@@ -47,6 +47,14 @@ import java.util.ArrayList;
  *   * Note: when the application starts for testing, it may need to upgrade the database from your existing version. If
  * this fails, the application will crash and the test may fail to start.
  *
+ * IMPORTANT:
+ * Test DBs must be created on APIs 11-20 (as of the time of writing): SQLite is not forwards compatible,
+ * e.g. uploading a DB created on 6.0 will cause failures when running this test on 4.3, so test DBs must
+ * be created on the version of SQLite from the oldest version of Android that is currently supported.
+ * See https://developer.android.com/reference/android/database/sqlite/package-summary.html for a list of
+ * Android API level to SQLite version. Caveat from the link: "Some device manufacturers include different
+ * versions of SQLite on their devices."
+ *
  * Implementation inspired by:
  *   http://riggaroo.co.za/automated-testing-sqlite-database-upgrades-android/
  */

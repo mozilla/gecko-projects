@@ -6,8 +6,9 @@
 #include "nsISupports.idl"
 
 interface nsIAccessiblePivot;
-interface nsIDOMDocument;
 interface mozIDOMWindowProxy;
+
+webidl Document;
 
 /**
  * An interface for in-process accessibility clients
@@ -19,7 +20,7 @@ interface mozIDOMWindowProxy;
  * the root node of a document or you can get one from
  * nsIAccessible::GetDocument().
  */
-[scriptable, uuid(5cad5f91-fcce-40e7-913e-4671701d19b4)]
+[scriptable, builtinclass, uuid(5cad5f91-fcce-40e7-913e-4671701d19b4)]
 interface nsIAccessibleDocument : nsISupports
 {
   /**
@@ -43,9 +44,9 @@ interface nsIAccessibleDocument : nsISupports
   readonly attribute AString docType;
 
   /**
-   * The nsIDOMDocument interface associated with this document.
+   * The Document interface associated with this document.
    */
-  readonly attribute nsIDOMDocument DOMDocument;
+  readonly attribute Document DOMDocument;
 
   /**
    * The nsIDOMWindow that the document resides in.

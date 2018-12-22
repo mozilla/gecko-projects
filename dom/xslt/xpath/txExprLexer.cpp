@@ -17,7 +17,8 @@
  * Creates a new ExprLexer
  */
 txExprLexer::txExprLexer()
-  : mCurrentItem(nullptr),
+  : mPosition(nullptr),
+    mCurrentItem(nullptr),
     mFirstItem(nullptr),
     mLastItem(nullptr),
     mTokenCount(0)
@@ -43,7 +44,7 @@ Token*
 txExprLexer::nextToken()
 {
   if (!mCurrentItem) {
-    NS_NOTREACHED("nextToken called on uninitialized lexer");
+    MOZ_ASSERT_UNREACHABLE("nextToken called on uninitialized lexer");
     return nullptr;
   }
 
@@ -92,10 +93,10 @@ txExprLexer::nextIsOperatorToken(Token* aToken)
  * Parses the given string into a sequence of Tokens
  */
 nsresult
-txExprLexer::parse(const nsASingleFragmentString& aPattern)
+txExprLexer::parse(const nsAString& aPattern)
 {
-  iterator start, end;
-  start = aPattern.BeginReading(mPosition);
+  iterator end;
+  aPattern.BeginReading(mPosition);
   aPattern.EndReading(end);
 
   //-- initialize previous token, this will automatically get
@@ -117,15 +118,15 @@ txExprLexer::parse(const nsASingleFragmentString& aPattern)
         return NS_ERROR_XPATH_INVALID_VAR_NAME;
       }
       defType = Token::VAR_REFERENCE;
-    } 
-    // just reuse the QName parsing, which will use defType 
+    }
+    // just reuse the QName parsing, which will use defType
     // the token to construct
 
     if (XMLUtils::isLetter(*mPosition)) {
       // NCName, can get QName or OperatorName;
       //  FunctionName, NodeName, and AxisSpecifier may want whitespace,
       //  and are dealt with below
-      start = mPosition;
+      iterator start = mPosition;
       while (++mPosition < end && XMLUtils::isNCNameChar(*mPosition)) {
         /* just go */
       }
@@ -170,7 +171,7 @@ txExprLexer::parse(const nsASingleFragmentString& aPattern)
       newToken = new Token(start, mPosition, defType);
     }
     else if (isXPathDigit(*mPosition)) {
-      start = mPosition;
+      iterator start = mPosition;
       while (++mPosition < end && isXPathDigit(*mPosition)) {
         /* just go */
       }
@@ -193,7 +194,8 @@ txExprLexer::parse(const nsASingleFragmentString& aPattern)
         break;
       case S_QUOTE :
       case D_QUOTE :
-        start = mPosition;
+      {
+        iterator start = mPosition;
         while (++mPosition < end && *mPosition != *start) {
           // eat literal
         }
@@ -203,14 +205,15 @@ txExprLexer::parse(const nsASingleFragmentString& aPattern)
         }
         newToken = new Token(start + 1, mPosition, Token::LITERAL);
         ++mPosition;
-        break;
+      }
+      break;
       case PERIOD:
         // period can be .., .(DIGITS)+ or ., check next
         if (++mPosition == end) {
           newToken = new Token(mPosition - 1, Token::SELF_NODE);
         }
         else if (isXPathDigit(*mPosition)) {
-          start = mPosition - 1;
+          iterator start = mPosition - 1;
           while (++mPosition < end && isXPathDigit(*mPosition)) {
             /* just go */
           }

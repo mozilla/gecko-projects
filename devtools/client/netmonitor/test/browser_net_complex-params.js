@@ -1,182 +1,179 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests whether complex request params and payload sent via POST are
  * displayed correctly.
  */
 
-function test() {
-  initNetMonitor(PARAMS_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(PARAMS_URL);
+  info("Starting test... ");
 
-    let { document, L10N, EVENTS, Editor, NetMonitorView } = aMonitor.panelWin;
-    let { RequestsMenu, NetworkDetails } = NetMonitorView;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const { L10N } = windowRequire("devtools/client/netmonitor/src/utils/l10n");
 
-    RequestsMenu.lazyUpdate = false;
-    NetworkDetails._params.lazyEmpty = false;
+  store.dispatch(Actions.batchEnable(false));
 
-    Task.spawn(function*() {
-      yield waitForNetworkEvents(aMonitor, 1, 6);
+  // Execute requests.
+  await performRequests(monitor, tab, 7);
 
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.getElementById("details-pane-toggle"));
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.querySelectorAll("#details-pane tab")[2]);
+  wait = waitForDOM(document, "#params-panel .tree-section", 2);
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[0]);
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector("#params-tab"));
+  await wait;
+  testParamsTab1("a", "", '{ "foo": "bar" }', "");
 
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab1('a', '""', '{ "foo": "bar" }', '""');
+  wait = waitForDOM(document, "#params-panel .tree-section", 2);
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[1]);
+  await wait;
+  testParamsTab1("a", "b", '{ "foo": "bar" }', "");
 
-      RequestsMenu.selectedIndex = 1;
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab1('a', '"b"', '{ "foo": "bar" }', '""');
+  wait = waitForDOM(document, "#params-panel .tree-section", 2);
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[2]);
+  await wait;
+  testParamsTab1("a", "b", "?foo", "bar");
 
-      RequestsMenu.selectedIndex = 2;
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab1('a', '"b"', 'foo', '"bar"');
+  wait = waitForDOM(document, "#params-panel tr:not(.tree-section).treeRow", 2);
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[3]);
+  await wait;
+  testParamsTab2("a", "", '{ "foo": "bar" }', "js");
 
-      RequestsMenu.selectedIndex = 3;
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab2('a', '""', '{ "foo": "bar" }', "js");
+  wait = waitForDOM(document, "#params-panel tr:not(.tree-section).treeRow", 2);
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[4]);
+  await wait;
+  testParamsTab2("a", "b", '{ "foo": "bar" }', "js");
 
-      RequestsMenu.selectedIndex = 4;
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab2('a', '"b"', '{ "foo": "bar" }', "js");
+  // Wait for all tree sections and editor updated by react
+  const waitSections = waitForDOM(document, "#params-panel .tree-section", 2);
+  const waitSourceEditor = waitForDOM(document, "#params-panel .CodeMirror-code");
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[5]);
+  await Promise.all([waitSections, waitSourceEditor]);
+  testParamsTab2("a", "b", "?foo=bar", "text");
 
-      RequestsMenu.selectedIndex = 5;
-      yield waitFor(aMonitor.panelWin, EVENTS.REQUEST_POST_PARAMS_DISPLAYED);
-      yield testParamsTab2('a', '"b"', '?foo=bar', "text");
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[6]);
+  testParamsTab3();
 
-      RequestsMenu.selectedIndex = 6;
-      yield waitFor(aMonitor.panelWin, EVENTS.SIDEBAR_POPULATED);
-      yield testParamsTab3('a', '"b"');
+  await teardown(monitor);
 
-      yield teardown(aMonitor);
-      finish();
-    });
+  function testParamsTab1(queryStringParamName, queryStringParamValue,
+                          formDataParamName, formDataParamValue) {
+    const tabpanel = document.querySelector("#params-panel");
 
-    function testParamsTab1(
-      aQueryStringParamName, aQueryStringParamValue, aFormDataParamName, aFormDataParamValue)
-    {
-      let tab = document.querySelectorAll("#details-pane tab")[2];
-      let tabpanel = document.querySelectorAll("#details-pane tabpanel")[2];
+    is(tabpanel.querySelectorAll(".tree-section").length, 2,
+      "The number of param tree sections displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll("tr:not(.tree-section).treeRow").length, 2,
+      "The number of param rows displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll(".empty-notice").length, 0,
+      "The empty notice should not be displayed in this tabpanel.");
 
-      is(tabpanel.querySelectorAll(".variables-view-scope").length, 2,
-        "The number of param scopes displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variable-or-property").length, 2,
-        "The number of param values displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variables-view-empty-notice").length, 0,
-        "The empty notice should not be displayed in this tabpanel.");
+    ok(tabpanel.querySelector(".treeTable"),
+      "The request params box should be displayed.");
+    ok(tabpanel.querySelector(".CodeMirror-code") === null,
+      "The request post data editor should not be displayed.");
 
-      is(tabpanel.querySelector("#request-params-box")
-        .hasAttribute("hidden"), false,
-        "The request params box should not be hidden.");
-      is(tabpanel.querySelector("#request-post-data-textarea-box")
-        .hasAttribute("hidden"), true,
-        "The request post data textarea box should be hidden.");
+    const treeSections = tabpanel.querySelectorAll(".tree-section");
+    const labels = tabpanel
+      .querySelectorAll("tr:not(.tree-section) .treeLabelCell .treeLabel");
+    const values = tabpanel
+      .querySelectorAll("tr:not(.tree-section) .treeValueCell .objectBox");
 
-      let paramsScope = tabpanel.querySelectorAll(".variables-view-scope")[0];
-      let formDataScope = tabpanel.querySelectorAll(".variables-view-scope")[1];
+    is(treeSections[0].querySelector(".treeLabel").textContent,
+      L10N.getStr("paramsQueryString"),
+      "The params section doesn't have the correct title.");
+    is(treeSections[1].querySelector(".treeLabel").textContent,
+      L10N.getStr("paramsFormData"),
+      "The form data section doesn't have the correct title.");
 
-      is(paramsScope.querySelector(".name").getAttribute("value"),
-        L10N.getStr("paramsQueryString"),
-        "The params scope doesn't have the correct title.");
-      is(formDataScope.querySelector(".name").getAttribute("value"),
-        L10N.getStr("paramsFormData"),
-        "The form data scope doesn't have the correct title.");
+    is(labels[0].textContent, queryStringParamName,
+      "The first query string param name was incorrect.");
+    is(values[0].textContent, queryStringParamValue,
+      "The first query string param value was incorrect.");
 
-      is(paramsScope.querySelectorAll(".variables-view-variable .name")[0].getAttribute("value"),
-        aQueryStringParamName,
-        "The first query string param name was incorrect.");
-      is(paramsScope.querySelectorAll(".variables-view-variable .value")[0].getAttribute("value"),
-        aQueryStringParamValue,
-        "The first query string param value was incorrect.");
+    is(labels[1].textContent, formDataParamName,
+      "The first form data param name was incorrect.");
+    is(values[1].textContent, formDataParamValue,
+      "The first form data param value was incorrect.");
+  }
 
-      is(formDataScope.querySelectorAll(".variables-view-variable .name")[0].getAttribute("value"),
-        aFormDataParamName,
-        "The first form data param name was incorrect.");
-      is(formDataScope.querySelectorAll(".variables-view-variable .value")[0].getAttribute("value"),
-        aFormDataParamValue,
-        "The first form data param value was incorrect.");
-    }
+  function testParamsTab2(queryStringParamName, queryStringParamValue,
+                          requestPayload, editorMode) {
+    const isJSON = editorMode === "js";
+    const tabpanel = document.querySelector("#params-panel");
 
-    function testParamsTab2(
-      aQueryStringParamName, aQueryStringParamValue, aRequestPayload, aEditorMode)
-    {
-      let isJSON = aEditorMode == "js";
-      let tab = document.querySelectorAll("#details-pane tab")[2];
-      let tabpanel = document.querySelectorAll("#details-pane tabpanel")[2];
+    is(tabpanel.querySelectorAll(".tree-section").length, 2,
+      "The number of param tree sections displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll("tr:not(.tree-section).treeRow").length, isJSON ? 2 : 1,
+      "The number of param rows displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll(".empty-notice").length, 0,
+      "The empty notice should not be displayed in this tabpanel.");
 
-      is(tabpanel.querySelectorAll(".variables-view-scope").length, 2,
-        "The number of param scopes displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variable-or-property").length, isJSON ? 4 : 1,
-        "The number of param values displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variables-view-empty-notice").length, 0,
-        "The empty notice should not be displayed in this tabpanel.");
+    ok(tabpanel.querySelector(".treeTable"),
+      "The request params box should be displayed.");
+    is(tabpanel.querySelector(".CodeMirror-code") === null,
+      isJSON,
+      "The request post data editor should be not displayed.");
 
-      is(tabpanel.querySelector("#request-params-box")
-        .hasAttribute("hidden"), false,
-        "The request params box should not be hidden.");
-      is(tabpanel.querySelector("#request-post-data-textarea-box")
-        .hasAttribute("hidden"), isJSON,
-        "The request post data textarea box should be hidden.");
+    const treeSections = tabpanel.querySelectorAll(".tree-section");
 
-      let paramsScope = tabpanel.querySelectorAll(".variables-view-scope")[0];
-      let payloadScope = tabpanel.querySelectorAll(".variables-view-scope")[1];
+    is(treeSections[0].querySelector(".treeLabel").textContent,
+      L10N.getStr("paramsQueryString"),
+      "The query section doesn't have the correct title.");
+    is(treeSections[1].querySelector(".treeLabel").textContent,
+      isJSON ? L10N.getStr("jsonScopeName") : L10N.getStr("paramsPostPayload"),
+      "The post section doesn't have the correct title.");
 
-      is(paramsScope.querySelector(".name").getAttribute("value"),
-        L10N.getStr("paramsQueryString"),
-        "The params scope doesn't have the correct title.");
-      is(payloadScope.querySelector(".name").getAttribute("value"),
-        isJSON ? L10N.getStr("jsonScopeName") : L10N.getStr("paramsPostPayload"),
-        "The request payload scope doesn't have the correct title.");
+    const labels = tabpanel
+      .querySelectorAll("tr:not(.tree-section) .treeLabelCell .treeLabel");
+    const values = tabpanel
+      .querySelectorAll("tr:not(.treeS-section) .treeValueCell .objectBox");
 
-      is(paramsScope.querySelectorAll(".variables-view-variable .name")[0].getAttribute("value"),
-        aQueryStringParamName,
-        "The first query string param name was incorrect.");
-      is(paramsScope.querySelectorAll(".variables-view-variable .value")[0].getAttribute("value"),
-        aQueryStringParamValue,
-        "The first query string param value was incorrect.");
+    is(labels[0].textContent, queryStringParamName,
+      "The first query string param name was incorrect.");
+    is(values[0].textContent, queryStringParamValue,
+      "The first query string param value was incorrect.");
 
-      if (isJSON) {
-        let requestPayloadObject = JSON.parse(aRequestPayload);
-        let requestPairs = Object.keys(requestPayloadObject).map(k => [k, requestPayloadObject[k]]);
-        let displayedNames = payloadScope.querySelectorAll(".variables-view-property.variable-or-property .name");
-        let displayedValues = payloadScope.querySelectorAll(".variables-view-property.variable-or-property .value");
-        for (let i = 0; i < requestPairs.length; i++) {
-          let [requestPayloadName, requestPayloadValue] = requestPairs[i];
-          is(requestPayloadName, displayedNames[i].getAttribute("value"), "JSON property name " + i + " should be displayed correctly");
-          is('"' + requestPayloadValue + '"', displayedValues[i].getAttribute("value"), "JSON property value " + i + " should be displayed correctly");
-        }
-      } else {
-        return NetMonitorView.editor("#request-post-data-textarea").then((aEditor) => {
-          is(aEditor.getText(), aRequestPayload,
-            "The text shown in the source editor is incorrect.");
-          is(aEditor.getMode(), Editor.modes[aEditorMode],
-            "The mode active in the source editor is incorrect.");
-        });
+    if (isJSON) {
+      const requestPayloadObject = JSON.parse(requestPayload);
+      const requestPairs = Object.keys(requestPayloadObject)
+        .map(k => [k, requestPayloadObject[k]]);
+      for (let i = 1; i < requestPairs.length; i++) {
+        const [requestPayloadName, requestPayloadValue] = requestPairs[i];
+        is(requestPayloadName, labels[i].textContent,
+          "JSON property name " + i + " should be displayed correctly");
+        is('"' + requestPayloadValue + '"', values[i].textContent,
+          "JSON property value " + i + " should be displayed correctly");
       }
+    } else {
+      ok(document.querySelector(".CodeMirror-code").textContent.includes(requestPayload),
+        "The text shown in the source editor is incorrect.");
     }
+  }
 
-    function testParamsTab3(aQueryStringParamName, aQueryStringParamValue) {
-      let tab = document.querySelectorAll("#details-pane tab")[2];
-      let tabpanel = document.querySelectorAll("#details-pane tabpanel")[2];
+  function testParamsTab3() {
+    const tabpanel = document.querySelector("#params-panel");
 
-      is(tabpanel.querySelectorAll(".variables-view-scope").length, 0,
-        "The number of param scopes displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variable-or-property").length, 0,
-        "The number of param values displayed in this tabpanel is incorrect.");
-      is(tabpanel.querySelectorAll(".variables-view-empty-notice").length, 1,
-        "The empty notice should be displayed in this tabpanel.");
+    is(tabpanel.querySelectorAll(".tree-section").length, 0,
+      "The number of param tree sections displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll("tr:not(.tree-section).treeRow").length, 0,
+      "The number of param rows displayed in this tabpanel is incorrect.");
+    is(tabpanel.querySelectorAll(".empty-notice").length, 1,
+      "The empty notice should be displayed in this tabpanel.");
 
-      is(tabpanel.querySelector("#request-params-box")
-        .hasAttribute("hidden"), false,
-        "The request params box should not be hidden.");
-      is(tabpanel.querySelector("#request-post-data-textarea-box")
-        .hasAttribute("hidden"), true,
-        "The request post data textarea box should be hidden.");
-    }
-
-    aDebuggee.performRequests();
-  });
-}
+    ok(!tabpanel.querySelector(".treeTable"),
+      "The request params box should be hidden.");
+    ok(!tabpanel.querySelector(".CodeMirror-code"),
+      "The request post data editor should be hidden.");
+  }
+});

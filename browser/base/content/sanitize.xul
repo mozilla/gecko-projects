@@ -1,71 +1,47 @@
 <?xml version="1.0"?>
 
-# -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+<!-- -*- Mode: Java; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- -->
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <?xml-stylesheet href="chrome://global/skin/"?>
+<?xml-stylesheet href="chrome://browser/skin/preferences/preferences.css"?>
 <?xml-stylesheet href="chrome://browser/skin/sanitizeDialog.css"?>
 
-#ifdef CRH_DIALOG_TREE_VIEW
-<?xml-stylesheet href="chrome://browser/skin/places/places.css"?>
-#endif
 
 <?xml-stylesheet href="chrome://browser/content/sanitizeDialog.css"?>
 
-<!DOCTYPE prefwindow [
+<!DOCTYPE dialog [
+  <!ENTITY % preferencesDTD SYSTEM "chrome://global/locale/preferences.dtd">
+  <!ENTITY % globalKeysDTD SYSTEM "chrome://global/locale/globalKeys.dtd">
   <!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd">
   <!ENTITY % sanitizeDTD SYSTEM "chrome://browser/locale/sanitize.dtd">
+  %preferencesDTD;
+  %globalKeysDTD;
   %brandDTD;
   %sanitizeDTD;
 ]>
 
-<prefwindow id="SanitizeDialog" type="child"
-            xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-            dlgbuttons="accept,cancel"
-            title="&sanitizeDialog2.title;"
-            noneverythingtitle="&sanitizeDialog2.title;"
-            style="width: &sanitizeDialog2.width;;"
-            ondialogaccept="return gSanitizePromptDialog.sanitize();">
+<dialog id="SanitizeDialog" class="prefwindow" type="child"
+        xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        buttons="accept,cancel"
+        persist="lastSelected screenX screenY"
+        role="dialog"
+        title="&sanitizeDialog2.title;"
+        noneverythingtitle="&sanitizeDialog2.title;"
+        style="width: &sanitizeDialog2.width;;"
+        onload="gSanitizePromptDialog.init();"
+        ondialogaccept="return gSanitizePromptDialog.sanitize();">
 
-  <prefpane id="SanitizeDialogPane" onpaneload="gSanitizePromptDialog.init();">
+  <vbox id="SanitizeDialogPane" class="prefpane">
     <stringbundle id="bundleBrowser"
                   src="chrome://browser/locale/browser.properties"/>
 
     <script type="application/javascript"
-            src="chrome://browser/content/sanitize.js"/>
-
-#ifdef CRH_DIALOG_TREE_VIEW
-    <script type="application/javascript"
-            src="chrome://global/content/globalOverlay.js"/>
-    <script type="application/javascript"
-            src="chrome://browser/content/places/treeView.js"/>
-    <script type="application/javascript"><![CDATA[
-      Components.utils.import("resource://gre/modules/PlacesUtils.jsm");
-      Components.utils.import("resource:///modules/PlacesUIUtils.jsm");
-    ]]></script>
-#endif
-
+            src="chrome://global/content/preferencesBindings.js"/>
     <script type="application/javascript"
             src="chrome://browser/content/sanitizeDialog.js"/>
-
-    <preferences id="sanitizePreferences">
-      <preference id="privacy.cpd.history"               name="privacy.cpd.history"               type="bool"/>
-      <preference id="privacy.cpd.formdata"              name="privacy.cpd.formdata"              type="bool"/>
-      <preference id="privacy.cpd.downloads"             name="privacy.cpd.downloads"             type="bool" disabled="true"/>
-      <preference id="privacy.cpd.cookies"               name="privacy.cpd.cookies"               type="bool"/>
-      <preference id="privacy.cpd.cache"                 name="privacy.cpd.cache"                 type="bool"/>
-      <preference id="privacy.cpd.sessions"              name="privacy.cpd.sessions"              type="bool"/>
-      <preference id="privacy.cpd.offlineApps"           name="privacy.cpd.offlineApps"           type="bool"/>
-      <preference id="privacy.cpd.siteSettings"          name="privacy.cpd.siteSettings"          type="bool"/>
-    </preferences>
-    
-    <preferences id="nonItemPreferences">
-      <preference id="privacy.sanitize.timeSpan"
-                  name="privacy.sanitize.timeSpan"
-                  type="int"/>
-    </preferences>
 
     <hbox id="SanitizeDurationBox" align="center">
       <label value="&clearTimeDuration.label;"
@@ -77,9 +53,6 @@
                 onselect="gSanitizePromptDialog.selectByTimespan();"
                 flex="1">
         <menupopup id="sanitizeDurationPopup">
-#ifdef CRH_DIALOG_TREE_VIEW
-          <menuitem label="" value="-1" id="sanitizeDurationCustom"/>
-#endif
           <menuitem label="&clearTimeDuration.lastHour;" value="1"/>
           <menuitem label="&clearTimeDuration.last2Hours;" value="2"/>
           <menuitem label="&clearTimeDuration.last4Hours;" value="3"/>
@@ -94,22 +67,6 @@
 
     <separator class="thin"/>
 
-#ifdef CRH_DIALOG_TREE_VIEW
-    <deck id="durationDeck">
-      <tree id="placesTree" flex="1" hidecolumnpicker="true" rows="10"
-            disabled="true" disableKeyNavigation="true">
-        <treecols>
-          <treecol id="date" label="&clearTimeDuration.dateColumn;" flex="1"/>
-          <splitter class="tree-splitter"/>
-          <treecol id="title" label="&clearTimeDuration.nameColumn;" flex="5"/>
-        </treecols>
-        <treechildren id="placesTreechildren"
-                      ondragstart="gSanitizePromptDialog.grippyMoved('ondragstart', event);"
-                      ondragover="gSanitizePromptDialog.grippyMoved('ondragover', event);"
-                      onkeypress="gSanitizePromptDialog.grippyMoved('onkeypress', event);"
-                      onmousedown="gSanitizePromptDialog.grippyMoved('onmousedown', event);"/>
-      </tree>
-#endif
 
       <vbox id="sanitizeEverythingWarningBox">
         <spacer flex="1"/>
@@ -123,9 +80,6 @@
         <spacer flex="1"/>
       </vbox>
 
-#ifdef CRH_DIALOG_TREE_VIEW
-    </deck>
-#endif
 
     <separator class="thin"/>
 
@@ -179,5 +133,5 @@
                 onsyncfrompreference="return gSanitizePromptDialog.onReadGeneric();"/>
     </listbox>
 
-  </prefpane>
-</prefwindow>
+  </vbox>
+</dialog>

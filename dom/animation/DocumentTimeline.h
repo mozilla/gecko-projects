@@ -7,9 +7,12 @@
 #ifndef mozilla_dom_DocumentTimeline_h
 #define mozilla_dom_DocumentTimeline_h
 
+#include "mozilla/dom/DocumentTimelineBinding.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h"
 #include "AnimationTimeline.h"
 #include "nsIDocument.h"
+#include "nsDOMNavigationTiming.h" // for DOMHighResTimeStamp
 #include "nsRefreshDriver.h"
 
 struct JSContext;
@@ -26,13 +29,18 @@ namespace dom {
 class DocumentTimeline final
   : public AnimationTimeline
   , public nsARefreshObserver
+  , public LinkedListElement<DocumentTimeline>
 {
 public:
-  explicit DocumentTimeline(nsIDocument* aDocument)
+  DocumentTimeline(nsIDocument* aDocument, const TimeDuration& aOriginTime)
     : AnimationTimeline(aDocument->GetParentObject())
     , mDocument(aDocument)
     , mIsObservingRefreshDriver(false)
+    , mOriginTime(aOriginTime)
   {
+    if (mDocument) {
+      mDocument->Timelines().insertBack(this);
+    }
   }
 
 protected:
@@ -40,6 +48,9 @@ protected:
   {
     MOZ_ASSERT(!mIsObservingRefreshDriver, "Timeline should have disassociated"
                " from the refresh driver before being destroyed");
+    if (isInList()) {
+      remove();
+    }
   }
 
 public:
@@ -49,6 +60,11 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
+
+  static already_AddRefed<DocumentTimeline>
+  Constructor(const GlobalObject& aGlobal,
+              const DocumentTimelineOptions& aOptions,
+              ErrorResult& aRv);
 
   // AnimationTimeline methods
   virtual Nullable<TimeDuration> GetCurrentTime() const override;
@@ -65,6 +81,8 @@ public:
 
   void NotifyAnimationUpdated(Animation& aAnimation) override;
 
+  void RemoveAnimation(Animation* aAnimation) override;
+
   // nsARefreshObserver methods
   void WillRefresh(TimeStamp aTime) override;
 
@@ -74,6 +92,7 @@ public:
 protected:
   TimeStamp GetCurrentTimeStamp() const;
   nsRefreshDriver* GetRefreshDriver() const;
+  void UnregisterFromRefreshDriver();
 
   nsCOMPtr<nsIDocument> mDocument;
 
@@ -82,6 +101,8 @@ protected:
   // iframe).
   mutable TimeStamp mLastRefreshDriverTime;
   bool mIsObservingRefreshDriver;
+
+  TimeDuration mOriginTime;
 };
 
 } // namespace dom

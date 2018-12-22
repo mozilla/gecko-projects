@@ -7,7 +7,6 @@
 #define GLCONTEXTPROVIDER_H_
 
 #include "GLContextTypes.h"
-#include "nsAutoPtr.h"
 #include "SurfaceTypes.h"
 
 #include "nsSize.h" // for gfx::IntSize (needed by GLContextProviderImpl.h below)
@@ -15,6 +14,9 @@
 class nsIWidget;
 
 namespace mozilla {
+namespace widget {
+  class CompositorWidget;
+}
 namespace gl {
 
 #define IN_GL_CONTEXT_PROVIDER_H
@@ -51,6 +53,14 @@ namespace gl {
 #undef GL_CONTEXT_PROVIDER_NAME
 #ifndef GL_CONTEXT_PROVIDER_DEFAULT
   #define GL_CONTEXT_PROVIDER_DEFAULT GLContextProviderEGL
+#endif
+
+#if defined(MOZ_WAYLAND)
+  #define GL_CONTEXT_PROVIDER_NAME GLContextProviderWayland
+  #include "GLContextProviderImpl.h"
+  #undef GL_CONTEXT_PROVIDER_NAME
+  #undef GL_CONTEXT_PROVIDER_DEFAULT
+  #define GL_CONTEXT_PROVIDER_DEFAULT GLContextProviderWayland
 #endif
 
 #if defined(MOZ_WIDGET_UIKIT)

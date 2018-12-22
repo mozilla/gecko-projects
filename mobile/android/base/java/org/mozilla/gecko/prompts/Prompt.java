@@ -5,13 +5,9 @@
 
 package org.mozilla.gecko.prompts;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.gfx.LayerView;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
@@ -41,6 +37,7 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     private String[] mButtons;
     private PromptInput[] mInputs;
     private AlertDialog mDialog;
+    private int mDoubleTapButtonType;
 
     private final LayoutInflater mInflater;
     private final Context mContext;
@@ -52,6 +49,7 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     private static int mInputPaddingSize;
 
     private int mTabId = Tabs.INVALID_TAB_ID;
+    private Object mPreviousInputValue = null;
 
     public Prompt(Context context, PromptCallback callback) {
         this(context);
@@ -77,24 +75,25 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
         return view;
     }
 
-    public void show(JSONObject message) {
-        String title = message.optString("title");
-        String text = message.optString("text");
-        mGuid = message.optString("guid");
+    public void show(GeckoBundle message) {
+        String title = message.getString("title", "");
+        String text = message.getString("text", "");
+        mGuid = message.getString("guid", "");
 
-        mButtons = getStringArray(message, "buttons");
+        mButtons = message.getStringArray("buttons");
+        final int buttonCount = mButtons == null ? 0 : mButtons.length;
+        mDoubleTapButtonType = convertIndexToButtonType(message.getInt("doubleTapButton", -1), buttonCount);
+        mPreviousInputValue = null;
 
-        JSONArray inputs = getSafeArray(message, "inputs");
-        mInputs = new PromptInput[inputs.length()];
+        GeckoBundle[] inputs = message.getBundleArray("inputs");
+        mInputs = new PromptInput[inputs != null ? inputs.length : 0];
         for (int i = 0; i < mInputs.length; i++) {
-            try {
-                mInputs[i] = PromptInput.getInput(inputs.getJSONObject(i));
-                mInputs[i].setListener(this);
-            } catch(Exception ex) { }
+            mInputs[i] = PromptInput.getInput(inputs[i]);
+            mInputs[i].setListener(this);
         }
 
-        PromptListItem[] menuitems = PromptListItem.getArray(message.optJSONArray("listitems"));
-        String selected = message.optString("choiceMode");
+        PromptListItem[] menuitems = PromptListItem.getArray(message.getBundleArray("listitems"));
+        String selected = message.getString("choiceMode", "");
 
         int choiceMode = ListView.CHOICE_MODE_NONE;
         if ("single".equals(selected)) {
@@ -103,19 +102,36 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
             choiceMode = ListView.CHOICE_MODE_MULTIPLE;
         }
 
-        if (message.has("tabId")) {
-            mTabId = message.optInt("tabId", Tabs.INVALID_TAB_ID);
-        }
+        mTabId = message.getInt("tabId", Tabs.INVALID_TAB_ID);
 
         show(title, text, menuitems, choiceMode);
     }
 
-     public void show(String title, String text, PromptListItem[] listItems, int choiceMode) {
+    private int convertIndexToButtonType(final int buttonIndex, final int buttonCount) {
+        if (buttonIndex < 0 || buttonIndex >= buttonCount) {
+            // All valid DialogInterface button values are < 0,
+            // so we return 0 as an invalid value.
+            return 0;
+        }
+
+        switch (buttonIndex) {
+            case 0:
+                return DialogInterface.BUTTON_POSITIVE;
+            case 1:
+                return DialogInterface.BUTTON_NEUTRAL;
+            case 2:
+                return DialogInterface.BUTTON_NEGATIVE;
+            default:
+                return 0;
+        }
+    }
+
+    public void show(String title, String text, PromptListItem[] listItems, int choiceMode) {
         ThreadUtils.assertOnUiThread();
 
         try {
             create(title, text, listItems, choiceMode);
-        } catch(IllegalStateException ex) {
+        } catch (IllegalStateException ex) {
             Log.i(LOGTAG, "Error building dialog", ex);
             return;
         }
@@ -133,12 +149,12 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     }
 
     @Override
-    public void onTabChanged(final Tab tab, final Tabs.TabEvents msg, final Object data) {
+    public void onTabChanged(final Tab tab, final Tabs.TabEvents msg, final String data) {
         if (tab != Tabs.getInstance().getTab(mTabId)) {
             return;
         }
 
-        switch(msg) {
+        switch (msg) {
             case SELECTED:
                 Log.i(LOGTAG, "Selected");
                 mDialog.show();
@@ -156,10 +172,6 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
 
     private void create(String title, String text, PromptListItem[] listItems, int choiceMode)
             throws IllegalStateException {
-        final LayerView view = GeckoAppShell.getLayerView();
-        if (view != null) {
-            view.abortPanning();
-        }
 
         AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
         if (!TextUtils.isEmpty(title)) {
@@ -207,63 +219,55 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
      *  object that's passed in. If this is a multi-select dialog, sets a
      *  selected attribute to an array of booleans.
      */
-    private void addListResult(final JSONObject result, int which) {
+    private void addListResult(final GeckoBundle result, int which) {
         if (mAdapter == null) {
             return;
         }
 
-        try {
-            JSONArray selected = new JSONArray();
+        // If the button has already been filled in
+        final ArrayList<Integer> selected = mAdapter.getSelected();
 
-            // If the button has already been filled in
-            ArrayList<Integer> selectedItems = mAdapter.getSelected();
-            for (Integer item : selectedItems) {
-                selected.put(item);
+        // If we haven't assigned a button yet, or we assigned it to -1, assign the which
+        // parameter to both selected and the button.
+        if (result.getInt("button", -1) == -1) {
+            if (!selected.contains(which)) {
+                selected.add(which);
             }
 
-            // If we haven't assigned a button yet, or we assigned it to -1, assign the which
-            // parameter to both selected and the button.
-            if (!result.has("button") || result.optInt("button") == -1) {
-                if (!selectedItems.contains(which)) {
-                    selected.put(which);
-                }
+            result.putInt("button", which);
+        }
 
-                result.put("button", which);
-            }
-
-            result.put("list", selected);
-        } catch(JSONException ex) { }
+        result.putIntArray("list", selected);
     }
 
     /* Adds to a result value from the inputs that can be shown in dialogs.
      * Each input will set its own value in the result.
      */
-    private void addInputValues(final JSONObject result) {
-        try {
-            if (mInputs != null) {
-                for (int i = 0; i < mInputs.length; i++) {
-                    if (mInputs[i] != null) {
-                        result.put(mInputs[i].getId(), mInputs[i].getValue());
-                    }
-                }
+    private void addInputValues(final GeckoBundle result) {
+        if (mInputs == null) {
+            return;
+        }
+
+        for (final PromptInput input : mInputs) {
+            if (input == null) {
+                continue;
             }
-        } catch(JSONException ex) { }
+            input.putInBundle(result);
+        }
     }
 
     /* Adds the selected button to a result. This should only be called if there
      * are no lists shown on the dialog, since they also write their results to the button
      * attribute.
      */
-    private void addButtonResult(final JSONObject result, int which) {
+    private void addButtonResult(final GeckoBundle result, int which) {
         int button = -1;
-        switch(which) {
+        switch (which) {
             case DialogInterface.BUTTON_POSITIVE : button = 0; break;
             case DialogInterface.BUTTON_NEUTRAL  : button = 1; break;
             case DialogInterface.BUTTON_NEGATIVE : button = 2; break;
         }
-        try {
-            result.put("button", button);
-        } catch(JSONException ex) { }
+        result.putInt("button", button);
     }
 
     @Override
@@ -280,10 +284,10 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
      * @param listItems
      *        The items to add.
      * @param choiceMode
-     *        One of the ListView.CHOICE_MODE constants to designate whether this list shows checkmarks, radios buttons, or nothing. 
+     *        One of the ListView.CHOICE_MODE constants to designate whether this list shows checkmarks, radios buttons, or nothing.
     */
     private void addListItems(AlertDialog.Builder builder, PromptListItem[] listItems, int choiceMode) {
-        switch(choiceMode) {
+        switch (choiceMode) {
             case ListView.CHOICE_MODE_MULTIPLE_MODAL:
             case ListView.CHOICE_MODE_MULTIPLE:
                 addMultiSelectList(builder, listItems);
@@ -408,7 +412,7 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
                 view.addView(root);
                 builder.setView(view);
             }
-        } catch(Exception ex) {
+        } catch (Exception ex) {
             Log.e(LOGTAG, "Error showing prompt inputs", ex);
             // We cannot display these input widgets with this sdk version,
             // do not display any dialog and finish the prompt now.
@@ -456,14 +460,13 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     }
 
     /* Called in situations where we want to cancel the dialog . This can happen if the user hits back,
-     *  or if the dialog can't be created because of invalid JSON.
+     * or if the dialog can't be created because of invalid input.
      */
     private void cancelDialog() {
-        JSONObject ret = new JSONObject();
-        try {
-            ret.put("button", -1);
-        } catch(Exception ex) { }
+        final GeckoBundle ret = new GeckoBundle();
+        ret.putInt("button", -1);
         addInputValues(ret);
+
         notifyClosing(ret);
     }
 
@@ -471,7 +474,7 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
      * is closing.
      */
     private void closeDialog(int which) {
-        JSONObject ret = new JSONObject();
+        final GeckoBundle ret = new GeckoBundle();
         mDialog.dismiss();
 
         addButtonResult(ret, which);
@@ -484,20 +487,15 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     /* Called any time we're closing the dialog to cleanup and notify listeners that the dialog
      * is closing.
      */
-    private void notifyClosing(JSONObject aReturn) {
-        try {
-            aReturn.put("guid", mGuid);
-        } catch(JSONException ex) { }
+    private void notifyClosing(final GeckoBundle ret) {
+        ret.putString("guid", mGuid);
 
         if (mTabId != Tabs.INVALID_TAB_ID) {
             Tabs.unregisterOnTabsChangedListener(this);
         }
 
-        // poke the Gecko thread in case it's waiting for new events
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createNoOpEvent());
-
         if (mCallback != null) {
-            mCallback.onPromptFinished(aReturn.toString());
+            mCallback.onPromptFinished(ret);
         }
     }
 
@@ -507,50 +505,28 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
         // If there are no buttons on this dialog, assuming that "changing" an input
         // means something was selected and we can close. This provides a way to tap
         // on a list item and close the dialog automatically.
-        closeIfNoButtons(-1);
-    }
-
-    private static JSONArray getSafeArray(JSONObject json, String key) {
-        try {
-            return json.getJSONArray(key);
-        } catch (Exception e) {
-            return new JSONArray();
+        if (!closeIfNoButtons(-1)) {
+            // Alternatively, if a default button has been specified for double tapping,
+            // we want to close the dialog if the same input value has been transmitted
+            // twice in a row.
+            closeIfDoubleTapEnabled(input.getValue());
         }
     }
 
-    public static String[] getStringArray(JSONObject aObject, String aName) {
-        JSONArray items = getSafeArray(aObject, aName);
-        int length = items.length();
-        String[] list = new String[length];
-        for (int i = 0; i < length; i++) {
-            try {
-                list[i] = items.getString(i);
-            } catch(Exception ex) { }
+    private boolean closeIfDoubleTapEnabled(Object inputValue) {
+        if (mDoubleTapButtonType != 0 && inputValue == mPreviousInputValue) {
+            closeDialog(mDoubleTapButtonType);
+            return true;
         }
-        return list;
-    }
-
-    private static boolean[] getBooleanArray(JSONObject aObject, String aName) {
-        JSONArray items = new JSONArray();
-        try {
-            items = aObject.getJSONArray(aName);
-        } catch(Exception ex) { return null; }
-        int length = items.length();
-        boolean[] list = new boolean[length];
-        for (int i = 0; i < length; i++) {
-            try {
-                list[i] = items.getBoolean(i);
-            } catch(Exception ex) { }
-        }
-        return list;
+        mPreviousInputValue = inputValue;
+        return false;
     }
 
     public interface PromptCallback {
-
         /**
          * Called when the Prompt has been completed (i.e. when the user has selected an item or action in the Prompt).
          * This callback is run on the UI thread.
          */
-        public void onPromptFinished(String jsonResult);
+        public void onPromptFinished(GeckoBundle result);
     }
 }

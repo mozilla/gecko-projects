@@ -6,6 +6,7 @@
 #include "nsEventShell.h"
 
 #include "nsAccUtils.h"
+#include "Logging.h"
 
 #include "mozilla/StaticPtr.h"
 
@@ -19,7 +20,7 @@ using namespace mozilla::a11y;
 void
 nsEventShell::FireEvent(AccEvent* aEvent)
 {
-  if (!aEvent)
+  if (!aEvent || aEvent->mEventRule == AccEvent::eDoNotEmit)
     return;
 
   Accessible* accessible = aEvent->GetAccessible();
@@ -43,6 +44,7 @@ nsEventShell::FireEvent(AccEvent* aEvent)
 #endif
 
   accessible->HandleAccEvent(aEvent);
+  aEvent->mEventRule = AccEvent::eDoNotEmit;
 
   sEventTargetNode = nullptr;
 }
@@ -59,7 +61,7 @@ nsEventShell::FireEvent(uint32_t aEventType, Accessible* aAccessible,
   FireEvent(event);
 }
 
-void 
+void
 nsEventShell::GetEventAttributes(nsINode *aNode,
                                  nsIPersistentProperties *aAttributes)
 {

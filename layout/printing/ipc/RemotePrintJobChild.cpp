@@ -6,16 +6,19 @@
 
 #include "RemotePrintJobChild.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsPagePrintTimer.h"
-#include "nsPrintEngine.h"
+#include "nsPrintJob.h"
+#include "private/pprio.h"
 
 namespace mozilla {
 namespace layout {
 
+NS_IMPL_ISUPPORTS(RemotePrintJobChild,
+                  nsIWebProgressListener)
+
 RemotePrintJobChild::RemotePrintJobChild()
 {
-  MOZ_COUNT_CTOR(RemotePrintJobChild);
 }
 
 nsresult
@@ -28,46 +31,68 @@ RemotePrintJobChild::InitializePrint(const nsString& aDocumentTitle,
   // need to spin a nested event loop until initialization completes.
   Unused << SendInitializePrint(aDocumentTitle, aPrintToFile, aStartPage,
                                 aEndPage);
-  while (!mPrintInitialized) {
-    Unused << NS_ProcessNextEvent();
-  }
+  mozilla::SpinEventLoopUntil([&]() { return mPrintInitialized; });
 
   return mInitializationResult;
 }
 
-bool
-RemotePrintJobChild::RecvPrintInitializationResult(const nsresult& aRv)
+mozilla::ipc::IPCResult
+RemotePrintJobChild::RecvPrintInitializationResult(
+  const nsresult& aRv,
+  const mozilla::ipc::FileDescriptor& aFd)
 {
   mPrintInitialized = true;
   mInitializationResult = aRv;
-  return true;
+  if (NS_SUCCEEDED(aRv)) {
+    SetNextPageFD(aFd);
+  }
+  return IPC_OK();
+}
+
+PRFileDesc*
+RemotePrintJobChild::GetNextPageFD()
+{
+  MOZ_ASSERT(mNextPageFD);
+  PRFileDesc* fd = mNextPageFD;
+  mNextPageFD = nullptr;
+  return fd;
 }
 
 void
-RemotePrintJobChild::ProcessPage(Shmem& aStoredPage)
+RemotePrintJobChild::SetNextPageFD(const mozilla::ipc::FileDescriptor& aFd)
+{
+  auto handle = aFd.ClonePlatformHandle();
+  mNextPageFD = PR_ImportFile(PROsfd(handle.release()));
+}
+
+void
+RemotePrintJobChild::ProcessPage()
 {
   MOZ_ASSERT(mPagePrintTimer);
 
   mPagePrintTimer->WaitForRemotePrint();
-  Unused << SendProcessPage(aStoredPage);
+  if (!mDestroyed) {
+    Unused << SendProcessPage();
+  }
 }
 
-bool
-RemotePrintJobChild::RecvPageProcessed()
+mozilla::ipc::IPCResult
+RemotePrintJobChild::RecvPageProcessed(const mozilla::ipc::FileDescriptor& aFd)
 {
   MOZ_ASSERT(mPagePrintTimer);
+  SetNextPageFD(aFd);
 
   mPagePrintTimer->RemotePrintFinished();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 RemotePrintJobChild::RecvAbortPrint(const nsresult& aRv)
 {
-  MOZ_ASSERT(mPrintEngine);
+  MOZ_ASSERT(mPrintJob);
 
-  mPrintEngine->CleanupOnFailure(aRv, true);
-  return true;
+  mPrintJob->CleanupOnFailure(aRv, true);
+  return IPC_OK();
 }
 
 void
@@ -79,23 +104,83 @@ RemotePrintJobChild::SetPagePrintTimer(nsPagePrintTimer* aPagePrintTimer)
 }
 
 void
-RemotePrintJobChild::SetPrintEngine(nsPrintEngine* aPrintEngine)
+RemotePrintJobChild::SetPrintJob(nsPrintJob* aPrintJob)
 {
-  MOZ_ASSERT(aPrintEngine);
+  MOZ_ASSERT(aPrintJob);
 
-  mPrintEngine = aPrintEngine;
+  mPrintJob = aPrintJob;
 }
+
+// nsIWebProgressListener
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnStateChange(nsIWebProgress* aProgress,
+                                   nsIRequest* aRequest, uint32_t aStateFlags,
+                                   nsresult aStatus)
+{
+  if (!mDestroyed) {
+    Unused << SendStateChange(aStateFlags, aStatus);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnProgressChange(nsIWebProgress * aProgress,
+                                      nsIRequest * aRequest,
+                                      int32_t aCurSelfProgress,
+                                      int32_t aMaxSelfProgress,
+                                      int32_t aCurTotalProgress,
+                                      int32_t aMaxTotalProgress)
+{
+  if (!mDestroyed) {
+    Unused << SendProgressChange(aCurSelfProgress, aMaxSelfProgress,
+                                 aCurTotalProgress, aMaxTotalProgress);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnLocationChange(nsIWebProgress* aProgress,
+                                      nsIRequest* aRequest, nsIURI* aURI,
+                                      uint32_t aFlags)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnStatusChange(nsIWebProgress* aProgress,
+                                    nsIRequest* aRequest, nsresult aStatus,
+                                    const char16_t* aMessage)
+{
+  if (NS_SUCCEEDED(mInitializationResult) && !mDestroyed) {
+    Unused << SendStatusChange(aStatus);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnSecurityChange(nsIWebProgress* aProgress,
+                                      nsIRequest* aRequest, uint32_t aState)
+{
+  return NS_OK;
+}
+
+// End of nsIWebProgressListener
 
 RemotePrintJobChild::~RemotePrintJobChild()
 {
-  MOZ_COUNT_DTOR(RemotePrintJobChild);
 }
 
 void
 RemotePrintJobChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   mPagePrintTimer = nullptr;
-  mPrintEngine = nullptr;
+  mPrintJob = nullptr;
+
+  mDestroyed = true;
 }
 
 } // namespace layout

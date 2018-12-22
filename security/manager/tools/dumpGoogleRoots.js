@@ -13,17 +13,16 @@
 // 4. [paste the output into the appropriate section in
 //     security/manager/tools/PreloadedHPKPins.json]
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest"]);
 
 function downloadRoots() {
-  let req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-              .createInstance(Ci.nsIXMLHttpRequest);
+  let req = new XMLHttpRequest();
   req.open("GET", "https://pki.google.com/roots.pem", false);
   try {
     req.send();
-  }
-  catch (e) {
+  } catch (e) {
     throw new Error("ERROR: problem downloading Google Root PEMs: " + e);
   }
 
@@ -57,14 +56,22 @@ function downloadRoots() {
   return roots;
 }
 
+function makeFormattedNickname(cert) {
+  if (cert.isBuiltInRoot) {
+    return `"${cert.displayName}"`;
+  }
+  // Otherwise, this isn't a built-in and we have to comment it out.
+  return `// "${cert.displayName}"`;
+}
+
 var roots = downloadRoots();
 var rootNicknames = [];
 for (var root of roots) {
-  rootNicknames.push(root.nickname.substring("Builtin Object Token:".length));
+  rootNicknames.push(makeFormattedNickname(root));
 }
 rootNicknames.sort(function(rootA, rootB) {
-  let rootALowercase = rootA.toLowerCase();
-  let rootBLowercase = rootB.toLowerCase();
+  let rootALowercase = rootA.toLowerCase().replace(/(^[^"]*")|"/g, "");
+  let rootBLowercase = rootB.toLowerCase().replace(/(^[^"]*")|"/g, "");
   if (rootALowercase < rootBLowercase) {
     return -1;
   }
@@ -82,7 +89,7 @@ for (var nickname of rootNicknames) {
     dump(",\n");
   }
   first = false;
-  dump("        \"" + nickname + "\"");
+  dump("        " + nickname);
 }
 dump("\n");
 dump("      ]\n");

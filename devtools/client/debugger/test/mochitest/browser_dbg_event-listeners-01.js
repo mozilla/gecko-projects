@@ -13,10 +13,8 @@ var gClient;
 var gTab;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -27,13 +25,13 @@ function test() {
     addTab(TAB_URL)
       .then((aTab) => {
         gTab = aTab;
-        return attachThreadActorForUrl(gClient, TAB_URL)
+        return attachThreadActorForUrl(gClient, TAB_URL);
       })
       .then(pauseDebuggee)
       .then(testEventListeners)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -87,12 +85,12 @@ function testEventListeners(aThreadClient) {
       let types = [];
 
       for (let l of listeners) {
-        info("Listener for the "+l.type+" event.");
+        info("Listener for the " + l.type + " event.");
         let node = l.node;
         ok(node, "There is a node property.");
         ok(node.object, "There is a node object property.");
         ok(node.selector == "window" ||
-          content.document.querySelectorAll(node.selector).length == 1,
+          gBrowser.contentDocumentAsCPOW.querySelectorAll(node.selector).length == 1,
           "The node property is a unique CSS selector.");
 
         let func = l.function;
@@ -102,7 +100,7 @@ function testEventListeners(aThreadClient) {
 
         // The onchange handler is an inline string that doesn't have
         // a URL because it's basically eval'ed
-        if (l.type !== 'change') {
+        if (l.type !== "change") {
           is(func.url, TAB_URL, "The function url is correct.");
         }
 
@@ -131,9 +129,9 @@ function testEventListeners(aThreadClient) {
         }
       }
 
-      ok(types.indexOf("click") != -1, "Found the click handler.");
-      ok(types.indexOf("change") != -1, "Found the change handler.");
-      ok(types.indexOf("keyup") != -1, "Found the keyup handler.");
+      ok(types.includes("click"), "Found the click handler.");
+      ok(types.includes("change"), "Found the change handler.");
+      ok(types.includes("keyup"), "Found the keyup handler.");
 
       aThreadClient.resume(deferred.resolve);
     });
@@ -142,12 +140,6 @@ function testEventListeners(aThreadClient) {
   return deferred.promise;
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

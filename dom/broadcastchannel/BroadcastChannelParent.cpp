@@ -7,9 +7,10 @@
 #include "BroadcastChannelParent.h"
 #include "BroadcastChannelService.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/ipc/BlobParent.h"
+#include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/ipc/BackgroundParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/Unused.h"
 #include "nsIScriptSecurityManager.h"
 
 namespace mozilla {
@@ -18,16 +19,12 @@ using namespace ipc;
 
 namespace dom {
 
-BroadcastChannelParent::BroadcastChannelParent(const nsACString& aOrigin,
-                                               const nsAString& aChannel,
-                                               bool aPrivateBrowsing)
+BroadcastChannelParent::BroadcastChannelParent(const nsAString& aOriginChannelKey)
   : mService(BroadcastChannelService::GetOrCreate())
-  , mOrigin(aOrigin)
-  , mChannel(aChannel)
-  , mPrivateBrowsing(aPrivateBrowsing)
+  , mOriginChannelKey(aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
-  mService->RegisterActor(this);
+  mService->RegisterActor(this, mOriginChannelKey);
 }
 
 BroadcastChannelParent::~BroadcastChannelParent()
@@ -35,34 +32,34 @@ BroadcastChannelParent::~BroadcastChannelParent()
   AssertIsOnBackgroundThread();
 }
 
-bool
+mozilla::ipc::IPCResult
 BroadcastChannelParent::RecvPostMessage(const ClonedMessageData& aData)
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
-  mService->PostMessage(this, aData, mOrigin, mChannel, mPrivateBrowsing);
-  return true;
+  mService->PostMessage(this, aData, mOriginChannelKey);
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 BroadcastChannelParent::RecvClose()
 {
   AssertIsOnBackgroundThread();
 
   if (NS_WARN_IF(!mService)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
-  mService->UnregisterActor(this);
+  mService->UnregisterActor(this, mOriginChannelKey);
   mService = nullptr;
 
   Unused << Send__delete__(this);
 
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -73,39 +70,7 @@ BroadcastChannelParent::ActorDestroy(ActorDestroyReason aWhy)
   if (mService) {
     // This object is about to be released and with it, also mService will be
     // released too.
-    mService->UnregisterActor(this);
-  }
-}
-
-void
-BroadcastChannelParent::CheckAndDeliver(const ClonedMessageData& aData,
-                                        const nsCString& aOrigin,
-                                        const nsString& aChannel,
-                                        bool aPrivateBrowsing)
-{
-  AssertIsOnBackgroundThread();
-
-  if (aOrigin == mOrigin &&
-      aChannel == mChannel &&
-      aPrivateBrowsing == mPrivateBrowsing) {
-    // Duplicate the data for this parent.
-    ClonedMessageData newData(aData);
-
-    // Ricreate the BlobParent for this new message.
-    for (uint32_t i = 0, len = newData.blobsParent().Length(); i < len; ++i) {
-      RefPtr<BlobImpl> impl =
-        static_cast<BlobParent*>(newData.blobsParent()[i])->GetBlobImpl();
-
-      PBlobParent* blobParent =
-        BackgroundParent::GetOrCreateActorForBlobImpl(Manager(), impl);
-      if (!blobParent) {
-        return;
-      }
-
-      newData.blobsParent()[i] = blobParent;
-    }
-
-    Unused << SendNotify(newData);
+    mService->UnregisterActor(this, mOriginChannelKey);
   }
 }
 

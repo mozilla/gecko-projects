@@ -1,19 +1,16 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests the function testing whether or not a frame is content or chrome
  * works properly.
  */
 
-function run_test() {
-  run_next_test();
-}
+add_task(function() {
+  const FrameUtils = require("devtools/client/performance/modules/logic/frame-utils");
 
-add_task(function () {
-  let FrameUtils = require("devtools/client/performance/modules/logic/frame-utils");
-
-  let isContent = (frame) => {
+  const isContent = (frame) => {
     FrameUtils.computeIsContentAndCategory(frame);
     return frame.isContent;
   };

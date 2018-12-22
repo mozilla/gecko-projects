@@ -6,18 +6,18 @@
 #ifndef ctypes_CTypes_h
 #define ctypes_CTypes_h
 
+#include "mozilla/Sprintf.h"
 #include "mozilla/Vector.h"
 
 #include "ffi.h"
-#include "jsalloc.h"
-#include "jsprf.h"
 #include "prlink.h"
 
 #include "ctypes/typedefs.h"
+#include "js/AllocPolicy.h"
 #include "js/GCHashTable.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
-#include "vm/String.h"
+#include "vm/StringType.h"
 
 namespace js {
 namespace ctypes {
@@ -26,16 +26,95 @@ namespace ctypes {
 ** Utility classes
 *******************************************************************************/
 
-// String and AutoString classes, based on Vector.
-typedef Vector<char16_t,  0, SystemAllocPolicy> String;
-typedef Vector<char16_t, 64, SystemAllocPolicy> AutoString;
-typedef Vector<char,      0, SystemAllocPolicy> CString;
-typedef Vector<char,     64, SystemAllocPolicy> AutoCString;
+// CTypes builds a number of strings. StringBuilder allows repeated appending
+// with a single error check at the end. Only the Vector methods required for
+// building the string are exposed.
+
+template <class CharT, size_t N>
+class StringBuilder {
+  Vector<CharT, N, SystemAllocPolicy> v;
+
+  // Have any (OOM) errors been encountered while constructing this string?
+  bool errored { false };
+
+#ifdef DEBUG
+  // Have we finished building this string?
+  bool finished { false };
+
+  // Did we check for errors?
+  mutable bool checked { false };
+#endif
+
+ public:
+
+  explicit operator bool() const {
+#ifdef DEBUG
+    checked = true;
+#endif
+    return !errored;
+  }
+
+  // Handle the result of modifying the string, by remembering the persistent
+  // errored status.
+  bool handle(bool result) {
+    MOZ_ASSERT(!finished);
+    if (!result)
+      errored = true;
+    return result;
+  }
+
+  bool resize(size_t n) {
+    return handle(v.resize(n));
+  }
+
+  CharT& operator[](size_t index) { return v[index]; }
+  const CharT& operator[](size_t index) const { return v[index]; }
+  size_t length() const { return v.length(); }
+
+  template<typename U> MOZ_MUST_USE bool append(U&& u) {
+    return handle(v.append(u));
+  }
+
+  template<typename U> MOZ_MUST_USE bool append(const U* begin, const U* end) {
+    return handle(v.append(begin, end));
+  }
+
+  template<typename U> MOZ_MUST_USE bool append(const U* begin, size_t len) {
+    return handle(v.append(begin, len));
+  }
+
+  CharT* begin() {
+    MOZ_ASSERT(!finished);
+    return v.begin();
+  }
+
+  // finish() produces the results of the string building, and is required as
+  // the last thing before the string contents are used. The StringBuilder must
+  // be checked for errors before calling this, however.
+  Vector<CharT, N, SystemAllocPolicy>&& finish() {
+    MOZ_ASSERT(!errored);
+    MOZ_ASSERT(!finished);
+    MOZ_ASSERT(checked);
+#ifdef DEBUG
+    finished = true;
+#endif
+    return std::move(v);
+  }
+};
+
+// Note that these strings do not have any inline storage, because we use move
+// constructors to pass the data around and inline storage would necessitate
+// copying.
+typedef StringBuilder<char16_t, 0> AutoString;
+typedef StringBuilder<char,     0> AutoCString;
+
+typedef Vector<char16_t, 0, SystemAllocPolicy> AutoStringChars;
+typedef Vector<char,     0, SystemAllocPolicy> AutoCStringChars;
 
 // Convenience functions to append, insert, and compare Strings.
-template <class T, size_t N, class AP, size_t ArrayLength>
+template <class T, size_t N, size_t ArrayLength>
 void
-AppendString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
+AppendString(JSContext* cx, StringBuilder<T, N>& v, const char (&array)[ArrayLength])
 {
   // Don't include the trailing '\0'.
   size_t alen = ArrayLength - 1;
@@ -47,9 +126,9 @@ AppendString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
     v[i + vlen] = array[i];
 }
 
-template <class T, size_t N, class AP>
+template <class T, size_t N>
 void
-AppendChars(mozilla::Vector<T, N, AP>& v, const char c, size_t count)
+AppendChars(StringBuilder<T, N>& v, const char c, size_t count)
 {
   size_t vlen = v.length();
   if (!v.resize(vlen + count))
@@ -59,12 +138,12 @@ AppendChars(mozilla::Vector<T, N, AP>& v, const char c, size_t count)
     v[i + vlen] = c;
 }
 
-template <class T, size_t N, class AP>
+template <class T, size_t N>
 void
-AppendUInt(mozilla::Vector<T, N, AP>& v, unsigned n)
+AppendUInt(StringBuilder<T, N>& v, unsigned n)
 {
   char array[16];
-  size_t alen = JS_snprintf(array, 16, "%u", n);
+  size_t alen = SprintfLiteral(array, "%u", n);
   size_t vlen = v.length();
   if (!v.resize(vlen + alen))
     return;
@@ -75,18 +154,18 @@ AppendUInt(mozilla::Vector<T, N, AP>& v, unsigned n)
 
 template <class T, size_t N, size_t M, class AP>
 void
-AppendString(mozilla::Vector<T, N, AP>& v, mozilla::Vector<T, M, AP>& w)
+AppendString(JSContext* cx, StringBuilder<T, N>& v, mozilla::Vector<T, M, AP>& w)
 {
   if (!v.append(w.begin(), w.length()))
     return;
 }
 
-template <size_t N, class AP>
+template <size_t N>
 void
-AppendString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
+AppendString(JSContext* cx, StringBuilder<char16_t, N>& v, JSString* str)
 {
   MOZ_ASSERT(str);
-  JSLinearString* linear = str->ensureLinear(nullptr);
+  JSLinearString* linear = str->ensureLinear(cx);
   if (!linear)
     return;
   JS::AutoCheckCannotGC nogc;
@@ -99,9 +178,9 @@ AppendString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
   }
 }
 
-template <size_t N, class AP>
+template <size_t N>
 void
-AppendString(mozilla::Vector<char, N, AP>& v, JSString* str)
+AppendString(JSContext* cx, StringBuilder<char, N>& v, JSString* str)
 {
   MOZ_ASSERT(str);
   size_t vlen = v.length();
@@ -109,7 +188,7 @@ AppendString(mozilla::Vector<char, N, AP>& v, JSString* str)
   if (!v.resize(vlen + alen))
     return;
 
-  JSLinearString* linear = str->ensureLinear(nullptr);
+  JSLinearString* linear = str->ensureLinear(cx);
   if (!linear)
     return;
 
@@ -125,9 +204,9 @@ AppendString(mozilla::Vector<char, N, AP>& v, JSString* str)
   }
 }
 
-template <class T, size_t N, class AP, size_t ArrayLength>
+template <class T, size_t N, size_t ArrayLength>
 void
-PrependString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
+PrependString(JSContext* cx, StringBuilder<T, N>& v, const char (&array)[ArrayLength])
 {
   // Don't include the trailing '\0'.
   size_t alen = ArrayLength - 1;
@@ -143,9 +222,9 @@ PrependString(mozilla::Vector<T, N, AP>& v, const char (&array)[ArrayLength])
     v[i] = array[i];
 }
 
-template <size_t N, class AP>
+template <size_t N>
 void
-PrependString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
+PrependString(JSContext* cx, StringBuilder<char16_t, N>& v, JSString* str)
 {
   MOZ_ASSERT(str);
   size_t vlen = v.length();
@@ -153,7 +232,7 @@ PrependString(mozilla::Vector<char16_t, N, AP>& v, JSString* str)
   if (!v.resize(vlen + alen))
     return;
 
-  JSLinearString* linear = str->ensureLinear(nullptr);
+  JSLinearString* linear = str->ensureLinear(cx);
   if (!linear)
     return;
 
@@ -177,10 +256,12 @@ GetDeflatedUTF8StringLength(JSContext* maybecx, const CharT* chars,
                             size_t charsLength);
 
 template <typename CharT>
-bool
+MOZ_MUST_USE bool
 DeflateStringToUTF8Buffer(JSContext* maybecx, const CharT* src, size_t srclen,
                           char* dst, size_t* dstlenp);
 
+MOZ_MUST_USE JSObject*
+GetThisObject(JSContext* cx, const CallArgs& args, const char* msg);
 
 /*******************************************************************************
 ** Function and struct API definitions
@@ -281,8 +362,8 @@ struct FieldHashPolicy : DefaultHasher<JSFlatString*>
   }
 };
 
-using FieldInfoHash = GCHashMap<js::RelocatablePtr<JSFlatString*>,
-                                FieldInfo, FieldHashPolicy, SystemAllocPolicy>;
+using FieldInfoHash = GCHashMap<js::HeapPtr<JSFlatString*>, FieldInfo,
+                                FieldHashPolicy, SystemAllocPolicy>;
 
 // Descriptor of ABI, return type, argument types, and variadicity for a
 // FunctionType.
@@ -317,7 +398,7 @@ struct FunctionInfo
 // Parameters necessary for invoking a JS function from a C closure.
 struct ClosureInfo
 {
-  JSRuntime* rt;
+  JSContext* cx;
   JS::Heap<JSObject*> closureObj;  // CClosure object
   JS::Heap<JSObject*> typeObj;     // FunctionType describing the C function
   JS::Heap<JSObject*> thisObj;     // 'this' object to use for the JS function call
@@ -327,8 +408,8 @@ struct ClosureInfo
 
   // Anything conditionally freed in the destructor should be initialized to
   // nullptr here.
-  explicit ClosureInfo(JSRuntime* runtime)
-    : rt(runtime)
+  explicit ClosureInfo(JSContext* context)
+    : cx(context)
     , errResult(nullptr)
     , closure(nullptr)
   {}
@@ -443,18 +524,19 @@ enum Int64FunctionSlot {
 
 namespace CType {
   JSObject* Create(JSContext* cx, HandleObject typeProto, HandleObject dataProto,
-    TypeCode type, JSString* name, Value size, Value align, ffi_type* ffiType);
+    TypeCode type, JSString* name, HandleValue size, HandleValue align,
+                   ffi_type* ffiType);
 
   JSObject* DefineBuiltin(JSContext* cx, HandleObject ctypesObj, const char* propName,
     JSObject* typeProto, JSObject* dataProto, const char* name, TypeCode type,
-    Value size, Value align, ffi_type* ffiType);
+    HandleValue size, HandleValue align, ffi_type* ffiType);
 
   bool IsCType(JSObject* obj);
   bool IsCTypeProto(JSObject* obj);
   TypeCode GetTypeCode(JSObject* typeObj);
   bool TypesEqual(JSObject* t1, JSObject* t2);
   size_t GetSize(JSObject* obj);
-  bool GetSafeSize(JSObject* obj, size_t* result);
+  MOZ_MUST_USE bool GetSafeSize(JSObject* obj, size_t* result);
   bool IsSizeDefined(JSObject* obj);
   size_t GetAlignment(JSObject* obj);
   ffi_type* GetFFIType(JSContext* cx, JSObject* obj);
@@ -478,12 +560,12 @@ namespace ArrayType {
 
   JSObject* GetBaseType(JSObject* obj);
   size_t GetLength(JSObject* obj);
-  bool GetSafeLength(JSObject* obj, size_t* result);
+  MOZ_MUST_USE bool GetSafeLength(JSObject* obj, size_t* result);
   UniquePtrFFIType BuildFFIType(JSContext* cx, JSObject* obj);
 } // namespace ArrayType
 
 namespace StructType {
-  bool DefineInternal(JSContext* cx, JSObject* typeObj, JSObject* fieldsObj);
+  MOZ_MUST_USE bool DefineInternal(JSContext* cx, JSObject* typeObj, JSObject* fieldsObj);
 
   const FieldInfoHash* GetFieldInfo(JSObject* obj);
   const FieldInfo* LookupField(JSContext* cx, JSObject* obj, JSFlatString* name);
@@ -499,13 +581,13 @@ namespace FunctionType {
     JSObject* refObj, PRFuncPtr fnptr, JSObject* result);
 
   FunctionInfo* GetFunctionInfo(JSObject* obj);
-  void BuildSymbolName(JSString* name, JSObject* typeObj,
+  void BuildSymbolName(JSContext* cx, JSString* name, JSObject* typeObj,
     AutoCString& result);
 } // namespace FunctionType
 
 namespace CClosure {
   JSObject* Create(JSContext* cx, HandleObject typeObj, HandleObject fnObj,
-    HandleObject thisObj, Value errVal, PRFuncPtr* fnptr);
+    HandleObject thisObj, HandleValue errVal, PRFuncPtr* fnptr);
 } // namespace CClosure
 
 namespace CData {
@@ -515,13 +597,14 @@ namespace CData {
   JSObject* GetCType(JSObject* dataObj);
   void* GetData(JSObject* dataObj);
   bool IsCData(JSObject* obj);
+  bool IsCDataMaybeUnwrap(MutableHandleObject obj);
   bool IsCData(HandleValue v);
   bool IsCDataProto(JSObject* obj);
 
   // Attached by JSAPI as the function 'ctypes.cast'
-  bool Cast(JSContext* cx, unsigned argc, Value* vp);
+  MOZ_MUST_USE bool Cast(JSContext* cx, unsigned argc, Value* vp);
   // Attached by JSAPI as the function 'ctypes.getRuntime'
-  bool GetRuntime(JSContext* cx, unsigned argc, Value* vp);
+  MOZ_MUST_USE bool GetRuntime(JSContext* cx, unsigned argc, Value* vp);
 } // namespace CData
 
 namespace Int64 {

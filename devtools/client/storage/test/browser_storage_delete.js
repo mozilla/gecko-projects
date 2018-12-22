@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* import-globals-from head.js */
+/* import-globals-from ../../shared/test/shared-head.js */
 
 "use strict";
 
@@ -10,40 +10,49 @@
 
 const TEST_CASES = [
   [["localStorage", "http://test1.example.org"],
-    "ls1", "name"],
+   "ls1", "name"],
   [["sessionStorage", "http://test1.example.org"],
-    "ss1", "name"],
-  [["cookies", "test1.example.org"],
-    "c1", "name"]
+   "ss1", "name"],
+  [
+    ["cookies", "http://test1.example.org"],
+    getCookieId("c1", "test1.example.org", "/browser"), "name"
+  ],
+  [["indexedDB", "http://test1.example.org", "idb1 (default)", "obj1"],
+   1, "name"],
+  [["Cache", "http://test1.example.org", "plop"],
+   MAIN_DOMAIN + "404_cached_file.js", "url"],
 ];
 
-add_task(function*() {
-  yield openTabAndSetupStorage(MAIN_DOMAIN + "storage-listings.html");
+add_task(async function() {
+  await openTabAndSetupStorage(MAIN_DOMAIN + "storage-listings.html");
 
-  let contextMenu = gPanelWindow.document.getElementById("storage-table-popup");
-  let menuDeleteItem = contextMenu.querySelector("#storage-table-popup-delete");
+  const contextMenu = gPanelWindow.document.getElementById("storage-table-popup");
+  const menuDeleteItem = contextMenu.querySelector("#storage-table-popup-delete");
 
-  for (let [ [store, host], rowName, cellToClick] of TEST_CASES) {
-    info(`Selecting tree item ${store} > ${host}`);
-    yield selectTreeItem([store, host]);
+  for (const [ treeItem, rowName, cellToClick] of TEST_CASES) {
+    const treeItemName = treeItem.join(" > ");
 
-    let row = getRowCells(rowName);
+    info(`Selecting tree item ${treeItemName}`);
+    await selectTreeItem(treeItem);
 
-    ok(gUI.table.items.has(rowName),
-      `There is a row '${rowName}' in ${store} > ${host}`);
+    const row = getRowCells(rowName);
+    ok(gUI.table.items.has(rowName), `There is a row '${rowName}' in ${treeItemName}`);
 
-    yield waitForContextMenu(contextMenu, row[cellToClick], () => {
-      info(`Opened context menu in ${store} > ${host}, row '${rowName}'`);
+    const eventWait = gUI.once("store-objects-edit");
+
+    await waitForContextMenu(contextMenu, row[cellToClick], () => {
+      info(`Opened context menu in ${treeItemName}, row '${rowName}'`);
       menuDeleteItem.click();
-      ok(menuDeleteItem.getAttribute("label").includes(rowName),
-        `Context menu item label contains '${rowName}'`);
+      const truncatedRowName = String(rowName).replace(SEPARATOR_GUID, "-").substr(0, 16);
+      ok(menuDeleteItem.getAttribute("label").includes(truncatedRowName),
+        `Context menu item label contains '${rowName}' (maybe truncated)`);
     });
 
-    yield gUI.once("store-objects-updated");
+    await eventWait;
 
     ok(!gUI.table.items.has(rowName),
-      `There is no row '${rowName}' in ${store} > ${host} after deletion`);
+      `There is no row '${rowName}' in ${treeItemName} after deletion`);
   }
 
-  yield finishTests();
+  await finishTests();
 });

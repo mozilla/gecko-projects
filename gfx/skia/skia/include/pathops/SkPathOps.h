@@ -7,9 +7,9 @@
 #ifndef SkPathOps_DEFINED
 #define SkPathOps_DEFINED
 
+#include "../private/SkTArray.h"
+#include "../private/SkTDArray.h"
 #include "SkPreConfig.h"
-#include "SkTArray.h"
-#include "SkTDArray.h"
 
 class SkPath;
 struct SkRect;
@@ -76,12 +76,12 @@ public:
 
         @param path The second operand.
         @param _operator The operator to apply to the existing and supplied paths.
-     */ 
+     */
     void add(const SkPath& path, SkPathOp _operator);
 
     /** Computes the sum of all paths and operands, and resets the builder to its
         initial state.
- 
+
         @param result The product of the operands.
         @return True if the operation succeeded.
       */
@@ -91,6 +91,8 @@ private:
     SkTArray<SkPath> fPathRefs;
     SkTDArray<SkPathOp> fOps;
 
+    static bool FixWinding(SkPath* path);
+    static void ReversePath(SkPath* path);
     void reset();
 };
 

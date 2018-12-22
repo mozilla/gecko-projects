@@ -11,6 +11,7 @@
 #include "mozilla/dom/InternalHeaders.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/LoadTainting.h"
+#include "mozilla/net/ReferrerPolicy.h"
 
 #include "nsIContentPolicy.h"
 #include "nsIInputStream.h"
@@ -22,99 +23,58 @@
 #endif
 
 namespace mozilla {
+
+namespace ipc {
+class PrincipalInfo;
+} // namespace ipc
+
 namespace dom {
 
 /*
- * The mapping of RequestContext and nsContentPolicyType is currently as the
+ * The mapping of RequestDestination and nsContentPolicyType is currently as the
  * following.  Note that this mapping is not perfect yet (see the TODO comments
  * below for examples).
  *
- * RequestContext    | nsContentPolicyType
+ * RequestDestination| nsContentPolicyType
  * ------------------+--------------------
  * audio             | TYPE_INTERNAL_AUDIO
- * beacon            | TYPE_BEACON
- * cspreport         | TYPE_CSP_REPORT
- * download          |
+ * audioworklet      | TODO
+ * document          | TYPE_DOCUMENT, TYPE_INTERNAL_IFRAME, TYPE_SUBDOCUMENT
  * embed             | TYPE_INTERNAL_EMBED
- * eventsource       |
- * favicon           |
- * fetch             | TYPE_FETCH
  * font              | TYPE_FONT
- * form              |
- * frame             | TYPE_INTERNAL_FRAME
- * hyperlink         |
- * iframe            | TYPE_INTERNAL_IFRAME
- * image             | TYPE_INTERNAL_IMAGE, TYPE_INTERNAL_IMAGE_PRELOAD
- * imageset          | TYPE_IMAGESET
- * import            | Not supported by Gecko
- * internal          | TYPE_DOCUMENT, TYPE_XBL, TYPE_OTHER
- * location          |
+ * image             | TYPE_INTERNAL_IMAGE, TYPE_INTERNAL_IMAGE_PRELOAD,
+ *                   | TYPE_IMAGE, TYPE_INTERNAL_IMAGE_FAVICON, TYPE_IMAGESET
  * manifest          | TYPE_WEB_MANIFEST
- * object            | TYPE_INTERNAL_OBJECT
- * ping              | TYPE_PING
- * plugin            | TYPE_OBJECT_SUBREQUEST
- * prefetch          |
- * script            | TYPE_INTERNAL_SCRIPT, TYPE_INTERNAL_SCRIPT_PRELOAD
+ * object            | TYPE_INTERNAL_OBJECT, TYPE_OBJECT
+ * "paintworklet"    | TODO
+ * report"           | TODO
+ * script            | TYPE_INTERNAL_SCRIPT, TYPE_INTERNAL_SCRIPT_PRELOAD, TYPE_SCRIPT
+ *                   | TYPE_INTERNAL_SERVICE_WORKER, TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS
  * sharedworker      | TYPE_INTERNAL_SHARED_WORKER
- * subresource       | Not supported by Gecko
- * style             | TYPE_INTERNAL_STYLESHEET, TYPE_INTERNAL_STYLESHEET_PRELOAD
+ * serviceworker     | The spec lists this as a valid value for the enum,however it
+ *                   | is impossible to observe a request with this destination value.
+ * style             | TYPE_INTERNAL_STYLESHEET, TYPE_INTERNAL_STYLESHEET_PRELOAD,
+ *                   | TYPE_STYLESHEET
  * track             | TYPE_INTERNAL_TRACK
  * video             | TYPE_INTERNAL_VIDEO
  * worker            | TYPE_INTERNAL_WORKER
- * xmlhttprequest    | TYPE_INTERNAL_XMLHTTPREQUEST
- * eventsource       | TYPE_INTERNAL_EVENTSOURCE
  * xslt              | TYPE_XSLT
+ * _empty            | Default for everything else.
  *
- * TODO: Figure out if TYPE_REFRESH maps to anything useful
- * TODO: Figure out if TYPE_DTD maps to anything useful
- * TODO: Figure out if TYPE_WEBSOCKET maps to anything useful
- * TODO: Add a content type for prefetch
- * TODO: Use the content type for manifest when it becomes available
- * TODO: Add a content type for location
- * TODO: Add a content type for hyperlink
- * TODO: Add a content type for form
- * TODO: Add a content type for favicon
- * TODO: Add a content type for download
  */
 
 class Request;
+class IPCInternalRequest;
 
 #define kFETCH_CLIENT_REFERRER_STR "about:client"
-
 class InternalRequest final
 {
   friend class Request;
-
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalRequest)
-
-  InternalRequest()
-    : mMethod("GET")
-    , mHeaders(new InternalHeaders(HeadersGuardEnum::None))
-    , mContentPolicyType(nsIContentPolicy::TYPE_FETCH)
-    , mReferrer(NS_LITERAL_STRING(kFETCH_CLIENT_REFERRER_STR))
-    , mReferrerPolicy(ReferrerPolicy::_empty)
-    , mMode(RequestMode::No_cors)
-    , mCredentialsMode(RequestCredentials::Omit)
-    , mResponseTainting(LoadTainting::Basic)
-    , mCacheMode(RequestCache::Default)
-    , mRedirectMode(RequestRedirect::Follow)
-    , mAuthenticationFlag(false)
-    , mForceOriginHeader(false)
-    , mPreserveContentCodings(false)
-      // FIXME(nsm): This should be false by default, but will lead to the
-      // algorithm never loading data: URLs right now. See Bug 1018872 about
-      // how certain contexts will override it to set it to true. Fetch
-      // specification does not handle this yet.
-    , mSameOriginDataURL(true)
-    , mSkipServiceWorker(false)
-    , mSynchronous(false)
-    , mUnsafeRequest(false)
-    , mUseURLCredentials(false)
-  {
-  }
-
+  InternalRequest(const nsACString& aURL, const nsACString& aFragment);
   InternalRequest(const nsACString& aURL,
+                  const nsACString& aFragment,
                   const nsACString& aMethod,
                   already_AddRefed<InternalHeaders> aHeaders,
                   RequestCache aCacheMode,
@@ -123,35 +83,12 @@ public:
                   RequestCredentials aRequestCredentials,
                   const nsAString& aReferrer,
                   ReferrerPolicy aReferrerPolicy,
-                  nsContentPolicyType aContentPolicyType)
-    : mMethod(aMethod)
-    , mURL(aURL)
-    , mHeaders(aHeaders)
-    , mContentPolicyType(aContentPolicyType)
-    , mReferrer(aReferrer)
-    , mReferrerPolicy(aReferrerPolicy)
-    , mMode(aMode)
-    , mCredentialsMode(aRequestCredentials)
-    , mResponseTainting(LoadTainting::Basic)
-    , mCacheMode(aCacheMode)
-    , mRedirectMode(aRequestRedirect)
-    , mAuthenticationFlag(false)
-    , mForceOriginHeader(false)
-    , mPreserveContentCodings(false)
-      // FIXME See the above comment in the default constructor.
-    , mSameOriginDataURL(true)
-    , mSkipServiceWorker(false)
-    , mSynchronous(false)
-    , mUnsafeRequest(false)
-    , mUseURLCredentials(false)
-  {
-    // Normally we strip the fragment from the URL in Request::Constructor.
-    // If internal code is directly constructing this object they must
-    // strip the fragment first.  Since these should be well formed URLs we
-    // can use a simple check for a fragment here.  The full parser is
-    // difficult to use off the main thread.
-    MOZ_ASSERT(mURL.Find(NS_LITERAL_CSTRING("#")) == kNotFound);
-  }
+                  nsContentPolicyType aContentPolicyType,
+                  const nsAString& aIntegrity);
+
+  explicit InternalRequest(const IPCInternalRequest& aIPCRequest);
+
+  void ToIPC(IPCInternalRequest* aIPCRequest);
 
   already_AddRefed<InternalRequest> Clone();
 
@@ -174,19 +111,49 @@ public:
            mMethod.LowerCaseEqualsASCII("post") ||
            mMethod.LowerCaseEqualsASCII("head");
   }
-
+  // GetURL should get the request's current url with fragment. A request has
+  // an associated current url. It is a pointer to the last fetch URL in
+  // request's url list.
   void
-  GetURL(nsCString& aURL) const
+  GetURL(nsACString& aURL) const
   {
-    aURL.Assign(mURL);
+    aURL.Assign(GetURLWithoutFragment());
+    if (GetFragment().IsEmpty()) {
+      return;
+    }
+    aURL.AppendLiteral("#");
+    aURL.Append(GetFragment());
   }
 
-  void
-  SetURL(const nsACString& aURL)
+  const nsCString&
+  GetURLWithoutFragment() const
   {
-    mURL.Assign(aURL);
-  }
+    MOZ_RELEASE_ASSERT(!mURLList.IsEmpty(),
+                       "Internal Request's urlList should not be empty.");
 
+    return mURLList.LastElement();
+  }
+  // AddURL should append the url into url list.
+  // Normally we strip the fragment from the URL in Request::Constructor and
+  // pass the fragment as the second argument into it.
+  // If a fragment is present in the URL it must be stripped and passed in
+  // separately.
+  void
+  AddURL(const nsACString& aURL, const nsACString& aFragment)
+  {
+    MOZ_ASSERT(!aURL.IsEmpty());
+    MOZ_ASSERT(!aURL.Contains('#'));
+
+    mURLList.AppendElement(aURL);
+
+    mFragment.Assign(aFragment);
+  }
+  // Get the URL list without their fragments.
+  void
+  GetURLListWithoutFragment(nsTArray<nsCString>& aURLList)
+  {
+    aURLList.Assign(mURLList);
+  }
   void
   GetReferrer(nsAString& aReferrer) const
   {
@@ -244,6 +211,84 @@ public:
   SetReferrerPolicy(ReferrerPolicy aReferrerPolicy)
   {
     mReferrerPolicy = aReferrerPolicy;
+  }
+
+  void
+  SetReferrerPolicy(net::ReferrerPolicy aReferrerPolicy)
+  {
+    switch (aReferrerPolicy) {
+      case net::RP_Unset:
+        mReferrerPolicy = ReferrerPolicy::_empty;
+        break;
+      case net::RP_No_Referrer:
+        mReferrerPolicy = ReferrerPolicy::No_referrer;
+        break;
+      case net::RP_No_Referrer_When_Downgrade:
+        mReferrerPolicy = ReferrerPolicy::No_referrer_when_downgrade;
+        break;
+      case net::RP_Origin:
+        mReferrerPolicy = ReferrerPolicy::Origin;
+        break;
+      case net::RP_Origin_When_Crossorigin:
+        mReferrerPolicy = ReferrerPolicy::Origin_when_cross_origin;
+        break;
+      case net::RP_Unsafe_URL:
+        mReferrerPolicy = ReferrerPolicy::Unsafe_url;
+        break;
+      case net::RP_Same_Origin:
+        mReferrerPolicy = ReferrerPolicy::Same_origin;
+        break;
+      case net::RP_Strict_Origin:
+        mReferrerPolicy = ReferrerPolicy::Strict_origin;
+        break;
+      case net::RP_Strict_Origin_When_Cross_Origin:
+        mReferrerPolicy = ReferrerPolicy::Strict_origin_when_cross_origin;
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Invalid ReferrerPolicy value");
+        break;
+    }
+  }
+
+  net::ReferrerPolicy
+  GetReferrerPolicy()
+  {
+    switch (mReferrerPolicy) {
+      case ReferrerPolicy::_empty:
+        return net::RP_Unset;
+      case ReferrerPolicy::No_referrer:
+        return net::RP_No_Referrer;
+      case ReferrerPolicy::No_referrer_when_downgrade:
+        return net::RP_No_Referrer_When_Downgrade;
+      case ReferrerPolicy::Origin:
+        return net::RP_Origin;
+      case ReferrerPolicy::Origin_when_cross_origin:
+        return net::RP_Origin_When_Crossorigin;
+      case ReferrerPolicy::Unsafe_url:
+        return net::RP_Unsafe_URL;
+      case ReferrerPolicy::Strict_origin:
+        return net::RP_Strict_Origin;
+      case ReferrerPolicy::Same_origin:
+        return net::RP_Same_Origin;
+      case ReferrerPolicy::Strict_origin_when_cross_origin:
+        return net::RP_Strict_Origin_When_Cross_Origin;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Invalid ReferrerPolicy enum value?");
+        break;
+    }
+    return net::RP_Unset;
+  }
+
+  net::ReferrerPolicy
+  GetEnvironmentReferrerPolicy() const
+  {
+    return mEnvironmentReferrerPolicy;
+  }
+
+  void
+  SetEnvironmentReferrerPolicy(net::ReferrerPolicy aReferrerPolicy)
+  {
+    mEnvironmentReferrerPolicy = aReferrerPolicy;
   }
 
   bool
@@ -326,19 +371,51 @@ public:
     mRedirectMode = aRedirectMode;
   }
 
+  const nsString&
+  GetIntegrity() const
+  {
+    return mIntegrity;
+  }
+  void
+  SetIntegrity(const nsAString& aIntegrity)
+  {
+    MOZ_ASSERT(mIntegrity.IsEmpty());
+    mIntegrity.Assign(aIntegrity);
+  }
+
+  bool
+  MozErrors() const
+  {
+    return mMozErrors;
+  }
+
+  void
+  SetMozErrors()
+  {
+    mMozErrors = true;
+  }
+
+  const nsCString&
+  GetFragment() const
+  {
+    return mFragment;
+  }
+
   nsContentPolicyType
   ContentPolicyType() const
   {
     return mContentPolicyType;
   }
-
   void
   SetContentPolicyType(nsContentPolicyType aContentPolicyType);
 
-  RequestContext
-  Context() const
+  void
+  OverrideContentPolicyType(nsContentPolicyType aContentPolicyType);
+
+  RequestDestination
+  Destination() const
   {
-    return MapContentPolicyTypeToRequestContext(mContentPolicyType);
+    return MapContentPolicyTypeToRequestDestination(mContentPolicyType);
   }
 
   bool
@@ -378,20 +455,25 @@ public:
   }
 
   void
-  SetBody(nsIInputStream* aStream)
+  SetBody(nsIInputStream* aStream, int64_t aBodyLength)
   {
     // A request's body may not be reset once set.
     MOZ_ASSERT_IF(aStream, !mBodyStream);
     mBodyStream = aStream;
+    mBodyLength = aBodyLength;
   }
 
   // Will return the original stream!
   // Use a tee or copy if you don't want to erase the original.
   void
-  GetBody(nsIInputStream** aStream)
+  GetBody(nsIInputStream** aStream, int64_t* aBodyLength = nullptr)
   {
     nsCOMPtr<nsIInputStream> s = mBodyStream;
     s.forget(aStream);
+
+    if (aBodyLength) {
+      *aBodyLength = mBodyLength;
+    }
   }
 
   // The global is used as the client for the new object.
@@ -428,11 +510,39 @@ public:
   void
   MaybeSkipCacheIfPerformingRevalidation();
 
+  bool
+  IsContentPolicyTypeOverridden() const
+  {
+    return mContentPolicyTypeOverridden;
+  }
+
   static RequestMode
   MapChannelToRequestMode(nsIChannel* aChannel);
 
   static RequestCredentials
   MapChannelToRequestCredentials(nsIChannel* aChannel);
+
+  // Takes ownership of the principal info.
+  void
+  SetPrincipalInfo(UniquePtr<mozilla::ipc::PrincipalInfo> aPrincipalInfo);
+
+  const UniquePtr<mozilla::ipc::PrincipalInfo>&
+  GetPrincipalInfo() const
+  {
+    return mPrincipalInfo;
+  }
+
+  const nsCString&
+  GetPreferredAlternativeDataType() const
+  {
+    return mPreferredAlternativeDataType;
+  }
+
+  void
+  SetPreferredAlternativeDataType(const nsACString& aDataType)
+  {
+    mPreferredAlternativeDataType = aDataType;
+  }
 
 private:
   // Does not copy mBodyStream.  Use fallible Clone() for complete copy.
@@ -440,8 +550,15 @@ private:
 
   ~InternalRequest();
 
-  static RequestContext
-  MapContentPolicyTypeToRequestContext(nsContentPolicyType aContentPolicyType);
+  // Map the content policy type to the associated fetch destination, as defined
+  // by the spec at https://fetch.spec.whatwg.org/#concept-request-destination.
+  // Note that while the HTML spec for the "Link" element and its "as" attribute
+  // (https://html.spec.whatwg.org/#attr-link-as) reuse fetch's definition of
+  // destination, and the Link class has an internal Link::AsDestination enum type,
+  // the latter is only a support type to map the string values via
+  // Link::ParseAsValue and Link::AsValueToContentPolicy to our canonical nsContentPolicyType.
+  static RequestDestination
+  MapContentPolicyTypeToRequestDestination(nsContentPolicyType aContentPolicyType);
 
   static bool
   IsNavigationContentPolicy(nsContentPolicyType aContentPolicyType);
@@ -450,10 +567,13 @@ private:
   IsWorkerContentPolicy(nsContentPolicyType aContentPolicyType);
 
   nsCString mMethod;
-  // mURL always stores the url with the ref stripped
-  nsCString mURL;
+  // mURLList: a list of one or more fetch URLs
+  nsTArray<nsCString> mURLList;
   RefPtr<InternalHeaders> mHeaders;
   nsCOMPtr<nsIInputStream> mBodyStream;
+  int64_t mBodyLength;
+
+  nsCString mPreferredAlternativeDataType;
 
   nsContentPolicyType mContentPolicyType;
 
@@ -463,24 +583,38 @@ private:
   nsString mReferrer;
   ReferrerPolicy mReferrerPolicy;
 
+  // This will be used for request created from Window or Worker contexts
+  // In case there's no Referrer Policy in Request, this will be passed to
+  // channel.
+  // The Environment Referrer Policy should be net::ReferrerPolicy so that it
+  // could be associated with nsIHttpChannel.
+  net::ReferrerPolicy mEnvironmentReferrerPolicy;
   RequestMode mMode;
   RequestCredentials mCredentialsMode;
-  LoadTainting mResponseTainting;
+  MOZ_INIT_OUTSIDE_CTOR LoadTainting mResponseTainting;
   RequestCache mCacheMode;
   RequestRedirect mRedirectMode;
-
-  bool mAuthenticationFlag;
-  bool mForceOriginHeader;
-  bool mPreserveContentCodings;
-  bool mSameOriginDataURL;
-  bool mSkipServiceWorker;
-  bool mSynchronous;
-  bool mUnsafeRequest;
-  bool mUseURLCredentials;
+  nsString mIntegrity;
+  bool mMozErrors;
+  nsCString mFragment;
+  MOZ_INIT_OUTSIDE_CTOR bool mAuthenticationFlag;
+  MOZ_INIT_OUTSIDE_CTOR bool mForceOriginHeader;
+  MOZ_INIT_OUTSIDE_CTOR bool mPreserveContentCodings;
+  MOZ_INIT_OUTSIDE_CTOR bool mSameOriginDataURL;
+  MOZ_INIT_OUTSIDE_CTOR bool mSkipServiceWorker;
+  MOZ_INIT_OUTSIDE_CTOR bool mSynchronous;
+  MOZ_INIT_OUTSIDE_CTOR bool mUnsafeRequest;
+  MOZ_INIT_OUTSIDE_CTOR bool mUseURLCredentials;
   // This is only set when a Request object is created by a fetch event.  We
   // use it to check if Service Workers are simply fetching intercepted Request
   // objects without modifying them.
   bool mCreatedByFetchEvent = false;
+  // This is only set when Request.overrideContentPolicyType() has been set.
+  // It is illegal to pass such a Request object to a fetch() method unless
+  // if the caller has chrome privileges.
+  bool mContentPolicyTypeOverridden = false;
+
+  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
 };
 
 } // namespace dom

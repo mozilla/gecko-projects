@@ -61,14 +61,19 @@ public:
                         uint32_t clockrate, uint16_t channels) override;
   virtual void ClearCodecs() override;
 
-  virtual void AddDataChannel(const std::string& pt, const std::string& name,
-                              uint16_t streams) override;
+  virtual void AddDataChannel(const std::string& name, uint16_t port,
+                              uint16_t streams, uint32_t message_size) override;
 
   virtual void Serialize(std::ostream&) const override;
 
 private:
   SipccSdpMediaSection(size_t level, const SipccSdpAttributeList* sessionLevel)
-      : SdpMediaSection(level), mAttributeList(sessionLevel)
+      : SdpMediaSection(level),
+        mMediaType(static_cast<MediaType>(0)),
+        mPort(0),
+        mPortCount(0),
+        mProtocol(static_cast<Protocol>(0)),
+        mAttributeList(sessionLevel)
   {
   }
 

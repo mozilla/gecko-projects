@@ -5,14 +5,13 @@
 
 "use strict";
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const {
   parsePseudoClassesAndAttributes,
   SELECTOR_ATTRIBUTE,
   SELECTOR_ELEMENT,
   SELECTOR_PSEUDO_CLASS
-} = require("devtools/client/shared/css-parsing-utils");
+} = require("devtools/shared/css/parsing-utils");
 
 const TEST_DATA = [
   // Test that a null input throws an exception
@@ -172,7 +171,7 @@ const TEST_DATA = [
 ];
 
 function run_test() {
-  for (let test of TEST_DATA) {
+  for (const test of TEST_DATA) {
     dump("Test input string " + test.input + "\n");
     let output;
 
@@ -204,7 +203,7 @@ function assertOutput(actual, expected) {
       equal(expected[i].type, actual[i].type);
     }
   } else {
-    for (let prop of actual) {
+    for (const prop of actual) {
       dump("Actual output contained: {value: " + prop.value + ", type: " +
         prop.type + "}\n");
     }

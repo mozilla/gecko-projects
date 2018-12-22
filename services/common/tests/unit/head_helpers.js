@@ -2,38 +2,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://testing-common/services/common/logging.js");
-Cu.import("resource://testing-common/MockRegistrar.jsm");
+/* import-globals-from head_global.js */
 
-var btoa = Cu.import("resource://gre/modules/Log.jsm").btoa;
-var atob = Cu.import("resource://gre/modules/Log.jsm").atob;
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://testing-common/services/common/logging.js");
+ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
 
 function do_check_empty(obj) {
   do_check_attribute_count(obj, 0);
 }
 
 function do_check_attribute_count(obj, c) {
-  do_check_eq(c, Object.keys(obj).length);
+  Assert.equal(c, Object.keys(obj).length);
 }
 
-function do_check_throws(aFunc, aResult, aStack) {
-  if (!aStack) {
-    try {
-      // We might not have a 'Components' object.
-      aStack = Components.stack.caller;
-    } catch (e) {}
-  }
-
+function do_check_throws(aFunc, aResult) {
   try {
     aFunc();
   } catch (e) {
-    do_check_eq(e.result, aResult, aStack);
+    Assert.equal(e.result, aResult);
     return;
   }
-  do_throw("Expected result " + aResult + ", none thrown.", aStack);
+  do_throw("Expected result " + aResult + ", none thrown.");
 }
 
 
@@ -50,7 +42,7 @@ function do_check_throws_message(aFunc, aResult) {
   try {
     aFunc();
   } catch (e) {
-    do_check_eq(e.message, aResult);
+    Assert.equal(e.message, aResult);
     return;
   }
   do_throw("Expected an error, none thrown.");
@@ -69,7 +61,7 @@ var _ = function(some, debug, text, to) {
   print(Array.slice(arguments).join(" "));
 };
 
-function httpd_setup (handlers, port=-1) {
+function httpd_setup(handlers, port = -1) {
   let server = new HttpServer();
   for (let path in handlers) {
     server.registerPathHandler(path, handlers[path]);
@@ -106,6 +98,10 @@ function httpd_handler(statusCode, status, body) {
   };
 }
 
+function promiseStopServer(server) {
+  return new Promise(resolve => server.stop(resolve));
+}
+
 /*
  * Read bytes string from an nsIInputStream.  If 'count' is omitted,
  * all available input is read.
@@ -135,7 +131,7 @@ function ensureThrows(func) {
  * Fake a PAC to prompt a channel replacement.
  */
 var PACSystemSettings = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISystemProxySettings]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISystemProxySettings]),
 
   // Replace this URI for each test to avoid caching. We want to ensure that
   // each test gets a completely fresh setup.
@@ -158,15 +154,21 @@ function uninstallFakePAC() {
   MockRegistrar.unregister(fakePACCID);
 }
 
-// Many tests do service.startOver() and don't expect the provider type to
-// change (whereas by default, a startOver will do exactly that so FxA is
-// subsequently used). The tests that know how to deal with
-// the Firefox Accounts identity hack things to ensure that still works.
-function ensureStartOverKeepsIdentity() {
-  Cu.import("resource://gre/modules/Services.jsm");
-  Services.prefs.setBoolPref("services.sync-testing.startOverKeepIdentity", true);
-  do_register_cleanup(function() {
-    Services.prefs.clearUserPref("services.sync-testing.startOverKeepIdentity");
-  });
+
+function getUptakeTelemetrySnapshot(key) {
+  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const TELEMETRY_HISTOGRAM_ID = "UPTAKE_REMOTE_CONTENT_RESULT_1";
+  return Services.telemetry
+           .getKeyedHistogramById(TELEMETRY_HISTOGRAM_ID)
+           .snapshot(key);
 }
-ensureStartOverKeepsIdentity();
+
+function checkUptakeTelemetry(snapshot1, snapshot2, expectedIncrements) {
+  const LABELS = ["up_to_date", "success", "backoff", "pref_disabled", "parse_error", "content_error", "sign_error", "sign_retry_error", "conflict_error", "sync_error", "apply_error", "server_error", "certificate_error", "download_error", "timeout_error", "network_error", "offline_error", "cleanup_error", "unknown_error", "custom_1_error", "custom_2_error", "custom_3_error", "custom_4_error", "custom_5_error"];
+  for (const label of LABELS) {
+    const key = LABELS.indexOf(label);
+    const expected = expectedIncrements[label] || 0;
+    const actual = snapshot2.counts[key] - snapshot1.counts[key];
+    equal(expected, actual, `check histogram count for ${label}`);
+  }
+}

@@ -7,12 +7,11 @@
 
 #include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/SVGDocument.h"
 #include "nsICategoryManager.h"
 #include "nsIChannel.h"
 #include "nsIContentViewer.h"
-#include "nsIDocument.h"
 #include "nsIDocumentLoaderFactory.h"
-#include "nsIDOMSVGLength.h"
 #include "nsIHttpChannel.h"
 #include "nsIObserverService.h"
 #include "nsIParser.h"
@@ -25,11 +24,12 @@
 #include "nsSMILAnimationController.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/SVGSVGElement.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "mozilla/dom/SVGAnimatedLength.h"
 #include "nsMimeTypes.h"
 #include "DOMSVGLength.h"
 #include "nsDocument.h"
+#include "mozilla/dom/ImageTracker.h"
 
 // undef the GetCurrentTime macro defined in WinBase.h from the MS Platform SDK
 #undef GetCurrentTime
@@ -154,7 +154,7 @@ SVGDocumentWrapper::StartAnimation()
     if (controller) {
       controller->Resume(nsSMILTimeContainer::PAUSE_IMAGE);
     }
-    doc->SetImagesNeedAnimating(true);
+    doc->ImageTracker()->SetAnimatingState(true);
   }
 }
 
@@ -173,7 +173,7 @@ SVGDocumentWrapper::StopAnimation()
     if (controller) {
       controller->Pause(nsSMILTimeContainer::PAUSE_IMAGE);
     }
-    doc->SetImagesNeedAnimating(false);
+    doc->ImageTracker()->SetAnimatingState(false);
   }
 }
 
@@ -275,7 +275,7 @@ SVGDocumentWrapper::Observe(nsISupports* aSubject,
     // Sever ties from rendering observers to helper-doc's root SVG node
     SVGSVGElement* svgElem = GetRootSVGElem();
     if (svgElem) {
-      nsSVGEffects::RemoveAllRenderingObservers(svgElem);
+      SVGObserverUtils::RemoveAllRenderingObservers(svgElem);
     }
 
     // Clean up at XPCOM shutdown time.
@@ -330,12 +330,12 @@ SVGDocumentWrapper::SetupViewer(nsIRequest* aRequest,
   nsCOMPtr<nsICategoryManager> catMan =
     do_GetService(NS_CATEGORYMANAGER_CONTRACTID);
   NS_ENSURE_TRUE(catMan, NS_ERROR_NOT_AVAILABLE);
-  nsXPIDLCString contractId;
+  nsCString contractId;
   nsresult rv = catMan->GetCategoryEntry("Gecko-Content-Viewers", IMAGE_SVG_XML,
                                          getter_Copies(contractId));
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIDocumentLoaderFactory> docLoaderFactory =
-    do_GetService(contractId);
+    do_GetService(contractId.get());
   NS_ENSURE_TRUE(docLoaderFactory, NS_ERROR_NOT_AVAILABLE);
 
   nsCOMPtr<nsIContentViewer> viewer;
@@ -350,12 +350,25 @@ SVGDocumentWrapper::SetupViewer(nsIRequest* aRequest,
 
   NS_ENSURE_TRUE(viewer, NS_ERROR_UNEXPECTED);
 
+  // Create a navigation time object and pass it to the SVG document through
+  // the viewer.
+  // The timeline(DocumentTimeline, used in CSS animation) of this SVG
+  // document needs this navigation timing object for time computation, such
+  // as to calculate current time stamp based on the start time of navigation
+  // time object.
+  //
+  // For a root document, DocShell would do these sort of things
+  // automatically. Since there is no DocShell for this wrapped SVG document,
+  // we must set it up manually.
+  RefPtr<nsDOMNavigationTiming> timing = new nsDOMNavigationTiming(nullptr);
+  timing->NotifyNavigationStart(nsDOMNavigationTiming::DocShellState::eInactive);
+  viewer->SetNavigationTiming(timing);
+
   nsCOMPtr<nsIParser> parser = do_QueryInterface(listener);
   NS_ENSURE_TRUE(parser, NS_ERROR_UNEXPECTED);
 
   // XML-only, because this is for SVG content
-  nsIContentSink* sink = parser->GetContentSink();
-  nsCOMPtr<nsIXMLContentSink> xmlSink = do_QueryInterface(sink);
+  nsCOMPtr<nsIContentSink> sink = parser->GetContentSink();
   NS_ENSURE_TRUE(sink, NS_ERROR_UNEXPECTED);
 
   listener.swap(mListener);
@@ -405,21 +418,22 @@ SVGDocumentWrapper::UnregisterForXPCOMShutdown()
 void
 SVGDocumentWrapper::FlushLayout()
 {
-  nsCOMPtr<nsIPresShell> presShell;
-  mViewer->GetPresShell(getter_AddRefs(presShell));
-  if (presShell) {
-    presShell->FlushPendingNotifications(Flush_Layout);
+  if (SVGDocument* doc = GetDocument()) {
+    doc->FlushPendingNotifications(FlushType::Layout);
   }
 }
 
-nsIDocument*
+SVGDocument*
 SVGDocumentWrapper::GetDocument()
 {
   if (!mViewer) {
     return nullptr;
   }
-
-  return mViewer->GetDocument(); // May be nullptr.
+  nsIDocument* doc = mViewer->GetDocument();
+  if (!doc) {
+    return nullptr;
+  }
+  return doc->AsSVGDocument();
 }
 
 SVGSVGElement*

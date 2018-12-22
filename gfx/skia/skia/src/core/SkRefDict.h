@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -16,7 +15,7 @@
  *  A dictionary of string,refcnt pairs. The dictionary is also an owner of the
  *  refcnt objects while they are contained.
  */
-class SK_API SkRefDict : SkNoncopyable {
+class SkRefDict : SkNoncopyable {
 public:
     SkRefDict();
     ~SkRefDict();

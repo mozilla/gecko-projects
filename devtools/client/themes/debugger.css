@@ -10,17 +10,17 @@
 }
 
 #sources-pane > tabs {
-  -moz-border-end: 1px solid;
+  border-inline-end: 1px solid;
 }
 
 #sources-pane .devtools-toolbar {
   border: none; /* Remove the devtools-toolbar bottom border. */
-  -moz-border-end: 1px solid;
+  border-inline-end: 1px solid;
 }
 
 #sources-pane > tabs,
 #sources-pane .devtools-toolbar {
-  -moz-border-end-color: var(--theme-splitter-color);
+  border-inline-end-color: var(--theme-splitter-color);
 }
 
 /* Sources and breakpoints list */
@@ -48,7 +48,7 @@
 }
 
 .dbg-breakpoint-text {
-  -moz-padding-start: 6px;
+  padding-inline-start: 6px;
   font-style: italic;
   font-size: 90%;
 }
@@ -66,7 +66,7 @@
 
 .dbg-breakpoint.dbg-breakpoint-condition-thrown .dbg-breakpoint-condition-thrown-message {
   display: block;
-  -moz-padding-start: 0;
+  padding-inline-start: 0;
 }
 
 /* Sources toolbar */
@@ -76,52 +76,26 @@
   min-width: 32px;
 }
 
-#sources-toolbar .devtools-toolbarbutton:not([label]) {
-  -moz-image-region: rect(0,16px,16px,0);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #sources-toolbar .devtools-toolbarbutton:not([label]) {
-    -moz-image-region: rect(0,32px,32px,0);
-  }
-}
-
 #black-box {
-  list-style-image: url(images/debugger-blackbox.png);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #black-box {
-    list-style-image: url(images/debugger-blackbox@2x.png);
-  }
+  list-style-image: url(images/item-toggle.svg);
 }
 
 #pretty-print {
-  list-style-image: url(images/debugger-prettyprint.png);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #pretty-print {
-    list-style-image: url(images/debugger-prettyprint@2x.png);
-  }
+  list-style-image: url(images/tool-styleeditor.svg);
 }
 
 #toggle-breakpoints {
   list-style-image: url(images/debugger-toggleBreakpoints.svg);
-  -moz-image-region: rect(0,32px,16px,16px) !important;
+  -moz-image-region: rect(0,32px,16px,16px);
 }
 
 #toggle-breakpoints[checked] {
-  -moz-image-region: rect(0,16px,16px,0) !important;
+  -moz-image-region: rect(0,16px,16px,0);
 }
 
 #toggle-breakpoints[checked] > image {
   /* This button has a special checked image, don't make it blue */
   filter: none;
-}
-
-#toggle-promise-debugger {
-  /* TODO Bug 1186119: Add a toggle promise debugger image */
 }
 
 #sources .black-boxed {
@@ -141,17 +115,9 @@
 #black-boxed-message-button > .button-box > .button-icon {
   width: 16px;
   height: 16px;
-  background-image: url(images/debugger-blackbox.png);
+  background-image: url(images/item-toggle.svg);
   background-position: 0 0;
-  background-size: 32px 16px;
-  background-repeat: no-repeat;
-  -moz-margin-end: 5px;
-}
-
-@media (min-resolution: 1.1dppx) {
-  #black-boxed-message-button > .button-box > .button-icon {
-    background-image: url(images/debugger-blackbox@2x.png);
-  }
+  background-size: cover;
 }
 
 /* Black box message and source progress meter */
@@ -182,7 +148,7 @@
 /* Breadcrumbs stack frames view */
 
 .dbg-stackframe-details {
-  -moz-padding-start: 4px;
+  padding-inline-start: 4px;
 }
 
 /* Classic stack frames view */
@@ -243,7 +209,7 @@
 }
 
 .trace-name {
-  -moz-padding-start: 4px;
+  padding-inline-start: 4px;
 }
 
 /* Tracer dark theme */
@@ -257,11 +223,11 @@
 }
 
 .theme-dark .trace-item.selected-matching {
-  background-color: rgba(29,79,115,.4); /* Select highlight blue at 40% alpha */
+  background-color: rgba(86, 117, 185, .4); /* Select highlight blue at 40% alpha */
 }
 
 .theme-dark .selected > .trace-item {
-  background-color: rgba(29,79,115,.6); /* Select highlight blue at 60% alpha */
+  background-color: rgba(86, 117, 185, .6); /* Select highlight blue at 60% alpha */
 }
 
 .trace-call {
@@ -319,19 +285,10 @@
 }
 
 .dbg-expression-arrow {
-  background-image: url(images/commandline-icon.png);
-  background-position: -16px 0;
-  background-repeat: no-repeat;
-  background-size: 32px 16px;
+  background-image: var(--theme-command-line-image-focus);
   width: 16px;
   height: 16px;
   margin: 2px;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .dbg-expression-arrow {
-    background-image: url(images/commandline-icon@2x.png);
-  }
 }
 
 .dbg-expression-input {
@@ -384,25 +341,25 @@
 
 #searchbox {
   min-width: 220px;
-  -moz-margin-start: 1px;
+  margin-inline-start: 1px;
 }
 
 #filter-label {
-  -moz-margin-start: 2px;
+  margin-inline-start: 2px;
 }
 
 #searchbox-panel-operators {
   margin-top: 5px;
   margin-bottom: 8px;
-  -moz-margin-start: 2px;
+  margin-inline-start: 2px;
 }
 
 .searchbox-panel-operator-button {
   min-width: 26px;
   margin-top: 0;
   margin-bottom: 0;
-  -moz-margin-start: 2px;
-  -moz-margin-end: 6px;
+  margin-inline-start: 2px;
+  margin-inline-end: 6px;
   text-align: center;
 }
 
@@ -430,7 +387,7 @@
 }
 
 .results-panel-item-label-before {
-  -moz-padding-end: 6px;
+  padding-inline-end: 6px;
 }
 
 .theme-dark .results-panel-item-label {
@@ -462,7 +419,7 @@
 }
 
 .dbg-results-header {
-  -moz-padding-start: 6px;
+  padding-inline-start: 6px;
 }
 
 .dbg-results-header-location {
@@ -470,18 +427,18 @@
 }
 
 .dbg-results-header-match-count {
-  -moz-padding-start: 6px;
+  padding-inline-start: 6px;
 }
 
 .dbg-results-line-number {
   min-width: 3em;
-  -moz-border-end: 1px solid rgba(128,128,128,0.2);
-  -moz-padding-end: 4px;
+  border-inline-end: 1px solid rgba(128,128,128,0.2);
+  padding-inline-end: 4px;
   text-align: end;
 }
 
 .dbg-results-line-contents {
-  -moz-padding-start: 4px;
+  padding-inline-start: 4px;
 }
 
 .dbg-results-line-contents-string[match=true] {
@@ -519,7 +476,7 @@
 }
 
 .theme-dark .dbg-search-result:hover {
-  background-color: rgba(29,79,115,.2); /* Select highlight blue at 40% alpha */
+  background-color: rgba(86, 117, 185, .2); /* Select highlight blue at 40% alpha */
 }
 
 .theme-light .dbg-search-result:hover {
@@ -550,21 +507,11 @@
 /* Toolbar controls */
 
 #resume {
-  list-style-image: url(images/debugger-pause.png);
+  list-style-image: url(images/pause.svg);
 }
 
 #resume[checked] {
-  list-style-image: url(images/debugger-play.png);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #resume {
-    list-style-image: url(images/debugger-pause@2x.png);
-  }
-
-  #resume[checked] {
-    list-style-image: url(images/debugger-play@2x.png);
-  }
+  list-style-image: url(images/play.svg);
 }
 
 #resume[break-on-next] {
@@ -572,37 +519,23 @@
 }
 
 #step-over {
-  list-style-image: url(images/debugger-step-over.png);
+  list-style-image: url(images/debugger-step-over.svg);
 }
 
 #step-in {
-  list-style-image: url(images/debugger-step-in.png);
+  list-style-image: url(images/debugger-step-in.svg);
 }
 
 #step-out {
-  list-style-image: url(images/debugger-step-out.png);
-}
-
-@media (min-resolution: 1.1dppx) {
-  #step-over {
-    list-style-image: url(images/debugger-step-over@2x.png);
-  }
-
-  #step-in {
-    list-style-image: url(images/debugger-step-in@2x.png);
-  }
-
-  #step-out {
-    list-style-image: url(images/debugger-step-out@2x.png);
-  }
+  list-style-image: url(images/debugger-step-out.svg);
 }
 
 #instruments-pane-toggle {
-  list-style-image: url(images/pane-collapse.svg);
+  list-style-image: var(--theme-pane-collapse-image);
 }
 
-#instruments-pane-toggle[pane-collapsed] {
-  list-style-image: url(images/pane-expand.svg);
+#instruments-pane-toggle.pane-collapsed {
+  list-style-image: var(--theme-pane-expand-image);
 }
 
 /* Horizontal vs. vertical layout */
@@ -613,7 +546,7 @@
 }
 
 #body[layout=vertical] #sources-pane > tabs {
-  -moz-border-end: none;
+  border-inline-end: none;
 }
 
 #body[layout=vertical] #instruments-pane {
@@ -632,5 +565,5 @@
 
 #body[layout=vertical] .side-menu-widget-group,
 #body[layout=vertical] .side-menu-widget-item {
-  -moz-margin-end: 0;
+  margin-inline-end: 0;
 }

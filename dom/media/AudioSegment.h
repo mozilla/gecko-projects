@@ -17,6 +17,22 @@
 #include <float.h>
 
 namespace mozilla {
+  struct AudioChunk;
+  class AudioSegment;
+}
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioChunk)
+
+/**
+ * This allows compilation of nsTArray<AudioSegment> and
+ * AutoTArray<AudioSegment> since without it, static analysis fails on the
+ * mChunks member being a non-memmovable AutoTArray.
+ *
+ * Note that AudioSegment(const AudioSegment&) is deleted, so this should
+ * never come into effect.
+ */
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioSegment)
+
+namespace mozilla {
 
 template<typename T>
 class SharedChannelArrayBuffer : public ThreadSharedObject {
@@ -165,24 +181,33 @@ struct AudioChunk {
     if (aOther.mBuffer != mBuffer) {
       return false;
     }
-    if (mBuffer) {
-      NS_ASSERTION(aOther.mBufferFormat == mBufferFormat,
-                   "Wrong metadata about buffer");
-      NS_ASSERTION(aOther.mChannelData.Length() == mChannelData.Length(),
-                   "Mismatched channel count");
-      if (mDuration > INT32_MAX) {
+    if (!mBuffer) {
+      return true;
+    }
+    if (aOther.mVolume != mVolume) {
+      return false;
+    }
+    if (aOther.mPrincipalHandle != mPrincipalHandle) {
+      return false;
+    }
+    NS_ASSERTION(aOther.mBufferFormat == mBufferFormat,
+                 "Wrong metadata about buffer");
+    NS_ASSERTION(aOther.mChannelData.Length() == mChannelData.Length(),
+                 "Mismatched channel count");
+    if (mDuration > INT32_MAX) {
+      return false;
+    }
+    for (uint32_t channel = 0; channel < mChannelData.Length(); ++channel) {
+      if (aOther.mChannelData[channel] != AddAudioSampleOffset(mChannelData[channel],
+          mBufferFormat, int32_t(mDuration))) {
         return false;
-      }
-      for (uint32_t channel = 0; channel < mChannelData.Length(); ++channel) {
-        if (aOther.mChannelData[channel] != AddAudioSampleOffset(mChannelData[channel],
-            mBufferFormat, int32_t(mDuration))) {
-          return false;
-        }
       }
     }
     return true;
   }
-  bool IsNull() const { return mBuffer == nullptr; }
+  bool IsNull() const {
+    return mBuffer == nullptr;
+  }
   void SetNull(StreamTime aDuration)
   {
     mBuffer = nullptr;
@@ -190,6 +215,7 @@ struct AudioChunk {
     mDuration = aDuration;
     mVolume = 1.0f;
     mBufferFormat = AUDIO_FORMAT_SILENCE;
+    mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
   }
 
   size_t ChannelCount() const { return mChannelData.Length(); }
@@ -218,20 +244,40 @@ struct AudioChunk {
   }
 
   template<typename T>
-  const nsTArray<const T*>& ChannelData()
+  const nsTArray<const T*>& ChannelData() const
   {
     MOZ_ASSERT(AudioSampleTypeToFormat<T>::Format == mBufferFormat);
-    return *reinterpret_cast<nsTArray<const T*>*>(&mChannelData);
+    return *reinterpret_cast<const AutoTArray<const T*,GUESS_AUDIO_CHANNELS>*>
+      (&mChannelData);
   }
 
-  StreamTime mDuration; // in frames within the buffer
+  /**
+   * ChannelFloatsForWrite() should be used only when mBuffer is owned solely
+   * by the calling thread.
+   */
+  template<typename T>
+  T* ChannelDataForWrite(size_t aChannel)
+  {
+    MOZ_ASSERT(AudioSampleTypeToFormat<T>::Format == mBufferFormat);
+    MOZ_ASSERT(!mBuffer->IsShared());
+    return static_cast<T*>(const_cast<void*>(mChannelData[aChannel]));
+  }
+
+  const PrincipalHandle& GetPrincipalHandle() const { return mPrincipalHandle; }
+
+  StreamTime mDuration = 0; // in frames within the buffer
   RefPtr<ThreadSharedObject> mBuffer; // the buffer object whose lifetime is managed; null means data is all zeroes
-  nsTArray<const void*> mChannelData; // one pointer per channel; empty if and only if mBuffer is null
-  float mVolume; // volume multiplier to apply (1.0f if mBuffer is nonnull)
-  SampleFormat mBufferFormat; // format of frames in mBuffer (only meaningful if mBuffer is nonnull)
+  // one pointer per channel; empty if and only if mBuffer is null
+  AutoTArray<const void*,GUESS_AUDIO_CHANNELS> mChannelData;
+  float mVolume = 1.0f; // volume multiplier to apply
+  // format of frames in mBuffer (or silence if mBuffer is null)
+  SampleFormat mBufferFormat = AUDIO_FORMAT_SILENCE;
 #ifdef MOZILLA_INTERNAL_API
   mozilla::TimeStamp mTimeStamp;           // time at which this has been fetched from the MediaEngine
 #endif
+  // principalHandle for the data in this chunk.
+  // This can be compared to an nsIPrincipal* when back on main thread.
+  PrincipalHandle mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
 };
 
 /**
@@ -243,6 +289,15 @@ public:
   typedef mozilla::AudioSampleFormat SampleFormat;
 
   AudioSegment() : MediaSegmentBase<AudioSegment, AudioChunk>(AUDIO) {}
+
+  AudioSegment(AudioSegment&& aSegment)
+    : MediaSegmentBase<AudioSegment, AudioChunk>(std::move(aSegment))
+  {}
+
+  AudioSegment(const AudioSegment&)=delete;
+  AudioSegment& operator= (const AudioSegment&)=delete;
+
+  ~AudioSegment() {}
 
   // Resample the whole segment in place.
   template<typename T>
@@ -298,36 +353,42 @@ public:
   void ResampleChunks(SpeexResamplerState* aResampler,
                       uint32_t aInRate,
                       uint32_t aOutRate);
-
   void AppendFrames(already_AddRefed<ThreadSharedObject> aBuffer,
                     const nsTArray<const float*>& aChannelData,
-                    int32_t aDuration)
+                    int32_t aDuration, const PrincipalHandle& aPrincipalHandle)
   {
     AudioChunk* chunk = AppendChunk(aDuration);
     chunk->mBuffer = aBuffer;
+
+    MOZ_ASSERT(chunk->mBuffer || aChannelData.IsEmpty(), "Appending invalid data ?");
+
     for (uint32_t channel = 0; channel < aChannelData.Length(); ++channel) {
       chunk->mChannelData.AppendElement(aChannelData[channel]);
     }
-    chunk->mVolume = 1.0f;
     chunk->mBufferFormat = AUDIO_FORMAT_FLOAT32;
 #ifdef MOZILLA_INTERNAL_API
     chunk->mTimeStamp = TimeStamp::Now();
 #endif
+    chunk->mPrincipalHandle = aPrincipalHandle;
   }
   void AppendFrames(already_AddRefed<ThreadSharedObject> aBuffer,
                     const nsTArray<const int16_t*>& aChannelData,
-                    int32_t aDuration)
+                    int32_t aDuration, const PrincipalHandle& aPrincipalHandle)
   {
     AudioChunk* chunk = AppendChunk(aDuration);
     chunk->mBuffer = aBuffer;
+
+    MOZ_ASSERT(chunk->mBuffer || aChannelData.IsEmpty(), "Appending invalid data ?");
+
     for (uint32_t channel = 0; channel < aChannelData.Length(); ++channel) {
       chunk->mChannelData.AppendElement(aChannelData[channel]);
     }
-    chunk->mVolume = 1.0f;
     chunk->mBufferFormat = AUDIO_FORMAT_S16;
 #ifdef MOZILLA_INTERNAL_API
     chunk->mTimeStamp = TimeStamp::Now();
 #endif
+    chunk->mPrincipalHandle = aPrincipalHandle;
+
   }
   // Consumes aChunk, and returns a pointer to the persistent copy of aChunk
   // in the segment.
@@ -336,11 +397,15 @@ public:
     AudioChunk* chunk = AppendChunk(aChunk->mDuration);
     chunk->mBuffer = aChunk->mBuffer.forget();
     chunk->mChannelData.SwapElements(aChunk->mChannelData);
+
+    MOZ_ASSERT(chunk->mBuffer || aChunk->mChannelData.IsEmpty(), "Appending invalid data ?");
+
     chunk->mVolume = aChunk->mVolume;
     chunk->mBufferFormat = aChunk->mBufferFormat;
 #ifdef MOZILLA_INTERNAL_API
     chunk->mTimeStamp = TimeStamp::Now();
 #endif
+    chunk->mPrincipalHandle = aChunk->mPrincipalHandle;
     return chunk;
   }
   void ApplyVolume(float aVolume);
@@ -354,8 +419,9 @@ public:
   void Mix(AudioMixer& aMixer, uint32_t aChannelCount, uint32_t aSampleRate);
 
   int ChannelCount() {
-    NS_WARN_IF_FALSE(!mChunks.IsEmpty(),
-        "Cannot query channel count on a AudioSegment with no chunks.");
+    NS_WARNING_ASSERTION(
+      !mChunks.IsEmpty(),
+      "Cannot query channel count on a AudioSegment with no chunks.");
     // Find the first chunk that has non-zero channels. A chunk that hs zero
     // channels is just silence and we can simply discard it.
     for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
@@ -364,16 +430,6 @@ public:
       }
     }
     return 0;
-  }
-
-  bool IsNull() const {
-    for (ChunkIterator ci(*const_cast<AudioSegment*>(this)); !ci.IsEnded();
-         ci.Next()) {
-      if (!ci->IsNull()) {
-        return false;
-      }
-    }
-    return true;
   }
 
   static Type StaticType() { return AUDIO; }

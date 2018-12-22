@@ -9,35 +9,40 @@ var service;
 var reports;
 
 function onLoad() {
-  trace = document.getElementById('trace');
+  trace = document.getElementById("trace");
   service = new CheckerboardReportService();
   updateEnabled();
   reports = service.getReports();
-  for (var i = 0; i < reports.length; i++) {
+  for (let i = 0; i < reports.length; i++) {
     let text = "Severity " + reports[i].severity + " at " + new Date(reports[i].timestamp).toString();
-    let link = document.createElement('a');
-    link.href = 'javascript:showReport(' + i + ')';
+    let link = document.createElement("a");
+    link.href = "#";
+    link.addEventListener("click", function() { showReport(i); return false; });
     link.textContent = text;
-    let bullet = document.createElement('li');
+    let bullet = document.createElement("li");
     bullet.appendChild(link);
     document.getElementById(reports[i].reason).appendChild(bullet);
   }
 }
 
 function updateEnabled() {
-  let enabled = document.getElementById('enabled');
-  if (service.isRecordingEnabled()) {
-    enabled.textContent = 'enabled';
-    enabled.style.color = 'green';
+  let enabled = document.getElementById("enabled");
+  let isEnabled = service.isRecordingEnabled();
+  if (isEnabled) {
+    enabled.textContent = "enabled";
   } else {
-    enabled.textContent = 'disabled';
-    enabled.style.color = 'red';
+    enabled.textContent = "disabled";
   }
+  enabled.classList.toggle("enabled", isEnabled);
 }
 
 function toggleEnabled() {
   service.setRecordingEnabled(!service.isRecordingEnabled());
   updateEnabled();
+}
+
+function flushReports() {
+  service.flushActiveReports();
 }
 
 function showReport(index) {
@@ -51,7 +56,7 @@ const CANVAS_USE_RATIO = 0.75;
 const FRAME_INTERVAL_MS = 50;
 const VECTOR_NORMALIZED_MAGNITUDE = 30.0;
 
-var renderData = new Array();
+var renderData = [];
 var currentFrame = 0;
 var playing = false;
 var timerId = 0;
@@ -78,7 +83,7 @@ function getFlag(flag) {
 //   <junk> RENDERTRACE <timestamp> rect <color> <x> <y> <width> <height> [extraInfo]
 function loadData() {
     stopPlay();
-    renderData = new Array();
+    renderData = [];
     currentFrame = 0;
     minX = undefined;
     minY = undefined;
@@ -92,7 +97,7 @@ function loadData() {
         charPos += lastLineLength;
         lastLineLength = lines[i].length + 1;
         // skip lines without RENDERTRACE
-        if (! /RENDERTRACE/.test(lines[i])) {
+        if (!/RENDERTRACE/.test(lines[i])) {
             continue;
         }
 
@@ -110,7 +115,7 @@ function loadData() {
         if (destIndex == 0) {
             // create the initial frame
             renderData.push({
-                timestamp: timestamp,
+                timestamp,
                 rects: {},
             });
         } else if (renderData[destIndex - 1].timestamp == timestamp) {
@@ -138,7 +143,7 @@ function loadData() {
                 rect.height = parseFloat(tokens[j++]);
                 rect.dataText = trace.value.substring(charPos, charPos + lines[i].length);
 
-                if (!getFlag('excludePageFromZoom') || color != 'brown') {
+                if (!getFlag("excludePageFromZoom") || color != "brown") {
                     if (typeof minX == "undefined") {
                         minX = rect.x;
                         minY = rect.y;
@@ -159,7 +164,7 @@ function loadData() {
         }
     }
 
-    if (! renderFrame()) {
+    if (!renderFrame()) {
         alert("No data found; nothing to render!");
     }
 }
@@ -173,12 +178,12 @@ function renderFrame() {
         return false;
     }
 
-    var canvas = document.getElementById('canvas');
-    if (! canvas.getContext) {
+    var canvas = document.getElementById("canvas");
+    if (!canvas.getContext) {
         log("No canvas context");
     }
 
-    var context = canvas.getContext('2d');
+    var context = canvas.getContext("2d");
 
     // midpoint of the bounding box
     var midX = (minX + maxX) / 2.0;
@@ -209,19 +214,19 @@ function renderFrame() {
     }
 
     // clear canvas
-    context.fillStyle = 'white';
+    context.fillStyle = "white";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    var activeData = '';
+    var activeData = "";
     // draw rects
     for (var i in renderData[frame].rects) {
         drawRect(i, renderData[frame].rects[i]);
         activeData += "\n" + renderData[frame].rects[i].dataText;
     }
     // draw timestamp and frame counter
-    context.fillStyle = 'black';
+    context.fillStyle = "black";
     context.fillText((frame + 1) + "/" + renderData.length + ": " + renderData[frame].timestamp, 5, 15);
 
-    document.getElementById('active').textContent = activeData;
+    document.getElementById("active").textContent = activeData;
 
     return true;
 }
@@ -238,7 +243,7 @@ function step(backwards) {
         togglePlay();
     }
     currentFrame += (backwards ? -1 : 1);
-    if (! renderFrame()) {
+    if (!renderFrame()) {
         currentFrame -= (backwards ? -1 : 1);
     }
 }
@@ -254,7 +259,7 @@ function togglePlay() {
     } else {
         timerId = setInterval(function() {
             currentFrame++;
-            if (! renderFrame()) {
+            if (!renderFrame()) {
                 currentFrame--;
                 togglePlay();
             }
@@ -270,3 +275,23 @@ function stopPlay() {
     currentFrame = 0;
     renderFrame();
 }
+
+document.getElementById("pauseButton").addEventListener("click", togglePlay);
+document.getElementById("stopButton").addEventListener("click", stopPlay);
+document.getElementById("enableToggleButton").addEventListener("click", toggleEnabled);
+document.getElementById("flushReportsButton").addEventListener("click", flushReports);
+document.getElementById("excludePageFromZoom").addEventListener("click", loadData);
+document.getElementById("stepForwardButton").addEventListener("click", function() {
+  step(false);
+});
+document.getElementById("forwardButton").addEventListener("click", function() {
+  reset(false);
+});
+document.getElementById("rewindButton").addEventListener("click", function() {
+  reset(true);
+});
+document.getElementById("stepBackButton").addEventListener("click", function() {
+  step(true);
+});
+window.addEventListener("load", onLoad);
+

@@ -21,16 +21,20 @@ loadCallgraph(callgraph_filename);
 
 printErr("Writing " + gcFunctions_filename);
 redirect(gcFunctions_filename);
+
 for (var name in gcFunctions) {
-    print("");
-    print("GC Function: " + name + "$" + readableNames[name][0]);
-    do {
-        name = gcFunctions[name];
-        if (name in readableNames)
-            print("    " + readableNames[name][0]);
-        else
-            print("    " + name);
-    } while (name in gcFunctions);
+    for (let readable of readableNames[name]) {
+        print("");
+        print("GC Function: " + name + "$" + readable);
+        let current = name;
+        do {
+            current = gcFunctions[current];
+            if (current in readableNames)
+                print("    " + readableNames[current][0]);
+            else
+                print("    " + current);
+        } while (current in gcFunctions);
+    }
 }
 
 printErr("Writing " + gcFunctionsList_filename);
@@ -43,7 +47,7 @@ for (var name in gcFunctions) {
 // gcEdges is a list of edges that can GC for more specific reasons than just
 // calling a function that is in gcFunctions.txt.
 //
-// Right now, it is unused. It was meant for ~AutoCompartment when it might
+// Right now, it is unused. It was meant for ~AutoRealm when it might
 // wrap an exception, but anything held live across ~AC will have to be held
 // live across the corresponding constructor (and hence the whole scope of the
 // AC), and in that case it'll be held live across whatever could create an

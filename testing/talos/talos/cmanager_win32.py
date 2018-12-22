@@ -1,15 +1,18 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import absolute_import
 
-from cmanager import CounterManager
+import struct
+from ctypes import byref, create_string_buffer, memmove, Union, c_double, \
+    c_longlong
 from ctypes import windll
 from ctypes.wintypes import DWORD, HANDLE, LPSTR, LPCSTR, LPCWSTR, Structure, \
     pointer, LONG
-from ctypes import byref, create_string_buffer, memmove, Union, c_double, \
-    c_longlong
-import struct
+
+from cmanager_base import CounterManager
 from utils import TalosError
+
 pdh = windll.pdh
 
 _LONGLONG = c_longlong
@@ -22,6 +25,7 @@ class _PDH_COUNTER_PATH_ELEMENTS_A(Structure):
                 ("szParentInstance", LPSTR),
                 ("dwInstanceIndex", DWORD),
                 ("szCounterName", LPSTR)]
+
 
 _PDH_MORE_DATA = -2147481646  # the need more space error
 
@@ -38,13 +42,13 @@ def _getExpandedCounterPaths(processName, counterName):
         LPSTR(None),
         pointer(pcchPathListLength)
     ) != _PDH_MORE_DATA:
-        return None
+        return []
 
     pathListLength = pcchPathListLength.value
     szExpandedPathList = LPCSTR('\0' * pathListLength)
     if pdh.PdhExpandCounterPathA(szWildCardPath, szExpandedPathList,
                                  pointer(pcchPathListLength)) != 0:
-        return None
+        return []
     buffer = create_string_buffer(pcchPathListLength.value)
     memmove(buffer, szExpandedPathList, pcchPathListLength.value)
 
@@ -78,17 +82,16 @@ class _PDH_FMT_COUNTERVALUE(Structure):
     _fields_ = [('CStatus', DWORD),
                 ('union', _PDH_Counter_Union)]
 
+
 _PDH_FMT_LONG = 0x00000100
 
 
 class WinCounterManager(CounterManager):
 
     def __init__(self, process_name, process, counters,
-                 childProcess="firefox-webcontent",
-                 pluginProcess="plugin-container"):
+                 childProcess="plugin-container"):
         CounterManager.__init__(self)
         self.childProcess = childProcess
-        self.pluginProcess = pluginProcess
         self.registeredCounters = {}
         self.registerCounters(counters)
         # PDH might need to be "refreshed" if it has been queried while the
@@ -181,8 +184,6 @@ class WinCounterManager(CounterManager):
         pdh.PdhEnumObjectsA(None, None, 0, 1, 0, True)
 
         expandedPaths = _getExpandedCounterPaths(self.childProcess, counter)
-        expandedPaths.append(_getExpandedCounterPaths(self.pluginProcess,
-                                                      counter))
         if not expandedPaths:
             return
         for expandedPath in expandedPaths:
@@ -201,7 +202,7 @@ class WinCounterManager(CounterManager):
                         )
                     self.registeredCounters[counter][1].append((newhc,
                                                                 expandedPath))
-                except:
+                except Exception:
                     continue
 
         if oldCounterListLength != len(self.registeredCounters[counter][1]):

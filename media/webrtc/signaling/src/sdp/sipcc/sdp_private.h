@@ -240,6 +240,10 @@ extern sdp_result_e sdp_parse_attr_simple_flag (
 
 extern sdp_result_e sdp_parse_attr_complete_line (
     sdp_t *sdp_p, sdp_attr_t *attr_p, const char *ptr);
+extern sdp_result_e sdp_parse_attr_long_line(sdp_t *sdp_p,
+                                     sdp_attr_t *attr_p, const char *ptr);
+extern sdp_result_e sdp_build_attr_long_line(sdp_t *sdp_p,
+                                     sdp_attr_t *attr_p, flex_string *fs);
 
 /* sdp_attr_access.c */
 extern void sdp_free_attr(sdp_attr_t *attr_p);
@@ -343,8 +347,6 @@ extern uint32_t sdp_getnextnumtok(const char *str, const char **str_end,
 extern uint32_t sdp_getnextnumtok_or_null(const char *str, const char **str_end,
                                      const char *delim, tinybool *null_ind,
                                      sdp_result_e *result);
-extern tinybool sdp_getchoosetok(const char *str, const char **str_end,
-                                 const char *delim, sdp_result_e *result);
 
 extern
 tinybool verify_sdescriptions_mki(char *buf, char *mkiVal, uint16_t *mkiLen);

@@ -355,6 +355,9 @@ crmf_copy_poposigningkey(PLArenaPool *poolp,
     if (inPopoSignKey->derInput.data != NULL) {
         rv = SECITEM_CopyItem(poolp, &destPopoSignKey->derInput,
                               &inPopoSignKey->derInput);
+        if (rv != SECSuccess) {
+            goto loser;
+        }
     }
     destPopoSignKey->algorithmIdentifier = (poolp == NULL) ? PORT_ZNew(SECAlgorithmID)
                                                            : PORT_ArenaZNew(poolp, SECAlgorithmID);
@@ -493,9 +496,7 @@ crmf_copy_cert_req_msg(CRMFCertReqMsg *srcReqMsg)
     return newReqMsg;
 
 loser:
-    if (newReqMsg != NULL) {
-        CRMF_DestroyCertReqMsg(newReqMsg);
-    }
+    CRMF_DestroyCertReqMsg(newReqMsg);
     return NULL;
 }
 
@@ -865,9 +866,7 @@ CRMF_CertRequestGetControlAtIndex(CRMFCertRequest *inCertReq, int index)
     }
     return newControl;
 loser:
-    if (newControl != NULL) {
-        CRMF_DestroyControl(newControl);
-    }
+    CRMF_DestroyControl(newControl);
     return NULL;
 }
 

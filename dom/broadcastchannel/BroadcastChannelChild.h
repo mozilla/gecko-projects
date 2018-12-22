@@ -31,7 +31,7 @@ public:
     mBC = aBC;
   }
 
-  virtual bool RecvNotify(const ClonedMessageData& aData) override;
+  virtual mozilla::ipc::IPCResult RecvNotify(const ClonedMessageData& aData) override;
 
   bool IsActorDestroyed() const
   {
@@ -43,6 +43,8 @@ private:
   ~BroadcastChannelChild();
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+
+  void DispatchError(JSContext* aCx);
 
   // This raw pointer is actually the parent object.
   // It's set to null when the parent object is deleted.

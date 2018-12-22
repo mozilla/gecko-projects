@@ -7,31 +7,40 @@
 #ifndef OscillatorNode_h_
 #define OscillatorNode_h_
 
-#include "AudioNode.h"
+#include "AudioScheduledSourceNode.h"
 #include "AudioParam.h"
 #include "PeriodicWave.h"
 #include "mozilla/dom/OscillatorNodeBinding.h"
-#include "mozilla/Preferences.h"
 
 namespace mozilla {
 namespace dom {
 
 class AudioContext;
+struct OscillatorOptions;
 
-class OscillatorNode final : public AudioNode,
-                             public MainThreadMediaStreamListener
+class OscillatorNode final : public AudioScheduledSourceNode
+                           , public MainThreadMediaStreamListener
 {
 public:
-  explicit OscillatorNode(AudioContext* aContext);
+  static already_AddRefed<OscillatorNode>
+  Create(AudioContext& aAudioContext, const OscillatorOptions& aOptions,
+         ErrorResult& aRv);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(OscillatorNode, AudioNode)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(OscillatorNode, AudioScheduledSourceNode)
+
+  static already_AddRefed<OscillatorNode>
+  Constructor(const GlobalObject& aGlobal, AudioContext& aAudioContext,
+              const OscillatorOptions& aOptions, ErrorResult& aRv)
+  {
+    return Create(aAudioContext, aOptions, aRv);
+  }
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void DestroyMediaStream() override;
 
-  uint16_t NumberOfInputs() const final override
+  uint16_t NumberOfInputs() const final
   {
     return 0;
   }
@@ -61,8 +70,9 @@ public:
     return mDetune;
   }
 
-  void Start(double aWhen, ErrorResult& aRv);
-  void Stop(double aWhen, ErrorResult& aRv);
+  void Start(double aWhen, ErrorResult& aRv) override;
+  void Stop(double aWhen, ErrorResult& aRv) override;
+
   void SetPeriodicWave(PeriodicWave& aPeriodicWave)
   {
     mPeriodicWave = &aPeriodicWave;
@@ -70,8 +80,6 @@ public:
     mType = OscillatorType::Custom;
     SendTypeToStream();
   }
-
-  IMPL_EVENT_HANDLER(ended)
 
   void NotifyMainThreadStreamFinished() override;
 
@@ -83,14 +91,13 @@ public:
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
-protected:
-  virtual ~OscillatorNode();
-
 private:
+  explicit OscillatorNode(AudioContext* aContext);
+  ~OscillatorNode() = default;
+
   void SendTypeToStream();
   void SendPeriodicWaveToStream();
 
-private:
   OscillatorType mType;
   RefPtr<PeriodicWave> mPeriodicWave;
   RefPtr<AudioParam> mFrequency;
@@ -102,4 +109,3 @@ private:
 } // namespace mozilla
 
 #endif
-

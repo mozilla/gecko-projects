@@ -9,14 +9,10 @@
 #include "nsIIDNService.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
+#include "nsUnicodeScriptCodes.h"
 #include "nsWeakReference.h"
 
-#ifdef IDNA2008
 #include "unicode/uidna.h"
-#else
-#include "nsIUnicodeNormalizer.h"
-#include "nsIDNKitInterface.h"
-#endif
 
 #include "nsString.h"
 
@@ -147,9 +143,9 @@ private:
    * For the "Moderately restrictive" profile, Latin is also allowed
    *  with other scripts except Cyrillic and Greek
    */
-  bool illegalScriptCombo(int32_t script, int32_t& savedScript);
+  bool illegalScriptCombo(mozilla::unicode::Script script,
+                          int32_t& savedScript);
 
-#ifdef IDNA2008
   /**
    * Convert a DNS label from ASCII to Unicode using IDNA2008
    */
@@ -162,16 +158,25 @@ private:
                               stringPrepFlag flag);
 
   UIDNA* mIDNA;
-#else
-  idn_nameprep_t mNamePrepHandle;
-  nsCOMPtr<nsIUnicodeNormalizer> mNormalizer;
-#endif
-  nsXPIDLString mIDNBlacklist;
+
+  // We use this mutex to guard access to:
+  // |mIDNBlacklist|, |mShowPunycode|, |mRestrictionProfile|,
+  // |mIDNUseWhitelist|.
+  //
+  // These members can only be updated on the main thread and
+  // read on any thread. Therefore, acquiring the mutex is required
+  // only for threads other than the main thread.
+  mozilla::Mutex mLock;
+
+  // guarded by mLock
+  nsString mIDNBlacklist;
 
   /**
    * Flag set by the pref network.IDN_show_punycode. When it is true,
    * IDNs containing non-ASCII characters are always displayed to the
    * user in punycode
+   *
+   * guarded by mLock
    */
   bool mShowPunycode;
 
@@ -185,8 +190,11 @@ private:
     eHighlyRestrictiveProfile,
     eModeratelyRestrictiveProfile
   };
+  // guarded by mLock;
   restrictionProfile mRestrictionProfile;
+  // guarded by mLock;
   nsCOMPtr<nsIPrefBranch> mIDNWhitelistPrefBranch;
+  // guarded by mLock
   bool mIDNUseWhitelist;
 };
 

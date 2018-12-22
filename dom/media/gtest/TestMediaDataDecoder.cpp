@@ -7,8 +7,12 @@
 #include "Benchmark.h"
 #include "MockMediaResource.h"
 #include "DecoderTraits.h"
+#include "MediaContainerType.h"
 #include "MP4Demuxer.h"
+#include "WebMDecoder.h"
 #include "WebMDemuxer.h"
+#include "mozilla/AbstractThread.h"
+#include "nsMimeTypes.h"
 
 using namespace mozilla;
 
@@ -25,14 +29,13 @@ public:
 
     mBenchmark->Init();
     mBenchmark->Run()->Then(
+      // Non DocGroup-version of AbstractThread::MainThread() is fine for testing.
       AbstractThread::MainThread(), __func__,
       [&](uint32_t aDecodeFps) { result = aDecodeFps; done = true; },
       [&]() { done = true; });
 
     // Wait until benchmark completes.
-    while (!done) {
-      NS_ProcessNextEvent();
-    }
+    SpinEventLoopUntil([&]() { return done; });
     return result;
   }
 
@@ -42,12 +45,13 @@ private:
 
 TEST(MediaDataDecoder, H264)
 {
-  if (!DecoderTraits::IsMP4TypeAndEnabled(NS_LITERAL_CSTRING("video/mp4"))) {
+  if (!DecoderTraits::IsMP4SupportedType(
+         MediaContainerType(MEDIAMIMETYPE(VIDEO_MP4)),
+         /* DecoderDoctorDiagnostics* */ nullptr)) {
     EXPECT_TRUE(true);
   } else {
-    RefPtr<MediaResource> resource =
-      new MockMediaResource("gizmo.mp4", NS_LITERAL_CSTRING("video/mp4"));
-    nsresult rv = resource->Open(nullptr);
+    RefPtr<MockMediaResource> resource = new MockMediaResource("gizmo.mp4");
+    nsresult rv = resource->Open();
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
     BenchmarkRunner runner(new Benchmark(new MP4Demuxer(resource)));
@@ -57,12 +61,11 @@ TEST(MediaDataDecoder, H264)
 
 TEST(MediaDataDecoder, VP9)
 {
-  if (!DecoderTraits::IsWebMTypeAndEnabled(NS_LITERAL_CSTRING("video/webm"))) {
+  if (!WebMDecoder::IsSupportedType(MediaContainerType(MEDIAMIMETYPE(VIDEO_WEBM)))) {
     EXPECT_TRUE(true);
   } else {
-    RefPtr<MediaResource> resource =
-      new MockMediaResource("vp9cake.webm", NS_LITERAL_CSTRING("video/webm"));
-    nsresult rv = resource->Open(nullptr);
+    RefPtr<MockMediaResource> resource = new MockMediaResource("vp9cake.webm");
+    nsresult rv = resource->Open();
     EXPECT_TRUE(NS_SUCCEEDED(rv));
 
     BenchmarkRunner runner(new Benchmark(new WebMDemuxer(resource)));

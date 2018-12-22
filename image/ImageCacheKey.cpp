@@ -5,13 +5,14 @@
 
 #include "ImageCacheKey.h"
 
+#include "mozilla/HashFunctions.h"
 #include "mozilla/Move.h"
-#include "File.h"
-#include "ImageURL.h"
-#include "nsHostObjectProtocolHandler.h"
+#include "nsContentUtils.h"
+#include "nsLayoutUtils.h"
 #include "nsString.h"
-#include "mozilla/dom/workers/ServiceWorkerManager.h"
-#include "nsIDOMDocument.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
+#include "mozilla/dom/File.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
 #include "nsIDocument.h"
 #include "nsPrintfCString.h"
 
@@ -21,18 +22,8 @@ using namespace dom;
 
 namespace image {
 
-bool
-URISchemeIs(ImageURL* aURI, const char* aScheme)
-{
-  bool schemeMatches = false;
-  if (NS_WARN_IF(NS_FAILED(aURI->SchemeIs(aScheme, &schemeMatches)))) {
-    return false;
-  }
-  return schemeMatches;
-}
-
 static Maybe<uint64_t>
-BlobSerial(ImageURL* aURI)
+BlobSerial(nsIURI* aURI)
 {
   nsAutoCString spec;
   aURI->GetSpec(spec);
@@ -46,45 +37,58 @@ BlobSerial(ImageURL* aURI)
   return Nothing();
 }
 
-ImageCacheKey::ImageCacheKey(nsIURI* aURI, nsIDOMDocument* aDocument)
-  : mURI(new ImageURL(aURI))
-  , mControlledDocument(GetControlledDocumentToken(aDocument))
-  , mIsChrome(URISchemeIs(mURI, "chrome"))
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (URISchemeIs(mURI, "blob")) {
-    mBlobSerial = BlobSerial(mURI);
-  }
-
-  mHash = ComputeHash(mURI, mBlobSerial, mControlledDocument);
-}
-
-ImageCacheKey::ImageCacheKey(ImageURL* aURI, nsIDOMDocument* aDocument)
+ImageCacheKey::ImageCacheKey(nsIURI* aURI,
+                             const OriginAttributes& aAttrs,
+                             nsIDocument* aDocument,
+                             nsresult& aRv)
   : mURI(aURI)
-  , mControlledDocument(GetControlledDocumentToken(aDocument))
-  , mIsChrome(URISchemeIs(mURI, "chrome"))
+  , mOriginAttributes(aAttrs)
+  , mControlledDocument(GetSpecialCaseDocumentToken(aDocument, aURI))
+  , mHash(0)
+  , mIsChrome(false)
 {
-  MOZ_ASSERT(aURI);
-
-  if (URISchemeIs(mURI, "blob")) {
+  if (SchemeIs("blob")) {
     mBlobSerial = BlobSerial(mURI);
+  } else if (SchemeIs("chrome")) {
+    mIsChrome = true;
   }
 
-  mHash = ComputeHash(mURI, mBlobSerial, mControlledDocument);
+  // Since we frequently call Hash() several times in a row on the same
+  // ImageCacheKey, as an optimization we compute our hash once and store it.
+
+  nsPrintfCString ptr("%p", mControlledDocument);
+  nsAutoCString suffix;
+  mOriginAttributes.CreateSuffix(suffix);
+
+  if (mBlobSerial) {
+    aRv = mURI->GetRef(mBlobRef);
+    NS_ENSURE_SUCCESS_VOID(aRv);
+    mHash = HashGeneric(*mBlobSerial, HashString(mBlobRef));
+  } else {
+    nsAutoCString spec;
+    aRv = mURI->GetSpec(spec);
+    NS_ENSURE_SUCCESS_VOID(aRv);
+    mHash = HashString(spec);
+  }
+
+  mHash = AddToHash(mHash, HashString(suffix), HashString(ptr));
 }
 
 ImageCacheKey::ImageCacheKey(const ImageCacheKey& aOther)
   : mURI(aOther.mURI)
   , mBlobSerial(aOther.mBlobSerial)
+  , mBlobRef(aOther.mBlobRef)
+  , mOriginAttributes(aOther.mOriginAttributes)
   , mControlledDocument(aOther.mControlledDocument)
   , mHash(aOther.mHash)
   , mIsChrome(aOther.mIsChrome)
 { }
 
 ImageCacheKey::ImageCacheKey(ImageCacheKey&& aOther)
-  : mURI(Move(aOther.mURI))
-  , mBlobSerial(Move(aOther.mBlobSerial))
+  : mURI(std::move(aOther.mURI))
+  , mBlobSerial(std::move(aOther.mBlobSerial))
+  , mBlobRef(std::move(aOther.mBlobRef))
+  , mOriginAttributes(aOther.mOriginAttributes)
   , mControlledDocument(aOther.mControlledDocument)
   , mHash(aOther.mHash)
   , mIsChrome(aOther.mIsChrome)
@@ -97,65 +101,53 @@ ImageCacheKey::operator==(const ImageCacheKey& aOther) const
   if (mControlledDocument != aOther.mControlledDocument) {
     return false;
   }
+  // The origin attributes always have to match.
+  if (mOriginAttributes != aOther.mOriginAttributes) {
+    return false;
+  }
   if (mBlobSerial || aOther.mBlobSerial) {
     // If at least one of us has a blob serial, just compare the blob serial and
     // the ref portion of the URIs.
     return mBlobSerial == aOther.mBlobSerial &&
-           mURI->HasSameRef(*aOther.mURI);
+           mBlobRef == aOther.mBlobRef;
   }
 
   // For non-blob URIs, compare the URIs.
-  return *mURI == *aOther.mURI;
+  bool equals = false;
+  nsresult rv = mURI->Equals(aOther.mURI, &equals);
+  return NS_SUCCEEDED(rv) && equals;
 }
 
-const char*
-ImageCacheKey::Spec() const
+bool
+ImageCacheKey::SchemeIs(const char* aScheme)
 {
-  return mURI->Spec();
-}
-
-/* static */ uint32_t
-ImageCacheKey::ComputeHash(ImageURL* aURI,
-                           const Maybe<uint64_t>& aBlobSerial,
-                           void* aControlledDocument)
-{
-  // Since we frequently call Hash() several times in a row on the same
-  // ImageCacheKey, as an optimization we compute our hash once and store it.
-
-  nsPrintfCString ptr("%p", aControlledDocument);
-  if (aBlobSerial) {
-    // For blob URIs, we hash the serial number of the underlying blob, so that
-    // different blob URIs which point to the same blob share a cache entry. We
-    // also include the ref portion of the URI to support -moz-samplesize, which
-    // requires us to create different Image objects even if the source data is
-    // the same.
-    nsAutoCString ref;
-    aURI->GetRef(ref);
-    return HashGeneric(*aBlobSerial, HashString(ref + ptr));
-  }
-
-  // For non-blob URIs, we hash the URI spec.
-  nsAutoCString spec;
-  aURI->GetSpec(spec);
-  return HashString(spec + ptr);
+  bool matches = false;
+  return NS_SUCCEEDED(mURI->SchemeIs(aScheme, &matches)) && matches;
 }
 
 /* static */ void*
-ImageCacheKey::GetControlledDocumentToken(nsIDOMDocument* aDocument)
+ImageCacheKey::GetSpecialCaseDocumentToken(nsIDocument* aDocument, nsIURI* aURI)
 {
-  // For non-controlled documents, we just return null.  For controlled
-  // documents, we cast the pointer into a void* to avoid dereferencing
-  // it (since we only use it for comparisons), and return it.
+  // For controlled documents, we cast the pointer into a void* to avoid
+  // dereferencing it (since we only use it for comparisons).
   void* pointer = nullptr;
-  using dom::workers::ServiceWorkerManager;
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDocument);
-  if (doc && swm) {
+  if (aDocument && swm) {
     ErrorResult rv;
-    if (swm->IsControlled(doc, rv)) {
-      pointer = doc;
+    if (aDocument->GetController().isSome()) {
+      pointer = aDocument;
     }
   }
+
+  // If this document has been marked as tracker, let's use its address to make
+  // a unique cache key.
+  if (!pointer && aDocument &&
+      nsContentUtils::StorageDisabledByAntiTracking(nullptr,
+                                                    aDocument->GetChannel(),
+                                                    aURI)) {
+    pointer = aDocument;
+  }
+
   return pointer;
 }
 

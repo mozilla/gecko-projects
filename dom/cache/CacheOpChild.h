@@ -31,7 +31,7 @@ class CacheOpChild final : public PCacheOpChild
 private:
   // This class must be constructed by CacheChild or CacheStorageChild using
   // their ExecuteOp() factory method.
-  CacheOpChild(Feature* aFeature, nsIGlobalObject* aGlobal,
+  CacheOpChild(CacheWorkerHolder* aWorkerHolder, nsIGlobalObject* aGlobal,
                nsISupports* aParent, Promise* aPromise);
   ~CacheOpChild();
 
@@ -39,7 +39,7 @@ private:
   virtual void
   ActorDestroy(ActorDestroyReason aReason) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   Recv__delete__(const ErrorResult& aRv, const CacheOpResult& aResult) override;
 
   // ActorChild methods
@@ -55,8 +55,8 @@ private:
   AssertOwningThread() const override;
 #endif
 
-  virtual CachePushStreamChild*
-  CreatePushStream(nsIAsyncInputStream* aStream) override;
+  virtual mozilla::ipc::PBackgroundChild*
+  GetIPCManager() override;
 
   // Utility methods
   void

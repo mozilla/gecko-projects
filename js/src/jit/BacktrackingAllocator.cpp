@@ -6,9 +6,8 @@
 
 #include "jit/BacktrackingAllocator.h"
 
-#include "jsprf.h"
-
 #include "jit/BitSet.h"
+#include "js/Printf.h"
 
 using namespace js;
 using namespace js::jit;
@@ -71,11 +70,39 @@ InsertSortedList(InlineForwardList<T> &list, T* value)
 // LiveRange
 /////////////////////////////////////////////////////////////////////
 
+inline void
+LiveRange::noteAddedUse(UsePosition* use)
+{
+    LUse::Policy policy = use->usePolicy();
+    usesSpillWeight_ += BacktrackingAllocator::SpillWeightFromUsePolicy(policy);
+    if (policy == LUse::FIXED)
+        ++numFixedUses_;
+}
+
+inline void
+LiveRange::noteRemovedUse(UsePosition* use)
+{
+    LUse::Policy policy = use->usePolicy();
+    usesSpillWeight_ -= BacktrackingAllocator::SpillWeightFromUsePolicy(policy);
+    if (policy == LUse::FIXED)
+        --numFixedUses_;
+    MOZ_ASSERT_IF(!hasUses(), !usesSpillWeight_ && !numFixedUses_);
+}
+
 void
 LiveRange::addUse(UsePosition* use)
 {
     MOZ_ASSERT(covers(use->pos));
     InsertSortedList(uses_, use);
+    noteAddedUse(use);
+}
+
+UsePosition*
+LiveRange::popUse()
+{
+    UsePosition* ret = uses_.popFront();
+    noteRemovedUse(ret);
+    return ret;
 }
 
 void
@@ -89,6 +116,7 @@ LiveRange::distributeUses(LiveRange* other)
         UsePosition* use = *iter;
         if (other->covers(use->pos)) {
             uses_.removeAndIncrement(iter);
+            noteRemovedUse(use);
             other->addUse(use);
         } else {
             iter++;
@@ -242,19 +270,25 @@ LiveBundle::removeRange(LiveRange* range)
 /////////////////////////////////////////////////////////////////////
 
 bool
-VirtualRegister::addInitialRange(TempAllocator& alloc, CodePosition from, CodePosition to)
+VirtualRegister::addInitialRange(TempAllocator& alloc, CodePosition from, CodePosition to,
+                                 size_t* numRanges)
 {
     MOZ_ASSERT(from < to);
 
     // Mark [from,to) as a live range for this register during the initial
     // liveness analysis, coalescing with any existing overlapping ranges.
 
+    // On some pathological graphs there might be a huge number of different
+    // live ranges. Allow non-overlapping live range to be merged if the
+    // number of ranges exceeds the cap below.
+    static const size_t CoalesceLimit = 100000;
+
     LiveRange* prev = nullptr;
     LiveRange* merged = nullptr;
     for (LiveRange::RegisterLinkIterator iter(rangesBegin()); iter; ) {
         LiveRange* existing = LiveRange::get(*iter);
 
-        if (from > existing->to()) {
+        if (from > existing->to() && *numRanges < CoalesceLimit) {
             // The new range should go after this one.
             prev = existing;
             iter++;
@@ -304,6 +338,8 @@ VirtualRegister::addInitialRange(TempAllocator& alloc, CodePosition from, CodePo
             ranges_.insertAfter(&prev->registerLink, &range->registerLink);
         else
             ranges_.pushFront(&range->registerLink);
+
+        (*numRanges)++;
     }
 
     return true;
@@ -378,7 +414,6 @@ BacktrackingAllocator::init()
     size_t numVregs = graph.numVirtualRegisters();
     if (!vregs.init(mir->alloc(), numVregs))
         return false;
-    memset(&vregs[0], 0, sizeof(VirtualRegister) * numVregs);
     for (uint32_t i = 0; i < numVregs; i++)
         new(&vregs[i]) VirtualRegister();
 
@@ -389,6 +424,9 @@ BacktrackingAllocator::init()
 
         LBlock* block = graph.getBlock(i);
         for (LInstructionIterator ins = block->begin(); ins != block->end(); ins++) {
+            if (mir->shouldCancel("Create data structures (inner loop 1)"))
+                return false;
+
             for (size_t j = 0; j < ins->numDefs(); j++) {
                 LDefinition* def = ins->getDef(j);
                 if (def->isBogusTemp())
@@ -416,7 +454,7 @@ BacktrackingAllocator::init()
         registers[reg.code()].allocatable = true;
     }
     while (!remainingRegisters.emptyFloat()) {
-        AnyRegister reg = AnyRegister(remainingRegisters.takeAnyFloat());
+        AnyRegister reg = AnyRegister(remainingRegisters.takeAnyFloat<RegTypeName::Any>());
         registers[reg.code()].allocatable = true;
     }
 
@@ -516,6 +554,8 @@ BacktrackingAllocator::buildLivenessInfo()
     if (!loopDone.init(alloc()))
         return false;
 
+    size_t numRanges = 0;
+
     for (size_t i = graph.numBlocks(); i > 0; i--) {
         if (mir->shouldCancel("Build Liveness Info (main loop)"))
             return false;
@@ -551,7 +591,8 @@ BacktrackingAllocator::buildLivenessInfo()
         // Registers are assumed alive for the entire block, a define shortens
         // the range to the point of definition.
         for (BitSet::Iterator liveRegId(live); liveRegId; ++liveRegId) {
-            if (!vregs[*liveRegId].addInitialRange(alloc(), entryOf(block), exitOf(block).next()))
+            if (!vregs[*liveRegId].addInitialRange(alloc(), entryOf(block), exitOf(block).next(),
+                                                   &numRanges))
                 return false;
         }
 
@@ -560,7 +601,7 @@ BacktrackingAllocator::buildLivenessInfo()
         for (LInstructionReverseIterator ins = block->rbegin(); ins != block->rend(); ins++) {
             // Calls may clobber registers, so force a spill and reload around the callsite.
             if (ins->isCall()) {
-                for (AnyRegisterIterator iter(allRegisters_.asLiveSet()); iter.more(); iter++) {
+                for (AnyRegisterIterator iter(allRegisters_.asLiveSet()); iter.more(); ++iter) {
                     bool found = false;
                     for (size_t i = 0; i < ins->numDefs(); i++) {
                         if (ins->getDef(i)->isFixed() &&
@@ -569,13 +610,17 @@ BacktrackingAllocator::buildLivenessInfo()
                             break;
                         }
                     }
-                    if (!found) {
+                    // If this register doesn't have an explicit def above, mark
+                    // it as clobbered by the call unless it is actually
+                    // call-preserved.
+                    if (!found && !ins->isCallPreserved(*iter)) {
                         if (!addInitialFixedRange(*iter, outputOf(*ins), outputOf(*ins).next()))
                             return false;
                     }
                 }
 
-                CallRange* callRange = new(alloc()) CallRange(outputOf(*ins), outputOf(*ins).next());
+                CallRange* callRange =
+                    new(alloc().fallible()) CallRange(outputOf(*ins), outputOf(*ins).next());
                 if (!callRange)
                     return false;
 
@@ -583,18 +628,12 @@ BacktrackingAllocator::buildLivenessInfo()
                 if (!callRanges.insert(callRange))
                     return false;
             }
-            DebugOnly<bool> hasDoubleDef = false;
-            DebugOnly<bool> hasFloat32Def = false;
+
             for (size_t i = 0; i < ins->numDefs(); i++) {
                 LDefinition* def = ins->getDef(i);
                 if (def->isBogusTemp())
                     continue;
-#ifdef DEBUG
-                if (def->type() == LDefinition::DOUBLE)
-                    hasDoubleDef = true;
-                if (def->type() == LDefinition::FLOAT32)
-                    hasFloat32Def = true;
-#endif
+
                 CodePosition from = outputOf(*ins);
 
                 if (def->policy() == LDefinition::MUST_REUSE_INPUT) {
@@ -609,7 +648,7 @@ BacktrackingAllocator::buildLivenessInfo()
                     *inputUse = LUse(inputUse->virtualRegister(), LUse::ANY, /* usedAtStart = */ true);
                 }
 
-                if (!vreg(def).addInitialRange(alloc(), from, from.next()))
+                if (!vreg(def).addInitialRange(alloc(), from, from.next(), &numRanges))
                     return false;
                 vreg(def).setInitialDefinition(from);
                 live.remove(def->virtualRegister());
@@ -639,10 +678,9 @@ BacktrackingAllocator::buildLivenessInfo()
                     }
                 }
 
-                CodePosition to =
-                    ins->isCall() ? outputOf(*ins) : outputOf(*ins).next();
+                CodePosition to = ins->isCall() ? outputOf(*ins) : outputOf(*ins).next();
 
-                if (!vreg(temp).addInitialRange(alloc(), from, to))
+                if (!vreg(temp).addInitialRange(alloc(), from, to, &numRanges))
                     return false;
                 vreg(temp).setInitialDefinition(from);
             }
@@ -654,17 +692,21 @@ BacktrackingAllocator::buildLivenessInfo()
                 if (inputAlloc->isUse()) {
                     LUse* use = inputAlloc->toUse();
 
-                    // Call uses should always be at-start or fixed, since
-                    // calls use all registers.
+                    // Call uses should always be at-start, since calls use all
+                    // registers.
                     MOZ_ASSERT_IF(ins->isCall() && !inputAlloc.isSnapshotInput(),
-                                  use->isFixedRegister() || use->usedAtStart());
+                                  use->usedAtStart());
 
 #ifdef DEBUG
                     // Don't allow at-start call uses if there are temps of the same kind,
-                    // so that we don't assign the same register.
+                    // so that we don't assign the same register. Only allow this when the
+                    // use and temp are fixed registers, as they can't alias.
                     if (ins->isCall() && use->usedAtStart()) {
-                        for (size_t i = 0; i < ins->numTemps(); i++)
-                            MOZ_ASSERT(vreg(ins->getTemp(i)).type() != vreg(use).type());
+                        for (size_t i = 0; i < ins->numTemps(); i++) {
+                            MOZ_ASSERT_IF(!ins->getTemp(i)->isBogusTemp(),
+                                          vreg(ins->getTemp(i)).type() != vreg(use).type() ||
+                                          (use->isFixedRegister() && ins->getTemp(i)->isFixed()));
+                        }
                     }
 
                     // If there are both useRegisterAtStart(x) and useRegister(y)
@@ -685,12 +727,7 @@ BacktrackingAllocator::buildLivenessInfo()
                     if (use->policy() == LUse::RECOVERED_INPUT)
                         continue;
 
-                    // Fixed uses on calls are specially overridden to happen
-                    // at the input position.
-                    CodePosition to =
-                        (use->usedAtStart() || (ins->isCall() && use->isFixedRegister()))
-                        ? inputOf(*ins)
-                        : outputOf(*ins);
+                    CodePosition to = use->usedAtStart() ? inputOf(*ins) : outputOf(*ins);
                     if (use->isFixedRegister()) {
                         LAllocation reg(AnyRegister::FromCode(use->registerCode()));
                         for (size_t i = 0; i < ins->numDefs(); i++) {
@@ -700,9 +737,9 @@ BacktrackingAllocator::buildLivenessInfo()
                         }
                     }
 
-                    if (!vreg(use).addInitialRange(alloc(), entryOf(block), to.next()))
+                    if (!vreg(use).addInitialRange(alloc(), entryOf(block), to.next(), &numRanges))
                         return false;
-                    UsePosition* usePosition = new(alloc()) UsePosition(use, to);
+                    UsePosition* usePosition = new(alloc().fallible()) UsePosition(use, to);
                     if (!usePosition)
                         return false;
                     vreg(use).addInitialUse(usePosition);
@@ -722,7 +759,7 @@ BacktrackingAllocator::buildLivenessInfo()
                 // This is a dead phi, so add a dummy range over all phis. This
                 // can go away if we have an earlier dead code elimination pass.
                 CodePosition entryPos = entryOf(block);
-                if (!vreg(def).addInitialRange(alloc(), entryPos, entryPos.next()))
+                if (!vreg(def).addInitialRange(alloc(), entryPos, entryPos.next(), &numRanges))
                     return false;
             }
         }
@@ -743,7 +780,7 @@ BacktrackingAllocator::buildLivenessInfo()
                 CodePosition to = exitOf(loopBlock->lir()).next();
 
                 for (BitSet::Iterator liveRegId(live); liveRegId; ++liveRegId) {
-                    if (!vregs[*liveRegId].addInitialRange(alloc(), from, to))
+                    if (!vregs[*liveRegId].addInitialRange(alloc(), from, to, &numRanges))
                         return false;
                 }
 
@@ -829,10 +866,14 @@ BacktrackingAllocator::go()
             return false;
 
         QueueItem item = allocationQueue.removeHighest();
-        if (!processBundle(item.bundle))
+        if (!processBundle(mir, item.bundle))
             return false;
     }
+
     JitSpew(JitSpew_RegAlloc, "Main allocation loop complete");
+
+    if (!tryAllocatingRegistersForSpillBundles())
+        return false;
 
     if (!pickStackSlots())
         return false;
@@ -931,21 +972,45 @@ BacktrackingAllocator::tryMergeBundles(LiveBundle* bundle0, LiveBundle* bundle1)
 }
 
 static inline LDefinition*
-FindReusingDefinition(LNode* ins, LAllocation* alloc)
+FindReusingDefOrTemp(LNode* node, LAllocation* alloc)
 {
+    if (node->isPhi()) {
+        MOZ_ASSERT(node->toPhi()->numDefs() == 1);
+        MOZ_ASSERT(node->toPhi()->getDef(0)->policy() != LDefinition::MUST_REUSE_INPUT);
+        return nullptr;
+    }
+
+    LInstruction* ins = node->toInstruction();
+
     for (size_t i = 0; i < ins->numDefs(); i++) {
         LDefinition* def = ins->getDef(i);
         if (def->policy() == LDefinition::MUST_REUSE_INPUT &&
             ins->getOperand(def->getReusedInput()) == alloc)
+        {
             return def;
+        }
     }
     for (size_t i = 0; i < ins->numTemps(); i++) {
         LDefinition* def = ins->getTemp(i);
         if (def->policy() == LDefinition::MUST_REUSE_INPUT &&
             ins->getOperand(def->getReusedInput()) == alloc)
+        {
             return def;
+        }
     }
     return nullptr;
+}
+
+static inline size_t
+NumReusingDefs(LInstruction* ins)
+{
+    size_t num = 0;
+    for (size_t i = 0; i < ins->numDefs(); i++) {
+        LDefinition* def = ins->getDef(i);
+        if (def->policy() == LDefinition::MUST_REUSE_INPUT)
+            num++;
+    }
+    return num;
 }
 
 bool
@@ -1008,7 +1073,7 @@ BacktrackingAllocator::tryMergeReusedRegister(VirtualRegister& def, VirtualRegis
             continue;
 
         LUse* use = iter->use();
-        if (FindReusingDefinition(insData[iter->pos], use)) {
+        if (FindReusingDefOrTemp(insData[iter->pos], use)) {
             def.setMustCopyInput();
             return true;
         }
@@ -1084,9 +1149,9 @@ BacktrackingAllocator::mergeAndQueueRegisters()
             if (iter->isParameter()) {
                 for (size_t i = 0; i < iter->numDefs(); i++) {
                     DebugOnly<bool> found = false;
-                    VirtualRegister &paramVreg = vreg(iter->getDef(i));
+                    VirtualRegister& paramVreg = vreg(iter->getDef(i));
                     for (; original < paramVreg.vreg(); original++) {
-                        VirtualRegister &originalVreg = vregs[original];
+                        VirtualRegister& originalVreg = vregs[original];
                         if (*originalVreg.def()->output() == *iter->getDef(i)->output()) {
                             MOZ_ASSERT(originalVreg.ins()->isParameter());
                             if (!tryMergeBundles(originalVreg.firstBundle(), paramVreg.firstBundle()))
@@ -1108,7 +1173,8 @@ BacktrackingAllocator::mergeAndQueueRegisters()
             continue;
 
         if (reg.def()->policy() == LDefinition::MUST_REUSE_INPUT) {
-            LUse* use = reg.ins()->getOperand(reg.def()->getReusedInput())->toUse();
+            LUse* use =
+                reg.ins()->toInstruction()->getOperand(reg.def()->getReusedInput())->toUse();
             if (!tryMergeReusedRegister(reg, vreg(use)))
                 return false;
         }
@@ -1119,7 +1185,7 @@ BacktrackingAllocator::mergeAndQueueRegisters()
         LBlock* block = graph.getBlock(i);
         for (size_t j = 0; j < block->numPhis(); j++) {
             LPhi* phi = block->getPhi(j);
-            VirtualRegister &outputVreg = vreg(phi->getDef(0));
+            VirtualRegister& outputVreg = vreg(phi->getDef(0));
             for (size_t k = 0, kend = phi->numOperands(); k < kend; k++) {
                 VirtualRegister& inputVreg = vreg(phi->getOperand(k)->toUse());
                 if (!tryMergeBundles(inputVreg.firstBundle(), outputVreg.firstBundle()))
@@ -1193,7 +1259,8 @@ BacktrackingAllocator::tryAllocateNonFixed(LiveBundle* bundle,
 
     // Spill bundles which have no hint or register requirement.
     if (requirement.kind() == Requirement::NONE && hint.kind() != Requirement::REGISTER) {
-        if (!spill(bundle))
+        JitSpew(JitSpew_RegAlloc, "  postponed spill (no hint or register requirement)");
+        if (!spilledBundles.append(bundle))
             return false;
         *success = true;
         return true;
@@ -1213,7 +1280,8 @@ BacktrackingAllocator::tryAllocateNonFixed(LiveBundle* bundle,
     // Spill bundles which have no register requirement if they didn't get
     // allocated.
     if (requirement.kind() == Requirement::NONE) {
-        if (!spill(bundle))
+        JitSpew(JitSpew_RegAlloc, "  postponed spill (no register requirement)");
+        if (!spilledBundles.append(bundle))
             return false;
         *success = true;
         return true;
@@ -1225,10 +1293,10 @@ BacktrackingAllocator::tryAllocateNonFixed(LiveBundle* bundle,
 }
 
 bool
-BacktrackingAllocator::processBundle(LiveBundle* bundle)
+BacktrackingAllocator::processBundle(MIRGenerator* mir, LiveBundle* bundle)
 {
     if (JitSpewEnabled(JitSpew_RegAlloc)) {
-        JitSpew(JitSpew_RegAlloc, "Allocating %s [priority %lu] [weight %lu]",
+        JitSpew(JitSpew_RegAlloc, "Allocating %s [priority %zu] [weight %zu]",
                 bundle->toString().get(), computePriority(bundle), computeSpillWeight(bundle));
     }
 
@@ -1260,6 +1328,9 @@ BacktrackingAllocator::processBundle(LiveBundle* bundle)
     bool fixed;
     LiveBundleVector conflicting;
     for (size_t attempt = 0;; attempt++) {
+        if (mir->shouldCancel("Backtracking Allocation (processBundle loop)"))
+            return false;
+
         if (canAllocate) {
             bool success = false;
             fixed = false;
@@ -1280,7 +1351,7 @@ BacktrackingAllocator::processBundle(LiveBundle* bundle)
 
             // If that didn't work, but we have one or more non-fixed bundles
             // known to be conflicting, maybe we can evict them and try again.
-            if (attempt < MAX_ATTEMPTS &&
+            if ((attempt < MAX_ATTEMPTS || minimalBundle(bundle)) &&
                 !fixed &&
                 !conflicting.empty() &&
                 maximumSpillWeight(conflicting) < computeSpillWeight(bundle))
@@ -1314,7 +1385,7 @@ BacktrackingAllocator::computeRequirement(LiveBundle* bundle,
 
     for (LiveRange::BundleLinkIterator iter = bundle->rangesBegin(); iter; iter++) {
         LiveRange* range = LiveRange::get(*iter);
-        VirtualRegister &reg = vregs[range->vreg()];
+        VirtualRegister& reg = vregs[range->vreg()];
 
         if (range->hasDefinition()) {
             // Deal with any definition constraints/hints.
@@ -1354,7 +1425,8 @@ BacktrackingAllocator::computeRequirement(LiveBundle* bundle,
                     return false;
             } else if (policy == LUse::ANY) {
                 // ANY differs from KEEPALIVE by actively preferring a register.
-                hint->merge(Requirement(Requirement::REGISTER));
+                if (!hint->merge(Requirement(Requirement::REGISTER)))
+                    return false;
             }
         }
     }
@@ -1375,7 +1447,7 @@ BacktrackingAllocator::tryAllocateRegister(PhysicalRegister& r, LiveBundle* bund
 
     for (LiveRange::BundleLinkIterator iter = bundle->rangesBegin(); iter; iter++) {
         LiveRange* range = LiveRange::get(*iter);
-        VirtualRegister &reg = vregs[range->vreg()];
+        VirtualRegister& reg = vregs[range->vreg()];
 
         if (!reg.isCompatible(r.reg))
             return true;
@@ -1416,13 +1488,13 @@ BacktrackingAllocator::tryAllocateRegister(PhysicalRegister& r, LiveBundle* bund
         if (JitSpewEnabled(JitSpew_RegAlloc)) {
             if (aliasedConflicting.length() == 1) {
                 LiveBundle* existing = aliasedConflicting[0];
-                JitSpew(JitSpew_RegAlloc, "  %s collides with %s [weight %lu]",
+                JitSpew(JitSpew_RegAlloc, "  %s collides with %s [weight %zu]",
                         r.reg.name(), existing->toString().get(), computeSpillWeight(existing));
             } else {
                 JitSpew(JitSpew_RegAlloc, "  %s collides with the following", r.reg.name());
                 for (size_t i = 0; i < aliasedConflicting.length(); i++) {
                     LiveBundle* existing = aliasedConflicting[i];
-                    JitSpew(JitSpew_RegAlloc, "      %s [weight %lu]",
+                    JitSpew(JitSpew_RegAlloc, "      %s [weight %zu]",
                             existing->toString().get(), computeSpillWeight(existing));
                 }
             }
@@ -1446,6 +1518,8 @@ BacktrackingAllocator::tryAllocateRegister(PhysicalRegister& r, LiveBundle* bund
 
     for (LiveRange::BundleLinkIterator iter = bundle->rangesBegin(); iter; iter++) {
         LiveRange* range = LiveRange::get(*iter);
+        if (!alloc().ensureBallast())
+            return false;
         if (!r.allocations.insert(range))
             return false;
     }
@@ -1459,7 +1533,7 @@ bool
 BacktrackingAllocator::evictBundle(LiveBundle* bundle)
 {
     if (JitSpewEnabled(JitSpew_RegAlloc)) {
-        JitSpew(JitSpew_RegAlloc, "  Evicting %s [priority %lu] [weight %lu]",
+        JitSpew(JitSpew_RegAlloc, "  Evicting %s [priority %zu] [weight %zu]",
                 bundle->toString().get(), computePriority(bundle), computeSpillWeight(bundle));
     }
 
@@ -1535,6 +1609,38 @@ BacktrackingAllocator::spill(LiveBundle* bundle)
     }
 
     return bundle->spillSet()->addSpilledBundle(bundle);
+}
+
+bool
+BacktrackingAllocator::tryAllocatingRegistersForSpillBundles()
+{
+    for (auto it = spilledBundles.begin(); it != spilledBundles.end(); it++) {
+        LiveBundle* bundle = *it;
+        LiveBundleVector conflicting;
+        bool fixed = false;
+        bool success = false;
+
+        if (mir->shouldCancel("Backtracking Try Allocating Spilled Bundles"))
+            return false;
+
+        if (JitSpewEnabled(JitSpew_RegAlloc))
+            JitSpew(JitSpew_RegAlloc, "Spill or allocate %s", bundle->toString().get());
+
+        // Search for any available register which the bundle can be
+        // allocated to.
+        for (size_t i = 0; i < AnyRegister::Total; i++) {
+            if (!tryAllocateRegister(registers[i], bundle, &success, &fixed, conflicting))
+                return false;
+            if (success)
+                break;
+        }
+
+        // If the bundle still has no register, spill the bundle.
+        if (!success && !spill(bundle))
+            return false;
+    }
+
+    return true;
 }
 
 bool
@@ -1650,7 +1756,7 @@ BacktrackingAllocator::pickStackSlot(SpillSet* spillSet)
     // We need a new physical stack slot.
     uint32_t stackSlot = stackSlotAllocator.allocateSlot(type);
 
-    SpillSlot* spillSlot = new(alloc()) SpillSlot(stackSlot, alloc().lifoAlloc());
+    SpillSlot* spillSlot = new(alloc().fallible()) SpillSlot(stackSlot, alloc().lifoAlloc());
     if (!spillSlot)
         return false;
 
@@ -1671,6 +1777,8 @@ BacktrackingAllocator::insertAllRanges(LiveRangeSet& set, LiveBundle* bundle)
 {
     for (LiveRange::BundleLinkIterator iter = bundle->rangesBegin(); iter; iter++) {
         LiveRange* range = LiveRange::get(*iter);
+        if (!alloc().ensureBallast())
+            return false;
         if (!set.insert(range))
             return false;
     }
@@ -1723,14 +1831,14 @@ BacktrackingAllocator::resolveControlFlow()
     for (size_t i = 1; i < graph.numVirtualRegisters(); i++) {
         VirtualRegister& reg = vregs[i];
 
-        if (mir->shouldCancel("Backtracking Resolve Control Flow (vreg loop)"))
-            return false;
-
-        if (!alloc().ensureBallast())
+        if (mir->shouldCancel("Backtracking Resolve Control Flow (vreg outer loop)"))
             return false;
 
         for (LiveRange::RegisterLinkIterator iter = reg.rangesBegin(); iter; ) {
             LiveRange* range = LiveRange::get(*iter);
+
+            if (mir->shouldCancel("Backtracking Resolve Control Flow (vreg inner loop)"))
+                return false;
 
             // Remove ranges which will never be used.
             if (deadRange(range)) {
@@ -1775,6 +1883,9 @@ BacktrackingAllocator::resolveControlFlow()
                 continue;
             }
 
+            if (!alloc().ensureBallast())
+                return false;
+
             LiveRange* predecessorRange = reg.rangeFor(start.previous(), /* preferRegister = */ true);
             if (start.subpos() == CodePosition::INPUT) {
                 if (!moveInput(ins->toInstruction(), predecessorRange, range, reg.type()))
@@ -1816,6 +1927,8 @@ BacktrackingAllocator::resolveControlFlow()
                 LiveRange* from = vreg(input).rangeFor(exitOf(predecessor), /* preferRegister = */ true);
                 MOZ_ASSERT(from);
 
+                if (!alloc().ensureBallast())
+                    return false;
                 if (!moveAtExit(predecessor, from, to, def->type()))
                     return false;
             }
@@ -1846,6 +1959,8 @@ BacktrackingAllocator::resolveControlFlow()
                     if (targetRange->covers(exitOf(predecessor)))
                         continue;
 
+                    if (!alloc().ensureBallast())
+                        return false;
                     LiveRange* from = reg.rangeFor(exitOf(predecessor), true);
                     if (successor->mir()->numPredecessors() > 1) {
                         MOZ_ASSERT(predecessor->mir()->numSuccessors() == 1);
@@ -1866,7 +1981,7 @@ BacktrackingAllocator::resolveControlFlow()
 bool
 BacktrackingAllocator::isReusedInput(LUse* use, LNode* ins, bool considerCopy)
 {
-    if (LDefinition* def = FindReusingDefinition(ins, use))
+    if (LDefinition* def = FindReusingDefOrTemp(ins, use))
         return considerCopy || !vregs[def->virtualRegister()].mustCopyInput();
     return false;
 }
@@ -1937,7 +2052,7 @@ BacktrackingAllocator::reifyAllocations()
                 // For any uses which feed into MUST_REUSE_INPUT definitions,
                 // add copies if the use and def have different allocations.
                 LNode* ins = insData[iter->pos];
-                if (LDefinition* def = FindReusingDefinition(ins, alloc)) {
+                if (LDefinition* def = FindReusingDefOrTemp(ins, alloc)) {
                     LiveRange* outputRange = vreg(def).rangeFor(outputOf(ins));
                     LAllocation res = outputRange->bundle()->allocation();
                     LAllocation sourceAlloc = range->bundle()->allocation();
@@ -1945,9 +2060,15 @@ BacktrackingAllocator::reifyAllocations()
                     if (res != *alloc) {
                         if (!this->alloc().ensureBallast())
                             return false;
-                        LMoveGroup* group = getInputMoveGroup(ins->toInstruction());
-                        if (!group->addAfter(sourceAlloc, res, reg.type()))
-                            return false;
+                        if (NumReusingDefs(ins->toInstruction()) <= 1) {
+                            LMoveGroup* group = getInputMoveGroup(ins->toInstruction());
+                            if (!group->addAfter(sourceAlloc, res, reg.type()))
+                                return false;
+                        } else {
+                            LMoveGroup* group = getFixReuseMoveGroup(ins->toInstruction());
+                            if (!group->add(sourceAlloc, res, reg.type()))
+                                return false;
+                        }
                         *alloc = res;
                     }
                 }
@@ -2236,21 +2357,21 @@ LiveRange::toString() const
 {
     AutoEnterOOMUnsafeRegion oomUnsafe;
 
-    char* buf = JS_smprintf("v%u [%u,%u)", hasVreg() ? vreg() : 0, from().bits(), to().bits());
+    UniqueChars buf = JS_smprintf("v%u [%u,%u)", hasVreg() ? vreg() : 0, from().bits(), to().bits());
 
     if (buf && bundle() && !bundle()->allocation().isBogus())
-        buf = JS_sprintf_append(buf, " %s", bundle()->allocation().toString().get());
+        buf = JS_sprintf_append(std::move(buf), " %s", bundle()->allocation().toString().get());
 
     if (buf && hasDefinition())
-        buf = JS_sprintf_append(buf, " (def)");
+        buf = JS_sprintf_append(std::move(buf), " (def)");
 
     for (UsePositionIterator iter = usesBegin(); buf && iter; iter++)
-        buf = JS_sprintf_append(buf, " %s@%u", iter->use()->toString().get(), iter->pos.bits());
+        buf = JS_sprintf_append(std::move(buf), " %s@%u", iter->use()->toString().get(), iter->pos.bits());
 
     if (!buf)
         oomUnsafe.crash("LiveRange::toString()");
 
-    return UniqueChars(buf);
+    return buf;
 }
 
 UniqueChars
@@ -2258,10 +2379,11 @@ LiveBundle::toString() const
 {
     AutoEnterOOMUnsafeRegion oomUnsafe;
 
-    char *buf = JS_smprintf("");
+    // Suppress -Wformat warning.
+    UniqueChars buf = JS_smprintf("%s", "");
 
     for (LiveRange::BundleLinkIterator iter = rangesBegin(); buf && iter; iter++) {
-        buf = JS_sprintf_append(buf, "%s %s",
+        buf = JS_sprintf_append(std::move(buf), "%s %s",
                                 (iter == rangesBegin()) ? "" : " ##",
                                 LiveRange::get(*iter)->toString().get());
     }
@@ -2269,7 +2391,7 @@ LiveBundle::toString() const
     if (!buf)
         oomUnsafe.crash("LiveBundle::toString()");
 
-    return UniqueChars(buf);
+    return buf;
 }
 
 #endif // JS_JITSPEW
@@ -2475,27 +2597,9 @@ BacktrackingAllocator::computeSpillWeight(LiveBundle* bundle)
             }
         }
 
-        for (UsePositionIterator iter = range->usesBegin(); iter; iter++) {
-            switch (iter->usePolicy()) {
-              case LUse::ANY:
-                usesTotal += 1000;
-                break;
-
-              case LUse::FIXED:
-                fixed = true;
-                MOZ_FALLTHROUGH;
-              case LUse::REGISTER:
-                usesTotal += 2000;
-                break;
-
-              case LUse::KEEPALIVE:
-                break;
-
-              default:
-                // Note: RECOVERED_INPUT will not appear in UsePositionIterator.
-                MOZ_CRASH("Bad use");
-            }
-        }
+        usesTotal += range->usesSpillWeight();
+        if (range->numFixedUses() > 0)
+            fixed = true;
     }
 
     // Bundles with fixed uses are given a higher spill weight, since they must
@@ -2554,11 +2658,11 @@ BacktrackingAllocator::trySplitAcrossHotcode(LiveBundle* bundle, bool* success)
 
     JitSpew(JitSpew_RegAlloc, "  split across hot range %s", hotRange->toString().get());
 
-    // Tweak the splitting method when compiling asm.js code to look at actual
+    // Tweak the splitting method when compiling wasm code to look at actual
     // uses within the hot/cold code. This heuristic is in place as the below
     // mechanism regresses several asm.js tests. Hopefully this will be fixed
     // soon and this special case removed. See bug 948838.
-    if (compilingAsmJS()) {
+    if (compilingWasm()) {
         SplitPositionVector splitPositions;
         if (!splitPositions.append(hotRange->from()) || !splitPositions.append(hotRange->to()))
             return false;
@@ -2737,6 +2841,13 @@ BacktrackingAllocator::trySplitBeforeFirstRegisterUse(LiveBundle* bundle, LiveBu
     for (LiveRange::BundleLinkIterator iter = bundle->rangesBegin(); iter; iter++) {
         LiveRange* range = LiveRange::get(*iter);
 
+        if (!conflict || range->from() > conflictEnd) {
+            if (range->hasDefinition() && isRegisterDefinition(range)) {
+                firstRegisterFrom = range->from();
+                break;
+            }
+        }
+
         for (UsePositionIterator iter(range->usesBegin()); iter; iter++) {
             LNode* ins = insData[iter->pos];
 
@@ -2747,6 +2858,8 @@ BacktrackingAllocator::trySplitBeforeFirstRegisterUse(LiveBundle* bundle, LiveBu
                 }
             }
         }
+        if (firstRegisterFrom.bits())
+            break;
     }
 
     if (!firstRegisterFrom.bits()) {

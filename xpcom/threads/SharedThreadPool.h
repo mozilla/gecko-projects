@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -34,7 +34,7 @@ namespace mozilla {
 // cause some functions to fail. So be careful when using Win32 APIs on a
 // SharedThreadPool, and avoid sharing objects if at all possible.
 //
-// [1] http://mxr.mozilla.org/mozilla-central/search?string=coinitialize
+// [1] https://dxr.mozilla.org/mozilla-central/search?q=coinitialize&redirect=false
 class SharedThreadPool : public nsIThreadPool
 {
 public:
@@ -58,18 +58,26 @@ public:
   // Call this when dispatching from an event on the same
   // threadpool that is about to complete. We should not create a new thread
   // in that case since a thread is about to become idle.
-  nsresult TailDispatch(nsIRunnable *event) { return Dispatch(event, NS_DISPATCH_TAIL); }
+  nsresult DispatchFromEndOfTaskInThisPool(nsIRunnable *event)
+  {
+    return Dispatch(event, NS_DISPATCH_AT_END);
+  }
 
   NS_IMETHOD DispatchFromScript(nsIRunnable *event, uint32_t flags) override {
       return Dispatch(event, flags);
   }
 
-  NS_IMETHOD Dispatch(already_AddRefed<nsIRunnable>&& event, uint32_t flags) override
-    { return !mEventTarget ? NS_ERROR_NULL_POINTER : mEventTarget->Dispatch(Move(event), flags); }
+  NS_IMETHOD Dispatch(already_AddRefed<nsIRunnable> event, uint32_t flags = NS_DISPATCH_NORMAL) override
+    { return !mEventTarget ? NS_ERROR_NULL_POINTER : mEventTarget->Dispatch(std::move(event), flags); }
+
+  NS_IMETHOD DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t) override
+    { return NS_ERROR_NOT_IMPLEMENTED; }
 
   using nsIEventTarget::Dispatch;
 
   NS_IMETHOD IsOnCurrentThread(bool *_retval) override { return !mEventTarget ? NS_ERROR_NULL_POINTER : mEventTarget->IsOnCurrentThread(_retval); }
+
+  NS_IMETHOD_(bool) IsOnCurrentThreadInfallible() override { return mEventTarget && mEventTarget->IsOnCurrentThread(); }
 
   // Creates necessary statics. Called once at startup.
   static void InitStatics();
@@ -77,17 +85,6 @@ public:
   // Spins the event loop until all thread pools are shutdown.
   // *Must* be called on the main thread.
   static void SpinUntilEmpty();
-
-#if defined(MOZ_ASAN)
-  // Use the system default in ASAN builds, because the default is assumed to be
-  // larger than the size we want to use and is hopefully sufficient for ASAN.
-  static const uint32_t kStackSize = nsIThreadManager::DEFAULT_STACK_SIZE;
-#elif defined(XP_WIN) || defined(XP_MACOSX) || defined(LINUX)
-  static const uint32_t kStackSize = (256 * 1024);
-#else
-  // All other platforms use their system defaults.
-  static const uint32_t kStackSize = nsIThreadManager::DEFAULT_STACK_SIZE;
-#endif
 
 private:
 

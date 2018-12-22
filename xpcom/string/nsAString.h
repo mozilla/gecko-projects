@@ -10,22 +10,17 @@
 
 #include "nsStringFwd.h"
 #include "nsStringIterator.h"
+#include "mozilla/TypedEnumBits.h"
 
 #include <string.h>
 #include <stdarg.h>
 
 #define kNotFound -1
 
-// declare nsAString
-#include "string-template-def-unichar.h"
+#include "nsStringFlags.h"
+#include "nsTStringRepr.h"
 #include "nsTSubstring.h"
-#include "string-template-undef.h"
-
-// declare nsACString
-#include "string-template-def-char.h"
-#include "nsTSubstring.h"
-#include "string-template-undef.h"
-
+#include "nsTSubstringTuple.h"
 
 /**
  * ASCII case-insensitive comparator.  (for Unicode case-insensitive
@@ -53,10 +48,5 @@ public:
     return aStrA.Equals(aStrB, nsCaseInsensitiveCStringComparator());
   }
 };
-
-// included here for backwards compatibility
-#ifndef nsSubstringTuple_h___
-#include "nsSubstringTuple.h"
-#endif
 
 #endif // !defined(nsAString_h___)

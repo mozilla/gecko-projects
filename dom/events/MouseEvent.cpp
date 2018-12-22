@@ -32,29 +32,22 @@ MouseEvent::MouseEvent(EventTarget* aOwner,
   else {
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
-    mouseEvent->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
+    mouseEvent->inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
   }
 
   if (mouseEvent) {
-    MOZ_ASSERT(mouseEvent->reason != WidgetMouseEvent::eSynthesized,
+    MOZ_ASSERT(mouseEvent->mReason != WidgetMouseEvent::eSynthesized,
                "Don't dispatch DOM events from synthesized mouse events");
-    mDetail = mouseEvent->clickCount;
+    mDetail = mouseEvent->mClickCount;
   }
 }
-
-NS_IMPL_ADDREF_INHERITED(MouseEvent, UIEvent)
-NS_IMPL_RELEASE_INHERITED(MouseEvent, UIEvent)
-
-NS_INTERFACE_MAP_BEGIN(MouseEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMouseEvent)
-NS_INTERFACE_MAP_END_INHERITING(UIEvent)
 
 void
 MouseEvent::InitMouseEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsGlobalWindow* aView,
+                           nsGlobalWindowInner* aView,
                            int32_t aDetail,
                            int32_t aScreenX,
                            int32_t aScreenY,
@@ -67,6 +60,8 @@ MouseEvent::InitMouseEvent(const nsAString& aType,
                            uint16_t aButton,
                            EventTarget* aRelatedTarget)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
 
   switch(mEvent->mClass) {
@@ -77,17 +72,17 @@ MouseEvent::InitMouseEvent(const nsAString& aType,
     case ePointerEventClass:
     case eSimpleGestureEventClass: {
       WidgetMouseEventBase* mouseEventBase = mEvent->AsMouseEventBase();
-      mouseEventBase->relatedTarget = aRelatedTarget;
+      mouseEventBase->mRelatedTarget = aRelatedTarget;
       mouseEventBase->button = aButton;
       mouseEventBase->InitBasicModifiers(aCtrlKey, aAltKey, aShiftKey, aMetaKey);
       mClientPoint.x = aClientX;
       mClientPoint.y = aClientY;
-      mouseEventBase->refPoint.x = aScreenX;
-      mouseEventBase->refPoint.y = aScreenY;
+      mouseEventBase->mRefPoint.x = aScreenX;
+      mouseEventBase->mRefPoint.y = aScreenY;
 
       WidgetMouseEvent* mouseEvent = mEvent->AsMouseEvent();
       if (mouseEvent) {
-        mouseEvent->clickCount = aDetail;
+        mouseEvent->mClickCount = aDetail;
       }
       break;
     }
@@ -96,39 +91,11 @@ MouseEvent::InitMouseEvent(const nsAString& aType,
   }
 }
 
-NS_IMETHODIMP
-MouseEvent::InitMouseEvent(const nsAString& aType,
-                           bool aCanBubble,
-                           bool aCancelable,
-                           mozIDOMWindow* aView,
-                           int32_t aDetail,
-                           int32_t aScreenX,
-                           int32_t aScreenY,
-                           int32_t aClientX,
-                           int32_t aClientY,
-                           bool aCtrlKey,
-                           bool aAltKey,
-                           bool aShiftKey,
-                           bool aMetaKey,
-                           uint16_t aButton,
-                           nsIDOMEventTarget* aRelatedTarget)
-{
-  MouseEvent::InitMouseEvent(aType, aCanBubble, aCancelable,
-                             nsGlobalWindow::Cast(aView), aDetail,
-                             aScreenX, aScreenY,
-                             aClientX, aClientY,
-                             aCtrlKey, aAltKey, aShiftKey,
-                             aMetaKey, aButton,
-                             static_cast<EventTarget *>(aRelatedTarget));
-
-  return NS_OK;
-}
-
 void
 MouseEvent::InitMouseEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsGlobalWindow* aView,
+                           nsGlobalWindowInner* aView,
                            int32_t aDetail,
                            int32_t aScreenX,
                            int32_t aScreenY,
@@ -138,6 +105,8 @@ MouseEvent::InitMouseEvent(const nsAString& aType,
                            EventTarget* aRelatedTarget,
                            const nsAString& aModifiersList)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   Modifiers modifiers = ComputeModifierState(aModifiersList);
 
   InitMouseEvent(aType, aCanBubble, aCancelable, aView, aDetail,
@@ -187,7 +156,7 @@ MouseEvent::Constructor(const GlobalObject& aGlobal,
                     aParam.mMetaKey, aParam.mButton, aParam.mRelatedTarget);
   e->InitializeExtraMouseEventDictionaryMembers(aParam);
   e->SetTrusted(trusted);
-
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -195,7 +164,7 @@ void
 MouseEvent::InitNSMouseEvent(const nsAString& aType,
                              bool aCanBubble,
                              bool aCancelable,
-                             nsGlobalWindow* aView,
+                             nsGlobalWindowInner* aView,
                              int32_t aDetail,
                              int32_t aScreenX,
                              int32_t aScreenY,
@@ -210,6 +179,8 @@ MouseEvent::InitNSMouseEvent(const nsAString& aType,
                              float aPressure,
                              uint16_t aInputSource)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   MouseEvent::InitMouseEvent(aType, aCanBubble, aCancelable,
                              aView, aDetail, aScreenX, aScreenY,
                              aClientX, aClientY,
@@ -219,14 +190,6 @@ MouseEvent::InitNSMouseEvent(const nsAString& aType,
   WidgetMouseEventBase* mouseEventBase = mEvent->AsMouseEventBase();
   mouseEventBase->pressure = aPressure;
   mouseEventBase->inputSource = aInputSource;
-}
-
-NS_IMETHODIMP
-MouseEvent::GetButton(int16_t* aButton)
-{
-  NS_ENSURE_ARG_POINTER(aButton);
-  *aButton = Button();
-  return NS_OK;
 }
 
 int16_t
@@ -246,14 +209,6 @@ MouseEvent::Button()
   }
 }
 
-NS_IMETHODIMP
-MouseEvent::GetButtons(uint16_t* aButtons)
-{
-  NS_ENSURE_ARG_POINTER(aButtons);
-  *aButtons = Buttons();
-  return NS_OK;
-}
-
 uint16_t
 MouseEvent::Buttons()
 {
@@ -270,14 +225,6 @@ MouseEvent::Buttons()
   }
 }
 
-NS_IMETHODIMP
-MouseEvent::GetRelatedTarget(nsIDOMEventTarget** aRelatedTarget)
-{
-  NS_ENSURE_ARG_POINTER(aRelatedTarget);
-  *aRelatedTarget = GetRelatedTarget().take();
-  return NS_OK;
-}
-
 already_AddRefed<EventTarget>
 MouseEvent::GetRelatedTarget()
 {
@@ -289,33 +236,13 @@ MouseEvent::GetRelatedTarget()
     case eDragEventClass:
     case ePointerEventClass:
     case eSimpleGestureEventClass:
-      relatedTarget =
-        do_QueryInterface(mEvent->AsMouseEventBase()->relatedTarget);
+      relatedTarget = mEvent->AsMouseEventBase()->mRelatedTarget;
       break;
     default:
       break;
   }
 
-  if (relatedTarget) {
-    nsCOMPtr<nsIContent> content = do_QueryInterface(relatedTarget);
-    nsCOMPtr<nsIContent> currentTarget = do_QueryInterface(mEvent->currentTarget);
-
-    nsIContent* shadowRelatedTarget = GetShadowRelatedTarget(currentTarget, content);
-    if (shadowRelatedTarget) {
-      relatedTarget = shadowRelatedTarget;
-    }
-
-    if (content && content->ChromeOnlyAccess() &&
-        !nsContentUtils::CanAccessNativeAnon()) {
-      relatedTarget = do_QueryInterface(content->FindFirstNonChromeOnlyAccessContent());
-    }
-
-    if (relatedTarget) {
-      relatedTarget = relatedTarget->GetTargetForDOMEvent();
-    }
-    return relatedTarget.forget();
-  }
-  return nullptr;
+  return EnsureWebAccessibleRelatedTarget(relatedTarget);
 }
 
 void
@@ -328,94 +255,79 @@ MouseEvent::GetRegion(nsAString& aRegion)
   }
 }
 
-NS_IMETHODIMP
-MouseEvent::GetMozMovementX(int32_t* aMovementX)
+int32_t
+MouseEvent::ScreenX(CallerType aCallerType)
 {
-  NS_ENSURE_ARG_POINTER(aMovementX);
-  *aMovementX = MovementX();
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
 
-  return NS_OK;
-}
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    // Sanitize to something sort of like client cooords, but not quite
+    // (defaulting to (0,0) instead of our pre-specified client coords).
+    return Event::GetClientCoords(mPresContext, mEvent, mEvent->mRefPoint,
+                                  CSSIntPoint(0, 0)).x;
+  }
 
-NS_IMETHODIMP
-MouseEvent::GetMozMovementY(int32_t* aMovementY)
-{
-  NS_ENSURE_ARG_POINTER(aMovementY);
-  *aMovementY = MovementY();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-MouseEvent::GetScreenX(int32_t* aScreenX)
-{
-  NS_ENSURE_ARG_POINTER(aScreenX);
-  *aScreenX = ScreenX();
-  return NS_OK;
+  return Event::GetScreenCoords(mPresContext, mEvent, mEvent->mRefPoint).x;
 }
 
 int32_t
-MouseEvent::ScreenX()
+MouseEvent::ScreenY(CallerType aCallerType)
 {
-  return Event::GetScreenCoords(mPresContext, mEvent, mEvent->refPoint).x;
-}
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
 
-NS_IMETHODIMP
-MouseEvent::GetScreenY(int32_t* aScreenY)
-{
-  NS_ENSURE_ARG_POINTER(aScreenY);
-  *aScreenY = ScreenY();
-  return NS_OK;
-}
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    // Sanitize to something sort of like client cooords, but not quite
+    // (defaulting to (0,0) instead of our pre-specified client coords).
+    return Event::GetClientCoords(mPresContext, mEvent, mEvent->mRefPoint,
+                                  CSSIntPoint(0, 0)).y;
+  }
 
-int32_t
-MouseEvent::ScreenY()
-{
-  return Event::GetScreenCoords(mPresContext, mEvent, mEvent->refPoint).y;
-}
-
-
-NS_IMETHODIMP
-MouseEvent::GetClientX(int32_t* aClientX)
-{
-  NS_ENSURE_ARG_POINTER(aClientX);
-  *aClientX = ClientX();
-  return NS_OK;
+  return Event::GetScreenCoords(mPresContext, mEvent, mEvent->mRefPoint).y;
 }
 
 int32_t
 MouseEvent::ClientX()
 {
-  return Event::GetClientCoords(mPresContext, mEvent, mEvent->refPoint,
-                                mClientPoint).x;
-}
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
 
-NS_IMETHODIMP
-MouseEvent::GetClientY(int32_t* aClientY)
-{
-  NS_ENSURE_ARG_POINTER(aClientY);
-  *aClientY = ClientY();
-  return NS_OK;
+  return Event::GetClientCoords(mPresContext, mEvent, mEvent->mRefPoint,
+                                mClientPoint).x;
 }
 
 int32_t
 MouseEvent::ClientY()
 {
-  return Event::GetClientCoords(mPresContext, mEvent, mEvent->refPoint,
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
+
+  return Event::GetClientCoords(mPresContext, mEvent, mEvent->mRefPoint,
                                 mClientPoint).y;
 }
 
 int32_t
 MouseEvent::OffsetX()
 {
-  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->refPoint,
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
+  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->mRefPoint,
                                 mClientPoint).x;
 }
 
 int32_t
 MouseEvent::OffsetY()
 {
-  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->refPoint,
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
+  return Event::GetOffsetCoords(mPresContext, mEvent, mEvent->mRefPoint,
                                 mClientPoint).y;
 }
 
@@ -425,26 +337,10 @@ MouseEvent::AltKey()
   return mEvent->AsInputEvent()->IsAlt();
 }
 
-NS_IMETHODIMP
-MouseEvent::GetAltKey(bool* aIsDown)
-{
-  NS_ENSURE_ARG_POINTER(aIsDown);
-  *aIsDown = AltKey();
-  return NS_OK;
-}
-
 bool
 MouseEvent::CtrlKey()
 {
   return mEvent->AsInputEvent()->IsControl();
-}
-
-NS_IMETHODIMP
-MouseEvent::GetCtrlKey(bool* aIsDown)
-{
-  NS_ENSURE_ARG_POINTER(aIsDown);
-  *aIsDown = CtrlKey();
-  return NS_OK;
 }
 
 bool
@@ -453,50 +349,16 @@ MouseEvent::ShiftKey()
   return mEvent->AsInputEvent()->IsShift();
 }
 
-NS_IMETHODIMP
-MouseEvent::GetShiftKey(bool* aIsDown)
-{
-  NS_ENSURE_ARG_POINTER(aIsDown);
-  *aIsDown = ShiftKey();
-  return NS_OK;
-}
-
 bool
 MouseEvent::MetaKey()
 {
   return mEvent->AsInputEvent()->IsMeta();
 }
 
-NS_IMETHODIMP
-MouseEvent::GetMetaKey(bool* aIsDown)
-{
-  NS_ENSURE_ARG_POINTER(aIsDown);
-  *aIsDown = MetaKey();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-MouseEvent::GetModifierState(const nsAString& aKey,
-                                  bool* aState)
-{
-  NS_ENSURE_ARG_POINTER(aState);
-
-  *aState = GetModifierState(aKey);
-  return NS_OK;
-}
-
 float
 MouseEvent::MozPressure() const
 {
   return mEvent->AsMouseEventBase()->pressure;
-}
-
-NS_IMETHODIMP
-MouseEvent::GetMozPressure(float* aPressure)
-{
-  NS_ENSURE_ARG_POINTER(aPressure);
-  *aPressure = MozPressure();
-  return NS_OK;
 }
 
 bool
@@ -509,14 +371,6 @@ uint16_t
 MouseEvent::MozInputSource() const
 {
   return mEvent->AsMouseEventBase()->inputSource;
-}
-
-NS_IMETHODIMP
-MouseEvent::GetMozInputSource(uint16_t* aInputSource)
-{
-  NS_ENSURE_ARG_POINTER(aInputSource);
-  *aInputSource = MozInputSource();
-  return NS_OK;
 }
 
 } // namespace dom

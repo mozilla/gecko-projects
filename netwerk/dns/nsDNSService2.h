@@ -18,6 +18,9 @@
 #include "nsHashKeys.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Attributes.h"
+#include "TRRService.h"
+
+class nsAuthSSPI;
 
 class nsDNSService final : public nsPIDNSService
                          , public nsIObserver
@@ -32,16 +35,24 @@ public:
 
     nsDNSService();
 
-    static nsIDNSService* GetXPCOMSingleton();
+    static already_AddRefed<nsIDNSService> GetXPCOMSingleton();
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
     bool GetOffline() const;
 
+protected:
+    friend class nsAuthSSPI;
+
+    nsresult DeprecatedSyncResolve(const nsACString &aHostname,
+                                   uint32_t flags,
+                                   const mozilla::OriginAttributes &aOriginAttributes,
+                                   nsIDNSRecord **result);
 private:
     ~nsDNSService();
 
-    static nsDNSService* GetSingleton();
+    nsresult ReadPrefs(const char *name);
+    static already_AddRefed<nsDNSService> GetSingleton();
 
     uint16_t GetAFForLookup(const nsACString &host, uint32_t flags);
 
@@ -49,6 +60,11 @@ private:
                                 const nsACString &aInput,
                                 nsIIDNService    *aIDN,
                                 nsACString       &aACE);
+
+    nsresult ResolveInternal(const nsACString &aHostname,
+                             uint32_t flags,
+                             const mozilla::OriginAttributes &aOriginAttributes,
+                             nsIDNSRecord **result);
 
     RefPtr<nsHostResolver>  mResolver;
     nsCOMPtr<nsIIDNService>   mIDN;
@@ -59,14 +75,22 @@ private:
     // mIPv4OnlyDomains is a comma-separated list of domains for which only
     // IPv4 DNS lookups are performed. This allows the user to disable IPv6 on
     // a per-domain basis and work around broken DNS servers. See bug 68796.
-    nsAdoptingCString                         mIPv4OnlyDomains;
+    nsCString                                 mIPv4OnlyDomains;
+    nsCString                                 mForceResolve;
     bool                                      mDisableIPv6;
     bool                                      mDisablePrefetch;
     bool                                      mBlockDotOnion;
-    bool                                      mFirstTime;
     bool                                      mNotifyResolution;
     bool                                      mOfflineLocalhost;
+    bool                                      mForceResolveOn;
+    uint32_t                                  mProxyType;
     nsTHashtable<nsCStringHashKey>            mLocalDomains;
+    RefPtr<mozilla::net::TRRService>          mTrrService;
+
+    uint32_t                                  mResCacheEntries;
+    uint32_t                                  mResCacheExpiration;
+    uint32_t                                  mResCacheGrace;
+    bool                                      mResolverPrefsUpdated;
 };
 
 #endif //nsDNSService2_h__

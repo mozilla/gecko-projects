@@ -3,19 +3,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// This file is loaded into the browser window scope.
+/* eslint-env mozilla/browser-window */
+
 /**
  * Customization handler prepares this browser window for entering and exiting
  * customization mode by handling customizationstarting and customizationending
  * events.
  */
 var CustomizationHandler = {
-  handleEvent: function(aEvent) {
-    switch(aEvent.type) {
+  handleEvent(aEvent) {
+    switch (aEvent.type) {
       case "customizationstarting":
         this._customizationStarting();
-        break;
-      case "customizationchange":
-        this._customizationChange();
         break;
       case "customizationending":
         this._customizationEnding(aEvent.detail);
@@ -23,11 +23,11 @@ var CustomizationHandler = {
     }
   },
 
-  isCustomizing: function() {
+  isCustomizing() {
     return document.documentElement.hasAttribute("customizing");
   },
 
-  _customizationStarting: function() {
+  _customizationStarting() {
     // Disable the toolbar context menu items
     let menubar = document.getElementById("main-menubar");
     for (let childNode of menubar.childNodes)
@@ -38,30 +38,15 @@ var CustomizationHandler = {
 
     UpdateUrlbarSearchSplitterState();
 
-    CombinedStopReload.uninit();
     PlacesToolbarHelper.customizeStart();
-    DownloadsButton.customizeStart();
-
-    // The additional padding on the sides of the browser
-    // can cause the customize tab to get clipped.
-    let tabContainer = gBrowser.tabContainer;
-    if (tabContainer.getAttribute("overflow") == "true") {
-      let tabstrip = tabContainer.mTabstrip;
-      tabstrip.ensureElementIsVisible(gBrowser.selectedTab, true);
-    }
   },
 
-  _customizationChange: function() {
-    PlacesToolbarHelper.customizeChange();
-  },
-
-  _customizationEnding: function(aDetails) {
+  _customizationEnding(aDetails) {
     // Update global UI elements that may have been added or removed
     if (aDetails.changed) {
       gURLBar = document.getElementById("urlbar");
 
       gHomeButton.updateTooltip();
-      XULBrowserWindow.init();
 
       if (AppConstants.platform != "macosx")
         updateEditUIVisibility();
@@ -77,11 +62,7 @@ var CustomizationHandler = {
     }
 
     PlacesToolbarHelper.customizeDone();
-    DownloadsButton.customizeDone();
 
-    // The url bar splitter state is dependent on whether stop/reload
-    // and the location bar are combined, so we need this ordering
-    CombinedStopReload.init();
     UpdateUrlbarSearchSplitterState();
 
     // Update the urlbar
@@ -97,4 +78,4 @@ var CustomizationHandler = {
 
     gBrowser.selectedBrowser.focus();
   }
-}
+};

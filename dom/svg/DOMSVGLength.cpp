@@ -11,7 +11,6 @@
 #include "SVGAnimatedLengthList.h"
 #include "nsSVGElement.h"
 #include "nsSVGLength2.h"
-#include "nsIDOMSVGLength.h"
 #include "nsError.h"
 #include "nsMathUtils.h"
 #include "mozilla/dom/SVGLengthBinding.h"
@@ -21,6 +20,8 @@
 // See the architecture comment in DOMSVGAnimatedLengthList.h.
 
 namespace mozilla {
+
+using namespace dom;
 
 static nsSVGAttrTearoffTable<nsSVGLength2, DOMSVGLength>
   sBaseSVGLengthTearOffTable,
@@ -33,10 +34,8 @@ static nsSVGAttrTearoffTable<nsSVGLength2, DOMSVGLength>
 NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGLength)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGLength)
-  // We may not belong to a list, so we must null check tmp->mList.
-  if (tmp->mList) {
-    tmp->mList->mItems[tmp->mListIndex] = nullptr;
-  }
+  tmp->CleanupWeakRefs();
+  tmp->mVal = nullptr; // (owned by mSVGElement, which we drop our ref to here)
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mSVGElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -45,7 +44,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGLength)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSVGElement)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGLength)
@@ -58,7 +56,6 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGLength)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGLength)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(mozilla::DOMSVGLength) // pseudo-interface
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGLength)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
@@ -103,7 +100,7 @@ DOMSVGLength::DOMSVGLength(DOMSVGLengthList *aList,
   , mListIndex(aListIndex)
   , mAttrEnum(aAttrEnum)
   , mIsAnimValItem(aIsAnimValItem)
-  , mUnit(nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER)
+  , mUnit(SVGLength_Binding::SVG_LENGTHTYPE_NUMBER)
   , mValue(0.0f)
   , mVal(nullptr)
 {
@@ -121,7 +118,7 @@ DOMSVGLength::DOMSVGLength()
   , mListIndex(0)
   , mAttrEnum(0)
   , mIsAnimValItem(false)
-  , mUnit(nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER)
+  , mUnit(SVGLength_Binding::SVG_LENGTHTYPE_NUMBER)
   , mValue(0.0f)
   , mVal(nullptr)
 {
@@ -133,26 +130,37 @@ DOMSVGLength::DOMSVGLength(nsSVGLength2* aVal, nsSVGElement* aSVGElement,
   , mListIndex(0)
   , mAttrEnum(0)
   , mIsAnimValItem(aAnimVal)
-  , mUnit(nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER)
+  , mUnit(SVGLength_Binding::SVG_LENGTHTYPE_NUMBER)
   , mValue(0.0f)
   , mVal(aVal)
   , mSVGElement(aSVGElement)
 {
 }
 
-DOMSVGLength::~DOMSVGLength()
+void
+DOMSVGLength::CleanupWeakRefs()
 {
-  // Our mList's weak ref to us must be nulled out when we die. If GC has
-  // unlinked us using the cycle collector code, then that has already
-  // happened, and mList is null.
+  // Our mList's weak ref to us must be nulled out when we die (or when we're
+  // cycle collected), so we that don't leave behind a pointer to
+  // free / soon-to-be-free memory.
   if (mList) {
+    MOZ_ASSERT(mList->mItems[mListIndex] == this,
+               "Clearing out the wrong list index...?");
     mList->mItems[mListIndex] = nullptr;
   }
 
+  // Similarly, we must update the tearoff table to remove its (non-owning)
+  // pointer to mVal.
   if (mVal) {
-    auto& table = mIsAnimValItem ? sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
+    auto& table = mIsAnimValItem ?
+      sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
     table.RemoveTearoff(mVal);
   }
+}
+
+DOMSVGLength::~DOMSVGLength()
+{
+  CleanupWeakRefs();
 }
 
 already_AddRefed<DOMSVGLength>
@@ -184,7 +192,7 @@ DOMSVGLength::Copy()
     unit = length.GetUnit();
     value = length.GetValueInCurrentUnits();
   }
-  copy->NewValueSpecifiedUnits(unit, value);
+  copy->NewValueSpecifiedUnits(unit, value, IgnoreErrors());
   return copy;
 }
 
@@ -202,13 +210,6 @@ DOMSVGLength::UnitType()
     Element()->FlushAnimations(); // May make HasOwner() == false
   }
   return HasOwner() ? InternalItem().GetUnit() : mUnit;
-}
-
-NS_IMETHODIMP
-DOMSVGLength::GetUnitType(uint16_t* aUnit)
-{
-  *aUnit = UnitType();
-  return NS_OK;
 }
 
 float
@@ -231,22 +232,14 @@ DOMSVGLength::GetValue(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_FAILURE);
     }
     return value;
-  } else if (mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER ||
-             mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_PX) {
+  } else if (mUnit == SVGLength_Binding::SVG_LENGTHTYPE_NUMBER ||
+             mUnit == SVGLength_Binding::SVG_LENGTHTYPE_PX) {
     return mValue;
   }
   // else [SVGWG issue] Can't convert this length's value to user units
   // ReportToConsole
   aRv.Throw(NS_ERROR_FAILURE);
   return 0.0f;
-}
-
-NS_IMETHODIMP
-DOMSVGLength::GetValue(float* aValue)
-{
-  ErrorResult rv;
-  *aValue = GetValue(rv);
-  return rv.StealNSResult();
 }
 
 void
@@ -258,7 +251,7 @@ DOMSVGLength::SetValue(float aUserUnitValue, ErrorResult& aRv)
   }
 
   if (mVal) {
-    mVal->SetBaseValue(aUserUnitValue, mSVGElement, true);
+    aRv = mVal->SetBaseValue(aUserUnitValue, mSVGElement, true);
     return;
   }
 
@@ -281,26 +274,14 @@ DOMSVGLength::SetValue(float aUserUnitValue, ErrorResult& aRv)
         return;
       }
     }
-  } else if (mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER ||
-             mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_PX) {
+  } else if (mUnit == SVGLength_Binding::SVG_LENGTHTYPE_NUMBER ||
+             mUnit == SVGLength_Binding::SVG_LENGTHTYPE_PX) {
     mValue = aUserUnitValue;
     return;
   }
   // else [SVGWG issue] Can't convert user unit value to this length's unit
   // ReportToConsole
   aRv.Throw(NS_ERROR_FAILURE);
-}
-
-NS_IMETHODIMP
-DOMSVGLength::SetValue(float aUserUnitValue)
-{
-  if (!IsFinite(aUserUnitValue)) {
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
-
-  ErrorResult rv;
-  SetValue(aUserUnitValue, rv);
-  return rv.StealNSResult();
 }
 
 float
@@ -318,13 +299,6 @@ DOMSVGLength::ValueInSpecifiedUnits()
     Element()->FlushAnimations(); // May make HasOwner() == false
   }
   return HasOwner() ? InternalItem().GetValueInCurrentUnits() : mValue;
-}
-
-NS_IMETHODIMP
-DOMSVGLength::GetValueInSpecifiedUnits(float* aValue)
-{
-  *aValue = ValueInSpecifiedUnits();
-  return NS_OK;
 }
 
 void
@@ -349,18 +323,6 @@ DOMSVGLength::SetValueInSpecifiedUnits(float aValue, ErrorResult& aRv)
     return;
   }
   mValue = aValue;
-}
-
-NS_IMETHODIMP
-DOMSVGLength::SetValueInSpecifiedUnits(float aValue)
-{
-  if (!IsFinite(aValue)) {
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
-
-  ErrorResult rv;
-  SetValueInSpecifiedUnits(aValue, rv);
-  return rv.StealNSResult();
 }
 
 void
@@ -393,15 +355,7 @@ DOMSVGLength::SetValueAsString(const nsAString& aValue, ErrorResult& aRv)
   mUnit = value.GetUnit();
 }
 
-NS_IMETHODIMP
-DOMSVGLength::SetValueAsString(const nsAString& aValue)
-{
-  ErrorResult rv;
-  SetValueAsString(aValue, rv);
-  return rv.StealNSResult();
-}
-
-NS_IMETHODIMP
+void
 DOMSVGLength::GetValueAsString(nsAString& aValue)
 {
   if (mVal) {
@@ -411,7 +365,7 @@ DOMSVGLength::GetValueAsString(nsAString& aValue)
     } else {
       mVal->GetBaseValueString(aValue);
     }
-    return NS_OK;
+    return;
   }
 
   if (mIsAnimValItem && HasOwner()) {
@@ -419,10 +373,9 @@ DOMSVGLength::GetValueAsString(nsAString& aValue)
   }
   if (HasOwner()) {
     InternalItem().GetValueAsString(aValue);
-    return NS_OK;
+    return;
   }
   SVGLength(mValue, mUnit).GetValueAsString(aValue);
-  return NS_OK;
 }
 
 void
@@ -454,18 +407,6 @@ DOMSVGLength::NewValueSpecifiedUnits(uint16_t aUnit, float aValue,
   }
   mUnit = uint8_t(aUnit);
   mValue = aValue;
-}
-
-NS_IMETHODIMP
-DOMSVGLength::NewValueSpecifiedUnits(uint16_t aUnit, float aValue)
-{
-  if (!IsFinite(aValue)) {
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
-
-  ErrorResult rv;
-  NewValueSpecifiedUnits(aUnit, aValue, rv);
-  return rv.StealNSResult();
 }
 
 void
@@ -510,18 +451,10 @@ DOMSVGLength::ConvertToSpecifiedUnits(uint16_t aUnit, ErrorResult& aRv)
   aRv.Throw(NS_ERROR_FAILURE);
 }
 
-NS_IMETHODIMP
-DOMSVGLength::ConvertToSpecifiedUnits(uint16_t aUnit)
-{
-  ErrorResult rv;
-  ConvertToSpecifiedUnits(aUnit, rv);
-  return rv.StealNSResult();
-}
-
 JSObject*
 DOMSVGLength::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::SVGLengthBinding::Wrap(aCx, this, aGivenProto);
+  return SVGLength_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void

@@ -7,53 +7,34 @@
 #ifndef MOZILLA_MEDIASOURCEDECODER_H_
 #define MOZILLA_MEDIASOURCEDECODER_H_
 
-#include "mozilla/Atomics.h"
-#include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
-#include "nsError.h"
 #include "MediaDecoder.h"
-#include "MediaFormatReader.h"
-
-class nsIStreamListener;
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 
-class MediaResource;
 class MediaDecoderStateMachine;
-class SourceBufferDecoder;
-class TrackBuffer;
-enum MSRangeRemovalAction : uint8_t;
 class MediaSourceDemuxer;
 
 namespace dom {
 
-class HTMLMediaElement;
 class MediaSource;
 
 } // namespace dom
 
-class MediaSourceDecoder : public MediaDecoder
+DDLoggedTypeDeclNameAndBase(MediaSourceDecoder, MediaDecoder);
+
+class MediaSourceDecoder
+  : public MediaDecoder
+  , public DecoderDoctorLifeLogger<MediaSourceDecoder>
 {
 public:
-  explicit MediaSourceDecoder(dom::HTMLMediaElement* aElement);
+  explicit MediaSourceDecoder(MediaDecoderInit& aInit);
 
-  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
-  MediaDecoderStateMachine* CreateStateMachine() override;
-  nsresult Load(nsIStreamListener**) override;
+  nsresult Load(nsIPrincipal* aPrincipal);
   media::TimeIntervals GetSeekable() override;
   media::TimeIntervals GetBuffered() override;
 
-  // We can't do this in the constructor because we don't know what type of
-  // media we're dealing with by that point.
-  void NotifyDormantSupported(bool aSupported)
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mDormantSupported = aSupported;
-  }
-
-  RefPtr<ShutdownPromise> Shutdown() override;
-
-  static already_AddRefed<MediaResource> CreateResource(nsIPrincipal* aPrincipal = nullptr);
+  void Shutdown() override;
 
   void AttachMediaSource(dom::MediaSource* aMediaSource);
   void DetachMediaSource();
@@ -64,34 +45,48 @@ public:
   double GetDuration() override;
 
   void SetInitialDuration(int64_t aDuration);
-  void SetMediaSourceDuration(double aDuration, MSRangeRemovalAction aAction);
-  double GetMediaSourceDuration();
+  void SetMediaSourceDuration(double aDuration);
 
   MediaSourceDemuxer* GetDemuxer()
   {
     return mDemuxer;
   }
 
+  already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
+
+  bool IsTransportSeekable() override { return true; }
+
   // Returns a string describing the state of the MediaSource internal
   // buffered data. Used for debugging purposes.
-  void GetMozDebugReaderData(nsAString& aString) override;
+  void GetMozDebugReaderData(nsACString& aString) override;
 
   void AddSizeOfResources(ResourceSizes* aSizes) override;
 
   MediaDecoderOwner::NextFrameStatus NextFrameBufferedStatus() override;
-  bool CanPlayThrough() override;
+
+  bool IsMSE() const override { return true; }
+
+  void NotifyInitDataArrived();
+
+  // Called as data appended to the source buffer or EOS is called on the media
+  // source. Main thread only.
+  void NotifyDataArrived();
 
 private:
+  MediaDecoderStateMachine* CreateStateMachine();
   void DoSetMediaSourceDuration(double aDuration);
+  media::TimeInterval ClampIntervalToEnd(const media::TimeInterval& aInterval);
+  bool CanPlayThroughImpl() override;
+
+  RefPtr<nsIPrincipal> mPrincipal;
 
   // The owning MediaSource holds a strong reference to this decoder, and
   // calls Attach/DetachMediaSource on this decoder to set and clear
   // mMediaSource.
   dom::MediaSource* mMediaSource;
   RefPtr<MediaSourceDemuxer> mDemuxer;
-  RefPtr<MediaFormatReader> mReader;
 
-  Atomic<bool> mEnded;
+  bool mEnded;
 };
 
 } // namespace mozilla

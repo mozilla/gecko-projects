@@ -7,6 +7,7 @@
 #define WebMWriter_h_
 
 #include "ContainerWriter.h"
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 
@@ -18,7 +19,6 @@ class VorbisMetadata : public TrackMetadataBase
 public:
   nsTArray<uint8_t> mData;
   int32_t mChannels;
-  int32_t mBitDepth;
   float mSamplingFrequency;
   MetadataKind GetKind() const override { return METADATA_VORBIS; }
 };
@@ -31,7 +31,6 @@ public:
   int32_t mHeight;
   int32_t mDisplayWidth;
   int32_t mDisplayHeight;
-  int32_t mEncodedFrameRate;
   MetadataKind GetKind() const override { return METADATA_VP8; }
 };
 

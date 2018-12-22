@@ -4,25 +4,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/BasePrincipal.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsIBrowserDOMWindow.h"
+#include "nsIFrameLoaderOwner.h"
 #include "nsString.h"
 
 namespace mozilla {
-class DocShellOriginAttributes;
+class OriginAttributes;
 }
 
 class nsOpenURIInFrameParams final : public nsIOpenURIInFrameParams
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(nsOpenURIInFrameParams)
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIOPENURIINFRAMEPARAMS
 
-  explicit nsOpenURIInFrameParams(const mozilla::DocShellOriginAttributes& aOriginAttributes);
+  explicit nsOpenURIInFrameParams(const mozilla::OriginAttributes& aOriginAttributes,
+                                  nsIFrameLoaderOwner* aOpener);
 
 private:
   ~nsOpenURIInFrameParams();
 
-  mozilla::DocShellOriginAttributes mOpenerOriginAttributes;
+  mozilla::OriginAttributes mOpenerOriginAttributes;
+  nsCOMPtr<nsIFrameLoaderOwner> mOpenerBrowser;
   nsString mReferrer;
-  bool mIsPrivate;
+  uint32_t mReferrerPolicy;
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
 };

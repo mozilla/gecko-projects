@@ -2,19 +2,20 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
+/* exported Cr, CC, Match, Census, Task, DevToolsUtils, HeapAnalysesClient,
+  assertThrows, getFilePath, saveHeapSnapshotAndTakeCensus,
+  saveHeapSnapshotAndComputeDominatorTree, compareCensusViewData, assertDiff,
+  assertLabelAndShallowSize, makeTestDominatorTreeNode,
+  assertDominatorTreeNodeInsertion, assertDeduplicatedPaths,
+  assertCountToBucketBreakdown, pathEntry */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
 var CC = Components.Constructor;
 
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const { Match } = Cu.import("resource://test/Match.jsm", {});
-const { Census } = Cu.import("resource://test/Census.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { Match } = ChromeUtils.import("resource://test/Match.jsm", {});
+const { Census } = ChromeUtils.import("resource://test/Census.jsm", {});
 const { addDebuggerToGlobal } =
-  Cu.import("resource://gre/modules/jsdebugger.jsm", {});
-const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
+  ChromeUtils.import("resource://gre/modules/jsdebugger.jsm", {});
 
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const HeapAnalysesClient =
@@ -26,14 +27,14 @@ const DominatorTreeNode = require("devtools/shared/heapsnapshot/DominatorTreeNod
 const { deduplicatePaths } = require("devtools/shared/heapsnapshot/shortest-paths");
 const { LabelAndShallowSizeVisitor } = DominatorTreeNode;
 
-
 // Always log packets when running tests. runxpcshelltests.py will throw
 // the output away anyway, unless you give it the --verbose flag.
-if (Services.appInfo &&
-    Services.appInfo.processType == Services.appInfo.PROCESS_TYPE_DEFAULT) {
+if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT) {
   Services.prefs.setBoolPref("devtools.debugger.log", true);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("devtools.debugger.log");
+  });
 }
-DevToolsUtils.dumpn.wantLogging = true;
 
 const SYSTEM_PRINCIPAL = Cc["@mozilla.org/systemprincipal;1"]
   .createInstance(Ci.nsIPrincipal);
@@ -52,7 +53,7 @@ function addTestingFunctionsToGlobal(global) {
     `
   );
   if (!global.print) {
-    global.print = do_print;
+    global.print = info;
   }
   if (!global.newGlobal) {
     global.newGlobal = newGlobal;
@@ -75,19 +76,24 @@ function newGlobal() {
   return global;
 }
 
-function assertThrowsValue(f, val, msg) {
-  var fullmsg;
+function assertThrows(f, val, msg) {
+  let fullmsg;
   try {
     f();
   } catch (exc) {
-    if ((exc === val) === (val === val) && (val !== 0 || 1 / exc === 1 / val))
+    if ((exc === val) && (val !== 0 || 1 / exc === 1 / val)) {
       return;
+    } else if (exc instanceof Error && exc.message === val) {
+      return;
+    }
     fullmsg = "Assertion failed: expected exception " + val + ", got " + exc;
   }
-  if (fullmsg === undefined)
+  if (fullmsg === undefined) {
     fullmsg = "Assertion failed: expected exception " + val + ", no exception thrown";
-  if (msg !== undefined)
+  }
+  if (msg !== undefined) {
     fullmsg += " - " + msg;
+  }
   throw new Error(fullmsg);
 }
 
@@ -95,9 +101,8 @@ function assertThrowsValue(f, val, msg) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false)
-{
-  let file = do_get_file(aName, aAllowMissing);
+function getFilePath(name, allowMissing = false, usePlatformPathSeparator = false) {
+  const file = do_get_file(name, allowMissing);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
   if ("nsILocalFileWin" in Ci &&
@@ -107,7 +112,7 @@ function getFilePath(aName, aAllowMissing=false, aUsePlatformPathSeparator=false
 
   path = path.slice(filePrePath.length);
 
-  if (aUsePlatformPathSeparator && path.match(/^\w:/)) {
+  if (usePlatformPathSeparator && path.match(/^\w:/)) {
     path = path.replace(/\//g, "\\");
   }
 
@@ -147,12 +152,13 @@ function readHeapSnapshot(filePath) {
  *
  * @returns Census
  */
-function saveHeapSnapshotAndTakeCensus(dbg=null, censusOptions=undefined) {
+function saveHeapSnapshotAndTakeCensus(dbg = null, censusOptions = undefined) {
   const snapshotOptions = dbg ? { debugger: dbg } : { runtime: true };
   const filePath = saveNewHeapSnapshot(snapshotOptions);
   const snapshot = readHeapSnapshot(filePath);
 
-  equal(typeof snapshot.takeCensus, "function", "snapshot should have a takeCensus method");
+  equal(typeof snapshot.takeCensus, "function",
+    "snapshot should have a takeCensus method");
 
   return snapshot.takeCensus(censusOptions);
 }
@@ -190,9 +196,8 @@ function isSavedFrame(obj) {
 function savedFrameReplacer(key, val) {
   if (isSavedFrame(val)) {
     return `<SavedFrame '${val.toString().split(/\n/g).shift()}'>`;
-  } else {
-    return val;
   }
+  return val;
 }
 
 /**
@@ -211,7 +216,7 @@ function savedFrameReplacer(key, val) {
  * @param {Object} options
  *        The options to pass through to `censusReportToCensusTreeNode`.
  */
-function compareCensusViewData (breakdown, report, expected, options) {
+function compareCensusViewData(breakdown, report, expected, options) {
   dumpn("Generating CensusTreeNode from report:");
   dumpn("breakdown: " + JSON.stringify(breakdown, null, 4));
   dumpn("report: " + JSON.stringify(report, null, 4));
@@ -225,7 +230,7 @@ function compareCensusViewData (breakdown, report, expected, options) {
 
 // Deep structural equivalence that can handle Map objects in addition to plain
 // objects.
-function assertStructurallyEquivalent(actual, expected, path="root") {
+function assertStructurallyEquivalent(actual, expected, path = "root") {
   if (actual === expected) {
     equal(actual, expected, "actual and expected are the same");
     return;
@@ -242,9 +247,9 @@ function assertStructurallyEquivalent(actual, expected, path="root") {
     if (actualProtoString === "[object Map]") {
       const expectedKeys = new Set([...expected.keys()]);
 
-      for (let key of actual.keys()) {
+      for (const key of actual.keys()) {
         ok(expectedKeys.has(key),
-           `${path}: every key in actual should exist in expected: ${String(key).slice(0, 10)}`);
+          `${path}: every key in actual is expected: ${String(key).slice(0, 10)}`);
         expectedKeys.delete(key);
 
         assertStructurallyEquivalent(actual.get(key), expected.get(key),
@@ -252,22 +257,24 @@ function assertStructurallyEquivalent(actual, expected, path="root") {
       }
 
       equal(expectedKeys.size, 0,
-            `${path}: every key in expected should also exist in actual, did not see ${[...expectedKeys]}`);
+        `${path}: every key in expected should also exist in actual,\
+        did not see ${[...expectedKeys]}`);
     } else if (actualProtoString === "[object Set]") {
       const expectedItems = new Set([...expected]);
 
-      for (let item of actual) {
+      for (const item of actual) {
         ok(expectedItems.has(item),
            `${path}: every set item in actual should exist in expected: ${item}`);
         expectedItems.delete(item);
       }
 
       equal(expectedItems.size, 0,
-            `${path}: every set item in expected should also exist in actual, did not see ${[...expectedItems]}`);
+        `${path}: every set item in expected should also exist in actual,\
+        did not see ${[...expectedItems]}`);
     } else {
       const expectedKeys = new Set(Object.keys(expected));
 
-      for (let key of Object.keys(actual)) {
+      for (const key of Object.keys(actual)) {
         ok(expectedKeys.has(key),
            `${path}: every key in actual should exist in expected: ${key}`);
         expectedKeys.delete(key);
@@ -276,7 +283,8 @@ function assertStructurallyEquivalent(actual, expected, path="root") {
       }
 
       equal(expectedKeys.size, 0,
-            `${path}: every key in expected should also exist in actual, did not see ${[...expectedKeys]}`);
+        `${path}: every key in expected should also exist in actual,\
+        did not see ${[...expectedKeys]}`);
     }
   } else {
     equal(actual, expected, `${path}: primitives should be equal`);
@@ -321,13 +329,14 @@ function assertDiff(breakdown, first, second, expected) {
  * @param {Number} expectedShallowSize
  * @param {Object} expectedLabel
  */
-function assertLabelAndShallowSize(breakdown, givenDescription, expectedShallowSize, expectedLabel) {
+function assertLabelAndShallowSize(breakdown, givenDescription,
+  expectedShallowSize, expectedLabel) {
   dumpn("Computing label and shallow size from node description:");
   dumpn("Breakdown: " + JSON.stringify(breakdown, null, 4));
   dumpn("Given description: " + JSON.stringify(givenDescription, null, 4));
 
   const visitor = new LabelAndShallowSizeVisitor();
-  CensusUtils.walk(breakdown, description, visitor);
+  CensusUtils.walk(breakdown, givenDescription, visitor);
 
   dumpn("Expected shallow size: " + expectedShallowSize);
   dumpn("Actual shallow size: " + visitor.shallowSize());
@@ -364,7 +373,7 @@ function makeTestDominatorTreeNode(opts, children) {
   }, opts);
 
   if (children && children.length) {
-    children.map(c => c.parentId = node.nodeId);
+    children.map(c => (c.parentId = node.nodeId));
   }
 
   return node;
@@ -375,7 +384,8 @@ function makeTestDominatorTreeNode(opts, children) {
  * `path` from the root to the node the `newChildren` should be inserted
  * beneath. Assert that the resulting tree matches `expected`.
  */
-function assertDominatorTreeNodeInsertion(tree, path, newChildren, moreChildrenAvailable, expected) {
+function assertDominatorTreeNodeInsertion(tree, path, newChildren,
+  moreChildrenAvailable, expected) {
   dumpn("Inserting new children into a dominator tree:");
   dumpn("Dominator tree: " + JSON.stringify(tree, null, 2));
   dumpn("Path: " + JSON.stringify(path, null, 2));
@@ -411,13 +421,13 @@ function assertDeduplicatedPaths({ target, paths, expectedNodes, expectedEdges }
   ok(nodeSet.size === nodes.length,
      "each returned node should be unique");
 
-  for (let node of nodes) {
+  for (const node of nodes) {
     ok(expectedNodeSet.has(node), `the ${node} node was expected`);
   }
 
-  for (let expectedEdge of expectedEdges) {
+  for (const expectedEdge of expectedEdges) {
     let count = 0;
-    for (let edge of edges) {
+    for (const edge of edges) {
       if (edge.from === expectedEdge.from &&
           edge.to === expectedEdge.to &&
           edge.name === expectedEdge.name) {
@@ -425,7 +435,8 @@ function assertDeduplicatedPaths({ target, paths, expectedNodes, expectedEdges }
       }
     }
     equal(count, 1,
-          "should have exactly one matching edge for the expected edge = " + JSON.stringify(edge));
+      "should have exactly one matching edge for the expected edge = "
+      + JSON.stringify(expectedEdge));
   }
 }
 

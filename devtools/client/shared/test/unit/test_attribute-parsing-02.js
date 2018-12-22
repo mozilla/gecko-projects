@@ -1,10 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Test parseAttribute from node-attribute-parser.js
 
-var Cu = Components.utils;
-var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const {parseAttribute} = require("devtools/client/shared/node-attribute-parser");
 
 const TEST_DATA = [{
@@ -107,24 +108,27 @@ const TEST_DATA = [{
 }];
 
 function run_test() {
-  for (let {tagName, namespaceURI, attributeName,
+  for (const {tagName, namespaceURI, attributeName,
             otherAttributes, attributeValue, expected} of TEST_DATA) {
-    do_print("Testing <" + tagName + " " + attributeName + "='" + attributeValue + "'>");
+    info("Testing <" + tagName + " " + attributeName + "='" + attributeValue + "'>");
 
-    let attributes = [...otherAttributes||[], {name: attributeName, value: attributeValue}];
-    let tokens = parseAttribute(namespaceURI, tagName, attributes, attributeName);
+    const attributes = [
+      ...otherAttributes || [],
+      { name: attributeName, value: attributeValue }
+    ];
+    const tokens = parseAttribute(namespaceURI, tagName, attributes, attributeName);
     if (!expected) {
-      do_check_true(!tokens);
+      Assert.ok(!tokens);
       continue;
     }
 
-    do_print("Checking that the number of parsed tokens is correct");
-    do_check_eq(tokens.length, expected.length);
+    info("Checking that the number of parsed tokens is correct");
+    Assert.equal(tokens.length, expected.length);
 
-    for (let i = 0; i < tokens.length; i ++) {
-      do_print("Checking the data in token " + i);
-      do_check_eq(tokens[i].value, expected[i].value);
-      do_check_eq(tokens[i].type, expected[i].type);
+    for (let i = 0; i < tokens.length; i++) {
+      info("Checking the data in token " + i);
+      Assert.equal(tokens[i].value, expected[i].value);
+      Assert.equal(tokens[i].type, expected[i].type);
     }
   }
 }

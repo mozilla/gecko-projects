@@ -5,14 +5,16 @@
  * found in the LICENSE file.
  */
 
+#include "SkOTUtils.h"
+
+#include "SkAdvancedTypefaceMetrics.h"
 #include "SkData.h"
 #include "SkEndian.h"
-#include "SkSFNTHeader.h"
-#include "SkStream.h"
+#include "SkOTTableTypes.h"
 #include "SkOTTable_head.h"
 #include "SkOTTable_name.h"
-#include "SkOTTableTypes.h"
-#include "SkOTUtils.h"
+#include "SkSFNTHeader.h"
+#include "SkStream.h"
 
 extern const uint8_t SK_OT_GlyphData_NoOutline[] = {
     0x0,0x0, //SkOTTableGlyphData::numberOfContours
@@ -83,7 +85,7 @@ SkData* SkOTUtils::RenameFont(SkStreamAsset* fontData, const char* fontName, int
     size_t originalDataSize = fontData->getLength() - oldNameTablePhysicalSize;
     size_t newDataSize = originalDataSize + nameTablePhysicalSize;
 
-    SkAutoTUnref<SkData> rewrittenFontData(SkData::NewUninitialized(newDataSize));
+    auto rewrittenFontData = SkData::MakeUninitialized(newDataSize);
     SK_OT_BYTE* data = static_cast<SK_OT_BYTE*>(rewrittenFontData->writable_data());
 
     if (fontData->read(data, oldNameTableOffset) < oldNameTableOffset) {
@@ -157,7 +159,7 @@ SkData* SkOTUtils::RenameFont(SkStreamAsset* fontData, const char* fontName, int
         }
     }
 
-    return rewrittenFontData.detach();
+    return rewrittenFontData.release();
 }
 
 
@@ -168,13 +170,13 @@ SkOTUtils::LocalizedStrings_NameTable::CreateForFamilyNames(const SkTypeface& ty
     if (0 == nameTableSize) {
         return nullptr;
     }
-    SkAutoTDeleteArray<uint8_t> nameTableData(new uint8_t[nameTableSize]);
+    std::unique_ptr<uint8_t[]> nameTableData(new uint8_t[nameTableSize]);
     size_t copied = typeface.getTableData(nameTag, 0, nameTableSize, nameTableData.get());
     if (copied != nameTableSize) {
         return nullptr;
     }
 
-    return new SkOTUtils::LocalizedStrings_NameTable((SkOTTableName*)nameTableData.detach(),
+    return new SkOTUtils::LocalizedStrings_NameTable((SkOTTableName*)nameTableData.release(),
         SkOTUtils::LocalizedStrings_NameTable::familyNameTypes,
         SK_ARRAY_COUNT(SkOTUtils::LocalizedStrings_NameTable::familyNameTypes));
 }
@@ -201,3 +203,17 @@ SkOTUtils::LocalizedStrings_NameTable::familyNameTypes[3] = {
     SkOTTableName::Record::NameID::Predefined::PreferredFamily,
     SkOTTableName::Record::NameID::Predefined::WWSFamilyName,
 };
+
+void SkOTUtils::SetAdvancedTypefaceFlags(SkOTTableOS2_V4::Type fsType,
+                                         SkAdvancedTypefaceMetrics* info) {
+    SkASSERT(info);
+    // The logic should be identical to SkTypeface_FreeType::onGetAdvancedMetrics().
+    if (fsType.raw.value != 0) {
+        if (SkToBool(fsType.field.Restricted) || SkToBool(fsType.field.Bitmap)) {
+            info->fFlags |= SkAdvancedTypefaceMetrics::kNotEmbeddable_FontFlag;
+        }
+        if (SkToBool(fsType.field.NoSubsetting)) {
+            info->fFlags |= SkAdvancedTypefaceMetrics::kNotSubsettable_FontFlag;
+        }
+    }
+}

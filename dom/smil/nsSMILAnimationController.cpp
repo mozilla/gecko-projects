@@ -5,17 +5,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSMILAnimationController.h"
+
+#include <algorithm>
+
+#include "mozilla/AutoRestore.h"
+#include "mozilla/RestyleManager.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/SVGAnimationElement.h"
+#include "nsContentUtils.h"
+#include "nsCSSProps.h"
+#include "nsIDocument.h"
+#include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
+#include "nsITimer.h"
 #include "nsSMILCompositor.h"
 #include "nsSMILCSSProperty.h"
-#include "nsCSSProps.h"
-#include "nsITimer.h"
-#include "mozilla/dom/Element.h"
-#include "nsIDocument.h"
-#include "mozilla/dom/SVGAnimationElement.h"
 #include "nsSMILTimedElement.h"
-#include <algorithm>
-#include "mozilla/AutoRestore.h"
-#include "RestyleTracker.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -264,7 +269,7 @@ nsSMILAnimationController::StartSampling(nsRefreshDriver* aRefreshDriver)
     // We're effectively resuming from a pause so update our current sample time
     // or else it will confuse our "average time between samples" calculations.
     mCurrentSampleTime = mozilla::TimeStamp::Now();
-    aRefreshDriver->AddRefreshObserver(this, Flush_Style);
+    aRefreshDriver->AddRefreshObserver(this, FlushType::Style);
     mRegisteredWithRefreshDriver = true;
   }
 }
@@ -277,7 +282,7 @@ nsSMILAnimationController::StopSampling(nsRefreshDriver* aRefreshDriver)
     // (and RefreshDriver), which would make GetRefreshDriver() return null.
     MOZ_ASSERT(!GetRefreshDriver() || aRefreshDriver == GetRefreshDriver(),
                "Stopping sampling with wrong refresh driver");
-    aRefreshDriver->RemoveRefreshObserver(this, Flush_Style);
+    aRefreshDriver->RemoveRefreshObserver(this, FlushType::Style);
     mRegisteredWithRefreshDriver = false;
   }
 }
@@ -319,12 +324,16 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
     return;
   }
 
+  bool isStyleFlushNeeded = mResampleNeeded;
   mResampleNeeded = false;
+
+  nsCOMPtr<nsIDocument> document(mDocument);  // keeps 'this' alive too
+
   // Set running sample flag -- do this before flushing styles so that when we
   // flush styles we don't end up requesting extra samples
   AutoRestore<bool> autoRestoreRunningSample(mRunningSample);
   mRunningSample = true;
-  
+
   // STEP 1: Bring model up to date
   // (i)  Rewind elements where necessary
   // (ii) Run milestone samples
@@ -374,11 +383,16 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
   // Create the compositor table
   nsAutoPtr<nsSMILCompositorTable>
     currentCompositorTable(new nsSMILCompositorTable(0));
+  nsTArray<RefPtr<SVGAnimationElement>>
+    animElems(mAnimationElementTable.Count());
 
   for (auto iter = mAnimationElementTable.Iter(); !iter.Done(); iter.Next()) {
     SVGAnimationElement* animElem = iter.Get()->GetKey();
     SampleTimedElement(animElem, &activeContainers);
-    AddAnimationToCompositorTable(animElem, currentCompositorTable);
+    AddAnimationToCompositorTable(animElem,
+                                  currentCompositorTable,
+                                  isStyleFlushNeeded);
+    animElems.AppendElement(animElem);
   }
   activeContainers.Clear();
 
@@ -421,10 +435,11 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
     return;
   }
 
-  nsCOMPtr<nsIDocument> kungFuDeathGrip(mDocument);  // keeps 'this' alive too
-  mDocument->FlushPendingNotifications(Flush_Style);
+  if (isStyleFlushNeeded) {
+    document->FlushPendingNotifications(FlushType::Style);
+  }
 
-  // WARNING: 
+  // WARNING:
   // WARNING: the above flush may have destroyed the pres shell and/or
   // WARNING: frames and other layout related objects.
   // WARNING:
@@ -434,13 +449,14 @@ nsSMILAnimationController::DoSample(bool aSkipUnchangedContainers)
   // random order. For animation from/to 'inherit' values to work correctly
   // when the inherited value is *also* being animated, we really should be
   // traversing our animated nodes in an ancestors-first order (bug 501183)
+  bool mightHavePendingStyleUpdates = false;
   for (auto iter = currentCompositorTable->Iter(); !iter.Done(); iter.Next()) {
-    iter.Get()->ComposeAttribute();
+    iter.Get()->ComposeAttribute(mightHavePendingStyleUpdates);
   }
 
   // Update last compositor table
   mLastCompositorTable = currentCompositorTable.forget();
-  mMightHavePendingStyleUpdates = true;
+  mMightHavePendingStyleUpdates = mightHavePendingStyleUpdates;
 
   NS_ASSERTION(!mResampleNeeded, "Resample dirty flag set during sample!");
 }
@@ -596,7 +612,9 @@ nsSMILAnimationController::SampleTimedElement(
 
 /*static*/ void
 nsSMILAnimationController::AddAnimationToCompositorTable(
-  SVGAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable)
+  SVGAnimationElement* aElement,
+  nsSMILCompositorTable* aCompositorTable,
+  bool& aStyleFlushNeeded)
 {
   // Add a compositor to the hash table if there's not already one there
   nsSMILTargetIdentifier key;
@@ -629,10 +647,11 @@ nsSMILAnimationController::AddAnimationToCompositorTable(
     // trigger this same clause in future samples (until it changes again).
     func.ClearHasChanged();
   }
+  aStyleFlushNeeded |= func.ValueNeedsReparsingEverySample();
 }
 
 static inline bool
-IsTransformAttribute(int32_t aNamespaceID, nsIAtom *aAttributeName)
+IsTransformAttribute(int32_t aNamespaceID, nsAtom *aAttributeName)
 {
   return aNamespaceID == kNameSpaceID_None &&
          (aAttributeName == nsGkAtoms::transform ||
@@ -656,7 +675,7 @@ nsSMILAnimationController::GetTargetIdentifierForAnimation(
   // Look up target (animated) attribute
   // SMILANIM section 3.1, attributeName may
   // have an XMLNS prefix to indicate the XML namespace.
-  nsCOMPtr<nsIAtom> attributeName;
+  RefPtr<nsAtom> attributeName;
   int32_t attributeNamespaceID;
   if (!aAnimElem->GetTargetAttributeName(&attributeNamespaceID,
                                          getter_AddRefs(attributeName)))
@@ -669,46 +688,35 @@ nsSMILAnimationController::GetTargetIdentifierForAnimation(
       (aAnimElem->IsSVGElement(nsGkAtoms::animateTransform)))
     return false;
 
-  // Look up target (animated) attribute-type
-  nsSMILTargetAttrType attributeType = aAnimElem->GetTargetAttributeType();
-
-  // Check if an 'auto' attributeType refers to a CSS property or XML attribute.
-  // Note that SMIL requires we search for CSS properties first. So if they
-  // overlap, 'auto' = 'CSS'. (SMILANIM 3.1)
-  bool isCSS = false;
-  if (attributeType == eSMILTargetAttrType_auto) {
-    if (attributeNamespaceID == kNameSpaceID_None) {
-      // width/height are special as they may be attributes or for
-      // outer-<svg> elements, mapped into style.
-      if (attributeName == nsGkAtoms::width ||
-          attributeName == nsGkAtoms::height) {
-        isCSS = targetElem->GetNameSpaceID() != kNameSpaceID_SVG;
-      } else {
-        nsCSSProperty prop =
-          nsCSSProps::LookupProperty(nsDependentAtomString(attributeName),
-                                     nsCSSProps::eEnabledForAllContent);
-        isCSS = nsSMILCSSProperty::IsPropertyAnimatable(prop);
-      }
-    }
-  } else {
-    isCSS = (attributeType == eSMILTargetAttrType_CSS);
-  }
-
   // Construct the key
-  aResult.mElement = targetElem;
-  aResult.mAttributeName = attributeName;
+  aResult.mElement              = targetElem;
+  aResult.mAttributeName        = attributeName;
   aResult.mAttributeNamespaceID = attributeNamespaceID;
-  aResult.mIsCSS = isCSS;
 
   return true;
 }
 
-void
-nsSMILAnimationController::AddStyleUpdatesTo(RestyleTracker& aTracker)
+bool
+nsSMILAnimationController::PreTraverse()
 {
-  MOZ_ASSERT(mMightHavePendingStyleUpdates,
-             "Should only add style updates when we think we might have some");
+  return PreTraverseInSubtree(nullptr);
+}
 
+bool
+nsSMILAnimationController::PreTraverseInSubtree(Element* aRoot)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mMightHavePendingStyleUpdates) {
+    return false;
+  }
+
+  nsPresContext* context = mDocument->GetPresContext();
+  if (!context) {
+    return false;
+  }
+
+  bool foundElementsNeedingRestyle = false;
   for (auto iter = mAnimationElementTable.Iter(); !iter.Done(); iter.Next()) {
     SVGAnimationElement* animElement = iter.Get()->GetKey();
 
@@ -718,16 +726,29 @@ nsSMILAnimationController::AddStyleUpdatesTo(RestyleTracker& aTracker)
       continue;
     }
 
-    // mIsCSS true means that the rules are the ones returned from
-    // Element::GetSMILOverrideStyleDeclaration (via nsSMILCSSProperty objects),
-    // and mIsCSS false means the rules are nsSMILMappedAttribute objects
-    // returned from nsSVGElement::GetAnimatedContentStyleRule.
-    nsRestyleHint rshint = key.mIsCSS ? eRestyle_StyleAttribute_Animations
-                                      : eRestyle_SVGAttrAnimations;
-    aTracker.AddPendingRestyle(key.mElement, rshint, nsChangeHint(0));
+    // Ignore restyles that aren't in the flattened tree subtree rooted at
+    // aRoot.
+    if (aRoot &&
+        !nsContentUtils::ContentIsFlattenedTreeDescendantOf(key.mElement,
+                                                            aRoot)) {
+      continue;
+    }
+
+    context->RestyleManager()->
+      PostRestyleEventForAnimations(key.mElement,
+                                    CSSPseudoElementType::NotPseudo,
+                                    eRestyle_StyleAttribute_Animations);
+
+    foundElementsNeedingRestyle = true;
   }
 
-  mMightHavePendingStyleUpdates = false;
+  // Only clear the mMightHavePendingStyleUpdates flag if we definitely posted
+  // all restyles.
+  if (!aRoot) {
+    mMightHavePendingStyleUpdates = false;
+  }
+
+  return foundElementsNeedingRestyle;
 }
 
 //----------------------------------------------------------------------
@@ -766,17 +787,14 @@ nsSMILAnimationController::GetRefreshDriver()
     return nullptr;
   }
 
-  nsIPresShell* shell = mDocument->GetShell();
-  if (!shell) {
-    return nullptr;
-  }
-
-  nsPresContext* context = shell->GetPresContext();
+  nsPresContext* context = mDocument->GetPresContext();
   return context ? context->RefreshDriver() : nullptr;
 }
 
 void
 nsSMILAnimationController::FlagDocumentNeedsFlush()
 {
-  mDocument->SetNeedStyleFlush();
+  if (nsIPresShell* shell = mDocument->GetShell()) {
+    shell->SetNeedStyleFlush();
+  }
 }

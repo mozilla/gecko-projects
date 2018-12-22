@@ -21,7 +21,7 @@ namespace dom {
 JSObject*
 SVGFEFloodElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFloodElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFloodElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGFEFloodElement::sStringInfo[1] =
@@ -30,7 +30,7 @@ nsSVGElement::StringInfo SVGFEFloodElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFloodElement)
 
@@ -43,9 +43,9 @@ SVGFEFloodElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   FilterPrimitiveDescription descr(PrimitiveType::Flood);
   nsIFrame* frame = GetPrimaryFrame();
   if (frame) {
-    nsStyleContext* style = frame->StyleContext();
-    Color color(Color::FromABGR(style->StyleSVGReset()->mFloodColor));
-    color.a *= style->StyleSVGReset()->mFloodOpacity;
+    const nsStyleSVGReset* styleSVGReset = frame->Style()->StyleSVGReset();
+    Color color(Color::FromABGR(styleSVGReset->mFloodColor.CalcColor(frame)));
+    color.a *= styleSVGReset->mFloodOpacity;
     descr.Attributes().Set(eFloodColor, color);
   } else {
     descr.Attributes().Set(eFloodColor, Color());
@@ -57,9 +57,10 @@ SVGFEFloodElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGFEFloodElement::IsAttributeMapped(const nsIAtom* name) const
+SVGFEFloodElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
+    sColorMap,
     sFEFloodMap
   };
 

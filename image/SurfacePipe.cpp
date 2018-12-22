@@ -6,10 +6,8 @@
 
 #include "SurfacePipe.h"
 
-#include <utility>
+#include <algorithm>    // for min
 
-#include "mozilla/ClearOnShutdown.h"
-#include "mozilla/DebugOnly.h"
 #include "Decoder.h"
 
 namespace mozilla {
@@ -18,33 +16,6 @@ namespace image {
 using namespace gfx;
 
 using std::min;
-
-/* static */ UniquePtr<NullSurfaceSink> NullSurfaceSink::sSingleton;
-
-/* static */ NullSurfaceSink*
-NullSurfaceSink::Singleton()
-{
-  if (!sSingleton) {
-    MOZ_ASSERT(NS_IsMainThread());
-    sSingleton = MakeUnique<NullSurfaceSink>();
-    ClearOnShutdown(&sSingleton);
-
-    DebugOnly<nsresult> rv = sSingleton->Configure(NullSurfaceConfig { });
-    MOZ_ASSERT(NS_SUCCEEDED(rv), "Couldn't configure a NullSurfaceSink?");
-  }
-
-  return sSingleton.get();
-}
-
-nsresult
-NullSurfaceSink::Configure(const NullSurfaceConfig& aConfig)
-{
-  // Note that the choice of uint32_t as the pixel size here is more or less
-  // arbitrary, since you cannot write to a NullSurfaceSink anyway, but uint32_t
-  // is a natural choice since most SurfacePipes will be for BGRA/BGRX surfaces.
-  ConfigureFilter(IntSize(), sizeof(uint32_t));
-  return NS_OK;
-}
 
 Maybe<SurfaceInvalidRect>
 AbstractSurfaceSink::TakeInvalidRect()
@@ -70,7 +41,7 @@ AbstractSurfaceSink::DoResetToFirstRow()
 }
 
 uint8_t*
-AbstractSurfaceSink::AdvanceRow()
+AbstractSurfaceSink::DoAdvanceRow()
 {
   if (mRow >= uint32_t(InputSize().height)) {
     return nullptr;
@@ -104,10 +75,11 @@ SurfaceSink::Configure(const SurfaceConfig& aConfig)
   // XXX(seth): Once every Decoder subclass uses SurfacePipe, we probably want
   // to allocate the frame directly here and get rid of Decoder::AllocateFrame
   // altogether.
-  nsresult rv = aConfig.mDecoder->AllocateFrame(aConfig.mFrameNum,
-                                                surfaceSize,
+  nsresult rv = aConfig.mDecoder->AllocateFrame(surfaceSize,
                                                 frameRect,
-                                                aConfig.mFormat);
+                                                aConfig.mFormat,
+                                                /* aPaletteDepth */ 0,
+                                                aConfig.mAnimParams);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -147,6 +119,8 @@ SurfaceSink::GetRowPointer() const
 nsresult
 PalettedSurfaceSink::Configure(const PalettedSurfaceConfig& aConfig)
 {
+  MOZ_ASSERT(aConfig.mFormat == SurfaceFormat::B8G8R8A8);
+
   // For paletted surfaces, the surface size is the size of the frame rect.
   IntSize surfaceSize = aConfig.mFrameRect.Size();
 
@@ -154,11 +128,11 @@ PalettedSurfaceSink::Configure(const PalettedSurfaceConfig& aConfig)
   // XXX(seth): Once every Decoder subclass uses SurfacePipe, we probably want
   // to allocate the frame directly here and get rid of Decoder::AllocateFrame
   // altogether.
-  nsresult rv = aConfig.mDecoder->AllocateFrame(aConfig.mFrameNum,
-                                                aConfig.mOutputSize,
+  nsresult rv = aConfig.mDecoder->AllocateFrame(aConfig.mOutputSize,
                                                 aConfig.mFrameRect,
                                                 aConfig.mFormat,
-                                                aConfig.mPaletteDepth);
+                                                aConfig.mPaletteDepth,
+                                                aConfig.mAnimParams);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -170,7 +144,7 @@ PalettedSurfaceSink::Configure(const PalettedSurfaceConfig& aConfig)
 
   MOZ_ASSERT(mImageData);
   MOZ_ASSERT(mImageDataLength ==
-               uint32_t(mFrameRect.width * mFrameRect.height * sizeof(uint8_t)));
+             uint32_t(mFrameRect.Width() * mFrameRect.Height() * sizeof(uint8_t)));
 
   ConfigureFilter(surfaceSize, sizeof(uint8_t));
   return NS_OK;

@@ -11,37 +11,28 @@
 
 namespace mozilla {
 
-class WMFDecoderModule : public PlatformDecoderModule {
+class WMFDecoderModule : public PlatformDecoderModule
+{
 public:
-  WMFDecoderModule();
-  virtual ~WMFDecoderModule();
-
   // Initializes the module, loads required dynamic libraries, etc.
   nsresult Startup() override;
 
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override;
 
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override;
 
-  bool SupportsMimeType(const nsACString& aMimeType) const override;
-
-  ConversionRequired
-  DecoderNeedsConversion(const TrackInfo& aConfig) const override;
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override;
+  bool Supports(const TrackInfo& aTrackInfo,
+                DecoderDoctorDiagnostics* aDiagnostics) const override;
 
   // Called on main thread.
   static void Init();
 
   // Called from any thread, must call init first
   static int GetNumDecoderThreads();
-  static bool LowLatencyMFTEnabled();
 
   // Accessors that report whether we have the required MFTs available
   // on the system to play various codecs. Windows Vista doesn't have the
@@ -52,7 +43,9 @@ public:
   static bool HasH264();
 
 private:
-  bool mWMFInitialized;
+  virtual ~WMFDecoderModule();
+
+  bool mWMFInitialized = false;
 };
 
 } // namespace mozilla

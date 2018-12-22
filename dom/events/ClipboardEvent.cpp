@@ -26,33 +26,13 @@ ClipboardEvent::ClipboardEvent(EventTarget* aOwner,
   }
 }
 
-NS_INTERFACE_MAP_BEGIN(ClipboardEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMClipboardEvent)
-NS_INTERFACE_MAP_END_INHERITING(Event)
-
-NS_IMPL_ADDREF_INHERITED(ClipboardEvent, Event)
-NS_IMPL_RELEASE_INHERITED(ClipboardEvent, Event)
-
-nsresult
-ClipboardEvent::InitClipboardEvent(const nsAString& aType,
-                                   bool aCanBubble,
-                                   bool aCancelable,
-                                   nsIDOMDataTransfer* aClipboardData)
-{
-  nsCOMPtr<DataTransfer> clipboardData = do_QueryInterface(aClipboardData);
-  // Null clipboardData is OK
-
-  ErrorResult rv;
-  InitClipboardEvent(aType, aCanBubble, aCancelable, clipboardData);
-
-  return rv.StealNSResult();
-}
-
 void
 ClipboardEvent::InitClipboardEvent(const nsAString& aType, bool aCanBubble,
                                    bool aCancelable,
                                    DataTransfer* aClipboardData)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   Event::InitEvent(aType, aCanBubble, aCancelable);
   mEvent->AsClipboardEvent()->mClipboardData = aClipboardData;
 }
@@ -75,7 +55,8 @@ ClipboardEvent::Constructor(const GlobalObject& aGlobal,
       // support other types of events, make sure that read/write privileges are
       // checked properly within DataTransfer.
       clipboardData = new DataTransfer(ToSupports(e), eCopy, false, -1);
-      clipboardData->SetData(aParam.mDataType, aParam.mData, aRv);
+      clipboardData->SetData(aParam.mDataType, aParam.mData,
+                             *aGlobal.GetSubjectPrincipal(), aRv);
       NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
     }
   }
@@ -83,14 +64,8 @@ ClipboardEvent::Constructor(const GlobalObject& aGlobal,
   e->InitClipboardEvent(aType, aParam.mBubbles, aParam.mCancelable,
                         clipboardData);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
-}
-
-NS_IMETHODIMP
-ClipboardEvent::GetClipboardData(nsIDOMDataTransfer** aClipboardData)
-{
-  NS_IF_ADDREF(*aClipboardData = GetClipboardData());
-  return NS_OK;
 }
 
 DataTransfer*

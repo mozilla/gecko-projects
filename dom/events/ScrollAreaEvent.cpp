@@ -22,28 +22,33 @@ ScrollAreaEvent::ScrollAreaEvent(EventTarget* aOwner,
   mClientArea->SetLayoutRect(aEvent ? aEvent->mArea : nsRect());
 }
 
+NS_IMPL_CYCLE_COLLECTION_INHERITED(ScrollAreaEvent, UIEvent,
+                                   mClientArea)
+
 NS_IMPL_ADDREF_INHERITED(ScrollAreaEvent, UIEvent)
 NS_IMPL_RELEASE_INHERITED(ScrollAreaEvent, UIEvent)
 
-NS_INTERFACE_MAP_BEGIN(ScrollAreaEvent)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ScrollAreaEvent)
 NS_INTERFACE_MAP_END_INHERITING(UIEvent)
 
 void
 ScrollAreaEvent::InitScrollAreaEvent(const nsAString& aEventType,
                                      bool aCanBubble,
                                      bool aCancelable,
-                                     nsGlobalWindow* aView,
+                                     nsGlobalWindowInner* aView,
                                      int32_t aDetail,
                                      float aX,
                                      float aY,
                                      float aWidth,
                                      float aHeight)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   UIEvent::InitUIEvent(aEventType, aCanBubble, aCancelable, aView, aDetail);
   mClientArea->SetRect(aX, aY, aWidth, aHeight);
 }
 
-NS_IMETHODIMP_(void)
+void
 ScrollAreaEvent::Serialize(IPC::Message* aMsg,
                            bool aSerializeInterfaceType)
 {
@@ -59,8 +64,8 @@ ScrollAreaEvent::Serialize(IPC::Message* aMsg,
   IPC::WriteParam(aMsg, Height());
 }
 
-NS_IMETHODIMP_(bool)
-ScrollAreaEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
+bool
+ScrollAreaEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
 {
   NS_ENSURE_TRUE(Event::Deserialize(aMsg, aIter), false);
 

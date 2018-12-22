@@ -3,24 +3,19 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const TEST_URL = "data:text/html,test for dynamically registering and unregistering tools";
+
 var toolbox;
 
-function test()
-{
-  gBrowser.selectedTab = gBrowser.addTab();
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+function test() {
+  addTab(TEST_URL).then(tab => {
+    const target = TargetFactory.forTab(tab);
     gDevTools.showToolbox(target).then(testRegister);
-  }, true);
-
-  content.location = "data:text/html,test for dynamically registering and unregistering tools";
+  });
 }
 
-function testRegister(aToolbox)
-{
-  toolbox = aToolbox
+function testRegister(aToolbox) {
+  toolbox = aToolbox;
   gDevTools.once("tool-registered", toolRegistered);
 
   gDevTools.registerTool({
@@ -29,28 +24,24 @@ function testRegister(aToolbox)
     inMenu: true,
     isTargetSupported: () => true,
     build: function() {},
-    key: "t"
   });
 }
 
-function toolRegistered(event, toolId)
-{
+function toolRegistered(toolId) {
   is(toolId, "test-tool", "tool-registered event handler sent tool id");
 
   ok(gDevTools.getToolDefinitionMap().has(toolId), "tool added to map");
 
   // test that it appeared in the UI
-  let doc = toolbox.frame.contentDocument;
-  let tab = doc.getElementById("toolbox-tab-" + toolId);
+  const doc = toolbox.doc;
+  const tab = doc.getElementById("toolbox-tab-" + toolId);
   ok(tab, "new tool's tab exists in toolbox UI");
 
-  let panel = doc.getElementById("toolbox-panel-" + toolId);
+  const panel = doc.getElementById("toolbox-panel-" + toolId);
   ok(panel, "new tool's panel exists in toolbox UI");
 
-  for (let win of getAllBrowserWindows()) {
-    let key = win.document.getElementById("key_" + toolId);
-    ok(key, "key for new tool added to every browser window");
-    let menuitem = win.document.getElementById("menuitem_" + toolId);
+  for (const win of getAllBrowserWindows()) {
+    const menuitem = win.document.getElementById("menuitem_" + toolId);
     ok(menuitem, "menu item of new tool added to every browser window");
   }
 
@@ -59,50 +50,45 @@ function toolRegistered(event, toolId)
 }
 
 function getAllBrowserWindows() {
-  let wins = [];
-  let enumerator = Services.wm.getEnumerator("navigator:browser");
+  const wins = [];
+  const enumerator = Services.wm.getEnumerator("navigator:browser");
   while (enumerator.hasMoreElements()) {
     wins.push(enumerator.getNext());
   }
   return wins;
 }
 
-function testUnregister()
-{
+function testUnregister() {
   gDevTools.once("tool-unregistered", toolUnregistered);
 
   gDevTools.unregisterTool("test-tool");
 }
 
-function toolUnregistered(event, toolDefinition)
-{
-  let toolId = toolDefinition.id;
+function toolUnregistered(toolId) {
   is(toolId, "test-tool", "tool-unregistered event handler sent tool id");
 
   ok(!gDevTools.getToolDefinitionMap().has(toolId), "tool removed from map");
 
   // test that it disappeared from the UI
-  let doc = toolbox.frame.contentDocument;
-  let tab = doc.getElementById("toolbox-tab-" + toolId);
+  const doc = toolbox.doc;
+  const tab = doc.getElementById("toolbox-tab-" + toolId);
   ok(!tab, "tool's tab was removed from the toolbox UI");
 
-  let panel = doc.getElementById("toolbox-panel-" + toolId);
+  const panel = doc.getElementById("toolbox-panel-" + toolId);
   ok(!panel, "tool's panel was removed from toolbox UI");
 
-  for (let win of getAllBrowserWindows()) {
-    let key = win.document.getElementById("key_" + toolId);
-    ok(!key , "key removed from every browser window");
-    let menuitem = win.document.getElementById("menuitem_" + toolId);
+  for (const win of getAllBrowserWindows()) {
+    const menuitem = win.document.getElementById("menuitem_" + toolId);
     ok(!menuitem, "menu item removed from every browser window");
   }
 
   cleanup();
 }
 
-function cleanup()
-{
-  toolbox.destroy();
-  toolbox = null;
-  gBrowser.removeCurrentTab();
-  finish();
+function cleanup() {
+  toolbox.destroy().then(() => {
+    toolbox = null;
+    gBrowser.removeCurrentTab();
+    finish();
+  });
 }

@@ -3,18 +3,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stddef.h>                     // for nullptr
-
+#include "mozilla/EditorSpellCheck.h"   // for NS_EDITORSPELLCHECK_CID, etc
+#include "mozilla/HTMLEditorController.h" // for HTMLEditorController, etc
 #include "mozilla/Module.h"             // for Module, Module::CIDEntry, etc
 #include "mozilla/ModuleUtils.h"
 #include "mozilla/mozalloc.h"           // for operator new
 #include "nsCOMPtr.h"                   // for nsCOMPtr, getter_AddRefs, etc
 #include "nsComponentManagerUtils.h"    // for do_CreateInstance
 #include "nsComposeTxtSrvFilter.h"      // for nsComposeTxtSrvFilter, etc
-#include "nsComposerController.h"       // for nsComposerController, etc
 #include "nsDebug.h"                    // for NS_ENSURE_SUCCESS
 #include "nsEditingSession.h"           // for NS_EDITINGSESSION_CID, etc
-#include "nsEditorSpellCheck.h"         // for NS_EDITORSPELLCHECK_CID, etc
 #include "nsError.h"                    // for NS_ERROR_NO_AGGREGATION, etc
 #include "nsIController.h"              // for nsIController
 #include "nsIControllerCommandTable.h"  // for nsIControllerCommandTable, etc
@@ -24,6 +22,8 @@
 #include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
 #include "nsServiceManagerUtils.h"      // for do_GetService
 #include "nscore.h"                     // for nsresult
+
+using mozilla::EditorSpellCheck;
 
 class nsISupports;
 
@@ -45,7 +45,7 @@ static NS_DEFINE_CID(kHTMLEditorDocStateCommandTableCID, NS_HTMLEDITOR_DOCSTATE_
 //
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsEditingSession)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsEditorSpellCheck)
+NS_GENERIC_FACTORY_CONSTRUCTOR(EditorSpellCheck)
 
 // There are no macros that enable us to have 2 constructors
 // for the same object
@@ -57,21 +57,19 @@ static nsresult
 nsComposeTxtSrvFilterConstructor(nsISupports *aOuter, REFNSIID aIID,
                                  void **aResult, bool aIsForMail)
 {
-    *aResult = nullptr;
-    if (nullptr != aOuter)
-    {
-        return NS_ERROR_NO_AGGREGATION;
-    }
-    nsComposeTxtSrvFilter * inst = new nsComposeTxtSrvFilter();
-    if (nullptr == inst)
-    {
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-    NS_ADDREF(inst);
-	  inst->Init(aIsForMail);
-    nsresult rv = inst->QueryInterface(aIID, aResult);
-    NS_RELEASE(inst);
-    return rv;
+  *aResult = nullptr;
+  if (aOuter) {
+      return NS_ERROR_NO_AGGREGATION;
+  }
+  nsComposeTxtSrvFilter * inst = new nsComposeTxtSrvFilter();
+  if (!inst) {
+      return NS_ERROR_OUT_OF_MEMORY;
+  }
+  NS_ADDREF(inst);
+  inst->Init(aIsForMail);
+  nsresult rv = inst->QueryInterface(aIID, aResult);
+  NS_RELEASE(inst);
+  return rv;
 }
 
 static nsresult
@@ -79,7 +77,7 @@ nsComposeTxtSrvFilterConstructorForComposer(nsISupports *aOuter,
                                             REFNSIID aIID,
                                             void **aResult)
 {
-    return nsComposeTxtSrvFilterConstructor(aOuter, aIID, aResult, false);
+  return nsComposeTxtSrvFilterConstructor(aOuter, aIID, aResult, false);
 }
 
 static nsresult
@@ -87,7 +85,7 @@ nsComposeTxtSrvFilterConstructorForMail(nsISupports *aOuter,
                                         REFNSIID aIID,
                                         void **aResult)
 {
-    return nsComposeTxtSrvFilterConstructor(aOuter, aIID, aResult, true);
+  return nsComposeTxtSrvFilterConstructor(aOuter, aIID, aResult, true);
 }
 
 
@@ -158,7 +156,7 @@ nsHTMLEditorCommandTableConstructor(nsISupports *aOuter, REFNSIID aIID,
       do_CreateInstance(NS_CONTROLLERCOMMANDTABLE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = nsComposerController::RegisterHTMLEditorCommands(commandTable);
+  rv = mozilla::HTMLEditorController::RegisterHTMLEditorCommands(commandTable);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // we don't know here whether we're being created as an instance,
@@ -178,7 +176,8 @@ nsHTMLEditorDocStateCommandTableConstructor(nsISupports *aOuter, REFNSIID aIID,
       do_CreateInstance(NS_CONTROLLERCOMMANDTABLE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = nsComposerController::RegisterEditorDocStateCommands(commandTable);
+  rv = mozilla::HTMLEditorController::RegisterEditorDocStateCommands(
+                                        commandTable);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // we don't know here whether we're being created as an instance,
@@ -203,7 +202,7 @@ static const mozilla::Module::CIDEntry kComposerCIDs[] = {
   { &kNS_HTMLEDITOR_COMMANDTABLE_CID, false, nullptr, nsHTMLEditorCommandTableConstructor },
   { &kNS_HTMLEDITOR_DOCSTATE_COMMANDTABLE_CID, false, nullptr, nsHTMLEditorDocStateCommandTableConstructor },
   { &kNS_EDITINGSESSION_CID, false, nullptr, nsEditingSessionConstructor },
-  { &kNS_EDITORSPELLCHECK_CID, false, nullptr, nsEditorSpellCheckConstructor },
+  { &kNS_EDITORSPELLCHECK_CID, false, nullptr, EditorSpellCheckConstructor },
   { &kNS_COMPOSERTXTSRVFILTER_CID, false, nullptr, nsComposeTxtSrvFilterConstructorForComposer },
   { &kNS_COMPOSERTXTSRVFILTERMAIL_CID, false, nullptr, nsComposeTxtSrvFilterConstructorForMail },
   { nullptr }

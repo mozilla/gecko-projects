@@ -12,7 +12,6 @@
 #include "nsCOMPtr.h"
 #include "nsNetCID.h"
 #include "nsXPCOM.h"
-#include "nsXPCOMGlue.h"
 
 #include "nsIComponentManager.h"
 #include "nsIComponentRegistrar.h"
@@ -28,6 +27,8 @@
 #define GTEST_HAS_RTTI 0
 #include "gtest/gtest.h"
 #include "gtest_utils.h"
+
+using namespace mozilla;
 
 namespace {
 class SocketTransportServiceTest : public MtransportTest {
@@ -74,12 +75,12 @@ class SocketTransportServiceTest : public MtransportTest {
 
 
 // Received an event.
-class EventReceived : public nsRunnable {
+class EventReceived : public Runnable {
 public:
   explicit EventReceived(SocketTransportServiceTest *test) :
-      test_(test) {}
+      Runnable("EventReceived"), test_(test) {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     test_->ReceiveEvent();
     return NS_OK;
   }
@@ -89,12 +90,12 @@ public:
 
 
 // Register our listener on the socket
-class RegisterEvent : public nsRunnable {
+class RegisterEvent : public Runnable {
 public:
   explicit RegisterEvent(SocketTransportServiceTest *test) :
-      test_(test) {}
+      Runnable("RegisterEvent"), test_(test) {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     test_->RegisterHandler();
     return NS_OK;
   }

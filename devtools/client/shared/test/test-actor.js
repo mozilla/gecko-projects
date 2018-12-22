@@ -2,34 +2,42 @@
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* exported TestActor, TestActorFront */
+
 "use strict";
 
 // A helper actor for inspector and markupview tests.
 
-var { Cc, Ci, Cu, Cr } = require("chrome");
-const {getRect, getElementFromPoint, getAdjustedQuads} = require("devtools/shared/layout/utils");
-const promise = require("promise");
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
-var DOMUtils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-var loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
-            .getService(Ci.mozIJSSubScriptLoader);
+const { Ci, Cu } = require("chrome");
+const Services = require("Services");
+const {
+  getRect, getAdjustedQuads, getWindowDimensions
+} = require("devtools/shared/layout/utils");
+const defer = require("devtools/shared/defer");
+const {
+  isContentStylesheet,
+  getCSSStyleRules
+} = require("devtools/shared/inspector/css-logic");
+const InspectorUtils = require("InspectorUtils");
 
 // Set up a dummy environment so that EventUtils works. We need to be careful to
 // pass a window object into each EventUtils method we call rather than having
 // it rely on the |window| global.
-let EventUtils = {};
+const EventUtils = {};
 EventUtils.window = {};
 EventUtils.parent = {};
-EventUtils._EU_Ci = Components.interfaces;
-EventUtils._EU_Cc = Components.classes;
-loader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
+/* eslint-disable camelcase */
+EventUtils._EU_Ci = Ci;
+EventUtils._EU_Cc = Cc;
+/* eslint-disable camelcase */
+Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
 
-const protocol = require("devtools/server/protocol");
-const {Arg, Option, method, RetVal, types} = protocol;
+const protocol = require("devtools/shared/protocol");
+const {Arg, RetVal} = protocol;
 
-var dumpn = msg => {
+const dumpn = msg => {
   dump(msg + "\n");
-}
+};
 
 /**
  * Get the instance of CanvasFrameAnonymousContentHelper used by a given
@@ -40,22 +48,258 @@ var dumpn = msg => {
  * @param {String} actorID
  */
 function getHighlighterCanvasFrameHelper(conn, actorID) {
-  let actor = conn.getActor(actorID);
+  const actor = conn.getActor(actorID);
   if (actor && actor._highlighter) {
     return actor._highlighter.markup;
   }
+  return null;
 }
 
-var TestActor = exports.TestActor = protocol.ActorClass({
+var testSpec = protocol.generateActorSpec({
   typeName: "testActor",
 
-  initialize: function(conn, tabActor, options) {
+  methods: {
+    getNumberOfElementMatches: {
+      request: {
+        selector: Arg(0, "string"),
+      },
+      response: {
+        value: RetVal("number")
+      }
+    },
+    getHighlighterAttribute: {
+      request: {
+        nodeID: Arg(0, "string"),
+        name: Arg(1, "string"),
+        actorID: Arg(2, "string")
+      },
+      response: {
+        value: RetVal("string")
+      }
+    },
+    getHighlighterNodeTextContent: {
+      request: {
+        nodeID: Arg(0, "string"),
+        actorID: Arg(1, "string")
+      },
+      response: {
+        value: RetVal("string")
+      }
+    },
+    getSelectorHighlighterBoxNb: {
+      request: {
+        highlighter: Arg(0, "string"),
+      },
+      response: {
+        value: RetVal("number")
+      }
+    },
+    changeHighlightedNodeWaitForUpdate: {
+      request: {
+        name: Arg(0, "string"),
+        value: Arg(1, "string"),
+        actorID: Arg(2, "string")
+      },
+      response: {}
+    },
+    waitForHighlighterEvent: {
+      request: {
+        event: Arg(0, "string"),
+        actorID: Arg(1, "string")
+      },
+      response: {}
+    },
+    waitForEventOnNode: {
+      request: {
+        eventName: Arg(0, "string"),
+        selector: Arg(1, "nullable:string")
+      },
+      response: {}
+    },
+    changeZoomLevel: {
+      request: {
+        level: Arg(0, "string"),
+        actorID: Arg(1, "string"),
+      },
+      response: {}
+    },
+    getAllAdjustedQuads: {
+      request: {
+        selector: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    synthesizeMouse: {
+      request: {
+        object: Arg(0, "json")
+      },
+      response: {}
+    },
+    synthesizeKey: {
+      request: {
+        args: Arg(0, "json")
+      },
+      response: {}
+    },
+    scrollIntoView: {
+      request: {
+        args: Arg(0, "string")
+      },
+      response: {}
+    },
+    hasPseudoClassLock: {
+      request: {
+        selector: Arg(0, "string"),
+        pseudo: Arg(1, "string")
+      },
+      response: {
+        value: RetVal("boolean")
+      }
+    },
+    loadAndWaitForCustomEvent: {
+      request: {
+        url: Arg(0, "string")
+      },
+      response: {}
+    },
+    hasNode: {
+      request: {
+        selector: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("boolean")
+      }
+    },
+    getBoundingClientRect: {
+      request: {
+        selector: Arg(0, "string"),
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    setProperty: {
+      request: {
+        selector: Arg(0, "string"),
+        property: Arg(1, "string"),
+        value: Arg(2, "string")
+      },
+      response: {}
+    },
+    getProperty: {
+      request: {
+        selector: Arg(0, "string"),
+        property: Arg(1, "string")
+      },
+      response: {
+        value: RetVal("string")
+      }
+    },
+    getAttribute: {
+      request: {
+        selector: Arg(0, "string"),
+        property: Arg(1, "string")
+      },
+      response: {
+        value: RetVal("string")
+      }
+    },
+    setAttribute: {
+      request: {
+        selector: Arg(0, "string"),
+        property: Arg(1, "string"),
+        value: Arg(2, "string")
+      },
+      response: {}
+    },
+    removeAttribute: {
+      request: {
+        selector: Arg(0, "string"),
+        property: Arg(1, "string")
+      },
+      response: {}
+    },
+    reload: {
+      request: {},
+      response: {}
+    },
+    reloadFrame: {
+      request: {
+        selector: Arg(0, "string"),
+      },
+      response: {}
+    },
+    eval: {
+      request: {
+        js: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("nullable:json")
+      }
+    },
+    scrollWindow: {
+      request: {
+        x: Arg(0, "number"),
+        y: Arg(1, "number"),
+        relative: Arg(2, "nullable:boolean"),
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    reflow: {},
+    getNodeRect: {
+      request: {
+        selector: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    getTextNodeRect: {
+      request: {
+        parentSelector: Arg(0, "string"),
+        childNodeIndex: Arg(1, "number")
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    getNodeInfo: {
+      request: {
+        selector: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    getStyleSheetsInfoForNode: {
+      request: {
+        selector: Arg(0, "string")
+      },
+      response: {
+        value: RetVal("json")
+      }
+    },
+    getWindowDimensions: {
+      request: {},
+      response: {
+        value: RetVal("json")
+      }
+    }
+  }
+});
+
+var TestActor = exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
+  initialize: function(conn, targetActor, options) {
     this.conn = conn;
-    this.tabActor = tabActor;
+    this.targetActor = targetActor;
   },
 
   get content() {
-    return this.tabActor.window;
+    return this.targetActor.window;
   },
 
   /**
@@ -65,13 +309,13 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    *   are considered matching an iframe, so that we can query element
    *   within deep iframes.
    */
-  _querySelector: function (selector) {
+  _querySelector: function(selector) {
     let document = this.content.document;
     if (Array.isArray(selector)) {
-      let fullSelector = selector.join(" >> ");
-      while(selector.length > 1) {
-        let str = selector.shift();
-        let iframe = document.querySelector(str);
+      const fullSelector = selector.join(" >> ");
+      while (selector.length > 1) {
+        const str = selector.shift();
+        const iframe = document.querySelector(str);
         if (!iframe) {
           throw new Error("Unable to find element with selector \"" + str + "\"" +
                           " (full selector:" + fullSelector + ")");
@@ -84,7 +328,7 @@ var TestActor = exports.TestActor = protocol.ActorClass({
       }
       selector = selector.shift();
     }
-    let node = document.querySelector(selector);
+    const node = document.querySelector(selector);
     if (!node) {
       throw new Error("Unable to find element with selector \"" + selector + "\"");
     }
@@ -94,17 +338,9 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * Helper to get the number of elements matching a selector
    * @param {string} CSS selector.
    */
-  getNumberOfElementMatches: protocol.method(function (selector,
-                                                       root=this.content.document) {
+  getNumberOfElementMatches: function(selector, root = this.content.document) {
     return root.querySelectorAll(selector).length;
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-    },
-    response: {
-      value: RetVal("number")
-    }
-  }),
+  },
 
   /**
    * Get a value for a given attribute name, on one of the elements of the box
@@ -115,21 +351,13 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * - {String} actorID The highlighter actor ID
    * @return {String} The value, if found, null otherwise
    */
-  getHighlighterAttribute: protocol.method(function (nodeID, name, actorID) {
-    let helper = getHighlighterCanvasFrameHelper(this.conn, actorID);
+  getHighlighterAttribute: function(nodeID, name, actorID) {
+    const helper = getHighlighterCanvasFrameHelper(this.conn, actorID);
     if (helper) {
       return helper.getAttributeForElement(nodeID, name);
     }
-  }, {
-    request: {
-      nodeID: Arg(0, "string"),
-      name: Arg(1, "string"),
-      actorID: Arg(2, "string")
-    },
-    response: {
-      value: RetVal("string")
-    }
-  }),
+    return null;
+  },
 
   /**
    * Get the textcontent of one of the elements of the box model highlighter,
@@ -138,22 +366,14 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} actorID The highlighter actor ID
    * @return {String} The textcontent value
    */
-  getHighlighterNodeTextContent: protocol.method(function (nodeID, actorID) {
+  getHighlighterNodeTextContent: function(nodeID, actorID) {
     let value;
-    let helper = getHighlighterCanvasFrameHelper(this.conn, actorID);
+    const helper = getHighlighterCanvasFrameHelper(this.conn, actorID);
     if (helper) {
       value = helper.getTextContentForElement(nodeID);
     }
     return value;
-  }, {
-    request: {
-      nodeID: Arg(0, "string"),
-      actorID: Arg(1, "string")
-    },
-    response: {
-      value: RetVal("string")
-    }
-  }),
+  },
 
   /**
    * Get the number of box-model highlighters created by the SelectorHighlighter
@@ -161,22 +381,14 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @return {Number} The number of box-model highlighters created, or null if the
    * SelectorHighlighter was not found.
    */
-  getSelectorHighlighterBoxNb: protocol.method(function (actorID) {
-    let highlighter = this.conn.getActor(actorID);
-    let {_highlighter: h} = highlighter;
+  getSelectorHighlighterBoxNb: function(actorID) {
+    const highlighter = this.conn.getActor(actorID);
+    const {_highlighter: h} = highlighter;
     if (!h || !h._highlighters) {
       return null;
-    } else {
-      return h._highlighters.length;
     }
-  }, {
-    request: {
-      highlighter: Arg(0, "string"),
-    },
-    response: {
-      value: RetVal("number")
-    }
-  }),
+    return h._highlighters.length;
+  },
 
   /**
    * Subscribe to the box-model highlighter's update event, modify an attribute of
@@ -186,45 +398,28 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} the new value for the attribute
    * @param {String} actorID The highlighter actor ID
    */
-  changeHighlightedNodeWaitForUpdate: protocol.method(function (name, value, actorID) {
-    let deferred = promise.defer();
+  changeHighlightedNodeWaitForUpdate: function(name, value, actorID) {
+    return new Promise(resolve => {
+      const highlighter = this.conn.getActor(actorID);
+      const {_highlighter: h} = highlighter;
 
-    let highlighter = this.conn.getActor(actorID);
-    let {_highlighter: h} = highlighter;
+      h.once("updated", resolve);
 
-    h.once("updated", () => {
-      deferred.resolve();
+      h.currentNode.setAttribute(name, value);
     });
-
-    h.currentNode.setAttribute(name, value);
-
-    return deferred.promise;
-  }, {
-    request: {
-      name: Arg(0, "string"),
-      value: Arg(1, "string"),
-      actorID: Arg(2, "string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Subscribe to a given highlighter event and respond when the event is received.
    * @param {String} event The name of the highlighter event to listen to
    * @param {String} actorID The highlighter actor ID
    */
-  waitForHighlighterEvent: protocol.method(function (event, actorID) {
-    let highlighter = this.conn.getActor(actorID);
-    let {_highlighter: h} = highlighter;
+  waitForHighlighterEvent: function(event, actorID) {
+    const highlighter = this.conn.getActor(actorID);
+    const {_highlighter: h} = highlighter;
 
     return h.once(event);
-  }, {
-    request: {
-      event: Arg(0, "string"),
-      actorID: Arg(1, "string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Wait for a specific event on a node matching the provided selector.
@@ -232,21 +427,14 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} selector Optional:  css selector of the node which should
    *        trigger the event. If ommitted, target will be the content window
    */
-  waitForEventOnNode: protocol.method(function (eventName, selector) {
+  waitForEventOnNode: function(eventName, selector) {
     return new Promise(resolve => {
-      let node = selector ? this._querySelector(selector) : this.content;
-      node.addEventListener(eventName, function onEvent() {
-        node.removeEventListener(eventName, onEvent);
+      const node = selector ? this._querySelector(selector) : this.content;
+      node.addEventListener(eventName, function() {
         resolve();
-      });
+      }, {once: true});
     });
-  }, {
-    request: {
-      eventName: Arg(0, "string"),
-      selector: Arg(1, "nullable:string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Change the zoom level of the page.
@@ -255,52 +443,23 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {Number} level The new zoom level
    * @param {String} actorID Optional. The highlighter actor ID
    */
-  changeZoomLevel: protocol.method(function (level, actorID) {
+  changeZoomLevel: function(level, actorID) {
     dumpn("Zooming page to " + level);
-    let deferred = promise.defer();
+    return new Promise(resolve => {
+      if (actorID) {
+        const actor = this.conn.getActor(actorID);
+        const {_highlighter: h} = actor;
+        h.once("updated", resolve);
+      } else {
+        resolve();
+      }
 
-    if (actorID) {
-      let actor = this.conn.getActor(actorID);
-      let {_highlighter: h} = actor;
-      h.once("updated", () => {
-        deferred.resolve();
-      });
-    } else {
-      deferred.resolve();
-    }
-
-    let docShell = this.content.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell);
-    docShell.contentViewer.fullZoom = level;
-
-    return deferred.promise;
-  }, {
-    request: {
-      level: Arg(0, "string"),
-      actorID: Arg(1, "string"),
-    },
-    response: {}
-  }),
-
-  assertElementAtPoint: protocol.method(function (x, y, selector) {
-    let elementAtPoint = getElementFromPoint(this.content.document, x, y);
-    if (!elementAtPoint) {
-      throw new Error("Unable to find element at (" + x + ", " + y + ")");
-    }
-    let node = this._querySelector(selector);
-    return node == elementAtPoint;
-  }, {
-    request: {
-      x: Arg(0, "number"),
-      y: Arg(1, "number"),
-      selector: Arg(2, "string")
-    },
-    response: {
-      value: RetVal("boolean")
-    }
-  }),
-
+      const docShell = this.content.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsIWebNavigation)
+                                 .QueryInterface(Ci.nsIDocShell);
+      docShell.contentViewer.fullZoom = level;
+    });
+  },
 
   /**
    * Get all box-model regions' adjusted boxquads for the given element
@@ -308,27 +467,21 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @return {Object} An object with each property being a box-model region, each
    * of them being an object with the p1/p2/p3/p4 properties
    */
-  getAllAdjustedQuads: protocol.method(function(selector) {
-    let regions = {};
-    let node = this._querySelector(selector);
-    for (let boxType of ["content", "padding", "border", "margin"]) {
+  getAllAdjustedQuads: function(selector) {
+    const regions = {};
+    const node = this._querySelector(selector);
+    for (const boxType of ["content", "padding", "border", "margin"]) {
       regions[boxType] = getAdjustedQuads(this.content, node, boxType);
     }
 
     return regions;
-  }, {
-    request: {
-      selector: Arg(0, "string")
-    },
-    response: {
-      value: RetVal("json")
-    }
-  }),
+  },
 
   /**
-   * Synthesize a mouse event on an element. This handler doesn't send a message
-   * back. Consumers should listen to specific events on the inspector/highlighter
-   * to know when the event got synthesized.
+   * Synthesize a mouse event on an element, after ensuring that it is visible
+   * in the viewport. This handler doesn't send a message back. Consumers
+   * should listen to specific events on the inspector/highlighter to know when
+   * the event got synthesized.
    * @param {String} selector The node selector to get the node target for the event
    * @param {Number} x
    * @param {Number} y
@@ -336,34 +489,33 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    *                  synthesizeMouseAtCenter will be used instead
    * @param {Object} options Other event options
    */
-  synthesizeMouse: protocol.method(function({ selector, x, y, center, options }) {
-    let node = this._querySelector(selector);
-
+  synthesizeMouse: function({ selector, x, y, center, options }) {
+    const node = this._querySelector(selector);
+    node.scrollIntoView();
     if (center) {
       EventUtils.synthesizeMouseAtCenter(node, options, node.ownerDocument.defaultView);
     } else {
       EventUtils.synthesizeMouse(node, x, y, options, node.ownerDocument.defaultView);
     }
-  }, {
-    request: {
-      object: Arg(0, "json")
-    },
-    response: {}
-  }),
+  },
 
   /**
   * Synthesize a key event for an element. This handler doesn't send a message
   * back. Consumers should listen to specific events on the inspector/highlighter
   * to know when the event got synthesized.
   */
-  synthesizeKey: protocol.method(function ({key, options, content}) {
+  synthesizeKey: function({key, options, content}) {
     EventUtils.synthesizeKey(key, options, this.content);
-  }, {
-    request: {
-      args: Arg(0, "json")
-    },
-    response: {}
-  }),
+  },
+
+  /**
+   * Scroll an element into view.
+   * @param {String} selector The selector for the node to scroll into view.
+   */
+  scrollIntoView: function(selector) {
+    const node = this._querySelector(selector);
+    node.scrollIntoView();
+  },
 
   /**
    * Check that an element currently has a pseudo-class lock.
@@ -371,74 +523,55 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} pseudo The pseudoclass to check for
    * @return {Boolean}
    */
-  hasPseudoClassLock: protocol.method(function (selector, pseudo) {
-    let node = this._querySelector(selector);
-    return DOMUtils.hasPseudoClassLock(node, pseudo);
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      pseudo: Arg(1, "string")
-    },
-    response: {
-      value: RetVal("boolean")
-    }
-  }),
+  hasPseudoClassLock: function(selector, pseudo) {
+    const node = this._querySelector(selector);
+    return InspectorUtils.hasPseudoClassLock(node, pseudo);
+  },
 
-  loadAndWaitForCustomEvent: protocol.method(function (url) {
-    let deferred = promise.defer();
-    let self = this;
-    // Wait for DOMWindowCreated first, as listening on the current outerwindow
-    // doesn't allow receiving test-page-processing-done.
-    this.tabActor.chromeEventHandler.addEventListener("DOMWindowCreated", function onWindowCreated() {
-      self.tabActor.chromeEventHandler.removeEventListener("DOMWindowCreated", onWindowCreated);
-      self.content.addEventListener("test-page-processing-done", function onEvent() {
-        self.content.removeEventListener("test-page-processing-done", onEvent);
-        deferred.resolve();
-      });
+  loadAndWaitForCustomEvent: function(url) {
+    return new Promise(resolve => {
+      // Wait for DOMWindowCreated first, as listening on the current outerwindow
+      // doesn't allow receiving test-page-processing-done.
+      this.targetActor.chromeEventHandler.addEventListener("DOMWindowCreated", () => {
+        this.content.addEventListener(
+          "test-page-processing-done", resolve, { once: true }
+        );
+      }, { once: true });
+
+      this.content.location = url;
     });
+  },
 
-    this.content.location = url;
-    return deferred.promise;
-  }, {
-    request: {
-      url: Arg(0, "string")
-    },
-    response: {}
-  }),
-
-  hasNode: protocol.method(function (selector) {
+  hasNode: function(selector) {
     try {
       // _querySelector throws if the node doesn't exists
       this._querySelector(selector);
       return true;
-    } catch(e) {
+    } catch (e) {
       return false;
     }
-  }, {
-    request: {
-      selector: Arg(0, "string")
-    },
-    response: {
-      value: RetVal("boolean")
-    }
-  }),
+  },
 
   /**
    * Get the bounding rect for a given DOM node once.
    * @param {String} selector selector identifier to select the DOM node
    * @return {json} the bounding rect info
    */
-  getBoundingClientRect: protocol.method(function (selector) {
-    let node = this._querySelector(selector);
-    return node.getBoundingClientRect();
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-    },
-    response: {
-      value: RetVal("json")
-    }
-  }),
+  getBoundingClientRect: function(selector) {
+    const node = this._querySelector(selector);
+    const rect = node.getBoundingClientRect();
+    // DOMRect can't be stringified directly, so return a simple object instead.
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left
+    };
+  },
 
   /**
    * Set a JS property on a DOM Node.
@@ -446,17 +579,10 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} property The property name
    * @param {String} value The attribute value
    */
-  setProperty: protocol.method(function (selector, property, value) {
-    let node = this._querySelector(selector);
+  setProperty: function(selector, property, value) {
+    const node = this._querySelector(selector);
     node[property] = value;
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      property: Arg(1, "string"),
-      value: Arg(2, "string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Get a JS property on a DOM Node.
@@ -464,18 +590,10 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} property The property name
    * @return {String} value The attribute value
    */
-  getProperty: protocol.method(function (selector, property) {
-    let node = this._querySelector(selector);
+  getProperty: function(selector, property) {
+    const node = this._querySelector(selector);
     return node[property];
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      property: Arg(1, "string")
-    },
-    response: {
-      value: RetVal("string")
-    }
-  }),
+  },
 
   /**
    * Get an attribute on a DOM Node.
@@ -483,18 +601,10 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} attribute The attribute name
    * @return {String} value The attribute value
    */
-  getAttribute: protocol.method(function (selector, attribute) {
-    let node = this._querySelector(selector);
+  getAttribute: function(selector, attribute) {
+    const node = this._querySelector(selector);
     return node.getAttribute(attribute);
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      property: Arg(1, "string")
-    },
-    response: {
-      value: RetVal("string")
-    }
-  }),
+  },
 
   /**
    * Set an attribute on a DOM Node.
@@ -502,54 +612,38 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @param {String} attribute The attribute name
    * @param {String} value The attribute value
    */
-  setAttribute: protocol.method(function (selector, attribute, value) {
-    let node = this._querySelector(selector);
+  setAttribute: function(selector, attribute, value) {
+    const node = this._querySelector(selector);
     node.setAttribute(attribute, value);
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      property: Arg(1, "string"),
-      value: Arg(2, "string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Remove an attribute from a DOM Node.
    * @param {String} selector The node selector
    * @param {String} attribute The attribute name
    */
-  removeAttribute: protocol.method(function (selector, attribute) {
-    let node = this._querySelector(selector);
+  removeAttribute: function(selector, attribute) {
+    const node = this._querySelector(selector);
     node.removeAttribute(attribute);
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-      property: Arg(1, "string")
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Reload the content window.
    */
-  reload: protocol.method(function () {
+  reload: function() {
     this.content.location.reload();
-  }, {
-    request: {},
-    response: {}
-  }),
+  },
 
   /**
    * Reload an iframe and wait for its load event.
    * @param {String} selector The node selector
    */
-  reloadFrame: protocol.method(function (selector) {
-    let node = this._querySelector(selector);
+  reloadFrame: function(selector) {
+    const node = this._querySelector(selector);
 
-    let deferred = promise.defer();
+    const deferred = defer();
 
-    let onLoad = function () {
+    const onLoad = function() {
       node.removeEventListener("load", onLoad);
       deferred.resolve();
     };
@@ -557,30 +651,26 @@ var TestActor = exports.TestActor = protocol.ActorClass({
 
     node.contentWindow.location.reload();
     return deferred.promise;
-  }, {
-    request: {
-      selector: Arg(0, "string"),
-    },
-    response: {}
-  }),
+  },
 
   /**
    * Evaluate a JS string in the context of the content document.
    * @param {String} js JS string to evaluate
    * @return {json} The evaluation result
    */
-  eval: protocol.method(function (js) {
+  eval: function(js) {
     // We have to use a sandbox, as CSP prevent us from using eval on apps...
-    let sb = Cu.Sandbox(this.content, { sandboxPrototype: this.content });
-    return Cu.evalInSandbox(js, sb);
-  }, {
-    request: {
-      js: Arg(0, "string")
-    },
-    response: {
-      value: RetVal("nullable:json")
+    const sb = Cu.Sandbox(this.content, { sandboxPrototype: this.content });
+    const result = Cu.evalInSandbox(js, sb);
+
+    // Ensure passing only serializable data to RDP
+    if (typeof result == "function") {
+      return null;
+    } else if (typeof result == "object") {
+      return JSON.parse(JSON.stringify(result));
     }
-  }),
+    return result;
+  },
 
   /**
    * Scrolls the window to a particular set of coordinates in the document, or
@@ -593,55 +683,43 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * @return {Object} An object with x / y properties, representing the number
    * of pixels that the document has been scrolled horizontally and vertically.
    */
-  scrollWindow: protocol.method(function (x, y, relative) {
+  scrollWindow: function(x, y, relative) {
     if (isNaN(x) || isNaN(y)) {
       return {};
     }
 
-    let deferred = promise.defer();
-    this.content.addEventListener("scroll", function onScroll(event) {
-      this.removeEventListener("scroll", onScroll);
-
-      let data = {x: this.content.scrollX, y: this.content.scrollY};
+    const deferred = defer();
+    this.content.addEventListener("scroll", function(event) {
+      const data = {x: this.content.scrollX, y: this.content.scrollY};
       deferred.resolve(data);
-    });
+    }, {once: true});
 
     this.content[relative ? "scrollBy" : "scrollTo"](x, y);
 
     return deferred.promise;
-  }, {
-    request: {
-      x: Arg(0, "number"),
-      y: Arg(1, "number"),
-      relative: Arg(2, "nullable:boolean"),
-    },
-    response: {
-      value: RetVal("json")
-    }
-  }),
+  },
 
   /**
    * Forces the reflow and waits for the next repaint.
    */
-  reflow: protocol.method(function () {
-    let deferred = promise.defer();
+  reflow: function() {
+    const deferred = defer();
     this.content.document.documentElement.offsetWidth;
     this.content.requestAnimationFrame(deferred.resolve);
 
     return deferred.promise;
-  }),
+  },
 
-  getNodeRect: protocol.method(Task.async(function* (selector) {
-    let node = this._querySelector(selector);
+  async getNodeRect(selector) {
+    const node = this._querySelector(selector);
     return getRect(this.content, node, this.content);
-  }), {
-    request: {
-      selector: Arg(0, "string")
-    },
-    response: {
-      value: RetVal("json")
-    }
-  }),
+  },
+
+  async getTextNodeRect(parentSelector, childNodeIndex) {
+    const parentNode = this._querySelector(parentSelector);
+    const node = parentNode.childNodes[childNodeIndex];
+    return getAdjustedQuads(this.content, node)[0].bounds;
+  },
 
   /**
    * Get information about a DOM element, identified by a selector.
@@ -656,8 +734,8 @@ var TestActor = exports.TestActor = protocol.ActorClass({
    * - {String} innerHTML.
    * - {String} textContent.
    */
-  getNodeInfo: protocol.method(function(selector) {
-    let node = this._querySelector(selector);
+  getNodeInfo: function(selector) {
+    const node = this._querySelector(selector);
     let info = null;
 
     if (node) {
@@ -665,6 +743,7 @@ var TestActor = exports.TestActor = protocol.ActorClass({
         tagName: node.tagName,
         namespaceURI: node.namespaceURI,
         numChildren: node.children.length,
+        numNodes: node.childNodes.length,
         attributes: [...node.attributes].map(({name, value, namespaceURI}) => {
           return {name, value, namespaceURI};
         }),
@@ -675,17 +754,46 @@ var TestActor = exports.TestActor = protocol.ActorClass({
     }
 
     return info;
-  }, {
-    request: {
-      selector: Arg(0, "string")
-    },
-    response: {
-      value: RetVal("json")
+  },
+
+  /**
+   * Get information about the stylesheets which have CSS rules that apply to a given DOM
+   * element, identified by a selector.
+   * @param {String} selector The CSS selector to get the node (can be an array
+   * of selectors to get elements in an iframe).
+   * @return {Array} A list of stylesheet objects, each having the following properties:
+   * - {String} href.
+   * - {Boolean} isContentSheet.
+   */
+  getStyleSheetsInfoForNode: function(selector) {
+    const node = this._querySelector(selector);
+    const domRules = getCSSStyleRules(node);
+
+    const sheets = [];
+
+    for (let i = 0, n = domRules.length; i < n; i++) {
+      const sheet = domRules[i].parentStyleSheet;
+      sheets.push({
+        href: sheet.href,
+        isContentSheet: isContentStylesheet(sheet)
+      });
     }
-  })
+
+    return sheets;
+  },
+
+  /**
+   * Returns the window's dimensions for the `window` given.
+   *
+   * @return {Object} An object with `width` and `height` properties, representing the
+   * number of pixels for the document's size.
+   */
+  getWindowDimensions: function() {
+    return getWindowDimensions(this.content);
+  }
 });
 
-var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
+var TestActorFront = exports.TestActorFront = protocol.FrontClassWithSpec(testSpec, {
   initialize: function(client, { testActor }, toolbox) {
     protocol.Front.prototype.initialize.call(this, client, { actor: testActor });
     this.manage(this);
@@ -695,15 +803,20 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
   /**
    * Zoom the current page to a given level.
    * @param {Number} level The new zoom level.
+   * @param {String} actorID Optional. The highlighter actor ID.
    * @return {Promise} The returned promise will only resolve when the
    * highlighter has updated to the new zoom level.
    */
-  zoomPageTo: function(level) {
-    return this.changeZoomLevel(level, this.toolbox.highlighter.actorID);
+  zoomPageTo: function(level, actorID = this.toolbox.highlighter.actorID) {
+    return this.changeZoomLevel(level, actorID);
   },
 
+  /* eslint-disable max-len */
   changeHighlightedNodeWaitForUpdate: protocol.custom(function(name, value, highlighter) {
-    return this._changeHighlightedNodeWaitForUpdate(name, value, (highlighter || this.toolbox.highlighter).actorID);
+    /* eslint-enable max-len */
+    return this._changeHighlightedNodeWaitForUpdate(
+      name, value, (highlighter || this.toolbox.highlighter).actorID
+    );
   }, {
     impl: "_changeHighlightedNodeWaitForUpdate"
   }),
@@ -716,11 +829,15 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
    * @return {String} value
    */
   getHighlighterNodeAttribute: function(nodeID, name, highlighter) {
-    return this.getHighlighterAttribute(nodeID, name, (highlighter || this.toolbox.highlighter).actorID);
+    return this.getHighlighterAttribute(
+      nodeID, name, (highlighter || this.toolbox.highlighter).actorID
+    );
   },
 
   getHighlighterNodeTextContent: protocol.custom(function(nodeID, highlighter) {
-    return this._getHighlighterNodeTextContent(nodeID, (highlighter || this.toolbox.highlighter).actorID);
+    return this._getHighlighterNodeTextContent(
+      nodeID, (highlighter || this.toolbox.highlighter).actorID
+    );
   }, {
     impl: "_getHighlighterNodeTextContent"
   }),
@@ -741,29 +858,29 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
    * @param {String} prefix An optional prefix for logging information to the
    * console.
    */
-  isNodeCorrectlyHighlighted: Task.async(function*(selector, is, prefix="") {
+  async isNodeCorrectlyHighlighted(selector, is, prefix = "") {
     prefix += (prefix ? " " : "") + selector + " ";
 
-    let boxModel = yield this._getBoxModelStatus();
-    let regions = yield this.getAllAdjustedQuads(selector);
+    const boxModel = await this._getBoxModelStatus();
+    const regions = await this.getAllAdjustedQuads(selector);
 
-    for (let boxType of ["content", "padding", "border", "margin"]) {
-      let [quad] = regions[boxType];
-      for (let point in boxModel[boxType].points) {
+    for (const boxType of ["content", "padding", "border", "margin"]) {
+      const [quad] = regions[boxType];
+      for (const point in boxModel[boxType].points) {
         is(boxModel[boxType].points[point].x, quad[point].x,
           prefix + boxType + " point " + point + " x coordinate is correct");
         is(boxModel[boxType].points[point].y, quad[point].y,
           prefix + boxType + " point " + point + " y coordinate is correct");
       }
     }
-  }),
+  },
 
   /**
    * Get the current rect of the border region of the box-model highlighter
    */
-  getSimpleBorderRect: Task.async(function*(toolbox) {
-    let {border} = yield this._getBoxModelStatus(toolbox);
-    let {p1, p2, p3, p4} = border.points;
+  async getSimpleBorderRect(toolbox) {
+    const {border} = await this._getBoxModelStatus(toolbox);
+    const {p1, p2, p4} = border.points;
 
     return {
       top: p1.y,
@@ -771,118 +888,102 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
       width: p2.x - p1.x,
       height: p4.y - p1.y
     };
-  }),
+  },
 
   /**
    * Get the current positions and visibility of the various box-model highlighter
    * elements.
    */
-  _getBoxModelStatus: Task.async(function*() {
-    let isVisible = yield this.isHighlighting();
+  async _getBoxModelStatus() {
+    const isVisible = await this.isHighlighting();
 
-    let ret = {
+    const ret = {
       visible: isVisible
     };
 
-    for (let region of ["margin", "border", "padding", "content"]) {
-      let points = yield this._getPointsForRegion(region);
-      let visible = yield this._isRegionHidden(region);
+    for (const region of ["margin", "border", "padding", "content"]) {
+      const points = await this._getPointsForRegion(region);
+      const visible = await this._isRegionHidden(region);
       ret[region] = {points, visible};
     }
 
     ret.guides = {};
-    for (let guide of ["top", "right", "bottom", "left"]) {
-      ret.guides[guide] = yield this._getGuideStatus(guide);
+    for (const guide of ["top", "right", "bottom", "left"]) {
+      ret.guides[guide] = await this._getGuideStatus(guide);
     }
 
     return ret;
-  }),
+  },
 
-  assertHighlightedNode: Task.async(function* (selector) {
-    // Taken and tweaked from:
-    // https://github.com/iominh/point-in-polygon-extended/blob/master/src/index.js#L30-L85
-    function isLeft(p0, p1, p2) {
-      let l = ( (p1[0] - p0[0]) * (p2[1] - p0[1]) ) -
-              ( (p2[0] - p0[0]) * (p1[1] - p0[1]) );
-      return l;
-    }
-    function isInside(point, polygon) {
-      if (polygon.length === 0) {
-        return false;
-      }
+  /**
+   * Check that the box-model highlighter is currently highlighting the node matching the
+   * given selector.
+   * @param {String} selector
+   * @return {Boolean}
+   */
+  async assertHighlightedNode(selector) {
+    const rect = await this.getNodeRect(selector);
+    return this.isNodeRectHighlighted(rect);
+  },
 
-      var n = polygon.length;
-      var newPoints = polygon.slice(0);
-      newPoints.push(polygon[0]);
-      var wn = 0; // wn counter
+  /**
+   * Check that the box-model highlighter is currently highlighting the text node that can
+   * be found at a given index within the list of childNodes of a parent element matching
+   * the given selector.
+   * @param {String} parentSelector
+   * @param {Number} childNodeIndex
+   * @return {Boolean}
+   */
+  async assertHighlightedTextNode(parentSelector, childNodeIndex) {
+    const rect = await this.getTextNodeRect(parentSelector, childNodeIndex);
+    return this.isNodeRectHighlighted(rect);
+  },
 
-      // loop through all edges of the polygon
-      for (var i = 0; i < n; i++) {
-        // Accept points on the edges
-        let r = isLeft(newPoints[i], newPoints[i + 1], point);
-        if (r === 0) {
-          return true;
-        }
-        if (newPoints[i][1] <= point[1]) {
-          if (newPoints[i + 1][1] > point[1] && r > 0) {
-            wn++;
-          }
-        } else {
-          if (newPoints[i + 1][1] <= point[1] && r < 0) {
-            wn--;
-          }
-        }
-      }
-      if (wn === 0) {
-        dumpn(JSON.stringify(point) + " is outside of " + JSON.stringify(polygon));
-      }
-      // the point is outside only when this winding number wn===0, otherwise it's inside
-      return wn !== 0;
-    }
-
-    let {visible, border} = yield this._getBoxModelStatus();
+  /**
+   * Check that the box-model highlighter is currently highlighting the given rect.
+   * @param {Object} rect
+   * @return {Boolean}
+   */
+  async isNodeRectHighlighted({ left, top, width, height }) {
+    const {visible, border} = await this._getBoxModelStatus();
     let points = border.points;
-    if (visible) {
-      // Check that the node is within the box model
-      let { left, top, width, height } = yield this.getNodeRect(selector);
-      let right = left + width;
-      let bottom = top + height;
-
-      // Converts points dictionnary into an array
-      let list = [];
-      for(var i = 1; i <= 4; i++) {
-        let p = points["p" + i];
-        list.push([p.x, p.y]);
-      }
-      points = list;
-
-      // Check that each point of the node is within the box model
-      if (!isInside([left, top], points) ||
-          !isInside([right, top], points) ||
-          !isInside([right, bottom], points) ||
-          !isInside([left, bottom], points)) {
-        return false;
-      }
-      return true;
-    } else {
+    if (!visible) {
       return false;
     }
-  }),
+
+    // Check that the node is within the box model
+    const right = left + width;
+    const bottom = top + height;
+
+    // Converts points dictionnary into an array
+    const list = [];
+    for (let i = 1; i <= 4; i++) {
+      const p = points["p" + i];
+      list.push([p.x, p.y]);
+    }
+    points = list;
+
+    // Check that each point of the node is within the box model
+    return isInside([left, top], points) &&
+           isInside([right, top], points) &&
+           isInside([right, bottom], points) &&
+           isInside([left, bottom], points);
+  },
 
   /**
    * Get the coordinate (points attribute) from one of the polygon elements in the
    * box model highlighter.
    */
-  _getPointsForRegion: Task.async(function*(region) {
-    let d = yield this.getHighlighterNodeAttribute("box-model-" + region, "d");
+  async _getPointsForRegion(region) {
+    const d = await this.getHighlighterNodeAttribute("box-model-" + region, "d");
 
-    let polygons = d.match(/M[^M]+/g);
+    const polygons = d.match(/M[^M]+/g);
     if (!polygons) {
       return null;
     }
 
-    let points = polygons[0].trim().split(" ").map(i => {
-      return i.replace(/M|L/, "").split(",")
+    const points = polygons[0].trim().split(" ").map(i => {
+      return i.replace(/M|L/, "").split(",");
     });
 
     return {
@@ -903,25 +1004,25 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
         y: parseFloat(points[3][1])
       }
     };
-  }),
+  },
 
   /**
    * Is a given region polygon element of the box-model highlighter currently
    * hidden?
    */
-  _isRegionHidden: Task.async(function*(region) {
-    let value = yield this.getHighlighterNodeAttribute("box-model-" + region, "hidden");
+  async _isRegionHidden(region) {
+    const value = await this.getHighlighterNodeAttribute("box-model-" + region, "hidden");
     return value !== null;
-  }),
+  },
 
-  _getGuideStatus: Task.async(function*(location) {
-    let id = "box-model-guide-" + location;
+  async _getGuideStatus(location) {
+    const id = "box-model-guide-" + location;
 
-    let hidden = yield this.getHighlighterNodeAttribute(id, "hidden");
-    let x1 = yield this.getHighlighterNodeAttribute(id, "x1");
-    let y1 = yield this.getHighlighterNodeAttribute(id, "y1");
-    let x2 = yield this.getHighlighterNodeAttribute(id, "x2");
-    let y2 = yield this.getHighlighterNodeAttribute(id, "y2");
+    const hidden = await this.getHighlighterNodeAttribute(id, "hidden");
+    const x1 = await this.getHighlighterNodeAttribute(id, "x1");
+    const y1 = await this.getHighlighterNodeAttribute(id, "y1");
+    const x2 = await this.getHighlighterNodeAttribute(id, "x2");
+    const y2 = await this.getHighlighterNodeAttribute(id, "y2");
 
     return {
       visible: !hidden,
@@ -930,7 +1031,7 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
       x2: x2,
       y2: y2
     };
-  }),
+  },
 
   /**
    * Get the coordinates of the rectangle that is defined by the 4 guides displayed
@@ -938,11 +1039,11 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
    * @return {Object} Null if at least one guide is hidden. Otherwise an object
    * with p1, p2, p3, p4 properties being {x, y} objects.
    */
-  getGuidesRectangle: Task.async(function*() {
-    let tGuide = yield this._getGuideStatus("top");
-    let rGuide = yield this._getGuideStatus("right");
-    let bGuide = yield this._getGuideStatus("bottom");
-    let lGuide = yield this._getGuideStatus("left");
+  async getGuidesRectangle() {
+    const tGuide = await this._getGuideStatus("top");
+    const rGuide = await this._getGuideStatus("right");
+    const bGuide = await this._getGuideStatus("bottom");
+    const lGuide = await this._getGuideStatus("left");
 
     if (!tGuide.visible || !rGuide.visible || !bGuide.visible || !lGuide.visible) {
       return null;
@@ -950,11 +1051,11 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
 
     return {
       p1: {x: lGuide.x1, y: tGuide.y1},
-      p2: {x: rGuide.x1, y: tGuide. y1},
-      p3: {x: rGuide.x1, y: bGuide.y1},
-      p4: {x: lGuide.x1, y: bGuide.y1}
+      p2: {x: +rGuide.x1 + 1, y: tGuide.y1},
+      p3: {x: +rGuide.x1 + 1, y: +bGuide.y1 + 1},
+      p4: {x: lGuide.x1, y: +bGuide.y1 + 1}
     };
-  }),
+  },
 
   waitForHighlighterEvent: protocol.custom(function(event) {
     return this._waitForHighlighterEvent(event, this.toolbox.highlighter.actorID);
@@ -972,24 +1073,77 @@ var TestActorFront = exports.TestActorFront = protocol.FrontClass(TestActor, {
    * - points {Array} an array of all the polygons defined by the path. Each box
    *   is itself an Array of points, themselves being [x,y] coordinates arrays.
    */
-  getHighlighterRegionPath: Task.async(function*(region, highlighter) {
-    let d = yield this.getHighlighterNodeAttribute("box-model-" + region, "d", highlighter);
+  async getHighlighterRegionPath(region, highlighter) {
+    const d = await this.getHighlighterNodeAttribute(
+      `box-model-${region}`, "d", highlighter
+    );
     if (!d) {
       return {d: null};
     }
 
-    let polygons = d.match(/M[^M]+/g);
+    const polygons = d.match(/M[^M]+/g);
     if (!polygons) {
       return {d};
     }
 
-    let points = [];
-    for (let polygon of polygons) {
+    const points = [];
+    for (const polygon of polygons) {
       points.push(polygon.trim().split(" ").map(i => {
-        return i.replace(/M|L/, "").split(",")
+        return i.replace(/M|L/, "").split(",");
       }));
     }
 
     return {d, points};
-  })
+  }
 });
+
+/**
+ * Check whether a point is included in a polygon.
+ * Taken and tweaked from:
+ * https://github.com/iominh/point-in-polygon-extended/blob/master/src/index.js#L30-L85
+ * @param {Array} point [x,y] coordinates
+ * @param {Array} polygon An array of [x,y] points
+ * @return {Boolean}
+ */
+function isInside(point, polygon) {
+  if (polygon.length === 0) {
+    return false;
+  }
+
+  // Reduce the length of the fractional part because this is likely to cause errors when
+  // the point is on the edge of the polygon.
+  point = point.map(n => n.toFixed(2));
+  polygon = polygon.map(p => p.map(n => n.toFixed(2)));
+
+  const n = polygon.length;
+  const newPoints = polygon.slice(0);
+  newPoints.push(polygon[0]);
+  let wn = 0;
+
+  // loop through all edges of the polygon
+  for (let i = 0; i < n; i++) {
+    // Accept points on the edges
+    const r = isLeft(newPoints[i], newPoints[i + 1], point);
+    if (r === 0) {
+      return true;
+    }
+    if (newPoints[i][1] <= point[1]) {
+      if (newPoints[i + 1][1] > point[1] && r > 0) {
+        wn++;
+      }
+    } else if (newPoints[i + 1][1] <= point[1] && r < 0) {
+      wn--;
+    }
+  }
+  if (wn === 0) {
+    dumpn(JSON.stringify(point) + " is outside of " + JSON.stringify(polygon));
+  }
+  // the point is outside only when this winding number wn===0, otherwise it's inside
+  return wn !== 0;
+}
+
+function isLeft(p0, p1, p2) {
+  const l = ((p1[0] - p0[0]) * (p2[1] - p0[1])) -
+          ((p2[0] - p0[0]) * (p1[1] - p0[1]));
+  return l;
+}

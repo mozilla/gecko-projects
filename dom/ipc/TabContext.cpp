@@ -8,7 +8,7 @@
 #include "mozilla/dom/PTabContext.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/TabChild.h"
-#include "nsIAppsService.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
 
@@ -23,8 +23,9 @@ namespace dom {
 TabContext::TabContext()
   : mInitialized(false)
   , mIsMozBrowserElement(false)
-  , mContainingAppId(NO_APP_ID)
-  , mOriginAttributes()
+  , mJSPluginID(-1)
+  , mShowAccelerators(UIStateChangeType_NoChange)
+  , mShowFocusRings(UIStateChangeType_NoChange)
 {
 }
 
@@ -41,111 +42,21 @@ TabContext::IsIsolatedMozBrowserElement() const
 }
 
 bool
-TabContext::IsMozBrowserOrApp() const
+TabContext::IsMozBrowser() const
 {
-  return HasOwnApp() || IsMozBrowserElement();
-}
-
-uint32_t
-TabContext::OwnAppId() const
-{
-  return mOriginAttributes.mAppId;
-}
-
-already_AddRefed<mozIApplication>
-TabContext::GetOwnApp() const
-{
-  nsCOMPtr<mozIApplication> ownApp = mOwnApp;
-  return ownApp.forget();
+  return IsMozBrowserElement();
 }
 
 bool
-TabContext::HasOwnApp() const
+TabContext::IsJSPlugin() const
 {
-  nsCOMPtr<mozIApplication> ownApp = GetOwnApp();
-  return !!ownApp;
+  return mJSPluginID >= 0;
 }
 
-uint32_t
-TabContext::BrowserOwnerAppId() const
+int32_t
+TabContext::JSPluginId() const
 {
-  if (IsMozBrowserElement()) {
-    return mContainingAppId;
-  }
-  return NO_APP_ID;
-}
-
-already_AddRefed<mozIApplication>
-TabContext::GetBrowserOwnerApp() const
-{
-  nsCOMPtr<mozIApplication> ownerApp;
-  if (IsMozBrowserElement()) {
-    ownerApp = mContainingApp;
-  }
-  return ownerApp.forget();
-}
-
-bool
-TabContext::HasBrowserOwnerApp() const
-{
-  nsCOMPtr<mozIApplication> ownerApp = GetBrowserOwnerApp();
-  return !!ownerApp;
-}
-
-uint32_t
-TabContext::AppOwnerAppId() const
-{
-  if (HasOwnApp()) {
-    return mContainingAppId;
-  }
-  return NO_APP_ID;
-}
-
-already_AddRefed<mozIApplication>
-TabContext::GetAppOwnerApp() const
-{
-  nsCOMPtr<mozIApplication> ownerApp;
-  if (HasOwnApp()) {
-    ownerApp = mContainingApp;
-  }
-  return ownerApp.forget();
-}
-
-bool
-TabContext::HasAppOwnerApp() const
-{
-  nsCOMPtr<mozIApplication> ownerApp = GetAppOwnerApp();
-  return !!ownerApp;
-}
-
-uint32_t
-TabContext::OwnOrContainingAppId() const
-{
-  if (HasOwnApp()) {
-    return mOriginAttributes.mAppId;
-  }
-
-  return mContainingAppId;
-}
-
-already_AddRefed<mozIApplication>
-TabContext::GetOwnOrContainingApp() const
-{
-  nsCOMPtr<mozIApplication> ownOrContainingApp;
-  if (HasOwnApp()) {
-    ownOrContainingApp = mOwnApp;
-  } else {
-    ownOrContainingApp = mContainingApp;
-  }
-
-  return ownOrContainingApp.forget();
-}
-
-bool
-TabContext::HasOwnOrContainingApp() const
-{
-  nsCOMPtr<mozIApplication> ownOrContainingApp = GetOwnOrContainingApp();
-  return !!ownOrContainingApp;
+  return mJSPluginID;
 }
 
 bool
@@ -159,89 +70,106 @@ TabContext::SetTabContext(const TabContext& aContext)
   return true;
 }
 
-const DocShellOriginAttributes&
+void
+TabContext::SetPrivateBrowsingAttributes(bool aIsPrivateBrowsing)
+{
+  mOriginAttributes.SyncAttributesWithPrivateBrowsing(aIsPrivateBrowsing);
+}
+
+bool
+TabContext::UpdateTabContextAfterSwap(const TabContext& aContext)
+{
+  // This is only used after already initialized.
+  MOZ_ASSERT(mInitialized);
+
+  // The only permissable change is to `mIsMozBrowserElement`.  All other fields
+  // must match for the change to be accepted.
+  if (aContext.mOriginAttributes != mOriginAttributes) {
+    return false;
+  }
+
+  mIsMozBrowserElement = aContext.mIsMozBrowserElement;
+  return true;
+}
+
+const OriginAttributes&
 TabContext::OriginAttributesRef() const
 {
   return mOriginAttributes;
 }
 
-const nsACString&
-TabContext::SignedPkgOriginNoSuffix() const
+const nsAString&
+TabContext::PresentationURL() const
 {
-  return mSignedPkgOriginNoSuffix;
+  return mPresentationURL;
+}
+
+UIStateChangeType
+TabContext::ShowAccelerators() const
+{
+  return mShowAccelerators;
+}
+
+UIStateChangeType
+TabContext::ShowFocusRings() const
+{
+  return mShowFocusRings;
 }
 
 bool
 TabContext::SetTabContext(bool aIsMozBrowserElement,
-                          mozIApplication* aOwnApp,
-                          mozIApplication* aAppFrameOwnerApp,
-                          const DocShellOriginAttributes& aOriginAttributes,
-                          const nsACString& aSignedPkgOriginNoSuffix)
+                          UIStateChangeType aShowAccelerators,
+                          UIStateChangeType aShowFocusRings,
+                          const OriginAttributes& aOriginAttributes,
+                          const nsAString& aPresentationURL)
 {
   NS_ENSURE_FALSE(mInitialized, false);
 
-  // Get ids for both apps and only write to our member variables after we've
-  // verified that this worked.
-  uint32_t ownAppId = NO_APP_ID;
-  if (aOwnApp) {
-    nsresult rv = aOwnApp->GetLocalId(&ownAppId);
-    NS_ENSURE_SUCCESS(rv, false);
-    NS_ENSURE_TRUE(ownAppId != NO_APP_ID, false);
-  }
-
-  uint32_t containingAppId = NO_APP_ID;
-  if (aAppFrameOwnerApp) {
-    nsresult rv = aAppFrameOwnerApp->GetLocalId(&containingAppId);
-    NS_ENSURE_SUCCESS(rv, false);
-    NS_ENSURE_TRUE(containingAppId != NO_APP_ID, false);
-  }
-
   // Veryify that app id matches mAppId passed in originAttributes
-  MOZ_RELEASE_ASSERT((aOwnApp && aOriginAttributes.mAppId == ownAppId) ||
-                     (aAppFrameOwnerApp && aOriginAttributes.mAppId == containingAppId) ||
-                     aOriginAttributes.mAppId == NO_APP_ID);
+  MOZ_RELEASE_ASSERT(aOriginAttributes.mAppId == NO_APP_ID);
 
   mInitialized = true;
   mIsMozBrowserElement = aIsMozBrowserElement;
   mOriginAttributes = aOriginAttributes;
-  mContainingAppId = containingAppId;
-  mOwnApp = aOwnApp;
-  mContainingApp = aAppFrameOwnerApp;
-  mSignedPkgOriginNoSuffix = aSignedPkgOriginNoSuffix;
+  mPresentationURL = aPresentationURL;
+  mShowAccelerators = aShowAccelerators;
+  mShowFocusRings = aShowFocusRings;
+  return true;
+}
+
+bool
+TabContext::SetTabContextForJSPluginFrame(int32_t aJSPluginID)
+{
+  NS_ENSURE_FALSE(mInitialized, false);
+
+  mInitialized = true;
+  mJSPluginID = aJSPluginID;
   return true;
 }
 
 IPCTabContext
 TabContext::AsIPCTabContext() const
 {
-  nsAutoCString originSuffix;
-  mOriginAttributes.CreateSuffix(originSuffix);
-  return IPCTabContext(FrameIPCTabContext(originSuffix,
-                                          mContainingAppId,
-                                          mSignedPkgOriginNoSuffix,
-                                          mIsMozBrowserElement));
-}
+  if (IsJSPlugin()) {
+    return IPCTabContext(JSPluginFrameIPCTabContext(mJSPluginID));
+  }
 
-static already_AddRefed<mozIApplication>
-GetAppForId(uint32_t aAppId)
-{
-  nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(appsService, nullptr);
-
-  nsCOMPtr<mozIApplication> app;
-  appsService->GetAppByLocalId(aAppId, getter_AddRefs(app));
-
-  return app.forget();
+  return IPCTabContext(FrameIPCTabContext(mOriginAttributes,
+                                          mIsMozBrowserElement,
+                                          mPresentationURL,
+                                          mShowAccelerators,
+                                          mShowFocusRings));
 }
 
 MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
   : mInvalidReason(nullptr)
 {
   bool isMozBrowserElement = false;
-  uint32_t containingAppId = NO_APP_ID;
-  DocShellOriginAttributes originAttributes;
-  nsAutoCString originSuffix;
-  nsAutoCString signedPkgOriginNoSuffix;
+  int32_t jsPluginId = -1;
+  OriginAttributes originAttributes;
+  nsAutoString presentationURL;
+  UIStateChangeType showAccelerators = UIStateChangeType_NoChange;
+  UIStateChangeType showFocusRings = UIStateChangeType_NoChange;
 
   switch(aParams.type()) {
     case IPCTabContext::TPopupIPCTabContext: {
@@ -250,6 +178,11 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       TabContext *context;
       if (ipcContext.opener().type() == PBrowserOrId::TPBrowserParent) {
         context = TabParent::GetFrom(ipcContext.opener().get_PBrowserParent());
+        if (!context) {
+          mInvalidReason = "Child is-browser process tried to "
+                           "open a null tab.";
+          return;
+        }
         if (context->IsMozBrowserElement() &&
             !ipcContext.isMozBrowserElement()) {
           // If the TabParent corresponds to a browser element, then it can only
@@ -283,11 +216,13 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       // opener app.
       isMozBrowserElement = ipcContext.isMozBrowserElement();
       originAttributes = context->mOriginAttributes;
-      if (isMozBrowserElement) {
-        containingAppId = context->OwnOrContainingAppId();
-      } else {
-        containingAppId = context->mContainingAppId;
-      }
+      break;
+    }
+    case IPCTabContext::TJSPluginFrameIPCTabContext: {
+      const JSPluginFrameIPCTabContext &ipcContext =
+        aParams.get_JSPluginFrameIPCTabContext();
+
+      jsPluginId = ipcContext.jsPluginId();
       break;
     }
     case IPCTabContext::TFrameIPCTabContext: {
@@ -295,10 +230,10 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
         aParams.get_FrameIPCTabContext();
 
       isMozBrowserElement = ipcContext.isMozBrowserElement();
-      containingAppId = ipcContext.frameOwnerAppId();
-      signedPkgOriginNoSuffix = ipcContext.signedPkgOriginNoSuffix();
-      originSuffix = ipcContext.originSuffix();
-      originAttributes.PopulateFromSuffix(originSuffix);
+      presentationURL = ipcContext.presentationURL();
+      showAccelerators = ipcContext.showAccelerators();
+      showFocusRings = ipcContext.showFocusRings();
+      originAttributes = ipcContext.originAttributes();
       break;
     }
     case IPCTabContext::TUnsafeIPCTabContext: {
@@ -306,16 +241,11 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
       // It is meant as a temporary solution until service workers can
       // provide a TabChild equivalent. Don't allow this on b2g since
       // it might be used to escalate privileges.
-#ifdef MOZ_B2G
-      mInvalidReason = "ServiceWorkerClients::OpenWindow is not supported.";
-      return;
-#endif
-      if (!Preferences::GetBool("dom.serviceWorkers.enabled", false)) {
+      if (!DOMPrefs::ServiceWorkersEnabled()) {
         mInvalidReason = "ServiceWorkers should be enabled.";
         return;
       }
 
-      containingAppId = NO_APP_ID;
       break;
     }
     default: {
@@ -323,29 +253,16 @@ MaybeInvalidTabContext::MaybeInvalidTabContext(const IPCTabContext& aParams)
     }
   }
 
-  nsCOMPtr<mozIApplication> ownApp;
-  if (!isMozBrowserElement) {
-    // mAppId corresponds to OwnOrContainingAppId; if isMozBrowserElement is
-    // false then it's ownApp otherwise it's containingApp
-    ownApp = GetAppForId(originAttributes.mAppId);
-    if ((ownApp == nullptr) != (originAttributes.mAppId == NO_APP_ID)) {
-      mInvalidReason = "Got an ownAppId that didn't correspond to an app.";
-      return;
-    }
-  }
-
-  nsCOMPtr<mozIApplication> containingApp = GetAppForId(containingAppId);
-  if ((containingApp == nullptr) != (containingAppId == NO_APP_ID)) {
-    mInvalidReason = "Got a containingAppId that didn't correspond to an app.";
-    return;
-  }
-
   bool rv;
-  rv = mTabContext.SetTabContext(isMozBrowserElement,
-                                 ownApp,
-                                 containingApp,
-                                 originAttributes,
-                                 signedPkgOriginNoSuffix);
+  if (jsPluginId >= 0) {
+    rv = mTabContext.SetTabContextForJSPluginFrame(jsPluginId);
+  } else {
+    rv = mTabContext.SetTabContext(isMozBrowserElement,
+                                   showAccelerators,
+                                   showFocusRings,
+                                   originAttributes,
+                                   presentationURL);
+  }
   if (!rv) {
     mInvalidReason = "Couldn't initialize TabContext.";
   }

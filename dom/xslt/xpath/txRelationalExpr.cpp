@@ -136,7 +136,7 @@ RelationalExpr::compareResults(txIEvalContext* aContext, txAExprResult* aLeft,
         }
         default:
         {
-            NS_NOTREACHED("We should have caught all cases");
+            MOZ_ASSERT_UNREACHABLE("We should have caught all cases");
         }
     }
 
@@ -154,7 +154,7 @@ RelationalExpr::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
     RefPtr<txAExprResult> rResult;
     rv = mRightExpr->evaluate(aContext, getter_AddRefs(rResult));
     NS_ENSURE_SUCCESS(rv, rv);
-    
+
     aContext->recycler()->
         getBoolResult(compareResults(aContext, lResult, rResult), aResult);
 

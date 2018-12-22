@@ -1,6 +1,9 @@
 import unittest
 
-import os, sys, os.path, time
+import os
+import sys
+import os.path
+import time
 from tempfile import mkdtemp
 from shutil import rmtree
 import mozunit
@@ -17,10 +20,12 @@ RUN_NON_ASCII_TESTS = (sys.platform == "win32" or
                        (sys.stdin.encoding is not None and
                         codecs.lookup(sys.stdin.encoding) == codecs.lookup("utf-8")))
 
+
 class TestNsinstall(unittest.TestCase):
     """
     Unit tests for nsinstall.py
     """
+
     def setUp(self):
         self.tmpdir = mkdtemp()
 
@@ -80,7 +85,8 @@ class TestNsinstall(unittest.TestCase):
         self.assert_(os.path.isfile(os.path.join(testdir, "testfile")))
         self.assert_(not os.path.exists(os.path.join(testdir, "Xfile")))
         self.assert_(os.path.isdir(os.path.join(testdir, "copieddir")))
-        self.assert_(os.path.isfile(os.path.join(testdir, "copieddir", "testfile2")))
+        self.assert_(os.path.isfile(os.path.join(
+            testdir, "copieddir", "testfile2")))
         self.assert_(not os.path.exists(os.path.join(testdir, "Xdir")))
 
     def test_nsinstall_multiple(self):
@@ -119,7 +125,7 @@ class TestNsinstall(unittest.TestCase):
         def test_nsinstall_m(self):
             "Test that nsinstall -m works (set mode)"
             testfile = self.touch("testfile")
-            mode = 0600
+            mode = 0o600
             os.chmod(testfile, mode)
             testdir = self.mkdirs("testdir")
             self.assertEqual(nsinstall(["-m", "{0:04o}"
@@ -168,7 +174,8 @@ class TestNsinstall(unittest.TestCase):
             destfile = os.path.join(testdir, filename)
             self.assert_(os.path.isfile(destfile))
 
-    #TODO: implement -R, -l, -L and test them!
+    # TODO: implement -R, -l, -L and test them!
+
 
 if __name__ == '__main__':
-  mozunit.main()
+    mozunit.main()

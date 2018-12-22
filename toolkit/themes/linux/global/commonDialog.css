@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #filler {
-  -moz-margin-start: -8px;
-  -moz-margin-end: -10px;
+  margin-inline-start: -8px;
+  margin-inline-end: -10px;
 }
 
 #iconContainer {
@@ -13,7 +13,7 @@
   min-width: 58px; /* maximum icon width + icon margin */
 }
 
-#info\.icon {
+#infoIcon {
   max-width: 48px;
   max-height: 48px;
   /* The 'spaced' class does this already. It's repeated here to make it clearer

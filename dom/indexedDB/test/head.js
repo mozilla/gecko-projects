@@ -5,36 +5,45 @@
 
 var gActiveListeners = {};
 
-function registerPopupEventHandler(eventName, callback) {
-  gActiveListeners[eventName] = function (event) {
-    if (event.target != PopupNotifications.panel)
+// These event (un)registration handlers only work for one window, DONOT use
+// them with multiple windows.
+function registerPopupEventHandler(eventName, callback, win) {
+  if (!win) {
+    win = window;
+  }
+  gActiveListeners[eventName] = function(event) {
+    if (event.target != win.PopupNotifications.panel)
       return;
-    PopupNotifications.panel.removeEventListener(eventName,
-                                                 gActiveListeners[eventName],
-                                                 false);
+    win.PopupNotifications.panel.removeEventListener(
+                                                   eventName,
+                                                   gActiveListeners[eventName]);
     delete gActiveListeners[eventName];
 
-    callback.call(PopupNotifications.panel);
-  }
-  PopupNotifications.panel.addEventListener(eventName,
-                                            gActiveListeners[eventName],
-                                            false);
+    callback.call(win.PopupNotifications.panel);
+  };
+  win.PopupNotifications.panel.addEventListener(eventName,
+                                                gActiveListeners[eventName]);
 }
 
-function unregisterPopupEventHandler(eventName)
+function unregisterPopupEventHandler(eventName, win)
 {
-  PopupNotifications.panel.removeEventListener(eventName,
-                                               gActiveListeners[eventName],
-                                               false);
+  if (!win) {
+    win = window;
+  }
+  win.PopupNotifications.panel.removeEventListener(eventName,
+                                                   gActiveListeners[eventName]);
   delete gActiveListeners[eventName];
 }
 
-function unregisterAllPopupEventHandlers()
+function unregisterAllPopupEventHandlers(win)
 {
+  if (!win) {
+    win = window;
+  }
   for (let eventName in gActiveListeners) {
-    PopupNotifications.panel.removeEventListener(eventName,
-                                                 gActiveListeners[eventName],
-                                                 false);
+    win.PopupNotifications.panel.removeEventListener(
+                                                   eventName,
+                                                   gActiveListeners[eventName]);
   }
   gActiveListeners = {};
 }
@@ -47,58 +56,58 @@ function triggerMainCommand(popup)
   let notification = notifications[0];
   info("triggering command: " + notification.getAttribute("buttonlabel"));
 
-  // 20, 10 so that the inner button is hit
-  EventUtils.synthesizeMouse(notification.button, 20, 10, {});
+  EventUtils.synthesizeMouseAtCenter(notification.button, {});
 }
 
-function triggerSecondaryCommand(popup, index)
+function triggerSecondaryCommand(popup)
 {
-  info("triggering secondary command, " + index);
+  info("triggering secondary command");
   let notifications = popup.childNodes;
   ok(notifications.length > 0, "at least one notification displayed");
   let notification = notifications[0];
-
-  // Cancel the arrow panel slide-in transition (bug 767133) such that
-  // it won't interfere with us interacting with the dropdown.
-  SpecialPowers.wrap(document).getAnonymousNodes(popup)[0].style.transition = "none";
-
-  notification.button.focus();
-
-  popup.addEventListener("popupshown", function () {
-    popup.removeEventListener("popupshown", arguments.callee, false);
-
-    // Press down until the desired command is selected
-    for (let i = 0; i <= index; i++)
-      EventUtils.synthesizeKey("VK_DOWN", {});
-
-    // Activate
-    EventUtils.synthesizeKey("VK_RETURN", {});
-  }, false);
-
-  // One down event to open the popup
-  EventUtils.synthesizeKey("VK_DOWN", { altKey: (navigator.platform.indexOf("Mac") == -1) });
+  EventUtils.synthesizeMouseAtCenter(notification.secondaryButton, {});
 }
 
 function dismissNotification(popup)
 {
   info("dismissing notification");
-  executeSoon(function () {
-    EventUtils.synthesizeKey("VK_ESCAPE", {});
+  executeSoon(function() {
+    EventUtils.synthesizeKey("KEY_Escape");
   });
 }
 
-function setFinishedCallback(callback, win)
+function waitForMessage(aMessage, browser)
 {
-  if (!win) {
-    win = window;
-  }
-  let testPage = win.gBrowser.selectedBrowser.contentWindow.wrappedJSObject;
-  testPage.testFinishedCallback = function(result, exception) {
-    setTimeout(function() {
-      info("got finished callback");
-      callback(result, exception);
-    }, 0);
-  }
+  return new Promise((resolve, reject) => {
+    /* eslint-disable no-undef */
+    // When contentScript runs, "this" is a ContentFrameMessageManager (so that's where
+    // addEventListener will add the listener), but the non-bubbling "message" event is
+    // sent to the Window involved, so we need a capturing listener.
+    function contentScript() {
+      addEventListener("message", function(event) {
+        sendAsyncMessage("testLocal:message",
+          {message: event.data});
+      }, {once: true, capture: true}, true);
+    }
+    /* eslint-enable no-undef */
+
+    let script = "data:,(" + contentScript.toString() + ")();";
+
+    let mm = browser.selectedBrowser.messageManager;
+
+    mm.addMessageListener("testLocal:message", function listener(msg) {
+      mm.removeMessageListener("testLocal:message", listener);
+      mm.removeDelayedFrameScript(script);
+      is(msg.data.message, aMessage, "received " + aMessage);
+      if (msg.data.message == aMessage) {
+        resolve();
+      } else {
+        reject();
+      }
+    });
+
+    mm.loadFrameScript(script, true);
+  });
 }
 
 function dispatchEvent(eventName)
@@ -111,45 +120,25 @@ function dispatchEvent(eventName)
 
 function setPermission(url, permission)
 {
-  const nsIPermissionManager = Components.interfaces.nsIPermissionManager;
+  let uri = Services.io.newURI(url);
+  let principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
 
-  let uri = Components.classes["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService)
-                      .newURI(url, null, null);
-  let ssm = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                      .getService(Ci.nsIScriptSecurityManager);
-  let principal = ssm.createCodebasePrincipal(uri, {});
-
-  Components.classes["@mozilla.org/permissionmanager;1"]
-            .getService(nsIPermissionManager)
-            .addFromPrincipal(principal, permission,
-                              nsIPermissionManager.ALLOW_ACTION);
+  Services.perms.addFromPrincipal(principal, permission,
+                                  Ci.nsIPermissionManager.ALLOW_ACTION);
 }
 
 function removePermission(url, permission)
 {
-  let uri = Components.classes["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService)
-                      .newURI(url, null, null);
-  let ssm = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                      .getService(Ci.nsIScriptSecurityManager);
-  let principal = ssm.createCodebasePrincipal(uri, {});
+  let uri = Services.io.newURI(url);
+  let principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
 
-  Components.classes["@mozilla.org/permissionmanager;1"]
-            .getService(Components.interfaces.nsIPermissionManager)
-            .removeFromPrincipal(principal, permission);
+  Services.perms.removeFromPrincipal(principal, permission);
 }
 
 function getPermission(url, permission)
 {
-  let uri = Components.classes["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService)
-                      .newURI(url, null, null);
-  let ssm = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                      .getService(Ci.nsIScriptSecurityManager);
-  let principal = ssm.createCodebasePrincipal(uri, {});
+  let uri = Services.io.newURI(url);
+  let principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
 
-  return Components.classes["@mozilla.org/permissionmanager;1"]
-                   .getService(Components.interfaces.nsIPermissionManager)
-                   .testPermissionFromPrincipal(principal, permission);
+  return Services.perms.testPermissionFromPrincipal(principal, permission);
 }

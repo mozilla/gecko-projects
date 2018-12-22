@@ -5,6 +5,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Base64.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/MemoryReporting.h"
 
 #include "mozilla/dom/ContentChild.h"
@@ -13,7 +14,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "nsIInputStream.h"
-#define gfxToolkitPlatform gfxAndroidPlatform
+#include "nsReadableUtils.h"
 
 #include "nsXULAppAPI.h"
 #include <dirent.h>
@@ -24,16 +25,20 @@
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TAGS_H
 #include FT_TRUETYPE_TABLES_H
+#include FT_MULTIPLE_MASTERS_H
 #include "cairo-ft.h"
 
 #include "gfxFT2FontList.h"
 #include "gfxFT2Fonts.h"
+#include "gfxFT2Utils.h"
 #include "gfxUserFontSet.h"
 #include "gfxFontUtils.h"
 
 #include "nsServiceManagerUtils.h"
+#include "nsIObserverService.h"
 #include "nsTArray.h"
 #include "nsUnicharUtils.h"
+#include "nsCRT.h"
 
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
@@ -49,6 +54,7 @@
 #include <sys/stat.h>
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 
 static LazyLogModule sFontInfoLog("fontInfoLog");
 
@@ -73,8 +79,8 @@ BuildKeyNameFromFontName(nsAString &aName)
 // allocate memory to uncompress a font from omnijar.
 class AutoFTFace {
 public:
-    AutoFTFace(FT2FontEntry* aFontEntry)
-        : mFace(nullptr), mFontDataBuf(nullptr), mOwnsFace(false)
+    explicit AutoFTFace(FT2FontEntry* aFontEntry)
+        : mFace(nullptr), mFontDataBuf(nullptr), mDataLength(0), mOwnsFace(false)
     {
         if (aFontEntry->mFTFace) {
             mFace = aFontEntry->mFTFace;
@@ -83,7 +89,6 @@ public:
 
         NS_ASSERTION(!aFontEntry->mFilename.IsEmpty(),
                      "can't use AutoFTFace for fonts without a filename");
-        FT_Library ft = gfxToolkitPlatform::GetPlatform()->GetFTLibrary();
 
         // A relative path (no initial "/") means this is a resource in
         // omnijar, not an installed font on the device.
@@ -104,16 +109,15 @@ public:
                 cursor.Copy(&bufSize);
                 NS_ASSERTION(bufSize == item->RealSize(),
                              "error reading bundled font");
-
-                if (FT_Err_Ok != FT_New_Memory_Face(ft, mFontDataBuf, bufSize,
-                                                    aFontEntry->mFTFontIndex,
-                                                    &mFace)) {
+                mDataLength = bufSize;
+                mFace = Factory::NewFTFaceFromData(nullptr, mFontDataBuf, bufSize, aFontEntry->mFTFontIndex);
+                if (!mFace) {
                     NS_WARNING("failed to create freetype face");
                 }
             }
         } else {
-            if (FT_Err_Ok != FT_New_Face(ft, aFontEntry->mFilename.get(),
-                                         aFontEntry->mFTFontIndex, &mFace)) {
+            mFace = Factory::NewFTFace(nullptr, aFontEntry->mFilename.get(), aFontEntry->mFTFontIndex);
+            if (!mFace) {
                 NS_WARNING("failed to create freetype face");
             }
         }
@@ -125,7 +129,7 @@ public:
 
     ~AutoFTFace() {
         if (mFace && mOwnsFace) {
-            FT_Done_Face(mFace);
+            Factory::ReleaseFTFace(mFace);
             if (mFontDataBuf) {
                 free(mFontDataBuf);
             }
@@ -144,6 +148,7 @@ public:
     }
 
     const uint8_t* FontData() const { return mFontDataBuf; }
+    uint32_t DataLength() const { return mDataLength; }
 
 private:
     FT_Face  mFace;
@@ -151,6 +156,7 @@ private:
                            // or null for fonts instantiated from a file.
                            // If non-null, this must survive as long as the
                            // FT_Face.
+    uint32_t mDataLength;  // Size of mFontDataBuf, if present.
     bool     mOwnsFace;
 };
 
@@ -167,7 +173,7 @@ private:
 cairo_scaled_font_t *
 FT2FontEntry::CreateScaledFont(const gfxFontStyle *aStyle)
 {
-    cairo_font_face_t *cairoFace = CairoFontFace();
+    cairo_font_face_t *cairoFace = CairoFontFace(aStyle);
     if (!cairoFace) {
         return nullptr;
     }
@@ -180,23 +186,6 @@ FT2FontEntry::CreateScaledFont(const gfxFontStyle *aStyle)
     // XXX deal with adjusted size
     cairo_matrix_init_scale(&sizeMatrix, aStyle->size, aStyle->size);
     cairo_matrix_init_identity(&identityMatrix);
-
-    // synthetic oblique by skewing via the font matrix
-    bool needsOblique = IsUpright() &&
-                        aStyle->style != NS_FONT_STYLE_NORMAL &&
-                        aStyle->allowSyntheticStyle;
-
-    if (needsOblique) {
-        cairo_matrix_t style;
-        cairo_matrix_init(&style,
-                          1,                //xx
-                          0,                //yx
-                          -1 * OBLIQUE_SKEW_FACTOR, //xy
-                          1,                //yy
-                          0,                //x0
-                          0);               //y0
-        cairo_matrix_multiply(&sizeMatrix, &sizeMatrix, &style);
-    }
 
     cairo_font_options_t *fontOptions = cairo_font_options_create();
 
@@ -228,14 +217,45 @@ FT2FontEntry::~FT2FontEntry()
 #endif
 }
 
+gfxFontEntry*
+FT2FontEntry::Clone() const
+{
+    MOZ_ASSERT(!IsUserFont(), "we can only clone installed fonts!");
+    FT2FontEntry* fe = new FT2FontEntry(Name());
+    fe->mFilename = mFilename;
+    fe->mFTFontIndex = mFTFontIndex;
+    fe->mWeightRange = mWeightRange;
+    fe->mStretchRange = mStretchRange;
+    fe->mStyleRange = mStyleRange;
+    return fe;
+}
+
+static cairo_user_data_key_t sFTFaceKey;
+
 gfxFont*
-FT2FontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBold)
+FT2FontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle)
 {
     cairo_scaled_font_t *scaledFont = CreateScaledFont(aFontStyle);
     if (!scaledFont) {
         return nullptr;
     }
-    gfxFont *font = new gfxFT2Font(scaledFont, this, aFontStyle, aNeedsBold);
+
+    RefPtr<UnscaledFontFreeType> unscaledFont(mUnscaledFont);
+    if (!unscaledFont) {
+        unscaledFont =
+            !mFilename.IsEmpty() && mFilename[0] == '/' ?
+                new UnscaledFontFreeType(mFilename.BeginReading(),
+                                         mFTFontIndex) :
+                new UnscaledFontFreeType(mFTFace);
+        mUnscaledFont = unscaledFont;
+    }
+
+    cairo_font_face_t* face = cairo_scaled_font_get_font_face(scaledFont);
+    FT_Face ftFace = static_cast<FT_Face>(cairo_font_face_get_user_data(face, &sFTFaceKey));
+
+    gfxFont *font = new gfxFT2Font(unscaledFont, scaledFont,
+                                   ftFace ? ftFace : mFTFace,
+                                   this, aFontStyle);
     cairo_scaled_font_destroy(scaledFont);
     return font;
 }
@@ -243,25 +263,22 @@ FT2FontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle, bool aNeedsBold
 /* static */
 FT2FontEntry*
 FT2FontEntry::CreateFontEntry(const nsAString& aFontName,
-                              uint16_t aWeight,
-                              int16_t aStretch,
-                              uint8_t aStyle,
+                              WeightRange aWeight,
+                              StretchRange aStretch,
+                              SlantStyleRange aStyle,
                               const uint8_t* aFontData,
                               uint32_t aLength)
 {
     // Ownership of aFontData is passed in here; the fontEntry must
     // retain it as long as the FT_Face needs it, and ensure it is
     // eventually deleted.
-    FT_Face face;
-    FT_Error error =
-        FT_New_Memory_Face(gfxToolkitPlatform::GetPlatform()->GetFTLibrary(),
-                           aFontData, aLength, 0, &face);
-    if (error != FT_Err_Ok) {
+    FT_Face face = Factory::NewFTFaceFromData(nullptr, aFontData, aLength, 0);
+    if (!face) {
         free((void*)aFontData);
         return nullptr;
     }
     if (FT_Err_Ok != FT_Select_Charmap(face, FT_ENCODING_UNICODE)) {
-        FT_Done_Face(face);
+        Factory::ReleaseFTFace(face);
         free((void*)aFontData);
         return nullptr;
     }
@@ -269,11 +286,11 @@ FT2FontEntry::CreateFontEntry(const nsAString& aFontName,
     // as it's not guaranteed that the face has valid names (bug 737315)
     FT2FontEntry* fe =
         FT2FontEntry::CreateFontEntry(face, nullptr, 0, aFontName,
-                                      aFontData);
+                                      aFontData, aLength);
     if (fe) {
-        fe->mStyle = aStyle;
-        fe->mWeight = aWeight;
-        fe->mStretch = aStretch;
+        fe->mStyleRange = aStyle;
+        fe->mWeightRange = aWeight;
+        fe->mStretchRange = aStretch;
         fe->mIsDataUserFont = true;
     }
     return fe;
@@ -281,24 +298,26 @@ FT2FontEntry::CreateFontEntry(const nsAString& aFontName,
 
 class FTUserFontData {
 public:
-    FTUserFontData(FT_Face aFace, const uint8_t* aData)
-        : mFace(aFace), mFontData(aData)
+    FTUserFontData(FT_Face aFace, const uint8_t* aData, uint32_t aLength)
+        : mFace(aFace), mFontData(aData), mLength(aLength)
     {
     }
 
     ~FTUserFontData()
     {
-        FT_Done_Face(mFace);
+        Factory::ReleaseFTFace(mFace);
         if (mFontData) {
             free((void*)mFontData);
         }
     }
 
     const uint8_t *FontData() const { return mFontData; }
+    uint32_t Length() const { return mLength; }
 
 private:
     FT_Face        mFace;
     const uint8_t *mFontData;
+    uint32_t       mLength;
 };
 
 static void
@@ -315,9 +334,9 @@ FT2FontEntry::CreateFontEntry(const FontListEntry& aFLE)
     FT2FontEntry *fe = new FT2FontEntry(aFLE.faceName());
     fe->mFilename = aFLE.filepath();
     fe->mFTFontIndex = aFLE.index();
-    fe->mWeight = aFLE.weight();
-    fe->mStretch = aFLE.stretch();
-    fe->mStyle = (aFLE.italic() ? NS_FONT_STYLE_ITALIC : NS_FONT_STYLE_NORMAL);
+    fe->mWeightRange = WeightRange::FromScalar(aFLE.weightRange());
+    fe->mStretchRange = StretchRange::FromScalar(aFLE.stretchRange());
+    fe->mStyleRange = SlantStyleRange::FromScalar(aFLE.styleRange());
     return fe;
 }
 
@@ -328,7 +347,7 @@ FTFaceIsItalic(FT_Face aFace)
     return !!(aFace->style_flags & FT_STYLE_FLAG_ITALIC);
 }
 
-static uint16_t
+static FontWeight
 FTFaceGetWeight(FT_Face aFace)
 {
     TT_OS2 *os2 = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(aFace, ft_sfnt_os2));
@@ -356,7 +375,7 @@ FTFaceGetWeight(FT_Face aFace)
 
     NS_ASSERTION(result >= 100 && result <= 900, "Invalid weight in font!");
 
-    return result;
+    return FontWeight(int(result));
 }
 
 // Used to create the font entry for installed faces on the device,
@@ -371,12 +390,14 @@ FT2FontEntry*
 FT2FontEntry::CreateFontEntry(FT_Face aFace,
                               const char* aFilename, uint8_t aIndex,
                               const nsAString& aName,
-                              const uint8_t* aFontData)
+                              const uint8_t* aFontData,
+                              uint32_t aLength)
 {
     FT2FontEntry *fe = new FT2FontEntry(aName);
-    fe->mStyle = (FTFaceIsItalic(aFace) ?
-                  NS_FONT_STYLE_ITALIC : NS_FONT_STYLE_NORMAL);
-    fe->mWeight = FTFaceGetWeight(aFace);
+    fe->mStyleRange = SlantStyleRange(FTFaceIsItalic(aFace)
+                                      ? FontSlantStyle::Italic()
+                                      : FontSlantStyle::Normal());
+    fe->mWeightRange = WeightRange(FTFaceGetWeight(aFace));
     fe->mFilename = aFilename;
     fe->mFTFontIndex = aIndex;
 
@@ -385,8 +406,8 @@ FT2FontEntry::CreateFontEntry(FT_Face aFace,
         int flags = gfxPlatform::GetPlatform()->FontHintingEnabled() ?
                     FT_LOAD_DEFAULT :
                     (FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING);
-        fe->mFontFace = cairo_ft_font_face_create_for_ft_face(aFace, flags);
-        FTUserFontData *userFontData = new FTUserFontData(aFace, aFontData);
+        fe->mFontFace = cairo_ft_font_face_create_for_ft_face(aFace, flags, nullptr, 0);
+        FTUserFontData *userFontData = new FTUserFontData(aFace, aFontData, aLength);
         cairo_font_face_set_user_data(fe->mFontFace, &sFTUserFontDataKey,
                                       userFontData, FTFontDestroyFunc);
     }
@@ -418,22 +439,70 @@ gfxFT2Font::GetFontEntry()
 }
 
 cairo_font_face_t *
-FT2FontEntry::CairoFontFace()
+FT2FontEntry::CairoFontFace(const gfxFontStyle* aStyle)
 {
+    // Create our basic (no-variations) mFontFace if not already present;
+    // this also ensures we have mFTFace available.
     if (!mFontFace) {
         AutoFTFace face(this);
         if (!face) {
             return nullptr;
         }
-        mFTFace = face.forget();
         int flags = gfxPlatform::GetPlatform()->FontHintingEnabled() ?
                     FT_LOAD_DEFAULT :
                     (FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING);
-        mFontFace = cairo_ft_font_face_create_for_ft_face(face, flags);
-        FTUserFontData *userFontData = new FTUserFontData(face, face.FontData());
+        mFontFace = cairo_ft_font_face_create_for_ft_face(face, flags, 
+                                                          nullptr, 0);
+        auto userFontData = new FTUserFontData(face, face.FontData(),
+                                               face.DataLength());
         cairo_font_face_set_user_data(mFontFace, &sFTUserFontDataKey,
                                       userFontData, FTFontDestroyFunc);
+        mFTFace = face.forget();
     }
+
+    // If variations are present, we will not use our cached mFontFace
+    // but always create a new cairo_font_face_t because its FT_Face will
+    // have custom variation coordinates applied.
+    if ((!mVariationSettings.IsEmpty() ||
+        (aStyle && !aStyle->variationSettings.IsEmpty())) &&
+        (mFTFace->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) {
+        int flags = gfxPlatform::GetPlatform()->FontHintingEnabled() ?
+                    FT_LOAD_DEFAULT :
+                    (FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING);
+        // Resolve variations from entry (descriptor) and style (property)
+        AutoTArray<gfxFontVariation,8> settings;
+        GetVariationsForStyle(settings, aStyle ? *aStyle : gfxFontStyle());
+        AutoTArray<FT_Fixed,8> coords;
+        gfxFT2FontBase::SetupVarCoords(mFTFace, settings, &coords);
+        // Create a separate FT_Face because we need to apply custom
+        // variation settings to it.
+        FT_Face ftFace;
+        if (!mFilename.IsEmpty() && mFilename[0] == '/') {
+            ftFace = Factory::NewFTFace(nullptr, mFilename.get(), mFTFontIndex);
+        } else {
+            auto ufd = reinterpret_cast<FTUserFontData*>(
+                cairo_font_face_get_user_data(mFontFace, &sFTUserFontDataKey));
+            ftFace = Factory::NewFTFaceFromData(nullptr, ufd->FontData(),
+                                                ufd->Length(), mFTFontIndex);
+        }
+        // The variation coordinates will actually be applied to ftFace by
+        // gfxFT2FontBase::InitMetrics, so we don't need to do it here.
+        cairo_font_face_t* cairoFace =
+            cairo_ft_font_face_create_for_ft_face(ftFace, flags,
+                                                  coords.Elements(),
+                                                  coords.Length());
+        // Set up user data to properly release the FT_Face when the cairo face
+        // is deleted.
+        if (cairo_font_face_set_user_data(cairoFace, &sFTFaceKey, ftFace,
+                    (cairo_destroy_func_t)&Factory::ReleaseFTFace)) {
+            // set_user_data failed! discard, and fall back to default face
+            cairo_font_face_destroy(cairoFace);
+            FT_Done_Face(ftFace);
+        } else {
+            return cairoFace;
+        }
+    }
+
     return mFontFace;
 }
 
@@ -461,15 +530,15 @@ FT2FontEntry::ReadCMAP(FontInfoData *aFontInfoData)
     nsresult rv = CopyFontTable(TTAG_cmap, buffer);
     
     if (NS_SUCCEEDED(rv)) {
-        bool unicodeFont;
-        bool symbolFont;
         rv = gfxFontUtils::ReadCMAP(buffer.Elements(), buffer.Length(),
-                                    *charmap, mUVSOffset,
-                                    unicodeFont, symbolFont);
+                                    *charmap, mUVSOffset);
     }
 
-    if (NS_SUCCEEDED(rv) && !HasGraphiteTables()) {
-        // We assume a Graphite font knows what it's doing,
+    if (NS_SUCCEEDED(rv) && !mIsDataUserFont && !HasGraphiteTables()) {
+        // For downloadable fonts, trust the author and don't
+        // try to munge the cmap based on script shaping support.
+
+        // We also assume a Graphite font knows what it's doing,
         // and provides whatever shaping is needed for the
         // characters it supports, so only check/clear the
         // complex-script ranges for non-Graphite fonts
@@ -544,13 +613,68 @@ FT2FontEntry::GetFontTable(uint32_t aTableTag)
         FTUserFontData *userFontData = static_cast<FTUserFontData*>(
             cairo_font_face_get_user_data(mFontFace, &sFTUserFontDataKey));
         if (userFontData && userFontData->FontData()) {
-            return GetTableFromFontData(userFontData->FontData(), aTableTag);
+            return gfxFontUtils::GetTableFromFontData(userFontData->FontData(),
+                                                      aTableTag);
         }
     }
 
     // otherwise, use the default method (which in turn will call our
     // implementation of CopyFontTable)
     return gfxFontEntry::GetFontTable(aTableTag);
+}
+
+bool
+FT2FontEntry::HasVariations()
+{
+    if (mHasVariationsInitialized) {
+        return mHasVariations;
+    }
+    mHasVariationsInitialized = true;
+
+    AutoFTFace face(this);
+    if (face) {
+        mHasVariations =
+            FT_Face(face)->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS;
+    }
+
+    return mHasVariations;
+}
+
+void
+FT2FontEntry::GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes)
+{
+    if (!HasVariations()) {
+        return;
+    }
+    AutoFTFace face(this);
+    if (!face) {
+        return;
+    }
+    FT_MM_Var* mmVar;
+    if (FT_Err_Ok != (FT_Get_MM_Var(face, &mmVar))) {
+        return;
+    }
+    gfxFT2Utils::GetVariationAxes(mmVar, aAxes);
+    FT_Done_MM_Var(FT_Face(face)->glyph->library, mmVar);
+}
+
+void
+FT2FontEntry::GetVariationInstances(
+    nsTArray<gfxFontVariationInstance>& aInstances)
+{
+    if (!HasVariations()) {
+        return;
+    }
+    AutoFTFace face(this);
+    if (!face) {
+        return;
+    }
+    FT_MM_Var* mmVar;
+    if (FT_Err_Ok != (FT_Get_MM_Var(face, &mmVar))) {
+        return;
+    }
+    gfxFT2Utils::GetVariationInstances(this, mmVar, aInstances);
+    FT_Done_MM_Var(FT_Face(face)->glyph->library, mmVar);
 }
 
 void
@@ -577,8 +701,7 @@ FT2FontEntry::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
  */
 
 void
-FT2FontFamily::AddFacesToFontList(InfallibleTArray<FontListEntry>* aFontList,
-                                  Visibility aVisibility)
+FT2FontFamily::AddFacesToFontList(InfallibleTArray<FontListEntry>* aFontList)
 {
     for (int i = 0, n = mAvailableFonts.Length(); i < n; ++i) {
         const FT2FontEntry *fe =
@@ -586,13 +709,14 @@ FT2FontFamily::AddFacesToFontList(InfallibleTArray<FontListEntry>* aFontList,
         if (!fe) {
             continue;
         }
-        
-        aFontList->AppendElement(FontListEntry(Name(), fe->Name(),
+
+        aFontList->AppendElement(FontListEntry(Name(),
+                                               fe->Name(),
                                                fe->mFilename,
-                                               fe->Weight(), fe->Stretch(),
-                                               fe->mStyle,
-                                               fe->mFTFontIndex,
-                                               aVisibility == kHidden));
+                                               fe->Weight().AsScalar(),
+                                               fe->Stretch().AsScalar(),
+                                               fe->SlantStyle().AsScalar(),
+                                               fe->mFTFontIndex));
     }
 }
 
@@ -609,6 +733,8 @@ FT2FontFamily::AddFacesToFontList(InfallibleTArray<FontListEntry>* aFontList,
 
 class FontNameCache {
 public:
+    // Creates the object but does NOT load the cached data from the startup
+    // cache; call Init() after creation to do that.
     FontNameCache()
         : mMap(&mOps, sizeof(FNCMapEntry), 0)
         , mWriteNeeded(false)
@@ -629,11 +755,8 @@ public:
         };
 
         MOZ_ASSERT(XRE_IsParentProcess(),
-                   "StartupCacheFontNameCache should only be used in chrome "
-                   "process");
+                   "FontNameCache should only be used in chrome process");
         mCache = mozilla::scache::StartupCache::GetSingleton();
-
-        Init();
     }
 
     ~FontNameCache()
@@ -658,14 +781,18 @@ public:
             buf.AppendInt(entry->mFilesize);
             buf.Append(';');
         }
-        mCache->PutBuffer(CACHE_KEY, buf.get(), buf.Length() + 1);
+
+        mCache->PutBuffer(CACHE_KEY,
+            UniquePtr<char[]>(ToNewCString(buf)), buf.Length() + 1);
     }
 
+    // This may be called more than once (if we re-load the font list).
     void Init()
     {
         if (!mCache) {
             return;
         }
+
         uint32_t size;
         UniquePtr<char[]> buf;
         if (NS_FAILED(mCache->GetBuffer(CACHE_KEY, &buf, &size))) {
@@ -673,6 +800,9 @@ public:
         }
 
         LOG(("got: %s from the cache", nsDependentCString(buf.get(), size).get()));
+
+        mMap.Clear();
+        mWriteNeeded = false;
 
         const char* beginning = buf.get();
         const char* end = strchr(beginning, ';');
@@ -711,7 +841,7 @@ public:
         }
     }
 
-    virtual void
+    void
     GetInfoForFile(const nsCString& aFileName, nsCString& aFaceList,
                    uint32_t *aTimestamp, uint32_t *aFilesize)
     {
@@ -727,7 +857,7 @@ public:
         }
     }
 
-    virtual void
+    void
     CacheFileInfo(const nsCString& aFileName, const nsCString& aFaceList,
                   uint32_t aTimestamp, uint32_t aFilesize)
     {
@@ -793,53 +923,131 @@ private:
 // For Mobile, we use gfxFT2Fonts, and we build the font list by directly
 // scanning the system's Fonts directory for OpenType and TrueType files.
 
-gfxFT2FontList::gfxFT2FontList()
+#define JAR_LAST_MODIFED_TIME "jar-last-modified-time"
+
+class WillShutdownObserver : public nsIObserver
 {
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIOBSERVER
+
+    explicit WillShutdownObserver(gfxFT2FontList* aFontList)
+        : mFontList(aFontList)
+    { }
+
+protected:
+    virtual ~WillShutdownObserver()
+    { }
+
+    gfxFT2FontList *mFontList;
+};
+
+NS_IMPL_ISUPPORTS(WillShutdownObserver, nsIObserver)
+
+NS_IMETHODIMP
+WillShutdownObserver::Observe(nsISupports *aSubject,
+                              const char *aTopic,
+                              const char16_t *aData)
+{
+    if (!nsCRT::strcmp(aTopic, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID)) {
+        mFontList->WillShutdown();
+    } else {
+        MOZ_ASSERT_UNREACHABLE("unexpected notification topic");
+    }
+    return NS_OK;
+}
+
+gfxFT2FontList::gfxFT2FontList()
+    : mJarModifiedTime(0)
+{
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (obs) {
+        mObserver = new WillShutdownObserver(this);
+        obs->AddObserver(mObserver, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID, false);
+    }
+}
+
+gfxFT2FontList::~gfxFT2FontList()
+{
+    if (mObserver) {
+        nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+        if (obs) {
+            obs->RemoveObserver(mObserver, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID);
+        }
+        mObserver = nullptr;
+    }
 }
 
 void
 gfxFT2FontList::AppendFacesFromCachedFaceList(
     const nsCString& aFileName,
     const nsCString& aFaceList,
-    StandardFile aStdFile,
-    FT2FontFamily::Visibility aVisibility)
+    StandardFile aStdFile)
 {
     const char *beginning = aFaceList.get();
     const char *end = strchr(beginning, ',');
     while (end) {
-        nsString familyName =
-            NS_ConvertUTF8toUTF16(beginning, end - beginning);
+        NS_ConvertUTF8toUTF16 familyName(beginning, end - beginning);
         ToLowerCase(familyName);
+
         beginning = end + 1;
         if (!(end = strchr(beginning, ','))) {
             break;
         }
-        nsString faceName =
-            NS_ConvertUTF8toUTF16(beginning, end - beginning);
+        NS_ConvertUTF8toUTF16 faceName(beginning, end - beginning);
+
         beginning = end + 1;
         if (!(end = strchr(beginning, ','))) {
             break;
         }
         uint32_t index = strtoul(beginning, nullptr, 10);
-        beginning = end + 1;
-        if (!(end = strchr(beginning, ','))) {
-            break;
-        }
-        bool italic = (*beginning != '0');
-        beginning = end + 1;
-        if (!(end = strchr(beginning, ','))) {
-            break;
-        }
-        uint32_t weight = strtoul(beginning, nullptr, 10);
-        beginning = end + 1;
-        if (!(end = strchr(beginning, ','))) {
-            break;
-        }
-        int32_t stretch = strtol(beginning, nullptr, 10);
 
-        FontListEntry fle(familyName, faceName, aFileName,
-                          weight, stretch, italic, index,
-                          aVisibility == FT2FontFamily::kHidden);
+        beginning = end + 1;
+        if (!(end = strchr(beginning, ','))) {
+            break;
+        }
+        nsAutoCString minStyle(beginning, end - beginning);
+        nsAutoCString maxStyle(minStyle);
+        int32_t colon = minStyle.FindChar(':');
+        if (colon > 0) {
+            maxStyle.Assign(minStyle.BeginReading() + colon + 1);
+            minStyle.Truncate(colon);
+        }
+
+        beginning = end + 1;
+        if (!(end = strchr(beginning, ','))) {
+            break;
+        }
+        char* limit;
+        float minWeight = strtof(beginning, &limit);
+        float maxWeight;
+        if (*limit == ':' && limit + 1 < end) {
+            maxWeight = strtof(limit + 1, nullptr);
+        } else {
+            maxWeight = minWeight;
+        }
+
+        beginning = end + 1;
+        if (!(end = strchr(beginning, ','))) {
+            break;
+        }
+        float minStretch = strtof(beginning, &limit);
+        float maxStretch;
+        if (*limit == ':' && limit + 1 < end) {
+            maxStretch = strtof(limit + 1, nullptr);
+        } else {
+            maxStretch = minStretch;
+        }
+
+        FontListEntry fle(
+            familyName, faceName, aFileName,
+            WeightRange(FontWeight(minWeight),
+                        FontWeight(maxWeight)).AsScalar(),
+            StretchRange(FontStretch(minStretch),
+                         FontStretch(maxStretch)).AsScalar(),
+            SlantStyleRange(FontSlantStyle::FromString(minStyle.get()),
+                            FontSlantStyle::FromString(maxStyle.get())).AsScalar(),
+            index);
         AppendFaceFromFontListEntry(fle, aStdFile);
 
         beginning = end + 1;
@@ -857,11 +1065,19 @@ AppendToFaceList(nsCString& aFaceList,
     aFaceList.Append(',');
     aFaceList.AppendInt(aFontEntry->mFTFontIndex);
     aFaceList.Append(',');
-    aFaceList.Append(aFontEntry->IsItalic() ? '1' : '0');
+    // Note that ToString() appends to the destination string without
+    // replacing existing contents (see FontPropertyTypes.h)
+    aFontEntry->SlantStyle().Min().ToString(aFaceList);
+    aFaceList.Append(':');
+    aFontEntry->SlantStyle().Max().ToString(aFaceList);
     aFaceList.Append(',');
-    aFaceList.AppendInt(aFontEntry->Weight());
+    aFaceList.AppendFloat(aFontEntry->Weight().Min().ToFloat());
+    aFaceList.Append(':');
+    aFaceList.AppendFloat(aFontEntry->Weight().Max().ToFloat());
     aFaceList.Append(',');
-    aFaceList.AppendInt(aFontEntry->Stretch());
+    aFaceList.AppendFloat(aFontEntry->Stretch().Min().Percentage());
+    aFaceList.Append(':');
+    aFaceList.AppendFloat(aFontEntry->Stretch().Max().Percentage());
     aFaceList.Append(',');
 }
 
@@ -898,8 +1114,7 @@ FT2FontEntry::CheckForBrokenFont(gfxFontFamily *aFamily)
 void
 gfxFT2FontList::AppendFacesFromFontFile(const nsCString& aFileName,
                                         FontNameCache *aCache,
-                                        StandardFile aStdFile,
-                                        FT2FontFamily::Visibility aVisibility)
+                                        StandardFile aStdFile)
 {
     nsCString cachedFaceList;
     uint32_t filesize = 0, timestamp = 0;
@@ -910,37 +1125,33 @@ gfxFT2FontList::AppendFacesFromFontFile(const nsCString& aFileName,
     struct stat s;
     int statRetval = stat(aFileName.get(), &s);
     if (!cachedFaceList.IsEmpty() && 0 == statRetval &&
-        s.st_mtime == timestamp && s.st_size == filesize)
+        uint32_t(s.st_mtime) == timestamp && s.st_size == filesize)
     {
         LOG(("using cached font info for %s", aFileName.get()));
-        AppendFacesFromCachedFaceList(aFileName, cachedFaceList, aStdFile,
-                                      aVisibility);
+        AppendFacesFromCachedFaceList(aFileName, cachedFaceList, aStdFile);
         return;
     }
 
-    FT_Library ftLibrary = gfxAndroidPlatform::GetPlatform()->GetFTLibrary();
-    FT_Face dummy;
-    if (FT_Err_Ok == FT_New_Face(ftLibrary, aFileName.get(), -1, &dummy)) {
+    FT_Face dummy = Factory::NewFTFace(nullptr, aFileName.get(), -1);
+    if (dummy) {
         LOG(("reading font info via FreeType for %s", aFileName.get()));
         nsCString newFaceList;
         timestamp = s.st_mtime;
         filesize = s.st_size;
         for (FT_Long i = 0; i < dummy->num_faces; i++) {
-            FT_Face face;
-            if (FT_Err_Ok != FT_New_Face(ftLibrary, aFileName.get(), i, &face)) {
+            FT_Face face = Factory::NewFTFace(nullptr, aFileName.get(), i);
+            if (!face) {
                 continue;
             }
-            AddFaceToList(aFileName, i, aStdFile, aVisibility, face, newFaceList);
-            FT_Done_Face(face);
+            AddFaceToList(aFileName, i, aStdFile, face, newFaceList);
+            Factory::ReleaseFTFace(face);
         }
-        FT_Done_Face(dummy);
+        Factory::ReleaseFTFace(dummy);
         if (aCache && 0 == statRetval && !newFaceList.IsEmpty()) {
             aCache->CacheFileInfo(aFileName, newFaceList, timestamp, filesize);
         }
     }
 }
-
-#define JAR_LAST_MODIFED_TIME "jar-last-modified-time"
 
 void
 gfxFT2FontList::FindFontsInOmnijar(FontNameCache *aCache)
@@ -951,7 +1162,6 @@ gfxFT2FontList::FindFontsInOmnijar(FontNameCache *aCache)
         mozilla::scache::StartupCache::GetSingleton();
     UniquePtr<char[]> cachedModifiedTimeBuf;
     uint32_t longSize;
-    int64_t jarModifiedTime;
     if (cache &&
         NS_SUCCEEDED(cache->GetBuffer(JAR_LAST_MODIFED_TIME,
                                       &cachedModifiedTimeBuf,
@@ -959,8 +1169,8 @@ gfxFT2FontList::FindFontsInOmnijar(FontNameCache *aCache)
         longSize == sizeof(int64_t))
     {
         nsCOMPtr<nsIFile> jarFile = Omnijar::GetPath(Omnijar::Type::GRE);
-        jarFile->GetLastModifiedTime(&jarModifiedTime);
-        if (jarModifiedTime > *(int64_t*)cachedModifiedTimeBuf.get()) {
+        jarFile->GetLastModifiedTime(&mJarModifiedTime);
+        if (mJarModifiedTime > *(int64_t*)cachedModifiedTimeBuf.get()) {
             jarChanged = true;
         }
     }
@@ -982,11 +1192,6 @@ gfxFT2FontList::FindFontsInOmnijar(FontNameCache *aCache)
             delete find;
         }
     }
-
-    if (cache) {
-        cache->PutBuffer(JAR_LAST_MODIFED_TIME, (char*)&jarModifiedTime,
-                         sizeof(jarModifiedTime));
-    }
 }
 
 // Given the freetype face corresponding to an entryName and face index,
@@ -994,7 +1199,6 @@ gfxFT2FontList::FindFontsInOmnijar(FontNameCache *aCache)
 void
 gfxFT2FontList::AddFaceToList(const nsCString& aEntryName, uint32_t aIndex,
                               StandardFile aStdFile,
-                              FT2FontFamily::Visibility aVisibility,
                               FT_Face aFace,
                               nsCString& aFaceList)
 {
@@ -1005,20 +1209,16 @@ gfxFT2FontList::AddFaceToList(const nsCString& aEntryName, uint32_t aIndex,
 
     // build the font entry name and create an FT2FontEntry,
     // but do -not- keep a reference to the FT_Face
-    FT2FontEntry* fe =
+    RefPtr<FT2FontEntry> fe =
         CreateNamedFontEntry(aFace, aEntryName.get(), aIndex);
-
-    auto& fontFamilies =
-        (aVisibility == FT2FontFamily::kHidden) ? mHiddenFontFamilies :
-                                                  mFontFamilies;
 
     if (fe) {
         NS_ConvertUTF8toUTF16 name(aFace->family_name);
         BuildKeyNameFromFontName(name);
-        gfxFontFamily *family = fontFamilies.GetWeak(name);
+        RefPtr<gfxFontFamily> family = mFontFamilies.GetWeak(name);
         if (!family) {
             family = new FT2FontFamily(name);
-            fontFamilies.Put(name, family);
+            mFontFamilies.Put(name, family);
             if (mSkipSpaceLookupCheckFamilies.Contains(name)) {
                 family->SetSkipSpaceFeatureCheck(true);
             }
@@ -1033,12 +1233,17 @@ gfxFT2FontList::AddFaceToList(const nsCString& aEntryName, uint32_t aIndex,
 
         AppendToFaceList(aFaceList, name, fe);
         if (LOG_ENABLED()) {
+            nsAutoCString weightString;
+            fe->Weight().ToString(weightString);
+            nsAutoCString stretchString;
+            fe->Stretch().ToString(stretchString);
             LOG(("(fontinit) added (%s) to family (%s)"
-                 " with style: %s weight: %d stretch: %d",
+                 " with style: %s weight: %s stretch: %s",
                  NS_ConvertUTF16toUTF8(fe->Name()).get(),
                  NS_ConvertUTF16toUTF8(family->Name()).get(),
                  fe->IsItalic() ? "italic" : "normal",
-                 fe->Weight(), fe->Stretch()));
+                 weightString.get(),
+                 stretchString.get()));
         }
     }
 }
@@ -1078,24 +1283,21 @@ gfxFT2FontList::AppendFacesFromOmnijarEntry(nsZipArchive* aArchive,
         return;
     }
 
-    FT_Library ftLibrary = gfxAndroidPlatform::GetPlatform()->GetFTLibrary();
-
-    FT_Face dummy;
-    if (FT_Err_Ok != FT_New_Memory_Face(ftLibrary, buf.get(), bufSize, 0, &dummy)) {
+    FT_Face dummy = Factory::NewFTFaceFromData(nullptr, buf.get(), bufSize, 0);
+    if (!dummy) {
         return;
     }
 
     for (FT_Long i = 0; i < dummy->num_faces; i++) {
-        FT_Face face;
-        if (FT_Err_Ok != FT_New_Memory_Face(ftLibrary, buf.get(), bufSize, i, &face)) {
+        FT_Face face = Factory::NewFTFaceFromData(nullptr, buf.get(), bufSize, i);
+        if (!face) {
             continue;
         }
-        AddFaceToList(aEntryName, i, kStandard, FT2FontFamily::kVisible,
-                      face, faceList);
-        FT_Done_Face(face);
+        AddFaceToList(aEntryName, i, kStandard, face, faceList);
+        Factory::ReleaseFTFace(face);
     }
 
-    FT_Done_Face(dummy);
+    Factory::ReleaseFTFace(dummy);
 
     if (aCache && !faceList.IsEmpty()) {
         aCache->CacheFileInfo(aEntryName, faceList, 0, bufSize);
@@ -1149,21 +1351,18 @@ gfxFT2FontList::FindFonts()
             RefPtr<gfxFontFamily>& family = iter.Data();
             FinalizeFamilyMemberList(key, family, /* aSortFaces */ false);
         }
-        for (auto iter = mHiddenFontFamilies.Iter(); !iter.Done(); iter.Next()) {
-            nsStringHashKey::KeyType key = iter.Key();
-            RefPtr<gfxFontFamily>& family = iter.Data();
-            FinalizeFamilyMemberList(key, family, /* aSortFaces */ false );
-        }
 
-        LOG(("got font list from chrome process: %d faces in %d families "
-             "and %d in hidden families",
-            fonts.Length(), mFontFamilies.Count(),
-            mHiddenFontFamilies.Count()));
+        LOG(("got font list from chrome process: %" PRIdPTR " faces in %"
+             PRIu32 " families",
+            fonts.Length(), mFontFamilies.Count()));
         return;
     }
 
     // Chrome process: get the cached list (if any)
-    FontNameCache fnc;
+    if (!mFontNameCache) {
+        mFontNameCache = MakeUnique<FontNameCache>();
+    }
+    mFontNameCache->Init();
 
     // ANDROID_ROOT is the root of the android system, typically /system;
     // font files are in /$ANDROID_ROOT/fonts/
@@ -1176,19 +1375,12 @@ gfxFT2FontList::FindFonts()
     }
     root.AppendLiteral("/fonts");
 
-    FindFontsInDir(root, &fnc, FT2FontFamily::kVisible);
+    FindFontsInDir(root, mFontNameCache.get());
 
     if (mFontFamilies.Count() == 0) {
         // if we can't find/read the font directory, we are doomed!
-        NS_RUNTIMEABORT("Could not read the system fonts directory");
+        MOZ_CRASH("Could not read the system fonts directory");
     }
-
-#ifdef MOZ_WIDGET_GONK
-    // Look for fonts in /system/fonts/hidden and preload them to the
-    // user-font cache as data: URIs
-    root.AppendLiteral("/hidden");
-    FindFontsInDir(root, &fnc, FT2FontFamily::kHidden);
-#endif
 
     // Look for fonts stored in omnijar, unless we're on a low-memory
     // device where we don't want to spend the RAM to decompress them.
@@ -1198,7 +1390,7 @@ gfxFT2FontList::FindFonts()
     if ((NS_SUCCEEDED(mem->IsLowMemoryPlatform(&lowmem)) && !lowmem &&
          Preferences::GetBool("gfx.bundled_fonts.enabled")) ||
         Preferences::GetBool("gfx.bundled_fonts.force-enabled")) {
-        FindFontsInOmnijar(&fnc);
+        FindFontsInOmnijar(mFontNameCache.get());
     }
 
     // Look for downloaded fonts in a profile-agnostic "fonts" directory.
@@ -1212,7 +1404,7 @@ gfxFT2FontList::FindFonts()
             appDir->AppendNative(NS_LITERAL_CSTRING("fonts"));
             nsCString localPath;
             if (NS_SUCCEEDED(appDir->GetNativePath(localPath))) {
-                FindFontsInDir(localPath, &fnc, FT2FontFamily::kVisible);
+                FindFontsInDir(localPath, mFontNameCache.get());
             }
         }
     }
@@ -1226,7 +1418,7 @@ gfxFT2FontList::FindFonts()
         nsCString localPath;
         rv = localDir->GetNativePath(localPath);
         if (NS_SUCCEEDED(rv)) {
-            FindFontsInDir(localPath, &fnc, FT2FontFamily::kVisible);
+            FindFontsInDir(localPath, mFontNameCache.get());
         }
     }
 
@@ -1238,17 +1430,11 @@ gfxFT2FontList::FindFonts()
         RefPtr<gfxFontFamily>& family = iter.Data();
         FinalizeFamilyMemberList(key, family, /* aSortFaces */ true);
     }
-    for (auto iter = mHiddenFontFamilies.Iter(); !iter.Done(); iter.Next()) {
-        nsStringHashKey::KeyType key = iter.Key();
-        RefPtr<gfxFontFamily>& family = iter.Data();
-        FinalizeFamilyMemberList(key, family, /* aSortFaces */ true);
-    }
 }
 
 void
 gfxFT2FontList::FindFontsInDir(const nsCString& aDir,
-                               FontNameCache *aFNC,
-                               FT2FontFamily::Visibility aVisibility)
+                               FontNameCache *aFNC)
 {
     static const char* sStandardFonts[] = {
         "DroidSans.ttf",
@@ -1297,8 +1483,7 @@ gfxFT2FontList::FindFontsInDir(const nsCString& aDir,
             // note that if we have cached info for this file in fnc,
             // and the file is unchanged, we won't actually need to read it.
             // If the file is new/changed, this will update the FontNameCache.
-            AppendFacesFromFontFile(s, aFNC, isStdFont ? kStandard : kUnknown,
-                                    aVisibility);
+            AppendFacesFromFontFile(s, aFNC, isStdFont ? kStandard : kUnknown);
         }
     }
 
@@ -1311,14 +1496,12 @@ gfxFT2FontList::AppendFaceFromFontListEntry(const FontListEntry& aFLE,
 {
     FT2FontEntry* fe = FT2FontEntry::CreateFontEntry(aFLE);
     if (fe) {
-        auto& fontFamilies =
-            aFLE.isHidden() ? mHiddenFontFamilies : mFontFamilies;
         fe->mStandardFace = (aStdFile == kStandard);
         nsAutoString name(aFLE.familyName());
-        gfxFontFamily *family = fontFamilies.GetWeak(name);
+        RefPtr<gfxFontFamily> family = mFontFamilies.GetWeak(name);
         if (!family) {
             family = new FT2FontFamily(name);
-            fontFamilies.Put(name, family);
+            mFontFamilies.Put(name, family);
             if (mSkipSpaceLookupCheckFamilies.Contains(name)) {
                 family->SetSkipSpaceFeatureCheck(true);
             }
@@ -1337,11 +1520,7 @@ gfxFT2FontList::GetSystemFontList(InfallibleTArray<FontListEntry>* retValue)
 {
     for (auto iter = mFontFamilies.Iter(); !iter.Done(); iter.Next()) {
         auto family = static_cast<FT2FontFamily*>(iter.Data().get());
-        family->AddFacesToFontList(retValue, FT2FontFamily::kVisible);
-    }
-    for (auto iter = mHiddenFontFamilies.Iter(); !iter.Done(); iter.Next()) {
-        auto family = static_cast<FT2FontFamily*>(iter.Data().get());
-        family->AddFacesToFontList(retValue, FT2FontFamily::kHidden);
+        family->AddFacesToFontList(retValue);
     }
 }
 
@@ -1359,79 +1538,13 @@ LoadSkipSpaceLookupCheck(nsTHashtable<nsStringHashKey>& aSkipSpaceLookupCheck)
     }
 }
 
-void
-PreloadAsUserFontFaces(nsStringHashKey::KeyType aKey,
-                       RefPtr<gfxFontFamily>& aFamily)
-{
-    gfxFontFamily *family = aFamily.get();
-
-    auto& faces = family->GetFontList();
-    size_t count = faces.Length();
-    for (size_t i = 0; i < count; ++i) {
-        FT2FontEntry* fe = static_cast<FT2FontEntry*>(faces[i].get());
-        if (fe->mFTFontIndex != 0) {
-            NS_NOTREACHED("don't try to preload a multi-face font");
-            continue;
-        }
-
-        // XXX Should we move the i/o here off the main thread?
-
-        // Map the font data in fe->mFilename, so we can calculate its CRC32.
-        int fd = open(fe->mFilename.get(), O_RDONLY);
-        if (fd < 0) {
-            continue;
-        }
-        struct stat buf;
-        if (fstat(fd, &buf) != 0 || buf.st_size < 12) {
-            close(fd);
-            continue;
-        }
-        char* data = static_cast<char*>(
-            mmap(0, buf.st_size, PROT_READ, MAP_PRIVATE, fd, 0));
-        close(fd);
-        if (data == MAP_FAILED) {
-            continue;
-        }
-
-        // Calculate CRC32
-        uint32_t crc = crc32(0, nullptr, 0);
-        crc = crc32(crc, (Bytef*)data, buf.st_size);
-        munmap(data, buf.st_size);
-
-#if 0
-        ALOG("\n**** Preloading family [%s] face [%s] CRC32 [0x%08x]",
-             NS_ConvertUTF16toUTF8(family->Name()).get(),
-             fe->mFilename.get(),
-             crc);
-#endif
-
-        fe->mUserFontData = new gfxUserFontData;
-        fe->mUserFontData->mRealName = fe->Name();
-        fe->mUserFontData->mCRC32 = crc;
-        fe->mUserFontData->mLength = buf.st_size;
-
-        // Stash it persistently in the user-font cache.
-        gfxUserFontSet::UserFontCache::CacheFont(
-            fe, gfxUserFontSet::UserFontCache::kPersistent);
-    }
-}
-
 nsresult
-gfxFT2FontList::InitFontList()
+gfxFT2FontList::InitFontListForPlatform()
 {
-    // reset font lists
-    gfxPlatformFontList::InitFontList();
-    mHiddenFontFamilies.Clear();
-
     LoadSkipSpaceLookupCheck(mSkipSpaceLookupCheckFamilies);
 
     FindFonts();
 
-    for (auto iter = mHiddenFontFamilies.Iter(); !iter.Done(); iter.Next()) {
-        nsStringHashKey::KeyType key = iter.Key();
-        RefPtr<gfxFontFamily>& family = iter.Data();
-        PreloadAsUserFontFaces(key, family);
-    }
     return NS_OK;
 }
 
@@ -1440,16 +1553,14 @@ gfxFT2FontList::InitFontList()
 
 gfxFontEntry*
 gfxFT2FontList::LookupLocalFont(const nsAString& aFontName,
-                                uint16_t aWeight,
-                                int16_t aStretch,
-                                uint8_t aStyle)
+                                WeightRange aWeightForEntry,
+                                StretchRange aStretchForEntry,
+                                SlantStyleRange aStyleForEntry)
 {
     // walk over list of names
     FT2FontEntry* fontEntry = nullptr;
     nsString fullName(aFontName);
 
-    // Note that we only check mFontFamilies here, not mHiddenFontFamilies;
-    // hence @font-face { src:local(...) } will not find hidden fonts.
     for (auto iter = mFontFamilies.Iter(); !iter.Done(); iter.Next()) {
         // Check family name, based on the assumption that the
         // first part of the full name is the family name
@@ -1499,9 +1610,9 @@ searchDone:
                                       fontEntry->mFTFontIndex,
                                       fontEntry->Name(), nullptr);
     if (fe) {
-        fe->mStyle = aStyle;
-        fe->mWeight = aWeight;
-        fe->mStretch = aStretch;
+        fe->mStyleRange = aStyleForEntry;
+        fe->mWeightRange = aWeightForEntry;
+        fe->mStretchRange = aStretchForEntry;
         fe->mIsLocalUserFont = true;
     }
 
@@ -1509,12 +1620,10 @@ searchDone:
 }
 
 gfxFontFamily*
-gfxFT2FontList::GetDefaultFont(const gfxFontStyle* aStyle)
+gfxFT2FontList::GetDefaultFontForPlatform(const gfxFontStyle* aStyle)
 {
     gfxFontFamily *ff = nullptr;
-#ifdef MOZ_WIDGET_GONK
-    ff = FindFamily(NS_LITERAL_STRING("Fira Sans"));
-#elif defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
     ff = FindFamily(NS_LITERAL_STRING("Roboto"));
     if (!ff) {
         ff = FindFamily(NS_LITERAL_STRING("Droid Sans"));
@@ -1526,17 +1635,20 @@ gfxFT2FontList::GetDefaultFont(const gfxFontStyle* aStyle)
 
 gfxFontEntry*
 gfxFT2FontList::MakePlatformFont(const nsAString& aFontName,
-                                 uint16_t aWeight,
-                                 int16_t aStretch,
-                                 uint8_t aStyle,
+                                 WeightRange aWeightForEntry,
+                                 StretchRange aStretchForEntry,
+                                 SlantStyleRange aStyleForEntry,
                                  const uint8_t* aFontData,
                                  uint32_t aLength)
 {
     // The FT2 font needs the font data to persist, so we do NOT free it here
     // but instead pass ownership to the font entry.
     // Deallocation will happen later, when the font face is destroyed.
-    return FT2FontEntry::CreateFontEntry(aFontName, aWeight, aStretch,
-                                         aStyle, aFontData, aLength);
+    return FT2FontEntry::CreateFontEntry(aFontName,
+                                         aWeightForEntry,
+                                         aStretchForEntry,
+                                         aStyleForEntry,
+                                         aFontData, aLength);
 }
 
 void
@@ -1546,8 +1658,26 @@ gfxFT2FontList::GetFontFamilyList(nsTArray<RefPtr<gfxFontFamily> >& aFamilyArray
         RefPtr<gfxFontFamily>& family = iter.Data();
         aFamilyArray.AppendElement(family);
     }
-    for (auto iter = mHiddenFontFamilies.Iter(); !iter.Done(); iter.Next()) {
-        RefPtr<gfxFontFamily>& family = iter.Data();
-        aFamilyArray.AppendElement(family);
+}
+
+gfxFontFamily*
+gfxFT2FontList::CreateFontFamily(const nsAString& aName) const
+{
+    return new FT2FontFamily(aName);
+}
+
+void
+gfxFT2FontList::WillShutdown()
+{
+    mozilla::scache::StartupCache* cache =
+        mozilla::scache::StartupCache::GetSingleton();
+    if (cache && mJarModifiedTime > 0) {
+        const size_t bufSize = sizeof(mJarModifiedTime);
+        auto buf = MakeUnique<char[]>(bufSize);
+        memcpy(buf.get(), &mJarModifiedTime, bufSize);
+
+        cache->PutBuffer(JAR_LAST_MODIFED_TIME,
+                         std::move(buf), bufSize);
     }
+    mFontNameCache = nullptr;
 }

@@ -6,11 +6,11 @@
 #include "nsIContentPolicy.idl"
 
 interface nsIURI;
-interface nsIChannel;
 interface nsIDocShell;
-interface nsIDOMDocument;
+interface nsIEventTarget;
 interface nsIPrincipal;
-interface nsIURI;
+
+webidl Document;
 
 /**
  * nsIContentSecurityPolicy
@@ -20,6 +20,12 @@ interface nsIURI;
  */
 
 typedef unsigned short CSPDirective;
+
+%{C++
+class nsCSPPolicy;
+%}
+
+[ptr] native CSPPolicyPtr(const nsCSPPolicy);
 
 [scriptable, builtinclass, uuid(b3c4c0ae-bd5e-4cad-87e0-8d210dbb3f9f)]
 interface nsIContentSecurityPolicy : nsISerializable
@@ -48,17 +54,26 @@ interface nsIContentSecurityPolicy : nsISerializable
   const unsigned short REFLECTED_XSS_DIRECTIVE        = 12;
   const unsigned short BASE_URI_DIRECTIVE             = 13;
   const unsigned short FORM_ACTION_DIRECTIVE          = 14;
-  const unsigned short REFERRER_DIRECTIVE             = 15;
-  const unsigned short WEB_MANIFEST_SRC_DIRECTIVE     = 16;
-  const unsigned short UPGRADE_IF_INSECURE_DIRECTIVE  = 17;
-  const unsigned short CHILD_SRC_DIRECTIVE            = 18;
-  const unsigned short BLOCK_ALL_MIXED_CONTENT        = 19;
+  const unsigned short WEB_MANIFEST_SRC_DIRECTIVE     = 15;
+  const unsigned short UPGRADE_IF_INSECURE_DIRECTIVE  = 16;
+  const unsigned short CHILD_SRC_DIRECTIVE            = 17;
+  const unsigned short BLOCK_ALL_MIXED_CONTENT        = 18;
+  const unsigned short REQUIRE_SRI_FOR                = 19;
+  const unsigned short SANDBOX_DIRECTIVE              = 20;
+  const unsigned short WORKER_SRC_DIRECTIVE           = 21;
 
   /**
    * Accessor method for a read-only string version of the policy at a given
    * index.
    */
-  AString getPolicy(in unsigned long index);
+  [binaryname(GetPolicyString)] AString getPolicy(in unsigned long index);
+
+  /**
+   * Accessor method for a read-only pointer the policy object at a given
+   * index. Returns a null pointer if the index is larger than the current
+   * policy count.
+   */
+  [noscript,notxpcom,nostdcall] CSPPolicyPtr GetPolicy(in unsigned long index);
 
   /**
    * Returns the number of policies attached to this CSP instance.  Useful with
@@ -83,19 +98,9 @@ interface nsIContentSecurityPolicy : nsISerializable
   readonly attribute bool blockAllMixedContent;
 
   /**
-   * Obtains the referrer policy (as integer) for this browsing context as
-   * specified in CSP.  If there are multiple policies and...
-   *  - only one sets a referrer policy: that policy is returned
-   *  - more than one sets different referrer policies: no-referrer is returned
-   *  - more than one set equivalent policies: that policy is returned
-   * For the enumeration of policies see ReferrerPolicy.h and nsIHttpChannel.
-   *
-   * @param aPolicy
-   *        The referrer policy to use for the protected resource.
-   * @return
-   *        true if a referrer policy is specified, false if it's unspecified.
+   * Returns whether this policy enforces the frame-ancestors directive.
    */
-  bool getReferrerPolicy(out unsigned long policy);
+  readonly attribute bool enforcesFrameAncestors;
 
   /**
    * Parse and install a CSP policy.
@@ -116,7 +121,9 @@ interface nsIContentSecurityPolicy : nsISerializable
    * Whether this policy allows inline script or style.
    * @param aContentPolicyType Either TYPE_SCRIPT or TYPE_STYLESHEET
    * @param aNonce The nonce string to check against the policy
-   * @param aContent  The content of the inline resource to hash
+   * @param aParserCreated If the script element was created by the HTML Parser
+   * @param aElementOrContent The script element of the inline resource to hash
+   *        or the content of the psuedo-script to compare to hash
    *        (and compare to the hashes listed in the policy)
    * @param aLineNumber The line number of the inline resource
    *        (used for reporting)
@@ -126,7 +133,8 @@ interface nsIContentSecurityPolicy : nsISerializable
    */
   boolean getAllowsInline(in nsContentPolicyType aContentPolicyType,
                           in AString aNonce,
-                          in AString aContent,
+                          in boolean aParserCreated,
+                          in nsISupports aElementOrContent,
                           in unsigned long aLineNumber);
 
   /**
@@ -142,6 +150,17 @@ interface nsIContentSecurityPolicy : nsISerializable
    *     (block the call if false).
    */
   boolean getAllowsEval(out boolean shouldReportViolations);
+
+  /**
+   * Delegate method called by the service when the protected document is loaded.
+   * Returns the union of all the sandbox flags contained in CSP policies. This is the most
+   * restrictive interpretation of flags set in multiple policies.
+   * See nsSandboxFlags.h for the possible flags.
+   *
+   * @return
+   *    sandbox flags or SANDBOXED_NONE if no sandbox directive exists
+   */
+  uint32_t getCSPSandboxFlags();
 
   /**
    * For each violated policy (of type violationType), log policy violation on
@@ -173,13 +192,15 @@ interface nsIContentSecurityPolicy : nsISerializable
                            [optional] in AString nonce,
                            [optional] in AString content);
 
-  const unsigned short VIOLATION_TYPE_INLINE_SCRIPT = 1;
-  const unsigned short VIOLATION_TYPE_EVAL          = 2;
-  const unsigned short VIOLATION_TYPE_INLINE_STYLE  = 3;
-  const unsigned short VIOLATION_TYPE_NONCE_SCRIPT  = 4;
-  const unsigned short VIOLATION_TYPE_NONCE_STYLE   = 5;
-  const unsigned short VIOLATION_TYPE_HASH_SCRIPT   = 6;
-  const unsigned short VIOLATION_TYPE_HASH_STYLE    = 7;
+  const unsigned short VIOLATION_TYPE_INLINE_SCRIPT          = 1;
+  const unsigned short VIOLATION_TYPE_EVAL                   = 2;
+  const unsigned short VIOLATION_TYPE_INLINE_STYLE           = 3;
+  const unsigned short VIOLATION_TYPE_NONCE_SCRIPT           = 4;
+  const unsigned short VIOLATION_TYPE_NONCE_STYLE            = 5;
+  const unsigned short VIOLATION_TYPE_HASH_SCRIPT            = 6;
+  const unsigned short VIOLATION_TYPE_HASH_STYLE             = 7;
+  const unsigned short VIOLATION_TYPE_REQUIRE_SRI_FOR_STYLE  = 8;
+  const unsigned short VIOLATION_TYPE_REQUIRE_SRI_FOR_SCRIPT = 9;
 
   /**
    * Called after the CSP object is created to fill in appropriate request
@@ -187,8 +208,19 @@ interface nsIContentSecurityPolicy : nsISerializable
    *  * aDocument (preferred), or if no document is available, then provide
    *  * aPrincipal
    */
-  void setRequestContext(in nsIDOMDocument aDocument,
+  void setRequestContext(in Document aDocument,
                          in nsIPrincipal aPrincipal);
+
+  /**
+   *  Ensure we have a nsIEventTarget to use to label CSPReportSenderRunnable
+   */
+  [noscript] void ensureEventTarget(in nsIEventTarget aEventTarget);
+
+  /*
+   * Checks if a CSP requires Subresource Integrity (SRI)
+   * for a given nsContentPolicyType.
+   */
+  bool requireSRIForType(in nsContentPolicyType aContentType);
 
   /**
    * Verifies ancestry as permitted by the policy.

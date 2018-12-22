@@ -48,14 +48,15 @@
 
 #include "mozilla/Assertions.h"
 
-#include "LulPlatformMacros.h"
+#include "PlatformMacros.h"
 
 
 // (derived from)
 // elfutils.h: Utilities for dealing with ELF files.
 //
+#include <link.h>
 
-#if defined(LUL_OS_android)
+#if defined(GP_OS_android)
 
 // From toolkit/crashreporter/google-breakpad/src/common/android/include/elf.h
 // The Android headers don't always define this constant.
@@ -75,17 +76,12 @@
 #define NT_GNU_BUILD_ID 3
 #endif
 
+#ifndef ElfW
 #define ElfW(type)      _ElfW (Elf, ELFSIZE, type)
 #define _ElfW(e,w,t)    _ElfW_1 (e, w, _##t)
 #define _ElfW_1(e,w,t)  e##w##t
+#endif
 
-//FIXME
-extern "C" {
-  extern char*  basename(const char*  path);
-};
-#else
-
-# include <link.h>
 #endif
 
 

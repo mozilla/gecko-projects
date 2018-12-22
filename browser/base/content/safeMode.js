@@ -3,13 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const appStartup = Services.startup;
 
-Cu.import("resource://gre/modules/ResetProfile.jsm");
+ChromeUtils.import("resource://gre/modules/ResetProfile.jsm");
 
 var defaultToReset = false;
 
@@ -44,10 +42,9 @@ function onDefaultButton() {
     restartApp();
     // Return false to prevent starting into safe mode while restarting.
     return false;
-  } else {
-    // Continue in safe mode. No restart needed.
-    return true;
   }
+  // Continue in safe mode. No restart needed.
+  return true;
 }
 
 function onCancel() {
@@ -59,15 +56,13 @@ function onExtra1() {
     // Continue in safe mode
     window.close();
     return true;
-  } else {
-    // The reset dialog will handle starting the reset process if the user confirms.
-    showResetDialog();
   }
+  // The reset dialog will handle starting the reset process if the user confirms.
+  showResetDialog();
   return false;
 }
 
 function onLoad() {
-  let dialog = document.documentElement;
   if (appStartup.automaticSafeModeNecessary) {
     document.getElementById("autoSafeMode").hidden = false;
     document.getElementById("safeMode").hidden = true;
@@ -77,11 +72,9 @@ function onLoad() {
       // Hide the reset button is it's not supported.
       document.documentElement.getButton("extra1").hidden = true;
     }
-  } else {
-    if (!ResetProfile.resetSupported()) {
-      // Hide the reset button and text if it's not supported.
-      document.documentElement.getButton("extra1").hidden = true;
-      document.getElementById("resetProfileInstead").hidden = true;
-    }
+  } else if (!ResetProfile.resetSupported()) {
+    // Hide the reset button and text if it's not supported.
+    document.documentElement.getButton("extra1").hidden = true;
+    document.getElementById("resetProfileInstead").hidden = true;
   }
 }

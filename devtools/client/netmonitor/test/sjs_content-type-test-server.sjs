@@ -1,8 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-const { classes: Cc, interfaces: Ci } = Components;
-
 function gzipCompressString(string, obs) {
 
   let scs = Cc["@mozilla.org/streamConverters;1"]
@@ -36,6 +34,7 @@ function handleRequest(request, response) {
   let params = request.queryString.split("&");
   let format = (params.filter((s) => s.includes("fmt="))[0] || "").split("=")[1];
   let status = (params.filter((s) => s.includes("sts="))[0] || "").split("=")[1] || 200;
+  let cookies = (params.filter((s) => s.includes("cookies="))[0] || "").split("=")[1] || 0;
 
   let cachedCount = 0;
   let cacheExpire = 60; // seconds
@@ -54,6 +53,13 @@ function handleRequest(request, response) {
       response.setHeader("Expires", Date(Date.now() + cacheExpire * 1000), false);
     }
     cachedCount++;
+  }
+
+  function setCookieHeaders() {
+    if (cookies) {
+      response.setHeader("Set-Cookie", "name1=value1; Domain=.foo.example.com", true);
+      response.setHeader("Set-Cookie", "name2=value2; Domain=.example.com", true);
+    }
   }
 
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -78,10 +84,11 @@ function handleRequest(request, response) {
         break;
       }
       case "html": {
-        let content = params.filter((s) => s.includes("res="))[0].split("=")[1];
+        let content = (params.filter((s) => s.includes("res="))[0] || "").split("=")[1];
         response.setStatusLine(request.httpVersion, status, "OK");
         response.setHeader("Content-Type", "text/html; charset=utf-8", false);
         setCacheHeaders();
+        setCookieHeaders();
         response.write(content || "<p>Hello HTML!</p>");
         response.finish();
         break;
@@ -120,7 +127,7 @@ function handleRequest(request, response) {
         break;
       }
       case "jsonp": {
-        let fun = params.filter((s) => s.includes("jsonp="))[0].split("=")[1];
+        let fun = (params.filter((s) => s.includes("jsonp="))[0] || "").split("=")[1];
         response.setStatusLine(request.httpVersion, status, "OK");
         response.setHeader("Content-Type", "text/json; charset=utf-8", false);
         setCacheHeaders();
@@ -129,11 +136,19 @@ function handleRequest(request, response) {
         break;
       }
       case "jsonp2": {
-        let fun = params.filter((s) => s.includes("jsonp="))[0].split("=")[1];
+        let fun = (params.filter((s) => s.includes("jsonp="))[0] || "").split("=")[1];
         response.setStatusLine(request.httpVersion, status, "OK");
         response.setHeader("Content-Type", "text/json; charset=utf-8", false);
         setCacheHeaders();
         response.write(" " + fun + " ( { \"greeting\": \"Hello weird JSONP!\" } ) ; ");
+        response.finish();
+        break;
+      }
+      case "json-b64": {
+        response.setStatusLine(request.httpVersion, status, "OK");
+        response.setHeader("Content-Type", "text/json; charset=utf-8", false);
+        setCacheHeaders();
+        response.write(btoa("{ \"greeting\": \"This is a base 64 string.\" }"));
         response.finish();
         break;
       }
@@ -230,6 +245,17 @@ function handleRequest(request, response) {
         };
         let data = new Array(1000).join("Hello gzip!");
         doubleGzipCompressString(data, observer);
+        break;
+      }
+      case "br": {
+        response.setStatusLine(request.httpVersion, status, "Connected");
+        response.setHeader("Content-Type", "text/plain", false);
+        response.setHeader("Content-Encoding", "br", false);
+        setCacheHeaders();
+        response.setHeader("Content-Length", "10", false);
+        // Use static data since we cannot encode brotli.
+        response.write("\x1b\x3f\x00\x00\x24\xb0\xe2\x99\x80\x12");
+        response.finish();
         break;
       }
       case "hls-m3u8": {

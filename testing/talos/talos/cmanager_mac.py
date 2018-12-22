@@ -3,10 +3,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 """CounterManager for Mac OSX"""
+from __future__ import absolute_import, print_function
 
 import subprocess
-from cmanager import CounterManager
 import sys
+
+from cmanager_base import CounterManager
 
 
 def GetProcessData(pid):
@@ -19,8 +21,8 @@ def GetProcessData(pid):
                                   universal_newlines=True, shell=True)
         handle.wait()
         data = handle.stdout.readlines()
-    except:
-        print "Unexpected error executing '%s': %s", (command, sys.exc_info())
+    except Exception:
+        print("Unexpected error executing '%s': %s", (command, sys.exc_info()))
         raise
 
     # First line is header output should look like:
@@ -75,12 +77,12 @@ class MacCounterManager(CounterManager):
     def getCounterValue(self, counterName):
         """Returns the last value of the counter 'counterName'"""
         if counterName not in self.registeredCounters:
-            print ("Warning: attempting to collect counter %s and it is not"
-                   " registered" % counterName)
+            print("Warning: attempting to collect counter %s and it is not"
+                  " registered" % counterName)
             return
 
         try:
             return self.registeredCounters[counterName][0](self.pid)
-        except Exception, e:
-            print ("Error in collecting counter: %s, pid: %s, exception: %s"
-                   % (counterName, self.pid, e))
+        except Exception as e:
+            print("Error in collecting counter: %s, pid: %s, exception: %s"
+                  % (counterName, self.pid, e))

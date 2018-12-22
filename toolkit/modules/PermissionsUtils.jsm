@@ -2,12 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["PermissionsUtils"];
+var EXPORTED_SYMBOLS = ["PermissionsUtils"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/BrowserUtils.jsm")
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
 
 
 var gImportedPrefBranches = new Set();
@@ -16,10 +14,7 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
   let list = Services.prefs.getChildList(aPrefBranch, {});
 
   for (let pref of list) {
-    let origins = "";
-    try {
-      origins = Services.prefs.getCharPref(pref);
-    } catch (e) {}
+    let origins = Services.prefs.getCharPref(pref, "");
 
     if (!origins)
       continue;
@@ -35,8 +30,8 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
         // reasons, we convert these hosts into http:// and https:// permissions
         // on default ports.
         try {
-          let httpURI = Services.io.newURI("http://" + origin, null, null);
-          let httpsURI = Services.io.newURI("https://" + origin, null, null);
+          let httpURI = Services.io.newURI("http://" + origin);
+          let httpsURI = Services.io.newURI("https://" + origin);
 
           principals = [
             Services.scriptSecurityManager.createCodebasePrincipal(httpURI, {}),
@@ -57,7 +52,7 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
 }
 
 
-this.PermissionsUtils = {
+var PermissionsUtils = {
   /**
    * Import permissions from perferences to the Permissions Manager. After being
    * imported, all processed permissions will be set to an empty string.
@@ -81,7 +76,7 @@ this.PermissionsUtils = {
    * @param aPermission Permission name to be passsed to the Permissions
    *                    Manager.
    */
-  importFromPrefs: function(aPrefBranch, aPermission) {
+  importFromPrefs(aPrefBranch, aPermission) {
     if (!aPrefBranch.endsWith("."))
       aPrefBranch += ".";
 

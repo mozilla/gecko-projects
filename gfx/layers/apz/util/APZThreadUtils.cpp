@@ -1,14 +1,10 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/APZThreadUtils.h"
-
-#include "mozilla/layers/Compositor.h"
-#ifdef MOZ_ANDROID_APZ
-#include "AndroidBridge.h"
-#endif
 
 namespace mozilla {
 namespace layers {
@@ -45,70 +41,30 @@ APZThreadUtils::AssertOnControllerThread() {
 }
 
 /*static*/ void
-APZThreadUtils::AssertOnCompositorThread()
+APZThreadUtils::RunOnControllerThread(already_AddRefed<Runnable> aTask)
 {
-  if (GetThreadAssertionsEnabled()) {
-    Compositor::AssertOnCompositorThread();
-  }
-}
+  RefPtr<Runnable> task = aTask;
 
-/*static*/ void
-APZThreadUtils::RunOnControllerThread(Task* aTask)
-{
-#ifdef MOZ_ANDROID_APZ
-  // This is needed while nsWindow::ConfigureAPZControllerThread is not propper
-  // implemented.
-  if (AndroidBridge::IsJavaUiThread()) {
-    aTask->Run();
-    delete aTask;
-  } else {
-    AndroidBridge::Bridge()->PostTaskToUiThread(aTask, 0);
-  }
-#else
   if (!sControllerThread) {
     // Could happen on startup
     NS_WARNING("Dropping task posted to controller thread");
-    delete aTask;
     return;
   }
 
   if (sControllerThread == MessageLoop::current()) {
-    aTask->Run();
-    delete aTask;
+    task->Run();
   } else {
-    sControllerThread->PostTask(FROM_HERE, aTask);
-  }
-#endif
-}
-
-/*static*/ void
-APZThreadUtils::RunDelayedTaskOnCurrentThread(Task* aTask,
-                                              const TimeDuration& aDelay)
-{
-  if (MessageLoop* messageLoop = MessageLoop::current()) {
-    messageLoop->PostDelayedTask(FROM_HERE, aTask, aDelay.ToMilliseconds());
-  } else {
-#ifdef MOZ_ANDROID_APZ
-    // Fennec does not have a MessageLoop::current() on the controller thread.
-    AndroidBridge::Bridge()->PostTaskToUiThread(aTask, aDelay.ToMilliseconds());
-#else
-    // Other platforms should.
-    MOZ_RELEASE_ASSERT(false, "This non-Fennec platform should have a MessageLoop::current()");
-#endif
+    sControllerThread->PostTask(task.forget());
   }
 }
 
 /*static*/ bool
 APZThreadUtils::IsControllerThread()
 {
-#ifdef MOZ_ANDROID_APZ
-  return AndroidBridge::IsJavaUiThread();
-#else
   return sControllerThread == MessageLoop::current();
-#endif
 }
 
-NS_IMPL_ISUPPORTS(GenericTimerCallbackBase, nsITimerCallback)
+NS_IMPL_ISUPPORTS(GenericNamedTimerCallbackBase, nsITimerCallback, nsINamed)
 
 } // namespace layers
 } // namespace mozilla

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,6 +14,10 @@ if CONFIG['OS_ARCH'] == 'Darwin':
             '!xptcstubs_asm_ppc_darwin.s',
             'xptcinvoke_asm_ppc_rhapsody.s',
         ]
+    if CONFIG['OS_TEST'] == 'x86_64':
+        SOURCES += [
+            'xptcinvoke_asm_x86_64_unix.S',
+        ]
     if '86' in CONFIG['OS_TEST'] and CONFIG['OS_TEST'] != 'x86_64':
         DEFINES['MOZ_NEED_LEADING_UNDERSCORE'] = True
 
@@ -28,6 +32,7 @@ if CONFIG['OS_ARCH'] in ('Linux', 'Bitrig', 'DragonFly', 'FreeBSD', 'NetBSD', 'O
    CONFIG['OS_ARCH'].startswith('GNU_'):
     if CONFIG['OS_TEST'] == 'x86_64':
         SOURCES += [
+            'xptcinvoke_asm_x86_64_unix.S',
             'xptcinvoke_x86_64_unix.cpp',
             'xptcstubs_x86_64_linux.cpp',
         ]
@@ -47,16 +52,17 @@ if CONFIG['OS_ARCH'] in ('Linux', 'FreeBSD'):
         ]
 
 if CONFIG['OS_ARCH'] == 'SunOS' and '86' in CONFIG['OS_TEST']:
-    GENERATED_FILES = [
-        'xptcstubsdef_asm.solx86',
-    ]
     if CONFIG['OS_TEST'] == 'x86_64':
-        if CONFIG['GNU_CC']:
+        if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
             SOURCES += [
+                'xptcinvoke_asm_x86_64_unix.S',
                 'xptcinvoke_x86_64_unix.cpp',
                 'xptcstubs_x86_64_linux.cpp'
             ]
         else:
+            GENERATED_FILES = [
+                'xptcstubsdef_asm.solx86',
+            ]
             ASFLAGS += ['-xarch=amd64']
             SOURCES += [
                 'xptcinvoke_x86_64_solaris.cpp',
@@ -64,12 +70,15 @@ if CONFIG['OS_ARCH'] == 'SunOS' and '86' in CONFIG['OS_TEST']:
                 'xptcstubs_x86_64_solaris.cpp',
             ]
     else:
-        if CONFIG['GNU_CC']:
+        if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
             SOURCES += [
                 'xptcinvoke_gcc_x86_unix.cpp',
                 'xptcstubs_gcc_x86_unix.cpp'
             ]
         else:
+            GENERATED_FILES = [
+                'xptcstubsdef_asm.solx86',
+            ]
             SOURCES += [
                 'xptcinvoke_asm_x86_solaris_SUNW.s',
                 'xptcinvoke_x86_solaris.cpp',
@@ -127,7 +136,7 @@ if CONFIG['OS_ARCH'] == 'HP-UX':
 
 if CONFIG['OS_ARCH'] == 'Linux':
     if CONFIG['OS_TEST'] in ('hppa', 'hppa2.0', 'hppa1.1'):
-        if CONFIG['GNU_CXX']:
+        if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
             SOURCES += [
                 'xptcinvoke_asm_parisc_linux.s',
                 'xptcinvoke_pa32.cpp',
@@ -145,7 +154,7 @@ if CONFIG['OS_ARCH'] == 'NetBSD':
             'xptcstubs_netbsd_m68k.cpp'
         ]
 
-if CONFIG['OS_ARCH'] == 'Linux':
+if CONFIG['OS_ARCH'] in ('Linux', 'FreeBSD', 'NetBSD', 'OpenBSD'):
     if CONFIG['OS_TEST'] == 'aarch64':
         SOURCES += [
             'xptcinvoke_aarch64.cpp',
@@ -232,7 +241,7 @@ if CONFIG['OS_ARCH'] == 'OpenBSD' and CONFIG['OS_TEST'] == 'powerpc':
         'xptcstubs_ppc_openbsd.cpp',
     ]
 
-if CONFIG['OS_ARCH'] == 'Linux' and 'sparc' in CONFIG['OS_TEST']:
+if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TEST'] == 'sparc':
     SOURCES += [
         'xptcinvoke_asm_sparc_linux_GCC3.s',
         'xptcinvoke_sparc_solaris.cpp',
@@ -256,7 +265,7 @@ if CONFIG['OS_ARCH'] == 'OpenBSD' and CONFIG['OS_TEST'] == 'sparc':
         'xptcstubs_sparc_openbsd.cpp',
     ]
 
-if CONFIG['OS_ARCH'] in ('OpenBSD', 'FreeBSD') and CONFIG['OS_TEST'] == 'sparc64':
+if CONFIG['OS_ARCH'] in ('OpenBSD', 'FreeBSD', 'Linux') and CONFIG['OS_TEST'] == 'sparc64':
     SOURCES += [
         'xptcinvoke_asm_sparc64_openbsd.s',
         'xptcinvoke_sparc64_openbsd.cpp',
@@ -276,7 +285,7 @@ if CONFIG['OS_ARCH'] == 'SunOS' and '86' not in CONFIG['OS_TEST']:
             'xptcinvoke_sparc_solaris.cpp',
             'xptcstubs_sparc_solaris.cpp',
         ]
-    if CONFIG['GNU_CC']:
+    if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
         SOURCES += [
             'xptcinvoke_asm_sparc_solaris_GCC3.s',
             'xptcstubs_asm_sparc_solaris.s',
@@ -321,10 +330,4 @@ FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '../..',
-    '/xpcom/reflect/xptinfo',
 ]
-
-NO_PGO = True
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wshadow']

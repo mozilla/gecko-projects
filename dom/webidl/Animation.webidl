@@ -4,23 +4,23 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://w3c.github.io/web-animations/#the-animation-interface
+ * https://drafts.csswg.org/web-animations/#animation
  *
  * Copyright © 2015 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
-enum AnimationPlayState { "idle", "pending", "running", "paused", "finished" };
+enum AnimationPlayState { "idle", "running", "paused", "finished" };
 
-[Func="nsDocument::IsWebAnimationsEnabled",
- Constructor (optional KeyframeEffectReadOnly? effect = null,
-              optional AnimationTimeline? timeline = null)]
+[Func="nsDocument::IsElementAnimateEnabled",
+ Constructor (optional AnimationEffect? effect = null,
+              optional AnimationTimeline? timeline)]
 interface Animation : EventTarget {
   attribute DOMString id;
-  // Bug 1049975: Make 'effect' writeable
-  [Pure]
-  readonly attribute AnimationEffectReadOnly? effect;
-  readonly attribute AnimationTimeline? timeline;
+  [Func="nsDocument::IsWebAnimationsEnabled", Pure]
+  attribute AnimationEffect? effect;
+  [Func="nsDocument::IsWebAnimationsEnabled"]
+  attribute AnimationTimeline? timeline;
   [BinaryName="startTimeAsDouble"]
   attribute double? startTime;
   [SetterThrows, BinaryName="currentTimeAsDouble"]
@@ -29,9 +29,11 @@ interface Animation : EventTarget {
            attribute double             playbackRate;
   [BinaryName="playStateFromJS"]
   readonly attribute AnimationPlayState playState;
-  [Throws]
+  [BinaryName="pendingFromJS"]
+  readonly attribute boolean            pending;
+  [Func="nsDocument::IsWebAnimationsEnabled", Throws]
   readonly attribute Promise<Animation> ready;
-  [Throws]
+  [Func="nsDocument::IsWebAnimationsEnabled", Throws]
   readonly attribute Promise<Animation> finished;
            attribute EventHandler       onfinish;
            attribute EventHandler       oncancel;
@@ -42,6 +44,7 @@ interface Animation : EventTarget {
   void play ();
   [Throws, BinaryName="pauseFromJS"]
   void pause ();
+  void updatePlaybackRate (double playbackRate);
   [Throws]
   void reverse ();
 };

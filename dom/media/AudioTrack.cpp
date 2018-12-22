@@ -12,12 +12,13 @@
 namespace mozilla {
 namespace dom {
 
-AudioTrack::AudioTrack(const nsAString& aId,
+AudioTrack::AudioTrack(nsIGlobalObject* aOwnerGlobal,
+                       const nsAString& aId,
                        const nsAString& aKind,
                        const nsAString& aLabel,
                        const nsAString& aLanguage,
                        bool aEnabled)
-  : MediaTrack(aId, aKind, aLabel, aLanguage)
+  : MediaTrack(aOwnerGlobal, aId, aKind, aLabel, aLanguage)
   , mEnabled(aEnabled)
 {
 }
@@ -25,7 +26,7 @@ AudioTrack::AudioTrack(const nsAString& aId,
 JSObject*
 AudioTrack::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AudioTrackBinding::Wrap(aCx, this, aGivenProto);
+  return AudioTrack_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -48,13 +49,20 @@ AudioTrack::SetEnabledInternal(bool aEnabled, int aFlags)
     return;
   }
 
-  if (!(aFlags & MediaTrack::FIRE_NO_EVENTS)) {
-    mList->CreateAndDispatchChangeEvent();
-
+  if (mEnabled) {
     HTMLMediaElement* element = mList->GetMediaElement();
     if (element) {
       element->NotifyMediaTrackEnabled(this);
     }
+  } else {
+    HTMLMediaElement* element = mList->GetMediaElement();
+    if (element) {
+      element->NotifyMediaTrackDisabled(this);
+    }
+  }
+
+  if (!(aFlags & MediaTrack::FIRE_NO_EVENTS)) {
+    mList->CreateAndDispatchChangeEvent();
   }
 }
 

@@ -9,7 +9,6 @@
 // Keep this in sync with the linux version.
 
 #include "xptcprivate.h"
-#include "xptiprivate.h"
 
 // The Darwin/x86-64 ABI passes the first 6 integer parameters and the
 // first 8 floating point parameters in registers (rdi, rsi, rdx, rcx,
@@ -26,7 +25,7 @@ const uint32_t FPR_COUNT            = 8;
 // - 'args[]' contains the arguments passed on stack
 // - 'gpregs[]' contains the arguments passed in integer registers
 // - 'fpregs[]' contains the arguments passed in floating point registers
-// 
+//
 // The parameters are mapped into an array of type 'nsXPTCMiniVariant'
 // and then the method gets called.
 
@@ -69,7 +68,7 @@ PrepareAndDispatch(nsXPTCStubBase * self, uint32_t methodIndex,
         const nsXPTParamInfo& param = info->GetParam(i);
         const nsXPTType& type = param.GetType();
         nsXPTCMiniVariant* dp = &dispatchParams[i];
-	
+
         if (!param.IsOut() && type == nsXPTType::T_DOUBLE) {
             if (nr_fpr < FPR_COUNT)
                 dp->val.d = fpregs[nr_fpr++];

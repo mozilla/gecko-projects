@@ -4,17 +4,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsParentalControlsService.h"
-#include "AndroidBridge.h"
 #include "nsString.h"
 #include "nsIFile.h"
+#include "FennecJNIWrappers.h"
+
+namespace java = mozilla::java;
 
 NS_IMPL_ISUPPORTS(nsParentalControlsService, nsIParentalControlsService)
 
 nsParentalControlsService::nsParentalControlsService() :
   mEnabled(false)
 {
-  if (mozilla::jni::IsAvailable()) {
-    mEnabled = mozilla::widget::Restrictions::IsUserRestricted();
+  if (mozilla::jni::IsFennec()) {
+    mEnabled = java::Restrictions::IsUserRestricted();
   }
 }
 
@@ -85,15 +87,15 @@ nsParentalControlsService::IsAllowed(int16_t aAction,
     return rv;
   }
 
-  if (mozilla::jni::IsAvailable()) {
+  if (mozilla::jni::IsFennec()) {
     nsAutoCString url;
     if (aUri) {
       rv = aUri->GetSpec(url);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
-    *_retval = mozilla::widget::Restrictions::IsAllowed(aAction,
-                                                    NS_ConvertUTF8toUTF16(url));
+    *_retval = java::Restrictions::IsAllowed(aAction,
+                                             NS_ConvertUTF8toUTF16(url));
     return rv;
   }
 

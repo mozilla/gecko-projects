@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,8 +12,15 @@ SimplePrograms([
 LOCAL_INCLUDES += ['..']
 USE_LIBS += [
     'linker',
+    'mfbt',
 ]
-OS_LIBS += CONFIG['MOZ_ZLIB_LIBS']
-DISABLE_STL_WRAPPING = True
+if CONFIG['ZLIB_IN_MOZGLUE']:
+    USE_LIBS += [ 'modules_zlib_src' ]
+else:
+    OS_LIBS += CONFIG['MOZ_ZLIB_LIBS']
+DisableStlWrapping()
 
-PYTHON_UNIT_TESTS += ['run_test_zip.py']
+PYTHON_UNITTEST_MANIFESTS += ['python.ini']
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

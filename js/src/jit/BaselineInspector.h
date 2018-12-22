@@ -37,15 +37,13 @@ class SetElemICInspector : public ICInspector
 
     bool sawOOBDenseWrite() const;
     bool sawOOBTypedArrayWrite() const;
-    bool sawDenseWrite() const;
-    bool sawTypedArrayWrite() const;
 };
 
 class BaselineInspector
 {
   private:
     JSScript* script;
-    ICEntry* prevLookedUpEntry;
+    BaselineICEntry* prevLookedUpEntry;
 
   public:
     explicit BaselineInspector(JSScript* script)
@@ -69,18 +67,31 @@ class BaselineInspector
     }
 #endif
 
-    ICEntry& icEntryFromPC(jsbytecode* pc) {
+    BaselineICEntry& icEntryFromPC(jsbytecode* pc) {
         MOZ_ASSERT(hasBaselineScript());
         MOZ_ASSERT(isValidPC(pc));
-        ICEntry& ent = baselineScript()->icEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
+        BaselineICEntry& ent =
+            baselineScript()->icEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
         MOZ_ASSERT(ent.isForOp());
         prevLookedUpEntry = &ent;
         return ent;
     }
 
+    BaselineICEntry* maybeICEntryFromPC(jsbytecode* pc) {
+        MOZ_ASSERT(hasBaselineScript());
+        MOZ_ASSERT(isValidPC(pc));
+        BaselineICEntry* ent =
+            baselineScript()->maybeICEntryFromPCOffset(script->pcToOffset(pc), prevLookedUpEntry);
+        if (!ent)
+            return nullptr;
+        MOZ_ASSERT(ent->isForOp());
+        prevLookedUpEntry = ent;
+        return ent;
+    }
+
     template <typename ICInspectorType>
     ICInspectorType makeICInspector(jsbytecode* pc, ICStub::Kind expectedFallbackKind) {
-        ICEntry* ent = nullptr;
+        BaselineICEntry* ent = nullptr;
         if (hasBaselineScript()) {
             ent = &icEntryFromPC(pc);
             MOZ_ASSERT(ent->fallbackStub()->kind() == expectedFallbackKind);
@@ -89,13 +100,17 @@ class BaselineInspector
     }
 
     ICStub* monomorphicStub(jsbytecode* pc);
-    bool dimorphicStub(jsbytecode* pc, ICStub** pfirst, ICStub** psecond);
+    MOZ_MUST_USE bool dimorphicStub(jsbytecode* pc, ICStub** pfirst, ICStub** psecond);
 
   public:
     typedef Vector<ReceiverGuard, 4, JitAllocPolicy> ReceiverVector;
     typedef Vector<ObjectGroup*, 4, JitAllocPolicy> ObjectGroupVector;
-    bool maybeInfoForPropertyOp(jsbytecode* pc, ReceiverVector& receivers,
-                                ObjectGroupVector& convertUnboxedGroups);
+    MOZ_MUST_USE bool maybeInfoForPropertyOp(jsbytecode* pc, ReceiverVector& receivers,
+                                             ObjectGroupVector& convertUnboxedGroups);
+
+    MOZ_MUST_USE bool maybeInfoForProtoReadSlot(jsbytecode* pc, ReceiverVector& receivers,
+                                                ObjectGroupVector& convertUnboxedGroups,
+                                                JSObject** holder);
 
     SetElemICInspector setElemICInspector(jsbytecode* pc) {
         return makeICInspector<SetElemICInspector>(pc, ICStub::SetElem_Fallback);
@@ -106,17 +121,17 @@ class BaselineInspector
     MIRType expectedBinaryArithSpecialization(jsbytecode* pc);
     MIRType expectedPropertyAccessInputType(jsbytecode* pc);
 
-    bool hasSeenNonNativeGetElement(jsbytecode* pc);
     bool hasSeenNegativeIndexGetElement(jsbytecode* pc);
     bool hasSeenAccessedGetter(jsbytecode* pc);
     bool hasSeenDoubleResult(jsbytecode* pc);
     bool hasSeenNonStringIterMore(jsbytecode* pc);
 
-    bool isOptimizableCallStringSplit(jsbytecode* pc, JSString** stringOut, JSString** stringArg,
-                                      JSObject** objOut);
+    MOZ_MUST_USE bool isOptimizableConstStringSplit(jsbytecode* pc, JSString** strOut,
+                                                    JSString** sepOut, ArrayObject** objOut);
     JSObject* getTemplateObject(jsbytecode* pc);
     JSObject* getTemplateObjectForNative(jsbytecode* pc, Native native);
     JSObject* getTemplateObjectForClassHook(jsbytecode* pc, const Class* clasp);
+    JSObject* getTemplateObjectForSimdCtor(jsbytecode* pc, SimdType simdType);
 
     // Sometimes the group a template object will have is known, even if the
     // object itself isn't.
@@ -124,17 +139,29 @@ class BaselineInspector
 
     JSFunction* getSingleCallee(jsbytecode* pc);
 
-    DeclEnvObject* templateDeclEnvObject();
+    LexicalEnvironmentObject* templateNamedLambdaObject();
     CallObject* templateCallObject();
 
-    bool commonGetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
-                               JSFunction** commonGetter, Shape** globalShape, bool* isOwnProperty,
-                               ReceiverVector& receivers, ObjectGroupVector& convertUnboxedGroups);
-    bool commonSetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
-                               JSFunction** commonSetter, bool* isOwnProperty,
-                               ReceiverVector& receivers, ObjectGroupVector& convertUnboxedGroups);
+    // If |innerized| is true, we're doing a GETPROP on a WindowProxy and
+    // IonBuilder unwrapped/innerized it to do the lookup on the Window (the
+    // global object) instead. In this case we should only look for Baseline
+    // stubs that performed the same optimization.
+    MOZ_MUST_USE bool commonGetPropFunction(jsbytecode* pc, bool innerized,
+                                            JSObject** holder, Shape** holderShape,
+                                            JSFunction** commonGetter, Shape** globalShape,
+                                            bool* isOwnProperty, ReceiverVector& receivers,
+                                            ObjectGroupVector& convertUnboxedGroups);
 
-    bool instanceOfData(jsbytecode* pc, Shape** shape, uint32_t* slot, JSObject** prototypeObject);
+    MOZ_MUST_USE bool megamorphicGetterSetterFunction(jsbytecode* pc, bool isGetter,
+                                                      JSFunction** getterOrSetter);
+
+    MOZ_MUST_USE bool commonSetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,
+                                            JSFunction** commonSetter, bool* isOwnProperty,
+                                            ReceiverVector& receivers,
+                                            ObjectGroupVector& convertUnboxedGroups);
+
+    MOZ_MUST_USE bool instanceOfData(jsbytecode* pc, Shape** shape, uint32_t* slot,
+                                     JSObject** prototypeObject);
 };
 
 } // namespace jit

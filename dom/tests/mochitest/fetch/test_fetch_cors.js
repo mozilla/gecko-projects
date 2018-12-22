@@ -64,9 +64,9 @@ function testSameOriginCredentials() {
                 withCred: "same-origin",
               },
               {
-                // Default mode is "omit".
+                // Default mode is "same-origin".
                 pass: 1,
-                noCookie: 1,
+                cookie: cookieStr,
               },
               {
                 pass: 1,
@@ -750,16 +750,16 @@ function testModeCors() {
         return lName != "accept" &&
                lName != "accept-language" &&
                (lName != "content-type" ||
-                ["text/plain",
+                !["text/plain",
                  "multipart/form-data",
                  "application/x-www-form-urlencoded"]
-                   .indexOf(test.headers[name].toLowerCase()) == -1);
+                   .includes(test.headers[name].toLowerCase()));
       }
       req.url += "&headers=" + escape(test.headers.toSource());
       reqHeaders =
         escape(Object.keys(test.headers)
                .filter(isUnsafeHeader)
-               .map(String.toLowerCase)
+               .map(s => s.toLowerCase())
                .sort()
                .join(","));
       req.url += reqHeaders ? "&requestHeaders=" + reqHeaders : "";
@@ -801,7 +801,7 @@ function testModeCors() {
         }
         if (test.responseHeaders) {
           for (header in test.responseHeaders) {
-            if (test.expectedResponseHeaders.indexOf(header) == -1) {
+            if (!test.expectedResponseHeaders.includes(header)) {
               is(res.headers.has(header), false,
                  "|Headers.has()|wrong response header (" + header + ") in test for " +
                  test.toSource());

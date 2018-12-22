@@ -12,16 +12,13 @@ Bug 1034648 - Tests whether a framerate recording can be cancelled.
 <body>
 <pre id="test">
 <script>
+"use strict";
 
 window.onload = function() {
-  var Cu = Components.utils;
-  var Cc = Components.classes;
-  var Ci = Components.interfaces;
-
-  var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-  var {DebuggerClient} = require("devtools/shared/client/main");
-  var {DebuggerServer} = require("devtools/server/main");
-  var Services = require("Services");
+  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const {DebuggerClient} = require("devtools/shared/client/debugger-client");
+  const {DebuggerServer} = require("devtools/server/main");
+  const Services = require("Services");
 
   // Always log packets when running tests.
   Services.prefs.setBoolPref("devtools.debugger.log", true);
@@ -31,18 +28,19 @@ window.onload = function() {
 
   SimpleTest.waitForExplicitFinish();
 
-  var {FramerateFront} = require("devtools/server/actors/framerate");
+  const {FramerateFront} = require("devtools/shared/fronts/framerate");
 
   DebuggerServer.init();
-  DebuggerServer.addBrowserActors();
+  DebuggerServer.registerAllActors();
 
-  var client = new DebuggerClient(DebuggerServer.connectPipe());
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
   client.connect().then(function onConnect() {
-    client.listTabs(function onListTabs(aResponse) {
-      var form = aResponse.tabs[aResponse.selected];
-      var front = FramerateFront(client, form);
+    client.listTabs().then(function onListTabs(response) {
+      const form = response.tabs[response.selected];
+      const front = FramerateFront(client, form);
 
       front.startRecording().then(() => {
+        /* eslint-disable max-nested-callbacks */
         window.setTimeout(() => {
           front.cancelRecording().then(() => {
             window.setTimeout(() => {
@@ -58,19 +56,20 @@ window.onload = function() {
                   is(rawData.length, 0,
                     "The returned raw data should be an empty array (2).");
 
-                  client.close(() => {
+                  client.close().then(() => {
                     DebuggerServer.destroy();
-                    SimpleTest.finish()
+                    SimpleTest.finish();
                   });
                 });
               });
             }, 1000);
           });
         }, 1000);
+        /* eslint-enable max-nested-callbacks */
       });
     });
   });
-}
+};
 </script>
 </pre>
 </body>

@@ -3,148 +3,205 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-:root[platform="mac"] #inspector-toolbar:-moz-locale-dir(ltr) {
-  padding-left: 2px;
+:root {
+  --eyedropper-image: url(images/command-eyedropper.svg);
 }
 
-:root[platform="mac"] #inspector-toolbar:-moz-locale-dir(rtl) {
-  padding-left: 4px;
+* {
+  box-sizing: border-box;
+}
+
+/* Make sure to hide scroll bars for the parent window */
+window {
+  overflow: hidden;
+}
+
+/* The main Inspector panel container. */
+.inspector-responsive-container {
+  height: 100vh;
+}
+
+/* The main panel layout. This area consists of a toolbar, markup view
+  and breadcrumbs bar. */
+#inspector-main-content {
+  /* Subtract 1 pixel from the panel height. It's puzzling why this
+    is needed, but if not presented the entire Inspector panel
+    content jumps 1 pixel up when the Toolbox is opened. */
+  height: calc(100% - 1px);
+  /* This min-width avoids a visual glitch when moving the splitter quickly to the left.
+     See bug 1307408 comment #12. */
+  min-width: 125px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+/* Inspector Panel Splitter */
+
+#inspector-splitter-box {
+  height: 100vh;
+  width: 100vw;
+  position: fixed;
+}
+
+/* Minimum dimensions for the Inspector splitter areas. */
+#inspector-splitter-box .uncontrolled,
+#inspector-splitter-box .controlled {
+  min-height: 50px;
+  min-width: 50px;
+  overflow-x: hidden;
+}
+
+/* Set a minimum width of 200px for tab content to avoid breaking the layout when resizing
+   the sidebar tab to small width. If a specific panel supports smaller width, this should
+   be overridden on a panel-by-panel basis */
+.inspector-tabpanel {
+  min-width: 200px;
+}
+
+#inspector-splitter-box .controlled.pane-collapsed {
+  visibility: collapse;
+}
+
+#inspector-splitter-box .sidebar-toggle::before {
+  background-image: url("chrome://devtools/skin/images/close-3-pane.svg");
+  transform: unset;
+}
+
+#inspector-splitter-box .sidebar-toggle.pane-collapsed::before {
+  background-image: url("chrome://devtools/skin/images/open-3-pane.svg");
+}
+
+/* Use flex layout for the Inspector toolbar. For now, it's done
+   specifically for the Inspector toolbar since general rule applied
+   on .devtools-toolbar breaks breadcrumbs and also toolbars in other
+   panels (e.g. webconsole, debugger), these are not ready for HTML
+   layout yet. */
+#inspector-toolbar.devtools-toolbar {
+  display: flex;
+}
+
+#inspector-toolbar.devtools-toolbar .devtools-toolbar-spacer {
+  flex-grow: 1;
+  display: inline-block;
+}
+
+/* Add element toolbar button */
+#inspector-element-add-button::before {
+  background-image: url("chrome://devtools/skin/images/add.svg");
+  list-style-image: url("chrome://devtools/skin/images/add.svg");
+  -moz-user-focus: normal;
 }
 
 #inspector-searchlabel {
   overflow: hidden;
+  margin-inline-end: 2px;
+}
+
+#inspector-search {
+  flex: unset;
+}
+
+/* Eyedropper toolbar button */
+
+#inspector-eyedropper-toggle {
+  /* Required to display tooltip when eyedropper is disabled in non-HTML documents */
+  pointer-events: auto;
+}
+
+#inspector-eyedropper-toggle::before {
+  background-image: var(--eyedropper-image);
 }
 
 #inspector-breadcrumbs-toolbar {
   padding: 0px;
   border-bottom-width: 0px;
   border-top-width: 1px;
+  border-top-color: var(--theme-splitter-color);
+  /* Bug 1262668 - Use the same background as the body so the breadcrumbs toolbar doesn't
+     get mistaken as a splitter */
+  background-color: var(--theme-body-background);
+  display: block;
+  position: relative;
 }
 
-/* Expand/collapse panel toolbar button */
-
-#inspector-pane-toggle {
-  list-style-image: url(chrome://devtools/skin/images/pane-collapse.svg);
+#inspector-breadcrumbs-toolbar,
+#inspector-breadcrumbs-toolbar * {
+  box-sizing: border-box;
 }
 
-#inspector-pane-toggle[pane-collapsed] {
-  list-style-image: url(chrome://devtools/skin/images/pane-expand.svg);
+#inspector-breadcrumbs {
+  display: flex;
+
+  /* Break out of the XUL flexbox, so the splitter can still shrink the
+     markup view even if the contents of the breadcrumbs are wider than
+     the new width. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
 }
 
-@media (max-width: 700px) {
-  #inspector-pane-toggle > .toolbarbutton-icon {
-    transform: rotate(90deg);
-  }
-}
-
-/* Add element toolbar button */
-
-#inspector-element-add-button {
-  list-style-image: url("chrome://devtools/skin/images/add.svg");
-}
-
-/* Tooltip: Events */
-
-#devtools-tooltip-events-container {
-  margin: -4px; /* Compensate for the .panel-arrowcontent padding. */
-  max-width: 590px;
-  overflow-y: auto;
-}
-
-.event-header {
+#inspector-breadcrumbs .scrollbutton-up,
+#inspector-breadcrumbs .scrollbutton-down {
+  flex: 0;
   display: flex;
   align-items: center;
-  cursor: pointer;
 }
 
-.event-header:first-child {
-  border-width: 0;
-}
-
-.event-header:not(:first-child) {
-  border-width: 1px 0 0 0;
-}
-
-.event-tooltip-event-type,
-.event-tooltip-filename,
-.event-tooltip-attributes {
-  -moz-margin-start: 0;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.event-tooltip-event-type {
-  font-weight: bold;
-  font-size: 13px;
-}
-
-.event-tooltip-filename {
-  -moz-margin-end: 0;
-  font-size: 100%;
-  flex-shrink: 1;
-}
-
-.event-tooltip-debugger-icon {
-  width: 16px;
-  height: 16px;
-  -moz-margin-end: 4px;
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-.event-tooltip-debugger-icon:hover {
-  opacity: 1;
-}
-
-.event-tooltip-content-box {
-  display: none;
-  height: 100px;
+#inspector-breadcrumbs .html-arrowscrollbox-inner {
+  flex: 1;
+  display: flex;
   overflow: hidden;
-  -moz-margin-end: 0;
-  border: 1px solid var(--theme-splitter-color);
-  border-width: 1px 0 0 0;
 }
 
-.event-toolbox-content-box iframe {
+#inspector-breadcrumbs .breadcrumbs-widget-item {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font: message-box;
+}
+
+#inspector-rules-container,
+#inspector-sidebar-container {
+  overflow: hidden;
+  position: relative;
   height: 100%;
 }
 
-.event-tooltip-content-box[open] {
-  display: block;
+#inspector-rules-sidebar,
+#inspector-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 
-.event-tooltip-source-container {
-  margin-top: 5px;
-  margin-bottom: 10px;
-  -moz-margin-start: 5px;
-  -moz-margin-end: 0;
+/* Override `-moz-user-focus:ignore;` from toolkit/content/minimal-xul.css */
+.inspector-tabpanel > * {
+  -moz-user-focus: normal;
 }
 
-.event-tooltip-source {
-  margin-bottom: 0;
+/* Markup Box */
+
+iframe {
+  border: 0;
 }
 
-.event-tooltip-attributes-container {
-  display: flex;
-  flex-shrink: 0;
-  flex-grow: 1;
-  justify-content: flex-end;
+#markup-box {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
-.event-tooltip-attributes-box {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  border-radius: 3px;
-  padding: 2px;
-  -moz-margin-start: 5px;
-  background-color: var(--theme-body-color-alt);
-  color: var(--theme-toolbar-background);
+#markup-box > iframe {
+  height: 100%;
+  width: 100%;
 }
 
-.event-tooltip-attributes {
-  margin: 0;
-  font-size: 9px;
-  padding-top: 2px;
+/* Animation inspector */
+#sidebar-panel-animationinspector {
+  height: 100%;
+  width: 100%;
 }

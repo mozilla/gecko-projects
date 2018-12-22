@@ -21,12 +21,9 @@ cp $1/CHANGES ./CHANGES
 cp $1/COPYING ./COPYING
 cp $1/README ./README
 cp $1/AUTHORS ./AUTHORS
-cp $1/lib/apiwrapper.c ./lib/
-cp $1/lib/apiwrapper.h ./lib/
 cp $1/lib/bitpack.c ./lib/
 cp $1/lib/bitpack.h ./lib/
 cp $1/lib/dct.h ./lib/
-cp $1/lib/decapiwrapper.c ./lib/
 cp $1/lib/decinfo.c ./lib/
 cp $1/lib/decint.h ./lib/
 cp $1/lib/decode.c ./lib/
@@ -82,5 +79,4 @@ patch -p3 < ./bug625773-r17780.patch
 patch -p3 < ./bug468275-r18219.patch
 patch -p3 < ./bug752139-r18031.patch
 patch -p3 < ./bug752668-r18268.patch
-patch -p3 < ./bug703135.patch
 patch -p3 < ./bug920992.patch

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,21 +24,21 @@ The syntax for <msqrt> is:
 Attributes of <msqrt> and <mroot>:
 
 None (except the attributes allowed for all MathML elements, listed in Section
-2.3.4). 
+2.3.4).
 
 The <mroot> element increments scriptlevel by 2, and sets displaystyle to
 "false", within index, but leaves both attributes unchanged within base. The
 <msqrt> element leaves both attributes unchanged within all its arguments.
 These attributes are inherited by every element from its rendering environment,
-but can be set explicitly only on <mstyle>. (See Section 3.3.4.) 
+but can be set explicitly only on <mstyle>. (See Section 3.3.4.)
 */
 
 class nsMathMLmsqrtFrame : public nsMathMLmencloseFrame {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsMathMLmsqrtFrame)
 
   friend nsIFrame* NS_NewMathMLmsqrtFrame(nsIPresShell*   aPresShell,
-                                          nsStyleContext* aContext);
+                                          ComputedStyle* aStyle);
 
   virtual void
   Init(nsIContent*       aContent,
@@ -49,7 +50,7 @@ public:
 
   virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
-                   nsIAtom*        aAttribute,
+                   nsAtom*        aAttribute,
                    int32_t         aModType) override;
 
   virtual bool
@@ -60,7 +61,7 @@ public:
   }
 
 protected:
-  explicit nsMathMLmsqrtFrame(nsStyleContext* aContext);
+  explicit nsMathMLmsqrtFrame(ComputedStyle* aStyle);
   virtual ~nsMathMLmsqrtFrame();
 };
 

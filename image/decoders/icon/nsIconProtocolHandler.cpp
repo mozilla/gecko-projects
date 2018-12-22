@@ -4,9 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsIconProtocolHandler.h"
+
 #include "nsIconChannel.h"
 #include "nsIconURI.h"
-#include "nsIconProtocolHandler.h"
 #include "nsIURL.h"
 #include "nsCRT.h"
 #include "nsCOMPtr.h"
@@ -67,24 +68,9 @@ nsIconProtocolHandler::NewURI(const nsACString& aSpec,
                               nsIURI* aBaseURI,
                               nsIURI** result)
 {
-  nsCOMPtr<nsIMozIconURI> uri = new nsMozIconURI();
-  if (!uri) return NS_ERROR_OUT_OF_MEMORY;
-
-  nsresult rv = uri->SetSpec(aSpec);
-  if (NS_FAILED(rv)) return rv;
-
-  nsCOMPtr<nsIURL> iconURL;
-  uri->GetIconURL(getter_AddRefs(iconURL));
-  if (iconURL) {
-    uri = new nsNestedMozIconURI();
-    rv = uri->SetSpec(aSpec);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-
-  NS_ADDREF(*result = uri);
-  return NS_OK;
+  return NS_MutateURI(new nsMozIconURI::Mutator())
+    .SetSpec(aSpec)
+    .Finalize(result);
 }
 
 NS_IMETHODIMP

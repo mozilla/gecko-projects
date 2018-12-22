@@ -5,8 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/SyncRunnable.h"
 #include "nsAnonymousTemporaryFile.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
@@ -15,11 +13,11 @@
 #include "nsString.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "prio.h"
-#include "private/pprio.h"
 
 #ifdef XP_WIN
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/Services.h"
 #include "nsIIdleService.h"
 #include "nsISimpleEnumerator.h"
@@ -83,52 +81,13 @@ GetTempDir(nsIFile** aTempDir)
   return NS_OK;
 }
 
-namespace {
-
-class nsRemoteAnonymousTemporaryFileRunnable : public nsRunnable
-{
-public:
-  dom::FileDescOrError *mResultPtr;
-  explicit nsRemoteAnonymousTemporaryFileRunnable(dom::FileDescOrError *aResultPtr)
-  : mResultPtr(aResultPtr)
-  { }
-
-protected:
-  NS_IMETHODIMP Run() {
-    dom::ContentChild* child = dom::ContentChild::GetSingleton();
-    MOZ_ASSERT(child);
-    child->SendOpenAnonymousTemporaryFile(mResultPtr);
-    return NS_OK;
-  }
-};
-
-} // namespace
-
 nsresult
-NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
+NS_OpenAnonymousTemporaryNsIFile(nsIFile** aFile)
 {
-  if (NS_WARN_IF(!aOutFileDesc)) {
-    return NS_ERROR_INVALID_ARG;
-  }
+  MOZ_ASSERT(XRE_IsParentProcess());
 
-  if (dom::ContentChild* child = dom::ContentChild::GetSingleton()) {
-    dom::FileDescOrError fd = NS_OK;
-    if (NS_IsMainThread()) {
-      child->SendOpenAnonymousTemporaryFile(&fd);
-    } else {
-      nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-      MOZ_ASSERT(mainThread);
-      SyncRunnable::DispatchToThread(mainThread,
-        new nsRemoteAnonymousTemporaryFileRunnable(&fd));
-    }
-    if (fd.type() == dom::FileDescOrError::Tnsresult) {
-      nsresult rv = fd.get_nsresult();
-      MOZ_ASSERT(NS_FAILED(rv));
-      return rv;
-    }
-    *aOutFileDesc =
-      PR_ImportFile(PROsfd(fd.get_FileDescriptor().PlatformHandle()));
-    return NS_OK;
+  if (NS_WARN_IF(!aFile)) {
+    return NS_ERROR_INVALID_ARG;
   }
 
   nsresult rv;
@@ -152,7 +111,20 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
     return rv;
   }
 
-  rv = tmpFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0700);
+  rv = tmpFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  tmpFile.forget(aFile);
+  return NS_OK;
+}
+
+nsresult
+NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
+{
+  nsCOMPtr<nsIFile> tmpFile;
+  nsresult rv = NS_OpenAnonymousTemporaryNsIFile(getter_AddRefs(tmpFile));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -203,16 +175,9 @@ public:
     // idle observer too early, it will be registered before the fake idle
     // service is installed when running in xpcshell, and this interferes with
     // the fake idle service, causing xpcshell-test failures.
-    mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-    if (NS_WARN_IF(!mTimer)) {
-      return NS_ERROR_FAILURE;
-    }
-    nsresult rv = mTimer->Init(this,
-                               SCHEDULE_TIMEOUT_MS,
-                               nsITimer::TYPE_ONE_SHOT);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    MOZ_TRY_VAR(mTimer, NS_NewTimerWithObserver(this,
+                                                SCHEDULE_TIMEOUT_MS,
+                                                nsITimer::TYPE_ONE_SHOT));
 
     // Register shutdown observer so we can cancel the timer if we shutdown before
     // the timer runs.

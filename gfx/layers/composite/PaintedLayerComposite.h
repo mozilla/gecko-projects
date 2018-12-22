@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,10 +13,8 @@
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite, etc
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nscore.h"                     // for nsACString
-
 
 namespace mozilla {
 namespace layers {
@@ -41,37 +40,33 @@ protected:
 public:
   virtual void Disconnect() override;
 
-  virtual LayerRenderState GetRenderState() override;
-
   CompositableHost* GetCompositableHost() override;
 
   virtual void Destroy() override;
 
   virtual Layer* GetLayer() override;
 
-  virtual void SetLayerManager(LayerManagerComposite* aManager) override;
+  virtual void SetLayerManager(HostLayerManager* aManager) override;
 
-  virtual void RenderLayer(const gfx::IntRect& aClipRect) override;
+  virtual void RenderLayer(const gfx::IntRect& aClipRect,
+                           const Maybe<gfx::Polygon>& aGeometry) override;
 
   virtual void CleanupResources() override;
+
+  virtual bool IsOpaque() override;
 
   virtual void GenEffectChain(EffectChain& aEffect) override;
 
   virtual bool SetCompositableHost(CompositableHost* aHost) override;
 
-  virtual LayerComposite* AsLayerComposite() override { return this; }
+  virtual HostLayer* AsHostLayer() override { return this; }
 
   virtual void InvalidateRegion(const nsIntRegion& aRegion) override
   {
-    NS_RUNTIMEABORT("PaintedLayerComposites can't fill invalidated regions");
+    MOZ_CRASH("PaintedLayerComposites can't fill invalidated regions");
   }
 
-  void SetValidRegion(const nsIntRegion& aRegion)
-  {
-    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ValidRegion", this));
-    mValidRegion = aRegion;
-    Mutated();
-  }
+  const virtual gfx::TiledIntRegion& GetInvalidRegion() override;
 
   MOZ_LAYER_DECL_NAME("PaintedLayerComposite", TYPE_PAINTED)
 
@@ -80,7 +75,7 @@ protected:
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 
 private:
-  gfx::Filter GetEffectFilter() { return gfx::Filter::LINEAR; }
+  gfx::SamplingFilter GetSamplingFilter() { return gfx::SamplingFilter::LINEAR; }
 
 private:
   RefPtr<ContentHost> mBuffer;

@@ -1,13 +1,8 @@
-this.EXPORTED_SYMBOLS = [ "PromptUtils", "EnableDelayHelper" ];
+var EXPORTED_SYMBOLS = [ "PromptUtils", "EnableDelayHelper" ];
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.import("resource://gre/modules/Services.jsm");
-
-this.PromptUtils = {
+var PromptUtils = {
     // Fire a dialog open/close event. Used by tabbrowser to focus the
     // tab which is triggering a prompt.
     // For remote dialogs, we pass in a different DOM window and a separate
@@ -16,7 +11,7 @@ this.PromptUtils = {
     // The detail may contain information about the principal on which the
     // prompt is triggered, as well as whether or not this is a tabprompt
     // (ie tabmodal alert/prompt/confirm and friends)
-    fireDialogEvent : function (domWin, eventName, maybeTarget, detail) {
+    fireDialogEvent(domWin, eventName, maybeTarget, detail) {
         let target = maybeTarget || domWin;
         let eventOptions = {cancelable: true, bubbles: true};
         if (detail) {
@@ -28,7 +23,7 @@ this.PromptUtils = {
         winUtils.dispatchEventToChromeOnly(target, event);
     },
 
-    objectToPropBag : function (obj) {
+    objectToPropBag(obj) {
         let bag = Cc["@mozilla.org/hash-property-bag;1"].
                   createInstance(Ci.nsIWritablePropertyBag2);
         bag.QueryInterface(Ci.nsIWritablePropertyBag);
@@ -39,7 +34,7 @@ this.PromptUtils = {
         return bag;
     },
 
-    propBagToObject : function (propBag, obj) {
+    propBagToObject(propBag, obj) {
         // Here we iterate over the object's original properties, not the bag
         // (ie, the prompt can't return more/different properties than were
         // passed in). This just helps ensure that the caller provides default
@@ -61,16 +56,16 @@ this.PromptUtils = {
  *                       is to be disabled.
  * @param focusTarget    The window used to watch focus/blur events.
  */
-this.EnableDelayHelper = function({enableDialog, disableDialog, focusTarget}) {
+var EnableDelayHelper = function({enableDialog, disableDialog, focusTarget}) {
     this.enableDialog = makeSafe(enableDialog);
     this.disableDialog = makeSafe(disableDialog);
     this.focusTarget = focusTarget;
 
     this.disableDialog();
 
-    this.focusTarget.addEventListener("blur", this, false);
-    this.focusTarget.addEventListener("focus", this, false);
-    this.focusTarget.document.addEventListener("unload", this, false);
+    this.focusTarget.addEventListener("blur", this);
+    this.focusTarget.addEventListener("focus", this);
+    this.focusTarget.document.addEventListener("unload", this);
 
     this.startOnFocusDelay();
 };
@@ -80,7 +75,7 @@ this.EnableDelayHelper.prototype = {
         return Services.prefs.getIntPref("security.dialog_enable_delay");
     },
 
-    handleEvent : function(event) {
+    handleEvent(event) {
         if (event.target != this.focusTarget &&
             event.target != this.focusTarget.document)
             return;
@@ -100,7 +95,7 @@ this.EnableDelayHelper.prototype = {
         }
     },
 
-    onBlur : function () {
+    onBlur() {
         this.disableDialog();
         // If we blur while waiting to enable the buttons, just cancel the
         // timer to ensure the delay doesn't fire while not focused.
@@ -110,14 +105,14 @@ this.EnableDelayHelper.prototype = {
         }
     },
 
-    onFocus : function () {
+    onFocus() {
         this.startOnFocusDelay();
     },
 
-    onUnload: function() {
-        this.focusTarget.removeEventListener("blur", this, false);
-        this.focusTarget.removeEventListener("focus", this, false);
-        this.focusTarget.document.removeEventListener("unload", this, false);
+    onUnload() {
+        this.focusTarget.removeEventListener("blur", this);
+        this.focusTarget.removeEventListener("focus", this);
+        this.focusTarget.document.removeEventListener("unload", this);
 
         if (this._focusTimer) {
             this._focusTimer.cancel();
@@ -127,7 +122,7 @@ this.EnableDelayHelper.prototype = {
         this.focusTarget = this.enableDialog = this.disableDialog = null;
     },
 
-    startOnFocusDelay : function() {
+    startOnFocusDelay() {
         if (this._focusTimer)
             return;
 
@@ -140,14 +135,14 @@ this.EnableDelayHelper.prototype = {
         );
     },
 
-    onFocusTimeout : function() {
+    onFocusTimeout() {
         this._focusTimer = null;
         this.enableDialog();
     },
 };
 
 function makeSafe(fn) {
-    return function () {
+    return function() {
         // The dialog could be gone by now (if the user closed it),
         // which makes it likely that the given fn might throw.
         try {

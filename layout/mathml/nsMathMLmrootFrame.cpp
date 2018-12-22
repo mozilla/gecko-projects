@@ -1,12 +1,14 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsMathMLmrootFrame.h"
 #include "nsPresContext.h"
-#include "nsRenderingContext.h"
 #include <algorithm>
+#include "gfxContext.h"
+#include "gfxMathTable.h"
 
 using namespace mozilla;
 
@@ -14,21 +16,21 @@ using namespace mozilla;
 // <mroot> -- form a radical - implementation
 //
 
-// additional style context to be used by our MathMLChar.
+// additional ComputedStyle to be used by our MathMLChar.
 #define NS_SQR_CHAR_STYLE_CONTEXT_INDEX   0
 
 static const char16_t kSqrChar = char16_t(0x221A);
 
 nsIFrame*
-NS_NewMathMLmrootFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMathMLmrootFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMathMLmrootFrame(aContext);
+  return new (aPresShell) nsMathMLmrootFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmrootFrame)
 
-nsMathMLmrootFrame::nsMathMLmrootFrame(nsStyleContext* aContext) :
-  nsMathMLContainerFrame(aContext),
+nsMathMLmrootFrame::nsMathMLmrootFrame(ComputedStyle* aStyle) :
+  nsMathMLContainerFrame(aStyle, kClassID),
   mSqrChar(),
   mBarRect()
 {
@@ -44,15 +46,15 @@ nsMathMLmrootFrame::Init(nsIContent*       aContent,
                          nsIFrame*         aPrevInFlow)
 {
   nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
-  
+
   nsPresContext *presContext = PresContext();
 
-  // No need to track the style context given to our MathML char. 
-  // The Style System will use Get/SetAdditionalStyleContext() to keep it
+  // No need to track the ComputedStyle given to our MathML char.
+  // The Style System will use Get/SetAdditionalComputedStyle() to keep it
   // up-to-date if dynamic changes arise.
   nsAutoString sqrChar; sqrChar.Assign(kSqrChar);
   mSqrChar.SetData(sqrChar);
-  ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mSqrChar);
+  ResolveMathMLCharStyle(presContext, mContent, mComputedStyle, &mSqrChar);
 }
 
 NS_IMETHODIMP
@@ -76,13 +78,12 @@ nsMathMLmrootFrame::TransmitAutomaticData()
 
 void
 nsMathMLmrootFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                     const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
 {
   /////////////
   // paint the content we are square-rooting
-  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-  
+  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aLists);
+
   /////////////
   // paint the sqrt symbol
   if (!NS_MATHML_HAS_ERROR(mPresentationData.flags)) {
@@ -116,8 +117,8 @@ nsMathMLmrootFrame::GetRadicalXOffsets(nscoord aIndexWidth, nscoord aSqrWidth,
   gfxFont* mathFont = aFontMetrics->GetThebesFontGroup()->GetFirstMathFont();
   if (mathFont) {
     indexRadicalKern =
-      mathFont->GetMathConstant(gfxFontEntry::RadicalKernAfterDegree,
-                                oneDevPixel);
+      mathFont->MathTable()->Constant(gfxMathTable::RadicalKernAfterDegree,
+                                      oneDevPixel);
     indexRadicalKern = -indexRadicalKern;
   }
   if (indexRadicalKern > aIndexWidth) {
@@ -133,8 +134,8 @@ nsMathMLmrootFrame::GetRadicalXOffsets(nscoord aIndexWidth, nscoord aSqrWidth,
     // add some kern before the radical index
     nscoord indexRadicalKernBefore = 0;
     indexRadicalKernBefore =
-      mathFont->GetMathConstant(gfxFontEntry::RadicalKernBeforeDegree,
-                                oneDevPixel);
+      mathFont->MathTable()->Constant(gfxMathTable::RadicalKernBeforeDegree,
+                                      oneDevPixel);
     dxIndex += indexRadicalKernBefore;
     dxSqr += indexRadicalKernBefore;
   } else {
@@ -160,19 +161,20 @@ nsMathMLmrootFrame::GetRadicalXOffsets(nscoord aIndexWidth, nscoord aSqrWidth,
 
 void
 nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
-                           nsHTMLReflowMetrics&     aDesiredSize,
-                           const nsHTMLReflowState& aReflowState,
+                           ReflowOutput&     aDesiredSize,
+                           const ReflowInput& aReflowInput,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
-  nsReflowStatus childStatus;
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
 
+  nsReflowStatus childStatus;
   mPresentationData.flags &= ~NS_MATHML_ERROR;
   aDesiredSize.ClearSize();
   aDesiredSize.SetBlockStartAscent(0);
 
   nsBoundingMetrics bmSqr, bmBase, bmIndex;
-  DrawTarget* drawTarget = aReflowState.rendContext->GetDrawTarget();
+  DrawTarget* drawTarget = aReflowInput.mRenderingContext->GetDrawTarget();
 
   //////////////////
   // Reflow Children
@@ -180,24 +182,22 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   int32_t count = 0;
   nsIFrame* baseFrame = nullptr;
   nsIFrame* indexFrame = nullptr;
-  nsHTMLReflowMetrics baseSize(aReflowState);
-  nsHTMLReflowMetrics indexSize(aReflowState);
+  ReflowOutput baseSize(aReflowInput);
+  ReflowOutput indexSize(aReflowInput);
   nsIFrame* childFrame = mFrames.FirstChild();
   while (childFrame) {
-    // ask our children to compute their bounding metrics 
-    nsHTMLReflowMetrics childDesiredSize(aReflowState,
-                                         aDesiredSize.mFlags
-                                         | NS_REFLOW_CALC_BOUNDING_METRICS);
+    // ask our children to compute their bounding metrics
+    ReflowOutput childDesiredSize(aReflowInput);
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowState.ComputedSize(wm);
+    LogicalSize availSize = aReflowInput.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
+    ReflowInput childReflowInput(aPresContext, aReflowInput,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext,
-                     childDesiredSize, childReflowState, childStatus);
-    //NS_ASSERTION(NS_FRAME_IS_COMPLETE(childStatus), "bad status");
+                     childDesiredSize, childReflowInput, childStatus);
+    //NS_ASSERTION(childStatus.IsComplete(), "bad status");
     if (0 == count) {
-      // base 
+      // base
       baseFrame = childFrame;
       baseSize = childDesiredSize;
       bmBase = childDesiredSize.mBoundingMetrics;
@@ -215,8 +215,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
     // report an error, encourage people to get their markups in order
     ReportChildCountError();
     ReflowError(drawTarget, aDesiredSize);
-    aStatus = NS_FRAME_COMPLETE;
-    NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+    NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
     // Call DidReflow() for the child frames we successfully did reflow.
     DidReflowChildren(mFrames.FirstChild(), childFrame);
     return;
@@ -260,9 +259,9 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
 
   // height(radical) should be >= height(base) + psi + ruleThickness
   nsBoundingMetrics radicalSize;
-  mSqrChar.Stretch(aPresContext, drawTarget,
+  mSqrChar.Stretch(this, drawTarget,
                    fontSizeInflation,
-                   NS_STRETCH_DIRECTION_VERTICAL, 
+                   NS_STRETCH_DIRECTION_VERTICAL,
                    contSize, radicalSize,
                    NS_STRETCH_LARGER,
                    StyleVisibility()->mDirection);
@@ -273,12 +272,12 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   // Update the desired size for the container (like msqrt, index is not yet included)
   // the baseline will be that of the base.
   mBoundingMetrics.ascent = bmBase.ascent + psi + ruleThickness;
-  mBoundingMetrics.descent = 
+  mBoundingMetrics.descent =
     std::max(bmBase.descent,
            (bmSqr.ascent + bmSqr.descent - mBoundingMetrics.ascent));
   mBoundingMetrics.width = bmSqr.width + bmBase.width;
   mBoundingMetrics.leftBearing = bmSqr.leftBearing;
-  mBoundingMetrics.rightBearing = bmSqr.width + 
+  mBoundingMetrics.rightBearing = bmSqr.width +
     std::max(bmBase.width, bmBase.rightBearing); // take also care of the rule
 
   aDesiredSize.SetBlockStartAscent(mBoundingMetrics.ascent + leading);
@@ -289,25 +288,25 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
 
   /////////////
   // Re-adjust the desired size to include the index.
-  
+
   // the index is raised by some fraction of the height
   // of the radical, see \mroot macro in App. B, TexBook
   float raiseIndexPercent = 0.6f;
   gfxFont* mathFont = fm->GetThebesFontGroup()->GetFirstMathFont();
   if (mathFont) {
-    raiseIndexPercent =
-      mathFont->GetMathConstant(gfxFontEntry::RadicalDegreeBottomRaisePercent);
+    raiseIndexPercent = mathFont->MathTable()->
+      Constant(gfxMathTable::RadicalDegreeBottomRaisePercent);
   }
   nscoord raiseIndexDelta = NSToCoordRound(raiseIndexPercent *
                                            (bmSqr.ascent + bmSqr.descent));
-  nscoord indexRaisedAscent = mBoundingMetrics.ascent // top of radical 
+  nscoord indexRaisedAscent = mBoundingMetrics.ascent // top of radical
     - (bmSqr.ascent + bmSqr.descent) // to bottom of radical
     + raiseIndexDelta + bmIndex.ascent + bmIndex.descent; // to top of raised index
 
   nscoord indexClearance = 0;
   if (mBoundingMetrics.ascent < indexRaisedAscent) {
-    indexClearance = 
-      indexRaisedAscent - mBoundingMetrics.ascent; // excess gap introduced by a tall index 
+    indexClearance =
+      indexRaisedAscent - mBoundingMetrics.ascent; // excess gap introduced by a tall index
     mBoundingMetrics.ascent = indexRaisedAscent;
     nscoord descent = aDesiredSize.Height() - aDesiredSize.BlockStartAscent();
     aDesiredSize.SetBlockStartAscent(mBoundingMetrics.ascent + leading);
@@ -318,7 +317,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   GetRadicalXOffsets(bmIndex.width, bmSqr.width, fm, &dxIndex, &dxSqr);
 
   mBoundingMetrics.width = dxSqr + bmSqr.width + bmBase.width;
-  mBoundingMetrics.leftBearing = 
+  mBoundingMetrics.leftBearing =
     std::min(dxIndex + bmIndex.leftBearing, dxSqr + bmSqr.leftBearing);
   mBoundingMetrics.rightBearing = dxSqr + bmSqr.width +
     std::max(bmBase.width, bmBase.rightBearing);
@@ -353,12 +352,11 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   mReference.x = 0;
   mReference.y = aDesiredSize.BlockStartAscent();
 
-  aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 /* virtual */ void
-nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext, nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmrootFrame::GetIntrinsicISizeMetrics(gfxContext* aRenderingContext, ReflowOutput& aDesiredSize)
 {
   nsIFrame* baseFrame = mFrames.FirstChild();
   nsIFrame* indexFrame = nullptr;
@@ -376,7 +374,7 @@ nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingConte
   nscoord indexWidth =
     nsLayoutUtils::IntrinsicForContainer(aRenderingContext, indexFrame,
                                          nsLayoutUtils::PREF_ISIZE);
-  nscoord sqrWidth = mSqrChar.GetMaxWidth(PresContext(),
+  nscoord sqrWidth = mSqrChar.GetMaxWidth(this,
                                           aRenderingContext->GetDrawTarget(),
                                           fontSizeInflation);
 
@@ -394,25 +392,26 @@ nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingConte
 }
 
 // ----------------------
-// the Style System will use these to pass the proper style context to our MathMLChar
-nsStyleContext*
-nsMathMLmrootFrame::GetAdditionalStyleContext(int32_t aIndex) const
+// the Style System will use these to pass the proper ComputedStyle to our
+// MathMLChar
+ComputedStyle*
+nsMathMLmrootFrame::GetAdditionalComputedStyle(int32_t aIndex) const
 {
   switch (aIndex) {
   case NS_SQR_CHAR_STYLE_CONTEXT_INDEX:
-    return mSqrChar.GetStyleContext();
+    return mSqrChar.GetComputedStyle();
   default:
     return nullptr;
   }
 }
 
 void
-nsMathMLmrootFrame::SetAdditionalStyleContext(int32_t          aIndex, 
-                                              nsStyleContext*  aStyleContext)
+nsMathMLmrootFrame::SetAdditionalComputedStyle(int32_t          aIndex,
+                                              ComputedStyle*  aComputedStyle)
 {
   switch (aIndex) {
   case NS_SQR_CHAR_STYLE_CONTEXT_INDEX:
-    mSqrChar.SetStyleContext(aStyleContext);
+    mSqrChar.SetComputedStyle(aComputedStyle);
     break;
   }
 }

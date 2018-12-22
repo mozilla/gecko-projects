@@ -20,16 +20,23 @@ from mach.decorators import (
 
 def setup_argument_parser_functional():
     from firefox_ui_harness.arguments.base import FirefoxUIArguments
-    return FirefoxUIArguments()
+    from mozlog.structured import commandline
+    parser = FirefoxUIArguments()
+    commandline.add_logging_group(parser)
+    return parser
 
 
 def setup_argument_parser_update():
     from firefox_ui_harness.arguments.update import UpdateArguments
-    return UpdateArguments()
+    from mozlog.structured import commandline
+    parser = UpdateArguments()
+    commandline.add_logging_group(parser)
+    return parser
 
 
 def run_firefox_ui_test(testtype=None, topsrcdir=None, **kwargs):
     from mozlog.structured import commandline
+    from argparse import Namespace
     import firefox_ui_harness
 
     if testtype == 'functional':
@@ -59,17 +66,23 @@ def run_firefox_ui_test(testtype=None, topsrcdir=None, **kwargs):
     if not kwargs['server_root']:
         kwargs['server_root'] = os.path.join(fxui_dir, 'resources')
 
-    # If no tests have been selected, set default ones
-    if kwargs.get('tests'):
-        tests = kwargs.get('tests')
-    else:
-        tests = [os.path.join(fxui_dir, 'tests', test)
+    # If called via "mach test" a dictionary of tests is passed in
+    if 'test_objects' in kwargs:
+        tests = []
+        for obj in kwargs['test_objects']:
+            tests.append(obj['file_relpath'])
+        kwargs['tests'] = tests
+    elif not kwargs.get('tests'):
+        # If no tests have been selected, set default ones
+        kwargs['tests'] = [os.path.join(fxui_dir, 'tests', test)
                            for test in test_types[testtype]['default_tests']]
 
-    kwargs['logger'] = commandline.setup_logging('Firefox UI - {} Tests'.format(testtype),
-                                                 {"mach": sys.stdout})
+    kwargs['logger'] = kwargs.pop('log', None)
+    if not kwargs['logger']:
+        kwargs['logger'] = commandline.setup_logging('Firefox UI - {} Tests'.format(testtype),
+                                                     {"mach": sys.stdout})
 
-    args = parser.parse_args(args=tests)
+    args = Namespace()
 
     for k, v in kwargs.iteritems():
         setattr(args, k, v)

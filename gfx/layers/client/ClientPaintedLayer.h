@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -8,7 +9,7 @@
 
 #include "ClientLayerManager.h"         // for ClientLayerManager, etc
 #include "Layers.h"                     // for PaintedLayer, etc
-#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
+#include "RotatedBuffer.h"              // for RotatedBuffer, etc
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/ContentClient.h"  // for ContentClient
@@ -19,8 +20,12 @@
 #include "mozilla/layers/PLayerTransaction.h" // for PaintedLayerAttributes
 
 namespace mozilla {
-namespace layers {
+namespace gfx {
+class DrawEventRecorderMemory;
+class DrawTargetCapture;
+};
 
+namespace layers {
 class CompositableClient;
 class ShadowableLayer;
 class SpecificLayerAttributes;
@@ -28,8 +33,8 @@ class SpecificLayerAttributes;
 class ClientPaintedLayer : public PaintedLayer,
                            public ClientLayer {
 public:
-  typedef RotatedContentBuffer::PaintState PaintState;
-  typedef RotatedContentBuffer::ContentType ContentType;
+  typedef ContentClient::PaintState PaintState;
+  typedef ContentClient::ContentType ContentType;
 
   explicit ClientPaintedLayer(ClientLayerManager* aLayerManager,
                              LayerManager::PaintedLayerCreationHint aCreationHint = LayerManager::NONE) :
@@ -60,9 +65,8 @@ public:
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
-    mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(20);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion);
+    mInvalidRegion.Add(aRegion);
+    UpdateValidRegionAfterInvalidRegionChanged();
   }
 
   virtual void RenderLayer() override { RenderLayerWithReadback(nullptr); }
@@ -74,10 +78,17 @@ public:
     if (mContentClient) {
       mContentClient->Clear();
     }
-    mValidRegion.SetEmpty();
+    ClearValidRegion();
     DestroyBackBuffer();
   }
-  
+
+  virtual void HandleMemoryPressure() override
+  {
+    if (mContentClient) {
+      mContentClient->HandleMemoryPressure();
+    }
+  }
+
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
     aAttrs = PaintedLayerAttributes(GetValidRegion());
@@ -99,11 +110,18 @@ public:
   virtual void Disconnect() override
   {
     mContentClient = nullptr;
-    ClientLayer::Disconnect();
   }
 
 protected:
-  void PaintThebes();
+  void PaintThebes(nsTArray<ReadbackProcessor::Update>* aReadbackUpdates);
+  void RecordThebes();
+  bool CanRecordLayer(ReadbackProcessor* aReadback);
+  bool HasMaskLayers();
+  bool EnsureContentClient();
+  uint32_t GetPaintFlags();
+  void UpdateContentClient(PaintState& aState);
+  bool UpdatePaintRegion(PaintState& aState);
+  void PaintOffMainThread();
 
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 

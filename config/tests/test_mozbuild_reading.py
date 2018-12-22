@@ -68,7 +68,6 @@ class TestMozbuildReading(unittest.TestCase):
         self.assertEqual(set(paths.keys()), all_paths)
         self.assertGreaterEqual(len(contexts), len(paths))
 
-
     def test_orphan_file_patterns(self):
         if sys.platform == 'win32':
             raise unittest.SkipTest('failing on windows builds')
@@ -82,12 +81,14 @@ class TestMozbuildReading(unittest.TestCase):
                 raise unittest.SkipTest('failing without config.status')
             raise
 
+        if config.substs['MOZ_BUILD_APP'] == 'js':
+            raise unittest.SkipTest('failing in Spidermonkey builds')
+
         reader = BuildReader(config)
         all_paths = self._mozbuilds(reader)
         _, contexts = reader.read_relevant_mozbuilds(all_paths)
 
-        finder = FileFinder(config.topsrcdir, find_executables=False,
-                            ignore=['obj*'])
+        finder = FileFinder(config.topsrcdir, ignore=['obj*'])
 
         def pattern_exists(pat):
             return [p for p in finder.find(pat)] != []
@@ -108,6 +109,7 @@ class TestMozbuildReading(unittest.TestCase):
                               "in '%s' corresponds to no files in the tree.\n"
                               "Please update this entry." %
                               (p, ctx.main_path))
+
 
 if __name__ == '__main__':
     main()

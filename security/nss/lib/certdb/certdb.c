@@ -257,27 +257,22 @@ SECStatus
 CERT_IssuerNameFromDERCert(SECItem *derCert, SECItem *derName)
 {
     int rv;
-    PLArenaPool *arena;
+    PORTCheapArenaPool tmpArena;
     CERTSignedData sd;
     void *tmpptr;
 
-    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-
-    if (!arena) {
-        return (SECFailure);
-    }
+    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
 
     PORT_Memset(&sd, 0, sizeof(CERTSignedData));
-    rv = SEC_QuickDERDecodeItem(arena, &sd, CERT_SignedDataTemplate, derCert);
-
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, &sd, CERT_SignedDataTemplate,
+                                derCert);
     if (rv) {
         goto loser;
     }
 
     PORT_Memset(derName, 0, sizeof(SECItem));
-    rv = SEC_QuickDERDecodeItem(arena, derName, SEC_CertIssuerTemplate,
-                                &sd.data);
-
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, derName,
+                                SEC_CertIssuerTemplate, &sd.data);
     if (rv) {
         goto loser;
     }
@@ -290,11 +285,11 @@ CERT_IssuerNameFromDERCert(SECItem *derCert, SECItem *derName)
 
     PORT_Memcpy(derName->data, tmpptr, derName->len);
 
-    PORT_FreeArena(arena, PR_FALSE);
+    PORT_DestroyCheapArena(&tmpArena);
     return (SECSuccess);
 
 loser:
-    PORT_FreeArena(arena, PR_FALSE);
+    PORT_DestroyCheapArena(&tmpArena);
     return (SECFailure);
 }
 
@@ -302,27 +297,22 @@ SECStatus
 CERT_SerialNumberFromDERCert(SECItem *derCert, SECItem *derName)
 {
     int rv;
-    PLArenaPool *arena;
+    PORTCheapArenaPool tmpArena;
     CERTSignedData sd;
     void *tmpptr;
 
-    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-
-    if (!arena) {
-        return (SECFailure);
-    }
+    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
 
     PORT_Memset(&sd, 0, sizeof(CERTSignedData));
-    rv = SEC_QuickDERDecodeItem(arena, &sd, CERT_SignedDataTemplate, derCert);
-
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, &sd, CERT_SignedDataTemplate,
+                                derCert);
     if (rv) {
         goto loser;
     }
 
     PORT_Memset(derName, 0, sizeof(SECItem));
-    rv = SEC_QuickDERDecodeItem(arena, derName, SEC_CertSerialNumberTemplate,
-                                &sd.data);
-
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, derName,
+                                SEC_CertSerialNumberTemplate, &sd.data);
     if (rv) {
         goto loser;
     }
@@ -335,11 +325,11 @@ CERT_SerialNumberFromDERCert(SECItem *derCert, SECItem *derName)
 
     PORT_Memcpy(derName->data, tmpptr, derName->len);
 
-    PORT_FreeArena(arena, PR_FALSE);
+    PORT_DestroyCheapArena(&tmpArena);
     return (SECSuccess);
 
 loser:
-    PORT_FreeArena(arena, PR_FALSE);
+    PORT_DestroyCheapArena(&tmpArena);
     return (SECFailure);
 }
 
@@ -1202,6 +1192,7 @@ CERT_CheckKeyUsage(CERTCertificate *cert, unsigned int requiredUsage)
             case rsaKey:
                 requiredUsage |= KU_KEY_ENCIPHERMENT;
                 break;
+            case rsaPssKey:
             case dsaKey:
                 requiredUsage |= KU_DIGITAL_SIGNATURE;
                 break;
@@ -1305,12 +1296,16 @@ CERT_AddOKDomainName(CERTCertificate *cert, const char *hn)
         PORT_SetError(SEC_ERROR_INVALID_ARGS);
         return SECFailure;
     }
-    domainOK = (CERTOKDomainName *)PORT_ArenaZAlloc(
-        cert->arena, (sizeof *domainOK) + newNameLen);
-    if (!domainOK)
+    domainOK = (CERTOKDomainName *)PORT_ArenaZAlloc(cert->arena, sizeof(*domainOK));
+    if (!domainOK) {
         return SECFailure; /* error code is already set. */
+    }
+    domainOK->name = (char *)PORT_ArenaZAlloc(cert->arena, newNameLen + 1);
+    if (!domainOK->name) {
+        return SECFailure; /* error code is already set. */
+    }
 
-    PORT_Strcpy(domainOK->name, hn);
+    PORT_Strncpy(domainOK->name, hn, newNameLen + 1);
     sec_lower_string(domainOK->name);
 
     /* put at head of list. */
@@ -1412,7 +1407,6 @@ cert_VerifySubjectAltName(const CERTCertificate *cert, const char *hn)
         goto fail;
     }
     isIPaddr = (PR_SUCCESS == PR_StringToNetAddr(hn, &netAddr));
-    rv = SECFailure;
     arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
     if (!arena)
         goto fail;
@@ -2072,36 +2066,29 @@ CERT_IsCACert(CERTCertificate *cert, unsigned int *rettype)
     unsigned int cType = cert->nsCertType;
     PRBool ret = PR_FALSE;
 
-    if (cType & (NS_CERT_TYPE_SSL_CA | NS_CERT_TYPE_EMAIL_CA |
-                 NS_CERT_TYPE_OBJECT_SIGNING_CA)) {
-        ret = PR_TRUE;
-    } else {
-        SECStatus rv;
-        CERTBasicConstraints constraints;
-
-        rv = CERT_FindBasicConstraintExten(cert, &constraints);
-        if (rv == SECSuccess && constraints.isCA) {
-            ret = PR_TRUE;
-            cType |= (NS_CERT_TYPE_SSL_CA | NS_CERT_TYPE_EMAIL_CA);
-        }
-    }
-
-    /* finally check if it's an X.509 v1 root CA */
-    if (!ret &&
-        (cert->isRoot && cert_Version(cert) < SEC_CERTIFICATE_VERSION_3)) {
-        ret = PR_TRUE;
+    /*
+     * Check if the constraints are available and it's a CA, OR if it's
+     * a X.509 v1 Root CA.
+     */
+    CERTBasicConstraints constraints;
+    if ((CERT_FindBasicConstraintExten(cert, &constraints) == SECSuccess &&
+         constraints.isCA) ||
+        (cert->isRoot && cert_Version(cert) < SEC_CERTIFICATE_VERSION_3))
         cType |= (NS_CERT_TYPE_SSL_CA | NS_CERT_TYPE_EMAIL_CA);
-    }
-    /* Now apply trust overrides, if any */
+
+    /*
+     * Apply trust overrides, if any.
+     */
     cType = cert_ComputeTrustOverrides(cert, cType);
     ret = (cType & (NS_CERT_TYPE_SSL_CA | NS_CERT_TYPE_EMAIL_CA |
                     NS_CERT_TYPE_OBJECT_SIGNING_CA))
               ? PR_TRUE
               : PR_FALSE;
 
-    if (rettype != NULL) {
+    if (rettype) {
         *rettype = cType;
     }
+
     return ret;
 }
 
@@ -2573,9 +2560,9 @@ CERT_AddCertToListHeadWithData(CERTCertList *certs, CERTCertificate *cert,
     CERTCertListNode *head;
 
     head = CERT_LIST_HEAD(certs);
-
-    if (head == NULL)
-        return CERT_AddCertToListTail(certs, cert);
+    if (head == NULL) {
+        goto loser;
+    }
 
     node = (CERTCertListNode *)PORT_ArenaZAlloc(certs->arena,
                                                 sizeof(CERTCertListNode));
@@ -2879,7 +2866,18 @@ CERT_LockCertTrust(const CERTCertificate *cert)
 {
     PORT_Assert(certTrustLock != NULL);
     PZ_Lock(certTrustLock);
-    return;
+}
+
+static PZLock *certTempPermLock = NULL;
+
+/*
+ * Acquire the cert temp/perm lock
+ */
+void
+CERT_LockCertTempPerm(const CERTCertificate *cert)
+{
+    PORT_Assert(certTempPermLock != NULL);
+    PZ_Lock(certTempPermLock);
 }
 
 SECStatus
@@ -2899,6 +2897,18 @@ cert_InitLocks(void)
         if (!certTrustLock) {
             PZ_DestroyLock(certRefCountLock);
             certRefCountLock = NULL;
+            return SECFailure;
+        }
+    }
+
+    if (certTempPermLock == NULL) {
+        certTempPermLock = PZ_NewLock(nssILockCertDB);
+        PORT_Assert(certTempPermLock != NULL);
+        if (!certTempPermLock) {
+            PZ_DestroyLock(certTrustLock);
+            PZ_DestroyLock(certRefCountLock);
+            certRefCountLock = NULL;
+            certTrustLock = NULL;
             return SECFailure;
         }
     }
@@ -2926,6 +2936,14 @@ cert_DestroyLocks(void)
     } else {
         rv = SECFailure;
     }
+
+    PORT_Assert(certTempPermLock != NULL);
+    if (certTempPermLock) {
+        PZ_DestroyLock(certTempPermLock);
+        certTempPermLock = NULL;
+    } else {
+        rv = SECFailure;
+    }
     return rv;
 }
 
@@ -2944,6 +2962,23 @@ CERT_UnlockCertTrust(const CERTCertificate *cert)
     }
 #else
     PZ_Unlock(certTrustLock);
+#endif
+}
+
+/*
+ * Free the temp/perm lock
+ */
+void
+CERT_UnlockCertTempPerm(const CERTCertificate *cert)
+{
+    PORT_Assert(certTempPermLock != NULL);
+#ifdef DEBUG
+    {
+        PRStatus prstat = PZ_Unlock(certTempPermLock);
+        PORT_Assert(prstat == PR_SUCCESS);
+    }
+#else
+    (void)PZ_Unlock(certTempPermLock);
 #endif
 }
 

@@ -1,12 +1,16 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM")
+
+DIRS += ['input']
+
 MOCHITEST_MANIFESTS += [
     'test/forms/mochitest.ini',
-    'test/imports/mochitest.ini',
     'test/mochitest.ini',
 ]
 
@@ -18,20 +22,19 @@ MOCHITEST_CHROME_MANIFESTS += [
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
 XPIDL_SOURCES += [
+    'nsIDateTimeInputArea.idl',
     'nsIFormSubmitObserver.idl',
-    'nsIHTMLMenu.idl',
     'nsIImageDocument.idl',
     'nsIMenuBuilder.idl',
-    'nsIPhonetic.idl',
 ]
 
 XPIDL_MODULE = 'content_html'
 
 EXPORTS += [
-    'HTMLPropertiesCollection.h',
-    'nsFormSubmission.h',
     'nsGenericHTMLElement.h',
+    'nsGenericHTMLFrameElement.h',
     'nsHTMLDNSPrefetch.h',
+    'nsHTMLDocument.h',
     'nsIConstraintValidation.h',
     'nsIForm.h',
     'nsIFormControl.h',
@@ -44,6 +47,10 @@ EXPORTS += [
     'nsTextEditorState.h',
 ]
 
+EXPORTS.mozilla += [
+    'TextInputListener.h',
+]
+
 EXPORTS.mozilla.dom += [
     'HTMLAllCollection.h',
     'HTMLAnchorElement.h',
@@ -53,16 +60,17 @@ EXPORTS.mozilla.dom += [
     'HTMLBRElement.h',
     'HTMLButtonElement.h',
     'HTMLCanvasElement.h',
-    'HTMLContentElement.h',
     'HTMLDataElement.h',
     'HTMLDataListElement.h',
     'HTMLDetailsElement.h',
+    'HTMLDialogElement.h',
     'HTMLDivElement.h',
-    'HTMLExtAppElement.h',
+    'HTMLEmbedElement.h',
     'HTMLFieldSetElement.h',
     'HTMLFontElement.h',
     'HTMLFormControlsCollection.h',
     'HTMLFormElement.h',
+    'HTMLFormSubmission.h',
     'HTMLFrameElement.h',
     'HTMLFrameSetElement.h',
     'HTMLHeadingElement.h',
@@ -92,10 +100,9 @@ EXPORTS.mozilla.dom += [
     'HTMLProgressElement.h',
     'HTMLScriptElement.h',
     'HTMLSelectElement.h',
-    'HTMLShadowElement.h',
     'HTMLSharedElement.h',
     'HTMLSharedListElement.h',
-    'HTMLSharedObjectElement.h',
+    'HTMLSlotElement.h',
     'HTMLSourceElement.h',
     'HTMLSpanElement.h',
     'HTMLStyleElement.h',
@@ -116,10 +123,10 @@ EXPORTS.mozilla.dom += [
     'ImageDocument.h',
     'MediaError.h',
     'nsBrowserElement.h',
+    'PlayPromise.h',
     'RadioNodeList.h',
     'TextTrackManager.h',
     'TimeRanges.h',
-    'UndoManager.h',
     'ValidityState.h',
 ]
 
@@ -132,17 +139,18 @@ UNIFIED_SOURCES += [
     'HTMLBRElement.cpp',
     'HTMLButtonElement.cpp',
     'HTMLCanvasElement.cpp',
-    'HTMLContentElement.cpp',
     'HTMLDataElement.cpp',
     'HTMLDataListElement.cpp',
     'HTMLDetailsElement.cpp',
+    'HTMLDialogElement.cpp',
     'HTMLDivElement.cpp',
     'HTMLElement.cpp',
-    'HTMLExtAppElement.cpp',
+    'HTMLEmbedElement.cpp',
     'HTMLFieldSetElement.cpp',
     'HTMLFontElement.cpp',
     'HTMLFormControlsCollection.cpp',
     'HTMLFormElement.cpp',
+    'HTMLFormSubmission.cpp',
     'HTMLFrameElement.cpp',
     'HTMLFrameSetElement.cpp',
     'HTMLHeadingElement.cpp',
@@ -170,13 +178,11 @@ UNIFIED_SOURCES += [
     'HTMLPictureElement.cpp',
     'HTMLPreElement.cpp',
     'HTMLProgressElement.cpp',
-    'HTMLPropertiesCollection.cpp',
     'HTMLScriptElement.cpp',
     'HTMLSelectElement.cpp',
-    'HTMLShadowElement.cpp',
     'HTMLSharedElement.cpp',
     'HTMLSharedListElement.cpp',
-    'HTMLSharedObjectElement.cpp',
+    'HTMLSlotElement.cpp',
     'HTMLSourceElement.cpp',
     'HTMLSpanElement.cpp',
     'HTMLStyleElement.cpp',
@@ -199,7 +205,6 @@ UNIFIED_SOURCES += [
     'MediaError.cpp',
     'nsBrowserElement.cpp',
     'nsDOMStringMap.cpp',
-    'nsFormSubmission.cpp',
     'nsGenericHTMLElement.cpp',
     'nsGenericHTMLFrameElement.cpp',
     'nsHTMLContentSink.cpp',
@@ -208,10 +213,10 @@ UNIFIED_SOURCES += [
     'nsIConstraintValidation.cpp',
     'nsRadioVisitor.cpp',
     'nsTextEditorState.cpp',
+    'PlayPromise.cpp',
     'RadioNodeList.cpp',
     'TextTrackManager.cpp',
     'TimeRanges.cpp',
-    'UndoManager.cpp',
     'ValidityState.cpp',
     'VideoDocument.cpp',
 ]
@@ -233,11 +238,11 @@ LOCAL_INCLUDES += [
     '/docshell/base',
     '/dom/base',
     '/dom/canvas',
-    '/dom/media/',
+    '/dom/html/input',
+    '/dom/media',
+    '/dom/security',
     '/dom/xbl',
     '/dom/xul',
-    '/editor/libeditor',
-    '/editor/txmgr',
     '/image',
     '/layout/forms',
     '/layout/generic',
@@ -248,3 +253,9 @@ LOCAL_INCLUDES += [
 ]
 
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['MOZ_ANDROID_HLS_SUPPORT']:
+    DEFINES['MOZ_ANDROID_HLS_SUPPORT'] = True
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

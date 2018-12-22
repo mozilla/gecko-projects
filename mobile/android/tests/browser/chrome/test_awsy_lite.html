@@ -14,12 +14,10 @@
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/MemoryStats.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://global/skin"/>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
-  <script type="application/javascript;version=1.8" src="head.js"></script>
-  <script type="application/javascript;version=1.8">
+  <script type="application/javascript" src="head.js"></script>
+  <script type="application/javascript">
 
   "use strict";
-
-  const { interfaces: Ci, utils: Cu, classes: Cc } = Components;
 
   var kUrls = [
     "http://mochi.test:8888/chrome/mobile/android/tests/browser/chrome/tp5/baidu.com/www.baidu.com/s@wd=mozilla.html",
@@ -34,12 +32,12 @@
   var gLastTab = null;
   var gResults = [];
 
-  Cu.import("resource://gre/modules/Services.jsm");
+  ChromeUtils.import("resource://gre/modules/Services.jsm");
 
   var BrowserApp = Services.wm.getMostRecentWindow("navigator:browser").BrowserApp;
   SimpleTest.waitForExplicitFinish();
-  SimpleTest.requestLongerTimeout(2);  // several long waits and GCs make for a long-running test
-  SimpleTest.requestCompleteLog();  // so that "PERFHERDER_DATA" can be scraped from the log
+  SimpleTest.requestLongerTimeout(3); // several long waits and GCs make for a long-running test
+  SimpleTest.requestCompleteLog(); // so that "PERFHERDER_DATA" can be scraped from the log
 
   function checkpoint(aName) {
     var mrm = Cc["@mozilla.org/memory-reporter-manager;1"].getService(Ci.nsIMemoryReporterManager);
@@ -50,33 +48,28 @@
   var browserListener = {
     onOpenWindow: function(aWindow) {
         var win = aWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
-        win.addEventListener("UIReady", function listener(aEvent) {
-            win.removeEventListener("UIReady", listener, false);
+        win.addEventListener("UIReady", function(aEvent) {
             attachTo(win);
-        }, false);
+        }, {once: true});
     },
 
     onCloseWindow: function(aWindow) {
         detachFrom(aWindow);
     },
-
-    onWindowTitleChange: function(aWindow, aTitle) {
-    }
   };
 
   function doFullGc(aCallback, aIterations) {
-    var threadMan = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
-    var domWindowUtils = gWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindowUtils);
+    var domWindowUtils = gWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
 
     function runSoon(f) {
-        threadMan.mainThread.dispatch({ run: f }, Ci.nsIThread.DISPATCH_NORMAL);
+        Services.tm.dispatchToMainThread({ run: f });
     }
 
     function cc() {
         if (domWindowUtils.cycleCollect) {
             domWindowUtils.cycleCollect();
         }
-        Services.obs.notifyObservers(null, "child-cc-request", null);
+        Services.obs.notifyObservers(null, "child-cc-request");
     }
 
     function minimizeInner() {
@@ -88,17 +81,17 @@
                 schedGC = Cu.schedulePreciseGC;
             }
 
-            Services.obs.notifyObservers(null, "child-gc-request", null);
+            Services.obs.notifyObservers(null, "child-gc-request");
 
             if (schedGC) {
-                schedGC.call(Cu, { callback: function () {
-                    runSoon(function () { cc(); runSoon(minimizeInner); });
+                schedGC.call(Cu, { callback: function() {
+                    runSoon(function() { cc(); runSoon(minimizeInner); });
                 } });
             } else {
                 if (domWindowUtils.garbageCollect) {
                     domWindowUtils.garbageCollect();
                 }
-                runSoon(function () { cc(); runSoon(minimizeInner); });
+                runSoon(function() { cc(); runSoon(minimizeInner); });
             }
         } else {
             runSoon(aCallback);
@@ -177,20 +170,16 @@
     checkpoint("After tabs [+30s, forced GC]");
     var tabCount = BrowserApp.tabs.length;
     for (var i = 1; i < tabCount; i++) {
-        BrowserApp.closeTab(BrowserApp.tabs[i]);
-    }
-
-    var closeListener = {
-        observe: function(aSubject, aTopic, aData) {
+        BrowserApp.tabs[i].browser.addEventListener("TabClose", () => {
             tabCount--;
             dump("tab count dropped to [" + tabCount + "]");
             if (tabCount == 1) {
-                Services.obs.removeObserver(this, "Tab:Closed", false);
                 setTimeout(tabsClosed, 0);
             }
-        }
-    };
-    Services.obs.addObserver(closeListener, "Tab:Closed", false);
+        }, { once: true });
+
+        BrowserApp.closeTab(BrowserApp.tabs[i]);
+    }
   }
 
   function tabsClosed() {
@@ -216,7 +205,7 @@
         var result = gResults[i];
         logsum += Math.log(result[aProperty]);
     }
-    return Math.round(Math.exp(logsum/gResults.length));
+    return Math.round(Math.exp(logsum / gResults.length));
   }
 
   function finalReport() {
@@ -234,7 +223,7 @@
         perfherder += `{\"name\": \"${result.name}\", \"value\": ${result.resident}}`;
     }
     perfherder += "], "; // end subtests
-    perfherder += "\"value\": "+geomean("resident");
+    perfherder += "\"value\": " + geomean("resident");
     perfherder += "}"; // end Resident Memory suite
     perfherder += "]"; // end suites
     perfherder += "}"; // end PERFHERDER_DATA

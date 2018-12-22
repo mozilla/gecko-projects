@@ -12,8 +12,6 @@
 
 #include "vm/Stack.h"
 
-class JSAtom;
-
 namespace js {
 
 /*
@@ -22,6 +20,9 @@ namespace js {
  */
 bool
 IsSelfHostedFunctionWithName(JSFunction* fun, JSAtom* name);
+
+JSAtom*
+GetSelfHostedFunctionName(JSFunction* fun);
 
 bool
 IsCallSelfHostedNonGenericMethod(NativeImpl impl);
@@ -33,11 +34,36 @@ ReportIncompatibleSelfHostedMethod(JSContext* cx, const CallArgs& args);
 void
 FillSelfHostingCompileOptions(JS::CompileOptions& options);
 
+#ifdef DEBUG
+/*
+ * Calls a self-hosted function by name.
+ *
+ * This function is only available in debug mode, because it always atomizes
+ * its |name| parameter. Use the alternative function below in non-debug code.
+ */
 bool
-CallSelfHostedFunction(JSContext* cx, char const* name, InvokeArgs& args);
+CallSelfHostedFunction(JSContext* cx, char const* name, HandleValue thisv,
+                       const AnyInvokeArgs& args, MutableHandleValue rval);
+#endif
+
+/*
+ * Calls a self-hosted function by name.
+ */
+bool
+CallSelfHostedFunction(JSContext* cx, HandlePropertyName name, HandleValue thisv,
+                       const AnyInvokeArgs& args, MutableHandleValue rval);
 
 bool
-CallSelfHostedFunction(JSContext* cx, HandlePropertyName name, InvokeArgs& args);
+intrinsic_StringSplitString(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+intrinsic_NewArrayIterator(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+intrinsic_NewStringIterator(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool
+intrinsic_IsSuspendedGenerator(JSContext* cx, unsigned argc, JS::Value* vp);
 
 } /* namespace js */
 

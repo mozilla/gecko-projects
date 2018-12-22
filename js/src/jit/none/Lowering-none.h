@@ -14,7 +14,7 @@ namespace jit {
 
 class LIRGeneratorNone : public LIRGeneratorShared
 {
-  public:
+  protected:
     LIRGeneratorNone(MIRGenerator* gen, MIRGraph& graph, LIRGraph& lirGraph)
       : LIRGeneratorShared(gen, graph, lirGraph)
     {
@@ -24,12 +24,15 @@ class LIRGeneratorNone : public LIRGeneratorShared
     LBoxAllocation useBoxFixed(MDefinition*, Register, Register, bool useAtStart = false) { MOZ_CRASH(); }
 
     LAllocation useByteOpRegister(MDefinition*) { MOZ_CRASH(); }
+    LAllocation useByteOpRegisterAtStart(MDefinition*) { MOZ_CRASH(); }
     LAllocation useByteOpRegisterOrNonDoubleConstant(MDefinition*) { MOZ_CRASH(); }
     LDefinition tempByteOpRegister() { MOZ_CRASH(); }
     LDefinition tempToUnbox() { MOZ_CRASH(); }
     bool needTempForPostBarrier() { MOZ_CRASH(); }
     void lowerUntypedPhiInput(MPhi*, uint32_t, LBlock*, size_t) { MOZ_CRASH(); }
+    void lowerInt64PhiInput(MPhi*, uint32_t, LBlock*, size_t) { MOZ_CRASH(); }
     void defineUntypedPhi(MPhi*, size_t) { MOZ_CRASH(); }
+    void defineInt64Phi(MPhi*, size_t) { MOZ_CRASH(); }
     void lowerForShift(LInstructionHelper<1, 2, 0>*, MDefinition*, MDefinition*, MDefinition*) {
         MOZ_CRASH();
     }
@@ -40,6 +43,7 @@ class LIRGeneratorNone : public LIRGeneratorShared
     void lowerForFPU(T, MDefinition*, MDefinition*, MDefinition* v = nullptr) { MOZ_CRASH(); }
     template <typename T>
     void lowerForALUInt64(T, MDefinition*, MDefinition*, MDefinition* v = nullptr) { MOZ_CRASH(); }
+    void lowerForMulInt64(LMulI64*, MMul*, MDefinition*, MDefinition* v = nullptr) { MOZ_CRASH(); }
     template <typename T>
     void lowerForShiftInt64(T, MDefinition*, MDefinition*, MDefinition* v = nullptr) { MOZ_CRASH(); }
     void lowerForCompIx4(LSimdBinaryCompIx4* ins, MSimdBinaryComp* mir,
@@ -66,37 +70,9 @@ class LIRGeneratorNone : public LIRGeneratorShared
     void lowerMulI(MMul*, MDefinition*, MDefinition*) { MOZ_CRASH(); }
     void lowerUDiv(MDiv*) { MOZ_CRASH(); }
     void lowerUMod(MMod*) { MOZ_CRASH(); }
-    void visitBox(MBox* box) { MOZ_CRASH(); }
-    void visitUnbox(MUnbox* unbox) { MOZ_CRASH(); }
-    void visitReturn(MReturn* ret) { MOZ_CRASH(); }
-    void visitPowHalf(MPowHalf*) { MOZ_CRASH(); }
-    void visitAsmJSNeg(MAsmJSNeg*) { MOZ_CRASH(); }
-    void visitGuardShape(MGuardShape* ins) { MOZ_CRASH(); }
-    void visitGuardObjectGroup(MGuardObjectGroup* ins) { MOZ_CRASH(); }
-    void visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble* ins) { MOZ_CRASH(); }
-    void visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins) { MOZ_CRASH(); }
-    void visitAsmJSLoadHeap(MAsmJSLoadHeap* ins) { MOZ_CRASH(); }
-    void visitAsmJSStoreHeap(MAsmJSStoreHeap* ins) { MOZ_CRASH(); }
-    void visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins) { MOZ_CRASH(); }
-    void visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins) { MOZ_CRASH(); }
-    void visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins) { MOZ_CRASH(); }
-    void visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins) { MOZ_CRASH(); }
-    void visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins) { MOZ_CRASH(); }
-    void visitAsmJSCompareExchangeHeap(MAsmJSCompareExchangeHeap* ins) { MOZ_CRASH(); }
-    void visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins) { MOZ_CRASH(); }
-    void visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins) { MOZ_CRASH(); }
-    void visitAsmSelect(MAsmSelect*) { MOZ_CRASH(); }
 
     LTableSwitch* newLTableSwitch(LAllocation, LDefinition, MTableSwitch*) { MOZ_CRASH(); }
     LTableSwitchV* newLTableSwitchV(MTableSwitch*) { MOZ_CRASH(); }
-    void visitSimdSelect(MSimdSelect* ins) { MOZ_CRASH(); }
-    void visitSimdSplatX4(MSimdSplatX4* ins) { MOZ_CRASH(); }
-    void visitSimdValueX4(MSimdValueX4* lir) { MOZ_CRASH(); }
-    void visitSubstr(MSubstr*) { MOZ_CRASH(); }
-    void visitSimdBinaryArith(js::jit::MSimdBinaryArith*) { MOZ_CRASH(); }
-    void visitRandom(js::jit::MRandom*) { MOZ_CRASH(); }
-    void visitTruncateToInt64(MTruncateToInt64*) { MOZ_CRASH(); }
-    void visitInt64ToFloatingPoint(MInt64ToFloatingPoint*) { MOZ_CRASH(); }
 };
 
 typedef LIRGeneratorNone LIRGeneratorSpecific;

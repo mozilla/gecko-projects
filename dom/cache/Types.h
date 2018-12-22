@@ -7,9 +7,11 @@
 #ifndef mozilla_dom_cache_Types_h
 #define mozilla_dom_cache_Types_h
 
+#include <functional>
 #include <stdint.h>
 #include "nsCOMPtr.h"
 #include "nsIFile.h"
+#include "nsIInputStream.h"
 #include "nsString.h"
 
 namespace mozilla {
@@ -29,11 +31,19 @@ static const CacheId INVALID_CACHE_ID = -1;
 
 struct QuotaInfo
 {
-  QuotaInfo() : mIsApp(false) { }
   nsCOMPtr<nsIFile> mDir;
+  nsCString mSuffix;
   nsCString mGroup;
   nsCString mOrigin;
-  bool mIsApp;
+};
+
+typedef std::function<void(nsCOMPtr<nsIInputStream>&&)> InputStreamResolver;
+
+enum class OpenMode : uint8_t
+{
+  Eager,
+  Lazy,
+  NumTypes
 };
 
 } // namespace cache

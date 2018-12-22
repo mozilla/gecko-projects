@@ -55,7 +55,7 @@ public:
   nsCommandLine();
 
 protected:
-  ~nsCommandLine() { }
+  ~nsCommandLine() = default;
 
   typedef nsresult (*EnumerateHandlersCallback)(nsICommandLineHandler* aHandler,
 					nsICommandLine* aThis,
@@ -65,7 +65,7 @@ protected:
 					void *aClosure);
 
   void appendArg(const char* arg);
-  void resolveShortcutURL(nsIFile* aFile, nsACString& outURL);
+  MOZ_MUST_USE nsresult resolveShortcutURL(nsIFile* aFile, nsACString& outURL);
   nsresult EnumerateHandlers(EnumerateHandlersCallback aCallback, void *aClosure);
   nsresult EnumerateValidators(EnumerateValidatorsCallback aCallback, void *aClosure);
 
@@ -187,11 +187,15 @@ nsCommandLine::HandleFlagWithParam(const nsAString& aFlag, bool aCaseSensitive,
 
   ++found;
 
-  if (mArgs[found].First() == '-') {
-    return NS_ERROR_INVALID_ARG;
+  { // scope for validity of |param|, which RemoveArguments call invalidates
+    const nsString& param = mArgs[found];
+    if (!param.IsEmpty() && param.First() == '-') {
+      return NS_ERROR_INVALID_ARG;
+    }
+
+    aResult = param;
   }
 
-  aResult = mArgs[found];
   RemoveArguments(found - 1, found);
 
   return NS_OK;
@@ -365,8 +369,8 @@ nsCommandLine::ResolveURI(const nsAString& aArgument, nsIURI* *aResult)
     lf->Normalize();
     nsAutoCString url;
     // Try to resolve the url for .url files.
-    resolveShortcutURL(lf, url);
-    if (!url.IsEmpty()) {
+    rv = resolveShortcutURL(lf, url);
+    if (NS_SUCCEEDED(rv) && !url.IsEmpty()) {
       return io->NewURI(url,
                         nullptr,
                         workingDirURI,
@@ -399,20 +403,20 @@ nsCommandLine::appendArg(const char* arg)
   mArgs.AppendElement(warg);
 }
 
-void
+nsresult
 nsCommandLine::resolveShortcutURL(nsIFile* aFile, nsACString& outURL)
 {
   nsCOMPtr<nsIFileProtocolHandler> fph;
   nsresult rv = NS_GetFileProtocolHandler(getter_AddRefs(fph));
   if (NS_FAILED(rv))
-    return;
+    return rv;
 
   nsCOMPtr<nsIURI> uri;
   rv = fph->ReadURLFile(aFile, getter_AddRefs(uri));
   if (NS_FAILED(rv))
-    return;
+    return rv;
 
-  uri->GetSpec(outURL);
+  return uri->GetSpec(outURL);
 }
 
 NS_IMETHODIMP
@@ -450,10 +454,8 @@ nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
       continue;
     }
 #endif
-#ifdef XP_UNIX
-    if (*curarg == '-' &&
-        *(curarg+1) == '-') {
-      ++curarg;
+    if (*curarg == '-') {
+      if (*(curarg+1) == '-') ++curarg;
 
       char* dup = PL_strdup(curarg);
       if (!dup) return NS_ERROR_OUT_OF_MEMORY;
@@ -469,7 +471,6 @@ nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
       PL_strfree(dup);
       continue;
     }
-#endif
 
     appendArg(curarg);
   }
@@ -479,19 +480,16 @@ nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
   return NS_OK;
 }
 
+template<typename ...T>
 static void
-LogConsoleMessage(const char16_t* fmt, ...)
+LogConsoleMessage(const char16_t* fmt, T... args)
 {
-  va_list args;
-  va_start(args, fmt);
-  char16_t* msg = nsTextFormatter::vsmprintf(fmt, args);
-  va_end(args);
+  nsString msg;
+  nsTextFormatter::ssprintf(msg, fmt, args...);
 
   nsCOMPtr<nsIConsoleService> cs = do_GetService("@mozilla.org/consoleservice;1");
   if (cs)
-    cs->LogStringMessage(msg);
-
-  free(msg);
+    cs->LogStringMessage(msg.get());
 }
 
 nsresult
@@ -525,7 +523,7 @@ nsCommandLine::EnumerateHandlers(EnumerateHandlersCallback aCallback, void *aClo
 
     nsCOMPtr<nsICommandLineHandler> clh(do_GetService(contractID.get()));
     if (!clh) {
-      LogConsoleMessage(MOZ_UTF16("Contract ID '%s' was registered as a command line handler for entry '%s', but could not be created."),
+      LogConsoleMessage(u"Contract ID '%s' was registered as a command line handler for entry '%s', but could not be created.",
                         contractID.get(), entry.get());
       continue;
     }
@@ -562,11 +560,11 @@ nsCommandLine::EnumerateValidators(EnumerateValidatorsCallback aCallback, void *
   while (NS_SUCCEEDED(strenum->HasMore(&hasMore)) && hasMore) {
     strenum->GetNext(entry);
 
-    nsXPIDLCString contractID;
+    nsCString contractID;
     rv = catman->GetCategoryEntry("command-line-validator",
 				  entry.get(),
 				  getter_Copies(contractID));
-    if (!contractID)
+    if (contractID.IsVoid())
       continue;
 
     nsCOMPtr<nsICommandLineValidator> clv(do_GetService(contractID.get()));
@@ -587,13 +585,13 @@ static nsresult
 EnumValidate(nsICommandLineValidator* aValidator, nsICommandLine* aThis, void*)
 {
   return aValidator->Validate(aThis);
-}  
+}
 
 static nsresult
 EnumRun(nsICommandLineHandler* aHandler, nsICommandLine* aThis, void*)
 {
   return aHandler->Handle(aThis);
-}  
+}
 
 NS_IMETHODIMP
 nsCommandLine::Run()
@@ -627,7 +625,7 @@ EnumHelp(nsICommandLineHandler* aHandler, nsICommandLine* aThis, void* aClosure)
   }
 
   return NS_OK;
-}  
+}
 
 NS_IMETHODIMP
 nsCommandLine::GetHelpText(nsACString& aResult)

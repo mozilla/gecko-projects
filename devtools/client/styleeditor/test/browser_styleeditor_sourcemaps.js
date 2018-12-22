@@ -6,7 +6,7 @@
 
 // https rather than chrome to improve coverage
 const TESTCASE_URI = TEST_BASE_HTTPS + "sourcemaps.html";
-const PREF = "devtools.styleeditor.source-maps-enabled";
+const PREF = "devtools.source-map.client-service.enabled";
 
 const contents = {
   "sourcemaps.scss": [
@@ -77,8 +77,8 @@ const origNames = ["sourcemaps.scss", "contained.scss", "test-stylus.styl"];
 
 waitForExplicitFinish();
 
-add_task(function*() {
-  let {ui} = yield openStyleEditorForURL(TESTCASE_URI);
+add_task(async function() {
+  const {ui} = await openStyleEditorForURL(TESTCASE_URI);
 
   is(ui.editors.length, 4,
     "correct number of editors with source maps enabled");
@@ -87,36 +87,36 @@ add_task(function*() {
   testFirstEditor(ui.editors[0]);
 
   // Test Scss editors
-  yield testEditor(ui.editors[1], origNames);
-  yield testEditor(ui.editors[2], origNames);
-  yield testEditor(ui.editors[3], origNames);
+  await testEditor(ui.editors[1], origNames);
+  await testEditor(ui.editors[2], origNames);
+  await testEditor(ui.editors[3], origNames);
 
   // Test disabling original sources
-  yield togglePref(ui);
+  await togglePref(ui);
 
   is(ui.editors.length, 4, "correct number of editors after pref toggled");
 
   // Test CSS editors
-  yield testEditor(ui.editors[1], cssNames);
-  yield testEditor(ui.editors[2], cssNames);
-  yield testEditor(ui.editors[3], cssNames);
+  await testEditor(ui.editors[1], cssNames);
+  await testEditor(ui.editors[2], cssNames);
+  await testEditor(ui.editors[3], cssNames);
 
   Services.prefs.clearUserPref(PREF);
 });
 
 function testFirstEditor(editor) {
-  let name = getStylesheetNameFor(editor);
+  const name = getStylesheetNameFor(editor);
   is(name, "simple.css", "First style sheet display name is correct");
 }
 
 function testEditor(editor, possibleNames) {
-  let name = getStylesheetNameFor(editor);
-  ok(possibleNames.indexOf(name) >= 0, name + " editor name is correct");
+  const name = getStylesheetNameFor(editor);
+  ok(possibleNames.includes(name), name + " editor name is correct");
 
   return openEditor(editor).then(() => {
-    let expectedText = contents[name];
+    const expectedText = contents[name];
 
-    let text = editor.sourceEditor.getText();
+    const text = editor.sourceEditor.getText();
 
     is(text, expectedText, name + " editor contains expected text");
   });
@@ -125,8 +125,8 @@ function testEditor(editor, possibleNames) {
 /* Helpers */
 
 function togglePref(UI) {
-  let editorsPromise = UI.once("stylesheets-reset");
-  let selectedPromise = UI.once("editor-selected");
+  const editorsPromise = UI.once("stylesheets-reset");
+  const selectedPromise = UI.once("editor-selected");
 
   Services.prefs.setBoolPref(PREF, false);
 

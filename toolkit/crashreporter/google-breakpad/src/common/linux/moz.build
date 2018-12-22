@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,7 +6,6 @@
 
 UNIFIED_SOURCES += [
     'elfutils.cc',
-    'guid_creator.cc',
     'linux_libc_support.cc',
     'memory_mapped_file.cc',
     'safe_readlink.cc',
@@ -29,7 +28,6 @@ HOST_SOURCES += [
     'elf_symbols_to_module.cc',
     'elfutils.cc',
     'file_id.cc',
-    'guid_creator.cc',
     'linux_libc_support.cc',
     'memory_mapped_file.cc',
 ]
@@ -39,6 +37,13 @@ HOST_CXXFLAGS += [
     '-g',
 ]
 
+if CONFIG['OS_TARGET'] == 'Android':
+    DEFINES['ANDROID_NDK_MAJOR_VERSION'] = CONFIG['ANDROID_NDK_MAJOR_VERSION']
+    DEFINES['ANDROID_NDK_MINOR_VERSION'] = CONFIG['ANDROID_NDK_MINOR_VERSION']
+    COMPILE_FLAGS['OS_INCLUDES'] += [
+        '-I%s/toolkit/crashreporter/google-breakpad/src/common/android/include' % TOPSRCDIR,
+    ]
+
 Library('breakpad_linux_common_s')
 
 FINAL_LIBRARY = 'xul'
@@ -46,3 +51,6 @@ FINAL_LIBRARY = 'xul'
 HOST_DEFINES['NO_STABS_SUPPORT'] = True
 
 include('/toolkit/crashreporter/crashreporter.mozbuild')
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-shadow']

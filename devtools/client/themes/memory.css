@@ -7,8 +7,8 @@
   --cell-border-color: rgba(255,255,255,0.15);
   --cell-border-color-light: rgba(255,255,255,0.1);
   --focus-cell-border-color: rgba(255,255,255,0.5);
-  --row-alt-background-color: rgba(29,79,115,0.15);
-  --row-hover-background-color: rgba(29,79,115,0.25);
+  --row-alt-background-color: rgba(86, 117, 185, 0.15);
+  --row-hover-background-color: rgba(86, 117, 185, 0.25);
 }
 
 .theme-light {
@@ -34,10 +34,10 @@ html, body, #app, #memory-tool {
   --sidebar-width: 185px;
   /**
    * If --heap-tree-row-height changes, be sure to change HEAP_TREE_ROW_HEIGHT
-   * in `devtools/client/memory/components/heap.js`.
+   * in `devtools/client/memory/components/Heap.js`.
    */
-  --heap-tree-row-height: 14px;
-  --heap-tree-header-height: 17px;
+  --heap-tree-row-height: 18px;
+  --heap-tree-header-height: 18px;
 }
 
 /**
@@ -97,6 +97,8 @@ html, body, #app, #memory-tool {
 
 .devtools-toolbar > label {
   margin-inline-end: 5px;
+  display: flex;
+  align-items: center;
 }
 
 #select-view {
@@ -115,17 +117,14 @@ html, body, #app, #memory-tool {
   background-image: url(chrome://devtools/skin/images/diff.svg);
 }
 
-/**
- * Due to toolbar styles of `.devtools-toolbarbutton:not([label])` which overrides
- * .devtools-toolbarbutton's min-width of 78px, reset the min-width.
- */
-#import-snapshot,
-#clear-snapshots {
-  -moz-box-align: center;
-  flex-grow: 1;
-  padding: 1px;
-  margin: 2px 1px;
-  min-width: unset;
+#import-snapshot::before {
+  background-image: url(chrome://devtools/skin/images/import.svg);
+}
+
+#record-allocation-stacks-label,
+#pop-view-button-label {
+  border-inline-end: 1px solid var(--theme-splitter-color);
+  padding-inline-end: 5px;
 }
 
 .spacer {
@@ -198,9 +197,36 @@ html, body, #app, #memory-tool {
   font-size: 90%;
 }
 
+.snapshot-list-item .snapshot-title {
+  display: flex;
+  justify-content: space-between;
+}
+
 .snapshot-list-item .save {
   text-decoration: underline;
   cursor: pointer;
+}
+
+.snapshot-list-item .delete {
+  cursor: pointer;
+  background-color: transparent;
+  border: 0;
+  padding: 0;
+  position: relative;
+  min-height: 1em;
+  min-width: 1.3em;
+  color: currentColor;
+}
+
+.snapshot-list-item .delete::before {
+  display: block;
+  width: 16px;
+  height: 16px;
+  content: "";
+  background-image: url("chrome://devtools/skin/images/close.svg");
+  background-repeat: no-repeat;
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 .snapshot-list-item > .snapshot-title {
@@ -377,6 +403,10 @@ html, body, #app, #memory-tool {
   padding-inline-end: 5px;
 }
 
+.children-pointer:dir(rtl) {
+  transform: scaleX(-1);
+}
+
 /**
  * Heap tree view columns
  */
@@ -408,6 +438,7 @@ html, body, #app, #memory-tool {
   color: var(--theme-selection-background);
 }
 
+.heap-tree-item-individuals,
 .heap-tree-item-bytes,
 .heap-tree-item-count,
 .heap-tree-item-total-bytes,
@@ -417,7 +448,8 @@ html, body, #app, #memory-tool {
    * These subcolumns may have specific widths or need to flex.
    */
   display: flex;
-  text-align: end;
+  /* Make sure units/decimals/... are always vertically aligned to right in both LTR and RTL locales */
+  text-align: right;
   border-inline-end: var(--cell-border-color) 1px solid;
 }
 
@@ -444,16 +476,21 @@ html, body, #app, #memory-tool {
 
 .heap-tree-item-name {
   /**
-   * Flex: contains an .arrow and some text, which need to be laid out
-   * horizontally, vertically aligned in the middle of the container.
-   */
-  display: flex;
-  align-items: center;
-  /**
    * Flexing to fill out remaining vertical space.
    * @see .header and .heap-tree-item */
   flex: 1;
   padding-inline-start: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heap-tree-item-name .arrow {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.heap-tree-item-name .frame-link {
+  display: inline-block;
 }
 
 /**
@@ -467,7 +504,11 @@ html, body, #app, #memory-tool {
 }
 
 .heap-tree-number {
-  padding-inline-start: 3px;
+  padding: 0 3px;
+  flex: 1;
+  color: var(--theme-content-color3);
+  /* Make sure number doesn't appear backwards on RTL locales */
+  direction: ltr;
 }
 
 .heap-tree-percent {
@@ -480,17 +521,25 @@ html, body, #app, #memory-tool {
   font-family: var(--monospace-font-family);
 }
 
-.heap-tree-number {
-  flex: 1;
-  color: var(--theme-content-color3);
-}
-
 .heap-tree-percent {
   width: 4ch;
 }
 
 .heap-tree-item.focused .heap-tree-number,
 .heap-tree-item.focused .heap-tree-percent {
+  color: inherit;
+}
+
+.heap-tree-item-individuals {
+  min-width: 38px;
+  overflow: hidden;
+  margin: 0;
+}
+
+.heap-tree-item-individuals > button {
+  width: 32px;
+  /* Override default styles for toolbar buttons to fix entire row height. */
+  margin: 0 auto !important;
   color: inherit;
 }
 
@@ -503,8 +552,6 @@ html, body, #app, #memory-tool {
   height: 100%;
   position: relative;
   overflow: hidden;
-  margin-top: -1em;
-  padding-bottom: 1em;
 }
 
 /**
@@ -542,6 +589,10 @@ html, body, #app, #memory-tool {
   margin-right: .5em;
 }
 
+.heap-tree-item-address {
+  font-family: monospace;
+}
+
 .no-allocation-stacks {
   border-color: var(--theme-splitter-color);
   border-style: solid;
@@ -554,45 +605,43 @@ html, body, #app, #memory-tool {
  * Dagre-D3 graphs
  */
 
+svg {
+  --arrow-color: var(--theme-splitter-color);
+  --text-color: var(--theme-body-color);
+}
+
+.theme-dark svg {
+  --arrow-color: var(--theme-body-color-alt);
+}
+
+svg #arrowhead {
+  /* !important is needed to override inline style */
+  fill: var(--arrow-color) !important;
+}
+
 .edgePath path {
   stroke-width: 1px;
   fill: none;
-}
-
-.theme-dark .edgePath path {
-  stroke: var(--theme-body-color-alt);
-}
-.theme-light .edgePath path {
-  stroke: var(--theme-splitter-color);
+  stroke: var(--arrow-color);
 }
 
 g.edgeLabel rect {
   fill: var(--theme-body-background);
 }
+
 g.edgeLabel tspan {
-  fill: var(--theme-body-color-alt);
+  fill: var(--text-color);
 }
 
 .nodes rect {
   stroke-width: 1px;
-}
-
-.nodes rect {
-  stroke: var(--theme-tab-toolbar-background);
-}
-.theme-light rect {
-  fill: var(--theme-tab-toolbar-background);
-}
-.theme-dark rect {
+  stroke: var(--theme-splitter-color);
   fill: var(--theme-toolbar-background);
 }
 
 text {
-  font-weight: 300;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serf;
-  font-size: 14px;
-}
-
-text {
-  fill: var(--theme-body-color-alt);
+  font-size: 1.25em;
+  fill: var(--text-color);
+  /* Make sure text stays inside its container in RTL locales */
+  direction: ltr;
 }

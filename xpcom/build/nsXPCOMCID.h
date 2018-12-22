@@ -77,11 +77,6 @@
 #define NS_MEMORY_INFO_DUMPER_CONTRACTID "@mozilla.org/memory-info-dumper;1"
 
 /**
- * Status reporter service CID
- */
-#define NS_STATUS_REPORTER_MANAGER_CONTRACTID "@mozilla.org/status-reporter-manager;1"
-
-/**
  * Cycle collector logger contract id
  */
 #define NS_CYCLE_COLLECTOR_LOGGER_CONTRACTID "@mozilla.org/cycle-collector-logger;1"
@@ -171,11 +166,6 @@
 { 0xcbf86871, 0x4ac0, 0x11d3, \
 { 0xba, 0xea, 0x0, 0x80, 0x5f, 0x8a, 0x5d, 0xd7 } }
 #define NS_SUPPORTS_DOUBLE_CONTRACTID "@mozilla.org/supports-double;1"
-
-#define NS_SUPPORTS_VOID_CID \
-{ 0xaf10f3e0, 0x568d, 0x11d3, \
-{ 0xba, 0xf8, 0x0, 0x80, 0x5f, 0x8a, 0x5d, 0xd7 } }
-#define NS_SUPPORTS_VOID_CONTRACTID "@mozilla.org/supports-void;1"
 
 #define NS_SUPPORTS_INTERFACE_POINTER_CID \
 { 0xA99FEBBA, 0x1DD1, 0x11B2, \

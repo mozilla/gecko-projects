@@ -20,7 +20,7 @@ namespace dom {
 JSObject*
 SVGFEComponentTransferElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEComponentTransferElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEComponentTransferElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGFEComponentTransferElement::sStringInfo[2] =
@@ -30,7 +30,7 @@ nsSVGElement::StringInfo SVGFEComponentTransferElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEComponentTransferElement)
 
@@ -95,7 +95,7 @@ SVGFEComponentTransferElement::GetPrimitiveDescription(nsSVGFilterInstance* aIns
 
 bool
 SVGFEComponentTransferElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                         nsIAtom* aAttribute) const
+                                                         nsAtom* aAttribute) const
 {
   return SVGFEComponentTransferElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

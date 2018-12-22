@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2015 Google Inc.
  *
@@ -17,6 +16,8 @@
  */
 class GrGpuResource::ResourcePriv {
 public:
+    SkDEBUGCODE(bool hasPendingIO_debugOnly() const { return fResource->internalHasPendingIO(); })
+
     /**
      * Sets a unique key for the resource. If the resource was previously cached as scratch it will
      * be converted to a uniquely-keyed resource. If the key is invalid then this is equivalent to
@@ -44,13 +45,18 @@ public:
     /**
      * Does the resource count against the resource budget?
      */
-    bool isBudgeted() const {
-        bool ret = GrGpuResource::kCached_LifeCycle == fResource->fLifeCycle;
-        SkASSERT(ret || !fResource->getUniqueKey().isValid());
-        return ret;
+    SkBudgeted isBudgeted() const {
+        bool ret = SkBudgeted::kYes == fResource->fBudgeted;
+        SkASSERT(ret || !fResource->getUniqueKey().isValid() || fResource->fRefsWrappedObjects);
+        return SkBudgeted(ret);
     }
 
-    /** 
+    /**
+     * Is the resource object wrapping an externally allocated GPU resource?
+     */
+    bool refsWrappedObjects() const { return fResource->fRefsWrappedObjects; }
+
+    /**
      * If this resource can be used as a scratch resource this returns a valid scratch key.
      * Otherwise it returns a key for which isNullScratch is true. The resource may currently be
      * used as a uniquely keyed resource rather than scratch. Check isScratch().

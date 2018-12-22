@@ -18,7 +18,6 @@
 #include "nsString.h"
 
 class mozIStorageStatement;
-struct PRThread;
 
 namespace mozilla {
 
@@ -48,10 +47,6 @@ protected:
   bool mHaveCachedLowerVal : 1;
   bool mHaveCachedUpperVal : 1;
   bool mRooted : 1;
-
-#ifdef DEBUG
-  PRThread* mOwningThread;
-#endif
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -93,11 +88,9 @@ public:
 
   void
   AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
+  {
+    NS_ASSERT_OWNINGTHREAD(IDBKeyRange);
+  }
 
   void
   ToSerialized(indexedDB::SerializedKeyRange& aKeyRange) const;
@@ -205,7 +198,7 @@ public:
         bool aUpperOpen,
         ErrorResult& aRv);
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(IDBLocaleAwareKeyRange, IDBKeyRange)
 
   // WebIDL
   bool

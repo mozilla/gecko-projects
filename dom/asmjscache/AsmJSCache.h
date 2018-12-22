@@ -73,14 +73,12 @@ struct WriteParams
   int64_t mFastHash;
   int64_t mNumChars;
   int64_t mFullHash;
-  bool mInstalled;
 
   WriteParams()
   : mSize(0),
     mFastHash(0),
     mNumChars(0),
-    mFullHash(0),
-    mInstalled(false)
+    mFullHash(0)
   { }
 };
 
@@ -121,7 +119,6 @@ CloseEntryForRead(size_t aSize,
                   intptr_t aHandle);
 JS::AsmJSCacheResult
 OpenEntryForWrite(nsIPrincipal* aPrincipal,
-                  bool aInstalled,
                   const char16_t* aBegin,
                   const char16_t* aEnd,
                   size_t aSize,
@@ -169,7 +166,7 @@ struct ParamTraits<mozilla::dom::asmjscache::Metadata>
 {
   typedef mozilla::dom::asmjscache::Metadata paramType;
   static void Write(Message* aMsg, const paramType& aParam);
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult);
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult);
   static void Log(const paramType& aParam, std::wstring* aLog);
 };
 
@@ -178,7 +175,7 @@ struct ParamTraits<mozilla::dom::asmjscache::WriteParams>
 {
   typedef mozilla::dom::asmjscache::WriteParams paramType;
   static void Write(Message* aMsg, const paramType& aParam);
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult);
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult);
   static void Log(const paramType& aParam, std::wstring* aLog);
 };
 

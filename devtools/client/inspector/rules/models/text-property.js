@@ -6,14 +6,8 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
-const {escapeCSSComment} = require("devtools/client/shared/css-parsing-utils");
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyGetter(this, "domUtils", function() {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-});
+const {escapeCSSComment} = require("devtools/shared/css/parsing-utils");
+const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
 /**
  * TextProperty is responsible for the following:
@@ -48,6 +42,11 @@ function TextProperty(rule, name, value, priority, enabled = true,
   this.priority = priority;
   this.enabled = !!enabled;
   this.invisible = invisible;
+  this.panelDoc = this.rule.elementStyle.ruleView.inspector.panelDoc;
+
+  const toolbox = this.rule.elementStyle.ruleView.inspector.toolbox;
+  this.cssProperties = getCssProperties(toolbox);
+
   this.updateComputed();
 }
 
@@ -73,30 +72,25 @@ TextProperty.prototype = {
     // This is a bit funky.  To get the list of computed properties
     // for this text property, we'll set the property on a dummy element
     // and see what the computed style looks like.
-    let dummyElement = this.rule.elementStyle.ruleView.dummyElement;
-    let dummyStyle = dummyElement.style;
+    const dummyElement = this.rule.elementStyle.ruleView.dummyElement;
+    const dummyStyle = dummyElement.style;
     dummyStyle.cssText = "";
     dummyStyle.setProperty(this.name, this.value, this.priority);
 
     this.computed = [];
 
-    try {
-      // Manually get all the properties that are set when setting a value on
-      // this.name and check the computed style on dummyElement for each one.
-      // If we just read dummyStyle, it would skip properties when value === "".
-      let subProps = domUtils.getSubpropertiesForCSSProperty(this.name);
+    // Manually get all the properties that are set when setting a value on
+    // this.name and check the computed style on dummyElement for each one.
+    // If we just read dummyStyle, it would skip properties when value === "".
+    const subProps = this.cssProperties.getSubproperties(this.name);
 
-      for (let prop of subProps) {
-        this.computed.push({
-          textProp: this,
-          name: prop,
-          value: dummyStyle.getPropertyValue(prop),
-          priority: dummyStyle.getPropertyPriority(prop),
-        });
-      }
-    } catch (e) {
-      // This is a partial property name, probably from cutting and pasting
-      // text. At this point don't check for computed properties.
+    for (const prop of subProps) {
+      this.computed.push({
+        textProp: this,
+        name: prop,
+        value: dummyStyle.getPropertyValue(prop),
+        priority: dummyStyle.getPropertyPriority(prop),
+      });
     }
   },
 
@@ -109,7 +103,7 @@ TextProperty.prototype = {
    */
   set: function(prop) {
     let changed = false;
-    for (let item of ["name", "value", "priority", "enabled"]) {
+    for (const item of ["name", "value", "priority", "enabled"]) {
       if (this[item] !== prop[item]) {
         this[item] = prop[item];
         changed = true;
@@ -122,10 +116,10 @@ TextProperty.prototype = {
   },
 
   setValue: function(value, priority, force = false) {
-    let store = this.rule.elementStyle.store;
+    const store = this.rule.elementStyle.store;
 
     if (this.editor && value !== this.editor.committed.value || force) {
-      store.userProperties.setProperty(this.rule.style, this.name, value);
+      store.userProperties.setProperty(this.rule.domRule, this.name, value);
     }
 
     this.rule.setPropertyValue(this, value, priority);
@@ -134,9 +128,12 @@ TextProperty.prototype = {
 
   /**
    * Called when the property's value has been updated externally, and
-   * the property and editor should update.
+   * the property and editor should update to reflect that value.
+   *
+   * @param {String} value
+   *        Property value
    */
-  noticeNewValue: function(value) {
+  updateValue: function(value) {
     if (value !== this.value) {
       this.value = value;
       this.updateEditor();
@@ -144,10 +141,10 @@ TextProperty.prototype = {
   },
 
   setName: function(name) {
-    let store = this.rule.elementStyle.store;
+    const store = this.rule.elementStyle.store;
 
     if (name !== this.name) {
-      store.userProperties.setProperty(this.rule.style, name,
+      store.userProperties.setProperty(this.rule.domRule, name,
                                        this.editor.committed.value);
     }
 
@@ -186,26 +183,52 @@ TextProperty.prototype = {
    * @return {Boolean} true if the property name is known, false otherwise.
    */
   isKnownProperty: function() {
-    try {
-      // If the property name is invalid, the cssPropertyIsShorthand
-      // will throw an exception.  But if it is valid, no exception will
-      // be thrown; so we just ignore the return value.
-      domUtils.cssPropertyIsShorthand(this.name);
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return this.cssProperties.isKnown(this.name);
   },
 
   /**
    * Validate this property. Does it make sense for this value to be assigned
-   * to this property name? This does not apply the property value
+   * to this property name?
    *
-   * @return {Boolean} true if the property value is valid, false otherwise.
+   * @return {Boolean} true if the whole CSS declaration is valid, false otherwise.
    */
   isValid: function() {
-    return domUtils.cssPropertyIsValid(this.name, this.value);
+    const selfIndex = this.rule.textProps.indexOf(this);
+
+    // When adding a new property in the rule-view, the TextProperty object is
+    // created right away before the rule gets updated on the server, so we're
+    // not going to find the corresponding declaration object yet. Default to
+    // true.
+    if (!this.rule.domRule.declarations[selfIndex]) {
+      return true;
+    }
+
+    return this.rule.domRule.declarations[selfIndex].isValid;
+  },
+
+  /**
+   * Validate the name of this property.
+   *
+   * @return {Boolean} true if the property name is valid, false otherwise.
+   */
+  isNameValid: function() {
+    const selfIndex = this.rule.textProps.indexOf(this);
+
+    // When adding a new property in the rule-view, the TextProperty object is
+    // created right away before the rule gets updated on the server, so we're
+    // not going to find the corresponding declaration object yet. Default to
+    // true.
+    if (!this.rule.domRule.declarations[selfIndex]) {
+      return true;
+    }
+
+    // Starting with FF61, StyleRuleActor provides an accessor to signal if the property
+    // name is valid. If we don't have this, assume the name is valid. In use, rely on
+    // isValid() as a guard against false positives.
+    return (this.rule.domRule.declarations[selfIndex].isNameValid !== undefined)
+      ? this.rule.domRule.declarations[selfIndex].isNameValid
+      : true;
   }
 };
 
-exports.TextProperty = TextProperty;
+module.exports = TextProperty;

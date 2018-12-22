@@ -1,10 +1,13 @@
-/* -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "nsCOMPtr.h"
 #include "nsContentDLF.h"
+
+#include "mozilla/Encoding.h"
+
+#include "nsCOMPtr.h"
 #include "nsDocShell.h"
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
@@ -19,7 +22,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsString.h"
 #include "nsContentCID.h"
-#include "prprf.h"
 #include "nsNetUtil.h"
 #include "nsCRT.h"
 #include "nsIViewSourceChannel.h"
@@ -52,9 +54,10 @@ static const char* const gHTMLTypes[] = {
   TEXT_HTML,
   VIEWSOURCE_CONTENT_TYPE,
   APPLICATION_XHTML_XML,
+  APPLICATION_WAPXHTML_XML,
   0
 };
-  
+
 static const char* const gXMLTypes[] = {
   TEXT_XML,
   APPLICATION_XML,
@@ -91,7 +94,7 @@ IsTypeInList(const nsACString& aType, const char* const aList[])
 nsresult
 NS_NewContentDocumentLoaderFactory(nsIDocumentLoaderFactory** aResult)
 {
-  NS_PRECONDITION(aResult, "null OUT ptr");
+  MOZ_ASSERT(aResult, "null OUT ptr");
   if (!aResult) {
     return NS_ERROR_NULL_POINTER;
   }
@@ -114,7 +117,7 @@ nsContentDLF::~nsContentDLF()
 NS_IMPL_ISUPPORTS(nsContentDLF,
                   nsIDocumentLoaderFactory)
 
-bool
+static bool
 MayUseXULXBL(nsIChannel* aChannel)
 {
   nsIScriptSecurityManager *securityManager =
@@ -154,7 +157,7 @@ nsContentDLF::CreateInstance(const char* aCommand,
     // type of the data.  If it's known, use it; otherwise use
     // text/plain.
     nsAutoCString type;
-    viewSourceChannel->GetOriginalContentType(type);
+    mozilla::Unused << viewSourceChannel->GetOriginalContentType(type);
     bool knownType =
       (!type.EqualsLiteral(VIEWSOURCE_CONTENT_TYPE) &&
         IsTypeInList(type, gHTMLTypes)) ||
@@ -212,7 +215,8 @@ nsContentDLF::CreateInstance(const char* aCommand,
                              aExtraInfo, aDocListener, aDocViewer);
   }
 
-  if (mozilla::DecoderTraits::ShouldHandleMediaType(contentType.get())) {
+  if (mozilla::DecoderTraits::ShouldHandleMediaType(contentType.get(),
+                    /* DecoderDoctorDiagnostics* */ nullptr)) {
     return CreateDocument(aCommand,
                           aChannel, aLoadGroup,
                           aContainer, kVideoDocumentCID,
@@ -259,79 +263,65 @@ nsContentDLF::CreateInstanceForDocument(nsISupports* aContainer,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsContentDLF::CreateBlankDocument(nsILoadGroup *aLoadGroup,
+/* static */ already_AddRefed<nsIDocument>
+nsContentDLF::CreateBlankDocument(nsILoadGroup* aLoadGroup,
                                   nsIPrincipal* aPrincipal,
-                                  nsIDocument **aDocument)
+                                  nsDocShell* aContainer)
 {
-  *aDocument = nullptr;
-
-  nsresult rv = NS_ERROR_FAILURE;
-
   // create a new blank HTML document
   nsCOMPtr<nsIDocument> blankDoc(do_CreateInstance(kHTMLDocumentCID));
 
-  if (blankDoc) {
-    // initialize
-    nsCOMPtr<nsIURI> uri;
-    NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("about:blank"));
-    if (uri) {
-      blankDoc->ResetToURI(uri, aLoadGroup, aPrincipal);
-      rv = NS_OK;
-    }
+  if (!blankDoc) {
+    return nullptr;
   }
 
+  // initialize
+  nsCOMPtr<nsIURI> uri;
+  NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("about:blank"));
+  if (!uri) {
+    return nullptr;
+  }
+  blankDoc->ResetToURI(uri, aLoadGroup, aPrincipal);
+  blankDoc->SetContainer(aContainer);
+
   // add some simple content structure
-  if (NS_SUCCEEDED(rv)) {
-    rv = NS_ERROR_FAILURE;
+  nsNodeInfoManager *nim = blankDoc->NodeInfoManager();
 
-    nsNodeInfoManager *nim = blankDoc->NodeInfoManager();
+  RefPtr<mozilla::dom::NodeInfo> htmlNodeInfo;
 
-    RefPtr<mozilla::dom::NodeInfo> htmlNodeInfo;
+  // generate an html html element
+  htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::html, 0, kNameSpaceID_XHTML,
+                                  nsINode::ELEMENT_NODE);
+  nsCOMPtr<nsIContent> htmlElement =
+    NS_NewHTMLHtmlElement(htmlNodeInfo.forget());
 
-    // generate an html html element
-    htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::html, 0, kNameSpaceID_XHTML,
-                                    nsIDOMNode::ELEMENT_NODE);
-    nsCOMPtr<nsIContent> htmlElement =
-      NS_NewHTMLHtmlElement(htmlNodeInfo.forget());
+  // generate an html head element
+  htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::head, 0, kNameSpaceID_XHTML,
+                                  nsINode::ELEMENT_NODE);
+  nsCOMPtr<nsIContent> headElement =
+    NS_NewHTMLHeadElement(htmlNodeInfo.forget());
 
-    // generate an html head element
-    htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::head, 0, kNameSpaceID_XHTML,
-                                    nsIDOMNode::ELEMENT_NODE);
-    nsCOMPtr<nsIContent> headElement =
-      NS_NewHTMLHeadElement(htmlNodeInfo.forget());
+  // generate an html body elemment
+  htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::body, 0, kNameSpaceID_XHTML,
+                                  nsINode::ELEMENT_NODE);
+  nsCOMPtr<nsIContent> bodyElement =
+    NS_NewHTMLBodyElement(htmlNodeInfo.forget());
 
-    // generate an html body elemment
-    htmlNodeInfo = nim->GetNodeInfo(nsGkAtoms::body, 0, kNameSpaceID_XHTML,
-                                    nsIDOMNode::ELEMENT_NODE);
-    nsCOMPtr<nsIContent> bodyElement =
-      NS_NewHTMLBodyElement(htmlNodeInfo.forget());
-
-    // blat in the structure
-    if (htmlElement && headElement && bodyElement) {
-      NS_ASSERTION(blankDoc->GetChildCount() == 0,
-                   "Shouldn't have children");
-      rv = blankDoc->AppendChildTo(htmlElement, false);
-      if (NS_SUCCEEDED(rv)) {
-        rv = htmlElement->AppendChildTo(headElement, false);
-
-        if (NS_SUCCEEDED(rv)) {
-          // XXXbz Why not notifying here?
-          htmlElement->AppendChildTo(bodyElement, false);
-        }
-      }
-    }
+  // blat in the structure
+  NS_ASSERTION(blankDoc->GetChildCount() == 0,
+                "Shouldn't have children");
+  if (!htmlElement || !headElement || !bodyElement ||
+      NS_FAILED(blankDoc->AppendChildTo(htmlElement, false)) ||
+      NS_FAILED(htmlElement->AppendChildTo(headElement, false)) ||
+      // XXXbz Why not notifying here?
+      NS_FAILED(htmlElement->AppendChildTo(bodyElement, false))) {
+    return nullptr;
   }
 
   // add a nice bow
-  if (NS_SUCCEEDED(rv)) {
-    blankDoc->SetDocumentCharacterSetSource(kCharsetFromDocTypeDefault);
-    blankDoc->SetDocumentCharacterSet(NS_LITERAL_CSTRING("UTF-8"));
-    
-    *aDocument = blankDoc;
-    NS_ADDREF(*aDocument);
-  }
-  return rv;
+  blankDoc->SetDocumentCharacterSetSource(kCharsetFromDocTypeDefault);
+  blankDoc->SetDocumentCharacterSet(UTF_8_ENCODING);
+  return blankDoc.forget();
 }
 
 
@@ -399,7 +389,7 @@ nsContentDLF::CreateXULDocument(const char* aCommand,
   rv = aChannel->GetURI(getter_AddRefs(aURL));
   if (NS_FAILED(rv)) return rv;
 
-  /* 
+  /*
    * Initialize the document to begin loading the data...
    *
    * An nsIStreamListener connected to the parser is returned in

@@ -18,26 +18,19 @@ class UsageInfo
 {
 public:
   UsageInfo()
-  : mCanceled(false), mDatabaseUsage(0), mFileUsage(0)
+    : mDatabaseUsage(0)
+    , mFileUsage(0)
+    , mLimit(0)
   { }
 
   virtual ~UsageInfo()
   { }
 
-  bool
-  Canceled()
+  void
+  Append(const UsageInfo& aUsageInfo)
   {
-    return mCanceled;
-  }
-
-  nsresult
-  Cancel()
-  {
-    if (mCanceled.exchange(true)) {
-      NS_WARNING("Canceled more than once?!");
-      return NS_ERROR_UNEXPECTED;
-    }
-    return NS_OK;
+    IncrementUsage(&mDatabaseUsage, aUsageInfo.mDatabaseUsage);
+    IncrementUsage(&mFileUsage, aUsageInfo.mFileUsage);
   }
 
   void
@@ -52,6 +45,12 @@ public:
     IncrementUsage(&mFileUsage, aUsage);
   }
 
+  void
+  SetLimit(uint64_t aLimit)
+  {
+    mLimit = aLimit;
+  }
+
   uint64_t
   DatabaseUsage()
   {
@@ -62,6 +61,12 @@ public:
   FileUsage()
   {
     return mFileUsage;
+  }
+
+  uint64_t
+  Limit()
+  {
+    return mLimit;
   }
 
   uint64_t
@@ -92,12 +97,10 @@ public:
     }
   }
 
-protected:
-  mozilla::Atomic<bool> mCanceled;
-
 private:
   uint64_t mDatabaseUsage;
   uint64_t mFileUsage;
+  uint64_t mLimit;
 };
 
 END_QUOTA_NAMESPACE

@@ -1,14 +1,13 @@
 try {
   // We might be running without privileges, in which case it's up to the
   // harness to give us the 'ctypes' object.
-  Components.utils.import("resource://gre/modules/ctypes.jsm");
-} catch(e) {
+  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+} catch (e) {
 }
 
 var acquire, dispose, null_dispose, compare, dispose_64;
 
-function run_test()
-{
+function run_test() {
   let library = open_ctypes_test_lib();
 
   let start = library.declare("test_finalizer_start", ctypes.default_abi,
@@ -64,20 +63,23 @@ function test_finalize_bad_construction() {
   must_throw(function() { ctypes.CDataFinalizer(dispose, dispose); });
 
   // Not enough arguments
-  must_throw(function() { ctypes.CDataFinalizer(init(0)); });
+  must_throw(function() { ctypes.CDataFinalizer(dispose); },
+             "TypeError: CDataFinalizer constructor takes two arguments");
 
   // Too many arguments
-  must_throw(function() { ctypes.CDataFinalizer(init(0), dispose, dispose); });
+  must_throw(function() { ctypes.CDataFinalizer(dispose, dispose, dispose); },
+             "TypeError: CDataFinalizer constructor takes two arguments");
 
   // Second argument is null
-  must_throw(function() { ctypes.CDataFinalizer(init(0), null); });
+  must_throw(function() { ctypes.CDataFinalizer(dispose, null); },
+             "TypeError: expected _a CData object_ of a function pointer type, got null");
 
   // Second argument is undefined
   must_throw(function() {
     let a;
-    ctypes.CDataFinalizer(init(0), a);
-  });
-
+    ctypes.CDataFinalizer(dispose, a);
+  },
+  "TypeError: expected _a CData object_ of a function pointer type, got undefined");
 }
 
 /**
@@ -107,30 +109,28 @@ function test_double_dispose() {
 /**
  * Test that nothing (too) bad happens when the finalizer is NULL
  */
-function test_null_dispose()
-{
+function test_null_dispose() {
   let exception;
 
   exception = false;
   try {
-    let v = ctypes.CDataFinalizer(acquire(0), null_dispose);
+    ctypes.CDataFinalizer(acquire(0), null_dispose);
   } catch (x) {
     exception = true;
   }
-  do_check_true(exception);
+  Assert.ok(exception);
 }
 
 /**
  * Test that conversion of a disposed/forgotten CDataFinalizer to a C
  * value fails nicely.
  */
-function test_pass_disposed()
-{
+function test_pass_disposed() {
   let exception, v;
 
   exception = false;
   v = ctypes.CDataFinalizer(acquire(0), dispose);
-  do_check_true(compare(v, 0));
+  Assert.ok(compare(v, 0));
   v.forget();
 
   try {
@@ -138,11 +138,11 @@ function test_pass_disposed()
   } catch (x) {
     exception = true;
   }
-  do_check_true(exception);
+  Assert.ok(exception);
 
   exception = false;
   v = ctypes.CDataFinalizer(acquire(0), dispose);
-  do_check_true(compare(v, 0));
+  Assert.ok(compare(v, 0));
   v.dispose();
 
   try {
@@ -150,7 +150,7 @@ function test_pass_disposed()
   } catch (x) {
     exception = true;
   }
-  do_check_true(exception);
+  Assert.ok(exception);
 
   exception = false;
   try {
@@ -158,11 +158,10 @@ function test_pass_disposed()
   } catch (x) {
     exception = true;
   }
-  do_check_true(exception);
+  Assert.ok(exception);
 }
 
-function test_wrong_type()
-{
+function test_wrong_type() {
   let int32_v = ctypes.int32_t(99);
   let exception;
   try {
@@ -171,6 +170,6 @@ function test_wrong_type()
     exception = x;
   }
 
-  do_check_true(!!exception);
-  do_check_eq(exception.constructor.name, "TypeError");
+  Assert.ok(!!exception);
+  Assert.equal(exception.constructor.name, "TypeError");
 }

@@ -19,7 +19,7 @@ from mozharness.base.log import INFO, WARNING, ERROR
 
 # ErrorLists {{{1
 _mochitest_summary = {
-    'regex': re.compile(r'''(\d+ INFO (Passed|Failed|Todo):\ +(\d+)|\t(Passed|Failed|Todo): (\d+))'''),
+    'regex': re.compile(r'''(\d+ INFO (Passed|Failed|Todo):\ +(\d+)|\t(Passed|Failed|Todo): (\d+))'''),  # NOQA: E501
     'pass_group': "Passed",
     'fail_group': "Failed",
     'known_fail_group': "Todo",
@@ -27,28 +27,37 @@ _mochitest_summary = {
 
 TinderBoxPrintRe = {
     "mochitest_summary": _mochitest_summary,
+    "mochitest-chrome_summary": _mochitest_summary,
     "mochitest-gl_summary": _mochitest_summary,
     "mochitest-media_summary": _mochitest_summary,
+    "mochitest-plain-clipboard_summary": _mochitest_summary,
+    "mochitest-plain-gpu_summary": _mochitest_summary,
+    "marionette_summary": {
+        'regex': re.compile(r'''(passed|failed|todo):\ +(\d+)'''),
+        'pass_group': "passed",
+        'fail_group': "failed",
+        'known_fail_group': "todo",
+    },
     "reftest_summary": {
-        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),
+        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),  # NOQA: E501
         'pass_group': "Successful",
         'fail_group': "Unexpected",
         'known_fail_group': "Known problems",
     },
     "crashtest_summary": {
-        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),
+        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),  # NOQA: E501
         'pass_group': "Successful",
         'fail_group': "Unexpected",
         'known_fail_group': "Known problems",
     },
     "xpcshell_summary": {
-        'regex': re.compile(r'''INFO \| (Passed|Failed): (\d+)'''),
+        'regex': re.compile(r'''INFO \| (Passed|Failed|Todo): (\d+)'''),
         'pass_group': "Passed",
         'fail_group': "Failed",
-        'known_fail_group': None,
+        'known_fail_group': "Todo",
     },
     "jsreftest_summary": {
-        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),
+        'regex': re.compile(r'''REFTEST INFO \| (Successful|Unexpected|Known problems): (\d+) \('''),  # NOQA: E501
         'pass_group': "Successful",
         'fail_group': "Unexpected",
         'known_fail_group': "Known problems",
@@ -85,11 +94,23 @@ TinderBoxPrintRe = {
         'fail_group': "Failed",
         'known_fail_group': "Skipped",
     },
+    "geckoview_summary": {
+        'regex': re.compile(r'''(Passed|Failed): (\d+)'''),
+        'pass_group': "Passed",
+        'fail_group': "Failed",
+        'known_fail_group': None,
+    },
+    "geckoview-junit_summary": {
+        'regex': re.compile(r'''(Passed|Failed): (\d+)'''),
+        'pass_group': "Passed",
+        'fail_group': "Failed",
+        'known_fail_group': None,
+    },
 
     "harness_error": {
-        'full_regex': re.compile(r"(?:TEST-UNEXPECTED-FAIL|PROCESS-CRASH) \| .* \| (application crashed|missing output line for total leaks!|negative leaks caught!|\d+ bytes leaked)"),
+        'full_regex': re.compile(r"(?:TEST-UNEXPECTED-FAIL|PROCESS-CRASH) \| .* \| (application crashed|missing output line for total leaks!|negative leaks caught!|\d+ bytes leaked)"),  # NOQA: E501
         'minimum_regex': re.compile(r'''(TEST-UNEXPECTED|PROCESS-CRASH)'''),
-        'retry_regex': re.compile(r'''FAIL-SHOULD-RETRY''')
+        'retry_regex': re.compile(r'''(FAIL-SHOULD-RETRY|No space left on device|ADBError|ADBProcessError|ADBTimeoutError|program finished with exit code 80|INFRA-ERROR)''')  # NOQA: E501
     },
 }
 
@@ -97,9 +118,19 @@ TestPassed = [
     {'regex': re.compile('''(TEST-INFO|TEST-KNOWN-FAIL|TEST-PASS|INFO \| )'''), 'level': INFO},
 ]
 
+HarnessErrorList = [
+    {'substr': 'TEST-UNEXPECTED', 'level': ERROR, },
+    {'substr': 'PROCESS-CRASH', 'level': ERROR, },
+    {'regex': re.compile('''ERROR: (Address|Leak)Sanitizer'''), 'level': ERROR, },
+    {'regex': re.compile('''thread '([^']+)' panicked'''), 'level': ERROR, },
+]
+
 LogcatErrorList = [
-    {'substr': 'Fatal signal 11 (SIGSEGV)', 'level': ERROR, 'explanation': 'This usually indicates the B2G process has crashed'},
-    {'substr': 'Fatal signal 7 (SIGBUS)', 'level': ERROR, 'explanation': 'This usually indicates the B2G process has crashed'},
+    {'substr': 'Fatal signal 11 (SIGSEGV)', 'level': ERROR,
+     'explanation': 'This usually indicates the B2G process has crashed'},
+    {'substr': 'Fatal signal 7 (SIGBUS)', 'level': ERROR,
+     'explanation': 'This usually indicates the B2G process has crashed'},
     {'substr': '[JavaScript Error:', 'level': WARNING},
-    {'substr': 'seccomp sandbox violation', 'level': ERROR, 'explanation': 'A content process has violated the system call sandbox (bug 790923)'},
+    {'substr': 'seccomp sandbox violation', 'level': ERROR,
+        'explanation': 'A content process has violated the system call sandbox (bug 790923)'},
 ]

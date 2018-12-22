@@ -1,45 +1,20 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* import-globals-from ../../shared/test/shared-head.js */
+/* exported promiseWaitForFocus, setup, ch, teardown, loadHelperScript,
+            limit, ch, read, codemirrorSetStatus */
 
 "use strict";
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
+// shared-head.js handles imports, constants, and utility functions
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
+  this);
 
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 const Editor = require("devtools/client/sourceeditor/editor");
-const promise = require("promise");
-const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-
-DevToolsUtils.testing = true;
-SimpleTest.registerCleanupFunction(() => {
-  DevToolsUtils.testing = false;
-});
-
-/**
- * Open a new tab at a URL and call a callback on load
- */
-function addTab(url, callback) {
-  waitForExplicitFinish();
-
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location = url;
-
-  let tab = gBrowser.selectedTab;
-  let browser = gBrowser.getBrowserForTab(tab);
-
-  function onTabLoad() {
-    browser.removeEventListener("load", onTabLoad, true);
-    callback(browser, tab, browser.contentDocument);
-  }
-
-  browser.addEventListener("load", onTabLoad, true);
-}
-
-function promiseTab(url) {
-  return new Promise(resolve =>
-    addTab(url, resolve));
-}
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
 function promiseWaitForFocus() {
   return new Promise(resolve =>
@@ -48,46 +23,40 @@ function promiseWaitForFocus() {
 
 function setup(cb, additionalOpts = {}) {
   cb = cb || function() {};
-  let def = promise.defer();
-  const opt = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
-  const url = "data:application/vnd.mozilla.xul+xml;charset=UTF-8," +
-    "<?xml version='1.0'?>" +
-    "<?xml-stylesheet href='chrome://global/skin/global.css'?>" +
-    "<window xmlns='http://www.mozilla.org/keymaster/gatekeeper" +
-    "/there.is.only.xul' title='Editor' width='600' height='500'>" +
-    "<box flex='1'/></window>";
+  return new Promise(resolve => {
+    const opt = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
-  let win = Services.ww.openWindow(null, url, "_blank", opt, null);
-  let opts = {
-    value: "Hello.",
-    lineNumbers: true,
-    foldGutter: true,
-    gutters: ["CodeMirror-linenumbers", "breakpoints", "CodeMirror-foldgutter"]
-  };
-  for (let o in additionalOpts) {
-    opts[o] = additionalOpts[o];
-  }
+    const win = Services.ww.openWindow(null, CHROME_URL_ROOT + "head.xul", "_blank", opt,
+                                     null);
+    const opts = {
+      value: "Hello.",
+      lineNumbers: true,
+      foldGutter: true,
+      gutters: ["CodeMirror-linenumbers", "breakpoints", "CodeMirror-foldgutter"],
+      cssProperties: getClientCssProperties()
+    };
 
-  win.addEventListener("load", function onLoad() {
-    win.removeEventListener("load", onLoad, false);
+    for (const o in additionalOpts) {
+      opts[o] = additionalOpts[o];
+    }
 
-    waitForFocus(function() {
-      let box = win.document.querySelector("box");
-      let editor = new Editor(opts);
+    win.addEventListener("load", function() {
+      waitForFocus(function() {
+        const box = win.document.querySelector("box");
+        const editor = new Editor(opts);
 
-      editor.appendTo(box)
-        .then(() => {
-          def.resolve({
-            ed: editor,
-            win: win,
-            edWin: editor.container.contentWindow.wrappedJSObject
-          });
-          cb(editor, win);
-        }, err => ok(false, err.message));
-    }, win);
-  }, false);
-
-  return def.promise;
+        editor.appendTo(box)
+          .then(() => {
+            resolve({
+              ed: editor,
+              win: win,
+              edWin: editor.container.contentWindow.wrappedJSObject
+            });
+            cb(editor, win);
+          }, err => ok(false, err.message));
+      }, win);
+    }, {once: true});
+  });
 }
 
 function ch(exp, act, label) {
@@ -117,7 +86,7 @@ function teardown(ed, win) {
  *                 - "../../../commandline/test/helpers.js"
  */
 function loadHelperScript(filePath) {
-  let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
+  const testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
   Services.scriptloader.loadSubScript(testDir + "/" + filePath, this);
 }
 
@@ -125,27 +94,27 @@ function loadHelperScript(filePath) {
  * This method returns the portion of the input string `source` up to the
  * [line, ch] location.
  */
-function limit(source, [line, ch]) {
+function limit(source, [line, char]) {
   line++;
-  let list = source.split("\n");
+  const list = source.split("\n");
   if (list.length < line) {
     return source;
   }
   if (line == 1) {
-    return list[0].slice(0, ch);
+    return list[0].slice(0, char);
   }
-  return [...list.slice(0, line - 1), list[line - 1].slice(0, ch)].join("\n");
+  return [...list.slice(0, line - 1), list[line - 1].slice(0, char)].join("\n");
 }
 
 function read(url) {
-  let scriptableStream = Cc["@mozilla.org/scriptableinputstream;1"]
+  const scriptableStream = Cc["@mozilla.org/scriptableinputstream;1"]
     .getService(Ci.nsIScriptableInputStream);
 
-  let channel = NetUtil.newChannel({
+  const channel = NetUtil.newChannel({
     uri: url,
     loadUsingSystemPrincipal: true
   });
-  let input = channel.open2();
+  const input = channel.open2();
   scriptableStream.init(input);
 
   let data = "";

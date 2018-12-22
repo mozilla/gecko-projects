@@ -7,38 +7,28 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "LoginTestUtils",
 ];
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-Cu.import("resource://testing-common/TestUtils.jsm");
+ChromeUtils.import("resource://testing-common/Assert.jsm");
+ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 
 const LoginInfo =
       Components.Constructor("@mozilla.org/login-manager/loginInfo;1",
                              "nsILoginInfo", "init");
 
-// For now, we need consumers to provide a reference to Assert.jsm.
-var Assert = null;
-
-this.LoginTestUtils = {
-  set Assert(assert) {
-    Assert = assert; // eslint-disable-line no-native-reassign
-  },
-
+var LoginTestUtils = {
   /**
    * Forces the storage module to save all data, and the Login Manager service
    * to replace the storage module with a newly initialized instance.
    */
-  * reloadData() {
-    Services.obs.notifyObservers(null, "passwordmgr-storage-replace", null);
-    yield TestUtils.topicObserved("passwordmgr-storage-replace-complete");
+  async reloadData() {
+    Services.obs.notifyObservers(null, "passwordmgr-storage-replace");
+    await TestUtils.topicObserved("passwordmgr-storage-replace-complete");
   },
 
   /**
@@ -69,15 +59,6 @@ this.LoginTestUtils = {
   assertLoginListsEqual(actual, expected) {
     Assert.equal(expected.length, actual.length);
     Assert.ok(expected.every(e => actual.some(a => a.equals(e))));
-  },
-
-  /**
-   * Checks that every login in "expected" matches one in "actual".
-   * The comparison uses the "matches" method of nsILoginInfo.
-   */
-  assertLoginListsMatches(actual, expected, ignorePassword) {
-    Assert.equal(expected.length, actual.length);
-    Assert.ok(expected.every(e => actual.some(a => a.matches(e, ignorePassword))));
   },
 
   /**
@@ -120,7 +101,7 @@ this.LoginTestUtils.testData = {
                                   "form_field_username", "form_field_password");
     loginInfo.QueryInterface(Ci.nsILoginMetaInfo);
     if (modifications) {
-      for (let [name, value] of Iterator(modifications)) {
+      for (let [name, value] of Object.entries(modifications)) {
         loginInfo[name] = value;
       }
     }
@@ -140,7 +121,7 @@ this.LoginTestUtils.testData = {
                                   "the password", "", "");
     loginInfo.QueryInterface(Ci.nsILoginMetaInfo);
     if (modifications) {
-      for (let [name, value] of Iterator(modifications)) {
+      for (let [name, value] of Object.entries(modifications)) {
         loginInfo[name] = value;
       }
     }
@@ -173,6 +154,9 @@ this.LoginTestUtils.testData = {
       // Forms found on the same host, but with different hostnames in the
       // "action" attribute, are handled independently.
       new LoginInfo("http://www3.example.com", "http://www.example.com", null,
+                    "the username", "the password",
+                    "form_field_username", "form_field_password"),
+      new LoginInfo("http://www3.example.com", "https://www.example.com", null,
                     "the username", "the password",
                     "form_field_username", "form_field_password"),
       new LoginInfo("http://www3.example.com", "http://example.com", null,
@@ -246,12 +230,51 @@ this.LoginTestUtils.testData = {
 
 this.LoginTestUtils.recipes = {
   getRecipeParent() {
-    let { LoginManagerParent } = Cu.import("resource://gre/modules/LoginManagerParent.jsm", {});
+    let { LoginManagerParent } = ChromeUtils.import("resource://gre/modules/LoginManagerParent.jsm", {});
     if (!LoginManagerParent.recipeParentPromise) {
       return null;
     }
     return LoginManagerParent.recipeParentPromise.then((recipeParent) => {
       return recipeParent;
     });
+  },
+};
+
+this.LoginTestUtils.masterPassword = {
+  masterPassword: "omgsecret!",
+
+  _set(enable) {
+    let oldPW, newPW;
+    if (enable) {
+      oldPW = "";
+      newPW = this.masterPassword;
+    } else {
+      oldPW = this.masterPassword;
+      newPW = "";
+    }
+
+    // Set master password. Note that this logs in the user if no password was
+    // set before. But after logging out the next invocation of pwmgr can
+    // trigger a MP prompt.
+    let pk11db = Cc["@mozilla.org/security/pk11tokendb;1"]
+                   .getService(Ci.nsIPK11TokenDB);
+    let token = pk11db.getInternalKeyToken();
+    if (token.needsUserInit) {
+      dump("MP initialized to " + newPW + "\n");
+      token.initPassword(newPW);
+    } else {
+      token.checkPassword(oldPW);
+      dump("MP change from " + oldPW + " to " + newPW + "\n");
+      token.changePassword(oldPW, newPW);
+      token.logoutSimple();
+    }
+  },
+
+  enable() {
+    this._set(true);
+  },
+
+  disable() {
+    this._set(false);
   },
 };

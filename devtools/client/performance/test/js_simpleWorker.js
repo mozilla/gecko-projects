@@ -1,4 +1,6 @@
-self.addEventListener('message', function(e) {
+"use strict";
+
+self.addEventListener("message", function(e) {
   self.postMessage(e.data);
-  self.close()
-}, false);
+  self.close();
+});

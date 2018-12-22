@@ -6,7 +6,7 @@
 /**
  * Test the suggestion-picker helper methods.
  */
-const {require} = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const {
   findMostRelevantIndex,
   findMostRelevantCssPropertyIndex
@@ -44,11 +44,11 @@ const TEST_DATA = [
 ];
 
 function ensureMostRelevantIndexProvidedByHelperFunction() {
-  do_print("Running ensureMostRelevantIndexProvidedByHelperFunction()");
+  info("Running ensureMostRelevantIndexProvidedByHelperFunction()");
 
-  for (let testData of TEST_DATA) {
-    let { items, sortedItems, expectedIndex } = testData;
-    let mostRelevantIndex = findMostRelevantIndex(items, sortedItems);
+  for (const testData of TEST_DATA) {
+    const { items, sortedItems, expectedIndex } = testData;
+    const mostRelevantIndex = findMostRelevantIndex(items, sortedItems);
     strictEqual(mostRelevantIndex, expectedIndex);
   }
 }
@@ -126,19 +126,19 @@ const CSS_TEST_DATA = [
 ];
 
 function ensureMostRelevantIndexProvidedByClassMethod() {
-  do_print("Running ensureMostRelevantIndexProvidedByClassMethod()");
+  info("Running ensureMostRelevantIndexProvidedByClassMethod()");
 
-  for (let testData of CSS_TEST_DATA) {
-    let { items, expectedIndex } = testData;
-    let mostRelevantIndex = findMostRelevantCssPropertyIndex(items);
+  for (const testData of CSS_TEST_DATA) {
+    const { items, expectedIndex } = testData;
+    const mostRelevantIndex = findMostRelevantCssPropertyIndex(items);
     strictEqual(mostRelevantIndex, expectedIndex);
   }
 }
 
 function ensureErrorThrownWithInvalidArguments() {
-  do_print("Running ensureErrorThrownWithInvalidTypeArgument()");
+  info("Running ensureErrorThrownWithInvalidTypeArgument()");
 
-  let expectedError = "Please provide valid items and sortedItems arrays.";
+  const expectedError = "Please provide valid items and sortedItems arrays.";
   // No arguments passed.
   throws(() => findMostRelevantIndex(), expectedError);
   // Invalid arguments passed.

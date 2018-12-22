@@ -5,8 +5,13 @@
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
+  Services.prefs.setBoolPref("dom.indexedDB.storageOption.enabled", true);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("dom.indexedDB.storageOption.enabled");
+  });
+
   const openParams = [
     // This one lives in storage/permanent/chrome
     { dbName: "dbA",
@@ -57,17 +62,12 @@ function testSteps()
       dbOptions: { version: 1, storage: "default" } }
   ];
 
-  let ios = SpecialPowers.Cc["@mozilla.org/network/io-service;1"]
-                         .getService(SpecialPowers.Ci.nsIIOService);
-
-  let ssm = SpecialPowers.Cc["@mozilla.org/scriptsecuritymanager;1"]
-                         .getService(SpecialPowers.Ci.nsIScriptSecurityManager);
-
   function openDatabase(params) {
     let request;
     if ("url" in params) {
-      let uri = ios.newURI(params.url, null, null);
-      let principal = ssm.createCodebasePrincipal(uri, {});
+      let uri = Services.io.newURI(params.url);
+      let principal = Services.scriptSecurityManager
+        .createCodebasePrincipal(uri, {});
       request = indexedDB.openForPrincipal(principal, params.dbName,
                                            params.dbOptions);
     } else {

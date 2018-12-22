@@ -11,44 +11,36 @@ const TEST_URI = "data:text/html;charset=UTF-8," +
                  "<div>test div</div>";
 const PSEUDOS = ["hover", "active", "focus"];
 
-add_task(function*() {
-  let {inspector, testActor} = yield openInspectorForURL(TEST_URI);
-  yield selectNode("div", inspector);
+add_task(async function() {
+  const {inspector, testActor} = await openInspectorForURL(TEST_URI);
+  await selectNode("div", inspector);
 
-  info("Getting the inspector ctx menu and opening it");
-  let menu = inspector.panelDoc.getElementById("inspector-node-popup");
-  yield openMenu(menu);
+  const allMenuItems = openContextMenuAndGetAllItems(inspector);
 
-  yield testMenuItems(testActor, menu, inspector);
-
-  menu.hidePopup();
+  await testMenuItems(testActor, allMenuItems, inspector);
 });
 
-function openMenu(menu) {
-  let promise = once(menu, "popupshowing", true);
-  menu.openPopup();
-  return promise;
-}
-
-function* testMenuItems(testActor, menu, inspector) {
-  for (let pseudo of PSEUDOS) {
-    let menuitem = inspector.panelDoc.getElementById("node-menu-pseudo-" + pseudo);
-    ok(menuitem, ":" + pseudo + " menuitem exists");
+async function testMenuItems(testActor, allMenuItems, inspector) {
+  for (const pseudo of PSEUDOS) {
+    const menuItem =
+      allMenuItems.find(item => item.id === "node-menu-pseudo-" + pseudo);
+    ok(menuItem, ":" + pseudo + " menuitem exists");
+    is(menuItem.disabled, false, ":" + pseudo + " menuitem is enabled");
 
     // Give the inspector panels a chance to update when the pseudoclass changes
-    let onPseudo = inspector.selection.once("pseudoclass");
-    let onRefresh = inspector.once("rule-view-refreshed");
+    const onPseudo = inspector.selection.once("pseudoclass");
+    const onRefresh = inspector.once("rule-view-refreshed");
 
     // Walker uses SDK-events so calling walker.once does not return a promise.
-    let onMutations = once(inspector.walker, "mutations");
+    const onMutations = once(inspector.walker, "mutations");
 
-    menuitem.doCommand();
+    menuItem.click();
 
-    yield onPseudo;
-    yield onRefresh;
-    yield onMutations;
+    await onPseudo;
+    await onRefresh;
+    await onMutations;
 
-    let hasLock = yield testActor.hasPseudoClassLock("div", ":" + pseudo);
+    const hasLock = await testActor.hasPseudoClassLock("div", ":" + pseudo);
     ok(hasLock, "pseudo-class lock has been applied");
   }
 }

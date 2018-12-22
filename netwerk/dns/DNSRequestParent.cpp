@@ -12,7 +12,7 @@
 #include "nsICancelable.h"
 #include "nsIDNSRecord.h"
 #include "nsHostResolver.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla::ipc;
 
@@ -26,23 +26,20 @@ DNSRequestParent::DNSRequestParent()
 
 }
 
-DNSRequestParent::~DNSRequestParent()
-{
-
-}
-
 void
-DNSRequestParent::DoAsyncResolve(const nsACString &hostname, uint32_t flags,
-                                 const nsACString &networkInterface)
+DNSRequestParent::DoAsyncResolve(const nsACString &hostname,
+                                 const OriginAttributes &originAttributes,
+                                 uint32_t flags)
 {
   nsresult rv;
   mFlags = flags;
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv)) {
-    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+    nsCOMPtr<nsIEventTarget> main = GetMainThreadEventTarget();
     nsCOMPtr<nsICancelable> unused;
-    rv = dns->AsyncResolveExtended(hostname, flags, networkInterface, this,
-                                   mainThread, getter_AddRefs(unused));
+    rv = dns->AsyncResolveNative(hostname, flags, this,
+                                 main, originAttributes,
+                                 getter_AddRefs(unused));
   }
 
   if (NS_FAILED(rv) && !mIPCClosed) {
@@ -51,26 +48,27 @@ DNSRequestParent::DoAsyncResolve(const nsACString &hostname, uint32_t flags,
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 DNSRequestParent::RecvCancelDNSRequest(const nsCString& hostName,
+                                       const OriginAttributes& originAttributes,
                                        const uint32_t& flags,
-                                       const nsCString& networkInterface,
                                        const nsresult& reason)
 {
   nsresult rv;
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv)) {
-    rv = dns->CancelAsyncResolveExtended(hostName, flags, networkInterface,
-                                         this, reason);
+    rv = dns->CancelAsyncResolveNative(hostName, flags,
+                                       this, reason,
+                                       originAttributes);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 DNSRequestParent::Recv__delete__()
 {
   mIPCClosed = true;
-  return true;
+  return IPC_OK();
 }
 
 void

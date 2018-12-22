@@ -13,7 +13,6 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PatternHelpers.h"
 #include "nsISupportsImpl.h"
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 
 typedef struct _cairo_pattern cairo_pattern_t;
@@ -49,16 +48,14 @@ public:
      * to the current transform.
      */
     mozilla::gfx::Pattern *GetPattern(const mozilla::gfx::DrawTarget *aTarget,
-                                      mozilla::gfx::Matrix *aOriginalUserToDevice = nullptr);
+                                      const mozilla::gfx::Matrix *aOriginalUserToDevice = nullptr);
     bool IsOpaque();
 
     // clamp, repeat, reflect
     void SetExtend(mozilla::gfx::ExtendMode aExtend);
 
-    int CairoStatus();
-
-    void SetFilter(mozilla::gfx::Filter filter);
-    mozilla::gfx::Filter Filter() const;
+    void SetSamplingFilter(mozilla::gfx::SamplingFilter aSamplingFilter);
+    mozilla::gfx::SamplingFilter SamplingFilter() const;
 
     /* returns TRUE if it succeeded */
     bool GetSolidColor(mozilla::gfx::Color& aColorOut);

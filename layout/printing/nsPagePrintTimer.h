@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,32 +12,38 @@
 #include "nsIDocumentViewerPrint.h"
 #include "nsPrintObject.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/OwningNonNull.h"
 #include "nsThreadUtils.h"
 
-class nsPrintEngine;
+class nsPrintJob;
+class nsIDocument;
 
 //---------------------------------------------------
 //-- Page Timer Class
 //---------------------------------------------------
-class nsPagePrintTimer final : public nsRunnable,
+class nsPagePrintTimer final : public mozilla::Runnable,
                                public nsITimerCallback
 {
 public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  nsPagePrintTimer(nsPrintEngine* aPrintEngine,
+  nsPagePrintTimer(nsPrintJob* aPrintJob,
                    nsIDocumentViewerPrint* aDocViewerPrint,
+                   nsIDocument* aDocument,
                    uint32_t aDelay)
-    : mPrintEngine(aPrintEngine)
-    , mDocViewerPrint(aDocViewerPrint)
+    : Runnable("nsPagePrintTimer")
+    , mPrintJob(aPrintJob)
+    , mDocViewerPrint(*aDocViewerPrint)
+    , mDocument(aDocument)
     , mDelay(aDelay)
     , mFiringCount(0)
     , mPrintObj(nullptr)
     , mWatchDogCount(0)
     , mDone(false)
   {
-    mDocViewerPrint->IncrementDestroyRefCount();
+    MOZ_ASSERT(aDocViewerPrint && aDocument);
+    mDocViewerPrint->IncrementDestroyBlockedCount();
   }
 
   NS_DECL_NSITIMERCALLBACK
@@ -50,6 +57,12 @@ public:
   void WaitForRemotePrint();
   void RemotePrintFinished();
 
+  void Disconnect()
+  {
+    mPrintJob = nullptr;
+    mPrintObj = nullptr;
+  }
+
 private:
   ~nsPagePrintTimer();
 
@@ -58,8 +71,9 @@ private:
   void     StopWatchDogTimer();
   void     Fail();
 
-  nsPrintEngine*             mPrintEngine;
-  nsCOMPtr<nsIDocumentViewerPrint> mDocViewerPrint;
+  nsPrintJob*                mPrintJob;
+  const mozilla::OwningNonNull<nsIDocumentViewerPrint> mDocViewerPrint;
+  nsCOMPtr<nsIDocument>      mDocument;
   nsCOMPtr<nsITimer>         mTimer;
   nsCOMPtr<nsITimer>         mWatchDogTimer;
   nsCOMPtr<nsITimer>         mWaitingForRemotePrint;
@@ -70,11 +84,14 @@ private:
   bool                       mDone;
 
   static const uint32_t WATCH_DOG_INTERVAL  = 1000;
-  static const uint32_t WATCH_DOG_MAX_COUNT = 10;
+  static const uint32_t WATCH_DOG_MAX_COUNT =
+#ifdef DEBUG
+    // Debug builds are very slow (on Mac at least) and can need extra time
+                                              30
+#else
+                                              10
+#endif
+  ;
 };
-
-
-nsresult
-NS_NewPagePrintTimer(nsPagePrintTimer **aResult);
 
 #endif /* nsPagePrintTimer_h___ */

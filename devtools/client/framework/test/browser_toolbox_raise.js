@@ -3,23 +3,20 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const TEST_URL = "data:text/html,test for opening toolbox in different hosts";
+
 var {Toolbox} = require("devtools/client/framework/toolbox");
 
-var toolbox, target, tab1, tab2;
+var toolbox, tab1, tab2;
 
 function test() {
-  gBrowser.selectedTab = tab1 = gBrowser.addTab();
-  tab2 = gBrowser.addTab();
-  target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+  addTab(TEST_URL).then(tab => {
+    tab2 = BrowserTestUtils.addTab(gBrowser);
+    const target = TargetFactory.forTab(tab);
     gDevTools.showToolbox(target)
              .then(testBottomHost, console.error)
-             .then(null, console.error);
-  }, true);
-
-  content.location = "data:text/html,test for opening toolbox in different hosts";
+             .catch(console.error);
+  });
 }
 
 function testBottomHost(aToolbox) {
@@ -33,7 +30,7 @@ function testBottomHost(aToolbox) {
     executeSoon(function() {
       is(gBrowser.selectedTab, tab1, "Correct tab was selected after calling raise");
 
-      toolbox.switchHost(Toolbox.HostType.WINDOW).then(testWindowHost).then(null, console.error);
+      toolbox.switchHost(Toolbox.HostType.WINDOW).then(testWindowHost).catch(console.error);
     });
   });
 }
@@ -44,26 +41,26 @@ function testWindowHost() {
 
   // Need to wait for focus  as otherwise window.focus() is overridden by
   // toolbox window getting focused first on Linux and Mac.
-  let onToolboxFocus = () => {
-    toolbox._host._window.removeEventListener("focus", onToolboxFocus, true);
+  const onToolboxFocus = () => {
+    toolbox.win.parent.removeEventListener("focus", onToolboxFocus, true);
     info("focusing main window.");
-    window.focus()
+    window.focus();
   };
   // Need to wait for toolbox window to get focus.
-  toolbox._host._window.addEventListener("focus", onToolboxFocus, true);
+  toolbox.win.parent.addEventListener("focus", onToolboxFocus, true);
 }
 
 function onFocus() {
-  info("Main window is focused before calling toolbox.raise()")
+  info("Main window is focused before calling toolbox.raise()");
   window.removeEventListener("focus", onFocus, true);
 
   // Check if toolbox window got focus.
-  let onToolboxFocusAgain = () => {
-    toolbox._host._window.removeEventListener("focus", onToolboxFocusAgain, false);
+  const onToolboxFocusAgain = () => {
+    toolbox.win.parent.removeEventListener("focus", onToolboxFocusAgain);
     ok(true, "Toolbox window is the focused window after calling toolbox.raise()");
     cleanup();
   };
-  toolbox._host._window.addEventListener("focus", onToolboxFocusAgain, false);
+  toolbox.win.parent.addEventListener("focus", onToolboxFocusAgain);
 
   // Now raise toolbox.
   toolbox.raise();
@@ -73,7 +70,7 @@ function cleanup() {
   Services.prefs.setCharPref("devtools.toolbox.host", Toolbox.HostType.BOTTOM);
 
   toolbox.destroy().then(function() {
-    toolbox = target = null;
+    toolbox = null;
     gBrowser.removeCurrentTab();
     gBrowser.removeCurrentTab();
     finish();

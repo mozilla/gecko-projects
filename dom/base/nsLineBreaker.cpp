@@ -6,18 +6,20 @@
 
 #include "nsLineBreaker.h"
 #include "nsContentUtils.h"
-#include "nsILineBreaker.h"
 #include "gfxTextRun.h" // for the gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_* values
 #include "nsHyphenationManager.h"
 #include "nsHyphenator.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/intl/LineBreaker.h"
+
+using mozilla::intl::LineBreaker;
 
 nsLineBreaker::nsLineBreaker()
   : mCurrentWordLanguage(nullptr),
     mCurrentWordContainsMixedLang(false),
     mCurrentWordContainsComplexChar(false),
     mAfterBreakableSpace(false), mBreakHere(false),
-    mWordBreak(nsILineBreaker::kWordBreak_Normal)
+    mWordBreak(LineBreaker::kWordBreak_Normal)
 {
 }
 
@@ -62,14 +64,14 @@ nsLineBreaker::FlushCurrentWord()
   AutoTArray<uint8_t,4000> breakState;
   if (!breakState.AppendElements(length))
     return NS_ERROR_OUT_OF_MEMORY;
-  
+
   nsTArray<bool> capitalizationState;
 
   if (!mCurrentWordContainsComplexChar) {
     // For break-strict set everything internal to "break", otherwise
     // to "no break"!
     memset(breakState.Elements(),
-           mWordBreak == nsILineBreaker::kWordBreak_BreakAll ?
+           mWordBreak == LineBreaker::kWordBreak_BreakAll ?
              gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL :
              gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE,
            length*sizeof(uint8_t));
@@ -134,7 +136,7 @@ nsLineBreaker::FlushCurrentWord()
                                      capitalizationState.Elements() + offset);
       }
     }
-    
+
     offset += ti->mLength;
   }
 
@@ -154,7 +156,7 @@ nsLineBreaker::FlushCurrentWord()
                                 BREAK_SKIP_SETTING_NO_BREAKS)
 
 nsresult
-nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, uint32_t aLength,
+nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage, const char16_t* aText, uint32_t aLength,
                           uint32_t aFlags, nsILineBreakSink* aSink)
 {
   NS_ASSERTION(aLength > 0, "Appending empty text...");
@@ -236,14 +238,14 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, 
     if (aSink && !noBreaksNeeded) {
       breakState[offset] =
         mBreakHere || (mAfterBreakableSpace && !isBreakableSpace) ||
-        (mWordBreak == nsILineBreaker::kWordBreak_BreakAll)  ?
+        (mWordBreak == LineBreaker::kWordBreak_BreakAll)  ?
           gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL :
           gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
     }
     mBreakHere = false;
     mAfterBreakableSpace = isBreakableSpace;
 
-    if (isSpace) {
+    if (isSpace || ch == '\n') {
       if (offset > wordStart && aSink) {
         if (!(aFlags & BREAK_SUPPRESS_INSIDE)) {
           if (wordHasComplexChar) {
@@ -325,7 +327,7 @@ nsLineBreaker::FindHyphenationPoints(nsHyphenator *aHyphenator,
 }
 
 nsresult
-nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const uint8_t* aText, uint32_t aLength,
+nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage, const uint8_t* aText, uint32_t aLength,
                           uint32_t aFlags, nsILineBreakSink* aSink)
 {
   NS_ASSERTION(aLength > 0, "Appending empty text...");
@@ -403,7 +405,7 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const uint8_t* aText, u
       // will be set by nsILineBreaker, we don't consider CJK at this point.
       breakState[offset] =
         mBreakHere || (mAfterBreakableSpace && !isBreakableSpace) ||
-        (mWordBreak == nsILineBreaker::kWordBreak_BreakAll) ?
+        (mWordBreak == LineBreaker::kWordBreak_BreakAll) ?
           gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL :
           gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
     }
@@ -460,7 +462,7 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const uint8_t* aText, u
 }
 
 void
-nsLineBreaker::UpdateCurrentWordLanguage(nsIAtom *aHyphenationLanguage)
+nsLineBreaker::UpdateCurrentWordLanguage(nsAtom *aHyphenationLanguage)
 {
   if (mCurrentWordLanguage && mCurrentWordLanguage != aHyphenationLanguage) {
     mCurrentWordContainsMixedLang = true;

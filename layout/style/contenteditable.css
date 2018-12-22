@@ -37,7 +37,7 @@ a:-moz-read-write:active img, a:-moz-read-write:-moz-only-whitespace[name] {
   cursor: default;
 }
 
-*|*:-moz-any-link:-moz-read-write {
+*|*:any-link:-moz-read-write {
   cursor: text;
 }
 
@@ -51,7 +51,6 @@ a:active:-moz-read-write img {
    so we must set explicitly. This isn't good!
 */
 a:link:-moz-read-write {
-  text-decoration: underline -moz-anchor-decoration;
   color: -moz-hyperlinktext;
 }
 

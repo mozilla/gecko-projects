@@ -14,22 +14,13 @@ xul|tab[visuallyselected] {
   text-shadow: none;
 }
 
-xul|button,
-html|button,
-xul|colorpicker[type="button"],
-xul|menulist {
-  margin-top: 3px;
-}
-
-xul|button,
-html|button {
-  /* use the same margin of other elements for the alignment */
-  margin-left: 4px;
-  margin-right: 4px;
+xul|button[dlgtype="help"] {
+  -moz-appearance: none;
+  width: auto;
 }
 
 xul|caption {
-  -moz-padding-start: 0;
+  padding-inline-start: 0;
 }
 
 xul|groupbox > xul|*.groupbox-body {
@@ -51,11 +42,11 @@ xul|menulist > xul|menupopup xul|menu,
 xul|menulist > xul|menupopup xul|menuitem,
 xul|button[type="menu"] > xul|menupopup xul|menu,
 xul|button[type="menu"] > xul|menupopup xul|menuitem {
-  -moz-padding-end: 34px;
+  padding-inline-end: 34px;
 }
 
 xul|*.help-button > xul|*.button-box > xul|*.button-icon {
-  -moz-margin-start: 0;
+  margin-inline-start: 0;
 }
 
 xul|*.checkbox-icon {
@@ -63,21 +54,10 @@ xul|*.checkbox-icon {
 }
 
 xul|*.radio-icon {
-  -moz-margin-end: 0;
+  margin-inline-end: 0;
 }
 
-xul|*.numberbox-input-box {
-  -moz-appearance: none;
-  border-width: 0;
-}
-
-xul|description {
-  font-size: 1.25rem;
-  line-height: 22px;
-}
-
-xul|*.text-link:-moz-focusring,
-xul|*.inline-link:-moz-focusring {
+xul|*.text-link:-moz-focusring {
   color: var(--in-content-link-highlight);
   text-decoration: underline;
   box-shadow: none;
@@ -98,25 +78,20 @@ xul|radio[focused="true"] > .radio-check {
   -moz-outline-radius: 100%;
 }
 
-xul|spinbuttons {
-  -moz-appearance: none;
-}
-
-xul|*.spinbuttons-up {
-  margin-top: 0 !important;
+html|*.numberbox-input::-moz-number-spin-up {
   border-radius: 4px 4px 0 0;
 }
 
-xul|*.spinbuttons-down  {
-  margin-bottom: 0 !important;
+html|*.numberbox-input::-moz-number-spin-down  {
   border-radius: 0 0 4px 4px;
 }
 
-xul|*.spinbuttons-button > xul|*.button-box {
-  -moz-padding-start: 2px !important;
-  -moz-padding-end: 3px !important;
+xul|textbox[type="search"]:not([searchbutton]) > .textbox-input-box > .textbox-search-sign {
+  list-style-image: url(chrome://global/skin/icons/search-textbox.svg);
+  margin-inline-end: 5px;
 }
 
-xul|*.spinbuttons-button > xul|*.button-box > xul|*.button-text {
-  display: none;
+html|button {
+  /* XUL button min-width */
+  min-width: 79px;
 }

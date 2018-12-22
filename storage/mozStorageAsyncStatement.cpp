@@ -23,7 +23,6 @@
 #include "mozStoragePrivateHelpers.h"
 #include "mozStorageStatementRow.h"
 #include "mozStorageStatement.h"
-#include "nsDOMClassInfo.h"
 
 #include "mozilla/Logging.h"
 
@@ -44,17 +43,17 @@ NS_IMPL_CI_INTERFACE_GETTER(AsyncStatement,
 class AsyncStatementClassInfo : public nsIClassInfo
 {
 public:
-  MOZ_CONSTEXPR AsyncStatementClassInfo() {}
+  constexpr AsyncStatementClassInfo() {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetInterfaces(uint32_t *_count, nsIID ***_array) override
   {
     return NS_CI_INTERFACE_GETTER_NAME(AsyncStatement)(_count, _array);
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetScriptableHelper(nsIXPCScriptable **_helper) override
   {
     static AsyncStatementJSHelper sJSHelper;
@@ -62,35 +61,35 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP
-  GetContractID(char **_contractID) override
+  NS_IMETHOD
+  GetContractID(nsACString& aContractID) override
   {
-    *_contractID = nullptr;
+    aContractID.SetIsVoid(true);
     return NS_OK;
   }
 
-  NS_IMETHODIMP
-  GetClassDescription(char **_desc) override
+  NS_IMETHOD
+  GetClassDescription(nsACString& aDesc) override
   {
-    *_desc = nullptr;
+    aDesc.SetIsVoid(true);
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassID(nsCID **_id) override
   {
     *_id = nullptr;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetFlags(uint32_t *_flags) override
   {
     *_flags = 0;
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   GetClassIDNoAlloc(nsCID *_cid) override
   {
     return NS_ERROR_NOT_AVAILABLE;
@@ -118,7 +117,7 @@ AsyncStatement::initialize(Connection *aDBConnection,
                            const nsACString &aSQLStatement)
 {
   MOZ_ASSERT(aDBConnection, "No database connection given!");
-  MOZ_ASSERT(!aDBConnection->isClosed(), "Database connection should be valid");
+  MOZ_ASSERT(aDBConnection->isConnectionReadyOnThisThread(), "Database connection should be valid");
   MOZ_ASSERT(aNativeConnection, "No native connection given!");
 
   mDBConnection = aDBConnection;
@@ -126,7 +125,7 @@ AsyncStatement::initialize(Connection *aDBConnection,
   mSQLString = aSQLStatement;
 
   MOZ_LOG(gStorageLog, LogLevel::Debug, ("Inited async statement '%s' (0x%p)",
-                                      mSQLString.get()));
+                                      mSQLString.get(), this));
 
 #ifdef DEBUG
   // We want to try and test for LIKE and that consumers are using
@@ -221,7 +220,9 @@ AsyncStatement::~AsyncStatement()
     // NS_ProxyRelase only magic forgets for us if mDBConnection is an
     // nsCOMPtr.  Which it is not; it's an nsRefPtr.
     nsCOMPtr<nsIThread> targetThread(mDBConnection->threadOpenedOn);
-    NS_ProxyRelease(targetThread, mDBConnection.forget());
+    NS_ProxyRelease(
+      "AsyncStatement::mDBConnection",
+      targetThread, mDBConnection.forget());
   }
 }
 
@@ -375,7 +376,7 @@ AsyncStatement::GetState(int32_t *_state)
 //// mozIStorageBindingParams
 
 BOILERPLATE_BIND_PROXIES(
-  AsyncStatement, 
+  AsyncStatement,
   if (mFinalized) return NS_ERROR_UNEXPECTED;
 )
 

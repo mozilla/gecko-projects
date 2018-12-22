@@ -22,13 +22,15 @@ class ARIAGridAccessible : public AccessibleWrap,
 public:
   ARIAGridAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(ARIAGridAccessible, AccessibleWrap)
 
   // Accessible
+  virtual a11y::role NativeRole() const override;
+  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
   virtual TableAccessible* AsTable() override { return this; }
 
   // TableAccessible
-  virtual uint32_t ColCount() override;
+  virtual uint32_t ColCount() const override;
   virtual uint32_t RowCount() override;
   virtual Accessible* CellAt(uint32_t aRowIndex, uint32_t aColumnIndex) override;
   virtual bool IsColSelected(uint32_t aColIdx) override;
@@ -81,9 +83,10 @@ class ARIARowAccessible : public AccessibleWrap
 public:
   ARIARowAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(ARIARowAccessible, AccessibleWrap)
 
   // Accessible
+  virtual a11y::role NativeRole() const override;
   virtual mozilla::a11y::GroupPos GroupPosition() override;
 
 protected:
@@ -100,9 +103,11 @@ class ARIAGridCellAccessible : public HyperTextAccessibleWrap,
 public:
   ARIAGridCellAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(ARIAGridCellAccessible,
+                                       HyperTextAccessibleWrap)
 
   // Accessible
+  virtual a11y::role NativeRole() const override;
   virtual TableCellAccessible* AsTableCell() override { return this; }
   virtual void ApplyARIAState(uint64_t* aState) const override;
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;

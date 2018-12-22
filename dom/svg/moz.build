@@ -1,8 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files("**"):
+    BUG_COMPONENT = ("Core", "SVG")
 
 MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 
@@ -14,12 +17,12 @@ EXPORTS += [
     'SVGContentUtils.h',
     'SVGPreserveAspectRatio.h',
     'SVGStringList.h',
+    'SVGTagList.h',
 ]
 
 EXPORTS.mozilla.dom += [
     'nsSVGAnimatedTransformList.h',
     'SVGAElement.h',
-    'SVGAltGlyphElement.h',
     'SVGAngle.h',
     'SVGAnimatedAngle.h',
     'SVGAnimatedBoolean.h',
@@ -27,6 +30,7 @@ EXPORTS.mozilla.dom += [
     'SVGAnimatedInteger.h',
     'SVGAnimatedLength.h',
     'SVGAnimatedNumber.h',
+    'SVGAnimatedPathSegList.h',
     'SVGAnimatedRect.h',
     'SVGAnimatedString.h',
     'SVGAnimatedTransformList.h',
@@ -40,6 +44,7 @@ EXPORTS.mozilla.dom += [
     'SVGDefsElement.h',
     'SVGDescElement.h',
     'SVGDocument.h',
+    'SVGElementFactory.h',
     'SVGEllipseElement.h',
     'SVGFEBlendElement.h',
     'SVGFEColorMatrixElement.h',
@@ -65,6 +70,7 @@ EXPORTS.mozilla.dom += [
     'SVGFilterElement.h',
     'SVGForeignObjectElement.h',
     'SVGGElement.h',
+    'SVGGeometryElement.h',
     'SVGGradientElement.h',
     'SVGGraphicsElement.h',
     'SVGImageElement.h',
@@ -99,7 +105,7 @@ EXPORTS.mozilla.dom += [
     'SVGTSpanElement.h',
     'SVGUseElement.h',
     'SVGViewElement.h',
-    'SVGZoomEvent.h',
+    'SVGViewportElement.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -131,13 +137,10 @@ UNIFIED_SOURCES += [
     'nsSVGNumber2.cpp',
     'nsSVGNumberPair.cpp',
     'nsSVGPathDataParser.cpp',
-    'nsSVGPathGeometryElement.cpp',
-    'nsSVGPolyElement.cpp',
     'nsSVGString.cpp',
     'nsSVGTransform.cpp',
     'nsSVGViewBox.cpp',
     'SVGAElement.cpp',
-    'SVGAltGlyphElement.cpp',
     'SVGAngle.cpp',
     'SVGAnimatedAngle.cpp',
     'SVGAnimatedBoolean.cpp',
@@ -191,6 +194,7 @@ UNIFIED_SOURCES += [
     'SVGForeignObjectElement.cpp',
     'SVGFragmentIdentifier.cpp',
     'SVGGElement.cpp',
+    'SVGGeometryElement.cpp',
     'SVGGradientElement.cpp',
     'SVGGraphicsElement.cpp',
     'SVGImageElement.cpp',
@@ -219,6 +223,7 @@ UNIFIED_SOURCES += [
     'SVGPatternElement.cpp',
     'SVGPointList.cpp',
     'SVGPointListSMILType.cpp',
+    'SVGPolyElement.cpp',
     'SVGPolygonElement.cpp',
     'SVGPolylineElement.cpp',
     'SVGPreserveAspectRatio.cpp',
@@ -247,7 +252,7 @@ UNIFIED_SOURCES += [
     'SVGUseElement.cpp',
     'SVGViewBoxSMILType.cpp',
     'SVGViewElement.cpp',
-    'SVGZoomEvent.cpp',
+    'SVGViewportElement.cpp',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -267,3 +272,6 @@ LOCAL_INCLUDES += [
     '/layout/svg',
     '/layout/xul',
 ]
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

@@ -22,8 +22,6 @@
 #ifdef THREADSAFE_I18N
 #include "nsCollationCID.h"
 #include "nsICollation.h"
-#include "nsILocale.h"
-#include "nsILocaleService.h"
 #endif
 #include "nsIFile.h"
 #include "nsURLHelper.h"
@@ -86,21 +84,19 @@ nsDirectoryIndexStream::Init(nsIFile* aDir)
     bool isDir;
     rv = aDir->IsDirectory(&isDir);
     if (NS_FAILED(rv)) return rv;
-    NS_PRECONDITION(isDir, "not a directory");
+    MOZ_ASSERT(isDir, "not a directory");
     if (!isDir)
         return NS_ERROR_ILLEGAL_VALUE;
 
     if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-        nsAutoCString path;
-        aDir->GetNativePath(path);
         MOZ_LOG(gLog, LogLevel::Debug,
                ("nsDirectoryIndexStream[%p]: initialized on %s",
-                this, path.get()));
+                this, aDir->HumanReadablePath().get()));
     }
 
     // Sigh. We have to allocate on the heap because there are no
     // assignment operators defined.
-    nsCOMPtr<nsISimpleEnumerator> iter;
+    nsCOMPtr<nsIDirectoryEnumerator> iter;
     rv = aDir->GetDirectoryEntries(getter_AddRefs(iter));
     if (NS_FAILED(rv)) return rv;
 
@@ -108,32 +104,18 @@ nsDirectoryIndexStream::Init(nsIFile* aDir)
     // XXX - should we do so here, or when the first item is requested?
     // XXX - use insertion sort instead?
 
-    bool more;
-    nsCOMPtr<nsISupports> elem;
-    while (NS_SUCCEEDED(iter->HasMoreElements(&more)) && more) {
-        rv = iter->GetNext(getter_AddRefs(elem));
-        if (NS_SUCCEEDED(rv)) {
-            nsCOMPtr<nsIFile> file = do_QueryInterface(elem);
-            if (file)
-                mArray.AppendObject(file); // addrefs
-        }
+    nsCOMPtr<nsIFile> file;
+    while (NS_SUCCEEDED(iter->GetNextFile(getter_AddRefs(file))) && file) {
+        mArray.AppendObject(file); // addrefs
     }
 
 #ifdef THREADSAFE_I18N
-    nsCOMPtr<nsILocaleService> ls = do_GetService(NS_LOCALESERVICE_CONTRACTID,
-                                                  &rv);
-    if (NS_FAILED(rv)) return rv;
-
-    nsCOMPtr<nsILocale> locale;
-    rv = ls->GetApplicationLocale(getter_AddRefs(locale));
-    if (NS_FAILED(rv)) return rv;
-    
     nsCOMPtr<nsICollationFactory> cf = do_CreateInstance(NS_COLLATIONFACTORY_CONTRACTID,
                                                          &rv);
     if (NS_FAILED(rv)) return rv;
 
     nsCOMPtr<nsICollation> coll;
-    rv = cf->CreateCollation(locale, getter_AddRefs(coll));
+    rv = cf->CreateCollation(getter_AddRefs(coll));
     if (NS_FAILED(rv)) return rv;
 
     mArray.Sort(compare, coll);
@@ -238,11 +220,9 @@ nsDirectoryIndexStream::Read(char* aBuf, uint32_t aCount, uint32_t* aReadCount)
             ++mPos;
 
             if (MOZ_LOG_TEST(gLog, LogLevel::Debug)) {
-                nsAutoCString path;
-                current->GetNativePath(path);
                 MOZ_LOG(gLog, LogLevel::Debug,
                        ("nsDirectoryIndexStream[%p]: iterated %s",
-                        this, path.get()));
+                        this, current->HumanReadablePath().get()));
             }
 
             // rjc: don't return hidden files/directories!
@@ -269,24 +249,28 @@ nsDirectoryIndexStream::Read(char* aBuf, uint32_t aCount, uint32_t* aReadCount)
             mBuf.AppendLiteral("201: ");
 
             // The "filename" field
-            char* escaped = nullptr;
             if (!NS_IsNativeUTF8()) {
                 nsAutoString leafname;
                 rv = current->GetLeafName(leafname);
                 if (NS_FAILED(rv)) return rv;
-                if (!leafname.IsEmpty())
-                    escaped = nsEscape(NS_ConvertUTF16toUTF8(leafname).get(), url_Path);
+
+                nsAutoCString escaped;
+                if (!leafname.IsEmpty() &&
+                    NS_Escape(NS_ConvertUTF16toUTF8(leafname), escaped, url_Path)) {
+                    mBuf.Append(escaped);
+                    mBuf.Append(' ');
+                }
             } else {
                 nsAutoCString leafname;
                 rv = current->GetNativeLeafName(leafname);
                 if (NS_FAILED(rv)) return rv;
-                if (!leafname.IsEmpty())
-                    escaped = nsEscape(leafname.get(), url_Path);
-            }
-            if (escaped) {
-                mBuf += escaped;
-                mBuf.Append(' ');
-                free(escaped);
+
+                nsAutoCString escaped;
+                if (!leafname.IsEmpty() &&
+                    NS_Escape(leafname, escaped, url_Path)) {
+                    mBuf.Append(escaped);
+                    mBuf.Append(' ');
+                }
             }
 
             // The "content-length" field
@@ -311,14 +295,14 @@ nsDirectoryIndexStream::Read(char* aBuf, uint32_t aCount, uint32_t* aReadCount)
             else {
                 bool isDir;
                 rv = current->IsDirectory(&isDir);
-                if (NS_FAILED(rv)) return rv; 
+                if (NS_FAILED(rv)) return rv;
                 if (isDir) {
                     mBuf.AppendLiteral("DIRECTORY ");
                 }
                 else {
                     bool isLink;
                     rv = current->IsSymlink(&isLink);
-                    if (NS_FAILED(rv)) return rv; 
+                    if (NS_FAILED(rv)) return rv;
                     if (isLink) {
                         mBuf.AppendLiteral("SYMBOLIC-LINK ");
                     }

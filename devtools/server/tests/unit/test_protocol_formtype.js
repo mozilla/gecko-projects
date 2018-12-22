@@ -1,12 +1,23 @@
-var protocol = require("devtools/server/protocol");
-var {method, Arg, Option, RetVal} = protocol;
+"use strict";
+
+var protocol = require("devtools/shared/protocol");
+var {RetVal} = protocol;
 
 protocol.types.addActorType("child");
 protocol.types.addActorType("root");
 
-// The child actor doesn't provide a form description
-var ChildActor = protocol.ActorClass({
+const childSpec = protocol.generateActorSpec({
   typeName: "child",
+
+  methods: {
+    getChild: {
+      response: RetVal("child")
+    }
+  }
+});
+
+// The child actor doesn't provide a form description
+var ChildActor = protocol.ActorClassWithSpec(childSpec, {
   initialize(conn) {
     protocol.Actor.prototype.initialize.call(this, conn);
   },
@@ -15,17 +26,15 @@ var ChildActor = protocol.ActorClass({
     return {
       actor: this.actorID,
       extra: "extra"
-    }
+    };
   },
 
-  getChild: method(function() {
+  getChild: function() {
     return this;
-  }, {
-    response: RetVal("child")
-  }),
+  }
 });
 
-var ChildFront = protocol.FrontClass(ChildActor, {
+var ChildFront = protocol.FrontClassWithSpec(childSpec, {
   initialize(client) {
     protocol.Front.prototype.initialize.call(this, client);
   },
@@ -35,26 +44,12 @@ var ChildFront = protocol.FrontClass(ChildActor, {
   }
 });
 
-// The root actor does provide a form description.
-var RootActor = protocol.ActorClass({
+const rootSpec = protocol.generateActorSpec({
   typeName: "root",
-  initialize(conn) {
-    protocol.Actor.prototype.initialize.call(this, conn);
-    this.manage(this);
-    this.child = new ChildActor();
-  },
 
   // Basic form type, relies on implicit DictType creation
   formType: {
     childActor: "child"
-  },
-
-  sayHello() {
-    return {
-      from: "root",
-      applicationType: "xpcshell-tests",
-      traits: []
-    }
   },
 
   // This detail uses explicit DictType creation
@@ -65,12 +60,46 @@ var RootActor = protocol.ActorClass({
   // This detail a string type.
   "formType#actorid": "string",
 
+  methods: {
+    getDefault: {
+      response: RetVal("root")
+    },
+    getDetail1: {
+      response: RetVal("root#detail1")
+    },
+    getDetail2: {
+      response: {
+        item: RetVal("root#actorid")
+      }
+    },
+    getUnknownDetail: {
+      response: RetVal("root#unknownDetail")
+    }
+  }
+});
+
+// The root actor does provide a form description.
+var RootActor = protocol.ActorClassWithSpec(rootSpec, {
+  initialize(conn) {
+    protocol.Actor.prototype.initialize.call(this, conn);
+    this.manage(this);
+    this.child = new ChildActor();
+  },
+
+  sayHello() {
+    return {
+      from: "root",
+      applicationType: "xpcshell-tests",
+      traits: []
+    };
+  },
+
   form(detail) {
     if (detail === "detail1") {
       return {
         actor: this.actorID,
         detailItem: this.child
-      }
+      };
     } else if (detail === "actorid") {
       return this.actorID;
     }
@@ -78,37 +107,27 @@ var RootActor = protocol.ActorClass({
     return {
       actor: this.actorID,
       childActor: this.child
-    }
+    };
   },
 
-  getDefault: method(function() {
+  getDefault: function() {
     return this;
-  }, {
-    response: RetVal("root")
-  }),
+  },
 
-  getDetail1: method(function() {
+  getDetail1: function() {
     return this;
-  }, {
-    response: RetVal("root#detail1")
-  }),
+  },
 
-  getDetail2: method(function() {
+  getDetail2: function() {
     return this;
-  }, {
-    response: {
-      item: RetVal("root#actorid")
-    }
-  }),
+  },
 
-  getUnknownDetail: method(function() {
+  getUnknownDetail: function() {
     return this;
-  }, {
-    response: RetVal("root#unknownDetail")
-  }),
+  }
 });
 
-var RootFront = protocol.FrontClass(RootActor, {
+var RootFront = protocol.FrontClassWithSpec(rootSpec, {
   initialize(client) {
     this.actorID = "root";
     protocol.Front.prototype.initialize.call(this, client);
@@ -122,7 +141,7 @@ var RootFront = protocol.FrontClass(RootActor, {
   }
 });
 
-const run_test = Test(function*() {
+const run_test = Test(async function() {
   DebuggerServer.createRootActor = (conn => {
     return RootActor(conn);
   });
@@ -132,29 +151,30 @@ const run_test = Test(function*() {
   const conn = new DebuggerClient(connection);
   const client = Async(conn);
 
-  yield client.connect();
+  await client.connect();
 
-  let rootFront = RootFront(conn);
+  const rootFront = RootFront(conn);
 
   // Trigger some methods that return forms.
-  let retval = yield rootFront.getDefault();
-  do_check_true(retval instanceof RootFront);
-  do_check_true(rootFront.lastForm.childActor instanceof ChildFront);
+  let retval = await rootFront.getDefault();
+  Assert.ok(retval instanceof RootFront);
+  Assert.ok(rootFront.lastForm.childActor instanceof ChildFront);
 
-  retval = yield rootFront.getDetail1();
-  do_check_true(retval instanceof RootFront);
-  do_check_true(rootFront.lastForm.detailItem instanceof ChildFront);
+  retval = await rootFront.getDetail1();
+  Assert.ok(retval instanceof RootFront);
+  Assert.ok(rootFront.lastForm.detailItem instanceof ChildFront);
 
-  retval = yield rootFront.getDetail2();
-  do_check_true(retval instanceof RootFront);
-  do_check_true(typeof(rootFront.lastForm) === "string");
+  retval = await rootFront.getDetail2();
+  Assert.ok(retval instanceof RootFront);
+  Assert.ok(typeof (rootFront.lastForm) === "string");
 
   // getUnknownDetail should fail, since no typeName is specified.
   try {
-    yield rootFront.getUnknownDetail();
-    do_check_true(false);
-  } catch(ex) {
+    await rootFront.getUnknownDetail();
+    Assert.ok(false);
+  } catch (ex) {
+    // empty
   }
 
-  yield client.close();
+  await client.close();
 });

@@ -28,7 +28,7 @@ public:
   bool Init(const nr_local_addr& local_addr) {
     ifname_ = local_addr.addr.ifname;
 
-    char buf[MAXIFNAME + 41];
+    char buf[MAXIFNAME + 47];
     int r = nr_transport_addr_fmt_ifname_addr_string(&local_addr.addr, buf, sizeof(buf));
     if (r) {
       MOZ_MTLOG(ML_ERROR, "Error formatting interface key.");
@@ -111,6 +111,10 @@ private:
     if (type & NR_INTERFACE_TYPE_MOBILE) {
       return 3;
     }
+    if (type & NR_INTERFACE_TYPE_TEREDO) {
+      // Teredo gets penalty because it's IP relayed
+      return 5;
+    }
     return 4;
   }
 
@@ -187,12 +191,11 @@ public:
   int sort() {
     UCHAR tmp_pref = 127;
     preference_map_.clear();
-    for (std::set<LocalAddress>::iterator i = local_addrs_.begin();
-         i != local_addrs_.end(); ++i) {
+    for (const auto& local_addr : local_addrs_) {
       if (tmp_pref == 0) {
         return R_FAILED;
       }
-      preference_map_.insert(make_pair(i->GetKey(), tmp_pref--));
+      preference_map_.insert(make_pair(local_addr.GetKey(), tmp_pref--));
     }
     sorted_ = true;
     return 0;
@@ -239,7 +242,7 @@ static int destroy(void **objp) {
   }
 
   InterfacePrioritizer *ip = static_cast<InterfacePrioritizer*>(*objp);
-  *objp = 0;
+  *objp = nullptr;
   delete ip;
 
   return 0;

@@ -5,9 +5,9 @@
 
 "use strict";
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const {parseSingleValue} = require("devtools/client/shared/css-parsing-utils");
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {parseSingleValue} = require("devtools/shared/css/parsing-utils");
+const {isCssPropertyKnown} = require("devtools/server/actors/css-properties");
 
 const TEST_DATA = [
   {input: null, throws: true},
@@ -22,7 +22,7 @@ const TEST_DATA = [
     input: "blue !  important",
     expected: {value: "blue", priority: "important"}
   },
-  {input: "blue !", expected: {value: "blue", priority: ""}},
+  {input: "blue !", expected: {value: "blue !", priority: ""}},
   {input: "blue !mportant", expected: {value: "blue !mportant", priority: ""}},
   {
     input: "  blue   !important ",
@@ -66,27 +66,27 @@ const TEST_DATA = [
 ];
 
 function run_test() {
-  for (let test of TEST_DATA) {
-    do_print("Test input value " + test.input);
+  for (const test of TEST_DATA) {
+    info("Test input value " + test.input);
     try {
-      let output = parseSingleValue(test.input);
+      const output = parseSingleValue(isCssPropertyKnown, test.input);
       assertOutput(output, test.expected);
     } catch (e) {
-      do_print("parseSingleValue threw an exception with the given input " +
+      info("parseSingleValue threw an exception with the given input " +
         "value");
       if (test.throws) {
-        do_print("Exception expected");
-        do_check_true(true);
+        info("Exception expected");
+        Assert.ok(true);
       } else {
-        do_print("Exception unexpected\n" + e);
-        do_check_true(false);
+        info("Exception unexpected\n" + e);
+        Assert.ok(false);
       }
     }
   }
 }
 
 function assertOutput(actual, expected) {
-  do_print("Check that the output has the expected value and priority");
-  do_check_eq(expected.value, actual.value);
-  do_check_eq(expected.priority, actual.priority);
+  info("Check that the output has the expected value and priority");
+  Assert.equal(expected.value, actual.value);
+  Assert.equal(expected.priority, actual.priority);
 }

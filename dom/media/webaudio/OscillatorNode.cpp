@@ -15,14 +15,14 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(OscillatorNode, AudioNode,
+NS_IMPL_CYCLE_COLLECTION_INHERITED(OscillatorNode, AudioScheduledSourceNode,
                                    mPeriodicWave, mFrequency, mDetune)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(OscillatorNode)
-NS_INTERFACE_MAP_END_INHERITING(AudioNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(OscillatorNode)
+NS_INTERFACE_MAP_END_INHERITING(AudioScheduledSourceNode)
 
-NS_IMPL_ADDREF_INHERITED(OscillatorNode, AudioNode)
-NS_IMPL_RELEASE_INHERITED(OscillatorNode, AudioNode)
+NS_IMPL_ADDREF_INHERITED(OscillatorNode, AudioScheduledSourceNode)
+NS_IMPL_RELEASE_INHERITED(OscillatorNode, AudioScheduledSourceNode)
 
 class OscillatorNodeEngine final : public AudioNodeEngine
 {
@@ -41,7 +41,7 @@ public:
     , mFinalFrequency(0.)
     , mPhaseIncrement(0.)
     , mRecomputeParameters(true)
-    , mCustomLength(0)
+    , mCustomDisableNormalization(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
     mBasicWaveFormCache = aDestination->Context()->GetBasicWaveFormCache();
@@ -56,7 +56,7 @@ public:
     FREQUENCY,
     DETUNE,
     TYPE,
-    PERIODICWAVE,
+    DISABLE_NORMALIZATION,
     START,
     STOP,
   };
@@ -103,8 +103,7 @@ public:
         mType = static_cast<OscillatorType>(aParam);
         if (mType == OscillatorType::Sine) {
           // Forget any previous custom data.
-          mCustomLength = 0;
-          mCustom = nullptr;
+          mCustomDisableNormalization = false;
           mPeriodicWave = nullptr;
           mRecomputeParameters = true;
         }
@@ -124,9 +123,9 @@ public:
         }
         // End type switch.
         break;
-      case PERIODICWAVE:
+      case DISABLE_NORMALIZATION:
         MOZ_ASSERT(aParam >= 0, "negative custom array length");
-        mCustomLength = static_cast<uint32_t>(aParam);
+        mCustomDisableNormalization = static_cast<uint32_t>(aParam);
         break;
       default:
         NS_ERROR("Bad OscillatorNodeEngine Int32Parameter.");
@@ -134,14 +133,17 @@ public:
     // End index switch.
   }
 
-  void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aBuffer) override
+  void SetBuffer(AudioChunk&& aBuffer) override
   {
-    MOZ_ASSERT(mCustomLength, "Custom buffer sent before length");
-    mCustom = aBuffer;
-    MOZ_ASSERT(mCustom->GetChannels() == 2,
+    MOZ_ASSERT(aBuffer.ChannelCount() == 2,
                "PeriodicWave should have sent two channels");
-    mPeriodicWave = WebCore::PeriodicWave::create(mSource->SampleRate(),
-    mCustom->GetData(0), mCustom->GetData(1), mCustomLength);
+    MOZ_ASSERT(aBuffer.mVolume == 1.0f);
+    mPeriodicWave =
+      WebCore::PeriodicWave::create(mSource->SampleRate(),
+                                    aBuffer.ChannelData<float>()[0],
+                                    aBuffer.ChannelData<float>()[1],
+                                    aBuffer.mDuration,
+                                    mCustomDisableNormalization);
   }
 
   void IncrementPhase()
@@ -363,10 +365,6 @@ public:
     // - mFrequency (internal ref owned by node)
     // - mDetune (internal ref owned by node)
 
-    if (mCustom) {
-      amount += mCustom->SizeOfIncludingThis(aMallocSizeOf);
-    }
-
     if (mPeriodicWave) {
       amount += mPeriodicWave->sizeOfIncludingThis(aMallocSizeOf);
     }
@@ -379,8 +377,9 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  AudioNodeStream* mSource;
-  AudioNodeStream* mDestination;
+  // mSource deletes this engine in its destructor
+  AudioNodeStream* MOZ_NON_OWNING_REF mSource;
+  RefPtr<AudioNodeStream> mDestination;
   StreamTime mStart;
   StreamTime mStop;
   AudioParamTimeline mFrequency;
@@ -390,32 +389,61 @@ public:
   float mFinalFrequency;
   float mPhaseIncrement;
   bool mRecomputeParameters;
-  RefPtr<ThreadSharedFloatArrayBufferList> mCustom;
   RefPtr<BasicWaveFormCache> mBasicWaveFormCache;
-  uint32_t mCustomLength;
+  bool mCustomDisableNormalization;
   RefPtr<WebCore::PeriodicWave> mPeriodicWave;
 };
 
 OscillatorNode::OscillatorNode(AudioContext* aContext)
-  : AudioNode(aContext,
-              2,
-              ChannelCountMode::Max,
-              ChannelInterpretation::Speakers)
+  : AudioScheduledSourceNode(aContext,
+                             2,
+                             ChannelCountMode::Max,
+                             ChannelInterpretation::Speakers)
   , mType(OscillatorType::Sine)
-  , mFrequency(new AudioParam(this, OscillatorNodeEngine::FREQUENCY,
-                              440.0f, "frequency"))
-  , mDetune(new AudioParam(this, OscillatorNodeEngine::DETUNE, 0.0f, "detune"))
+  , mFrequency(
+    new AudioParam(this, OscillatorNodeEngine::FREQUENCY, "frequency", 440.0f,
+                   -(aContext->SampleRate() / 2), aContext->SampleRate() / 2))
+  , mDetune(new AudioParam(this, OscillatorNodeEngine::DETUNE, "detune", 0.0f))
   , mStartCalled(false)
 {
+
   OscillatorNodeEngine* engine = new OscillatorNodeEngine(this, aContext->Destination());
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NEED_MAIN_THREAD_FINISHED);
+                                    AudioNodeStream::NEED_MAIN_THREAD_FINISHED,
+                                    aContext->Graph());
   engine->SetSourceStream(mStream);
   mStream->AddMainThreadListener(this);
 }
 
-OscillatorNode::~OscillatorNode()
+/* static */ already_AddRefed<OscillatorNode>
+OscillatorNode::Create(AudioContext& aAudioContext,
+                       const OscillatorOptions& aOptions,
+                       ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<OscillatorNode> audioNode = new OscillatorNode(&aAudioContext);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  audioNode->SetType(aOptions.mType, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  audioNode->Frequency()->SetValue(aOptions.mFrequency);
+  audioNode->Detune()->SetValue(aOptions.mDetune);
+
+  if (aOptions.mPeriodicWave.WasPassed()) {
+    audioNode->SetPeriodicWave(aOptions.mPeriodicWave.Value());
+  }
+
+  return audioNode.forget();
 }
 
 size_t
@@ -441,7 +469,7 @@ OscillatorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 OscillatorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return OscillatorNodeBinding::Wrap(aCx, this, aGivenProto);
+  return OscillatorNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -472,11 +500,10 @@ void OscillatorNode::SendPeriodicWaveToStream()
                "Sending custom waveform to engine thread with non-custom type");
   MOZ_ASSERT(mStream, "Missing node stream.");
   MOZ_ASSERT(mPeriodicWave, "Send called without PeriodicWave object.");
-  SendInt32ParameterToStream(OscillatorNodeEngine::PERIODICWAVE,
-                             mPeriodicWave->DataLength());
-  RefPtr<ThreadSharedFloatArrayBufferList> data =
-    mPeriodicWave->GetThreadSharedBuffer();
-  mStream->SetBuffer(data.forget());
+  SendInt32ParameterToStream(OscillatorNodeEngine::DISABLE_NORMALIZATION,
+                             mPeriodicWave->DisableNormalization());
+  AudioChunk data = mPeriodicWave->GetThreadSharedBuffer();
+  mStream->SetBuffer(std::move(data));
 }
 
 void
@@ -533,11 +560,14 @@ OscillatorNode::NotifyMainThreadStreamFinished()
 {
   MOZ_ASSERT(mStream->IsFinished());
 
-  class EndedEventDispatcher final : public nsRunnable
+  class EndedEventDispatcher final : public Runnable
   {
   public:
     explicit EndedEventDispatcher(OscillatorNode* aNode)
-      : mNode(aNode) {}
+      : mozilla::Runnable("EndedEventDispatcher")
+      , mNode(aNode)
+    {
+    }
     NS_IMETHOD Run() override
     {
       // If it's not safe to run scripts right now, schedule this to run later
@@ -555,7 +585,7 @@ OscillatorNode::NotifyMainThreadStreamFinished()
     RefPtr<OscillatorNode> mNode;
   };
 
-  NS_DispatchToMainThread(new EndedEventDispatcher(this));
+  Context()->Dispatch(do_AddRef(new EndedEventDispatcher(this)));
 
   // Drop the playing reference
   // Warning: The below line might delete this.

@@ -8,6 +8,7 @@
 
 #include "nsIFrame.h"
 #include "nsISelectionListener.h"
+#include "mozilla/WeakPtr.h"
 
 class nsIPresShell;
 
@@ -15,6 +16,7 @@ namespace mozilla {
 
 namespace dom {
 class Element;
+class Selection;
 }
 
 namespace a11y {
@@ -121,9 +123,10 @@ protected:
 
 private:
   // Currently focused control.
-  nsWeakFrame mCurrCtrlFrame;
   int32_t mCaretOffset;
   HyperTextAccessible* mAccWithCaret;
+  WeakPtr<dom::Selection> mCurrCtrlNormalSel;
+  WeakPtr<dom::Selection> mCurrCtrlSpellSel;
 };
 
 } // namespace a11y

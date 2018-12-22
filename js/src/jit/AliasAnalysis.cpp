@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "jit/AliasAnalysisShared.h"
 #include "jit/Ion.h"
 #include "jit/IonBuilder.h"
 #include "jit/JitSpewer.h"
@@ -18,8 +19,6 @@
 
 using namespace js;
 using namespace js::jit;
-
-using mozilla::Array;
 
 namespace js {
 namespace jit {
@@ -56,45 +55,8 @@ class LoopAliasInfo : public TempObject
 } // namespace jit
 } // namespace js
 
-namespace {
-
-// Iterates over the flags in an AliasSet.
-class AliasSetIterator
-{
-  private:
-    uint32_t flags;
-    unsigned pos;
-
-  public:
-    explicit AliasSetIterator(AliasSet set)
-      : flags(set.flags()), pos(0)
-    {
-        while (flags && (flags & 1) == 0) {
-            flags >>= 1;
-            pos++;
-        }
-    }
-    AliasSetIterator& operator ++(int) {
-        do {
-            flags >>= 1;
-            pos++;
-        } while (flags && (flags & 1) == 0);
-        return *this;
-    }
-    explicit operator bool() const {
-        return !!flags;
-    }
-    unsigned operator*() const {
-        MOZ_ASSERT(pos < AliasSet::NumCategories);
-        return pos;
-    }
-};
-
-} /* anonymous namespace */
-
 AliasAnalysis::AliasAnalysis(MIRGenerator* mir, MIRGraph& graph)
-  : mir(mir),
-    graph_(graph),
+  : AliasAnalysisShared(mir, graph),
     loop_(nullptr)
 {
 }
@@ -127,6 +89,7 @@ BlockMightReach(MBasicBlock* src, MBasicBlock* dest)
 static void
 IonSpewDependency(MInstruction* load, MInstruction* store, const char* verb, const char* reason)
 {
+#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_Alias))
         return;
 
@@ -136,11 +99,13 @@ IonSpewDependency(MInstruction* load, MInstruction* store, const char* verb, con
     out.printf(" %s on store ", verb);
     store->printName(out);
     out.printf(" (%s)\n", reason);
+#endif
 }
 
 static void
 IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
 {
+#ifdef JS_JITSPEW
     if (!JitSpewEnabled(JitSpew_Alias))
         return;
 
@@ -148,6 +113,7 @@ IonSpewAliasInfo(const char* pre, MInstruction* ins, const char* post)
     out.printf("%s ", pre);
     ins->printName(out);
     out.printf(" %s\n", post);
+#endif
 }
 
 // This pass annotates every load instruction with the last store instruction
@@ -175,7 +141,7 @@ AliasAnalysis::analyze()
         MInstructionVector defs(alloc());
         if (!defs.append(firstIns))
             return false;
-        if (!stores.append(Move(defs)))
+        if (!stores.append(std::move(defs)))
             return false;
     }
 
@@ -189,7 +155,9 @@ AliasAnalysis::analyze()
 
         if (block->isLoopHeader()) {
             JitSpew(JitSpew_Alias, "Processing loop header %d", block->id());
-            loop_ = new(alloc()) LoopAliasInfo(alloc(), loop_, *block);
+            loop_ = new(alloc().fallible()) LoopAliasInfo(alloc(), loop_, *block);
+            if (!loop_)
+                return false;
         }
 
         for (MPhiIterator def(block->phisBegin()), end(block->phisEnd()); def != end; ++def)
@@ -217,12 +185,14 @@ AliasAnalysis::analyze()
                         return false;
                 }
 
+#ifdef JS_JITSPEW
                 if (JitSpewEnabled(JitSpew_Alias)) {
                     Fprinter& out = JitSpewPrinter();
                     out.printf("Processing store ");
                     def->printName(out);
                     out.printf(" (flags %x)\n", set.flags());
                 }
+#endif
             } else {
                 // Find the most recent store on which this instruction depends.
                 MInstruction* lastStore = firstIns;
@@ -231,7 +201,10 @@ AliasAnalysis::analyze()
                     MInstructionVector& aliasedStores = stores[*iter];
                     for (int i = aliasedStores.length() - 1; i >= 0; i--) {
                         MInstruction* store = aliasedStores[i];
-                        if (def->mightAlias(store) && BlockMightReach(store->block(), *block)) {
+                        if (genericMightAlias(*def, store) != MDefinition::AliasType::NoAlias &&
+                            def->mightAlias(store) != MDefinition::AliasType::NoAlias &&
+                            BlockMightReach(store->block(), *block))
+                        {
                             if (lastStore->id() < store->id())
                                 lastStore = store;
                             break;
@@ -276,7 +249,9 @@ AliasAnalysis::analyze()
                         MInstruction* store = aliasedStores[i];
                         if (store->id() < firstLoopIns->id())
                             break;
-                        if (ins->mightAlias(store)) {
+                        if (genericMightAlias(ins, store) != MDefinition::AliasType::NoAlias &&
+                            ins->mightAlias(store) != MDefinition::AliasType::NoAlias)
+                        {
                             hasAlias = true;
                             IonSpewDependency(ins, store, "aliases", "store in loop body");
                             break;
@@ -306,6 +281,8 @@ AliasAnalysis::analyze()
             loop_ = loop_->outer();
         }
     }
+
+    spewDependencyList();
 
     MOZ_ASSERT(loop_ == nullptr);
     return true;

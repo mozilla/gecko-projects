@@ -17,39 +17,41 @@ typedef nsMainThreadPtrHolder<nsIHttpActivityObserver> ObserverHolder;
 typedef nsMainThreadPtrHandle<nsIHttpActivityObserver> ObserverHandle;
 typedef nsTArray<ObserverHandle> ObserverArray;
 
-class nsHttpActivityEvent : public nsRunnable
+class nsHttpActivityEvent : public Runnable
 {
 public:
-    nsHttpActivityEvent(nsISupports *aHttpChannel,
-                        uint32_t aActivityType,
-                        uint32_t aActivitySubtype,
-                        PRTime aTimestamp,
-                        uint64_t aExtraSizeData,
-                        const nsACString & aExtraStringData,
-                        ObserverArray *aObservers)
-        : mHttpChannel(aHttpChannel)
-        , mActivityType(aActivityType)
-        , mActivitySubtype(aActivitySubtype)
-        , mTimestamp(aTimestamp)
-        , mExtraSizeData(aExtraSizeData)
-        , mExtraStringData(aExtraStringData)
-        , mObservers(*aObservers)
-    {
+  nsHttpActivityEvent(nsISupports* aHttpChannel,
+                      uint32_t aActivityType,
+                      uint32_t aActivitySubtype,
+                      PRTime aTimestamp,
+                      uint64_t aExtraSizeData,
+                      const nsACString& aExtraStringData,
+                      ObserverArray* aObservers)
+    : Runnable("net::nsHttpActivityEvent")
+    , mHttpChannel(aHttpChannel)
+    , mActivityType(aActivityType)
+    , mActivitySubtype(aActivitySubtype)
+    , mTimestamp(aTimestamp)
+    , mExtraSizeData(aExtraSizeData)
+    , mExtraStringData(aExtraStringData)
+    , mObservers(*aObservers)
+  {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
-        for (size_t i = 0 ; i < mObservers.Length() ; i++)
-            mObservers[i]->ObserveActivity(mHttpChannel, mActivityType,
-                                           mActivitySubtype, mTimestamp,
-                                           mExtraSizeData, mExtraStringData);
+        for (size_t i = 0 ; i < mObservers.Length() ; i++) {
+            Unused <<
+                mObservers[i]->ObserveActivity(mHttpChannel, mActivityType,
+                                               mActivitySubtype, mTimestamp,
+                                               mExtraSizeData,
+                                               mExtraStringData);
+        }
         return NS_OK;
     }
 
 private:
-    virtual ~nsHttpActivityEvent()
-    {
-    }
+    virtual ~nsHttpActivityEvent() = default;
 
     nsCOMPtr<nsISupports> mHttpChannel;
     uint32_t mActivityType;
@@ -67,10 +69,6 @@ NS_IMPL_ISUPPORTS(nsHttpActivityDistributor,
 
 nsHttpActivityDistributor::nsHttpActivityDistributor()
     : mLock("nsHttpActivityDistributor.mLock")
-{
-}
-
-nsHttpActivityDistributor::~nsHttpActivityDistributor()
 {
 }
 
@@ -112,7 +110,7 @@ nsHttpActivityDistributor::AddObserver(nsIHttpActivityObserver *aObserver)
 {
     MutexAutoLock lock(mLock);
 
-    ObserverHandle observer(new ObserverHolder(aObserver));
+    ObserverHandle observer(new ObserverHolder("nsIHttpActivityObserver", aObserver));
     if (!mObservers.AppendElement(observer))
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -124,7 +122,7 @@ nsHttpActivityDistributor::RemoveObserver(nsIHttpActivityObserver *aObserver)
 {
     MutexAutoLock lock(mLock);
 
-    ObserverHandle observer(new ObserverHolder(aObserver));
+    ObserverHandle observer(new ObserverHolder("nsIHttpActivityObserver", aObserver));
     if (!mObservers.RemoveElement(observer))
         return NS_ERROR_FAILURE;
 

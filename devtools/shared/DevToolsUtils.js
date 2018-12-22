@@ -2,45 +2,68 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* globals setImmediate, rpc */
+
 "use strict";
 
 /* General utilities used throughout devtools. */
 
-var { Ci, Cu, Cc, components } = require("chrome");
+var { Ci, Cu, components } = require("chrome");
 var Services = require("Services");
 var promise = require("promise");
+var defer = require("devtools/shared/defer");
+var flags = require("./flags");
+var {getStack, callFunctionWithAsyncStack} = require("devtools/shared/platform/stack");
 
 loader.lazyRequireGetter(this, "FileUtils",
                          "resource://gre/modules/FileUtils.jsm", true);
-loader.lazyRequireGetter(this, "setTimeout", "Timer", true);
+
+// Using this name lets the eslint plugin know about lazy defines in
+// this file.
+var DevToolsUtils = exports;
 
 // Re-export the thread-safe utils.
 const ThreadSafeDevToolsUtils = require("./ThreadSafeDevToolsUtils.js");
-for (let key of Object.keys(ThreadSafeDevToolsUtils)) {
+for (const key of Object.keys(ThreadSafeDevToolsUtils)) {
   exports[key] = ThreadSafeDevToolsUtils[key];
 }
 
 /**
+ * Helper for Cu.isCrossProcessWrapper that works with Debugger.Objects.
+ * This will always return false in workers (see the implementation in
+ * ThreadSafeDevToolsUtils.js).
+ *
+ * @param Debugger.Object debuggerObject
+ * @return bool
+ */
+exports.isCPOW = function(debuggerObject) {
+  try {
+    return Cu.isCrossProcessWrapper(debuggerObject.unsafeDereference());
+  } catch (e) { }
+  return false;
+};
+
+/**
  * Waits for the next tick in the event loop to execute a callback.
  */
-exports.executeSoon = function executeSoon(aFn) {
+exports.executeSoon = function(fn) {
   if (isWorker) {
-    setImmediate(aFn);
+    setImmediate(fn);
   } else {
     let executor;
     // Only enable async stack reporting when DEBUG_JS_MODULES is set
     // (customized local builds) to avoid a performance penalty.
-    if (AppConstants.DEBUG_JS_MODULES || exports.testing) {
-      let stack = components.stack;
+    if (AppConstants.DEBUG_JS_MODULES || flags.testing) {
+      const stack = getStack();
       executor = () => {
-        Cu.callFunctionWithAsyncStack(aFn, stack, "DevToolsUtils.executeSoon");
+        callFunctionWithAsyncStack(fn, stack, "DevToolsUtils.executeSoon");
       };
     } else {
-      executor = aFn;
+      executor = fn;
     }
-    Services.tm.mainThread.dispatch({
+    Services.tm.dispatchToMainThread({
       run: exports.makeInfallible(executor)
-    }, Ci.nsIThread.DISPATCH_NORMAL);
+    });
   }
 };
 
@@ -50,8 +73,8 @@ exports.executeSoon = function executeSoon(aFn) {
  * @return Promise
  *         A promise that is resolved after the next tick in the event loop.
  */
-exports.waitForTick = function waitForTick() {
-  let deferred = promise.defer();
+exports.waitForTick = function() {
+  const deferred = defer();
   exports.executeSoon(deferred.resolve);
   return deferred.promise;
 };
@@ -59,14 +82,14 @@ exports.waitForTick = function waitForTick() {
 /**
  * Waits for the specified amount of time to pass.
  *
- * @param number aDelay
+ * @param number delay
  *        The amount of time to wait, in milliseconds.
  * @return Promise
  *         A promise that is resolved after the specified amount of time passes.
  */
-exports.waitForTime = function waitForTime(aDelay) {
-  let deferred = promise.defer();
-  setTimeout(deferred.resolve, aDelay);
+exports.waitForTime = function(delay) {
+  const deferred = defer();
+  setTimeout(deferred.resolve, delay);
   return deferred.promise;
 };
 
@@ -75,22 +98,22 @@ exports.waitForTime = function waitForTime(aDelay) {
  * very large arrays by yielding to the browser and continuing execution on the
  * next tick.
  *
- * @param Array aArray
+ * @param Array array
  *        The array being iterated over.
- * @param Function aFn
+ * @param Function fn
  *        The function called on each item in the array. If a promise is
  *        returned by this function, iterating over the array will be paused
  *        until the respective promise is resolved.
  * @returns Promise
  *          A promise that is resolved once the whole array has been iterated
- *          over, and all promises returned by the aFn callback are resolved.
+ *          over, and all promises returned by the fn callback are resolved.
  */
-exports.yieldingEach = function yieldingEach(aArray, aFn) {
-  const deferred = promise.defer();
+exports.yieldingEach = function(array, fn) {
+  const deferred = defer();
 
   let i = 0;
-  let len = aArray.length;
-  let outstanding = [deferred.promise];
+  const len = array.length;
+  const outstanding = [deferred.promise];
 
   (function loop() {
     const start = Date.now();
@@ -106,7 +129,7 @@ exports.yieldingEach = function yieldingEach(aArray, aFn) {
       }
 
       try {
-        outstanding.push(aFn(aArray[i], i++));
+        outstanding.push(fn(array[i], i++));
       } catch (e) {
         deferred.reject(e);
         return;
@@ -124,22 +147,21 @@ exports.yieldingEach = function yieldingEach(aArray, aFn) {
  * allows the lazy getter to be defined on a prototype and work correctly with
  * instances.
  *
- * @param Object aObject
+ * @param Object object
  *        The prototype object to define the lazy getter on.
- * @param String aKey
+ * @param String key
  *        The key to define the lazy getter on.
- * @param Function aCallback
+ * @param Function callback
  *        The callback that will be called to determine the value. Will be
  *        called with the |this| value of the current instance.
  */
-exports.defineLazyPrototypeGetter =
-function defineLazyPrototypeGetter(aObject, aKey, aCallback) {
-  Object.defineProperty(aObject, aKey, {
+exports.defineLazyPrototypeGetter = function(object, key, callback) {
+  Object.defineProperty(object, key, {
     configurable: true,
     get: function() {
-      const value = aCallback.call(this);
+      const value = callback.call(this);
 
-      Object.defineProperty(this, aKey, {
+      Object.defineProperty(this, key, {
         configurable: true,
         writable: true,
         value: value
@@ -148,57 +170,139 @@ function defineLazyPrototypeGetter(aObject, aKey, aCallback) {
       return value;
     }
   });
-}
+};
 
 /**
  * Safely get the property value from a Debugger.Object for a given key. Walks
  * the prototype chain until the property is found.
  *
- * @param Debugger.Object aObject
+ * @param Debugger.Object object
  *        The Debugger.Object to get the value from.
- * @param String aKey
+ * @param String key
  *        The key to look for.
  * @return Any
  */
-exports.getProperty = function getProperty(aObj, aKey) {
-  let root = aObj;
-  try {
-    do {
-      const desc = aObj.getOwnPropertyDescriptor(aKey);
-      if (desc) {
-        if ("value" in desc) {
-          return desc.value;
-        }
-        // Call the getter if it's safe.
-        return exports.hasSafeGetter(desc) ? desc.get.call(root).return : undefined;
+exports.getProperty = function(object, key) {
+  const root = object;
+  while (object && exports.isSafeDebuggerObject(object)) {
+    let desc;
+    try {
+      desc = object.getOwnPropertyDescriptor(key);
+    } catch (e) {
+      // The above can throw when the debuggee does not subsume the object's
+      // compartment, or for some WrappedNatives like Cu.Sandbox.
+      return undefined;
+    }
+    if (desc) {
+      if ("value" in desc) {
+        return desc.value;
       }
-      aObj = aObj.proto;
-    } while (aObj);
-  } catch (e) {
-    // If anything goes wrong report the error and return undefined.
-    exports.reportException("getProperty", e);
+      // Call the getter if it's safe.
+      if (exports.hasSafeGetter(desc)) {
+        try {
+          return desc.get.call(root).return;
+        } catch (e) {
+          // If anything goes wrong report the error and return undefined.
+          exports.reportException("getProperty", e);
+        }
+      }
+      return undefined;
+    }
+    object = object.proto;
   }
   return undefined;
 };
 
 /**
+ * Removes all the non-opaque security wrappers of a debuggee object.
+ *
+ * @param obj Debugger.Object
+ *        The debuggee object to be unwrapped.
+ * @return Debugger.Object|null|undefined
+ *      - If the object has no wrapper, the same `obj` is returned. Note DeadObject
+ *        objects belong to this case.
+ *      - Otherwise, if the debuggee doesn't subsume object's compartment, returns `null`.
+ *      - Otherwise, if the object belongs to an invisible-to-debugger compartment,
+ *        returns `undefined`. Note CPOW objects belong to this case.
+ *      - Otherwise, returns the unwrapped object.
+ */
+exports.unwrap = function unwrap(obj) {
+  // Check if `obj` has an opaque wrapper.
+  if (obj.class === "Opaque") {
+    return obj;
+  }
+
+  // Attempt to unwrap via `obj.unwrap()`. Note that:
+  // - This will return `null` if the debuggee does not subsume object's compartment.
+  // - This will throw if the object belongs to an invisible-to-debugger compartment.
+  //   This case includes CPOWs (see bug 1391449).
+  // - This will return `obj` if there is no wrapper.
+  let unwrapped;
+  try {
+    unwrapped = obj.unwrap();
+  } catch (err) {
+    return undefined;
+  }
+
+  // Check if further unwrapping is not possible.
+  if (!unwrapped || unwrapped === obj) {
+    return unwrapped;
+  }
+
+  // Recursively remove additional security wrappers.
+  return unwrap(unwrapped);
+};
+
+/**
+ * Checks whether a debuggee object is safe. Unsafe objects may run proxy traps or throw
+ * when using `proto`, `isExtensible`, `isFrozen` or `isSealed`. Note that safe objects
+ * may still throw when calling `getOwnPropertyNames`, `getOwnPropertyDescriptor`, etc.
+ * Also note CPOW objects are considered to be unsafe, and DeadObject objects to be safe.
+ *
+ * @param obj Debugger.Object
+ *        The debuggee object to be checked.
+ * @return boolean
+ */
+exports.isSafeDebuggerObject = function(obj) {
+  const unwrapped = exports.unwrap(obj);
+
+  // Objects belonging to an invisible-to-debugger compartment might be proxies,
+  // so just in case consider them unsafe. CPOWs are included in this case.
+  if (unwrapped === undefined) {
+    return false;
+  }
+
+  // If the debuggee does not subsume the object's compartment, most properties won't
+  // be accessible. Cross-origin Window and Location objects might expose some, though.
+  // Therefore, it must be considered safe. Note that proxy objects have fully opaque
+  // security wrappers, so proxy traps won't run in this case.
+  if (unwrapped === null) {
+    return true;
+  }
+
+  // Proxy objects can run traps when accessed. `isProxy` getter is called on `unwrapped`
+  // instead of on `obj` in order to detect proxies behind transparent wrappers.
+  if (unwrapped.isProxy) {
+    return false;
+  }
+
+  return true;
+};
+
+/**
  * Determines if a descriptor has a getter which doesn't call into JavaScript.
  *
- * @param Object aDesc
+ * @param Object desc
  *        The descriptor to check for a safe getter.
  * @return Boolean
  *         Whether a safe getter was found.
  */
-exports.hasSafeGetter = function hasSafeGetter(aDesc) {
+exports.hasSafeGetter = function(desc) {
   // Scripted functions that are CCWs will not appear scripted until after
   // unwrapping.
-  try {
-    let fn = aDesc.get.unwrap();
-    return fn && fn.callable && fn.class == "Function" && fn.script === undefined;
-  } catch(e) {
-    // Avoid exception 'Object in compartment marked as invisible to Debugger'
-    return false;
-  }
+  let fn = desc.get;
+  fn = fn && exports.unwrap(fn);
+  return fn && fn.callable && fn.class == "Function" && fn.script === undefined;
 };
 
 /**
@@ -208,92 +312,120 @@ exports.hasSafeGetter = function hasSafeGetter(aDesc) {
  *
  * See bugs 945920 and 946752 for discussion.
  *
- * @type Object aObj
+ * @type Object obj
  *       The object to check.
  * @return Boolean
- *         True if it is safe to read properties from aObj, or false otherwise.
+ *         True if it is safe to read properties from obj, or false otherwise.
  */
-exports.isSafeJSObject = function isSafeJSObject(aObj) {
+exports.isSafeJSObject = function(obj) {
   // If we are running on a worker thread, Cu is not available. In this case,
   // we always return false, just to be on the safe side.
   if (isWorker) {
     return false;
   }
 
-  if (Cu.getGlobalForObject(aObj) ==
+  if (Cu.getGlobalForObject(obj) ==
       Cu.getGlobalForObject(exports.isSafeJSObject)) {
-    return true; // aObj is not a cross-compartment wrapper.
+    // obj is not a cross-compartment wrapper.
+    return true;
   }
 
-  let principal = Cu.getObjectPrincipal(aObj);
-  if (Services.scriptSecurityManager.isSystemPrincipal(principal)) {
-    return true; // allow chrome objects
+  // Xray wrappers protect against unintended code execution.
+  if (Cu.isXrayWrapper(obj)) {
+    return true;
   }
 
-  return Cu.isXrayWrapper(aObj);
+  // If there aren't Xrays, only allow chrome objects.
+  const principal = Cu.getObjectPrincipal(obj);
+  if (!Services.scriptSecurityManager.isSystemPrincipal(principal)) {
+    return false;
+  }
+
+  // Scripted proxy objects without Xrays can run their proxy traps.
+  if (Cu.isProxy(obj)) {
+    return false;
+  }
+
+  // Even if `obj` looks safe, an unsafe object in its prototype chain may still
+  // run unintended code, e.g. when using the `instanceof` operator.
+  const proto = Object.getPrototypeOf(obj);
+  if (proto && !exports.isSafeJSObject(proto)) {
+    return false;
+  }
+
+  // Allow non-problematic chrome objects.
+  return true;
 };
 
-exports.dumpn = function dumpn(str) {
-  if (exports.dumpn.wantLogging) {
+/**
+ * Dump with newline - This is a logging function that will only output when
+ * the preference "devtools.debugger.log" is set to true. Typically it is used
+ * for logging the remote debugging protocol calls.
+ */
+exports.dumpn = function(str) {
+  if (flags.wantLogging) {
     dump("DBG-SERVER: " + str + "\n");
   }
 };
 
-// We want wantLogging to be writable. The exports object is frozen by the
-// loader, so define it on dumpn instead.
-exports.dumpn.wantLogging = false;
-
 /**
- * A verbose logger for low-level tracing.
+ * Dump verbose - This is a verbose logger for low-level tracing, that is typically
+ * used to provide information about the remote debugging protocol's transport
+ * mechanisms. The logging can be enabled by changing the preferences
+ * "devtools.debugger.log" and "devtools.debugger.log.verbose" to true.
  */
 exports.dumpv = function(msg) {
-  if (exports.dumpv.wantVerbose) {
+  if (flags.wantVerbose) {
     exports.dumpn(msg);
   }
 };
 
-// We want wantLogging to be writable. The exports object is frozen by the
-// loader, so define it on dumpn instead.
-exports.dumpv.wantVerbose = false;
-
 /**
  * Defines a getter on a specified object that will be created upon first use.
  *
- * @param aObject
+ * @param object
  *        The object to define the lazy getter on.
- * @param aName
- *        The name of the getter to define on aObject.
- * @param aLambda
+ * @param name
+ *        The name of the getter to define on object.
+ * @param lambda
  *        A function that returns what the getter should return.  This will
  *        only ever be called once.
  */
-exports.defineLazyGetter = function defineLazyGetter(aObject, aName, aLambda) {
-  Object.defineProperty(aObject, aName, {
-    get: function () {
-      delete aObject[aName];
-      return aObject[aName] = aLambda.apply(aObject);
+exports.defineLazyGetter = function(object, name, lambda) {
+  Object.defineProperty(object, name, {
+    get: function() {
+      delete object[name];
+      object[name] = lambda.apply(object);
+      return object[name];
     },
     configurable: true,
     enumerable: true
   });
 };
 
-exports.defineLazyGetter(this, "AppConstants", () => {
+DevToolsUtils.defineLazyGetter(this, "AppConstants", () => {
   if (isWorker) {
     return {};
   }
-  const scope = {};
-  Cu.import("resource://gre/modules/AppConstants.jsm", scope);
-  return scope.AppConstants;
+  return require("resource://gre/modules/AppConstants.jsm").AppConstants;
 });
 
 /**
  * No operation. The empty function.
  */
-exports.noop = function () { };
+exports.noop = function() { };
+
+let assertionFailureCount = 0;
+
+Object.defineProperty(exports, "assertionFailureCount", {
+  get() {
+    return assertionFailureCount;
+  }
+});
 
 function reallyAssert(condition, message) {
   if (!condition) {
+    assertionFailureCount++;
     const err = new Error("Assertion failure: " + message);
     exports.reportException("DevToolsUtils.assert", err);
     throw err;
@@ -308,8 +440,7 @@ function reallyAssert(condition, message) {
  *
  * Assertions are enabled when any of the following are true:
  *   - This is a DEBUG_JS_MODULES build
- *   - This is a DEBUG build
- *   - DevToolsUtils.testing is set to true
+ *   - flags.testing is set to true
  *
  * If assertions are enabled, then `condition` is checked and if false-y, the
  * assertion failure is logged and then an error is thrown.
@@ -317,7 +448,7 @@ function reallyAssert(condition, message) {
  * If assertions are not enabled, then this function is a no-op.
  */
 Object.defineProperty(exports, "assert", {
-  get: () => (AppConstants.DEBUG || AppConstants.DEBUG_JS_MODULES || this.testing)
+  get: () => (AppConstants.DEBUG_JS_MODULES || flags.testing)
     ? reallyAssert
     : exports.noop,
 });
@@ -326,55 +457,55 @@ Object.defineProperty(exports, "assert", {
  * Defines a getter on a specified object for a module.  The module will not
  * be imported until first use.
  *
- * @param aObject
+ * @param object
  *        The object to define the lazy getter on.
- * @param aName
- *        The name of the getter to define on aObject for the module.
- * @param aResource
+ * @param name
+ *        The name of the getter to define on object for the module.
+ * @param resource
  *        The URL used to obtain the module.
- * @param aSymbol
+ * @param symbol
  *        The name of the symbol exported by the module.
- *        This parameter is optional and defaults to aName.
+ *        This parameter is optional and defaults to name.
  */
-exports.defineLazyModuleGetter = function defineLazyModuleGetter(aObject, aName,
-                                                                 aResource,
-                                                                 aSymbol)
-{
-  this.defineLazyGetter(aObject, aName, function XPCU_moduleLambda() {
-    var temp = {};
-    Cu.import(aResource, temp);
-    return temp[aSymbol || aName];
+exports.defineLazyModuleGetter = function(object, name, resource, symbol) {
+  this.defineLazyGetter(object, name, function() {
+    const temp = {};
+    ChromeUtils.import(resource, temp);
+    return temp[symbol || name];
   });
 };
 
-exports.defineLazyGetter(this, "NetUtil", () => {
-  return Cu.import("resource://gre/modules/NetUtil.jsm", {}).NetUtil;
+DevToolsUtils.defineLazyGetter(this, "NetUtil", () => {
+  return require("resource://gre/modules/NetUtil.jsm").NetUtil;
 });
 
-exports.defineLazyGetter(this, "OS", () => {
-  return Cu.import("resource://gre/modules/osfile.jsm", {}).OS;
+DevToolsUtils.defineLazyGetter(this, "OS", () => {
+  return require("resource://gre/modules/osfile.jsm").OS;
 });
 
-exports.defineLazyGetter(this, "TextDecoder", () => {
-  return Cu.import("resource://gre/modules/osfile.jsm", {}).TextDecoder;
-});
-
-exports.defineLazyGetter(this, "NetworkHelper", () => {
+DevToolsUtils.defineLazyGetter(this, "NetworkHelper", () => {
   return require("devtools/shared/webconsole/network-helper");
 });
 
 /**
  * Performs a request to load the desired URL and returns a promise.
  *
- * @param aURL String
+ * @param urlIn String
  *        The URL we will request.
  * @param aOptions Object
  *        An object with the following optional properties:
  *        - loadFromCache: if false, will bypass the cache and
  *          always load fresh from the network (default: true)
  *        - policy: the nsIContentPolicy type to apply when fetching the URL
+ *                  (only works when loading from system principal)
  *        - window: the window to get the loadGroup from
  *        - charset: the charset to use if the channel doesn't provide one
+ *        - principal: the principal to use, if omitted, the request is loaded
+ *                     with a codebase principal corresponding to the url being
+ *                     loaded, using the origin attributes of the window, if any.
+ *        - cacheKey: when loading from cache, use this key to retrieve a cache
+ *                    specific to a given SHEntry. (Allows loading POST
+ *                    requests from cache)
  * @returns Promise that resolves with an object with the following members on
  *          success:
  *           - content: the document at that URL, as a string,
@@ -386,12 +517,14 @@ exports.defineLazyGetter(this, "NetworkHelper", () => {
  * without relying on caching when we can (not for eval, etc.):
  * http://www.softwareishard.com/blog/firebug/nsitraceablechannel-intercept-http-traffic/
  */
-function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
-                                          policy: Ci.nsIContentPolicy.TYPE_OTHER,
-                                          window: null,
-                                          charset: null }) {
+function mainThreadFetch(urlIn, aOptions = { loadFromCache: true,
+                                             policy: Ci.nsIContentPolicy.TYPE_OTHER,
+                                             window: null,
+                                             charset: null,
+                                             principal: null,
+                                             cacheKey: 0 }) {
   // Create a channel.
-  let url = aURL.split(" -> ").pop();
+  const url = urlIn.split(" -> ").pop();
   let channel;
   try {
     channel = newChannelForURL(url, aOptions);
@@ -404,6 +537,13 @@ function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
     ? channel.LOAD_FROM_CACHE
     : channel.LOAD_BYPASS_CACHE;
 
+  // When loading from cache, the cacheKey allows us to target a specific
+  // SHEntry and offer ways to restore POST requests from cache.
+  if (aOptions.loadFromCache &&
+      aOptions.cacheKey != 0 && channel instanceof Ci.nsICacheInfoChannel) {
+    channel.cacheKey = aOptions.cacheKey;
+  }
+
   if (aOptions.window) {
     // Respect private browsing.
     channel.loadGroup = aOptions.window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -412,8 +552,8 @@ function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
                           .loadGroup;
   }
 
-  let deferred = promise.defer();
-  let onResponse = (stream, status, request) => {
+  const deferred = defer();
+  const onResponse = (stream, status, request) => {
     if (!components.isSuccessCode(status)) {
       deferred.reject(new Error(`Failed to fetch ${url}. Code ${status}.`));
       return;
@@ -426,9 +566,27 @@ function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
       // to using the locale default encoding (bug 1181345).
 
       // Read and decode the data according to the locale default encoding.
-      let available = stream.available();
+      const available = stream.available();
       let source = NetUtil.readInputStreamToString(stream, available);
       stream.close();
+
+      // We do our own BOM sniffing here because there's no convenient
+      // implementation of the "decode" algorithm
+      // (https://encoding.spec.whatwg.org/#decode) exposed to JS.
+      let bomCharset = null;
+      if (available >= 3 && source.codePointAt(0) == 0xef &&
+          source.codePointAt(1) == 0xbb && source.codePointAt(2) == 0xbf) {
+        bomCharset = "UTF-8";
+        source = source.slice(3);
+      } else if (available >= 2 && source.codePointAt(0) == 0xfe &&
+                 source.codePointAt(1) == 0xff) {
+        bomCharset = "UTF-16BE";
+        source = source.slice(2);
+      } else if (available >= 2 && source.codePointAt(0) == 0xff &&
+                 source.codePointAt(1) == 0xfe) {
+        bomCharset = "UTF-16LE";
+        source = source.slice(2);
+      }
 
       // If the channel or the caller has correct charset information, the
       // content will be decoded correctly. If we have to fall back to UTF-8 and
@@ -436,25 +594,36 @@ function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
       // the input unmodified. Essentially we try to decode the data as UTF-8
       // and if that fails, we use the locale specific default encoding. This is
       // the best we can do if the source does not provide charset info.
-      let charset = channel.contentCharset || aOptions.charset || "UTF-8";
-      let unicodeSource = NetworkHelper.convertToUnicode(source, charset);
+      let charset = bomCharset;
+      if (!charset) {
+        try {
+          charset = channel.contentCharset;
+        } catch (e) {
+          // Accessing `contentCharset` on content served by a service worker in
+          // non-e10s may throw.
+        }
+      }
+      if (!charset) {
+        charset = aOptions.charset || "UTF-8";
+      }
+      const unicodeSource = NetworkHelper.convertToUnicode(source, charset);
 
       deferred.resolve({
         content: unicodeSource,
         contentType: request.contentType
       });
     } catch (ex) {
-      let uri = request.originalURI;
+      const uri = request.originalURI;
       if (ex.name === "NS_BASE_STREAM_CLOSED" && uri instanceof Ci.nsIFileURL) {
         // Empty files cause NS_BASE_STREAM_CLOSED exception. Use OS.File to
         // differentiate between empty files and other errors (bug 1170864).
         // This can be removed when bug 982654 is fixed.
 
         uri.QueryInterface(Ci.nsIFileURL);
-        let result = OS.File.read(uri.file.path).then(bytes => {
+        const result = OS.File.read(uri.file.path).then(bytes => {
           // Convert the bytearray to a String.
-          let decoder = new TextDecoder();
-          let content = decoder.decode(bytes);
+          const decoder = new TextDecoder();
+          const content = decoder.decode(bytes);
 
           // We can't detect the contentType without opening a channel
           // and that failed already. This is the best we can do here.
@@ -488,124 +657,73 @@ function mainThreadFetch(aURL, aOptions={ loadFromCache: true,
  * @param {Object} options - The options object passed to @method fetch.
  * @return {nsIChannel} - The newly created channel. Throws on failure.
  */
-function newChannelForURL(url, { policy }) {
-  let channelOptions = {
-    contentPolicyType: policy,
-    loadUsingSystemPrincipal: true,
-    uri: url
-  };
+function newChannelForURL(url, { policy, window, principal }) {
+  const securityFlags = Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
 
+  let uri;
   try {
-    return NetUtil.newChannel(channelOptions);
+    uri = Services.io.newURI(url);
   } catch (e) {
     // In the xpcshell tests, the script url is the absolute path of the test
     // file, which will make a malformed URI error be thrown. Add the file
     // scheme to see if it helps.
-    channelOptions.uri = "file://" + url;
+    uri = Services.io.newURI("file://" + url);
+  }
+  const channelOptions = {
+    contentPolicyType: policy,
+    securityFlags: securityFlags,
+    uri: uri
+  };
 
+  // Ensure that we have some contentPolicyType type set if one was
+  // not provided.
+  if (!channelOptions.contentPolicyType) {
+    channelOptions.contentPolicyType = Ci.nsIContentPolicy.TYPE_OTHER;
+  }
+
+  // If a window is provided, always use it's document as the loadingNode.
+  // This will provide the correct principal, origin attributes, service
+  // worker controller, etc.
+  if (window) {
+    channelOptions.loadingNode = window.document;
+  } else {
+    // If a window is not provided, then we must set a loading principal.
+
+    // If the caller did not provide a principal, then we use the URI
+    // to create one.  Note, it's not clear what use cases require this
+    // and it may not be correct.
+    let prin = principal;
+    if (!prin) {
+      prin = Services.scriptSecurityManager
+                     .createCodebasePrincipal(uri, {});
+    }
+
+    channelOptions.loadingPrincipal = prin;
+  }
+
+  try {
     return NetUtil.newChannel(channelOptions);
+  } catch (e) {
+    // In xpcshell tests on Windows, nsExternalProtocolHandler::NewChannel()
+    // can throw NS_ERROR_UNKNOWN_PROTOCOL if the external protocol isn't
+    // supported by Windows, so we also need to handle the exception here if
+    // parsing the URL above doesn't throw.
+    return newChannelForURL("file://" + url, { policy, window, principal });
   }
 }
 
 // Fetch is defined differently depending on whether we are on the main thread
 // or a worker thread.
-if (!this.isWorker) {
-  exports.fetch = mainThreadFetch;
-} else {
+if (this.isWorker) {
   // Services is not available in worker threads, nor is there any other way
   // to fetch a URL. We need to enlist the help from the main thread here, by
   // issuing an rpc request, to fetch the URL on our behalf.
-  exports.fetch = function (url, options) {
+  exports.fetch = function(url, options) {
     return rpc("fetch", url, options);
   };
+} else {
+  exports.fetch = mainThreadFetch;
 }
-
-/**
- * Returns a promise that is resolved or rejected when all promises have settled
- * (resolved or rejected).
- *
- * This differs from Promise.all, which will reject immediately after the first
- * rejection, instead of waiting for the remaining promises to settle.
- *
- * @param values
- *        Iterable of promises that may be pending, resolved, or rejected. When
- *        when all promises have settled (resolved or rejected), the returned
- *        promise will be resolved or rejected as well.
- *
- * @return A new promise that is fulfilled when all values have settled
- *         (resolved or rejected). Its resolution value will be an array of all
- *         resolved values in the given order, or undefined if values is an
- *         empty array. The reject reason will be forwarded from the first
- *         promise in the list of given promises to be rejected.
- */
-exports.settleAll = values => {
-  if (values === null || typeof(values[Symbol.iterator]) != "function") {
-    throw new Error("settleAll() expects an iterable.");
-  }
-
-  let deferred = promise.defer();
-
-  values = Array.isArray(values) ? values : [...values];
-  let countdown = values.length;
-  let resolutionValues = new Array(countdown);
-  let rejectionValue;
-  let rejectionOccurred = false;
-
-  if (!countdown) {
-    deferred.resolve(resolutionValues);
-    return deferred.promise;
-  }
-
-  function checkForCompletion() {
-    if (--countdown > 0) {
-      return;
-    }
-    if (!rejectionOccurred) {
-      deferred.resolve(resolutionValues);
-    } else {
-      deferred.reject(rejectionValue);
-    }
-  }
-
-  for (let i = 0; i < values.length; i++) {
-    let index = i;
-    let value = values[i];
-    let resolver = result => {
-      resolutionValues[index] = result;
-      checkForCompletion();
-    };
-    let rejecter = error => {
-      if (!rejectionOccurred) {
-        rejectionValue = error;
-        rejectionOccurred = true;
-      }
-      checkForCompletion();
-    };
-
-    if (value && typeof(value.then) == "function") {
-      value.then(resolver, rejecter);
-    } else {
-      // Given value is not a promise, forward it as a resolution value.
-      resolver(value);
-    }
-  }
-
-  return deferred.promise;
-};
-
-/**
- * When the testing flag is set, various behaviors may be altered from
- * production mode, typically to enable easier testing or enhanced debugging.
- */
-var testing = false;
-Object.defineProperty(exports, "testing", {
-  get: function() {
-    return testing;
-  },
-  set: function(state) {
-    testing = state;
-  }
-});
 
 /**
  * Open the file at the given path for reading.
@@ -614,7 +732,7 @@ Object.defineProperty(exports, "testing", {
  *
  * @returns Promise<nsIInputStream>
  */
-exports.openFileStream = function (filePath) {
+exports.openFileStream = function(filePath) {
   return new Promise((resolve, reject) => {
     const uri = NetUtil.newURI(new FileUtils.File(filePath));
     NetUtil.asyncFetch(
@@ -630,3 +748,68 @@ exports.openFileStream = function (filePath) {
     );
   });
 };
+
+/*
+ * All of the flags have been moved to a different module. Make sure
+ * nobody is accessing them anymore, and don't write new code using
+ * them. We can remove this code after a while.
+ */
+function errorOnFlag(exports, name) {
+  Object.defineProperty(exports, name, {
+    get: () => {
+      const msg = `Cannot get the flag ${name}. ` +
+            `Use the "devtools/shared/flags" module instead`;
+      console.error(msg);
+      throw new Error(msg);
+    },
+    set: () => {
+      const msg = `Cannot set the flag ${name}. ` +
+            `Use the "devtools/shared/flags" module instead`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+  });
+}
+
+errorOnFlag(exports, "testing");
+errorOnFlag(exports, "wantLogging");
+errorOnFlag(exports, "wantVerbose");
+
+// Calls the property with the given `name` on the given `object`, where
+// `name` is a string, and `object` a Debugger.Object instance.
+//
+// This function uses only the Debugger.Object API to call the property. It
+// avoids the use of unsafeDeference. This is useful for example in workers,
+// where unsafeDereference will return an opaque security wrapper to the
+// referent.
+function callPropertyOnObject(object, name) {
+  // Find the property.
+  let descriptor;
+  let proto = object;
+  do {
+    descriptor = proto.getOwnPropertyDescriptor(name);
+    if (descriptor !== undefined) {
+      break;
+    }
+    proto = proto.proto;
+  } while (proto !== null);
+  if (descriptor === undefined) {
+    throw new Error("No such property");
+  }
+  const value = descriptor.value;
+  if (typeof value !== "object" || value === null || !("callable" in value)) {
+    throw new Error("Not a callable object.");
+  }
+
+  // Call the property.
+  const result = value.call(object);
+  if (result === null) {
+    throw new Error("Code was terminated.");
+  }
+  if ("throw" in result) {
+    throw result.throw;
+  }
+  return result.return;
+}
+
+exports.callPropertyOnObject = callPropertyOnObject;

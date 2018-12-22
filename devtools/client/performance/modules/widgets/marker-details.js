@@ -7,17 +7,15 @@
  * This file contains the rendering code for the marker sidebar.
  */
 
-const { Cc, Ci, Cu, Cr } = require("chrome");
-
 const EventEmitter = require("devtools/shared/event-emitter");
 const { MarkerDOMUtils } = require("devtools/client/performance/modules/marker-dom-utils");
 
 /**
  * A detailed view for one single marker.
  *
- * @param nsIDOMNode parent
+ * @param Node parent
  *        The parent node holding the view.
- * @param nsIDOMNode splitter
+ * @param Node splitter
  *        The splitter node that the resize event is bound to.
  */
 function MarkerDetails(parent, splitter) {
@@ -86,28 +84,30 @@ MarkerDetails.prototype = {
    *        An options object holding:
    *          - marker: The marker to display.
    *          - frames: Array of stack frame information; see stack.js.
-   *          - allocations: Whether or not allocations were enabled for this recording. [optional]
+   *          - allocations: Whether or not allocations were enabled for this
+   *                         recording. [optional]
    */
-  render: function (options) {
-    let { marker, frames } = options;
+  render: function(options) {
+    const { marker, frames } = options;
     this.empty();
 
-    let elements = [];
+    const elements = [];
     elements.push(MarkerDOMUtils.buildTitle(this._document, marker));
     elements.push(MarkerDOMUtils.buildDuration(this._document, marker));
     MarkerDOMUtils.buildFields(this._document, marker).forEach(f => elements.push(f));
-    MarkerDOMUtils.buildCustom(this._document, marker, options).forEach(f => elements.push(f));
+    MarkerDOMUtils.buildCustom(this._document, marker, options)
+                  .forEach(f => elements.push(f));
 
     // Build a stack element -- and use the "startStack" label if
     // we have both a startStack and endStack.
     if (marker.stack) {
-      let type = marker.endStack ? "startStack" : "stack";
+      const type = marker.endStack ? "startStack" : "stack";
       elements.push(MarkerDOMUtils.buildStackTrace(this._document, {
         frameIndex: marker.stack, frames, type
       }));
     }
     if (marker.endStack) {
-      let type = "endStack";
+      const type = "endStack";
       elements.push(MarkerDOMUtils.buildStackTrace(this._document, {
         frameIndex: marker.endStack, frames, type
       }));
@@ -121,8 +121,8 @@ MarkerDetails.prototype = {
    * can handle different actions -- only supporting view source links
    * for the moment.
    */
-  _onClick: function (e) {
-    let data = findActionFromEvent(e.target, this._parent);
+  _onClick: function(e) {
+    const data = findActionFromEvent(e.target, this._parent);
     if (!data) {
       return;
     }
@@ -148,11 +148,12 @@ MarkerDetails.prototype = {
  * @param {Element} container
  * @return {?object}
  */
-function findActionFromEvent (target, container) {
+function findActionFromEvent(target, container) {
   let el = target;
   let action;
   while (el !== container) {
-    if (action = el.getAttribute("data-action")) {
+    action = el.getAttribute("data-action");
+    if (action) {
       return JSON.parse(action);
     }
     el = el.parentNode;

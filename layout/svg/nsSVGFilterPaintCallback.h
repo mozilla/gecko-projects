@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,6 +14,8 @@ class gfxContext;
 
 class nsSVGFilterPaintCallback {
 public:
+  typedef mozilla::image::imgDrawingParams imgDrawingParams;
+
   /**
    * Paint the frame contents.
    * SVG frames will have had matrix propagation set to false already.
@@ -26,8 +29,8 @@ public:
    *                       into account when painting an SVG glyph
    */
   virtual void Paint(gfxContext& aContext, nsIFrame *aTarget,
-                     const gfxMatrix& aTransform,
-                     const nsIntRect *aDirtyRect) = 0;
+                    const gfxMatrix& aTransform, const nsIntRect *aDirtyRect,
+                    imgDrawingParams& aImgParams) = 0;
 };
 
 #endif

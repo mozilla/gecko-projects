@@ -568,8 +568,8 @@ CERT_CompareRDN(const CERTRDN *a, const CERTRDN *b)
 SECComparison
 CERT_CompareName(const CERTName *a, const CERTName *b)
 {
-    CERTRDN **ardns, *ardn;
-    CERTRDN **brdns, *brdn;
+    CERTRDN **ardns;
+    CERTRDN **brdns;
     int ac, bc;
     SECComparison rv = SECEqual;
 
@@ -587,15 +587,8 @@ CERT_CompareName(const CERTName *a, const CERTName *b)
     if (ac > bc)
         return SECGreaterThan;
 
-    for (;;) {
-        ardn = *ardns++;
-        brdn = *brdns++;
-        if (!ardn) {
-            break;
-        }
-        rv = CERT_CompareRDN(ardn, brdn);
-        if (rv)
-            return rv;
+    while (rv == SECEqual && *ardns) {
+        rv = CERT_CompareRDN(*ardns++, *brdns++);
     }
     return rv;
 }
@@ -606,9 +599,12 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
 {
     SECItem *retItem;
     const SEC_ASN1Template *theTemplate = NULL;
-    enum { conv_none, conv_ucs4, conv_ucs2, conv_iso88591 } convert = conv_none;
+    enum { conv_none,
+           conv_ucs4,
+           conv_ucs2,
+           conv_iso88591 } convert = conv_none;
     SECItem avaValue = { siBuffer, 0 };
-    PLArenaPool *newarena = NULL;
+    PORTCheapArenaPool tmpArena;
 
     if (!derAVAValue || !derAVAValue->len || !derAVAValue->data) {
         PORT_SetError(SEC_ERROR_INVALID_ARGS);
@@ -648,20 +644,17 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
     }
 
     PORT_Memset(&avaValue, 0, sizeof(SECItem));
-    newarena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-    if (!newarena) {
-        return NULL;
-    }
-    if (SEC_QuickDERDecodeItem(newarena, &avaValue, theTemplate, derAVAValue) !=
-        SECSuccess) {
-        PORT_FreeArena(newarena, PR_FALSE);
+    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
+    if (SEC_QuickDERDecodeItem(&tmpArena.arena, &avaValue, theTemplate,
+                               derAVAValue) != SECSuccess) {
+        PORT_DestroyCheapArena(&tmpArena);
         return NULL;
     }
 
     if (convert != conv_none) {
         unsigned int utf8ValLen = avaValue.len * 3;
         unsigned char *utf8Val =
-            (unsigned char *)PORT_ArenaZAlloc(newarena, utf8ValLen);
+            (unsigned char *)PORT_ArenaZAlloc(&tmpArena.arena, utf8ValLen);
 
         switch (convert) {
             case conv_ucs4:
@@ -669,7 +662,7 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
                     !PORT_UCS4_UTF8Conversion(PR_FALSE, avaValue.data,
                                               avaValue.len, utf8Val, utf8ValLen,
                                               &utf8ValLen)) {
-                    PORT_FreeArena(newarena, PR_FALSE);
+                    PORT_DestroyCheapArena(&tmpArena);
                     PORT_SetError(SEC_ERROR_INVALID_AVA);
                     return NULL;
                 }
@@ -679,7 +672,7 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
                     !PORT_UCS2_UTF8Conversion(PR_FALSE, avaValue.data,
                                               avaValue.len, utf8Val, utf8ValLen,
                                               &utf8ValLen)) {
-                    PORT_FreeArena(newarena, PR_FALSE);
+                    PORT_DestroyCheapArena(&tmpArena);
                     PORT_SetError(SEC_ERROR_INVALID_AVA);
                     return NULL;
                 }
@@ -688,7 +681,7 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
                 if (!PORT_ISO88591_UTF8Conversion(avaValue.data, avaValue.len,
                                                   utf8Val, utf8ValLen,
                                                   &utf8ValLen)) {
-                    PORT_FreeArena(newarena, PR_FALSE);
+                    PORT_DestroyCheapArena(&tmpArena);
                     PORT_SetError(SEC_ERROR_INVALID_AVA);
                     return NULL;
                 }
@@ -703,6 +696,6 @@ CERT_DecodeAVAValue(const SECItem *derAVAValue)
     }
 
     retItem = SECITEM_DupItem(&avaValue);
-    PORT_FreeArena(newarena, PR_FALSE);
+    PORT_DestroyCheapArena(&tmpArena);
     return retItem;
 }

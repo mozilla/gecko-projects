@@ -29,8 +29,8 @@
 
 // Used to notify begin and end of a heavy IO task.
 #define OBSERVER_TOPIC_HEAVY_IO "heavy-io-task"
-#define OBSERVER_DATA_VACUUM_BEGIN NS_LITERAL_STRING("vacuum-begin")
-#define OBSERVER_DATA_VACUUM_END NS_LITERAL_STRING("vacuum-end")
+#define OBSERVER_DATA_VACUUM_BEGIN u"vacuum-begin"
+#define OBSERVER_DATA_VACUUM_END u"vacuum-end"
 
 // This preferences root will contain last vacuum timestamps (in seconds) for
 // each database.  The database filename is used as a key.
@@ -99,7 +99,7 @@ NS_IMPL_ISUPPORTS(
 , mozIStorageStatementCallback
 )
 
-//////////////////////////////////////////////////////////////////////////////// 
+////////////////////////////////////////////////////////////////////////////////
 //// Vacuumer declaration.
 
 class Vacuumer : public BaseCallback
@@ -189,9 +189,9 @@ Vacuumer::execute()
   // Notify a heavy IO task is about to start.
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
-    DebugOnly<nsresult> rv =
+    rv =
       os->NotifyObservers(nullptr, OBSERVER_TOPIC_HEAVY_IO,
-                          OBSERVER_DATA_VACUUM_BEGIN.get());
+                          OBSERVER_DATA_VACUUM_BEGIN);
     MOZ_ASSERT(NS_SUCCEEDED(rv), "Should be able to notify");
   }
 
@@ -226,11 +226,13 @@ Vacuumer::execute()
 NS_IMETHODIMP
 Vacuumer::HandleError(mozIStorageError *aError)
 {
-#ifdef DEBUG
   int32_t result;
-  nsresult rv = aError->GetResult(&result);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv;
   nsAutoCString message;
+
+#ifdef DEBUG
+  rv = aError->GetResult(&result);
+  NS_ENSURE_SUCCESS(rv, rv);
   rv = aError->GetMessage(message);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -245,10 +247,8 @@ Vacuumer::HandleError(mozIStorageError *aError)
 #endif
 
   if (MOZ_LOG_TEST(gStorageLog, LogLevel::Error)) {
-    int32_t result;
-    nsresult rv = aError->GetResult(&result);
+    rv = aError->GetResult(&result);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsAutoCString message;
     rv = aError->GetMessage(message);
     NS_ENSURE_SUCCESS(rv, rv);
     MOZ_LOG(gStorageLog, LogLevel::Error,
@@ -261,7 +261,7 @@ Vacuumer::HandleError(mozIStorageError *aError)
 NS_IMETHODIMP
 Vacuumer::HandleResult(mozIStorageResultSet *aResultSet)
 {
-  NS_NOTREACHED("Got a resultset from a vacuum?");
+  MOZ_ASSERT_UNREACHABLE("Got a resultset from a vacuum?");
   return NS_OK;
 }
 
@@ -275,7 +275,7 @@ Vacuumer::HandleCompletion(uint16_t aReason)
     nsAutoCString prefName(PREF_VACUUM_BRANCH);
     prefName += mDBFilename;
     DebugOnly<nsresult> rv = Preferences::SetInt(prefName.get(), now);
-    MOZ_ASSERT(NS_SUCCEEDED(rv), "Should be able to set a preference"); 
+    MOZ_ASSERT(NS_SUCCEEDED(rv), "Should be able to set a preference");
   }
 
   notifyCompletion(aReason == REASON_FINISHED);
@@ -289,7 +289,7 @@ Vacuumer::notifyCompletion(bool aSucceeded)
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
     os->NotifyObservers(nullptr, OBSERVER_TOPIC_HEAVY_IO,
-                        OBSERVER_DATA_VACUUM_END.get());
+                        OBSERVER_DATA_VACUUM_END);
   }
 
   nsresult rv = mParticipant->OnEndVacuum(aSucceeded);
@@ -311,7 +311,7 @@ NS_IMPL_ISUPPORTS(
 VacuumManager *
 VacuumManager::gVacuumManager = nullptr;
 
-VacuumManager *
+already_AddRefed<VacuumManager>
 VacuumManager::getSingleton()
 {
   //Don't allocate it in the child Process.
@@ -319,15 +319,12 @@ VacuumManager::getSingleton()
     return nullptr;
   }
 
-  if (gVacuumManager) {
-    NS_ADDREF(gVacuumManager);
-    return gVacuumManager;
+  if (!gVacuumManager) {
+    auto manager = MakeRefPtr<VacuumManager>();
+    MOZ_ASSERT(gVacuumManager == manager.get());
+    return manager.forget();
   }
-  gVacuumManager = new VacuumManager();
-  if (gVacuumManager) {
-    NS_ADDREF(gVacuumManager);
-  }
-  return gVacuumManager;
+  return do_AddRef(gVacuumManager);
 }
 
 VacuumManager::VacuumManager()

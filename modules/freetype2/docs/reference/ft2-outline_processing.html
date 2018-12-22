@@ -1,9 +1,9 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
-"http://www.w3.org/TR/html4/loose.dtd">
+"https://www.w3.org/TR/html4/loose.dtd">
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-<title>FreeType-2.5.5 API Reference</title>
+<title>FreeType-2.9.1 API Reference</title>
 <style type="text/css">
   a:link { color: #0000EF; }
   a:visited { color: #51188E; }
@@ -100,9 +100,9 @@
 <body>
 
 <table class="index-toc-link"><tr><td class="left">[<a href="ft2-index.html">Index</a>]</td><td class="right">[<a href="ft2-toc.html">TOC</a>]</td></tr></table>
-<h1>FreeType-2.5.5 API Reference</h1>
+<h1>FreeType-2.9.1 API Reference</h1>
 
-<h1>Outline Processing</h1>
+<h1 id="outline_processing">Outline Processing</h1>
 <h2>Synopsis</h2>
 <table class="synopsis">
 <tr><td><a href="#FT_Outline">FT_Outline</a></td><td><a href="#FT_Outline_Get_Bitmap">FT_Outline_Get_Bitmap</a></td></tr>
@@ -126,7 +126,7 @@
 
 <div class="section">
 <h3 id="FT_Outline">FT_Outline</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">struct</span>  FT_Outline_
   {
@@ -157,8 +157,8 @@
 </td></tr>
 <tr><td class="val" id="tags">tags</td><td class="desc">
 <p>A pointer to an array of &lsquo;n_points&rsquo; chars, giving each outline point's type.</p>
-<p>If bit&nbsp;0 is unset, the point is &lsquo;off&rsquo; the curve, i.e., a Bézier control point, while it is &lsquo;on&rsquo; if set.</p>
-<p>Bit&nbsp;1 is meaningful for &lsquo;off&rsquo; points only. If set, it indicates a third-order Bézier arc control point; and a second-order control point if unset.</p>
+<p>If bit&nbsp;0 is unset, the point is &lsquo;off&rsquo; the curve, i.e., a Bezier control point, while it is &lsquo;on&rsquo; if set.</p>
+<p>Bit&nbsp;1 is meaningful for &lsquo;off&rsquo; points only. If set, it indicates a third-order Bezier arc control point; and a second-order control point if unset.</p>
 <p>If bit&nbsp;2 is set, bits 5-7 contain the drop-out mode (as defined in the OpenType specification; the value is the same as the argument to the SCANMODE instruction).</p>
 <p>Bits 3 and&nbsp;4 are reserved for internal purposes.</p>
 </td></tr>
@@ -178,7 +178,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_New">FT_Outline_New</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_New</b>( <a href="ft2-base_interface.html#FT_Library">FT_Library</a>   library,
@@ -227,7 +227,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Done">FT_Outline_Done</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Done</b>( <a href="ft2-base_interface.html#FT_Library">FT_Library</a>   library,
@@ -256,14 +256,13 @@
 
 <h4>note</h4>
 <p>If the outline's &lsquo;owner&rsquo; field is not set, only the outline descriptor will be released.</p>
-<p>The reason why this function takes an &lsquo;library&rsquo; parameter is simply to use ft_mem_free().</p>
 
 <hr>
 <table class="index-toc-link"><tr><td class="left">[<a href="ft2-index.html">Index</a>]</td><td class="middle">[<a href="#">Top</a>]</td><td class="right">[<a href="ft2-toc.html">TOC</a>]</td></tr></table></div>
 
 <div class="section">
 <h3 id="FT_Outline_Copy">FT_Outline_Copy</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Copy</b>( <span class="keyword">const</span> <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  source,
@@ -294,7 +293,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Translate">FT_Outline_Translate</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <span class="keyword">void</span> )
   <b>FT_Outline_Translate</b>( <span class="keyword">const</span> <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
@@ -326,7 +325,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Transform">FT_Outline_Transform</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <span class="keyword">void</span> )
   <b>FT_Outline_Transform</b>( <span class="keyword">const</span> <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
@@ -357,7 +356,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Embolden">FT_Outline_Embolden</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Embolden</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
@@ -389,9 +388,9 @@
 <p>If you need &lsquo;better&rsquo; metrics values you should call <a href="ft2-outline_processing.html#FT_Outline_Get_CBox">FT_Outline_Get_CBox</a> or <a href="ft2-outline_processing.html#FT_Outline_Get_BBox">FT_Outline_Get_BBox</a>.</p>
 <p>Example call:</p>
 <pre class="colored">
-  FT_Load_Glyph( face, index, FT_LOAD_DEFAULT );                   
-  if ( face-&gt;slot-&gt;format == FT_GLYPH_FORMAT_OUTLINE )             
-    FT_Outline_Embolden( &amp;face-&gt;slot-&gt;outline, strength );         
+  FT_Load_Glyph( face, index, FT_LOAD_DEFAULT );
+  if ( face-&gt;glyph-&gt;format == FT_GLYPH_FORMAT_OUTLINE )
+    FT_Outline_Embolden( &amp;face-&gt;glyph-&gt;outline, strength );
 </pre>
 <p>To get meaningful results, font scaling values must be set with functions like <a href="ft2-base_interface.html#FT_Set_Char_Size">FT_Set_Char_Size</a> before calling FT_Render_Glyph.</p>
 
@@ -400,7 +399,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_EmboldenXY">FT_Outline_EmboldenXY</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_EmboldenXY</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
@@ -410,12 +409,15 @@
 
 <p>Embolden an outline. The new outline will be &lsquo;xstrength&rsquo; pixels wider and &lsquo;ystrength&rsquo; pixels higher. Otherwise, it is similar to <a href="ft2-outline_processing.html#FT_Outline_Embolden">FT_Outline_Embolden</a>, which uses the same strength in both directions.</p>
 
+<h4>since</h4>
+<p>2.4.10</p>
+
 <hr>
 <table class="index-toc-link"><tr><td class="left">[<a href="ft2-index.html">Index</a>]</td><td class="middle">[<a href="#">Top</a>]</td><td class="right">[<a href="ft2-toc.html">TOC</a>]</td></tr></table></div>
 
 <div class="section">
 <h3 id="FT_Outline_Reverse">FT_Outline_Reverse</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <span class="keyword">void</span> )
   <b>FT_Outline_Reverse</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline );
@@ -439,7 +441,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Check">FT_Outline_Check</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Check</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline );
@@ -457,19 +459,22 @@
 <h4>return</h4>
 <p>FreeType error code. 0&nbsp;means success.</p>
 
+<h4>note</h4>
+<p>An empty outline, or an outline with a single point only is also valid.</p>
+
 <hr>
 <table class="index-toc-link"><tr><td class="left">[<a href="ft2-index.html">Index</a>]</td><td class="middle">[<a href="#">Top</a>]</td><td class="right">[<a href="ft2-toc.html">TOC</a>]</td></tr></table></div>
 
 <div class="section">
 <h3 id="FT_Outline_Get_CBox">FT_Outline_Get_CBox</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <span class="keyword">void</span> )
   <b>FT_Outline_Get_CBox</b>( <span class="keyword">const</span> <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
                        <a href="ft2-basic_types.html#FT_BBox">FT_BBox</a>           *acbox );
 </pre>
 
-<p>Return an outline's &lsquo;control box&rsquo;. The control box encloses all the outline's points, including Bézier control points. Though it coincides with the exact bounding box for most glyphs, it can be slightly larger in some situations (like when rotating an outline that contains Bézier outside arcs).</p>
+<p>Return an outline's &lsquo;control box&rsquo;. The control box encloses all the outline's points, including Bezier control points. Though it coincides with the exact bounding box for most glyphs, it can be slightly larger in some situations (like when rotating an outline that contains Bezier outside arcs).</p>
 <p>Computing the control box is very fast, while getting the bounding box can take much more time as it needs to walk over all segments and arcs in the outline. To get the latter, you can use the &lsquo;ftbbox&rsquo; component, which is dedicated to this single task.</p>
 
 <h4>input</h4>
@@ -494,14 +499,14 @@
 
 <div class="section">
 <h3 id="FT_Outline_Get_BBox">FT_Outline_Get_BBox</h3>
-<p>Defined in FT_BBOX_H (ftbbox.h).</p>
+<p>Defined in FT_BBOX_H (freetype/ftbbox.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Get_BBox</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline,
                        <a href="ft2-basic_types.html#FT_BBox">FT_BBox</a>     *abbox );
 </pre>
 
-<p>Compute the exact bounding box of an outline. This is slower than computing the control box. However, it uses an advanced algorithm that returns <i>very</i> quickly when the two boxes coincide. Otherwise, the outline Bézier arcs are traversed to extract their extrema.</p>
+<p>Compute the exact bounding box of an outline. This is slower than computing the control box. However, it uses an advanced algorithm that returns <i>very</i> quickly when the two boxes coincide. Otherwise, the outline Bezier arcs are traversed to extract their extrema.</p>
 
 <h4>input</h4>
 <table class="fields">
@@ -528,7 +533,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Get_Bitmap">FT_Outline_Get_Bitmap</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Get_Bitmap</b>( <a href="ft2-base_interface.html#FT_Library">FT_Library</a>        library,
@@ -568,7 +573,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Render">FT_Outline_Render</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Render</b>( <a href="ft2-base_interface.html#FT_Library">FT_Library</a>         library,
@@ -608,7 +613,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Decompose">FT_Outline_Decompose</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-basic_types.html#FT_Error">FT_Error</a> )
   <b>FT_Outline_Decompose</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*              outline,
@@ -616,7 +621,7 @@
                         <span class="keyword">void</span>*                    user );
 </pre>
 
-<p>Walk over an outline's structure to decompose it into individual segments and Bézier arcs. This function also emits &lsquo;move to&rsquo; operations to indicate the start of new contours in the outline.</p>
+<p>Walk over an outline's structure to decompose it into individual segments and Bezier arcs. This function also emits &lsquo;move to&rsquo; operations to indicate the start of new contours in the outline.</p>
 
 <h4>input</h4>
 <table class="fields">
@@ -640,13 +645,14 @@
 
 <h4>note</h4>
 <p>A contour that contains a single point only is represented by a &lsquo;move to&rsquo; operation followed by &lsquo;line to&rsquo; to the same point. In most cases, it is best to filter this out before using the outline for stroking purposes (otherwise it would result in a visible dot when round caps are used).</p>
+<p>Similarly, the function returns success for an empty outline also (doing nothing, this is, not calling any emitter); if necessary, you should filter this out, too.</p>
 
 <hr>
 <table class="index-toc-link"><tr><td class="left">[<a href="ft2-index.html">Index</a>]</td><td class="middle">[<a href="#">Top</a>]</td><td class="right">[<a href="ft2-toc.html">TOC</a>]</td></tr></table></div>
 
 <div class="section">
 <h3 id="FT_Outline_Funcs">FT_Outline_Funcs</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">struct</span>  FT_Outline_Funcs_
   {
@@ -661,7 +667,7 @@
   } <b>FT_Outline_Funcs</b>;
 </pre>
 
-<p>A structure to hold various function pointers used during outline decomposition in order to emit segments, conic, and cubic Béziers.</p>
+<p>A structure to hold various function pointers used during outline decomposition in order to emit segments, conic, and cubic Beziers.</p>
 
 <h4>fields</h4>
 <table class="fields">
@@ -672,10 +678,10 @@
 <p>The segment emitter.</p>
 </td></tr>
 <tr><td class="val" id="conic_to">conic_to</td><td class="desc">
-<p>The second-order Bézier arc emitter.</p>
+<p>The second-order Bezier arc emitter.</p>
 </td></tr>
 <tr><td class="val" id="cubic_to">cubic_to</td><td class="desc">
-<p>The third-order Bézier arc emitter.</p>
+<p>The third-order Bezier arc emitter.</p>
 </td></tr>
 <tr><td class="val" id="shift">shift</td><td class="desc">
 <p>The shift that is applied to coordinates before they are sent to the emitter.</p>
@@ -688,8 +694,8 @@
 <h4>note</h4>
 <p>The point coordinates sent to the emitters are the transformed version of the original coordinates (this is important for high accuracy during scan-conversion). The transformation is simple:</p>
 <pre class="colored">
-  x' = (x &lt;&lt; shift) - delta                                        
-  y' = (x &lt;&lt; shift) - delta                                        
+  x' = (x &lt;&lt; shift) - delta
+  y' = (y &lt;&lt; shift) - delta
 </pre>
 <p>Set the values of &lsquo;shift&rsquo; and &lsquo;delta&rsquo; to&nbsp;0 to get the original point coordinates.</p>
 
@@ -698,7 +704,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_MoveToFunc">FT_Outline_MoveToFunc</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">int</span>
   (*<b>FT_Outline_MoveToFunc</b>)( <span class="keyword">const</span> <a href="ft2-basic_types.html#FT_Vector">FT_Vector</a>*  to,
@@ -728,7 +734,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_LineToFunc">FT_Outline_LineToFunc</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">int</span>
   (*<b>FT_Outline_LineToFunc</b>)( <span class="keyword">const</span> <a href="ft2-basic_types.html#FT_Vector">FT_Vector</a>*  to,
@@ -758,7 +764,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_ConicToFunc">FT_Outline_ConicToFunc</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">int</span>
   (*<b>FT_Outline_ConicToFunc</b>)( <span class="keyword">const</span> <a href="ft2-basic_types.html#FT_Vector">FT_Vector</a>*  control,
@@ -769,7 +775,7 @@
 </pre>
 
 <p>A function pointer type used to describe the signature of a &lsquo;conic to&rsquo; function during outline walking or decomposition.</p>
-<p>A &lsquo;conic to&rsquo; is emitted to indicate a second-order Bézier arc in the outline.</p>
+<p>A &lsquo;conic to&rsquo; is emitted to indicate a second-order Bezier arc in the outline.</p>
 
 <h4>input</h4>
 <table class="fields">
@@ -792,7 +798,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_CubicToFunc">FT_Outline_CubicToFunc</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">int</span>
   (*<b>FT_Outline_CubicToFunc</b>)( <span class="keyword">const</span> <a href="ft2-basic_types.html#FT_Vector">FT_Vector</a>*  control1,
@@ -804,15 +810,15 @@
 </pre>
 
 <p>A function pointer type used to describe the signature of a &lsquo;cubic to&rsquo; function during outline walking or decomposition.</p>
-<p>A &lsquo;cubic to&rsquo; is emitted to indicate a third-order Bézier arc.</p>
+<p>A &lsquo;cubic to&rsquo; is emitted to indicate a third-order Bezier arc.</p>
 
 <h4>input</h4>
 <table class="fields">
 <tr><td class="val" id="control1">control1</td><td class="desc">
-<p>A pointer to the first Bézier control point.</p>
+<p>A pointer to the first Bezier control point.</p>
 </td></tr>
 <tr><td class="val" id="control2">control2</td><td class="desc">
-<p>A pointer to the second Bézier control point.</p>
+<p>A pointer to the second Bezier control point.</p>
 </td></tr>
 <tr><td class="val" id="to">to</td><td class="desc">
 <p>A pointer to the target end point.</p>
@@ -830,7 +836,7 @@
 
 <div class="section">
 <h3 id="FT_Orientation">FT_Orientation</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   <span class="keyword">typedef</span> <span class="keyword">enum</span>  FT_Orientation_
   {
@@ -870,7 +876,7 @@
 
 <div class="section">
 <h3 id="FT_Outline_Get_Orientation">FT_Outline_Get_Orientation</h3>
-<p>Defined in FT_OUTLINE_H (ftoutln.h).</p>
+<p>Defined in FT_OUTLINE_H (freetype/ftoutln.h).</p>
 <pre>
   FT_EXPORT( <a href="ft2-outline_processing.html#FT_Orientation">FT_Orientation</a> )
   <b>FT_Outline_Get_Orientation</b>( <a href="ft2-outline_processing.html#FT_Outline">FT_Outline</a>*  outline );
@@ -894,7 +900,7 @@
 
 <div class="section">
 <h3 id="FT_OUTLINE_XXX">FT_OUTLINE_XXX</h3>
-<p>Defined in FT_IMAGE_H (ftimage.h).</p>
+<p>Defined in FT_IMAGE_H (freetype/ftimage.h).</p>
 <pre>
 #define <a href="ft2-outline_processing.html#FT_OUTLINE_NONE">FT_OUTLINE_NONE</a>             0x0
 #define <a href="ft2-outline_processing.html#FT_OUTLINE_OWNER">FT_OUTLINE_OWNER</a>            0x1

@@ -7,15 +7,14 @@
 "use strict";
 
 const { ActorPool } = require("devtools/server/actors/common");
-const { createValueGrip } = require("devtools/server/actors/object");
-const { ActorClass } = require("devtools/server/protocol");
+const { createValueGrip } = require("devtools/server/actors/object/utils");
+const { ActorClassWithSpec } = require("devtools/shared/protocol");
+const { frameSpec } = require("devtools/shared/specs/frame");
 
 /**
  * An actor for a specified stack frame.
  */
-let FrameActor = ActorClass({
-  typeName: "frame",
-
+const FrameActor = ActorClassWithSpec(frameSpec, {
   /**
    * Creates the Frame actor.
    *
@@ -45,35 +44,58 @@ let FrameActor = ActorClass({
    * Finalization handler that is called when the actor is being evicted from
    * the pool.
    */
-  disconnect: function() {
+  destroy: function() {
     this.conn.removeActorPool(this._frameLifetimePool);
     this._frameLifetimePool = null;
+  },
+
+  getEnvironment: function() {
+    try {
+      if (!this.frame.environment) {
+        return {};
+      }
+    } catch (e) {
+      // |this.frame| might not be live.
+      return {};
+    }
+
+    const envActor = this.threadActor.createEnvironmentActor(
+      this.frame.environment,
+      this.frameLifetimePool
+    );
+
+    return envActor.form();
   },
 
   /**
    * Returns a frame form for use in a protocol message.
    */
   form: function() {
-    let threadActor = this.threadActor;
-    let form = { actor: this.actorID,
-                 type: this.frame.type };
+    const threadActor = this.threadActor;
+    const form = { actor: this.actorID,
+                   type: this.frame.type };
     if (this.frame.type === "call") {
       form.callee = createValueGrip(this.frame.callee, threadActor._pausePool,
         threadActor.objectGrip);
     }
 
-    if (this.frame.environment) {
-      let envActor = threadActor.createEnvironmentActor(
-        this.frame.environment,
-        this.frameLifetimePool
-      );
-      form.environment = envActor.form();
+    // NOTE: ignoreFrameEnvironment lets the client explicitly avoid
+    // populating form environments on pause.
+    if (
+      !this.threadActor._options.ignoreFrameEnvironment &&
+      this.frame.environment
+    ) {
+      form.environment = this.getEnvironment();
     }
-    form.this = createValueGrip(this.frame.this, threadActor._pausePool,
-      threadActor.objectGrip);
+
+    if (this.frame.type != "wasmcall") {
+      form.this = createValueGrip(this.frame.this, threadActor._pausePool,
+        threadActor.objectGrip);
+    }
+
     form.arguments = this._args();
     if (this.frame.script) {
-      var generatedLocation = this.threadActor.sources.getFrameLocation(this.frame);
+      const generatedLocation = this.threadActor.sources.getFrameLocation(this.frame);
       form.where = {
         source: generatedLocation.generatedSourceActor.form(),
         line: generatedLocation.generatedLine,

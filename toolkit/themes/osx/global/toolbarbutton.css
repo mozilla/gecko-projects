@@ -10,12 +10,6 @@ toolbarbutton {
   margin: 0 2px;
   padding: 3px 2px;
   background-color: transparent;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-}
-
-toolbarbutton[open="true"],
-toolbarbutton:not([disabled="true"]):active:hover {
-  text-shadow: none;
 }
 
 .toolbarbutton-text {
@@ -29,7 +23,7 @@ toolbarbutton[disabled="true"],
 toolbarbutton[disabled="true"]:hover,
 toolbarbutton[disabled="true"]:hover:active,
 toolbarbutton[disabled="true"][open="true"] {
-  color: -moz-mac-disabledtoolbartext !important;
+  color: -moz-mac-disabledtoolbartext;
 }
 
 /* ::::: toolbarbutton menu ::::: */
@@ -40,38 +34,14 @@ toolbarbutton[disabled="true"][open="true"] {
   background-color: transparent !important;
   list-style-image: url("chrome://global/skin/arrow/arrow-dn.png");
   padding: 0;
-  -moz-padding-start: 2px;
+  padding-inline-start: 2px;
   width: auto;
 }
 
 .toolbarbutton-menu-dropmarker[disabled="true"] {
   list-style-image: url("chrome://global/skin/arrow/arrow-dn-dis.png");
   padding: 0;
-  -moz-padding-start: 2px;
-}
-
-/* ::::: toolbarbutton menu-button ::::: */
-
-toolbarbutton[type="menu-button"] {
-  -moz-box-align: stretch;
-  -moz-box-orient: horizontal !important;
-}
-
-toolbarbutton[type="menu-button"],
-toolbarbutton[type="menu-button"]:hover,
-toolbarbutton[type="menu-button"]:hover:active,
-toolbarbutton[type="menu-button"][open="true"],
-toolbarbutton[type="menu-button"][disabled="true"],
-toolbarbutton[type="menu-button"][disabled="true"]:hover,
-toolbarbutton[type="menu-button"][disabled="true"]:hover:active {
-  background-color: transparent;
-}
-
-.toolbarbutton-menubutton-button {
-  -moz-box-align: center;
-  -moz-box-pack: center;
-  -moz-box-orient: vertical;
-  text-shadow: inherit;
+  padding-inline-start: 2px;
 }
 
 /* ::::: toolbarbutton badged ::::: */
@@ -81,12 +51,13 @@ toolbarbutton[type="menu-button"][disabled="true"]:hover:active {
   font-size: 9px;
   padding: 1px 2px;
   color: #fff;
+  text-shadow: none;
   border-radius: 2px;
   box-shadow: 0 1px 0 hsla(0, 100%, 100%, .2) inset,
               0 -1px 0 hsla(0, 0%, 0%, .1) inset,
               0 1px 0 hsla(206, 50%, 10%, .2);
   margin: -6px 0 0 !important;
-  -moz-margin-end: -6px !important;
+  margin-inline-end: -6px !important;
   min-width: 14px;
   max-width: 28px;
   line-height: 10px;
@@ -97,27 +68,11 @@ toolbarbutton[type="menu-button"][disabled="true"]:hover:active {
 .toolbarbutton-badge:-moz-window-inactive {
   background-color: rgb(230,230,230);
   box-shadow: none;
-  border: 1px solid rgb(206,206,206);
   color: rgb(192,192,192);
 }
 
 toolbar[mode="icons"] > *|* > .toolbarbutton-badge {
-  -moz-margin-end: -10px !important;
-}
-
-/* .......... dropmarker .......... */
-
-.toolbarbutton-menubutton-dropmarker {
-  -moz-appearance: none;
-  border: none;
-  background-color: transparent !important;
-  list-style-image: url("chrome://global/skin/arrow/arrow-dn.png");
-  width: auto;
-  padding: 0 5px;
-}
-
-.toolbarbutton-menubutton-dropmarker[disabled="true"] {
-  list-style-image: url("chrome://global/skin/arrow/arrow-dn-dis.png");
+  margin-inline-end: -10px !important;
 }
 
 toolbarbutton.tabbable {

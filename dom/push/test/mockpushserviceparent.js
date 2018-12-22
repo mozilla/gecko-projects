@@ -1,8 +1,6 @@
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /**
  * Defers one or more callbacks until the next turn of the event loop. Multiple
@@ -32,10 +30,7 @@ MockWebSocketParent.prototype = {
   _listener: null,
   _context: null,
 
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsISupports,
-    Ci.nsIWebSocketChannel
-  ]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebSocketChannel]),
 
   get originalURI() {
     return this._originalURI;
@@ -61,57 +56,46 @@ MockWebSocketParent.prototype = {
   },
 };
 
-function MockNetworkInfo() {}
-
-MockNetworkInfo.prototype = {
-  getNetworkInformation() {
-    return {mcc: '', mnc: '', ip: ''};
-  },
-
-  getNetworkState(callback) {
-    callback({mcc: '', mnc: '', ip: '', netid: ''});
-  },
-
-  getNetworkStateChangeEventName() {
-    return 'network:offline-status-changed';
-  }
-};
-
 var pushService = Cc["@mozilla.org/push/Service;1"].
                   getService(Ci.nsIPushService).
                   wrappedJSObject;
 
-var mockWebSocket;
+var mockSocket;
+var serverMsgs = [];
 
 addMessageListener("socket-setup", function () {
-  mockWebSocket = new Promise((resolve, reject) => {
-    var mockSocket = null;
-    pushService.replaceServiceBackend({
-      serverURI: "wss://push.example.org/",
-      networkInfo: new MockNetworkInfo(),
-      makeWebSocket(uri) {
-        if (!mockSocket) {
-          mockSocket = new MockWebSocketParent(uri);
-          resolve(mockSocket);
-        }
-
-        return mockSocket;
+  pushService.replaceServiceBackend({
+    serverURI: "wss://push.example.org/",
+    makeWebSocket(uri) {
+      mockSocket = new MockWebSocketParent(uri);
+      while (serverMsgs.length > 0) {
+        let msg = serverMsgs.shift();
+        mockSocket.serverSendMsg(msg);
       }
-    });
+      return mockSocket;
+    }
   });
 });
 
-addMessageListener("socket-teardown", function () {
-  mockWebSocket.then(socket => {
-    socket.close();
-    pushService.restoreServiceBackend();
-  });
+addMessageListener("socket-teardown", function (msg) {
+  pushService.restoreServiceBackend().then(_ => {
+    serverMsgs.length = 0;
+    if (mockSocket) {
+      mockSocket.close();
+      mockSocket = null;
+    }
+    sendAsyncMessage("socket-server-teardown");
+  }).catch(error => {
+    Cu.reportError(`Error restoring service backend: ${error}`);
+  })
 });
 
 addMessageListener("socket-server-msg", function (msg) {
-  mockWebSocket.then(socket => {
-    socket.serverSendMsg(msg);
-  });
+  if (mockSocket) {
+    mockSocket.serverSendMsg(msg);
+  } else {
+    serverMsgs.push(msg);
+  }
 });
 
 var MockService = {

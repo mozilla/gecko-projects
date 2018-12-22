@@ -9,26 +9,25 @@
  * interact with the Push service.
  */
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var isParent = Services.appinfo.processType === Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
 
 // The default Push service implementation.
 XPCOMUtils.defineLazyGetter(this, "PushService", function() {
-  const {PushService} = Cu.import("resource://gre/modules/PushService.jsm",
-                                  {});
+  const {PushService} = ChromeUtils.import("resource://gre/modules/PushService.jsm",
+                                           {});
   PushService.init();
   return PushService;
 });
 
-// Observer notification topics for system subscriptions. These are duplicated
-// and used in `PushNotifier.cpp`. They're exposed on `nsIPushService` instead
-// of `nsIPushNotifier` so that JS callers only need to import this service.
+// Observer notification topics for push messages and subscription status
+// changes. These are duplicated and used in `nsIPushNotifier`. They're exposed
+// on `nsIPushService` so that JS callers only need to import this service.
 const OBSERVER_TOPIC_PUSH = "push-message";
 const OBSERVER_TOPIC_SUBSCRIPTION_CHANGE = "push-subscription-change";
+const OBSERVER_TOPIC_SUBSCRIPTION_MODIFIED = "push-subscription-modified";
 
 /**
  * `PushServiceBase`, `PushServiceParent`, and `PushServiceContent` collectively
@@ -50,7 +49,7 @@ function PushServiceBase() {
 PushServiceBase.prototype = {
   classID: Components.ID("{daaa8d73-677e-4233-8acd-2c404bd01658}"),
   contractID: "@mozilla.org/push/Service;1",
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIObserver,
     Ci.nsISupportsWeakReference,
     Ci.nsIPushService,
@@ -60,6 +59,7 @@ PushServiceBase.prototype = {
 
   pushTopic: OBSERVER_TOPIC_PUSH,
   subscriptionChangeTopic: OBSERVER_TOPIC_SUBSCRIPTION_CHANGE,
+  subscriptionModifiedTopic: OBSERVER_TOPIC_SUBSCRIPTION_MODIFIED,
 
   _handleReady() {},
 
@@ -83,6 +83,11 @@ PushServiceBase.prototype = {
       this._handleReady();
       return;
     }
+    if (topic === "android-push-service") {
+      // Load PushService immediately.
+      this._handleReady();
+      return;
+    }
   },
 
   _deliverSubscription(request, props) {
@@ -91,6 +96,12 @@ PushServiceBase.prototype = {
       return;
     }
     request.onPushSubscription(Cr.NS_OK, new PushSubscription(props));
+  },
+
+  _deliverSubscriptionError(request, error) {
+    let result = typeof error.result == "number" ?
+                 error.result : Cr.NS_ERROR_FAILURE;
+    request.onPushSubscription(result, null);
   },
 };
 
@@ -106,7 +117,7 @@ function PushServiceParent() {
 PushServiceParent.prototype = Object.create(PushServiceBase.prototype);
 
 XPCOMUtils.defineLazyServiceGetter(PushServiceParent.prototype, "_mm",
-  "@mozilla.org/parentprocessmessagemanager;1", "nsIMessageBroadcaster");
+  "@mozilla.org/parentprocessmessagemanager;1", "nsISupports");
 
 Object.assign(PushServiceParent.prototype, {
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(PushServiceParent),
@@ -124,12 +135,17 @@ Object.assign(PushServiceParent.prototype, {
   // nsIPushService methods
 
   subscribe(scope, principal, callback) {
-    return this._handleRequest("Push:Register", principal, {
+    this.subscribeWithKey(scope, principal, 0, null, callback);
+  },
+
+  subscribeWithKey(scope, principal, keyLen, key, callback) {
+    this._handleRequest("Push:Register", principal, {
       scope: scope,
+      appServerKey: key,
     }).then(result => {
       this._deliverSubscription(callback, result);
     }, error => {
-      callback.onPushSubscription(Cr.NS_ERROR_FAILURE, null);
+      this._deliverSubscriptionError(callback, error);
     }).catch(Cu.reportError);
   },
 
@@ -149,7 +165,7 @@ Object.assign(PushServiceParent.prototype, {
     }).then(result => {
       this._deliverSubscription(callback, result);
     }, error => {
-      callback.onPushSubscription(Cr.NS_ERROR_FAILURE, null);
+      this._deliverSubscriptionError(callback, error);
     }).catch(Cu.reportError);
   },
 
@@ -192,22 +208,19 @@ Object.assign(PushServiceParent.prototype, {
       this.notificationForOriginClosed(data);
       return;
     }
-    if (!target.assertPermission("push")) {
-      return;
-    }
     if (name === "Push:ReportError") {
       this.reportDeliveryError(data.messageId, data.reason);
       return;
     }
-    let sender = target.QueryInterface(Ci.nsIMessageSender);
     return this._handleRequest(name, principal, data).then(result => {
-      sender.sendAsyncMessage(this._getResponseName(name, "OK"), {
+      target.sendAsyncMessage(this._getResponseName(name, "OK"), {
         requestID: data.requestID,
         result: result
       });
     }, error => {
-      sender.sendAsyncMessage(this._getResponseName(name, "KO"), {
+      target.sendAsyncMessage(this._getResponseName(name, "KO"), {
         requestID: data.requestID,
+        result: error.result,
       });
     }).catch(Cu.reportError);
   },
@@ -229,7 +242,7 @@ Object.assign(PushServiceParent.prototype, {
 
     // System subscriptions can only be created by chrome callers, and are
     // exempt from the background message quota and permission checks. They
-    // also use XPCOM observer notifications instead of service worker events.
+    // also do not fire service worker events.
     data.systemRecord = principal.isSystemPrincipal;
 
     data.originAttributes =
@@ -271,12 +284,12 @@ Object.assign(PushServiceParent.prototype, {
   // Methods used for mocking in tests.
 
   replaceServiceBackend(options) {
-    this.service.changeTestServer(options.serverURI, options);
+    return this.service.changeTestServer(options.serverURI, options);
   },
 
   restoreServiceBackend() {
     var defaultServerURL = Services.prefs.getCharPref("dom.push.serverURL");
-    this.service.changeTestServer(defaultServerURL);
+    return this.service.changeTestServer(defaultServerURL);
   },
 });
 
@@ -306,7 +319,7 @@ PushServiceContent.prototype = Object.create(PushServiceBase.prototype);
 
 XPCOMUtils.defineLazyServiceGetter(PushServiceContent.prototype,
   "_mm", "@mozilla.org/childprocessmessagemanager;1",
-  "nsISyncMessageSender");
+  "nsISupports");
 
 Object.assign(PushServiceContent.prototype, {
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(PushServiceContent),
@@ -325,9 +338,14 @@ Object.assign(PushServiceContent.prototype, {
   // nsIPushService methods
 
   subscribe(scope, principal, callback) {
+    this.subscribeWithKey(scope, principal, 0, null, callback);
+  },
+
+  subscribeWithKey(scope, principal, keyLen, key, callback) {
     let requestId = this._addRequest(callback);
     this._mm.sendAsyncMessage("Push:Register", {
       scope: scope,
+      appServerKey: key,
       requestID: requestId,
     }, null, principal);
   },
@@ -406,7 +424,7 @@ Object.assign(PushServiceContent.prototype, {
 
       case "PushService:Register:KO":
       case "PushService:Registration:KO":
-        request.onPushSubscription(Cr.NS_ERROR_FAILURE, null);
+        this._deliverSubscriptionError(request, data);
         break;
 
       case "PushService:Unregister:OK":
@@ -441,7 +459,7 @@ function PushSubscription(props) {
 }
 
 PushSubscription.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPushSubscription]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPushSubscription]),
 
   /** The URL for sending messages to this subscription. */
   get endpoint() {
@@ -463,6 +481,20 @@ PushSubscription.prototype = {
    */
   get quota() {
     return this._props.quota;
+  },
+
+  /**
+   * Indicates whether this subscription was created with the system principal.
+   * System subscriptions are exempt from the background message quota and
+   * permission checks.
+   */
+  get isSystemSubscription() {
+    return !!this._props.systemRecord;
+  },
+
+  /** The private key used to decrypt incoming push messages, in JWK format */
+  get p256dhPrivateKey() {
+    return this._props.p256dhPrivateKey;
   },
 
   /**
@@ -488,11 +520,15 @@ PushSubscription.prototype = {
    * receive the key size and buffer as out parameters.
    */
   getKey(name, outKeyLen) {
-    if (name === "p256dh") {
-      return this._getRawKey(this._props.p256dhKey, outKeyLen);
-    }
-    if (name === "auth") {
-      return this._getRawKey(this._props.authenticationSecret, outKeyLen);
+    switch (name) {
+      case "p256dh":
+        return this._getRawKey(this._props.p256dhKey, outKeyLen);
+
+      case "auth":
+        return this._getRawKey(this._props.authenticationSecret, outKeyLen);
+
+      case "appServer":
+        return this._getRawKey(this._props.appServerKey, outKeyLen);
     }
     return null;
   },

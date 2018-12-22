@@ -9,14 +9,13 @@
 
 [NoInterfaceObject]
 interface ChildNode {
-// Not implemented yet:
-//  [Unscopable]
-//  void before((Node or DOMString)... nodes);
-//  [Unscopable]
-//  void after((Node or DOMString)... nodes);
-//  [Unscopable]
-//  void replace((Node or DOMString)... nodes);
-  [Unscopable]
+  [CEReactions, Throws, Unscopable]
+  void before((Node or DOMString)... nodes);
+  [CEReactions, Throws, Unscopable]
+  void after((Node or DOMString)... nodes);
+  [CEReactions, Throws, Unscopable]
+  void replaceWith((Node or DOMString)... nodes);
+  [CEReactions, Unscopable]
   void remove();
 };
 

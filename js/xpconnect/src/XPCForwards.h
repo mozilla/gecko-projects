@@ -12,6 +12,7 @@
 // forward declarations of interally used classes...
 
 class nsXPConnect;
+class XPCJSContext;
 class XPCJSRuntime;
 class XPCContext;
 class XPCCallContext;
@@ -28,12 +29,8 @@ class XPCNativeSet;
 class XPCWrappedNative;
 class XPCWrappedNativeProto;
 class XPCWrappedNativeTearOff;
-class XPCNativeScriptableShared;
-class XPCNativeScriptableInfo;
-class XPCNativeScriptableCreateInfo;
 
 class XPCTraceableVariant;
-class XPCJSObjectHolder;
 
 class JSObject2WrappedJSMap;
 class Native2WrappedNativeMap;
@@ -42,8 +39,6 @@ class IID2NativeInterfaceMap;
 class ClassInfo2NativeSetMap;
 class ClassInfo2WrappedNativeProtoMap;
 class NativeSetMap;
-class IID2ThisTranslatorMap;
-class XPCNativeScriptableSharedMap;
 class XPCWrappedNativeProtoMap;
 class JSObject2JSObjectMap;
 

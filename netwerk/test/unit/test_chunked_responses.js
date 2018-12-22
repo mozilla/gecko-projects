@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /*
  * Test Chunked-Encoded response parsing.
  */
@@ -5,8 +9,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Test infrastructure
 
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+"use strict";
+
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -27,11 +33,11 @@ function run_test()
 
 function run_test_number(num)
 {
-  testPath = testPathBase + num;
+  var testPath = testPathBase + num;
   httpserver.registerPathHandler(testPath, eval("handler" + num));
 
   var channel = setupChannel(testPath);
-  flags = test_flags[num];   // OK if flags undefined for test
+  var flags = test_flags[num];   // OK if flags undefined for test
   channel.asyncOpen2(new ChannelListener(eval("completeTest" + num),
                                         channel, flags));
 }
@@ -42,7 +48,7 @@ function setupChannel(url)
     uri: URL + url,
     loadUsingSystemPrincipal: true
   });
-  var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
+  var httpChan = chan.QueryInterface(Ci.nsIHttpChannel);
   return httpChan;
 }
 
@@ -71,7 +77,7 @@ function handler1(metadata, response)
 
 function completeTest1(request, data, ctx)
 {
-  do_check_eq(request.status, Components.results.NS_ERROR_UNEXPECTED);
+  Assert.equal(request.status, Cr.NS_ERROR_UNEXPECTED);
 
   run_test_number(2);
 }
@@ -96,7 +102,7 @@ function handler2(metadata, response)
 
 function completeTest2(request, data, ctx)
 {
-  do_check_eq(request.status, Components.results.NS_ERROR_UNEXPECTED);
+  Assert.equal(request.status, Cr.NS_ERROR_UNEXPECTED);
   run_test_number(3);
 }
 
@@ -120,7 +126,7 @@ function handler3(metadata, response)
 
 function completeTest3(request, data, ctx)
 {
-  do_check_eq(request.status, 0);
+  Assert.equal(request.status, 0);
   run_test_number(4);
 }
 
@@ -144,7 +150,7 @@ function handler4(metadata, response)
 
 function completeTest4(request, data, ctx)
 {
-  do_check_eq(request.status, 0);
+  Assert.equal(request.status, 0);
   run_test_number(5);
 }
 
@@ -169,7 +175,7 @@ function handler5(metadata, response)
 
 function completeTest5(request, data, ctx)
 {
-  do_check_eq(request.status, Components.results.NS_ERROR_UNEXPECTED);
+  Assert.equal(request.status, Cr.NS_ERROR_UNEXPECTED);
   endTests();
 //  run_test_number(6);
 }

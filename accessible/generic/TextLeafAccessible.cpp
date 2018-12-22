@@ -20,6 +20,7 @@ TextLeafAccessible::
   LinkableAccessible(aContent, aDoc)
 {
   mType = eTextLeafType;
+  mGenericTypes |= eText;
   mStateFlags |= eNoKidsFromDOM;
 }
 
@@ -28,7 +29,7 @@ TextLeafAccessible::~TextLeafAccessible()
 }
 
 role
-TextLeafAccessible::NativeRole()
+TextLeafAccessible::NativeRole() const
 {
   nsIFrame* frame = GetFrame();
   if (frame && frame->IsGeneratedContentFrame())
@@ -45,7 +46,7 @@ TextLeafAccessible::AppendTextTo(nsAString& aText, uint32_t aStartOffset,
 }
 
 ENameValueFlag
-TextLeafAccessible::Name(nsString& aName)
+TextLeafAccessible::Name(nsString& aName) const
 {
   // Text node, ARIA can't be used.
   aName = mText;

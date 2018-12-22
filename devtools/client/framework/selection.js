@@ -6,14 +6,13 @@
 
 "use strict";
 
-const { Cu, Ci } = require("chrome");
-const { getRootBindingParent } = require("devtools/shared/layout/utils");
+const nodeConstants = require("devtools/shared/dom-node-constants");
 var EventEmitter = require("devtools/shared/event-emitter");
 
 /**
  * API
  *
- *   new Selection(walker=null, node=null, track={attributes,detached});
+ *   new Selection(walker=null)
  *   destroy()
  *   node (readonly)
  *   setNode(node, origin="unknown")
@@ -42,37 +41,35 @@ var EventEmitter = require("devtools/shared/event-emitter");
  *   isNotationNode()
  *
  * Events:
- *   "new-node" when the inner node changed
- *   "before-new-node" when the inner node is set to change
- *   "attribute-changed" when an attribute is changed (only if tracked)
- *   "detached" when the node (or one of its parents) is removed from the document (only if tracked)
- *   "reparented" when the node (or one of its parents) is moved under a different node (only if tracked)
+ *   "new-node-front" when the inner node changed
+ *   "attribute-changed" when an attribute is changed
+ *   "detached-front" when the node (or one of its parents) is removed from
+ *   the document
+ *   "reparented" when the node (or one of its parents) is moved under
+ *   a different node
  */
 
 /**
  * A Selection object. Hold a reference to a node.
  * Includes some helpers, fire some helpful events.
- *
- * @param node Inner node.
- *    Can be null. Can be (un)set in the future via the "node" property;
- * @param trackAttribute Tell if events should be fired when the attributes of
- *    the node change.
- *
  */
-function Selection(walker, node=null, track={attributes:true,detached:true}) {
+function Selection(walker) {
   EventEmitter.decorate(this);
 
+  // A single node front can be represented twice on the client when the node is a slotted
+  // element. It will be displayed once as a direct child of the host element, and once as
+  // a child of a slot in the "shadow DOM". The latter is called the slotted version.
+  this._isSlotted = false;
+
   this._onMutations = this._onMutations.bind(this);
-  this.track = track;
+  this.setNodeFront = this.setNodeFront.bind(this);
   this.setWalker(walker);
-  this.setNode(node);
 }
 
 exports.Selection = Selection;
 
 Selection.prototype = {
   _walker: null,
-  _node: null,
 
   _onMutations: function(mutations) {
     let attributeChange = false;
@@ -80,7 +77,7 @@ Selection.prototype = {
     let detached = false;
     let parentNode = null;
 
-    for (let m of mutations) {
+    for (const m of mutations) {
       if (!attributeChange && m.type == "attributes") {
         attributeChange = true;
       }
@@ -105,18 +102,11 @@ Selection.prototype = {
       this.emit("pseudoclass");
     }
     if (detached) {
-      let rawNode = null;
-      if (parentNode && parentNode.isLocal_toBeDeprecated()) {
-        rawNode = parentNode.rawNode();
-      }
-
-      this.emit("detached", rawNode, null);
       this.emit("detached-front", parentNode);
     }
   },
 
   destroy: function() {
-    this.setNode(null);
     this.setWalker(null);
   },
 
@@ -130,59 +120,29 @@ Selection.prototype = {
     }
   },
 
-  // Not remote-safe
-  setNode: function(value, reason="unknown") {
-    if (value) {
-      value = this._walker.frontForRawNode(value);
-    }
-    this.setNodeFront(value, reason);
-  },
-
-  // Not remote-safe
-  get node() {
-    return this._node;
-  },
-
-  // Not remote-safe
-  get window() {
-    if (this.isNode()) {
-      return this.node.ownerDocument.defaultView;
-    }
-    return null;
-  },
-
-  // Not remote-safe
-  get document() {
-    if (this.isNode()) {
-      return this.node.ownerDocument;
-    }
-    return null;
-  },
-
-  setNodeFront: function(value, reason="unknown") {
+  /**
+   * Update the currently selected node-front.
+   *
+   * @param {NodeFront} nodeFront
+   *        The NodeFront being selected.
+   * @param {Object} (optional)
+   *        - {String} reason: Reason that triggered the selection, will be fired with
+   *          the "new-node-front" event.
+   *        - {Boolean} isSlotted: Is the selection representing the slotted version of
+   *          the node.
+   */
+  setNodeFront: function(nodeFront, { reason = "unknown", isSlotted = false} = {}) {
     this.reason = reason;
 
-    // If a singleTextChild text node is being set, then set it's parent instead.
-    let parentNode = value && value.parentNode();
-    if (value && parentNode && parentNode.singleTextChild === value) {
-      value = parentNode;
+    // If an inlineTextChild text node is being set, then set it's parent instead.
+    const parentNode = nodeFront && nodeFront.parentNode();
+    if (nodeFront && parentNode && parentNode.inlineTextChild === nodeFront) {
+      nodeFront = parentNode;
     }
 
-    // We used to return here if the node had not changed but we now need to
-    // set the node even if it is already set otherwise it is not possible to
-    // e.g. highlight the same node twice.
-    let rawValue = null;
-    if (value && value.isLocal_toBeDeprecated()) {
-      rawValue = value.rawNode();
-    }
-    this.emit("before-new-node", rawValue, reason);
-    this.emit("before-new-node-front", value, reason);
-    let previousNode = this._node;
-    let previousFront = this._nodeFront;
-    this._node = rawValue;
-    this._nodeFront = value;
-    this.emit("new-node", previousNode, this.reason);
-    this.emit("new-node-front", value, this.reason);
+    this._isSlotted = isSlotted;
+    this._nodeFront = nodeFront;
+    this.emit("new-node-front", nodeFront, this.reason);
   },
 
   get documentFront() {
@@ -200,21 +160,7 @@ Selection.prototype = {
   },
 
   isNode: function() {
-    if (!this._nodeFront) {
-      return false;
-    }
-
-    // As long as tools are still accessing node.rawNode(),
-    // this needs to stay here.
-    if (this._node && Cu.isDeadWrapper(this._node)) {
-      return false;
-    }
-
-    return true;
-  },
-
-  isLocal: function() {
-    return !!this._node;
+    return !!this._nodeFront;
   },
 
   isConnected: function() {
@@ -223,47 +169,24 @@ Selection.prototype = {
       return false;
     }
 
-    // As long as there are still tools going around
-    // accessing node.rawNode, this needs to stay.
-    let rawNode = null;
-    if (node.isLocal_toBeDeprecated()) {
-      rawNode = node.rawNode();
-    }
-    if (rawNode) {
-      try {
-        let doc = this.document;
-        if (doc && doc.defaultView) {
-          let docEl = doc.documentElement;
-          let bindingParent = getRootBindingParent(rawNode);
-
-          if (docEl.contains(bindingParent)) {
-            return true;
-          }
-        }
-      } catch (e) {
-        // "can't access dead object" error
-      }
-      return false;
-    }
-
-    while(node) {
+    while (node) {
       if (node === this._walker.rootNode) {
         return true;
       }
       node = node.parentNode();
-    };
+    }
     return false;
   },
 
   isHTMLNode: function() {
-    let xhtml_ns = "http://www.w3.org/1999/xhtml";
-    return this.isNode() && this.nodeFront.namespaceURI == xhtml_ns;
+    const xhtmlNs = "http://www.w3.org/1999/xhtml";
+    return this.isNode() && this.nodeFront.namespaceURI == xhtmlNs;
   },
 
   // Node type
 
   isElementNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.ELEMENT_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.ELEMENT_NODE;
   },
 
   isPseudoElementNode: function() {
@@ -275,35 +198,38 @@ Selection.prototype = {
   },
 
   isAttributeNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.ATTRIBUTE_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.ATTRIBUTE_NODE;
   },
 
   isTextNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.TEXT_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.TEXT_NODE;
   },
 
   isCDATANode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.CDATA_SECTION_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.CDATA_SECTION_NODE;
   },
 
   isEntityRefNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.ENTITY_REFERENCE_NODE;
+    return this.isNode() &&
+      this.nodeFront.nodeType == nodeConstants.ENTITY_REFERENCE_NODE;
   },
 
   isEntityNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.ENTITY_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.ENTITY_NODE;
   },
 
   isProcessingInstructionNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.PROCESSING_INSTRUCTION_NODE;
+    return this.isNode() &&
+      this.nodeFront.nodeType == nodeConstants.PROCESSING_INSTRUCTION_NODE;
   },
 
   isCommentNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.PROCESSING_INSTRUCTION_NODE;
+    return this.isNode() &&
+      this.nodeFront.nodeType == nodeConstants.PROCESSING_INSTRUCTION_NODE;
   },
 
   isDocumentNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.DOCUMENT_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.DOCUMENT_NODE;
   },
 
   /**
@@ -325,14 +251,19 @@ Selection.prototype = {
   },
 
   isDocumentTypeNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.DOCUMENT_TYPE_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.DOCUMENT_TYPE_NODE;
   },
 
   isDocumentFragmentNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE;
+    return this.isNode() &&
+      this.nodeFront.nodeType == nodeConstants.DOCUMENT_FRAGMENT_NODE;
   },
 
   isNotationNode: function() {
-    return this.isNode() && this.nodeFront.nodeType == Ci.nsIDOMNode.NOTATION_NODE;
+    return this.isNode() && this.nodeFront.nodeType == nodeConstants.NOTATION_NODE;
+  },
+
+  isSlotted: function() {
+    return this._isSlotted;
   },
 };

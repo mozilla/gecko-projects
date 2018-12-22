@@ -53,7 +53,7 @@ public:
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return CanvasGradientBinding::Wrap(aCx, this, aGivenProto);
+    return CanvasGradient_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   CanvasRenderingContext2D* GetParentObject()
@@ -62,6 +62,8 @@ public:
   }
 
 protected:
+  friend struct CanvasBidiProcessor;
+
   CanvasGradient(CanvasRenderingContext2D* aContext, Type aType)
     : mContext(aContext)
     , mType(aType)

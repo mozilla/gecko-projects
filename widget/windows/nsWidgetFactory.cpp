@@ -12,10 +12,10 @@
 #include "nsAppShellSingleton.h"
 #include "mozilla/ModuleUtils.h"
 #include "mozilla/WidgetUtils.h"
+#include "mozilla/widget/ScreenManager.h"
 #include "nsIServiceManager.h"
 #include "nsIdleServiceWin.h"
 #include "nsLookAndFeel.h"
-#include "nsScreenManagerWin.h"
 #include "nsSound.h"
 #include "WinMouseScrollHandler.h"
 #include "KeyboardLayout.h"
@@ -35,6 +35,7 @@
 // Drag & Drop, Clipboard
 #include "nsClipboardHelper.h"
 #include "nsClipboard.h"
+#include "HeadlessClipboard.h"
 #include "nsBidiKeyboard.h"
 #include "nsDragService.h"
 #include "nsTransferable.h"
@@ -48,7 +49,8 @@
 
 #ifdef NS_PRINTING
 #include "nsDeviceContextSpecWin.h"
-#include "nsPrintOptionsWin.h"
+#include "nsPrintDialogWin.h"
+#include "nsPrintSettingsServiceWin.h"
 #include "nsPrintSession.h"
 #endif
 
@@ -75,7 +77,7 @@ ChildWindowConstructor(nsISupports *aOuter, REFNSIID aIID,
   if (aOuter != nullptr) {
     return NS_ERROR_NO_AGGREGATION;
   }
-  nsCOMPtr<nsIWidget> widget = new ChildWindow;
+  nsCOMPtr<nsIWidget> widget = new nsWindow(true);
   return widget->QueryInterface(aIID, aResult);
 }
 
@@ -103,11 +105,27 @@ ColorPickerConstructor(nsISupports *aOuter, REFNSIID aIID,
   return picker->QueryInterface(aIID, aResult);
 }
 
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsScreenManagerWin)
+static nsresult
+nsClipboardConstructor(nsISupports *aOuter, REFNSIID aIID,
+                       void **aResult)
+{
+  *aResult = nullptr;
+  if (aOuter != nullptr) {
+    return NS_ERROR_NO_AGGREGATION;
+  }
+  nsCOMPtr<nsIClipboard> inst;
+  if (gfxPlatform::IsHeadless()) {
+    inst = new HeadlessClipboard();
+  } else {
+    inst = new nsClipboard();
+  }
+  return inst->QueryInterface(aIID, aResult);
+}
+
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(ScreenManager, ScreenManager::GetAddRefedSingleton)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIdleServiceWin, nsIdleServiceWin::GetInstance)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsClipboard)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsISound, nsSound::GetInstance)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsClipboardHelper)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsSound)
 NS_GENERIC_FACTORY_CONSTRUCTOR(WinTaskbar)
 NS_GENERIC_FACTORY_CONSTRUCTOR(JumpListBuilder)
 NS_GENERIC_FACTORY_CONSTRUCTOR(JumpListItem)
@@ -121,7 +139,8 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsDragService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBidiKeyboard)
 NS_GENERIC_FACTORY_CONSTRUCTOR(TaskbarPreviewCallback)
 #ifdef NS_PRINTING
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintOptionsWin, Init)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintDialogServiceWin, Init)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintSettingsServiceWin, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsPrinterEnumeratorWin)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintSession, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDeviceContextSpecWin)
@@ -159,6 +178,7 @@ NS_DEFINE_NAMED_CID(NS_DRAGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_BIDIKEYBOARD_CID);
 NS_DEFINE_NAMED_CID(NS_TASKBARPREVIEWCALLBACK_CID);
 #ifdef NS_PRINTING
+NS_DEFINE_NAMED_CID(NS_PRINTDIALOGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTSETTINGSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTER_ENUMERATOR_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTSESSION_CID);
@@ -171,15 +191,15 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_CHILD_CID, false, nullptr, ChildWindowConstructor },
   { &kNS_FILEPICKER_CID, false, nullptr, FilePickerConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_COLORPICKER_CID, false, nullptr, ColorPickerConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor },
-  { &kNS_SCREENMANAGER_CID, false, nullptr, nsScreenManagerWinConstructor,
+  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor, Module::ALLOW_IN_GPU_PROCESS },
+  { &kNS_SCREENMANAGER_CID, false, nullptr, ScreenManagerConstructor,
     Module::MAIN_PROCESS_ONLY },
-  { &kNS_GFXINFO_CID, false, nullptr, GfxInfoConstructor },
+  { &kNS_GFXINFO_CID, false, nullptr, GfxInfoConstructor, Module::ALLOW_IN_GPU_PROCESS },
   { &kNS_THEMERENDERER_CID, false, nullptr, NS_NewNativeTheme },
   { &kNS_IDLE_SERVICE_CID, false, nullptr, nsIdleServiceWinConstructor },
   { &kNS_CLIPBOARD_CID, false, nullptr, nsClipboardConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_CLIPBOARDHELPER_CID, false, nullptr, nsClipboardHelperConstructor },
-  { &kNS_SOUND_CID, false, nullptr, nsSoundConstructor, Module::MAIN_PROCESS_ONLY },
+  { &kNS_SOUND_CID, false, nullptr, nsISoundConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_TRANSFERABLE_CID, false, nullptr, nsTransferableConstructor },
   { &kNS_HTMLFORMATCONVERTER_CID, false, nullptr, nsHTMLFormatConverterConstructor },
   { &kNS_WIN_TASKBAR_CID, false, nullptr, WinTaskbarConstructor },
@@ -193,7 +213,8 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_BIDIKEYBOARD_CID, false, nullptr, nsBidiKeyboardConstructor, Module::MAIN_PROCESS_ONLY },
   { &kNS_TASKBARPREVIEWCALLBACK_CID, false, nullptr, TaskbarPreviewCallbackConstructor },
 #ifdef NS_PRINTING
-  { &kNS_PRINTSETTINGSSERVICE_CID, false, nullptr, nsPrintOptionsWinConstructor },
+  { &kNS_PRINTDIALOGSERVICE_CID, false, nullptr, nsPrintDialogServiceWinConstructor, Module::MAIN_PROCESS_ONLY },
+  { &kNS_PRINTSETTINGSSERVICE_CID, false, nullptr, nsPrintSettingsServiceWinConstructor },
   { &kNS_PRINTER_ENUMERATOR_CID, false, nullptr, nsPrinterEnumeratorWinConstructor },
   { &kNS_PRINTSESSION_CID, false, nullptr, nsPrintSessionConstructor },
   { &kNS_DEVICE_CONTEXT_SPEC_CID, false, nullptr, nsDeviceContextSpecWinConstructor },
@@ -206,9 +227,9 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widgets/child_window/win;1", &kNS_CHILD_CID },
   { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID },
+  { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID, Module::ALLOW_IN_GPU_PROCESS },
   { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID },
+  { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID, Module::ALLOW_IN_GPU_PROCESS },
   { "@mozilla.org/chrome/chrome-native-theme;1", &kNS_THEMERENDERER_CID },
   { "@mozilla.org/widget/idleservice;1", &kNS_IDLE_SERVICE_CID },
   { "@mozilla.org/widget/clipboard;1", &kNS_CLIPBOARD_CID, Module::MAIN_PROCESS_ONLY },
@@ -227,6 +248,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widget/bidikeyboard;1", &kNS_BIDIKEYBOARD_CID, Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/widget/taskbar-preview-callback;1", &kNS_TASKBARPREVIEWCALLBACK_CID },
 #ifdef NS_PRINTING
+  { NS_PRINTDIALOGSERVICE_CONTRACTID, &kNS_PRINTDIALOGSERVICE_CID },
   { "@mozilla.org/gfx/printsettings-service;1", &kNS_PRINTSETTINGSSERVICE_CID },
   { "@mozilla.org/gfx/printerenumerator;1", &kNS_PRINTER_ENUMERATOR_CID },
   { "@mozilla.org/gfx/printsession;1", &kNS_PRINTSESSION_CID },
@@ -255,7 +277,8 @@ static const mozilla::Module kWidgetModule = {
   nullptr,
   nullptr,
   nsAppShellInit,
-  nsWidgetWindowsModuleDtor
+  nsWidgetWindowsModuleDtor,
+  Module::ALLOW_IN_GPU_PROCESS
 };
 
 NSMODULE_DEFN(nsWidgetModule) = &kWidgetModule;

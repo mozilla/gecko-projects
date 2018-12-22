@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -44,17 +46,8 @@ ScopedXREEmbed::SetAppDir(const nsACString& aPath)
 void
 ScopedXREEmbed::Start()
 {
-  std::string path;
-#if defined(OS_WIN)
-  path = WideToUTF8(CommandLine::ForCurrentProcess()->program());
-#elif defined(OS_POSIX)
-  path = CommandLine::ForCurrentProcess()->argv()[0];
-#else
-#  error Sorry
-#endif
-
   nsCOMPtr<nsIFile> localFile;
-  nsresult rv = XRE_GetBinaryPath(path.c_str(), getter_AddRefs(localFile));
+  nsresult rv = XRE_GetBinaryPath(getter_AddRefs(localFile));
   if (NS_FAILED(rv))
     return;
 

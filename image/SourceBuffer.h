@@ -11,6 +11,7 @@
 #ifndef mozilla_image_sourcebuffer_h
 #define mozilla_image_sourcebuffer_h
 
+#include <algorithm>
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
@@ -40,8 +41,7 @@ struct IResumable
 
   // Subclasses may or may not be XPCOM classes, so we just require that they
   // implement AddRef and Release.
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) = 0;
-  NS_IMETHOD_(MozExternalRefCountType) Release(void) = 0;
+  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
 
   virtual void Resume() = 0;
 
@@ -77,32 +77,33 @@ public:
     COMPLETE  // The iterator is pointing to the end of the buffer.
   };
 
-  explicit SourceBufferIterator(SourceBuffer* aOwner)
+  explicit SourceBufferIterator(SourceBuffer* aOwner, size_t aReadLimit)
     : mOwner(aOwner)
     , mState(START)
+    , mChunkCount(0)
+    , mByteCount(0)
+    , mRemainderToRead(aReadLimit)
   {
     MOZ_ASSERT(aOwner);
     mData.mIterating.mChunk = 0;
     mData.mIterating.mData = nullptr;
     mData.mIterating.mOffset = 0;
-    mData.mIterating.mLength = 0;
+    mData.mIterating.mAvailableLength = 0;
+    mData.mIterating.mNextReadLength = 0;
   }
 
   SourceBufferIterator(SourceBufferIterator&& aOther)
-    : mOwner(Move(aOther.mOwner))
+    : mOwner(std::move(aOther.mOwner))
     , mState(aOther.mState)
     , mData(aOther.mData)
+    , mChunkCount(aOther.mChunkCount)
+    , mByteCount(aOther.mByteCount)
+    , mRemainderToRead(aOther.mRemainderToRead)
   { }
 
   ~SourceBufferIterator();
 
-  SourceBufferIterator& operator=(SourceBufferIterator&& aOther)
-  {
-    mOwner = Move(aOther.mOwner);
-    mState = aOther.mState;
-    mData = aOther.mData;
-    return *this;
-  }
+  SourceBufferIterator& operator=(SourceBufferIterator&& aOther);
 
   /**
    * Returns true if there are no more than @aBytes remaining in the
@@ -111,11 +112,45 @@ public:
   bool RemainingBytesIsNoMoreThan(size_t aBytes) const;
 
   /**
-   * Advances the iterator through the SourceBuffer if possible. If not,
+   * Advances the iterator through the SourceBuffer if possible. Advances no
+   * more than @aRequestedBytes bytes. (Use SIZE_MAX to advance as much as
+   * possible.)
+   *
+   * This is a wrapper around AdvanceOrScheduleResume() that makes it clearer at
+   * the callsite when the no resuming is intended.
+   *
+   * @return State::READY if the iterator was successfully advanced.
+   *         State::WAITING if the iterator could not be advanced because it's
+   *           at the end of the underlying SourceBuffer, but the SourceBuffer
+   *           may still receive additional data.
+   *         State::COMPLETE if the iterator could not be advanced because it's
+   *           at the end of the underlying SourceBuffer and the SourceBuffer is
+   *           marked complete (i.e., it will never receive any additional
+   *           data).
+   */
+  State Advance(size_t aRequestedBytes)
+  {
+    return AdvanceOrScheduleResume(aRequestedBytes, nullptr);
+  }
+
+  /**
+   * Advances the iterator through the SourceBuffer if possible. Advances no
+   * more than @aRequestedBytes bytes. (Use SIZE_MAX to advance as much as
+   * possible.) If advancing is not possible and @aConsumer is not null,
    * arranges to call the @aConsumer's Resume() method when more data is
    * available.
+   *
+   * @return State::READY if the iterator was successfully advanced.
+   *         State::WAITING if the iterator could not be advanced because it's
+   *           at the end of the underlying SourceBuffer, but the SourceBuffer
+   *           may still receive additional data. @aConsumer's Resume() method
+   *           will be called when additional data is available.
+   *         State::COMPLETE if the iterator could not be advanced because it's
+   *           at the end of the underlying SourceBuffer and the SourceBuffer is
+   *           marked complete (i.e., it will never receive any additional
+   *           data).
    */
-  State AdvanceOrScheduleResume(IResumable* aConsumer);
+  State AdvanceOrScheduleResume(size_t aRequestedBytes, IResumable* aConsumer);
 
   /// If at the end, returns the status passed to SourceBuffer::Complete().
   nsresult CompletionStatus() const
@@ -137,7 +172,26 @@ public:
   size_t Length() const
   {
     MOZ_ASSERT(mState == READY, "Calling Length() in the wrong state");
-    return mState == READY ? mData.mIterating.mLength : 0;
+    return mState == READY ? mData.mIterating.mNextReadLength : 0;
+  }
+
+  /// @return a count of the chunks we've advanced through.
+  uint32_t ChunkCount() const { return mChunkCount; }
+
+  /// @return a count of the bytes in all chunks we've advanced through.
+  size_t ByteCount() const { return mByteCount; }
+
+  /// @return the source buffer which owns the iterator.
+  SourceBuffer* Owner() const
+  {
+    MOZ_ASSERT(mOwner);
+    return mOwner;
+  }
+
+  /// @return the current offset from the beginning of the buffer.
+  size_t Position() const
+  {
+    return mByteCount - mData.mIterating.mAvailableLength;
   }
 
 private:
@@ -148,21 +202,54 @@ private:
 
   bool HasMore() const { return mState != COMPLETE; }
 
+  State AdvanceFromLocalBuffer(size_t aRequestedBytes)
+  {
+    MOZ_ASSERT(mState == READY, "Advancing in the wrong state");
+    MOZ_ASSERT(mData.mIterating.mAvailableLength > 0,
+               "The local buffer shouldn't be empty");
+    MOZ_ASSERT(mData.mIterating.mNextReadLength == 0,
+               "Advancing without consuming previous data");
+
+    mData.mIterating.mNextReadLength =
+      std::min(mData.mIterating.mAvailableLength, aRequestedBytes);
+
+    return READY;
+  }
+
   State SetReady(uint32_t aChunk, const char* aData,
-                size_t aOffset, size_t aLength)
+                 size_t aOffset, size_t aAvailableLength,
+                 size_t aRequestedBytes)
   {
     MOZ_ASSERT(mState != COMPLETE);
+    mState = READY;
+
+    // Prevent the iterator from reporting more data than it is allowed to read.
+    if (aAvailableLength > mRemainderToRead) {
+      aAvailableLength = mRemainderToRead;
+    }
+
+    // Update state.
     mData.mIterating.mChunk = aChunk;
     mData.mIterating.mData = aData;
     mData.mIterating.mOffset = aOffset;
-    mData.mIterating.mLength = aLength;
-    return mState = READY;
+    mData.mIterating.mAvailableLength = aAvailableLength;
+
+    // Update metrics.
+    mChunkCount++;
+    mByteCount += aAvailableLength;
+
+    // Attempt to advance by the requested number of bytes.
+    return AdvanceFromLocalBuffer(aRequestedBytes);
   }
 
-  State SetWaiting()
+  State SetWaiting(bool aHasConsumer)
   {
     MOZ_ASSERT(mState != COMPLETE);
-    MOZ_ASSERT(mState != WAITING, "Did we get a spurious wakeup somehow?");
+    // Without a consumer, we won't know when to wake up precisely. Caller
+    // convention should mean that we don't try to advance unless we have
+    // written new data, but that doesn't mean we got enough.
+    MOZ_ASSERT(mState != WAITING || !aHasConsumer,
+               "Did we get a spurious wakeup somehow?");
     return mState = WAITING;
   }
 
@@ -183,15 +270,27 @@ private:
    */
   union {
     struct {
-      uint32_t mChunk;
-      const char* mData;
-      size_t mOffset;
-      size_t mLength;
-    } mIterating;
+      uint32_t mChunk;   // Index of the chunk in SourceBuffer.
+      const char* mData; // Pointer to the start of the chunk.
+      size_t mOffset;    // Current read position of the iterator relative to
+                         // mData.
+      size_t mAvailableLength; // How many bytes remain unread in the chunk,
+                               // relative to mOffset.
+      size_t mNextReadLength; // How many bytes the last iterator advance
+                              // requested to be read, so that we know much
+                              // to increase mOffset and reduce mAvailableLength
+                              // by when the next advance is requested.
+    } mIterating;        // Cached info of the chunk currently iterating over.
     struct {
-      nsresult mStatus;
-    } mAtEnd;
+      nsresult mStatus;  // Status code indicating if we read all the data.
+    } mAtEnd;            // State info after iterator is complete.
   } mData;
+
+  uint32_t mChunkCount;  // Count of chunks observed, including current chunk.
+  size_t mByteCount;     // Count of readable bytes observed, including unread
+                         // bytes from the current chunk.
+  size_t mRemainderToRead; // Count of bytes left to read if there is a maximum
+                           // imposed by the caller. SIZE_MAX if unlimited.
 };
 
 /**
@@ -252,9 +351,32 @@ public:
   // Consumer methods.
   //////////////////////////////////////////////////////////////////////////////
 
-  /// Returns an iterator to this SourceBuffer.
-  SourceBufferIterator Iterator();
+  /**
+   * Returns an iterator to this SourceBuffer, which cannot read more than the
+   * given length.
+   */
+  SourceBufferIterator Iterator(size_t aReadLength = SIZE_MAX);
 
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Consumer methods.
+  //////////////////////////////////////////////////////////////////////////////
+
+  /**
+   * The minimum chunk capacity we'll allocate, if we don't know the correct
+   * capacity (which would happen because ExpectLength() wasn't called or gave
+   * us the wrong value). This is only exposed for use by tests; if normal code
+   * is using this, it's doing something wrong.
+   */
+  static const size_t MIN_CHUNK_CAPACITY = 4096;
+
+  /**
+   * The maximum chunk capacity we'll allocate. This was historically the
+   * maximum we would preallocate based on the network size. We may adjust it
+   * in the future based on the IMAGE_DECODE_CHUNKS telemetry to ensure most
+   * images remain in a single chunk.
+   */
+  static const size_t MAX_CHUNK_CAPACITY = 20*1024*1024;
 
 private:
   friend class SourceBufferIterator;
@@ -265,7 +387,7 @@ private:
   // Chunk type and chunk-related methods.
   //////////////////////////////////////////////////////////////////////////////
 
-  class Chunk
+  class Chunk final
   {
   public:
     explicit Chunk(size_t aCapacity)
@@ -273,13 +395,18 @@ private:
       , mLength(0)
     {
       MOZ_ASSERT(aCapacity > 0, "Creating zero-capacity chunk");
-      mData.reset(new (fallible) char[mCapacity]);
+      mData = static_cast<char*>(malloc(mCapacity));
+    }
+
+    ~Chunk()
+    {
+      free(mData);
     }
 
     Chunk(Chunk&& aOther)
       : mCapacity(aOther.mCapacity)
       , mLength(aOther.mLength)
-      , mData(Move(aOther.mData))
+      , mData(aOther.mData)
     {
       aOther.mCapacity = aOther.mLength = 0;
       aOther.mData = nullptr;
@@ -287,9 +414,10 @@ private:
 
     Chunk& operator=(Chunk&& aOther)
     {
+      free(mData);
       mCapacity = aOther.mCapacity;
       mLength = aOther.mLength;
-      mData = Move(aOther.mData);
+      mData = aOther.mData;
       aOther.mCapacity = aOther.mLength = 0;
       aOther.mData = nullptr;
       return *this;
@@ -302,7 +430,7 @@ private:
     char* Data() const
     {
       MOZ_ASSERT(mData, "Allocation failed but nobody checked for it");
-      return mData.get();
+      return mData;
     }
 
     void AddLength(size_t aAdditionalLength)
@@ -311,17 +439,32 @@ private:
       mLength += aAdditionalLength;
     }
 
+    bool SetCapacity(size_t aCapacity)
+    {
+      MOZ_ASSERT(mData, "Allocation failed but nobody checked for it");
+      char* data = static_cast<char*>(realloc(mData, aCapacity));
+      if (!data) {
+        return false;
+      }
+
+      mData = data;
+      mCapacity = aCapacity;
+      return true;
+    }
+
   private:
     Chunk(const Chunk&) = delete;
     Chunk& operator=(const Chunk&) = delete;
 
     size_t mCapacity;
     size_t mLength;
-    UniquePtr<char[]> mData;
+    char* mData;
   };
 
   nsresult AppendChunk(Maybe<Chunk>&& aChunk);
-  Maybe<Chunk> CreateChunk(size_t aCapacity, bool aRoundUp = true);
+  Maybe<Chunk> CreateChunk(size_t aCapacity,
+                           size_t aExistingCapacity = 0,
+                           bool aRoundUp = true);
   nsresult Compact();
   static size_t RoundedUpCapacity(size_t aCapacity);
   size_t FibonacciCapacityWithMinimum(size_t aMinCapacity);
@@ -337,6 +480,7 @@ private:
   typedef SourceBufferIterator::State State;
 
   State AdvanceIteratorOrScheduleResume(SourceBufferIterator& aIterator,
+                                        size_t aRequestedBytes,
                                         IResumable* aConsumer);
   bool RemainingBytesIsNoMoreThan(const SourceBufferIterator& aIterator,
                                   size_t aBytes) const;
@@ -356,13 +500,11 @@ private:
   // Member variables.
   //////////////////////////////////////////////////////////////////////////////
 
-  static const size_t MIN_CHUNK_CAPACITY = 4096;
-
   /// All private members are protected by mMutex.
   mutable Mutex mMutex;
 
   /// The data in this SourceBuffer, stored as a series of Chunks.
-  FallibleTArray<Chunk> mChunks;
+  AutoTArray<Chunk, 1> mChunks;
 
   /// Consumers which are waiting to be notified when new data is available.
   nsTArray<RefPtr<IResumable>> mWaitingConsumers;
@@ -372,6 +514,9 @@ private:
 
   /// Count of active consumers.
   uint32_t mConsumerCount;
+
+  /// True if compacting has been performed.
+  bool mCompacted;
 };
 
 } // namespace image

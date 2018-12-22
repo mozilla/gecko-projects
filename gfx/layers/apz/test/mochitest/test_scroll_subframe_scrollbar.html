@@ -58,7 +58,7 @@ p {
 39	<br>
 40	<br>
 </p>
-<script clss="testbody" type="text/javascript;version=1.7">
+<script clss="testbody" type="text/javascript">
 
 var DefaultEvent = {
   deltaMode: WheelEvent.DOM_DELTA_LINE,
@@ -104,23 +104,14 @@ function testScrolling(subframe) {
   });
 }
 
-function startTest() {
-  waitForAllPaints(function() {
-    flushApzRepaints(test);
-  });
-}
-
-window.onload = function() {
-  SpecialPowers.pushPrefEnv({
-    'set': [['general.smoothScroll', false],
-            ['mousewheel.transaction.timeout', 0],
-            ['mousewheel.transaction.ignoremovedelay', 0]]
-  }, function () {
-    SimpleTest.waitForFocus(startTest);
-  });
-}
-
 SimpleTest.waitForExplicitFinish();
+
+pushPrefs([['general.smoothScroll', false],
+           ['mousewheel.transaction.timeout', 0],
+           ['mousewheel.transaction.ignoremovedelay', 0]])
+.then(waitUntilApzStable)
+.then(test);
+
 </script>
 </body>
 </html>

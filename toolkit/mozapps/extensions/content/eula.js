@@ -6,8 +6,9 @@
 
 "use strict";
 
-var Cu = Components.utils;
-Cu.import("resource://gre/modules/AddonManager.jsm");
+/* exported Startup */
+
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 
 function Startup() {
   var bundle = document.getElementById("extensionsStrings");

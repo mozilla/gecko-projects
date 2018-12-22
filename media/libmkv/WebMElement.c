@@ -57,8 +57,7 @@ static UInt64 generateTrackID(unsigned int trackNumber) {
 
 void writeVideoTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
                      const char *codecId, unsigned int pixelWidth, unsigned int pixelHeight,
-                     unsigned int displayWidth, unsigned int displayHeight,
-                     double frameRate) {
+                     unsigned int displayWidth, unsigned int displayHeight) {
   EbmlLoc start;
   UInt64 trackID;
   Ebml_StartSubElement(glob, &start, TrackEntry);
@@ -80,13 +79,13 @@ void writeVideoTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
     if (pixelHeight != displayHeight) {
       Ebml_SerializeUnsigned(glob, DisplayHeight, displayHeight);
     }
-    Ebml_SerializeFloat(glob, FrameRate, frameRate);
     Ebml_EndSubElement(glob, &videoStart); // Video
   }
   Ebml_EndSubElement(glob, &start); // Track Entry
 }
 void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
                      const char *codecId, double samplingFrequency, unsigned int channels,
+                     uint64_t codecDelay, uint64_t seekPreRoll,
                      unsigned char *private, unsigned long privateSize) {
   EbmlLoc start;
   UInt64 trackID;
@@ -95,6 +94,8 @@ void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
   trackID = generateTrackID(trackNumber);
   Ebml_SerializeUnsigned(glob, TrackUID, trackID);
   Ebml_SerializeUnsigned(glob, TrackType, 2); // audio is always 2
+  Ebml_SerializeUnsigned(glob, CodecDelay, codecDelay);
+  Ebml_SerializeUnsigned(glob, SeekPreRoll, seekPreRoll);
   // I am using defaults for thesed required fields
   /*  Ebml_SerializeUnsigned(glob, FlagEnabled, 1);
       Ebml_SerializeUnsigned(glob, FlagDefault, 1);
@@ -103,7 +104,7 @@ void writeAudioTrack(EbmlGlobal *glob, unsigned int trackNumber, int flagLacing,
   Ebml_SerializeString(glob, CodecID, codecId);
   Ebml_SerializeData(glob, CodecPrivate, private, privateSize);
 
-  Ebml_SerializeString(glob, CodecName, "VORBIS");  // fixed for now
+  Ebml_SerializeString(glob, CodecName, "OPUS");  // fixed for now
   {
     EbmlLoc AudioStart;
     Ebml_StartSubElement(glob, &AudioStart, Audio);

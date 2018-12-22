@@ -5,18 +5,21 @@
 
 const {PushDB, PushService, PushServiceWebSocket} = serviceExports;
 
+const userAgentID = 'fbe865a6-aeb8-446f-873c-aeebdb8d493c';
 const channelID = 'db0a7021-ec2d-4bd3-8802-7a6966f10ed8';
 
 function run_test() {
   do_get_profile();
-  setPrefs();
+  setPrefs({
+    userAgentID: userAgentID,
+  });
   run_next_test();
 }
 
-add_task(function* test_unregister_success() {
+add_task(async function test_unregister_success() {
   let db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {return db.drop().then(_ => db.close());});
-  yield db.put({
+  registerCleanupFunction(() => {return db.drop().then(_ => db.close());});
+  await db.put({
     channelID,
     pushEndpoint: 'https://example.org/update/unregister-success',
     scope: 'https://example.com/page/unregister-success',
@@ -29,7 +32,6 @@ add_task(function* test_unregister_success() {
   let unregisterPromise = new Promise(resolve => unregisterDone = resolve);
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -37,7 +39,8 @@ add_task(function* test_unregister_success() {
           this.serverSendMsg(JSON.stringify({
             messageType: 'hello',
             status: 200,
-            uaid: 'fbe865a6-aeb8-446f-873c-aeebdb8d493c'
+            uaid: userAgentID,
+            use_webpush: true,
           }));
         },
         onUnregister(request) {
@@ -54,12 +57,20 @@ add_task(function* test_unregister_success() {
     }
   });
 
-  yield PushService.unregister({
+  let subModifiedPromise = promiseObserverNotification(
+    PushServiceComponent.subscriptionModifiedTopic);
+
+  await PushService.unregister({
     scope: 'https://example.com/page/unregister-success',
     originAttributes: '',
   });
-  let record = yield db.getByKeyID(channelID);
+
+  let {data: subModifiedScope} = await subModifiedPromise;
+  equal(subModifiedScope, 'https://example.com/page/unregister-success',
+    'Should fire a subscription modified event after unsubscribing');
+
+  let record = await db.getByKeyID(channelID);
   ok(!record, 'Unregister did not remove record');
 
-  yield unregisterPromise;
+  await unregisterPromise;
 });

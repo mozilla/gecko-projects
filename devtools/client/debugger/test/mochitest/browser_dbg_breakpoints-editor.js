@@ -11,18 +11,22 @@
 const TAB_URL = EXAMPLE_URL + "doc_script-switching-01.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_script-switching-01.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     const gTab = aTab;
     const gPanel = aPanel;
     const gDebugger = gPanel.panelWin;
     const gEditor = gDebugger.DebuggerView.editor;
     const gSources = gDebugger.DebuggerView.Sources;
-    const queries = gDebugger.require('./content/queries');
-    const constants = gDebugger.require('./content/constants');
+    const queries = gDebugger.require("./content/queries");
+    const constants = gDebugger.require("./content/constants");
     const actions = bindActionCreators(gPanel);
     const getState = gDebugger.DebuggerController.getState;
 
-    Task.spawn(function*() {
+    Task.spawn(function* () {
       yield waitForSourceAndCaretAndScopes(gPanel, "-02.js", 1);
 
       is(gDebugger.gThreadClient.state, "paused",
@@ -63,11 +67,10 @@ function test() {
     let breakpointsRemoved = 0;
     let editorBreakpointChanges = 0;
 
-    function onEditorBreakpointAddFirst(aEvent, aLine) {
+    function onEditorBreakpointAddFirst(aLine) {
       editorBreakpointChanges++;
 
-      ok(aEvent,
-         "breakpoint1 added to the editor.");
+      info("breakpoint1 added to the editor.");
       is(aLine, 5,
          "Editor breakpoint line is correct.");
 
@@ -75,11 +78,10 @@ function test() {
          "editor.getBreakpoints().length is correct.");
     }
 
-    function onEditorBreakpointRemoveFirst(aEvent, aLine) {
+    function onEditorBreakpointRemoveFirst(aLine) {
       editorBreakpointChanges++;
 
-      ok(aEvent,
-         "breakpoint1 removed from the editor.");
+      info("breakpoint1 removed from the editor.");
       is(aLine, 5,
          "Editor breakpoint line is correct.");
 
@@ -155,11 +157,10 @@ function test() {
       gEditor.off("breakpointAdded", onEditorBreakpointAddBackgroundTrap);
     }
 
-    function onEditorBreakpointAddSwitch(aEvent, aLine) {
+    function onEditorBreakpointAddSwitch(aLine) {
       editorBreakpointChanges++;
 
-      ok(aEvent,
-        "breakpoint2 added to the editor.");
+      info("breakpoint2 added to the editor.");
       is(aLine, 4,
         "Editor breakpoint line is correct.");
 
@@ -203,11 +204,10 @@ function test() {
       utils.sendMouseEventToWindow("mouseup", left, top, 0, 1, 0, false, 0, 0);
     }
 
-    function onEditorBreakpointRemoveSecond(aEvent, aLine) {
+    function onEditorBreakpointRemoveSecond(aLine) {
       editorBreakpointChanges++;
 
-      ok(aEvent,
-        "breakpoint2 removed from the editor.");
+      info("breakpoint2 removed from the editor.");
       is(aLine, 4,
         "Editor breakpoint line is correct.");
 

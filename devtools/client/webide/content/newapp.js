@@ -2,37 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cc = Components.classes;
-var Cu = Components.utils;
-var Ci = Components.interfaces;
+"use strict";
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "ZipUtils", "resource://gre/modules/ZipUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Downloads", "resource://gre/modules/Downloads.jsm");
-
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
-const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm", {});
+const {FileUtils} = require("resource://gre/modules/FileUtils.jsm");
 const {AppProjects} = require("devtools/client/webide/modules/app-projects");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const {getJSON} = require("devtools/client/shared/getjson");
+
+ChromeUtils.defineModuleGetter(this, "ZipUtils", "resource://gre/modules/ZipUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "Downloads", "resource://gre/modules/Downloads.jsm");
 
 const TEMPLATES_URL = "devtools.webide.templatesURL";
 
 var gTemplateList = null;
 
-// See bug 989619
-console.log = console.log.bind(console);
-console.warn = console.warn.bind(console);
-console.error = console.error.bind(console);
-
-window.addEventListener("load", function onLoad() {
-  window.removeEventListener("load", onLoad);
-  let projectNameNode = document.querySelector("#project-name");
+window.addEventListener("load", function() {
+  const projectNameNode = document.querySelector("#project-name");
   projectNameNode.addEventListener("input", canValidate, true);
   getTemplatesJSON();
-}, true);
+}, {capture: true, once: true});
 
 function getTemplatesJSON() {
   getJSON(TEMPLATES_URL).then(list => {
@@ -43,17 +33,17 @@ function getTemplatesJSON() {
       throw new Error("JSON response is an empty array");
     }
     gTemplateList = list;
-    let templatelistNode = document.querySelector("#templatelist");
+    const templatelistNode = document.querySelector("#templatelist");
     templatelistNode.innerHTML = "";
-    for (let template of list) {
-      let richlistitemNode = document.createElement("richlistitem");
-      let imageNode = document.createElement("image");
+    for (const template of list) {
+      const richlistitemNode = document.createElement("richlistitem");
+      const imageNode = document.createElement("image");
       imageNode.setAttribute("src", template.icon);
-      let labelNode = document.createElement("label");
+      const labelNode = document.createElement("label");
       labelNode.setAttribute("value", template.name);
-      let descriptionNode = document.createElement("description");
+      const descriptionNode = document.createElement("description");
       descriptionNode.textContent = template.description;
-      let vboxNode = document.createElement("vbox");
+      const vboxNode = document.createElement("vbox");
       vboxNode.setAttribute("flex", "1");
       richlistitemNode.appendChild(imageNode);
       vboxNode.appendChild(labelNode);
@@ -64,7 +54,7 @@ function getTemplatesJSON() {
     templatelistNode.selectedIndex = 0;
 
     /* Chrome mochitest support */
-    let testOptions = window.arguments[0].testOptions;
+    const testOptions = window.arguments[0].testOptions;
     if (testOptions) {
       templatelistNode.selectedIndex = testOptions.index;
       document.querySelector("#project-name").value = testOptions.name;
@@ -76,14 +66,13 @@ function getTemplatesJSON() {
 }
 
 function failAndBail(msg) {
-  let promptService = Cc["@mozilla.org/embedcomp/prompt-service;1"].getService(Ci.nsIPromptService);
-  promptService.alert(window, "error", msg);
+  Services.prompt.alert(window, "error", msg);
   window.close();
 }
 
 function canValidate() {
-  let projectNameNode = document.querySelector("#project-name");
-  let dialogNode = document.querySelector("dialog");
+  const projectNameNode = document.querySelector("#project-name");
+  const dialogNode = document.querySelector("dialog");
   if (projectNameNode.value.length > 0) {
     dialogNode.removeAttribute("buttondisabledaccept");
   } else {
@@ -92,7 +81,7 @@ function canValidate() {
 }
 
 function doOK() {
-  let projectName = document.querySelector("#project-name").value;
+  const projectName = document.querySelector("#project-name").value;
 
   if (!projectName) {
     console.error("No project name");
@@ -104,70 +93,75 @@ function doOK() {
     return false;
   }
 
-  let templatelistNode = document.querySelector("#templatelist");
+  const templatelistNode = document.querySelector("#templatelist");
   if (templatelistNode.selectedIndex < 0) {
     console.error("No template selected");
     return false;
   }
 
-  let folder;
-
   /* Chrome mochitest support */
-  let testOptions = window.arguments[0].testOptions;
-  if (testOptions) {
-    folder = testOptions.folder;
-  } else {
-    let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    fp.init(window, "Select directory where to create app directory", Ci.nsIFilePicker.modeGetFolder);
-    let res = fp.show();
-    if (res == Ci.nsIFilePicker.returnCancel) {
-      console.error("No directory selected");
-      return false;
+  const promise = new Promise((resolve, reject) => {
+    const testOptions = window.arguments[0].testOptions;
+    if (testOptions) {
+      resolve(testOptions.folder);
+    } else {
+      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      fp.init(window, "Select directory where to create app directory", Ci.nsIFilePicker.modeGetFolder);
+      fp.open(res => {
+        if (res == Ci.nsIFilePicker.returnCancel) {
+          console.error("No directory selected");
+          reject(null);
+        } else {
+          resolve(fp.file);
+        }
+      });
     }
-    folder = fp.file;
-  }
+  });
 
-  // Create subfolder with fs-friendly name of project
-  let subfolder = projectName.replace(/[\\/:*?"<>|]/g, '').toLowerCase();
-  let win = Services.wm.getMostRecentWindow("devtools:webide");
-  folder.append(subfolder);
-
-  try {
-    folder.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
-  } catch(e) {
-    win.UI.reportError("error_folderCreationFailed");
-    window.close();
-    return false;
-  }
-
-  // Download boilerplate zip
-  let template = gTemplateList[templatelistNode.selectedIndex];
-  let source = template.file;
-  let target = folder.clone();
-  target.append(subfolder + ".zip");
-
-  let bail = (e) => {
+  const bail = (e) => {
     console.error(e);
     window.close();
   };
 
-  Downloads.fetch(source, target).then(() => {
-    ZipUtils.extractFiles(target, folder);
-    target.remove(false);
-    AppProjects.addPackaged(folder).then((project) => {
-      window.arguments[0].location = project.location;
-      AppManager.validateAndUpdateProject(project).then(() => {
-        if (project.manifest) {
-          project.manifest.name = projectName;
-          AppManager.writeManifest(project).then(() => {
-            AppManager.validateAndUpdateProject(project).then(
-              () => {window.close()}, bail)
-          }, bail)
-        } else {
-          bail("Manifest not found");
-        }
-      }, bail)
-    }, bail)
+  promise.then(folder => {
+    // Create subfolder with fs-friendly name of project
+    const subfolder = projectName.replace(/[\\/:*?"<>|]/g, "").toLowerCase();
+    const win = Services.wm.getMostRecentWindow("devtools:webide");
+    folder.append(subfolder);
+
+    try {
+      folder.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    } catch (e) {
+      win.UI.reportError("error_folderCreationFailed");
+      window.close();
+      return;
+    }
+
+    // Download boilerplate zip
+    const template = gTemplateList[templatelistNode.selectedIndex];
+    const source = template.file;
+    const target = folder.clone();
+    target.append(subfolder + ".zip");
+    Downloads.fetch(source, target).then(() => {
+      ZipUtils.extractFiles(target, folder);
+      target.remove(false);
+      AppProjects.addPackaged(folder).then((project) => {
+        window.arguments[0].location = project.location;
+        AppManager.validateAndUpdateProject(project).then(() => {
+          if (project.manifest) {
+            project.manifest.name = projectName;
+            AppManager.writeManifest(project).then(() => {
+              AppManager.validateAndUpdateProject(project).then(
+                () => {
+                  window.close();
+                }, bail);
+            }, bail);
+          } else {
+            bail("Manifest not found");
+          }
+        }, bail);
+      }, bail);
+    }, bail);
   }, bail);
 
   return false;

@@ -52,6 +52,8 @@
 #include "nsCharTraits.h"
 #include "harfbuzz/hb.h"
 
+using namespace mozilla::unicode;
+
 #define MOD(sp) ((sp) % PAREN_STACK_DEPTH)
 #define LIMIT_INC(sp) (((sp) < PAREN_STACK_DEPTH)? (sp) + 1 : PAREN_STACK_DEPTH)
 #define INC(sp,count) (MOD((sp) + (count)))
@@ -64,7 +66,7 @@
 #define SYNC_FIXUP() (fixupCount = 0)
 
 void
-gfxScriptItemizer::push(uint32_t endPairChar, int32_t newScriptCode)
+gfxScriptItemizer::push(uint32_t endPairChar, Script newScriptCode)
 {
     pushCount  = LIMIT_INC(pushCount);
     fixupCount = LIMIT_INC(fixupCount);
@@ -97,7 +99,7 @@ gfxScriptItemizer::pop()
 }
 
 void
-gfxScriptItemizer::fixup(int32_t newScriptCode)
+gfxScriptItemizer::fixup(Script newScriptCode)
 {
     int32_t fixupSP = DEC(parenSP, fixupCount);
 
@@ -107,12 +109,17 @@ gfxScriptItemizer::fixup(int32_t newScriptCode)
     }
 }
 
+// We regard the current char as having the same script as the in-progress run
+// if either script code is Common or Inherited, or if the run script appears
+// in the character's ScriptExtensions, or if the char is a cluster extender.
 static inline bool
-SameScript(int32_t runScript, int32_t currCharScript)
+SameScript(Script runScript, Script currCharScript, uint32_t aCurrCh)
 {
-    return runScript <= MOZ_SCRIPT_INHERITED ||
-           currCharScript <= MOZ_SCRIPT_INHERITED ||
-           currCharScript == runScript;
+    return runScript <= Script::INHERITED ||
+           currCharScript <= Script::INHERITED ||
+           currCharScript == runScript ||
+           IsClusterExtender(aCurrCh) ||
+           HasScript(aCurrCh, runScript);
 }
 
 gfxScriptItemizer::gfxScriptItemizer(const char16_t *src, uint32_t length)
@@ -132,7 +139,7 @@ gfxScriptItemizer::SetText(const char16_t *src, uint32_t length)
 
 bool
 gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
-                        int32_t& aRunScript)
+                        Script& aRunScript)
 {
     /* if we've fallen off the end of the text, we're done */
     if (scriptLimit >= textLength) {
@@ -140,11 +147,11 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
     }
 
     SYNC_FIXUP();
-    scriptCode = MOZ_SCRIPT_COMMON;
+    scriptCode = Script::COMMON;
 
     for (scriptStart = scriptLimit; scriptLimit < textLength; scriptLimit += 1) {
         uint32_t ch;
-        int32_t sc;
+        Script sc;
         uint32_t startOfChar = scriptLimit;
 
         ch = textPtr[scriptLimit];
@@ -163,7 +170,7 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
         uint8_t gc = HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED;
 
         sc = GetScriptCode(ch);
-        if (sc == MOZ_SCRIPT_COMMON) {
+        if (sc == Script::COMMON) {
             /*
              * Paired character handling:
              *
@@ -194,9 +201,9 @@ gfxScriptItemizer::Next(uint32_t& aRunStart, uint32_t& aRunLimit,
             }
         }
 
-        if (SameScript(scriptCode, sc)) {
-            if (scriptCode <= MOZ_SCRIPT_INHERITED &&
-                sc > MOZ_SCRIPT_INHERITED)
+        if (SameScript(scriptCode, sc, ch)) {
+            if (scriptCode <= Script::INHERITED &&
+                sc > Script::INHERITED)
             {
                 scriptCode = sc;
                 fixup(scriptCode);

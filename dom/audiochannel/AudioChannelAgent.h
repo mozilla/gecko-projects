@@ -23,6 +23,8 @@ class nsPIDOMWindowOuter;
 namespace mozilla {
 namespace dom {
 
+class AudioPlaybackConfig;
+
 /* Header file */
 class AudioChannelAgent : public nsIAudioChannelAgent
 {
@@ -35,6 +37,7 @@ public:
   AudioChannelAgent();
 
   void WindowVolumeChanged();
+  void WindowSuspendChanged(nsSuspendedTypes aSuspend);
   void WindowAudioCaptureChanged(uint64_t aInnerWindowID, bool aCapture);
 
   nsPIDOMWindowOuter* Window() const
@@ -45,14 +48,20 @@ public:
   uint64_t WindowID() const;
   uint64_t InnerWindowID() const;
 
+  bool IsPlayingStarted() const;
+  bool ShouldBlockMedia() const;
+
 private:
   virtual ~AudioChannelAgent();
+
+  AudioPlaybackConfig GetMediaConfig();
+  bool IsDisposableSuspend(nsSuspendedTypes aSuspend) const;
 
   // Returns mCallback if that's non-null, or otherwise tries to get an
   // nsIAudioChannelAgentCallback out of mWeakCallback.
   already_AddRefed<nsIAudioChannelAgentCallback> GetCallback();
 
-  nsresult InitInternal(nsPIDOMWindowInner* aWindow, int32_t aAudioAgentType,
+  nsresult InitInternal(nsPIDOMWindowInner* aWindow,
                         nsIAudioChannelAgentCallback* aCallback,
                         bool aUseWeakRef);
 
@@ -65,7 +74,6 @@ private:
 
   nsWeakPtr mWeakCallback;
 
-  int32_t mAudioChannelType;
   uint64_t mInnerWindowID;
   bool mIsRegToService;
 };

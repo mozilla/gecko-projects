@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,15 +39,15 @@ public:
   static already_AddRefed<CheckerboardEventStorage> GetInstance();
 
   /**
-   * Save a checkerboard event log, optionally dropping older ones that were
-   * less severe or less recent. Zero-severity reports may be ignored entirely.
-   */
-  void ReportCheckerboard(uint32_t aSeverity, const std::string& aLog);
-
-  /**
    * Get the stored checkerboard reports.
    */
   void GetReports(nsTArray<dom::CheckerboardReport>& aOutReports);
+
+  /**
+   * Save a checkerboard event log, optionally dropping older ones that were
+   * less severe or less recent. Zero-severity reports may be ignored entirely.
+   */
+  static void Report(uint32_t aSeverity, const std::string& aLog);
 
 private:
   /* Stuff for refcounted singleton */
@@ -54,6 +55,8 @@ private:
   virtual ~CheckerboardEventStorage() {}
 
   static StaticRefPtr<CheckerboardEventStorage> sInstance;
+
+  void ReportCheckerboard(uint32_t aSeverity, const std::string& aLog);
 
 private:
   /**
@@ -128,6 +131,7 @@ public:
   void GetReports(nsTArray<dom::CheckerboardReport>& aOutReports);
   bool IsRecordingEnabled() const;
   void SetRecordingEnabled(bool aEnabled);
+  void FlushActiveReports();
 
 private:
   virtual ~CheckerboardReportService() {}

@@ -10,24 +10,26 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.StringDef;
 
+import org.mozilla.gecko.AppConstants;
+
 public class DownloadContent {
-    @IntDef({STATE_NONE, STATE_SCHEDULED, STATE_DOWNLOADED, STATE_FAILED, STATE_IGNORED, STATE_UPDATED, STATE_DELETED})
+    @IntDef({STATE_NONE, STATE_SCHEDULED, STATE_DOWNLOADED, STATE_FAILED, STATE_UPDATED, STATE_DELETED})
     public @interface State {}
     public static final int STATE_NONE = 0;
     public static final int STATE_SCHEDULED = 1;
     public static final int STATE_DOWNLOADED = 2;
     public static final int STATE_FAILED = 3; // Permanently failed for this version of the content
-    public static final int STATE_IGNORED = 4;
-    public static final int STATE_UPDATED = 5;
-    public static final int STATE_DELETED = 6;
+    public static final int STATE_UPDATED = 4;
+    public static final int STATE_DELETED = 5;
 
     @StringDef({TYPE_ASSET_ARCHIVE})
     public @interface Type {}
     public static final String TYPE_ASSET_ARCHIVE = "asset-archive";
 
-    @StringDef({KIND_FONT})
+    @StringDef({KIND_FONT, KIND_HYPHENATION_DICTIONARY})
     public @interface Kind {}
     public static final String KIND_FONT = "font";
+    public static final String KIND_HYPHENATION_DICTIONARY = "hyphenation";
 
     private final String id;
     private final String location;
@@ -125,6 +127,19 @@ public class DownloadContent {
 
     public boolean isFont() {
         return KIND_FONT.equals(kind);
+    }
+
+    public boolean isHyphenationDictionary() {
+        return KIND_HYPHENATION_DICTIONARY.equals(kind);
+    }
+
+    /**
+     *Checks whether the content to be downloaded is a known content.
+     *Currently it checks whether the type is "Asset Archive" and is of kind
+     *"Font" or "Hyphenation Dictionary".
+     */
+    public boolean isKnownContent() {
+        return (((isFont() && AppConstants.MOZ_ANDROID_EXCLUDE_FONTS) || (isHyphenationDictionary() && AppConstants.MOZ_EXCLUDE_HYPHENATION_DICTIONARIES)) && isAssetArchive());
     }
 
     public boolean isAssetArchive() {

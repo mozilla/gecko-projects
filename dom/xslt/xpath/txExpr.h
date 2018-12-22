@@ -12,7 +12,7 @@
 #include "txCore.h"
 #include "nsString.h"
 #include "txOwningArray.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 
 #ifdef DEBUG
 #define TX_TO_STRING
@@ -23,11 +23,12 @@
   Much of this code was ported from XSL:P.
 */
 
-class nsIAtom;
+class nsAtom;
 class txIMatchContext;
 class txIEvalContext;
 class txNodeSet;
 class txXPathNode;
+class txXPathTreeWalker;
 
 /**
  * A Base Class for all XSL Expressions
@@ -139,11 +140,11 @@ public:
 #ifdef TX_TO_STRING
 #define TX_DECL_TOSTRING \
     void toString(nsAString& aDest) override;
-#define TX_DECL_GETNAMEATOM \
-    nsresult getNameAtom(nsIAtom** aAtom) override;
+#define TX_DECL_APPENDNAME \
+    void appendName(nsAString& aDest) override;
 #else
 #define TX_DECL_TOSTRING
-#define TX_DECL_GETNAMEATOM
+#define TX_DECL_APPENDNAME
 #endif
 
 #define TX_DECL_EXPR_BASE \
@@ -162,7 +163,7 @@ public:
     ExprType getType() override;
 
 #define TX_DECL_FUNCTION \
-    TX_DECL_GETNAMEATOM \
+    TX_DECL_APPENDNAME \
     TX_DECL_EXPR_BASE
 
 #define TX_IMPL_EXPR_STUBS_BASE(_class, _ReturnType)          \
@@ -182,7 +183,7 @@ _class::getSubExprAt(uint32_t aPos)                           \
 void                                                          \
 _class::setSubExprAt(uint32_t aPos, Expr* aExpr)              \
 {                                                             \
-    NS_NOTREACHED("setting bad subexpression index");         \
+    MOZ_ASSERT_UNREACHABLE("setting bad subexpression index");\
 }
 
 #define TX_IMPL_EXPR_STUBS_1(_class, _ReturnType, _Expr1)     \
@@ -312,9 +313,9 @@ protected:
 
 #ifdef TX_TO_STRING
     /*
-     * Returns the name of the function as an atom.
+     * Appends the name of the function to `aStr`.
      */
-    virtual nsresult getNameAtom(nsIAtom** aAtom) = 0;
+    virtual void appendName(nsAString& aStr) = 0;
 #endif
 };
 
@@ -366,7 +367,7 @@ public:
 
     TX_DECL_FUNCTION
 
-    static bool getTypeFromAtom(nsIAtom* aName, eType& aType);
+    static bool getTypeFromAtom(nsAtom* aName, eType& aType);
 
 private:
     eType mType;
@@ -390,12 +391,13 @@ public:
 
     /*
      * Virtual methods
-     * pretty much a txPattern, but not supposed to be used 
+     * pretty much a txPattern, but not supposed to be used
      * standalone. The NodeTest node() is different to the
      * Pattern "node()" (document node isn't matched)
      */
-    virtual bool matches(const txXPathNode& aNode,
-                           txIMatchContext* aContext) = 0;
+    virtual nsresult matches(const txXPathNode& aNode,
+                             txIMatchContext* aContext,
+                             bool& aMatched) = 0;
     virtual double getDefaultPriority() = 0;
 
     /**
@@ -424,7 +426,9 @@ public:
 
 #define TX_DECL_NODE_TEST \
     TX_DECL_TOSTRING \
-    bool matches(const txXPathNode& aNode, txIMatchContext* aContext) override; \
+    nsresult matches(const txXPathNode& aNode, \
+                     txIMatchContext* aContext, \
+                     bool& aMatched) override; \
     double getDefaultPriority() override; \
     bool isSensitiveTo(Expr::ContextSensitivity aContext) override;
 
@@ -438,15 +442,15 @@ public:
      * Creates a new txNameTest with the given type and the given
      * principal node type
      */
-    txNameTest(nsIAtom* aPrefix, nsIAtom* aLocalName, int32_t aNSID,
+    txNameTest(nsAtom* aPrefix, nsAtom* aLocalName, int32_t aNSID,
                uint16_t aNodeType);
 
     NodeTestType getType() override;
 
     TX_DECL_NODE_TEST
 
-    nsCOMPtr<nsIAtom> mPrefix;
-    nsCOMPtr<nsIAtom> mLocalName;
+    RefPtr<nsAtom> mPrefix;
+    RefPtr<nsAtom> mLocalName;
     int32_t mNamespace;
 private:
     uint16_t mNodeType;
@@ -492,7 +496,7 @@ public:
 
 private:
     NodeType mNodeType;
-    nsCOMPtr<nsIAtom> mNodeName;
+    RefPtr<nsAtom> mNodeName;
 };
 
 /**
@@ -630,10 +634,30 @@ public:
     }
 
 private:
-    void fromDescendants(const txXPathNode& aNode, txIMatchContext* aCs,
-                         txNodeSet* aNodes);
-    void fromDescendantsRev(const txXPathNode& aNode, txIMatchContext* aCs,
-                            txNodeSet* aNodes);
+    /**
+     * Append the current position of aWalker to aNodes if it matches mNodeTest,
+     * using aContext as the context for matching.
+     */
+    nsresult appendIfMatching(const txXPathTreeWalker& aWalker,
+                              txIMatchContext* aContext,
+                              txNodeSet* aNodes);
+
+    /**
+     * Append the descendants of the current position of aWalker to aNodes if
+     * they match mNodeTest, using aContext as the context for matching.
+     */
+    nsresult appendMatchingDescendants(const txXPathTreeWalker& aWalker,
+                                       txIMatchContext* aContext,
+                                       txNodeSet* aNodes);
+
+    /**
+     * Append the descendants of the current position of aWalker to aNodes in
+     * reverse order if they match mNodeTest, using aContext as the context for
+     * matching.
+     */
+    nsresult appendMatchingDescendantsRev(const txXPathTreeWalker& aWalker,
+                                          txIMatchContext* aContext,
+                                          txNodeSet* aNodes);
 
     nsAutoPtr<txNodeTest> mNodeTest;
     LocationStepType mAxisIdentifier;
@@ -802,13 +826,13 @@ class VariableRefExpr : public Expr {
 
 public:
 
-    VariableRefExpr(nsIAtom* aPrefix, nsIAtom* aLocalName, int32_t aNSID);
+    VariableRefExpr(nsAtom* aPrefix, nsAtom* aLocalName, int32_t aNSID);
 
     TX_DECL_EXPR
 
 private:
-    nsCOMPtr<nsIAtom> mPrefix;
-    nsCOMPtr<nsIAtom> mLocalName;
+    RefPtr<nsAtom> mPrefix;
+    RefPtr<nsAtom> mLocalName;
     int32_t mNamespace;
 };
 
@@ -949,15 +973,15 @@ private:
 class txNamedAttributeStep : public Expr
 {
 public:
-    txNamedAttributeStep(int32_t aNsID, nsIAtom* aPrefix,
-                         nsIAtom* aLocalName);
+    txNamedAttributeStep(int32_t aNsID, nsAtom* aPrefix,
+                         nsAtom* aLocalName);
 
     TX_DECL_EXPR
 
 private:
     int32_t mNamespace;
-    nsCOMPtr<nsIAtom> mPrefix;
-    nsCOMPtr<nsIAtom> mLocalName;
+    RefPtr<nsAtom> mPrefix;
+    RefPtr<nsAtom> mLocalName;
 };
 
 /**

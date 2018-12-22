@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsILocalFile.h"
 #include "nsCRT.h"
 #include "nsIFile.h"
 #include "nsISupportsImpl.h"
@@ -13,14 +12,11 @@
 // nsCheckSummedOutputStream
 
 NS_IMPL_ISUPPORTS_INHERITED(nsCheckSummedOutputStream,
-                            nsSafeFileOutputStream,
-                            nsISafeOutputStream,
-                            nsIOutputStream,
-                            nsIFileOutputStream)
+                            nsBufferedOutputStream,
+                            nsISafeOutputStream)
 
 NS_IMETHODIMP
-nsCheckSummedOutputStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
-                                int32_t behaviorFlags)
+nsCheckSummedOutputStream::Init(nsIOutputStream* stream, uint32_t bufferSize)
 {
   nsresult rv;
   mHash = do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
@@ -29,7 +25,7 @@ nsCheckSummedOutputStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
   rv = mHash->Init(nsICryptoHash::MD5);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return nsSafeFileOutputStream::Init(file, ioFlags, perm, behaviorFlags);
+  return nsBufferedOutputStream::Init(stream, bufferSize);
 }
 
 NS_IMETHODIMP
@@ -39,12 +35,12 @@ nsCheckSummedOutputStream::Finish()
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t written;
-  rv = nsSafeFileOutputStream::Write(reinterpret_cast<const char*>(mCheckSum.BeginReading()),
+  rv = nsBufferedOutputStream::Write(reinterpret_cast<const char*>(mCheckSum.BeginReading()),
                                      mCheckSum.Length(), &written);
   NS_ASSERTION(written == mCheckSum.Length(), "Error writing stream checksum");
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return nsSafeFileOutputStream::Finish();
+  return nsBufferedOutputStream::Finish();
 }
 
 NS_IMETHODIMP
@@ -53,7 +49,7 @@ nsCheckSummedOutputStream::Write(const char *buf, uint32_t count, uint32_t *resu
   nsresult rv = mHash->Update(reinterpret_cast<const uint8_t*>(buf), count);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return nsSafeFileOutputStream::Write(buf, count, result);
+  return nsBufferedOutputStream::Write(buf, count, result);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

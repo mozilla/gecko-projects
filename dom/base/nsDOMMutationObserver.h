@@ -8,24 +8,26 @@
 #define nsDOMMutationObserver_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Move.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsPIDOMWindow.h"
 #include "nsIScriptContext.h"
 #include "nsStubAnimationObserver.h"
 #include "nsCOMArray.h"
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 #include "nsIVariant.h"
 #include "nsContentList.h"
 #include "mozilla/dom/Element.h"
 #include "nsClassHashtable.h"
 #include "nsNodeUtils.h"
-#include "nsIDOMMutationEvent.h"
 #include "nsWrapperCache.h"
+#include "mozilla/dom/Nullable.h"
+#include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/dom/MutationObserverBinding.h"
 #include "nsIDocument.h"
 #include "mozilla/dom/Animation.h"
 #include "nsIAnimationObserver.h"
+#include "nsGlobalWindow.h"
 
 class nsDOMMutationObserver;
 using mozilla::dom::MutationObservingInfo;
@@ -38,8 +40,8 @@ class nsDOMMutationRecord final : public nsISupports,
 public:
   typedef nsTArray<RefPtr<mozilla::dom::Animation>> AnimationArray;
 
-  nsDOMMutationRecord(nsIAtom* aType, nsISupports* aOwner)
-  : mType(aType), mAttrNamespace(NullString()), mPrevValue(NullString()), mOwner(aOwner)
+  nsDOMMutationRecord(nsAtom* aType, nsISupports* aOwner)
+  : mType(aType), mAttrNamespace(VoidString()), mPrevValue(VoidString()), mOwner(aOwner)
   {
   }
 
@@ -50,7 +52,7 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return mozilla::dom::MutationRecordBinding::Wrap(aCx, this, aGivenProto);
+    return mozilla::dom::MutationRecord_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -58,7 +60,7 @@ public:
 
   void GetType(mozilla::dom::DOMString& aRetVal) const
   {
-    aRetVal.SetOwnedAtom(mType, mozilla::dom::DOMString::eNullNotExpected);
+    aRetVal.SetKnownLiveAtom(mType, mozilla::dom::DOMString::eNullNotExpected);
   }
 
   nsINode* GetTarget() const
@@ -82,17 +84,18 @@ public:
 
   void GetAttributeName(mozilla::dom::DOMString& aRetVal) const
   {
-    aRetVal.SetOwnedAtom(mAttrName, mozilla::dom::DOMString::eTreatNullAsNull);
+    aRetVal.SetKnownLiveAtom(mAttrName,
+                             mozilla::dom::DOMString::eTreatNullAsNull);
   }
 
   void GetAttributeNamespace(mozilla::dom::DOMString& aRetVal) const
   {
-    aRetVal.SetOwnedString(mAttrNamespace);
+    aRetVal.SetKnownLiveString(mAttrNamespace);
   }
 
   void GetOldValue(mozilla::dom::DOMString& aRetVal) const
   {
-    aRetVal.SetOwnedString(mPrevValue);
+    aRetVal.SetKnownLiveString(mPrevValue);
   }
 
   void GetAddedAnimations(AnimationArray& aRetVal) const
@@ -111,8 +114,8 @@ public:
   }
 
   nsCOMPtr<nsINode>             mTarget;
-  nsCOMPtr<nsIAtom>             mType;
-  nsCOMPtr<nsIAtom>             mAttrName;
+  RefPtr<nsAtom>             mType;
+  RefPtr<nsAtom>             mAttrName;
   nsString                      mAttrNamespace;
   nsString                      mPrevValue;
   RefPtr<nsSimpleContentList> mAddedNodes;
@@ -126,7 +129,7 @@ public:
   RefPtr<nsDOMMutationRecord> mNext;
   nsCOMPtr<nsISupports>         mOwner;
 };
- 
+
 // Base class just prevents direct access to
 // members to make sure we go through getters/setters.
 class nsMutationReceiverBase : public nsStubAnimationObserver
@@ -217,12 +220,12 @@ public:
     mAttributeOldValue = aOldValue;
   }
 
-  nsCOMArray<nsIAtom>& AttributeFilter() { return mAttributeFilter; }
-  void SetAttributeFilter(nsCOMArray<nsIAtom>& aFilter)
+  nsTArray<RefPtr<nsAtom>>& AttributeFilter() { return mAttributeFilter; }
+  void SetAttributeFilter(nsTArray<RefPtr<nsAtom>>&& aFilter)
   {
     NS_ASSERTION(!mParent, "Shouldn't have parent");
     mAttributeFilter.Clear();
-    mAttributeFilter.AppendObjects(aFilter);
+    mAttributeFilter = std::move(aFilter);
   }
 
   void AddClone(nsMutationReceiverBase* aClone)
@@ -234,17 +237,40 @@ public:
   {
     mTransientReceivers.RemoveObject(aClone);
   }
-  
+
 protected:
   nsMutationReceiverBase(nsINode* aTarget, nsDOMMutationObserver* aObserver)
-  : mTarget(aTarget), mObserver(aObserver), mRegisterTarget(aTarget)
+    : mTarget(aTarget)
+    , mObserver(aObserver)
+    , mRegisterTarget(aTarget)
+    , mSubtree(false)
+    , mChildList(false)
+    , mCharacterData(false)
+    , mCharacterDataOldValue(false)
+    , mNativeAnonymousChildList(false)
+    , mAttributes(false)
+    , mAllAttributes(false)
+    , mAttributeOldValue(false)
+    , mAnimations(false)
   {
   }
 
   nsMutationReceiverBase(nsINode* aRegisterTarget,
                          nsMutationReceiverBase* aParent)
-  : mTarget(nullptr), mObserver(nullptr), mParent(aParent),
-    mRegisterTarget(aRegisterTarget), mKungFuDeathGrip(aParent->Target())
+    : mTarget(nullptr)
+    , mObserver(nullptr)
+    , mParent(aParent)
+    , mRegisterTarget(aRegisterTarget)
+    , mKungFuDeathGrip(aParent->Target())
+    , mSubtree(false)
+    , mChildList(false)
+    , mCharacterData(false)
+    , mCharacterDataOldValue(false)
+    , mNativeAnonymousChildList(false)
+    , mAttributes(false)
+    , mAllAttributes(false)
+    , mAttributeOldValue(false)
+    , mAnimations(false)
   {
     NS_ASSERTION(mParent->Subtree(), "Should clone a non-subtree observer!");
   }
@@ -263,7 +289,7 @@ protected:
   bool ObservesAttr(nsINode* aRegisterTarget,
                     mozilla::dom::Element* aElement,
                     int32_t aNameSpaceID,
-                    nsIAtom* aAttr)
+                    nsAtom* aAttr)
   {
     if (mParent) {
       return mParent->ObservesAttr(aRegisterTarget, aElement, aNameSpaceID, aAttr);
@@ -282,8 +308,8 @@ protected:
       return false;
     }
 
-    nsCOMArray<nsIAtom>& filters = AttributeFilter();
-    for (int32_t i = 0; i < filters.Count(); ++i) {
+    nsTArray<RefPtr<nsAtom>>& filters = AttributeFilter();
+    for (size_t i = 0; i < filters.Length(); ++i) {
       if (filters[i] == aAttr) {
         return true;
       }
@@ -302,7 +328,7 @@ protected:
   // While we have transient receivers, keep the original mutation receiver
   // alive so it doesn't go away and disconnect all its transient receivers.
   nsCOMPtr<nsINode>                  mKungFuDeathGrip;
-  
+
 private:
   bool                               mSubtree;
   bool                               mChildList;
@@ -313,7 +339,7 @@ private:
   bool                               mAllAttributes;
   bool                               mAttributeOldValue;
   bool                               mAnimations;
-  nsCOMArray<nsIAtom>                mAttributeFilter;
+  nsTArray<RefPtr<nsAtom>>          mAttributeFilter;
 };
 
 
@@ -369,7 +395,6 @@ public:
 
   void Disconnect(bool aRemoveFromObserver);
 
-  NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
   NS_DECL_ISUPPORTS
 
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTEWILLCHANGE
@@ -380,14 +405,13 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
   NS_DECL_NSIMUTATIONOBSERVER_NODEWILLBEDESTROYED
 
-  virtual void AttributeSetToCurrentValue(nsIDocument* aDocument,
-                                          mozilla::dom::Element* aElement,
+  virtual void AttributeSetToCurrentValue(mozilla::dom::Element* aElement,
                                           int32_t aNameSpaceID,
-                                          nsIAtom* aAttribute) override
+                                          nsAtom* aAttribute) override
   {
     // We can reuse AttributeWillChange implementation.
-    AttributeWillChange(aDocument, aElement, aNameSpaceID, aAttribute,
-                        nsIDOMMutationEvent::MODIFICATION, nullptr);
+    AttributeWillChange(aElement, aNameSpaceID, aAttribute,
+                        mozilla::dom::MutationEvent_Binding::MODIFICATION, nullptr);
   }
 
 protected:
@@ -484,7 +508,7 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return mozilla::dom::MutationObserverBinding::Wrap(aCx, this, aGivenProto);
+    return mozilla::dom::MutationObserver_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   nsISupports* GetParentObject() const
@@ -507,8 +531,9 @@ public:
 
   void HandleMutation();
 
-  void GetObservingInfo(nsTArray<Nullable<MutationObservingInfo>>& aResult,
-                        mozilla::ErrorResult& aRv);
+  void GetObservingInfo(
+    nsTArray<mozilla::dom::Nullable<MutationObservingInfo>>& aResult,
+    mozilla::ErrorResult& aRv);
 
   mozilla::dom::MutationCallback* MutationCallback() { return mCallback; }
 
@@ -552,11 +577,24 @@ public:
   }
 
   // static methods
-  static void HandleMutations()
+  static void QueueMutationObserverMicroTask();
+
+  static void HandleMutations(mozilla::AutoSlowOperation& aAso);
+
+  static bool AllScheduledMutationObserversAreSuppressed()
   {
     if (sScheduledMutationObservers) {
-      HandleMutationsInternal();
+      uint32_t len = sScheduledMutationObservers->Length();
+      if (len > 0) {
+        for (uint32_t i = 0; i < len; ++i) {
+          if (!(*sScheduledMutationObservers)[i]->Suppressed()) {
+            return false;
+          }
+        }
+        return true;
+      }
     }
+    return false;
   }
 
   static void EnterMutationHandling();
@@ -582,19 +620,15 @@ protected:
   void ScheduleForRun();
   void RescheduleForRun();
 
-  nsDOMMutationRecord* CurrentRecord(nsIAtom* aType);
+  nsDOMMutationRecord* CurrentRecord(nsAtom* aType);
   bool HasCurrentRecord(const nsAString& aType);
 
   bool Suppressed()
   {
-    if (mOwner) {
-      nsCOMPtr<nsIDocument> d = mOwner->GetExtantDoc();
-      return d && d->IsInSyncOperation();
-    }
-    return false;
+    return mOwner && nsGlobalWindowInner::Cast(mOwner)->IsInSyncOperation();
   }
 
-  static void HandleMutationsInternal();
+  static void HandleMutationsInternal(mozilla::AutoSlowOperation& aAso);
 
   static void AddCurrentlyHandlingObserver(nsDOMMutationObserver* aObserver,
                                            uint32_t aMutationLevel);
@@ -622,7 +656,6 @@ protected:
 
   static uint64_t                                    sCount;
   static AutoTArray<RefPtr<nsDOMMutationObserver>, 4>* sScheduledMutationObservers;
-  static nsDOMMutationObserver*                      sCurrentObserver;
 
   static uint32_t                                    sMutationLevel;
   static AutoTArray<AutoTArray<RefPtr<nsDOMMutationObserver>, 4>, 4>*
@@ -636,7 +669,7 @@ class nsAutoMutationBatch
 public:
   nsAutoMutationBatch()
   : mPreviousBatch(nullptr), mBatchTarget(nullptr), mRemovalDone(false),
-    mFromFirstToLast(false), mAllowNestedBatches(false)    
+    mFromFirstToLast(false), mAllowNestedBatches(false)
   {
   }
 
@@ -691,11 +724,11 @@ public:
       if (sCurrentBatch->mObservers[i].mObserver == aObserver) {
         if (aWantsChildList) {
           sCurrentBatch->mObservers[i].mWantsChildList = aWantsChildList;
-        } 
+        }
         return;
       }
     }
-    BatchObserver* bo = sCurrentBatch->mObservers.AppendElement(); 
+    BatchObserver* bo = sCurrentBatch->mObservers.AppendElement();
     bo->mObserver = aObserver;
     bo->mWantsChildList = aWantsChildList;
   }
@@ -737,7 +770,7 @@ private:
     nsDOMMutationObserver* mObserver;
     bool                   mWantsChildList;
   };
-  
+
   static nsAutoMutationBatch* sCurrentBatch;
   nsAutoMutationBatch* mPreviousBatch;
   AutoTArray<BatchObserver, 2> mObservers;
@@ -814,9 +847,14 @@ public:
         case eState_Removed:
           entry->mState = eState_RemainedPresent;
           break;
-        default:
-          NS_NOTREACHED("shouldn't have observed an animation being added "
-                        "twice");
+        case eState_Added:
+          // FIXME bug 1189015
+          NS_ERROR("shouldn't have observed an animation being added twice");
+          break;
+        case eState_RemainedPresent:
+          MOZ_ASSERT_UNREACHABLE("shouldn't have observed an animation "
+                                 "remaining present");
+          break;
       }
     } else {
       entry = sCurrentBatch->AddEntry(aAnimation, aTarget);
@@ -854,9 +892,14 @@ public:
         case eState_Added:
           entry->mState = eState_RemainedAbsent;
           break;
-        default:
-          NS_NOTREACHED("shouldn't have observed an animation being removed "
-                        "twice");
+        case eState_RemainedAbsent:
+          MOZ_ASSERT_UNREACHABLE("shouldn't have observed an animation "
+                                 "remaining absent");
+          break;
+        case eState_Removed:
+          // FIXME bug 1189015
+          NS_ERROR("shouldn't have observed an animation being removed twice");
+          break;
       }
     } else {
       entry = sCurrentBatch->AddEntry(aAnimation, aTarget);

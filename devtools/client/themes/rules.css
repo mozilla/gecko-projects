@@ -3,14 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* CSS Variables specific to this panel that aren't defined by the themes */
-.theme-light {
-  --rule-highlight-background-color: #ffee99;
-  --rule-filter-icon: url(images/magnifying-glass-light.png);
+:root {
+  --rule-highlight-background-color: var(--theme-highlight-yellow);
+  --rule-overridden-item-border-color: var(--theme-content-color3);
+  --rule-header-background-color: var(--theme-toolbar-background);
+  --rule-flex-toggle-color: var(--grey-90);
+  --rule-shape-toggle-color: var(--grey-90);
 }
 
-.theme-dark {
-  --rule-highlight-background-color: #594724;
-  --rule-filter-icon: url(images/magnifying-glass.png);
+:root.theme-dark {
+  --rule-highlight-background-color: #521C76;
+  --rule-overridden-item-border-color: var(--theme-content-color1);
+  --rule-header-background-color: #222225;
+  --rule-flex-toggle-color: var(--grey-10);
+  --rule-shape-toggle-color: var(--grey-10);
 }
 
 /* Rule View Tabpanel */
@@ -20,10 +26,10 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  /* Bug 1243598 - Reduce the container height by the tab height to make room
-     for the tabs above. */
-  height: calc(100% - 24px);
-  position: absolute;
+  height: 100%;
+  /* Override the min-width from .inspector-tabpanel, as the rule panel can support small
+     widths */
+  min-width: 100px;
 }
 
 /* Rule View Toolbar */
@@ -36,33 +42,74 @@
 
 #ruleview-toolbar {
   display: flex;
-  height: 23px;
 }
 
 #ruleview-toolbar > .devtools-searchbox:first-child {
-  -moz-padding-start: 0px;
+  padding-inline-start: 0px;
 }
 
 #ruleview-command-toolbar {
   display: flex;
 }
 
-#pseudo-class-panel {
+.ruleview-reveal-panel {
   display: flex;
-  height: 24px;
   overflow: hidden;
-  transition: height 150ms ease;
 }
 
-#pseudo-class-panel[hidden] {
-  height: 0px;
+.ruleview-reveal-panel[hidden] {
+  display: none;
 }
 
-#pseudo-class-panel > label {
+.ruleview-reveal-panel label {
   -moz-user-select: none;
   flex-grow: 1;
   display: flex;
   align-items: center;
+}
+
+/* Class toggle panel */
+#ruleview-class-panel:not([hidden]) {
+  /* The class panel can contain 0 to N classes, so we can't hardcode a height here like
+     we do for the pseudo-class panel. Unfortunately, that means we don't get the height
+     transition when toggling the panel */
+  flex-direction: column;
+}
+
+#ruleview-class-panel .add-class {
+  margin: 0;
+  border-width: 0 0 1px 0;
+  padding: 2px 6px;
+  border-radius: 0;
+}
+
+#ruleview-class-panel .classes {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+#ruleview-class-panel .classes {
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+#ruleview-class-panel .classes label {
+  flex: 0 0;
+  max-width: 50%;
+}
+
+#ruleview-class-panel .classes label span {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+#ruleview-class-panel .no-classes {
+  flex: 1;
+  color: var(--theme-body-color-inactive);
+  margin: 0;
+  text-align: center;
 }
 
 /* Rule View Container */
@@ -71,6 +118,17 @@
   -moz-user-select: text;
   overflow: auto;
   flex: auto;
+  height: 100%;
+}
+
+/* This extra wrapper only serves as a way to get the content of the view focusable.
+   So that when the user reaches it either via keyboard or mouse, we know that the view
+   is focused and therefore can handle shortcuts.
+   However, for accessibility reasons, tabindex is set to -1 to avoid having to tab
+   through it, and the outline is hidden. */
+#ruleview-container-focusable {
+  height: 100%;
+  outline: none;
 }
 
 #ruleview-container.non-interactive {
@@ -87,16 +145,13 @@
   pointer-events: none;
 }
 
-.ruleview-expandable-container[hidden] {
-  display: none;
-}
-
 .ruleview-expandable-container {
   display: block;
 }
 
 .ruleview-namecontainer {
   cursor: text;
+  margin-left: -25px;
 }
 
 .ruleview-propertyvaluecontainer {
@@ -105,34 +160,52 @@
 }
 
 .ruleview-propertyvaluecontainer a {
+  color: var(--theme-highlight-purple);
   cursor: pointer;
 }
 
 .ruleview-computedlist,
+.ruleview-expandable-container[hidden],
+.ruleview-overridden-items[hidden],
 .ruleview-overridden-rule-filter[hidden],
-.ruleview-warning[hidden] {
+.ruleview-warning[hidden],
+.ruleview-overridden .ruleview-grid {
   display: none;
 }
 
 .ruleview-computedlist[user-open],
-.ruleview-computedlist[filter-open] {
+.ruleview-computedlist[filter-open],
+.ruleview-overridden-items {
   display: block;
 }
 
 .ruleview-rule-source {
   text-align: end;
   float: right;
+  max-width: 100%;
+
+  /* Force RTL direction to crop the source link at the beginning. */
+  direction: rtl;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
   -moz-user-select: none;
   margin-bottom: 2px;
 }
 
-.ruleview-rule-source > label {
-  cursor: pointer;
+.ruleview-rule-source-label {
+  white-space: nowrap;
   margin: 0;
+  cursor: pointer;
+
+  /* Create an LTR embed to avoid special characters being shifted to the start due to the
+     parent node direction: rtl; */
+  direction: ltr;
+  unicode-bidi: embed
 }
 
 .ruleview-rule-source[unselectable],
-.ruleview-rule-source[unselectable] > label {
+.ruleview-rule-source[unselectable] > .ruleview-rule-source-label {
   cursor: default;
 }
 
@@ -141,26 +214,24 @@
 }
 
 .ruleview-header {
-  border-top-width: 1px;
-  border-bottom-width: 1px;
-  border-top-style: solid;
-  border-bottom-style: solid;
-  padding: 1px 4px;
+  background: var(--rule-header-background-color);
+  border-bottom: 1px solid var(--theme-splitter-color);
+  color: var(--theme-toolbar-color);
+  font-size: 12px;
+  padding: 4px;
+  width: 100%;
+  align-items: center;
+  display: flex;
+
   -moz-user-select: none;
-  word-wrap: break-word;
-  vertical-align: middle;
-  min-height: 1.5em;
-  line-height: 1.5em;
-  margin-top: -1px;
 }
 
-:root[platform="win"] .ruleview-header,
-:root[platform="linux"] .ruleview-header {
-  margin-top: 4px;
-}
-
-.ruleview-header.ruleview-expandable-header {
+.ruleview-expandable-header {
   cursor: pointer;
+}
+
+.ruleview-expandable-header:hover {
+  background-color: var(--theme-toolbar-background-hover);
 }
 
 .ruleview-rule-pseudo-element {
@@ -168,9 +239,13 @@
   border-left: solid 10px;
 }
 
-.ruleview-rule,
-#noResults {
+.ruleview-rule {
+  border-bottom: 1px solid var(--theme-splitter-color);
   padding: 2px 4px;
+}
+
+#ruleview-container-focusable > .ruleview-rule:last-child {
+  border-bottom: none;
 }
 
 /**
@@ -180,6 +255,10 @@
 .ruleview-rule[unmatched=true],
 .ruleview-rule[uneditable=true] {
   background: var(--theme-tab-toolbar-background);
+}
+
+.ruleview-rule[unmatched=true] {
+  opacity: 0.5;
 }
 
 .ruleview-rule[uneditable=true] :focus {
@@ -204,25 +283,6 @@
   border-bottom-color: transparent;
 }
 
-#noResults {
-  font: message-box;
-  color: GrayText;
-}
-
-.ruleview-rule + .ruleview-rule {
-  border-top-width: 1px;
-  border-top-style: dotted;
-}
-
-.ruleview-warning {
-  background-image: url(images/alerticon-warning.png);
-  background-size: 13px 12px;
-  -moz-margin-start: 5px;
-  display: inline-block;
-  width: 13px;
-  height: 12px;
-}
-
 @media (min-resolution: 1.1dppx) {
   .ruleview-warning {
     background-image: url(images/alerticon-warning@2x.png);
@@ -230,19 +290,20 @@
 }
 
 .ruleview-overridden-rule-filter {
-  background-image: var(--rule-filter-icon);
+  background-image: url(chrome://devtools/skin/images/filter.svg#filterinput);
   background-size: 11px 11px;
-  -moz-margin-start: 5px;
+  margin-inline-start: 5px;
   display: inline-block;
   width: 11px;
   height: 11px;
 }
 
 .ruleview-ruleopen {
-  -moz-padding-end: 5px;
+  padding-inline-end: 5px;
 }
 
 .ruleview-ruleclose {
+  clear: both;
   cursor: text;
   padding-right: 20px;
 }
@@ -253,18 +314,31 @@
   margin: 0;
 }
 
+.ruleview-enableproperty {
+  position: relative;
+  float: left;
+  left: -28px;
+}
+
 .ruleview-rule:not(:hover) .ruleview-enableproperty {
   visibility: hidden;
 }
 
 .ruleview-expander {
   vertical-align: middle;
-  display: inline-block;
+}
+
+.ruleview-propertycontainer .ruleview-expander {
+  margin-left: -6px;
+}
+
+.ruleview-rule .ruleview-expander.theme-twisty:dir(rtl) {
+  /* for preventing .theme-twisty's wrong direction in rtl; Bug 1296648 */
+  transform: none;
 }
 
 .ruleview-newproperty {
-  /* (enable checkbox width: 12px) + (expander width: 15px) */
-  -moz-margin-start: 27px;
+  margin-inline-start: -10px;
 }
 
 .ruleview-namecontainer,
@@ -279,21 +353,73 @@
   padding: 0;
 }
 
-.ruleview-computed {
-  -moz-margin-start: 35px;
+.ruleview-overridden-items {
+  margin-inline-start: -25px;
+  list-style: none;
+  line-height: 1.5em;
 }
 
+.ruleview-overridden-item {
+  position: relative;
+}
+
+.ruleview-overridden-item::before {
+  position: absolute;
+  left: -15px;
+  top: 0px;
+  content: '';
+  display: block;
+  border-left: 0.5px solid var(--rule-overridden-item-border-color);
+  height: 0.8em;
+  border-bottom: 0.5px solid var(--rule-overridden-item-border-color);
+  width: 10px;
+}
+
+.ruleview-overridden-item::after {
+  position: absolute;
+  left: -15px;
+  bottom: -7px;
+  content: '';
+  display: block;
+  border-left: 0.5px solid var(--rule-overridden-item-border-color);
+  height: 100%;
+}
+
+.ruleview-overridden-item:last-child:after {
+  display: none;
+}
+
+.ruleview-flex,
+.ruleview-grid,
 .ruleview-swatch {
   cursor: pointer;
   border-radius: 50%;
-  width: 0.9em;
-  height: 0.9em;
+  width: 1em;
+  height: 1em;
   vertical-align: middle;
   /* align the swatch with its value */
   margin-top: -1px;
-  -moz-margin-end: 5px;
+  margin-inline-end: 5px;
   display: inline-block;
   position: relative;
+}
+
+.ruleview-flex {
+  background: url("chrome://devtools/skin/images/command-frames.svg");
+  -moz-context-properties: fill;
+  fill: var(--rule-flex-toggle-color);
+  border-radius: 0;
+  background-size: 1em;
+}
+
+.ruleview-grid {
+  background: url("chrome://devtools/skin/images/grid.svg");
+  border-radius: 0;
+}
+
+.ruleview-shape-point.active,
+.ruleview-shapeswatch.active + .ruleview-shape > .ruleview-shape-point:hover {
+  background-color: var(--rule-highlight-background-color);
 }
 
 .ruleview-colorswatch::before {
@@ -327,6 +453,17 @@
   background-size: 1em;
 }
 
+.ruleview-shapeswatch {
+  background: url("chrome://devtools/skin/images/shape-swatch.svg");
+  -moz-context-properties: stroke;
+  stroke: var(--rule-shape-toggle-color);
+  border-radius: 0;
+  background-size: 110% 110%;
+  box-shadow: none;
+  width: 1.45em;
+  height: 1.45em;
+}
+
 @media (min-resolution: 1.1dppx) {
   .ruleview-bezierswatch {
     background: url("chrome://devtools/skin/images/cubic-bezier-swatch@2x.png");
@@ -338,8 +475,23 @@
   text-decoration: line-through;
 }
 
+/**
+ * Hide swatches (tool icons) from properties that are overwritten by higher specificity * rules.
+ * .ruleview-swatch is a base class for many tool swatches (shapes, color, bezier curves)
+ * .ruleview-flex and .ruleview-grid are custom
+ */
+.ruleview-overridden .ruleview-flex,
+.ruleview-overridden .ruleview-grid,
+.ruleview-overridden .ruleview-swatch {
+  display: none;
+}
+
 .theme-light .ruleview-overridden {
   text-decoration-color: var(--theme-content-color3);
+}
+
+.ruleview-font-family.used-font {
+  text-decoration: underline;
 }
 
 .styleinspector-propertyeditor {
@@ -350,7 +502,8 @@
 
 .ruleview-property {
   border-left: 3px solid transparent;
-  clear: right;
+  clear: both;
+  padding-left: 28px;
 }
 
 .ruleview-propertycontainer  > * {
@@ -361,7 +514,8 @@
   border-left-color: var(--theme-highlight-green);
 }
 
-.ruleview-highlight {
+.ruleview-highlight > .ruleview-namecontainer,
+.ruleview-highlight > .ruleview-propertyvaluecontainer {
   background-color: var(--rule-highlight-background-color);
 }
 
@@ -380,7 +534,9 @@
   cursor: text;
 }
 
-.ruleview-selector-separator, .ruleview-selector-unmatched {
+.ruleview-selector-separator,
+.ruleview-selector-unmatched,
+.ruleview-unmatched-variable {
   color: #888;
 }
 
@@ -405,22 +561,27 @@
 }
 
 .ruleview-selectorhighlighter:hover {
-  filter: url(images/filters.svg#checked-icon-state);
+  filter: var(--theme-icon-checked-filter);
 }
 
+.ruleview-flex.active,
+.ruleview-grid.active,
 .ruleview-selectorhighlighter:active,
-.ruleview-selectorhighlighter.highlighted {
-  filter: url(images/filters.svg#checked-icon-state) brightness(0.9);
+.ruleview-selectorhighlighter.highlighted,
+.ruleview-shapeswatch.active {
+  filter: var(--theme-icon-checked-filter) brightness(0.9);
 }
 
 #ruleview-add-rule-button::before {
   background-image: url("chrome://devtools/skin/images/add.svg");
-  background-size: cover;
 }
 
 #pseudo-class-panel-toggle::before {
   background-image: url("chrome://devtools/skin/images/pseudo-class.svg");
-  background-size: cover;
+}
+
+#class-panel-toggle::before {
+  content: ".cls";
 }
 
 .ruleview-overridden-rule-filter {

@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include "TCPSocketChild.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/dom/PBrowserChild.h"
@@ -50,7 +50,6 @@ namespace dom {
 NS_IMPL_CYCLE_COLLECTION_CLASS(TCPSocketChildBase)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(TCPSocketChildBase)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSocket)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -89,9 +88,12 @@ NS_IMETHODIMP_(MozExternalRefCountType) TCPSocketChild::Release(void)
   return refcnt;
 }
 
-TCPSocketChild::TCPSocketChild(const nsAString& aHost, const uint16_t& aPort)
+TCPSocketChild::TCPSocketChild(const nsAString& aHost,
+                               const uint16_t& aPort,
+                               nsIEventTarget* aTarget)
 : mHost(aHost)
 , mPort(aPort)
+, mIPCEventTarget(aTarget)
 {
 }
 
@@ -100,8 +102,13 @@ TCPSocketChild::SendOpen(nsITCPSocketCallback* aSocket, bool aUseSSL, bool aUseA
 {
   mSocket = aSocket;
 
+  if (mIPCEventTarget) {
+    gNeckoChild->SetEventTargetForActor(this, mIPCEventTarget);
+  }
+
   AddIPDLReference();
   gNeckoChild->SendPTCPSocketConstructor(this, mHost, mPort);
+  MOZ_ASSERT(mFilterName.IsEmpty()); // Currently nobody should use this
   PTCPSocketChild::SendOpen(mHost, mPort, aUseSSL, aUseArrayBuffers);
 }
 
@@ -109,16 +116,22 @@ void
 TCPSocketChild::SendWindowlessOpenBind(nsITCPSocketCallback* aSocket,
                                        const nsACString& aRemoteHost, uint16_t aRemotePort,
                                        const nsACString& aLocalHost, uint16_t aLocalPort,
-                                       bool aUseSSL)
+                                       bool aUseSSL, bool aReuseAddrPort)
 {
   mSocket = aSocket;
+
+  if (mIPCEventTarget) {
+    gNeckoChild->SetEventTargetForActor(this, mIPCEventTarget);
+  }
+
   AddIPDLReference();
   gNeckoChild->SendPTCPSocketConstructor(this,
                                          NS_ConvertUTF8toUTF16(aRemoteHost),
                                          aRemotePort);
   PTCPSocketChild::SendOpenBind(nsCString(aRemoteHost), aRemotePort,
                                 nsCString(aLocalHost), aLocalPort,
-                                aUseSSL, true);
+                                aUseSSL, aReuseAddrPort,
+                                true, mFilterName);
 }
 
 void
@@ -126,6 +139,7 @@ TCPSocketChildBase::ReleaseIPDLReference()
 {
   MOZ_ASSERT(mIPCOpen);
   mIPCOpen = false;
+  mSocket = nullptr;
   this->Release();
 }
 
@@ -141,15 +155,15 @@ TCPSocketChild::~TCPSocketChild()
 {
 }
 
-bool
+mozilla::ipc::IPCResult
 TCPSocketChild::RecvUpdateBufferedAmount(const uint32_t& aBuffered,
                                          const uint32_t& aTrackingNumber)
 {
   mSocket->UpdateBufferedAmount(aBuffered, aTrackingNumber);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TCPSocketChild::RecvCallback(const nsString& aType,
                              const CallbackData& aData,
                              const uint32_t& aReadyState)
@@ -176,7 +190,7 @@ TCPSocketChild::RecvCallback(const nsString& aType,
   } else {
     MOZ_CRASH("Invalid callback type!");
   }
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -230,11 +244,22 @@ TCPSocketChild::GetPort(uint16_t* aPort)
   *aPort = mPort;
 }
 
-bool
+nsresult
+TCPSocketChild::SetFilterName(const nsACString& aFilterName)
+{
+  if (!mFilterName.IsEmpty()) {
+    // filter name can only be set once.
+    return NS_ERROR_FAILURE;
+  }
+  mFilterName = aFilterName;
+  return NS_OK;
+}
+
+mozilla::ipc::IPCResult
 TCPSocketChild::RecvRequestDelete()
 {
   mozilla::Unused << Send__delete__(this);
-  return true;
+  return IPC_OK();
 }
 
 } // namespace dom

@@ -7,54 +7,23 @@
 #ifndef security_sandbox_loggingCallbacks_h__
 #define security_sandbox_loggingCallbacks_h__
 
-#include "mozilla/sandboxing/loggingTypes.h"
-#include "mozilla/sandboxing/sandboxLogging.h"
-
-#ifdef TARGET_SANDBOX_EXPORTS
 #include <sstream>
-#include <iostream>
 
+#include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/sandboxing/loggingTypes.h"
 #include "nsContentUtils.h"
 
-#ifdef MOZ_STACKWALKING
 #include "mozilla/StackWalk.h"
-#endif
-
-#define TARGET_SANDBOX_EXPORT __declspec(dllexport)
-#else
-#define TARGET_SANDBOX_EXPORT __declspec(dllimport)
-#endif
 
 namespace mozilla {
+
+static LazyLogModule sSandboxTargetLog("SandboxTarget");
+
+#define LOG_D(...) MOZ_LOG(sSandboxTargetLog, LogLevel::Debug, (__VA_ARGS__))
+
 namespace sandboxing {
 
-// We need to use a callback to work around the fact that sandbox_s lib is
-// linked into plugin-container.exe directly and also via xul.dll via
-// sandboxbroker.dll. This causes problems with holding the state required to
-// implement sandbox logging.
-// So, we provide a callback from plugin-container.exe that the code in xul.dll
-// can call to make sure we hit the right version of the code.
-void TARGET_SANDBOX_EXPORT
-SetProvideLogFunctionCb(ProvideLogFunctionCb aProvideLogFunctionCb);
-
-// Provide a call back so a pointer to a logging function can be passed later.
-static void
-PrepareForLogging()
-{
-  SetProvideLogFunctionCb(ProvideLogFunction);
-}
-
-#ifdef TARGET_SANDBOX_EXPORTS
-static ProvideLogFunctionCb sProvideLogFunctionCb = nullptr;
-
-void
-SetProvideLogFunctionCb(ProvideLogFunctionCb aProvideLogFunctionCb)
-{
-  sProvideLogFunctionCb = aProvideLogFunctionCb;
-}
-
-#ifdef MOZ_STACKWALKING
 static uint32_t sStackTraceDepth = 0;
 
 // NS_WalkStackCallback to write a formatted stack frame to an ostringstream.
@@ -70,7 +39,6 @@ StackFrameToOStringStream(uint32_t aFrameNumber, void* aPC, void* aSP,
   *stream << std::endl << "--" << buf;
   stream->flush();
 }
-#endif
 
 // Log to the browser console and, if DEBUG build, stderr.
 static void
@@ -86,15 +54,13 @@ Log(const char* aMessageType,
     msgStream << " for : " << aContext;
   }
 
-#ifdef MOZ_STACKWALKING
   if (aShouldLogStackTrace) {
     if (sStackTraceDepth) {
       msgStream << std::endl << "Stack Trace:";
       MozStackWalk(StackFrameToOStringStream, aFramesToSkip, sStackTraceDepth,
-                   &msgStream, 0, nullptr);
+                   &msgStream);
     }
   }
-#endif
 
   std::string msg = msgStream.str();
 #if defined(DEBUG)
@@ -106,21 +72,24 @@ Log(const char* aMessageType,
   if (nsContentUtils::IsInitialized()) {
     nsContentUtils::LogMessageToConsole(msg.c_str());
   }
+
+  // As we don't always have the facility to log to console use MOZ_LOG as well.
+  LOG_D("%s", msg.c_str());
 }
 
 // Initialize sandbox logging if required.
 static void
-InitLoggingIfRequired()
+InitLoggingIfRequired(ProvideLogFunctionCb aProvideLogFunctionCb)
 {
-  if (!sProvideLogFunctionCb) {
+  if (!aProvideLogFunctionCb) {
     return;
   }
 
-  if (Preferences::GetBool("security.sandbox.windows.log") ||
-      PR_GetEnv("MOZ_WIN_SANDBOX_LOGGING")) {
-    sProvideLogFunctionCb(Log);
+  if (Preferences::GetBool("security.sandbox.logging.enabled") ||
+      PR_GetEnv("MOZ_SANDBOX_LOGGING")) {
+    aProvideLogFunctionCb(Log);
 
-#if defined(MOZ_CONTENT_SANDBOX) && defined(MOZ_STACKWALKING)
+#if defined(MOZ_CONTENT_SANDBOX)
     // We can only log the stack trace on process types where we know that the
     // sandbox won't prevent it.
     if (XRE_IsContentProcess()) {
@@ -130,7 +99,7 @@ InitLoggingIfRequired()
 #endif
   }
 }
-#endif
+
 } // sandboxing
 } // mozilla
 

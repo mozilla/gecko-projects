@@ -14,6 +14,7 @@
 nsSMILValue::nsSMILValue(const nsISMILType* aType)
   : mType(nsSMILNullType::Singleton())
 {
+  mU.mBool = false;
   if (!aType) {
     NS_ERROR("Trying to construct nsSMILValue with null mType pointer");
     return;
@@ -144,7 +145,7 @@ nsSMILValue::InitAndCheckPostcondition(const nsISMILType* aNewType)
   MOZ_ASSERT(mType == aNewType,
              "Post-condition of Init failed. nsSMILValue is invalid");
 }
-                
+
 void
 nsSMILValue::DestroyAndCheckPostcondition()
 {

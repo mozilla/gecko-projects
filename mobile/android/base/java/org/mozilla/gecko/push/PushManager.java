@@ -6,17 +6,18 @@
 package org.mozilla.gecko.push;
 
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.gcm.GcmTokenClient;
+import org.mozilla.gecko.mma.MmaDelegate;
 import org.mozilla.gecko.push.autopush.AutopushClientException;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -101,14 +102,14 @@ public class PushManager {
         return registration;
     }
 
-    public PushSubscription subscribeChannel(final @NonNull String profileName, final @NonNull String service, final @NonNull JSONObject serviceData, final long now) throws ProfileNeedsConfigurationException, AutopushClientException, PushClient.LocalException, GcmTokenClient.NeedsGooglePlayServicesException, IOException {
+    public PushSubscription subscribeChannel(final @NonNull String profileName, final @NonNull String service, final @NonNull JSONObject serviceData, @Nullable String appServerKey, final long now) throws ProfileNeedsConfigurationException, AutopushClientException, PushClient.LocalException, GcmTokenClient.NeedsGooglePlayServicesException, IOException {
         Log.i(LOG_TAG, "Subscribing to channel for service: " + service + "; for profile named: " + profileName);
         final PushRegistration registration = advanceRegistration(profileName, now);
-        final PushSubscription subscription = subscribeChannel(registration, profileName, service, serviceData, System.currentTimeMillis());
+        final PushSubscription subscription = subscribeChannel(registration, profileName, service, serviceData, appServerKey, System.currentTimeMillis());
         return subscription;
     }
 
-    protected PushSubscription subscribeChannel(final @NonNull PushRegistration registration, final @NonNull String profileName, final @NonNull String service, final @NonNull JSONObject serviceData, final long now) throws AutopushClientException, PushClient.LocalException {
+    protected PushSubscription subscribeChannel(final @NonNull PushRegistration registration, final @NonNull String profileName, final @NonNull String service, final @NonNull JSONObject serviceData, @Nullable String appServerKey, final long now) throws AutopushClientException, PushClient.LocalException {
         final String uaid = registration.uaid.value;
         final String secret = registration.secret;
         if (uaid == null || secret == null) {
@@ -118,7 +119,7 @@ public class PushManager {
         // Verify endpoint is not null?
         final PushClient pushClient = pushClientFactory.getPushClient(registration.autopushEndpoint, registration.debug);
 
-        final SubscribeChannelResponse result = pushClient.subscribeChannel(uaid, secret);
+        final SubscribeChannelResponse result = pushClient.subscribeChannel(uaid, secret, appServerKey);
         if (registration.debug) {
             Log.i(LOG_TAG, "Got chid: " + result.channelID + " and endpoint: " + result.endpoint);
         } else {
@@ -243,7 +244,7 @@ public class PushManager {
     }
 
     protected @NonNull PushRegistration advanceRegistration(final PushRegistration registration, final @NonNull String profileName, final long now) throws AutopushClientException, PushClient.LocalException, GcmTokenClient.NeedsGooglePlayServicesException, IOException {
-        final Fetched gcmToken = gcmClient.getToken(AppConstants.MOZ_ANDROID_GCM_SENDERID, registration.debug);
+        final Fetched gcmToken = gcmClient.getToken(AppConstants.MOZ_ANDROID_GCM_SENDERIDS, registration.debug);
 
         final PushClient pushClient = pushClientFactory.getPushClient(registration.autopushEndpoint, registration.debug);
 
@@ -295,7 +296,7 @@ public class PushManager {
     public void startup(long now) {
         try {
             Log.i(LOG_TAG, "Startup: requesting GCM token.");
-            gcmClient.getToken(AppConstants.MOZ_ANDROID_GCM_SENDERID, false); // For side-effects.
+            gcmClient.getToken(AppConstants.MOZ_ANDROID_GCM_SENDERIDS, false); // For side-effects.
         } catch (GcmTokenClient.NeedsGooglePlayServicesException e) {
             // Requires user intervention.  At App startup, we don't want to address this.  In
             // response to user activity, we do want to try to have the user address this.

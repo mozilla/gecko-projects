@@ -2,11 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/osfile.jsm");
-
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 // This component is used for handling dragover and drop of urls.
 //
@@ -20,23 +18,80 @@ function ContentAreaDropListener() { };
 ContentAreaDropListener.prototype =
 {
   classID:          Components.ID("{1f34bc80-1bc7-11d6-a384-d705dd0746fc}"),
-  QueryInterface:   XPCOMUtils.generateQI([Ci.nsIDroppedLinkHandler, Ci.nsISupports]),
+  QueryInterface:   ChromeUtils.generateQI([Ci.nsIDroppedLinkHandler]),
 
-  _getDropURL : function (dt)
+  _addLink : function(links, url, name, type)
+   {
+    links.push({ url, name, type });
+  },
+
+  _addLinksFromItem: function(links, dt, i)
   {
-    let types = dt.types;
-    for (let t = 0; t < types.length; t++) {
-      let type = types[t];
-      switch (type) {
-        case "text/uri-list":
-          var url = dt.getData("URL").replace(/^\s+|\s+$/g, "");
-          return [url, url];
-        case "text/plain":
-        case "text/x-moz-text-internal":
-          var url = dt.getData(type).replace(/^\s+|\s+$/g, "");
-          return [url, url];
-        case "text/x-moz-url":
-          return dt.getData(type).split("\n");
+    let types = dt.mozTypesAt(i);
+    let type, data;
+
+    type = "text/uri-list";
+    if (types.contains(type)) {
+      data = dt.mozGetDataAt(type, i);
+      if (data) {
+        let urls = data.split("\n");
+        for (let url of urls) {
+          // lines beginning with # are comments
+          if (url.startsWith("#"))
+            continue;
+          url = url.replace(/^\s+|\s+$/g, "");
+          this._addLink(links, url, url, type);
+        }
+        return;
+      }
+    }
+
+    type = "text/x-moz-url";
+    if (types.contains(type)) {
+      data = dt.mozGetDataAt(type, i);
+      if (data) {
+        let lines = data.split("\n");
+        for (let i = 0, length = lines.length; i < length; i += 2) {
+          this._addLink(links, lines[i], lines[i + 1], type);
+        }
+        return;
+      }
+    }
+
+    for (let type of ["text/plain", "text/x-moz-text-internal"]) {
+      if (types.contains(type)) {
+        data = dt.mozGetDataAt(type, i);
+        if (data) {
+          let lines = data.replace(/^\s+|\s+$/mg, "").split("\n");
+          if (!lines.length) {
+            return;
+          }
+
+          // For plain text, there are 2 cases:
+          //   * if there is at least one URI:
+          //       Add all URIs, ignoring non-URI lines, so that all URIs
+          //       are opened in tabs.
+          //   * if there's no URI:
+          //       Add the entire text as a single entry, so that the entire
+          //       text is searched.
+          let hasURI = false;
+          let flags = Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
+              Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+          for (let line of lines) {
+            let info = Services.uriFixup.getFixupURIInfo(line, flags);
+            if (info.fixedURI) {
+              // Use the original line here, and let the caller decide
+              // whether to perform fixup or not.
+              hasURI = true;
+              this._addLink(links, line, line, type);
+            }
+          }
+
+          if (!hasURI) {
+            this._addLink(links, data, data, type);
+          }
+          return;
+        }
       }
     }
 
@@ -44,14 +99,23 @@ ContentAreaDropListener.prototype =
     // url pointed to in one of the url types is found first before the file
     // type, which points to the actual file.
     let files = dt.files;
-    if (files && files.length) {
-      return [OS.Path.toFileURI(files[0].mozFullPath), files[0].name];
+    if (files && i < files.length) {
+      this._addLink(links, OS.Path.toFileURI(files[i].mozFullPath),
+                    files[i].name, "application/x-moz-file");
     }
-
-    return [ ];
   },
 
-  _validateURI: function(dataTransfer, uriString, disallowInherit)
+  _getDropLinks : function (dt)
+  {
+    let links = [];
+    for (let i = 0; i < dt.mozItemCount; i++) {
+      this._addLinksFromItem(links, dt, i);
+    }
+    return links;
+  },
+
+  _validateURI: function(dataTransfer, uriString, disallowInherit,
+                         triggeringPrincipal)
   {
     if (!uriString)
       return "";
@@ -62,32 +126,79 @@ ContentAreaDropListener.prototype =
     // sure the source document can load the dropped URI.
     uriString = uriString.replace(/^\s*|\s*$/g, '');
 
-    let uri;
-    let ioService = Cc["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService);
-    try {
-      // Check that the uri is valid first and return an empty string if not.
-      // It may just be plain text and should be ignored here
-      uri = ioService.newURI(uriString, null, null);
-    } catch (ex) { }
-    if (!uri)
+    // Apply URI fixup so that this validation prevents bad URIs even if the
+    // similar fixup is applied later, especialy fixing typos up will convert
+    // non-URI to URI.
+    let fixupFlags = Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
+        Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+    let info = Services.uriFixup.getFixupURIInfo(uriString, fixupFlags);
+    if (!info.fixedURI || info.keywordProviderName) {
+      // Loading a keyword search should always be fine for all cases.
       return uriString;
+    }
+    let uri = info.fixedURI;
 
-    // uriString is a valid URI, so do the security check.
     let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].
                    getService(Ci.nsIScriptSecurityManager);
-    let sourceNode = dataTransfer.mozSourceNode;
     let flags = secMan.STANDARD;
     if (disallowInherit)
       flags |= secMan.DISALLOW_INHERIT_PRINCIPAL;
 
-    // Use file:/// as the default uri so that drops of file URIs are always allowed
-    let principal = sourceNode ? sourceNode.nodePrincipal
-                               : secMan.getSimpleCodebasePrincipal(ioService.newURI("file:///", null, null));
+    secMan.checkLoadURIWithPrincipal(triggeringPrincipal, uri, flags);
 
-    secMan.checkLoadURIStrWithPrincipal(principal, uriString, flags);
+    // Once we validated, return the URI after fixup, instead of the original
+    // uriString.
+    return uri.spec;
+  },
 
-    return uriString;
+  _getTriggeringPrincipalFromDataTransfer: function(aDataTransfer,
+                                                    fallbackToSystemPrincipal)
+  {
+    let sourceNode = aDataTransfer.mozSourceNode;
+    if (sourceNode &&
+        (sourceNode.localName !== "browser" ||
+         sourceNode.namespaceURI !== "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul")) {
+      // Use sourceNode's principal only if the sourceNode is not browser.
+      //
+      // If sourceNode is browser, the actual triggering principal may be
+      // differ than sourceNode's principal, since sourceNode's principal is
+      // top level document's one and the drag may be triggered from a frame
+      // with different principal.
+      if (sourceNode.nodePrincipal) {
+        return sourceNode.nodePrincipal;
+      }
+    }
+
+    // First, fallback to mozTriggeringPrincipalURISpec that is set when the
+    // drop comes from another content process.
+    let principalURISpec = aDataTransfer.mozTriggeringPrincipalURISpec;
+    if (!principalURISpec) {
+      // Fallback to either system principal or file principal, supposing
+      // the drop comes from outside of the browser, so that drops of file
+      // URIs are always allowed.
+      //
+      // TODO: Investigate and describe the difference between them,
+      //       or use only one principal. (Bug 1367038)
+      if (fallbackToSystemPrincipal) {
+        let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].
+            getService(Ci.nsIScriptSecurityManager);
+        return secMan.getSystemPrincipal();
+      } else {
+        principalURISpec = "file:///";
+      }
+    }
+    let ioService = Cc["@mozilla.org/network/io-service;1"]
+        .getService(Ci.nsIIOService);
+    let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].
+        getService(Ci.nsIScriptSecurityManager);
+    return secMan.createCodebasePrincipal(ioService.newURI(principalURISpec), {});
+  },
+
+  getTriggeringPrincipal: function(aEvent)
+  {
+    let dataTransfer = aEvent.dataTransfer;
+    return this._getTriggeringPrincipalFromDataTransfer(dataTransfer, true);
+
   },
 
   canDropLink: function(aEvent, aAllowSameDocument)
@@ -97,11 +208,11 @@ ContentAreaDropListener.prototype =
 
     let dataTransfer = aEvent.dataTransfer;
     let types = dataTransfer.types;
-    if (!types.contains("application/x-moz-file") &&
-        !types.contains("text/x-moz-url") &&
-        !types.contains("text/uri-list") &&
-        !types.contains("text/x-moz-text-internal") &&
-        !types.contains("text/plain"))
+    if (!types.includes("application/x-moz-file") &&
+        !types.includes("text/x-moz-url") &&
+        !types.includes("text/uri-list") &&
+        !types.includes("text/x-moz-text-internal") &&
+        !types.includes("text/plain"))
       return false;
 
     if (aAllowSameDocument)
@@ -120,6 +231,8 @@ ContentAreaDropListener.prototype =
     // also check for nodes in other child or sibling frames by checking
     // if both have the same top window.
     if (sourceDocument && eventDocument) {
+      if (sourceDocument.defaultView == null)
+        return true;
       let sourceRoot = sourceDocument.defaultView.top;
       if (sourceRoot && sourceRoot == eventDocument.defaultView.top)
         return false;
@@ -131,24 +244,63 @@ ContentAreaDropListener.prototype =
   dropLink: function(aEvent, aName, aDisallowInherit)
   {
     aName.value = "";
-    if (this._eventTargetIsDisabled(aEvent))
-      return "";
-
-    let dataTransfer = aEvent.dataTransfer;
-    let [url, name] = this._getDropURL(dataTransfer);
-
-    try {
-      url = this._validateURI(dataTransfer, url, aDisallowInherit);
-    } catch (ex) {
-      aEvent.stopPropagation();
-      aEvent.preventDefault();
-      throw ex;
+    let links = this.dropLinks(aEvent, aDisallowInherit);
+    let url = "";
+    if (links.length > 0) {
+      url = links[0].url;
+      let name = links[0].name;
+      if (name)
+        aName.value = name;
     }
 
-    if (name)
-      aName.value = name;
-
     return url;
+  },
+
+  dropLinks: function(aEvent, aDisallowInherit, aCount)
+  {
+    if (aEvent && this._eventTargetIsDisabled(aEvent))
+      return [];
+
+    let dataTransfer = aEvent.dataTransfer;
+    let links = this._getDropLinks(dataTransfer);
+    let triggeringPrincipal = this._getTriggeringPrincipalFromDataTransfer(dataTransfer, false);
+
+    for (let link of links) {
+      try {
+        link.url = this._validateURI(dataTransfer, link.url, aDisallowInherit,
+                                     triggeringPrincipal);
+      } catch (ex) {
+        // Prevent the drop entirely if any of the links are invalid even if
+        // one of them is valid.
+        aEvent.stopPropagation();
+        aEvent.preventDefault();
+        throw ex;
+      }
+    }
+    if (aCount)
+      aCount.value = links.length;
+
+    return links;
+  },
+
+  validateURIsForDrop: function(aEvent, aURIsCount, aURIs, aDisallowInherit)
+  {
+    let dataTransfer = aEvent.dataTransfer;
+    let triggeringPrincipal = this._getTriggeringPrincipalFromDataTransfer(dataTransfer, false);
+
+    for (let uri of aURIs) {
+      this._validateURI(dataTransfer, uri, aDisallowInherit,
+                        triggeringPrincipal);
+    }
+  },
+
+  queryLinks: function(aDataTransfer, aCount)
+  {
+    let links = this._getDropLinks(aDataTransfer);
+    if (aCount) {
+      aCount.value = links.length;
+    }
+    return links;
   },
 
   _eventTargetIsDisabled: function(aEvent)
@@ -158,8 +310,8 @@ ContentAreaDropListener.prototype =
       return false;
 
     return ownerDoc.defaultView
-                   .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                   .getInterface(Components.interfaces.nsIDOMWindowUtils)
+                   .QueryInterface(Ci.nsIInterfaceRequestor)
+                   .getInterface(Ci.nsIDOMWindowUtils)
                    .isNodeDisabledForEvents(aEvent.originalTarget);
   }
 };

@@ -5,10 +5,13 @@
 
 #include "nsWindowBase.h"
 
+#include "gfxPrefs.h"
 #include "mozilla/MiscEvents.h"
 #include "KeyboardLayout.h"
 #include "WinUtils.h"
 #include "npapi.h"
+#include "nsAutoPtr.h"
+#include "nsIPresShell.h"
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -20,7 +23,7 @@ InjectTouchInputPtr nsWindowBase::sInjectTouchFuncPtr;
 bool
 nsWindowBase::DispatchPluginEvent(const MSG& aMsg)
 {
-  if (!PluginHasFocus()) {
+  if (!ShouldDispatchPluginEvent()) {
     return false;
   }
   WidgetPluginEvent pluginEvent(true, ePluginInputEvent, this);
@@ -33,6 +36,12 @@ nsWindowBase::DispatchPluginEvent(const MSG& aMsg)
   pluginEvent.mPluginEvent.Copy(npEvent);
   pluginEvent.mRetargetToFocusedDocument = true;
   return DispatchWindowEvent(&pluginEvent);
+}
+
+bool
+nsWindowBase::ShouldDispatchPluginEvent()
+{
+  return PluginHasFocus();
 }
 
 // static
@@ -70,7 +79,7 @@ nsWindowBase::InitTouchInjection()
 }
 
 bool
-nsWindowBase::InjectTouchPoint(uint32_t aId, ScreenIntPoint& aPointerScreenPoint,
+nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
                                POINTER_FLAGS aFlags, uint32_t aPressure,
                                uint32_t aOrientation)
 {
@@ -86,18 +95,18 @@ nsWindowBase::InjectTouchPoint(uint32_t aId, ScreenIntPoint& aPointerScreenPoint
   info.touchMask = TOUCH_MASK_CONTACTAREA|TOUCH_MASK_ORIENTATION|TOUCH_MASK_PRESSURE;
   info.pressure = aPressure;
   info.orientation = aOrientation;
-  
+
   info.pointerInfo.pointerFlags = aFlags;
   info.pointerInfo.pointerType =  PT_TOUCH;
   info.pointerInfo.pointerId = aId;
-  info.pointerInfo.ptPixelLocation.x = aPointerScreenPoint.x;
-  info.pointerInfo.ptPixelLocation.y = aPointerScreenPoint.y;
+  info.pointerInfo.ptPixelLocation.x = aPoint.x;
+  info.pointerInfo.ptPixelLocation.y = aPoint.y;
 
   info.rcContact.top = info.pointerInfo.ptPixelLocation.y - 2;
   info.rcContact.bottom = info.pointerInfo.ptPixelLocation.y + 2;
   info.rcContact.left = info.pointerInfo.ptPixelLocation.x - 2;
   info.rcContact.right = info.pointerInfo.ptPixelLocation.x + 2;
-  
+
   if (!sInjectTouchFuncPtr(1, &info)) {
     WinUtils::Log("InjectTouchInput failure. GetLastError=%d", GetLastError());
     return false;
@@ -112,22 +121,40 @@ void nsWindowBase::ChangedDPI()
     if (presShell) {
       presShell->BackingScaleFactorChanged();
     }
-    mWidgetListener->UIResolutionChanged();
   }
 }
 
 nsresult
 nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                          nsIWidget::TouchPointerState aPointerState,
-                                         ScreenIntPoint aPointerScreenPoint,
+                                         LayoutDeviceIntPoint aPoint,
                                          double aPointerPressure,
                                          uint32_t aPointerOrientation,
                                          nsIObserver* aObserver)
 {
   AutoObserverNotifier notifier(aObserver, "touchpoint");
 
-  if (!InitTouchInjection()) {
-    return NS_ERROR_NOT_IMPLEMENTED;
+  if (gfxPrefs::APZTestFailsWithNativeInjection() || !InitTouchInjection()) {
+    // If we don't have touch injection from the OS, or if we are running a test
+    // that cannot properly inject events to satisfy the OS requirements (see bug
+    // 1313170)  we can just fake it and synthesize the events from here.
+    MOZ_ASSERT(NS_IsMainThread());
+    if (aPointerState == TOUCH_HOVER) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    if (!mSynthesizedTouchInput) {
+      mSynthesizedTouchInput = MakeUnique<MultiTouchInput>();
+    }
+
+    WidgetEventTime time = CurrentMessageWidgetEventTime();
+    LayoutDeviceIntPoint pointInWindow = aPoint - WidgetToScreenOffset();
+    MultiTouchInput inputToDispatch = UpdateSynthesizedTouchState(
+        mSynthesizedTouchInput.get(), time.mTime, time.mTimeStamp,
+        aPointerId, aPointerState, pointInWindow, aPointerPressure,
+        aPointerOrientation);
+    DispatchTouchInput(inputToDispatch);
+    return NS_OK;
   }
 
   bool hover = aPointerState & TOUCH_HOVER;
@@ -160,7 +187,7 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
       flags |= POINTER_FLAG_CANCELED;
     }
 
-    return !InjectTouchPoint(aPointerId, aPointerScreenPoint, flags,
+    return !InjectTouchPoint(aPointerId, aPoint, flags,
                              pressure, aPointerOrientation) ?
       NS_ERROR_UNEXPECTED : NS_OK;
   }
@@ -171,7 +198,7 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   }
 
   // Create a new pointer
-  info = new PointerInfo(aPointerId, aPointerScreenPoint);
+  info = new PointerInfo(aPointerId, aPoint);
 
   POINTER_FLAGS flags = POINTER_FLAG_INRANGE;
   if (contact) {
@@ -179,7 +206,7 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   }
 
   mActivePointers.Put(aPointerId, info);
-  return !InjectTouchPoint(aPointerId, aPointerScreenPoint, flags,
+  return !InjectTouchPoint(aPointerId, aPoint, flags,
                            pressure, aPointerOrientation) ?
     NS_ERROR_UNEXPECTED : NS_OK;
 }

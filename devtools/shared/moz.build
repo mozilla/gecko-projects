@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -10,24 +10,32 @@ DIRS += [
     'acorn',
     'apps',
     'client',
+    'css',
     'discovery',
+    'fronts',
     'gcli',
     'heapsnapshot',
     'inspector',
     'jsbeautify',
     'layout',
     'locales',
+    'node-properties',
     'performance',
+    'platform',
     'pretty-fast',
     'qrcode',
     'security',
     'sourcemap',
-    'shims',
-    'touch',
+    'sprintfjs',
+    'specs',
     'transport',
     'webconsole',
     'worker',
 ]
+
+# Only ship test helpers in local builds
+if not CONFIG['MOZILLA_OFFICIAL']:
+    DIRS += ['test-helpers']
 
 BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/mochitest/chrome.ini']
@@ -38,17 +46,34 @@ JAR_MANIFESTS += ['jar.mn']
 DevToolsModules(
     'async-storage.js',
     'async-utils.js',
+    'base-loader.js',
+    'builtin-modules.js',
     'content-observer.js',
-    'css-angle.js',
-    'css-color.js',
+    'debounce.js',
+    'defer.js',
     'deprecated-sync-thenables.js',
     'DevToolsUtils.js',
+    'dom-node-constants.js',
+    'dom-node-filter-constants.js',
     'event-emitter.js',
-    'event-parsers.js',
+    'extend.js',
+    'flags.js',
+    'generate-uuid.js',
     'indentation.js',
+    'indexed-db.js',
+    'l10n.js',
+    'loader-plugin-raw.jsm',
     'Loader.jsm',
     'Parser.jsm',
     'path.js',
+    'plural-form.js',
+    'protocol.js',
     'system.js',
+    'task.js',
     'ThreadSafeDevToolsUtils.js',
+    'throttle.js',
+    'wasm-source-map.js',
 )
+
+with Files('**'):
+    BUG_COMPONENT = ('DevTools', 'General')

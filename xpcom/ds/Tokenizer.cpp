@@ -7,147 +7,181 @@
 #include "Tokenizer.h"
 
 #include "nsUnicharUtils.h"
+#include <algorithm>
 
 namespace mozilla {
 
-static const char sWhitespaces[] = " \t";
+template<>
+char const TokenizerBase<char>::sWhitespaces[] = { ' ', '\t', 0 };
+template<>
+char16_t const TokenizerBase<char16_t>::sWhitespaces[3] = { ' ', '\t', 0 };
 
-Tokenizer::Tokenizer(const nsACString& aSource,
-                     const char* aWhitespaces,
-                     const char* aAdditionalWordChars)
-  : mPastEof(false)
-  , mHasFailed(false)
-  , mWhitespaces(aWhitespaces ? aWhitespaces : sWhitespaces)
-  , mAdditionalWordChars(aAdditionalWordChars)
+template<typename TChar>
+static bool
+contains(TChar const* const list, TChar const needle)
 {
-  aSource.BeginReading(mCursor);
-  mRecord = mRollback = mCursor;
-  aSource.EndReading(mEnd);
+  for (TChar const *c = list; *c; ++c) {
+    if (needle == *c) {
+      return true;
+    }
+  }
+  return false;
 }
 
-Tokenizer::Tokenizer(const char* aSource,
-                     const char* aWhitespaces,
-                     const char* aAdditionalWordChars)
-  : Tokenizer(nsDependentCString(aSource), aWhitespaces, aAdditionalWordChars)
+template<typename TChar>
+TTokenizer<TChar>::TTokenizer(const typename base::TAString& aSource,
+                              const TChar* aWhitespaces,
+                              const TChar* aAdditionalWordChars)
+  : TokenizerBase<TChar>(aWhitespaces, aAdditionalWordChars)
+{
+  base::mInputFinished = true;
+  aSource.BeginReading(base::mCursor);
+  mRecord = mRollback = base::mCursor;
+  aSource.EndReading(base::mEnd);
+}
+
+template<typename TChar>
+TTokenizer<TChar>::TTokenizer(const TChar* aSource,
+                              const TChar* aWhitespaces,
+                              const TChar* aAdditionalWordChars)
+  : TTokenizer(typename base::TDependentString(aSource), aWhitespaces, aAdditionalWordChars)
 {
 }
 
+template<typename TChar>
 bool
-Tokenizer::Next(Token& aToken)
+TTokenizer<TChar>::Next(typename base::Token& aToken)
 {
-  if (!HasInput()) {
-    mHasFailed = true;
+  if (!base::HasInput()) {
+    base::mHasFailed = true;
     return false;
   }
 
-  mRollback = mCursor;
-  mCursor = Parse(aToken);
+  mRollback = base::mCursor;
+  base::mCursor = base::Parse(aToken);
 
-  aToken.AssignFragment(mRollback, mCursor);
+  base::AssignFragment(aToken, mRollback, base::mCursor);
 
-  mPastEof = aToken.Type() == TOKEN_EOF;
-  mHasFailed = false;
+  base::mPastEof = aToken.Type() == base::TOKEN_EOF;
+  base::mHasFailed = false;
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::Check(const TokenType aTokenType, Token& aResult)
+TTokenizer<TChar>::Check(const typename base::TokenType aTokenType, typename base::Token& aResult)
 {
-  if (!HasInput()) {
-    mHasFailed = true;
+  if (!base::HasInput()) {
+    base::mHasFailed = true;
     return false;
   }
 
-  nsACString::const_char_iterator next = Parse(aResult);
+  typename base::TAString::const_char_iterator next = base::Parse(aResult);
   if (aTokenType != aResult.Type()) {
-    mHasFailed = true;
+    base::mHasFailed = true;
     return false;
   }
 
-  mRollback = mCursor;
-  mCursor = next;
+  mRollback = base::mCursor;
+  base::mCursor = next;
 
-  aResult.AssignFragment(mRollback, mCursor);
+  base::AssignFragment(aResult, mRollback, base::mCursor);
 
-  mPastEof = aResult.Type() == TOKEN_EOF;
-  mHasFailed = false;
+  base::mPastEof = aResult.Type() == base::TOKEN_EOF;
+  base::mHasFailed = false;
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::Check(const Token& aToken)
+TTokenizer<TChar>::Check(const typename base::Token& aToken)
 {
-  if (!HasInput()) {
-    mHasFailed = true;
+  if (!base::HasInput()) {
+    base::mHasFailed = true;
     return false;
   }
 
-  Token parsed;
-  nsACString::const_char_iterator next = Parse(parsed);
+  typename base::Token parsed;
+  typename base::TAString::const_char_iterator next = base::Parse(parsed);
   if (!aToken.Equals(parsed)) {
-    mHasFailed = true;
+    base::mHasFailed = true;
     return false;
   }
 
-  mRollback = mCursor;
-  mCursor = next;
-  mPastEof = parsed.Type() == TOKEN_EOF;
-  mHasFailed = false;
+  mRollback = base::mCursor;
+  base::mCursor = next;
+  base::mPastEof = parsed.Type() == base::TOKEN_EOF;
+  base::mHasFailed = false;
   return true;
 }
 
-bool
-Tokenizer::HasFailed() const
-{
-  return mHasFailed;
-}
-
+template<typename TChar>
 void
-Tokenizer::SkipWhites(WhiteSkipping aIncludeNewLines)
+TTokenizer<TChar>::SkipWhites(WhiteSkipping aIncludeNewLines)
 {
   if (!CheckWhite() && (aIncludeNewLines == DONT_INCLUDE_NEW_LINE || !CheckEOL())) {
     return;
   }
 
-  nsACString::const_char_iterator rollback = mRollback;
+  typename base::TAString::const_char_iterator rollback = mRollback;
   while (CheckWhite() || (aIncludeNewLines == INCLUDE_NEW_LINE && CheckEOL())) {
   }
 
-  mHasFailed = false;
+  base::mHasFailed = false;
   mRollback = rollback;
 }
 
+template<typename TChar>
+void
+TTokenizer<TChar>::SkipUntil(typename base::Token const& aToken)
+{
+  typename base::TAString::const_char_iterator rollback = base::mCursor;
+  const typename base::Token eof = base::Token::EndOfFile();
+
+  typename base::Token t;
+  while (Next(t)) {
+    if (aToken.Equals(t) || eof.Equals(t)) {
+      Rollback();
+      break;
+    }
+  }
+
+  mRollback = rollback;
+}
+
+template<typename TChar>
 bool
-Tokenizer::CheckChar(bool (*aClassifier)(const char aChar))
+TTokenizer<TChar>::CheckChar(bool (*aClassifier)(const TChar aChar))
 {
   if (!aClassifier) {
     MOZ_ASSERT(false);
     return false;
   }
 
-  if (!HasInput() || mCursor == mEnd) {
-    mHasFailed = true;
+  if (!base::HasInput() || base::mCursor == base::mEnd) {
+    base::mHasFailed = true;
     return false;
   }
 
-  if (!aClassifier(*mCursor)) {
-    mHasFailed = true;
+  if (!aClassifier(*base::mCursor)) {
+    base::mHasFailed = true;
     return false;
   }
 
-  mRollback = mCursor;
-  ++mCursor;
-  mHasFailed = false;
+  mRollback = base::mCursor;
+  ++base::mCursor;
+  base::mHasFailed = false;
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::ReadChar(char* aValue)
+TTokenizer<TChar>::ReadChar(TChar* aValue)
 {
   MOZ_RELEASE_ASSERT(aValue);
 
-  Token t;
-  if (!Check(TOKEN_CHAR, t)) {
+  typename base::Token t;
+  if (!Check(base::TOKEN_CHAR, t)) {
     return false;
   }
 
@@ -155,8 +189,9 @@ Tokenizer::ReadChar(char* aValue)
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::ReadChar(bool (*aClassifier)(const char aChar), char* aValue)
+TTokenizer<TChar>::ReadChar(bool (*aClassifier)(const TChar aChar), TChar* aValue)
 {
   MOZ_RELEASE_ASSERT(aValue);
 
@@ -168,11 +203,12 @@ Tokenizer::ReadChar(bool (*aClassifier)(const char aChar), char* aValue)
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::ReadWord(nsACString& aValue)
+TTokenizer<TChar>::ReadWord(typename base::TAString& aValue)
 {
-  Token t;
-  if (!Check(TOKEN_WORD, t)) {
+  typename base::Token t;
+  if (!Check(base::TOKEN_WORD, t)) {
     return false;
   }
 
@@ -180,11 +216,12 @@ Tokenizer::ReadWord(nsACString& aValue)
   return true;
 }
 
+template<typename TChar>
 bool
-Tokenizer::ReadWord(nsDependentCSubstring& aValue)
+TTokenizer<TChar>::ReadWord(typename base::TDependentSubstring& aValue)
 {
-  Token t;
-  if (!Check(TOKEN_WORD, t)) {
+  typename base::Token t;
+  if (!Check(base::TOKEN_WORD, t)) {
     return false;
   }
 
@@ -192,60 +229,246 @@ Tokenizer::ReadWord(nsDependentCSubstring& aValue)
   return true;
 }
 
-void
-Tokenizer::Rollback()
+template<typename TChar>
+bool
+TTokenizer<TChar>::ReadUntil(typename base::Token const& aToken, typename base::TAString& aResult, ClaimInclusion aInclude)
 {
-  MOZ_ASSERT(mCursor > mRollback || mPastEof,
-             "Tokenizer::Rollback() cannot use twice or before any parsing");
-
-  mPastEof = false;
-  mHasFailed = false;
-  mCursor = mRollback;
+  typename base::TDependentSubstring substring;
+  bool rv = ReadUntil(aToken, substring, aInclude);
+  aResult.Assign(substring);
+  return rv;
 }
 
+template<typename TChar>
+bool
+TTokenizer<TChar>::ReadUntil(typename base::Token const& aToken, typename base::TDependentSubstring& aResult, ClaimInclusion aInclude)
+{
+  typename base::TAString::const_char_iterator record = mRecord;
+  Record();
+  typename base::TAString::const_char_iterator rollback = mRollback = base::mCursor;
+
+  bool found = false;
+  typename base::Token t;
+  while (Next(t)) {
+    if (aToken.Equals(t)) {
+      found = true;
+      break;
+    }
+    if (t.Equals(base::Token::EndOfFile())) {
+      // We don't want to eat it.
+      Rollback();
+      break;
+    }
+  }
+
+  Claim(aResult, aInclude);
+  mRollback = rollback;
+  mRecord = record;
+  return found;
+}
+
+template<typename TChar>
 void
-Tokenizer::Record(ClaimInclusion aInclude)
+TTokenizer<TChar>::Rollback()
+{
+  MOZ_ASSERT(base::mCursor > mRollback || base::mPastEof, "TODO!!!");
+
+  base::mPastEof = false;
+  base::mHasFailed = false;
+  base::mCursor = mRollback;
+}
+
+template<typename TChar>
+void
+TTokenizer<TChar>::Record(ClaimInclusion aInclude)
 {
   mRecord = aInclude == INCLUDE_LAST
     ? mRollback
-    : mCursor;
+    : base::mCursor;
 }
 
+template<typename TChar>
 void
-Tokenizer::Claim(nsACString& aResult, ClaimInclusion aInclusion)
+TTokenizer<TChar>::Claim(typename base::TAString& aResult, ClaimInclusion aInclusion)
 {
-  nsACString::const_char_iterator close = aInclusion == EXCLUDE_LAST
+  typename base::TAString::const_char_iterator close = aInclusion == EXCLUDE_LAST
     ? mRollback
-    : mCursor;
+    : base::mCursor;
   aResult.Assign(Substring(mRecord, close));
 }
 
+template<typename TChar>
 void
-Tokenizer::Claim(nsDependentCSubstring& aResult, ClaimInclusion aInclusion)
+TTokenizer<TChar>::Claim(typename base::TDependentSubstring& aResult, ClaimInclusion aInclusion)
 {
-  nsACString::const_char_iterator close = aInclusion == EXCLUDE_LAST
+  typename base::TAString::const_char_iterator close = aInclusion == EXCLUDE_LAST
     ? mRollback
-    : mCursor;
+    : base::mCursor;
+
+  MOZ_RELEASE_ASSERT(close >= mRecord, "Overflow!");
   aResult.Rebind(mRecord, close - mRecord);
 }
 
-// protected
+// TokenizerBase
 
+template<typename TChar>
+TokenizerBase<TChar>::TokenizerBase(const TChar* aWhitespaces,
+                                    const TChar* aAdditionalWordChars)
+  : mPastEof(false)
+  , mHasFailed(false)
+  , mInputFinished(true)
+  , mMode(Mode::FULL)
+  , mMinRawDelivery(1024)
+  , mWhitespaces(aWhitespaces ? aWhitespaces : sWhitespaces)
+  , mAdditionalWordChars(aAdditionalWordChars)
+  , mCursor(nullptr)
+  , mEnd(nullptr)
+  , mNextCustomTokenID(TOKEN_CUSTOM0)
+{
+}
+
+template<typename TChar>
+auto
+TokenizerBase<TChar>::AddCustomToken(const TAString & aValue,
+                                     ECaseSensitivity aCaseInsensitivity, bool aEnabled)
+  -> Token
+{
+  MOZ_ASSERT(!aValue.IsEmpty());
+
+  UniquePtr<Token>& t = *mCustomTokens.AppendElement();
+  t = MakeUnique<Token>();
+
+  t->mType = static_cast<TokenType>(++mNextCustomTokenID);
+  t->mCustomCaseInsensitivity = aCaseInsensitivity;
+  t->mCustomEnabled = aEnabled;
+  t->mCustom.Assign(aValue);
+  return *t;
+}
+
+template<typename TChar>
+void
+TokenizerBase<TChar>::RemoveCustomToken(Token& aToken)
+{
+  if (aToken.mType == TOKEN_UNKNOWN) {
+    // Already removed
+    return;
+  }
+
+  for (UniquePtr<Token> const& custom : mCustomTokens) {
+    if (custom->mType == aToken.mType) {
+      mCustomTokens.RemoveElement(custom);
+      aToken.mType = TOKEN_UNKNOWN;
+      return;
+    }
+  }
+
+  MOZ_ASSERT(false, "Token to remove not found");
+}
+
+template<typename TChar>
+void
+TokenizerBase<TChar>::EnableCustomToken(Token const& aToken, bool aEnabled)
+{
+  if (aToken.mType == TOKEN_UNKNOWN) {
+    // Already removed
+    return;
+  }
+
+  for (UniquePtr<Token> const& custom : mCustomTokens) {
+    if (custom->Type() == aToken.Type()) {
+      // This effectively destroys the token instance.
+      custom->mCustomEnabled = aEnabled;
+      return;
+    }
+  }
+
+  MOZ_ASSERT(false, "Token to change not found");
+}
+
+template<typename TChar>
+void
+TokenizerBase<TChar>::SetTokenizingMode(Mode aMode)
+{
+  mMode = aMode;
+}
+
+template<typename TChar>
 bool
-Tokenizer::HasInput() const
+TokenizerBase<TChar>::HasFailed() const
+{
+  return mHasFailed;
+}
+
+template<typename TChar>
+bool
+TokenizerBase<TChar>::HasInput() const
 {
   return !mPastEof;
 }
 
-nsACString::const_char_iterator
-Tokenizer::Parse(Token& aToken) const
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Parse(Token& aToken) const
+  -> typename TAString::const_char_iterator
 {
   if (mCursor == mEnd) {
+    if (!mInputFinished) {
+      return mCursor;
+    }
+
     aToken = Token::EndOfFile();
     return mEnd;
   }
 
-  nsACString::const_char_iterator next = mCursor;
+  MOZ_RELEASE_ASSERT(mEnd >= mCursor, "Overflow!");
+  typename TAString::size_type available = mEnd - mCursor;
+
+  uint32_t longestCustom = 0;
+  for (UniquePtr<Token> const& custom : mCustomTokens) {
+    if (IsCustom(mCursor, *custom, &longestCustom)) {
+      aToken = *custom;
+      return mCursor + custom->mCustom.Length();
+    }
+  }
+
+  if (!mInputFinished && available < longestCustom) {
+    // Not enough data to deterministically decide.
+    return mCursor;
+  }
+
+  typename TAString::const_char_iterator next = mCursor;
+
+  if (mMode == Mode::CUSTOM_ONLY) {
+    // We have to do a brute-force search for all of the enabled custom
+    // tokens.
+    while (next < mEnd) {
+      ++next;
+      for (UniquePtr<Token> const& custom : mCustomTokens) {
+        if (IsCustom(next, *custom)) {
+          aToken = Token::Raw();
+          return next;
+        }
+      }
+    }
+
+    if (mInputFinished) {
+      // End of the data reached.
+      aToken = Token::Raw();
+      return next;
+    }
+
+    if (longestCustom < available && available > mMinRawDelivery) {
+      // We can return some data w/o waiting for either a custom token
+      // or call to FinishData() when we leave the tail where all the
+      // custom tokens potentially fit, so we can't lose only partially
+      // delivered tokens.  This preserves reasonable granularity.
+      aToken = Token::Raw();
+      return mEnd - longestCustom + 1;
+    }
+
+    // Not enough data to deterministically decide.
+    return mCursor;
+  }
 
   enum State {
     PARSE_INTEGER,
@@ -260,7 +483,7 @@ Tokenizer::Parse(Token& aToken) const
     state = PARSE_WORD;
   } else if (IsNumber(*next)) {
     state = PARSE_INTEGER;
-  } else if (strchr(mWhitespaces, *next)) { // not UTF-8 friendly?
+  } else if (contains(mWhitespaces, *next)) { // not UTF-8 friendly?
     state = PARSE_WS;
   } else if (*next == '\r') {
     state = PARSE_CRLF;
@@ -280,6 +503,9 @@ Tokenizer::Parse(Token& aToken) const
       resultingNumber += static_cast<uint64_t>(*next - '0');
 
       ++next;
+      if (IsPending(next)) {
+        break;
+      }
       if (IsEnd(next) || !IsNumber(*next)) {
         if (!resultingNumber.isValid()) {
           aToken = Token::Error();
@@ -292,6 +518,9 @@ Tokenizer::Parse(Token& aToken) const
 
     case PARSE_WORD:
       ++next;
+      if (IsPending(next)) {
+        break;
+      }
       if (IsEnd(next) || !IsWord(*next)) {
         aToken = Token::Word(Substring(mCursor, next));
         return next;
@@ -300,6 +529,9 @@ Tokenizer::Parse(Token& aToken) const
 
     case PARSE_CRLF:
       ++next;
+      if (IsPending(next)) {
+        break;
+      }
       if (!IsEnd(next) && *next == '\n') { // LF is optional
         ++next;
       }
@@ -323,70 +555,162 @@ Tokenizer::Parse(Token& aToken) const
     } // switch (state)
   } // while (next < end)
 
-  return next;
+  MOZ_ASSERT(!mInputFinished);
+  return mCursor;
 }
 
+template<typename TChar>
 bool
-Tokenizer::IsEnd(const nsACString::const_char_iterator& caret) const
+TokenizerBase<TChar>::IsEnd(const typename TAString::const_char_iterator& caret) const
 {
   return caret == mEnd;
 }
 
+template<typename TChar>
 bool
-Tokenizer::IsWordFirst(const char aInput) const
+TokenizerBase<TChar>::IsPending(const typename TAString::const_char_iterator& caret) const
+{
+  return IsEnd(caret) && !mInputFinished;
+}
+
+template<typename TChar>
+bool
+TokenizerBase<TChar>::IsWordFirst(const TChar aInput) const
 {
   // TODO: make this fully work with unicode
   return (ToLowerCase(static_cast<uint32_t>(aInput)) !=
           ToUpperCase(static_cast<uint32_t>(aInput))) ||
           '_' == aInput ||
-          (mAdditionalWordChars ? !!strchr(mAdditionalWordChars, aInput) : false);
+          (mAdditionalWordChars ? contains(mAdditionalWordChars, aInput) : false);
 }
 
+template<typename TChar>
 bool
-Tokenizer::IsWord(const char aInput) const
+TokenizerBase<TChar>::IsWord(const TChar aInput) const
 {
   return IsWordFirst(aInput) || IsNumber(aInput);
 }
 
+template<typename TChar>
 bool
-Tokenizer::IsNumber(const char aInput) const
+TokenizerBase<TChar>::IsNumber(const TChar aInput) const
 {
   // TODO: are there unicode numbers?
   return aInput >= '0' && aInput <= '9';
 }
 
-// Tokenizer::Token
+namespace {
 
-Tokenizer::Token::Token(const Token& aOther)
+template<typename TChar> class TCharComparator;
+template<> class TCharComparator<char> final : public nsCaseInsensitiveUTF8StringComparator {};
+template<> class TCharComparator<char16_t> final : public nsCaseInsensitiveStringComparator {};
+
+}
+
+template<typename TChar>
+bool
+TokenizerBase<TChar>::IsCustom(const typename TAString::const_char_iterator & caret,
+                               const Token & aCustomToken,
+                               uint32_t * aLongest) const
+{
+  MOZ_ASSERT(aCustomToken.mType > TOKEN_CUSTOM0);
+  if (!aCustomToken.mCustomEnabled) {
+    return false;
+  }
+
+  if (aLongest) {
+    *aLongest = std::max(*aLongest, aCustomToken.mCustom.Length());
+  }
+
+  // This is not very likely to happen according to how we call this method
+  // and since it's on a hot path, it's just a diagnostic assert,
+  // not a release assert.
+  MOZ_DIAGNOSTIC_ASSERT(mEnd >= caret, "Overflow?");
+  uint32_t inputLength = mEnd - caret;
+  if (aCustomToken.mCustom.Length() > inputLength) {
+    return false;
+  }
+
+  TDependentSubstring inputFragment(caret, aCustomToken.mCustom.Length());
+  if (aCustomToken.mCustomCaseInsensitivity == CASE_INSENSITIVE) {
+    return inputFragment.Equals(aCustomToken.mCustom, TCharComparator<TChar>());
+  }
+  return inputFragment.Equals(aCustomToken.mCustom);
+}
+
+template<typename TChar>
+void
+TokenizerBase<TChar>::AssignFragment(Token& aToken,
+                                     typename TAString::const_char_iterator begin,
+                                     typename TAString::const_char_iterator end)
+{
+  aToken.AssignFragment(begin, end);
+}
+
+// TokenizerBase::Token
+
+template<typename TChar>
+TokenizerBase<TChar>::Token::Token()
+  : mType(TOKEN_UNKNOWN)
+  , mChar(0)
+  , mInteger(0)
+  , mCustomCaseInsensitivity(CASE_SENSITIVE)
+  , mCustomEnabled(false)
+{
+}
+
+template<typename TChar>
+TokenizerBase<TChar>::Token::Token(const Token& aOther)
   : mType(aOther.mType)
+  , mCustom(aOther.mCustom)
   , mChar(aOther.mChar)
   , mInteger(aOther.mInteger)
+  , mCustomCaseInsensitivity(aOther.mCustomCaseInsensitivity)
+  , mCustomEnabled(aOther.mCustomEnabled)
 {
-  if (mType == TOKEN_WORD) {
+  if (mType == TOKEN_WORD || mType > TOKEN_CUSTOM0) {
     mWord.Rebind(aOther.mWord.BeginReading(), aOther.mWord.Length());
   }
 }
 
-Tokenizer::Token&
-Tokenizer::Token::operator=(const Token& aOther)
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::operator=(const Token& aOther)
+  -> Token&
 {
   mType = aOther.mType;
+  mCustom = aOther.mCustom;
   mChar = aOther.mChar;
   mWord.Rebind(aOther.mWord.BeginReading(), aOther.mWord.Length());
   mInteger = aOther.mInteger;
+  mCustomCaseInsensitivity = aOther.mCustomCaseInsensitivity;
+  mCustomEnabled = aOther.mCustomEnabled;
   return *this;
 }
 
+template<typename TChar>
 void
-Tokenizer::Token::AssignFragment(nsACString::const_char_iterator begin,
-                                 nsACString::const_char_iterator end)
+TokenizerBase<TChar>::Token::AssignFragment(typename TAString::const_char_iterator begin,
+                                     typename TAString::const_char_iterator end)
 {
+  MOZ_RELEASE_ASSERT(end >= begin, "Overflow!");
   mFragment.Rebind(begin, end - begin);
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::Word(const nsACString& aValue)
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Raw() -> Token
+{
+  Token t;
+  t.mType = TOKEN_RAW;
+  return t;
+}
+
+// static
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Word(TAString const& aValue) -> Token
 {
   Token t;
   t.mType = TOKEN_WORD;
@@ -395,8 +719,9 @@ Tokenizer::Token::Word(const nsACString& aValue)
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::Char(const char aValue)
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Char(TChar const aValue) -> Token
 {
   Token t;
   t.mType = TOKEN_CHAR;
@@ -405,8 +730,9 @@ Tokenizer::Token::Char(const char aValue)
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::Number(const uint64_t aValue)
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Number(uint64_t const aValue) -> Token
 {
   Token t;
   t.mType = TOKEN_INTEGER;
@@ -415,8 +741,9 @@ Tokenizer::Token::Number(const uint64_t aValue)
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::Whitespace()
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Whitespace() -> Token
 {
   Token t;
   t.mType = TOKEN_WS;
@@ -425,8 +752,9 @@ Tokenizer::Token::Whitespace()
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::NewLine()
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::NewLine() -> Token
 {
   Token t;
   t.mType = TOKEN_EOL;
@@ -434,8 +762,9 @@ Tokenizer::Token::NewLine()
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::EndOfFile()
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::EndOfFile() -> Token
 {
   Token t;
   t.mType = TOKEN_EOF;
@@ -443,16 +772,18 @@ Tokenizer::Token::EndOfFile()
 }
 
 // static
-Tokenizer::Token
-Tokenizer::Token::Error()
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::Error() -> Token
 {
   Token t;
   t.mType = TOKEN_ERROR;
   return t;
 }
 
+template<typename TChar>
 bool
-Tokenizer::Token::Equals(const Token& aOther) const
+TokenizerBase<TChar>::Token::Equals(const Token& aOther) const
 {
   if (mType != aOther.mType) {
     return false;
@@ -470,25 +801,34 @@ Tokenizer::Token::Equals(const Token& aOther) const
   }
 }
 
-char
-Tokenizer::Token::AsChar() const
+template<typename TChar>
+TChar
+TokenizerBase<TChar>::Token::AsChar() const
 {
   MOZ_ASSERT(mType == TOKEN_CHAR || mType == TOKEN_WS);
   return mChar;
 }
 
-nsDependentCSubstring
-Tokenizer::Token::AsString() const
+template<typename TChar>
+auto
+TokenizerBase<TChar>::Token::AsString() const -> TDependentSubstring
 {
   MOZ_ASSERT(mType == TOKEN_WORD);
   return mWord;
 }
 
+template<typename TChar>
 uint64_t
-Tokenizer::Token::AsInteger() const
+TokenizerBase<TChar>::Token::AsInteger() const
 {
   MOZ_ASSERT(mType == TOKEN_INTEGER);
   return mInteger;
 }
+
+template class TokenizerBase<char>;
+template class TokenizerBase<char16_t>;
+
+template class TTokenizer<char>;
+template class TTokenizer<char16_t>;
 
 } // mozilla

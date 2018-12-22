@@ -11,25 +11,31 @@
 // platforms, so include it here to avoid inadvertent build bustage.
 #include "jit/JitSpewer.h"
 
+#include "jit/shared/Architecture-shared.h"
+
 namespace js {
 namespace jit {
 
 static const bool SupportsSimd = false;
 static const uint32_t SimdMemoryAlignment = 4; // Make it 4 to avoid a bunch of div-by-zero warnings
-static const uint32_t AsmJSStackAlignment = 8;
+static const uint32_t WasmStackAlignment = 8;
+static const uint32_t WasmTrapInstructionLength = 0;
 
 // Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4FloatConversions = false;
+static constexpr bool SupportsUint32x4FloatConversions = false;
 
-// Does this architecture support comparisons of unsigned 32x4 integer vectors?
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4Compares = false;
+// Does this architecture support comparisons of unsigned integer vectors?
+static constexpr bool SupportsUint8x16Compares = false;
+static constexpr bool SupportsUint16x8Compares = false;
+static constexpr bool SupportsUint32x4Compares = false;
 
 class Registers
 {
   public:
     enum RegisterID {
         r0 = 0,
-        invalid_reg
+        invalid_reg,
+        invalid_reg2, // To avoid silly static_assert failures.
     };
     typedef uint8_t Code;
     typedef RegisterID Encoding;
@@ -56,7 +62,6 @@ class Registers
     static const SetType NonVolatileMask = 0;
     static const SetType NonAllocatableMask = 0;
     static const SetType AllocatableMask = 0;
-    static const SetType TempMask = 0;
     static const SetType JSCallMask = 0;
     static const SetType CallMask = 0;
 };
@@ -87,6 +92,7 @@ class FloatRegisters
     static const uint32_t Allocatable = 0;
     static const SetType AllMask = 0;
     static const SetType AllDoubleMask = 0;
+    static const SetType AllSingleMask = 0;
     static const SetType VolatileMask = 0;
     static const SetType NonVolatileMask = 0;
     static const SetType NonAllocatableMask = 0;
@@ -122,12 +128,26 @@ struct FloatRegister
     bool operator == (FloatRegister) const { MOZ_CRASH(); }
     bool aliases(FloatRegister) const { MOZ_CRASH(); }
     uint32_t numAliased() const { MOZ_CRASH(); }
-    void aliased(uint32_t, FloatRegister*) { MOZ_CRASH(); }
+    FloatRegister aliased(uint32_t) { MOZ_CRASH(); }
     bool equiv(FloatRegister) const { MOZ_CRASH(); }
     uint32_t size() const { MOZ_CRASH(); }
     uint32_t numAlignedAliased() const { MOZ_CRASH(); }
-    void alignedAliased(uint32_t, FloatRegister*) { MOZ_CRASH(); }
+    FloatRegister alignedAliased(uint32_t) { MOZ_CRASH(); }
     SetType alignedOrDominatedAliasedSet() const { MOZ_CRASH(); }
+
+    static constexpr RegTypeName DefaultType = RegTypeName::Float64;
+
+    template <RegTypeName = DefaultType>
+    static SetType LiveAsIndexableSet(SetType s) {
+        return SetType(0);
+    }
+
+    template <RegTypeName Name = DefaultType>
+    static SetType AllocatableAsIndexableSet(SetType s) {
+        static_assert(Name != RegTypeName::Any, "Allocatable set are not iterable");
+        return SetType(0);
+    }
+
     template <typename T> static T ReduceSetForPush(T) { MOZ_CRASH(); }
     uint32_t getRegisterDumpOffsetInBytes() { MOZ_CRASH(); }
     static uint32_t SetSize(SetType x) { MOZ_CRASH(); }
@@ -147,9 +167,6 @@ static const uint32_t JumpImmediateRange = INT32_MAX;
 static const int32_t NUNBOX32_TYPE_OFFSET = 4;
 static const int32_t NUNBOX32_PAYLOAD_OFFSET = 0;
 #endif
-
-static const size_t WasmCheckedImmediateRange = 0;
-static const size_t WasmImmediateRange = 0;
 
 } // namespace jit
 } // namespace js

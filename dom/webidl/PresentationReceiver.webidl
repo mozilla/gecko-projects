@@ -2,26 +2,17 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * The origin of this IDL file is
+ * https://w3c.github.io/presentation-api/#interface-presentationreceiver
  */
 
-[Pref="dom.presentation.enabled",
- Func="Navigator::HasPresentationSupport"]
-interface PresentationReceiver : EventTarget {
+[Pref="dom.presentation.receiver.enabled"]
+interface PresentationReceiver {
   /*
-   * Get the first connected presentation connection in a receiving browsing
-   * context.
+   * Get a list which contains all connected presentation connections
+   * in a receiving browsing context.
    */
   [Throws]
-  Promise<PresentationConnection> getConnection();
-
-  /*
-   * Get all connected presentation connections in a receiving browsing context.
-   */
-  [Throws]
-  Promise<sequence<PresentationConnection>> getConnections();
-
-  /*
-   * It is called when an incoming connection is connecting.
-   */
-  attribute EventHandler onconnectionavailable;
+  readonly attribute Promise<PresentationConnectionList> connectionList;
 };

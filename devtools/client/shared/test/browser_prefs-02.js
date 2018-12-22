@@ -1,15 +1,19 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that preference helpers work properly with custom types of Float and Json.
 
-var { PrefsHelper } = require("devtools/client/shared/prefs");
+const { PrefsHelper } = require("devtools/client/shared/prefs");
 
 function test() {
-  let originalJson = Services.prefs.getCharPref("devtools.performance.timeline.hidden-markers");
-  let originalFloat = Services.prefs.getCharPref("devtools.performance.memory.sample-probability");
+  const originalJson = Services.prefs.getCharPref(
+    "devtools.performance.timeline.hidden-markers");
+  const originalFloat = Services.prefs.getCharPref(
+    "devtools.performance.memory.sample-probability");
 
-  let Prefs = new PrefsHelper("devtools.performance", {
+  const Prefs = new PrefsHelper("devtools.performance", {
     "float": ["Float", "memory.sample-probability"],
     "json": ["Json", "timeline.hidden-markers"]
   });
@@ -33,7 +37,9 @@ function test() {
 
   Prefs.unregisterObserver();
 
-  Services.prefs.setCharPref("devtools.performance.timeline.hidden-markers", originalJson);
-  Services.prefs.setCharPref("devtools.performance.memory.sample-probability", originalFloat);
+  Services.prefs.setCharPref("devtools.performance.timeline.hidden-markers",
+                             originalJson);
+  Services.prefs.setCharPref("devtools.performance.memory.sample-probability",
+                             originalFloat);
   finish();
 }

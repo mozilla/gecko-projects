@@ -12,14 +12,24 @@
 
 // Call a method on each observer in a category cache, then call the same
 // method on the observer array.
-#define NOTIFY_OBSERVERS(canFire, cache, array, type, method)                  \
+#define NOTIFY_OBSERVERS(canFire, array, type, method)                         \
   PR_BEGIN_MACRO                                                               \
   if (canFire) {                                                               \
-    nsCOMArray<type> entries;                                                  \
-    cache.GetEntries(entries);                                                 \
-    for (int32_t idx = 0; idx < entries.Count(); ++idx)                        \
-        entries[idx]->method;                                                  \
     ENUMERATE_WEAKARRAY(array, type, method)                                   \
+  }                                                                            \
+  PR_END_MACRO;
+
+#define NOTIFY_BOOKMARKS_OBSERVERS(canFire, array, skipIf, method)             \
+  PR_BEGIN_MACRO                                                               \
+  if (canFire) {                                                               \
+    for (uint32_t idx = 0; idx < array.Length(); ++idx) {                      \
+      const nsCOMPtr<nsINavBookmarkObserver> &e = array.ElementAt(idx).GetValue(); \
+      if (e) {                                                                 \
+        if (skipIf(e))                                                         \
+            continue;                                                          \
+        e->method;                                                             \
+      }                                                                        \
+    }                                                                          \
   }                                                                            \
   PR_END_MACRO;
 

@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGAnimateTransformElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAnimateTransformElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGAnimateTransformElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -28,15 +28,16 @@ SVGAnimateTransformElement::SVGAnimateTransformElement(already_AddRefed<mozilla:
 
 bool
 SVGAnimateTransformElement::ParseAttribute(int32_t aNamespaceID,
-                                           nsIAtom* aAttribute,
+                                           nsAtom* aAttribute,
                                            const nsAString& aValue,
+                                           nsIPrincipal* aMaybeScriptedPrincipal,
                                            nsAttrValue& aResult)
 {
   // 'type' is an <animateTransform>-specific attribute, and we'll handle it
   // specially.
   if (aNamespaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::type) {
     aResult.ParseAtom(aValue);
-    nsIAtom* atom = aResult.GetAtomValue();
+    nsAtom* atom = aResult.GetAtomValue();
     if (atom != nsGkAtoms::translate &&
         atom != nsGkAtoms::scale &&
         atom != nsGkAtoms::rotate &&
@@ -49,11 +50,12 @@ SVGAnimateTransformElement::ParseAttribute(int32_t aNamespaceID,
 
   return SVGAnimationElement::ParseAttribute(aNamespaceID,
                                              aAttribute, aValue,
+                                             aMaybeScriptedPrincipal,
                                              aResult);
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGAnimateTransformElement)
 

@@ -8,19 +8,17 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "ObjectUtils"
 ];
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
 // Used only to cause test failures.
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-  "resource://gre/modules/Promise.jsm");
 
-this.ObjectUtils = {
+var pSlice = Array.prototype.slice;
+
+var ObjectUtils = {
   /**
    * This tests objects & values for deep equality.
    *
@@ -33,7 +31,7 @@ this.ObjectUtils = {
    * @param b (mixed) Object or value to be compared.
    * @return Boolean Whether the objects are deep equal.
    */
-  deepEqual: function(a, b) {
+  deepEqual(a, b) {
     return _deepEqual(a, b);
   },
 
@@ -52,8 +50,28 @@ this.ObjectUtils = {
    *
    * Note that `strict` has no effect in non-DEBUG mode.
    */
-  strict: function(obj) {
+  strict(obj) {
     return _strict(obj);
+  },
+
+  /**
+   * Returns `true` if `obj` is an array without elements, an object without
+   * enumerable properties, or a falsy primitive; `false` otherwise.
+   */
+  isEmpty(obj) {
+    if (!obj) {
+      return true;
+    }
+    if (typeof obj != "object") {
+      return false;
+    }
+    if (Array.isArray(obj)) {
+      return !obj.length;
+    }
+    for (let key in obj) {
+      return false;
+    }
+    return true;
   }
 };
 
@@ -70,32 +88,42 @@ function _deepEqual(a, b) {
     return true;
   // 7.2 If the b value is a Date object, the a value is
   // equivalent if it is also a Date object that refers to the same time.
-  } else if (instanceOf(a, "Date") && instanceOf(b, "Date")) {
+  }
+  let aIsDate = instanceOf(a, "Date");
+  let bIsDate = instanceOf(b, "Date");
+  if (aIsDate || bIsDate) {
+    if (!aIsDate || !bIsDate) {
+      return false;
+    }
     if (isNaN(a.getTime()) && isNaN(b.getTime()))
       return true;
     return a.getTime() === b.getTime();
   // 7.3 If the b value is a RegExp object, the a value is
   // equivalent if it is also a RegExp object with the same source and
   // properties (`global`, `multiline`, `lastIndex`, `ignoreCase`).
-  } else if (instanceOf(a, "RegExp") && instanceOf(b, "RegExp")) {
-    return a.source === b.source &&
+  }
+  let aIsRegExp = instanceOf(a, "RegExp");
+  let bIsRegExp = instanceOf(b, "RegExp");
+  if (aIsRegExp || bIsRegExp) {
+    return aIsRegExp && bIsRegExp &&
+           a.source === b.source &&
            a.global === b.global &&
            a.multiline === b.multiline &&
            a.lastIndex === b.lastIndex &&
            a.ignoreCase === b.ignoreCase;
   // 7.4 Other pairs that do not both pass typeof value == "object",
   // equivalence is determined by ==.
-  } else if (typeof a != "object" && typeof b != "object") {
+  }
+  if (typeof a != "object" || typeof b != "object") {
     return a == b;
+  }
   // 7.5 For all other Object pairs, including Array objects, equivalence is
   // determined by having the same number of owned properties (as verified
   // with Object.prototype.hasOwnProperty.call), the same set of keys
   // (although not necessarily the same order), equivalent values for every
   // corresponding key, and an identical 'prototype' property. Note: this
   // accounts for both named and indexed properties on Arrays.
-  } else {
-    return objEquiv(a, b);
-  }
+  return objEquiv(a, b);
 }
 
 function instanceOf(object, type) {
@@ -115,7 +143,7 @@ function objEquiv(a, b) {
     return false;
   }
   // An identical 'prototype' property.
-  if ((a.prototype || undefined)  != (b.prototype || undefined)) {
+  if ((a.prototype || undefined) != (b.prototype || undefined)) {
     return false;
   }
   // Object.keys may be broken through screwy arguments passing. Converting to
@@ -161,7 +189,7 @@ function _strict(obj) {
   }
 
   return new Proxy(obj, {
-    get: function(target, name) {
+    get(target, name) {
       if (name in obj) {
         return obj[name];
       }

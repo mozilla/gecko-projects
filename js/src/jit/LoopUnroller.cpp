@@ -8,6 +8,8 @@
 
 #include "jit/MIRGraph.h"
 
+#include "vm/JSScript-inl.h"
+
 using namespace js;
 using namespace js::jit;
 
@@ -18,10 +20,13 @@ namespace {
 struct LoopUnroller
 {
     typedef HashMap<MDefinition*, MDefinition*,
-                    PointerHasher<MDefinition*, 2>, SystemAllocPolicy> DefinitionMap;
+                    PointerHasher<MDefinition*>, SystemAllocPolicy> DefinitionMap;
 
     explicit LoopUnroller(MIRGraph& graph)
-      : graph(graph), alloc(graph.alloc())
+      : graph(graph), alloc(graph.alloc()),
+        header(nullptr), backedge(nullptr),
+        unrolledHeader(nullptr), unrolledBackedge(nullptr),
+        oldPreheader(nullptr), newPreheader(nullptr)
     {}
 
     MIRGraph& graph;
@@ -46,9 +51,9 @@ struct LoopUnroller
 
     MDefinition* getReplacementDefinition(MDefinition* def);
     MResumePoint* makeReplacementResumePoint(MBasicBlock* block, MResumePoint* rp);
-    bool makeReplacementInstruction(MInstruction* ins);
+    MOZ_MUST_USE bool makeReplacementInstruction(MInstruction* ins);
 
-    void go(LoopIterationBound* bound);
+    MOZ_MUST_USE bool go(LoopIterationBound* bound);
 };
 
 } // namespace
@@ -68,7 +73,7 @@ LoopUnroller::getReplacementDefinition(MDefinition* def)
         // the block itself.
         MOZ_ASSERT(def->isConstant());
 
-        MConstant* constant = new(alloc) MConstant(*def->toConstant());
+        MConstant* constant = MConstant::Copy(alloc, def->toConstant());
         oldPreheader->insertBefore(*oldPreheader->begin(), constant);
         return constant;
     }
@@ -96,6 +101,8 @@ LoopUnroller::makeReplacementInstruction(MInstruction* ins)
 
     if (MResumePoint* old = ins->resumePoint()) {
         MResumePoint* rp = makeReplacementResumePoint(unrolledBackedge, old);
+        if (!rp)
+            return false;
         clone->setResumePoint(rp);
     }
 
@@ -120,7 +127,7 @@ LoopUnroller::makeReplacementResumePoint(MBasicBlock* block, MResumePoint* rp)
     return clone;
 }
 
-void
+bool
 LoopUnroller::go(LoopIterationBound* bound)
 {
     // For now we always unroll loops the same number of times.
@@ -132,7 +139,7 @@ LoopUnroller::go(LoopIterationBound* bound)
 
     // UCE might have determined this isn't actually a loop.
     if (!header->isLoopHeader())
-        return;
+        return true;
 
     backedge = header->backedge();
     oldPreheader = header->loopPredecessor();
@@ -143,18 +150,18 @@ LoopUnroller::go(LoopIterationBound* bound)
     // bound's test, and the body ending with the backedge.
     MTest* test = bound->test;
     if (header->lastIns() != test)
-        return;
+        return true;
     if (test->ifTrue() == backedge) {
         if (test->ifFalse()->id() <= backedge->id())
-            return;
+            return true;
     } else if (test->ifFalse() == backedge) {
         if (test->ifTrue()->id() <= backedge->id())
-            return;
+            return true;
     } else {
-        return;
+        return true;
     }
     if (backedge->numPredecessors() != 1 || backedge->numSuccessors() != 1)
-        return;
+        return true;
     MOZ_ASSERT(backedge->phisEmpty());
 
     MBasicBlock* bodyBlocks[] = { header, backedge };
@@ -171,7 +178,7 @@ LoopUnroller::go(LoopIterationBound* bound)
 #ifdef JS_JITSPEW
             JitSpew(JitSpew_Unrolling, "Aborting: can't clone instruction %s", ins->opName());
 #endif
-            return;
+            return true;
         }
     }
 
@@ -181,21 +188,21 @@ LoopUnroller::go(LoopIterationBound* bound)
     //
     LinearSum remainingIterationsInequality(bound->boundSum);
     if (!remainingIterationsInequality.add(bound->currentSum, -1))
-        return;
+        return true;
     if (!remainingIterationsInequality.add(-int32_t(UnrollCount)))
-        return;
+        return true;
 
     // Terms in the inequality need to be either loop invariant or phis from
     // the original header.
     for (size_t i = 0; i < remainingIterationsInequality.numTerms(); i++) {
         MDefinition* def = remainingIterationsInequality.term(i).term;
         if (def->isDiscarded())
-            return;
+            return true;
         if (def->block()->id() < header->id())
             continue;
         if (def->block() == header && def->isPhi())
             continue;
-        return;
+        return true;
     }
 
     // OK, we've checked everything, now unroll the loop.
@@ -207,18 +214,30 @@ LoopUnroller::go(LoopIterationBound* bound)
     const CompileInfo& info = oldPreheader->info();
     if (header->trackedPc()) {
         unrolledHeader =
-            MBasicBlock::New(graph, nullptr, info,
+            MBasicBlock::New(graph, oldPreheader->stackDepth(), info,
                              oldPreheader, header->trackedSite(), MBasicBlock::LOOP_HEADER);
+        if (!unrolledHeader)
+            return false;
         unrolledBackedge =
-            MBasicBlock::New(graph, nullptr, info,
+            MBasicBlock::New(graph, unrolledHeader->stackDepth(), info,
                              unrolledHeader, backedge->trackedSite(), MBasicBlock::NORMAL);
+        if (!unrolledBackedge)
+            return false;
         newPreheader =
-            MBasicBlock::New(graph, nullptr, info,
+            MBasicBlock::New(graph, unrolledHeader->stackDepth(), info,
                              unrolledHeader, oldPreheader->trackedSite(), MBasicBlock::NORMAL);
+        if (!newPreheader)
+            return false;
     } else {
-        unrolledHeader = MBasicBlock::NewAsmJS(graph, info, oldPreheader, MBasicBlock::LOOP_HEADER);
-        unrolledBackedge = MBasicBlock::NewAsmJS(graph, info, unrolledHeader, MBasicBlock::NORMAL);
-        newPreheader = MBasicBlock::NewAsmJS(graph, info, unrolledHeader, MBasicBlock::NORMAL);
+        unrolledHeader = MBasicBlock::New(graph, info, oldPreheader, MBasicBlock::LOOP_HEADER);
+        if (!unrolledHeader)
+            return false;
+        unrolledBackedge = MBasicBlock::New(graph, info, unrolledHeader, MBasicBlock::NORMAL);
+        if (!unrolledBackedge)
+            return false;
+        newPreheader = MBasicBlock::New(graph, info, unrolledHeader, MBasicBlock::NORMAL);
+        if (!newPreheader)
+            return false;
     }
 
     unrolledHeader->discardAllResumePoints();
@@ -231,12 +250,8 @@ LoopUnroller::go(LoopIterationBound* bound)
     graph.insertBlockAfter(unrolledBackedge, newPreheader);
     graph.renumberBlocksAfter(oldPreheader);
 
-    // We don't tolerate allocation failure after this point.
-    // TODO: This is a bit drastic, is it possible to improve this?
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
     if (!unrolledDefinitions.init())
-        oomUnsafe.crash("LoopUnroller::go");
+        return false;
 
     // Add phis to the unrolled loop header which correspond to the phis in the
     // original loop header.
@@ -252,7 +267,7 @@ LoopUnroller::go(LoopIterationBound* bound)
         unrolledHeader->addPhi(phi);
 
         if (!phi->reserveLength(2))
-            oomUnsafe.crash("LoopUnroller::go");
+            return false;
 
         // Set the first input for the phi for now. We'll set the second after
         // finishing the unroll.
@@ -262,7 +277,7 @@ LoopUnroller::go(LoopIterationBound* bound)
         old->replaceOperand(0, phi);
 
         if (!unrolledDefinitions.putNew(old, phi))
-            oomUnsafe.crash("LoopUnroller::go");
+            return false;
     }
 
     // The loop condition can bail out on e.g. integer overflow, so make a
@@ -271,7 +286,7 @@ LoopUnroller::go(LoopIterationBound* bound)
     if (headerResumePoint) {
         MResumePoint* rp = makeReplacementResumePoint(unrolledHeader, headerResumePoint);
         if (!rp)
-            oomUnsafe.crash("LoopUnroller::makeReplacementResumePoint");
+            return false;
         unrolledHeader->setEntryResumePoint(rp);
 
         // Perform an interrupt check at the start of the unrolled loop.
@@ -294,7 +309,7 @@ LoopUnroller::go(LoopIterationBound* bound)
     if (headerResumePoint) {
         MResumePoint* rp = makeReplacementResumePoint(unrolledBackedge, headerResumePoint);
         if (!rp)
-            oomUnsafe.crash("LoopUnroller::makeReplacementResumePoint");
+            return false;
         unrolledBackedge->setEntryResumePoint(rp);
     }
 
@@ -303,7 +318,7 @@ LoopUnroller::go(LoopIterationBound* bound)
     if (headerResumePoint) {
         MResumePoint* rp = makeReplacementResumePoint(newPreheader, headerResumePoint);
         if (!rp)
-            oomUnsafe.crash("LoopUnroller::makeReplacementResumePoint");
+            return false;
         newPreheader->setEntryResumePoint(rp);
     }
 
@@ -318,7 +333,7 @@ LoopUnroller::go(LoopIterationBound* bound)
                 MInstruction* ins = *iter;
                 if (ins->canClone()) {
                     if (!makeReplacementInstruction(*iter))
-                        oomUnsafe.crash("LoopUnroller::makeReplacementDefinition");
+                        return false;
                 } else {
                     // Control instructions are handled separately.
                     MOZ_ASSERT(ins->isTest() || ins->isGoto() || ins->isInterruptCheck());
@@ -334,7 +349,7 @@ LoopUnroller::go(LoopIterationBound* bound)
             MPhi* old = *iter;
             MDefinition* oldInput = old->getOperand(1);
             if (!phiValues.append(getReplacementDefinition(oldInput)))
-                oomUnsafe.crash("LoopUnroller::go");
+                return false;
         }
 
         unrolledDefinitions.clear();
@@ -356,7 +371,7 @@ LoopUnroller::go(LoopIterationBound* bound)
         for (MPhiIterator iter(header->phisBegin()); iter != header->phisEnd(); iter++) {
             MPhi* old = *iter;
             if (!unrolledDefinitions.putNew(old, phiValues[phiIndex++]))
-                oomUnsafe.crash("LoopUnroller::go");
+                return false;
         }
         MOZ_ASSERT(phiIndex == phiValues.length());
 
@@ -376,11 +391,12 @@ LoopUnroller::go(LoopIterationBound* bound)
 
     // Cleanup the MIR graph.
     if (!unrolledHeader->addPredecessorWithoutPhis(unrolledBackedge))
-        oomUnsafe.crash("LoopUnroller::go");
+        return false;
     header->replacePredecessor(oldPreheader, newPreheader);
     oldPreheader->setSuccessorWithPhis(unrolledHeader, 0);
     newPreheader->setSuccessorWithPhis(header, 0);
     unrolledBackedge->setSuccessorWithPhis(unrolledHeader, 1);
+    return true;
 }
 
 bool
@@ -389,9 +405,15 @@ jit::UnrollLoops(MIRGraph& graph, const LoopIterationBoundVector& bounds)
     if (bounds.empty())
         return true;
 
+    // Loop unrolling interferes with the progress tracking performed when
+    // recording/replaying.
+    if (graph.entryBlock()->info().script()->trackRecordReplayProgress())
+        return true;
+
     for (size_t i = 0; i < bounds.length(); i++) {
         LoopUnroller unroller(graph);
-        unroller.go(bounds[i]);
+        if (!unroller.go(bounds[i]))
+            return false;
     }
 
     // The MIR graph is valid, but now has several new blocks. Update or

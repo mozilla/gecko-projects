@@ -3,18 +3,18 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifdef MOZILLA_INTERNAL_API
-#ifdef ENABLE_INTL_API
 
 #include "ICUUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/intl/LocaleService.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
-#include "nsIToolkitChromeRegistry.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "unicode/uloc.h"
 #include "unicode/unum.h"
 
 using namespace mozilla;
+using mozilla::intl::LocaleService;
 
 /**
  * This pref just controls whether we format the number with grouping separator
@@ -70,17 +70,11 @@ ICUUtils::LanguageTagIterForContent::GetNext(nsACString& aBCP47LangTag)
 
   if (mCurrentFallbackIndex < 2) {
     mCurrentFallbackIndex = 2;
-    // Else try the user-agent's locale:
-    nsCOMPtr<nsIToolkitChromeRegistry> cr =
-      mozilla::services::GetToolkitChromeRegistryService();
-    nsAutoCString uaLangTag;
-    if (cr) {
-      cr->GetSelectedLocale(NS_LITERAL_CSTRING("global"), uaLangTag);
-    }
-    if (!uaLangTag.IsEmpty()) {
-      aBCP47LangTag = uaLangTag;
-      return;
-    }
+    // Else take the app's locale:
+
+    nsAutoCString appLocale;
+    LocaleService::GetInstance()->GetAppLocaleAsBCP47(aBCP47LangTag);
+    return;
   }
 
   // TODO: Probably not worth it, but maybe have a fourth fallback to using
@@ -106,6 +100,12 @@ ICUUtils::LocalizeNumber(double aValue,
     UErrorCode status = U_ZERO_ERROR;
     AutoCloseUNumberFormat format(unum_open(UNUM_DECIMAL, nullptr, 0,
                                             langTag.get(), nullptr, &status));
+    // Since unum_setAttribute have no UErrorCode parameter, we have to
+    // check error status.
+    if (U_FAILURE(status)) {
+      aLangTags.GetNext(langTag);
+      continue;
+    }
     unum_setAttribute(format, UNUM_GROUPING_USED,
                       LocaleNumberGroupingIsEnabled());
     // ICU default is a maximum of 3 significant fractional digits. We don't
@@ -279,6 +279,5 @@ ICUUtils::ToICUString(nsAString& aMozString, UnicodeString& aICUString)
 }
 #endif
 
-#endif /* ENABLE_INTL_API */
 #endif /* MOZILLA_INTERNAL_API */
 

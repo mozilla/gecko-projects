@@ -27,20 +27,7 @@ NS_IMPL_ELEMENT_CLONE(HTMLDataElement)
 JSObject*
 HTMLDataElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLDataElementBinding::Wrap(aCx, this, aGivenProto);
-}
-
-void
-HTMLDataElement::GetItemValueText(DOMString& text)
-{
-  GetValue(text);
-}
-
-void
-HTMLDataElement::SetItemValueText(const nsAString& text)
-{
-  ErrorResult rv;
-  SetValue(text, rv);
+  return HTMLDataElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

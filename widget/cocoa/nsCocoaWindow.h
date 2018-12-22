@@ -10,45 +10,15 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "mozilla/RefPtr.h"
 #include "nsBaseWidget.h"
 #include "nsPIWidgetCocoa.h"
-#include "nsAutoPtr.h"
 #include "nsCocoaUtils.h"
 
 class nsCocoaWindow;
 class nsChildView;
 class nsMenuBarX;
 @class ChildView;
-
-// If we are using an SDK older than 10.7, define bits we need that are missing
-// from it.
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
-enum {
-    NSWindowAnimationBehaviorDefault = 0,
-    NSWindowAnimationBehaviorNone = 2,
-    NSWindowAnimationBehaviorDocumentWindow = 3,
-    NSWindowAnimationBehaviorUtilityWindow = 4,
-    NSWindowAnimationBehaviorAlertPanel = 5,
-    NSWindowCollectionBehaviorFullScreenPrimary = 128, // 1 << 7
-};
-
-typedef NSInteger NSWindowAnimationBehavior;
-
-@interface NSWindow (LionWindowFeatures)
-- (void)setAnimationBehavior:(NSWindowAnimationBehavior)newAnimationBehavior;
-- (void)toggleFullScreen:(id)sender;
-@end
-
-typedef struct NSEdgeInsets {
-    CGFloat top;
-    CGFloat left;
-    CGFloat bottom;
-    CGFloat right;
-} NSEdgeInsets;
-
-#endif
 
 typedef struct _nsCocoaWindowList {
   _nsCocoaWindowList() : prev(nullptr), window(nullptr) {}
@@ -68,19 +38,9 @@ typedef struct _nsCocoaWindowList {
   // Data Storage
   NSMutableDictionary* mState;
   BOOL mDrawsIntoWindowFrame;
-  NSColor* mActiveTitlebarColor;
-  NSColor* mInactiveTitlebarColor;
-
-  // Shadow
-  BOOL mScheduledShadowInvalidation;
 
   // Invalidation disabling
   BOOL mDisabledNeedsDisplay;
-
-  // DPI cache. Getting the physical screen size (CGDisplayScreenSize)
-  // is ridiculously slow, so we cache it in the toplevel window for all
-  // descendants to use.
-  float mDPI;
 
   NSTrackingArea* mTrackingArea;
 
@@ -96,12 +56,7 @@ typedef struct _nsCocoaWindowList {
 - (NSMutableDictionary*)exportState;
 - (void)setDrawsContentsIntoWindowFrame:(BOOL)aState;
 - (BOOL)drawsContentsIntoWindowFrame;
-- (void)setTitlebarColor:(NSColor*)aColor forActiveWindow:(BOOL)aActive;
-- (NSColor*)titlebarColorForActiveWindow:(BOOL)aActive;
 
-- (void)deferredInvalidateShadow;
-- (void)invalidateShadow;
-- (float)getDPI;
 
 - (void)mouseEntered:(NSEvent*)aEvent;
 - (void)mouseExited:(NSEvent*)aEvent;
@@ -182,11 +137,7 @@ typedef struct _nsCocoaWindowList {
 
 @end
 
-#if defined( MAC_OS_X_VERSION_10_6 ) && ( MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6 )
 @interface WindowDelegate : NSObject <NSWindowDelegate>
-#else
-@interface WindowDelegate : NSObject
-#endif
 {
   nsCocoaWindow* mGeckoWindow; // [WEAK] (we are owned by the window)
   // Used to avoid duplication when we send NS_ACTIVATE and
@@ -206,7 +157,7 @@ typedef struct _nsCocoaWindowList {
 
 @class ToolbarWindow;
 
-// NSColor subclass that allows us to draw separate colors both in the titlebar 
+// NSColor subclass that allows us to draw separate colors both in the titlebar
 // and for background of the window.
 @interface TitlebarAndBackgroundColor : NSColor
 {
@@ -220,15 +171,11 @@ typedef struct _nsCocoaWindowList {
 // NSWindow subclass for handling windows with toolbars.
 @interface ToolbarWindow : BaseWindow
 {
-  TitlebarAndBackgroundColor *mColor;
   CGFloat mUnifiedToolbarHeight;
-  NSColor *mBackgroundColor;
-  NSView *mTitlebarView; // strong
+  CGFloat mSheetAttachmentPosition;
   NSRect mWindowButtonsRect;
   NSRect mFullScreenButtonRect;
 }
-// Pass nil here to get the default appearance.
-- (void)setTitlebarColor:(NSColor*)aColor forActiveWindow:(BOOL)aActive;
 - (void)setUnifiedToolbarHeight:(CGFloat)aHeight;
 - (CGFloat)unifiedToolbarHeight;
 - (CGFloat)titlebarHeight;
@@ -237,13 +184,14 @@ typedef struct _nsCocoaWindowList {
 - (void)setTitlebarNeedsDisplayInRect:(NSRect)aRect;
 - (void)setDrawsContentsIntoWindowFrame:(BOOL)aState;
 - (void)setSheetAttachmentPosition:(CGFloat)aY;
+- (CGFloat)sheetAttachmentPosition;
 - (void)placeWindowButtons:(NSRect)aRect;
 - (void)placeFullScreenButton:(NSRect)aRect;
 - (NSPoint)windowButtonsPositionWithDefaultPosition:(NSPoint)aDefaultPosition;
 - (NSPoint)fullScreenButtonPositionWithDefaultPosition:(NSPoint)aDefaultPosition;
 @end
 
-class nsCocoaWindow : public nsBaseWidget, public nsPIWidgetCocoa
+class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa
 {
 private:
   typedef nsBaseWidget Inherited;
@@ -255,26 +203,29 @@ public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSPIWIDGETCOCOA
 
-    NS_IMETHOD              Create(nsIWidget* aParent,
-                                   nsNativeWidget aNativeParent,
-                                   const DesktopIntRect& aRect,
-                                   nsWidgetInitData* aInitData = nullptr) override;
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         nsNativeWidget aNativeParent,
+                                         const DesktopIntRect& aRect,
+                                         nsWidgetInitData* aInitData = nullptr)
+                                         override;
 
-    NS_IMETHOD              Create(nsIWidget* aParent,
-                                   nsNativeWidget aNativeParent,
-                                   const LayoutDeviceIntRect& aRect,
-                                   nsWidgetInitData* aInitData = nullptr) override;
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         nsNativeWidget aNativeParent,
+                                         const LayoutDeviceIntRect& aRect,
+                                         nsWidgetInitData* aInitData = nullptr)
+                                         override;
 
-    NS_IMETHOD              Destroy() override;
+    virtual void            Destroy() override;
 
-    NS_IMETHOD              Show(bool aState) override;
+    virtual void            Show(bool aState) override;
     virtual nsIWidget*      GetSheetWindowParent(void) override;
-    NS_IMETHOD              Enable(bool aState) override;
+    virtual void            Enable(bool aState) override;
     virtual bool            IsEnabled() const override;
-    NS_IMETHOD              SetModal(bool aState) override;
-    NS_IMETHOD              SetFakeModal(bool aState) override;
+    virtual void            SetModal(bool aState) override;
+    virtual void            SetFakeModal(bool aState) override;
+    virtual bool            IsRunningAppModal() override;
     virtual bool            IsVisible() const override;
-    NS_IMETHOD              SetFocus(bool aState=false) override;
+    virtual nsresult        SetFocus(bool aState=false) override;
     virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
     virtual LayoutDeviceIntPoint GetClientOffset() override;
     virtual LayoutDeviceIntSize
@@ -282,25 +233,25 @@ public:
 
     virtual void* GetNativeData(uint32_t aDataType) override;
 
-    NS_IMETHOD              ConstrainPosition(bool aAllowSlop,
+    virtual void            ConstrainPosition(bool aAllowSlop,
                                               int32_t *aX, int32_t *aY) override;
     virtual void            SetSizeConstraints(const SizeConstraints& aConstraints) override;
-    NS_IMETHOD              Move(double aX, double aY) override;
-    NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
-                                        nsIWidget *aWidget, bool aActivate) override;
-    NS_IMETHOD              SetSizeMode(nsSizeMode aMode) override;
-    NS_IMETHOD              HideWindowChrome(bool aShouldHide) override;
+    virtual void            Move(double aX, double aY) override;
+    virtual void            SetSizeMode(nsSizeMode aMode) override;
+    virtual void            SuppressAnimation(bool aSuppress) override;
+    virtual void            HideWindowChrome(bool aShouldHide) override;
 
+    void WillEnterFullScreen(bool aFullScreen);
     void EnteredFullScreen(bool aFullScreen, bool aNativeMode = true);
     virtual bool PrepareForFullscreenTransition(nsISupports** aData) override;
     virtual void PerformFullscreenTransition(FullscreenTransitionStage aStage,
                                              uint16_t aDuration,
                                              nsISupports* aData,
                                              nsIRunnable* aCallback) override;
-    NS_IMETHOD MakeFullScreen(
-      bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override final;
-    NS_IMETHOD MakeFullScreenWithNativeTransition(
-      bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override final;
+    nsresult MakeFullScreen(
+      bool aFullScreen, nsIScreen* aTargetScreen = nullptr) final;
+    nsresult MakeFullScreenWithNativeTransition(
+      bool aFullScreen, nsIScreen* aTargetScreen = nullptr) final;
     NSAnimation* FullscreenTransitionAnimation() const { return mFullscreenTransitionAnimation; }
     void ReleaseFullscreenTransitionAnimation()
     {
@@ -310,14 +261,16 @@ public:
       mFullscreenTransitionAnimation = nil;
     }
 
-    NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint) override;
-    NS_IMETHOD              Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
-    NS_IMETHOD              GetClientBounds(LayoutDeviceIntRect& aRect) override;
-    NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+    virtual void            Resize(double aWidth, double aHeight, bool aRepaint) override;
+    virtual void            Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
+    virtual LayoutDeviceIntRect GetClientBounds() override;
+    virtual LayoutDeviceIntRect GetScreenBounds() override;
     void                    ReportMoveEvent();
     void                    ReportSizeEvent();
-    NS_IMETHOD              SetCursor(nsCursor aCursor) override;
-    NS_IMETHOD              SetCursor(imgIContainer* aCursor, uint32_t aHotspotX, uint32_t aHotspotY) override;
+    virtual void            SetCursor(nsCursor aCursor) override;
+    virtual nsresult        SetCursor(imgIContainer* aCursor,
+                                      uint32_t aHotspotX, uint32_t aHotspotY)
+                                      override;
 
     CGFloat                 BackingScaleFactor();
     void                    BackingScaleFactorChanged();
@@ -328,29 +281,30 @@ public:
       return mozilla::DesktopToLayoutDeviceScale(BackingScaleFactor());
     }
 
-    NS_IMETHOD              SetTitle(const nsAString& aTitle) override;
+    virtual nsresult        SetTitle(const nsAString& aTitle) override;
 
-    NS_IMETHOD Invalidate(const LayoutDeviceIntRect& aRect) override;
+    virtual void Invalidate(const LayoutDeviceIntRect& aRect) override;
     virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations) override;
     virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nullptr) override;
-    NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
-                             nsEventStatus& aStatus) override;
-    NS_IMETHOD CaptureRollupEvents(nsIRollupListener * aListener, bool aDoCapture) override;
-    NS_IMETHOD GetAttention(int32_t aCycleCount) override;
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
+    virtual nsresult DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
+                                   nsEventStatus& aStatus) override;
+    virtual void CaptureRollupEvents(nsIRollupListener * aListener,
+                                     bool aDoCapture) override;
+    virtual MOZ_MUST_USE nsresult GetAttention(int32_t aCycleCount) override;
     virtual bool HasPendingInputEvent() override;
     virtual nsTransparencyMode GetTransparencyMode() override;
     virtual void SetTransparencyMode(nsTransparencyMode aMode) override;
-    NS_IMETHOD SetWindowShadowStyle(int32_t aStyle) override;
+    virtual void SetWindowShadowStyle(int32_t aStyle) override;
+    virtual void SetWindowOpacity(float aOpacity) override;
+    virtual void SetWindowTransform(const mozilla::gfx::Matrix& aTransform) override;
     virtual void SetShowsToolbarButton(bool aShow) override;
     virtual void SetShowsFullScreenButton(bool aShow) override;
     virtual void SetWindowAnimationType(WindowAnimationType aType) override;
     virtual void SetDrawsTitle(bool aDrawTitle) override;
     virtual void SetUseBrightTitlebarForeground(bool aBrightForeground) override;
-    NS_IMETHOD SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
-    NS_IMETHOD SetWindowTitlebarColor(nscolor aColor, bool aActive) override;
+    virtual nsresult SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
     virtual void SetDrawsInTitlebar(bool aState) override;
     virtual void UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override;
     virtual nsresult SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
@@ -359,9 +313,10 @@ public:
                                                 nsIObserver* aObserver) override;
 
     void DispatchSizeModeEvent();
+    void DispatchOcclusionEvent();
 
     // be notified that a some form of drag event needs to go into Gecko
-    virtual bool DragEvent(unsigned int aMessage, Point aMouseGlobal, UInt16 aKeyModifiers);
+    virtual bool DragEvent(unsigned int aMessage, mozilla::gfx::Point aMouseGlobal, UInt16 aKeyModifiers);
 
     bool HasModalDescendents() { return mNumModalDescendents > 0; }
     NSWindow *GetCocoaWindow() { return mWindow; }
@@ -369,35 +324,35 @@ public:
     void SetMenuBar(nsMenuBarX* aMenuBar);
     nsMenuBarX *GetMenuBar();
 
-    NS_IMETHOD_(void) SetInputContext(
-                        const InputContext& aContext,
-                        const InputContextAction& aAction) override;
-    NS_IMETHOD_(InputContext) GetInputContext() override
+    virtual void SetInputContext(const InputContext& aContext,
+                                 const InputContextAction& aAction) override;
+    virtual InputContext GetInputContext() override
     {
       return mInputContext;
     }
-    NS_IMETHOD_(bool) ExecuteNativeKeyBinding(
-                        NativeKeyBindingsType aType,
-                        const mozilla::WidgetKeyboardEvent& aEvent,
-                        DoCommandCallback aCallback,
-                        void* aCallbackData) override;
+    virtual void GetEditCommands(
+                   NativeKeyBindingsType aType,
+                   const mozilla::WidgetKeyboardEvent& aEvent,
+                   nsTArray<mozilla::CommandInt>& aCommands) override;
 
     void SetPopupWindowLevel();
 
-    NS_IMETHOD         ReparentNativeWidget(nsIWidget* aNewParent) override;
+    bool InFullScreenMode() const { return mInFullScreenMode; }
+
 protected:
   virtual ~nsCocoaWindow();
 
   nsresult             CreateNativeWindow(const NSRect &aRect,
                                           nsBorderStyle aBorderStyle,
                                           bool aRectIsFrameRect);
-  nsresult             CreatePopupContentView(const LayoutDeviceIntRect &aRect);
+  nsresult             CreatePopupContentView(const LayoutDeviceIntRect &aRect,
+                                              nsWidgetInitData* aInitData);
   void                 DestroyNativeWindow();
   void                 AdjustWindowShadow();
   void                 SetWindowBackgroundBlur();
   void                 UpdateBounds();
 
-  nsresult             DoResize(double aX, double aY, double aWidth, double aHeight,
+  void                 DoResize(double aX, double aY, double aWidth, double aHeight,
                                 bool aRepaint, bool aConstrainToCurrentScreen);
 
   inline bool ShouldToggleNativeFullscreen(bool aFullScreen,
@@ -439,18 +394,19 @@ protected:
 
   // Only true on 10.7+ if SetShowsFullScreenButton(true) is called.
   bool                 mSupportsNativeFullScreen;
-  // Whether we are currently using Lion native fullscreen. It could be
-  // false either because we are not on Lion, or we are in the DOM
-  // fullscreen where we do not use the native fullscreen.
+  // Whether we are currently using native fullscreen. It could be false because
+  // we are in the DOM fullscreen where we do not use the native fullscreen.
   bool                 mInNativeFullScreenMode;
 
   bool                 mIsAnimationSuppressed;
 
   bool                 mInReportMoveEvent; // true if in a call to ReportMoveEvent().
   bool                 mInResize; // true if in a call to DoResize().
+  bool                 mWindowTransformIsIdentity;
 
   int32_t              mNumModalDescendents;
   InputContext         mInputContext;
+  NSWindowAnimationBehavior mWindowAnimationBehavior;
 };
 
 #endif // nsCocoaWindow_h_

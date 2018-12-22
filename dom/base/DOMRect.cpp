@@ -25,46 +25,30 @@ JSObject*
 DOMRectReadOnly::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectReadOnlyBinding::Wrap(aCx, this, aGivenProto);
+  return DOMRectReadOnly_Binding::Wrap(aCx, this, aGivenProto);
+}
+
+already_AddRefed<DOMRectReadOnly>
+DOMRectReadOnly::Constructor(const GlobalObject& aGlobal, double aX, double aY,
+                             double aWidth, double aHeight, ErrorResult& aRv)
+{
+  RefPtr<DOMRectReadOnly> obj =
+    new DOMRectReadOnly(aGlobal.GetAsSupports(), aX, aY, aWidth, aHeight);
+  return obj.forget();
 }
 
 // -----------------------------------------------------------------------------
-
-NS_IMPL_ISUPPORTS_INHERITED(DOMRect, DOMRectReadOnly, nsIDOMClientRect)
-
-#define FORWARD_GETTER(_name)                                                   \
-  NS_IMETHODIMP                                                                 \
-  DOMRect::Get ## _name(float* aResult)                                         \
-  {                                                                             \
-    *aResult = float(_name());                                                  \
-    return NS_OK;                                                               \
-  }
-
-FORWARD_GETTER(Left)
-FORWARD_GETTER(Top)
-FORWARD_GETTER(Right)
-FORWARD_GETTER(Bottom)
-FORWARD_GETTER(Width)
-FORWARD_GETTER(Height)
 
 JSObject*
 DOMRect::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(mParent);
-  return DOMRectBinding::Wrap(aCx, this, aGivenProto);
-}
-
-already_AddRefed<DOMRect>
-DOMRect::Constructor(const GlobalObject& aGlobal, ErrorResult& aRV)
-{
-  RefPtr<DOMRect> obj =
-    new DOMRect(aGlobal.GetAsSupports(), 0.0, 0.0, 0.0, 0.0);
-  return obj.forget();
+  return DOMRect_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DOMRect>
 DOMRect::Constructor(const GlobalObject& aGlobal, double aX, double aY,
-                     double aWidth, double aHeight, ErrorResult& aRV)
+                     double aWidth, double aHeight, ErrorResult& aRv)
 {
   RefPtr<DOMRect> obj =
     new DOMRect(aGlobal.GetAsSupports(), aX, aY, aWidth, aHeight);
@@ -77,32 +61,17 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMRectList, mParent, mArray)
 
 NS_INTERFACE_TABLE_HEAD(DOMRectList)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(DOMRectList, nsIDOMClientRectList)
+  NS_INTERFACE_TABLE0(DOMRectList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(DOMRectList)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMRectList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMRectList)
 
-
-NS_IMETHODIMP
-DOMRectList::GetLength(uint32_t* aLength)
-{
-  *aLength = Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP    
-DOMRectList::Item(uint32_t aIndex, nsIDOMClientRect** aReturn)
-{
-  NS_IF_ADDREF(*aReturn = Item(aIndex));
-  return NS_OK;
-}
-
 JSObject*
 DOMRectList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::DOMRectListBinding::Wrap(cx, this, aGivenProto);
+  return mozilla::dom::DOMRectList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 static double

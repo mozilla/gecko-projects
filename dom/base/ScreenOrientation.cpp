@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,7 +16,9 @@
 #include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
 
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/Promise.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -23,7 +27,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(ScreenOrientation,
                                    DOMEventTargetHelper,
                                    mScreen);
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ScreenOrientation)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ScreenOrientation)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(ScreenOrientation, DOMEventTargetHelper)
@@ -171,14 +175,14 @@ ScreenOrientation::LockOrientationTask::Run()
 
   if (mDocument->Hidden()) {
     // Active orientation lock is not the document's orientation lock.
-    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise->MaybeResolveWithUndefined();
     mDocument->SetOrientationPendingPromise(nullptr);
     return NS_OK;
   }
 
   if (mOrientationLock == eScreenOrientation_None) {
     mScreenOrientation->UnlockDeviceOrientation();
-    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise->MaybeResolveWithUndefined();
     mDocument->SetOrientationPendingPromise(nullptr);
     return NS_OK;
   }
@@ -200,7 +204,7 @@ ScreenOrientation::LockOrientationTask::Run()
       (mOrientationLock == eScreenOrientation_Default &&
        mDocument->CurrentOrientationAngle() == 0)) {
     // Orientation lock will not cause an orientation change.
-    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise->MaybeResolveWithUndefined();
     mDocument->SetOrientationPendingPromise(nullptr);
   }
 
@@ -308,7 +312,7 @@ ScreenOrientation::LockInternal(ScreenOrientationInternal aOrientation, ErrorRes
     return nullptr;
   }
 
-#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_GONK)
+#if !defined(MOZ_WIDGET_ANDROID)
   // User agent does not support locking the screen orientation.
   p->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
   return p.forget();
@@ -367,8 +371,11 @@ ScreenOrientation::LockDeviceOrientation(ScreenOrientationInternal aOrientation,
   }
 
   // We are fullscreen and lock has been accepted.
-  if (aIsFullScreen && !mFullScreenListener) {
-    mFullScreenListener = new FullScreenEventListener();
+  if (aIsFullScreen) {
+    if (!mFullScreenListener) {
+      mFullScreenListener = new FullScreenEventListener();
+    }
+
     aRv = target->AddSystemEventListener(NS_LITERAL_STRING("fullscreenchange"),
                                          mFullScreenListener, /* useCapture = */ true);
     if (NS_WARN_IF(aRv.Failed())) {
@@ -398,29 +405,34 @@ ScreenOrientation::UnlockDeviceOrientation()
   // Remove event listener in case of fullscreen lock.
   nsCOMPtr<EventTarget> target = do_QueryInterface(GetOwner()->GetDoc());
   if (target) {
-    nsresult rv = target->RemoveSystemEventListener(NS_LITERAL_STRING("fullscreenchange"),
-                                                    mFullScreenListener, /* useCapture */ true);
-    NS_WARN_IF(NS_FAILED(rv));
+    target->RemoveSystemEventListener(NS_LITERAL_STRING("fullscreenchange"),
+                                      mFullScreenListener,
+                                      /* useCapture */ true);
   }
 
   mFullScreenListener = nullptr;
 }
 
 OrientationType
-ScreenOrientation::DeviceType() const
+ScreenOrientation::DeviceType(CallerType aCallerType) const
 {
-  return mType;
+  return nsContentUtils::ResistFingerprinting(aCallerType) ?
+    OrientationType::Landscape_primary : mType;
 }
 
 uint16_t
-ScreenOrientation::DeviceAngle() const
+ScreenOrientation::DeviceAngle(CallerType aCallerType) const
 {
-  return mAngle;
+  return nsContentUtils::ResistFingerprinting(aCallerType) ? 0 : mAngle;
 }
 
 OrientationType
-ScreenOrientation::GetType(ErrorResult& aRv) const
+ScreenOrientation::GetType(CallerType aCallerType, ErrorResult& aRv) const
 {
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return OrientationType::Landscape_primary;
+  }
+
   nsIDocument* doc = GetResponsibleDocument();
   if (!doc) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
@@ -431,8 +443,12 @@ ScreenOrientation::GetType(ErrorResult& aRv) const
 }
 
 uint16_t
-ScreenOrientation::GetAngle(ErrorResult& aRv) const
+ScreenOrientation::GetAngle(CallerType aCallerType, ErrorResult& aRv) const
 {
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return 0;
+  }
+
   nsIDocument* doc = GetResponsibleDocument();
   if (!doc) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
@@ -466,19 +482,13 @@ ScreenOrientation::GetLockOrientationPermission(bool aCheckSandbox) const
     return LOCK_DENIED;
   }
 
-  // Apps can always lock the screen orientation.
-  if (doc->NodePrincipal()->GetAppStatus() >=
-        nsIPrincipal::APP_STATUS_INSTALLED) {
-    return LOCK_ALLOWED;
-  }
-
   if (Preferences::GetBool("dom.screenorientation.testing.non_fullscreen_lock_allow",
                            false)) {
     return LOCK_ALLOWED;
   }
 
   // Other content must be full-screen in order to lock orientation.
-  return doc->MozFullScreen() ? FULLSCREEN_LOCK_ALLOWED : LOCK_DENIED;
+  return doc->Fullscreen() ? FULLSCREEN_LOCK_ALLOWED : LOCK_DENIED;
 }
 
 nsIDocument*
@@ -495,6 +505,10 @@ ScreenOrientation::GetResponsibleDocument() const
 void
 ScreenOrientation::Notify(const hal::ScreenConfiguration& aConfiguration)
 {
+  if (ShouldResistFingerprinting()) {
+    return;
+  }
+
   nsIDocument* doc = GetResponsibleDocument();
   if (!doc) {
     return;
@@ -516,18 +530,18 @@ ScreenOrientation::Notify(const hal::ScreenConfiguration& aConfiguration)
   mAngle = aConfiguration.angle();
   mType = InternalOrientationToType(orientation);
 
-  nsresult rv;
+  DebugOnly<nsresult> rv;
   if (mScreen && mType != previousOrientation) {
     // Use of mozorientationchange is deprecated.
     rv = mScreen->DispatchTrustedEvent(NS_LITERAL_STRING("mozorientationchange"));
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "DispatchTrustedEvent failed");
   }
 
   if (doc->Hidden() && !mVisibleListener) {
     mVisibleListener = new VisibleEventListener();
     rv = doc->AddSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
                                      mVisibleListener, /* useCapture = */ true);
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "AddSystemEventListener failed");
     return;
   }
 
@@ -536,14 +550,16 @@ ScreenOrientation::Notify(const hal::ScreenConfiguration& aConfiguration)
 
     Promise* pendingPromise = doc->GetOrientationPendingPromise();
     if (pendingPromise) {
-      pendingPromise->MaybeResolve(JS::UndefinedHandleValue);
+      pendingPromise->MaybeResolveWithUndefined();
       doc->SetOrientationPendingPromise(nullptr);
     }
 
-    nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableMethod(this,
-      &ScreenOrientation::DispatchChangeEvent);
+    nsCOMPtr<nsIRunnable> runnable =
+      NewRunnableMethod("dom::ScreenOrientation::DispatchChangeEvent",
+                        this,
+                        &ScreenOrientation::DispatchChangeEvent);
     rv = NS_DispatchToMainThread(runnable);
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "NS_DispatchToMainThread failed");
   }
 }
 
@@ -553,31 +569,42 @@ ScreenOrientation::UpdateActiveOrientationLock(ScreenOrientationInternal aOrient
   if (aOrientation == eScreenOrientation_None) {
     hal::UnlockScreenOrientation();
   } else {
-    hal::LockScreenOrientation(aOrientation);
+    DebugOnly<bool> ok = hal::LockScreenOrientation(aOrientation);
+    NS_WARNING_ASSERTION(ok, "hal::LockScreenOrientation failed");
   }
 }
 
 void
 ScreenOrientation::DispatchChangeEvent()
 {
-  nsresult rv = DispatchTrustedEvent(NS_LITERAL_STRING("change"));
-  NS_WARN_IF(NS_FAILED(rv));
+  DebugOnly<nsresult> rv = DispatchTrustedEvent(NS_LITERAL_STRING("change"));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "DispatchTrustedEvent failed");
 }
 
 JSObject*
 ScreenOrientation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ScreenOrientationBinding::Wrap(aCx, this, aGivenProto);
+  return ScreenOrientation_Binding::Wrap(aCx, this, aGivenProto);
+}
+
+bool
+ScreenOrientation::ShouldResistFingerprinting() const
+{
+  bool resist = false;
+  if (nsCOMPtr<nsPIDOMWindowInner> owner = GetOwner()) {
+    resist = nsContentUtils::ShouldResistFingerprinting(owner->GetDocShell());
+  }
+  return resist;
 }
 
 NS_IMPL_ISUPPORTS(ScreenOrientation::VisibleEventListener, nsIDOMEventListener)
 
 NS_IMETHODIMP
-ScreenOrientation::VisibleEventListener::HandleEvent(nsIDOMEvent* aEvent)
+ScreenOrientation::VisibleEventListener::HandleEvent(Event* aEvent)
 {
   // Document may have become visible, if the page is visible, run the steps
   // following the "now visible algorithm" as specified.
-  nsCOMPtr<EventTarget> target = aEvent->InternalDOMEvent()->GetCurrentTarget();
+  nsCOMPtr<EventTarget> target = aEvent->GetCurrentTarget();
   MOZ_ASSERT(target);
 
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(target);
@@ -585,7 +612,7 @@ ScreenOrientation::VisibleEventListener::HandleEvent(nsIDOMEvent* aEvent)
     return NS_OK;
   }
 
-  auto* win = nsGlobalWindow::Cast(doc->GetInnerWindow());
+  auto* win = nsGlobalWindowInner::Cast(doc->GetInnerWindow());
   if (!win) {
     return NS_OK;
   }
@@ -600,23 +627,23 @@ ScreenOrientation::VisibleEventListener::HandleEvent(nsIDOMEvent* aEvent)
   ScreenOrientation* orientation = screen->Orientation();
   MOZ_ASSERT(orientation);
 
-  rv = target->RemoveSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
-                                         this, true);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
+  target->RemoveSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
+                                    this, true);
 
-  if (doc->CurrentOrientationType() != orientation->DeviceType()) {
-    doc->SetCurrentOrientation(orientation->DeviceType(), orientation->DeviceAngle());
+  if (doc->CurrentOrientationType() != orientation->DeviceType(CallerType::System)) {
+    doc->SetCurrentOrientation(orientation->DeviceType(CallerType::System),
+			       orientation->DeviceAngle(CallerType::System));
 
     Promise* pendingPromise = doc->GetOrientationPendingPromise();
     if (pendingPromise) {
-      pendingPromise->MaybeResolve(JS::UndefinedHandleValue);
+      pendingPromise->MaybeResolveWithUndefined();
       doc->SetOrientationPendingPromise(nullptr);
     }
 
-    nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableMethod(orientation,
-      &ScreenOrientation::DispatchChangeEvent);
+    nsCOMPtr<nsIRunnable> runnable =
+      NewRunnableMethod("dom::ScreenOrientation::DispatchChangeEvent",
+                        orientation,
+                        &ScreenOrientation::DispatchChangeEvent);
     rv = NS_DispatchToMainThread(runnable);
     if (NS_WARN_IF(rv.Failed())) {
       return rv.StealNSResult();
@@ -629,7 +656,7 @@ ScreenOrientation::VisibleEventListener::HandleEvent(nsIDOMEvent* aEvent)
 NS_IMPL_ISUPPORTS(ScreenOrientation::FullScreenEventListener, nsIDOMEventListener)
 
 NS_IMETHODIMP
-ScreenOrientation::FullScreenEventListener::HandleEvent(nsIDOMEvent* aEvent)
+ScreenOrientation::FullScreenEventListener::HandleEvent(Event* aEvent)
 {
 #ifdef DEBUG
   nsAutoString eventType;
@@ -638,7 +665,7 @@ ScreenOrientation::FullScreenEventListener::HandleEvent(nsIDOMEvent* aEvent)
   MOZ_ASSERT(eventType.EqualsLiteral("fullscreenchange"));
 #endif
 
-  nsCOMPtr<EventTarget> target = aEvent->InternalDOMEvent()->GetCurrentTarget();
+  nsCOMPtr<EventTarget> target = aEvent->GetCurrentTarget();
   MOZ_ASSERT(target);
 
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(target);
@@ -647,15 +674,13 @@ ScreenOrientation::FullScreenEventListener::HandleEvent(nsIDOMEvent* aEvent)
   // We have to make sure that the event we got is the event sent when
   // fullscreen is disabled because we could get one when fullscreen
   // got enabled if the lock call is done at the same moment.
-  if (doc->MozFullScreen()) {
+  if (doc->Fullscreen()) {
     return NS_OK;
   }
 
   hal::UnlockScreenOrientation();
 
-  nsresult rv = target->RemoveSystemEventListener(NS_LITERAL_STRING("fullscreenchange"),
-                                                  this, true);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  target->RemoveSystemEventListener(NS_LITERAL_STRING("fullscreenchange"),
+                                    this, true);
   return NS_OK;
 }

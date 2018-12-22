@@ -1,9 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*-
- * vim: sw=2 ts=2 et lcs=trail\:.,tab\:>~ :
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 /**
  * What this is aimed to test:
  *
@@ -21,100 +15,45 @@ const DEFAULT_TIMER_DELAY_SECONDS = 3 * 60;
 // Sync this with the const value in the component.
 const EXPIRE_AGGRESSIVITY_MULTIPLIER = 3;
 
-Cu.import("resource://testing-common/MockRegistrar.jsm");
-// Provide a mock timer implementation, so there is no need to wait seconds to
-// achieve test results.
-const TIMER_CONTRACT_ID = "@mozilla.org/timer;1";
-var mockCID;
-
-var mockTimerImpl = {
-  initWithCallback: function MTI_initWithCallback(aCallback, aDelay, aType) {
-    print("Checking timer delay equals expected interval value");
-    if (!currentTest)
-      return;
-    // History status is not dirty, so the timer is delayed.
-    do_check_eq(aDelay, currentTest.expectedTimerDelay * 1000 * EXPIRE_AGGRESSIVITY_MULTIPLIER)
-
-    do_execute_soon(runNextTest);
-  },
-
-  cancel: function() {},
-  initWithFuncCallback: function() {},
-  init: function() {},
-
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsITimer,
-  ])
-}
-
-function replace_timer_factory() {
-  mockCID = MockRegistrar.register(TIMER_CONTRACT_ID, mockTimerImpl);
-}
-
-do_register_cleanup(function() {
-  // Shutdown expiration before restoring original timer, otherwise we could
-  // leak due to the different implementation.
-  shutdownExpiration();
-
-  // Restore original timer factory.
-  MockRegistrar.unregister(mockCID);
-});
-
-
 var tests = [
 
-  // This test should be the first, so the interval won't be influenced by
-  // status of history.
   { desc: "Set interval to 1s.",
     interval: 1,
-    expectedTimerDelay: 1
+    expectedTimerDelay: 1 * EXPIRE_AGGRESSIVITY_MULTIPLIER
   },
 
   { desc: "Set interval to a negative value.",
     interval: -1,
-    expectedTimerDelay: DEFAULT_TIMER_DELAY_SECONDS
+    expectedTimerDelay: DEFAULT_TIMER_DELAY_SECONDS * EXPIRE_AGGRESSIVITY_MULTIPLIER
   },
 
   { desc: "Set interval to 0.",
     interval: 0,
-    expectedTimerDelay: DEFAULT_TIMER_DELAY_SECONDS
+    expectedTimerDelay: DEFAULT_TIMER_DELAY_SECONDS * EXPIRE_AGGRESSIVITY_MULTIPLIER
   },
 
   { desc: "Set interval to a large value.",
     interval: 100,
-    expectedTimerDelay: 100
+    expectedTimerDelay: 100 * EXPIRE_AGGRESSIVITY_MULTIPLIER
   },
 
 ];
 
-var currentTest;
-
-function run_test() {
+add_task(async function test() {
   // The pref should not exist by default.
-  try {
-    getInterval();
-    do_throw("interval pref should not exist by default");
-  }
-  catch (ex) {}
-
-  // Use our own mock timer implementation.
-  replace_timer_factory();
+  Assert.throws(() => getInterval(),
+    /NS_ERROR_UNEXPECTED/);
 
   // Force the component, so it will start observing preferences.
   force_expiration_start();
 
-  runNextTest();
-  do_test_pending();
-}
-
-function runNextTest() {
-  if (tests.length) {
+  for (let currentTest of tests) {
     currentTest = tests.shift();
     print(currentTest.desc);
+    let promise = promiseTopicObserved("test-interval-changed");
     setInterval(currentTest.interval);
+    let [, data] = await promise;
+    Assert.equal(data, currentTest.expectedTimerDelay);
   }
-  else {
-    clearInterval();
-    do_test_finished();
-  }
-}
+  clearInterval();
+});

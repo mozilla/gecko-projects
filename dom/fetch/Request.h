@@ -32,21 +32,21 @@ class Request final : public nsISupports
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Request)
 
 public:
-  Request(nsIGlobalObject* aOwner, InternalRequest* aRequest);
-
-  static bool
-  RequestContextEnabled(JSContext* aCx, JSObject* aObj);
+  Request(nsIGlobalObject* aOwner, InternalRequest* aRequest,
+          AbortSignal* aSignal);
 
   JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return RequestBinding::Wrap(aCx, this, aGivenProto);
+    return Request_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   void
   GetUrl(nsAString& aUrl) const
   {
-    CopyUTF8toUTF16(mRequest->mURL, aUrl);
+    nsAutoCString url;
+    mRequest->GetURL(url);
+    CopyUTF8toUTF16(url, aUrl);
   }
 
   void
@@ -79,16 +79,34 @@ public:
     return mRequest->GetRedirectMode();
   }
 
-  RequestContext
-  Context() const
+  void
+  GetIntegrity(nsAString& aIntegrity) const
   {
-    return mRequest->Context();
+    aIntegrity = mRequest->GetIntegrity();
+  }
+
+  bool
+  MozErrors() const
+  {
+    return mRequest->MozErrors();
+  }
+
+  RequestDestination
+  Destination() const
+  {
+    return mRequest->Destination();
   }
 
   void
-  SetContentPolicyType(nsContentPolicyType aContentPolicyType)
+  OverrideContentPolicyType(nsContentPolicyType aContentPolicyType)
   {
-    mRequest->SetContentPolicyType(aContentPolicyType);
+    mRequest->OverrideContentPolicyType(aContentPolicyType);
+  }
+
+  bool
+  IsContentPolicyTypeOverridden() const
+  {
+    return mRequest->IsContentPolicyTypeOverridden();
   }
 
   void
@@ -111,11 +129,19 @@ public:
 
   Headers* Headers_();
 
-  void
-  GetBody(nsIInputStream** aStream) { return mRequest->GetBody(aStream); }
+  using FetchBody::GetBody;
 
   void
-  SetBody(nsIInputStream* aStream) { return mRequest->SetBody(aStream); }
+  GetBody(nsIInputStream** aStream, int64_t* aBodyLength = nullptr)
+  {
+    mRequest->GetBody(aStream, aBodyLength);
+  }
+
+  void
+  SetBody(nsIInputStream* aStream, int64_t aBodyLength)
+  {
+    mRequest->SetBody(aStream, aBodyLength);
+  }
 
   static already_AddRefed<Request>
   Constructor(const GlobalObject& aGlobal, const RequestOrUSVString& aInput,
@@ -127,17 +153,32 @@ public:
   }
 
   already_AddRefed<Request>
-  Clone(ErrorResult& aRv) const;
+  Clone(ErrorResult& aRv);
 
   already_AddRefed<InternalRequest>
   GetInternalRequest();
+
+  const UniquePtr<mozilla::ipc::PrincipalInfo>&
+  GetPrincipalInfo() const
+  {
+    return mRequest->GetPrincipalInfo();
+  }
+
+  AbortSignal*
+  GetOrCreateSignal();
+
+  // This can return a null AbortSignal.
+  AbortSignal*
+  GetSignal() const override;
+
 private:
   ~Request();
 
-  nsCOMPtr<nsIGlobalObject> mOwner;
   RefPtr<InternalRequest> mRequest;
+
   // Lazily created.
   RefPtr<Headers> mHeaders;
+  RefPtr<AbortSignal> mSignal;
 };
 
 } // namespace dom

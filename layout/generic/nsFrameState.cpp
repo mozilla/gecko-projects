@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,7 +15,7 @@
 #include "nsGridContainerFrame.h"
 #include "nsGfxScrollFrame.h"
 #include "nsIFrame.h"
-#include "nsISVGChildFrame.h"
+#include "nsSVGDisplayableFrame.h"
 #include "nsImageFrame.h"
 #include "nsInlineFrame.h"
 #include "nsPlaceholderFrame.h"
@@ -52,9 +53,9 @@ GetFrameState(nsIFrame* aFrame)
 #define FRAME_STATE_BIT(group_, value_, name_)                                \
   if ((state & NS_FRAME_STATE_BIT(value_)) && groups.Contains(#group_)) {     \
     if (!result.IsEmpty()) {                                                  \
-      result.Insert(" | ", 0);                                                \
+      result.InsertLiteral(" | ", 0);                                         \
     }                                                                         \
-    result.Insert(#name_, 0);                                                 \
+    result.InsertLiteral(#name_, 0);                                          \
     state = state & ~NS_FRAME_STATE_BIT(value_);                              \
   }
 #include "nsFrameStateBits.h"
@@ -62,7 +63,7 @@ GetFrameState(nsIFrame* aFrame)
 #undef FRAME_STATE_BIT
 
   if (state) {
-    result.AppendPrintf(" | 0x%0llx", state);
+    result.AppendPrintf(" | 0x%0" PRIx64, static_cast<uint64_t>(state));
   }
 
   return result;

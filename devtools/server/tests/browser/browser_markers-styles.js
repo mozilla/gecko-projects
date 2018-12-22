@@ -4,31 +4,27 @@
 /**
  * Test that we get "Styles" markers with correct meta.
  */
+"use strict";
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
 const MARKER_NAME = "Styles";
 
-add_task(function*() {
-  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
-  let doc = browser.contentDocument;
+add_task(async function() {
+  await addTab(MAIN_DOMAIN + "doc_perf.html");
 
   initDebuggerServer();
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = PerformanceFront(client, form);
-  yield front.connect();
-  let rec = yield front.startRecording({ withMarkers: true });
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = PerformanceFront(client, form);
+  await front.connect();
+  const rec = await front.startRecording({ withMarkers: true });
 
-  let markers = yield waitForMarkerType(front, MARKER_NAME, function (markers) {
-    return markers.some(({restyleHint}) => restyleHint != void 0);
-  });
+  const markers = await waitForMarkerType(front, MARKER_NAME);
 
-  yield front.stopRecording(rec);
+  await front.stopRecording(rec);
 
   ok(markers.some(m => m.name === MARKER_NAME), `got some ${MARKER_NAME} markers`);
-  ok(markers.some(({restyleHint}) => restyleHint != void 0),
-    "Some markers have a restyleHint.");
 
-  yield closeDebuggerClient(client);
+  await client.close();
   gBrowser.removeCurrentTab();
 });

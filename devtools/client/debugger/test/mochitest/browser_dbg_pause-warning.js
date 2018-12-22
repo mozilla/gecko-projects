@@ -13,7 +13,11 @@ var gTab, gPanel, gDebugger;
 var gTarget, gToolbox;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -29,9 +33,7 @@ function testPause() {
     ok(gDebugger.gThreadClient.paused,
       "threadClient.paused has been updated to true.");
 
-    gToolbox.once("inspector-selected").then(inspector => {
-      inspector.once("inspector-updated").then(testNotificationIsUp1);
-    });
+    gToolbox.once("inspector-selected").then(testNotificationIsUp1);
     gToolbox.selectTool("inspector");
   });
 
@@ -96,7 +98,7 @@ function testResume() {
     gDebugger);
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

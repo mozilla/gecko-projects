@@ -16,7 +16,9 @@
  * (mozilla/content and mozilla/layout).
  */
 
+class nsAtom;
 class nsIContent;
+class nsIDocument;
 class imgRequestProxy;
 class nsGenericHTMLElement;
 
@@ -24,13 +26,15 @@ namespace mozilla {
 namespace dom {
 class Element;
 class NodeInfo;
+struct CustomElementDefinition;
 } // namespace dom
 } // namespace mozilla
 
 nsresult
 NS_NewElement(mozilla::dom::Element** aResult,
               already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-              mozilla::dom::FromParser aFromParser);
+              mozilla::dom::FromParser aFromParser,
+              const nsAString* aIs = nullptr);
 
 nsresult
 NS_NewXMLElement(mozilla::dom::Element** aResult,
@@ -39,7 +43,9 @@ NS_NewXMLElement(mozilla::dom::Element** aResult,
 nsresult
 NS_NewHTMLElement(mozilla::dom::Element** aResult,
                   already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                  mozilla::dom::FromParser aFromParser);
+                  mozilla::dom::FromParser aFromParser,
+                  nsAtom* aIsAtom = nullptr,
+                  mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
 
 // First argument should be nsHTMLTag, but that adds dependency to parser
 // for a bunch of files.
@@ -55,10 +61,13 @@ NS_NewMathMLElement(mozilla::dom::Element** aResult,
 #ifdef MOZ_XUL
 nsresult
 NS_NewXULElement(mozilla::dom::Element** aResult,
-                 already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
+                 already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
+                 mozilla::dom::FromParser aFromParser,
+                 nsAtom* aIsAtom = nullptr,
+                 mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
 
 void
-NS_TrustedNewXULElement(nsIContent** aResult,
+NS_TrustedNewXULElement(mozilla::dom::Element** aResult,
                         already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 #endif
 
@@ -67,9 +76,11 @@ NS_NewSVGElement(mozilla::dom::Element** aResult,
                  already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                  mozilla::dom::FromParser aFromParser);
 
-nsresult
-NS_NewGenConImageContent(nsIContent** aResult,
-                         already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                         imgRequestProxy* aImageRequest);
+namespace mozilla {
+namespace dom {
+already_AddRefed<nsIContent>
+CreateGenConImageContent(nsIDocument* aDocument, imgRequestProxy* aImageRequest);
+} // namespace dom
+} // namespace mozilla
 
 #endif // nsContentCreatorFunctions_h__

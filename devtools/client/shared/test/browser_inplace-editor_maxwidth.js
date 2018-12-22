@@ -1,10 +1,11 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* import-globals-from helper_inplace_editor.js */
 
 "use strict";
 
-var { editableField } = require("devtools/client/shared/inplace-editor");
+loadHelperScript("helper_inplace_editor.js");
 
 const MAX_WIDTH = 300;
 const START_TEXT = "Start text";
@@ -14,32 +15,32 @@ const LONG_TEXT = "I am a long text and I will not fit in a 300px container. " +
 // Test the inplace-editor behavior with a maxWidth configuration option
 // defined.
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8,inplace editor max width tests");
-  let [host, , doc] = yield createHost();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8,inplace editor max width tests");
+  const [host, , doc] = await createHost();
 
   info("Testing the maxWidth option in pixels, to precisely check the size");
-  yield new Promise(resolve => {
+  await new Promise(resolve => {
     createInplaceEditorAndClick({
       multiline: true,
       maxWidth: MAX_WIDTH,
       start: testMaxWidth,
       done: resolve
-    }, doc);
+    }, doc, START_TEXT);
   });
 
   host.destroy();
   gBrowser.removeCurrentTab();
 });
 
-let testMaxWidth = Task.async(function* (editor) {
+const testMaxWidth = async function(editor) {
   is(editor.input.value, START_TEXT, "Span text content should be used");
   ok(editor.input.offsetWidth < MAX_WIDTH,
     "Input width should be strictly smaller than MAX_WIDTH");
   is(getLines(editor.input), 1, "Input should display 1 line of text");
 
   info("Check a text is on several lines if it does not fit MAX_WIDTH");
-  for (let key of LONG_TEXT) {
+  for (const key of LONG_TEXT) {
     EventUtils.sendChar(key);
     checkScrollbars(editor.input);
   }
@@ -85,7 +86,7 @@ let testMaxWidth = Task.async(function* (editor) {
 
   info("Leave the inplace-editor");
   EventUtils.sendKey("RETURN");
-});
+};
 
 /**
  * Retrieve the current number of lines displayed in the provided textarea.
@@ -94,10 +95,9 @@ let testMaxWidth = Task.async(function* (editor) {
  * @return {Number} the number of lines
  */
 function getLines(textarea) {
-  let win = textarea.ownerDocument.defaultView;
-  let style = win.getComputedStyle(textarea);
-  let lineHeight = style.getPropertyCSSValue("line-height").cssText;
-  return Math.floor(textarea.clientHeight / parseFloat(lineHeight));
+  const win = textarea.ownerDocument.defaultView;
+  const style = win.getComputedStyle(textarea);
+  return Math.floor(textarea.clientHeight / parseFloat(style.lineHeight));
 }
 
 /**
@@ -110,26 +110,4 @@ function checkScrollbars(textarea) {
     "Textarea should never have vertical scrollbars");
   is(textarea.scrollWidth, textarea.clientWidth,
     "Textarea should never have horizontal scrollbars");
-}
-
-function createInplaceEditorAndClick(options, doc) {
-  doc.body.innerHTML = "";
-  let span = options.element = createSpan(doc);
-
-  info("Creating an inplace-editor field");
-  editableField(options);
-
-  info("Clicking on the inplace-editor field to turn to edit mode");
-  span.click();
-}
-
-function createSpan(doc) {
-  info("Creating a new span element");
-  let span = doc.createElement("span");
-  span.setAttribute("tabindex", "0");
-  span.style.fontSize = "11px";
-  span.style.fontFamily = "monospace";
-  span.textContent = START_TEXT;
-  doc.body.appendChild(span);
-  return span;
 }

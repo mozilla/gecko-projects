@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -16,12 +17,14 @@
 #endif
 #include "mozilla/Tuple.h"
 
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
 #include "nsDebug.h"
 #endif
+#include "2D.h"
 #include "Point.h"
 #include "BaseRect.h"
 #include "Matrix.h"
+#include "LoggingConstants.h"
 
 #if defined(MOZ_LOGGING)
 extern GFX2D_API mozilla::LogModule* GetGFX2DLog();
@@ -29,21 +32,6 @@ extern GFX2D_API mozilla::LogModule* GetGFX2DLog();
 
 namespace mozilla {
 namespace gfx {
-
-// Attempting to be consistent with prlog values, but that isn't critical
-// (and note that 5 has a special meaning - see the description
-// with sGfxLogLevel)
-const int LOG_CRITICAL = 1;
-const int LOG_WARNING = 2;
-const int LOG_DEBUG = 3;
-const int LOG_DEBUG_PRLOG = 4;
-const int LOG_EVERYTHING = 5; // This needs to be the highest value
-
-#if defined(DEBUG)
-const int LOG_DEFAULT = LOG_EVERYTHING;
-#else
-const int LOG_DEFAULT = LOG_CRITICAL;
-#endif
 
 #if defined(MOZ_LOGGING)
 inline mozilla::LogLevel PRLogLevelForLevel(int aLevel) {
@@ -68,11 +56,9 @@ class LoggingPrefs
 public:
   // Used to choose the level of logging we get.  The higher the number,
   // the more logging we get.  Value of zero will give you no logging,
-  // 1 just errors, 2 adds warnings and 3 adds logging/debug.  4 is used to
-  // selectively enable logging on the configurations that
-  // support prlog (on other systems, 3 and 4 are the same.)  For prlog,
-  // in addition to setting the value to 4, you will need to set an
-  // environment variable NSPR_LOG_MODULES to gfx:4. See prlog.h for details.
+  // 1 just errors, 2 adds warnings and 3 or 4 add debug logging.
+  // In addition to setting the value to 4, you will need to set the
+  // environment variable MOZ_LOG to gfx:4. See mozilla/Logging.h for details.
   static int32_t sGfxLogLevel;
 };
 
@@ -133,6 +119,22 @@ enum class LogReason : int {
   IncompatibleBasicTexturedEffect,
   InvalidFont,
   PAllocTextureBackendMismatch,
+  GetFontFileDataFailed,
+  MessageChannelCloseFailure,
+  MessageChannelInvalidHandle,
+  TextureAliveAfterShutdown,
+  InvalidContext,
+  InvalidCommandList,
+  AsyncTransactionTimeout, // 30
+  TextureCreation,
+  InvalidCacheSurface,
+  AlphaWithBasicClient,
+  UnbalancedClipStack,
+  ProcessingError,
+  InvalidDrawTarget,
+  NativeFontResourceNotFound,
+  UnscaledFontNotFound,
+  InvalidLayerType,
   // End
   MustBeLessThanThis = 101,
 };
@@ -144,7 +146,7 @@ struct BasicLogger
   // in the appropriate places in that method.
   static bool ShouldOutputMessage(int aLevel) {
     if (LoggingPrefs::sGfxLogLevel >= aLevel) {
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
       return true;
 #else
 #if defined(MOZ_LOGGING)
@@ -177,12 +179,12 @@ struct BasicLogger
     // make the corresponding change in the ShouldOutputMessage method
     // above.
     if (LoggingPrefs::sGfxLogLevel >= aLevel) {
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_ANDROID)
       printf_stderr("%s%s", aString.c_str(), aNoNewline ? "" : "\n");
 #else
 #if defined(MOZ_LOGGING)
       if (MOZ_LOG_TEST(GetGFX2DLog(), PRLogLevelForLevel(aLevel))) {
-        PR_LogPrint("%s%s", aString.c_str(), aNoNewline ? "" : "\n");
+        MOZ_LOG(GetGFX2DLog(), PRLogLevelForLevel(aLevel), ("%s%s", aString.c_str(), aNoNewline ? "" : "\n"));
       } else
 #endif
       if ((LoggingPrefs::sGfxLogLevel >= LOG_DEBUG_PRLOG) ||
@@ -356,6 +358,12 @@ public:
     }
     return *this;
   }
+  Log &operator <<(const Color& aColor) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "Color(" << aColor.r << ", " << aColor.g << ", " << aColor.b << ", " << aColor.a << ")";
+    }
+    return *this;
+  }
   template <typename T, typename Sub, typename Coord>
   Log &operator <<(const BasePoint<T, Sub, Coord>& aPoint) {
     if (MOZ_UNLIKELY(LogIt())) {
@@ -393,6 +401,205 @@ public:
     return *this;
   }
 
+  Log &operator<<(const SourceSurface* aSurface) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "SourceSurface(" << (void*)(aSurface) << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const Path* aPath) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "Path(" << (void*)(aPath) << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const Pattern* aPattern) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "Pattern(" << (void*)(aPattern) << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const ScaledFont* aFont) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "ScaledFont(" << (void*)(aFont) << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const FilterNode* aFilter) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "FilterNode(" << (void*)(aFilter) << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const DrawOptions& aOptions) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "DrawOptions(" << aOptions.mAlpha << ", ";
+      (*this) << aOptions.mCompositionOp;
+      mMessage << ", ";
+      (*this) << aOptions.mAntialiasMode;
+      mMessage << ")";
+    }
+    return *this;
+  }
+  Log &operator<<(const DrawSurfaceOptions& aOptions) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      mMessage << "DrawSurfaceOptions(";
+      (*this) << aOptions.mSamplingFilter;
+      mMessage << ", ";
+      (*this) << aOptions.mSamplingBounds;
+      mMessage << ")";
+    }
+    return *this;
+  }
+
+  Log& operator<<(SamplingBounds aBounds) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      switch(aBounds) {
+        case SamplingBounds::UNBOUNDED:
+          mMessage << "SamplingBounds::UNBOUNDED";
+          break;
+        case SamplingBounds::BOUNDED:
+          mMessage << "SamplingBounds::BOUNDED";
+          break;
+        default:
+          mMessage << "Invalid SamplingBounds (" << (int)aBounds << ")";
+          break;
+      }
+    }
+    return *this;
+  }
+  Log& operator<<(SamplingFilter aFilter) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      switch(aFilter) {
+        case SamplingFilter::GOOD:
+          mMessage << "SamplingFilter::GOOD";
+          break;
+        case SamplingFilter::LINEAR:
+          mMessage << "SamplingFilter::LINEAR";
+          break;
+        case SamplingFilter::POINT:
+          mMessage << "SamplingFilter::POINT";
+          break;
+        default:
+          mMessage << "Invalid SamplingFilter (" << (int)aFilter << ")";
+          break;
+      }
+    }
+    return *this;
+  }
+  Log& operator<<(AntialiasMode aMode) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      switch(aMode) {
+        case AntialiasMode::NONE:
+          mMessage << "AntialiasMode::NONE";
+          break;
+        case AntialiasMode::GRAY:
+          mMessage << "AntialiasMode::GRAY";
+          break;
+        case AntialiasMode::SUBPIXEL:
+          mMessage << "AntialiasMode::SUBPIXEL";
+          break;
+        case AntialiasMode::DEFAULT:
+          mMessage << "AntialiasMode::DEFAULT";
+          break;
+        default:
+          mMessage << "Invalid AntialiasMode (" << (int)aMode << ")";
+          break;
+      }
+    }
+    return *this;
+  }
+  Log& operator<<(CompositionOp aOp) {
+    if (MOZ_UNLIKELY(LogIt())) {
+      switch(aOp) {
+        case CompositionOp::OP_OVER:
+          mMessage << "CompositionOp::OP_OVER";
+          break;
+        case CompositionOp::OP_ADD:
+          mMessage << "CompositionOp::OP_ADD";
+          break;
+        case CompositionOp::OP_ATOP:
+          mMessage << "CompositionOp::OP_ATOP";
+          break;
+        case CompositionOp::OP_OUT:
+          mMessage << "CompositionOp::OP_OUT";
+          break;
+        case CompositionOp::OP_IN:
+          mMessage << "CompositionOp::OP_IN";
+          break;
+        case CompositionOp::OP_SOURCE:
+          mMessage << "CompositionOp::OP_SOURCE";
+          break;
+        case CompositionOp::OP_DEST_IN:
+          mMessage << "CompositionOp::OP_DEST_IN";
+          break;
+        case CompositionOp::OP_DEST_OUT:
+          mMessage << "CompositionOp::OP_DEST_OUT";
+          break;
+        case CompositionOp::OP_DEST_OVER:
+          mMessage << "CompositionOp::OP_DEST_OVER";
+          break;
+        case CompositionOp::OP_DEST_ATOP:
+          mMessage << "CompositionOp::OP_DEST_ATOP";
+          break;
+        case CompositionOp::OP_XOR:
+          mMessage << "CompositionOp::OP_XOR";
+          break;
+        case CompositionOp::OP_MULTIPLY:
+          mMessage << "CompositionOp::OP_MULTIPLY";
+          break;
+        case CompositionOp::OP_SCREEN:
+          mMessage << "CompositionOp::OP_SCREEN";
+          break;
+        case CompositionOp::OP_OVERLAY:
+          mMessage << "CompositionOp::OP_OVERLAY";
+          break;
+        case CompositionOp::OP_DARKEN:
+          mMessage << "CompositionOp::OP_DARKEN";
+          break;
+        case CompositionOp::OP_LIGHTEN:
+          mMessage << "CompositionOp::OP_LIGHTEN";
+          break;
+        case CompositionOp::OP_COLOR_DODGE:
+          mMessage << "CompositionOp::OP_COLOR_DODGE";
+          break;
+        case CompositionOp::OP_COLOR_BURN:
+          mMessage << "CompositionOp::OP_COLOR_BURN";
+          break;
+        case CompositionOp::OP_HARD_LIGHT:
+          mMessage << "CompositionOp::OP_HARD_LIGHT";
+          break;
+        case CompositionOp::OP_SOFT_LIGHT:
+          mMessage << "CompositionOp::OP_SOFT_LIGHT";
+          break;
+        case CompositionOp::OP_DIFFERENCE:
+          mMessage << "CompositionOp::OP_DIFFERENCE";
+          break;
+        case CompositionOp::OP_EXCLUSION:
+          mMessage << "CompositionOp::OP_EXCLUSION";
+          break;
+        case CompositionOp::OP_HUE:
+          mMessage << "CompositionOp::OP_HUE";
+          break;
+        case CompositionOp::OP_SATURATION:
+          mMessage << "CompositionOp::OP_SATURATION";
+          break;
+        case CompositionOp::OP_COLOR:
+          mMessage << "CompositionOp::OP_COLOR";
+          break;
+        case CompositionOp::OP_LUMINOSITY:
+          mMessage << "CompositionOp::OP_LUMINOSITY";
+          break;
+        case CompositionOp::OP_COUNT:
+          mMessage << "CompositionOp::OP_COUNT";
+          break;
+        default:
+          mMessage << "Invalid CompositionOp (" << (int)aOp << ")";
+          break;
+      }
+    }
+    return *this;
+  }
   Log& operator<<(SurfaceFormat aFormat) {
     if (MOZ_UNLIKELY(LogIt())) {
       switch(aFormat) {
@@ -467,6 +674,9 @@ public:
         case SurfaceType::TILED:
           mMessage << "SurfaceType::TILED";
           break;
+        case SurfaceType::DATA_SHARED:
+          mMessage << "SurfaceType::DATA_SHARED";
+          break;
         default:
           mMessage << "Invalid SurfaceType (" << (int)aType << ")";
           break;
@@ -501,16 +711,23 @@ private:
       if ((mOptions & int(LogOptions::CrashAction)) && ValidReason()) {
         mMessage << " " << (int)mReason;
       }
-      mMessage << "]: ";
+      if (AutoPrefix()) {
+        mMessage << "]: ";
+      }
     }
   }
 
   void WriteLog(const std::string &aString) {
     if (MOZ_UNLIKELY(LogIt())) {
       Logger::OutputMessage(aString, L, NoNewline());
+      // Assert if required.  We don't have a three parameter MOZ_ASSERT
+      // so use the underlying functions instead (see bug 1281702):
+#ifdef DEBUG
       if (mOptions & int(LogOptions::AssertOnCall)) {
-        MOZ_ASSERT(false, "An assert from the graphics logger");
+        MOZ_ReportAssertionFailure(aString.c_str(), __FILE__, __LINE__);
+        MOZ_CRASH("GFX: An assert from the graphics logger");
       }
+#endif
       if ((mOptions & int(LogOptions::CrashAction)) && ValidReason()) {
         Logger::CrashAction(mReason);
       }
@@ -626,7 +843,10 @@ public:
       return *this;
     }
     if (mStartOfLine) {
-      mLog << '[' << mPrefix << "] " << std::string(mDepth * INDENT_PER_LEVEL, ' ');
+      if (!mPrefix.empty()) {
+        mLog << '[' << mPrefix << "] ";
+      }
+      mLog << std::string(mDepth * INDENT_PER_LEVEL, ' ');
       mStartOfLine = false;
     }
     mLog << aObject;
@@ -640,7 +860,10 @@ public:
   }
 
   void IncreaseIndent() { ++mDepth; }
-  void DecreaseIndent() { --mDepth; }
+  void DecreaseIndent() {
+    MOZ_ASSERT(mDepth > 0);
+    --mDepth;
+  }
 
   void ConditionOnPrefFunction(bool(*aPrefFunction)()) {
     mConditionedOnPref = true;
@@ -678,6 +901,14 @@ public:
   explicit TreeAutoIndent(TreeLog& aTreeLog) : mTreeLog(aTreeLog) {
     mTreeLog.IncreaseIndent();
   }
+
+  TreeAutoIndent(const TreeAutoIndent& aTreeAutoIndent) :
+      mTreeLog(aTreeAutoIndent.mTreeLog) {
+    mTreeLog.IncreaseIndent();
+  }
+
+  TreeAutoIndent& operator=(const TreeAutoIndent& aTreeAutoIndent) = delete;
+
   ~TreeAutoIndent() {
     mTreeLog.DecreaseIndent();
   }

@@ -21,8 +21,9 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(DeviceRotationRate)
 
   DeviceRotationRate(DeviceMotionEvent* aOwner,
-                     Nullable<double> aAlpha, Nullable<double> aBeta,
-                     Nullable<double> aGamma);
+                     const Nullable<double>& aAlpha,
+                     const Nullable<double>& aBeta,
+                     const Nullable<double>& aGamma);
 
   DeviceMotionEvent* GetParentObject() const
   {
@@ -31,7 +32,7 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return DeviceRotationRateBinding::Wrap(aCx, this, aGivenProto);
+    return DeviceRotationRate_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   Nullable<double> GetAlpha() const { return mAlpha; }
@@ -53,8 +54,9 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(DeviceAcceleration)
 
   DeviceAcceleration(DeviceMotionEvent* aOwner,
-                     Nullable<double> aX, Nullable<double> aY,
-                     Nullable<double> aZ);
+                     const Nullable<double>& aX,
+                     const Nullable<double>& aY,
+                     const Nullable<double>& aZ);
 
   DeviceMotionEvent* GetParentObject() const
   {
@@ -63,7 +65,7 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return DeviceAccelerationBinding::Wrap(aCx, this, aGivenProto);
+    return DeviceAcceleration_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   Nullable<double> GetX() const { return mX; }
@@ -91,14 +93,11 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // Forward to Event
-  NS_FORWARD_TO_EVENT
-
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DeviceMotionEvent, Event)
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return DeviceMotionEventBinding::Wrap(aCx, this, aGivenProto);
+    return DeviceMotionEvent_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   DeviceAcceleration* GetAcceleration() const
@@ -128,7 +127,7 @@ public:
          const DeviceAccelerationInit& aAcceleration,
          const DeviceAccelerationInit& aAccelerationIncludingGravity,
          const DeviceRotationRateInit& aRotationRate,
-         Nullable<double> aInterval);
+         const Nullable<double>& aInterval);
 
   void InitDeviceMotionEvent(
          const nsAString& aType,
@@ -137,8 +136,8 @@ public:
          const DeviceAccelerationInit& aAcceleration,
          const DeviceAccelerationInit& aAccelerationIncludingGravity,
          const DeviceRotationRateInit& aRotationRate,
-         Nullable<double> aInterval,
-         Nullable<uint64_t> aTimeStamp);
+         const Nullable<double>& aInterval,
+         const Nullable<uint64_t>& aTimeStamp);
 
   static already_AddRefed<DeviceMotionEvent>
   Constructor(const GlobalObject& aGlobal,

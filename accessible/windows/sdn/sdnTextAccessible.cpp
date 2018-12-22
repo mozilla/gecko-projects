@@ -6,7 +6,7 @@
 
 #include "sdnTextAccessible.h"
 
-#include "ISimpleDOMText_i.c"
+#include "ISimpleDOM.h"
 
 #include "nsCoreUtils.h"
 #include "DocAccessible.h"
@@ -33,8 +33,6 @@ IMPL_IUNKNOWN_QUERY_TAIL_AGGREGATED(mAccessible)
 STDMETHODIMP
 sdnTextAccessible::get_domText(BSTR __RPC_FAR* aText)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aText)
     return E_INVALIDARG;
   *aText = nullptr;
@@ -44,15 +42,12 @@ sdnTextAccessible::get_domText(BSTR __RPC_FAR* aText)
 
   nsAutoString nodeValue;
 
-  nsCOMPtr<nsIDOMNode> DOMNode(do_QueryInterface(mAccessible->GetContent()));
-  DOMNode->GetNodeValue(nodeValue);
+  mAccessible->GetContent()->GetNodeValue(nodeValue);
   if (nodeValue.IsEmpty())
     return S_FALSE;
 
   *aText = ::SysAllocStringLen(nodeValue.get(), nodeValue.Length());
   return *aText ? S_OK : E_OUTOFMEMORY;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
@@ -63,8 +58,6 @@ sdnTextAccessible::get_clippedSubstringBounds(unsigned int aStartIndex,
                                               int __RPC_FAR* aWidth,
                                               int __RPC_FAR* aHeight)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   nscoord x = 0, y = 0, width = 0, height = 0;
   HRESULT rv = get_unclippedSubstringBounds(aStartIndex, aEndIndex,
                                             &x, &y, &width, &height);
@@ -81,13 +74,11 @@ sdnTextAccessible::get_clippedSubstringBounds(unsigned int aStartIndex,
   nsIntRect clippedRect;
   clippedRect.IntersectRect(unclippedRect, docRect);
 
-  *aX = clippedRect.x;
-  *aY = clippedRect.y;
-  *aWidth = clippedRect.width;
-  *aHeight = clippedRect.height;
+  *aX = clippedRect.X();
+  *aY = clippedRect.Y();
+  *aWidth = clippedRect.Width();
+  *aHeight = clippedRect.Height();
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
@@ -98,8 +89,6 @@ sdnTextAccessible::get_unclippedSubstringBounds(unsigned int aStartIndex,
                                                 int __RPC_FAR* aWidth,
                                                 int __RPC_FAR* aHeight)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aX || !aY || !aWidth || !aHeight)
     return E_INVALIDARG;
   *aX = *aY = *aWidth = *aHeight = 0;
@@ -122,29 +111,25 @@ sdnTextAccessible::get_unclippedSubstringBounds(unsigned int aStartIndex,
   for (; iter != stopLoopFrame; iter = iter->GetNextContinuation()) {
     nsRect rect = iter->GetScreenRectInAppUnits();
     nscoord start = (iter == startFrame) ? startPoint.x : 0;
-    nscoord end = (iter == endFrame) ? endPoint.x : rect.width;
-    rect.x += start;
-    rect.width = end - start;
+    nscoord end = (iter == endFrame) ? endPoint.x : rect.Width();
+    rect.MoveByX(start);
+    rect.SetWidth(end - start);
     sum.UnionRect(sum, rect);
   }
 
   nsPresContext* presContext = mAccessible->Document()->PresContext();
-  *aX = presContext->AppUnitsToDevPixels(sum.x);
-  *aY = presContext->AppUnitsToDevPixels(sum.y);
-  *aWidth = presContext->AppUnitsToDevPixels(sum.width);
-  *aHeight = presContext->AppUnitsToDevPixels(sum.height);
+  *aX = presContext->AppUnitsToDevPixels(sum.X());
+  *aY = presContext->AppUnitsToDevPixels(sum.Y());
+  *aWidth = presContext->AppUnitsToDevPixels(sum.Width());
+  *aHeight = presContext->AppUnitsToDevPixels(sum.Height());
 
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 sdnTextAccessible::scrollToSubstring(unsigned int aStartIndex,
                                      unsigned int aEndIndex)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (mAccessible->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
@@ -159,15 +144,11 @@ sdnTextAccessible::scrollToSubstring(unsigned int aStartIndex,
     nsCoreUtils::ScrollSubstringTo(mAccessible->GetFrame(), range,
                                    nsIAccessibleScrollType::SCROLL_TYPE_ANYWHERE);
   return GetHRESULT(rv);
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 sdnTextAccessible::get_fontFamily(BSTR __RPC_FAR* aFontFamily)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aFontFamily)
     return E_INVALIDARG;
   *aFontFamily = nullptr;
@@ -189,8 +170,6 @@ sdnTextAccessible::get_fontFamily(BSTR __RPC_FAR* aFontFamily)
 
   *aFontFamily = ::SysAllocStringLen(name.get(), name.Length());
   return *aFontFamily ? S_OK : E_OUTOFMEMORY;
-
-  A11Y_TRYBLOCK_END
 }
 
 nsIFrame*

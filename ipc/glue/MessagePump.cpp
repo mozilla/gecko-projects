@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,10 +25,6 @@
 #include "nsXULAppAPI.h"
 #include "prthread.h"
 
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
-
 using base::TimeTicks;
 using namespace mozilla::ipc;
 
@@ -39,20 +37,21 @@ static MessagePump::Delegate* gFirstDelegate;
 namespace mozilla {
 namespace ipc {
 
-class DoWorkRunnable final : public nsICancelableRunnable,
+class DoWorkRunnable final : public CancelableRunnable,
                              public nsITimerCallback
 {
 public:
   explicit DoWorkRunnable(MessagePump* aPump)
-  : mPump(aPump)
+    : CancelableRunnable("ipc::DoWorkRunnable")
+    , mPump(aPump)
   {
     MOZ_ASSERT(aPump);
   }
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSITIMERCALLBACK
-  NS_DECL_NSICANCELABLERUNNABLE
+  nsresult Cancel() override;
 
 private:
   ~DoWorkRunnable()
@@ -66,8 +65,8 @@ private:
 } /* namespace ipc */
 } /* namespace mozilla */
 
-MessagePump::MessagePump(nsIThread* aThread)
-: mThread(aThread)
+MessagePump::MessagePump(nsIEventTarget* aEventTarget)
+  : mEventTarget(aEventTarget)
 {
   mDoWorkEvent = new DoWorkRunnable(this);
 }
@@ -81,13 +80,13 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
 {
   MOZ_ASSERT(keep_running_);
   MOZ_RELEASE_ASSERT(NS_IsMainThread(),
-		     "Use mozilla::ipc::MessagePumpForNonMainThreads instead!");
-  MOZ_RELEASE_ASSERT(!mThread);
+                     "Use mozilla::ipc::MessagePumpForNonMainThreads instead!");
+  MOZ_RELEASE_ASSERT(!mEventTarget);
 
   nsIThread* thisThread = NS_GetCurrentThread();
   MOZ_ASSERT(thisThread);
 
-  mDelayedWorkTimer = do_CreateInstance(kNS_TIMER_CID);
+  mDelayedWorkTimer = NS_NewTimer();
   MOZ_ASSERT(mDelayedWorkTimer);
 
   base::ScopedNSAutoreleasePool autoReleasePool;
@@ -106,11 +105,7 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
 
     did_work |= aDelegate->DoDelayedWork(&delayed_work_time_);
 
-if (did_work && delayed_work_time_.is_null()
-#ifdef MOZ_NUWA_PROCESS
-    && (!IsNuwaReady() || !IsNuwaProcess())
-#endif
-   )
+if (did_work && delayed_work_time_.is_null())
       mDelayedWorkTimer->Cancel();
 
     if (!keep_running_)
@@ -130,9 +125,6 @@ if (did_work && delayed_work_time_.is_null()
     NS_ProcessNextEvent(thisThread, true);
   }
 
-#ifdef MOZ_NUWA_PROCESS
-  if (!IsNuwaReady() || !IsNuwaProcess())
-#endif
     mDelayedWorkTimer->Cancel();
 
   keep_running_ = true;
@@ -142,8 +134,8 @@ void
 MessagePump::ScheduleWork()
 {
   // Make sure the event loop wakes up.
-  if (mThread) {
-    mThread->Dispatch(mDoWorkEvent, NS_DISPATCH_NORMAL);
+  if (mEventTarget) {
+    mEventTarget->Dispatch(mDoWorkEvent, NS_DISPATCH_NORMAL);
   } else {
     // Some things (like xpcshell) don't use the app shell and so Run hasn't
     // been called. We still need to wake up the main thread.
@@ -164,18 +156,13 @@ MessagePump::ScheduleWorkForNestedLoop()
 void
 MessagePump::ScheduleDelayedWork(const base::TimeTicks& aDelayedTime)
 {
-#ifdef MOZ_NUWA_PROCESS
-  if (IsNuwaReady() && IsNuwaProcess())
-    return;
-#endif
-
   // To avoid racing on mDelayedWorkTimer, we need to be on the same thread as
   // ::Run().
-  MOZ_RELEASE_ASSERT(NS_GetCurrentThread() == mThread ||
-		     (!mThread && NS_IsMainThread()));
+  MOZ_RELEASE_ASSERT((!mEventTarget && NS_IsMainThread())
+                     || mEventTarget->IsOnCurrentThread());
 
   if (!mDelayedWorkTimer) {
-    mDelayedWorkTimer = do_CreateInstance(kNS_TIMER_CID);
+    mDelayedWorkTimer = NS_NewTimer();
     if (!mDelayedWorkTimer) {
         // Called before XPCOM has started up? We can't do this correctly.
         NS_WARNING("Delayed task might not run!");
@@ -200,6 +187,17 @@ MessagePump::ScheduleDelayedWork(const base::TimeTicks& aDelayedTime)
                                       nsITimer::TYPE_ONE_SHOT);
 }
 
+nsIEventTarget*
+MessagePump::GetXPCOMThread()
+{
+  if (mEventTarget) {
+    return mEventTarget;
+  }
+
+  // Main thread
+  return GetMainThreadEventTarget();
+}
+
 void
 MessagePump::DoDelayedWork(base::MessagePump::Delegate* aDelegate)
 {
@@ -209,8 +207,8 @@ MessagePump::DoDelayedWork(base::MessagePump::Delegate* aDelegate)
   }
 }
 
-NS_IMPL_ISUPPORTS(DoWorkRunnable, nsIRunnable, nsITimerCallback,
-                                  nsICancelableRunnable)
+NS_IMPL_ISUPPORTS_INHERITED(DoWorkRunnable, CancelableRunnable,
+                            nsITimerCallback)
 
 NS_IMETHODIMP
 DoWorkRunnable::Run()
@@ -244,7 +242,7 @@ DoWorkRunnable::Notify(nsITimer* aTimer)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 DoWorkRunnable::Cancel()
 {
   // Workers require cancelable runnables, but we can't really cancel cleanly
@@ -310,14 +308,10 @@ MessagePumpForNonMainThreads::Run(base::MessagePump::Delegate* aDelegate)
   MOZ_RELEASE_ASSERT(!NS_IsMainThread(), "Use mozilla::ipc::MessagePump instead!");
 
   nsIThread* thread = NS_GetCurrentThread();
-  MOZ_RELEASE_ASSERT(mThread == thread);
+  MOZ_RELEASE_ASSERT(mEventTarget->IsOnCurrentThread());
 
-  mDelayedWorkTimer = do_CreateInstance(kNS_TIMER_CID);
+  mDelayedWorkTimer = NS_NewTimer(mEventTarget);
   MOZ_ASSERT(mDelayedWorkTimer);
-
-  if (NS_FAILED(mDelayedWorkTimer->SetTarget(thread))) {
-    MOZ_CRASH("Failed to set timer target!");
-  }
 
   // Chromium event notifications to be processed will be received by this
   // event loop as a DoWorkRunnables via ScheduleWork. Chromium events that
@@ -328,7 +322,7 @@ MessagePumpForNonMainThreads::Run(base::MessagePump::Delegate* aDelegate)
   // Note we would like to request a flush of the chromium event queue
   // using a runnable on the xpcom side, but some thread implementations
   // (dom workers) get cranky if we call ScheduleWork here (ScheduleWork
-  // calls dispatch on mThread) before the thread processes an event. As
+  // calls dispatch on mEventTarget) before the thread processes an event. As
   // such, clear the queue manually.
   while (aDelegate->DoWork()) {
   }
@@ -356,7 +350,8 @@ MessagePumpForNonMainThreads::Run(base::MessagePump::Delegate* aDelegate)
       continue;
     }
 
-    didWork = aDelegate->DoIdleWork();
+    DebugOnly<bool> didIdleWork = aDelegate->DoIdleWork();
+    MOZ_ASSERT(!didIdleWork);
     if (!keep_running_) {
       break;
     }
@@ -418,7 +413,8 @@ MessagePumpForNonMainUIThreads::DoRunLoop()
       continue;
     }
 
-    didWork = state_->delegate->DoIdleWork();
+    DebugOnly<bool> didIdleWork = state_->delegate->DoIdleWork();
+    MOZ_ASSERT(!didIdleWork);
     CHECK_QUIT_STATE
 
     SetInWait();
@@ -437,7 +433,7 @@ MessagePumpForNonMainUIThreads::DoRunLoop()
 }
 
 NS_IMETHODIMP
-MessagePumpForNonMainUIThreads::OnDispatchedEvent(nsIThreadInternal *thread)
+MessagePumpForNonMainUIThreads::OnDispatchedEvent()
 {
   // If our thread is sleeping in DoRunLoop's call to WaitForWork() and an
   // event posts to the nsIThread event queue - break our thread out of
@@ -463,3 +459,29 @@ MessagePumpForNonMainUIThreads::AfterProcessNextEvent(nsIThreadInternal *thread,
 }
 
 #endif // XP_WIN
+
+#if defined(MOZ_WIDGET_ANDROID)
+void
+MessagePumpForAndroidUI::Run(Delegate* delegate)
+{
+  MOZ_CRASH("MessagePumpForAndroidUI should never be Run.");
+}
+
+void
+MessagePumpForAndroidUI::Quit()
+{
+  MOZ_CRASH("MessagePumpForAndroidUI should never be Quit.");
+}
+
+void
+MessagePumpForAndroidUI::ScheduleWork()
+{
+  MOZ_CRASH("MessagePumpForAndroidUI should never ScheduleWork");
+}
+
+void
+MessagePumpForAndroidUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time)
+{
+  MOZ_CRASH("MessagePumpForAndroidUI should never ScheduleDelayedWork");
+}
+#endif // defined(MOZ_WIDGET_ANDROID)

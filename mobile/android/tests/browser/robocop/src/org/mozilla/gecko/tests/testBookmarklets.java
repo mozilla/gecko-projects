@@ -9,7 +9,7 @@ import org.mozilla.gecko.Actions;
 import com.robotium.solo.Condition;
 
 
-public class testBookmarklets extends BaseTest {
+public class testBookmarklets extends OldBaseTest {
     public void testBookmarklets() {
         final String url = getAbsoluteUrl(mStringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         final String title = "alertBookmarklet";
@@ -40,7 +40,7 @@ public class testBookmarklets extends BaseTest {
             public boolean isSatisfied() {
                 return mSolo.searchButton("OK", true) && mSolo.searchText(expected, true);
             }
-        }, 3000);
+        }, 10000);
         mAsserter.is(alerted, true, "Alert was shown for bookmarklet");
     }
 }

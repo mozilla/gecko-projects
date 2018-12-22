@@ -5,10 +5,9 @@
 
 const {PushDB, PushService, PushServiceWebSocket} = serviceExports;
 
-Cu.import("resource://gre/modules/Task.jsm");
 
 const userAgentID = 'aaabf1f8-2f68-44f1-a920-b88e9e7d7559';
-const nsIPushQuotaManager = Components.interfaces.nsIPushQuotaManager;
+const nsIPushQuotaManager = Ci.nsIPushQuotaManager;
 
 function run_test() {
   do_get_profile();
@@ -19,9 +18,9 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test_expiration_origin_threshold() {
+add_task(async function test_expiration_origin_threshold() {
   let db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     PushService.notificationForOriginClosed("https://example.com");
     return db.drop().then(_ => db.close());
   });
@@ -31,7 +30,7 @@ add_task(function* test_expiration_origin_threshold() {
   // as we want.
   PushService.notificationForOriginShown("https://example.com");
 
-  yield db.put({
+  await db.put({
     channelID: 'f56645a9-1f32-4655-92ad-ddc37f6d54fb',
     pushEndpoint: 'https://example.org/push/1',
     scope: 'https://example.com/quota',
@@ -43,10 +42,10 @@ add_task(function* test_expiration_origin_threshold() {
   });
 
   // A visit one day ago should provide a quota of 8 messages.
-  yield PlacesTestUtils.addVisits({
+  await PlacesTestUtils.addVisits({
     uri: 'https://example.com/login',
     title: 'Sign in to see your auctions',
-    visitDate: (Date.now() - 1 * 24 * 60 * 60 * 1000) * 1000,
+    visitDate: (Date.now() - MS_IN_ONE_DAY) * 1000,
     transition: Ci.nsINavHistoryService.TRANSITION_LINK
   });
 
@@ -58,11 +57,19 @@ add_task(function* test_expiration_origin_threshold() {
     return updates == numMessages;
   });
 
+  let modifications = 0;
+  let modifiedPromise = promiseObserverNotification(PushServiceComponent.subscriptionModifiedTopic, (subject, data) => {
+    // Each subscription should be modified twice: once to update the message
+    // count and last push time, and the second time to update the quota.
+    modifications++;
+    return modifications == numMessages * 2;
+  });
+
   let updateQuotaPromise = new Promise((resolve, reject) => {
     let quotaUpdateCount = 0;
     PushService._updateQuotaTestCallback = function() {
       quotaUpdateCount++;
-      if (quotaUpdateCount == 10) {
+      if (quotaUpdateCount == numMessages) {
         resolve();
       }
     };
@@ -70,7 +77,6 @@ add_task(function* test_expiration_origin_threshold() {
 
   PushService.init({
     serverURI: 'wss://push.example.org/',
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -103,10 +109,11 @@ add_task(function* test_expiration_origin_threshold() {
     },
   });
 
-  yield notifyPromise;
+  await notifyPromise;
 
-  yield updateQuotaPromise;
+  await updateQuotaPromise;
+  await modifiedPromise;
 
-  let expiredRecord = yield db.getByKeyID('f56645a9-1f32-4655-92ad-ddc37f6d54fb');
+  let expiredRecord = await db.getByKeyID('f56645a9-1f32-4655-92ad-ddc37f6d54fb');
   notStrictEqual(expiredRecord.quota, 0, 'Expired record not updated');
 });

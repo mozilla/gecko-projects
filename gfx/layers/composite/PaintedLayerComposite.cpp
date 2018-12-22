@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,8 +12,9 @@
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
+#include "mozilla/gfx/Polygon.h"        // for Polygon
 #include "mozilla/gfx/Rect.h"           // for RoundedToInt, Rect
-#include "mozilla/gfx/Types.h"          // for Filter::Filter::LINEAR
+#include "mozilla/gfx/Types.h"          // for SamplingFilter::LINEAR
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/ContentHost.h"  // for ContentHost
 #include "mozilla/layers/Effects.h"     // for EffectChain
@@ -79,36 +81,27 @@ PaintedLayerComposite::GetLayer()
 }
 
 void
-PaintedLayerComposite::SetLayerManager(LayerManagerComposite* aManager)
+PaintedLayerComposite::SetLayerManager(HostLayerManager* aManager)
 {
   LayerComposite::SetLayerManager(aManager);
   mManager = aManager;
   if (mBuffer && mCompositor) {
-    mBuffer->SetCompositor(mCompositor);
+    mBuffer->SetTextureSourceProvider(mCompositor);
   }
-}
-
-LayerRenderState
-PaintedLayerComposite::GetRenderState()
-{
-  if (!mBuffer || !mBuffer->IsAttached() || mDestroyed) {
-    return LayerRenderState();
-  }
-  return mBuffer->GetRenderState();
 }
 
 void
-PaintedLayerComposite::RenderLayer(const gfx::IntRect& aClipRect)
+PaintedLayerComposite::RenderLayer(const gfx::IntRect& aClipRect,
+                                   const Maybe<gfx::Polygon>& aGeometry)
 {
   if (!mBuffer || !mBuffer->IsAttached()) {
     return;
   }
-  PROFILER_LABEL("PaintedLayerComposite", "RenderLayer",
-    js::ProfileEntry::Category::GRAPHICS);
+  AUTO_PROFILER_LABEL("PaintedLayerComposite::RenderLayer", GRAPHICS);
 
   Compositor* compositor = mCompositeManager->GetCompositor();
 
-  MOZ_ASSERT(mBuffer->GetCompositor() == compositor &&
+  MOZ_ASSERT(mBuffer->GetTextureSourceProvider() == compositor &&
              mBuffer->GetLayer() == this,
              "buffer is corrupted");
 
@@ -123,17 +116,14 @@ PaintedLayerComposite::RenderLayer(const gfx::IntRect& aClipRect)
   }
 #endif
 
-
   RenderWithAllMasks(this, compositor, aClipRect,
-                     [&](EffectChain& effectChain, const gfx::Rect& clipRect) {
+                     [&](EffectChain& effectChain,
+                     const gfx::IntRect& clipRect) {
     mBuffer->SetPaintWillResample(MayResample());
 
-    mBuffer->Composite(this, effectChain,
-                       GetEffectiveOpacity(),
-                       GetEffectiveTransform(),
-                       GetEffectFilter(),
-                       clipRect,
-                       &visibleRegion);
+    mBuffer->Composite(compositor, this, effectChain, GetEffectiveOpacity(),
+                       GetEffectiveTransform(), GetSamplingFilter(),
+                       clipRect, &visibleRegion, aGeometry);
   });
 
   mBuffer->BumpFlashCounter();
@@ -160,11 +150,20 @@ PaintedLayerComposite::CleanupResources()
   mBuffer = nullptr;
 }
 
+bool
+PaintedLayerComposite::IsOpaque()
+{
+  if (!mBuffer || !mBuffer->IsAttached()) {
+    return false;
+  }
+  return PaintedLayer::IsOpaque();
+}
+
 void
 PaintedLayerComposite::GenEffectChain(EffectChain& aEffect)
 {
   aEffect.mLayerRef = this;
-  aEffect.mPrimaryEffect = mBuffer->GenEffect(GetEffectFilter());
+  aEffect.mPrimaryEffect = mBuffer->GenEffect(GetSamplingFilter());
 }
 
 void
@@ -178,6 +177,17 @@ PaintedLayerComposite::PrintInfo(std::stringstream& aStream, const char* aPrefix
     mBuffer->PrintInfo(aStream, pfx.get());
   }
 }
+
+const gfx::TiledIntRegion&
+PaintedLayerComposite::GetInvalidRegion()
+{
+  if (mBuffer) {
+    nsIntRegion region = mInvalidRegion.GetRegion();
+    mBuffer->AddAnimationInvalidation(region);
+  }
+  return mInvalidRegion;
+}
+
 
 } // namespace layers
 } // namespace mozilla

@@ -34,7 +34,9 @@ public:
   // (no public constructor - use ImageFactory)
 
   // Methods inherited from Image
-  virtual size_t SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf)
+  nsresult GetNativeSizes(nsTArray<gfx::IntSize>& aNativeSizes) const override;
+  size_t GetNativeSizesLength() const override;
+  virtual size_t SizeOfSourceWithComputedFallback(SizeOfState& aState)
     const override;
   virtual void CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
                                      MallocSizeOf aMallocSizeOf) const override;
@@ -49,7 +51,7 @@ public:
                                        nsresult aResult,
                                        bool aLastPart) override;
 
-  void OnSurfaceDiscarded() override;
+  virtual void OnSurfaceDiscarded(const SurfaceKey& aSurfaceKey) override;
 
   /**
    * Callback for SVGRootRenderingObserver.
@@ -71,17 +73,51 @@ public:
   virtual void ReportUseCounters() override;
 
 protected:
-  explicit VectorImage(ImageURL* aURI = nullptr);
+  explicit VectorImage(nsIURI* aURI = nullptr);
   virtual ~VectorImage();
 
   virtual nsresult StartAnimation() override;
   virtual nsresult StopAnimation() override;
   virtual bool     ShouldAnimate() override;
 
-  void CreateSurfaceAndShow(const SVGDrawingParameters& aParams);
+private:
+  Tuple<ImgDrawResult, IntSize, RefPtr<SourceSurface>>
+    GetFrameInternal(const IntSize& aSize,
+                     const Maybe<SVGImageContext>& aSVGContext,
+                     uint32_t aWhichFrame,
+                     uint32_t aFlags) override;
+
+  IntSize GetImageContainerSize(layers::LayerManager* aManager,
+                                const IntSize& aSize,
+                                uint32_t aFlags) override;
+
+  /// Attempt to find a matching cached surface in the SurfaceCache.
+  already_AddRefed<SourceSurface>
+    LookupCachedSurface(const IntSize& aSize,
+                        const Maybe<SVGImageContext>& aSVGContext,
+                        uint32_t aFlags);
+
+  bool MaybeRestrictSVGContext(Maybe<SVGImageContext>& aNewSVGContext,
+                               const Maybe<SVGImageContext>& aSVGContext,
+                               uint32_t aFlags);
+
+  /// Create a gfxDrawable which callbacks into the SVG document.
+  already_AddRefed<gfxDrawable>
+    CreateSVGDrawable(const SVGDrawingParameters& aParams);
+
+  /// Rasterize the SVG into a surface. aWillCache will be set to whether or
+  /// not the new surface was put into the cache.
+  already_AddRefed<SourceSurface>
+    CreateSurface(const SVGDrawingParameters& aParams,
+                  gfxDrawable* aSVGDrawable,
+                  bool& aWillCache);
+
+  /// Send a frame complete notification if appropriate. Must be called only
+  /// after all drawing has been completed.
+  void SendFrameComplete(bool aDidCache, uint32_t aFlags);
+
   void Show(gfxDrawable* aDrawable, const SVGDrawingParameters& aParams);
 
-private:
   nsresult Init(const char* aMimeType, uint32_t aFlags);
 
   /**

@@ -61,25 +61,21 @@ nsChromeRegistryContent::RegisterPackage(const ChromePackage& aPackage)
   if (aPackage.contentBaseURI.spec.Length()) {
     nsresult rv = NS_NewURI(getter_AddRefs(content),
                             aPackage.contentBaseURI.spec,
-                            aPackage.contentBaseURI.charset.get(),
-                            nullptr, io);
+                            nullptr, nullptr, io);
     if (NS_FAILED(rv))
       return;
   }
   if (aPackage.localeBaseURI.spec.Length()) {
     nsresult rv = NS_NewURI(getter_AddRefs(locale),
                             aPackage.localeBaseURI.spec,
-                            aPackage.localeBaseURI.charset.get(),
-                            nullptr, io);
+                            nullptr, nullptr, io);
     if (NS_FAILED(rv))
       return;
   }
   if (aPackage.skinBaseURI.spec.Length()) {
-    nsCOMPtr<nsIURI> skinBaseURI;
     nsresult rv = NS_NewURI(getter_AddRefs(skin),
                             aPackage.skinBaseURI.spec,
-                            aPackage.skinBaseURI.charset.get(),
-                            nullptr, io);
+                            nullptr, nullptr, io);
     if (NS_FAILED(rv))
       return;
   }
@@ -104,22 +100,21 @@ nsChromeRegistryContent::RegisterSubstitution(const SubstitutionMapping& aSubsti
   nsresult rv = io->GetProtocolHandler(aSubstitution.scheme.get(), getter_AddRefs(ph));
   if (NS_FAILED(rv))
     return;
-  
+
   nsCOMPtr<nsISubstitutingProtocolHandler> sph (do_QueryInterface(ph));
   if (!sph)
     return;
 
   nsCOMPtr<nsIURI> resolvedURI;
   if (aSubstitution.resolvedURI.spec.Length()) {
-    nsresult rv = NS_NewURI(getter_AddRefs(resolvedURI),
-                            aSubstitution.resolvedURI.spec,
-                            aSubstitution.resolvedURI.charset.get(),
-                            nullptr, io);
+    rv = NS_NewURI(getter_AddRefs(resolvedURI),
+                   aSubstitution.resolvedURI.spec,
+                   nullptr, nullptr, io);
     if (NS_FAILED(rv))
       return;
   }
 
-  rv = sph->SetSubstitution(aSubstitution.path, resolvedURI);
+  rv = sph->SetSubstitutionWithFlags(aSubstitution.path, resolvedURI, aSubstitution.flags);
   if (NS_FAILED(rv))
     return;
 }
@@ -134,16 +129,15 @@ nsChromeRegistryContent::RegisterOverride(const OverrideMapping& aOverride)
   nsCOMPtr<nsIURI> chromeURI, overrideURI;
   nsresult rv = NS_NewURI(getter_AddRefs(chromeURI),
                           aOverride.originalURI.spec,
-                          aOverride.originalURI.charset.get(),
-                          nullptr, io);
+                          nullptr, nullptr, io);
   if (NS_FAILED(rv))
     return;
 
   rv = NS_NewURI(getter_AddRefs(overrideURI), aOverride.overrideURI.spec,
-                 aOverride.overrideURI.charset.get(), nullptr, io);
+                 nullptr, nullptr, io);
   if (NS_FAILED(rv))
     return;
-  
+
   mOverrideTable.Put(chromeURI, overrideURI);
 }
 
@@ -184,7 +178,7 @@ nsChromeRegistryContent::GetFlagsFromPackage(const nsCString& aPackage,
 // All functions following only make sense in chrome, and therefore assert
 
 #define CONTENT_NOTREACHED() \
-  NS_NOTREACHED("Content should not be calling this")
+  MOZ_ASSERT_UNREACHABLE("Content should not be calling this")
 
 #define CONTENT_NOT_IMPLEMENTED() \
   CONTENT_NOTREACHED();           \
@@ -223,6 +217,7 @@ nsChromeRegistryContent::IsLocaleRTL(const nsACString& aPackage,
 
 NS_IMETHODIMP
 nsChromeRegistryContent::GetSelectedLocale(const nsACString& aPackage,
+                                           bool aAsBCP47,
                                            nsACString& aLocale)
 {
   if (aPackage != nsDependentCString("global")) {
@@ -230,9 +225,12 @@ nsChromeRegistryContent::GetSelectedLocale(const nsACString& aPackage,
     return NS_ERROR_NOT_AVAILABLE;
   }
   aLocale = mLocale;
+  if (aAsBCP47) {
+    SanitizeForBCP47(aLocale);
+  }
   return NS_OK;
 }
-  
+
 NS_IMETHODIMP
 nsChromeRegistryContent::Observe(nsISupports* aSubject, const char* aTopic,
                                  const char16_t* aData)
@@ -241,20 +239,8 @@ nsChromeRegistryContent::Observe(nsISupports* aSubject, const char* aTopic,
 }
 
 NS_IMETHODIMP
-nsChromeRegistryContent::GetStyleOverlays(nsIURI *aChromeURL,
-                                          nsISimpleEnumerator **aResult)
-{
-  CONTENT_NOT_IMPLEMENTED();
-}
-
-NS_IMETHODIMP
 nsChromeRegistryContent::GetXULOverlays(nsIURI *aChromeURL,
                                         nsISimpleEnumerator **aResult)
-{
-  CONTENT_NOT_IMPLEMENTED();
-}
-
-nsresult nsChromeRegistryContent::UpdateSelectedLocale()
 {
   CONTENT_NOT_IMPLEMENTED();
 }
@@ -286,14 +272,6 @@ nsChromeRegistryContent::ManifestSkin(ManifestProcessingContext& cx,
 void
 nsChromeRegistryContent::ManifestOverlay(ManifestProcessingContext& cx, int lineno,
                                          char *const * argv, int flags)
-{
-  CONTENT_NOTREACHED();
-}
-
-void
-nsChromeRegistryContent::ManifestStyle(ManifestProcessingContext& cx,
-                                       int lineno,
-                                       char *const * argv, int flags)
 {
   CONTENT_NOTREACHED();
 }

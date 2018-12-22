@@ -5,47 +5,33 @@
 "use strict";
 
 const { Ci } = require("chrome");
-loader.lazyRequireGetter(this, "getOuterId", "sdk/window/utils", true);
-loader.lazyRequireGetter(this, "getBrowserForTab", "sdk/tabs/utils", true);
+
+loader.lazyRequireGetter(this, "CommandState",
+  "devtools/shared/gcli/command-state", true);
 
 var telemetry;
 try {
   const Telemetry = require("devtools/client/shared/telemetry");
   telemetry = new Telemetry();
-} catch(e) {
+} catch (e) {
   // DevTools Telemetry module only available in Firefox
 }
-
-const EventEmitter = require("devtools/shared/event-emitter");
-const eventEmitter = new EventEmitter();
 
 const gcli = require("gcli/index");
 const l10n = require("gcli/l10n");
 
-const enabledPaintFlashing = new Set();
-
-const isCheckedFor = (tab) =>
-  tab ? enabledPaintFlashing.has(getBrowserForTab(tab).outerWindowID) : false;
-
 /**
  * Fire events and telemetry when paintFlashing happens
  */
-function onPaintFlashingChanged(target, state) {
-  const { flashing, id } = state;
-
+function onPaintFlashingChanged(target, flashing) {
   if (flashing) {
-    enabledPaintFlashing.add(id);
+    CommandState.enableForTarget(target, "paintflashing");
   } else {
-    enabledPaintFlashing.delete(id);
+    CommandState.disableForTarget(target, "paintflashing");
   }
 
-  eventEmitter.emit("changed", { target: target });
-  function fireChange() {
-    eventEmitter.emit("changed", { target: target });
-  }
-
-  target.off("navigate", fireChange);
-  target.once("navigate", fireChange);
+  target.once("will-navigate", () =>
+    CommandState.disableForTarget(target, "paintflashing"));
 
   if (!telemetry) {
     return;
@@ -115,7 +101,7 @@ exports.items = [
         }
       ]
     }],
-    exec: function*(args, context) {
+    exec: function* (args, context) {
       if (!args.chrome) {
         const output = yield context.updateExec("paintflashing_server --state on");
 
@@ -144,7 +130,7 @@ exports.items = [
         }
       ]
     }],
-    exec: function*(args, context) {
+    exec: function* (args, context) {
       if (!args.chrome) {
         const output = yield context.updateExec("paintflashing_server --state off");
 
@@ -160,16 +146,16 @@ exports.items = [
     name: "paintflashing toggle",
     hidden: true,
     buttonId: "command-button-paintflashing",
-    buttonClass: "command-button command-button-invertable",
+    buttonClass: "command-button",
     state: {
-      isChecked: ({_tab}) => isCheckedFor(_tab),
-      onChange: (_, handler) => eventEmitter.on("changed", handler),
-      offChange: (_, handler) => eventEmitter.off("changed", handler),
+      isChecked: (target) => CommandState.isEnabledForTarget(target, "paintflashing"),
+      onChange: (_, handler) => CommandState.on("changed", handler),
+      offChange: (_, handler) => CommandState.off("changed", handler),
     },
     tooltipText: l10n.lookup("paintflashingTooltip"),
     description: l10n.lookup("paintflashingToggleDesc"),
     manual: l10n.lookup("paintflashingManual"),
-    exec: function*(args, context) {
+    exec: function* (args, context) {
       const output = yield context.updateExec("paintflashing_server --state toggle");
 
       onPaintFlashingChanged(context.environment.target, output.data);
@@ -191,11 +177,9 @@ exports.items = [
     ],
     returnType: "paintFlashingState",
     exec: function(args, context) {
-      let { window } = context.environment;
-      let id = getOuterId(window);
-      let flashing = setPaintFlashing(window, args.state);
+      const { window } = context.environment;
 
-      return { flashing, id };
+      return setPaintFlashing(window, args.state);
     }
   }
 ];

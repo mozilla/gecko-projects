@@ -7,13 +7,19 @@
 #define GFX_GLYPHEXTENTS_H
 
 #include "gfxFont.h"
+#include "gfxRect.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
 #include "nsTArray.h"
 #include "mozilla/MemoryReporting.h"
 
 class gfxContext;
-struct gfxRect;
+
+namespace mozilla {
+namespace gfx {
+class DrawTarget;
+} // namespace gfx
+} // namespace mozilla
 
 /**
  * This stores glyph bounds information for a particular gfxFont, at
@@ -29,6 +35,8 @@ struct gfxRect;
  * assumed to be zero.
  */
 class gfxGlyphExtents {
+    typedef mozilla::gfx::DrawTarget DrawTarget;
+
 public:
     explicit gfxGlyphExtents(int32_t aAppUnitsPerDevUnit) :
         mAppUnitsPerDevUnit(aAppUnitsPerDevUnit) {

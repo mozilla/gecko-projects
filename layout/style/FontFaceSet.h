@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,20 +10,21 @@
 #include "mozilla/dom/FontFace.h"
 #include "mozilla/dom/FontFaceSetBinding.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "gfxUserFontSet.h"
-#include "nsCSSRules.h"
 #include "nsICSSLoaderObserver.h"
 
 struct gfxFontFaceSrc;
+class gfxFontSrcPrincipal;
 class gfxUserFontEntry;
 class nsFontFaceLoader;
 class nsIPrincipal;
 class nsPIDOMWindowInner;
+struct RawServoFontFaceRule;
 
 namespace mozilla {
-namespace css {
-class FontFamilyListRefCnt;
-} // namespace css
+class PostTraversalTask;
+class SharedFontList;
 namespace dom {
 class FontFace;
 class Promise;
@@ -36,6 +38,7 @@ class FontFaceSet final : public DOMEventTargetHelper
                         , public nsIDOMEventListener
                         , public nsICSSLoaderObserver
 {
+  friend class mozilla::PostTraversalTask;
   friend class UserFontSet;
 
 public:
@@ -61,18 +64,26 @@ public:
 
     FontFaceSet* GetFontFaceSet() { return mFontFaceSet; }
 
-    virtual nsresult CheckFontLoad(const gfxFontFaceSrc* aFontFaceSrc,
-                                   nsIPrincipal** aPrincipal,
-                                   bool* aBypassCache) override;
+    gfxFontSrcPrincipal* GetStandardFontLoadPrincipal() const final
+    {
+      return mFontFaceSet ? mFontFaceSet->mStandardFontLoadPrincipal.get() : nullptr;
+    }
 
-    virtual bool IsFontLoadAllowed(nsIURI* aFontLocation,
-                                   nsIPrincipal* aPrincipal) override;
+    bool IsFontLoadAllowed(const gfxFontFaceSrc&) final;
+
+    void DispatchFontLoadViolations(
+		  nsTArray<nsCOMPtr<nsIRunnable>>& aViolations) override;
 
     virtual nsresult StartLoad(gfxUserFontEntry* aUserFontEntry,
                                const gfxFontFaceSrc* aFontFaceSrc) override;
 
     void RecordFontLoadDone(uint32_t aFontSize,
                             mozilla::TimeStamp aDoneTime) override;
+
+    bool BypassCache() final
+    {
+      return mFontFaceSet && mFontFaceSet->mBypassCache;
+    }
 
   protected:
     virtual bool GetPrivateBrowsing() override;
@@ -85,15 +96,17 @@ public:
                                 uint32_t aFlags = nsIScriptError::errorFlag,
                                 nsresult aStatus = NS_OK) override;
     virtual void DoRebuildUserFontSet() override;
-    virtual already_AddRefed<gfxUserFontEntry> CreateUserFontEntry(
+    already_AddRefed<gfxUserFontEntry> CreateUserFontEntry(
                                    const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
-                                   uint32_t aWeight,
-                                   int32_t aStretch,
-                                   uint8_t aStyle,
+                                   WeightRange aWeight,
+                                   StretchRange aStretch,
+                                   SlantStyleRange aStyle,
                                    const nsTArray<gfxFontFeature>& aFeatureSettings,
+                                   const nsTArray<gfxFontVariation>& aVariationSettings,
                                    uint32_t aLanguageOverride,
-                                   gfxSparseBitSet* aUnicodeRanges,
-                                   uint8_t aFontDisplay) override;
+                                   gfxCharacterMap* aUnicodeRanges,
+                                   uint8_t aFontDisplay,
+                                   RangeFlags aRangeFlags) override;
 
   private:
     RefPtr<FontFaceSet> mFontFaceSet;
@@ -118,7 +131,7 @@ public:
   nsPresContext* GetPresContext();
 
   // search for @font-face rule that matches a platform font entry
-  nsCSSFontFaceRule* FindRuleForEntry(gfxFontEntry* aFontEntry);
+  RawServoFontFaceRule* FindRuleForEntry(gfxFontEntry* aFontEntry);
 
   void IncrementGeneration(bool aIsRebuild = false);
 
@@ -126,7 +139,7 @@ public:
    * Finds an existing entry in the user font cache or creates a new user
    * font entry for the given FontFace object.
    */
-  already_AddRefed<gfxUserFontEntry>
+  static already_AddRefed<gfxUserFontEntry>
     FindOrCreateUserFontEntryFromFontFace(FontFace* aFontFace);
 
   /**
@@ -148,7 +161,7 @@ public:
   static bool PrefEnabled();
 
   // nsICSSLoaderObserver
-  NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheetHandle aSheet,
+  NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheet* aSheet,
                               bool aWasAlternate,
                               nsresult aStatus) override;
 
@@ -161,6 +174,10 @@ public:
     FontFaceSet* set = static_cast<UserFontSet*>(aUserFontSet)->mFontFaceSet;
     return set ? set->GetPresContext() : nullptr;
   }
+
+  void RefreshStandardFontLoadPrincipal();
+
+  nsIDocument* Document() const { return mDocument; }
 
   // -- Web IDL --------------------------------------------------------------
 
@@ -177,7 +194,7 @@ public:
   mozilla::dom::Promise* GetReady(mozilla::ErrorResult& aRv);
   mozilla::dom::FontFaceSetLoadStatus Status();
 
-  FontFaceSet* Add(FontFace& aFontFace, mozilla::ErrorResult& aRv);
+  void Add(FontFace& aFontFace, mozilla::ErrorResult& aRv);
   void Clear();
   bool Delete(FontFace& aFontFace);
   bool Has(FontFace& aFontFace);
@@ -187,6 +204,9 @@ public:
   void ForEach(JSContext* aCx, FontFaceSetForEachCallback& aCallback,
                JS::Handle<JS::Value> aThisArg,
                mozilla::ErrorResult& aRv);
+
+  // For ServoStyleSet to know ahead of time whether a font is loadable.
+  void CacheFontLoadability();
 
 private:
   ~FontFaceSet();
@@ -232,7 +252,7 @@ private:
    */
   void DispatchLoadingFinishedEvent(
                                 const nsAString& aType,
-                                const nsTArray<FontFace*>& aFontFaces);
+                                nsTArray<OwningNonNull<FontFace>>&& aFontFaces);
 
   // Note: if you add new cycle collected objects to FontFaceRecord,
   // make sure to update FontFaceSet's cycle collection macros
@@ -247,21 +267,23 @@ private:
     bool mLoadEventShouldFire;
   };
 
-  already_AddRefed<gfxUserFontEntry> FindOrCreateUserFontEntryFromFontFace(
+  static already_AddRefed<gfxUserFontEntry> FindOrCreateUserFontEntryFromFontFace(
                                                    const nsAString& aFamilyName,
                                                    FontFace* aFontFace,
                                                    SheetType aSheetType);
 
   // search for @font-face rule that matches a userfont font entry
-  nsCSSFontFaceRule* FindRuleForUserFontEntry(gfxUserFontEntry* aUserFontEntry);
+  RawServoFontFaceRule* FindRuleForUserFontEntry(gfxUserFontEntry* aUserFontEntry);
 
   nsresult StartLoad(gfxUserFontEntry* aUserFontEntry,
                      const gfxFontFaceSrc* aFontFaceSrc);
+  gfxFontSrcPrincipal* GetStandardFontLoadPrincipal();
   nsresult CheckFontLoad(const gfxFontFaceSrc* aFontFaceSrc,
-                         nsIPrincipal** aPrincipal,
+                         gfxFontSrcPrincipal** aPrincipal,
                          bool* aBypassCache);
-  bool IsFontLoadAllowed(nsIURI* aFontLocation, nsIPrincipal* aPrincipal);
-  bool GetPrivateBrowsing();
+  bool IsFontLoadAllowed(const gfxFontFaceSrc& aSrc);
+
+  void DispatchFontLoadViolations(nsTArray<nsCOMPtr<nsIRunnable>>& aViolations);
   nsresult SyncLoadFontData(gfxUserFontEntry* aFontToLoad,
                             const gfxFontFaceSrc* aFontFaceSrc,
                             uint8_t*& aBuffer,
@@ -270,7 +292,7 @@ private:
                       const char* aMessage,
                       uint32_t aFlags,
                       nsresult aStatus);
-  void RebuildUserFontSet();
+  void MarkUserFontSetDirty();
 
   void InsertRuleFontFace(FontFace* aFontFace, SheetType aSheetType,
                           nsTArray<FontFaceRecord>& aOldRecords,
@@ -286,20 +308,26 @@ private:
    */
   bool HasLoadingFontFaces();
 
+  // Whether mReady is pending, or would be when created.
+  bool ReadyPromiseIsPending() const;
+
   // Helper function for HasLoadingFontFaces.
   void UpdateHasLoadingFontFaces();
 
   void ParseFontShorthandForMatching(
               const nsAString& aFont,
-              RefPtr<mozilla::css::FontFamilyListRefCnt>& aFamilyList,
-              uint32_t& aWeight,
-              int32_t& aStretch,
-              uint8_t& aStyle,
+              RefPtr<SharedFontList>& aFamilyList,
+              FontWeight& aWeight,
+              FontStretch& aStretch,
+              FontSlantStyle& aStyle,
               ErrorResult& aRv);
   void FindMatchingFontFaces(const nsAString& aFont,
                              const nsAString& aText,
                              nsTArray<FontFace*>& aFontFaces,
                              mozilla::ErrorResult& aRv);
+
+  void DispatchLoadingEventAndReplaceReadyPromise();
+  void DispatchCheckLoadingFinishedAfterDelay();
 
   TimeStamp GetNavigationStartTimeStamp();
 
@@ -308,13 +336,29 @@ private:
   // The document this is a FontFaceSet for.
   nsCOMPtr<nsIDocument> mDocument;
 
+  // The document's node principal, which is the principal font loads for
+  // this FontFaceSet will generally use.  (This principal is not used for
+  // @font-face rules in UA and user sheets, where the principal of the
+  // sheet is used instead.)
+  //
+  // This field is used from GetStandardFontLoadPrincipal.  When on a
+  // style worker thread, we use mStandardFontLoadPrincipal assuming
+  // it is up to date.
+  //
+  // Because mDocument's principal can change over time,
+  // its value must be updated by a call to ResetStandardFontLoadPrincipal.
+  RefPtr<gfxFontSrcPrincipal> mStandardFontLoadPrincipal;
+
   // A Promise that is fulfilled once all of the FontFace objects
   // in mRuleFaces and mNonRuleFaces that started or were loading at the
   // time the Promise was created have finished loading.  It is rejected if
   // any of those fonts failed to load.  mReady is replaced with
   // a new Promise object whenever mReady is settled and another
   // FontFace in mRuleFaces or mNonRuleFaces starts to load.
+  // Note that mReady is created lazily when GetReady() is called.
   RefPtr<mozilla::dom::Promise> mReady;
+  // Whether the ready promise must be resolved when it's created.
+  bool mResolveLazilyCreatedReadyPromise;
 
   // Set of all loaders pointing to us. These are not strong pointers,
   // but that's OK because nsFontFaceLoader always calls RemoveLoader on
@@ -331,6 +375,14 @@ private:
   // The overall status of the loading or loaded fonts in the FontFaceSet.
   mozilla::dom::FontFaceSetLoadStatus mStatus;
 
+  // A map from gfxFontFaceSrc pointer identity to whether the load is allowed
+  // by CSP or other checks. We store this here because querying CSP off the
+  // main thread is not a great idea.
+  //
+  // We could use just the pointer and use this as a hash set, but then we'd
+  // have no way to verify that we've checked all the loads we should.
+  nsDataHashtable<nsPtrHashKey<const gfxFontFaceSrc>, bool> mAllowedFontLoads;
+
   // Whether mNonRuleFaces has changed since last time UpdateRules ran.
   bool mNonRuleFacesDirty;
 
@@ -345,6 +397,14 @@ private:
   // Whether CheckLoadingFinished calls should be ignored.  See comment in
   // OnFontFaceStatusChanged.
   bool mDelayedLoadCheck;
+
+  // Whether the docshell for our document indicated that loads should
+  // bypass the cache.
+  bool mBypassCache;
+
+  // Whether the docshell for our document indicates that we are in private
+  // browsing mode.
+  bool mPrivateBrowsing;
 };
 
 } // namespace dom

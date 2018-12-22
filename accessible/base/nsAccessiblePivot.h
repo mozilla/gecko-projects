@@ -10,7 +10,6 @@
 #include "nsIAccessiblePivot.h"
 
 #include "Accessible-inl.h"
-#include "nsAutoPtr.h"
 #include "nsTObserverArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
@@ -36,6 +35,10 @@ public:
    * A simple getter for the pivot's position.
    */
   Accessible* Position() { return mPosition; }
+
+  int32_t StartOffset() { return mStartOffset; }
+
+  int32_t EndOffset() { return mEndOffset; }
 
 private:
   ~nsAccessiblePivot();

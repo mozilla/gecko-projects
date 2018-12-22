@@ -1,16 +1,10 @@
-///////////////////
-//
-// Whitelisting this test.
-// As part of bug 1077403, the leaking uncaught rejection should be fixed.
-//
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: this.docShell is null");
-
-
-// ----------------------------------------------------------------------------
 // Test whether a request for auth for an XPI switches to the appropriate tab
 var gNewTab;
 
 function test() {
+  // Turn off the authentication dialog blocking for this test.
+  Services.prefs.setBoolPref("network.auth.non-web-content-triggered-resources-http-auth-allow", true);
+
   Harness.authenticationCallback = get_auth_info;
   Harness.downloadFailedCallback = download_failed;
   Harness.installEndedCallback = install_ended;
@@ -23,7 +17,7 @@ function test() {
   var triggers = encodeURIComponent(JSON.stringify({
     "Unsigned XPI": TESTROOT + "authRedirect.sjs?" + TESTROOT + "amosigned.xpi"
   }));
-  gNewTab = gBrowser.addTab();
+  gNewTab = BrowserTestUtils.addTab(gBrowser);
   gBrowser.getBrowserForTab(gNewTab).loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
@@ -42,11 +36,13 @@ function install_ended(install, addon) {
 
 function finish_test(count) {
   is(count, 1, "1 Add-on should have been successfully installed");
-  var authMgr = Components.classes['@mozilla.org/network/http-auth-manager;1']
-                          .getService(Components.interfaces.nsIHttpAuthManager);
+  var authMgr = Cc["@mozilla.org/network/http-auth-manager;1"]
+                  .getService(Ci.nsIHttpAuthManager);
   authMgr.clearAll();
 
   Services.perms.remove(makeURI("http://example.com"), "install");
+
+  Services.prefs.clearUserPref("network.auth.non-web-content-triggered-resources-http-auth-allow");
 
   gBrowser.removeTab(gNewTab);
   Harness.finish();

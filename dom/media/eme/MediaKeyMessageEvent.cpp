@@ -6,7 +6,7 @@
 
 #include "mozilla/dom/MediaKeyMessageEvent.h"
 #include "mozilla/dom/MediaKeyMessageEventBinding.h"
-#include "js/GCAPI.h"
+#include "js/RootingAPI.h"
 #include "jsfriendapi.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/PrimitiveConversions.h"
@@ -35,11 +35,12 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaKeyMessageEvent, Event)
   mozilla::DropJSObjects(this);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaKeyMessageEvent)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaKeyMessageEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
 
 MediaKeyMessageEvent::MediaKeyMessageEvent(EventTarget* aOwner)
   : Event(aOwner, nullptr, nullptr)
+  , mMessageType(static_cast<MediaKeyMessageType>(0))
 {
   mozilla::HoldJSObjects(this);
 }
@@ -59,7 +60,7 @@ MediaKeyMessageEvent::AsMediaKeyMessageEvent()
 JSObject*
 MediaKeyMessageEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaKeyMessageEventBinding::Wrap(aCx, this, aGivenProto);
+  return MediaKeyMessageEvent_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<MediaKeyMessageEvent>
@@ -85,21 +86,17 @@ MediaKeyMessageEvent::Constructor(const GlobalObject& aGlobal,
   RefPtr<MediaKeyMessageEvent> e = new MediaKeyMessageEvent(owner);
   bool trusted = e->Init(owner);
   e->InitEvent(aType, aEventInitDict.mBubbles, aEventInitDict.mCancelable);
-  const uint8_t* data = nullptr;
-  size_t length = 0;
-  if (aEventInitDict.mMessage.WasPassed()) {
-    const auto& a = aEventInitDict.mMessage.Value();
-    a.ComputeLengthAndData();
-    data = a.Data();
-    length = a.Length();
-  }
-  e->mMessage = ArrayBuffer::Create(aGlobal.Context(), length, data);
+  aEventInitDict.mMessage.ComputeLengthAndData();
+  e->mMessage = ArrayBuffer::Create(aGlobal.Context(),
+                                    aEventInitDict.mMessage.Length(),
+                                    aEventInitDict.mMessage.Data());
   if (!e->mMessage) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
   }
   e->mMessageType = aEventInitDict.mMessageType;
   e->SetTrusted(trusted);
+  e->SetComposed(aEventInitDict.mComposed);
   return e.forget();
 }
 
@@ -119,7 +116,6 @@ MediaKeyMessageEvent::GetMessage(JSContext* cx,
     }
     mRawMessage.Clear();
   }
-  JS::ExposeObjectToActiveJS(mMessage);
   aMessage.set(mMessage);
 }
 

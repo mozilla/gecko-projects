@@ -24,17 +24,16 @@
         title="&history.title;"
         onload="gUpdateHistory.onLoad();">
 
-  <script type="application/javascript" 
+  <script type="application/javascript"
           src="chrome://mozapps/content/update/history.js"/>
-          
-  <stringbundle id="updateBundle" 
+
+  <stringbundle id="updateBundle"
                 src="chrome://mozapps/locale/update/updates.properties"/>
-  
-  <label>&history.intro;</label>
+
+  <label>&history2.intro;</label>
   <separator class="thin"/>
   <richlistbox id="historyItems" flex="1">
     <label>&noupdates.label;</label>
   </richlistbox>
   <separator class="thin"/>
 </dialog>
-

@@ -2,27 +2,13 @@
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- *
- *
- * This Original Code has been modified by IBM Corporation.
- * Modifications made by IBM described herein are
- * Copyright (c) International Business Machines
- * Corporation, 2000
- *
- * Modifications to Mozilla code or documentation
- * identified per MPL Section 3.3
- *
- * Date         Modified by     Description of modification
- * 03/27/2000   IBM Corp.       Added PR_CALLBACK for Optlink
- *                               use in OS2
- */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsStreamConverterService.h"
 #include "nsIComponentRegistrar.h"
 #include "nsAutoPtr.h"
 #include "nsString.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsDeque.h"
 #include "nsIInputStream.h"
 #include "nsIStreamConverter.h"
@@ -63,15 +49,9 @@ NS_IMPL_ISUPPORTS(nsStreamConverterService, nsIStreamConverterService)
 
 ////////////////////////////////////////////////////////////
 // nsStreamConverterService methods
-nsStreamConverterService::nsStreamConverterService()
-{
-}
-
-nsStreamConverterService::~nsStreamConverterService() {
-}
 
 // Builds the graph represented as an adjacency list (and built up in
-// memory using an nsObjectHashtable and nsISupportsArray combination).
+// memory using an nsObjectHashtable and nsCOMArray combination).
 //
 // :BuildGraph() consults the category manager for all stream converter
 // CONTRACTIDS then fills the adjacency list with edges.
@@ -139,29 +119,29 @@ nsStreamConverterService::AddAdjacency(const char *aContractID) {
     // Each MIME-type is a vertex in the graph, so first lets make sure
     // each MIME-type is represented as a key in our hashtable.
 
-    nsCOMArray<nsIAtom> *fromEdges = mAdjacencyList.Get(fromStr);
+    nsTArray<RefPtr<nsAtom>>* fromEdges = mAdjacencyList.Get(fromStr);
     if (!fromEdges) {
         // There is no fromStr vertex, create one.
-        fromEdges = new nsCOMArray<nsIAtom>();
+        fromEdges = new nsTArray<RefPtr<nsAtom>>();
         mAdjacencyList.Put(fromStr, fromEdges);
     }
 
     if (!mAdjacencyList.Get(toStr)) {
         // There is no toStr vertex, create one.
-        mAdjacencyList.Put(toStr, new nsCOMArray<nsIAtom>());
+        mAdjacencyList.Put(toStr, new nsTArray<RefPtr<nsAtom>>());
     }
 
     // Now we know the FROM and TO types are represented as keys in the hashtable.
     // Let's "connect" the verticies, making an edge.
 
-    nsCOMPtr<nsIAtom> vertex = NS_Atomize(toStr);
+    RefPtr<nsAtom> vertex = NS_Atomize(toStr);
     if (!vertex) return NS_ERROR_OUT_OF_MEMORY;
 
     NS_ASSERTION(fromEdges, "something wrong in adjacency list construction");
     if (!fromEdges)
         return NS_ERROR_FAILURE;
 
-    return fromEdges->AppendObject(vertex) ? NS_OK : NS_ERROR_FAILURE;
+    return fromEdges->AppendElement(vertex) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 nsresult
@@ -194,10 +174,9 @@ typedef nsClassHashtable<nsCStringHashKey, BFSTableData> BFSHashTable;
 
 class CStreamConvDeallocator : public nsDequeFunctor {
 public:
-    virtual void* operator()(void* anObject) {
+    void operator()(void* anObject) override {
         nsCString *string = (nsCString*)anObject;
         delete string;
-        return 0;
     }
 };
 
@@ -239,7 +218,7 @@ nsStreamConverterService::FindConverter(const char *aContractID, nsTArray<nsCStr
 
     data->color = gray;
     data->distance = 0;
-    CStreamConvDeallocator *dtorFunc = new CStreamConvDeallocator();
+    auto *dtorFunc = new CStreamConvDeallocator();
 
     nsDeque grayQ(dtorFunc);
 
@@ -247,7 +226,7 @@ nsStreamConverterService::FindConverter(const char *aContractID, nsTArray<nsCStr
     grayQ.Push(new nsCString(fromC));
     while (0 < grayQ.GetSize()) {
         nsCString *currentHead = (nsCString*)grayQ.PeekFront();
-        nsCOMArray<nsIAtom> *data2 = mAdjacencyList.Get(*currentHead);
+        nsTArray<RefPtr<nsAtom>>* data2 = mAdjacencyList.Get(*currentHead);
         if (!data2) return NS_ERROR_FAILURE;
 
         // Get the state of the current head to calculate the distance of each
@@ -255,11 +234,11 @@ nsStreamConverterService::FindConverter(const char *aContractID, nsTArray<nsCStr
         BFSTableData *headVertexState = lBFSTable.Get(*currentHead);
         if (!headVertexState) return NS_ERROR_FAILURE;
 
-        int32_t edgeCount = data2->Count();
+        int32_t edgeCount = data2->Length();
 
         for (int32_t i = 0; i < edgeCount; i++) {
-            nsIAtom* curVertexAtom = data2->ObjectAt(i);
-            nsCString *curVertex = new nsCString();
+            nsAtom* curVertexAtom = data2->ElementAt(i);
+            auto *curVertex = new nsCString();
             curVertexAtom->ToUTF8String(*curVertex);
 
             BFSTableData *curVertexState = lBFSTable.Get(*curVertex);
@@ -295,7 +274,7 @@ nsStreamConverterService::FindConverter(const char *aContractID, nsTArray<nsCStr
 
     // get the root CONTRACTID
     nsAutoCString ContractIDPrefix(NS_ISTREAMCONVERTER_KEY);
-    nsTArray<nsCString> *shortestPath = new nsTArray<nsCString>();
+    auto *shortestPath = new nsTArray<nsCString>();
 
     data = lBFSTable.Get(toMIMEType);
     if (!data) {
@@ -379,7 +358,7 @@ nsStreamConverterService::CanConvert(const char* aFromType,
 
 NS_IMETHODIMP
 nsStreamConverterService::Convert(nsIInputStream *aFromStream,
-                                  const char *aFromType, 
+                                  const char *aFromType,
                                   const char *aToType,
                                   nsISupports *aContext,
                                   nsIInputStream **_retval) {
@@ -456,8 +435,8 @@ nsStreamConverterService::Convert(nsIInputStream *aFromStream,
 
 
 NS_IMETHODIMP
-nsStreamConverterService::AsyncConvertData(const char *aFromType, 
-                                           const char *aToType, 
+nsStreamConverterService::AsyncConvertData(const char *aFromType,
+                                           const char *aToType,
                                            nsIStreamListener *aListener,
                                            nsISupports *aContext,
                                            nsIStreamListener **_retval) {
@@ -490,7 +469,7 @@ nsStreamConverterService::AsyncConvertData(const char *aFromType,
         }
 
         // aListener is the listener that wants the final, converted, data.
-        // we initialize finalListener w/ aListener so it gets put at the 
+        // we initialize finalListener w/ aListener so it gets put at the
         // tail end of the chain, which in the loop below, means the *first*
         // converter created.
         nsCOMPtr<nsIStreamListener> finalListener = aListener;
@@ -549,7 +528,7 @@ nsStreamConverterService::AsyncConvertData(const char *aFromType,
 nsresult
 NS_NewStreamConv(nsStreamConverterService** aStreamConv)
 {
-    NS_PRECONDITION(aStreamConv != nullptr, "null ptr");
+    MOZ_ASSERT(aStreamConv != nullptr, "null ptr");
     if (!aStreamConv) return NS_ERROR_NULL_POINTER;
 
     *aStreamConv = new nsStreamConverterService();

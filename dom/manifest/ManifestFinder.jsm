@@ -6,10 +6,9 @@
 const {
   utils: Cu
 } = Components;
-Cu.import("resource://gre/modules/PromiseMessage.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
+ChromeUtils.import("resource://gre/modules/PromiseMessage.jsm");
 
-this.ManifestFinder = {// jshint ignore:line
+var ManifestFinder = {// jshint ignore:line
   /**
   * Check from content process if DOM Window has a conforming
   * manifest link relationship.
@@ -29,17 +28,15 @@ this.ManifestFinder = {// jshint ignore:line
   * @param aBrowser The XUL browser to check.
   * @return {Promise}
   */
-  browserHasManifestLink: Task.async(
-    function* (aBrowser) {
+  async browserHasManifestLink(aBrowser) {
       if (!isXULBrowser(aBrowser)) {
         throw new TypeError("Invalid input.");
       }
       const msgKey = "DOM:WebManifest:hasManifestLink";
       const mm = aBrowser.messageManager;
-      const reply = yield PromiseMessage.send(mm, msgKey);
+      const reply = await PromiseMessage.send(mm, msgKey);
       return reply.data.result;
     }
-  )
 };
 
 function isXULBrowser(aBrowser) {
@@ -63,6 +60,6 @@ function checkForManifest(aWindow) {
   return true;
 }
 
-this.EXPORTED_SYMBOLS = [// jshint ignore:line
+var EXPORTED_SYMBOLS = [// jshint ignore:line
   "ManifestFinder"
 ];

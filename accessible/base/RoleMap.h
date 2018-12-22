@@ -129,7 +129,7 @@ ROLE(APPLICATION,
 
 ROLE(DOCUMENT,
      "document",
-     ATK_ROLE_DOCUMENT_FRAME,
+     ATK_ROLE_DOCUMENT_WEB,
      @"AXWebArea",
      ROLE_SYSTEM_DOCUMENT,
      ROLE_SYSTEM_DOCUMENT,
@@ -306,8 +306,8 @@ ROLE(OUTLINE,
 
 ROLE(OUTLINEITEM,
      "outlineitem",
-     ATK_ROLE_LIST_ITEM,
-     NSAccessibilityRowRole,  //XXX: use OutlineRow as subrole.
+     ATK_ROLE_TREE_ITEM,
+     NSAccessibilityRowRole,
      ROLE_SYSTEM_OUTLINEITEM,
      ROLE_SYSTEM_OUTLINEITEM,
      eNameFromSubtreeRule)
@@ -384,6 +384,7 @@ ROLE(RADIOBUTTON,
      ROLE_SYSTEM_RADIOBUTTON,
      eNameFromSubtreeRule)
 
+// Equivalent of HTML select element with size="1". See also EDITCOMBOBOX.
 ROLE(COMBOBOX,
      "combobox",
      ATK_ROLE_COMBO_BOX,
@@ -848,12 +849,12 @@ ROLE(CAPTION,
      IA2_ROLE_CAPTION,
      eNameFromSubtreeIfReqRule)
 
-ROLE(DOCUMENT_FRAME,
-     "document frame",
+ROLE(NON_NATIVE_DOCUMENT,
+     "non-native document",
      ATK_ROLE_DOCUMENT_FRAME,
-     NSAccessibilityScrollAreaRole,
+     NSAccessibilityGroupRole,
      USE_ROLE_STRING,
-     IA2_ROLE_UNKNOWN,
+     ROLE_SYSTEM_DOCUMENT,
      eNoNameRule)
 
 ROLE(HEADING,
@@ -862,7 +863,7 @@ ROLE(HEADING,
      @"AXHeading",
      USE_ROLE_STRING,
      IA2_ROLE_HEADING,
-     eNameFromSubtreeIfReqRule)
+     eNameFromSubtreeRule)
 
 ROLE(PAGE,
      "page",
@@ -1002,7 +1003,7 @@ ROLE(EMBEDDED_OBJECT,
 
 ROLE(NOTE,
      "note",
-     ATK_ROLE_SECTION,
+     ATK_ROLE_COMMENT,
      NSAccessibilityGroupRole,
      USE_ROLE_STRING,
      IA2_ROLE_NOTE,
@@ -1034,7 +1035,7 @@ ROLE(DEFINITION_LIST,
 
 ROLE(TERM,
      "term",
-     ATK_ROLE_LIST_ITEM,
+     ATK_ROLE_DESCRIPTION_TERM,
      NSAccessibilityGroupRole,
      ROLE_SYSTEM_LISTITEM,
      ROLE_SYSTEM_LISTITEM,
@@ -1352,3 +1353,76 @@ ROLE(TEXT,
      IA2_ROLE_TEXT_FRAME,
      eNameFromSubtreeIfReqRule)
 
+ROLE(DETAILS,
+     "details",
+     ATK_ROLE_PANEL,
+     NSAccessibilityGroupRole,
+     ROLE_SYSTEM_GROUPING,
+     ROLE_SYSTEM_GROUPING,
+     eNoNameRule)
+
+ROLE(SUMMARY,
+     "summary",
+     ATK_ROLE_PUSH_BUTTON,
+     NSAccessibilityGroupRole,
+     ROLE_SYSTEM_PUSHBUTTON,
+     ROLE_SYSTEM_PUSHBUTTON,
+     eNameFromSubtreeRule)
+
+ROLE(LANDMARK,
+     "landmark",
+     ATK_ROLE_LANDMARK,
+     NSAccessibilityGroupRole,
+     USE_ROLE_STRING,
+     IA2_ROLE_LANDMARK,
+     eNoNameRule)
+
+ROLE(NAVIGATION,
+     "navigation",
+     ATK_ROLE_LANDMARK,
+     NSAccessibilityGroupRole,
+     USE_ROLE_STRING,
+     IA2_ROLE_LANDMARK,
+     eNoNameRule)
+
+ROLE(FOOTNOTE,
+     "footnote",
+     ATK_ROLE_FOOTNOTE,
+     NSAccessibilityGroupRole,
+     USE_ROLE_STRING,
+     IA2_ROLE_FOOTNOTE,
+     eNoNameRule)
+
+ROLE(ARTICLE,
+     "article",
+     ATK_ROLE_ARTICLE,
+     NSAccessibilityGroupRole,
+     ROLE_SYSTEM_DOCUMENT,
+     ROLE_SYSTEM_DOCUMENT,
+     eNoNameRule)
+
+ROLE(REGION,
+     "region",
+     ATK_ROLE_LANDMARK,
+     NSAccessibilityGroupRole,
+     USE_ROLE_STRING,
+     IA2_ROLE_LANDMARK,
+     eNoNameRule)
+
+// A composite widget with a text input and popup. Used for ARIA role combobox.
+// See also COMBOBOX.
+ROLE(EDITCOMBOBOX,
+     "editcombobox",
+     ATK_ROLE_COMBO_BOX,
+     NSAccessibilityComboBoxRole,
+     ROLE_SYSTEM_COMBOBOX,
+     ROLE_SYSTEM_COMBOBOX,
+     eNameFromValueRule)
+
+ROLE(BLOCKQUOTE,
+     "blockquote",
+     ATK_ROLE_BLOCK_QUOTE,
+     NSAccessibilityGroupRole,
+     ROLE_SYSTEM_GROUPING,
+     IA2_ROLE_SECTION,
+     eNoNameRule)

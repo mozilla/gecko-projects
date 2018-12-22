@@ -1,8 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Content Processes")
 
 XPIDL_SOURCES += [
     'nsIHangReport.idl',
@@ -10,42 +13,37 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'dom'
 
-EXPORTS += [
-    'nsICachedFileDescriptorListener.h',
-]
-
 EXPORTS.mozilla.dom.ipc += [
-    'BlobChild.h',
-    'BlobParent.h',
     'IdType.h',
-    'nsIRemoteBlob.h',
     'StructuredCloneData.h',
 ]
 
 EXPORTS.mozilla.dom += [
+    'CoalescedInputData.h',
+    'CoalescedMouseData.h',
+    'CoalescedWheelData.h',
     'ContentBridgeChild.h',
     'ContentBridgeParent.h',
     'ContentChild.h',
     'ContentParent.h',
     'ContentProcess.h',
+    'ContentProcessHost.h',
     'ContentProcessManager.h',
     'CPOWManagerGetter.h',
-    'CrashReporterChild.h',
-    'CrashReporterParent.h',
     'FilePickerParent.h',
+    'MemoryReportRequest.h',
     'nsIContentChild.h',
     'nsIContentParent.h',
-    'NuwaChild.h',
-    'NuwaParent.h',
     'PermissionMessageUtils.h',
     'TabChild.h',
     'TabContext.h',
     'TabMessageUtils.h',
     'TabParent.h',
+    'URLClassifierChild.h',
+    'URLClassifierParent.h',
 ]
 
 EXPORTS.mozilla += [
-    'AppProcessChecker.h',
     'PreallocatedProcessManager.h',
     'ProcessHangMonitor.h',
     'ProcessHangMonitorIPC.h',
@@ -53,46 +51,39 @@ EXPORTS.mozilla += [
 ]
 
 UNIFIED_SOURCES += [
-    'AppProcessChecker.cpp',
+    'CoalescedMouseData.cpp',
+    'CoalescedWheelData.cpp',
     'ColorPickerParent.cpp',
     'ContentBridgeChild.cpp',
     'ContentBridgeParent.cpp',
     'ContentParent.cpp',
     'ContentProcess.cpp',
+    'ContentProcessHost.cpp',
     'ContentProcessManager.cpp',
-    'CrashReporterParent.cpp',
     'FilePickerParent.cpp',
+    'MemoryReportRequest.cpp',
     'nsIContentChild.cpp',
     'nsIContentParent.cpp',
-    'NuwaChild.cpp',
-    'NuwaParent.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
-    'ScreenManagerParent.cpp',
     'StructuredCloneData.cpp',
     'TabChild.cpp',
     'TabContext.cpp',
     'TabMessageUtils.cpp',
     'TabParent.cpp',
+    'URLClassifierParent.cpp',
 ]
 
-# Blob.cpp cannot be compiled in unified mode because it triggers a fatal gcc warning.
-# CrashReporterChild.cpp cannot be compiled in unified mode because of name clashes
-# in OS X headers.
 # ContentChild.cpp cannot be compiled in unified mode on  linux due to Time conflict
 SOURCES += [
-    'Blob.cpp',
     'ContentChild.cpp',
-    'CrashReporterChild.cpp',
     'ProcessHangMonitor.cpp',
 ]
 
 IPDL_SOURCES += [
-    'BrowserConfiguration.ipdlh',
     'DOMTypes.ipdlh',
-    'PBlob.ipdl',
-    'PBlobStream.ipdl',
+    'MemoryReportTypes.ipdlh',
     'PBrowser.ipdl',
     'PBrowserOrId.ipdlh',
     'PColorPicker.ipdl',
@@ -100,16 +91,16 @@ IPDL_SOURCES += [
     'PContentBridge.ipdl',
     'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
-    'PCrashReporter.ipdl',
     'PCycleCollectWithLogs.ipdl',
-    'PDocumentRenderer.ipdl',
     'PFilePicker.ipdl',
-    'PMemoryReportRequest.ipdl',
-    'PNuwa.ipdl',
+    'PLoginReputation.ipdl',
     'PPluginWidget.ipdl',
     'PProcessHangMonitor.ipdl',
-    'PScreenManager.ipdl',
     'PTabContext.ipdlh',
+    'PURLClassifier.ipdl',
+    'PURLClassifierInfo.ipdlh',
+    'PURLClassifierLocal.ipdl',
+    'ServiceWorkerConfiguration.ipdlh',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -121,25 +112,22 @@ if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_TARGET'] == 'Darwin':
         'mozsandbox',
     ]
 
+if CONFIG['MOZ_CONTENT_SANDBOX'] and CONFIG['OS_ARCH'] == 'Linux':
+    USE_LIBS += [
+        'mozsandbox',
+    ]
+
 LOCAL_INCLUDES += [
     '/caps',
     '/chrome',
     '/docshell/base',
     '/dom/base',
-    '/dom/bluetooth/common',
-    '/dom/bluetooth/ipc',
-    '/dom/devicestorage',
+    '/dom/bindings',
     '/dom/events',
     '/dom/filesystem',
-    '/dom/fmradio/ipc',
     '/dom/geolocation',
     '/dom/media/webspeech/synth/ipc',
-    '/dom/mobilemessage/ipc',
     '/dom/security',
-    '/dom/storage',
-    '/dom/workers',
-    '/editor/libeditor',
-    '/embedding/components/printingui/ipc',
     '/extensions/cookie',
     '/extensions/spellcheck/src',
     '/gfx/2d',
@@ -147,6 +135,8 @@ LOCAL_INCLUDES += [
     '/layout/base',
     '/media/webrtc',
     '/netwerk/base',
+    '/toolkit/components/printingui/ipc',
+    '/toolkit/crashreporter',
     '/toolkit/xre',
     '/uriloader/exthandler',
     '/widget',
@@ -167,7 +157,7 @@ if CONFIG['OS_ARCH'] != 'WINNT':
 
 DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gonk', 'qt'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     DEFINES['MOZ_ENABLE_FREETYPE'] = True
 
 if CONFIG['MOZ_TOOLKIT_SEARCH']:
@@ -180,3 +170,17 @@ MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['NIGHTLY_BUILD']:
+    DEFINES['ASYNC_CONTENTPROC_LAUNCH'] = True
+
+if CONFIG['FUZZING'] and CONFIG['FUZZING_INTERFACES']:
+    TEST_DIRS += [
+        'fuzztest'
+    ]
+
+# Add libFuzzer configuration directives
+include('/tools/fuzzing/libfuzzer-config.mozbuild')

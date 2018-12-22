@@ -4,6 +4,8 @@
 <script src=/resources/testharness.js></script>
 <script src=/resources/testharnessreport.js></script>
 <script src=../../../constants.js?pipe=sub></script>
+<meta name="variant" content="">
+<meta name="variant" content="?wss">
 <div id=log></div>
 <script>
 async_test(function(t){
@@ -16,9 +18,9 @@ async_test(function(t){
     ws.close();
   });
   ws.onclose = t.step_func(function(e) {
-    ws.onclose = t.step_func(function() {assert_unreached()});
-    setTimeout(function() {t.done()}, 50);
+    ws.onclose = t.unreached_func();
+    t.step_timeout(() => t.done(), 50);
   });
-  ws.onerror = t.step_func(function() {assert_unreached()});
+  ws.onerror = t.unreached_func();
 });
 </script>

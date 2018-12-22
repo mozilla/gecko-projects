@@ -12,18 +12,18 @@
 
 dictionary PositionOptions {
   boolean enableHighAccuracy = false;
-  long timeout = 0x7fffffff;
-  long maximumAge = 0;
+  [Clamp] unsigned long timeout = 0x7fffffff;
+  [Clamp] unsigned long maximumAge = 0;
 };
 
 [NoInterfaceObject]
 interface Geolocation {
-  [Throws]
+  [Throws, NeedsCallerType]
   void getCurrentPosition(PositionCallback successCallback,
                           optional PositionErrorCallback? errorCallback = null,
                           optional PositionOptions options);
 
-  [Throws]
+  [Throws, NeedsCallerType]
   long watchPosition(PositionCallback successCallback,
                      optional PositionErrorCallback? errorCallback = null,
                      optional PositionOptions options);

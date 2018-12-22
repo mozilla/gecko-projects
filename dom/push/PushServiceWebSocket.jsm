@@ -5,46 +5,23 @@
 
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-const {PushDB} = Cu.import("resource://gre/modules/PushDB.jsm");
-const {PushRecord} = Cu.import("resource://gre/modules/PushRecord.jsm");
-const {
-  PushCrypto,
-  base64UrlDecode,
-  getCryptoParams,
-} = Cu.import("resource://gre/modules/PushCrypto.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "gDNSService",
-                                   "@mozilla.org/network/dns-service;1",
-                                   "nsIDNSService");
-
-if (AppConstants.MOZ_B2G) {
-  XPCOMUtils.defineLazyServiceGetter(this, "gPowerManagerService",
-                                     "@mozilla.org/power/powermanagerservice;1",
-                                     "nsIPowerManagerService");
-}
-
-var threadManager = Cc["@mozilla.org/thread-manager;1"]
-                      .getService(Ci.nsIThreadManager);
+const {PushDB} = ChromeUtils.import("resource://gre/modules/PushDB.jsm");
+const {PushRecord} = ChromeUtils.import("resource://gre/modules/PushRecord.jsm");
+const {PushCrypto} = ChromeUtils.import("resource://gre/modules/PushCrypto.jsm");
 
 const kPUSHWSDB_DB_NAME = "pushapi";
 const kPUSHWSDB_DB_VERSION = 5; // Change this if the IndexedDB format changes
 const kPUSHWSDB_STORE_NAME = "pushapi";
 
-const kUDP_WAKEUP_WS_STATUS_CODE = 4774;  // WebSocket Close status code sent
-                                          // by server to signal that it can
-                                          // wake client up using UDP.
+// WebSocket close code sent by the server to indicate that the client should
+// not automatically reconnect.
+const kBACKOFF_WS_STATUS_CODE = 4774;
 
 // Maps ack statuses, unsubscribe reasons, and delivery error reasons to codes
 // included in request payloads.
@@ -68,10 +45,10 @@ const kDELIVERY_REASON_TO_CODE = {
 
 const prefs = new Preferences("dom.push.");
 
-this.EXPORTED_SYMBOLS = ["PushServiceWebSocket"];
+var EXPORTED_SYMBOLS = ["PushServiceWebSocket"];
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
-  let {ConsoleAPI} = Cu.import("resource://gre/modules/Console.jsm", {});
+  let {ConsoleAPI} = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
   return new ConsoleAPI({
     maxLogLevelPref: "dom.push.loglevel",
     prefix: "PushServiceWebSocket",
@@ -139,7 +116,7 @@ const STATE_WAITING_FOR_HELLO = 2;
 // Websocket operational, handshake completed, begin protocol messaging.
 const STATE_READY = 3;
 
-this.PushServiceWebSocket = {
+var PushServiceWebSocket = {
   _mainPushService: null,
   _serverURI: null,
 
@@ -149,10 +126,6 @@ this.PushServiceWebSocket = {
                       kPUSHWSDB_STORE_NAME,
                       "channelID",
                       PushRecordWebSocket);
-  },
-
-  serviceType: function() {
-    return "WebSocket";
   },
 
   disconnect: function() {
@@ -242,17 +215,15 @@ this.PushServiceWebSocket = {
       requestTimedOut = true;
 
     } else {
-      for (let [channelID, request] of this._registerRequests) {
+      for (let [key, request] of this._pendingRequests) {
         let duration = now - request.ctime;
         // If any of the registration requests time out, all the ones after it
         // also made to fail, since we are going to be disconnecting the
         // socket.
         requestTimedOut |= duration > this._requestTimeout;
         if (requestTimedOut) {
-          request.reject(new Error(
-            "Register request timed out for channel ID " + channelID));
-
-          this._registerRequests.delete(channelID);
+          request.reject(new Error("Request timed out: " + key));
+          this._pendingRequests.delete(key);
         }
       }
     }
@@ -265,7 +236,10 @@ this.PushServiceWebSocket = {
   },
 
   validServerURI: function(serverURI) {
-    return serverURI.scheme == "ws" || serverURI.scheme == "wss";
+    if (serverURI.scheme == "ws") {
+      return !!prefs.get("testing.allowInsecureServerURL");
+    }
+    return serverURI.scheme == "wss";
   },
 
   get _UAID() {
@@ -283,7 +257,7 @@ this.PushServiceWebSocket = {
   },
 
   _ws: null,
-  _registerRequests: new Map(),
+  _pendingRequests: new Map(),
   _currentState: STATE_SHUT_DOWN,
   _requestTimeout: 0,
   _requestTimeoutTimer: null,
@@ -294,47 +268,12 @@ this.PushServiceWebSocket = {
    * TCP connection after they close a WebSocket. This causes wsOnStop to be
    * called with error NS_BASE_STREAM_CLOSED. Since the client has to keep the
    * WebSocket up, it should try to reconnect. But if the server closes the
-   * WebSocket because it will wake up the client via UDP, then the client
-   * shouldn't re-establish the connection. If the server says that it will
-   * wake up the client over UDP, this is set to true in wsOnServerClose. It is
+   * WebSocket because it wants the client to back off, then the client
+   * shouldn't re-establish the connection. If the server sends the backoff
+   * close code, this field will be set to true in wsOnServerClose. It is
    * checked in wsOnStop.
    */
-  _willBeWokenUpByUDP: false,
-
-  /**
-   * Holds if the adaptive ping is enabled. This is read on init().
-   * If adaptive ping is enabled, a new ping is calculed each time we receive
-   * a pong message, trying to maximize network resources while minimizing
-   * cellular signalling storms.
-   */
-  _adaptiveEnabled: false,
-
-  /**
-   * This saves a flag about if we need to recalculate a new ping, based on:
-   *   1) the gap between the maximum working ping and the first ping that
-   *      gives an error (timeout) OR
-   *   2) we have reached the pref of the maximum value we allow for a ping
-   *      (dom.push.adaptive.upperLimit)
-   */
-  _recalculatePing: true,
-
-  /**
-   * This map holds a (pingInterval, triedTimes) of each pingInterval tried.
-   * It is used to check if the pingInterval has been tested enough to know that
-   * is incorrect and is above the limit the network allow us to keep the
-   * connection open.
-   */
-  _pingIntervalRetryTimes: {},
-
-  /**
-   * Holds the lastGoodPingInterval for our current connection.
-   */
-  _lastGoodPingInterval: 0,
-
-  /**
-   * Maximum ping interval that we can reach.
-   */
-  _upperLimit: 0,
+  _skipReconnect: false,
 
   /** Indicates whether the server supports Web Push-style message delivery. */
   _dataEnabled: false,
@@ -375,6 +314,8 @@ this.PushServiceWebSocket = {
 
     this._mainPushService = mainPushService;
     this._serverURI = serverURI;
+    // Filled in at connect() time
+    this._broadcastListeners = null;
 
     // Override the default WebSocket factory function. The returned object
     // must be null or satisfy the nsIWebSocketChannel interface. Used by
@@ -383,21 +324,7 @@ this.PushServiceWebSocket = {
       this._makeWebSocket = options.makeWebSocket;
     }
 
-    // Override the default UDP socket factory function. The returned object
-    // must be null or satisfy the nsIUDPSocket interface. Used by the
-    // UDP tests.
-    if (options.makeUDPSocket) {
-      this._makeUDPSocket = options.makeUDPSocket;
-    }
-
-    this._networkInfo = options.networkInfo;
-    if (!this._networkInfo) {
-      this._networkInfo = PushNetworkInfo;
-    }
-
     this._requestTimeout = prefs.get("requestTimeout");
-    this._adaptiveEnabled = prefs.get('adaptive.enabled');
-    this._upperLimit = prefs.get('adaptive.upperLimit');
 
     return Promise.resolve();
   },
@@ -410,10 +337,13 @@ this.PushServiceWebSocket = {
 
   _shutdownWS: function(shouldCancelPending = true) {
     console.debug("shutdownWS()");
-    this._currentState = STATE_SHUT_DOWN;
-    this._willBeWokenUpByUDP = false;
 
-    prefs.ignore("userAgentID", this);
+    if (this._currentState == STATE_READY) {
+      prefs.ignore("userAgentID", this);
+    }
+
+    this._currentState = STATE_SHUT_DOWN;
+    this._skipReconnect = false;
 
     if (this._wsListener) {
       this._wsListener._pushService = null;
@@ -430,7 +360,7 @@ this.PushServiceWebSocket = {
     }
 
     if (shouldCancelPending) {
-      this._cancelRegisterRequests();
+      this._cancelPendingRequests();
     }
 
     if (this._notifyRequestQueue) {
@@ -440,11 +370,6 @@ this.PushServiceWebSocket = {
   },
 
   uninit: function() {
-    if (this._udpServer) {
-      this._udpServer.close();
-      this._udpServer = null;
-    }
-
     // All pending requests (ideally none) are dropped at this point. We
     // shouldn't have any applications performing registration/unregistration
     // or receiving notifications.
@@ -463,9 +388,7 @@ this.PushServiceWebSocket = {
   },
 
   /**
-   * How retries work:  The goal is to ensure websocket is always up on
-   * networks not supporting UDP. So the websocket should only be shutdown if
-   * onServerClose indicates UDP wakeup.  If WS is closed due to socket error,
+   * How retries work: If the WS is closed due to a socket error,
    * _startBackoffTimer() is called. The retry timer is started and when
    * it times out, beginWSSetup() is called again.
    *
@@ -478,8 +401,6 @@ this.PushServiceWebSocket = {
    */
   _startBackoffTimer() {
     console.debug("startBackoffTimer()");
-    //Calculate new ping interval
-    this._calculateAdaptivePing(true /* wsWentDown */);
 
     // Calculate new timeout, but cap it to pingInterval.
     let retryTimeout = prefs.get("retryBaseInterval") *
@@ -500,7 +421,7 @@ this.PushServiceWebSocket = {
 
   /** Indicates whether we're waiting for pongs or requests. */
   _hasPendingRequests() {
-    return this._lastPingTime > 0 || this._registerRequests.size > 0;
+    return this._lastPingTime > 0 || this._pendingRequests.size > 0;
   },
 
   /**
@@ -530,156 +451,6 @@ this.PushServiceWebSocket = {
                          Ci.nsITimer.TYPE_ONE_SHOT);
   },
 
-  /**
-   * We need to calculate a new ping based on:
-   *  1) Latest good ping
-   *  2) A safe gap between 1) and the calculated new ping (which is
-   *  by default, 1 minute)
-   *
-   * This is for 3G networks, whose connections keepalives differ broadly,
-   * for example:
-   *  1) Movistar Spain: 29 minutes
-   *  2) VIVO Brazil: 5 minutes
-   *  3) Movistar Colombia: XXX minutes
-   *
-   * So a fixed ping is not good for us for two reasons:
-   *  1) We might lose the connection, so we need to reconnect again (wasting
-   *  resources)
-   *  2) We use a lot of network signaling just for pinging.
-   *
-   * This algorithm tries to search the best value between a disconnection and a
-   * valid ping, to ensure better battery life and network resources usage.
-   *
-   * The value is saved in dom.push.pingInterval
-   * @param wsWentDown [Boolean] if the WebSocket was closed or it is still
-   * alive
-   *
-   */
-  _calculateAdaptivePing: function(wsWentDown) {
-    console.debug("_calculateAdaptivePing()");
-    if (!this._adaptiveEnabled) {
-      console.debug("calculateAdaptivePing: Adaptive ping is disabled");
-      return;
-    }
-
-    if (this._retryFailCount > 0) {
-      console.warn("calculateAdaptivePing: Push has failed to connect to the",
-        "Push Server", this._retryFailCount, "times. Do not calculate a new",
-        "pingInterval now");
-      return;
-    }
-
-    if (!this._recalculatePing && !wsWentDown) {
-      console.debug("calculateAdaptivePing: We do not need to recalculate the",
-        "ping now, based on previous data");
-      return;
-    }
-
-    // Save actual state of the network
-    let ns = this._networkInfo.getNetworkInformation();
-
-    if (ns.ip) {
-      // mobile
-      console.debug("calculateAdaptivePing: mobile");
-      let oldNetwork = prefs.get('adaptive.mobile');
-      let newNetwork = 'mobile-' + ns.mcc + '-' + ns.mnc;
-
-      // Mobile networks differ, reset all intervals and pings
-      if (oldNetwork !== newNetwork) {
-        // Network differ, reset all values
-        console.debug("calculateAdaptivePing: Mobile networks differ. Old",
-          "network is", oldNetwork, "and new is", newNetwork);
-        prefs.set('adaptive.mobile', newNetwork);
-        //We reset the upper bound member
-        this._recalculatePing = true;
-        this._pingIntervalRetryTimes = {};
-
-        // Put default values
-        let defaultPing = prefs.get('pingInterval.default');
-        prefs.set('pingInterval', defaultPing);
-        this._lastGoodPingInterval = defaultPing;
-
-      } else {
-        // Mobile network is the same, let's just update things
-        prefs.set('pingInterval', prefs.get('pingInterval.mobile'));
-        this._lastGoodPingInterval = prefs.get('adaptive.lastGoodPingInterval.mobile');
-      }
-
-    } else {
-      // wifi
-      console.debug("calculateAdaptivePing: wifi");
-      prefs.set('pingInterval', prefs.get('pingInterval.wifi'));
-      this._lastGoodPingInterval = prefs.get('adaptive.lastGoodPingInterval.wifi');
-    }
-
-    let nextPingInterval;
-    let lastTriedPingInterval = prefs.get('pingInterval');
-
-    if (wsWentDown) {
-      console.debug("calculateAdaptivePing: The WebSocket was disconnected.",
-        "Calculating next ping");
-
-      // If we have not tried this pingInterval yet, initialize
-      this._pingIntervalRetryTimes[lastTriedPingInterval] =
-           (this._pingIntervalRetryTimes[lastTriedPingInterval] || 0) + 1;
-
-       // Try the pingInterval at least 3 times, just to be sure that the
-       // calculated interval is not valid.
-       if (this._pingIntervalRetryTimes[lastTriedPingInterval] < 2) {
-         console.debug("calculateAdaptivePing: pingInterval=",
-          lastTriedPingInterval, "tried only",
-          this._pingIntervalRetryTimes[lastTriedPingInterval], "times");
-         return;
-       }
-
-       // Latest ping was invalid, we need to lower the limit to limit / 2
-       nextPingInterval = Math.floor(lastTriedPingInterval / 2);
-
-      // If the new ping interval is close to the last good one, we are near
-      // optimum, so stop calculating.
-      if (nextPingInterval - this._lastGoodPingInterval <
-          prefs.get('adaptive.gap')) {
-        console.debug("calculateAdaptivePing: We have reached the gap, we",
-          "have finished the calculation. nextPingInterval=", nextPingInterval,
-          "lastGoodPing=", this._lastGoodPingInterval);
-        nextPingInterval = this._lastGoodPingInterval;
-        this._recalculatePing = false;
-      } else {
-        console.debug("calculateAdaptivePing: We need to calculate next time");
-        this._recalculatePing = true;
-      }
-
-    } else {
-      console.debug("calculateAdaptivePing: The WebSocket is still up");
-      this._lastGoodPingInterval = lastTriedPingInterval;
-      nextPingInterval = Math.floor(lastTriedPingInterval * 1.5);
-    }
-
-    // Check if we have reached the upper limit
-    if (this._upperLimit < nextPingInterval) {
-      console.debug("calculateAdaptivePing: Next ping will be bigger than the",
-        "configured upper limit, capping interval");
-      this._recalculatePing = false;
-      this._lastGoodPingInterval = lastTriedPingInterval;
-      nextPingInterval = lastTriedPingInterval;
-    }
-
-    console.debug("calculateAdaptivePing: Setting the pingInterval to",
-      nextPingInterval);
-    prefs.set('pingInterval', nextPingInterval);
-
-    //Save values for our current network
-    if (ns.ip) {
-      prefs.set('pingInterval.mobile', nextPingInterval);
-      prefs.set('adaptive.lastGoodPingInterval.mobile',
-                this._lastGoodPingInterval);
-    } else {
-      prefs.set('pingInterval.wifi', nextPingInterval);
-      prefs.set('adaptive.lastGoodPingInterval.wifi',
-                this._lastGoodPingInterval);
-    }
-  },
-
   _makeWebSocket: function(uri) {
     if (!prefs.get("connection.enabled")) {
       console.warn("makeWebSocket: connection.enabled is not set to true.",
@@ -690,13 +461,15 @@ this.PushServiceWebSocket = {
       console.warn("makeWebSocket: Network is offline.");
       return null;
     }
-    let socket = Cc["@mozilla.org/network/protocol;1?name=wss"]
-                   .createInstance(Ci.nsIWebSocketChannel);
+    let contractId = uri.scheme == "ws" ?
+                     "@mozilla.org/network/protocol;1?name=ws" :
+                     "@mozilla.org/network/protocol;1?name=wss";
+    let socket = Cc[contractId].createInstance(Ci.nsIWebSocketChannel);
 
     socket.initLoadInfo(null, // aLoadingNode
                         Services.scriptSecurityManager.getSystemPrincipal(),
                         null, // aTriggeringPrincipal
-                        Ci.nsILoadInfo.SEC_NORMAL,
+                        Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                         Ci.nsIContentPolicy.TYPE_WEBSOCKET);
 
     return socket;
@@ -733,7 +506,6 @@ this.PushServiceWebSocket = {
       // Grab a wakelock before we open the socket to ensure we don't go to
       // sleep before connection the is opened.
       this._ws.asyncOpen(uri, uri.spec, 0, this._wsListener, null);
-      this._acquireWakeLock();
       this._currentState = STATE_WAITING_FOR_WS_START;
     } catch(e) {
       console.error("beginWSSetup: Error opening websocket.",
@@ -742,58 +514,14 @@ this.PushServiceWebSocket = {
     }
   },
 
-  connect: function(records) {
-    console.debug("connect()");
-    // Check to see if we need to do anything.
-    if (records.length > 0) {
-      this._beginWSSetup();
-    }
+  connect: function(records, broadcastListeners) {
+    console.debug("connect()", broadcastListeners);
+    this._broadcastListeners = broadcastListeners;
+    this._beginWSSetup();
   },
 
   isConnected: function() {
     return !!this._ws;
-  },
-
-  _acquireWakeLock: function() {
-    if (!AppConstants.MOZ_B2G) {
-      return;
-    }
-
-    // Disable the wake lock on non-B2G platforms to work around bug 1154492.
-    if (!this._socketWakeLock) {
-      console.debug("acquireWakeLock: Acquiring Socket Wakelock");
-      this._socketWakeLock = gPowerManagerService.newWakeLock("cpu");
-    }
-    if (!this._socketWakeLockTimer) {
-      console.debug("acquireWakeLock: Creating Socket WakeLock Timer");
-      this._socketWakeLockTimer = Cc["@mozilla.org/timer;1"]
-                                    .createInstance(Ci.nsITimer);
-    }
-
-    console.debug("acquireWakeLock: Setting Socket WakeLock Timer");
-    this._socketWakeLockTimer
-      .initWithCallback(this._releaseWakeLock.bind(this),
-                        // Allow the same time for socket setup as we do for
-                        // requests after the setup. Fudge it a bit since
-                        // timers can be a little off and we don't want to go
-                        // to sleep just as the socket connected.
-                        this._requestTimeout + 1000,
-                        Ci.nsITimer.TYPE_ONE_SHOT);
-  },
-
-  _releaseWakeLock: function() {
-    if (!AppConstants.MOZ_B2G) {
-      return;
-    }
-
-    console.debug("releaseWakeLock: Releasing Socket WakeLock");
-    if (this._socketWakeLockTimer) {
-      this._socketWakeLockTimer.cancel();
-    }
-    if (this._socketWakeLock) {
-      this._socketWakeLock.unlock();
-      this._socketWakeLock = null;
-    }
   },
 
   /**
@@ -833,13 +561,20 @@ this.PushServiceWebSocket = {
         this._notifyRequestQueue();
         this._notifyRequestQueue = null;
       }
-      this._sendRegisterRequests();
+      this._sendPendingRequests();
     };
 
     function finishHandshake() {
       this._UAID = reply.uaid;
       this._currentState = STATE_READY;
       prefs.observe("userAgentID", this);
+
+      // Handle broadcasts received in response to the "hello" message.
+      if (reply.broadcasts) {
+        // The reply isn't technically a broadcast message, but it has
+        // the shape of a broadcast message (it has a broadcasts field).
+        this._mainPushService.receivedBroadcastMessage(reply);
+      }
 
       this._dataEnabled = !!reply.use_webpush;
       if (this._dataEnabled) {
@@ -880,20 +615,15 @@ this.PushServiceWebSocket = {
    */
   _handleRegisterReply: function(reply) {
     console.debug("handleRegisterReply()");
-    if (typeof reply.channelID !== "string" ||
-        !this._registerRequests.has(reply.channelID)) {
-      return;
-    }
 
-    let tmp = this._registerRequests.get(reply.channelID);
-    this._registerRequests.delete(reply.channelID);
-    if (!this._hasPendingRequests()) {
-      this._requestTimeoutTimer.cancel();
+    let tmp = this._takeRequestForReply(reply);
+    if (!tmp) {
+      return;
     }
 
     if (reply.status == 200) {
       try {
-        Services.io.newURI(reply.pushEndpoint, null, null);
+        Services.io.newURI(reply.pushEndpoint);
       }
       catch (e) {
         tmp.reject(new Error("Invalid push endpoint: " + reply.pushEndpoint));
@@ -907,15 +637,27 @@ this.PushServiceWebSocket = {
         originAttributes: tmp.record.originAttributes,
         version: null,
         systemRecord: tmp.record.systemRecord,
+        appServerKey: tmp.record.appServerKey,
         ctime: Date.now(),
       });
-      Services.telemetry.getHistogramById("PUSH_API_SUBSCRIBE_WS_TIME").add(Date.now() - tmp.ctime);
       tmp.resolve(record);
     } else {
       console.error("handleRegisterReply: Unexpected server response", reply);
       tmp.reject(new Error("Wrong status code for register reply: " +
         reply.status));
     }
+  },
+
+  _handleUnregisterReply(reply) {
+    console.debug("handleUnregisterReply()");
+
+    let request = this._takeRequestForReply(reply);
+    if (!request) {
+      return;
+    }
+
+    let success = reply.status === 200;
+    request.resolve(success);
   },
 
   _handleDataUpdate: function(update) {
@@ -925,28 +667,39 @@ this.PushServiceWebSocket = {
         update);
       return;
     }
+    function updateRecord(record) {
+      // Ignore messages that we've already processed. This can happen if the
+      // connection drops between notifying the service worker and acking the
+      // the message. In that case, the server will re-send the message on
+      // reconnect.
+      if (record.hasRecentMessageID(update.version)) {
+        console.warn("handleDataUpdate: Ignoring duplicate message",
+          update.version);
+        return null;
+      }
+      record.noteRecentMessageID(update.version);
+      return record;
+    }
     if (typeof update.data != "string") {
       promise = this._mainPushService.receivedPushMessage(
         update.channelID,
         update.version,
         null,
         null,
-        record => record
+        updateRecord
       );
     } else {
-      let params = getCryptoParams(update.headers);
-      if (params) {
-        let message = base64UrlDecode(update.data);
-        promise = this._mainPushService.receivedPushMessage(
-          update.channelID,
-          update.version,
-          message,
-          params,
-          record => record
-        );
-      } else {
-        promise = Promise.reject(new Error("Invalid crypto headers"));
-      }
+      let message = ChromeUtils.base64URLDecode(update.data, {
+        // The Push server may append padding.
+        padding: "ignore",
+      });
+      promise = this._mainPushService.receivedPushMessage(
+        update.channelID,
+        update.version,
+        update.headers,
+        message,
+        updateRecord
+      );
     }
     promise.then(status => {
       this._sendAck(update.channelID, update.version, status);
@@ -1004,6 +757,10 @@ this.PushServiceWebSocket = {
     }
   },
 
+  _handleBroadcastReply: function(reply) {
+    this._mainPushService.receivedBroadcastMessage(reply);
+  },
+
   reportDeliveryError(messageID, reason) {
     console.debug("reportDeliveryError()");
     let code = kDELIVERY_REASON_TO_CODE[reason];
@@ -1039,21 +796,17 @@ this.PushServiceWebSocket = {
   register(record) {
     console.debug("register() ", record);
 
-    // start the timer since we now have at least one request
-    this._startRequestTimeoutTimer();
-
     let data = {channelID: this._generateID(),
                 messageType: "register"};
 
-    return new Promise((resolve, reject) => {
-      this._registerRequests.set(data.channelID, {
-        record: record,
-        resolve: resolve,
-        reject: reject,
-        ctime: Date.now(),
+    if (record.appServerKey) {
+      data.key = ChromeUtils.base64URLEncode(record.appServerKey, {
+        // The Push server requires padding.
+        pad: true,
       });
-      this._queueRequest(data);
-    }).then(record => {
+    }
+
+    return this._sendRequestForReply(record, data).then(record => {
       if (!this._dataEnabled) {
         return record;
       }
@@ -1070,15 +823,17 @@ this.PushServiceWebSocket = {
   unregister(record, reason) {
     console.debug("unregister() ", record, reason);
 
-    let code = kUNREGISTER_REASON_TO_CODE[reason];
-    if (!code) {
-      return Promise.reject(new Error('Invalid unregister reason'));
-    }
-    let data = {channelID: record.channelID,
-                messageType: "unregister",
-                code: code};
-    this._queueRequest(data);
-    return Promise.resolve();
+    return Promise.resolve().then(_ => {
+      let code = kUNREGISTER_REASON_TO_CODE[reason];
+      if (!code) {
+        throw new Error('Invalid unregister reason');
+      }
+      let data = {channelID: record.channelID,
+                  messageType: "unregister",
+                  code: code};
+
+      return this._sendRequestForReply(record, data);
+    });
   },
 
   _queueStart: Promise.resolve(),
@@ -1094,40 +849,68 @@ this.PushServiceWebSocket = {
                     .catch(_ => {});
   },
 
+  /** Sends a request to the server. */
   _send(data) {
-    if (this._currentState == STATE_READY) {
-      if (data.messageType != "register" ||
-          this._registerRequests.has(data.channelID)) {
-
-        // check if request has not been cancelled
-        this._wsSendMessage(data);
-      }
+    if (this._currentState != STATE_READY) {
+      console.warn("send: Unexpected state; ignoring message",
+        this._currentState);
+      return;
     }
+    if (!this._requestHasReply(data)) {
+      this._wsSendMessage(data);
+      return;
+    }
+    // If we're expecting a reply, check that we haven't cancelled the request.
+    let key = this._makePendingRequestKey(data);
+    if (!this._pendingRequests.has(key)) {
+      console.log("send: Request cancelled; ignoring message", key);
+      return;
+    }
+    this._wsSendMessage(data);
   },
 
-  _sendRegisterRequests() {
+  /** Indicates whether a request has a corresponding reply from the server. */
+  _requestHasReply(data) {
+    return data.messageType == "register" || data.messageType == "unregister";
+  },
+
+  /**
+   * Sends all pending requests that expect replies. Called after the connection
+   * is established and the handshake is complete.
+   */
+  _sendPendingRequests() {
     this._enqueue(_ => {
-      for (let channelID of this._registerRequests.keys()) {
-        this._send({
-          messageType: "register",
-          channelID: channelID,
-        });
+      for (let request of this._pendingRequests.values()) {
+        this._send(request.data);
       }
     });
   },
 
+  /** Queues an outgoing request, establishing a connection if necessary. */
   _queueRequest(data) {
-    if (data.messageType != "register") {
-      if (this._currentState != STATE_READY && !this._notifyRequestQueue) {
-        let promise = new Promise((resolve, reject) => {
-          this._notifyRequestQueue = resolve;
-        });
-        this._enqueue(_ => promise);
-      }
+    console.debug("queueRequest()", data);
 
-      this._enqueue(_ => this._send(data));
-    } else if (this._currentState == STATE_READY) {
+    if (this._currentState == STATE_READY) {
+      // If we're ready, no need to queue; just send the request.
       this._send(data);
+      return;
+    }
+
+    // Otherwise, we're still setting up. If we don't have a request queue,
+    // make one now.
+    if (!this._notifyRequestQueue) {
+      let promise = new Promise((resolve, reject) => {
+        this._notifyRequestQueue = resolve;
+      });
+      this._enqueue(_ => promise);
+    }
+
+    let isRequest = this._requestHasReply(data);
+    if (!isRequest) {
+      // Don't queue requests, since they're stored in `_pendingRequests`, and
+      // `_sendPendingRequests` will send them after reconnecting. Without this
+      // check, we'd send requests twice.
+      this._enqueue(_ => this._send(data));
     }
 
     if (!this._ws) {
@@ -1167,7 +950,6 @@ this.PushServiceWebSocket = {
   // begin Push protocol handshake
   _wsOnStart: function(context) {
     console.debug("wsOnStart()");
-    this._releaseWakeLock();
 
     if (this._currentState != STATE_WAITING_FOR_WS_START) {
       console.error("wsOnStart: NOT in STATE_WAITING_FOR_WS_START. Current",
@@ -1177,6 +959,7 @@ this.PushServiceWebSocket = {
 
     let data = {
       messageType: "hello",
+      broadcasts: this._broadcastListeners,
       use_webpush: true,
     };
 
@@ -1184,27 +967,8 @@ this.PushServiceWebSocket = {
       data.uaid = this._UAID;
     }
 
-    this._networkInfo.getNetworkState((networkState) => {
-      if (networkState.ip) {
-        // Opening an available UDP port.
-        this._listenForUDPWakeup();
-
-        // Host-port is apparently a thing.
-        data.wakeup_hostport = {
-          ip: networkState.ip,
-          port: this._udpServer && this._udpServer.port
-        };
-
-        data.mobilenetwork = {
-          mcc: networkState.mcc,
-          mnc: networkState.mnc,
-          netid: networkState.netid
-        };
-      }
-
-      this._wsSendMessage(data);
-      this._currentState = STATE_WAITING_FOR_HELLO;
-    });
+    this._wsSendMessage(data);
+    this._currentState = STATE_WAITING_FOR_HELLO;
   },
 
   /**
@@ -1216,11 +980,9 @@ this.PushServiceWebSocket = {
    */
   _wsOnStop: function(context, statusCode) {
     console.debug("wsOnStop()");
-    this._releaseWakeLock();
 
-    if (statusCode != Cr.NS_OK &&
-        !(statusCode == Cr.NS_BASE_STREAM_CLOSED && this._willBeWokenUpByUDP)) {
-      console.debug("wsOnStop: Socket error", statusCode);
+    if (statusCode != Cr.NS_OK && !this._skipReconnect) {
+      console.debug("wsOnStop: Reconnecting after socket error", statusCode);
       this._reconnect();
       return;
     }
@@ -1245,7 +1007,6 @@ this.PushServiceWebSocket = {
     // If we receive a message, we know the connection succeeded. Reset the
     // connection attempt and ping interval counters.
     this._retryFailCount = 0;
-    this._pingIntervalRetryTimes = {};
 
     let doNotHandle = false;
     if ((message === '{}') ||
@@ -1253,7 +1014,6 @@ this.PushServiceWebSocket = {
         (reply.messageType === "ping") ||
         (typeof reply.messageType != "string")) {
       console.debug("wsOnMessageAvailable: Pong received");
-      this._calculateAdaptivePing(false);
       doNotHandle = true;
     }
 
@@ -1268,14 +1028,14 @@ this.PushServiceWebSocket = {
 
     // A whitelist of protocol handlers. Add to these if new messages are added
     // in the protocol.
-    let handlers = ["Hello", "Register", "Notification"];
+    let handlers = ["Hello", "Register", "Unregister", "Notification", "Broadcast"];
 
     // Build up the handler name to call from messageType.
     // e.g. messageType == "register" -> _handleRegisterReply.
     let handlerName = reply.messageType[0].toUpperCase() +
                       reply.messageType.slice(1).toLowerCase();
 
-    if (handlers.indexOf(handlerName) == -1) {
+    if (!handlers.includes(handlerName)) {
       console.warn("wsOnMessageAvailable: No whitelisted handler", handlerName,
         "for message", reply.messageType);
       return;
@@ -1298,210 +1058,86 @@ this.PushServiceWebSocket = {
    * function), which calls reconnect and re-establishes the WebSocket
    * connection.
    *
-   * If the server said it'll use UDP for wakeup, we set _willBeWokenUpByUDP
-   * and stop reconnecting in _wsOnStop().
+   * If the server requested that we back off, we won't reconnect until the
+   * next network state change event, or until we need to send a new register
+   * request.
    */
   _wsOnServerClose: function(context, aStatusCode, aReason) {
     console.debug("wsOnServerClose()", aStatusCode, aReason);
 
-    // Switch over to UDP.
-    if (aStatusCode == kUDP_WAKEUP_WS_STATUS_CODE) {
-      console.debug("wsOnServerClose: Server closed with promise to wake up");
-      this._willBeWokenUpByUDP = true;
-      // TODO: there should be no pending requests
+    if (aStatusCode == kBACKOFF_WS_STATUS_CODE) {
+      console.debug("wsOnServerClose: Skipping automatic reconnect");
+      this._skipReconnect = true;
     }
   },
 
   /**
    * Rejects all pending register requests with errors.
    */
-  _cancelRegisterRequests: function() {
-    for (let request of this._registerRequests.values()) {
-      request.reject(new Error("Register request aborted"));
+  _cancelPendingRequests() {
+    for (let request of this._pendingRequests.values()) {
+      request.reject(new Error("Request aborted"));
     }
-    this._registerRequests.clear();
+    this._pendingRequests.clear();
   },
 
-  _makeUDPSocket: function() {
-    return Cc["@mozilla.org/network/udp-socket;1"]
-             .createInstance(Ci.nsIUDPSocket);
+  /** Creates a case-insensitive map key for a request that expects a reply. */
+  _makePendingRequestKey(data) {
+    return (data.messageType + "|" + data.channelID).toLowerCase();
   },
 
-  /**
-   * This method should be called only if the device is on a mobile network!
-   */
-  _listenForUDPWakeup: function() {
-    console.debug("listenForUDPWakeup()");
+  /** Sends a request and waits for a reply from the server. */
+  _sendRequestForReply(record, data) {
+    return Promise.resolve().then(_ => {
+      // start the timer since we now have at least one request
+      this._startRequestTimeoutTimer();
 
-    if (this._udpServer) {
-      console.warn("listenForUDPWakeup: UDP Server already running");
-      return;
-    }
-
-    if (!prefs.get("udp.wakeupEnabled")) {
-      console.debug("listenForUDPWakeup: UDP support disabled");
-      return;
-    }
-
-    let socket = this._makeUDPSocket();
-    if (!socket) {
-      return;
-    }
-    this._udpServer = socket.QueryInterface(Ci.nsIUDPSocket);
-    this._udpServer.init(-1, false, Services.scriptSecurityManager.getSystemPrincipal());
-    this._udpServer.asyncListen(this);
-    console.debug("listenForUDPWakeup: Listening on", this._udpServer.port);
-
-    return this._udpServer.port;
-  },
-
-  /**
-   * Called by UDP Server Socket. As soon as a ping is recieved via UDP,
-   * reconnect the WebSocket and get the actual data.
-   */
-  onPacketReceived: function(aServ, aMessage) {
-    console.debug("onPacketReceived: Recv UDP datagram on port",
-      this._udpServer.port);
-    this._beginWSSetup();
-  },
-
-  /**
-   * Called by UDP Server Socket if the socket was closed for some reason.
-   *
-   * If this happens, we reconnect the WebSocket to not miss out on
-   * notifications.
-   */
-  onStopListening: function(aServ, aStatus) {
-    console.debug("onStopListening: UDP Server socket was shutdown. Status",
-      aStatus);
-    this._udpServer = undefined;
-    this._beginWSSetup();
-  },
-};
-
-var PushNetworkInfo = {
-  /**
-   * Returns information about MCC-MNC and the IP of the current connection.
-   */
-  getNetworkInformation: function() {
-    console.debug("PushNetworkInfo: getNetworkInformation()");
-
-    try {
-      if (!prefs.get("udp.wakeupEnabled")) {
-        console.debug("getNetworkInformation: UDP support disabled, we do not",
-          "send any carrier info");
-        throw new Error("UDP disabled");
-      }
-
-      let nm = Cc["@mozilla.org/network/manager;1"]
-                 .getService(Ci.nsINetworkManager);
-      if (nm.activeNetworkInfo &&
-          nm.activeNetworkInfo.type == Ci.nsINetworkInfo.NETWORK_TYPE_MOBILE) {
-        let iccService = Cc["@mozilla.org/icc/iccservice;1"]
-                           .getService(Ci.nsIIccService);
-        // TODO: Bug 927721 - PushService for multi-sim
-        // In Multi-sim, there is more than one client in iccService. Each
-        // client represents a icc handle. To maintain backward compatibility
-        // with single sim, we always use client 0 for now. Adding support
-        // for multiple sim will be addressed in bug 927721, if needed.
-        let clientId = 0;
-        let icc = iccService.getIccByServiceId(clientId);
-        let iccInfo = icc && icc.iccInfo;
-        if (iccInfo) {
-          console.debug("getNetworkInformation: Running on mobile data");
-
-          let ips = {};
-          let prefixLengths = {};
-          nm.activeNetworkInfo.getAddresses(ips, prefixLengths);
-
-          return {
-            mcc: iccInfo.mcc,
-            mnc: iccInfo.mnc,
-            ip:  ips.value[0]
-          };
-        }
-      }
-    } catch (e) {
-      console.error("getNetworkInformation: Error recovering mobile network",
-        "information", e);
-    }
-
-    console.debug("getNetworkInformation: Running on wifi");
-    return {
-      mcc: 0,
-      mnc: 0,
-      ip: undefined
-    };
-  },
-
-  /**
-   * Get mobile network information to decide if the client is capable of being
-   * woken up by UDP (which currently just means having an mcc and mnc along
-   * with an IP, and optionally a netid).
-   */
-  getNetworkState: function(callback) {
-    console.debug("PushNetworkInfo: getNetworkState()");
-
-    if (typeof callback !== 'function') {
-      throw new Error("No callback method. Aborting push agent !");
-    }
-
-    var networkInfo = this.getNetworkInformation();
-
-    if (networkInfo.ip) {
-      this._getMobileNetworkId(networkInfo, function(netid) {
-        console.debug("getNetworkState: Recovered netID", netid);
-        callback({
-          mcc: networkInfo.mcc,
-          mnc: networkInfo.mnc,
-          ip:  networkInfo.ip,
-          netid: netid
+      let key = this._makePendingRequestKey(data);
+      if (!this._pendingRequests.has(key)) {
+        let request = {
+          data: data,
+          record: record,
+          ctime: Date.now(),
+        };
+        request.promise = new Promise((resolve, reject) => {
+          request.resolve = resolve;
+          request.reject = reject;
         });
-      });
-    } else {
-      callback(networkInfo);
-    }
+        this._pendingRequests.set(key, request);
+        this._queueRequest(data);
+      }
+
+      return this._pendingRequests.get(key).promise;
+    });
   },
 
-  /*
-   * Get the mobile network ID (netid)
-   *
-   * @param networkInfo
-   *        Network information object { mcc, mnc, ip, port }
-   * @param callback
-   *        Callback function to invoke with the netid or null if not found
-   */
-  _getMobileNetworkId: function(networkInfo, callback) {
-    console.debug("PushNetworkInfo: getMobileNetworkId()");
-    if (typeof callback !== 'function') {
-      return;
+  /** Removes and returns a pending request for a server reply. */
+  _takeRequestForReply(reply) {
+    if (typeof reply.channelID !== "string") {
+      return null;
     }
-
-    function queryDNSForDomain(domain) {
-      console.debug("queryDNSForDomain: Querying DNS for", domain);
-      let netIDDNSListener = {
-        onLookupComplete: function(aRequest, aRecord, aStatus) {
-          if (aRecord) {
-            let netid = aRecord.getNextAddrAsString();
-            console.debug("queryDNSForDomain: NetID found", netid);
-            callback(netid);
-          } else {
-            console.debug("queryDNSForDomain: NetID not found");
-            callback(null);
-          }
-        }
-      };
-      gDNSService.asyncResolve(domain, 0, netIDDNSListener,
-        threadManager.currentThread);
-      return [];
+    let key = this._makePendingRequestKey(reply);
+    let request = this._pendingRequests.get(key);
+    if (!request) {
+      return null;
     }
+    this._pendingRequests.delete(key);
+    if (!this._hasPendingRequests()) {
+      this._requestTimeoutTimer.cancel();
+    }
+    return request;
+  },
 
-    console.debug("getMobileNetworkId: Getting mobile network ID");
+  sendSubscribeBroadcast(serviceId, version) {
+    let data = {
+      messageType: "broadcast_subscribe",
+      broadcasts: {
+        [serviceId]: version
+      },
+    };
 
-    let netidAddress = "wakeup.mnc" + ("00" + networkInfo.mnc).slice(-3) +
-      ".mcc" + ("00" + networkInfo.mcc).slice(-3) + ".3gppnetwork.org";
-    queryDNSForDomain(netidAddress, callback);
-  }
+    this._queueRequest(data);
+  },
 };
 
 function PushRecordWebSocket(record) {

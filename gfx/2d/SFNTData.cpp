@@ -139,7 +139,7 @@ SFNTData::Create(const uint8_t *aFontData, uint32_t aDataLength)
       ++offset;
     }
 
-    return Move(sfntData);
+    return sfntData;
   }
 
   UniquePtr<SFNTData> sfntData(new SFNTData);
@@ -147,12 +147,13 @@ SFNTData::Create(const uint8_t *aFontData, uint32_t aDataLength)
     return nullptr;
   }
 
-  return Move(sfntData);
+  return sfntData;
 }
 
 /* static */
 uint64_t
-SFNTData::GetUniqueKey(const uint8_t *aFontData, uint32_t aDataLength)
+SFNTData::GetUniqueKey(const uint8_t *aFontData, uint32_t aDataLength,
+                       uint32_t aVarDataSize, const void* aVarData)
 {
   uint64_t hash;
   UniquePtr<SFNTData> sfntData = SFNTData::Create(aFontData, aDataLength);
@@ -162,6 +163,10 @@ SFNTData::GetUniqueKey(const uint8_t *aFontData, uint32_t aDataLength)
   } else {
     gfxWarning() << "Failed to get name from font data hashing whole font.";
     hash = HashString(aFontData, aDataLength);
+  }
+
+  if (aVarDataSize) {
+    hash = AddToHash(hash, HashBytes(aVarData, aVarDataSize));
   }
 
   return hash << 32 | aDataLength;;
@@ -194,7 +199,7 @@ SFNTData::GetU16FullNames(Vector<mozilla::u16string>& aU16FullNames)
     if (mFonts[i]->GetU16FullName(name)) {
       fontFound = true;
     }
-    if (!aU16FullNames.append(Move(name))) {
+    if (!aU16FullNames.append(std::move(name))) {
       return false;
     }
   }
@@ -204,11 +209,20 @@ SFNTData::GetU16FullNames(Vector<mozilla::u16string>& aU16FullNames)
 
 bool
 SFNTData::GetIndexForU16Name(const mozilla::u16string& aU16FullName,
-                             uint32_t* aIndex)
+                             uint32_t* aIndex, size_t aTruncatedLen)
 {
   for (size_t i = 0; i < mFonts.length(); ++i) {
     mozilla::u16string name;
-    if (mFonts[i]->GetU16FullName(name) && name == aU16FullName) {
+    if (!mFonts[i]->GetU16FullName(name)) {
+      continue;
+    }
+
+    if (aTruncatedLen) {
+      MOZ_ASSERT(aU16FullName.length() <= aTruncatedLen);
+      name = name.substr(0, aTruncatedLen);
+    }
+
+    if (name == aU16FullName) {
       *aIndex = i;
       return true;
     }

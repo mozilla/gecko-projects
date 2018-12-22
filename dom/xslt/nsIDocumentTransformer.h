@@ -1,16 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #ifndef nsIDocumentTransformer_h__
 #define nsIDocumentTransformer_h__
 
 #include "nsISupports.h"
+#include "nsStringFwd.h"
 
+template<class> class nsCOMPtr;
+class nsIContent;
 class nsIDocument;
-class nsIDOMNode;
+class nsINode;
 class nsIURI;
-class nsString;
+template<class> class nsTArray;
 
 #define NS_ITRANSFORMOBSERVER_IID \
 { 0x04b2d17c, 0xe98d, 0x45f5, \
@@ -18,7 +21,7 @@ class nsString;
 
 class nsITransformObserver : public nsISupports
 {
-public: 
+public:
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ITRANSFORMOBSERVER_IID)
 
@@ -37,13 +40,13 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsITransformObserver, NS_ITRANSFORMOBSERVER_IID)
 
 class nsIDocumentTransformer : public nsISupports
 {
-public: 
+public:
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENTTRANSFORMER_IID)
 
   NS_IMETHOD SetTransformObserver(nsITransformObserver* aObserver) = 0;
   NS_IMETHOD LoadStyleSheet(nsIURI* aUri, nsIDocument* aLoaderDocument) = 0;
-  NS_IMETHOD SetSourceContentModel(nsIDOMNode* aSource) = 0;
+  NS_IMETHOD SetSourceContentModel(nsINode* aSource) = 0;
   NS_IMETHOD CancelLoads() = 0;
 
   NS_IMETHOD AddXSLTParamNamespace(const nsString& aPrefix,
@@ -52,7 +55,7 @@ public:
                           const nsString& aNamespace,
                           const nsString& aValue,
                           const nsString& aSelect,
-                          nsIDOMNode* aContextNode) = 0;
+                          nsINode* aContextNode) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocumentTransformer,

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,9 +13,9 @@
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Types.h"
 #include "nsColor.h"
+#include "nsTArrayForwardDeclare.h"
 
 struct nsStyleFilter;
-template<class T> class nsTArray;
 
 /**
  * This class helps nsFilterInstance build its filter graph. It turns a CSS
@@ -50,15 +51,25 @@ public:
    * Creates at least one new FilterPrimitiveDescription based on the filter
    * from the style system. Appends the new FilterPrimitiveDescription(s) to the
    * aPrimitiveDescrs list.
+   * aInputIsTainted describes whether the input to this filter is tainted, i.e.
+   * whether it contains security-sensitive content. This is needed to propagate
+   * taintedness to the FilterPrimitive that take tainted inputs. Something being
+   * tainted means that it contains security sensitive content.
+   * The input to this filter is the previous filter's output, i.e. the last
+   * element in aPrimitiveDescrs, or the SourceGraphic input if this is the first
+   * filter in the filter chain.
    */
-  nsresult BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs);
+  nsresult BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
+                           bool aInputIsTainted);
 
 private:
   /**
    * Returns a new FilterPrimitiveDescription with its basic properties set up.
+   * See the comment above BuildPrimitives for the meaning of aInputIsTainted.
    */
   FilterPrimitiveDescription CreatePrimitiveDescription(PrimitiveType aType,
-                                                        const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs);
+                                                        const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
+                                                        bool aInputIsTainted);
 
   /**
    * Sets aDescr's attributes using the style info in mFilter.

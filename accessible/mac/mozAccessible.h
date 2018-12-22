@@ -42,13 +42,6 @@ GetNativeFromProxy(const ProxyAccessible* aProxy)
   return reinterpret_cast<mozAccessible*>(aProxy->GetWrapper());
 }
 
-ProxyAccessible* GetProxyUnignoredParent(const ProxyAccessible* aProxy);
-
-void GetProxyUnignoredChildren(const ProxyAccessible* aProxy,
-                               nsTArray<ProxyAccessible*>* aChildrenArray);
-
-BOOL IsProxyIgnored(const ProxyAccessible* aProxy);
-
 } // a11y
 } // mozilla
 
@@ -120,6 +113,9 @@ static const uintptr_t IS_PROXY = 1;
 
 // the accessible description (help text) of this particular instance.
 - (NSString*)help;
+
+// returns the orientation (vertical, horizontal, or undefined)
+- (NSString*)orientation;
 
 - (BOOL)isEnabled;
 

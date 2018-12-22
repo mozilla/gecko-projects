@@ -26,34 +26,33 @@ SimpleTest.waitForExplicitFinish();
 // Error margin allowed for the window's size. Windows has varying minimum
 // sizes depending on the os due to outer window chrome. Unix is given 5
 // pixels to protect against minor variances.
-var epsilon =  navigator.platform.indexOf("Win") == -1 ? 5 : 20;
+var epsilon =  !navigator.platform.includes("Win") ? 5 : 20;
 
 // Windows 8 has a minimum 122 pixel inner window width due to
 // outer window chrome.
-var isWin8 = (navigator.userAgent.indexOf("Windows NT 6.2") != -1);
+var isWin8 = (navigator.userAgent.includes("Windows NT 6.2"));
 
 var innerWidthMin = (isWin8 ? 120 : 100);
 var innerWidthMax = (isWin8 ? 125 : 100);
 
+var isExecuted = false;
+
 function test() {
-  var w = window.open('data:text/html,null', null, 'width=300,height=300');
-  var nbResize = 0;
+  var w = window.open('file_empty.html', null, 'width=300,height=300');
 
   SimpleTest.waitForFocus(function() {
     w.onresize = function() {
-      nbResize++;
 
-      if (nbResize == 1) {
+      if (w.innerWidth > 300 - epsilon || isExecuted) {
         return;
       }
 
-      ok(w.innerWidth + epsilon >= innerWidthMin && w.innerWidth - epsilon <= innerWidthMax,
-         "innerWidth should be between " + innerWidthMin + " and " + innerWidthMax);
-      ok(w.innerHeight + epsilon >= 100 && w.innerHeight - epsilon <= 100,
-         "innerHeight should be around 100");
+      isExecuted = true;
 
-      // It's not clear why 2 events are coming...
-      is(nbResize, 2, "We should get 2 events.");
+      ok(w.innerWidth + epsilon >= innerWidthMin && w.innerWidth - epsilon <= innerWidthMax,
+         "innerWidth should be between " + innerWidthMin + " and " + innerWidthMax + " but it was: " + w.innerWidth);
+      ok(w.innerHeight + epsilon >= 100 && w.innerHeight - epsilon <= 100,
+         "innerHeight should be around 100" + " but it was: " + w.innerHeight);
 
       w.close();
 

@@ -1,9 +1,11 @@
 # lint_ignore=E501
 config = {
     "shipped-locales-url": "https://hg.mozilla.org/%(repo)s/raw-file/%(revision)s/browser/locales/shipped-locales",
+    "bouncer_prefix": "https://download.mozilla.org/",
     "products": {
         "installer": {
             "product-name": "Firefox-%(version)s",
+            "check_uptake": True,
             "alias": "firefox-beta-latest",
             "ssl-only": False,
             "add-locales": True,
@@ -32,6 +34,8 @@ config = {
         },
         "installer-ssl": {
             "product-name": "Firefox-%(version)s-SSL",
+            "check_uptake": True,
+            "alias": "firefox-beta-latest-ssl",
             "ssl-only": True,
             "add-locales": True,
             "paths": {
@@ -59,22 +63,24 @@ config = {
         },
         "stub-installer": {
             "product-name": "Firefox-%(version)s-stub",
+            "check_uptake": True,
             "alias": "firefox-beta-stub",
             "ssl-only": True,
             "add-locales": True,
             "paths": {
                 "win32": {
-                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20Stub%%20%(version)s.exe",
+                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Installer.exe",
                     "bouncer-platform": "win",
                 },
                 "win64": {
-                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20Stub%%20%(version)s.exe",
+                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Installer.exe",
                     "bouncer-platform": "win64",
                 },
             },
         },
         "complete-mar": {
             "product-name": "Firefox-%(version)s-Complete",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {
@@ -104,6 +110,7 @@ config = {
     "partials": {
         "releases-dir": {
             "product-name": "Firefox-%(version)s-Partial-%(prev_version)s",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": True,
             "paths": {

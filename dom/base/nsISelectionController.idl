@@ -7,31 +7,39 @@
 #include "nsISelectionDisplay.idl"
 
 %{C++
-typedef short SelectionType;
 typedef short SelectionRegion;
+namespace mozilla {
+namespace dom {
+class Selection;
+} // namespace dom
+} // namespace mozilla
 %}
 
 interface nsIContent;
-interface nsIDOMNode;
-interface nsISelection;
 interface nsISelectionDisplay;
+
+webidl Node;
+webidl Selection;
 
 [scriptable, uuid(3801c9d4-8e69-4bfc-9edb-b58278621f8f)]
 interface nsISelectionController : nsISelectionDisplay
 {
-   const short SELECTION_NONE=0;
-   const short SELECTION_NORMAL=1;
-   const short SELECTION_SPELLCHECK=2;
-   const short SELECTION_IME_RAWINPUT=4;
-   const short SELECTION_IME_SELECTEDRAWTEXT=8;
-   const short SELECTION_IME_CONVERTEDTEXT=16;
-   const short SELECTION_IME_SELECTEDCONVERTEDTEXT=32;
-   const short SELECTION_ACCESSIBILITY=64; // For accessibility API usage
-   const short SELECTION_FIND=128;
-   const short SELECTION_URLSECONDARY=256;
-   const short SELECTION_URLSTRIKEOUT=512;
-   const short NUM_SELECTIONTYPES=11;
+   // RawSelectionType values:
+   const short SELECTION_NONE                      = 0;
+   const short SELECTION_NORMAL                    = 1;
+   const short SELECTION_SPELLCHECK                = 2;
+   const short SELECTION_IME_RAWINPUT              = 3;
+   const short SELECTION_IME_SELECTEDRAWTEXT       = 4;
+   const short SELECTION_IME_CONVERTEDTEXT         = 5;
+   const short SELECTION_IME_SELECTEDCONVERTEDTEXT = 6;
+   // For accessibility API usage
+   const short SELECTION_ACCESSIBILITY             = 7;
+   const short SELECTION_FIND                      = 8;
+   const short SELECTION_URLSECONDARY              = 9;
+   const short SELECTION_URLSTRIKEOUT              = 10;
+   const short NUM_SELECTIONTYPES                  = 11;
 
+   // SelectionRegion values:
    const short SELECTION_ANCHOR_REGION = 0;
    const short SELECTION_FOCUS_REGION = 1;
    const short SELECTION_WHOLE_SELECTION = 2;
@@ -57,10 +65,18 @@ interface nsISelectionController : nsISelectionDisplay
    * GetSelection will return the selection that the presentation
    *  shell may implement.
    *
-   * @param aType will hold the type of selection //SelectionType
+   * @param aType This will hold the type of selection.  This value must be one
+   *              of RawSelectionType values.
    * @param _return will hold the return value
    */
-    nsISelection getSelection(in short type);
+    [binaryname(GetSelectionFromScript)]
+    Selection getSelection(in short type);
+
+   /**
+   * Return the selection object corresponding to a selection type.
+   */
+    [noscript,nostdcall,notxpcom,binaryname(GetSelection)]
+    Selection getDOMSelection(in short aType);
 
    const short SCROLL_SYNCHRONOUS = 1<<1;
    const short SCROLL_FIRST_ANCESTOR_ONLY = 1<<2;
@@ -72,7 +88,8 @@ interface nsISelectionController : nsISelectionDisplay
    * ScrollSelectionIntoView scrolls a region of the selection,
    * so that it is visible in the scrolled view.
    *
-   * @param aType the selection to scroll into view. //SelectionType
+   * @param aType the selection to scroll into view.  This value must be one
+   *              of RawSelectionType values.
    * @param aRegion the region inside the selection to scroll into view. //SelectionRegion
    * @param aFlags the scroll flags.  Valid bits include:
    * SCROLL_SYNCHRONOUS: when set, scrolls the selection into view
@@ -268,11 +285,74 @@ interface nsISelectionController : nsISelectionDisplay
    *  @param aEndOffset    offset in dom to last char of textnode to test
    *  @param aReturnBool   boolean returned TRUE if visible FALSE if not
    */
-    boolean checkVisibility(in nsIDOMNode node, in short startOffset, in short endOffset);
+    boolean checkVisibility(in Node node, in short startOffset, in short endOffset);
     [noscript,nostdcall] boolean checkVisibilityContent(in nsIContent node, in short startOffset, in short endOffset);
 };
 %{ C++
    #define NS_ISELECTIONCONTROLLER_CID \
    { 0x513b9460, 0xd56a, 0x4c4e, \
    { 0xb6, 0xf9, 0x0b, 0x8a, 0xe4, 0x37, 0x2a, 0x3b }}
+
+namespace mozilla {
+
+// RawSelectionType should be used to store nsISelectionController::SELECTION_*.
+typedef short RawSelectionType;
+
+// SelectionTypeMask should be used to store bit-mask of selection types.
+// The value can be retrieved with ToSelectionTypeMask() and checking if
+// a selection type is in a mask with |SelectionType & SelectionTypeMask|.
+typedef uint16_t SelectionTypeMask;
+
+// SelectionType should be used in internal handling because of type safe.
+enum class SelectionType : RawSelectionType
+{
+  eInvalid = -1,
+  eNone = nsISelectionController::SELECTION_NONE,
+  eNormal = nsISelectionController::SELECTION_NORMAL,
+  eSpellCheck = nsISelectionController::SELECTION_SPELLCHECK,
+  eIMERawClause = nsISelectionController::SELECTION_IME_RAWINPUT,
+  eIMESelectedRawClause = nsISelectionController::SELECTION_IME_SELECTEDRAWTEXT,
+  eIMEConvertedClause = nsISelectionController::SELECTION_IME_CONVERTEDTEXT,
+  eIMESelectedClause =
+    nsISelectionController::SELECTION_IME_SELECTEDCONVERTEDTEXT,
+  eAccessibility = nsISelectionController::SELECTION_ACCESSIBILITY,
+  eFind = nsISelectionController::SELECTION_FIND,
+  eURLSecondary = nsISelectionController::SELECTION_URLSECONDARY,
+  eURLStrikeout = nsISelectionController::SELECTION_URLSTRIKEOUT,
+};
+
+// Using anonymous enum to define constants because these constants may be
+// used at defining fixed size array in some header files (e.g.,
+// nsFrameSelection.h).  So, the values needs to be defined here, but we cannot
+// use static/const even with extern since it causes failing to link or
+// initializes them after such headers.
+enum : size_t
+{
+  // kSelectionTypeCount is number of SelectionType.
+  kSelectionTypeCount = nsISelectionController::NUM_SELECTIONTYPES,
+};
+
+// kPresentSelectionTypes is selection types which may be displayed.
+// I.e., selection types except eNone.
+static const SelectionType kPresentSelectionTypes[] = {
+  SelectionType::eNormal,
+  SelectionType::eSpellCheck,
+  SelectionType::eIMERawClause,
+  SelectionType::eIMESelectedRawClause,
+  SelectionType::eIMEConvertedClause,
+  SelectionType::eIMESelectedClause,
+  SelectionType::eAccessibility,
+  SelectionType::eFind,
+  SelectionType::eURLSecondary,
+  SelectionType::eURLStrikeout,
+};
+
+// Please include mozilla/dom/Selection.h for the following APIs.
+const char* ToChar(SelectionType aSelectionType);
+inline bool IsValidRawSelectionType(RawSelectionType aRawSelectionType);
+inline SelectionType ToSelectionType(RawSelectionType aRawSelectionType);
+inline RawSelectionType ToRawSelectionType(SelectionType aSelectionType);
+inline SelectionTypeMask ToSelectionTypeMask(SelectionType aSelectionType);
+
+} // namespace mozilla
 %}

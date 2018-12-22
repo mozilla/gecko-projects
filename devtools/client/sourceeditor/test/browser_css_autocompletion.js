@@ -5,9 +5,7 @@
 "use strict";
 
 const CSSCompleter = require("devtools/client/sourceeditor/css-autocompleter");
-const {InspectorFront} = require("devtools/server/actors/inspector");
-const {TargetFactory} = require("devtools/client/framework/target");
-const { Cc, Ci } = require("chrome");
+const {InspectorFront} = require("devtools/shared/fronts/inspector");
 
 const CSS_URI = "http://mochi.test:8888/browser/devtools/client/sourceeditor" +
                 "/test/css_statemachine_testcases.css";
@@ -15,7 +13,7 @@ const TESTS_URI = "http://mochi.test:8888/browser/devtools/client" +
                   "/sourceeditor/test/css_autocompletion_tests.json";
 
 const source = read(CSS_URI);
-const tests = eval(read(TESTS_URI));
+const {tests} = JSON.parse(read(TESTS_URI));
 
 const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
   ["<!DOCTYPE html>",
@@ -62,7 +60,9 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    "  <div class='hidden-labels-box devtools-toolbarbutton devtools-menulist'></div>",
    "  <div class='devtools-menulist'></div>",
    "  <div class='devtools-menulist'></div>",
+   /* eslint-disable max-len */
    "  <tabs class='devtools-toolbarbutton'><tab></tab><tab></tab><tab></tab></tabs><tabs></tabs>",
+   /* eslint-enable max-len */
    "  <button class='category-name visible'></button>",
    "  <div class='devtools-toolbarbutton' label='true'>",
    "   <hbox class='toolbarbutton-menubutton-button'></hbox></div>",
@@ -70,57 +70,62 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    " </html>"
   ].join("\n"));
 
-let doc = null;
+let browser;
 let index = 0;
 let completer = null;
-let progress;
-let progressDiv;
 let inspector;
 
-function test() {
-  waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onload() {
-    gBrowser.selectedBrowser.removeEventListener("load", onload, true);
-    doc = content.document;
-    runTests();
-  }, true);
-  content.location = TEST_URI;
+add_task(async function test() {
+  const tab = await addTab(TEST_URI);
+  browser = tab.linkedBrowser;
+  await runTests();
+  browser = null;
+  gBrowser.removeCurrentTab();
+});
+
+async function runTests() {
+  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  await target.makeRemote();
+  inspector = InspectorFront(target.client, target.form);
+  const walker = await inspector.getWalker();
+  completer = new CSSCompleter({walker: walker,
+                                cssProperties: getClientCssProperties()});
+  await checkStateAndMoveOn();
+  await completer.walker.release();
+  inspector.destroy();
+  inspector = null;
+  completer = null;
 }
 
-function runTests() {
-  progress = doc.getElementById("progress");
-  progressDiv = doc.querySelector("#progress > div");
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  target.makeRemote().then(() => {
-    inspector = InspectorFront(target.client, target.form);
-    inspector.getWalker().then(walker => {
-      completer = new CSSCompleter({walker: walker});
-      checkStateAndMoveOn();
-    });
-  });
-}
-
-function checkStateAndMoveOn() {
+async function checkStateAndMoveOn() {
   if (index == tests.length) {
-    finishUp();
     return;
   }
 
-  let test = tests[index];
-  progress.dataset.progress = ++index;
-  progressDiv.style.width = 100 * index / tests.length + "%";
-  completer.complete(limit(source, test[0]),
-                     {line: test[0][0], ch: test[0][1]}).then(suggestions => {
-    checkState(test[1], suggestions);
-  }).then(checkStateAndMoveOn);
+  const [lineCh, expectedSuggestions] = tests[index];
+  const [line, ch] = lineCh;
+
+  ++index;
+  await ContentTask.spawn(browser, [index, tests.length], function([idx, len]) {
+    const progress = content.document.getElementById("progress");
+    const progressDiv = content.document.querySelector("#progress > div");
+    progress.dataset.progress = idx;
+    progressDiv.style.width = 100 * idx / len + "%";
+  });
+
+  const actualSuggestions = await completer.complete(limit(source, lineCh), {line, ch});
+  await checkState(expectedSuggestions, actualSuggestions);
+  await checkStateAndMoveOn();
 }
 
-function checkState(expected, actual) {
+async function checkState(expected, actual) {
   if (expected.length != actual.length) {
     ok(false, "Number of suggestions did not match up for state " + index +
               ". Expected: " + expected.length + ", Actual: " + actual.length);
-    progress.classList.add("failed");
+    await ContentTask.spawn(browser, null, function() {
+      const progress = content.document.getElementById("progress");
+      progress.classList.add("failed");
+    });
     return;
   }
 
@@ -132,16 +137,4 @@ function checkState(expected, actual) {
     }
   }
   ok(true, "Test " + index + " passed. ");
-}
-
-function finishUp() {
-  completer.walker.release().then(() => {
-    inspector.destroy();
-    inspector = null;
-    completer = null;
-    gBrowser.removeCurrentTab();
-    finish();
-  });
-  progress = null;
-  progressDiv = null;
 }

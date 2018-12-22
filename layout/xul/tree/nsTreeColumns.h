@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,15 +7,16 @@
 #ifndef nsTreeColumns_h__
 #define nsTreeColumns_h__
 
-#include "nsITreeColumns.h"
 #include "nsITreeBoxObject.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/RefPtr.h"
 #include "nsCoord.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsAutoPtr.h"
+#include "nsQueryObject.h"
 #include "nsWrapperCache.h"
 #include "nsString.h"
 
+class nsAtom;
 class nsTreeBodyFrame;
 class nsTreeColumns;
 class nsIFrame;
@@ -39,30 +41,29 @@ class TreeBoxObject;
 
 // This class is our column info.  We use it to iterate our columns and to obtain
 // information about each column.
-class nsTreeColumn final : public nsITreeColumn
+class nsTreeColumn final : public nsISupports
                          , public nsWrapperCache
 {
 public:
-  nsTreeColumn(nsTreeColumns* aColumns, nsIContent* aContent);
+  nsTreeColumn(nsTreeColumns* aColumns, mozilla::dom::Element* aElement);
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_TREECOLUMN_IMPL_CID)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsTreeColumn)
-  NS_DECL_NSITREECOLUMN
 
   // WebIDL
   nsIContent* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  mozilla::dom::Element* GetElement(mozilla::ErrorResult& aRv);
+  mozilla::dom::Element* Element();
 
   nsTreeColumns* GetColumns() const { return mColumns; }
 
   int32_t GetX(mozilla::ErrorResult& aRv);
   int32_t GetWidth(mozilla::ErrorResult& aRv);
 
-  // GetId is fine
+  void GetId(nsAString& aId) const;
   int32_t Index() const { return mIndex; }
 
   bool Primary() const { return mIsPrimary; }
@@ -98,11 +99,12 @@ protected:
 
   void SetColumns(nsTreeColumns* aColumns) { mColumns = aColumns; }
 
-  const nsAString& GetId() { return mId; }
-  nsIAtom* GetAtom() { return mAtom; }
-
+public:
+  const nsAString& GetId() const { return mId; }
+  nsAtom* GetAtom() { return mAtom; }
   int32_t GetIndex() { return mIndex; }
 
+protected:
   bool IsPrimary() { return mIsPrimary; }
   bool IsCycler() { return mIsCycler; }
   bool IsEditable() { return mIsEditable; }
@@ -124,12 +126,12 @@ private:
   /**
    * Non-null nsIContent for the associated <treecol> element.
    */
-  nsCOMPtr<nsIContent> mContent;
+  RefPtr<mozilla::dom::Element> mContent;
 
   nsTreeColumns* mColumns;
 
   nsString mId;
-  nsCOMPtr<nsIAtom> mAtom;
+  RefPtr<nsAtom> mAtom;
 
   int32_t mIndex;
 
@@ -150,7 +152,7 @@ private:
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsTreeColumn, NS_TREECOLUMN_IMPL_CID)
 
-class nsTreeColumns final : public nsITreeColumns
+class nsTreeColumns final : public nsISupports
                           , public nsWrapperCache
 {
 private:
@@ -161,7 +163,6 @@ public:
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsTreeColumns)
-  NS_DECL_NSITREECOLUMNS
 
   nsIContent* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -186,12 +187,11 @@ public:
   nsTreeColumn* IndexedGetter(uint32_t aIndex, bool& aFound);
   nsTreeColumn* GetColumnAt(uint32_t aIndex);
   nsTreeColumn* NamedGetter(const nsAString& aId, bool& aFound);
-  bool NameIsEnumerable(const nsAString& aName);
   nsTreeColumn* GetNamedColumn(const nsAString& aId);
-  void GetSupportedNames(unsigned, nsTArray<nsString>& aNames);
+  void GetSupportedNames(nsTArray<nsString>& aNames);
 
-  // Uses XPCOM InvalidateColumns().
-  // Uses XPCOM RestoreNaturalOrder().
+  void InvalidateColumns();
+  void RestoreNaturalOrder();
 
   friend class nsTreeBodyFrame;
 protected:

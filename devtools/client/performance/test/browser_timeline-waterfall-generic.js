@@ -6,40 +6,37 @@
  * Tests if the waterfall is properly built after finishing a recording.
  */
 
-const { WATERFALL_MARKER_SIDEBAR_SAFE_BOUNDS } = require("devtools/client/performance/modules/widgets/marker-view");
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { startRecording, stopRecording, waitForOverviewRenderedWithMarkers } = require("devtools/client/performance/test/helpers/actions");
 const { once } = require("devtools/client/performance/test/helpers/event-utils");
 
-add_task(function*() {
-  let { panel } = yield initPerformanceInNewTab({
+add_task(async function() {
+  const { panel } = await initPerformanceInNewTab({
     url: SIMPLE_URL,
     win: window
   });
 
-  let { $, $$, EVENTS, WaterfallView } = panel.panelWin;
+  const { $, $$, EVENTS, WaterfallView } = panel.panelWin;
 
-  yield startRecording(panel);
+  await startRecording(panel);
   ok(true, "Recording has started.");
 
   // Ensure overview is rendering and some markers were received.
-  yield waitForOverviewRenderedWithMarkers(panel);
+  await waitForOverviewRenderedWithMarkers(panel);
 
-  yield stopRecording(panel);
+  await stopRecording(panel);
   ok(true, "Recording has ended.");
 
   // Test the header container.
 
-  ok($(".waterfall-header-container"),
+  ok($(".waterfall-header"),
     "A header container should have been created.");
 
   // Test the header sidebar (left).
 
-  ok($(".waterfall-header-container > .waterfall-sidebar"),
+  ok($(".waterfall-header > .waterfall-sidebar"),
     "A header sidebar node should have been created.");
-  ok($(".waterfall-header-container > .waterfall-sidebar > .waterfall-header-name"),
-    "A header name label should have been created inside the sidebar.");
 
   // Test the header ticks (right).
 
@@ -61,35 +58,35 @@ add_task(function*() {
 
   ok($$(".waterfall-tree-item > .waterfall-marker").length,
     "Some marker waterfall nodes should have been created.");
-  ok($$(".waterfall-tree-item > .waterfall-marker > .waterfall-marker-bar").length,
+  ok($$(".waterfall-tree-item > .waterfall-marker .waterfall-marker-bar").length,
     "Some marker color bars should have been created inside the waterfall.");
 
   // Test the sidebar.
 
-  let detailsView = WaterfallView.details;
-  let markersRoot = WaterfallView._markersRoot;
-  markersRoot.recalculateBounds(); // Make sure the bounds are up to date.
+  const detailsView = WaterfallView.details;
+  // Make sure the bounds are up to date.
+  WaterfallView._recalculateBounds();
 
-  let parentWidthBefore = $("#waterfall-view").getBoundingClientRect().width;
-  let sidebarWidthBefore = $(".waterfall-sidebar").getBoundingClientRect().width;
-  let detailsWidthBefore = $("#waterfall-details").getBoundingClientRect().width;
+  const parentWidthBefore = $("#waterfall-view").getBoundingClientRect().width;
+  const sidebarWidthBefore = $(".waterfall-sidebar").getBoundingClientRect().width;
+  const detailsWidthBefore = $("#waterfall-details").getBoundingClientRect().width;
 
   ok(detailsView.hidden,
     "The details view in the waterfall view is hidden by default.");
   is(detailsWidthBefore, 0,
     "The details view width should be 0 when hidden.");
-  is(markersRoot._waterfallWidth, parentWidthBefore - sidebarWidthBefore - WATERFALL_MARKER_SIDEBAR_SAFE_BOUNDS,
-    "The waterfall width is correct (1).");
+  is(WaterfallView.waterfallWidth,
+     parentWidthBefore - sidebarWidthBefore
+                       - WaterfallView.WATERFALL_MARKER_SIDEBAR_SAFE_BOUNDS,
+     "The waterfall width is correct (1).");
 
-  let receivedFocusEvent = once(markersRoot, "focus");
-  let waterfallRerendered = once(WaterfallView, EVENTS.UI_WATERFALL_RENDERED);
-  WaterfallView._markersRoot.getChild(0).focus();
-  yield receivedFocusEvent;
-  yield waterfallRerendered;
+  const waterfallRerendered = once(WaterfallView, EVENTS.UI_WATERFALL_RENDERED);
+  $$(".waterfall-tree-item")[0].click();
+  await waterfallRerendered;
 
-  let parentWidthAfter = $("#waterfall-view").getBoundingClientRect().width;
-  let sidebarWidthAfter = $(".waterfall-sidebar").getBoundingClientRect().width;
-  let detailsWidthAfter = $("#waterfall-details").getBoundingClientRect().width;
+  const parentWidthAfter = $("#waterfall-view").getBoundingClientRect().width;
+  const sidebarWidthAfter = $(".waterfall-sidebar").getBoundingClientRect().width;
+  const detailsWidthAfter = $("#waterfall-details").getBoundingClientRect().width;
 
   ok(!detailsView.hidden,
     "The details view in the waterfall view is now visible.");
@@ -99,8 +96,10 @@ add_task(function*() {
     "The sidebar view's width should not have changed.");
   isnot(detailsWidthAfter, 0,
     "The details view width should not be 0 when visible.");
-  is(markersRoot._waterfallWidth, parentWidthAfter - sidebarWidthAfter - detailsWidthAfter - WATERFALL_MARKER_SIDEBAR_SAFE_BOUNDS,
-    "The waterfall width is correct (2).");
+  is(WaterfallView.waterfallWidth,
+     parentWidthAfter - sidebarWidthAfter - detailsWidthAfter
+                      - WaterfallView.WATERFALL_MARKER_SIDEBAR_SAFE_BOUNDS,
+     "The waterfall width is correct (2).");
 
-  yield teardownToolboxAndRemoveTab(panel);
+  await teardownToolboxAndRemoveTab(panel);
 });

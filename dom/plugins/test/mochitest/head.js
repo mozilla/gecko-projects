@@ -4,10 +4,9 @@
  */
 function waitTabSwitched() {
   return new Promise(resolve => {
-    gBrowser.addEventListener("TabSwitchDone", function onSwitch() {
-      gBrowser.removeEventListener("TabSwitchDone", onSwitch);
+    gBrowser.addEventListener("TabSwitchDone", function() {
       executeSoon(resolve);
-    });
+    }, {once: true});
   });
 }
 
@@ -64,10 +63,9 @@ function nativeVerticalWheelEventMsg() {
  */
 function waitScrollStart(aTarget) {
   return new Promise((resolve, reject) => {
-    aTarget.addEventListener("scroll", function listener(event) {
-      aTarget.removeEventListener("scroll", listener, true);
+    aTarget.addEventListener("scroll", function(event) {
       resolve(event);
-    }, true);
+    }, {capture: true, once: true});
   });
 }
 
@@ -119,7 +117,7 @@ function setTestPluginEnabledState(aState, aPluginName) {
  */
 function getTestPlugin(aName) {
   let pluginName = aName || "Test Plug-in";
-  let ph = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+  let ph = Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost);
   let tags = ph.getPluginTags();
 
   // Find the test plugin

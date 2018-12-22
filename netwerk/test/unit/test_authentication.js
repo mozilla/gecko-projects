@@ -1,8 +1,8 @@
 // This file tests authentication prompt callbacks
 // TODO NIT use do_check_eq(expected, actual) consistently, not sometimes eq(actual, expected)
 
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 // Turn off the authentication dialog blocking for this test.
 var prefs = Cc["@mozilla.org/preferences-service;1"].
@@ -21,9 +21,12 @@ const FLAG_RETURN_FALSE   = 1 << 0;
 const FLAG_WRONG_PASSWORD = 1 << 1;
 const FLAG_BOGUS_USER = 1 << 2;
 const FLAG_PREVIOUS_FAILED = 1 << 3;
+const CROSS_ORIGIN = 1 << 4;
+const FLAG_NO_REALM = 1 << 5;
+const FLAG_NON_ASCII_USER_PASSWORD = 1 << 6;
 
-const nsIAuthPrompt2 = Components.interfaces.nsIAuthPrompt2;
-const nsIAuthInformation = Components.interfaces.nsIAuthInformation;
+const nsIAuthPrompt2 = Ci.nsIAuthPrompt2;
+const nsIAuthInformation = Ci.nsIAuthInformation;
 
 
 function AuthPrompt1(flags) {
@@ -37,10 +40,10 @@ AuthPrompt1.prototype = {
   expectedRealm: "secret",
 
   QueryInterface: function authprompt_qi(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIAuthPrompt))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIAuthPrompt))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   prompt: function ap1_prompt(title, text, realm, save, defaultText, result) {
@@ -50,28 +53,42 @@ AuthPrompt1.prototype = {
   promptUsernameAndPassword:
     function ap1_promptUP(title, text, realm, savePW, user, pw)
   {
-    // Note that the realm here isn't actually the realm. it's a pw mgr key.
-    do_check_eq(URL + " (" + this.expectedRealm + ")", realm);
-    if (text.indexOf(this.expectedRealm) == -1)
-      do_throw("Text must indicate the realm");
-    if (text.indexOf("localhost") == -1)
+    if (this.flags & FLAG_NO_REALM) {
+      // Note that the realm here isn't actually the realm. it's a pw mgr key.
+      Assert.equal(URL + " (" + this.expectedRealm + ")", realm);
+    }
+    if (!(this.flags & CROSS_ORIGIN)) {
+      if (!text.includes(this.expectedRealm)) {
+        do_throw("Text must indicate the realm");
+      }
+    } else {
+      if (text.includes(this.expectedRealm)) {
+        do_throw("There should not be realm for cross origin");
+      }
+    }
+    if (!text.includes("localhost"))
       do_throw("Text must indicate the hostname");
-    if (text.indexOf(String(PORT)) == -1)
+    if (!text.includes(String(PORT)))
       do_throw("Text must indicate the port");
-    if (text.indexOf("-1") != -1)
+    if (text.includes("-1"))
       do_throw("Text must contain negative numbers");
 
     if (this.flags & FLAG_RETURN_FALSE)
       return false;
 
-    if (this.flags & FLAG_BOGUS_USER)
+    if (this.flags & FLAG_BOGUS_USER) {
       this.user = "foo\nbar";
+    } else if (this.flags & FLAG_NON_ASCII_USER_PASSWORD) {
+      this.user = "é";
+    }
 
     user.value = this.user;
     if (this.flags & FLAG_WRONG_PASSWORD) {
       pw.value = this.pass + ".wrong";
       // Now clear the flag to avoid an infinite loop
       this.flags &= ~FLAG_WRONG_PASSWORD;
+    } else if (this.flags & FLAG_NON_ASCII_USER_PASSWORD) {
+      pw.value = "é";
     } else {
       pw.value = this.pass;
     }
@@ -95,46 +112,50 @@ AuthPrompt2.prototype = {
   expectedRealm: "secret",
 
   QueryInterface: function authprompt2_qi(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIAuthPrompt2))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIAuthPrompt2))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   promptAuth:
     function ap2_promptAuth(channel, level, authInfo)
   {
-    var isNTLM = channel.URI.path.indexOf("ntlm") != -1;
-    var isDigest = channel.URI.path.indexOf("digest") != -1;
+    var isNTLM = channel.URI.pathQueryRef.includes("ntlm");
+    var isDigest = channel.URI.pathQueryRef.includes("digest");
 
-    if (isNTLM)
+    if (isNTLM || (this.flags & FLAG_NO_REALM)) {
       this.expectedRealm = ""; // NTLM knows no realms
+    }
 
-    do_check_eq(this.expectedRealm, authInfo.realm);
+    Assert.equal(this.expectedRealm, authInfo.realm);
 
     var expectedLevel = (isNTLM || isDigest) ?
                         nsIAuthPrompt2.LEVEL_PW_ENCRYPTED :
                         nsIAuthPrompt2.LEVEL_NONE;
-    do_check_eq(expectedLevel, level);
+    Assert.equal(expectedLevel, level);
 
     var expectedFlags = nsIAuthInformation.AUTH_HOST;
 
     if (this.flags & FLAG_PREVIOUS_FAILED)
       expectedFlags |= nsIAuthInformation.PREVIOUS_FAILED;
 
+    if (this.flags & CROSS_ORIGIN)
+      expectedFlags |= nsIAuthInformation.CROSS_ORIGIN_SUB_RESOURCE;
+
     if (isNTLM)
       expectedFlags |= nsIAuthInformation.NEED_DOMAIN;
 
-    const kAllKnownFlags = 31; // Don't fail test for newly added flags
-    do_check_eq(expectedFlags, authInfo.flags & kAllKnownFlags);
+    const kAllKnownFlags = 127; // Don't fail test for newly added flags
+    Assert.equal(expectedFlags, authInfo.flags & kAllKnownFlags);
 
     var expectedScheme = isNTLM ? "ntlm" : isDigest ? "digest" : "basic";
-    do_check_eq(expectedScheme, authInfo.authenticationScheme);
+    Assert.equal(expectedScheme, authInfo.authenticationScheme);
 
     // No passwords in the URL -> nothing should be prefilled
-    do_check_eq(authInfo.username, "");
-    do_check_eq(authInfo.password, "");
-    do_check_eq(authInfo.domain, "");
+    Assert.equal(authInfo.username, "");
+    Assert.equal(authInfo.password, "");
+    Assert.equal(authInfo.domain, "");
 
     if (this.flags & FLAG_RETURN_FALSE)
     {
@@ -142,8 +163,11 @@ AuthPrompt2.prototype = {
       return false;
     }
 
-    if (this.flags & FLAG_BOGUS_USER)
+    if (this.flags & FLAG_BOGUS_USER) {
       this.user = "foo\nbar";
+    } else if (this.flags & FLAG_NON_ASCII_USER_PASSWORD) {
+      this.user = "é";
+    }
 
     authInfo.username = this.user;
     if (this.flags & FLAG_WRONG_PASSWORD) {
@@ -151,6 +175,8 @@ AuthPrompt2.prototype = {
       this.flags |= FLAG_PREVIOUS_FAILED;
       // Now clear the flag to avoid an infinite loop
       this.flags &= ~FLAG_WRONG_PASSWORD;
+    } else if (this.flags & FLAG_NON_ASCII_USER_PASSWORD) {
+      authInfo.password = "é";
     } else {
       authInfo.password = this.pass;
       this.flags &= ~FLAG_PREVIOUS_FAILED;
@@ -159,7 +185,7 @@ AuthPrompt2.prototype = {
   },
 
   asyncPromptAuth: function ap2_async(chan, cb, ctx, lvl, info) {
-    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   }
 };
 
@@ -170,29 +196,29 @@ function Requestor(flags, versions) {
 
 Requestor.prototype = {
   QueryInterface: function requestor_qi(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIInterfaceRequestor))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIInterfaceRequestor))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   getInterface: function requestor_gi(iid) {
     if (this.versions & 1 &&
-        iid.equals(Components.interfaces.nsIAuthPrompt)) {
+        iid.equals(Ci.nsIAuthPrompt)) {
       // Allow the prompt to store state by caching it here
       if (!this.prompt1)
         this.prompt1 = new AuthPrompt1(this.flags);
       return this.prompt1;
     }
     if (this.versions & 2 &&
-        iid.equals(Components.interfaces.nsIAuthPrompt2)) {
+        iid.equals(Ci.nsIAuthPrompt2)) {
       // Allow the prompt to store state by caching it here
       if (!this.prompt2)
         this.prompt2 = new AuthPrompt2(this.flags);
       return this.prompt2;
     }
 
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   prompt1: null,
@@ -203,28 +229,28 @@ function RealmTestRequestor() {}
 
 RealmTestRequestor.prototype = {
   QueryInterface: function realmtest_qi(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIInterfaceRequestor) ||
-        iid.equals(Components.interfaces.nsIAuthPrompt2))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIInterfaceRequestor) ||
+        iid.equals(Ci.nsIAuthPrompt2))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   getInterface: function realmtest_interface(iid) {
-    if (iid.equals(Components.interfaces.nsIAuthPrompt2))
+    if (iid.equals(Ci.nsIAuthPrompt2))
       return this;
 
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   promptAuth: function realmtest_checkAuth(channel, level, authInfo) {
-    do_check_eq(authInfo.realm, '\"foo_bar');
+    Assert.equal(authInfo.realm, '\"foo_bar');
 
     return false;
   },
 
   asyncPromptAuth: function realmtest_async(chan, cb, ctx, lvl, info) {
-    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   }
 };
 
@@ -236,18 +262,18 @@ var listener = {
       if (!Components.isSuccessCode(request.status))
         do_throw("Channel should have a success code!");
 
-      if (!(request instanceof Components.interfaces.nsIHttpChannel))
+      if (!(request instanceof Ci.nsIHttpChannel))
         do_throw("Expecting an HTTP channel");
 
-      do_check_eq(request.responseStatus, this.expectedCode);
+      Assert.equal(request.responseStatus, this.expectedCode);
       // The request should be succeeded iff we expect 200
-      do_check_eq(request.requestSucceeded, this.expectedCode == 200);
+      Assert.equal(request.requestSucceeded, this.expectedCode == 200);
 
     } catch (e) {
       do_throw("Unexpected exception: " + e);
     }
 
-    throw Components.results.NS_ERROR_ABORT;
+    throw Cr.NS_ERROR_ABORT;
   },
 
   onDataAvailable: function test_ODA() {
@@ -255,13 +281,13 @@ var listener = {
   },
 
   onStopRequest: function test_onStopR(request, ctx, status) {
-    do_check_eq(status, Components.results.NS_ERROR_ABORT);
+    Assert.equal(status, Cr.NS_ERROR_ABORT);
 
     if (current_test < (tests.length - 1)) {
       // First, gotta clear the auth cache
-      Components.classes["@mozilla.org/network/http-auth-manager;1"]
-                .getService(Components.interfaces.nsIHttpAuthManager)
-                .clearAll();
+      Cc["@mozilla.org/network/http-auth-manager;1"]
+        .getService(Ci.nsIHttpAuthManager)
+        .clearAll();
 
       current_test++;
       tests[current_test]();
@@ -274,15 +300,25 @@ var listener = {
   }
 };
 
-function makeChan(url) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                .QueryInterface(Components.interfaces.nsIHttpChannel);
+function makeChan(url, loadingUrl) {
+  var ios = Cc["@mozilla.org/network/io-service;1"].
+              getService(Ci.nsIIOService);
+  var ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
+              .getService(Ci.nsIScriptSecurityManager);
+  var principal = ssm.createCodebasePrincipal(ios.newURI(loadingUrl), {});
+  return NetUtil.newChannel(
+    { uri: url, loadingPrincipal: principal,
+      securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+    });
 }
 
 var tests = [test_noauth, test_returnfalse1, test_wrongpw1, test_prompt1,
+             test_prompt1CrossOrigin, test_prompt2CrossOrigin,
              test_returnfalse2, test_wrongpw2, test_prompt2, test_ntlm,
-             test_basicrealm, test_digest_noauth, test_digest,
-             test_digest_bogus_user, test_large_realm, test_large_domain];
+             test_basicrealm, test_nonascii, test_digest_noauth, test_digest,
+             test_digest_bogus_user, test_short_digest, test_large_realm,
+             test_large_domain];
 
 var current_test = 0;
 
@@ -294,7 +330,9 @@ function run_test() {
   httpserv.registerPathHandler("/auth", authHandler);
   httpserv.registerPathHandler("/auth/ntlm/simple", authNtlmSimple);
   httpserv.registerPathHandler("/auth/realm", authRealm);
+  httpserv.registerPathHandler("/auth/non_ascii", authNonascii);
   httpserv.registerPathHandler("/auth/digest", authDigest);
+  httpserv.registerPathHandler("/auth/short_digest", authShortDigest);
   httpserv.registerPathHandler("/largeRealm", largeRealm);
   httpserv.registerPathHandler("/largeDomain", largeDomain);
 
@@ -304,7 +342,7 @@ function run_test() {
 }
 
 function test_noauth() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   listener.expectedCode = 401; // Unauthorized
   chan.asyncOpen2(listener);
@@ -313,7 +351,7 @@ function test_noauth() {
 }
 
 function test_returnfalse1() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(FLAG_RETURN_FALSE, 1);
   listener.expectedCode = 401; // Unauthorized
@@ -323,7 +361,7 @@ function test_returnfalse1() {
 }
 
 function test_wrongpw1() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(FLAG_WRONG_PASSWORD, 1);
   listener.expectedCode = 200; // OK
@@ -333,7 +371,7 @@ function test_wrongpw1() {
 }
 
 function test_prompt1() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(0, 1);
   listener.expectedCode = 200; // OK
@@ -342,8 +380,28 @@ function test_prompt1() {
   do_test_pending();
 }
 
+function test_prompt1CrossOrigin() {
+  var chan = makeChan(URL + "/auth", "http://example.org");
+
+  chan.notificationCallbacks = new Requestor(16, 1);
+  listener.expectedCode = 200; // OK
+  chan.asyncOpen2(listener);
+
+  do_test_pending();
+}
+
+function test_prompt2CrossOrigin() {
+  var chan = makeChan(URL + "/auth", "http://example.org");
+
+  chan.notificationCallbacks = new Requestor(16, 2);
+  listener.expectedCode = 200; // OK
+  chan.asyncOpen2(listener);
+
+  do_test_pending();
+}
+
 function test_returnfalse2() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(FLAG_RETURN_FALSE, 2);
   listener.expectedCode = 401; // Unauthorized
@@ -353,7 +411,7 @@ function test_returnfalse2() {
 }
 
 function test_wrongpw2() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(FLAG_WRONG_PASSWORD, 2);
   listener.expectedCode = 200; // OK
@@ -363,7 +421,7 @@ function test_wrongpw2() {
 }
 
 function test_prompt2() {
-  var chan = makeChan(URL + "/auth");
+  var chan = makeChan(URL + "/auth", URL);
 
   chan.notificationCallbacks = new Requestor(0, 2);
   listener.expectedCode = 200; // OK
@@ -373,7 +431,7 @@ function test_prompt2() {
 }
 
 function test_ntlm() {
-  var chan = makeChan(URL + "/auth/ntlm/simple");
+  var chan = makeChan(URL + "/auth/ntlm/simple", URL);
 
   chan.notificationCallbacks = new Requestor(FLAG_RETURN_FALSE, 2);
   listener.expectedCode = 401; // Unauthorized
@@ -383,7 +441,7 @@ function test_ntlm() {
 }
 
 function test_basicrealm() {
-  var chan = makeChan(URL + "/auth/realm");
+  var chan = makeChan(URL + "/auth/realm", URL);
 
   chan.notificationCallbacks = new RealmTestRequestor();
   listener.expectedCode = 401; // Unauthorized
@@ -392,8 +450,18 @@ function test_basicrealm() {
   do_test_pending();
 }
 
+function test_nonascii() {
+  var chan = makeChan(URL + "/auth/non_ascii", URL);
+
+  chan.notificationCallbacks = new Requestor(FLAG_NON_ASCII_USER_PASSWORD, 2);
+  listener.expectedCode = 200; // OK
+  chan.asyncOpen2(listener);
+
+  do_test_pending();
+}
+
 function test_digest_noauth() {
-  var chan = makeChan(URL + "/auth/digest");
+  var chan = makeChan(URL + "/auth/digest", URL);
 
   //chan.notificationCallbacks = new Requestor(FLAG_RETURN_FALSE, 2);
   listener.expectedCode = 401; // Unauthorized
@@ -403,7 +471,7 @@ function test_digest_noauth() {
 }
 
 function test_digest() {
-  var chan = makeChan(URL + "/auth/digest");
+  var chan = makeChan(URL + "/auth/digest", URL);
 
   chan.notificationCallbacks = new Requestor(0, 2);
   listener.expectedCode = 200; // OK
@@ -413,9 +481,19 @@ function test_digest() {
 }
 
 function test_digest_bogus_user() {
-  var chan = makeChan(URL + "/auth/digest");
+  var chan = makeChan(URL + "/auth/digest", URL);
   chan.notificationCallbacks =  new Requestor(FLAG_BOGUS_USER, 2);
   listener.expectedCode = 401; // unauthorized
+  chan.asyncOpen2(listener);
+
+  do_test_pending();
+}
+
+// Test header "WWW-Authenticate: Digest" - bug 1338876.
+function test_short_digest() {
+  var chan = makeChan(URL + "/auth/short_digest", URL);
+  chan.notificationCallbacks =  new Requestor(FLAG_NO_REALM, 2);
+  listener.expectedCode = 401; // OK
   chan.asyncOpen2(listener);
 
   do_test_pending();
@@ -471,13 +549,39 @@ function authRealm(metadata, response) {
   response.bodyOutputStream.write(body, body.length);
 }
 
+// /auth/nonAscii
+function authNonascii(metadata, response) {
+  // btoa("é:é"), but that function is not available here
+  var expectedHeader = "Basic w6k6w6k=";
+
+  var body;
+  if (metadata.hasHeader("Authorization") &&
+      metadata.getHeader("Authorization") == expectedHeader)
+  {
+    response.setStatusLine(metadata.httpVersion, 200, "OK, authorized");
+    response.setHeader("WWW-Authenticate", 'Basic realm="secret"', false);
+
+    body = "success";
+  }
+  else
+  {
+    // didn't know é:é, failure
+    response.setStatusLine(metadata.httpVersion, 401, "Unauthorized");
+    response.setHeader("WWW-Authenticate", 'Basic realm="secret"', false);
+
+    body = "failed";
+  }
+
+  response.bodyOutputStream.write(body, body.length);
+}
+
 //
 // Digest functions
 // 
 function bytesFromString(str) {
  var converter =
-   Components.classes["@mozilla.org/intl/scriptableunicodeconverter"]
-     .createInstance(Components.interfaces.nsIScriptableUnicodeConverter);
+   Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+     .createInstance(Ci.nsIScriptableUnicodeConverter);
  converter.charset = "UTF-8";
  var data = converter.convertToByteArray(str);
  return data;
@@ -490,9 +594,9 @@ function toHexString(charCode) {
 
 function H(str) {
  var data = bytesFromString(str);
- var ch = Components.classes["@mozilla.org/security/hash;1"]
-            .createInstance(Components.interfaces.nsICryptoHash);
- ch.init(Components.interfaces.nsICryptoHash.MD5);
+ var ch = Cc["@mozilla.org/security/hash;1"]
+            .createInstance(Ci.nsICryptoHash);
+ ch.init(Ci.nsICryptoHash.MD5);
  ch.update(data, data.length);
  var hash = ch.finish(false);
  return Array.from(hash, (c, i) => toHexString(hash.charCodeAt(i))).join("");
@@ -547,6 +651,13 @@ function authDigest(metadata, response) {
  }
  
  response.bodyOutputStream.write(body, body.length);
+}
+
+function authShortDigest(metadata, response) {
+  // no header, send one
+  response.setStatusLine(metadata.httpVersion, 401, "Unauthorized");
+  response.setHeader("WWW-Authenticate", 'Digest', false);
+  body = "failed, no header";
 }
 
 function largeRealm(metadata, response) {
@@ -2016,7 +2127,7 @@ function largeDomain(metadata, response) {
 }
 
 function test_large_realm() {
-  var chan = makeChan(URL + "/largeRealm");
+  var chan = makeChan(URL + "/largeRealm", URL);
 
   listener.expectedCode = 401; // Unauthorized
   chan.asyncOpen2(listener);
@@ -2025,7 +2136,7 @@ function test_large_realm() {
 }
 
 function test_large_domain() {
-  var chan = makeChan(URL + "/largeDomain ");
+  var chan = makeChan(URL + "/largeDomain", URL);
 
   listener.expectedCode = 401; // Unauthorized
   chan.asyncOpen2(listener);

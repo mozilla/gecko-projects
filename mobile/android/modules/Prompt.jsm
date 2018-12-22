@@ -2,15 +2,17 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict"
+"use strict";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/Messaging.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  EventDispatcher: "resource://gre/modules/Messaging.jsm",
+  GeckoViewUtils: "resource://gre/modules/GeckoViewUtils.jsm",
+  Services: "resource://gre/modules/Services.jsm",
+});
 
-this.EXPORTED_SYMBOLS = ["Prompt"];
+var EXPORTED_SYMBOLS = ["Prompt", "DoorHanger"];
 
 function log(msg) {
   Services.console.logStringMessage(msg);
@@ -22,17 +24,21 @@ function Prompt(aOptions) {
   this.msg = { async: true };
 
   if (this.window) {
-    let window = Services.wm.getMostRecentWindow("navigator:browser");
-    var tab = window.BrowserApp.getTabForWindow(this.window);
+    let window = GeckoViewUtils.getChromeWindow(this.window);
+    let tab = window &&
+              window.document.documentElement
+                    .getAttribute("windowtype") === "navigator:browser" &&
+              window.BrowserApp &&
+              window.BrowserApp.getTabForWindow(this.window);
     if (tab) {
       this.msg.tabId = tab.id;
     }
   }
 
   if (aOptions.priority === 1)
-    this.msg.type = "Prompt:ShowTop"
+    this.msg.type = "Prompt:ShowTop";
   else
-    this.msg.type = "Prompt:Show"
+    this.msg.type = "Prompt:Show";
 
   if ("title" in aOptions && aOptions.title != null)
     this.msg.title = aOptions.title;
@@ -42,6 +48,9 @@ function Prompt(aOptions) {
 
   if ("buttons" in aOptions && aOptions.buttons != null)
     this.msg.buttons = aOptions.buttons;
+
+  if ("doubleTapButton" in aOptions && aOptions.doubleTapButton != null)
+    this.msg.doubleTapButton = aOptions.doubleTapButton;
 
   if ("hint" in aOptions && aOptions.hint != null)
     this.msg.hint = aOptions.hint;
@@ -112,7 +121,7 @@ Prompt.prototype = {
       value: aOptions.value,
       hint: aOptions.hint,
       autofocus: aOptions.autofocus,
-      id : aOptions.id
+      id: aOptions.id
     });
   },
 
@@ -173,14 +182,22 @@ Prompt.prototype = {
   },
 
   _innerShow: function() {
-    Messaging.sendRequestForResult(this.msg).then((data) => {
-      if (this.callback)
+    let dispatcher;
+    if (this.window) {
+      dispatcher = GeckoViewUtils.getDispatcherForWindow(this.window);
+    }
+    if (!dispatcher) {
+      [dispatcher] = GeckoViewUtils.getActiveDispatcherAndWindow();
+    }
+
+    dispatcher.sendRequestForResult(this.msg).then((data) => {
+      if (this.callback) {
         this.callback(data);
+      }
     });
   },
 
   _setListItems: function(aItems) {
-    let hasSelected = false;
     this.msg.listitems = [];
 
     aItems.forEach(function(item) {
@@ -228,4 +245,65 @@ Prompt.prototype = {
     return this._setListItems(aItems);
   },
 
-}
+};
+
+var DoorHanger = {
+  _getTabId: function(aWindow, aBrowserApp) {
+      let tab = aBrowserApp.getTabForWindow(aWindow.top) ||
+                aBrowserApp.selectedTab;
+      return tab ? tab.id : -1;
+  },
+
+  show: function(aWindow, aMessage, aValue, aButtons, aOptions, aCategory) {
+    let chromeWin = GeckoViewUtils.getChromeWindow(aWindow);
+    if (chromeWin.NativeWindow && chromeWin.NativeWindow.doorhanger) {
+      // We're dealing with browser.js.
+      return chromeWin.NativeWindow.doorhanger.show(
+          aMessage, aValue, aButtons, this._getTabId(aWindow, chromeWin.BrowserApp),
+          aOptions, aCategory);
+    }
+
+    // We're dealing with GeckoView (e.g. custom tabs).
+    aButtons = aButtons || [];
+
+    // Extract callbacks into a separate array, and replace each callback in
+    // the buttons array with an index into the callback array.
+    let callbacks = aButtons.map((aButton, aIndex) => {
+      let cb = aButton.callback;
+      aButton.callback = aIndex;
+      return cb;
+    });
+
+    EventDispatcher.for(chromeWin).sendRequestForResult({
+      type: "Doorhanger:Add",
+      message: aMessage,
+      value: aValue,
+      buttons: aButtons,
+      options: aOptions || {},
+      category: aCategory,
+      defaultCallback: (aOptions && aOptions.defaultCallback) ? -1 : undefined,
+    }).then(response => {
+      if (response.callback === -1) {
+        // Default case.
+        aOptions.defaultCallback(response.checked, response.inputs);
+        return;
+      }
+      // Pass the value of the optional checkbox to the callback
+      callbacks[response.callback](response.checked, response.inputs);
+    });
+  },
+
+  hide: function(aWindow, aValue) {
+    let chromeWin = GeckoViewUtils.getChromeWindow(aWindow);
+    if (chromeWin.NativeWindow && chromeWin.NativeWindow.doorhanger) {
+      // We're dealing with browser.js.
+      return chromeWin.NativeWindow.doorhanger.hide(
+          aValue, this._getTabId(aWindow, chromeWin.BrowserApp));
+    }
+
+    EventDispatcher.for(chromeWin).sendRequest({
+      type: "Doorhanger:Remove",
+      value: aValue,
+    });
+  },
+};

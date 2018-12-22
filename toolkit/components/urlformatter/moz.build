@@ -1,8 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'General')
 
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
@@ -13,15 +16,8 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'urlformatter'
 
 EXTRA_COMPONENTS += [
-    'nsURLFormatter.manifest',
-]
-
-EXTRA_PP_COMPONENTS += [
     'nsURLFormatter.js',
-]
-
-CONFIGURE_SUBST_FILES += [
-    'api_keys',
+    'nsURLFormatter.manifest',
 ]
 
 DEFINES['OBJDIR'] = OBJDIR

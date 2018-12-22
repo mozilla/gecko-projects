@@ -11,6 +11,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "nsCOMPtr.h"
+#include "nsDocShell.h"
 #include "nsIFrame.h"
 #include "nsIReflowObserver.h"
 #include "nsIScrollObserver.h"
@@ -19,9 +20,9 @@
 #include "mozilla/RefPtr.h"
 #include "nsWeakReference.h"
 
-class nsDocShell;
 class nsIPresShell;
 class nsITimer;
+class nsIDocument;
 
 namespace mozilla {
 class AccessibleCaretManager;
@@ -53,35 +54,53 @@ class WidgetTouchEvent;
 // "layout.accessiblecaret.use_long_tap_injector" for the fake long-tap events.
 //
 // State transition diagram:
-// http://hg.mozilla.org/mozilla-central/raw-file/default/layout/base/doc/AccessibleCaretEventHubStates.png
+// https://hg.mozilla.org/mozilla-central/raw-file/default/layout/base/doc/AccessibleCaretEventHubStates.png
 // Source code of the diagram:
-// http://hg.mozilla.org/mozilla-central/file/default/layout/base/doc/AccessibleCaretEventHubStates.dot
+// https://hg.mozilla.org/mozilla-central/file/default/layout/base/doc/AccessibleCaretEventHubStates.dot
 //
 // Please see the wiki page for more information.
-// https://wiki.mozilla.org/Copy_n_Paste
+// https://wiki.mozilla.org/AccessibleCaret
 //
-class AccessibleCaretEventHub : public nsIReflowObserver,
-                                public nsIScrollObserver,
-                                public nsISelectionListener,
-                                public nsSupportsWeakReference
+class AccessibleCaretEventHub
+  : public nsIReflowObserver
+  , public nsIScrollObserver
+  , public nsISelectionListener
+  , public nsSupportsWeakReference
 {
 public:
   explicit AccessibleCaretEventHub(nsIPresShell* aPresShell);
   void Init();
   void Terminate();
 
+  MOZ_CAN_RUN_SCRIPT
   nsEventStatus HandleEvent(WidgetEvent* aEvent);
 
   // Call this function to notify the blur event happened.
+  MOZ_CAN_RUN_SCRIPT
   void NotifyBlur(bool aIsLeavingDocument);
 
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIREFLOWOBSERVER
-  NS_DECL_NSISELECTIONLISTENER
+
+  // nsIReflowObserver
+  MOZ_CAN_RUN_SCRIPT
+  NS_IMETHOD Reflow(DOMHighResTimeStamp start,
+                    DOMHighResTimeStamp end) final;
+  MOZ_CAN_RUN_SCRIPT
+  NS_IMETHOD ReflowInterruptible(DOMHighResTimeStamp start,
+                                 DOMHighResTimeStamp end) final;
+
+  // nsISelectionListener
+  MOZ_CAN_RUN_SCRIPT
+  NS_IMETHOD NotifySelectionChanged(nsIDocument* doc,
+                                    dom::Selection* sel,
+                                    int16_t reason) final;
 
   // Override nsIScrollObserver methods.
+  MOZ_CAN_RUN_SCRIPT
   virtual void ScrollPositionChanged() override;
+  MOZ_CAN_RUN_SCRIPT
   virtual void AsyncPanZoomStarted() override;
+  MOZ_CAN_RUN_SCRIPT
   virtual void AsyncPanZoomStopped() override;
 
   // Base state
@@ -89,7 +108,7 @@ public:
   State* GetState() const;
 
 protected:
-  virtual ~AccessibleCaretEventHub();
+  virtual ~AccessibleCaretEventHub() = default;
 
 #define MOZ_DECL_STATE_CLASS_GETTER(aClassName)                                \
   class aClassName;                                                            \
@@ -108,13 +127,15 @@ protected:
   MOZ_DECL_STATE_CLASS_GETTER(DragCaretState)
   MOZ_DECL_STATE_CLASS_GETTER(PressNoCaretState)
   MOZ_DECL_STATE_CLASS_GETTER(ScrollState)
-  MOZ_DECL_STATE_CLASS_GETTER(PostScrollState)
   MOZ_DECL_STATE_CLASS_GETTER(LongTapState)
 
   void SetState(State* aState);
 
+  MOZ_CAN_RUN_SCRIPT
   nsEventStatus HandleMouseEvent(WidgetMouseEvent* aEvent);
+  MOZ_CAN_RUN_SCRIPT
   nsEventStatus HandleTouchEvent(WidgetTouchEvent* aEvent);
+  MOZ_CAN_RUN_SCRIPT
   nsEventStatus HandleKeyboardEvent(WidgetKeyboardEvent* aEvent);
 
   virtual nsPoint GetTouchEventPosition(WidgetTouchEvent* aEvent,
@@ -125,15 +146,17 @@ protected:
 
   void LaunchLongTapInjector();
   void CancelLongTapInjector();
+
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static void FireLongTap(nsITimer* aTimer, void* aAccessibleCaretEventHub);
 
   void LaunchScrollEndInjector();
   void CancelScrollEndInjector();
+
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static void FireScrollEnd(nsITimer* aTimer, void* aAccessibleCaretEventHub);
 
   // Member variables
-  bool mInitialized = false;
-
   State* mState = NoActionState();
 
   // Will be set to nullptr in Terminate().
@@ -147,19 +170,21 @@ protected:
   // is enabled, it will send long tap event to us.
   nsCOMPtr<nsITimer> mLongTapInjectorTimer;
 
-  // Use this timer for injecting a simulated scroll end.
-  nsCOMPtr<nsITimer> mScrollEndInjectorTimer;
-
   // Last mouse button down event or touch start event point.
   nsPoint mPressPoint{ NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE };
 
   // For filter multitouch event
   int32_t mActiveTouchId = kInvalidTouchId;
 
+  // Flag to indicate the class has been initialized.
+  bool mInitialized = false;
+
+  // Flag to avoid calling Reflow() callback recursively.
+  bool mIsInReflowCallback = false;
+
   // Simulate long tap if the platform does not support eMouseLongTap events.
   static bool sUseLongTapInjector;
 
-  static const int32_t kScrollEndTimerDelay = 300;
   static const int32_t kMoveStartToleranceInPixel = 5;
   static const int32_t kInvalidTouchId = -1;
   static const int32_t kDefaultTouchId = 0; // For mouse event
@@ -176,7 +201,8 @@ public:
   virtual const char* Name() const { return ""; }
 
   virtual nsEventStatus OnPress(AccessibleCaretEventHub* aContext,
-                                const nsPoint& aPoint, int32_t aTouchId)
+                                const nsPoint& aPoint, int32_t aTouchId,
+                                EventClassID aEventClass)
   {
     return nsEventStatus_eIgnore;
   }
@@ -204,7 +230,7 @@ public:
   virtual void OnBlur(AccessibleCaretEventHub* aContext,
                       bool aIsLeavingDocument) {}
   virtual void OnSelectionChanged(AccessibleCaretEventHub* aContext,
-                                  nsIDOMDocument* aDoc, nsISelection* aSel,
+                                  nsIDocument* aDoc, dom::Selection* aSel,
                                   int16_t aReason) {}
   virtual void OnReflow(AccessibleCaretEventHub* aContext) {}
   virtual void Enter(AccessibleCaretEventHub* aContext) {}

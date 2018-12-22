@@ -19,15 +19,16 @@ namespace mozilla {
 namespace dom {
 namespace indexedDB {
 
-const char16_t* kAbortEventType = MOZ_UTF16("abort");
-const char16_t* kBlockedEventType = MOZ_UTF16("blocked");
-const char16_t* kCompleteEventType = MOZ_UTF16("complete");
-const char16_t* kErrorEventType = MOZ_UTF16("error");
-const char16_t* kSuccessEventType = MOZ_UTF16("success");
-const char16_t* kUpgradeNeededEventType = MOZ_UTF16("upgradeneeded");
-const char16_t* kVersionChangeEventType = MOZ_UTF16("versionchange");
+const char16_t* kAbortEventType = u"abort";
+const char16_t* kBlockedEventType = u"blocked";
+const char16_t* kCompleteEventType = u"complete";
+const char16_t* kErrorEventType = u"error";
+const char16_t* kSuccessEventType = u"success";
+const char16_t* kUpgradeNeededEventType = u"upgradeneeded";
+const char16_t* kVersionChangeEventType = u"versionchange";
+const char16_t* kCloseEventType = u"close";
 
-already_AddRefed<nsIDOMEvent>
+already_AddRefed<Event>
 CreateGenericEvent(EventTarget* aOwner,
                    const nsDependentString& aType,
                    Bubbles aBubbles,
@@ -51,7 +52,7 @@ already_AddRefed<IDBVersionChangeEvent>
 IDBVersionChangeEvent::CreateInternal(EventTarget* aOwner,
                                       const nsAString& aType,
                                       uint64_t aOldVersion,
-                                      Nullable<uint64_t> aNewVersion)
+                                      const Nullable<uint64_t>& aNewVersion)
 {
   RefPtr<IDBVersionChangeEvent> event =
     new IDBVersionChangeEvent(aOwner, aOldVersion);
@@ -90,7 +91,7 @@ NS_INTERFACE_MAP_END_INHERITING(Event)
 JSObject*
 IDBVersionChangeEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBVersionChangeEventBinding::Wrap(aCx, this, aGivenProto);
+  return IDBVersionChangeEvent_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

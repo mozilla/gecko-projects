@@ -1,58 +1,44 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals template */
 
 "use strict";
 
-const {Cc, Cu, Ci} = require("chrome");
+const promise = require("promise");
+const Services = require("Services");
+const nodeConstants = require("devtools/shared/dom-node-constants");
+const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
+const EventEmitter = require("devtools/shared/event-emitter");
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const {PluralForm} = require("devtools/shared/plural-form");
+const AutocompletePopup = require("devtools/client/shared/autocomplete-popup");
+const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
+const {scrollIntoViewIfNeeded} = require("devtools/client/shared/scroll");
+const {UndoStack} = require("devtools/client/shared/undo");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
+const {PrefObserver} = require("devtools/client/shared/prefs");
+const MarkupElementContainer = require("devtools/client/inspector/markup/views/element-container");
+const MarkupReadOnlyContainer = require("devtools/client/inspector/markup/views/read-only-container");
+const MarkupTextContainer = require("devtools/client/inspector/markup/views/text-container");
+const SlottedNodeContainer = require("devtools/client/inspector/markup/views/slotted-node-container");
+const RootContainer = require("devtools/client/inspector/markup/views/root-container");
+
+const INSPECTOR_L10N =
+      new LocalizationHelper("devtools/client/locales/inspector.properties");
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
 const DEFAULT_MAX_CHILDREN = 100;
-const COLLAPSE_DATA_URL_REGEX = /^data.+base64/;
-const COLLAPSE_DATA_URL_LENGTH = 60;
 const NEW_SELECTION_HIGHLIGHTER_TIMER = 1000;
-const DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE = 50;
-const DRAG_DROP_MIN_AUTOSCROLL_SPEED = 5;
-const DRAG_DROP_MAX_AUTOSCROLL_SPEED = 15;
-const DRAG_DROP_MIN_INITIAL_DISTANCE = 10;
-const AUTOCOMPLETE_POPUP_PANEL_ID = "markupview_autoCompletePopup";
+const DRAG_DROP_AUTOSCROLL_EDGE_MAX_DISTANCE = 50;
+const DRAG_DROP_AUTOSCROLL_EDGE_RATIO = 0.1;
+const DRAG_DROP_MIN_AUTOSCROLL_SPEED = 2;
+const DRAG_DROP_MAX_AUTOSCROLL_SPEED = 8;
+const DRAG_DROP_HEIGHT_TO_SPEED = 500;
+const DRAG_DROP_HEIGHT_TO_SPEED_MIN = 0.5;
+const DRAG_DROP_HEIGHT_TO_SPEED_MAX = 1;
 const ATTR_COLLAPSE_ENABLED_PREF = "devtools.markup.collapseAttributes";
 const ATTR_COLLAPSE_LENGTH_PREF = "devtools.markup.collapseAttributeLength";
-
-const {UndoStack} = require("devtools/client/shared/undo");
-const {editableField, InplaceEditor} =
-      require("devtools/client/shared/inplace-editor");
-const {HTMLEditor} = require("devtools/client/inspector/markup/html-editor");
-const promise = require("promise");
-const Services = require("Services");
-const {Tooltip} = require("devtools/client/shared/widgets/Tooltip");
-const EventEmitter = require("devtools/shared/event-emitter");
-const Heritage = require("sdk/core/heritage");
-const {setTimeout, clearTimeout, setInterval, clearInterval} =
-      require("sdk/timers");
-const {parseAttribute} =
-      require("devtools/client/shared/node-attribute-parser");
-const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis",
-      Ci.nsIPrefLocalizedString).data;
-const {Task} = require("resource://gre/modules/Task.jsm");
-const {scrollIntoViewIfNeeded} = require("devtools/shared/layout/utils");
-const {PrefObserver} = require("devtools/client/styleeditor/utils");
-
-Cu.import("resource://devtools/shared/gcli/Templater.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-loader.lazyRequireGetter(this, "CSS", "CSS");
-loader.lazyGetter(this, "DOMParser", () => {
-  return Cc["@mozilla.org/xmlextras/domparser;1"]
-    .createInstance(Ci.nsIDOMParser);
-});
-loader.lazyGetter(this, "AutocompletePopup", () => {
-  return require("devtools/client/shared/autocomplete-popup").AutocompletePopup;
-});
 
 /**
  * Vocabulary for the purposes of this file:
@@ -76,79 +62,77 @@ loader.lazyGetter(this, "AutocompletePopup", () => {
  *         An iframe in which the caller has kindly loaded markup.xhtml.
  */
 function MarkupView(inspector, frame, controllerWindow) {
-  this._inspector = inspector;
-  this.walker = this._inspector.walker;
+  EventEmitter.decorate(this);
+
+  this.inspector = inspector;
+  this.highlighters = inspector.highlighters;
+  this.walker = this.inspector.walker;
   this._frame = frame;
   this.win = this._frame.contentWindow;
   this.doc = this._frame.contentDocument;
   this._elt = this.doc.querySelector("#root");
-  this.htmlEditor = new HTMLEditor(this.doc);
+  this.telemetry = this.inspector.telemetry;
 
-  try {
-    this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize");
-  } catch (ex) {
-    this.maxChildren = DEFAULT_MAX_CHILDREN;
-  }
+  this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize",
+                                               DEFAULT_MAX_CHILDREN);
 
-  this.collapseAttributes =
-    Services.prefs.getBoolPref(ATTR_COLLAPSE_ENABLED_PREF);
-  this.collapseAttributeLength =
-    Services.prefs.getIntPref(ATTR_COLLAPSE_LENGTH_PREF);
+  this.collapseAttributes = Services.prefs.getBoolPref(ATTR_COLLAPSE_ENABLED_PREF);
+  this.collapseAttributeLength = Services.prefs.getIntPref(ATTR_COLLAPSE_LENGTH_PREF);
 
   // Creating the popup to be used to show CSS suggestions.
-  let options = {
+  // The popup will be attached to the toolbox document.
+  this.popup = new AutocompletePopup(inspector.toolbox.doc, {
     autoSelect: true,
     theme: "auto",
-    // panelId option prevents the markupView autocomplete popup from
-    // sharing XUL elements with other views, such as ruleView (see Bug 1191093)
-    panelId: AUTOCOMPLETE_POPUP_PANEL_ID
-  };
-  this.popup = new AutocompletePopup(this.doc.defaultView.parent.document,
-                                     options);
+  });
 
   this.undo = new UndoStack();
   this.undo.installController(controllerWindow);
 
   this._containers = new Map();
+  // This weakmap will hold keys used with the _containers map, in order to retrieve the
+  // slotted container for a given node front.
+  this._slottedContainerKeys = new WeakMap();
 
   // Binding functions that need to be called in scope.
+  this._handleRejectionIfNotDestroyed = this._handleRejectionIfNotDestroyed.bind(this);
+  this._isImagePreviewTarget = this._isImagePreviewTarget.bind(this);
   this._mutationObserver = this._mutationObserver.bind(this);
+  this._onBlur = this._onBlur.bind(this);
+  this._onCopy = this._onCopy.bind(this);
+  this._onCollapseAttributesPrefChange = this._onCollapseAttributesPrefChange.bind(this);
   this._onDisplayChange = this._onDisplayChange.bind(this);
+  this._onFocus = this._onFocus.bind(this);
   this._onMouseClick = this._onMouseClick.bind(this);
+  this._onMouseMove = this._onMouseMove.bind(this);
+  this._onMouseOut = this._onMouseOut.bind(this);
   this._onMouseUp = this._onMouseUp.bind(this);
   this._onNewSelection = this._onNewSelection.bind(this);
-  this._onKeyDown = this._onKeyDown.bind(this);
-  this._onCopy = this._onCopy.bind(this);
-  this._onFocus = this._onFocus.bind(this);
-  this._onMouseMove = this._onMouseMove.bind(this);
-  this._onMouseLeave = this._onMouseLeave.bind(this);
+  this._onToolboxPickerCanceled = this._onToolboxPickerCanceled.bind(this);
   this._onToolboxPickerHover = this._onToolboxPickerHover.bind(this);
-  this._onCollapseAttributesPrefChange =
-    this._onCollapseAttributesPrefChange.bind(this);
 
   // Listening to various events.
-  this._elt.addEventListener("click", this._onMouseClick, false);
-  this._elt.addEventListener("mousemove", this._onMouseMove, false);
-  this._elt.addEventListener("mouseleave", this._onMouseLeave, false);
-  this.doc.body.addEventListener("mouseup", this._onMouseUp);
-  this.win.addEventListener("keydown", this._onKeyDown, false);
-  this.win.addEventListener("copy", this._onCopy);
-  this._frame.addEventListener("focus", this._onFocus, false);
-  this.walker.on("mutations", this._mutationObserver);
+  this._elt.addEventListener("blur", this._onBlur, true);
+  this._elt.addEventListener("click", this._onMouseClick);
+  this._elt.addEventListener("mousemove", this._onMouseMove);
+  this._elt.addEventListener("mouseout", this._onMouseOut);
+  this._frame.addEventListener("focus", this._onFocus);
+  this.inspector.selection.on("new-node-front", this._onNewSelection);
   this.walker.on("display-change", this._onDisplayChange);
-  this._inspector.selection.on("new-node-front", this._onNewSelection);
-  this._inspector.toolbox.on("picker-node-hovered", this._onToolboxPickerHover);
+  this.walker.on("mutations", this._mutationObserver);
+  this.win.addEventListener("copy", this._onCopy);
+  this.win.addEventListener("mouseup", this._onMouseUp);
+  this.toolbox.on("picker-canceled", this._onToolboxPickerCanceled);
+  this.toolbox.on("picker-node-hovered", this._onToolboxPickerHover);
 
   this._onNewSelection();
   this._initTooltips();
 
   this._prefObserver = new PrefObserver("devtools.markup");
-  this._prefObserver.on(ATTR_COLLAPSE_ENABLED_PREF,
-                        this._onCollapseAttributesPrefChange);
-  this._prefObserver.on(ATTR_COLLAPSE_LENGTH_PREF,
-                        this._onCollapseAttributesPrefChange);
+  this._prefObserver.on(ATTR_COLLAPSE_ENABLED_PREF, this._onCollapseAttributesPrefChange);
+  this._prefObserver.on(ATTR_COLLAPSE_LENGTH_PREF, this._onCollapseAttributesPrefChange);
 
-  EventEmitter.decorate(this);
+  this._initShortcuts();
 }
 
 MarkupView.prototype = {
@@ -159,31 +143,69 @@ MarkupView.prototype = {
 
   _selectedContainer: null,
 
-  _initTooltips: function() {
-    this.tooltip = new Tooltip(this._inspector.panelDoc);
-    this._makeTooltipPersistent(false);
+  get toolbox() {
+    return this.inspector.toolbox;
   },
 
-  _makeTooltipPersistent: function(state) {
-    if (state) {
-      this.tooltip.stopTogglingOnHover();
-    } else {
-      this.tooltip.startTogglingOnHover(this._elt,
-        this._isImagePreviewTarget.bind(this));
+  /**
+   * Handle promise rejections for various asynchronous actions, and only log errors if
+   * the markup view still exists.
+   * This is useful to silence useless errors that happen when the markup view is
+   * destroyed while still initializing (and making protocol requests).
+   */
+  _handleRejectionIfNotDestroyed: function(e) {
+    if (!this._destroyer) {
+      console.error(e);
     }
   },
 
-  _onToolboxPickerHover: function(event, nodeFront) {
+  _initTooltips: function() {
+    // The tooltips will be attached to the toolbox document.
+    this.eventDetailsTooltip = new HTMLTooltip(this.toolbox.doc, {
+      type: "arrow",
+      consumeOutsideClicks: false,
+    });
+    this.imagePreviewTooltip = new HTMLTooltip(this.toolbox.doc, {
+      type: "arrow",
+      useXulWrapper: true,
+    });
+    this._enableImagePreviewTooltip();
+  },
+
+  _enableImagePreviewTooltip: function() {
+    this.imagePreviewTooltip.startTogglingOnHover(this._elt,
+      this._isImagePreviewTarget);
+  },
+
+  _disableImagePreviewTooltip: function() {
+    this.imagePreviewTooltip.stopTogglingOnHover();
+  },
+
+  _onToolboxPickerHover: function(nodeFront) {
     this.showNode(nodeFront).then(() => {
-      this._showContainerAsHovered(nodeFront);
-    }, e => console.error(e));
+      this._showNodeAsHovered(nodeFront);
+    }, console.error);
+  },
+
+  /**
+   * If the element picker gets canceled, make sure and re-center the view on the
+   * current selected element.
+   */
+  _onToolboxPickerCanceled: function() {
+    if (this._selectedContainer) {
+      scrollIntoViewIfNeeded(this._selectedContainer.editor.elt);
+    }
   },
 
   isDragging: false,
+  _draggedContainer: null,
 
   _onMouseMove: function(event) {
     let target = event.target;
 
+    if (this._draggedContainer) {
+      this._draggedContainer.onMouseMove(event);
+    }
     // Auto-scroll if we're dragging.
     if (this.isDragging) {
       event.preventDefault();
@@ -200,17 +222,32 @@ MarkupView.prototype = {
       target = target.parentNode;
     }
 
-    let container = target.container;
-    if (this._hoveredNode !== container.node) {
-      if (container.node.nodeType !== Ci.nsIDOMNode.TEXT_NODE) {
-        this._showBoxModel(container.node);
-      } else {
-        this._hideBoxModel();
-      }
+    const container = target.container;
+    if (this._hoveredContainer !== container) {
+      this._showBoxModel(container.node);
     }
-    this._showContainerAsHovered(container.node);
+    this._showContainerAsHovered(container);
 
     this.emit("node-hover");
+  },
+
+  /**
+   * If focus is moved outside of the markup view document and there is a
+   * selected container, make its contents not focusable by a keyboard.
+   */
+  _onBlur: function(event) {
+    if (!this._selectedContainer) {
+      return;
+    }
+
+    const {relatedTarget} = event;
+    if (relatedTarget && relatedTarget.ownerDocument === this.doc) {
+      return;
+    }
+
+    if (this._selectedContainer) {
+      this._selectedContainer.clearFocus();
+    }
   },
 
   /**
@@ -219,44 +256,65 @@ MarkupView.prototype = {
    * node in.
    */
   _autoScroll: function(event) {
-    let docEl = this.doc.documentElement;
+    const docEl = this.doc.documentElement;
 
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
 
     // Auto-scroll when the mouse approaches top/bottom edge.
-    let fromBottom = docEl.clientHeight - event.pageY + this.win.scrollY;
-    let fromTop = event.pageY - this.win.scrollY;
+    const fromBottom = docEl.clientHeight - event.pageY + this.win.scrollY;
+    const fromTop = event.pageY - this.win.scrollY;
+    const edgeDistance = Math.min(DRAG_DROP_AUTOSCROLL_EDGE_MAX_DISTANCE,
+           docEl.clientHeight * DRAG_DROP_AUTOSCROLL_EDGE_RATIO);
 
-    if (fromBottom <= DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE) {
-      // Map our distance from 0-50 to 5-15 range so the speed is kept in a
-      // range not too fast, not too slow.
-      let speed = map(
+    // The smaller the screen, the slower the movement.
+    const heightToSpeedRatio =
+      Math.max(DRAG_DROP_HEIGHT_TO_SPEED_MIN,
+        Math.min(DRAG_DROP_HEIGHT_TO_SPEED_MAX,
+          docEl.clientHeight / DRAG_DROP_HEIGHT_TO_SPEED));
+
+    if (fromBottom <= edgeDistance) {
+      // Map our distance range to a speed range so that the speed is not too
+      // fast or too slow.
+      const speed = map(
         fromBottom,
-        0, DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE,
+        0, edgeDistance,
         DRAG_DROP_MIN_AUTOSCROLL_SPEED, DRAG_DROP_MAX_AUTOSCROLL_SPEED);
 
-      this._autoScrollInterval = setInterval(() => {
-        docEl.scrollTop -= speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED;
-      }, 0);
+      this._runUpdateLoop(() => {
+        docEl.scrollTop -= heightToSpeedRatio *
+          (speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED);
+      });
     }
 
-    if (fromTop <= DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE) {
-      let speed = map(
+    if (fromTop <= edgeDistance) {
+      const speed = map(
         fromTop,
-        0, DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE,
+        0, edgeDistance,
         DRAG_DROP_MIN_AUTOSCROLL_SPEED, DRAG_DROP_MAX_AUTOSCROLL_SPEED);
 
-      this._autoScrollInterval = setInterval(() => {
-        docEl.scrollTop += speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED;
-      }, 0);
+      this._runUpdateLoop(() => {
+        docEl.scrollTop += heightToSpeedRatio *
+          (speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED);
+      });
     }
+  },
+
+  /**
+   * Run a loop on the requestAnimationFrame.
+   */
+  _runUpdateLoop: function(update) {
+    const loop = () => {
+      update();
+      this._autoScrollAnimationFrame = this.win.requestAnimationFrame(loop);
+    };
+    loop();
   },
 
   _onMouseClick: function(event) {
     // From the target passed here, let's find the parent MarkupContainer
-    // and ask it if the tooltip should be shown
+    // and forward the event if needed.
     let parentNode = event.target;
     let container;
     while (parentNode !== this.doc.body) {
@@ -267,18 +325,21 @@ MarkupView.prototype = {
       parentNode = parentNode.parentNode;
     }
 
-    if (container instanceof MarkupElementContainer) {
-      // With the newly found container, delegate the tooltip content creation
-      // and decision to show or not the tooltip
-      container._buildEventTooltipContent(event.target, this.tooltip);
+    if (typeof container.onContainerClick === "function") {
+      // Forward the event to the container if it implements onContainerClick.
+      container.onContainerClick(event);
     }
   },
 
-  _onMouseUp: function() {
+  _onMouseUp: function(event) {
+    if (this._draggedContainer) {
+      this._draggedContainer.onMouseUp(event);
+    }
+
     this.indicateDropTarget(null);
     this.indicateDragTarget(null);
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
   },
 
@@ -295,7 +356,7 @@ MarkupView.prototype = {
       return;
     }
 
-    for (let [, container] of this._containers) {
+    for (const [, container] of this._containers) {
       if (container.isDragging) {
         container.cancelDragging();
         break;
@@ -304,12 +365,12 @@ MarkupView.prototype = {
 
     this.indicateDropTarget(null);
     this.indicateDragTarget(null);
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
   },
 
-  _hoveredNode: null,
+  _hoveredContainer: null,
 
   /**
    * Show a NodeFront's container as being hovered
@@ -317,32 +378,45 @@ MarkupView.prototype = {
    * @param  {NodeFront} nodeFront
    *         The node to show as hovered
    */
-  _showContainerAsHovered: function(nodeFront) {
-    if (this._hoveredNode === nodeFront) {
+  _showNodeAsHovered: function(nodeFront) {
+    const container = this.getContainer(nodeFront);
+    this._showContainerAsHovered(container);
+  },
+
+  _showContainerAsHovered: function(container) {
+    if (this._hoveredContainer === container) {
       return;
     }
 
-    if (this._hoveredNode) {
-      this.getContainer(this._hoveredNode).hovered = false;
+    if (this._hoveredContainer) {
+      this._hoveredContainer.hovered = false;
     }
 
-    this.getContainer(nodeFront).hovered = true;
-    this._hoveredNode = nodeFront;
+    container.hovered = true;
+    this._hoveredContainer = container;
+    // Emit an event that the container view is actually hovered now, as this function
+    // can be called by an asynchronous caller.
+    this.emit("showcontainerhovered");
   },
 
-  _onMouseLeave: function() {
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+  _onMouseOut: function(event) {
+    // Emulate mouseleave by skipping any relatedTarget inside the markup-view.
+    if (this._elt.contains(event.relatedTarget)) {
+      return;
+    }
+
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
     if (this.isDragging) {
       return;
     }
 
     this._hideBoxModel(true);
-    if (this._hoveredNode) {
-      this.getContainer(this._hoveredNode).hovered = false;
+    if (this._hoveredContainer) {
+      this._hoveredContainer.hovered = false;
     }
-    this._hoveredNode = null;
+    this._hoveredContainer = null;
 
     this.emit("leave");
   },
@@ -357,15 +431,13 @@ MarkupView.prototype = {
    *         requests queued up
    */
   _showBoxModel: function(nodeFront) {
-    return this._inspector.toolbox.highlighterUtils
-      .highlightNodeFront(nodeFront);
+    return this.toolbox.highlighterUtils.highlightNodeFront(nodeFront)
+      .catch(this._handleRejectionIfNotDestroyed);
   },
 
   /**
    * Hide the box model highlighter on a given node front
    *
-   * @param  {NodeFront} nodeFront
-   *         The node to hide the highlighter for
    * @param  {Boolean} forceHide
    *         See toolbox-highlighter-utils/unhighlight
    * @return {Promise} Resolves when the highlighter for this nodeFront is
@@ -373,7 +445,8 @@ MarkupView.prototype = {
    *         requests queued up
    */
   _hideBoxModel: function(forceHide) {
-    return this._inspector.toolbox.highlighterUtils.unhighlight(forceHide);
+    return this.toolbox.highlighterUtils.unhighlight(forceHide)
+      .catch(this._handleRejectionIfNotDestroyed);
   },
 
   _briefBoxModelTimer: null,
@@ -389,44 +462,101 @@ MarkupView.prototype = {
 
   _brieflyShowBoxModel: function(nodeFront) {
     this._clearBriefBoxModelTimer();
-    let onShown = this._showBoxModel(nodeFront);
-    this._briefBoxModelPromise = promise.defer();
+    const onShown = this._showBoxModel(nodeFront);
 
-    this._briefBoxModelTimer = setTimeout(() => {
-      this._hideBoxModel()
-          .then(this._briefBoxModelPromise.resolve,
-                this._briefBoxModelPromise.resolve);
-    }, NEW_SELECTION_HIGHLIGHTER_TIMER);
+    let _resolve;
+    this._briefBoxModelPromise = new Promise(resolve => {
+      _resolve = resolve;
+      this._briefBoxModelTimer = setTimeout(() => {
+        this._hideBoxModel().then(resolve, resolve);
+      }, NEW_SELECTION_HIGHLIGHTER_TIMER);
+    });
+    this._briefBoxModelPromise.resolve = _resolve;
 
-    return promise.all([onShown, this._briefBoxModelPromise.promise]);
+    return promise.all([onShown, this._briefBoxModelPromise]);
   },
 
-  template: function(name, dest, options = {stack: "markup.xhtml"}) {
-    let node = this.doc.getElementById("template-" + name).cloneNode(true);
-    node.removeAttribute("id");
-    template(node, dest, options);
-    return node;
+  /**
+   * Used by tests
+   */
+  getSelectedContainer: function() {
+    return this._selectedContainer;
   },
 
   /**
    * Get the MarkupContainer object for a given node, or undefined if
    * none exists.
+   *
+   * @param  {NodeFront} nodeFront
+   *         The node to get the container for.
+   * @param  {Boolean} slotted
+   *         true to get the slotted version of the container.
+   * @return {MarkupContainer} The container for the provided node.
    */
-  getContainer: function(node) {
-    return this._containers.get(node);
+  getContainer: function(node, slotted) {
+    const key = this._getContainerKey(node, slotted);
+    return this._containers.get(key);
+  },
+
+  /**
+   * Register a given container for a given node/slotted node.
+   *
+   * @param  {NodeFront} nodeFront
+   *         The node to set the container for.
+   * @param  {Boolean} slotted
+   *         true if the container represents the slotted version of the node.
+   */
+  setContainer: function(node, container, slotted) {
+    const key = this._getContainerKey(node, slotted);
+    return this._containers.set(key, container);
+  },
+
+  /**
+   * Check if a MarkupContainer object exists for a given node/slotted node
+   *
+   * @param  {NodeFront} nodeFront
+   *         The node to check.
+   * @param  {Boolean} slotted
+   *         true to check for a container matching the slotted version of the node.
+   * @return {Boolean} True if a container exists, false otherwise.
+   */
+  hasContainer: function(node, slotted) {
+    const key = this._getContainerKey(node, slotted);
+    return this._containers.has(key);
+  },
+
+  _getContainerKey: function(node, slotted) {
+    if (!slotted) {
+      return node;
+    }
+
+    if (!this._slottedContainerKeys.has(node)) {
+      this._slottedContainerKeys.set(node, { node });
+    }
+    return this._slottedContainerKeys.get(node);
+  },
+
+  _isContainerSelected: function(container) {
+    if (!container) {
+      return false;
+    }
+
+    const selection = this.inspector.selection;
+    return container.node == selection.nodeFront &&
+           container.isSlotted() == selection.isSlotted();
   },
 
   update: function() {
-    let updateChildren = (node) => {
+    const updateChildren = (node) => {
       this.getContainer(node).update();
-      for (let child of node.treeChildren()) {
+      for (const child of node.treeChildren()) {
         updateChildren(child);
       }
     };
 
     // Start with the documentElement
     let documentElement;
-    for (let node of this._rootNode.treeChildren()) {
+    for (const node of this._rootNode.treeChildren()) {
       if (node.isDocumentElement === true) {
         documentElement = node;
         break;
@@ -447,15 +577,15 @@ MarkupView.prototype = {
    * @return {Promise} the promise returned by
    *         MarkupElementContainer._isImagePreviewTarget
    */
-  _isImagePreviewTarget: function(target) {
+  async _isImagePreviewTarget(target) {
     // From the target passed here, let's find the parent MarkupContainer
     // and ask it if the tooltip should be shown
     if (this.isDragging) {
-      return promise.reject(false);
+      return false;
     }
 
     let parent = target, container;
-    while (parent !== this.doc.body) {
+    while (parent) {
       if (parent.container) {
         container = parent.container;
         break;
@@ -464,10 +594,10 @@ MarkupView.prototype = {
     }
 
     if (container instanceof MarkupElementContainer) {
-      // With the newly found container, delegate the tooltip content creation
-      // and decision to show or not the tooltip
-      return container.isImagePreviewTarget(target, this.tooltip);
+      return container.isImagePreviewTarget(target, this.imagePreviewTooltip);
     }
+
+    return false;
   },
 
   /**
@@ -485,15 +615,16 @@ MarkupView.prototype = {
    * highlighted.
    */
   _shouldNewSelectionBeHighlighted: function() {
-    let reason = this._inspector.selection.reason;
-    let unwantedReasons = [
+    const reason = this.inspector.selection.reason;
+    const unwantedReasons = [
       "inspector-open",
       "navigateaway",
       "nodeselected",
       "test"
     ];
-    let isHighlight = this._hoveredNode === this._inspector.selection.nodeFront;
-    return !isHighlight && reason && unwantedReasons.indexOf(reason) === -1;
+
+    const isHighlight = this._isContainerSelected(this._hoveredContainer);
+    return !isHighlight && reason && !unwantedReasons.includes(reason);
   },
 
   /**
@@ -502,12 +633,14 @@ MarkupView.prototype = {
    * the view.
    */
   _onNewSelection: function() {
-    let selection = this._inspector.selection;
+    const selection = this.inspector.selection;
 
-    this.htmlEditor.hide();
-    if (this._hoveredNode && this._hoveredNode !== selection.nodeFront) {
-      this.getContainer(this._hoveredNode).hovered = false;
-      this._hoveredNode = null;
+    if (this.htmlEditor) {
+      this.htmlEditor.hide();
+    }
+    if (this._isContainerSelected(this._hoveredContainer)) {
+      this._hoveredContainer.hovered = false;
+      this._hoveredContainer = null;
     }
 
     if (!selection.isNode()) {
@@ -515,51 +648,62 @@ MarkupView.prototype = {
       return;
     }
 
-    let done = this._inspector.updating("markup-view");
-    let onShowBoxModel, onShow;
+    const done = this.inspector.updating("markup-view");
+    let onShowBoxModel;
 
     // Highlight the element briefly if needed.
     if (this._shouldNewSelectionBeHighlighted()) {
       onShowBoxModel = this._brieflyShowBoxModel(selection.nodeFront);
     }
 
-    onShow = this.showNode(selection.nodeFront).then(() => {
+    const slotted = selection.isSlotted();
+    const onShow = this.showNode(selection.nodeFront, { slotted }).then(() => {
       // We could be destroyed by now.
       if (this._destroyer) {
         return promise.reject("markupview destroyed");
       }
 
       // Mark the node as selected.
-      this.markNodeAsSelected(selection.nodeFront);
+      const container = this.getContainer(selection.nodeFront, slotted);
+      this._markContainerAsSelected(container);
 
-      // Make sure the new selection receives focus so the keyboard can be used.
-      this.maybeFocusNewSelection();
-    }).catch(e => {
-      if (!this._destroyer) {
-        console.error(e);
-      } else {
-        console.warn("Could not mark node as selected, the markup-view was " +
-          "destroyed while showing the node.");
-      }
-    });
+      // Make sure the new selection is navigated to.
+      this.maybeNavigateToNewSelection();
+      return undefined;
+    }).catch(this._handleRejectionIfNotDestroyed);
 
     promise.all([onShowBoxModel, onShow]).then(done);
   },
 
   /**
-   * Focus the current node selection's MarkupContainer if the selection
-   * happened because the user picked an element using the element picker or
-   * browser context menu.
+   * Maybe make selected the current node selection's MarkupContainer depending
+   * on why the current node got selected.
    */
-  maybeFocusNewSelection: function() {
-    let {reason, nodeFront} = this._inspector.selection;
+  maybeNavigateToNewSelection: function() {
+    const {reason, nodeFront} = this.inspector.selection;
 
-    if (reason !== "browser-context-menu" &&
-        reason !== "picker-node-picked") {
-      return;
+    // The list of reasons that should lead to navigating to the node.
+    const reasonsToNavigate = [
+      // If the user picked an element with the element picker.
+      "picker-node-picked",
+      // If the user shift-clicked (previewed) an element.
+      "picker-node-previewed",
+      // If the user selected an element with the browser context menu.
+      "browser-context-menu",
+      // If the user added a new node by clicking in the inspector toolbar.
+      "node-inserted"
+    ];
+
+    // If the user performed an action with a keyboard, move keyboard focus to
+    // the markup tree container.
+    if (reason && reason.endsWith("-keyboard")) {
+      this.getContainer(this._rootNode).elt.focus();
     }
 
-    this.getContainer(nodeFront).focus();
+    if (reasonsToNavigate.includes(reason)) {
+      this.getContainer(this._rootNode).elt.focus();
+      this.navigate(this.getContainer(nodeFront));
+    }
   },
 
   /**
@@ -567,16 +711,16 @@ MarkupView.prototype = {
    * node for selection.
    */
   _selectionWalker: function(start) {
-    let walker = this.doc.createTreeWalker(
+    const walker = this.doc.createTreeWalker(
       start || this._elt,
-      Ci.nsIDOMNodeFilter.SHOW_ELEMENT,
+      nodeFilterConstants.SHOW_ELEMENT,
       function(element) {
         if (element.container &&
             element.container.elt === element &&
             element.container.visible) {
-          return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
+          return nodeFilterConstants.FILTER_ACCEPT;
         }
-        return Ci.nsIDOMNodeFilter.FILTER_SKIP;
+        return nodeFilterConstants.FILTER_SKIP;
       }
     );
     walker.currentNode = this._selectedContainer.elt;
@@ -589,89 +733,122 @@ MarkupView.prototype = {
       return;
     }
 
-    let selection = this._inspector.selection;
+    const selection = this.inspector.selection;
     if (selection.isNode()) {
-      this._inspector.copyOuterHTML();
+      this.inspector.copyOuterHTML();
     }
     evt.stopPropagation();
     evt.preventDefault();
   },
 
   /**
-   * Key handling.
+   * Register all key shortcuts.
    */
-  _onKeyDown: function(event) {
-    let handled = true;
-    let previousNode, nextNode;
+  _initShortcuts: function() {
+    const shortcuts = new KeyShortcuts({
+      window: this.win,
+    });
 
-    // Ignore keystrokes that originated in editors.
+    this._onShortcut = this._onShortcut.bind(this);
+
+    // Process localizable keys
+    ["markupView.hide.key",
+     "markupView.edit.key",
+     "markupView.scrollInto.key"].forEach(name => {
+       const key = INSPECTOR_L10N.getStr(name);
+       shortcuts.on(key, event => this._onShortcut(name, event));
+     });
+
+    // Process generic keys:
+    ["Delete", "Backspace", "Home", "Left", "Right", "Up", "Down", "PageUp",
+     "PageDown", "Esc", "Enter", "Space"].forEach(key => {
+       shortcuts.on(key, event => this._onShortcut(key, event));
+     });
+  },
+
+  /**
+   * Key shortcut listener.
+   */
+  _onShortcut(name, event) {
     if (this._isInputOrTextarea(event.target)) {
       return;
     }
-
-    // Ignore keystrokes with modifiers to allow native shortcuts (such as save:
-    // accel + S) to bubble up.
-    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-      return;
-    }
-
-    switch (event.keyCode) {
-      case Ci.nsIDOMKeyEvent.DOM_VK_H:
-        let node = this._selectedContainer.node;
+    switch (name) {
+      // Localizable keys
+      case "markupView.hide.key": {
+        const node = this._selectedContainer.node;
         if (node.hidden) {
           this.walker.unhideNode(node);
         } else {
           this.walker.hideNode(node);
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_DELETE:
+      }
+      case "markupView.edit.key": {
+        this.beginEditingOuterHTML(this._selectedContainer.node);
+        break;
+      }
+      case "markupView.scrollInto.key": {
+        const selection = this._selectedContainer.node;
+        this.inspector.scrollNodeIntoView(selection);
+        break;
+      }
+      // Generic keys
+      case "Delete": {
         this.deleteNodeOrAttribute();
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_BACK_SPACE:
+      }
+      case "Backspace": {
         this.deleteNodeOrAttribute(true);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_HOME:
-        let rootContainer = this.getContainer(this._rootNode);
+      }
+      case "Home": {
+        const rootContainer = this.getContainer(this._rootNode);
         this.navigate(rootContainer.children.firstChild.container);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_LEFT:
+      }
+      case "Left": {
         if (this._selectedContainer.expanded) {
           this.collapseNode(this._selectedContainer.node);
         } else {
-          let parent = this._selectionWalker().parentNode();
+          const parent = this._selectionWalker().parentNode();
           if (parent) {
             this.navigate(parent.container);
           }
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_RIGHT:
+      }
+      case "Right": {
         if (!this._selectedContainer.expanded &&
             this._selectedContainer.hasChildren) {
           this._expandContainer(this._selectedContainer);
         } else {
-          let next = this._selectionWalker().nextNode();
+          const next = this._selectionWalker().nextNode();
           if (next) {
             this.navigate(next.container);
           }
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_UP:
-        previousNode = this._selectionWalker().previousNode();
+      }
+      case "Up": {
+        const previousNode = this._selectionWalker().previousNode();
         if (previousNode) {
           this.navigate(previousNode.container);
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_DOWN:
-        nextNode = this._selectionWalker().nextNode();
+      }
+      case "Down": {
+        const nextNode = this._selectionWalker().nextNode();
         if (nextNode) {
           this.navigate(nextNode.container);
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_PAGE_UP: {
-        let walker = this._selectionWalker();
+      }
+      case "PageUp": {
+        const walker = this._selectionWalker();
         let selection = this._selectedContainer;
         for (let i = 0; i < PAGE_SIZE; i++) {
-          previousNode = walker.previousNode();
+          const previousNode = walker.previousNode();
           if (!previousNode) {
             break;
           }
@@ -680,11 +857,11 @@ MarkupView.prototype = {
         this.navigate(selection);
         break;
       }
-      case Ci.nsIDOMKeyEvent.DOM_VK_PAGE_DOWN: {
-        let walker = this._selectionWalker();
+      case "PageDown": {
+        const walker = this._selectionWalker();
         let selection = this._selectedContainer;
         for (let i = 0; i < PAGE_SIZE; i++) {
-          nextNode = walker.nextNode();
+          const nextNode = walker.nextNode();
           if (!nextNode) {
             break;
           }
@@ -693,35 +870,41 @@ MarkupView.prototype = {
         this.navigate(selection);
         break;
       }
-      case Ci.nsIDOMKeyEvent.DOM_VK_F2: {
-        this.beginEditingOuterHTML(this._selectedContainer.node);
+      case "Enter":
+      case "Space": {
+        if (!this._selectedContainer.canFocus) {
+          this._selectedContainer.canFocus = true;
+          this._selectedContainer.focus();
+        } else {
+          // Return early to prevent cancelling the event.
+          return;
+        }
         break;
       }
-      case Ci.nsIDOMKeyEvent.DOM_VK_S: {
-        let selection = this._selectedContainer.node;
-        this._inspector.scrollNodeIntoView(selection);
-        break;
-      }
-      case Ci.nsIDOMKeyEvent.DOM_VK_ESCAPE: {
+      case "Esc": {
         if (this.isDragging) {
           this.cancelDragging();
-          break;
+        } else {
+          // Return early to prevent cancelling the event when not
+          // dragging, to allow the split console to be toggled.
+          return;
         }
+        break;
       }
       default:
-        handled = false;
+        console.error("Unexpected markup-view key shortcut", name);
+        return;
     }
-    if (handled) {
-      event.stopPropagation();
-      event.preventDefault();
-    }
+    // Prevent default for this action
+    event.stopPropagation();
+    event.preventDefault();
   },
 
   /**
    * Check if a node is an input or textarea
    */
   _isInputOrTextarea: function(element) {
-    let name = element.tagName.toLowerCase();
+    const name = element.tagName.toLowerCase();
     return name === "input" || name === "textarea";
   },
 
@@ -734,12 +917,12 @@ MarkupView.prototype = {
    *         sibling after deletion, otherwise the next one.
    */
   deleteNodeOrAttribute: function(moveBackward) {
-    let focusedAttribute = this.doc.activeElement
+    const focusedAttribute = this.doc.activeElement
                            ? this.doc.activeElement.closest(".attreditor")
                            : null;
     if (focusedAttribute) {
       // The focused attribute might not be in the current selected container.
-      let container = focusedAttribute.closest("li.child").container;
+      const container = focusedAttribute.closest("li.child").container;
       container.removeAttribute(focusedAttribute.dataset.attr);
     } else {
       this.deleteNode(this._selectedContainer.node, moveBackward);
@@ -756,27 +939,39 @@ MarkupView.prototype = {
    *         If set to true, focus the previous sibling, otherwise the next one.
    */
   deleteNode: function(node, moveBackward) {
-    if (node.isDocumentElement ||
-        node.nodeType == Ci.nsIDOMNode.DOCUMENT_TYPE_NODE ||
-        node.isAnonymous) {
+    if (!this.inspector.isDeletable(node)) {
       return;
     }
 
-    let container = this.getContainer(node);
+    const container = this.getContainer(node);
 
     // Retain the node so we can undo this...
     this.walker.retainNode(node).then(() => {
-      let parent = node.parentNode();
+      const parent = node.parentNode();
       let nextSibling = null;
       this.undo.do(() => {
         this.walker.removeNode(node).then(siblings => {
           nextSibling = siblings.nextSibling;
-          let focusNode = moveBackward ? siblings.previousSibling : nextSibling;
+          const prevSibling = siblings.previousSibling;
+          let focusNode = moveBackward ? prevSibling : nextSibling;
 
           // If we can't move as the user wants, we move to the other direction.
           // If there is no sibling elements anymore, move to the parent node.
           if (!focusNode) {
-            focusNode = nextSibling || siblings.previousSibling || parent;
+            focusNode = nextSibling || prevSibling || parent;
+          }
+
+          const isNextSiblingText = nextSibling ?
+            nextSibling.nodeType === nodeConstants.TEXT_NODE : false;
+          const isPrevSiblingText = prevSibling ?
+            prevSibling.nodeType === nodeConstants.TEXT_NODE : false;
+
+          // If the parent had two children and the next or previous sibling
+          // is a text node, then it now has only a single text node, is about
+          // to be in-lined; and focus should move to the parent.
+          if (parent.numChildren === 2
+              && (isNextSiblingText || isPrevSiblingText)) {
+            focusNode = parent;
           }
 
           if (container.selected) {
@@ -784,9 +979,11 @@ MarkupView.prototype = {
           }
         });
       }, () => {
+        const isValidSibling = nextSibling && !nextSibling.isPseudoElement;
+        nextSibling = isValidSibling ? nextSibling : null;
         this.walker.insertBefore(node, parent, nextSibling);
       });
-    }).then(null, console.error);
+    }).catch(console.error);
   },
 
   /**
@@ -798,7 +995,7 @@ MarkupView.prototype = {
       parent = parent.parentNode;
     }
     if (parent) {
-      this.navigate(parent.container, true);
+      this.navigate(parent.container);
     }
   },
 
@@ -808,20 +1005,13 @@ MarkupView.prototype = {
    *
    * @param  {MarkupContainer} container
    *         The container we're navigating to.
-   * @param  {Boolean} ignoreFocus
-   *         If false, keyboard focus will be moved to the container too.
    */
-  navigate: function(container, ignoreFocus) {
+  navigate: function(container) {
     if (!container) {
       return;
     }
 
-    let node = container.node;
-    this.markNodeAsSelected(node, "treepanel");
-
-    if (!ignoreFocus) {
-      container.focus();
-    }
+    this._markContainerAsSelected(container, "treepanel");
   },
 
   /**
@@ -831,42 +1021,46 @@ MarkupView.prototype = {
    *         The node in the content document.
    * @param  {Boolean} flashNode
    *         Whether the newly imported node should be flashed
+   * @param  {Boolean} slotted
+   *         Whether we are importing the slotted version of the node.
    * @return {MarkupContainer} The MarkupContainer object for this element.
    */
-  importNode: function(node, flashNode) {
+  importNode: function(node, flashNode, slotted) {
     if (!node) {
       return null;
     }
 
-    if (this._containers.has(node)) {
-      return this.getContainer(node);
+    if (this.hasContainer(node, slotted)) {
+      return this.getContainer(node, slotted);
     }
 
     let container;
-    let {nodeType, isPseudoElement} = node;
+    const {nodeType, isPseudoElement} = node;
     if (node === this.walker.rootNode) {
       container = new RootContainer(this, node);
       this._elt.appendChild(container.elt);
       this._rootNode = node;
-    } else if (nodeType == Ci.nsIDOMNode.ELEMENT_NODE && !isPseudoElement) {
-      container = new MarkupElementContainer(this, node, this._inspector);
-    } else if (nodeType == Ci.nsIDOMNode.COMMENT_NODE ||
-               nodeType == Ci.nsIDOMNode.TEXT_NODE) {
-      container = new MarkupTextContainer(this, node, this._inspector);
+    } else if (slotted) {
+      container = new SlottedNodeContainer(this, node, this.inspector);
+    } else if (nodeType == nodeConstants.ELEMENT_NODE && !isPseudoElement) {
+      container = new MarkupElementContainer(this, node, this.inspector);
+    } else if (nodeType == nodeConstants.COMMENT_NODE ||
+               nodeType == nodeConstants.TEXT_NODE) {
+      container = new MarkupTextContainer(this, node, this.inspector);
     } else {
-      container = new MarkupReadOnlyContainer(this, node, this._inspector);
+      container = new MarkupReadOnlyContainer(this, node, this.inspector);
     }
 
     if (flashNode) {
       container.flashMutation();
     }
 
-    this._containers.set(node, container);
+    this.setContainer(node, container, slotted);
     container.childrenDirty = true;
 
     this._updateChildren(container);
 
-    this._inspector.emit("container-created", container);
+    this.inspector.emit("container-created", container);
 
     return container;
   },
@@ -875,7 +1069,7 @@ MarkupView.prototype = {
    * Mutation observer used for included nodes.
    */
   _mutationObserver: function(mutations) {
-    for (let mutation of mutations) {
+    for (const mutation of mutations) {
       let type = mutation.type;
       let target = mutation.target;
 
@@ -889,34 +1083,45 @@ MarkupView.prototype = {
         }
       }
 
-      let container = this.getContainer(target);
+      const container = this.getContainer(target);
       if (!container) {
         // Container might not exist if this came from a load event for a node
         // we're not viewing.
         continue;
       }
+
       if (type === "attributes" || type === "characterData"
         || type === "events" || type === "pseudoClassLock") {
         container.update();
-      } else if (type === "childList" || type === "nativeAnonymousChildList") {
+      } else if (type === "childList" || type === "nativeAnonymousChildList"
+        || type === "slotchange") {
         container.childrenDirty = true;
-        // Update the children to take care of changes in the markup view DOM.
+        // Update the children to take care of changes in the markup view DOM
+        // and update container (and its subtree) DOM tree depth level for
+        // accessibility where necessary.
+        this._updateChildren(container, {flash: true}).then(() =>
+          container.updateLevel());
+      } else if (type === "inlineTextChild") {
+        container.childrenDirty = true;
         this._updateChildren(container, {flash: true});
+        container.update();
       }
     }
 
     this._waitForChildren().then(() => {
       if (this._destroyer) {
-        console.warn("Could not fully update after markup mutations, " +
-          "the markup-view was destroyed while waiting for children.");
+        // Could not fully update after markup mutations, the markup-view was destroyed
+        // while waiting for children. Bail out silently.
         return;
       }
       this._flashMutatedNodes(mutations);
-      this._inspector.emit("markupmutation", mutations);
+      this.inspector.emit("markupmutation", mutations);
 
       // Since the htmlEditor is absolutely positioned, a mutation may change
       // the location in which it should be shown.
-      this.htmlEditor.refresh();
+      if (this.htmlEditor) {
+        this.htmlEditor.refresh();
+      }
     });
   },
 
@@ -927,10 +1132,10 @@ MarkupView.prototype = {
    *         An array of nodeFronts
    */
   _onDisplayChange: function(nodes) {
-    for (let node of nodes) {
-      let container = this.getContainer(node);
+    for (const node of nodes) {
+      const container = this.getContainer(node);
       if (container) {
-        container.isDisplayed = node.isDisplayed;
+        container.update();
       }
     }
   },
@@ -940,11 +1145,11 @@ MarkupView.prototype = {
    * corresponding containers to attract attention.
    */
   _flashMutatedNodes: function(mutations) {
-    let addedOrEditedContainers = new Set();
-    let removedContainers = new Set();
+    const addedOrEditedContainers = new Set();
+    const removedContainers = new Set();
 
-    for (let {type, target, added, removed, newValue} of mutations) {
-      let container = this.getContainer(target);
+    for (const {type, target, added, removed, newValue} of mutations) {
+      const container = this.getContainer(target);
 
       if (container) {
         if (type === "characterData") {
@@ -963,7 +1168,7 @@ MarkupView.prototype = {
           // If there has been additions, flash the nodes if their associated
           // container exist (so if their parent is expanded in the inspector).
           added.forEach(node => {
-            let addedContainer = this.getContainer(node);
+            const addedContainer = this.getContainer(node);
             if (addedContainer) {
               addedOrEditedContainers.add(addedContainer);
 
@@ -978,10 +1183,10 @@ MarkupView.prototype = {
       }
     }
 
-    for (let container of removedContainers) {
+    for (const container of removedContainers) {
       container.flashMutation();
     }
-    for (let container of addedOrEditedContainers) {
+    for (const container of addedOrEditedContainers) {
       container.flashMutation();
     }
   },
@@ -990,14 +1195,11 @@ MarkupView.prototype = {
    * Make sure the given node's parents are expanded and the
    * node is scrolled on to screen.
    */
-  showNode: function(node, centered = true) {
-    let parent = node;
-
-    this.importNode(node);
-
-    while ((parent = parent.parentNode())) {
-      this.importNode(parent);
-      this.expandNode(parent);
+  showNode: function(node, {centered = true, slotted} = {}) {
+    if (slotted && !this.hasContainer(node, slotted)) {
+      throw new Error("Tried to show a slotted node not previously imported");
+    } else {
+      this._ensureNodeImported(node);
     }
 
     return this._waitForChildren().then(() => {
@@ -1006,17 +1208,20 @@ MarkupView.prototype = {
       }
       return this._ensureVisible(node);
     }).then(() => {
-      scrollIntoViewIfNeeded(this.getContainer(node).editor.elt, centered);
-    }, e => {
-      // Only report this rejection as an error if the panel hasn't been
-      // destroyed in the meantime.
-      if (!this._destroyer) {
-        console.error(e);
-      } else {
-        console.warn("Could not show the node, the markup-view was destroyed " +
-          "while waiting for children");
-      }
-    });
+      const container = this.getContainer(node, slotted);
+      scrollIntoViewIfNeeded(container.editor.elt, centered);
+    }, this._handleRejectionIfNotDestroyed);
+  },
+
+  _ensureNodeImported: function(node) {
+    let parent = node;
+
+    this.importNode(node);
+
+    while ((parent = parent.parentNode())) {
+      this.importNode(parent);
+      this.expandNode(parent);
+    }
   },
 
   /**
@@ -1025,8 +1230,8 @@ MarkupView.prototype = {
   _expandContainer: function(container) {
     return this._updateChildren(container, {expand: true}).then(() => {
       if (this._destroyer) {
-        console.warn("Could not expand the node, the markup-view was " +
-          "destroyed");
+        // Could not expand the node, the markup-view was destroyed in the meantime. Just
+        // silently give up.
         return;
       }
       container.setExpanded(true);
@@ -1037,8 +1242,8 @@ MarkupView.prototype = {
    * Expand the node's children.
    */
   expandNode: function(node) {
-    let container = this.getContainer(node);
-    this._expandContainer(container);
+    const container = this.getContainer(node);
+    return this._expandContainer(container);
   },
 
   /**
@@ -1050,13 +1255,13 @@ MarkupView.prototype = {
   _expandAll: function(container) {
     return this._expandContainer(container).then(() => {
       let child = container.children.firstChild;
-      let promises = [];
+      const promises = [];
       while (child) {
         promises.push(this._expandAll(child.container));
         child = child.nextSibling;
       }
       return promise.all(promises);
-    }).then(null, console.error);
+    }).catch(console.error);
   },
 
   /**
@@ -1064,6 +1269,7 @@ MarkupView.prototype = {
    *
    * @param  {DOMNode} node
    *         The node to expand, or null to start from the top.
+   * @return {Promise} promise that resolves once all children are expanded.
    */
   expandAll: function(node) {
     node = node || this._rootNode;
@@ -1074,8 +1280,28 @@ MarkupView.prototype = {
    * Collapse the node's children.
    */
   collapseNode: function(node) {
-    let container = this.getContainer(node);
+    const container = this.getContainer(node);
     container.setExpanded(false);
+  },
+
+  _collapseAll: function(container) {
+    container.setExpanded(false);
+    const children = container.getChildContainers() || [];
+    children.forEach(child => this._collapseAll(child));
+  },
+
+  /**
+   * Collapse the entire tree beneath a node.
+   *
+   * @param  {DOMNode} node
+   *         The node to collapse.
+   * @return {Promise} promise that resolves once all children are collapsed.
+   */
+  collapseAll: function(node) {
+    this._collapseAll(this.getContainer(node));
+
+    // collapseAll is synchronous, return a promise for consistency with expandAll.
+    return Promise.resolve();
   },
 
   /**
@@ -1099,7 +1325,7 @@ MarkupView.prototype = {
 
     return walkerPromise.then(longstr => {
       return longstr.string().then(html => {
-        longstr.release().then(null, console.error);
+        longstr.release().catch(console.error);
         return html;
       });
     });
@@ -1139,15 +1365,15 @@ MarkupView.prototype = {
     this.cancelReselectOnRemoved();
 
     // Get the removedNode index in its parent node to reselect the right node.
-    let isHTMLTag = removedNode.tagName.toLowerCase() === "html";
-    let oldContainer = this.getContainer(removedNode);
-    let parentContainer = this.getContainer(removedNode.parentNode());
-    let childIndex = parentContainer.getChildContainers().indexOf(oldContainer);
+    const isHTMLTag = removedNode.tagName.toLowerCase() === "html";
+    const oldContainer = this.getContainer(removedNode);
+    const parentContainer = this.getContainer(removedNode.parentNode());
+    const childIndex = parentContainer.getChildContainers().indexOf(oldContainer);
 
-    let onMutations = this._removedNodeObserver = (e, mutations) => {
+    const onMutations = this._removedNodeObserver = mutations => {
       let isNodeRemovalMutation = false;
-      for (let mutation of mutations) {
-        let containsRemovedNode = mutation.removed &&
+      for (const mutation of mutations) {
+        const containsRemovedNode = mutation.removed &&
                                   mutation.removed.some(n => n === removedNode);
         if (mutation.type === "childList" &&
             (containsRemovedNode || isHTMLTag)) {
@@ -1159,18 +1385,19 @@ MarkupView.prototype = {
         return;
       }
 
-      this._inspector.off("markupmutation", onMutations);
+      this.inspector.off("markupmutation", onMutations);
       this._removedNodeObserver = null;
 
       // Don't select the new node if the user has already changed the current
       // selection.
-      if (this._inspector.selection.nodeFront === parentContainer.node ||
-          (this._inspector.selection.nodeFront === removedNode && isHTMLTag)) {
-        let childContainers = parentContainer.getChildContainers();
+      if (this.inspector.selection.nodeFront === parentContainer.node ||
+          (this.inspector.selection.nodeFront === removedNode && isHTMLTag)) {
+        const childContainers = parentContainer.getChildContainers();
         if (childContainers && childContainers[childIndex]) {
-          this.markNodeAsSelected(childContainers[childIndex].node, reason);
-          if (childContainers[childIndex].hasChildren) {
-            this.expandNode(childContainers[childIndex].node);
+          const childContainer = childContainers[childIndex];
+          this._markContainerAsSelected(childContainer, reason);
+          if (childContainer.hasChildren) {
+            this.expandNode(childContainer.node);
           }
           this.emit("reselectedonremoved");
         }
@@ -1179,7 +1406,7 @@ MarkupView.prototype = {
 
     // Start listening for mutations until we find a childList change that has
     // removedNode removed.
-    this._inspector.on("markupmutation", onMutations);
+    this.inspector.on("markupmutation", onMutations);
   },
 
   /**
@@ -1189,7 +1416,7 @@ MarkupView.prototype = {
    */
   cancelReselectOnRemoved: function() {
     if (this._removedNodeObserver) {
-      this._inspector.off("markupmutation", this._removedNodeObserver);
+      this.inspector.off("markupmutation", this._removedNodeObserver);
       this._removedNodeObserver = null;
       this.emit("canceledreselectonremoved");
     }
@@ -1208,7 +1435,7 @@ MarkupView.prototype = {
    * @return {Promise} that will resolve when the outer HTML has been updated.
    */
   updateNodeOuterHTML: function(node, newValue) {
-    let container = this.getContainer(node);
+    const container = this.getContainer(node);
     if (!container) {
       return promise.reject();
     }
@@ -1216,7 +1443,7 @@ MarkupView.prototype = {
     // Changing the outerHTML removes the node which outerHTML was changed.
     // Listen to this removal to reselect the right node afterwards.
     this.reselectOnRemoved(node, "outerhtml");
-    return this.walker.setOuterHTML(node, newValue).then(null, () => {
+    return this.walker.setOuterHTML(node, newValue).catch(() => {
       this.cancelReselectOnRemoved();
     });
   },
@@ -1233,20 +1460,18 @@ MarkupView.prototype = {
    * @return {Promise} that will resolve when the inner HTML has been updated.
    */
   updateNodeInnerHTML: function(node, newValue, oldValue) {
-    let container = this.getContainer(node);
+    const container = this.getContainer(node);
     if (!container) {
       return promise.reject();
     }
 
-    let def = promise.defer();
-
-    container.undo.do(() => {
-      this.walker.setInnerHTML(node, newValue).then(def.resolve, def.reject);
-    }, () => {
-      this.walker.setInnerHTML(node, oldValue);
+    return new Promise((resolve, reject) => {
+      container.undo.do(() => {
+        this.walker.setInnerHTML(node, newValue).then(resolve, reject);
+      }, () => {
+        this.walker.setInnerHTML(node, oldValue);
+      });
     });
-
-    return def.promise;
   },
 
   /**
@@ -1263,24 +1488,27 @@ MarkupView.prototype = {
    *         been inserted.
    */
   insertAdjacentHTMLToNode: function(node, position, value) {
-    let container = this.getContainer(node);
+    const container = this.getContainer(node);
     if (!container) {
       return promise.reject();
     }
 
-    let def = promise.defer();
-
     let injectedNodes = [];
-    container.undo.do(() => {
-      this.walker.insertAdjacentHTML(node, position, value).then(nodeArray => {
-        injectedNodes = nodeArray.nodes;
-        return nodeArray;
-      }).then(def.resolve, def.reject);
-    }, () => {
-      this.walker.removeNodes(injectedNodes);
-    });
 
-    return def.promise;
+    return new Promise((resolve, reject) => {
+      container.undo.do(() => {
+        // eslint-disable-next-line no-unsanitized/method
+        this.walker
+            .insertAdjacentHTML(node, position, value)
+            .then(nodeArray => {
+              injectedNodes = nodeArray.nodes;
+              return nodeArray;
+            })
+            .then(resolve, reject);
+      }, () => {
+        this.walker.removeNodes(injectedNodes);
+      });
+    });
   },
 
   /**
@@ -1291,12 +1519,18 @@ MarkupView.prototype = {
    */
   beginEditingOuterHTML: function(node) {
     this.getNodeOuterHTML(node).then(oldValue => {
-      let container = this.getContainer(node);
+      const container = this.getContainer(node);
       if (!container) {
         return;
       }
+      // Load load and create HTML Editor as it is rarely used and fetch complex deps
+      if (!this.htmlEditor) {
+        const HTMLEditor = require("devtools/client/inspector/markup/views/html-editor");
+        this.htmlEditor = new HTMLEditor(this.doc);
+      }
       this.htmlEditor.show(container.tagLine, oldValue);
-      this.htmlEditor.once("popuphidden", (e, commit, value) => {
+      const start = this.telemetry.msSystemNow();
+      this.htmlEditor.once("popuphidden", (commit, value) => {
         // Need to focus the <html> element instead of the frame / window
         // in order to give keyboard focus back to doc (from editor).
         this.doc.documentElement.focus();
@@ -1304,27 +1538,37 @@ MarkupView.prototype = {
         if (commit) {
           this.updateNodeOuterHTML(node, value, oldValue);
         }
+
+        const end = this.telemetry.msSystemNow();
+        this.telemetry.recordEvent("devtools.main", "edit_html", "inspector", null, {
+          "made_changes": commit,
+          "time_open": end - start
+        });
       });
+
+      this.emit("begin-editing");
     });
   },
 
   /**
-   * Mark the given node expanded.
+   * Expand or collapse the given node.
    *
    * @param  {NodeFront} node
-   *         The NodeFront to mark as expanded.
+   *         The NodeFront to update.
    * @param  {Boolean} expanded
-   *         Whether the expand or collapse.
-   * @param  {Boolean} expandDescendants
-   *         Whether to expand all descendants too
+   *         Whether the node should be expanded/collapsed.
+   * @param  {Boolean} applyToDescendants
+   *         Whether all descendants should also be expanded/collapsed
    */
-  setNodeExpanded: function(node, expanded, expandDescendants) {
+  setNodeExpanded: function(node, expanded, applyToDescendants) {
     if (expanded) {
-      if (expandDescendants) {
+      if (applyToDescendants) {
         this.expandAll(node);
       } else {
         this.expandNode(node);
       }
+    } else if (applyToDescendants) {
+      this.collapseAll(node);
     } else {
       this.collapseNode(node);
     }
@@ -1341,15 +1585,22 @@ MarkupView.prototype = {
    * @return {Boolean} False if the node is already marked as selected, true
    *         otherwise.
    */
-  markNodeAsSelected: function(node, reason) {
-    let container = this.getContainer(node);
-    if (this._selectedContainer === container) {
+  markNodeAsSelected: function(node, reason = "nodeselected") {
+    const container = this.getContainer(node);
+    return this._markContainerAsSelected(container);
+  },
+
+  _markContainerAsSelected: function(container, reason) {
+    if (!container || this._selectedContainer === container) {
       return false;
     }
 
-    // Un-select the previous container.
+    const { node } = container;
+
+    // Un-select and remove focus from the previous container.
     if (this._selectedContainer) {
       this._selectedContainer.selected = false;
+      this._selectedContainer.clearFocus();
     }
 
     // Select the new container.
@@ -1359,8 +1610,9 @@ MarkupView.prototype = {
     }
 
     // Change the current selection if needed.
-    if (this._inspector.selection.nodeFront !== node) {
-      this._inspector.selection.setNodeFront(node, reason || "nodeselected");
+    if (!this._isContainerSelected(this._selectedContainer)) {
+      const isSlotted = container.isSlotted();
+      this.inspector.selection.setNodeFront(node, { reason, isSlotted });
     }
 
     return true;
@@ -1372,10 +1624,10 @@ MarkupView.prototype = {
    */
   _ensureVisible: function(node) {
     while (node) {
-      let container = this.getContainer(node);
-      let parent = node.parentNode();
+      const container = this.getContainer(node);
+      const parent = node.parentNode();
       if (!container.elt.parentNode) {
-        let parentContainer = this.getContainer(parent);
+        const parentContainer = this.getContainer(parent);
         if (parentContainer) {
           parentContainer.childrenDirty = true;
           this._updateChildren(parentContainer, {expand: true});
@@ -1406,7 +1658,7 @@ MarkupView.prototype = {
    */
   _checkSelectionVisible: function(container) {
     let centered = null;
-    let node = this._inspector.selection.nodeFront;
+    let node = this.inspector.selection.nodeFront;
     while (node) {
       if (node.parentNode() === container.node) {
         centered = node;
@@ -1440,10 +1692,18 @@ MarkupView.prototype = {
    *         (which may be immediately).
    */
   _updateChildren: function(container, options) {
-    let expand = options && options.expand;
-    let flash = options && options.flash;
+    // Slotted containers do not display any children.
+    if (container.isSlotted()) {
+      return promise.resolve(container);
+    }
+
+    const expand = options && options.expand;
+    const flash = options && options.flash;
 
     container.hasChildren = container.node.hasChildren;
+    // Accessibility should either ignore empty children or semantically
+    // consider them a group.
+    container.setChildrenRole();
 
     if (!this._queuedChildUpdates) {
       this._queuedChildUpdates = new Map();
@@ -1457,36 +1717,36 @@ MarkupView.prototype = {
       return promise.resolve(container);
     }
 
-    if (container.singleTextChild
-        && container.singleTextChild != container.node.singleTextChild) {
+    if (container.inlineTextChild
+        && container.inlineTextChild != container.node.inlineTextChild) {
       // This container was doing double duty as a container for a single
       // text child, back that out.
-      this._containers.delete(container.singleTextChild);
-      container.clearSingleTextChild();
+      this._containers.delete(container.inlineTextChild);
+      container.clearInlineTextChild();
 
       if (container.hasChildren && container.selected) {
         container.setExpanded(true);
       }
     }
 
-    if (container.node.singleTextChild) {
+    if (container.node.inlineTextChild) {
       container.setExpanded(false);
       // this container will do double duty as the container for the single
       // text child.
       while (container.children.firstChild) {
-        container.children.removeChild(container.children.firstChild);
+        container.children.firstChild.remove();
       }
 
-      container.setSingleTextChild(container.node.singleTextChild);
+      container.setInlineTextChild(container.node.inlineTextChild);
 
-      this._containers.set(container.node.singleTextChild, container);
+      this.setContainer(container.node.inlineTextChild, container);
       container.childrenDirty = false;
       return promise.resolve(container);
     }
 
     if (!container.hasChildren) {
       while (container.children.firstChild) {
-        container.children.removeChild(container.children.firstChild);
+        container.children.firstChild.remove();
       }
       container.childrenDirty = false;
       container.setExpanded(false);
@@ -1502,13 +1762,15 @@ MarkupView.prototype = {
 
     // We're going to issue a children request, make sure it includes the
     // centered node.
-    let centered = this._checkSelectionVisible(container);
+    const centered = this._checkSelectionVisible(container);
 
     // Children aren't updated yet, but clear the childrenDirty flag anyway.
     // If the dirty flag is re-set while we're fetching we'll need to fetch
     // again.
     container.childrenDirty = false;
-    let updatePromise =
+
+    const isShadowHost = container.node.isShadowHost;
+    const updatePromise =
       this._getVisibleChildren(container, centered).then(children => {
         if (!this._containers) {
           return promise.reject("markup view destroyed");
@@ -1518,48 +1780,59 @@ MarkupView.prototype = {
         // If children are dirty, we got a change notification for this node
         // while the request was in progress, we need to do it again.
         if (container.childrenDirty) {
-          return this._updateChildren(container, {expand: centered});
+          return this._updateChildren(container, {expand: centered || expand});
         }
 
-        let fragment = this.doc.createDocumentFragment();
+        const fragment = this.doc.createDocumentFragment();
 
-        for (let child of children.nodes) {
-          let childContainer = this.importNode(child, flash);
+        for (const child of children.nodes) {
+          const slotted = !isShadowHost && child.isDirectShadowHostChild;
+          const childContainer = this.importNode(child, flash, slotted);
           fragment.appendChild(childContainer.elt);
         }
 
         while (container.children.firstChild) {
-          container.children.removeChild(container.children.firstChild);
+          container.children.firstChild.remove();
         }
 
-        if (!(children.hasFirst && children.hasLast)) {
-          let data = {
-            showing: this.strings.GetStringFromName("markupView.more.showing"),
-            showAll: this.strings.formatStringFromName(
-                      "markupView.more.showAll",
-                      [container.node.numChildren.toString()], 1),
-            allButtonClick: () => {
-              container.maxChildren = -1;
-              container.childrenDirty = true;
-              this._updateChildren(container);
-            }
-          };
-
-          if (!children.hasFirst) {
-            let span = this.template("more-nodes", data);
-            fragment.insertBefore(span, fragment.firstChild);
-          }
-          if (!children.hasLast) {
-            let span = this.template("more-nodes", data);
-            fragment.appendChild(span);
-          }
+        if (!children.hasFirst) {
+          const topItem = this.buildMoreNodesButtonMarkup(container);
+          fragment.insertBefore(topItem, fragment.firstChild);
+        }
+        if (!children.hasLast) {
+          const bottomItem = this.buildMoreNodesButtonMarkup(container);
+          fragment.appendChild(bottomItem);
         }
 
         container.children.appendChild(fragment);
         return container;
-      }).then(null, console.error);
+      }).catch(this._handleRejectionIfNotDestroyed);
     this._queuedChildUpdates.set(container, updatePromise);
     return updatePromise;
+  },
+
+  buildMoreNodesButtonMarkup: function(container) {
+    const elt = this.doc.createElement("li");
+    elt.classList.add("more-nodes", "devtools-class-comment");
+
+    const label = this.doc.createElement("span");
+    label.textContent = INSPECTOR_L10N.getStr("markupView.more.showing");
+    elt.appendChild(label);
+
+    const button = this.doc.createElement("button");
+    button.setAttribute("href", "#");
+    const showAllString = PluralForm.get(container.node.numChildren,
+      INSPECTOR_L10N.getStr("markupView.more.showAll2"));
+    button.textContent = showAllString.replace("#1", container.node.numChildren);
+    elt.appendChild(button);
+
+    button.addEventListener("click", () => {
+      container.maxChildren = -1;
+      container.childrenDirty = true;
+      this._updateChildren(container);
+    });
+
+    return elt;
   },
 
   _waitForChildren: function() {
@@ -1597,10 +1870,12 @@ MarkupView.prototype = {
 
     this._clearBriefBoxModelTimer();
 
-    this._hoveredNode = null;
+    this._hoveredContainer = null;
 
-    this.htmlEditor.destroy();
-    this.htmlEditor = null;
+    if (this.htmlEditor) {
+      this.htmlEditor.destroy();
+      this.htmlEditor = null;
+    }
 
     this.undo.destroy();
     this.undo = null;
@@ -1608,18 +1883,17 @@ MarkupView.prototype = {
     this.popup.destroy();
     this.popup = null;
 
-    this._elt.removeEventListener("click", this._onMouseClick, false);
-    this._elt.removeEventListener("mousemove", this._onMouseMove, false);
-    this._elt.removeEventListener("mouseleave", this._onMouseLeave, false);
-    this.doc.body.removeEventListener("mouseup", this._onMouseUp);
-    this.win.removeEventListener("keydown", this._onKeyDown, false);
-    this.win.removeEventListener("copy", this._onCopy);
-    this._frame.removeEventListener("focus", this._onFocus, false);
-    this.walker.off("mutations", this._mutationObserver);
+    this._elt.removeEventListener("blur", this._onBlur, true);
+    this._elt.removeEventListener("click", this._onMouseClick);
+    this._elt.removeEventListener("mousemove", this._onMouseMove);
+    this._elt.removeEventListener("mouseout", this._onMouseOut);
+    this._frame.removeEventListener("focus", this._onFocus);
+    this.inspector.selection.off("new-node-front", this._onNewSelection);
+    this.toolbox.off("picker-node-hovered", this._onToolboxPickerHover);
     this.walker.off("display-change", this._onDisplayChange);
-    this._inspector.selection.off("new-node-front", this._onNewSelection);
-    this._inspector.toolbox.off("picker-node-hovered",
-                                this._onToolboxPickerHover);
+    this.walker.off("mutations", this._mutationObserver);
+    this.win.removeEventListener("copy", this._onCopy);
+    this.win.removeEventListener("mouseup", this._onMouseUp);
 
     this._prefObserver.off(ATTR_COLLAPSE_ENABLED_PREF,
                            this._onCollapseAttributesPrefChange);
@@ -1629,16 +1903,20 @@ MarkupView.prototype = {
 
     this._elt = null;
 
-    for (let [, container] of this._containers) {
+    for (const [, container] of this._containers) {
       container.destroy();
     }
     this._containers = null;
 
-    this.tooltip.destroy();
-    this.tooltip = null;
+    this.eventDetailsTooltip.destroy();
+    this.eventDetailsTooltip = null;
 
-    this.win = null;
+    this.imagePreviewTooltip.destroy();
+    this.imagePreviewTooltip = null;
+
     this.doc = null;
+    this.highlighters = null;
+    this.win = null;
 
     this._lastDropTarget = null;
     this._lastDragTarget = null;
@@ -1672,7 +1950,7 @@ MarkupView.prototype = {
       return;
     }
 
-    let target = this.findClosestDragDropTarget(el);
+    const target = this.findClosestDragDropTarget(el);
     if (target) {
       target.classList.add("drop-target");
       this._lastDropTarget = target;
@@ -1691,7 +1969,7 @@ MarkupView.prototype = {
       return;
     }
 
-    let target = this.findClosestDragDropTarget(el);
+    const target = this.findClosestDragDropTarget(el);
     if (target) {
       target.classList.add("drag-target");
       this._lastDragTarget = target;
@@ -1703,7 +1981,7 @@ MarkupView.prototype = {
    * element (parent/nextSibling).
    */
   get dropTargetNodes() {
-    let target = this._lastDropTarget;
+    const target = this._lastDropTarget;
 
     if (!target) {
       return null;
@@ -1728,7 +2006,7 @@ MarkupView.prototype = {
       nextSibling = null;
     }
 
-    if (parent.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
+    if (parent.nodeType !== nodeConstants.ELEMENT_NODE) {
       return null;
     }
 
@@ -1737,1513 +2015,14 @@ MarkupView.prototype = {
 };
 
 /**
- * The main structure for storing a document node in the markup
- * tree.  Manages creation of the editor for the node and
- * a <ul> for placing child elements, and expansion/collapsing
- * of the element.
- *
- * This should not be instantiated directly, instead use one of:
- *    MarkupReadOnlyContainer
- *    MarkupTextContainer
- *    MarkupElementContainer
- */
-function MarkupContainer() { }
-
-MarkupContainer.prototype = {
-  /*
-   * Initialize the MarkupContainer.  Should be called while one
-   * of the other contain classes is instantiated.
-   *
-   * @param  {MarkupView} markupView
-   *         The markup view that owns this container.
-   * @param  {NodeFront} node
-   *         The node to display.
-   * @param  {String} templateID
-   *         Which template to render for this container
-   */
-  initialize: function(markupView, node, templateID) {
-    this.markup = markupView;
-    this.node = node;
-    this.undo = this.markup.undo;
-    this.win = this.markup._frame.contentWindow;
-
-    // The template will fill the following properties
-    this.elt = null;
-    this.expander = null;
-    this.tagState = null;
-    this.tagLine = null;
-    this.children = null;
-    this.markup.template(templateID, this);
-    this.elt.container = this;
-
-    this._onMouseDown = this._onMouseDown.bind(this);
-    this._onToggle = this._onToggle.bind(this);
-    this._onMouseUp = this._onMouseUp.bind(this);
-    this._onMouseMove = this._onMouseMove.bind(this);
-
-    // Binding event listeners
-    this.elt.addEventListener("mousedown", this._onMouseDown, false);
-    this.markup.doc.body.addEventListener("mouseup", this._onMouseUp, true);
-    this.markup.doc.body.addEventListener("mousemove", this._onMouseMove, true);
-    this.elt.addEventListener("dblclick", this._onToggle, false);
-    if (this.expander) {
-      this.expander.addEventListener("click", this._onToggle, false);
-    }
-
-    // Marking the node as shown or hidden
-    this.isDisplayed = this.node.isDisplayed;
-  },
-
-  toString: function() {
-    return "[MarkupContainer for " + this.node + "]";
-  },
-
-  isPreviewable: function() {
-    if (this.node.tagName && !this.node.isPseudoElement) {
-      let tagName = this.node.tagName.toLowerCase();
-      let srcAttr = this.editor.getAttributeElement("src");
-      let isImage = tagName === "img" && srcAttr;
-      let isCanvas = tagName === "canvas";
-
-      return isImage || isCanvas;
-    }
-
-    return false;
-  },
-
-  /**
-   * Show the element has displayed or not.
-   */
-  set isDisplayed(isDisplayed) {
-    this.elt.classList.remove("not-displayed");
-    if (!isDisplayed) {
-      this.elt.classList.add("not-displayed");
-    }
-  },
-
-  /**
-   * True if the current node has children. The MarkupView
-   * will set this attribute for the MarkupContainer.
-   */
-  _hasChildren: false,
-
-  get hasChildren() {
-    return this._hasChildren;
-  },
-
-  set hasChildren(value) {
-    this._hasChildren = value;
-    this.updateExpander();
-  },
-
-  /**
-   * True if the current node can be expanded.
-   */
-  get canExpand() {
-    return this._hasChildren && !this.node.singleTextChild;
-  },
-
-  /**
-   * True if this is the root <html> element and can't be collapsed.
-   */
-  get mustExpand() {
-    return this.node._parent === this.markup.walker.rootNode;
-  },
-
-  updateExpander: function() {
-    if (!this.expander) {
-      return;
-    }
-
-    if (this.canExpand && !this.mustExpand) {
-      this.expander.style.visibility = "visible";
-    } else {
-      this.expander.style.visibility = "hidden";
-    }
-  },
-
-  /**
-   * If the node has children, return the list of containers for all these
-   * children.
-   */
-  getChildContainers: function() {
-    if (!this.hasChildren) {
-      return null;
-    }
-
-    return [...this.children.children].map(node => node.container);
-  },
-
-  /**
-   * True if the node has been visually expanded in the tree.
-   */
-  get expanded() {
-    return !this.elt.classList.contains("collapsed");
-  },
-
-  setExpanded: function(value) {
-    if (!this.expander) {
-      return;
-    }
-
-    if (!this.canExpand) {
-      value = false;
-    }
-    if (this.mustExpand) {
-      value = true;
-    }
-
-    if (value && this.elt.classList.contains("collapsed")) {
-      // Expanding a node means cloning its "inline" closing tag into a new
-      // tag-line that the user can interact with and showing the children.
-      let closingTag = this.elt.querySelector(".close");
-      if (closingTag) {
-        if (!this.closeTagLine) {
-          let line = this.markup.doc.createElement("div");
-          line.classList.add("tag-line");
-
-          let tagState = this.markup.doc.createElement("div");
-          tagState.classList.add("tag-state");
-          line.appendChild(tagState);
-
-          line.appendChild(closingTag.cloneNode(true));
-
-          flashElementOff(line);
-          this.closeTagLine = line;
-        }
-        this.elt.appendChild(this.closeTagLine);
-      }
-
-      this.elt.classList.remove("collapsed");
-      this.expander.setAttribute("open", "");
-      this.hovered = false;
-    } else if (!value) {
-      if (this.closeTagLine) {
-        this.elt.removeChild(this.closeTagLine);
-        this.closeTagLine = undefined;
-      }
-      this.elt.classList.add("collapsed");
-      this.expander.removeAttribute("open");
-    }
-  },
-
-  parentContainer: function() {
-    return this.elt.parentNode ? this.elt.parentNode.container : null;
-  },
-
-  _isDragging: false,
-  _dragStartY: 0,
-
-  set isDragging(isDragging) {
-    this._isDragging = isDragging;
-    this.markup.isDragging = isDragging;
-
-    if (isDragging) {
-      this.elt.classList.add("dragging");
-      this.markup.doc.body.classList.add("dragging");
-    } else {
-      this.elt.classList.remove("dragging");
-      this.markup.doc.body.classList.remove("dragging");
-    }
-  },
-
-  get isDragging() {
-    return this._isDragging;
-  },
-
-  /**
-   * Check if element is draggable.
-   */
-  isDraggable: function() {
-    let tagName = this.node.tagName && this.node.tagName.toLowerCase();
-
-    return !this.node.isPseudoElement &&
-           !this.node.isAnonymous &&
-           !this.node.isDocumentElement &&
-           tagName !== "body" &&
-           tagName !== "head" &&
-           this.win.getSelection().isCollapsed &&
-           this.node.parentNode().tagName !== null;
-  },
-
-  _onMouseDown: function(event) {
-    let {target, button, metaKey, ctrlKey} = event;
-    let isLeftClick = button === 0;
-    let isMiddleClick = button === 1;
-    let isMetaClick = isLeftClick && (metaKey || ctrlKey);
-
-    // The "show more nodes" button already has its onclick, so early return.
-    if (target.nodeName === "button") {
-      return;
-    }
-
-    // target is the MarkupContainer itself.
-    this.hovered = false;
-    this.markup.navigate(this);
-    event.stopPropagation();
-
-    // Preventing the default behavior will avoid the body to gain focus on
-    // mouseup (through bubbling) when clicking on a non focusable node in the
-    // line. So, if the click happened outside of a focusable element, do
-    // prevent the default behavior, so that the tagname or textcontent gains
-    // focus.
-    if (!target.closest(".editor [tabindex]")) {
-      event.preventDefault();
-    }
-
-    // Follow attribute links if middle or meta click.
-    if (isMiddleClick || isMetaClick) {
-      let link = target.dataset.link;
-      let type = target.dataset.type;
-      this.markup._inspector.followAttributeLink(type, link);
-      return;
-    }
-
-    // Start node drag & drop (if the mouse moved, see _onMouseMove).
-    if (isLeftClick && this.isDraggable()) {
-      this._isPreDragging = true;
-      this._dragStartY = event.pageY;
-    }
-  },
-
-  /**
-   * On mouse up, stop dragging.
-   */
-  _onMouseUp: Task.async(function*() {
-    this._isPreDragging = false;
-
-    if (this.isDragging) {
-      this.cancelDragging();
-
-      let dropTargetNodes = this.markup.dropTargetNodes;
-
-      if (!dropTargetNodes) {
-        return;
-      }
-
-      yield this.markup.walker.insertBefore(this.node, dropTargetNodes.parent,
-                                            dropTargetNodes.nextSibling);
-      this.markup.emit("drop-completed");
-    }
-  }),
-
-  /**
-   * On mouse move, move the dragged element and indicate the drop target.
-   */
-  _onMouseMove: function(event) {
-    // If this is the first move after mousedown, only start dragging after the
-    // mouse has travelled a few pixels and then indicate the start position.
-    let initialDiff = Math.abs(event.pageY - this._dragStartY);
-    if (this._isPreDragging && initialDiff >= DRAG_DROP_MIN_INITIAL_DISTANCE) {
-      this._isPreDragging = false;
-      this.isDragging = true;
-
-      // If this is the last child, use the closing <div.tag-line> of parent as
-      // indicator.
-      let position = this.elt.nextElementSibling ||
-                     this.markup.getContainer(this.node.parentNode())
-                                .closeTagLine;
-      this.markup.indicateDragTarget(position);
-    }
-
-    if (this.isDragging) {
-      let diff = event.pageY - this._dragStartY;
-      this.elt.style.top = diff + "px";
-
-      let el = this.markup.doc.elementFromPoint(event.pageX - this.win.scrollX,
-                                                event.pageY - this.win.scrollY);
-      this.markup.indicateDropTarget(el);
-    }
-  },
-
-  cancelDragging: function() {
-    if (!this.isDragging) {
-      return;
-    }
-
-    this._isPreDragging = false;
-    this.isDragging = false;
-    this.elt.style.removeProperty("top");
-  },
-
-  /**
-   * Temporarily flash the container to attract attention.
-   * Used for markup mutations.
-   */
-  flashMutation: function() {
-    if (!this.selected) {
-      flashElementOn(this.tagState, this.editor.elt);
-      if (this._flashMutationTimer) {
-        clearTimeout(this._flashMutationTimer);
-        this._flashMutationTimer = null;
-      }
-      this._flashMutationTimer = setTimeout(() => {
-        flashElementOff(this.tagState, this.editor.elt);
-      }, this.markup.CONTAINER_FLASHING_DURATION);
-    }
-  },
-
-  _hovered: false,
-
-  /**
-   * Highlight the currently hovered tag + its closing tag if necessary
-   * (that is if the tag is expanded)
-   */
-  set hovered(value) {
-    this.tagState.classList.remove("flash-out");
-    this._hovered = value;
-    if (value) {
-      if (!this.selected) {
-        this.tagState.classList.add("theme-bg-darker");
-      }
-      if (this.closeTagLine) {
-        this.closeTagLine.querySelector(".tag-state").classList.add(
-          "theme-bg-darker");
-      }
-    } else {
-      this.tagState.classList.remove("theme-bg-darker");
-      if (this.closeTagLine) {
-        this.closeTagLine.querySelector(".tag-state").classList.remove(
-          "theme-bg-darker");
-      }
-    }
-  },
-
-  /**
-   * True if the container is visible in the markup tree.
-   */
-  get visible() {
-    return this.elt.getBoundingClientRect().height > 0;
-  },
-
-  /**
-   * True if the container is currently selected.
-   */
-  _selected: false,
-
-  get selected() {
-    return this._selected;
-  },
-
-  set selected(value) {
-    this.tagState.classList.remove("flash-out");
-    this._selected = value;
-    this.editor.selected = value;
-    if (this._selected) {
-      this.tagLine.setAttribute("selected", "");
-      this.tagState.classList.add("theme-selected");
-    } else {
-      this.tagLine.removeAttribute("selected");
-      this.tagState.classList.remove("theme-selected");
-    }
-  },
-
-  /**
-   * Update the container's editor to the current state of the
-   * viewed node.
-   */
-  update: function() {
-    if (this.node.pseudoClassLocks.length) {
-      this.elt.classList.add("pseudoclass-locked");
-    } else {
-      this.elt.classList.remove("pseudoclass-locked");
-    }
-
-    if (this.editor.update) {
-      this.editor.update();
-    }
-  },
-
-  /**
-   * Try to put keyboard focus on the current editor.
-   */
-  focus: function() {
-    let focusable = this.editor.elt.querySelector("[tabindex]");
-    if (focusable) {
-      focusable.focus();
-    }
-  },
-
-  _onToggle: function(event) {
-    this.markup.navigate(this);
-    if (this.hasChildren) {
-      this.markup.setNodeExpanded(this.node, !this.expanded, event.altKey);
-    }
-    event.stopPropagation();
-  },
-
-  /**
-   * Get rid of event listeners and references, when the container is no longer
-   * needed
-   */
-  destroy: function() {
-    // Remove event listeners
-    this.elt.removeEventListener("mousedown", this._onMouseDown, false);
-    this.elt.removeEventListener("dblclick", this._onToggle, false);
-    this.markup.doc.body.removeEventListener("mouseup", this._onMouseUp, true);
-    this.markup.doc.body.removeEventListener("mousemove",
-      this._onMouseMove, true);
-
-    this.win = null;
-
-    if (this.expander) {
-      this.expander.removeEventListener("click", this._onToggle, false);
-    }
-
-    // Recursively destroy children containers
-    let firstChild = this.children.firstChild;
-    while (firstChild) {
-      // Not all children of a container are containers themselves
-      // ("show more nodes" button is one example)
-      if (firstChild.container) {
-        firstChild.container.destroy();
-      }
-      this.children.removeChild(firstChild);
-      firstChild = this.children.firstChild;
-    }
-
-    this.editor.destroy();
-  }
-};
-
-/**
- * An implementation of MarkupContainer for Pseudo Elements,
- * Doctype nodes, or any other type generic node that doesn't
- * fit for other editors.
- * Does not allow any editing, just viewing / selecting.
- *
- * @param  {MarkupView} markupView
- *         The markup view that owns this container.
- * @param  {NodeFront} node
- *         The node to display.
- */
-function MarkupReadOnlyContainer(markupView, node) {
-  MarkupContainer.prototype.initialize.call(this, markupView, node,
-    "readonlycontainer");
-
-  this.editor = new GenericEditor(this, node);
-  this.tagLine.appendChild(this.editor.elt);
-}
-
-MarkupReadOnlyContainer.prototype =
-  Heritage.extend(MarkupContainer.prototype, {});
-
-/**
- * An implementation of MarkupContainer for text node and comment nodes.
- * Allows basic text editing in a textarea.
- *
- * @param  {MarkupView} markupView
- *         The markup view that owns this container.
- * @param  {NodeFront} node
- *         The node to display.
- * @param  {Inspector} inspector
- *         The inspector tool container the markup-view
- */
-function MarkupTextContainer(markupView, node) {
-  MarkupContainer.prototype.initialize.call(this, markupView, node,
-    "textcontainer");
-
-  if (node.nodeType == Ci.nsIDOMNode.TEXT_NODE) {
-    this.editor = new TextEditor(this, node, "text");
-  } else if (node.nodeType == Ci.nsIDOMNode.COMMENT_NODE) {
-    this.editor = new TextEditor(this, node, "comment");
-  } else {
-    throw new Error("Invalid node for MarkupTextContainer");
-  }
-
-  this.tagLine.appendChild(this.editor.elt);
-}
-
-MarkupTextContainer.prototype = Heritage.extend(MarkupContainer.prototype, {});
-
-/**
- * An implementation of MarkupContainer for Elements that can contain
- * child nodes.
- * Allows editing of tag name, attributes, expanding / collapsing.
- *
- * @param  {MarkupView} markupView
- *         The markup view that owns this container.
- * @param  {NodeFront} node
- *         The node to display.
- */
-function MarkupElementContainer(markupView, node) {
-  MarkupContainer.prototype.initialize.call(this, markupView, node,
-    "elementcontainer");
-
-  if (node.nodeType === Ci.nsIDOMNode.ELEMENT_NODE) {
-    this.editor = new ElementEditor(this, node);
-  } else {
-    throw new Error("Invalid node for MarkupElementContainer");
-  }
-
-  this.tagLine.appendChild(this.editor.elt);
-}
-
-MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
-  _buildEventTooltipContent: function(target, tooltip) {
-    if (target.hasAttribute("data-event")) {
-      tooltip.hide(target);
-
-      this.node.getEventListenerInfo().then(listenerInfo => {
-        tooltip.setEventContent({
-          eventListenerInfos: listenerInfo,
-          toolbox: this.markup._inspector.toolbox
-        });
-
-        this.markup._makeTooltipPersistent(true);
-        tooltip.once("hidden", () => {
-          this.markup._makeTooltipPersistent(false);
-        });
-        tooltip.show(target);
-      });
-      return true;
-    }
-  },
-
-  /**
-   * Generates the an image preview for this Element. The element must be an
-   * image or canvas (@see isPreviewable).
-   *
-   * @return {Promise} that is resolved with an object of form
-   *         { data, size: { naturalWidth, naturalHeight, resizeRatio } } where
-   *         - data is the data-uri for the image preview.
-   *         - size contains information about the original image size and if
-   *         the preview has been resized.
-   *
-   * If this element is not previewable or the preview cannot be generated for
-   * some reason, the Promise is rejected.
-   */
-  _getPreview: function() {
-    if (!this.isPreviewable()) {
-      return promise.reject("_getPreview called on a non-previewable element.");
-    }
-
-    if (this.tooltipDataPromise) {
-      // A preview request is already pending. Re-use that request.
-      return this.tooltipDataPromise;
-    }
-
-    let maxDim =
-      Services.prefs.getIntPref("devtools.inspector.imagePreviewTooltipSize");
-
-    // Fetch the preview from the server.
-    this.tooltipDataPromise = Task.spawn(function*() {
-      let preview = yield this.node.getImageData(maxDim);
-      let data = yield preview.data.string();
-
-      // Clear the pending preview request. We can't reuse the results later as
-      // the preview contents might have changed.
-      this.tooltipDataPromise = null;
-
-      return { data, size: preview.size };
-    }.bind(this));
-
-    return this.tooltipDataPromise;
-  },
-
-  /**
-   * Executed by MarkupView._isImagePreviewTarget which is itself called when
-   * the mouse hovers over a target in the markup-view.
-   * Checks if the target is indeed something we want to have an image tooltip
-   * preview over and, if so, inserts content into the tooltip.
-   *
-   * @return {Promise} that resolves when the content has been inserted or
-   *         rejects if no preview is required. This promise is then used by
-   *         Tooltip.js to decide if/when to show the tooltip
-   */
-  isImagePreviewTarget: function(target, tooltip) {
-    // Is this Element previewable.
-    if (!this.isPreviewable()) {
-      return promise.reject(false);
-    }
-
-    // If the Element has an src attribute, the tooltip is shown when hovering
-    // over the src url. If not, the tooltip is shown when hovering over the tag
-    // name.
-    let src = this.editor.getAttributeElement("src");
-    let expectedTarget = src ? src.querySelector(".link") : this.editor.tag;
-    if (target !== expectedTarget) {
-      return promise.reject(false);
-    }
-
-    return this._getPreview().then(({data, size}) => {
-      // The preview is ready.
-      tooltip.setImageContent(data, size);
-    }, () => {
-      // Indicate the failure but show the tooltip anyway.
-      tooltip.setBrokenImageContent();
-    });
-  },
-
-  copyImageDataUri: function() {
-    // We need to send again a request to gettooltipData even if one was sent
-    // for the tooltip, because we want the full-size image
-    this.node.getImageData().then(data => {
-      data.data.string().then(str => {
-        clipboardHelper.copyString(str);
-      });
-    });
-  },
-
-  setSingleTextChild: function(singleTextChild) {
-    this.singleTextChild = singleTextChild;
-    this.editor.updateTextEditor();
-  },
-
-  clearSingleTextChild: function() {
-    this.singleTextChild = undefined;
-    this.editor.updateTextEditor();
-  },
-
-  /**
-   * Trigger new attribute field for input.
-   */
-  addAttribute: function() {
-    this.editor.newAttr.editMode();
-  },
-
-  /**
-   * Trigger attribute field for editing.
-   */
-  editAttribute: function(attrName) {
-    this.editor.attrElements.get(attrName).editMode();
-  },
-
-  /**
-   * Remove attribute from container.
-   * This is an undoable action.
-   */
-  removeAttribute: function(attrName) {
-    let doMods = this.editor._startModifyingAttributes();
-    let undoMods = this.editor._startModifyingAttributes();
-    this.editor._saveAttribute(attrName, undoMods);
-    doMods.removeAttribute(attrName);
-    this.undo.do(() => {
-      doMods.apply();
-    }, () => {
-      undoMods.apply();
-    });
-  }
-});
-
-/**
- * Dummy container node used for the root document element.
- */
-function RootContainer(markupView, node) {
-  this.doc = markupView.doc;
-  this.elt = this.doc.createElement("ul");
-  this.elt.container = this;
-  this.children = this.elt;
-  this.node = node;
-  this.toString = () => "[root container]";
-}
-
-RootContainer.prototype = {
-  hasChildren: true,
-  expanded: true,
-  update: function() {},
-  destroy: function() {},
-
-  /**
-   * If the node has children, return the list of containers for all these
-   * children.
-   */
-  getChildContainers: function() {
-    return [...this.children.children].map(node => node.container);
-  },
-
-  /**
-   * Set the expanded state of the container node.
-   * @param  {Boolean} value
-   */
-  setExpanded: function() {}
-};
-
-/**
- * Creates an editor for non-editable nodes.
- */
-function GenericEditor(container, node) {
-  this.container = container;
-  this.markup = this.container.markup;
-  this.template = this.markup.template.bind(this.markup);
-  this.elt = null;
-  this.template("generic", this);
-
-  if (node.isPseudoElement) {
-    this.tag.classList.add("theme-fg-color5");
-    this.tag.textContent = node.isBeforePseudoElement ? "::before" : "::after";
-  } else if (node.nodeType == Ci.nsIDOMNode.DOCUMENT_TYPE_NODE) {
-    this.elt.classList.add("comment");
-    this.tag.textContent = node.doctypeString;
-  } else {
-    this.tag.textContent = node.nodeName;
-  }
-}
-
-GenericEditor.prototype = {
-  destroy: function() {
-    this.elt.remove();
-  },
-
-  /**
-   * Stub method for consistency with ElementEditor.
-   */
-  getInfoAtNode: function() {
-    return null;
-  }
-};
-
-/**
- * Creates a simple text editor node, used for TEXT and COMMENT
- * nodes.
- *
- * @param  {MarkupContainer} container
- *         The container owning this editor.
- * @param  {DOMNode} node
- *         The node being edited.
- * @param  {String} template
- *         The template id to use to build the editor.
- */
-function TextEditor(container, node, template) {
-  this.container = container;
-  this.markup = this.container.markup;
-  this.node = node;
-  this.template = this.markup.template.bind(template);
-  this._selected = false;
-
-  this.markup.template(template, this);
-
-  editableField({
-    element: this.value,
-    stopOnReturn: true,
-    trigger: "dblclick",
-    multiline: true,
-    maxWidth: () => {
-      let elementRect = this.value.getBoundingClientRect();
-      let containerRect = this.container.elt.getBoundingClientRect();
-      return containerRect.right - elementRect.left - 2;
-    },
-    trimOutput: false,
-    done: (val, commit) => {
-      if (!commit) {
-        return;
-      }
-      this.node.getNodeValue().then(longstr => {
-        longstr.string().then(oldValue => {
-          longstr.release().then(null, console.error);
-
-          this.container.undo.do(() => {
-            this.node.setNodeValue(val);
-          }, () => {
-            this.node.setNodeValue(oldValue);
-          });
-        });
-      });
-    }
-  });
-
-  this.update();
-}
-
-TextEditor.prototype = {
-  get selected() {
-    return this._selected;
-  },
-
-  set selected(value) {
-    if (value === this._selected) {
-      return;
-    }
-    this._selected = value;
-    this.update();
-  },
-
-  update: function() {
-    if (!this.selected || !this.node.incompleteValue) {
-      let text = this.node.shortValue;
-      if (this.node.incompleteValue) {
-        text += ELLIPSIS;
-      }
-      this.value.textContent = text;
-    } else {
-      let longstr = null;
-      this.node.getNodeValue().then(ret => {
-        longstr = ret;
-        return longstr.string();
-      }).then(str => {
-        longstr.release().then(null, console.error);
-        if (this.selected) {
-          this.value.textContent = str;
-          this.markup.emit("text-expand");
-        }
-      }).then(null, console.error);
-    }
-  },
-
-  destroy: function() {},
-
-  /**
-   * Stub method for consistency with ElementEditor.
-   */
-  getInfoAtNode: function() {
-    return null;
-  }
-};
-
-/**
- * Creates an editor for an Element node.
- *
- * @param  {MarkupContainer} container
- *         The container owning this editor.
- * @param  {Element} node
- *         The node being edited.
- */
-function ElementEditor(container, node) {
-  this.container = container;
-  this.node = node;
-  this.markup = this.container.markup;
-  this.template = this.markup.template.bind(this.markup);
-  this.doc = this.markup.doc;
-
-  this.attrElements = new Map();
-  this.animationTimers = {};
-
-  // The templates will fill the following properties
-  this.elt = null;
-  this.tag = null;
-  this.closeTag = null;
-  this.attrList = null;
-  this.newAttr = null;
-  this.closeElt = null;
-
-  // Create the main editor
-  this.template("element", this);
-
-  // Make the tag name editable (unless this is a remote node or
-  // a document element)
-  if (!node.isDocumentElement) {
-    this.tag.setAttribute("tabindex", "0");
-    editableField({
-      element: this.tag,
-      trigger: "dblclick",
-      stopOnReturn: true,
-      done: this.onTagEdit.bind(this),
-    });
-  }
-
-  // Make the new attribute space editable.
-  this.newAttr.editMode = editableField({
-    element: this.newAttr,
-    trigger: "dblclick",
-    stopOnReturn: true,
-    contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
-    popup: this.markup.popup,
-    done: (val, commit) => {
-      if (!commit) {
-        return;
-      }
-
-      let doMods = this._startModifyingAttributes();
-      let undoMods = this._startModifyingAttributes();
-      this._applyAttributes(val, null, doMods, undoMods);
-      this.container.undo.do(() => {
-        doMods.apply();
-      }, function() {
-        undoMods.apply();
-      });
-    }
-  });
-
-  let tagName = this.getTagName(this.node);
-  this.tag.textContent = tagName;
-  this.closeTag.textContent = tagName;
-
-  this.update();
-  this.initialized = true;
-}
-
-ElementEditor.prototype = {
-  set selected(value) {
-    if (this.textEditor) {
-      this.textEditor.selected = value;
-    }
-  },
-
-  flashAttribute: function(attrName) {
-    if (this.animationTimers[attrName]) {
-      clearTimeout(this.animationTimers[attrName]);
-    }
-
-    flashElementOn(this.getAttributeElement(attrName));
-
-    this.animationTimers[attrName] = setTimeout(() => {
-      flashElementOff(this.getAttributeElement(attrName));
-    }, this.markup.CONTAINER_FLASHING_DURATION);
-  },
-
-  /**
-   * Returns the name of a node.
-   *
-   * @param  {DOMNode} node
-   *         The node to get the name of.
-   * @return {String} A tag name with correct case
-   */
-  getTagName: function(node) {
-    // Check the node is a SVG element
-    if (node.namespaceURI === "http://www.w3.org/2000/svg") {
-      // nodeName is already in the correct case
-      return node.nodeName;
-    }
-
-    return node.nodeName.toLowerCase();
-  },
-
-  /**
-   * Returns information about node in the editor.
-   *
-   * @param  {DOMNode} node
-   *         The node to get information from.
-   * @return {Object} An object literal with the following information:
-   *         {type: "attribute", name: "rel", value: "index", el: node}
-   */
-  getInfoAtNode: function(node) {
-    if (!node) {
-      return null;
-    }
-
-    let type = null;
-    let name = null;
-    let value = null;
-
-    // Attribute
-    let attribute = node.closest(".attreditor");
-    if (attribute) {
-      type = "attribute";
-      name = attribute.querySelector(".attr-name").textContent;
-      value = attribute.querySelector(".attr-value").textContent;
-    }
-
-    return {type, name, value, el: node};
-  },
-
-  /**
-   * Update the state of the editor from the node.
-   */
-  update: function() {
-    let nodeAttributes = this.node.attributes || [];
-
-    // Keep the data model in sync with attributes on the node.
-    let currentAttributes = new Set(nodeAttributes.map(a => a.name));
-    for (let name of this.attrElements.keys()) {
-      if (!currentAttributes.has(name)) {
-        this.removeAttribute(name);
-      }
-    }
-
-    // Only loop through the current attributes on the node.  Missing
-    // attributes have already been removed at this point.
-    for (let attr of nodeAttributes) {
-      let el = this.attrElements.get(attr.name);
-      let valueChanged = el &&
-        el.dataset.value !== attr.value;
-      let isEditing = el && el.querySelector(".editable").inplaceEditor;
-      let canSimplyShowEditor = el && (!valueChanged || isEditing);
-
-      if (canSimplyShowEditor) {
-        // Element already exists and doesn't need to be recreated.
-        // Just show it (it's hidden by default due to the template).
-        el.style.removeProperty("display");
-      } else {
-        // Create a new editor, because the value of an existing attribute
-        // has changed.
-        let attribute = this._createAttribute(attr, el);
-        attribute.style.removeProperty("display");
-
-        // Temporarily flash the attribute to highlight the change.
-        // But not if this is the first time the editor instance has
-        // been created.
-        if (this.initialized) {
-          this.flashAttribute(attr.name);
-        }
-      }
-    }
-
-    // Update the event bubble display
-    this.eventNode.style.display = this.node.hasEventListeners ?
-      "inline-block" : "none";
-
-    this.updateTextEditor();
-  },
-
-  /**
-   * Update the inline text editor in case of a single text child node.
-   */
-  updateTextEditor: function() {
-    let node = this.node.singleTextChild;
-
-    if (this.textEditor && this.textEditor.node != node) {
-      this.elt.removeChild(this.textEditor.elt);
-      this.textEditor = null;
-    }
-
-    if (node && !this.textEditor) {
-      // Create a text editor added to this editor.
-      // This editor won't receive an update automatically, so we rely on
-      // child text editors to let us know that we need updating.
-      this.textEditor = new TextEditor(this.container, node, "text");
-      this.elt.insertBefore(this.textEditor.elt,
-                            this.elt.firstChild.nextSibling.nextSibling);
-    }
-
-    if (this.textEditor) {
-      this.textEditor.update();
-    }
-  },
-
-  _startModifyingAttributes: function() {
-    return this.node.startModifyingAttributes();
-  },
-
-  /**
-   * Get the element used for one of the attributes of this element.
-   *
-   * @param  {String} attrName
-   *         The name of the attribute to get the element for
-   * @return {DOMNode}
-   */
-  getAttributeElement: function(attrName) {
-    return this.attrList.querySelector(
-      ".attreditor[data-attr=" + CSS.escape(attrName) + "] .attr-value");
-  },
-
-  /**
-   * Remove an attribute from the attrElements object and the DOM.
-   *
-   * @param  {String} attrName
-   *         The name of the attribute to remove
-   */
-  removeAttribute: function(attrName) {
-    let attr = this.attrElements.get(attrName);
-    if (attr) {
-      this.attrElements.delete(attrName);
-      attr.remove();
-    }
-  },
-
-  _createAttribute: function(attribute, before = null) {
-    // Create the template editor, which will save some variables here.
-    let data = {
-      attrName: attribute.name,
-    };
-    this.template("attribute", data);
-    let {attr, inner, name, val} = data;
-
-    // Double quotes need to be handled specially to prevent DOMParser failing.
-    // name="v"a"l"u"e" when editing -> name='v"a"l"u"e"'
-    // name="v'a"l'u"e" when editing -> name="v'a&quot;l'u&quot;e"
-    let editValueDisplayed = attribute.value || "";
-    let hasDoubleQuote = editValueDisplayed.includes('"');
-    let hasSingleQuote = editValueDisplayed.includes("'");
-    let initial = attribute.name + '="' + editValueDisplayed + '"';
-
-    // Can't just wrap value with ' since the value contains both " and '.
-    if (hasDoubleQuote && hasSingleQuote) {
-      editValueDisplayed = editValueDisplayed.replace(/\"/g, "&quot;");
-      initial = attribute.name + '="' + editValueDisplayed + '"';
-    }
-
-    // Wrap with ' since there are no single quotes in the attribute value.
-    if (hasDoubleQuote && !hasSingleQuote) {
-      initial = attribute.name + "='" + editValueDisplayed + "'";
-    }
-
-    // Make the attribute editable.
-    attr.editMode = editableField({
-      element: inner,
-      trigger: "dblclick",
-      stopOnReturn: true,
-      selectAll: false,
-      initial: initial,
-      contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
-      popup: this.markup.popup,
-      start: (editor, event) => {
-        // If the editing was started inside the name or value areas,
-        // select accordingly.
-        if (event && event.target === name) {
-          editor.input.setSelectionRange(0, name.textContent.length);
-        } else if (event && event.target.closest(".attr-value") === val) {
-          let length = editValueDisplayed.length;
-          let editorLength = editor.input.value.length;
-          let start = editorLength - (length + 1);
-          editor.input.setSelectionRange(start, start + length);
-        } else {
-          editor.input.select();
-        }
-      },
-      done: (newValue, commit, direction) => {
-        if (!commit || newValue === initial) {
-          return;
-        }
-
-        let doMods = this._startModifyingAttributes();
-        let undoMods = this._startModifyingAttributes();
-
-        // Remove the attribute stored in this editor and re-add any attributes
-        // parsed out of the input element. Restore original attribute if
-        // parsing fails.
-        this.refocusOnEdit(attribute.name, attr, direction);
-        this._saveAttribute(attribute.name, undoMods);
-        doMods.removeAttribute(attribute.name);
-        this._applyAttributes(newValue, attr, doMods, undoMods);
-        this.container.undo.do(() => {
-          doMods.apply();
-        }, () => {
-          undoMods.apply();
-        });
-      }
-    });
-
-    // Figure out where we should place the attribute.
-    if (attribute.name == "id") {
-      before = this.attrList.firstChild;
-    } else if (attribute.name == "class") {
-      let idNode = this.attrElements.get("id");
-      before = idNode ? idNode.nextSibling : this.attrList.firstChild;
-    }
-    this.attrList.insertBefore(attr, before);
-
-    this.removeAttribute(attribute.name);
-    this.attrElements.set(attribute.name, attr);
-
-    // Parse the attribute value to detect whether there are linkable parts in
-    // it (make sure to pass a complete list of existing attributes to the
-    // parseAttribute function, by concatenating attribute, because this could
-    // be a newly added attribute not yet on this.node).
-    let attributes = this.node.attributes.filter(existingAttribute => {
-      return existingAttribute.name !== attribute.name;
-    });
-    attributes.push(attribute);
-    let parsedLinksData = parseAttribute(this.node.namespaceURI,
-      this.node.tagName, attributes, attribute.name);
-
-    // Create links in the attribute value, and collapse long attributes if
-    // needed.
-    let collapse = value => {
-      if (value && value.match(COLLAPSE_DATA_URL_REGEX)) {
-        return truncateString(value, COLLAPSE_DATA_URL_LENGTH);
-      }
-      return this.markup.collapseAttributes
-        ? truncateString(value, this.markup.collapseAttributeLength)
-        : value;
-    };
-
-    val.innerHTML = "";
-    for (let token of parsedLinksData) {
-      if (token.type === "string") {
-        val.appendChild(this.doc.createTextNode(collapse(token.value)));
-      } else {
-        let link = this.doc.createElement("span");
-        link.classList.add("link");
-        link.setAttribute("data-type", token.type);
-        link.setAttribute("data-link", token.value);
-        link.textContent = collapse(token.value);
-        val.appendChild(link);
-      }
-    }
-
-    name.textContent = attribute.name;
-
-    return attr;
-  },
-
-  /**
-   * Parse a user-entered attribute string and apply the resulting
-   * attributes to the node. This operation is undoable.
-   *
-   * @param  {String} value
-   *         The user-entered value.
-   * @param  {DOMNode} attrNode
-   *         The attribute editor that created this
-   *         set of attributes, used to place new attributes where the
-   *         user put them.
-   */
-  _applyAttributes: function(value, attrNode, doMods, undoMods) {
-    let attrs = parseAttributeValues(value, this.doc);
-    for (let attr of attrs) {
-      // Create an attribute editor next to the current attribute if needed.
-      this._createAttribute(attr, attrNode ? attrNode.nextSibling : null);
-      this._saveAttribute(attr.name, undoMods);
-      doMods.setAttribute(attr.name, attr.value);
-    }
-  },
-
-  /**
-   * Saves the current state of the given attribute into an attribute
-   * modification list.
-   */
-  _saveAttribute: function(name, undoMods) {
-    let node = this.node;
-    if (node.hasAttribute(name)) {
-      let oldValue = node.getAttribute(name);
-      undoMods.setAttribute(name, oldValue);
-    } else {
-      undoMods.removeAttribute(name);
-    }
-  },
-
-  /**
-   * Listen to mutations, and when the attribute list is regenerated
-   * try to focus on the attribute after the one that's being edited now.
-   * If the attribute order changes, go to the beginning of the attribute list.
-   */
-  refocusOnEdit: function(attrName, attrNode, direction) {
-    // Only allow one refocus on attribute change at a time, so when there's
-    // more than 1 request in parallel, the last one wins.
-    if (this._editedAttributeObserver) {
-      this.markup._inspector.off("markupmutation",
-        this._editedAttributeObserver);
-      this._editedAttributeObserver = null;
-    }
-
-    let container = this.markup.getContainer(this.node);
-
-    let activeAttrs = [...this.attrList.childNodes]
-      .filter(el => el.style.display != "none");
-    let attributeIndex = activeAttrs.indexOf(attrNode);
-
-    let onMutations = this._editedAttributeObserver = (e, mutations) => {
-      let isDeletedAttribute = false;
-      let isNewAttribute = false;
-
-      for (let mutation of mutations) {
-        let inContainer =
-          this.markup.getContainer(mutation.target) === container;
-        if (!inContainer) {
-          continue;
-        }
-
-        let isOriginalAttribute = mutation.attributeName === attrName;
-
-        isDeletedAttribute = isDeletedAttribute || isOriginalAttribute &&
-                             mutation.newValue === null;
-        isNewAttribute = isNewAttribute || mutation.attributeName !== attrName;
-      }
-
-      let isModifiedOrder = isDeletedAttribute && isNewAttribute;
-      this._editedAttributeObserver = null;
-
-      // "Deleted" attributes are merely hidden, so filter them out.
-      let visibleAttrs = [...this.attrList.childNodes]
-        .filter(el => el.style.display != "none");
-      let activeEditor;
-      if (visibleAttrs.length > 0) {
-        if (!direction) {
-          // No direction was given; stay on current attribute.
-          activeEditor = visibleAttrs[attributeIndex];
-        } else if (isModifiedOrder) {
-          // The attribute was renamed, reordering the existing attributes.
-          // So let's go to the beginning of the attribute list for consistency.
-          activeEditor = visibleAttrs[0];
-        } else {
-          let newAttributeIndex;
-          if (isDeletedAttribute) {
-            newAttributeIndex = attributeIndex;
-          } else if (direction == Ci.nsIFocusManager.MOVEFOCUS_FORWARD) {
-            newAttributeIndex = attributeIndex + 1;
-          } else if (direction == Ci.nsIFocusManager.MOVEFOCUS_BACKWARD) {
-            newAttributeIndex = attributeIndex - 1;
-          }
-
-          // The number of attributes changed (deleted), or we moved through
-          // the array so check we're still within bounds.
-          if (newAttributeIndex >= 0 &&
-              newAttributeIndex <= visibleAttrs.length - 1) {
-            activeEditor = visibleAttrs[newAttributeIndex];
-          }
-        }
-      }
-
-      // Either we have no attributes left,
-      // or we just edited the last attribute and want to move on.
-      if (!activeEditor) {
-        activeEditor = this.newAttr;
-      }
-
-      // Refocus was triggered by tab or shift-tab.
-      // Continue in edit mode.
-      if (direction) {
-        activeEditor.editMode();
-      } else {
-        // Refocus was triggered by enter.
-        // Exit edit mode (but restore focus).
-        let editable = activeEditor === this.newAttr ?
-          activeEditor : activeEditor.querySelector(".editable");
-        editable.focus();
-      }
-
-      this.markup.emit("refocusedonedit");
-    };
-
-    // Start listening for mutations until we find an attributes change
-    // that modifies this attribute.
-    this.markup._inspector.once("markupmutation", onMutations);
-  },
-
-  /**
-   * Called when the tag name editor has is done editing.
-   */
-  onTagEdit: function(newTagName, isCommit) {
-    if (!isCommit ||
-        newTagName.toLowerCase() === this.node.tagName.toLowerCase() ||
-        !("editTagName" in this.markup.walker)) {
-      return;
-    }
-
-    // Changing the tagName removes the node. Make sure the replacing node gets
-    // selected afterwards.
-    this.markup.reselectOnRemoved(this.node, "edittagname");
-    this.markup.walker.editTagName(this.node, newTagName).then(null, () => {
-      // Failed to edit the tag name, cancel the reselection.
-      this.markup.cancelReselectOnRemoved();
-    });
-  },
-
-  destroy: function() {
-    for (let key in this.animationTimers) {
-      clearTimeout(this.animationTimers[key]);
-    }
-    this.animationTimers = null;
-  }
-};
-
-function truncateString(str, maxLength) {
-  if (!str || str.length <= maxLength) {
-    return str;
-  }
-
-  return str.substring(0, Math.ceil(maxLength / 2)) +
-         "…" +
-         str.substring(str.length - Math.floor(maxLength / 2));
-}
-
-/**
- * Parse attribute names and values from a string.
- *
- * @param  {String} attr
- *         The input string for which names/values are to be parsed.
- * @param  {HTMLDocument} doc
- *         A document that can be used to test valid attributes.
- * @return {Array}
- *         An array of attribute names and their values.
- */
-function parseAttributeValues(attr, doc) {
-  attr = attr.trim();
-
-  let parseAndGetNode = str => {
-    return DOMParser.parseFromString(str, "text/html").body.childNodes[0];
-  };
-
-  // Handle bad user inputs by appending a " or ' if it fails to parse without
-  // them. Also note that a SVG tag is used to make sure the HTML parser
-  // preserves mixed-case attributes
-  let el = parseAndGetNode("<svg " + attr + "></svg>") ||
-           parseAndGetNode("<svg " + attr + "\"></svg>") ||
-           parseAndGetNode("<svg " + attr + "'></svg>");
-
-  let div = doc.createElement("div");
-  let attributes = [];
-  for (let {name, value} of el.attributes) {
-    // Try to set on an element in the document, throws exception on bad input.
-    // Prevents InvalidCharacterError - "String contains an invalid character".
-    try {
-      div.setAttribute(name, value);
-      attributes.push({ name, value });
-    } catch (e) {
-      // This may throw exceptions on bad input.
-      // Prevents InvalidCharacterError - "String contains an invalid
-      // character".
-    }
-  }
-
-  // Attributes return from DOMParser in reverse order from how they are
-  // entered.
-  return attributes.reverse();
-}
-
-/**
- * Apply a 'flashed' background and foreground color to elements. Intended
- * to be used with flashElementOff as a way of drawing attention to an element.
- *
- * @param  {Node} backgroundElt
- *         The element to set the highlighted background color on.
- * @param  {Node} foregroundElt
- *         The element to set the matching foreground color on.
- *         Optional.  This will equal backgroundElt if not set.
- */
-function flashElementOn(backgroundElt, foregroundElt = backgroundElt) {
-  if (!backgroundElt || !foregroundElt) {
-    return;
-  }
-
-  // Make sure the animation class is not here
-  backgroundElt.classList.remove("flash-out");
-
-  // Change the background
-  backgroundElt.classList.add("theme-bg-contrast");
-
-  foregroundElt.classList.add("theme-fg-contrast");
-  [].forEach.call(
-    foregroundElt.querySelectorAll("[class*=theme-fg-color]"),
-    span => span.classList.add("theme-fg-contrast")
-  );
-}
-
-/**
- * Remove a 'flashed' background and foreground color to elements.
- * See flashElementOn.
- *
- * @param  {Node} backgroundElt
- *         The element to reomve the highlighted background color on.
- * @param  {Node} foregroundElt
- *         The element to remove the matching foreground color on.
- *         Optional.  This will equal backgroundElt if not set.
- */
-function flashElementOff(backgroundElt, foregroundElt = backgroundElt) {
-  if (!backgroundElt || !foregroundElt) {
-    return;
-  }
-
-  // Add the animation class to smoothly remove the background
-  backgroundElt.classList.add("flash-out");
-
-  // Remove the background
-  backgroundElt.classList.remove("theme-bg-contrast");
-
-  foregroundElt.classList.remove("theme-fg-contrast");
-  [].forEach.call(
-    foregroundElt.querySelectorAll("[class*=theme-fg-color]"),
-    span => span.classList.remove("theme-fg-contrast")
-  );
-}
-
-/**
  * Map a number from one range to another.
  */
 function map(value, oldMin, oldMax, newMin, newMax) {
-  let ratio = oldMax - oldMin;
+  const ratio = oldMax - oldMin;
   if (ratio == 0) {
     return value;
   }
   return newMin + (newMax - newMin) * ((value - oldMin) / ratio);
 }
 
-loader.lazyGetter(MarkupView.prototype, "strings", () => Services.strings.createBundle(
-  "chrome://devtools/locale/inspector.properties"
-));
-
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function() {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-    .getService(Ci.nsIClipboardHelper);
-});
-
-exports.MarkupView = MarkupView;
+module.exports = MarkupView;

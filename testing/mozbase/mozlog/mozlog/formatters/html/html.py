@@ -3,6 +3,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import base64
 import cgi
 from datetime import datetime
@@ -11,11 +13,13 @@ import os
 from .. import base
 
 from collections import defaultdict
+import six
 
 html = None
 raw = None
 
 base_path = os.path.split(__file__)[0]
+
 
 def do_defered_imports():
     global html
@@ -26,6 +30,7 @@ def do_defered_imports():
 
 class HTMLFormatter(base.BaseFormatter):
     """Formatter that produces a simple HTML-formatted report."""
+
     def __init__(self):
         do_defered_imports()
         self.suite_name = None
@@ -52,12 +57,16 @@ class HTMLFormatter(base.BaseFormatter):
             self.env["Device identifier"] = version_info.get("device_id")
             self.env["Device firmware (base)"] = version_info.get("device_firmware_version_base")
             self.env["Device firmware (date)"] = (
-                datetime.utcfromtimestamp(int(version_info.get("device_firmware_date"))).strftime(date_format) if
+                datetime.utcfromtimestamp(int(version_info.get("device_firmware_date")))
+                .strftime(date_format) if
                 "device_firmware_date" in version_info else None)
-            self.env["Device firmware (incremental)"] = version_info.get("device_firmware_version_incremental")
-            self.env["Device firmware (release)"] = version_info.get("device_firmware_version_release")
+            self.env["Device firmware (incremental)"] = version_info.get(
+                "device_firmware_version_incremental")
+            self.env["Device firmware (release)"] = version_info.get(
+                "device_firmware_version_release")
             self.env["Gaia date"] = (
-                datetime.utcfromtimestamp(int(version_info.get("gaia_date"))).strftime(date_format) if
+                datetime.utcfromtimestamp(int(version_info.get("gaia_date")))
+                .strftime(date_format) if
                 "gaia_date" in version_info else None)
             self.env["Gecko version"] = version_info.get("application_version")
             self.env["Gecko build"] = version_info.get("application_buildid")
@@ -74,7 +83,8 @@ class HTMLFormatter(base.BaseFormatter):
             if version_info.get("gaia_changeset"):
                 self.env["Gaia revision"] = html.a(
                     version_info.get("gaia_changeset")[:12],
-                    href="https://github.com/mozilla-b2g/gaia/commit/%s" % version_info.get("gaia_changeset"),
+                    href="https://github.com/mozilla-b2g/gaia/commit/%s" % version_info.get(
+                        "gaia_changeset"),
                     target="_blank")
 
         device_info = data.get("device_info")
@@ -97,6 +107,16 @@ class HTMLFormatter(base.BaseFormatter):
         tc_time = (data["time"] - self.start_times.pop(data["test"])) / 1000.
         additional_html = []
         debug = data.get("extra", {})
+        # Add support for log exported from wptrunner. The structure of
+        # reftest_screenshots is listed in wptrunner/executors/base.py.
+        if debug.get('reftest_screenshots'):
+            log_data = debug.get("reftest_screenshots", {})
+            debug = {
+                'image1': 'data:image/png;base64,' + log_data[0].get("screenshot", {}),
+                'image2': 'data:image/png;base64,' + log_data[2].get("screenshot", {}),
+                'differences': "Not Implemented",
+            }
+
         links_html = []
 
         status = status_name = data["status"]
@@ -110,17 +130,26 @@ class HTMLFormatter(base.BaseFormatter):
         self.test_count[status_name] += 1
 
         if status in ['SKIP', 'FAIL', 'ERROR']:
-            for image_name in ['screenshot', 'image1', 'image2']:
-                if debug.get(image_name):
-                    screenshot = '%s' % debug[image_name]
-                    # screenshot from gaia unit test doesn't has the datatype
-                    # string
-                    if not screenshot.startswith('data:image/png;base64,'):
-                        screenshot = 'data:image/png;base64,' + screenshot
-
+            if debug.get('differences'):
+                images = [
+                    ('image1', 'Image 1 (test)'),
+                    ('image2', 'Image 2 (reference)')
+                ]
+                for title, description in images:
+                    screenshot = '%s' % debug[title]
                     additional_html.append(html.div(
                         html.a(html.img(src=screenshot), href="#"),
+                        html.br(),
+                        html.a(description),
                         class_='screenshot'))
+
+            if debug.get('screenshot'):
+                screenshot = '%s' % debug['screenshot']
+                screenshot = 'data:image/png;base64,' + screenshot
+
+                additional_html.append(html.div(
+                    html.a(html.img(src=screenshot), href="#"),
+                    class_='screenshot'))
 
             for name, content in debug.items():
                 if name in ['screenshot', 'image1', 'image2']:
@@ -129,10 +158,12 @@ class HTMLFormatter(base.BaseFormatter):
                     else:
                         href = content
                 else:
-                    # use base64 to avoid that some browser (such as Firefox, Opera)
-                    # treats '#' as the start of another link if the data URL contains.
-                    # use 'charset=utf-8' to show special characters like Chinese.
-                    href = 'data:text/plain;charset=utf-8;base64,%s' % base64.b64encode(str(content).encode('utf-8'))
+                    # Encode base64 to avoid that some browsers (such as Firefox, Opera)
+                    # treats '#' as the start of another link if it is contained in the data URL.
+                    # Use 'charset=utf-8' to show special characters like Chinese.
+                    utf_encoded = six.text_type(content).encode('utf-8', 'xmlcharrefreplace')
+                    href = 'data:text/html;charset=utf-8;base64,%s' % base64.b64encode(utf_encoded)
+
                 links_html.append(html.a(
                     name.title(),
                     class_=name,
@@ -175,18 +206,21 @@ class HTMLFormatter(base.BaseFormatter):
                         generated.strftime('%H:%M:%S'))),
                     html.h2('Environment'),
                     html.table(
-                        [html.tr(html.td(k), html.td(v)) for k, v in sorted(self.env.items()) if v],
+                        [html.tr(html.td(k), html.td(v))
+                         for k, v in sorted(self.env.items()) if v],
                         id='environment'),
 
                     html.h2('Summary'),
-                    html.p('%i tests ran in %.1f seconds.' % (sum(self.test_count.itervalues()),
+                    html.p('%i tests ran in %.1f seconds.' % (sum(six.itervalues(self.test_count)),
                                                               (self.suite_times["end"] -
                                                                self.suite_times["start"]) / 1000.),
                            html.br(),
                            html.span('%i passed' % self.test_count["PASS"], class_='pass'), ', ',
                            html.span('%i skipped' % self.test_count["SKIP"], class_='skip'), ', ',
-                           html.span('%i failed' % self.test_count["UNEXPECTED_FAIL"], class_='fail'), ', ',
-                           html.span('%i errors' % self.test_count["UNEXPECTED_ERROR"], class_='error'), '.',
+                           html.span('%i failed' % self.test_count[
+                                     "UNEXPECTED_FAIL"], class_='fail'), ', ',
+                           html.span('%i errors' % self.test_count[
+                                     "UNEXPECTED_ERROR"], class_='error'), '.',
                            html.br(),
                            html.span('%i expected failures' % self.test_count["EXPECTED_FAIL"],
                                      class_='expected_fail'), ', ',
@@ -199,6 +233,7 @@ class HTMLFormatter(base.BaseFormatter):
                             html.th('Test', class_='sortable', col='name'),
                             html.th('Duration', class_='sortable numeric', col='duration'),
                             html.th('Links')]), id='results-table-head'),
-                        html.tbody(self.result_rows, id='results-table-body')], id='results-table')))
+                        html.tbody(self.result_rows,
+                                   id='results-table-body')], id='results-table')))
 
         return u"<!DOCTYPE html>\n" + doc.unicode(indent=2)

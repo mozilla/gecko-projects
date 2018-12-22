@@ -11,26 +11,27 @@
 namespace mozilla {
 namespace jni {
 
-namespace {
+namespace detail {
 
 // Helper class to convert an arbitrary type to a jvalue, e.g. Value(123).val.
 struct Value
 {
-    Value(jboolean z) { val.z = z; }
-    Value(jbyte b)    { val.b = b; }
-    Value(jchar c)    { val.c = c; }
-    Value(jshort s)   { val.s = s; }
-    Value(jint i)     { val.i = i; }
-    Value(jlong j)    { val.j = j; }
-    Value(jfloat f)   { val.f = f; }
-    Value(jdouble d)  { val.d = d; }
-    Value(jobject l)  { val.l = l; }
+    explicit Value(jboolean z) { val.z = z; }
+    explicit Value(jbyte b)    { val.b = b; }
+    explicit Value(jchar c)    { val.c = c; }
+    explicit Value(jshort s)   { val.s = s; }
+    explicit Value(jint i)     { val.i = i; }
+    explicit Value(jlong j)    { val.j = j; }
+    explicit Value(jfloat f)   { val.f = f; }
+    explicit Value(jdouble d)  { val.d = d; }
+    explicit Value(jobject l)  { val.l = l; }
 
     jvalue val;
 };
 
-}
+} // namespace detail
 
+using namespace detail;
 
 // Base class for Method<>, Field<>, and Constructor<>.
 class Accessor
@@ -38,7 +39,7 @@ class Accessor
     static void GetNsresult(JNIEnv* env, nsresult* rv)
     {
         if (env->ExceptionCheck()) {
-#ifdef DEBUG
+#ifdef MOZ_CHECK_JNI
             env->ExceptionDescribe();
 #endif
             env->ExceptionClear();
@@ -76,6 +77,10 @@ protected:
 
     static void BeginAccess(const Context& ctx)
     {
+        MOZ_ASSERT_JNI_THREAD(Traits::callingThread);
+        static_assert(Traits::dispatchTarget == DispatchTarget::CURRENT,
+                      "Dispatching not supported for method call");
+
         if (sID) {
             return;
         }
@@ -108,7 +113,7 @@ public:
         auto result = TypeAdapter<ReturnType>::ToNative(env,
                 Traits::isStatic ?
                 (env->*TypeAdapter<ReturnType>::StaticCall)(
-                        ctx.RawClassRef(), sID, jargs) :
+                        ctx.ClassRef(), sID, jargs) :
                 (env->*TypeAdapter<ReturnType>::Call)(
                         ctx.Get(), sID, jargs));
 
@@ -142,7 +147,7 @@ public:
         };
 
         if (Traits::isStatic) {
-            env->CallStaticVoidMethodA(ctx.RawClassRef(), Base::sID, jargs);
+            env->CallStaticVoidMethodA(ctx.ClassRef(), Base::sID, jargs);
         } else {
             env->CallVoidMethodA(ctx.Get(), Base::sID, jargs);
         }
@@ -172,7 +177,7 @@ public:
         };
 
         auto result = TypeAdapter<ReturnType>::ToNative(
-                env, env->NewObjectA(ctx.RawClassRef(), Base::sID, jargs));
+                env, env->NewObjectA(ctx.ClassRef(), Base::sID, jargs));
 
         Base::EndAccess(ctx, rv);
         return result;
@@ -195,6 +200,10 @@ private:
 
     static void BeginAccess(const Context& ctx)
     {
+        MOZ_ASSERT_JNI_THREAD(Traits::callingThread);
+        static_assert(Traits::dispatchTarget == DispatchTarget::CURRENT,
+                      "Dispatching not supported for field access");
+
         if (sID) {
             return;
         }
@@ -223,7 +232,7 @@ public:
                 env, Traits::isStatic ?
 
                 (env->*TypeAdapter<GetterType>::StaticGet)
-                        (ctx.RawClassRef(), sID) :
+                        (ctx.ClassRef(), sID) :
 
                 (env->*TypeAdapter<GetterType>::Get)
                         (ctx.Get(), sID));
@@ -239,7 +248,7 @@ public:
 
         if (Traits::isStatic) {
             (env->*TypeAdapter<SetterType>::StaticSet)(
-                    ctx.RawClassRef(), sID,
+                    ctx.ClassRef(), sID,
                     TypeAdapter<SetterType>::FromNative(env, val));
         } else {
             (env->*TypeAdapter<SetterType>::Set)(
@@ -254,10 +263,6 @@ public:
 // Define sID member.
 template<class T> jfieldID Field<T>::sID;
 
-
-// Define the sClassRef member declared in Refs.h and
-// used by Method and Field above.
-template<class C, typename T> jclass Context<C, T>::sClassRef;
 
 } // namespace jni
 } // namespace mozilla

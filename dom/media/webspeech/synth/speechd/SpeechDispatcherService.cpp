@@ -8,6 +8,7 @@
 
 #include "mozilla/dom/nsSpeechTask.h"
 #include "mozilla/dom/nsSynthVoiceRegistry.h"
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Preferences.h"
 #include "nsEscape.h"
 #include "nsISupports.h"
@@ -273,10 +274,12 @@ speechd_cb(size_t msg_id, size_t client_id, SPDNotificationType state)
   SpeechDispatcherService* service = SpeechDispatcherService::GetInstance(false);
 
   if (service) {
-    NS_DispatchToMainThread(
-      NS_NewRunnableMethodWithArgs<uint32_t, SPDNotificationType>(
-        service, &SpeechDispatcherService::EventNotify,
-        static_cast<uint32_t>(msg_id), state));
+    NS_DispatchToMainThread(NewRunnableMethod<uint32_t, SPDNotificationType>(
+      "dom::SpeechDispatcherService::EventNotify",
+      service,
+      &SpeechDispatcherService::EventNotify,
+      static_cast<uint32_t>(msg_id),
+      state));
   }
 }
 
@@ -311,7 +314,10 @@ SpeechDispatcherService::Init()
                                              getter_AddRefs(mInitThread));
   MOZ_ASSERT(NS_SUCCEEDED(rv));
   rv = mInitThread->Dispatch(
-    NS_NewRunnableMethod(this, &SpeechDispatcherService::Setup), NS_DISPATCH_NORMAL);
+    NewRunnableMethod("dom::SpeechDispatcherService::Setup",
+                      this,
+                      &SpeechDispatcherService::Setup),
+    NS_DISPATCH_NORMAL);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
@@ -341,6 +347,13 @@ SpeechDispatcherService::Setup()
 
   if (!speechdLib) {
     NS_WARNING("Failed to load speechd library");
+    return;
+  }
+
+  if (!PR_FindFunctionSymbol(speechdLib, "spd_get_volume")) {
+    // There is no version getter function, so we rely on a symbol that was
+    // introduced in release 0.8.2 in order to check for ABI compatibility.
+    NS_WARNING("Unsupported version of speechd detected");
     return;
   }
 
@@ -380,7 +393,7 @@ SpeechDispatcherService::Setup()
 
       uri.AssignLiteral(URI_PREFIX);
       nsAutoCString name;
-      NS_EscapeURL(list[i]->name, -1, esc_OnlyNonASCII | esc_AlwaysCopy, name);
+      NS_EscapeURL(list[i]->name, -1, esc_OnlyNonASCII | esc_Spaces | esc_AlwaysCopy, name);
       uri.Append(NS_ConvertUTF8toUTF16(name));;
       uri.AppendLiteral("?");
 
@@ -396,7 +409,7 @@ SpeechDispatcherService::Setup()
         ToUpperCase(variant);
 
         // eSpeak uses UK which is not a valid region subtag in BCP47.
-        if (variant.Equals("UK")) {
+        if (variant.EqualsLiteral("UK")) {
           variant.AssignLiteral("GB");
         }
 
@@ -412,7 +425,10 @@ SpeechDispatcherService::Setup()
     }
   }
 
-  NS_DispatchToMainThread(NS_NewRunnableMethod(this, &SpeechDispatcherService::RegisterVoices));
+  NS_DispatchToMainThread(
+    NewRunnableMethod("dom::SpeechDispatcherService::RegisterVoices",
+                      this,
+                      &SpeechDispatcherService::RegisterVoices));
 
   //mInitialized = true;
 }
@@ -433,7 +449,7 @@ SpeechDispatcherService::RegisterVoices()
       registry->AddVoice(this, iter.Key(), voice->mName, voice->mLanguage,
                          voice->mName.EqualsLiteral("default"), true);
 
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to add voice");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to add voice");
   }
 
   mInitThread->Shutdown();
@@ -498,8 +514,7 @@ SpeechDispatcherService::Speak(const nsAString& aText, const nsAString& aUri,
   // speech-dispatcher expects -100 to 100 with 0 being default.
   spd_set_voice_pitch(mSpeechdClient, static_cast<int>((aPitch - 1) * 100));
 
-  // The last three parameters don't matter for an indirect service
-  nsresult rv = aTask->Setup(callback, 0, 0, 0);
+  nsresult rv = aTask->Setup(callback);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -518,20 +533,19 @@ SpeechDispatcherService::Speak(const nsAString& aText, const nsAString& aUri,
     // Speech dispatcher does not work well with empty strings.
     // In that case, don't send empty string to speechd,
     // and just emulate a speechd start and end event.
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs<SPDNotificationType>(
-        callback, &SpeechDispatcherCallback::OnSpeechEvent, SPD_EVENT_BEGIN));
+    NS_DispatchToMainThread(NewRunnableMethod<SPDNotificationType>(
+      "dom::SpeechDispatcherCallback::OnSpeechEvent",
+      callback,
+      &SpeechDispatcherCallback::OnSpeechEvent,
+      SPD_EVENT_BEGIN));
 
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs<SPDNotificationType>(
-        callback, &SpeechDispatcherCallback::OnSpeechEvent, SPD_EVENT_END));
+    NS_DispatchToMainThread(NewRunnableMethod<SPDNotificationType>(
+      "dom::SpeechDispatcherCallback::OnSpeechEvent",
+      callback,
+      &SpeechDispatcherCallback::OnSpeechEvent,
+      SPD_EVENT_END));
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-SpeechDispatcherService::GetServiceType(SpeechServiceType* aServiceType)
-{
-  *aServiceType = nsISpeechService::SERVICETYPE_INDIRECT_AUDIO;
   return NS_OK;
 }
 
@@ -547,6 +561,7 @@ SpeechDispatcherService::GetInstance(bool create)
   if (!sSingleton && create) {
     sSingleton = new SpeechDispatcherService();
     sSingleton->Init();
+    ClearOnShutdown(&sSingleton);
   }
 
   return sSingleton;
@@ -570,16 +585,6 @@ SpeechDispatcherService::EventNotify(uint32_t aMsgId, uint32_t aState)
       mCallbacks.Remove(aMsgId);
     }
   }
-}
-
-void
-SpeechDispatcherService::Shutdown()
-{
-  if (!sSingleton) {
-    return;
-  }
-
-  sSingleton = nullptr;
 }
 
 } // namespace dom

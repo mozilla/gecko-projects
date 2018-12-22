@@ -20,14 +20,28 @@ const PRIVATE_URI = NetUtil.newURI("http://www.example.net/");
  *        Callback function to be called with the same arguments of onVisit.
  */
 function waitForOnVisit(aCallback) {
-  let historyObserver = {
-    __proto__: NavHistoryObserver.prototype,
-    onVisit: function HO_onVisit() {
-      PlacesUtils.history.removeObserver(this);
-      aCallback.apply(null, arguments);
-    }
-  };
-  PlacesUtils.history.addObserver(historyObserver, false);
+  function listener(aEvents) {
+    Assert.equal(aEvents.length, 1, "Right number of visits notified");
+    Assert.equal(aEvents[0].type, "page-visited");
+    let {
+      url,
+      visitId,
+      visitTime,
+      referringVisitId,
+      transitionType,
+      pageGuid,
+      hidden,
+      visitCount,
+      typedCount,
+      lastKnownTitle,
+    } = aEvents[0];
+    PlacesObservers.removeListener(["page-visited"], listener);
+    let uriArg = NetUtil.newURI(url);
+    aCallback(uriArg, visitId, visitTime, 0, referringVisitId,
+              transitionType, pageGuid, hidden, visitCount,
+              typedCount, lastKnownTitle);
+  }
+  PlacesObservers.addListener(["page-visited"], listener);
 }
 
 /**
@@ -44,7 +58,7 @@ function waitForOnDeleteURI(aCallback) {
       aCallback.apply(null, arguments);
     }
   };
-  PlacesUtils.history.addObserver(historyObserver, false);
+  PlacesUtils.history.addObserver(historyObserver);
 }
 
 /**
@@ -61,35 +75,28 @@ function waitForOnDeleteVisits(aCallback) {
       aCallback.apply(null, arguments);
     }
   };
-  PlacesUtils.history.addObserver(historyObserver, false);
+  PlacesUtils.history.addObserver(historyObserver);
 }
 
-function run_test()
-{
-  run_next_test();
-}
-
-add_test(function test_dh_is_from_places()
-{
+add_test(function test_dh_is_from_places() {
   // Test that this nsIDownloadHistory is the one places implements.
-  do_check_true(gDownloadHistory instanceof Ci.mozIAsyncHistory);
+  Assert.ok(gDownloadHistory instanceof Ci.mozIAsyncHistory);
 
   run_next_test();
 });
 
-add_test(function test_dh_addRemoveDownload()
-{
+add_test(function test_dh_addRemoveDownload() {
   waitForOnVisit(function DHAD_onVisit(aURI) {
-    do_check_true(aURI.equals(DOWNLOAD_URI));
+    Assert.ok(aURI.equals(DOWNLOAD_URI));
 
     // Verify that the URI is already available in results at this time.
-    do_check_true(!!page_in_database(DOWNLOAD_URI));
+    Assert.ok(!!page_in_database(DOWNLOAD_URI));
 
-    waitForOnDeleteURI(function DHRAD_onDeleteURI(aURI) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
+    waitForOnDeleteURI(function DHRAD_onDeleteURI(aDeletedURI) {
+      Assert.ok(aDeletedURI.equals(DOWNLOAD_URI));
 
       // Verify that the URI is already available in results at this time.
-      do_check_false(!!page_in_database(DOWNLOAD_URI));
+      Assert.ok(!page_in_database(DOWNLOAD_URI));
 
       run_next_test();
     });
@@ -99,21 +106,20 @@ add_test(function test_dh_addRemoveDownload()
   gDownloadHistory.addDownload(DOWNLOAD_URI, null, Date.now() * 1000);
 });
 
-add_test(function test_dh_addMultiRemoveDownload()
-{
+add_test(function test_dh_addMultiRemoveDownload() {
   PlacesTestUtils.addVisits({
     uri: DOWNLOAD_URI,
     transition: TRANSITION_TYPED
-  }).then(function () {
+  }).then(function() {
     waitForOnVisit(function DHAD_onVisit(aURI) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
-      do_check_true(!!page_in_database(DOWNLOAD_URI));
+      Assert.ok(aURI.equals(DOWNLOAD_URI));
+      Assert.ok(!!page_in_database(DOWNLOAD_URI));
 
-      waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aURI) {
-        do_check_true(aURI.equals(DOWNLOAD_URI));
-        do_check_true(!!page_in_database(DOWNLOAD_URI));
+      waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aDeletedURI) {
+        Assert.ok(aDeletedURI.equals(DOWNLOAD_URI));
+        Assert.ok(!!page_in_database(DOWNLOAD_URI));
 
-        PlacesTestUtils.clearHistory().then(run_next_test);
+        PlacesUtils.history.clear().then(run_next_test);
       });
       gDownloadHistory.removeAllDownloads();
     });
@@ -122,72 +128,81 @@ add_test(function test_dh_addMultiRemoveDownload()
   });
 });
 
-add_test(function test_dh_addBookmarkRemoveDownload()
-{
-  PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
-                                       DOWNLOAD_URI,
-                                       PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                       "A bookmark");
-  waitForOnVisit(function DHAD_onVisit(aURI) {
-    do_check_true(aURI.equals(DOWNLOAD_URI));
-    do_check_true(!!page_in_database(DOWNLOAD_URI));
-
-    waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aURI) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
-      do_check_true(!!page_in_database(DOWNLOAD_URI));
-
-      PlacesTestUtils.clearHistory().then(run_next_test);
-    });
-    gDownloadHistory.removeAllDownloads();
+add_task(async function test_dh_addBookmarkRemoveDownload() {
+  await PlacesUtils.bookmarks.insert({
+    parentGuid: PlacesUtils.bookmarks.unfiledGuid,
+    url: DOWNLOAD_URI,
+    title: "A bookmark"
   });
 
-  gDownloadHistory.addDownload(DOWNLOAD_URI, null, Date.now() * 1000);
+  await new Promise(resolve => {
+    waitForOnVisit(function DHAD_onVisit(aURI) {
+      Assert.ok(aURI.equals(DOWNLOAD_URI));
+      Assert.ok(!!page_in_database(DOWNLOAD_URI));
+
+      waitForOnDeleteVisits(function DHRAD_onDeleteVisits(aDeletedURI) {
+        Assert.ok(aDeletedURI.equals(DOWNLOAD_URI));
+        Assert.ok(!!page_in_database(DOWNLOAD_URI));
+
+        PlacesUtils.history.clear().then(resolve);
+      });
+      gDownloadHistory.removeAllDownloads();
+    });
+
+    gDownloadHistory.addDownload(DOWNLOAD_URI, null, Date.now() * 1000);
+  });
 });
 
-add_test(function test_dh_addDownload_referrer()
-{
-  waitForOnVisit(function DHAD_prepareReferrer(aURI, aVisitID) {
-    do_check_true(aURI.equals(REFERRER_URI));
-    let referrerVisitId = aVisitID;
+add_task(async function test_dh_addDownload_referrer() {
+  // Wait for visits notification and get the visit id.
+  let visitId;
+  let referrerPromise = PlacesTestUtils.waitForNotification("page-visited", visits => {
+    visitId = visits[0].visitId;
+    let {url} = visits[0];
+    return url == REFERRER_URI.spec;
+  }, "places");
 
-    waitForOnVisit(function DHAD_onVisit(aURI, aVisitID, aTime, aSessionID,
-                                              aReferringID) {
-      do_check_true(aURI.equals(DOWNLOAD_URI));
-      do_check_eq(aReferringID, referrerVisitId);
-
-      // Verify that the URI is already available in results at this time.
-      do_check_true(!!page_in_database(DOWNLOAD_URI));
-
-      PlacesTestUtils.clearHistory().then(run_next_test);
-    });
-
-    gDownloadHistory.addDownload(DOWNLOAD_URI, REFERRER_URI, Date.now() * 1000);
-  });
-
-  // Note that we don't pass the optional callback argument here because we must
-  // ensure that we receive the onVisit notification before we call addDownload.
-  PlacesUtils.asyncHistory.updatePlaces({
+  await PlacesTestUtils.addVisits([{
     uri: REFERRER_URI,
-    visits: [{
-      transitionType: Ci.nsINavHistoryService.TRANSITION_TYPED,
-      visitDate: Date.now() * 1000
-    }]
-  });
+    transition: Ci.nsINavHistoryService.TRANSITION_TYPED
+  }]);
+  await referrerPromise;
+
+  // Verify results for referrer uri.
+  Assert.ok(!!PlacesTestUtils.isPageInDB(REFERRER_URI));
+  Assert.equal(visitId, 1);
+
+  // Wait for visits notification and get the referrer Id.
+  let referrerId;
+  let downloadPromise = PlacesTestUtils.waitForNotification("page-visited", visits => {
+    referrerId = visits[0].referringVisitId;
+    let {url} = visits[0];
+    return url == DOWNLOAD_URI.spec;
+  }, "places");
+
+  gDownloadHistory.addDownload(DOWNLOAD_URI, REFERRER_URI, Date.now() * 1000);
+  await downloadPromise;
+
+  // Verify results for download uri.
+  // ensure that we receive the 'page-visited' notification before we call addDownload.
+  Assert.ok(!!PlacesTestUtils.isPageInDB(DOWNLOAD_URI));
+  Assert.equal(visitId, referrerId);
+
+  await PlacesUtils.history.clear();
 });
 
-add_test(function test_dh_addDownload_disabledHistory()
-{
+add_test(function test_dh_addDownload_disabledHistory() {
   waitForOnVisit(function DHAD_onVisit(aURI) {
     // We should only receive the notification for the non-private URI.  This
     // test is based on the assumption that visit notifications are received in
     // the same order of the addDownload calls, which is currently true because
     // database access is serialized on the same worker thread.
-    do_check_true(aURI.equals(DOWNLOAD_URI));
+    Assert.ok(aURI.equals(DOWNLOAD_URI));
 
-    do_check_true(!!page_in_database(DOWNLOAD_URI));
-    do_check_false(!!page_in_database(PRIVATE_URI));
+    Assert.ok(!!page_in_database(DOWNLOAD_URI));
+    Assert.ok(!page_in_database(PRIVATE_URI));
 
-    PlacesTestUtils.clearHistory().then(run_next_test);
+    PlacesUtils.history.clear().then(run_next_test);
   });
 
   Services.prefs.setBoolPref("places.history.enabled", false);
@@ -204,8 +219,7 @@ add_test(function test_dh_addDownload_disabledHistory()
  * Tests that nsIDownloadHistory::AddDownload saves the additional download
  * details if the optional destination URL is specified.
  */
-add_test(function test_dh_details()
-{
+add_test(function test_dh_details() {
   const REMOTE_URI = NetUtil.newURI("http://localhost/");
   const SOURCE_URI = NetUtil.newURI("http://example.com/test_dh_details");
   const DEST_FILE_NAME = "dest.txt";
@@ -215,62 +229,52 @@ add_test(function test_dh_details()
 
   let titleSet = false;
   let destinationFileUriSet = false;
-  let destinationFileNameSet = false;
 
-  function checkFinished()
-  {
-    if (titleSet && destinationFileUriSet && destinationFileNameSet) {
+  function checkFinished() {
+    if (titleSet && destinationFileUriSet) {
       PlacesUtils.annotations.removeObserver(annoObserver);
       PlacesUtils.history.removeObserver(historyObserver);
 
-      PlacesTestUtils.clearHistory().then(run_next_test);
+      PlacesUtils.history.clear().then(run_next_test);
     }
   }
 
   let annoObserver = {
-    onPageAnnotationSet: function AO_onPageAnnotationSet(aPage, aName)
-    {
+    onPageAnnotationSet: function AO_onPageAnnotationSet(aPage, aName) {
       if (aPage.equals(SOURCE_URI)) {
         let value = PlacesUtils.annotations.getPageAnnotation(aPage, aName);
-        switch (aName)
-        {
+        switch (aName) {
           case "downloads/destinationFileURI":
             destinationFileUriSet = true;
-            do_check_eq(value, destFileUri.spec);
-            break;
-          case "downloads/destinationFileName":
-            destinationFileNameSet = true;
-            do_check_eq(value, DEST_FILE_NAME);
+            Assert.equal(value, destFileUri.spec);
             break;
         }
         checkFinished();
       }
     },
-    onItemAnnotationSet: function() {},
-    onPageAnnotationRemoved: function() {},
-    onItemAnnotationRemoved: function() {}
-  }
+    onItemAnnotationSet() {},
+    onPageAnnotationRemoved() {},
+    onItemAnnotationRemoved() {}
+  };
 
   let historyObserver = {
-    onBeginUpdateBatch: function() {},
-    onEndUpdateBatch: function() {},
-    onVisit: function() {},
-    onTitleChanged: function HO_onTitleChanged(aURI, aPageTitle)
-    {
+    onBeginUpdateBatch() {},
+    onEndUpdateBatch() {},
+    onTitleChanged: function HO_onTitleChanged(aURI, aPageTitle) {
       if (aURI.equals(SOURCE_URI)) {
         titleSet = true;
-        do_check_eq(aPageTitle, DEST_FILE_NAME);
+        Assert.equal(aPageTitle, DEST_FILE_NAME);
         checkFinished();
       }
     },
-    onDeleteURI: function() {},
-    onClearHistory: function() {},
-    onPageChanged: function() {},
-    onDeleteVisits: function() {}
+    onDeleteURI() {},
+    onClearHistory() {},
+    onPageChanged() {},
+    onDeleteVisits() {}
   };
 
-  PlacesUtils.annotations.addObserver(annoObserver, false);
-  PlacesUtils.history.addObserver(historyObserver, false);
+  PlacesUtils.annotations.addObserver(annoObserver);
+  PlacesUtils.history.addObserver(historyObserver);
 
   // Both null values and remote URIs should not cause errors.
   gDownloadHistory.addDownload(SOURCE_URI, null, Date.now() * 1000);

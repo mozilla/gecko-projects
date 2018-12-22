@@ -23,14 +23,15 @@ from mozpack.copier import (
     Jarrer,
 )
 from mozpack.errors import errors
-from mozpack.unify import UnifiedBuildFinder
+from mozpack.files import ExecutableFile
+from mozpack.mozjar import JAR_BROTLI
 import mozpack.path as mozpath
 import buildconfig
 from argparse import ArgumentParser
+from createprecomplete import generate_precomplete
 import os
 from StringIO import StringIO
 import subprocess
-import platform
 import mozinfo
 
 # List of libraries to shlibsign.
@@ -38,6 +39,7 @@ SIGN_LIBS = [
     'softokn3',
     'nssdbm3',
     'freebl3',
+    'freeblpriv3',
     'freebl_32fpu_3',
     'freebl_32int_3',
     'freebl_32int64_3',
@@ -81,7 +83,7 @@ class ToolLauncher(object):
             env[e] = extra_env[e]
 
         # For VC12+, make sure we can find the right bitness of pgort1x0.dll
-        if not buildconfig.substs['HAVE_64BIT_BUILD']:
+        if not buildconfig.substs.get('HAVE_64BIT_BUILD'):
             for e in ('VS140COMNTOOLS', 'VS120COMNTOOLS'):
                 if e not in env:
                     continue
@@ -122,60 +124,6 @@ class LibSignFile(File):
             return False
         if launcher.launch(['shlibsign', '-v', '-o', dest, '-i', self.path]):
             errors.fatal('Error while signing %s' % self.path)
-
-
-def precompile_cache(registry, source_path, gre_path, app_path):
-    '''
-    Create startup cache for the given application directory, using the
-    given GRE path.
-    - registry is a FileRegistry-like instance where to add the startup cache.
-    - source_path is the base path of the package.
-    - gre_path is the GRE path, relative to source_path.
-    - app_path is the application path, relative to source_path.
-    Startup cache for all resources under resource://app/ are generated,
-    except when gre_path == app_path, in which case it's under
-    resource://gre/.
-    '''
-    from tempfile import mkstemp
-    source_path = os.path.abspath(source_path)
-    if app_path != gre_path:
-        resource = 'app'
-    else:
-        resource = 'gre'
-    app_path = os.path.join(source_path, app_path)
-    gre_path = os.path.join(source_path, gre_path)
-
-    fd, cache = mkstemp('.zip')
-    os.close(fd)
-    os.remove(cache)
-
-    try:
-        extra_env = {'MOZ_STARTUP_CACHE': cache}
-        if buildconfig.substs.get('MOZ_TSAN'):
-            extra_env['TSAN_OPTIONS'] = 'report_bugs=0'
-        if buildconfig.substs.get('MOZ_ASAN'):
-            extra_env['ASAN_OPTIONS'] = 'detect_leaks=0'
-        if launcher.launch(['xpcshell', '-g', gre_path, '-a', app_path,
-                            '-f', os.path.join(os.path.dirname(__file__),
-                            'precompile_cache.js'),
-                            '-e', 'precompile_startupcache("resource://%s/");'
-                                  % resource],
-                           extra_linker_path=gre_path,
-                           extra_env=extra_env):
-            errors.fatal('Error while running startup cache precompilation')
-            return
-        from mozpack.mozjar import JarReader
-        jar = JarReader(cache)
-        resource = '/resource/%s/' % resource
-        for f in jar:
-            if resource in f.filename:
-                path = f.filename[f.filename.index(resource) + len(resource):]
-                if registry.contains(path):
-                    registry.add(f.filename, GeneratedFile(f.read()))
-        jar.close()
-    finally:
-        if os.path.exists(cache):
-            os.remove(cache)
 
 
 class RemovedFiles(GeneratedFile):
@@ -237,9 +185,6 @@ class NoPkgFilesRemover(object):
     def add_manifest(self, entry):
         self._formatter.add_manifest(entry)
 
-    def add_interfaces(self, path, content):
-        self._formatter.add_interfaces(path, content)
-
     def contains(self, path):
         return self._formatter.contains(path)
 
@@ -267,11 +212,9 @@ def main():
                         'access logs')
     parser.add_argument('--optimizejars', action='store_true', default=False,
                         help='Enable jar optimizations')
-    parser.add_argument('--unify', default='',
-                        help='Base directory of another build to unify with')
-    parser.add_argument('--disable-compression', action='store_false',
-                        dest='compress', default=True,
-                        help='Disable jar compression')
+    parser.add_argument('--compress', choices=('none', 'deflate', 'brotli'),
+                        default='deflate',
+                        help='Use given jar compression (default: deflate)')
     parser.add_argument('manifest', default=None, nargs='?',
                         help='Manifest file name')
     parser.add_argument('source', help='Source directory')
@@ -281,7 +224,7 @@ def main():
                         help='Extra files not to be considered as resources')
     args = parser.parse_args()
 
-    defines = dict(buildconfig.defines)
+    defines = dict(buildconfig.defines['ALLDEFINES'])
     if args.ignore_errors:
         errors.ignore_errors()
 
@@ -289,15 +232,21 @@ def main():
         for name, value in [split_define(d) for d in args.defines]:
             defines[name] = value
 
+    compress = {
+        'none': False,
+        'deflate': True,
+        'brotli': JAR_BROTLI,
+    }[args.compress]
+
     copier = FileCopier()
     if args.format == 'flat':
         formatter = FlatFormatter(copier)
     elif args.format == 'jar':
-        formatter = JarFormatter(copier, compress=args.compress, optimize=args.optimizejars)
+        formatter = JarFormatter(copier, compress=compress, optimize=args.optimizejars)
     elif args.format == 'omni':
         formatter = OmniJarFormatter(copier,
                                      buildconfig.substs['OMNIJAR_NAME'],
-                                     compress=args.compress,
+                                     compress=compress,
                                      optimize=args.optimizejars,
                                      non_resources=args.non_resource)
     else:
@@ -315,18 +264,7 @@ def main():
     while respath.startswith('/'):
         respath = respath[1:]
 
-    if args.unify:
-        def is_native(path):
-            path = os.path.abspath(path)
-            return platform.machine() in mozpath.split(path)
-
-        # Invert args.unify and args.source if args.unify points to the
-        # native architecture.
-        args.source, args.unify = sorted([args.source, args.unify],
-                                         key=is_native, reverse=True)
-        if is_native(args.source):
-            launcher.tooldir = args.source
-    elif not buildconfig.substs['CROSS_COMPILE']:
+    if not buildconfig.substs['CROSS_COMPILE']:
         launcher.tooldir = mozpath.join(buildconfig.topobjdir, 'dist')
 
     with errors.accumulate():
@@ -340,12 +278,8 @@ def main():
                 os.path.join(os.path.abspath(os.path.dirname(__file__)),
                     'js-compare-ast.js')
             ]
-        if args.unify:
-            finder = UnifiedBuildFinder(FileFinder(args.source),
-                                        FileFinder(args.unify),
-                                        **finder_args)
-        else:
-            finder = FileFinder(args.source, **finder_args)
+        finder = FileFinder(args.source, find_executables=True,
+                            **finder_args)
         if 'NO_PKG_FILES' in os.environ:
             sinkformatter = NoPkgFilesRemover(formatter,
                                               args.manifest is not None)
@@ -377,6 +311,14 @@ def main():
                                LibSignFile(os.path.join(args.destination,
                                                         libname)))
 
+    # Include pdb files for llvm-symbolizer to resolve symbols.
+    if buildconfig.substs.get('LLVM_SYMBOLIZER') and mozinfo.isWin:
+        for p, f in copier:
+            if isinstance(f, ExecutableFile):
+                pdbname = os.path.splitext(f.inputs()[0])[0] + '.pdb'
+                if os.path.exists(pdbname):
+                    copier.add(os.path.basename(pdbname), File(pdbname))
+
     # Setup preloading
     if args.jarlog and os.path.exists(args.jarlog):
         from mozpack.mozjar import JarLog
@@ -388,26 +330,9 @@ def main():
             if key in log:
                 f.preload(log[key])
 
-    # Fill startup cache
-    if isinstance(formatter, OmniJarFormatter) and launcher.can_launch() \
-      and buildconfig.substs['MOZ_DISABLE_STARTUPCACHE'] != '1':
-        gre_path = None
-        def get_bases():
-            for b in sink.packager.get_bases(addons=False):
-                for p in (mozpath.join('bin', b), b):
-                    if os.path.exists(os.path.join(args.source, p)):
-                        yield p
-                        break
-        for base in sorted(get_bases()):
-            if not gre_path:
-                gre_path = base
-            omnijar_path = mozpath.join(sink.normalize_path(base),
-                                        buildconfig.substs['OMNIJAR_NAME'])
-            if formatter.contains(omnijar_path):
-                precompile_cache(formatter.copier[omnijar_path],
-                                 args.source, gre_path, base)
-
     copier.copy(args.destination)
+    generate_precomplete(os.path.normpath(os.path.join(args.destination,
+                                                       respath)))
 
 
 if __name__ == '__main__':

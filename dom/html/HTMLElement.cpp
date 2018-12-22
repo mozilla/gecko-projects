@@ -17,10 +17,9 @@ public:
   explicit HTMLElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
   virtual ~HTMLElement();
 
-  NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML) override;
-
   virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo,
-                         nsINode** aResult) const override;
+                         nsINode** aResult,
+                         bool aPreallocateChildren) const override;
 
 protected:
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -29,6 +28,9 @@ protected:
 HTMLElement::HTMLElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
+  if (NodeInfo()->Equals(nsGkAtoms::bdi)) {
+    AddStatesSilently(NS_EVENT_STATE_DIR_ATTR_LIKE_AUTO);
+  }
 }
 
 HTMLElement::~HTMLElement()
@@ -37,31 +39,10 @@ HTMLElement::~HTMLElement()
 
 NS_IMPL_ELEMENT_CLONE(HTMLElement)
 
-NS_IMETHODIMP
-HTMLElement::GetInnerHTML(nsAString& aInnerHTML)
-{
-  /**
-   * nsGenericHTMLElement::GetInnerHTML escapes < and > characters (at least).
-   * .innerHTML should return the HTML code for xmp and plaintext element.
-   *
-   * This code is a workaround until we implement a HTML5 Serializer
-   * with this behavior.
-   */
-  if (mNodeInfo->Equals(nsGkAtoms::xmp) ||
-      mNodeInfo->Equals(nsGkAtoms::plaintext)) {
-    if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML, fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return NS_OK;
-  }
-
-  return nsGenericHTMLElement::GetInnerHTML(aInnerHTML);
-}
-
 JSObject*
 HTMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::HTMLElementBinding::Wrap(aCx, this, aGivenProto);
+  return dom::HTMLElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -72,6 +53,15 @@ HTMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 nsGenericHTMLElement*
 NS_NewHTMLElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                   mozilla::dom::FromParser aFromParser)
+{
+  return new mozilla::dom::HTMLElement(aNodeInfo);
+}
+
+// Distinct from the above in order to have function pointer that compared unequal
+// to a function pointer to the above.
+nsGenericHTMLElement*
+NS_NewCustomElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
+                    mozilla::dom::FromParser aFromParser)
 {
   return new mozilla::dom::HTMLElement(aNodeInfo);
 }

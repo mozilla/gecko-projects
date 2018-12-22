@@ -22,7 +22,7 @@ class MDefinition;
 class MInstruction;
 class LOsiPoint;
 
-class LIRGeneratorShared : public MDefinitionVisitor
+class LIRGeneratorShared
 {
   protected:
     MIRGenerator* gen;
@@ -33,11 +33,11 @@ class LIRGeneratorShared : public MDefinitionVisitor
     LRecoverInfo* cachedRecoverInfo_;
     LOsiPoint* osiPoint_;
 
-  public:
     LIRGeneratorShared(MIRGenerator* gen, MIRGraph& graph, LIRGraph& lirGraph)
       : gen(gen),
         graph(graph),
         lirGraph_(lirGraph),
+        current(nullptr),
         lastResumePoint_(nullptr),
         cachedRecoverInfo_(nullptr),
         osiPoint_(nullptr)
@@ -47,7 +47,21 @@ class LIRGeneratorShared : public MDefinitionVisitor
         return gen;
     }
 
-  protected:
+    // Needed to capture the abort error out of the visitInstruction methods.
+    bool errored() {
+        return gen->getOffThreadStatus().isErr();
+    }
+    void abort(AbortReason r, const char* message, ...) MOZ_FORMAT_PRINTF(3, 4) {
+        va_list ap;
+        va_start(ap, message);
+        auto reason_ = gen->abortFmt(r, message, ap);
+        va_end(ap);
+        gen->setOffThreadStatus(reason_);
+    }
+    void abort(AbortReason r) {
+        auto reason_ = gen->abort(r);
+        gen->setOffThreadStatus(reason_);
+    }
 
     static void ReorderCommutative(MDefinition** lhsp, MDefinition** rhsp, MInstruction* ins);
     static bool ShouldReorderCommutative(MDefinition* lhs, MDefinition* rhs, MInstruction* ins);
@@ -66,6 +80,8 @@ class LIRGeneratorShared : public MDefinitionVisitor
     // The lowest-level calls to use, those that do not wrap another call to
     // use(), must prefix grabbing virtual register IDs by these calls.
     inline void ensureDefined(MDefinition* mir);
+
+    void visitEmittedAtUses(MInstruction* ins);
 
     // These all create a use of a virtual register, with an optional
     // allocation policy.
@@ -92,6 +108,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline LUse useFixed(MDefinition* mir, FloatRegister reg);
     inline LUse useFixed(MDefinition* mir, AnyRegister reg);
     inline LUse useFixedAtStart(MDefinition* mir, Register reg);
+    inline LUse useFixedAtStart(MDefinition* mir, AnyRegister reg);
     inline LAllocation useOrConstant(MDefinition* mir);
     inline LAllocation useOrConstantAtStart(MDefinition* mir);
     // "Any" is architecture dependent, and will include registers and stack
@@ -108,6 +125,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline LAllocation useRegisterOrConstant(MDefinition* mir);
     inline LAllocation useRegisterOrConstantAtStart(MDefinition* mir);
     inline LAllocation useRegisterOrZeroAtStart(MDefinition* mir);
+    inline LAllocation useRegisterOrZero(MDefinition* mir);
     inline LAllocation useRegisterOrNonDoubleConstant(MDefinition* mir);
 
     inline LUse useRegisterForTypedLoad(MDefinition* mir, MIRType type);
@@ -127,6 +145,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
     // These create temporary register requests.
     inline LDefinition temp(LDefinition::Type type = LDefinition::GENERAL,
                             LDefinition::Policy policy = LDefinition::REGISTER);
+    inline LInt64Definition tempInt64(LDefinition::Policy policy = LDefinition::REGISTER);
     inline LDefinition tempFloat32();
     inline LDefinition tempDouble();
     inline LDefinition tempCopy(MDefinition* input, uint32_t reusedInput);
@@ -138,9 +157,9 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline void defineFixed(LInstructionHelper<1, Ops, Temps>* lir, MDefinition* mir,
                             const LAllocation& output);
 
-    template <size_t Ops, size_t Temps>
-    inline void defineBox(LInstructionHelper<BOX_PIECES, Ops, Temps>* lir, MDefinition* mir,
-                          LDefinition::Policy policy = LDefinition::REGISTER);
+    template <size_t Temps>
+    inline void defineBox(details::LInstructionFixedDefsTempsHelper<BOX_PIECES, Temps>* lir,
+                          MDefinition* mir, LDefinition::Policy policy = LDefinition::REGISTER);
 
     template <size_t Ops, size_t Temps>
     inline void defineInt64(LInstructionHelper<INT64_PIECES, Ops, Temps>* lir, MDefinition* mir,
@@ -165,7 +184,12 @@ class LIRGeneratorShared : public MDefinitionVisitor
                        const LDefinition& def);
 
     template <size_t Ops, size_t Temps>
-    inline void defineReuseInput(LInstructionHelper<1, Ops, Temps>* lir, MDefinition* mir, uint32_t operand);
+    inline void defineReuseInput(LInstructionHelper<1, Ops, Temps>* lir, MDefinition* mir,
+                                 uint32_t operand);
+
+    template <size_t Ops, size_t Temps>
+    inline void defineBoxReuseInput(LInstructionHelper<BOX_PIECES, Ops, Temps>* lir,
+                                    MDefinition* mir, uint32_t operand);
 
     template <size_t Ops, size_t Temps>
     inline void defineInt64ReuseInput(LInstructionHelper<INT64_PIECES, Ops, Temps>* lir,
@@ -178,6 +202,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
     // Returns a box allocation. The use is either typed, a Value, or
     // a constant (if useConstant is true).
     inline LBoxAllocation useBoxOrTypedOrConstant(MDefinition* mir, bool useConstant);
+    inline LBoxAllocation useBoxOrTyped(MDefinition* mir);
 
     // Returns an int64 allocation for an Int64-typed instruction.
     inline LInt64Allocation useInt64(MDefinition* mir, LUse::Policy policy, bool useAtStart);
@@ -185,9 +210,15 @@ class LIRGeneratorShared : public MDefinitionVisitor
     inline LInt64Allocation useInt64AtStart(MDefinition* mir);
     inline LInt64Allocation useInt64OrConstant(MDefinition* mir, bool useAtStart = false);
     inline LInt64Allocation useInt64Register(MDefinition* mir, bool useAtStart = false);
+    inline LInt64Allocation useInt64RegisterOrConstant(MDefinition* mir, bool useAtStart = false);
+    inline LInt64Allocation useInt64Fixed(MDefinition* mir, Register64 regs, bool useAtStart = false);
+    inline LInt64Allocation useInt64FixedAtStart(MDefinition* mir, Register64 regs);
 
     LInt64Allocation useInt64RegisterAtStart(MDefinition* mir) {
         return useInt64Register(mir, /* useAtStart = */ true);
+    }
+    LInt64Allocation useInt64RegisterOrConstantAtStart(MDefinition* mir) {
+        return useInt64RegisterOrConstant(mir, /* useAtStart = */ true);
     }
     LInt64Allocation useInt64OrConstantAtStart(MDefinition* mir) {
         return useInt64OrConstant(mir, /* useAtStart = */ true);
@@ -200,6 +231,9 @@ class LIRGeneratorShared : public MDefinitionVisitor
     // Redefine a sin/cos call to sincos.
     inline void redefine(MDefinition* def, MDefinition* as, MMathFunction::Function func);
 
+    template <typename LClass, typename... Args>
+    inline LClass* allocateVariadic(uint32_t numOperands, Args&&... args);
+
     TempAllocator& alloc() const {
         return graph.alloc();
     }
@@ -211,7 +245,7 @@ class LIRGeneratorShared : public MDefinitionVisitor
         // failed and return a dummy vreg. Include a + 1 here for NUNBOX32
         // platforms that expect Value vregs to be adjacent.
         if (vreg + 1 >= MAX_VIRTUAL_REGISTERS) {
-            gen->abort("max virtual registers");
+            abort(AbortReason::Alloc, "max virtual registers");
             return 1;
         }
         return vreg;
@@ -245,7 +279,6 @@ class LIRGeneratorShared : public MDefinitionVisitor
     void assignSafepoint(LInstruction* ins, MInstruction* mir,
                          BailoutKind kind = Bailout_DuringVMCall);
 
-  public:
     void lowerConstantDouble(double d, MInstruction* mir) {
         define(new(alloc()) LDouble(d), mir);
     }
@@ -253,18 +286,11 @@ class LIRGeneratorShared : public MDefinitionVisitor
         define(new(alloc()) LFloat32(f), mir);
     }
 
-    void visitConstant(MConstant* ins);
-
+  public:
     // Whether to generate typed reads for element accesses with hole checks.
     static bool allowTypedElementHoleCheck() {
         return false;
     }
-
-    // Whether to generate typed array accesses on statically known objects.
-    static bool allowStaticTypedArrayAccesses() {
-        return false;
-    }
-
 };
 
 } // namespace jit

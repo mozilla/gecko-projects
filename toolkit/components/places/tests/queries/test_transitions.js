@@ -4,7 +4,6 @@
   Any copyright is dedicated to the Public Domain.
   http://creativecommons.org/publicdomain/zero/1.0/
  * ***** END LICENSE BLOCK ***** */
-var beginTime = Date.now();
 var testData = [
   {
     isVisit: true,
@@ -83,21 +82,10 @@ var testDataTyped = [0, 5, 7, 9];
 var testDataDownload = [1, 2, 4, 6, 10];
 var testDataBookmark = [3, 8, 11];
 
-/**
- * run_test is where the magic happens.  This is automatically run by the test
- * harness.  It is where you do the work of creating the query, running it, and
- * playing with the result set.
- */
-function run_test()
-{
-  run_next_test();
-}
-
-add_task(function* test_transitions()
-{
+add_task(async function test_transitions() {
   let timeNow = Date.now();
   for (let item of testData) {
-    yield PlacesTestUtils.addVisits({
+    await PlacesTestUtils.addVisits({
       uri: uri(item.uri),
       transition: item.transType,
       visitDate: timeNow++ * 1000,
@@ -105,15 +93,15 @@ add_task(function* test_transitions()
     });
   }
 
-  //dump_table("moz_places");
-  //dump_table("moz_historyvisits");
+  // dump_table("moz_places");
+  // dump_table("moz_historyvisits");
 
-  var numSortFunc = function (a,b) { return (a - b); };
+  var numSortFunc = function(a, b) { return (a - b); };
   var arrs = testDataTyped.concat(testDataDownload).concat(testDataBookmark)
               .sort(numSortFunc);
 
   // Four tests which compare the result of a query to an expected set.
-  var data = arrs.filter(function (index) {
+  var data = arrs.filter(function(index) {
       return (testData[index].uri.match(/arewefastyet\.com/) &&
               testData[index].transType ==
                 Ci.nsINavHistoryService.TRANSITION_DOWNLOAD);
@@ -141,20 +129,18 @@ add_task(function* test_transitions()
   var query = {};
   var options = {};
   PlacesUtils.history.
-    queryStringToQueries("place:transition=" +
+    queryStringToQuery("place:transition=" +
                          Ci.nsINavHistoryService.TRANSITION_DOWNLOAD,
-                         query, {}, options);
-  query = (query.value)[0];
-  options = PlacesUtils.history.getNewQueryOptions();
-  var result = PlacesUtils.history.executeQuery(query, options);
+                         query, options);
+  var result = PlacesUtils.history.executeQuery(query.value, options.value);
   var root = result.root;
   root.containerOpen = true;
-  do_check_eq(testDataDownload.length, root.childCount);
-  yield PlacesTestUtils.addVisits({
+  Assert.equal(testDataDownload.length, root.childCount);
+  await PlacesTestUtils.addVisits({
     uri: uri("http://getfirefox.com"),
     transition: TRANSITION_DOWNLOAD
   });
-  do_check_eq(testDataDownload.length + 1, root.childCount);
+  Assert.equal(testDataDownload.length + 1, root.childCount);
   root.containerOpen = false;
 });
 
@@ -165,10 +151,8 @@ add_task(function* test_transitions()
 function compareQueryToTestData(queryStr, data) {
   var query = {};
   var options = {};
-  PlacesUtils.history.queryStringToQueries(queryStr, query, {}, options);
-  query = query.value[0];
-  options = options.value;
-  var result = PlacesUtils.history.executeQuery(query, options);
+  PlacesUtils.history.queryStringToQuery(queryStr, query, options);
+  var result = PlacesUtils.history.executeQuery(query.value, options.value);
   var root = result.root;
   for (var i = 0; i < data.length; i++) {
     data[i] = testData[data[i]];

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -16,11 +16,6 @@ UNIFIED_SOURCES += [
     'nsLayoutStatics.cpp',
 ]
 
-if CONFIG['MOZ_NFC']:
-    LOCAL_INCLUDES += [
-        '/dom/nfc'
-    ]
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 LOCAL_INCLUDES += [
@@ -29,6 +24,7 @@ LOCAL_INCLUDES += [
     '../generic',
     '../inspector',
     '../mathml',
+    '../painting',
     '../style',
     '../tables',
     '../xul',
@@ -36,30 +32,23 @@ LOCAL_INCLUDES += [
     '/docshell/base',
     '/dom/audiochannel',
     '/dom/base',
-    '/dom/camera',
+    '/dom/bindings',
     '/dom/canvas',
     '/dom/filesystem',
     '/dom/geolocation',
     '/dom/html',
-    '/dom/json',
     '/dom/jsurl',
     '/dom/media',
     '/dom/offline',
-    '/dom/speakermanager',
     '/dom/storage',
     '/dom/svg',
-    '/dom/telephony',
     '/dom/xbl',
     '/dom/xslt/base',
     '/dom/xslt/xml',
     '/dom/xslt/xpath',
     '/dom/xslt/xslt',
     '/dom/xul',
-    '/dom/xul/templates',
     '/editor/composer',
-    '/editor/libeditor',
-    '/editor/txmgr',
-    '/editor/txtsvc',
     '/extensions/cookie',
     '/js/xpconnect/loader',
     '/js/xpconnect/src',
@@ -81,32 +70,6 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
         '/dom/system',
         '/dom/system/android',
     ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    LOCAL_INCLUDES += [
-        '/dom/system/gonk',
-    ]
-    if CONFIG['ANDROID_VERSION'] == '15':
-        LOCAL_INCLUDES += [
-            '%' + '%s/%s' % (CONFIG['ANDROID_SOURCE'], d) for d in [
-                'dalvik/libnativehelper/include/nativehelper',
-                'frameworks/base/include',
-                'frameworks/base/include/binder',
-                'frameworks/base/include/media',
-                'frameworks/base/include/media/stagefright/openmax',
-                'frameworks/base/include/utils',
-                'frameworks/base/media/libstagefright/include',
-            ]
-        ]
-
-if CONFIG['MOZ_B2G_FM']:
-    LOCAL_INCLUDES += [
-        '/dom/fmradio',
-    ]
-
-if CONFIG['MOZ_B2G_BT']:
-    LOCAL_INCLUDES += [
-        '/dom/bluetooth/common',
-    ]
 
 if CONFIG['MOZ_WEBSPEECH']:
     LOCAL_INCLUDES += [
@@ -114,15 +77,7 @@ if CONFIG['MOZ_WEBSPEECH']:
         '/dom/media/webspeech/synth',
     ]
 
-if CONFIG['MOZ_WEBSPEECH_POCKETSPHINX']:
-    LOCAL_INCLUDES += [
-        '/media/pocketsphinx',
-        '/media/sphinxbase',
-    ]
-
-if CONFIG['MOZ_SECUREELEMENT']:
-    LOCAL_INCLUDES += [
-        '/dom/secureelement',
-    ]
-
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

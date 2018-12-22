@@ -17,6 +17,8 @@ namespace net {
 NS_IMPL_ISUPPORTS(nsHttpAuthManager, nsIHttpAuthManager)
 
 nsHttpAuthManager::nsHttpAuthManager()
+  : mAuthCache(nullptr)
+  , mPrivateAuthCache(nullptr)
 {
 }
 
@@ -39,16 +41,12 @@ nsresult nsHttpAuthManager::Init()
     // maybe someone is overriding our HTTP handler implementation?
     NS_ENSURE_TRUE(gHttpHandler, NS_ERROR_UNEXPECTED);
   }
-	
+
   mAuthCache = gHttpHandler->AuthCache(false);
   mPrivateAuthCache = gHttpHandler->AuthCache(true);
   NS_ENSURE_TRUE(mAuthCache, NS_ERROR_FAILURE);
   NS_ENSURE_TRUE(mPrivateAuthCache, NS_ERROR_FAILURE);
   return NS_OK;
-}
-
-nsHttpAuthManager::~nsHttpAuthManager()
-{
 }
 
 NS_IMETHODIMP
@@ -70,7 +68,7 @@ nsHttpAuthManager::GetAuthIdentity(const nsACString & aScheme,
 
   nsAutoCString originSuffix;
   if (aPrincipal) {
-    BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(originSuffix);
+    aPrincipal->OriginAttributesRef().CreateSuffix(originSuffix);
   }
 
   if (!aPath.IsEmpty())
@@ -118,9 +116,8 @@ nsHttpAuthManager::SetAuthIdentity(const nsACString & aScheme,
 
   nsAutoCString originSuffix;
   if (aPrincipal) {
-    BasePrincipal::Cast(aPrincipal)->OriginAttributesRef().CreateSuffix(originSuffix);
+    aPrincipal->OriginAttributesRef().CreateSuffix(originSuffix);
   }
-
 
   nsHttpAuthCache* auth_cache = aIsPrivate ? mPrivateAuthCache : mAuthCache;
   return auth_cache->SetAuthEntry(PromiseFlatCString(aScheme).get(),

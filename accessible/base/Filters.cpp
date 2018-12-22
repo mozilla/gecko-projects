@@ -33,11 +33,11 @@ filters::GetSelectable(Accessible* aAccessible)
 uint32_t
 filters::GetRow(Accessible* aAccessible)
 {
-  a11y::role role = aAccessible->Role();
-  if (role == roles::ROW)
+  if (aAccessible->IsTableRow())
     return eMatch | eSkipSubtree;
 
   // Look for rows inside rowgroup.
+  a11y::role role = aAccessible->Role();
   if (role == roles::GROUPING)
     return eSkip;
 
@@ -48,11 +48,4 @@ uint32_t
 filters::GetCell(Accessible* aAccessible)
 {
   return aAccessible->IsTableCell() ? eMatch : eSkipSubtree;
-}
-
-uint32_t
-filters::GetEmbeddedObject(Accessible* aAccessible)
-{
-  return nsAccUtils::IsEmbeddedObject(aAccessible) ?
-    eMatch | eSkipSubtree : eSkipSubtree;
 }

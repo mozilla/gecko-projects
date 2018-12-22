@@ -15,7 +15,7 @@ function runTests() {
   var plugin = document.getElementById("plugin1");
 
   plugin.focus();
-  synthesizeComposition({ type: "compositionstart", data: "" });
+  // FYI: "compositionstart" will be dispatched automatically.
   let data = "composition";
   synthesizeCompositionChange({
     composition: {
@@ -36,7 +36,7 @@ function runTests() {
 }
 
 SimpleTest.waitForExplicitFinish();
-SpecialPowers.setTestPluginEnabledState(SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED);
+setTestPluginEnabledState(SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED);
   </script>
 </head>
 

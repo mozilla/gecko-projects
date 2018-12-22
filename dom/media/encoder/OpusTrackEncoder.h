@@ -22,14 +22,15 @@ public:
   nsTArray<uint8_t> mIdHeader;
   // The Comment Header of OggOpus.
   nsTArray<uint8_t> mCommentHeader;
-
+  int32_t mChannels;
+  float mSamplingFrequency;
   MetadataKind GetKind() const override { return METADATA_OPUS; }
 };
 
 class OpusTrackEncoder : public AudioTrackEncoder
 {
 public:
-  OpusTrackEncoder();
+  explicit OpusTrackEncoder(TrackRate aTrackRate);
   virtual ~OpusTrackEncoder();
 
   already_AddRefed<TrackMetadataBase> GetMetadata() override;
@@ -80,6 +81,9 @@ private:
    * They will be prepended to the resampled frames next encoding cycle.
    */
   nsTArray<AudioDataValue> mResampledLeftover;
+
+  // TimeStamp in microseconds.
+  uint64_t mOutputTimeStamp;
 };
 
 } // namespace mozilla

@@ -14,8 +14,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.support.v4.app.NotificationCompat;
 import android.text.TextUtils;
-import android.util.Log;
-import com.keepsafe.switchboard.SwitchBoard;
+
+import org.mozilla.gecko.switchboard.SwitchBoard;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.Locales;
@@ -23,7 +23,7 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.preferences.GeckoPreferences;
-import org.mozilla.gecko.util.Experiments;
+import org.mozilla.gecko.Experiments;
 
 import java.util.Locale;
 
@@ -40,7 +40,7 @@ public class WhatsNewReceiver extends BroadcastReceiver {
         }
 
         final String dataString = intent.getDataString();
-        if (TextUtils.isEmpty(dataString) || !dataString.contains(AppConstants.ANDROID_PACKAGE_NAME)){
+        if (TextUtils.isEmpty(dataString) || !dataString.contains(AppConstants.ANDROID_PACKAGE_NAME)) {
             return;
         }
 

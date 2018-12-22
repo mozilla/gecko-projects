@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set sw=4 ts=8 et tw=80 : */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,9 +15,7 @@ FileDescriptorSetParent::FileDescriptorSetParent(
   mFileDescriptors.AppendElement(aFileDescriptor);
 }
 
-FileDescriptorSetParent::~FileDescriptorSetParent()
-{
-}
+FileDescriptorSetParent::~FileDescriptorSetParent() = default;
 
 void
 FileDescriptorSetParent::ForgetFileDescriptors(
@@ -33,12 +31,12 @@ FileDescriptorSetParent::ActorDestroy(ActorDestroyReason aWhy)
   // Implement me! Bug 1005157
 }
 
-bool
+mozilla::ipc::IPCResult
 FileDescriptorSetParent::RecvAddFileDescriptor(
                                           const FileDescriptor& aFileDescriptor)
 {
   mFileDescriptors.AppendElement(aFileDescriptor);
-  return true;
+  return IPC_OK();
 }
 
 } // namespace ipc

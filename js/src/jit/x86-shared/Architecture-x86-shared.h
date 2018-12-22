@@ -15,16 +15,20 @@
 
 #include <string.h>
 
+#include "jit/shared/Architecture-shared.h"
+
 #include "jit/x86-shared/Constants-x86-shared.h"
 
 namespace js {
 namespace jit {
 
 // Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4FloatConversions = false;
+static constexpr bool SupportsUint32x4FloatConversions = false;
 
-// Does this architecture support comparisons of unsigned 32x4 integer vectors?
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4Compares = false;
+// Does this architecture support comparisons of unsigned integer vectors?
+static constexpr bool SupportsUint8x16Compares = false;
+static constexpr bool SupportsUint16x8Compares = false;
+static constexpr bool SupportsUint32x4Compares = false;
 
 #if defined(JS_CODEGEN_X86)
 // In bytes: slots needed for potential memory->memory move spills.
@@ -189,9 +193,6 @@ class Registers {
         AllMask & ~VolatileMask & ~(1 << X86Encoding::rsp);
 
     static const SetType AllocatableMask = AllMask & ~NonAllocatableMask;
-
-    // Registers that can be allocated without being saved, generally.
-    static const SetType TempMask = VolatileMask & ~NonAllocatableMask;
 };
 
 typedef Registers::SetType PackedRegisterMask;
@@ -234,13 +235,11 @@ class FloatRegisters {
     static const uint32_t TotalPhys = 8;
     static const uint32_t Allocatable = 7;
     typedef uint32_t SetType;
-
 #elif defined(JS_CODEGEN_X64)
     static const uint32_t Total = 16 * NumTypes;
     static const uint32_t TotalPhys = 16;
     static const uint32_t Allocatable = 15;
     typedef uint64_t SetType;
-
 #endif
 
     static_assert(sizeof(SetType) * 8 >= Total,
@@ -259,6 +258,8 @@ class FloatRegisters {
     static const SetType AllPhysMask = ((1 << TotalPhys) - 1);
     static const SetType AllMask = AllPhysMask * Spread;
     static const SetType AllDoubleMask = AllPhysMask * SpreadDouble;
+    static const SetType AllSingleMask = AllPhysMask * SpreadSingle;
+    static const SetType AllVector128Mask = AllPhysMask * SpreadSimd128;
 
 #if defined(JS_CODEGEN_X86)
     static const SetType NonAllocatableMask =
@@ -279,7 +280,6 @@ class FloatRegisters {
           (1 << X86Encoding::xmm5)
         ) * SpreadScalar
         | AllPhysMask * SpreadVector;
-
 #else
     static const SetType VolatileMask =
         AllMask;
@@ -347,13 +347,13 @@ struct FloatRegister {
     static const size_t RegMask = (1 << RegSize) - 1;
 
   public:
-    MOZ_CONSTEXPR FloatRegister()
+    constexpr FloatRegister()
         : reg_(Codes::Encoding(0)), type_(Codes::Single), isInvalid_(true)
     { }
-    MOZ_CONSTEXPR FloatRegister(uint32_t r, Codes::ContentType k)
+    constexpr FloatRegister(uint32_t r, Codes::ContentType k)
         : reg_(Codes::Encoding(r)), type_(k), isInvalid_(false)
     { }
-    MOZ_CONSTEXPR FloatRegister(Codes::Encoding r, Codes::ContentType k)
+    constexpr FloatRegister(Codes::Encoding r, Codes::ContentType k)
         : reg_(r), type_(k), isInvalid_(false)
     { }
 
@@ -419,24 +419,59 @@ struct FloatRegister {
         return numAliased();
     }
 
-    // N.B. FloatRegister is an explicit outparam here because msvc-2010
-    // miscompiled it on win64 when the value was simply returned
-    void aliased(uint32_t aliasIdx, FloatRegister* ret) const {
+    FloatRegister aliased(uint32_t aliasIdx) const {
         MOZ_ASSERT(aliasIdx < Codes::NumTypes);
-        *ret = FloatRegister(reg_, Codes::ContentType((aliasIdx + type_) % Codes::NumTypes));
+        return FloatRegister(reg_, Codes::ContentType((aliasIdx + type_) % Codes::NumTypes));
     }
-    void alignedAliased(uint32_t aliasIdx, FloatRegister* ret) const {
-        aliased(aliasIdx, ret);
+    FloatRegister alignedAliased(uint32_t aliasIdx) const {
+        return aliased(aliasIdx);
     }
 
     SetType alignedOrDominatedAliasedSet() const {
         return Codes::Spread << reg_;
     }
 
+    static constexpr RegTypeName DefaultType = RegTypeName::Float64;
+
+    template <RegTypeName = DefaultType>
+    static SetType LiveAsIndexableSet(SetType s) {
+        return SetType(0);
+    }
+
+    template <RegTypeName Name = DefaultType>
+    static SetType AllocatableAsIndexableSet(SetType s) {
+        static_assert(Name != RegTypeName::Any, "Allocatable set are not iterable");
+        return LiveAsIndexableSet<Name>(s);
+    }
+
     static TypedRegisterSet<FloatRegister> ReduceSetForPush(const TypedRegisterSet<FloatRegister>& s);
     static uint32_t GetPushSizeInBytes(const TypedRegisterSet<FloatRegister>& s);
     uint32_t getRegisterDumpOffsetInBytes();
 };
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Float32>(SetType set)
+{
+    return set & FloatRegisters::AllSingleMask;
+}
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Float64>(SetType set)
+{
+    return set & FloatRegisters::AllDoubleMask;
+}
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Vector128>(SetType set)
+{
+    return set & FloatRegisters::AllVector128Mask;
+}
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Any>(SetType set)
+{
+    return set;
+}
 
 // Arm/D32 has double registers that can NOT be treated as float32
 // and this requires some dances in lowering.
@@ -453,10 +488,6 @@ hasMultiAlias()
 {
     return false;
 }
-
-// See MIRGenerator::foldableOffsetRange for more info.
-static const size_t WasmCheckedImmediateRange = 4096;
-static const size_t WasmImmediateRange = UINT32_C(0x80000000);
 
 } // namespace jit
 } // namespace js

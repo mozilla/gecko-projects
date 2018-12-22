@@ -5,20 +5,19 @@
 
 // Tests the Filter Editor Widget's remove button
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
-
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
-const STRINGS_URI = "chrome://devtools/locale/filterwidget.properties";
-const L10N = new LocalizationHelper(STRINGS_URI);
+const TEST_URI = CHROME_URL_ROOT + "doc_filter-editor-01.html";
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+add_task(async function() {
+  const [,, doc] = await createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
 
-  const container = doc.querySelector("#container");
-  let widget = new CSSFilterEditorWidget(container, "blur(2px) contrast(200%)");
+  const container = doc.querySelector("#filter-container");
+  const widget = new CSSFilterEditorWidget(
+    container, "blur(2px) contrast(200%)", cssIsValid
+  );
 
   info("Test removing filters with remove button");
   widget.el.querySelector(".filter button").click();

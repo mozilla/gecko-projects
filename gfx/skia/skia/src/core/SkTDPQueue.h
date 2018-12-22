@@ -9,6 +9,7 @@
 #define SkTDPQueue_DEFINED
 
 #include "SkTDArray.h"
+#include "SkTSort.h"
 
 /**
  * This class implements a priority queue. T is the type of the elements in the queue. LESS is a
@@ -24,9 +25,15 @@
 template <typename T,
           bool (*LESS)(const T&, const T&),
           int* (*INDEX)(const T&) = (int* (*)(const T&))nullptr>
-class SkTDPQueue : public SkNoncopyable {
+class SkTDPQueue {
 public:
     SkTDPQueue() {}
+
+    SkTDPQueue(SkTDPQueue&&) = default;
+    SkTDPQueue& operator =(SkTDPQueue&&) = default;
+
+    SkTDPQueue(const SkTDPQueue&) = delete;
+    SkTDPQueue& operator=(const SkTDPQueue&) = delete;
 
     /** Number of items in the queue. */
     int count() const { return fArray.count(); }
@@ -34,7 +41,7 @@ public:
     /** Gets the next item in the queue without popping it. */
     const T& peek() const { return fArray[0]; }
     T& peek() { return fArray[0]; }
-    
+
     /** Removes the next item. */
     void pop() {
         this->validate();
@@ -96,6 +103,19 @@ public:
         to peek(). Otherwise, there is no guarantee about ordering of elements in the queue. */
     T at(int i) const { return fArray[i]; }
 
+    /** Sorts the queue into priority order.  The queue is only guarenteed to remain in sorted order
+     *  until any other operation, other than at(), is performed.
+     */
+    void sort() {
+        if (fArray.count() > 1) {
+            SkTQSort<T>(fArray.begin(), fArray.end() - 1, LESS);
+            for (int i = 0; i < fArray.count(); i++) {
+                this->setIndex(i);
+            }
+            this->validate();
+        }
+    }
+
 private:
     static int LeftOf(int x) { SkASSERT(x >= 0); return 2 * x + 1; }
     static int ParentOf(int x) { SkASSERT(x > 0); return (x - 1) >> 1; }
@@ -134,7 +154,7 @@ private:
         SkASSERT(index >= 0);
         do {
             int child = LeftOf(index);
-            
+
             if (child >= fArray.count()) {
                 // We're a leaf.
                 this->setIndex(index);
@@ -188,8 +208,6 @@ private:
     }
 
     SkTDArray<T> fArray;
-    
-    typedef SkNoncopyable INHERITED;
 };
 
 #endif

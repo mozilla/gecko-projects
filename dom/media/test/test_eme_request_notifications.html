@@ -12,21 +12,17 @@
 <script class="testbody" type="text/javascript">
 var manager = new MediaTestManager;
 
-var observedStatus = "nothing";
-
-var observer = function(subject, topic, data) {
-  observedStatus = JSON.parse(data).status;
-  info("Observed: " + observedStatus);
-};
-SpecialPowers.Services.obs.addObserver(observer, "mediakeys-request", false);
-
-SimpleTest.registerCleanupFunction(function() {
-  SpecialPowers.Services.obs.removeObserver(observer, "mediakeys-request");
-});
-
 function SetPrefs(prefs) {
+  return SpecialPowers.pushPrefEnv({"set": prefs});
+}
+
+function observe() {
   return new Promise(function(resolve, reject) {
-    SpecialPowers.pushPrefEnv({"set": prefs}, function() { resolve(); });
+    var observer = function(subject, topic, data) {
+      SpecialPowers.Services.obs.removeObserver(observer, "mediakeys-request");
+      resolve(JSON.parse(data).status);
+    };
+    SpecialPowers.Services.obs.addObserver(observer, "mediakeys-request");
   });
 }
 
@@ -34,58 +30,45 @@ function Test(test) {
   var p = test.prefs ? SetPrefs(test.prefs) : Promise.resolve();
   observedStatus = "nothing";
   var name = "'" + test.keySystem + "'";
-  return p.then(function() {
-    return new Promise(function(resolve, reject) {
-      navigator.requestMediaKeySystemAccess(test.keySystem, [{initDataTypes:["cenc"]}])
-      .then(
-        function(keySystemAccess) {
-          return keySystemAccess.createMediaKeys();
-        })
-      .then(
-        function(mediaKeys) {
-          ok(test.shouldPass, name + " passed and was expected to " + (test.shouldPass ? "pass" : "fail"));
-          is(observedStatus, test.expectedStatus, name + " observer service result");
-          resolve();
-        }
-      )
-      .catch(
-        function() {
-          ok(!test.shouldPass, name + " failed and was expected to " + (test.shouldPass ? "pass" : "fail"));
-          is(observedStatus, test.expectedStatus, name + " observer service result");
-          resolve();
-        }
-      );
-    });
+
+  var res = observe().then((status) => {
+    is(status, test.expectedStatus, name + " expected status");
   });
+
+  p.then(() => navigator.requestMediaKeySystemAccess(test.keySystem, gCencMediaKeySystemConfig))
+   .then((keySystemAccess) => keySystemAccess.createMediaKeys());
+
+  return res;
 }
 
-const CLEARKEY_ID = 'org.w3.clearkey';
+const isWinXP = navigator.userAgent.includes("Windows NT 5.1");
 
 var tests = [
   {
-    keySystem: CLEARKEY_ID,
-    shouldPass: false,
-    expectedStatus: 'api-disabled',
-    prefs: [["media.eme.enabled", false], ["media.eme.clearkey.enabled", true]]
-  },
-  {
-    keySystem: CLEARKEY_ID,
-    shouldPass: false,
-    expectedStatus: 'cdm-disabled',
-    prefs: [["media.eme.enabled", true], ["media.eme.clearkey.enabled", false]]
-  },
-  {
-    keySystem: CLEARKEY_ID + '.10000' , // A stupendously high min CDM version, presumably not installed.
-    shouldPass: false,
-    expectedStatus: 'cdm-insufficient-version',
-    prefs: [["media.eme.enabled", true], ["media.eme.clearkey.enabled", true]]
-  },
-  {
-    keySystem: CLEARKEY_ID,
-    shouldPass: true,
+    keySystem: CLEARKEY_KEYSYSTEM,
     expectedStatus: 'cdm-created',
-    prefs: [["media.eme.enabled", true], ["media.eme.clearkey.enabled", true]]
+    prefs: [["media.eme.enabled", false]]
   },
+  {
+    keySystem: "com.widevine.alpha",
+    expectedStatus: 'api-disabled',
+    prefs: [["media.eme.enabled", false]]
+  },
+  {
+    keySystem: "com.widevine.alpha",
+    expectedStatus: (isWinXP ? 'cdm-not-supported' : 'cdm-disabled'),
+    prefs: [["media.eme.enabled", true], ["media.gmp-widevinecdm.enabled", false]]
+  },
+  {
+    keySystem: "com.widevine.alpha",
+    expectedStatus: (isWinXP ? 'cdm-not-supported' : 'cdm-not-installed'),
+    prefs: [["media.eme.enabled", true], , ["media.gmp-widevinecdm.enabled", true]]
+  },
+  {
+    keySystem: CLEARKEY_KEYSYSTEM,
+    expectedStatus: 'cdm-created',
+    prefs: [["media.eme.enabled", true]]
+  }
 ];
 
 SetupEMEPref(function() {
@@ -101,4 +84,3 @@ SimpleTest.waitForExplicitFinish();
 </pre>
 </body>
 </html>
-

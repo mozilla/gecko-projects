@@ -8,17 +8,7 @@ DISABLE_SCREEN_SAVER = False
 ADJUST_MOUSE_AND_SCREEN = False
 #####
 config = {
-    "buildbot_json_path": "buildprops.json",
-    "exes": {
-        'python': '/tools/buildbot/bin/python',
-        'virtualenv': ['/tools/buildbot/bin/python', '/tools/misc-python/virtualenv.py'],
-        'tooltool.py': "/tools/tooltool.py",
-    },
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
+    "virtualenv_modules": ['six==1.10.0', 'vcversioner==2.16.0.0'],
     ###
     "installer_path": INSTALLER_PATH,
     "xpcshell_name": XPCSHELL_NAME,
@@ -37,21 +27,12 @@ config = {
         "bin/*",
         "certs/*",
         "config/*",
+        "mach",
         "marionette/*",
         "modules/*",
         "mozbase/*",
         "tools/*",
     ],
-    "specific_tests_zip_dirs": {
-        "mochitest": ["mochitest/*"],
-        "reftest": ["reftest/*", "jsreftest/*"],
-        "xpcshell": ["xpcshell/*"],
-        "cppunittest": ["cppunittest/*"],
-        "gtest": ["gtest/*"],
-        "jittest": ["jit-test/*"],
-        "mozbase": ["mozbase/*"],
-        "mozmill": ["mozmill/*"],
-    },
     "suite_definitions": {
         "cppunittest": {
             "options": [
@@ -67,10 +48,12 @@ config = {
                 "--no-slow",
                 "--no-progress",
                 "--format=automation",
-                "--jitflags=all"
+                "--jitflags=all",
+                "--timeout=970" # Keep in sync with run_timeout below.
             ],
             "run_filename": "jit_test.py",
-            "testsdir": "jit-test/jit-test"
+            "testsdir": "jit-test/jit-test",
+            "run_timeout": 1000 # Keep in sync with --timeout above.
         },
         "mochitest": {
             "options": [
@@ -83,6 +66,9 @@ config = {
                 "--log-raw=%(raw_log_file)s",
                 "--log-errorsummary=%(error_summary_file)s",
                 "--screenshot-on-fail",
+                "--cleanup-crashes",
+                "--marionette-startup-timeout=180",
+                "--sandbox-read-whitelist=%(abs_work_dir)s",
             ],
             "run_filename": "runtests.py",
             "testsdir": "mochitest"
@@ -110,7 +96,12 @@ config = {
                 "--appname=%(binary_path)s",
                 "--utility-path=tests/bin",
                 "--extra-profile-file=tests/bin/plugins",
-                "--symbols-path=%(symbols_path)s"
+                "--symbols-path=%(symbols_path)s",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+                "--cleanup-crashes",
+                "--marionette-startup-timeout=180",
+                "--sandbox-read-whitelist=%(abs_work_dir)s",
             ],
             "run_filename": "runreftest.py",
             "testsdir": "reftest"
@@ -140,50 +131,40 @@ config = {
     # local mochi suites
     "all_mochitest_suites": {
         "plain": [],
+        "plain-gpu": ["--subsuite=gpu"],
+        "plain-clipboard": ["--subsuite=clipboard"],
         "plain-chunked": ["--chunk-by-dir=4"],
         "mochitest-media": ["--subsuite=media"],
-        "chrome": ["--chrome"],
-        "chrome-chunked": ["--chrome", "--chunk-by-dir=4"],
-        "browser-chrome": ["--browser-chrome"],
-        "browser-chrome-chunked": ["--browser-chrome", "--chunk-by-runtime"],
-        "browser-chrome-addons": ["--browser-chrome", "--chunk-by-runtime", "--tag=addons"],
-        "browser-chrome-screenshots": ["--browser-chrome", "--subsuite=screenshots"],
+        "chrome": ["--flavor=chrome"],
+        "chrome-gpu": ["--flavor=chrome", "--subsuite=gpu"],
+        "chrome-clipboard": ["--flavor=chrome", "--subsuite=clipboard"],
+        "chrome-chunked": ["--flavor=chrome", "--chunk-by-dir=4"],
+        "browser-chrome": ["--flavor=browser"],
+        "browser-chrome-gpu": ["--flavor=browser", "--subsuite=gpu"],
+        "browser-chrome-clipboard": ["--flavor=browser", "--subsuite=clipboard"],
+        "browser-chrome-chunked": ["--flavor=browser", "--chunk-by-runtime"],
+        "browser-chrome-addons": ["--flavor=browser", "--chunk-by-runtime", "--tag=addons"],
+        "browser-chrome-screenshots": ["--flavor=browser", "--subsuite=screenshots"],
+        "browser-chrome-instrumentation": ["--flavor=browser"],
         "mochitest-gl": ["--subsuite=webgl"],
-        "mochitest-devtools-chrome": ["--browser-chrome", "--subsuite=devtools"],
-        "mochitest-devtools-chrome-chunked": ["--browser-chrome", "--subsuite=devtools", "--chunk-by-runtime"],
-        "jetpack-package": ["--jetpack-package"],
-        "jetpack-addon": ["--jetpack-addon"],
-        "a11y": ["--a11y"],
+        "mochitest-devtools-chrome": ["--flavor=browser", "--subsuite=devtools"],
+        "mochitest-devtools-chrome-chunked": ["--flavor=browser", "--subsuite=devtools", "--chunk-by-runtime"],
+        "a11y": ["--flavor=a11y"],
     },
     # local reftest suites
     "all_reftest_suites": {
-        "reftest": {
-            'options': ["--suite=reftest"],
-            'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
-        },
         "crashtest": {
             'options': ["--suite=crashtest"],
             'tests': ["tests/reftest/tests/testing/crashtest/crashtests.list"]
         },
         "jsreftest": {
-            'options':["--extra-profile-file=tests/jsreftest/tests/user.js"],
+            'options':["--extra-profile-file=tests/jsreftest/tests/user.js",
+                       "--suite=jstestbrowser"],
             'tests': ["tests/jsreftest/tests/jstests.list"]
         },
-        "reftest-ipc": {
-            'options': ['--suite=reftest',
-                        '--setpref=browser.tabs.remote=true',
-                        '--setpref=browser.tabs.remote.autostart=true',
-                        '--setpref=extensions.e10sBlocksEnabling=false',
-                        '--setpref=layers.async-pan-zoom.enabled=true'],
-            'tests': ['tests/reftest/tests/layout/reftests/reftest-sanity/reftest.list']
-        },
-        "crashtest-ipc": {
-            'options': ['--suite=crashtest',
-                        '--setpref=browser.tabs.remote=true',
-                        '--setpref=browser.tabs.remote.autostart=true',
-                        '--setpref=extensions.e10sBlocksEnabling=false',
-                        '--setpref=layers.async-pan-zoom.enabled=true'],
-            'tests': ['tests/reftest/tests/testing/crashtest/crashtests.list']
+        "reftest": {
+            'options': ["--suite=reftest"],
+            'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
     },
     "all_xpcshell_suites": {
@@ -206,7 +187,8 @@ config = {
         "gtest": []
     },
     "all_jittest_suites": {
-        "jittest": []
+        "jittest": [],
+        "jittest-chunked": []
     },
     "all_mozbase_suites": {
         "mozbase": []
@@ -227,9 +209,8 @@ config = {
                 # when configs are consolidated this python path will only show
                 # for windows.
                 "python", "../scripts/external_tools/mouse_and_screen_resolution.py",
-                "--configuration-url",
-                "https://hg.mozilla.org/%(branch)s/raw-file/%(revision)s/" +
-                    "testing/machine-configuration.json"],
+                "--configuration-file",
+                "../scripts/external_tools/machine-configuration.json"],
             "architectures": ["32bit"],
             "halt_on_failure": True,
             "enabled": ADJUST_MOUSE_AND_SCREEN
@@ -237,13 +218,18 @@ config = {
     ],
     "vcs_output_timeout": 1000,
     "minidump_save_path": "%(abs_work_dir)s/../minidumps",
-    "buildbot_max_log_size": 52428800,
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
-    "blob_uploader_auth_file": os.path.join(os.getcwd(), "oauth.txt"),
+    "unstructured_flavors": {"xpcshell": [],
+                             "gtest": [],
+                             "mozmill": [],
+                             "cppunittest": [],
+                             "jittest": [],
+                             "mozbase": [],
+                             },
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "macosx64-minidump_stackwalk",
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/macosx64/releng.manifest",
     "tooltool_cache": "/builds/tooltool_cache",
+    "download_nodejs": True,
+    "nodejs_path": "node-osx/bin/node",
+    "nodejs_tooltool_manifest_path": "config/tooltool-manifests/macosx64/nodejs.manifest",
 }

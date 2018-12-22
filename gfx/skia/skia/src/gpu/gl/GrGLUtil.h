@@ -10,7 +10,7 @@
 
 #include "gl/GrGLInterface.h"
 #include "GrGLDefines.h"
-#include "GrStencil.h"
+#include "GrStencilSettings.h"
 
 class SkMatrix;
 
@@ -40,6 +40,7 @@ enum GrGLVendor {
     kIntel_GrGLVendor,
     kQualcomm_GrGLVendor,
     kNVIDIA_GrGLVendor,
+    kATI_GrGLVendor,
 
     kOther_GrGLVendor
 };
@@ -51,6 +52,21 @@ enum GrGLRenderer {
     kPowerVRRogue_GrGLRenderer,
     kAdreno3xx_GrGLRenderer,
     kAdreno4xx_GrGLRenderer,
+    kAdreno5xx_GrGLRenderer,
+    kOSMesa_GrGLRenderer,
+    kIntelIrisPro_GrGLRenderer,
+    /** Either HD 4xxx or Iris 4xxx */
+    kIntel4xxx_GrGLRenderer,
+    /** Either HD 6xxx or Iris 6xxx */
+    kIntel6xxx_GrGLRenderer,
+    kGalliumLLVM_GrGLRenderer,
+    /** T-6xx, T-7xx, or T-8xx */
+    kMaliT_GrGLRenderer,
+    kANGLE_GrGLRenderer,
+
+    kAMDRadeonHD7xxx_GrGLRenderer, // AMD Radeon HD 7000 Series
+    kAMDRadeonR9M4xx_GrGLRenderer, // AMD Radeon R9 M400 Series
+
     kOther_GrGLRenderer
 };
 
@@ -60,7 +76,26 @@ enum GrGLDriver {
     kNVIDIA_GrGLDriver,
     kIntel_GrGLDriver,
     kANGLE_GrGLDriver,
+    kQualcomm_GrGLDriver,
     kUnknown_GrGLDriver
+};
+
+enum class GrGLANGLEBackend {
+    kUnknown,
+    kD3D9,
+    kD3D11,
+    kOpenGL
+};
+
+enum class GrGLANGLEVendor {
+    kUnknown,
+    kIntel
+};
+
+enum class GrGLANGLERenderer {
+    kUnknown,
+    kIvyBridge,
+    kSkylake
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -79,6 +114,12 @@ enum GrGLDriver {
     do {                                                                       \
         *(p) = GR_GL_INIT_ZERO;                                                \
         GR_GL_CALL(gl, GetFramebufferAttachmentParameteriv(t, a, pname, p));   \
+    } while (0)
+
+#define GR_GL_GetInternalformativ(gl, t, f, n, s, p)                           \
+    do {                                                                       \
+        *(p) = GR_GL_INIT_ZERO;                                                \
+        GR_GL_CALL(gl, GetInternalformativ(t, f, n, s, p));                    \
     } while (0)
 
 #define GR_GL_GetNamedFramebufferAttachmentParameteriv(gl, fb, a, pname, p)          \
@@ -119,6 +160,8 @@ GrGLStandard GrGLGetStandardInUseFromString(const char* versionString);
 GrGLSLVersion GrGLGetGLSLVersionFromString(const char* versionString);
 GrGLVendor GrGLGetVendorFromString(const char* vendorString);
 GrGLRenderer GrGLGetRendererFromString(const char* rendererString);
+void GrGLGetANGLEInfoFromString(const char* rendererString, GrGLANGLEBackend*,
+                                GrGLANGLEVendor*, GrGLANGLERenderer*);
 
 void GrGLGetDriverInfo(GrGLStandard standard,
                        GrGLVendor vendor,
@@ -132,7 +175,6 @@ GrGLVersion GrGLGetVersion(const GrGLInterface*);
 GrGLSLVersion GrGLGetGLSLVersion(const GrGLInterface*);
 GrGLVendor GrGLGetVendor(const GrGLInterface*);
 GrGLRenderer GrGLGetRenderer(const GrGLInterface*);
-
 
 /**
  * Helpers for glGetError()
@@ -172,13 +214,6 @@ void GrGLClearErr(const GrGLInterface* gl);
     #define GR_GL_LOG_CALLS_IMPL(X)
 #endif
 
-// internal macro that does the per-GL-call callback (if necessary)
-#if GR_GL_PER_GL_FUNC_CALLBACK
-    #define GR_GL_CALLBACK_IMPL(IFACE) (IFACE)->fCallback(IFACE)
-#else
-    #define GR_GL_CALLBACK_IMPL(IFACE)
-#endif
-
 // makes a GL call on the interface and does any error checking and logging
 #define GR_GL_CALL(IFACE, X)                                    \
     do {                                                        \
@@ -190,7 +225,6 @@ void GrGLClearErr(const GrGLInterface* gl);
 // the caller wants to do its own glGetError() call and examine the error value.
 #define GR_GL_CALL_NOERRCHECK(IFACE, X)                         \
     do {                                                        \
-        GR_GL_CALLBACK_IMPL(IFACE);                             \
         (IFACE)->fFunctions.f##X;                               \
         GR_GL_LOG_CALLS_IMPL(X);                                \
     } while (false)
@@ -205,7 +239,6 @@ void GrGLClearErr(const GrGLInterface* gl);
 // same as GR_GL_CALL_RET but always skips the error check.
 #define GR_GL_CALL_RET_NOERRCHECK(IFACE, RET, X)                \
     do {                                                        \
-        GR_GL_CALLBACK_IMPL(IFACE);                             \
         (RET) = (IFACE)->fFunctions.f##X;                       \
         GR_GL_LOG_CALLS_IMPL(X);                                \
     } while (false)
@@ -213,7 +246,8 @@ void GrGLClearErr(const GrGLInterface* gl);
 // call glGetError without doing a redundant error check or logging.
 #define GR_GL_GET_ERROR(IFACE) (IFACE)->fFunctions.fGetError()
 
-GrGLenum GrToGLStencilFunc(GrStencilFunc basicFunc);
+GrGLenum GrToGLStencilFunc(GrStencilTest test);
 
+GrPixelConfig GrGLSizedFormatToPixelConfig(GrGLenum sizedFormat);
 
 #endif

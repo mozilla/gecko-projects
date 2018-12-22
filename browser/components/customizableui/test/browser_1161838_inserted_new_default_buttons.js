@@ -6,7 +6,7 @@ function test() {
   // Customize something to make sure stuff changed:
   CustomizableUI.addWidgetToArea("feed-button", CustomizableUI.AREA_NAVBAR);
 
-  let CustomizableUIBSPass = Cu.import("resource:///modules/CustomizableUI.jsm", {});
+  let CustomizableUIBSPass = ChromeUtils.import("resource:///modules/CustomizableUI.jsm", {});
 
   is(CustomizableUIBSPass.gFuturePlacements.size, 0,
      "All future placements should be dealt with by now.");
@@ -17,12 +17,9 @@ function test() {
   CustomizableUIInternal.saveState();
   CustomizableUIInternal.loadSavedState();
 
-  CustomizableUIInternal._introduceNewBuiltinWidgets();
+  CustomizableUIInternal._updateForNewVersion();
   is(gFuturePlacements.size, 0,
      "No change to future placements initially.");
-
-  let currentVersion = CustomizableUIBSPass.kVersion;
-
 
   // Add our widget to the defaults:
   let testWidgetNew = {
@@ -47,7 +44,7 @@ function test() {
 
   let savedPlacements = CustomizableUIBSPass.gSavedState.placements[CustomizableUI.AREA_NAVBAR];
   // Then call the re-init routine so we re-add the builtin widgets
-  CustomizableUIInternal._introduceNewBuiltinWidgets();
+  CustomizableUIInternal._updateForNewVersion();
   is(gFuturePlacements.size, 1,
      "Should have 1 more future placement");
   let futureNavbarPlacements = gFuturePlacements.get(CustomizableUI.AREA_NAVBAR);
@@ -58,7 +55,7 @@ function test() {
   CustomizableUIInternal._placeNewDefaultWidgetsInArea(CustomizableUI.AREA_NAVBAR);
 
   let indexInSavedPlacements = savedPlacements.indexOf(testWidgetNew.id);
-  info("Saved placements: " + savedPlacements.join(', '));
+  info("Saved placements: " + savedPlacements.join(", "));
   isnot(indexInSavedPlacements, -1, "Widget should have been inserted");
   is(indexInSavedPlacements, savedPlacements.indexOf("bookmarks-menu-button") + 1,
      "Widget should be in the right place.");
@@ -79,4 +76,3 @@ function test() {
   gPalette.delete(testWidgetNew.id);
   CustomizableUI.reset();
 }
-

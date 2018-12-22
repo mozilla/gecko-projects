@@ -4,9 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/BasePrincipal.h"
 #include "nsTLSSocketProvider.h"
 #include "nsNSSIOLayer.h"
 #include "nsError.h"
+
+using mozilla::OriginAttributes;
 
 nsTLSSocketProvider::nsTLSSocketProvider()
 {
@@ -23,7 +26,9 @@ nsTLSSocketProvider::NewSocket(int32_t family,
                                const char *host,
                                int32_t port,
                                nsIProxyInfo *proxy,
+                               const OriginAttributes &originAttributes,
                                uint32_t flags,
+                               uint32_t tlsFlags,
                                PRFileDesc **_result,
                                nsISupports **securityInfo)
 {
@@ -31,11 +36,13 @@ nsTLSSocketProvider::NewSocket(int32_t family,
                                       host,
                                       port,
                                       proxy,
+                                      originAttributes,
                                       _result,
                                       securityInfo,
                                       true,
-                                      flags);
-  
+                                      flags,
+                                      tlsFlags);
+
   return (NS_FAILED(rv)) ? NS_ERROR_SOCKET_CREATE_FAILED : NS_OK;
 }
 
@@ -45,7 +52,9 @@ nsTLSSocketProvider::AddToSocket(int32_t family,
                                  const char *host,
                                  int32_t port,
                                  nsIProxyInfo *proxy,
+                                 const OriginAttributes &originAttributes,
                                  uint32_t flags,
+                                 uint32_t tlsFlags,
                                  PRFileDesc *aSocket,
                                  nsISupports **securityInfo)
 {
@@ -53,10 +62,12 @@ nsTLSSocketProvider::AddToSocket(int32_t family,
                                         host,
                                         port,
                                         proxy,
+                                        originAttributes,
                                         aSocket,
                                         securityInfo,
                                         true,
-                                        flags);
-  
+                                        flags,
+                                        tlsFlags);
+
   return (NS_FAILED(rv)) ? NS_ERROR_SOCKET_CREATE_FAILED : NS_OK;
 }

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -13,14 +13,9 @@ SOURCES += [
     'workmonitor.cpp',
 ]
 
-if CONFIG['OS_ARCH'] == 'WINNT':
-    USE_LIBS += [
-        'updatecommon-standalone',
-    ]
-else:
-    USE_LIBS += [
-        'updatecommon',
-    ]
+USE_LIBS += [
+    'updatecommon',
+]
 
 # For debugging purposes only
 #DEFINES['DISABLE_UPDATER_AUTHENTICODE_CHECK'] = True
@@ -37,12 +32,12 @@ LOCAL_INCLUDES += [
 
 USE_STATIC_LIBS = True
 
-if CONFIG['_MSC_VER']:
+if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
     WIN32_EXE_LDFLAGS += ['-ENTRY:wmainCRTStartup']
 
 RCINCLUDE = 'maintenanceservice.rc'
 
-DISABLE_STL_WRAPPING = True
+DisableStlWrapping()
 
 OS_LIBS += [
     'comctl32',

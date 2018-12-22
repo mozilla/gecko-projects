@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -9,7 +8,8 @@
 #include "SkAAClip.h"
 #include "SkAtomics.h"
 #include "SkBlitter.h"
-#include "SkColorPriv.h"
+#include "SkColorData.h"
+#include "SkRectPriv.h"
 #include "SkPath.h"
 #include "SkScan.h"
 #include "SkUtils.h"
@@ -192,6 +192,7 @@ void SkAAClip::validate() const {
         SkASSERT(fBounds.isEmpty());
         return;
     }
+    SkASSERT(!fBounds.isEmpty());
 
     const RunHead* head = fRunHead;
     SkASSERT(head->fRefCnt > 0);
@@ -805,7 +806,7 @@ bool SkAAClip::setRegion(const SkRegion& rgn) {
     SkTDArray<uint8_t> xArray;
 
     yArray.setReserve(SkMin32(bounds.height(), 1024));
-    xArray.setReserve(SkMin32(bounds.width() * 128, 64 * 1024));
+    xArray.setReserve(SkMin32(bounds.width(), 512) * 128);
 
     SkRegion::Iterator iter(rgn);
     int prevRight = 0;
@@ -1037,8 +1038,10 @@ public:
 
     void addAntiRectRun(int x, int y, int width, int height,
                         SkAlpha leftAlpha, SkAlpha rightAlpha) {
-        SkASSERT(fBounds.contains(x + width - 1 +
-                 (leftAlpha > 0 ? 1 : 0) + (rightAlpha > 0 ? 1 : 0),
+        // According to SkBlitter.cpp, no matter whether leftAlpha is 0 or positive,
+        // we should always consider [x, x+1] as the left-most column and [x+1, x+1+width]
+        // as the rect with full alpha.
+        SkASSERT(fBounds.contains(x + width + (rightAlpha > 0 ? 1 : 0),
                  y + height - 1));
         SkASSERT(width >= 0);
 
@@ -1048,6 +1051,9 @@ public:
             width++;
         } else if (leftAlpha > 0) {
           this->addRun(x++, y, leftAlpha, 1);
+        } else {
+          // leftAlpha is 0, ignore the left column
+          x++;
         }
         if (rightAlpha == 0xFF) {
             width++;
@@ -1274,9 +1280,17 @@ public:
        any failure cases that misses may have minor artifacts.
     */
     void blitV(int x, int y, int height, SkAlpha alpha) override {
-        this->recordMinY(y);
-        fBuilder->addColumn(x, y, alpha, height);
-        fLastY = y + height - 1;
+        if (height == 1) {
+            // We're still in scan-line order if height is 1
+            // This is useful for Analytic AA
+            const SkAlpha alphas[2] = {alpha, 0};
+            const int16_t runs[2] = {1, 0};
+            this->blitAntiH(x, y, alphas, runs);
+        } else {
+            this->recordMinY(y);
+            fBuilder->addColumn(x, y, alpha, height);
+            fLastY = y + height - 1;
+        }
     }
 
     void blitRect(int x, int y, int width, int height) override {
@@ -1318,12 +1332,16 @@ public:
             }
 
             // The supersampler's buffer can be the width of the device, so
-            // we may have to trim the run to our bounds. If so, we assert that
-            // the extra spans are always alpha==0
+            // we may have to trim the run to our bounds. Previously, we assert that
+            // the extra spans are always alpha==0.
+            // However, the analytic AA is too sensitive to precision errors
+            // so it may have extra spans with very tiny alpha because after several
+            // arithmatic operations, the edge may bleed the path boundary a little bit.
+            // Therefore, instead of always asserting alpha==0, we assert alpha < 0x10.
             int localX = x;
             int localCount = count;
             if (x < fLeft) {
-                SkASSERT(0 == *alpha);
+                SkASSERT(0x10 > *alpha);
                 int gap = fLeft - x;
                 SkASSERT(gap <= count);
                 localX += gap;
@@ -1331,7 +1349,7 @@ public:
             }
             int right = x + count;
             if (right > fRight) {
-                SkASSERT(0 == *alpha);
+                SkASSERT(0x10 > *alpha);
                 localCount -= right - fRight;
                 SkASSERT(localCount >= 0);
             }
@@ -1365,8 +1383,7 @@ private:
     }
 
     void unexpected() {
-        SkDebugf("---- did not expect to get called here");
-        sk_throw();
+        SK_ABORT("---- did not expect to get called here");
     }
 };
 
@@ -1386,21 +1403,27 @@ bool SkAAClip::setPath(const SkPath& path, const SkRegion* clip, bool doAA) {
         clip = &tmpClip;
     }
 
+    // Since we assert that the BuilderBlitter will never blit outside the intersection
+    // of clip and ibounds, we create this snugClip to be that intersection and send it
+    // to the scan-converter.
+    SkRegion snugClip(*clip);
+
     if (path.isInverseFillType()) {
         ibounds = clip->getBounds();
     } else {
         if (ibounds.isEmpty() || !ibounds.intersect(clip->getBounds())) {
             return this->setEmpty();
         }
+        snugClip.op(ibounds, SkRegion::kIntersect_Op);
     }
 
     Builder        builder(ibounds);
     BuilderBlitter blitter(&builder);
 
     if (doAA) {
-        SkScan::AntiFillPath(path, *clip, &blitter, true);
+        SkScan::AntiFillPath(path, snugClip, &blitter, true);
     } else {
-        SkScan::FillPath(path, *clip, &blitter);
+        SkScan::FillPath(path, snugClip, &blitter);
     }
 
     blitter.finish();

@@ -8,19 +8,20 @@ package org.mozilla.gecko.widget;
 import android.app.Activity;
 import android.net.Uri;
 import android.support.design.widget.Snackbar;
+import android.support.v4.content.FileProvider;
 import android.util.Base64;
 import android.view.Menu;
 
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.SnackbarHelper;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
-import org.mozilla.gecko.menu.QuickShareBarActionView;
-import org.mozilla.gecko.mozglue.ContextUtils;
 import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.menu.MenuItemSwitcherLayout;
 import org.mozilla.gecko.util.IOUtils;
+import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
@@ -119,10 +120,6 @@ public class GeckoActionProvider {
                 view = new MenuItemSwitcherLayout(mContext, null);
                 break;
 
-            case QUICK_SHARE_ICON:
-                view = new QuickShareBarActionView(mContext, null);
-                break;
-
             case CONTEXT_MENU:
                 view = new MenuItemSwitcherLayout(mContext, null);
                 view.initContextMenuStyles();
@@ -149,7 +146,7 @@ public class GeckoActionProvider {
         }
 
         for (int i = 0; i < historySize; i++) {
-            view.addActionButton(dataModel.getActivity(i).loadIcon(packageManager), 
+            view.addActionButton(dataModel.getActivity(i).loadIcon(packageManager),
                                  dataModel.getActivity(i).loadLabel(packageManager));
         }
 
@@ -283,7 +280,6 @@ public class GeckoActionProvider {
 
     public enum ActionViewType {
         DEFAULT,
-        QUICK_SHARE_ICON,
         CONTEXT_MENU,
     }
 
@@ -295,21 +291,22 @@ public class GeckoActionProvider {
      * @param intent share intent to alter in place.
      */
     public void downloadImageForIntent(final Intent intent) {
-        final String src = ContextUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
-        final File dir = GeckoApp.getTempDirectory();
+        final String src = IntentUtils.getStringExtraSafe(intent, Intent.EXTRA_TEXT);
+        final File dir = GeckoApp.getTempDirectory(mContext);
 
         if (src == null || dir == null) {
             // We should be, but currently aren't, statically guaranteed an Activity context.
             // Try our best.
             if (mContext instanceof Activity) {
-                SnackbarHelper.showSnackbar((Activity) mContext,
-                        mContext.getApplicationContext().getString(R.string.share_image_failed),
-                        Snackbar.LENGTH_LONG);
+                SnackbarBuilder.builder((Activity) mContext)
+                        .message(mContext.getApplicationContext().getString(R.string.share_image_failed))
+                        .duration(Snackbar.LENGTH_LONG)
+                        .buildAndShow();
             }
             return;
         }
 
-        GeckoApp.deleteTempFiles();
+        GeckoApp.deleteTempFiles(mContext);
 
         String type = intent.getType();
         OutputStream os = null;
@@ -333,7 +330,7 @@ public class GeckoActionProvider {
                 os.write(buf);
 
                 // Only alter the intent when we're sure everything has worked
-                intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(imageFile));
+                addFileExtra(intent, imageFile);
             } else {
                 InputStream is = null;
                 try {
@@ -351,15 +348,26 @@ public class GeckoActionProvider {
                     }
 
                     // Only alter the intent when we're sure everything has worked
-                    intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(imageFile));
+                    addFileExtra(intent, imageFile);
                 } finally {
                     IOUtils.safeStreamClose(is);
                 }
             }
-        } catch(IOException ex) {
+        } catch (IOException ex) {
             // If something went wrong, we'll just leave the intent un-changed
         } finally {
             IOUtils.safeStreamClose(os);
+        }
+    }
+
+    private void addFileExtra(final Intent intent, final File file) {
+        if (AppConstants.Versions.preN) {
+            intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(file));
+        } else {
+            Uri contentUri = FileProvider.getUriForFile(mContext,
+                    AppConstants.MOZ_FILE_PROVIDER_AUTHORITY, file);
+            intent.putExtra(Intent.EXTRA_STREAM, contentUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
     }
 }

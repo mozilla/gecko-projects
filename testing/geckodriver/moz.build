@@ -1,0 +1,17 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+RUST_PROGRAMS += ["geckodriver"]
+
+# https://bugzil.la/1425365
+if CONFIG["OS_ARCH"] != "WINNT":
+    RUST_TESTS = ["geckodriver"]
+
+with Files("**"):
+    BUG_COMPONENT = ("Testing", "geckodriver")
+
+SPHINX_TREES["geckodriver"] = "doc"
+
+with Files('doc/**'):
+    SCHEDULES.exclusive = ['docs']

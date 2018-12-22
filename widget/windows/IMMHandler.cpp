@@ -16,6 +16,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/TextEvents.h"
+#include "mozilla/WindowsVersion.h"
 
 #ifndef IME_PROP_ACCEPT_WIDE_VKEY
 #define IME_PROP_ACCEPT_WIDE_VKEY 0x20
@@ -54,7 +55,7 @@ HandleSeparator(nsACString& aDesc)
 class GetIMEGeneralPropertyName : public nsAutoCString
 {
 public:
-  GetIMEGeneralPropertyName(DWORD aFlags)
+  explicit GetIMEGeneralPropertyName(DWORD aFlags)
   {
     if (!aFlags) {
       AppendLiteral("no flags");
@@ -90,7 +91,7 @@ public:
 class GetIMEUIPropertyName : public nsAutoCString
 {
 public:
-  GetIMEUIPropertyName(DWORD aFlags)
+  explicit GetIMEUIPropertyName(DWORD aFlags)
   {
     if (!aFlags) {
       AppendLiteral("no flags");
@@ -114,17 +115,17 @@ public:
 class GetWritingModeName : public nsAutoCString
 {
 public:
-  GetWritingModeName(const WritingMode& aWritingMode)
+  explicit GetWritingModeName(const WritingMode& aWritingMode)
   {
     if (!aWritingMode.IsVertical()) {
-      Assign("Horizontal");
+      AssignLiteral("Horizontal");
       return;
     }
     if (aWritingMode.IsVerticalLR()) {
-      Assign("Vertical (LR)");
+      AssignLiteral("Vertical (LR)");
       return;
     }
-    Assign("Vertical (RL)");
+    AssignLiteral("Vertical (RL)");
   }
   virtual ~GetWritingModeName() {}
 };
@@ -132,7 +133,7 @@ public:
 class GetReconvertStringLog : public nsAutoCString
 {
 public:
-  GetReconvertStringLog(RECONVERTSTRING* aReconv)
+  explicit GetReconvertStringLog(RECONVERTSTRING* aReconv)
   {
     AssignLiteral("{ dwSize=");
     AppendInt(static_cast<uint32_t>(aReconv->dwSize));
@@ -168,7 +169,7 @@ namespace widget {
 
 static IMMHandler* gIMMHandler = nullptr;
 
-PRLogModuleInfo* gIMMLog = nullptr;
+LazyLogModule gIMMLog("nsIMM32HandlerWidgets");
 
 /******************************************************************************
  * IMEContext
@@ -180,9 +181,9 @@ IMEContext::IMEContext(HWND aWnd)
 {
 }
 
-IMEContext::IMEContext(nsWindow* aWindow)
-  : mWnd(aWindow->GetWindowHandle())
-  , mIMC(::ImmGetContext(aWindow->GetWindowHandle()))
+IMEContext::IMEContext(nsWindowBase* aWindowBase)
+  : mWnd(aWindowBase->GetWindowHandle())
+  , mIMC(::ImmGetContext(aWindowBase->GetWindowHandle()))
 {
 }
 
@@ -195,9 +196,9 @@ IMEContext::Init(HWND aWnd)
 }
 
 void
-IMEContext::Init(nsWindow* aWindow)
+IMEContext::Init(nsWindowBase* aWindowBase)
 {
-  Init(aWindow->GetWindowHandle());
+  Init(aWindowBase->GetWindowHandle());
 }
 
 void
@@ -225,6 +226,54 @@ bool IMMHandler::sAssumeVerticalWritingModeNotSupported = false;
 bool IMMHandler::sHasFocus = false;
 bool IMMHandler::sNativeCaretIsCreatedForPlugin = false;
 
+#define IMPL_IS_IME_ACTIVE(aReadableName, aActualName)                         \
+bool                                                                           \
+IMMHandler::Is ## aReadableName ## Active()                                    \
+{                                                                              \
+  return sIMEName.Equals(aActualName);                                         \
+}                                                                              \
+
+IMPL_IS_IME_ACTIVE(ATOK2006, u"ATOK 2006")
+IMPL_IS_IME_ACTIVE(ATOK2007, u"ATOK 2007")
+IMPL_IS_IME_ACTIVE(ATOK2008, u"ATOK 2008")
+IMPL_IS_IME_ACTIVE(ATOK2009, u"ATOK 2009")
+IMPL_IS_IME_ACTIVE(ATOK2010, u"ATOK 2010")
+// NOTE: Even on Windows for en-US, the name of Google Japanese Input is
+//       written in Japanese.
+IMPL_IS_IME_ACTIVE(GoogleJapaneseInput,
+                   u"Google \x65E5\x672C\x8A9E\x5165\x529B "
+                   u"IMM32 \x30E2\x30B8\x30E5\x30FC\x30EB")
+IMPL_IS_IME_ACTIVE(Japanist2003, u"Japanist 2003")
+
+#undef IMPL_IS_IME_ACTIVE
+
+// static
+bool
+IMMHandler::IsActiveIMEInBlockList()
+{
+  if (sIMEName.IsEmpty()) {
+    return false;
+  }
+#ifdef _WIN64
+  // ATOK started to be TIP of TSF since 2011.  Older than it, i.e., ATOK 2010
+  // and earlier have a lot of problems even for daily use.  Perhaps, the
+  // reason is Win 8 has a lot of changes around IMM-IME support and TSF,
+  // and ATOK 2010 is released earlier than Win 8.
+  // ATOK 2006 crashes while converting a word with candidate window.
+  // ATOK 2007 doesn't paint and resize suggest window and candidate window
+  // correctly (showing white window or too big window).
+  // ATOK 2008 and ATOK 2009 crash when user just opens their open state.
+  // ATOK 2010 isn't installable newly on Win 7 or later, but we have a lot of
+  // crash reports.
+  if (IsWin8OrLater() &&
+      (IsATOK2006Active() || IsATOK2007Active() || IsATOK2008Active() ||
+       IsATOK2009Active() || IsATOK2010Active())) {
+    return true;
+  }
+#endif // #ifdef _WIN64
+  return false;
+}
+
 // static
 void
 IMMHandler::EnsureHandlerInstance()
@@ -238,9 +287,6 @@ IMMHandler::EnsureHandlerInstance()
 void
 IMMHandler::Initialize()
 {
-  if (!gIMMLog) {
-    gIMMLog = PR_NewLogModule("nsIMM32HandlerWidgets");
-  }
   if (!sWM_MSIME_MOUSE) {
     sWM_MSIME_MOUSE = ::RegisterWindowMessage(RWM_MOUSE);
   }
@@ -294,23 +340,6 @@ IMMHandler::IsTopLevelWindowOfComposition(nsWindow* aWindow)
 
 // static
 bool
-IMMHandler::IsJapanist2003Active()
-{
-  return sIMEName.EqualsLiteral("Japanist 2003");
-}
-
-// static
-bool
-IMMHandler::IsGoogleJapaneseInputActive()
-{
-  // NOTE: Even on Windows for en-US, the name of Google Japanese Input is
-  //       written in Japanese.
-  return sIMEName.Equals(L"Google \x65E5\x672C\x8A9E\x5165\x529B "
-                         L"IMM32 \x30E2\x30B8\x30E5\x30FC\x30EB");
-}
-
-// static
-bool
 IMMHandler::ShouldDrawCompositionStringOurselves()
 {
   // If current IME has special UI or its composition window should not
@@ -347,7 +376,7 @@ IMMHandler::InitKeyboardLayout(nsWindow* aWindow,
     // Add room for the terminating null character
     sIMEName.SetLength(++IMENameLength);
     IMENameLength =
-      ::ImmGetDescriptionW(aKeyboardLayout, wwc(sIMEName.BeginWriting()),
+      ::ImmGetDescriptionW(aKeyboardLayout, sIMEName.get(),
                            IMENameLength);
     // Adjust the length to ignore the terminating null character
     sIMEName.SetLength(IMENameLength);
@@ -366,8 +395,8 @@ IMMHandler::InitKeyboardLayout(nsWindow* aWindow,
   // For hacking some bugs of some TIP, we should set an IME name from the
   // pref.
   if (sCodePage == 932 && sIMEName.IsEmpty()) {
-    sIMEName =
-      Preferences::GetString("intl.imm.japanese.assume_active_tip_name_as");
+    Preferences::GetString("intl.imm.japanese.assume_active_tip_name_as",
+                           sIMEName);
   }
 
   // Whether the IME supports vertical writing mode might be changed or
@@ -378,7 +407,7 @@ IMMHandler::InitKeyboardLayout(nsWindow* aWindow,
   }
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: InitKeyboardLayout, aKeyboardLayout=%08x (\"%s\"), sCodePage=%lu, "
+    ("InitKeyboardLayout, aKeyboardLayout=%08x (\"%s\"), sCodePage=%lu, "
      "sIMEProperty=%s, sIMEUIProperty=%s",
      aKeyboardLayout, NS_ConvertUTF16toUTF8(sIMEName).get(),
      sCodePage, GetIMEGeneralPropertyName(sIMEProperty).get(),
@@ -393,13 +422,12 @@ IMMHandler::GetKeyboardCodePage()
 }
 
 // static
-nsIMEUpdatePreference
-IMMHandler::GetIMEUpdatePreference()
+IMENotificationRequests
+IMMHandler::GetIMENotificationRequests()
 {
-  return nsIMEUpdatePreference(
-    nsIMEUpdatePreference::NOTIFY_POSITION_CHANGE |
-    nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE |
-    nsIMEUpdatePreference::NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR);
+  return IMENotificationRequests(
+    IMENotificationRequests::NOTIFY_POSITION_CHANGE |
+    IMENotificationRequests::NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR);
 }
 
 // used for checking the lParam of WM_IME_COMPOSITION
@@ -418,16 +446,16 @@ IMMHandler::IMMHandler()
   , mIsComposingOnPlugin(false)
   , mNativeCaretIsCreated(false)
 {
-  MOZ_LOG(gIMMLog, LogLevel::Debug, ("IMM: IMMHandler is created"));
+  MOZ_LOG(gIMMLog, LogLevel::Debug, ("IMMHandler is created"));
 }
 
 IMMHandler::~IMMHandler()
 {
   if (mIsComposing) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: ~IMMHandler, ERROR, the instance is still composing"));
+      ("~IMMHandler, ERROR, the instance is still composing"));
   }
-  MOZ_LOG(gIMMLog, LogLevel::Debug, ("IMM: IMMHandler is destroyed"));
+  MOZ_LOG(gIMMLog, LogLevel::Debug, ("IMMHandler is destroyed"));
 }
 
 nsresult
@@ -451,7 +479,7 @@ void
 IMMHandler::CommitComposition(nsWindow* aWindow, bool aForce)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: CommitComposition, aForce=%s, aWindow=%p, hWnd=%08x, "
+    ("CommitComposition, aForce=%s, aWindow=%p, hWnd=%08x, "
      "mComposingWindow=%p%s",
      GetBoolName(aForce), aWindow, aWindow->GetWindowHandle(),
      gIMMHandler ? gIMMHandler->mComposingWindow : nullptr,
@@ -465,7 +493,7 @@ IMMHandler::CommitComposition(nsWindow* aWindow, bool aForce)
   IMEContext context(aWindow);
   bool associated = context.AssociateDefaultContext();
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: CommitComposition, associated=%s",
+    ("CommitComposition, associated=%s",
      GetBoolName(associated)));
 
   if (context.IsValid()) {
@@ -483,7 +511,7 @@ void
 IMMHandler::CancelComposition(nsWindow* aWindow, bool aForce)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: CancelComposition, aForce=%s, aWindow=%p, hWnd=%08x, "
+    ("CancelComposition, aForce=%s, aWindow=%p, hWnd=%08x, "
      "mComposingWindow=%p%s",
      GetBoolName(aForce), aWindow, aWindow->GetWindowHandle(),
      gIMMHandler ? gIMMHandler->mComposingWindow : nullptr,
@@ -497,7 +525,7 @@ IMMHandler::CancelComposition(nsWindow* aWindow, bool aForce)
   IMEContext context(aWindow);
   bool associated = context.AssociateDefaultContext();
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: CancelComposition, associated=%s",
+    ("CancelComposition, associated=%s",
      GetBoolName(associated)));
 
   if (context.IsValid()) {
@@ -514,7 +542,7 @@ void
 IMMHandler::OnFocusChange(bool aFocus, nsWindow* aWindow)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnFocusChange(aFocus=%s, aWindow=%p), sHasFocus=%s, "
+    ("OnFocusChange(aFocus=%s, aWindow=%p), sHasFocus=%s, "
      "IsComposingWindow(aWindow)=%s, aWindow->Destroyed()=%s, "
      "sNativeCaretIsCreatedForPlugin=%s",
      GetBoolName(aFocus), aWindow, GetBoolName(sHasFocus),
@@ -737,7 +765,7 @@ IMMHandler::OnInputLangChange(nsWindow* aWindow,
                               MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnInputLangChange, hWnd=%08x, wParam=%08x, lParam=%08x",
+    ("OnInputLangChange, hWnd=%08x, wParam=%08x, lParam=%08x",
      aWindow->GetWindowHandle(), wParam, lParam));
 
   aWindow->NotifyIME(REQUEST_TO_COMMIT_COMPOSITION);
@@ -755,7 +783,7 @@ IMMHandler::OnIMEStartComposition(nsWindow* aWindow,
                                   MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEStartComposition, hWnd=%08x, mIsComposing=%s",
+    ("OnIMEStartComposition, hWnd=%08x, mIsComposing=%s",
      aWindow->GetWindowHandle(), GetBoolName(mIsComposing)));
   aResult.mConsumed = ShouldDrawCompositionStringOurselves();
   if (mIsComposing) {
@@ -775,7 +803,7 @@ IMMHandler::OnIMEComposition(nsWindow* aWindow,
                              MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEComposition, hWnd=%08x, lParam=%08x, mIsComposing=%s, "
+    ("OnIMEComposition, hWnd=%08x, lParam=%08x, mIsComposing=%s, "
      "GCS_RESULTSTR=%s, GCS_COMPSTR=%s, GCS_COMPATTR=%s, GCS_COMPCLAUSE=%s, "
      "GCS_CURSORPOS=%s,",
      aWindow->GetWindowHandle(), lParam, GetBoolName(mIsComposing),
@@ -793,7 +821,7 @@ IMMHandler::OnIMEEndComposition(nsWindow* aWindow,
                                 MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEEndComposition, hWnd=%08x, mIsComposing=%s",
+    ("OnIMEEndComposition, hWnd=%08x, mIsComposing=%s",
      aWindow->GetWindowHandle(), GetBoolName(mIsComposing)));
 
   aResult.mConsumed = ShouldDrawCompositionStringOurselves();
@@ -811,7 +839,7 @@ IMMHandler::OnIMEEndComposition(nsWindow* aWindow,
       compositionMsg.message == WM_IME_COMPOSITION &&
       IS_COMMITTING_LPARAM(compositionMsg.lParam)) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: OnIMEEndComposition, WM_IME_ENDCOMPOSITION is followed by "
+      ("OnIMEEndComposition, WM_IME_ENDCOMPOSITION is followed by "
        "WM_IME_COMPOSITION, ignoring the message..."));
     return true;
   }
@@ -823,7 +851,7 @@ IMMHandler::OnIMEEndComposition(nsWindow* aWindow,
   // XXX Shouldn't we dispatch the compositionchange event with actual or
   //     latest composition string?
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEEndComposition, mCompositionString=\"%s\"%s",
+    ("OnIMEEndComposition, mCompositionString=\"%s\"%s",
      NS_ConvertUTF16toUTF8(mCompositionString).get(),
      mCompositionString.IsEmpty() ? "" : ", but canceling it..."));
 
@@ -840,7 +868,7 @@ IMMHandler::OnIMEChar(nsWindow* aWindow,
                       MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEChar, hWnd=%08x, char=%08x",
+    ("OnIMEChar, hWnd=%08x, char=%08x",
      aWindow->GetWindowHandle(), wParam));
 
   // We don't need to fire any compositionchange events from here. This method
@@ -859,7 +887,7 @@ IMMHandler::OnIMECompositionFull(nsWindow* aWindow,
                                  MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMECompositionFull, hWnd=%08x",
+    ("OnIMECompositionFull, hWnd=%08x",
      aWindow->GetWindowHandle()));
 
   // not implement yet
@@ -877,72 +905,72 @@ IMMHandler::OnIMENotify(nsWindow* aWindow,
   switch (wParam) {
     case IMN_CHANGECANDIDATE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_CHANGECANDIDATE, lParam=%08x",
+        ("OnIMENotify, hWnd=%08x, IMN_CHANGECANDIDATE, lParam=%08x",
          aWindow->GetWindowHandle(), lParam));
       break;
     case IMN_CLOSECANDIDATE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_CLOSECANDIDATE, lParam=%08x",
+        ("OnIMENotify, hWnd=%08x, IMN_CLOSECANDIDATE, lParam=%08x",
          aWindow->GetWindowHandle(), lParam));
       break;
     case IMN_CLOSESTATUSWINDOW:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_CLOSESTATUSWINDOW",
+        ("OnIMENotify, hWnd=%08x, IMN_CLOSESTATUSWINDOW",
          aWindow->GetWindowHandle()));
       break;
     case IMN_GUIDELINE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_GUIDELINE",
+        ("OnIMENotify, hWnd=%08x, IMN_GUIDELINE",
          aWindow->GetWindowHandle()));
       break;
     case IMN_OPENCANDIDATE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_OPENCANDIDATE, lParam=%08x",
+        ("OnIMENotify, hWnd=%08x, IMN_OPENCANDIDATE, lParam=%08x",
          aWindow->GetWindowHandle(), lParam));
       break;
     case IMN_OPENSTATUSWINDOW:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_OPENSTATUSWINDOW",
+        ("OnIMENotify, hWnd=%08x, IMN_OPENSTATUSWINDOW",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETCANDIDATEPOS:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETCANDIDATEPOS, lParam=%08x",
+        ("OnIMENotify, hWnd=%08x, IMN_SETCANDIDATEPOS, lParam=%08x",
          aWindow->GetWindowHandle(), lParam));
       break;
     case IMN_SETCOMPOSITIONFONT:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETCOMPOSITIONFONT",
+        ("OnIMENotify, hWnd=%08x, IMN_SETCOMPOSITIONFONT",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETCOMPOSITIONWINDOW:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETCOMPOSITIONWINDOW",
+        ("OnIMENotify, hWnd=%08x, IMN_SETCOMPOSITIONWINDOW",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETCONVERSIONMODE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETCONVERSIONMODE",
+        ("OnIMENotify, hWnd=%08x, IMN_SETCONVERSIONMODE",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETOPENSTATUS:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETOPENSTATUS",
+        ("OnIMENotify, hWnd=%08x, IMN_SETOPENSTATUS",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETSENTENCEMODE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETSENTENCEMODE",
+        ("OnIMENotify, hWnd=%08x, IMN_SETSENTENCEMODE",
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETSTATUSWINDOWPOS:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_SETSTATUSWINDOWPOS",
+        ("OnIMENotify, hWnd=%08x, IMN_SETSTATUSWINDOWPOS",
          aWindow->GetWindowHandle()));
       break;
     case IMN_PRIVATE:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMENotify, hWnd=%08x, IMN_PRIVATE",
+        ("OnIMENotify, hWnd=%08x, IMN_PRIVATE",
          aWindow->GetWindowHandle()));
       break;
   }
@@ -961,26 +989,26 @@ IMMHandler::OnIMERequest(nsWindow* aWindow,
   switch (wParam) {
     case IMR_RECONVERTSTRING:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMERequest, hWnd=%08x, IMR_RECONVERTSTRING",
+        ("OnIMERequest, hWnd=%08x, IMR_RECONVERTSTRING",
          aWindow->GetWindowHandle()));
       aResult.mConsumed = HandleReconvert(aWindow, lParam, &aResult.mResult);
       return true;
     case IMR_QUERYCHARPOSITION:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMERequest, hWnd=%08x, IMR_QUERYCHARPOSITION",
+        ("OnIMERequest, hWnd=%08x, IMR_QUERYCHARPOSITION",
          aWindow->GetWindowHandle()));
       aResult.mConsumed =
         HandleQueryCharPosition(aWindow, lParam, &aResult.mResult);
       return true;
     case IMR_DOCUMENTFEED:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMERequest, hWnd=%08x, IMR_DOCUMENTFEED",
+        ("OnIMERequest, hWnd=%08x, IMR_DOCUMENTFEED",
          aWindow->GetWindowHandle()));
       aResult.mConsumed = HandleDocumentFeed(aWindow, lParam, &aResult.mResult);
       return true;
     default:
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: OnIMERequest, hWnd=%08x, wParam=%08x",
+        ("OnIMERequest, hWnd=%08x, wParam=%08x",
          aWindow->GetWindowHandle(), wParam));
       aResult.mConsumed = false;
       return true;
@@ -995,7 +1023,7 @@ IMMHandler::OnIMESelect(nsWindow* aWindow,
                         MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMESelect, hWnd=%08x, wParam=%08x, lParam=%08x",
+    ("OnIMESelect, hWnd=%08x, wParam=%08x, lParam=%08x",
      aWindow->GetWindowHandle(), wParam, lParam));
 
   // not implement yet
@@ -1011,7 +1039,7 @@ IMMHandler::OnIMESetContext(nsWindow* aWindow,
                             MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMESetContext, hWnd=%08x, %s, lParam=%08x",
+    ("OnIMESetContext, hWnd=%08x, %s, lParam=%08x",
      aWindow->GetWindowHandle(), wParam ? "Active" : "Deactive", lParam));
 
   aResult.mConsumed = false;
@@ -1025,7 +1053,7 @@ IMMHandler::OnIMESetContext(nsWindow* aWindow,
   // the WM_IME_SETCONTEXT on the top level window.
   if (IsTopLevelWindowOfComposition(aWindow)) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: OnIMESetContext, hWnd=%08x is top level window"));
+      ("OnIMESetContext, hWnd=%08x is top level window"));
     return true;
   }
 
@@ -1040,7 +1068,7 @@ IMMHandler::OnIMESetContext(nsWindow* aWindow,
   if (wParam && (lParam & ISC_SHOWUICOMPOSITIONWINDOW) &&
       ShouldDrawCompositionStringOurselves()) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: OnIMESetContext, ISC_SHOWUICOMPOSITIONWINDOW is removed"));
+      ("OnIMESetContext, ISC_SHOWUICOMPOSITIONWINDOW is removed"));
     lParam &= ~ISC_SHOWUICOMPOSITIONWINDOW;
   }
 
@@ -1077,7 +1105,7 @@ IMMHandler::OnChar(nsWindow* aWindow,
   LPARAM recLParam;
   DequeueIMECharRecords(recWParam, recLParam);
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnChar, aWindow=%p, wParam=%08x, lParam=%08x, "
+    ("OnChar, aWindow=%p, wParam=%08x, lParam=%08x, "
      "recorded: wParam=%08x, lParam=%08x",
      aWindow->GetWindowHandle(), wParam, lParam, recWParam, recLParam));
   // If an unexpected char message comes, we should reset the records,
@@ -1103,7 +1131,7 @@ IMMHandler::OnIMEStartCompositionOnPlugin(nsWindow* aWindow,
                                           LPARAM lParam)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEStartCompositionOnPlugin, hWnd=%08x, mIsComposingOnPlugin=%s",
+    ("OnIMEStartCompositionOnPlugin, hWnd=%08x, mIsComposingOnPlugin=%s",
      aWindow->GetWindowHandle(), GetBoolName(mIsComposingOnPlugin)));
   mIsComposingOnPlugin = true;
   mDispatcher = GetTextEventDispatcherFor(aWindow);
@@ -1121,7 +1149,7 @@ IMMHandler::OnIMECompositionOnPlugin(nsWindow* aWindow,
                                      LPARAM lParam)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMECompositionOnPlugin, hWnd=%08x, lParam=%08x, "
+    ("OnIMECompositionOnPlugin, hWnd=%08x, lParam=%08x, "
      "mIsComposingOnPlugin=%s, GCS_RESULTSTR=%s, GCS_COMPSTR=%s, "
      "GCS_COMPATTR=%s, GCS_COMPCLAUSE=%s, GCS_CURSORPOS=%s",
      aWindow->GetWindowHandle(), lParam, GetBoolName(mIsComposingOnPlugin),
@@ -1151,7 +1179,7 @@ IMMHandler::OnIMEEndCompositionOnPlugin(nsWindow* aWindow,
                                         LPARAM lParam)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMEEndCompositionOnPlugin, hWnd=%08x, mIsComposingOnPlugin=%s",
+    ("OnIMEEndCompositionOnPlugin, hWnd=%08x, mIsComposingOnPlugin=%s",
      aWindow->GetWindowHandle(), GetBoolName(mIsComposingOnPlugin)));
 
   mIsComposingOnPlugin = false;
@@ -1171,7 +1199,7 @@ IMMHandler::OnIMECharOnPlugin(nsWindow* aWindow,
                               MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMECharOnPlugin, hWnd=%08x, char=%08x, scancode=%08x",
+    ("OnIMECharOnPlugin, hWnd=%08x, char=%08x, scancode=%08x",
      aWindow->GetWindowHandle(), wParam, lParam));
 
   aResult.mConsumed =
@@ -1193,7 +1221,7 @@ IMMHandler::OnIMESetContextOnPlugin(nsWindow* aWindow,
                                     MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnIMESetContextOnPlugin, hWnd=%08x, %s, lParam=%08x",
+    ("OnIMESetContextOnPlugin, hWnd=%08x, %s, lParam=%08x",
      aWindow->GetWindowHandle(), wParam ? "Active" : "Deactive", lParam));
 
   // If the IME context becomes active on a plug-in, we should commit
@@ -1246,7 +1274,7 @@ IMMHandler::OnCharOnPlugin(nsWindow* aWindow,
   LPARAM recLParam;
   DequeueIMECharRecords(recWParam, recLParam);
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnCharOnPlugin, aWindow=%p, wParam=%08x, lParam=%08x, "
+    ("OnCharOnPlugin, aWindow=%p, wParam=%08x, lParam=%08x, "
      "recorded: wParam=%08x, lParam=%08x",
      aWindow->GetWindowHandle(), wParam, lParam, recWParam, recLParam));
   // If an unexpected char message comes, we should reset the records,
@@ -1273,13 +1301,13 @@ void
 IMMHandler::HandleStartComposition(nsWindow* aWindow,
                                    const IMEContext& aContext)
 {
-  NS_PRECONDITION(!mIsComposing,
-    "HandleStartComposition is called but mIsComposing is TRUE");
+  MOZ_ASSERT(!mIsComposing,
+             "HandleStartComposition is called but mIsComposing is TRUE");
 
   Selection& selection = GetSelection();
   if (!selection.EnsureValidSelection(aWindow)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleStartComposition, FAILED, due to "
+      ("HandleStartComposition, FAILED, due to "
        "Selection::EnsureValidSelection() failure"));
     return;
   }
@@ -1293,7 +1321,7 @@ IMMHandler::HandleStartComposition(nsWindow* aWindow,
   nsresult rv = dispatcher->BeginNativeInputTransaction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleStartComposition, FAILED due to "
+      ("HandleStartComposition, FAILED due to "
        "TextEventDispatcher::BeginNativeInputTransaction() failure"));
     return;
   }
@@ -1302,7 +1330,7 @@ IMMHandler::HandleStartComposition(nsWindow* aWindow,
   rv = dispatcher->StartComposition(status, &eventTime);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleStartComposition, FAILED, due to "
+      ("HandleStartComposition, FAILED, due to "
        "TextEventDispatcher::StartComposition() failure"));
     return;
   }
@@ -1312,7 +1340,7 @@ IMMHandler::HandleStartComposition(nsWindow* aWindow,
   mDispatcher = dispatcher;
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleStartComposition, START composition, mCompositionStart=%ld",
+    ("HandleStartComposition, START composition, mCompositionStart=%ld",
      mCompositionStart));
 }
 
@@ -1343,7 +1371,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
                               WM_IME_COMPOSITION, PM_NOREMOVE) &&
         msg2.message == WM_IME_COMPOSITION) {
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: HandleComposition, Ignores due to find a "
+        ("HandleComposition, Ignores due to find a "
          "WM_IME_STARTCOMPOSITION"));
       return ShouldDrawCompositionStringOurselves();
     }
@@ -1362,7 +1390,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
     GetCompositionString(aContext, GCS_RESULTSTR, mCompositionString);
 
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleComposition, GCS_RESULTSTR"));
+      ("HandleComposition, GCS_RESULTSTR"));
 
     HandleEndComposition(aWindow, &mCompositionString);
 
@@ -1383,14 +1411,14 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
   // 1. Get GCS_COMPSTR
   //--------------------------------------------------------
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleComposition, GCS_COMPSTR"));
+    ("HandleComposition, GCS_COMPSTR"));
 
   nsAutoString previousCompositionString(mCompositionString);
   GetCompositionString(aContext, GCS_COMPSTR, mCompositionString);
 
   if (!IS_COMPOSING_LPARAM(lParam)) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleComposition, lParam doesn't indicate composing, "
+      ("HandleComposition, lParam doesn't indicate composing, "
        "mCompositionString=\"%s\", previousCompositionString=\"%s\"",
        NS_ConvertUTF16toUTF8(mCompositionString).get(),
        NS_ConvertUTF16toUTF8(previousCompositionString).get()));
@@ -1429,7 +1457,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
     // WM_IME_ENDCOMPOSITION may not be sent. If so, we cannot run
     // HandleEndComposition() in other place.
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleComposition, Aborting GCS_COMPSTR"));
+      ("HandleComposition, Aborting GCS_COMPSTR"));
     HandleEndComposition(aWindow);
     return IS_COMMITTING_LPARAM(lParam);
   }
@@ -1452,7 +1480,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
     bool useA_API = !(sIMEProperty & IME_PROP_UNICODE);
 
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleComposition, GCS_COMPCLAUSE, useA_API=%s",
+      ("HandleComposition, GCS_COMPCLAUSE, useA_API=%s",
        useA_API ? "TRUE" : "FALSE"));
 
     long clauseArrayLength2 = 
@@ -1467,20 +1495,21 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
 
     if (clauseArrayLength != clauseArrayLength2) {
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: HandleComposition, GCS_COMPCLAUSE, clauseArrayLength=%ld but "
+        ("HandleComposition, GCS_COMPCLAUSE, clauseArrayLength=%ld but "
          "clauseArrayLength2=%ld",
          clauseArrayLength, clauseArrayLength2));
       if (clauseArrayLength > clauseArrayLength2)
         clauseArrayLength = clauseArrayLength2;
     }
 
-    if (useA_API) {
+    if (useA_API && clauseArrayLength > 0) {
       // Convert each values of sIMECompClauseArray. The values mean offset of
       // the clauses in ANSI string. But we need the values in Unicode string.
       nsAutoCString compANSIStr;
       if (ConvertToANSIString(mCompositionString, GetKeyboardCodePage(),
                               compANSIStr)) {
         uint32_t maxlen = compANSIStr.Length();
+        mClauseArray.SetLength(clauseArrayLength);
         mClauseArray[0] = 0; // first value must be 0
         for (int32_t i = 1; i < clauseArrayLength; i++) {
           uint32_t len = std::min(mClauseArray[i], maxlen);
@@ -1497,7 +1526,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
   mClauseArray.SetLength(std::max<long>(0, clauseArrayLength));
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleComposition, GCS_COMPCLAUSE, mClauseLength=%ld",
+    ("HandleComposition, GCS_COMPCLAUSE, mClauseLength=%ld",
      mClauseArray.Length()));
 
   //--------------------------------------------------------
@@ -1523,7 +1552,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
   mAttributeArray.SetLength(std::max<long>(0, attrArrayLength));
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleComposition, GCS_COMPATTR, mAttributeLength=%ld",
+    ("HandleComposition, GCS_COMPATTR, mAttributeLength=%ld",
      mAttributeArray.Length()));
 
   //--------------------------------------------------------
@@ -1544,7 +1573,7 @@ IMMHandler::HandleComposition(nsWindow* aWindow,
                "illegal pos");
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleComposition, GCS_CURSORPOS, mCursorPosition=%d",
+    ("HandleComposition, GCS_CURSORPOS, mCursorPosition=%d",
      mCursorPosition));
 
   //--------------------------------------------------------
@@ -1563,7 +1592,7 @@ IMMHandler::HandleEndComposition(nsWindow* aWindow,
     "HandleEndComposition is called but mIsComposing is FALSE");
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleEndComposition(aWindow=0x%p, aCommitString=0x%p (\"%s\"))",
+    ("HandleEndComposition(aWindow=0x%p, aCommitString=0x%p (\"%s\"))",
      aWindow, aCommitString,
      aCommitString ? NS_ConvertUTF16toUTF8(*aCommitString).get() : ""));
 
@@ -1576,7 +1605,7 @@ IMMHandler::HandleEndComposition(nsWindow* aWindow,
   nsresult rv = dispatcher->BeginNativeInputTransaction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleEndComposition, FAILED due to "
+      ("HandleEndComposition, FAILED due to "
        "TextEventDispatcher::BeginNativeInputTransaction() failure"));
     return;
   }
@@ -1585,7 +1614,7 @@ IMMHandler::HandleEndComposition(nsWindow* aWindow,
   rv = dispatcher->CommitComposition(status, aCommitString, &eventTime);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleStartComposition, FAILED, due to "
+      ("HandleStartComposition, FAILED, due to "
        "TextEventDispatcher::CommitComposition() failure"));
     return;
   }
@@ -1606,7 +1635,7 @@ IMMHandler::HandleReconvert(nsWindow* aWindow,
   Selection& selection = GetSelection();
   if (!selection.EnsureValidSelection(aWindow)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleReconvert, FAILED, due to "
+      ("HandleReconvert, FAILED, due to "
        "Selection::EnsureValidSelection() failure"));
     return false;
   }
@@ -1618,19 +1647,19 @@ IMMHandler::HandleReconvert(nsWindow* aWindow,
     // Return need size to reconvert.
     if (len == 0) {
       MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: HandleReconvert, There are not selected text"));
+        ("HandleReconvert, There are not selected text"));
       return false;
     }
     *oResult = needSize;
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleReconvert, succeeded, result=%ld",
+      ("HandleReconvert, succeeded, result=%ld",
        *oResult));
     return true;
   }
 
   if (pReconv->dwSize < needSize) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleReconvert, FAILED, pReconv->dwSize=%ld, needSize=%ld",
+      ("HandleReconvert, FAILED, pReconv->dwSize=%ld, needSize=%ld",
        pReconv->dwSize, needSize));
     return false;
   }
@@ -1650,7 +1679,7 @@ IMMHandler::HandleReconvert(nsWindow* aWindow,
                selection.mString.get(), len * sizeof(WCHAR));
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleReconvert, SUCCEEDED, pReconv=%s, result=%ld",
+    ("HandleReconvert, SUCCEEDED, pReconv=%s, result=%ld",
      GetReconvertStringLog(pReconv).get(), *oResult));
 
   return true;
@@ -1666,25 +1695,25 @@ IMMHandler::HandleQueryCharPosition(nsWindow* aWindow,
   IMECHARPOSITION* pCharPosition = reinterpret_cast<IMECHARPOSITION*>(lParam);
   if (!pCharPosition) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleQueryCharPosition, FAILED, due to pCharPosition is null"));
+      ("HandleQueryCharPosition, FAILED, due to pCharPosition is null"));
     return false;
   }
   if (pCharPosition->dwSize < sizeof(IMECHARPOSITION)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleReconvert, FAILED, pCharPosition->dwSize=%ld, "
+      ("HandleReconvert, FAILED, pCharPosition->dwSize=%ld, "
        "sizeof(IMECHARPOSITION)=%ld",
        pCharPosition->dwSize, sizeof(IMECHARPOSITION)));
     return false;
   }
   if (::GetFocus() != aWindow->GetWindowHandle()) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleReconvert, FAILED, ::GetFocus()=%08x, OurWindowHandle=%08x",
+      ("HandleReconvert, FAILED, ::GetFocus()=%08x, OurWindowHandle=%08x",
        ::GetFocus(), aWindow->GetWindowHandle()));
     return false;
   }
   if (pCharPosition->dwCharPos > len) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleQueryCharPosition, FAILED, pCharPosition->dwCharPos=%ld, "
+      ("HandleQueryCharPosition, FAILED, pCharPosition->dwCharPos=%ld, "
        "len=%ld",
        pCharPosition->dwCharPos, len));
     return false;
@@ -1707,17 +1736,17 @@ IMMHandler::HandleQueryCharPosition(nsWindow* aWindow,
   //     documented) and its horizontal width.  So, it might be better to set
   //     top-right corner of the character and horizontal width, but we're not
   //     sure if it doesn't cause any problems with a lot of IMEs...
-  pCharPosition->pt.x = screenRect.x;
-  pCharPosition->pt.y = screenRect.y;
+  pCharPosition->pt.x = screenRect.X();
+  pCharPosition->pt.y = screenRect.Y();
 
-  pCharPosition->cLineHeight = r.height;
+  pCharPosition->cLineHeight = r.Height();
 
   WidgetQueryContentEvent editorRect(true, eQueryEditorRect, aWindow);
   aWindow->InitEvent(editorRect);
   DispatchEvent(aWindow, editorRect);
   if (NS_WARN_IF(!editorRect.mSucceeded)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleQueryCharPosition, eQueryEditorRect failed"));
+      ("HandleQueryCharPosition, eQueryEditorRect failed"));
     ::GetWindowRect(aWindow->GetWindowHandle(), &pCharPosition->rcDocument);
   } else {
     LayoutDeviceIntRect editorRectInWindow = editorRect.mReply.mRect;
@@ -1726,14 +1755,14 @@ IMMHandler::HandleQueryCharPosition(nsWindow* aWindow,
     LayoutDeviceIntRect editorRectInScreen;
     ResolveIMECaretPos(window, editorRectInWindow, nullptr, editorRectInScreen);
     ::SetRect(&pCharPosition->rcDocument,
-              editorRectInScreen.x, editorRectInScreen.y,
+              editorRectInScreen.X(), editorRectInScreen.Y(),
               editorRectInScreen.XMost(), editorRectInScreen.YMost());
   }
 
   *oResult = TRUE;
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleQueryCharPosition, SUCCEEDED, pCharPosition={ pt={ x=%d, "
+    ("HandleQueryCharPosition, SUCCEEDED, pCharPosition={ pt={ x=%d, "
      "y=%d }, cLineHeight=%d, rcDocument={ left=%d, top=%d, right=%d, "
      "bottom=%d } }",
      pCharPosition->pt.x, pCharPosition->pt.y, pCharPosition->cLineHeight,
@@ -1760,7 +1789,7 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
     Selection& selection = GetSelection();
     if (!selection.EnsureValidSelection(aWindow)) {
       MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: HandleDocumentFeed, FAILED, due to "
+        ("HandleDocumentFeed, FAILED, due to "
          "Selection::EnsureValidSelection() failure"));
       return false;
     }
@@ -1777,7 +1806,7 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
   if (targetOffset < 0 || targetLength < 0 ||
       targetOffset + targetLength < 0) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleDocumentFeed, FAILED, due to the selection is out of "
+      ("HandleDocumentFeed, FAILED, due to the selection is out of "
        "range"));
     return false;
   }
@@ -1789,14 +1818,14 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
   DispatchEvent(aWindow, textContent);
   if (!textContent.mSucceeded) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleDocumentFeed, FAILED, due to eQueryTextContent failure"));
+      ("HandleDocumentFeed, FAILED, due to eQueryTextContent failure"));
     return false;
   }
 
   nsAutoString str(textContent.mReply.mString);
   if (targetOffset > int32_t(str.Length())) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleDocumentFeed, FAILED, due to the caret offset is invalid"));
+      ("HandleDocumentFeed, FAILED, due to the caret offset is invalid"));
     return false;
   }
 
@@ -1817,14 +1846,14 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
   if (!pReconv) {
     *oResult = needSize;
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: HandleDocumentFeed, succeeded, result=%ld",
+      ("HandleDocumentFeed, succeeded, result=%ld",
        *oResult));
     return true;
   }
 
   if (pReconv->dwSize < needSize) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: HandleDocumentFeed, FAILED, pReconv->dwSize=%ld, needSize=%ld",
+      ("HandleDocumentFeed, FAILED, pReconv->dwSize=%ld, needSize=%ld",
        pReconv->dwSize, needSize));
     return false;
   }
@@ -1841,7 +1870,7 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
     uint32_t offset, length;
     if (!GetTargetClauseRange(&offset, &length)) {
       MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: HandleDocumentFeed, FAILED, due to GetTargetClauseRange() "
+        ("HandleDocumentFeed, FAILED, due to GetTargetClauseRange() "
          "failure"));
       return false;
     }
@@ -1862,7 +1891,7 @@ IMMHandler::HandleDocumentFeed(nsWindow* aWindow,
                paragraph.BeginReading(), len * sizeof(WCHAR));
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: HandleDocumentFeed, SUCCEEDED, pReconv=%s, result=%ld",
+    ("HandleDocumentFeed, SUCCEEDED, pReconv=%s, result=%ld",
      GetReconvertStringLog(pReconv).get(), *oResult));
 
   return true;
@@ -1876,7 +1905,7 @@ IMMHandler::CommitCompositionOnPreviousWindow(nsWindow* aWindow)
   }
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: CommitCompositionOnPreviousWindow, mIsComposing=%s",
+    ("CommitCompositionOnPreviousWindow, mIsComposing=%s",
      GetBoolName(mIsComposing)));
 
   // If we have composition, we should dispatch composition events internally.
@@ -1891,7 +1920,7 @@ IMMHandler::CommitCompositionOnPreviousWindow(nsWindow* aWindow)
   return false;
 }
 
-static uint32_t
+static TextRangeType
 PlatformToNSAttr(uint8_t aAttr)
 {
   switch (aAttr)
@@ -1899,35 +1928,16 @@ PlatformToNSAttr(uint8_t aAttr)
     case ATTR_INPUT_ERROR:
     // case ATTR_FIXEDCONVERTED:
     case ATTR_INPUT:
-      return NS_TEXTRANGE_RAWINPUT;
+      return TextRangeType::eRawClause;
     case ATTR_CONVERTED:
-      return NS_TEXTRANGE_CONVERTEDTEXT;
+      return TextRangeType::eConvertedClause;
     case ATTR_TARGET_NOTCONVERTED:
-      return NS_TEXTRANGE_SELECTEDRAWTEXT;
+      return TextRangeType::eSelectedRawClause;
     case ATTR_TARGET_CONVERTED:
-      return NS_TEXTRANGE_SELECTEDCONVERTEDTEXT;
+      return TextRangeType::eSelectedClause;
     default:
       NS_ASSERTION(false, "unknown attribute");
-      return NS_TEXTRANGE_CARETPOSITION;
-  }
-}
-
-static const char*
-GetRangeTypeName(uint32_t aRangeType)
-{
-  switch (aRangeType) {
-    case NS_TEXTRANGE_RAWINPUT:
-      return "NS_TEXTRANGE_RAWINPUT";
-    case NS_TEXTRANGE_CONVERTEDTEXT:
-      return "NS_TEXTRANGE_CONVERTEDTEXT";
-    case NS_TEXTRANGE_SELECTEDRAWTEXT:
-      return "NS_TEXTRANGE_SELECTEDRAWTEXT";
-    case NS_TEXTRANGE_SELECTEDCONVERTEDTEXT:
-      return "NS_TEXTRANGE_SELECTEDCONVERTEDTEXT";
-    case NS_TEXTRANGE_CARETPOSITION:
-      return "NS_TEXTRANGE_CARETPOSITION";
-    default:
-      return "UNKNOWN SELECTION TYPE!!";
+      return TextRangeType::eCaret;
   }
 }
 
@@ -1936,7 +1946,7 @@ void
 IMMHandler::DispatchEvent(nsWindow* aWindow, WidgetGUIEvent& aEvent)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: DispatchEvent(aWindow=0x%p, aEvent={ mMessage=%s }, "
+    ("DispatchEvent(aWindow=0x%p, aEvent={ mMessage=%s }, "
      "aWindow->Destroyed()=%s",
      aWindow, ToChar(aEvent.mMessage), GetBoolName(aWindow->Destroyed())));
 
@@ -1953,7 +1963,7 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
 {
   NS_ASSERTION(mIsComposing, "conflict state");
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: DispatchCompositionChangeEvent"));
+    ("DispatchCompositionChangeEvent"));
 
   // If we don't need to draw composition string ourselves, we don't need to
   // fire compositionchange event during composing.
@@ -1968,15 +1978,15 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
   nsresult rv = dispatcher->BeginNativeInputTransaction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: DispatchCompositionChangeEvent, FAILED due to "
+      ("DispatchCompositionChangeEvent, FAILED due to "
        "TextEventDispatcher::BeginNativeInputTransaction() failure"));
     return;
   }
 
   // NOTE: Calling SetIMERelatedWindowsPos() from this method will be failure
   //       in e10s mode.  compositionchange event will notify this of
-  //       NOTIFY_IME_OF_COMPOSITION_UPDATE, then SetIMERelatedWindowsPos()
-  //       will be called.
+  //       NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED, then
+  //       SetIMERelatedWindowsPos() will be called.
 
   // XXX Sogou (Simplified Chinese IME) returns contradictory values:
   //     The cursor position is actual cursor position. However, other values
@@ -1988,11 +1998,11 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
     // Some IMEs don't return clause array information, then, we assume that
     // all characters in the composition string are in one clause.
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: DispatchCompositionChangeEvent, mClauseArray.Length()=0"));
+      ("DispatchCompositionChangeEvent, mClauseArray.Length()=0"));
     rv =dispatcher->SetPendingComposition(mCompositionString, nullptr);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: DispatchCompositionChangeEvent, FAILED due to"
+        ("DispatchCompositionChangeEvent, FAILED due to"
          "TextEventDispatcher::SetPendingComposition() failure"));
       return;
     }
@@ -2001,7 +2011,7 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
     rv = dispatcher->SetPendingCompositionString(mCompositionString);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: DispatchCompositionChangeEvent, FAILED due to"
+        ("DispatchCompositionChangeEvent, FAILED due to"
          "TextEventDispatcher::SetPendingCompositionString() failure"));
       return;
     }
@@ -2010,18 +2020,25 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
       uint32_t current = mClauseArray[i + 1];
       if (current > mCompositionString.Length()) {
         MOZ_LOG(gIMMLog, LogLevel::Info,
-          ("IMM: DispatchCompositionChangeEvent, mClauseArray[%ld]=%lu. "
+          ("DispatchCompositionChangeEvent, mClauseArray[%ld]=%lu. "
            "This is larger than mCompositionString.Length()=%lu",
            i + 1, current, mCompositionString.Length()));
         current = int32_t(mCompositionString.Length());
       }
 
       uint32_t length = current - lastOffset;
-      uint32_t attr = PlatformToNSAttr(mAttributeArray[lastOffset]);
-      rv = dispatcher->AppendClauseToPendingComposition(length, attr);
+      if (NS_WARN_IF(lastOffset >= mAttributeArray.Length())) {
+        MOZ_LOG(gIMMLog, LogLevel::Error,
+          ("DispatchCompositionChangeEvent, FAILED due to invalid data of "
+            "mClauseArray or mAttributeArray"));
+        return;
+      }
+      TextRangeType textRangeType =
+        PlatformToNSAttr(mAttributeArray[lastOffset]);
+      rv = dispatcher->AppendClauseToPendingComposition(length, textRangeType);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         MOZ_LOG(gIMMLog, LogLevel::Error,
-          ("IMM: DispatchCompositionChangeEvent, FAILED due to"
+          ("DispatchCompositionChangeEvent, FAILED due to"
            "TextEventDispatcher::AppendClauseToPendingComposition() failure"));
         return;
       }
@@ -2029,20 +2046,20 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
       lastOffset = current;
 
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: DispatchCompositionChangeEvent, index=%ld, rangeType=%s, "
+        ("DispatchCompositionChangeEvent, index=%ld, rangeType=%s, "
          "range length=%lu",
-         i, GetRangeTypeName(attr), length));
+         i, ToChar(textRangeType), length));
     }
   }
 
   if (mCursorPosition == NO_IME_CARET) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: DispatchCompositionChangeEvent, no caret"));
+      ("DispatchCompositionChangeEvent, no caret"));
   } else {
     uint32_t cursor = static_cast<uint32_t>(mCursorPosition);
     if (cursor > mCompositionString.Length()) {
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: CreateTextRangeArray, mCursorPosition=%ld. "
+        ("CreateTextRangeArray, mCursorPosition=%ld. "
          "This is larger than mCompositionString.Length()=%lu",
          mCursorPosition, mCompositionString.Length()));
       cursor = mCompositionString.Length();
@@ -2061,7 +2078,7 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
       // will be at the end of composition string.
       mCursorPosition = NO_IME_CARET;
       MOZ_LOG(gIMMLog, LogLevel::Info,
-        ("IMM: CreateTextRangeArray, no caret due to it's in the target "
+        ("CreateTextRangeArray, no caret due to it's in the target "
          "clause, now, mCursorPosition is NO_IME_CARET"));
     }
 
@@ -2069,7 +2086,7 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
       rv = dispatcher->SetCaretInPendingComposition(cursor, 0);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         MOZ_LOG(gIMMLog, LogLevel::Error,
-          ("IMM: DispatchCompositionChangeEvent, FAILED due to"
+          ("DispatchCompositionChangeEvent, FAILED due to"
            "TextEventDispatcher::SetCaretInPendingComposition() failure"));
         return;
       }
@@ -2081,7 +2098,7 @@ IMMHandler::DispatchCompositionChangeEvent(nsWindow* aWindow,
   rv = dispatcher->FlushPendingComposition(status, &eventTime);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: DispatchCompositionChangeEvent, FAILED due to"
+      ("DispatchCompositionChangeEvent, FAILED due to"
        "TextEventDispatcher::FlushPendingComposition() failure"));
     return;
   }
@@ -2100,7 +2117,7 @@ IMMHandler::GetCompositionString(const IMEContext& aContext,
       !aCompositionString.SetLength((lRtn / sizeof(WCHAR)) + 1,
                                     mozilla::fallible)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: GetCompositionString, FAILED, due to OOM"));
+      ("GetCompositionString, FAILED, due to OOM"));
     return; // Error or out of memory.
   }
 
@@ -2111,7 +2128,7 @@ IMMHandler::GetCompositionString(const IMEContext& aContext,
   aCompositionString.SetLength(lRtn / sizeof(WCHAR));
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: GetCompositionString, succeeded, aCompositionString=\"%s\"",
+    ("GetCompositionString, succeeded, aCompositionString=\"%s\"",
      NS_ConvertUTF16toUTF8(aCompositionString).get()));
 }
 
@@ -2158,7 +2175,7 @@ IMMHandler::GetTargetClauseRange(uint32_t* aOffset,
 }
 
 bool
-IMMHandler::ConvertToANSIString(const nsAFlatString& aStr,
+IMMHandler::ConvertToANSIString(const nsString& aStr,
                                 UINT aCodePage,
                                 nsACString& aANSIStr)
 {
@@ -2169,7 +2186,7 @@ IMMHandler::ConvertToANSIString(const nsAFlatString& aStr,
 
   if (!aANSIStr.SetLength(len, mozilla::fallible)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: ConvertToANSIString, FAILED, due to OOM"));
+      ("ConvertToANSIString, FAILED, due to OOM"));
     return false;
   }
   ::WideCharToMultiByte(aCodePage, 0, (LPCWSTR)aStr.get(), aStr.Length(),
@@ -2188,24 +2205,8 @@ IMMHandler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
   Selection& selection = GetSelection();
   if (!selection.EnsureValidSelection(aWindow)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: GetCharacterRectOfSelectedTextAt, FAILED, due to "
+      ("GetCharacterRectOfSelectedTextAt, FAILED, due to "
        "Selection::EnsureValidSelection() failure"));
-    return false;
-  }
-
-  // The base offset of aOffset is the start of composition string during
-  // composing or the start of selected string not during composing.
-  uint32_t baseOffset =
-    mIsComposing ? mCompositionStart : selection.mOffset;
-
-  CheckedInt<uint32_t> checkingOffset =
-    CheckedInt<uint32_t>(baseOffset) + aOffset;
-  if (NS_WARN_IF(!checkingOffset.isValid()) ||
-      checkingOffset.value() == UINT32_MAX) {
-    MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: GetCharacterRectOfSelectedTextAt, FAILED, due to "
-       "aOffset is too large (aOffset=%u, baseOffset=%u, mIsComposing=%s)",
-       aOffset, baseOffset, GetBoolName(mIsComposing)));
     return false;
   }
 
@@ -2217,13 +2218,11 @@ IMMHandler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
     mIsComposing ? mCompositionString.Length() : selection.Length();
   if (NS_WARN_IF(aOffset > targetLength)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: GetCharacterRectOfSelectedTextAt, FAILED, due to "
+      ("GetCharacterRectOfSelectedTextAt, FAILED, due to "
        "aOffset is too large (aOffset=%u, targetLength=%u, mIsComposing=%s)",
        aOffset, targetLength, GetBoolName(mIsComposing)));
     return false;
   }
-
-  uint32_t offset = checkingOffset.value();
 
   // If there is caret, we might be able to use caret rect.
   uint32_t caretOffset = UINT32_MAX;
@@ -2234,24 +2233,26 @@ IMMHandler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
       // the composition string.
       if (mCursorPosition != NO_IME_CARET) {
         MOZ_ASSERT(mCursorPosition >= 0);
-        caretOffset = mCompositionStart + mCursorPosition;
+        caretOffset = mCursorPosition;
       } else if (!ShouldDrawCompositionStringOurselves() ||
                  mCompositionString.IsEmpty()) {
         // Otherwise, if there is no composition string, we should assume that
         // there is a caret at the start of composition string.
-        caretOffset = mCompositionStart;
+        caretOffset = 0;
       }
     } else {
       // If there is no composition, the selection offset is the caret offset.
-      caretOffset = selection.mOffset;
+      caretOffset = 0;
     }
   }
 
   // If there is a caret and retrieving offset is same as the caret offset,
   // we should use the caret rect.
-  if (offset != caretOffset) {
+  if (aOffset != caretOffset) {
     WidgetQueryContentEvent charRect(true, eQueryTextRect, aWindow);
-    charRect.InitForQueryTextRect(offset, 1);
+    WidgetQueryContentEvent::Options options;
+    options.mRelativeToInsertionPoint = true;
+    charRect.InitForQueryTextRect(aOffset, 1, options);
     aWindow->InitEvent(charRect, &point);
     DispatchEvent(aWindow, charRect);
     if (charRect.mSucceeded) {
@@ -2260,10 +2261,10 @@ IMMHandler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
         *aWritingMode = charRect.GetWritingMode();
       }
       MOZ_LOG(gIMMLog, LogLevel::Debug,
-        ("IMM: GetCharacterRectOfSelectedTextAt, Succeeded, aOffset=%u, "
+        ("GetCharacterRectOfSelectedTextAt, Succeeded, aOffset=%u, "
          "aCharRect={ x: %ld, y: %ld, width: %ld, height: %ld }, "
          "charRect.GetWritingMode()=%s",
-         aOffset, aCharRect.x, aCharRect.y, aCharRect.width, aCharRect.height,
+         aOffset, aCharRect.X(), aCharRect.Y(), aCharRect.Width(), aCharRect.Height(),
          GetWritingModeName(charRect.GetWritingMode()).get()));
       return true;
     }
@@ -2279,21 +2280,15 @@ IMMHandler::GetCaretRect(nsWindow* aWindow,
 {
   LayoutDeviceIntPoint point(0, 0);
 
-  Selection& selection = GetSelection();
-  if (!selection.EnsureValidSelection(aWindow)) {
-    MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: GetCaretRect, FAILED, due to "
-       "Selection::EnsureValidSelection() failure"));
-    return false;
-  }
-
   WidgetQueryContentEvent caretRect(true, eQueryCaretRect, aWindow);
-  caretRect.InitForQueryCaretRect(selection.mOffset);
+  WidgetQueryContentEvent::Options options;
+  options.mRelativeToInsertionPoint = true;
+  caretRect.InitForQueryCaretRect(0, options);
   aWindow->InitEvent(caretRect, &point);
   DispatchEvent(aWindow, caretRect);
   if (!caretRect.mSucceeded) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: GetCaretRect, FAILED, due to eQueryCaretRect failure"));
+      ("GetCaretRect, FAILED, due to eQueryCaretRect failure"));
     return false;
   }
   aCaretRect = caretRect.mReply.mRect;
@@ -2301,10 +2296,10 @@ IMMHandler::GetCaretRect(nsWindow* aWindow,
     *aWritingMode = caretRect.GetWritingMode();
   }
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: GetCaretRect, SUCCEEDED, "
+    ("GetCaretRect, SUCCEEDED, "
      "aCaretRect={ x: %ld, y: %ld, width: %ld, height: %ld }, "
      "caretRect.GetWritingMode()=%s",
-     aCaretRect.x, aCaretRect.y, aCaretRect.width, aCaretRect.height,
+     aCaretRect.X(), aCaretRect.Y(), aCaretRect.Width(), aCaretRect.Height(),
      GetWritingModeName(caretRect.GetWritingMode()).get()));
   return true;
 }
@@ -2331,21 +2326,21 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
     ResolveIMECaretPos(toplevelWindow, r, aWindow, caretRect);
   } else {
     NS_WARNING("failed to get caret rect");
-    caretRect.width = 1;
+    caretRect.SetWidth(1);
   }
   if (!mNativeCaretIsCreated) {
     mNativeCaretIsCreated = ::CreateCaret(aWindow->GetWindowHandle(), nullptr,
-                                          caretRect.width, caretRect.height);
+                                          caretRect.Width(), caretRect.Height());
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPos, mNativeCaretIsCreated=%s, "
+      ("SetIMERelatedWindowsPos, mNativeCaretIsCreated=%s, "
        "width=%ld, height=%ld",
-       GetBoolName(mNativeCaretIsCreated), caretRect.width, caretRect.height));
+       GetBoolName(mNativeCaretIsCreated), caretRect.Width(), caretRect.Height()));
   }
-  ::SetCaretPos(caretRect.x, caretRect.y);
+  ::SetCaretPos(caretRect.X(), caretRect.Y());
 
   if (ShouldDrawCompositionStringOurselves()) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPos, Set candidate window"));
+      ("SetIMERelatedWindowsPos, Set candidate window"));
 
     // Get a rect of first character in current target in composition string.
     LayoutDeviceIntRect firstTargetCharRect, lastTargetCharRect;
@@ -2355,7 +2350,7 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
       uint32_t offset, length;
       if (!GetTargetClauseRange(&offset, &length)) {
         MOZ_LOG(gIMMLog, LogLevel::Error,
-          ("IMM: SetIMERelatedWindowsPos, FAILED, due to "
+          ("SetIMERelatedWindowsPos, FAILED, due to "
            "GetTargetClauseRange() failure"));
         return false;
       }
@@ -2393,22 +2388,22 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
       candForm.dwStyle = CFS_EXCLUDE;
       // Candidate window shouldn't overlap the target clause in any writing
       // mode.
-      candForm.rcArea.left = targetClauseRect.x;
+      candForm.rcArea.left = targetClauseRect.X();
       candForm.rcArea.right = targetClauseRect.XMost();
-      candForm.rcArea.top = targetClauseRect.y;
+      candForm.rcArea.top = targetClauseRect.Y();
       candForm.rcArea.bottom = targetClauseRect.YMost();
       if (!writingMode.IsVertical()) {
         // In horizontal layout, current point of interest should be top-left
         // of the first character.
-        candForm.ptCurrentPos.x = firstTargetCharRect.x;
-        candForm.ptCurrentPos.y = firstTargetCharRect.y;
+        candForm.ptCurrentPos.x = firstTargetCharRect.X();
+        candForm.ptCurrentPos.y = firstTargetCharRect.Y();
       } else if (writingMode.IsVerticalRL()) {
         // In vertical layout (RL), candidate window should be positioned right
         // side of target clause.  However, we don't set vertical writing font
         // to the IME.  Therefore, the candidate window may be positioned
         // bottom-left of target clause rect with these information.
-        candForm.ptCurrentPos.x = targetClauseRect.x;
-        candForm.ptCurrentPos.y = targetClauseRect.y;
+        candForm.ptCurrentPos.x = targetClauseRect.X();
+        candForm.ptCurrentPos.y = targetClauseRect.Y();
       } else {
         MOZ_ASSERT(writingMode.IsVerticalLR(), "Did we miss some causes?");
         // In vertical layout (LR), candidate window should be poisitioned left
@@ -2416,7 +2411,7 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
         // to the IME, the candidate window may be positioned bottom-right of
         // the target clause rect with these information.
         candForm.ptCurrentPos.x = targetClauseRect.XMost();
-        candForm.ptCurrentPos.y = targetClauseRect.y;
+        candForm.ptCurrentPos.y = targetClauseRect.Y();
       }
     } else {
       // If vertical writing is not supported by IME, let's set candidate
@@ -2424,11 +2419,11 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
       // the position must be the safest position to prevent the candidate
       // window to overlap with the target clause.
       candForm.dwStyle = CFS_CANDIDATEPOS;
-      candForm.ptCurrentPos.x = targetClauseRect.x;
+      candForm.ptCurrentPos.x = targetClauseRect.X();
       candForm.ptCurrentPos.y = targetClauseRect.YMost();
     }
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPos, Calling ImmSetCandidateWindow()... "
+      ("SetIMERelatedWindowsPos, Calling ImmSetCandidateWindow()... "
        "ptCurrentPos={ x=%d, y=%d }, "
        "rcArea={ left=%d, top=%d, right=%d, bottom=%d }, "
        "writingMode=%s",
@@ -2439,7 +2434,7 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
     ::ImmSetCandidateWindow(aContext.get(), &candForm);
   } else {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPos, Set composition window"));
+      ("SetIMERelatedWindowsPos, Set composition window"));
 
     // Move the composition window to caret position (if selected some
     // characters, we should use first character rect of them).
@@ -2448,9 +2443,9 @@ IMMHandler::SetIMERelatedWindowsPos(nsWindow* aWindow,
     COMPOSITIONFORM compForm;
     compForm.dwStyle = CFS_POINT;
     compForm.ptCurrentPos.x =
-      !writingMode.IsVerticalLR() ? firstSelectedCharRect.x :
+      !writingMode.IsVerticalLR() ? firstSelectedCharRect.X() :
                                     firstSelectedCharRect.XMost();
-    compForm.ptCurrentPos.y = firstSelectedCharRect.y;
+    compForm.ptCurrentPos.y = firstSelectedCharRect.Y();
     ::ImmSetCompositionWindow(aContext.get(), &compForm);
   }
 
@@ -2466,7 +2461,7 @@ IMMHandler::SetIMERelatedWindowsPosOnPlugin(nsWindow* aWindow,
   DispatchEvent(aWindow, editorRectEvent);
   if (!editorRectEvent.mSucceeded) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPosOnPlugin, "
+      ("SetIMERelatedWindowsPosOnPlugin, "
        "FAILED, due to eQueryEditorRect failure"));
     return;
   }
@@ -2476,22 +2471,20 @@ IMMHandler::SetIMERelatedWindowsPosOnPlugin(nsWindow* aWindow,
   nsWindow* toplevelWindow = aWindow->GetTopLevelWindow(false);
   LayoutDeviceIntRect pluginRectInScreen =
     editorRectEvent.mReply.mRect + toplevelWindow->WidgetToScreenOffset();
-  LayoutDeviceIntRect winRectInScreen;
-  aWindow->GetClientBounds(winRectInScreen);
+  LayoutDeviceIntRect winRectInScreen = aWindow->GetClientBounds();
   // composition window cannot be positioned on the edge of client area.
-  winRectInScreen.width--;
-  winRectInScreen.height--;
+  winRectInScreen.SizeTo(winRectInScreen.Width() - 1,
+                         winRectInScreen.Height() - 1);
   LayoutDeviceIntRect clippedPluginRect;
-  clippedPluginRect.x =
-    std::min(std::max(pluginRectInScreen.x, winRectInScreen.x),
-             winRectInScreen.XMost());
-  clippedPluginRect.y =
-    std::min(std::max(pluginRectInScreen.y, winRectInScreen.y),
-             winRectInScreen.YMost());
+  clippedPluginRect.MoveTo(
+    std::min(std::max(pluginRectInScreen.X(), winRectInScreen.X()),
+             winRectInScreen.XMost()),
+    std::min(std::max(pluginRectInScreen.Y(), winRectInScreen.Y()),
+             winRectInScreen.YMost()));
   int32_t xMost = std::min(pluginRectInScreen.XMost(), winRectInScreen.XMost());
   int32_t yMost = std::min(pluginRectInScreen.YMost(), winRectInScreen.YMost());
-  clippedPluginRect.width = std::max(0, xMost - clippedPluginRect.x);
-  clippedPluginRect.height = std::max(0, yMost - clippedPluginRect.y);
+  clippedPluginRect.SizeTo(std::max(0, xMost - clippedPluginRect.X()),
+                           std::max(0, yMost - clippedPluginRect.Y()));
   clippedPluginRect -= aWindow->WidgetToScreenOffset();
 
   // Cover the plugin with native caret.  This prevents IME's window and plugin
@@ -2501,8 +2494,8 @@ IMMHandler::SetIMERelatedWindowsPosOnPlugin(nsWindow* aWindow,
   }
   mNativeCaretIsCreated =
     ::CreateCaret(aWindow->GetWindowHandle(), nullptr,
-                  clippedPluginRect.width, clippedPluginRect.height);
-  ::SetCaretPos(clippedPluginRect.x, clippedPluginRect.y);
+                  clippedPluginRect.Width(), clippedPluginRect.Height());
+  ::SetCaretPos(clippedPluginRect.X(), clippedPluginRect.Y());
 
   // Set the composition window to bottom-left of the clipped plugin.
   // As far as we know, there is no IME for RTL language.  Therefore, this code
@@ -2513,7 +2506,7 @@ IMMHandler::SetIMERelatedWindowsPosOnPlugin(nsWindow* aWindow,
   compForm.ptCurrentPos.y = clippedPluginRect.BottomLeft().y;
   if (!::ImmSetCompositionWindow(aContext.get(), &compForm)) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: SetIMERelatedWindowsPosOnPlugin, "
+      ("SetIMERelatedWindowsPosOnPlugin, "
        "FAILED, due to ::ImmSetCompositionWindow() failure"));
     return;
   }
@@ -2576,8 +2569,12 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
   // Therefore, we need to store the information which are set to the IM
   // context to static variables since IM context is never recreated.
   static bool sCompositionFontsInitialized = false;
-  static nsString sCompositionFont =
-    Preferences::GetString("intl.imm.composition_font");
+  static nsString sCompositionFont;
+  static bool sCompositionFontPrefDone = false;
+  if (!sCompositionFontPrefDone) {
+    sCompositionFontPrefDone = true;
+    Preferences::GetString("intl.imm.composition_font", sCompositionFont);
+  }
 
   // If composition font is customized by pref, we need to modify the
   // composition font of the IME context at first time even if the writing mode
@@ -2609,7 +2606,7 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
       if (NS_WARN_IF(!::ImmGetCompositionFont(aContext.get(),
                                               &defaultLogFont))) {
         MOZ_LOG(gIMMLog, LogLevel::Error,
-          ("IMM: AdjustCompositionFont, ::ImmGetCompositionFont() failed"));
+          ("AdjustCompositionFont, ::ImmGetCompositionFont() failed"));
         sCompositionFont.AssignLiteral("System");
       } else {
         // The font face is typically, "System".
@@ -2618,7 +2615,7 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
     }
 
     MOZ_LOG(gIMMLog, LogLevel::Info,
-      ("IMM: AdjustCompositionFont, sCompositionFont=\"%s\" is initialized",
+      ("AdjustCompositionFont, sCompositionFont=\"%s\" is initialized",
        NS_ConvertUTF16toUTF8(sCompositionFont).get()));
   }
 
@@ -2626,8 +2623,8 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
   if (IsJapanist2003Active() && sCompositionFontForJapanist2003.IsEmpty()) {
     const char* kCompositionFontForJapanist2003 =
       "intl.imm.composition_font.japanist_2003";
-    sCompositionFontForJapanist2003 =
-      Preferences::GetString(kCompositionFontForJapanist2003);
+    Preferences::GetString(kCompositionFontForJapanist2003,
+                           sCompositionFontForJapanist2003);
     // If the font name is not specified properly, let's use
     // "MS PGothic" instead.
     if (sCompositionFontForJapanist2003.IsEmpty() ||
@@ -2644,7 +2641,7 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
   memset(&logFont, 0, sizeof(logFont));
   if (!::ImmGetCompositionFont(aContext.get(), &logFont)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: AdjustCompositionFont, ::ImmGetCompositionFont() failed"));
+      ("AdjustCompositionFont, ::ImmGetCompositionFont() failed"));
     logFont.lfFaceName[0] = 0;
   }
   // Need to reset some information which should be recomputed with new font.
@@ -2665,7 +2662,7 @@ IMMHandler::AdjustCompositionFont(nsWindow* aWindow,
                                sCompositionFont, logFont);
   }
   MOZ_LOG(gIMMLog, LogLevel::Warning,
-    ("IMM: AdjustCompositionFont, calling ::ImmSetCompositionFont(\"%s\")",
+    ("AdjustCompositionFont, calling ::ImmSetCompositionFont(\"%s\")",
      NS_ConvertUTF16toUTF8(nsDependentString(logFont.lfFaceName)).get()));
   ::ImmSetCompositionFontW(aContext.get(), &logFont);
 }
@@ -2723,7 +2720,7 @@ IMMHandler::OnMouseButtonEvent(nsWindow* aWindow,
     aIMENotification.mMouseButtonEventData.mCursorPos.AsIntPoint();
   nsIntRect charRect =
     aIMENotification.mMouseButtonEventData.mCharRect.AsIntRect();
-  int32_t cursorXInChar = cursorPos.x - charRect.x;
+  int32_t cursorXInChar = cursorPos.x - charRect.X();
   // The event might hit to zero-width character, see bug 694913.
   // The reason might be:
   // * There are some zero-width characters are actually.
@@ -2732,8 +2729,8 @@ IMMHandler::OnMouseButtonEvent(nsWindow* aWindow,
   // We should assume that user clicked on right most of the zero-width
   // character in such case.
   int positioning = 1;
-  if (charRect.width > 0) {
-    positioning = cursorXInChar * 4 / charRect.width;
+  if (charRect.Width() > 0) {
+    positioning = cursorXInChar * 4 / charRect.Width();
     positioning = (positioning + 2) % 4;
   }
 
@@ -2744,7 +2741,7 @@ IMMHandler::OnMouseButtonEvent(nsWindow* aWindow,
   }
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnMouseButtonEvent, x,y=%ld,%ld, offset=%ld, positioning=%ld",
+    ("OnMouseButtonEvent, x,y=%ld,%ld, offset=%ld, positioning=%ld",
      cursorPos.x, cursorPos.y, offset, positioning));
 
   // send MS_MSIME_MOUSE message to default IME window.
@@ -2766,7 +2763,7 @@ IMMHandler::OnKeyDownEvent(nsWindow* aWindow,
                            MSGResult& aResult)
 {
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: OnKeyDownEvent, hWnd=%08x, wParam=%08x, lParam=%08x",
+    ("OnKeyDownEvent, hWnd=%08x, wParam=%08x, lParam=%08x",
      aWindow->GetWindowHandle(), wParam, lParam));
   aResult.mConsumed = false;
   switch (wParam) {
@@ -2800,8 +2797,9 @@ IMMHandler::OnKeyDownEvent(nsWindow* aWindow,
 void
 IMMHandler::SetCandidateWindow(nsWindow* aWindow, CANDIDATEFORM* aForm)
 {
-  // Hack for ATOK.  ATOK (Japanese IME) refers native caret position at
-  // deciding candidate window position.
+  // Hack for ATOK 2011 - 2016 (Japanese IME).  They refer native caret
+  // position at deciding candidate window position.  Note that we cannot
+  // check active IME since TIPs are wrapped and hidden by CUAS.
   if (aWindow->PluginHasFocus()) {
     // We cannot retrieve proper character height from plugin.  Therefore,
     // we should assume that the caret height is always 20px since if less than
@@ -2880,13 +2878,13 @@ IMMHandler::Selection::Update(const IMENotification& aIMENotification)
   mIsValid = true;
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: Selection::Update, aIMENotification={ mSelectionChangeData={ "
+    ("Selection::Update, aIMENotification={ mSelectionChangeData={ "
      "mOffset=%u, mLength=%u, GetWritingMode()=%s } }",
      mOffset, mString.Length(), GetWritingModeName(mWritingMode).get()));
 
   if (!IsValid()) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: Selection::Update, FAILED, due to invalid range"));
+      ("Selection::Update, FAILED, due to invalid range"));
     Clear();
     return false;
   }
@@ -2904,14 +2902,14 @@ IMMHandler::Selection::Init(nsWindow* aWindow)
   DispatchEvent(aWindow, selection);
   if (NS_WARN_IF(!selection.mSucceeded)) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: Selection::Init, FAILED, due to eQuerySelectedText failure"));
+      ("Selection::Init, FAILED, due to eQuerySelectedText failure"));
     return false;
   }
   // If the window is destroyed during querying selected text, we shouldn't
   // do anymore.
   if (aWindow->Destroyed()) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: Selection::Init, FAILED, due to the widget destroyed"));
+      ("Selection::Init, FAILED, due to the widget destroyed"));
     return false;
   }
 
@@ -2921,13 +2919,13 @@ IMMHandler::Selection::Init(nsWindow* aWindow)
   mIsValid = true;
 
   MOZ_LOG(gIMMLog, LogLevel::Info,
-    ("IMM: Selection::Init, selection={ mReply={ mOffset=%u, "
+    ("Selection::Init, selection={ mReply={ mOffset=%u, "
      "mString.Length()=%u, mWritingMode=%s } }",
      mOffset, mString.Length(), GetWritingModeName(mWritingMode).get()));
 
   if (!IsValid()) {
     MOZ_LOG(gIMMLog, LogLevel::Error,
-      ("IMM: Selection::Init, FAILED, due to invalid range"));
+      ("Selection::Init, FAILED, due to invalid range"));
     Clear();
     return false;
   }

@@ -1,18 +1,10 @@
-// Copyright 2013 Google Inc. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-// Font management utilities
+/* Copyright 2013 Google Inc. All Rights Reserved.
+
+   Distributed under MIT license.
+   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
+*/
+
+/* Font management utilities */
 
 #include "./font.h"
 
@@ -49,11 +41,7 @@ std::vector<uint32_t> Font::OutputOrderedTags() const {
     output_order.push_back(table.tag);
   }
 
-  // Alphabetize and do not put loca immediately after glyf
-  // This violates woff2 spec but results in a font that passes OTS
-  std::sort(output_order.begin(), output_order.end());
-  // TODO(user): change to match spec once browsers are on newer OTS
-  /*
+  // Alphabetize then put loca immediately after glyf
   auto glyf_loc = std::find(output_order.begin(), output_order.end(),
       kGlyfTableTag);
   auto loca_loc = std::find(output_order.begin(), output_order.end(),
@@ -62,7 +50,7 @@ std::vector<uint32_t> Font::OutputOrderedTags() const {
     output_order.erase(loca_loc);
     output_order.insert(std::find(output_order.begin(), output_order.end(),
       kGlyfTableTag) + 1, kLocaTableTag);
-  }*/
+  }
 
   return output_order;
 }
@@ -109,6 +97,12 @@ bool ReadTrueTypeFont(Buffer* file, const uint8_t* data, size_t len,
     last_offset = i.first + i.second;
   }
 
+  // Sanity check key tables
+  const Font::Table* head_table = font->FindTable(kHeadTableTag);
+  if (head_table != NULL && head_table->length < 52) {
+    return FONT_COMPRESSION_FAILURE();
+  }
+
   return true;
 }
 
@@ -129,6 +123,9 @@ bool ReadCollectionFont(Buffer* file, const uint8_t* data, size_t len,
       (*all_tables)[table.offset] = font->FindTable(table.tag);
     } else {
       table.reuse_of = (*all_tables)[table.offset];
+      if (table.tag != table.reuse_of->tag) {
+        return FONT_COMPRESSION_FAILURE();
+      }
     }
 
   }
@@ -145,7 +142,7 @@ bool ReadTrueTypeCollection(Buffer* file, const uint8_t* data, size_t len,
     }
 
     std::vector<uint32_t> offsets;
-    for (auto i = 0; i < num_fonts; i++) {
+    for (size_t i = 0; i < num_fonts; i++) {
       uint32_t offset;
       if (!file->ReadU32(&offset)) {
         return FONT_COMPRESSION_FAILURE();
@@ -185,15 +182,14 @@ bool ReadFontCollection(const uint8_t* data, size_t len,
                         FontCollection* font_collection) {
   Buffer file(data, len);
 
-  uint32_t flavor;
-  if (!file.ReadU32(&flavor)) {
+  if (!file.ReadU32(&font_collection->flavor)) {
     return FONT_COMPRESSION_FAILURE();
   }
 
-  if (flavor != kTtcFontFlavor) {
+  if (font_collection->flavor != kTtcFontFlavor) {
     font_collection->fonts.resize(1);
     Font& font = font_collection->fonts[0];
-    font.flavor = flavor;
+    font.flavor = font_collection->flavor;
     return ReadTrueTypeFont(&file, data, len, &font);
   }
   return ReadTrueTypeCollection(&file, data, len, font_collection);
@@ -290,7 +286,7 @@ bool WriteFontCollection(const FontCollection& font_collection, uint8_t* dst,
   size_t offset = 0;
 
   // It's simpler if this just a simple sfnt
-  if (font_collection.fonts.size() == 1) {
+  if (font_collection.flavor != kTtcFontFlavor) {
     return WriteFont(font_collection.fonts[0], &offset, dst, dst_size);
   }
 
@@ -301,7 +297,7 @@ bool WriteFontCollection(const FontCollection& font_collection, uint8_t* dst,
 
   // Offset Table, zeroed for now
   size_t offset_table = offset;  // where to write offsets later
-  for (int i = 0; i < font_collection.fonts.size(); i++) {
+  for (size_t i = 0; i < font_collection.fonts.size(); i++) {
     StoreU32(0, &offset, dst);
   }
 
@@ -312,7 +308,7 @@ bool WriteFontCollection(const FontCollection& font_collection, uint8_t* dst,
   }
 
   // Write fonts and their offsets.
-  for (int i = 0; i < font_collection.fonts.size(); i++) {
+  for (size_t i = 0; i < font_collection.fonts.size(); i++) {
     const auto& font = font_collection.fonts[i];
     StoreU32(offset, &offset_table, dst);
     if (!WriteFont(font, &offset, dst, dst_size)) {
@@ -330,8 +326,11 @@ int NumGlyphs(const Font& font) {
     return 0;
   }
   int index_fmt = IndexFormat(font);
-  int num_glyphs = (loca_table->length / (index_fmt == 0 ? 2 : 4)) - 1;
-  return num_glyphs;
+  int loca_record_size = (index_fmt == 0 ? 2 : 4);
+  if (loca_table->length < loca_record_size) {
+    return 0;
+  }
+  return (loca_table->length / loca_record_size) - 1;
 }
 
 int IndexFormat(const Font& font) {

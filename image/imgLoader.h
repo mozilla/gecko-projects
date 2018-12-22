@@ -34,22 +34,22 @@ class imgMemoryReporter;
 
 namespace mozilla {
 namespace image {
-class ImageURL;
 } // namespace image
 } // namespace mozilla
 
 class imgCacheEntry
 {
 public:
+  static uint32_t SecondsFromPRTime(PRTime prTime);
+
   imgCacheEntry(imgLoader* loader, imgRequest* request,
                 bool aForcePrincipalCheck);
   ~imgCacheEntry();
 
   nsrefcnt AddRef()
   {
-    NS_PRECONDITION(int32_t(mRefCnt) >= 0, "illegal refcnt");
-    MOZ_ASSERT(_mOwningThread.GetThread() == PR_GetCurrentThread(),
-      "imgCacheEntry addref isn't thread-safe!");
+    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");
+    NS_ASSERT_OWNINGTHREAD(imgCacheEntry);
     ++mRefCnt;
     NS_LOG_ADDREF(this, mRefCnt, "imgCacheEntry", sizeof(*this));
     return mRefCnt;
@@ -57,9 +57,8 @@ public:
 
   nsrefcnt Release()
   {
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
-    MOZ_ASSERT(_mOwningThread.GetThread() == PR_GetCurrentThread(),
-      "imgCacheEntry release isn't thread-safe!");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
+    NS_ASSERT_OWNINGTHREAD(imgCacheEntry);
     --mRefCnt;
     NS_LOG_RELEASE(this, mRefCnt, "imgCacheEntry");
     if (mRefCnt == 0) {
@@ -203,7 +202,8 @@ public:
   uint32_t GetSize() const;
   void UpdateSize(int32_t diff);
   uint32_t GetNumElements() const;
-  typedef std::vector<RefPtr<imgCacheEntry> > queueContainer;
+  bool Contains(imgCacheEntry* aEntry) const;
+  typedef nsTArray<RefPtr<imgCacheEntry> > queueContainer;
   typedef queueContainer::iterator iterator;
   typedef queueContainer::const_iterator const_iterator;
 
@@ -233,7 +233,6 @@ class imgLoader final : public imgILoader,
 
 public:
   typedef mozilla::image::ImageCacheKey ImageCacheKey;
-  typedef mozilla::image::ImageURL ImageURL;
   typedef nsRefPtrHashtable<nsGenericHashKey<ImageCacheKey>,
                             imgCacheEntry> imgCacheTable;
   typedef nsTHashtable<nsPtrHashKey<imgRequest>> imgSet;
@@ -246,49 +245,70 @@ public:
   NS_DECL_IMGICACHE
   NS_DECL_NSIOBSERVER
 
-  static imgLoader* Singleton();
-  static imgLoader* PBSingleton();
+  /**
+   * Get the normal image loader instance that is used by gecko code, creating
+   * it if necessary.
+   */
+  static imgLoader* NormalLoader();
 
+  /**
+   * Get the Private Browsing image loader instance that is used by gecko code,
+   * creating it if necessary.
+   */
+  static imgLoader* PrivateBrowsingLoader();
+
+  /**
+   * Gecko code should use NormalLoader() or PrivateBrowsingLoader() to get the
+   * appropriate image loader.
+   *
+   * This constructor is public because the XPCOM module code that creates
+   * instances of "@mozilla.org/image/loader;1" / "@mozilla.org/image/cache;1"
+   * for nsIComponentManager.createInstance()/nsIServiceManager.getService()
+   * calls (now only made by add-ons) needs access to it.
+   *
+   * XXX We would like to get rid of the nsIServiceManager.getService (and
+   * nsIComponentManager.createInstance) method of creating imgLoader objects,
+   * but there are add-ons that are still using it.  These add-ons don't
+   * actually do anything useful with the loaders that they create since nobody
+   * who creates an imgLoader using this method actually QIs to imgILoader and
+   * loads images.  They all just QI to imgICache and either call clearCache()
+   * or findEntryProperties().  Since they're doing this on an imgLoader that
+   * has never loaded images, these calls are useless.  It seems likely that
+   * the code that is doing this is just legacy code left over from a time when
+   * there was only one imgLoader instance for the entire process.  (Nowadays
+   * the correct method to get an imgILoader/imgICache is to call
+   * imgITools::getImgCacheForDocument/imgITools::getImgLoaderForDocument.)
+   * All the same, even though what these add-ons are doing is a no-op,
+   * removing the nsIServiceManager.getService method of creating/getting an
+   * imgLoader objects would cause an exception in these add-ons that could
+   * break things.
+   */
   imgLoader();
-
   nsresult Init();
 
-  static imgLoader* Create()
-  {
-      // Unfortunately, we rely on XPCOM module init happening
-      // before imgLoader creation. For now, it's easier
-      // to just call CallCreateInstance() which will init
-      // the image module instead of calling new imgLoader
-      // directly.
-      imgILoader* loader;
-      CallCreateInstance("@mozilla.org/image/loader;1", &loader);
-      // There's only one imgLoader implementation so we
-      // can safely cast to it.
-      return static_cast<imgLoader*>(loader);
-  }
+  MOZ_MUST_USE nsresult LoadImage(nsIURI* aURI,
+                                  nsIURI* aInitialDocumentURI,
+                                  nsIURI* aReferrerURI,
+                                  ReferrerPolicy aReferrerPolicy,
+                                  nsIPrincipal* aLoadingPrincipal,
+                                  uint64_t aRequestContextID,
+                                  nsILoadGroup* aLoadGroup,
+                                  imgINotificationObserver* aObserver,
+                                  nsINode* aContext,
+                                  nsIDocument* aLoadingDocument,
+                                  nsLoadFlags aLoadFlags,
+                                  nsISupports* aCacheKey,
+                                  nsContentPolicyType aContentPolicyType,
+                                  const nsAString& initiatorType,
+                                  bool aUseUrgentStartForChannel,
+                                  imgRequestProxy** _retval);
 
-  static already_AddRefed<imgLoader>
-  GetInstance();
-
-  nsresult LoadImage(nsIURI* aURI,
-                     nsIURI* aInitialDocumentURI,
-                     nsIURI* aReferrerURI,
-                     ReferrerPolicy aReferrerPolicy,
-                     nsIPrincipal* aLoadingPrincipal,
-                     nsILoadGroup* aLoadGroup,
-                     imgINotificationObserver* aObserver,
-                     nsISupports* aCX,
-                     nsLoadFlags aLoadFlags,
-                     nsISupports* aCacheKey,
-                     nsContentPolicyType aContentPolicyType,
-                     const nsAString& initiatorType,
-                     imgRequestProxy** _retval);
-
-  nsresult LoadImageWithChannel(nsIChannel* channel,
-                                imgINotificationObserver* aObserver,
-                                nsISupports* aCX,
-                                nsIStreamListener** listener,
-                                imgRequestProxy** _retval);
+  MOZ_MUST_USE nsresult
+  LoadImageWithChannel(nsIChannel* channel,
+                       imgINotificationObserver* aObserver,
+                       nsISupports* aCX,
+                       nsIStreamListener** listener,
+                       imgRequestProxy** _retval);
 
   static nsresult GetMimeTypeFromContent(const char* aContents,
                                          uint32_t aLength,
@@ -306,13 +326,14 @@ public:
    * @param aMimeType The MIME type to evaluate.
    * @param aAcceptedMimeTypes Which kinds of MIME types to treat as images.
    */
-  static NS_EXPORT_(bool)
+  static bool
   SupportImageWithMimeType(const char* aMimeType,
                            AcceptedMimeTypes aAccept =
                              AcceptedMimeTypes::IMAGES);
 
   static void GlobalInit(); // for use by the factory
   static void Shutdown(); // for use by the factory
+  static void ShutdownMemoryReporter();
 
   nsresult ClearChromeImageCache();
   nsresult ClearImageCache();
@@ -321,7 +342,16 @@ public:
   nsresult InitCache();
 
   bool RemoveFromCache(const ImageCacheKey& aKey);
-  bool RemoveFromCache(imgCacheEntry* entry);
+
+  // Enumeration describing if a given entry is in the cache queue or not.
+  // There are some cases we know the entry is definitely not in the queue.
+  enum class QueueState {
+    MaybeExists,
+    AlreadyRemoved
+  };
+
+  bool RemoveFromCache(imgCacheEntry* entry,
+                       QueueState aQueueState = QueueState::MaybeExists);
 
   bool PutIntoCache(const ImageCacheKey& aKey, imgCacheEntry* aEntry);
 
@@ -372,11 +402,14 @@ public:
 
 private: // methods
 
+  static already_AddRefed<imgLoader> CreateImageLoader();
+
   bool ValidateEntry(imgCacheEntry* aEntry, nsIURI* aKey,
                      nsIURI* aInitialDocumentURI, nsIURI* aReferrerURI,
                      ReferrerPolicy aReferrerPolicy,
                      nsILoadGroup* aLoadGroup,
                      imgINotificationObserver* aObserver, nsISupports* aCX,
+                     nsIDocument* aLoadingDocument,
                      nsLoadFlags aLoadFlags,
                      nsContentPolicyType aContentPolicyType,
                      bool aCanMakeNewChannel,
@@ -390,7 +423,9 @@ private: // methods
                                      ReferrerPolicy aReferrerPolicy,
                                      nsILoadGroup* aLoadGroup,
                                      imgINotificationObserver* aObserver,
-                                     nsISupports* aCX, nsLoadFlags aLoadFlags,
+                                     nsISupports* aCX,
+                                     nsIDocument* aLoadingDocument,
+                                     nsLoadFlags aLoadFlags,
                                      nsContentPolicyType aContentPolicyType,
                                      imgRequestProxy** aProxyRequest,
                                      nsIPrincipal* aLoadingPrincipal,
@@ -398,6 +433,7 @@ private: // methods
 
   nsresult CreateNewProxyForRequest(imgRequest* aRequest,
                                     nsILoadGroup* aLoadGroup,
+                                    nsIDocument* aLoadingDocument,
                                     imgINotificationObserver* aObserver,
                                     nsLoadFlags aLoadFlags,
                                     imgRequestProxy** _retval);
@@ -519,8 +555,9 @@ public:
                     bool forcePrincipalCheckForCacheEntry);
 
   void AddProxy(imgRequestProxy* aProxy);
+  void RemoveProxy(imgRequestProxy* aProxy);
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSIREQUESTOBSERVER
@@ -529,6 +566,7 @@ public:
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
 
 private:
+  void UpdateProxies(bool aCancelRequest, bool aSyncNotify);
   virtual ~imgCacheValidator();
 
   nsCOMPtr<nsIStreamListener> mDestListener;
@@ -537,7 +575,7 @@ private:
   nsCOMPtr<nsIChannel> mRedirectChannel;
 
   RefPtr<imgRequest> mRequest;
-  nsCOMArray<imgIRequest> mProxies;
+  AutoTArray<RefPtr<imgRequestProxy>, 4> mProxies;
 
   RefPtr<imgRequest> mNewRequest;
   RefPtr<imgCacheEntry> mNewEntry;

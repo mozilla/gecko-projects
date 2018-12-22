@@ -1,22 +1,23 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests if the sidebar is properly updated with worker markers.
  */
 
-function* spawnTest() {
-  let { panel } = yield initPerformance(WORKER_URL);
+async function spawnTest() {
+  let { panel } = await initPerformance(WORKER_URL);
   let { $$, $, PerformanceController } = panel.panelWin;
 
   loadFrameScripts();
 
-  yield startRecording(panel);
+  await startRecording(panel);
   ok(true, "Recording has started.");
 
   evalInDebuggee("performWork()");
 
-  yield waitUntil(() => {
+  await waitUntil(() => {
     // Wait until we get the worker markers.
     let markers = PerformanceController.getCurrentRecording().getMarkers();
     if (!markers.some(m => m.name == "Worker") ||
@@ -31,14 +32,14 @@ function* spawnTest() {
     return true;
   });
 
-  yield stopRecording(panel);
+  await stopRecording(panel);
   ok(true, "Recording has ended.");
 
   for (let node of $$(".waterfall-marker-name[value=Worker")) {
     testWorkerMarkerUI(node.parentNode.parentNode);
   }
 
-  yield teardown(panel);
+  await teardown(panel);
   finish();
 }
 
@@ -70,9 +71,9 @@ function testWorkerMarkerUI(node) {
  * Takes a string `script` and evaluates it directly in the content
  * in potentially a different process.
  */
-function evalInDebuggee (script) {
-  let { generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
-  let deferred = Promise.defer();
+function evalInDebuggee(script) {
+  let { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+  let deferred = defer();
 
   if (!mm) {
     throw new Error("`loadFrameScripts()` must be called when using MessageManager.");
@@ -82,7 +83,7 @@ function evalInDebuggee (script) {
   mm.sendAsyncMessage("devtools:test:eval", { script: script, id: id });
   mm.addMessageListener("devtools:test:eval:response", handler);
 
-  function handler ({ data }) {
+  function handler({ data }) {
     if (id !== data.id) {
       return;
     }
@@ -93,3 +94,4 @@ function evalInDebuggee (script) {
 
   return deferred.promise;
 }
+/* eslint-enable */

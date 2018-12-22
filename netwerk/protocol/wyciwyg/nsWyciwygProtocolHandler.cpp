@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsContentUtils.h"
 #include "nsWyciwyg.h"
 #include "nsWyciwygChannel.h"
 #include "nsWyciwygProtocolHandler.h"
@@ -11,8 +12,8 @@
 #include "nsServiceManagerUtils.h"
 #include "plstr.h"
 #include "nsIObserverService.h"
-#include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIURI.h"
+#include "nsIURIMutator.h"
 
 #include "mozilla/net/NeckoChild.h"
 
@@ -21,12 +22,12 @@ using namespace mozilla::net;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-nsWyciwygProtocolHandler::nsWyciwygProtocolHandler() 
+nsWyciwygProtocolHandler::nsWyciwygProtocolHandler()
 {
   LOG(("Creating nsWyciwygProtocolHandler [this=%p].\n", this));
 }
 
-nsWyciwygProtocolHandler::~nsWyciwygProtocolHandler() 
+nsWyciwygProtocolHandler::~nsWyciwygProtocolHandler()
 {
   LOG(("Deleting nsWyciwygProtocolHandler [this=%p]\n", this));
 }
@@ -46,15 +47,15 @@ nsWyciwygProtocolHandler::GetScheme(nsACString &result)
 }
 
 NS_IMETHODIMP
-nsWyciwygProtocolHandler::GetDefaultPort(int32_t *result) 
+nsWyciwygProtocolHandler::GetDefaultPort(int32_t *result)
 {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsWyciwygProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *_retval)
 {
-  // don't override anything.  
+  // don't override anything.
   *_retval = false;
   return NS_OK;
 }
@@ -63,19 +64,11 @@ NS_IMETHODIMP
 nsWyciwygProtocolHandler::NewURI(const nsACString &aSpec,
                                  const char *aCharset, // ignored
                                  nsIURI *aBaseURI,
-                                 nsIURI **result) 
+                                 nsIURI **result)
 {
-  nsresult rv;
-
-  nsCOMPtr<nsIURI> url = do_CreateInstance(NS_SIMPLEURI_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = url->SetSpec(aSpec);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  url.forget(result);
-
-  return rv;
+  return NS_MutateURI(NS_SIMPLEURIMUTATOR_CONTRACTID)
+           .SetSpec(aSpec)
+           .Finalize(result);
 }
 
 NS_IMETHODIMP
@@ -93,8 +86,16 @@ nsWyciwygProtocolHandler::NewChannel2(nsIURI* url,
   if (IsNeckoChild()) {
     NS_ENSURE_TRUE(gNeckoChild != nullptr, NS_ERROR_FAILURE);
 
-    WyciwygChannelChild *wcc = static_cast<WyciwygChannelChild *>(
-                                 gNeckoChild->SendPWyciwygChannelConstructor());
+    ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+    if (cc->IsShuttingDown()) {
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCOMPtr<nsIEventTarget> target =
+      nsContentUtils::GetEventTargetByLoadInfo(aLoadInfo,
+                                               mozilla::TaskCategory::Other);
+    WyciwygChannelChild *wcc = new WyciwygChannelChild(target);
+
     if (!wcc)
       return NS_ERROR_OUT_OF_MEMORY;
 
@@ -107,7 +108,7 @@ nsWyciwygProtocolHandler::NewChannel2(nsIURI* url,
     // If original channel used https, make sure PSM is initialized
     // (this may be first channel to load during a session restore)
     nsAutoCString path;
-    rv = url->GetPath(path);
+    rv = url->GetPathQueryRef(path);
     NS_ENSURE_SUCCESS(rv, rv);
     int32_t slashIndex = path.FindChar('/', 2);
     if (slashIndex == kNotFound)
@@ -142,7 +143,7 @@ nsWyciwygProtocolHandler::NewChannel(nsIURI* url, nsIChannel* *result)
 }
 
 NS_IMETHODIMP
-nsWyciwygProtocolHandler::GetProtocolFlags(uint32_t *result) 
+nsWyciwygProtocolHandler::GetProtocolFlags(uint32_t *result)
 {
   // Should this be an an nsINestedURI?  We don't really want random webpages
   // loading these URIs...

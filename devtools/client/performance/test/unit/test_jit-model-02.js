@@ -1,21 +1,18 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests that JITOptimizations create OptimizationSites, and the underlying
  * hasSuccessfulOutcome/isSuccessfulOutcome work as intended.
  */
 
-function run_test() {
-  run_next_test();
-}
-
 add_task(function test() {
-  let {
+  const {
     JITOptimizations, hasSuccessfulOutcome, isSuccessfulOutcome, SUCCESSFUL_OUTCOMES
   } = require("devtools/client/performance/modules/logic/jit");
 
-  let rawSites = [];
+  const rawSites = [];
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite1);
@@ -23,25 +20,34 @@ add_task(function test() {
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite3);
 
-  let jit = new JITOptimizations(rawSites, gStringTable.stringTable);
-  let sites = jit.optimizationSites;
+  const jit = new JITOptimizations(rawSites, gStringTable.stringTable);
+  const sites = jit.optimizationSites;
 
-  let [first, second, third] = sites;
+  const [first, second, third] = sites;
 
   /* hasSuccessfulOutcome */
-  equal(hasSuccessfulOutcome(first), false, "hasSuccessfulOutcome() returns expected (1)");
-  equal(hasSuccessfulOutcome(second), true, "hasSuccessfulOutcome() returns expected (2)");
-  equal(hasSuccessfulOutcome(third), true, "hasSuccessfulOutcome() returns expected (3)");
+  equal(hasSuccessfulOutcome(first), false,
+        "hasSuccessfulOutcome() returns expected (1)");
+  equal(hasSuccessfulOutcome(second), true,
+        "hasSuccessfulOutcome() returns expected (2)");
+  equal(hasSuccessfulOutcome(third), true,
+        "hasSuccessfulOutcome() returns expected (3)");
 
   /* .data.attempts */
-  equal(first.data.attempts.length, 2, "optSite.data.attempts has the correct amount of attempts (1)");
-  equal(second.data.attempts.length, 5, "optSite.data.attempts has the correct amount of attempts (2)");
-  equal(third.data.attempts.length, 3, "optSite.data.attempts has the correct amount of attempts (3)");
+  equal(first.data.attempts.length, 2,
+        "optSite.data.attempts has the correct amount of attempts (1)");
+  equal(second.data.attempts.length, 5,
+        "optSite.data.attempts has the correct amount of attempts (2)");
+  equal(third.data.attempts.length, 3,
+        "optSite.data.attempts has the correct amount of attempts (3)");
 
   /* .data.types */
-  equal(first.data.types.length, 1, "optSite.data.types has the correct amount of IonTypes (1)");
-  equal(second.data.types.length, 2, "optSite.data.types has the correct amount of IonTypes (2)");
-  equal(third.data.types.length, 1, "optSite.data.types has the correct amount of IonTypes (3)");
+  equal(first.data.types.length, 1,
+        "optSite.data.types has the correct amount of IonTypes (1)");
+  equal(second.data.types.length, 2,
+        "optSite.data.types has the correct amount of IonTypes (2)");
+  equal(third.data.types.length, 1,
+        "optSite.data.types has the correct amount of IonTypes (3)");
 
   /* isSuccessfulOutcome */
   ok(SUCCESSFUL_OUTCOMES.length, "Have some successful outcomes in SUCCESSFUL_OUTCOMES");

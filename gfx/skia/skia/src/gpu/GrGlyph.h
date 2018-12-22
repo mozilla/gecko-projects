@@ -8,14 +8,13 @@
 #ifndef GrGlyph_DEFINED
 #define GrGlyph_DEFINED
 
-#include "GrBatchAtlas.h"
+#include "GrDrawOpAtlas.h"
 #include "GrRect.h"
 #include "GrTypes.h"
 
 #include "SkChecksum.h"
+#include "SkFixed.h"
 #include "SkPath.h"
-
-class GrPlot;
 
 /*  Need this to be quad-state:
     - complete w/ image
@@ -28,10 +27,10 @@ struct GrGlyph {
         kCoverage_MaskStyle,
         kDistance_MaskStyle
     };
-    
+
     typedef uint32_t PackedID;
 
-    GrBatchAtlas::AtlasID fID;
+    GrDrawOpAtlas::AtlasID fID;
     SkPath*               fPath;
     PackedID              fPackedID;
     GrMaskFormat          fMaskFormat;
@@ -40,16 +39,16 @@ struct GrGlyph {
     bool                  fTooLargeForAtlas;
 
     void init(GrGlyph::PackedID packed, const SkIRect& bounds, GrMaskFormat format) {
-        fID = GrBatchAtlas::kInvalidAtlasID;
+        fID = GrDrawOpAtlas::kInvalidAtlasID;
         fPath = nullptr;
         fPackedID = packed;
         fBounds.set(bounds);
         fMaskFormat = format;
         fAtlasLocation.set(0, 0);
-        fTooLargeForAtlas = GrBatchAtlas::GlyphTooLargeForAtlas(bounds.width(), bounds.height());
+        fTooLargeForAtlas = GrDrawOpAtlas::GlyphTooLargeForAtlas(bounds.width(), bounds.height());
     }
 
-    void free() {
+    void reset() {
         if (fPath) {
             delete fPath;
             fPath = nullptr;
@@ -60,6 +59,7 @@ struct GrGlyph {
     int height() const { return fBounds.height(); }
     bool isEmpty() const { return fBounds.isEmpty(); }
     uint16_t glyphID() const { return UnpackID(fPackedID); }
+    uint32_t pageIndex() const { return GrDrawOpAtlas::GetPageIndexFromID(fID); }
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -86,7 +86,7 @@ struct GrGlyph {
     static inline MaskStyle UnpackMaskStyle(PackedID packed) {
         return ((packed >> 20) & 1) ? kDistance_MaskStyle : kCoverage_MaskStyle;
     }
-    
+
     static inline uint16_t UnpackID(PackedID packed) {
         return (uint16_t)packed;
     }

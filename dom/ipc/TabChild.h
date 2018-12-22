@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_TabChild_h
 #define mozilla_dom_TabChild_h
 
+#include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/PBrowserChild.h"
 #include "nsIWebNavigation.h"
 #include "nsCOMPtr.h"
@@ -28,21 +29,31 @@
 #include "nsITooltipListener.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/TabContext.h"
+#include "mozilla/dom/CoalescedMouseData.h"
+#include "mozilla/dom/CoalescedWheelData.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/layers/CompositorOptions.h"
 #include "nsIWebBrowserChrome3.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "AudioChannelService.h"
 #include "PuppetWidget.h"
 #include "mozilla/layers/GeckoContentController.h"
+#include "nsDeque.h"
+#include "nsISHistoryListener.h"
 
-class nsICachedFileDescriptorListener;
 class nsIDOMWindowUtils;
+class nsIHttpChannel;
+class nsISerialEventTarget;
+
+template<typename T> class nsTHashtable;
+template<typename T> class nsPtrHashKey;
 
 namespace mozilla {
+class AbstractThread;
 namespace layout {
 class RenderFrameChild;
 } // namespace layout
@@ -51,104 +62,73 @@ namespace layers {
 class APZChild;
 class APZEventState;
 class AsyncDragMetrics;
+class IAPZCTreeManager;
 class ImageCompositeNotification;
+class PCompositorBridgeChild;
 } // namespace layers
 
 namespace widget {
 struct AutoCacheNativeKeyCommands;
 } // namespace widget
 
-namespace plugins {
-class PluginWidgetChild;
-} // namespace plugins
-
 namespace dom {
 
 class TabChild;
+class TabGroup;
 class ClonedMessageData;
-class TabChildBase;
+class CoalescedMouseData;
+class CoalescedWheelData;
 
-class TabChildGlobal : public DOMEventTargetHelper,
+class TabChildGlobal : public ContentFrameMessageManager,
                        public nsIContentFrameMessageManager,
                        public nsIScriptObjectPrincipal,
                        public nsIGlobalObject,
                        public nsSupportsWeakReference
 {
 public:
-  explicit TabChildGlobal(TabChildBase* aTabChild);
-  void Init();
+  explicit TabChildGlobal(TabChild* aTabChild);
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TabChildGlobal, DOMEventTargetHelper)
-  NS_FORWARD_SAFE_NSIMESSAGELISTENERMANAGER(mMessageManager)
+
+  void MarkForCC();
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aGivenProto) override
+  {
+    MOZ_CRASH("We should never get here!");
+  }
+  bool WrapGlobalObject(JSContext* aCx,
+                        JS::RealmOptions& aOptions,
+                        JS::MutableHandle<JSObject*> aReflector);
+
+  virtual already_AddRefed<nsPIDOMWindowOuter> GetContent(ErrorResult& aError) override;
+  virtual already_AddRefed<nsIDocShell> GetDocShell(ErrorResult& aError) override;
+  virtual already_AddRefed<nsIEventTarget> GetTabEventTarget() override;
+
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
-  NS_FORWARD_SAFE_NSIMESSAGEMANAGERGLOBAL(mMessageManager)
-  NS_IMETHOD SendSyncMessage(const nsAString& aMessageName,
-                             JS::Handle<JS::Value> aObject,
-                             JS::Handle<JS::Value> aRemote,
-                             nsIPrincipal* aPrincipal,
-                             JSContext* aCx,
-                             uint8_t aArgc,
-                             JS::MutableHandle<JS::Value> aRetval) override
-  {
-    return mMessageManager
-      ? mMessageManager->SendSyncMessage(aMessageName, aObject, aRemote,
-                                         aPrincipal, aCx, aArgc, aRetval)
-      : NS_ERROR_NULL_POINTER;
-  }
-  NS_IMETHOD SendRpcMessage(const nsAString& aMessageName,
-                            JS::Handle<JS::Value> aObject,
-                            JS::Handle<JS::Value> aRemote,
-                            nsIPrincipal* aPrincipal,
-                            JSContext* aCx,
-                            uint8_t aArgc,
-                            JS::MutableHandle<JS::Value> aRetval) override
-  {
-    return mMessageManager
-      ? mMessageManager->SendRpcMessage(aMessageName, aObject, aRemote,
-                                        aPrincipal, aCx, aArgc, aRetval)
-      : NS_ERROR_NULL_POINTER;
-  }
-  NS_IMETHOD GetContent(mozIDOMWindowProxy** aContent) override;
-  NS_IMETHOD GetDocShell(nsIDocShell** aDocShell) override;
+  NS_DECL_NSICONTENTFRAMEMESSAGEMANAGER
 
-  nsresult AddEventListener(const nsAString& aType,
-                            nsIDOMEventListener* aListener,
-                            bool aUseCapture)
-  {
-    // By default add listeners only for trusted events!
-    return DOMEventTargetHelper::AddEventListener(aType, aListener,
-                                                  aUseCapture, false, 2);
-  }
-  using DOMEventTargetHelper::AddEventListener;
-  NS_IMETHOD AddEventListener(const nsAString& aType,
-                              nsIDOMEventListener* aListener,
-                              bool aUseCapture, bool aWantsUntrusted,
-                              uint8_t optional_argc) override
-  {
-    return DOMEventTargetHelper::AddEventListener(aType, aListener,
-                                                  aUseCapture,
-                                                  aWantsUntrusted,
-                                                  optional_argc);
-  }
-
-  nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) override
+  void
+  GetEventTargetParent(EventChainPreVisitor& aVisitor) override
   {
     aVisitor.mForceContentDispatch = true;
-    return NS_OK;
   }
 
-  virtual JSContext* GetJSContextForEventHandlers() override;
   virtual nsIPrincipal* GetPrincipal() override;
   virtual JSObject* GetGlobalJSObject() override;
 
-  virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override
-  {
-    MOZ_CRASH("TabChildGlobal doesn't use DOM bindings!");
-  }
+  // Dispatch a runnable related to the global.
+  virtual nsresult Dispatch(mozilla::TaskCategory aCategory,
+                            already_AddRefed<nsIRunnable>&& aRunnable) override;
 
-  nsCOMPtr<nsIContentFrameMessageManager> mMessageManager;
-  RefPtr<TabChildBase> mTabChild;
+  virtual nsISerialEventTarget*
+  EventTargetFor(mozilla::TaskCategory aCategory) const override;
+
+  virtual AbstractThread*
+  AbstractMainThreadFor(mozilla::TaskCategory aCategory) override;
+
+  RefPtr<TabChild> mTabChild;
 
 protected:
   ~TabChildGlobal();
@@ -182,6 +162,13 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TabChildBase)
 
+  virtual bool WrapGlobalObject(JSContext* aCx,
+                                JS::RealmOptions& aOptions,
+                                JS::MutableHandle<JSObject*> aReflector) override
+  {
+    return mTabChildGlobal->WrapGlobalObject(aCx, aOptions, aReflector);
+  }
+
   virtual nsIWebNavigation* WebNavigation() const = 0;
   virtual PuppetWidget* WebWidget() = 0;
   nsIPrincipal* GetPrincipal() { return mPrincipal; }
@@ -194,11 +181,11 @@ public:
   // Get the Document for the top-level window in this tab.
   already_AddRefed<nsIDocument> GetDocument() const;
 
-protected:
-  virtual ~TabChildBase();
-
   // Get the pres-shell of the document for the top-level window in this tab.
   already_AddRefed<nsIPresShell> GetPresShell() const;
+
+protected:
+  virtual ~TabChildBase();
 
   // Wraps up a JSON object as a structured clone and sends it to the browser
   // chrome script.
@@ -228,12 +215,16 @@ class TabChild final : public TabChildBase,
                        public nsITabChild,
                        public nsIObserver,
                        public TabContext,
-                       public nsITooltipListener
+                       public nsITooltipListener,
+                       public mozilla::ipc::IShmemAllocator
 {
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
+  typedef mozilla::dom::CoalescedMouseData CoalescedMouseData;
+  typedef mozilla::dom::CoalescedWheelData CoalescedWheelData;
   typedef mozilla::layout::RenderFrameChild RenderFrameChild;
   typedef mozilla::layers::APZEventState APZEventState;
   typedef mozilla::layers::SetAllowedTouchBehaviorCallback SetAllowedTouchBehaviorCallback;
+  typedef mozilla::layers::TouchBehaviorFlags TouchBehaviorFlags;
 
 public:
   /**
@@ -242,30 +233,26 @@ public:
    */
   static already_AddRefed<TabChild> FindTabChild(const TabId& aTabId);
 
+  // Return a list of all active TabChildren.
+  static nsTArray<RefPtr<TabChild>> GetAll();
+
 public:
   /**
    * Create a new TabChild object.
    */
   TabChild(nsIContentChild* aManager,
            const TabId& aTabId,
+           TabGroup* aTabGroup,
            const TabContext& aContext,
            uint32_t aChromeFlags);
 
   nsresult Init();
 
-  /**
-   * This is expected to be called off the critical path to content
-   * startup.  This is an opportunity to load things that are slow
-   * on the critical path.
-   */
-  static void PreloadSlowThings();
-
   /** Return a TabChild with the given attributes. */
   static already_AddRefed<TabChild>
   Create(nsIContentChild* aManager, const TabId& aTabId,
+         const TabId& aSameTabGroupAs,
          const TabContext& aContext, uint32_t aChromeFlags);
-
-  bool IsRootContentDocument() const;
 
   // Let managees query if it is safe to send messages.
   bool IsDestroyed() const{ return mDestroyed; }
@@ -286,6 +273,15 @@ public:
   NS_DECL_NSITABCHILD
   NS_DECL_NSIOBSERVER
   NS_DECL_NSITOOLTIPLISTENER
+
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(TabChild, TabChildBase)
+
+  FORWARD_SHMEM_ALLOCATOR_TO(PBrowserChild)
+
+  TabChildGlobal* GetMessageManager()
+  {
+    return mTabChildGlobal;
+  }
 
   /**
    * MessageManagerCallback methods that we override.
@@ -309,141 +305,150 @@ public:
                           const ViewID& aViewId,
                           const Maybe<ZoomConstraints>& aConstraints) override;
 
-  virtual bool RecvLoadURL(const nsCString& aURI,
-                           const BrowserConfiguration& aConfiguration,
-                           const ShowInfo& aInfo) override;
-
-  virtual bool RecvCacheFileDescriptor(const nsString& aPath,
-                                       const FileDescriptor& aFileDescriptor)
-                                       override;
-
-  virtual bool
+  virtual mozilla::ipc::IPCResult RecvLoadURL(const nsCString& aURI,
+                                              const ShowInfo& aInfo) override;
+  virtual mozilla::ipc::IPCResult
   RecvShow(const ScreenIntSize& aSize,
            const ShowInfo& aInfo,
-           const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-           const uint64_t& aLayersId,
-           PRenderFrameChild* aRenderFrame,
            const bool& aParentIsActive,
            const nsSizeMode& aSizeMode) override;
 
-  virtual bool
-  RecvUpdateDimensions(const CSSRect& aRect,
-                       const CSSSize& aSize,
-                       const ScreenOrientationInternal& aOrientation,
-                       const LayoutDeviceIntPoint& aClientOffset,
-                       const LayoutDeviceIntPoint& aChromeDisp) override;
-  virtual bool
+  virtual mozilla::ipc::IPCResult
+  RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
+                    const layers::LayersId& aLayersId,
+                    const mozilla::layers::CompositorOptions& aCompositorOptions,
+                    const bool& aLayersConnected,
+                    PRenderFrameChild* aRenderFrame) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvUpdateDimensions(const mozilla::dom::DimensionInfo& aDimensionInfo) override;
+  virtual mozilla::ipc::IPCResult
   RecvSizeModeChanged(const nsSizeMode& aSizeMode) override;
 
-  virtual bool RecvActivate() override;
+  mozilla::ipc::IPCResult RecvActivate();
 
-  virtual bool RecvDeactivate() override;
+  mozilla::ipc::IPCResult RecvDeactivate();
 
-  virtual bool RecvMouseEvent(const nsString& aType,
-                              const float& aX,
-                              const float& aY,
-                              const int32_t& aButton,
-                              const int32_t& aClickCount,
-                              const int32_t& aModifiers,
-                              const bool& aIgnoreRootScrollFrame) override;
+  MOZ_CAN_RUN_SCRIPT
+  virtual mozilla::ipc::IPCResult RecvMouseEvent(const nsString& aType,
+                                                 const float& aX,
+                                                 const float& aY,
+                                                 const int32_t& aButton,
+                                                 const int32_t& aClickCount,
+                                                 const int32_t& aModifiers,
+                                                 const bool& aIgnoreRootScrollFrame) override;
 
-  virtual bool RecvRealMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
-                                      const ScrollableLayerGuid& aGuid,
-                                      const uint64_t& aInputBlockId) override;
+  virtual mozilla::ipc::IPCResult RecvRealMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                                         const ScrollableLayerGuid& aGuid,
+                                                         const uint64_t& aInputBlockId) override;
 
-  virtual bool RecvSynthMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
                                        const ScrollableLayerGuid& aGuid,
                                        const uint64_t& aInputBlockId) override;
 
-  virtual bool RecvRealMouseButtonEvent(const mozilla::WidgetMouseEvent& aEvent,
+  virtual mozilla::ipc::IPCResult RecvSynthMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                                          const ScrollableLayerGuid& aGuid,
+                                                          const uint64_t& aInputBlockId) override;
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPrioritySynthMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
                                         const ScrollableLayerGuid& aGuid,
                                         const uint64_t& aInputBlockId) override;
 
-  virtual bool RecvRealDragEvent(const WidgetDragEvent& aEvent,
-                                 const uint32_t& aDragAction,
-                                 const uint32_t& aDropEffect) override;
+  virtual mozilla::ipc::IPCResult RecvRealMouseButtonEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                                           const ScrollableLayerGuid& aGuid,
+                                                           const uint64_t& aInputBlockId) override;
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealMouseButtonEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                         const ScrollableLayerGuid& aGuid,
+                                         const uint64_t& aInputBlockId) override;
 
-  virtual bool
-  RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent,
-                   const MaybeNativeKeyBinding& aBindings) override;
+  virtual mozilla::ipc::IPCResult RecvRealDragEvent(const WidgetDragEvent& aEvent,
+                                                    const uint32_t& aDragAction,
+                                                    const uint32_t& aDropEffect,
+                                                    const nsCString& aPrincipalURISpec) override;
 
-  virtual bool RecvMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
+  virtual mozilla::ipc::IPCResult
+  RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent) override;
+
+  virtual mozilla::ipc::IPCResult RecvMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
+                                                      const ScrollableLayerGuid& aGuid,
+                                                      const uint64_t& aInputBlockId) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
+                                    const ScrollableLayerGuid& aGuid,
+                                    const uint64_t& aInputBlockId) override;
+
+  virtual mozilla::ipc::IPCResult RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
+                                                     const ScrollableLayerGuid& aGuid,
+                                                     const uint64_t& aInputBlockId,
+                                                     const nsEventStatus& aApzResponse) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealTouchEvent(const WidgetTouchEvent& aEvent,
                                    const ScrollableLayerGuid& aGuid,
-                                   const uint64_t& aInputBlockId) override;
+                                   const uint64_t& aInputBlockId,
+                                   const nsEventStatus& aApzResponse) override;
 
-  virtual bool RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
-                                  const ScrollableLayerGuid& aGuid,
-                                  const uint64_t& aInputBlockId,
-                                  const nsEventStatus& aApzResponse) override;
-
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
                          const ScrollableLayerGuid& aGuid,
                          const uint64_t& aInputBlockId,
                          const nsEventStatus& aApzResponse) override;
 
-  virtual bool RecvKeyEvent(const nsString& aType,
-                            const int32_t& aKeyCode,
-                            const int32_t& aCharCode,
-                            const int32_t& aModifiers,
-                            const bool& aPreventDefault) override;
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
+                                       const ScrollableLayerGuid& aGuid,
+                                       const uint64_t& aInputBlockId,
+                                       const nsEventStatus& aApzResponse) override;
 
-  virtual bool RecvMouseScrollTestEvent(const uint64_t& aLayersId,
-                                        const FrameMetrics::ViewID& aScrollId,
-                                        const nsString& aEvent) override;
+  virtual mozilla::ipc::IPCResult RecvNativeSynthesisResponse(const uint64_t& aObserverId,
+                                                              const nsCString& aResponse) override;
 
-  virtual bool RecvNativeSynthesisResponse(const uint64_t& aObserverId,
-                                           const nsCString& aResponse) override;
+  virtual mozilla::ipc::IPCResult RecvPluginEvent(const WidgetPluginEvent& aEvent) override;
 
-  virtual bool RecvPluginEvent(const WidgetPluginEvent& aEvent) override;
-
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvCompositionEvent(const mozilla::WidgetCompositionEvent& aEvent) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityCompositionEvent(
+    const mozilla::WidgetCompositionEvent& aEvent) override;
+
+  virtual mozilla::ipc::IPCResult
   RecvSelectionEvent(const mozilla::WidgetSelectionEvent& aEvent) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPrioritySelectionEvent(
+    const mozilla::WidgetSelectionEvent& aEvent) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
+                        const bool& aIsPrivateData,
+                        const IPC::Principal& aRequestingPrincipal,
+                        const uint32_t& aContentPolicyType) override;
+
+  virtual mozilla::ipc::IPCResult
   RecvActivateFrameEvent(const nsString& aType, const bool& aCapture) override;
 
-  virtual bool RecvLoadRemoteScript(const nsString& aURL,
-                                    const bool& aRunInGlobalScope) override;
+  virtual mozilla::ipc::IPCResult RecvLoadRemoteScript(const nsString& aURL,
+                                                       const bool& aRunInGlobalScope) override;
 
-  virtual bool RecvAsyncMessage(const nsString& aMessage,
-                                const ClonedMessageData& aData,
-                                InfallibleTArray<CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
-
-  virtual bool RecvAppOfflineStatus(const uint32_t& aId,
-                                    const bool& aOffline) override;
-
-  virtual bool RecvSwappedWithOtherRemoteLoader() override;
+  virtual mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aMessage,
+                                                   InfallibleTArray<CpowEntry>&& aCpows,
+                                                   const IPC::Principal& aPrincipal,
+                                                   const ClonedMessageData& aData) override;
+  virtual mozilla::ipc::IPCResult
+  RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext) override;
 
   virtual PDocAccessibleChild*
-  AllocPDocAccessibleChild(PDocAccessibleChild*, const uint64_t&) override;
+  AllocPDocAccessibleChild(PDocAccessibleChild*, const uint64_t&,
+                           const uint32_t&, const IAccessibleHolder&) override;
 
   virtual bool DeallocPDocAccessibleChild(PDocAccessibleChild*) override;
-
-  virtual PDocumentRendererChild*
-  AllocPDocumentRendererChild(const nsRect& aDocumentRect,
-                              const gfx::Matrix& aTransform,
-                              const nsString& aBggcolor,
-                              const uint32_t& aRenderFlags,
-                              const bool& aFlushLayout,
-                              const nsIntSize& arenderSize) override;
-
-  virtual bool
-  DeallocPDocumentRendererChild(PDocumentRendererChild* aCctor) override;
-
-  virtual bool
-  RecvPDocumentRendererConstructor(PDocumentRendererChild* aActor,
-                                   const nsRect& aDocumentRect,
-                                   const gfx::Matrix& aTransform,
-                                   const nsString& aBgcolor,
-                                   const uint32_t& aRenderFlags,
-                                   const bool& aFlushLayout,
-                                   const nsIntSize& aRenderSize) override;
-
 
   virtual PColorPickerChild*
   AllocPColorPickerChild(const nsString& aTitle,
@@ -470,12 +475,17 @@ public:
 
   virtual PuppetWidget* WebWidget() override { return mPuppetWidget; }
 
-  /** Return the DPI of the widget this TabChild draws to. */
-  void GetDPI(float* aDPI);
+  bool IsTransparent() const { return mIsTransparent; }
 
-  void GetDefaultScale(double *aScale);
+  void GetMaxTouchPoints(uint32_t* aTouchPoints)
+  {
+    *aTouchPoints = mMaxTouchPoints;
+  }
 
-  void GetMaxTouchPoints(uint32_t* aTouchPoints);
+  void SetMaxTouchPoints(uint32_t aMaxTouchPoints)
+  {
+    mMaxTouchPoints = aMaxTouchPoints;
+  }
 
   ScreenOrientationInternal GetOrientation() const { return mOrientation; }
 
@@ -483,8 +493,9 @@ public:
 
   void NotifyPainted();
 
-  void RequestNativeKeyBindings(mozilla::widget::AutoCacheNativeKeyCommands* aAutoCache,
-                                WidgetKeyboardEvent* aEvent);
+  void RequestEditCommands(nsIWidget::NativeKeyBindingsType aType,
+                           const WidgetKeyboardEvent& aEvent,
+                           nsTArray<CommandInt>& aCommands);
 
   /**
    * Signal to this TabChild that it should be made visible:
@@ -493,21 +504,9 @@ public:
    */
   void MakeVisible();
   void MakeHidden();
-
-  // Returns true if the file descriptor was found in the cache, false
-  // otherwise.
-  bool GetCachedFileDescriptor(const nsAString& aPath,
-                               nsICachedFileDescriptorListener* aCallback);
-
-  void CancelCachedFileDescriptorCallback(
-                                  const nsAString& aPath,
-                                  nsICachedFileDescriptorListener* aCallback);
+  bool IsVisible();
 
   nsIContentChild* Manager() const { return mManager; }
-
-  bool GetUpdateHitRegion() const { return mUpdateHitRegion; }
-
-  void UpdateHitRegion(const nsRegion& aRegion);
 
   static inline TabChild*
   GetFrom(nsIDocShell* aDocShell)
@@ -537,11 +536,12 @@ public:
   }
 
   static TabChild* GetFrom(nsIPresShell* aPresShell);
-  static TabChild* GetFrom(uint64_t aLayersId);
+  static TabChild* GetFrom(layers::LayersId aLayersId);
 
-  uint64_t LayersId() { return mLayersId; }
+  layers::LayersId GetLayersId() { return mLayersId; }
+  Maybe<bool> IsLayersConnected() { return mLayersConnected; }
 
-  void DidComposite(uint64_t aTransactionId,
+  void DidComposite(mozilla::layers::TransactionId aTransactionId,
                     const TimeStamp& aCompositeStart,
                     const TimeStamp& aCompositeEnd);
 
@@ -550,7 +550,8 @@ public:
 
   void ClearCachedResources();
   void InvalidateLayers();
-  void CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier);
+  void ReinitRendering();
+  void ReinitRenderingForDeviceReset();
 
   static inline TabChild* GetFrom(nsIDOMWindow* aWindow)
   {
@@ -559,21 +560,27 @@ public:
     return GetFrom(docShell);
   }
 
-  virtual bool RecvUIResolutionChanged(const float& aDpi,
-                                       const double& aScale) override;
+  virtual mozilla::ipc::IPCResult RecvUIResolutionChanged(const float& aDpi,
+                                                          const int32_t& aRounding,
+                                                          const double& aScale) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvThemeChanged(nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) override;
 
-  virtual bool RecvHandleAccessKey(nsTArray<uint32_t>&& aCharCodes,
-                                   const bool& aIsTrusted,
-                                   const int32_t& aModifierMask) override;
+  virtual mozilla::ipc::IPCResult
+  RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
+                      nsTArray<uint32_t>&& aCharCodes) override;
 
-  virtual bool RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,
-                                                  const float& aVolume,
-                                                  const bool& aMuted) override;
+  virtual mozilla::ipc::IPCResult RecvSetUseGlobalHistory(const bool& aUse) override;
 
-  virtual bool RecvSetUseGlobalHistory(const bool& aUse) override;
+  virtual mozilla::ipc::IPCResult RecvHandledWindowedPluginKeyEvent(
+    const mozilla::NativeEventData& aKeyEventData,
+    const bool& aIsConsumed) override;
+
+  virtual mozilla::ipc::IPCResult RecvPrint(const uint64_t& aOuterWindowID,
+                                            const PrintData& aPrintData) override;
+
+  virtual mozilla::ipc::IPCResult RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle) override;
 
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
@@ -582,10 +589,18 @@ public:
 
   bool DeallocPPluginWidgetChild(PPluginWidgetChild* aActor) override;
 
+#ifdef XP_WIN
   nsresult CreatePluginWidget(nsIWidget* aParent, nsIWidget** aOut);
+#endif
+
+  virtual PPaymentRequestChild*
+  AllocPPaymentRequestChild() override;
+
+  virtual bool
+  DeallocPPaymentRequestChild(PPaymentRequestChild* aActor) override;
 
   LayoutDeviceIntPoint GetClientOffset() const { return mClientOffset; }
-  LayoutDeviceIntPoint GetChromeDisplacement() const { return mChromeDisp; };
+  LayoutDeviceIntPoint GetChromeOffset() const { return mChromeOffset; };
 
   bool IPCOpen() const { return mIPCOpen; }
 
@@ -594,13 +609,15 @@ public:
     return mParentIsActive;
   }
 
-  bool AsyncPanZoomEnabled() const { return mAsyncPanZoomEnabled; }
+  const mozilla::layers::CompositorOptions& GetCompositorOptions() const;
+  bool AsyncPanZoomEnabled() const;
 
   virtual ScreenIntSize GetInnerSize() override;
 
   // Call RecvShow(nsIntSize(0, 0)) and block future calls to RecvShow().
   void DoFakeShow(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-                  const uint64_t& aLayersId,
+                  const layers::LayersId& aLayersId,
+                  const mozilla::layers::CompositorOptions& aCompositorOptions,
                   PRenderFrameChild* aRenderFrame,
                   const ShowInfo& aShowInfo);
 
@@ -609,17 +626,21 @@ public:
                                  bool aPreventDefault) const;
   void SetTargetAPZC(uint64_t aInputBlockId,
                     const nsTArray<ScrollableLayerGuid>& aTargets) const;
-  void HandleDoubleTap(const CSSPoint& aPoint,
-                       const Modifiers& aModifiers,
-                       const mozilla::layers::ScrollableLayerGuid& aGuid);
-  void HandleSingleTap(const CSSPoint& aPoint,
-                       const Modifiers& aModifiers,
-                       const mozilla::layers::ScrollableLayerGuid& aGuid,
-                       bool aCallTakeFocusForClickFromTap);
-  void HandleLongTap(const CSSPoint& aPoint,
-                     const Modifiers& aModifiers,
-                     const mozilla::layers::ScrollableLayerGuid& aGuid,
-                     const uint64_t& aInputBlockId);
+  MOZ_CAN_RUN_SCRIPT
+  mozilla::ipc::IPCResult RecvHandleTap(const layers::GeckoContentController::TapType& aType,
+                                        const LayoutDevicePoint& aPoint,
+                                        const Modifiers& aModifiers,
+                                        const ScrollableLayerGuid& aGuid,
+                                        const uint64_t& aInputBlockId) override;
+
+  MOZ_CAN_RUN_SCRIPT
+  mozilla::ipc::IPCResult
+  RecvNormalPriorityHandleTap(const layers::GeckoContentController::TapType& aType,
+                              const LayoutDevicePoint& aPoint,
+                              const Modifiers& aModifiers,
+                              const ScrollableLayerGuid& aGuid,
+                              const uint64_t& aInputBlockId) override;
+
   void SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                const nsTArray<TouchBehaviorFlags>& aFlags) const;
 
@@ -633,9 +654,70 @@ public:
                   const CSSRect& aRect,
                   const uint32_t& aFlags);
 
-  void SetAPZChild(layers::APZChild* aAPZChild)
+  // Request that the docshell be marked as active.
+  void PaintWhileInterruptingJS(uint64_t aLayerObserverEpoch,
+                                bool aForceRepaint);
+
+  uint64_t LayerObserverEpoch() const { return mLayerObserverEpoch; }
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  uintptr_t GetNativeWindowHandle() const { return mNativeWindowHandle; }
+#endif
+
+  // These methods return `true` if this TabChild is currently awaiting a
+  // Large-Allocation header.
+  bool StopAwaitingLargeAlloc();
+  bool IsAwaitingLargeAlloc();
+
+  mozilla::dom::TabGroup* TabGroup();
+
+#if defined(ACCESSIBILITY)
+  void SetTopLevelDocAccessibleChild(PDocAccessibleChild* aTopLevelChild)
   {
-      mAPZChild = aAPZChild;
+    mTopLevelDocAccessibleChild = aTopLevelChild;
+  }
+
+  PDocAccessibleChild* GetTopLevelDocAccessibleChild()
+  {
+    return mTopLevelDocAccessibleChild;
+  }
+#endif
+
+  void AddPendingDocShellBlocker();
+  void RemovePendingDocShellBlocker();
+
+  // The HANDLE object for the widget this TabChild in.
+  WindowsHandle WidgetNativeData()
+  {
+    return mWidgetNativeData;
+  }
+
+  // Prepare to dispatch all coalesced mousemove events. We'll move all data
+  // in mCoalescedMouseData to a nsDeque; then we start processing them. We
+  // can't fetch the coalesced event one by one and dispatch it because we may
+  // reentry the event loop and access to the same hashtable. It's called when
+  // dispatching some mouse events other than mousemove.
+  void FlushAllCoalescedMouseData();
+  void ProcessPendingCoalescedMouseDataAndDispatchEvents();
+
+  void HandleRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
+                                  const ScrollableLayerGuid& aGuid,
+                                  const uint64_t& aInputBlockId);
+
+  static bool HasVisibleTabs()
+  {
+    return sVisibleTabs && !sVisibleTabs->IsEmpty();
+  }
+
+  // Returns the set of TabChilds that are currently rendering layers. There
+  // can be multiple TabChilds in this state if Firefox has multiple windows
+  // open or is warming tabs up. There can also be zero TabChilds in this
+  // state. Note that this function should only be called if HasVisibleTabs()
+  // returns true.
+  static const nsTHashtable<nsPtrHashKey<TabChild>>& GetVisibleTabs()
+  {
+    MOZ_ASSERT(HasVisibleTabs());
+    return *sVisibleTabs;
   }
 
 protected:
@@ -645,52 +727,60 @@ protected:
 
   virtual bool DeallocPRenderFrameChild(PRenderFrameChild* aFrame) override;
 
-  virtual bool RecvDestroy() override;
+  virtual mozilla::ipc::IPCResult RecvDestroy() override;
 
-  virtual bool RecvSetUpdateHitRegion(const bool& aEnabled) override;
+  virtual mozilla::ipc::IPCResult RecvSetDocShellIsActive(const bool& aIsActive) override;
 
-  virtual bool RecvSetDocShellIsActive(const bool& aIsActive,
-                                       const bool& aIsHidden) override;
+  virtual mozilla::ipc::IPCResult RecvRenderLayers(const bool& aEnabled, const bool& aForce, const uint64_t& aLayerObserverEpoch) override;
 
-  virtual bool RecvNavigateByKey(const bool& aForward,
-                                 const bool& aForDocumentNavigation) override;
+  virtual mozilla::ipc::IPCResult RecvNavigateByKey(const bool& aForward,
+                                                    const bool& aForDocumentNavigation) override;
 
-  virtual bool RecvRequestNotifyAfterRemotePaint() override;
+  virtual mozilla::ipc::IPCResult RecvRequestNotifyAfterRemotePaint() override;
 
-  virtual bool RecvSuppressDisplayport(const bool& aEnabled) override;
+  virtual mozilla::ipc::IPCResult RecvSuppressDisplayport(const bool& aEnabled) override;
 
-  virtual bool RecvParentActivated(const bool& aActivated) override;
+  virtual mozilla::ipc::IPCResult RecvParentActivated(const bool& aActivated) override;
 
-  virtual bool RecvStopIMEStateManagement() override;
+  virtual mozilla::ipc::IPCResult RecvSetKeyboardIndicators(const UIStateChangeType& aShowAccelerators,
+                                                            const UIStateChangeType& aShowFocusRings) override;
 
-  virtual bool RecvMenuKeyboardListenerInstalled(
-                 const bool& aInstalled) override;
+  virtual mozilla::ipc::IPCResult RecvStopIMEStateManagement() override;
 
-#ifdef MOZ_WIDGET_GONK
-  void MaybeRequestPreinitCamera();
-#endif
+  virtual mozilla::ipc::IPCResult RecvAwaitLargeAlloc() override;
+
+  virtual mozilla::ipc::IPCResult RecvSetWindowName(const nsString& aName) override;
+
+  virtual mozilla::ipc::IPCResult RecvSetOriginAttributes(const OriginAttributes& aOriginAttributes) override;
+
+  virtual mozilla::ipc::IPCResult RecvSetWidgetNativeData(const WindowsHandle& aWidgetNativeData) override;
 
 private:
-  // Notify others that our TabContext has been updated.  (At the moment, this
-  // sets the appropriate app-id and is-browser flags on our docshell.)
+  void HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
+                       const ScrollableLayerGuid& aGuid);
+
+  // Notify others that our TabContext has been updated.
   //
   // You should call this after calling TabContext::SetTabContext().  We also
   // call this during Init().
-  void NotifyTabContextUpdated();
+  //
+  // @param aIsPreallocated  true if this is called for Preallocated Tab.
+  void NotifyTabContextUpdated(bool aIsPreallocated);
+
+  // Update the frameType on our docshell.
+  void UpdateFrameType();
 
   void ActorDestroy(ActorDestroyReason why) override;
 
-  enum FrameScriptLoading { DONT_LOAD_SCRIPTS, DEFAULT_LOAD_SCRIPTS };
+  bool InitTabChildGlobal();
 
-  bool InitTabChildGlobal(FrameScriptLoading aScriptLoading = DEFAULT_LOAD_SCRIPTS);
-
-  bool InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-                          const uint64_t& aLayersId,
+  void InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
+                          const layers::LayersId& aLayersId,
+                          const mozilla::layers::CompositorOptions& aCompositorOptions,
                           PRenderFrameChild* aRenderFrame);
+  void InitAPZState();
 
   void DestroyWindow();
-
-  void SetProcessNameToAppName();
 
   void ApplyShowInfo(const ShowInfo& aInfo);
 
@@ -705,31 +795,50 @@ private:
     mUnscaledInnerSize = aSize;
   }
 
-  class CachedFileDescriptorInfo;
-  class CachedFileDescriptorCallbackRunnable;
+  bool SkipRepeatedKeyEvent(const WidgetKeyboardEvent& aEvent);
+
+  void UpdateRepeatedKeyEventEndTime(const WidgetKeyboardEvent& aEvent);
+
+  bool MaybeCoalesceWheelEvent(const WidgetWheelEvent& aEvent,
+                               const ScrollableLayerGuid& aGuid,
+                               const uint64_t& aInputBlockId,
+                               bool* aIsNextWheelEvent);
+
+  void MaybeDispatchCoalescedWheelEvent();
+
+  /**
+   * Dispatch aEvent on aEvent.mWidget.
+   */
+  nsEventStatus DispatchWidgetEventViaAPZ(WidgetGUIEvent& aEvent);
+
+  void DispatchWheelEvent(const WidgetWheelEvent& aEvent,
+                          const ScrollableLayerGuid& aGuid,
+                          const uint64_t& aInputBlockId);
+
+  void InternalSetDocShellIsActive(bool aIsActive);
+
+  bool CreateRemoteLayerManager(mozilla::layers::PCompositorBridgeChild* aCompositorChild);
+
   class DelayedDeleteRunnable;
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
   nsCOMPtr<nsIWebNavigation> mWebNav;
+  RefPtr<mozilla::dom::TabGroup> mTabGroup;
   RefPtr<PuppetWidget> mPuppetWidget;
   nsCOMPtr<nsIURI> mLastURI;
   RenderFrameChild* mRemoteFrame;
   RefPtr<nsIContentChild> mManager;
   uint32_t mChromeFlags;
-  int32_t mActiveSuppressDisplayport;
-  uint64_t mLayersId;
+  uint32_t mMaxTouchPoints;
+  layers::LayersId mLayersId;
+  int64_t mBeforeUnloadListeners;
   CSSRect mUnscaledOuterRect;
-  // Whether we have already received a FileDescriptor for the app package.
-  bool mAppPackageFileDescriptorRecved;
-  // At present only 1 of these is really expected.
-  AutoTArray<nsAutoPtr<CachedFileDescriptorInfo>, 1>
-      mCachedFileDescriptorInfos;
   nscolor mLastBackgroundColor;
+  Maybe<bool> mLayersConnected;
   bool mDidFakeShow;
   bool mNotified;
   bool mTriedBrowserInit;
   ScreenOrientationInternal mOrientation;
-  bool mUpdateHitRegion;
 
   bool mIgnoreKeyPressEvent;
   RefPtr<APZEventState> mAPZEventState;
@@ -739,25 +848,83 @@ private:
   // Position of client area relative to the outer window
   LayoutDeviceIntPoint mClientOffset;
   // Position of tab, relative to parent widget (typically the window)
-  LayoutDeviceIntPoint mChromeDisp;
+  LayoutDeviceIntPoint mChromeOffset;
   TabId mUniqueId;
 
+  // Holds the compositor options for the compositor rendering this tab,
+  // once we find out which compositor that is.
+  Maybe<mozilla::layers::CompositorOptions> mCompositorOptions;
+
   friend class ContentChild;
-  float mDPI;
-  double mDefaultScale;
+
+  bool mIsTransparent;
 
   bool mIPCOpen;
   bool mParentIsActive;
-  bool mAsyncPanZoomEnabled;
   CSSSize mUnscaledInnerSize;
   bool mDidSetRealShowInfo;
   bool mDidLoadURLInit;
+  bool mAwaitingLA;
 
-  AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
+  bool mSkipKeyPress;
 
-  // APZChild clears this pointer from its destructor, so it shouldn't be a
-  // dangling pointer.
-  layers::APZChild* mAPZChild;
+  // Store the end time of the handling of the last repeated keydown/keypress
+  // event so that in case event handling takes time, some repeated events can
+  // be skipped to not flood child process.
+  mozilla::TimeStamp mRepeatedKeyEventTime;
+
+  // Similar to mRepeatedKeyEventTime, store the end time (from parent process)
+  // of handling the last repeated wheel event so that in case event handling
+  // takes time, some repeated events can be skipped to not flood child process.
+  mozilla::TimeStamp mLastWheelProcessedTimeFromParent;
+  mozilla::TimeDuration mLastWheelProcessingDuration;
+
+  // Hash table to track coalesced mousemove events for different pointers.
+  nsClassHashtable<nsUint32HashKey, CoalescedMouseData> mCoalescedMouseData;
+
+  nsDeque mToBeDispatchedMouseData;
+
+  CoalescedWheelData mCoalescedWheelData;
+  RefPtr<CoalescedMouseMoveFlusher> mCoalescedMouseEventFlusher;
+
+  RefPtr<layers::IAPZCTreeManager> mApzcTreeManager;
+
+  // The most recently seen layer observer epoch in RecvSetDocShellIsActive.
+  uint64_t mLayerObserverEpoch;
+
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  // The handle associated with the native window that contains this tab
+  uintptr_t mNativeWindowHandle;
+#endif // defined(XP_WIN)
+
+#if defined(ACCESSIBILITY)
+  PDocAccessibleChild* mTopLevelDocAccessibleChild;
+#endif
+  bool mCoalesceMouseMoveEvents;
+
+  // In some circumstances, a DocShell might be in a state where it is
+  // "blocked", and we should not attempt to change its active state or
+  // the underlying PresShell state until the DocShell becomes unblocked.
+  // It is possible, however, for the parent process to send commands to
+  // change those states while the DocShell is blocked. We store those
+  // states temporarily as "pending", and only apply them once the DocShell
+  // is no longer blocked.
+  bool mPendingDocShellIsActive;
+  bool mPendingDocShellReceivedMessage;
+  bool mPendingRenderLayers;
+  bool mPendingRenderLayersReceivedMessage;
+  uint64_t mPendingLayerObserverEpoch;
+  // When mPendingDocShellBlockers is greater than 0, the DocShell is blocked,
+  // and once it reaches 0, it is no longer blocked.
+  uint32_t mPendingDocShellBlockers;
+
+  WindowsHandle mWidgetNativeData;
+
+  // This state is used to keep track of the current visible tabs (the ones rendering
+  // layers). There may be more than one if there are multiple browser windows open, or
+  // tabs are being warmed up. There may be none if this process does not host any
+  // visible or warming tabs.
+  static nsTHashtable<nsPtrHashKey<TabChild>>* sVisibleTabs;
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

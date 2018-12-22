@@ -8,6 +8,7 @@
 #define DNS_h_
 
 #include "nscore.h"
+#include "nsString.h"
 #include "prio.h"
 #include "prnetdb.h"
 #include "plstr.h"
@@ -20,6 +21,10 @@
 
 #ifdef XP_WIN
 #include "winsock2.h"
+#endif
+
+#ifndef AF_LOCAL
+#define AF_LOCAL 1  // used for named pipe
 #endif
 
 #define IPv6ADDR_IS_LOOPBACK(a) \
@@ -103,14 +108,16 @@ union NetAddr {
     IPv6Addr ip;                    /* the actual 128 bits of address */
     uint32_t scope_id;              /* set of interfaces for a scope */
   } inet6;
-#if defined(XP_UNIX)
-  struct {                          /* Unix domain socket address */
+#if defined(XP_UNIX) || defined(XP_WIN)
+  struct {                          /* Unix domain socket or
+                                       Windows Named Pipes address */
     uint16_t family;                /* address family (AF_UNIX) */
     char path[104];                 /* null-terminated pathname */
   } local;
 #endif
-  // introduced to support nsTArray<NetAddr> (for DNSRequestParent.cpp)
+  // introduced to support nsTArray<NetAddr> comparisons and sorting
   bool operator == (const NetAddr& other) const;
+  bool operator < (const NetAddr &other) const;
 };
 
 // This class wraps a NetAddr union to provide C++ linked list
@@ -127,28 +134,33 @@ public:
 
 class AddrInfo {
 public:
-  // Creates an AddrInfo object. It calls the AddrInfo(const char*, const char*)
-  // to initialize the host and the cname.
-  AddrInfo(const char *host, const PRAddrInfo *prAddrInfo, bool disableIPv4,
-           bool filterNameCollision, const char *cname);
+  // Creates an AddrInfo object.
+  explicit AddrInfo(const nsACString& host, const PRAddrInfo *prAddrInfo,
+           bool disableIPv4, bool filterNameCollision,
+           const nsACString& cname);
 
-  // Creates a basic AddrInfo object (initialize only the host and the cname).
-  AddrInfo(const char *host, const char *cname);
+  // Creates a basic AddrInfo object (initialize only the host, cname and TRR type).
+  explicit AddrInfo(const nsACString& host, const nsACString& cname, unsigned int TRRType);
+
+  // Creates a basic AddrInfo object (initialize only the host and TRR status).
+  explicit AddrInfo(const nsACString& host, unsigned int TRRType);
   ~AddrInfo();
+
+  explicit AddrInfo(const AddrInfo *src); // copy
 
   void AddAddress(NetAddrElement *address);
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-  char *mHostName;
-  char *mCanonicalName;
-  uint16_t ttl;
-  static const uint16_t NO_TTL_DATA = (uint16_t) -1;
+  nsCString mHostName;
+  nsCString mCanonicalName;
+  uint32_t ttl;
+  static const uint32_t NO_TTL_DATA = (uint32_t) -1;
 
   LinkedList<NetAddrElement> mAddresses;
-
+  unsigned int IsTRR() { return mFromTRR; }
 private:
-  void Init(const char *host, const char *cname);
+  unsigned int mFromTRR;
 };
 
 // Copies the contents of a PRNetAddr to a NetAddr.

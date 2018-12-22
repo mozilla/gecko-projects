@@ -35,12 +35,12 @@ struct nssListIteratorStr {
     nssListElement *current;
 };
 
-#define NSSLIST_LOCK_IF(list)                                                  \
-    if ((list)->lock)                                                          \
+#define NSSLIST_LOCK_IF(list) \
+    if ((list)->lock)         \
     PZ_Lock((list)->lock)
 
-#define NSSLIST_UNLOCK_IF(list)                                                \
-    if ((list)->lock)                                                          \
+#define NSSLIST_UNLOCK_IF(list) \
+    if ((list)->lock)           \
     PZ_Unlock((list)->lock)
 
 static PRBool
@@ -52,20 +52,17 @@ pointer_compare(void *a, void *b)
 static nssListElement *
 nsslist_get_matching_element(nssList *list, void *data)
 {
-    PRCList *link;
     nssListElement *node;
     node = list->head;
     if (!node) {
         return NULL;
     }
-    link = &node->link;
     while (node) {
         /* using a callback slows things down when it's just compare ... */
         if (list->compareFunc(node->data, data)) {
             break;
         }
-        link = &node->link;
-        if (link == PR_LIST_TAIL(&list->head->link)) {
+        if (&node->link == PR_LIST_TAIL(&list->head->link)) {
             node = NULL;
             break;
         }
@@ -117,6 +114,9 @@ nssList_Create(NSSArena *arenaOpt, PRBool threadSafe)
 NSS_IMPLEMENT PRStatus
 nssList_Destroy(nssList *list)
 {
+    if (!list) {
+        return PR_SUCCESS;
+    }
     if (!list->i_alloced_arena) {
         nssList_Clear(list, NULL);
     }
@@ -155,6 +155,9 @@ nssList_Clear(nssList *list, nssListElementDestructorFunc destructor)
 {
     PRCList *link;
     nssListElement *node, *tmp;
+    if (!list) {
+        return;
+    }
     NSSLIST_LOCK_IF(list);
     node = list->head;
     list->head = NULL;
@@ -355,7 +358,9 @@ nssListIterator_Destroy(nssListIterator *iter)
     if (iter->lock) {
         (void)PZ_DestroyLock(iter->lock);
     }
-    nssList_Destroy(iter->list);
+    if (iter->list) {
+        nssList_Destroy(iter->list);
+    }
     nss_ZFreeIf(iter);
 }
 

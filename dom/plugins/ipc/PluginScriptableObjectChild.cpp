@@ -133,7 +133,7 @@ PluginScriptableObjectChild::ScriptableAllocate(NPP aInstance,
   AssertPluginThread();
 
   if (aClass != GetClass()) {
-    NS_RUNTIMEABORT("Huh?! Wrong class!");
+    MOZ_CRASH("Huh?! Wrong class!");
   }
 
   return new ChildNPObject();
@@ -146,7 +146,7 @@ PluginScriptableObjectChild::ScriptableInvalidate(NPObject* aObject)
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -165,7 +165,7 @@ PluginScriptableObjectChild::ScriptableDeallocate(NPObject* aObject)
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -186,7 +186,7 @@ PluginScriptableObjectChild::ScriptableHasMethod(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -216,7 +216,7 @@ PluginScriptableObjectChild::ScriptableInvoke(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -258,7 +258,7 @@ PluginScriptableObjectChild::ScriptableInvokeDefault(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -297,7 +297,7 @@ PluginScriptableObjectChild::ScriptableHasProperty(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -325,7 +325,7 @@ PluginScriptableObjectChild::ScriptableGetProperty(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -337,6 +337,8 @@ PluginScriptableObjectChild::ScriptableGetProperty(NPObject* aObject,
   ProtectedActor<PluginScriptableObjectChild> actor(object->parent);
   NS_ASSERTION(actor, "This shouldn't ever be null!");
   NS_ASSERTION(actor->Type() == Proxy, "Bad type!");
+
+  PluginInstanceChild::AutoStackHelper guard(actor->mInstance);
 
   Variant result;
   bool success;
@@ -360,7 +362,7 @@ PluginScriptableObjectChild::ScriptableSetProperty(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -394,7 +396,7 @@ PluginScriptableObjectChild::ScriptableRemoveProperty(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -423,7 +425,7 @@ PluginScriptableObjectChild::ScriptableEnumerate(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -476,7 +478,7 @@ PluginScriptableObjectChild::ScriptableConstruct(NPObject* aObject,
   AssertPluginThread();
 
   if (aObject->_class != GetClass()) {
-    NS_RUNTIMEABORT("Don't know what kind of object this is!");
+    MOZ_CRASH("Don't know what kind of object this is!");
   }
 
   ChildNPObject* object = reinterpret_cast<ChildNPObject*>(aObject);
@@ -703,13 +705,14 @@ PluginScriptableObjectChild::NPObjectDestroyed()
   mObject = nullptr;
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerInvalidate()
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
-    return true;
+    return IPC_OK();
   }
 
   mInvalidated = true;
@@ -723,19 +726,20 @@ PluginScriptableObjectChild::AnswerInvalidate()
 
   Unprotect();
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerHasMethod(const PluginIdentifier& aId,
                                              bool* aHasMethod)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerHasMethod with an invalidated object!");
     *aHasMethod = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -743,27 +747,28 @@ PluginScriptableObjectChild::AnswerHasMethod(const PluginIdentifier& aId,
 
   if (!(mObject->_class && mObject->_class->hasMethod)) {
     *aHasMethod = false;
-    return true;
+    return IPC_OK();
   }
 
   StackIdentifier id(aId);
   *aHasMethod = mObject->_class->hasMethod(mObject, id.ToNPIdentifier());
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
                                           InfallibleTArray<Variant>&& aArgs,
                                           Variant* aResult,
                                           bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerInvoke with an invalidated object!");
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -772,7 +777,7 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
   if (!(mObject->_class && mObject->_class->invoke)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   AutoTArray<NPVariant, 10> convertedArgs;
@@ -781,7 +786,7 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   for (uint32_t index = 0; index < argCount; index++) {
@@ -802,7 +807,7 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   Variant convertedResult;
@@ -814,26 +819,27 @@ PluginScriptableObjectChild::AnswerInvoke(const PluginIdentifier& aId,
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   *aSuccess = true;
   *aResult = convertedResult;
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aArgs,
                                                  Variant* aResult,
                                                  bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerInvokeDefault with an invalidated object!");
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -842,7 +848,7 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
   if (!(mObject->_class && mObject->_class->invokeDefault)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   AutoTArray<NPVariant, 10> convertedArgs;
@@ -851,7 +857,7 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   for (uint32_t index = 0; index < argCount; index++) {
@@ -871,7 +877,7 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   Variant convertedResult;
@@ -883,24 +889,25 @@ PluginScriptableObjectChild::AnswerInvokeDefault(InfallibleTArray<Variant>&& aAr
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   *aResult = convertedResult;
   *aSuccess = true;
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerHasProperty(const PluginIdentifier& aId,
                                                bool* aHasProperty)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerHasProperty with an invalidated object!");
     *aHasProperty = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -908,15 +915,15 @@ PluginScriptableObjectChild::AnswerHasProperty(const PluginIdentifier& aId,
 
   if (!(mObject->_class && mObject->_class->hasProperty)) {
     *aHasProperty = false;
-    return true;
+    return IPC_OK();
   }
 
   StackIdentifier id(aId);
   *aHasProperty = mObject->_class->hasProperty(mObject, id.ToNPIdentifier());
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
                                                     bool* aHasProperty,
                                                     bool* aHasMethod,
@@ -924,13 +931,14 @@ PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
                                                     bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   *aHasProperty = *aHasMethod = *aSuccess = false;
   *aResult = void_t();
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerGetProperty with an invalidated object!");
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -938,7 +946,7 @@ PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
 
   if (!(mObject->_class && mObject->_class->hasProperty &&
         mObject->_class->hasMethod && mObject->_class->getProperty)) {
-    return true;
+    return IPC_OK();
   }
 
   StackIdentifier stackID(aId);
@@ -952,7 +960,7 @@ PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
     VOID_TO_NPVARIANT(result);
 
     if (!mObject->_class->getProperty(mObject, id, &result)) {
-      return true;
+      return IPC_OK();
     }
 
     Variant converted;
@@ -963,20 +971,21 @@ PluginScriptableObjectChild::AnswerGetChildProperty(const PluginIdentifier& aId,
     }
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerSetProperty(const PluginIdentifier& aId,
                                                const Variant& aValue,
                                                bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerSetProperty with an invalidated object!");
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -985,7 +994,7 @@ PluginScriptableObjectChild::AnswerSetProperty(const PluginIdentifier& aId,
   if (!(mObject->_class && mObject->_class->hasProperty &&
         mObject->_class->setProperty)) {
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   StackIdentifier stackID(aId);
@@ -993,7 +1002,7 @@ PluginScriptableObjectChild::AnswerSetProperty(const PluginIdentifier& aId,
 
   if (!mObject->_class->hasProperty(mObject, id)) {
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NPVariant converted;
@@ -1002,19 +1011,20 @@ PluginScriptableObjectChild::AnswerSetProperty(const PluginIdentifier& aId,
   if ((*aSuccess = mObject->_class->setProperty(mObject, id, &converted))) {
     PluginModuleChild::sBrowserFuncs.releasevariantvalue(&converted);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerRemoveProperty(const PluginIdentifier& aId,
                                                   bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerRemoveProperty with an invalidated object!");
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -1023,7 +1033,7 @@ PluginScriptableObjectChild::AnswerRemoveProperty(const PluginIdentifier& aId,
   if (!(mObject->_class && mObject->_class->hasProperty &&
         mObject->_class->removeProperty)) {
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   StackIdentifier stackID(aId);
@@ -1032,19 +1042,20 @@ PluginScriptableObjectChild::AnswerRemoveProperty(const PluginIdentifier& aId,
               mObject->_class->removeProperty(mObject, id) :
               true;
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerEnumerate(InfallibleTArray<PluginIdentifier>* aProperties,
                                              bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerEnumerate with an invalidated object!");
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -1052,14 +1063,14 @@ PluginScriptableObjectChild::AnswerEnumerate(InfallibleTArray<PluginIdentifier>*
 
   if (!(mObject->_class && mObject->_class->enumerate)) {
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NPIdentifier* ids;
   uint32_t idCount;
   if (!mObject->_class->enumerate(mObject, &ids, &idCount)) {
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   aProperties->SetCapacity(idCount);
@@ -1070,21 +1081,22 @@ PluginScriptableObjectChild::AnswerEnumerate(InfallibleTArray<PluginIdentifier>*
 
   PluginModuleChild::sBrowserFuncs.memfree(ids);
   *aSuccess = true;
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
                                              Variant* aResult,
                                              bool* aSuccess)
 {
   AssertPluginThread();
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
 
   if (mInvalidated) {
     NS_WARNING("Calling AnswerConstruct with an invalidated object!");
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
@@ -1093,7 +1105,7 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
   if (!(mObject->_class && mObject->_class->construct)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   AutoTArray<NPVariant, 10> convertedArgs;
@@ -1102,7 +1114,7 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
   if (!convertedArgs.SetLength(argCount, mozilla::fallible)) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   for (uint32_t index = 0; index < argCount; index++) {
@@ -1121,7 +1133,7 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   Variant convertedResult;
@@ -1133,38 +1145,40 @@ PluginScriptableObjectChild::AnswerConstruct(InfallibleTArray<Variant>&& aArgs,
   if (!success) {
     *aResult = void_t();
     *aSuccess = false;
-    return true;
+    return IPC_OK();
   }
 
   *aResult = convertedResult;
   *aSuccess = true;
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::RecvProtect()
 {
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
   NS_ASSERTION(mType == LocalObject, "Bad type!");
 
   Protect();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginScriptableObjectChild::RecvUnprotect()
 {
   NS_ASSERTION(mObject->_class != GetClass(), "Bad object type!");
   NS_ASSERTION(mType == LocalObject, "Bad type!");
 
   Unprotect();
-  return true;
+  return IPC_OK();
 }
 
 bool
 PluginScriptableObjectChild::Evaluate(NPString* aScript,
                                       NPVariant* aResult)
 {
+  PluginInstanceChild::AutoStackHelper guard(mInstance);
+
   nsDependentCString script("");
   if (aScript->UTF8Characters && aScript->UTF8Length) {
     script.Rebind(aScript->UTF8Characters, aScript->UTF8Length);
@@ -1259,6 +1273,11 @@ PluginScriptableObjectChild::UnregisterObject(NPObject* aObject)
 PluginScriptableObjectChild::GetInstanceForNPObject(NPObject* aObject)
 {
   AssertPluginThread();
+  if (!sObjectMap) {
+    // All PluginInstanceChilds have been destroyed
+    return nullptr;
+  }
+
   NPObjectData* d = sObjectMap->GetEntry(aObject);
   if (!d) {
     return nullptr;

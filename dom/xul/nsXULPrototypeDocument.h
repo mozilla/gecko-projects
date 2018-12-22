@@ -8,14 +8,13 @@
 
 #include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 #include "nsISerializable.h"
 #include "nsCycleCollectionParticipant.h"
 
-class nsIAtom;
+class nsAtom;
 class nsIPrincipal;
 class nsIURI;
 class nsNodeInfoManager;
@@ -72,24 +71,6 @@ public:
      */
     const nsTArray<RefPtr<nsXULPrototypePI> >& GetProcessingInstructions() const;
 
-    /**
-     * Access the array of style overlays for this document.
-     *
-     * Style overlays are stylesheets that need to be applied to the
-     * document, but are not referenced from within the document. They
-     * are currently obtained from the chrome registry via
-     * nsIXULOverlayProvider::getStyleOverlays.)
-     */
-    void AddStyleSheetReference(nsIURI* aStyleSheet);
-    const nsCOMArray<nsIURI>& GetStyleSheetReferences() const;
-
-    /**
-     * Access HTTP header data.
-     * @note Not implemented.
-     */
-    NS_IMETHOD GetHeaderData(nsIAtom* aField, nsAString& aData) const;
-    NS_IMETHOD SetHeaderData(nsIAtom* aField, const nsAString& aData);
-
     nsIPrincipal *DocumentPrincipal();
     void SetDocumentPrincipal(nsIPrincipal *aPrincipal);
 
@@ -105,7 +86,7 @@ public:
      * Notifies each document registered via AwaitLoadDone on this
      * prototype document that the prototype has finished loading.
      * The notification is performed by calling
-     * nsIXULDocument::OnPrototypeLoadDone on the registered documents.
+     * XULDocument::OnPrototypeLoadDone on the registered documents.
      */
     nsresult NotifyLoadDone();
 
@@ -115,13 +96,12 @@ public:
 
     NS_DECL_CYCLE_COLLECTION_CLASS(nsXULPrototypeDocument)
 
-    void TraceProtos(JSTracer* aTrc, uint32_t aGCNumber);
+    void TraceProtos(JSTracer* aTrc);
 
 protected:
     nsCOMPtr<nsIURI> mURI;
     RefPtr<nsXULPrototypeElement> mRoot;
     nsTArray<RefPtr<nsXULPrototypePI> > mProcessingInstructions;
-    nsCOMArray<nsIURI> mStyleSheetReferences;
 
     bool mLoaded;
     nsTArray< RefPtr<mozilla::dom::XULDocument> > mPrototypeWaiters;

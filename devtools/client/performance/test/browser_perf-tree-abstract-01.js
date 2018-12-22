@@ -11,15 +11,15 @@ const { appendAndWaitForPaint } = require("devtools/client/performance/test/help
 const { synthesizeCustomTreeClass } = require("devtools/client/performance/test/helpers/synth-utils");
 const { once } = require("devtools/client/performance/test/helpers/event-utils");
 
-add_task(function*() {
-  let { MyCustomTreeItem, myDataSrc } = synthesizeCustomTreeClass();
+add_task(async function() {
+  const { MyCustomTreeItem, myDataSrc } = synthesizeCustomTreeClass();
 
-  let container = document.createElement("vbox");
-  yield appendAndWaitForPaint(gBrowser.selectedBrowser.parentNode, container);
+  const container = document.createElement("vbox");
+  await appendAndWaitForPaint(gBrowser.selectedBrowser.parentNode, container);
 
   // Populate the tree and test the root item...
 
-  let treeRoot = new MyCustomTreeItem(myDataSrc, { parent: null });
+  const treeRoot = new MyCustomTreeItem(myDataSrc, { parent: null });
   treeRoot.attachTo(container);
 
   ok(!treeRoot.expanded,
@@ -38,7 +38,7 @@ add_task(function*() {
     "The root node has the correct parent.");
   is(treeRoot.level, 0,
     "The root node has the correct level.");
-  is(treeRoot.target.MozMarginStart, "0px",
+  is(treeRoot.target.style.marginInlineStart, "0px",
     "The root node's indentation is correct.");
   is(treeRoot.target.textContent, "root",
     "The root node's text contents are correct.");
@@ -51,16 +51,16 @@ add_task(function*() {
   let receivedFocusEvent = once(treeRoot, "focus");
   mousedown(treeRoot.target.querySelector(".arrow"));
 
-  let [_, eventItem] = yield receivedExpandEvent;
+  let [eventItem] = await receivedExpandEvent;
   is(eventItem, treeRoot,
     "The 'expand' event target is correct (1).");
 
-  yield receivedFocusEvent;
+  await receivedFocusEvent;
   is(document.commandDispatcher.focusedElement, treeRoot.target,
     "The root node is now focused.");
 
-  let fooItem = treeRoot.getChild(0);
-  let barItem = treeRoot.getChild(1);
+  const fooItem = treeRoot.getChild(0);
+  const barItem = treeRoot.getChild(1);
 
   is(container.childNodes.length, 3,
     "The container node should now have three children available.");
@@ -77,7 +77,7 @@ add_task(function*() {
     "The 'foo' node has the correct parent.");
   is(fooItem.level, 1,
     "The 'foo' node has the correct level.");
-  is(fooItem.target.MozMarginStart, "10px",
+  is(fooItem.target.style.marginInlineStart, "10px",
     "The 'foo' node's indentation is correct.");
   is(fooItem.target.textContent, "foo",
     "The 'foo' node's text contents are correct.");
@@ -90,7 +90,7 @@ add_task(function*() {
     "The 'bar' node has the correct parent.");
   is(barItem.level, 1,
     "The 'bar' node has the correct level.");
-  is(barItem.target.MozMarginStart, "10px",
+  is(barItem.target.style.marginInlineStart, "10px",
     "The 'bar' node's indentation is correct.");
   is(barItem.target.textContent, "bar",
     "The 'bar' node's text contents are correct.");
@@ -102,7 +102,7 @@ add_task(function*() {
   receivedFocusEvent = once(treeRoot, "focus", { spreadArgs: true });
   mousedown(fooItem.target);
 
-  [_, eventItem] = yield receivedFocusEvent;
+  [eventItem] = await receivedFocusEvent;
   is(eventItem, fooItem,
     "The 'focus' event target is correct (2).");
   is(document.commandDispatcher.focusedElement, fooItem.target,
@@ -114,17 +114,17 @@ add_task(function*() {
   receivedFocusEvent = once(treeRoot, "focus");
   dblclick(barItem.target);
 
-  [_, eventItem] = yield receivedExpandEvent;
+  [eventItem] = await receivedExpandEvent;
   is(eventItem, barItem,
     "The 'expand' event target is correct (3).");
 
-  yield receivedFocusEvent;
+  await receivedFocusEvent;
   is(document.commandDispatcher.focusedElement, barItem.target,
     "The 'foo' node is now focused.");
 
   // A child item got expanded, test the descendants...
 
-  let bazItem = barItem.getChild(0);
+  const bazItem = barItem.getChild(0);
 
   is(container.childNodes.length, 4,
     "The container node should now have four children available.");
@@ -143,7 +143,7 @@ add_task(function*() {
     "The 'baz' node has the correct parent.");
   is(bazItem.level, 2,
     "The 'baz' node has the correct level.");
-  is(bazItem.target.MozMarginStart, "20px",
+  is(bazItem.target.style.marginInlineStart, "20px",
     "The 'baz' node's indentation is correct.");
   is(bazItem.target.textContent, "baz",
     "The 'baz' node's text contents are correct.");

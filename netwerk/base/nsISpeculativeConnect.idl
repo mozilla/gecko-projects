@@ -5,6 +5,7 @@
 
 #include "nsISupports.idl"
 
+interface nsIPrincipal;
 interface nsIURI;
 interface nsIInterfaceRequestor;
 
@@ -21,6 +22,8 @@ interface nsISpeculativeConnect : nsISupports
      * to actually open the new channel. 
      *
      * @param aURI the URI of the hinted transaction
+     * @param aPrincipal the principal that will be used for opening the
+     *        channel of the hinted transaction.
      * @param aCallbacks any security callbacks for use with SSL for interfaces
      *        such as nsIBadCertListener. May be null.
      *
@@ -28,8 +31,16 @@ interface nsISpeculativeConnect : nsISupports
     void speculativeConnect(in nsIURI aURI,
                             in nsIInterfaceRequestor aCallbacks);
 
+    void speculativeConnect2(in nsIURI aURI,
+                             in nsIPrincipal aPrincipal,
+                             in nsIInterfaceRequestor aCallbacks);
+
     void speculativeAnonymousConnect(in nsIURI aURI,
                                      in nsIInterfaceRequestor aCallbacks);
+
+    void speculativeAnonymousConnect2(in nsIURI aURI,
+                                      in nsIPrincipal aPrincipal,
+                                      in nsIInterfaceRequestor aCallbacks);
 };
 
 /**
@@ -37,7 +48,7 @@ interface nsISpeculativeConnect : nsISupports
  * inline) to determine whether or not to actually make a speculative
  * connection.
  */
-[builtinclass, uuid(f6a0d1e5-369f-4abc-81ae-d370d36e4006)]
+[builtinclass, uuid(1040ebe3-6ed1-45a6-8587-995e082518d7)]
 interface nsISpeculativeConnectionOverrider : nsISupports
 {
     /**
@@ -45,13 +56,6 @@ interface nsISpeculativeConnectionOverrider : nsISupports
      * we will have open for a host at any one time
      */
     [infallible] readonly attribute unsigned long parallelSpeculativeConnectLimit;
-
-    /**
-     * Used to loosen the restrictions nsHttpConnectionMgr::RestrictConnections
-     * to allow more speculative connections when we're unsure if a host will
-     * connect via SPDY or not.
-     */
-    [infallible] readonly attribute boolean ignorePossibleSpdyConnections;
 
     /**
      * Used to determine if we will ignore the existence of any currently idle

@@ -3,61 +3,86 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from shared-head.js */
-
 "use strict";
 
 /**
  * Check that the detached devtools window title is not updated when switching
- * the selected frame.
+ * the selected frame. Also check that frames command button has 'open'
+ * attribute set when the list of frames is opened.
  */
 
 var {Toolbox} = require("devtools/client/framework/toolbox");
 const URL = URL_ROOT + "browser_toolbox_window_title_frame_select_page.html";
 const IFRAME_URL = URL_ROOT + "browser_toolbox_window_title_changes_page.html";
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
-add_task(function* () {
+add_task(async function() {
   Services.prefs.setBoolPref("devtools.command-button-frames.enabled", true);
 
-  yield addTab(URL);
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = yield gDevTools.showToolbox(target, null,
+  await addTab(URL);
+  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = await gDevTools.showToolbox(target, null,
     Toolbox.HostType.BOTTOM);
 
-  yield toolbox.selectTool("inspector");
-  yield toolbox.switchHost(Toolbox.HostType.WINDOW);
+  let onTitleChanged = waitForTitleChange(toolbox);
+  await toolbox.selectTool("inspector");
+  await onTitleChanged;
 
-  is(getTitle(), "Inspector - Page title",
+  await toolbox.switchHost(Toolbox.HostType.WINDOW);
+  // Wait for title change event *after* switch host, in order to listen
+  // for the event on the WINDOW host window, which only exists after switchHost
+  await waitForTitleChange(toolbox);
+
+  is(getTitle(), `Developer Tools - Page title - ${URL}`,
     "Devtools title correct after switching to detached window host");
 
-  // Verify that the frame list button is visible and populated
-  let btn = toolbox.doc.getElementById("command-button-frames");
-  let frames = Array.slice(btn.firstChild.querySelectorAll("[data-window-id]"));
+  // Wait for tick to avoid unexpected 'popuphidden' event, which
+  // blocks the frame popup menu opened below. See also bug 1276873
+  await waitForTick();
+
+  const btn = toolbox.doc.getElementById("command-button-frames");
+
+  await testShortcutToOpenFrames(btn, toolbox);
+
+  // Open frame menu and wait till it's available on the screen.
+  // Also check 'open' attribute on the command button.
+  ok(!btn.classList.contains("checked"), "The checked class must not be present");
+  const menu = await toolbox.showFramesMenu({target: btn});
+  await once(menu, "open");
+
+  ok(btn.classList.contains("checked"), "The checked class must be set");
+
+  // Verify that the frame list menu is populated
+  const frames = menu.items;
   is(frames.length, 2, "We have both frames in the list");
 
-  let topFrameBtn = frames.filter(b => b.getAttribute("label") == URL)[0];
-  let iframeBtn = frames.filter(b => b.getAttribute("label") == IFRAME_URL)[0];
+  const topFrameBtn = frames.filter(b => b.label == URL)[0];
+  const iframeBtn = frames.filter(b => b.label == IFRAME_URL)[0];
   ok(topFrameBtn, "Got top level document in the list");
   ok(iframeBtn, "Got iframe document in the list");
 
   // Listen to will-navigate to check if the view is empty
-  let willNavigate = toolbox.target.once("will-navigate");
+  const willNavigate = toolbox.target.once("will-navigate");
+
+  onTitleChanged = waitForTitleChange(toolbox);
 
   // Only select the iframe after we are able to select an element from the top
   // level document.
-  let newRoot = toolbox.getPanel("inspector").once("new-root");
+  const newRoot = toolbox.getPanel("inspector").once("new-root");
   info("Select the iframe");
   iframeBtn.click();
 
-  yield willNavigate;
-  yield newRoot;
+  await willNavigate;
+  await newRoot;
+  await onTitleChanged;
 
   info("Navigation to the iframe is done, the inspector should be back up");
-  is(getTitle(), "Inspector - Page title",
+  is(getTitle(), `Developer Tools - Page title - ${URL}`,
     "Devtools title was not updated after changing inspected frame");
 
   info("Cleanup toolbox and test preferences.");
-  yield toolbox.destroy();
+  await toolbox.destroy();
   toolbox = null;
   gBrowser.removeCurrentTab();
   Services.prefs.clearUserPref("devtools.toolbox.host");
@@ -69,4 +94,26 @@ add_task(function* () {
 
 function getTitle() {
   return Services.wm.getMostRecentWindow("devtools:toolbox").document.title;
+}
+
+async function testShortcutToOpenFrames(btn, toolbox) {
+  info("Tests if shortcut Alt+Down opens the frames");
+  // focus the button so that keyPress can be performed
+  btn.focus();
+  // perform keyPress - Alt+Down
+  const shortcut = L10N.getStr("toolbox.showFrames.key");
+  synthesizeKeyShortcut(shortcut, toolbox.win);
+
+  // wait for 200 ms for UI to render
+  await wait(200);
+
+  // btn should now have the checked class set
+  ok(btn.classList.contains("checked"), "The checked class must be set");
+
+  // pressing Esc should hide the menu again
+  synthesizeKeyShortcut("Esc", toolbox.win);
+  await wait(200);
+
+  // btn shouldn't have the checked class set
+  ok(!btn.classList.contains("checked"), "The checked class must not be set");
 }

@@ -7,16 +7,6 @@
 #ifndef vm_PIC_h
 #define vm_PIC_h
 
-#include "jsapi.h"
-#include "jscntxt.h"
-#include "jsfriendapi.h"
-#include "jsobj.h"
-
-#include "gc/Barrier.h"
-#include "gc/Heap.h"
-#include "gc/Marking.h"
-
-#include "js/Value.h"
 #include "vm/GlobalObject.h"
 
 namespace js {
@@ -178,20 +168,20 @@ struct ForOfPIC
     {
       private:
         // Pointer to canonical Array.prototype and ArrayIterator.prototype
-        HeapPtrNativeObject arrayProto_;
-        HeapPtrNativeObject arrayIteratorProto_;
+        GCPtrNativeObject arrayProto_;
+        GCPtrNativeObject arrayIteratorProto_;
 
         // Shape of matching Array.prototype object, and slot containing
         // the @@iterator for it, and the canonical value.
-        HeapPtrShape arrayProtoShape_;
+        GCPtrShape arrayProtoShape_;
         uint32_t arrayProtoIteratorSlot_;
-        HeapValue canonicalIteratorFunc_;
+        GCPtrValue canonicalIteratorFunc_;
 
         // Shape of matching ArrayIteratorProto, and slot containing
         // the 'next' property, and the canonical value.
-        HeapPtrShape arrayIteratorProtoShape_;
+        GCPtrShape arrayIteratorProtoShape_;
         uint32_t arrayIteratorProtoNextSlot_;
-        HeapValue canonicalNextFunc_;
+        GCPtrValue canonicalNextFunc_;
 
         // Initialization flag marking lazy initialization of above fields.
         bool initialized_;
@@ -219,9 +209,6 @@ struct ForOfPIC
         // Initialize the canonical iterator function.
         bool initialize(JSContext* cx);
 
-        // Check if a given array object is optimized by this PIC.
-        Stub* isArrayOptimized(ArrayObject* obj);
-
         // Try to optimize this chain for an object.
         bool tryOptimizeArray(JSContext* cx, HandleArrayObject array, bool* optimized);
 
@@ -235,30 +222,27 @@ struct ForOfPIC
                 (arrayIteratorProto_->getSlot(arrayIteratorProtoNextSlot_) == canonicalNextFunc_);
         }
 
-        void mark(JSTracer* trc);
+        void trace(JSTracer* trc);
         void sweep(FreeOp* fop);
 
       private:
-        // Get a matching optimized stub for the given object.
-        Stub* getMatchingStub(JSObject* obj);
-
-        // Check if the given object is for-of optimizable with this PIC.
-        bool isOptimizableArray(JSObject* obj);
+        // Check if a matching optimized stub for the given object exists.
+        bool hasMatchingStub(ArrayObject* obj);
 
         // Reset the PIC and all info associated with it.
-        void reset(JSContext* cx);
+        void reset();
 
         // Erase the stub chain.
         void eraseChain();
     };
 
     // Class for object that holds ForOfPIC chain.
-    static const Class jsclass;
+    static const Class class_;
 
     static NativeObject* createForOfPICObject(JSContext* cx, Handle<GlobalObject*> global);
 
     static inline Chain* fromJSObject(NativeObject* obj) {
-        MOZ_ASSERT(js::GetObjectClass(obj) == &ForOfPIC::jsclass);
+        MOZ_ASSERT(obj->getClass() == &ForOfPIC::class_);
         return (ForOfPIC::Chain*) obj->getPrivate();
     }
     static inline Chain* getOrCreate(JSContext* cx) {

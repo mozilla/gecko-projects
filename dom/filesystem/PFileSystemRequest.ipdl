@@ -4,15 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PBlob;
-include protocol PContent;
+include protocol PBackground;
+include protocol PIPCBlobInputStream;
+include protocol PChildToParentStream;
+include protocol PParentToChildStream;
+include protocol PFileDescriptorSet;
+
+include IPCBlob;
 
 namespace mozilla {
 namespace dom {
 
 struct FileSystemFileResponse
 {
-  PBlob blob;
+  IPCBlob blob;
 };
 
 struct FileSystemDirectoryResponse
@@ -20,9 +25,9 @@ struct FileSystemDirectoryResponse
   nsString realPath;
 };
 
-struct FileSystemDirectoryListingResponseBlob
+struct FileSystemDirectoryListingResponseFile
 {
-  PBlob blob;
+  IPCBlob blob;
 };
 
 struct FileSystemDirectoryListingResponseDirectory
@@ -33,7 +38,7 @@ struct FileSystemDirectoryListingResponseDirectory
 
 union FileSystemDirectoryListingResponseData
 {
-  FileSystemDirectoryListingResponseBlob;
+  FileSystemDirectoryListingResponseFile;
   FileSystemDirectoryListingResponseDirectory;
 };
 
@@ -42,28 +47,28 @@ struct FileSystemDirectoryListingResponse
   FileSystemDirectoryListingResponseData[] data;
 };
 
+struct FileSystemFilesResponse
+{
+  FileSystemFileResponse[] data;
+};
+
 struct FileSystemErrorResponse
 {
   nsresult error;
 };
 
-struct FileSystemBooleanResponse
-{
-  bool success;
-};
-
 union FileSystemResponseValue
 {
-  FileSystemBooleanResponse;
   FileSystemDirectoryResponse;
   FileSystemDirectoryListingResponse;
   FileSystemFileResponse;
+  FileSystemFilesResponse;
   FileSystemErrorResponse;
 };
 
-sync protocol PFileSystemRequest
+protocol PFileSystemRequest
 {
-  manager PContent;
+  manager PBackground;
 
 child:
   async __delete__(FileSystemResponseValue response);

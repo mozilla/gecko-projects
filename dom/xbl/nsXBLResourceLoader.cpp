@@ -4,9 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsCSSFrameConstructor.h"
 #include "nsTArray.h"
 #include "nsString.h"
-#include "nsIStyleRuleProcessor.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsIPresShell.h"
@@ -17,18 +17,15 @@
 #include "nsIDocumentObserver.h"
 #include "imgILoader.h"
 #include "imgRequestProxy.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Loader.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsGkAtoms.h"
-#include "nsFrameManager.h"
-#include "nsStyleContext.h"
 #include "nsXBLPrototypeBinding.h"
-#include "nsCSSRuleProcessor.h"
 #include "nsContentUtils.h"
-#include "nsStyleSet.h"
 #include "nsIScriptSecurityManager.h"
 
 using namespace mozilla;
@@ -46,10 +43,10 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXBLResourceLoader)
 struct nsXBLResource
 {
   nsXBLResource* mNext;
-  nsIAtom* mType;
+  nsAtom* mType;
   nsString mSrc;
 
-  nsXBLResource(nsIAtom* aType, const nsAString& aSrc)
+  nsXBLResource(nsAtom* aType, const nsAString& aSrc)
   {
     MOZ_COUNT_CTOR(nsXBLResource);
     mNext = nullptr;
@@ -72,7 +69,8 @@ nsXBLResourceLoader::nsXBLResourceLoader(nsXBLPrototypeBinding* aBinding,
  mLastResource(nullptr),
  mLoadingResources(false),
  mInLoadResourcesFunc(false),
- mPendingSheets(0)
+ mPendingSheets(0),
+ mBoundDocument(nullptr)
 {
 }
 
@@ -81,24 +79,25 @@ nsXBLResourceLoader::~nsXBLResourceLoader()
   delete mResourceList;
 }
 
-void
-nsXBLResourceLoader::LoadResources(bool* aResult)
+bool
+nsXBLResourceLoader::LoadResources(nsIContent* aBoundElement)
 {
   mInLoadResourcesFunc = true;
 
   if (mLoadingResources) {
-    *aResult = (mPendingSheets == 0);
     mInLoadResourcesFunc = false;
-    return;
+    return mPendingSheets == 0;
   }
 
   mLoadingResources = true;
-  *aResult = true;
 
   // Declare our loaders.
   nsCOMPtr<nsIDocument> doc = mBinding->XBLDocumentInfo()->GetDocument();
+  mBoundDocument = aBoundElement->OwnerDoc();
 
   mozilla::css::Loader* cssLoader = doc->CSSLoader();
+  MOZ_ASSERT(cssLoader->GetDocument(), "Loader must have document");
+
   nsIURI *docURL = doc->GetDocumentURI();
   nsIPrincipal* docPrincipal = doc->NodePrincipal();
 
@@ -109,20 +108,15 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
       continue;
 
     if (NS_FAILED(NS_NewURI(getter_AddRefs(url), curr->mSrc,
-                            doc->GetDocumentCharacterSet().get(), docURL)))
+                            doc->GetDocumentCharacterSet(), docURL)))
       continue;
 
     if (curr->mType == nsGkAtoms::image) {
-      if (!nsContentUtils::CanLoadImage(url, doc, doc, docPrincipal)) {
-        // We're not permitted to load this image, move on...
-        continue;
-      }
-
       // Now kick off the image load...
       // Passing nullptr for pretty much everything -- cause we don't care!
-      // XXX: initialDocumentURI is nullptr! 
+      // XXX: initialDocumentURI is nullptr!
       RefPtr<imgRequestProxy> req;
-      nsContentUtils::LoadImage(url, doc, docPrincipal, docURL,
+      nsContentUtils::LoadImage(url, doc, doc, docPrincipal, 0, docURL,
                                 doc->GetReferrerPolicy(), nullptr,
                                 nsIRequest::LOAD_BACKGROUND, EmptyString(),
                                 getter_AddRefs(req));
@@ -140,7 +134,7 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
           CheckLoadURIWithPrincipal(docPrincipal, url,
                                     nsIScriptSecurityManager::ALLOW_CHROME);
         if (NS_SUCCEEDED(rv)) {
-          StyleSheetHandle::RefPtr sheet;
+          RefPtr<StyleSheet> sheet;
           rv = cssLoader->LoadSheetSync(url, &sheet);
           NS_ASSERTION(NS_SUCCEEDED(rv), "Load failed!!!");
           if (NS_SUCCEEDED(rv))
@@ -152,40 +146,42 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
       }
       else
       {
-        rv = cssLoader->LoadSheet(url, false, docPrincipal, EmptyCString(), this);
+        rv = cssLoader->LoadSheet(url, false, docPrincipal, nullptr, this);
         if (NS_SUCCEEDED(rv))
           ++mPendingSheets;
       }
     }
   }
 
-  *aResult = (mPendingSheets == 0);
   mInLoadResourcesFunc = false;
-  
+
   // Destroy our resource list.
   delete mResourceList;
   mResourceList = nullptr;
+
+  return mPendingSheets == 0;
 }
 
 // nsICSSLoaderObserver
 NS_IMETHODIMP
-nsXBLResourceLoader::StyleSheetLoaded(StyleSheetHandle aSheet,
-                                      bool aWasAlternate,
+nsXBLResourceLoader::StyleSheetLoaded(StyleSheet* aSheet,
+                                      bool aWasDeferred,
                                       nsresult aStatus)
 {
   if (!mResources) {
     // Our resources got destroyed -- just bail out
     return NS_OK;
   }
-   
+
   mResources->AppendStyleSheet(aSheet);
 
   if (!mInLoadResourcesFunc)
     mPendingSheets--;
-  
+
   if (mPendingSheets == 0) {
-    // All stylesheets are loaded.  
-    mResources->GatherRuleProcessor();
+    // All stylesheets are loaded.
+    mResources->ComputeServoStyles(
+      *mBoundDocument->GetShell()->StyleSet());
 
     // XXX Check for mPendingScripts when scripts also come online.
     if (!mInLoadResourcesFunc)
@@ -194,8 +190,8 @@ nsXBLResourceLoader::StyleSheetLoaded(StyleSheetHandle aSheet,
   return NS_OK;
 }
 
-void 
-nsXBLResourceLoader::AddResource(nsIAtom* aResourceType, const nsAString& aSrc)
+void
+nsXBLResourceLoader::AddResource(nsAtom* aResourceType, const nsAString& aSrc)
 {
   nsXBLResource* res = new nsXBLResource(aResourceType, aSrc);
   if (!mResourceList)
@@ -207,10 +203,11 @@ nsXBLResourceLoader::AddResource(nsIAtom* aResourceType, const nsAString& aSrc)
 }
 
 void
-nsXBLResourceLoader::AddResourceListener(nsIContent* aBoundElement) 
+nsXBLResourceLoader::AddResourceListener(nsIContent* aBoundElement)
 {
   if (aBoundElement) {
     mBoundElements.AppendObject(aBoundElement);
+    aBoundElement->OwnerDoc()->BlockOnload();
   }
 }
 
@@ -226,47 +223,27 @@ nsXBLResourceLoader::NotifyBoundElements()
   uint32_t eltCount = mBoundElements.Count();
   for (uint32_t j = 0; j < eltCount; j++) {
     nsCOMPtr<nsIContent> content = mBoundElements.ObjectAt(j);
-    
+    MOZ_ASSERT(content->IsElement());
+    content->OwnerDoc()->UnblockOnload(/* aFireSync = */ false);
+
     bool ready = false;
     xblService->BindingReady(content, bindingURI, &ready);
 
-    if (ready) {
-      // We need the document to flush out frame construction and
-      // such, so we want to use the current document.
-      nsIDocument* doc = content->GetCurrentDoc();
-    
-      if (doc) {
-        // Flush first to make sure we can get the frame for content
-        doc->FlushPendingNotifications(Flush_Frames);
-
-        // If |content| is (in addition to having binding |mBinding|)
-        // also a descendant of another element with binding |mBinding|,
-        // then we might have just constructed it due to the
-        // notification of its parent.  (We can know about both if the
-        // binding loads were triggered from the DOM rather than frame
-        // construction.)  So we have to check both whether the element
-        // has a primary frame and whether it's in the undisplayed map
-        // before sending a ContentInserted notification, or bad things
-        // will happen.
-        nsIPresShell *shell = doc->GetShell();
-        if (shell) {
-          nsIFrame* childFrame = content->GetPrimaryFrame();
-          if (!childFrame) {
-            // Check to see if it's in the undisplayed content map.
-            nsStyleContext* sc =
-              shell->FrameManager()->GetUndisplayedContent(content);
-
-            if (!sc) {
-              shell->RecreateFramesFor(content);
-            }
-          }
-        }
-
-        // Flush again
-        // XXXbz why is this needed?
-        doc->FlushPendingNotifications(Flush_ContentAndNotify);
-      }
+    if (!ready) {
+      continue;
     }
+
+    nsIDocument* doc = content->GetUncomposedDoc();
+    if (!doc) {
+      continue;
+    }
+
+    nsIPresShell* shell = doc->GetShell();
+    if (!shell) {
+      continue;
+    }
+
+    shell->PostRecreateFramesFor(content->AsElement());
   }
 
   // Clear out the whole array.

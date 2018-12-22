@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1238,6 +1239,7 @@ FilterNodeGraphFromDescription(DrawTarget* aDT,
                                nsTArray<RefPtr<SourceSurface>>& aAdditionalImages)
 {
   const nsTArray<FilterPrimitiveDescription>& primitives = aFilter.mPrimitives;
+  MOZ_RELEASE_ASSERT(!primitives.IsEmpty());
 
   RefPtr<FilterCachedColorModels> sourceFilters[4];
   nsTArray<RefPtr<FilterCachedColorModels> > primitiveFilters;
@@ -1328,6 +1330,7 @@ FilterNodeGraphFromDescription(DrawTarget* aDT,
     primitiveFilters.AppendElement(primitiveFilter);
   }
 
+  MOZ_RELEASE_ASSERT(!primitiveFilters.IsEmpty());
   return primitiveFilters.LastElement()->ForColorModel(ColorModel::PremulSRGB());
 }
 
@@ -1477,6 +1480,8 @@ FilterSupport::ComputeResultChangeRegion(const FilterDescription& aFilter,
                                          const nsIntRegion& aStrokePaintChange)
 {
   const nsTArray<FilterPrimitiveDescription>& primitives = aFilter.mPrimitives;
+  MOZ_RELEASE_ASSERT(!primitives.IsEmpty());
+
   nsTArray<nsIntRegion> resultChangeRegions;
 
   for (int32_t i = 0; i < int32_t(primitives.Length()); ++i) {
@@ -1498,6 +1503,7 @@ FilterSupport::ComputeResultChangeRegion(const FilterDescription& aFilter,
     resultChangeRegions.AppendElement(changeRegion);
   }
 
+  MOZ_RELEASE_ASSERT(!resultChangeRegions.IsEmpty());
   return resultChangeRegions[resultChangeRegions.Length() - 1];
 }
 
@@ -1638,6 +1644,7 @@ FilterSupport::ComputePostFilterExtents(const FilterDescription& aFilter,
                                         const nsIntRegion& aSourceGraphicExtents)
 {
   const nsTArray<FilterPrimitiveDescription>& primitives = aFilter.mPrimitives;
+  MOZ_RELEASE_ASSERT(!primitives.IsEmpty());
   nsTArray<nsIntRegion> postFilterExtents;
 
   for (int32_t i = 0; i < int32_t(primitives.Length()); ++i) {
@@ -1658,6 +1665,7 @@ FilterSupport::ComputePostFilterExtents(const FilterDescription& aFilter,
     postFilterExtents.AppendElement(extent);
   }
 
+  MOZ_RELEASE_ASSERT(!postFilterExtents.IsEmpty());
   return postFilterExtents[postFilterExtents.Length() - 1];
 }
 
@@ -1768,6 +1776,11 @@ FilterSupport::ComputeSourceNeededRegions(const FilterDescription& aFilter,
                                           nsIntRegion& aStrokePaintNeededRegion)
 {
   const nsTArray<FilterPrimitiveDescription>& primitives = aFilter.mPrimitives;
+  MOZ_ASSERT(!primitives.IsEmpty());
+  if (primitives.IsEmpty()) {
+    return;
+  }
+
   nsTArray<nsIntRegion> primitiveNeededRegions;
   primitiveNeededRegions.AppendElements(primitives.Length());
 
@@ -1791,11 +1804,9 @@ FilterSupport::ComputeSourceNeededRegions(const FilterDescription& aFilter,
   }
 
   // Clip original SourceGraphic to first filter region.
-  if (primitives.Length() > 0) {
-    const FilterPrimitiveDescription& firstDescr = primitives[0];
-    aSourceGraphicNeededRegion.And(aSourceGraphicNeededRegion,
-                                   firstDescr.FilterSpaceBounds());
-  }
+  const FilterPrimitiveDescription& firstDescr = primitives[0];
+  aSourceGraphicNeededRegion.And(aSourceGraphicNeededRegion,
+                                 firstDescr.FilterSpaceBounds());
 }
 
 // FilterPrimitiveDescription
@@ -2122,7 +2133,6 @@ AttributeMap::GetType(FilterAttribute* aAttribute)
   }                                                                  \
   void                                                               \
   AttributeMap::Set(AttributeName aName, type aValue) {              \
-    mMap.Remove(aName);                                              \
     mMap.Put(aName, new Attribute(aValue));                          \
   }
 
@@ -2134,7 +2144,6 @@ AttributeMap::GetType(FilterAttribute* aAttribute)
   }                                                                  \
   void                                                               \
   AttributeMap::Set(AttributeName aName, const className& aValue) {  \
-    mMap.Remove(aName);                                              \
     mMap.Put(aName, new Attribute(aValue));                          \
   }
 
@@ -2156,18 +2165,14 @@ MAKE_ATTRIBUTE_HANDLERS_CLASS(AttributeMap)
 const nsTArray<float>&
 AttributeMap::GetFloats(AttributeName aName) const
 {
-  Attribute* value = mMap.Get(aName);
-  if (!value) {
-    value = new Attribute(nullptr, 0);
-    mMap.Put(aName, value);
-  }
+  Attribute* value = mMap.LookupForAdd(aName).OrInsert(
+    [] () { return new Attribute(nullptr, 0); });
   return value->AsFloats();
 }
 
 void
 AttributeMap::Set(AttributeName aName, const float* aValues, int32_t aLength)
 {
-  mMap.Remove(aName);
   mMap.Put(aName, new Attribute(aValues, aLength));
 }
 

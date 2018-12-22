@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/DragEvent.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/MouseEvents.h"
 #include "nsContentUtils.h"
 #include "prtime.h"
@@ -25,23 +26,16 @@ DragEvent::DragEvent(EventTarget* aOwner,
   else {
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
-    mEvent->AsMouseEvent()->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
+    mEvent->AsMouseEvent()->inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
   }
 }
-
-NS_IMPL_ADDREF_INHERITED(DragEvent, MouseEvent)
-NS_IMPL_RELEASE_INHERITED(DragEvent, MouseEvent)
-
-NS_INTERFACE_MAP_BEGIN(DragEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMDragEvent)
-NS_INTERFACE_MAP_END_INHERITING(MouseEvent)
 
 void
 DragEvent::InitDragEvent(const nsAString& aType,
                          bool aCanBubble,
                          bool aCancelable,
-                         nsGlobalWindow* aView,
+                         nsGlobalWindowInner* aView,
                          int32_t aDetail,
                          int32_t aScreenX,
                          int32_t aScreenY,
@@ -55,20 +49,15 @@ DragEvent::InitDragEvent(const nsAString& aType,
                          EventTarget* aRelatedTarget,
                          DataTransfer* aDataTransfer)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   MouseEvent::InitMouseEvent(aType, aCanBubble, aCancelable,
                              aView, aDetail, aScreenX, aScreenY,
                              aClientX, aClientY, aCtrlKey, aAltKey,
                              aShiftKey, aMetaKey, aButton, aRelatedTarget);
-  if (mEventIsInternal && mEvent) {
+  if (mEventIsInternal) {
     mEvent->AsDragEvent()->mDataTransfer = aDataTransfer;
   }
-}
-
-NS_IMETHODIMP
-DragEvent::GetDataTransfer(nsIDOMDataTransfer** aDataTransfer)
-{
-  NS_IF_ADDREF(*aDataTransfer = GetDataTransfer());
-  return NS_OK;
 }
 
 DataTransfer*
@@ -111,6 +100,7 @@ DragEvent::Constructor(const GlobalObject& aGlobal,
                    aParam.mDataTransfer);
   e->InitializeExtraMouseEventDictionaryMembers(aParam);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -123,7 +113,7 @@ using namespace mozilla::dom;
 already_AddRefed<DragEvent>
 NS_NewDOMDragEvent(EventTarget* aOwner,
                    nsPresContext* aPresContext,
-                   WidgetDragEvent* aEvent) 
+                   WidgetDragEvent* aEvent)
 {
   RefPtr<DragEvent> event =
     new DragEvent(aOwner, aPresContext, aEvent);

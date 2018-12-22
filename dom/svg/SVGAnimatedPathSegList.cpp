@@ -144,10 +144,16 @@ SVGAnimatedPathSegList::ClearAnimValue(nsSVGElement *aElement)
   aElement->DidAnimatePathSegList();
 }
 
-nsISMILAttr*
+bool
+SVGAnimatedPathSegList::IsRendered() const
+{
+  return mAnimVal ? !mAnimVal->IsEmpty() : !mBaseVal.IsEmpty();
+}
+
+UniquePtr<nsISMILAttr>
 SVGAnimatedPathSegList::ToSMILAttr(nsSVGElement *aElement)
 {
-  return new SMILAnimatedPathSegList(this, aElement);
+  return MakeUnique<SMILAnimatedPathSegList>(this, aElement);
 }
 
 nsresult
@@ -162,7 +168,7 @@ SVGAnimatedPathSegList::
   nsresult rv = list->SetValueFromString(aStr);
   if (NS_SUCCEEDED(rv)) {
     list->SetElement(mElement);
-    aValue = Move(val);
+    aValue = std::move(val);
   }
   aPreventCachingOfSandwich = false;
   return rv;
@@ -181,7 +187,7 @@ SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue() const
   nsresult rv = list->CopyFrom(mVal->mBaseVal);
   if (NS_SUCCEEDED(rv)) {
     list->SetElement(mElement);
-    val = Move(tmp);
+    val = std::move(tmp);
   }
   return val;
 }

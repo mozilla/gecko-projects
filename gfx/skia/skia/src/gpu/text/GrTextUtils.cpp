@@ -6,201 +6,101 @@
  */
 
 #include "GrTextUtils.h"
-
-#include "GrAtlasTextBlob.h"
-#include "GrBatchFontCache.h"
-#include "GrBlurUtils.h"
 #include "GrContext.h"
-#include "GrDrawContext.h"
-#include "GrTextContext.h"
-#include "SkDrawProcs.h"
-#include "SkFindAndPlaceGlyph.h"
+#include "SkDrawFilter.h"
 #include "SkGlyphCache.h"
+#include "SkGr.h"
 #include "SkPaint.h"
-#include "SkRect.h"
-#include "SkTextMapStateProc.h"
-#include "SkTextToPathIter.h"
+#include "SkTextBlobRunIterator.h"
 
-void GrTextUtils::DrawBmpText(GrAtlasTextBlob* blob, int runIndex,
-                              GrBatchFontCache* fontCache,
-                              const SkSurfaceProps& props, const SkPaint& skPaint,
-                              GrColor color,
-                              const SkMatrix& viewMatrix,
-                              const char text[], size_t byteLength,
-                              SkScalar x, SkScalar y) {
-    SkASSERT(byteLength == 0 || text != nullptr);
-
-    // nothing to draw
-    if (text == nullptr || byteLength == 0) {
-        return;
-    }
-
-    GrBatchTextStrike* currStrike = nullptr;
-
-    // Get GrFontScaler from cache
-    SkGlyphCache* cache = blob->setupCache(runIndex, props, skPaint, &viewMatrix, false);
-    GrFontScaler* fontScaler = GrTextContext::GetGrFontScaler(cache);
-
-    SkFindAndPlaceGlyph::ProcessText(
-        skPaint.getTextEncoding(), text, byteLength,
-        {x, y}, viewMatrix, skPaint.getTextAlign(),
-        cache,
-        [&](const SkGlyph& glyph, SkPoint position, SkPoint rounding) {
-            position += rounding;
-            BmpAppendGlyph(
-                blob, runIndex, fontCache, &currStrike, glyph,
-                SkScalarFloorToInt(position.fX), SkScalarFloorToInt(position.fY),
-                color, fontScaler);
+void GrTextUtils::Paint::initFilteredColor() {
+    // This mirrors the logic in skpaint_to_grpaint_impl for handling paint colors
+    if (fDstColorSpaceInfo->colorSpace()) {
+        GrColor4f filteredColor =
+                SkColorToUnpremulGrColor4f(fPaint->getColor(), *fDstColorSpaceInfo);
+        if (fPaint->getColorFilter()) {
+            filteredColor = GrColor4f::FromSkColor4f(
+                fPaint->getColorFilter()->filterColor4f(filteredColor.toSkColor4f()));
         }
-    );
-
-    SkGlyphCache::AttachCache(cache);
-}
-
-void GrTextUtils::DrawBmpPosText(GrAtlasTextBlob* blob, int runIndex,
-                                 GrBatchFontCache* fontCache,
-                                 const SkSurfaceProps& props, const SkPaint& skPaint,
-                                 GrColor color,
-                                 const SkMatrix& viewMatrix,
-                                 const char text[], size_t byteLength,
-                                 const SkScalar pos[], int scalarsPerPosition,
-                                 const SkPoint& offset) {
-    SkASSERT(byteLength == 0 || text != nullptr);
-    SkASSERT(1 == scalarsPerPosition || 2 == scalarsPerPosition);
-
-    // nothing to draw
-    if (text == nullptr || byteLength == 0) {
-        return;
-    }
-
-    GrBatchTextStrike* currStrike = nullptr;
-
-    // Get GrFontScaler from cache
-    SkGlyphCache* cache = blob->setupCache(runIndex, props, skPaint, &viewMatrix, false);
-    GrFontScaler* fontScaler = GrTextContext::GetGrFontScaler(cache);
-
-    SkFindAndPlaceGlyph::ProcessPosText(
-        skPaint.getTextEncoding(), text, byteLength,
-        offset, viewMatrix, pos, scalarsPerPosition,
-        skPaint.getTextAlign(), cache,
-        [&](const SkGlyph& glyph, SkPoint position, SkPoint rounding) {
-            position += rounding;
-            BmpAppendGlyph(
-                blob, runIndex, fontCache, &currStrike, glyph,
-                SkScalarFloorToInt(position.fX), SkScalarFloorToInt(position.fY),
-                color, fontScaler);
+        fFilteredPremulColor = filteredColor.premul().toGrColor();
+    } else {
+        SkColor filteredSkColor = fPaint->getColor();
+        if (fPaint->getColorFilter()) {
+            filteredSkColor = fPaint->getColorFilter()->filterColor(filteredSkColor);
         }
-    );
-
-    SkGlyphCache::AttachCache(cache);
+        fFilteredPremulColor = SkColorToPremulGrColor(filteredSkColor);
+    }
 }
 
-void GrTextUtils::BmpAppendGlyph(GrAtlasTextBlob* blob, int runIndex,
-                                 GrBatchFontCache* fontCache,
-                                 GrBatchTextStrike** strike, const SkGlyph& skGlyph,
-                                 int vx, int vy, GrColor color, GrFontScaler* scaler) {
-    if (!*strike) {
-        *strike = fontCache->getStrike(scaler);
+
+bool GrTextUtils::RunPaint::modifyForRun(std::function<void(SkPaint*)> paintModFunc) {
+    if (!fModifiedPaint.isValid()) {
+        fModifiedPaint.init(fOriginalPaint->skPaint());
+        fPaint = fModifiedPaint.get();
+    } else if (fFilter) {
+        // We have to reset before applying the run because the filter could have arbitrary
+        // changed the paint.
+        *fModifiedPaint.get() = fOriginalPaint->skPaint();
     }
+    paintModFunc(fModifiedPaint.get());
 
-    GrGlyph::PackedID id = GrGlyph::Pack(skGlyph.getGlyphID(),
-                                         skGlyph.getSubXFixed(),
-                                         skGlyph.getSubYFixed(),
-                                         GrGlyph::kCoverage_MaskStyle);
-    GrGlyph* glyph = (*strike)->getGlyph(skGlyph, id, scaler);
-    if (!glyph) {
-        return;
-    }
-
-    int x = vx + glyph->fBounds.fLeft;
-    int y = vy + glyph->fBounds.fTop;
-
-    // keep them as ints until we've done the clip-test
-    int width = glyph->fBounds.width();
-    int height = glyph->fBounds.height();
-
-    SkRect r;
-    r.fLeft = SkIntToScalar(x);
-    r.fTop = SkIntToScalar(y);
-    r.fRight = r.fLeft + SkIntToScalar(width);
-    r.fBottom = r.fTop + SkIntToScalar(height);
-
-    blob->appendGlyph(runIndex, r, color, *strike, glyph, scaler, skGlyph,
-                      SkIntToScalar(vx), SkIntToScalar(vy), 1.0f, false);
-}
-
-void GrTextUtils::DrawTextAsPath(GrContext* context, GrDrawContext* dc,
-                                 const GrClip& clip,
-                                 const SkPaint& skPaint, const SkMatrix& viewMatrix,
-                                 const char text[], size_t byteLength, SkScalar x, SkScalar y,
-                                 const SkIRect& clipBounds) {
-    SkTextToPathIter iter(text, byteLength, skPaint, true);
-
-    SkMatrix    matrix;
-    matrix.setScale(iter.getPathScale(), iter.getPathScale());
-    matrix.postTranslate(x, y);
-
-    const SkPath* iterPath;
-    SkScalar xpos, prevXPos = 0;
-
-    while (iter.next(&iterPath, &xpos)) {
-        matrix.postTranslate(xpos - prevXPos, 0);
-        if (iterPath) {
-            const SkPaint& pnt = iter.getPaint();
-            GrBlurUtils::drawPathWithMaskFilter(context, dc, clip, *iterPath,
-                                                pnt, viewMatrix, &matrix, clipBounds, false);
+    if (fFilter) {
+        if (!fFilter->filter(fModifiedPaint.get(), SkDrawFilter::kText_Type)) {
+            // A false return from filter() means we should abort the current draw.
+            return false;
         }
-        prevXPos = xpos;
+        // The draw filter could have changed either the paint color or color filter.
+        this->initFilteredColor();
     }
+    fModifiedPaint.get()->setFlags(FilterTextFlags(fProps, *fModifiedPaint.get()));
+    return true;
 }
 
-void GrTextUtils::DrawPosTextAsPath(GrContext* context,
-                                    GrDrawContext* dc,
-                                    const SkSurfaceProps& props,
-                                    const GrClip& clip,
-                                    const SkPaint& origPaint, const SkMatrix& viewMatrix,
-                                    const char text[], size_t byteLength,
-                                    const SkScalar pos[], int scalarsPerPosition,
-                                    const SkPoint& offset, const SkIRect& clipBounds) {
-    // setup our std paint, in hopes of getting hits in the cache
-    SkPaint paint(origPaint);
-    SkScalar matrixScale = paint.setupForAsPaths();
+uint32_t GrTextUtils::FilterTextFlags(const SkSurfaceProps& surfaceProps, const SkPaint& paint) {
+    uint32_t flags = paint.getFlags();
 
-    SkMatrix matrix;
-    matrix.setScale(matrixScale, matrixScale);
+    if (!paint.isLCDRenderText() || !paint.isAntiAlias()) {
+        return flags;
+    }
 
-    // Temporarily jam in kFill, so we only ever ask for the raw outline from the cache.
-    paint.setStyle(SkPaint::kFill_Style);
-    paint.setPathEffect(nullptr);
+    if (kUnknown_SkPixelGeometry == surfaceProps.pixelGeometry() || ShouldDisableLCD(paint)) {
+        flags &= ~SkPaint::kLCDRenderText_Flag;
+        flags |= SkPaint::kGenA8FromLCD_Flag;
+    }
 
-    SkDrawCacheProc     glyphCacheProc = paint.getDrawCacheProc();
-    SkAutoGlyphCache    autoCache(paint, &props, nullptr);
-    SkGlyphCache*       cache = autoCache.getCache();
+    return flags;
+}
 
-    const char*        stop = text + byteLength;
-    SkTextAlignProc    alignProc(paint.getTextAlign());
-    SkTextMapStateProc tmsProc(SkMatrix::I(), offset, scalarsPerPosition);
+bool GrTextUtils::ShouldDisableLCD(const SkPaint& paint) {
+    return paint.getMaskFilter() || paint.getPathEffect() ||
+           paint.isFakeBoldText() || paint.getStyle() != SkPaint::kFill_Style;
+}
 
-    // Now restore the original settings, so we "draw" with whatever style/stroking.
-    paint.setStyle(origPaint.getStyle());
-    paint.setPathEffect(origPaint.getPathEffect());
+bool GrTextUtils::PathTextIter::next(const SkGlyph** skGlyph, const SkPath** path, SkScalar* xpos) {
+    SkASSERT(skGlyph);
+    SkASSERT(path);
+    SkASSERT(xpos);
+    if (fText < fStop) {
+        const SkGlyph& glyph = fGlyphCacheProc(fCache, &fText);
 
-    while (text < stop) {
-        const SkGlyph& glyph = glyphCacheProc(cache, &text, 0, 0);
+        fXPos += (fPrevAdvance + fAutoKern.adjust(glyph)) * fScale;
+        SkASSERT(0 == fXYIndex || 1 == fXYIndex);
+        fPrevAdvance = SkFloatToScalar((&glyph.fAdvanceX)[fXYIndex]);
+
         if (glyph.fWidth) {
-            const SkPath* path = cache->findPath(glyph);
-            if (path) {
-                SkPoint tmsLoc;
-                tmsProc(pos, &tmsLoc);
-                SkPoint loc;
-                alignProc(tmsLoc, glyph, &loc);
-
-                matrix[SkMatrix::kMTransX] = loc.fX;
-                matrix[SkMatrix::kMTransY] = loc.fY;
-                GrBlurUtils::drawPathWithMaskFilter(context, dc, clip, *path, paint,
-                                                    viewMatrix, &matrix, clipBounds, false);
+            if (SkMask::kARGB32_Format == glyph.fMaskFormat) {
+                *skGlyph = &glyph;
+                *path = nullptr;
+            } else {
+                *skGlyph = nullptr;
+                *path = fCache->findPath(glyph);
             }
+        } else {
+            *skGlyph = nullptr;
+            *path = nullptr;
         }
-        pos += scalarsPerPosition;
+        *xpos = fXPos;
+        return true;
     }
+    return false;
 }

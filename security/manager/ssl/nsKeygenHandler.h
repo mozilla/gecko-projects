@@ -4,31 +4,35 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _NSKEYGENHANDLER_H_
-#define _NSKEYGENHANDLER_H_
-// Form Processor
+#ifndef nsKeygenHandler_h
+#define nsKeygenHandler_h
+
+#include "ScopedNSSTypes.h"
+#include "keythi.h"
+#include "nsCOMPtr.h"
+#include "nsError.h"
 #include "nsIFormProcessor.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsString.h"
 #include "nsTArray.h"
-#include "nsNSSShutDown.h"
+#include "secmodt.h"
 
 nsresult GetSlotWithMechanism(uint32_t mechanism,
                               nsIInterfaceRequestor* ctx,
-                              PK11SlotInfo** retSlot,
-                              nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                              PK11SlotInfo** retSlot);
 
 #define DEFAULT_RSA_KEYGEN_PE 65537L
 #define DEFAULT_RSA_KEYGEN_ALG SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION
 
-SECKEYECParams *decode_ec_params(const char *curve);
+mozilla::UniqueSECItem DecodeECParams(const char* curve);
 
 class nsKeygenFormProcessor : public nsIFormProcessor
-                            , public nsNSSShutDownObject
 {
 public:
   nsKeygenFormProcessor();
   nsresult Init();
 
-  virtual nsresult ProcessValue(nsIDOMHTMLElement* aElement,
+  virtual nsresult ProcessValue(mozilla::dom::Element* aElement,
                                 const nsAString& aName,
                                 nsAString& aValue) override;
 
@@ -45,19 +49,16 @@ public:
 
   static nsresult Create(nsISupports* aOuter, const nsIID& aIID, void* *aResult);
 
-  static void ExtractParams(nsIDOMHTMLElement* aElement,
+  static void ExtractParams(mozilla::dom::Element* aElement,
                             nsAString& challengeValue,
                             nsAString& keyTypeValue,
                             nsAString& keyParamsValue);
 
-  // Nothing to release.
-  virtual void virtualDestroyNSSReference() override {}
-
 protected:
-  virtual ~nsKeygenFormProcessor();
+  virtual ~nsKeygenFormProcessor() {}
 
   nsresult GetPublicKey(const nsAString& aValue, const nsAString& aChallenge,
-                        const nsAFlatString& akeyType, nsAString& aOutPublicKey,
+                        const nsString& akeyType, nsAString& aOutPublicKey,
                         const nsAString& aPqg);
   nsresult GetSlot(uint32_t aMechanism, PK11SlotInfo** aSlot);
 private:
@@ -73,4 +74,4 @@ private:
   SECKeySizeChoiceInfo mSECKeySizeChoiceList[number_of_key_size_choices];
 };
 
-#endif //_NSKEYGENHANDLER_H_
+#endif // nsKeygenHandler_h

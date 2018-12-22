@@ -222,7 +222,7 @@ nsCellMap*
 nsTableCellMap::GetMapFor(const nsTableRowGroupFrame* aRowGroup,
                           nsCellMap* aStartHint) const
 {
-  NS_PRECONDITION(aRowGroup, "Must have a rowgroup");
+  MOZ_ASSERT(aRowGroup, "Must have a rowgroup");
   NS_ASSERTION(!aRowGroup->GetPrevInFlow(), "GetMapFor called with continuation");
   if (aStartHint) {
     nsCellMap* map = FindMapFor(aRowGroup, aStartHint, nullptr);
@@ -242,7 +242,7 @@ nsTableCellMap::GetMapFor(const nsTableRowGroupFrame* aRowGroup,
 
     const nsStyleDisplay* display = aRowGroup->StyleDisplay();
     nsTableRowGroupFrame* rgOrig =
-      (NS_STYLE_DISPLAY_TABLE_HEADER_GROUP == display->mDisplay) ?
+      (StyleDisplay::TableHeaderGroup == display->mDisplay) ?
       fifTable->GetTHead() : fifTable->GetTFoot();
     // find the row group cell map using the original header/footer
     if (rgOrig && rgOrig != aRowGroup) {
@@ -341,7 +341,7 @@ nsTableCellMap::GetEffectiveRowSpan(int32_t aRowIndex,
     rowIndex -= map->GetRowCount();
     map = map->GetNextSibling();
   }
-  NS_NOTREACHED("Bogus row index?");
+  MOZ_ASSERT_UNREACHABLE("Bogus row index?");
   return 0;
 }
 
@@ -358,7 +358,7 @@ nsTableCellMap::GetEffectiveColSpan(int32_t aRowIndex,
     rowIndex -= map->GetRowCount();
     map = map->GetNextSibling();
   }
-  NS_NOTREACHED("Bogus row index?");
+  MOZ_ASSERT_UNREACHABLE("Bogus row index?");
   return 0;
 }
 
@@ -669,8 +669,8 @@ nsTableCellMap::RebuildConsideringRows(nsCellMap*                  aCellMap,
                                        int32_t                     aNumRowsToRemove,
                                        TableArea&                  aDamageArea)
 {
-  NS_PRECONDITION(!aRowsToInsert || aNumRowsToRemove == 0,
-                  "Can't handle both removing and inserting rows at once");
+  MOZ_ASSERT(!aRowsToInsert || aNumRowsToRemove == 0,
+             "Can't handle both removing and inserting rows at once");
 
   int32_t numOrigCols = GetColCount();
   ClearCols();
@@ -898,9 +898,12 @@ bool nsTableCellMap::RowHasSpanningCells(int32_t aRowIndex,
   return false;
 }
 
+// FIXME: The only value callers pass for aSide is eLogicalSideBEnd.
+// Consider removing support for the other three values.
 void
 nsTableCellMap::ResetBStartStart(LogicalSide aSide,
                                  nsCellMap&  aCellMap,
+                                 uint32_t    aRowGroupStart,
                                  uint32_t    aRowIndex,
                                  uint32_t    aColIndex,
                                  bool        aIsBEndIEnd)
@@ -915,7 +918,7 @@ nsTableCellMap::ResetBStartStart(LogicalSide aSide,
     aRowIndex++;
     MOZ_FALLTHROUGH;
   case eLogicalSideBStart:
-    cellData = (BCCellData*)aCellMap.GetDataAt(aRowIndex, aColIndex);
+    cellData = (BCCellData*)aCellMap.GetDataAt(aRowIndex - aRowGroupStart, aColIndex);
     if (cellData) {
       bcData = &cellData->mData;
     }
@@ -938,7 +941,7 @@ nsTableCellMap::ResetBStartStart(LogicalSide aSide,
     aColIndex++;
     MOZ_FALLTHROUGH;
   case eLogicalSideIStart:
-    cellData = (BCCellData*)aCellMap.GetDataAt(aRowIndex, aColIndex);
+    cellData = (BCCellData*)aCellMap.GetDataAt(aRowIndex - aRowGroupStart, aColIndex);
     if (cellData) {
       bcData = &cellData->mData;
     }
@@ -1055,7 +1058,7 @@ nsTableCellMap::SetBCBorderEdge(LogicalSide aSide,
 // (aRowIndex, aColIndex). For eBStartIEnd, store it in the entry to the iEnd-wards where
 // it would be BStartIStart. For eBEndIEnd, store it in the entry to the bEnd-wards. etc.
 void
-nsTableCellMap::SetBCBorderCorner(Corner      aCorner,
+nsTableCellMap::SetBCBorderCorner(LogicalCorner aCorner,
                                   nsCellMap&  aCellMap,
                                   uint32_t    aCellMapStart,
                                   uint32_t    aRowIndex,
@@ -1076,15 +1079,15 @@ nsTableCellMap::SetBCBorderCorner(Corner      aCorner,
   int32_t yPos = aRowIndex;
   int32_t rgYPos = aRowIndex - aCellMapStart;
 
-  if (eBStartIEnd == aCorner) {
+  if (eLogicalCornerBStartIEnd == aCorner) {
     xPos++;
   }
-  else if (eBEndIEnd == aCorner) {
+  else if (eLogicalCornerBEndIEnd == aCorner) {
     xPos++;
     rgYPos++;
     yPos++;
   }
-  else if (eBEndIStart == aCorner) {
+  else if (eLogicalCornerBEndIStart == aCorner) {
     rgYPos++;
     yPos++;
   }
@@ -1491,8 +1494,8 @@ nsCellMap::AppendCell(nsTableCellMap&   aMap,
     //the caller depends on the damageArea
     // The special case for zeroRowSpan is to adjust for the '2' in
     // GetRowSpanForNewCell.
-    uint32_t height = zeroRowSpan ? endRowIndex - aRowIndex  :
-                                    1 + endRowIndex - aRowIndex;
+    uint32_t height = std::min(zeroRowSpan ? rowSpan - 1 : rowSpan,
+                               GetRowCount() - aRowIndex);
     SetDamageArea(startColIndex, aRgFirstRowIndex + aRowIndex,
                   1 + endColIndex - startColIndex, height, aDamageArea);
   }
@@ -2348,13 +2351,13 @@ void nsCellMap::Dump(bool aIsBorderCollapse) const
   nsTableRowGroupFrame* rg = GetRowGroup();
   const nsStyleDisplay* display = rg->StyleDisplay();
   switch (display->mDisplay) {
-  case NS_STYLE_DISPLAY_TABLE_HEADER_GROUP:
+  case StyleDisplay::TableHeaderGroup:
     printf("  thead ");
     break;
-  case NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP:
+  case StyleDisplay::TableFooterGroup:
     printf("  tfoot ");
     break;
-  case NS_STYLE_DISPLAY_TABLE_ROW_GROUP:
+  case StyleDisplay::TableRowGroup:
     printf("  tbody ");
     break;
   default:
@@ -2431,9 +2434,8 @@ void nsCellMap::Dump(bool aIsBorderCollapse) const
       if (cd) {
         if (cd->IsOrig()) {
           nsTableCellFrame* cellFrame = cd->GetCellFrame();
-          int32_t cellFrameColIndex;
-          cellFrame->GetColIndex(cellFrameColIndex);
-          printf("C%d,%d=%p(%d)  ", rIndex, colIndex, (void*)cellFrame,
+          uint32_t cellFrameColIndex = cellFrame->ColIndex();
+          printf("C%d,%d=%p(%u)  ", rIndex, colIndex, (void*)cellFrame,
                  cellFrameColIndex);
           cellCount++;
         }
@@ -2520,8 +2522,7 @@ nsCellMap::GetCellInfoAt(const nsTableCellMap& aMap,
       cellFrame = GetCellFrame(aRowX, aColX, *data, true);
     }
     if (cellFrame && aColSpan) {
-      int32_t initialColIndex;
-      cellFrame->GetColIndex(initialColIndex);
+      uint32_t initialColIndex = cellFrame->ColIndex();
       *aColSpan = GetEffectiveColSpan(aMap, aRowX, initialColIndex);
     }
   }
@@ -2580,10 +2581,12 @@ void nsCellMap::DestroyCellData(CellData* aData)
   if (mIsBC) {
     BCCellData* bcData = static_cast<BCCellData*>(aData);
     bcData->~BCCellData();
-    mPresContext->FreeToShell(sizeof(BCCellData), bcData);
+    mPresContext->PresShell()->
+      FreeByObjectID(eArenaObjectID_BCCellData, bcData);
   } else {
     aData->~CellData();
-    mPresContext->FreeToShell(sizeof(CellData), aData);
+    mPresContext->PresShell()->
+      FreeByObjectID(eArenaObjectID_CellData, aData);
   }
 }
 
@@ -2591,7 +2594,8 @@ CellData* nsCellMap::AllocCellData(nsTableCellFrame* aOrigCell)
 {
   if (mIsBC) {
     BCCellData* data = (BCCellData*)
-      mPresContext->AllocateFromShell(sizeof(BCCellData));
+      mPresContext->PresShell()->
+        AllocateByObjectID(eArenaObjectID_BCCellData, sizeof(BCCellData));
     if (data) {
       new (data) BCCellData(aOrigCell);
     }
@@ -2599,7 +2603,8 @@ CellData* nsCellMap::AllocCellData(nsTableCellFrame* aOrigCell)
   }
 
   CellData* data = (CellData*)
-    mPresContext->AllocateFromShell(sizeof(CellData));
+    mPresContext->PresShell()->
+      AllocateByObjectID(eArenaObjectID_CellData, sizeof(CellData));
   if (data) {
     new (data) CellData(aOrigCell);
   }
@@ -2638,8 +2643,8 @@ nsCellMapColumnIterator::AdvanceRowGroup()
 void
 nsCellMapColumnIterator::IncrementRow(int32_t aIncrement)
 {
-  NS_PRECONDITION(aIncrement >= 0, "Bogus increment");
-  NS_PRECONDITION(mCurMap, "Bogus mOrigCells?");
+  MOZ_ASSERT(aIncrement >= 0, "Bogus increment");
+  MOZ_ASSERT(mCurMap, "Bogus mOrigCells?");
   if (aIncrement == 0) {
     AdvanceRowGroup();
   }
@@ -2711,6 +2716,6 @@ nsCellMapColumnIterator::GetNextFrame(int32_t* aRow, int32_t* aColSpan)
     return cellFrame;
   }
 
-  NS_NOTREACHED("Can't get here");
+  MOZ_ASSERT_UNREACHABLE("Can't get here");
   return nullptr;
 }

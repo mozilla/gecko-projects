@@ -5,7 +5,7 @@
 
 "use strict";
 
-const {getRuleText} = devtools.require("devtools/server/actors/styles");
+const {getRuleText} = require("devtools/server/actors/styles");
 
 const TEST_DATA = [
   {
@@ -24,7 +24,8 @@ const TEST_DATA = [
   },
   {
     desc: "Multiple rules test case",
-    input: "#id{color:red;background:yellow;}.class-one .class-two { position:absolute; line-height: 45px}",
+    input: "#id{color:red;background:yellow;}.class-one .class-two " +
+      "{ position:absolute; line-height: 45px}",
     line: 1,
     column: 34,
     expected: {offset: 56, text: " position:absolute; line-height: 45px"}
@@ -69,8 +70,8 @@ const TEST_DATA = [
     desc: "Multi-lines CSS and multi-line rule",
     input: [
       "/* ",
-       "* some comments",
-       "*/",
+      "* some comments",
+      "*/",
       "",
       "body {",
       "    margin: 0;",
@@ -110,24 +111,24 @@ const TEST_DATA = [
 ];
 
 function run_test() {
-  for (let test of TEST_DATA) {
-    do_print("Starting test: " + test.desc);
-    do_print("Input string " + test.input);
+  for (const test of TEST_DATA) {
+    info("Starting test: " + test.desc);
+    info("Input string " + test.input);
     let output;
     try {
       output = getRuleText(test.input, test.line, test.column);
       if (test.throws) {
-        do_print("Test should have thrown");
-        do_check_true(false);
+        info("Test should have thrown");
+        Assert.ok(false);
       }
     } catch (e) {
-      do_print("getRuleText threw an exception with the given input string");
+      info("getRuleText threw an exception with the given input string");
       if (test.throws) {
-        do_print("Exception expected");
-        do_check_true(true);
+        info("Exception expected");
+        Assert.ok(true);
       } else {
-        do_print("Exception unexpected\n" + e);
-        do_check_true(false);
+        info("Exception unexpected\n" + e);
+        Assert.ok(false);
       }
     }
     if (output) {

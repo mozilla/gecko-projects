@@ -1,30 +1,21 @@
-/**
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
-
-var conn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+var conn = PlacesUtils.history.DBConnection;
 
 /**
  * Gets a single column value from either the places or historyvisits table.
  */
-function getColumn(table, column, fromColumnName, fromColumnValue)
-{
+function getColumn(table, column, url) {
   var stmt = conn.createStatement(
-    `SELECT ${column} FROM ${table} WHERE ${fromColumnName} = :val
-     LIMIT 1`);
+    `SELECT ${column} FROM ${table} WHERE url_hash = hash(:val) AND url = :val`);
   try {
-    stmt.params.val = fromColumnValue;
+    stmt.params.val = url;
     stmt.executeStep();
     return stmt.row[column];
-  }
-  finally {
+  } finally {
     stmt.finalize();
   }
 }
 
-add_task(function* ()
-{
+add_task(async function() {
   // Make sure titles are correctly saved for a URI with the proper
   // notifications.
 
@@ -32,12 +23,9 @@ add_task(function* ()
   let titleChangedPromise = new Promise(resolve => {
     var historyObserver = {
       data: [],
-      onBeginUpdateBatch: function() {},
-      onEndUpdateBatch: function() {},
-      onVisit: function(aURI, aVisitID, aTime, aSessionID, aReferringID,
-                        aTransitionType) {
-      },
-      onTitleChanged: function(aURI, aPageTitle, aGUID) {
+      onBeginUpdateBatch() {},
+      onEndUpdateBatch() {},
+      onTitleChanged(aURI, aPageTitle, aGUID) {
         this.data.push({ uri: aURI, title: aPageTitle, guid: aGUID });
 
         // We only expect one title change.
@@ -49,34 +37,34 @@ add_task(function* ()
         PlacesUtils.history.removeObserver(this);
         resolve(this.data);
       },
-      onDeleteURI: function() {},
-      onClearHistory: function() {},
-      onPageChanged: function() {},
-      onDeleteVisits: function() {},
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver])
+      onDeleteURI() {},
+      onClearHistory() {},
+      onPageChanged() {},
+      onDeleteVisits() {},
+      QueryInterface: ChromeUtils.generateQI([Ci.nsINavHistoryObserver])
     };
-    PlacesUtils.history.addObserver(historyObserver, false);
+    PlacesUtils.history.addObserver(historyObserver);
   });
 
   const url1 = "http://example.com/tests/toolkit/components/places/tests/browser/title1.html";
-  yield BrowserTestUtils.openNewForegroundTab(gBrowser, url1);
+  await BrowserTestUtils.openNewForegroundTab(gBrowser, url1);
 
   const url2 = "http://example.com/tests/toolkit/components/places/tests/browser/title2.html";
   let loadPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
   BrowserTestUtils.loadURI(gBrowser.selectedBrowser, url2);
-  yield loadPromise;
+  await loadPromise;
 
-  let data = yield titleChangedPromise;
+  let data = await titleChangedPromise;
   is(data[0].uri.spec, "http://example.com/tests/toolkit/components/places/tests/browser/title2.html");
   is(data[0].title, "Some title");
-  is(data[0].guid, getColumn("moz_places", "guid", "url", data[0].uri.spec));
+  is(data[0].guid, getColumn("moz_places", "guid", data[0].uri.spec));
 
   data.forEach(function(item) {
-    var title = getColumn("moz_places", "title", "url", data[0].uri.spec);
+    var title = getColumn("moz_places", "title", data[0].uri.spec);
     is(title, item.title);
   });
 
   gBrowser.removeCurrentTab();
-  yield PlacesTestUtils.clearHistory();
+  await PlacesUtils.history.clear();
 });
 

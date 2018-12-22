@@ -25,6 +25,8 @@
 #include "nsIIPCSerializableInputStream.h"
 
 using namespace mozilla::ipc;
+using mozilla::Maybe;
+using mozilla::Some;
 
 //-----------------------------------------------------------------------------
 // nsIStringInputStream implementation
@@ -48,17 +50,12 @@ public:
   NS_DECL_NSICLONEABLEINPUTSTREAM
 
   nsStringInputStream()
+    : mOffset(0)
   {
     Clear();
   }
 
-  explicit nsStringInputStream(const nsStringInputStream& aOther)
-    : mOffset(aOther.mOffset)
-  {
-    // Use Assign() here because we don't want the life of the clone to be
-    // dependent on the life of the original stream.
-    mData.Assign(aOther.mData);
-  }
+  nsresult Init(nsCString&& aString);
 
 private:
   ~nsStringInputStream()
@@ -88,6 +85,17 @@ private:
   nsDependentCSubstring mData;
   uint32_t mOffset;
 };
+
+nsresult
+nsStringInputStream::Init(nsCString&& aString)
+{
+  if (!mData.Assign(std::move(aString), fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  mOffset = 0;
+  return NS_OK;
+}
 
 // This class needs to support threadsafe refcounting since people often
 // allocate a string stream, and then read it from a background thread.
@@ -138,7 +146,10 @@ nsStringInputStream::GetData(nsACString& data)
 NS_IMETHODIMP
 nsStringInputStream::SetData(const nsACString& aData)
 {
-  mData.Assign(aData);
+  if (NS_WARN_IF(!mData.Assign(aData, fallible))) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   mOffset = 0;
   return NS_OK;
 }
@@ -160,7 +171,11 @@ nsStringInputStream::SetData(const char* aData, int32_t aDataLen)
   if (NS_WARN_IF(!aData)) {
     return NS_ERROR_INVALID_ARG;
   }
-  mData.Assign(aData, aDataLen);
+
+  if (NS_WARN_IF(!mData.Assign(aData, aDataLen, fallible))) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   mOffset = 0;
   return NS_OK;
 }
@@ -190,6 +205,14 @@ nsStringInputStream::ShareData(const char* aData, int32_t aDataLen)
   mData.Rebind(aData, aDataLen);
   mOffset = 0;
   return NS_OK;
+}
+
+NS_IMETHODIMP_(size_t)
+nsStringInputStream::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
+{
+  size_t n = aMallocSizeOf(this);
+  n += mData.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+  return n;
 }
 
 /////////
@@ -354,6 +377,12 @@ nsStringInputStream::Deserialize(const InputStreamParams& aParams,
   return true;
 }
 
+Maybe<uint64_t>
+nsStringInputStream::ExpectedSerializedLength()
+{
+  return Some(static_cast<uint64_t>(Length()));
+}
+
 /////////
 // nsICloneableInputStream implementation
 /////////
@@ -368,7 +397,15 @@ nsStringInputStream::GetCloneable(bool* aCloneableOut)
 NS_IMETHODIMP
 nsStringInputStream::Clone(nsIInputStream** aCloneOut)
 {
-  RefPtr<nsIInputStream> ref = new nsStringInputStream(*this);
+  RefPtr<nsStringInputStream> ref = new nsStringInputStream();
+  nsresult rv = ref->SetData(mData);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // mOffset is overwritten by SetData().
+  ref->mOffset = mOffset;
+
   ref.forget(aCloneOut);
   return NS_OK;
 }
@@ -378,7 +415,7 @@ NS_NewByteInputStream(nsIInputStream** aStreamResult,
                       const char* aStringToRead, int32_t aLength,
                       nsAssignmentType aAssignment)
 {
-  NS_PRECONDITION(aStreamResult, "null out ptr");
+  MOZ_ASSERT(aStreamResult, "null out ptr");
 
   RefPtr<nsStringInputStream> stream = new nsStringInputStream();
 
@@ -407,22 +444,34 @@ NS_NewByteInputStream(nsIInputStream** aStreamResult,
 }
 
 nsresult
-NS_NewStringInputStream(nsIInputStream** aStreamResult,
-                        const nsAString& aStringToRead)
+NS_NewCStringInputStream(nsIInputStream** aStreamResult,
+                         const nsACString& aStringToRead)
 {
-  NS_LossyConvertUTF16toASCII data(aStringToRead); // truncates high-order bytes
-  return NS_NewCStringInputStream(aStreamResult, data);
+  MOZ_ASSERT(aStreamResult, "null out ptr");
+
+  RefPtr<nsStringInputStream> stream = new nsStringInputStream();
+
+  nsresult rv = stream->SetData(aStringToRead);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  stream.forget(aStreamResult);
+  return NS_OK;
 }
 
 nsresult
 NS_NewCStringInputStream(nsIInputStream** aStreamResult,
-                         const nsACString& aStringToRead)
+                         nsCString&& aStringToRead)
 {
-  NS_PRECONDITION(aStreamResult, "null out ptr");
+  MOZ_ASSERT(aStreamResult, "null out ptr");
 
   RefPtr<nsStringInputStream> stream = new nsStringInputStream();
 
-  stream->SetData(aStringToRead);
+  nsresult rv = stream->Init(std::move(aStringToRead));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   stream.forget(aStreamResult);
   return NS_OK;

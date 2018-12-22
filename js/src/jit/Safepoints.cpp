@@ -31,7 +31,7 @@ SafepointWriter::init(TempAllocator& alloc)
 uint32_t
 SafepointWriter::startEntry()
 {
-    JitSpew(JitSpew_Safepoints, "Encoding safepoint (position %d):", stream_.length());
+    JitSpew(JitSpew_Safepoints, "Encoding safepoint (position %zu):", stream_.length());
     return uint32_t(stream_.length());
 }
 
@@ -113,7 +113,7 @@ SafepointWriter::writeGcRegs(LSafepoint* safepoint)
 
 #ifdef JS_JITSPEW
     if (JitSpewEnabled(JitSpew_Safepoints)) {
-        for (GeneralRegisterForwardIterator iter(spilledGpr); iter.more(); iter++) {
+        for (GeneralRegisterForwardIterator iter(spilledGpr); iter.more(); ++iter) {
             const char* type = gc.has(*iter)
                                ? "gc"
                                : slots.has(*iter)
@@ -123,7 +123,7 @@ SafepointWriter::writeGcRegs(LSafepoint* safepoint)
                                    : "any";
             JitSpew(JitSpew_Safepoints, "    %s reg: %s", type, (*iter).name());
         }
-        for (FloatRegisterForwardIterator iter(spilledFloat); iter.more(); iter++)
+        for (FloatRegisterForwardIterator iter(spilledFloat); iter.more(); ++iter)
             JitSpew(JitSpew_Safepoints, "    float reg: %s", (*iter).name());
     }
 #endif
@@ -395,7 +395,9 @@ SafepointReader::SafepointReader(IonScript* script, const SafepointIndex* si)
   : stream_(script->safepoints() + si->safepointOffset(),
             script->safepoints() + script->safepointsSize()),
     frameSlots_((script->frameSlots() / sizeof(intptr_t)) + 1), // Stack slot counts are inclusive.
-    argumentSlots_(script->argumentSlots() / sizeof(intptr_t))
+    argumentSlots_(script->argumentSlots() / sizeof(intptr_t)),
+    nunboxSlotsRemaining_(0),
+    slotsOrElementsSlotsRemaining_(0)
 {
     osiCallPointOffset_ = stream_.readUnsigned();
 

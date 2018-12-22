@@ -2,26 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var promise = require("promise");
+/* exported waitUntilState */
 
-DevToolsUtils.testing = true;
+"use strict";
 
-function waitUntilState (store, predicate) {
-  let deferred = promise.defer();
-  let unsubscribe = store.subscribe(check);
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 
-  function check () {
-    if (predicate(store.getState())) {
-      unsubscribe();
-      deferred.resolve()
+function waitUntilState(store, predicate) {
+  return new Promise(resolve => {
+    const unsubscribe = store.subscribe(check);
+    function check() {
+      if (predicate(store.getState())) {
+        unsubscribe();
+        resolve();
+      }
     }
-  }
 
-  // Fire the check immediately incase the action has already occurred
-  check();
-
-  return deferred.promise;
+    // Fire the check immediately incase the action has already occurred
+    check();
+  });
 }

@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests if the performance tool can import profiler data when Profiler is v2
  * and requires deflating, and has an extra thread that's a string. Not sure
@@ -83,8 +84,8 @@ var PROFILER_DATA = (function () {
   return data;
 })();
 
-var test = Task.async(function*() {
-  let { target, panel, toolbox } = yield initPerformance(SIMPLE_URL);
+var test = async function () {
+  let { target, panel, toolbox } = await initPerformance(SIMPLE_URL);
   let { $, EVENTS, PerformanceController, DetailsView, JsCallTreeView } = panel.panelWin;
 
   let profilerData = {
@@ -97,23 +98,23 @@ var test = Task.async(function*() {
 
   let file = FileUtils.getFile("TmpD", ["tmpprofile.json"]);
   file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("666", 8));
-  yield asyncCopy(profilerData, file);
+  await asyncCopy(profilerData, file);
 
   // Import recording.
 
   let calltreeRendered = once(JsCallTreeView, EVENTS.UI_JS_CALL_TREE_RENDERED);
   let imported = once(PerformanceController, EVENTS.RECORDING_IMPORTED);
-  yield PerformanceController.importRecording("", file);
+  await PerformanceController.importRecording("", file);
 
-  yield imported;
+  await imported;
   ok(true, "The profiler data appears to have been successfully imported.");
 
-  yield calltreeRendered;
+  await calltreeRendered;
   ok(true, "The imported data was re-rendered.");
 
-  yield teardown(panel);
+  await teardown(panel);
   finish();
-});
+};
 
 function getUnicodeConverter() {
   let className = "@mozilla.org/intl/scriptableunicodeconverter";
@@ -123,7 +124,7 @@ function getUnicodeConverter() {
 }
 
 function asyncCopy(data, file) {
-  let deferred = Promise.defer();
+  let deferred = defer();
 
   let string = JSON.stringify(data);
   let inputStream = getUnicodeConverter().convertToInputStream(string);
@@ -138,3 +139,4 @@ function asyncCopy(data, file) {
 
   return deferred.promise;
 }
+/* eslint-enable */

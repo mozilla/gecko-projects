@@ -13,34 +13,64 @@ class nsIInputStream;
 
 namespace mozilla {
 
-nsresult
+MOZ_MUST_USE nsresult
 Base64EncodeInputStream(nsIInputStream* aInputStream,
                         nsACString& aDest,
                         uint32_t aCount,
                         uint32_t aOffset = 0);
-nsresult
+MOZ_MUST_USE nsresult
 Base64EncodeInputStream(nsIInputStream* aInputStream,
                         nsAString& aDest,
                         uint32_t aCount,
                         uint32_t aOffset = 0);
 
-nsresult
-Base64Encode(const nsACString& aString, nsACString& aBinary);
-nsresult
-Base64Encode(const nsAString& aString, nsAString& aBinaryData);
+MOZ_MUST_USE nsresult
+Base64Encode(const char* aBinary, uint32_t aBinaryLen, char** aBase64);
+MOZ_MUST_USE nsresult
+Base64Encode(const nsACString& aBinary, nsACString& aBase64);
 
-nsresult
-Base64Decode(const nsACString& aBinaryData, nsACString& aString);
-nsresult
-Base64Decode(const nsAString& aBinaryData, nsAString& aString);
+// The high bits of any characters in aBinary are dropped.
+MOZ_MUST_USE nsresult
+Base64Encode(const nsAString& aBinary, nsAString& aBase64);
+
+MOZ_MUST_USE nsresult
+Base64Decode(const char* aBase64, uint32_t aBase64Len, char** aBinary,
+             uint32_t* aBinaryLen);
+MOZ_MUST_USE nsresult
+Base64Decode(const nsACString& aBase64, nsACString& aBinary);
+
+// The high bits of any characters in aBase64 are dropped.
+MOZ_MUST_USE nsresult
+Base64Decode(const nsAString& aBase64, nsAString& aBinary);
+
+enum class Base64URLEncodePaddingPolicy {
+  Include,
+  Omit,
+};
 
 /**
- * Converts |aData| to an unpadded, Base64 URL-encoded string per RFC 4648.
- * Aims to encode the data in constant time. The caller may free |aData| once
- * this function returns.
+ * Converts |aBinary| to an unpadded, Base64 URL-encoded string per RFC 4648.
+ * Aims to encode the data in constant time. The caller retains ownership
+ * of |aBinary|.
  */
-nsresult
-Base64URLEncode(uint32_t aLength, const uint8_t* aData, nsACString& aString);
+MOZ_MUST_USE nsresult
+Base64URLEncode(uint32_t aBinaryLen, const uint8_t* aBinary,
+                Base64URLEncodePaddingPolicy aPaddingPolicy,
+                nsACString& aBase64);
+
+enum class Base64URLDecodePaddingPolicy {
+  Require,
+  Ignore,
+  Reject,
+};
+
+/**
+ * Decodes a Base64 URL-encoded |aBase64| into |aBinary|.
+ */
+MOZ_MUST_USE nsresult
+Base64URLDecode(const nsACString& aBase64,
+                Base64URLDecodePaddingPolicy aPaddingPolicy,
+                FallibleTArray<uint8_t>& aBinary);
 
 } // namespace mozilla
 

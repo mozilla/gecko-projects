@@ -7,12 +7,8 @@
 </head>
 <body>
 
-  <script type="application/javascript;version=1.7">
+  <script type="application/javascript">
     "use strict";
-
-    const Ci = Components.interfaces;
-    const Cc = Components.classes;
-    const Cu = Components.utils;
 
     var permManager = Cc["@mozilla.org/permissionmanager;1"]
                         .getService(Ci.nsIPermissionManager);
@@ -85,6 +81,7 @@
       SpecialPowers.pushPrefEnv({
         "set": [
           ["dom.mozBrowserFramesEnabled", true],
+          ["network.disable.ipc.security", true],
           ["browser.pagethumbnails.capturing_disabled", true]
         ]
       }, runTests);

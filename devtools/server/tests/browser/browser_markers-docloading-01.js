@@ -4,34 +4,36 @@
 /**
  * Test that we get DOMContentLoaded and Load markers
  */
+"use strict";
 
-const { TimelineFront } = require("devtools/server/actors/timeline");
+const { TimelineFront } = require("devtools/shared/fronts/timeline");
 const MARKER_NAMES = ["document::DOMContentLoaded", "document::Load"];
 
-add_task(function*() {
-  let browser = yield addTab(MAIN_DOMAIN + "doc_innerHTML.html");
-  let doc = browser.contentDocument;
+add_task(async function() {
+  const browser = await addTab(MAIN_DOMAIN + "doc_innerHTML.html");
 
   initDebuggerServer();
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = TimelineFront(client, form);
-  let rec = yield front.start({ withMarkers: true });
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = TimelineFront(client, form);
+  const rec = await front.start({ withMarkers: true });
 
   front.once("doc-loading", e => {
     ok(false, "Should not be emitting doc-loading events.");
   });
 
-  executeSoon(() => doc.location.reload());
+  ContentTask.spawn(browser, null, function() {
+    content.location.reload();
+  });
 
-  yield waitForMarkerType(front, MARKER_NAMES, () => true, e => e, "markers");
-  yield front.stop(rec);
+  await waitForMarkerType(front, MARKER_NAMES, () => true, e => e, "markers");
+  await front.stop(rec);
 
   ok(true, "Found the required marker names.");
 
   // Wait some more time to make sure the 'doc-loading' events never get fired.
-  yield DevToolsUtils.waitForTime(1000);
+  await DevToolsUtils.waitForTime(1000);
 
-  yield closeDebuggerClient(client);
+  await client.close();
   gBrowser.removeCurrentTab();
 });

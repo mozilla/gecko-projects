@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -17,12 +18,27 @@ class SourceSurfaceRawData : public DataSourceSurface
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceRawData, override)
+
   SourceSurfaceRawData()
-    : mMapCount(0)
-  {}
-  ~SourceSurfaceRawData()
+    : mRawData(0)
+    , mStride(0)
+    , mFormat(SurfaceFormat::UNKNOWN)
+    , mMapCount(0)
+    , mOwnData(false)
+    , mDeallocator(nullptr)
+    , mClosure(nullptr)
   {
-    if(mOwnData) delete [] mRawData;
+  }
+
+  virtual ~SourceSurfaceRawData()
+  {
+    if (mDeallocator) {
+      mDeallocator(mClosure);
+    } else if (mOwnData) {
+      // The buffer is created from GuaranteePersistance().
+      delete [] mRawData;
+    }
+
     MOZ_ASSERT(mMapCount == 0);
   }
 
@@ -32,12 +48,6 @@ public:
   virtual SurfaceType GetType() const override { return SurfaceType::DATA; }
   virtual IntSize GetSize() const override { return mSize; }
   virtual SurfaceFormat GetFormat() const override { return mFormat; }
-
-  void InitWrappingData(unsigned char *aData,
-                        const IntSize &aSize,
-                        int32_t aStride,
-                        SurfaceFormat aFormat,
-                        bool aOwnData);
 
   virtual void GuaranteePersistance() override;
 
@@ -68,12 +78,27 @@ public:
   }
 
 private:
+  friend class Factory;
+
+  // If we have a custom deallocator, the |aData| will be released using the
+  // custom deallocator and |aClosure| in dtor.  The assumption is that the
+  // caller will check for valid size and stride before making this call.
+  void InitWrappingData(unsigned char *aData,
+                        const IntSize &aSize,
+                        int32_t aStride,
+                        SurfaceFormat aFormat,
+                        Factory::SourceSurfaceDeallocator aDeallocator,
+                        void* aClosure);
+
   uint8_t *mRawData;
   int32_t mStride;
   SurfaceFormat mFormat;
   IntSize mSize;
   Atomic<int32_t> mMapCount;
+
   bool mOwnData;
+  Factory::SourceSurfaceDeallocator mDeallocator;
+  void* mClosure;
 };
 
 class SourceSurfaceAlignedRawData : public DataSourceSurface
@@ -81,27 +106,32 @@ class SourceSurfaceAlignedRawData : public DataSourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceAlignedRawData, override)
   SourceSurfaceAlignedRawData()
-    : mMapCount(0)
+    : mStride(0)
+    , mFormat(SurfaceFormat::UNKNOWN)
+    , mMapCount(0)
   {}
   ~SourceSurfaceAlignedRawData()
   {
     MOZ_ASSERT(mMapCount == 0);
   }
 
-  virtual uint8_t *GetData() override { return mArray; }
+  bool Init(const IntSize &aSize,
+            SurfaceFormat aFormat,
+            bool aClearMem,
+            uint8_t aClearValue,
+            int32_t aStride = 0);
+
+  virtual uint8_t* GetData() override { return mArray; }
   virtual int32_t Stride() override { return mStride; }
 
   virtual SurfaceType GetType() const override { return SurfaceType::DATA; }
   virtual IntSize GetSize() const override { return mSize; }
   virtual SurfaceFormat GetFormat() const override { return mFormat; }
 
-  bool Init(const IntSize &aSize,
-            SurfaceFormat aFormat,
-            bool aZero);
-  bool InitWithStride(const IntSize &aSize,
-                      SurfaceFormat aFormat,
-                      int32_t aStride,
-                      bool aZero);
+  void AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
+                              size_t& aHeapSizeOut,
+                              size_t& aNonHeapSizeOut,
+                              size_t& aExtHandlesOut) const override;
 
   virtual bool Map(MapType, MappedSurface *aMappedSurface) override
   {
@@ -121,6 +151,8 @@ public:
   }
 
 private:
+  friend class Factory;
+
   AlignedArray<uint8_t> mArray;
   int32_t mStride;
   SurfaceFormat mFormat;

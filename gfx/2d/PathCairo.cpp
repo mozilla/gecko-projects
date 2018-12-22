@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -176,7 +177,7 @@ PathCairo::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule
   RefPtr<PathBuilderCairo> builder = new PathBuilderCairo(aFillRule);
 
   AppendPathToBuilder(builder, &aTransform);
-  builder->mCurrentPoint = aTransform * mCurrentPoint;
+  builder->mCurrentPoint = aTransform.TransformPoint(mCurrentPoint);
 
   return builder.forget();
 }
@@ -186,7 +187,7 @@ PathCairo::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
 {
   Matrix inverse = aTransform;
   inverse.Invert();
-  Point transformed = inverse * aPoint;
+  Point transformed = inverse.TransformPoint(aPoint);
 
   EnsureContainingContext(aTransform);
 
@@ -200,7 +201,7 @@ PathCairo::StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
 {
   Matrix inverse = aTransform;
   inverse.Invert();
-  Point transformed = inverse * aPoint;
+  Point transformed = inverse.TransformPoint(aPoint);
 
   EnsureContainingContext(aTransform);
 
@@ -293,7 +294,7 @@ PathCairo::SetPathOnContext(cairo_t *aContext) const
 
   cairo_new_path(aContext);
 
-  if (mPathData.size()) {
+  if (!mPathData.empty()) {
     cairo_path_t path;
     path.data = const_cast<cairo_path_data_t*>(&mPathData.front());
     path.num_data = mPathData.size();
@@ -313,7 +314,7 @@ PathCairo::AppendPathToBuilder(PathBuilderCairo *aBuilder, const Matrix *aTransf
       i++;
       for (uint32_t c = 0; c < pointCount; c++) {
         cairo_path_data_t data;
-        Point newPoint = *aTransform * Point(mPathData[i].point.x, mPathData[i].point.y);
+        Point newPoint = aTransform->TransformPoint(Point(mPathData[i].point.x, mPathData[i].point.y));
         data.point.x = newPoint.x;
         data.point.y = newPoint.y;
         aBuilder->mPathData.push_back(data);

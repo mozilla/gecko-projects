@@ -25,33 +25,33 @@ public:
     nsDiskCacheDevice();
     virtual ~nsDiskCacheDevice();
 
-    virtual nsresult        Init();
-    virtual nsresult        Shutdown();
+    virtual nsresult        Init() override;
+    virtual nsresult        Shutdown() override;
 
-    virtual const char *    GetDeviceID(void);
-    virtual nsCacheEntry *  FindEntry(nsCString * key, bool *collision);
-    virtual nsresult        DeactivateEntry(nsCacheEntry * entry);
-    virtual nsresult        BindEntry(nsCacheEntry * entry);
-    virtual void            DoomEntry( nsCacheEntry * entry );
+    virtual const char *    GetDeviceID(void) override;
+    virtual nsCacheEntry *  FindEntry(nsCString * key, bool *collision) override;
+    virtual nsresult        DeactivateEntry(nsCacheEntry * entry) override;
+    virtual nsresult        BindEntry(nsCacheEntry * entry) override;
+    virtual void            DoomEntry( nsCacheEntry * entry ) override;
 
     virtual nsresult OpenInputStreamForEntry(nsCacheEntry *    entry,
                                              nsCacheAccessMode mode,
                                              uint32_t          offset,
-                                             nsIInputStream ** result);
+                                             nsIInputStream ** result) override;
 
     virtual nsresult OpenOutputStreamForEntry(nsCacheEntry *     entry,
                                               nsCacheAccessMode  mode,
                                               uint32_t           offset,
-                                              nsIOutputStream ** result);
+                                              nsIOutputStream ** result) override;
 
     virtual nsresult        GetFileForEntry(nsCacheEntry *    entry,
-                                            nsIFile **        result);
+                                            nsIFile **        result) override;
 
-    virtual nsresult        OnDataSizeChange(nsCacheEntry * entry, int32_t deltaSize);
-    
-    virtual nsresult        Visit(nsICacheVisitor * visitor);
+    virtual nsresult        OnDataSizeChange(nsCacheEntry * entry, int32_t deltaSize) override;
 
-    virtual nsresult        EvictEntries(const char * clientID);
+    virtual nsresult        Visit(nsICacheVisitor * visitor) override;
+
+    virtual nsresult        EvictEntries(const char * clientID) override;
 
     bool                    EntryIsTooBig(int64_t entrySize);
 
@@ -70,10 +70,10 @@ public:
     uint32_t                getCacheCapacity();
     uint32_t                getCacheSize();
     uint32_t                getEntryCount();
-    
+
     nsDiskCacheMap *        CacheMap()    { return &mCacheMap; }
-    
-private:    
+
+private:
     friend class nsDiskCacheDeviceDeactivateEntryEvent;
     friend class nsEvictDiskCacheEntriesEvent;
     friend class nsDiskCacheMap;
@@ -99,7 +99,7 @@ private:
     nsresult                ClearDiskCache();
 
     nsresult                EvictDiskCacheEntries(uint32_t  targetCapacity);
-    
+
     /**
      *  Member variables
      */

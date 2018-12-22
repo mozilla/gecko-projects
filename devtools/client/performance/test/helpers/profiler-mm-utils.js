@@ -10,16 +10,15 @@
  */
 
 const { Cc, Ci } = require("chrome");
-const { Task } = require("resource://gre/modules/Task.jsm");
 
-const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js";
+const FRAME_SCRIPT_UTILS_URL = "chrome://mochitests/content/browser/devtools/client/shared/test/frame-script-utils.js";
 
 let gMM = null;
 
 /**
  * Loads the relevant frame scripts into the provided browser's message manager.
  */
-exports.PMM_loadFrameScripts = (gBrowser) => {
+exports.pmmLoadFrameScripts = (gBrowser) => {
   gMM = gBrowser.selectedBrowser.messageManager;
   gMM.loadFrameScript(FRAME_SCRIPT_UTILS_URL, false);
 };
@@ -27,7 +26,7 @@ exports.PMM_loadFrameScripts = (gBrowser) => {
 /**
  * Clears the cached message manager.
  */
-exports.PMM_clearFrameScripts = () => {
+exports.pmmClearFrameScripts = () => {
   gMM = null;
 };
 
@@ -36,12 +35,13 @@ exports.PMM_clearFrameScripts = () => {
  * Resolves a returned promise when the response is received from the message
  * listener, with the same id as part of the response payload data.
  */
-exports.PMM_uniqueMessage = function(message, payload) {
+exports.pmmUniqueMessage = function(message, payload) {
   if (!gMM) {
-    throw new Error("`PMM_loadFrameScripts()` must be called when using MessageManager.");
+    throw new Error("`pmmLoadFrameScripts()` must be called when using MessageManager.");
   }
 
-  let { generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
+  const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"]
+    .getService(Ci.nsIUUIDGenerator);
   payload.id = generateUUID().toString();
 
   return new Promise(resolve => {
@@ -58,48 +58,51 @@ exports.PMM_uniqueMessage = function(message, payload) {
 /**
  * Checks if the nsProfiler module is active.
  */
-exports.PMM_isProfilerActive = () => {
-  return exports.PMM_sendProfilerCommand("IsActive");
+exports.pmmIsProfilerActive = () => {
+  return exports.pmmSendProfilerCommand("IsActive");
 };
 
 /**
  * Starts the nsProfiler module.
  */
-exports.PMM_startProfiler = Task.async(function*({ entries, interval, features }) {
-  let isActive = (yield exports.PMM_sendProfilerCommand("IsActive")).isActive;
+exports.pmmStartProfiler = async function({ entries, interval, features }) {
+  const isActive = (await exports.pmmSendProfilerCommand("IsActive")).isActive;
   if (!isActive) {
-    return exports.PMM_sendProfilerCommand("StartProfiler", [entries, interval, features, features.length]);
+    return exports.pmmSendProfilerCommand("StartProfiler", [entries, interval, features,
+                                                            features.length]);
   }
-});
+  return null;
+};
 /**
  * Stops the nsProfiler module.
  */
-exports.PMM_stopProfiler = Task.async(function*() {
-  let isActive = (yield exports.PMM_sendProfilerCommand("IsActive")).isActive;
+exports.pmmStopProfiler = async function() {
+  const isActive = (await exports.pmmSendProfilerCommand("IsActive")).isActive;
   if (isActive) {
-    return exports.PMM_sendProfilerCommand("StopProfiler");
+    return exports.pmmSendProfilerCommand("StopProfiler");
   }
-});
+  return null;
+};
 
 /**
  * Calls a method on the nsProfiler module.
  */
-exports.PMM_sendProfilerCommand = (method, args = []) => {
-  return exports.PMM_uniqueMessage("devtools:test:profiler", { method, args });
+exports.pmmSendProfilerCommand = (method, args = []) => {
+  return exports.pmmUniqueMessage("devtools:test:profiler", { method, args });
 };
 
 /**
  * Evaluates a script in content, returning a promise resolved with the
  * returned result.
  */
-exports.PMM_evalInDebuggee = (script) => {
-  return exports.PMM_uniqueMessage("devtools:test:eval", { script });
+exports.pmmEvalInDebuggee = (script) => {
+  return exports.pmmUniqueMessage("devtools:test:eval", { script });
 };
 
 /**
  * Evaluates a console method in content.
  */
-exports.PMM_consoleMethod = function (method, ...args) {
+exports.pmmConsoleMethod = function(method, ...args) {
   // Terrible ugly hack -- this gets stringified when it uses the
   // message manager, so an undefined arg in `console.profileEnd()`
   // turns into a stringified "null", which is terrible. This method
@@ -109,5 +112,5 @@ exports.PMM_consoleMethod = function (method, ...args) {
   if (args[0] == null) {
     args[0] = "";
   }
-  return exports.PMM_uniqueMessage("devtools:test:console", { method, args });
+  return exports.pmmUniqueMessage("devtools:test:console", { method, args });
 };

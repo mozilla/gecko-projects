@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,7 +29,6 @@ AsyncCanvasRenderer::AsyncCanvasRenderer()
   , mIsAlphaPremultiplied(true)
   , mWidth(0)
   , mHeight(0)
-  , mCanvasClientAsyncID(0)
   , mCanvasClient(nullptr)
   , mMutex("AsyncCanvasRenderer::mMutex")
 {
@@ -44,14 +43,15 @@ AsyncCanvasRenderer::~AsyncCanvasRenderer()
 void
 AsyncCanvasRenderer::NotifyElementAboutAttributesChanged()
 {
-  class Runnable final : public nsRunnable
+  class Runnable final : public mozilla::Runnable
   {
   public:
     explicit Runnable(AsyncCanvasRenderer* aRenderer)
-      : mRenderer(aRenderer)
+      : mozilla::Runnable("Runnable")
+      , mRenderer(aRenderer)
     {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       if (mRenderer) {
         dom::HTMLCanvasElement::SetAttrFromAsyncCanvasRenderer(mRenderer);
@@ -60,16 +60,11 @@ AsyncCanvasRenderer::NotifyElementAboutAttributesChanged()
       return NS_OK;
     }
 
-    void Revoke()
-    {
-      mRenderer = nullptr;
-    }
-
   private:
     RefPtr<AsyncCanvasRenderer> mRenderer;
   };
 
-  RefPtr<nsRunnable> runnable = new Runnable(this);
+  nsCOMPtr<nsIRunnable> runnable = new Runnable(this);
   nsresult rv = NS_DispatchToMainThread(runnable);
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to dispatch a runnable to the main-thread.");
@@ -79,14 +74,15 @@ AsyncCanvasRenderer::NotifyElementAboutAttributesChanged()
 void
 AsyncCanvasRenderer::NotifyElementAboutInvalidation()
 {
-  class Runnable final : public nsRunnable
+  class Runnable final : public mozilla::Runnable
   {
   public:
     explicit Runnable(AsyncCanvasRenderer* aRenderer)
-      : mRenderer(aRenderer)
+      : mozilla::Runnable("Runnable")
+      , mRenderer(aRenderer)
     {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       if (mRenderer) {
         dom::HTMLCanvasElement::InvalidateFromAsyncCanvasRenderer(mRenderer);
@@ -95,16 +91,11 @@ AsyncCanvasRenderer::NotifyElementAboutInvalidation()
       return NS_OK;
     }
 
-    void Revoke()
-    {
-      mRenderer = nullptr;
-    }
-
   private:
     RefPtr<AsyncCanvasRenderer> mRenderer;
   };
 
-  RefPtr<nsRunnable> runnable = new Runnable(this);
+  nsCOMPtr<nsIRunnable> runnable = new Runnable(this);
   nsresult rv = NS_DispatchToMainThread(runnable);
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to dispatch a runnable to the main-thread.");
@@ -116,31 +107,31 @@ AsyncCanvasRenderer::SetCanvasClient(CanvasClient* aClient)
 {
   mCanvasClient = aClient;
   if (aClient) {
-    mCanvasClientAsyncID = aClient->GetAsyncID();
+    mCanvasClientAsyncHandle = aClient->GetAsyncHandle();
   } else {
-    mCanvasClientAsyncID = 0;
+    mCanvasClientAsyncHandle = CompositableHandle();
   }
 }
 
 void
-AsyncCanvasRenderer::SetActiveThread()
+AsyncCanvasRenderer::SetActiveEventTarget()
 {
   MutexAutoLock lock(mMutex);
-  mActiveThread = NS_GetCurrentThread();
+  mActiveEventTarget = GetCurrentThreadSerialEventTarget();
 }
 
 void
-AsyncCanvasRenderer::ResetActiveThread()
+AsyncCanvasRenderer::ResetActiveEventTarget()
 {
   MutexAutoLock lock(mMutex);
-  mActiveThread = nullptr;
+  mActiveEventTarget = nullptr;
 }
 
-already_AddRefed<nsIThread>
-AsyncCanvasRenderer::GetActiveThread()
+already_AddRefed<nsISerialEventTarget>
+AsyncCanvasRenderer::GetActiveEventTarget()
 {
   MutexAutoLock lock(mMutex);
-  nsCOMPtr<nsIThread> result = mActiveThread;
+  nsCOMPtr<nsISerialEventTarget> result = mActiveEventTarget;
   return result.forget();
 }
 
@@ -148,6 +139,12 @@ void
 AsyncCanvasRenderer::CopyFromTextureClient(TextureClient* aTextureClient)
 {
   MutexAutoLock lock(mMutex);
+
+  if (!aTextureClient) {
+    mSurfaceForBasic = nullptr;
+    return;
+  }
+
   TextureClientAutoLock texLock(aTextureClient, layers::OpenMode::OPEN_READ);
   if (!texLock.Succeeded()) {
     return;
@@ -162,8 +159,11 @@ AsyncCanvasRenderer::CopyFromTextureClient(TextureClient* aTextureClient)
       size != mSurfaceForBasic->GetSize() ||
       format != mSurfaceForBasic->GetFormat())
   {
-    uint32_t stride = gfx::GetAlignedStride<8>(size.width * BytesPerPixel(format));
+    uint32_t stride = gfx::GetAlignedStride<8>(size.width, BytesPerPixel(format));
     mSurfaceForBasic = gfx::Factory::CreateDataSourceSurfaceWithStride(size, format, stride);
+    if (!mSurfaceForBasic) {
+      return;
+    }
   }
 
   MappedTextureData mapped;
@@ -213,7 +213,7 @@ AsyncCanvasRenderer::UpdateTarget()
   // This buffer would be used later for content rendering. So we choose
   // B8G8R8A8 format here.
   const gfx::SurfaceFormat format = gfx::SurfaceFormat::B8G8R8A8;
-  uint32_t stride = gfx::GetAlignedStride<8>(size.width * BytesPerPixel(format));
+  uint32_t stride = gfx::GetAlignedStride<8>(size.width, BytesPerPixel(format));
   RefPtr<gfx::DataSourceSurface> surface =
     gfx::Factory::CreateDataSourceSurfaceWithStride(size, format, stride);
 
@@ -241,12 +241,16 @@ AsyncCanvasRenderer::GetSurface()
   MutexAutoLock lock(mMutex);
   if (mSurfaceForBasic) {
     // Since SourceSurface isn't thread-safe, we need copy to a new SourceSurface.
+    gfx::DataSourceSurface::ScopedMap srcMap(mSurfaceForBasic, gfx::DataSourceSurface::READ);
+
     RefPtr<gfx::DataSourceSurface> result =
       gfx::Factory::CreateDataSourceSurfaceWithStride(mSurfaceForBasic->GetSize(),
                                                       mSurfaceForBasic->GetFormat(),
-                                                      mSurfaceForBasic->Stride());
+                                                      srcMap.GetStride());
+    if (NS_WARN_IF(!result)) {
+      return nullptr;
+    }
 
-    gfx::DataSourceSurface::ScopedMap srcMap(mSurfaceForBasic, gfx::DataSourceSurface::READ);
     gfx::DataSourceSurface::ScopedMap dstMap(result, gfx::DataSourceSurface::WRITE);
 
     if (NS_WARN_IF(!srcMap.IsMapped()) ||
@@ -274,8 +278,10 @@ AsyncCanvasRenderer::GetInputStream(const char *aMimeType,
     return NS_ERROR_FAILURE;
   }
 
+  gfx::DataSourceSurface::ScopedMap map(surface, gfx::DataSourceSurface::READ);
+
   // Handle y flip.
-  RefPtr<gfx::DataSourceSurface> dataSurf = gl::YInvertImageSurface(surface);
+  RefPtr<gfx::DataSourceSurface> dataSurf = gl::YInvertImageSurface(surface, map.GetStride());
 
   return gfxUtils::GetInputStream(dataSurf, false, aMimeType, aEncoderOptions, aStream);
 }

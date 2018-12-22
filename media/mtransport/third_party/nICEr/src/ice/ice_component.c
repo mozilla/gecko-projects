@@ -30,10 +30,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-
-
-static char *RCSSTRING __UNUSED__="$Id: ice_component.c,v 1.2 2008/04/28 17:59:01 ekr Exp $";
-
 #include <string.h>
 #include <assert.h>
 #include <nr_api.h>
@@ -49,12 +45,21 @@ static char *RCSSTRING __UNUSED__="$Id: ice_component.c,v 1.2 2008/04/28 17:59:0
 #include "nr_socket_multi_tcp.h"
 #include "ice_reg.h"
 #include "nr_crypto.h"
+#include "r_time.h"
 
+static void nr_ice_component_refresh_consent_cb(NR_SOCKET s, int how, void *cb_arg);
 static int nr_ice_component_stun_server_default_cb(void *cb_arg,nr_stun_server_ctx *stun_ctx,nr_socket *sock, nr_stun_server_request *req, int *dont_free, int *error);
 static int nr_ice_pre_answer_request_destroy(nr_ice_pre_answer_request **parp);
+int nr_ice_component_can_candidate_addr_pair(nr_transport_addr *local, nr_transport_addr *remote);
+int nr_ice_component_can_candidate_tcptype_pair(nr_socket_tcp_type left, nr_socket_tcp_type right);
+void nr_ice_component_consent_calc_consent_timer(nr_ice_component *comp);
+void nr_ice_component_consent_schedule_consent_timer(nr_ice_component *comp);
+int nr_ice_component_refresh_consent(nr_stun_client_ctx *ctx, NR_async_cb finished_cb, void *cb_arg);
+int nr_ice_component_setup_consent(nr_ice_component *comp);
+int nr_ice_pre_answer_enqueue(nr_ice_component *comp, nr_socket *sock, nr_stun_server_request *req, int *dont_free);
 
 /* This function takes ownership of the contents of req (but not req itself) */
-static int nr_ice_pre_answer_request_create(nr_socket *sock, nr_stun_server_request *req, nr_ice_pre_answer_request **parp)
+static int nr_ice_pre_answer_request_create(nr_transport_addr *dst, nr_stun_server_request *req, nr_ice_pre_answer_request **parp)
   {
     int r, _status;
     nr_ice_pre_answer_request *par = 0;
@@ -66,7 +71,7 @@ static int nr_ice_pre_answer_request_create(nr_socket *sock, nr_stun_server_requ
     par->req = *req; /* Struct assignment */
     memset(req, 0, sizeof(*req)); /* Zero contents to avoid confusion */
 
-    if (r=nr_socket_getaddr(sock, &par->local_addr))
+    if (r=nr_transport_addr_copy(&par->local_addr, dst))
       ABORT(r);
     if (!nr_stun_message_has_attribute(par->req.request, NR_STUN_ATTR_USERNAME, &attr))
       ABORT(R_INTERNAL);
@@ -141,6 +146,8 @@ int nr_ice_component_destroy(nr_ice_component **componentp)
     component=*componentp;
     *componentp=0;
 
+    nr_ice_component_consent_destroy(component);
+
     /* Detach ourselves from the sockets */
     if (component->local_component){
       nr_ice_socket *isock=STAILQ_FIRST(&component->local_component->sockets);
@@ -166,10 +173,6 @@ int nr_ice_component_destroy(nr_ice_component **componentp)
       STAILQ_REMOVE(&component->pre_answer_reqs,r1,nr_ice_pre_answer_request_, entry);
       nr_ice_pre_answer_request_destroy(&r1);
     }
-
-    if(component->keepalive_timer)
-      NR_async_timer_cancel(component->keepalive_timer);
-    nr_stun_client_ctx_destroy(&component->keepalive_ctx);
 
     RFREE(component);
     return(0);
@@ -205,6 +208,11 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
     int i;
     int j;
     int r,_status;
+
+    if(ctx->flags & NR_ICE_CTX_FLAGS_ONLY_PROXY) {
+      /* No UDP support if we must use a proxy */
+      return 0;
+    }
 
     /* Now one ice_socket for each address */
     for(i=0;i<addr_ct;i++){
@@ -243,6 +251,15 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
           if(ctx->stun_servers[j].transport!=IPPROTO_UDP)
             continue;
 
+          if (ctx->stun_servers[j].type == NR_ICE_STUN_SERVER_TYPE_ADDR) {
+            if (nr_transport_addr_check_compatibility(
+                  &addrs[i].addr,
+                  &ctx->stun_servers[j].u.addr)) {
+              r_log(LOG_ICE,LOG_INFO,"ICE(%s): Skipping STUN server because of link local mis-match",ctx->label);
+              continue;
+            }
+          }
+
           /* Ensure id is set (nr_ice_ctx_set_stun_servers does not) */
           ctx->stun_servers[j].id = j;
           if(r=nr_ice_candidate_create(ctx,component,
@@ -272,6 +289,15 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         /* Skip non-UDP */
         if (ctx->turn_servers[j].turn_server.transport != IPPROTO_UDP)
           continue;
+
+        if (ctx->turn_servers[j].turn_server.type == NR_ICE_STUN_SERVER_TYPE_ADDR) {
+          if (nr_transport_addr_check_compatibility(
+                &addrs[i].addr,
+                &ctx->turn_servers[j].turn_server.u.addr)) {
+            r_log(LOG_ICE,LOG_INFO,"ICE(%s): Skipping TURN server because of link local mis-match",ctx->label);
+            continue;
+          }
+        }
 
         if (!(ctx->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY)) {
           /* Ensure id is set with a unique value */
@@ -428,8 +454,9 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
       if (r != R_NOT_FOUND)
         ABORT(r);
     }
-    if (ctx->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY) {
-      r_log(LOG_ICE,LOG_WARNING,"ICE(%s): relay only option results in ICE TCP being disabled",ctx->label);
+    if ((ctx->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY) ||
+        (ctx->flags & NR_ICE_CTX_FLAGS_ONLY_PROXY)) {
+      r_log(LOG_ICE,LOG_WARNING,"ICE(%s): relay/proxy only option results in ICE TCP being disabled",ctx->label);
       ice_tcp_disabled = 1;
     }
 
@@ -507,12 +534,18 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         if (ctx->turn_servers[j].turn_server.transport != IPPROTO_TCP)
           continue;
 
-        if (ctx->turn_servers[j].turn_server.type == NR_ICE_STUN_SERVER_TYPE_ADDR &&
-            nr_transport_addr_cmp(&ctx->turn_servers[j].turn_server.u.addr,
-                                  &addrs[i].addr,
-                                  NR_TRANSPORT_ADDR_CMP_MODE_VERSION)) {
-          r_log(LOG_ICE,LOG_INFO,"ICE(%s): Skipping TURN server because of IP version mis-match (%u - %u)",ctx->label,addrs[i].addr.ip_version,ctx->turn_servers[j].turn_server.u.addr.ip_version);
-          continue;
+        /* Create relay candidate */
+        if ((r=nr_transport_addr_copy(&addr, &addrs[i].addr)))
+          ABORT(r);
+        addr.protocol = IPPROTO_TCP;
+
+        if (ctx->turn_servers[j].turn_server.type == NR_ICE_STUN_SERVER_TYPE_ADDR) {
+          if (nr_transport_addr_check_compatibility(
+                &addr,
+                &ctx->turn_servers[j].turn_server.u.addr)) {
+            r_log(LOG_ICE,LOG_INFO,"ICE(%s): Skipping TURN server because of link local mis-match",ctx->label);
+            continue;
+          }
         }
 
         if (!ice_tcp_disabled) {
@@ -538,10 +571,13 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
           }
         }
 
-        /* Create relay candidate */
-        if ((r=nr_transport_addr_copy(&addr, &addrs[i].addr)))
-          ABORT(r);
-        addr.protocol = IPPROTO_TCP;
+        /* If we're going to use TLS, make sure that's recorded */
+        if (ctx->turn_servers[j].turn_server.tls) {
+          strncpy(addr.tls_host,
+                  ctx->turn_servers[j].turn_server.u.dnsname.host,
+                  sizeof(addr.tls_host) - 1);
+        }
+
         if ((r=nr_transport_addr_fmt_addr_string(&addr)))
           ABORT(r);
         /* Create a local socket */
@@ -692,7 +728,7 @@ int nr_ice_component_maybe_prune_candidate(nr_ice_ctx *ctx, nr_ice_component *co
          !nr_transport_addr_cmp(&c1->addr,&c2->addr,NR_TRANSPORT_ADDR_CMP_MODE_ALL)){
 
         if((c1->type == c2->type) ||
-           (!(ctx->flags & NR_ICE_CTX_FLAGS_ONLY_DEFAULT_ADDRS) &&
+           (!(ctx->flags & NR_ICE_CTX_FLAGS_HIDE_HOST_CANDIDATES) &&
             ((c1->type==HOST && c2->type == SERVER_REFLEXIVE) ||
              (c2->type==HOST && c1->type == SERVER_REFLEXIVE)))){
 
@@ -779,7 +815,7 @@ static int nr_ice_component_handle_triggered_check(nr_ice_component *comp, nr_ic
 
     _status=0;
   abort:
-    return(r);
+    return(_status);
   }
 
 /* Section 7.2.1 */
@@ -931,6 +967,11 @@ static int nr_ice_component_stun_server_cb(void *cb_arg,nr_stun_server_ctx *stun
     nr_transport_addr local_addr;
     int r,_status;
 
+    if(comp->state==NR_ICE_COMPONENT_FAILED) {
+      *error=400;
+      ABORT(R_REJECTED);
+    }
+
     /* Find the candidate pair that this maps to */
     if(r=nr_socket_getaddr(sock,&local_addr)) {
       *error=500;
@@ -991,12 +1032,9 @@ int nr_ice_component_can_candidate_tcptype_pair(nr_socket_tcp_type left, nr_sock
     return(1);
   }
 
-/* local vs. remote matters here because we allow private -> public pairing,
- * but discourage public -> private pairing. */
+/* filter out pairings which won't work. */
 int nr_ice_component_can_candidate_addr_pair(nr_transport_addr *local, nr_transport_addr *remote)
   {
-    int remote_range;
-
     if(local->ip_version != remote->ip_version)
       return(0);
     if(nr_transport_addr_is_link_local(local) !=
@@ -1006,10 +1044,6 @@ int nr_ice_component_can_candidate_addr_pair(nr_transport_addr *local, nr_transp
      * loopback with a host candidate. */
     if(nr_transport_addr_is_loopback(local) !=
        nr_transport_addr_is_loopback(remote))
-      return(0);
-    remote_range = nr_transport_addr_get_private_addr_range(remote);
-    if(remote_range && (nr_transport_addr_get_private_addr_range(local) !=
-       remote_range))
       return(0);
 
     return(1);
@@ -1090,6 +1124,12 @@ int nr_ice_component_pair_candidates(nr_ice_peer_ctx *pctx, nr_ice_component *lc
 
     /* Create the candidate pairs */
     lcand=TAILQ_FIRST(&lcomp->candidates);
+
+    if (!lcand) {
+      /* No local candidates, initialized or not! */
+      ABORT(R_FAILED);
+    }
+
     while(lcand){
       if (lcand->state == NR_ICE_CAND_STATE_INITIALIZED) {
         if ((r = nr_ice_component_pair_candidate(pctx, pcomp, lcand, 0)))
@@ -1130,6 +1170,41 @@ int nr_ice_component_pair_candidates(nr_ice_peer_ctx *pctx, nr_ice_component *lc
     return(_status);
   }
 
+int nr_ice_pre_answer_enqueue(nr_ice_component *comp, nr_socket *sock, nr_stun_server_request *req, int *dont_free)
+  {
+    int r = 0;
+    int _status;
+    nr_ice_pre_answer_request *r1, *r2;
+    nr_transport_addr dst_addr;
+    nr_ice_pre_answer_request *par = 0;
+
+    if (r=nr_socket_getaddr(sock, &dst_addr))
+      ABORT(r);
+
+    STAILQ_FOREACH_SAFE(r1, &comp->pre_answer_reqs, entry, r2) {
+      if (!nr_transport_addr_cmp(&r1->local_addr, &dst_addr,
+                                 NR_TRANSPORT_ADDR_CMP_MODE_ALL) &&
+          !nr_transport_addr_cmp(&r1->req.src_addr, &req->src_addr,
+                                 NR_TRANSPORT_ADDR_CMP_MODE_ALL)) {
+        return(0);
+      }
+    }
+
+    if (r=nr_ice_pre_answer_request_create(&dst_addr, req, &par))
+      ABORT(r);
+
+    r_log(LOG_ICE,LOG_DEBUG, "ICE(%s)/STREAM(%s)/COMP(%d): Enqueuing STUN request pre-answer from %s",
+          comp->ctx->label, comp->stream->label, comp->component_id,
+          req->src_addr.as_string);
+
+    *dont_free = 1;
+    STAILQ_INSERT_TAIL(&comp->pre_answer_reqs, par, entry);
+
+    _status=0;
+abort:
+    return(_status);
+  }
+
 /* Fires when we have an incoming candidate that doesn't correspond to an existing
    remote peer. This is either pre-answer or just spurious. Store it in the
    component for use when we see the actual answer, at which point we need
@@ -1139,18 +1214,272 @@ static int nr_ice_component_stun_server_default_cb(void *cb_arg,nr_stun_server_c
   {
     int r, _status;
     nr_ice_component *comp = (nr_ice_component *)cb_arg;
-    nr_ice_pre_answer_request *par = 0;
+
     r_log(LOG_ICE,LOG_DEBUG,"ICE(%s)/STREAM(%s)/COMP(%d): Received STUN request pre-answer from %s",
-          comp->ctx->label, comp->stream->label, comp->component_id, req->src_addr.as_string);
+          comp->ctx->label, comp->stream->label, comp->component_id,
+          req->src_addr.as_string);
 
-    if (r=nr_ice_pre_answer_request_create(sock, req, &par))
+    if (r=nr_ice_pre_answer_enqueue(comp, sock, req, dont_free)) {
+      r_log(LOG_ICE,LOG_ERR,"ICE(%s)/STREAM(%s)/COMP(%d): Failed (%d) to enque pre-answer request from %s",
+          comp->ctx->label, comp->stream->label, comp->component_id, r,
+          req->src_addr.as_string);
       ABORT(r);
-
-    *dont_free = 1;
-    STAILQ_INSERT_TAIL(&comp->pre_answer_reqs, par, entry);
+    }
 
     _status=0;
  abort:
+    return(_status);
+  }
+
+#define NR_ICE_CONSENT_TIMER_DEFAULT 5000
+#define NR_ICE_CONSENT_TIMEOUT_DEFAULT 30000
+
+static void nr_ice_component_consent_failed(nr_ice_component *comp)
+  {
+    if (!comp->can_send) {
+      return;
+    }
+
+    r_log(LOG_ICE,LOG_INFO,"ICE(%s)/STREAM(%s)/COMP(%d): Consent refresh failed",
+          comp->ctx->label, comp->stream->label, comp->component_id);
+    comp->can_send = 0;
+
+    if (comp->consent_timeout) {
+      NR_async_timer_cancel(comp->consent_timeout);
+      comp->consent_timeout = 0;
+    }
+    if (comp->consent_timer) {
+      NR_async_timer_cancel(comp->consent_timer);
+      comp->consent_timer = 0;
+    }
+    /* We are turning the consent failure into a ICE component failure to
+     * alert the browser via ICE connection state change about this event. */
+    if (nr_ice_media_stream_component_failed(comp->stream, comp))
+      r_log(LOG_ICE,LOG_ERR,"ICE(%s)/STREAM(%s)/COMP(%d): failed to mark component as failed",
+        comp->ctx->label, comp->stream->label, comp->component_id);
+  }
+
+static void nr_ice_component_consent_timeout_cb(NR_SOCKET s, int how, void *cb_arg)
+  {
+    nr_ice_component *comp=cb_arg;
+
+    comp->consent_timeout = 0;
+
+    r_log(LOG_ICE,LOG_WARNING,"ICE(%s)/STREAM(%s)/COMP(%d): Consent refresh final time out",
+          comp->ctx->label, comp->stream->label, comp->component_id);
+    nr_ice_component_consent_failed(comp);
+  }
+
+
+void nr_ice_component_disconnected(nr_ice_component *comp)
+  {
+    if (!comp->can_send) {
+      return;
+    }
+
+    if (comp->disconnected) {
+      return;
+    }
+
+    r_log(LOG_ICE,LOG_WARNING,"ICE(%s)/STREAM(%s)/COMP(%d): component disconnected",
+          comp->ctx->label, comp->stream->label, comp->component_id);
+    comp->disconnected = 1;
+
+    /* a single disconnected component disconnects the stream */
+    nr_ice_media_stream_set_disconnected(comp->stream, NR_ICE_MEDIA_STREAM_DISCONNECTED);
+  }
+
+static void nr_ice_component_consent_refreshed(nr_ice_component *comp)
+  {
+    uint16_t tval;
+
+    if (!comp->can_send) {
+      return;
+    }
+
+    gettimeofday(&comp->consent_last_seen, 0);
+    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s)/STREAM(%s)/COMP(%d): consent_last_seen is now %lu",
+        comp->ctx->label, comp->stream->label, comp->component_id,
+        comp->consent_last_seen.tv_sec);
+
+    comp->disconnected = 0;
+
+    nr_ice_media_stream_check_if_connected(comp->stream);
+
+    if (comp->consent_timeout)
+      NR_async_timer_cancel(comp->consent_timeout);
+
+    tval = NR_ICE_CONSENT_TIMEOUT_DEFAULT;
+    if (comp->ctx->test_timer_divider)
+      tval = tval / comp->ctx->test_timer_divider;
+
+    NR_ASYNC_TIMER_SET(tval, nr_ice_component_consent_timeout_cb, comp,
+                       &comp->consent_timeout);
+  }
+
+static void nr_ice_component_refresh_consent_cb(NR_SOCKET s, int how, void *cb_arg)
+  {
+    nr_ice_component *comp=cb_arg;
+
+    switch (comp->consent_ctx->state) {
+      case NR_STUN_CLIENT_STATE_FAILED:
+        if (comp->consent_ctx->error_code == 403) {
+          r_log(LOG_ICE, LOG_INFO, "ICE(%s)/STREAM(%s)/COMP(%d): Consent revoked by peer",
+                comp->ctx->label, comp->stream->label, comp->component_id);
+          nr_ice_component_consent_failed(comp);
+        }
+        break;
+      case NR_STUN_CLIENT_STATE_DONE:
+        r_log(LOG_ICE, LOG_INFO, "ICE(%s)/STREAM(%s)/COMP(%d): Consent refreshed",
+              comp->ctx->label, comp->stream->label, comp->component_id);
+        nr_ice_component_consent_refreshed(comp);
+        break;
+      case NR_STUN_CLIENT_STATE_TIMED_OUT:
+        r_log(LOG_ICE, LOG_INFO, "ICE(%s)/STREAM(%s)/COMP(%d): A single consent refresh request timed out",
+              comp->ctx->label, comp->stream->label, comp->component_id);
+        nr_ice_component_disconnected(comp);
+        break;
+      default:
+        break;
+    }
+  }
+
+int nr_ice_component_refresh_consent(nr_stun_client_ctx *ctx, NR_async_cb finished_cb, void *cb_arg)
+  {
+    int r,_status;
+
+    nr_stun_client_reset(ctx);
+
+    if (r=nr_stun_client_start(ctx, NR_ICE_CLIENT_MODE_BINDING_REQUEST, finished_cb, cb_arg))
+      ABORT(r);
+
+    _status=0;
+  abort:
+    return(_status);
+  }
+
+void nr_ice_component_consent_calc_consent_timer(nr_ice_component *comp)
+  {
+    uint16_t trange, trand, tval;
+
+    trange = NR_ICE_CONSENT_TIMER_DEFAULT * 20 / 100;
+    tval = NR_ICE_CONSENT_TIMER_DEFAULT - trange;
+    if (!nr_crypto_random_bytes((UCHAR*)&trand, sizeof(trand)))
+      tval += (trand % (trange * 2));
+
+    if (comp->ctx->test_timer_divider)
+      tval = tval / comp->ctx->test_timer_divider;
+
+    /* The timeout of the transaction is the maximum time until we send the
+     * next consent request. */
+    comp->consent_ctx->maximum_transmits_timeout_ms = tval;
+  }
+
+static void nr_ice_component_consent_timer_cb(NR_SOCKET s, int how, void *cb_arg)
+  {
+    nr_ice_component *comp=cb_arg;
+    int r;
+
+    if (!comp->consent_ctx) {
+      return;
+    }
+
+    if (comp->consent_timer) {
+      NR_async_timer_cancel(comp->consent_timer);
+    }
+    comp->consent_timer = 0;
+
+    comp->consent_ctx->params.ice_binding_request.username =
+      comp->stream->l2r_user;
+    comp->consent_ctx->params.ice_binding_request.password =
+      comp->stream->l2r_pass;
+    comp->consent_ctx->params.ice_binding_request.control =
+      comp->stream->pctx->controlling?
+      NR_ICE_CONTROLLING:NR_ICE_CONTROLLED;
+    comp->consent_ctx->params.ice_binding_request.tiebreaker =
+      comp->stream->pctx->tiebreaker;
+    comp->consent_ctx->params.ice_binding_request.priority =
+      comp->active->local->priority;
+
+    nr_ice_component_consent_calc_consent_timer(comp);
+
+    if (r=nr_ice_component_refresh_consent(comp->consent_ctx,
+                                           nr_ice_component_refresh_consent_cb,
+                                           comp)) {
+      r_log(LOG_ICE,LOG_ERR,"ICE(%s)/STREAM(%s)/COMP(%d): Refresh consent failed with %d",
+            comp->ctx->label, comp->stream->label, comp->component_id, r);
+    }
+
+    nr_ice_component_consent_schedule_consent_timer(comp);
+
+  }
+
+void nr_ice_component_consent_schedule_consent_timer(nr_ice_component *comp)
+  {
+    if (!comp->can_send) {
+      return;
+    }
+
+    NR_ASYNC_TIMER_SET(comp->consent_ctx->maximum_transmits_timeout_ms,
+                       nr_ice_component_consent_timer_cb, comp,
+                       &comp->consent_timer);
+  }
+
+void nr_ice_component_refresh_consent_now(nr_ice_component *comp)
+  {
+    nr_ice_component_consent_timer_cb(0, 0, comp);
+  }
+
+void nr_ice_component_consent_destroy(nr_ice_component *comp)
+  {
+    if (comp->consent_timer) {
+      NR_async_timer_cancel(comp->consent_timer);
+      comp->consent_timer = 0;
+    }
+    if (comp->consent_timeout) {
+      NR_async_timer_cancel(comp->consent_timeout);
+      comp->consent_timeout = 0;
+    }
+    if (comp->consent_handle) {
+      nr_ice_socket_deregister(comp->active->local->isock,
+                               comp->consent_handle);
+      comp->consent_handle = 0;
+    }
+    if (comp->consent_ctx) {
+      nr_stun_client_ctx_destroy(&comp->consent_ctx);
+      comp->consent_ctx = 0;
+    }
+  }
+
+int nr_ice_component_setup_consent(nr_ice_component *comp)
+  {
+    int r,_status;
+
+    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s)/STREAM(%s)/COMP(%d): Setting up refresh consent",
+          comp->ctx->label, comp->stream->label, comp->component_id);
+
+    nr_ice_component_consent_destroy(comp);
+
+    if (r=nr_stun_client_ctx_create("consent", comp->active->local->osock,
+                                    &comp->active->remote->addr, 0,
+                                    &comp->consent_ctx))
+      ABORT(r);
+    /* Consent request get send only once. */
+    comp->consent_ctx->maximum_transmits = 1;
+
+    if (r=nr_ice_socket_register_stun_client(comp->active->local->isock,
+            comp->consent_ctx, &comp->consent_handle))
+      ABORT(r);
+
+    comp->can_send = 1;
+    comp->disconnected = 0;
+    nr_ice_component_consent_refreshed(comp);
+
+    nr_ice_component_consent_calc_consent_timer(comp);
+    nr_ice_component_consent_schedule_consent_timer(comp);
+
+    _status=0;
+  abort:
     return(_status);
   }
 
@@ -1164,6 +1493,9 @@ int nr_ice_component_nominated_pair(nr_ice_component *comp, nr_ice_cand_pair *pa
       if(comp->nominated->priority >= pair->priority)
         return(0);
       r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/STREAM(%s)/COMP(%d)/CAND-PAIR(%s): replacing pair %s with CAND-PAIR(%s)",comp->stream->pctx->label,comp->stream->label,comp->component_id,comp->nominated->codeword,comp->nominated->as_string,pair->codeword);
+      /* As consent doesn't hold a reference to its isock this needs to happen
+       * before making the new pair the active one. */
+      nr_ice_component_consent_destroy(comp);
     }
 
     /* Set the new nominated pair */
@@ -1204,6 +1536,9 @@ int nr_ice_component_nominated_pair(nr_ice_component *comp, nr_ice_cand_pair *pa
       p2=TAILQ_NEXT(p2,check_queue_entry);
     }
     r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/COMP(%d): cancelling done",comp->stream->pctx->label,comp->stream->label,comp->component_id);
+
+    if(r=nr_ice_component_setup_consent(comp))
+      ABORT(r);
 
     if(r=nr_ice_media_stream_component_nominated(comp->stream,comp))
       ABORT(r);
@@ -1305,30 +1640,10 @@ int nr_ice_component_select_pair(nr_ice_peer_ctx *pctx, nr_ice_component *comp)
   }
 
 
-static void nr_ice_component_keepalive_cb(NR_SOCKET s, int how, void *cb_arg)
-  {
-    nr_ice_component *comp=cb_arg;
-    UINT4 keepalive_timeout;
-
-    assert(comp->keepalive_ctx);
-
-    if(NR_reg_get_uint4(NR_ICE_REG_KEEPALIVE_TIMER,&keepalive_timeout)){
-      keepalive_timeout=15000; /* Default */
-    }
-
-    if(comp->keepalive_needed)
-      nr_stun_client_force_retransmit(comp->keepalive_ctx);
-
-    comp->keepalive_needed=1;
-    NR_ASYNC_TIMER_SET(keepalive_timeout,nr_ice_component_keepalive_cb,cb_arg,&comp->keepalive_timer);
-  }
-
-
 /* Close the underlying sockets for everything but the nominated candidate */
 int nr_ice_component_finalize(nr_ice_component *lcomp, nr_ice_component *rcomp)
   {
     nr_ice_socket *isock=0;
-    int r,_status;
     nr_ice_socket *s1,*s2;
 
     if(rcomp->state==NR_ICE_COMPONENT_NOMINATED){
@@ -1343,19 +1658,7 @@ int nr_ice_component_finalize(nr_ice_component *lcomp, nr_ice_component *rcomp)
       }
     }
 
-    /* Set up the keepalives for the chosen socket */
-    if(r=nr_stun_client_ctx_create("keepalive",rcomp->nominated->local->osock,
-      &rcomp->nominated->remote->addr,0,&rcomp->keepalive_ctx))
-      ABORT(r);
-    if(r=nr_stun_client_start(rcomp->keepalive_ctx,NR_STUN_CLIENT_MODE_KEEPALIVE,0,0))
-      ABORT(r);
-    nr_ice_component_keepalive_cb(0,0,rcomp);
-
-
-    _status=0;
-  abort:
-
-    return(_status);
+    return(0);
   }
 
 

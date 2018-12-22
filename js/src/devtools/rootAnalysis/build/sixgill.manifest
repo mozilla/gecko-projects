@@ -1,10 +1,10 @@
 [
 {
-"hg_id" : "ec7b7d2442e8",
-"algorithm" : "sha512",
-"digest" : "49627d734df52cb9e7319733da5a6be1812b9373355dc300ee5600b431122570e00d380d50c7c5b5003c462c2c2cb022494b42c4ad00f8eba01c2259cbe6e502",
+"digest" : "2e56a3cf84764b8e63720e5f961cff7ba8ba5cf2f353dac55c69486489bcd89f53a757e09469a07700b80cd09f09666c2db4ce375b67060ac3be967714597231",
+"size" : 2629600,
+"hg_id" : "221d0d2eead9",
+"unpack" : true,
 "filename" : "sixgill.tar.xz",
-"size" : 2628868,
-"unpack" : true
+"algorithm" : "sha512"
 }
 ]

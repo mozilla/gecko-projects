@@ -10,7 +10,8 @@
 enum PermissionName {
   "geolocation",
   "notifications",
-  "push"
+  "push",
+  "persistent-storage"
   // Unsupported: "midi"
 };
 
@@ -18,14 +19,13 @@ dictionary PermissionDescriptor {
   required PermissionName name;
 };
 
-dictionary PushPermissionDescriptor : PermissionDescriptor {
-  boolean userVisible = false;
-};
+// We don't implement `PushPermissionDescriptor` because we use a background
+// message quota instead of `userVisibleOnly`.
 
 [Exposed=(Window)]
 interface Permissions {
   [Throws]
   Promise<PermissionStatus> query(object permission);
-  [Throws]
+  [Throws, Pref="dom.permissions.revoke.enable"]
   Promise<PermissionStatus> revoke(object permission);
 };

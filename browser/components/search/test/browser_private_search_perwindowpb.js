@@ -2,13 +2,14 @@
 // search in a private window, and then checks in the public window
 // whether there is an autocomplete entry for the private search.
 
-add_task(function* () {
-  // Don't use about:home as the homepage for new windows
-  Services.prefs.setIntPref("browser.startup.page", 0);
-  registerCleanupFunction(() => Services.prefs.clearUserPref("browser.startup.page"));
+add_task(async function test_setup() {
+  await gCUITestUtils.addSearchBar();
+  registerCleanupFunction(() => {
+    gCUITestUtils.removeSearchBar();
+  });
+});
 
-  let engineURL =
-    "http://mochi.test:8888/browser/browser/components/search/test/";
+add_task(async function() {
   let windowsToClose = [];
 
   function performSearch(aWin, aIsPrivate) {
@@ -24,22 +25,22 @@ add_task(function* () {
     return loadPromise;
   }
 
-  function* testOnWindow(aIsPrivate) {
-    let win = yield BrowserTestUtils.openNewBrowserWindow({ private: aIsPrivate });
-    yield SimpleTest.promiseFocus(win);
+  async function testOnWindow(aIsPrivate) {
+    let win = await BrowserTestUtils.openNewBrowserWindow({ private: aIsPrivate });
+    await SimpleTest.promiseFocus(win);
     windowsToClose.push(win);
     return win;
   }
 
-  yield promiseNewEngine("426329.xml", { iconURL: "data:image/x-icon,%00" });
+  await promiseNewEngine("426329.xml", { iconURL: "data:image/x-icon,%00" });
 
-  let newWindow = yield* testOnWindow(false);
-  yield performSearch(newWindow, false);
+  let newWindow = await testOnWindow(false);
+  await performSearch(newWindow, false);
 
-  newWindow = yield* testOnWindow(true);
-  yield performSearch(newWindow, true);
+  newWindow = await testOnWindow(true);
+  await performSearch(newWindow, true);
 
-  newWindow = yield* testOnWindow(false);
+  newWindow = await testOnWindow(false);
 
   let searchBar = newWindow.BrowserSearch.searchBar;
   searchBar.value = "p";
@@ -48,7 +49,7 @@ add_task(function* () {
   let popup = searchBar.textbox.popup;
   let popupPromise = BrowserTestUtils.waitForEvent(popup, "popupshown");
   searchBar.textbox.showHistoryPopup();
-  yield popupPromise;
+  await popupPromise;
 
   let entries = getMenuEntries(searchBar);
   for (let i = 0; i < entries.length; i++) {
@@ -65,14 +66,8 @@ add_task(function* () {
 });
 
 function getMenuEntries(searchBar) {
-  let entries = [];
-  let autocompleteMenu = searchBar.textbox.popup;
   // Could perhaps pull values directly from the controller, but it seems
-  // more reliable to test the values that are actually in the tree?
-  let column = autocompleteMenu.tree.columns[0];
-  let numRows = autocompleteMenu.tree.view.rowCount;
-  for (let i = 0; i < numRows; i++) {
-    entries.push(autocompleteMenu.tree.view.getValueAt(i, column));
-  }
-  return entries;
+  // more reliable to test the values that are actually in the richlistbox?
+  return Array.map(searchBar.textbox.popup.richlistbox.children,
+                   item => item.getAttribute("ac-value"));
 }

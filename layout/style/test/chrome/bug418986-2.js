@@ -4,6 +4,10 @@
 /* jshint loopfunc:true */
 /* global window, screen, ok, SpecialPowers, matchMedia */
 
+const is_chrome_window = window.location.protocol === "chrome:";
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
 // Expected values. Format: [name, pref_off_value, pref_on_value]
 // If pref_*_value is an array with two values, then we will match
 // any value in between those two values. If a value is null, then
@@ -37,7 +41,6 @@ var expected_values = [
 // These media queries return value 0 or 1 when the pref is off.
 // When the pref is on, they should not match.
 var suppressed_toggles = [
-  "-moz-images-in-menus",
   "-moz-mac-graphite-theme",
   // Not available on most OSs.
 //  "-moz-maemo-classic",
@@ -50,12 +53,18 @@ var suppressed_toggles = [
   "-moz-windows-compositor",
   "-moz-windows-default-theme",
   "-moz-windows-glass",
+  "-moz-gtk-csd-available",
+  "-moz-gtk-csd-minimize-button",
+  "-moz-gtk-csd-maximize-button",
+  "-moz-gtk-csd-close-button",
+];
+
+var toggles_enabled_in_content = [
+  "-moz-touch-enabled",
 ];
 
 // Possible values for '-moz-os-version'
 var windows_versions = [
-  "windows-xp",
-  "windows-vista",
   "windows-win7",
   "windows-win8",
   "windows-win10",
@@ -107,7 +116,7 @@ var testToggles = function (resisting) {
   suppressed_toggles.forEach(
     function (key) {
       var exists = keyValMatches(key, 0) || keyValMatches(key, 1);
-      if (resisting) {
+      if (resisting || (!toggles_enabled_in_content.includes(key) && !is_chrome_window)) {
          ok(!exists, key + " should not exist.");
       } else {
          ok(exists, key + " should exist.");
@@ -124,7 +133,7 @@ var testWindowsSpecific = function (resisting, queryName, possibleValues) {
       foundValue = val;
     }
   });
-  if (resisting) {
+  if (resisting || !is_chrome_window) {
     ok(!foundValue, queryName + " should have no match");
   } else {
     ok(foundValue, foundValue ? ("Match found: '" + queryName + ":" + foundValue + "'")
@@ -137,23 +146,37 @@ var testWindowsSpecific = function (resisting, queryName, possibleValues) {
 // `<div class='spoof' id='resolution'>resolution</div>`,
 // where each line corresponds to a different media query.
 var generateHtmlLines = function (resisting) {
-  let lines = "";
+  let fragment = document.createDocumentFragment();
   expected_values.forEach(
     function ([key, offVal, onVal]) {
       let val = resisting ? onVal : offVal;
       if (val) {
-        lines += "<div class='spoof' id='" + key + "'>" + key + "</div>\n";
+        let div = document.createElement("div");
+        div.setAttribute("class", "spoof");
+        div.setAttribute("id", key);
+        div.textContent = key;
+        fragment.appendChild(div);
       }
     });
   suppressed_toggles.forEach(
     function (key) {
-      lines += "<div class='suppress' id='" + key + "'>" + key + "</div>\n";
+      let div = document.createElement("div");
+      div.setAttribute("class", "suppress");
+      div.setAttribute("id", key);
+      div.textContent = key;
+      fragment.appendChild(div);
     });
   if (OS === "WINNT") {
-    lines += "<div class='windows' id='-moz-os-version'>-moz-os-version</div>";
-    lines += "<div class='windows' id='-moz-windows-theme'>-moz-windows-theme</div>";
+    let ids = ["-moz-os-version", "-moz-windows-theme"];
+    for (let id of ids) {
+      let div = document.createElement("div");
+      div.setAttribute("class", "windows");
+      div.setAttribute("id", id);
+      div.textContent = id;
+      fragment.appendChild(div);
+    }
   }
-  return lines;
+  return fragment;
 };
 
 // __cssLine__.
@@ -203,7 +226,11 @@ var generateCSSLines = function (resisting) {
   lines += ".suppress { background-color: " + (resisting ? "green" : "red") + ";}\n";
   suppressed_toggles.forEach(
     function (key) {
-      lines += suppressedMediaQueryCSSLine(key, resisting ? "red" : "green");
+      if (!toggles_enabled_in_content.includes(key) && !resisting && !is_chrome_window) {
+        lines += "#" + key + " { background-color: green; }\n";
+      } else {
+        lines += suppressedMediaQueryCSSLine(key, resisting ? "red" : "green");
+      }
     });
   if (OS === "WINNT") {
     lines += ".windows { background-color: " + (resisting ? "green" : "red") + ";}\n";
@@ -228,8 +255,8 @@ var green = (function () {
 // background color. If all media queries match as expected, then
 // all divs should have a green background color.
 var testCSS = function (resisting) {
-  document.getElementById("display").innerHTML = generateHtmlLines(resisting);
-  document.getElementById("test-css").innerHTML = generateCSSLines(resisting);
+  document.getElementById("display").appendChild(generateHtmlLines(resisting));
+  document.getElementById("test-css").textContent = generateCSSLines(resisting);
   let cssTestDivs = document.querySelectorAll(".spoof,.suppress");
   for (let div of cssTestDivs) {
     let color = window.getComputedStyle(div).backgroundColor;
@@ -259,23 +286,31 @@ var sleep = function (timeoutMs) {
 
 // __testMediaQueriesInPictureElements(resisting)__.
 // Test to see if media queries are properly spoofed in picture elements
-// when we are resisting fingerprinting. A generator function
-// to be used with SpawnTask.js.
-var testMediaQueriesInPictureElements = function* (resisting) {
-  let lines = "";
+// when we are resisting fingerprinting.
+var testMediaQueriesInPictureElements = async function(resisting) {
+  let picture = document.createElementNS(HTML_NS, "picture");
   for (let [key, offVal, onVal] of expected_values) {
     let expected = resisting ? onVal : offVal;
     if (expected) {
       let query = constructQuery(key, expected);
-      lines += "<picture>\n";
-      lines += " <source srcset='/tests/layout/style/test/chrome/match.png' media='" + query + "' />\n";
-      lines += " <img title='" + key + ":" + expected + "' class='testImage' src='/tests/layout/style/test/chrome/mismatch.png' alt='" + key + "' />\n";
-      lines += "</picture><br/>\n";
+
+      let source = document.createElementNS(HTML_NS, "source");
+      source.setAttribute("srcset", "/tests/layout/style/test/chrome/match.png");
+      source.setAttribute("media", query);
+
+      let image = document.createElementNS(HTML_NS, "img");
+      image.setAttribute("title", key + ":" + expected);
+      image.setAttribute("class", "testImage");
+      image.setAttribute("src", "/tests/layout/style/test/chrome/mismatch.png");
+      image.setAttribute("alt", key);
+
+      picture.appendChild(source);
+      picture.appendChild(image);
     }
   }
-  document.getElementById("pictures").innerHTML = lines;
+  document.getElementById("pictures").appendChild(picture);
   var testImages = document.getElementsByClassName("testImage");
-  yield sleep(0);
+  await sleep(0);
   for (let testImage of testImages) {
     ok(testImage.currentSrc.endsWith("/match.png"), "Media query '" + testImage.title + "' in picture should match.");
   }
@@ -291,11 +326,10 @@ var pushPref = function (key, value) {
 };
 
 // __test(isContent)__.
-// Run all tests. A generator function to be used
-// with SpawnTask.js.
-var test = function* (isContent) {
+// Run all tests.
+var test = async function(isContent) {
   for (prefValue of [false, true]) {
-    yield pushPref("privacy.resistFingerprinting", prefValue);
+    await pushPref("privacy.resistFingerprinting", prefValue);
     let resisting = prefValue && isContent;
     expected_values.forEach(
       function ([key, offVal, onVal]) {
@@ -310,6 +344,6 @@ var test = function* (isContent) {
     if (OS === "Darwin") {
       testOSXFontSmoothing(resisting);
     }
-    yield testMediaQueriesInPictureElements(resisting);
+    await testMediaQueriesInPictureElements(resisting);
   }
 };

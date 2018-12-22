@@ -10,6 +10,8 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Sprintf.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -25,6 +27,7 @@
 #define USE_LINUX_QUOTACTL
 #include <sys/mount.h>
 #include <sys/quota.h>
+#include <sys/sysmacros.h>
 #ifndef BLOCK_SIZE
 #define BLOCK_SIZE 1024 /* kernel block size */
 #endif
@@ -40,7 +43,6 @@
 #include "nsReadableUtils.h"
 #include "nsLocalFile.h"
 #include "nsIComponentManager.h"
-#include "nsXPIDLString.h"
 #include "prproces.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsISimpleEnumerator.h"
@@ -61,13 +63,9 @@ static nsresult MacErrorMapper(OSErr inErr);
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
 #include "nsIMIMEService.h"
 #include <linux/magic.h>
-#endif
-
-#ifdef MOZ_ENABLE_CONTENTACTION
-#include <contentaction/contentaction.h>
 #endif
 
 #include "nsNativeCharsetUtils.h"
@@ -77,21 +75,20 @@ static nsresult MacErrorMapper(OSErr inErr);
 using namespace mozilla;
 
 #define ENSURE_STAT_CACHE()                     \
-    PR_BEGIN_MACRO                              \
+    do {                                        \
         if (!FillStatCache())                   \
              return NSRESULT_FOR_ERRNO();       \
-    PR_END_MACRO
+    } while(0)
 
 #define CHECK_mPath()                           \
-    PR_BEGIN_MACRO                              \
+    do {                                        \
         if (mPath.IsEmpty())                    \
             return NS_ERROR_NOT_INITIALIZED;    \
-    PR_END_MACRO
+    } while(0)
 
 /* directory enumerator */
 class nsDirEnumeratorUnix final
-  : public nsISimpleEnumerator
-  , public nsIDirectoryEnumerator
+  : public nsIDirectoryEnumerator
 {
 public:
   nsDirEnumeratorUnix();
@@ -171,7 +168,7 @@ nsDirEnumeratorUnix::GetNext(nsISupports** aResult)
   if (NS_FAILED(rv)) {
     return rv;
   }
-  NS_IF_ADDREF(*aResult = file);
+  file.forget(aResult);
   return NS_OK;
 }
 
@@ -226,7 +223,14 @@ nsDirEnumeratorUnix::Close()
 }
 
 nsLocalFile::nsLocalFile()
+  : mCachedStat()
 {
+}
+
+nsLocalFile::nsLocalFile(const nsACString& aFilePath)
+  : mCachedStat()
+{
+  InitWithNativePath(aFilePath);
 }
 
 nsLocalFile::nsLocalFile(const nsLocalFile& aOther)
@@ -237,12 +241,10 @@ nsLocalFile::nsLocalFile(const nsLocalFile& aOther)
 #ifdef MOZ_WIDGET_COCOA
 NS_IMPL_ISUPPORTS(nsLocalFile,
                   nsILocalFileMac,
-                  nsILocalFile,
                   nsIFile,
                   nsIHashable)
 #else
 NS_IMPL_ISUPPORTS(nsLocalFile,
-                  nsILocalFile,
                   nsIFile,
                   nsIHashable)
 #endif
@@ -596,11 +598,26 @@ nsLocalFile::SetNativeLeafName(const nsACString& aLeafName)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsLocalFile::GetNativePath(nsACString& aResult)
+nsCString
+nsLocalFile::NativePath()
 {
-  aResult = mPath;
+  return mPath;
+}
+
+nsresult
+nsIFile::GetNativePath(nsACString& aResult)
+{
+  aResult = NativePath();
   return NS_OK;
+}
+
+nsCString
+nsIFile::HumanReadablePath()
+{
+  nsCString path;
+  DebugOnly<nsresult> rv = GetNativePath(path);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  return path;
 }
 
 nsresult
@@ -714,20 +731,13 @@ nsLocalFile::CopyDirectoryTo(nsIFile* aNewParent)
     }
   }
 
-  nsCOMPtr<nsISimpleEnumerator> dirIterator;
+  nsCOMPtr<nsIDirectoryEnumerator> dirIterator;
   if (NS_FAILED(rv = GetDirectoryEntries(getter_AddRefs(dirIterator)))) {
     return rv;
   }
 
-  bool hasMore = false;
-  while (dirIterator->HasMoreElements(&hasMore), hasMore) {
-    nsCOMPtr<nsISupports> supports;
-    nsCOMPtr<nsIFile> entry;
-    rv = dirIterator->GetNext(getter_AddRefs(supports));
-    entry = do_QueryInterface(supports);
-    if (NS_FAILED(rv) || !entry) {
-      continue;
-    }
+  nsCOMPtr<nsIFile> entry;
+  while (NS_SUCCEEDED(dirIterator->GetNextFile(getter_AddRefs(entry))) && entry) {
     if (NS_FAILED(rv = entry->IsSymlink(&isSymlink))) {
       return rv;
     }
@@ -826,7 +836,7 @@ nsLocalFile::CopyToNative(nsIFile* aNewParent, const nsACString& aNewName)
 #endif
 
     // actually create the file.
-    nsLocalFile* newFile = new nsLocalFile();
+    auto* newFile = new nsLocalFile();
     nsCOMPtr<nsIFile> fileRef(newFile); // release on exit
 
     rv = newFile->InitWithNativePath(newPathName);
@@ -960,13 +970,12 @@ nsLocalFile::CopyToNative(nsIFile* aNewParent, const nsACString& aNewName)
     if (bytesRead < 0) {
       if (saved_write_error != NS_OK) {
         return saved_write_error;
-      } else if (saved_read_error != NS_OK) {
+      }
+      if (saved_read_error != NS_OK) {
         return saved_read_error;
       }
 #if DEBUG
-      else {              // sanity check. Die and debug.
-        MOZ_ASSERT(0);
-      }
+      MOZ_ASSERT(0);
 #endif
     }
 
@@ -1039,7 +1048,7 @@ nsLocalFile::Remove(bool aRecursive)
   }
 
   if (aRecursive) {
-    nsDirEnumeratorUnix* dir = new nsDirEnumeratorUnix();
+    auto* dir = new nsDirEnumeratorUnix();
 
     nsCOMPtr<nsISimpleEnumerator> dirRef(dir); // release on exit
 
@@ -1049,7 +1058,7 @@ nsLocalFile::Remove(bool aRecursive)
     }
 
     bool more;
-    while (dir->HasMoreElements(&more), more) {
+    while (NS_SUCCEEDED(dir->HasMoreElements(&more)) && more) {
       nsCOMPtr<nsISupports> item;
       rv = dir->GetNext(getter_AddRefs(item));
       if (NS_FAILED(rv)) {
@@ -1286,7 +1295,8 @@ nsLocalFile::GetFileSizeOfLink(int64_t* aFileSize)
  * Fails when /proc/self/mountinfo or diven device don't exist.
  */
 static bool
-GetDeviceName(int aDeviceMajor, int aDeviceMinor, nsACString& aDeviceName)
+GetDeviceName(unsigned int aDeviceMajor, unsigned int aDeviceMinor,
+              nsACString& aDeviceName)
 {
   bool ret = false;
 
@@ -1296,7 +1306,7 @@ GetDeviceName(int aDeviceMajor, int aDeviceMinor, nsACString& aDeviceName)
   char mountinfoLine[kMountInfoLineLength];
   char deviceNum[kMountInfoLineLength];
 
-  snprintf(deviceNum, kMountInfoLineLength, "%d:%d", aDeviceMajor, aDeviceMinor);
+  SprintfLiteral(deviceNum, "%u:%u", aDeviceMajor, aDeviceMinor);
 
   FILE* f = fopen("/proc/self/mountinfo", "rt");
   if (!f) {
@@ -1436,10 +1446,8 @@ nsLocalFile::GetParent(nsIFile** aParent)
 
   // <brendan, after jband> I promise to play nice
   char* buffer = mPath.BeginWriting();
-  char* slashp = buffer;
-
   // find the last significant slash in buffer
-  slashp = strrchr(buffer, '/');
+  char* slashp = strrchr(buffer, '/');
   NS_ASSERTION(slashp, "non-canonical path?");
   if (!slashp) {
     return NS_ERROR_FILE_INVALID_PATH;
@@ -1558,8 +1566,8 @@ nsLocalFile::IsExecutable(bool* aResult)
       "jar"   // java application bundle
     };
     nsDependentSubstring ext = Substring(path, dotIdx + 1);
-    for (size_t i = 0; i < ArrayLength(executableExts); i++) {
-      if (ext.EqualsASCII(executableExts[i])) {
+    for (auto executableExt : executableExts) {
+      if (ext.EqualsASCII(executableExt)) {
         // Found a match.  Set result and quit.
         *aResult = true;
         return NS_OK;
@@ -1753,16 +1761,14 @@ nsLocalFile::GetNativeTarget(nsACString& aResult)
   }
 
   int32_t size = (int32_t)symStat.st_size;
-  char* target = (char*)moz_xmalloc(size + 1);
-  if (!target) {
+  nsAutoCString target;
+  if (!target.SetLength(size, mozilla::fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (readlink(mPath.get(), target, (size_t)size) < 0) {
-    free(target);
+  if (readlink(mPath.get(), target.BeginWriting(), (size_t)size) < 0) {
     return NSRESULT_FOR_ERRNO();
   }
-  target[size] = '\0';
 
   nsresult rv = NS_OK;
   nsCOMPtr<nsIFile> self(this);
@@ -1778,7 +1784,7 @@ nsLocalFile::GetNativeTarget(nsACString& aResult)
       if (NS_FAILED(rv = self->GetParent(getter_AddRefs(parent)))) {
         break;
       }
-      if (NS_FAILED(rv = parent->AppendRelativeNativePath(nsDependentCString(target)))) {
+      if (NS_FAILED(rv = parent->AppendRelativeNativePath(target))) {
         break;
       }
       if (NS_FAILED(rv = parent->GetNativePath(aResult))) {
@@ -1803,25 +1809,20 @@ nsLocalFile::GetNativeTarget(nsACString& aResult)
     }
 
     int32_t newSize = (int32_t)symStat.st_size;
-    if (newSize > size) {
-      char* newTarget = (char*)moz_xrealloc(target, newSize + 1);
-      if (!newTarget) {
-        rv = NS_ERROR_OUT_OF_MEMORY;
-        break;
-      }
-      target = newTarget;
-      size = newSize;
+    size = newSize;
+    nsAutoCString newTarget;
+    if (!newTarget.SetLength(size, mozilla::fallible)) {
+      rv = NS_ERROR_OUT_OF_MEMORY;
+      break;
     }
 
-    int32_t linkLen = readlink(flatRetval.get(), target, size);
+    int32_t linkLen = readlink(flatRetval.get(), newTarget.BeginWriting(), size);
     if (linkLen == -1) {
       rv = NSRESULT_FOR_ERRNO();
       break;
     }
-    target[linkLen] = '\0';
+    target = newTarget;
   }
-
-  free(target);
 
   if (NS_FAILED(rv)) {
     aResult.Truncate();
@@ -1843,7 +1844,7 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 }
 
 NS_IMETHODIMP
-nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator** aEntries)
+nsLocalFile::GetDirectoryEntriesImpl(nsIDirectoryEnumerator** aEntries)
 {
   RefPtr<nsDirEnumeratorUnix> dir = new nsDirEnumeratorUnix();
 
@@ -1915,7 +1916,7 @@ nsLocalFile::SetPersistentDescriptor(const nsACString& aPersistentDescriptor)
   AliasRecord aliasHeader = *(AliasPtr)decodedData;
   int32_t aliasSize = ::GetAliasSizeFromPtr(&aliasHeader);
   if (aliasSize > ((int32_t)dataSize * 3) / 4) { // be paranoid about having too few data
-    PR_Free(decodedData);
+    PR_Free(decodedData); // PL_Base64Decode() uses PR_Malloc().
     return NS_ERROR_FAILURE;
   }
 
@@ -1927,7 +1928,7 @@ nsLocalFile::SetPersistentDescriptor(const nsACString& aPersistentDescriptor)
   if (::PtrToHand(decodedData, &newHandle, aliasSize) != noErr) {
     rv = NS_ERROR_OUT_OF_MEMORY;
   }
-  PR_Free(decodedData);
+  PR_Free(decodedData); // PL_Base64Decode() uses PR_Malloc().
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1965,20 +1966,20 @@ nsLocalFile::Reveal()
 
   if (isDirectory) {
     return giovfs->ShowURIForInput(mPath);
-  } else if (NS_SUCCEEDED(giovfs->OrgFreedesktopFileManager1ShowItems(mPath))) {
-    return NS_OK;
-  } else {
-    nsCOMPtr<nsIFile> parentDir;
-    nsAutoCString dirPath;
-    if (NS_FAILED(GetParent(getter_AddRefs(parentDir)))) {
-      return NS_ERROR_FAILURE;
-    }
-    if (NS_FAILED(parentDir->GetNativePath(dirPath))) {
-      return NS_ERROR_FAILURE;
-    }
-
-    return giovfs->ShowURIForInput(dirPath);
   }
+  if (NS_SUCCEEDED(giovfs->OrgFreedesktopFileManager1ShowItems(mPath))) {
+    return NS_OK;
+  }
+  nsCOMPtr<nsIFile> parentDir;
+  nsAutoCString dirPath;
+  if (NS_FAILED(GetParent(getter_AddRefs(parentDir)))) {
+    return NS_ERROR_FAILURE;
+  }
+  if (NS_FAILED(parentDir->GetNativePath(dirPath))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return giovfs->ShowURIForInput(dirPath);
 #elif defined(MOZ_WIDGET_COCOA)
   CFURLRef url;
   if (NS_SUCCEEDED(GetCFURL(&url))) {
@@ -2002,17 +2003,6 @@ nsLocalFile::Launch()
   }
 
   return giovfs->ShowURIForInput(mPath);
-#elif defined(MOZ_ENABLE_CONTENTACTION)
-  QUrl uri = QUrl::fromLocalFile(QString::fromUtf8(mPath.get()));
-  ContentAction::Action action =
-    ContentAction::Action::defaultActionForFile(uri);
-
-  if (action.isValid()) {
-    action.trigger();
-    return NS_OK;
-  }
-
-  return NS_ERROR_FAILURE;
 #elif defined(MOZ_WIDGET_ANDROID)
   // Try to get a mimetype, if this fails just use the file uri alone
   nsresult rv;
@@ -2023,7 +2013,7 @@ nsLocalFile::Launch()
   }
 
   nsAutoCString fileUri = NS_LITERAL_CSTRING("file://") + mPath;
-  return widget::GeckoAppShell::OpenUriExternal(
+  return java::GeckoAppShell::OpenUriExternal(
     NS_ConvertUTF8toUTF16(fileUri),
     NS_ConvertUTF8toUTF16(type),
     EmptyString(),
@@ -2208,20 +2198,6 @@ NS_NewLocalFile(const nsAString& aPath, bool aFollowLinks, nsIFile** aResult)
     return rv;
   }
   return NS_NewNativeLocalFile(buf, aFollowLinks, aResult);
-}
-
-//-----------------------------------------------------------------------------
-// global init/shutdown
-//-----------------------------------------------------------------------------
-
-void
-nsLocalFile::GlobalInit()
-{
-}
-
-void
-nsLocalFile::GlobalShutdown()
-{
 }
 
 // nsILocalFileMac

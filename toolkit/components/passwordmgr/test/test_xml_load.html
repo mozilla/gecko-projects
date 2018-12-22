@@ -20,12 +20,9 @@ Login Manager test: XML prompt
 <script class="testbody" type="text/javascript">
 
 /** Test for Login Manager: XML prompts. **/
-var pwmgr, login1, login2;
+var login1, login2;
 
 function initLogins() {
-  pwmgr = SpecialPowers.Cc["@mozilla.org/login-manager;1"]
-                       .getService(Ci.nsILoginManager);
-
   login1 = SpecialPowers.Cc["@mozilla.org/login-manager/loginInfo;1"]
                         .createInstance(Ci.nsILoginInfo);
   login2 = SpecialPowers.Cc["@mozilla.org/login-manager/loginInfo;1"]
@@ -36,8 +33,8 @@ function initLogins() {
   login2.init("http://mochi.test:8888", null, "xml2",
                "xmluser2", "xmlpass2", "", "");
 
-  pwmgr.addLogin(login1);
-  pwmgr.addLogin(login2);
+  SpecialPowers.Services.logins.addLogin(login1);
+  SpecialPowers.Services.logins.addLogin(login2);
 }
 
 function handleDialog(doc, testNum) {
@@ -50,7 +47,7 @@ function handleDialog(doc, testNum) {
   var password = passfield.getAttribute("value");
   var dialog    = doc.getElementById("commonDialog");
 
-  switch(testNum) {
+  switch (testNum) {
     case 1:
         is(username, "xmluser1", "Checking provided username");
         is(password, "xmlpass1", "Checking provided password");
@@ -119,7 +116,7 @@ function xmlLoad(responseDoc) {
   var password = responseDoc.getElementById("pass").textContent;
   var authok = responseDoc.getElementById("ok").textContent;
 
-  switch(testNum) {
+  switch (testNum) {
     case 1:
         is(username, "xmluser1", "Checking provided username");
         is(password, "xmlpass1", "Checking provided password");
@@ -141,7 +138,7 @@ function xmlLoad(responseDoc) {
 }
 
 function doTest() {
-  switch(++testNum) {
+  switch (++testNum) {
     case 1:
         startCallbackTimer();
         makeRequest("authenticate.sjs?user=xmluser1&pass=xmlpass1&realm=xml");
@@ -167,7 +164,7 @@ function makeRequest(uri) {
   function documentLoaded(e) {
       xmlLoad(xmlDoc);
   }
-  xmlDoc.addEventListener("load", documentLoaded, false);
+  xmlDoc.addEventListener("load", documentLoaded);
   xmlDoc.load(uri);
 }
 
@@ -176,7 +173,7 @@ initLogins();
 
 // clear plain HTTP auth sessions before the test, to allow
 // running them more than once.
-var authMgr = SpecialPowers.Cc['@mozilla.org/network/http-auth-manager;1']
+var authMgr = SpecialPowers.Cc["@mozilla.org/network/http-auth-manager;1"]
                            .getService(SpecialPowers.Ci.nsIHttpAuthManager);
 authMgr.clearAll();
 

@@ -1,22 +1,18 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxCrashReporterUtils.h"
-
-#if defined(MOZ_CRASHREPORTER)
-#define MOZ_GFXFEATUREREPORTER 1
-#endif
-
-#ifdef MOZ_GFXFEATUREREPORTER
-#include "gfxCrashReporterUtils.h"
 #include <string.h>                     // for strcmp
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
 #include "mozilla/Services.h"           // for GetObserverService
 #include "mozilla/StaticMutex.h"
+#include "mozilla/SystemGroup.h"        // for SystemGroup
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "MainThreadUtils.h"            // for NS_IsMainThread
 #include "nsCOMPtr.h"                   // for nsCOMPtr
 #include "nsError.h"                    // for NS_OK, NS_FAILED, nsresult
 #include "nsExceptionHandler.h"         // for AppendAppNotesToCrashReport
@@ -27,7 +23,6 @@
 #include "nsIRunnable.h"                // for nsIRunnable
 #include "nsISupports.h"
 #include "nsTArray.h"                   // for nsTArray
-#include "nsThreadUtils.h"              // for NS_DispatchToMainThread, etc
 #include "nscore.h"                     // for NS_IMETHOD, NS_IMETHODIMP, etc
 
 namespace mozilla {
@@ -65,8 +60,9 @@ ObserverToDestroyFeaturesAlreadyReported::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
-class RegisterObserverRunnable : public nsRunnable {
+class RegisterObserverRunnable : public Runnable {
 public:
+  RegisterObserverRunnable() : Runnable("RegisterObserverRunnable") {}
   NS_IMETHOD Run() override {
     // LeakLog made me do this. Basically, I just wanted gFeaturesAlreadyReported to be a static nsTArray<nsCString>,
     // and LeakLog was complaining about leaks like this:
@@ -83,10 +79,11 @@ public:
   }
 };
 
-class AppendAppNotesRunnable : public nsCancelableRunnable {
+class AppendAppNotesRunnable : public CancelableRunnable {
 public:
   explicit AppendAppNotesRunnable(const nsACString& aFeatureStr)
-    : mFeatureString(aFeatureStr)
+    : CancelableRunnable("AppendAppNotesRunnable")
+    , mFeatureString(aFeatureStr)
   {
   }
 
@@ -100,20 +97,27 @@ private:
 };
 
 void
-ScopedGfxFeatureReporter::WriteAppNote(char statusChar)
+ScopedGfxFeatureReporter::WriteAppNote(char statusChar, int32_t statusNumber)
 {
   StaticMutexAutoLock al(gFeaturesAlreadyReportedMutex);
 
   if (!gFeaturesAlreadyReported) {
     gFeaturesAlreadyReported = new nsTArray<nsCString>;
     nsCOMPtr<nsIRunnable> r = new RegisterObserverRunnable();
-    NS_DispatchToMainThread(r);
+    SystemGroup::Dispatch(TaskCategory::Other, r.forget());
   }
 
   nsAutoCString featureString;
-  featureString.AppendPrintf("%s%c ",
-                             mFeature,
-                             statusChar);
+  if (statusNumber == 0) {
+    featureString.AppendPrintf("%s%c ",
+                               mFeature,
+                               statusChar);
+  } else {
+    featureString.AppendPrintf("%s%c%d ",
+                               mFeature,
+                               statusChar,
+                               statusNumber);
+  }
 
   if (!gFeaturesAlreadyReported->Contains(featureString)) {
     gFeaturesAlreadyReported->AppendElement(featureString);
@@ -128,18 +132,8 @@ ScopedGfxFeatureReporter::AppNote(const nsACString& aMessage)
     CrashReporter::AppendAppNotesToCrashReport(aMessage);
   } else {
     nsCOMPtr<nsIRunnable> r = new AppendAppNotesRunnable(aMessage);
-    NS_DispatchToMainThread(r);
+    SystemGroup::Dispatch(TaskCategory::Other, r.forget());
   }
 }
   
 } // end namespace mozilla
-
-#else
-
-namespace mozilla {
-void ScopedGfxFeatureReporter::WriteAppNote(char) {}
-void ScopedGfxFeatureReporter::AppNote(const nsACString&) {}
-  
-} // namespace mozilla
-
-#endif

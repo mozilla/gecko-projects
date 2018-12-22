@@ -1,28 +1,35 @@
-/* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* eslint no-unused-vars: [2, {"vars": "local"}] */
+
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://testing-common/Assert.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var { Assert } = require("resource://testing-common/Assert.jsm");
 var { gDevTools } = require("devtools/client/framework/devtools");
-var { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
+var { BrowserLoader } = ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
 var promise = require("promise");
+var defer = require("devtools/shared/defer");
 var Services = require("Services");
 var { DebuggerServer } = require("devtools/server/main");
-var { DebuggerClient } = require("devtools/shared/client/main");
+var { DebuggerClient } = require("devtools/shared/client/debugger-client");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { TargetFactory } = require("devtools/client/framework/target");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 
-DevToolsUtils.testing = true;
 var { require: browserRequire } = BrowserLoader({
   baseURI: "resource://devtools/client/shared/",
-  window: this
+  window
 });
+
+const React = browserRequire("devtools/client/shared/vendor/react");
+const ReactDOM = browserRequire("devtools/client/shared/vendor/react-dom");
+const dom = browserRequire("devtools/client/shared/vendor/react-dom-factories");
+const TestUtils = browserRequire("devtools/client/shared/vendor/react-dom-test-utils");
+
+const ShallowRenderer =
+  browserRequire("devtools/client/shared/vendor/react-test-renderer-shallow");
 
 var EXAMPLE_URL = "http://example.com/browser/browser/devtools/shared/test/";
 
@@ -41,15 +48,9 @@ function onNextAnimationFrame(fn) {
 }
 
 function setState(component, newState) {
-  var deferred = promise.defer();
-  component.setState(newState, onNextAnimationFrame(deferred.resolve));
-  return deferred.promise;
-}
-
-function setProps(component, newState) {
-  var deferred = promise.defer();
-  component.setProps(newState, onNextAnimationFrame(deferred.resolve));
-  return deferred.promise;
+  return new Promise(resolve => {
+    component.setState(newState, onNextAnimationFrame(resolve));
+  });
 }
 
 function dumpn(msg) {
@@ -63,7 +64,7 @@ function dumpn(msg) {
 var TEST_TREE_INTERFACE = {
   getParent: x => TEST_TREE.parent[x],
   getChildren: x => TEST_TREE.children[x],
-  renderItem: (x, depth, focused, arrow) => "-".repeat(depth) + x + ":" + focused + "\n",
+  renderItem: (x, depth, focused) => "-".repeat(depth) + x + ":" + focused + "\n",
   getRoots: () => ["A", "M"],
   getKey: x => "key-" + x,
   itemHeight: 1,
@@ -77,6 +78,25 @@ function isRenderedTree(actual, expectedDescription, msg) {
   dumpn(`Expected tree:\n${expected}`);
   dumpn(`Actual tree:\n${actual}`);
   is(actual, expected, msg);
+}
+
+function isAccessibleTree(tree, options = {}) {
+  const treeNode = tree.refs.tree;
+  is(treeNode.getAttribute("tabindex"), "0", "Tab index is set");
+  is(treeNode.getAttribute("role"), "tree", "Tree semantics is present");
+  if (options.hasActiveDescendant) {
+    ok(treeNode.hasAttribute("aria-activedescendant"),
+       "Tree has an active descendant set");
+  }
+
+  const treeNodes = [...treeNode.querySelectorAll(".tree-node")];
+  for (const node of treeNodes) {
+    ok(node.id, "TreeNode has an id");
+    is(node.getAttribute("role"), "treeitem", "Tree item semantics is present");
+    is(parseInt(node.getAttribute("aria-level"), 10),
+       parseInt(node.getAttribute("data-depth"), 10) + 1,
+       "Aria level attribute is set correctly");
+  }
 }
 
 // Encoding of the following tree/forest:
@@ -137,30 +157,80 @@ var TEST_TREE = {
 /**
  * Frame
  */
-function checkFrameString({ frame, file, line, column, shouldLink, tooltip }) {
-  let el = frame.getDOMNode();
-  let $ = selector => el.querySelector(selector);
+function checkFrameString({
+  el, file, line, column, source, functionName, shouldLink, tooltip
+}) {
+  const $ = selector => el.querySelector(selector);
 
-  let $source = $(".frame-link-source");
-  let $filename = $(".frame-link-filename");
-  let $line = $(".frame-link-line");
-  let $column = $(".frame-link-column");
+  const $func = $(".frame-link-function-display-name");
+  const $source = $(".frame-link-source");
+  const $sourceInner = $(".frame-link-source-inner");
+  const $filename = $(".frame-link-filename");
+  const $line = $(".frame-link-line");
 
   is($filename.textContent, file, "Correct filename");
   is(el.getAttribute("data-line"), line ? `${line}` : null, "Expected `data-line` found");
-  is(el.getAttribute("data-column"), column ? `${column}` : null, "Expected `data-column` found");
-  is($source.getAttribute("title"), tooltip, "Correct tooltip");
+  is(el.getAttribute("data-column"),
+     column ? `${column}` : null, "Expected `data-column` found");
+  is($sourceInner.getAttribute("title"), tooltip, "Correct tooltip");
   is($source.tagName, shouldLink ? "A" : "SPAN", "Correct linkable status");
+  if (shouldLink) {
+    is($source.getAttribute("href"), source, "Correct source");
+  }
 
   if (line != null) {
-    is(+$line.textContent, +line);
+    let lineText = `:${line}`;
+    if (column != null) {
+      lineText += `:${column}`;
+    }
+
+    is($line.textContent, lineText, "Correct line number");
   } else {
     ok(!$line, "Should not have an element for `line`");
   }
 
-  if (column != null) {
-    is(+$column.textContent, +column);
+  if (functionName != null) {
+    is($func.textContent, functionName, "Correct function name");
   } else {
-    ok(!$column, "Should not have an element for `column`");
+    ok(!$func, "Should not have an element for `functionName`");
   }
+}
+
+function renderComponent(component, props) {
+  const el = React.createElement(component, props, {});
+  // By default, renderIntoDocument() won't work for stateless components, but
+  // it will work if the stateless component is wrapped in a stateful one.
+  // See https://github.com/facebook/react/issues/4839
+  const wrappedEl = dom.span({}, [el]);
+  const renderedComponent = TestUtils.renderIntoDocument(wrappedEl);
+  return ReactDOM.findDOMNode(renderedComponent).children[0];
+}
+
+function shallowRenderComponent(component, props) {
+  const el = React.createElement(component, props);
+  const renderer = new ShallowRenderer();
+  renderer.render(el, {});
+  return renderer.getRenderOutput();
+}
+
+/**
+ * Creates a React Component for testing
+ *
+ * @param {string} factory - factory object of the component to be created
+ * @param {object} props - React props for the component
+ * @returns {object} - container Node, Object with React component
+ * and querySelector function with $ as name.
+ */
+async function createComponentTest(factory, props) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  const component = ReactDOM.render(factory(props), container);
+  await forceRender(component);
+
+  return {
+    container,
+    component,
+    $: (s) => container.querySelector(s),
+  };
 }

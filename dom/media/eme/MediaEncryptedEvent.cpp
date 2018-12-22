@@ -31,7 +31,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaEncryptedEvent, Event)
   mozilla::DropJSObjects(this);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaEncryptedEvent)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaEncryptedEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
 
 MediaEncryptedEvent::MediaEncryptedEvent(EventTarget* aOwner)
@@ -49,14 +49,14 @@ MediaEncryptedEvent::~MediaEncryptedEvent()
 JSObject*
 MediaEncryptedEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaEncryptedEventBinding::Wrap(aCx, this, aGivenProto);
+  return MediaEncryptedEvent_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<MediaEncryptedEvent>
 MediaEncryptedEvent::Constructor(EventTarget* aOwner)
 {
   RefPtr<MediaEncryptedEvent> e = new MediaEncryptedEvent(aOwner);
-  e->InitEvent(NS_LITERAL_STRING("encrypted"), false, false);
+  e->InitEvent(NS_LITERAL_STRING("encrypted"), CanBubble::eNo, Cancelable::eNo);
   e->SetTrusted(true);
   return e.forget();
 }
@@ -67,7 +67,7 @@ MediaEncryptedEvent::Constructor(EventTarget* aOwner,
                                  const nsTArray<uint8_t>& aInitData)
 {
   RefPtr<MediaEncryptedEvent> e = new MediaEncryptedEvent(aOwner);
-  e->InitEvent(NS_LITERAL_STRING("encrypted"), false, false);
+  e->InitEvent(NS_LITERAL_STRING("encrypted"), CanBubble::eNo, Cancelable::eNo);
   e->mInitDataType = aInitDataType;
   e->mRawInitData = aInitData;
   e->SetTrusted(true);
@@ -121,9 +121,6 @@ MediaEncryptedEvent::GetInitData(JSContext* cx,
       return;
     }
     mRawInitData.Clear();
-  }
-  if (mInitData) {
-    JS::ExposeObjectToActiveJS(mInitData);
   }
   aData.set(mInitData);
 }

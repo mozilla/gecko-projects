@@ -55,7 +55,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGLengthList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGLengthList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGLengthList)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
@@ -72,7 +71,7 @@ NS_INTERFACE_MAP_END
 JSObject*
 DOMSVGLengthList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::SVGLengthListBinding::Wrap(cx, this, aGivenProto);
+  return mozilla::dom::SVGLengthList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------

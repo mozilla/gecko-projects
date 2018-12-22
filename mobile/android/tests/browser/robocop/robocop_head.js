@@ -13,8 +13,8 @@
 // placebo for compat. An easy way to differentiate this from the real thing
 // is whether the property is read-only or not.
 {
-  let c = Object.getOwnPropertyDescriptor(this, 'Components');
-  if ((!c.value || c.writable) && typeof SpecialPowers === 'object')
+  let c = Object.getOwnPropertyDescriptor(this, "Components");
+  if ((!c || !c.value || c.writable) && typeof SpecialPowers === "object")
     Components = SpecialPowers.wrap(SpecialPowers.Components);
 }
 
@@ -23,6 +23,10 @@
  * See http://developer.mozilla.org/en/docs/Writing_xpcshell-based_unit_tests
  * for more information.
  */
+
+/* eslint-disable mozilla/use-cc-etc */
+/* eslint-disable mozilla/use-chromeutils-import */
+/* eslint-disable mozilla/use-services */
 
 var _quit = false;
 var _tests_pending = 0;
@@ -38,7 +42,7 @@ function _dump(str) {
 // not connected to a network.
 {
   let ios = Components.classes["@mozilla.org/network/io-service;1"]
-             .getService(Components.interfaces.nsIIOService2);
+                      .getService(Components.interfaces.nsIIOService);
   ios.manageOfflineStatus = false;
   ios.offline = false;
 }
@@ -49,8 +53,7 @@ try {
   runningInParent = Components.classes["@mozilla.org/xre/runtime;1"].
                     getService(Components.interfaces.nsIXULRuntime).processType
                     == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
-}
-catch (e) { }
+} catch (e) { }
 
 try {
   if (runningInParent) {
@@ -66,8 +69,7 @@ try {
       prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
     }
   }
-}
-catch (e) { }
+} catch (e) { }
 
 // Enable crash reporting, if possible
 // We rely on the Python harness to set MOZ_CRASHREPORTER_NO_REPORT
@@ -85,8 +87,7 @@ try { // nsIXULRuntime is not available in some configurations.
     crashReporter.enabled = true;
     crashReporter.minidumpPath = do_get_cwd();
   }
-}
-catch (e) { }
+} catch (e) { }
 
 /**
  * Date.now() is not necessarily monotonically increasing (insert sob story
@@ -170,7 +171,7 @@ function _dump_exception_stack(stack) {
   });
 }
 
-/************** Functions to be used from the tests **************/
+/** ************ Functions to be used from the tests **************/
 
 /**
  * Prints a message to the output log.
@@ -199,7 +200,7 @@ function do_execute_soon(callback) {
   var tm = Components.classes["@mozilla.org/thread-manager;1"]
                      .getService(Components.interfaces.nsIThreadManager);
 
-  tm.mainThread.dispatch({
+  tm.dispatchToMainThread({
     run: function() {
       try {
         callback();
@@ -214,18 +215,16 @@ function do_execute_soon(callback) {
           if (e.stack) {
             dump(" - See following stack:\n");
             _dump_exception_stack(e.stack);
-          }
-          else {
+          } else {
             dump("\n");
           }
           _do_quit();
         }
-      }
-      finally {
+      } finally {
         do_test_finished();
       }
     }
-  }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
+  });
 }
 
 function do_throw(text, stack) {
@@ -291,16 +290,14 @@ function _do_check_neq(left, right, stack, todo) {
       do_throw(text, stack);
     } else {
       _dump("TEST-KNOWN-FAIL | " + stack.filename + " | [" + stack.name +
-            " : " + stack.lineNumber + "] " + text +"\n");
+            " : " + stack.lineNumber + "] " + text + "\n");
     }
-  } else {
-    if (!todo) {
+  } else if (!todo) {
       _dump("TEST-PASS | " + stack.filename + " | [" + stack.name + " : " +
             stack.lineNumber + "] " + text + "\n");
     } else {
       do_throw_todo(text, stack);
     }
-  }
 }
 
 function do_check_neq(left, right, stack) {
@@ -325,14 +322,12 @@ function do_report_result(passed, text, stack, todo) {
       _dump("TEST-PASS | " + stack.filename + " | [" + stack.name + " : " +
             stack.lineNumber + "] " + text + "\n");
     }
-  } else {
-    if (todo) {
+  } else if (todo) {
       _dump("TEST-KNOWN-FAIL | " + stack.filename + " | [" + stack.name +
-            " : " + stack.lineNumber + "] " + text +"\n");
+            " : " + stack.lineNumber + "] " + text + "\n");
     } else {
       do_throw(text, stack);
     }
-  }
 }
 
 /**
@@ -400,11 +395,11 @@ function todo_check_false(condition, stack) {
   todo_check_eq(condition, false, stack);
 }
 
-function do_check_null(condition, stack=Components.stack.caller) {
+function do_check_null(condition, stack = Components.stack.caller) {
   do_check_eq(condition, null, stack);
 }
 
-function todo_check_null(condition, stack=Components.stack.caller) {
+function todo_check_null(condition, stack = Components.stack.caller) {
   todo_check_eq(condition, null, stack);
 }
 
@@ -475,10 +470,10 @@ function todo_check_null(condition, stack=Components.stack.caller) {
  * is ideal. If you do want to be more careful, you can use function
  * patterns to implement more stringent checks.
  */
-function do_check_matches(pattern, value, stack=Components.stack.caller, todo=false) {
+function do_check_matches(pattern, value, stack = Components.stack.caller, todo = false) {
   var matcher = pattern_matcher(pattern);
   var text = "VALUE: " + uneval(value) + "\nPATTERN: " + uneval(pattern) + "\n";
-  var diagnosis = []
+  var diagnosis = [];
   if (matcher(value, diagnosis)) {
     do_report_result(true, "value matches pattern:\n" + text, stack, todo);
   } else {
@@ -490,7 +485,7 @@ function do_check_matches(pattern, value, stack=Components.stack.caller, todo=fa
   }
 }
 
-function todo_check_matches(pattern, value, stack=Components.stack.caller) {
+function todo_check_matches(pattern, value, stack = Components.stack.caller) {
   do_check_matches(pattern, value, stack, true);
 }
 
@@ -518,38 +513,38 @@ function pattern_matcher(pattern) {
     }
     // Kludge: include 'length', if not enumerable. (If it is enumerable,
     // we picked it up in the array comprehension, above.
-    ld = Object.getOwnPropertyDescriptor(pattern, 'length');
+    ld = Object.getOwnPropertyDescriptor(pattern, "length");
     if (ld && !ld.enumerable) {
-      matchers.push(['length', pattern_matcher(pattern.length)])
+      matchers.push(["length", pattern_matcher(pattern.length)]);
     }
-    return function (value, diagnosis) {
+    return function(value, diagnosis) {
       if (!(value && typeof value == "object")) {
         return explain(diagnosis, "value not object");
       }
       for (let [p, m] of matchers) {
         var element_diagnosis = [];
         if (!(p in value && m(value[p], element_diagnosis))) {
-          return explain(diagnosis, { property:p,
-                                      diagnosis:element_diagnosis[0] });
+          return explain(diagnosis, { property: p,
+                                      diagnosis: element_diagnosis[0] });
         }
       }
       return true;
     };
   } else if (pattern === undefined) {
     return function(value) { return true; };
-  } else {
-    return function (value, diagnosis) {
+  }
+    return function(value, diagnosis) {
       if (value !== pattern) {
         return explain(diagnosis, "pattern " + uneval(pattern) + " not === to value " + uneval(value));
       }
       return true;
     };
-  }
+
 }
 
 // Format an explanation for a pattern match failure, as stored in the
 // second argument to a matching function.
-function format_pattern_match_failure(diagnosis, indent="") {
+function format_pattern_match_failure(diagnosis, indent = "") {
   var a;
   if (!diagnosis) {
     a = "Matcher did not explain reason for mismatch.";
@@ -583,7 +578,7 @@ function do_get_file(path, allowNonexistent) {
   try {
     let lf = Components.classes["@mozilla.org/file/directory_service;1"]
       .getService(Components.interfaces.nsIProperties)
-      .get("CurWorkD", Components.interfaces.nsILocalFile);
+      .get("CurWorkD", Components.interfaces.nsIFile);
 
     let bits = path.split("/");
     for (let i = 0; i < bits.length; i++) {
@@ -604,8 +599,7 @@ function do_get_file(path, allowNonexistent) {
     }
 
     return lf;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw(ex.toString(), Components.stack.caller);
   }
 
@@ -622,43 +616,6 @@ function do_load_manifest(path) {
   const nsIComponentRegistrar = Components.interfaces.nsIComponentRegistrar;
   do_check_true(Components.manager instanceof nsIComponentRegistrar);
   Components.manager.autoRegister(lf);
-}
-
-/**
- * Parse a DOM document.
- *
- * @param aPath File path to the document.
- * @param aType Content type to use in DOMParser.
- *
- * @return nsIDOMDocument from the file.
- */
-function do_parse_document(aPath, aType) {
-  switch (aType) {
-    case "application/xhtml+xml":
-    case "application/xml":
-    case "text/xml":
-      break;
-
-    default:
-      do_throw("type: expected application/xhtml+xml, application/xml or text/xml," +
-                 " got '" + aType + "'",
-               Components.stack.caller);
-  }
-
-  var lf = do_get_file(aPath);
-  const C_i = Components.interfaces;
-  const parserClass = "@mozilla.org/xmlextras/domparser;1";
-  const streamClass = "@mozilla.org/network/file-input-stream;1";
-  var stream = Components.classes[streamClass]
-                         .createInstance(C_i.nsIFileInputStream);
-  stream.init(lf, -1, -1, C_i.nsIFileInputStream.CLOSE_ON_EOF);
-  var parser = Components.classes[parserClass]
-                         .createInstance(C_i.nsIDOMParser);
-  var doc = parser.parseFromStream(stream, null, lf.fileSize, aType);
-  parser = null;
-  stream = null;
-  lf = null;
-  return doc;
 }
 
 /**
@@ -722,7 +679,7 @@ var _Task;
  *
  * Example usage:
  *
- * add_task(function test() {
+ * add_task(function* test() {
  *   let result = yield Promise.resolve(true);
  *
  *   do_check_true(result);
@@ -731,7 +688,7 @@ var _Task;
  *   do_check_eq(secondary, "expected value");
  * });
  *
- * add_task(function test_early_return() {
+ * add_task(function* test_early_return() {
  *   let result = yield somethingThatReturnsAPromise();
  *
  *   if (!result) {
@@ -756,10 +713,8 @@ function add_task(func) {
  */
 var _gRunningTest = null;
 var _gTestIndex = 0; // The index of the currently running test.
-function run_next_test()
-{
-  function _run_next_test()
-  {
+function run_next_test() {
+  function _run_next_test() {
     if (_gTestIndex < _gTests.length) {
       do_test_pending();
       let _isTask;
@@ -805,33 +760,45 @@ function run_next_test()
 function JavaBridge(obj) {
 
   this._EVENT_TYPE = "Robocop:JS";
+  this._JAVA_EVENT_TYPE = "Robocop:Java";
   this._target = obj;
   // The number of replies needed to answer all outstanding sync calls.
   this._repliesNeeded = 0;
-  this._Services.obs.addObserver(this, this._EVENT_TYPE, false);
+  this._EventDispatcher.registerListener(this, this._EVENT_TYPE);
 
   this._sendMessage("notify-loaded", []);
-};
+}
 
 JavaBridge.prototype = {
 
   _Services: Components.utils.import(
     "resource://gre/modules/Services.jsm", {}).Services,
 
-  _sendMessageToJava: Components.utils.import(
-    "resource://gre/modules/Messaging.jsm", {}).Messaging.sendRequest,
+  _EventDispatcher: Components.utils.import(
+    "resource://gre/modules/Messaging.jsm", {}).EventDispatcher.instance,
 
-  _sendMessage: function (innerType, args) {
-    this._sendMessageToJava({
-      type: this._EVENT_TYPE,
+  _getArgs: function(args) {
+    let out = {
+      length: Math.max(0, args.length - 1),
+    };
+    for (let i = 1; i < args.length; i++) {
+      out[i - 1] = args[i];
+    }
+    return out;
+  },
+
+  _sendMessage: function(innerType, args) {
+    this._EventDispatcher.dispatch(this._JAVA_EVENT_TYPE, {
       innerType: innerType,
       method: args[0],
-      args: Array.prototype.slice.call(args, 1),
+      args: this._getArgs(args),
     });
   },
 
-  observe: function(subject, topic, data) {
-    let message = JSON.parse(data);
+  onEvent: function(event, message, callback) {
+    if (typeof SpecialPowers === "object") {
+      message = SpecialPowers.wrap(message);
+    }
     if (message.innerType === "sync-reply") {
       // Reply to our Javascript-to-Java sync call
       this._repliesNeeded--;
@@ -853,7 +820,7 @@ JavaBridge.prototype = {
    * Synchronously call a method in Java,
    * given the method name followed by a list of arguments.
    */
-  syncCall: function (methodName /*, ... */) {
+  syncCall: function(methodName /* , ... */) {
     this._sendMessage("sync-call", arguments);
     let thread = this._Services.tm.currentThread;
     let initialReplies = this._repliesNeeded;
@@ -863,23 +830,21 @@ JavaBridge.prototype = {
     // spin the event loop, but here we're in a test and our API
     // specifies a synchronous call, so we spin the loop to wait for
     // the call to finish.
-    while (this._repliesNeeded > initialReplies) {
-      thread.processNextEvent(true);
-    }
+    this._Services.tm.spinEventLoopUntil(() => this._repliesNeeded <= initialReplies);
   },
 
   /**
    * Asynchronously call a method in Java,
    * given the method name followed by a list of arguments.
    */
-  asyncCall: function (methodName /*, ... */) {
+  asyncCall: function(methodName /* , ... */) {
     this._sendMessage("async-call", arguments);
   },
 
   /**
    * Disconnect with Java.
    */
-  disconnect: function () {
-    this._Services.obs.removeObserver(this, this._EVENT_TYPE);
+  disconnect: function() {
+    this._EventDispatcher.unregisterListener(this, this._EVENT_TYPE);
   },
 };

@@ -6,11 +6,7 @@
 
 // see http://mxr.mozilla.org/mozilla-central/source/services/sync/Weave.js#76
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const rph = Services.io.getProtocolHandler("resource").QueryInterface(Ci.nsIResProtocolHandler);
 
@@ -37,7 +33,7 @@ function dir_entries(baseDir, subpath, ext) {
   }
   var entries = [];
   while (enumerator.hasMoreElements()) {
-    var file = enumerator.getNext().QueryInterface(Ci.nsIFile);
+    var file = enumerator.nextFile;
     if (file.isDirectory()) {
       entries = entries.concat(dir_entries(dir, file.leafName, ext).map(p => subpath + "/" + p));
     } else if (endsWith(file.leafName, ext)) {
@@ -58,14 +54,13 @@ function get_modules_under(uri) {
                   .concat(jar_entries(jarReader, "modules/*.jsm"));
     jarReader.close();
     return entries;
-  } else if (uri instanceof Ci.nsIFileURL){
+  } else if (uri instanceof Ci.nsIFileURL) {
     let file = uri.QueryInterface(Ci.nsIFileURL);
     return dir_entries(file.file, "components", ".js")
            .concat(dir_entries(file.file, "modules", ".js"))
            .concat(dir_entries(file.file, "modules", ".jsm"));
-  } else {
-    throw "Expected a nsIJARURI or nsIFileURL";
   }
+  throw new Error("Expected a nsIJARURI or nsIFileURL");
 }
 
 function load_modules_under(spec, uri) {
@@ -73,14 +68,14 @@ function load_modules_under(spec, uri) {
   for (let entry of entries) {
     try {
       dump(spec + entry + "\n");
-      Cu.import(spec + entry, null);
-    } catch(e) {}
+      ChromeUtils.import(spec + entry, null);
+    } catch (e) {}
   }
 }
 
 function resolveResource(spec) {
-  var uri = Services.io.newURI(spec, null, null);
-  return Services.io.newURI(rph.resolveURI(uri), null, null);
+  var uri = Services.io.newURI(spec);
+  return Services.io.newURI(rph.resolveURI(uri));
 }
 
 function precompile_startupcache(uri) {

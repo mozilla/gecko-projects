@@ -463,7 +463,6 @@ mar_read_product_info_block(MarFile *mar,
       /* Extract the version from the buffer */
       len = strlen(location);
       infoBlock->productVersion = location;
-      location += len + 1;
       if (len >= 32) {
         infoBlock->MARChannelID = NULL;
         infoBlock->productVersion = NULL;
@@ -516,7 +515,7 @@ int mar_enum_items(MarFile *mar, MarItemCallback callback, void *closure) {
   return 0;
 }
 
-int mar_read(MarFile *mar, const MarItem *item, int offset, char *buf,
+int mar_read(MarFile *mar, const MarItem *item, int offset, uint8_t *buf,
              int bufsize) {
   int nr;
 

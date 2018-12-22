@@ -27,12 +27,12 @@ public:
         const SkPixmap& pixmap() const { return fPixmap; }
         const SkMatrix& invMatrix() const { return fInvMatrix; }
         SkFilterQuality quality() const { return fQuality; }
-    
+
     protected:
         SkPixmap        fPixmap;
         SkMatrix        fInvMatrix;
         SkFilterQuality fQuality;
-    
+
     private:
         friend class SkBitmapController;
     };
@@ -53,10 +53,12 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "SkMipMap.h"
+
 class SkDefaultBitmapController : public SkBitmapController {
 public:
     SkDefaultBitmapController() {}
-    
+
 protected:
     State* onRequestBitmap(const SkBitmapProvider&, const SkMatrix& inverse, SkFilterQuality,
                            void* storage, size_t storageSize) override;

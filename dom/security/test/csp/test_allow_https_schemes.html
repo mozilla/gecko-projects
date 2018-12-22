@@ -28,7 +28,12 @@ SimpleTest.waitForExplicitFinish();
 var policies = [
   ["allowed", "example.com"],
   ["allowed", "example.com:443"],
-  ["blocked", "example.com:80"]
+  ["allowed", "example.com:80"],
+  ["allowed", "http://*:80"],
+  ["allowed", "https://*:443"],
+  // our testing framework only supports :80 and :443, but
+  // using :8000 in a policy does the trick for the test.
+  ["blocked", "example.com:8000"],
 ]
 
 var counter = 0;
@@ -46,14 +51,14 @@ function loadNextTest() {
     // append the CSP that should be used to serve the file
     src += "&csp=" + escape("default-src 'none'; script-src " + policy[1]);
 
-    document.getElementById("testframe").addEventListener("load", test, false);
+    document.getElementById("testframe").addEventListener("load", test);
     document.getElementById("testframe").src = src;
   }
 }
 
 function test() {
   try {
-    document.getElementById("testframe").removeEventListener('load', test, false);
+    document.getElementById("testframe").removeEventListener('load', test);
     var testframe = document.getElementById("testframe");
     var divcontent = testframe.contentWindow.document.getElementById('testdiv').innerHTML;
     is(divcontent, policy[0], "should be " + policy[0] + " in test " + (counter - 1) + "!");

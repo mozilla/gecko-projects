@@ -46,16 +46,16 @@ enum class CertStatus : uint8_t {
 class Context final
 {
 public:
-  Context(TrustDomain& trustDomain, const CertID& certID, Time time,
-          uint16_t maxLifetimeInDays, /*optional out*/ Time* thisUpdate,
-          /*optional out*/ Time* validThrough)
-    : trustDomain(trustDomain)
-    , certID(certID)
-    , time(time)
-    , maxLifetimeInDays(maxLifetimeInDays)
+  Context(TrustDomain& aTrustDomain, const CertID& aCertID, Time aTime,
+          uint16_t aMaxLifetimeInDays, /*optional out*/ Time* aThisUpdate,
+          /*optional out*/ Time* aValidThrough)
+    : trustDomain(aTrustDomain)
+    , certID(aCertID)
+    , time(aTime)
+    , maxLifetimeInDays(aMaxLifetimeInDays)
     , certStatus(CertStatus::Unknown)
-    , thisUpdate(thisUpdate)
-    , validThrough(validThrough)
+    , thisUpdate(aThisUpdate)
+    , validThrough(aValidThrough)
     , expired(false)
     , matchFound(false)
   {
@@ -75,6 +75,8 @@ public:
   Time* thisUpdate;
   Time* validThrough;
   bool expired;
+
+  Input signedCertificateTimestamps;
 
   // Keep track of whether the OCSP response contains the status of the
   // certificate we're interested in. Responders might reply without
@@ -168,9 +170,16 @@ static inline Result ResponseData(
 static inline Result SingleResponse(Reader& input, Context& context);
 static Result ExtensionNotUnderstood(Reader& extnID, Input extnValue,
                                      bool critical, /*out*/ bool& understood);
-static inline Result CertID(Reader& input,
-                            const Context& context,
-                            /*out*/ bool& match);
+static Result RememberSingleExtension(Context& context, Reader& extnID,
+                                      Input extnValue, bool critical,
+                                      /*out*/ bool& understood);
+// It is convention to name the function after the part of the data structure
+// we're parsing from the RFC (e.g. OCSPResponse, ResponseBytes).
+// But since we also have a C++ type called CertID, this function doesn't
+// follow the convention to prevent shadowing.
+static inline Result MatchCertID(Reader& input,
+                                 const Context& context,
+                                 /*out*/ bool& match);
 static Result MatchKeyHash(TrustDomain& trustDomain,
                            Input issuerKeyHash,
                            Input issuerSubjectPublicKeyInfo,
@@ -330,6 +339,16 @@ VerifyEncodedOCSPResponse(TrustDomain& trustDomain, const struct CertID& certID,
       if (expired) {
         return Result::ERROR_OCSP_OLD_RESPONSE;
       }
+      if (context.signedCertificateTimestamps.GetLength()) {
+        Input sctList;
+        rv = ExtractSignedCertificateTimestampListFromExtension(
+          context.signedCertificateTimestamps, sctList);
+        if (rv != Success) {
+          return MapBadDERToMalformedOCSPResponse(rv);
+        }
+        context.trustDomain.NoteAuxiliaryExtension(
+          AuxiliaryExtension::SCTListFromOCSPResponse, sctList);
+      }
       return Success;
     case CertStatus::Revoked:
       return Result::ERROR_REVOKED_CERTIFICATE;
@@ -423,12 +442,13 @@ BasicResponse(Reader& input, Context& context)
                      der::SEQUENCE, [&certs](Reader& certsDER) -> Result {
       while (!certsDER.AtEnd()) {
         Input cert;
-        Result rv = der::ExpectTagAndGetTLV(certsDER, der::SEQUENCE, cert);
-        if (rv != Success) {
-          return rv;
+        Result nestedRv =
+          der::ExpectTagAndGetTLV(certsDER, der::SEQUENCE, cert);
+        if (nestedRv != Success) {
+          return nestedRv;
         }
-        rv = certs.Append(cert);
-        if (rv != Success) {
+        nestedRv = certs.Append(cert);
+        if (nestedRv != Success) {
           return Result::ERROR_BAD_DER; // Too many certs
         }
       }
@@ -523,7 +543,7 @@ SingleResponse(Reader& input, Context& context)
 {
   bool match = false;
   Result rv = der::Nested(input, der::SEQUENCE, [&context, &match](Reader& r) {
-    return CertID(r, context, match);
+    return MatchCertID(r, context, match);
   });
   if (rv != Success) {
     return rv;
@@ -651,9 +671,15 @@ SingleResponse(Reader& input, Context& context)
     context.expired = true;
   }
 
-  rv = der::OptionalExtensions(input,
-                               der::CONTEXT_SPECIFIC | der::CONSTRUCTED | 1,
-                               ExtensionNotUnderstood);
+  rv = der::OptionalExtensions(
+    input,
+    der::CONTEXT_SPECIFIC | der::CONSTRUCTED | 1,
+    [&context](Reader& extnID, const Input& extnValue, bool critical,
+               /*out*/ bool& understood) {
+      return RememberSingleExtension(context, extnID, extnValue, critical,
+                                     understood);
+    });
+
   if (rv != Success) {
     return rv;
   }
@@ -674,7 +700,7 @@ SingleResponse(Reader& input, Context& context)
 //        issuerKeyHash       OCTET STRING, -- Hash of issuer's public key
 //        serialNumber        CertificateSerialNumber }
 static inline Result
-CertID(Reader& input, const Context& context, /*out*/ bool& match)
+MatchCertID(Reader& input, const Context& context, /*out*/ bool& match)
 {
   match = false;
 
@@ -765,7 +791,7 @@ MatchKeyHash(TrustDomain& trustDomain, Input keyHash,
   if (keyHash.GetLength() != SHA1_DIGEST_LENGTH)  {
     return Result::ERROR_OCSP_MALFORMED_RESPONSE;
   }
-  static uint8_t hashBuf[SHA1_DIGEST_LENGTH];
+  uint8_t hashBuf[SHA1_DIGEST_LENGTH];
   Result rv = KeyHash(trustDomain, subjectPublicKeyInfo, hashBuf,
                       sizeof hashBuf);
   if (rv != Success) {
@@ -823,6 +849,36 @@ ExtensionNotUnderstood(Reader& /*extnID*/, Input /*extnValue*/,
                        bool /*critical*/, /*out*/ bool& understood)
 {
   understood = false;
+  return Success;
+}
+
+Result
+RememberSingleExtension(Context& context, Reader& extnID, Input extnValue,
+                        bool /*critical*/, /*out*/ bool& understood)
+{
+  understood = false;
+
+  // SingleExtension for Signed Certificate Timestamp List.
+  // See Section 3.3 of RFC 6962.
+  // python DottedOIDToCode.py
+  //   id_ocsp_singleExtensionSctList 1.3.6.1.4.1.11129.2.4.5
+  static const uint8_t id_ocsp_singleExtensionSctList[] = {
+    0x2b, 0x06, 0x01, 0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x05
+  };
+
+  if (extnID.MatchRest(id_ocsp_singleExtensionSctList)) {
+    // Empty values are not allowed for this extension. Note that
+    // we assume this later, when checking if the extension was present.
+    if (extnValue.GetLength() == 0) {
+      return Result::ERROR_EXTENSION_VALUE_INVALID;
+    }
+    if (context.signedCertificateTimestamps.Init(extnValue) != Success) {
+      // Duplicate extension.
+      return Result::ERROR_EXTENSION_VALUE_INVALID;
+    }
+    understood = true;
+  }
+
   return Success;
 }
 
@@ -913,8 +969,8 @@ CreateEncodedOCSPRequest(TrustDomain& trustDomain, const struct CertID& certID,
   *d++ = 0x30; *d++ = totalLen - 10u; //         reqCert (CertID SEQUENCE)
 
   // reqCert.hashAlgorithm
-  for (size_t i = 0; i < sizeof(hashAlgorithm); ++i) {
-    *d++ = hashAlgorithm[i];
+  for (const uint8_t hashAlgorithmByte : hashAlgorithm) {
+    *d++ = hashAlgorithmByte;
   }
 
   // reqCert.issuerNameHash (OCTET STRING)

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,19 +8,24 @@
 #define nsXULTooltipListener_h__
 
 #include "nsIDOMEventListener.h"
-#include "nsIDOMMouseEvent.h"
-#include "nsIDOMElement.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #ifdef MOZ_XUL
 #include "nsITreeBoxObject.h"
-#include "nsITreeColumns.h"
 #endif
 #include "nsWeakPtr.h"
 #include "mozilla/Attributes.h"
 
 class nsIContent;
+class nsTreeColumn;
+
+namespace mozilla {
+namespace dom {
+class Event;
+class MouseEvent;
+} // namespace dom
+} // namespace mozilla
 
 class nsXULTooltipListener final : public nsIDOMEventListener
 {
@@ -27,17 +33,16 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
 
-  void MouseOut(nsIDOMEvent* aEvent);
-  void MouseMove(nsIDOMEvent* aEvent);
+  void MouseOut(mozilla::dom::Event* aEvent);
+  void MouseMove(mozilla::dom::Event* aEvent);
 
-  nsresult AddTooltipSupport(nsIContent* aNode);
-  nsresult RemoveTooltipSupport(nsIContent* aNode);
+  void AddTooltipSupport(nsIContent* aNode);
+  void RemoveTooltipSupport(nsIContent* aNode);
   static nsXULTooltipListener* GetInstance() {
-    if (!mInstance)
-      mInstance = new nsXULTooltipListener();
-    return mInstance;
+    if (!sInstance)
+      sInstance = new nsXULTooltipListener();
+    return sInstance;
   }
-  static void ClearTooltipCache() { mInstance = nullptr; }
 
 protected:
 
@@ -46,12 +51,11 @@ protected:
 
   // pref callback for when the "show tooltips" pref changes
   static bool sShowTooltips;
-  static uint32_t sTooltipListenerCount;
 
   void KillTooltipTimer();
 
 #ifdef MOZ_XUL
-  void CheckTreeBodyMove(nsIDOMMouseEvent* aMouseEvent);
+  void CheckTreeBodyMove(mozilla::dom::MouseEvent* aMouseEvent);
   nsresult GetSourceTreeBoxObject(nsITreeBoxObject** aBoxObject);
 #endif
 
@@ -65,7 +69,7 @@ protected:
   // can be really used (i.e. tooltip is not a menu).
   nsresult GetTooltipFor(nsIContent* aTarget, nsIContent** aTooltip);
 
-  static nsXULTooltipListener* mInstance;
+  static nsXULTooltipListener* sInstance;
   static void ToolbarTipsPrefChanged(const char *aPref, void *aClosure);
 
   nsWeakPtr mSourceNode;
@@ -95,7 +99,7 @@ protected:
   bool mIsSourceTree;
   bool mNeedTitletip;
   int32_t mLastTreeRow;
-  nsCOMPtr<nsITreeColumn> mLastTreeCol;
+  RefPtr<nsTreeColumn> mLastTreeCol;
 #endif
 };
 

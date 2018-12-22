@@ -25,11 +25,3 @@ richlistitem {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.ac-tags[empty] {
-  display: none;
-}
-
-.ac-action[actiontype=searchengine]:not([selected]) {
-  display: none;
-}

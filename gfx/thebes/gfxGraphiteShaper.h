@@ -19,23 +19,24 @@ public:
     explicit gfxGraphiteShaper(gfxFont *aFont);
     virtual ~gfxGraphiteShaper();
 
-    virtual bool ShapeText(DrawTarget      *aDrawTarget,
-                           const char16_t *aText,
-                           uint32_t         aOffset,
-                           uint32_t         aLength,
-                           int32_t          aScript,
-                           bool             aVertical,
-                           gfxShapedText   *aShapedText);
+    bool ShapeText(DrawTarget      *aDrawTarget,
+                   const char16_t *aText,
+                   uint32_t         aOffset,
+                   uint32_t         aLength,
+                   Script           aScript,
+                   bool             aVertical,
+                   RoundingFlags    aRounding,
+                   gfxShapedText   *aShapedText) override;
 
     static void Shutdown();
 
 protected:
-    nsresult SetGlyphsFromSegment(DrawTarget      *aDrawTarget,
-                                  gfxShapedText   *aShapedText,
+    nsresult SetGlyphsFromSegment(gfxShapedText   *aShapedText,
                                   uint32_t         aOffset,
                                   uint32_t         aLength,
                                   const char16_t *aText,
-                                  gr_segment      *aSegment);
+                                  gr_segment      *aSegment,
+                                  RoundingFlags    aRounding);
 
     static float GrGetAdvance(const void* appFontHandle, uint16_t glyphid);
 
@@ -44,8 +45,12 @@ protected:
     gr_font *mGrFont; // owned by the shaper itself
 
     struct CallbackData {
-        gfxFont* mFont;
-        mozilla::gfx::DrawTarget* mDrawTarget;
+        // mFont is a pointer to the font that owns this shaper, so it will
+        // remain valid throughout our lifetime
+        gfxFont* MOZ_NON_OWNING_REF mFont;
+        // initialized to a DrawTarget owned by our caller on every call to
+        // ShapeText
+        mozilla::gfx::DrawTarget* MOZ_NON_OWNING_REF mDrawTarget;
     };
 
     CallbackData mCallbackData;

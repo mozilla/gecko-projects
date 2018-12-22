@@ -7,12 +7,14 @@
 #ifndef builtin_TypedObject_h
 #define builtin_TypedObject_h
 
-#include "jsobj.h"
-#include "jsweakmap.h"
+#include "mozilla/CheckedInt.h"
 
 #include "builtin/TypedObjectConstants.h"
+#include "gc/WeakMap.h"
 #include "js/Conversions.h"
 #include "vm/ArrayBufferObject.h"
+#include "vm/JSObject.h"
+#include "vm/ShapedObject.h"
 
 /*
  * -------------
@@ -93,6 +95,8 @@
 
 namespace js {
 
+class GlobalObject;
+
 /*
  * Helper method for converting a double into other scalar
  * types in the same way that JavaScript would. In particular,
@@ -102,15 +106,14 @@ namespace js {
 template <typename T>
 static T ConvertScalar(double d)
 {
-    if (TypeIsFloatingPoint<T>()) {
+    if (TypeIsFloatingPoint<T>())
         return T(d);
-    } else if (TypeIsUnsigned<T>()) {
+    if (TypeIsUnsigned<T>()) {
         uint32_t n = JS::ToUint32(d);
         return T(n);
-    } else {
-        int32_t n = JS::ToInt32(d);
-        return T(n);
     }
+    int32_t n = JS::ToInt32(d);
+    return T(n);
 }
 
 namespace type {
@@ -166,16 +169,20 @@ class TypeDescr : public NativeObject
         return !opaque();
     }
 
-    int32_t alignment() const {
-        return getReservedSlot(JS_DESCR_SLOT_ALIGNMENT).toInt32();
+    uint32_t alignment() const {
+        int32_t i = getReservedSlot(JS_DESCR_SLOT_ALIGNMENT).toInt32();
+        MOZ_ASSERT(i >= 0);
+        return uint32_t(i);
     }
 
-    int32_t size() const {
-        return getReservedSlot(JS_DESCR_SLOT_SIZE).toInt32();
+    uint32_t size() const {
+        int32_t i = getReservedSlot(JS_DESCR_SLOT_SIZE).toInt32();
+        MOZ_ASSERT(i >= 0);
+        return uint32_t(i);
     }
 
     // Whether id is an 'own' property of objects with this descriptor.
-    bool hasProperty(const JSAtomState& names, jsid id);
+    MOZ_MUST_USE bool hasProperty(const JSAtomState& names, jsid id);
 
     // Type descriptors may contain a list of their references for use during
     // scanning. Marking code is optimized to use this list to mark inline
@@ -187,7 +194,7 @@ class TypeDescr : public NativeObject
     // The list is three consecutive arrays of int32_t offsets, with each array
     // terminated by -1. The arrays store offsets of string, object, and value
     // references in the descriptor, in that order.
-    bool hasTraceList() const {
+    MOZ_MUST_USE bool hasTraceList() const {
         return !getFixedSlot(JS_DESCR_SLOT_TRACE_LIST).isUndefined();
     }
     const int32_t* traceList() const {
@@ -218,8 +225,8 @@ class ScalarTypeDescr : public SimpleTypeDescr
 
     static const type::Kind Kind = type::Scalar;
     static const bool Opaque = false;
-    static int32_t size(Type t);
-    static int32_t alignment(Type t);
+    static uint32_t size(Type t);
+    static uint32_t alignment(Type t);
     static const char* typeName(Type type);
 
     static const Class class_;
@@ -250,13 +257,17 @@ class ScalarTypeDescr : public SimpleTypeDescr
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
         static_assert(Scalar::Float32x4 == JS_SCALARTYPEREPR_FLOAT32X4,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Int8x16 == JS_SCALARTYPEREPR_INT8X16,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Int16x8 == JS_SCALARTYPEREPR_INT16X8,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
         static_assert(Scalar::Int32x4 == JS_SCALARTYPEREPR_INT32X4,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
 
         return Type(getReservedSlot(JS_DESCR_SLOT_TYPE).toInt32());
     }
 
-    static bool call(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool call(JSContext* cx, unsigned argc, Value* vp);
 };
 
 // Enumerates the cases of ScalarTypeDescr::Type which have
@@ -277,6 +288,12 @@ class ScalarTypeDescr : public SimpleTypeDescr
     JS_FOR_EACH_UNIQUE_SCALAR_TYPE_REPR_CTYPE(macro_)           \
     macro_(Scalar::Uint8Clamped, uint8_t, uint8Clamped)
 
+enum class ReferenceType {
+    TYPE_ANY = JS_REFERENCETYPEREPR_ANY,
+    TYPE_OBJECT = JS_REFERENCETYPEREPR_OBJECT,
+    TYPE_STRING = JS_REFERENCETYPEREPR_STRING
+};
+
 // Type for reference type constructors like `Any`, `String`, and
 // `Object`. All such type constructors share a common js::Class and
 // JSFunctionSpec. All these types are opaque.
@@ -284,36 +301,32 @@ class ReferenceTypeDescr : public SimpleTypeDescr
 {
   public:
     // Must match order of JS_FOR_EACH_REFERENCE_TYPE_REPR below
-    enum Type {
-        TYPE_ANY = JS_REFERENCETYPEREPR_ANY,
-        TYPE_OBJECT = JS_REFERENCETYPEREPR_OBJECT,
-        TYPE_STRING = JS_REFERENCETYPEREPR_STRING,
-    };
-    static const int32_t TYPE_MAX = TYPE_STRING + 1;
+    typedef ReferenceType Type;
     static const char* typeName(Type type);
 
+    static const int32_t TYPE_MAX = int32_t(ReferenceType::TYPE_STRING) + 1;
     static const type::Kind Kind = type::Reference;
     static const bool Opaque = true;
     static const Class class_;
-    static int32_t size(Type t);
-    static int32_t alignment(Type t);
+    static uint32_t size(Type t);
+    static uint32_t alignment(Type t);
     static const JSFunctionSpec typeObjectMethods[];
 
-    ReferenceTypeDescr::Type type() const {
-        return (ReferenceTypeDescr::Type) getReservedSlot(JS_DESCR_SLOT_TYPE).toInt32();
+    ReferenceType type() const {
+        return (ReferenceType) getReservedSlot(JS_DESCR_SLOT_TYPE).toInt32();
     }
 
     const char* typeName() const {
         return typeName(type());
     }
 
-    static bool call(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool call(JSContext* cx, unsigned argc, Value* vp);
 };
 
-#define JS_FOR_EACH_REFERENCE_TYPE_REPR(macro_)                    \
-    macro_(ReferenceTypeDescr::TYPE_ANY,    HeapValue, Any)        \
-    macro_(ReferenceTypeDescr::TYPE_OBJECT, HeapPtrObject, Object) \
-    macro_(ReferenceTypeDescr::TYPE_STRING, HeapPtrString, string)
+#define JS_FOR_EACH_REFERENCE_TYPE_REPR(macro_) \
+    macro_(ReferenceType::TYPE_ANY, GCPtrValue, Any) \
+    macro_(ReferenceType::TYPE_OBJECT, GCPtrObject, Object) \
+    macro_(ReferenceType::TYPE_STRING, GCPtrString, string)
 
 // Type descriptors whose instances are objects and hence which have
 // an associated `prototype` property.
@@ -327,7 +340,7 @@ class ComplexTypeDescr : public TypeDescr
     }
 };
 
-enum class SimdType : uint8_t;
+enum class SimdType;
 
 /*
  * SIMD Type descriptors.
@@ -338,9 +351,9 @@ class SimdTypeDescr : public ComplexTypeDescr
     static const type::Kind Kind = type::Simd;
     static const bool Opaque = false;
     static const Class class_;
-    static int32_t size(SimdType t);
-    static int32_t alignment(SimdType t);
-    static bool call(JSContext* cx, unsigned argc, Value* vp);
+    static uint32_t size(SimdType t);
+    static uint32_t alignment(SimdType t);
+    static MOZ_MUST_USE bool call(JSContext* cx, unsigned argc, Value* vp);
     static bool is(const Value& v);
 
     SimdType type() const;
@@ -349,7 +362,7 @@ class SimdTypeDescr : public ComplexTypeDescr
 bool IsTypedObjectClass(const Class* clasp); // Defined below
 bool IsTypedObjectArray(JSObject& obj);
 
-bool CreateUserSizeAndAlignmentProperties(JSContext* cx, HandleTypeDescr obj);
+MOZ_MUST_USE bool CreateUserSizeAndAlignmentProperties(JSContext* cx, HandleTypeDescr obj);
 
 class ArrayTypeDescr;
 
@@ -387,7 +400,7 @@ class ArrayMetaTypeDescr : public NativeObject
 
     // This is the function that gets called when the user
     // does `new ArrayType(elem)`. It produces an array type object.
-    static bool construct(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool construct(JSContext* cx, unsigned argc, Value* vp);
 };
 
 /*
@@ -402,13 +415,11 @@ class ArrayTypeDescr : public ComplexTypeDescr
     TypeDescr& elementType() const {
         return getReservedSlot(JS_DESCR_SLOT_ARRAY_ELEM_TYPE).toObject().as<TypeDescr>();
     }
-    TypeDescr& maybeForwardedElementType() const {
-        JSObject* obj = MaybeForwarded(&getReservedSlot(JS_DESCR_SLOT_ARRAY_ELEM_TYPE).toObject());
-        return obj->as<TypeDescr>();
-    }
 
-    int32_t length() const {
-        return getReservedSlot(JS_DESCR_SLOT_ARRAY_LENGTH).toInt32();
+    uint32_t length() const {
+        int32_t i = getReservedSlot(JS_DESCR_SLOT_ARRAY_LENGTH).toInt32();
+        MOZ_ASSERT(i >= 0);
+        return uint32_t(i);
     }
 
     static int32_t offsetOfLength() {
@@ -428,6 +439,15 @@ class StructMetaTypeDescr : public NativeObject
                             HandleObject fields);
 
   public:
+    // The prototype cannot be null.
+    // The names in `ids` must all be non-numeric.
+    // The type objects in `fieldTypeObjs` must all be TypeDescr objects.
+    static StructTypeDescr* createFromArrays(JSContext* cx,
+                                             HandleObject structTypePrototype,
+                                             bool opaque,
+                                             AutoIdVector& ids,
+                                             AutoValueVector& fieldTypeObjs);
+
     // Properties and methods to be installed on StructType.prototype,
     // and hence inherited by all struct type objects:
     static const JSPropertySpec typeObjectProperties[];
@@ -440,7 +460,28 @@ class StructMetaTypeDescr : public NativeObject
 
     // This is the function that gets called when the user
     // does `new StructType(...)`. It produces a struct type object.
-    static bool construct(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool construct(JSContext* cx, unsigned argc, Value* vp);
+
+    class Layout
+    {
+        // Can call addField() directly.
+        friend class StructMetaTypeDescr;
+
+        mozilla::CheckedInt32 sizeSoFar = 0;
+        int32_t structAlignment = 1;
+
+        mozilla::CheckedInt32 addField(int32_t fieldAlignment, int32_t fieldSize);
+
+      public:
+        // The field adders return the offset of the the field.
+        mozilla::CheckedInt32 addScalar(Scalar::Type type);
+        mozilla::CheckedInt32 addReference(ReferenceType type);
+
+        // The close method rounds up the structure size to the appropriate
+        // alignment and returns that size.  If `alignment` is not NULL then
+        // return the structure alignment through that pointer.
+        mozilla::CheckedInt32 close(int32_t* alignment = nullptr);
+    };
 };
 
 class StructTypeDescr : public ComplexTypeDescr
@@ -450,29 +491,23 @@ class StructTypeDescr : public ComplexTypeDescr
 
     // Returns the number of fields defined in this struct.
     size_t fieldCount() const;
-    size_t maybeForwardedFieldCount() const;
 
     // Set `*out` to the index of the field named `id` and returns true,
     // or return false if no such field exists.
-    bool fieldIndex(jsid id, size_t* out) const;
+    MOZ_MUST_USE bool fieldIndex(jsid id, size_t* out) const;
 
     // Return the name of the field at index `index`.
     JSAtom& fieldName(size_t index) const;
 
     // Return the type descr of the field at index `index`.
     TypeDescr& fieldDescr(size_t index) const;
-    TypeDescr& maybeForwardedFieldDescr(size_t index) const;
 
     // Return the offset of the field at index `index`.
     size_t fieldOffset(size_t index) const;
-    size_t maybeForwardedFieldOffset(size_t index) const;
 
   private:
     ArrayObject& fieldInfoObject(size_t slot) const {
         return getReservedSlot(slot).toObject().as<ArrayObject>();
-    }
-    ArrayObject& maybeForwardedFieldInfoObject(size_t slot) const {
-        return MaybeForwarded(&getReservedSlot(slot).toObject())->as<ArrayObject>();
     }
 };
 
@@ -495,96 +530,106 @@ class TypedObjectModuleObject : public NativeObject {
 };
 
 /* Base type for transparent and opaque typed objects. */
-class TypedObject : public JSObject
+class TypedObject : public ShapedObject
 {
     static const bool IsTypedObjectClass = true;
 
-    static bool obj_getArrayElement(JSContext* cx,
-                                    Handle<TypedObject*> typedObj,
-                                    Handle<TypeDescr*> typeDescr,
-                                    uint32_t index,
-                                    MutableHandleValue vp);
+    static MOZ_MUST_USE bool obj_getArrayElement(JSContext* cx,
+                                                 Handle<TypedObject*> typedObj,
+                                                 Handle<TypeDescr*> typeDescr,
+                                                 uint32_t index,
+                                                 MutableHandleValue vp);
 
   protected:
     static const ObjectOps objectOps_;
 
-    HeapPtrShape shape_;
+    static MOZ_MUST_USE bool obj_lookupProperty(JSContext* cx, HandleObject obj,
+                                                HandleId id, MutableHandleObject objp,
+                                                MutableHandle<PropertyResult> propp);
 
-    static bool obj_lookupProperty(JSContext* cx, HandleObject obj,
-                                   HandleId id, MutableHandleObject objp,
-                                   MutableHandleShape propp);
+    static MOZ_MUST_USE bool obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
+                                                Handle<PropertyDescriptor> desc,
+                                                ObjectOpResult& result);
 
-    static bool obj_defineProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                   Handle<PropertyDescriptor> desc,
-                                   ObjectOpResult& result);
+    static MOZ_MUST_USE bool obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id,
+                                             bool* foundp);
 
-    static bool obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp);
+    static MOZ_MUST_USE bool obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
+                                             HandleId id, MutableHandleValue vp);
 
-    static bool obj_getProperty(JSContext* cx, HandleObject obj, HandleValue receiver,
-                                HandleId id, MutableHandleValue vp);
+    static MOZ_MUST_USE bool obj_getElement(JSContext* cx, HandleObject obj, HandleValue receiver,
+                                            uint32_t index, MutableHandleValue vp);
 
-    static bool obj_getElement(JSContext* cx, HandleObject obj, HandleValue receiver,
-                               uint32_t index, MutableHandleValue vp);
+    static MOZ_MUST_USE bool obj_setProperty(JSContext* cx, HandleObject obj, HandleId id,
+                                             HandleValue v, HandleValue receiver,
+                                             ObjectOpResult& result);
 
-    static bool obj_setProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
-                                HandleValue receiver, ObjectOpResult& result);
+    static MOZ_MUST_USE bool obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj,
+                                                          HandleId id,
+                                                          MutableHandle<PropertyDescriptor> desc);
 
-    static bool obj_getOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
-                                             MutableHandle<PropertyDescriptor> desc);
+    static MOZ_MUST_USE bool obj_deleteProperty(JSContext* cx, HandleObject obj, HandleId id,
+                                                ObjectOpResult& result);
 
-    static bool obj_deleteProperty(JSContext* cx, HandleObject obj, HandleId id,
-                                   ObjectOpResult& result);
 
-    static bool obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector& properties,
-                              bool enumerableOnly);
+    uint8_t* typedMem() const;
+    uint8_t* typedMemBase() const;
 
   public:
+    static MOZ_MUST_USE bool obj_newEnumerate(JSContext* cx, HandleObject obj,
+                                              AutoIdVector& properties, bool enumerableOnly);
+
     TypedProto& typedProto() const {
-        return getProto()->as<TypedProto>();
+        // Typed objects' prototypes can't be modified.
+        return staticPrototype()->as<TypedProto>();
     }
 
     TypeDescr& typeDescr() const {
         return group()->typeDescr();
     }
 
-    int32_t offset() const;
-    int32_t length() const;
-    uint8_t* typedMem() const;
-    uint8_t* typedMemBase() const;
-    bool isAttached() const;
-    bool maybeForwardedIsAttached() const;
+    static JS::Result<TypedObject*, JS::OOM&>
+    create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+           js::HandleShape shape, js::HandleObjectGroup group);
 
-    int32_t size() const {
+    uint32_t offset() const;
+    uint32_t length() const;
+    uint8_t* typedMem(const JS::AutoRequireNoGC&) const { return typedMem(); }
+    bool isAttached() const;
+
+    uint32_t size() const {
         return typeDescr().size();
     }
 
-    uint8_t* typedMem(size_t offset) const {
+    uint8_t* typedMem(size_t offset, const JS::AutoRequireNoGC& nogc) const {
         // It seems a bit surprising that one might request an offset
         // == size(), but it can happen when taking the "address of" a
         // 0-sized value. (In other words, we maintain the invariant
         // that `offset + size <= size()` -- this is always checked in
         // the caller's side.)
         MOZ_ASSERT(offset <= (size_t) size());
-        return typedMem() + offset;
+        return typedMem(nogc) + offset;
     }
 
-    inline bool opaque() const;
+    inline MOZ_MUST_USE bool opaque() const;
 
     // Creates a new typed object whose memory is freshly allocated and
     // initialized with zeroes (or, in the case of references, an appropriate
     // default value).
-    static TypedObject* createZeroed(JSContext* cx, HandleTypeDescr typeObj, int32_t length,
+    static TypedObject* createZeroed(JSContext* cx, HandleTypeDescr typeObj,
                                      gc::InitialHeap heap = gc::DefaultHeap);
 
     // User-accessible constructor (`new TypeDescriptor(...)`). Note that the
     // callee here is the type descriptor.
-    static bool construct(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool construct(JSContext* cx, unsigned argc, Value* vp);
 
     /* Accessors for self hosted code. */
-    static bool GetBuffer(JSContext* cx, unsigned argc, Value* vp);
-    static bool GetByteOffset(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool GetBuffer(JSContext* cx, unsigned argc, Value* vp);
+    static MOZ_MUST_USE bool GetByteOffset(JSContext* cx, unsigned argc, Value* vp);
 
-    Shape** addressOfShapeFromGC() { return shape_.unsafeUnbarrieredForTracing(); }
+    Shape** addressOfShapeFromGC() {
+        return shapeRef().unsafeUnbarrieredForTracing();
+    }
 };
 
 typedef Handle<TypedObject*> HandleTypedObject;
@@ -592,7 +637,7 @@ typedef Handle<TypedObject*> HandleTypedObject;
 class OutlineTypedObject : public TypedObject
 {
     // The object which owns the data this object points to. Because this
-    // pointer is managed in tandem with |data|, this is not a HeapPtr and
+    // pointer is managed in tandem with |data|, this is not a GCPtr and
     // barriers are managed directly.
     JSObject* owner_;
 
@@ -623,11 +668,15 @@ class OutlineTypedObject : public TypedObject
         data_ = data;
     }
 
+    void resetOffset(size_t offset) {
+        MOZ_ASSERT(offset <= (size_t) size());
+        setData(typedMemBase() + offset);
+    }
+
     // Helper for createUnattached()
     static OutlineTypedObject* createUnattachedWithClass(JSContext* cx,
                                                          const Class* clasp,
                                                          HandleTypeDescr type,
-                                                         int32_t length,
                                                          gc::InitialHeap heap = gc::DefaultHeap);
 
     // Creates an unattached typed object or handle (depending on the
@@ -637,9 +686,8 @@ class OutlineTypedObject : public TypedObject
     //
     // Arguments:
     // - type: type object for resulting object
-    // - length: 0 unless this is an array, otherwise the length
     static OutlineTypedObject* createUnattached(JSContext* cx, HandleTypeDescr type,
-                                                int32_t length, gc::InitialHeap heap = gc::DefaultHeap);
+                                                gc::InitialHeap heap = gc::DefaultHeap);
 
     // Creates a typedObj that aliases the memory pointed at by `owner`
     // at the given offset. The typedObj will be a handle iff type is a
@@ -647,13 +695,13 @@ class OutlineTypedObject : public TypedObject
     static OutlineTypedObject* createDerived(JSContext* cx,
                                              HandleTypeDescr type,
                                              Handle<TypedObject*> typedContents,
-                                             int32_t offset);
+                                             uint32_t offset);
 
     // Use this method when `buffer` is the owner of the memory.
-    void attach(JSContext* cx, ArrayBufferObject& buffer, int32_t offset);
+    void attach(JSContext* cx, ArrayBufferObject& buffer, uint32_t offset);
 
     // Otherwise, use this to attach to memory referenced by another typedObj.
-    void attach(JSContext* cx, TypedObject& typedObj, int32_t offset);
+    void attach(JSContext* cx, TypedObject& typedObj, uint32_t offset);
 
     // Invoked when array buffer is transferred elsewhere
     void notifyBufferDetached(void* newData);
@@ -681,25 +729,39 @@ class OutlineOpaqueTypedObject : public OutlineTypedObject
 // Class for a typed object whose data is allocated inline.
 class InlineTypedObject : public TypedObject
 {
+    friend class TypedObject;
+
     // Start of the inline data, which immediately follows the shape and type.
     uint8_t data_[1];
 
-  public:
     static const size_t MaximumSize = JSObject::MAX_BYTE_SIZE - sizeof(TypedObject);
 
-    static gc::AllocKind allocKindForTypeDescriptor(TypeDescr* descr) {
-        size_t nbytes = descr->size();
-        MOZ_ASSERT(nbytes <= MaximumSize);
-
-        return gc::GetGCObjectKindForBytes(nbytes + sizeof(TypedObject));
-    }
-
+  protected:
     uint8_t* inlineTypedMem() const {
         return (uint8_t*) &data_;
     }
 
+  public:
+    static inline gc::AllocKind allocKindForTypeDescriptor(TypeDescr* descr);
+
+    static bool canAccommodateSize(size_t size) {
+        return size <= MaximumSize;
+    }
+
+    static bool canAccommodateType(TypeDescr* type) {
+        return type->size() <= MaximumSize;
+    }
+
+    uint8_t* inlineTypedMem(const JS::AutoRequireNoGC&) const {
+        return inlineTypedMem();
+    }
+
+    uint8_t* inlineTypedMemForGC() const {
+        return inlineTypedMem();
+    }
+
     static void obj_trace(JSTracer* trace, JSObject* object);
-    static void objectMovedDuringMinorGC(JSTracer* trc, JSObject* dst, JSObject* src);
+    static size_t obj_moved(JSObject* dst, JSObject* src);
 
     static size_t offsetOfDataStart() {
         return offsetof(InlineTypedObject, data_);
@@ -719,6 +781,10 @@ class InlineTransparentTypedObject : public InlineTypedObject
     static const Class class_;
 
     ArrayBufferObject* getOrCreateBuffer(JSContext* cx);
+
+    uint8_t* inlineTypedMem() const {
+        return InlineTypedObject::inlineTypedMem();
+    }
 };
 
 // Class for an opaque typed object with inline data and no array buffer.
@@ -728,19 +794,29 @@ class InlineOpaqueTypedObject : public InlineTypedObject
     static const Class class_;
 };
 
+// Class for the global SIMD object.
+class SimdObject : public NativeObject
+{
+  public:
+    static const Class class_;
+    static MOZ_MUST_USE bool toString(JSContext* cx, unsigned int argc, Value* vp);
+    static MOZ_MUST_USE bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId,
+                                     bool* resolved);
+};
+
 /*
  * Usage: NewOpaqueTypedObject(typeObj)
  *
  * Constructs a new, unattached instance of `Handle`.
  */
-bool NewOpaqueTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool NewOpaqueTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: NewDerivedTypedObject(typeObj, owner, offset)
  *
  * Constructs a new, unattached instance of `Handle`.
  */
-bool NewDerivedTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool NewDerivedTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: AttachTypedObject(typedObj, newDatum, newOffset)
@@ -748,7 +824,7 @@ bool NewDerivedTypedObject(JSContext* cx, unsigned argc, Value* vp);
  * Moves `typedObj` to point at the memory referenced by `newDatum` with
  * the offset `newOffset`.
  */
-bool AttachTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool AttachTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: SetTypedObjectOffset(typedObj, offset)
@@ -756,41 +832,41 @@ bool AttachTypedObject(JSContext* cx, unsigned argc, Value* vp);
  * Changes the offset for `typedObj` within its buffer to `offset`.
  * `typedObj` must already be attached.
  */
-bool SetTypedObjectOffset(JSContext*, unsigned argc, Value* vp);
+MOZ_MUST_USE bool SetTypedObjectOffset(JSContext*, unsigned argc, Value* vp);
 
 /*
  * Usage: ObjectIsTypeDescr(obj)
  *
  * True if `obj` is a type object.
  */
-bool ObjectIsTypeDescr(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool ObjectIsTypeDescr(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: ObjectIsTypedObject(obj)
  *
  * True if `obj` is a transparent or opaque typed object.
  */
-bool ObjectIsTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool ObjectIsTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: ObjectIsOpaqueTypedObject(obj)
  *
  * True if `obj` is an opaque typed object.
  */
-bool ObjectIsOpaqueTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool ObjectIsOpaqueTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: ObjectIsTransparentTypedObject(obj)
  *
  * True if `obj` is a transparent typed object.
  */
-bool ObjectIsTransparentTypedObject(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool ObjectIsTransparentTypedObject(JSContext* cx, unsigned argc, Value* vp);
 
 /* Predicates on type descriptor objects.  In all cases, 'obj' must be a type descriptor. */
 
-bool TypeDescrIsSimpleType(JSContext*, unsigned argc, Value* vp);
+MOZ_MUST_USE bool TypeDescrIsSimpleType(JSContext*, unsigned argc, Value* vp);
 
-bool TypeDescrIsArrayType(JSContext*, unsigned argc, Value* vp);
+MOZ_MUST_USE bool TypeDescrIsArrayType(JSContext*, unsigned argc, Value* vp);
 
 /*
  * Usage: TypedObjectIsAttached(obj)
@@ -798,21 +874,21 @@ bool TypeDescrIsArrayType(JSContext*, unsigned argc, Value* vp);
  * Given a TypedObject `obj`, returns true if `obj` is
  * "attached" (i.e., its data pointer is nullptr).
  */
-bool TypedObjectIsAttached(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool TypedObjectIsAttached(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: TypedObjectTypeDescr(obj)
  *
  * Given a TypedObject `obj`, returns the object's type descriptor.
  */
-bool TypedObjectTypeDescr(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool TypedObjectTypeDescr(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: ClampToUint8(v)
  *
  * Same as the C function ClampDoubleToUint8. `v` must be a number.
  */
-bool ClampToUint8(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool ClampToUint8(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: GetTypedObjectModule()
@@ -823,7 +899,7 @@ bool ClampToUint8(JSContext* cx, unsigned argc, Value* vp);
  * to access them; eventually this should be linked into the module
  * system.
  */
-bool GetTypedObjectModule(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool GetTypedObjectModule(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: GetSimdTypeDescr(simdTypeRepr)
@@ -833,7 +909,7 @@ bool GetTypedObjectModule(JSContext* cx, unsigned argc, Value* vp);
  *
  * The SIMD pseudo-module must have been initialized for this to be safe.
  */
-bool GetSimdTypeDescr(JSContext* cx, unsigned argc, Value* vp);
+MOZ_MUST_USE bool GetSimdTypeDescr(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: Store_int8(targetDatum, targetOffset, value)
@@ -854,7 +930,7 @@ bool GetSimdTypeDescr(JSContext* cx, unsigned argc, Value* vp);
 #define JS_STORE_SCALAR_CLASS_DEFN(_constant, T, _name)                       \
 class StoreScalar##T {                                                        \
   public:                                                                     \
-    static bool Func(JSContext* cx, unsigned argc, Value* vp);        \
+    static MOZ_MUST_USE bool Func(JSContext* cx, unsigned argc, Value* vp);   \
     static const JSJitInfo JitInfo;                                           \
 };
 
@@ -872,13 +948,13 @@ class StoreScalar##T {                                                        \
  * - `value` is an object or null (`Store_Object`) or string (`Store_string`).
  */
 #define JS_STORE_REFERENCE_CLASS_DEFN(_constant, T, _name)                    \
-class StoreReference##T {                                                     \
+class StoreReference##_name {                                                 \
   private:                                                                    \
-    static bool store(JSContext* cx, T* heap, const Value& v,         \
-                      TypedObject* obj, jsid id);                             \
+    static MOZ_MUST_USE bool store(JSContext* cx, T* heap, const Value& v,    \
+                                   TypedObject* obj, jsid id);                \
                                                                               \
   public:                                                                     \
-    static bool Func(JSContext* cx, unsigned argc, Value* vp);        \
+    static MOZ_MUST_USE bool Func(JSContext* cx, unsigned argc, Value* vp);   \
     static const JSJitInfo JitInfo;                                           \
 };
 
@@ -893,7 +969,7 @@ class StoreReference##T {                                                     \
 #define JS_LOAD_SCALAR_CLASS_DEFN(_constant, T, _name)                        \
 class LoadScalar##T {                                                         \
   public:                                                                     \
-    static bool Func(JSContext* cx, unsigned argc, Value* vp);        \
+    static MOZ_MUST_USE bool Func(JSContext* cx, unsigned argc, Value* vp);   \
     static const JSJitInfo JitInfo;                                           \
 };
 
@@ -906,12 +982,12 @@ class LoadScalar##T {                                                         \
  * `targetDatum` must be attached.
  */
 #define JS_LOAD_REFERENCE_CLASS_DEFN(_constant, T, _name)                     \
-class LoadReference##T {                                                      \
+class LoadReference##_name {                                                  \
   private:                                                                    \
     static void load(T* heap, MutableHandleValue v);                          \
                                                                               \
   public:                                                                     \
-    static bool Func(JSContext* cx, unsigned argc, Value* vp);        \
+    static MOZ_MUST_USE bool Func(JSContext* cx, unsigned argc, Value* vp);   \
     static const JSJitInfo JitInfo;                                           \
 };
 
@@ -987,7 +1063,7 @@ TypedObject::opaque() const
 }
 
 JSObject*
-InitTypedObjectModuleObject(JSContext* cx, JS::HandleObject obj);
+InitTypedObjectModuleObject(JSContext* cx, JS::Handle<GlobalObject*> global);
 
 } // namespace js
 

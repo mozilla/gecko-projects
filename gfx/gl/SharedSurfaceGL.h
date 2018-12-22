@@ -10,7 +10,6 @@
 #include "SharedSurface.h"
 #include "SurfaceTypes.h"
 #include "GLContextTypes.h"
-#include "nsAutoPtr.h"
 #include "gfxTypes.h"
 #include "mozilla/Mutex.h"
 
@@ -74,7 +73,7 @@ public:
     }
 
     virtual bool ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor) override {
-        MOZ_CRASH("don't do this");
+        MOZ_CRASH("GFX: ToSurfaceDescriptor");
         return false;
     }
 };
@@ -149,7 +148,7 @@ class SurfaceFactory_GLTexture
 public:
     SurfaceFactory_GLTexture(GLContext* prodGL,
                              const SurfaceCaps& caps,
-                             const RefPtr<layers::ClientIPCAllocator>& allocator,
+                             const RefPtr<layers::LayersIPCChannel>& allocator,
                              const layers::TextureFlags& flags)
         : SurfaceFactory(SharedSurfaceType::SharedGLTexture, prodGL, caps, allocator, flags)
     {

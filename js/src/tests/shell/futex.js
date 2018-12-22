@@ -1,20 +1,21 @@
-// |reftest| skip-if(!xulRuntime.shell)
+// |reftest| slow skip-if(!xulRuntime.shell)
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /*
  * Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/licenses/publicdomain/
  */
 
-if (!(this.SharedArrayBuffer && this.getSharedArrayBuffer && this.setSharedArrayBuffer)) {
-    reportCompare(true,true);
-    quit(0);
-}
-
 var DEBUG = false;
 
 function dprint(s) {
     if (DEBUG) print(s);
 }
+
+var hasSharedArrayBuffer = !!(this.SharedArrayBuffer &&
+                              this.getSharedArrayBuffer &&
+                              this.setSharedArrayBuffer);
+
+if (hasSharedArrayBuffer) {
 
 // Tests the SharedArrayBuffer mailbox in the shell.
 // Tests the wait/wake functionality in the shell.
@@ -59,13 +60,13 @@ assertThrowsInstanceOf(() => setSharedArrayBuffer(mem), Error);
 assertThrowsInstanceOf(() => setSharedArrayBuffer("abracadabra"), Error);
 assertThrowsInstanceOf(() => setSharedArrayBuffer(() => 37), Error);
 
+} // if (hasSharedArrayBuffer) { ... }
+
+
 // Futex test
 
-if (helperThreadCount() === 0) {
-  // Abort if there is no helper thread.
-  reportCompare(true,true);
-  quit();
-}
+// Only run if helper threads are available.
+if (hasSharedArrayBuffer && helperThreadCount() !== 0) {
 
 ////////////////////////////////////////////////////////////
 
@@ -134,18 +135,20 @@ dprint("Woke up as I should have in " + (Date.now() - then)/1000 + "s");
 // the interrupt handler we will execute a wait.  This is
 // explicitly prohibited (for now), so there should be a catchable exception.
 
+var exn = false;
 timeout(2, function () {
     dprint("In the interrupt, starting inner wait with timeout 2s");
-    Atomics.wait(mem, 0, 42); // Should throw and propagate all the way out
+    try {
+        Atomics.wait(mem, 0, 42); // Should throw
+    } catch (e) {
+        dprint("Got the interrupt exception!");
+        exn = true;
+    }
+    return true;
 });
-var exn = false;
 try {
     dprint("Starting outer wait");
-    assertEq(Atomics.wait(mem, 0, 42, 5000), "ok");
-}
-catch (e) {
-    dprint("Got the timeout exception!");
-    exn = true;
+    assertEq(Atomics.wait(mem, 0, 42, 5000), "timed-out");
 }
 finally {
     timeout(-1);
@@ -153,6 +156,8 @@ finally {
 assertEq(exn, true);
 
 ////////////////////////////////////////////////////////////
+
+} // if (hasSharedArrayBuffer && helperThreadCount() !== 0) { ... }
 
 dprint("Done");
 reportCompare(true,true);

@@ -4,21 +4,16 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+ChromeUtils.defineModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 
 var PrintHelper = {
-  init: function() {
-    Services.obs.addObserver(this, "Print:PDF", false);
-  },
-
-  observe: function (aSubject, aTopic, aData) {
+  onEvent: function(event, data, callback) {
     let browser = BrowserApp.selectedBrowser;
 
-    switch (aTopic) {
+    switch (event) {
       case "Print:PDF":
-        Messaging.handleRequest(aTopic, aData, (data) => {
-          return this.generatePDF(browser);
-        });
+        this.generatePDF(browser).then((data) => callback.onSuccess(data),
+                                       (error) => callback.onError(error));
         break;
     }
   },
@@ -63,10 +58,10 @@ var PrintHelper = {
             }
           }
         },
-        onProgressChange: function () {},
-        onLocationChange: function () {},
-        onStatusChange: function () {},
-        onSecurityChange: function () {},
+        onProgressChange: function() {},
+        onLocationChange: function() {},
+        onStatusChange: function() {},
+        onSecurityChange: function() {},
       });
     });
   }

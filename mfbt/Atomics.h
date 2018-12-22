@@ -19,32 +19,12 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Compiler.h"
+#include "mozilla/RecordReplay.h"
 #include "mozilla/TypeTraits.h"
 
-#include <stdint.h>
+#include <atomic>
 
-/*
- * Our minimum deployment target on clang/OS X is OS X 10.6, whose SDK
- * does not have <atomic>.  So be sure to check for <atomic> support
- * along with C++0x support.
- */
-#if defined(_MSC_VER)
-#  define MOZ_HAVE_CXX11_ATOMICS
-#elif defined(__clang__) || defined(__GNUC__)
-   /*
-    * Clang doesn't like <atomic> from libstdc++ before 4.7 due to the
-    * loose typing of the atomic builtins. GCC 4.5 and 4.6 lacks inline
-    * definitions for unspecialized std::atomic and causes linking errors.
-    * Therefore, we require at least 4.7.0 for using libstdc++.
-    *
-    * libc++ <atomic> is only functional with clang.
-    */
-#  if MOZ_USING_LIBSTDCXX && MOZ_LIBSTDCXX_VERSION_AT_LEAST(4, 7, 0)
-#    define MOZ_HAVE_CXX11_ATOMICS
-#  elif MOZ_USING_LIBCXX && defined(__clang__)
-#    define MOZ_HAVE_CXX11_ATOMICS
-#  endif
-#endif
+#include <stdint.h>
 
 namespace mozilla {
 
@@ -162,15 +142,31 @@ enum MemoryOrdering {
   SequentiallyConsistent,
 };
 
-} // namespace mozilla
-
-// Build up the underlying intrinsics.
-#ifdef MOZ_HAVE_CXX11_ATOMICS
-
-#  include <atomic>
-
-namespace mozilla {
 namespace detail {
+
+/*
+ * Structure which can be used to preserve the ordering of atomic accesses
+ * when recording or replaying an execution, depending on the Recording enum.
+ *
+ * Atomic access ordering is preserved by default when recording/replaying.
+ * This should be overridden for atomics that can be accessed in code that
+ * runs non-deterministically when recording/replaying, such as during GC, the
+ * JS interrupt callback, or code that is affected by JIT compilation or
+ * debugger activity.
+ */
+template<recordreplay::Behavior Recording> struct AutoRecordAtomicAccess;
+
+template<>
+struct AutoRecordAtomicAccess<recordreplay::Behavior::DontPreserve> {
+  AutoRecordAtomicAccess() {}
+  ~AutoRecordAtomicAccess() {}
+};
+
+template<>
+struct AutoRecordAtomicAccess<recordreplay::Behavior::Preserve> {
+  AutoRecordAtomicAccess() { recordreplay::BeginOrderedAtomicAccess(); }
+  ~AutoRecordAtomicAccess() { recordreplay::EndOrderedAtomicAccess(); }
+};
 
 /*
  * We provide CompareExchangeFailureOrder to work around a bug in some
@@ -215,339 +211,143 @@ struct IntrinsicBase
   typedef AtomicOrderConstraints<Order> OrderedOp;
 };
 
-template<typename T, MemoryOrdering Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
 struct IntrinsicMemoryOps : public IntrinsicBase<T, Order>
 {
   typedef IntrinsicBase<T, Order> Base;
 
   static T load(const typename Base::ValueType& aPtr)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.load(Base::OrderedOp::LoadOrder);
   }
 
   static void store(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     aPtr.store(aVal, Base::OrderedOp::StoreOrder);
   }
 
   static T exchange(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.exchange(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 
   static bool compareExchange(typename Base::ValueType& aPtr,
                               T aOldVal, T aNewVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.compare_exchange_strong(aOldVal, aNewVal,
                                         Base::OrderedOp::AtomicRMWOrder,
                                         Base::OrderedOp::CompareExchangeFailureOrder);
   }
 };
 
-template<typename T, MemoryOrdering Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
 struct IntrinsicAddSub : public IntrinsicBase<T, Order>
 {
   typedef IntrinsicBase<T, Order> Base;
 
   static T add(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_add(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 
   static T sub(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_sub(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 };
 
-template<typename T, MemoryOrdering Order>
-struct IntrinsicAddSub<T*, Order> : public IntrinsicBase<T*, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+struct IntrinsicAddSub<T*, Order, Recording> : public IntrinsicBase<T*, Order>
 {
   typedef IntrinsicBase<T*, Order> Base;
 
   static T* add(typename Base::ValueType& aPtr, ptrdiff_t aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_add(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 
   static T* sub(typename Base::ValueType& aPtr, ptrdiff_t aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_sub(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 };
 
-template<typename T, MemoryOrdering Order>
-struct IntrinsicIncDec : public IntrinsicAddSub<T, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+struct IntrinsicIncDec : public IntrinsicAddSub<T, Order, Recording>
 {
   typedef IntrinsicBase<T, Order> Base;
 
   static T inc(typename Base::ValueType& aPtr)
   {
-    return IntrinsicAddSub<T, Order>::add(aPtr, 1);
+    return IntrinsicAddSub<T, Order, Recording>::add(aPtr, 1);
   }
 
   static T dec(typename Base::ValueType& aPtr)
   {
-    return IntrinsicAddSub<T, Order>::sub(aPtr, 1);
+    return IntrinsicAddSub<T, Order, Recording>::sub(aPtr, 1);
   }
 };
 
-template<typename T, MemoryOrdering Order>
-struct AtomicIntrinsics : public IntrinsicMemoryOps<T, Order>,
-                          public IntrinsicIncDec<T, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+struct AtomicIntrinsics : public IntrinsicMemoryOps<T, Order, Recording>,
+                          public IntrinsicIncDec<T, Order, Recording>
 {
   typedef IntrinsicBase<T, Order> Base;
 
   static T or_(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_or(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 
   static T xor_(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_xor(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 
   static T and_(typename Base::ValueType& aPtr, T aVal)
   {
+    AutoRecordAtomicAccess<Recording> record;
     return aPtr.fetch_and(aVal, Base::OrderedOp::AtomicRMWOrder);
   }
 };
 
-template<typename T, MemoryOrdering Order>
-struct AtomicIntrinsics<T*, Order>
-  : public IntrinsicMemoryOps<T*, Order>, public IntrinsicIncDec<T*, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+struct AtomicIntrinsics<T*, Order, Recording>
+  : public IntrinsicMemoryOps<T*, Order, Recording>,
+    public IntrinsicIncDec<T*, Order, Recording>
 {
 };
 
 template<typename T>
 struct ToStorageTypeArgument
 {
-  static MOZ_CONSTEXPR T convert (T aT) { return aT; }
+  static constexpr T convert (T aT) { return aT; }
 };
 
-} // namespace detail
-} // namespace mozilla
-
-#elif defined(__GNUC__)
-
-namespace mozilla {
-namespace detail {
-
-/*
- * The __sync_* family of intrinsics is documented here:
- *
- * http://gcc.gnu.org/onlinedocs/gcc-4.6.4/gcc/Atomic-Builtins.html
- *
- * While these intrinsics are deprecated in favor of the newer __atomic_*
- * family of intrincs:
- *
- * http://gcc.gnu.org/onlinedocs/gcc-4.7.3/gcc/_005f_005fatomic-Builtins.html
- *
- * any GCC version that supports the __atomic_* intrinsics will also support
- * the <atomic> header and so will be handled above.  We provide a version of
- * atomics using the __sync_* intrinsics to support older versions of GCC.
- *
- * All __sync_* intrinsics that we use below act as full memory barriers, for
- * both compiler and hardware reordering, except for __sync_lock_test_and_set,
- * which is a only an acquire barrier.  When we call __sync_lock_test_and_set,
- * we add a barrier above it as appropriate.
- */
-
-template<MemoryOrdering Order> struct Barrier;
-
-/*
- * Some processors (in particular, x86) don't require quite so many calls to
- * __sync_sychronize as our specializations of Barrier produce.  If
- * performance turns out to be an issue, defining these specializations
- * on a per-processor basis would be a good first tuning step.
- */
-
-template<>
-struct Barrier<Relaxed>
-{
-  static void beforeLoad() {}
-  static void afterLoad() {}
-  static void beforeStore() {}
-  static void afterStore() {}
-};
-
-template<>
-struct Barrier<ReleaseAcquire>
-{
-  static void beforeLoad() {}
-  static void afterLoad() { __sync_synchronize(); }
-  static void beforeStore() { __sync_synchronize(); }
-  static void afterStore() {}
-};
-
-template<>
-struct Barrier<SequentiallyConsistent>
-{
-  static void beforeLoad() { __sync_synchronize(); }
-  static void afterLoad() { __sync_synchronize(); }
-  static void beforeStore() { __sync_synchronize(); }
-  static void afterStore() { __sync_synchronize(); }
-};
-
-template<typename T, bool TIsEnum = IsEnum<T>::value>
-struct AtomicStorageType
-{
-  // For non-enums, just use the type directly.
-  typedef T Type;
-};
-
-template<typename T>
-struct AtomicStorageType<T, true>
-  : Conditional<sizeof(T) == 4, uint32_t, uint64_t>
-{
-  static_assert(sizeof(T) == 4 || sizeof(T) == 8,
-                "wrong type computed in conditional above");
-};
-
-template<typename T, MemoryOrdering Order>
-struct IntrinsicMemoryOps
-{
-  typedef typename AtomicStorageType<T>::Type ValueType;
-
-  static T load(const ValueType& aPtr)
-  {
-    Barrier<Order>::beforeLoad();
-    T val = T(aPtr);
-    Barrier<Order>::afterLoad();
-    return val;
-  }
-
-  static void store(ValueType& aPtr, T aVal)
-  {
-    Barrier<Order>::beforeStore();
-    aPtr = ValueType(aVal);
-    Barrier<Order>::afterStore();
-  }
-
-  static T exchange(ValueType& aPtr, T aVal)
-  {
-    // __sync_lock_test_and_set is only an acquire barrier; loads and stores
-    // can't be moved up from after to before it, but they can be moved down
-    // from before to after it.  We may want a stricter ordering, so we need
-    // an explicit barrier.
-    Barrier<Order>::beforeStore();
-    return T(__sync_lock_test_and_set(&aPtr, ValueType(aVal)));
-  }
-
-  static bool compareExchange(ValueType& aPtr, T aOldVal, T aNewVal)
-  {
-    return __sync_bool_compare_and_swap(&aPtr, ValueType(aOldVal), ValueType(aNewVal));
-  }
-};
-
-template<typename T, MemoryOrdering Order>
-struct IntrinsicAddSub
-  : public IntrinsicMemoryOps<T, Order>
-{
-  typedef IntrinsicMemoryOps<T, Order> Base;
-  typedef typename Base::ValueType ValueType;
-
-  static T add(ValueType& aPtr, T aVal)
-  {
-    return T(__sync_fetch_and_add(&aPtr, ValueType(aVal)));
-  }
-
-  static T sub(ValueType& aPtr, T aVal)
-  {
-    return T(__sync_fetch_and_sub(&aPtr, ValueType(aVal)));
-  }
-};
-
-template<typename T, MemoryOrdering Order>
-struct IntrinsicAddSub<T*, Order>
-  : public IntrinsicMemoryOps<T*, Order>
-{
-  typedef IntrinsicMemoryOps<T*, Order> Base;
-  typedef typename Base::ValueType ValueType;
-
-  /*
-   * The reinterpret_casts are needed so that
-   * __sync_fetch_and_{add,sub} will properly type-check.
-   *
-   * Also, these functions do not provide standard semantics for
-   * pointer types, so we need to adjust the addend.
-   */
-  static ValueType add(ValueType& aPtr, ptrdiff_t aVal)
-  {
-    ValueType amount = reinterpret_cast<ValueType>(aVal * sizeof(T));
-    return __sync_fetch_and_add(&aPtr, amount);
-  }
-
-  static ValueType sub(ValueType& aPtr, ptrdiff_t aVal)
-  {
-    ValueType amount = reinterpret_cast<ValueType>(aVal * sizeof(T));
-    return __sync_fetch_and_sub(&aPtr, amount);
-  }
-};
-
-template<typename T, MemoryOrdering Order>
-struct IntrinsicIncDec : public IntrinsicAddSub<T, Order>
-{
-  typedef IntrinsicAddSub<T, Order> Base;
-  typedef typename Base::ValueType ValueType;
-
-  static T inc(ValueType& aPtr) { return Base::add(aPtr, 1); }
-  static T dec(ValueType& aPtr) { return Base::sub(aPtr, 1); }
-};
-
-template<typename T, MemoryOrdering Order>
-struct AtomicIntrinsics : public IntrinsicIncDec<T, Order>
-{
-  static T or_( T& aPtr, T aVal) { return __sync_fetch_and_or(&aPtr, aVal); }
-  static T xor_(T& aPtr, T aVal) { return __sync_fetch_and_xor(&aPtr, aVal); }
-  static T and_(T& aPtr, T aVal) { return __sync_fetch_and_and(&aPtr, aVal); }
-};
-
-template<typename T, MemoryOrdering Order>
-struct AtomicIntrinsics<T*, Order> : public IntrinsicIncDec<T*, Order>
-{
-};
-
-template<typename T, bool TIsEnum = IsEnum<T>::value>
-struct ToStorageTypeArgument
-{
-  typedef typename AtomicStorageType<T>::Type ResultType;
-
-  static MOZ_CONSTEXPR ResultType convert (T aT) { return ResultType(aT); }
-};
-
-template<typename T>
-struct ToStorageTypeArgument<T, false>
-{
-  static MOZ_CONSTEXPR T convert (T aT) { return aT; }
-};
-
-} // namespace detail
-} // namespace mozilla
-
-#else
-# error "Atomic compiler intrinsics are not supported on your platform"
-#endif
-
-namespace mozilla {
-
-namespace detail {
-
-template<typename T, MemoryOrdering Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
 class AtomicBase
 {
   static_assert(sizeof(T) == 4 || sizeof(T) == 8,
                 "mozilla/Atomics.h only supports 32-bit and 64-bit types");
 
 protected:
-  typedef typename detail::AtomicIntrinsics<T, Order> Intrinsics;
+  typedef typename detail::AtomicIntrinsics<T, Order, Recording> Intrinsics;
   typedef typename Intrinsics::ValueType ValueType;
   ValueType mValue;
 
 public:
-  MOZ_CONSTEXPR AtomicBase() : mValue() {}
-  explicit MOZ_CONSTEXPR AtomicBase(T aInit)
+  constexpr AtomicBase() : mValue() {}
+  explicit constexpr AtomicBase(T aInit)
     : mValue(ToStorageTypeArgument<T>::convert(aInit))
   {}
 
@@ -588,18 +388,17 @@ public:
   }
 
 private:
-  template<MemoryOrdering AnyOrder>
-  AtomicBase(const AtomicBase<T, AnyOrder>& aCopy) = delete;
+  AtomicBase(const AtomicBase& aCopy) = delete;
 };
 
-template<typename T, MemoryOrdering Order>
-class AtomicBaseIncDec : public AtomicBase<T, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+class AtomicBaseIncDec : public AtomicBase<T, Order, Recording>
 {
-  typedef typename detail::AtomicBase<T, Order> Base;
+  typedef typename detail::AtomicBase<T, Order, Recording> Base;
 
 public:
-  MOZ_CONSTEXPR AtomicBaseIncDec() : Base() {}
-  explicit MOZ_CONSTEXPR AtomicBaseIncDec(T aInit) : Base(aInit) {}
+  constexpr AtomicBaseIncDec() : Base() {}
+  explicit constexpr AtomicBaseIncDec(T aInit) : Base(aInit) {}
 
   using Base::operator=;
 
@@ -610,8 +409,7 @@ public:
   T operator--() { return Base::Intrinsics::dec(Base::mValue) - 1; }
 
 private:
-  template<MemoryOrdering AnyOrder>
-  AtomicBaseIncDec(const AtomicBaseIncDec<T, AnyOrder>& aCopy) = delete;
+  AtomicBaseIncDec(const AtomicBaseIncDec& aCopy) = delete;
 };
 
 } // namespace detail
@@ -635,6 +433,7 @@ private:
  */
 template<typename T,
          MemoryOrdering Order = SequentiallyConsistent,
+         recordreplay::Behavior Recording = recordreplay::Behavior::Preserve,
          typename Enable = void>
 class Atomic;
 
@@ -646,16 +445,17 @@ class Atomic;
  * corresponding read-modify-write operation atomically.  Finally, an atomic
  * swap method is provided.
  */
-template<typename T, MemoryOrdering Order>
-class Atomic<T, Order, typename EnableIf<IsIntegral<T>::value &&
-                       !IsSame<T, bool>::value>::Type>
-  : public detail::AtomicBaseIncDec<T, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+class Atomic<T, Order, Recording,
+             typename EnableIf<IsIntegral<T>::value &&
+                               !IsSame<T, bool>::value>::Type>
+  : public detail::AtomicBaseIncDec<T, Order, Recording>
 {
-  typedef typename detail::AtomicBaseIncDec<T, Order> Base;
+  typedef typename detail::AtomicBaseIncDec<T, Order, Recording> Base;
 
 public:
-  MOZ_CONSTEXPR Atomic() : Base() {}
-  explicit MOZ_CONSTEXPR Atomic(T aInit) : Base(aInit) {}
+  constexpr Atomic() : Base() {}
+  explicit constexpr Atomic(T aInit) : Base(aInit) {}
 
   using Base::operator=;
 
@@ -685,7 +485,7 @@ public:
   }
 
 private:
-  Atomic(Atomic<T, Order>& aOther) = delete;
+  Atomic(Atomic& aOther) = delete;
 };
 
 /**
@@ -696,14 +496,14 @@ private:
  * assignment operators for addition and subtraction. Atomic swap (via
  * exchange()) is included as well.
  */
-template<typename T, MemoryOrdering Order>
-class Atomic<T*, Order> : public detail::AtomicBaseIncDec<T*, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+class Atomic<T*, Order, Recording> : public detail::AtomicBaseIncDec<T*, Order, Recording>
 {
-  typedef typename detail::AtomicBaseIncDec<T*, Order> Base;
+  typedef typename detail::AtomicBaseIncDec<T*, Order, Recording> Base;
 
 public:
-  MOZ_CONSTEXPR Atomic() : Base() {}
-  explicit MOZ_CONSTEXPR Atomic(T* aInit) : Base(aInit) {}
+  constexpr Atomic() : Base() {}
+  explicit constexpr Atomic(T* aInit) : Base(aInit) {}
 
   using Base::operator=;
 
@@ -718,7 +518,7 @@ public:
   }
 
 private:
-  Atomic(Atomic<T*, Order>& aOther) = delete;
+  Atomic(Atomic& aOther) = delete;
 };
 
 /**
@@ -726,22 +526,22 @@ private:
  *
  * The atomic store and load operations and the atomic swap method is provided.
  */
-template<typename T, MemoryOrdering Order>
-class Atomic<T, Order, typename EnableIf<IsEnum<T>::value>::Type>
-  : public detail::AtomicBase<T, Order>
+template<typename T, MemoryOrdering Order, recordreplay::Behavior Recording>
+class Atomic<T, Order, Recording, typename EnableIf<IsEnum<T>::value>::Type>
+  : public detail::AtomicBase<T, Order, Recording>
 {
-  typedef typename detail::AtomicBase<T, Order> Base;
+  typedef typename detail::AtomicBase<T, Order, Recording> Base;
 
 public:
-  MOZ_CONSTEXPR Atomic() : Base() {}
-  explicit MOZ_CONSTEXPR Atomic(T aInit) : Base(aInit) {}
+  constexpr Atomic() : Base() {}
+  explicit constexpr Atomic(T aInit) : Base(aInit) {}
 
   operator T() const { return T(Base::Intrinsics::load(Base::mValue)); }
 
   using Base::operator=;
 
 private:
-  Atomic(Atomic<T, Order>& aOther) = delete;
+  Atomic(Atomic& aOther) = delete;
 };
 
 /**
@@ -760,15 +560,15 @@ private:
  *   runtime library are not available on Windows XP. This is why we implement
  *   Atomic<bool> with an underlying type of uint32_t.
  */
-template<MemoryOrdering Order>
-class Atomic<bool, Order>
-  : protected detail::AtomicBase<uint32_t, Order>
+template<MemoryOrdering Order, recordreplay::Behavior Recording>
+class Atomic<bool, Order, Recording>
+  : protected detail::AtomicBase<uint32_t, Order, Recording>
 {
-  typedef typename detail::AtomicBase<uint32_t, Order> Base;
+  typedef typename detail::AtomicBase<uint32_t, Order, Recording> Base;
 
 public:
-  MOZ_CONSTEXPR Atomic() : Base() {}
-  explicit MOZ_CONSTEXPR Atomic(bool aInit) : Base(aInit) {}
+  constexpr Atomic() : Base() {}
+  explicit constexpr Atomic(bool aInit) : Base(aInit) {}
 
   // We provide boolean wrappers for the underlying AtomicBase methods.
   MOZ_IMPLICIT operator bool() const
@@ -792,8 +592,13 @@ public:
   }
 
 private:
-  Atomic(Atomic<bool, Order>& aOther) = delete;
+  Atomic(Atomic& aOther) = delete;
 };
+
+// If you want to atomically swap two atomic values, use exchange().
+template<typename T, MemoryOrdering Order>
+void
+Swap(Atomic<T, Order>&, Atomic<T, Order>&) = delete;
 
 } // namespace mozilla
 

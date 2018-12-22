@@ -6,22 +6,21 @@
 "use strict";
 
 const EventEmitter = require("devtools/shared/event-emitter");
-const { Cu, Ci } = require("chrome");
-const { ViewHelpers } = Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm", {});
+const { ViewHelpers } = require("devtools/client/shared/widgets/view-helpers");
 
 /**
  * A list menu widget that attempts to be very fast.
  *
  * Note: this widget should be used in tandem with the WidgetMethods in
- * ViewHelpers.jsm.
+ * view-helpers.js.
  *
- * @param nsIDOMNode aNode
+ * @param Node aNode
  *        The element associated with the widget.
  */
-const FastListWidget = module.exports = function FastListWidget(aNode) {
-  this.document = aNode.ownerDocument;
+const FastListWidget = module.exports = function FastListWidget(node) {
+  this.document = node.ownerDocument;
   this.window = this.document.defaultView;
-  this._parent = aNode;
+  this._parent = node;
   this._fragment = this.document.createDocumentFragment();
 
   // This is a prototype element that each item added to the list clones.
@@ -33,8 +32,8 @@ const FastListWidget = module.exports = function FastListWidget(aNode) {
   this._list.setAttribute("flex", "1");
   this._list.setAttribute("orient", "vertical");
   this._list.setAttribute("tabindex", "0");
-  this._list.addEventListener("keypress", e => this.emit("keyPress", e), false);
-  this._list.addEventListener("mousedown", e => this.emit("mousePress", e), false);
+  this._list.addEventListener("keydown", e => this.emit("keyDown", e));
+  this._list.addEventListener("mousedown", e => this.emit("mousePress", e));
   this._parent.appendChild(this._list);
 
   this._orderedMenuElementsArray = [];
@@ -45,9 +44,9 @@ const FastListWidget = module.exports = function FastListWidget(aNode) {
 
   // Delegate some of the associated node's methods to satisfy the interface
   // required by MenuContainer instances.
-  ViewHelpers.delegateWidgetAttributeMethods(this, aNode);
-  ViewHelpers.delegateWidgetEventMethods(this, aNode);
-}
+  ViewHelpers.delegateWidgetAttributeMethods(this, node);
+  ViewHelpers.delegateWidgetEventMethods(this, node);
+};
 
 FastListWidget.prototype = {
   /**
@@ -56,18 +55,18 @@ FastListWidget.prototype = {
    *
    * @param number aIndex
    *        The position in the container intended for this item.
-   * @param nsIDOMNode aContents
+   * @param Node aContents
    *        The node to be displayed in the container.
    * @param Object aAttachment [optional]
    *        Extra data for the user.
-   * @return nsIDOMNode
+   * @return Node
    *         The element associated with the displayed item.
    */
-  insertItemAt: function(aIndex, aContents, aAttachment={}) {
-    let element = this._templateElement.cloneNode();
-    element.appendChild(aContents);
+  insertItemAt: function(index, contents, attachment = {}) {
+    const element = this._templateElement.cloneNode();
+    element.appendChild(contents);
 
-    if (aIndex >= 0) {
+    if (index >= 0) {
       throw new Error("FastListWidget only supports appending items.");
     }
 
@@ -91,8 +90,7 @@ FastListWidget.prototype = {
    * Removes all of the child nodes from this container.
    */
   removeAllItems: function() {
-    let parent = this._parent;
-    let list = this._list;
+    const list = this._list;
 
     while (list.hasChildNodes()) {
       list.firstChild.remove();
@@ -113,7 +111,7 @@ FastListWidget.prototype = {
 
   /**
    * Gets the currently selected child node in this container.
-   * @return nsIDOMNode
+   * @return Node
    */
   get selectedItem() {
     return this._selectedItem;
@@ -121,15 +119,15 @@ FastListWidget.prototype = {
 
   /**
    * Sets the currently selected child node in this container.
-   * @param nsIDOMNode child
+   * @param Node child
    */
   set selectedItem(child) {
-    let menuArray = this._orderedMenuElementsArray;
+    const menuArray = this._orderedMenuElementsArray;
 
     if (!child) {
       this._selectedItem = null;
     }
-    for (let node of menuArray) {
+    for (const node of menuArray) {
       if (node == child) {
         node.classList.add("selected");
         this._selectedItem = node;
@@ -146,7 +144,7 @@ FastListWidget.prototype = {
    *
    * @param number index
    *        The position in the container intended for this item.
-   * @return nsIDOMNode
+   * @return Node
    *         The element associated with the displayed item.
    */
   getItemAtIndex: function(index) {
@@ -186,7 +184,7 @@ FastListWidget.prototype = {
   /**
    * Ensures the specified element is visible.
    *
-   * @param nsIDOMNode element
+   * @param Node element
    *        The element to make visible.
    */
   ensureElementIsVisible: function(element) {
@@ -195,7 +193,7 @@ FastListWidget.prototype = {
     }
 
     // Ensure the element is visible but not scrolled horizontally.
-    let boxObject = this._list.boxObject;
+    const boxObject = this._list.boxObject;
     boxObject.ensureElementIsVisible(element);
     boxObject.scrollBy(-this._list.clientWidth, 0);
   },
@@ -204,11 +202,11 @@ FastListWidget.prototype = {
    * Sets the text displayed in this container when empty.
    * @param string aValue
    */
-  set _textWhenEmpty(aValue) {
+  set _textWhenEmpty(value) {
     if (this._emptyTextNode) {
-      this._emptyTextNode.setAttribute("value", aValue);
+      this._emptyTextNode.setAttribute("value", value);
     }
-    this._emptyTextValue = aValue;
+    this._emptyTextValue = value;
     this._showEmptyText();
   },
 
@@ -219,7 +217,7 @@ FastListWidget.prototype = {
     if (this._emptyTextNode || !this._emptyTextValue) {
       return;
     }
-    let label = this.document.createElement("label");
+    const label = this.document.createElement("label");
     label.className = "plain fast-list-widget-empty-text";
     label.setAttribute("value", this._emptyTextValue);
 

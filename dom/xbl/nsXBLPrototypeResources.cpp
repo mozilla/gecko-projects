@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsIStyleRuleProcessor.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsIServiceManager.h"
@@ -15,12 +14,12 @@
 #include "mozilla/css/Loader.h"
 #include "nsIURI.h"
 #include "nsLayoutCID.h"
-#include "nsCSSRuleProcessor.h"
-#include "nsStyleSet.h"
 #include "mozilla/dom/URL.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/ServoBindings.h"
+#include "mozilla/ServoStyleRuleMap.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 using namespace mozilla;
 using mozilla::dom::IsChromeURI;
@@ -41,19 +40,20 @@ nsXBLPrototypeResources::~nsXBLPrototypeResources()
 }
 
 void
-nsXBLPrototypeResources::AddResource(nsIAtom* aResourceType, const nsAString& aSrc)
+nsXBLPrototypeResources::AddResource(nsAtom* aResourceType, const nsAString& aSrc)
 {
   if (mLoader)
     mLoader->AddResource(aResourceType, aSrc);
 }
 
-void
-nsXBLPrototypeResources::LoadResources(bool* aResult)
+bool
+nsXBLPrototypeResources::LoadResources(nsIContent* aBoundElement)
 {
-  if (mLoader)
-    mLoader->LoadResources(aResult);
-  else
-    *aResult = true; // All resources loaded.
+  if (mLoader) {
+    return mLoader->LoadResources(aBoundElement);
+  }
+
+  return true; // All resources loaded.
 }
 
 void
@@ -84,18 +84,18 @@ nsXBLPrototypeResources::FlushSkinSheets()
   // skin sheets can't be, and which in any case don't have a usable
   // URL to reload.)
 
-  nsTArray<StyleSheetHandle::RefPtr> oldSheets;
+  nsTArray<RefPtr<StyleSheet>> oldSheets;
 
   oldSheets.SwapElements(mStyleSheetList);
 
   mozilla::css::Loader* cssLoader = doc->CSSLoader();
 
   for (size_t i = 0, count = oldSheets.Length(); i < count; ++i) {
-    StyleSheetHandle oldSheet = oldSheets[i];
+    StyleSheet* oldSheet = oldSheets[i];
 
     nsIURI* uri = oldSheet->GetSheetURI();
 
-    StyleSheetHandle::RefPtr newSheet;
+    RefPtr<StyleSheet> newSheet;
     if (!oldSheet->IsInline() && IsChromeURI(uri)) {
       if (NS_FAILED(cssLoader->LoadSheetSync(uri, &newSheet)))
         continue;
@@ -107,7 +107,11 @@ nsXBLPrototypeResources::FlushSkinSheets()
     mStyleSheetList.AppendElement(newSheet);
   }
 
-  GatherRuleProcessor();
+  // There may be no shell during unlink.
+  if (auto* shell = doc->GetShell()) {
+    MOZ_ASSERT(shell->GetPresContext());
+    ComputeServoStyles(*shell->StyleSet());
+  }
 
   return NS_OK;
 }
@@ -126,7 +130,6 @@ nsXBLPrototypeResources::Traverse(nsCycleCollectionTraversalCallback &cb)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
   cb.NoteXPCOMChild(mLoader);
 
-  CycleCollectionNoteChild(cb, mRuleProcessor.get(), "mRuleProcessor");
   ImplCycleCollectionTraverse(cb, mStyleSheetList, "mStyleSheetList");
 }
 
@@ -134,7 +137,6 @@ void
 nsXBLPrototypeResources::Unlink()
 {
   mStyleSheetList.Clear();
-  mRuleProcessor = nullptr;
 }
 
 void
@@ -143,62 +145,84 @@ nsXBLPrototypeResources::ClearLoader()
   mLoader = nullptr;
 }
 
+
 void
-nsXBLPrototypeResources::GatherRuleProcessor()
+nsXBLPrototypeResources::SyncServoStyles()
 {
-  nsTArray<RefPtr<CSSStyleSheet>> sheets(mStyleSheetList.Length());
-  for (StyleSheetHandle sheet : mStyleSheetList) {
-    MOZ_ASSERT(sheet->IsGecko(),
-               "GatherRuleProcessor must only be called for "
-               "nsXBLPrototypeResources objects with Gecko-flavored style "
-               "backends");
-    sheets.AppendElement(sheet->AsGecko());
+  mStyleRuleMap.reset(nullptr);
+  mServoStyles.reset(Servo_AuthorStyles_Create());
+  for (auto& sheet : mStyleSheetList) {
+    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), sheet);
   }
-  mRuleProcessor = new nsCSSRuleProcessor(sheets,
-                                          SheetType::Doc,
-                                          nullptr,
-                                          mRuleProcessor);
 }
 
 void
-nsXBLPrototypeResources::AppendStyleSheet(StyleSheetHandle aSheet)
+nsXBLPrototypeResources::ComputeServoStyles(const ServoStyleSet& aMasterStyleSet)
+{
+  SyncServoStyles();
+  Servo_AuthorStyles_Flush(mServoStyles.get(), aMasterStyleSet.RawSet());
+}
+
+ServoStyleRuleMap*
+nsXBLPrototypeResources::GetServoStyleRuleMap()
+{
+  if (!HasStyleSheets() || !mServoStyles) {
+    return nullptr;
+  }
+
+  if (!mStyleRuleMap) {
+    mStyleRuleMap = MakeUnique<ServoStyleRuleMap>();
+  }
+
+  mStyleRuleMap->EnsureTable(*this);
+  return mStyleRuleMap.get();
+}
+
+void
+nsXBLPrototypeResources::AppendStyleSheet(StyleSheet* aSheet)
 {
   mStyleSheetList.AppendElement(aSheet);
 }
 
 void
-nsXBLPrototypeResources::RemoveStyleSheet(StyleSheetHandle aSheet)
+nsXBLPrototypeResources::RemoveStyleSheet(StyleSheet* aSheet)
 {
   mStyleSheetList.RemoveElement(aSheet);
 }
 
 void
-nsXBLPrototypeResources::InsertStyleSheetAt(size_t aIndex, StyleSheetHandle aSheet)
+nsXBLPrototypeResources::InsertStyleSheetAt(size_t aIndex, StyleSheet* aSheet)
 {
   mStyleSheetList.InsertElementAt(aIndex, aSheet);
 }
 
-StyleSheetHandle
-nsXBLPrototypeResources::StyleSheetAt(size_t aIndex) const
-{
-  return mStyleSheetList[aIndex];
-}
-
-size_t
-nsXBLPrototypeResources::SheetCount() const
-{
-  return mStyleSheetList.Length();
-}
-
-bool
-nsXBLPrototypeResources::HasStyleSheets() const
-{
-  return !mStyleSheetList.IsEmpty();
-}
-
 void
 nsXBLPrototypeResources::AppendStyleSheetsTo(
-                                      nsTArray<StyleSheetHandle>& aResult) const
+                                      nsTArray<StyleSheet*>& aResult) const
 {
   aResult.AppendElements(mStyleSheetList);
+}
+
+MOZ_DEFINE_MALLOC_SIZE_OF(ServoAuthorStylesMallocSizeOf)
+MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF(ServoAuthorStylesMallocEnclosingSizeOf)
+
+size_t
+nsXBLPrototypeResources::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  size_t n = aMallocSizeOf(this);
+  n += mStyleSheetList.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (const auto& sheet : mStyleSheetList) {
+    n += sheet->SizeOfIncludingThis(aMallocSizeOf);
+  }
+  n += mServoStyles ? Servo_AuthorStyles_SizeOfIncludingThis(
+      ServoAuthorStylesMallocSizeOf,
+      ServoAuthorStylesMallocEnclosingSizeOf,
+      mServoStyles.get()) : 0;
+  n += mStyleRuleMap ? mStyleRuleMap->SizeOfIncludingThis(aMallocSizeOf) : 0;
+
+  // Measurement of the following members may be added later if DMD finds it
+  // is worthwhile:
+  // - mLoader
+
+  return n;
 }

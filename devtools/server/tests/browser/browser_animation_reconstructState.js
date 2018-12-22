@@ -7,31 +7,31 @@
 // Check that, even though the AnimationPlayerActor only sends the bits of its
 // state that change, the front reconstructs the whole state everytime.
 
-add_task(function*() {
-  let {client, walker, animations} =
-    yield initAnimationsFrontForUrl(MAIN_DOMAIN + "animation.html");
+add_task(async function() {
+  const {client, walker, animations} =
+    await initAnimationsFrontForUrl(MAIN_DOMAIN + "animation.html");
 
-  yield playerHasCompleteStateAtAllTimes(walker, animations);
+  await playerHasCompleteStateAtAllTimes(walker, animations);
 
-  yield closeDebuggerClient(client);
+  await client.close();
   gBrowser.removeCurrentTab();
 });
 
-function* playerHasCompleteStateAtAllTimes(walker, animations) {
-  let node = yield walker.querySelector(walker.rootNode, ".simple-animation");
-  let [player] = yield animations.getAnimationPlayersForNode(node);
-  yield player.ready();
+async function playerHasCompleteStateAtAllTimes(walker, animations) {
+  const node = await walker.querySelector(walker.rootNode, ".simple-animation");
+  const [player] = await animations.getAnimationPlayersForNode(node);
+  await player.ready();
 
   // Get the list of state key names from the initialstate.
-  let keys = Object.keys(player.initialState);
+  const keys = Object.keys(player.initialState);
 
   // Get the state over and over again and check that the object returned
   // contains all keys.
   // Normally, only the currentTime will have changed in between 2 calls.
   for (let i = 0; i < 10; i++) {
-    let state = yield player.getCurrentState();
+    await player.refreshState();
     keys.forEach(key => {
-      ok(typeof state[key] !== "undefined",
+      ok(typeof player.state[key] !== "undefined",
          "The state retrieved has key " + key);
     });
   }

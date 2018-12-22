@@ -4,11 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_psm__NSSCertDBTrustDomain_h
-#define mozilla_psm__NSSCertDBTrustDomain_h
+#ifndef NSSCertDBTrustDomain_h
+#define NSSCertDBTrustDomain_h
 
 #include "CertVerifier.h"
+#include "ScopedNSSTypes.h"
+#include "mozilla/BasePrincipal.h"
+#include "mozilla/TimeStamp.h"
 #include "nsICertBlocklist.h"
+#include "nsString.h"
 #include "pkix/pkixtypes.h"
 #include "secmodt.h"
 
@@ -19,27 +23,42 @@ enum class ValidityCheckingMode {
   CheckForEV = 1,
 };
 
-SECStatus InitializeNSS(const char* dir, bool readOnly, bool loadPKCS11Modules);
+// Policy options for matching id-Netscape-stepUp with id-kp-serverAuth (for CA
+// certificates only):
+// * Always match: the step-up OID is considered equivalent to serverAuth
+// * Match before 23 August 2016: the OID is considered equivalent if the
+//   certificate's notBefore is before 23 August 2016
+// * Match before 23 August 2015: similarly, but for 23 August 2015
+// * Never match: the OID is never considered equivalent to serverAuth
+enum class NetscapeStepUpPolicy : uint32_t {
+  AlwaysMatch = 0,
+  MatchBefore23August2016 = 1,
+  MatchBefore23August2015 = 2,
+  NeverMatch = 3,
+};
+
+SECStatus InitializeNSS(const nsACString& dir, bool readOnly,
+                        bool loadPKCS11Modules);
 
 void DisableMD5();
 
-extern const char BUILTIN_ROOTS_MODULE_DEFAULT_NAME[];
+/**
+ * Loads root certificates from a module.
+ *
+ * @param dir
+ *        The path to the directory containing the NSS builtin roots module.
+ *        Usually the same as the path to the other NSS shared libraries.
+ *        If empty, the (library) path will be searched.
+ * @return true if the roots were successfully loaded, false otherwise.
+ */
+bool LoadLoadableRoots(const nsCString& dir);
 
-// The dir parameter is the path to the directory containing the NSS builtin
-// roots module. Usually this is the same as the path to the other NSS shared
-// libraries. If it is null then the (library) path will be searched.
-//
-// The modNameUTF8 parameter should usually be
-// BUILTIN_ROOTS_MODULE_DEFAULT_NAME.
-SECStatus LoadLoadableRoots(/*optional*/ const char* dir,
-                            const char* modNameUTF8);
+void UnloadLoadableRoots();
 
-void UnloadLoadableRoots(const char* modNameUTF8);
+nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
+                              /*out*/ nsCString& nickname);
 
-// Caller must free the result with PR_Free
-char* DefaultServerNicknameForCert(CERTCertificate* cert);
-
-void SaveIntermediateCerts(const ScopedCERTCertList& certList);
+void SaveIntermediateCerts(const UniqueCERTCertList& certList);
 
 class NSSCertDBTrustDomain : public mozilla::pkix::TrustDomain
 {
@@ -57,13 +76,17 @@ public:
 
   NSSCertDBTrustDomain(SECTrustType certDBTrustType, OCSPFetching ocspFetching,
                        OCSPCache& ocspCache, void* pinArg,
-                       CertVerifier::OcspGetConfig ocspGETConfig,
+                       mozilla::TimeDuration ocspTimeoutSoft,
+                       mozilla::TimeDuration ocspTimeoutHard,
                        uint32_t certShortLifetimeInDays,
                        CertVerifier::PinningMode pinningMode,
                        unsigned int minRSABits,
                        ValidityCheckingMode validityCheckingMode,
                        CertVerifier::SHA1Mode sha1Mode,
-                       ScopedCERTCertList& builtChain,
+                       NetscapeStepUpPolicy netscapeStepUpPolicy,
+                       DistrustedCAPolicy distrustedCAPolicy,
+                       const OriginAttributes& originAttributes,
+                       UniqueCERTCertList& builtChain,
           /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
           /*optional*/ const char* hostname = nullptr);
 
@@ -108,6 +131,10 @@ public:
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
 
+  virtual Result NetscapeStepUpMatchesServerAuth(
+                   mozilla::pkix::Time notBefore,
+                   /*out*/ bool& matches) override;
+
   virtual Result CheckRevocation(
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    const mozilla::pkix::CertID& certID,
@@ -118,16 +145,32 @@ public:
                    override;
 
   virtual Result IsChainValid(const mozilla::pkix::DERArray& certChain,
-                              mozilla::pkix::Time time) override;
+                              mozilla::pkix::Time time,
+                              const mozilla::pkix::CertPolicyId& requiredPolicy)
+                              override;
+
+  virtual void NoteAuxiliaryExtension(
+                   mozilla::pkix::AuxiliaryExtension extension,
+                   mozilla::pkix::Input extensionData) override;
+
+  // Resets the OCSP stapling status and SCT lists accumulated during
+  // the chain building.
+  void ResetAccumulatedState();
 
   CertVerifier::OCSPStaplingStatus GetOCSPStaplingStatus() const
   {
     return mOCSPStaplingStatus;
   }
-  void ResetOCSPStaplingStatus()
-  {
-    mOCSPStaplingStatus = CertVerifier::OCSP_STAPLING_NEVER_CHECKED;
-  }
+
+  // SCT lists (see Certificate Transparency) extracted during
+  // certificate verification. Note that the returned Inputs are invalidated
+  // the next time a chain is built and by ResetAccumulatedState method
+  // (and when the TrustDomain object is destroyed).
+
+  mozilla::pkix::Input GetSCTListFromCertificate() const;
+  mozilla::pkix::Input GetSCTListFromOCSPStapling() const;
+
+  bool GetIsErrorDueToDistrustedCAPolicy() const;
 
 private:
   enum EncodedResponseSource {
@@ -138,24 +181,33 @@ private:
     const mozilla::pkix::CertID& certID, mozilla::pkix::Time time,
     uint16_t maxLifetimeInDays, mozilla::pkix::Input encodedResponse,
     EncodedResponseSource responseSource, /*out*/ bool& expired);
+  TimeDuration GetOCSPTimeout() const;
 
   const SECTrustType mCertDBTrustType;
   const OCSPFetching mOCSPFetching;
   OCSPCache& mOCSPCache; // non-owning!
   void* mPinArg; // non-owning!
-  const CertVerifier::OcspGetConfig mOCSPGetConfig;
+  const mozilla::TimeDuration mOCSPTimeoutSoft;
+  const mozilla::TimeDuration mOCSPTimeoutHard;
   const uint32_t mCertShortLifetimeInDays;
   CertVerifier::PinningMode mPinningMode;
   const unsigned int mMinRSABits;
   ValidityCheckingMode mValidityCheckingMode;
   CertVerifier::SHA1Mode mSHA1Mode;
-  ScopedCERTCertList& mBuiltChain; // non-owning
+  NetscapeStepUpPolicy mNetscapeStepUpPolicy;
+  DistrustedCAPolicy mDistrustedCAPolicy;
+  bool mSawDistrustedCAByPolicyError;
+  const OriginAttributes& mOriginAttributes;
+  UniqueCERTCertList& mBuiltChain; // non-owning
   PinningTelemetryInfo* mPinningTelemetryInfo;
   const char* mHostname; // non-owning - only used for pinning checks
   nsCOMPtr<nsICertBlocklist> mCertBlocklist;
   CertVerifier::OCSPStaplingStatus mOCSPStaplingStatus;
+  // Certificate Transparency data extracted during certificate verification
+  UniqueSECItem mSCTListFromCertificate;
+  UniqueSECItem mSCTListFromOCSPStapling;
 };
 
 } } // namespace mozilla::psm
 
-#endif // mozilla_psm__NSSCertDBTrustDomain_h
+#endif // NSSCertDBTrustDomain_h

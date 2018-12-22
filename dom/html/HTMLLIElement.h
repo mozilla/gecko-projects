@@ -9,14 +9,12 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsIDOMHTMLLIElement.h"
 #include "nsGenericHTMLElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLLIElement final : public nsGenericHTMLElement,
-                            public nsIDOMHTMLLIElement
+class HTMLLIElement final : public nsGenericHTMLElement
 {
 public:
   explicit HTMLLIElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
@@ -25,18 +23,17 @@ public:
   }
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMHTMLLIElement
-  NS_DECL_NSIDOMHTMLLIELEMENT
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLLIElement, nsGenericHTMLElement)
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult) override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   // WebIDL API
   void GetType(DOMString& aType)
@@ -63,7 +60,7 @@ protected:
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
+                                    MappedDeclarations&);
 };
 
 } // namespace dom

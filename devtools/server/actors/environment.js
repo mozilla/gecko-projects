@@ -5,8 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { ActorClass, Arg, RetVal, method } = require("devtools/server/protocol");
-const { createValueGrip } = require("devtools/server/actors/object");
+/* global Debugger */
+
+const { ActorClassWithSpec } = require("devtools/shared/protocol");
+const { createValueGrip } = require("devtools/server/actors/object/utils");
+const { environmentSpec } = require("devtools/shared/specs/environment");
 
 /**
  * Creates an EnvironmentActor. EnvironmentActors are responsible for listing
@@ -18,19 +21,26 @@ const { createValueGrip } = require("devtools/server/actors/object");
  * @param ThreadActor aThreadActor
  *        The parent thread actor that contains this environment.
  */
-let EnvironmentActor = ActorClass({
-  typeName: "environment",
-
-  initialize: function (environment, threadActor) {
+const EnvironmentActor = ActorClassWithSpec(environmentSpec, {
+  initialize: function(environment, threadActor) {
     this.obj = environment;
     this.threadActor = threadActor;
   },
 
   /**
+   * When the Environment Actor is destroyed it removes the
+   * Debugger.Environment.actor field so that environment does not
+   * reference a destroyed actor.
+   */
+  destroy: function() {
+    this.obj.actor = null;
+  },
+
+  /**
    * Return an environment form for use in a protocol message.
    */
-  form: function () {
-    let form = { actor: this.actorID };
+  form: function() {
+    const form = { actor: this.actorID };
 
     // What is this environment's type?
     if (this.obj.type == "declarative") {
@@ -76,10 +86,10 @@ let EnvironmentActor = ActorClass({
    * @param any value
    *        The value to be assigned.
    */
-  assign: method(function (name, value) {
+  assign: function(name, value) {
     // TODO: enable the commented-out part when getVariableDescriptor lands
     // (bug 725815).
-    /*let desc = this.obj.getVariableDescriptor(name);
+    /* let desc = this.obj.getVariableDescriptor(name);
 
     if (!desc.writable) {
       return { error: "immutableBinding",
@@ -91,33 +101,29 @@ let EnvironmentActor = ActorClass({
       this.obj.setVariable(name, value);
     } catch (e) {
       if (e instanceof Debugger.DebuggeeWouldRun) {
-        throw {
+        const errorObject = {
           error: "threadWouldRun",
           message: "Assigning a value would cause the debuggee to run"
         };
+        throw errorObject;
       } else {
         throw e;
       }
     }
     return { from: this.actorID };
-  }, {
-    request: {
-      name: Arg(1),
-      value: Arg(2)
-    }
-  }),
+  },
 
   /**
    * Handle a protocol request to fully enumerate the bindings introduced by the
    * lexical environment.
    */
-  bindings: method(function () {
-    let bindings = { arguments: [], variables: {} };
+  bindings: function() {
+    const bindings = { arguments: [], variables: {} };
 
     // TODO: this part should be removed in favor of the commented-out part
     // below when getVariableDescriptor lands (bug 725815).
     if (typeof this.obj.getVariable != "function") {
-    //if (typeof this.obj.getVariableDescriptor != "function") {
+    // if (typeof this.obj.getVariableDescriptor != "function") {
       return bindings;
     }
 
@@ -127,13 +133,13 @@ let EnvironmentActor = ActorClass({
     } else {
       parameterNames = [];
     }
-    for (let name of parameterNames) {
-      let arg = {};
-      let value = this.obj.getVariable(name);
+    for (const name of parameterNames) {
+      const arg = {};
+      const value = this.obj.getVariable(name);
 
       // TODO: this part should be removed in favor of the commented-out part
       // below when getVariableDescriptor lands (bug 725815).
-      let desc = {
+      const desc = {
         value: value,
         configurable: false,
         writable: !(value && value.optimizedOut),
@@ -141,7 +147,7 @@ let EnvironmentActor = ActorClass({
       };
 
       // let desc = this.obj.getVariableDescriptor(name);
-      let descForm = {
+      const descForm = {
         enumerable: true,
         configurable: desc.configurable
       };
@@ -159,18 +165,18 @@ let EnvironmentActor = ActorClass({
       bindings.arguments.push(arg);
     }
 
-    for (let name of this.obj.names()) {
+    for (const name of this.obj.names()) {
       if (bindings.arguments.some(function exists(element) {
-                                    return !!element[name];
-                                  })) {
+        return !!element[name];
+      })) {
         continue;
       }
 
-      let value = this.obj.getVariable(name);
+      const value = this.obj.getVariable(name);
 
       // TODO: this part should be removed in favor of the commented-out part
       // below when getVariableDescriptor lands.
-      let desc = {
+      const desc = {
         value: value,
         configurable: false,
         writable: !(value &&
@@ -180,8 +186,8 @@ let EnvironmentActor = ActorClass({
         enumerable: true
       };
 
-      //let desc = this.obj.getVariableDescriptor(name);
-      let descForm = {
+      // let desc = this.obj.getVariableDescriptor(name);
+      const descForm = {
         enumerable: true,
         configurable: desc.configurable
       };
@@ -199,12 +205,7 @@ let EnvironmentActor = ActorClass({
     }
 
     return bindings;
-  }, {
-    request: {},
-    response: {
-      bindings: RetVal("json")
-    }
-  })
+  }
 });
 
 exports.EnvironmentActor = EnvironmentActor;

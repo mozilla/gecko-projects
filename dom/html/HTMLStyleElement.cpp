@@ -7,7 +7,6 @@
 #include "mozilla/dom/HTMLStyleElementBinding.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
-#include "nsIDOMStyleSheet.h"
 #include "nsIDocument.h"
 #include "nsUnicharUtils.h"
 #include "nsThreadUtils.h"
@@ -41,88 +40,50 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLStyleElement,
   tmp->nsStyleLinkElement::Unlink();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_ADDREF_INHERITED(HTMLStyleElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLStyleElement, Element)
-
-
-// QueryInterface implementation for HTMLStyleElement
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLStyleElement)
-  NS_INTERFACE_TABLE_INHERITED(HTMLStyleElement,
-                               nsIDOMHTMLStyleElement,
-                               nsIStyleSheetLinkingElement,
-                               nsIMutationObserver)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLStyleElement,
+                                             nsGenericHTMLElement,
+                                             nsIStyleSheetLinkingElement,
+                                             nsIMutationObserver)
 
 NS_IMPL_ELEMENT_CLONE(HTMLStyleElement)
 
 
-NS_IMETHODIMP
-HTMLStyleElement::GetMozDisabled(bool* aDisabled)
-{
-  NS_ENSURE_ARG_POINTER(aDisabled);
-
-  *aDisabled = Disabled();
-  return NS_OK;
-}
-
 bool
 HTMLStyleElement::Disabled()
 {
-  CSSStyleSheet* ss = GetSheet();
+  StyleSheet* ss = GetSheet();
   return ss && ss->Disabled();
-}
-
-NS_IMETHODIMP
-HTMLStyleElement::SetMozDisabled(bool aDisabled)
-{
-  SetDisabled(aDisabled);
-  return NS_OK;
 }
 
 void
 HTMLStyleElement::SetDisabled(bool aDisabled)
 {
-  CSSStyleSheet* ss = GetSheet();
-  if (ss) {
+  if (StyleSheet* ss = GetSheet()) {
     ss->SetDisabled(aDisabled);
   }
 }
 
-NS_IMPL_STRING_ATTR(HTMLStyleElement, Media, media)
-NS_IMPL_BOOL_ATTR(HTMLStyleElement, Scoped, scoped)
-NS_IMPL_STRING_ATTR(HTMLStyleElement, Type, type)
-
 void
-HTMLStyleElement::CharacterDataChanged(nsIDocument* aDocument,
-                                       nsIContent* aContent,
-                                       CharacterDataChangeInfo* aInfo)
+HTMLStyleElement::CharacterDataChanged(nsIContent* aContent,
+                                       const CharacterDataChangeInfo&)
 {
   ContentChanged(aContent);
 }
 
 void
-HTMLStyleElement::ContentAppended(nsIDocument* aDocument,
-                                  nsIContent* aContainer,
-                                  nsIContent* aFirstNewContent,
-                                  int32_t aNewIndexInContainer)
+HTMLStyleElement::ContentAppended(nsIContent* aFirstNewContent)
 {
-  ContentChanged(aContainer);
+  ContentChanged(aFirstNewContent->GetParent());
 }
 
 void
-HTMLStyleElement::ContentInserted(nsIDocument* aDocument,
-                                  nsIContent* aContainer,
-                                  nsIContent* aChild,
-                                  int32_t aIndexInContainer)
+HTMLStyleElement::ContentInserted(nsIContent* aChild)
 {
   ContentChanged(aChild);
 }
 
 void
-HTMLStyleElement::ContentRemoved(nsIDocument* aDocument,
-                                 nsIContent* aContainer,
-                                 nsIContent* aChild,
-                                 int32_t aIndexInContainer,
+HTMLStyleElement::ContentRemoved(nsIContent* aChild,
                                  nsIContent* aPreviousSibling)
 {
   ContentChanged(aChild);
@@ -131,8 +92,9 @@ HTMLStyleElement::ContentRemoved(nsIDocument* aDocument,
 void
 HTMLStyleElement::ContentChanged(nsIContent* aContent)
 {
+  mTriggeringPrincipal = nullptr;
   if (nsContentUtils::IsInSameAnonymousTree(this, aContent)) {
-    UpdateStyleSheetInternal(nullptr, nullptr);
+    Unused << UpdateStyleSheetInternal(nullptr, nullptr);
   }
 }
 
@@ -147,9 +109,10 @@ HTMLStyleElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   NS_ENSURE_SUCCESS(rv, rv);
 
   void (HTMLStyleElement::*update)() = &HTMLStyleElement::UpdateStyleSheetInternal;
-  nsContentUtils::AddScriptRunner(NS_NewRunnableMethod(this, update));
+  nsContentUtils::AddScriptRunner(
+    NewRunnableMethod("dom::HTMLStyleElement::BindToTree", this, update));
 
-  return rv;  
+  return rv;
 }
 
 void
@@ -167,99 +130,100 @@ HTMLStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
     return;
   }
 
-  UpdateStyleSheetInternal(oldDoc, oldShadow);
+  Unused << UpdateStyleSheetInternal(oldDoc, oldShadow);
 }
 
 nsresult
-HTMLStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                               const nsAttrValue* aValue, bool aNotify)
+HTMLStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                               const nsAttrValue* aValue,
+                               const nsAttrValue* aOldValue,
+                               nsIPrincipal* aSubjectPrincipal,
+                               bool aNotify)
 {
   if (aNameSpaceID == kNameSpaceID_None) {
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, nullptr, true);
-    } else if (aName == nsGkAtoms::scoped) {
-      bool isScoped = aValue;
-      UpdateStyleSheetScopedness(isScoped);
+      Unused << UpdateStyleSheetInternal(nullptr, nullptr, ForceUpdate::Yes);
     }
   }
 
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName, aValue,
-                                            aNotify);
+                                            aOldValue, aSubjectPrincipal, aNotify);
 }
 
-NS_IMETHODIMP
-HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML)
+void
+HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError)
 {
   if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML, fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+    aError.ReportOOM();
   }
-  return NS_OK;
 }
 
 void
 HTMLStyleElement::SetInnerHTML(const nsAString& aInnerHTML,
+                               nsIPrincipal* aScriptedPrincipal,
                                ErrorResult& aError)
 {
-  SetEnableUpdates(false);
-
-  aError = nsContentUtils::SetNodeTextContent(this, aInnerHTML, true);
-
-  SetEnableUpdates(true);
-
-  UpdateStyleSheetInternal(nullptr, nullptr);
-}
-
-already_AddRefed<nsIURI>
-HTMLStyleElement::GetStyleSheetURL(bool* aIsInline)
-{
-  *aIsInline = true;
-  return nullptr;
+  SetTextContentInternal(aInnerHTML, aScriptedPrincipal, aError);
 }
 
 void
-HTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
-                                    nsAString& aType,
-                                    nsAString& aMedia,
-                                    bool* aIsScoped,
-                                    bool* aIsAlternate)
+HTMLStyleElement::SetTextContentInternal(const nsAString& aTextContent,
+                                         nsIPrincipal* aScriptedPrincipal,
+                                         ErrorResult& aError)
 {
-  aTitle.Truncate();
-  aType.Truncate();
-  aMedia.Truncate();
-  *aIsAlternate = false;
-
-  nsAutoString title;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::title, title);
-  title.CompressWhitespace();
-  aTitle.Assign(title);
-
-  GetAttr(kNameSpaceID_None, nsGkAtoms::media, aMedia);
-  // The HTML5 spec is formulated in terms of the CSSOM spec, which specifies
-  // that media queries should be ASCII lowercased during serialization.
-  nsContentUtils::ASCIIToLower(aMedia);
-
-  GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
-
-  *aIsScoped = HasAttr(kNameSpaceID_None, nsGkAtoms::scoped);
-
-  nsAutoString mimeType;
-  nsAutoString notUsed;
-  nsContentUtils::SplitMimeType(aType, mimeType, notUsed);
-  if (!mimeType.IsEmpty() && !mimeType.LowerCaseEqualsLiteral("text/css")) {
-    return;
+  // Per spec, if we're setting text content to an empty string and don't
+  // already have any children, we should not trigger any mutation observers, or
+  // re-parse the stylesheet.
+  if (aTextContent.IsEmpty() && !GetFirstChild()) {
+    nsIPrincipal* principal = mTriggeringPrincipal ? mTriggeringPrincipal.get() : NodePrincipal();
+    if (principal == aScriptedPrincipal) {
+      return;
+    }
   }
 
-  // If we get here we assume that we're loading a css file, so set the
-  // type to 'text/css'
-  aType.AssignLiteral("text/css");
+  SetEnableUpdates(false);
+
+  aError = nsContentUtils::SetNodeTextContent(this, aTextContent, true);
+
+  SetEnableUpdates(true);
+
+  mTriggeringPrincipal = aScriptedPrincipal;
+
+  Unused << UpdateStyleSheetInternal(nullptr, nullptr);
+}
+
+Maybe<nsStyleLinkElement::SheetInfo>
+HTMLStyleElement::GetStyleSheetInfo()
+{
+  if (!IsCSSMimeTypeAttribute(*this)) {
+    return Nothing();
+  }
+
+  nsAutoString title;
+  nsAutoString media;
+  GetTitleAndMediaForElement(*this, title, media);
+
+  nsCOMPtr<nsIPrincipal> prin = mTriggeringPrincipal;
+  return Some(SheetInfo {
+    *OwnerDoc(),
+    this,
+    nullptr,
+    prin.forget(),
+    net::ReferrerPolicy::RP_Unset,
+    CORS_NONE,
+    title,
+    media,
+    HasAlternateRel::No,
+    IsInline::Yes,
+  });
 }
 
 JSObject*
 HTMLStyleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLStyleElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLStyleElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -109,18 +110,18 @@ CairoAntialiasToGfxAntialias(cairo_antialias_t aAntialias)
 }
 
 static inline cairo_filter_t
-GfxFilterToCairoFilter(Filter filter)
+GfxSamplingFilterToCairoFilter(SamplingFilter filter)
 {
   switch (filter)
   {
-    case Filter::GOOD:
+    case SamplingFilter::GOOD:
       return CAIRO_FILTER_GOOD;
-    case Filter::LINEAR:
+    case SamplingFilter::LINEAR:
       return CAIRO_FILTER_BILINEAR;
-    case Filter::POINT:
+    case SamplingFilter::POINT:
       return CAIRO_FILTER_NEAREST;
     default:
-      MOZ_CRASH("bad filter");
+      MOZ_CRASH("GFX: bad Cairo filter");
   }
 
   return CAIRO_FILTER_BILINEAR;
@@ -162,6 +163,23 @@ GfxFormatToCairoFormat(SurfaceFormat format)
     default:
       gfxCriticalError() << "Unknown image format " << (int)format;
       return CAIRO_FORMAT_ARGB32;
+  }
+}
+
+static inline cairo_format_t
+CairoContentToCairoFormat(cairo_content_t content)
+{
+  switch (content)
+  {
+    case CAIRO_CONTENT_COLOR:
+      return CAIRO_FORMAT_RGB24;
+    case CAIRO_CONTENT_ALPHA:
+      return CAIRO_FORMAT_A8;
+    case CAIRO_CONTENT_COLOR_ALPHA:
+      return CAIRO_FORMAT_ARGB32;
+    default:
+      gfxCriticalError() << "Unknown cairo content type " << (int)content;
+      return CAIRO_FORMAT_A8; // least likely to cause OOB reads
   }
 }
 

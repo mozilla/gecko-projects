@@ -2,15 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* global treeMapState, censusState */
+/* eslint no-shadow: ["error", { "allow": ["app"] }] */
+
+"use strict";
+
 const { assert } = require("devtools/shared/DevToolsUtils");
-const { MemoryFront } = require("devtools/server/actors/memory");
+const { MemoryFront } = require("devtools/shared/fronts/memory");
 const HeapAnalysesClient = require("devtools/shared/heapsnapshot/HeapAnalysesClient");
-const { PropTypes } = require("devtools/client/shared/vendor/react");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {
   snapshotState: states,
   diffingState,
   dominatorTreeState,
-  viewState
+  viewState,
+  individualsState,
 } = require("./constants");
 
 /**
@@ -35,10 +41,12 @@ const {
  *     });
  */
 function catchAndIgnore(fn) {
-  return function (...args) {
+  return function(...args) {
     try {
       fn(...args);
-    } catch (err) { }
+    } catch (err) {
+      // continue regardless of error
+    }
 
     return null;
   };
@@ -65,7 +73,7 @@ const censusDisplayModel = exports.censusDisplay = PropTypes.shape({
  *
  * @see `js/src/doc/Debugger/Debugger.Memory.md`
  */
-const dominatorTreeDisplayModel = exports.dominatorTreeDisplay = PropTypes.shape({
+const labelDisplayModel = exports.labelDisplay = PropTypes.shape({
   displayName: PropTypes.string.isRequired,
   tooltip: PropTypes.string.isRequired,
   breakdown: PropTypes.shape({
@@ -96,12 +104,13 @@ const treeMapModel = exports.treeMapModel = PropTypes.shape({
   // The display data used to generate the current census.
   display: treeMapDisplayModel,
   // The current treeMapState this is in
-  state: catchAndIgnore(function (treeMap) {
+  state: catchAndIgnore(function(treeMap) {
     switch (treeMap.state) {
       case treeMapState.SAVING:
         assert(!treeMap.report, "Should not have a report");
         assert(!treeMap.error, "Should not have an error");
         break;
+
       case treeMapState.SAVED:
         assert(treeMap.report, "Should have a report");
         assert(!treeMap.error, "Should not have an error");
@@ -117,7 +126,7 @@ const treeMapModel = exports.treeMapModel = PropTypes.shape({
   })
 });
 
-let censusModel = exports.censusModel = PropTypes.shape({
+const censusModel = exports.censusModel = PropTypes.shape({
   // The current census report data.
   report: PropTypes.object,
   // The parent map for the report.
@@ -127,8 +136,9 @@ let censusModel = exports.censusModel = PropTypes.shape({
   // If present, the currently cached report's filter string used for pruning
   // the tree items.
   filter: PropTypes.string,
-  // The Set<CensusTreeNode.id> of expanded node ids in the report tree.
-  expanded: catchAndIgnore(function (census) {
+  // The Immutable.Set<CensusTreeNode.id> of expanded node ids in the report
+  // tree.
+  expanded: catchAndIgnore(function(census) {
     if (census.report) {
       assert(census.expanded,
              "If we have a report, we should also have the set of expanded nodes");
@@ -137,7 +147,7 @@ let censusModel = exports.censusModel = PropTypes.shape({
   // If a node is currently focused in the report tree, then this is it.
   focused: PropTypes.object,
   // The censusModelState that this census is currently in.
-  state: catchAndIgnore(function (census) {
+  state: catchAndIgnore(function(census) {
     switch (census.state) {
       case censusState.SAVING:
         assert(!census.report, "Should not have a report");
@@ -167,7 +177,7 @@ let censusModel = exports.censusModel = PropTypes.shape({
 /**
  * Dominator tree model.
  */
-let dominatorTreeModel = exports.dominatorTreeModel = PropTypes.shape({
+const dominatorTreeModel = exports.dominatorTreeModel = PropTypes.shape({
   // The id of this dominator tree.
   dominatorTreeId: PropTypes.number,
 
@@ -189,14 +199,14 @@ let dominatorTreeModel = exports.dominatorTreeModel = PropTypes.shape({
 
   // The display used to generate descriptive labels of nodes in this dominator
   // tree.
-  display: dominatorTreeDisplayModel,
+  display: labelDisplayModel,
 
   // The number of active requests to incrementally fetch subtrees. This should
   // only be non-zero when the state is INCREMENTAL_FETCHING.
   activeFetchRequestCount: PropTypes.number,
 
   // The dominatorTreeState that this domintor tree is currently in.
-  state: catchAndIgnore(function (dominatorTree) {
+  state: catchAndIgnore(function(dominatorTree) {
     switch (dominatorTree.state) {
       case dominatorTreeState.COMPUTING:
         assert(dominatorTree.dominatorTreeId == null,
@@ -249,9 +259,9 @@ let dominatorTreeModel = exports.dominatorTreeModel = PropTypes.shape({
 /**
  * Snapshot model.
  */
-let stateKeys = Object.keys(states).map(state => states[state]);
+const stateKeys = Object.keys(states).map(state => states[state]);
 const snapshotId = PropTypes.number;
-let snapshotModel = exports.snapshot = PropTypes.shape({
+const snapshotModel = exports.snapshot = PropTypes.shape({
   // Unique ID for a snapshot
   id: snapshotId.isRequired,
   // Whether or not this snapshot is currently selected.
@@ -275,10 +285,10 @@ let snapshotModel = exports.snapshot = PropTypes.shape({
   creationTime: PropTypes.number,
   // The current state the snapshot is in.
   // @see ./constants.js
-  state: catchAndIgnore(function (snapshot, propName) {
-    let current = snapshot.state;
-    let shouldHavePath = [states.IMPORTING, states.SAVED, states.READ];
-    let shouldHaveCreationTime = [states.READ];
+  state: catchAndIgnore(function(snapshot, propName) {
+    const current = snapshot.state;
+    const shouldHavePath = [states.IMPORTING, states.SAVED, states.READ];
+    const shouldHaveCreationTime = [states.READ];
 
     if (!stateKeys.includes(current)) {
       throw new Error(`Snapshot state must be one of ${stateKeys}.`);
@@ -292,7 +302,7 @@ let snapshotModel = exports.snapshot = PropTypes.shape({
   }),
 });
 
-let allocationsModel = exports.allocations = PropTypes.shape({
+const allocationsModel = exports.allocations = PropTypes.shape({
   // True iff we are recording allocation stacks right now.
   recording: PropTypes.bool.isRequired,
   // True iff we are in the process of toggling the recording of allocation
@@ -300,12 +310,12 @@ let allocationsModel = exports.allocations = PropTypes.shape({
   togglingInProgress: PropTypes.bool.isRequired,
 });
 
-let diffingModel = exports.diffingModel = PropTypes.shape({
+const diffingModel = exports.diffingModel = PropTypes.shape({
   // The id of the first snapshot to diff.
   firstSnapshotId: snapshotId,
 
   // The id of the second snapshot to diff.
-  secondSnapshotId: catchAndIgnore(function (diffing, propName) {
+  secondSnapshotId: catchAndIgnore(function(diffing, propName) {
     if (diffing.secondSnapshotId && !diffing.firstSnapshotId) {
       throw new Error("Cannot have second snapshot without already having " +
                       "first snapshot");
@@ -322,7 +332,7 @@ let diffingModel = exports.diffingModel = PropTypes.shape({
 
   // The current state the diffing is in.
   // @see ./constants.js
-  state: catchAndIgnore(function (diffing) {
+  state: catchAndIgnore(function(diffing) {
     switch (diffing.state) {
       case diffingState.TOOK_DIFF:
         assert(diffing.census, "If we took a diff, we should have a census");
@@ -345,7 +355,103 @@ let diffingModel = exports.diffingModel = PropTypes.shape({
   }),
 });
 
-let appModel = exports.app = {
+const previousViewModel = exports.previousView = PropTypes.shape({
+  state: catchAndIgnore(function(previous) {
+    switch (previous.state) {
+      case viewState.DIFFING:
+        assert(previous.diffing, "Should have previous diffing state.");
+        assert(!previous.selected, "Should not have a previously selected snapshot.");
+        break;
+
+      case viewState.CENSUS:
+      case viewState.DOMINATOR_TREE:
+      case viewState.TREE_MAP:
+        assert(previous.selected, "Should have a previously selected snapshot.");
+        break;
+
+      case viewState.INDIVIDUALS:
+      default:
+        assert(false, `Unexpected previous view state: ${previous.state}.`);
+    }
+  }),
+
+  // The previous diffing state, if any.
+  diffing: diffingModel,
+
+  // The previously selected snapshot, if any.
+  selected: snapshotId,
+});
+
+exports.view = PropTypes.shape({
+  // The current view state.
+  state: catchAndIgnore(function(view) {
+    switch (view.state) {
+      case viewState.DIFFING:
+      case viewState.CENSUS:
+      case viewState.DOMINATOR_TREE:
+      case viewState.INDIVIDUALS:
+      case viewState.TREE_MAP:
+        break;
+
+      default:
+        assert(false, `Unexpected type of view: ${view.state}`);
+    }
+  }),
+
+  // The previous view state.
+  previous: previousViewModel,
+});
+
+const individualsModel = exports.individuals = PropTypes.shape({
+  error: PropTypes.object,
+
+  nodes: PropTypes.arrayOf(PropTypes.object),
+
+  dominatorTree: dominatorTreeModel,
+
+  id: snapshotId,
+
+  censusBreakdown: PropTypes.object,
+
+  indices: PropTypes.object,
+
+  labelDisplay: labelDisplayModel,
+
+  focused: PropTypes.object,
+
+  state: catchAndIgnore(function(individuals) {
+    switch (individuals.state) {
+      case individualsState.COMPUTING_DOMINATOR_TREE:
+      case individualsState.FETCHING:
+        assert(!individuals.nodes, "Should not have individual nodes");
+        assert(!individuals.dominatorTree, "Should not have dominator tree");
+        assert(!individuals.id, "Should not have an id");
+        assert(!individuals.censusBreakdown, "Should not have a censusBreakdown");
+        assert(!individuals.indices, "Should not have indices");
+        assert(!individuals.labelDisplay, "Should not have a labelDisplay");
+        break;
+
+      case individualsState.FETCHED:
+        assert(individuals.nodes, "Should have individual nodes");
+        assert(individuals.dominatorTree, "Should have dominator tree");
+        assert(individuals.id, "Should have an id");
+        assert(individuals.censusBreakdown, "Should have a censusBreakdown");
+        assert(individuals.indices, "Should have indices");
+        assert(individuals.labelDisplay, "Should have a labelDisplay");
+        break;
+
+      case individualsState.ERROR:
+        assert(individuals.error, "Should have an error object");
+        break;
+
+      default:
+        assert(false, `Unexpected individuals state: ${individuals.state}`);
+        break;
+    }
+  }),
+});
+
+exports.app = {
   // {MemoryFront} Used to communicate with platform
   front: PropTypes.instanceOf(MemoryFront),
 
@@ -360,7 +466,7 @@ let appModel = exports.app = {
 
   // The display data describing how we want the dominator tree labels to be
   // computed.
-  dominatorTreeDisplay: dominatorTreeDisplayModel.isRequired,
+  labelDisplay: labelDisplayModel.isRequired,
 
   // The display data describing how we want the dominator tree labels to be
   // computed.
@@ -375,27 +481,45 @@ let appModel = exports.app = {
   // If present, the current diffing state.
   diffing: diffingModel,
 
+  // If present, the current individuals state.
+  individuals: individualsModel,
+
   // The current type of view.
-  view: catchAndIgnore(function (app) {
-    switch (app.view) {
-      case viewState.CENSUS:
-        assert(!app.diffing, "Should not be diffing");
-        break;
+  view: function(app) {
+    catchAndIgnore(function(app) {
+      switch (app.view.state) {
+        case viewState.DIFFING:
+          assert(app.diffing, "Should be diffing");
+          break;
 
-      case viewState.DIFFING:
-        assert(app.diffing, "Should be diffing");
-        break;
+        case viewState.INDIVIDUALS:
+        case viewState.CENSUS:
+        case viewState.DOMINATOR_TREE:
+        case viewState.TREE_MAP:
+          assert(!app.diffing, "Should not be diffing");
+          break;
 
-      case viewState.DOMINATOR_TREE:
-        assert(!app.diffing, "Should not be diffing");
-        break;
+        default:
+          assert(false, `Unexpected type of view: ${app.view.state}`);
+      }
+    })(app);
 
-      case viewState.TREE_MAP:
-        assert(!app.diffing, "Should not be diffing");
-        break;
+    catchAndIgnore(function(app) {
+      switch (app.view.state) {
+        case viewState.INDIVIDUALS:
+          assert(app.individuals, "Should have individuals state");
+          break;
 
-      default:
-        assert(false, `Unexpected type of view: ${app.view}`);
-    }
-  }),
+        case viewState.DIFFING:
+        case viewState.CENSUS:
+        case viewState.DOMINATOR_TREE:
+        case viewState.TREE_MAP:
+          assert(!app.individuals, "Should not have individuals state");
+          break;
+
+        default:
+          assert(false, `Unexpected type of view: ${app.view.state}`);
+      }
+    })(app);
+  },
 };

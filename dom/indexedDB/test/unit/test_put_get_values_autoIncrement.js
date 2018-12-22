@@ -5,7 +5,7 @@
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const name = this.window ? window.location.pathname : "Splendid Test";
   const objectStoreName = "Objects";
@@ -44,11 +44,10 @@ function testSteps()
     request.onsuccess = function(event) {
       is(event.target.result, testInt.value, "Got the right value");
     };
-  }
+  };
 
   // Wait for success
   yield undefined;
 
   finishTest();
-  yield undefined;
 }

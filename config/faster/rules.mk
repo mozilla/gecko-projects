@@ -59,8 +59,7 @@ endif
 .PHONY: FORCE
 
 # Extra define to trigger some workarounds. We should strive to limit the
-# use of those. As of writing the only ones are in
-# toolkit/content/buildconfig.html and browser/locales/jar.mn.
+# use of those. As of writing the only one is in browser/locales/jar.mn.
 ACDEFINES += -DBUILD_FASTER
 
 # Files under the faster/ sub-directory, however, are not meant to use the
@@ -85,12 +84,10 @@ $(addprefix install-,$(INSTALL_MANIFESTS)): install-%: $(addprefix $(TOPOBJDIR)/
 	@# The overhead is not that big, and this avoids waiting for proper
 	@# support for defines tracking in process_install_manifest.
 	@touch install_$(subst /,_,$*)
-	@# BOOKMARKS_INCLUDE_DIR is for bookmarks.html only.
 	$(PYTHON) -m mozbuild.action.process_install_manifest \
 		--track install_$(subst /,_,$*).track \
 		$(TOPOBJDIR)/$* \
 		-DAB_CD=en-US \
-		-DBOOKMARKS_INCLUDE_DIR=$(TOPSRCDIR)/browser/locales/en-US/profile \
 		$(ACDEFINES) \
 		install_$(subst /,_,$*)
 
@@ -98,13 +95,24 @@ $(addprefix install-,$(INSTALL_MANIFESTS)): install-%: $(addprefix $(TOPOBJDIR)/
 # Below is a set of additional dependencies and variables used to build things
 # that are not supported by data in moz.build.
 
-# The xpidl target in config/makefiles/xpidl requires the install manifest for
-# dist/idl to have been processed. When using the hybrid
-# FasterMake/RecursiveMake backend, this dependency is handled in the top-level
-# Makefile.
-ifndef FASTER_RECURSIVE_MAKE
-$(TOPOBJDIR)/config/makefiles/xpidl/xpidl: $(TOPOBJDIR)/install-dist_idl
+$(TOPOBJDIR)/build/application.ini: $(TOPOBJDIR)/buildid.h $(TOPOBJDIR)/source-repo.h
+
+# The manifest of allowed system add-ons should be re-built when using
+# "build faster".
+#
+# Note the dependency on install-dist/bin.  The form of this
+# dependency is critical: it's triggering the stem rule (install-%)
+# above to force the dist/bin manifest to be processed.  The more
+# obvious `$(TOPOBJDIR)/install-dist_bin` doesn't work because
+# dist/bin isn't in $(INSTALL_MANIFESTS) in the
+# FasterMake+RecursiveMake (artifact build) situation.
+ifeq ($(MOZ_BUILD_APP),browser)
+$(TOPOBJDIR)/browser/app/features: install-dist/bin
+
+default: $(TOPOBJDIR)/browser/app/features
 endif
-# It also requires all the install manifests for dist/bin to have been processed
-# because it adds interfaces.manifest references with buildlist.py.
-$(TOPOBJDIR)/config/makefiles/xpidl/xpidl: $(addprefix install-,$(filter dist/bin%,$(INSTALL_MANIFESTS)))
+ifeq ($(MOZ_BUILD_APP),mobile/android)
+$(TOPOBJDIR)/mobile/android/base/features: install-dist/bin
+
+default: $(TOPOBJDIR)/mobile/android/base/features
+endif

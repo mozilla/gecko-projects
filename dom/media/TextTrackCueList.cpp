@@ -14,13 +14,12 @@ class CompareCuesByTime
 {
 public:
   bool Equals(TextTrackCue* aOne, TextTrackCue* aTwo) const {
-    return aOne->StartTime() == aTwo->StartTime() &&
-           aOne->EndTime() == aTwo->EndTime();
+    return false;
   }
   bool LessThan(TextTrackCue* aOne, TextTrackCue* aTwo) const {
     return aOne->StartTime() < aTwo->StartTime() ||
            (aOne->StartTime() == aTwo->StartTime() &&
-            aOne->EndTime() < aTwo->EndTime());
+            aOne->EndTime() >= aTwo->EndTime());
   }
 };
 
@@ -43,7 +42,7 @@ TextTrackCueList::~TextTrackCueList()
 JSObject*
 TextTrackCueList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return TextTrackCueListBinding::Wrap(aCx, this, aGivenProto);
+  return TextTrackCueList_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 TextTrackCue*
@@ -60,6 +59,13 @@ TextTrackCue*
 TextTrackCueList::operator[](uint32_t aIndex)
 {
   return mList.SafeElementAt(aIndex, nullptr);
+}
+
+TextTrackCueList&
+TextTrackCueList::operator=(const TextTrackCueList& aOther)
+{
+  mList = aOther.mList;
+  return *this;
 }
 
 TextTrackCue*
@@ -97,6 +103,12 @@ TextTrackCueList::RemoveCue(TextTrackCue& aCue, ErrorResult& aRv)
 }
 
 void
+TextTrackCueList::RemoveCue(TextTrackCue& aCue)
+{
+  mList.RemoveElement(&aCue);
+}
+
+void
 TextTrackCueList::RemoveCueAt(uint32_t aIndex)
 {
   if (aIndex < mList.Length()) {
@@ -116,6 +128,52 @@ TextTrackCueList::GetArray(nsTArray<RefPtr<TextTrackCue> >& aCues)
   aCues = nsTArray<RefPtr<TextTrackCue> >(mList);
 }
 
+
+void
+TextTrackCueList::SetCuesInactive()
+{
+  for(uint32_t i = 0; i < mList.Length(); ++i) {
+    mList[i]->SetActive(false);
+  }
+}
+
+already_AddRefed<TextTrackCueList>
+TextTrackCueList::GetCueListByTimeInterval(media::Interval<double>& aInterval)
+{
+  RefPtr<TextTrackCueList> output = new TextTrackCueList(mParent);
+  for (uint32_t i = 0; i < mList.Length(); ++i) {
+    TextTrackCue* cue = mList[i];
+    if (cue->StartTime() <= aInterval.mEnd &&
+        aInterval.mStart <= cue->EndTime()) {
+      output->AddCue(*cue);
+    }
+  }
+  return output.forget();
+}
+
+void
+TextTrackCueList::NotifyCueUpdated(TextTrackCue *aCue)
+{
+  if (aCue) {
+    mList.RemoveElement(aCue);
+    mList.InsertElementSorted(aCue, CompareCuesByTime());
+  }
+}
+
+bool
+TextTrackCueList::IsCueExist(TextTrackCue *aCue)
+{
+  if (aCue && mList.Contains(aCue)) {
+    return true;
+  }
+  return false;
+}
+
+nsTArray<RefPtr<TextTrackCue>>&
+TextTrackCueList::GetCuesArray()
+{
+  return mList;
+}
 
 } // namespace dom
 } // namespace mozilla

@@ -3,8 +3,8 @@
 
 'use strict';
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
 
 const {PushDB, PushService, PushServiceHttp2} = serviceExports;
 
@@ -29,7 +29,7 @@ function resubscribeHandler(metadata, response) {
 }
 
 function listenSuccessHandler(metadata, response) {
-  do_check_true(true, "New listener point");
+  Assert.ok(true, "New listener point");
   httpServer.stop(handlerDone);
   response.setStatusLine(metadata.httpVersion, 204, "Try again");
 }
@@ -44,6 +44,7 @@ function run_test() {
 
   do_get_profile();
   setPrefs({
+    'testing.allowInsecureServerURL': true,
     'http2.retryInterval': 1000,
     'http2.maxRetries': 2
   });
@@ -51,10 +52,10 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test1() {
+add_task(async function test1() {
 
   let db = PushServiceHttp2.newPushDB();
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     return db.drop().then(_ => db.close());
   });
 
@@ -80,7 +81,7 @@ add_task(function* test1() {
   }];
 
   for (let record of records) {
-    yield db.put(record);
+    await db.put(record);
   }
 
   PushService.init({
@@ -88,9 +89,9 @@ add_task(function* test1() {
     db
   });
 
-  yield handlerPromise;
+  await handlerPromise;
 
-  let record = yield db.getByIdentifiers({
+  let record = await db.getByIdentifiers({
     scope: 'https://example.com/page',
     originAttributes: '',
   });

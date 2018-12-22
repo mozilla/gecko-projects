@@ -11,6 +11,9 @@
 
 //-----------------------------------------------------------------------------
 
+namespace mozilla {
+namespace net {
+
 class nsInputStreamChannel : public nsBaseChannel
                            , public nsIInputStreamChannel
 {
@@ -22,7 +25,7 @@ public:
       mIsSrcdocChannel(false) {}
 
 protected:
-    virtual ~nsInputStreamChannel() {}
+    virtual ~nsInputStreamChannel() = default;
 
     virtual nsresult OpenContentStream(bool async, nsIInputStream **result,
                                        nsIChannel** channel) override;
@@ -37,5 +40,8 @@ private:
     nsString mSrcdocData;
     bool mIsSrcdocChannel;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // !nsInputStreamChannel_h__

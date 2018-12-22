@@ -8,15 +8,15 @@
 
 const TEST_URL = "data:text/html;charset=utf-8,<h1>Add node</h1>";
 
-add_task(function*() {
-  let {inspector} = yield openInspectorForURL(TEST_URL);
-  let {panelDoc} = inspector;
+add_task(async function() {
+  const {inspector} = await openInspectorForURL(TEST_URL);
+  const {panelDoc} = inspector;
 
-  let toolbarButton =
-    panelDoc.querySelector("#inspector-toolbar #inspector-element-add-button");
-  let menuItem =
-    panelDoc.querySelector("#inspector-node-popup #node-menu-add");
-
-  ok(toolbarButton, "The add button is in the toolbar");
+  const allMenuItems = openContextMenuAndGetAllItems(inspector);
+  const menuItem = allMenuItems.find(item => item.id === "node-menu-add");
   ok(menuItem, "The item is in the menu");
+
+  const toolbarButton =
+    panelDoc.querySelector("#inspector-toolbar #inspector-element-add-button");
+  ok(toolbarButton, "The add button is in the toolbar");
 });

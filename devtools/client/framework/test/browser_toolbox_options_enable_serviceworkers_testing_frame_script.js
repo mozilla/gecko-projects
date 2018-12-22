@@ -5,6 +5,8 @@
 
 // A helper frame-script for devtools/client/framework service worker tests.
 
+/* eslint-env mozilla/frame-script */
+
 "use strict";
 
 addMessageListener("devtools:sw-test:register", function(msg) {
@@ -20,7 +22,26 @@ addMessageListener("devtools:sw-test:unregister", function(msg) {
   content.navigator.serviceWorker.getRegistration().then(swr => {
     swr.unregister().then(result => {
       sendAsyncMessage("devtools:sw-test:unregister",
-                       {success: result ? true : false});
+                       {success: !!result});
     });
   });
+});
+
+addMessageListener("devtools:sw-test:iframe:register-and-unregister", function(msg) {
+  var frame = content.document.createElement("iframe");
+  frame.addEventListener("load", function() {
+    frame.contentWindow.navigator.serviceWorker.register("serviceworker.js")
+      .then(swr => {
+        return swr.unregister();
+      }).then(_ => {
+        frame.remove();
+        sendAsyncMessage("devtools:sw-test:iframe:register-and-unregister",
+                         {success: true});
+      }).catch(error => {
+        sendAsyncMessage("devtools:sw-test:iframe:register-and-unregister",
+                         {success: false});
+      });
+  }, {once: true});
+  frame.src = "browser_toolbox_options_enabled_serviceworkers_testing.html";
+  content.document.body.appendChild(frame);
 });

@@ -7,6 +7,7 @@
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/Logging.h"
 #include "mozilla/RefPtr.h"
 #include "ImageRegion.h"
 #include "Orientation.h"
@@ -31,7 +32,7 @@ DynamicImage::GetProgressTracker()
 }
 
 size_t
-DynamicImage::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
+DynamicImage::SizeOfSourceWithComputedFallback(SizeOfState& aState) const
 {
   return 0;
 }
@@ -80,7 +81,7 @@ DynamicImage::OnImageDataComplete(nsIRequest* aRequest,
 }
 
 void
-DynamicImage::OnSurfaceDiscarded()
+DynamicImage::OnSurfaceDiscarded(const SurfaceKey& aSurfaceKey)
 { }
 
 void
@@ -103,8 +104,8 @@ void
 DynamicImage::SetHasError()
 { }
 
-ImageURL*
-DynamicImage::GetURI()
+nsIURI*
+DynamicImage::GetURI() const
 {
   return nullptr;
 }
@@ -125,6 +126,18 @@ DynamicImage::GetHeight(int32_t* aHeight)
 {
   *aHeight = mDrawable->Size().height;
   return NS_OK;
+}
+
+nsresult
+DynamicImage::GetNativeSizes(nsTArray<IntSize>& aNativeSizes) const
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+size_t
+DynamicImage::GetNativeSizesLength() const
+{
+  return 0;
 }
 
 NS_IMETHODIMP
@@ -180,24 +193,24 @@ DynamicImage::GetFrameAtSize(const IntSize& aSize,
 {
   RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
     CreateOffscreenContentDrawTarget(aSize, SurfaceFormat::B8G8R8A8);
-  if (!dt) {
+  if (!dt || !dt->IsValid()) {
     gfxWarning() <<
       "DynamicImage::GetFrame failed in CreateOffscreenContentDrawTarget";
     return nullptr;
   }
-  RefPtr<gfxContext> context = new gfxContext(dt);
+  RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
+  MOZ_ASSERT(context); // already checked the draw target above
 
   auto result = Draw(context, aSize, ImageRegion::Create(aSize),
-                     aWhichFrame, Filter::POINT, Nothing(), aFlags);
+                     aWhichFrame, SamplingFilter::POINT, Nothing(), aFlags,
+                     1.0);
 
-  return result == DrawResult::SUCCESS ? dt->Snapshot() : nullptr;
+  return result == ImgDrawResult::SUCCESS ? dt->Snapshot() : nullptr;
 }
 
 NS_IMETHODIMP_(bool)
-DynamicImage::IsOpaque()
+DynamicImage::WillDrawOpaqueNow()
 {
-  // XXX(seth): For performance reasons it'd be better to return true here, but
-  // I'm not sure how we can guarantee it for an arbitrary gfxDrawable.
   return false;
 }
 
@@ -213,23 +226,42 @@ DynamicImage::GetImageContainer(LayerManager* aManager, uint32_t aFlags)
   return nullptr;
 }
 
-NS_IMETHODIMP_(DrawResult)
+NS_IMETHODIMP_(bool)
+DynamicImage::IsImageContainerAvailableAtSize(LayerManager* aManager,
+                                              const IntSize& aSize,
+                                              uint32_t aFlags)
+{
+  return false;
+}
+
+NS_IMETHODIMP_(already_AddRefed<ImageContainer>)
+DynamicImage::GetImageContainerAtSize(LayerManager* aManager,
+                                      const IntSize& aSize,
+                                      const Maybe<SVGImageContext>& aSVGContext,
+                                      uint32_t aFlags)
+{
+  return nullptr;
+}
+
+NS_IMETHODIMP_(ImgDrawResult)
 DynamicImage::Draw(gfxContext* aContext,
                    const nsIntSize& aSize,
                    const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
-                   Filter aFilter,
+                   SamplingFilter aSamplingFilter,
                    const Maybe<SVGImageContext>& aSVGContext,
-                   uint32_t aFlags)
+                   uint32_t aFlags,
+                   float aOpacity)
 {
   MOZ_ASSERT(!aSize.IsEmpty(), "Unexpected empty size");
 
   IntSize drawableSize(mDrawable->Size());
 
   if (aSize == drawableSize) {
-    gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, aRegion,
-                               SurfaceFormat::B8G8R8A8, aFilter);
-    return DrawResult::SUCCESS;
+    gfxUtils::DrawPixelSnapped(aContext, mDrawable, SizeDouble(drawableSize), aRegion,
+                               SurfaceFormat::B8G8R8A8, aSamplingFilter,
+                               aOpacity);
+    return ImgDrawResult::SUCCESS;
   }
 
   gfxSize scale(double(aSize.width) / drawableSize.width,
@@ -241,15 +273,22 @@ DynamicImage::Draw(gfxContext* aContext,
   gfxContextMatrixAutoSaveRestore saveMatrix(aContext);
   aContext->Multiply(gfxMatrix::Scaling(scale.width, scale.height));
 
-  gfxUtils::DrawPixelSnapped(aContext, mDrawable, drawableSize, region,
-                             SurfaceFormat::B8G8R8A8, aFilter);
-  return DrawResult::SUCCESS;
+  gfxUtils::DrawPixelSnapped(aContext, mDrawable, SizeDouble(drawableSize), region,
+                             SurfaceFormat::B8G8R8A8, aSamplingFilter,
+                             aOpacity);
+  return ImgDrawResult::SUCCESS;
 }
 
 NS_IMETHODIMP
-DynamicImage::StartDecoding()
+DynamicImage::StartDecoding(uint32_t aFlags)
 {
   return NS_OK;
+}
+
+bool
+DynamicImage::StartDecodingWithResult(uint32_t aFlags)
+{
+  return true;
 }
 
 NS_IMETHODIMP
@@ -318,7 +357,8 @@ DynamicImage::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
 nsIntSize
 DynamicImage::OptimalImageSizeForDest(const gfxSize& aDest,
                                       uint32_t aWhichFrame,
-                                      Filter aFilter, uint32_t aFlags)
+                                      SamplingFilter aSamplingFilter,
+                                      uint32_t aFlags)
 {
   IntSize size(mDrawable->Size());
   return nsIntSize(size.width, size.height);

@@ -19,7 +19,7 @@ namespace dom {
 JSObject*
 SVGFEDisplacementMapElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEDisplacementMapElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEDisplacementMapElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEDisplacementMapElement::sNumberInfo[1] =
@@ -55,7 +55,7 @@ nsSVGElement::StringInfo SVGFEDisplacementMapElement::sStringInfo[3] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEDisplacementMapElement)
 
@@ -118,7 +118,7 @@ SVGFEDisplacementMapElement::GetPrimitiveDescription(nsSVGFilterInstance* aInsta
 
 bool
 SVGFEDisplacementMapElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                       nsIAtom* aAttribute) const
+                                                       nsAtom* aAttribute) const
 {
   return SVGFEDisplacementMapElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

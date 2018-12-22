@@ -2,20 +2,17 @@
   <head>
     <title>Local Storage Session Pref Override</title>
     <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-    <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
+    <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
     <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
     <script>
       const ACCEPT_SESSION = 2;
 
-      add_task(function*() {
-        yield new Promise((resolve, reject) => {
-          SpecialPowers.pushPrefEnv({"set": [["network.cookie.lifetimePolicy",
-                                              ACCEPT_SESSION]]},
-                                    resolve);
-        });
+      add_task(async function() {
+        await SpecialPowers.pushPrefEnv({"set": [["network.cookie.lifetimePolicy",
+                                                  ACCEPT_SESSION]]});
 
         // Before setting permission
-        yield new Promise((resolve) => {
+        await new Promise((resolve) => {
           var frame = document.createElement('iframe');
           frame.src = "frameLocalStorageSessionOnly.html";
 
@@ -29,12 +26,12 @@
         });
 
         // After setting permission
-        yield new Promise((resolve) => {
+        await new Promise((resolve) => {
           SpecialPowers.pushPermissions([{"type": "cookie", "allow": 1, "context": document}],
                                         resolve);
         });
 
-        yield new Promise((resolve) => {
+        await new Promise((resolve) => {
           var frame = document.createElement('iframe');
           frame.src = "frameLocalStorageSessionOnly.html";
 

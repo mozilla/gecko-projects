@@ -36,7 +36,7 @@ nsMIMEInfoAndroid::LoadUriInternal(nsIURI * aURI)
     mimeType = NS_ConvertUTF8toUTF16(mType);
   }
 
-  if (widget::GeckoAppShell::OpenUriExternal(
+  if (java::GeckoAppShell::OpenUriExternal(
       NS_ConvertUTF8toUTF16(uriSpec), mimeType, EmptyString(),
       EmptyString(), EmptyString(), EmptyString())) {
     return NS_OK;
@@ -59,7 +59,7 @@ nsMIMEInfoAndroid::GetMimeInfoForMimeType(const nsACString& aMimeType,
 
   nsIHandlerApp* systemDefault = nullptr;
 
-  if (!IsUTF8(aMimeType, true))
+  if (!IsUTF8(aMimeType))
     return false;
 
   NS_ConvertUTF8toUTF16 mimeType(aMimeType);
@@ -377,14 +377,16 @@ nsMIMEInfoAndroid::nsMIMEInfoAndroid(const nsACString& aMIMEType) :
   mPrefApp = new nsMIMEInfoAndroid::SystemChooser(this);
   nsresult rv;
   mHandlerApps = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  mHandlerApps->AppendElement(mPrefApp, false);
+  mHandlerApps->AppendElement(mPrefApp);
 }
+
+#define SYSTEMCHOOSER_NAME u"Android chooser"
+#define SYSTEMCHOOSER_DESCRIPTION u"Android's default handler application chooser"
 
 NS_IMPL_ISUPPORTS(nsMIMEInfoAndroid::SystemChooser, nsIHandlerApp)
 
-
 nsresult nsMIMEInfoAndroid::SystemChooser::GetName(nsAString & aName) {
-  aName.AssignLiteral(MOZ_UTF16("Android chooser"));
+  aName.AssignLiteral(SYSTEMCHOOSER_NAME);
   return NS_OK;
 }
 
@@ -395,7 +397,7 @@ nsMIMEInfoAndroid::SystemChooser::SetName(const nsAString&) {
 
 nsresult
 nsMIMEInfoAndroid::SystemChooser::GetDetailedDescription(nsAString & aDesc) {
-  aDesc.AssignLiteral(MOZ_UTF16("Android's default handler application chooser"));
+  aDesc.AssignLiteral(SYSTEMCHOOSER_DESCRIPTION);
   return NS_OK;
 }
 
@@ -404,19 +406,20 @@ nsMIMEInfoAndroid::SystemChooser::SetDetailedDescription(const nsAString&) {
   return NS_OK;
 }
 
-// XXX Workaround for bug 986975 to maintain the existing broken semantics
-template<>
-struct nsIHandlerApp::COMTypeInfo<nsMIMEInfoAndroid::SystemChooser, void> {
-  static const nsIID kIID;
-};
-const nsIID nsIHandlerApp::COMTypeInfo<nsMIMEInfoAndroid::SystemChooser, void>::kIID = NS_IHANDLERAPP_IID;
-
 nsresult
 nsMIMEInfoAndroid::SystemChooser::Equals(nsIHandlerApp *aHandlerApp, bool *aRetVal) {
-  nsCOMPtr<nsMIMEInfoAndroid::SystemChooser> info = do_QueryInterface(aHandlerApp);
-  if (info)
-    return mOuter->Equals(info->mOuter, aRetVal);
   *aRetVal = false;
+  if (!aHandlerApp) {
+    return NS_OK;
+  }
+
+  nsAutoString name;
+  nsAutoString detailedDescription;
+  aHandlerApp->GetName(name);
+  aHandlerApp->GetDetailedDescription(detailedDescription);
+
+  *aRetVal = name.Equals(SYSTEMCHOOSER_NAME) &&
+             detailedDescription.Equals(SYSTEMCHOOSER_DESCRIPTION);
   return NS_OK;
 }
 

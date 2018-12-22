@@ -13,7 +13,11 @@ var gTab, gPanel, gDebugger;
 var gFrames, gVariables, gPrefs, gOptions;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -27,18 +31,17 @@ function test() {
     isnot(gOptions._pauseOnExceptionsItem.getAttribute("checked"), "true",
       "The pause-on-exceptions menu item should not be checked.");
 
-    waitForSourceShown(aPanel, ".html")
-      .then(enablePauseOnExceptions)
+    enablePauseOnExceptions()
       .then(disableIgnoreCaughtExceptions)
       .then(() => reloadActiveTab(gPanel, gDebugger.EVENTS.SOURCE_SHOWN))
       .then(() => {
-          generateMouseClickInTab(gTab, "content.document.querySelector('button')");
+        generateMouseClickInTab(gTab, "content.document.querySelector('button')");
       })
       .then(testPauseOnExceptionsAfterReload)
       .then(disablePauseOnExceptions)
       .then(enableIgnoreCaughtExceptions)
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -190,7 +193,7 @@ function disableIgnoreCaughtExceptions() {
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

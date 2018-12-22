@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -125,10 +126,10 @@ AppendRoundedRectToPath(PathBuilder* aPathBuilder,
   Point pc, p0, p1, p2, p3;
 
   if (aDrawClockwise) {
-    aPathBuilder->MoveTo(Point(aRect.X() + aRadii[RectCorner::TopLeft].width,
+    aPathBuilder->MoveTo(Point(aRect.X() + aRadii[eCornerTopLeft].width,
                                aRect.Y()));
   } else {
-    aPathBuilder->MoveTo(Point(aRect.X() + aRect.Width() - aRadii[RectCorner::TopRight].width,
+    aPathBuilder->MoveTo(Point(aRect.X() + aRect.Width() - aRadii[eCornerTopRight].width,
                                aRect.Y()));
   }
 
@@ -270,6 +271,12 @@ MaxStrokeExtents(const StrokeOptions& aStrokeOptions,
 
   double dx = styleExpansionFactor * hypot(aTransform._11, aTransform._21);
   double dy = styleExpansionFactor * hypot(aTransform._22, aTransform._12);
+
+  // Even if the stroke only partially covers a pixel, it must still render to
+  // full pixels. Round up to compensate for this.
+  dx = ceil(dx);
+  dy = ceil(dy);
+
   return Margin(dy, dx, dy, dx);
 }
 

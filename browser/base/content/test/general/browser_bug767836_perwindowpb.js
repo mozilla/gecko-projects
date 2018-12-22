@@ -2,16 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
-/* globals waitForExplicitFinish, executeSoon, finish, whenNewWindowLoaded, ok */
-/* globals is */
-/* exported test */
 
 function test() {
-  //initialization
+  // initialization
   waitForExplicitFinish();
 
-  let aboutNewTabService = Components.classes["@mozilla.org/browser/aboutnewtab-service;1"]
-                                     .getService(Components.interfaces.nsIAboutNewTabService);
+  let aboutNewTabService = Cc["@mozilla.org/browser/aboutnewtab-service;1"]
+                             .getService(Ci.nsIAboutNewTabService);
   let newTabURL;
   let testURL = "http://example.com/";
   let defaultURL = aboutNewTabService.newTabURL;
@@ -29,7 +26,7 @@ function test() {
 
       // Check the new tab opened while in normal/private mode
       is(aWindow.gBrowser.selectedBrowser.currentURI.spec, newTabURL,
-        "URL of NewTab should be " + newTabURL + " in " + mode +  " mode");
+        "URL of NewTab should be " + newTabURL + " in " + mode + " mode");
       // Set the custom newtab url
       aboutNewTabService.newTabURL = testURL;
       is(aboutNewTabService.newTabURL, testURL, "Custom newtab url is set");
@@ -64,8 +61,8 @@ function test() {
   testOnWindow(false, function(aWindow) {
     doTest(false, aWindow, function() {
       // test private mode
-      testOnWindow(true, function(aWindow) {
-        doTest(true, aWindow, function() {
+      testOnWindow(true, function(aWindow2) {
+        doTest(true, aWindow2, function() {
           finish();
         });
       });
@@ -78,13 +75,13 @@ function openNewTab(aWindow, aCallback) {
   aWindow.BrowserOpenTab();
 
   let browser = aWindow.gBrowser.selectedBrowser;
-  if (browser.contentDocument.readyState === "complete") {
+  let doc = browser.contentDocumentAsCPOW;
+  if (doc && doc.readyState === "complete") {
     executeSoon(aCallback);
     return;
   }
 
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
+  BrowserTestUtils.browserLoaded(browser).then(() => {
     executeSoon(aCallback);
-  }, true);
+  });
 }

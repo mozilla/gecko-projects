@@ -15,21 +15,27 @@
 #include "nsISupportsPriority.h"
 #include "SimpleBuffer.h"
 
-class nsStandardURL;
 class nsIInputStream;
 class nsIOutputStream;
+
+namespace mozilla{
+class OriginAttributes;
+}
 
 namespace mozilla {
 namespace net {
 
+class nsStandardURL;
 class Http2Session;
 class Http2Decompressor;
 
 class Http2Stream
   : public nsAHttpSegmentReader
   , public nsAHttpSegmentWriter
+  , public SupportsWeakPtr<Http2Stream>
 {
 public:
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(Http2Stream)
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
 
@@ -46,25 +52,28 @@ public:
   const static int32_t kWorstPriority = kNormalPriority + nsISupportsPriority::PRIORITY_LOWEST;
   const static int32_t kBestPriority = kNormalPriority + nsISupportsPriority::PRIORITY_HIGHEST;
 
-  Http2Stream(nsAHttpTransaction *, Http2Session *, int32_t);
+  Http2Stream(nsAHttpTransaction *, Http2Session *, int32_t, uint64_t);
 
   uint32_t StreamID() { return mStreamID; }
   Http2PushedStream *PushSource() { return mPushSource; }
+  void ClearPushSource();
 
   stateType HTTPState() { return mState; }
   void SetHTTPState(stateType val) { mState = val; }
 
-  virtual nsresult ReadSegments(nsAHttpSegmentReader *,  uint32_t, uint32_t *);
-  virtual nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *);
+  virtual MOZ_MUST_USE nsresult ReadSegments(nsAHttpSegmentReader *,
+                                             uint32_t, uint32_t *);
+  virtual MOZ_MUST_USE nsresult WriteSegments(nsAHttpSegmentWriter *,
+                                              uint32_t, uint32_t *);
   virtual bool DeferCleanup(nsresult status);
 
   // The consumer stream is the synthetic pull stream hooked up to this stream
   // http2PushedStream overrides it
   virtual Http2Stream *GetConsumerStream() { return nullptr; };
 
-  const nsAFlatCString &Origin() const { return mOrigin; }
-  const nsAFlatCString &Host() const { return mHeaderHost; }
-  const nsAFlatCString &Path() const { return mHeaderPath; }
+  const nsCString& Origin() const { return mOrigin; }
+  const nsCString& Host() const { return mHeaderHost; }
+  const nsCString& Path() const { return mHeaderPath; }
 
   bool RequestBlockedOnRead()
   {
@@ -74,12 +83,13 @@ public:
   bool HasRegisteredID() { return mStreamID != 0; }
 
   nsAHttpTransaction *Transaction() { return mTransaction; }
-  virtual nsISchedulingContext *SchedulingContext()
+  virtual nsIRequestContext *RequestContext()
   {
-    return mTransaction ? mTransaction->SchedulingContext() : nullptr;
+    return mTransaction ? mTransaction->RequestContext() : nullptr;
   }
 
   void Close(nsresult reason);
+  void SetResponseIsComplete();
 
   void SetRecvdFin(bool aStatus);
   bool RecvdFin() { return mRecvdFin; }
@@ -110,9 +120,13 @@ public:
   void UpdateTransportReadEvents(uint32_t count);
 
   // NS_ERROR_ABORT terminates stream, other failure terminates session
-  nsresult ConvertResponseHeaders(Http2Decompressor *, nsACString &,
-                                  nsACString &, int32_t &);
-  nsresult ConvertPushHeaders(Http2Decompressor *, nsACString &, nsACString &);
+  MOZ_MUST_USE nsresult ConvertResponseHeaders(Http2Decompressor *,
+                                               nsACString &,
+                                               nsACString &, int32_t &);
+  MOZ_MUST_USE nsresult ConvertPushHeaders(Http2Decompressor *, nsACString &,
+                                           nsACString &);
+  MOZ_MUST_USE nsresult ConvertResponseTrailers(Http2Decompressor *,
+                                                nsACString &);
 
   bool AllowFlowControlledWrite();
   void UpdateServerReceiveWindow(int32_t delta);
@@ -142,22 +156,34 @@ public:
   // once it is matched to a pull stream.
   virtual bool HasSink() { return true; }
 
+  // This is a no-op on pull streams. Pushed streams override this.
+  virtual void SetPushComplete() { };
+
   virtual ~Http2Stream();
 
   Http2Session *Session() { return mSession; }
 
-  static nsresult MakeOriginURL(const nsACString &origin,
-                                RefPtr<nsStandardURL> &url);
+  static MOZ_MUST_USE nsresult MakeOriginURL(const nsACString &origin,
+                                             nsCOMPtr<nsIURI> &url);
 
-  static nsresult MakeOriginURL(const nsACString &scheme,
-                                const nsACString &origin,
-                                RefPtr<nsStandardURL> &url);
+  static MOZ_MUST_USE nsresult MakeOriginURL(const nsACString &scheme,
+                                             const nsACString &origin,
+                                             nsCOMPtr<nsIURI> &url);
+
+  // Mirrors nsAHttpTransaction
+  bool Do0RTT();
+  nsresult Finish0RTT(bool aRestart, bool aAlpnIgnored);
+
+  nsresult GetOriginAttributes(mozilla::OriginAttributes *oa);
+
+  void TopLevelOuterContentWindowIdChanged(uint64_t windowId);
 
 protected:
   static void CreatePushHashKey(const nsCString &scheme,
                                 const nsCString &hostHeader,
+                                const mozilla::OriginAttributes &originAttributes,
                                 uint64_t serial,
-                                const nsCSubstring &pathInfo,
+                                const nsACString& pathInfo,
                                 nsCString &outOrigin,
                                 nsCString &outKey);
 
@@ -210,27 +236,27 @@ protected:
   void     ChangeState(enum upstreamStateType);
 
   virtual void AdjustInitialWindow();
-  nsresult TransmitFrame(const char *, uint32_t *, bool forceCommitment);
+  MOZ_MUST_USE nsresult TransmitFrame(const char *, uint32_t *, bool forceCommitment);
+
+  // The underlying socket transport object is needed to propogate some events
+  nsISocketTransport         *mSocketTransport;
 
 private:
   friend class nsAutoPtr<Http2Stream>;
 
-  nsresult ParseHttpRequestHeaders(const char *, uint32_t, uint32_t *);
-  nsresult GenerateOpen();
+  MOZ_MUST_USE nsresult ParseHttpRequestHeaders(const char *, uint32_t, uint32_t *);
+  MOZ_MUST_USE nsresult GenerateOpen();
 
   void     AdjustPushedPriority();
   void     GenerateDataFrameHeader(uint32_t, bool);
 
-  nsresult BufferInput(uint32_t , uint32_t *);
+  MOZ_MUST_USE nsresult BufferInput(uint32_t , uint32_t *);
 
   // The underlying HTTP transaction. This pointer is used as the key
   // in the Http2Session mStreamTransactionHash so it is important to
   // keep a reference to it as long as this stream is a member of that hash.
   // (i.e. don't change it or release it after it is set in the ctor).
   RefPtr<nsAHttpTransaction> mTransaction;
-
-  // The underlying socket transport object is needed to propogate some events
-  nsISocketTransport         *mSocketTransport;
 
   // The quanta upstream data frames are chopped into
   uint32_t                    mChunkSize;
@@ -326,6 +352,12 @@ private:
   // Used to store stream data when the transaction channel cannot keep up
   // and flow control has not yet kicked in.
   SimpleBuffer mSimpleBuffer;
+
+  bool mAttempting0RTT;
+
+  uint64_t mCurrentForegroundTabOuterContentWindowId;
+
+  uint64_t mTransactionTabId;
 
 /// connect tunnels
 public:

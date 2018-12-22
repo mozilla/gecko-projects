@@ -1,21 +1,18 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests if a call tree model ignores samples with no timing information.
  */
 
-function run_test() {
-  run_next_test();
-}
-
 add_task(function test() {
-  let { ThreadNode } = require("devtools/client/performance/modules/logic/tree-model");
+  const { ThreadNode } = require("devtools/client/performance/modules/logic/tree-model");
 
   // Create a root node from a given samples array.
 
-  let thread = new ThreadNode(gThread, { startTime: 0, endTime: 10 });
-  let root = getFrameNodePath(thread, "(root)");
+  const thread = new ThreadNode(gThread, { startTime: 0, endTime: 10 });
+  const root = getFrameNodePath(thread, "(root)");
 
   // Test the ThreadNode, only node with a duration.
   equal(thread.duration, 10,

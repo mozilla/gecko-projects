@@ -7,24 +7,24 @@
 
 const { setTheme } = require("devtools/client/shared/theme");
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
-  let { panelWin } = panel;
-  let { gFront, $, $$, MARKER_STYLING } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(SIMPLE_CONTEXT_URL);
+  const { panelWin } = panel;
+  const { gFront, $, $$, MARKER_STYLING } = panelWin;
 
-  let currentTheme = Services.prefs.getCharPref("devtools.theme");
+  const currentTheme = Services.prefs.getCharPref("devtools.theme");
 
   ok(MARKER_STYLING.light, "Marker styling exists for light theme.");
   ok(MARKER_STYLING.dark, "Marker styling exists for dark theme.");
 
-  let started = once(gFront, "start-context");
+  const started = once(gFront, "start-context");
 
-  reload(target);
-
-  let [actors] = yield Promise.all([
+  const events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
+  reload(target);
+  const [actors] = await events;
 
   is(getFill($("#arrowhead")), MARKER_STYLING[currentTheme],
     "marker initially matches theme.");
@@ -49,13 +49,13 @@ add_task(function*() {
   is(getFill($("#arrowhead")), MARKER_STYLING.light,
     "marker styling switches back to light once again.");
 
-  yield teardown(target);
+  await teardown(target);
 });
 
 /**
  * Returns a hex value found in styling for an element. So parses
  * <marker style="fill: #abcdef"> and returns "#abcdef"
  */
-function getFill (el) {
+function getFill(el) {
   return el.getAttribute("style").match(/(#.*)$/)[1];
 }

@@ -6,15 +6,36 @@
 "use strict";
 
 XPCOMUtils.defineLazyGetter(this, "DebuggerServer", () => {
-  let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+  let { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
   let { DebuggerServer } = require("devtools/server/main");
   return DebuggerServer;
 });
 
 var RemoteDebugger = {
-  init() {
+  init(aWindow) {
+    this._windowType = "navigator:browser";
+
     USBRemoteDebugger.init();
     WiFiRemoteDebugger.init();
+
+    const listener = (event) => {
+      if (event.target !== aWindow) {
+        return;
+      }
+
+      const newType = (event.type === "activate") ? "navigator:browser"
+                                                  : "navigator:geckoview";
+      if (this._windowType === newType) {
+        return;
+      }
+
+      this._windowType = newType;
+      if (this.isAnyEnabled) {
+        this.initServer();
+      }
+    };
+    aWindow.addEventListener("activate", listener, { mozSystemGroup: true });
+    aWindow.addEventListener("deactivate", listener, { mozSystemGroup: true });
   },
 
   get isAnyEnabled() {
@@ -60,7 +81,7 @@ var RemoteDebugger = {
   },
 
   _promptForUSB(session) {
-    if (session.authentication !== 'PROMPT') {
+    if (session.authentication !== "PROMPT") {
       // This dialog is not prepared for any other authentication method at
       // this time.
       return DebuggerServer.AuthenticationResult.DENY;
@@ -94,7 +115,7 @@ var RemoteDebugger = {
   },
 
   _promptForTCP(session) {
-    if (session.authentication !== 'OOB_CERT' || !session.client.cert) {
+    if (session.authentication !== "OOB_CERT" || !session.client.cert) {
       // This dialog is not prepared for any other authentication method at
       // this time.
       return DebuggerServer.AuthenticationResult.DENY;
@@ -151,10 +172,23 @@ var RemoteDebugger = {
       return this._receivingOOB;
     }
 
-    this._receivingOOB = Messaging.sendRequestForResult({
+    this._receivingOOB = WindowEventDispatcher.sendRequestForResult({
       type: "DevToolsAuth:Scan"
     }).then(data => {
       return JSON.parse(data);
+    }, () => {
+      let title = Strings.browser.GetStringFromName("remoteQRScanFailedPromptTitle");
+      let msg = Strings.browser.GetStringFromName("remoteQRScanFailedPromptMessage");
+      let ok = Strings.browser.GetStringFromName("remoteQRScanFailedPromptOK");
+      let prompt = new Prompt({
+        window: null,
+        hint: "remotedebug",
+        title: title,
+        message: msg,
+        buttons: [ ok ],
+        priority: 1
+      });
+      prompt.show();
     });
 
     this._receivingOOB.then(() => this._receivingOOB = null);
@@ -163,18 +197,15 @@ var RemoteDebugger = {
   },
 
   initServer: function() {
-    if (DebuggerServer.initialized) {
-      return;
-    }
-
     DebuggerServer.init();
 
     // Add browser and Fennec specific actors
-    DebuggerServer.addBrowserActors();
+    DebuggerServer.registerAllActors();
     DebuggerServer.registerModule("resource://gre/modules/dbg-browser-actors.js");
 
     // Allow debugging of chrome for any process
     DebuggerServer.allowChromeProcess = true;
+    DebuggerServer.chromeWindowType = this._windowType;
   }
 };
 
@@ -186,7 +217,7 @@ RemoteDebugger.receiveOOB =
 var USBRemoteDebugger = {
 
   init() {
-    Services.prefs.addObserver("devtools.", this, false);
+    Services.prefs.addObserver("devtools.", this);
 
     if (this.isEnabled) {
       this.start();
@@ -266,7 +297,7 @@ var USBRemoteDebugger = {
 var WiFiRemoteDebugger = {
 
   init() {
-    Services.prefs.addObserver("devtools.", this, false);
+    Services.prefs.addObserver("devtools.", this);
 
     if (this.isEnabled) {
       this.start();

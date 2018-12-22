@@ -1,15 +1,10 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */ 
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/debug.js");
-Components.utils.import("resource://gre/modules/Services.jsm");
-
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function LOG(str) {
   dump("*** " + str + "\n");
@@ -91,17 +86,9 @@ function getPrefReaderForType(t) {
   }
 }
 
-function safeGetCharPref(pref, defaultValue) {
-  var prefs =
-      Cc["@mozilla.org/preferences-service;1"].
-      getService(Ci.nsIPrefBranch);
-  try {
-    return prefs.getCharPref(pref);
-  }
-  catch (e) {
-  }
-  return defaultValue;
-}
+XPCOMUtils.defineLazyPreferenceGetter(this, "gCanFrameFeeds",
+  "browser.feeds.unsafelyFrameFeeds", false);
+
 
 function FeedConverter() {
 }
@@ -194,11 +181,11 @@ FeedConverter.prototype = {
           getService(Ci.nsIFeedResultService);
       if (!this._forcePreviewPage && result.doc) {
         let feed = result.doc.QueryInterface(Ci.nsIFeed);
-        let handler = safeGetCharPref(getPrefActionForType(feed.type), "ask");
+        let handler = Services.prefs.getCharPref(getPrefActionForType(feed.type), "ask");
 
         if (handler != "ask") {
           if (handler == "reader")
-            handler = safeGetCharPref(getPrefReaderForType(feed.type), "bookmarks");
+            handler = Services.prefs.getCharPref(getPrefReaderForType(feed.type), "bookmarks");
           switch (handler) {
             case "web":
               let wccr =
@@ -224,17 +211,13 @@ FeedConverter.prototype = {
               try {
                 let title = feed.title ? feed.title.plainText() : "";
                 let desc = feed.subtitle ? feed.subtitle.plainText() : "";
-                let feedReader = safeGetCharPref(getPrefActionForType(feedType), "bookmarks");
-                feedService.addToClientReader(result.uri.spec, title, desc, feed.type, feedReader);
+                feedService.addToClientReader(result.uri.spec, title, desc, feed.type, handler);
                 return;
-              } catch(ex) { /* fallback to preview mode */ }
+              } catch (ex) { /* fallback to preview mode */ }
           }
         }
       }
 
-      let ios =
-          Cc["@mozilla.org/network/io-service;1"].
-          getService(Ci.nsIIOService);
       let chromeChannel;
 
       // handling a redirect, hence forwarding the loadInfo from the old channel
@@ -252,19 +235,21 @@ FeedConverter.prototype = {
         feedService.addFeedResult(result);
 
         // Now load the actual XUL document.
-        let aboutFeedsURI = ios.newURI("about:feeds", null, null);
-        chromeChannel = ios.newChannelFromURIWithLoadInfo(aboutFeedsURI, loadInfo);
+        let aboutFeedsURI = Services.io.newURI("about:feeds");
+        chromeChannel = Services.io.newChannelFromURIWithLoadInfo(aboutFeedsURI, loadInfo);
         chromeChannel.originalURI = result.uri;
+
+        // carry the origin attributes from the channel that loaded the feed.
         chromeChannel.owner =
-          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI, {});
+          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI,
+                                                                 loadInfo.originAttributes);
       } else {
-        chromeChannel = ios.newChannelFromURIWithLoadInfo(result.uri, loadInfo);
+        chromeChannel = Services.io.newChannelFromURIWithLoadInfo(result.uri, loadInfo);
       }
 
       chromeChannel.loadGroup = this._request.loadGroup;
-      chromeChannel.asyncOpen(this._listener, null);
-    }
-    finally {
+      chromeChannel.asyncOpen2(this._listener);
+    } finally {
       this._releaseHandles();
     }
   },
@@ -285,6 +270,13 @@ FeedConverter.prototype = {
   onStartRequest(request, context) {
     let channel = request.QueryInterface(Ci.nsIChannel);
 
+    let {loadInfo} = channel;
+    if ((loadInfo.frameOuterWindowID || loadInfo.outerWindowID) != loadInfo.topOuterWindowID &&
+        !gCanFrameFeeds) {
+      // We don't care about frame loads:
+      return;
+    }
+
     // Check for a header that tells us there was no sniffing
     // The value doesn't matter.
     try {
@@ -296,9 +288,10 @@ FeedConverter.prototype = {
         request.cancel(Cr.NS_BINDING_ABORTED);
         return;
       }
-      let noSniff = httpChannel.getResponseHeader("X-Moz-Is-Feed");
-    }
-    catch (ex) {
+
+      // Note: this throws if the header is not set.
+      httpChannel.getResponseHeader("X-Moz-Is-Feed");
+    } catch (ex) {
       this._sniffed = true;
     }
 
@@ -333,15 +326,10 @@ FeedConverter.prototype = {
   /**
    * See nsISupports.idl
    */
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIFeedResultListener) ||
-        iid.equals(Ci.nsIStreamConverter) ||
-        iid.equals(Ci.nsIStreamListener) ||
-        iid.equals(Ci.nsIRequestObserver)||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIFeedResultListener",
+                                          "nsIStreamConverter",
+                                          "nsIStreamListener",
+                                          "nsIRequestObserver"]),
 };
 
 /**
@@ -373,7 +361,7 @@ FeedResultService.prototype = {
       feedReader = "default";
     }
 
-    let handler = safeGetCharPref(getPrefActionForType(feedType), "bookmarks");
+    let handler = Services.prefs.getCharPref(getPrefActionForType(feedType), "bookmarks");
     if (handler == "ask" || handler == "reader")
       handler = feedReader;
 
@@ -399,7 +387,7 @@ FeedResultService.prototype = {
       // fall through
     case "bookmarks":
       Services.cpmm.sendAsyncMessage("FeedConverter:addLiveBookmark",
-                                     { spec, title, subtitle });
+                                     { spec, title });
       break;
     }
   },
@@ -408,8 +396,10 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   addFeedResult(feedResult) {
-    NS_ASSERT(feedResult.uri != null, "null URI!");
-    NS_ASSERT(feedResult.uri != null, "null feedResult!");
+    if (feedResult.uri == null)
+      throw new Error("null URI!");
+    if (feedResult.uri == null)
+      throw new Error("null feedResult!");
     let spec = feedResult.uri.spec;
     if (!this._results[spec])
       this._results[spec] = [];
@@ -420,7 +410,8 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   getFeedResult(uri) {
-    NS_ASSERT(uri != null, "null URI!");
+    if (uri == null)
+      throw new Error("null URI!");
     let resultList = this._results[uri.spec];
     for (let result of resultList) {
       if (result.uri == uri)
@@ -433,7 +424,8 @@ FeedResultService.prototype = {
    * See nsIFeedResultService.idl
    */
   removeFeedResult(uri) {
-    NS_ASSERT(uri != null, "null URI!");
+    if (uri == null)
+      throw new Error("null URI!");
     let resultList = this._results[uri.spec];
     if (!resultList)
       return;
@@ -459,107 +451,13 @@ FeedResultService.prototype = {
     return this.QueryInterface(iid);
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIFeedResultService) ||
-        iid.equals(Ci.nsIFactory) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIFeedResultService",
+                                          "nsIFactory"]),
 };
 
-/**
- * A protocol handler that attempts to deal with the variant forms of feed:
- * URIs that are actually either http or https.
- */
-function GenericProtocolHandler() {
-}
-GenericProtocolHandler.prototype = {
-  _init(scheme) {
-    let ios =
-      Cc["@mozilla.org/network/io-service;1"].
-      getService(Ci.nsIIOService);
-    this._http = ios.getProtocolHandler("http");
-    this._scheme = scheme;
-  },
-
-  get scheme() {
-    return this._scheme;
-  },
-
-  get protocolFlags() {
-    return this._http.protocolFlags;
-  },
-
-  get defaultPort() {
-    return this._http.defaultPort;
-  },
-
-  allowPort(port, scheme) {
-    return this._http.allowPort(port, scheme);
-  },
-
-  newURI(spec, originalCharset, baseURI) {
-    // Feed URIs can be either nested URIs of the form feed:realURI (in which
-    // case we create a nested URI for the realURI) or feed://example.com, in
-    // which case we create a nested URI for the real protocol which is http.
-
-    let scheme = this._scheme + ":";
-    if (spec.substr(0, scheme.length) != scheme)
-      throw Cr.NS_ERROR_MALFORMED_URI;
-
-    let prefix = spec.substr(scheme.length, 2) == "//" ? "http:" : "";
-    let inner = Cc["@mozilla.org/network/io-service;1"].
-                getService(Ci.nsIIOService).newURI(spec.replace(scheme, prefix),
-                                                   originalCharset, baseURI);
-    let netutil = Cc["@mozilla.org/network/util;1"].getService(Ci.nsINetUtil);
-    const URI_INHERITS_SECURITY_CONTEXT = Ci.nsIProtocolHandler
-                                            .URI_INHERITS_SECURITY_CONTEXT;
-    if (netutil.URIChainHasFlags(inner, URI_INHERITS_SECURITY_CONTEXT))
-      throw Cr.NS_ERROR_MALFORMED_URI;
-
-    let uri = netutil.newSimpleNestedURI(inner);
-    uri.spec = inner.spec.replace(prefix, scheme);
-    return uri;
-  },
-
-  newChannel2(aUri, aLoadInfo) {
-    let inner = aUri.QueryInterface(Ci.nsINestedURI).innerURI;
-    let channel = Cc["@mozilla.org/network/io-service;1"].
-                  getService(Ci.nsIIOService).
-                  newChannelFromURIWithLoadInfo(inner, aLoadInfo);
-
-    if (channel instanceof Components.interfaces.nsIHttpChannel)
-      // Set this so we know this is supposed to be a feed
-      channel.setRequestHeader("X-Moz-Is-Feed", "1", false);
-    channel.originalURI = aUri;
-    return channel;
-  },
-
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIProtocolHandler) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
-};
-
-function FeedProtocolHandler() {
-  this._init('feed');
-}
-FeedProtocolHandler.prototype = new GenericProtocolHandler();
-FeedProtocolHandler.prototype.classID = Components.ID("{4f91ef2e-57ba-472e-ab7a-b4999e42d6c0}");
-
-function PodCastProtocolHandler() {
-  this._init('pcast');
-}
-PodCastProtocolHandler.prototype = new GenericProtocolHandler();
-PodCastProtocolHandler.prototype.classID = Components.ID("{1c31ed79-accd-4b94-b517-06e0c81999d5}");
 
 var components = [FeedConverter,
-                  FeedResultService,
-                  FeedProtocolHandler,
-                  PodCastProtocolHandler];
+                  FeedResultService];
 
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

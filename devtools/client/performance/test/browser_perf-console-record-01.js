@@ -10,32 +10,34 @@
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { initPerformanceInTab, initConsoleInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { waitUntil } = require("devtools/client/performance/test/helpers/wait-utils");
-const { once } = require("devtools/client/performance/test/helpers/event-utils");
+const { getSelectedRecording } = require("devtools/client/performance/test/helpers/recording-utils");
 
-add_task(function*() {
-  let { target, toolbox, console } = yield initConsoleInNewTab({
+add_task(async function() {
+  const { target, console } = await initConsoleInNewTab({
     url: SIMPLE_URL,
     win: window
   });
 
-  yield console.profile("rust");
-  yield console.profileEnd("rust");
+  await console.profile("rust");
+  await console.profileEnd("rust");
 
-  let { panel } = yield initPerformanceInTab({ tab: target.tab });
-  let { PerformanceController, RecordingsView, WaterfallView } = panel.panelWin;
+  const { panel } = await initPerformanceInTab({ tab: target.tab });
+  const { PerformanceController, WaterfallView } = panel.panelWin;
 
-  yield waitUntil(() => PerformanceController.getRecordings().length == 1);
-  yield waitUntil(() => WaterfallView.wasRenderedAtLeastOnce);
+  await waitUntil(() => PerformanceController.getRecordings().length == 1);
+  await waitUntil(() => WaterfallView.wasRenderedAtLeastOnce);
 
-  let recordings = PerformanceController.getRecordings();
+  const recordings = PerformanceController.getRecordings();
   is(recordings.length, 1, "One recording found in the performance panel.");
   is(recordings[0].isConsole(), true, "Recording came from console.profile.");
   is(recordings[0].getLabel(), "rust", "Correct label in the recording model.");
 
-  is(RecordingsView.selectedItem.attachment, recordings[0],
+  const selected = getSelectedRecording(panel);
+
+  is(selected, recordings[0],
     "The profile from console should be selected as it's the only one.");
-  is(RecordingsView.selectedItem.attachment.getLabel(), "rust",
+  is(selected.getLabel(), "rust",
     "The profile label for the first recording is correct.");
 
-  yield teardownToolboxAndRemoveTab(panel);
+  await teardownToolboxAndRemoveTab(panel);
 });

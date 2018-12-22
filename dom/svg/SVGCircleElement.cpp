@@ -8,6 +8,7 @@
 #include "mozilla/gfx/2D.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/SVGCircleElementBinding.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Circle)
 
@@ -19,14 +20,14 @@ namespace dom {
 JSObject*
 SVGCircleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGCircleElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGCircleElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::LengthInfo SVGCircleElement::sLengthInfo[3] =
 {
-  { &nsGkAtoms::cx, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
-  { &nsGkAtoms::cy, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
-  { &nsGkAtoms::r, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::XY }
+  { &nsGkAtoms::cx, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
+  { &nsGkAtoms::cy, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
+  { &nsGkAtoms::r, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::XY }
 };
 
 //----------------------------------------------------------------------
@@ -38,7 +39,7 @@ SVGCircleElement::SVGCircleElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGCircleElement)
 
@@ -80,7 +81,7 @@ SVGCircleElement::GetLengthInfo()
 }
 
 //----------------------------------------------------------------------
-// nsSVGPathGeometryElement methods
+// SVGGeometryElement methods
 
 bool
 SVGCircleElement::GetGeometryBounds(Rect* aBounds,
@@ -93,7 +94,7 @@ SVGCircleElement::GetGeometryBounds(Rect* aBounds,
 
   if (r <= 0.f) {
     // Rendering of the element is disabled
-    *aBounds = Rect(aToBoundsSpace * Point(x, y), Size());
+    *aBounds = Rect(aToBoundsSpace.TransformPoint(Point(x, y)), Size());
     return true;
   }
 

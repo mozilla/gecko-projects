@@ -8,22 +8,24 @@
  */
 
 const TAB_URL = EXAMPLE_URL + "doc_recursion-stack.html";
+const { ELLIPSIS } = require("devtools/shared/l10n");
 
 function test() {
   let gTab, gPanel, gDebugger;
   let gSources, gUtils;
 
-  initDebugger(TAB_URL).then(Task.async(function*([aTab,, aPanel]) {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(Task.async(function* ([aTab,, aPanel]) {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gSources = gDebugger.DebuggerView.Sources;
     gUtils = gDebugger.SourceUtils;
 
-    let ellipsis = gPanel.panelWin.L10N.ellipsis;
     let nananana = new Array(20).join(NaN);
-
-    yield waitForSourceShown(gPanel, '.html');
 
     // Test trimming url queries.
 
@@ -38,8 +40,8 @@ function test() {
     let trimmedLargeLabel = gUtils.trimUrlLength(largeLabel, 1234);
     is(trimmedLargeLabel.length, 1235,
       "Trimming large labels isn't done properly.");
-    ok(trimmedLargeLabel.endsWith(ellipsis),
-      "Trimming large labels should add an ellipsis at the end.");
+    ok(trimmedLargeLabel.endsWith(ELLIPSIS),
+      "Trimming large labels should add an ellipsis at the end : " + ELLIPSIS);
 
     // Test the sources list behaviour with certain urls.
 
@@ -82,11 +84,11 @@ function test() {
     let id = 0;
     for (let { href, leaf } of urls) {
       let url = href + leaf;
-      let actor = 'actor' + id++;
+      let actor = "actor" + id++;
       let label = gUtils.trimUrlLength(gUtils.getSourceLabel(url));
       let group = gUtils.getSourceGroup(url);
       let dummy = document.createElement("label");
-      dummy.setAttribute('value', label);
+      dummy.setAttribute("value", label);
 
       gSources.push([dummy, actor], {
         attachment: {
@@ -145,7 +147,7 @@ function test() {
     ok(gSources.getItemForAttachment(e => e.label == "script_t3_3.js"),
       "Source (14) label is incorrect.");
 
-    ok(gSources.getItemForAttachment(e => e.label == nananana + "Batman!" + ellipsis),
+    ok(gSources.getItemForAttachment(e => e.label == nananana + "Batman!" + ELLIPSIS),
       "Source (15) label is incorrect.");
 
     is(gSources.itemCount, urls.filter(({ dupe }) => !dupe).length + 1,

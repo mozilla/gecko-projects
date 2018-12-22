@@ -9,7 +9,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/UniquePtr.h"
-#include "nsIDOMHTMLFrameSetElement.h"
 #include "nsGenericHTMLElement.h"
 
 /**
@@ -44,8 +43,7 @@ namespace dom {
 
 class OnBeforeUnloadEventHandlerNonNull;
 
-class HTMLFrameSetElement final : public nsGenericHTMLElement,
-                                  public nsIDOMHTMLFrameSetElement
+class HTMLFrameSetElement final : public nsGenericHTMLElement
 {
 public:
   explicit HTMLFrameSetElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
@@ -57,13 +55,11 @@ public:
     SetHasWeirdParserInsertionMode();
   }
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLFrameSetElement, frameset)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLFrameSetElement, frameset)
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMHTMLFrameSetElement
-  NS_DECL_NSIDOMHTMLFRAMESETELEMENT
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLFrameSetElement,
+                                       nsGenericHTMLElement)
 
   void GetCols(DOMString& aCols)
   {
@@ -82,7 +78,7 @@ public:
     SetHTMLAttr(nsGkAtoms::rows, aRows, aError);
   }
 
-  virtual bool IsEventAttributeName(nsIAtom *aName) override;
+  virtual bool IsEventAttributeNameInternal(nsAtom *aName) override;
 
   // Event listener stuff; we need to declare only the ones we need to
   // forward to window that don't come from nsIDOMHTMLFrameSetElement.
@@ -99,17 +95,6 @@ public:
 #undef WINDOW_EVENT
 #undef WINDOW_EVENT_HELPER
 #undef EVENT
-
-  // These override the SetAttr methods in nsGenericHTMLElement (need
-  // both here to silence compiler warnings).
-  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                   const nsAString& aValue, bool aNotify)
-  {
-    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
-  }
-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                           nsIAtom* aPrefix, const nsAString& aValue,
-                           bool aNotify) override;
 
    /**
     * GetRowSpec is used to get the "rows" spec.
@@ -130,18 +115,24 @@ public:
 
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult) override;
-  virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+  virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const override;
 
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
 protected:
   virtual ~HTMLFrameSetElement();
 
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
+
+  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                                 const nsAttrValueOrString* aValue,
+                                 bool aNotify) override;
 
 private:
   nsresult ParseRowCol(const nsAString& aValue,

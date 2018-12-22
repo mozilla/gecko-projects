@@ -2,16 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const {Connection} = require("devtools/shared/client/connection-manager");
 const ConfigView = require("devtools/client/webide/modules/config-view");
 
 var configView = new ConfigView(window);
 
-window.addEventListener("load", function onLoad() {
-  window.removeEventListener("load", onLoad);
+window.addEventListener("load", function() {
   AppManager.on("app-manager-update", OnAppManagerUpdate);
   document.getElementById("close").onclick = CloseUI;
   document.getElementById("device-fields").onchange = UpdateField;
@@ -21,18 +19,17 @@ window.addEventListener("load", function onLoad() {
   document.getElementById("custom-value-type").onchange = ClearNewFields;
   document.getElementById("add-custom-field").onkeyup = CheckNewFieldSubmit;
   BuildUI();
-}, true);
+}, {capture: true, once: true});
 
-window.addEventListener("unload", function onUnload() {
-  window.removeEventListener("unload", onUnload);
+window.addEventListener("unload", function() {
   AppManager.off("app-manager-update", OnAppManagerUpdate);
-});
+}, {once: true});
 
 function CloseUI() {
   window.parent.UI.openProject();
 }
 
-function OnAppManagerUpdate(event, what) {
+function OnAppManagerUpdate(what) {
   if (what == "connection" || what == "runtime-global-actors") {
     BuildUI();
   }
@@ -62,7 +59,9 @@ function SearchField(event) {
   configView.search(event);
 }
 
-var getAllPrefs; // Used by tests
+// Used by tests
+/* exported getAllPrefs */
+var getAllPrefs;
 function BuildUI() {
   configView.resetTable();
 

@@ -2,47 +2,52 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { Cc, Cu, Ci } = require("chrome");
-const { FileUtils } = Cu.import("resource://gre/modules/FileUtils.jsm", {});
+const { Cc, Ci } = require("chrome");
+const { FileUtils } = require("resource://gre/modules/FileUtils.jsm");
 const Services = require("Services");
 const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.properties");
 
-function doesFileExist (location) {
-  let file = new FileUtils.File(location);
+function doesFileExist(location) {
+  const file = new FileUtils.File(location);
   return file.exists();
 }
 exports.doesFileExist = doesFileExist;
 
-function _getFile (location, ...pickerParams) {
+function _getFile(location, ...pickerParams) {
   if (location) {
-    return new FileUtils.File(location);
+    return Promise.resolve(new FileUtils.File(location));
   }
-  let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+  const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
   fp.init(...pickerParams);
-  let res = fp.show();
-  if (res == Ci.nsIFilePicker.returnCancel) {
-    return null;
-  }
-  return fp.file;
+
+  return new Promise(resolve => {
+    fp.open(res => {
+      if (res == Ci.nsIFilePicker.returnCancel) {
+        resolve(null);
+      } else {
+        resolve(fp.file);
+      }
+    });
+  });
 }
 
-function getCustomBinary (window, location) {
+function getCustomBinary(window, location) {
   return _getFile(location, window, Strings.GetStringFromName("selectCustomBinary_title"), Ci.nsIFilePicker.modeOpen);
 }
 exports.getCustomBinary = getCustomBinary;
 
-function getCustomProfile (window, location) {
+function getCustomProfile(window, location) {
   return _getFile(location, window, Strings.GetStringFromName("selectCustomProfile_title"), Ci.nsIFilePicker.modeGetFolder);
 }
 exports.getCustomProfile = getCustomProfile;
 
-function getPackagedDirectory (window, location) {
+function getPackagedDirectory(window, location) {
   return _getFile(location, window, Strings.GetStringFromName("importPackagedApp_title"), Ci.nsIFilePicker.modeGetFolder);
 }
 exports.getPackagedDirectory = getPackagedDirectory;
 
-function getHostedURL (window, location) {
-  let ret = { value: null };
+function getHostedURL(window, location) {
+  const ret = { value: null };
 
   if (!location) {
     Services.prompt.prompt(window,
@@ -60,7 +65,7 @@ function getHostedURL (window, location) {
   location = location.trim();
   try { // Will fail if no scheme
     Services.io.extractScheme(location);
-  } catch(e) {
+  } catch (e) {
     location = "http://" + location;
   }
   return location;

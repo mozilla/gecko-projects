@@ -15,40 +15,33 @@ JSAPITest* JSAPITest::list;
 
 bool JSAPITest::init()
 {
-    rt = createRuntime();
-    if (!rt)
-        return false;
     cx = createContext();
     if (!cx)
         return false;
+    js::UseInternalJobQueues(cx);
+    if (!JS::InitSelfHostedCode(cx))
+        return false;
     JS_BeginRequest(cx);
-    global.init(rt);
+    global.init(cx);
     createGlobal();
     if (!global)
         return false;
-    JS_EnterCompartment(cx, global);
+    JS::EnterRealm(cx, global);
     return true;
 }
 
 void JSAPITest::uninit()
 {
-    if (oldCompartment) {
-        JS_LeaveCompartment(cx, oldCompartment);
-        oldCompartment = nullptr;
-    }
     if (global) {
-        JS_LeaveCompartment(cx, nullptr);
+        JS::LeaveRealm(cx, nullptr);
         global = nullptr;
     }
     if (cx) {
         JS_EndRequest(cx);
-        JS_DestroyContext(cx);
+        destroyContext();
         cx = nullptr;
     }
-    if (rt) {
-        destroyRuntime();
-        rt = nullptr;
-    }
+    msgs.clear();
 }
 
 bool JSAPITest::exec(const char* bytes, const char* filename, int lineno)
@@ -58,6 +51,14 @@ bool JSAPITest::exec(const char* bytes, const char* filename, int lineno)
     opts.setFileAndLine(filename, lineno);
     return JS::Evaluate(cx, opts, bytes, strlen(bytes), &v) ||
         fail(JSAPITestString(bytes), filename, lineno);
+}
+
+bool JSAPITest::execDontReport(const char* bytes, const char* filename, int lineno)
+{
+    JS::RootedValue v(cx);
+    JS::CompileOptions opts(cx);
+    opts.setFileAndLine(filename, lineno);
+    return JS::Evaluate(cx, opts, bytes, strlen(bytes), &v);
 }
 
 bool JSAPITest::evaluate(const char* bytes, const char* filename, int lineno,
@@ -78,18 +79,20 @@ JSObject* JSAPITest::createGlobal(JSPrincipals* principals)
 {
     /* Create the global object. */
     JS::RootedObject newGlobal(cx);
-    JS::CompartmentOptions options;
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    JS::RealmOptions options;
+#ifdef ENABLE_STREAMS
+    options.creationOptions().setStreamsEnabled(true);
+#endif
     newGlobal = JS_NewGlobalObject(cx, getGlobalClass(), principals, JS::FireOnNewGlobalHook,
                                    options);
     if (!newGlobal)
         return nullptr;
 
-    JSAutoCompartment ac(cx, newGlobal);
+    JSAutoRealm ar(cx, newGlobal);
 
     // Populate the global object with the standard globals like Object and
     // Array.
-    if (!JS_InitStandardClasses(cx, newGlobal))
+    if (!JS::InitRealmStandardClasses(cx))
         return nullptr;
 
     global = newGlobal;
@@ -135,6 +138,7 @@ int main(int argc, char* argv[])
         test->uninit();
     }
 
+    MOZ_RELEASE_ASSERT(!JSRuntime::hasLiveRuntimes());
     JS_ShutDown();
 
     if (failures) {

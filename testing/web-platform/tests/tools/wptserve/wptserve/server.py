@@ -1,7 +1,6 @@
 import BaseHTTPServer
 import errno
 import os
-import re
 import socket
 from SocketServer import ThreadingMixIn
 import ssl
@@ -10,14 +9,16 @@ import threading
 import time
 import traceback
 import types
-import urlparse
 
-import routes as default_routes
-from logger import get_logger
-from request import Server, Request
-from response import Response
-from router import Router
-from utils import HTTPException
+from six.moves.urllib.parse import urlsplit, urlunsplit
+
+from . import routes as default_routes
+from .config import Config
+from .logger import get_logger
+from .request import Server, Request
+from .response import Response
+from .router import Router
+from .utils import HTTPException
 
 
 """HTTP server designed for testing purposes.
@@ -90,7 +91,7 @@ class RequestRewriter(object):
         :param request_handler: BaseHTTPRequestHandler for which to
                                 rewrite the request.
         """
-        split_url = urlparse.urlsplit(request_handler.path)
+        split_url = urlsplit(request_handler.path)
         if split_url.path in self.rules:
             methods, destination = self.rules[split_url.path]
             if "*" in methods or request_handler.command in methods:
@@ -98,7 +99,7 @@ class RequestRewriter(object):
                              (request_handler.path, destination))
                 new_url = list(split_url)
                 new_url[2] = destination
-                new_url = urlparse.urlunsplit(new_url)
+                new_url = urlunsplit(new_url)
                 request_handler.path = new_url
 
 
@@ -110,14 +111,15 @@ class WebTestServer(ThreadingMixIn, BaseHTTPServer.HTTPServer):
     # Ensure that we don't hang on shutdown waiting for requests
     daemon_threads = True
 
-    def __init__(self, server_address, RequestHandlerClass, router, rewriter, bind_hostname,
+    def __init__(self, server_address, request_handler_cls,
+                 router, rewriter, bind_address,
                  config=None, use_ssl=False, key_file=None, certificate=None,
                  encrypt_after_connect=False, latency=None, **kwargs):
         """Server for HTTP(s) Requests
 
         :param server_address: tuple of (server_name, port)
 
-        :param RequestHandlerClass: BaseHTTPRequestHandler-like class to use for
+        :param request_handler_cls: BaseHTTPRequestHandler-like class to use for
                                     handling requests.
 
         :param router: Router instance to use for matching requests to handler
@@ -140,10 +142,10 @@ class WebTestServer(ThreadingMixIn, BaseHTTPServer.HTTPServer):
                                       This enables the server to act as a
                                       self-proxy.
 
-        :param bind_hostname True to bind the server to both the hostname and
-                             port specified in the server_address parameter.
-                             False to bind the server only to the port in the
-                             server_address parameter, but not to the hostname.
+        :param bind_address True to bind the server to both the IP address and
+                            port specified in the server_address parameter.
+                            False to bind the server only to the port in the
+                            server_address parameter, but not to the address.
         :param latency: Delay in ms to wait before seving each response, or
                         callable that returns a delay in ms
         """
@@ -155,21 +157,20 @@ class WebTestServer(ThreadingMixIn, BaseHTTPServer.HTTPServer):
 
         self.latency = latency
 
-        if bind_hostname:
+        if bind_address:
             hostname_port = server_address
         else:
             hostname_port = ("",server_address[1])
 
         #super doesn't work here because BaseHTTPServer.HTTPServer is old-style
-        BaseHTTPServer.HTTPServer.__init__(self, hostname_port, RequestHandlerClass, **kwargs)
+        BaseHTTPServer.HTTPServer.__init__(self, hostname_port, request_handler_cls, **kwargs)
 
         if config is not None:
             Server.config = config
         else:
             self.logger.debug("Using default configuration")
-            Server.config = {"host": server_address[0],
-                             "domains": {"": server_address[0]},
-                             "ports": {"http": [self.server_address[1]]}}
+            Server.config = Config(browser_host=server_address[0],
+                                   ports={"http": [self.server_address[1]]})
 
 
         self.key_file = key_file
@@ -183,12 +184,11 @@ class WebTestServer(ThreadingMixIn, BaseHTTPServer.HTTPServer):
                                           server_side=True)
 
     def handle_error(self, request, client_address):
-        error = sys.exc_value
+        error = sys.exc_info()[1]
 
         if ((isinstance(error, socket.error) and
              isinstance(error.args, tuple) and
-             error.args[0] in self.acceptable_errors)
-            or
+             error.args[0] in self.acceptable_errors) or
             (isinstance(error, IOError) and
              error.errno in self.acceptable_errors)):
             pass  # remote hang up before the result is sent
@@ -282,7 +282,7 @@ class WebTestRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 # Ensure that the whole request has been read from the socket
                 request.raw_input.read()
 
-        except socket.timeout, e:
+        except socket.timeout as e:
             self.log_error("Request timed out: %r", e)
             self.close_connection = True
             return
@@ -343,7 +343,7 @@ class WebTestHttpd(object):
     :param rewrites: List of rewrites with which to initialize the rewriter_cls
     :param config: Dictionary holding environment configuration settings for
                    handlers to read, or None to use the default values.
-    :param bind_hostname: Boolean indicating whether to bind server to hostname.
+    :param bind_address: Boolean indicating whether to bind server to IP address.
     :param latency: Delay in ms to wait before seving each response, or
                     callable that returns a delay in ms
 
@@ -381,7 +381,7 @@ class WebTestHttpd(object):
                  server_cls=None, handler_cls=WebTestRequestHandler,
                  use_ssl=False, key_file=None, certificate=None, encrypt_after_connect=False,
                  router_cls=Router, doc_root=os.curdir, routes=None,
-                 rewriter_cls=RequestRewriter, bind_hostname=True, rewrites=None,
+                 rewriter_cls=RequestRewriter, bind_address=True, rewrites=None,
                  latency=None, config=None):
 
         if routes is None:
@@ -399,9 +399,10 @@ class WebTestHttpd(object):
             server_cls = WebTestServer
 
         if use_ssl:
-            if key_file is not None:
-                assert os.path.exists(key_file)
-            assert certificate is not None and os.path.exists(certificate)
+            if not os.path.exists(key_file):
+                raise ValueError("SSL certificate not found: {}".format(key_file))
+            if not os.path.exists(certificate):
+                raise ValueError("SSL key not found: {}".format(certificate))
 
         try:
             self.httpd = server_cls((host, port),
@@ -409,7 +410,7 @@ class WebTestHttpd(object):
                                     self.router,
                                     self.rewriter,
                                     config=config,
-                                    bind_hostname=bind_hostname,
+                                    bind_address=bind_address,
                                     use_ssl=use_ssl,
                                     key_file=key_file,
                                     certificate=certificate,
@@ -419,7 +420,8 @@ class WebTestHttpd(object):
 
             _host, self.port = self.httpd.socket.getsockname()
         except Exception:
-            self.logger.error('Init failed! You may need to modify your hosts file. Refer to README.md.');
+            self.logger.error("Failed to start HTTP server. "
+                              "You may need to edit /etc/hosts or similar, see README.md.")
             raise
 
     def start(self, block=False):
@@ -458,6 +460,6 @@ class WebTestHttpd(object):
         if not self.started:
             return None
 
-        return urlparse.urlunsplit(("http" if not self.use_ssl else "https",
-                                    "%s:%s" % (self.host, self.port),
-                                    path, query, fragment))
+        return urlunsplit(("http" if not self.use_ssl else "https",
+                           "%s:%s" % (self.host, self.port),
+                           path, query, fragment))

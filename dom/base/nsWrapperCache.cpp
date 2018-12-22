@@ -8,7 +8,6 @@
 
 #include "js/Class.h"
 #include "js/Proxy.h"
-#include "mozilla/dom/DOMJSProxyHandler.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "nsCycleCollectionTraversalCallback.h"
@@ -39,10 +38,14 @@ void
 nsWrapperCache::SetWrapperJSObject(JSObject* aWrapper)
 {
   mWrapper = aWrapper;
-  UnsetWrapperFlags(kWrapperFlagsMask & ~WRAPPER_IS_NOT_DOM_BINDING);
+  UnsetWrapperFlags(kWrapperFlagsMask);
 
   if (aWrapper && !JS::ObjectIsTenured(aWrapper)) {
     CycleCollectedJSRuntime::Get()->NurseryWrapperAdded(this);
+  }
+
+  if (mozilla::recordreplay::IsReplaying()) {
+    mozilla::recordreplay::SetWeakPointerJSRoot(this, aWrapper);
   }
 }
 
@@ -50,13 +53,6 @@ void
 nsWrapperCache::ReleaseWrapper(void* aScriptObjectHolder)
 {
   if (PreservingWrapper()) {
-    // PreserveWrapper puts new DOM bindings in the JS holders hash, but they
-    // can also be in the DOM expando hash, so we need to try to remove them
-    // from both here.
-    JSObject* obj = GetWrapperPreserveColor();
-    if (IsDOMBinding() && obj && js::IsProxy(obj)) {
-      DOMProxyHandler::GetAndClearExpandoObject(obj);
-    }
     SetPreservingWrapper(false);
     cyclecollector::DropJSObjectsImpl(aScriptObjectHolder);
   }
@@ -69,46 +65,43 @@ class DebugWrapperTraversalCallback : public nsCycleCollectionTraversalCallback
 public:
   explicit DebugWrapperTraversalCallback(JSObject* aWrapper)
     : mFound(false)
-    , mWrapper(aWrapper)
+    , mWrapper(JS::GCCellPtr(aWrapper))
   {
     mFlags = WANT_ALL_TRACES;
   }
 
   NS_IMETHOD_(void) DescribeRefCountedNode(nsrefcnt aRefCount,
-                                           const char* aObjName)
+                                           const char* aObjName) override
   {
   }
   NS_IMETHOD_(void) DescribeGCedNode(bool aIsMarked,
                                      const char* aObjName,
-                                     uint64_t aCompartmentAddress)
+                                     uint64_t aCompartmentAddress) override
   {
   }
 
-  NS_IMETHOD_(void) NoteJSObject(JSObject* aChild)
+  NS_IMETHOD_(void) NoteJSChild(const JS::GCCellPtr& aChild) override
   {
     if (aChild == mWrapper) {
       mFound = true;
     }
   }
-  NS_IMETHOD_(void) NoteJSScript(JSScript* aChild)
-  {
-  }
-  NS_IMETHOD_(void) NoteXPCOMChild(nsISupports* aChild)
+  NS_IMETHOD_(void) NoteXPCOMChild(nsISupports* aChild) override
   {
   }
   NS_IMETHOD_(void) NoteNativeChild(void* aChild,
-                                    nsCycleCollectionParticipant* aHelper)
+                                    nsCycleCollectionParticipant* aHelper) override
   {
   }
 
-  NS_IMETHOD_(void) NoteNextEdgeName(const char* aName)
+  NS_IMETHOD_(void) NoteNextEdgeName(const char* aName) override
   {
   }
 
   bool mFound;
 
 private:
-  JSObject* mWrapper;
+  JS::GCCellPtr mWrapper;
 };
 
 static void
@@ -117,7 +110,7 @@ DebugWrapperTraceCallback(JS::GCCellPtr aPtr, const char* aName, void* aClosure)
   DebugWrapperTraversalCallback* callback =
     static_cast<DebugWrapperTraversalCallback*>(aClosure);
   if (aPtr.is<JSObject>()) {
-    callback->NoteJSObject(&aPtr.as<JSObject>());
+    callback->NoteJSChild(aPtr);
   }
 }
 
@@ -125,7 +118,13 @@ void
 nsWrapperCache::CheckCCWrapperTraversal(void* aScriptObjectHolder,
                                         nsScriptObjectTracer* aTracer)
 {
-  JSObject* wrapper = GetWrapper();
+  // Skip checking if we are recording or replaying, as calling
+  // GetWrapperPreserveColor() can cause the cache's wrapper to be cleared.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return;
+  }
+
+  JSObject* wrapper = GetWrapperPreserveColor();
   if (!wrapper) {
     return;
   }
@@ -136,7 +135,7 @@ nsWrapperCache::CheckCCWrapperTraversal(void* aScriptObjectHolder,
   // see through the COM layer, so we use a suppression to help it.
   JS::AutoSuppressGCAnalysis suppress;
 
-  aTracer->Traverse(aScriptObjectHolder, callback);
+  aTracer->TraverseNativeAndJS(aScriptObjectHolder, callback);
   MOZ_ASSERT(callback.mFound,
              "Cycle collection participant didn't traverse to preserved "
              "wrapper! This will probably crash.");

@@ -4,12 +4,12 @@
 
 "use strict";
 
-const { Ci, Cc, Cu, Cr, CC } = require("chrome");
+const { Ci, Cc, Cr, CC } = require("chrome");
 const Services = require("Services");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { dumpv } = DevToolsUtils;
 const EventEmitter = require("devtools/shared/event-emitter");
-const promise = require("promise");
+const defer = require("devtools/shared/defer");
 
 DevToolsUtils.defineLazyGetter(this, "IOUtil", () => {
   return Cc["@mozilla.org/io-util;1"].getService(Ci.nsIIOUtil);
@@ -56,7 +56,7 @@ const BUFFER_SIZE = 0x8000;
  *         (unexpected) errors occur.
  */
 function copyStream(input, output, length) {
-  let copier = new StreamCopier(input, output, length);
+  const copier = new StreamCopier(input, output, length);
   return copier.copy();
 }
 
@@ -69,13 +69,13 @@ function StreamCopier(input, output, length) {
   if (IOUtil.outputStreamIsBuffered(output)) {
     this.output = output;
   } else {
-    this.output = Cc["@mozilla.org/network/buffered-output-stream;1"].
-                  createInstance(Ci.nsIBufferedOutputStream);
+    this.output = Cc["@mozilla.org/network/buffered-output-stream;1"]
+                  .createInstance(Ci.nsIBufferedOutputStream);
     this.output.init(output, BUFFER_SIZE);
   }
   this._length = length;
   this._amountLeft = length;
-  this._deferred = promise.defer();
+  this._deferred = defer();
 
   this._copy = this._copy.bind(this);
   this._flush = this._flush.bind(this);
@@ -99,33 +99,32 @@ StreamCopier.prototype = {
   copy: function() {
     // Dispatch to the next tick so that it's possible to attach a progress
     // event listener, even for extremely fast copies (like when testing).
-    Services.tm.currentThread.dispatch(() => {
+    Services.tm.dispatchToMainThread(() => {
       try {
         this._copy();
-      } catch(e) {
+      } catch (e) {
         this._deferred.reject(e);
       }
-    }, 0);
+    });
     return this;
   },
 
   _copy: function() {
-    let bytesAvailable = this.input.available();
-    let amountToCopy = Math.min(bytesAvailable, this._amountLeft);
+    const bytesAvailable = this.input.available();
+    const amountToCopy = Math.min(bytesAvailable, this._amountLeft);
     this._debug("Trying to copy: " + amountToCopy);
 
     let bytesCopied;
     try {
       bytesCopied = this.output.writeFrom(this.input, amountToCopy);
-    } catch(e) {
+    } catch (e) {
       if (e.result == Cr.NS_BASE_STREAM_WOULD_BLOCK) {
         this._debug("Base stream would block, will retry");
         this._debug("Waiting for output stream");
         this.baseAsyncOutput.asyncWait(this, 0, 0, Services.tm.currentThread);
         return;
-      } else {
-        throw e;
       }
+      throw e;
     }
 
     this._amountLeft -= bytesCopied;
@@ -153,7 +152,7 @@ StreamCopier.prototype = {
   _flush: function() {
     try {
       this.output.flush();
-    } catch(e) {
+    } catch (e) {
       if (e.result == Cr.NS_BASE_STREAM_WOULD_BLOCK ||
           e.result == Cr.NS_ERROR_FAILURE) {
         this._debug("Flush would block, will retry");
@@ -161,9 +160,8 @@ StreamCopier.prototype = {
         this._debug("Waiting for output stream");
         this.baseAsyncOutput.asyncWait(this, 0, 0, Services.tm.currentThread);
         return;
-      } else {
-        throw e;
       }
+      throw e;
     }
     this._deferred.resolve();
   },

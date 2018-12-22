@@ -3,7 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PGMP;
+include protocol PGMPContent;
+include GMPTypes;
 
 using base::ProcessId from "base/process.h";
 
@@ -12,16 +13,33 @@ namespace gmp {
 
 sync protocol PGMPService
 {
-  parent spawns PGMP as child;
-
 parent:
-  sync LoadGMP(nsCString nodeId, nsCString api, nsCString[] tags,
-               ProcessId[] alreadyBridgedTo)
-    returns (ProcessId id, nsCString displayName, uint32_t pluginId);
-  sync GetGMPNodeId(nsString origin, nsString topLevelOrigin,
-                    nsString gmpName,
-                    bool inPrivateBrowsing)
+  sync LaunchGMP(nsCString nodeId,
+                 nsCString api,
+                 nsCString[] tags,
+                 ProcessId[] alreadyBridgedTo)
+    returns (uint32_t pluginId,
+             ProcessId id,
+             nsCString displayName,
+             Endpoint<PGMPContentParent> endpoint,
+             nsresult aResult,
+             nsCString aErrorDescription);
+
+  sync LaunchGMPForNodeId(NodeIdData nodeId,
+                          nsCString api,
+                          nsCString[] tags,
+                          ProcessId[] alreadyBridgedTo)
+    returns (uint32_t pluginId,
+             ProcessId id,
+             nsCString displayName,
+             Endpoint<PGMPContentParent> endpoint,
+             nsresult aResult,
+             nsCString aErrorDescription);
+
+  sync GetGMPNodeId(nsString origin, nsString topLevelOrigin, nsString gmpName)
     returns (nsCString id);
+child:
+  async BeginShutdown();
 };
 
 } // namespace gmp

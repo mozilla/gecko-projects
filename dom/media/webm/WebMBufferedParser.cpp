@@ -9,11 +9,10 @@
 #include "nsThreadUtils.h"
 #include <algorithm>
 
-#define WEBM_DEBUG(arg, ...) MOZ_LOG(gWebMDemuxerLog, mozilla::LogLevel::Debug, ("WebMBufferedParser(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+extern mozilla::LazyLogModule gMediaDemuxerLog;
+#define WEBM_DEBUG(arg, ...) MOZ_LOG(gMediaDemuxerLog, mozilla::LogLevel::Debug, ("WebMBufferedParser(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
 namespace mozilla {
-
-extern LazyLogModule gWebMDemuxerLog;
 
 static uint32_t
 VIntLength(unsigned char aFirstByte, uint32_t* aMask)
@@ -34,7 +33,7 @@ VIntLength(unsigned char aFirstByte, uint32_t* aMask)
   return count;
 }
 
-void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
+bool WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
                                 nsTArray<WebMTimeDataOffset>& aMapping,
                                 ReentrantMonitor& aReentrantMonitor)
 {
@@ -114,6 +113,7 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
         } else {
           mClusterEndOffset = -1;
         }
+        mGotClusterTimecode = false;
         mState = READ_ELEMENT_ID;
         break;
       case BLOCKGROUP_ID:
@@ -122,6 +122,11 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       case SIMPLEBLOCK_ID:
         /* FALLTHROUGH */
       case BLOCK_ID:
+        if (!mGotClusterTimecode) {
+          WEBM_DEBUG("The Timecode element must appear before any Block or "
+                     "SimpleBlock elements in a Cluster");
+          return false;
+        }
         mBlockSize = mElement.mSize.mValue;
         mBlockTimecode = 0;
         mBlockTimecodeLength = BLOCK_TIMECODE_LENGTH;
@@ -164,12 +169,16 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
       }
       break;
     case READ_TIMECODESCALE:
-      MOZ_ASSERT(mGotTimecodeScale);
+      if (!mGotTimecodeScale) {
+        WEBM_DEBUG("Should get the SegmentInfo first");
+        return false;
+      }
       mTimecodeScale = mVInt.mValue;
       mState = READ_ELEMENT_ID;
       break;
     case READ_CLUSTER_TIMECODE:
       mClusterTimecode = mVInt.mValue;
+      mGotClusterTimecode = true;
       mState = READ_ELEMENT_ID;
       break;
     case READ_BLOCK_TIMECODE:
@@ -188,7 +197,10 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
           if (idx == 0 || aMapping[idx - 1] != endOffset) {
             // Don't insert invalid negative timecodes.
             if (mBlockTimecode >= 0 || mClusterTimecode >= uint16_t(abs(mBlockTimecode))) {
-              MOZ_ASSERT(mGotTimecodeScale);
+              if (!mGotTimecodeScale) {
+                WEBM_DEBUG("Should get the TimecodeScale first");
+                return false;
+              }
               uint64_t absTimecode = mClusterTimecode + mBlockTimecode;
               absTimecode *= mTimecodeScale;
               // Avoid creating an entry if the timecode is out of order
@@ -202,7 +214,7 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
                                          mClusterOffset, mClusterEndOffset);
                 aMapping.InsertElementAt(idx, entry);
               } else {
-                WEBM_DEBUG("Out of order timecode %llu in Cluster at %lld ignored",
+                WEBM_DEBUG("Out of order timecode %" PRIu64 " in Cluster at %" PRId64 " ignored",
                            absTimecode, mClusterOffset);
               }
             }
@@ -249,6 +261,8 @@ void WebMBufferedParser::Append(const unsigned char* aBuffer, uint32_t aLength,
 
   NS_ASSERTION(p == aBuffer + aLength, "Must have parsed to end of data.");
   mCurrentOffset += aLength;
+
+  return true;
 }
 
 int64_t
@@ -259,6 +273,12 @@ WebMBufferedParser::EndSegmentOffset(int64_t aOffset)
                     mClusterOffset >= 0 ? mClusterOffset : INT64_MAX);
   }
   return mBlockEndOffset;
+}
+
+int64_t
+WebMBufferedParser::GetClusterOffset() const
+{
+  return mClusterOffset;
 }
 
 // SyncOffsetComparator and TimeComparator are slightly confusing, in that
@@ -441,10 +461,12 @@ void WebMBufferedState::UpdateIndex(const MediaByteRangeSet& aRanges, MediaResou
         }
       }
     }
+
+    MediaResourceIndex res(aResource);
     while (length > 0) {
       static const uint32_t BLOCK_SIZE = 1048576;
       uint32_t block = std::min(length, BLOCK_SIZE);
-      RefPtr<MediaByteBuffer> bytes = aResource->MediaReadAt(offset, block);
+      RefPtr<MediaByteBuffer> bytes = res.CachedMediaReadAt(offset, block);
       if (!bytes) {
         break;
       }

@@ -1,6 +1,5 @@
 // Bug 356571 - loadOneOrMoreURIs gives up if one of the URLs has an unknown protocol
 
-var Cr = Components.results;
 var Cm = Components.manager;
 
 // Set to true when docShell alerts for unknown protocol error
@@ -15,7 +14,7 @@ const kPromptServiceFactory = Cm.getClassObject(Cc[kPromptServiceContractID],
                                                 Ci.nsIFactory);
 
 var fakePromptServiceFactory = {
-  createInstance: function(aOuter, aIid) {
+  createInstance(aOuter, aIid) {
     if (aOuter != null)
       throw Cr.NS_ERROR_NO_AGGREGATION;
     return promptService.QueryInterface(aIid);
@@ -23,8 +22,8 @@ var fakePromptServiceFactory = {
 };
 
 var promptService = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPromptService]),
-  alert: function() {
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPromptService]),
+  alert() {
     didFail = true;
   }
 };
@@ -47,7 +46,7 @@ const kURIs = [
 
 var gProgressListener = {
   _runCount: 0,
-  onStateChange: function (aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
+  onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
     if ((aStateFlags & kCompleteState) == kCompleteState) {
       if (++this._runCount != kURIs.length)
         return;
@@ -58,15 +57,17 @@ var gProgressListener = {
       finishTest();
     }
   }
-}
+};
 
 function test() {
   todo(false, "temp. disabled");
-  return; /* FIXME */
+  /* FIXME */
+  /*
   waitForExplicitFinish();
   // Wait for all tabs to finish loading
   gBrowser.addTabsProgressListener(gProgressListener);
   loadOneOrMoreURIs(kURIs.join("|"));
+  */
 }
 
 function finishTest() {
@@ -84,7 +85,7 @@ function finishTest() {
   gBrowser.removeTabsProgressListener(gProgressListener);
 
   // Close opened tabs
-  for (var i = gBrowser.tabs.length-1; i > 0; i--)
+  for (var i = gBrowser.tabs.length - 1; i > 0; i--)
     gBrowser.removeTab(gBrowser.tabs[i]);
 
   finish();

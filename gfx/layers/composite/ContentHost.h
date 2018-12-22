@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,15 +11,17 @@
 #include <stdio.h>                      // for FILE
 #include "mozilla-config.h"             // for MOZ_DUMP_PAINTING
 #include "CompositableHost.h"           // for CompositableHost, etc
-#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
+#include "RotatedBuffer.h"              // for RotatedBuffer, etc
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
 #include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
+#include "mozilla/gfx/Polygon.h"        // for Polygon
 #include "mozilla/gfx/Rect.h"           // for Rect
-#include "mozilla/gfx/Types.h"          // for Filter
+#include "mozilla/gfx/Types.h"          // for SamplingFilter
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
+#include "mozilla/layers/ContentClient.h"  // for ContentClient
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/LayersTypes.h"  // for etc
@@ -26,7 +29,6 @@
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "mozilla/UniquePtr.h"          // for UniquePtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -53,11 +55,21 @@ class ContentHost : public CompositableHost
 public:
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
-                            const nsIntRegion& aOldValidRegionBack,
-                            nsIntRegion* aUpdatedRegionBack) = 0;
+                            const nsIntRegion& aOldValidRegionBack) override = 0;
 
   virtual void SetPaintWillResample(bool aResample) { mPaintWillResample = aResample; }
   bool PaintWillResample() { return mPaintWillResample; }
+
+  // We use this to allow TiledContentHost to invalidate regions where
+  // tiles are fading in.
+  virtual void AddAnimationInvalidation(nsIntRegion& aRegion) { }
+
+  virtual gfx::IntRect GetBufferRect() {
+    MOZ_ASSERT_UNREACHABLE("Must be implemented in derived class");
+    return gfx::IntRect();
+  }
+
+  virtual ContentHost* AsContentHost() override { return this; }
 
 protected:
   explicit ContentHost(const TextureInfo& aTextureInfo)
@@ -82,19 +94,25 @@ protected:
 class ContentHostBase : public ContentHost
 {
 public:
-  typedef RotatedContentBuffer::ContentType ContentType;
-  typedef RotatedContentBuffer::PaintState PaintState;
+  typedef ContentClient::ContentType ContentType;
+  typedef ContentClient::PaintState PaintState;
 
   explicit ContentHostBase(const TextureInfo& aTextureInfo);
   virtual ~ContentHostBase();
 
-protected:
+  virtual gfx::IntRect GetBufferRect() override { return mBufferRect; }
+
   virtual nsIntPoint GetOriginOffset()
   {
     return mBufferRect.TopLeft() - mBufferRotation;
   }
 
+  gfx::IntPoint GetBufferRotation()
+  {
+    return mBufferRotation.ToUnknownPoint();
+  }
 
+protected:
   gfx::IntRect mBufferRect;
   nsIntPoint mBufferRotation;
   bool mInitialised;
@@ -113,15 +131,17 @@ public:
     , mReceivedNewHost(false)
   { }
 
-  virtual void Composite(LayerComposite* aLayer,
+  virtual void Composite(Compositor* aCompositor,
+                         LayerComposite* aLayer,
                          EffectChain& aEffectChain,
                          float aOpacity,
                          const gfx::Matrix4x4& aTransform,
-                         const gfx::Filter& aFilter,
-                         const gfx::Rect& aClipRect,
-                         const nsIntRegion* aVisibleRegion = nullptr) override;
+                         const gfx::SamplingFilter aSamplingFilter,
+                         const gfx::IntRect& aClipRect,
+                         const nsIntRegion* aVisibleRegion = nullptr,
+                         const Maybe<gfx::Polygon>& aGeometry = Nothing()) override;
 
-  virtual void SetCompositor(Compositor* aCompositor) override;
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) override;
 
   virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
 
@@ -160,9 +180,16 @@ public:
     mLocked = false;
   }
 
-  LayerRenderState GetRenderState() override;
+  bool HasComponentAlpha() const {
+    return !!mTextureHostOnWhite;
+  }
 
-  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::Filter& aFilter) override;
+  RefPtr<TextureSource> AcquireTextureSource();
+  RefPtr<TextureSource> AcquireTextureSourceOnWhite();
+
+  ContentHostTexture* AsContentHostTexture() override { return this; }
+
+  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::SamplingFilter aSamplingFilter) override;
 
 protected:
   CompositableTextureHostRef mTextureHost;
@@ -187,12 +214,11 @@ public:
 
   virtual ~ContentHostDoubleBuffered() {}
 
-  virtual CompositableType GetType() { return CompositableType::CONTENT_DOUBLE; }
+  virtual CompositableType GetType() override { return CompositableType::CONTENT_DOUBLE; }
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
-                            const nsIntRegion& aOldValidRegionBack,
-                            nsIntRegion* aUpdatedRegionBack);
+                            const nsIntRegion& aOldValidRegionBack) override;
 
 protected:
   nsIntRegion mValidRegionForNextBackBuffer;
@@ -210,12 +236,11 @@ public:
   {}
   virtual ~ContentHostSingleBuffered() {}
 
-  virtual CompositableType GetType() { return CompositableType::CONTENT_SINGLE; }
+  virtual CompositableType GetType() override { return CompositableType::CONTENT_SINGLE; }
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
-                            const nsIntRegion& aOldValidRegionBack,
-                            nsIntRegion* aUpdatedRegionBack);
+                            const nsIntRegion& aOldValidRegionBack) override;
 };
 
 } // namespace layers

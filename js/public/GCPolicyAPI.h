@@ -13,9 +13,6 @@
 //
 // The GCPolicy provides at a minimum:
 //
-//   static T initial()
-//       - Construct and return an empty T.
-//
 //   static void trace(JSTracer, T* tp, const char* name)
 //       - Trace the edge |*tp|, calling the edge |name|. Containers like
 //         GCHashMap and GCHashSet use this method to trace their children.
@@ -40,37 +37,55 @@
 #ifndef GCPolicyAPI_h
 #define GCPolicyAPI_h
 
+#include "mozilla/Maybe.h"
 #include "mozilla/UniquePtr.h"
 
 #include "js/TraceKind.h"
 #include "js/TracingAPI.h"
+#include "js/TypeDecls.h"
 
-class JSAtom;
-class JSFunction;
-class JSObject;
-class JSScript;
-class JSString;
+// Expand the given macro D for each public GC pointer.
+#define FOR_EACH_PUBLIC_GC_POINTER_TYPE(D) \
+    D(JS::Symbol*) \
+    IF_BIGINT(D(JS::BigInt*),) \
+    D(JSAtom*) \
+    D(JSFunction*) \
+    D(JSObject*) \
+    D(JSScript*) \
+    D(JSString*)
+
+// Expand the given macro D for each public tagged GC pointer type.
+#define FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(D) \
+    D(JS::Value) \
+    D(jsid)
+
+#define FOR_EACH_PUBLIC_AGGREGATE_GC_POINTER_TYPE(D) \
+    D(JSPropertyDescriptor)
+
 namespace JS {
-class Symbol;
-}
-
-namespace js {
 
 // Defines a policy for container types with non-GC, i.e. C storage. This
 // policy dispatches to the underlying struct for GC interactions.
 template <typename T>
 struct StructGCPolicy
 {
-    static T initial() {
-        return T();
-    }
+    static_assert(!mozilla::IsPointer<T>::value,
+                  "Pointer type not allowed for StructGCPolicy");
 
     static void trace(JSTracer* trc, T* tp, const char* name) {
         tp->trace(trc);
     }
 
+    static void sweep(T* tp) {
+        return tp->sweep();
+    }
+
     static bool needsSweep(T* tp) {
         return tp->needsSweep();
+    }
+
+    static bool isValid(const T& tp) {
+        return true;
     }
 };
 
@@ -83,9 +98,9 @@ template <typename T> struct GCPolicy : public StructGCPolicy<T> {};
 // This policy ignores any GC interaction, e.g. for non-GC types.
 template <typename T>
 struct IgnoreGCPolicy {
-    static T initial() { return T(); }
     static void trace(JSTracer* trc, T* t, const char* name) {}
     static bool needsSweep(T* v) { return false; }
+    static bool isValid(const T& v) { return true; }
 };
 template <> struct GCPolicy<uint32_t> : public IgnoreGCPolicy<uint32_t> {};
 template <> struct GCPolicy<uint64_t> : public IgnoreGCPolicy<uint64_t> {};
@@ -93,30 +108,53 @@ template <> struct GCPolicy<uint64_t> : public IgnoreGCPolicy<uint64_t> {};
 template <typename T>
 struct GCPointerPolicy
 {
-    static T initial() { return nullptr; }
+    static_assert(mozilla::IsPointer<T>::value,
+                  "Non-pointer type not allowed for GCPointerPolicy");
+
     static void trace(JSTracer* trc, T* vp, const char* name) {
         if (*vp)
             js::UnsafeTraceManuallyBarrieredEdge(trc, vp, name);
     }
     static bool needsSweep(T* vp) {
-        return js::gc::EdgeNeedsSweep(vp);
+        if (*vp)
+            return js::gc::IsAboutToBeFinalizedUnbarriered(vp);
+        return false;
+    }
+    static bool isValid(T v) {
+        return js::gc::IsCellPointerValidOrNull(v);
     }
 };
-template <> struct GCPolicy<JS::Symbol*> : public GCPointerPolicy<JS::Symbol*> {};
-template <> struct GCPolicy<JSAtom*> : public GCPointerPolicy<JSAtom*> {};
-template <> struct GCPolicy<JSFunction*> : public GCPointerPolicy<JSFunction*> {};
-template <> struct GCPolicy<JSObject*> : public GCPointerPolicy<JSObject*> {};
-template <> struct GCPolicy<JSScript*> : public GCPointerPolicy<JSScript*> {};
-template <> struct GCPolicy<JSString*> : public GCPointerPolicy<JSString*> {};
+#define EXPAND_SPECIALIZE_GCPOLICY(Type) \
+    template <> struct GCPolicy<Type> : public GCPointerPolicy<Type> {}; \
+    template <> struct GCPolicy<Type const> : public GCPointerPolicy<Type const> {};
+FOR_EACH_PUBLIC_GC_POINTER_TYPE(EXPAND_SPECIALIZE_GCPOLICY)
+#undef EXPAND_SPECIALIZE_GCPOLICY
+
+template <typename T>
+struct NonGCPointerPolicy
+{
+    static void trace(JSTracer* trc, T* vp, const char* name) {
+        if (*vp)
+            (*vp)->trace(trc);
+    }
+    static bool needsSweep(T* vp) {
+        if (*vp)
+            return (*vp)->needsSweep();
+        return false;
+    }
+    static bool isValid(T v) {
+        return true;
+    }
+};
 
 template <typename T>
 struct GCPolicy<JS::Heap<T>>
 {
     static void trace(JSTracer* trc, JS::Heap<T>* thingp, const char* name) {
-        JS::TraceEdge(trc, thingp, name);
+        TraceEdge(trc, thingp, name);
     }
     static bool needsSweep(JS::Heap<T>* thingp) {
-        return gc::EdgeNeedsSweep(thingp);
+        return *thingp && js::gc::EdgeNeedsSweep(thingp);
     }
 };
 
@@ -124,15 +162,45 @@ struct GCPolicy<JS::Heap<T>>
 template <typename T, typename D>
 struct GCPolicy<mozilla::UniquePtr<T, D>>
 {
-    static mozilla::UniquePtr<T,D> initial() { return mozilla::UniquePtr<T,D>(); }
     static void trace(JSTracer* trc, mozilla::UniquePtr<T,D>* tp, const char* name) {
-        GCPolicy<T>::trace(trc, tp->get(), name);
+        if (tp->get())
+            GCPolicy<T>::trace(trc, tp->get(), name);
     }
     static bool needsSweep(mozilla::UniquePtr<T,D>* tp) {
-        return GCPolicy<T>::needsSweep(tp->get());
+        if (tp->get())
+            return GCPolicy<T>::needsSweep(tp->get());
+        return false;
+    }
+    static bool isValid(const mozilla::UniquePtr<T,D>& t) {
+        if (t.get())
+            return GCPolicy<T>::isValid(*t.get());
+        return true;
     }
 };
 
-} // namespace js
+// GCPolicy<Maybe<T>> forwards tracing/sweeping to GCPolicy<T*> if
+// when the Maybe<T> is full.
+template <typename T>
+struct GCPolicy<mozilla::Maybe<T>>
+{
+    static void trace(JSTracer* trc, mozilla::Maybe<T>* tp, const char* name) {
+        if (tp->isSome())
+            GCPolicy<T>::trace(trc, tp->ptr(), name);
+    }
+    static bool needsSweep(mozilla::Maybe<T>* tp) {
+        if (tp->isSome())
+            return GCPolicy<T>::needsSweep(tp->ptr());
+        return false;
+    }
+    static bool isValid(const mozilla::Maybe<T>& t) {
+        if (t.isSome())
+            return GCPolicy<T>::isValid(t.ref());
+        return true;
+    }
+};
+
+template <> struct GCPolicy<JS::Realm*>;  // see Realm.h
+
+} // namespace JS
 
 #endif // GCPolicyAPI_h

@@ -21,85 +21,79 @@
  */
 
 const { Ci, Cu } = require("chrome");
-const { Class } = require("sdk/core/heritage");
+
 // Be aggressive about lazy loading, as this will run on every
 // toolbox startup
-loader.lazyRequireGetter(this, "events", "sdk/event/core");
-loader.lazyRequireGetter(this, "Timers", "sdk/timers");
-loader.lazyRequireGetter(this, "Task", "resource://gre/modules/Task.jsm", true);
 loader.lazyRequireGetter(this, "Memory", "devtools/server/performance/memory", true);
 loader.lazyRequireGetter(this, "Framerate", "devtools/server/performance/framerate", true);
 loader.lazyRequireGetter(this, "StackFrameCache", "devtools/server/actors/utils/stack", true);
-loader.lazyRequireGetter(this, "EventTarget", "sdk/event/target", true);
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 // How often do we pull markers from the docShells, and therefore, how often do
 // we send events to the front (knowing that when there are no markers in the
-// docShell, no event is sent).
-const DEFAULT_TIMELINE_DATA_PULL_TIMEOUT = 200; // ms
+// docShell, no event is sent). In milliseconds.
+const DEFAULT_TIMELINE_DATA_PULL_TIMEOUT = 200;
 
 /**
  * The timeline actor pops and forwards timeline markers registered in docshells.
  */
-var Timeline = exports.Timeline = Class({
-  extends: EventTarget,
+function Timeline(targetActor) {
+  EventEmitter.decorate(this);
 
-  /**
-   * Initializes this actor with the provided connection and tab actor.
-   */
-  initialize: function (tabActor) {
-    this.tabActor = tabActor;
+  this.targetActor = targetActor;
 
-    this._isRecording = false;
-    this._stackFrames = null;
-    this._memory = null;
-    this._framerate = null;
+  this._isRecording = false;
+  this._stackFrames = null;
+  this._memory = null;
+  this._framerate = null;
 
-    // Make sure to get markers from new windows as they become available
-    this._onWindowReady = this._onWindowReady.bind(this);
-    this._onGarbageCollection = this._onGarbageCollection.bind(this);
-    events.on(this.tabActor, "window-ready", this._onWindowReady);
-  },
+  // Make sure to get markers from new windows as they become available
+  this._onWindowReady = this._onWindowReady.bind(this);
+  this._onGarbageCollection = this._onGarbageCollection.bind(this);
+  this.targetActor.on("window-ready", this._onWindowReady);
+}
 
+Timeline.prototype = {
   /**
    * Destroys this actor, stopping recording first.
    */
   destroy: function() {
     this.stop();
 
-    events.off(this.tabActor, "window-ready", this._onWindowReady);
-    this.tabActor = null;
+    this.targetActor.off("window-ready", this._onWindowReady);
+    this.targetActor = null;
   },
 
   /**
-   * Get the list of docShells in the currently attached tabActor. Note that we
-   * always list the docShells included in the real root docShell, even if the
-   * tabActor was switched to a child frame. This is because for now, paint
-   * markers are only recorded at parent frame level so switching the timeline
-   * to a child frame would hide all paint markers.
+   * Get the list of docShells in the currently attached targetActor. Note that
+   * we always list the docShells included in the real root docShell, even if
+   * the targetActor was switched to a child frame. This is because for now,
+   * paint markers are only recorded at parent frame level so switching the
+   * timeline to a child frame would hide all paint markers.
    * See https://bugzilla.mozilla.org/show_bug.cgi?id=1050773#c14
    * @return {Array}
    */
   get docShells() {
     let originalDocShell;
-    let docShells = [];
+    const docShells = [];
 
-    if (this.tabActor.isRootActor) {
-      originalDocShell = this.tabActor.docShell;
+    if (this.targetActor.isRootActor) {
+      originalDocShell = this.targetActor.docShell;
     } else {
-      originalDocShell = this.tabActor.originalDocShell;
+      originalDocShell = this.targetActor.originalDocShell;
     }
 
     if (!originalDocShell) {
       return docShells;
     }
 
-    let docShellsEnum = originalDocShell.getDocShellEnumerator(
+    const docShellsEnum = originalDocShell.getDocShellEnumerator(
       Ci.nsIDocShellTreeItem.typeAll,
       Ci.nsIDocShell.ENUMERATE_FORWARDS
     );
 
     while (docShellsEnum.hasMoreElements()) {
-      let docShell = docShellsEnum.getNext();
+      const docShell = docShellsEnum.getNext();
       docShells.push(docShell.QueryInterface(Ci.nsIDocShell));
     }
 
@@ -111,18 +105,18 @@ var Timeline = exports.Timeline = Class({
    * markers, memory, tick and frames events, if any.
    */
   _pullTimelineData: function() {
-    let docShells = this.docShells;
+    const docShells = this.docShells;
     if (!this._isRecording || !docShells.length) {
       return;
     }
 
-    let endTime = docShells[0].now();
-    let markers = [];
+    const endTime = docShells[0].now();
+    const markers = [];
 
     // Gather markers if requested.
     if (this._withMarkers || this._withDocLoadingEvents) {
-      for (let docShell of docShells) {
-        for (let marker of docShell.popProfileTimelineMarkers()) {
+      for (const docShell of docShells) {
+        for (const marker of docShell.popProfileTimelineMarkers()) {
           markers.push(marker);
 
           // The docshell may return markers with stack traces attached.
@@ -136,7 +130,9 @@ var Timeline = exports.Timeline = Class({
               marker.stack = this._stackFrames.addFrame(Cu.waiveXrays(marker.stack));
             }
             if (marker.endStack) {
-              marker.endStack = this._stackFrames.addFrame(Cu.waiveXrays(marker.endStack));
+              marker.endStack = this._stackFrames.addFrame(
+                Cu.waiveXrays(marker.endStack)
+              );
             }
           }
 
@@ -144,7 +140,7 @@ var Timeline = exports.Timeline = Class({
           if (this._withDocLoadingEvents) {
             if (marker.name == "document::DOMContentLoaded" ||
                 marker.name == "document::Load") {
-              events.emit(this, "doc-loading", marker, endTime);
+              this.emit("doc-loading", marker, endTime);
             }
           }
         }
@@ -153,28 +149,28 @@ var Timeline = exports.Timeline = Class({
 
     // Emit markers if requested.
     if (this._withMarkers && markers.length > 0) {
-      events.emit(this, "markers", markers, endTime);
+      this.emit("markers", markers, endTime);
     }
 
     // Emit framerate data if requested.
     if (this._withTicks) {
-      events.emit(this, "ticks", endTime, this._framerate.getPendingTicks());
+      this.emit("ticks", endTime, this._framerate.getPendingTicks());
     }
 
     // Emit memory data if requested.
     if (this._withMemory) {
-      events.emit(this, "memory", endTime, this._memory.measure());
+      this.emit("memory", endTime, this._memory.measure());
     }
 
     // Emit stack frames data if requested.
     if (this._withFrames && this._withMarkers) {
-      let frames = this._stackFrames.makeEvent();
+      const frames = this._stackFrames.makeEvent();
       if (frames) {
-        events.emit(this, "frames", endTime, frames);
+        this.emit("frames", endTime, frames);
       }
     }
 
-    this._dataPullTimeout = Timers.setTimeout(() => {
+    this._dataPullTimeout = setTimeout(() => {
       this._pullTimelineData();
     }, DEFAULT_TIMELINE_DATA_PULL_TIMEOUT);
   },
@@ -182,7 +178,7 @@ var Timeline = exports.Timeline = Class({
   /**
    * Are we recording profile markers currently?
    */
-  isRecording: function () {
+  isRecording: function() {
     return this._isRecording;
   },
 
@@ -208,7 +204,7 @@ var Timeline = exports.Timeline = Class({
    *         Boolean indicating whether or not DOMContentLoaded and Load
    *         marker events are emitted.
    */
-  start: Task.async(function *({
+  async start({
     withMarkers,
     withTicks,
     withMemory,
@@ -216,11 +212,11 @@ var Timeline = exports.Timeline = Class({
     withGCEvents,
     withDocLoadingEvents,
   }) {
-    let docShells = this.docShells;
+    const docShells = this.docShells;
     if (!docShells.length) {
       return -1;
     }
-    let startTime = this._startTime = docShells[0].now();
+    const startTime = this._startTime = docShells[0].now();
     if (this._isRecording) {
       return startTime;
     }
@@ -234,23 +230,23 @@ var Timeline = exports.Timeline = Class({
     this._withDocLoadingEvents = !!withDocLoadingEvents;
 
     if (this._withMarkers || this._withDocLoadingEvents) {
-      for (let docShell of docShells) {
+      for (const docShell of docShells) {
         docShell.recordProfileTimelineMarkers = true;
       }
     }
 
     if (this._withTicks) {
-      this._framerate = new Framerate(this.tabActor);
+      this._framerate = new Framerate(this.targetActor);
       this._framerate.startRecording();
     }
 
     if (this._withMemory || this._withGCEvents) {
-      this._memory = new Memory(this.tabActor, this._stackFrames);
+      this._memory = new Memory(this.targetActor, this._stackFrames);
       this._memory.attach();
     }
 
     if (this._withGCEvents) {
-      events.on(this._memory, "garbage-collection", this._onGarbageCollection);
+      this._memory.on("garbage-collection", this._onGarbageCollection);
     }
 
     if (this._withFrames && this._withMarkers) {
@@ -260,23 +256,23 @@ var Timeline = exports.Timeline = Class({
 
     this._pullTimelineData();
     return startTime;
-  }),
+  },
 
   /**
    * Stop recording profile markers.
    */
-  stop: Task.async(function *() {
-    let docShells = this.docShells;
+  async stop() {
+    const docShells = this.docShells;
     if (!docShells.length) {
       return -1;
     }
-    let endTime = this._startTime = docShells[0].now();
+    const endTime = this._startTime = docShells[0].now();
     if (!this._isRecording) {
       return endTime;
     }
 
     if (this._withMarkers || this._withDocLoadingEvents) {
-      for (let docShell of docShells) {
+      for (const docShell of docShells) {
         docShell.recordProfileTimelineMarkers = false;
       }
     }
@@ -293,7 +289,7 @@ var Timeline = exports.Timeline = Class({
     }
 
     if (this._withGCEvents) {
-      events.off(this._memory, "garbage-collection", this._onGarbageCollection);
+      this._memory.off("garbage-collection", this._onGarbageCollection);
     }
 
     if (this._withFrames && this._withMarkers) {
@@ -308,18 +304,18 @@ var Timeline = exports.Timeline = Class({
     this._withDocLoadingEvents = false;
     this._withGCEvents = false;
 
-    Timers.clearTimeout(this._dataPullTimeout);
+    clearTimeout(this._dataPullTimeout);
 
     return endTime;
-  }),
+  },
 
   /**
-   * When a new window becomes available in the tabActor, start recording its
+   * When a new window becomes available in the targetActor, start recording its
    * markers if we were recording.
    */
   _onWindowReady: function({ window }) {
     if (this._isRecording) {
-      let docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
+      const docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIWebNavigation)
                            .QueryInterface(Ci.nsIDocShell);
       docShell.recordProfileTimelineMarkers = true;
@@ -331,19 +327,23 @@ var Timeline = exports.Timeline = Class({
    * take the data and make it look like the rest of our markers.
    *
    * A GC "marker" here represents a full GC cycle, which may contain several incremental
-   * events within its `collection` array. The marker contains a `reason` field, indicating
-   * why there was a GC, and may contain a `nonincrementalReason` when SpiderMonkey could
-   * not incrementally collect garbage.
+   * events within its `collection` array. The marker contains a `reason` field,
+   * indicating why there was a GC, and may contain a `nonincrementalReason` when
+   * SpiderMonkey could not incrementally collect garbage.
    */
-  _onGarbageCollection: function ({ collections, gcCycleNumber, reason, nonincrementalReason }) {
-    let docShells = this.docShells;
+  _onGarbageCollection: function({
+    collections, gcCycleNumber, reason, nonincrementalReason
+  }) {
+    const docShells = this.docShells;
     if (!this._isRecording || !docShells.length) {
       return;
     }
 
-    let endTime = docShells[0].now();
+    const endTime = docShells[0].now();
 
-    events.emit(this, "markers", collections.map(({ startTimestamp: start, endTimestamp: end }) => {
+    this.emit("markers", collections.map(({
+      startTimestamp: start, endTimestamp: end
+    }) => {
       return {
         name: "GarbageCollection",
         causeName: reason,
@@ -354,4 +354,6 @@ var Timeline = exports.Timeline = Class({
       };
     }), endTime);
   },
-});
+};
+
+exports.Timeline = Timeline;

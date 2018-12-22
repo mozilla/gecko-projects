@@ -5,19 +5,18 @@
 
 // Tests that the Filter Editor Widget parses filter values correctly (setCssValue)
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
-const {CSSFilterEditorWidget} =
-      require("devtools/client/shared/widgets/FilterWidget");
-const {cssTokenizer} = require("devtools/client/shared/css-parsing-utils");
-const DOMUtils =
-      Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
+const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+
+const TEST_URI = CHROME_URL_ROOT + "doc_filter-editor-01.html";
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
+const {getCSSLexer} = require("devtools/shared/css/lexer");
 
 // Verify that the given string consists of a valid CSS URL token.
 // Return true on success, false on error.
 function verifyURL(string) {
-  let lexer = DOMUtils.getCSSLexer(string);
+  const lexer = getCSSLexer(string);
 
-  let token = lexer.nextToken();
+  const token = lexer.nextToken();
   if (!token || token.tokenType !== "url") {
     return false;
   }
@@ -25,12 +24,12 @@ function verifyURL(string) {
   return lexer.nextToken() === null;
 }
 
-add_task(function *() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+add_task(async function() {
+  const [,, doc] = await createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
 
-  const container = doc.querySelector("#container");
-  let widget = new CSSFilterEditorWidget(container, "none");
+  const container = doc.querySelector("#filter-container");
+  const widget = new CSSFilterEditorWidget(container, "none", cssIsValid);
 
   info("Test parsing of a valid CSS Filter value");
   widget.setCssValue("blur(2px) contrast(200%)");
@@ -98,14 +97,14 @@ add_task(function *() {
   is(widget.getCssValue(), "url(ordinary)",
      "setCssValue should not quote ordinary unquoted URL contents");
 
-  let quotedurl =
+  const quotedurl =
       "url(invalid\\ \\)\\ {\\\twhen\\ }\\ ;\\ \\\\unquoted\\'\\\")";
   ok(verifyURL(quotedurl), "weird URL is valid");
   widget.setCssValue(quotedurl);
   is(widget.getCssValue(), quotedurl,
      "setCssValue should re-quote weird unquoted URL contents");
 
-  let dataurl = "url(data:image/svg+xml;utf8,<svg\\ " +
+  const dataurl = "url(data:image/svg+xml;utf8,<svg\\ " +
       "xmlns=\\\"http://www.w3.org/2000/svg\\\"><filter\\ id=\\\"blur\\\">" +
       "<feGaussianBlur\\ stdDeviation=\\\"3\\\"/></filter></svg>#blur)";
   ok(verifyURL(dataurl), "data URL is valid");

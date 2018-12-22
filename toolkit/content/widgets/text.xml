@@ -10,7 +10,7 @@
    xmlns:html="http://www.w3.org/1999/xhtml">
 
   <!-- bound to <description>s -->
-  <binding id="text-base" role="xul:text">
+  <binding id="text-base">
     <implementation implements="nsIDOMXULDescriptionElement">
       <property name="disabled" onset="if (val) this.setAttribute('disabled', 'true');
                                        else this.removeAttribute('disabled');
@@ -28,13 +28,13 @@
       <property name="accessKey">
         <getter>
           <![CDATA[
-            var accessKey = this.getAttribute('accesskey');
+            var accessKey = this.getAttribute("accesskey");
             return accessKey ? accessKey[0] : null;
           ]]>
         </getter>
         <setter>
           <![CDATA[
-            this.setAttribute('accesskey', val);
+            this.setAttribute("accesskey", val);
             return val;
           ]]>
         </setter>
@@ -44,7 +44,7 @@
         <setter>
           <![CDATA[
             // After this gets set, the label will use the binding #label-control
-            this.setAttribute('control', val);
+            this.setAttribute("control", val);
             return val;
           ]]>
         </setter>
@@ -70,7 +70,7 @@
             var control = this.labeledControlElement;
             if (!control) {
               var bindingParent = document.getBindingParent(this);
-              if (bindingParent instanceof Components.interfaces.nsIDOMXULLabeledControlElement) {
+              if (bindingParent instanceof Ci.nsIDOMXULLabeledControlElement) {
                 control = bindingParent; // For controls that make the <label> an anon child
               }
             }
@@ -85,12 +85,12 @@
 
             if (this.mInsertSeparator === undefined) {
               try {
-                var prefs = Components.classes["@mozilla.org/preferences-service;1"].
-                                       getService(Components.interfaces.nsIPrefBranch);
+                var prefs = Cc["@mozilla.org/preferences-service;1"].
+                                       getService(Ci.nsIPrefBranch);
                 this.mUnderlineAccesskey = (prefs.getIntPref("ui.key.menuAccessKey") != 0);
 
                 const nsIPrefLocalizedString =
-                  Components.interfaces.nsIPrefLocalizedString;
+                  Ci.nsIPrefLocalizedString;
 
                 const prefNameInsertSeparator =
                   "intl.menuitems.insertseparatorbeforeaccesskeys";
@@ -104,8 +104,7 @@
                 val = prefs.getComplexValue(prefNameAlwaysAppendAccessKey,
                                             nsIPrefLocalizedString).data;
                 this.mAlwaysAppendAccessKey = (val == "true");
-              }
-              catch (e) {
+              } catch (e) {
                 this.mInsertSeparator = true;
               }
             }
@@ -116,13 +115,13 @@
             var afterLabel = document.getAnonymousElementByAttribute(this, "anonid", "accessKeyParens");
             afterLabel.textContent = "";
 
-            var oldAccessKey = this.getElementsByAttribute('class', 'accesskey').item(0);
+            var oldAccessKey = this.getElementsByAttribute("class", "accesskey").item(0);
             if (oldAccessKey) { // Clear old accesskey
               this.mergeElement(oldAccessKey);
             }
 
             var oldHiddenSpan =
-              this.getElementsByAttribute('class', 'hiddenColon').item(0);
+              this.getElementsByAttribute("class", "hiddenColon").item(0);
             if (oldHiddenSpan) {
               this.mergeElement(oldHiddenSpan);
             }
@@ -215,12 +214,11 @@
         <body>
           <![CDATA[
             if (element.previousSibling instanceof Text) {
-              element.previousSibling.appendData(element.textContent)
-            }
-            else {
+              element.previousSibling.appendData(element.textContent);
+            } else {
               element.parentNode.insertBefore(element.firstChild, element);
             }
-            element.parentNode.removeChild(element);
+            element.remove();
           ]]>
         </body>
       </method>
@@ -237,10 +235,10 @@
             var accessKey = null;
             var labeledEl = this.labeledControlElement;
             if (labeledEl) {
-              accessKey = labeledEl.getAttribute('accesskey');
+              accessKey = labeledEl.getAttribute("accesskey");
             }
             if (!accessKey) {
-              accessKey = this.getAttribute('accesskey');
+              accessKey = this.getAttribute("accesskey");
             }
             return accessKey ? accessKey[0] : null;
           ]]>
@@ -248,12 +246,12 @@
         <setter>
           <![CDATA[
             // If this label already has an accesskey attribute store it here as well
-            if (this.hasAttribute('accesskey')) {
-              this.setAttribute('accesskey', val);
+            if (this.hasAttribute("accesskey")) {
+              this.setAttribute("accesskey", val);
             }
             var control = this.labeledControlElement;
             if (control) {
-              control.setAttribute('accesskey', val);
+              control.setAttribute("accesskey", val);
             }
             this.formatAccessKey(false);
             return val;
@@ -271,7 +269,7 @@
             if (control) {
               control.labelElement = null; // No longer pointed to be this label
             }
-            this.setAttribute('control', val);
+            this.setAttribute("control", val);
             this.formatAccessKey(false);
             return val;
           ]]>
@@ -289,7 +287,7 @@
     </handlers>
   </binding>
 
-  <binding id="text-link" extends="chrome://global/content/bindings/text.xml#text-label" role="xul:link">
+  <binding id="text-link" extends="chrome://global/content/bindings/text.xml#text-label">
     <implementation>
       <property name="href" onget="return this.getAttribute('href');"
                             onset="this.setAttribute('href', val); return val;" />
@@ -303,46 +301,47 @@
 
           var uri = null;
           try {
-            const nsISSM = Components.interfaces.nsIScriptSecurityManager;
+            const nsISSM = Ci.nsIScriptSecurityManager;
             const secMan =
-                     Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                               .getService(nsISSM);
+                     Cc["@mozilla.org/scriptsecuritymanager;1"]
+                       .getService(nsISSM);
 
             const ioService =
-                     Components.classes["@mozilla.org/network/io-service;1"]
-                               .getService(Components.interfaces.nsIIOService);
+                     Cc["@mozilla.org/network/io-service;1"]
+                       .getService(Ci.nsIIOService);
 
-            uri = ioService.newURI(href, null, null);
+            uri = ioService.newURI(href);
 
-            var nullPrincipal =
-              Components.classes["@mozilla.org/nullprincipal;1"]
-                        .createInstance(Components.interfaces.nsIPrincipal);
-            try {
-              secMan.checkLoadURIWithPrincipal(nullPrincipal, uri,
-                                               nsISSM.DISALLOW_INHERIT_PRINCIPAL)
+            let principal;
+            if (this.getAttribute("useoriginprincipal") == "true") {
+              principal = this.nodePrincipal;
+            } else {
+              principal = secMan.createNullPrincipal({});
             }
-            catch (ex) {
+            try {
+              secMan.checkLoadURIWithPrincipal(principal, uri,
+                                               nsISSM.DISALLOW_INHERIT_PRINCIPAL);
+            } catch (ex) {
               var msg = "Error: Cannot open a " + uri.scheme + ": link using \
                          the text-link binding.";
-              Components.utils.reportError(msg);
+              Cu.reportError(msg);
               return;
             }
 
             const cID = "@mozilla.org/uriloader/external-protocol-service;1";
-            const nsIEPS = Components.interfaces.nsIExternalProtocolService;
-            var protocolSvc = Components.classes[cID].getService(nsIEPS);
+            const nsIEPS = Ci.nsIExternalProtocolService;
+            var protocolSvc = Cc[cID].getService(nsIEPS);
 
             // if the scheme is not an exposed protocol, then opening this link
             // should be deferred to the system's external protocol handler
             if (!protocolSvc.isExposedProtocol(uri.scheme)) {
-              protocolSvc.loadUrl(uri);
-              aEvent.preventDefault()
+              protocolSvc.loadURI(uri);
+              aEvent.preventDefault();
               return;
             }
 
-          }
-          catch (ex) {
-            Components.utils.reportError(ex);
+          } catch (ex) {
+            Cu.reportError(ex);
           }
 
           aEvent.preventDefault();
@@ -350,18 +349,20 @@
 
           // Try handing off the link to the host application, e.g. for
           // opening it in a tabbed browser.
-          var linkHandled = Components.classes["@mozilla.org/supports-PRBool;1"]
-                                      .createInstance(Components.interfaces.nsISupportsPRBool);
+          var linkHandled = Cc["@mozilla.org/supports-PRBool;1"]
+                              .createInstance(Ci.nsISupportsPRBool);
           linkHandled.data = false;
-          Components.classes["@mozilla.org/observer-service;1"]
-                    .getService(Components.interfaces.nsIObserverService)
-                    .notifyObservers(linkHandled, "handle-xul-text-link", href);
+          let {shiftKey, ctrlKey, metaKey, altKey, button} = aEvent;
+          let data = {shiftKey, ctrlKey, metaKey, altKey, button, href};
+          Cc["@mozilla.org/observer-service;1"]
+            .getService(Ci.nsIObserverService)
+            .notifyObservers(linkHandled, "handle-xul-text-link", JSON.stringify(data));
           if (linkHandled.data)
             return;
 
           // otherwise, fall back to opening the anchor directly
           var win = window;
-          if (window instanceof Components.interfaces.nsIDOMChromeWindow) {
+          if (window.isChromeWindow) {
             while (win.opener && !win.opener.closed)
               win = win.opener;
           }
@@ -373,6 +374,7 @@
 
     <handlers>
       <handler event="click" phase="capturing" button="0" action="this.open(event)"/>
+      <handler event="click" phase="capturing" button="1" action="this.open(event)"/>
       <handler event="keypress" preventdefault="true" keycode="VK_RETURN" action="this.click()" />
     </handlers>
   </binding>

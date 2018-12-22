@@ -9,36 +9,18 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsSubstring.h"
+#include "nsStringFwd.h"
+
+#include "nsAString.h"
 #include "nsDependentSubstring.h"
 #include "nsReadableUtils.h"
-
-#include <new>
 
 // enable support for the obsolete string API if not explicitly disabled
 #ifndef MOZ_STRING_WITH_OBSOLETE_API
 #define MOZ_STRING_WITH_OBSOLETE_API 1
 #endif
 
-#if MOZ_STRING_WITH_OBSOLETE_API
-// radix values for ToInteger/AppendInt
-#define kRadix10        (10)
-#define kRadix16        (16)
-#define kAutoDetect     (100)
-#define kRadixUnknown   (kAutoDetect+1)
-#define IGNORE_CASE     (true)
-#endif
-
-
-// declare nsString, et. al.
-#include "string-template-def-unichar.h"
 #include "nsTString.h"
-#include "string-template-undef.h"
-
-// declare nsCString, et. al.
-#include "string-template-def-char.h"
-#include "nsTString.h"
-#include "string-template-undef.h"
 
 static_assert(sizeof(char16_t) == 2, "size of char16_t must be 2");
 static_assert(sizeof(nsString::char_type) == 2,
@@ -47,6 +29,14 @@ static_assert(nsString::char_type(-1) > nsString::char_type(0),
               "nsString::char_type must be unsigned");
 static_assert(sizeof(nsCString::char_type) == 1,
               "size of nsCString::char_type must be 1");
+
+static_assert(sizeof(nsTLiteralString<char>) == sizeof(nsTString<char>),
+              "nsLiteralCString can masquerade as nsCString, "
+              "so they must have identical layout");
+
+static_assert(sizeof(nsTLiteralString<char16_t>) == sizeof(nsTString<char16_t>),
+              "nsTLiteralString can masquerade as nsString, "
+              "so they must have identical layout");
 
 
 /**
@@ -62,7 +52,7 @@ public:
 
   NS_LossyConvertUTF16toASCII(const char16ptr_t aString, uint32_t aLength)
   {
-    LossyAppendUTF16toASCII(Substring(aString, aLength), *this);
+    LossyAppendUTF16toASCII(Substring(static_cast<const char16_t*>(aString), aLength), *this);
   }
 
   explicit NS_LossyConvertUTF16toASCII(const nsAString& aString)
@@ -113,7 +103,7 @@ public:
 
   NS_ConvertUTF16toUTF8(const char16ptr_t aString, uint32_t aLength)
   {
-    AppendUTF16toUTF8(Substring(aString, aLength), *this);
+    AppendUTF16toUTF8(Substring(static_cast<const char16_t*>(aString), aLength), *this);
   }
 
   explicit NS_ConvertUTF16toUTF8(const nsAString& aString)
@@ -150,60 +140,9 @@ private:
   NS_ConvertUTF8toUTF16(char16_t) = delete;
 };
 
-
-#ifdef MOZ_USE_CHAR16_WRAPPER
-
-inline char16_t*
-wwc(wchar_t* aStr)
-{
-  return reinterpret_cast<char16_t*>(aStr);
-}
-
-inline wchar_t*
-wwc(char16_t* aStr)
-{
-  return reinterpret_cast<wchar_t*>(aStr);
-}
-
-inline const char16_t*
-wwc(const wchar_t* aStr)
-{
-  return reinterpret_cast<const char16_t*>(aStr);
-}
-
-inline const wchar_t*
-wwc(const char16_t* aStr)
-{
-  return reinterpret_cast<const wchar_t*>(aStr);
-}
-
-#else
-
-inline char16_t*
-wwc(char16_t* aStr)
-{
-  return aStr;
-}
-
-inline const char16_t*
-wwc(const char16_t* aStr)
-{
-  return aStr;
-}
-
-#endif
-
 // the following are included/declared for backwards compatibility
-typedef nsAutoString nsVoidableString;
-
 #include "nsDependentString.h"
 #include "nsLiteralString.h"
 #include "nsPromiseFlatString.h"
-
-// need to include these for backwards compatibility
-#include "nsMemory.h"
-#include <string.h>
-#include <stdio.h>
-#include "plhash.h"
 
 #endif // !defined(nsString_h___)

@@ -20,20 +20,17 @@ public:
                    nsPresContext* aPresContext,
                    WidgetMouseScrollEvent* aEvent);
 
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // Forward to base class
-  NS_FORWARD_TO_MOUSEEVENT
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(MouseScrollEvent, MouseEvent)
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return MouseScrollEventBinding::Wrap(aCx, this, aGivenProto);
+    return MouseScrollEvent_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   int32_t Axis();
 
   void InitMouseScrollEvent(const nsAString& aType, bool aCanBubble,
-                            bool aCancelable, nsGlobalWindow* aView,
+                            bool aCancelable, nsGlobalWindowInner* aView,
                             int32_t aDetail, int32_t aScreenX, int32_t aScreenY,
                             int32_t aClientX, int32_t aClientY,
                             bool aCtrlKey, bool aAltKey, bool aShiftKey,

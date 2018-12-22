@@ -30,7 +30,7 @@ class ClippedImage : public ImageWrapper
   typedef gfx::SourceSurface SourceSurface;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(ClippedImage, ImageWrapper)
 
   NS_IMETHOD GetWidth(int32_t* aWidth) override;
   NS_IMETHOD GetHeight(int32_t* aHeight) override;
@@ -47,20 +47,30 @@ public:
   NS_IMETHOD_(already_AddRefed<layers::ImageContainer>)
     GetImageContainer(layers::LayerManager* aManager,
                       uint32_t aFlags) override;
-  NS_IMETHOD_(DrawResult) Draw(gfxContext* aContext,
+  NS_IMETHOD_(bool)
+    IsImageContainerAvailableAtSize(layers::LayerManager* aManager,
+                                    const gfx::IntSize& aSize,
+                                    uint32_t aFlags) override;
+  NS_IMETHOD_(already_AddRefed<layers::ImageContainer>)
+    GetImageContainerAtSize(layers::LayerManager* aManager,
+                            const gfx::IntSize& aSize,
+                            const Maybe<SVGImageContext>& aSVGContext,
+                            uint32_t aFlags) override;
+  NS_IMETHOD_(ImgDrawResult) Draw(gfxContext* aContext,
                                const nsIntSize& aSize,
                                const ImageRegion& aRegion,
                                uint32_t aWhichFrame,
-                               gfx::Filter aFilter,
+                               gfx::SamplingFilter aSamplingFilter,
                                const Maybe<SVGImageContext>& aSVGContext,
-                               uint32_t aFlags) override;
+                               uint32_t aFlags,
+                               float aOpacity) override;
   NS_IMETHOD RequestDiscard() override;
   NS_IMETHOD_(Orientation) GetOrientation() override;
   NS_IMETHOD_(nsIntRect) GetImageSpaceInvalidationRect(const nsIntRect& aRect)
     override;
   nsIntSize OptimalImageSizeForDest(const gfxSize& aDest,
                                     uint32_t aWhichFrame,
-                                    gfx::Filter aFilter,
+                                    gfx::SamplingFilter aSamplingFilter,
                                     uint32_t aFlags) override;
 
 protected:
@@ -70,19 +80,21 @@ protected:
   virtual ~ClippedImage();
 
 private:
-  Pair<DrawResult, RefPtr<SourceSurface>>
+  Pair<ImgDrawResult, RefPtr<SourceSurface>>
     GetFrameInternal(const nsIntSize& aSize,
                      const Maybe<SVGImageContext>& aSVGContext,
                      uint32_t aWhichFrame,
-                     uint32_t aFlags);
+                     uint32_t aFlags,
+                     float aOpacity);
   bool ShouldClip();
-  DrawResult DrawSingleTile(gfxContext* aContext,
+  ImgDrawResult DrawSingleTile(gfxContext* aContext,
                             const nsIntSize& aSize,
                             const ImageRegion& aRegion,
                             uint32_t aWhichFrame,
-                            gfx::Filter aFilter,
+                            gfx::SamplingFilter aSamplingFilter,
                             const Maybe<SVGImageContext>& aSVGContext,
-                            uint32_t aFlags);
+                            uint32_t aFlags,
+                            float aOpacity);
 
   // If we are forced to draw a temporary surface, we cache it here.
   UniquePtr<ClippedImageCachedSurface> mCachedSurface;

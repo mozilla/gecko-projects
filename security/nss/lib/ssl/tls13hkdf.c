@@ -9,11 +9,10 @@
 #include "keyhi.h"
 #include "pk11func.h"
 #include "secitem.h"
+#include "ssl.h"
 #include "sslt.h"
 #include "sslerr.h"
-
-// TODO(ekr@rtfm.com): Export this separately.
-unsigned char *tls13_EncodeUintX(PRUint32 value, unsigned int bytes, unsigned char *to);
+#include "sslimpl.h"
 
 /* This table contains the mapping between TLS hash identifiers and the
  * PKCS#11 identifiers */
@@ -32,7 +31,7 @@ static const struct {
 };
 
 SECStatus
-tls13_HkdfExtract(PK11SymKey *ikm1, PK11SymKey *ikm2, SSLHashType baseHash,
+tls13_HkdfExtract(PK11SymKey *ikm1, PK11SymKey *ikm2in, SSLHashType baseHash,
                   PK11SymKey **prkp)
 {
     CK_NSS_HKDFParams params;
@@ -40,6 +39,10 @@ tls13_HkdfExtract(PK11SymKey *ikm1, PK11SymKey *ikm2, SSLHashType baseHash,
     SECStatus rv;
     SECItem *salt;
     PK11SymKey *prk;
+    static const PRUint8 zeroKeyBuf[HASH_LENGTH_MAX];
+    PK11SymKey *zeroKey = NULL;
+    PK11SlotInfo *slot = NULL;
+    PK11SymKey *ikm2;
 
     params.bExtract = CK_TRUE;
     params.bExpand = CK_FALSE;
@@ -75,13 +78,46 @@ tls13_HkdfExtract(PK11SymKey *ikm1, PK11SymKey *ikm2, SSLHashType baseHash,
     PORT_Assert(kTlsHkdfInfo[baseHash].pkcs11Mech);
     PORT_Assert(kTlsHkdfInfo[baseHash].hashSize);
     PORT_Assert(kTlsHkdfInfo[baseHash].hash == baseHash);
+
+    /* A zero ikm2 is a key of hash-length 0s. */
+    if (!ikm2in) {
+        SECItem zeroItem = {
+            siBuffer,
+            (unsigned char *)zeroKeyBuf,
+            kTlsHkdfInfo[baseHash].hashSize
+        };
+        slot = PK11_GetInternalSlot();
+        if (!slot) {
+            return SECFailure;
+        }
+        zeroKey = PK11_ImportSymKey(slot,
+                                    kTlsHkdfInfo[baseHash].pkcs11Mech,
+                                    PK11_OriginUnwrap,
+                                    CKA_DERIVE, &zeroItem, NULL);
+        if (!zeroKey)
+            return SECFailure;
+        ikm2 = zeroKey;
+    } else {
+        ikm2 = ikm2in;
+    }
+    PORT_Assert(ikm2);
+
+    PRINT_BUF(50, (NULL, "HKDF Extract: IKM1/Salt", params.pSalt, params.ulSaltLen));
+    PRINT_KEY(50, (NULL, "HKDF Extract: IKM2", ikm2));
+
     prk = PK11_Derive(ikm2, kTlsHkdfInfo[baseHash].pkcs11Mech,
                       &paramsi, kTlsHkdfInfo[baseHash].pkcs11Mech,
                       CKA_DERIVE, kTlsHkdfInfo[baseHash].hashSize);
+    if (zeroKey)
+        PK11_FreeSymKey(zeroKey);
+    if (slot)
+        PK11_FreeSlot(slot);
     if (!prk)
         return SECFailure;
 
+    PRINT_KEY(50, (NULL, "HKDF Extract", prk));
     *prkp = prk;
+
     return SECSuccess;
 }
 
@@ -94,15 +130,22 @@ tls13_HkdfExpandLabel(PK11SymKey *prk, SSLHashType baseHash,
 {
     CK_NSS_HKDFParams params;
     SECItem paramsi = { siBuffer, NULL, 0 };
-    PRUint8 info[100];
-    PRUint8 *ptr = info;
-    unsigned int infoLen;
+    /* Size of info array needs to be big enough to hold the maximum Prefix,
+     * Label, plus HandshakeHash. If it's ever to small, the code will abort.
+     */
+    PRUint8 info[256];
+    sslBuffer infoBuf = SSL_BUFFER(info);
     PK11SymKey *derived;
-    const char *kLabelPrefix = "TLS 1.3, ";
+    SECStatus rv;
+    const char *kLabelPrefix = "tls13 ";
     const unsigned int kLabelPrefixLen = strlen(kLabelPrefix);
 
     if (handshakeHash) {
-        PORT_Assert(handshakeHashLen == kTlsHkdfInfo[baseHash].hashSize);
+        if (handshakeHashLen > 255) {
+            PORT_Assert(0);
+            PORT_SetError(SEC_ERROR_INVALID_ARGS);
+            return SECFailure;
+        }
     } else {
         PORT_Assert(!handshakeHashLen);
     }
@@ -127,29 +170,31 @@ tls13_HkdfExpandLabel(PK11SymKey *prk, SSLHashType baseHash,
      *  - HkdfLabel.label is "TLS 1.3, " + Label
      *
      */
-    infoLen = 2 + 1 + kLabelPrefixLen + labelLen + 1 + handshakeHashLen;
-    if (infoLen > sizeof(info)) {
-        PORT_Assert(0);
-        goto abort;
+    rv = sslBuffer_AppendNumber(&infoBuf, keySize, 2);
+    if (rv != SECSuccess) {
+        return SECFailure;
     }
-
-    ptr = tls13_EncodeUintX(keySize, 2, ptr);
-    ptr = tls13_EncodeUintX(labelLen + kLabelPrefixLen, 1, ptr);
-    PORT_Memcpy(ptr, kLabelPrefix, kLabelPrefixLen);
-    ptr += kLabelPrefixLen;
-    PORT_Memcpy(ptr, label, labelLen);
-    ptr += labelLen;
-    ptr = tls13_EncodeUintX(handshakeHashLen, 1, ptr);
-    if (handshakeHash) {
-        PORT_Memcpy(ptr, handshakeHash, handshakeHashLen);
-        ptr += handshakeHashLen;
+    rv = sslBuffer_AppendNumber(&infoBuf, labelLen + kLabelPrefixLen, 1);
+    if (rv != SECSuccess) {
+        return SECFailure;
     }
-    PORT_Assert((ptr - info) == infoLen);
+    rv = sslBuffer_Append(&infoBuf, kLabelPrefix, kLabelPrefixLen);
+    if (rv != SECSuccess) {
+        return SECFailure;
+    }
+    rv = sslBuffer_Append(&infoBuf, label, labelLen);
+    if (rv != SECSuccess) {
+        return SECFailure;
+    }
+    rv = sslBuffer_AppendVariable(&infoBuf, handshakeHash, handshakeHashLen, 1);
+    if (rv != SECSuccess) {
+        return SECFailure;
+    }
 
     params.bExtract = CK_FALSE;
     params.bExpand = CK_TRUE;
-    params.pInfo = info;
-    params.ulInfoLen = infoLen;
+    params.pInfo = SSL_BUFFER_BASE(&infoBuf);
+    params.ulInfoLen = SSL_BUFFER_LEN(&infoBuf);
     paramsi.data = (unsigned char *)&params;
     paramsi.len = sizeof(params);
 
@@ -162,11 +207,23 @@ tls13_HkdfExpandLabel(PK11SymKey *prk, SSLHashType baseHash,
 
     *keyp = derived;
 
-    return SECSuccess;
+#ifdef TRACE
+    if (ssl_trace >= 10) {
+        /* Make sure the label is null terminated. */
+        char labelStr[100];
+        PORT_Memcpy(labelStr, label, labelLen);
+        labelStr[labelLen] = 0;
+        SSL_TRC(50, ("HKDF Expand: label='tls13 %s',requested length=%d",
+                     labelStr, keySize));
+    }
+    PRINT_KEY(50, (NULL, "PRK", prk));
+    PRINT_BUF(50, (NULL, "Hash", handshakeHash, handshakeHashLen));
+    PRINT_BUF(50, (NULL, "Info", SSL_BUFFER_BASE(&infoBuf),
+                   SSL_BUFFER_LEN(&infoBuf)));
+    PRINT_KEY(50, (NULL, "Derived key", derived));
+#endif
 
-abort:
-    PORT_SetError(SSL_ERROR_SYM_KEY_CONTEXT_FAILURE);
-    return SECFailure;
+    return SECSuccess;
 }
 
 SECStatus

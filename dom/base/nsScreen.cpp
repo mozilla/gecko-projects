@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "mozilla/dom/ScreenBinding.h"
+#include "nsContentUtils.h"
 #include "nsScreen.h"
 #include "nsIDocument.h"
 #include "nsIDocShell.h"
@@ -24,7 +24,6 @@ using namespace mozilla::dom;
 nsScreen::Create(nsPIDOMWindowInner* aWindow)
 {
   MOZ_ASSERT(aWindow);
-  MOZ_ASSERT(aWindow->IsInnerWindow());
 
   if (!aWindow->GetDocShell()) {
     return nullptr;
@@ -49,8 +48,7 @@ nsScreen::~nsScreen()
 
 
 // QueryInterface implementation for nsScreen
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsScreen)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMScreen)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsScreen)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(nsScreen, DOMEventTargetHelper)
@@ -79,28 +77,6 @@ nsScreen::GetPixelDepth(ErrorResult& aRv)
   context->GetDepth(depth);
   return depth;
 }
-
-#define FORWARD_LONG_GETTER(_name)                                              \
-  NS_IMETHODIMP                                                                 \
-  nsScreen::Get ## _name(int32_t* aOut)                                         \
-  {                                                                             \
-    ErrorResult rv;                                                             \
-    *aOut = Get ## _name(rv);                                                   \
-    return rv.StealNSResult();                                                  \
-  }
-
-FORWARD_LONG_GETTER(AvailWidth)
-FORWARD_LONG_GETTER(AvailHeight)
-FORWARD_LONG_GETTER(Width)
-FORWARD_LONG_GETTER(Height)
-
-FORWARD_LONG_GETTER(Top)
-FORWARD_LONG_GETTER(Left)
-FORWARD_LONG_GETTER(AvailTop)
-FORWARD_LONG_GETTER(AvailLeft)
-
-FORWARD_LONG_GETTER(PixelDepth)
-FORWARD_LONG_GETTER(ColorDepth)
 
 nsPIDOMWindowOuter*
 nsScreen::GetOuter() const
@@ -142,8 +118,8 @@ nsScreen::GetRect(nsRect& aRect)
   aRect.x = NSToIntRound(screenTopLeftDesk.x);
   aRect.y = NSToIntRound(screenTopLeftDesk.y);
 
-  aRect.height = nsPresContext::AppUnitsToIntCSSPixels(aRect.height);
-  aRect.width = nsPresContext::AppUnitsToIntCSSPixels(aRect.width);
+  aRect.SetHeight(nsPresContext::AppUnitsToIntCSSPixels(aRect.Height()));
+  aRect.SetWidth(nsPresContext::AppUnitsToIntCSSPixels(aRect.Width()));
 
   return NS_OK;
 }
@@ -177,8 +153,8 @@ nsScreen::GetAvailRect(nsRect& aRect)
   aRect.y = NSToIntRound(screenTopLeftDesk.y) +
             nsPresContext::AppUnitsToIntCSSPixels(aRect.y - r.y);
 
-  aRect.height = nsPresContext::AppUnitsToIntCSSPixels(aRect.height);
-  aRect.width = nsPresContext::AppUnitsToIntCSSPixels(aRect.width);
+  aRect.SetHeight(nsPresContext::AppUnitsToIntCSSPixels(aRect.Height()));
+  aRect.SetWidth(nsPresContext::AppUnitsToIntCSSPixels(aRect.Width()));
 
   return NS_OK;
 }
@@ -190,37 +166,25 @@ nsScreen::Orientation() const
 }
 
 void
-nsScreen::GetMozOrientation(nsString& aOrientation) const
+nsScreen::GetMozOrientation(nsString& aOrientation,
+                            CallerType aCallerType) const
 {
-  if (ShouldResistFingerprinting()) {
+  switch (mScreenOrientation->DeviceType(aCallerType)) {
+  case OrientationType::Portrait_primary:
+    aOrientation.AssignLiteral("portrait-primary");
+    break;
+  case OrientationType::Portrait_secondary:
+    aOrientation.AssignLiteral("portrait-secondary");
+    break;
+  case OrientationType::Landscape_primary:
     aOrientation.AssignLiteral("landscape-primary");
-  } else {
-    switch (mScreenOrientation->DeviceType()) {
-    case OrientationType::Portrait_primary:
-      aOrientation.AssignLiteral("portrait-primary");
-      break;
-    case OrientationType::Portrait_secondary:
-      aOrientation.AssignLiteral("portrait-secondary");
-      break;
-    case OrientationType::Landscape_primary:
-      aOrientation.AssignLiteral("landscape-primary");
-      break;
-    case OrientationType::Landscape_secondary:
-      aOrientation.AssignLiteral("landscape-secondary");
-      break;
-    default:
-      MOZ_CRASH("Unacceptable screen orientation type.");
-    }
+    break;
+  case OrientationType::Landscape_secondary:
+    aOrientation.AssignLiteral("landscape-secondary");
+    break;
+  default:
+    MOZ_CRASH("Unacceptable screen orientation type.");
   }
-}
-
-NS_IMETHODIMP
-nsScreen::GetSlowMozOrientation(nsAString& aOrientation)
-{
-  nsString orientation;
-  GetMozOrientation(orientation);
-  aOrientation = orientation;
-  return NS_OK;
 }
 
 static void
@@ -262,6 +226,9 @@ bool
 nsScreen::MozLockOrientation(const Sequence<nsString>& aOrientations,
                              ErrorResult& aRv)
 {
+  if (ShouldResistFingerprinting()) {
+    return false;
+  }
   ScreenOrientationInternal orientation = eScreenOrientation_None;
 
   for (uint32_t i = 0; i < aOrientations.Length(); ++i) {
@@ -309,6 +276,9 @@ nsScreen::MozLockOrientation(const Sequence<nsString>& aOrientations,
 void
 nsScreen::MozUnlockOrientation()
 {
+  if (ShouldResistFingerprinting()) {
+    return;
+  }
   UpdateDocShellOrientationLock(GetOwner(), eScreenOrientation_None);
   mScreenOrientation->UnlockDeviceOrientation();
 }
@@ -329,7 +299,7 @@ nsScreen::IsDeviceSizePageSize()
 JSObject*
 nsScreen::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ScreenBinding::Wrap(aCx, this, aGivenProto);
+  return Screen_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsresult

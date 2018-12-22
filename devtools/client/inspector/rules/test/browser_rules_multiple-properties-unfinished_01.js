@@ -9,23 +9,21 @@
 
 const TEST_URI = "<div>Test Element</div>";
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
-  yield selectNode("div", inspector);
-  yield testCreateNewMultiUnfinished(inspector, view);
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
+  await selectNode("div", inspector);
+  await testCreateNewMultiUnfinished(inspector, view);
 });
 
-function* testCreateNewMultiUnfinished(inspector, view) {
-  let ruleEditor = getRuleViewRuleEditor(view, 0);
-  let onMutation = inspector.once("markupmutation");
-  // There are 2 rule-view updates: one for the preview and one for
-  // the final commit.
-  let onRuleViewChanged = waitForNEvents(view, "ruleview-changed", 2);
-  yield createNewRuleViewProperty(ruleEditor,
+async function testCreateNewMultiUnfinished(inspector, view) {
+  const ruleEditor = getRuleViewRuleEditor(view, 0);
+  const onMutation = inspector.once("markupmutation");
+  let onRuleViewChanged = view.once("ruleview-changed");
+  await createNewRuleViewProperty(ruleEditor,
     "color:blue;background : orange   ; text-align:center; border-color: ");
-  yield onMutation;
-  yield onRuleViewChanged;
+  await onMutation;
+  await onRuleViewChanged;
 
   is(ruleEditor.rule.textProps.length, 4,
     "Should have created new text properties.");
@@ -35,7 +33,7 @@ function* testCreateNewMultiUnfinished(inspector, view) {
   EventUtils.sendString("red", view.styleWindow);
   onRuleViewChanged = view.once("ruleview-changed");
   EventUtils.synthesizeKey("VK_RETURN", {}, view.styleWindow);
-  yield onRuleViewChanged;
+  await onRuleViewChanged;
 
   is(ruleEditor.rule.textProps.length, 4,
     "Should have the same number of text properties.");

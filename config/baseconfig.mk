@@ -2,10 +2,7 @@
 # directly in python/mozbuild/mozbuild/base.py for gmake validation.
 # We thus use INCLUDED_AUTOCONF_MK to enable/disable some parts depending
 # whether a normal build is happening or whether the check is running.
-includedir := $(includedir)/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
-idldir = $(datadir)/idl/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
-installdir = $(libdir)/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
-sdkdir = $(libdir)/$(MOZ_APP_NAME)-devel-$(MOZ_APP_VERSION)
+installdir = $(libdir)/$(MOZ_APP_NAME)
 ifeq (.,$(DEPTH))
 DIST = dist
 else
@@ -45,7 +42,7 @@ endif # WINNT
 ifndef INCLUDED_AUTOCONF_MK
 default::
 else
-TIERS := pre-export export $(if $(COMPILE_ENVIRONMENT),compile )misc libs tools
+TIERS := $(if $(MOZ_ARTIFACT_BUILDS),artifact )pre-export export $(if $(COMPILE_ENVIRONMENT),compile )misc libs tools$(if $(filter check recurse_check,$(MAKECMDGOALS)), check)
 endif
 
 # These defines are used to support the twin-topsrcdir model for comm-central.

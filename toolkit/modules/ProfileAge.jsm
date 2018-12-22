@@ -4,28 +4,39 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ProfileAge"];
+var EXPORTED_SYMBOLS = ["ProfileAge"];
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-common/utils.js");
 
-Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://gre/modules/osfile.jsm")
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://services-common/utils.js");
+/**
+ * Calculate how many days passed between two dates.
+ * @param {Object} aStartDate The starting date.
+ * @param {Object} aEndDate The ending date.
+ * @return {Integer} The number of days between the two dates.
+ */
+function getElapsedTimeInDays(aStartDate, aEndDate) {
+  return TelemetryUtils.millisecondsToDays(aEndDate - aStartDate);
+}
 
 /**
  * Profile access to times.json (eg, creation/reset time).
  * This is separate from the provider to simplify testing and enable extraction
  * to a shared location in the future.
  */
-this.ProfileAge = function(profile, log) {
+var ProfileAge = function(profile, log) {
   this.profilePath = profile || OS.Constants.Path.profileDir;
   if (!this.profilePath) {
     throw new Error("No profile directory.");
   }
-  this._log = log || {"debug": function (s) { dump(s + "\n"); }};
-}
+  if (!log) {
+    log = Log.repository.getLogger("Toolkit.ProfileAge");
+  }
+  this._log = log;
+};
 this.ProfileAge.prototype = {
   /**
    * There are three ways we can get our creation time:
@@ -51,7 +62,7 @@ this.ProfileAge.prototype = {
       return this.computeAndPersistCreated(times)
                  .then(function onSuccess(created) {
                          return created;
-                       }.bind(this));
+                       });
     }
 
     return this.getTimes()
@@ -63,7 +74,7 @@ this.ProfileAge.prototype = {
    * Explicitly make `file`, a filename, a full path
    * relative to our profile path.
    */
-  getPath: function (file) {
+  getPath(file) {
     return OS.Path.join(this.profilePath, file);
   },
 
@@ -71,7 +82,7 @@ this.ProfileAge.prototype = {
    * Return a promise which resolves to the JSON contents
    * of the time file, using the already read value if possible.
    */
-  getTimes: function (file="times.json") {
+  getTimes(file = "times.json") {
     if (this._times) {
       return Promise.resolve(this._times);
     }
@@ -86,7 +97,7 @@ this.ProfileAge.prototype = {
    * Return a promise which resolves to the JSON contents
    * of the time file in this accessor's profile.
    */
-  readTimes: function (file="times.json") {
+  readTimes(file = "times.json") {
     return CommonUtils.readJSON(this.getPath(file));
   },
 
@@ -94,7 +105,7 @@ this.ProfileAge.prototype = {
    * Return a promise representing the writing of `contents`
    * to `file` in the specified profile.
    */
-  writeTimes: function (contents, file="times.json") {
+  writeTimes(contents, file = "times.json") {
     return CommonUtils.writeJSON(contents, this.getPath(file));
   },
 
@@ -102,7 +113,7 @@ this.ProfileAge.prototype = {
    * Merge existing contents with a 'created' field, writing them
    * to the specified file. Promise, naturally.
    */
-  computeAndPersistCreated: function (existingContents, file="times.json") {
+  computeAndPersistCreated(existingContents, file = "times.json") {
     let path = this.getPath(file);
     function onOldest(oldest) {
       let contents = existingContents || {};
@@ -122,14 +133,18 @@ this.ProfileAge.prototype = {
    * Traverse the contents of the profile directory, finding the oldest file
    * and returning its creation timestamp.
    */
-  getOldestProfileTimestamp: function () {
+  getOldestProfileTimestamp() {
     let self = this;
-    let oldest = Date.now() + 1000;
+    let start = Date.now();
+    let oldest = start + 1000;
     let iterator = new OS.File.DirectoryIterator(this.profilePath);
     self._log.debug("Iterating over profile " + this.profilePath);
     if (!iterator) {
       throw new Error("Unable to fetch oldest profile entry: no profile iterator.");
     }
+
+    Services.telemetry.scalarAdd("telemetry.profile_directory_scans", 1);
+    let histogram = Services.telemetry.getHistogramById("PROFILE_DIRECTORY_FILE_AGE");
 
     function onEntry(entry) {
       function onStatSuccess(info) {
@@ -147,6 +162,11 @@ this.ProfileAge.prototype = {
 
         if (date) {
           let timestamp = date.getTime();
+          // Get the age relative to now.
+          // We don't care about dates in the future.
+          let age_in_days = Math.max(0, getElapsedTimeInDays(timestamp, start));
+          histogram.add(age_in_days);
+
           self._log.debug("Using date: " + entry.path + " = " + date);
           if (timestamp < oldest) {
             oldest = timestamp;
@@ -185,7 +205,7 @@ this.ProfileAge.prototype = {
    * be able to make use of that.
    * Returns a promise that is resolved once the file has been written.
    */
-  recordProfileReset: function (time=Date.now(), file="times.json") {
+  recordProfileReset(time = Date.now(), file = "times.json") {
     return this.getTimes(file).then(
       times => {
         times.reset = time;
@@ -202,4 +222,4 @@ this.ProfileAge.prototype = {
       times => times.reset
     );
   },
-}
+};

@@ -19,7 +19,7 @@ MARKUPMAP(acronym,
 
 MARKUPMAP(article,
           New_HyperText,
-          roles::DOCUMENT,
+          roles::ARTICLE,
           Attr(xmlroles, article))
 
 MARKUPMAP(aside,
@@ -28,11 +28,15 @@ MARKUPMAP(aside,
 
 MARKUPMAP(blockquote,
           New_HyperText,
-          roles::SECTION)
+          roles::BLOCKQUOTE)
 
 MARKUPMAP(dd,
           New_HTMLDefinition,
           roles::DEFINITION)
+
+MARKUPMAP(details,
+          New_HyperText,
+          roles::DETAILS)
 
 MARKUPMAP(div,
           nullptr,
@@ -60,12 +64,12 @@ MARKUPMAP(form,
           roles::FORM)
 
 MARKUPMAP(footer,
-          New_HyperText,
-          roles::FOOTER)
+          New_HTMLHeaderOrFooter,
+          0)
 
 MARKUPMAP(header,
-          New_HyperText,
-          roles::HEADER)
+          New_HTMLHeaderOrFooter,
+          0)
 
 MARKUPMAP(h1,
           New_HyperText,
@@ -90,6 +94,10 @@ MARKUPMAP(h5,
 MARKUPMAP(h6,
           New_HyperText,
           roles::HEADING)
+
+MARKUPMAP(input,
+          New_HTMLInput,
+          0)
 
 MARKUPMAP(label,
           New_HTMLLabel,
@@ -310,8 +318,23 @@ MARKUPMAP(q,
 
 MARKUPMAP(section,
           New_HyperText,
-          roles::SECTION,
-          Attr(xmlroles, region))
+          roles::SECTION)
+
+MARKUPMAP(summary,
+          New_HTMLSummary,
+          roles::SUMMARY)
+
+MARKUPMAP(
+  table,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     if (aElement->GetPrimaryFrame() &&
+         aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableType) {
+       return new ARIAGridAccessibleWrap(aElement, aContext->Document());
+     }
+     return nullptr;
+  },
+  0
+)
 
 MARKUPMAP(time,
           New_HyperText,
@@ -319,13 +342,70 @@ MARKUPMAP(time,
           Attr(xmlroles, time),
           AttrFromDOM(datetime, datetime))
 
-MARKUPMAP(td,
-          New_HTMLTableHeaderCellIfScope,
-          0)
+MARKUPMAP(
+  td,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     if (aContext->IsTableRow() && aContext->GetContent() == aElement->GetParent()) {
+       // If HTML:td element is part of its HTML:table, which has CSS
+       // display style other than 'table', then create a generic table cell
+       // accessible, because there's no underlying table layout and thus native
+       // HTML table cell class doesn't work.
+       if (!aContext->IsHTMLTableRow()) {
+         return new ARIAGridCellAccessibleWrap(aElement, aContext->Document());
+       }
+       if (aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::scope)) {
+         return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
+       }
+     }
+     return nullptr;
+  },
+  0
+)
 
-MARKUPMAP(th,
-          New_HTMLTableHeaderCell,
-          0)
+MARKUPMAP(
+  th,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     if (aContext->IsTableRow() && aContext->GetContent() == aElement->GetParent()) {
+       if (!aContext->IsHTMLTableRow()) {
+         return new ARIAGridCellAccessibleWrap(aElement, aContext->Document());
+       }
+       return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
+     }
+     return nullptr;
+  },
+  0
+)
+
+MARKUPMAP(
+  tr,
+  [](Element* aElement, Accessible* aContext) -> Accessible* {
+     // If HTML:tr element is part of its HTML:table, which has CSS
+     // display style other than 'table', then create a generic table row
+     // accessible, because there's no underlying table layout and thus native
+     // HTML table row class doesn't work. Refer to
+     // CreateAccessibleByFrameType dual logic.
+     Accessible* table = aContext->IsTable() ? aContext : nullptr;
+     if (!table && aContext->Parent() && aContext->Parent()->IsTable()) {
+        table = aContext->Parent();
+     }
+     if (table) {
+        nsIContent* parentContent = aElement->GetParent();
+        nsIFrame* parentFrame = parentContent->GetPrimaryFrame();
+        if (parentFrame && !parentFrame->IsTableWrapperFrame()) {
+          parentContent = parentContent->GetParent();
+          parentFrame = parentContent->GetPrimaryFrame();
+          if (table->GetContent() == parentContent &&
+              ((parentFrame && !parentFrame->IsTableWrapperFrame()) ||
+               (aElement->GetPrimaryFrame() &&
+                aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableRowType))) {
+            return new ARIARowAccessible(aElement, aContext->Document());
+          }
+        }
+      }
+      return nullptr;
+  },
+  0
+)
 
 MARKUPMAP(ul,
           New_HTMLList,

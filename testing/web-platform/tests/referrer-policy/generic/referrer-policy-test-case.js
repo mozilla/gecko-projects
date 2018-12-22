@@ -29,7 +29,7 @@ function ReferrerPolicyTestCase(scenario, testDescription, sanityChecker) {
       return undefined;
     },
     "origin": function() {
-      return document.origin + "/";
+      return self.origin + "/";
     },
     "stripped-referrer": function() {
       return stripUrlForUseAsReferrer(location.toString());
@@ -70,13 +70,13 @@ function ReferrerPolicyTestCase(scenario, testDescription, sanityChecker) {
       t._expectedReferrerUrl = referrerUrlResolver[t._scenario.referrer_url]();
     },
 
-    _invokeSubresource: function(callback) {
+    _invokeSubresource: function(callback, test) {
       var invoker = subresourceInvoker[t._scenario.subresource];
 
       // Depending on the delivery method, extend the subresource element with
       // these attributes.
       var elementAttributesForDeliveryMethod = {
-        "attr-referrer":  {referrerpolicy: t._scenario.referrer_policy},
+        "attr-referrer":  {referrerPolicy: t._scenario.referrer_policy},
         "rel-noreferrer": {rel: "noreferrer"}
       };
 
@@ -85,9 +85,11 @@ function ReferrerPolicyTestCase(scenario, testDescription, sanityChecker) {
       if (delivery_method in elementAttributesForDeliveryMethod) {
         invoker(t._subresourceUrl,
                 callback,
-                elementAttributesForDeliveryMethod[delivery_method]);
+                elementAttributesForDeliveryMethod[delivery_method],
+                t._scenario.referrer_policy,
+                test);
       } else {
-        invoker(t._subresourceUrl, callback);
+        invoker(t._subresourceUrl, callback, null, t._scenario.referrer_policy, test);
       }
 
     },
@@ -116,7 +118,7 @@ function ReferrerPolicyTestCase(scenario, testDescription, sanityChecker) {
         }, "Reported Referrer URL is as expected: " + t._scenario.referrer_url);
 
         test.done();
-      })
+      }, test);
 
     }
   }

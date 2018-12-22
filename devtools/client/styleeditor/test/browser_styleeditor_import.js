@@ -9,20 +9,20 @@
 const TESTCASE_URI = TEST_BASE_HTTP + "simple.html";
 
 var tempScope = {};
-Components.utils.import("resource://gre/modules/FileUtils.jsm", tempScope);
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm", tempScope);
 var FileUtils = tempScope.FileUtils;
 
 const FILENAME = "styleeditor-import-test.css";
 const SOURCE = "body{background:red;}";
 
-add_task(function* () {
-  let { panel, ui } = yield openStyleEditorForURL(TESTCASE_URI);
+add_task(async function() {
+  const { panel, ui } = await openStyleEditorForURL(TESTCASE_URI);
 
-  let added = ui.once("editor-added");
+  const added = ui.once("test:editor-updated");
   importSheet(ui, panel.panelWindow);
 
   info("Waiting for editor to be added for the imported sheet.");
-  let editor = yield added;
+  const editor = await added;
 
   is(editor.savedFile.leafName, FILENAME,
      "imported stylesheet will be saved directly into the same file");
@@ -32,12 +32,12 @@ add_task(function* () {
 
 function importSheet(ui, panelWindow) {
   // create file to import first
-  let file = FileUtils.getFile("ProfD", [FILENAME]);
-  let ostream = FileUtils.openSafeFileOutputStream(file);
-  let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+  const file = FileUtils.getFile("ProfD", [FILENAME]);
+  const ostream = FileUtils.openSafeFileOutputStream(file);
+  const converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                     .createInstance(Ci.nsIScriptableUnicodeConverter);
   converter.charset = "UTF-8";
-  let istream = converter.convertToInputStream(SOURCE);
+  const istream = converter.convertToInputStream(SOURCE);
   NetUtil.asyncCopy(istream, ostream, function() {
     FileUtils.closeSafeFileOutputStream(ostream);
 
@@ -45,8 +45,8 @@ function importSheet(ui, panelWindow) {
     ui._mockImportFile = file;
 
     waitForFocus(function() {
-      let document = panelWindow.document;
-      let importButton = document.querySelector(".style-editor-importButton");
+      const document = panelWindow.document;
+      const importButton = document.querySelector(".style-editor-importButton");
       ok(importButton, "import button exists");
 
       EventUtils.synthesizeMouseAtCenter(importButton, {}, panelWindow);

@@ -1,10 +1,12 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "PathRecording.h"
 #include "DrawEventRecorder.h"
+#include "RecordedEventImpl.h"
 
 namespace mozilla {
 namespace gfx {
@@ -103,13 +105,13 @@ PathRecording::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFill
     PathOp newPathOp;
     newPathOp.mType = iter->mType;
     if (sPointCount[newPathOp.mType] >= 1) {
-      newPathOp.mP1 = aTransform * iter->mP1;
+      newPathOp.mP1 = aTransform.TransformPoint(iter->mP1);
     }
     if (sPointCount[newPathOp.mType] >= 2) {
-      newPathOp.mP2 = aTransform * iter->mP2;
+      newPathOp.mP2 = aTransform.TransformPoint(iter->mP2);
     }
     if (sPointCount[newPathOp.mType] >= 3) {
-      newPathOp.mP3 = aTransform * iter->mP3;
+      newPathOp.mP3 = aTransform.TransformPoint(iter->mP3);
     }
     recording->mPathOps.push_back(newPathOp);
   }

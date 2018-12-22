@@ -4,7 +4,6 @@
 'use strict';
 
 const {PushDB, PushService, PushServiceWebSocket} = serviceExports;
-const {base64UrlDecode} = Cu.import('resource://gre/modules/PushCrypto.jsm', {});
 
 let db;
 let userAgentID = 'f5b47f8d-771f-4ea3-b999-91c135f8766d';
@@ -27,19 +26,23 @@ function putRecord(channelID, scope, publicKey, privateKey, authSecret) {
     originAttributes: '',
     quota: Infinity,
     systemRecord: true,
-    p256dhPublicKey: base64UrlDecode(publicKey),
+    p256dhPublicKey: ChromeUtils.base64URLDecode(publicKey, {
+      padding: "reject",
+    }),
     p256dhPrivateKey: privateKey,
-    authenticationSecret: base64UrlDecode(authSecret),
+    authenticationSecret: ChromeUtils.base64URLDecode(authSecret, {
+      padding: "reject",
+    }),
   });
 }
 
 let ackDone;
 let server;
-add_task(function* test_notification_ack_data_setup() {
+add_task(async function test_notification_ack_data_setup() {
   db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {return db.drop().then(_ => db.close());});
+  registerCleanupFunction(() => {return db.drop().then(_ => db.close());});
 
-  yield putRecord(
+  await putRecord(
     'subscription1',
     'https://example.com/page/1',
     'BPCd4gNQkjwRah61LpdALdzZKLLnU5UAwDztQ5_h0QsT26jk0IFbqcK6-JxhHAm-rsHEwy0CyVJjtnfOcqc1tgA',
@@ -54,7 +57,7 @@ add_task(function* test_notification_ack_data_setup() {
     },
     'c_sGN6uCv9Hu7JOQT34jAQ'
   );
-  yield putRecord(
+  await putRecord(
     'subscription2',
     'https://example.com/page/2',
     'BPnWyUo7yMnuMlyKtERuLfWE8a09dtdjHSW2lpC9_BqR5TZ1rK8Ldih6ljyxVwnBA-nygQHGRpEmu1jV5K8437E',
@@ -69,7 +72,7 @@ add_task(function* test_notification_ack_data_setup() {
     },
     't3P246Gj9vjKDHHRYaY6hw'
   );
-  yield putRecord(
+  await putRecord(
     'subscription3',
     'https://example.com/page/3',
     'BDhUHITSeVrWYybFnb7ylVTCDDLPdQWMpf8gXhcWwvaaJa6n3YH8TOcH8narDF6t8mKVvg2ioLW-8MH5O4dzGcI',
@@ -90,7 +93,6 @@ add_task(function* test_notification_ack_data_setup() {
 
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -114,10 +116,10 @@ add_task(function* test_notification_ack_data_setup() {
       });
     }
   });
-  yield setupDonePromise;
+  await setupDonePromise;
 });
 
-add_task(function* test_notification_ack_data() {
+add_task(async function test_notification_ack_data() {
   let allTestData = [
     {
       channelID: 'subscription1',
@@ -243,7 +245,7 @@ add_task(function* test_notification_ack_data() {
 
   let sendAndReceive = testData => {
     let messageReceived = testData.receive ? promiseObserverNotification(PushServiceComponent.pushTopic, (subject, data) => {
-      let notification = subject.QueryInterface(Ci.nsIPushMessage);
+      let notification = subject.QueryInterface(Ci.nsIPushMessage).data;
       equal(notification.text(), testData.receive.data,
             'Check data for notification ' + testData.version);
       equal(data, testData.receive.scope,
@@ -272,7 +274,7 @@ add_task(function* test_notification_ack_data() {
     return Promise.all([messageReceived, ackReceived]);
   };
 
-  yield allTestData.reduce((p, testData) => {
+  await allTestData.reduce((p, testData) => {
     return p.then(_ => sendAndReceive(testData));
   }, Promise.resolve());
 });

@@ -6,7 +6,6 @@
 
 #include "mozilla/dom/HTMLLegendElement.h"
 #include "mozilla/dom/HTMLLegendElementBinding.h"
-#include "nsIDOMHTMLFormElement.h"
 #include "nsFocusManager.h"
 #include "nsIFrame.h"
 
@@ -36,8 +35,9 @@ HTMLLegendElement::GetFieldSet() const
 
 bool
 HTMLLegendElement::ParseAttribute(int32_t aNamespaceID,
-                                  nsIAtom* aAttribute,
+                                  nsAtom* aAttribute,
                                   const nsAString& aValue,
+                                  nsIPrincipal* aMaybeScriptedPrincipal,
                                   nsAttrValue& aResult)
 {
   // this contains center, because IE4 does
@@ -47,7 +47,7 @@ HTMLLegendElement::ParseAttribute(int32_t aNamespaceID,
     { "center", NS_STYLE_TEXT_ALIGN_CENTER },
     { "bottom", NS_STYLE_VERTICAL_ALIGN_BOTTOM },
     { "top", NS_STYLE_VERTICAL_ALIGN_TOP },
-    { 0 }
+    { nullptr, 0 }
   };
 
   if (aAttribute == nsGkAtoms::align && aNamespaceID == kNameSpaceID_None) {
@@ -55,34 +55,19 @@ HTMLLegendElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 nsChangeHint
-HTMLLegendElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
+HTMLLegendElement::GetAttributeChangeHint(const nsAtom* aAttribute,
                                           int32_t aModType) const
 {
   nsChangeHint retval =
       nsGenericHTMLElement::GetAttributeChangeHint(aAttribute, aModType);
   if (aAttribute == nsGkAtoms::align) {
-    NS_UpdateHint(retval, NS_STYLE_HINT_REFLOW);
+    retval |= NS_STYLE_HINT_REFLOW;
   }
   return retval;
-}
-
-nsresult
-HTMLLegendElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                           nsIAtom* aPrefix, const nsAString& aValue,
-                           bool aNotify)
-{
-  return nsGenericHTMLElement::SetAttr(aNameSpaceID, aAttribute,
-                                       aPrefix, aValue, aNotify);
-}
-nsresult
-HTMLLegendElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify)
-{
-  return nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
 }
 
 nsresult
@@ -122,7 +107,7 @@ HTMLLegendElement::Focus(ErrorResult& aError)
     return;
   }
 
-  nsCOMPtr<nsIDOMElement> result;
+  RefPtr<Element> result;
   aError = fm->MoveFocus(nullptr, this, nsIFocusManager::MOVEFOCUS_FORWARD,
                          nsIFocusManager::FLAG_NOPARENTFRAME,
                          getter_AddRefs(result));
@@ -150,7 +135,7 @@ HTMLLegendElement::GetForm()
 JSObject*
 HTMLLegendElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLLegendElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLLegendElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

@@ -8,7 +8,9 @@
 
 #include "DOMMediaStream.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
-#include "StreamBuffer.h"
+#include "StreamTracks.h"
+
+class nsIPrincipal;
 
 namespace mozilla {
 class DOMMediaStream;
@@ -68,7 +70,8 @@ class OutputStreamDriver : public FrameCaptureListener
 {
 public:
   OutputStreamDriver(SourceMediaStream* aSourceStream,
-                     const TrackID& aTrackId);
+                     const TrackID& aTrackId,
+                     const PrincipalHandle& aPrincipalHandle);
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(OutputStreamDriver);
 
@@ -76,7 +79,7 @@ public:
    * Sub classes can SetImage() to update the image being appended to the
    * output stream. It will be appended on the next NotifyPull from MSG.
    */
-  void SetImage(const RefPtr<layers::Image>& aImage);
+  void SetImage(const RefPtr<layers::Image>& aImage, const TimeStamp& aTime);
 
   /*
    * Makes sure any internal resources this driver is holding that may create
@@ -96,19 +99,26 @@ private:
 class CanvasCaptureMediaStream : public DOMMediaStream
 {
 public:
-  explicit CanvasCaptureMediaStream(HTMLCanvasElement* aCanvas);
+  CanvasCaptureMediaStream(nsPIDOMWindowInner* aWindow, HTMLCanvasElement* aCanvas);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(CanvasCaptureMediaStream, DOMMediaStream)
 
-  nsresult Init(const dom::Optional<double>& aFPS, const TrackID& aTrackId);
+  nsresult Init(const dom::Optional<double>& aFPS, const TrackID& aTrackId,
+                nsIPrincipal* aPrincipal);
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // WebIDL
   HTMLCanvasElement* Canvas() const { return mCanvas; }
   void RequestFrame();
+
   dom::FrameCaptureListener* FrameCaptureListener();
+
+  /**
+   * Stops capturing for this stream at mCanvas.
+   */
+  void StopCapture();
 
   /**
    * Create a CanvasCaptureMediaStream whose underlying stream is a SourceMediaStream.

@@ -1,0 +1,166 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+%include downloads/indicator.inc.css
+%include addons/extension-controlled.inc.css
+
+%filter substitution
+%define navbarTabsShadowSize 1px
+%define themeTransition background-color 0.1s cubic-bezier(.17,.67,.83,.67)
+%define lwtPopupBrighttextLinkColor #45a1ff
+
+:root {
+  /* Note: Setting this to 0 (without px) breaks CSS calculations for OSX. */
+  --space-above-tabbar: 0px;
+}
+
+:root[extradragspace][tabsintitlebar]:not([inFullscreen]) {
+  --space-above-tabbar: 8px;
+}
+
+:root[sessionrestored]:-moz-lwtheme {
+  transition: @themeTransition@;
+}
+
+/* Increase contrast of UI links on dark themes */
+:root[lwt-popup-brighttext] panel .text-link {
+  color: @lwtPopupBrighttextLinkColor@;
+}
+
+/* Toolbar / content area border */
+
+#navigator-toolbox::after {
+  content: "";
+  display: -moz-box;
+  border-bottom: 1px solid var(--toolbox-border-bottom-color);
+}
+
+:root[customizing] #navigator-toolbox::after {
+  border-bottom-style: none;
+}
+
+:root[sessionrestored] #nav-bar:-moz-lwtheme {
+  transition: @themeTransition@;
+}
+
+/* Bookmark toolbar */
+
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
+  overflow: -moz-hidden-unscrollable;
+  max-height: 4em;
+  padding: 0 6px 2px;
+}
+
+:root[sessionrestored] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
+  transition: min-height 170ms ease-out, max-height 170ms ease-out, @themeTransition@;
+}
+
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar)[collapsed=true] {
+  min-height: 0.1px;
+  max-height: 0;
+}
+
+:root[sessionrestored] #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar)[collapsed=true] {
+  transition: min-height 170ms ease-out, max-height 170ms ease-out, visibility 170ms linear;
+}
+
+#navigator-toolbox > toolbar[customizing]:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
+  outline: 1px dashed;
+  outline-offset: -3px;
+  -moz-outline-radius: 2px;
+}
+
+#navigator-toolbox > toolbar[customizing]:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar):empty {
+  /* Avoid the toolbar having no height when there's no items in it */
+  min-height: 22px;
+}
+
+/* Required for Library animation */
+
+#navigator-toolbox {
+  position: relative;
+}
+
+#library-animatable-box {
+  display: none;
+}
+
+#library-animatable-box[animate] {
+  display: -moz-box;
+}
+
+/* Back / Forward context menu */
+
+.unified-nav-back,
+.unified-nav-forward {
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
+.unified-nav-back[_moz-menuactive]:-moz-locale-dir(ltr),
+.unified-nav-forward[_moz-menuactive]:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://browser/skin/back.svg") !important;
+}
+
+.unified-nav-forward[_moz-menuactive]:-moz-locale-dir(ltr),
+.unified-nav-back[_moz-menuactive]:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://browser/skin/forward.svg") !important;
+}
+
+/* Private browsing and accessibility indicators */
+
+.accessibility-indicator,
+.private-browsing-indicator {
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+  background-position: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 7px;
+  margin-right: 7px;
+  position: relative;
+  /* Need to ensure this gets positioned on top of the position:relative #navigator-toolbox
+   * in case the dark/light themes give that item a background. */
+  z-index: 1;
+}
+
+.accessibility-indicator {
+  background-image: url("chrome://browser/skin/accessibility.svg");
+  -moz-user-focus: normal;
+  /* Clear default button styling */
+  -moz-appearance: none;
+  margin-top: unset;
+  margin-bottom: unset;
+  min-width: unset;
+  color: unset;
+  text-shadow: unset;
+}
+
+.accessibility-indicator:-moz-any(:hover, :active, :focus, :-moz-focusring) {
+  background-image: url("chrome://browser/skin/accessibility-active.svg");
+  outline: 0;
+}
+
+.private-browsing-indicator {
+  background-image: url("chrome://browser/skin/private-browsing.svg");
+}
+
+:root:not([accessibilitymode]) .accessibility-indicator,
+:root:not([privatebrowsingmode=temporary]) .private-browsing-indicator {
+  display: none;
+}
+
+/* End private browsing and accessibility indicators */
+
+/* Override theme colors since the picker uses extra colors that
+   themes cannot set */
+#DateTimePickerPanel[active="true"] {
+  --arrowpanel-background: var(--default-arrowpanel-background);
+  --arrowpanel-color: var(--default-arrowpanel-color);
+  --arrowpanel-border-color: var(--default-arrowpanel-border-color);
+}
+
+#widget-overflow .webextension-popup-browser {
+  background: #fff;
+}

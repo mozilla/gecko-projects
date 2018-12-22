@@ -17,16 +17,9 @@ namespace frontend {
 inline PropertyName*
 ParseNode::name() const
 {
-    MOZ_ASSERT(isKind(PNK_FUNCTION) || isKind(PNK_NAME));
-    JSAtom* atom = isKind(PNK_FUNCTION) ? pn_funbox->function()->atom() : pn_atom;
+    MOZ_ASSERT(isKind(ParseNodeKind::Function) || isKind(ParseNodeKind::Name));
+    JSAtom* atom = isKind(ParseNodeKind::Function) ? pn_funbox->function()->explicitName() : pn_atom;
     return atom->asPropertyName();
-}
-
-inline JSAtom*
-ParseNode::atom() const
-{
-    MOZ_ASSERT(isKind(PNK_STRING));
-    return pn_atom;
 }
 
 } /* namespace frontend */

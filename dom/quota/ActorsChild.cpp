@@ -6,8 +6,10 @@
 
 #include "ActorsChild.h"
 
+#include "nsVariant.h"
 #include "QuotaManagerService.h"
 #include "QuotaRequests.h"
+#include "QuotaResults.h"
 
 namespace mozilla {
 namespace dom {
@@ -20,7 +22,7 @@ namespace quota {
 QuotaChild::QuotaChild(QuotaManagerService* aService)
   : mService(aService)
 #ifdef DEBUG
-  , mOwningThread(NS_GetCurrentThread())
+  , mOwningThread(GetCurrentThreadEventTarget())
 #endif
 {
   AssertIsOnOwningThread();
@@ -140,12 +142,57 @@ QuotaUsageRequestChild::HandleResponse(nsresult aResponse)
 }
 
 void
-QuotaUsageRequestChild::HandleResponse(const UsageResponse& aResponse)
+QuotaUsageRequestChild::HandleResponse(const nsTArray<OriginUsage>& aResponse)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
 
-  mRequest->SetResult(aResponse.usage(), aResponse.fileUsage());
+  RefPtr<nsVariant> variant = new nsVariant();
+
+  if (aResponse.IsEmpty()) {
+    variant->SetAsEmptyArray();
+  } else {
+    nsTArray<RefPtr<UsageResult>> usageResults;
+
+    const uint32_t count = aResponse.Length();
+
+    usageResults.SetCapacity(count);
+
+    for (uint32_t index = 0; index < count; index++) {
+      auto& originUsage = aResponse[index];
+
+      RefPtr<UsageResult> usageResult = new UsageResult(originUsage.origin(),
+                                                        originUsage.persisted(),
+                                                        originUsage.usage(),
+                                                        originUsage.lastAccessed());
+
+      usageResults.AppendElement(usageResult.forget());
+    }
+
+    variant->SetAsArray(nsIDataType::VTYPE_INTERFACE_IS,
+                        &NS_GET_IID(nsIQuotaUsageResult),
+                        usageResults.Length(),
+                        static_cast<void*>(usageResults.Elements()));
+  }
+
+  mRequest->SetResult(variant);
+}
+
+void
+QuotaUsageRequestChild::HandleResponse(const OriginUsageResponse& aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+
+  RefPtr<OriginUsageResult> result =
+    new OriginUsageResult(aResponse.usage(),
+                          aResponse.fileUsage(),
+                          aResponse.limit());
+
+  RefPtr<nsVariant> variant = new nsVariant();
+  variant->SetAsInterface(NS_GET_IID(nsIQuotaOriginUsageResult), result);
+
+  mRequest->SetResult(variant);
 }
 
 void
@@ -161,7 +208,7 @@ QuotaUsageRequestChild::ActorDestroy(ActorDestroyReason aWhy)
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 QuotaUsageRequestChild::Recv__delete__(const UsageRequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
@@ -172,15 +219,19 @@ QuotaUsageRequestChild::Recv__delete__(const UsageRequestResponse& aResponse)
       HandleResponse(aResponse.get_nsresult());
       break;
 
-    case UsageRequestResponse::TUsageResponse:
-      HandleResponse(aResponse.get_UsageResponse());
+    case UsageRequestResponse::TAllUsageResponse:
+      HandleResponse(aResponse.get_AllUsageResponse().originUsages());
+      break;
+
+    case UsageRequestResponse::TOriginUsageResponse:
+      HandleResponse(aResponse.get_OriginUsageResponse());
       break;
 
     default:
       MOZ_CRASH("Unknown response type!");
   }
 
-  return true;
+  return IPC_OK();
 }
 
 /*******************************************************************************
@@ -229,7 +280,22 @@ QuotaRequestChild::HandleResponse()
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
 
-  mRequest->SetResult();
+  RefPtr<nsVariant> variant = new nsVariant();
+  variant->SetAsVoid();
+
+  mRequest->SetResult(variant);
+}
+
+void
+QuotaRequestChild::HandleResponse(bool aResponse)
+{
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mRequest);
+
+  RefPtr<nsVariant> variant = new nsVariant();
+  variant->SetAsBool(aResponse);
+
+  mRequest->SetResult(variant);
 }
 
 void
@@ -238,7 +304,7 @@ QuotaRequestChild::ActorDestroy(ActorDestroyReason aWhy)
   AssertIsOnOwningThread();
 }
 
-bool
+mozilla::ipc::IPCResult
 QuotaRequestChild::Recv__delete__(const RequestResponse& aResponse)
 {
   AssertIsOnOwningThread();
@@ -249,18 +315,28 @@ QuotaRequestChild::Recv__delete__(const RequestResponse& aResponse)
       HandleResponse(aResponse.get_nsresult());
       break;
 
+    case RequestResponse::TInitResponse:
     case RequestResponse::TClearOriginResponse:
-    case RequestResponse::TClearAppResponse:
+    case RequestResponse::TClearDataResponse:
     case RequestResponse::TClearAllResponse:
     case RequestResponse::TResetAllResponse:
+    case RequestResponse::TPersistResponse:
       HandleResponse();
+      break;
+
+    case RequestResponse::TInitOriginResponse:
+      HandleResponse(aResponse.get_InitOriginResponse().created());
+      break;
+
+    case RequestResponse::TPersistedResponse:
+      HandleResponse(aResponse.get_PersistedResponse().persisted());
       break;
 
     default:
       MOZ_CRASH("Unknown response type!");
   }
 
-  return true;
+  return IPC_OK();
 }
 
 } // namespace quota

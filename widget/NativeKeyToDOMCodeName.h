@@ -21,7 +21,7 @@
 #define CODE_MAP_MAC(aCPPCodeName, aNativeKey)
 // GTK and Qt on Linux
 #define CODE_MAP_X11(aCPPCodeName, aNativeKey)
-// Android and Gonk
+// Android
 #define CODE_MAP_ANDROID(aCPPCodeName, aNativeKey)
 
 #if defined(XP_WIN)
@@ -36,7 +36,7 @@
 #define CODE_MAP_MAC(aCPPCodeName, aNativeKey) \
   NS_NATIVE_KEY_TO_DOM_CODE_NAME_INDEX(aNativeKey, \
                                        CODE_NAME_INDEX_##aCPPCodeName)
-#elif defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#elif defined(MOZ_WIDGET_GTK)
 #undef CODE_MAP_X11
 // aNativeKey is hardware_keycode of GDKEvent or nativeScanCode of QKeyEvent.
 #define CODE_MAP_X11(aCPPCodeName, aNativeKey) \

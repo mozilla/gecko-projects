@@ -10,6 +10,8 @@
 #include "DocAccessible.h"
 #include "Filters.h"
 
+#include <memory>
+
 class nsITreeView;
 
 namespace mozilla {
@@ -26,7 +28,7 @@ public:
 
 private:
   friend class Relation;
-  nsAutoPtr<AccIterable> mNextIter;
+  std::unique_ptr<AccIterable> mNextIter;
 };
 
 /**
@@ -36,7 +38,7 @@ private:
 class AccIterator : public AccIterable
 {
 public:
-  AccIterator(Accessible* aRoot, filters::FilterFuncPtr aFilterFunc);
+  AccIterator(const Accessible* aRoot, filters::FilterFuncPtr aFilterFunc);
   virtual ~AccIterator();
 
   /**
@@ -52,9 +54,9 @@ private:
 
   struct IteratorState
   {
-    explicit IteratorState(Accessible* aParent, IteratorState* mParentState = nullptr);
+    explicit IteratorState(const Accessible* aParent, IteratorState* mParentState = nullptr);
 
-    Accessible* mParent;
+    const Accessible* mParent;
     int32_t mIndex;
     IteratorState* mParentState;
   };
@@ -82,7 +84,7 @@ public:
    *                           pointed by
    */
   RelatedAccIterator(DocAccessible* aDocument, nsIContent* aDependentContent,
-                     nsIAtom* aRelAttr);
+                     nsAtom* aRelAttr);
 
   virtual ~RelatedAccIterator() { }
 
@@ -97,7 +99,7 @@ private:
   RelatedAccIterator& operator = (const RelatedAccIterator&);
 
   DocAccessible* mDocument;
-  nsIAtom* mRelAttr;
+  nsAtom* mRelAttr;
   DocAccessible::AttrRelProviderArray* mProviders;
   nsIContent* mBindingParent;
   uint32_t mIndex;
@@ -217,7 +219,7 @@ class IDRefsIterator : public AccIterable
 {
 public:
   IDRefsIterator(DocAccessible* aDoc, nsIContent* aContent,
-                 nsIAtom* aIDRefsAttr);
+                 nsAtom* aIDRefsAttr);
   virtual ~IDRefsIterator() { }
 
   /**
@@ -277,7 +279,7 @@ private:
 class ItemIterator : public AccIterable
 {
 public:
-  explicit ItemIterator(Accessible* aItemContainer) :
+  explicit ItemIterator(const Accessible* aItemContainer) :
     mContainer(aItemContainer), mAnchor(nullptr) { }
   virtual ~ItemIterator() { }
 
@@ -288,7 +290,7 @@ private:
   ItemIterator(const ItemIterator&) = delete;
   ItemIterator& operator = (const ItemIterator&) = delete;
 
-  Accessible* mContainer;
+  const Accessible* mContainer;
   Accessible* mAnchor;
 };
 
@@ -299,7 +301,7 @@ private:
 class XULTreeItemIterator : public AccIterable
 {
 public:
-  XULTreeItemIterator(XULTreeAccessible* aXULTree, nsITreeView* aTreeView,
+  XULTreeItemIterator(const XULTreeAccessible* aXULTree, nsITreeView* aTreeView,
                       int32_t aRowIdx);
   virtual ~XULTreeItemIterator() { }
 
@@ -310,7 +312,7 @@ private:
   XULTreeItemIterator(const XULTreeItemIterator&) = delete;
   XULTreeItemIterator& operator = (const XULTreeItemIterator&) = delete;
 
-  XULTreeAccessible* mXULTree;
+  const XULTreeAccessible* mXULTree;
   nsITreeView* mTreeView;
   int32_t mRowCount;
   int32_t mContainerLevel;

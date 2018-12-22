@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGTSpanElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGTSpanElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGTSpanElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 
@@ -42,7 +42,7 @@ SVGTSpanElement::GetLengthInfo()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGTSpanElement)
@@ -51,7 +51,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGTSpanElement)
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGTSpanElement::IsAttributeMapped(const nsIAtom* name) const
+SVGTSpanElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sColorMap,

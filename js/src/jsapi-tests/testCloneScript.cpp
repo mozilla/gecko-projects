@@ -31,7 +31,7 @@ BEGIN_TEST(test_cloneScript)
 
     // compile for A
     {
-        JSAutoCompartment a(cx, A);
+        JSAutoRealm a(cx, A);
         JS::RootedFunction fun(cx);
         JS::CompileOptions options(cx);
         options.setFileAndLine(__FILE__, 1);
@@ -43,7 +43,7 @@ BEGIN_TEST(test_cloneScript)
 
     // clone into B
     {
-        JSAutoCompartment b(cx, B);
+        JSAutoRealm b(cx, B);
         CHECK(JS::CloneFunctionObject(cx, obj));
     }
 
@@ -67,19 +67,19 @@ struct Principals final : public JSPrincipals
 
 class AutoDropPrincipals
 {
-    JSRuntime* rt;
+    JSContext* cx;
     JSPrincipals* principals;
 
   public:
-    AutoDropPrincipals(JSRuntime* rt, JSPrincipals* principals)
-      : rt(rt), principals(principals)
+    AutoDropPrincipals(JSContext* cx, JSPrincipals* principals)
+      : cx(cx), principals(principals)
     {
         JS_HoldPrincipals(principals);
     }
 
     ~AutoDropPrincipals()
     {
-        JS_DropPrincipals(rt, principals);
+        JS_DropPrincipals(cx, principals);
     }
 };
 
@@ -92,12 +92,12 @@ DestroyPrincipals(JSPrincipals* principals)
 
 BEGIN_TEST(test_cloneScriptWithPrincipals)
 {
-    JS_InitDestroyPrincipalsCallback(rt, DestroyPrincipals);
+    JS_InitDestroyPrincipalsCallback(cx, DestroyPrincipals);
 
     JSPrincipals* principalsA = new Principals();
-    AutoDropPrincipals dropA(rt, principalsA);
+    AutoDropPrincipals dropA(cx, principalsA);
     JSPrincipals* principalsB = new Principals();
-    AutoDropPrincipals dropB(rt, principalsB);
+    AutoDropPrincipals dropB(cx, principalsB);
 
     JS::RootedObject A(cx, createGlobal(principalsA));
     JS::RootedObject B(cx, createGlobal(principalsB));
@@ -112,7 +112,7 @@ BEGIN_TEST(test_cloneScriptWithPrincipals)
 
     // Compile in A
     {
-        JSAutoCompartment a(cx, A);
+        JSAutoRealm a(cx, A);
         JS::CompileOptions options(cx);
         options.setFileAndLine(__FILE__, 1);
         JS::RootedFunction fun(cx);
@@ -131,7 +131,7 @@ BEGIN_TEST(test_cloneScriptWithPrincipals)
 
     // Clone into B
     {
-        JSAutoCompartment b(cx, B);
+        JSAutoRealm b(cx, B);
         JS::RootedObject cloned(cx);
         CHECK(cloned = JS::CloneFunctionObject(cx, obj));
 

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,7 +17,6 @@
 #include "mozilla/layers/TextureClient.h"  // for BufferTextureClient, etc
 #include "mozilla/layers/ImageBridgeChild.h"  // for ImageBridgeChild
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Image::AddRef, etc
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
@@ -63,15 +64,6 @@ SharedRGBImage::SharedRGBImage(ImageClient* aCompositable)
 SharedRGBImage::~SharedRGBImage()
 {
   MOZ_COUNT_DTOR(SharedRGBImage);
-
-  if (mCompositable->GetAsyncID() != 0 &&
-      !InImageBridgeChildThread()) {
-    ADDREF_MANUALLY(mTextureClient);
-    ImageBridgeChild::DispatchReleaseTextureClient(mTextureClient);
-    mTextureClient = nullptr;
-
-    ImageBridgeChild::DispatchReleaseImageClient(mCompositable.forget().take());
-  }
 }
 
 bool
@@ -85,7 +77,7 @@ SharedRGBImage::Allocate(gfx::IntSize aSize, gfx::SurfaceFormat aFormat)
 }
 
 uint8_t*
-SharedRGBImage::GetBuffer()
+SharedRGBImage::GetBuffer() const
 {
   MappedTextureData mapped;
   if (mTextureClient && mTextureClient->BorrowMappedData(mapped)) {
@@ -95,21 +87,66 @@ SharedRGBImage::GetBuffer()
 }
 
 gfx::IntSize
-SharedRGBImage::GetSize()
+SharedRGBImage::GetSize() const
 {
   return mSize;
 }
 
 TextureClient*
-SharedRGBImage::GetTextureClient(CompositableClient* aClient)
+SharedRGBImage::GetTextureClient(KnowsCompositor* aForwarder)
 {
   return mTextureClient.get();
 }
 
+static void
+ReleaseTextureClient(void* aData)
+{
+  RELEASE_MANUALLY(static_cast<TextureClient*>(aData));
+}
+
+static gfx::UserDataKey sTextureClientKey;
+
 already_AddRefed<gfx::SourceSurface>
 SharedRGBImage::GetAsSourceSurface()
 {
-  return nullptr;
+  NS_ASSERTION(NS_IsMainThread(), "Must be main thread");
+
+  if (mSourceSurface) {
+    RefPtr<gfx::SourceSurface> surface(mSourceSurface);
+    return surface.forget();
+  }
+
+  RefPtr<gfx::SourceSurface> surface;
+  {
+    // We are 'borrowing' the DrawTarget and retaining a permanent reference to
+    // the underlying data (via the surface). It is in this instance since we
+    // know that the TextureClient is always wrapping a BufferTextureData and
+    // therefore it won't go away underneath us.
+    BufferTextureData* decoded_buffer =
+      mTextureClient->GetInternalData()->AsBufferTextureData();
+    RefPtr<gfx::DrawTarget> drawTarget = decoded_buffer->BorrowDrawTarget();
+
+    if (!drawTarget) {
+      return nullptr;
+    }
+
+    surface = drawTarget->Snapshot();
+    if (!surface) {
+      return nullptr;
+    }
+
+    // The surface may outlive the owning TextureClient. So, we need to ensure
+    // that the surface keeps the TextureClient alive via a reference held in
+    // user data. The TextureClient's DrawTarget only has a weak reference to the
+    // surface, so we won't create any cycles by just referencing the TextureClient.
+    if (!surface->GetUserData(&sTextureClientKey)) {
+      surface->AddUserData(&sTextureClientKey, mTextureClient, ReleaseTextureClient);
+      ADDREF_MANUALLY(mTextureClient);
+    }
+  }
+
+  mSourceSurface = surface;
+  return surface.forget();
 }
 
 } // namespace layers

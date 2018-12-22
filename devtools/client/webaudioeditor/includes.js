@@ -3,25 +3,20 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-
-const { loader, require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-
-var { console } = Cu.import("resource://gre/modules/Console.jsm", {});
-var { EventTarget } = require("sdk/event/target");
-
-const { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-const { Class } = require("sdk/core/heritage");
+const { loader, require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const Services = require("Services");
 const { gDevTools } = require("devtools/client/framework/devtools");
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const { ViewHelpers } = require("devtools/client/shared/widgets/view-helpers");
 
-const STRINGS_URI = "chrome://devtools/locale/webaudioeditor.properties"
+// Use privileged promise in panel documents to prevent having them to freeze
+// during toolbox destruction. See bug 1402779.
+const Promise = require("Promise");
+
+const STRINGS_URI = "devtools/client/locales/webaudioeditor.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
 loader.lazyRequireGetter(this, "LineGraphWidget",
@@ -89,8 +84,12 @@ EventEmitter.decorate(this);
 /**
  * DOM query helper.
  */
-function $(selector, target = document) { return target.querySelector(selector); }
-function $$(selector, target = document) { return target.querySelectorAll(selector); }
+function $(selector, target = document) {
+  return target.querySelector(selector);
+}
+function $$(selector, target = document) {
+  return target.querySelectorAll(selector);
+}
 
 /**
  * Takes an iterable collection, and a hash. Return the first
@@ -98,9 +97,9 @@ function $$(selector, target = document) { return target.querySelectorAll(select
  * From Backbone.Collection#findWhere
  * http://backbonejs.org/#Collection-findWhere
  */
-function findWhere (collection, attrs) {
-  let keys = Object.keys(attrs);
-  for (let model of collection) {
+function findWhere(collection, attrs) {
+  const keys = Object.keys(attrs);
+  for (const model of collection) {
     if (keys.every(key => model[key] === attrs[key])) {
       return model;
     }
@@ -108,7 +107,7 @@ function findWhere (collection, attrs) {
   return void 0;
 }
 
-function mixin (source, ...args) {
+function mixin(source, ...args) {
   args.forEach(obj => Object.keys(obj).forEach(prop => source[prop] = obj[prop]));
   return source;
 }

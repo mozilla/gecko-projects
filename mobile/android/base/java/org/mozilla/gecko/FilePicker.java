@@ -4,36 +4,40 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.permissions.PermissionBlock;
+import org.mozilla.gecko.permissions.Permissions;
+import org.mozilla.gecko.util.BundleEventListener;
+import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.GeckoBundle;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
+import android.Manifest;
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.net.Uri;
 import android.os.Environment;
 import android.os.Parcelable;
-import android.provider.MediaStore;
+import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
-public class FilePicker implements GeckoEventListener {
+public class FilePicker implements BundleEventListener {
     private static final String LOGTAG = "GeckoFilePicker";
     private static FilePicker sFilePicker;
+    private static final int MODE_OPEN_MULTIPLE_ATTRIBUTE_VALUE = 3;
+    private static final int MODE_OPEN_SINGLE_ATTRIBUTE_VALUE = 0;
     private final Context context;
 
     public interface ResultHandler {
-        public void gotFile(String filename);
+        void gotFile(String filename);
     }
 
     public static void init(Context context) {
@@ -42,38 +46,86 @@ public class FilePicker implements GeckoEventListener {
         }
     }
 
-    protected FilePicker(Context context) {
+    private FilePicker(Context context) {
         this.context = context;
-        EventDispatcher.getInstance().registerGeckoThreadListener(this, "FilePicker:Show");
+        EventDispatcher.getInstance().registerUiThreadListener(this, "FilePicker:Show");
     }
 
-    @Override
-    public void handleMessage(String event, final JSONObject message) {
-        if (event.equals("FilePicker:Show")) {
+    @Override // BundleEventListener
+    public void handleMessage(final String event, final GeckoBundle message,
+                              final EventCallback callback) {
+        if ("FilePicker:Show".equals(event)) {
             String mimeType = "*/*";
-            final String mode = message.optString("mode");
-            final int tabId = message.optInt("tabId", -1);
-            final String title = message.optString("title");
+            final String mode = message.getString("mode", "");
+            final int tabId = message.getInt("tabId", -1);
+            final String title = message.getString("title", "");
+            final boolean isModeOpenMultiple = message.getInt("modeOpenAttribute", MODE_OPEN_SINGLE_ATTRIBUTE_VALUE)
+                    == MODE_OPEN_MULTIPLE_ATTRIBUTE_VALUE;
 
-            if ("mimeType".equals(mode))
-                mimeType = message.optString("mimeType");
-            else if ("extension".equals(mode))
-                mimeType = GeckoAppShell.getMimeTypeFromExtensions(message.optString("extensions"));
+            if ("mimeType".equals(mode)) {
+                mimeType = message.getString("mimeType", "");
+            } else if ("extension".equals(mode)) {
+                mimeType = GeckoAppShell.getMimeTypeFromExtensions(message.getString("extensions", ""));
+            }
 
-            showFilePickerAsync(title, mimeType, new ResultHandler() {
-                @Override
-                public void gotFile(String filename) {
-                    try {
-                        message.put("file", filename);
-                    } catch (JSONException ex) {
-                        Log.i(LOGTAG, "Can't add filename to message " + filename);
+            final String[] requiredPermission = getPermissionsForMimeType(mimeType);
+            final String finalMimeType = mimeType;
+
+            // Use activity context because we want to prompt for runtime permission.
+            final Activity currentActivity =
+                    GeckoActivityMonitor.getInstance().getCurrentActivity();
+            final PermissionBlock perm;
+            if (currentActivity != null) {
+                perm = Permissions.from(currentActivity);
+            } else {
+                perm = Permissions.from(context).doNotPrompt();
+            }
+
+            perm.withPermissions(requiredPermission)
+                .andFallback(new Runnable() {
+                    @Override
+                    public void run() {
+                        // In the fallback case, we still show the picker, just
+                        // with the default file list.
+                        // TODO: Figure out which permissions have been denied and use that
+                        // knowledge for availPermissions. For now we assume we don't have any
+                        // permissions at all (bug 1411014).
+                        showFilePickerAsync(title, "*/*", new String[0], isModeOpenMultiple, new ResultHandler() {
+                            @Override
+                            public void gotFile(final String filename) {
+                                callback.sendSuccess(filename);
+                            }
+                        }, tabId);
                     }
-
-
-                    GeckoAppShell.notifyObservers("FilePicker:Result", message.toString());
-                }
-            }, tabId);
+                })
+                .run(new Runnable() {
+                    @Override
+                    public void run() {
+                        showFilePickerAsync(title, finalMimeType, requiredPermission, isModeOpenMultiple, new ResultHandler() {
+                            @Override
+                            public void gotFile(final String filename) {
+                                callback.sendSuccess(filename);
+                            }
+                        }, tabId);
+                    }
+                });
         }
+    }
+
+    private static String[] getPermissionsForMimeType(final String mimeType) {
+        if (mimeType.startsWith("audio/")) {
+            return new String[] { Manifest.permission.READ_EXTERNAL_STORAGE };
+        } else if (mimeType.startsWith("image/")) {
+            return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+        } else if (mimeType.startsWith("video/")) {
+            return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+        }
+        return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+    }
+
+    private static boolean hasPermissionsForMimeType(final String mimeType, final String[] availPermissions) {
+        return Arrays.asList(availPermissions)
+                .containsAll(Arrays.asList(getPermissionsForMimeType(mimeType)));
     }
 
     private void addActivities(Intent intent, HashMap<String, Intent> intents, HashMap<String, Intent> filters) {
@@ -96,49 +148,72 @@ public class FilePicker implements GeckoEventListener {
         return intent;
     }
 
-    private List<Intent> getIntentsForFilePicker(final String mimeType,
-                                                       final FilePickerResultHandler fileHandler) {
+    private List<Intent> getIntentsForFilePicker(final @NonNull String mimeType,
+                                                 final @NonNull String[] availPermissions,
+                                                 final boolean isModeOpenMultiple,
+                                                 final FilePickerResultHandler fileHandler) {
         // The base intent to use for the file picker. Even if this is an implicit intent, Android will
         // still show a list of Activities that match this action/type.
         Intent baseIntent;
         // A HashMap of Activities the base intent will show in the chooser. This is used
         // to filter activities from other intents so that we don't show duplicates.
         HashMap<String, Intent> baseIntents = new HashMap<String, Intent>();
-        // A list of other activities to shwo in the picker (and the intents to launch them).
+        // A list of other activities to show in the picker (and the intents to launch them).
         HashMap<String, Intent> intents = new HashMap<String, Intent> ();
 
-        if ("audio/*".equals(mimeType)) {
-            // For audio the only intent is the mimetype
-            baseIntent = getIntent(mimeType);
-            addActivities(baseIntent, baseIntents, null);
-        } else if ("image/*".equals(mimeType)) {
-            // For images the base is a capture intent
-            baseIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-            baseIntent.putExtra(MediaStore.EXTRA_OUTPUT,
-                            Uri.fromFile(new File(Environment.getExternalStorageDirectory(),
-                                                  fileHandler.generateImageName())));
-            addActivities(baseIntent, baseIntents, null);
+        baseIntent = getIntent(mimeType);
+        if (isModeOpenMultiple) {
+            baseIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
 
-            // We also add the mimetype intent
-            addActivities(getIntent(mimeType), intents, baseIntents);
-        } else if ("video/*".equals(mimeType)) {
-            // For videos the base is a capture intent
-            baseIntent = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
+        if (mimeType.startsWith("audio/")) {
             addActivities(baseIntent, baseIntents, null);
-
-            // We also add the mimetype intent
-            addActivities(getIntent(mimeType), intents, baseIntents);
+            if (mimeType.equals("audio/*") &&
+                    hasPermissionsForMimeType(mimeType, availPermissions)) {
+                // We also add a capture intent
+                Intent intent = IntentHelper.getAudioCaptureIntent();
+                addActivities(intent, intents, baseIntents);
+            }
+        } else if (mimeType.startsWith("image/") ) {
+            addActivities(baseIntent, baseIntents, null);
+            if (mimeType.equals("image/*") &&
+                    hasPermissionsForMimeType(mimeType, availPermissions)) {
+                // We also add a capture intent
+                Intent intent = IntentHelper.getImageCaptureIntent(context,
+                        new File(Environment.getExternalStorageDirectory(),
+                                fileHandler.generateImageName()));
+                addActivities(intent, intents, baseIntents);
+            }
+        } else if (mimeType.startsWith("video/")) {
+            addActivities(baseIntent, baseIntents, null);
+            if (mimeType.equals("video/*") &&
+                    hasPermissionsForMimeType(mimeType, availPermissions)) {
+                // We also add a capture intent
+                Intent intent = IntentHelper.getVideoCaptureIntent();
+                addActivities(intent, intents, baseIntents);
+            }
         } else {
             baseIntent = getIntent("*/*");
+            if (isModeOpenMultiple) {
+                baseIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            }
             addActivities(baseIntent, baseIntents, null);
 
-            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-            intent.putExtra(MediaStore.EXTRA_OUTPUT,
-                            Uri.fromFile(new File(Environment.getExternalStorageDirectory(),
-                                                  fileHandler.generateImageName())));
-            addActivities(intent, intents, baseIntents);
-            intent = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
-            addActivities(intent, intents, baseIntents);
+            Intent intent;
+            if (hasPermissionsForMimeType("audio/*", availPermissions)) {
+                intent = IntentHelper.getAudioCaptureIntent();
+                addActivities(intent, intents, baseIntents);
+            }
+            if (hasPermissionsForMimeType("image/*", availPermissions)) {
+                intent = IntentHelper.getImageCaptureIntent(context,
+                        new File(Environment.getExternalStorageDirectory(),
+                                fileHandler.generateImageName()));
+                addActivities(intent, intents, baseIntents);
+            }
+            if (hasPermissionsForMimeType("video/*", availPermissions)) {
+                intent = IntentHelper.getVideoCaptureIntent();
+                addActivities(intent, intents, baseIntents);
+            }
         }
 
         // If we didn't find any activities, we fall back to the */* mimetype intent
@@ -166,62 +241,57 @@ public class FilePicker implements GeckoEventListener {
         }
     }
 
-    private interface IntentHandler {
-        public void gotIntent(Intent intent);
-    }
-
     /* Gets an intent that can open a particular mimetype. Will show a prompt with a list
      * of Activities that can handle the mietype. Asynchronously calls the handler when
      * one of the intents is selected. If the caller passes in null for the handler, will still
      * prompt for the activity, but will throw away the result.
      */
-    private void getFilePickerIntentAsync(String title,
-                                          final String mimeType,
-                                          final FilePickerResultHandler fileHandler,
-                                          final IntentHandler handler) {
-        List<Intent> intents = getIntentsForFilePicker(mimeType, fileHandler);
+    private Intent getFilePickerIntent(String title,
+                                       final @NonNull String mimeType,
+                                       final @NonNull String[] availPermissions,
+                                       final boolean isModeOpenMultiple,
+                                       final FilePickerResultHandler fileHandler) {
+        final List<Intent> intents = getIntentsForFilePicker(mimeType, availPermissions, isModeOpenMultiple, fileHandler);
 
         if (intents.size() == 0) {
             Log.i(LOGTAG, "no activities for the file picker!");
-            handler.gotIntent(null);
-            return;
+            return null;
         }
 
-        Intent base = intents.remove(0);
+        final Intent base = intents.remove(0);
 
         if (intents.size() == 0) {
-            handler.gotIntent(base);
-            return;
+            return base;
         }
 
         if (TextUtils.isEmpty(title)) {
             title = getFilePickerTitle(mimeType);
         }
-        Intent chooser = Intent.createChooser(base, title);
-        chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, intents.toArray(new Parcelable[intents.size()]));
-        handler.gotIntent(chooser);
+        final Intent chooser = Intent.createChooser(base, title);
+        chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,
+                         intents.toArray(new Parcelable[intents.size()]));
+        return chooser;
     }
 
     /* Allows the user to pick an activity to load files from using a list prompt. Then opens the activity and
      * sends the file returned to the passed in handler. If a null handler is passed in, will still
      * pick and launch the file picker, but will throw away the result.
      */
-    protected void showFilePickerAsync(final String title, final String mimeType, final ResultHandler handler, final int tabId) {
-        final FilePickerResultHandler fileHandler = new FilePickerResultHandler(handler, context, tabId);
-        getFilePickerIntentAsync(title, mimeType, fileHandler, new IntentHandler() {
-            @Override
-            public void gotIntent(Intent intent) {
-                if (handler == null) {
-                    return;
-                }
+    protected void showFilePickerAsync(final String title, final @NonNull String mimeType,
+                                       final @NonNull String[] availPermissions,
+                                       final boolean isModeOpenMultiple,
+                                       final ResultHandler handler, final int tabId) {
+        final FilePickerResultHandler fileHandler =
+                new FilePickerResultHandler(handler, context, tabId);
+        final Intent intent = getFilePickerIntent(title, mimeType, availPermissions, isModeOpenMultiple, fileHandler);
+        final Activity currentActivity =
+                GeckoActivityMonitor.getInstance().getCurrentActivity();
 
-                if (intent == null) {
-                    handler.gotFile("");
-                    return;
-                }
+        if (intent == null || currentActivity == null) {
+            handler.gotFile("");
+            return;
+        }
 
-                ActivityHandlerHelper.startIntent(intent, fileHandler);
-            }
-        });
+        ActivityHandlerHelper.startIntentForActivity(currentActivity, intent, fileHandler);
     }
 }

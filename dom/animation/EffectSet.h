@@ -7,11 +7,11 @@
 #ifndef mozilla_EffectSet_h
 #define mozilla_EffectSet_h
 
-#include "mozilla/AnimValuesStyleRule.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "nsHashKeys.h" // For nsPtrHashKey
 #include "nsTHashtable.h" // For nsTHashtable
 
@@ -21,7 +21,6 @@ namespace mozilla {
 
 namespace dom {
 class Element;
-class KeyframeEffectReadOnly;
 } // namespace dom
 
 enum class CSSPseudoElementType : uint8_t;
@@ -38,6 +37,8 @@ public:
     , mActiveIterators(0)
     , mCalledPropertyDtor(false)
 #endif
+    , mMayHaveOpacityAnim(false)
+    , mMayHaveTransformAnim(false)
   {
     MOZ_COUNT_CTOR(EffectSet);
   }
@@ -51,13 +52,13 @@ public:
                "enumerated");
     MOZ_COUNT_DTOR(EffectSet);
   }
-  static void PropertyDtor(void* aObject, nsIAtom* aPropertyName,
+  static void PropertyDtor(void* aObject, nsAtom* aPropertyName,
                            void* aPropertyValue, void* aData);
 
   // Methods for supporting cycle-collection
   void Traverse(nsCycleCollectionTraversalCallback& aCallback);
 
-  static EffectSet* GetEffectSet(dom::Element* aElement,
+  static EffectSet* GetEffectSet(const dom::Element* aElement,
                                  CSSPseudoElementType aPseudoType);
   static EffectSet* GetEffectSet(const nsIFrame* aFrame);
   static EffectSet* GetOrCreateEffectSet(dom::Element* aElement,
@@ -65,11 +66,16 @@ public:
   static void DestroyEffectSet(dom::Element* aElement,
                                CSSPseudoElementType aPseudoType);
 
-  void AddEffect(dom::KeyframeEffectReadOnly& aEffect);
-  void RemoveEffect(dom::KeyframeEffectReadOnly& aEffect);
+  void AddEffect(dom::KeyframeEffect& aEffect);
+  void RemoveEffect(dom::KeyframeEffect& aEffect);
+
+  void SetMayHaveOpacityAnimation() { mMayHaveOpacityAnim = true; }
+  bool MayHaveOpacityAnimation() const { return mMayHaveOpacityAnim; }
+  void SetMayHaveTransformAnimation() { mMayHaveTransformAnim = true; }
+  bool MayHaveTransformAnimation() const { return mMayHaveTransformAnim; }
 
 private:
-  typedef nsTHashtable<nsRefPtrHashKey<dom::KeyframeEffectReadOnly>>
+  typedef nsTHashtable<nsRefPtrHashKey<dom::KeyframeEffect>>
     OwningEffectSet;
 
 public:
@@ -84,7 +90,7 @@ public:
   public:
     explicit Iterator(EffectSet& aEffectSet)
       : mEffectSet(aEffectSet)
-      , mHashIterator(mozilla::Move(aEffectSet.mEffects.Iter()))
+      , mHashIterator(aEffectSet.mEffects.Iter())
       , mIsEndIterator(false)
     {
 #ifdef DEBUG
@@ -94,7 +100,7 @@ public:
 
     Iterator(Iterator&& aOther)
       : mEffectSet(aOther.mEffectSet)
-      , mHashIterator(mozilla::Move(aOther.mHashIterator))
+      , mHashIterator(std::move(aOther.mHashIterator))
       , mIsEndIterator(aOther.mIsEndIterator)
     {
 #ifdef DEBUG
@@ -130,7 +136,7 @@ public:
       return *this;
     }
 
-    dom::KeyframeEffectReadOnly* operator* ()
+    dom::KeyframeEffect* operator*()
     {
       MOZ_ASSERT(!Done());
       return mHashIterator.Get()->GetKey();
@@ -161,22 +167,16 @@ public:
 
   bool IsEmpty() const { return mEffects.IsEmpty(); }
 
-  RefPtr<AnimValuesStyleRule>& AnimationRule(EffectCompositor::CascadeLevel
-                                             aCascadeLevel)
-  {
-    return mAnimationRule[aCascadeLevel];
-  }
+  size_t Count() const { return mEffects.Count(); }
 
-  const TimeStamp& AnimationRuleRefreshTime(EffectCompositor::CascadeLevel
-                                              aCascadeLevel) const
+
+  const TimeStamp& LastOverflowAnimationSyncTime() const
   {
-    return mAnimationRuleRefreshTime[aCascadeLevel];
+    return mLastOverflowAnimationSyncTime;
   }
-  void UpdateAnimationRuleRefreshTime(EffectCompositor::CascadeLevel
-                                        aCascadeLevel,
-                                      const TimeStamp& aRefreshTime)
+  void UpdateLastOverflowAnimationSyncTime(const TimeStamp& aRefreshTime)
   {
-    mAnimationRuleRefreshTime[aCascadeLevel] = aRefreshTime;
+    mLastOverflowAnimationSyncTime = aRefreshTime;
   }
 
   bool CascadeNeedsUpdate() const { return mCascadeNeedsUpdate; }
@@ -186,34 +186,39 @@ public:
   void UpdateAnimationGeneration(nsPresContext* aPresContext);
   uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
 
-  static nsIAtom** GetEffectSetPropertyAtoms();
+  static nsAtom** GetEffectSetPropertyAtoms();
+
+  nsCSSPropertyIDSet& PropertiesWithImportantRules()
+  {
+    return mPropertiesWithImportantRules;
+  }
+  nsCSSPropertyIDSet& PropertiesForAnimationsLevel()
+  {
+    return mPropertiesForAnimationsLevel;
+  }
+  nsCSSPropertyIDSet PropertiesForAnimationsLevel() const
+  {
+    return mPropertiesForAnimationsLevel;
+  }
 
 private:
-  static nsIAtom* GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType);
+  static nsAtom* GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType);
 
   OwningEffectSet mEffects;
 
-  // These style rules contain the style data for currently animating
-  // values.  They only match when styling with animation.  When we
-  // style without animation, we need to not use them so that we can
-  // detect any new changes; if necessary we restyle immediately
-  // afterwards with animation.
-  EnumeratedArray<EffectCompositor::CascadeLevel,
-                  EffectCompositor::CascadeLevel(
-                    EffectCompositor::kCascadeLevelCount),
-                  RefPtr<AnimValuesStyleRule>> mAnimationRule;
 
-  // A parallel array to mAnimationRule that records the refresh driver
-  // timestamp when the rule was last updated. This is used for certain
-  // animations which are updated only periodically (e.g. transform animations
-  // running on the compositor that affect the scrollable overflow region).
-  EnumeratedArray<EffectCompositor::CascadeLevel,
-                  EffectCompositor::CascadeLevel(
-                    EffectCompositor::kCascadeLevelCount),
-                  TimeStamp> mAnimationRuleRefreshTime;
+  // Refresh driver timestamp from the moment when the animations which produce
+  // overflow change hints in this effect set were last updated.
 
-  // Dirty flag to represent when the mWinsInCascade flag on effects in
-  // this set might need to be updated.
+  // This is used for animations whose main-thread restyling is throttled either
+  // because they are running on the compositor or because they are not visible.
+  // We still need to update them on the main thread periodically, however (e.g.
+  // so scrollbars can be updated), so this tracks the last time we did that.
+  TimeStamp mLastOverflowAnimationSyncTime;
+
+  // Dirty flag to represent when the mPropertiesWithImportantRules and
+  // mPropertiesForAnimationsLevel on effects in this set might need to be
+  // updated.
   //
   // Set to true any time the set of effects is changed or when
   // one the effects goes in or out of the "in effect" state.
@@ -227,6 +232,14 @@ private:
   // the animation manager.
   uint64_t mAnimationGeneration;
 
+  // Specifies the compositor-animatable properties that are overridden by
+  // !important rules.
+  nsCSSPropertyIDSet mPropertiesWithImportantRules;
+  // Specifies the properties for which the result will be added to the
+  // animations level of the cascade and hence should be skipped when we are
+  // composing the animation style for the transitions level of the cascede.
+  nsCSSPropertyIDSet mPropertiesForAnimationsLevel;
+
 #ifdef DEBUG
   // Track how many iterators are referencing this effect set when we are
   // destroyed, we can assert that nothing is still pointing to us.
@@ -234,6 +247,9 @@ private:
 
   bool mCalledPropertyDtor;
 #endif
+
+  bool mMayHaveOpacityAnim;
+  bool mMayHaveTransformAnim;
 };
 
 } // namespace mozilla

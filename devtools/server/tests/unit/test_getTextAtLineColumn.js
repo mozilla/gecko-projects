@@ -5,7 +5,7 @@
 
 "use strict";
 
-const {getTextAtLineColumn} = devtools.require("devtools/server/actors/styles");
+const {getTextAtLineColumn} = require("devtools/server/actors/styles");
 
 const TEST_DATA = [
   {
@@ -25,11 +25,11 @@ const TEST_DATA = [
 ];
 
 function run_test() {
-  for (let test of TEST_DATA) {
-    do_print("Starting test: " + test.desc);
-    do_print("Input string " + test.input);
+  for (const test of TEST_DATA) {
+    info("Starting test: " + test.desc);
+    info("Input string " + test.input);
 
-    let output = getTextAtLineColumn(test.input, test.line, test.column);
+    const output = getTextAtLineColumn(test.input, test.line, test.column);
     deepEqual(output, test.expected);
   }
 }

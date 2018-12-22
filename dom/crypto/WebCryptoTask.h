@@ -7,15 +7,17 @@
 #ifndef mozilla_dom_WebCryptoTask_h
 #define mozilla_dom_WebCryptoTask_h
 
-#include "nsNSSShutDown.h"
-#include "nsIGlobalObject.h"
-#include "mozilla/dom/Promise.h"
-#include "mozilla/dom/DOMException.h"
-#include "mozilla/dom/SubtleCryptoBinding.h"
+#include "ScopedNSSTypes.h"
 #include "mozilla/dom/CryptoKey.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/SubtleCryptoBinding.h"
+#include "nsIGlobalObject.h"
 
 namespace mozilla {
 namespace dom {
+
+class ThreadSafeWorkerRef;
 
 typedef ArrayBufferViewOrArrayBuffer CryptoOperationData;
 typedef ArrayBufferViewOrArrayBuffer KeyData;
@@ -53,20 +55,13 @@ Cleanup should execute regardless of what else happens.
 #define MAYBE_EARLY_FAIL(rv) \
 if (NS_FAILED(rv)) { \
   FailWithError(rv); \
-  Skip(); \
   return; \
 }
 
-class WebCryptoTask : public nsCancelableRunnable,
-                      public nsNSSShutDownObject
+class WebCryptoTask : public CancelableRunnable
 {
 public:
   virtual void DispatchWithPromise(Promise* aResultPromise);
-
-  void Skip()
-  {
-    virtualDestroyNSSReference();
-  }
 
 protected:
   static WebCryptoTask* CreateEncryptDecryptTask(JSContext* aCx,
@@ -169,26 +164,11 @@ protected:
   nsresult mEarlyRv;
   bool mEarlyComplete;
 
-  WebCryptoTask()
-    : mEarlyRv(NS_OK)
-    , mEarlyComplete(false)
-    , mOriginalThread(nullptr)
-    , mReleasedNSSResources(false)
-    , mRv(NS_ERROR_NOT_INITIALIZED)
-  {}
-
-  virtual ~WebCryptoTask()
-  {
-    MOZ_ASSERT(mReleasedNSSResources);
-
-    nsNSSShutDownPreventionLock lock;
-    if (!isAlreadyShutDown()) {
-      shutdown(calledFromObject);
-    }
-  }
+  WebCryptoTask();
+  virtual ~WebCryptoTask();
 
   bool IsOnOriginalThread() {
-    return !mOriginalThread || NS_GetCurrentThread() == mOriginalThread;
+    return !mOriginalEventTarget || mOriginalEventTarget->IsOnCurrentThread();
   }
 
   // For things that need to happen on the main thread
@@ -201,30 +181,16 @@ protected:
 
   void FailWithError(nsresult aRv);
 
-  // Subclasses should override this method if they keep references to
-  // any NSS objects, e.g., SECKEYPrivateKey or PK11SymKey.
-  virtual void ReleaseNSSResources() {}
+  nsresult CalculateResult();
 
-  virtual nsresult CalculateResult() final;
-
-  virtual void CallCallback(nsresult rv) final;
+  void CallCallback(nsresult rv);
 
 private:
-  NS_IMETHOD Run() override final;
+  NS_IMETHOD Run() final;
+  nsresult Cancel() final;
 
-  virtual void
-  virtualDestroyNSSReference() override final
-  {
-    MOZ_ASSERT(IsOnOriginalThread());
-
-    if (!mReleasedNSSResources) {
-      mReleasedNSSResources = true;
-      ReleaseNSSResources();
-    }
-  }
-
-  nsCOMPtr<nsIThread> mOriginalThread;
-  bool mReleasedNSSResources;
+  nsCOMPtr<nsISerialEventTarget> mOriginalEventTarget;
+  RefPtr<ThreadSafeWorkerRef> mWorkerRef;
   nsresult mRv;
 };
 
@@ -236,7 +202,7 @@ public:
                             const ObjectOrString& aAlgorithm, bool aExtractable,
                             const Sequence<nsString>& aKeyUsages);
 protected:
-  ScopedPLArenaPool mArena;
+  UniquePLArenaPool mArena;
   UniquePtr<CryptoKeyPair> mKeyPair;
   nsString mAlgName;
   CK_MECHANISM_TYPE mMechanism;
@@ -244,14 +210,13 @@ protected:
   SECKEYDHParams mDhParams;
   nsString mNamedCurve;
 
-  virtual void ReleaseNSSResources() override;
   virtual nsresult DoCrypto() override;
   virtual void Resolve() override;
   virtual void Cleanup() override;
 
 private:
-  ScopedSECKEYPublicKey mPublicKey;
-  ScopedSECKEYPrivateKey mPrivateKey;
+  UniqueSECKEYPublicKey mPublicKey;
+  UniqueSECKEYPrivateKey mPrivateKey;
 };
 
 } // namespace dom

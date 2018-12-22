@@ -88,16 +88,16 @@ protected:
         txExpandedNameMap_base& mMap;
         uint32_t mCurrentPos;
     };
-    
+
     friend class iterator_base;
 
     friend class txMapItemComparator;
     struct MapItem {
         int32_t mNamespaceID;
-        nsCOMPtr<nsIAtom> mLocalName;
+        RefPtr<nsAtom> mLocalName;
         void* mValue;
     };
-    
+
     nsTArray<MapItem> mItems;
 };
 

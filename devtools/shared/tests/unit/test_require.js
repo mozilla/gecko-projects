@@ -1,18 +1,20 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Test require
 
 // Ensure that DevtoolsLoader.require doesn't spawn multiple
 // loader/modules when early cached
 function testBug1091706() {
-  let loader = new DevToolsLoader();
-  let require = loader.require;
+  const loader = new DevToolsLoader();
+  const require = loader.require;
 
-  let color1 = require("devtools/shared/css-color");
-  let color2 = require("devtools/shared/css-color");
+  const indent1 = require("devtools/shared/indentation");
+  const indent2 = require("devtools/shared/indentation");
 
-  do_check_true(color1 === color2);
+  Assert.ok(indent1 === indent2);
 }
 
 function run_test() {

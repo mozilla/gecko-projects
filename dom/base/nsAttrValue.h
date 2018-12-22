@@ -12,33 +12,31 @@
 #ifndef nsAttrValue_h___
 #define nsAttrValue_h___
 
+#include <type_traits>
+
 #include "nscore.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsStringBuffer.h"
 #include "nsColor.h"
 #include "nsCaseTreatment.h"
 #include "nsMargin.h"
 #include "nsCOMPtr.h"
+#include "nsStringFwd.h"
 #include "SVGAttrValueWrapper.h"
 #include "nsTArrayForwardDeclare.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
+#include "mozilla/AtomArray.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/EnumTypeTraits.h"
 
-// Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
-
-class nsAString;
 class nsIDocument;
-class nsStyledElementNotElementCSSInlineStyle;
+class nsIURI;
+class nsStyledElement;
 struct MiscContainer;
 
 namespace mozilla {
-namespace css {
-class Declaration;
-struct URLValue;
-struct ImageValue;
-} // namespace css
+class DeclarationBlock;
 } // namespace mozilla
 
 #define NS_ATTRVALUE_MAX_STRINGLENGTH_ATOM 12
@@ -81,12 +79,10 @@ public:
 class nsAttrValue {
   friend struct MiscContainer;
 public:
-  typedef nsTArray< nsCOMPtr<nsIAtom> > AtomArray;
-
   // This has to be the same as in ValueBaseType
   enum ValueType {
     eString =       0x00, //   00
-                          //   01  this value indicates an 'misc' struct
+                          //   01  this value indicates a 'misc' struct
     eAtom =         0x02, //   10
     eInteger =      0x03, // 0011
     eColor =        0x07, // 0111
@@ -94,33 +90,34 @@ public:
     ePercent =      0x0F, // 1111
     // Values below here won't matter, they'll be always stored in the 'misc'
     // struct.
-    eCSSDeclaration =          0x10
-    ,eURL =                    0x11
-    ,eImage =                  0x12
-    ,eAtomArray =              0x13
-    ,eDoubleValue  =           0x14
-    ,eIntMarginValue =         0x15
-    ,eSVGAngle =               0x16
-    ,eSVGTypesBegin =          eSVGAngle
-    ,eSVGIntegerPair =         0x17
-    ,eSVGLength =              0x18
-    ,eSVGLengthList =          0x19
-    ,eSVGNumberList =          0x1A
-    ,eSVGNumberPair =          0x1B
-    ,eSVGPathData =            0x1C
-    ,eSVGPointList =           0x1D
-    ,eSVGPreserveAspectRatio = 0x1E
-    ,eSVGStringList =          0x1F
-    ,eSVGTransformList =       0x20
-    ,eSVGViewBox =             0x21
-    ,eSVGTypesEnd =            eSVGViewBox
+    eCSSDeclaration = 0x10,
+    eURL,
+    eImage,
+    eAtomArray,
+    eDoubleValue,
+    eIntMarginValue,
+    eSVGAngle,
+    eSVGTypesBegin = eSVGAngle,
+    eSVGIntegerPair,
+    eSVGLength,
+    eSVGLengthList,
+    eSVGNumberList,
+    eSVGNumberPair,
+    eSVGPathData,
+    eSVGPointList,
+    eSVGPreserveAspectRatio,
+    eSVGStringList,
+    eSVGTransformList,
+    eSVGViewBox,
+    eSVGTypesEnd = eSVGViewBox,
   };
 
   nsAttrValue();
   nsAttrValue(const nsAttrValue& aOther);
   explicit nsAttrValue(const nsAString& aValue);
-  explicit nsAttrValue(nsIAtom* aValue);
-  nsAttrValue(mozilla::css::Declaration* aValue, const nsAString* aSerialized);
+  explicit nsAttrValue(nsAtom* aValue);
+  nsAttrValue(already_AddRefed<mozilla::DeclarationBlock> aValue,
+              const nsAString* aSerialized);
   explicit nsAttrValue(const nsIntMargin& aValue);
   ~nsAttrValue();
 
@@ -129,7 +126,7 @@ public:
   static nsresult Init();
   static void Shutdown();
 
-  ValueType Type() const;
+  inline ValueType Type() const;
   // Returns true when this value is self-contained and does not depend on
   // the state of its associated element.
   // Returns false when this value depends on the state of its associated
@@ -141,12 +138,13 @@ public:
 
   void SetTo(const nsAttrValue& aOther);
   void SetTo(const nsAString& aValue);
-  void SetTo(nsIAtom* aValue);
+  void SetTo(nsAtom* aValue);
   void SetTo(int16_t aInt);
   void SetTo(int32_t aInt, const nsAString* aSerialized);
   void SetTo(double aValue, const nsAString* aSerialized);
-  void SetTo(mozilla::css::Declaration* aValue, const nsAString* aSerialized);
-  void SetTo(mozilla::css::URLValue* aValue, const nsAString* aSerialized);
+  void SetTo(already_AddRefed<mozilla::DeclarationBlock> aValue,
+             const nsAString* aSerialized);
+  void SetTo(nsIURI* aValue, const nsAString* aSerialized);
   void SetTo(const nsIntMargin& aValue);
   void SetTo(const nsSVGAngle& aValue, const nsAString* aSerialized);
   void SetTo(const nsSVGIntegerPair& aValue, const nsAString* aSerialized);
@@ -184,21 +182,20 @@ public:
    * Returns the value of this object as an atom. If necessary, the value will
    * first be serialised using ToString before converting to an atom.
    */
-  already_AddRefed<nsIAtom> GetAsAtom() const;
+  already_AddRefed<nsAtom> GetAsAtom() const;
 
   // Methods to get value. These methods do not convert so only use them
   // to retrieve the datatype that this nsAttrValue has.
   inline bool IsEmptyString() const;
   const nsCheapString GetStringValue() const;
-  inline nsIAtom* GetAtomValue() const;
+  inline nsAtom* GetAtomValue() const;
   inline int32_t GetIntegerValue() const;
   bool GetColorValue(nscolor& aColor) const;
   inline int16_t GetEnumValue() const;
   inline float GetPercentValue() const;
-  inline AtomArray* GetAtomArrayValue() const;
-  inline mozilla::css::Declaration* GetCSSDeclarationValue() const;
-  inline mozilla::css::URLValue* GetURLValue() const;
-  inline mozilla::css::ImageValue* GetImageValue() const;
+  inline mozilla::AtomArray* GetAtomArrayValue() const;
+  inline mozilla::DeclarationBlock* GetCSSDeclarationValue() const;
+  inline nsIURI* GetURLValue() const;
   inline double GetDoubleValue() const;
   bool GetIntMarginValue(nsIntMargin& aMargin) const;
 
@@ -216,13 +213,13 @@ public:
   uint32_t GetAtomCount() const;
   // Returns the atom at aIndex (0-based).  Do not call this with
   // aIndex >= GetAtomCount().
-  nsIAtom* AtomAt(int32_t aIndex) const;
+  nsAtom* AtomAt(int32_t aIndex) const;
 
   uint32_t HashValue() const;
   bool Equals(const nsAttrValue& aOther) const;
   // aCaseSensitive == eIgnoreCase means ASCII case-insenstive matching
   bool Equals(const nsAString& aValue, nsCaseTreatment aCaseSensitive) const;
-  bool Equals(nsIAtom* aValue, nsCaseTreatment aCaseSensitive) const;
+  bool Equals(nsAtom* aValue, nsCaseTreatment aCaseSensitive) const;
 
   /**
    * Compares this object with aOther according to their string representation.
@@ -237,7 +234,7 @@ public:
    * Returns true if this AttrValue is equal to the given atom, or is an
    * array which contains the given atom.
    */
-  bool Contains(nsIAtom* aValue, nsCaseTreatment aCaseSensitive) const;
+  bool Contains(nsAtom* aValue, nsCaseTreatment aCaseSensitive) const;
   /**
    * Returns true if this AttrValue is an atom equal to the given
    * string, or is an array of atoms which contains the given string.
@@ -256,10 +253,29 @@ public:
    * EnumTable myTable[] = {
    *   { "string1", 1 },
    *   { "string2", 2 },
-   *   { 0 }
+   *   { nullptr, 0 }
    * }
    */
   struct EnumTable {
+    // EnumTable can be initialized either with an int16_t value
+    // or a value of an enumeration type that can fit within an int16_t.
+
+    constexpr EnumTable(const char* aTag, int16_t aValue)
+      : tag(aTag)
+      , value(aValue)
+    {
+    }
+
+    template<typename T,
+             typename = typename std::enable_if<std::is_enum<T>::value>::type>
+    constexpr EnumTable(const char* aTag, T aValue)
+      : tag(aTag)
+      , value(static_cast<int16_t>(aValue))
+    {
+      static_assert(mozilla::EnumTypeFitsWithin<T, int16_t>::value,
+                    "aValue must be an enum that fits within int16_t");
+    }
+
     /** The string the value maps to */
     const char* tag;
     /** The enum value that maps to this string */
@@ -317,6 +333,18 @@ public:
                             int32_t aMax = INT32_MAX);
 
   /**
+   * Parse a string value into an integer with a fallback for invalid values.
+   * Also allows clamping to a maximum value to support col/colgroup.span (this
+   * is not per spec right now).
+   *
+   * @param aString the string to parse
+   * @param aDefault the default value
+   * @param aMax the maximum value (if value is greater it will be clamped)
+   */
+  void ParseIntWithFallback(const nsAString& aString, int32_t aDefault,
+                            int32_t aMax = INT32_MAX);
+
+  /**
    * Parse a string value into a non-negative integer.
    * This method follows the rules for parsing non-negative integer from:
    * http://dev.w3.org/html5/spec/infrastructure.html#rules-for-parsing-non-negative-integers
@@ -325,6 +353,19 @@ public:
    * @return whether the value is valid
    */
   bool ParseNonNegativeIntValue(const nsAString& aString);
+
+  /**
+   * Parse a string value into a clamped non-negative integer.
+   * This method follows the rules for parsing non-negative integer from:
+   * https://html.spec.whatwg.org/multipage/infrastructure.html#clamped-to-the-range
+   *
+   * @param aString the string to parse
+   * @param aDefault value to return for negative or invalid values
+   * @param aMin minimum value
+   * @param aMax maximum value
+   */
+  void ParseClampedNonNegativeInt(const nsAString& aString, int32_t aDefault,
+                                  int32_t aMin, int32_t aMax);
 
   /**
    * Parse a string value into a positive integer.
@@ -374,20 +415,17 @@ public:
   bool ParseIntMarginValue(const nsAString& aString);
 
   /**
-   * Convert a URL nsAttrValue to an Image nsAttrValue.
-   *
-   * @param aDocument the document this nsAttrValue belongs to.
-   */
-  void LoadImage(nsIDocument* aDocument);
-
-  /**
    * Parse a string into a CSS style rule.
    *
    * @param aString the style attribute value to be parsed.
    * @param aElement the element the attribute is set on.
+   * @param aMaybeScriptedPrincipal if available, the scripted principal
+   *        responsible for this attribute value, as passed to
+   *        Element::ParseAttribute.
    */
   bool ParseStyleAttribute(const nsAString& aString,
-                           nsStyledElementNotElementCSSInlineStyle* aElement);
+                           nsIPrincipal* aMaybeScriptedPrincipal,
+                           nsStyledElement* aElement);
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
@@ -438,7 +476,7 @@ private:
   // Given an enum table and a particular entry in that table, return
   // the actual integer value we should store.
   int32_t EnumTableEntryToValue(const EnumTable* aEnumTable,
-                                const EnumTable* aTableEntry);  
+                                const EnumTable* aTableEntry);
 
   static nsTArray<const EnumTable*>* sEnumTableArray;
 
@@ -450,13 +488,6 @@ nsAttrValue::operator=(const nsAttrValue& aOther)
 {
   SetTo(aOther);
   return *this;
-}
-
-inline nsIAtom*
-nsAttrValue::GetAtomValue() const
-{
-  NS_PRECONDITION(Type() == eAtom, "wrong type");
-  return reinterpret_cast<nsIAtom*>(GetPtr());
 }
 
 inline nsAttrValue::ValueBaseType
@@ -477,32 +508,6 @@ inline bool
 nsAttrValue::IsEmptyString() const
 {
   return !mBits;
-}
-
-inline void
-nsAttrValue::ToString(mozilla::dom::DOMString& aResult) const
-{
-  switch (Type()) {
-    case eString:
-    {
-      nsStringBuffer* str = static_cast<nsStringBuffer*>(GetPtr());
-      if (str) {
-        aResult.SetStringBuffer(str, str->StorageSize()/sizeof(char16_t) - 1);
-      }
-      // else aResult is already empty
-      return;
-    }
-    case eAtom:
-    {
-      nsIAtom *atom = static_cast<nsIAtom*>(GetPtr());
-      aResult.SetStringBuffer(atom->GetStringBuffer(), atom->GetLength());
-      break;
-    }
-    default:
-    {
-      ToString(aResult.AsAString());
-    }
-  }
 }
 
 #endif

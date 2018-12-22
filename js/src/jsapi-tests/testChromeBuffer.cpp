@@ -8,10 +8,7 @@
 
 static TestJSPrincipals system_principals(1);
 
-static const JSClass global_class = {
-    "global",
-    JSCLASS_IS_GLOBAL | JSCLASS_GLOBAL_FLAGS,
-    nullptr,
+static const JSClassOps global_classOps = {
     nullptr,
     nullptr,
     nullptr,
@@ -25,6 +22,12 @@ static const JSClass global_class = {
     JS_GlobalObjectTraceHook
 };
 
+static const JSClass global_class = {
+    "global",
+    JSCLASS_IS_GLOBAL | JSCLASS_GLOBAL_FLAGS,
+    &global_classOps
+};
+
 static JS::PersistentRootedObject trusted_glob;
 static JS::PersistentRootedObject trusted_fun;
 
@@ -33,24 +36,20 @@ CallTrusted(JSContext* cx, unsigned argc, JS::Value* vp)
 {
     JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
-    if (!JS_SaveFrameChain(cx))
-        return false;
-
     bool ok = false;
     {
-        JSAutoCompartment ac(cx, trusted_glob);
+        JSAutoRealm ar(cx, trusted_glob);
         JS::RootedValue funVal(cx, JS::ObjectValue(*trusted_fun));
         ok = JS_CallFunctionValue(cx, nullptr, funVal, JS::HandleValueArray::empty(), args.rval());
     }
-    JS_RestoreFrameChain(cx);
     return ok;
 }
 
 BEGIN_TEST(testChromeBuffer)
 {
-    JS_SetTrustedPrincipals(rt, &system_principals);
+    JS_SetTrustedPrincipals(cx, &system_principals);
 
-    JS::CompartmentOptions options;
+    JS::RealmOptions options;
     trusted_glob.init(cx, JS_NewGlobalObject(cx, &global_class, &system_principals,
                                              JS::FireOnNewGlobalHook, options));
     CHECK(trusted_glob);
@@ -64,10 +63,10 @@ BEGIN_TEST(testChromeBuffer)
      */
     {
         // Disable the JIT because if we don't this test fails.  See bug 1160414.
-        JS::RuntimeOptions oldOptions = JS::RuntimeOptionsRef(rt);
-        JS::RuntimeOptionsRef(rt).setIon(false).setBaseline(false);
+        JS::ContextOptions oldOptions = JS::ContextOptionsRef(cx);
+        JS::ContextOptionsRef(cx).setIon(false).setBaseline(false);
         {
-            JSAutoCompartment ac(cx, trusted_glob);
+            JSAutoRealm ar(cx, trusted_glob);
             const char* paramName = "x";
             const char* bytes = "return x ? 1 + trusted(x-1) : 0";
             JS::CompileOptions options(cx);
@@ -102,7 +101,7 @@ BEGIN_TEST(testChromeBuffer)
         JS::RootedValue rval(cx);
         CHECK(JS_CallFunction(cx, nullptr, fun, JS::HandleValueArray(v), &rval));
         CHECK(rval.toInt32() == 100);
-        JS::RuntimeOptionsRef(rt) = oldOptions;
+        JS::ContextOptionsRef(cx) = oldOptions;
     }
 
     /*
@@ -111,7 +110,7 @@ BEGIN_TEST(testChromeBuffer)
      */
     {
         {
-            JSAutoCompartment ac(cx, trusted_glob);
+            JSAutoRealm ar(cx, trusted_glob);
             const char* paramName = "untrusted";
             const char* bytes = "try {                                  "
                                 "  untrusted();                         "
@@ -155,13 +154,9 @@ BEGIN_TEST(testChromeBuffer)
         CHECK(match);
     }
 
-    /*
-     * Check that JS_SaveFrameChain called on the way from content to chrome
-     * (say, as done by XPCJSContextSTack::Push) works.
-     */
     {
         {
-            JSAutoCompartment ac(cx, trusted_glob);
+            JSAutoRealm ar(cx, trusted_glob);
             const char* bytes = "return 42";
             JS::CompileOptions options(cx);
             options.setFileAndLine("", 0);

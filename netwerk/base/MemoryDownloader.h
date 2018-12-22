@@ -45,14 +45,14 @@ public:
   explicit MemoryDownloader(IObserver* aObserver);
 
 private:
-  virtual ~MemoryDownloader();
+  virtual ~MemoryDownloader() = default;
 
-  static NS_METHOD ConsumeData(nsIInputStream *in,
-                               void           *closure,
-                               const char     *fromRawSegment,
-                               uint32_t        toOffset,
-                               uint32_t        count,
-                               uint32_t       *writeCount);
+  static nsresult ConsumeData(nsIInputStream *in,
+                              void           *closure,
+                              const char     *fromRawSegment,
+                              uint32_t        toOffset,
+                              uint32_t        count,
+                              uint32_t       *writeCount);
 
   RefPtr<IObserver> mObserver;
   Data mData;

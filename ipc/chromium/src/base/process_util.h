@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -25,6 +27,7 @@
 #include <mach/mach.h>
 #endif
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -37,60 +40,14 @@
 #include "base/command_line.h"
 #include "base/process.h"
 
-#if defined(OS_WIN)
-typedef PROCESSENTRY32 ProcessEntry;
-typedef IO_COUNTERS IoCounters;
-#elif defined(OS_POSIX)
-// TODO(port): we should not rely on a Win32 structure.
-struct ProcessEntry {
-  int pid;
-  int ppid;
-  char szExeFile[NAME_MAX + 1];
-};
-
-struct IoCounters {
-  unsigned long long ReadOperationCount;
-  unsigned long long WriteOperationCount;
-  unsigned long long OtherOperationCount;
-  unsigned long long ReadTransferCount;
-  unsigned long long WriteTransferCount;
-  unsigned long long OtherTransferCount;
-};
-
-#include "base/file_descriptor_shuffle.h"
-#endif
+#include "mozilla/UniquePtr.h"
+#include "mozilla/ipc/EnvironmentMap.h"
 
 #if defined(OS_MACOSX)
 struct kinfo_proc;
 #endif
 
 namespace base {
-
-// These can be used in a 32-bit bitmask.
-enum ProcessArchitecture {
-  PROCESS_ARCH_I386 = 0x1,
-  PROCESS_ARCH_X86_64 = 0x2,
-  PROCESS_ARCH_PPC = 0x4,
-  PROCESS_ARCH_ARM = 0x8,
-  PROCESS_ARCH_MIPS = 0x10
-};
-
-inline ProcessArchitecture GetCurrentProcessArchitecture()
-{
-  base::ProcessArchitecture currentArchitecture;
-#if defined(ARCH_CPU_X86)
-  currentArchitecture = base::PROCESS_ARCH_I386;
-#elif defined(ARCH_CPU_X86_64)
-  currentArchitecture = base::PROCESS_ARCH_X86_64;
-#elif defined(ARCH_CPU_PPC)
-  currentArchitecture = base::PROCESS_ARCH_PPC;
-#elif defined(ARCH_CPU_ARMEL)
-  currentArchitecture = base::PROCESS_ARCH_ARM;
-#elif defined(ARCH_CPU_MIPS)
-  currentArchitecture = base::PROCESS_ARCH_MIPS;
-#endif
-  return currentArchitecture;
-}
 
 // A minimalistic but hopefully cross-platform set of exit codes.
 // Do not change the enumeration values or you will break third-party
@@ -112,13 +69,10 @@ ProcessHandle GetCurrentProcessHandle();
 bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Converts a PID to a process handle. On Windows the handle is opened
-// with more access rights and must only be used by trusted code. Parameter
-// error can be used to get the error code in opening the process handle.
+// with more access rights and must only be used by trusted code.
 // You have to close returned handle using CloseProcessHandle. Returns true
 // on success.
-bool OpenPrivilegedProcessHandle(ProcessId pid,
-                                 ProcessHandle* handle,
-                                 int64_t* error = nullptr);
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Closes the process handle opened by OpenProcessHandle.
 void CloseProcessHandle(ProcessHandle process);
@@ -135,26 +89,53 @@ ProcessId GetProcId(ProcessHandle process);
 // WARNING: do not use. It's inherently race-prone in the face of
 // multi-threading.
 void SetAllFDsToCloseOnExec();
-// Close all file descriptors, expect those which are a destination in the
-// given multimap. Only call this function in a child process where you know
-// that there aren't any other threads.
-void CloseSuperfluousFds(const base::InjectiveMultimap& saved_map);
+// Close all file descriptors, except for std{in,out,err} and those
+// for which the given function returns true.  Only call this function
+// in a child process where you know that there aren't any other
+// threads.
+void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve);
+
+typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
+typedef std::map<std::string, std::string> environment_map;
 #endif
 
-enum ChildPrivileges {
-  PRIVILEGES_DEFAULT,
-  PRIVILEGES_UNPRIVILEGED,
-  PRIVILEGES_INHERIT,
-  PRIVILEGES_LAST
+struct LaunchOptions {
+  // If true, wait for the process to terminate.  Otherwise, return
+  // immediately.
+  bool wait = false;
+
+#if defined(OS_WIN)
+  bool start_hidden = false;
+
+  // Environment variables to be applied in addition to the current
+  // process's environment, replacing them where necessary.
+  EnvironmentMap env_map;
+
+  std::vector<HANDLE> handles_to_inherit;
+#endif
+#if defined(OS_POSIX)
+  environment_map env_map;
+
+  // A mapping of (src fd -> dest fd) to propagate into the child
+  // process.  All other fds will be closed, except std{in,out,err}.
+  file_handle_mapping_vector fds_to_remap;
+#endif
+
+#if defined(OS_LINUX) || defined(OS_SOLARIS)
+  struct ForkDelegate {
+    virtual ~ForkDelegate() { }
+    virtual pid_t Fork() = 0;
+  };
+
+  // If non-null, the fork delegate will be called instead of fork().
+  mozilla::UniquePtr<ForkDelegate> fork_delegate = nullptr;
+#endif
 };
 
 #if defined(OS_WIN)
 // Runs the given application name with the given command line. Normally, the
 // first command line argument should be the path to the process, and don't
 // forget to quote it.
-//
-// If wait is true, it will block and wait for the other process to finish,
-// otherwise, it will just continue asynchronously.
 //
 // Example (including literal quotes)
 //  cmdline = "c:\windows\explorer.exe" -foo "c:\bar\"
@@ -164,54 +145,39 @@ enum ChildPrivileges {
 // NOTE: In this case, the caller is responsible for closing the handle so
 //       that it doesn't leak!
 bool LaunchApp(const std::wstring& cmdline,
-               bool wait, bool start_hidden, ProcessHandle* process_handle);
+               const LaunchOptions& options,
+               ProcessHandle* process_handle);
+
 #elif defined(OS_POSIX)
 // Runs the application specified in argv[0] with the command line argv.
-// Before launching all FDs open in the parent process will be marked as
-// close-on-exec.  |fds_to_remap| defines a mapping of src fd->dest fd to
-// propagate FDs into the child process.
 //
-// As above, if wait is true, execute synchronously. The pid will be stored
-// in process_handle if that pointer is non-null.
+// The pid will be stored in process_handle if that pointer is
+// non-null.
 //
 // Note that the first argument in argv must point to the filename,
-// and must be fully specified.
-typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
+// and must be fully specified (i.e., this will not search $PATH).
 bool LaunchApp(const std::vector<std::string>& argv,
-               const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle);
+               const LaunchOptions& options,
+               ProcessHandle* process_handle);
 
-typedef std::map<std::string, std::string> environment_map;
-bool LaunchApp(const std::vector<std::string>& argv,
-               const file_handle_mapping_vector& fds_to_remap,
-               const environment_map& env_vars_to_set,
-               ChildPrivileges privs,
-               bool wait, ProcessHandle* process_handle,
-               ProcessArchitecture arch=GetCurrentProcessArchitecture());
-bool LaunchApp(const std::vector<std::string>& argv,
-               const file_handle_mapping_vector& fds_to_remap,
-               const environment_map& env_vars_to_set,
-               bool wait, ProcessHandle* process_handle,
-               ProcessArchitecture arch=GetCurrentProcessArchitecture());
+// Deleter for the array of strings allocated within BuildEnvironmentArray.
+struct FreeEnvVarsArray
+{
+  void operator()(char** array);
+};
+
+typedef mozilla::UniquePtr<char*[], FreeEnvVarsArray> EnvironmentArray;
+
+// Merge an environment map with the current environment.
+// Existing variables are overwritten by env_vars_to_set.
+EnvironmentArray BuildEnvironmentArray(const environment_map& env_vars_to_set);
 #endif
-
-// Adjust the privileges of this process to match |privs|.  Only
-// returns if privileges were successfully adjusted.
-void SetCurrentProcessPrivileges(ChildPrivileges privs);
 
 // Executes the application specified by cl. This function delegates to one
 // of the above two platform-specific functions.
 bool LaunchApp(const CommandLine& cl,
-               bool wait, bool start_hidden, ProcessHandle* process_handle);
-
-// Used to filter processes by process ID.
-class ProcessFilter {
- public:
-  // Returns true to indicate set-inclusion and false otherwise.  This method
-  // should not have side-effects and should be idempotent.
-  virtual bool Includes(ProcessId pid, ProcessId parent_pid) const = 0;
-  virtual ~ProcessFilter() { }
-};
+               const LaunchOptions&,
+               ProcessHandle* process_handle);
 
 // Attempts to kill the process identified by the given process
 // entry structure, giving it the specified exit code. If |wait| is true, wait
@@ -227,40 +193,6 @@ bool KillProcess(ProcessHandle process, int exit_code, bool wait);
 // yet. On POSIX, |child_exited| is set correctly since we detect terminate in
 // a different manner on POSIX.
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle);
-
-// Provides performance metrics for a specified process (CPU usage, memory and
-// IO counters). To use it, invoke CreateProcessMetrics() to get an instance
-// for a specific process, then access the information with the different get
-// methods.
-class ProcessMetrics {
- public:
-  // Creates a ProcessMetrics for the specified process.
-  // The caller owns the returned object.
-  static ProcessMetrics* CreateProcessMetrics(ProcessHandle process);
-
-  ~ProcessMetrics();
-
-  // Returns the CPU usage in percent since the last time this method was
-  // called. The first time this method is called it returns 0 and will return
-  // the actual CPU info on subsequent calls.
-  // Note that on multi-processor machines, the CPU usage value is for all
-  // CPUs. So if you have 2 CPUs and your process is using all the cycles
-  // of 1 CPU and not the other CPU, this method returns 50.
-  int GetCPUUsage();
-
- private:
-  explicit ProcessMetrics(ProcessHandle process);
-
-  ProcessHandle process_;
-
-  int processor_count_;
-
-  // Used to store the previous times so we can compute the CPU usage.
-  int64_t last_time_;
-  int64_t last_system_time_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(ProcessMetrics);
-};
 
 }  // namespace base
 
@@ -314,6 +246,8 @@ private:
 #undef GetClassName
 #undef GetBinaryType
 #undef RemoveDirectory
+#undef LoadImage
+#undef LoadIcon
 #endif
 
 #endif  // BASE_PROCESS_UTIL_H_

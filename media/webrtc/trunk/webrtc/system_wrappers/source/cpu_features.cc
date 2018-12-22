@@ -10,7 +10,7 @@
 
 // Parts of this file derived from Chromium's base/cpu.cc.
 
-#include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
+#include "webrtc/system_wrappers/include/cpu_features_wrapper.h"
 
 #if defined(WEBRTC_ARCH_X86_FAMILY) && defined(_MSC_VER)
 #include <intrin.h>
@@ -67,7 +67,7 @@ static int GetCPUInfo(CPUFeature feature) {
   return 0;
 }
 
-#if !defined(WEBRTC_GONK) && !defined(ANDROID)
+#if !defined(ANDROID)
 #ifdef WEBRTC_ARCH_ARM_V7
 uint64_t WebRtc_GetCPUFeaturesARM(void) {
   return kCPUFeatureARMv7
@@ -77,7 +77,7 @@ uint64_t WebRtc_GetCPUFeaturesARM(void) {
          | kCPUFeatureVFPv3;
 }
 #endif // WEBRTC_ARCH_ARM_V7
-#endif // !WEBRTC_GONK && !ANDROID
+#endif // !ANDROID
 
 #endif
 

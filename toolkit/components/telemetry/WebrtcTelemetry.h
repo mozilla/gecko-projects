@@ -9,6 +9,7 @@
 
 #include "nsBaseHashtable.h"
 #include "nsHashKeys.h"
+#include "TelemetryCommon.h"
 
 class WebrtcTelemetry {
 public:
@@ -23,11 +24,10 @@ public:
   };
   struct WebrtcIceStatsCategory {
     struct WebrtcIceCandidateStats webrtc;
-    struct WebrtcIceCandidateStats loop;
   };
   typedef nsBaseHashtableET<nsUint32HashKey, WebrtcIceStatsCategory> WebrtcIceCandidateType;
 
-  void RecordIceCandidateMask(const uint32_t iceCandidateBitmask, bool success, bool loop);
+  void RecordIceCandidateMask(const uint32_t iceCandidateBitmask, bool success);
 
   bool GetWebrtcStats(JSContext *cx, JS::MutableHandle<JS::Value> ret);
 
@@ -35,9 +35,9 @@ public:
 
 private:
 
-  bool AddIceInfo(JSContext *cx, JS::Handle<JSObject*> rootObj, bool loop);
+  bool AddIceInfo(JSContext *cx, JS::Handle<JSObject*> rootObj);
 
-  AutoHashtable<WebrtcIceCandidateType> mWebrtcIceCandidates;
+  mozilla::Telemetry::Common::AutoHashtable<WebrtcIceCandidateType> mWebrtcIceCandidates;
 };
 
 #endif // WebrtcTelemetry_h__

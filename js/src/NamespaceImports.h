@@ -13,6 +13,7 @@
 // These includes are needed these for some typedefs (e.g. HandleValue) and
 // functions (e.g. NullValue())...
 #include "js/CallNonGenericMethod.h"
+#include "js/GCHashTable.h"
 #include "js/GCVector.h"
 #include "js/TypeDecls.h"
 #include "js/Value.h"
@@ -29,28 +30,26 @@ class TwoByteCharsZ;
 class UTF8Chars;
 class UTF8CharsZ;
 
-template <typename T>
-class AutoVectorRooter;
-typedef AutoVectorRooter<Value> AutoValueVector;
-typedef AutoVectorRooter<jsid> AutoIdVector;
-typedef AutoVectorRooter<JSObject*> AutoObjectVector;
-typedef AutoVectorRooter<JSScript*> AutoVector;
+using AutoValueVector = AutoVector<Value>;
+using AutoIdVector = AutoVector<jsid>;
+using AutoObjectVector = AutoVector<JSObject*>;
 
-using ValueVector = js::GCVector<JS::Value>;
-using IdVector = js::GCVector<jsid>;
-using ScriptVector = js::GCVector<JSScript*>;
-
-template <typename T> class AutoVectorRooter;
-template<typename K, typename V> class AutoHashMapRooter;
-template<typename T> class AutoHashSetRooter;
+using ValueVector = JS::GCVector<JS::Value>;
+using IdVector = JS::GCVector<jsid>;
+using ScriptVector = JS::GCVector<JSScript*>;
 
 class MOZ_STACK_CLASS SourceBufferHolder;
 
 class HandleValueArray;
 
 class ObjectOpResult;
+class PropertyResult;
 
-struct PropertyDescriptor;
+enum class SymbolCode: uint32_t;
+
+#ifdef ENABLE_BIGINT
+class BigInt;
+#endif
 } // namespace JS
 
 // Do the importing.
@@ -68,6 +67,7 @@ using JS::ObjectOrNullValue;
 using JS::ObjectValue;
 using JS::PrivateUint32Value;
 using JS::PrivateValue;
+using JS::PrivateGCThingValue;
 using JS::StringValue;
 using JS::UndefinedValue;
 
@@ -82,21 +82,24 @@ using JS::UTF8CharsZ;
 using JS::UniqueChars;
 using JS::UniqueTwoByteChars;
 
-using JS::AutoVectorRooter;
-typedef AutoVectorRooter<Value> AutoValueVector;
-typedef AutoVectorRooter<jsid> AutoIdVector;
-typedef AutoVectorRooter<JSObject*> AutoObjectVector;
+using JS::Result;
+using JS::Ok;
+using JS::OOM;
+
+using JS::AutoValueVector;
+using JS::AutoIdVector;
+using JS::AutoObjectVector;
 
 using JS::ValueVector;
 using JS::IdVector;
 using JS::ScriptVector;
 
-using JS::AutoHashMapRooter;
-using JS::AutoHashSetRooter;
+using JS::GCVector;
+using JS::GCHashMap;
+using JS::GCHashSet;
 
 using JS::CallArgs;
 using JS::CallNonGenericMethod;
-using JS::CallReceiver;
 using JS::CompileOptions;
 using JS::IsAcceptableThis;
 using JS::NativeImpl;
@@ -112,6 +115,9 @@ using JS::RootedObject;
 using JS::RootedScript;
 using JS::RootedString;
 using JS::RootedSymbol;
+#ifdef ENABLE_BIGINT
+using JS::RootedBigInt;
+#endif
 using JS::RootedValue;
 
 using JS::PersistentRooted;
@@ -121,6 +127,9 @@ using JS::PersistentRootedObject;
 using JS::PersistentRootedScript;
 using JS::PersistentRootedString;
 using JS::PersistentRootedSymbol;
+#ifdef ENABLE_BIGINT
+using JS::PersistentRootedBigInt;
+#endif
 using JS::PersistentRootedValue;
 
 using JS::Handle;
@@ -130,6 +139,9 @@ using JS::HandleObject;
 using JS::HandleScript;
 using JS::HandleString;
 using JS::HandleSymbol;
+#ifdef ENABLE_BIGINT
+using JS::HandleBigInt;
+#endif
 using JS::HandleValue;
 
 using JS::MutableHandle;
@@ -139,6 +151,9 @@ using JS::MutableHandleObject;
 using JS::MutableHandleScript;
 using JS::MutableHandleString;
 using JS::MutableHandleSymbol;
+#ifdef ENABLE_BIGINT
+using JS::MutableHandleBigInt;
+#endif
 using JS::MutableHandleValue;
 
 using JS::NullHandleValue;
@@ -149,11 +164,18 @@ using JS::FalseHandleValue;
 using JS::HandleValueArray;
 
 using JS::ObjectOpResult;
+using JS::PropertyResult;
 
-using JS::PropertyDescriptor;
-
+using JS::Compartment;
+using JS::Realm;
 using JS::Zone;
 
+using JS::Symbol;
+using JS::SymbolCode;
+
+#ifdef ENABLE_BIGINT
+using JS::BigInt;
+#endif
 } /* namespace js */
 
 #endif /* NamespaceImports_h */

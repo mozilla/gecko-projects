@@ -9,7 +9,8 @@
 // This is more of a unit test than a mochitest-browser test, but can't be
 // tested with an xpcshell test as the output-parser requires the DOM to work.
 
-var {OutputParser} = require("devtools/client/shared/output-parser");
+const OutputParser = require("devtools/client/shared/output-parser");
+const {initCssProperties, getCssProperties} = require("devtools/shared/fronts/css-properties");
 
 const COLOR_CLASS = "color-class";
 const URL_CLASS = "url-class";
@@ -145,10 +146,12 @@ const TEST_DATA = [
   },
   {
     name: "background",
-    value: "linear-gradient(to right, rgba(183,222,237,1) 0%, rgba(33,180,226,1) 30%, rgba(31,170,217,.5) 44%, #F06 75%, red 100%)",
+    value: "linear-gradient(to right, rgba(183,222,237,1) 0%, " +
+           "rgba(33,180,226,1) 30%, rgba(31,170,217,.5) 44%, " +
+           "#F06 75%, red 100%)",
     test: fragment => {
       is(countAll(fragment), 10);
-      let allSwatches = fragment.querySelectorAll("." + COLOR_CLASS);
+      const allSwatches = fragment.querySelectorAll("." + COLOR_CLASS);
       is(allSwatches.length, 5);
       is(allSwatches[0].textContent, "rgba(183,222,237,1)");
       is(allSwatches[1].textContent, "rgba(33,180,226,1)");
@@ -159,16 +162,13 @@ const TEST_DATA = [
   },
   {
     name: "background",
-    value: "-moz-radial-gradient(center 45deg, circle closest-side, orange 0%, red 100%)",
+    value: "radial-gradient(circle closest-side at center, orange 0%, red 100%)",
     test: fragment => {
-      is(countAll(fragment), 6);
-      let colorSwatches = fragment.querySelectorAll("." + COLOR_CLASS);
+      is(countAll(fragment), 4);
+      const colorSwatches = fragment.querySelectorAll("." + COLOR_CLASS);
       is(colorSwatches.length, 2);
       is(colorSwatches[0].textContent, "orange");
       is(colorSwatches[1].textContent, "red");
-      let angleSwatches = fragment.querySelectorAll("." + ANGLE_CLASS);
-      is(angleSwatches.length, 1);
-      is(angleSwatches[0].textContent, "45deg");
     }
   },
   {
@@ -207,10 +207,12 @@ const TEST_DATA = [
   },
   {
     name: "background-image",
-    value: "url(../../../look/at/this/folder/structure/../../red.blue.green.svg   )",
+    value: "url(../../../look/at/this/folder/structure/../" +
+           "../red.blue.green.svg   )",
     test: fragment => {
       is(countAll(fragment), 1);
-      is(getUrl(fragment), "../../../look/at/this/folder/structure/../../red.blue.green.svg");
+      is(getUrl(fragment), "../../../look/at/this/folder/structure/../" +
+                           "../red.blue.green.svg");
     }
   },
   {
@@ -290,10 +292,15 @@ const TEST_DATA = [
   }
 ];
 
-add_task(function*() {
-  let parser = new OutputParser(document);
+add_task(async function() {
+  // Mock the toolbox that initCssProperties expect so we get the fallback css properties.
+  const toolbox = {target: {client: {}, hasActor: () => false}};
+  await initCssProperties(toolbox);
+  const cssProperties = getCssProperties(toolbox);
+
+  const parser = new OutputParser(document, cssProperties);
   for (let i = 0; i < TEST_DATA.length; i++) {
-    let data = TEST_DATA[i];
+    const data = TEST_DATA[i];
     info("Output-parser test data " + i + ". {" + data.name + " : " +
       data.value + ";}");
     data.test(parser.parseCssProperty(data.name, data.value, {

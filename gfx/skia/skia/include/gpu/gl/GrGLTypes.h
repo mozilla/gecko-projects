@@ -10,6 +10,7 @@
 #define GrGLTypes_DEFINED
 
 #include "GrGLConfig.h"
+#include "SkRefCnt.h"
 
 /**
  * Classifies GL contexts by which standard they implement (currently as OpenGL vs. OpenGL ES).
@@ -58,10 +59,41 @@ typedef signed long int GrGLintptr;
 typedef signed long int GrGLsizeiptr;
 #endif
 typedef void* GrGLeglImage;
+typedef struct __GLsync* GrGLsync;
+
+struct GrGLDrawArraysIndirectCommand {
+    GrGLuint fCount;
+    GrGLuint fInstanceCount;
+    GrGLuint fFirst;
+    GrGLuint fBaseInstance;  // Requires EXT_base_instance on ES.
+};
+
+GR_STATIC_ASSERT(16 == sizeof(GrGLDrawArraysIndirectCommand));
+
+struct GrGLDrawElementsIndirectCommand {
+    GrGLuint fCount;
+    GrGLuint fInstanceCount;
+    GrGLuint fFirstIndex;
+    GrGLuint fBaseVertex;
+    GrGLuint fBaseInstance;  // Requires EXT_base_instance on ES.
+};
+
+GR_STATIC_ASSERT(20 == sizeof(GrGLDrawElementsIndirectCommand));
+
+/**
+ * KHR_debug
+ */
+typedef void (GR_GL_FUNCTION_TYPE* GRGLDEBUGPROC)(GrGLenum source,
+                                                  GrGLenum type,
+                                                  GrGLuint id,
+                                                  GrGLenum severity,
+                                                  GrGLsizei length,
+                                                  const GrGLchar* message,
+                                                  const void* userParam);
+
 /**
  * EGL types.
  */
-
 typedef void* GrEGLImage;
 typedef void* GrEGLDisplay;
 typedef void* GrEGLContext;
@@ -73,14 +105,23 @@ typedef unsigned int GrEGLBoolean;
 ///////////////////////////////////////////////////////////////////////////////
 /**
  * Types for interacting with GL resources created externally to Skia. GrBackendObjects for GL
- * textures are really const GrGLTexture*
+ * textures are really const GrGLTexture*. The fFormat here should be a sized, internal format
+ * for the texture. We will try to use the sized format if the GL Context supports it, otherwise
+ * we will internally fall back to using the base internal formats.
  */
-
 struct GrGLTextureInfo {
     GrGLenum fTarget;
     GrGLuint fID;
+    GrGLenum fFormat = 0;
 };
 
 GR_STATIC_ASSERT(sizeof(GrBackendObject) >= sizeof(const GrGLTextureInfo*));
+
+struct GrGLFramebufferInfo {
+    GrGLuint fFBOID;
+    GrGLenum fFormat = 0;
+};
+
+GR_STATIC_ASSERT(sizeof(GrBackendObject) >= sizeof(const GrGLFramebufferInfo*));
 
 #endif

@@ -13,15 +13,12 @@
 #include "prio.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/net/DNS.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIFile.h"
 
-using namespace mozilla;
-using namespace mozilla::net;
-
-static NS_DEFINE_CID(kSocketTransportServiceCID, NS_SOCKETTRANSPORTSERVICE_CID);
+namespace mozilla { namespace net {
 
 //-----------------------------------------------------------------------------
 
@@ -30,10 +27,7 @@ typedef void (nsServerSocket:: *nsServerSocketFunc)(void);
 static nsresult
 PostEvent(nsServerSocket *s, nsServerSocketFunc func)
 {
-  nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(s, func);
-  if (!ev)
-    return NS_ERROR_OUT_OF_MEMORY;
-
+  nsCOMPtr<nsIRunnable> ev = NewRunnableMethod("net::PostEvent", s, func);
   if (!gSocketTransportService)
     return NS_ERROR_FAILURE;
 
@@ -50,13 +44,22 @@ nsServerSocket::nsServerSocket()
   , mAttached(false)
   , mKeepWhenOffline(false)
 {
+  this->mAddr.raw.family = 0;
+  this->mAddr.inet.family = 0;
+  this->mAddr.inet.port = 0;
+  this->mAddr.inet.ip = 0;
+  this->mAddr.ipv6.family = 0;
+  this->mAddr.ipv6.port = 0;
+  this->mAddr.ipv6.flowinfo = 0;
+  this->mAddr.ipv6.scope_id = 0;
+  this->mAddr.local.family = 0;
   // we want to be able to access the STS directly, and it may not have been
   // constructed yet.  the STS constructor sets gSocketTransportService.
   if (!gSocketTransportService)
   {
     // This call can fail if we're offline, for example.
     nsCOMPtr<nsISocketTransportService> sts =
-        do_GetService(kSocketTransportServiceCID);
+        do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID);
   }
   // make sure the STS sticks around as long as we do
   NS_IF_ADDREF(gSocketTransportService);
@@ -97,7 +100,7 @@ nsServerSocket::OnMsgAttach()
     return;
 
   mCondition = TryAttach();
-  
+
   // if we hit an error while trying to attach then bail...
   if (NS_FAILED(mCondition))
   {
@@ -128,8 +131,8 @@ nsServerSocket::TryAttach()
   //
   if (!gSocketTransportService->CanAttachSocket())
   {
-    nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(this, &nsServerSocket::OnMsgAttach);
+    nsCOMPtr<nsIRunnable> event = NewRunnableMethod(
+      "net::nsServerSocket::OnMsgAttach", this, &nsServerSocket::OnMsgAttach);
     if (!event)
       return NS_ERROR_OUT_OF_MEMORY;
 
@@ -242,7 +245,8 @@ nsServerSocket::OnSocketDetached(PRFileDesc *fd)
     // XXX we need to proxy the release to the listener's target thread to work
     // around bug 337492.
     if (listener) {
-      NS_ProxyRelease(mListenerTarget, listener.forget());
+      NS_ProxyRelease(
+        "nsServerSocket::mListener", mListenerTarget, listener.forget());
     }
   }
 }
@@ -424,28 +428,31 @@ namespace {
 
 class ServerSocketListenerProxy final : public nsIServerSocketListener
 {
-  ~ServerSocketListenerProxy() {}
+  ~ServerSocketListenerProxy() = default;
 
 public:
   explicit ServerSocketListenerProxy(nsIServerSocketListener* aListener)
-    : mListener(new nsMainThreadPtrHolder<nsIServerSocketListener>(aListener))
-    , mTargetThread(do_GetCurrentThread())
+    : mListener(new nsMainThreadPtrHolder<nsIServerSocketListener>(
+        "ServerSocketListenerProxy::mListener", aListener))
+    , mTarget(GetCurrentThreadEventTarget())
   { }
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISERVERSOCKETLISTENER
 
-  class OnSocketAcceptedRunnable : public nsRunnable
+  class OnSocketAcceptedRunnable : public Runnable
   {
   public:
-    OnSocketAcceptedRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
-                             nsIServerSocket* aServ,
-                             nsISocketTransport* aTransport)
-      : mListener(aListener)
+    OnSocketAcceptedRunnable(
+      const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
+      nsIServerSocket* aServ,
+      nsISocketTransport* aTransport)
+      : Runnable("net::ServerSocketListenerProxy::OnSocketAcceptedRunnable")
+      , mListener(aListener)
       , mServ(aServ)
       , mTransport(aTransport)
     { }
-    
+
     NS_DECL_NSIRUNNABLE
 
   private:
@@ -454,13 +461,15 @@ public:
     nsCOMPtr<nsISocketTransport> mTransport;
   };
 
-  class OnStopListeningRunnable : public nsRunnable
+  class OnStopListeningRunnable : public Runnable
   {
   public:
-    OnStopListeningRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
-                            nsIServerSocket* aServ,
-                            nsresult aStatus)
-      : mListener(aListener)
+    OnStopListeningRunnable(
+      const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
+      nsIServerSocket* aServ,
+      nsresult aStatus)
+      : Runnable("net::ServerSocketListenerProxy::OnStopListeningRunnable")
+      , mListener(aListener)
       , mServ(aServ)
       , mStatus(aStatus)
     { }
@@ -475,7 +484,7 @@ public:
 
 private:
   nsMainThreadPtrHandle<nsIServerSocketListener> mListener;
-  nsCOMPtr<nsIEventTarget> mTargetThread;
+  nsCOMPtr<nsIEventTarget> mTarget;
 };
 
 NS_IMPL_ISUPPORTS(ServerSocketListenerProxy,
@@ -487,7 +496,7 @@ ServerSocketListenerProxy::OnSocketAccepted(nsIServerSocket* aServ,
 {
   RefPtr<OnSocketAcceptedRunnable> r =
     new OnSocketAcceptedRunnable(mListener, aServ, aTransport);
-  return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
+  return mTarget->Dispatch(r, NS_DISPATCH_NORMAL);
 }
 
 NS_IMETHODIMP
@@ -496,7 +505,7 @@ ServerSocketListenerProxy::OnStopListening(nsIServerSocket* aServ,
 {
   RefPtr<OnStopListeningRunnable> r =
     new OnStopListeningRunnable(mListener, aServ, aStatus);
-  return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
+  return mTarget->Dispatch(r, NS_DISPATCH_NORMAL);
 }
 
 NS_IMETHODIMP
@@ -524,7 +533,7 @@ nsServerSocket::AsyncListen(nsIServerSocketListener *aListener)
   {
     MutexAutoLock lock(mLock);
     mListener = new ServerSocketListenerProxy(aListener);
-    mListenerTarget = NS_GetCurrentThread();
+    mListenerTarget = GetCurrentThreadEventTarget();
   }
 
   // Child classes may need to do additional setup just before listening begins
@@ -559,3 +568,6 @@ nsServerSocket::GetAddress(PRNetAddr *aResult)
   memcpy(aResult, &mAddr, sizeof(mAddr));
   return NS_OK;
 }
+
+} // namespace net
+} // namespace mozilla

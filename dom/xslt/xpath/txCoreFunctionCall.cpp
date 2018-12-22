@@ -24,7 +24,7 @@ struct txCoreFunctionDescriptor
     int8_t mMinParams;
     int8_t mMaxParams;
     Expr::ResultType mReturnType;
-    nsIAtom** mName;
+    nsStaticAtom** mName;
 };
 
 // This must be ordered in the same order as txCoreFunctionCall::eType.
@@ -105,7 +105,7 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
             NS_ENSURE_SUCCESS(rv, rv);
 
             txXPathTreeWalker walker(aContext->getContextNode());
-            
+
             if (exprResult->getResultType() == txAExprResult::NODESET) {
                 txNodeSet* nodes = static_cast<txNodeSet*>
                                               (static_cast<txAExprResult*>
@@ -386,7 +386,7 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
 
                     return NS_OK;
                 }
-                
+
                 if (end > src.Length())
                     end = src.Length();
                 else
@@ -398,10 +398,10 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
 
             if (start < 0)
                 start = 0;
- 
+
             if (start > end) {
                 aContext->recycler()->getEmptyStringResult(aResult);
-                
+
                 return NS_OK;
             }
 
@@ -426,11 +426,11 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
             int32_t idx = arg1.Find(arg2);
             if (idx == kNotFound) {
                 aContext->recycler()->getEmptyStringResult(aResult);
-                
+
                 return NS_OK;
             }
 
-            const nsSubstring& result = Substring(arg1, idx + arg2.Length());
+            const nsAString& result = Substring(arg1, idx + arg2.Length());
             return aContext->recycler()->getStringResult(result, aResult);
         }
         case SUBSTRING_BEFORE:
@@ -452,7 +452,7 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
             int32_t idx = arg1.Find(arg2);
             if (idx == kNotFound) {
                 aContext->recycler()->getEmptyStringResult(aResult);
-                
+
                 return NS_OK;
             }
 
@@ -470,7 +470,7 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
 
                 return NS_OK;
             }
-            
+
             RefPtr<StringResult> strRes;
             rv = aContext->recycler()->getStringResult(getter_AddRefs(strRes));
             NS_ENSURE_SUCCESS(rv, rv);
@@ -501,7 +501,7 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
 
             return NS_OK;
         }
-        
+
         // Number functions
 
         case NUMBER:
@@ -578,9 +578,9 @@ txCoreFunctionCall::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
             }
             return aContext->recycler()->getNumberResult(res, aResult);
         }
-        
+
         // Boolean functions
-        
+
         case BOOLEAN:
         {
             bool result;
@@ -713,13 +713,13 @@ txCoreFunctionCall::isSensitiveTo(ContextSensitivity aContext)
         }
     }
 
-    NS_NOTREACHED("how'd we get here?");
+    MOZ_ASSERT_UNREACHABLE("how'd we get here?");
     return true;
 }
 
 // static
 bool
-txCoreFunctionCall::getTypeFromAtom(nsIAtom* aName, eType& aType)
+txCoreFunctionCall::getTypeFromAtom(nsAtom* aName, eType& aType)
 {
     uint32_t i;
     for (i = 0; i < ArrayLength(descriptTable); ++i) {
@@ -734,10 +734,9 @@ txCoreFunctionCall::getTypeFromAtom(nsIAtom* aName, eType& aType)
 }
 
 #ifdef TX_TO_STRING
-nsresult
-txCoreFunctionCall::getNameAtom(nsIAtom** aAtom)
+void
+txCoreFunctionCall::appendName(nsAString& aDest)
 {
-    NS_ADDREF(*aAtom = *descriptTable[mType].mName);
-    return NS_OK;
+    aDest.Append((*descriptTable[mType].mName)->GetUTF16String());
 }
 #endif

@@ -6,7 +6,9 @@
  *
  * Portions Copyright 2013 Microsoft Open Technologies, Inc. */
 
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/PointerEvent.h"
+#include "mozilla/dom/PointerEventBinding.h"
 #include "mozilla/MouseEvents.h"
 #include "prtime.h"
 
@@ -29,38 +31,48 @@ PointerEvent::PointerEvent(EventTarget* aOwner,
   } else {
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
-    mouseEvent->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
+    mouseEvent->inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
   }
+  // 5.2 Pointer Event types, for all pointer events, |detail| attribute SHOULD
+  // be 0.
+  mDetail = 0;
+}
+
+JSObject*
+PointerEvent::WrapObjectInternal(JSContext* aCx,
+                                 JS::Handle<JSObject*> aGivenProto)
+{
+  return PointerEvent_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 static uint16_t
 ConvertStringToPointerType(const nsAString& aPointerTypeArg)
 {
   if (aPointerTypeArg.EqualsLiteral("mouse")) {
-    return nsIDOMMouseEvent::MOZ_SOURCE_MOUSE;
+    return MouseEvent_Binding::MOZ_SOURCE_MOUSE;
   }
   if (aPointerTypeArg.EqualsLiteral("pen")) {
-    return nsIDOMMouseEvent::MOZ_SOURCE_PEN;
+    return MouseEvent_Binding::MOZ_SOURCE_PEN;
   }
   if (aPointerTypeArg.EqualsLiteral("touch")) {
-    return nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+    return MouseEvent_Binding::MOZ_SOURCE_TOUCH;
   }
 
-  return nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+  return MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
 }
 
 void
 ConvertPointerTypeToString(uint16_t aPointerTypeSrc, nsAString& aPointerTypeDest)
 {
   switch (aPointerTypeSrc) {
-    case nsIDOMMouseEvent::MOZ_SOURCE_MOUSE:
+    case MouseEvent_Binding::MOZ_SOURCE_MOUSE:
       aPointerTypeDest.AssignLiteral("mouse");
       break;
-    case nsIDOMMouseEvent::MOZ_SOURCE_PEN:
+    case MouseEvent_Binding::MOZ_SOURCE_PEN:
       aPointerTypeDest.AssignLiteral("pen");
       break;
-    case nsIDOMMouseEvent::MOZ_SOURCE_TOUCH:
+    case MouseEvent_Binding::MOZ_SOURCE_TOUCH:
       aPointerTypeDest.AssignLiteral("touch");
       break;
     default:
@@ -87,16 +99,22 @@ PointerEvent::Constructor(EventTarget* aOwner,
 
   WidgetPointerEvent* widgetEvent = e->mEvent->AsPointerEvent();
   widgetEvent->pointerId = aParam.mPointerId;
-  widgetEvent->width = aParam.mWidth;
-  widgetEvent->height = aParam.mHeight;
+  widgetEvent->mWidth = aParam.mWidth;
+  widgetEvent->mHeight = aParam.mHeight;
   widgetEvent->pressure = aParam.mPressure;
+  widgetEvent->tangentialPressure = aParam.mTangentialPressure;
   widgetEvent->tiltX = aParam.mTiltX;
   widgetEvent->tiltY = aParam.mTiltY;
+  widgetEvent->twist = aParam.mTwist;
   widgetEvent->inputSource = ConvertStringToPointerType(aParam.mPointerType);
-  widgetEvent->isPrimary = aParam.mIsPrimary;
+  widgetEvent->mIsPrimary = aParam.mIsPrimary;
   widgetEvent->buttons = aParam.mButtons;
 
+  if (!aParam.mCoalescedEvents.IsEmpty()) {
+    e->mCoalescedEvents.AppendElements(aParam.mCoalescedEvents);
+  }
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -110,6 +128,22 @@ PointerEvent::Constructor(const GlobalObject& aGlobal,
   nsCOMPtr<EventTarget> owner = do_QueryInterface(aGlobal.GetAsSupports());
   return Constructor(owner, aType, aParam);
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(PointerEvent)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PointerEvent, MouseEvent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCoalescedEvents)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PointerEvent, MouseEvent)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCoalescedEvents)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PointerEvent)
+NS_INTERFACE_MAP_END_INHERITING(MouseEvent)
+
+NS_IMPL_ADDREF_INHERITED(PointerEvent, MouseEvent)
+NS_IMPL_RELEASE_INHERITED(PointerEvent, MouseEvent)
 
 void
 PointerEvent::GetPointerType(nsAString& aPointerType)
@@ -126,19 +160,25 @@ PointerEvent::PointerId()
 int32_t
 PointerEvent::Width()
 {
-  return mEvent->AsPointerEvent()->width;
+  return mEvent->AsPointerEvent()->mWidth;
 }
 
 int32_t
 PointerEvent::Height()
 {
-  return mEvent->AsPointerEvent()->height;
+  return mEvent->AsPointerEvent()->mHeight;
 }
 
 float
 PointerEvent::Pressure()
 {
   return mEvent->AsPointerEvent()->pressure;
+}
+
+float
+PointerEvent::TangentialPressure()
+{
+  return mEvent->AsPointerEvent()->tangentialPressure;
 }
 
 int32_t
@@ -153,10 +193,60 @@ PointerEvent::TiltY()
   return mEvent->AsPointerEvent()->tiltY;
 }
 
+int32_t
+PointerEvent::Twist()
+{
+  return mEvent->AsPointerEvent()->twist;
+}
+
 bool
 PointerEvent::IsPrimary()
 {
-  return mEvent->AsPointerEvent()->isPrimary;
+  return mEvent->AsPointerEvent()->mIsPrimary;
+}
+
+void
+PointerEvent::GetCoalescedEvents(nsTArray<RefPtr<PointerEvent>>& aPointerEvents)
+{
+  WidgetPointerEvent* widgetEvent = mEvent->AsPointerEvent();
+  if (mCoalescedEvents.IsEmpty() && widgetEvent &&
+      widgetEvent->mCoalescedWidgetEvents &&
+      !widgetEvent->mCoalescedWidgetEvents->mEvents.IsEmpty()) {
+    for (WidgetPointerEvent& event :
+         widgetEvent->mCoalescedWidgetEvents->mEvents) {
+      RefPtr<PointerEvent> domEvent =
+        NS_NewDOMPointerEvent(nullptr, nullptr, &event);
+
+      // The dom event is derived from an OS generated widget event. Setup
+      // mWidget and mPresContext since they are necessary to calculate
+      // offsetX / offsetY.
+      domEvent->mEvent->AsGUIEvent()->mWidget = widgetEvent->mWidget;
+      domEvent->mPresContext = mPresContext;
+
+      // The coalesced widget mouse events shouldn't have been dispatched.
+      MOZ_ASSERT(!domEvent->mEvent->mTarget);
+      // The event target should be the same as the dispatched event's target.
+      domEvent->mEvent->mTarget = mEvent->mTarget;
+
+      // JS could hold reference to dom events. We have to ask dom event to
+      // duplicate its private data to avoid the widget event is destroyed.
+      domEvent->DuplicatePrivateData();
+
+      // Setup mPresContext again after DuplicatePrivateData since it clears
+      // mPresContext.
+      domEvent->mPresContext = mPresContext;
+      mCoalescedEvents.AppendElement(domEvent);
+    }
+  }
+  if (mEvent->mTarget) {
+    for (RefPtr<PointerEvent>& pointerEvent : mCoalescedEvents) {
+      // Only set event target when it's null.
+      if (!pointerEvent->mEvent->mTarget) {
+        pointerEvent->mEvent->mTarget = mEvent->mTarget;
+      }
+    }
+  }
+  aPointerEvents.AppendElements(mCoalescedEvents);
 }
 
 } // namespace dom

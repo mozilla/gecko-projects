@@ -20,21 +20,15 @@ html|applet:not([height]), html|applet[height=""] {
   height: 200px;
 }
 
-:-moz-type-unsupported .mainBox,
-:-moz-type-unsupported-platform .mainBox,
 :-moz-handler-clicktoplay .mainBox,
 :-moz-handler-vulnerable-updatable .mainBox,
 :-moz-handler-vulnerable-no-update .mainBox,
-:-moz-handler-disabled .mainBox,
 :-moz-handler-blocked .mainBox {
   -moz-user-focus: normal;
 }
-:-moz-type-unsupported .mainBox:focus,
-:-moz-type-unsupported-platform .mainBox:focus,
 :-moz-handler-clicktoplay .mainBox:focus,
 :-moz-handler-vulnerable-updatable .mainBox:focus,
 :-moz-handler-vulnerable-no-update .mainBox:focus,
-:-moz-handler-disabled .mainBox:focus,
 :-moz-handler-blocked .mainBox:focus {
   outline: 1px dotted;
 }
@@ -53,6 +47,11 @@ html|applet:not([height]), html|applet[height=""] {
   word-spacing: initial;
   letter-spacing: initial;
   line-height: initial;
+  visibility: hidden;
+}
+
+.visible {
+  visibility: visible;
 }
 
 /* Initialize the overlay with visibility:hidden to prevent flickering if
@@ -88,17 +87,12 @@ html|applet:not([height]), html|applet[height=""] {
   display: none;
 }
 
-:-moz-type-unsupported .msgUnsupported,
-:-moz-type-unsupported-platform .msgUnsupportedPlatform,
 :-moz-handler-clicktoplay .msgClickToPlay,
 :-moz-handler-vulnerable-updatable .msgVulnerabilityStatus,
 :-moz-handler-vulnerable-updatable .msgCheckForUpdates,
 :-moz-handler-vulnerable-updatable .msgClickToPlay,
 :-moz-handler-vulnerable-no-update .msgVulnerabilityStatus,
 :-moz-handler-vulnerable-no-update .msgClickToPlay,
-:-moz-handler-clicktoplay .msgTapToPlay,
-:-moz-handler-disabled .msgDisabled,
-:-moz-handler-disabled .msgManagePlugins,
 :-moz-handler-blocked .msgBlocked,
 :-moz-handler-crashed .msgCrashed {
   display: block;

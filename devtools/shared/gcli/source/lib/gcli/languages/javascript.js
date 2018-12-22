@@ -42,7 +42,7 @@ exports.items = [
     },
 
     exec: function(input) {
-      return this.evaluate(input).then(function(response) {
+      return this.evaluate(input).then(response => {
         var output = (response.exception != null) ?
                       response.exception.class :
                       response.output;
@@ -54,7 +54,7 @@ exports.items = [
 
         // Place strings in quotes
         if (typeof output === 'string' && response.exception == null) {
-          if (output.indexOf('\'') === -1) {
+          if (!output.includes('\'')) {
             output = '\'' + output + '\'';
           }
           else {
@@ -76,7 +76,7 @@ exports.items = [
 
         var grammar = prism.languages[this.name];
         return prism.highlight(line, grammar, this.name);
-      }.bind(this));
+      });
     },
 
     evaluate: function(input) {

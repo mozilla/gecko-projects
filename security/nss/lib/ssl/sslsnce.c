@@ -1,3 +1,4 @@
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This file implements the SERVER Session ID cache.
  * NOTE:  The contents of this file are NOT used by the client.
  *
@@ -33,10 +34,10 @@
  *     sidCacheSet              sidCacheSets[ numSIDCacheSets ];
  *     sidCacheEntry            sidCacheData[ numSIDCacheEntries];
  *     certCacheEntry           certCacheData[numCertCacheEntries];
- *     SSLWrappedSymWrappingKey keyCacheData[kt_kea_size][SSL_NUM_WRAP_MECHS];
- *     PRUint8                  keyNameSuffix[SESS_TICKET_KEY_VAR_NAME_LEN]
- *     encKeyCacheEntry         ticketEncKey; // Wrapped in non-bypass mode
- *     encKeyCacheEntry         ticketMacKey; // Wrapped in non-bypass mode
+ *     SSLWrappedSymWrappingKey keyCacheData[SSL_NUM_WRAP_KEYS][SSL_NUM_WRAP_MECHS];
+ *     PRUint8                  keyNameSuffix[SELF_ENCRYPT_KEY_VAR_NAME_LEN]
+ *     encKeyCacheEntry         ticketEncKey; // Wrapped
+ *     encKeyCacheEntry         ticketMacKey; // Wrapped
  *     PRBool                   ticketKeysValid;
  *     sidCacheLock             srvNameCacheLock;
  *     srvNameCacheEntry        srvNameData[ numSrvNameCacheEntries ];
@@ -53,13 +54,10 @@
 #include "pk11func.h"
 #include "base64.h"
 #include "keyhi.h"
-#ifdef NO_PKCS11_BYPASS
 #include "blapit.h"
+#include "nss.h" /* for NSS_RegisterShutdown */
 #include "sechash.h"
-#else
-#include "blapi.h"
-#endif
-
+#include "selfencrypt.h"
 #include <stdio.h>
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
@@ -81,57 +79,45 @@
 #endif
 #include <sys/types.h>
 
-#define SET_ERROR_CODE /* reminder */
-
 #include "nspr.h"
 #include "sslmutex.h"
 
 /*
 ** Format of a cache entry in the shared memory.
 */
+PR_STATIC_ASSERT(sizeof(PRTime) == 8);
 struct sidCacheEntryStr {
     /* 16 */ PRIPv6Addr addr; /* client's IP address */
-    /*  4 */ PRUint32 creationTime;
-    /*  4 */ PRUint32 lastAccessTime;
-    /*  4 */ PRUint32 expirationTime;
+    /*  8 */ PRTime creationTime;
+    /*  8 */ PRTime lastAccessTime;
+    /*  8 */ PRTime expirationTime;
     /*  2 */ PRUint16 version;
     /*  1 */ PRUint8 valid;
     /*  1 */ PRUint8 sessionIDLength;
     /* 32 */ PRUint8 sessionID[SSL3_SESSIONID_BYTES];
-    /*  2 */ PRUint16 authAlgorithm;
+    /*  2 */ PRUint16 authType;
     /*  2 */ PRUint16 authKeyBits;
     /*  2 */ PRUint16 keaType;
     /*  2 */ PRUint16 keaKeyBits;
-    /* 72  - common header total */
+    /*  4 */ PRUint32 signatureScheme;
+    /*  4 */ PRUint32 keaGroup;
+    /* 92  - common header total */
 
     union {
         struct {
-            /* 64 */ PRUint8 masterKey[SSL_MAX_MASTER_KEY_BYTES];
-            /* 32 */ PRUint8 cipherArg[SSL_MAX_CYPHER_ARG_BYTES];
+            /*  2 */ ssl3CipherSuite cipherSuite;
+            /* 52 */ ssl3SidKeys keys; /* keys, wrapped as needed. */
 
-            /*  1 */ PRUint8 cipherType;
-            /*  1 */ PRUint8 masterKeyLen;
-            /*  1 */ PRUint8 keyBits;
-            /*  1 */ PRUint8 secretKeyBits;
-            /*  1 */ PRUint8 cipherArgLen;
-/*101 */} ssl2;
-
-struct {
-    /*  2 */ ssl3CipherSuite cipherSuite;
-    /*  2 */ PRUint16 compression; /* SSLCompressionMethod */
-
-    /* 54 */ ssl3SidKeys keys; /* keys, wrapped as needed. */
-
-    /*  4 */ PRUint32 masterWrapMech;
-    /*  4 */ SSL3KEAType exchKeyType;
-    /*  4 */ PRInt32 certIndex;
-    /*  4 */ PRInt32 srvNameIndex;
-    /* 32 */ PRUint8 srvNameHash[SHA256_LENGTH]; /* SHA256 name hash */
-/*108 */} ssl3;
+            /*  4 */ PRUint32 masterWrapMech;
+            /*  4 */ PRInt32 certIndex;
+            /*  4 */ PRInt32 srvNameIndex;
+            /* 32 */ PRUint8 srvNameHash[SHA256_LENGTH]; /* SHA256 name hash */
+            /*  2 */ PRUint16 namedCurve;
+/*100 */} ssl3;
 
 /* force sizeof(sidCacheEntry) to be a multiple of cache line size */
 struct {
-    /*120 */ PRUint8 filler[120]; /* 72+120==192, a multiple of 16 */
+    /*116 */ PRUint8 filler[116]; /* 92+116==208, a multiple of 16 */
 } forceSize;
     } u;
 };
@@ -195,7 +181,6 @@ struct cacheDescStr {
     PRUint32 numSrvNameCacheEntries;
     PRUint32 srvNameCacheSize;
 
-    PRUint32 ssl2Timeout;
     PRUint32 ssl3Timeout;
 
     PRUint32 numSIDCacheLocksInitialized;
@@ -245,10 +230,6 @@ static PRBool isMultiProcess = PR_FALSE;
 
 #define SID_CACHE_ENTRIES_PER_SET 128
 #define SID_ALIGNMENT 16
-
-#define DEF_SSL2_TIMEOUT 100 /* seconds */
-#define MAX_SSL2_TIMEOUT 100 /* seconds */
-#define MIN_SSL2_TIMEOUT 5   /* seconds */
 
 #define DEF_SSL3_TIMEOUT 86400L /* 24 hours */
 #define MAX_SSL3_TIMEOUT 86400L /* 24 hours */
@@ -302,7 +283,7 @@ LockSidCacheLock(sidCacheLock *lock, PRUint32 now)
     if (rv != SECSuccess)
         return 0;
     if (!now)
-        now = ssl_Time();
+        now = ssl_TimeSec();
     lock->timeStamp = now;
     lock->pid = myPid;
     return now;
@@ -318,7 +299,7 @@ UnlockSidCacheLock(sidCacheLock *lock)
     return rv;
 }
 
-/* returns the value of ssl_Time on success, zero on failure. */
+/* returns the value of ssl_TimeSec on success, zero on failure. */
 static PRUint32
 LockSet(cacheDesc *cache, PRUint32 set, PRUint32 now)
 {
@@ -414,12 +395,8 @@ CacheSrvName(cacheDesc *cache, SECItem *name, sidCacheEntry *sce)
     snce.type = name->type;
     snce.nameLen = name->len;
     PORT_Memcpy(snce.name, name->data, snce.nameLen);
-#ifdef NO_PKCS11_BYPASS
     HASH_HashBuf(HASH_AlgSHA256, snce.nameHash, name->data, name->len);
-#else
-    SHA256_HashBuf(snce.nameHash, (unsigned char *)name->data,
-                   name->len);
-#endif
+
     /* get index of the next name */
     ndx = Get32BitNameHash(name);
     /* get lock on cert cache */
@@ -452,65 +429,35 @@ ConvertFromSID(sidCacheEntry *to, sslSessionID *from)
     to->creationTime = from->creationTime;
     to->lastAccessTime = from->lastAccessTime;
     to->expirationTime = from->expirationTime;
-    to->authAlgorithm = from->authAlgorithm;
+    to->authType = from->authType;
     to->authKeyBits = from->authKeyBits;
     to->keaType = from->keaType;
     to->keaKeyBits = from->keaKeyBits;
+    to->keaGroup = from->keaGroup;
+    to->signatureScheme = from->sigScheme;
 
-    if (from->version < SSL_LIBRARY_VERSION_3_0) {
-        if ((from->u.ssl2.masterKey.len > SSL_MAX_MASTER_KEY_BYTES) ||
-            (from->u.ssl2.cipherArg.len > SSL_MAX_CYPHER_ARG_BYTES)) {
-            SSL_DBG(("%d: SSL: masterKeyLen=%d cipherArgLen=%d",
-                     myPid, from->u.ssl2.masterKey.len,
-                     from->u.ssl2.cipherArg.len));
-            to->valid = 0;
-            return;
-        }
-
-        to->u.ssl2.cipherType = from->u.ssl2.cipherType;
-        to->u.ssl2.masterKeyLen = from->u.ssl2.masterKey.len;
-        to->u.ssl2.cipherArgLen = from->u.ssl2.cipherArg.len;
-        to->u.ssl2.keyBits = from->u.ssl2.keyBits;
-        to->u.ssl2.secretKeyBits = from->u.ssl2.secretKeyBits;
-        to->sessionIDLength = SSL2_SESSIONID_BYTES;
-        PORT_Memcpy(to->sessionID, from->u.ssl2.sessionID, SSL2_SESSIONID_BYTES);
-        PORT_Memcpy(to->u.ssl2.masterKey, from->u.ssl2.masterKey.data,
-                    from->u.ssl2.masterKey.len);
-        PORT_Memcpy(to->u.ssl2.cipherArg, from->u.ssl2.cipherArg.data,
-                    from->u.ssl2.cipherArg.len);
-#ifdef DEBUG
-        PORT_Memset(to->u.ssl2.masterKey + from->u.ssl2.masterKey.len, 0,
-                    sizeof(to->u.ssl2.masterKey) - from->u.ssl2.masterKey.len);
-        PORT_Memset(to->u.ssl2.cipherArg + from->u.ssl2.cipherArg.len, 0,
-                    sizeof(to->u.ssl2.cipherArg) - from->u.ssl2.cipherArg.len);
-#endif
-        SSL_TRC(8, ("%d: SSL: ConvertSID: masterKeyLen=%d cipherArgLen=%d "
-                    "time=%d addr=0x%08x%08x%08x%08x cipherType=%d",
-                    myPid,
-                    to->u.ssl2.masterKeyLen, to->u.ssl2.cipherArgLen,
-                    to->creationTime, to->addr.pr_s6_addr32[0],
-                    to->addr.pr_s6_addr32[1], to->addr.pr_s6_addr32[2],
-                    to->addr.pr_s6_addr32[3], to->u.ssl2.cipherType));
-    } else {
-        /* This is an SSL v3 session */
-
-        to->u.ssl3.cipherSuite = from->u.ssl3.cipherSuite;
-        to->u.ssl3.compression = (PRUint16)from->u.ssl3.compression;
-        to->u.ssl3.keys = from->u.ssl3.keys;
-        to->u.ssl3.masterWrapMech = from->u.ssl3.masterWrapMech;
-        to->u.ssl3.exchKeyType = from->u.ssl3.exchKeyType;
-        to->sessionIDLength = from->u.ssl3.sessionIDLength;
-        to->u.ssl3.certIndex = -1;
-        to->u.ssl3.srvNameIndex = -1;
-        PORT_Memcpy(to->sessionID, from->u.ssl3.sessionID,
-                    to->sessionIDLength);
-
-        SSL_TRC(8, ("%d: SSL3: ConvertSID: time=%d addr=0x%08x%08x%08x%08x "
-                    "cipherSuite=%d",
-                    myPid, to->creationTime, to->addr.pr_s6_addr32[0],
-                    to->addr.pr_s6_addr32[1], to->addr.pr_s6_addr32[2],
-                    to->addr.pr_s6_addr32[3], to->u.ssl3.cipherSuite));
+    to->u.ssl3.cipherSuite = from->u.ssl3.cipherSuite;
+    to->u.ssl3.keys = from->u.ssl3.keys;
+    to->u.ssl3.masterWrapMech = from->u.ssl3.masterWrapMech;
+    to->sessionIDLength = from->u.ssl3.sessionIDLength;
+    to->u.ssl3.certIndex = -1;
+    to->u.ssl3.srvNameIndex = -1;
+    PORT_Memcpy(to->sessionID, from->u.ssl3.sessionID,
+                to->sessionIDLength);
+    to->u.ssl3.namedCurve = 0U;
+    if (from->authType == ssl_auth_ecdsa ||
+        from->authType == ssl_auth_ecdh_rsa ||
+        from->authType == ssl_auth_ecdh_ecdsa) {
+        PORT_Assert(from->namedCurve);
+        to->u.ssl3.namedCurve = (PRUint16)from->namedCurve->name;
     }
+
+    SSL_TRC(8, ("%d: SSL3: ConvertSID: time=%d addr=0x%08x%08x%08x%08x "
+                "cipherSuite=%d",
+                myPid, to->creationTime / PR_USEC_PER_SEC,
+                to->addr.pr_s6_addr32[0], to->addr.pr_s6_addr32[1],
+                to->addr.pr_s6_addr32[2], to->addr.pr_s6_addr32[3],
+                to->u.ssl3.cipherSuite));
 }
 
 /*
@@ -524,100 +471,59 @@ ConvertToSID(sidCacheEntry *from,
              CERTCertDBHandle *dbHandle)
 {
     sslSessionID *to;
-    PRUint16 version = from->version;
 
     to = PORT_ZNew(sslSessionID);
     if (!to) {
         return 0;
     }
 
-    if (version < SSL_LIBRARY_VERSION_3_0) {
-        /* This is an SSL v2 session */
-        to->u.ssl2.masterKey.data =
-            (unsigned char *)PORT_Alloc(from->u.ssl2.masterKeyLen);
-        if (!to->u.ssl2.masterKey.data) {
+    to->u.ssl3.sessionIDLength = from->sessionIDLength;
+    to->u.ssl3.cipherSuite = from->u.ssl3.cipherSuite;
+    to->u.ssl3.keys = from->u.ssl3.keys;
+    to->u.ssl3.masterWrapMech = from->u.ssl3.masterWrapMech;
+    if (from->u.ssl3.srvNameIndex != -1 && psnce) {
+        SECItem name;
+        SECStatus rv;
+        name.type = psnce->type;
+        name.len = psnce->nameLen;
+        name.data = psnce->name;
+        rv = SECITEM_CopyItem(NULL, &to->u.ssl3.srvName, &name);
+        if (rv != SECSuccess) {
             goto loser;
         }
-        if (from->u.ssl2.cipherArgLen) {
-            to->u.ssl2.cipherArg.data =
-                (unsigned char *)PORT_Alloc(from->u.ssl2.cipherArgLen);
-            if (!to->u.ssl2.cipherArg.data) {
-                goto loser;
-            }
-            PORT_Memcpy(to->u.ssl2.cipherArg.data, from->u.ssl2.cipherArg,
-                        from->u.ssl2.cipherArgLen);
-        }
+    }
 
-        to->u.ssl2.cipherType = from->u.ssl2.cipherType;
-        to->u.ssl2.masterKey.len = from->u.ssl2.masterKeyLen;
-        to->u.ssl2.cipherArg.len = from->u.ssl2.cipherArgLen;
-        to->u.ssl2.keyBits = from->u.ssl2.keyBits;
-        to->u.ssl2.secretKeyBits = from->u.ssl2.secretKeyBits;
-        /*  to->sessionIDLength      = SSL2_SESSIONID_BYTES; */
-        PORT_Memcpy(to->u.ssl2.sessionID, from->sessionID, SSL2_SESSIONID_BYTES);
-        PORT_Memcpy(to->u.ssl2.masterKey.data, from->u.ssl2.masterKey,
-                    from->u.ssl2.masterKeyLen);
+    PORT_Memcpy(to->u.ssl3.sessionID, from->sessionID, from->sessionIDLength);
 
-        SSL_TRC(8, ("%d: SSL: ConvertToSID: masterKeyLen=%d cipherArgLen=%d "
-                    "time=%d addr=0x%08x%08x%08x%08x cipherType=%d",
-                    myPid, to->u.ssl2.masterKey.len,
-                    to->u.ssl2.cipherArg.len, to->creationTime,
-                    to->addr.pr_s6_addr32[0], to->addr.pr_s6_addr32[1],
-                    to->addr.pr_s6_addr32[2], to->addr.pr_s6_addr32[3],
-                    to->u.ssl2.cipherType));
-    } else {
-        /* This is an SSL v3 session */
+    to->urlSvrName = NULL;
 
-        to->u.ssl3.sessionIDLength = from->sessionIDLength;
-        to->u.ssl3.cipherSuite = from->u.ssl3.cipherSuite;
-        to->u.ssl3.compression = (SSLCompressionMethod)from->u.ssl3.compression;
-        to->u.ssl3.keys = from->u.ssl3.keys;
-        to->u.ssl3.masterWrapMech = from->u.ssl3.masterWrapMech;
-        to->u.ssl3.exchKeyType = from->u.ssl3.exchKeyType;
-        if (from->u.ssl3.srvNameIndex != -1 && psnce) {
-            SECItem name;
-            SECStatus rv;
-            name.type = psnce->type;
-            name.len = psnce->nameLen;
-            name.data = psnce->name;
-            rv = SECITEM_CopyItem(NULL, &to->u.ssl3.srvName, &name);
-            if (rv != SECSuccess) {
-                goto loser;
-            }
-        }
+    to->u.ssl3.masterModuleID = (SECMODModuleID)-1; /* invalid value */
+    to->u.ssl3.masterSlotID = (CK_SLOT_ID)-1;       /* invalid value */
+    to->u.ssl3.masterWrapIndex = 0;
+    to->u.ssl3.masterWrapSeries = 0;
+    to->u.ssl3.masterValid = PR_FALSE;
 
-        PORT_Memcpy(to->u.ssl3.sessionID, from->sessionID, from->sessionIDLength);
+    to->u.ssl3.clAuthModuleID = (SECMODModuleID)-1; /* invalid value */
+    to->u.ssl3.clAuthSlotID = (CK_SLOT_ID)-1;       /* invalid value */
+    to->u.ssl3.clAuthSeries = 0;
+    to->u.ssl3.clAuthValid = PR_FALSE;
 
-        /* the portions of the SID that are only restored on the client
-         * are set to invalid values on the server.
-         */
-        to->u.ssl3.clientWriteKey = NULL;
-        to->u.ssl3.serverWriteKey = NULL;
+    if (from->u.ssl3.certIndex != -1 && pcce) {
+        SECItem derCert;
 
-        to->urlSvrName = NULL;
+        derCert.len = pcce->certLength;
+        derCert.data = pcce->cert;
 
-        to->u.ssl3.masterModuleID = (SECMODModuleID)-1; /* invalid value */
-        to->u.ssl3.masterSlotID = (CK_SLOT_ID)-1;       /* invalid value */
-        to->u.ssl3.masterWrapIndex = 0;
-        to->u.ssl3.masterWrapSeries = 0;
-        to->u.ssl3.masterValid = PR_FALSE;
-
-        to->u.ssl3.clAuthModuleID = (SECMODModuleID)-1; /* invalid value */
-        to->u.ssl3.clAuthSlotID = (CK_SLOT_ID)-1;       /* invalid value */
-        to->u.ssl3.clAuthSeries = 0;
-        to->u.ssl3.clAuthValid = PR_FALSE;
-
-        if (from->u.ssl3.certIndex != -1 && pcce) {
-            SECItem derCert;
-
-            derCert.len = pcce->certLength;
-            derCert.data = pcce->cert;
-
-            to->peerCert = CERT_NewTempCertificate(dbHandle, &derCert, NULL,
-                                                   PR_FALSE, PR_TRUE);
-            if (to->peerCert == NULL)
-                goto loser;
-        }
+        to->peerCert = CERT_NewTempCertificate(dbHandle, &derCert, NULL,
+                                               PR_FALSE, PR_TRUE);
+        if (to->peerCert == NULL)
+            goto loser;
+    }
+    if (from->authType == ssl_auth_ecdsa ||
+        from->authType == ssl_auth_ecdh_rsa ||
+        from->authType == ssl_auth_ecdh_ecdsa) {
+        to->namedCurve =
+            ssl_LookupNamedGroup((SSLNamedGroup)from->u.ssl3.namedCurve);
     }
 
     to->version = from->version;
@@ -627,23 +533,18 @@ ConvertToSID(sidCacheEntry *from,
     to->cached = in_server_cache;
     to->addr = from->addr;
     to->references = 1;
-    to->authAlgorithm = from->authAlgorithm;
+    to->authType = from->authType;
     to->authKeyBits = from->authKeyBits;
     to->keaType = from->keaType;
     to->keaKeyBits = from->keaKeyBits;
+    to->keaGroup = from->keaGroup;
+    to->sigScheme = from->signatureScheme;
 
     return to;
 
 loser:
     if (to) {
-        if (version < SSL_LIBRARY_VERSION_3_0) {
-            if (to->u.ssl2.masterKey.data)
-                PORT_Free(to->u.ssl2.masterKey.data);
-            if (to->u.ssl2.cipherArg.data)
-                PORT_Free(to->u.ssl2.cipherArg.data);
-        } else {
-            SECITEM_FreeItem(&to->u.ssl3.srvName, PR_FALSE);
-        }
+        SECITEM_FreeItem(&to->u.ssl3.srvName, PR_FALSE);
         PORT_Free(to);
     }
     return NULL;
@@ -755,62 +656,59 @@ ServerSessionIDLookup(const PRIPv6Addr *addr,
 
     psce = FindSID(cache, set, now, addr, sessionID, sessionIDLength);
     if (psce) {
-        if (psce->version >= SSL_LIBRARY_VERSION_3_0) {
-            if ((cndx = psce->u.ssl3.certIndex) != -1) {
+        if ((cndx = psce->u.ssl3.certIndex) != -1) {
+            PRUint32 gotLock = LockSidCacheLock(cache->certCacheLock, now);
+            if (gotLock) {
+                pcce = &cache->certCacheData[cndx];
 
-                PRUint32 gotLock = LockSidCacheLock(cache->certCacheLock, now);
-                if (gotLock) {
-                    pcce = &cache->certCacheData[cndx];
-
-                    /* See if the cert's session ID matches the sce cache. */
-                    if ((pcce->sessionIDLength == psce->sessionIDLength) &&
-                        !PORT_Memcmp(pcce->sessionID, psce->sessionID,
-                                     pcce->sessionIDLength)) {
-                        cce = *pcce;
-                    } else {
-                        /* The cert doesen't match the SID cache entry,
-                        ** so invalidate the SID cache entry.
-                        */
-                        psce->valid = 0;
-                        psce = 0;
-                        pcce = 0;
-                    }
-                    UnlockSidCacheLock(cache->certCacheLock);
+                /* See if the cert's session ID matches the sce cache. */
+                if ((pcce->sessionIDLength == psce->sessionIDLength) &&
+                    !PORT_Memcmp(pcce->sessionID, psce->sessionID,
+                                 pcce->sessionIDLength)) {
+                    cce = *pcce;
                 } else {
-                    /* what the ??.  Didn't get the cert cache lock.
-                    ** Don't invalidate the SID cache entry, but don't find it.
+                    /* The cert doesen't match the SID cache entry,
+                    ** so invalidate the SID cache entry.
                     */
-                    PORT_Assert(!("Didn't get cert Cache Lock!"));
+                    psce->valid = 0;
                     psce = 0;
                     pcce = 0;
                 }
+                UnlockSidCacheLock(cache->certCacheLock);
+            } else {
+                /* what the ??.  Didn't get the cert cache lock.
+                ** Don't invalidate the SID cache entry, but don't find it.
+                */
+                PORT_Assert(!("Didn't get cert Cache Lock!"));
+                psce = 0;
+                pcce = 0;
             }
-            if (psce && ((cndx = psce->u.ssl3.srvNameIndex) != -1)) {
-                PRUint32 gotLock = LockSidCacheLock(cache->srvNameCacheLock,
-                                                    now);
-                if (gotLock) {
-                    psnce = &cache->srvNameCacheData[cndx];
+        }
+        if (psce && ((cndx = psce->u.ssl3.srvNameIndex) != -1)) {
+            PRUint32 gotLock = LockSidCacheLock(cache->srvNameCacheLock,
+                                                now);
+            if (gotLock) {
+                psnce = &cache->srvNameCacheData[cndx];
 
-                    if (!PORT_Memcmp(psnce->nameHash, psce->u.ssl3.srvNameHash,
-                                     SHA256_LENGTH)) {
-                        snce = *psnce;
-                    } else {
-                        /* The name doesen't match the SID cache entry,
-                        ** so invalidate the SID cache entry.
-                        */
-                        psce->valid = 0;
-                        psce = 0;
-                        psnce = 0;
-                    }
-                    UnlockSidCacheLock(cache->srvNameCacheLock);
+                if (!PORT_Memcmp(psnce->nameHash, psce->u.ssl3.srvNameHash,
+                                 SHA256_LENGTH)) {
+                    snce = *psnce;
                 } else {
-                    /* what the ??.  Didn't get the cert cache lock.
-                    ** Don't invalidate the SID cache entry, but don't find it.
+                    /* The name doesen't match the SID cache entry,
+                    ** so invalidate the SID cache entry.
                     */
-                    PORT_Assert(!("Didn't get name Cache Lock!"));
+                    psce->valid = 0;
                     psce = 0;
                     psnce = 0;
                 }
+                UnlockSidCacheLock(cache->srvNameCacheLock);
+            } else {
+                /* what the ??.  Didn't get the cert cache lock.
+                ** Don't invalidate the SID cache entry, but don't find it.
+                */
+                PORT_Assert(!("Didn't get name Cache Lock!"));
+                psce = 0;
+                psnce = 0;
             }
         }
         if (psce) {
@@ -831,67 +729,49 @@ ServerSessionIDLookup(const PRIPv6Addr *addr,
 /*
 ** Place a sid into the cache, if it isn't already there.
 */
-static void
-ServerSessionIDCache(sslSessionID *sid)
+void
+ssl_ServerCacheSessionID(sslSessionID *sid)
 {
+    PORT_Assert(sid);
+
     sidCacheEntry sce;
     PRUint32 now = 0;
-    PRUint16 version = sid->version;
     cacheDesc *cache = &globalCache;
 
-    if ((version >= SSL_LIBRARY_VERSION_3_0) &&
-        (sid->u.ssl3.sessionIDLength == 0)) {
+    if (sid->u.ssl3.sessionIDLength == 0) {
         return;
     }
 
     if (sid->cached == never_cached || sid->cached == invalid_cache) {
         PRUint32 set;
+        SECItem *name;
 
         PORT_Assert(sid->creationTime != 0);
         if (!sid->creationTime)
-            sid->lastAccessTime = sid->creationTime = ssl_Time();
-        if (version < SSL_LIBRARY_VERSION_3_0) {
-            /* override caller's expiration time, which uses client timeout
-             * duration, not server timeout duration.
-             */
-            sid->expirationTime = sid->creationTime + cache->ssl2Timeout;
-            SSL_TRC(8, ("%d: SSL: CacheMT: cached=%d addr=0x%08x%08x%08x%08x time=%x "
-                        "cipher=%d",
-                        myPid, sid->cached,
-                        sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
-                        sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
-                        sid->creationTime, sid->u.ssl2.cipherType));
-            PRINT_BUF(8, (0, "sessionID:", sid->u.ssl2.sessionID,
-                          SSL2_SESSIONID_BYTES));
-            PRINT_BUF(8, (0, "masterKey:", sid->u.ssl2.masterKey.data,
-                          sid->u.ssl2.masterKey.len));
-            PRINT_BUF(8, (0, "cipherArg:", sid->u.ssl2.cipherArg.data,
-                          sid->u.ssl2.cipherArg.len));
-        } else {
-            /* override caller's expiration time, which uses client timeout
-             * duration, not server timeout duration.
-             */
-            sid->expirationTime = sid->creationTime + cache->ssl3Timeout;
-            SSL_TRC(8, ("%d: SSL: CacheMT: cached=%d addr=0x%08x%08x%08x%08x time=%x "
-                        "cipherSuite=%d",
-                        myPid, sid->cached,
-                        sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
-                        sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
-                        sid->creationTime, sid->u.ssl3.cipherSuite));
-            PRINT_BUF(8, (0, "sessionID:", sid->u.ssl3.sessionID,
-                          sid->u.ssl3.sessionIDLength));
-        }
+            sid->lastAccessTime = sid->creationTime = ssl_TimeUsec();
+        /* override caller's expiration time, which uses client timeout
+         * duration, not server timeout duration.
+         */
+        sid->expirationTime =
+            sid->creationTime + cache->ssl3Timeout * PR_USEC_PER_SEC;
+        SSL_TRC(8, ("%d: SSL: CacheMT: cached=%d addr=0x%08x%08x%08x%08x time=%x "
+                    "cipherSuite=%d",
+                    myPid, sid->cached,
+                    sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
+                    sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
+                    sid->creationTime / PR_USEC_PER_SEC,
+                    sid->u.ssl3.cipherSuite));
+        PRINT_BUF(8, (0, "sessionID:", sid->u.ssl3.sessionID,
+                      sid->u.ssl3.sessionIDLength));
 
         ConvertFromSID(&sce, sid);
 
-        if (version >= SSL_LIBRARY_VERSION_3_0) {
-            SECItem *name = &sid->u.ssl3.srvName;
-            if (name->len && name->data) {
-                now = CacheSrvName(cache, name, &sce);
-            }
-            if (sid->peerCert != NULL) {
-                now = CacheCert(cache, sid->peerCert, &sce);
-            }
+        name = &sid->u.ssl3.srvName;
+        if (name->len && name->data) {
+            now = CacheSrvName(cache, name, &sce);
+        }
+        if (sid->peerCert != NULL) {
+            now = CacheCert(cache, sid->peerCert, &sce);
         }
 
         set = SIDindex(cache, &sce.addr, sce.sessionID, sce.sessionIDLength);
@@ -916,8 +796,8 @@ ServerSessionIDCache(sslSessionID *sid)
 ** Although this is static, it is called from ssl via global function pointer
 **  ssl_sid_uncache.  This invalidates the referenced cache entry.
 */
-static void
-ServerSessionIDUncache(sslSessionID *sid)
+void
+ssl_ServerUncacheSessionID(sslSessionID *sid)
 {
     cacheDesc *cache = &globalCache;
     PRUint8 *sessionID;
@@ -935,31 +815,16 @@ ServerSessionIDUncache(sslSessionID *sid)
     */
     err = PR_GetError();
 
-    if (sid->version < SSL_LIBRARY_VERSION_3_0) {
-        sessionID = sid->u.ssl2.sessionID;
-        sessionIDLength = SSL2_SESSIONID_BYTES;
-        SSL_TRC(8, ("%d: SSL: UncacheMT: valid=%d addr=0x%08x%08x%08x%08x time=%x "
-                    "cipher=%d",
-                    myPid, sid->cached,
-                    sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
-                    sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
-                    sid->creationTime, sid->u.ssl2.cipherType));
-        PRINT_BUF(8, (0, "sessionID:", sessionID, sessionIDLength));
-        PRINT_BUF(8, (0, "masterKey:", sid->u.ssl2.masterKey.data,
-                      sid->u.ssl2.masterKey.len));
-        PRINT_BUF(8, (0, "cipherArg:", sid->u.ssl2.cipherArg.data,
-                      sid->u.ssl2.cipherArg.len));
-    } else {
-        sessionID = sid->u.ssl3.sessionID;
-        sessionIDLength = sid->u.ssl3.sessionIDLength;
-        SSL_TRC(8, ("%d: SSL3: UncacheMT: valid=%d addr=0x%08x%08x%08x%08x time=%x "
-                    "cipherSuite=%d",
-                    myPid, sid->cached,
-                    sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
-                    sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
-                    sid->creationTime, sid->u.ssl3.cipherSuite));
-        PRINT_BUF(8, (0, "sessionID:", sessionID, sessionIDLength));
-    }
+    sessionID = sid->u.ssl3.sessionID;
+    sessionIDLength = sid->u.ssl3.sessionIDLength;
+    SSL_TRC(8, ("%d: SSL3: UncacheMT: valid=%d addr=0x%08x%08x%08x%08x time=%x "
+                "cipherSuite=%d",
+                myPid, sid->cached,
+                sid->addr.pr_s6_addr32[0], sid->addr.pr_s6_addr32[1],
+                sid->addr.pr_s6_addr32[2], sid->addr.pr_s6_addr32[3],
+                sid->creationTime / PR_USEC_PER_SEC,
+                sid->u.ssl3.cipherSuite));
+    PRINT_BUF(8, (0, "sessionID:", sessionID, sessionIDLength));
     set = SIDindex(cache, &sid->addr, sessionID, sessionIDLength);
     now = LockSet(cache, set, 0);
     if (now) {
@@ -1022,8 +887,8 @@ CloseCache(cacheDesc *cache)
 
 static SECStatus
 InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
-          int maxSrvNameCacheEntries, PRUint32 ssl2_timeout,
-          PRUint32 ssl3_timeout, const char *directory, PRBool shared)
+          int maxSrvNameCacheEntries, PRUint32 ssl3_timeout,
+          const char *directory, PRBool shared)
 {
     ptrdiff_t ptr;
     sidCacheLock *pLock;
@@ -1113,7 +978,7 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
     cache->certCacheSize =
         (char *)cache->keyCacheData - (char *)cache->certCacheData;
 
-    cache->numKeyCacheEntries = kt_kea_size * SSL_NUM_WRAP_MECHS;
+    cache->numKeyCacheEntries = SSL_NUM_WRAP_KEYS * SSL_NUM_WRAP_MECHS;
     ptr = (ptrdiff_t)(cache->keyCacheData + cache->numKeyCacheEntries);
     ptr = SID_ROUNDUP(ptr, SID_ALIGNMENT);
 
@@ -1121,7 +986,7 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
 
     cache->ticketKeyNameSuffix = (PRUint8 *)ptr;
     ptr = (ptrdiff_t)(cache->ticketKeyNameSuffix +
-                      SESS_TICKET_KEY_VAR_NAME_LEN);
+                      SELF_ENCRYPT_KEY_VAR_NAME_LEN);
     ptr = SID_ROUNDUP(ptr, SID_ALIGNMENT);
 
     cache->ticketEncKey = (encKeyCacheEntry *)ptr;
@@ -1144,18 +1009,6 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
 
     cache->cacheMemSize = ptr;
 
-    if (ssl2_timeout) {
-        if (ssl2_timeout > MAX_SSL2_TIMEOUT) {
-            ssl2_timeout = MAX_SSL2_TIMEOUT;
-        }
-        if (ssl2_timeout < MIN_SSL2_TIMEOUT) {
-            ssl2_timeout = MIN_SSL2_TIMEOUT;
-        }
-        cache->ssl2Timeout = ssl2_timeout;
-    } else {
-        cache->ssl2Timeout = DEF_SSL2_TIMEOUT;
-    }
-
     if (ssl3_timeout) {
         if (ssl3_timeout > MAX_SSL3_TIMEOUT) {
             ssl3_timeout = MAX_SSL3_TIMEOUT;
@@ -1169,7 +1022,7 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
     }
 
     if (shared) {
-    /* Create file names */
+/* Create file names */
 #if defined(XP_UNIX) || defined(XP_BEOS)
         /* there's some confusion here about whether PR_OpenAnonFileMap wants
         ** a directory name or a file name for its first argument.
@@ -1236,7 +1089,7 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
     cache->srvNameCacheData = (srvNameCacheEntry *)(cache->cacheMem + (ptrdiff_t)cache->srvNameCacheData);
 
     /* initialize the locks */
-    init_time = ssl_Time();
+    init_time = ssl_TimeSec();
     pLock = cache->sidCacheLocks;
     for (locks_to_initialize = cache->numSIDCacheLocks + 3;
          locks_initialized < locks_to_initialize;
@@ -1256,6 +1109,7 @@ InitCache(cacheDesc *cache, int maxCacheEntries, int maxCertCacheEntries,
 
 loser:
     CloseCache(cache);
+    PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
     return SECFailure;
 }
 
@@ -1283,9 +1137,12 @@ SSL_SetMaxServerCacheLocks(PRUint32 maxLocks)
     return SECSuccess;
 }
 
+PR_STATIC_ASSERT(sizeof(sidCacheEntry) % 16 == 0);
+PR_STATIC_ASSERT(sizeof(certCacheEntry) == 4096);
+PR_STATIC_ASSERT(sizeof(srvNameCacheEntry) == 1072);
+
 static SECStatus
 ssl_ConfigServerSessionIDCacheInstanceWithOpt(cacheDesc *cache,
-                                              PRUint32 ssl2_timeout,
                                               PRUint32 ssl3_timeout,
                                               const char *directory,
                                               PRBool shared,
@@ -1294,10 +1151,6 @@ ssl_ConfigServerSessionIDCacheInstanceWithOpt(cacheDesc *cache,
                                               int maxSrvNameCacheEntries)
 {
     SECStatus rv;
-
-    PORT_Assert(sizeof(sidCacheEntry) == 192);
-    PORT_Assert(sizeof(certCacheEntry) == 4096);
-    PORT_Assert(sizeof(srvNameCacheEntry) == 1072);
 
     rv = ssl_Init();
     if (rv != SECSuccess) {
@@ -1309,16 +1162,12 @@ ssl_ConfigServerSessionIDCacheInstanceWithOpt(cacheDesc *cache,
         directory = DEFAULT_CACHE_DIRECTORY;
     }
     rv = InitCache(cache, maxCacheEntries, maxCertCacheEntries,
-                   maxSrvNameCacheEntries, ssl2_timeout, ssl3_timeout,
-                   directory, shared);
+                   maxSrvNameCacheEntries, ssl3_timeout, directory, shared);
     if (rv) {
-        SET_ERROR_CODE
         return SECFailure;
     }
 
     ssl_sid_lookup = ServerSessionIDLookup;
-    ssl_sid_cache = ServerSessionIDCache;
-    ssl_sid_uncache = ServerSessionIDUncache;
     return SECSuccess;
 }
 
@@ -1330,7 +1179,6 @@ SSL_ConfigServerSessionIDCacheInstance(cacheDesc *cache,
                                        const char *directory, PRBool shared)
 {
     return ssl_ConfigServerSessionIDCacheInstanceWithOpt(cache,
-                                                         ssl2_timeout,
                                                          ssl3_timeout,
                                                          directory,
                                                          shared,
@@ -1371,8 +1219,7 @@ SSL_ShutdownServerSessionIDCache(void)
  * if the cache will be shared by multiple processes.
  */
 static SECStatus
-ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl2_timeout,
-                                  PRUint32 ssl3_timeout,
+ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl3_timeout,
                                   const char *directory,
                                   int maxCacheEntries,
                                   int maxCertCacheEntries,
@@ -1390,7 +1237,7 @@ ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl2_timeout,
 
     isMultiProcess = PR_TRUE;
     result = ssl_ConfigServerSessionIDCacheInstanceWithOpt(cache,
-                                                           ssl2_timeout, ssl3_timeout, directory, PR_TRUE,
+                                                           ssl3_timeout, directory, PR_TRUE,
                                                            maxCacheEntries, maxCacheEntries, maxSrvNameCacheEntries);
     if (result != SECSuccess)
         return result;
@@ -1398,7 +1245,7 @@ ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl2_timeout,
     prStatus = PR_ExportFileMapAsString(cache->cacheMemMap,
                                         sizeof fmString, fmString);
     if ((prStatus != PR_SUCCESS) || !(fmStrLen = strlen(fmString))) {
-        SET_ERROR_CODE
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
         return SECFailure;
     }
 
@@ -1407,12 +1254,12 @@ ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl2_timeout,
 
     inhValue = BTOA_DataToAscii((unsigned char *)&inherit, sizeof inherit);
     if (!inhValue || !strlen(inhValue)) {
-        SET_ERROR_CODE
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
         return SECFailure;
     }
     envValue = PR_smprintf("%s,%s", inhValue, fmString);
     if (!envValue || !strlen(envValue)) {
-        SET_ERROR_CODE
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
         return SECFailure;
     }
     PORT_Free(inhValue);
@@ -1420,7 +1267,7 @@ ssl_ConfigMPServerSIDCacheWithOpt(PRUint32 ssl2_timeout,
     putEnvFailed = (SECStatus)NSS_PutEnv(envVarName, envValue);
     PR_smprintf_free(envValue);
     if (putEnvFailed) {
-        SET_ERROR_CODE
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
         result = SECFailure;
     }
 
@@ -1440,8 +1287,7 @@ SSL_ConfigMPServerSIDCache(int maxCacheEntries,
                            PRUint32 ssl3_timeout,
                            const char *directory)
 {
-    return ssl_ConfigMPServerSIDCacheWithOpt(ssl2_timeout,
-                                             ssl3_timeout,
+    return ssl_ConfigMPServerSIDCacheWithOpt(ssl3_timeout,
                                              directory,
                                              maxCacheEntries,
                                              -1, -1);
@@ -1460,12 +1306,11 @@ SSL_ConfigServerSessionIDCacheWithOpt(
     if (!enableMPCache) {
         ssl_InitSessionCacheLocks(PR_FALSE);
         return ssl_ConfigServerSessionIDCacheInstanceWithOpt(&globalCache,
-                                                             ssl2_timeout, ssl3_timeout, directory, PR_FALSE,
+                                                             ssl3_timeout, directory, PR_FALSE,
                                                              maxCacheEntries, maxCertCacheEntries, maxSrvNameCacheEntries);
     } else {
-        return ssl_ConfigMPServerSIDCacheWithOpt(ssl2_timeout, ssl3_timeout,
-                                                 directory, maxCacheEntries, maxCertCacheEntries,
-                                                 maxSrvNameCacheEntries);
+        return ssl_ConfigMPServerSIDCacheWithOpt(ssl3_timeout, directory,
+                                                 maxCacheEntries, maxCertCacheEntries, maxSrvNameCacheEntries);
     }
 }
 
@@ -1505,13 +1350,11 @@ SSL_InheritMPServerSIDCacheInstance(cacheDesc *cache, const char *envString)
     ssl_InitSessionCacheLocks(PR_FALSE);
 
     ssl_sid_lookup = ServerSessionIDLookup;
-    ssl_sid_cache = ServerSessionIDCache;
-    ssl_sid_uncache = ServerSessionIDUncache;
 
     if (!envString) {
         envString = PR_GetEnvSecure(envVarName);
         if (!envString) {
-            SET_ERROR_CODE
+            PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
             return SECFailure;
         }
     }
@@ -1525,11 +1368,9 @@ SSL_InheritMPServerSIDCacheInstance(cacheDesc *cache, const char *envString)
 
     decoString = ATOB_AsciiToData(myEnvString, &decoLen);
     if (!decoString) {
-        SET_ERROR_CODE
         goto loser;
     }
     if (decoLen != sizeof inherit) {
-        SET_ERROR_CODE
         goto loser;
     }
 
@@ -1554,7 +1395,6 @@ SSL_InheritMPServerSIDCacheInstance(cacheDesc *cache, const char *envString)
     cache->sharedCache = (cacheDesc *)cache->cacheMem;
 
     if (cache->sharedCache->cacheMemSize != cache->cacheMemSize) {
-        SET_ERROR_CODE
         goto loser;
     }
 
@@ -1645,6 +1485,7 @@ loser:
     if (decoString)
         PORT_Free(decoString);
     CloseCache(cache);
+    PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
     return SECFailure;
 }
 
@@ -1677,7 +1518,7 @@ LockPoller(void *arg)
         if (sharedCache->stopPolling)
             break;
 
-        now = ssl_Time();
+        now = ssl_TimeSec();
         then = now - expiration;
         for (pLock = cache->sidCacheLocks, locks_polled = 0;
              locks_to_poll > locks_polled && !sharedCache->stopPolling;
@@ -1758,36 +1599,260 @@ StopLockPoller(cacheDesc *cache)
  *  Code dealing with shared wrapped symmetric wrapping keys below      *
  ************************************************************************/
 
-/* If now is zero, it implies that the lock is not held, and must be
-** aquired here.
-*/
+/* The asymmetric key we use for wrapping the self-encryption keys. This is a
+ * global structure that can be initialized without a socket. Access is
+ * synchronized on the reader-writer lock. This is setup either by calling
+ * SSL_SetSessionTicketKeyPair() or by configuring a certificate of the
+ * ssl_auth_rsa_decrypt type. */
+static struct {
+    PRCallOnceType setup;
+    PRRWLock *lock;
+    SECKEYPublicKey *pubKey;
+    SECKEYPrivateKey *privKey;
+    PRBool configured;
+} ssl_self_encrypt_key_pair;
+
+/* The symmetric self-encryption keys. This requires a socket to construct
+ * and requires that the global structure be initialized before use.
+ */
+static sslSelfEncryptKeys ssl_self_encrypt_keys;
+
+/* Externalize the self encrypt keys. Purely used for testing. */
+sslSelfEncryptKeys *
+ssl_GetSelfEncryptKeysInt()
+{
+    return &ssl_self_encrypt_keys;
+}
+
+static void
+ssl_CleanupSelfEncryptKeyPair()
+{
+    if (ssl_self_encrypt_key_pair.pubKey) {
+        PORT_Assert(ssl_self_encrypt_key_pair.privKey);
+        SECKEY_DestroyPublicKey(ssl_self_encrypt_key_pair.pubKey);
+        SECKEY_DestroyPrivateKey(ssl_self_encrypt_key_pair.privKey);
+    }
+}
+
+void
+ssl_ResetSelfEncryptKeys()
+{
+    if (ssl_self_encrypt_keys.encKey) {
+        PORT_Assert(ssl_self_encrypt_keys.macKey);
+        PK11_FreeSymKey(ssl_self_encrypt_keys.encKey);
+        PK11_FreeSymKey(ssl_self_encrypt_keys.macKey);
+    }
+    PORT_Memset(&ssl_self_encrypt_keys, 0,
+                sizeof(ssl_self_encrypt_keys));
+}
+
+static SECStatus
+ssl_SelfEncryptShutdown(void *appData, void *nssData)
+{
+    ssl_CleanupSelfEncryptKeyPair();
+    PR_DestroyRWLock(ssl_self_encrypt_key_pair.lock);
+    PORT_Memset(&ssl_self_encrypt_key_pair, 0,
+                sizeof(ssl_self_encrypt_key_pair));
+
+    ssl_ResetSelfEncryptKeys();
+    return SECSuccess;
+}
+
+static PRStatus
+ssl_SelfEncryptSetup(void)
+{
+    SECStatus rv = NSS_RegisterShutdown(ssl_SelfEncryptShutdown, NULL);
+    if (rv != SECSuccess) {
+        return PR_FAILURE;
+    }
+    ssl_self_encrypt_key_pair.lock = PR_NewRWLock(PR_RWLOCK_RANK_NONE, NULL);
+    if (!ssl_self_encrypt_key_pair.lock) {
+        return PR_FAILURE;
+    }
+    return PR_SUCCESS;
+}
+
+/* Configure a self encryption key pair.  |explicitConfig| is set to true for
+ * calls to SSL_SetSessionTicketKeyPair(), false for implicit configuration.
+ * This assumes that the setup has been run. */
+static SECStatus
+ssl_SetSelfEncryptKeyPair(SECKEYPublicKey *pubKey,
+                          SECKEYPrivateKey *privKey,
+                          PRBool explicitConfig)
+{
+    SECKEYPublicKey *pubKeyCopy;
+    SECKEYPrivateKey *privKeyCopy;
+
+    PORT_Assert(ssl_self_encrypt_key_pair.lock);
+
+    pubKeyCopy = SECKEY_CopyPublicKey(pubKey);
+    if (!pubKeyCopy) {
+        PORT_SetError(SEC_ERROR_NO_MEMORY);
+        return SECFailure;
+    }
+
+    privKeyCopy = SECKEY_CopyPrivateKey(privKey);
+    if (!privKeyCopy) {
+        SECKEY_DestroyPublicKey(pubKeyCopy);
+        PORT_SetError(SEC_ERROR_NO_MEMORY);
+        return SECFailure;
+    }
+
+    PR_RWLock_Wlock(ssl_self_encrypt_key_pair.lock);
+    ssl_CleanupSelfEncryptKeyPair();
+    ssl_self_encrypt_key_pair.pubKey = pubKeyCopy;
+    ssl_self_encrypt_key_pair.privKey = privKeyCopy;
+    ssl_self_encrypt_key_pair.configured = explicitConfig;
+    PR_RWLock_Unlock(ssl_self_encrypt_key_pair.lock);
+    return SECSuccess;
+}
+
+/* This is really the self-encryption keys but it has the
+ * wrong name for historical API stability reasons. */
+SECStatus
+SSL_SetSessionTicketKeyPair(SECKEYPublicKey *pubKey,
+                            SECKEYPrivateKey *privKey)
+{
+    if (SECKEY_GetPublicKeyType(pubKey) != rsaKey ||
+        SECKEY_GetPrivateKeyType(privKey) != rsaKey) {
+        PORT_SetError(SEC_ERROR_INVALID_ARGS);
+        return SECFailure;
+    }
+
+    if (PR_SUCCESS != PR_CallOnce(&ssl_self_encrypt_key_pair.setup,
+                                  &ssl_SelfEncryptSetup)) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+
+    return ssl_SetSelfEncryptKeyPair(pubKey, privKey, PR_TRUE);
+}
+
+/* When configuring a server cert, we should save the RSA key in case it is
+ * needed for self-encryption. This saves the latest copy, unless there has
+ * been an explicit call to SSL_SetSessionTicketKeyPair(). */
+SECStatus
+ssl_MaybeSetSelfEncryptKeyPair(const sslKeyPair *keyPair)
+{
+    PRBool configured;
+
+    if (PR_SUCCESS != PR_CallOnce(&ssl_self_encrypt_key_pair.setup,
+                                  &ssl_SelfEncryptSetup)) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+
+    PR_RWLock_Rlock(ssl_self_encrypt_key_pair.lock);
+    configured = ssl_self_encrypt_key_pair.configured;
+    PR_RWLock_Unlock(ssl_self_encrypt_key_pair.lock);
+    if (configured) {
+        return SECSuccess;
+    }
+    return ssl_SetSelfEncryptKeyPair(keyPair->pubKey,
+                                     keyPair->privKey, PR_FALSE);
+}
+
+static SECStatus
+ssl_GetSelfEncryptKeyPair(SECKEYPublicKey **pubKey,
+                          SECKEYPrivateKey **privKey)
+{
+    if (PR_SUCCESS != PR_CallOnce(&ssl_self_encrypt_key_pair.setup,
+                                  &ssl_SelfEncryptSetup)) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+
+    PR_RWLock_Rlock(ssl_self_encrypt_key_pair.lock);
+    *pubKey = ssl_self_encrypt_key_pair.pubKey;
+    *privKey = ssl_self_encrypt_key_pair.privKey;
+    PR_RWLock_Unlock(ssl_self_encrypt_key_pair.lock);
+    if (!*pubKey) {
+        PORT_Assert(!*privKey);
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+    PORT_Assert(*privKey);
+    return SECSuccess;
+}
+
 static PRBool
-getSvrWrappingKey(PRInt32 symWrapMechIndex,
-                  SSL3KEAType exchKeyType,
+ssl_GenerateSelfEncryptKeys(void *pwArg, PRUint8 *keyName,
+                            PK11SymKey **aesKey, PK11SymKey **macKey);
+
+static PRStatus
+ssl_GenerateSelfEncryptKeysOnce(void *arg)
+{
+    SECStatus rv;
+
+    /* Get a copy of the session keys from shared memory. */
+    PORT_Memcpy(ssl_self_encrypt_keys.keyName,
+                SELF_ENCRYPT_KEY_NAME_PREFIX,
+                sizeof(SELF_ENCRYPT_KEY_NAME_PREFIX));
+    /* This function calls ssl_GetSelfEncryptKeyPair(), which initializes the
+     * key pair stuff.  That allows this to use the same shutdown function. */
+    rv = ssl_GenerateSelfEncryptKeys(arg, ssl_self_encrypt_keys.keyName,
+                                     &ssl_self_encrypt_keys.encKey,
+                                     &ssl_self_encrypt_keys.macKey);
+    if (rv != SECSuccess) {
+        return PR_FAILURE;
+    }
+
+    return PR_SUCCESS;
+}
+
+SECStatus
+ssl_GetSelfEncryptKeys(sslSocket *ss, PRUint8 *keyName,
+                       PK11SymKey **encKey, PK11SymKey **macKey)
+{
+    if (PR_SUCCESS != PR_CallOnceWithArg(&ssl_self_encrypt_keys.setup,
+                                         &ssl_GenerateSelfEncryptKeysOnce,
+                                         ss->pkcs11PinArg)) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+
+    if (!ssl_self_encrypt_keys.encKey || !ssl_self_encrypt_keys.macKey) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
+
+    PORT_Memcpy(keyName, ssl_self_encrypt_keys.keyName,
+                sizeof(ssl_self_encrypt_keys.keyName));
+    *encKey = ssl_self_encrypt_keys.encKey;
+    *macKey = ssl_self_encrypt_keys.macKey;
+    return SECSuccess;
+}
+
+/* If lockTime is zero, it implies that the lock is not held, and must be
+ * aquired here.
+ */
+static SECStatus
+getSvrWrappingKey(unsigned int symWrapMechIndex,
+                  unsigned int wrapKeyIndex,
                   SSLWrappedSymWrappingKey *wswk,
                   cacheDesc *cache,
                   PRUint32 lockTime)
 {
-    PRUint32 ndx = (exchKeyType * SSL_NUM_WRAP_MECHS) + symWrapMechIndex;
+    PRUint32 ndx = (wrapKeyIndex * SSL_NUM_WRAP_MECHS) + symWrapMechIndex;
     SSLWrappedSymWrappingKey *pwswk = cache->keyCacheData + ndx;
     PRUint32 now = 0;
-    PRBool rv = PR_FALSE;
+    PRBool rv = SECFailure;
 
     if (!cache->cacheMem) { /* cache is uninitialized */
         PORT_SetError(SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED);
-        return rv;
+        return SECFailure;
     }
     if (!lockTime) {
-        lockTime = now = LockSidCacheLock(cache->keyCacheLock, now);
-        if (!lockTime) {
-            return rv;
+        now = LockSidCacheLock(cache->keyCacheLock, 0);
+        if (!now) {
+            return SECFailure;
         }
     }
-    if (pwswk->exchKeyType == exchKeyType &&
-        pwswk->symWrapMechIndex == symWrapMechIndex &&
+    if (pwswk->wrapKeyIndex == wrapKeyIndex &&
+        pwswk->wrapMechIndex == symWrapMechIndex &&
         pwswk->wrappedSymKeyLen != 0) {
         *wswk = *pwswk;
-        rv = PR_TRUE;
+        rv = SECSuccess;
     }
     if (now) {
         UnlockSidCacheLock(cache->keyCacheLock);
@@ -1795,30 +1860,27 @@ getSvrWrappingKey(PRInt32 symWrapMechIndex,
     return rv;
 }
 
-PRBool
-ssl_GetWrappingKey(PRInt32 symWrapMechIndex,
-                   SSL3KEAType exchKeyType,
+SECStatus
+ssl_GetWrappingKey(unsigned int wrapMechIndex,
+                   unsigned int wrapKeyIndex,
                    SSLWrappedSymWrappingKey *wswk)
 {
-    PRBool rv;
-
-    PORT_Assert((unsigned)exchKeyType < kt_kea_size);
-    PORT_Assert((unsigned)symWrapMechIndex < SSL_NUM_WRAP_MECHS);
-    if ((unsigned)exchKeyType < kt_kea_size &&
-        (unsigned)symWrapMechIndex < SSL_NUM_WRAP_MECHS) {
-        rv = getSvrWrappingKey(symWrapMechIndex, exchKeyType, wswk,
-                               &globalCache, 0);
-    } else {
-        rv = PR_FALSE;
+    PORT_Assert(wrapMechIndex < SSL_NUM_WRAP_MECHS);
+    PORT_Assert(wrapKeyIndex < SSL_NUM_WRAP_KEYS);
+    if (wrapMechIndex >= SSL_NUM_WRAP_MECHS ||
+        wrapKeyIndex >= SSL_NUM_WRAP_KEYS) {
+        PORT_SetError(SEC_ERROR_INVALID_ARGS);
+        return SECFailure;
     }
 
-    return rv;
+    return getSvrWrappingKey(wrapMechIndex, wrapKeyIndex, wswk,
+                             &globalCache, 0);
 }
 
 /* Wrap and cache a session ticket key. */
-static PRBool
-WrapTicketKey(SECKEYPublicKey *svrPubKey, PK11SymKey *symKey,
-              const char *keyName, encKeyCacheEntry *cacheEntry)
+static SECStatus
+WrapSelfEncryptKey(SECKEYPublicKey *svrPubKey, PK11SymKey *symKey,
+                   const char *keyName, encKeyCacheEntry *cacheEntry)
 {
     SECItem wrappedKey = { siBuffer, NULL, 0 };
 
@@ -1830,24 +1892,24 @@ WrapTicketKey(SECKEYPublicKey *svrPubKey, PK11SymKey *symKey,
 
     if (PK11_PubWrapSymKey(CKM_RSA_PKCS, svrPubKey, symKey, &wrappedKey) !=
         SECSuccess) {
-        SSL_DBG(("%d: SSL[%s]: Unable to wrap session ticket %s.",
+        SSL_DBG(("%d: SSL[%s]: Unable to wrap self encrypt key %s.",
                  SSL_GETPID(), "unknown", keyName));
-        return PR_FALSE;
+        return SECFailure;
     }
     cacheEntry->length = wrappedKey.len;
-    return PR_TRUE;
+    return SECSuccess;
 }
 
-static PRBool
-GenerateTicketKeys(void *pwArg, unsigned char *keyName, PK11SymKey **aesKey,
-                   PK11SymKey **macKey)
+static SECStatus
+GenerateSelfEncryptKeys(void *pwArg, PRUint8 *keyName, PK11SymKey **aesKey,
+                        PK11SymKey **macKey)
 {
     PK11SlotInfo *slot;
     CK_MECHANISM_TYPE mechanismArray[2];
     PK11SymKey *aesKeyTmp = NULL;
     PK11SymKey *macKeyTmp = NULL;
     cacheDesc *cache = &globalCache;
-    PRUint8 ticketKeyNameSuffixLocal[SESS_TICKET_KEY_VAR_NAME_LEN];
+    PRUint8 ticketKeyNameSuffixLocal[SELF_ENCRYPT_KEY_VAR_NAME_LEN];
     PRUint8 *ticketKeyNameSuffix;
 
     if (!cache->cacheMem) {
@@ -1858,11 +1920,11 @@ GenerateTicketKeys(void *pwArg, unsigned char *keyName, PK11SymKey **aesKey,
     }
 
     if (PK11_GenerateRandom(ticketKeyNameSuffix,
-                            SESS_TICKET_KEY_VAR_NAME_LEN) !=
+                            SELF_ENCRYPT_KEY_VAR_NAME_LEN) !=
         SECSuccess) {
         SSL_DBG(("%d: SSL[%s]: Unable to generate random key name bytes.",
                  SSL_GETPID(), "unknown"));
-        goto loser;
+        return SECFailure;
     }
 
     mechanismArray[0] = CKM_AES_CBC;
@@ -1882,54 +1944,58 @@ GenerateTicketKeys(void *pwArg, unsigned char *keyName, PK11SymKey **aesKey,
                  SSL_GETPID(), "unknown"));
         goto loser;
     }
-    PORT_Memcpy(keyName, ticketKeyNameSuffix, SESS_TICKET_KEY_VAR_NAME_LEN);
+    PORT_Memcpy(keyName, ticketKeyNameSuffix, SELF_ENCRYPT_KEY_VAR_NAME_LEN);
     *aesKey = aesKeyTmp;
     *macKey = macKeyTmp;
-    return PR_TRUE;
+    return SECSuccess;
 
 loser:
     if (aesKeyTmp)
         PK11_FreeSymKey(aesKeyTmp);
     if (macKeyTmp)
         PK11_FreeSymKey(macKeyTmp);
-    return PR_FALSE;
+    return SECFailure;
 }
 
-static PRBool
-GenerateAndWrapTicketKeys(SECKEYPublicKey *svrPubKey, void *pwArg,
-                          unsigned char *keyName, PK11SymKey **aesKey,
-                          PK11SymKey **macKey)
+static SECStatus
+GenerateAndWrapSelfEncryptKeys(SECKEYPublicKey *svrPubKey, void *pwArg,
+                               PRUint8 *keyName, PK11SymKey **aesKey,
+                               PK11SymKey **macKey)
 {
     PK11SymKey *aesKeyTmp = NULL;
     PK11SymKey *macKeyTmp = NULL;
     cacheDesc *cache = &globalCache;
+    SECStatus rv;
 
-    if (!GenerateTicketKeys(pwArg, keyName, &aesKeyTmp, &macKeyTmp)) {
-        goto loser;
+    rv = GenerateSelfEncryptKeys(pwArg, keyName, &aesKeyTmp, &macKeyTmp);
+    if (rv != SECSuccess) {
+        return SECFailure;
     }
 
     if (cache->cacheMem) {
         /* Export the keys to the shared cache in wrapped form. */
-        if (!WrapTicketKey(svrPubKey, aesKeyTmp, "enc key", cache->ticketEncKey))
+        rv = WrapSelfEncryptKey(svrPubKey, aesKeyTmp, "enc key", cache->ticketEncKey);
+        if (rv != SECSuccess) {
             goto loser;
-        if (!WrapTicketKey(svrPubKey, macKeyTmp, "mac key", cache->ticketMacKey))
+        }
+        rv = WrapSelfEncryptKey(svrPubKey, macKeyTmp, "mac key", cache->ticketMacKey);
+        if (rv != SECSuccess) {
             goto loser;
+        }
     }
     *aesKey = aesKeyTmp;
     *macKey = macKeyTmp;
-    return PR_TRUE;
+    return SECSuccess;
 
 loser:
-    if (aesKeyTmp)
-        PK11_FreeSymKey(aesKeyTmp);
-    if (macKeyTmp)
-        PK11_FreeSymKey(macKeyTmp);
-    return PR_FALSE;
+    PK11_FreeSymKey(aesKeyTmp);
+    PK11_FreeSymKey(macKeyTmp);
+    return SECFailure;
 }
 
-static PRBool
-UnwrapCachedTicketKeys(SECKEYPrivateKey *svrPrivKey, unsigned char *keyName,
-                       PK11SymKey **aesKey, PK11SymKey **macKey)
+static SECStatus
+UnwrapCachedSelfEncryptKeys(SECKEYPrivateKey *svrPrivKey, PRUint8 *keyName,
+                            PK11SymKey **aesKey, PK11SymKey **macKey)
 {
     SECItem wrappedKey = { siBuffer, NULL, 0 };
     PK11SymKey *aesKeyTmp = NULL;
@@ -1957,119 +2023,51 @@ UnwrapCachedTicketKeys(SECKEYPrivateKey *svrPrivKey, unsigned char *keyName,
              SSL_GETPID(), "unknown"));
 
     PORT_Memcpy(keyName, cache->ticketKeyNameSuffix,
-                SESS_TICKET_KEY_VAR_NAME_LEN);
+                SELF_ENCRYPT_KEY_VAR_NAME_LEN);
     *aesKey = aesKeyTmp;
     *macKey = macKeyTmp;
-    return PR_TRUE;
+    return SECSuccess;
 
 loser:
     if (aesKeyTmp)
         PK11_FreeSymKey(aesKeyTmp);
     if (macKeyTmp)
         PK11_FreeSymKey(macKeyTmp);
-    return PR_FALSE;
+    return SECFailure;
 }
 
-PRBool
-ssl_GetSessionTicketKeysPKCS11(SECKEYPrivateKey *svrPrivKey,
-                               SECKEYPublicKey *svrPubKey, void *pwArg,
-                               unsigned char *keyName, PK11SymKey **aesKey,
-                               PK11SymKey **macKey)
+static SECStatus
+ssl_GenerateSelfEncryptKeys(void *pwArg, PRUint8 *keyName,
+                            PK11SymKey **encKey, PK11SymKey **macKey)
 {
-    PRUint32 now = 0;
-    PRBool rv = PR_FALSE;
-    PRBool keysGenerated = PR_FALSE;
+    SECKEYPrivateKey *svrPrivKey;
+    SECKEYPublicKey *svrPubKey;
+    PRUint32 now;
+    SECStatus rv;
     cacheDesc *cache = &globalCache;
 
-    if (!cache->cacheMem) {
-        /* cache is uninitialized. Generate keys and return them
-         * without caching. */
-        return GenerateTicketKeys(pwArg, keyName, aesKey, macKey);
+    rv = ssl_GetSelfEncryptKeyPair(&svrPubKey, &svrPrivKey);
+    if (rv != SECSuccess || !cache->cacheMem) {
+        /* No key pair for wrapping, or the cache is uninitialized. Generate
+         * keys and return them without caching. */
+        return GenerateSelfEncryptKeys(pwArg, keyName, encKey, macKey);
     }
 
-    now = LockSidCacheLock(cache->keyCacheLock, now);
+    now = LockSidCacheLock(cache->keyCacheLock, 0);
     if (!now)
-        return rv;
+        return SECFailure;
 
-    if (!*(cache->ticketKeysValid)) {
-        /* Keys do not exist, create them. */
-        if (!GenerateAndWrapTicketKeys(svrPubKey, pwArg, keyName,
-                                       aesKey, macKey))
-            goto loser;
-        keysGenerated = PR_TRUE;
-        *(cache->ticketKeysValid) = 1;
-    }
-
-    rv = PR_TRUE;
-
-loser:
-    UnlockSidCacheLock(cache->keyCacheLock);
-    if (rv && !keysGenerated)
-        rv = UnwrapCachedTicketKeys(svrPrivKey, keyName, aesKey, macKey);
-    return rv;
-}
-
-PRBool
-ssl_GetSessionTicketKeys(unsigned char *keyName, unsigned char *encKey,
-                         unsigned char *macKey)
-{
-    PRBool rv = PR_FALSE;
-    PRUint32 now = 0;
-    cacheDesc *cache = &globalCache;
-    PRUint8 ticketMacKey[SHA256_LENGTH], ticketEncKey[AES_256_KEY_LENGTH];
-    PRUint8 ticketKeyNameSuffixLocal[SESS_TICKET_KEY_VAR_NAME_LEN];
-    PRUint8 *ticketMacKeyPtr, *ticketEncKeyPtr, *ticketKeyNameSuffix;
-    PRBool cacheIsEnabled = PR_TRUE;
-
-    if (!cache->cacheMem) { /* cache is uninitialized */
-        cacheIsEnabled = PR_FALSE;
-        ticketKeyNameSuffix = ticketKeyNameSuffixLocal;
-        ticketEncKeyPtr = ticketEncKey;
-        ticketMacKeyPtr = ticketMacKey;
+    if (*(cache->ticketKeysValid)) {
+        rv = UnwrapCachedSelfEncryptKeys(svrPrivKey, keyName, encKey, macKey);
     } else {
-        /* these values have constant memory locations in the cache.
-         * Ok to reference them without holding the lock. */
-        ticketKeyNameSuffix = cache->ticketKeyNameSuffix;
-        ticketEncKeyPtr = cache->ticketEncKey->bytes;
-        ticketMacKeyPtr = cache->ticketMacKey->bytes;
-    }
-
-    if (cacheIsEnabled) {
-        /* Grab lock if initialized. */
-        now = LockSidCacheLock(cache->keyCacheLock, now);
-        if (!now)
-            return rv;
-    }
-    /* Going to regenerate keys on every call if cache was not
-     * initialized. */
-    if (!cacheIsEnabled || !*(cache->ticketKeysValid)) {
-        if (PK11_GenerateRandom(ticketKeyNameSuffix,
-                                SESS_TICKET_KEY_VAR_NAME_LEN) !=
-            SECSuccess)
-            goto loser;
-        if (PK11_GenerateRandom(ticketEncKeyPtr,
-                                AES_256_KEY_LENGTH) != SECSuccess)
-            goto loser;
-        if (PK11_GenerateRandom(ticketMacKeyPtr,
-                                SHA256_LENGTH) != SECSuccess)
-            goto loser;
-        if (cacheIsEnabled) {
+        /* Keys do not exist, create them. */
+        rv = GenerateAndWrapSelfEncryptKeys(svrPubKey, pwArg, keyName,
+                                            encKey, macKey);
+        if (rv == SECSuccess) {
             *(cache->ticketKeysValid) = 1;
         }
     }
-
-    rv = PR_TRUE;
-
-loser:
-    if (cacheIsEnabled) {
-        UnlockSidCacheLock(cache->keyCacheLock);
-    }
-    if (rv) {
-        PORT_Memcpy(keyName, ticketKeyNameSuffix,
-                    SESS_TICKET_KEY_VAR_NAME_LEN);
-        PORT_Memcpy(encKey, ticketEncKeyPtr, AES_256_KEY_LENGTH);
-        PORT_Memcpy(macKey, ticketMacKeyPtr, SHA256_LENGTH);
-    }
+    UnlockSidCacheLock(cache->keyCacheLock);
     return rv;
 }
 
@@ -2082,47 +2080,45 @@ loser:
  * This is all done while holding the locks/mutexes necessary to make
  * the operation atomic.
  */
-PRBool
+SECStatus
 ssl_SetWrappingKey(SSLWrappedSymWrappingKey *wswk)
 {
     cacheDesc *cache = &globalCache;
-    PRBool rv = PR_FALSE;
-    SSL3KEAType exchKeyType = wswk->exchKeyType;
-    /* type of keys used to wrap SymWrapKey*/
-    PRInt32 symWrapMechIndex = wswk->symWrapMechIndex;
+    PRBool rv = SECFailure;
     PRUint32 ndx;
-    PRUint32 now = 0;
+    PRUint32 now;
     SSLWrappedSymWrappingKey myWswk;
 
     if (!cache->cacheMem) { /* cache is uninitialized */
         PORT_SetError(SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED);
-        return 0;
+        return SECFailure;
     }
 
-    PORT_Assert((unsigned)exchKeyType < kt_kea_size);
-    if ((unsigned)exchKeyType >= kt_kea_size)
-        return 0;
+    PORT_Assert(wswk->wrapMechIndex < SSL_NUM_WRAP_MECHS);
+    PORT_Assert(wswk->wrapKeyIndex < SSL_NUM_WRAP_KEYS);
+    if (wswk->wrapMechIndex >= SSL_NUM_WRAP_MECHS ||
+        wswk->wrapKeyIndex >= SSL_NUM_WRAP_KEYS) {
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
+    }
 
-    PORT_Assert((unsigned)symWrapMechIndex < SSL_NUM_WRAP_MECHS);
-    if ((unsigned)symWrapMechIndex >= SSL_NUM_WRAP_MECHS)
-        return 0;
-
-    ndx = (exchKeyType * SSL_NUM_WRAP_MECHS) + symWrapMechIndex;
+    ndx = (wswk->wrapKeyIndex * SSL_NUM_WRAP_MECHS) + wswk->wrapMechIndex;
     PORT_Memset(&myWswk, 0, sizeof myWswk); /* eliminate UMRs. */
 
-    now = LockSidCacheLock(cache->keyCacheLock, now);
-    if (now) {
-        rv = getSvrWrappingKey(wswk->symWrapMechIndex, wswk->exchKeyType,
-                               &myWswk, cache, now);
-        if (rv) {
-            /* we found it on disk, copy it out to the caller. */
-            PORT_Memcpy(wswk, &myWswk, sizeof *wswk);
-        } else {
-            /* Wasn't on disk, and we're still holding the lock, so write it. */
-            cache->keyCacheData[ndx] = *wswk;
-        }
-        UnlockSidCacheLock(cache->keyCacheLock);
+    now = LockSidCacheLock(cache->keyCacheLock, 0);
+    if (!now) {
+        return SECFailure;
     }
+    rv = getSvrWrappingKey(wswk->wrapMechIndex, wswk->wrapKeyIndex,
+                           &myWswk, cache, now);
+    if (rv == SECSuccess) {
+        /* we found it on disk, copy it out to the caller. */
+        PORT_Memcpy(wswk, &myWswk, sizeof *wswk);
+    } else {
+        /* Wasn't on disk, and we're still holding the lock, so write it. */
+        cache->keyCacheData[ndx] = *wswk;
+    }
+    UnlockSidCacheLock(cache->keyCacheLock);
     return rv;
 }
 
@@ -2160,14 +2156,13 @@ SSL_InheritMPServerSIDCache(const char *envString)
     return SECFailure;
 }
 
-PRBool
-ssl_GetWrappingKey(PRInt32 symWrapMechIndex,
-                   SSL3KEAType exchKeyType,
+SECStatus
+ssl_GetWrappingKey(unsigned int wrapMechIndex,
+                   unsigned int wrapKeyIndex,
                    SSLWrappedSymWrappingKey *wswk)
 {
-    PRBool rv = PR_FALSE;
     PR_ASSERT(!"SSL servers are not supported on this platform. (ssl_GetWrappingKey)");
-    return rv;
+    return SECFailure;
 }
 
 /* This is a kind of test-and-set.  The caller passes in the new value it wants
@@ -2179,12 +2174,11 @@ ssl_GetWrappingKey(PRInt32 symWrapMechIndex,
  * This is all done while holding the locks/mutexes necessary to make
  * the operation atomic.
  */
-PRBool
+SECStatus
 ssl_SetWrappingKey(SSLWrappedSymWrappingKey *wswk)
 {
-    PRBool rv = PR_FALSE;
     PR_ASSERT(!"SSL servers are not supported on this platform. (ssl_SetWrappingKey)");
-    return rv;
+    return SECFailure;
 }
 
 PRUint32

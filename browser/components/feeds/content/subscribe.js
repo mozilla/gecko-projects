@@ -8,7 +8,7 @@ var SubscribeHandler = {
    * The nsIFeedWriter object that produces the UI
    */
   _feedWriter: null,
-  
+
   init: function SH_init() {
     this._feedWriter = new BrowserFeedWriter();
   },
@@ -20,4 +20,14 @@ var SubscribeHandler = {
   uninit: function SH_uninit() {
     this._feedWriter.close();
   }
+};
+
+SubscribeHandler.init();
+
+window.onload = function() {
+  SubscribeHandler.writeContent();
+};
+
+window.onunload = function() {
+  SubscribeHandler.uninit();
 };

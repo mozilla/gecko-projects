@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-  * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
      
@@ -61,9 +62,11 @@ public:
     const SourceSurfaceDual *ssDual =
       static_cast<const SourceSurfaceDual*>(surfPat->mSurface.get());
     mA = new (mSurfPatA.addr()) SurfacePattern(ssDual->mA, surfPat->mExtendMode,
-                                               surfPat->mMatrix, surfPat->mFilter);
+                                               surfPat->mMatrix,
+                                               surfPat->mSamplingFilter);
     mB = new (mSurfPatB.addr()) SurfacePattern(ssDual->mB, surfPat->mExtendMode,
-                                               surfPat->mMatrix, surfPat->mFilter);
+                                               surfPat->mMatrix,
+                                               surfPat->mSamplingFilter);
     mPatternsInitialized = true;
   }
 
@@ -83,6 +86,13 @@ public:
 
   bool mPatternsInitialized;
 };
+
+void
+DrawTargetDual::DetachAllSnapshots()
+{
+  mA->DetachAllSnapshots();
+  mB->DetachAllSnapshots();
+}
 
 void
 DrawTargetDual::DrawSurface(SourceSurface *aSurface, const Rect &aDest, const Rect &aSource,
@@ -169,12 +179,11 @@ DrawTargetDual::Fill(const Path *aPath, const Pattern &aPattern, const DrawOptio
 
 void
 DrawTargetDual::FillGlyphs(ScaledFont *aScaledFont, const GlyphBuffer &aBuffer,
-                           const Pattern &aPattern, const DrawOptions &aOptions,
-                           const GlyphRenderingOptions *aRenderingOptions)
+                           const Pattern &aPattern, const DrawOptions &aOptions)
 {
   DualPattern pattern(aPattern);
-  mA->FillGlyphs(aScaledFont, aBuffer, *pattern.mA, aOptions, aRenderingOptions);
-  mB->FillGlyphs(aScaledFont, aBuffer, *pattern.mB, aOptions, aRenderingOptions);
+  mA->FillGlyphs(aScaledFont, aBuffer, *pattern.mA, aOptions);
+  mB->FillGlyphs(aScaledFont, aBuffer, *pattern.mB, aOptions);
 }
 
 void
@@ -199,15 +208,9 @@ DrawTargetDual::PushLayer(bool aOpaque, Float aOpacity, SourceSurface* aMask,
 already_AddRefed<DrawTarget>
 DrawTargetDual::CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const
 {
-  RefPtr<DrawTarget> dtA = mA->CreateSimilarDrawTarget(aSize, aFormat);
-  RefPtr<DrawTarget> dtB = mB->CreateSimilarDrawTarget(aSize, aFormat);
-
-  if (!dtA || !dtB) {
-    gfxWarning() << "Failure to allocate a similar DrawTargetDual. Size: " << aSize;
-    return nullptr;
-  }
-
-  return MakeAndAddRef<DrawTargetDual>(dtA, dtB);
+  /* Now that we have PushLayer there a very few cases where a user of DrawTargetDual
+   * wants to have a DualTarget when creating a similar one. */
+  return mA->CreateSimilarDrawTarget(aSize, aFormat);
 }
 
 } // namespace gfx

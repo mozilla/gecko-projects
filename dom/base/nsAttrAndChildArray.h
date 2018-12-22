@@ -14,6 +14,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/dom/BorrowedAttrInfo.h"
 
 #include "nscore.h"
 #include "nsAttrName.h"
@@ -46,6 +47,7 @@ class nsMappedAttributeElement;
 
 class nsAttrAndChildArray
 {
+  typedef mozilla::dom::BorrowedAttrInfo BorrowedAttrInfo;
 public:
   nsAttrAndChildArray();
   ~nsAttrAndChildArray();
@@ -61,10 +63,6 @@ public:
   }
   nsIContent* GetSafeChildAt(uint32_t aPos) const;
   nsIContent * const * GetChildArray(uint32_t* aChildCount) const;
-  nsresult AppendChild(nsIContent* aChild)
-  {
-    return InsertChildAt(aChild, ChildCount());
-  }
   nsresult InsertChildAt(nsIContent* aChild, uint32_t aPos);
   void RemoveChildAt(uint32_t aPos);
   // Like RemoveChildAt but hands the reference to the child being
@@ -78,7 +76,7 @@ public:
   }
 
   uint32_t AttrCount() const;
-  const nsAttrValue* GetAttr(nsIAtom* aLocalName,
+  const nsAttrValue* GetAttr(nsAtom* aLocalName,
                              int32_t aNamespaceID = kNameSpaceID_None) const;
   // As above but using a string attr name and always using
   // kNameSpaceID_None.  This is always case-sensitive.
@@ -89,8 +87,13 @@ public:
                              nsCaseTreatment aCaseSensitive) const;
   const nsAttrValue* AttrAt(uint32_t aPos) const;
   // SetAndSwapAttr swaps the current attribute value with aValue.
-  nsresult SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue);
-  nsresult SetAndSwapAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue);
+  // If the attribute was unset, an empty value will be swapped into aValue
+  // and aHadValue will be set to false. Otherwise, aHadValue will be set to
+  // true.
+  nsresult SetAndSwapAttr(nsAtom* aLocalName, nsAttrValue& aValue,
+                          bool* aHadValue);
+  nsresult SetAndSwapAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue,
+                          bool* aHadValue);
 
   // Remove the attr at position aPos.  The value of the attr is placed in
   // aValue; any value that was already in aValue is destroyed.
@@ -99,22 +102,29 @@ public:
   // Returns attribute name at given position, *not* out-of-bounds safe
   const nsAttrName* AttrNameAt(uint32_t aPos) const;
 
+  // Returns the attribute info at a given position, *not* out-of-bounds safe
+  BorrowedAttrInfo AttrInfoAt(uint32_t aPos) const;
+
   // Returns attribute name at given position or null if aPos is out-of-bounds
   const nsAttrName* GetSafeAttrNameAt(uint32_t aPos) const;
 
   const nsAttrName* GetExistingAttrNameFromQName(const nsAString& aName) const;
-  int32_t IndexOfAttr(nsIAtom* aLocalName, int32_t aNamespaceID = kNameSpaceID_None) const;
+  int32_t IndexOfAttr(nsAtom* aLocalName, int32_t aNamespaceID = kNameSpaceID_None) const;
 
-  nsresult SetAndTakeMappedAttr(nsIAtom* aLocalName, nsAttrValue& aValue,
+  // SetAndSwapMappedAttr swaps the current attribute value with aValue.
+  // If the attribute was unset, an empty value will be swapped into aValue
+  // and aHadValue will be set to false. Otherwise, aHadValue will be set to
+  // true.
+  nsresult SetAndSwapMappedAttr(nsAtom* aLocalName, nsAttrValue& aValue,
                                 nsMappedAttributeElement* aContent,
-                                nsHTMLStyleSheet* aSheet);
+                                nsHTMLStyleSheet* aSheet,
+                                bool* aHadValue);
   nsresult SetMappedAttrStyleSheet(nsHTMLStyleSheet* aSheet) {
     if (!mImpl || !mImpl->mMappedAttrs) {
       return NS_OK;
     }
     return DoSetMappedAttrStyleSheet(aSheet);
   }
-  void WalkMappedAttributeStyleRules(nsRuleWalker* aRuleWalker);
 
   void Compact();
 
@@ -129,6 +139,21 @@ public:
   {
     return MappedAttrCount();
   }
+  const nsMappedAttributes* GetMapped() const;
+
+  // Force this to have mapped attributes, even if those attributes are empty.
+  nsresult ForceMapped(nsMappedAttributeElement* aContent, nsIDocument* aDocument);
+
+  // Clear the servo declaration block on the mapped attributes, if any
+  // Will assert off main thread
+  void ClearMappedServoStyle();
+
+  // Increases capacity (if necessary) to have enough space to accomodate the
+  // unmapped attributes and children of |aOther|. If |aAllocateChildren| is not
+  // true, only enough space for unmapped attributes will be reserved.
+  // It is REQUIRED that this function be called ONLY when the array is empty.
+  nsresult EnsureCapacityToClone(const nsAttrAndChildArray& aOther,
+                                 bool aAllocateChildren);
 
 private:
   nsAttrAndChildArray(const nsAttrAndChildArray& aOther) = delete;
@@ -143,7 +168,8 @@ private:
   nsMappedAttributes*
   GetModifiableMapped(nsMappedAttributeElement* aContent,
                       nsHTMLStyleSheet* aSheet,
-                      bool aWillAddAttr);
+                      bool aWillAddAttr,
+                      int32_t aAttrCount = 1);
   nsresult MakeMappedUnique(nsMappedAttributes* aAttributes);
 
   uint32_t AttrSlotsSize() const
@@ -158,13 +184,13 @@ private:
 
   bool AttrSlotIsTaken(uint32_t aSlot) const
   {
-    NS_PRECONDITION(aSlot < AttrSlotCount(), "out-of-bounds");
+    MOZ_ASSERT(aSlot < AttrSlotCount(), "out-of-bounds");
     return mImpl->mBuffer[aSlot * ATTRSIZE];
   }
 
   void SetChildCount(uint32_t aCount)
   {
-    mImpl->mAttrAndChildCount = 
+    mImpl->mAttrAndChildCount =
         (mImpl->mAttrAndChildCount & ATTRCHILD_ARRAY_ATTR_SLOTS_COUNT_MASK) |
         (aCount << ATTRCHILD_ARRAY_ATTR_SLOTS_BITS);
   }

@@ -8,34 +8,40 @@
 
 const TEST_URI = "data:text/html;charset=utf-8," +
   "<html><head><title>Test for the highlighter keybindings</title></head>" +
-  "<body><h1>Hello</h1><p><strong>Greetings, earthlings!</strong>" +
+  "<body><p><strong>Greetings, earthlings!</strong>" +
   " I come in peace.</p></body></html>";
 
 const TEST_DATA = [
-  { key: "VK_RIGHT", selectedNode: "h1" },
-  { key: "VK_DOWN", selectedNode: "p" },
-  { key: "VK_UP", selectedNode: "h1" },
-  { key: "VK_LEFT", selectedNode: "body" },
+  { key: "KEY_ArrowLeft", selectedNode: "p" },
+  { key: "KEY_ArrowLeft", selectedNode: "body" },
+  { key: "KEY_ArrowLeft", selectedNode: "html" },
+  { key: "KEY_ArrowRight", selectedNode: "body" },
+  { key: "KEY_ArrowRight", selectedNode: "p" },
+  { key: "KEY_ArrowRight", selectedNode: "strong" },
 ];
 
-add_task(function* () {
-  let { inspector } = yield openInspectorForURL(TEST_URI);
-  let bodyFront = yield getNodeFront("body", inspector);
-  is(inspector.selection.nodeFront, bodyFront,
-    "Body should be selected initially.");
+add_task(async function() {
+  const { inspector } = await openInspectorForURL(TEST_URI);
+
+  info("Selecting the deepest element to start with");
+  await selectNode("strong", inspector);
+
+  const nodeFront = await getNodeFront("strong", inspector);
+  is(inspector.selection.nodeFront, nodeFront,
+     "<strong> should be selected initially");
 
   info("Focusing the currently active breadcrumb button");
-  let bc = inspector.breadcrumbs;
+  const bc = inspector.breadcrumbs;
   bc.nodeHierarchy[bc.currentIndex].button.focus();
 
-  for (let { key, selectedNode } of TEST_DATA) {
+  for (const { key, selectedNode } of TEST_DATA) {
     info("Pressing " + key + " to select " + selectedNode);
 
-    let updated = inspector.once("inspector-updated");
-    EventUtils.synthesizeKey(key, {});
-    yield updated;
+    const updated = inspector.once("inspector-updated");
+    EventUtils.synthesizeKey(key);
+    await updated;
 
-    let selectedNodeFront = yield getNodeFront(selectedNode, inspector);
+    const selectedNodeFront = await getNodeFront(selectedNode, inspector);
     is(inspector.selection.nodeFront, selectedNodeFront,
       selectedNode + " is selected.");
   }

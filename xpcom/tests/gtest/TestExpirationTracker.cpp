@@ -60,6 +60,8 @@ public:
   }
 
   void DoRandomOperation() {
+    using mozilla::UniquePtr;
+
     Object* obj;
     switch (rand() & 0x7) {
     case 0: {
@@ -107,9 +109,9 @@ public:
     }
     }
   }
-  
+
 protected:
-  void NotifyExpired(Object* aObj) {
+  void NotifyExpired(Object* aObj) override {
     LogAction(aObj, "Expired");
     PRIntervalTime now = PR_IntervalNow();
     uint32_t timeDiffMS = (now - aObj->mLastUsed)*1000/PR_TicksPerSecond();
@@ -135,7 +137,7 @@ protected:
 template <uint32_t K> static bool test_random() {
   srand(K);
   error = false;
- 
+
   for (uint32_t j = 0; j < iterations; ++j) {
     Tracker<K> tracker;
 
@@ -153,7 +155,7 @@ template <uint32_t K> static bool test_random() {
       tracker.DoRandomOperation();
     }
   }
-  
+
   return !error;
 }
 

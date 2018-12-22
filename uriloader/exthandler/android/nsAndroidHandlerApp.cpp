@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAndroidHandlerApp.h"
-#include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
 
 using namespace mozilla;
 
@@ -55,19 +55,20 @@ nsAndroidHandlerApp::SetDetailedDescription(const nsAString & aDescription)
   return NS_OK;
 }
 
-// XXX Workaround for bug 986975 to maintain the existing broken semantics
-template<>
-struct nsISharingHandlerApp::COMTypeInfo<nsAndroidHandlerApp, void> {
-  static const nsIID kIID;
-};
-const nsIID nsISharingHandlerApp::COMTypeInfo<nsAndroidHandlerApp, void>::kIID = NS_IHANDLERAPP_IID;
-
 NS_IMETHODIMP
 nsAndroidHandlerApp::Equals(nsIHandlerApp *aHandlerApp, bool *aRetval)
 {
-  nsCOMPtr<nsAndroidHandlerApp> aApp = do_QueryInterface(aHandlerApp);
-  *aRetval = aApp && aApp->mName.Equals(mName) &&
-    aApp->mDescription.Equals(mDescription);
+  *aRetval = false;
+  if (!aHandlerApp) {
+    return NS_OK;
+  }
+
+  nsAutoString name;
+  nsAutoString detailedDescription;
+  aHandlerApp->GetName(name);
+  aHandlerApp->GetDetailedDescription(detailedDescription);
+
+  *aRetval = name.Equals(mName) && detailedDescription.Equals(mDescription);
   return NS_OK;
 }
 
@@ -76,7 +77,7 @@ nsAndroidHandlerApp::LaunchWithURI(nsIURI *aURI, nsIInterfaceRequestor *aWindowC
 {
   nsCString uriSpec;
   aURI->GetSpec(uriSpec);
-  return widget::GeckoAppShell::OpenUriExternal(
+  return java::GeckoAppShell::OpenUriExternal(
           uriSpec, mMimeType, mPackageName, mClassName,
           mAction, EmptyString()) ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -84,7 +85,7 @@ nsAndroidHandlerApp::LaunchWithURI(nsIURI *aURI, nsIInterfaceRequestor *aWindowC
 NS_IMETHODIMP
 nsAndroidHandlerApp::Share(const nsAString & data, const nsAString & title)
 {
-  return widget::GeckoAppShell::OpenUriExternal(
+  return java::GeckoAppShell::OpenUriExternal(
           data, mMimeType, mPackageName, mClassName,
           mAction, EmptyString()) ? NS_OK : NS_ERROR_FAILURE;
 }

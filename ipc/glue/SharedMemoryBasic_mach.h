@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,6 +12,10 @@
 
 #include "SharedMemory.h"
 #include <mach/port.h>
+
+#ifdef FUZZING
+#include "SharedMemoryFuzzer.h"
+#endif
 
 //
 // This is a low-level wrapper around platform shared memory.  Don't
@@ -41,7 +44,7 @@ public:
 
   SharedMemoryBasic();
 
-  virtual bool SetHandle(const Handle& aHandle) override;
+  virtual bool SetHandle(const Handle& aHandle, OpenRights aRights) override;
 
   virtual bool Create(size_t aNbytes) override;
 
@@ -51,7 +54,11 @@ public:
 
   virtual void* memory() const override
   {
+#ifdef FUZZING
+    return SharedMemoryFuzzer::MutateSharedMemory(mMemory, mAllocSize);
+#else
     return mMemory;
+#endif
   }
 
   virtual SharedMemoryType Type() const override
@@ -77,6 +84,8 @@ private:
   mach_port_t mPort;
   // Pointer to mapped region, null if unmapped.
   void *mMemory;
+  // Access rights to map an existing region with.
+  OpenRights mOpenRights;
 };
 
 } // namespace ipc

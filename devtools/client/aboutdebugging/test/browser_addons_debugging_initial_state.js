@@ -8,6 +8,7 @@
 // - devtools.debugger.remote-enabled
 
 const ADDON_ID = "test-devtools@mozilla.org";
+const ADDON_NAME = "test-devtools";
 
 const TEST_DATA = [
   {
@@ -29,39 +30,44 @@ const TEST_DATA = [
   }
 ];
 
-add_task(function* () {
-  for (let testData of TEST_DATA) {
-    yield testCheckboxState(testData);
+add_task(async function() {
+  for (const testData of TEST_DATA) {
+    await testCheckboxState(testData);
   }
 });
 
-function* testCheckboxState(testData) {
+async function testCheckboxState(testData) {
   info("Set preferences as defined by the current test data.");
-  yield new Promise(resolve => {
-    let options = {"set": [
+  await new Promise(resolve => {
+    const options = {"set": [
       ["devtools.chrome.enabled", testData.chromeEnabled],
       ["devtools.debugger.remote-enabled", testData.debuggerRemoteEnable],
     ]};
     SpecialPowers.pushPrefEnv(options, resolve);
   });
 
-  let { tab, document } = yield openAboutDebugging("addons");
+  const { tab, document } = await openAboutDebugging("addons");
+  await waitForInitialAddonList(document);
 
   info("Install a test addon.");
-  yield installAddon(document, "addons/unpacked/install.rdf", "test-devtools");
+  await installAddon({
+    document,
+    path: "addons/unpacked/install.rdf",
+    name: ADDON_NAME,
+  });
 
   info("Test checkbox checked state.");
-  let addonDebugCheckbox = document.querySelector("#enable-addon-debugging");
+  const addonDebugCheckbox = document.querySelector("#enable-addon-debugging");
   is(addonDebugCheckbox.checked, testData.expected,
     "Addons debugging checkbox should be in expected state.");
 
   info("Test debug buttons disabled state.");
-  let debugButtons = [...document.querySelectorAll("#addons .debug-button")];
+  const debugButtons = [...document.querySelectorAll("#addons .debug-button")];
   ok(debugButtons.every(b => b.disabled != testData.expected),
     "Debug buttons should be in the expected state");
 
   info("Uninstall test addon installed earlier.");
-  yield uninstallAddon(ADDON_ID);
+  await uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
 
-  yield closeAboutDebugging(tab);
+  await closeAboutDebugging(tab);
 }

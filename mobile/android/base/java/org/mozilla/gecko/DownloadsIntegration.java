@@ -8,15 +8,17 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.permissions.Permissions;
-import org.mozilla.gecko.util.NativeEventListener;
-import org.mozilla.gecko.util.NativeJSObject;
+import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.GeckoBundle;
 
 import java.io.File;
 import java.lang.IllegalArgumentException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
+import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -28,21 +30,23 @@ import android.os.Environment;
 import android.text.TextUtils;
 import android.util.Log;
 
-public class DownloadsIntegration implements NativeEventListener
+public class DownloadsIntegration implements BundleEventListener
 {
     private static final String LOGTAG = "GeckoDownloadsIntegration";
 
-    @SuppressWarnings("serial")
-    private static final List<String> UNKNOWN_MIME_TYPES = new ArrayList<String>(3) {{
-        add("unknown/unknown"); // This will be used as a default mime type for unknown files
-        add("application/unknown");
-        add("application/octet-stream"); // Github uses this for APK files
-    }};
+    private static final List<String> UNKNOWN_MIME_TYPES;
+    static {
+        final ArrayList<String> tempTypes = new ArrayList<>(3);
+        tempTypes.add("unknown/unknown"); // This will be used as a default mime type for unknown files
+        tempTypes.add("application/unknown");
+        tempTypes.add("application/octet-stream"); // Github uses this for APK files
+        UNKNOWN_MIME_TYPES = Collections.unmodifiableList(tempTypes);
+    }
 
     private static final String DOWNLOAD_REMOVE = "Download:Remove";
 
     private DownloadsIntegration() {
-        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this, DOWNLOAD_REMOVE);
+        EventDispatcher.getInstance().registerBackgroundThreadListener(this, DOWNLOAD_REMOVE);
     }
 
     private static DownloadsIntegration sInstance;
@@ -62,7 +66,7 @@ public class DownloadsIntegration implements NativeEventListener
             this.id = id;
         }
 
-        public static Download fromJSON(final NativeJSObject obj) {
+        public static Download fromBundle(final GeckoBundle obj) {
             final String path = obj.getString("path");
             return new Download(path);
         }
@@ -85,10 +89,10 @@ public class DownloadsIntegration implements NativeEventListener
     }
 
     @Override
-    public void handleMessage(final String event, final NativeJSObject message,
+    public void handleMessage(final String event, final GeckoBundle message,
                               final EventCallback callback) {
         if (DOWNLOAD_REMOVE.equals(event)) {
-            final Download d = Download.fromJSON(message);
+            final Download d = Download.fromBundle(message);
             removeDownload(d);
         }
     }
@@ -100,7 +104,9 @@ public class DownloadsIntegration implements NativeEventListener
 
         int state = PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
         try {
-            state = GeckoAppShell.getContext().getPackageManager().getApplicationEnabledSetting("com.android.providers.downloads");
+            final PackageManager pm = GeckoAppShell.getApplicationContext()
+                                                   .getPackageManager();
+            state = pm.getApplicationEnabledSetting("com.android.providers.downloads");
         } catch (IllegalArgumentException e) {
             // Download Manager package does not exist
             return false;
@@ -110,7 +116,7 @@ public class DownloadsIntegration implements NativeEventListener
                 PackageManager.COMPONENT_ENABLED_STATE_DEFAULT == state);
     }
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "gecko")
     public static String getTemporaryDownloadDirectory() {
         Context context = GeckoAppShell.getApplicationContext();
 
@@ -129,7 +135,7 @@ public class DownloadsIntegration implements NativeEventListener
     }
 
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "gecko")
     public static void scanMedia(final String aFile, String aMimeType) {
         String mimeType = aMimeType;
         if (UNKNOWN_MIME_TYPES.contains(mimeType)) {
@@ -142,7 +148,7 @@ public class DownloadsIntegration implements NativeEventListener
         if (TextUtils.isEmpty(mimeType)) {
             final int extPosition = aFile.lastIndexOf(".");
             if (extPosition > 0 && extPosition < aFile.length() - 1) {
-                mimeType = GeckoAppShell.getMimeTypeFromExtension(aFile.substring(extPosition+1));
+                mimeType = GeckoAppShell.getMimeTypeFromExtension(aFile.substring(extPosition + 1));
             }
         }
 
@@ -158,7 +164,9 @@ public class DownloadsIntegration implements NativeEventListener
 
         if (useSystemDownloadManager()) {
             final File f = new File(aFile);
-            final DownloadManager dm = (DownloadManager) GeckoAppShell.getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+            final DownloadManager dm = (DownloadManager)
+                    GeckoAppShell.getApplicationContext()
+                                 .getSystemService(Context.DOWNLOAD_SERVICE);
             dm.addCompletedDownload(f.getName(),
                     f.getName(),
                     true, // Media scanner should scan this
@@ -167,8 +175,13 @@ public class DownloadsIntegration implements NativeEventListener
                     Math.max(1, f.length()), // Some versions of Android require downloads to be at least length 1
                     false); // Don't show a notification.
         } else {
-            final Context context = GeckoAppShell.getContext();
-            final GeckoMediaScannerClient client = new GeckoMediaScannerClient(context, aFile, mimeType);
+            final Activity currentActivity =
+                    GeckoActivityMonitor.getInstance().getCurrentActivity();
+            if (currentActivity == null) {
+                return;
+            }
+            final GeckoMediaScannerClient client =
+                    new GeckoMediaScannerClient(currentActivity, aFile, mimeType);
             client.connect();
         }
     }
@@ -178,7 +191,9 @@ public class DownloadsIntegration implements NativeEventListener
             return;
         }
 
-        final DownloadManager dm = (DownloadManager) GeckoAppShell.getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+        final DownloadManager dm = (DownloadManager)
+                GeckoAppShell.getApplicationContext()
+                             .getSystemService(Context.DOWNLOAD_SERVICE);
 
         Cursor c = null;
         try {
@@ -193,7 +208,7 @@ public class DownloadsIntegration implements NativeEventListener
                 if (download.equals(d)) {
                     dm.remove(d.id);
                 }
-            } while(c.moveToNext());
+            } while (c.moveToNext());
         } finally {
             if (c != null) {
                 c.close();
@@ -223,7 +238,7 @@ public class DownloadsIntegration implements NativeEventListener
 
         @Override
         public void onScanCompleted(String path, Uri uri) {
-            if(path.equals(mFile)) {
+            if (path.equals(mFile)) {
                 mScanner.disconnect();
                 mScanner = null;
             }

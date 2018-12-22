@@ -10,7 +10,7 @@
 #include "mozilla/DebugOnly.h"
 #include "nsDumpUtils.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsIConsoleService.h"
@@ -38,7 +38,9 @@
 #define MOZ_SUPPORTS_FIFO 1
 #endif
 
-#if defined(XP_LINUX) || defined(__FreeBSD__)
+// Some Android devices seem to send RT signals to Firefox so we want to avoid
+// consuming those as they're not user triggered.
+#if !defined(ANDROID) && (defined(XP_LINUX) || defined(__FreeBSD__))
 #define MOZ_SUPPORTS_RT_SIGNALS 1
 #endif
 
@@ -57,18 +59,20 @@ using namespace mozilla::dom;
 
 namespace {
 
-class DumpMemoryInfoToTempDirRunnable : public nsRunnable
+class DumpMemoryInfoToTempDirRunnable : public Runnable
 {
 public:
   DumpMemoryInfoToTempDirRunnable(const nsAString& aIdentifier,
-                                  bool aAnonymize, bool aMinimizeMemoryUsage)
-    : mIdentifier(aIdentifier)
+                                  bool aAnonymize,
+                                  bool aMinimizeMemoryUsage)
+    : mozilla::Runnable("DumpMemoryInfoToTempDirRunnable")
+    , mIdentifier(aIdentifier)
     , mAnonymize(aAnonymize)
     , mMinimizeMemoryUsage(aMinimizeMemoryUsage)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsIMemoryInfoDumper> dumper =
       do_GetService("@mozilla.org/memory-info-dumper;1");
@@ -84,7 +88,7 @@ private:
 };
 
 class GCAndCCLogDumpRunnable final
-  : public nsRunnable
+  : public Runnable
   , public nsIDumpGCAndCCLogsCallback
 {
 public:
@@ -93,7 +97,8 @@ public:
   GCAndCCLogDumpRunnable(const nsAString& aIdentifier,
                          bool aDumpAllTraces,
                          bool aDumpChildProcesses)
-    : mIdentifier(aIdentifier)
+    : mozilla::Runnable("GCAndCCLogDumpRunnable")
+    , mIdentifier(aIdentifier)
     , mDumpAllTraces(aDumpAllTraces)
     , mDumpChildProcesses(aDumpChildProcesses)
   {
@@ -127,7 +132,7 @@ private:
   const bool mDumpChildProcesses;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(GCAndCCLogDumpRunnable, nsRunnable,
+NS_IMPL_ISUPPORTS_INHERITED(GCAndCCLogDumpRunnable, Runnable,
                             nsIDumpGCAndCCLogsCallback)
 
 } // namespace
@@ -333,12 +338,12 @@ public:
   {
   }
 
-  NS_IMETHODIMP OnFinish() override
+  NS_IMETHOD OnFinish() override
   {
     return NS_ERROR_UNEXPECTED;
   }
 
-  NS_IMETHODIMP OnDump(nsIFile* aGCLog, nsIFile* aCCLog, bool aIsParent) override
+  NS_IMETHOD OnDump(nsIFile* aGCLog, nsIFile* aCCLog, bool aIsParent) override
   {
     return mCallback->OnDump(aGCLog, aCCLog, aIsParent);
   }
@@ -446,9 +451,11 @@ public:
     : mGZWriter(aGZWriter)
   {}
 
-  void Write(const char* aStr)
+  void Write(const char* aStr) override
   {
-    (void)mGZWriter->Write(aStr);
+    // Ignore any failure because JSONWriteFunc doesn't have a mechanism for
+    // handling errors.
+    Unused << mGZWriter->Write(aStr);
   }
 
   nsresult Finish() { return mGZWriter->Finish(); }
@@ -469,7 +476,7 @@ public:
   HandleReportAndFinishReportingCallbacks(UniquePtr<JSONWriter> aWriter,
                                           nsIFinishDumpingCallback* aFinishDumping,
                                           nsISupports* aFinishDumpingData)
-    : mWriter(Move(aWriter))
+    : mWriter(std::move(aWriter))
     , mFinishDumping(aFinishDumping)
     , mFinishDumpingData(aFinishDumpingData)
   {
@@ -664,7 +671,7 @@ DumpMemoryInfoToFile(
 
   RefPtr<HandleReportAndFinishReportingCallbacks>
     handleReportAndFinishReporting =
-      new HandleReportAndFinishReportingCallbacks(Move(jsonWriter),
+      new HandleReportAndFinishReportingCallbacks(std::move(jsonWriter),
                                                   aFinishDumping,
                                                   aFinishDumpingData);
   rv = mgr->GetReportsExtended(handleReportAndFinishReporting, nullptr,
@@ -795,15 +802,11 @@ nsMemoryInfoDumper::OpenDMDFile(const nsAString& aIdentifier, int aPid,
     return rv;
   }
   rv = dmdFile->OpenANSIFileDesc("wb", aOutFile);
-  NS_WARN_IF(NS_FAILED(rv));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "OpenANSIFileDesc failed");
 
   // Print the path, because on some platforms (e.g. Mac) it's not obvious.
-  nsCString path;
-  rv = dmdFile->GetNativePath(path);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  dmd::StatusMsg("opened %s for writing\n", path.get());
+  dmd::StatusMsg("opened %s for writing\n",
+                 dmdFile->HumanReadablePath().get());
 
   return rv;
 }
@@ -821,7 +824,7 @@ nsMemoryInfoDumper::DumpDMDToFile(FILE* aFile)
   dmd::Analyze(MakeUnique<GZWriterWrapper>(gzWriter));
 
   rv = gzWriter->Finish();
-  NS_WARN_IF(NS_FAILED(rv));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Finish failed");
   return rv;
 }
 #endif  // MOZ_DMD

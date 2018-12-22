@@ -5,38 +5,30 @@
 
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
-const {PushDB} = Cu.import("resource://gre/modules/PushDB.jsm");
-const {PushRecord} = Cu.import("resource://gre/modules/PushRecord.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
+const {PushDB} = ChromeUtils.import("resource://gre/modules/PushDB.jsm");
+const {PushRecord} = ChromeUtils.import("resource://gre/modules/PushRecord.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/IndexedDBHelper.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
 const {
   PushCrypto,
   concatArray,
-  getCryptoParams,
-} = Cu.import("resource://gre/modules/PushCrypto.jsm");
+} = ChromeUtils.import("resource://gre/modules/PushCrypto.jsm");
 
-this.EXPORTED_SYMBOLS = ["PushServiceHttp2"];
+var EXPORTED_SYMBOLS = ["PushServiceHttp2"];
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
-  let {ConsoleAPI} = Cu.import("resource://gre/modules/Console.jsm", {});
+  let {ConsoleAPI} = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
   return new ConsoleAPI({
     maxLogLevelPref: "dom.push.loglevel",
     prefix: "PushServiceHttp2",
   });
 });
 
-const prefs = new Preferences("dom.push.");
+const prefs = Services.prefs.getBranch("dom.push.");
 
 const kPUSHHTTP2DB_DB_NAME = "pushHttp2";
 const kPUSHHTTP2DB_DB_VERSION = 5; // Change this if the IndexedDB format changes
@@ -58,13 +50,8 @@ var PushSubscriptionListener = function(pushService, uri) {
 
 PushSubscriptionListener.prototype = {
 
-  QueryInterface: function (aIID) {
-    if (aIID.equals(Ci.nsIHttpPushListener) ||
-        aIID.equals(Ci.nsIStreamListener)) {
-      return this;
-    }
-    throw Components.results.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIHttpPushListener",
+                                         "nsIStreamListener"]),
 
   getInterface: function(aIID) {
     return this.QueryInterface(aIID);
@@ -157,13 +144,12 @@ PushChannelListener.prototype = {
         encryption: getHeaderField(aRequest, "Encryption"),
         encoding: getHeaderField(aRequest, "Content-Encoding"),
       };
-      let cryptoParams = getCryptoParams(headers);
       let msg = concatArray(this._message);
 
       this._mainListener._pushService._pushChannelOnStop(this._mainListener.uri,
                                                          this._ackUri,
-                                                         msg,
-                                                         cryptoParams);
+                                                         headers,
+                                                         msg);
     }
   }
 };
@@ -260,7 +246,7 @@ SubscriptionListener.prototype = {
     var statusCode = aRequest.QueryInterface(Ci.nsIHttpChannel).responseStatus;
 
     if (Math.floor(statusCode / 100) == 5) {
-      if (this._subInfo.retries < prefs.get("http2.maxRetries")) {
+      if (this._subInfo.retries < prefs.getIntPref("http2.maxRetries")) {
         this._subInfo.retries++;
         var retryAfter = retryAfterParser(aRequest);
         this._retryTimeoutID = setTimeout(_ =>
@@ -314,7 +300,7 @@ SubscriptionListener.prototype = {
       return;
     }
     try {
-      let uriTry = Services.io.newURI(subscriptionUri, null, null);
+      let uriTry = Services.io.newURI(subscriptionUri);
     } catch (e) {
       console.error("onStopRequest: Invalid subscription URI",
         subscriptionUri);
@@ -330,10 +316,10 @@ SubscriptionListener.prototype = {
       scope: this._subInfo.record.scope,
       originAttributes: this._subInfo.record.originAttributes,
       systemRecord: this._subInfo.record.systemRecord,
+      appServerKey: this._subInfo.record.appServerKey,
       ctime: Date.now(),
     });
 
-    Services.telemetry.getHistogramById("PUSH_API_SUBSCRIBE_HTTP2_TIME").add(Date.now() - this._ctime);
     this._resolve(reply);
   },
 
@@ -410,7 +396,7 @@ function linkParser(linkHeader, serverURI) {
 /**
  * The implementation of the WebPush.
  */
-this.PushServiceHttp2 = {
+var PushServiceHttp2 = {
   _mainPushService: null,
   _serverURI: null,
 
@@ -429,20 +415,23 @@ this.PushServiceHttp2 = {
                       PushRecordHttp2);
   },
 
-  serviceType: function() {
-    return "http2";
-  },
-
   hasmainPushService: function() {
     return this._mainPushService !== null;
   },
 
   validServerURI: function(serverURI) {
-    return serverURI.scheme == "http" || serverURI.scheme == "https";
+    if (serverURI.scheme == "http") {
+      return !!prefs.getBoolPref("testing.allowInsecureServerURL", false);
+    }
+    return serverURI.scheme == "https";
   },
 
-  connect: function(subscriptions) {
+  connect: function(subscriptions, broadcastListeners) {
     this.startConnections(subscriptions);
+  },
+
+  sendSubscribeBroadcast: async function(serviceId, version) {
+    // Not implemented yet
   },
 
   isConnected: function() {
@@ -586,14 +575,14 @@ this.PushServiceHttp2 = {
   _retryAfterBackoff: function(aSubscriptionUri, retryAfter) {
     console.debug("retryAfterBackoff()");
 
-    var resetRetryCount = prefs.get("http2.reset_retry_count_after_ms");
+    var resetRetryCount = prefs.getIntPref("http2.reset_retry_count_after_ms");
     // If it was running for some time, reset retry counter.
     if ((Date.now() - this._conns[aSubscriptionUri].lastStartListening) >
         resetRetryCount) {
       this._conns[aSubscriptionUri].countUnableToConnect = 0;
     }
 
-    let maxRetries = prefs.get("http2.maxRetries");
+    let maxRetries = prefs.getIntPref("http2.maxRetries");
     if (this._conns[aSubscriptionUri].countUnableToConnect >= maxRetries) {
       this._shutdownSubscription(aSubscriptionUri);
       this._resubscribe(aSubscriptionUri);
@@ -608,7 +597,7 @@ this.PushServiceHttp2 = {
       return;
     }
 
-    retryAfter = prefs.get("http2.retryInterval") *
+    retryAfter = prefs.getIntPref("http2.retryInterval") *
       Math.pow(2, this._conns[aSubscriptionUri].countUnableToConnect);
 
     retryAfter = retryAfter * (0.8 + Math.random() * 0.4); // add +/-20%.
@@ -712,6 +701,11 @@ this.PushServiceHttp2 = {
     return this._unsubscribeResource(aRecord.subscriptionUri);
   },
 
+  reportDeliveryError: function(messageID, reason) {
+    console.warn("reportDeliveryError: Ignoring message delivery error",
+      messageID, reason);
+  },
+
   /** Push server has deleted subscription.
    *  Re-subscribe - if it succeeds send update db record and send
    *                 pushsubscriptionchange,
@@ -779,11 +773,11 @@ this.PushServiceHttp2 = {
     }
   },
 
-  _pushChannelOnStop: function(aUri, aAckUri, aMessage, cryptoParams) {
+  _pushChannelOnStop: function(aUri, aAckUri, aHeaders, aMessage) {
     console.debug("pushChannelOnStop()");
 
     this._mainPushService.receivedPushMessage(
-      aUri, "", aMessage, cryptoParams, record => {
+      aUri, "", aHeaders, aMessage, record => {
         // Always update the stored record.
         return record;
       }

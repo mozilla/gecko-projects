@@ -7,7 +7,9 @@
 #ifndef MOZILLA_DOM_OFFSCREENCANVAS_H_
 #define MOZILLA_DOM_OFFSCREENCANVAS_H_
 
+#include "gfxTypes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/RefPtr.h"
 #include "CanvasRenderingContextHelper.h"
@@ -111,7 +113,7 @@ public:
   }
 
   already_AddRefed<ImageBitmap>
-  TransferToImageBitmap();
+  TransferToImageBitmap(ErrorResult& aRv);
 
   already_AddRefed<Promise>
   ToBlob(JSContext* aCx,
@@ -124,12 +126,10 @@ public:
     return mCurrentContext;
   }
 
-  already_AddRefed<gfx::SourceSurface> GetSurfaceSnapshot(bool* aPremultAlpha = nullptr);
+  already_AddRefed<gfx::SourceSurface> GetSurfaceSnapshot(gfxAlphaType* aOutAlphaType = nullptr);
 
   static already_AddRefed<OffscreenCanvas>
   CreateFromCloneData(nsIGlobalObject* aGlobal, OffscreenCanvasCloneData* aData);
-
-  static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
 
   // Return true on main-thread, and return gfx.offscreencanvas.enabled
   // on worker thread.
@@ -204,7 +204,7 @@ private:
 
   layers::LayersBackend mCompositorBackendType;
 
-  layers::CanvasClient* mCanvasClient;
+  RefPtr<layers::CanvasClient> mCanvasClient;
   RefPtr<layers::AsyncCanvasRenderer> mCanvasRenderer;
 };
 

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -20,12 +22,21 @@
 
 // This macro checks that the _EVENT_SIZEOF_* constants defined in
 // ipc/chromiume/src/third_party/<platform>/event2/event-config.h are correct.
+#if defined(_EVENT_SIZEOF_SHORT)
 #define CHECK_EVENT_SIZEOF(TYPE, type) \
     static_assert(_EVENT_SIZEOF_##TYPE == sizeof(type), \
     "bad _EVENT_SIZEOF_"#TYPE);
+#elif defined(EVENT__SIZEOF_SHORT)
+#define CHECK_EVENT_SIZEOF(TYPE, type) \
+    static_assert(EVENT__SIZEOF_##TYPE == sizeof(type), \
+    "bad EVENT__SIZEOF_"#TYPE);
+#else
+#error Cannot find libevent type sizes
+#endif
 
 CHECK_EVENT_SIZEOF(LONG,      long);
 CHECK_EVENT_SIZEOF(LONG_LONG, long long);
+CHECK_EVENT_SIZEOF(OFF_T,     ev_off_t);
 CHECK_EVENT_SIZEOF(PTHREAD_T, pthread_t);
 CHECK_EVENT_SIZEOF(SHORT,     short);
 CHECK_EVENT_SIZEOF(SIZE_T,    size_t);

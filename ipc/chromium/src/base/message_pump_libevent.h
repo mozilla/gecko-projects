@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -8,12 +10,11 @@
 #include "base/message_pump.h"
 #include "base/time.h"
 #include "mozilla/UniquePtr.h"
+#include "nsStringFwd.h"
 
 // Declare structs we need from libevent.h rather than including it
 struct event_base;
 struct event;
-
-class nsDependentCSubstring;
 
 namespace base {
 
@@ -206,7 +207,7 @@ protected:
   virtual void OnLineRead(int aFd, nsDependentCSubstring& aMessage) = 0;
   virtual void OnFileCanWriteWithoutBlocking(int /* aFd */) override {}
 private:
-  virtual void OnFileCanReadWithoutBlocking(int aFd) final override;
+  void OnFileCanReadWithoutBlocking(int aFd) final;
 
   mozilla::UniquePtr<char[]> mReceiveBuffer;
   int mReceivedIndex;

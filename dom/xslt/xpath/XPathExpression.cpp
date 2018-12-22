@@ -9,16 +9,13 @@
 #include "txExprResult.h"
 #include "txIXPathContext.h"
 #include "nsError.h"
-#include "nsIDOMCharacterData.h"
-#include "nsDOMClassInfoID.h"
-#include "nsIDOMDocument.h"
+#include "nsINode.h"
 #include "XPathResult.h"
 #include "txURIUtils.h"
 #include "txXPathTreeWalker.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Text.h"
 #include "mozilla/dom/XPathResultBinding.h"
-
-using mozilla::Move;
 
 namespace mozilla {
 namespace dom {
@@ -55,7 +52,7 @@ private:
 XPathExpression::XPathExpression(nsAutoPtr<Expr>&& aExpression,
                                  txResultRecycler* aRecycler,
                                  nsIDocument *aDocument)
-    : mExpression(Move(aExpression)),
+    : mExpression(std::move(aExpression)),
       mRecycler(aRecycler),
       mDocument(do_GetWeakReference(aDocument)),
       mCheckDocument(aDocument != nullptr)
@@ -75,7 +72,7 @@ XPathExpression::EvaluateWithContext(JSContext* aCx,
                                      JS::Handle<JSObject*> aInResult,
                                      ErrorResult& aRv)
 {
-    XPathResult* inResult = nullptr;
+    RefPtr<XPathResult> inResult;
     if (aInResult) {
         nsresult rv = UNWRAP_OBJECT(XPathResult, aInResult, inResult);
         if (NS_FAILED(rv) && rv != NS_ERROR_XPC_BAD_CONVERT_JS) {
@@ -101,6 +98,11 @@ XPathExpression::EvaluateWithContext(nsINode& aContextNode,
         return nullptr;
     }
 
+    if (aType > XPathResult_Binding::FIRST_ORDERED_NODE_TYPE) {
+        aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+        return nullptr;
+    }
+
     if (!nsContentUtils::LegacyIsCallerNativeCode() &&
         !nsContentUtils::CanCallerAccess(&aContextNode))
     {
@@ -118,17 +120,12 @@ XPathExpression::EvaluateWithContext(nsINode& aContextNode,
 
     uint16_t nodeType = aContextNode.NodeType();
 
-    if (nodeType == nsIDOMNode::TEXT_NODE ||
-        nodeType == nsIDOMNode::CDATA_SECTION_NODE) {
-        nsCOMPtr<nsIDOMCharacterData> textNode =
-            do_QueryInterface(&aContextNode);
-        if (!textNode) {
-            aRv.Throw(NS_ERROR_FAILURE);
-            return nullptr;
-        }
+    if (nodeType == nsINode::TEXT_NODE ||
+        nodeType == nsINode::CDATA_SECTION_NODE) {
+        Text* textNode = aContextNode.GetAsText();
+        MOZ_ASSERT(textNode);
 
-        uint32_t textLength;
-        textNode->GetLength(&textLength);
+        uint32_t textLength = textNode->Length();
         if (textLength == 0) {
             aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
             return nullptr;
@@ -137,11 +134,11 @@ XPathExpression::EvaluateWithContext(nsINode& aContextNode,
         // XXX Need to get logical XPath text node for CDATASection
         //     and Text nodes.
     }
-    else if (nodeType != nsIDOMNode::DOCUMENT_NODE &&
-             nodeType != nsIDOMNode::ELEMENT_NODE &&
-             nodeType != nsIDOMNode::ATTRIBUTE_NODE &&
-             nodeType != nsIDOMNode::COMMENT_NODE &&
-             nodeType != nsIDOMNode::PROCESSING_INSTRUCTION_NODE) {
+    else if (nodeType != nsINode::DOCUMENT_NODE &&
+             nodeType != nsINode::ELEMENT_NODE &&
+             nodeType != nsINode::ATTRIBUTE_NODE &&
+             nodeType != nsINode::COMMENT_NODE &&
+             nodeType != nsINode::PROCESSING_INSTRUCTION_NODE) {
         aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
         return nullptr;
     }
@@ -199,17 +196,19 @@ XPathExpression::EvaluateWithContext(nsINode& aContextNode,
 
 nsresult
 EvalContextImpl::getVariable(int32_t aNamespace,
-                             nsIAtom* aLName,
+                             nsAtom* aLName,
                              txAExprResult*& aResult)
 {
     aResult = 0;
     return NS_ERROR_INVALID_ARG;
 }
 
-bool
-EvalContextImpl::isStripSpaceAllowed(const txXPathNode& aNode)
+nsresult
+EvalContextImpl::isStripSpaceAllowed(const txXPathNode& aNode, bool& aAllowed)
 {
-    return false;
+    aAllowed = false;
+
+    return NS_OK;
 }
 
 void*

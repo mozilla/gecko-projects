@@ -3,12 +3,9 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/AddonManager.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const wdm = Cc["@mozilla.org/dom/workers/workerdebuggermanager;1"].
             getService(Ci.nsIWorkerDebuggerManager);
@@ -137,10 +134,10 @@ function waitForWindowMessage(window, message) {
       if (event.data !== event.data) {
         return;
       }
-      window.removeEventListener("message", onmessage, false);
+      window.removeEventListener("message", onmessage);
       resolve();
     };
-    window.addEventListener("message", onmessage, false);
+    window.addEventListener("message", onmessage);
   });
 }
 

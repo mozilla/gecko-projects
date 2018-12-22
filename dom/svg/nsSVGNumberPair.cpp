@@ -23,7 +23,7 @@ static nsresult
 ParseNumberOptionalNumber(const nsAString& aValue,
                           float aValues[2])
 {
-  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
+  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
     tokenizer(aValue, ',',
               nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
   if (tokenizer.whitespaceBeforeFirstToken()) {
@@ -170,10 +170,10 @@ nsSVGNumberPair::DOMAnimatedNumber::~DOMAnimatedNumber()
   }
 }
 
-nsISMILAttr*
+UniquePtr<nsISMILAttr>
 nsSVGNumberPair::ToSMILAttr(nsSVGElement *aSVGElement)
 {
-  return new SMILNumberPair(this, aSVGElement);
+  return MakeUnique<SMILNumberPair>(this, aSVGElement);
 }
 
 nsresult

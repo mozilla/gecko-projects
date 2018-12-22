@@ -7,13 +7,14 @@
 #ifndef AudioContext_h_
 #define AudioContext_h_
 
-#include "mozilla/dom/AudioChannelBinding.h"
+#include "mozilla/dom/OfflineAudioContextBinding.h"
 #include "MediaBufferDecoder.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/TypedArray.h"
-#include "nsAutoPtr.h"
+#include "mozilla/RelativeTimeline.h"
+#include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
@@ -43,7 +44,7 @@ class AudioNodeStream;
 
 namespace dom {
 
-enum class AudioContextState : uint32_t;
+enum class AudioContextState : uint8_t;
 class AnalyserNode;
 class AudioBuffer;
 class AudioBufferSourceNode;
@@ -53,13 +54,15 @@ class AudioNode;
 class BiquadFilterNode;
 class ChannelMergerNode;
 class ChannelSplitterNode;
+class ConstantSourceNode;
 class ConvolverNode;
 class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
-class HTMLMediaElement;
-class MediaElementAudioSourceNode;
 class GlobalObject;
+class HTMLMediaElement;
+class IIRFilterNode;
+class MediaElementAudioSourceNode;
 class MediaStreamAudioDestinationNode;
 class MediaStreamAudioSourceNode;
 class OscillatorNode;
@@ -68,8 +71,9 @@ class ScriptProcessorNode;
 class StereoPannerNode;
 class WaveShaperNode;
 class PeriodicWave;
+struct PeriodicWaveConstraints;
 class Promise;
-enum class OscillatorType : uint32_t;
+enum class OscillatorType : uint8_t;
 
 // This is addrefed by the OscillatorNodeEngine on the main thread
 // and then used from the MSG thread.
@@ -91,7 +95,7 @@ private:
 
 /* This runnable allows the MSG to notify the main thread when audio is actually
  * flowing */
-class StateChangeTask final : public nsRunnable
+class StateChangeTask final : public Runnable
 {
 public:
   /* This constructor should be used when this event is sent from the main
@@ -112,13 +116,14 @@ private:
 };
 
 enum class AudioContextOperation { Suspend, Resume, Close };
+struct AudioContextOptions;
 
 class AudioContext final : public DOMEventTargetHelper,
-                           public nsIMemoryReporter
+                           public nsIMemoryReporter,
+                           public RelativeTimeline
 {
   AudioContext(nsPIDOMWindowInner* aParentWindow,
                bool aIsOffline,
-               AudioChannel aChannel,
                uint32_t aNumberOfChannels = 0,
                uint32_t aLength = 0,
                float aSampleRate = 0.0f);
@@ -139,6 +144,9 @@ public:
     return GetOwner();
   }
 
+  virtual void DisconnectFromOwner() override;
+  virtual void BindToOwner(nsIGlobalObject* aNew) override;
+
   void Shutdown(); // idempotent
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -147,12 +155,14 @@ public:
 
   // Constructor for regular AudioContext
   static already_AddRefed<AudioContext>
-  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  Constructor(const GlobalObject& aGlobal,
+              const AudioContextOptions& aOptions,
+              ErrorResult& aRv);
 
-  // Constructor for regular AudioContext. A default audio channel is needed.
+  // Constructor for offline AudioContext with options object
   static already_AddRefed<AudioContext>
   Constructor(const GlobalObject& aGlobal,
-              AudioChannel aChannel,
+              const OfflineAudioContextOptions& aOptions,
               ErrorResult& aRv);
 
   // Constructor for offline AudioContext
@@ -177,11 +187,12 @@ public:
 
   bool ShouldSuspendNewStream() const { return mSuspendCalled; }
 
-  double CurrentTime() const;
+  double CurrentTime();
 
   AudioListener* Listener();
 
   AudioContextState State() const { return mAudioContextState; }
+  bool IsRunning() const;
 
   // Those three methods return a promise to content, that is resolved when an
   // (possibly long) operation is completed on the MSG (and possibly other)
@@ -198,6 +209,8 @@ public:
   IMPL_EVENT_HANDLER(statechange)
 
   already_AddRefed<AudioBufferSourceNode> CreateBufferSource(ErrorResult& aRv);
+
+  already_AddRefed<ConstantSourceNode> CreateConstantSource(ErrorResult& aRv);
 
   already_AddRefed<AudioBuffer>
   CreateBuffer(uint32_t aNumberOfChannels, uint32_t aLength, float aSampleRate,
@@ -250,11 +263,17 @@ public:
   already_AddRefed<BiquadFilterNode>
   CreateBiquadFilter(ErrorResult& aRv);
 
+  already_AddRefed<IIRFilterNode>
+  CreateIIRFilter(const Sequence<double>& aFeedforward,
+                  const Sequence<double>& aFeedback,
+                  mozilla::ErrorResult& aRv);
+
   already_AddRefed<OscillatorNode>
   CreateOscillator(ErrorResult& aRv);
 
   already_AddRefed<PeriodicWave>
   CreatePeriodicWave(const Float32Array& aRealData, const Float32Array& aImagData,
+                     const PeriodicWaveConstraints& aConstraints,
                      ErrorResult& aRv);
 
   already_AddRefed<Promise>
@@ -266,6 +285,7 @@ public:
   // OfflineAudioContext methods
   already_AddRefed<Promise> StartRendering(ErrorResult& aRv);
   IMPL_EVENT_HANDLER(complete)
+  unsigned long Length();
 
   bool IsOffline() const { return mIsOffline; }
 
@@ -291,14 +311,12 @@ public:
 
   uint32_t MaxChannelCount() const;
 
+  uint32_t ActiveNodeCount() const;
+
   void Mute() const;
   void Unmute() const;
 
   JSObject* GetGlobalJSObject() const;
-
-  AudioChannel MozAudioChannelType() const;
-
-  AudioChannel TestAudioChannelInAudioNodeStream();
 
   void RegisterNode(AudioNode* aNode);
   void UnregisterNode(AudioNode* aNode);
@@ -307,8 +325,9 @@ public:
 
   BasicWaveFormCache* GetBasicWaveFormCache();
 
-  IMPL_EVENT_HANDLER(mozinterruptbegin)
-  IMPL_EVENT_HANDLER(mozinterruptend)
+  bool CheckClosed(ErrorResult& aRv);
+
+  void Dispatch(already_AddRefed<nsIRunnable>&& aRunnable);
 
 private:
   void DisconnectFromWindow();
@@ -316,12 +335,9 @@ private:
   void ShutdownDecoder();
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize) override;
+  NS_DECL_NSIMEMORYREPORTER
 
   friend struct ::mozilla::WebAudioDecodeJob;
-
-  bool CheckClosed(ErrorResult& aRv);
 
   nsTArray<MediaStream*> GetAllStreams() const;
 
@@ -336,10 +352,15 @@ private:
   AudioContextState mAudioContextState;
   RefPtr<AudioDestinationNode> mDestination;
   RefPtr<AudioListener> mListener;
-  nsTArray<RefPtr<WebAudioDecodeJob> > mDecodeJobs;
-  // This array is used to keep the suspend/resume/close promises alive until
+  nsTArray<UniquePtr<WebAudioDecodeJob> > mDecodeJobs;
+  // This array is used to keep the suspend/close promises alive until
   // they are resolved, so we can safely pass them accross threads.
   nsTArray<RefPtr<Promise>> mPromiseGripArray;
+  // This array is used to onlly keep the resume promises alive until they are
+  // resolved, so we can safely pass them accross threads. If the audio context
+  // is not allowed to play, the promise would be pending in this array and be
+  // resolved until audio context has been allowed and user call resume() again.
+  nsTArray<RefPtr<Promise>> mPendingResumePromises;
   // See RegisterActiveNode.  These will keep the AudioContext alive while it
   // is rendering and the window remains alive.
   nsTHashtable<nsRefPtrHashKey<AudioNode> > mActiveNodes;
@@ -359,6 +380,7 @@ private:
   bool mCloseCalled;
   // Suspend has been called with no following resume.
   bool mSuspendCalled;
+  bool mIsDisconnecting;
 };
 
 static const dom::AudioContext::AudioContextId NO_AUDIO_CONTEXT = 0;

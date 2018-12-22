@@ -5,10 +5,10 @@
 #include "nsThreadUtils.h"
 #include "nsAndroidHistory.h"
 #include "nsComponentManagerUtils.h"
-#include "AndroidBridge.h"
-#include "Link.h"
 #include "nsIURI.h"
 #include "nsIObserverService.h"
+#include "FennecJNIWrappers.h"
+#include "Link.h"
 
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
@@ -25,12 +25,12 @@
 using namespace mozilla;
 using mozilla::dom::Link;
 
-NS_IMPL_ISUPPORTS(nsAndroidHistory, IHistory, nsIRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS(nsAndroidHistory, IHistory, nsIRunnable, nsITimerCallback, nsINamed)
 
 nsAndroidHistory* nsAndroidHistory::sHistory = nullptr;
 
 /*static*/
-nsAndroidHistory*
+already_AddRefed<nsAndroidHistory>
 nsAndroidHistory::GetSingleton()
 {
   if (!sHistory) {
@@ -38,8 +38,7 @@ nsAndroidHistory::GetSingleton()
     NS_ENSURE_TRUE(sHistory, nullptr);
   }
 
-  NS_ADDREF(sHistory);
-  return sHistory;
+  return do_AddRef(sHistory);
 }
 
 nsAndroidHistory::nsAndroidHistory()
@@ -47,7 +46,7 @@ nsAndroidHistory::nsAndroidHistory()
 {
   LoadPrefs();
 
-  mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+  mTimer = NS_NewTimer();
 }
 
 NS_IMETHODIMP
@@ -65,7 +64,7 @@ nsAndroidHistory::RegisterVisitedCallback(nsIURI *aURI, Link *aContent)
   }
 
   nsAutoCString uri;
-  rv = aURI->GetSpec(uri);
+  rv = aURI->GetDisplaySpec(uri);
   if (NS_FAILED(rv)) return rv;
   NS_ConvertUTF8toUTF16 uriString(uri);
 
@@ -76,8 +75,8 @@ nsAndroidHistory::RegisterVisitedCallback(nsIURI *aURI, Link *aContent)
   }
   list->AppendElement(aContent);
 
-  if (jni::IsAvailable()) {
-    widget::GeckoAppShell::CheckURIVisited(uriString);
+  if (jni::IsFennec()) {
+    java::GlobalHistory::CheckURIVisited(uriString);
   }
 
   return NS_OK;
@@ -90,7 +89,7 @@ nsAndroidHistory::UnregisterVisitedCallback(nsIURI *aURI, Link *aContent)
     return NS_OK;
 
   nsAutoCString uri;
-  nsresult rv = aURI->GetSpec(uri);
+  nsresult rv = aURI->GetDisplaySpec(uri);
   if (NS_FAILED(rv)) return rv;
   NS_ConvertUTF8toUTF16 uriString(uri);
 
@@ -194,16 +193,23 @@ nsAndroidHistory::Notify(nsITimer *timer)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsAndroidHistory::GetName(nsACString& aName)
+{
+  aName.AssignLiteral("nsAndroidHistory");
+  return NS_OK;
+}
+
 void
 nsAndroidHistory::SaveVisitURI(nsIURI* aURI) {
   // Add the URI to our cache so we can take a fast path later
   AppendToRecentlyVisitedURIs(aURI);
 
-  if (jni::IsAvailable()) {
+  if (jni::IsFennec()) {
     // Save this URI in our history
     nsAutoCString spec;
-    (void)aURI->GetSpec(spec);
-    widget::GeckoAppShell::MarkURIVisited(NS_ConvertUTF8toUTF16(spec));
+    (void)aURI->GetDisplaySpec(spec);
+    java::GlobalHistory::MarkURIVisited(NS_ConvertUTF8toUTF16(spec));
   }
 
   // Finally, notify that we've been visited.
@@ -283,12 +289,16 @@ nsAndroidHistory::SetURITitle(nsIURI *aURI, const nsAString& aTitle)
     return NS_OK;
   }
 
-  if (jni::IsAvailable()) {
+  if (jni::IsFennec()) {
     nsAutoCString uri;
-    nsresult rv = aURI->GetSpec(uri);
+    nsresult rv = aURI->GetDisplaySpec(uri);
     if (NS_FAILED(rv)) return rv;
+    if (RemovePendingVisitURI(aURI)) {
+      // We have a title, so aURI isn't a redirect, so save the visit now before setting the title.
+      SaveVisitURI(aURI);
+    }
     NS_ConvertUTF8toUTF16 uriString(uri);
-    widget::GeckoAppShell::SetURITitle(uriString, aTitle);
+    java::GlobalHistory::SetURITitle(uriString, aTitle);
   }
   return NS_OK;
 }
@@ -298,7 +308,7 @@ nsAndroidHistory::NotifyVisited(nsIURI *aURI)
 {
   if (aURI && sHistory) {
     nsAutoCString spec;
-    (void)aURI->GetSpec(spec);
+    (void)aURI->GetDisplaySpec(spec);
     sHistory->mPendingLinkURIs.Push(NS_ConvertUTF8toUTF16(spec));
     NS_DispatchToMainThread(sHistory);
   }
@@ -358,6 +368,16 @@ nsAndroidHistory::CanAddURI(nsIURI* aURI, bool* canAdd)
   if (scheme.EqualsLiteral("https")) {
     *canAdd = true;
     return NS_OK;
+  }
+  if (scheme.EqualsLiteral("about")) {
+    nsAutoCString path;
+    rv = aURI->GetPathQueryRef(path);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (StringBeginsWith(path, NS_LITERAL_CSTRING("reader"))) {
+      *canAdd = true;
+      return NS_OK;
+    }
   }
 
   // now check for all bad things

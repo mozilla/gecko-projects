@@ -1,14 +1,11 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
-var Cu = Components.utils;
-Cu.import("resource://devtools/shared/Loader.jsm");
-const {parseDeclarations, RuleRewriter} =
-      devtools.require("devtools/client/shared/css-parsing-utils");
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {RuleRewriter} = require("devtools/shared/css/parsing-utils");
+const {isCssPropertyKnown} = require("devtools/server/actors/css-properties");
 
 const TEST_DATA = [
   {
@@ -66,14 +63,14 @@ const TEST_DATA = [
     desc: "simple create",
     input: "",
     instruction: {type: "create", name: "p", value: "v", priority: "important",
-                  index: 0},
+                  index: 0, enabled: true},
     expected: "p: v !important;"
   },
   {
     desc: "create between two properties",
     input: "a:b; e: f;",
     instruction: {type: "create", name: "c", value: "d", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "a:b; c: d;e: f;"
   },
   // "create" is passed the name that the user entered, and must do
@@ -82,7 +79,7 @@ const TEST_DATA = [
     desc: "create requiring escape",
     input: "",
     instruction: {type: "create", name: "a b", value: "d", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "a\\ b: d;"
   },
   {
@@ -139,7 +136,7 @@ const TEST_DATA = [
     // Note the lack of a trailing semicolon.
     input: "color: red",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "color: red;a: b;"
   },
 
@@ -148,7 +145,7 @@ const TEST_DATA = [
     desc: "simple newline insertion",
     input: "\ncolor: red;\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\ncolor: red;\na: b;\n"
   },
   // Newline insertion.
@@ -157,7 +154,7 @@ const TEST_DATA = [
     // Note the lack of a trailing semicolon.
     input: "\ncolor: red\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\ncolor: red;\na: b;\n"
   },
   // Newline insertion.
@@ -166,7 +163,7 @@ const TEST_DATA = [
     // Note the lack of a trailing semicolon and newline.
     input: "\ncolor: red",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\ncolor: red;\na: b;\n"
   },
 
@@ -175,7 +172,7 @@ const TEST_DATA = [
     desc: "indentation with create",
     input: "\n  color: red;\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\n  color: red;\n  a: b;\n"
   },
   // Newline insertion and indentation.
@@ -184,7 +181,7 @@ const TEST_DATA = [
     // Note the lack of a trailing semicolon.
     input: "\n  color: red\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\n  color: red;\n  a: b;\n"
   },
   {
@@ -200,7 +197,7 @@ const TEST_DATA = [
     // the indentation of the "}".
     input: "\n    color: red;\n  ",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\n    color: red;\n    a: b;\n  "
   },
   // Newline insertion and indentation.
@@ -209,7 +206,7 @@ const TEST_DATA = [
     // Note how the comment comes before the declaration.
     input: "\n  /* comment */ color: red\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "\n  /* comment */ color: red;\n  a: b;\n"
   },
   // Default indentation.
@@ -217,7 +214,7 @@ const TEST_DATA = [
     desc: "use of default indentation",
     input: "\n",
     instruction: {type: "create", name: "a", value: "b", priority: "",
-                  index: 0},
+                  index: 0, enabled: true},
     expected: "\n\ta: b;\n"
   },
 
@@ -277,7 +274,7 @@ const TEST_DATA = [
     desc: "create single quote termination",
     input: "content: 'hi",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "content: 'hi';color: red;",
     changed: {0: "'hi'"}
   },
@@ -295,7 +292,7 @@ const TEST_DATA = [
     desc: "create double quote termination",
     input: "content: \"hi",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "content: \"hi\";color: red;",
     changed: {0: "\"hi\""}
   },
@@ -314,7 +311,7 @@ const TEST_DATA = [
     desc: "create url termination",
     input: "background-image: url(something.jpg",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "background-image: url(something.jpg);color: red;",
     changed: {0: "url(something.jpg)"}
   },
@@ -333,7 +330,7 @@ const TEST_DATA = [
     desc: "create url single quote termination",
     input: "background-image: url('something.jpg",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "background-image: url('something.jpg');color: red;",
     changed: {0: "url('something.jpg')"}
   },
@@ -352,7 +349,7 @@ const TEST_DATA = [
     desc: "enable url double quote termination",
     input: "background-image: url(\"something.jpg",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "background-image: url(\"something.jpg\");color: red;",
     changed: {0: "url(\"something.jpg\")"}
   },
@@ -362,7 +359,7 @@ const TEST_DATA = [
     desc: "create backslash termination",
     input: "something: \\",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "something: \\\\;color: red;",
     // The lexer rewrites the token before we see it.  However this is
     // so obscure as to be inconsequential.
@@ -374,7 +371,7 @@ const TEST_DATA = [
     desc: "enable backslash single quote termination",
     input: "something: '\\",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "something: '\\\\';color: red;",
     changed: {0: "'\\\\'"}
   },
@@ -382,7 +379,7 @@ const TEST_DATA = [
     desc: "enable backslash double quote termination",
     input: "something: \"\\",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "something: \"\\\\\";color: red;",
     changed: {0: "\"\\\\\""}
   },
@@ -392,7 +389,7 @@ const TEST_DATA = [
     desc: "enable comment termination",
     input: "something: blah /* comment ",
     instruction: {type: "create", name: "color", value: "red", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "something: blah /* comment*/; color: red;"
   },
 
@@ -409,7 +406,7 @@ const TEST_DATA = [
     desc: "create sanitize unpaired brace",
     input: "",
     instruction: {type: "create", name: "p", value: "}", priority: "",
-                  index: 0},
+                  index: 0, enabled: true},
     expected: "p: \\};",
     changed: {0: "\\}"}
   },
@@ -437,14 +434,109 @@ const TEST_DATA = [
     desc: "disabled declaration does not need semicolon insertion",
     input: "/*! no: semicolon */\n",
     instruction: {type: "create", name: "walrus", value: "zebra", priority: "",
-                  index: 1},
+                  index: 1, enabled: true},
     expected: "/*! no: semicolon */\nwalrus: zebra;\n",
     changed: {}
+  },
+
+  {
+    desc: "create commented-out property",
+    input: "p: v",
+    instruction: {type: "create", name: "shoveler", value: "duck", priority: "",
+                  index: 1, enabled: false},
+    expected: "p: v;/*! shoveler: duck; */",
+  },
+  {
+    desc: "disabled create with comment ender in string",
+    input: "",
+    instruction: {type: "create", name: "content", value: "'*/'", priority: "",
+                  index: 0, enabled: false},
+    expected: "/*! content: '*\\/'; */"
+  },
+
+  {
+    desc: "delete disabled property",
+    input: "\n  a:b;\n  /* color:#f06; */\n  e:f;",
+    instruction: {type: "remove", name: "color", index: 1},
+    expected: "\n  a:b;\n  e:f;",
+  },
+  {
+    desc: "delete heuristic-disabled property",
+    input: "\n  a:b;\n  /*! c:d; */\n  e:f;",
+    instruction: {type: "remove", name: "c", index: 1},
+    expected: "\n  a:b;\n  e:f;",
+  },
+  {
+    desc: "delete disabled property leaving other disabled property",
+    input: "\n  a:b;\n  /* color:#f06; background-color: seagreen; */\n  e:f;",
+    instruction: {type: "remove", name: "color", index: 1},
+    expected: "\n  a:b;\n   /* background-color: seagreen; */\n  e:f;",
+  },
+
+  {
+    desc: "regression test for bug 1328016",
+    input: "position:absolute;top50px;height:50px;width:50px;",
+    instruction: {type: "set", name: "width", value: "60px", priority: "",
+                  index: 2},
+    expected: "position:absolute;top50px;height:50px;width:60px;",
+  },
+
+  {
+    desc: "url regression test for bug 1321970",
+    input: "",
+    instruction: {type: "create", name: "p", value: "url(", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: url();",
+    changed: {0: "url()"}
+  },
+
+  {
+    desc: "url semicolon regression test for bug 1321970",
+    input: "",
+    instruction: {type: "create", name: "p", value: "url(;", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: url();",
+    changed: {0: "url()"}
+  },
+
+  {
+    desc: "basic regression test for bug 1321970",
+    input: "",
+    instruction: {type: "create", name: "p", value: "(", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: \\(;",
+    changed: {0: "\\("}
+  },
+
+  {
+    desc: "unbalanced regression test for bug 1321970",
+    input: "",
+    instruction: {type: "create", name: "p", value: "({[})", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: ({\\[});",
+    changed: {0: "({\\[})"}
+  },
+
+  {
+    desc: "function regression test for bug 1321970",
+    input: "",
+    instruction: {type: "create", name: "p", value: "func(1,2)", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: func(1,2);",
+  },
+
+  {
+    desc: "function regression test for bug 1355233",
+    input: "",
+    instruction: {type: "create", name: "p", value: "func(", priority: "",
+                  index: 0, enabled: true},
+    expected: "p: func\\(;",
+    changed: {0: "func\\("}
   },
 ];
 
 function rewriteDeclarations(inputString, instruction, defaultIndentation) {
-  let rewriter = new RuleRewriter(null, inputString);
+  const rewriter = new RuleRewriter(isCssPropertyKnown, null, inputString);
   rewriter.defaultIndentation = defaultIndentation;
 
   switch (instruction.type) {
@@ -460,7 +552,8 @@ function rewriteDeclarations(inputString, instruction, defaultIndentation) {
 
     case "create":
       rewriter.createProperty(instruction.index, instruction.name,
-                              instruction.value, instruction.priority);
+                              instruction.value, instruction.priority,
+                              instruction.enabled);
       break;
 
     case "set":
@@ -480,10 +573,8 @@ function rewriteDeclarations(inputString, instruction, defaultIndentation) {
 }
 
 function run_test() {
-  let i = 0;
-  for (let test of TEST_DATA) {
-    ++i;
-    let {changed, text} = rewriteDeclarations(test.input, test.instruction,
+  for (const test of TEST_DATA) {
+    const {changed, text} = rewriteDeclarations(test.input, test.instruction,
                                               "\t");
     equal(text, test.expected, "output for " + test.desc);
 

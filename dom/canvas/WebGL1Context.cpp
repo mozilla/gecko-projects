@@ -35,25 +35,7 @@ WebGL1Context::CreateFormatUsage(gl::GLContext* gl) const
 JSObject*
 WebGL1Context::WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGLRenderingContextBinding::Wrap(cx, this, givenProto);
-}
-
-bool
-WebGL1Context::ValidateQueryTarget(GLenum target, const char* info)
-{
-    // TODO: Implement this for EXT_disjoint_timer
-    return false;
+    return dom::WebGLRenderingContext_Binding::Wrap(cx, this, givenProto);
 }
 
 } // namespace mozilla
-
-nsresult
-NS_NewCanvasRenderingContextWebGL(nsIDOMWebGLRenderingContext** out_result)
-{
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::CANVAS_WEBGL_USED, 1);
-
-    nsIDOMWebGLRenderingContext* ctx = mozilla::WebGL1Context::Create();
-
-    NS_ADDREF(*out_result = ctx);
-    return NS_OK;
-}

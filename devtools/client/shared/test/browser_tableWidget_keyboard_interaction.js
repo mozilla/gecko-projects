@@ -6,31 +6,18 @@
 
 "use strict";
 
-const TEST_URI = "data:text/xml;charset=UTF-8,<?xml version='1.0'?>" +
-  "<?xml-stylesheet href='chrome://global/skin/global.css'?>" +
-
-  // Uncomment these lines to help with visual debugging. When uncommented they
-  // dump a couple of thousand errors in the log (bug 1258285)
-  // "<?xml-stylesheet href='chrome://devtools/skin/light-theme.css'?>" +
-  // "<?xml-stylesheet href='chrome://devtools/skin/widgets.css'?>" +
-
-  "<window xmlns='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul'" +
-  " title='Table Widget' width='600' height='500'>" +
-  "<box flex='1' class='theme-light'/></window>";
+const TEST_URI = CHROME_URL_ROOT + "doc_tableWidget_keyboard_interaction.xul";
 const TEST_OPT = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
 const {TableWidget} = require("devtools/client/shared/widgets/TableWidget");
-var {Task} = require("resource://gre/modules/Task.jsm");
 
 var doc, table;
 
 function test() {
   waitForExplicitFinish();
-  let win = Services.ww.openWindow(null, TEST_URI, "_blank", TEST_OPT, null);
+  const win = Services.ww.openWindow(null, TEST_URI, "_blank", TEST_OPT, null);
 
-  win.addEventListener("load", function onLoad() {
-    win.removeEventListener("load", onLoad, false);
-
+  win.addEventListener("load", function() {
     waitForFocus(function() {
       doc = win.document;
       table = new TableWidget(doc.querySelector("box"), {
@@ -47,7 +34,7 @@ function test() {
       });
       startTests();
     });
-  });
+  }, {once: true});
 }
 
 function endTests() {
@@ -57,11 +44,11 @@ function endTests() {
   finish();
 }
 
-var startTests = Task.async(function*() {
+var startTests = async function() {
   populateTable();
-  yield testKeyboardInteraction();
+  await testKeyboardInteraction();
   endTests();
-});
+};
 
 function populateTable() {
   table.push({
@@ -144,50 +131,50 @@ function getNodeByValue(value) {
  * Tests if pressing navigation keys on the table items does the expected
  * behavior.
  */
-var testKeyboardInteraction = Task.async(function*() {
+var testKeyboardInteraction = async function() {
   info("Testing keyboard interaction with the table");
   info("clicking on the row containing id2");
-  let node = getNodeByValue("id2");
-  let event = table.once(TableWidget.EVENTS.ROW_SELECTED);
+  const node = getNodeByValue("id2");
+  const event = table.once(TableWidget.EVENTS.ROW_SELECTED);
   click(node);
-  yield event;
+  await event;
 
-  yield testRow("id3", "DOWN", "next row");
-  yield testRow("id4", "DOWN", "next row");
-  yield testRow("id3", "UP", "previous row");
-  yield testRow("id4", "DOWN", "next row");
-  yield testRow("id5", "DOWN", "next row");
-  yield testRow("id6", "DOWN", "next row");
-  yield testRow("id5", "UP", "previous row");
-  yield testRow("id4", "UP", "previous row");
-  yield testRow("id3", "UP", "previous row");
+  await testRow("id3", "DOWN", "next row");
+  await testRow("id4", "DOWN", "next row");
+  await testRow("id3", "UP", "previous row");
+  await testRow("id4", "DOWN", "next row");
+  await testRow("id5", "DOWN", "next row");
+  await testRow("id6", "DOWN", "next row");
+  await testRow("id5", "UP", "previous row");
+  await testRow("id4", "UP", "previous row");
+  await testRow("id3", "UP", "previous row");
 
   // selecting last item node to test edge navigation cycling case
   table.selectedRow = "id9";
 
   // pressing down on last row should move to first row.
-  yield testRow("id1", "DOWN", "first row");
+  await testRow("id1", "DOWN", "first row");
 
   // pressing up now should move to last row.
-  yield testRow("id9", "UP", "last row");
-});
+  await testRow("id9", "UP", "last row");
+};
 
-function* testRow(id, key, destination) {
-  let node = getNodeByValue(id);
+async function testRow(id, key, destination) {
+  const node = getNodeByValue(id);
   // node should not have selected class
   ok(!node.classList.contains("theme-selected"),
      "Row should not have selected class");
   info(`Pressing ${key} to select ${destination}`);
 
-  let event = table.once(TableWidget.EVENTS.ROW_SELECTED);
+  const event = table.once(TableWidget.EVENTS.ROW_SELECTED);
   EventUtils.sendKey(key, doc.defaultView);
 
-  let uniqueId = yield event;
+  const uniqueId = await event;
   is(id, uniqueId, `Correct row was selected after pressing ${key}`);
 
   ok(node.classList.contains("theme-selected"), "row has selected class");
 
-  let nodes = doc.querySelectorAll(".theme-selected");
+  const nodes = doc.querySelectorAll(".theme-selected");
   for (let i = 0; i < nodes.length; i++) {
     is(nodes[i].getAttribute("data-id"), id,
        "Correct cell selected in all columns");

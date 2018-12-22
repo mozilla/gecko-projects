@@ -9,17 +9,17 @@
 
 DEF_TEST(DoesCrossCompartmentBoundaries, {
     // Create a new global to get a new compartment.
-    JS::CompartmentOptions options;
+    JS::RealmOptions options;
     JS::RootedObject newGlobal(cx, JS_NewGlobalObject(cx,
                                                       getGlobalClass(),
                                                       nullptr,
                                                       JS::FireOnNewGlobalHook,
                                                       options));
     ASSERT_TRUE(newGlobal);
-    JSCompartment* newCompartment = nullptr;
+    JS::Compartment* newCompartment = nullptr;
     {
-      JSAutoCompartment ac(cx, newGlobal);
-      ASSERT_TRUE(JS_InitStandardClasses(cx, newGlobal));
+      JSAutoRealm ar(cx, newGlobal);
+      ASSERT_TRUE(JS::InitRealmStandardClasses(cx));
       newCompartment = js::GetContextCompartment(cx);
     }
     ASSERT_TRUE(newCompartment);
@@ -58,10 +58,11 @@ DEF_TEST(DoesCrossCompartmentBoundaries, {
     // different compartment than A.
     ExpectWriteNode(writer, nodeC);
 
-    // However, should not serialize nodeD because nodeB doesn't belong to one
-    // of our target compartments and so its edges are excluded from serialization.
+    // Should serialize nodeD because it's reachable via B and both nodes B and D
+    // don't belong to a specific compartment.
+    ExpectWriteNode(writer, nodeD);
 
-    JS::AutoCheckCannotGC noGC(rt);
+    JS::AutoCheckCannotGC noGC(cx);
 
     ASSERT_TRUE(WriteHeapGraph(cx,
                                JS::ubi::Node(&nodeA),

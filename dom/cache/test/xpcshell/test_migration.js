@@ -31,8 +31,14 @@ function run_test() {
     ok(responseList.length > 0, 'should have at least one response in cache');
     responseList.forEach(function(response) {
       ok(response, 'each response in list should be non-null');
-      do_check_eq(response.headers.get('Content-Type'), 'text/plain;charset=UTF-8',
-                  'the response should have the correct header');
+      // reponse.url is a empty string in current test file. It should test for
+      // not being a empty string once thet test file is updated.
+      ok(typeof response.url === 'string', 'each response.url in list should be a string');
+      // reponse.redirected may be changed once test file is updated. It should
+      // be false since current reponse.url is a empty string.
+      ok(response.redirected === false, 'each response.redirected in list should be false');
+      Assert.equal(response.headers.get('Content-Type'), 'text/plain;charset=UTF-8',
+                   'the response should have the correct header');
     });
   }).then(function() {
     do_test_finished();

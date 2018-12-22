@@ -12,19 +12,19 @@ if (DEBUG) {
   debug = function (s) {}
 }
 
-const Cu = Components.utils;
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+var EXPORTED_SYMBOLS = ["IndexedDBHelper"];
 
-this.EXPORTED_SYMBOLS = ["IndexedDBHelper"];
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.importGlobalProperties(["indexedDB"]);
 
-XPCOMUtils.defineLazyModuleGetter(this, 'Services',
+ChromeUtils.defineModuleGetter(this, 'Services',
   'resource://gre/modules/Services.jsm');
 
-this.IndexedDBHelper = function IndexedDBHelper() {
+function getErrorName(err) {
+  return err && err.name || "UnknownError";
+}
+
+function IndexedDBHelper() {
 }
 
 IndexedDBHelper.prototype = {
@@ -62,7 +62,14 @@ IndexedDBHelper.prototype = {
     };
 
     if (DEBUG) debug("Try to open database:" + self.dbName + " " + self.dbVersion);
-    let req = indexedDB.open(this.dbName, this.dbVersion);
+    let req;
+    try {
+      req = indexedDB.open(this.dbName, this.dbVersion);
+    } catch (e) {
+      if (DEBUG) debug("Error opening database: " + self.dbName);
+      Services.tm.dispatchToMainThread(() => invokeCallbacks(getErrorName(e)));
+      return;
+    }
     req.onsuccess = function (event) {
       if (DEBUG) debug("Opened database:" + self.dbName + " " + self.dbVersion);
       self._db = event.target.result;
@@ -83,7 +90,7 @@ IndexedDBHelper.prototype = {
     };
     req.onerror = function (aEvent) {
       if (DEBUG) debug("Failed to open database: " + self.dbName);
-      invokeCallbacks(aEvent.target.error.name);
+      invokeCallbacks(getErrorName(aEvent.target.error));
     };
     req.onblocked = function (aEvent) {
       if (DEBUG) debug("Opening database request is blocked.");
@@ -102,8 +109,7 @@ IndexedDBHelper.prototype = {
     if (this._db) {
       if (DEBUG) debug("ensureDB: already have a database, returning early.");
       if (aSuccessCb) {
-        Services.tm.currentThread.dispatch(aSuccessCb,
-                                           Ci.nsIThread.DISPATCH_NORMAL);
+        Services.tm.dispatchToMainThread(aSuccessCb);
       }
       return;
     }
@@ -133,10 +139,17 @@ IndexedDBHelper.prototype = {
    *        Error callback to call when an error is encountered.
    */
   newTxn: function newTxn(txn_type, store_name, callback, successCb, failureCb) {
-    this.ensureDB(function () {
+    this.ensureDB(() => {
       if (DEBUG) debug("Starting new transaction" + txn_type);
-      let txn = this._db.transaction(Array.isArray(store_name) ? store_name : this.dbStoreNames, txn_type);
-      if (DEBUG) debug("Retrieving object store", this.dbName);
+      let txn;
+      try {
+        txn = this._db.transaction(Array.isArray(store_name) ? store_name : this.dbStoreNames, txn_type);
+      } catch (e) {
+        if (DEBUG) debug("Error starting transaction: " + this.dbName);
+        failureCb(getErrorName(e));
+        return;
+      }
+      if (DEBUG) debug("Retrieving object store: " + this.dbName);
       let stores;
       if (Array.isArray(store_name)) {
         stores = [];
@@ -161,15 +174,11 @@ IndexedDBHelper.prototype = {
          * if txn was aborted by calling txn.abort()
          */
         if (failureCb) {
-          if (event.target.error) {
-            failureCb(event.target.error.name);
-          } else {
-            failureCb("UnknownError");
-          }
+          failureCb(getErrorName(event.target.error));
         }
       };
       callback(txn, stores);
-    }.bind(this), failureCb);
+    }, failureCb);
   },
 
   /**

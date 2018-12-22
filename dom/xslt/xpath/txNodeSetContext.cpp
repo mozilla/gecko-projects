@@ -22,17 +22,18 @@ uint32_t txNodeSetContext::position()
     return mPosition;
 }
 
-nsresult txNodeSetContext::getVariable(int32_t aNamespace, nsIAtom* aLName,
+nsresult txNodeSetContext::getVariable(int32_t aNamespace, nsAtom* aLName,
                                        txAExprResult*& aResult)
 {
     NS_ASSERTION(mInner, "mInner is null!!!");
     return mInner->getVariable(aNamespace, aLName, aResult);
 }
 
-bool txNodeSetContext::isStripSpaceAllowed(const txXPathNode& aNode)
+nsresult
+txNodeSetContext::isStripSpaceAllowed(const txXPathNode& aNode, bool& aAllowed)
 {
     NS_ASSERTION(mInner, "mInner is null!!!");
-    return mInner->isStripSpaceAllowed(aNode);
+    return mInner->isStripSpaceAllowed(aNode, aAllowed);
 }
 
 void* txNodeSetContext::getPrivateContext()

@@ -12,7 +12,7 @@ test(() => {
 
 test(() => {
 
-  for (let highWaterMark of [-Infinity, NaN, 'foo', {}, () => {}]) {
+  for (const highWaterMark of [-Infinity, NaN, 'foo', {}, () => {}]) {
     const strategy = new CountQueuingStrategy({ highWaterMark });
     assert_equals(strategy.highWaterMark, highWaterMark, `${highWaterMark} gets set correctly`);
   }
@@ -102,5 +102,12 @@ test(() => {
   assert_equals(strategy.highWaterMark, 'banana');
 
 }, 'CountQueuingStrategy\'s highWaterMark property can be set to anything');
+
+test(() => {
+
+  assert_equals(CountQueuingStrategy.name, 'CountQueuingStrategy',
+                'CountQueuingStrategy.name must be "CountQueuingStrategy"');
+
+}, 'CountQueuingStrategy.name is correct');
 
 done();

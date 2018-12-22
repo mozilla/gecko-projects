@@ -5,8 +5,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaSystemResourceManagerParent.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/layers/CompositorThread.h"
+#include "mozilla/Unused.h"
 
 #include "MediaSystemResourceService.h"
 
@@ -46,24 +46,7 @@ MediaSystemResourceService::Shutdown()
 MediaSystemResourceService::MediaSystemResourceService()
   : mDestroyed(false)
 {
-  MOZ_ASSERT(CompositorBridgeParent::IsInCompositorThread());
-#ifdef MOZ_WIDGET_GONK
-  // The maximum number of hardware resoureces available.
-  // XXX need to hange to a dynamic way.
-  enum
-  {
-    VIDEO_DECODER_COUNT = 1,
-    VIDEO_ENCODER_COUNT = 1
-  };
-
-  MediaSystemResource* resource;
-
-  resource = new MediaSystemResource(VIDEO_DECODER_COUNT);
-  mResources.Put(static_cast<uint32_t>(MediaSystemResourceType::VIDEO_DECODER), resource);
-
-  resource = new MediaSystemResource(VIDEO_ENCODER_COUNT);
-  mResources.Put(static_cast<uint32_t>(MediaSystemResourceType::VIDEO_ENCODER), resource);
-#endif
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 }
 
 MediaSystemResourceService::~MediaSystemResourceService()
@@ -82,7 +65,7 @@ MediaSystemResourceService::Acquire(media::MediaSystemResourceManagerParent* aPa
                                     MediaSystemResourceType aResourceType,
                                     bool aWillWait)
 {
-  MOZ_ASSERT(CompositorBridgeParent::IsInCompositorThread());
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   MOZ_ASSERT(aParent);
 
   if (mDestroyed) {
@@ -123,7 +106,7 @@ MediaSystemResourceService::ReleaseResource(media::MediaSystemResourceManagerPar
                                             uint32_t aId,
                                             MediaSystemResourceType aResourceType)
 {
-  MOZ_ASSERT(CompositorBridgeParent::IsInCompositorThread());
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   MOZ_ASSERT(aParent);
 
   if (mDestroyed) {
@@ -242,7 +225,7 @@ MediaSystemResourceService::UpdateRequests(MediaSystemResourceType aResourceType
     resource->mWaitingRequests;
 
   while ((acquiredRequests.size() < resource->mResourceCount) &&
-         (waitingRequests.size() > 0)) {
+         (!waitingRequests.empty())) {
     MediaSystemResourceRequest& request = waitingRequests.front();
     MOZ_ASSERT(request.mParent);
     // Send response

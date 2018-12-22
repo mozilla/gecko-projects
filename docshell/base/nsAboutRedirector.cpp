@@ -8,7 +8,6 @@
 #include "nsNetUtil.h"
 #include "nsAboutProtocolUtils.h"
 #include "mozilla/ArrayUtils.h"
-#include "nsDOMString.h"
 #include "nsIProtocolHandler.h"
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
@@ -26,15 +25,12 @@ struct RedirEntry
   URI_SAFE_FOR_UNTRUSTED_CONTENT in the third argument to each map item below
   unless your about: page really needs chrome privileges. Security review is
   required before adding new map entries without
-  URI_SAFE_FOR_UNTRUSTED_CONTENT.  Also note, however, that adding
-  URI_SAFE_FOR_UNTRUSTED_CONTENT will allow random web sites to link to that
-  URI.  Perhaps we should separate the two concepts out...
+  URI_SAFE_FOR_UNTRUSTED_CONTENT.
+
+  URI_SAFE_FOR_UNTRUSTED_CONTENT is not enough to let web pages load that page,
+  for that you need MAKE_LINKABLE.
  */
-static RedirEntry kRedirMap[] = {
-  {
-    "", "chrome://global/content/about.xhtml",
-    nsIAboutModule::ALLOW_SCRIPT
-  },
+static const RedirEntry kRedirMap[] = {
   { "about", "chrome://global/content/aboutAbout.xhtml", 0 },
   {
     "addons", "chrome://mozapps/content/extensions/extensions.xul",
@@ -57,19 +53,16 @@ static RedirEntry kRedirMap[] = {
     "credits", "https://www.mozilla.org/credits/",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
   },
-#ifdef MOZ_DEVTOOLS_ALL
-  {
-    "debugging", "chrome://devtools/content/aboutdebugging/aboutdebugging.xhtml",
-    nsIAboutModule::ALLOW_SCRIPT
-  },
-#endif
   {
     "license", "chrome://global/content/license.html",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+      nsIAboutModule::MAKE_LINKABLE
   },
   {
     "logo", "chrome://branding/content/about.png",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    // Linkable for testing reasons.
+    nsIAboutModule::MAKE_LINKABLE
   },
   {
     "memory", "chrome://global/content/aboutMemory.xhtml",
@@ -89,11 +82,6 @@ static RedirEntry kRedirMap[] = {
   {
     "networking", "chrome://global/content/aboutNetworking.xhtml",
     nsIAboutModule::ALLOW_SCRIPT
-  },
-  {
-    "newaddon", "chrome://mozapps/content/extensions/newaddon.xul",
-    nsIAboutModule::ALLOW_SCRIPT |
-      nsIAboutModule::HIDE_FROM_ABOUTABOUT
   },
   {
     "performance", "chrome://global/content/aboutPerformance.xhtml",
@@ -121,6 +109,8 @@ static RedirEntry kRedirMap[] = {
     "srcdoc", "about:blank",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
       nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+      // Needs to be linkable so content can touch its own srcdoc frames
+      nsIAboutModule::MAKE_LINKABLE |
       nsIAboutModule::URI_CAN_LOAD_IN_CHILD
   },
   {
@@ -132,8 +122,30 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT
   },
   {
+    "url-classifier", "chrome://global/content/aboutUrlClassifier.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT
+  },
+  {
     "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.html",
     nsIAboutModule::ALLOW_SCRIPT
+  },
+  {
+    "printpreview", "about:blank",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+    nsIAboutModule::URI_CAN_LOAD_IN_CHILD
+  },
+  {
+    "crashparent", "about:blank",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    nsIAboutModule::HIDE_FROM_ABOUTABOUT
+  },
+  {
+    "crashcontent", "about:blank",
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+    nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+    nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
+    nsIAboutModule::URI_MUST_LOAD_IN_CHILD
   }
 };
 static const int kRedirTotal = mozilla::ArrayLength(kRedirMap);
@@ -144,6 +156,7 @@ nsAboutRedirector::NewChannel(nsIURI* aURI,
                               nsIChannel** aResult)
 {
   NS_ENSURE_ARG_POINTER(aURI);
+  NS_ENSURE_ARG_POINTER(aLoadInfo);
   NS_ASSERTION(aResult, "must not be null");
 
   nsAutoCString path;
@@ -153,6 +166,14 @@ nsAboutRedirector::NewChannel(nsIURI* aURI,
   nsCOMPtr<nsIIOService> ioService = do_GetIOService(&rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  if (XRE_IsParentProcess() && path.EqualsASCII("crashparent")) {
+    MOZ_CRASH("Crash via about:crashparent");
+  }
+
+  if (XRE_IsContentProcess() && path.EqualsASCII("crashcontent")) {
+    MOZ_CRASH("Crash via about:crashcontent");
+  }
+
   for (int i = 0; i < kRedirTotal; i++) {
     if (!strcmp(path.get(), kRedirMap[i].id)) {
       nsCOMPtr<nsIChannel> tempChannel;
@@ -160,26 +181,25 @@ nsAboutRedirector::NewChannel(nsIURI* aURI,
       rv = NS_NewURI(getter_AddRefs(tempURI), kRedirMap[i].url);
       NS_ENSURE_SUCCESS(rv, rv);
 
+      rv = NS_NewChannelInternal(getter_AddRefs(tempChannel),
+                                 tempURI,
+                                 aLoadInfo);
+      NS_ENSURE_SUCCESS(rv, rv);
+
       // If tempURI links to an external URI (i.e. something other than
-      // chrome:// or resource://) then set the LOAD_REPLACE flag on the
-      // channel which forces the channel owner to reflect the displayed
+      // chrome:// or resource://) then set result principal URI on the
+      // load info which forces the channel principal to reflect the displayed
       // URL rather then being the systemPrincipal.
       bool isUIResource = false;
       rv = NS_URIChainHasFlags(tempURI, nsIProtocolHandler::URI_IS_UI_RESOURCE,
                                &isUIResource);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      nsLoadFlags loadFlags =
-        isUIResource ? static_cast<nsLoadFlags>(nsIChannel::LOAD_NORMAL)
-                     : static_cast<nsLoadFlags>(nsIChannel::LOAD_REPLACE);
+      bool isAboutBlank = NS_IsAboutBlank(tempURI);
 
-      rv = NS_NewChannelInternal(getter_AddRefs(tempChannel),
-                                 tempURI,
-                                 aLoadInfo,
-                                 nullptr, // aLoadGroup
-                                 nullptr, // aCallbacks
-                                 loadFlags);
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (!isUIResource && !isAboutBlank) {
+        aLoadInfo->SetResultPrincipalURI(tempURI);
+      }
 
       tempChannel->SetOriginalURI(aURI);
 
@@ -210,13 +230,6 @@ nsAboutRedirector::GetURIFlags(nsIURI* aURI, uint32_t* aResult)
 
   NS_ERROR("nsAboutRedirector called for unknown case");
   return NS_ERROR_ILLEGAL_VALUE;
-}
-
-NS_IMETHODIMP
-nsAboutRedirector::GetIndexedDBOriginPostfix(nsIURI* aURI, nsAString& aResult)
-{
-  SetDOMStringToNull(aResult);
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsresult

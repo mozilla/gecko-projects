@@ -8,50 +8,45 @@
  */
 
 var { DebuggerServer } = require("devtools/server/main");
-var { DebuggerClient } = require("devtools/shared/client/main");
+var { DebuggerClient } = require("devtools/shared/client/debugger-client");
 
 const TAB_URL_1 = "data:text/html;charset=utf-8,foo";
 const TAB_URL_2 = "data:text/html;charset=utf-8,bar";
 
 var gClient;
 var gTab1, gTab2;
-var gTabActor1, gTabActor2;
+var gTargetActor1, gTargetActor2;
 
 function test() {
   waitForExplicitFinish();
 
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   openTabs();
 }
 
 function openTabs() {
   // Open two tabs, select the second
-  gTab1 = gBrowser.addTab(TAB_URL_1);
-  gTab1.linkedBrowser.addEventListener("load", function onLoad1(evt) {
-    gTab1.linkedBrowser.removeEventListener("load", onLoad1);
-
-    gTab2 = gBrowser.selectedTab = gBrowser.addTab(TAB_URL_2);
-    gTab2.linkedBrowser.addEventListener("load", function onLoad2(evt) {
-      gTab2.linkedBrowser.removeEventListener("load", onLoad2);
+  addTab(TAB_URL_1).then(tab1 => {
+    gTab1 = tab1;
+    addTab(TAB_URL_2).then(tab2 => {
+      gTab2 = tab2;
 
       connect();
-    }, true);
-  }, true);
+    });
+  });
 }
 
 function connect() {
-  // Connect to debugger server to fetch the two tab actors
+  // Connect to debugger server to fetch the two target actors for each tab
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect()
     .then(() => gClient.listTabs())
     .then(response => {
-      // Fetch the tab actors for each tab
-      gTabActor1 = response.tabs.filter(a => a.url === TAB_URL_1)[0];
-      gTabActor2 = response.tabs.filter(a => a.url === TAB_URL_2)[0];
+      // Fetch the target actors for each tab
+      gTargetActor1 = response.tabs.filter(a => a.url === TAB_URL_1)[0];
+      gTargetActor2 = response.tabs.filter(a => a.url === TAB_URL_2)[0];
 
       checkGetTab();
     });
@@ -60,17 +55,17 @@ function connect() {
 function checkGetTab() {
   gClient.getTab({tab: gTab1})
          .then(response => {
-           is(JSON.stringify(gTabActor1), JSON.stringify(response.tab),
-              "getTab returns the same tab grip for first tab");
+           is(JSON.stringify(gTargetActor1), JSON.stringify(response.tab),
+              "getTab returns the same target form for first tab");
          })
          .then(() => {
-           let filter = {};
+           const filter = {};
            // Filter either by tabId or outerWindowID,
            // if we are running tests OOP or not.
            if (gTab1.linkedBrowser.frameLoader.tabParent) {
              filter.tabId = gTab1.linkedBrowser.frameLoader.tabParent.tabId;
            } else {
-             let windowUtils = gTab1.linkedBrowser.contentWindow
+             const windowUtils = gTab1.linkedBrowser.contentWindow
                .QueryInterface(Ci.nsIInterfaceRequestor)
                .getInterface(Ci.nsIDOMWindowUtils);
              filter.outerWindowID = windowUtils.outerWindowID;
@@ -78,13 +73,13 @@ function checkGetTab() {
            return gClient.getTab(filter);
          })
          .then(response => {
-           is(JSON.stringify(gTabActor1), JSON.stringify(response.tab),
-              "getTab returns the same tab grip when filtering by tabId/outerWindowID");
+           is(JSON.stringify(gTargetActor1), JSON.stringify(response.tab),
+              "getTab returns the same target form when filtering by tabId/outerWindowID");
          })
          .then(() => gClient.getTab({tab: gTab2}))
          .then(response => {
-           is(JSON.stringify(gTabActor2), JSON.stringify(response.tab),
-              "getTab returns the same tab grip for second tab");
+           is(JSON.stringify(gTargetActor2), JSON.stringify(response.tab),
+              "getTab returns the same target form for second tab");
          })
          .then(checkGetTabFailures);
 }
@@ -106,14 +101,12 @@ function checkGetTabFailures() {
         is(response.message, "Unable to find tab with outerWindowID '-999'");
       }
     )
-    .then(checkSelectedTabActor);
-
+    .then(checkSelectedTargetActor);
 }
 
-function checkSelectedTabActor() {
-  // Send a naive request to the second tab actor
-  // to check if it works
-  gClient.request({ to: gTabActor2.consoleActor, type: "startListeners", listeners: [] }, aResponse => {
+function checkSelectedTargetActor() {
+  // Send a naive request to the second target actor to check if it works
+  gClient.request({ to: gTargetActor2.consoleActor, type: "startListeners", listeners: [] }, aResponse => {
     ok("startedListeners" in aResponse, "Actor from the selected tab should respond to the request.");
 
     closeSecondTab();
@@ -122,19 +115,16 @@ function checkSelectedTabActor() {
 
 function closeSecondTab() {
   // Close the second tab, currently selected
-  let container = gBrowser.tabContainer;
-  container.addEventListener("TabClose", function onTabClose() {
-    container.removeEventListener("TabClose", onTabClose);
-
-    checkFirstTabActor();
-  });
+  const container = gBrowser.tabContainer;
+  container.addEventListener("TabClose", function() {
+    checkFirstTargetActor();
+  }, {once: true});
   gBrowser.removeTab(gTab2);
 }
 
-function checkFirstTabActor() {
-  // then send a request to the first tab actor
-  // to check if it still works
-  gClient.request({ to: gTabActor1.consoleActor, type: "startListeners", listeners: [] }, aResponse => {
+function checkFirstTargetActor() {
+  // then send a request to the first target actor to check if it still works
+  gClient.request({ to: gTargetActor1.consoleActor, type: "startListeners", listeners: [] }, aResponse => {
     ok("startedListeners" in aResponse, "Actor from the first tab should still respond.");
 
     cleanup();
@@ -142,11 +132,9 @@ function checkFirstTabActor() {
 }
 
 function cleanup() {
-  let container = gBrowser.tabContainer;
-  container.addEventListener("TabClose", function onTabClose() {
-    container.removeEventListener("TabClose", onTabClose);
-
-    gClient.close(finish);
-  });
+  const container = gBrowser.tabContainer;
+  container.addEventListener("TabClose", function() {
+    gClient.close().then(finish);
+  }, {once: true});
   gBrowser.removeTab(gTab1);
 }

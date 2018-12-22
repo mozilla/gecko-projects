@@ -11,11 +11,7 @@
 #include "mozilla/StickyTimeDuration.h"
 #include "mozilla/ComputedTimingFunction.h"
 
-// X11 has a #define for None
-#ifdef None
-#undef None
-#endif
-#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // FillMode
+#include "mozilla/dom/AnimationEffectBinding.h" // FillMode
 
 namespace mozilla {
 
@@ -29,6 +25,8 @@ struct ComputedTiming
   // Will equal StickyTimeDuration::Forever() if the animation repeats
   // indefinitely.
   StickyTimeDuration  mActiveDuration;
+  // The time within the active interval.
+  StickyTimeDuration  mActiveTime;
   // The effect end time in local time (i.e. an offset from the effect's
   // start time). Will equal StickyTimeDuration::Forever() if the animation
   // plays indefinitely.
@@ -37,7 +35,7 @@ struct ComputedTiming
   // being sampled backwards, this will go from 1.0 to 0.0.
   // Will be null if the animation is neither animating nor
   // filling at the sampled time.
-  Nullable<double>    mProgress;
+  dom::Nullable<double>    mProgress;
   // Zero-based iteration index (meaningless if mProgress is null).
   uint64_t            mCurrentIteration = 0;
   // Unlike TimingParams::mIterations, this value is
@@ -62,12 +60,12 @@ struct ComputedTiming
   }
 
   enum class AnimationPhase {
-    Null,   // Not sampled (null sample time)
+    Idle,   // Not sampled (null sample time)
     Before, // Sampled prior to the start of the active interval
     Active, // Sampled within the active interval
     After   // Sampled after (or at) the end of the active interval
   };
-  AnimationPhase      mPhase = AnimationPhase::Null;
+  AnimationPhase      mPhase = AnimationPhase::Idle;
 
   ComputedTimingFunction::BeforeFlag mBeforeFlag =
     ComputedTimingFunction::BeforeFlag::Unset;

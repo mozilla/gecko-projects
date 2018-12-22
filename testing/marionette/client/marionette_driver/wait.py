@@ -2,15 +2,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import collections
-import errors
 import sys
 import time
+
+from . import errors
+
 
 DEFAULT_TIMEOUT = 5
 DEFAULT_INTERVAL = 0.1
 
+
 class Wait(object):
+
     """An explicit conditional utility class for waiting until a condition
     evaluates to true or not null.
 
@@ -28,7 +34,7 @@ class Wait(object):
     """
 
     def __init__(self, marionette, timeout=None,
-                 interval=DEFAULT_INTERVAL, ignored_exceptions=None,
+                 interval=None, ignored_exceptions=None,
                  clock=None):
         """Configure the Wait instance to have a custom timeout, interval, and
         list of ignored exceptions.  Optionally a different time
@@ -47,14 +53,15 @@ class Wait(object):
             conditions, usually a Marionette instance.
 
         :param timeout: How long to wait for the evaluated condition
-            to become true.  The default timeout is the `timeout`
-            property on the `Marionette` object if set, or
+            to become true.  The default timeout is
             `wait.DEFAULT_TIMEOUT`.
 
         :param interval: How often the condition should be evaluated.
             In reality the interval may be greater as the cost of
-            evaluating the condition function is not factored in.  The
-            default polling interval is `wait.DEFAULT_INTERVAL`.
+            evaluating the condition function. If that is not the case the
+            interval for the next condition function call is shortend to keep
+            the original interval sequence as best as possible.
+            The default polling interval is `wait.DEFAULT_INTERVAL`.
 
         :param ignored_exceptions: Ignore specific types of exceptions
             whilst waiting for the condition.  Any exceptions not
@@ -68,11 +75,10 @@ class Wait(object):
         """
 
         self.marionette = marionette
-        self.timeout = timeout or (self.marionette.timeout and
-                                   self.marionette.timeout / 1000.0) or DEFAULT_TIMEOUT
+        self.timeout = timeout if timeout is not None else DEFAULT_TIMEOUT
+        self.interval = interval if interval is not None else DEFAULT_INTERVAL
         self.clock = clock or SystemClock()
         self.end = self.clock.now + self.timeout
-        self.interval = interval
 
         exceptions = []
         if ignored_exceptions is not None:
@@ -119,33 +125,41 @@ class Wait(object):
 
         while not until(self.clock, self.end):
             try:
+                next = self.clock.now + self.interval
                 rv = condition(self.marionette)
-            except (KeyboardInterrupt, SystemExit) as e:
-                raise e
-            except self.exceptions as e:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except self.exceptions:
                 last_exc = sys.exc_info()
 
+            # Re-adjust the interval depending on how long the callback
+            # took to evaluate the condition
+            interval_new = max(next - self.clock.now, 0)
+
             if not rv:
-                self.clock.sleep(self.interval)
+                self.clock.sleep(interval_new)
                 continue
 
             if rv is not None:
                 return rv
 
-            self.clock.sleep(self.interval)
+            self.clock.sleep(interval_new)
 
         if message:
-            message = " with message: %s" % message
+            message = " with message: {}".format(message)
 
         raise errors.TimeoutException(
-            "Timed out after %s seconds%s" %
-            (round((self.clock.now - start), 1), message if message else ""),
+            "Timed out after {0} seconds{1}".format(round((self.clock.now - start), 1),
+                                                    message if message else ""),
             cause=last_exc)
+
 
 def until_pred(clock, end):
     return clock.now >= end
 
+
 class SystemClock(object):
+
     def __init__(self):
         self._time = time
 

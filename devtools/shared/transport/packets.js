@@ -24,13 +24,15 @@
  *     Called to clean up at the end of use
  */
 
-const { Cc, Ci, Cu } = require("chrome");
+const { Cc, Ci } = require("chrome");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { dumpn, dumpv } = DevToolsUtils;
+const flags = require("devtools/shared/flags");
 const StreamUtils = require("devtools/shared/transport/stream-utils");
-const promise = require("promise");
+const defer = require("devtools/shared/defer");
 
 DevToolsUtils.defineLazyGetter(this, "unicodeConverter", () => {
+  // eslint-disable-next-line no-shadow
   const unicodeConverter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                            .createInstance(Ci.nsIScriptableUnicodeConverter);
   unicodeConverter.charset = "UTF-8";
@@ -114,14 +116,14 @@ function JSONPacket(transport) {
  *         The parsed packet, or null if it's not a match.
  */
 JSONPacket.fromHeader = function(header, transport) {
-  let match = this.HEADER_PATTERN.exec(header);
+  const match = this.HEADER_PATTERN.exec(header);
 
   if (!match) {
     return null;
   }
 
   dumpv("Header matches JSON packet");
-  let packet = new JSONPacket(transport);
+  const packet = new JSONPacket(transport);
   packet.length = +match[1];
   return packet;
 };
@@ -134,14 +136,16 @@ Object.defineProperty(JSONPacket.prototype, "object", {
   /**
    * Gets the object (not the serialized string) being read or written.
    */
-  get: function() { return this._object; },
+  get: function() {
+    return this._object;
+  },
 
   /**
    * Sets the object to be sent when write() is called.
    */
   set: function(object) {
     this._object = object;
-    let data = JSON.stringify(object);
+    const data = JSON.stringify(object);
     this._data = unicodeConverter.ConvertFromUnicode(data);
     this.length = this._data.length;
   }
@@ -162,29 +166,27 @@ JSONPacket.prototype.read = function(stream, scriptableStream) {
   try {
     json = unicodeConverter.ConvertToUnicode(json);
     this._object = JSON.parse(json);
-  } catch(e) {
-    let msg = "Error parsing incoming packet: " + json + " (" + e +
+  } catch (e) {
+    const msg = "Error parsing incoming packet: " + json + " (" + e +
               " - " + e.stack + ")";
-    if (Cu.reportError) {
-      Cu.reportError(msg);
-    }
+    console.error(msg);
     dumpn(msg);
     return;
   }
 
   this._transport._onJSONObjectReady(this._object);
-}
+};
 
 JSONPacket.prototype._readData = function(stream, scriptableStream) {
-  if (dumpv.wantVerbose) {
+  if (flags.wantVerbose) {
     dumpv("Reading JSON data: _l: " + this.length + " dL: " +
           this._data.length + " sA: " + stream.available());
   }
-  let bytesToRead = Math.min(this.length - this._data.length,
+  const bytesToRead = Math.min(this.length - this._data.length,
                              stream.available());
   this._data += scriptableStream.readBytes(bytesToRead);
   this._done = this._data.length === this.length;
-}
+};
 
 JSONPacket.prototype.write = function(stream) {
   dumpv("Writing JSON packet");
@@ -194,18 +196,20 @@ JSONPacket.prototype.write = function(stream) {
     this._outgoing = this.length + ":" + this._data;
   }
 
-  let written = stream.write(this._outgoing, this._outgoing.length);
+  const written = stream.write(this._outgoing, this._outgoing.length);
   this._outgoing = this._outgoing.slice(written);
   this._done = !this._outgoing.length;
-}
+};
 
 Object.defineProperty(JSONPacket.prototype, "done", {
-  get: function() { return this._done; }
+  get: function() {
+    return this._done;
+  }
 });
 
 JSONPacket.prototype.toString = function() {
   return JSON.stringify(this._object, null, 2);
-}
+};
 
 exports.JSONPacket = JSONPacket;
 
@@ -227,7 +231,7 @@ exports.JSONPacket = JSONPacket;
 function BulkPacket(transport) {
   Packet.call(this, transport);
   this._done = false;
-  this._readyForWriting = promise.defer();
+  this._readyForWriting = defer();
 }
 
 /**
@@ -241,14 +245,14 @@ function BulkPacket(transport) {
  *         The parsed packet, or null if it's not a match.
  */
 BulkPacket.fromHeader = function(header, transport) {
-  let match = this.HEADER_PATTERN.exec(header);
+  const match = this.HEADER_PATTERN.exec(header);
 
   if (!match) {
     return null;
   }
 
   dumpv("Header matches bulk packet");
-  let packet = new BulkPacket(transport);
+  const packet = new BulkPacket(transport);
   packet.header = {
     actor: match[1],
     type: match[2],
@@ -267,7 +271,7 @@ BulkPacket.prototype.read = function(stream) {
   // Temporarily pause monitoring of the input stream
   this._transport.pauseIncoming();
 
-  let deferred = promise.defer();
+  const deferred = defer();
 
   this._transport._onBulkReadReady({
     actor: this.actor,
@@ -275,7 +279,7 @@ BulkPacket.prototype.read = function(stream) {
     length: this.length,
     copyTo: (output) => {
       dumpv("CT length: " + this.length);
-      let copying = StreamUtils.copyStream(stream, output, this.length);
+      const copying = StreamUtils.copyStream(stream, output, this.length);
       deferred.resolve(copying);
       return copying;
     },
@@ -294,7 +298,7 @@ BulkPacket.prototype.read = function(stream) {
   this.read = () => {
     throw new Error("Tried to read() a BulkPacket's stream multiple times.");
   };
-}
+};
 
 BulkPacket.prototype.write = function(stream) {
   dumpv("Writing bulk packet");
@@ -309,7 +313,7 @@ BulkPacket.prototype.write = function(stream) {
   // Write the header, or whatever's left of it to write.
   if (this._outgoingHeader.length) {
     dumpv("Writing bulk packet header");
-    let written = stream.write(this._outgoingHeader,
+    const written = stream.write(this._outgoingHeader,
                                this._outgoingHeader.length);
     this._outgoingHeader = this._outgoingHeader.slice(written);
     return;
@@ -320,12 +324,12 @@ BulkPacket.prototype.write = function(stream) {
   // Temporarily pause the monitoring of the output stream
   this._transport.pauseOutgoing();
 
-  let deferred = promise.defer();
+  const deferred = defer();
 
   this._readyForWriting.resolve({
     copyFrom: (input) => {
       dumpv("CF length: " + this.length);
-      let copying = StreamUtils.copyStream(input, stream, this.length);
+      const copying = StreamUtils.copyStream(input, stream, this.length);
       deferred.resolve(copying);
       return copying;
     },
@@ -344,7 +348,7 @@ BulkPacket.prototype.write = function(stream) {
   this.write = () => {
     throw new Error("Tried to write() a BulkPacket's stream multiple times.");
   };
-}
+};
 
 Object.defineProperty(BulkPacket.prototype, "streamReadyForWriting", {
   get: function() {
@@ -369,13 +373,14 @@ Object.defineProperty(BulkPacket.prototype, "header", {
 });
 
 Object.defineProperty(BulkPacket.prototype, "done", {
-  get: function() { return this._done; },
+  get: function() {
+    return this._done;
+  },
 });
-
 
 BulkPacket.prototype.toString = function() {
   return "Bulk: " + JSON.stringify(this.header, null, 2);
-}
+};
 
 exports.BulkPacket = BulkPacket;
 
@@ -399,16 +404,18 @@ RawPacket.prototype = Object.create(Packet.prototype);
 RawPacket.prototype.read = function(stream) {
   // This hasn't yet been needed for testing.
   throw Error("Not implmented.");
-}
+};
 
 RawPacket.prototype.write = function(stream) {
-  let written = stream.write(this._data, this._data.length);
+  const written = stream.write(this._data, this._data.length);
   this._data = this._data.slice(written);
   this._done = !this._data.length;
-}
+};
 
 Object.defineProperty(RawPacket.prototype, "done", {
-  get: function() { return this._done; }
+  get: function() {
+    return this._done;
+  }
 });
 
 exports.RawPacket = RawPacket;

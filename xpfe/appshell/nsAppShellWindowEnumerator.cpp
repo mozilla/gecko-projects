@@ -8,42 +8,37 @@
 #include "nsIContentViewer.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMWindow.h"
 #include "nsIFactory.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIXULWindow.h"
+#include "mozilla/dom/Element.h"
 
 #include "nsWindowMediator.h"
+
+using mozilla::dom::Element;
 
 //
 // static helper functions
 //
 
-static nsCOMPtr<nsIDOMNode> GetDOMNodeFromDocShell(nsIDocShell *aShell);
 static void GetAttribute(nsIXULWindow *inWindow, const nsAString &inAttribute,
                          nsAString &outValue);
 static void GetWindowType(nsIXULWindow* inWindow, nsString &outType);
 
-nsCOMPtr<nsIDOMNode> GetDOMNodeFromDocShell(nsIDocShell *aShell)
+static Element* GetElementFromDocShell(nsIDocShell *aShell)
 {
-  nsCOMPtr<nsIDOMNode> node;
-
   nsCOMPtr<nsIContentViewer> cv;
   aShell->GetContentViewer(getter_AddRefs(cv));
   if (cv) {
-    nsCOMPtr<nsIDOMDocument> domdoc(do_QueryInterface(cv->GetDocument()));
-    if (domdoc) {
-      nsCOMPtr<nsIDOMElement> element;
-      domdoc->GetDocumentElement(getter_AddRefs(element));
-      if (element)
-        node = element;
+    nsCOMPtr<nsIDocument> doc = cv->GetDocument();
+    if (doc) {
+      return doc->GetDocumentElement();
     }
   }
 
-  return node;
+  return nullptr;
 }
 
 // generic "retrieve the value of a XUL attribute" function
@@ -52,11 +47,9 @@ void GetAttribute(nsIXULWindow *inWindow, const nsAString &inAttribute,
 {
   nsCOMPtr<nsIDocShell> shell;
   if (inWindow && NS_SUCCEEDED(inWindow->GetDocShell(getter_AddRefs(shell)))) {
-    nsCOMPtr<nsIDOMNode> node(GetDOMNodeFromDocShell(shell));
-    if (node) {
-      nsCOMPtr<nsIDOMElement> webshellElement(do_QueryInterface(node));
-      if (webshellElement)
-        webshellElement->GetAttribute(inAttribute, outValue);
+    RefPtr<Element> webshellElement = GetElementFromDocShell(shell);
+    if (webshellElement) {
+      webshellElement->GetAttribute(inAttribute, outValue);
     }
   }
 }
@@ -85,7 +78,7 @@ nsWindowInfo::~nsWindowInfo()
 // return true if the window described by this WindowInfo has a type
 // equal to the given type
 bool nsWindowInfo::TypeEquals(const nsAString &aType)
-{ 
+{
   nsAutoString rtnString;
   GetWindowType(mWindow, rtnString);
   return rtnString == aType;

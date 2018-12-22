@@ -9,7 +9,7 @@
 #include "nsNativeDragTarget.h"
 #include "nsDragService.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMNode.h"
+#include "nsINode.h"
 #include "nsCOMPtr.h"
 
 #include "nsIWidget.h"
@@ -27,6 +27,8 @@ static NS_DEFINE_IID(kIDragServiceIID, NS_IDRAGSERVICE_IID);
 
 // This is cached for Leave notification
 static POINTL gDragLastPoint;
+
+bool nsNativeDragTarget::gDragImageChanged = false;
 
 /*
  * class nsNativeDragTarget
@@ -167,11 +169,9 @@ nsNativeDragTarget::DispatchDragDropEvent(EventMessage aEventMessage,
 
   if (mHWnd != nullptr) {
     ::ScreenToClient(mHWnd, &cpos);
-    event.refPoint.x = cpos.x;
-    event.refPoint.y = cpos.y;
+    event.mRefPoint = LayoutDeviceIntPoint(cpos.x, cpos.y);
   } else {
-    event.refPoint.x = 0;
-    event.refPoint.y = 0;
+    event.mRefPoint = LayoutDeviceIntPoint(0, 0);
   }
 
   ModifierKeyState modifierKeyState;
@@ -321,6 +321,9 @@ nsNativeDragTarget::DragOver(DWORD   grfKeyState,
     return E_FAIL;
   }
 
+  bool dragImageChanged = gDragImageChanged;
+  gDragImageChanged = false;
+
   // If a LINK effect could be generated previously from a DragEnter(),
   // then we should include it as an allowed effect.
   mEffectsAllowed = (*pdwEffect) | (mEffectsAllowed & DROPEFFECT_LINK);
@@ -336,11 +339,20 @@ nsNativeDragTarget::DragOver(DWORD   grfKeyState,
 
   // Drag and drop image helper
   if (GetDropTargetHelper()) {
+    if (dragImageChanged) {
+      // The drop helper only updates the image during DragEnter, so emulate
+      // a DragEnter if the image was changed.
+      POINT pt = { ptl.x, ptl.y };
+      nsDragService* dragService = static_cast<nsDragService *>(mDragService);
+      GetDropTargetHelper()->DragEnter(mHWnd, dragService->GetDataObject(), &pt, *pdwEffect);
+
+    }
     POINT pt = { ptl.x, ptl.y };
     GetDropTargetHelper()->DragOver(&pt, *pdwEffect);
   }
 
-  mDragService->FireDragEventAtSource(eDrag);
+  ModifierKeyState modifierKeyState;
+  mDragService->FireDragEventAtSource(eDrag, modifierKeyState.GetModifiers());
   // Now process the native drag state and then dispatch the event
   ProcessDrag(eDragOver, grfKeyState, ptl, pdwEffect);
 
@@ -368,7 +380,7 @@ nsNativeDragTarget::DragLeave()
   mDragService->GetCurrentSession(getter_AddRefs(currentDragSession));
 
   if (currentDragSession) {
-    nsCOMPtr<nsIDOMNode> sourceNode;
+    nsCOMPtr<nsINode> sourceNode;
     currentDragSession->GetSourceNode(getter_AddRefs(sourceNode));
 
     if (!sourceNode) {
@@ -376,7 +388,8 @@ nsNativeDragTarget::DragLeave()
       // initiated in a different app. End the drag session, since
       // we're done with it for now (until the user drags back into
       // mozilla).
-      mDragService->EndDragSession(false);
+      ModifierKeyState modifierKeyState;
+      mDragService->EndDragSession(false, modifierKeyState.GetModifiers());
     }
   }
 
@@ -399,7 +412,8 @@ nsNativeDragTarget::DragCancel()
       GetDropTargetHelper()->DragLeave();
     }
     if (mDragService) {
-      mDragService->EndDragSession(false);
+      ModifierKeyState modifierKeyState;
+      mDragService->EndDragSession(false, modifierKeyState.GetModifiers());
     }
     this->Release(); // matching the AddRef in DragEnter
     mTookOwnRef = false;
@@ -460,7 +474,8 @@ nsNativeDragTarget::Drop(LPDATAOBJECT pData,
   cpos.x = GET_X_LPARAM(pos);
   cpos.y = GET_Y_LPARAM(pos);
   winDragService->SetDragEndPoint(nsIntPoint(cpos.x, cpos.y));
-  serv->EndDragSession(true);
+  ModifierKeyState modifierKeyState;
+  serv->EndDragSession(true, modifierKeyState.GetModifiers());
 
   // release the ref that was taken in DragEnter
   NS_ASSERTION(mTookOwnRef, "want to release own ref, but not taken!");

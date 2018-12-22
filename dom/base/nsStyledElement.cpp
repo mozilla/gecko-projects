@@ -5,19 +5,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsStyledElement.h"
+#include "mozAutoDocUpdate.h"
 #include "nsGkAtoms.h"
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
 #include "mozilla/dom/ElementInlines.h"
+#include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/InternalMutationEvent.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDocument.h"
-#include "mozilla/css/Declaration.h"
-#include "nsCSSParser.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/css/Loader.h"
-#include "nsIDOMMutationEvent.h"
 #include "nsXULElement.h"
 #include "nsContentUtils.h"
 #include "nsStyleUtil.h"
@@ -25,96 +26,130 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
+// Use the CC variant of this, even though this class does not define
+// a new CC participant, to make QIing to the CC interfaces faster.
+NS_IMPL_QUERY_INTERFACE_CYCLE_COLLECTION_INHERITED(nsStyledElement,
+                                                   nsStyledElementBase,
+                                                   nsStyledElement)
+
 //----------------------------------------------------------------------
 // nsIContent methods
 
 bool
-nsStyledElementNotElementCSSInlineStyle::ParseAttribute(int32_t aNamespaceID,
-                                                        nsIAtom* aAttribute,
-                                                        const nsAString& aValue,
-                                                        nsAttrValue& aResult)
+nsStyledElement::ParseAttribute(int32_t aNamespaceID,
+                                nsAtom* aAttribute,
+                                const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
+                                nsAttrValue& aResult)
 {
   if (aAttribute == nsGkAtoms::style && aNamespaceID == kNameSpaceID_None) {
-    SetMayHaveStyle();
-    ParseStyleAttribute(aValue, aResult, false);
+    ParseStyleAttribute(aValue, aMaybeScriptedPrincipal, aResult, false);
     return true;
   }
 
   return nsStyledElementBase::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                             aResult);
+                                             aMaybeScriptedPrincipal, aResult);
 }
 
 nsresult
-nsStyledElementNotElementCSSInlineStyle::SetInlineStyleDeclaration(css::Declaration* aDeclaration,
-                                                                   const nsAString* aSerialized,
-                                                                   bool aNotify)
+nsStyledElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                               const nsAttrValueOrString* aValue, bool aNotify)
 {
-  SetMayHaveStyle();
-  bool modification = false;
-  nsAttrValue oldValue;
+  if (aNamespaceID == kNameSpaceID_None) {
+    if (aName == nsGkAtoms::style) {
+      if (aValue) {
+        SetMayHaveStyle();
+      }
+    }
+  }
 
-  bool hasListeners = aNotify &&
+  return nsStyledElementBase::BeforeSetAttr(aNamespaceID, aName, aValue,
+                                            aNotify);
+}
+
+void
+nsStyledElement::InlineStyleDeclarationWillChange(MutationClosureData& aData)
+{
+  MOZ_ASSERT(OwnerDoc()->UpdateNestingLevel() > 0,
+             "Should be inside document update!");
+  bool modification = false;
+  if (MayHaveStyle()) {
+    bool needsOldValue =
+      !StaticPrefs::dom_mutation_events_cssom_disabled() &&
+      nsContentUtils::HasMutationListeners(this,
+                                           NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
+                                           this);
+
+    if (!needsOldValue) {
+      CustomElementDefinition* definition = GetCustomElementDefinition();
+      if (definition && definition->IsInObservedAttributeList(nsGkAtoms::style)) {
+        needsOldValue = true;
+      }
+    }
+
+    if (needsOldValue) {
+      nsAutoString oldValueStr;
+      modification = GetAttr(kNameSpaceID_None, nsGkAtoms::style,
+                             oldValueStr);
+      if (modification) {
+        aData.mOldValue.emplace();
+        aData.mOldValue->SetTo(oldValueStr);
+      }
+    } else {
+      modification = HasAttr(kNameSpaceID_None, nsGkAtoms::style);
+    }
+  }
+
+  aData.mModType = modification ?
+    static_cast<uint8_t>(MutationEvent_Binding::MODIFICATION) :
+    static_cast<uint8_t>(MutationEvent_Binding::ADDITION);
+  nsNodeUtils::AttributeWillChange(this, kNameSpaceID_None,
+                                   nsGkAtoms::style,
+                                   aData.mModType, nullptr);
+
+  //XXXsmaug In order to make attribute handling more consistent, consider to
+  //         call BeforeSetAttr and pass kCallAfterSetAttr to
+  //         SetAttrAndNotify in SetInlineStyleDeclaration.
+  //         Handling of mozAutoDocUpdate may require changes in that case.
+}
+
+nsresult
+nsStyledElement::SetInlineStyleDeclaration(DeclarationBlock& aDeclaration,
+                                           MutationClosureData& aData)
+{
+  MOZ_ASSERT(OwnerDoc()->UpdateNestingLevel(),
+             "Should be inside document update!");
+
+  bool hasListeners =
+    !StaticPrefs::dom_mutation_events_cssom_disabled() &&
     nsContentUtils::HasMutationListeners(this,
                                          NS_EVENT_BITS_MUTATION_ATTRMODIFIED,
                                          this);
 
-  // There's no point in comparing the stylerule pointers since we're always
-  // getting a new stylerule here. And we can't compare the stringvalues of
-  // the old and the new rules since both will point to the same declaration
-  // and thus will be the same.
-  if (hasListeners) {
-    // save the old attribute so we can set up the mutation event properly
-    // XXXbz if the old rule points to the same declaration as the new one,
-    // this is getting the new attr value, not the old one....
-    nsAutoString oldValueStr;
-    modification = GetAttr(kNameSpaceID_None, nsGkAtoms::style,
-                           oldValueStr);
-    if (modification) {
-      oldValue.SetTo(oldValueStr);
-    }
-  }
-  else if (aNotify && IsInDoc()) {
-    modification = !!mAttrsAndChildren.GetAttr(nsGkAtoms::style);
-  }
+  nsAttrValue attrValue(do_AddRef(&aDeclaration), nullptr);
+  SetMayHaveStyle();
 
-  nsAttrValue attrValue(aDeclaration, aSerialized);
-
-  // XXXbz do we ever end up with ADDITION here?  I doubt it.
-  uint8_t modType = modification ?
-    static_cast<uint8_t>(nsIDOMMutationEvent::MODIFICATION) :
-    static_cast<uint8_t>(nsIDOMMutationEvent::ADDITION);
-
+  nsIDocument* document = GetComposedDoc();
+  mozAutoDocUpdate updateBatch(document, true);
   return SetAttrAndNotify(kNameSpaceID_None, nsGkAtoms::style, nullptr,
-                          oldValue, attrValue, modType, hasListeners,
-                          aNotify, kDontCallAfterSetAttr);
-}
-
-css::Declaration*
-nsStyledElementNotElementCSSInlineStyle::GetInlineStyleDeclaration()
-{
-  if (!MayHaveStyle()) {
-    return nullptr;
-  }
-  const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
-
-  if (attrVal && attrVal->Type() == nsAttrValue::eCSSDeclaration) {
-    return attrVal->GetCSSDeclarationValue();
-  }
-
-  return nullptr;
+                          aData.mOldValue.isSome() ?
+                            aData.mOldValue.ptr() : nullptr,
+                          attrValue, nullptr, aData.mModType,
+                          hasListeners, true, kDontCallAfterSetAttr,
+                          document, updateBatch);
 }
 
 // ---------------------------------------------------------------
 // Others and helpers
 
 nsICSSDeclaration*
-nsStyledElementNotElementCSSInlineStyle::Style()
+nsStyledElement::Style()
 {
   Element::nsDOMSlots *slots = DOMSlots();
 
   if (!slots->mStyle) {
     // Just in case...
-    ReparseStyleAttribute(true);
+    ReparseStyleAttribute(true, false);
 
     slots->mStyle = new nsDOMCSSAttributeDeclaration(this, false);
     SetMayHaveStyle();
@@ -124,43 +159,64 @@ nsStyledElementNotElementCSSInlineStyle::Style()
 }
 
 nsresult
-nsStyledElementNotElementCSSInlineStyle::ReparseStyleAttribute(bool aForceInDataDoc)
+nsStyledElement::ReparseStyleAttribute(bool aForceInDataDoc, bool aForceIfAlreadyParsed)
 {
   if (!MayHaveStyle()) {
     return NS_OK;
   }
   const nsAttrValue* oldVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
-  
-  if (oldVal && oldVal->Type() != nsAttrValue::eCSSDeclaration) {
+  if (oldVal && (aForceIfAlreadyParsed || oldVal->Type() != nsAttrValue::eCSSDeclaration)) {
     nsAttrValue attrValue;
     nsAutoString stringValue;
     oldVal->ToString(stringValue);
-    ParseStyleAttribute(stringValue, attrValue, aForceInDataDoc);
+    ParseStyleAttribute(stringValue, nullptr, attrValue, aForceInDataDoc);
     // Don't bother going through SetInlineStyleDeclaration; we don't
     // want to fire off mutation events or document notifications anyway
-    nsresult rv = mAttrsAndChildren.SetAndSwapAttr(nsGkAtoms::style, attrValue);
+    bool oldValueSet;
+    nsresult rv = mAttrsAndChildren.SetAndSwapAttr(nsGkAtoms::style, attrValue,
+                                                   &oldValueSet);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-  
+
   return NS_OK;
 }
 
 void
-nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aValue,
-                                                             nsAttrValue& aResult,
-                                                             bool aForceInDataDoc)
+nsStyledElement::NodeInfoChanged(nsIDocument* aOldDoc)
+{
+  nsStyledElementBase::NodeInfoChanged(aOldDoc);
+}
+
+nsICSSDeclaration*
+nsStyledElement::GetExistingStyle()
+{
+  Element::nsDOMSlots* slots = GetExistingDOMSlots();
+  if (!slots) {
+    return nullptr;
+  }
+
+  return slots->mStyle;
+}
+
+void
+nsStyledElement::ParseStyleAttribute(const nsAString& aValue,
+                                     nsIPrincipal* aMaybeScriptedPrincipal,
+                                     nsAttrValue& aResult,
+                                     bool aForceInDataDoc)
 {
   nsIDocument* doc = OwnerDoc();
   bool isNativeAnon = IsInNativeAnonymousSubtree();
 
   if (!isNativeAnon &&
       !nsStyleUtil::CSPAllowsInlineStyle(nullptr, NodePrincipal(),
+                                         aMaybeScriptedPrincipal,
                                          doc->GetDocumentURI(), 0, aValue,
                                          nullptr))
     return;
 
   if (aForceInDataDoc ||
       !doc->IsLoadedAsData() ||
+      GetExistingStyle() ||
       doc->IsStaticDocument()) {
     bool isCSS = true; // assume CSS until proven otherwise
 
@@ -173,7 +229,8 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
       }
     }
 
-    if (isCSS && aResult.ParseStyleAttribute(aValue, this)) {
+    if (isCSS && aResult.ParseStyleAttribute(aValue, aMaybeScriptedPrincipal,
+                                             this)) {
       return;
     }
   }

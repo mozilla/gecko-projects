@@ -23,17 +23,18 @@ uint32_t txForwardContext::position()
     return (uint32_t)(pos + 1);
 }
 
-nsresult txForwardContext::getVariable(int32_t aNamespace, nsIAtom* aLName,
+nsresult txForwardContext::getVariable(int32_t aNamespace, nsAtom* aLName,
                                        txAExprResult*& aResult)
 {
     NS_ASSERTION(mInner, "mInner is null!!!");
     return mInner->getVariable(aNamespace, aLName, aResult);
 }
 
-bool txForwardContext::isStripSpaceAllowed(const txXPathNode& aNode)
+nsresult
+txForwardContext::isStripSpaceAllowed(const txXPathNode& aNode, bool& aAllowed)
 {
     NS_ASSERTION(mInner, "mInner is null!!!");
-    return mInner->isStripSpaceAllowed(aNode);
+    return mInner->isStripSpaceAllowed(aNode, aAllowed);
 }
 
 void* txForwardContext::getPrivateContext()

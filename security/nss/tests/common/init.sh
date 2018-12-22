@@ -63,11 +63,13 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
         DBPASSDIR=${HOSTDIR}/dbpass
         ECCURVES_DIR=${HOSTDIR}/eccurves
         DISTRUSTDIR=${HOSTDIR}/distrust
+        RSAPSSDIR=${HOSTDIR}/rsapss
 
         SERVER_CADIR=${HOSTDIR}/serverCA
         CLIENT_CADIR=${HOSTDIR}/clientCA
         EXT_SERVERDIR=${HOSTDIR}/ext_server
         EXT_CLIENTDIR=${HOSTDIR}/ext_client
+        IMPLICIT_INIT_DIR=${HOSTDIR}/implicit_init
 
         IOPR_CADIR=${HOSTDIR}/CA_iopr
         IOPR_SSL_SERVERDIR=${HOSTDIR}/server_ssl_iopr
@@ -76,11 +78,12 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
 
         CERT_EXTENSIONS_DIR=${HOSTDIR}/cert_extensions
         STAPLINGDIR=${HOSTDIR}/stapling
+        NOLOGINDIR=${HOSTDIR}/nologin
         SSLGTESTDIR=${HOSTDIR}/ssl_gtests
-        PK11GTESTDIR=${HOSTDIR}/pk11_gtests
-        DERGTESTDIR=${HOSTDIR}/der_gtests
+        GTESTDIR=${HOSTDIR}/gtests
 
         PWFILE=${HOSTDIR}/tests.pw
+        EMPTY_FILE=${HOSTDIR}/tests_empty
         NOISE_FILE=${HOSTDIR}/tests_noise
         CORELIST_FILE=${HOSTDIR}/clist
 
@@ -179,30 +182,42 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     {      # 3 functions so we can put targets in the output.log easier
         echo $* >>${RESULTS}
     }
+    increase_msg_id()
+    {
+        MSG_ID=$(( ${MSG_ID} + 1 ))
+    }
+    html_passed_ignore_core()
+    {
+        increase_msg_id
+        html "<TR><TD>#${MSG_ID}: $1 ${HTML_PASSED}"
+        echo "${SCRIPTNAME}: #${MSG_ID}: $* - PASSED"
+    }
     html_passed()
     {
         html_detect_core "$@" || return
-        MSG_ID=`cat ${MSG_ID_FILE}`
-        MSG_ID=`expr ${MSG_ID} + 1`
-        echo ${MSG_ID} > ${MSG_ID_FILE}
-        html "<TR><TD>#${MSG_ID}: $1 ${HTML_PASSED}"
-        echo "${SCRIPTNAME}: #${MSG_ID}: $* - PASSED"
+        html_passed_ignore_core "$@"
+    }
+    html_failed_ignore_core()
+    {
+        increase_msg_id
+        html "<TR><TD>#${MSG_ID}: $1 ${HTML_FAILED}"
+        echo "${SCRIPTNAME}: #${MSG_ID}: $* - FAILED"
     }
     html_failed()
     {
         html_detect_core "$@" || return
-        MSG_ID=`cat ${MSG_ID_FILE}`
-        MSG_ID=`expr ${MSG_ID} + 1`
-        echo ${MSG_ID} > ${MSG_ID_FILE}
-        html "<TR><TD>#${MSG_ID}: $1 ${HTML_FAILED}"
-        echo "${SCRIPTNAME}: #${MSG_ID}: $* - FAILED"
+        html_failed_ignore_core "$@" || return
+    }
+    html_unknown_ignore_core()
+    {
+        increase_msg_id
+        html "<TR><TD>#${MSG_ID}: $1 ${HTML_UNKNOWN}"
+        echo "${SCRIPTNAME}: #${MSG_ID}: $* - UNKNOWN"
     }
     html_unknown()
     {
         html_detect_core "$@" || return
-        MSG_ID=`cat ${MSG_ID_FILE}`
-        MSG_ID=`expr ${MSG_ID} + 1`
-        echo ${MSG_ID} > ${MSG_ID_FILE}
+        increase_msg_id
         html "<TR><TD>#${MSG_ID}: $1 ${HTML_UNKNOWN}"
         echo "${SCRIPTNAME}: #${MSG_ID}: $* - UNKNOWN"
     }
@@ -210,9 +225,7 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     {
         detect_core
         if [ $? -ne 0 ]; then
-            MSG_ID=`cat ${MSG_ID_FILE}`
-            MSG_ID=`expr ${MSG_ID} + 1`
-            echo ${MSG_ID} > ${MSG_ID_FILE}
+            increase_msg_id
             html "<TR><TD>#${MSG_ID}: $* ${HTML_FAILED_CORE}"
             echo "${SCRIPTNAME}: #${MSG_ID}: $* - Core file is detected - FAILED"
             return 1
@@ -271,7 +284,11 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     fi
 
     if [ "${OBJDIR}" = "" ]; then
-        OBJDIR=`(cd $COMMON; $MAKE objdir_name)`
+        if [ -f ${DIST}/latest ]; then
+            OBJDIR=$(cat ${DIST}/latest)
+        else
+            OBJDIR=`($MAKE -s -C $COMMON objdir_name)`
+        fi
     fi
     if [ "${OS_ARCH}" = "" ]; then
         OS_ARCH=`(cd $COMMON; $MAKE os_arch)`
@@ -515,16 +532,19 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     D_CLIENT_CA="ClientCA.$version"
     D_SERVER="Server.$version"
     D_CLIENT="Client.$version"
+    D_NOLOGIN="NoLogin.$version"
     D_FIPS="FIPS.$version"
     D_DBPASS="DBPASS.$version"
     D_ECCURVES="ECCURVES.$version"
     D_EXT_SERVER="ExtendedServer.$version"
     D_EXT_CLIENT="ExtendedClient.$version"
+    D_IMPLICIT_INIT="ImplicitInit.$version"
     D_CERT_EXTENSTIONS="CertExtensions.$version"
     D_DISTRUST="Distrust.$version"
+    D_RSAPSS="RSAPSS.$version"
 
-    # we need relative pathnames of these files abd directories, since our
-    # tools can't handle the unix style absolut pathnames on cygnus
+    # we need relative pathnames of these files and directories, since our
+    # tools can't handle the unix style absolute pathnames on cygnus
 
     R_CADIR=../CA
     R_SERVERDIR=../server
@@ -539,11 +559,13 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     R_EVEDIR=../eve
     R_EXT_SERVERDIR=../ext_server
     R_EXT_CLIENTDIR=../ext_client
+    R_IMPLICIT_INIT_DIR=../implicit_init
     R_CERT_EXT=../cert_extensions
     R_STAPLINGDIR=../stapling
+    R_NOLOGINDIR=../nologin
     R_SSLGTESTDIR=../ssl_gtests
-    R_PK11GTESTDIR=../pk11_gtests
-    R_DERGTESTDIR=../der_gtests
+    R_GTESTDIR=../gtests
+    R_RSAPSSDIR=../rsapss
 
     #
     # profiles are either paths or domains depending on the setting of
@@ -556,8 +578,11 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     P_R_EVEDIR=${R_EVEDIR}
     P_R_SERVERDIR=${R_SERVERDIR}
     P_R_CLIENTDIR=${R_CLIENTDIR}
+    P_R_NOLOGINDIR=${R_NOLOGINDIR}
     P_R_EXT_SERVERDIR=${R_EXT_SERVERDIR}
     P_R_EXT_CLIENTDIR=${R_EXT_CLIENTDIR}
+    P_R_IMPLICIT_INIT_DIR=${R_IMPLICIT_INIT_DIR}
+    P_R_RSAPSSDIR=${R_RSAPSSDIR}
     if [ -n "${MULTIACCESS_DBM}" ]; then
         P_R_CADIR="multiaccess:${D_CA}"
         P_R_ALICEDIR="multiaccess:${D_ALICE}"
@@ -566,11 +591,15 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
         P_R_EVEDIR="multiaccess:${D_EVE}"
         P_R_SERVERDIR="multiaccess:${D_SERVER}"
         P_R_CLIENTDIR="multiaccess:${D_CLIENT}"
+        P_R_NOLOGINDIR="multiaccess:${D_NOLOGIN}"
         P_R_EXT_SERVERDIR="multiaccess:${D_EXT_SERVER}"
         P_R_EXT_CLIENTDIR="multiaccess:${D_EXT_CLIENT}"
+        P_R_IMPLICIT_INIT_DIR="multiaccess:${D_IMPLICIT_INIT}"
+	P_R_RSAPSSDIR="multiaccess:${D_RSAPSS}"
     fi
 
     R_PWFILE=../tests.pw
+    R_EMPTY_FILE=../tests_empty
     R_NOISE_FILE=../tests_noise
 
     R_FIPSPWFILE=../tests.fipspw
@@ -631,9 +660,7 @@ if [ -z "${INIT_SOURCED}" -o "${INIT_SOURCED}" != "TRUE" ]; then
     NSS_DEFAULT_DB_TYPE="dbm"
     export NSS_DEFAULT_DB_TYPE
 
-    MSG_ID_FILE="${HOSTDIR}/id"
     MSG_ID=0
-    echo ${MSG_ID} > ${MSG_ID_FILE}
 
     #################################################
     # Interoperability testing constatnts

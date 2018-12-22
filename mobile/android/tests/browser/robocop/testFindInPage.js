@@ -5,7 +5,7 @@
 
 "use strict";
 
-var Cu = Components.utils;
+/* eslint-disable mozilla/use-chromeutils-import */
 
 Cu.import("resource://gre/modules/Messaging.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -37,14 +37,14 @@ function openTabWithUrl(url) {
 function findInPage(browser, text, nrOfMatches) {
   let repaintPromise = promiseBrowserEvent(browser, "MozAfterPaint");
   do_print("Send findInPageMessage: " + text + " nth: " + nrOfMatches);
-  Messaging.sendRequest({ type: "Test:FindInPage", text: text, nrOfMatches: nrOfMatches });
+  EventDispatcher.instance.sendRequest({ type: "Test:FindInPage", text: text, nrOfMatches: nrOfMatches });
   return repaintPromise;
 }
 
 function closeFindInPage(browser) {
   let repaintPromise = promiseBrowserEvent(browser, "MozAfterPaint");
   do_print("Send closeFindInPageMessage");
-  Messaging.sendRequest({ type: "Test:CloseFindInPage" });
+  EventDispatcher.instance.sendRequest({ type: "Test:CloseFindInPage" });
   return repaintPromise;
 }
 
@@ -63,26 +63,26 @@ function assertSelection(document, expectedSelection = false, expectedAnchorText
   }
 }
 
-add_task(function* testFindInPage() {
-  let browser = yield openTabWithUrl(TEST_URL);
+add_task(async function testFindInPage() {
+  let browser = await openTabWithUrl(TEST_URL);
   let document = browser.contentDocument;
 
-  yield findInPage(browser, "Robocoop", 1);
+  await findInPage(browser, "Robocoop", 1);
   assertSelection(document);
 
-  yield closeFindInPage(browser);
+  await closeFindInPage(browser);
   assertSelection(document);
 
-  yield findInPage(browser, "Robocop", 1);
+  await findInPage(browser, "Robocop", 1);
   assertSelection(document, "Robocop", " Robocop 1 ");
 
-  yield closeFindInPage(browser);
+  await closeFindInPage(browser);
   assertSelection(document);
 
-  yield findInPage(browser, "Robocop", 3);
+  await findInPage(browser, "Robocop", 3);
   assertSelection(document, "Robocop", " Robocop 3 ");
 
-  yield closeFindInPage(browser);
+  await closeFindInPage(browser);
   assertSelection(document);
 });
 

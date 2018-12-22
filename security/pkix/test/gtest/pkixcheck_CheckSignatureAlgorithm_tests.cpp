@@ -46,6 +46,12 @@ struct CheckSignatureAlgorithmTestParams
   Result expectedResult;
 };
 
+::std::ostream& operator<<(::std::ostream& os,
+                           const CheckSignatureAlgorithmTestParams&)
+{
+  return os << "TODO (bug 1318770)";
+}
+
 #define BS(s) ByteString(s, MOZILLA_PKIX_ARRAY_LENGTH(s))
 
 // python DottedOIDToCode.py --tlv sha256WithRSAEncryption 1.2.840.113549.1.1.11
@@ -197,8 +203,8 @@ class pkixcheck_CheckSignatureAlgorithm_TrustDomain final
 {
 public:
   explicit pkixcheck_CheckSignatureAlgorithm_TrustDomain(
-             unsigned int publicKeySizeInBits)
-    : publicKeySizeInBits(publicKeySizeInBits)
+             unsigned int aPublicKeySizeInBits)
+    : publicKeySizeInBits(aPublicKeySizeInBits)
     , checkedDigestAlgorithm(false)
     , checkedModulusSizeInBits(false)
   {
@@ -267,8 +273,8 @@ class pkixcheck_CheckSignatureAlgorithm_BuildCertChain_TrustDomain
 {
 public:
   explicit pkixcheck_CheckSignatureAlgorithm_BuildCertChain_TrustDomain(
-             const ByteString& issuer)
-    : issuer(issuer)
+             const ByteString& aIssuer)
+    : issuer(aIssuer)
   {
   }
 
@@ -302,7 +308,7 @@ public:
     return Success;
   }
 
-  Result IsChainValid(const DERArray&, Time) override
+  Result IsChainValid(const DERArray&, Time, const CertPolicyId&) override
   {
     return Success;
   }

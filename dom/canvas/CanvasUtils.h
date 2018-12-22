@@ -6,6 +6,7 @@
 #ifndef _CANVASUTILS_H_
 #define _CANVASUTILS_H_
 
+#include "CanvasRenderingContextHelper.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "jsapi.h"
@@ -45,10 +46,16 @@ void DoDrawImageSecurityCheck(dom::HTMLCanvasElement *aCanvasElement,
                               bool forceWriteOnly,
                               bool CORSUsed);
 
+// Check if the context is chrome or has the permission to drawWindow
+bool HasDrawWindowPrivilege(JSContext* aCx, JSObject* aObj);
+
+// Check site-specific permission and display prompt if appropriate.
+bool IsImageExtractionAllowed(nsIDocument *aDocument, JSContext *aCx, nsIPrincipal& aPrincipal);
+
 // Make a double out of |v|, treating undefined values as 0.0 (for
 // the sake of sparse arrays).  Return true iff coercion
 // succeeded.
-bool CoerceDouble(JS::Value v, double* d);
+bool CoerceDouble(const JS::Value& v, double* d);
 
     /* Float validation stuff */
 #define VALIDATE(_f)  if (!IsFinite(_f)) return false

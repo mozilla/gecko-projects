@@ -12,6 +12,12 @@
 
 class SkPathPriv {
 public:
+#ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+    static const int kPathRefGenIDBitCnt = 30; // leave room for the fill type (skbug.com/1762)
+#else
+    static const int kPathRefGenIDBitCnt = 32;
+#endif
+
     enum FirstDirection {
         kCW_FirstDirection,         // == SkPath::kCW_Direction
         kCCW_FirstDirection,        // == SkPath::kCCW_Direction
@@ -29,7 +35,7 @@ public:
      */
     static FirstDirection OppositeFirstDirection(FirstDirection dir) {
         static const FirstDirection gOppositeDir[] = {
-            kCCW_FirstDirection, kCW_FirstDirection, kUnknown_FirstDirection, 
+            kCCW_FirstDirection, kCW_FirstDirection, kUnknown_FirstDirection,
         };
         return gOppositeDir[dir];
     }
@@ -82,6 +88,128 @@ public:
 
     static void AddGenIDChangeListener(const SkPath& path, SkPathRef::GenIDChangeListener* listener) {
         path.fPathRef->addGenIDChangeListener(listener);
+    }
+
+    /**
+     * This returns true for a rect that begins and ends at the same corner and has either a move
+     * followed by four lines or a move followed by 3 lines and a close. None of the parameters are
+     * optional. This does not permit degenerate line or point rectangles.
+     */
+    static bool IsSimpleClosedRect(const SkPath& path, SkRect* rect, SkPath::Direction* direction,
+                                   unsigned* start);
+
+    /**
+     * Creates a path from arc params using the semantics of SkCanvas::drawArc. This function
+     * assumes empty ovals and zero sweeps have already been filtered out.
+     */
+    static void CreateDrawArcPath(SkPath* path, const SkRect& oval, SkScalar startAngle,
+                                  SkScalar sweepAngle, bool useCenter, bool isFillNoPathEffect);
+
+    /**
+     * Returns a C++11-iterable object that traverses a path's verbs in order. e.g:
+     *
+     *   for (SkPath::Verb verb : SkPathPriv::Verbs(path)) {
+     *       ...
+     *   }
+     */
+    struct Verbs {
+    public:
+        Verbs(const SkPath& path) : fPathRef(path.fPathRef.get()) {}
+        struct Iter {
+            void operator++() { --fVerb; } // verbs are laid out backwards in memory.
+            bool operator!=(const Iter& b) { return fVerb != b.fVerb; }
+            SkPath::Verb operator*() { return static_cast<SkPath::Verb>(*fVerb); }
+            const uint8_t* fVerb;
+        };
+        Iter begin() { return Iter{fPathRef->verbs() - 1}; }
+        Iter end() { return Iter{fPathRef->verbs() - fPathRef->countVerbs() - 1}; }
+    private:
+        Verbs(const Verbs&) = delete;
+        Verbs& operator=(const Verbs&) = delete;
+        SkPathRef* fPathRef;
+    };
+
+    /**
+     * Returns a pointer to the verb data. Note that the verbs are stored backwards in memory and
+     * thus the returned pointer is the last verb.
+     */
+    static const uint8_t* VerbData(const SkPath& path) {
+        return path.fPathRef->verbsMemBegin();
+    }
+
+    /** Returns a raw pointer to the path points */
+    static const SkPoint* PointData(const SkPath& path) {
+        return path.fPathRef->points();
+    }
+
+    /** Returns the number of conic weights in the path */
+    static int ConicWeightCnt(const SkPath& path) {
+        return path.fPathRef->countWeights();
+    }
+
+    /** Returns a raw pointer to the path conic weights. */
+    static const SkScalar* ConicWeightData(const SkPath& path) {
+        return path.fPathRef->conicWeights();
+    }
+
+    /** Returns true if the underlying SkPathRef has one single owner. */
+    static bool TestingOnly_unique(const SkPath& path) {
+        return path.fPathRef->unique();
+    }
+
+    /** Returns true if constructed by addCircle(), addOval(); and in some cases,
+     addRoundRect(), addRRect(). SkPath constructed with conicTo() or rConicTo() will not
+     return true though SkPath draws oval.
+
+     rect receives bounds of oval.
+     dir receives SkPath::Direction of oval: kCW_Direction if clockwise, kCCW_Direction if
+     counterclockwise.
+     start receives start of oval: 0 for top, 1 for right, 2 for bottom, 3 for left.
+
+     rect, dir, and start are unmodified if oval is not found.
+
+     Triggers performance optimizations on some GPU surface implementations.
+
+     @param rect   storage for bounding SkRect of oval; may be nullptr
+     @param dir    storage for SkPath::Direction; may be nullptr
+     @param start  storage for start of oval; may be nullptr
+     @return       true if SkPath was constructed by method that reduces to oval
+     */
+    static bool IsOval(const SkPath& path, SkRect* rect, SkPath::Direction* dir, unsigned* start) {
+        bool isCCW = false;
+        bool result = path.fPathRef->isOval(rect, &isCCW, start);
+        if (dir && result) {
+            *dir = isCCW ? SkPath::kCCW_Direction : SkPath::kCW_Direction;
+        }
+        return result;
+    }
+
+    /** Returns true if constructed by addRoundRect(), addRRect(); and if construction
+     is not empty, not SkRect, and not oval. SkPath constructed with other calls
+     will not return true though SkPath draws SkRRect.
+
+     rrect receives bounds of SkRRect.
+     dir receives SkPath::Direction of oval: kCW_Direction if clockwise, kCCW_Direction if
+     counterclockwise.
+     start receives start of SkRRect: 0 for top, 1 for right, 2 for bottom, 3 for left.
+
+     rrect, dir, and start are unmodified if SkRRect is not found.
+
+     Triggers performance optimizations on some GPU surface implementations.
+
+     @param rrect  storage for bounding SkRect of SkRRect; may be nullptr
+     @param dir    storage for SkPath::Direction; may be nullptr
+     @param start  storage for start of SkRRect; may be nullptr
+     @return       true if SkPath contains only SkRRect
+     */
+    static bool IsRRect(const SkPath& path, SkRRect* rrect, SkPath::Direction* dir,
+                        unsigned* start) {
+        bool isCCW = false;
+        bool result = path.fPathRef->isRRect(rrect, &isCCW, start);
+        if (dir && result) {
+            *dir = isCCW ? SkPath::kCCW_Direction : SkPath::kCW_Direction;
+        }
+        return result;
     }
 };
 

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,7 +31,7 @@ ListBoxObject::~ListBoxObject()
 
 JSObject* ListBoxObject::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ListBoxObjectBinding::Wrap(aCx, this, aGivenProto);
+  return ListBoxObject_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 // nsIListBoxObject
@@ -42,7 +43,7 @@ ListBoxObject::GetRowCount(int32_t *aResult)
 }
 
 NS_IMETHODIMP
-ListBoxObject::GetItemAtIndex(int32_t index, nsIDOMElement **_retval)
+ListBoxObject::GetItemAtIndex(int32_t index, Element **_retval)
 {
   nsListBoxBodyFrame* body = GetListBoxBody(true);
   if (body) {
@@ -52,7 +53,7 @@ ListBoxObject::GetItemAtIndex(int32_t index, nsIDOMElement **_retval)
  }
 
 NS_IMETHODIMP
-ListBoxObject::GetIndexOfItem(nsIDOMElement* aElement, int32_t *aResult)
+ListBoxObject::GetIndexOfItem(Element* aElement, int32_t *aResult)
 {
   *aResult = 0;
 
@@ -71,6 +72,16 @@ ListBoxObject::GetRowCount()
   nsListBoxBodyFrame* body = GetListBoxBody(true);
   if (body) {
     return body->GetRowCount();
+  }
+  return 0;
+}
+
+int32_t
+ListBoxObject::GetRowHeight()
+{
+  nsListBoxBodyFrame* body = GetListBoxBody(true);
+  if (body) {
+    return body->GetRowHeightPixels();
   }
   return 0;
 }
@@ -125,18 +136,16 @@ ListBoxObject::ScrollByLines(int32_t aNumLines)
 already_AddRefed<Element>
 ListBoxObject::GetItemAtIndex(int32_t index)
 {
-  nsCOMPtr<nsIDOMElement> el;
+  RefPtr<Element> el;
   GetItemAtIndex(index, getter_AddRefs(el));
-  nsCOMPtr<Element> ret(do_QueryInterface(el));
-  return ret.forget();
+  return el.forget();
 }
 
 int32_t
 ListBoxObject::GetIndexOfItem(Element& aElement)
 {
   int32_t ret;
-  nsCOMPtr<nsIDOMElement> el(do_QueryInterface(&aElement));
-  GetIndexOfItem(el, &ret);
+  GetIndexOfItem(&aElement, &ret);
   return ret;
 }
 
@@ -173,7 +182,7 @@ ListBoxObject::GetListBoxBody(bool aFlush)
   }
 
   nsIFrame* frame = aFlush ?
-                      GetFrame(false) /* does Flush_Frames */ :
+                      GetFrame(false) /* does FlushType::Frames */ :
                       mContent->GetPrimaryFrame();
   if (!frame) {
     return nullptr;

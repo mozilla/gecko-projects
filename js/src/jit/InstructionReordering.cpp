@@ -44,7 +44,7 @@ IsLastUse(MDefinition* ins, MDefinition* input, MBasicBlock* loopHeader)
 }
 
 bool
-jit::ReorderInstructions(MIRGenerator* mir, MIRGraph& graph)
+jit::ReorderInstructions(MIRGraph& graph)
 {
     // Renumber all instructions in the graph as we go.
     size_t nextId = 0;
@@ -149,7 +149,7 @@ jit::ReorderInstructions(MIRGenerator* mir, MIRGraph& graph)
                 // stores to a location read by the instruction.
                 if (prev->isEffectful() &&
                     (ins->getAliasSet().flags() & prev->getAliasSet().flags()) &&
-                    ins->mightAlias(prev))
+                    ins->mightAlias(prev) != MDefinition::AliasType::NoAlias)
                 {
                     break;
                 }

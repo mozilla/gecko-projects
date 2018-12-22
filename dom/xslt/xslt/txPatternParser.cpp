@@ -13,7 +13,7 @@
 #include "txPatternOptimizer.h"
 
 
-nsresult txPatternParser::createPattern(const nsAFlatString& aPattern,
+nsresult txPatternParser::createPattern(const nsString& aPattern,
                                         txIParseContext* aContext,
                                         txPattern** aResult)
 {
@@ -120,7 +120,7 @@ nsresult txPatternParser::createLocPathPattern(txExprLexer& aLexer,
         case Token::PARENT_OP:
             aLexer.nextToken();
             isAbsolute = true;
-            if (aLexer.peek()->mType == Token::END || 
+            if (aLexer.peek()->mType == Token::END ||
                 aLexer.peek()->mType == Token::UNION_OP) {
                 aPattern = new txRootPattern();
                 return NS_OK;
@@ -129,7 +129,7 @@ nsresult txPatternParser::createLocPathPattern(txExprLexer& aLexer,
         case Token::FUNCTION_NAME_AND_PAREN:
             // id(Literal) or key(Literal, Literal)
             {
-                nsCOMPtr<nsIAtom> nameAtom =
+                RefPtr<nsAtom> nameAtom =
                     NS_Atomize(aLexer.nextToken()->Value());
                 if (nameAtom == nsGkAtoms::id) {
                     rv = createIdPattern(aLexer, stepPattern);
@@ -225,7 +225,7 @@ nsresult txPatternParser::createKeyPattern(txExprLexer& aLexer,
         return NS_ERROR_XPATH_PARSE_FAILURE;
     const nsDependentSubstring& key =
         aLexer.nextToken()->Value();
-    if (aLexer.nextToken()->mType != Token::COMMA && 
+    if (aLexer.nextToken()->mType != Token::COMMA &&
         aLexer.peek()->mType != Token::LITERAL)
         return NS_ERROR_XPATH_PARSE_FAILURE;
     const nsDependentSubstring& value =
@@ -239,7 +239,7 @@ nsresult txPatternParser::createKeyPattern(txExprLexer& aLexer,
     const char16_t* colon;
     if (!XMLUtils::isValidQName(PromiseFlatString(key), &colon))
         return NS_ERROR_XPATH_PARSE_FAILURE;
-    nsCOMPtr<nsIAtom> prefix, localName;
+    RefPtr<nsAtom> prefix, localName;
     int32_t namespaceID;
     nsresult rv = resolveQName(key, getter_AddRefs(prefix), aContext,
                                getter_AddRefs(localName), namespaceID);
@@ -278,7 +278,7 @@ nsresult txPatternParser::createStepPattern(txExprLexer& aLexer,
         tok = aLexer.nextToken();
 
         // resolve QName
-        nsCOMPtr<nsIAtom> prefix, lName;
+        RefPtr<nsAtom> prefix, lName;
         int32_t nspace;
         rv = resolveQName(tok->Value(), getter_AddRefs(prefix), aContext,
                           getter_AddRefs(lName), nspace, true);

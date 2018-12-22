@@ -4,70 +4,37 @@
 
 "use strict";
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageSender");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  GeckoViewTelemetryController: "resource://gre/modules/GeckoViewTelemetryController.jsm",
+  TelemetryController: "resource://gre/modules/TelemetryController.jsm",
+});
 
 function ContentProcessSingleton() {}
 ContentProcessSingleton.prototype = {
   classID: Components.ID("{ca2a8470-45c7-11e4-916c-0800200c9a66}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
-  observe: function(subject, topic, data) {
+  observe(subject, topic, data) {
     switch (topic) {
     case "app-startup": {
-      Services.obs.addObserver(this, "console-api-log-event", false);
-      Services.obs.addObserver(this, "xpcom-shutdown", false);
-      cpmm.addMessageListener("DevTools:InitDebuggerServer", this);
-      break;
-    }
-    case "console-api-log-event": {
-      let consoleMsg = subject.wrappedJSObject;
-
-      let msgData = {
-        level: consoleMsg.level,
-        filename: consoleMsg.filename,
-        lineNumber: consoleMsg.lineNumber,
-        functionName: consoleMsg.functionName,
-        timeStamp: consoleMsg.timeStamp,
-        arguments: [],
-      };
-
-      // We can't send objects over the message manager, so we sanitize
-      // them out.
-      for (let arg of consoleMsg.arguments) {
-        if ((typeof arg == "object" || typeof arg == "function") && arg !== null) {
-          msgData.arguments.push("<unavailable>");
-        } else {
-          msgData.arguments.push(arg);
-        }
+      Services.obs.addObserver(this, "xpcom-shutdown");
+      // Initialize Telemetry in the content process: use a different
+      // controller depending on the platform.
+      if (Services.prefs.getBoolPref("toolkit.telemetry.isGeckoViewMode", false)) {
+        GeckoViewTelemetryController.setup();
+        return;
       }
-
-      cpmm.sendAsyncMessage("Console:Log", msgData);
+      // Initialize Firefox Desktop Telemetry.
+      TelemetryController.observe(null, topic, null);
       break;
     }
-
     case "xpcom-shutdown":
-      Services.obs.removeObserver(this, "console-api-log-event");
       Services.obs.removeObserver(this, "xpcom-shutdown");
-      cpmm.removeMessageListener("DevTools:InitDebuggerServer", this);
       break;
-    }
-  },
-
-  receiveMessage: function (message) {
-    // load devtools component on-demand
-    // Only reply if we are in a real content process
-    if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
-      let {init} = Cu.import("resource://devtools/server/content-server.jsm", {});
-      init(message);
     }
   },
 };

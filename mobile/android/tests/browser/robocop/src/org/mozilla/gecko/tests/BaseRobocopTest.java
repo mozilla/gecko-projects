@@ -25,7 +25,6 @@ import org.mozilla.gecko.FennecNativeActions;
 import org.mozilla.gecko.FennecNativeDriver;
 import org.mozilla.gecko.FennecTalosAssert;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
 
@@ -175,8 +174,7 @@ public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<A
         // Set up Robotium.solo and Driver objects
         Activity tempActivity = getActivity();
 
-        StringHelper.initialize(tempActivity.getResources());
-        mStringHelper = StringHelper.get();
+        mStringHelper = StringHelper.initialize(tempActivity.getResources());
 
         mSolo = new Solo(getInstrumentation(), tempActivity);
         mDriver = new FennecNativeDriver(tempActivity, mSolo, mRootPath);
@@ -218,7 +216,7 @@ public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<A
             if ("1".equals(quitAndFinish)) {
                 // Request the browser force quit and wait for it to take effect.
                 Log.i(LOGTAG, "Requesting force quit.");
-                mActions.sendGeckoEvent("Robocop:Quit", null);
+                mActions.sendGlobalEvent("Robocop:Quit", null);
                 mSolo.sleep(ROBOCOP_QUIT_WAIT_MS);
 
                 // If still running, finish activities as recommended by Robotium.
@@ -250,7 +248,7 @@ public abstract class BaseRobocopTest extends ActivityInstrumentationTestCase2<A
         // rawURL to test fetching from. This should be a raw (IP) URL, not an alias
         // (like mochi.test). We can't (easily) test fetching from the aliases, since
         // those are managed by Fennec's proxy settings.
-        final String rawUrl = ((String) mConfig.get("rawhost")).replaceAll("(/$)", "");
+        final String rawUrl = mConfig.get("rawhost").replaceAll("(/$)", "");
 
         HttpURLConnection urlConnection = null;
 

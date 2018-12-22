@@ -8,8 +8,8 @@
 
 #include "nsIHttpAuthenticator.h"
 #include "nsIURI.h"
-#include "nsSubstring.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/LazyIdleThread.h"
 
 // The nsHttpNegotiateAuth class provides responses for the GSS-API Negotiate method
 // as specified by Microsoft in draft-brezak-spnego-http-04.txt
@@ -17,7 +17,7 @@
 class nsHttpNegotiateAuth final : public nsIHttpAuthenticator
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIHTTPAUTHENTICATOR
 
 private:
@@ -29,13 +29,7 @@ private:
     // tests if the host part of an uri is fully qualified
     bool TestNonFqdn(nsIURI *uri);
 
-    // returns true if URI is accepted by the list of hosts in the pref
-    bool TestPref(nsIURI *, const char *pref);
-
-    bool MatchesBaseURI(const nsCSubstring &scheme,
-                          const nsCSubstring &host,
-                          int32_t             port,
-                          const char         *baseStart,
-                          const char         *baseEnd);
+    // Thread for GenerateCredentialsAsync
+    RefPtr<mozilla::LazyIdleThread> mNegotiateThread;
 };
 #endif /* nsHttpNegotiateAuth_h__ */

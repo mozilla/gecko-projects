@@ -32,18 +32,18 @@ public:
 
 class bar : public foo{
 public:
-  NS_IMETHOD ignored();
-  NS_IMETHOD callme1(int i, int j);
-  NS_IMETHOD callme2(int i, int j);
-  NS_IMETHOD callme3(int i, int j);
+  NS_IMETHOD ignored() override;
+  NS_IMETHOD callme1(int i, int j) override;
+  NS_IMETHOD callme2(int i, int j) override;
+  NS_IMETHOD callme3(int i, int j) override;
 };
 
 class baz : public base {
 public:
-  NS_IMETHOD ignored();
-  NS_IMETHOD callme1();
-  NS_IMETHOD callme2();
-  NS_IMETHOD callme3();
+  NS_IMETHOD ignored() override;
+  NS_IMETHOD callme1() override;
+  NS_IMETHOD callme2() override;
+  NS_IMETHOD callme3() override;
   void setfoo(foo* f) {other = f;}
 
   foo* other;
@@ -71,7 +71,7 @@ NS_IMETHODIMP bar::callme3(int i, int j)
 }
 
 void docall(foo* f, int i, int j){
-  f->callme1(i, j); 
+  f->callme1(i, j);
 }
 
 /***************************************************************************/
@@ -201,7 +201,7 @@ int main()
   /* here we make the global 'check for alloc failure' checker happy */
   if(!a || !b)
     return 1;
-  
+
   foo* c = (foo*)b;
 
   b->setfoo(a);

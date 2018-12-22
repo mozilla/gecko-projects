@@ -79,15 +79,16 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
   // nsSVGElement interface
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override = 0;
 
   virtual bool HasValidDimensions() const override;
 
   bool IsNodeOfType(uint32_t aFlags) const override
-    { return !(aFlags & ~(eCONTENT | eFILTER)); }
+    { return !(aFlags & ~eFILTER); }
 
   virtual nsSVGString& GetResultImageName() = 0;
   // Return a list of all image names used as sources. Default is to
@@ -103,7 +104,7 @@ public:
   // returns true if changes to the attribute should cause us to
   // repaint the filter
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
+          int32_t aNameSpaceID, nsAtom* aAttribute) const;
 
   // Return whether this filter primitive has tainted output. A filter's
   // output is tainted if it depends on things that the web page is not
@@ -159,12 +160,13 @@ protected:
     : SVGFEUnstyledElementBase(aNodeInfo) {}
 
 public:
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override = 0;
 
   // returns true if changes to the attribute should cause us to
   // repaint the filter
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const = 0;
+          int32_t aNameSpaceID, nsAtom* aAttribute) const = 0;
 };
 
 //------------------------------------------------------------
@@ -181,15 +183,14 @@ protected:
 
 public:
   // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(nsSVGFELightingElement,
+                                       nsSVGFELightingElementBase)
 
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const override;
+          int32_t aNameSpaceID, nsAtom* aAttribute) const override;
   virtual nsSVGString& GetResultImageName() override { return mStringAttributes[RESULT]; }
   virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) override;
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFELightingElementBase::)
-
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
 protected:
   virtual bool OperatesOnSRGB(int32_t aInputIndex,
@@ -202,7 +203,7 @@ protected:
   AttributeMap ComputeLightAttributes(nsSVGFilterInstance* aInstance);
 
   FilterPrimitiveDescription
-    AddLightingAttributes(FilterPrimitiveDescription aDescription,
+    AddLightingAttributes(const FilterPrimitiveDescription& aDescription,
                           nsSVGFilterInstance* aInstance);
 
   enum { SURFACE_SCALE, DIFFUSE_CONSTANT, SPECULAR_CONSTANT, SPECULAR_EXPONENT };

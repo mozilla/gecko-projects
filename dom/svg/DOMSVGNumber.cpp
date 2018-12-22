@@ -35,7 +35,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGNumber)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGNumber)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
@@ -110,36 +109,6 @@ DOMSVGNumber::DOMSVGNumber(nsISupports* aParent)
   , mIsAnimValItem(false)
   , mValue(0.0f)
 {
-}
-
-/* static */ already_AddRefed<DOMSVGNumber>
-DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& aRv)
-{
-  nsCOMPtr<nsPIDOMWindowInner> window =
-    do_QueryInterface(aGlobal.GetAsSupports());
-  if (!window) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  RefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
-  return number.forget();
-}
-
-/* static */ already_AddRefed<DOMSVGNumber>
-DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, float aValue,
-                          ErrorResult& aRv)
-{
-  nsCOMPtr<nsPIDOMWindowInner> window =
-    do_QueryInterface(aGlobal.GetAsSupports());
-  if (!window) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  RefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
-  number->SetValue(aValue, aRv);
-  return number.forget();
 }
 
 float
@@ -225,7 +194,7 @@ DOMSVGNumber::IndexIsValid()
 JSObject*
 DOMSVGNumber::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::SVGNumberBinding::Wrap(aCx, this, aGivenProto);
+  return dom::SVGNumber_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace mozilla

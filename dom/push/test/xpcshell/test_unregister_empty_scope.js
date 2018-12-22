@@ -11,10 +11,9 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test_unregister_empty_scope() {
+add_task(async function test_unregister_empty_scope() {
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
         onHello(request) {
@@ -28,12 +27,13 @@ add_task(function* test_unregister_empty_scope() {
     }
   });
 
-  yield rejects(
+  await rejects(
     PushService.unregister({
       scope: '',
       originAttributes: ChromeUtils.originAttributesToSuffix(
         { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
     }),
+    /Invalid page record/,
     'Expected error for empty endpoint'
   );
 });

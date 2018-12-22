@@ -31,7 +31,7 @@ NS_IMPL_QUERY_INTERFACE(nsMemoryImpl, nsIMemory)
 NS_IMETHODIMP
 nsMemoryImpl::HeapMinimize(bool aImmediate)
 {
-  return FlushMemory(MOZ_UTF16("heap-minimize"), aImmediate);
+  return FlushMemory(u"heap-minimize", aImmediate);
 }
 
 NS_IMETHODIMP
@@ -49,7 +49,7 @@ nsMemoryImpl::IsLowMemoryPlatform(bool* aResult)
       return NS_OK;
     }
     uint64_t mem = 0;
-    int rv = fscanf(fd, "MemTotal: %llu kB", &mem);
+    int rv = fscanf(fd, "MemTotal: %" PRIu64 " kB", &mem);
     if (fclose(fd)) {
       return NS_OK;
     }

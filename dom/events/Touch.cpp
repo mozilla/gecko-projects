@@ -50,8 +50,10 @@ Touch::Touch(EventTarget* aTarget,
              int32_t aRadiusY,
              float aRotationAngle,
              float aForce)
+  : mIsTouchEventSuppressed(false)
 {
   mTarget = aTarget;
+  mOriginalTarget = aTarget;
   mIdentifier = aIdentifier;
   mPagePoint = CSSIntPoint(aPageX, aPageY);
   mScreenPoint = CSSIntPoint(aScreenX, aScreenY);
@@ -73,6 +75,7 @@ Touch::Touch(int32_t aIdentifier,
              LayoutDeviceIntPoint aRadius,
              float aRotationAngle,
              float aForce)
+  : mIsTouchEventSuppressed(false)
 {
   mIdentifier = aIdentifier;
   mPagePoint = CSSIntPoint(0, 0);
@@ -90,9 +93,11 @@ Touch::Touch(int32_t aIdentifier,
 }
 
 Touch::Touch(const Touch& aOther)
-  : mTarget(aOther.mTarget)
+  : mOriginalTarget(aOther.mOriginalTarget)
+  , mTarget(aOther.mTarget)
   , mRefPoint(aOther.mRefPoint)
   , mChanged(aOther.mChanged)
+  , mIsTouchEventSuppressed(aOther.mIsTouchEventSuppressed)
   , mMessage(aOther.mMessage)
   , mIdentifier(aOther.mIdentifier)
   , mPagePoint(aOther.mPagePoint)
@@ -117,7 +122,7 @@ Touch::PrefEnabled(JSContext* aCx, JSObject* aGlobal)
   return TouchEvent::PrefEnabled(aCx, aGlobal);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Touch, mTarget)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Touch, mTarget, mOriginalTarget)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Touch)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -140,6 +145,66 @@ Touch::GetTarget() const
   return mTarget;
 }
 
+int32_t
+Touch::ScreenX(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return ClientX();
+  }
+
+  return mScreenPoint.x;
+}
+
+int32_t
+Touch::ScreenY(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return ClientY();
+  }
+
+  return mScreenPoint.y;
+}
+
+int32_t
+Touch::RadiusX(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return 0;
+  }
+
+  return mRadius.x;
+}
+
+int32_t
+Touch::RadiusY(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return 0;
+  }
+
+  return mRadius.y;
+}
+
+float
+Touch::RotationAngle(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return 0.0f;
+  }
+
+  return mRotationAngle;
+}
+
+float
+Touch::Force(CallerType aCallerType) const
+{
+  if (nsContentUtils::ResistFingerprinting(aCallerType)) {
+    return 0.0f;
+  }
+
+  return mForce;
+}
+
 void
 Touch::InitializePoints(nsPresContext* aPresContext, WidgetEvent* aEvent)
 {
@@ -155,8 +220,9 @@ Touch::InitializePoints(nsPresContext* aPresContext, WidgetEvent* aEvent)
 }
 
 void
-Touch::SetTarget(EventTarget* aTarget)
+Touch::SetTouchTarget(EventTarget* aTarget)
 {
+  mOriginalTarget = aTarget;
   mTarget = aTarget;
 }
 
@@ -164,16 +230,16 @@ bool
 Touch::Equals(Touch* aTouch)
 {
   return mRefPoint == aTouch->mRefPoint &&
-         mForce == aTouch->Force() &&
-         mRotationAngle == aTouch->RotationAngle() &&
-         mRadius.x == aTouch->RadiusX() &&
-         mRadius.y == aTouch->RadiusY();
+         mForce == aTouch->mForce &&
+         mRotationAngle == aTouch->mRotationAngle &&
+         mRadius.x == aTouch->mRadius.x &&
+         mRadius.y == aTouch->mRadius.y;
 }
 
 JSObject*
 Touch::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return TouchBinding::Wrap(aCx, this, aGivenProto);
+  return Touch_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 // Parent ourselves to the global of the target. This achieves the desirable
@@ -182,10 +248,10 @@ Touch::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 nsIGlobalObject*
 Touch::GetParentObject()
 {
-  if (!mTarget) {
+  if (!mOriginalTarget) {
     return nullptr;
   }
-  return mTarget->GetOwnerGlobal();
+  return mOriginalTarget->GetOwnerGlobal();
 }
 
 } // namespace dom

@@ -21,31 +21,44 @@
 #include "nsIIPCSerializableURI.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "nsIURIMutator.h"
 
 using namespace mozilla::ipc;
+
+namespace mozilla {
+namespace net {
 
 static NS_DEFINE_CID(kThisSimpleURIImplementationCID,
                      NS_THIS_SIMPLEURI_IMPLEMENTATION_CID);
 static NS_DEFINE_CID(kSimpleURICID, NS_SIMPLEURI_CID);
 
+/* static */ already_AddRefed<nsSimpleURI>
+nsSimpleURI::From(nsIURI* aURI)
+{
+    RefPtr<nsSimpleURI> uri;
+    nsresult rv = aURI->QueryInterface(kThisSimpleURIImplementationCID,
+                                       getter_AddRefs(uri));
+    if (NS_FAILED(rv)) {
+        return nullptr;
+    }
+
+    return uri.forget();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsSimpleURI methods:
 
 nsSimpleURI::nsSimpleURI()
-    : mMutable(true),
-      mIsRefValid(false)
-{
-}
-
-nsSimpleURI::~nsSimpleURI()
+    : mIsRefValid(false)
+    , mIsQueryValid(false)
 {
 }
 
 NS_IMPL_ADDREF(nsSimpleURI)
 NS_IMPL_RELEASE(nsSimpleURI)
 NS_INTERFACE_TABLE_HEAD(nsSimpleURI)
-NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable, nsIClassInfo,
-                    nsIMutable, nsIIPCSerializableURI)
+NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable,
+                   nsIClassInfo, nsIIPCSerializableURI)
 NS_INTERFACE_TABLE_TO_MAP_SEGUE
   if (aIID.Equals(kThisSimpleURIImplementationCID))
     foundInterface = static_cast<nsIURI*>(this);
@@ -57,14 +70,21 @@ NS_INTERFACE_MAP_END
 // nsISerializable methods:
 
 NS_IMETHODIMP
-nsSimpleURI::Read(nsIObjectInputStream* aStream)
+nsSimpleURI::Read(nsIObjectInputStream *aStream)
+{
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+nsresult
+nsSimpleURI::ReadPrivate(nsIObjectInputStream *aStream)
 {
     nsresult rv;
 
     bool isMutable;
     rv = aStream->ReadBoolean(&isMutable);
     if (NS_FAILED(rv)) return rv;
-    mMutable = isMutable;
+    Unused << isMutable;
 
     rv = aStream->ReadCString(mScheme);
     if (NS_FAILED(rv)) return rv;
@@ -84,6 +104,18 @@ nsSimpleURI::Read(nsIObjectInputStream* aStream)
         mRef.Truncate(); // invariant: mRef should be empty when it's not valid
     }
 
+    bool isQueryValid;
+    rv = aStream->ReadBoolean(&isQueryValid);
+    if (NS_FAILED(rv)) return rv;
+    mIsQueryValid = isQueryValid;
+
+    if (isQueryValid) {
+        rv = aStream->ReadCString(mQuery);
+        if (NS_FAILED(rv)) return rv;
+    } else {
+        mQuery.Truncate(); // invariant: mQuery should be empty when it's not valid
+    }
+
     return NS_OK;
 }
 
@@ -92,7 +124,7 @@ nsSimpleURI::Write(nsIObjectOutputStream* aStream)
 {
     nsresult rv;
 
-    rv = aStream->WriteBoolean(mMutable);
+    rv = aStream->WriteBoolean(false); // former mMutable
     if (NS_FAILED(rv)) return rv;
 
     rv = aStream->WriteStringZ(mScheme.get());
@@ -109,6 +141,14 @@ nsSimpleURI::Write(nsIObjectOutputStream* aStream)
         if (NS_FAILED(rv)) return rv;
     }
 
+    rv = aStream->WriteBoolean(mIsQueryValid);
+    if (NS_FAILED(rv)) return rv;
+
+    if (mIsQueryValid) {
+        rv = aStream->WriteStringZ(mQuery.get());
+        if (NS_FAILED(rv)) return rv;
+    }
+
     return NS_OK;
 }
 
@@ -122,13 +162,18 @@ nsSimpleURI::Serialize(URIParams& aParams)
 
     params.scheme() = mScheme;
     params.path() = mPath;
+
     if (mIsRefValid) {
       params.ref() = mRef;
-    }
-    else {
+    } else {
       params.ref().SetIsVoid(true);
     }
-    params.isMutable() = mMutable;
+
+    if (mIsQueryValid) {
+      params.query() = mQuery;
+    } else {
+      params.query().SetIsVoid(true);
+    }
 
     aParams = params;
 }
@@ -145,15 +190,22 @@ nsSimpleURI::Deserialize(const URIParams& aParams)
 
     mScheme = params.scheme();
     mPath = params.path();
+
     if (params.ref().IsVoid()) {
         mRef.Truncate();
         mIsRefValid = false;
-    }
-    else {
+    } else {
         mRef = params.ref();
         mIsRefValid = true;
     }
-    mMutable = params.isMutable();
+
+    if (params.query().IsVoid()) {
+        mQuery.Truncate();
+        mIsQueryValid = false;
+    } else {
+        mQuery = params.query();
+        mIsQueryValid = true;
+    }
 
     return true;
 }
@@ -164,12 +216,30 @@ nsSimpleURI::Deserialize(const URIParams& aParams)
 NS_IMETHODIMP
 nsSimpleURI::GetSpec(nsACString &result)
 {
-    result = mScheme + NS_LITERAL_CSTRING(":") + mPath;
+    if (!result.Assign(mScheme, fallible) ||
+        !result.Append(NS_LITERAL_CSTRING(":"), fallible) ||
+        !result.Append(mPath, fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    if (mIsQueryValid) {
+        if (!result.Append(NS_LITERAL_CSTRING("?"), fallible) ||
+            !result.Append(mQuery, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
+    } else {
+        MOZ_ASSERT(mQuery.IsEmpty(), "mIsQueryValid/mQuery invariant broken");
+    }
+
     if (mIsRefValid) {
-        result += NS_LITERAL_CSTRING("#") + mRef;
+        if (!result.Append(NS_LITERAL_CSTRING("#"), fallible) ||
+            !result.Append(mRef, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
     } else {
         MOZ_ASSERT(mRef.IsEmpty(), "mIsRefValid/mRef invariant broken");
     }
+
     return NS_OK;
 }
 
@@ -178,7 +248,34 @@ NS_IMETHODIMP
 nsSimpleURI::GetSpecIgnoringRef(nsACString &result)
 {
     result = mScheme + NS_LITERAL_CSTRING(":") + mPath;
+    if (mIsQueryValid) {
+        result += NS_LITERAL_CSTRING("?") + mQuery;
+    }
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetDisplaySpec(nsACString &aUnicodeSpec)
+{
+    return GetSpec(aUnicodeSpec);
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetDisplayHostPort(nsACString &aUnicodeHostPort)
+{
+    return GetHostPort(aUnicodeHostPort);
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetDisplayHost(nsACString &aUnicodeHost)
+{
+    return GetHost(aUnicodeHost);
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetDisplayPrePath(nsACString &aPrePath)
+{
+    return GetPrePath(aPrePath);
 }
 
 NS_IMETHODIMP
@@ -188,38 +285,25 @@ nsSimpleURI::GetHasRef(bool *result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSimpleURI::SetSpec(const nsACString &aSpec)
+nsresult
+nsSimpleURI::SetSpecInternal(const nsACString &aSpec)
 {
-    NS_ENSURE_STATE(mMutable);
-    
-    const nsAFlatCString& flat = PromiseFlatCString(aSpec);
-    const char* specPtr = flat.get();
+    nsresult rv = net_ExtractURLScheme(aSpec, mScheme);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
-    // filter out unexpected chars "\r\n\t" if necessary
-    nsAutoCString filteredSpec;
-    int32_t specLen;
-    if (net_FilterURIString(specPtr, filteredSpec)) {
-        specPtr = filteredSpec.get();
-        specLen = filteredSpec.Length();
-    } else
-        specLen = flat.Length();
-
-    // nsSimpleURI currently restricts the charset to US-ASCII
     nsAutoCString spec;
-    NS_EscapeURL(specPtr, specLen, esc_OnlyNonASCII|esc_AlwaysCopy, spec);
+    rv = net_FilterAndEscapeURI(aSpec, esc_OnlyNonASCII, spec);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
     int32_t colonPos = spec.FindChar(':');
-    if (colonPos < 0 || !net_IsValidScheme(spec.get(), colonPos))
-        return NS_ERROR_MALFORMED_URI;
-
-    mScheme.Truncate();
-    mozilla::DebugOnly<int32_t> n = spec.Left(mScheme, colonPos);
-    NS_ASSERTION(n == colonPos, "Left failed");
-    ToLowerCase(mScheme);
-
-    // This sets both mPath and mRef.
-    return SetPath(Substring(spec, colonPos + 1));
+    MOZ_ASSERT(colonPos != kNotFound, "A colon should be in this string");
+    // This sets mPath, mQuery and mRef.
+    return SetPathQueryRefEscaped(Substring(spec, colonPos + 1),
+                                  /* aNeedsEscape = */ false);
 }
 
 NS_IMETHODIMP
@@ -229,14 +313,12 @@ nsSimpleURI::GetScheme(nsACString &result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetScheme(const nsACString &scheme)
 {
-    NS_ENSURE_STATE(mMutable);
-
     const nsPromiseFlatCString &flat = PromiseFlatCString(scheme);
     if (!net_IsValidScheme(flat)) {
-        NS_ERROR("the given url scheme contains invalid characters");
+        NS_WARNING("the given url scheme contains invalid characters");
         return NS_ERROR_MALFORMED_URI;
     }
 
@@ -258,7 +340,7 @@ nsSimpleURI::GetUserPass(nsACString &result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetUserPass(const nsACString &userPass)
 {
     return NS_ERROR_FAILURE;
@@ -270,11 +352,9 @@ nsSimpleURI::GetUsername(nsACString &result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetUsername(const nsACString &userName)
 {
-    NS_ENSURE_STATE(mMutable);
-    
     return NS_ERROR_FAILURE;
 }
 
@@ -284,11 +364,9 @@ nsSimpleURI::GetPassword(nsACString &result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetPassword(const nsACString &password)
 {
-    NS_ENSURE_STATE(mMutable);
-    
     return NS_ERROR_FAILURE;
 }
 
@@ -301,11 +379,9 @@ nsSimpleURI::GetHostPort(nsACString &result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetHostPort(const nsACString &result)
 {
-    NS_ENSURE_STATE(mMutable);
-    
     return NS_ERROR_FAILURE;
 }
 
@@ -317,11 +393,9 @@ nsSimpleURI::GetHost(nsACString &result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetHost(const nsACString &host)
 {
-    NS_ENSURE_STATE(mMutable);
-    
     return NS_ERROR_FAILURE;
 }
 
@@ -333,18 +407,19 @@ nsSimpleURI::GetPort(int32_t *result)
     return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetPort(int32_t port)
 {
-    NS_ENSURE_STATE(mMutable);
-    
     return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
-nsSimpleURI::GetPath(nsACString &result)
+nsSimpleURI::GetPathQueryRef(nsACString &result)
 {
     result = mPath;
+    if (mIsQueryValid) {
+        result += NS_LITERAL_CSTRING("?") + mQuery;
+    }
     if (mIsRefValid) {
         result += NS_LITERAL_CSTRING("#") + mRef;
     }
@@ -352,31 +427,80 @@ nsSimpleURI::GetPath(nsACString &result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSimpleURI::SetPath(const nsACString &path)
+nsresult
+nsSimpleURI::SetPathQueryRef(const nsACString &aPath)
 {
-    NS_ENSURE_STATE(mMutable);
-    
-    int32_t hashPos = path.FindChar('#');
-    if (hashPos < 0) {
-        mIsRefValid = false;
-        mRef.Truncate(); // invariant: mRef should be empty when it's not valid
-        mPath = path;
-        return NS_OK;
+    return SetPathQueryRefEscaped(aPath, true);
+}
+nsresult
+nsSimpleURI::SetPathQueryRefEscaped(const nsACString &aPath, bool aNeedsEscape)
+{
+    nsresult rv;
+    nsAutoCString path;
+    if (aNeedsEscape) {
+        rv = NS_EscapeURL(aPath, esc_OnlyNonASCII, path, fallible);
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+    } else {
+        if (!path.Assign(aPath, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
     }
 
-    mPath = StringHead(path, hashPos);
-    return SetRef(Substring(path, uint32_t(hashPos)));
+    int32_t queryPos = path.FindChar('?');
+    int32_t hashPos = path.FindChar('#');
+
+    if (queryPos != kNotFound && hashPos != kNotFound && hashPos < queryPos) {
+        queryPos = kNotFound;
+    }
+
+    nsAutoCString query;
+    if (queryPos != kNotFound) {
+        query.Assign(Substring(path, queryPos));
+        path.Truncate(queryPos);
+    }
+
+    nsAutoCString hash;
+    if (hashPos != kNotFound) {
+        if (query.IsEmpty()) {
+            hash.Assign(Substring(path, hashPos));
+            path.Truncate(hashPos);
+        } else {
+            // We have to search the hash character in the query
+            hashPos = query.FindChar('#');
+            hash.Assign(Substring(query, hashPos));
+            query.Truncate(hashPos);
+        }
+    }
+
+    mIsQueryValid = false;
+    mQuery.Truncate();
+
+    mIsRefValid = false;
+    mRef.Truncate();
+
+    // The path
+    if (!mPath.Assign(path, fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    rv = SetQuery(query);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+
+    return SetRef(hash);
 }
 
 NS_IMETHODIMP
 nsSimpleURI::GetRef(nsACString &result)
 {
     if (!mIsRefValid) {
-      MOZ_ASSERT(mRef.IsEmpty(), "mIsRefValid/mRef invariant broken");
-      result.Truncate();
+        MOZ_ASSERT(mRef.IsEmpty(), "mIsRefValid/mRef invariant broken");
+        result.Truncate();
     } else {
-      result = mRef;
+        result = mRef;
     }
 
     return NS_OK;
@@ -384,25 +508,29 @@ nsSimpleURI::GetRef(nsACString &result)
 
 // NOTE: SetRef("") removes our ref, whereas SetRef("#") sets it to the empty
 // string (and will result in .spec and .path having a terminal #).
-NS_IMETHODIMP
+nsresult
 nsSimpleURI::SetRef(const nsACString &aRef)
 {
-    NS_ENSURE_STATE(mMutable);
+    nsAutoCString ref;
+    nsresult rv = NS_EscapeURL(aRef, esc_OnlyNonASCII | esc_Spaces, ref, fallible);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
-    if (aRef.IsEmpty()) {
-      // Empty string means to remove ref completely.
-      mIsRefValid = false;
-      mRef.Truncate(); // invariant: mRef should be empty when it's not valid
-      return NS_OK;
+    if (ref.IsEmpty()) {
+        // Empty string means to remove ref completely.
+        mIsRefValid = false;
+        mRef.Truncate(); // invariant: mRef should be empty when it's not valid
+        return NS_OK;
     }
 
     mIsRefValid = true;
 
     // Gracefully skip initial hash
-    if (aRef[0] == '#') {
-        mRef = Substring(aRef, 1);
+    if (ref[0] == '#') {
+        mRef = Substring(ref, 1);
     } else {
-        mRef = aRef;
+        mRef = ref;
     }
 
     return NS_OK;
@@ -426,7 +554,7 @@ nsSimpleURI::EqualsInternal(nsIURI* other,
                             bool* result)
 {
     NS_ENSURE_ARG_POINTER(other);
-    NS_PRECONDITION(result, "null pointer");
+    MOZ_ASSERT(result, "null pointer");
 
     RefPtr<nsSimpleURI> otherUri;
     nsresult rv = other->QueryInterface(kThisSimpleURIImplementationCID,
@@ -445,6 +573,11 @@ nsSimpleURI::EqualsInternal(nsSimpleURI* otherUri, RefHandlingEnum refHandlingMo
 {
     bool result = (mScheme == otherUri->mScheme &&
                    mPath   == otherUri->mPath);
+
+    if (result) {
+        result = (mIsQueryValid == otherUri->mIsQueryValid &&
+                  (!mIsQueryValid || mQuery == otherUri->mQuery));
+    }
 
     if (result && refHandlingMode == eHonorRef) {
         result = (mIsRefValid == otherUri->mIsRefValid &&
@@ -473,38 +606,60 @@ nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals)
 }
 
 /* virtual */ nsSimpleURI*
-nsSimpleURI::StartClone(nsSimpleURI::RefHandlingEnum /* ignored */)
+nsSimpleURI::StartClone(nsSimpleURI::RefHandlingEnum refHandlingMode,
+                        const nsACString& newRef)
 {
-    return new nsSimpleURI();
+    nsSimpleURI* url = new nsSimpleURI();
+    SetRefOnClone(url, refHandlingMode, newRef);
+    return url;
 }
 
-NS_IMETHODIMP
+/* virtual */ void
+nsSimpleURI::SetRefOnClone(nsSimpleURI* url,
+                           nsSimpleURI::RefHandlingEnum refHandlingMode,
+                           const nsACString& newRef)
+{
+    if (refHandlingMode == eHonorRef) {
+        url->mRef = mRef;
+        url->mIsRefValid = mIsRefValid;
+    } else if (refHandlingMode == eReplaceRef) {
+        url->SetRef(newRef);
+    }
+}
+
+nsresult
 nsSimpleURI::Clone(nsIURI** result)
 {
-    return CloneInternal(eHonorRef, result);
+    return CloneInternal(eHonorRef, EmptyCString(), result);
 }
 
 NS_IMETHODIMP
 nsSimpleURI::CloneIgnoringRef(nsIURI** result)
 {
-    return CloneInternal(eIgnoreRef, result);
+    return CloneInternal(eIgnoreRef, EmptyCString(), result);
+}
+
+NS_IMETHODIMP
+nsSimpleURI::CloneWithNewRef(const nsACString &newRef, nsIURI** result)
+{
+    return CloneInternal(eReplaceRef, newRef, result);
 }
 
 nsresult
 nsSimpleURI::CloneInternal(nsSimpleURI::RefHandlingEnum refHandlingMode,
+                           const nsACString &newRef,
                            nsIURI** result)
 {
-    RefPtr<nsSimpleURI> url = StartClone(refHandlingMode);
+    RefPtr<nsSimpleURI> url = StartClone(refHandlingMode, newRef);
     if (!url)
         return NS_ERROR_OUT_OF_MEMORY;
 
-    // Note: |url| may well have mMutable false at this point, so
-    // don't call any setter methods.
     url->mScheme = mScheme;
     url->mPath = mPath;
-    if (refHandlingMode == eHonorRef) {
-        url->mRef = mRef;
-        url->mIsRefValid = mIsRefValid;
+
+    url->mIsQueryValid = mIsQueryValid;
+    if (url->mIsQueryValid) {
+      url->mQuery = mQuery;
     }
 
     url.forget(result);
@@ -512,19 +667,18 @@ nsSimpleURI::CloneInternal(nsSimpleURI::RefHandlingEnum refHandlingMode,
 }
 
 NS_IMETHODIMP
-nsSimpleURI::Resolve(const nsACString &relativePath, nsACString &result) 
+nsSimpleURI::Resolve(const nsACString &relativePath, nsACString &result)
 {
     result = relativePath;
     return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSimpleURI::GetAsciiSpec(nsACString &result)
+nsSimpleURI::GetAsciiSpec(nsACString &aResult)
 {
-    nsAutoCString buf;
-    nsresult rv = GetSpec(buf);
+    nsresult rv = GetSpec(aResult);
     if (NS_FAILED(rv)) return rv;
-    NS_EscapeURL(buf, esc_OnlyNonASCII|esc_AlwaysCopy, result);
+    MOZ_ASSERT(IsASCII(aResult), "The spec should be ASCII");
     return NS_OK;
 }
 
@@ -542,18 +696,11 @@ nsSimpleURI::GetAsciiHost(nsACString &result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSimpleURI::GetOriginCharset(nsACString &result)
-{
-    result.Truncate();
-    return NS_OK;
-}
-
 //----------------------------------------------------------------------------
 // nsSimpleURI::nsIClassInfo
 //----------------------------------------------------------------------------
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSimpleURI::GetInterfaces(uint32_t *count, nsIID * **array)
 {
     *count = 0;
@@ -561,30 +708,30 @@ nsSimpleURI::GetInterfaces(uint32_t *count, nsIID * **array)
     return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSimpleURI::GetScriptableHelper(nsIXPCScriptable **_retval)
 {
     *_retval = nullptr;
     return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsSimpleURI::GetContractID(char * *aContractID)
+NS_IMETHODIMP
+nsSimpleURI::GetContractID(nsACString& aContractID)
 {
     // Make sure to modify any subclasses as needed if this ever
     // changes.
-    *aContractID = nullptr;
+    aContractID.SetIsVoid(true);
     return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsSimpleURI::GetClassDescription(char * *aClassDescription)
+NS_IMETHODIMP
+nsSimpleURI::GetClassDescription(nsACString& aClassDescription)
 {
-    *aClassDescription = nullptr;
+    aClassDescription.SetIsVoid(true);
     return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSimpleURI::GetClassID(nsCID * *aClassID)
 {
     // Make sure to modify any subclasses as needed if this ever
@@ -595,14 +742,14 @@ nsSimpleURI::GetClassID(nsCID * *aClassID)
     return GetClassIDNoAlloc(*aClassID);
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSimpleURI::GetFlags(uint32_t *aFlags)
 {
     *aFlags = nsIClassInfo::MAIN_THREAD_ONLY;
     return NS_OK;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSimpleURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
 {
     *aClassIDNoAlloc = kSimpleURICID;
@@ -610,38 +757,100 @@ nsSimpleURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
 }
 
 //----------------------------------------------------------------------------
-// nsSimpleURI::nsISimpleURI
-//----------------------------------------------------------------------------
-NS_IMETHODIMP
-nsSimpleURI::GetMutable(bool *value)
-{
-    *value = mMutable;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSimpleURI::SetMutable(bool value)
-{
-    NS_ENSURE_ARG(mMutable || !value);
-
-    mMutable = value;
-    return NS_OK;
-}
-
-//----------------------------------------------------------------------------
 // nsSimpleURI::nsISizeOf
 //----------------------------------------------------------------------------
 
-size_t 
-nsSimpleURI::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+size_t
+nsSimpleURI::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return mScheme.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
          mPath.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
+         mQuery.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
          mRef.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
 }
 
 size_t
-nsSimpleURI::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+nsSimpleURI::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
+NS_IMETHODIMP
+nsSimpleURI::GetFilePath(nsACString& aFilePath)
+{
+    aFilePath = mPath;
+    return NS_OK;
+}
+
+nsresult
+nsSimpleURI::SetFilePath(const nsACString& aFilePath)
+{
+    return NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+nsSimpleURI::GetQuery(nsACString& aQuery)
+{
+    if (!mIsQueryValid) {
+        MOZ_ASSERT(mQuery.IsEmpty(), "mIsQueryValid/mQuery invariant broken");
+        aQuery.Truncate();
+    } else {
+        aQuery = mQuery;
+    }
+    return NS_OK;
+}
+
+nsresult
+nsSimpleURI::SetQuery(const nsACString& aQuery)
+{
+    nsAutoCString query;
+    nsresult rv = NS_EscapeURL(aQuery, esc_OnlyNonASCII, query, fallible);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+
+    if (query.IsEmpty()) {
+        // Empty string means to remove query completely.
+        mIsQueryValid = false;
+        mQuery.Truncate(); // invariant: mQuery should be empty when it's not valid
+        return NS_OK;
+    }
+
+    mIsQueryValid = true;
+
+    // Gracefully skip initial question mark
+    if (query[0] == '?') {
+        mQuery = Substring(query, 1);
+    } else {
+        mQuery = query;
+    }
+
+    return NS_OK;
+}
+
+nsresult
+nsSimpleURI::SetQueryWithEncoding(const nsACString& aQuery,
+                                  const Encoding* aEncoding)
+{
+    return SetQuery(aQuery);
+}
+
+// Queries this list of interfaces. If none match, it queries mURI.
+NS_IMPL_NSIURIMUTATOR_ISUPPORTS(nsSimpleURI::Mutator,
+                                nsIURISetters,
+                                nsIURIMutator,
+                                nsISerializable)
+
+NS_IMETHODIMP
+nsSimpleURI::Mutate(nsIURIMutator** aMutator)
+{
+    RefPtr<nsSimpleURI::Mutator> mutator = new nsSimpleURI::Mutator();
+    nsresult rv = mutator->InitFromURI(this);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
+    mutator.forget(aMutator);
+    return NS_OK;
+}
+
+} // namespace net
+} // namespace mozilla

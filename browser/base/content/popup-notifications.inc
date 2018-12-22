@@ -2,7 +2,6 @@
 
     <panel id="notification-popup"
            type="arrow"
-           footertype="promobox"
            position="after_start"
            hidden="true"
            orient="vertical"
@@ -23,10 +22,18 @@
         <label id="webRTC-selectWindow-label"
                control="webRTC-selectWindow-menulist"/>
         <menulist id="webRTC-selectWindow-menulist"
-                  oncommand="gWebRTCUI.updateMainActionLabel(this);">
+                  oncommand="webrtcUI.updateWarningLabel(this);">
           <menupopup id="webRTC-selectWindow-menupopup"/>
         </menulist>
         <description id="webRTC-all-windows-shared" hidden="true">&getUserMedia.allWindowsShared.message;</description>
+      </popupnotificationcontent>
+
+      <popupnotificationcontent id="webRTC-preview" hidden="true">
+        <html:video id="webRTC-previewVideo"/>
+        <vbox id="webRTC-previewWarningBox">
+          <spacer flex="1"/>
+          <description id="webRTC-previewWarning"/>
+        </vbox>
       </popupnotificationcontent>
 
       <popupnotificationcontent id="webRTC-selectMicrophone" orient="vertical">
@@ -45,57 +52,36 @@
       </popupnotificationcontent>
     </popupnotification>
 
-    <popupnotification id="pointerLock-notification" hidden="true">
-      <popupnotificationcontent orient="vertical" align="start">
-        <label id="pointerLock-cancel">&pointerLock.notification.message;</label>
-      </popupnotificationcontent>
-    </popupnotification>
-
     <popupnotification id="password-notification" hidden="true">
       <popupnotificationcontent orient="vertical">
         <textbox id="password-notification-username"/>
         <textbox id="password-notification-password" type="password" show-content=""/>
+        <checkbox id="password-notification-visibilityToggle" hidden="true"/>
       </popupnotificationcontent>
     </popupnotification>
 
-    <stack id="login-fill-doorhanger" hidden="true">
-      <vbox id="login-fill-mainview">
-        <description id="login-fill-testing"
-                     value="Thanks for testing the login fill doorhanger!"/>
-        <textbox id="login-fill-filter"/>
-        <richlistbox id="login-fill-list"/>
-      </vbox>
-      <vbox id="login-fill-clickcapturer"/>
-      <vbox id="login-fill-details">
-        <textbox id="login-fill-username" readonly="true"/>
-        <textbox id="login-fill-password" type="password" disabled="true"/>
-        <hbox>
-          <button id="login-fill-use" label="Use in form"/>
-        </hbox>
-      </vbox>
-    </stack>
-
-#ifdef E10S_TESTING_ONLY
-    <popupnotification id="enable-e10s-notification" hidden="true">
-      <popupnotificationcontent orient="vertical"/>
-    </popupnotification>
-#endif
 
     <popupnotification id="addon-progress-notification" hidden="true">
       <popupnotificationcontent orient="vertical">
         <progressmeter id="addon-progress-notification-progressmeter"/>
         <label id="addon-progress-notification-progresstext" crop="end"/>
       </popupnotificationcontent>
-      <button id="addon-progress-cancel"
-              oncommand="this.parentNode.cancel();"/>
-      <button id="addon-progress-accept" disabled="true"/>
     </popupnotification>
 
     <popupnotification id="addon-install-confirmation-notification" hidden="true">
       <popupnotificationcontent id="addon-install-confirmation-content" orient="vertical"/>
-      <button id="addon-install-confirmation-cancel"
-              oncommand="PopupNotifications.getNotification('addon-install-confirmation').remove();"/>
-      <button id="addon-install-confirmation-accept"
-              oncommand="gXPInstallObserver.acceptInstallation();
-                         PopupNotifications.getNotification('addon-install-confirmation').remove();"/>
+    </popupnotification>
+
+    <popupnotification id="addon-webext-permissions-notification" hidden="true">
+      <popupnotificationcontent class="addon-webext-perm-notification-content" orient="vertical">
+        <description id="addon-webext-perm-text" class="addon-webext-perm-text"/>
+        <label id="addon-webext-perm-intro" class="addon-webext-perm-text"/>
+        <html:ul id="addon-webext-perm-list" class="addon-webext-perm-list"/>
+      </popupnotificationcontent>
+    </popupnotification>
+
+    <popupnotification id="addon-installed-notification" hidden="true">
+      <popupnotificationcontent class="addon-installed-notification-content" orient="vertical">
+        <description>&addonPostInstallMessage.label;</description>
+      </popupnotificationcontent>
     </popupnotification>

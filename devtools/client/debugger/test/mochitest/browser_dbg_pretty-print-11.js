@@ -13,25 +13,30 @@ var gTab, gPanel, gDebugger;
 var gEditor, gSources;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  // Wait for debugger panel to be fully set and break on debugger statement
+  let options = {
+    source: EXAMPLE_URL + "code_ugly.js",
+    line: 2
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gEditor = gDebugger.DebuggerView.editor;
     gSources = gDebugger.DebuggerView.Sources;
 
-    waitForSourceShown(gPanel, "code_ugly.js")
-      .then(testSourceIsUgly)
+    testSourceIsUgly();
+    const finished = waitForCaretUpdated(gPanel, 7);
+    clickPrettyPrintButton();
+    finished.then(testSourceIsPretty)
       .then(() => {
-        const finished = waitForSourceShown(gPanel, "code_ugly.js");
-        clickPrettyPrintButton();
-        return finished;
+        const finished = waitForCaretUpdated(gPanel, 7);
+        const reloaded = reloadActiveTab(gPanel, gDebugger.EVENTS.SOURCE_SHOWN);
+        return Promise.all([finished, reloaded]);
       })
       .then(testSourceIsPretty)
-      .then(reloadActiveTab.bind(null, gPanel, gDebugger.EVENTS.SOURCE_SHOWN))
-      .then(testSourceIsPretty)
       .then(() => resumeDebuggerThenCloseAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + DevToolsUtils.safeErrorString(aError));
       });
   });
@@ -48,10 +53,10 @@ function clickPrettyPrintButton() {
 
 function testSourceIsPretty() {
   ok(gEditor.getText().includes("\n  "),
-     "The source should be pretty printed.")
+     "The source should be pretty printed.");
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

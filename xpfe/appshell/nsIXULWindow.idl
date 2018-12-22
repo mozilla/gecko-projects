@@ -13,12 +13,20 @@
  * notification through the global observer service.
  */
 
+%{C++
+#include "LiveResizeListener.h"
+#include "nsTArray.h"
+%}
+
 interface nsIDocShell;
 interface nsIDocShellTreeItem;
 interface nsIXULBrowserWindow;
 interface nsITabParent;
+interface mozIDOMWindowProxy;
 
-[scriptable, uuid(d6d7a014-e28d-4c9d-8727-1cf6d870619b)]
+native LiveResizeListenerArray(nsTArray<RefPtr<mozilla::LiveResizeListener>>);
+
+[builtinclass, scriptable, uuid(d6d7a014-e28d-4c9d-8727-1cf6d870619b)]
 interface nsIXULWindow : nsISupports
 {
   /**
@@ -50,21 +58,20 @@ interface nsIXULWindow : nsISupports
   void tabParentAdded(in nsITabParent aTab, in boolean aPrimary);
   void tabParentRemoved(in nsITabParent aTab);
 
-  /**
-   * The content shell specified by the supplied id.
-   *
-   * Note that this is a docshell tree item and therefore can not be assured of
-   * what object it is.  It could be an editor, a docshell, or a browser object.
-   * Or down the road any other object that supports being a DocShellTreeItem
-   * Query accordingly to determine the capabilities.
-   */
-  nsIDocShellTreeItem getContentShellById(in wstring ID);
+  [noscript,notxpcom] LiveResizeListenerArray getLiveResizeListeners();
 
   /**
    * Tell this window that it has picked up a child XUL window
    * @param aChild the child window being added
    */
   void addChildWindow(in nsIXULWindow aChild);
+
+  /**
+   * Returns the difference between the inner window size (client size) and the
+   * outer window size, in CSS pixels.
+   */
+  [infallible] readonly attribute unsigned long outerToInnerHeightDifferenceInCSSPixels;
+  [infallible] readonly attribute unsigned long outerToInnerWidthDifferenceInCSSPixels;
 
   /**
    * Tell this window that it has lost a child XUL window
@@ -102,11 +109,6 @@ interface nsIXULWindow : nsISupports
 
   attribute unsigned long zLevel;
 
-  /**
-   * contextFlags are from nsIWindowCreator2
-   */
-  attribute uint32_t contextFlags;
-
   attribute uint32_t chromeFlags;
 
   /**
@@ -120,18 +122,60 @@ interface nsIXULWindow : nsISupports
    * @param aChromeFlags see nsIWebBrowserChrome
    * @param aOpeningTab the TabParent that requested this new window be opened.
    *                    Can be left null.
+   * @param aOpener The window which is requesting that this new window be opened.
+   * @param aNextTabParentId The integer ID of the next tab parent actor to use.
+   *        0 means there is no next tab parent actor to use.
    * @return the newly minted window
    */
   nsIXULWindow createNewWindow(in int32_t aChromeFlags,
-                               in nsITabParent aOpeningTab);
+                               in nsITabParent aOpeningTab,
+                               in mozIDOMWindowProxy aOpener,
+                               in unsigned long long aNextTabParentId);
 
   attribute nsIXULBrowserWindow XULBrowserWindow;
 
   /**
-   * Back-door method to force application of chrome flags at a particular
-   * time.  Do NOT call this unless you know what you're doing!  In particular,
+   * Back-door method to make sure some stuff is done when the document is
+   * ready for layout, that would cause expensive computation otherwise later.
+   *
+   * Do NOT call this unless you know what you're doing!  In particular,
    * calling this when this XUL window doesn't yet have a document in its
    * docshell could cause problems.
    */
-  [noscript] void applyChromeFlags();
+  [noscript] void beforeStartLayout();
+
+  /**
+   * Given the dimensions of some content area held within this
+   * XUL window, and assuming that that content area will change
+   * its dimensions in linear proportion to the dimensions of this
+   * XUL window, changes the size of the XUL window so that the
+   * content area reaches a particular size.
+   *
+   * We need to supply the content area dimensions because sometimes
+   * the child's nsDocShellTreeOwner needs to propagate a SizeShellTo
+   * call to the parent. But the shellItem argument of the call will
+   * not be available on the parent side.
+   *
+   * Note: this is an internal method, other consumers should never call this.
+   *
+   * @param aDesiredWidth
+   *        The desired width of the content area in device pixels.
+   * @param aDesiredHeight
+   *        The desired height of the content area in device pixels.
+   * @param shellItemWidth
+   *        The current width of the content area.
+   * @param shellItemHeight
+   *        The current height of the content area.
+   */
+  [noscript, notxpcom] void sizeShellToWithLimit(in int32_t aDesiredWidth,
+                                                 in int32_t aDesiredHeight,
+                                                 in int32_t shellItemWidth,
+                                                 in int32_t shellItemHeight);
+
+  /**
+   * If the window was opened as a content window by script, this will return the
+   * integer ID of the next TabParent actor to use.
+   */
+  [noscript]
+  readonly attribute unsigned long long nextTabParentId;
 };

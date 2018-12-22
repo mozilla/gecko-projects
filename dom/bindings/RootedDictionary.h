@@ -15,11 +15,12 @@ namespace mozilla {
 namespace dom {
 
 template<typename T>
-class MOZ_RAII RootedDictionary : public T,
+class MOZ_RAII RootedDictionary final : public T,
                                          private JS::CustomAutoRooter
 {
 public:
-  explicit RootedDictionary(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+  template <typename CX>
+  explicit RootedDictionary(const CX& cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     T(),
     JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
   {
@@ -32,11 +33,12 @@ public:
 };
 
 template<typename T>
-class MOZ_RAII NullableRootedDictionary : public Nullable<T>,
+class MOZ_RAII NullableRootedDictionary final : public Nullable<T>,
                                                  private JS::CustomAutoRooter
 {
 public:
-  explicit NullableRootedDictionary(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+  template <typename CX>
+  explicit NullableRootedDictionary(const CX& cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
     Nullable<T>(),
     JS::CustomAutoRooter(cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
   {

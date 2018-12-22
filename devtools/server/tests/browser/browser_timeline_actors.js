@@ -1,25 +1,25 @@
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable mozilla/no-arbitrary-setTimeout */
 
 "use strict";
 
 // Test that the timeline can also record data from the memory and framerate
 // actors, emitted as events in tadem with the markers.
 
-const {TimelineFront} = require("devtools/server/actors/timeline");
+const {TimelineFront} = require("devtools/shared/fronts/timeline");
 
-add_task(function*() {
-  let browser = yield addTab("data:text/html;charset=utf-8,mop");
-  let doc = browser.contentDocument;
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8,mop");
 
   initDebuggerServer();
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = TimelineFront(client, form);
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = TimelineFront(client, form);
 
   info("Start timeline marker recording");
-  yield front.start({ withMemory: true, withTicks: true });
+  await front.start({ withMemory: true, withTicks: true });
 
   let updatedMemory = 0;
   let updatedTicks = 0;
@@ -39,14 +39,14 @@ add_task(function*() {
     updatedTicks++;
   });
 
-  ok((yield waitUntil(() => updatedMemory > 1)),
+  ok((await waitUntil(() => updatedMemory > 1)),
     "Some memory measurements were emitted.");
-  ok((yield waitUntil(() => updatedTicks > 1)),
+  ok((await waitUntil(() => updatedTicks > 1)),
     "Some refresh driver ticks were emitted.");
 
   info("Stop timeline marker recording");
-  yield front.stop();
-  yield closeDebuggerClient(client);
+  await front.stop();
+  await client.close();
   gBrowser.removeCurrentTab();
 });
 

@@ -30,13 +30,13 @@ public:
   LeafAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(LeafAccessible, AccessibleWrap)
 
   // Accessible
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild) override;
-  virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override final;
-  virtual bool RemoveChild(Accessible* aChild) override final;
+  bool InsertChildAt(uint32_t aIndex, Accessible* aChild) final;
+  bool RemoveChild(Accessible* aChild) final;
 
   virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
@@ -60,25 +60,25 @@ public:
   {
   }
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(LinkableAccessible, AccessibleWrap)
 
   // Accessible
-  virtual void Value(nsString& aValue) override;
+  virtual void Value(nsString& aValue) const override;
   virtual uint64_t NativeLinkState() const override;
-  virtual void TakeFocus() override;
+  virtual void TakeFocus() const override;
 
   // ActionAccessible
-  virtual uint8_t ActionCount() override;
+  virtual uint8_t ActionCount() const override;
   virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t index) override;
+  virtual bool DoAction(uint8_t index) const override;
   virtual KeyBinding AccessKey() const override;
 
   // ActionAccessible helpers
-  Accessible* ActionWalk(bool* aIsLink = nullptr,
-                         bool* aIsOnclick = nullptr,
-                         bool* aIsLabelWithControl = nullptr);
+  const Accessible* ActionWalk(bool* aIsLink = nullptr,
+                               bool* aIsOnclick = nullptr,
+                               bool* aIsLabelWithControl = nullptr) const;
   // HyperLinkAccessible
-  virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex) override;
+  virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex) const override;
 
 protected:
   virtual ~LinkableAccessible() {}
@@ -99,7 +99,7 @@ public:
     { return Accessible::QueryInterface(aIID, aPtr); }
 
   // Accessible
-  virtual a11y::role NativeRole() override { return R; }
+  virtual a11y::role NativeRole() const override { return R; }
 
 protected:
   virtual ~EnumRoleAccessible() { }
@@ -116,11 +116,11 @@ public:
   explicit DummyAccessible(DocAccessible* aDocument = nullptr) :
     AccessibleWrap(nullptr, aDocument) { }
 
-  virtual uint64_t NativeState() override final;
-  virtual uint64_t NativeInteractiveState() const override final;
-  virtual uint64_t NativeLinkState() const override final;
-  virtual bool NativelyUnavailable() const override final;
-  virtual void ApplyARIAState(uint64_t* aState) const override final;
+  uint64_t NativeState() const final;
+  uint64_t NativeInteractiveState() const final;
+  uint64_t NativeLinkState() const final;
+  bool NativelyUnavailable() const final;
+  void ApplyARIAState(uint64_t* aState) const final;
 
 protected:
   virtual ~DummyAccessible() { }

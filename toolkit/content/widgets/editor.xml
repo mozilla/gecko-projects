@@ -9,7 +9,7 @@
    xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
    xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="editor" role="outerdoc">
+  <binding id="editor">
     <implementation type="application/javascript">
       <constructor>
         <![CDATA[
@@ -26,29 +26,18 @@
       <field name="_editorContentListener">
         <![CDATA[
           ({
-            QueryInterface: function(iid)
-            {
-              if (iid.equals(Components.interfaces.nsIURIContentListener) ||
-                  iid.equals(Components.interfaces.nsISupportsWeakReference) ||
-                  iid.equals(Components.interfaces.nsISupports))
-              return this;
-
-              throw Components.results.NS_ERROR_NO_INTERFACE;
-            },
-            onStartURIOpen: function(uri)
-            {
+            QueryInterface: ChromeUtils.generateQI(["nsIURIContentListener",
+                                                    "nsISupportsWeakReference"]),
+            onStartURIOpen(uri) {
               return false;
             },
-            doContent: function(contentType, isContentPreferred, request, contentHandler)
-            {
+            doContent(contentType, isContentPreferred, request, contentHandler) {
               return false;
             },
-            isPreferred: function(contentType, desiredContentType)
-            {
+            isPreferred(contentType, desiredContentType) {
               return false;
             },
-            canHandleContent: function(contentType, isContentPreferred, desiredContentType)
-            {
+            canHandleContent(contentType, isContentPreferred, desiredContentType) {
               return false;
             },
             loadCookie: null,
@@ -64,8 +53,8 @@
           this.editingSession.makeWindowEditable(this.contentWindow, editortype, waitForUrlLoad, true, false);
           this.setAttribute("editortype", editortype);
 
-          this.docShell.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-              .getInterface(Components.interfaces.nsIURIContentListener)
+          this.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+              .getInterface(Ci.nsIURIContentListener)
               .parentContentListener = this._editorContentListener;
         ]]>
         </body>
@@ -83,7 +72,7 @@
         <body>
         <![CDATA[
           var editor = this.editingSession.getEditorForWindow(containingWindow);
-          return editor.QueryInterface(Components.interfaces.nsIHTMLEditor);
+          return editor.QueryInterface(Ci.nsIHTMLEditor);
         ]]>
         </body>
       </method>
@@ -95,7 +84,7 @@
             if (!this.docShell)
               return null;
 
-            let Finder = Components.utils.import("resource://gre/modules/Finder.jsm", {}).Finder;
+            let Finder = ChromeUtils.import("resource://gre/modules/Finder.jsm", {}).Finder;
             this._finder = new Finder(this.docShell);
           }
           return this._finder;
@@ -108,14 +97,14 @@
         <getter>
         <![CDATA[
           if (!this._fastFind) {
-            if (!("@mozilla.org/typeaheadfind;1" in Components.classes))
+            if (!("@mozilla.org/typeaheadfind;1" in Cc))
               return null;
 
             if (!this.docShell)
               return null;
 
-            this._fastFind = Components.classes["@mozilla.org/typeaheadfind;1"]
-                                       .createInstance(Components.interfaces.nsITypeAheadFind);
+            this._fastFind = Cc["@mozilla.org/typeaheadfind;1"]
+                               .createInstance(Ci.nsITypeAheadFind);
             this._fastFind.init(this.docShell);
           }
           return this._fastFind;
@@ -124,7 +113,6 @@
       </property>
 
       <field name="_lastSearchString">null</field>
-      <field name="_lastSearchHighlight">false</field>
 
       <property name="editortype"
                 onget="return this.getAttribute('editortype');"
@@ -136,7 +124,7 @@
                 onget="return this.webNavigation.document;"/>
       <property name="docShell" readonly="true">
         <getter><![CDATA[
-          let frameLoader = this.QueryInterface(Components.interfaces.nsIFrameLoaderOwner).frameLoader;
+          let {frameLoader} = this;
           return frameLoader ? frameLoader.docShell : null;
         ]]></getter>
       </property>
@@ -174,19 +162,18 @@
                 readonly="true">
         <getter>
           <![CDATA[
-            var owner = this.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
-            if (!owner.frameLoader) {
-              return null;
+            if (this.frameLoader) {
+              return this.frameLoader.messageManager;
             }
-            return owner.frameLoader.messageManager;
+            return null;
           ]]>
         </getter>
       </property>
       <property name="outerWindowID" readonly="true">
         <getter><![CDATA[
           return this.contentWindow
-                     .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                     .getInterface(Components.interfaces.nsIDOMWindowUtils)
+                     .QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindowUtils)
                      .outerWindowID;
         ]]></getter>
       </property>

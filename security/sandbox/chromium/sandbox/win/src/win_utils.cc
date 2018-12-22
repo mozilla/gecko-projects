@@ -4,9 +4,17 @@
 
 #include "sandbox/win/src/win_utils.h"
 
-#include <map>
+#include <psapi.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <map>
+#include <memory>
+#include <vector>
+
+#include "base/macros.h"
+#include "base/numerics/safe_math.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/win/pe_image.h"
 #include "sandbox/win/src/internal_types.h"
@@ -14,6 +22,11 @@
 #include "sandbox/win/src/sandbox_nt_util.h"
 
 namespace {
+
+const size_t kDriveLetterLen = 3;
+
+constexpr wchar_t kNTDotPrefix[] = L"\\\\.\\";
+const size_t kNTDotPrefixLen = arraysize(kNTDotPrefix) - 1;
 
 // Holds the information about a known registry key.
 struct KnownReservedKey {
@@ -57,9 +70,9 @@ bool EqualPath(const base::string16& first, size_t first_offset,
 
 // Returns true if |path| starts with "\??\" and returns a path without that
 // component.
-bool IsNTPath(const base::string16& path, base::string16* trimmed_path ) {
+bool IsNTPath(const base::string16& path, base::string16* trimmed_path) {
   if ((path.size() < sandbox::kNTPrefixLen) ||
-      (0 != path.compare(0, sandbox::kNTPrefixLen, sandbox::kNTPrefix))) {
+      !EqualPath(path, sandbox::kNTPrefix, sandbox::kNTPrefixLen)) {
     *trimmed_path = path;
     return false;
   }
@@ -70,7 +83,7 @@ bool IsNTPath(const base::string16& path, base::string16* trimmed_path ) {
 
 // Returns true if |path| starts with "\Device\" and returns a path without that
 // component.
-bool IsDevicePath(const base::string16& path, base::string16* trimmed_path ) {
+bool IsDevicePath(const base::string16& path, base::string16* trimmed_path) {
   if ((path.size() < sandbox::kNTDevicePrefixLen) ||
       (!EqualPath(path, sandbox::kNTDevicePrefix,
                   sandbox::kNTDevicePrefixLen))) {
@@ -82,23 +95,49 @@ bool IsDevicePath(const base::string16& path, base::string16* trimmed_path ) {
   return true;
 }
 
+// Returns the offset to the path seperator following
+// "\Device\HarddiskVolumeX" in |path|.
+size_t PassHarddiskVolume(const base::string16& path) {
+  static constexpr wchar_t pattern[] = L"\\Device\\HarddiskVolume";
+  const size_t patternLen = arraysize(pattern) - 1;
+
+  // First, check for |pattern|.
+  if ((path.size() < patternLen) || (!EqualPath(path, pattern, patternLen)))
+    return base::string16::npos;
+
+  // Find the next path separator, after the pattern match.
+  return path.find_first_of(L'\\', patternLen - 1);
+}
+
+// Returns true if |path| starts with "\Device\HarddiskVolumeX\" and returns a
+// path without that component.  |removed| will hold the prefix removed.
+bool IsDeviceHarddiskPath(const base::string16& path,
+                          base::string16* trimmed_path,
+                          base::string16* removed) {
+  size_t offset = PassHarddiskVolume(path);
+  if (offset == base::string16::npos)
+    return false;
+
+  // Remove up to and including the path separator.
+  *removed = path.substr(0, offset + 1);
+  // Remaining path starts after the path separator.
+  *trimmed_path = path.substr(offset + 1);
+  return true;
+}
+
 bool StartsWithDriveLetter(const base::string16& path) {
-  if (path.size() < 3)
+  if (path.size() < kDriveLetterLen)
     return false;
 
   if (path[1] != L':' || path[2] != L'\\')
     return false;
 
-  return (path[0] >= 'a' && path[0] <= 'z') ||
-         (path[0] >= 'A' && path[0] <= 'Z');
+  return base::IsAsciiAlpha(path[0]);
 }
-
-const wchar_t kNTDotPrefix[] = L"\\\\.\\";
-const size_t kNTDotPrefixLen = arraysize(kNTDotPrefix) - 1;
 
 // Removes "\\\\.\\" from the path.
 void RemoveImpliedDevice(base::string16* path) {
-  if (0 == path->compare(0, kNTDotPrefixLen, kNTDotPrefix))
+  if (EqualPath(*path, kNTDotPrefix, kNTDotPrefixLen))
     *path = path->substr(kNTDotPrefixLen);
 }
 
@@ -109,7 +148,7 @@ namespace sandbox {
 // Returns true if the provided path points to a pipe.
 bool IsPipe(const base::string16& path) {
   size_t start = 0;
-  if (0 == path.compare(0, sandbox::kNTPrefixLen, sandbox::kNTPrefix))
+  if (EqualPath(path, sandbox::kNTPrefix, sandbox::kNTPrefixLen))
     start = sandbox::kNTPrefixLen;
 
   const wchar_t kPipe[] = L"pipe\\";
@@ -157,12 +196,10 @@ bool ResolveRegistryName(base::string16 name, base::string16* resolved_name) {
 //    \Device\HarddiskVolume0\some\foo\bar
 //    \??\HarddiskVolume0\some\foo\bar
 //    \??\UNC\SERVER\Share\some\foo\bar
-DWORD IsReparsePoint(const base::string16& full_path, bool* result) {
+DWORD IsReparsePoint(const base::string16& full_path) {
   // Check if it's a pipe. We can't query the attributes of a pipe.
-  if (IsPipe(full_path)) {
-    *result = FALSE;
-    return ERROR_SUCCESS;
-  }
+  if (IsPipe(full_path))
+    return ERROR_NOT_A_REPARSE_POINT;
 
   base::string16 path;
   bool nt_path = IsNTPath(full_path, &path);
@@ -180,15 +217,16 @@ DWORD IsReparsePoint(const base::string16& full_path, bool* result) {
   // Ensure that volume path matches start of path.
   wchar_t vol_path[MAX_PATH];
   if (!::GetVolumePathNameW(path.c_str(), vol_path, MAX_PATH)) {
-    return ERROR_INVALID_NAME;
+    // This will fail if this is a device that isn't volume related, which can't
+    // then be a reparse point.
+    return is_device_path ? ERROR_NOT_A_REPARSE_POINT : ERROR_INVALID_NAME;
   }
-  size_t vol_path_len = wcslen(vol_path);
+
+  // vol_path includes a trailing slash, so reduce size for path and loop check.
+  size_t vol_path_len = wcslen(vol_path) - 1;
   if (!EqualPath(path, vol_path, vol_path_len)) {
     return ERROR_INVALID_NAME;
   }
-
-  // vol_path will include a trailing slash, so reduce size for loop check.
-  --vol_path_len;
 
   do {
     DWORD attributes = ::GetFileAttributes(path.c_str());
@@ -196,6 +234,7 @@ DWORD IsReparsePoint(const base::string16& full_path, bool* result) {
       DWORD error = ::GetLastError();
       if (error != ERROR_FILE_NOT_FOUND &&
           error != ERROR_PATH_NOT_FOUND &&
+          error != ERROR_INVALID_FUNCTION &&
           error != ERROR_INVALID_NAME) {
         // Unexpected error.
         NOTREACHED_NT();
@@ -203,15 +242,13 @@ DWORD IsReparsePoint(const base::string16& full_path, bool* result) {
       }
     } else if (FILE_ATTRIBUTE_REPARSE_POINT & attributes) {
       // This is a reparse point.
-      *result = true;
       return ERROR_SUCCESS;
     }
 
     path.resize(path.rfind(L'\\'));
   } while (path.size() > vol_path_len);  // Skip root dir.
 
-  *result = false;
-  return ERROR_SUCCESS;
+  return ERROR_NOT_A_REPARSE_POINT;
 }
 
 // We get a |full_path| of the forms accepted by IsReparsePoint(), and the name
@@ -284,36 +321,54 @@ bool SameObject(HANDLE handle, const wchar_t* full_path) {
   return true;
 }
 
-// Paths like \Device\HarddiskVolume0\some\foo\bar are assumed to be already
-// expanded.
-bool ConvertToLongPath(const base::string16& short_path,
-                       base::string16* long_path) {
-  if (IsPipe(short_path)) {
-    // TODO(rvargas): Change the signature to use a single argument.
-    long_path->assign(short_path);
+// Just make a best effort here.  There are lots of corner cases that we're
+// not expecting - and will fail to make long.
+bool ConvertToLongPath(base::string16* native_path,
+                       const base::string16* drive_letter) {
+  if (IsPipe(*native_path))
     return true;
-  }
 
-  base::string16 path;
-  if (IsDevicePath(short_path, &path))
-    return false;
-
-  bool is_nt_path = IsNTPath(path, &path);
+  bool is_device_harddisk_path = false;
+  bool is_nt_path = false;
   bool added_implied_device = false;
-  if (!StartsWithDriveLetter(path) && is_nt_path) {
-    path = base::string16(kNTDotPrefix) + path;
-    added_implied_device = true;
+  base::string16 temp_path;
+  base::string16 to_restore;
+
+  // Process a few prefix types.
+  if (IsNTPath(*native_path, &temp_path)) {
+    // "\??\"
+    if (!StartsWithDriveLetter(temp_path)) {
+      // Prepend with "\\.\".
+      temp_path = base::string16(kNTDotPrefix) + temp_path;
+      added_implied_device = true;
+    }
+    is_nt_path = true;
+  } else if (IsDeviceHarddiskPath(*native_path, &temp_path, &to_restore)) {
+    // "\Device\HarddiskVolumeX\" - hacky attempt making ::GetLongPathName
+    // work for native device paths.  Remove "\Device\HarddiskVolumeX\" and
+    // replace with drive letter.
+
+    // Nothing we can do if we don't have a drive letter.  Leave |native_path|
+    // as is.
+    if (!drive_letter || drive_letter->empty())
+      return false;
+    temp_path = *drive_letter + temp_path;
+    is_device_harddisk_path = true;
+  } else if (IsDevicePath(*native_path, &temp_path)) {
+    // "\Device\" - there's nothing we can do to convert to long here.
+    return false;
   }
 
   DWORD size = MAX_PATH;
-  scoped_ptr<wchar_t[]> long_path_buf(new wchar_t[size]);
+  std::unique_ptr<wchar_t[]> long_path_buf(new wchar_t[size]);
 
-  DWORD return_value = ::GetLongPathName(path.c_str(), long_path_buf.get(),
+  DWORD return_value = ::GetLongPathName(temp_path.c_str(), long_path_buf.get(),
                                          size);
   while (return_value >= size) {
     size *= 2;
     long_path_buf.reset(new wchar_t[size]);
-    return_value = ::GetLongPathName(path.c_str(), long_path_buf.get(), size);
+    return_value = ::GetLongPathName(temp_path.c_str(), long_path_buf.get(),
+                                     size);
   }
 
   DWORD last_error = ::GetLastError();
@@ -321,31 +376,37 @@ bool ConvertToLongPath(const base::string16& short_path,
                             ERROR_PATH_NOT_FOUND == last_error ||
                             ERROR_INVALID_NAME == last_error)) {
     // The file does not exist, but maybe a sub path needs to be expanded.
-    base::string16::size_type last_slash = path.rfind(L'\\');
+    base::string16::size_type last_slash = temp_path.rfind(L'\\');
     if (base::string16::npos == last_slash)
       return false;
 
-    base::string16 begin = path.substr(0, last_slash);
-    base::string16 end = path.substr(last_slash);
-    if (!ConvertToLongPath(begin, &begin))
+    base::string16 begin = temp_path.substr(0, last_slash);
+    base::string16 end = temp_path.substr(last_slash);
+    if (!ConvertToLongPath(&begin))
       return false;
 
     // Ok, it worked. Let's reset the return value.
-    path = begin + end;
+    temp_path = begin + end;
     return_value = 1;
   } else if (0 != return_value) {
-    path = long_path_buf.get();
+    temp_path = long_path_buf.get();
   }
 
+  // If successful, re-apply original namespace prefix before returning.
   if (return_value != 0) {
     if (added_implied_device)
-      RemoveImpliedDevice(&path);
+      RemoveImpliedDevice(&temp_path);
 
     if (is_nt_path) {
-      *long_path = kNTPrefix;
-      *long_path += path;
+      *native_path = kNTPrefix;
+      *native_path += temp_path;
+    } else if (is_device_harddisk_path) {
+      // Remove the added drive letter.
+      temp_path = temp_path.substr(kDriveLetterLen);
+      *native_path = to_restore;
+      *native_path += temp_path;
     } else {
-      *long_path = path;
+      *native_path = temp_path;
     }
 
     return true;
@@ -362,13 +423,14 @@ bool GetPathFromHandle(HANDLE handle, base::string16* path) {
   OBJECT_NAME_INFORMATION* name = &initial_buffer;
   ULONG size = sizeof(initial_buffer);
   // Query the name information a first time to get the size of the name.
+  // Windows XP requires that the size of the buffer passed in here be != 0.
   NTSTATUS status = NtQueryObject(handle, ObjectNameInformation, name, size,
                                   &size);
 
-  scoped_ptr<OBJECT_NAME_INFORMATION> name_ptr;
+  std::unique_ptr<BYTE[]> name_ptr;
   if (size) {
-    name = reinterpret_cast<OBJECT_NAME_INFORMATION*>(new BYTE[size]);
-    name_ptr.reset(name);
+    name_ptr.reset(new BYTE[size]);
+    name = reinterpret_cast<OBJECT_NAME_INFORMATION*>(name_ptr.get());
 
     // Query the name information a second time to get the name of the
     // object referenced by the handle.
@@ -415,6 +477,48 @@ bool WriteProtectedChildMemory(HANDLE child_process, void* address,
   return ok;
 }
 
+DWORD GetLastErrorFromNtStatus(NTSTATUS status) {
+  RtlNtStatusToDosErrorFunction NtStatusToDosError = nullptr;
+  ResolveNTFunctionPtr("RtlNtStatusToDosError", &NtStatusToDosError);
+  return NtStatusToDosError(status);
+}
+
+// This function uses the undocumented PEB ImageBaseAddress field to extract
+// the base address of the new process.
+void* GetProcessBaseAddress(HANDLE process) {
+  NtQueryInformationProcessFunction query_information_process = NULL;
+  ResolveNTFunctionPtr("NtQueryInformationProcess", &query_information_process);
+  if (!query_information_process)
+    return nullptr;
+  PROCESS_BASIC_INFORMATION process_basic_info = {};
+  NTSTATUS status = query_information_process(
+      process, ProcessBasicInformation, &process_basic_info,
+      sizeof(process_basic_info), nullptr);
+  if (STATUS_SUCCESS != status)
+    return nullptr;
+
+  PEB peb = {};
+  SIZE_T bytes_read = 0;
+  if (!::ReadProcessMemory(process, process_basic_info.PebBaseAddress, &peb,
+                           sizeof(peb), &bytes_read) ||
+      (sizeof(peb) != bytes_read)) {
+    return nullptr;
+  }
+
+  void* base_address = peb.ImageBaseAddress;
+  char magic[2] = {};
+  if (!::ReadProcessMemory(process, base_address, magic, sizeof(magic),
+                           &bytes_read) ||
+      (sizeof(magic) != bytes_read)) {
+    return nullptr;
+  }
+
+  if (magic[0] != 'M' || magic[1] != 'Z')
+    return nullptr;
+
+  return base_address;
+}
+
 };  // namespace sandbox
 
 void ResolveNTFunctionPtr(const char* name, void* ptr) {
@@ -428,7 +532,6 @@ void ResolveNTFunctionPtr(const char* name, void* ptr) {
     // Race-safe way to set static ntdll.
     ::InterlockedCompareExchangePointer(
         reinterpret_cast<PVOID volatile*>(&ntdll), ntdll_local, NULL);
-
   }
 
   CHECK_NT(ntdll);

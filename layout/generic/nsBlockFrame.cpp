@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=2:et:sw=2:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,15 +11,20 @@
 
 #include "nsBlockFrame.h"
 
+#include "gfxContext.h"
+
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 
 #include "nsCOMPtr.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "nsBlockReflowContext.h"
-#include "nsBlockReflowState.h"
+#include "BlockReflowInput.h"
 #include "nsBulletFrame.h"
 #include "nsFontMetrics.h"
+#include "nsGenericHTMLElement.h"
 #include "nsLineBox.h"
 #include "nsLineLayout.h"
 #include "nsPlaceholderFrame.h"
@@ -27,35 +32,34 @@
 #include "nsFrameManager.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
-#include "nsStyleContext.h"
 #include "nsHTMLParts.h"
 #include "nsGkAtoms.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsFloatManager.h"
 #include "prenv.h"
 #include "plstr.h"
 #include "nsError.h"
-#include "nsAutoPtr.h"
 #include "nsIScrollableFrame.h"
 #include <algorithm>
-#ifdef ACCESSIBILITY
-#include "nsIDOMHTMLDocument.h"
-#endif
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSFrameConstructor.h"
-#include "nsRenderingContext.h"
 #include "TextOverflow.h"
 #include "nsIFrameInlines.h"
 #include "CounterStyleManager.h"
-#include "nsISelection.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/dom/HTMLDetailsElement.h"
+#include "mozilla/dom/HTMLSummaryElement.h"
+#include "mozilla/dom/Selection.h"
+#include "mozilla/RestyleManager.h"
+#include "mozilla/ServoStyleSet.h"
+#include "mozilla/Telemetry.h"
 
 #include "nsBidiPresUtils.h"
+
+#include <inttypes.h>
 
 static const int MIN_LINES_NEEDING_CURSOR = 20;
 
@@ -63,13 +67,15 @@ static const char16_t kDiscCharacter = 0x2022;
 
 using namespace mozilla;
 using namespace mozilla::css;
+using namespace mozilla::dom;
 using namespace mozilla::layout;
+using ShapeType = nsFloatManager::ShapeType;
 typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
 
 static void MarkAllDescendantLinesDirty(nsBlockFrame* aBlock)
 {
-  nsLineList::iterator line = aBlock->begin_lines();
-  nsLineList::iterator endLine = aBlock->end_lines();
+  nsLineList::iterator line = aBlock->LinesBegin();
+  nsLineList::iterator endLine = aBlock->LinesEnd();
   while (line != endLine) {
     if (line->IsBlock()) {
       nsIFrame* f = line->mFirstChild;
@@ -93,7 +99,7 @@ static void MarkSameFloatManagerLinesDirty(nsBlockFrame* aBlock)
     }
     blockWithFloatMgr = bf;
   }
-    
+
   // Mark every line at and below the line where the float was
   // dirty, and mark their lines dirty too. We could probably do
   // something more efficient --- e.g., just dirty the lines that intersect
@@ -111,9 +117,9 @@ static bool BlockHasAnyFloats(nsIFrame* aFrame)
     return false;
   if (block->GetChildList(nsIFrame::kFloatList).FirstChild())
     return true;
-    
-  nsLineList::iterator line = block->begin_lines();
-  nsLineList::iterator endLine = block->end_lines();
+
+  nsLineList::iterator line = block->LinesBegin();
+  nsLineList::iterator endLine = block->LinesEnd();
   while (line != endLine) {
     if (line->IsBlock() && BlockHasAnyFloats(line->mFirstChild))
       return true;
@@ -211,10 +217,6 @@ nsBlockFrame::InitDebugFlags()
 
 #endif
 
-// add in a sanity check for absurdly deep frame trees.  See bug 42138
-// can't just use IsFrameTreeTooDeep() because that method has side effects we don't want
-#define MAX_DEPTH_FOR_LIST_RENUMBERING 200  // 200 open displayable tags is pretty unrealistic
-
 //----------------------------------------------------------------------
 
 // Debugging support code
@@ -227,29 +229,26 @@ const char* nsBlockFrame::kReflowCommandType[] = {
   "Timeout",
   "UserDefined",
 };
-#endif
 
-#ifdef REALLY_NOISY_FIRST_LINE
-static void
-DumpStyleGeneaology(nsIFrame* aFrame, const char* gap)
+const char*
+nsBlockFrame::LineReflowStatusToString(LineReflowStatus aLineReflowStatus) const
 {
-  fputs(gap, stdout);
-  nsFrame::ListTag(stdout, aFrame);
-  printf(": ");
-  nsStyleContext* sc = aFrame->StyleContext();
-  while (nullptr != sc) {
-    nsStyleContext* psc;
-    printf("%p ", sc);
-    psc = sc->GetParent();
-    sc = psc;
+  switch (aLineReflowStatus) {
+    case LineReflowStatus::OK: return "LINE_REFLOW_OK";
+    case LineReflowStatus::Stop: return "LINE_REFLOW_STOP";
+    case LineReflowStatus::RedoNoPull: return "LINE_REFLOW_REDO_NO_PULL";
+    case LineReflowStatus::RedoMoreFloats: return "LINE_REFLOW_REDO_MORE_FLOATS";
+    case LineReflowStatus::RedoNextBand: return "LINE_REFLOW_REDO_NEXT_BAND";
+    case LineReflowStatus::Truncated: return "LINE_REFLOW_TRUNCATED";
   }
-  printf("\n");
+  return "unknown";
 }
+
 #endif
 
 #ifdef REFLOW_STATUS_COVERAGE
 static void
-RecordReflowStatus(bool aChildIsBlock, nsReflowStatus aFrameReflowStatus)
+RecordReflowStatus(bool aChildIsBlock, const nsReflowStatus& aFrameReflowStatus)
 {
   static uint32_t record[2];
 
@@ -260,18 +259,18 @@ RecordReflowStatus(bool aChildIsBlock, nsReflowStatus aFrameReflowStatus)
 
   // Compute new status
   uint32_t newS = record[index];
-  if (NS_INLINE_IS_BREAK(aFrameReflowStatus)) {
-    if (NS_INLINE_IS_BREAK_BEFORE(aFrameReflowStatus)) {
+  if (aFrameReflowStatus.IsInlineBreak()) {
+    if (aFrameReflowStatus.IsInlineBreakBefore()) {
       newS |= 1;
     }
-    else if (NS_FRAME_IS_NOT_COMPLETE(aFrameReflowStatus)) {
+    else if (aFrameReflowStatus.IsIncomplete()) {
       newS |= 2;
     }
     else {
       newS |= 4;
     }
   }
-  else if (NS_FRAME_IS_NOT_COMPLETE(aFrameReflowStatus)) {
+  else if (aFrameReflowStatus.IsIncomplete()) {
     newS |= 8;
   }
   else {
@@ -297,11 +296,18 @@ NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BlockEndEdgeOfChildrenProperty, nscoord)
 //----------------------------------------------------------------------
 
 nsBlockFrame*
-NS_NewBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags)
+NS_NewBlockFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  nsBlockFrame* it = new (aPresShell) nsBlockFrame(aContext);
-  it->SetFlags(aFlags);
-  return it;
+  return new (aPresShell) nsBlockFrame(aStyle);
+}
+
+nsBlockFrame*
+NS_NewBlockFormattingContext(nsIPresShell* aPresShell,
+                             ComputedStyle* aComputedStyle)
+{
+  nsBlockFrame* blockFrame = NS_NewBlockFrame(aPresShell, aComputedStyle);
+  blockFrame->AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
+  return blockFrame;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBlockFrame)
@@ -311,20 +317,18 @@ nsBlockFrame::~nsBlockFrame()
 }
 
 void
-nsBlockFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsBlockFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   ClearLineCursor();
-  DestroyAbsoluteFrames(aDestructRoot);
-  mFloats.DestroyFramesFrom(aDestructRoot);
+  DestroyAbsoluteFrames(aDestructRoot, aPostDestroyData);
+  mFloats.DestroyFramesFrom(aDestructRoot, aPostDestroyData);
   nsPresContext* presContext = PresContext();
   nsIPresShell* shell = presContext->PresShell();
   nsLineBox::DeleteLineList(presContext, mLines, aDestructRoot,
-                            &mFrames);
-
-  FramePropertyTable* props = presContext->PropertyTable();
+                            &mFrames, aPostDestroyData);
 
   if (HasPushedFloats()) {
-    SafelyDestroyFrameListProp(aDestructRoot, shell, props,
+    SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
                                PushedFloatProperty());
     RemoveStateBits(NS_BLOCK_HAS_PUSHED_FLOATS);
   }
@@ -333,23 +337,24 @@ nsBlockFrame::DestroyFrom(nsIFrame* aDestructRoot)
   FrameLines* overflowLines = RemoveOverflowLines();
   if (overflowLines) {
     nsLineBox::DeleteLineList(presContext, overflowLines->mLines,
-                              aDestructRoot, &overflowLines->mFrames);
+                              aDestructRoot, &overflowLines->mFrames,
+                              aPostDestroyData);
     delete overflowLines;
   }
 
   if (GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) {
-    SafelyDestroyFrameListProp(aDestructRoot, shell, props,
+    SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
                                OverflowOutOfFlowsProperty());
     RemoveStateBits(NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS);
   }
 
   if (HasOutsideBullet()) {
-    SafelyDestroyFrameListProp(aDestructRoot, shell, props,
+    SafelyDestroyFrameListProp(aDestructRoot, aPostDestroyData, shell,
                                OutsideBulletProperty());
     RemoveStateBits(NS_BLOCK_FRAME_HAS_OUTSIDE_BULLET);
   }
 
-  nsBlockFrameSuper::DestroyFrom(aDestructRoot);
+  nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 /* virtual */ nsILineIterator*
@@ -370,7 +375,7 @@ nsBlockFrame::GetLineIterator()
 
 NS_QUERYFRAME_HEAD(nsBlockFrame)
   NS_QUERYFRAME_ENTRY(nsBlockFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrameSuper)
+NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 nsSplittableType
 nsBlockFrame::GetSplittableType() const
@@ -392,7 +397,7 @@ nsBlockFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 
   // Output the lines
   if (!mLines.empty()) {
-    const_line_iterator line = begin_lines(), line_end = end_lines();
+    ConstLineIterator line = LinesBegin(), line_end = LinesEnd();
     for ( ; line != line_end; ++line) {
       line->List(out, pfx.get(), aFlags);
     }
@@ -404,8 +409,8 @@ nsBlockFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
     fprintf_stderr(out, "%sOverflow-lines %p/%p <\n", pfx.get(), overflowLines, &overflowLines->mFrames);
     nsCString nestedPfx(pfx);
     nestedPfx += "  ";
-    const_line_iterator line = overflowLines->mLines.begin(),
-                        line_end = overflowLines->mLines.end();
+    ConstLineIterator line = overflowLines->mLines.begin(),
+                      line_end = overflowLines->mLines.end();
     for ( ; line != line_end; ++line) {
       line->List(out, nestedPfx.get(), aFlags);
     }
@@ -443,53 +448,69 @@ nsBlockFrame::GetFrameName(nsAString& aResult) const
 }
 #endif
 
-#ifdef DEBUG
-nsFrameState
-nsBlockFrame::GetDebugStateBits() const
-{
-  // We don't want to include our cursor flag in the bits the
-  // regression tester looks at
-  return nsBlockFrameSuper::GetDebugStateBits() & ~NS_BLOCK_HAS_LINE_CURSOR;
-}
-#endif
-
-nsIAtom*
-nsBlockFrame::GetType() const
-{
-  return nsGkAtoms::blockFrame;
-}
-
 void
-nsBlockFrame::InvalidateFrame(uint32_t aDisplayItemKey)
+nsBlockFrame::InvalidateFrame(uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
-  if (IsSVGText()) {
-    NS_ASSERTION(GetParent()->GetType() == nsGkAtoms::svgTextFrame,
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
+    NS_ASSERTION(GetParent()->IsSVGTextFrame(),
                  "unexpected block frame in SVG text");
     GetParent()->InvalidateFrame();
     return;
   }
-  nsBlockFrameSuper::InvalidateFrame(aDisplayItemKey);
+  nsContainerFrame::InvalidateFrame(aDisplayItemKey, aRebuildDisplayItems);
 }
 
 void
-nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
+nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
-  if (IsSVGText()) {
-    NS_ASSERTION(GetParent()->GetType() == nsGkAtoms::svgTextFrame,
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
+    NS_ASSERTION(GetParent()->IsSVGTextFrame(),
                  "unexpected block frame in SVG text");
     GetParent()->InvalidateFrame();
     return;
   }
-  nsBlockFrameSuper::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+  nsContainerFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey, aRebuildDisplayItems);
 }
 
 nscoord
-nsBlockFrame::GetLogicalBaseline(WritingMode aWritingMode) const
+nsBlockFrame::GetLogicalBaseline(WritingMode aWM) const
 {
-  nscoord result;
-  if (nsLayoutUtils::GetLastLineBaseline(aWritingMode, this, &result))
-    return result;
-  return nsFrame::GetLogicalBaseline(aWritingMode);
+  auto lastBaseline =
+    BaselineBOffset(aWM, BaselineSharingGroup::eLast, AlignmentContext::eInline);
+  return BSize(aWM) - lastBaseline;
+}
+
+bool
+nsBlockFrame::GetNaturalBaselineBOffset(mozilla::WritingMode aWM,
+                                        BaselineSharingGroup aBaselineGroup,
+                                        nscoord*             aBaseline) const
+{
+  if (aBaselineGroup == BaselineSharingGroup::eFirst) {
+    return nsLayoutUtils::GetFirstLineBaseline(aWM, this, aBaseline);
+  }
+
+  for (ConstReverseLineIterator line = LinesRBegin(), line_end = LinesREnd();
+       line != line_end; ++line) {
+    if (line->IsBlock()) {
+      nscoord offset;
+      nsIFrame* kid = line->mFirstChild;
+      if (kid->GetVerticalAlignBaseline(aWM, &offset)) {
+        // Ignore relative positioning for baseline calculations.
+        const nsSize& sz = line->mContainerSize;
+        offset += kid->GetLogicalNormalPosition(aWM, sz).B(aWM);
+        *aBaseline = BSize(aWM) - offset;
+        return true;
+      }
+    } else {
+      // XXX Is this the right test?  We have some bogus empty lines
+      // floating around, but IsEmpty is perhaps too weak.
+      if (line->BSize() != 0 || !line->IsEmpty()) {
+        *aBaseline = BSize(aWM) - (line->BStart() + line->GetLogicalAscent());
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 nscoord
@@ -499,7 +520,7 @@ nsBlockFrame::GetCaretBaseline() const
   nsMargin bp = GetUsedBorderAndPadding();
 
   if (!mLines.empty()) {
-    const_line_iterator line = begin_lines();
+    ConstLineIterator line = LinesBegin();
     const nsLineBox* firstLine = line;
     if (firstLine->GetChildCount()) {
       return bp.top + firstLine->mFirstChild->GetCaretBaseline();
@@ -509,8 +530,11 @@ nsBlockFrame::GetCaretBaseline() const
   RefPtr<nsFontMetrics> fm =
     nsLayoutUtils::GetFontMetricsForFrame(this, inflation);
   nscoord lineHeight =
-    nsHTMLReflowState::CalcLineHeight(GetContent(), StyleContext(),
-                                      contentRect.height, inflation);
+    ReflowInput::CalcLineHeight(GetContent(),
+                                Style(),
+                                PresContext(),
+                                contentRect.height,
+                                inflation);
   const WritingMode wm = GetWritingMode();
   return nsLayoutUtils::GetCenteredFontBaseline(fm, lineHeight,
                                                 wm.IsLineInverted()) + bp.top;
@@ -590,7 +614,7 @@ ReparentFrame(nsIFrame* aFrame, nsContainerFrame* aOldParent,
   // views need to be reparented
   nsContainerFrame::ReparentFrameView(aFrame, aOldParent, aNewParent);
 }
- 
+
 static void
 ReparentFrames(nsFrameList& aFrameList, nsContainerFrame* aOldParent,
                nsContainerFrame* aNewParent)
@@ -599,7 +623,7 @@ ReparentFrames(nsFrameList& aFrameList, nsContainerFrame* aOldParent,
     ReparentFrame(e.get(), aOldParent, aNewParent);
   }
 }
- 
+
 /**
  * Remove the first line from aFromLines and adjust the associated frame list
  * aFromFrames accordingly.  The removed line is assigned to *aOutLine and
@@ -633,13 +657,13 @@ nsBlockFrame::MarkIntrinsicISizesDirty()
   dirtyBlock->mMinWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
   dirtyBlock->mPrefWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
   if (!(GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)) {
-    for (nsIFrame* frame = dirtyBlock; frame; 
+    for (nsIFrame* frame = dirtyBlock; frame;
          frame = frame->GetNextContinuation()) {
       frame->AddStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
     }
   }
 
-  nsBlockFrameSuper::MarkIntrinsicISizesDirty();
+  nsContainerFrame::MarkIntrinsicISizesDirty();
 }
 
 void
@@ -664,7 +688,7 @@ nsBlockFrame::CheckIntrinsicCacheAgainstShrinkWrapState()
 }
 
 /* virtual */ nscoord
-nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsBlockFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nsIFrame* firstInFlow = FirstContinuation();
   if (firstInFlow != this)
@@ -691,7 +715,7 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
     curFrame->LazyMarkLinesDirty();
   }
 
-  if (RenumberLists(PresContext())) {
+  if (RenumberList()) {
     AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
   }
   if (GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)
@@ -699,7 +723,7 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
   InlineMinISizeData data;
   for (nsBlockFrame* curFrame = this; curFrame;
        curFrame = static_cast<nsBlockFrame*>(curFrame->GetNextContinuation())) {
-    for (line_iterator line = curFrame->begin_lines(), line_end = curFrame->end_lines();
+    for (LineIterator line = curFrame->LinesBegin(), line_end = curFrame->LinesEnd();
       line != line_end; ++line)
     {
 #ifdef DEBUG
@@ -713,22 +737,22 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 #endif
       if (line->IsBlock()) {
         data.ForceBreak();
-        data.currentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+        data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                         line->mFirstChild, nsLayoutUtils::MIN_ISIZE);
         data.ForceBreak();
       } else {
         if (!curFrame->GetPrevContinuation() &&
-            line == curFrame->begin_lines()) {
+            line == curFrame->LinesBegin()) {
           // Only add text-indent if it has no percentages; using a
           // percentage basis of 0 unconditionally would give strange
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
           if (indent.ConvertsToLength())
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+            data.mCurrentLine += indent.ComputeCoordPercentCalc(0);
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -740,19 +764,19 @@ nsBlockFrame::GetMinISize(nsRenderingContext *aRenderingContext)
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
         printf("min: [prevLines=%d currentLine=%d]\n",
-               data.prevLines, data.currentLine);
+               data.mPrevLines, data.mCurrentLine);
       }
 #endif
     }
   }
   data.ForceBreak();
 
-  mMinWidth = data.prevLines;
+  mMinWidth = data.mPrevLines;
   return mMinWidth;
 }
 
 /* virtual */ nscoord
-nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nsIFrame* firstInFlow = FirstContinuation();
   if (firstInFlow != this)
@@ -779,7 +803,7 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
     curFrame->LazyMarkLinesDirty();
   }
 
-  if (RenumberLists(PresContext())) {
+  if (RenumberList()) {
     AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
   }
   if (GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)
@@ -787,7 +811,7 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
   InlinePrefISizeData data;
   for (nsBlockFrame* curFrame = this; curFrame;
        curFrame = static_cast<nsBlockFrame*>(curFrame->GetNextContinuation())) {
-    for (line_iterator line = curFrame->begin_lines(), line_end = curFrame->end_lines();
+    for (LineIterator line = curFrame->LinesBegin(), line_end = curFrame->LinesEnd();
          line != line_end; ++line)
     {
 #ifdef DEBUG
@@ -800,23 +824,35 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
       AutoNoisyIndenter lineindent(gNoisyIntrinsic);
 #endif
       if (line->IsBlock()) {
-        data.ForceBreak();
-        data.currentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
+        StyleClear breakType;
+        if (!data.mLineIsEmpty || BlockCanIntersectFloats(line->mFirstChild)) {
+          breakType = StyleClear::Both;
+        } else {
+          breakType = line->mFirstChild->
+            StyleDisplay()->PhysicalBreakType(data.mLineContainerWM);
+        }
+        data.ForceBreak(breakType);
+        data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                         line->mFirstChild, nsLayoutUtils::PREF_ISIZE);
         data.ForceBreak();
       } else {
         if (!curFrame->GetPrevContinuation() &&
-            line == curFrame->begin_lines()) {
+            line == curFrame->LinesBegin()) {
           // Only add text-indent if it has no percentages; using a
           // percentage basis of 0 unconditionally would give strange
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
-          if (indent.ConvertsToLength())
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+          if (indent.ConvertsToLength()) {
+            nscoord length = indent.ToLength();
+            if (length != 0) {
+              data.mCurrentLine += length;
+              data.mLineIsEmpty = false;
+            }
+          }
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -828,14 +864,14 @@ nsBlockFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
         printf("pref: [prevLines=%d currentLine=%d]\n",
-               data.prevLines, data.currentLine);
+               data.mPrevLines, data.mCurrentLine);
       }
 #endif
     }
   }
   data.ForceBreak();
 
-  mPrefWidth = data.prevLines;
+  mPrefWidth = data.mPrevLines;
   return mPrefWidth;
 }
 
@@ -843,14 +879,14 @@ nsRect
 nsBlockFrame::ComputeTightBounds(DrawTarget* aDrawTarget) const
 {
   // be conservative
-  if (StyleContext()->HasTextDecorationLines()) {
+  if (Style()->HasTextDecorationLines()) {
     return GetVisualOverflowRect();
   }
   return ComputeSimpleTightBounds(aDrawTarget);
 }
 
 /* virtual */ nsresult
-nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
+nsBlockFrame::GetPrefWidthTightBounds(gfxContext* aRenderingContext,
                                       nscoord* aX,
                                       nscoord* aXMost)
 {
@@ -866,7 +902,7 @@ nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
   InlinePrefISizeData data;
   for (nsBlockFrame* curFrame = this; curFrame;
        curFrame = static_cast<nsBlockFrame*>(curFrame->GetNextContinuation())) {
-    for (line_iterator line = curFrame->begin_lines(), line_end = curFrame->end_lines();
+    for (LineIterator line = curFrame->LinesBegin(), line_end = curFrame->LinesEnd();
          line != line_end; ++line)
     {
       nscoord childX, childXMost;
@@ -879,18 +915,18 @@ nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
         *aXMost = std::max(*aXMost, childXMost);
       } else {
         if (!curFrame->GetPrevContinuation() &&
-            line == curFrame->begin_lines()) {
+            line == curFrame->LinesBegin()) {
           // Only add text-indent if it has no percentages; using a
           // percentage basis of 0 unconditionally would give strange
           // behavior for calc(10%-3px).
           const nsStyleCoord &indent = StyleText()->mTextIndent;
           if (indent.ConvertsToLength()) {
-            data.currentLine += nsRuleNode::ComputeCoordPercentCalc(indent, 0);
+            data.mCurrentLine += indent.ComputeCoordPercentCalc(0);
           }
         }
         // XXX Bug NNNNNN Should probably handle percentage text-indent.
 
-        data.line = &line;
+        data.mLine = &line;
         data.SetLineContainer(curFrame);
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
@@ -898,8 +934,8 @@ nsBlockFrame::GetPrefWidthTightBounds(nsRenderingContext* aRenderingContext,
           rv = kid->GetPrefWidthTightBounds(aRenderingContext, &childX,
                                             &childXMost);
           NS_ENSURE_SUCCESS(rv, rv);
-          *aX = std::min(*aX, data.currentLine + childX);
-          *aXMost = std::max(*aXMost, data.currentLine + childXMost);
+          *aX = std::min(*aX, data.mCurrentLine + childX);
+          *aXMost = std::max(*aXMost, data.mCurrentLine + childXMost);
           kid->AddInlinePrefISize(aRenderingContext, &data);
         }
       }
@@ -952,25 +988,25 @@ AvailableSpaceShrunk(WritingMode aWM,
 
 static LogicalSize
 CalculateContainingBlockSizeForAbsolutes(WritingMode aWM,
-                                         const nsHTMLReflowState& aReflowState,
+                                         const ReflowInput& aReflowInput,
                                          LogicalSize aFrameSize)
 {
   // The issue here is that for a 'height' of 'auto' the reflow state
   // code won't know how to calculate the containing block height
   // because it's calculated bottom up. So we use our own computed
   // size as the dimensions.
-  nsIFrame* frame = aReflowState.frame;
+  nsIFrame* frame = aReflowInput.mFrame;
 
   LogicalSize cbSize(aFrameSize);
     // Containing block is relative to the padding edge
   const LogicalMargin& border =
-    LogicalMargin(aWM, aReflowState.ComputedPhysicalBorderPadding() -
-                       aReflowState.ComputedPhysicalPadding());
+    LogicalMargin(aWM, aReflowInput.ComputedPhysicalBorderPadding() -
+                       aReflowInput.ComputedPhysicalPadding());
   cbSize.ISize(aWM) -= border.IStartEnd(aWM);
   cbSize.BSize(aWM) -= border.BStartEnd(aWM);
 
   if (frame->GetParent()->GetContent() == frame->GetContent() &&
-      frame->GetParent()->GetType() != nsGkAtoms::canvasFrame) {
+      !frame->GetParent()->IsCanvasFrame()) {
     // We are a wrapped frame for the content (and the wrapper is not the
     // canvas frame, whose size is not meaningful here).
     // Use the container's dimensions, if they have been precomputed.
@@ -983,48 +1019,48 @@ CalculateContainingBlockSizeForAbsolutes(WritingMode aWM,
     // First, find the reflow state for the outermost frame for this
     // content, except for fieldsets where the inner anonymous frame has
     // the correct padding area with the legend taken into account.
-    const nsHTMLReflowState* aLastRS = &aReflowState;
-    const nsHTMLReflowState* lastButOneRS = &aReflowState;
-    while (aLastRS->parentReflowState &&
-           aLastRS->parentReflowState->frame->GetContent() == frame->GetContent() &&
-           aLastRS->parentReflowState->frame->GetType() != nsGkAtoms::fieldSetFrame) {
-      lastButOneRS = aLastRS;
-      aLastRS = aLastRS->parentReflowState;
+    const ReflowInput* aLastRI = &aReflowInput;
+    const ReflowInput* lastButOneRI = &aReflowInput;
+    while (aLastRI->mParentReflowInput &&
+           aLastRI->mParentReflowInput->mFrame->GetContent() == frame->GetContent() &&
+           !aLastRI->mParentReflowInput->mFrame->IsFieldSetFrame()) {
+      lastButOneRI = aLastRI;
+      aLastRI = aLastRI->mParentReflowInput;
     }
-    if (aLastRS != &aReflowState) {
+    if (aLastRI != &aReflowInput) {
       // Scrollbars need to be specifically excluded, if present, because they are outside the
       // padding-edge. We need better APIs for getting the various boxes from a frame.
-      nsIScrollableFrame* scrollFrame = do_QueryFrame(aLastRS->frame);
+      nsIScrollableFrame* scrollFrame = do_QueryFrame(aLastRI->mFrame);
       nsMargin scrollbars(0,0,0,0);
       if (scrollFrame) {
         scrollbars =
-          scrollFrame->GetDesiredScrollbarSizes(aLastRS->frame->PresContext(),
-                                                aLastRS->rendContext);
-        if (!lastButOneRS->mFlags.mAssumingHScrollbar) {
+          scrollFrame->GetDesiredScrollbarSizes(aLastRI->mFrame->PresContext(),
+                                                aLastRI->mRenderingContext);
+        if (!lastButOneRI->mFlags.mAssumingHScrollbar) {
           scrollbars.top = scrollbars.bottom = 0;
         }
-        if (!lastButOneRS->mFlags.mAssumingVScrollbar) {
+        if (!lastButOneRI->mFlags.mAssumingVScrollbar) {
           scrollbars.left = scrollbars.right = 0;
         }
       }
       // We found a reflow state for the outermost wrapping frame, so use
       // its computed metrics if available, converted to our writing mode
-      WritingMode lastWM = aLastRS->GetWritingMode();
-      LogicalSize lastRSSize =
+      WritingMode lastWM = aLastRI->GetWritingMode();
+      LogicalSize lastRISize =
         LogicalSize(lastWM,
-                    aLastRS->ComputedISize(),
-                    aLastRS->ComputedBSize()).ConvertTo(aWM, lastWM);
-      LogicalMargin lastRSPadding =
-        aLastRS->ComputedLogicalPadding().ConvertTo(aWM, lastWM);
+                    aLastRI->ComputedISize(),
+                    aLastRI->ComputedBSize()).ConvertTo(aWM, lastWM);
+      LogicalMargin lastRIPadding =
+        aLastRI->ComputedLogicalPadding().ConvertTo(aWM, lastWM);
       LogicalMargin logicalScrollbars(aWM, scrollbars);
-      if (lastRSSize.ISize(aWM) != NS_UNCONSTRAINEDSIZE) {
-        cbSize.ISize(aWM) = std::max(0, lastRSSize.ISize(aWM) +
-                                        lastRSPadding.IStartEnd(aWM) -
+      if (lastRISize.ISize(aWM) != NS_UNCONSTRAINEDSIZE) {
+        cbSize.ISize(aWM) = std::max(0, lastRISize.ISize(aWM) +
+                                        lastRIPadding.IStartEnd(aWM) -
                                         logicalScrollbars.IStartEnd(aWM));
       }
-      if (lastRSSize.BSize(aWM) != NS_UNCONSTRAINEDSIZE) {
-        cbSize.BSize(aWM) = std::max(0, lastRSSize.BSize(aWM) +
-                                        lastRSPadding.BStartEnd(aWM) -
+      if (lastRISize.BSize(aWM) != NS_UNCONSTRAINEDSIZE) {
+        cbSize.BSize(aWM) = std::max(0, lastRISize.BSize(aWM) +
+                                        lastRIPadding.BStartEnd(aWM) -
                                         logicalScrollbars.BStartEnd(aWM));
       }
     }
@@ -1035,20 +1071,22 @@ CalculateContainingBlockSizeForAbsolutes(WritingMode aWM,
 
 void
 nsBlockFrame::Reflow(nsPresContext*           aPresContext,
-                     nsHTMLReflowMetrics&     aMetrics,
-                     const nsHTMLReflowState& aReflowState,
+                     ReflowOutput&     aMetrics,
+                     const ReflowInput& aReflowInput,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsBlockFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
+
 #ifdef DEBUG
   if (gNoisyReflow) {
     IndentBy(stdout, gNoiseIndent);
     ListTag(stdout);
     printf(": begin reflow availSize=%d,%d computedSize=%d,%d\n",
-           aReflowState.AvailableISize(), aReflowState.AvailableBSize(),
-           aReflowState.ComputedISize(), aReflowState.ComputedBSize());
+           aReflowInput.AvailableISize(), aReflowInput.AvailableBSize(),
+           aReflowInput.ComputedISize(), aReflowInput.ComputedBSize());
   }
   AutoNoisyIndenter indent(gNoisy);
   PRTime start = 0; // Initialize these variablies to silence the compiler.
@@ -1059,32 +1097,32 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   }
 #endif
 
-  const nsHTMLReflowState *reflowState = &aReflowState;
-  WritingMode wm = aReflowState.GetWritingMode();
-  nscoord consumedBSize = GetConsumedBSize();
-  nscoord effectiveComputedBSize = GetEffectiveComputedBSize(aReflowState,
+  const ReflowInput *reflowInput = &aReflowInput;
+  WritingMode wm = aReflowInput.GetWritingMode();
+  nscoord consumedBSize = ConsumedBSize(wm);
+  nscoord effectiveComputedBSize = GetEffectiveComputedBSize(aReflowInput,
                                                              consumedBSize);
-  Maybe<nsHTMLReflowState> mutableReflowState;
+  Maybe<ReflowInput> mutableReflowInput;
   // If we have non-auto block size, we're clipping our kids and we fit,
   // make sure our kids fit too.
-  if (aReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
-      aReflowState.ComputedBSize() != NS_AUTOHEIGHT &&
-      ShouldApplyOverflowClipping(this, aReflowState.mStyleDisplay)) {
-    LogicalMargin blockDirExtras = aReflowState.ComputedLogicalBorderPadding();
+  if (aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
+      aReflowInput.ComputedBSize() != NS_AUTOHEIGHT &&
+      ShouldApplyOverflowClipping(this, aReflowInput.mStyleDisplay)) {
+    LogicalMargin blockDirExtras = aReflowInput.ComputedLogicalBorderPadding();
     if (GetLogicalSkipSides().BStart()) {
       blockDirExtras.BStart(wm) = 0;
     } else {
       // Block-end margin never causes us to create continuations, so we
       // don't need to worry about whether it fits in its entirety.
       blockDirExtras.BStart(wm) +=
-        aReflowState.ComputedLogicalMargin().BStart(wm);
+        aReflowInput.ComputedLogicalMargin().BStart(wm);
     }
 
     if (effectiveComputedBSize + blockDirExtras.BStartEnd(wm) <=
-        aReflowState.AvailableBSize()) {
-      mutableReflowState.emplace(aReflowState);
-      mutableReflowState->AvailableBSize() = NS_UNCONSTRAINEDSIZE;
-      reflowState = mutableReflowState.ptr();
+        aReflowInput.AvailableBSize()) {
+      mutableReflowInput.emplace(aReflowInput);
+      mutableReflowInput->AvailableBSize() = NS_UNCONSTRAINEDSIZE;
+      reflowInput = mutableReflowInput.ptr();
     }
   }
 
@@ -1093,7 +1131,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   nsSize oldSize = GetSize();
 
   // Should we create a float manager?
-  nsAutoFloatManager autoFloatManager(const_cast<nsHTMLReflowState&>(*reflowState));
+  nsAutoFloatManager autoFloatManager(const_cast<ReflowInput&>(*reflowInput));
 
   // XXXldb If we start storing the float manager in the frame rather
   // than keeping it around only during reflow then we should create it
@@ -1109,24 +1147,8 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   // delete the line with the line cursor.
   ClearLineCursor();
 
-  if (IsFrameTreeTooDeep(*reflowState, aMetrics, aStatus)) {
+  if (IsFrameTreeTooDeep(*reflowInput, aMetrics, aStatus)) {
     return;
-  }
-
-  bool blockStartMarginRoot, blockEndMarginRoot;
-  IsMarginRoot(&blockStartMarginRoot, &blockEndMarginRoot);
-
-  // Cache the consumed height in the block reflow state so that we don't have
-  // to continually recompute it.
-  nsBlockReflowState state(*reflowState, aPresContext, this,
-                           blockStartMarginRoot, blockEndMarginRoot,
-                           needFloatManager, consumedBSize);
-
-  if (GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)
-    static_cast<nsBlockFrame*>(FirstContinuation())->ResolveBidi();
-
-  if (RenumberLists(aPresContext)) {
-    AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 
 #ifdef DEBUG
@@ -1143,11 +1165,27 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   // overflow line lists being cleared out between reflow passes.
   DrainOverflowLines();
 
+  bool blockStartMarginRoot, blockEndMarginRoot;
+  IsMarginRoot(&blockStartMarginRoot, &blockEndMarginRoot);
+
+  // Cache the consumed height in the block reflow state so that we don't have
+  // to continually recompute it.
+  BlockReflowInput state(*reflowInput, aPresContext, this,
+                           blockStartMarginRoot, blockEndMarginRoot,
+                           needFloatManager, consumedBSize);
+
+  if (GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)
+    static_cast<nsBlockFrame*>(FirstContinuation())->ResolveBidi();
+
+  if (RenumberList()) {
+    AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
+  }
+
   // Handle paginated overflow (see nsContainerFrame.h)
   nsOverflowAreas ocBounds;
-  nsReflowStatus ocStatus = NS_FRAME_COMPLETE;
+  nsReflowStatus ocStatus;
   if (GetPrevInFlow()) {
-    ReflowOverflowContainerChildren(aPresContext, *reflowState, ocBounds, 0,
+    ReflowOverflowContainerChildren(aPresContext, *reflowInput, ocBounds, 0,
                                     ocStatus);
   }
 
@@ -1159,51 +1197,51 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   // Drain & handle pushed floats
   DrainPushedFloats();
   nsOverflowAreas fcBounds;
-  nsReflowStatus fcStatus = NS_FRAME_COMPLETE;
+  nsReflowStatus fcStatus;
   ReflowPushedFloats(state, fcBounds, fcStatus);
 
   // If we're not dirty (which means we'll mark everything dirty later)
   // and our inline-size has changed, mark the lines dirty that we need to
   // mark dirty for a resize reflow.
-  if (!(GetStateBits() & NS_FRAME_IS_DIRTY) && reflowState->IsIResize()) {
+  if (!(GetStateBits() & NS_FRAME_IS_DIRTY) && reflowInput->IsIResize()) {
     PrepareResizeReflow(state);
   }
 
   // The same for percentage text-indent, except conditioned on the
   // parent resizing.
   if (!(GetStateBits() & NS_FRAME_IS_DIRTY) &&
-      reflowState->mCBReflowState &&
-      reflowState->mCBReflowState->IsIResize() &&
-      reflowState->mStyleText->mTextIndent.HasPercent() &&
+      reflowInput->mCBReflowInput &&
+      reflowInput->mCBReflowInput->IsIResize() &&
+      reflowInput->mStyleText->mTextIndent.HasPercent() &&
       !mLines.empty()) {
     mLines.front()->MarkDirty();
   }
 
   LazyMarkLinesDirty();
 
-  mState &= ~NS_FRAME_FIRST_REFLOW;
+  RemoveStateBits(NS_FRAME_FIRST_REFLOW);
 
   // Now reflow...
   ReflowDirtyLines(state);
 
   // If we have a next-in-flow, and that next-in-flow has pushed floats from
   // this frame from a previous iteration of reflow, then we should not return
-  // a status of NS_FRAME_IS_FULLY_COMPLETE, since we actually have overflow,
-  // it's just already been handled.
+  // a status with IsFullyComplete() equals to true, since we actually have
+  // overflow, it's just already been handled.
 
   // NOTE: This really shouldn't happen, since we _should_ pull back our floats
   // and reflow them, but just in case it does, this is a safety precaution so
   // we don't end up with a placeholder pointing to frames that have already
   // been deleted as part of removing our next-in-flow.
-  // XXXmats maybe this code isn't needed anymore?
-  // XXXmats (layout/generic/crashtests/600100.xhtml doesn't crash without it)
-  if (NS_FRAME_IS_FULLY_COMPLETE(state.mReflowStatus)) {
+  if (state.mReflowStatus.IsFullyComplete()) {
     nsBlockFrame* nif = static_cast<nsBlockFrame*>(GetNextInFlow());
     while (nif) {
       if (nif->HasPushedFloatsFromPrevContinuation()) {
-        bool oc = nif->GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER;
-        NS_MergeReflowStatusInto(&state.mReflowStatus,
-            oc ? NS_FRAME_OVERFLOW_INCOMPLETE : NS_FRAME_NOT_COMPLETE);
+        if (nif->GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) {
+          state.mReflowStatus.SetOverflowIncomplete();
+        } else {
+          state.mReflowStatus.SetIncomplete();
+        }
         break;
       }
 
@@ -1211,20 +1249,20 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
     }
   }
 
-  NS_MergeReflowStatusInto(&state.mReflowStatus, ocStatus);
-  NS_MergeReflowStatusInto(&state.mReflowStatus, fcStatus);
+  state.mReflowStatus.MergeCompletionStatusFrom(ocStatus);
+  state.mReflowStatus.MergeCompletionStatusFrom(fcStatus);
 
   // If we end in a BR with clear and affected floats continue,
   // we need to continue, too.
-  if (NS_UNCONSTRAINEDSIZE != reflowState->AvailableBSize() &&
-      NS_FRAME_IS_COMPLETE(state.mReflowStatus) &&
-      state.mFloatManager->ClearContinues(FindTrailingClear())) {
-    NS_FRAME_SET_INCOMPLETE(state.mReflowStatus);
+  if (NS_UNCONSTRAINEDSIZE != reflowInput->AvailableBSize() &&
+      state.mReflowStatus.IsComplete() &&
+      state.FloatManager()->ClearContinues(FindTrailingClear())) {
+    state.mReflowStatus.SetIncomplete();
   }
 
-  if (!NS_FRAME_IS_FULLY_COMPLETE(state.mReflowStatus)) {
+  if (!state.mReflowStatus.IsFullyComplete()) {
     if (HasOverflowLines() || HasPushedFloats()) {
-      state.mReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+      state.mReflowStatus.SetNextInFlowNeedsReflow();
     }
 
 #ifdef DEBUG_kipp
@@ -1250,30 +1288,30 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
         mLines.front() != mLines.back() &&
         mLines.begin().next()->IsBlock()))) {
     // Reflow the bullet
-    nsHTMLReflowMetrics metrics(aReflowState);
+    ReflowOutput reflowOutput(aReflowInput);
     // XXX Use the entire line when we fix bug 25888.
     nsLayoutUtils::LinePosition position;
-    WritingMode wm = aReflowState.GetWritingMode();
+    WritingMode wm = aReflowInput.GetWritingMode();
     bool havePosition = nsLayoutUtils::GetFirstLinePosition(wm, this,
                                                             &position);
     nscoord lineBStart = havePosition ?
       position.mBStart :
-      reflowState->ComputedLogicalBorderPadding().BStart(wm);
+      reflowInput->ComputedLogicalBorderPadding().BStart(wm);
     nsIFrame* bullet = GetOutsideBullet();
-    ReflowBullet(bullet, state, metrics, lineBStart);
-    NS_ASSERTION(!BulletIsEmpty() || metrics.BSize(wm) == 0,
+    ReflowBullet(bullet, state, reflowOutput, lineBStart);
+    NS_ASSERTION(!BulletIsEmpty() || reflowOutput.BSize(wm) == 0,
                  "empty bullet took up space");
 
     if (havePosition && !BulletIsEmpty()) {
-      // We have some lines to align the bullet with.  
+      // We have some lines to align the bullet with.
 
       // Doing the alignment using the baseline will also cater for
       // bullets that are placed next to a child block (bug 92896)
-    
+
       // Tall bullets won't look particularly nice here...
-      LogicalRect bbox = bullet->GetLogicalRect(wm, metrics.PhysicalSize());
-      bbox.BStart(wm) = position.mBaseline - metrics.BlockStartAscent();
-      bullet->SetRect(wm, bbox, metrics.PhysicalSize());
+      LogicalRect bbox = bullet->GetLogicalRect(wm, reflowOutput.PhysicalSize());
+      bbox.BStart(wm) = position.mBaseline - reflowOutput.BlockStartAscent();
+      bullet->SetRect(wm, bbox, reflowOutput.PhysicalSize());
     }
     // Otherwise just leave the bullet where it is, up against our
     // block-start padding.
@@ -1283,13 +1321,13 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
 
   // Compute our final size
   nscoord blockEndEdgeOfChildren;
-  ComputeFinalSize(*reflowState, state, aMetrics, &blockEndEdgeOfChildren);
+  ComputeFinalSize(*reflowInput, state, aMetrics, &blockEndEdgeOfChildren);
 
   // If the block direction is right-to-left, we need to update the bounds of
   // lines that were placed relative to mContainerSize during reflow, as
   // we typically do not know the true container size until we've reflowed all
   // its children. So we use a dummy mContainerSize during reflow (see
-  // nsBlockReflowState's constructor) and then fix up the positions of the
+  // BlockReflowInput's constructor) and then fix up the positions of the
   // lines here, once the final block size is known.
   //
   // Note that writing-mode:vertical-rl is the only case where the block
@@ -1301,7 +1339,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
     nsSize containerSize = aMetrics.PhysicalSize();
     nscoord deltaX = containerSize.width - state.ContainerSize().width;
     if (deltaX != 0) {
-      for (line_iterator line = begin_lines(), end = end_lines();
+      for (LineIterator line = LinesBegin(), end = LinesEnd();
            line != end; line++) {
         UpdateLineContainerSize(line, containerSize);
       }
@@ -1320,7 +1358,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   }
 
   nsRect areaBounds = nsRect(0, 0, aMetrics.Width(), aMetrics.Height());
-  ComputeOverflowAreas(areaBounds, reflowState->mStyleDisplay,
+  ComputeOverflowAreas(areaBounds, reflowInput->mStyleDisplay,
                        blockEndEdgeOfChildren, aMetrics.mOverflowAreas);
   // Factor overflow container child bounds into the overflow area
   aMetrics.mOverflowAreas.UnionWith(ocBounds);
@@ -1348,7 +1386,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   if (HasAbsolutelyPositionedChildren()) {
     nsAbsoluteContainingBlock* absoluteContainer = GetAbsoluteContainingBlock();
     bool haveInterrupt = aPresContext->HasPendingInterrupt();
-    if (reflowState->WillReflowAgainForClearance() ||
+    if (reflowInput->WillReflowAgainForClearance() ||
         haveInterrupt) {
       // Make sure that when we reflow again we'll actually reflow all the abs
       // pos frames that might conceivably depend on our size (or all of them,
@@ -1363,7 +1401,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
       }
     } else {
       LogicalSize containingBlockSize =
-        CalculateContainingBlockSizeForAbsolutes(parentWM, *reflowState,
+        CalculateContainingBlockSizeForAbsolutes(parentWM, *reflowInput,
                                                  aMetrics.Size(parentWM));
 
       // Mark frames that depend on changes we just made to this frame as dirty:
@@ -1382,7 +1420,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
       // viewport height, which can't change during incremental
       // reflow.
       bool cbHeightChanged =
-        !(isRoot && NS_UNCONSTRAINEDSIZE == reflowState->ComputedHeight()) &&
+        !(isRoot && NS_UNCONSTRAINEDSIZE == reflowInput->ComputedHeight()) &&
         aMetrics.Height() != oldSize.height;
 
       nsRect containingBlock(nsPoint(0, 0),
@@ -1394,20 +1432,19 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
       if (cbHeightChanged) {
         flags |= AbsPosReflowFlags::eCBHeightChanged;
       }
-      absoluteContainer->Reflow(this, aPresContext, *reflowState,
+      // Setup the line cursor here to optimize line searching for
+      // calculating hypothetical position of absolutely-positioned
+      // frames. The line cursor is immediately cleared afterward to
+      // avoid affecting the display list generation.
+      AutoLineCursorSetup autoLineCursor(this);
+      absoluteContainer->Reflow(this, aPresContext, *reflowInput,
                                 state.mReflowStatus,
                                 containingBlock, flags,
                                 &aMetrics.mOverflowAreas);
     }
   }
 
-  FinishAndStoreOverflow(&aMetrics);
-
-  // Clear the float manager pointer in the block reflow state so we
-  // don't waste time translating the coordinate system back on a dead
-  // float manager.
-  if (needFloatManager)
-    state.mFloatManager = nullptr;
+  FinishAndStoreOverflow(&aMetrics, reflowInput->mStyleDisplay);
 
   aStatus = state.mReflowStatus;
 
@@ -1422,8 +1459,8 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
   if (gNoisyReflow) {
     IndentBy(stdout, gNoiseIndent);
     ListTag(stdout);
-    printf(": status=%x (%scomplete) metrics=%d,%d carriedMargin=%d",
-           aStatus, NS_FRAME_IS_COMPLETE(aStatus) ? "" : "not ",
+    printf(": status=%s metrics=%d,%d carriedMargin=%d",
+           ToString(aStatus).c_str(),
            aMetrics.ISize(parentWM), aMetrics.BSize(parentWM),
            aMetrics.mCarriedOutBEndMargin.get());
     if (HasOverflowAreas()) {
@@ -1454,21 +1491,21 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
 
     ListTag(stdout);
     char buf[400];
-    snprintf_literal(buf,
-                     ": %lld elapsed (%lld per line) (%d lines; %d new lines)",
-                     delta, perLineDelta, numLines, ectc - ctc);
+    SprintfLiteral(buf,
+                   ": %" PRId64 " elapsed (%" PRId64 " per line) (%d lines; %d new lines)",
+                   delta, perLineDelta, numLines, ectc - ctc);
     printf("%s\n", buf);
   }
 #endif
 
-  NS_FRAME_SET_TRUNCATION(aStatus, (*reflowState), aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, (*reflowInput), aMetrics);
 }
 
 bool
 nsBlockFrame::CheckForCollapsedBEndMarginFromClearanceLine()
 {
-  line_iterator begin = begin_lines();
-  line_iterator line = end_lines();
+  LineIterator begin = LinesBegin();
+  LineIterator line = LinesEnd();
 
   while (true) {
     if (begin == line) {
@@ -1486,18 +1523,18 @@ nsBlockFrame::CheckForCollapsedBEndMarginFromClearanceLine()
 }
 
 void
-nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
-                               nsBlockReflowState&      aState,
-                               nsHTMLReflowMetrics&     aMetrics,
-                               nscoord*                 aBEndEdgeOfChildren)
+nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
+                               BlockReflowInput&  aState,
+                               ReflowOutput&      aMetrics,
+                               nscoord*           aBEndEdgeOfChildren)
 {
-  WritingMode wm = aState.mReflowState.GetWritingMode();
+  WritingMode wm = aState.mReflowInput.GetWritingMode();
   const LogicalMargin& borderPadding = aState.BorderPadding();
 #ifdef NOISY_FINAL_SIZE
   ListTag(stdout);
   printf(": mBCoord=%d mIsBEndMarginRoot=%s mPrevBEndMargin=%d bp=%d,%d\n",
-         aState.mBCoord, aState.GetFlag(BRS_ISBENDMARGINROOT) ? "yes" : "no",
-         aState.mPrevBEndMargin,
+         aState.mBCoord, aState.mFlags.mIsBEndMarginRoot ? "yes" : "no",
+         aState.mPrevBEndMargin.get(),
          borderPadding.BStart(wm), borderPadding.BEnd(wm));
 #endif
 
@@ -1505,7 +1542,7 @@ nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
   LogicalSize finalSize(wm);
   finalSize.ISize(wm) =
     NSCoordSaturatingAdd(NSCoordSaturatingAdd(borderPadding.IStart(wm),
-                                              aReflowState.ComputedISize()),
+                                              aReflowInput.ComputedISize()),
                          borderPadding.IEnd(wm));
 
   // Return block-end margin information
@@ -1514,7 +1551,7 @@ nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
   //NS_ASSERTION(aMetrics.mCarriedOutBEndMargin.IsZero(),
   //             "someone else set the margin");
   nscoord nonCarriedOutBDirMargin = 0;
-  if (!aState.GetFlag(BRS_ISBENDMARGINROOT)) {
+  if (!aState.mFlags.mIsBEndMarginRoot) {
     // Apply rule from CSS 2.1 section 8.3.1. If we have some empty
     // line with clearance and a non-zero block-start margin and all
     // subsequent lines are empty, then we do not allow our children's
@@ -1533,47 +1570,47 @@ nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
 
   nscoord blockEndEdgeOfChildren = aState.mBCoord + nonCarriedOutBDirMargin;
   // Shrink wrap our height around our contents.
-  if (aState.GetFlag(BRS_ISBENDMARGINROOT) ||
-      NS_UNCONSTRAINEDSIZE != aReflowState.ComputedBSize()) {
+  if (aState.mFlags.mIsBEndMarginRoot ||
+      NS_UNCONSTRAINEDSIZE != aReflowInput.ComputedBSize()) {
     // When we are a block-end-margin root make sure that our last
     // childs block-end margin is fully applied. We also do this when
     // we have a computed height, since in that case the carried out
     // margin is not going to be applied anywhere, so we should note it
     // here to be included in the overflow area.
     // Apply the margin only if there's space for it.
-    if (blockEndEdgeOfChildren < aState.mReflowState.AvailableBSize())
+    if (blockEndEdgeOfChildren < aState.mReflowInput.AvailableBSize())
     {
       // Truncate block-end margin if it doesn't fit to our available BSize.
       blockEndEdgeOfChildren =
         std::min(blockEndEdgeOfChildren + aState.mPrevBEndMargin.get(),
-               aState.mReflowState.AvailableBSize());
+               aState.mReflowInput.AvailableBSize());
     }
   }
-  if (aState.GetFlag(BRS_FLOAT_MGR)) {
+  if (aState.mFlags.mBlockNeedsFloatManager) {
     // Include the float manager's state to properly account for the
     // block-end margin of any floated elements; e.g., inside a table cell.
     nscoord floatHeight =
-      aState.ClearFloats(blockEndEdgeOfChildren, NS_STYLE_CLEAR_BOTH,
+      aState.ClearFloats(blockEndEdgeOfChildren, StyleClear::Both,
                          nullptr, nsFloatManager::DONT_CLEAR_PUSHED_FLOATS);
     blockEndEdgeOfChildren = std::max(blockEndEdgeOfChildren, floatHeight);
   }
 
-  if (NS_UNCONSTRAINEDSIZE != aReflowState.ComputedBSize()
-      && (GetParent()->GetType() != nsGkAtoms::columnSetFrame ||
-          aReflowState.parentReflowState->AvailableBSize() == NS_UNCONSTRAINEDSIZE)) {
-    ComputeFinalBSize(aReflowState, &aState.mReflowStatus,
+  if (NS_UNCONSTRAINEDSIZE != aReflowInput.ComputedBSize()
+      && (!GetParent()->IsColumnSetFrame() ||
+          aReflowInput.mParentReflowInput->AvailableBSize() == NS_UNCONSTRAINEDSIZE)) {
+    ComputeFinalBSize(aReflowInput, &aState.mReflowStatus,
                       aState.mBCoord + nonCarriedOutBDirMargin,
                       borderPadding, finalSize, aState.mConsumedBSize);
-    if (!NS_FRAME_IS_COMPLETE(aState.mReflowStatus)) {
+    if (!aState.mReflowStatus.IsComplete()) {
       // Use the current height; continuations will take up the rest.
       // Do extend the height to at least consume the available
       // height, otherwise our left/right borders (for example) won't
       // extend all the way to the break.
-      finalSize.BSize(wm) = std::max(aReflowState.AvailableBSize(),
+      finalSize.BSize(wm) = std::max(aReflowInput.AvailableBSize(),
                                      aState.mBCoord + nonCarriedOutBDirMargin);
       // ... but don't take up more block size than is available
       nscoord effectiveComputedBSize =
-        GetEffectiveComputedBSize(aReflowState, aState.GetConsumedBSize());
+        GetEffectiveComputedBSize(aReflowInput, aState.ConsumedBSize());
       finalSize.BSize(wm) =
         std::min(finalSize.BSize(wm),
                  borderPadding.BStart(wm) + effectiveComputedBSize);
@@ -1586,9 +1623,9 @@ nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
     // Don't carry out a block-end margin when our BSize is fixed.
     aMetrics.mCarriedOutBEndMargin.Zero();
   }
-  else if (NS_FRAME_IS_COMPLETE(aState.mReflowStatus)) {
+  else if (aState.mReflowStatus.IsComplete()) {
     nscoord contentBSize = blockEndEdgeOfChildren - borderPadding.BStart(wm);
-    nscoord autoBSize = aReflowState.ApplyMinMaxBSize(contentBSize);
+    nscoord autoBSize = aReflowInput.ApplyMinMaxBSize(contentBSize);
     if (autoBSize != contentBSize) {
       // Our min- or max-bsize value made our bsize change.  Don't carry out
       // our kids' block-end margins.
@@ -1598,34 +1635,67 @@ nsBlockFrame::ComputeFinalSize(const nsHTMLReflowState& aReflowState,
     finalSize.BSize(wm) = autoBSize;
   }
   else {
-    NS_ASSERTION(aReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE,
+    NS_ASSERTION(aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE,
       "Shouldn't be incomplete if availableBSize is UNCONSTRAINED.");
     finalSize.BSize(wm) = std::max(aState.mBCoord,
-                                   aReflowState.AvailableBSize());
-    if (aReflowState.AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
+                                   aReflowInput.AvailableBSize());
+    if (aReflowInput.AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
       // This should never happen, but it does. See bug 414255
       finalSize.BSize(wm) = aState.mBCoord;
     }
   }
 
-  if (IS_TRUE_OVERFLOW_CONTAINER(this) &&
-      NS_FRAME_IS_NOT_COMPLETE(aState.mReflowStatus)) {
-    // Overflow containers can only be overflow complete.
-    // Note that auto height overflow containers have no normal children
-    NS_ASSERTION(finalSize.BSize(wm) == 0,
-                 "overflow containers must be zero-block-size");
-    NS_FRAME_SET_OVERFLOW_INCOMPLETE(aState.mReflowStatus);
+  if (IS_TRUE_OVERFLOW_CONTAINER(this)) {
+    if (aState.mReflowStatus.IsIncomplete()) {
+      // Overflow containers can only be overflow complete.
+      // Note that auto height overflow containers have no normal children
+      NS_ASSERTION(finalSize.BSize(wm) == 0,
+                   "overflow containers must be zero-block-size");
+      aState.mReflowStatus.SetOverflowIncomplete();
+    }
+  } else if (aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
+             !aState.mReflowStatus.IsInlineBreakBefore() &&
+             aState.mReflowStatus.IsComplete()) {
+    // Currently only used for grid items, but could be used in other contexts.
+    // The FragStretchBSizeProperty is our expected non-fragmented block-size
+    // we should stretch to (for align-self:stretch etc).  In some fragmentation
+    // cases though, the last fragment (this frame since we're complete), needs
+    // to have extra size applied because earlier fragments consumed too much of
+    // our computed size due to overflowing their containing block.  (E.g. this
+    // ensures we fill the last row when a multi-row grid item is fragmented).
+    bool found;
+    nscoord bSize = GetProperty(FragStretchBSizeProperty(), &found);
+    if (found) {
+      finalSize.BSize(wm) = std::max(bSize, finalSize.BSize(wm));
+    }
+  }
+
+  // Clamp the content size to fit within the margin-box clamp size, if any.
+  if (MOZ_UNLIKELY(aReflowInput.mFlags.mBClampMarginBoxMinSize) &&
+      aState.mReflowStatus.IsComplete()) {
+    bool found;
+    nscoord cbSize = GetProperty(BClampMarginBoxMinSizeProperty(), &found);
+    if (found) {
+      auto marginBoxBSize = finalSize.BSize(wm) +
+                            aReflowInput.ComputedLogicalMargin().BStartEnd(wm);
+      auto overflow = marginBoxBSize - cbSize;
+      if (overflow > 0) {
+        auto contentBSize = finalSize.BSize(wm) - borderPadding.BStartEnd(wm);
+        auto newContentBSize = std::max(nscoord(0), contentBSize - overflow);
+        // XXXmats deal with percentages better somehow?
+        finalSize.BSize(wm) -= contentBSize - newContentBSize;
+      }
+    }
   }
 
   // Screen out negative block sizes --- can happen due to integer overflows :-(
   finalSize.BSize(wm) = std::max(0, finalSize.BSize(wm));
   *aBEndEdgeOfChildren = blockEndEdgeOfChildren;
 
-  FrameProperties properties = Properties();
   if (blockEndEdgeOfChildren != finalSize.BSize(wm) - borderPadding.BEnd(wm)) {
-    properties.Set(BlockEndEdgeOfChildrenProperty(), blockEndEdgeOfChildren);
+    SetProperty(BlockEndEdgeOfChildrenProperty(), blockEndEdgeOfChildren);
   } else {
-    properties.Delete(BlockEndEdgeOfChildrenProperty());
+    DeleteProperty(BlockEndEdgeOfChildrenProperty());
   }
 
   aMetrics.SetSize(wm, finalSize);
@@ -1686,7 +1756,7 @@ nsBlockFrame::ComputeOverflowAreas(const nsRect&         aBounds,
   // the things that makes incremental reflow O(N^2).
   nsOverflowAreas areas(aBounds, aBounds);
   if (!ShouldApplyOverflowClipping(this, aDisplay)) {
-    for (line_iterator line = begin_lines(), line_end = end_lines();
+    for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end;
          ++line) {
       areas.UnionWith(line->GetOverflowAreas());
@@ -1708,23 +1778,23 @@ nsBlockFrame::ComputeOverflowAreas(const nsRect&         aBounds,
 
 #ifdef NOISY_COMBINED_AREA
   ListTag(stdout);
-  printf(": ca=%d,%d,%d,%d\n", area.x, area.y, area.width, area.height);
+  const nsRect& vis = areas.VisualOverflow();
+  printf(": VisualOverflowArea CA=%d,%d,%d,%d\n", vis.x, vis.y, vis.width, vis.height);
+  const nsRect& scr = areas.ScrollableOverflow();
+  printf(": ScrollableOverflowArea CA=%d,%d,%d,%d\n", scr.x, scr.y, scr.width, scr.height);
 #endif
 
   aOverflowAreas = areas;
 }
 
-bool
-nsBlockFrame::UpdateOverflow()
+void
+nsBlockFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas)
 {
-  nsRect rect(nsPoint(0, 0), GetSize());
-  nsOverflowAreas overflowAreas(rect, rect);
-
   // We need to update the overflow areas of lines manually, as they
   // get cached and re-used otherwise. Lines aren't exposed as normal
   // frame children, so calling UnionChildOverflow alone will end up
   // using the old cached values.
-  for (line_iterator line = begin_lines(), line_end = end_lines();
+  for (LineIterator line = LinesBegin(), line_end = LinesEnd();
        line != line_end;
        ++line) {
     nsRect bounds = line->GetPhysicalBounds();
@@ -1744,34 +1814,37 @@ nsBlockFrame::UpdateOverflow()
     }
 
     line->SetOverflowAreas(lineAreas);
-    overflowAreas.UnionWith(lineAreas);
+    aOverflowAreas.UnionWith(lineAreas);
+  }
+
+  // Union with child frames, skipping the principal and float lists
+  // since we already handled those using the line boxes.
+  nsLayoutUtils::UnionChildOverflow(this, aOverflowAreas,
+                                    kPrincipalList | kFloatList);
+}
+
+bool
+nsBlockFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
+{
+  bool found;
+  nscoord blockEndEdgeOfChildren =
+    GetProperty(BlockEndEdgeOfChildrenProperty(), &found);
+  if (found) {
+    ConsiderBlockEndEdgeOfChildren(GetWritingMode(),
+                                   blockEndEdgeOfChildren, aOverflowAreas);
   }
 
   // Line cursor invariants depend on the overflow areas of the lines, so
   // we must clear the line cursor since those areas may have changed.
   ClearLineCursor();
-
-  // Union with child frames, skipping the principal and float lists
-  // since we already handled those using the line boxes.
-  nsLayoutUtils::UnionChildOverflow(this, overflowAreas,
-                                    kPrincipalList | kFloatList);
-
-  bool found;
-  nscoord blockEndEdgeOfChildren =
-    Properties().Get(BlockEndEdgeOfChildrenProperty(), &found);
-  if (found) {
-    ConsiderBlockEndEdgeOfChildren(GetWritingMode(),
-                                   blockEndEdgeOfChildren, overflowAreas);
-  }
-
-  return FinishAndStoreOverflow(overflowAreas, GetSize());
+  return nsContainerFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 void
 nsBlockFrame::LazyMarkLinesDirty()
 {
   if (GetStateBits() & NS_BLOCK_LOOK_FOR_DIRTY_FRAMES) {
-    for (line_iterator line = begin_lines(), line_end = end_lines();
+    for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end; ++line) {
       int32_t n = line->GetChildCount();
       for (nsIFrame* lineFrame = line->mFirstChild;
@@ -1788,7 +1861,7 @@ nsBlockFrame::LazyMarkLinesDirty()
 }
 
 void
-nsBlockFrame::MarkLineDirty(line_iterator aLine, const nsLineList* aLineList)
+nsBlockFrame::MarkLineDirty(LineIterator aLine, const nsLineList* aLineList)
 {
   // Mark aLine dirty
   aLine->MarkDirty();
@@ -1829,9 +1902,9 @@ IsAlignedLeft(uint8_t aAlignment,
               uint8_t aUnicodeBidi,
               nsIFrame* aFrame)
 {
-  return aFrame->IsSVGText() ||
+  return nsSVGUtils::IsInSVGTextSubtree(aFrame) ||
          NS_STYLE_TEXT_ALIGN_LEFT == aAlignment ||
-         (((NS_STYLE_TEXT_ALIGN_DEFAULT == aAlignment &&
+         (((NS_STYLE_TEXT_ALIGN_START == aAlignment &&
            NS_STYLE_DIRECTION_LTR == aDirection) ||
           (NS_STYLE_TEXT_ALIGN_END == aAlignment &&
            NS_STYLE_DIRECTION_RTL == aDirection)) &&
@@ -1839,7 +1912,7 @@ IsAlignedLeft(uint8_t aAlignment,
 }
 
 void
-nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
+nsBlockFrame::PrepareResizeReflow(BlockReflowInput& aState)
 {
   // See if we can try and avoid marking all the lines as dirty
   bool tryAndSkipLines =
@@ -1856,19 +1929,16 @@ nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
       IndentBy(stdout, gNoiseIndent);
       ListTag(stdout);
       printf(": marking all lines dirty: availISize=%d\n",
-             aState.mReflowState.AvailableISize());
+             aState.mReflowInput.AvailableISize());
     }
   }
 #endif
 
   if (tryAndSkipLines) {
-    WritingMode wm = aState.mReflowState.GetWritingMode();
+    WritingMode wm = aState.mReflowInput.GetWritingMode();
     nscoord newAvailISize =
-      aState.mReflowState.ComputedLogicalBorderPadding().IStart(wm) +
-      aState.mReflowState.ComputedISize();
-    NS_ASSERTION(NS_UNCONSTRAINEDSIZE != aState.mReflowState.ComputedLogicalBorderPadding().IStart(wm) &&
-                 NS_UNCONSTRAINEDSIZE != aState.mReflowState.ComputedISize(),
-                 "math on NS_UNCONSTRAINEDSIZE");
+      aState.mReflowInput.ComputedLogicalBorderPadding().IStart(wm) +
+      aState.mReflowInput.ComputedISize();
 
 #ifdef DEBUG
     if (gNoisyReflow) {
@@ -1878,7 +1948,7 @@ nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
     }
 #endif
 
-    for (line_iterator line = begin_lines(), line_end = end_lines();
+    for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end;
          ++line)
     {
@@ -1897,21 +1967,22 @@ nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
 
 #ifdef REALLY_NOISY_REFLOW
       if (!line->IsBlock()) {
-        printf("PrepareResizeReflow thinks line %p is %simpacted by floats\n", 
+        printf("PrepareResizeReflow thinks line %p is %simpacted by floats\n",
                line.get(), line->IsImpactedByFloat() ? "" : "not ");
       }
 #endif
 #ifdef DEBUG
       if (gNoisyReflow && !line->IsDirty()) {
         IndentBy(stdout, gNoiseIndent + 1);
-        printf("skipped: line=%p next=%p %s %s%s%s breakTypeBefore/After=%d/%d xmost=%d\n",
+        printf("skipped: line=%p next=%p %s %s%s%s breakTypeBefore/After=%s/%s xmost=%d\n",
            static_cast<void*>(line.get()),
-           static_cast<void*>((line.next() != end_lines() ? line.next().get() : nullptr)),
+           static_cast<void*>((line.next() != LinesEnd() ? line.next().get() : nullptr)),
            line->IsBlock() ? "block" : "inline",
            line->HasBreakAfter() ? "has-break-after " : "",
            line->HasFloats() ? "has-floats " : "",
            line->IsImpactedByFloat() ? "impacted " : "",
-           line->GetBreakTypeBefore(), line->GetBreakTypeAfter(),
+           line->BreakTypeToString(line->GetBreakTypeBefore()),
+           line->BreakTypeToString(line->GetBreakTypeAfter()),
            line->IEnd());
       }
 #endif
@@ -1919,7 +1990,7 @@ nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
   }
   else {
     // Mark everything dirty
-    for (line_iterator line = begin_lines(), line_end = end_lines();
+    for (LineIterator line = LinesBegin(), line_end = LinesEnd();
          line != line_end;
          ++line)
     {
@@ -1942,14 +2013,14 @@ nsBlockFrame::PrepareResizeReflow(nsBlockReflowState& aState)
  * doesn't get marked dirty and reflowed entirely).
  */
 void
-nsBlockFrame::PropagateFloatDamage(nsBlockReflowState& aState,
+nsBlockFrame::PropagateFloatDamage(BlockReflowInput& aState,
                                    nsLineBox* aLine,
                                    nscoord aDeltaBCoord)
 {
-  nsFloatManager *floatManager = aState.mReflowState.mFloatManager;
-  NS_ASSERTION((aState.mReflowState.parentReflowState &&
-                aState.mReflowState.parentReflowState->mFloatManager == floatManager) ||
-                aState.mReflowState.mBlockDelta == 0, "Bad block delta passed in");
+  nsFloatManager* floatManager = aState.FloatManager();
+  NS_ASSERTION((aState.mReflowInput.mParentReflowInput &&
+                aState.mReflowInput.mParentReflowInput->mFloatManager == floatManager) ||
+                aState.mReflowInput.mBlockDelta == 0, "Bad block delta passed in");
 
   // Check to see if there are any floats; if there aren't, there can't
   // be any float damage
@@ -1958,13 +2029,13 @@ nsBlockFrame::PropagateFloatDamage(nsBlockReflowState& aState,
 
   // Check the damage region recorded in the float damage.
   if (floatManager->HasFloatDamage()) {
-    // Need to check mBounds *and* mCombinedArea to find intersections 
+    // Need to check mBounds *and* mCombinedArea to find intersections
     // with aLine's floats
     nscoord lineBCoordBefore = aLine->BStart() + aDeltaBCoord;
     nscoord lineBCoordAfter = lineBCoordBefore + aLine->BSize();
     // Scrollable overflow should be sufficient for things that affect
     // layout.
-    WritingMode wm = aState.mReflowState.GetWritingMode();
+    WritingMode wm = aState.mReflowInput.GetWritingMode();
     nsSize containerSize = aState.ContainerSize();
     LogicalRect overflow = aLine->GetOverflowArea(eScrollableOverflow, wm,
                                                   containerSize);
@@ -1983,7 +2054,7 @@ nsBlockFrame::PropagateFloatDamage(nsBlockReflowState& aState,
   }
 
   // Check if the line is moving relative to the float manager
-  if (aDeltaBCoord + aState.mReflowState.mBlockDelta != 0) {
+  if (aDeltaBCoord + aState.mReflowInput.mBlockDelta != 0) {
     if (aLine->IsBlock()) {
       // Unconditionally reflow sliding blocks; we only really need to reflow
       // if there's a float impacting this block, but the current float manager
@@ -1998,14 +2069,14 @@ nsBlockFrame::PropagateFloatDamage(nsBlockReflowState& aState,
                                               nullptr);
 
 #ifdef REALLY_NOISY_REFLOW
-    printf("nsBlockFrame::PropagateFloatDamage %p was = %d, is=%d\n", 
-           this, wasImpactedByFloat, floatAvailableSpace.mHasFloats);
+    printf("nsBlockFrame::PropagateFloatDamage %p was = %d, is=%d\n",
+           this, wasImpactedByFloat, floatAvailableSpace.HasFloats());
 #endif
 
       // Mark the line dirty if it was or is affected by a float
       // We actually only really need to reflow if the amount of impact
       // changes, but that's not straightforward to check
-      if (wasImpactedByFloat || floatAvailableSpace.mHasFloats) {
+      if (wasImpactedByFloat || floatAvailableSpace.HasFloats()) {
         aLine->MarkDirty();
       }
     }
@@ -2014,7 +2085,7 @@ nsBlockFrame::PropagateFloatDamage(nsBlockReflowState& aState,
 
 static bool LineHasClear(nsLineBox* aLine) {
   return aLine->IsBlock()
-    ? (aLine->GetBreakTypeBefore() ||
+    ? (aLine->GetBreakTypeBefore() != StyleClear::None ||
        (aLine->mFirstChild->GetStateBits() & NS_BLOCK_HAS_CLEAR_CHILDREN) ||
        !nsBlockFrame::BlockCanIntersectFloats(aLine->mFirstChild))
     : aLine->HasFloatBreakAfter();
@@ -2041,7 +2112,7 @@ nsBlockFrame::ReparentFloats(nsIFrame* aFirstFrame, nsBlockFrame* aOldParent,
   }
 }
 
-static void DumpLine(const nsBlockReflowState& aState, nsLineBox* aLine,
+static void DumpLine(const BlockReflowInput& aState, nsLineBox* aLine,
                      nscoord aDeltaBCoord, int32_t aDeltaIndent) {
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
@@ -2061,11 +2132,11 @@ static void DumpLine(const nsBlockReflowState& aState, nsLineBox* aLine,
 }
 
 void
-nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
+nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
 {
   bool keepGoing = true;
   bool repositionViews = false; // should we really need this?
-  bool foundAnyClears = aState.mFloatBreakType != NS_STYLE_CLEAR_NONE;
+  bool foundAnyClears = aState.mFloatBreakType != StyleClear::None;
   bool willReflowAgain = false;
 
 #ifdef DEBUG
@@ -2073,22 +2144,22 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     IndentBy(stdout, gNoiseIndent);
     ListTag(stdout);
     printf(": reflowing dirty lines");
-    printf(" computedISize=%d\n", aState.mReflowState.ComputedISize());
+    printf(" computedISize=%d\n", aState.mReflowInput.ComputedISize());
   }
   AutoNoisyIndenter indent(gNoisyReflow);
 #endif
 
   bool selfDirty = (GetStateBits() & NS_FRAME_IS_DIRTY) ||
-                     (aState.mReflowState.IsBResize() &&
+                     (aState.mReflowInput.IsBResize() &&
                       (GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_BSIZE));
 
   // Reflow our last line if our availableBSize has increased
   // so that we (and our last child) pull up content as necessary
-  if (aState.mReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE
-      && GetNextInFlow() && aState.mReflowState.AvailableBSize() >
-        GetLogicalSize().BSize(aState.mReflowState.GetWritingMode())) {
-    line_iterator lastLine = end_lines();
-    if (lastLine != begin_lines()) {
+  if (aState.mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE
+      && GetNextInFlow() && aState.mReflowInput.AvailableBSize() >
+        GetLogicalSize().BSize(aState.mReflowInput.GetWritingMode())) {
+    LineIterator lastLine = LinesEnd();
+    if (lastLine != LinesBegin()) {
       --lastLine;
       lastLine->MarkDirty();
     }
@@ -2106,9 +2177,9 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     (mFloats.FirstChild()->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT);
   bool lastLineMovedUp = false;
   // We save up information about BR-clearance here
-  uint8_t inlineFloatBreakType = aState.mFloatBreakType;
+  StyleClear inlineFloatBreakType = aState.mFloatBreakType;
 
-  line_iterator line = begin_lines(), line_end = end_lines();
+  LineIterator line = LinesBegin(), line_end = LinesEnd();
 
   // Reflow the lines that are already ours
   for ( ; line != line_end; ++line, aState.AdvanceToNextLine()) {
@@ -2137,12 +2208,12 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     // We have to reflow the line if it's a block whose clearance
     // might have changed, so detect that.
     if (!line->IsDirty() &&
-        (line->GetBreakTypeBefore() != NS_STYLE_CLEAR_NONE ||
+        (line->GetBreakTypeBefore() != StyleClear::None ||
          replacedBlock)) {
       nscoord curBCoord = aState.mBCoord;
       // See where we would be after applying any clearance due to
       // BRs.
-      if (inlineFloatBreakType != NS_STYLE_CLEAR_NONE) {
+      if (inlineFloatBreakType != StyleClear::None) {
         curBCoord = aState.ClearFloats(curBCoord, inlineFloatBreakType);
       }
 
@@ -2168,14 +2239,14 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     }
 
     // We might have to reflow a line that is after a clearing BR.
-    if (inlineFloatBreakType != NS_STYLE_CLEAR_NONE) {
+    if (inlineFloatBreakType != StyleClear::None) {
       aState.mBCoord = aState.ClearFloats(aState.mBCoord, inlineFloatBreakType);
       if (aState.mBCoord != line->BStart() + deltaBCoord) {
         // SlideLine is not going to put the line where the clearance
         // put it. Reflow the line to be sure.
         line->MarkDirty();
       }
-      inlineFloatBreakType = NS_STYLE_CLEAR_NONE;
+      inlineFloatBreakType = StyleClear::None;
     }
 
     bool previousMarginWasDirty = line->IsPreviousMarginDirty();
@@ -2197,9 +2268,9 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     // FIXME: What about a deltaBCoord or block-size change that forces us to
     // push lines?  Why does that work?
     if (!line->IsDirty() &&
-        aState.mReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
-        (deltaBCoord != 0 || aState.mReflowState.IsBResize() ||
-         aState.mReflowState.mFlags.mMustReflowPlaceholders) &&
+        aState.mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
+        (deltaBCoord != 0 || aState.mReflowInput.IsBResize() ||
+         aState.mReflowInput.mFlags.mMustReflowPlaceholders) &&
         (line->IsBlock() || line->HasFloats() || line->HadFloatPushed())) {
       line->MarkDirty();
     }
@@ -2225,7 +2296,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       if (line->mWritingMode.IsVertical() ||
           !line->mWritingMode.IsBidiLTR() ||
           !IsAlignedLeft(align,
-                         aState.mReflowState.mStyleVisibility->mDirection,
+                         aState.mReflowInput.mStyleVisibility->mDirection,
                          StyleTextReset()->mUnicodeBidi, this)) {
         line->MarkDirty();
       }
@@ -2259,7 +2330,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
     // dangling frame pointers! Ugh! This reflow of the line may be
     // incorrect because we skipped reflowing previous lines (e.g., floats
     // may be placed incorrectly), but that's OK because we'll mark the
-    // line dirty below under "if (aState.mReflowState.mDiscoveredClearance..."
+    // line dirty below under "if (aState.mReflowInput.mDiscoveredClearance..."
     if (line->IsDirty() && (line->HasFloats() || !willReflowAgain)) {
       lastLineMovedUp = true;
 
@@ -2280,7 +2351,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       // it to invalidate the dirty area if necessary
       ReflowLine(aState, line, &keepGoing);
 
-      if (aState.mReflowState.WillReflowAgainForClearance()) {
+      if (aState.mReflowInput.WillReflowAgainForClearance()) {
         line->MarkDirty();
         willReflowAgain = true;
         // Note that once we've entered this state, every line that gets here
@@ -2326,7 +2397,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       // we don't need to check 4), but if the line is not empty now and we're sure
       // it wasn't empty before, any adjacency and clearance changes are irrelevant
       // to the result of nextLine->ShouldApplyBStartMargin.
-      if (line.next() != end_lines()) {
+      if (line.next() != LinesEnd()) {
         bool maybeWasEmpty = oldB == line.next()->BStart();
         bool isEmpty = line->CachedIsEmpty();
         if (maybeReflowingForFirstTime /*1*/ ||
@@ -2428,7 +2499,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
   }
 
   // Handle BR-clearance from the last line of the block
-  if (inlineFloatBreakType != NS_STYLE_CLEAR_NONE) {
+  if (inlineFloatBreakType != StyleClear::None) {
     aState.mBCoord = aState.ClearFloats(aState.mBCoord, inlineFloatBreakType);
   }
 
@@ -2460,26 +2531,26 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
   // -- my chain of next-in-flows either has no first line, or its first
   // line isn't dirty.
   bool heightConstrained =
-    aState.mReflowState.AvailableBSize() != NS_UNCONSTRAINEDSIZE;
+    aState.mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE;
   bool skipPull = willReflowAgain && heightConstrained;
   if (!skipPull && heightConstrained && aState.mNextInFlow &&
-      (aState.mReflowState.mFlags.mNextInFlowUntouched &&
-       !lastLineMovedUp && 
+      (aState.mReflowInput.mFlags.mNextInFlowUntouched &&
+       !lastLineMovedUp &&
        !(GetStateBits() & NS_FRAME_IS_DIRTY) &&
        !reflowedFloat)) {
-    // We'll place lineIter at the last line of this block, so that 
+    // We'll place lineIter at the last line of this block, so that
     // nsBlockInFlowLineIterator::Next() will take us to the first
-    // line of my next-in-flow-chain.  (But first, check that I 
+    // line of my next-in-flow-chain.  (But first, check that I
     // have any lines -- if I don't, just bail out of this
-    // optimization.) 
-    line_iterator lineIter = this->end_lines();
-    if (lineIter != this->begin_lines()) {
+    // optimization.)
+    LineIterator lineIter = this->LinesEnd();
+    if (lineIter != this->LinesBegin()) {
       lineIter--; // I have lines; step back from dummy iterator to last line.
       nsBlockInFlowLineIterator bifLineIter(this, lineIter);
 
       // Check for next-in-flow-chain's first line.
       // (First, see if there is such a line, and second, see if it's clean)
-      if (!bifLineIter.Next() ||                
+      if (!bifLineIter.Next() ||
           !bifLineIter.GetLine()->IsDirty()) {
         skipPull=true;
       }
@@ -2489,11 +2560,11 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
   if (skipPull && aState.mNextInFlow) {
     NS_ASSERTION(heightConstrained, "Height should be constrained here\n");
     if (IS_TRUE_OVERFLOW_CONTAINER(aState.mNextInFlow))
-      NS_FRAME_SET_OVERFLOW_INCOMPLETE(aState.mReflowStatus);
+      aState.mReflowStatus.SetOverflowIncomplete();
     else
-      NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+      aState.mReflowStatus.SetIncomplete();
   }
-  
+
   if (!skipPull && aState.mNextInFlow) {
     // Pull data from a next-in-flow if there's still room for more
     // content here.
@@ -2544,7 +2615,7 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       mFrames.AppendFrames(nullptr, pulledFrames);
 
       // Add line to our line list, and set its last child as our new prev-child
-      line = mLines.before_insert(end_lines(), pulledLine);
+      line = mLines.before_insert(LinesEnd(), pulledLine);
       aState.mPrevChild = mFrames.LastChild();
 
       // Reparent floats whose placeholders are in the line.
@@ -2562,13 +2633,13 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
         // (we have to loop here because reflowing the line may cause a new
         // line to be created; see SplitLine's callers for examples of
         // when this happens).
-        while (line != end_lines()) {
+        while (line != LinesEnd()) {
           ReflowLine(aState, line, &keepGoing);
 
-          if (aState.mReflowState.WillReflowAgainForClearance()) {
+          if (aState.mReflowInput.WillReflowAgainForClearance()) {
             line->MarkDirty();
             keepGoing = false;
-            NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+            aState.mReflowStatus.SetIncomplete();
             break;
           }
 
@@ -2596,18 +2667,18 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       }
     }
 
-    if (NS_FRAME_IS_NOT_COMPLETE(aState.mReflowStatus)) {
-      aState.mReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+    if (aState.mReflowStatus.IsIncomplete()) {
+      aState.mReflowStatus.SetNextInFlowNeedsReflow();
     } //XXXfr shouldn't set this flag when nextinflow has no lines
   }
 
   // Handle an odd-ball case: a list-item with no lines
   if (HasOutsideBullet() && mLines.empty()) {
-    nsHTMLReflowMetrics metrics(aState.mReflowState);
+    ReflowOutput metrics(aState.mReflowInput);
     nsIFrame* bullet = GetOutsideBullet();
-    WritingMode wm = aState.mReflowState.GetWritingMode();
+    WritingMode wm = aState.mReflowInput.GetWritingMode();
     ReflowBullet(bullet, aState, metrics,
-                 aState.mReflowState.ComputedPhysicalBorderPadding().top);
+                 aState.mReflowInput.ComputedPhysicalBorderPadding().top);
     NS_ASSERTION(!BulletIsEmpty() || metrics.BSize(wm) == 0,
                  "empty bullet took up space");
 
@@ -2615,9 +2686,9 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
       // There are no lines so we have to fake up some y motion so that
       // we end up with *some* height.
 
-      if (metrics.BlockStartAscent() == nsHTMLReflowMetrics::ASK_FOR_BASELINE) {
+      if (metrics.BlockStartAscent() == ReflowOutput::ASK_FOR_BASELINE) {
         nscoord ascent;
-        WritingMode wm = aState.mReflowState.GetWritingMode();
+        WritingMode wm = aState.mReflowInput.GetWritingMode();
         if (nsLayoutUtils::GetFirstLineBaseline(wm, bullet, &ascent)) {
           metrics.SetBlockStartAscent(ascent);
         } else {
@@ -2656,8 +2727,8 @@ nsBlockFrame::ReflowDirtyLines(nsBlockReflowState& aState)
   if (gNoisyReflow) {
     IndentBy(stdout, gNoiseIndent - 1);
     ListTag(stdout);
-    printf(": done reflowing dirty lines (status=%x)\n",
-           aState.mReflowStatus);
+    printf(": done reflowing dirty lines (status=%s)\n",
+           ToString(aState.mReflowStatus).c_str());
   }
 #endif
 }
@@ -2700,11 +2771,11 @@ nsBlockFrame::MarkLineDirtyForInterrupt(nsLineBox* aLine)
 }
 
 void
-nsBlockFrame::DeleteLine(nsBlockReflowState& aState,
+nsBlockFrame::DeleteLine(BlockReflowInput& aState,
                          nsLineList::iterator aLine,
                          nsLineList::iterator aLineEnd)
 {
-  NS_PRECONDITION(0 == aLine->GetChildCount(), "can't delete !empty line");
+  MOZ_ASSERT(0 == aLine->GetChildCount(), "can't delete !empty line");
   if (0 == aLine->GetChildCount()) {
     NS_ASSERTION(aState.mCurrentLine == aLine,
                  "using function more generally than designed, "
@@ -2725,8 +2796,8 @@ nsBlockFrame::DeleteLine(nsBlockReflowState& aState,
  * whether or not the caller should continue to reflow more lines.
  */
 void
-nsBlockFrame::ReflowLine(nsBlockReflowState& aState,
-                         line_iterator aLine,
+nsBlockFrame::ReflowLine(BlockReflowInput& aState,
+                         LineIterator aLine,
                          bool* aKeepReflowGoing)
 {
   MOZ_ASSERT(aLine->GetChildCount(), "reflowing empty line");
@@ -2743,15 +2814,35 @@ nsBlockFrame::ReflowLine(nsBlockReflowState& aState,
   } else {
     aLine->SetLineWrapped(false);
     ReflowInlineFrames(aState, aLine, aKeepReflowGoing);
+
+    // Store the line's float edges for text-overflow analysis if needed.
+    aLine->ClearFloatEdges();
+    if (aState.mFlags.mCanHaveTextOverflow) {
+      WritingMode wm = aLine->mWritingMode;
+      nsFlowAreaRect r = aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
+                                                               aLine->BSize(),
+                                                               nullptr);
+      if (r.HasFloats()) {
+        LogicalRect so =
+          aLine->GetOverflowArea(eScrollableOverflow, wm, aLine->mContainerSize);
+        nscoord s = r.mRect.IStart(wm);
+        nscoord e = r.mRect.IEnd(wm);
+        if (so.IEnd(wm) > e || so.IStart(wm) < s) {
+          // This line is overlapping a float - store the edges marking the area
+          // between the floats for text-overflow analysis.
+          aLine->SetFloatEdges(s, e);
+        }
+      }
+    }
   }
 }
 
 nsIFrame*
-nsBlockFrame::PullFrame(nsBlockReflowState& aState,
-                        line_iterator       aLine)
+nsBlockFrame::PullFrame(BlockReflowInput& aState,
+                        LineIterator       aLine)
 {
   // First check our remaining lines.
-  if (end_lines() != aLine.next()) {
+  if (LinesEnd() != aLine.next()) {
     return PullFrameFrom(aLine, this, aLine.next());
   }
 
@@ -2844,10 +2935,10 @@ nsBlockFrame::PullFrameFrom(nsLineBox*           aLine,
 }
 
 void
-nsBlockFrame::SlideLine(nsBlockReflowState& aState,
+nsBlockFrame::SlideLine(BlockReflowInput& aState,
                         nsLineBox* aLine, nscoord aDeltaBCoord)
 {
-  NS_PRECONDITION(aDeltaBCoord != 0, "why slide a line nowhere?");
+  MOZ_ASSERT(aDeltaBCoord != 0, "why slide a line nowhere?");
 
   // Adjust line state
   aLine->SlideBy(aDeltaBCoord, aState.ContainerSize());
@@ -2910,52 +3001,42 @@ nsBlockFrame::MoveChildFramesOfLine(nsLineBox* aLine, nscoord aDeltaBCoord)
   }
 }
 
-nsresult 
+nsresult
 nsBlockFrame::AttributeChanged(int32_t         aNameSpaceID,
-                               nsIAtom*        aAttribute,
+                               nsAtom*        aAttribute,
                                int32_t         aModType)
 {
-  nsresult rv = nsBlockFrameSuper::AttributeChanged(aNameSpaceID,
-                                                    aAttribute, aModType);
-
+  nsresult rv = nsContainerFrame::AttributeChanged(aNameSpaceID,
+                                                   aAttribute, aModType);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  if (nsGkAtoms::start == aAttribute ||
-      (nsGkAtoms::reversed == aAttribute &&
-       mContent->IsHTMLElement(nsGkAtoms::ol))) {
-    nsPresContext* presContext = PresContext();
-
-    // XXX Not sure if this is necessary anymore
-    if (RenumberLists(presContext)) {
-      presContext->PresShell()->
-        FrameNeedsReflow(this, nsIPresShell::eStyleChange,
-                         NS_FRAME_HAS_DIRTY_CHILDREN);
-    }
-  }
-  else if (nsGkAtoms::value == aAttribute) {
+  if (nsGkAtoms::value == aAttribute) {
     const nsStyleDisplay* styleDisplay = StyleDisplay();
-    if (NS_STYLE_DISPLAY_LIST_ITEM == styleDisplay->mDisplay) {
+    if (mozilla::StyleDisplay::ListItem == styleDisplay->mDisplay) {
       // Search for the closest ancestor that's a block frame. We
       // make the assumption that all related list items share a
-      // common block parent.
+      // common block/grid/flex ancestor.
       // XXXldb I think that's a bad assumption.
-      nsBlockFrame* blockParent = nsLayoutUtils::FindNearestBlockAncestor(this);
-
-      // Tell the enclosing block frame to renumber list items within
-      // itself
-      if (nullptr != blockParent) {
-        nsPresContext* presContext = PresContext();
+      nsContainerFrame* ancestor = GetParent();
+      for (; ancestor; ancestor = ancestor->GetParent()) {
+        auto frameType = ancestor->Type();
+        if (frameType == LayoutFrameType::Block ||
+            frameType == LayoutFrameType::FlexContainer ||
+            frameType == LayoutFrameType::GridContainer) {
+          break;
+        }
+      }
+      // Tell the ancestor to renumber list items within itself.
+      if (ancestor) {
         // XXX Not sure if this is necessary anymore
-        if (blockParent->RenumberLists(presContext)) {
-          presContext->PresShell()->
-            FrameNeedsReflow(blockParent, nsIPresShell::eStyleChange,
-                             NS_FRAME_HAS_DIRTY_CHILDREN);
+        if (ancestor->RenumberList()) {
+          PresShell()->FrameNeedsReflow(ancestor, nsIPresShell::eStyleChange,
+                                        NS_FRAME_HAS_DIRTY_CHILDREN);
         }
       }
     }
   }
-
   return rv;
 }
 
@@ -2981,8 +3062,8 @@ IsNonAutoNonZeroBSize(const nsStyleCoord& aCoord)
     // both nscoord_MAX and 0, and it's zero both ways, then it's a zero
     // length, percent, or combination thereof.  Test > 0 so we clamp
     // negative calc() results to 0.
-    return nsRuleNode::ComputeCoordPercentCalc(aCoord, nscoord_MAX) > 0 ||
-           nsRuleNode::ComputeCoordPercentCalc(aCoord, 0) > 0;
+    return aCoord.ComputeCoordPercentCalc(nscoord_MAX) > 0 ||
+           aCoord.ComputeCoordPercentCalc(0) > 0;
   }
   MOZ_ASSERT(false, "unexpected unit for height or min-height");
   return true;
@@ -3030,7 +3111,7 @@ nsBlockFrame::CachedIsEmpty()
     return false;
   }
 
-  for (line_iterator line = begin_lines(), line_end = end_lines();
+  for (LineIterator line = LinesBegin(), line_end = LinesEnd();
        line != line_end;
        ++line)
   {
@@ -3048,7 +3129,7 @@ nsBlockFrame::IsEmpty()
     return false;
   }
 
-  for (line_iterator line = begin_lines(), line_end = end_lines();
+  for (LineIterator line = LinesBegin(), line_end = LinesEnd();
        line != line_end;
        ++line)
   {
@@ -3060,41 +3141,41 @@ nsBlockFrame::IsEmpty()
 }
 
 bool
-nsBlockFrame::ShouldApplyBStartMargin(nsBlockReflowState& aState,
+nsBlockFrame::ShouldApplyBStartMargin(BlockReflowInput& aState,
                                       nsLineBox* aLine,
                                       nsIFrame* aChildFrame)
 {
-  if (aState.GetFlag(BRS_APPLYBSTARTMARGIN)) {
+  if (aState.mFlags.mShouldApplyBStartMargin) {
     // Apply short-circuit check to avoid searching the line list
     return true;
   }
 
   if (!aState.IsAdjacentWithTop() ||
       aChildFrame->StyleBorder()->mBoxDecorationBreak ==
-        NS_STYLE_BOX_DECORATION_BREAK_CLONE) {
+        StyleBoxDecorationBreak::Clone) {
     // If we aren't at the start block-coordinate then something of non-zero
     // height must have been placed. Therefore the childs block-start margin
     // applies.
-    aState.SetFlag(BRS_APPLYBSTARTMARGIN, true);
+    aState.mFlags.mShouldApplyBStartMargin = true;
     return true;
   }
 
   // Determine if this line is "essentially" the first line
-  line_iterator line = begin_lines();
-  if (aState.GetFlag(BRS_HAVELINEADJACENTTOTOP)) {
+  LineIterator line = LinesBegin();
+  if (aState.mFlags.mHasLineAdjacentToTop) {
     line = aState.mLineAdjacentToTop;
   }
   while (line != aLine) {
     if (!line->CachedIsEmpty() || line->HasClearance()) {
       // A line which precedes aLine is non-empty, or has clearance,
       // so therefore the block-start margin applies.
-      aState.SetFlag(BRS_APPLYBSTARTMARGIN, true);
+      aState.mFlags.mShouldApplyBStartMargin = true;
       return true;
     }
     // No need to apply the block-start margin if the line has floats.  We
     // should collapse anyway (bug 44419)
     ++line;
-    aState.SetFlag(BRS_HAVELINEADJACENTTOTOP, true);
+    aState.mFlags.mHasLineAdjacentToTop = true;
     aState.mLineAdjacentToTop = line;
   }
 
@@ -3105,28 +3186,27 @@ nsBlockFrame::ShouldApplyBStartMargin(nsBlockReflowState& aState,
 }
 
 void
-nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
-                               line_iterator aLine,
+nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
+                               LineIterator aLine,
                                bool* aKeepReflowGoing)
 {
-  NS_PRECONDITION(*aKeepReflowGoing, "bad caller");
+  MOZ_ASSERT(*aKeepReflowGoing, "bad caller");
 
   nsIFrame* frame = aLine->mFirstChild;
   if (!frame) {
-    NS_ASSERTION(false, "program error - unexpected empty line"); 
-    return; 
+    NS_ASSERTION(false, "program error - unexpected empty line");
+    return;
   }
 
   // Prepare the block reflow engine
-  const nsStyleDisplay* display = frame->StyleDisplay();
-  nsBlockReflowContext brc(aState.mPresContext, aState.mReflowState);
+  nsBlockReflowContext brc(aState.mPresContext, aState.mReflowInput);
 
-  uint8_t breakType =
-    display->PhysicalBreakType(aState.mReflowState.GetWritingMode());
-  if (NS_STYLE_CLEAR_NONE != aState.mFloatBreakType) {
+  StyleClear breakType = frame->StyleDisplay()->
+    PhysicalBreakType(aState.mReflowInput.GetWritingMode());
+  if (StyleClear::None != aState.mFloatBreakType) {
     breakType = nsLayoutUtils::CombineBreakType(breakType,
                                                 aState.mFloatBreakType);
-    aState.mFloatBreakType = NS_STYLE_CLEAR_NONE;
+    aState.mFloatBreakType = StyleClear::None;
   }
 
   // Clear past floats before the block if the clear style is not none
@@ -3137,7 +3217,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
   // apply its block-start margin because it's not significant unless it has
   // 'box-decoration-break:clone'.  Otherwise, dig deeper.
   bool applyBStartMargin = (frame->StyleBorder()->mBoxDecorationBreak ==
-                              NS_STYLE_BOX_DECORATION_BREAK_CLONE ||
+                              StyleBoxDecorationBreak::Clone ||
                             !frame->GetPrevInFlow()) &&
                            ShouldApplyBStartMargin(aState, aLine, frame);
   if (applyBStartMargin) {
@@ -3149,7 +3229,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
   }
   bool treatWithClearance = aLine->HasClearance();
 
-  bool mightClearFloats = breakType != NS_STYLE_CLEAR_NONE;
+  bool mightClearFloats = breakType != StyleClear::None;
   nsIFrame *replacedBlock = nullptr;
   if (!nsBlockFrame::BlockCanIntersectFloats(frame)) {
     mightClearFloats = true;
@@ -3161,13 +3241,13 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
   // frame DID NOT need clearance, then we need to check that
   // assumption.
   if (!treatWithClearance && !applyBStartMargin && mightClearFloats &&
-      aState.mReflowState.mDiscoveredClearance) {
+      aState.mReflowInput.mDiscoveredClearance) {
     nscoord curBCoord = aState.mBCoord + aState.mPrevBEndMargin.get();
     nscoord clearBCoord = aState.ClearFloats(curBCoord, breakType, replacedBlock);
     if (clearBCoord != curBCoord) {
       // Only record the first frame that requires clearance
-      if (!*aState.mReflowState.mDiscoveredClearance) {
-        *aState.mReflowState.mDiscoveredClearance = frame;
+      if (!*aState.mReflowInput.mDiscoveredClearance) {
+        *aState.mReflowInput.mDiscoveredClearance = frame;
       }
       aState.mPrevChild = frame;
       // Exactly what we do now is flexible since we'll definitely be
@@ -3196,18 +3276,18 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       // correct available space (there might be a float that's
       // already been placed below the aState.mPrevBEndMargin
 
-      // Setup a reflowState to get the style computed block-start margin
+      // Setup a reflowInput to get the style computed block-start margin
       // value. We'll use a reason of `resize' so that we don't fudge
       // any incremental reflow state.
 
       // The availSpace here is irrelevant to our needs - all we want
       // out if this setup is the block-start margin value which doesn't depend
       // on the childs available space.
-      // XXX building a complete nsHTMLReflowState just to get the block-start
+      // XXX building a complete ReflowInput just to get the block-start
       // margin seems like a waste. And we do this for almost every block!
       WritingMode wm = frame->GetWritingMode();
       LogicalSize availSpace = aState.ContentSize(wm);
-      nsHTMLReflowState reflowState(aState.mPresContext, aState.mReflowState,
+      ReflowInput reflowInput(aState.mPresContext, aState.mReflowInput,
                                     frame, availSpace);
 
       if (treatWithClearance) {
@@ -3218,7 +3298,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       // Now compute the collapsed margin-block-start value into
       // aState.mPrevBEndMargin, assuming that all child margins
       // collapse down to clearanceFrame.
-      brc.ComputeCollapsedBStartMargin(reflowState,
+      brc.ComputeCollapsedBStartMargin(reflowInput,
                                        &aState.mPrevBEndMargin,
                                        clearanceFrame,
                                        &mayNeedRetry);
@@ -3254,7 +3334,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 
           // Compute the collapsed margin again, ignoring the incoming margin this time
           mayNeedRetry = false;
-          brc.ComputeCollapsedBStartMargin(reflowState,
+          brc.ComputeCollapsedBStartMargin(reflowInput,
                                            &aState.mPrevBEndMargin,
                                            clearanceFrame,
                                            &mayNeedRetry);
@@ -3301,17 +3381,17 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
     // Here aState.mBCoord is the block-start border-edge of the block.
     // Compute the available space for the block
     nsFlowAreaRect floatAvailableSpace = aState.GetFloatAvailableSpace();
-    WritingMode wm = aState.mReflowState.GetWritingMode();
+    WritingMode wm = aState.mReflowInput.GetWritingMode();
     LogicalRect availSpace(wm);
-    aState.ComputeBlockAvailSpace(frame, display, floatAvailableSpace,
+    aState.ComputeBlockAvailSpace(frame, floatAvailableSpace,
                                   replacedBlock != nullptr, availSpace);
 
     // The check for
-    //   (!aState.mReflowState.mFlags.mIsTopOfPage || clearedFloats)
+    //   (!aState.mReflowInput.mFlags.mIsTopOfPage || clearedFloats)
     // is to some degree out of paranoia:  if we reliably eat up block-start
     // margins at the top of the page as we ought to, it wouldn't be
     // needed.
-    if ((!aState.mReflowState.mFlags.mIsTopOfPage || clearedFloats) &&
+    if ((!aState.mReflowInput.mFlags.mIsTopOfPage || clearedFloats) &&
         availSpace.BSize(wm) < 0) {
       // We know already that this child block won't fit on this
       // page/column due to the block-start margin or the clearance.  So we
@@ -3326,11 +3406,11 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       aState.mBCoord = startingBCoord;
       aState.mPrevBEndMargin = incomingMargin;
       *aKeepReflowGoing = false;
-      if (ShouldAvoidBreakInside(aState.mReflowState)) {
-        aState.mReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
+      if (ShouldAvoidBreakInside(aState.mReflowInput)) {
+        aState.mReflowStatus.SetInlineLineBreakBeforeAndReset();
       } else {
         PushLines(aState, aLine.prev());
-        NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+        aState.mReflowStatus.SetIncomplete();
       }
       return;
     }
@@ -3345,16 +3425,16 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 
     // construct the html reflow state for the block. ReflowBlock
     // will initialize it.
-    Maybe<nsHTMLReflowState> blockHtmlRS;
-    blockHtmlRS.emplace(
-      aState.mPresContext, aState.mReflowState, frame,
+    Maybe<ReflowInput> blockHtmlRI;
+    blockHtmlRI.emplace(
+      aState.mPresContext, aState.mReflowInput, frame,
       availSpace.Size(wm).ConvertTo(frame->GetWritingMode(), wm));
 
     nsFloatManager::SavedState floatManagerState;
     nsReflowStatus frameReflowStatus;
     do {
-      if (floatAvailableSpace.mHasFloats) {
-        // Set if floatAvailableSpace.mHasFloats is true for any
+      if (floatAvailableSpace.HasFloats()) {
+        // Set if floatAvailableSpace.HasFloats() is true for any
         // iteration of the loop.
         aLine->SetLineIsImpactedByFloat(true);
       }
@@ -3364,25 +3444,25 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       // brc.ReflowBlock() below does, so we need to remember now
       // whether it's empty.
       const bool shouldStoreClearance =
-        aState.mReflowState.mDiscoveredClearance &&
-        !*aState.mReflowState.mDiscoveredClearance;
+        aState.mReflowInput.mDiscoveredClearance &&
+        !*aState.mReflowInput.mDiscoveredClearance;
 
       // Reflow the block into the available space
       if (mayNeedRetry || replacedBlock) {
-        aState.mFloatManager->PushState(&floatManagerState);
+        aState.FloatManager()->PushState(&floatManagerState);
       }
 
       if (mayNeedRetry) {
-        blockHtmlRS->mDiscoveredClearance = &clearanceFrame;
+        blockHtmlRI->mDiscoveredClearance = &clearanceFrame;
       } else if (!applyBStartMargin) {
-        blockHtmlRS->mDiscoveredClearance =
-          aState.mReflowState.mDiscoveredClearance;
+        blockHtmlRI->mDiscoveredClearance =
+          aState.mReflowInput.mDiscoveredClearance;
       }
 
-      frameReflowStatus = NS_FRAME_COMPLETE;
+      frameReflowStatus.Reset();
       brc.ReflowBlock(availSpace, applyBStartMargin, aState.mPrevBEndMargin,
                       clearance, aState.IsAdjacentWithTop(),
-                      aLine.get(), *blockHtmlRS, frameReflowStatus, aState);
+                      aLine.get(), *blockHtmlRI, frameReflowStatus, aState);
 
       // Now the block has a height.  Using that height, get the
       // available space again and call ComputeBlockAvailSpace again.
@@ -3395,7 +3475,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       LogicalRect oldFloatAvailableSpaceRect(floatAvailableSpace.mRect);
       floatAvailableSpace = aState.GetFloatAvailableSpaceForBSize(
                               aState.mBCoord + bStartMargin,
-                              brc.GetMetrics().Height(),
+                              brc.GetMetrics().BSize(wm),
                               &floatManagerState);
       NS_ASSERTION(floatAvailableSpace.mRect.BStart(wm) ==
                      oldFloatAvailableSpaceRect.BStart(wm),
@@ -3428,15 +3508,16 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
         }
         // ClearFloats might be able to advance us further once we're there.
         aState.mBCoord =
-          aState.ClearFloats(newBCoord, NS_STYLE_CLEAR_NONE, replacedBlock);
+          aState.ClearFloats(newBCoord, StyleClear::None, replacedBlock);
         // Start over with a new available space rect at the new height.
         floatAvailableSpace =
           aState.GetFloatAvailableSpaceWithState(aState.mBCoord,
+                                                 ShapeType::ShapeOutside,
                                                  &floatManagerState);
       }
 
       LogicalRect oldAvailSpace(availSpace);
-      aState.ComputeBlockAvailSpace(frame, display, floatAvailableSpace,
+      aState.ComputeBlockAvailSpace(frame, floatAvailableSpace,
                                     replacedBlock != nullptr, availSpace);
 
       if (!advanced && availSpace.IsEqualEdges(oldAvailSpace)) {
@@ -3444,14 +3525,14 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       }
 
       // We need another reflow.
-      aState.mFloatManager->PopState(&floatManagerState);
+      aState.FloatManager()->PopState(&floatManagerState);
 
       if (!treatWithClearance && !applyBStartMargin &&
-          aState.mReflowState.mDiscoveredClearance) {
+          aState.mReflowInput.mDiscoveredClearance) {
         // We set shouldStoreClearance above to record only the first
         // frame that requires clearance.
         if (shouldStoreClearance) {
-          *aState.mReflowState.mDiscoveredClearance = frame;
+          *aState.mReflowInput.mDiscoveredClearance = frame;
         }
         aState.mPrevChild = frame;
         // Exactly what we do now is flexible since we'll definitely be
@@ -3469,14 +3550,14 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
         clearance = 0;
       }
 
-      blockHtmlRS.reset();
-      blockHtmlRS.emplace(
-        aState.mPresContext, aState.mReflowState, frame,
+      blockHtmlRI.reset();
+      blockHtmlRI.emplace(
+        aState.mPresContext, aState.mReflowInput, frame,
         availSpace.Size(wm).ConvertTo(frame->GetWritingMode(), wm));
     } while (true);
 
     if (mayNeedRetry && clearanceFrame) {
-      aState.mFloatManager->PopState(&floatManagerState);
+      aState.FloatManager()->PopState(&floatManagerState);
       aState.mBCoord = startingBCoord;
       aState.mPrevBEndMargin = incomingMargin;
       continue;
@@ -3484,7 +3565,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 
     aState.mPrevChild = frame;
 
-    if (blockHtmlRS->WillReflowAgainForClearance()) {
+    if (blockHtmlRI->WillReflowAgainForClearance()) {
       // If an ancestor of ours is going to reflow for clearance, we
       // need to avoid calling PlaceBlock, because it unsets dirty bits
       // on the child block (both itself, and through its call to
@@ -3499,14 +3580,14 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
     RecordReflowStatus(true, frameReflowStatus);
 #endif
 
-    if (NS_INLINE_IS_BREAK_BEFORE(frameReflowStatus)) {
+    if (frameReflowStatus.IsInlineBreakBefore()) {
       // None of the child block fits.
       *aKeepReflowGoing = false;
-      if (ShouldAvoidBreakInside(aState.mReflowState)) {
-        aState.mReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
+      if (ShouldAvoidBreakInside(aState.mReflowInput)) {
+        aState.mReflowStatus.SetInlineLineBreakBeforeAndReset();
       } else {
         PushLines(aState, aLine.prev());
-        NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+        aState.mReflowStatus.SetIncomplete();
       }
     }
     else {
@@ -3519,22 +3600,22 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       // then pushing it to the next page would give it more room. Note that
       // isImpacted doesn't include impact from the block's own floats.
       bool forceFit = aState.IsAdjacentWithTop() && clearance <= 0 &&
-        !floatAvailableSpace.mHasFloats;
+        !floatAvailableSpace.HasFloats();
       nsCollapsingMargin collapsedBEndMargin;
       nsOverflowAreas overflowAreas;
-      *aKeepReflowGoing = brc.PlaceBlock(*blockHtmlRS, forceFit, aLine.get(),
+      *aKeepReflowGoing = brc.PlaceBlock(*blockHtmlRI, forceFit, aLine.get(),
                                          collapsedBEndMargin,
                                          overflowAreas,
                                          frameReflowStatus);
-      if (!NS_FRAME_IS_FULLY_COMPLETE(frameReflowStatus) &&
-          ShouldAvoidBreakInside(aState.mReflowState)) {
+      if (!frameReflowStatus.IsFullyComplete() &&
+          ShouldAvoidBreakInside(aState.mReflowInput)) {
         *aKeepReflowGoing = false;
       }
 
       if (aLine->SetCarriedOutBEndMargin(collapsedBEndMargin)) {
-        line_iterator nextLine = aLine;
+        LineIterator nextLine = aLine;
         ++nextLine;
-        if (nextLine != end_lines()) {
+        if (nextLine != LinesEnd()) {
           nextLine->MarkPreviousMarginDirty();
         }
       }
@@ -3542,22 +3623,22 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
       aLine->SetOverflowAreas(overflowAreas);
       if (*aKeepReflowGoing) {
         // Some of the child block fit
-        
+
         // Advance to new Y position
         nscoord newBCoord = aLine->BEnd();
         aState.mBCoord = newBCoord;
 
-        
+
         // Continue the block frame now if it didn't completely fit in
         // the available space.
-        if (!NS_FRAME_IS_FULLY_COMPLETE(frameReflowStatus)) {
+        if (!frameReflowStatus.IsFullyComplete()) {
           bool madeContinuation =
             CreateContinuationFor(aState, nullptr, frame);
-          
+
           nsIFrame* nextFrame = frame->GetNextInFlow();
           NS_ASSERTION(nextFrame, "We're supposed to have a next-in-flow by now");
-          
-          if (NS_FRAME_IS_NOT_COMPLETE(frameReflowStatus)) {
+
+          if (frameReflowStatus.IsIncomplete()) {
             // If nextFrame used to be an overflow container, make it a normal block
             if (!madeContinuation &&
                 (NS_FRAME_IS_OVERFLOW_CONTAINER & nextFrame->GetStateBits())) {
@@ -3572,7 +3653,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
               mFrames.InsertFrame(nullptr, frame, nextFrame);
               madeContinuation = true; // needs to be added to mLines
               nextFrame->RemoveStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
-              frameReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+              frameReflowStatus.SetNextInFlowNeedsReflow();
             }
 
             // Push continuation to a new line, but only if we actually made one.
@@ -3582,12 +3663,12 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
             }
 
             PushLines(aState, aLine);
-            NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+            aState.mReflowStatus.SetIncomplete();
 
             // If we need to reflow the continuation of the block child,
             // then we'd better reflow our continuation
-            if (frameReflowStatus & NS_FRAME_REFLOW_NEXTINFLOW) {
-              aState.mReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+            if (frameReflowStatus.NextInFlowNeedsReflow()) {
+              aState.mReflowStatus.SetNextInFlowNeedsReflow();
               // We also need to make that continuation's line dirty so
               // it gets reflowed when we reflow our next in flow. The
               // nif's line must always be either a line of the nif's
@@ -3600,8 +3681,8 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
                   nsLayoutUtils::GetAsBlock(nextFrame->GetParent());
                 NS_ASSERTION(nifBlock,
                              "A block's child's next in flow's parent must be a block!");
-                for (line_iterator line = nifBlock->begin_lines(),
-                     line_end = nifBlock->end_lines(); line != line_end; ++line) {
+                for (LineIterator line = nifBlock->LinesBegin(),
+                     line_end = nifBlock->LinesEnd(); line != line_end; ++line) {
                   if (line->Contains(nextFrame)) {
                     line->MarkDirty();
                     break;
@@ -3610,7 +3691,7 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
               }
             }
             *aKeepReflowGoing = false;
-            
+
             // The block-end margin for a block is only applied on the last
             // flow block. Since we just continued the child block frame,
             // we know that line->mFirstChild is not the last flow block
@@ -3618,9 +3699,9 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 #ifdef NOISY_BLOCK_DIR_MARGINS
             ListTag(stdout);
             printf(": reflow incomplete, frame=");
-            nsFrame::ListTag(stdout, frame);
+            nsFrame::ListTag(stdout, mFrame);
             printf(" prevBEndMargin=%d, setting to zero\n",
-                   aState.mPrevBEndMargin);
+                   aState.mPrevBEndMargin.get());
 #endif
             aState.mPrevBEndMargin.Zero();
           }
@@ -3641,14 +3722,14 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 
             // Put it in our overflow list
             aState.mOverflowTracker->Insert(nextFrame, frameReflowStatus);
-            NS_MergeReflowStatusInto(&aState.mReflowStatus, frameReflowStatus);
+            aState.mReflowStatus.MergeCompletionStatusFrom(frameReflowStatus);
 
 #ifdef NOISY_BLOCK_DIR_MARGINS
             ListTag(stdout);
             printf(": reflow complete but overflow incomplete for ");
-            nsFrame::ListTag(stdout, frame);
+            nsFrame::ListTag(stdout, mFrame);
             printf(" prevBEndMargin=%d collapsedBEndMargin=%d\n",
-                   aState.mPrevBEndMargin, collapsedBEndMargin.get());
+                   aState.mPrevBEndMargin.get(), collapsedBEndMargin.get());
 #endif
             aState.mPrevBEndMargin = collapsedBEndMargin;
           }
@@ -3657,32 +3738,35 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
 #ifdef NOISY_BLOCK_DIR_MARGINS
           ListTag(stdout);
           printf(": reflow complete for ");
-          nsFrame::ListTag(stdout, frame);
+          nsFrame::ListTag(stdout, mFrame);
           printf(" prevBEndMargin=%d collapsedBEndMargin=%d\n",
-                 aState.mPrevBEndMargin, collapsedBEndMargin.get());
+                 aState.mPrevBEndMargin.get(), collapsedBEndMargin.get());
 #endif
           aState.mPrevBEndMargin = collapsedBEndMargin;
         }
 #ifdef NOISY_BLOCK_DIR_MARGINS
         ListTag(stdout);
         printf(": frame=");
-        nsFrame::ListTag(stdout, frame);
+        nsFrame::ListTag(stdout, mFrame);
         printf(" carriedOutBEndMargin=%d collapsedBEndMargin=%d => %d\n",
-               brc.GetCarriedOutBEndMargin(), collapsedBEndMargin.get(),
-               aState.mPrevBEndMargin);
+               brc.GetCarriedOutBEndMargin().get(), collapsedBEndMargin.get(),
+               aState.mPrevBEndMargin.get());
 #endif
       } else {
         if ((aLine == mLines.front() && !GetPrevInFlow()) ||
-            ShouldAvoidBreakInside(aState.mReflowState)) {
+            ShouldAvoidBreakInside(aState.mReflowInput)) {
           // If it's our very first line *or* we're not at the top of the page
           // and we have page-break-inside:avoid, then we need to be pushed to
           // our parent's next-in-flow.
-          aState.mReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
+          aState.mReflowStatus.SetInlineLineBreakBeforeAndReset();
+          // When we reflow in the new position, we need to reflow this
+          // line again.
+          aLine->MarkDirty();
         } else {
           // Push the line that didn't fit and any lines that follow it
           // to our next-in-flow.
           PushLines(aState, aLine.prev());
-          NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+          aState.mReflowStatus.SetIncomplete();
         }
       }
     }
@@ -3696,15 +3780,15 @@ nsBlockFrame::ReflowBlockFrame(nsBlockReflowState& aState,
   if (originalPosition != frame->GetPosition() && !frame->HasView()) {
     nsContainerFrame::PositionChildViews(frame);
   }
-  
+
 #ifdef DEBUG
   VerifyLines(true);
 #endif
 }
 
 void
-nsBlockFrame::ReflowInlineFrames(nsBlockReflowState& aState,
-                                 line_iterator aLine,
+nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
+                                 LineIterator aLine,
                                  bool* aKeepReflowGoing)
 {
   *aKeepReflowGoing = true;
@@ -3720,7 +3804,8 @@ nsBlockFrame::ReflowInlineFrames(nsBlockReflowState& aState,
 
   LineReflowStatus lineReflowStatus;
   do {
-    nscoord availableSpaceHeight = 0;
+    nscoord availableSpaceBSize = 0;
+    aState.mLineBSize.reset();
     do {
       bool allowPullUp = true;
       nsIFrame* forceBreakInFrame = nullptr;
@@ -3728,7 +3813,7 @@ nsBlockFrame::ReflowInlineFrames(nsBlockReflowState& aState,
       gfxBreakPriority forceBreakPriority = gfxBreakPriority::eNoBreak;
       do {
         nsFloatManager::SavedState floatManagerState;
-        aState.mReflowState.mFloatManager->PushState(&floatManagerState);
+        aState.FloatManager()->PushState(&floatManagerState);
 
         // Once upon a time we allocated the first 30 nsLineLayout objects
         // on the stack, and then we switched to the heap.  At that time
@@ -3738,21 +3823,21 @@ nsBlockFrame::ReflowInlineFrames(nsBlockReflowState& aState,
         // smaller, the complexity of 2 different ways of allocating
         // no longer makes sense.  Now we always allocate on the stack.
         nsLineLayout lineLayout(aState.mPresContext,
-                                aState.mReflowState.mFloatManager,
-                                &aState.mReflowState, &aLine, nullptr);
+                                aState.FloatManager(),
+                                &aState.mReflowInput, &aLine, nullptr);
         lineLayout.Init(&aState, aState.mMinLineHeight, aState.mLineNumber);
         if (forceBreakInFrame) {
           lineLayout.ForceBreakAtPosition(forceBreakInFrame, forceBreakOffset);
         }
         DoReflowInlineFrames(aState, lineLayout, aLine,
-                             floatAvailableSpace, availableSpaceHeight,
+                             floatAvailableSpace, availableSpaceBSize,
                              &floatManagerState, aKeepReflowGoing,
                              &lineReflowStatus, allowPullUp);
         lineLayout.EndLineReflow();
 
-        if (LINE_REFLOW_REDO_NO_PULL == lineReflowStatus ||
-            LINE_REFLOW_REDO_MORE_FLOATS == lineReflowStatus ||
-            LINE_REFLOW_REDO_NEXT_BAND == lineReflowStatus) {
+        if (LineReflowStatus::RedoNoPull == lineReflowStatus ||
+            LineReflowStatus::RedoMoreFloats == lineReflowStatus ||
+            LineReflowStatus::RedoNextBand == lineReflowStatus) {
           if (lineLayout.NeedsBackup()) {
             NS_ASSERTION(!forceBreakInFrame, "Backing up twice; this should never be necessary");
             // If there is no saved break position, then this will set
@@ -3764,43 +3849,35 @@ nsBlockFrame::ReflowInlineFrames(nsBlockReflowState& aState,
             forceBreakInFrame = nullptr;
           }
           // restore the float manager state
-          aState.mReflowState.mFloatManager->PopState(&floatManagerState);
+          aState.FloatManager()->PopState(&floatManagerState);
           // Clear out float lists
           aState.mCurrentLineFloats.DeleteAll();
           aState.mBelowCurrentLineFloats.DeleteAll();
         }
 
-        // Don't allow pullup on a subsequent LINE_REFLOW_REDO_NO_PULL pass
+        // Don't allow pullup on a subsequent LineReflowStatus::RedoNoPull pass
         allowPullUp = false;
-      } while (LINE_REFLOW_REDO_NO_PULL == lineReflowStatus);
-    } while (LINE_REFLOW_REDO_MORE_FLOATS == lineReflowStatus);
-  } while (LINE_REFLOW_REDO_NEXT_BAND == lineReflowStatus);
+      } while (LineReflowStatus::RedoNoPull == lineReflowStatus);
+    } while (LineReflowStatus::RedoMoreFloats == lineReflowStatus);
+  } while (LineReflowStatus::RedoNextBand == lineReflowStatus);
 }
 
 void
-nsBlockFrame::PushTruncatedLine(nsBlockReflowState& aState,
-                                line_iterator       aLine,
+nsBlockFrame::PushTruncatedLine(BlockReflowInput& aState,
+                                LineIterator       aLine,
                                 bool*               aKeepReflowGoing)
 {
   PushLines(aState, aLine.prev());
   *aKeepReflowGoing = false;
-  NS_FRAME_SET_INCOMPLETE(aState.mReflowStatus);
+  aState.mReflowStatus.SetIncomplete();
 }
 
-#ifdef DEBUG
-static const char* LineReflowStatusNames[] = {
-  "LINE_REFLOW_OK", "LINE_REFLOW_STOP", "LINE_REFLOW_REDO_NO_PULL",
-  "LINE_REFLOW_REDO_MORE_FLOATS",
-  "LINE_REFLOW_REDO_NEXT_BAND", "LINE_REFLOW_TRUNCATED"
-};
-#endif
-
 void
-nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
+nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
                                    nsLineLayout& aLineLayout,
-                                   line_iterator aLine,
+                                   LineIterator aLine,
                                    nsFlowAreaRect& aFloatAvailableSpace,
-                                   nscoord& aAvailableSpaceHeight,
+                                   nscoord& aAvailableSpaceBSize,
                                    nsFloatManager::SavedState*
                                      aFloatStateBeforeLine,
                                    bool* aKeepReflowGoing,
@@ -3813,15 +3890,15 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
 
   // We need to set this flag on the line if any of our reflow passes
   // are impacted by floats.
-  if (aFloatAvailableSpace.mHasFloats)
+  if (aFloatAvailableSpace.HasFloats())
     aLine->SetLineIsImpactedByFloat(true);
 #ifdef REALLY_NOISY_REFLOW
   printf("nsBlockFrame::DoReflowInlineFrames %p impacted = %d\n",
-         this, aFloatAvailableSpace.mHasFloats);
+         this, aFloatAvailableSpace.HasFloats());
 #endif
 
-  WritingMode outerWM = aState.mReflowState.GetWritingMode();
-  WritingMode lineWM = GetWritingMode(aLine->mFirstChild);
+  WritingMode outerWM = aState.mReflowInput.GetWritingMode();
+  WritingMode lineWM = WritingModeForLine(outerWM, aLine->mFirstChild);
   LogicalRect lineRect =
     aFloatAvailableSpace.mRect.ConvertTo(lineWM, outerWM,
                                          aState.ContainerSize());
@@ -3829,7 +3906,7 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
   nscoord iStart = lineRect.IStart(lineWM);
   nscoord availISize = lineRect.ISize(lineWM);
   nscoord availBSize;
-  if (aState.GetFlag(BRS_UNCONSTRAINEDBSIZE)) {
+  if (aState.mFlags.mHasUnconstrainedBSize) {
     availBSize = NS_UNCONSTRAINEDSIZE;
   }
   else {
@@ -3843,11 +3920,11 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
 
   aLineLayout.BeginLineReflow(iStart, aState.mBCoord,
                               availISize, availBSize,
-                              aFloatAvailableSpace.mHasFloats,
+                              aFloatAvailableSpace.HasFloats(),
                               false, /*XXX isTopOfPage*/
                               lineWM, aState.mContainerSize);
 
-  aState.SetFlag(BRS_LINE_LAYOUT_EMPTY, false);
+  aState.mFlags.mIsLineLayoutEmpty = false;
 
   // XXX Unfortunately we need to know this before reflowing the first
   // inline frame in the line. FIX ME.
@@ -3861,30 +3938,30 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
                "first letter child bit should only be on first continuation");
 
   // Reflow the frames that are already on the line first
-  LineReflowStatus lineReflowStatus = LINE_REFLOW_OK;
+  LineReflowStatus lineReflowStatus = LineReflowStatus::OK;
   int32_t i;
   nsIFrame* frame = aLine->mFirstChild;
 
-  if (aFloatAvailableSpace.mHasFloats) {
+  if (aFloatAvailableSpace.HasFloats()) {
     // There is a soft break opportunity at the start of the line, because
     // we can always move this line down below float(s).
     if (aLineLayout.NotifyOptionalBreakPosition(
             frame, 0, true, gfxBreakPriority::eNormalBreak)) {
-      lineReflowStatus = LINE_REFLOW_REDO_NEXT_BAND;
+      lineReflowStatus = LineReflowStatus::RedoNextBand;
     }
   }
 
   // need to repeatedly call GetChildCount here, because the child
   // count can change during the loop!
-  for (i = 0; LINE_REFLOW_OK == lineReflowStatus && i < aLine->GetChildCount();
+  for (i = 0; LineReflowStatus::OK == lineReflowStatus && i < aLine->GetChildCount();
        i++, frame = frame->GetNextSibling()) {
     ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
-    if (LINE_REFLOW_OK != lineReflowStatus) {
+    if (LineReflowStatus::OK != lineReflowStatus) {
       // It is possible that one or more of next lines are empty
       // (because of DeleteNextInFlowChild). If so, delete them now
       // in case we are finished.
       ++aLine;
-      while ((aLine != end_lines()) && (0 == aLine->GetChildCount())) {
+      while ((aLine != LinesEnd()) && (0 == aLine->GetChildCount())) {
         // XXX Is this still necessary now that DeleteNextInFlowChild
         // uses DoRemoveFrame?
         nsLineBox *toremove = aLine;
@@ -3894,7 +3971,7 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
       }
       --aLine;
 
-      NS_ASSERTION(lineReflowStatus != LINE_REFLOW_TRUNCATED,
+      NS_ASSERTION(lineReflowStatus != LineReflowStatus::Truncated,
                    "ReflowInlineFrame should never determine that a line "
                    "needs to go to the next page/column");
     }
@@ -3903,13 +3980,13 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
   // Don't pull up new frames into lines with continuation placeholders
   if (aAllowPullUp) {
     // Pull frames and reflow them until we can't
-    while (LINE_REFLOW_OK == lineReflowStatus) {
+    while (LineReflowStatus::OK == lineReflowStatus) {
       frame = PullFrame(aState, aLine);
       if (!frame) {
         break;
       }
 
-      while (LINE_REFLOW_OK == lineReflowStatus) {
+      while (LineReflowStatus::OK == lineReflowStatus) {
         int32_t oldCount = aLine->GetChildCount();
         ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
         if (aLine->GetChildCount() != oldCount) {
@@ -3926,13 +4003,14 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
     }
   }
 
-  aState.SetFlag(BRS_LINE_LAYOUT_EMPTY, aLineLayout.LineIsEmpty());
+  aState.mFlags.mIsLineLayoutEmpty = aLineLayout.LineIsEmpty();
 
   // We only need to backup if the line isn't going to be reflowed again anyway
   bool needsBackup = aLineLayout.NeedsBackup() &&
-    (lineReflowStatus == LINE_REFLOW_STOP || lineReflowStatus == LINE_REFLOW_OK);
+    (lineReflowStatus == LineReflowStatus::Stop ||
+     lineReflowStatus == LineReflowStatus::OK);
   if (needsBackup && aLineLayout.HaveForcedBreakPosition()) {
-  	NS_WARNING("We shouldn't be backing up more than once! "
+    NS_WARNING("We shouldn't be backing up more than once! "
                "Someone must have set a break opportunity beyond the available width, "
                "even though there were better break opportunities before it");
     needsBackup = false;
@@ -3944,7 +4022,7 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
     // re-do the line.
     if (aLineLayout.HasOptionalBreakPosition()) {
       // We can back up!
-      lineReflowStatus = LINE_REFLOW_REDO_NO_PULL;
+      lineReflowStatus = LineReflowStatus::RedoNoPull;
     }
   } else {
     // In case we reflow this line again, remember that we don't
@@ -3952,47 +4030,47 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
     aLineLayout.ClearOptionalBreakPosition();
   }
 
-  if (LINE_REFLOW_REDO_NEXT_BAND == lineReflowStatus) {
+  if (LineReflowStatus::RedoNextBand == lineReflowStatus) {
     // This happens only when we have a line that is impacted by
     // floats and the first element in the line doesn't fit with
     // the floats.
     //
-    // What we do is to advance past the first float we find and
-    // then reflow the line all over again.
+    // If there's block space available, we either try to reflow the line
+    // past the current band (if it's non-zero and the band definitely won't
+    // widen around a shape-outside), otherwise we try one pixel down. If
+    // there's no block space available, we push the line to the next
+    // page/column.
     NS_ASSERTION(NS_UNCONSTRAINEDSIZE !=
                  aFloatAvailableSpace.mRect.BSize(outerWM),
                  "unconstrained block size on totally empty line");
 
-    // See the analogous code for blocks in nsBlockReflowState::ClearFloats.
-    if (aFloatAvailableSpace.mRect.BSize(outerWM) > 0) {
-      NS_ASSERTION(aFloatAvailableSpace.mHasFloats,
+    // See the analogous code for blocks in BlockReflowInput::ClearFloats.
+    nscoord bandBSize = aFloatAvailableSpace.mRect.BSize(outerWM);
+    if (bandBSize > 0 ||
+        NS_UNCONSTRAINEDSIZE == aState.mReflowInput.AvailableBSize()) {
+      NS_ASSERTION(bandBSize == 0 || aFloatAvailableSpace.HasFloats(),
                    "redo line on totally empty line with non-empty band...");
       // We should never hit this case if we've placed floats on the
       // line; if we have, then the GetFloatAvailableSpace call is wrong
-      // and needs to happen after the caller pops the space manager
+      // and needs to happen after the caller pops the float manager
       // state.
-      aState.mFloatManager->AssertStateMatches(aFloatStateBeforeLine);
-      aState.mBCoord += aFloatAvailableSpace.mRect.BSize(outerWM);
+      aState.FloatManager()->AssertStateMatches(aFloatStateBeforeLine);
+
+      if (!aFloatAvailableSpace.MayWiden() && bandBSize > 0) {
+        // Move it down far enough to clear the current band.
+        aState.mBCoord += bandBSize;
+      } else {
+        // Move it down by one dev pixel.
+        aState.mBCoord += aState.mPresContext->DevPixelsToAppUnits(1);
+      }
+
       aFloatAvailableSpace = aState.GetFloatAvailableSpace();
     } else {
-      NS_ASSERTION(NS_UNCONSTRAINEDSIZE != aState.mReflowState.AvailableBSize(),
-                   "We shouldn't be running out of height here");
-      if (NS_UNCONSTRAINEDSIZE == aState.mReflowState.AvailableBSize()) {
-        // just move it down a bit to try to get out of this mess
-        aState.mBCoord += 1;
-        // We should never hit this case if we've placed floats on the
-        // line; if we have, then the GetFloatAvailableSpace call is wrong
-        // and needs to happen after the caller pops the space manager
-        // state.
-        aState.mFloatManager->AssertStateMatches(aFloatStateBeforeLine);
-        aFloatAvailableSpace = aState.GetFloatAvailableSpace();
-      } else {
-        // There's nowhere to retry placing the line, so we want to push
-        // it to the next page/column where its contents can fit not
-        // next to a float.
-        lineReflowStatus = LINE_REFLOW_TRUNCATED;
-        PushTruncatedLine(aState, aLine, aKeepReflowGoing);
-      }
+      // There's nowhere to retry placing the line, so we want to push
+      // it to the next page/column where its contents can fit not
+      // next to a float.
+      lineReflowStatus = LineReflowStatus::Truncated;
+      PushTruncatedLine(aState, aLine, aKeepReflowGoing);
     }
 
     // XXX: a small optimization can be done here when paginating:
@@ -4000,22 +4078,22 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
     // push the line and return now instead of later on after we are
     // past the float.
   }
-  else if (LINE_REFLOW_TRUNCATED != lineReflowStatus &&
-           LINE_REFLOW_REDO_NO_PULL != lineReflowStatus) {
+  else if (LineReflowStatus::Truncated != lineReflowStatus &&
+           LineReflowStatus::RedoNoPull != lineReflowStatus) {
     // If we are propagating out a break-before status then there is
     // no point in placing the line.
-    if (!NS_INLINE_IS_BREAK_BEFORE(aState.mReflowStatus)) {
+    if (!aState.mReflowStatus.IsInlineBreakBefore()) {
       if (!PlaceLine(aState, aLineLayout, aLine, aFloatStateBeforeLine,
-                     aFloatAvailableSpace.mRect, aAvailableSpaceHeight,
+                     aFloatAvailableSpace, aAvailableSpaceBSize,
                      aKeepReflowGoing)) {
-        lineReflowStatus = LINE_REFLOW_REDO_MORE_FLOATS;
+        lineReflowStatus = LineReflowStatus::RedoMoreFloats;
         // PlaceLine already called GetAvailableSpaceForBSize for us.
       }
     }
   }
 #ifdef DEBUG
   if (gNoisyReflow) {
-    printf("Line reflow status = %s\n", LineReflowStatusNames[lineReflowStatus]);
+    printf("Line reflow status = %s\n", LineReflowStatusToString(lineReflowStatus));
   }
 #endif
 
@@ -4035,7 +4113,7 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
     if (iter.Next() && iter.GetLine()->IsInline()) {
       iter.GetLine()->MarkDirty();
       if (iter.GetContainer() != this) {
-        aState.mReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+        aState.mReflowStatus.SetNextInFlowNeedsReflow();
       }
     }
   }
@@ -4049,21 +4127,17 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
  * The line reflow status is simple: true means keep placing frames
  * on the line; false means don't (the line is done). If the line
  * has some sort of breaking affect then aLine's break-type will be set
- * to something other than NS_STYLE_CLEAR_NONE.
+ * to something other than StyleClear::None.
  */
 void
-nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
+nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
                                 nsLineLayout& aLineLayout,
-                                line_iterator aLine,
+                                LineIterator aLine,
                                 nsIFrame* aFrame,
                                 LineReflowStatus* aLineReflowStatus)
 {
-  if (!aFrame) { // XXX change to MOZ_ASSERT(aFrame)
-    NS_ERROR("why call me?");
-    return;
-  }
-  
-  *aLineReflowStatus = LINE_REFLOW_OK;
+  MOZ_ASSERT(aFrame);
+  *aLineReflowStatus = LineReflowStatus::OK;
 
 #ifdef NOISY_FIRST_LETTER
   ListTag(stdout);
@@ -4073,18 +4147,23 @@ nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
          aLineLayout.GetFirstLetterStyleOK() ? "on" : "off");
 #endif
 
+  if (aFrame->IsPlaceholderFrame()) {
+    auto ph = static_cast<nsPlaceholderFrame*>(aFrame);
+    ph->ForgetLineIsEmptySoFar();
+  }
+
   // Reflow the inline frame
   nsReflowStatus frameReflowStatus;
-  bool           pushedFrame;
+  bool pushedFrame;
   aLineLayout.ReflowFrame(aFrame, frameReflowStatus, nullptr, pushedFrame);
 
-  if (frameReflowStatus & NS_FRAME_REFLOW_NEXTINFLOW) {
+  if (frameReflowStatus.NextInFlowNeedsReflow()) {
     aLineLayout.SetDirtyNextLine();
   }
 
-#ifdef REALLY_NOISY_REFLOW_CHILD
+#ifdef REALLY_NOISY_REFLOW
   nsFrame::ListTag(stdout, aFrame);
-  printf(": status=%x\n", frameReflowStatus);
+  printf(": status=%s\n", frameReflowStatus.ToString().get());
 #endif
 
 #if defined(REFLOW_STATUS_COVERAGE)
@@ -4106,27 +4185,26 @@ nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
   // break-after-not-complete. There are two situations: we are a
   // block or we are an inline. This makes a total of 10 cases
   // (fortunately, there is some overlap).
-  aLine->SetBreakTypeAfter(NS_STYLE_CLEAR_NONE);
-  if (NS_INLINE_IS_BREAK(frameReflowStatus) || 
-      (NS_STYLE_CLEAR_NONE != aState.mFloatBreakType)) {
+  aLine->SetBreakTypeAfter(StyleClear::None);
+  if (frameReflowStatus.IsInlineBreak() ||
+      StyleClear::None != aState.mFloatBreakType) {
     // Always abort the line reflow (because a line break is the
     // minimal amount of break we do).
-    *aLineReflowStatus = LINE_REFLOW_STOP;
+    *aLineReflowStatus = LineReflowStatus::Stop;
 
     // XXX what should aLine's break-type be set to in all these cases?
-    uint8_t breakType = NS_INLINE_GET_BREAK_TYPE(frameReflowStatus);
-    NS_ASSERTION((NS_STYLE_CLEAR_NONE != breakType) || 
-                 (NS_STYLE_CLEAR_NONE != aState.mFloatBreakType), "bad break type");
-    NS_ASSERTION(NS_STYLE_CLEAR_MAX >= breakType, "invalid break type");
+    StyleClear breakType = frameReflowStatus.BreakType();
+    MOZ_ASSERT(StyleClear::None != breakType ||
+               StyleClear::None != aState.mFloatBreakType, "bad break type");
 
-    if (NS_INLINE_IS_BREAK_BEFORE(frameReflowStatus)) {
+    if (frameReflowStatus.IsInlineBreakBefore()) {
       // Break-before cases.
       if (aFrame == aLine->mFirstChild) {
         // If we break before the first frame on the line then we must
         // be trying to place content where there's no room (e.g. on a
         // line with wide floats). Inform the caller to reflow the
         // line after skipping past a float.
-        *aLineReflowStatus = LINE_REFLOW_REDO_NEXT_BAND;
+        *aLineReflowStatus = LineReflowStatus::RedoNextBand;
       }
       else {
         // It's not the first child on this line so go ahead and split
@@ -4142,26 +4220,26 @@ nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
       }
     }
     else {
-      // If a float split and its prev-in-flow was followed by a <BR>, then combine 
-      // the <BR>'s break type with the inline's break type (the inline will be the very 
+      // If a float split and its prev-in-flow was followed by a <BR>, then combine
+      // the <BR>'s break type with the inline's break type (the inline will be the very
       // next frame after the split float).
-      if (NS_STYLE_CLEAR_NONE != aState.mFloatBreakType) {
+      if (StyleClear::None != aState.mFloatBreakType) {
         breakType = nsLayoutUtils::CombineBreakType(breakType,
                                                     aState.mFloatBreakType);
-        aState.mFloatBreakType = NS_STYLE_CLEAR_NONE;
+        aState.mFloatBreakType = StyleClear::None;
       }
       // Break-after cases
-      if (breakType == NS_STYLE_CLEAR_LINE) {
+      if (breakType == StyleClear::Line) {
         if (!aLineLayout.GetLineEndsInBR()) {
-          breakType = NS_STYLE_CLEAR_NONE;
+          breakType = StyleClear::None;
         }
       }
       aLine->SetBreakTypeAfter(breakType);
-      if (NS_FRAME_IS_COMPLETE(frameReflowStatus)) {
+      if (frameReflowStatus.IsComplete()) {
         // Split line, but after the frame just reflowed
         SplitLine(aState, aLineLayout, aLine, aFrame->GetNextSibling(), aLineReflowStatus);
 
-        if (NS_INLINE_IS_BREAK_AFTER(frameReflowStatus) &&
+        if (frameReflowStatus.IsInlineBreakAfter() &&
             !aLineLayout.GetLineEndsInBR()) {
           aLineLayout.SetDirtyNextLine();
         }
@@ -4169,7 +4247,7 @@ nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
     }
   }
 
-  if (!NS_FRAME_IS_FULLY_COMPLETE(frameReflowStatus)) {
+  if (!frameReflowStatus.IsFullyComplete()) {
     // Create a continuation for the incomplete frame. Note that the
     // frame may already have a continuation.
     CreateContinuationFor(aState, aLine, aFrame);
@@ -4178,22 +4256,22 @@ nsBlockFrame::ReflowInlineFrame(nsBlockReflowState& aState,
     if (!aLineLayout.GetLineEndsInBR()) {
       aLine->SetLineWrapped(true);
     }
-    
-    // If we just ended a first-letter frame or reflowed a placeholder then 
+
+    // If we just ended a first-letter frame or reflowed a placeholder then
     // don't split the line and don't stop the line reflow...
     // But if we are going to stop anyways we'd better split the line.
-    if ((!(frameReflowStatus & NS_INLINE_BREAK_FIRST_LETTER_COMPLETE) && 
-         nsGkAtoms::placeholderFrame != aFrame->GetType()) ||
-        *aLineReflowStatus == LINE_REFLOW_STOP) {
+    if ((!frameReflowStatus.FirstLetterComplete() &&
+         !aFrame->IsPlaceholderFrame()) ||
+        *aLineReflowStatus == LineReflowStatus::Stop) {
       // Split line after the current frame
-      *aLineReflowStatus = LINE_REFLOW_STOP;
+      *aLineReflowStatus = LineReflowStatus::Stop;
       SplitLine(aState, aLineLayout, aLine, aFrame->GetNextSibling(), aLineReflowStatus);
     }
   }
 }
 
 bool
-nsBlockFrame::CreateContinuationFor(nsBlockReflowState& aState,
+nsBlockFrame::CreateContinuationFor(BlockReflowInput& aState,
                                     nsLineBox*          aLine,
                                     nsIFrame*           aFrame)
 {
@@ -4215,12 +4293,12 @@ nsBlockFrame::CreateContinuationFor(nsBlockReflowState& aState,
   return !!newFrame;
 }
 
-nsresult
-nsBlockFrame::SplitFloat(nsBlockReflowState& aState,
-                         nsIFrame*           aFloat,
-                         nsReflowStatus      aFloatStatus)
+void
+nsBlockFrame::SplitFloat(BlockReflowInput& aState,
+                         nsIFrame* aFloat,
+                         const nsReflowStatus& aFloatStatus)
 {
-  MOZ_ASSERT(!NS_FRAME_IS_FULLY_COMPLETE(aFloatStatus),
+  MOZ_ASSERT(!aFloatStatus.IsFullyComplete(),
              "why split the frame if it's fully complete?");
   MOZ_ASSERT(aState.mBlock == this);
 
@@ -4232,29 +4310,28 @@ nsBlockFrame::SplitFloat(nsBlockReflowState& aState,
     if (oldParent != this) {
       ReparentFrame(nextInFlow, oldParent, this);
     }
-    if (!NS_FRAME_OVERFLOW_IS_INCOMPLETE(aFloatStatus)) {
+    if (!aFloatStatus.IsOverflowIncomplete()) {
       nextInFlow->RemoveStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
     }
   } else {
     nextInFlow = aState.mPresContext->PresShell()->FrameConstructor()->
       CreateContinuingFrame(aState.mPresContext, aFloat, this);
   }
-  if (NS_FRAME_OVERFLOW_IS_INCOMPLETE(aFloatStatus)) {
+  if (aFloatStatus.IsOverflowIncomplete()) {
     nextInFlow->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
   }
 
-  uint8_t floatStyle =
-    aFloat->StyleDisplay()->PhysicalFloats(aState.mReflowState.GetWritingMode());
-  if (floatStyle == NS_STYLE_FLOAT_LEFT) {
-    aState.mFloatManager->SetSplitLeftFloatAcrossBreak();
+  StyleFloat floatStyle =
+    aFloat->StyleDisplay()->PhysicalFloats(aState.mReflowInput.GetWritingMode());
+  if (floatStyle == StyleFloat::Left) {
+    aState.FloatManager()->SetSplitLeftFloatAcrossBreak();
   } else {
-    MOZ_ASSERT(floatStyle == NS_STYLE_FLOAT_RIGHT, "unexpected float side");
-    aState.mFloatManager->SetSplitRightFloatAcrossBreak();
+    MOZ_ASSERT(floatStyle == StyleFloat::Right, "Unexpected float side!");
+    aState.FloatManager()->SetSplitRightFloatAcrossBreak();
   }
 
   aState.AppendPushedFloatChain(nextInFlow);
-  NS_FRAME_SET_OVERFLOW_INCOMPLETE(aState.mReflowStatus);
-  return NS_OK;
+  aState.mReflowStatus.SetOverflowIncomplete();
 }
 
 static nsFloatCache*
@@ -4276,8 +4353,7 @@ CheckPlaceholderInLine(nsIFrame* aBlock, nsLineBox* aLine, nsFloatCache* aFC)
                "float in a line should never be a continuation");
   NS_ASSERTION(!(aFC->mFloat->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT),
                "float in a line should never be a pushed float");
-  nsIFrame* ph = aBlock->PresContext()->FrameManager()->
-                   GetPlaceholderFrameFor(aFC->mFloat->FirstInFlow());
+  nsIFrame* ph = aFC->mFloat->FirstInFlow()->GetPlaceholderFrame();
   for (nsIFrame* f = ph; f; f = f->GetParent()) {
     if (f->GetParent() == aBlock)
       return aLine->Contains(f);
@@ -4287,16 +4363,16 @@ CheckPlaceholderInLine(nsIFrame* aBlock, nsLineBox* aLine, nsFloatCache* aFC)
 }
 
 void
-nsBlockFrame::SplitLine(nsBlockReflowState& aState,
+nsBlockFrame::SplitLine(BlockReflowInput& aState,
                         nsLineLayout& aLineLayout,
-                        line_iterator aLine,
+                        LineIterator aLine,
                         nsIFrame* aFrame,
                         LineReflowStatus* aLineReflowStatus)
 {
   MOZ_ASSERT(aLine->IsInline(), "illegal SplitLine on block line");
 
   int32_t pushCount = aLine->GetChildCount() - aLineLayout.GetCurrentSpanCount();
-  MOZ_ASSERT(pushCount >= 0, "bad push count"); 
+  MOZ_ASSERT(pushCount >= 0, "bad push count");
 
 #ifdef DEBUG
   if (gNoisyReflow) {
@@ -4346,12 +4422,12 @@ nsBlockFrame::SplitLine(nsBlockReflowState& aState,
 
     // If floats have been placed whose placeholders have been pushed to the new
     // line, we need to reflow the old line again. We don't want to look at the
-    // frames in the new line, because as a large paragraph is laid out the 
+    // frames in the new line, because as a large paragraph is laid out the
     // we'd get O(N^2) performance. So instead we just check that the last
     // float and the last below-current-line float are still in aLine.
     if (!CheckPlaceholderInLine(this, aLine, GetLastFloat(aLine)) ||
         !CheckPlaceholderInLine(this, aLine, aState.mBelowCurrentLineFloats.Tail())) {
-      *aLineReflowStatus = LINE_REFLOW_REDO_NO_PULL;
+      *aLineReflowStatus = LineReflowStatus::RedoNoPull;
     }
 
 #ifdef DEBUG
@@ -4361,10 +4437,10 @@ nsBlockFrame::SplitLine(nsBlockReflowState& aState,
 }
 
 bool
-nsBlockFrame::IsLastLine(nsBlockReflowState& aState,
-                         line_iterator aLine)
+nsBlockFrame::IsLastLine(BlockReflowInput& aState,
+                         LineIterator aLine)
 {
-  while (++aLine != end_lines()) {
+  while (++aLine != LinesEnd()) {
     // There is another line
     if (0 != aLine->GetChildCount()) {
       // If the next line is a block line then this line is the last in a
@@ -4378,8 +4454,8 @@ nsBlockFrame::IsLastLine(nsBlockReflowState& aState,
   // Try our next-in-flows lines to answer the question
   nsBlockFrame* nextInFlow = (nsBlockFrame*) GetNextInFlow();
   while (nullptr != nextInFlow) {
-    for (line_iterator line = nextInFlow->begin_lines(),
-                   line_end = nextInFlow->end_lines();
+    for (LineIterator line = nextInFlow->LinesBegin(),
+                   line_end = nextInFlow->LinesEnd();
          line != line_end;
          ++line)
     {
@@ -4394,13 +4470,13 @@ nsBlockFrame::IsLastLine(nsBlockReflowState& aState,
 }
 
 bool
-nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
-                        nsLineLayout&       aLineLayout,
-                        line_iterator       aLine,
+nsBlockFrame::PlaceLine(BlockReflowInput& aState,
+                        nsLineLayout& aLineLayout,
+                        LineIterator aLine,
                         nsFloatManager::SavedState *aFloatStateBeforeLine,
-                        LogicalRect&        aFloatAvailableSpace,
-                        nscoord&            aAvailableSpaceHeight,
-                        bool*             aKeepReflowGoing)
+                        nsFlowAreaRect& aFlowArea,
+                        nscoord& aAvailableSpaceBSize,
+                        bool* aKeepReflowGoing)
 {
   // Trim extra white-space from the line before placing the frames
   aLineLayout.TrimTrailingWhiteSpace();
@@ -4414,7 +4490,7 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
   // There are exactly two places a bullet can be placed: near the
   // first or second line. It's only placed on the second line in a
   // rare case: when the first line is empty.
-  WritingMode wm = aState.mReflowState.GetWritingMode();
+  WritingMode wm = aState.mReflowInput.GetWritingMode();
   bool addedBullet = false;
   if (HasOutsideBullet() &&
       ((aLine == mLines.front() &&
@@ -4422,7 +4498,7 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
        (mLines.front() != mLines.back() &&
         0 == mLines.front()->BSize() &&
         aLine == mLines.begin().next()))) {
-    nsHTMLReflowMetrics metrics(aState.mReflowState);
+    ReflowOutput metrics(aState.mReflowInput);
     nsIFrame* bullet = GetOutsideBullet();
     ReflowBullet(bullet, aState, metrics, aState.mBCoord);
     NS_ASSERTION(!BulletIsEmpty() || metrics.BSize(wm) == 0,
@@ -4432,30 +4508,66 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
   }
   aLineLayout.VerticalAlignLine();
 
-  // We want to compare to the available space that we would have had in
-  // the line's height *before* we placed any floats in the line itself.
-  // Floats that are in the line are handled during line reflow (and may
-  // result in floats being pushed to below the line or (I HOPE???) in a
-  // reflow with a forced break position).
-  LogicalRect oldFloatAvailableSpace(aFloatAvailableSpace);
-  // As we redo for floats, we can't reduce the amount of height we're
+  // We want to consider the floats in the current line when determining
+  // whether the float available space is shrunk. If mLineBSize doesn't
+  // exist, we are in the first pass trying to place the line. Calling
+  // GetFloatAvailableSpace() like we did in BlockReflowInput::AddFloat()
+  // for UpdateBand().
+
+  // floatAvailableSpaceWithOldLineBSize is the float available space with
+  // the old BSize, but including the floats that were added in this line.
+  LogicalRect floatAvailableSpaceWithOldLineBSize =
+    aState.mLineBSize.isNothing()
+    ? aState.GetFloatAvailableSpace(aLine->BStart()).mRect
+    : aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
+                                            aState.mLineBSize.value(),
+                                            nullptr).mRect;
+
+  // As we redo for floats, we can't reduce the amount of BSize we're
   // checking.
-  aAvailableSpaceHeight = std::max(aAvailableSpaceHeight, aLine->BSize());
-  aFloatAvailableSpace =
+  aAvailableSpaceBSize = std::max(aAvailableSpaceBSize, aLine->BSize());
+  LogicalRect floatAvailableSpaceWithLineBSize =
     aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
-                                          aAvailableSpaceHeight,
-                                          aFloatStateBeforeLine).mRect;
-  NS_ASSERTION(aFloatAvailableSpace.BStart(wm) ==
-               oldFloatAvailableSpace.BStart(wm), "yikes");
-  // Restore the height to the position of the next band.
-  aFloatAvailableSpace.BSize(wm) = oldFloatAvailableSpace.BSize(wm);
+                                          aAvailableSpaceBSize,
+                                          nullptr).mRect;
+
   // If the available space between the floats is smaller now that we
-  // know the height, return false (and cause another pass with
-  // LINE_REFLOW_REDO_MORE_FLOATS).  We ensure aAvailableSpaceHeight
+  // know the BSize, return false (and cause another pass with
+  // LineReflowStatus::RedoMoreFloats).  We ensure aAvailableSpaceBSize
   // never decreases, which means that we can't reduce the set of floats
   // we intersect, which means that the available space cannot grow.
-  if (AvailableSpaceShrunk(wm, oldFloatAvailableSpace, aFloatAvailableSpace,
-                           false)) {
+  if (AvailableSpaceShrunk(wm, floatAvailableSpaceWithOldLineBSize,
+                           floatAvailableSpaceWithLineBSize, false)) {
+    // Prepare data for redoing the line.
+    aState.mLineBSize = Some(aLine->BSize());
+
+    // Since we want to redo the line, we update aFlowArea by using the
+    // aFloatStateBeforeLine, which is the float manager's state before the
+    // line is placed.
+    LogicalRect oldFloatAvailableSpace(aFlowArea.mRect);
+    aFlowArea = aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
+                                                      aAvailableSpaceBSize,
+                                                      aFloatStateBeforeLine);
+
+    NS_ASSERTION(aFlowArea.mRect.BStart(wm) ==
+                 oldFloatAvailableSpace.BStart(wm), "yikes");
+    // Restore the BSize to the position of the next band.
+    aFlowArea.mRect.BSize(wm) = oldFloatAvailableSpace.BSize(wm);
+
+    // Enforce both IStart() and IEnd() never move outwards to prevent
+    // infinite grow-shrink loops.
+    const nscoord iStartDiff =
+      aFlowArea.mRect.IStart(wm) - oldFloatAvailableSpace.IStart(wm);
+    const nscoord iEndDiff =
+      aFlowArea.mRect.IEnd(wm) - oldFloatAvailableSpace.IEnd(wm);
+    if (iStartDiff < 0) {
+      aFlowArea.mRect.IStart(wm) -= iStartDiff;
+      aFlowArea.mRect.ISize(wm) += iStartDiff;
+    }
+    if (iEndDiff > 0) {
+      aFlowArea.mRect.ISize(wm) -= iEndDiff;
+    }
+
     return false;
   }
 
@@ -4490,7 +4602,7 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
    * In other words, isLastLine really means isLastLineAndWeCare.
    */
   bool isLastLine =
-    !IsSVGText() &&
+    !nsSVGUtils::IsInSVGTextSubtree(this) &&
     ((NS_STYLE_TEXT_ALIGN_AUTO != styleText->mTextAlignLast ||
       NS_STYLE_TEXT_ALIGN_JUSTIFY == styleText->mTextAlign) &&
      (aLineLayout.GetLineEndsInBR() ||
@@ -4526,16 +4638,19 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
     // coordinate (it was applied in ReflowInlineFrames speculatively)
     // since the line is empty.
     // We already called |ShouldApplyBStartMargin|, and if we applied it
-    // then BRS_APPLYBSTARTMARGIN is set.
-    nscoord dy = aState.GetFlag(BRS_APPLYBSTARTMARGIN)
+    // then mShouldApplyBStartMargin is set.
+    nscoord dy = aState.mFlags.mShouldApplyBStartMargin
                    ? -aState.mPrevBEndMargin.get() : 0;
     newBCoord = aState.mBCoord + dy;
   }
 
-  if (!NS_FRAME_IS_FULLY_COMPLETE(aState.mReflowStatus) &&
-      ShouldAvoidBreakInside(aState.mReflowState)) {
+  if (!aState.mReflowStatus.IsFullyComplete() &&
+      ShouldAvoidBreakInside(aState.mReflowInput)) {
     aLine->AppendFloats(aState.mCurrentLineFloats);
-    aState.mReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
+    aState.mReflowStatus.SetInlineLineBreakBeforeAndReset();
+    // Reflow the line again when we reflow at our new position.
+    aLine->MarkDirty();
+    *aKeepReflowGoing = false;
     return true;
   }
 
@@ -4544,9 +4659,10 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
       newBCoord > aState.mBEndEdge &&
       aState.mBEndEdge != NS_UNCONSTRAINEDSIZE) {
     NS_ASSERTION(aState.mCurrentLine == aLine, "oops");
-    if (ShouldAvoidBreakInside(aState.mReflowState)) {
+    if (ShouldAvoidBreakInside(aState.mReflowInput)) {
       // All our content doesn't fit, start on the next page.
-      aState.mReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
+      aState.mReflowStatus.SetInlineLineBreakBeforeAndReset();
+      *aKeepReflowGoing = false;
     } else {
       // Push aLine and all of its children and anything else that
       // follows to our next-in-flow.
@@ -4555,6 +4671,10 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
     return true;
   }
 
+  // Note that any early return before this update of aState.mBCoord
+  // must either (a) return false or (b) set aKeepReflowGoing to false.
+  // Otherwise we'll keep reflowing later lines at an incorrect
+  // position, and we might not come back and clean up the damage later.
   aState.mBCoord = newBCoord;
 
   // Add the already placed current-line floats to the line
@@ -4606,7 +4726,7 @@ nsBlockFrame::PlaceLine(nsBlockReflowState& aState,
 }
 
 void
-nsBlockFrame::PushLines(nsBlockReflowState&  aState,
+nsBlockFrame::PushLines(BlockReflowInput&  aState,
                         nsLineList::iterator aLineBefore)
 {
   // NOTE: aLineBefore is always a normal line, not an overflow line.
@@ -4616,9 +4736,9 @@ nsBlockFrame::PushLines(nsBlockReflowState&  aState,
   nsLineList::iterator overBegin(aLineBefore.next());
 
   // PushTruncatedPlaceholderLine sometimes pushes the first line.  Ugh.
-  bool firstLine = overBegin == begin_lines();
+  bool firstLine = overBegin == LinesBegin();
 
-  if (overBegin != end_lines()) {
+  if (overBegin != LinesEnd()) {
     // Remove floats in the lines from mFloats
     nsFrameList floats;
     CollectFloats(overBegin->mFirstChild, floats, true);
@@ -4659,17 +4779,17 @@ nsBlockFrame::PushLines(nsBlockReflowState&  aState,
       overflowLines->mFrames.InsertFrames(nullptr, nullptr, pushedFrames);
 
       overflowLines->mLines.splice(overflowLines->mLines.begin(), mLines,
-                                    overBegin, end_lines());
+                                    overBegin, LinesEnd());
       NS_ASSERTION(!overflowLines->mLines.empty(), "should not be empty");
       // this takes ownership but it won't delete it immediately so we
       // can keep using it.
       SetOverflowLines(overflowLines);
-  
+
       // Mark all the overflow lines dirty so that they get reflowed when
       // they are pulled up by our next-in-flow.
 
       // XXXldb Can this get called O(N) times making the whole thing O(N^2)?
-      for (line_iterator line = overflowLines->mLines.begin(),
+      for (LineIterator line = overflowLines->mLines.begin(),
              line_end = overflowLines->mLines.end();
            line != line_end;
            ++line)
@@ -4733,7 +4853,7 @@ nsBlockFrame::DrainOverflowLines()
       }
       // The overflow lines have already been marked dirty and their previous
       // margins marked dirty also.
-      
+
       // Prepend the overflow frames/lines to our principal list.
       mFrames.InsertFrames(nullptr, nullptr, overflowLines->mFrames);
       mLines.splice(mLines.begin(), overflowLines->mLines);
@@ -4750,7 +4870,7 @@ nsBlockFrame::DrainOverflowLines()
 bool
 nsBlockFrame::DrainSelfOverflowList()
 {
-  nsAutoPtr<FrameLines> ourOverflowLines(RemoveOverflowLines());
+  UniquePtr<FrameLines> ourOverflowLines(RemoveOverflowLines());
   if (!ourOverflowLines) {
     return false;
   }
@@ -4800,7 +4920,7 @@ nsBlockFrame::DrainSelfOverflowList()
  * DrainPushedFloats sets up pushed floats the way we need them at the
  * start of reflow; they are then reflowed by ReflowPushedFloats (which
  * might push some of them on).  Floats with placeholders in this block
- * are reflowed by (nsBlockReflowState/nsLineLayout)::AddFloat, which
+ * are reflowed by (BlockReflowInput/nsLineLayout)::AddFloat, which
  * also maintains these invariants.
  *
  * DrainSelfPushedFloats moves any pushed floats from this block's own
@@ -4843,9 +4963,8 @@ nsBlockFrame::DrainSelfPushedFloats()
       if (f->GetPrevContinuation()) {
         // FIXME
       } else {
-        nsPlaceholderFrame *placeholder =
-          presContext->FrameManager()->GetPlaceholderFrameFor(f);
-        nsIFrame *floatOriginalParent = presContext->PresShell()->
+        nsPlaceholderFrame* placeholder = f->GetPlaceholderFrame();
+        nsIFrame* floatOriginalParent = presContext->PresShell()->
           FrameConstructor()->GetFloatContainingBlock(placeholder);
         if (floatOriginalParent != this) {
           // This is a first continuation that was pushed from one of our
@@ -4886,7 +5005,7 @@ nsBlockFrame::GetOverflowLines() const
   if (!HasOverflowLines()) {
     return nullptr;
   }
-  FrameLines* prop = Properties().Get(OverflowLinesProperty());
+  FrameLines* prop = GetProperty(OverflowLinesProperty());
   NS_ASSERTION(prop && !prop->mLines.empty() &&
                prop->mLines.front()->GetChildCount() == 0 ? prop->mFrames.IsEmpty() :
                  prop->mLines.front()->mFirstChild == prop->mFrames.FirstChild(),
@@ -4900,7 +5019,7 @@ nsBlockFrame::RemoveOverflowLines()
   if (!HasOverflowLines()) {
     return nullptr;
   }
-  FrameLines* prop = Properties().Remove(OverflowLinesProperty());
+  FrameLines* prop = RemoveProperty(OverflowLinesProperty());
   NS_ASSERTION(prop && !prop->mLines.empty() &&
                prop->mLines.front()->GetChildCount() == 0 ? prop->mFrames.IsEmpty() :
                  prop->mLines.front()->mFirstChild == prop->mFrames.FirstChild(),
@@ -4913,7 +5032,7 @@ void
 nsBlockFrame::DestroyOverflowLines()
 {
   NS_ASSERTION(HasOverflowLines(), "huh?");
-  FrameLines* prop = Properties().Remove(OverflowLinesProperty());
+  FrameLines* prop = RemoveProperty(OverflowLinesProperty());
   NS_ASSERTION(prop && prop->mLines.empty(),
                "value should always be stored but empty when destroying");
   RemoveStateBits(NS_BLOCK_HAS_OVERFLOW_LINES);
@@ -4933,10 +5052,9 @@ nsBlockFrame::SetOverflowLines(FrameLines* aOverflowLines)
   NS_ASSERTION(!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_LINES),
                "Overwriting existing overflow lines");
 
-  FrameProperties props = Properties();
   // Verify that we won't overwrite an existing overflow list
-  NS_ASSERTION(!props.Get(OverflowLinesProperty()), "existing overflow list");
-  props.Set(OverflowLinesProperty(), aOverflowLines);
+  NS_ASSERTION(!GetProperty(OverflowLinesProperty()), "existing overflow list");
+  SetProperty(OverflowLinesProperty(), aOverflowLines);
   AddStateBits(NS_BLOCK_HAS_OVERFLOW_LINES);
 }
 
@@ -4957,8 +5075,8 @@ void
 nsBlockFrame::SetOverflowOutOfFlows(const nsFrameList& aList,
                                     nsFrameList* aPropValue)
 {
-  NS_PRECONDITION(!!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) ==
-                  !!aPropValue, "state does not match value");
+  MOZ_ASSERT(!!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) ==
+             !!aPropValue, "state does not match value");
 
   if (aList.IsEmpty()) {
     if (!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS)) {
@@ -4967,7 +5085,7 @@ nsBlockFrame::SetOverflowOutOfFlows(const nsFrameList& aList,
     nsFrameList* list = RemovePropTableFrames(OverflowOutOfFlowsProperty());
     NS_ASSERTION(aPropValue == list, "prop value mismatch");
     list->Clear();
-    list->Delete(PresContext()->PresShell());
+    list->Delete(PresShell());
     RemoveStateBits(NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS);
   }
   else if (GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) {
@@ -4976,7 +5094,7 @@ nsBlockFrame::SetOverflowOutOfFlows(const nsFrameList& aList,
     *aPropValue = aList;
   }
   else {
-    SetPropTableFrames(new (PresContext()->PresShell()) nsFrameList(aList),
+    SetPropTableFrames(new (PresShell()) nsFrameList(aList),
                        OverflowOutOfFlowsProperty());
     AddStateBits(NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS);
   }
@@ -4989,9 +5107,8 @@ nsBlockFrame::GetInsideBullet() const
     return nullptr;
   }
   NS_ASSERTION(!HasOutsideBullet(), "invalid bullet state");
-  nsBulletFrame* frame = Properties().Get(InsideBulletProperty());
-  NS_ASSERTION(frame && frame->GetType() == nsGkAtoms::bulletFrame,
-               "bogus inside bullet frame");
+  nsBulletFrame* frame = GetProperty(InsideBulletProperty());
+  NS_ASSERTION(frame && frame->IsBulletFrame(), "bogus inside bullet frame");
   return frame;
 }
 
@@ -5010,10 +5127,9 @@ nsBlockFrame::GetOutsideBulletList() const
     return nullptr;
   }
   NS_ASSERTION(!HasInsideBullet(), "invalid bullet state");
-  nsFrameList* list =
-    static_cast<nsFrameList*>(Properties().Get(OutsideBulletProperty()));
+  nsFrameList* list = GetProperty(OutsideBulletProperty());
   NS_ASSERTION(list && list->GetLength() == 1 &&
-               list->FirstChild()->GetType() == nsGkAtoms::bulletFrame,
+               list->FirstChild()->IsBulletFrame(),
                "bogus outside bullet list");
   return list;
 }
@@ -5024,8 +5140,7 @@ nsBlockFrame::GetPushedFloats() const
   if (!HasPushedFloats()) {
     return nullptr;
   }
-  nsFrameList* result =
-    static_cast<nsFrameList*>(Properties().Get(PushedFloatProperty()));
+  nsFrameList* result = GetProperty(PushedFloatProperty());
   NS_ASSERTION(result, "value should always be non-empty when state set");
   return result;
 }
@@ -5037,8 +5152,8 @@ nsBlockFrame::EnsurePushedFloats()
   if (result)
     return result;
 
-  result = new (PresContext()->PresShell()) nsFrameList;
-  Properties().Set(PushedFloatProperty(), result);
+  result = new (PresShell()) nsFrameList;
+  SetProperty(PushedFloatProperty(), result);
   AddStateBits(NS_BLOCK_HAS_PUSHED_FLOATS);
 
   return result;
@@ -5050,8 +5165,7 @@ nsBlockFrame::RemovePushedFloats()
   if (!HasPushedFloats()) {
     return nullptr;
   }
-  nsFrameList *result =
-    static_cast<nsFrameList*>(Properties().Remove(PushedFloatProperty()));
+  nsFrameList *result = RemoveProperty(PushedFloatProperty());
   RemoveStateBits(NS_BLOCK_HAS_PUSHED_FLOATS);
   NS_ASSERTION(result, "value should always be non-empty when state set");
   return result;
@@ -5092,9 +5206,17 @@ nsBlockFrame::AppendFrames(ChildListID  aListID,
   printf("\n");
 #endif
 
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
+    MOZ_ASSERT(GetParent()->IsSVGTextFrame(),
+               "unexpected block frame in SVG text");
+    // Workaround for bug 1399425 in case this bit has been removed from the
+    // SVGTextFrame just before the parser adds more descendant nodes.
+    GetParent()->AddStateBits(NS_STATE_SVG_TEXT_CORRESPONDENCE_DIRTY);
+  }
+
   AddFrames(aFrameList, lastKid);
   if (aListID != kNoReflowPrincipalList) {
-    PresContext()->PresShell()->
+    PresShell()->
       FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                        NS_FRAME_HAS_DIRTY_CHILDREN); // XXX sufficient?
   }
@@ -5130,7 +5252,7 @@ nsBlockFrame::InsertFrames(ChildListID aListID,
 
   AddFrames(aFrameList, aPrevFrame);
   if (aListID != kNoReflowPrincipalList) {
-    PresContext()->PresShell()->
+    PresShell()->
       FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                        NS_FRAME_HAS_DIRTY_CHILDREN); // XXX sufficient?
   }
@@ -5176,7 +5298,7 @@ nsBlockFrame::RemoveFrame(ChildListID aListID,
     MOZ_CRASH("unexpected child list");
   }
 
-  PresContext()->PresShell()->
+  PresShell()->
     FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                      NS_FRAME_HAS_DIRTY_CHILDREN); // XXX sufficient?
 }
@@ -5184,12 +5306,12 @@ nsBlockFrame::RemoveFrame(ChildListID aListID,
 static bool
 ShouldPutNextSiblingOnNewLine(nsIFrame* aLastFrame)
 {
-  nsIAtom* type = aLastFrame->GetType();
-  if (type == nsGkAtoms::brFrame) {
+  LayoutFrameType type = aLastFrame->Type();
+  if (type == LayoutFrameType::Br) {
     return true;
   }
   // XXX the TEXT_OFFSETS_NEED_FIXING check is a wallpaper for bug 822910.
-  if (type == nsGkAtoms::textFrame &&
+  if (type == LayoutFrameType::Text &&
       !(aLastFrame->GetStateBits() & TEXT_OFFSETS_NEED_FIXING)) {
     return aLastFrame->HasSignificantTerminalNewline();
   }
@@ -5211,7 +5333,7 @@ nsBlockFrame::AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling)
   if (!aPrevSibling && HasInsideBullet()) {
     aPrevSibling = GetInsideBullet();
   }
-  
+
   // Attempt to find the line that contains the previous sibling
   nsLineList* lineList = &mLines;
   nsFrameList* frames = &mFrames;
@@ -5284,7 +5406,7 @@ nsBlockFrame::AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling)
     nsIFrame* newFrame = e.get();
     NS_ASSERTION(!aPrevSibling || aPrevSibling->GetNextSibling() == newFrame,
                  "Unexpected aPrevSibling");
-    NS_ASSERTION(newFrame->GetType() != nsGkAtoms::placeholderFrame ||
+    NS_ASSERTION(!newFrame->IsPlaceholderFrame() ||
                  (!newFrame->IsAbsolutelyPositioned() &&
                   !newFrame->IsFloating()),
                  "Placeholders should not float or be positioned");
@@ -5334,7 +5456,7 @@ nsBlockFrame::RemoveFloatFromFloatCache(nsIFrame* aFloat)
 {
   // Find which line contains the float, so we can update
   // the float cache.
-  line_iterator line = begin_lines(), line_end = end_lines();
+  LineIterator line = LinesBegin(), line_end = LinesEnd();
   for ( ; line != line_end; ++line) {
     if (line->IsInline() && line->RemoveFloat(aFloat)) {
       break;
@@ -5364,7 +5486,7 @@ nsBlockFrame::RemoveFloat(nsIFrame* aFloat)
   nsFrameList* list = GetPushedFloats();
   if (list && list->ContinueRemoveFrame(aFloat)) {
 #if 0
-    // XXXmats not yet - need to investigate nsBlockReflowState::mPushedFloats
+    // XXXmats not yet - need to investigate BlockReflowInput::mPushedFloats
     // first so we don't leave it pointing to a deleted list.
     if (list->IsEmpty()) {
       delete RemovePushedFloats();
@@ -5433,15 +5555,15 @@ nsBlockFrame::TryAllLines(nsLineList::iterator* aIterator,
 }
 
 nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
-    line_iterator aLine)
+    LineIterator aLine)
   : mFrame(aFrame), mLine(aLine), mLineList(&aFrame->mLines)
 {
   // This will assert if aLine isn't in mLines of aFrame:
-  DebugOnly<bool> check = aLine == mFrame->begin_lines();
+  DebugOnly<bool> check = aLine == mFrame->LinesBegin();
 }
 
 nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
-    line_iterator aLine, bool aInOverflow)
+    LineIterator aLine, bool aInOverflow)
   : mFrame(aFrame), mLine(aLine),
     mLineList(aInOverflow ? &aFrame->GetOverflowLines()->mLines
                           : &aFrame->mLines)
@@ -5452,8 +5574,52 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
     bool* aFoundValidLine)
   : mFrame(aFrame), mLineList(&aFrame->mLines)
 {
-  mLine = aFrame->begin_lines();
+  mLine = aFrame->LinesBegin();
   *aFoundValidLine = FindValidLine();
+}
+
+void
+nsBlockFrame::UpdateFirstLetterStyle(ServoRestyleState& aRestyleState)
+{
+  nsIFrame* letterFrame = GetFirstLetter();
+  if (!letterFrame) {
+    return;
+  }
+
+  // Figure out what the right style parent is.  This needs to match
+  // nsCSSFrameConstructor::CreateLetterFrame.
+  nsIFrame* inFlowFrame = letterFrame;
+  if (inFlowFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
+    inFlowFrame = inFlowFrame->GetPlaceholderFrame();
+  }
+  nsIFrame* styleParent =
+    CorrectStyleParentFrame(inFlowFrame->GetParent(),
+                            nsCSSPseudoElements::firstLetter);
+  ComputedStyle* parentStyle = styleParent->Style();
+  RefPtr<ComputedStyle> firstLetterStyle =
+    aRestyleState.StyleSet()
+                 .ResolvePseudoElementStyle(mContent->AsElement(),
+                                            CSSPseudoElementType::firstLetter,
+                                            parentStyle,
+                                            nullptr);
+  // Note that we don't need to worry about changehints for the continuation
+  // styles: those will be handled by the styleParent already.
+  RefPtr<ComputedStyle> continuationStyle =
+    aRestyleState.StyleSet().ResolveStyleForFirstLetterContinuation(parentStyle);
+  UpdateStyleOfOwnedChildFrame(letterFrame, firstLetterStyle, aRestyleState,
+                               Some(continuationStyle.get()));
+
+  // We also want to update the style on the textframe inside the first-letter.
+  // We don't need to compute a changehint for this, though, since any changes
+  // to it are handled by the first-letter anyway.
+  nsIFrame* textFrame = letterFrame->PrincipalChildList().FirstChild();
+  RefPtr<ComputedStyle> firstTextStyle =
+    aRestyleState.StyleSet().ResolveStyleForText(textFrame->GetContent(),
+                                                 firstLetterStyle);
+  textFrame->SetComputedStyle(firstTextStyle);
+
+  // We don't need to update style for textFrame's continuations: it's already
+  // set up to inherit from parentStyle, which is what we want.
 }
 
 static nsIFrame*
@@ -5473,7 +5639,7 @@ FindChildContaining(nsBlockFrame* aFrame, nsIFrame* aFindFrame)
       return nullptr;
     if (!(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW))
       break;
-    aFindFrame = aFrame->PresContext()->FrameManager()->GetPlaceholderFrameFor(child);
+    aFindFrame = child->GetPlaceholderFrame();
   }
 
   return child;
@@ -5489,22 +5655,23 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
   if (!child)
     return;
 
-  // Try to use the cursor if it exists, otherwise fall back to the first line
-  nsLineBox* cursor = aFrame->GetLineCursor();
-  if (!cursor) {
-    line_iterator iter = aFrame->begin_lines();
-    if (iter != aFrame->end_lines()) {
-      cursor = iter;
-    }
+  LineIterator line_end = aFrame->LinesEnd();
+  mLine = aFrame->LinesBegin();
+  if (mLine != line_end && mLine.next() == line_end &&
+      !aFrame->HasOverflowLines()) {
+    // The block has a single line - that must be it!
+    *aFoundValidLine = true;
+    return;
   }
 
-  if (cursor) {
+  // Try to use the cursor if it exists, otherwise fall back to the first line
+  if (nsLineBox* const cursor = aFrame->GetLineCursor()) {
+    mLine = line_end;
     // Perform a simultaneous forward and reverse search starting from the
     // line cursor.
-    nsBlockFrame::line_iterator line = aFrame->line(cursor);
-    nsBlockFrame::reverse_line_iterator rline = aFrame->rline(cursor);
-    nsBlockFrame::line_iterator line_end = aFrame->end_lines();
-    nsBlockFrame::reverse_line_iterator rline_end = aFrame->rend_lines();
+    nsBlockFrame::LineIterator line = aFrame->LinesBeginFrom(cursor);
+    nsBlockFrame::ReverseLineIterator rline = aFrame->LinesRBeginFrom(cursor);
+    nsBlockFrame::ReverseLineIterator rline_end = aFrame->LinesREnd();
     // rline is positioned on the line containing 'cursor', so it's not
     // rline_end. So we can safely increment it (i.e. move it to one line
     // earlier) to start searching there.
@@ -5512,31 +5679,42 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
     while (line != line_end || rline != rline_end) {
       if (line != line_end) {
         if (line->Contains(child)) {
-          *aFoundValidLine = true;
           mLine = line;
-          return;
+          break;
         }
         ++line;
       }
       if (rline != rline_end) {
         if (rline->Contains(child)) {
-          *aFoundValidLine = true;
           mLine = rline;
-          return;
+          break;
         }
         ++rline;
       }
     }
-    // Didn't find the line
+    if (mLine != line_end) {
+      *aFoundValidLine = true;
+      if (mLine != cursor) {
+        aFrame->SetProperty(nsBlockFrame::LineCursorProperty(), mLine);
+      }
+      return;
+    }
+  } else {
+    for (mLine = aFrame->LinesBegin(); mLine != line_end; ++mLine) {
+      if (mLine->Contains(child)) {
+        *aFoundValidLine = true;
+        return;
+      }
+    }
   }
+  // Didn't find the line
+  MOZ_ASSERT(mLine == line_end, "mLine should be line_end at this point");
 
   // If we reach here, it means that we have not been able to find the
   // desired frame in our in-flow lines.  So we should start looking at
   // our overflow lines. In order to do that, we set mLine to the end
   // iterator so that FindValidLine starts to look at overflow lines,
   // if any.
-
-  mLine = aFrame->end_lines();
 
   if (!FindValidLine())
     return;
@@ -5549,7 +5727,7 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
   } while (Next());
 }
 
-nsBlockFrame::line_iterator
+nsBlockFrame::LineIterator
 nsBlockInFlowLineIterator::End()
 {
   return mLineList->end();
@@ -5558,7 +5736,7 @@ nsBlockInFlowLineIterator::End()
 bool
 nsBlockInFlowLineIterator::IsLastLineInList()
 {
-  line_iterator end = End();
+  LineIterator end = End();
   return mLine != end && mLine.next() == end;
 }
 
@@ -5572,7 +5750,7 @@ nsBlockInFlowLineIterator::Next()
 bool
 nsBlockInFlowLineIterator::Prev()
 {
-  line_iterator begin = mLineList->begin();
+  LineIterator begin = mLineList->begin();
   if (mLine != begin) {
     --mLine;
     return true;
@@ -5606,7 +5784,7 @@ nsBlockInFlowLineIterator::Prev()
 bool
 nsBlockInFlowLineIterator::FindValidLine()
 {
-  line_iterator end = mLineList->end();
+  LineIterator end = mLineList->end();
   if (mLine != end)
     return true;
   bool currentlyInOverflowLines = GetInOverflow();
@@ -5632,19 +5810,6 @@ nsBlockInFlowLineIterator::FindValidLine()
   }
 }
 
-static void RemoveBlockChild(nsIFrame* aFrame,
-                             bool      aRemoveOnlyFluidContinuations)
-{
-  if (!aFrame) {
-    return;
-  }
-  nsBlockFrame* nextBlock = nsLayoutUtils::GetAsBlock(aFrame->GetParent());
-  NS_ASSERTION(nextBlock,
-               "Our child's continuation's parent is not a block?");
-  nextBlock->DoRemoveFrame(aFrame,
-      (aRemoveOnlyFluidContinuations ? 0 : nsBlockFrame::REMOVE_FIXED_CONTINUATIONS));
-}
-
 // This function removes aDeletedFrame and all its continuations.  It
 // is optimized for deleting a whole series of frames. The easy
 // implementation would invoke itself recursively on
@@ -5653,7 +5818,8 @@ static void RemoveBlockChild(nsIFrame* aFrame,
 // start by locating aDeletedFrame and then scanning from that point
 // on looking for continuations.
 void
-nsBlockFrame::DoRemoveFrame(nsIFrame* aDeletedFrame, uint32_t aFlags)
+nsBlockFrame::DoRemoveFrameInternal(nsIFrame* aDeletedFrame, uint32_t aFlags,
+                                    PostDestroyData& aPostDestroyData)
 {
   // Clear our line cursor, since our lines may change.
   ClearLineCursor();
@@ -5695,7 +5861,7 @@ nsBlockFrame::DoRemoveFrame(nsIFrame* aDeletedFrame, uint32_t aFlags)
     NS_ERROR("can't find deleted frame in lines");
     return;
   }
-  
+
   if (!(aFlags & FRAMES_ARE_EMPTY)) {
     if (line != line_start) {
       line.prev()->MarkDirty();
@@ -5720,10 +5886,10 @@ nsBlockFrame::DoRemoveFrame(nsIFrame* aDeletedFrame, uint32_t aFlags)
     // optimize away the line->Contains(next-in-flow) call below.
     bool isLastFrameOnLine = 1 == line->GetChildCount();
     if (!isLastFrameOnLine) {
-      line_iterator next = line.next();
+      LineIterator next = line.next();
       nsIFrame* lastFrame = next != line_end ?
         next->mFirstChild->GetPrevSibling() :
-        (searchingOverflowList ? overflowLines->mFrames.LastChild() : 
+        (searchingOverflowList ? overflowLines->mFrames.LastChild() :
                                  mFrames.LastChild());
       NS_ASSERTION(next == line_end || lastFrame == line->LastChild(),
                    "unexpected line frames");
@@ -5780,7 +5946,7 @@ nsBlockFrame::DoRemoveFrame(nsIFrame* aDeletedFrame, uint32_t aFlags)
       deletedNextContinuation = nullptr;
     }
 
-    aDeletedFrame->Destroy();
+    aDeletedFrame->DestroyFrom(aDeletedFrame, aPostDestroyData);
     aDeletedFrame = deletedNextContinuation;
 
     bool haveAdvancedToNextLine = false;
@@ -5881,8 +6047,15 @@ nsBlockFrame::DoRemoveFrame(nsIFrame* aDeletedFrame, uint32_t aFlags)
   VerifyOverflowSituation();
 #endif
 
-  // Advance to next flow block if the frame has more continuations
-  RemoveBlockChild(aDeletedFrame, !(aFlags & REMOVE_FIXED_CONTINUATIONS));
+  // Advance to next flow block if the frame has more continuations.
+  if (!aDeletedFrame) {
+    return;
+  }
+  nsBlockFrame* nextBlock = nsLayoutUtils::GetAsBlock(aDeletedFrame->GetParent());
+  NS_ASSERTION(nextBlock,
+               "Our child's continuation's parent is not a block?");
+  uint32_t flags = (aFlags & REMOVE_FIXED_CONTINUATIONS);
+  nextBlock->DoRemoveFrameInternal(aDeletedFrame, flags, aPostDestroyData);
 }
 
 static bool
@@ -5940,8 +6113,7 @@ FindLineFor(nsIFrame*             aChild,
 }
 
 nsresult
-nsBlockFrame::StealFrame(nsIFrame* aChild,
-                         bool      aForceNormal)
+nsBlockFrame::StealFrame(nsIFrame* aChild)
 {
   MOZ_ASSERT(aChild->GetParent() == this);
 
@@ -5951,9 +6123,8 @@ nsBlockFrame::StealFrame(nsIFrame* aChild,
     return NS_OK;
   }
 
-  if ((aChild->GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER)
-      && !aForceNormal) {
-    return nsContainerFrame::StealFrame(aChild);
+  if (MaybeStealOverflowContainerFrame(aChild)) {
+    return NS_OK;
   }
 
   MOZ_ASSERT(!(aChild->GetStateBits() & NS_FRAME_OUT_OF_FLOW));
@@ -6004,7 +6175,7 @@ void
 nsBlockFrame::DeleteNextInFlowChild(nsIFrame* aNextInFlow,
                                     bool      aDeletingEmptyFrames)
 {
-  NS_PRECONDITION(aNextInFlow->GetPrevInFlow(), "bad next-in-flow");
+  MOZ_ASSERT(aNextInFlow->GetPrevInFlow(), "bad next-in-flow");
 
   if (aNextInFlow->GetStateBits() &
       (NS_FRAME_OUT_OF_FLOW | NS_FRAME_IS_OVERFLOW_CONTAINER)) {
@@ -6032,7 +6203,7 @@ nsBlockFrame::StyleTextForLineLayout()
 // Float support
 
 LogicalRect
-nsBlockFrame::AdjustFloatAvailableSpace(nsBlockReflowState& aState,
+nsBlockFrame::AdjustFloatAvailableSpace(BlockReflowInput& aState,
                                         const LogicalRect& aFloatAvailableSpace,
                                         nsIFrame* aFloatFrame)
 {
@@ -6040,14 +6211,14 @@ nsBlockFrame::AdjustFloatAvailableSpace(nsBlockReflowState& aState,
   // size of the containing block.
   nscoord availISize;
   const nsStyleDisplay* floatDisplay = aFloatFrame->StyleDisplay();
-  WritingMode wm = aState.mReflowState.GetWritingMode();
+  WritingMode wm = aState.mReflowInput.GetWritingMode();
 
-  if (NS_STYLE_DISPLAY_TABLE != floatDisplay->mDisplay ||
+  if (mozilla::StyleDisplay::Table != floatDisplay->mDisplay ||
       eCompatibility_NavQuirks != aState.mPresContext->CompatibilityMode() ) {
     availISize = aState.ContentISize();
   }
   else {
-    // This quirk matches the one in nsBlockReflowState::FlowAndPlaceFloat
+    // This quirk matches the one in BlockReflowInput::FlowAndPlaceFloat
     // give tables only the available space
     // if they can shrink we may not be constrained to place
     // them in the next line
@@ -6059,8 +6230,8 @@ nsBlockFrame::AdjustFloatAvailableSpace(nsBlockReflowState& aState,
                        : std::max(0, aState.ContentBEnd() - aState.mBCoord);
 
   if (availBSize != NS_UNCONSTRAINEDSIZE &&
-      !aState.GetFlag(BRS_FLOAT_FRAGMENTS_INSIDE_COLUMN_ENABLED) &&
-      nsLayoutUtils::GetClosestFrameOfType(this, nsGkAtoms::columnSetFrame)) {
+      !aState.mFlags.mFloatFragmentsInsideColumnEnabled &&
+      nsLayoutUtils::GetClosestFrameOfType(this, LayoutFrameType::ColumnSet)) {
     // Tell the float it has unrestricted block-size, so it won't break.
     // If the float doesn't actually fit in the column it will fail to be
     // placed, and either move to the block-start of the next column or just
@@ -6073,28 +6244,29 @@ nsBlockFrame::AdjustFloatAvailableSpace(nsBlockReflowState& aState,
 }
 
 nscoord
-nsBlockFrame::ComputeFloatISize(nsBlockReflowState& aState,
+nsBlockFrame::ComputeFloatISize(BlockReflowInput& aState,
                                 const LogicalRect&  aFloatAvailableSpace,
                                 nsIFrame*           aFloat)
 {
-  NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
-                  "aFloat must be an out-of-flow frame");
+  MOZ_ASSERT(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
+             "aFloat must be an out-of-flow frame");
+
   // Reflow the float.
   LogicalRect availSpace = AdjustFloatAvailableSpace(aState,
                                                      aFloatAvailableSpace,
                                                      aFloat);
 
-  WritingMode blockWM = aState.mReflowState.GetWritingMode();
+  WritingMode blockWM = aState.mReflowInput.GetWritingMode();
   WritingMode floatWM = aFloat->GetWritingMode();
-  nsHTMLReflowState
-    floatRS(aState.mPresContext, aState.mReflowState, aFloat,
+  ReflowInput
+    floatRS(aState.mPresContext, aState.mReflowInput, aFloat,
             availSpace.Size(blockWM).ConvertTo(floatWM, blockWM));
 
   return floatRS.ComputedSizeWithMarginBorderPadding(blockWM).ISize(blockWM);
 }
 
 void
-nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
+nsBlockFrame::ReflowFloat(BlockReflowInput& aState,
                           const LogicalRect&  aAdjustedAvailableSpace,
                           nsIFrame*           aFloat,
                           LogicalMargin&      aFloatMargin,
@@ -6102,22 +6274,23 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
                           bool                aFloatPushedDown,
                           nsReflowStatus&     aReflowStatus)
 {
-  NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
-                  "aFloat must be an out-of-flow frame");
-  // Reflow the float.
-  aReflowStatus = NS_FRAME_COMPLETE;
+  MOZ_ASSERT(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
+             "aFloat must be an out-of-flow frame");
 
-  WritingMode wm = aState.mReflowState.GetWritingMode();
+  // Reflow the float.
+  aReflowStatus.Reset();
+
+  WritingMode wm = aState.mReflowInput.GetWritingMode();
 #ifdef NOISY_FLOAT
   printf("Reflow Float %p in parent %p, availSpace(%d,%d,%d,%d)\n",
          aFloat, this,
-         aFloatAvailableSpace.IStart(wm), aFloatAvailableSpace.BStart(wm),
-         aFloatAvailableSpace.ISize(wm), aFloatAvailableSpace.BSize(wm)
+         aAdjustedAvailableSpace.IStart(wm), aAdjustedAvailableSpace.BStart(wm),
+         aAdjustedAvailableSpace.ISize(wm), aAdjustedAvailableSpace.BSize(wm)
   );
 #endif
 
-  nsHTMLReflowState
-    floatRS(aState.mPresContext, aState.mReflowState, aFloat,
+  ReflowInput
+    floatRS(aState.mPresContext, aState.mReflowInput, aFloat,
             aAdjustedAvailableSpace.Size(wm).ConvertTo(aFloat->GetWritingMode(),
                                                        wm));
 
@@ -6136,7 +6309,7 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
   }
 
   // Setup a block reflow context to reflow the float.
-  nsBlockReflowContext brc(aState.mPresContext, aState.mReflowState);
+  nsBlockReflowContext brc(aState.mPresContext, aState.mReflowInput);
 
   // Reflow the float
   bool isAdjacentWithTop = aState.IsAdjacentWithTop();
@@ -6165,26 +6338,26 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
                     aReflowStatus, aState);
   } while (clearanceFrame);
 
-  if (!NS_FRAME_IS_FULLY_COMPLETE(aReflowStatus) &&
+  if (!aReflowStatus.IsFullyComplete() &&
       ShouldAvoidBreakInside(floatRS)) {
-    aReflowStatus = NS_INLINE_LINE_BREAK_BEFORE();
-  } else if (NS_FRAME_IS_NOT_COMPLETE(aReflowStatus) &&
+    aReflowStatus.SetInlineLineBreakBeforeAndReset();
+  } else if (aReflowStatus.IsIncomplete() &&
              (NS_UNCONSTRAINEDSIZE == aAdjustedAvailableSpace.BSize(wm))) {
     // An incomplete reflow status means we should split the float
     // if the height is constrained (bug 145305).
-    aReflowStatus = NS_FRAME_COMPLETE;
+    aReflowStatus.Reset();
   }
 
-  if (aReflowStatus & NS_FRAME_REFLOW_NEXTINFLOW) {
-    aState.mReflowStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+  if (aReflowStatus.NextInFlowNeedsReflow()) {
+    aState.mReflowStatus.SetNextInFlowNeedsReflow();
   }
 
-  if (aFloat->GetType() == nsGkAtoms::letterFrame) {
+  if (aFloat->IsLetterFrame()) {
     // We never split floating first letters; an incomplete state for
     // such frames simply means that there is more content to be
     // reflowed on the line.
-    if (NS_FRAME_IS_NOT_COMPLETE(aReflowStatus)) 
-      aReflowStatus = NS_FRAME_COMPLETE;
+    if (aReflowStatus.IsIncomplete())
+      aReflowStatus.Reset();
   }
 
   // Capture the margin and offsets information for the caller
@@ -6194,12 +6367,12 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
   aFloatOffsets =
     floatRS.ComputedLogicalOffsets().ConvertTo(wm, floatRS.GetWritingMode());
 
-  const nsHTMLReflowMetrics& metrics = brc.GetMetrics();
+  const ReflowOutput& metrics = brc.GetMetrics();
 
   // Set the rect, make sure the view is properly sized and positioned,
   // and tell the frame we're done reflowing it
   // XXXldb This seems like the wrong place to be doing this -- shouldn't
-  // we be doing this in nsBlockReflowState::FlowAndPlaceFloat after
+  // we be doing this in BlockReflowInput::FlowAndPlaceFloat after
   // we've positioned the float, and shouldn't we be doing the equivalent
   // of |PlaceFrameView| here?
   WritingMode metricsWM = metrics.GetWritingMode();
@@ -6210,9 +6383,8 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
                                                metrics.VisualOverflow(),
                                                NS_FRAME_NO_MOVE_VIEW);
   }
-  // Pass floatRS so the frame hierarchy can be used (redoFloatRS has the same hierarchy)  
-  aFloat->DidReflow(aState.mPresContext, &floatRS,
-                    nsDidReflowStatus::FINISHED);
+  // Pass floatRS so the frame hierarchy can be used (redoFloatRS has the same hierarchy)
+  aFloat->DidReflow(aState.mPresContext, &floatRS);
 
 #ifdef NOISY_FLOAT
   printf("end ReflowFloat %p, sized to %d,%d\n",
@@ -6220,23 +6392,23 @@ nsBlockFrame::ReflowFloat(nsBlockReflowState& aState,
 #endif
 }
 
-uint8_t
+StyleClear
 nsBlockFrame::FindTrailingClear()
 {
   // find the break type of the last line
   for (nsIFrame* b = this; b; b = b->GetPrevInFlow()) {
     nsBlockFrame* block = static_cast<nsBlockFrame*>(b);
-    line_iterator endLine = block->end_lines();
-    if (endLine != block->begin_lines()) {
+    LineIterator endLine = block->LinesEnd();
+    if (endLine != block->LinesBegin()) {
       --endLine;
       return endLine->GetBreakTypeAfter();
     }
   }
-  return NS_STYLE_CLEAR_NONE;
+  return StyleClear::None;
 }
 
 void
-nsBlockFrame::ReflowPushedFloats(nsBlockReflowState& aState,
+nsBlockFrame::ReflowPushedFloats(BlockReflowInput& aState,
                                  nsOverflowAreas&    aOverflowAreas,
                                  nsReflowStatus&     aStatus)
 {
@@ -6301,7 +6473,7 @@ nsBlockFrame::ReflowPushedFloats(nsBlockReflowState& aState,
   }
 
   // If there are continued floats, then we may need to continue BR clearance
-  if (0 != aState.ClearFloats(0, NS_STYLE_CLEAR_BOTH)) {
+  if (0 != aState.ClearFloats(0, StyleClear::Both)) {
     nsBlockFrame* prevBlock = static_cast<nsBlockFrame*>(GetPrevInFlow());
     if (prevBlock) {
       aState.mFloatBreakType = prevBlock->FindTrailingClear();
@@ -6330,7 +6502,7 @@ nsBlockFrame::RecoverFloats(nsFloatManager& aFloatManager, WritingMode aWM,
   }
 
   // Recurse into our normal children
-  for (nsBlockFrame::line_iterator line = begin_lines(); line != end_lines(); ++line) {
+  for (nsBlockFrame::LineIterator line = LinesBegin(); line != LinesEnd(); ++line) {
     if (line->IsBlock()) {
       RecoverFloatsFor(line->mFirstChild, aFloatManager, aWM, aContainerSize);
     }
@@ -6343,10 +6515,11 @@ nsBlockFrame::RecoverFloatsFor(nsIFrame*       aFrame,
                                WritingMode     aWM,
                                const nsSize&   aContainerSize)
 {
-  NS_PRECONDITION(aFrame, "null frame");
+  MOZ_ASSERT(aFrame, "null frame");
+
   // Only blocks have floats
   nsBlockFrame* block = nsLayoutUtils::GetAsBlock(aFrame);
-  // Don't recover any state inside a block that has its own space manager
+  // Don't recover any state inside a block that has its own float manager
   // (we don't currently have any blocks like this, though, thanks to our
   // use of extra frames for 'overflow')
   if (block && !nsBlockFrame::BlockNeedsFloatManager(block)) {
@@ -6404,15 +6577,14 @@ static void ComputeVisualOverflowArea(nsLineList& aLines,
 #endif
 
 bool
-nsBlockFrame::IsVisibleInSelection(nsISelection* aSelection)
+nsBlockFrame::IsVisibleInSelection(Selection* aSelection)
 {
   if (mContent->IsAnyOfHTMLElements(nsGkAtoms::html, nsGkAtoms::body))
     return true;
 
-  nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mContent));
-  bool visible;
-  nsresult rv = aSelection->ContainsNode(node, true, &visible);
-  return NS_SUCCEEDED(rv) && visible;
+  IgnoredErrorResult rv;
+  bool visible = aSelection->ContainsNode(*mContent, true, rv);
+  return !rv.Failed() && visible;
 }
 
 #ifdef DEBUG
@@ -6433,13 +6605,15 @@ static void DebugOutputDrawLine(int32_t aDepth, nsLineBox* aLine, bool aDrawn) {
 
 static void
 DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
-            const nsRect& aDirtyRect, nsBlockFrame::line_iterator& aLine,
+            nsBlockFrame::LineIterator& aLine,
             int32_t aDepth, int32_t& aDrawnLines, const nsDisplayListSet& aLists,
-            nsBlockFrame* aFrame, TextOverflow* aTextOverflow) {
+            nsBlockFrame* aFrame, TextOverflow* aTextOverflow,
+            uint32_t aLineNumberForTextOverflow) {
   // If the line's combined area (which includes child frames that
   // stick outside of the line's bounding box or our bounding box)
   // intersects the dirty rect then paint the line.
-  bool intersect = aLineArea.Intersects(aDirtyRect);
+  bool intersect = aLineArea.Intersects(aBuilder->GetDirtyRect());
+  bool visible = aLineArea.Intersects(aBuilder->GetVisibleRect());
 #ifdef DEBUG
   if (nsBlockFrame::gLamePaintMetrics) {
     aDrawnLines++;
@@ -6455,14 +6629,14 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   // frame in the line, it's also true for aFrame.
   bool lineInline = aLine->IsInline();
   bool lineMayHaveTextOverflow = aTextOverflow && lineInline;
-  if (!intersect && !aBuilder->ShouldDescendIntoFrame(aFrame) &&
+  if (!intersect && !aBuilder->ShouldDescendIntoFrame(aFrame, visible) &&
       !lineMayHaveTextOverflow)
     return;
 
   // Collect our line's display items in a temporary nsDisplayListCollection,
   // so that we can apply any "text-overflow" clipping to the entire collection
   // without affecting previous lines.
-  nsDisplayListCollection collection;
+  nsDisplayListCollection collection(aBuilder);
 
   // Block-level child backgrounds go on the blockBorderBackgrounds list ...
   // Inline-level child backgrounds go on the regular child content list.
@@ -6474,13 +6648,12 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   nsIFrame* kid = aLine->mFirstChild;
   int32_t n = aLine->GetChildCount();
   while (--n >= 0) {
-    aFrame->BuildDisplayListForChild(aBuilder, kid, aDirtyRect,
-                                     childLists, flags);
+    aFrame->BuildDisplayListForChild(aBuilder, kid, childLists, flags);
     kid = kid->GetNextSibling();
   }
-  
+
   if (lineMayHaveTextOverflow) {
-    aTextOverflow->ProcessLine(collection, aLine.get());
+    aTextOverflow->ProcessLine(collection, aLine.get(), aLineNumberForTextOverflow);
   }
 
   collection.MoveTo(aLists);
@@ -6488,13 +6661,13 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
 
 void
 nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                               const nsRect&           aDirtyRect,
                                const nsDisplayListSet& aLists)
 {
   int32_t drawnLines; // Will only be used if set (gLamePaintMetrics).
   int32_t depth = 0;
 #ifdef DEBUG
   if (gNoisyDamageRepair) {
+      nsRect dirty = aBuilder->GetDirtyRect();
       depth = GetDepth();
       nsRect ca;
       ::ComputeVisualOverflowArea(mLines, mRect.width, mRect.height, ca);
@@ -6502,7 +6675,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       ListTag(stdout);
       printf(": bounds=%d,%d,%d,%d dirty(absolute)=%d,%d,%d,%d ca=%d,%d,%d,%d\n",
              mRect.x, mRect.y, mRect.width, mRect.height,
-             aDirtyRect.x, aDirtyRect.y, aDirtyRect.width, aDirtyRect.height,
+             dirty.x, dirty.y, dirty.width, dirty.height,
              ca.x, ca.y, ca.width, ca.height);
   }
   PRTime start = 0; // Initialize these variables to silence the compiler.
@@ -6515,21 +6688,21 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   if (GetPrevInFlow()) {
-    DisplayOverflowContainers(aBuilder, aDirtyRect, aLists);
+    DisplayOverflowContainers(aBuilder, aLists);
     for (nsIFrame* f : mFloats) {
       if (f->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT)
-         BuildDisplayListForChild(aBuilder, f, aDirtyRect, aLists);
+         BuildDisplayListForChild(aBuilder, f, aLists);
     }
   }
 
-  aBuilder->MarkFramesForDisplayList(this, mFloats, aDirtyRect);
+  aBuilder->MarkFramesForDisplayList(this, mFloats);
 
   // Prepare for text-overflow processing.
-  nsAutoPtr<TextOverflow> textOverflow(
-    TextOverflow::WillProcessLines(aBuilder, this));
+  UniquePtr<TextOverflow> textOverflow =
+    TextOverflow::WillProcessLines(aBuilder, this);
 
   // We'll collect our lines' display items here, & then append this to aLists.
-  nsDisplayListCollection linesDisplayListCollection;
+  nsDisplayListCollection linesDisplayListCollection(aBuilder);
 
   // Don't use the line cursor if we might have a descendant placeholder ...
   // it might skip lines that contain placeholders but don't themselves
@@ -6538,36 +6711,40 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // on all our child frames, but that might be expensive.  So we
   // approximate it by checking it on |this|; if it's true for any
   // frame in our child list, it's also true for |this|.
-  nsLineBox* cursor = aBuilder->ShouldDescendIntoFrame(this) ?
-    nullptr : GetFirstLineContaining(aDirtyRect.y);
-  line_iterator line_end = end_lines();
-  
+  // Also skip the cursor if we're creating text overflow markers,
+  // since we need to know what line number we're up to in order
+  // to generate unique display item keys.
+  nsLineBox* cursor = (aBuilder->ShouldDescendIntoFrame(this, true) || textOverflow) ?
+    nullptr : GetFirstLineContaining(aBuilder->GetDirtyRect().y);
+  LineIterator line_end = LinesEnd();
+
   if (cursor) {
-    for (line_iterator line = mLines.begin(cursor);
+    for (LineIterator line = mLines.begin(cursor);
          line != line_end;
          ++line) {
       nsRect lineArea = line->GetVisualOverflowArea();
       if (!lineArea.IsEmpty()) {
         // Because we have a cursor, the combinedArea.ys are non-decreasing.
         // Once we've passed aDirtyRect.YMost(), we can never see it again.
-        if (lineArea.y >= aDirtyRect.YMost()) {
+        if (lineArea.y >= aBuilder->GetDirtyRect().YMost()) {
           break;
         }
-        DisplayLine(aBuilder, lineArea, aDirtyRect, line, depth, drawnLines,
-                    linesDisplayListCollection, this, textOverflow);
+        MOZ_ASSERT(!textOverflow);
+        DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
+                    linesDisplayListCollection, this, nullptr, 0);
       }
     }
   } else {
     bool nonDecreasingYs = true;
-    int32_t lineCount = 0;
+    uint32_t lineCount = 0;
     nscoord lastY = INT32_MIN;
     nscoord lastYMost = INT32_MIN;
-    for (line_iterator line = begin_lines();
+    for (LineIterator line = LinesBegin();
          line != line_end;
          ++line) {
       nsRect lineArea = line->GetVisualOverflowArea();
-      DisplayLine(aBuilder, lineArea, aDirtyRect, line, depth, drawnLines,
-                  linesDisplayListCollection, this, textOverflow);
+      DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
+                  linesDisplayListCollection, this, textOverflow.get(), lineCount);
       if (!lineArea.IsEmpty()) {
         if (lineArea.y < lastY
             || lineArea.YMost() < lastYMost) {
@@ -6596,7 +6773,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (HasOutsideBullet()) {
     // Display outside bullets manually
     nsIFrame* bullet = GetOutsideBullet();
-    BuildDisplayListForChild(aBuilder, bullet, aDirtyRect, aLists);
+    BuildDisplayListForChild(aBuilder, bullet, aLists);
   }
 
 #ifdef DEBUG
@@ -6612,10 +6789,10 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     ListTag(stdout);
     char buf[400];
-    snprintf_literal(buf,
-                     ": %lld elapsed (%lld per line) lines=%d drawn=%d skip=%d",
-                     delta, deltaPerLine,
-                     numLines, drawnLines, numLines - drawnLines);
+    SprintfLiteral(buf,
+                   ": %" PRId64 " elapsed (%" PRId64 " per line) lines=%d drawn=%d skip=%d",
+                   delta, deltaPerLine,
+                   numLines, drawnLines, numLines - drawnLines);
     printf("%s\n", buf);
   }
 #endif
@@ -6641,17 +6818,11 @@ nsBlockFrame::AccessibleType()
       // the nsDocAccessible object created with the document node
       return a11y::eNoType;
     }
-    
-    nsCOMPtr<nsIDOMHTMLDocument> htmlDoc =
-      do_QueryInterface(mContent->GetComposedDoc());
-    if (htmlDoc) {
-      nsCOMPtr<nsIDOMHTMLElement> body;
-      htmlDoc->GetBody(getter_AddRefs(body));
-      if (SameCOMIdentity(body, mContent)) {
-        // Don't create accessible objects for the body, they are redundant with
-        // the nsDocAccessible object created with the document node
-        return a11y::eNoType;
-      }
+
+    if (mContent == mContent->OwnerDoc()->GetBody()) {
+      // Don't create accessible objects for the body, they are redundant with
+      // the nsDocAccessible object created with the document node
+      return a11y::eNoType;
     }
 
     // Not a bullet, treat as normal HTML container
@@ -6669,7 +6840,7 @@ void nsBlockFrame::ClearLineCursor()
     return;
   }
 
-  Properties().Delete(LineCursorProperty());
+  DeleteProperty(LineCursorProperty());
   RemoveStateBits(NS_BLOCK_HAS_LINE_CURSOR);
 }
 
@@ -6679,8 +6850,8 @@ void nsBlockFrame::SetupLineCursor()
       || mLines.empty()) {
     return;
   }
-   
-  Properties().Set(LineCursorProperty(), mLines.front());
+
+  SetProperty(LineCursorProperty(), mLines.front());
   AddStateBits(NS_BLOCK_HAS_LINE_CURSOR);
 }
 
@@ -6690,10 +6861,8 @@ nsLineBox* nsBlockFrame::GetFirstLineContaining(nscoord y)
     return nullptr;
   }
 
-  FrameProperties props = Properties();
-  
-  nsLineBox* property = props.Get(LineCursorProperty());
-  line_iterator cursor = mLines.begin(property);
+  nsLineBox* property = GetProperty(LineCursorProperty());
+  LineIterator cursor = mLines.begin(property);
   nsRect cursorArea = cursor->GetVisualOverflowArea();
 
   while ((cursorArea.IsEmpty() || cursorArea.YMost() > y)
@@ -6708,7 +6877,7 @@ nsLineBox* nsBlockFrame::GetFirstLineContaining(nscoord y)
   }
 
   if (cursor.get() != property) {
-    props.Set(LineCursorProperty(), cursor.get());
+    SetProperty(LineCursorProperty(), cursor.get());
   }
 
   return cursor.get();
@@ -6725,13 +6894,13 @@ nsBlockFrame::ChildIsDirty(nsIFrame* aChild)
     // The bullet lives in the first line, unless the first line has
     // height 0 and there is a second line, in which case it lives
     // in the second line.
-    line_iterator bulletLine = begin_lines();
-    if (bulletLine != end_lines() && bulletLine->BSize() == 0 &&
+    LineIterator bulletLine = LinesBegin();
+    if (bulletLine != LinesEnd() && bulletLine->BSize() == 0 &&
         bulletLine != mLines.back()) {
       bulletLine = bulletLine.next();
     }
-    
-    if (bulletLine != end_lines()) {
+
+    if (bulletLine != LinesEnd()) {
       MarkLineDirty(bulletLine, &mLines);
     }
     // otherwise we have an empty line list, and ReflowDirtyLines
@@ -6755,9 +6924,8 @@ nsBlockFrame::ChildIsDirty(nsIFrame* aChild)
       AddStateBits(NS_BLOCK_LOOK_FOR_DIRTY_FRAMES);
     } else {
       NS_ASSERTION(aChild->IsFloating(), "should be a float");
-      nsIFrame *thisFC = FirstContinuation();
-      nsIFrame *placeholderPath =
-        PresContext()->FrameManager()->GetPlaceholderFrameFor(aChild);
+      nsIFrame* thisFC = FirstContinuation();
+      nsIFrame* placeholderPath = aChild->GetPlaceholderFrame();
       // SVG code sometimes sends FrameNeedsReflow notifications during
       // frame destruction, leading to null placeholders, but we're safe
       // ignoring those.
@@ -6776,7 +6944,7 @@ nsBlockFrame::ChildIsDirty(nsIFrame* aChild)
     }
   }
 
-  nsBlockFrameSuper::ChildIsDirty(aChild);
+  nsContainerFrame::ChildIsDirty(aChild);
 }
 
 void
@@ -6786,17 +6954,19 @@ nsBlockFrame::Init(nsIContent*       aContent,
 {
   if (aPrevInFlow) {
     // Copy over the inherited block frame bits from the prev-in-flow.
-    SetFlags(aPrevInFlow->GetStateBits() &
-             (NS_BLOCK_FLAGS_MASK & ~NS_BLOCK_FLAGS_NON_INHERITED_MASK));
+    RemoveStateBits(NS_BLOCK_FLAGS_MASK);
+    AddStateBits(aPrevInFlow->GetStateBits() &
+                 (NS_BLOCK_FLAGS_MASK & ~NS_BLOCK_FLAGS_NON_INHERITED_MASK));
   }
 
-  nsBlockFrameSuper::Init(aContent, aParent, aPrevInFlow);
+  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
   if (!aPrevInFlow ||
       aPrevInFlow->GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION) {
     AddStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
   }
 
+  // A display:flow-root box establishes a block formatting context.
   // If a box has a different block flow direction than its containing block:
   // ...
   //   If the box is a block container, then it establishes a new block
@@ -6804,10 +6974,11 @@ nsBlockFrame::Init(nsIContent*       aContent,
   // (http://dev.w3.org/csswg/css-writing-modes/#block-flow)
   // If the box has contain: paint (or contain: strict), then it should also
   // establish a formatting context.
-  if ((GetParent() && StyleVisibility()->mWritingMode !=
+  if (StyleDisplay()->mDisplay == mozilla::StyleDisplay::FlowRoot ||
+      (GetParent() && StyleVisibility()->mWritingMode !=
                       GetParent()->StyleVisibility()->mWritingMode) ||
       StyleDisplay()->IsContainPaint()) {
-    AddStateBits(NS_BLOCK_FLOAT_MGR | NS_BLOCK_MARGIN_ROOT);
+    AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   }
 
   if ((GetStateBits() &
@@ -6836,20 +7007,20 @@ nsBlockFrame::SetInitialChildList(ChildListID     aListID,
     // the anonymous block in {ib} splits do NOT get first-letter frames.
     // Note that NS_BLOCK_HAS_FIRST_LETTER_STYLE gets set on all continuations
     // of the block.
-    nsIAtom *pseudo = StyleContext()->GetPseudo();
+    nsAtom *pseudo = Style()->GetPseudo();
     bool haveFirstLetterStyle =
       (!pseudo ||
        (pseudo == nsCSSAnonBoxes::cellContent &&
-        GetParent()->StyleContext()->GetPseudo() == nullptr) ||
+        GetParent()->Style()->GetPseudo() == nullptr) ||
        pseudo == nsCSSAnonBoxes::fieldsetContent ||
        pseudo == nsCSSAnonBoxes::buttonContent ||
        pseudo == nsCSSAnonBoxes::columnContent ||
        (pseudo == nsCSSAnonBoxes::scrolledContent &&
-        GetParent()->GetType() != nsGkAtoms::listControlFrame) ||
+        !GetParent()->IsListControlFrame()) ||
        pseudo == nsCSSAnonBoxes::mozSVGText) &&
-      GetType() != nsGkAtoms::comboboxControlFrame &&
+      !IsComboboxControlFrame() &&
       !IsFrameOfType(eMathML) &&
-      RefPtr<nsStyleContext>(GetFirstLetterStyle(PresContext())) != nullptr;
+      RefPtr<ComputedStyle>(GetFirstLetterStyle(PresContext())) != nullptr;
     NS_ASSERTION(haveFirstLetterStyle ==
                  ((mState & NS_BLOCK_HAS_FIRST_LETTER_STYLE) != 0),
                  "NS_BLOCK_HAS_FIRST_LETTER_STYLE state out of sync");
@@ -6867,7 +7038,7 @@ nsBlockFrame::SetInitialChildList(ChildListID     aListID,
     // for a columnset we don't want a bullet per column.  Note that
     // the outermost frame for the content is the primary frame in
     // most cases; the ones when it's not (like tables) can't be
-    // NS_STYLE_DISPLAY_LIST_ITEM).
+    // StyleDisplay::ListItem).
     nsIFrame* possibleListItem = this;
     while (1) {
       nsIFrame* parent = possibleListItem->GetParent();
@@ -6876,12 +7047,12 @@ nsBlockFrame::SetInitialChildList(ChildListID     aListID,
       }
       possibleListItem = parent;
     }
-    if (NS_STYLE_DISPLAY_LIST_ITEM ==
+    if (mozilla::StyleDisplay::ListItem ==
           possibleListItem->StyleDisplay()->mDisplay &&
         !GetPrevInFlow()) {
       // Resolve style for the bullet frame
       const nsStyleList* styleList = StyleList();
-      CounterStyle* style = styleList->GetCounterStyle();
+      CounterStyle* style = styleList->mCounterStyle;
 
       CreateBulletFrameForListItem(
         style->IsBullet(),
@@ -6896,20 +7067,14 @@ void
 nsBlockFrame::CreateBulletFrameForListItem(bool aCreateBulletList,
                                            bool aListStylePositionInside)
 {
-  nsIPresShell* shell = PresContext()->PresShell();
+  nsIPresShell* shell = PresShell();
 
   CSSPseudoElementType pseudoType = aCreateBulletList ?
     CSSPseudoElementType::mozListBullet :
     CSSPseudoElementType::mozListNumber;
 
-  nsStyleContext* parentStyle =
-    CorrectStyleParentFrame(this,
-                            nsCSSPseudoElements::GetPseudoAtom(pseudoType))->
-    StyleContext();
-
-  RefPtr<nsStyleContext> kidSC = shell->StyleSet()->
-    ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
-                              parentStyle, nullptr);
+  RefPtr<ComputedStyle> kidSC = ResolveBulletStyle(pseudoType,
+                                                    shell->StyleSet());
 
   // Create bullet frame
   nsBulletFrame* bullet = new (shell) nsBulletFrame(kidSC);
@@ -6918,14 +7083,13 @@ nsBlockFrame::CreateBulletFrameForListItem(bool aCreateBulletList,
   // If the list bullet frame should be positioned inside then add
   // it to the flow now.
   if (aListStylePositionInside) {
-
     nsFrameList bulletList(bullet, bullet);
     AddFrames(bulletList, nullptr);
-    Properties().Set(InsideBulletProperty(), bullet);
+    SetProperty(InsideBulletProperty(), bullet);
     AddStateBits(NS_BLOCK_FRAME_HAS_INSIDE_BULLET);
   } else {
     nsFrameList* bulletList = new (shell) nsFrameList(bullet, bullet);
-    Properties().Set(OutsideBulletProperty(), bulletList);
+    SetProperty(OutsideBulletProperty(), bulletList);
     AddStateBits(NS_BLOCK_FRAME_HAS_OUTSIDE_BULLET);
   }
 }
@@ -6934,10 +7098,10 @@ bool
 nsBlockFrame::BulletIsEmpty() const
 {
   NS_ASSERTION(mContent->GetPrimaryFrame()->StyleDisplay()->mDisplay ==
-                 NS_STYLE_DISPLAY_LIST_ITEM && HasOutsideBullet(),
+               mozilla::StyleDisplay::ListItem && HasOutsideBullet(),
                "should only care when we have an outside bullet");
   const nsStyleList* list = StyleList();
-  return list->GetCounterStyle()->IsNone() &&
+  return list->mCounterStyle->IsNone() &&
          !list->GetListStyleImage();
 }
 
@@ -6958,95 +7122,28 @@ nsBlockFrame::GetSpokenBulletText(nsAString& aText) const
   }
 }
 
-// static
 bool
-nsBlockFrame::FrameStartsCounterScope(nsIFrame* aFrame)
-{
-  nsIContent* content = aFrame->GetContent();
-  if (!content || !content->IsHTMLElement())
-    return false;
-
-  nsIAtom *localName = content->NodeInfo()->NameAtom();
-  return localName == nsGkAtoms::ol ||
-         localName == nsGkAtoms::ul ||
-         localName == nsGkAtoms::dir ||
-         localName == nsGkAtoms::menu;
-}
-
-bool
-nsBlockFrame::RenumberLists(nsPresContext* aPresContext)
-{
-  if (!FrameStartsCounterScope(this)) {
-    // If this frame doesn't start a counter scope then we don't need
-    // to renumber child list items.
-    return false;
-  }
-
-  MOZ_ASSERT(mContent->IsHTMLElement(),
-             "FrameStartsCounterScope should only return true for HTML elements");
-
-  // Setup initial list ordinal value
-  // XXX Map html's start property to counter-reset style
-  int32_t ordinal = 1;
-  int32_t increment;
-  if (mContent->IsHTMLElement(nsGkAtoms::ol) &&
-      mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::reversed)) {
-    increment = -1;
-  } else {
-    increment = 1;
-  }
-
-  nsGenericHTMLElement *hc = nsGenericHTMLElement::FromContent(mContent);
-  // Must be non-null, since FrameStartsCounterScope only returns true
-  // for HTML elements.
-  MOZ_ASSERT(hc, "How is mContent not HTML?");
-  const nsAttrValue* attr = hc->GetParsedAttr(nsGkAtoms::start);
-  if (attr && attr->Type() == nsAttrValue::eInteger) {
-    ordinal = attr->GetIntegerValue();
-  } else if (increment < 0) {
-    // <ol reversed> case, or some other case with a negative increment: count
-    // up the child list
-    ordinal = 0;
-    for (nsIContent* kid = mContent->GetFirstChild(); kid;
-         kid = kid->GetNextSibling()) {
-      if (kid->IsHTMLElement(nsGkAtoms::li)) {
-        // FIXME: This isn't right in terms of what CSS says to do for
-        // overflow of counters (but it only matters when this node has
-        // more than numeric_limits<int32_t>::max() children).
-        ordinal -= increment;
-      }
-    }
-  }
-
-  // Get to first-in-flow
-  nsBlockFrame* block = static_cast<nsBlockFrame*>(FirstInFlow());
-  return RenumberListsInBlock(aPresContext, block, &ordinal, 0, increment);
-}
-
-bool
-nsBlockFrame::RenumberListsInBlock(nsPresContext* aPresContext,
-                                   nsBlockFrame* aBlockFrame,
-                                   int32_t* aOrdinal,
-                                   int32_t aDepth,
-                                   int32_t aIncrement)
+nsBlockFrame::RenumberChildFrames(int32_t* aOrdinal,
+                                  int32_t aDepth,
+                                  int32_t aIncrement,
+                                  bool aForCounting)
 {
   // Examine each line in the block
   bool foundValidLine;
-  nsBlockInFlowLineIterator bifLineIter(aBlockFrame, &foundValidLine);
-  
-  if (!foundValidLine)
+  nsBlockInFlowLineIterator bifLineIter(this, &foundValidLine);
+  if (!foundValidLine) {
     return false;
+  }
 
   bool renumberedABullet = false;
-
   do {
     nsLineList::iterator line = bifLineIter.GetLine();
     nsIFrame* kid = line->mFirstChild;
     int32_t n = line->GetChildCount();
     while (--n >= 0) {
-      bool kidRenumberedABullet = RenumberListsFor(aPresContext, kid, aOrdinal,
-                                                   aDepth, aIncrement);
-      if (kidRenumberedABullet) {
+      bool kidRenumberedABullet =
+        kid->RenumberFrameAndDescendants(aOrdinal, aDepth, aIncrement, aForCounting);
+      if (!aForCounting && kidRenumberedABullet) {
         line->MarkDirty();
         renumberedABullet = true;
       }
@@ -7060,105 +7157,19 @@ nsBlockFrame::RenumberListsInBlock(nsPresContext* aPresContext,
   // might be making a FrameNeedsReflow call, which requires that the
   // bit not be set yet.
   if (renumberedABullet && aDepth != 0) {
-    aBlockFrame->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
+    AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
   }
 
   return renumberedABullet;
 }
 
-bool
-nsBlockFrame::RenumberListsFor(nsPresContext* aPresContext,
-                               nsIFrame* aKid,
-                               int32_t* aOrdinal,
-                               int32_t aDepth,
-                               int32_t aIncrement)
-{
-  NS_PRECONDITION(aPresContext && aKid && aOrdinal, "null params are immoral!");
-
-  // add in a sanity check for absurdly deep frame trees.  See bug 42138
-  if (MAX_DEPTH_FOR_LIST_RENUMBERING < aDepth)
-    return false;
-
-  // if the frame is a placeholder, then get the out of flow frame
-  nsIFrame* kid = nsPlaceholderFrame::GetRealFrameFor(aKid);
-  const nsStyleDisplay* display = kid->StyleDisplay();
-
-  // drill down through any wrappers to the real frame
-  kid = kid->GetContentInsertionFrame();
-
-  // possible there is no content insertion frame
-  if (!kid)
-    return false;
-
-  bool kidRenumberedABullet = false;
-
-  // If the frame is a list-item and the frame implements our
-  // block frame API then get its bullet and set the list item
-  // ordinal.
-  if (NS_STYLE_DISPLAY_LIST_ITEM == display->mDisplay) {
-    // Make certain that the frame is a block frame in case
-    // something foreign has crept in.
-    nsBlockFrame* listItem = nsLayoutUtils::GetAsBlock(kid);
-    if (listItem) {
-      nsBulletFrame* bullet = listItem->GetBullet();
-      if (bullet) {
-        bool changed;
-        *aOrdinal = bullet->SetListItemOrdinal(*aOrdinal, &changed, aIncrement);
-        if (changed) {
-          kidRenumberedABullet = true;
-
-          // The ordinal changed - mark the bullet frame, and any
-          // intermediate frames between it and the block (are there
-          // ever any?), dirty.
-          // The calling code will make the necessary FrameNeedsReflow
-          // call for the list ancestor.
-          bullet->AddStateBits(NS_FRAME_IS_DIRTY);
-          nsIFrame *f = bullet;
-          do {
-            nsIFrame *parent = f->GetParent();
-            parent->ChildIsDirty(f);
-            f = parent;
-          } while (f != listItem);
-        }
-      }
-
-      // XXX temporary? if the list-item has child list-items they
-      // should be numbered too; especially since the list-item is
-      // itself (ASSUMED!) not to be a counter-resetter.
-      bool meToo = RenumberListsInBlock(aPresContext, listItem, aOrdinal,
-                                        aDepth + 1, aIncrement);
-      if (meToo) {
-        kidRenumberedABullet = true;
-      }
-    }
-  }
-  else if (NS_STYLE_DISPLAY_BLOCK == display->mDisplay) {
-    if (FrameStartsCounterScope(kid)) {
-      // Don't bother recursing into a block frame that is a new
-      // counter scope. Any list-items in there will be handled by
-      // it.
-    }
-    else {
-      // If the display=block element is a block frame then go ahead
-      // and recurse into it, as it might have child list-items.
-      nsBlockFrame* kidBlock = nsLayoutUtils::GetAsBlock(kid);
-      if (kidBlock) {
-        kidRenumberedABullet = RenumberListsInBlock(aPresContext, kidBlock,
-                                                    aOrdinal, aDepth + 1,
-                                                    aIncrement);
-      }
-    }
-  }
-  return kidRenumberedABullet;
-}
-
 void
 nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
-                           nsBlockReflowState& aState,
-                           nsHTMLReflowMetrics& aMetrics,
+                           BlockReflowInput& aState,
+                           ReflowOutput& aMetrics,
                            nscoord aLineTop)
 {
-  const nsHTMLReflowState &rs = aState.mReflowState;
+  const ReflowInput &ri = aState.mReflowInput;
 
   // Reflow the bullet now
   WritingMode bulletWM = aBulletFrame->GetWritingMode();
@@ -7170,10 +7181,10 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // Get the reason right.
   // XXXwaterson Should this look just like the logic in
   // nsBlockReflowContext::ReflowBlock and nsLineLayout::ReflowFrame?
-  nsHTMLReflowState reflowState(aState.mPresContext, rs,
+  ReflowInput reflowInput(aState.mPresContext, ri,
                                 aBulletFrame, availSize);
-  nsReflowStatus  status;
-  aBulletFrame->Reflow(aState.mPresContext, aMetrics, reflowState, status);
+  nsReflowStatus status;
+  aBulletFrame->Reflow(aState.mPresContext, aMetrics, reflowInput, status);
 
   // Get the float available space using our saved state from before we
   // started reflowing the block, so that we ignore any floats inside
@@ -7181,7 +7192,7 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // FIXME: aLineTop isn't actually set correctly by some callers, since
   // they reposition the line.
   LogicalRect floatAvailSpace =
-    aState.GetFloatAvailableSpaceWithState(aLineTop,
+    aState.GetFloatAvailableSpaceWithState(aLineTop, ShapeType::ShapeOutside,
                                            &aState.mFloatManagerStateBefore)
           .mRect;
   // FIXME (bug 25888): need to check the entire region that the first
@@ -7199,13 +7210,13 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // IStart from floatAvailSpace gives us the content/float start edge
   // in the current writing mode. Then we subtract out the start
   // border/padding and the bullet's width and margin to offset the position.
-  WritingMode wm = rs.GetWritingMode();
+  WritingMode wm = ri.GetWritingMode();
   // Get the bullet's margin, converted to our writing mode so that we can
   // combine it with other logical values here.
   LogicalMargin bulletMargin =
-    reflowState.ComputedLogicalMargin().ConvertTo(wm, bulletWM);
+    reflowInput.ComputedLogicalMargin().ConvertTo(wm, bulletWM);
   nscoord iStart = floatAvailSpace.IStart(wm) -
-                   rs.ComputedLogicalBorderPadding().IStart(wm) -
+                   ri.ComputedLogicalBorderPadding().IStart(wm) -
                    bulletMargin.IEnd(wm) -
                    aMetrics.ISize(wm);
 
@@ -7217,8 +7228,7 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
                                         aMetrics.ISize(wm),
                                         aMetrics.BSize(wm)),
                         aState.ContainerSize());
-  aBulletFrame->DidReflow(aState.mPresContext, &aState.mReflowState,
-                          nsDidReflowStatus::FINISHED);
+  aBulletFrame->DidReflow(aState.mPresContext, &aState.mReflowInput);
 }
 
 // This is used to scan frames for any float placeholders, add their
@@ -7233,9 +7243,10 @@ nsBlockFrame::DoCollectFloats(nsIFrame* aFrame, nsFrameList& aList,
   while (aFrame) {
     // Don't descend into float containing blocks.
     if (!aFrame->IsFloatContainingBlock()) {
-      nsIFrame *outOfFlowFrame =
-        aFrame->GetType() == nsGkAtoms::placeholderFrame ?
-          nsLayoutUtils::GetFloatFromPlaceholder(aFrame) : nullptr;
+      nsIFrame* outOfFlowFrame =
+        aFrame->IsPlaceholderFrame()
+          ? nsLayoutUtils::GetFloatFromPlaceholder(aFrame)
+          : nullptr;
       while (outOfFlowFrame && outOfFlowFrame->GetParent() == this) {
         RemoveFloat(outOfFlowFrame);
         // Remove the IS_PUSHED_FLOAT bit, in case |outOfFlowFrame| came from
@@ -7259,7 +7270,7 @@ nsBlockFrame::DoCollectFloats(nsIFrame* aFrame, nsFrameList& aList,
 }
 
 void
-nsBlockFrame::CheckFloats(nsBlockReflowState& aState)
+nsBlockFrame::CheckFloats(BlockReflowInput& aState)
 {
 #ifdef DEBUG
   // If any line is still dirty, that must mean we're going to reflow this
@@ -7269,7 +7280,7 @@ nsBlockFrame::CheckFloats(nsBlockReflowState& aState)
 
   // Check that the float list is what we would have built
   AutoTArray<nsIFrame*, 8> lineFloats;
-  for (line_iterator line = begin_lines(), line_end = end_lines();
+  for (LineIterator line = LinesBegin(), line_end = LinesEnd();
        line != line_end; ++line) {
     if (line->HasFloats()) {
       nsFloatCache* fc = line->GetFirstFloat();
@@ -7282,7 +7293,7 @@ nsBlockFrame::CheckFloats(nsBlockReflowState& aState)
       anyLineDirty = true;
     }
   }
-  
+
   AutoTArray<nsIFrame*, 8> storedFloats;
   bool equal = true;
   uint32_t i = 0;
@@ -7322,7 +7333,7 @@ nsBlockFrame::CheckFloats(nsBlockReflowState& aState)
     // because we know from here on the float manager will only be
     // used for its XMost and YMost, not to place new floats and
     // lines.
-    aState.mFloatManager->RemoveTrailingRegions(oofs->FirstChild());
+    aState.FloatManager()->RemoveTrailingRegions(oofs->FirstChild());
   }
 }
 
@@ -7336,7 +7347,7 @@ nsBlockFrame::IsMarginRoot(bool* aBStartMarginRoot, bool* aBEndMarginRoot)
       *aBEndMarginRoot = false;
       return;
     }
-    if (parent->GetType() == nsGkAtoms::columnSetFrame) {
+    if (parent->IsColumnSetFrame()) {
       *aBStartMarginRoot = GetPrevInFlow() == nullptr;
       *aBEndMarginRoot = GetNextInFlow() == nullptr;
       return;
@@ -7351,7 +7362,7 @@ nsBlockFrame::IsMarginRoot(bool* aBStartMarginRoot, bool* aBEndMarginRoot)
 bool
 nsBlockFrame::BlockNeedsFloatManager(nsIFrame* aBlock)
 {
-  NS_PRECONDITION(aBlock, "Must have a frame");
+  MOZ_ASSERT(aBlock, "Must have a frame");
   NS_ASSERTION(nsLayoutUtils::GetAsBlock(aBlock), "aBlock must be a block");
 
   nsIFrame* parent = aBlock->GetParent();
@@ -7374,13 +7385,13 @@ nsBlockFrame::BlockCanIntersectFloats(nsIFrame* aFrame)
 // matter.
 /* static */
 nsBlockFrame::ReplacedElementISizeToClear
-nsBlockFrame::ISizeToClearPastFloats(const nsBlockReflowState& aState,
+nsBlockFrame::ISizeToClearPastFloats(const BlockReflowInput& aState,
                                      const LogicalRect& aFloatAvailableSpace,
                                      nsIFrame* aFrame)
 {
   nscoord inlineStartOffset, inlineEndOffset;
-  WritingMode wm = aState.mReflowState.GetWritingMode();
-  nsCSSOffsetState offsetState(aFrame, aState.mReflowState.rendContext,
+  WritingMode wm = aState.mReflowInput.GetWritingMode();
+  SizeComputationInput offsetState(aFrame, aState.mReflowInput.mRenderingContext,
                                wm, aState.mContentArea.ISize(wm));
 
   ReplacedElementISizeToClear result;
@@ -7394,23 +7405,23 @@ nsBlockFrame::ISizeToClearPastFloats(const nsBlockReflowState& aState,
   // want to displace if the width won't compute to a value small enough
   // to fit.
   // All we really need here is the result of ComputeSize, and we
-  // could *almost* get that from an nsCSSOffsetState, except for the
+  // could *almost* get that from an SizeComputationInput, except for the
   // last argument.
   WritingMode frWM = aFrame->GetWritingMode();
   LogicalSize availSpace = LogicalSize(wm, availISize, NS_UNCONSTRAINEDSIZE).
                              ConvertTo(frWM, wm);
-  nsHTMLReflowState reflowState(aState.mPresContext, aState.mReflowState,
+  ReflowInput reflowInput(aState.mPresContext, aState.mReflowInput,
                                 aFrame, availSpace);
   result.borderBoxISize =
-    reflowState.ComputedSizeWithBorderPadding().ConvertTo(wm, frWM).ISize(wm);
-  // Use the margins from offsetState rather than reflowState so that
+    reflowInput.ComputedSizeWithBorderPadding().ConvertTo(wm, frWM).ISize(wm);
+  // Use the margins from offsetState rather than reflowInput so that
   // they aren't reduced by ignoring margins in overconstrained cases.
   LogicalMargin computedMargin =
     offsetState.ComputedLogicalMargin().ConvertTo(wm, frWM);
   result.marginIStart = computedMargin.IStart(wm);
   return result;
 }
- 
+
 /* static */
 nsBlockFrame*
 nsBlockFrame::GetNearestAncestorBlock(nsIFrame* aCandidate)
@@ -7418,29 +7429,29 @@ nsBlockFrame::GetNearestAncestorBlock(nsIFrame* aCandidate)
   nsBlockFrame* block = nullptr;
   while(aCandidate) {
     block = nsLayoutUtils::GetAsBlock(aCandidate);
-    if (block) { 
+    if (block) {
       // yay, candidate is a block!
       return block;
     }
     // Not a block. Check its parent next.
     aCandidate = aCandidate->GetParent();
   }
-  NS_NOTREACHED("Fell off frame tree looking for ancestor block!");
+  MOZ_ASSERT_UNREACHABLE("Fell off frame tree looking for ancestor block!");
   return nullptr;
 }
 
 void
-nsBlockFrame::ComputeFinalBSize(const nsHTMLReflowState& aReflowState,
+nsBlockFrame::ComputeFinalBSize(const ReflowInput& aReflowInput,
                                 nsReflowStatus*          aStatus,
                                 nscoord                  aContentBSize,
                                 const LogicalMargin&     aBorderPadding,
                                 LogicalSize&             aFinalSize,
                                 nscoord                  aConsumed)
 {
-  WritingMode wm = aReflowState.GetWritingMode();
+  WritingMode wm = aReflowInput.GetWritingMode();
   // Figure out how much of the computed height should be
   // applied to this frame.
-  nscoord computedBSizeLeftOver = GetEffectiveComputedBSize(aReflowState,
+  nscoord computedBSizeLeftOver = GetEffectiveComputedBSize(aReflowInput,
                                                             aConsumed);
   NS_ASSERTION(!( IS_TRUE_OVERFLOW_CONTAINER(this)
                   && computedBSizeLeftOver ),
@@ -7451,20 +7462,19 @@ nsBlockFrame::ComputeFinalBSize(const nsHTMLReflowState& aReflowState,
                                               computedBSizeLeftOver),
                          aBorderPadding.BEnd(wm));
 
-  if (NS_FRAME_IS_NOT_COMPLETE(*aStatus) &&
-      aFinalSize.BSize(wm) < aReflowState.AvailableBSize()) {
-    // We fit in the available space - change status to OVERFLOW_INCOMPLETE.
-    // XXXmats why didn't Reflow report OVERFLOW_INCOMPLETE in the first place?
-    // XXXmats and why exclude the case when our size == AvailableBSize?
-    NS_FRAME_SET_OVERFLOW_INCOMPLETE(*aStatus);
+  if (aStatus->IsIncomplete() &&
+      aFinalSize.BSize(wm) <= aReflowInput.AvailableBSize()) {
+    // We ran out of height on this page but we're incomplete.
+    // Set status to complete except for overflow.
+    aStatus->SetOverflowIncomplete();
   }
 
-  if (NS_FRAME_IS_COMPLETE(*aStatus)) {
+  if (aStatus->IsComplete()) {
     if (computedBSizeLeftOver > 0 &&
-        NS_UNCONSTRAINEDSIZE != aReflowState.AvailableBSize() &&
-        aFinalSize.BSize(wm) > aReflowState.AvailableBSize()) {
-      if (ShouldAvoidBreakInside(aReflowState)) {
-        *aStatus = NS_INLINE_LINE_BREAK_BEFORE();
+        NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableBSize() &&
+        aFinalSize.BSize(wm) > aReflowInput.AvailableBSize()) {
+      if (ShouldAvoidBreakInside(aReflowInput)) {
+        aStatus->SetInlineLineBreakBeforeAndReset();
         return;
       }
       // We don't fit and we consumed some of the computed height,
@@ -7472,11 +7482,11 @@ nsBlockFrame::ComputeFinalBSize(const nsHTMLReflowState& aReflowState,
       // break.  If our bottom border/padding straddles the break
       // point, then this will increase our height and push the
       // border/padding to the next page/column.
-      aFinalSize.BSize(wm) = std::max(aReflowState.AvailableBSize(),
+      aFinalSize.BSize(wm) = std::max(aReflowInput.AvailableBSize(),
                                       aContentBSize);
-      NS_FRAME_SET_INCOMPLETE(*aStatus);
+      aStatus->SetIncomplete();
       if (!GetNextInFlow())
-        *aStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+        aStatus->SetNextInFlowNeedsReflow();
     }
   }
 }
@@ -7495,6 +7505,98 @@ nsBlockFrame::ResolveBidi()
   return nsBidiPresUtils::Resolve(this);
 }
 
+void
+nsBlockFrame::UpdatePseudoElementStyles(ServoRestyleState& aRestyleState)
+{
+  // first-letter needs to be updated before first-line, because first-line can
+  // change the style of the first-letter.
+  if (HasFirstLetterChild()) {
+    UpdateFirstLetterStyle(aRestyleState);
+  }
+
+  if (nsBulletFrame* bullet = GetBullet()) {
+    CSSPseudoElementType type = bullet->Style()->GetPseudoType();
+    RefPtr<ComputedStyle> newBulletStyle =
+      ResolveBulletStyle(type, &aRestyleState.StyleSet());
+    UpdateStyleOfOwnedChildFrame(bullet, newBulletStyle, aRestyleState);
+  }
+
+  if (nsIFrame* firstLineFrame = GetFirstLineFrame()) {
+    nsIFrame* styleParent =
+      CorrectStyleParentFrame(firstLineFrame->GetParent(),
+                              nsCSSPseudoElements::firstLine);
+
+    ComputedStyle* parentStyle = styleParent->Style();
+    RefPtr<ComputedStyle> firstLineStyle =
+      aRestyleState.StyleSet()
+                   .ResolvePseudoElementStyle(mContent->AsElement(),
+                                              CSSPseudoElementType::firstLine,
+                                              parentStyle,
+                                              nullptr);
+
+    // FIXME(bz): Can we make first-line continuations be non-inheriting anon
+    // boxes?
+    RefPtr<ComputedStyle> continuationStyle = aRestyleState.StyleSet().
+      ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame,
+                                         parentStyle);
+
+    UpdateStyleOfOwnedChildFrame(firstLineFrame, firstLineStyle, aRestyleState,
+                                 Some(continuationStyle.get()));
+
+    // We also want to update the styles of the first-line's descendants.  We
+    // don't need to compute a changehint for this, though, since any changes to
+    // them are handled by the first-line anyway.
+    RestyleManager* manager = PresContext()->RestyleManager();
+    for (nsIFrame* kid : firstLineFrame->PrincipalChildList()) {
+      manager->ReparentComputedStyleForFirstLine(kid);
+    }
+  }
+}
+
+already_AddRefed<ComputedStyle>
+nsBlockFrame::ResolveBulletStyle(CSSPseudoElementType aType,
+                                 ServoStyleSet* aStyleSet)
+{
+  ComputedStyle* parentStyle =
+    CorrectStyleParentFrame(this,
+                            nsCSSPseudoElements::GetPseudoAtom(aType))->
+    Style();
+
+  return aStyleSet->ResolvePseudoElementStyle(mContent->AsElement(), aType,
+                                              parentStyle, nullptr);
+}
+
+nsIFrame*
+nsBlockFrame::GetFirstLetter() const
+{
+  if (!(GetStateBits() & NS_BLOCK_HAS_FIRST_LETTER_STYLE)) {
+    // Certainly no first-letter frame.
+    return nullptr;
+  }
+
+  return GetProperty(FirstLetterProperty());
+}
+
+nsIFrame*
+nsBlockFrame::GetFirstLineFrame() const
+{
+  // Our ::first-line frame is either the first thing on our principal child
+  // list, or the second one if we have an inside bullet.
+  nsIFrame* bullet = GetInsideBullet();
+  nsIFrame* maybeFirstLine;
+  if (bullet) {
+    maybeFirstLine = bullet->GetNextSibling();
+  } else {
+    maybeFirstLine = PrincipalChildList().FirstChild();
+  }
+
+  if (maybeFirstLine && maybeFirstLine->IsLineFrame()) {
+    return maybeFirstLine;
+  }
+
+  return nullptr;
+}
+
 #ifdef DEBUG
 void
 nsBlockFrame::VerifyLines(bool aFinalCheckOK)
@@ -7511,8 +7613,8 @@ nsBlockFrame::VerifyLines(bool aFinalCheckOK)
   // Add up the counts on each line. Also validate that IsFirstLine is
   // set properly.
   int32_t count = 0;
-  line_iterator line, line_end;
-  for (line = begin_lines(), line_end = end_lines();
+  LineIterator line, line_end;
+  for (line = LinesBegin(), line_end = LinesEnd();
        line != line_end;
        ++line) {
     if (line == cursor) {
@@ -7537,7 +7639,7 @@ nsBlockFrame::VerifyLines(bool aFinalCheckOK)
   NS_ASSERTION(count == frameCount, "bad line list");
 
   // Next: test that each line has right number of frames on it
-  for (line = begin_lines(), line_end = end_lines();
+  for (line = LinesBegin(), line_end = LinesEnd();
        line != line_end;
         ) {
     count = line->GetChildCount();
@@ -7554,8 +7656,8 @@ nsBlockFrame::VerifyLines(bool aFinalCheckOK)
   if (cursor) {
     FrameLines* overflowLines = GetOverflowLines();
     if (overflowLines) {
-      line_iterator line = overflowLines->mLines.begin();
-      line_iterator line_end = overflowLines->mLines.end();
+      LineIterator line = overflowLines->mLines.begin();
+      LineIterator line_end = overflowLines->mLines.end();
       for (; line != line_end; ++line) {
         if (line == cursor) {
           cursor = nullptr;
@@ -7625,8 +7727,8 @@ nsBlockFrame::VerifyOverflowSituation()
     }
     nsLineBox* cursor = flow->GetLineCursor();
     if (cursor) {
-      line_iterator line = flow->begin_lines();
-      line_iterator line_end = flow->end_lines();
+      LineIterator line = flow->LinesBegin();
+      LineIterator line_end = flow->LinesEnd();
       for (; line != line_end && line != cursor; ++line)
         ;
       if (line == line_end && overflowLines) {
@@ -7653,12 +7755,12 @@ nsBlockFrame::GetDepth() const
   return depth;
 }
 
-already_AddRefed<nsStyleContext>
+already_AddRefed<ComputedStyle>
 nsBlockFrame::GetFirstLetterStyle(nsPresContext* aPresContext)
 {
   return aPresContext->StyleSet()->
     ProbePseudoElementStyle(mContent->AsElement(),
                             CSSPseudoElementType::firstLetter,
-                            mStyleContext);
+                            mComputedStyle);
 }
 #endif

@@ -24,11 +24,10 @@ nsresult xpcJSWeakReference::Init(JSContext* cx, const JS::Value& object)
 
     JS::RootedObject obj(cx, &object.toObject());
 
-    XPCCallContext ccx(NATIVE_CALLER, cx);
+    XPCCallContext ccx(cx);
 
     // See if the object is a wrapped native that supports weak references.
-    nsISupports* supports =
-        nsXPConnect::XPConnect()->GetNativeOfWrapper(cx, obj);
+    nsCOMPtr<nsISupports> supports = xpc::UnwrapReflectorToISupports(obj);
     nsCOMPtr<nsISupportsWeakReference> supportsWeakRef =
         do_QueryInterface(supports);
     if (supportsWeakRef) {

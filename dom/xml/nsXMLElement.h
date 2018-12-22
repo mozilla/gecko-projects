@@ -8,12 +8,10 @@
 #define nsXMLElement_h___
 
 #include "mozilla/Attributes.h"
-#include "nsIDOMElement.h"
-#include "mozilla/dom/ElementInlines.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMRect.h"
 
-class nsXMLElement : public mozilla::dom::Element,
-                     public nsIDOMElement
+class nsXMLElement : public mozilla::dom::Element
 {
 public:
   explicit nsXMLElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
@@ -22,18 +20,14 @@ public:
   }
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(nsXMLElement, mozilla::dom::Element)
 
   // nsINode interface methods
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
-  virtual nsIDOMNode* AsDOMNode() override { return this; }
+  virtual void UnbindFromTree(bool aDeep = true,
+                              bool aNullParent = true) override;
 
 protected:
   virtual ~nsXMLElement() {}

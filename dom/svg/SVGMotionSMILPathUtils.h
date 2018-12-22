@@ -16,9 +16,9 @@
 #include "mozilla/RefPtr.h"
 #include "nsDebug.h"
 #include "nsSMILParserUtils.h"
+#include "nsStringFwd.h"
 #include "nsTArray.h"
 
-class nsAString;
 class nsSVGElement;
 
 namespace mozilla {
@@ -43,7 +43,7 @@ public:
       NS_ASSERTION(gfxPlatform::GetPlatform()->
                      SupportsAzureContentForDrawTarget(drawTarget),
                    "Should support Moz2D content drawing");
-      
+
       mPathBuilder = drawTarget->CreatePathBuilder();
     }
 

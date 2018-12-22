@@ -13,6 +13,9 @@
 #include "nsTObserverArray.h"
 
 namespace mozilla {
+namespace ipc {
+class AutoIPCStream;
+} // namespace ipc
 namespace dom {
 namespace cache {
 
@@ -34,12 +37,11 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) override;
 
   virtual void
-  SerializeFds(CacheReadStream* aReadStreamOut,
-               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) override;
+  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
+                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) override;
 
   virtual void
-  DeserializeFds(const CacheReadStream& aReadStream,
-                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) override;
+  OpenStream(const nsID& aId, InputStreamResolver&& aResolver) override;
 
 private:
   virtual void
@@ -52,8 +54,8 @@ private:
 
   // PCacheStreamControlChild methods
   virtual void ActorDestroy(ActorDestroyReason aReason) override;
-  virtual bool RecvClose(const nsID& aId) override;
-  virtual bool RecvCloseAll() override;
+  virtual mozilla::ipc::IPCResult RecvClose(const nsID& aId) override;
+  virtual mozilla::ipc::IPCResult RecvCloseAll() override;
 
   bool mDestroyStarted;
   bool mDestroyDelayed;

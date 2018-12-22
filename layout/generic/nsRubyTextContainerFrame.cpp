@@ -1,18 +1,18 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* This Source Code is subject to the terms of the Mozilla Public License
- * version 2.0 (the "License"). You can obtain a copy of the License at
- * http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* rendering object for CSS "display: ruby-text-container" */
 
 #include "nsRubyTextContainerFrame.h"
 
+#include "mozilla/ComputedStyle.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WritingModes.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
 
 using namespace mozilla;
 
@@ -29,9 +29,9 @@ NS_IMPL_FRAMEARENA_HELPERS(nsRubyTextContainerFrame)
 
 nsContainerFrame*
 NS_NewRubyTextContainerFrame(nsIPresShell* aPresShell,
-                             nsStyleContext* aContext)
+                             ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsRubyTextContainerFrame(aContext);
+  return new (aPresShell) nsRubyTextContainerFrame(aStyle);
 }
 
 
@@ -39,12 +39,6 @@ NS_NewRubyTextContainerFrame(nsIPresShell* aPresShell,
 
 // nsRubyTextContainerFrame Method Implementations
 // ===============================================
-
-nsIAtom*
-nsRubyTextContainerFrame::GetType() const
-{
-  return nsGkAtoms::rubyTextContainerFrame;
-}
 
 #ifdef DEBUG_FRAME_DUMP
 nsresult
@@ -60,14 +54,14 @@ nsRubyTextContainerFrame::IsFrameOfType(uint32_t aFlags) const
   if (aFlags & eSupportsCSSTransforms) {
     return false;
   }
-  return nsRubyTextContainerFrameSuper::IsFrameOfType(aFlags);
+  return nsContainerFrame::IsFrameOfType(aFlags);
 }
 
 /* virtual */ void
 nsRubyTextContainerFrame::SetInitialChildList(ChildListID aListID,
                                               nsFrameList& aChildList)
 {
-  nsRubyTextContainerFrameSuper::SetInitialChildList(aListID, aChildList);
+  nsContainerFrame::SetInitialChildList(aListID, aChildList);
   if (aListID == kPrincipalList) {
     UpdateSpanFlag();
   }
@@ -77,7 +71,7 @@ nsRubyTextContainerFrame::SetInitialChildList(ChildListID aListID,
 nsRubyTextContainerFrame::AppendFrames(ChildListID aListID,
                                        nsFrameList& aFrameList)
 {
-  nsRubyTextContainerFrameSuper::AppendFrames(aListID, aFrameList);
+  nsContainerFrame::AppendFrames(aListID, aFrameList);
   UpdateSpanFlag();
 }
 
@@ -86,7 +80,7 @@ nsRubyTextContainerFrame::InsertFrames(ChildListID aListID,
                                        nsIFrame* aPrevFrame,
                                        nsFrameList& aFrameList)
 {
-  nsRubyTextContainerFrameSuper::InsertFrames(aListID, aPrevFrame, aFrameList);
+  nsContainerFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
   UpdateSpanFlag();
 }
 
@@ -94,7 +88,7 @@ nsRubyTextContainerFrame::InsertFrames(ChildListID aListID,
 nsRubyTextContainerFrame::RemoveFrame(ChildListID aListID,
                                       nsIFrame* aOldFrame)
 {
-  nsRubyTextContainerFrameSuper::RemoveFrame(aListID, aOldFrame);
+  nsContainerFrame::RemoveFrame(aListID, aOldFrame);
   UpdateSpanFlag();
 }
 
@@ -121,20 +115,20 @@ nsRubyTextContainerFrame::UpdateSpanFlag()
 
 /* virtual */ void
 nsRubyTextContainerFrame::Reflow(nsPresContext* aPresContext,
-                                 nsHTMLReflowMetrics& aDesiredSize,
-                                 const nsHTMLReflowState& aReflowState,
+                                 ReflowOutput& aDesiredSize,
+                                 const ReflowInput& aReflowInput,
                                  nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRubyTextContainerFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
 
   // Although a ruby text container may have continuations, returning
-  // NS_FRAME_COMPLETE here is still safe, since its parent, ruby frame,
+  // complete reflow status is still safe, since its parent, ruby frame,
   // ignores the status, and continuations of the ruby base container
   // will take care of our continuations.
-  aStatus = NS_FRAME_COMPLETE;
-  WritingMode lineWM = aReflowState.mLineLayout->GetWritingMode();
+  WritingMode rtcWM = GetWritingMode();
 
   nscoord minBCoord = nscoord_MAX;
   nscoord maxBCoord = nscoord_MIN;
@@ -144,38 +138,38 @@ nsRubyTextContainerFrame::Reflow(nsPresContext* aPresContext,
   const nsSize dummyContainerSize;
   for (nsFrameList::Enumerator e(mFrames); !e.AtEnd(); e.Next()) {
     nsIFrame* child = e.get();
-    MOZ_ASSERT(child->GetType() == nsGkAtoms::rubyTextFrame);
-    LogicalRect rect = child->GetLogicalRect(lineWM, dummyContainerSize);
-    LogicalMargin margin = child->GetLogicalUsedMargin(lineWM);
-    nscoord blockStart = rect.BStart(lineWM) - margin.BStart(lineWM);
+    MOZ_ASSERT(child->IsRubyTextFrame());
+    LogicalRect rect = child->GetLogicalRect(rtcWM, dummyContainerSize);
+    LogicalMargin margin = child->GetLogicalUsedMargin(rtcWM);
+    nscoord blockStart = rect.BStart(rtcWM) - margin.BStart(rtcWM);
     minBCoord = std::min(minBCoord, blockStart);
-    nscoord blockEnd = rect.BEnd(lineWM) + margin.BEnd(lineWM);
+    nscoord blockEnd = rect.BEnd(rtcWM) + margin.BEnd(rtcWM);
     maxBCoord = std::max(maxBCoord, blockEnd);
   }
 
-  LogicalSize size(lineWM, mISize, 0);
+  LogicalSize size(rtcWM, mISize, 0);
   if (!mFrames.IsEmpty()) {
     if (MOZ_UNLIKELY(minBCoord > maxBCoord)) {
       // XXX When bug 765861 gets fixed, this warning should be upgraded.
       NS_WARNING("bad block coord");
       minBCoord = maxBCoord = 0;
     }
-    size.BSize(lineWM) = maxBCoord - minBCoord;
-    nsSize containerSize = size.GetPhysicalSize(lineWM);
+    size.BSize(rtcWM) = maxBCoord - minBCoord;
+    nsSize containerSize = size.GetPhysicalSize(rtcWM);
     for (nsFrameList::Enumerator e(mFrames); !e.AtEnd(); e.Next()) {
       nsIFrame* child = e.get();
       // We reflowed the child with a dummy container size, as the true size
       // was not yet known at that time.
-      LogicalPoint pos = child->GetLogicalPosition(lineWM, dummyContainerSize);
+      LogicalPoint pos = child->GetLogicalPosition(rtcWM, dummyContainerSize);
       // Adjust block position to account for minBCoord,
       // then reposition child based on the true container width.
-      pos.B(lineWM) -= minBCoord;
+      pos.B(rtcWM) -= minBCoord;
       // Relative positioning hasn't happened yet.
       // So MovePositionBy should not be used here.
-      child->SetPosition(lineWM, pos, containerSize);
+      child->SetPosition(rtcWM, pos, containerSize);
       nsContainerFrame::PlaceFrameView(child);
     }
   }
 
-  aDesiredSize.SetSize(lineWM, size);
+  aDesiredSize.SetSize(rtcWM, size);
 }

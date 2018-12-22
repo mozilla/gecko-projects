@@ -6,8 +6,8 @@
 
 // Simple checks for the AnimationsActor
 
-add_task(function*() {
-  let {client, walker, animations} = yield initAnimationsFrontForUrl(
+add_task(async function() {
+  const {client, walker, animations} = await initAnimationsFrontForUrl(
     "data:text/html;charset=utf-8,<title>test</title><div></div>");
 
   ok(animations, "The AnimationsFront was created");
@@ -19,17 +19,17 @@ add_task(function*() {
 
   let didThrow = false;
   try {
-    yield animations.getAnimationPlayersForNode(null);
+    await animations.getAnimationPlayersForNode(null);
   } catch (e) {
     didThrow = true;
   }
   ok(didThrow, "An exception was thrown for a missing NodeActor");
 
-  let invalidNode = yield walker.querySelector(walker.rootNode, "title");
-  let players = yield animations.getAnimationPlayersForNode(invalidNode);
+  const invalidNode = await walker.querySelector(walker.rootNode, "title");
+  const players = await animations.getAnimationPlayersForNode(invalidNode);
   ok(Array.isArray(players), "An array of players was returned");
   is(players.length, 0, "0 players have been returned for the invalid node");
 
-  yield closeDebuggerClient(client);
+  await client.close();
   gBrowser.removeCurrentTab();
 });

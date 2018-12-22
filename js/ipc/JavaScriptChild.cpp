@@ -21,20 +21,22 @@ using namespace mozilla::jsipc;
 using mozilla::AutoSafeJSContext;
 
 static void
-UpdateChildWeakPointersBeforeSweepingZoneGroup(JSRuntime* rt, void* data)
+UpdateChildWeakPointersBeforeSweepingZoneGroup(JSContext* cx, void* data)
 {
     static_cast<JavaScriptChild*>(data)->updateWeakPointers();
 }
 
-JavaScriptChild::JavaScriptChild(JSRuntime* rt)
-  : JavaScriptShared(rt),
-    JavaScriptBase<PJavaScriptChild>(rt)
+static void
+TraceChild(JSTracer* trc, void* data)
 {
+    static_cast<JavaScriptChild*>(data)->trace(trc);
 }
 
 JavaScriptChild::~JavaScriptChild()
 {
-    JS_RemoveWeakPointerZoneGroupCallback(rt_, UpdateChildWeakPointersBeforeSweepingZoneGroup);
+    JSContext* cx = dom::danger::GetJSContext();
+    JS_RemoveWeakPointerZonesCallback(cx, UpdateChildWeakPointersBeforeSweepingZoneGroup);
+    JS_RemoveExtraGCRootsTracer(cx, TraceChild, this);
 }
 
 bool
@@ -45,8 +47,16 @@ JavaScriptChild::init()
     if (!WrapperAnswer::init())
         return false;
 
-    JS_AddWeakPointerZoneGroupCallback(rt_, UpdateChildWeakPointersBeforeSweepingZoneGroup, this);
+    JSContext* cx = dom::danger::GetJSContext();
+    JS_AddWeakPointerZonesCallback(cx, UpdateChildWeakPointersBeforeSweepingZoneGroup, this);
+    JS_AddExtraGCRootsTracer(cx, TraceChild, this);
     return true;
+}
+
+void
+JavaScriptChild::trace(JSTracer* trc)
+{
+    objects_.trace(trc, strongReferenceObjIdMinimum_);
 }
 
 void
@@ -65,10 +75,17 @@ JavaScriptChild::scopeForTargetObjects()
     return xpc::PrivilegedJunkScope();
 }
 
-PJavaScriptChild*
-mozilla::jsipc::NewJavaScriptChild(JSRuntime* rt)
+mozilla::ipc::IPCResult
+JavaScriptChild::RecvDropTemporaryStrongReferences(const uint64_t& upToObjId)
 {
-    JavaScriptChild* child = new JavaScriptChild(rt);
+    strongReferenceObjIdMinimum_ = upToObjId + 1;
+    return IPC_OK();
+}
+
+PJavaScriptChild*
+mozilla::jsipc::NewJavaScriptChild()
+{
+    JavaScriptChild* child = new JavaScriptChild();
     if (!child->init()) {
         delete child;
         return nullptr;

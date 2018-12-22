@@ -1,74 +1,86 @@
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // Interfaces
 
-const nsIAccessibleRetrieval = Components.interfaces.nsIAccessibleRetrieval;
+const nsIAccessibilityService = Ci.nsIAccessibilityService;
 
-const nsIAccessibleEvent = Components.interfaces.nsIAccessibleEvent;
+const nsIAccessibleEvent = Ci.nsIAccessibleEvent;
 const nsIAccessibleStateChangeEvent =
-  Components.interfaces.nsIAccessibleStateChangeEvent;
+  Ci.nsIAccessibleStateChangeEvent;
 const nsIAccessibleCaretMoveEvent =
-  Components.interfaces.nsIAccessibleCaretMoveEvent;
+  Ci.nsIAccessibleCaretMoveEvent;
 const nsIAccessibleTextChangeEvent =
-  Components.interfaces.nsIAccessibleTextChangeEvent;
+  Ci.nsIAccessibleTextChangeEvent;
 const nsIAccessibleVirtualCursorChangeEvent =
-  Components.interfaces.nsIAccessibleVirtualCursorChangeEvent;
+  Ci.nsIAccessibleVirtualCursorChangeEvent;
 const nsIAccessibleObjectAttributeChangedEvent =
-  Components.interfaces.nsIAccessibleObjectAttributeChangedEvent;
+  Ci.nsIAccessibleObjectAttributeChangedEvent;
 
-const nsIAccessibleStates = Components.interfaces.nsIAccessibleStates;
-const nsIAccessibleRole = Components.interfaces.nsIAccessibleRole;
-const nsIAccessibleScrollType = Components.interfaces.nsIAccessibleScrollType;
-const nsIAccessibleCoordinateType = Components.interfaces.nsIAccessibleCoordinateType;
+const nsIAccessibleStates = Ci.nsIAccessibleStates;
+const nsIAccessibleRole = Ci.nsIAccessibleRole;
+const nsIAccessibleScrollType = Ci.nsIAccessibleScrollType;
+const nsIAccessibleCoordinateType = Ci.nsIAccessibleCoordinateType;
 
-const nsIAccessibleRelation = Components.interfaces.nsIAccessibleRelation;
-const nsIAccessibleTextRange = Components.interfaces.nsIAccessibleTextRange;
+const nsIAccessibleRelation = Ci.nsIAccessibleRelation;
+const nsIAccessibleTextRange = Ci.nsIAccessibleTextRange;
 
-const nsIAccessible = Components.interfaces.nsIAccessible;
+const nsIAccessible = Ci.nsIAccessible;
 
-const nsIAccessibleDocument = Components.interfaces.nsIAccessibleDocument;
-const nsIAccessibleApplication = Components.interfaces.nsIAccessibleApplication;
+const nsIAccessibleDocument = Ci.nsIAccessibleDocument;
+const nsIAccessibleApplication = Ci.nsIAccessibleApplication;
 
-const nsIAccessibleText = Components.interfaces.nsIAccessibleText;
-const nsIAccessibleEditableText = Components.interfaces.nsIAccessibleEditableText;
+const nsIAccessibleText = Ci.nsIAccessibleText;
+const nsIAccessibleEditableText = Ci.nsIAccessibleEditableText;
 
-const nsIAccessibleHyperLink = Components.interfaces.nsIAccessibleHyperLink;
-const nsIAccessibleHyperText = Components.interfaces.nsIAccessibleHyperText;
+const nsIAccessibleHyperLink = Ci.nsIAccessibleHyperLink;
+const nsIAccessibleHyperText = Ci.nsIAccessibleHyperText;
 
-const nsIAccessibleImage = Components.interfaces.nsIAccessibleImage;
-const nsIAccessiblePivot = Components.interfaces.nsIAccessiblePivot;
-const nsIAccessibleSelectable = Components.interfaces.nsIAccessibleSelectable;
-const nsIAccessibleTable = Components.interfaces.nsIAccessibleTable;
-const nsIAccessibleTableCell = Components.interfaces.nsIAccessibleTableCell;
-const nsIAccessibleTraversalRule = Components.interfaces.nsIAccessibleTraversalRule;
-const nsIAccessibleValue = Components.interfaces.nsIAccessibleValue;
+const nsIAccessibleImage = Ci.nsIAccessibleImage;
+const nsIAccessiblePivot = Ci.nsIAccessiblePivot;
+const nsIAccessibleSelectable = Ci.nsIAccessibleSelectable;
+const nsIAccessibleTable = Ci.nsIAccessibleTable;
+const nsIAccessibleTableCell = Ci.nsIAccessibleTableCell;
+const nsIAccessibleTraversalRule = Ci.nsIAccessibleTraversalRule;
+const nsIAccessibleValue = Ci.nsIAccessibleValue;
 
-const nsIObserverService = Components.interfaces.nsIObserverService;
+const nsIObserverService = Ci.nsIObserverService;
 
-const nsIDOMDocument = Components.interfaces.nsIDOMDocument;
-const nsIDOMEvent = Components.interfaces.nsIDOMEvent;
-const nsIDOMHTMLDocument = Components.interfaces.nsIDOMHTMLDocument;
-const nsIDOMNode = Components.interfaces.nsIDOMNode;
-const nsIDOMHTMLElement = Components.interfaces.nsIDOMHTMLElement;
-const nsIDOMWindow = Components.interfaces.nsIDOMWindow;
-const nsIDOMXULElement = Components.interfaces.nsIDOMXULElement;
+const nsIDOMWindow = Ci.nsIDOMWindow;
 
-const nsIPropertyElement = Components.interfaces.nsIPropertyElement;
+const nsIPropertyElement = Ci.nsIPropertyElement;
 
-////////////////////////////////////////////////////////////////////////////////
+// Testing "'Node' in this" doesn't do the right thing because there are cases
+// when our "this" is not the global even though we're at toplevel.  In those
+// cases, the import could fail because our global is a Window and we in fact
+// have a Node all along.
+//
+// We could get the global via the (function() { return this; })() trick, but
+// that might break any time if people switch us to strict mode.  So let's just
+// test the thing we care about directly: does bareword Node exist?
+let needToImportNode = false;
+try {
+    Node;
+} catch (e) {
+    needToImportNode = true;
+}
+if (needToImportNode) {
+    Cu.importGlobalProperties(["Node"]);
+}
+
+// //////////////////////////////////////////////////////////////////////////////
 // OS detect
 
-const MAC = (navigator.platform.indexOf("Mac") != -1);
-const LINUX = (navigator.platform.indexOf("Linux") != -1);
-const SOLARIS = (navigator.platform.indexOf("SunOS") != -1);
-const WIN = (navigator.platform.indexOf("Win") != -1);
+const MAC = (navigator.platform.includes("Mac"));
+const LINUX = (navigator.platform.includes("Linux"));
+const SOLARIS = (navigator.platform.includes("SunOS"));
+const WIN = (navigator.platform.includes("Win"));
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // Application detect
 // Firefox is assumed by default.
 
 const SEAMONKEY = navigator.userAgent.match(/ SeaMonkey\//);
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // Accessible general
 
 const STATE_BUSY = nsIAccessibleStates.STATE_BUSY;
@@ -89,34 +101,34 @@ const kSquareBulletText = String.fromCharCode(0x25fe) + " ";
 const MAX_TRIM_LENGTH = 100;
 
 /**
- * nsIAccessibleRetrieval service.
+ * Services to determine if e10s is enabled.
  */
-var gAccRetrieval = Components.classes["@mozilla.org/accessibleRetrieval;1"].
-  getService(nsIAccessibleRetrieval);
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+/**
+ * nsIAccessibilityService service.
+ */
+var gAccService = Cc["@mozilla.org/accessibilityService;1"].
+  getService(nsIAccessibilityService);
 
 /**
  * Enable/disable logging.
  */
-function enableLogging(aModules)
-{
-  gAccRetrieval.setLogging(aModules);
+function enableLogging(aModules) {
+  gAccService.setLogging(aModules);
 }
-function disableLogging()
-{
-  gAccRetrieval.setLogging("");
+function disableLogging() {
+  gAccService.setLogging("");
 }
-function isLogged(aModule)
-{
-  return gAccRetrieval.isLogged(aModule);
+function isLogged(aModule) {
+  return gAccService.isLogged(aModule);
 }
 
 /**
  * Dumps the accessible tree into console.
  */
-function dumpTree(aId, aMsg)
-{
-  function dumpTreeIntl(acc, indent)
-  {
+function dumpTree(aId, aMsg) {
+  function dumpTreeIntl(acc, indent) {
     dump(indent + prettyName(acc) + "\n");
 
     var children = acc.children;
@@ -126,8 +138,7 @@ function dumpTree(aId, aMsg)
     }
   }
 
-  function dumpDOMTreeIntl(node, indent)
-  {
+  function dumpDOMTreeIntl(node, indent) {
     dump(indent + prettyName(node) + "\n");
 
     var children = node.childNodes;
@@ -152,13 +163,10 @@ function dumpTree(aId, aMsg)
  *
  * @param aFunc  the function to invoke
  */
-function addA11yLoadEvent(aFunc, aWindow)
-{
-  function waitForDocLoad()
-  {
+function addA11yLoadEvent(aFunc, aWindow) {
+  function waitForDocLoad() {
     window.setTimeout(
-      function()
-      {
+      function() {
         var targetDocument = aWindow ? aWindow.document : document;
         var accDoc = getAccessible(targetDocument);
         var state = {};
@@ -172,14 +180,19 @@ function addA11yLoadEvent(aFunc, aWindow)
     );
   }
 
-  SimpleTest.waitForFocus(waitForDocLoad, aWindow);
+  if (aWindow &&
+      aWindow.document.activeElement &&
+      aWindow.document.activeElement.localName == "browser") {
+    waitForDocLoad();
+  } else {
+    SimpleTest.waitForFocus(waitForDocLoad, aWindow);
+  }
 }
 
 /**
  * Analogy of SimpleTest.is function used to compare objects.
  */
-function isObject(aObj, aExpectedObj, aMsg)
-{
+function isObject(aObj, aExpectedObj, aMsg) {
   if (aObj == aExpectedObj) {
     ok(true, aMsg);
     return;
@@ -190,18 +203,29 @@ function isObject(aObj, aExpectedObj, aMsg)
             "', expected '" + prettyName(aExpectedObj) + "'");
 }
 
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * is() function checking the expected value is within the range.
+ */
+function isWithin(aExpected, aGot, aWithin, aMsg) {
+  if (Math.abs(aGot - aExpected) <= aWithin) {
+    ok(true, `${aMsg} - Got ${aGot}`);
+  } else {
+    ok(false,
+       `${aMsg} - Got ${aGot}, expected ${aExpected} with error of ${aWithin}`);
+  }
+}
+
+// //////////////////////////////////////////////////////////////////////////////
 // Helpers for getting DOM node/accessible
 
 /**
  * Return the DOM node by identifier (may be accessible, DOM node or ID).
  */
-function getNode(aAccOrNodeOrID, aDocument)
-{
+function getNode(aAccOrNodeOrID, aDocument) {
   if (!aAccOrNodeOrID)
     return null;
 
-  if (aAccOrNodeOrID instanceof nsIDOMNode)
+  if (Node.isInstance(aAccOrNodeOrID))
     return aAccOrNodeOrID;
 
   if (aAccOrNodeOrID instanceof nsIAccessible)
@@ -240,17 +264,16 @@ const DONOTFAIL_IF_NO_INTERFACE = 2;
  * @param aDoNotFailIf       [in, optional] no error for special cases (see
  *                            constants above)
  */
-function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf)
-{
+function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf) {
   if (!aAccOrElmOrID)
     return null;
 
   var elm = null;
 
   if (aAccOrElmOrID instanceof nsIAccessible) {
-    try { elm = aAccOrElmOrID.DOMNode; } catch(e) { }
+    try { elm = aAccOrElmOrID.DOMNode; } catch (e) { }
 
-  } else if (aAccOrElmOrID instanceof nsIDOMNode) {
+  } else if (Node.isInstance(aAccOrElmOrID)) {
     elm = aAccOrElmOrID;
 
   } else {
@@ -267,7 +290,7 @@ function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf)
   var acc = (aAccOrElmOrID instanceof nsIAccessible) ? aAccOrElmOrID : null;
   if (!acc) {
     try {
-      acc = gAccRetrieval.getAccessibleFor(elm);
+      acc = gAccService.getAccessibleFor(elm);
     } catch (e) {
     }
 
@@ -286,6 +309,9 @@ function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf)
     aInterfaces = [ aInterfaces ];
 
   for (var index = 0; index < aInterfaces.length; index++) {
+    if (acc instanceof aInterfaces[index]) {
+      continue;
+    }
     try {
       acc.QueryInterface(aInterfaces[index]);
     } catch (e) {
@@ -303,18 +329,15 @@ function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf)
  * Return true if the given identifier has an accessible, or exposes the wanted
  * interfaces.
  */
-function isAccessible(aAccOrElmOrID, aInterfaces)
-{
-  return getAccessible(aAccOrElmOrID, aInterfaces, null,
-                       DONOTFAIL_IF_NO_ACC | DONOTFAIL_IF_NO_INTERFACE) ?
-    true : false;
+function isAccessible(aAccOrElmOrID, aInterfaces) {
+  return !!getAccessible(aAccOrElmOrID, aInterfaces, null,
+                         DONOTFAIL_IF_NO_ACC | DONOTFAIL_IF_NO_INTERFACE);
 }
 
 /**
  * Return an accessible that contains the DOM node for the given identifier.
  */
-function getContainerAccessible(aAccOrElmOrID)
-{
+function getContainerAccessible(aAccOrElmOrID) {
   var node = getNode(aAccOrElmOrID);
   if (!node)
     return null;
@@ -326,8 +349,7 @@ function getContainerAccessible(aAccOrElmOrID)
 /**
  * Return root accessible for the given identifier.
  */
-function getRootAccessible(aAccOrElmOrID)
-{
+function getRootAccessible(aAccOrElmOrID) {
   var acc = getAccessible(aAccOrElmOrID ? aAccOrElmOrID : document);
   return acc ? acc.rootDocument.QueryInterface(nsIAccessible) : null;
 }
@@ -335,8 +357,7 @@ function getRootAccessible(aAccOrElmOrID)
 /**
  * Return tab document accessible the given accessible is contained by.
  */
-function getTabDocAccessible(aAccOrElmOrID)
-{
+function getTabDocAccessible(aAccOrElmOrID) {
   var acc = getAccessible(aAccOrElmOrID ? aAccOrElmOrID : document);
 
   var docAcc = acc.document.QueryInterface(nsIAccessible);
@@ -353,17 +374,15 @@ function getTabDocAccessible(aAccOrElmOrID)
 /**
  * Return application accessible.
  */
-function getApplicationAccessible()
-{
-  return gAccRetrieval.getApplicationAccessible().
+function getApplicationAccessible() {
+  return gAccService.getApplicationAccessible().
     QueryInterface(nsIAccessibleApplication);
 }
 
 /**
  * A version of accessible tree testing, doesn't fail if tree is not complete.
  */
-function testElm(aID, aTreeObj)
-{
+function testElm(aID, aTreeObj) {
   testAccessibleTree(aID, aTreeObj, kSkipTreeFullCheck);
 }
 
@@ -385,8 +404,7 @@ const kSkipTreeFullCheck = 1;
  *                                      fields
  * @param aFlags          [in, optional] flags, see constants above
  */
-function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
-{
+function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags) {
   var acc = getAccessible(aAccOrElmOrID);
   if (!acc)
     return;
@@ -418,7 +436,7 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
     case "interfaces": {
       var ifaces = (accTree[prop] instanceof Array) ?
         accTree[prop] : [ accTree[prop] ];
-      for (var i = 0; i < ifaces.length; i++) {
+      for (let i = 0; i < ifaces.length; i++) {
         ok((acc instanceof ifaces[i]),
            "No " + ifaces[i] + " interface on " + prettyName(acc));
       }
@@ -439,8 +457,8 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
     case "extraStates":
     case "absentStates":
     case "absentExtraStates": {
-      testStates(acc, accTree["states"], accTree["extraStates"],
-                 accTree["absentStates"], accTree["absentExtraStates"]);
+      testStates(acc, accTree.states, accTree.extraStates,
+                 accTree.absentStates, accTree.absentExtraStates);
       break;
     }
 
@@ -451,8 +469,8 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
     case "textAttrs": {
       var prevOffset = -1;
       for (var offset in accTree[prop]) {
-        if (prevOffset !=- 1) {
-          var attrs = accTree[prop][prevOffset];
+        if (prevOffset != -1) {
+          let attrs = accTree[prop][prevOffset];
           testTextAttrs(acc, prevOffset, attrs, { }, prevOffset, +offset, true);
         }
         prevOffset = +offset;
@@ -460,7 +478,7 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
 
       if (prevOffset != -1) {
         var charCount = getAccessible(acc, [nsIAccessibleText]).characterCount;
-        var attrs = accTree[prop][prevOffset];
+        let attrs = accTree[prop][prevOffset];
         testTextAttrs(acc, prevOffset, attrs, { }, prevOffset, charCount, true);
       }
 
@@ -476,12 +494,12 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
   }
 
   // Test children.
-  if ("children" in accTree && accTree["children"] instanceof Array) {
+  if ("children" in accTree && accTree.children instanceof Array) {
     var children = acc.children;
     var childCount = children.length;
 
     if (accTree.children.length != childCount) {
-      for (var i = 0; i < Math.max(accTree.children.length, childCount); i++) {
+      for (let i = 0; i < Math.max(accTree.children.length, childCount); i++) {
         var accChild = null, testChild = null;
         try {
           testChild = accTree.children[i];
@@ -510,8 +528,8 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
       }
     } else {
       if (aFlags & kSkipTreeFullCheck) {
-        for (var i = 0; i < childCount; i++) {
-          var child = children.queryElementAt(i, nsIAccessible);
+        for (let i = 0; i < childCount; i++) {
+          let child = children.queryElementAt(i, nsIAccessible);
           testAccessibleTree(child, accTree.children[i], aFlags);
         }
         return;
@@ -534,7 +552,7 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
          "Wrong last child of " + prettyName(acc));
 
       for (var i = 0; i < childCount; i++) {
-        var child = children.queryElementAt(i, nsIAccessible);
+        let child = children.queryElementAt(i, nsIAccessible);
 
         // nsIAccessible::parent
         var parent = null;
@@ -543,7 +561,7 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
 
         // nsIAccessible::indexInParent
         var indexInParent = -1;
-        try { indexInParent = child.indexInParent; } catch(e) {}
+        try { indexInParent = child.indexInParent; } catch (e) {}
         is(indexInParent, i,
            "Wrong index in parent of " + prettyName(child));
 
@@ -573,10 +591,9 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags)
 /**
  * Return true if accessible for the given node is in cache.
  */
-function isAccessibleInCache(aNodeOrId)
-{
+function isAccessibleInCache(aNodeOrId) {
   var node = getNode(aNodeOrId);
-  return gAccRetrieval.getAccessibleFromCache(node) ? true : false;
+  return !!gAccService.getAccessibleFromCache(node);
 }
 
 /**
@@ -585,8 +602,7 @@ function isAccessibleInCache(aNodeOrId)
  * @param  aAcc       [in] the defunct accessible
  * @param  aNodeOrId  [in] the DOM node identifier for the defunct accessible
  */
-function testDefunctAccessible(aAcc, aNodeOrId)
-{
+function testDefunctAccessible(aAcc, aNodeOrId) {
   if (aNodeOrId)
     ok(!isAccessible(aNodeOrId),
        "Accessible for " + aNodeOrId + " wasn't properly shut down!");
@@ -599,7 +615,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.firstChild;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE)
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "firstChild" + msg);
 
@@ -608,7 +624,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.lastChild;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE)
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "lastChild" + msg);
 
@@ -617,7 +633,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.childCount;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE)
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "childCount" + msg);
 
@@ -626,7 +642,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.children;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE)
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "children" + msg);
 
@@ -635,7 +651,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.nextSibling;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE);
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "nextSibling" + msg);
 
@@ -644,7 +660,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.previousSibling;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE);
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "previousSibling" + msg);
 
@@ -653,7 +669,7 @@ function testDefunctAccessible(aAcc, aNodeOrId)
   try {
     aAcc.parent;
   } catch (e) {
-    success = (e.result == Components.results.NS_ERROR_FAILURE);
+    success = (e.result == Cr.NS_ERROR_FAILURE);
   }
   ok(success, "parent" + msg);
 }
@@ -661,24 +677,22 @@ function testDefunctAccessible(aAcc, aNodeOrId)
 /**
  * Convert role to human readable string.
  */
-function roleToString(aRole)
-{
-  return gAccRetrieval.getStringRole(aRole);
+function roleToString(aRole) {
+  return gAccService.getStringRole(aRole);
 }
 
 /**
  * Convert states to human readable string.
  */
-function statesToString(aStates, aExtraStates)
-{
-  var list = gAccRetrieval.getStringStates(aStates, aExtraStates);
+function statesToString(aStates, aExtraStates) {
+  var list = gAccService.getStringStates(aStates, aExtraStates);
 
   var str = "";
   for (var index = 0; index < list.length - 1; index++)
     str += list.item(index) + ", ";
 
   if (list.length != 0)
-    str += list.item(index)
+    str += list.item(index);
 
   return str;
 }
@@ -686,21 +700,18 @@ function statesToString(aStates, aExtraStates)
 /**
  * Convert event type to human readable string.
  */
-function eventTypeToString(aEventType)
-{
-  return gAccRetrieval.getStringEventType(aEventType);
+function eventTypeToString(aEventType) {
+  return gAccService.getStringEventType(aEventType);
 }
 
 /**
  * Convert relation type to human readable string.
  */
-function relationTypeToString(aRelationType)
-{
-  return gAccRetrieval.getStringRelationType(aRelationType);
+function relationTypeToString(aRelationType) {
+  return gAccService.getStringRelationType(aRelationType);
 }
 
 function getLoadContext() {
-  const Ci = Components.interfaces;
   return window.QueryInterface(Ci.nsIInterfaceRequestor)
                .getInterface(Ci.nsIWebNavigation)
                .QueryInterface(Ci.nsILoadContext);
@@ -709,28 +720,22 @@ function getLoadContext() {
 /**
  * Return text from clipboard.
  */
-function getTextFromClipboard()
-{
-  var clip = Components.classes["@mozilla.org/widget/clipboard;1"].
-    getService(Components.interfaces.nsIClipboard);
-  if (!clip)
-    return "";
-
-  var trans = Components.classes["@mozilla.org/widget/transferable;1"].
-    createInstance(Components.interfaces.nsITransferable);
+function getTextFromClipboard() {
+  var trans = Cc["@mozilla.org/widget/transferable;1"].
+    createInstance(Ci.nsITransferable);
   trans.init(getLoadContext());
   if (!trans)
     return "";
 
   trans.addDataFlavor("text/unicode");
-  clip.getData(trans, clip.kGlobalClipboard);
+  Services.clipboard.getData(trans, Services.clipboard.kGlobalClipboard);
 
-  var str = new Object();
-  var strLength = new Object();
+  var str = {};
+  var strLength = {};
   trans.getTransferData("text/unicode", str, strLength);
 
   if (str)
-    str = str.value.QueryInterface(Components.interfaces.nsISupportsString);
+    str = str.value.QueryInterface(Ci.nsISupportsString);
   if (str)
     return str.data.substring(0, strLength.value / 2);
 
@@ -738,12 +743,36 @@ function getTextFromClipboard()
 }
 
 /**
+ * Extract DOMNode id from an accessible. If e10s is enabled, DOMNode is not
+ * present in parent process but, if available, DOMNode id is attached to an
+ * accessible object.
+ * @param  {nsIAccessible} accessible  accessible
+ * @return {String?}                   DOMNode id if available
+ */
+function getAccessibleDOMNodeID(accessible) {
+  if (accessible instanceof nsIAccessibleDocument) {
+    // If accessible is a document, trying to find its document body id.
+    try {
+      return accessible.DOMNode.body.id;
+    } catch (e) { /* This only works if accessible is not a proxy. */ }
+  }
+  try {
+    return accessible.DOMNode.id;
+  } catch (e) { /* This will fail if DOMNode is in different process. */ }
+  try {
+    // When e10s is enabled, accessible will have an "id" property if its
+    // corresponding DOMNode has an id. If accessible is a document, its "id"
+    // property corresponds to the "id" of its body element.
+    return accessible.id;
+  } catch (e) { /* This will fail if accessible is not a proxy. */ }
+}
+
+/**
  * Return pretty name for identifier, it may be ID, DOM node or accessible.
  */
-function prettyName(aIdentifier)
-{
+function prettyName(aIdentifier) {
   if (aIdentifier instanceof Array) {
-    var msg = "";
+    let msg = "";
     for (var idx = 0; idx < aIdentifier.length; idx++) {
       if (msg != "")
         msg += ", ";
@@ -755,10 +784,17 @@ function prettyName(aIdentifier)
 
   if (aIdentifier instanceof nsIAccessible) {
     var acc = getAccessible(aIdentifier);
-    var msg = "[";
+    var domID = getAccessibleDOMNodeID(acc);
+    let msg = "[";
     try {
-      msg += getNodePrettyName(acc.DOMNode);
-      msg += ", role: " + roleToString(acc.role);
+      if (Services.appinfo.browserTabsRemoteAutostart) {
+        if (domID) {
+          msg += `DOM node id: ${domID}, `;
+        }
+      } else {
+        msg += `${getNodePrettyName(acc.DOMNode)}, `;
+      }
+      msg += "role: " + roleToString(acc.role);
       if (acc.name)
         msg += ", name: '" + shortenString(acc.name) + "'";
     } catch (e) {
@@ -772,7 +808,7 @@ function prettyName(aIdentifier)
     return msg;
   }
 
-  if (aIdentifier instanceof nsIDOMNode)
+  if (Node.isInstance(aIdentifier))
     return "[ " + getNodePrettyName(aIdentifier) + " ]";
 
   if (aIdentifier && typeof aIdentifier === "object" ) {
@@ -804,8 +840,7 @@ function prettyName(aIdentifier)
  * @param aString the string to shorten.
  * @returns the shortened string.
  */
-function shortenString(aString, aMaxLength)
-{
+function shortenString(aString, aMaxLength) {
   if (aString.length <= MAX_TRIM_LENGTH)
     return aString;
 
@@ -815,20 +850,19 @@ function shortenString(aString, aMaxLength)
     aString.substring(aString.length - trimOffset, aString.length);
 }
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // General Utils
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 /**
  * Return main chrome window (crosses chrome boundary)
  */
-function getMainChromeWindow(aWindow)
-{
-  return aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                .getInterface(Components.interfaces.nsIWebNavigation)
-                .QueryInterface(Components.interfaces.nsIDocShellTreeItem)
+function getMainChromeWindow(aWindow) {
+  return aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                .getInterface(Ci.nsIWebNavigation)
+                .QueryInterface(Ci.nsIDocShellTreeItem)
                 .rootTreeItem
-                .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                .getInterface(Components.interfaces.nsIDOMWindow);
+                .QueryInterface(Ci.nsIInterfaceRequestor)
+                .getInterface(Ci.nsIDOMWindow);
 }
 
 /** Sets the test plugin(s) initially expected enabled state.
@@ -837,8 +871,7 @@ function getMainChromeWindow(aWindow)
  * @param aNewEnabledState [in] the enabled state, e.g. SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED
  * @param aPluginName [in, optional] The name of the plugin, defaults to "Test Plug-in"
  */
-function setTestPluginEnabledState(aNewEnabledState, aPluginName)
-{
+function setTestPluginEnabledState(aNewEnabledState, aPluginName) {
   var plugin = getTestPluginTag(aPluginName);
   var oldEnabledState = plugin.enabledState;
   plugin.enabledState = aNewEnabledState;
@@ -847,22 +880,21 @@ function setTestPluginEnabledState(aNewEnabledState, aPluginName)
   });
 }
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // Private
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
 // Accessible general
 
-function getNodePrettyName(aNode)
-{
+function getNodePrettyName(aNode) {
   try {
     var tag = "";
-    if (aNode.nodeType == nsIDOMNode.DOCUMENT_NODE) {
+    if (aNode.nodeType == Node.DOCUMENT_NODE) {
       tag = "document";
     } else {
       tag = aNode.localName;
-      if (aNode.nodeType == nsIDOMNode.ELEMENT_NODE && aNode.hasAttribute("id"))
+      if (aNode.nodeType == Node.ELEMENT_NODE && aNode.hasAttribute("id"))
         tag += "@id=\"" + aNode.getAttribute("id") + "\"";
     }
 
@@ -872,8 +904,7 @@ function getNodePrettyName(aNode)
   }
 }
 
-function getObjAddress(aObj)
-{
+function getObjAddress(aObj) {
   var exp = /native\s*@\s*(0x[a-f0-9]+)/g;
   var match = exp.exec(aObj.toString());
   if (match)
@@ -882,8 +913,7 @@ function getObjAddress(aObj)
   return aObj.toString();
 }
 
-function getTestPluginTag(aPluginName)
-{
+function getTestPluginTag(aPluginName) {
   var ph = SpecialPowers.Cc["@mozilla.org/plugin/host;1"]
                         .getService(SpecialPowers.Ci.nsIPluginHost);
   var tags = ph.getPluginTags();
@@ -898,8 +928,7 @@ function getTestPluginTag(aPluginName)
   return null;
 }
 
-function normalizeAccTreeObj(aObj)
-{
+function normalizeAccTreeObj(aObj) {
   var key = Object.keys(aObj)[0];
   var roleName = "ROLE_" + key;
   if (roleName in nsIAccessibleRole) {

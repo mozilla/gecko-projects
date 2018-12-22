@@ -7,17 +7,18 @@
 #define WEBGL_EXTENSIONS_H_
 
 #include "mozilla/AlreadyAddRefed.h"
-#include "mozilla/Attributes.h"
+#include "nsString.h"
+#include "nsTArray.h"
 #include "nsWrapperCache.h"
-
 #include "WebGLObjectModel.h"
 #include "WebGLTypes.h"
 
 namespace mozilla {
+class ErrorResult;
 
 namespace dom {
-template<typename T>
-class Sequence;
+template<typename> struct Nullable;
+template<typename> class Sequence;
 } // namespace dom
 
 namespace webgl {
@@ -27,7 +28,6 @@ class FormatUsageAuthority;
 class WebGLContext;
 class WebGLShader;
 class WebGLQuery;
-class WebGLTimerQuery;
 class WebGLVertexArray;
 
 class WebGLExtensionBase
@@ -49,6 +49,8 @@ public:
 protected:
     virtual ~WebGLExtensionBase();
 
+    virtual void OnMarkLost() { }
+
     bool mIsLost;
 };
 
@@ -58,8 +60,24 @@ protected:
 #define IMPL_WEBGL_EXTENSION_GOOP(WebGLExtensionType, WebGLBindingType)\
     JSObject*                                                    \
     WebGLExtensionType::WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) {              \
-        return dom::WebGLBindingType##Binding::Wrap(cx, this, givenProto); \
+        return dom::WebGLBindingType##_Binding::Wrap(cx, this, givenProto); \
     }
+
+////
+
+class WebGLExtensionCompressedTextureASTC
+    : public WebGLExtensionBase
+{
+public:
+    explicit WebGLExtensionCompressedTextureASTC(WebGLContext* webgl);
+    virtual ~WebGLExtensionCompressedTextureASTC();
+
+    void GetSupportedProfiles(dom::Nullable< nsTArray<nsString> >& retval) const;
+
+    static bool IsSupported(const WebGLContext* webgl);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
 
 class WebGLExtensionCompressedTextureATC
     : public WebGLExtensionBase
@@ -108,6 +126,20 @@ public:
     explicit WebGLExtensionCompressedTextureS3TC(WebGLContext*);
     virtual ~WebGLExtensionCompressedTextureS3TC();
 
+    static bool IsSupported(const WebGLContext*);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionCompressedTextureS3TC_SRGB
+    : public WebGLExtensionBase
+{
+public:
+    explicit WebGLExtensionCompressedTextureS3TC_SRGB(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTextureS3TC_SRGB();
+
+    static bool IsSupported(const WebGLContext*);
+
     DECL_WEBGL_EXTENSION_GOOP
 };
 
@@ -128,7 +160,7 @@ public:
     explicit WebGLExtensionDebugShaders(WebGLContext*);
     virtual ~WebGLExtensionDebugShaders();
 
-    void GetTranslatedShaderSource(WebGLShader* shader, nsAString& retval);
+    void GetTranslatedShaderSource(const WebGLShader& shader, nsAString& retval) const;
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -149,6 +181,18 @@ class WebGLExtensionElementIndexUint
 public:
     explicit WebGLExtensionElementIndexUint(WebGLContext*);
     virtual ~WebGLExtensionElementIndexUint();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionEXTColorBufferFloat
+    : public WebGLExtensionBase
+{
+public:
+    explicit WebGLExtensionEXTColorBufferFloat(WebGLContext*);
+    virtual ~WebGLExtensionEXTColorBufferFloat() { }
+
+    static bool IsSupported(const WebGLContext*);
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -315,7 +359,7 @@ public:
 
     already_AddRefed<WebGLVertexArray> CreateVertexArrayOES();
     void DeleteVertexArrayOES(WebGLVertexArray* array);
-    bool IsVertexArrayOES(WebGLVertexArray* array);
+    bool IsVertexArrayOES(const WebGLVertexArray* array);
     void BindVertexArrayOES(WebGLVertexArray* array);
 
     DECL_WEBGL_EXTENSION_GOOP
@@ -358,27 +402,33 @@ public:
     explicit WebGLExtensionDisjointTimerQuery(WebGLContext* webgl);
     virtual ~WebGLExtensionDisjointTimerQuery();
 
-    already_AddRefed<WebGLTimerQuery> CreateQueryEXT();
-    void DeleteQueryEXT(WebGLTimerQuery* query);
-    bool IsQueryEXT(WebGLTimerQuery* query);
-    void BeginQueryEXT(GLenum target, WebGLTimerQuery* query);
-    void EndQueryEXT(GLenum target);
-    void QueryCounterEXT(WebGLTimerQuery* query, GLenum target);
-    void GetQueryEXT(JSContext *cx, GLenum target, GLenum pname,
-                     JS::MutableHandle<JS::Value> retval);
-    void GetQueryObjectEXT(JSContext *cx, WebGLTimerQuery* query,
-                           GLenum pname,
-                           JS::MutableHandle<JS::Value> retval);
+    already_AddRefed<WebGLQuery> CreateQueryEXT() const;
+    void DeleteQueryEXT(WebGLQuery* query) const;
+    bool IsQueryEXT(const WebGLQuery* query) const;
+    void BeginQueryEXT(GLenum target, WebGLQuery& query) const;
+    void EndQueryEXT(GLenum target) const;
+    void QueryCounterEXT(WebGLQuery& query, GLenum target) const;
+    void GetQueryEXT(JSContext* cx, GLenum target, GLenum pname,
+                     JS::MutableHandleValue retval) const;
+    void GetQueryObjectEXT(JSContext* cx, const WebGLQuery& query,
+                           GLenum pname, JS::MutableHandleValue retval) const;
 
     static bool IsSupported(const WebGLContext*);
 
     DECL_WEBGL_EXTENSION_GOOP
+};
 
-private:
-    /**
-     * An active TIME_ELAPSED query participating in a begin/end block.
-     */
-    WebGLRefPtr<WebGLTimerQuery> mActiveQuery;
+class WebGLExtensionMOZDebug final
+    : public WebGLExtensionBase
+{
+public:
+    explicit WebGLExtensionMOZDebug(WebGLContext* webgl);
+    virtual ~WebGLExtensionMOZDebug();
+
+    void GetParameter(JSContext* cx, GLenum pname,
+                      JS::MutableHandle<JS::Value> retval, ErrorResult& er) const;
+
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
 } // namespace mozilla

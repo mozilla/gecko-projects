@@ -4,29 +4,25 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["UserAgentUpdates"];
+var EXPORTED_SYMBOLS = ["UserAgentUpdates"];
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest"]);
 
-XPCOMUtils.defineLazyModuleGetter(
+ChromeUtils.defineModuleGetter(
   this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(
+ChromeUtils.defineModuleGetter(
   this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(
+ChromeUtils.defineModuleGetter(
   this, "OS", "resource://gre/modules/osfile.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(
-  this, "Promise", "resource://gre/modules/Promise.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(
+ChromeUtils.defineModuleGetter(
   this, "UpdateUtils", "resource://gre/modules/UpdateUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -89,7 +85,7 @@ function readChannel(url) {
   });
 }
 
-this.UserAgentUpdates = {
+var UserAgentUpdates = {
   init: function(callback) {
     if (gInitialized) {
       return;
@@ -100,7 +96,7 @@ this.UserAgentUpdates = {
     this._lastUpdated = 0;
     this._applySavedUpdate();
 
-    Services.prefs.addObserver(PREF_UPDATES, this, false);
+    Services.prefs.addObserver(PREF_UPDATES, this);
   },
 
   uninit: function() {
@@ -142,8 +138,8 @@ this.UserAgentUpdates = {
         }
       );
       // try to load next one if the previous load failed
-      return prevLoad ? prevLoad.then(null, tryNext) : tryNext();
-    }, null).then(null, (ex) => {
+      return prevLoad ? prevLoad.catch(tryNext) : tryNext();
+    }, null).catch((ex) => {
       if (AppConstants.platform !== "android") {
         // All previous (non-Android) load attempts have failed, so we bail.
         throw new Error("UserAgentUpdates: Failed to load " + FILE_UPDATES +
@@ -209,8 +205,7 @@ this.UserAgentUpdates = {
   },
 
   _fetchUpdate: function(url, success, error) {
-    let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                    .createInstance(Ci.nsIXMLHttpRequest);
+    let request = new XMLHttpRequest();
     request.mozBackgroundRequest = true;
     request.timeout = this._getPref(PREF_UPDATES_TIMEOUT, 60000);
     request.open("GET", url, true);
@@ -228,15 +223,15 @@ this.UserAgentUpdates = {
   _update: function() {
     let url = this._getUpdateURL();
     url && this._fetchUpdate(url,
-      (function(response) { // success
+      response => { // success
         // apply update and save overrides to profile
         this._applyUpdate(response);
         this._saveToFile(response);
         this._scheduleUpdate(); // cancel any retries
-      }).bind(this),
-      (function(response) { // error
+      },
+      response => { // error
         this._scheduleUpdate(true /* retry */);
-      }).bind(this));
+      });
   },
 
   _scheduleUpdate: function(retry) {
@@ -278,7 +273,7 @@ this.UserAgentUpdates = {
     }
   },
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIObserver,
     Ci.nsITimerCallback,
   ]),

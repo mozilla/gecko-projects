@@ -20,12 +20,12 @@ namespace layout {
 PrintTranslator::PrintTranslator(nsDeviceContext* aDeviceContext)
   : mDeviceContext(aDeviceContext)
 {
-  RefPtr<gfxContext> context = mDeviceContext->CreateRenderingContext();
+  RefPtr<gfxContext> context = mDeviceContext->CreateReferenceRenderingContext();
   mBaseDT = context->GetDrawTarget();
 }
 
 bool
-PrintTranslator::TranslateRecording(std::istream& aRecording)
+PrintTranslator::TranslateRecording(PRFileDescStream& aRecording)
 {
   uint32_t magicInt;
   ReadElement(aRecording, magicInt);
@@ -57,7 +57,10 @@ PrintTranslator::TranslateRecording(std::istream& aRecording)
       return false;
     }
 
-    recordedEvent->PlayEvent(this);
+    if (!recordedEvent->PlayEvent(this)) {
+      return false;
+    }
+
     ReadElement(aRecording, eventType);
   }
 
@@ -78,24 +81,6 @@ PrintTranslator::CreateDrawTarget(ReferencePtr aRefPtr,
   RefPtr<DrawTarget> drawTarget = context->GetDrawTarget();
   AddDrawTarget(aRefPtr, drawTarget);
   return drawTarget.forget();
-}
-
-FontType
-PrintTranslator::GetDesiredFontType()
-{
-  switch (mBaseDT->GetBackendType()) {
-    case BackendType::DIRECT2D:
-      return FontType::DWRITE;
-    case BackendType::CAIRO:
-      return FontType::CAIRO;
-    case BackendType::SKIA:
-      return FontType::SKIA;
-    case BackendType::COREGRAPHICS:
-    case BackendType::COREGRAPHICS_ACCELERATED:
-      return FontType::COREGRAPHICS;
-    default:
-      return FontType::CAIRO;
-  }
 }
 
 } // namespace layout

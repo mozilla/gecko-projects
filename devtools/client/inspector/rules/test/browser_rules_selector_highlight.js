@@ -109,20 +109,20 @@ const TEST_DATA = [
   },
 ];
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
 
-  for (let {node, pseudoClass, expected} of TEST_DATA) {
-    yield selectNode(node, inspector);
+  for (const {node, pseudoClass, expected} of TEST_DATA) {
+    await selectNode(node, inspector);
 
     if (pseudoClass) {
-      let onRefresh = inspector.once("rule-view-refreshed");
+      const onRefresh = inspector.once("rule-view-refreshed");
       inspector.togglePseudoClass(pseudoClass);
-      yield onRefresh;
+      await onRefresh;
     }
 
-    let selectorContainer =
+    const selectorContainer =
       getRuleViewRuleEditor(view, 1).selectorText.firstChild;
 
     if (selectorContainer.children.length === expected.length) {
@@ -135,7 +135,7 @@ add_task(function*() {
           selectorContainer.children[i].className);
       }
     } else {
-      for (let selector of selectorContainer.children) {
+      for (const selector of selectorContainer.children) {
         info("Actual selector components: { value: " + selector.textContent +
           ", class: " + selector.className + " }\n");
       }

@@ -30,10 +30,13 @@
 #include "nsChildView.h"
 #include "nsToolkit.h"
 #include "TextInputHandler.h"
-#include "mozilla/HangMonitor.h"
+#include "mozilla/BackgroundHangMonitor.h"
 #include "GeckoProfiler.h"
+#include "ScreenHelperCocoa.h"
+#include "mozilla/widget/ScreenManager.h"
+#include "HeadlessScreenHelper.h"
 #include "pratom.h"
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
 #include "nsSandboxViolationSink.h"
 #endif
 
@@ -42,6 +45,9 @@
 #include "nsIPowerManagerService.h"
 
 using namespace mozilla::widget;
+
+#define WAKE_LOCK_LOG(...) MOZ_LOG(gMacWakeLockLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
+static mozilla::LazyLogModule gMacWakeLockLog("MacWakeLock");
 
 // A wake lock listener that disables screen saver when requested by
 // Gecko. For example when we're playing video in a foreground tab we
@@ -54,15 +60,37 @@ public:
 private:
   ~MacWakeLockListener() {}
 
-  IOPMAssertionID mAssertionID = kIOPMNullAssertionID;
+  IOPMAssertionID mAssertionNoDisplaySleepID = kIOPMNullAssertionID;
+  IOPMAssertionID mAssertionNoIdleSleepID = kIOPMNullAssertionID;
 
   NS_IMETHOD Callback(const nsAString& aTopic, const nsAString& aState) override {
-    if (!aTopic.EqualsASCII("screen")) {
+    if (!aTopic.EqualsASCII("screen") &&
+        !aTopic.EqualsASCII("audio-playing") &&
+        !aTopic.EqualsASCII("video-playing")) {
       return NS_OK;
     }
+
+    // we should still hold the lock for background audio.
+    if (aTopic.EqualsASCII("audio-playing") &&
+        aState.EqualsASCII("locked-background")) {
+      WAKE_LOCK_LOG("keep audio playing even in background");
+      return NS_OK;
+    }
+
+    bool shouldKeepDisplayOn = aTopic.EqualsASCII("screen") ||
+                               aTopic.EqualsASCII("video-playing");
+    CFStringRef assertionType = shouldKeepDisplayOn ?
+      kIOPMAssertionTypeNoDisplaySleep : kIOPMAssertionTypeNoIdleSleep;
+    IOPMAssertionID& assertionId = shouldKeepDisplayOn ?
+      mAssertionNoDisplaySleepID : mAssertionNoIdleSleepID;
+
     // Note the wake lock code ensures that we're not sent duplicate
     // "locked-foreground" notifications when multiple wake locks are held.
     if (aState.EqualsASCII("locked-foreground")) {
+      if (assertionId != kIOPMNullAssertionID) {
+        WAKE_LOCK_LOG("already has a lock");
+        return NS_OK;
+      }
       // Prevent screen saver.
       CFStringRef cf_topic =
         ::CFStringCreateWithCharacters(kCFAllocatorDefault,
@@ -70,22 +98,24 @@ private:
                                          (aTopic.Data()),
                                        aTopic.Length());
       IOReturn success =
-        ::IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep,
+        ::IOPMAssertionCreateWithName(assertionType,
                                       kIOPMAssertionLevelOn,
                                       cf_topic,
-                                      &mAssertionID);
+                                      &assertionId);
       CFRelease(cf_topic);
       if (success != kIOReturnSuccess) {
-        NS_WARNING("failed to disable screensaver");
+        WAKE_LOCK_LOG("failed to disable screensaver");
       }
+      WAKE_LOCK_LOG("create screensaver");
     } else {
       // Re-enable screen saver.
-      NS_WARNING("Releasing screensaver");
-      if (mAssertionID != kIOPMNullAssertionID) {
-        IOReturn result = ::IOPMAssertionRelease(mAssertionID);
+      if (assertionId != kIOPMNullAssertionID) {
+        IOReturn result = ::IOPMAssertionRelease(assertionId);
         if (result != kIOReturnSuccess) {
-          NS_WARNING("failed to release screensaver");
+          WAKE_LOCK_LOG("failed to release screensaver");
         }
+        WAKE_LOCK_LOG("Release screensaver");
+        assertionId = kIOPMNullAssertionID;
       }
     }
     return NS_OK;
@@ -101,7 +131,13 @@ static bool gAppShellMethodsSwizzled = false;
 
 - (void)sendEvent:(NSEvent *)anEvent
 {
-  mozilla::HangMonitor::NotifyActivity();
+  // Mark this function as non-idle because it's one of the exit points from
+  // the event loop (running inside of -[GeckoNSApplication nextEventMatchingMask:...])
+  // into non-idle code. So we basically unset the IDLE category from the inside.
+  AUTO_PROFILER_LABEL("-[GeckoNSApplication sendEvent:]", OTHER);
+
+  mozilla::BackgroundHangMonitor().NotifyActivity();
+
   if ([anEvent type] == NSApplicationDefined &&
       [anEvent subtype] == kEventSubtypeTrace) {
     mozilla::SignalTracerThread();
@@ -110,24 +146,44 @@ static bool gAppShellMethodsSwizzled = false;
   [super sendEvent:anEvent];
 }
 
+#if defined(MAC_OS_X_VERSION_10_12) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12 && \
+    __LP64__
+// 10.12 changed `mask` to NSEventMask (unsigned long long) for x86_64 builds.
+- (NSEvent*)nextEventMatchingMask:(NSEventMask)mask
+#else
 - (NSEvent*)nextEventMatchingMask:(NSUInteger)mask
+#endif
                         untilDate:(NSDate*)expiration
                            inMode:(NSString*)mode
                           dequeue:(BOOL)flag
 {
+  // When we're waiting in the event loop, this is the last function under our
+  // control that's on the stack, so this is the function that we mark with the
+  // IDLE category.
+  // However, when we're processing an event or when our CFRunLoopSource runs,
+  // this function is still on the stack - "the event loop calls us". So we
+  // need to mark functions that enter non-idle code with a different profiler
+  // category, usually OTHER. This gives the profiler a rough approximation of
+  // idleness but isn't perfect. For example, sometimes there's some Cocoa-
+  // internal activity that's triggered from the event loop, and we'll
+  // misidentify the stacks for that activity as idle because there's no Gecko
+  // code on the stack that can change the stack's category to something
+  // non-idle.
+  AUTO_PROFILER_LABEL("-[GeckoNSApplication nextEventMatchingMask:untilDate:inMode:dequeue:]", IDLE);
+
   if (expiration) {
-    mozilla::HangMonitor::Suspend();
+    mozilla::BackgroundHangMonitor().NotifyWait();
   }
   NSEvent* nextEvent = [super nextEventMatchingMask:mask
                         untilDate:expiration inMode:mode dequeue:flag];
   if (expiration) {
-    mozilla::HangMonitor::NotifyActivity();
+    mozilla::BackgroundHangMonitor().NotifyActivity();
   }
   return nextEvent;
 }
 
 @end
-
 
 // AppShellDelegate
 //
@@ -294,11 +350,21 @@ nsAppShell::Init()
   // context.version = 0;
   context.info = this;
   context.perform = ProcessGeckoEvents;
-  
+
   mCFRunLoopSource = ::CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
   NS_ENSURE_STATE(mCFRunLoopSource);
 
   ::CFRunLoopAddSource(mCFRunLoop, mCFRunLoopSource, kCFRunLoopCommonModes);
+
+  if (XRE_IsParentProcess()) {
+    ScreenManager& screenManager = ScreenManager::GetSingleton();
+
+    if (gfxPlatform::IsHeadless()) {
+      screenManager.SetHelper(mozilla::MakeUnique<HeadlessScreenHelper>());
+    } else {
+      screenManager.SetHelper(mozilla::MakeUnique<ScreenHelperCocoa>());
+    }
+  }
 
   rv = nsBaseAppShell::Init();
 
@@ -312,7 +378,12 @@ nsAppShell::Init()
     gAppShellMethodsSwizzled = true;
   }
 
-  if (nsCocoaFeatures::OnYosemiteOrLater()) {
+  // The bug that this works around was introduced in OS X 10.10.0
+  // and fixed in OS X 10.10.2. Order these version checks so as
+  // few as possible will actually end up running.
+  if (nsCocoaFeatures::OSXVersionMinor() == 10 &&
+      nsCocoaFeatures::OSXVersionBugFix() < 2 &&
+      nsCocoaFeatures::OSXVersionMajor() == 10) {
     // Explicitly turn off CGEvent logging.  This works around bug 1092855.
     // If there are already CGEvents in the log, turning off logging also
     // causes those events to be written to disk.  But at this point no
@@ -322,9 +393,8 @@ nsAppShell::Init()
     CGSSetDebugOptions(0x80000007);
   }
 
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
-  if (nsCocoaFeatures::OnMavericksOrLater() &&
-      Preferences::GetBool("security.sandbox.mac.track.violations", false)) {
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
+  if (Preferences::GetBool("security.sandbox.mac.track.violations", false)) {
     nsSandboxViolationSink::Start();
   }
 #endif
@@ -350,8 +420,7 @@ void
 nsAppShell::ProcessGeckoEvents(void* aInfo)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-  PROFILER_LABEL("Events", "ProcessGeckoEvents",
-    js::ProfileEntry::Category::EVENTS);
+  AUTO_PROFILER_LABEL("nsAppShell::ProcessGeckoEvents", OTHER);
 
   nsAppShell* self = static_cast<nsAppShell*> (aInfo);
 
@@ -364,7 +433,7 @@ nsAppShell::ProcessGeckoEvents(void* aInfo)
     // presentable.
     //
     // But _don't_ set windowNumber to '-1' -- that can lead to nasty
-    // wierdness like bmo bug 397039 (a crash in [NSApp sendEvent:] on one of
+    // weirdness like bmo bug 397039 (a crash in [NSApp sendEvent:] on one of
     // these fake events, because the -1 has gotten changed into the number
     // of an actual NSWindow object, and that NSWindow object has just been
     // destroyed).  Setting windowNumber to '0' seems to work fine -- this
@@ -545,7 +614,7 @@ nsAppShell::ProcessNextNativeEvent(bool aMayWait)
   EventTargetRef eventDispatcherTarget = GetEventDispatcherTarget();
 
   if (aMayWait) {
-    mozilla::HangMonitor::Suspend();
+    mozilla::BackgroundHangMonitor().NotifyWait();
   }
 
   // Only call -[NSApp sendEvent:] (and indirectly send user-input events to
@@ -571,7 +640,7 @@ nsAppShell::ProcessNextNativeEvent(bool aMayWait)
                                                  inMode:currentMode
                                                 dequeue:YES];
       if (nextEvent) {
-        mozilla::HangMonitor::NotifyActivity();
+        mozilla::BackgroundHangMonitor().NotifyActivity();
         [NSApp sendEvent:nextEvent];
         eventProcessed = true;
       }
@@ -656,13 +725,23 @@ nsAppShell::Run(void)
 
   mStarted = true;
 
-  AddScreenWakeLockListener();
+  if (XRE_IsParentProcess()) {
+    AddScreenWakeLockListener();
+  }
 
-  NS_OBJC_TRY_ABORT([NSApp run]);
+  // We use the native Gecko event loop in content processes.
+  nsresult rv = NS_OK;
+  if (XRE_UseNativeEventProcessing()) {
+    NS_OBJC_TRY_ABORT([NSApp run]);
+  } else {
+    rv = nsBaseAppShell::Run();
+  }
 
-  RemoveScreenWakeLockListener();
+  if (XRE_IsParentProcess()) {
+    RemoveScreenWakeLockListener();
+  }
 
-  return NS_OK;
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -682,10 +761,8 @@ nsAppShell::Exit(void)
 
   mTerminated = true;
 
-#if !defined(RELEASE_BUILD) || defined(DEBUG)
-  if (nsCocoaFeatures::OnMavericksOrLater()) {
-    nsSandboxViolationSink::Stop();
-  }
+#if !defined(RELEASE_OR_BETA) || defined(DEBUG)
+  nsSandboxViolationSink::Stop();
 #endif
 
   // Quoting from Apple's doc on the [NSApplication stop:] method (from their

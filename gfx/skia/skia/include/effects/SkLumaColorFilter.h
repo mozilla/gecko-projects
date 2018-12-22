@@ -9,6 +9,9 @@
 #define SkLumaColorFilter_DEFINED
 
 #include "SkColorFilter.h"
+#include "SkRefCnt.h"
+
+class SkRasterPipeline;
 
 /**
  *  Luminance-to-alpha color filter, as defined in
@@ -23,12 +26,11 @@
  */
 class SK_API SkLumaColorFilter : public SkColorFilter {
 public:
-    static SkColorFilter* Create();
-
-    void filterSpan(const SkPMColor src[], int count, SkPMColor[]) const override;
+    static sk_sp<SkColorFilter> Make();
 
 #if SK_SUPPORT_GPU
-    const GrFragmentProcessor* asFragmentProcessor(GrContext*) const override;
+    std::unique_ptr<GrFragmentProcessor> asFragmentProcessor(
+            GrContext*, const GrColorSpaceInfo&) const override;
 #endif
 
     SK_TO_STRING_OVERRIDE()
@@ -39,6 +41,8 @@ protected:
 
 private:
     SkLumaColorFilter();
+    void onAppendStages(SkRasterPipeline*, SkColorSpace*, SkArenaAlloc*,
+                        bool shaderIsOpaque) const override;
 
     typedef SkColorFilter INHERITED;
 };

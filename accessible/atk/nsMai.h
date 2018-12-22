@@ -65,22 +65,29 @@ typedef struct _MaiAtkSocketClass
   AtkSocketClass parent_class;
 } MaiAtkSocketClass;
 
+// This is a pointer to the atk_table_cell_get_type function if we are using
+// a version of atk that defines that.
+extern "C" GType (*gAtkTableCellGetTypeFunc)();
+
 mozilla::a11y::AccessibleWrap* GetAccessibleWrap(AtkObject* aAtkObj);
 mozilla::a11y::ProxyAccessible* GetProxy(AtkObject* aAtkObj);
 mozilla::a11y::AccessibleOrProxy GetInternalObj(AtkObject* aObj);
 AtkObject* GetWrapperFor(mozilla::a11y::ProxyAccessible* aProxy);
+AtkObject* GetWrapperFor(mozilla::a11y::AccessibleOrProxy aObj);
 
-extern int atkMajorVersion, atkMinorVersion;
+extern int atkMajorVersion, atkMinorVersion, atkMicroVersion;
 
 /**
  * Return true if the loaded version of libatk-1.0.so is at least
- * aMajor.aMinor.0.
+ * aMajor.aMinor.aMicro.
  */
 static inline bool
-IsAtkVersionAtLeast(int aMajor, int aMinor)
+IsAtkVersionAtLeast(int aMajor, int aMinor, int aMicro=0)
 {
   return aMajor < atkMajorVersion ||
-         (aMajor == atkMajorVersion && aMinor <= atkMinorVersion);
+         (aMajor == atkMajorVersion &&
+          (aMinor < atkMinorVersion ||
+           (aMinor == atkMinorVersion && aMicro <= atkMicroVersion)));
 }
 
 // This is or'd with the pointer in MaiAtkObject::accWrap if the wrap-ee is a
@@ -119,6 +126,12 @@ struct MaiAtkObject
    */
   void FireTextChangeEvent(const nsString& aStr, int32_t aStart, uint32_t aLen,
                            bool aIsInsert, bool aIsFromUser);
+
+  /**
+   * Notify ATK of a shown or hidden subtree rooted at aObject whose parent is
+   * aParent
+   */
+  void FireAtkShowHideEvent(AtkObject* aParent, bool aIsAdded, bool aFromUser);
 
 private:
   /*

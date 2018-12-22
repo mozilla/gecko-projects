@@ -14,16 +14,19 @@ const SCRIPT_URI = EXAMPLE_URL + "code_function-jump-01.js";
 function test() {
   let gTab, gPanel, gDebugger, gSources;
 
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_function-jump-01.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gSources = gDebugger.DebuggerView.Sources;
 
-    waitForSourceShown(gPanel, "-01.js")
-      .then(jumpToFunctionDefinition)
+    jumpToFunctionDefinition()
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });

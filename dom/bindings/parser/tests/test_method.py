@@ -11,7 +11,6 @@ def WebIDLTest(parser, harness):
           boolean basicBooleanWithSimpleArgs(boolean arg1, byte arg2, unsigned long arg3);
           void optionalArg(optional byte? arg1, optional sequence<byte> arg2);
           void variadicArg(byte?... arg1);
-          void crazyTypes(sequence<long?[]>? arg1, boolean?[][]? arg2);
           object getObject();
           void setObject(object arg1);
           void setAny(any arg1);
@@ -28,7 +27,7 @@ def WebIDLTest(parser, harness):
                "Should be an IDLInterface")
     harness.check(iface.identifier.QName(), "::TestMethods", "Interface has the right QName")
     harness.check(iface.identifier.name, "TestMethods", "Interface has the right name")
-    harness.check(len(iface.members), 13, "Expect 13 members")
+    harness.check(len(iface.members), 12, "Expect 12 members")
 
     methods = iface.members
 
@@ -42,7 +41,7 @@ def WebIDLTest(parser, harness):
         harness.check(argument.variadic, variadic, "Argument has the right variadic value")
 
     def checkMethod(method, QName, name, signatures,
-                    static=False, getter=False, setter=False, creator=False,
+                    static=False, getter=False, setter=False,
                     deleter=False, legacycaller=False, stringifier=False):
         harness.ok(isinstance(method, WebIDL.IDLMethod),
                    "Should be an IDLMethod")
@@ -54,7 +53,6 @@ def WebIDLTest(parser, harness):
         harness.check(method.isStatic(), static, "Method has the correct static value")
         harness.check(method.isGetter(), getter, "Method has the correct getter value")
         harness.check(method.isSetter(), setter, "Method has the correct setter value")
-        harness.check(method.isCreator(), creator, "Method has the correct creator value")
         harness.check(method.isDeleter(), deleter, "Method has the correct deleter value")
         harness.check(method.isLegacycaller(), legacycaller, "Method has the correct legacycaller value")
         harness.check(method.isStringifier(), stringifier, "Method has the correct stringifier value")
@@ -98,22 +96,17 @@ def WebIDLTest(parser, harness):
                 "variadicArg",
        [("Void",
         [("::TestMethods::variadicArg::arg1", "arg1", "ByteOrNull", True, True)])])
-    checkMethod(methods[8], "::TestMethods::crazyTypes",
-                "crazyTypes",
-       [("Void",
-        [("::TestMethods::crazyTypes::arg1", "arg1", "LongOrNullArraySequenceOrNull", False, False),
-         ("::TestMethods::crazyTypes::arg2", "arg2", "BooleanOrNullArrayArrayOrNull", False, False)])])
-    checkMethod(methods[9], "::TestMethods::getObject",
+    checkMethod(methods[8], "::TestMethods::getObject",
                 "getObject", [("Object", [])])
-    checkMethod(methods[10], "::TestMethods::setObject",
+    checkMethod(methods[9], "::TestMethods::setObject",
                 "setObject",
        [("Void",
         [("::TestMethods::setObject::arg1", "arg1", "Object", False, False)])])
-    checkMethod(methods[11], "::TestMethods::setAny",
+    checkMethod(methods[10], "::TestMethods::setAny",
                 "setAny",
        [("Void",
         [("::TestMethods::setAny::arg1", "arg1", "Any", False, False)])])
-    checkMethod(methods[12], "::TestMethods::doFloats",
+    checkMethod(methods[11], "::TestMethods::doFloats",
                 "doFloats",
        [("Float",
         [("::TestMethods::doFloats::arg1", "arg1", "Float", False, False)])])

@@ -11,20 +11,26 @@ const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
 const { once } = require("devtools/client/performance/test/helpers/event-utils");
+const { setSelectedRecording, getSelectedRecordingIndex } = require("devtools/client/performance/test/helpers/recording-utils");
 
-add_task(function*() {
-  let { panel } = yield initPerformanceInNewTab({
+add_task(async function() {
+  const { panel } = await initPerformanceInNewTab({
     url: SIMPLE_URL,
     win: window
   });
 
-  let { EVENTS, $, PerformanceController, RecordingsView, WaterfallView } = panel.panelWin;
+  const {
+    EVENTS,
+    $,
+    PerformanceController,
+    WaterfallView
+  } = panel.panelWin;
 
-  let waterfallBtn = $("toolbarbutton[data-view='waterfall']");
-  let jsFlameBtn = $("toolbarbutton[data-view='js-flamegraph']");
-  let jsCallBtn = $("toolbarbutton[data-view='js-calltree']");
-  let memFlameBtn = $("toolbarbutton[data-view='memory-flamegraph']");
-  let memCallBtn = $("toolbarbutton[data-view='memory-calltree']");
+  const waterfallBtn = $("toolbarbutton[data-view='waterfall']");
+  const jsFlameBtn = $("toolbarbutton[data-view='js-flamegraph']");
+  const jsCallBtn = $("toolbarbutton[data-view='js-calltree']");
+  const memFlameBtn = $("toolbarbutton[data-view='memory-flamegraph']");
+  const memCallBtn = $("toolbarbutton[data-view='memory-calltree']");
 
   is(waterfallBtn.hidden, true,
     "The `waterfall` button is hidden when tool starts.");
@@ -37,7 +43,7 @@ add_task(function*() {
   is(memCallBtn.hidden, true,
     "The `memory-calltree` button is hidden when tool starts.");
 
-  yield startRecording(panel);
+  await startRecording(panel);
 
   is(waterfallBtn.hidden, true,
     "The `waterfall` button is hidden when recording starts.");
@@ -50,7 +56,7 @@ add_task(function*() {
   is(memCallBtn.hidden, true,
     "The `memory-calltree` button is hidden when recording starts.");
 
-  yield stopRecording(panel);
+  await stopRecording(panel);
 
   is(waterfallBtn.hidden, false,
     "The `waterfall` button is visible when recording ends.");
@@ -63,7 +69,7 @@ add_task(function*() {
   is(memCallBtn.hidden, true,
     "The `memory-calltree` button is hidden when recording ends.");
 
-  yield startRecording(panel);
+  await startRecording(panel);
 
   is(waterfallBtn.hidden, true,
     "The `waterfall` button is hidden when another recording starts.");
@@ -78,11 +84,12 @@ add_task(function*() {
 
   let selected = once(PerformanceController, EVENTS.RECORDING_SELECTED);
   let rendered = once(WaterfallView, EVENTS.UI_WATERFALL_RENDERED);
-  RecordingsView.selectedIndex = 0;
-  yield selected;
-  yield rendered;
+  setSelectedRecording(panel, 0);
+  await selected;
+  await rendered;
 
-  is(RecordingsView.selectedIndex, 0,
+  let selectedIndex = getSelectedRecordingIndex(panel);
+  is(selectedIndex, 0,
     "The first recording was selected again.");
 
   is(waterfallBtn.hidden, false,
@@ -97,10 +104,11 @@ add_task(function*() {
     "The `memory-calltree` button is hidden when first recording selected.");
 
   selected = once(PerformanceController, EVENTS.RECORDING_SELECTED);
-  RecordingsView.selectedIndex = 1;
-  yield selected;
+  setSelectedRecording(panel, 1);
+  await selected;
 
-  is(RecordingsView.selectedIndex, 1,
+  selectedIndex = getSelectedRecordingIndex(panel);
+  is(selectedIndex, 1,
     "The second recording was selected again.");
 
   is(waterfallBtn.hidden, true,
@@ -115,10 +123,11 @@ add_task(function*() {
     "The `memory-calltree button` still is hidden when second recording selected.");
 
   rendered = once(WaterfallView, EVENTS.UI_WATERFALL_RENDERED);
-  yield stopRecording(panel);
-  yield rendered;
+  await stopRecording(panel);
+  await rendered;
 
-  is(RecordingsView.selectedIndex, 1,
+  selectedIndex = getSelectedRecordingIndex(panel);
+  is(selectedIndex, 1,
     "The second recording is still selected.");
 
   is(waterfallBtn.hidden, false,
@@ -132,5 +141,5 @@ add_task(function*() {
   is(memCallBtn.hidden, true,
     "The `memory-calltree` button is hidden when second recording finished.");
 
-  yield teardownToolboxAndRemoveTab(panel);
+  await teardownToolboxAndRemoveTab(panel);
 });

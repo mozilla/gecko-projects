@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +10,12 @@
 #include <QuartzCore/QuartzCore.h>
 #include <CoreVideo/CoreVideo.h>
 #include <dlfcn.h>
+
+namespace mozilla {
+namespace gl {
+class GLContext;
+}
+}
 
 struct _CGLContextObject;
 
@@ -91,7 +97,7 @@ public:
                                                            double aContentsScaleFactor = 1.0,
                                                            bool aHasAlpha = true);
 
-  explicit MacIOSurface(const void *aIOSurfacePtr,
+  explicit MacIOSurface(IOSurfacePtr aIOSurfacePtr,
                         double aContentsScaleFactor = 1.0,
                         bool aHasAlpha = true);
   ~MacIOSurface();
@@ -110,8 +116,8 @@ public:
   size_t GetDevicePixelWidth(size_t plane = 0);
   size_t GetDevicePixelHeight(size_t plane = 0);
   size_t GetBytesPerRow(size_t plane = 0);
-  void Lock();
-  void Unlock();
+  void Lock(bool aReadOnly = true);
+  void Unlock(bool aReadOnly = true);
   void IncrementUseCount();
   void DecrementUseCount();
   bool HasAlpha() { return mHasAlpha; }
@@ -120,7 +126,15 @@ public:
 
   // We would like to forward declare NSOpenGLContext, but it is an @interface
   // and this file is also used from c++, so we use a void *.
-  CGLError CGLTexImageIOSurface2D(CGLContextObj ctxt, size_t plane = 0);
+  CGLError CGLTexImageIOSurface2D(mozilla::gl::GLContext* aGL,
+                                  CGLContextObj ctxt,
+                                  size_t plane,
+                                  mozilla::gfx::SurfaceFormat* aOutReadFormat = nullptr);
+  CGLError CGLTexImageIOSurface2D(CGLContextObj ctxt,
+                                  GLenum target, GLenum internalFormat,
+                                  GLsizei width, GLsizei height,
+                                  GLenum format, GLenum type,
+                                  GLuint plane) const;
   already_AddRefed<SourceSurface> GetAsSurface();
   CGContextRef CreateIOSurfaceContext();
 
@@ -131,10 +145,11 @@ public:
                                                                         bool aHasAlpha = true);
   static size_t GetMaxWidth();
   static size_t GetMaxHeight();
+  const void* GetIOSurfacePtr() { return mIOSurfacePtr; }
 
 private:
   friend class nsCARenderer;
-  const void* mIOSurfacePtr;
+  const IOSurfacePtr mIOSurfacePtr;
   double mContentsScaleFactor;
   bool mHasAlpha;
 };

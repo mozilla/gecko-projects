@@ -1,4 +1,5 @@
-/* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,10 +11,10 @@
 
 #include "nsContainerFrame.h"
 
-struct nsHTMLReflowState;
-
 class nsFontInflationData
 {
+  using ReflowInput = mozilla::ReflowInput;
+
 public:
 
   static nsFontInflationData* FindFontInflationDataFor(const nsIFrame *aFrame);
@@ -21,7 +22,7 @@ public:
   // Returns whether the effective width changed (which requires the
   // caller to mark its descendants dirty
   static bool
-    UpdateFontInflationDataISizeFor(const nsHTMLReflowState& aReflowState);
+    UpdateFontInflationDataISizeFor(const ReflowInput& aReflowInput);
 
   static void MarkFontInflationDataTextDirty(nsIFrame *aFrame);
 
@@ -43,7 +44,7 @@ private:
   nsFontInflationData(const nsFontInflationData&) = delete;
   void operator=(const nsFontInflationData&) = delete;
 
-  void UpdateISize(const nsHTMLReflowState &aReflowState);
+  void UpdateISize(const ReflowInput &aReflowInput);
   enum SearchDirection { eFromStart, eFromEnd };
   static nsIFrame* FindEdgeInflatableFrameIn(nsIFrame *aFrame,
                                              SearchDirection aDirection);

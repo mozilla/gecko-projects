@@ -1,11 +1,13 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef MOZILLA_GFX_TEXTUREHOST_H
 #define MOZILLA_GFX_TEXTUREHOST_H
 
+#include <functional>
 #include <stddef.h>                     // for size_t
 #include <stdint.h>                     // for uint64_t, uint32_t, uint8_t
 #include "gfxTypes.h"
@@ -17,13 +19,14 @@
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat, etc
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
-#include "mozilla/layers/FenceUtils.h"  // for FenceHandle
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
 #include "mozilla/layers/LayersSurfaces.h"
 #include "mozilla/mozalloc.h"           // for operator delete
+#include "mozilla/Range.h"
 #include "mozilla/UniquePtr.h"          // for UniquePtr
+#include "mozilla/webrender/WebRenderTypes.h"
 #include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsDebug.h"                    // for NS_WARNING
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
@@ -31,26 +34,39 @@
 #include "mozilla/layers/AtomicRefCountedWithFinalize.h"
 #include "mozilla/gfx/Rect.h"
 
+class MacIOSurface;
 namespace mozilla {
 namespace ipc {
 class Shmem;
 } // namespace ipc
 
+namespace wr {
+class DisplayListBuilder;
+class TransactionBuilder;
+}
+
 namespace layers {
 
 class BufferDescriptor;
+class BufferTextureHost;
 class Compositor;
 class CompositableParentManager;
+class ReadLockDescriptor;
+class CompositorBridgeParent;
 class SurfaceDescriptor;
+class HostIPCAllocator;
 class ISurfaceAllocator;
+class MacIOSurfaceTextureHostOGL;
 class TextureHostOGL;
+class TextureReadLock;
 class TextureSourceOGL;
-class TextureSourceD3D9;
 class TextureSourceD3D11;
 class TextureSourceBasic;
 class DataTextureSource;
 class PTextureParent;
 class TextureParent;
+class WebRenderTextureHost;
+class WrappingTextureSourceYCbCrBasic;
 
 /**
  * A view on a TextureHost where the texture is internally represented as tiles
@@ -111,14 +127,17 @@ public:
   /**
    * Cast to a TextureSource for for each backend..
    */
-  virtual TextureSourceOGL* AsSourceOGL() { return nullptr; }
-  virtual TextureSourceD3D9* AsSourceD3D9() { return nullptr; }
+  virtual TextureSourceOGL* AsSourceOGL() {
+    gfxCriticalNote << "Failed to cast " << Name() << " into a TextureSourceOGL";
+    return nullptr;
+  }
   virtual TextureSourceD3D11* AsSourceD3D11() { return nullptr; }
   virtual TextureSourceBasic* AsSourceBasic() { return nullptr; }
   /**
    * Cast to a DataTextureSurce.
    */
   virtual DataTextureSource* AsDataTextureSource() { return nullptr; }
+  virtual WrappingTextureSourceYCbCrBasic* AsWrappingTextureSourceYCbCrBasic() { return nullptr; }
 
   /**
    * Overload this if the TextureSource supports big textures that don't fit in
@@ -126,7 +145,9 @@ public:
    */
   virtual BigImageIterator* AsBigImageIterator() { return nullptr; }
 
-  virtual void SetCompositor(Compositor* aCompositor) {}
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) {}
+
+  virtual void Unbind() {}
 
   void SetNextSibling(TextureSource* aTexture) { mNextSibling = aTexture; }
 
@@ -153,6 +174,13 @@ public:
     MOZ_ASSERT(mCompositableCount >= 0);
   }
 
+  // When iterating as a BigImage, this creates temporary TextureSources wrapping
+  // individual tiles.
+  virtual RefPtr<TextureSource> ExtractCurrentTile() {
+    NS_WARNING("Implementation does not expose tile sources");
+    return nullptr;
+  }
+
   int NumCompositableRefs() const { return mCompositableCount; }
 
 protected:
@@ -161,10 +189,33 @@ protected:
   int mCompositableCount;
 };
 
-/**
- * equivalent of a RefPtr<TextureSource>, that calls AddCompositableRef and
- * ReleaseCompositableRef in addition to the usual AddRef and Release.
- */
+/// Equivalent of a RefPtr<TextureSource>, that calls AddCompositableRef and
+/// ReleaseCompositableRef in addition to the usual AddRef and Release.
+///
+/// The semantoics of these CompositableTextureRefs are important because they
+/// are used both as a synchronization/safety mechanism, and as an optimization
+/// mechanism. They are also tricky and subtle because we use them in a very
+/// implicit way (assigning to a CompositableTextureRef is less visible than
+/// explicitly calling a method or whatnot).
+/// It is Therefore important to be careful about the way we use this tool.
+///
+/// CompositableTextureRef is a mechanism that lets us count how many compositables
+/// are using a given texture (for TextureSource and TextureHost).
+/// We use it to run specific code when a texture is not used anymore, and also
+/// we trigger fast paths on some operations when we can see that the texture's
+/// CompositableTextureRef counter is equal to 1 (the texture is not shared
+/// between compositables).
+/// This means that it is important to observe the following rules:
+/// * CompositableHosts that receive UseTexture and similar messages *must* store
+/// all of the TextureHosts they receive in CompositableTextureRef slots for as
+/// long as they may be using them.
+/// * CompositableHosts must store each texture in a *single* CompositableTextureRef
+/// slot to ensure that the counter properly reflects how many compositables are
+/// using the texture.
+/// If a compositable needs to hold two references to a given texture (for example
+/// to have a pointer to the current texture in a list of textures that may be
+/// used), it can hold its extra references with RefPtr or whichever pointer type
+/// makes sense.
 template<typename T>
 class CompositableTextureRef {
 public:
@@ -350,29 +401,30 @@ public:
    */
   static already_AddRefed<TextureHost> Create(
     const SurfaceDescriptor& aDesc,
+    const ReadLockDescriptor& aReadLock,
     ISurfaceAllocator* aDeallocator,
     LayersBackend aBackend,
-    TextureFlags aFlags);
-
-  /**
-   * Tell to TextureChild that TextureHost is recycled.
-   * This function should be called from TextureHost's RecycleCallback.
-   * If SetRecycleCallback is set to TextureHost.
-   * TextureHost can be recycled by calling RecycleCallback
-   * when reference count becomes one.
-   * One reference count is always added by TextureChild.
-   */
-  void CompositorRecycle();
+    TextureFlags aFlags,
+    wr::MaybeExternalImageId& aExternalImageId);
 
   /**
    * Lock the texture host for compositing.
    */
   virtual bool Lock() { return true; }
-
   /**
-   * Unlock the texture host after compositing.
+   * Unlock the texture host after compositing. Lock() and Unlock() should be
+   * called in pair.
    */
   virtual void Unlock() {}
+
+  /**
+   * Lock the texture host for compositing without using compositor.
+   */
+  virtual bool LockWithoutCompositor() { return true; }
+  /**
+   * Similar to Unlock(), but it should be called with LockWithoutCompositor().
+   */
+  virtual void UnlockWithoutCompositor() {}
 
   /**
    * Note that the texture host format can be different from its corresponding
@@ -385,6 +437,13 @@ public:
    * Apple's YCBCR_422 is R8G8B8X8.
    */
   virtual gfx::SurfaceFormat GetReadFormat() const { return GetFormat(); }
+
+  virtual YUVColorSpace GetYUVColorSpace() const { return YUVColorSpace::UNKNOWN; }
+
+  /**
+   * Return the bit depth of the image. Used with YUV textures.
+   */
+  virtual uint32_t GetBitDepth() const { return 8; }
 
   /**
    * Called during the transaction. The TextureSource may or may not be composited.
@@ -401,9 +460,17 @@ public:
   virtual bool BindTextureSource(CompositableTextureSourceRef& aTexture) = 0;
 
   /**
+   * Called when preparing the rendering pipeline for advanced-layers. This is
+   * a lockless version of BindTextureSource.
+   */
+  virtual bool AcquireTextureSource(CompositableTextureSourceRef& aTexture) {
+    return false;
+  }
+
+  /**
    * Called when another TextureHost will take over.
    */
-  virtual void UnbindTextureSource() {}
+  virtual void UnbindTextureSource();
 
   /**
    * Is called before compositing if the shared data has changed since last
@@ -417,13 +484,15 @@ public:
    void Updated(const nsIntRegion* aRegion = nullptr);
 
   /**
-   * Sets this TextureHost's compositor.
-   * A TextureHost can change compositor on certain occasions, in particular if
-   * it belongs to an async Compositable.
+   * Sets this TextureHost's compositor. A TextureHost can change compositor
+   * on certain occasions, in particular if it belongs to an async Compositable.
    * aCompositor can be null, in which case the TextureHost must cleanup  all
-   * of it's device textures.
+   * of its device textures.
+   *
+   * Setting mProvider from this callback implicitly causes the texture to
+   * be locked for an extra frame after being detached from a compositable.
    */
-  virtual void SetCompositor(Compositor* aCompositor) {}
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) {}
 
   /**
    * Should be overridden in order to deallocate the data that is associated
@@ -478,10 +547,13 @@ public:
    * are for use with the managing IPDL protocols only (so that they can
    * implement AllocPTextureParent and DeallocPTextureParent).
    */
-  static PTextureParent* CreateIPDLActor(CompositableParentManager* aManager,
+  static PTextureParent* CreateIPDLActor(HostIPCAllocator* aAllocator,
                                          const SurfaceDescriptor& aSharedData,
+                                         const ReadLockDescriptor& aDescriptor,
                                          LayersBackend aLayersBackend,
-                                         TextureFlags aFlags);
+                                         TextureFlags aFlags,
+                                         uint64_t aSerial,
+                                         const wr::MaybeExternalImageId& aExternalImageId);
   static bool DestroyIPDLActor(PTextureParent* actor);
 
   /**
@@ -496,6 +568,8 @@ public:
    */
   static TextureHost* AsTextureHost(PTextureParent* actor);
 
+  static uint64_t GetTextureSerial(PTextureParent* actor);
+
   /**
    * Return a pointer to the IPDLActor.
    *
@@ -503,17 +577,6 @@ public:
    * pointer.
    */
   PTextureParent* GetIPDLActor();
-
-  /**
-   * Specific to B2G's Composer2D
-   * XXX - more doc here
-   */
-  virtual LayerRenderState GetRenderState()
-  {
-    // By default we return an empty render state, this should be overridden
-    // by the TextureHost implementations that are used on B2G with Composer2D
-    return LayerRenderState();
-  }
 
   // If a texture host holds a reference to shmem, it should override this method
   // to forget about the shmem _without_ releasing it.
@@ -540,49 +603,92 @@ public:
     MOZ_ASSERT(mCompositableCount >= 0);
     if (mCompositableCount == 0) {
       UnbindTextureSource();
+      // Send mFwdTransactionId to client side if necessary.
+      NotifyNotUsed();
     }
   }
 
   int NumCompositableRefs() const { return mCompositableCount; }
 
-  /**
-   * Store a fence that will signal when the current buffer is no longer being read.
-   * Similar to android's GLConsumer::setReleaseFence()
-   */
-  bool SetReleaseFenceHandle(const FenceHandle& aReleaseFenceHandle);
+  void SetLastFwdTransactionId(uint64_t aTransactionId);
+
+  void DeserializeReadLock(const ReadLockDescriptor& aDesc,
+                           ISurfaceAllocator* aAllocator);
+  void SetReadLocked();
+
+  TextureReadLock* GetReadLock() { return mReadLock; }
+
+  virtual BufferTextureHost* AsBufferTextureHost() { return nullptr; }
+  virtual MacIOSurfaceTextureHostOGL* AsMacIOSurfaceTextureHost() { return nullptr; }
+  virtual WebRenderTextureHost* AsWebRenderTextureHost() { return nullptr; }
+
+  // Create the corresponding RenderTextureHost type of this texture, and
+  // register the RenderTextureHost into render thread.
+  virtual void CreateRenderTexture(const wr::ExternalImageId& aExternalImageId)
+  {
+    MOZ_RELEASE_ASSERT(false, "No CreateRenderTexture() implementation for this TextureHost type.");
+  }
+
+  /// Returns the number of actual textures that will be used to render this.
+  /// For example in a lot of YUV cases it will be 3
+  virtual uint32_t NumSubTextures() const { return 1; }
+
+  enum ResourceUpdateOp {
+    ADD_IMAGE,
+    UPDATE_IMAGE,
+  };
+
+  // Add all necessary TextureHost informations to the resource update queue.
+  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
+                                   ResourceUpdateOp aOp,
+                                   const Range<wr::ImageKey>& aImageKeys,
+                                   const wr::ExternalImageId& aExtID)
+  {
+    MOZ_ASSERT_UNREACHABLE("Unimplemented");
+  }
+
+  // Put all necessary WR commands into DisplayListBuilder for this textureHost rendering.
+  virtual void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                const wr::LayoutRect& aBounds,
+                                const wr::LayoutRect& aClip,
+                                wr::ImageRendering aFilter,
+                                const Range<wr::ImageKey>& aKeys)
+  {
+    MOZ_ASSERT_UNREACHABLE("No PushDisplayItems() implementation for this TextureHost type.");
+  }
 
   /**
-   * Return a releaseFence's Fence and clear a reference to the Fence.
+   * Some API's can use the cross-process IOSurface directly, such as OpenVR
    */
-  FenceHandle GetAndResetReleaseFenceHandle();
-
-  void SetAcquireFenceHandle(const FenceHandle& aAcquireFenceHandle);
-
-  /**
-   * Return a acquireFence's Fence and clear a reference to the Fence.
-   */
-  FenceHandle GetAndResetAcquireFenceHandle();
-
-  virtual void WaitAcquireFenceHandleSyncComplete() {};
-
-  virtual bool NeedsFenceHandle() { return false; }
-
-  virtual FenceHandle GetCompositorReleaseFence() { return FenceHandle(); }
+  virtual MacIOSurface* GetMacIOSurface() { return nullptr; }
 
 protected:
-  FenceHandle mReleaseFenceHandle;
-
-  FenceHandle mAcquireFenceHandle;
+  void ReadUnlock();
 
   void RecycleTexture(TextureFlags aFlags);
 
   virtual void UpdatedInternal(const nsIntRegion *Region) {}
 
+  /**
+   * Called when mCompositableCount becomes 0.
+   */
+  virtual void NotifyNotUsed();
+
+  // for Compositor.
+  void CallNotifyNotUsed();
+
   PTextureParent* mActor;
+  RefPtr<TextureSourceProvider> mProvider;
+  RefPtr<TextureReadLock> mReadLock;
   TextureFlags mFlags;
   int mCompositableCount;
+  uint64_t mFwdTransactionId;
+  bool mReadLocked;
 
+  friend class Compositor;
   friend class TextureParent;
+  friend class TiledLayerBufferComposite;
+  friend class TextureSourceProvider;
 };
 
 /**
@@ -616,10 +722,13 @@ public:
   virtual void PrepareTextureSource(CompositableTextureSourceRef& aTexture) override;
 
   virtual bool BindTextureSource(CompositableTextureSourceRef& aTexture) override;
+  virtual bool AcquireTextureSource(CompositableTextureSourceRef& aTexture) override;
+
+  virtual void UnbindTextureSource() override;
 
   virtual void DeallocateDeviceData() override;
 
-  virtual void SetCompositor(Compositor* aCompositor) override;
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) override;
 
   /**
    * Return the format that is exposed to the compositor when calling
@@ -630,15 +739,39 @@ public:
    */
   virtual gfx::SurfaceFormat GetFormat() const override;
 
+  virtual YUVColorSpace GetYUVColorSpace() const override;
+
+  virtual uint32_t GetBitDepth() const override;
+
   virtual gfx::IntSize GetSize() const override { return mSize; }
 
   virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
 
   virtual bool HasIntermediateBuffer() const override { return mHasIntermediateBuffer; }
 
+  virtual BufferTextureHost* AsBufferTextureHost() override { return this; }
+
+  const BufferDescriptor& GetBufferDescriptor() const { return mDescriptor; }
+
+  virtual void CreateRenderTexture(const wr::ExternalImageId& aExternalImageId) override;
+
+  virtual uint32_t NumSubTextures() const override;
+
+  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
+                                   ResourceUpdateOp aOp,
+                                   const Range<wr::ImageKey>& aImageKeys,
+                                   const wr::ExternalImageId& aExtID) override;
+
+  virtual void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                const wr::LayoutRect& aBounds,
+                                const wr::LayoutRect& aClip,
+                                wr::ImageRendering aFilter,
+                                const Range<wr::ImageKey>& aImageKeys) override;
+
 protected:
   bool Upload(nsIntRegion *aRegion = nullptr);
-  bool MaybeUpload(nsIntRegion *aRegion = nullptr);
+  bool UploadIfNeeded();
+  bool MaybeUpload(nsIntRegion *aRegion);
   bool EnsureWrappingTextureSource();
 
   virtual void UpdatedInternal(const nsIntRegion* aRegion = nullptr) override;
@@ -653,6 +786,8 @@ protected:
   bool mLocked;
   bool mNeedsFullUpdate;
   bool mHasIntermediateBuffer;
+
+  class DataTextureSourceYCbCrBasic;
 };
 
 /**
@@ -743,6 +878,29 @@ private:
   bool mLocked;
 };
 
+class MOZ_STACK_CLASS AutoLockTextureHostWithoutCompositor
+{
+public:
+  explicit AutoLockTextureHostWithoutCompositor(TextureHost* aTexture)
+    : mTexture(aTexture)
+  {
+    mLocked = mTexture ? mTexture->LockWithoutCompositor() : false;
+  }
+
+  ~AutoLockTextureHostWithoutCompositor()
+  {
+    if (mTexture && mLocked) {
+      mTexture->UnlockWithoutCompositor();
+    }
+  }
+
+  bool Failed() { return mTexture && !mLocked; }
+
+private:
+  RefPtr<TextureHost> mTexture;
+  bool mLocked;
+};
+
 /**
  * This can be used as an offscreen rendering target by the compositor, and
  * subsequently can be used as a source by the compositor.
@@ -820,6 +978,7 @@ private:
 already_AddRefed<TextureHost>
 CreateBackendIndependentTextureHost(const SurfaceDescriptor& aDesc,
                                     ISurfaceAllocator* aDeallocator,
+                                    LayersBackend aBackend,
                                     TextureFlags aFlags);
 
 } // namespace layers

@@ -1,7 +1,4 @@
-Components.utils.import("resource://gre/modules/Services.jsm");
-
-const Ci = Components.interfaces;
-const Cc = Components.classes;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const reportURI = "http://mochi.test:8888/foo.sjs";
 
@@ -46,9 +43,11 @@ var openingObserver = {
       }
 
       sendAsyncMessage('opening-request-completed', message);
-      Services.obs.removeObserver(openingObserver, 'http-on-opening-request');
     }
   }
 };
 
-Services.obs.addObserver(openingObserver, 'http-on-opening-request', false);
+Services.obs.addObserver(openingObserver, 'http-on-opening-request');
+addMessageListener("finish", function() {
+  Services.obs.removeObserver(openingObserver, 'http-on-opening-request');
+});

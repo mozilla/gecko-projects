@@ -29,7 +29,7 @@ class LookAndFeel
 public:
   // When modifying this list, also modify nsXPLookAndFeel::sColorPrefs
   // in widget/xpwidgts/nsXPLookAndFeel.cpp.
-  enum ColorID {
+  enum ColorID : uint8_t {
 
     // WARNING : NO NEGATIVE VALUE IN THIS ENUMERATION
     // see patch in bug 57757 for more information
@@ -156,8 +156,26 @@ public:
     //inactive light hightlight
     eColorID__moz_mac_secondaryhighlight,
 
+    // Font smoothing background colors needed by the Mac OS X theme, based
+    // on -moz-appearance names
+    eColorID__moz_mac_vibrancy_light,
+    eColorID__moz_mac_vibrancy_dark,
+    eColorID__moz_mac_vibrant_titlebar_light,
+    eColorID__moz_mac_vibrant_titlebar_dark,
+    eColorID__moz_mac_menupopup,
+    eColorID__moz_mac_menuitem,
+    eColorID__moz_mac_active_menuitem,
+    eColorID__moz_mac_source_list,
+    eColorID__moz_mac_source_list_selection,
+    eColorID__moz_mac_active_source_list_selection,
+    eColorID__moz_mac_tooltip,
+
     // vista rebars
 
+    // accent color for title bar
+    eColorID__moz_win_accentcolor,
+    // color from drawing text over the accent color
+    eColorID__moz_win_accentcolortext,
     // media rebar text
     eColorID__moz_win_mediatext,
     // communications rebar text
@@ -239,6 +257,15 @@ public:
     eIntID_ChosenMenuItemsShouldBlink,
 
     /*
+     * A Boolean value to determine whether the Windows accent color
+     * should be applied to the title bar.
+     *
+     * The value of this metric is not used on other platforms. These platforms
+     * should return NS_ERROR_NOT_IMPLEMENTED when queried for this metric.
+     */
+    eIntID_WindowsAccentColorInTitlebar,
+
+    /*
      * A Boolean value to determine whether the Windows default theme is
      * being used.
      *
@@ -291,16 +318,6 @@ public:
      */
     eIntID_MacGraphiteTheme,
 
-    /*
-     * A Boolean value to determine whether the Mac OS X Lion-specific theming
-     * should be used.
-     *
-     * The value of this metric is not used on non-Mac platforms. These
-     * platforms should return NS_ERROR_NOT_IMPLEMENTED when queried for this
-     * metric.
-     */
-    eIntID_MacLionTheme,
-
    /*
     * A Boolean value to determine whether the Mac OS X Yosemite-specific theming
     * should be used.
@@ -347,14 +364,6 @@ public:
     eIntID_SpellCheckerUnderlineStyle,
 
     /**
-     * If this metric != 0, show icons in menus.
-     */
-    eIntID_ImagesInMenus,
-    /**
-     * If this metric != 0, show icons in buttons.
-     */
-    eIntID_ImagesInButtons,
-    /**
      * If this metric != 0, support window dragging on the menubar.
      */
     eIntID_MenuBarDrag,
@@ -381,22 +390,6 @@ public:
      */
     eIntID_SwipeAnimationEnabled,
 
-    /*
-     * A Boolean value to determine whether we have a color picker available
-     * for <input type="color"> to hook into.
-     *
-     * This lets us selectively enable the style for <input type="color">
-     * based on whether it's functional or not.
-     */
-    eIntID_ColorPickerAvailable,
-
-    /*
-     * A boolean value indicating whether or not the device has a hardware
-     * home button. Used on gaia to determine whether a home button
-     * is shown.
-     */
-     eIntID_PhysicalHomeButton,
-
      /*
       * Controls whether overlay scrollbars display when the user moves
       * the mouse in a scrollable frame.
@@ -414,7 +407,37 @@ public:
       * on open.
       */
      eIntID_ContextMenuOffsetVertical,
-     eIntID_ContextMenuOffsetHorizontal
+     eIntID_ContextMenuOffsetHorizontal,
+
+     /*
+      * A boolean value indicating whether client-side decorations are
+      * supported by the user's GTK version.
+      */
+     eIntID_GTKCSDAvailable,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a minimize button.
+      */
+     eIntID_GTKCSDMinimizeButton,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a maximize button.
+      */
+     eIntID_GTKCSDMaximizeButton,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a close button.
+      */
+     eIntID_GTKCSDCloseButton,
+
+     /*
+      * A boolean value indicating whether or not the OS is using a dark theme,
+      * which we may want to switch to as well if not overridden by the user.
+      */
+     eIntID_SystemUsesDarkTheme
   };
 
   /**
@@ -436,9 +459,7 @@ public:
    * Operating system versions.
    */
   enum OperatingSystemVersion {
-    eOperatingSystemVersion_WindowsXP = 0,
-    eOperatingSystemVersion_WindowsVista,
-    eOperatingSystemVersion_Windows7,
+    eOperatingSystemVersion_Windows7 = 2,
     eOperatingSystemVersion_Windows8,
     eOperatingSystemVersion_Windows10,
     eOperatingSystemVersion_Unknown
@@ -488,6 +509,7 @@ public:
   // NS_STYLE_FONT_* system font constants.
   enum FontID {
     eFont_Caption = 1,     // css2
+    FontID_MINIMUM = eFont_Caption,
     eFont_Icon,
     eFont_Menu,
     eFont_MessageBox,
@@ -506,7 +528,8 @@ public:
     eFont_Field,
 
     eFont_Tooltips,        // moz
-    eFont_Widget
+    eFont_Widget,
+    FontID_MAXIMUM = eFont_Widget
   };
 
   /**
@@ -550,6 +573,18 @@ public:
   {
     nscolor result = NS_RGB(0, 0, 0);
     if (NS_FAILED(GetColor(aID, &result))) {
+      return aDefault;
+    }
+    return result;
+  }
+
+  static nscolor GetColorUsingStandins(ColorID aID,
+                                       nscolor aDefault = NS_RGB(0, 0, 0))
+  {
+    nscolor result = NS_RGB(0, 0, 0);
+    if (NS_FAILED(GetColor(aID,
+                           true, // aUseStandinsForNativeColors
+                           &result))) {
       return aDefault;
     }
     return result;
@@ -610,6 +645,16 @@ public:
    * cached data would be released.
    */
   static void Refresh();
+
+  /**
+   * GTK's initialization code can't be run off main thread, call this
+   * if you plan on using LookAndFeel off main thread later.
+   *
+   * This initialized state may get reset due to theme changes, so it
+   * must be called prior to each potential off-main-thread LookAndFeel
+   * call, not just once.
+   */
+  static void NativeInit();
 
   /**
    * If the implementation is caching values, these accessors allow the

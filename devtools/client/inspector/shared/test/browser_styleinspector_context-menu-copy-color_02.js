@@ -15,85 +15,85 @@ const TEST_URI = `
   <div>Testing the color picker tooltip!</div>
 `;
 
-add_task(function* () {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
 
-  let {inspector, view} = yield openRuleView();
-  yield testCopyToClipboard(inspector, view);
-  yield testManualEdit(inspector, view);
-  yield testColorPickerEdit(inspector, view);
+  const {inspector, view} = await openRuleView();
+
+  await testCopyToClipboard(inspector, view);
+  await testManualEdit(inspector, view);
+  await testColorPickerEdit(inspector, view);
 });
 
-function* testCopyToClipboard(inspector, view) {
+async function testCopyToClipboard(inspector, view) {
   info("Testing that color is copied to clipboard");
 
-  yield selectNode("div", inspector);
+  await selectNode("div", inspector);
 
-  let win = view.styleWindow;
-  let element = getRuleViewProperty(view, "div", "color").valueSpan
+  const element = getRuleViewProperty(view, "div", "color").valueSpan
     .querySelector(".ruleview-colorswatch");
 
-  let popup = once(view._contextmenu._menupopup, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(element, {button: 2, type: "contextmenu"},
-    win);
-  yield popup;
+  const allMenuItems = openStyleContextMenuAndGetAllItems(view, element);
+  const menuitemCopyColor = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyColor"));
 
-  ok(!view._contextmenu.menuitemCopyColor.hidden, "Copy color is visible");
+  ok(menuitemCopyColor.visible, "Copy color is visible");
 
-  yield waitForClipboard(() => view._contextmenu.menuitemCopyColor.click(),
+  await waitForClipboardPromise(() => menuitemCopyColor.click(),
     "#123ABC");
-  view._contextmenu._menupopup.hidePopup();
+
+  EventUtils.synthesizeKey("KEY_Escape");
 }
 
-function* testManualEdit(inspector, view) {
+async function testManualEdit(inspector, view) {
   info("Testing manually edited colors");
-  yield selectNode("div", inspector);
+  await selectNode("div", inspector);
 
-  let {valueSpan} = getRuleViewProperty(view, "div", "color");
+  const {valueSpan} = getRuleViewProperty(view, "div", "color");
 
-  let newColor = "#C9184E";
-  let editor = yield focusEditableField(view, valueSpan);
+  const newColor = "#C9184E";
+  const editor = await focusEditableField(view, valueSpan);
 
   info("Typing new value");
-  let input = editor.input;
-  let onBlur = once(input, "blur");
+  const input = editor.input;
+  const onBlur = once(input, "blur");
   EventUtils.sendString(newColor + ";", view.styleWindow);
-  yield onBlur;
-  yield wait(1);
+  await onBlur;
+  await wait(1);
 
-  let colorValueElement = getRuleViewProperty(view, "div", "color")
+  const colorValueElement = getRuleViewProperty(view, "div", "color")
     .valueSpan.firstChild;
   is(colorValueElement.dataset.color, newColor, "data-color was updated");
 
   view.styleDocument.popupNode = colorValueElement;
 
-  let contextMenu = view._contextmenu;
+  const contextMenu = view.contextMenu;
   contextMenu._isColorPopup();
   is(contextMenu._colorToCopy, newColor, "_colorToCopy has the new value");
 }
 
-function* testColorPickerEdit(inspector, view) {
+async function testColorPickerEdit(inspector, view) {
   info("Testing colors edited via color picker");
-  yield selectNode("div", inspector);
+  await selectNode("div", inspector);
 
-  let swatchElement = getRuleViewProperty(view, "div", "color").valueSpan
+  const swatchElement = getRuleViewProperty(view, "div", "color").valueSpan
     .querySelector(".ruleview-colorswatch");
 
   info("Opening the color picker");
-  let picker = view.tooltips.colorPicker;
-  let onShown = picker.tooltip.once("shown");
+  const picker = view.tooltips.getTooltip("colorPicker");
+  const onColorPickerReady = picker.once("ready");
   swatchElement.click();
-  yield onShown;
+  await onColorPickerReady;
 
-  let rgbaColor = [83, 183, 89, 1];
-  let rgbaColorText = "rgba(83, 183, 89, 1)";
-  yield simulateColorPickerChange(view, picker, rgbaColor);
+  const rgbaColor = [83, 183, 89, 1];
+  const rgbaColorText = "rgba(83, 183, 89, 1)";
+  await simulateColorPickerChange(view, picker, rgbaColor);
 
   is(swatchElement.parentNode.dataset.color, rgbaColorText,
     "data-color was updated");
   view.styleDocument.popupNode = swatchElement;
 
-  let contextMenu = view._contextmenu;
+  const contextMenu = view.contextMenu;
   contextMenu._isColorPopup();
   is(contextMenu._colorToCopy, rgbaColorText, "_colorToCopy has the new value");
 }

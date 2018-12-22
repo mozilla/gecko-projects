@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Check that we continue stepping when a single original source's line
  * corresponds to multiple generated js lines.
@@ -17,10 +19,11 @@ function run_test() {
   gDebuggee = addTestGlobal("test-source-map");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-source-map", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      define_code();
-    });
+    attachTestTabAndResume(gClient, "test-source-map",
+                           function(response, tabClient, threadClient) {
+                             gThreadClient = threadClient;
+                             define_code();
+                           });
   });
   do_test_pending();
 }
@@ -44,30 +47,30 @@ function define_code() {
 
   code += "//# sourceMappingURL=data:text/json," + map.toString();
 
-  Components.utils.evalInSandbox(code, gDebuggee, "1.8",
-                                 "http://example.com/abc.js", 1);
+  Cu.evalInSandbox(code, gDebuggee, "1.8",
+                   "http://example.com/abc.js", 1);
 
   run_code();
 }
 
 function run_code() {
-  gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    do_check_eq(aPacket.why.type, "debuggerStatement");
+  gClient.addOneTimeListener("paused", function(event, packet) {
+    Assert.equal(packet.why.type, "debuggerStatement");
     step_in();
   });
   gDebuggee.runTest();
 }
 
 function step_in() {
-  gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    do_check_eq(aPacket.why.type, "resumeLimit");
-    let { frame: { environment, where: { source, line } } } = aPacket;
+  gClient.addOneTimeListener("paused", function(event, packet) {
+    Assert.equal(packet.why.type, "resumeLimit");
+    const { frame: { environment, where: { source, line } } } = packet;
     // Stepping should have moved us to the next source mapped line.
-    do_check_eq(source.url, "http://example.com/a.js");
-    do_check_eq(line, 3);
+    Assert.equal(source.url, "http://example.com/a.js");
+    Assert.equal(line, 3);
     // Which should have skipped over the for loop in the generated js and sum
     // should be calculated.
-    do_check_eq(environment.bindings.variables.sum.value, 10);
+    Assert.equal(environment.bindings.variables.sum.value, 10);
     finishClient(gClient);
   });
   gThreadClient.stepIn();

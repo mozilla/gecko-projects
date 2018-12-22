@@ -4,27 +4,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsBrowserStatusFilter.h"
+#include "mozilla/SystemGroup.h"
 #include "nsIChannel.h"
 #include "nsITimer.h"
 #include "nsIServiceManager.h"
 #include "nsString.h"
+#include "nsThreadUtils.h"
 
-// XXX
-// XXX  DO NOT TOUCH THIS CODE UNLESS YOU KNOW WHAT YOU'RE DOING !!!
-// XXX
+using namespace mozilla;
 
 //-----------------------------------------------------------------------------
 // nsBrowserStatusFilter <public>
 //-----------------------------------------------------------------------------
 
 nsBrowserStatusFilter::nsBrowserStatusFilter()
-    : mCurProgress(0)
+    : mTarget(GetMainThreadEventTarget())
+    , mCurProgress(0)
     , mMaxProgress(0)
-    , mStatusIsDirty(true)
     , mCurrentPercentage(0)
-    , mTotalRequests(0)
-    , mFinishedRequests(0)
-    , mUseRealProgressFlag(false)
+    , mStatusIsDirty(true)
+    , mIsLoadingDocument(false)
     , mDelayedStatus(false)
     , mDelayedProgress(false)
 {
@@ -41,11 +40,20 @@ nsBrowserStatusFilter::~nsBrowserStatusFilter()
 // nsBrowserStatusFilter::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS(nsBrowserStatusFilter,
-                  nsIWebProgress,
-                  nsIWebProgressListener,
-                  nsIWebProgressListener2,
-                  nsISupportsWeakReference)
+NS_IMPL_CYCLE_COLLECTION(nsBrowserStatusFilter,
+                         mListener,
+                         mTarget)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsBrowserStatusFilter)
+  NS_INTERFACE_MAP_ENTRY(nsIWebProgress)
+  NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
+  NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener2)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebProgress)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsBrowserStatusFilter)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsBrowserStatusFilter)
 
 //-----------------------------------------------------------------------------
 // nsBrowserStatusFilter::nsIWebProgress
@@ -70,7 +78,7 @@ nsBrowserStatusFilter::RemoveProgressListener(nsIWebProgressListener *aListener)
 NS_IMETHODIMP
 nsBrowserStatusFilter::GetDOMWindow(mozIDOMWindowProxy **aResult)
 {
-    NS_NOTREACHED("nsBrowserStatusFilter::GetDOMWindow");
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetDOMWindow");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -78,7 +86,15 @@ NS_IMETHODIMP
 nsBrowserStatusFilter::GetDOMWindowID(uint64_t *aResult)
 {
     *aResult = 0;
-    NS_NOTREACHED("nsBrowserStatusFilter::GetDOMWindowID");
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetDOMWindowID");
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsBrowserStatusFilter::GetInnerDOMWindowID(uint64_t *aResult)
+{
+    *aResult = 0;
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetInnerDOMWindowID");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -86,14 +102,14 @@ NS_IMETHODIMP
 nsBrowserStatusFilter::GetIsTopLevel(bool *aIsTopLevel)
 {
     *aIsTopLevel = false;
-    NS_NOTREACHED("nsBrowserStatusFilter::GetIsTopLevel");
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetIsTopLevel");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 nsBrowserStatusFilter::GetIsLoadingDocument(bool *aIsLoadingDocument)
 {
-    NS_NOTREACHED("nsBrowserStatusFilter::GetIsLoadingDocument");
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetIsLoadingDocument");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -101,8 +117,23 @@ NS_IMETHODIMP
 nsBrowserStatusFilter::GetLoadType(uint32_t *aLoadType)
 {
     *aLoadType = 0;
-    NS_NOTREACHED("nsBrowserStatusFilter::GetLoadType");
+    MOZ_ASSERT_UNREACHABLE("nsBrowserStatusFilter::GetLoadType");
     return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsBrowserStatusFilter::GetTarget(nsIEventTarget** aTarget)
+{
+    nsCOMPtr<nsIEventTarget> target = mTarget;
+    target.forget(aTarget);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsBrowserStatusFilter::SetTarget(nsIEventTarget* aTarget)
+{
+    mTarget = aTarget;
+    return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -119,56 +150,37 @@ nsBrowserStatusFilter::OnStateChange(nsIWebProgress *aWebProgress,
         return NS_OK;
 
     if (aStateFlags & STATE_START) {
-        if (aStateFlags & STATE_IS_NETWORK) {
-            ResetMembers();
+        // Reset members on beginning of document loading, but we don't want
+        // subframe document loading followed by the root document loading
+        // resets members accidentally, so for non-toplevel load we check if
+        // there hasn't been a document load started.
+        if (aStateFlags & STATE_IS_DOCUMENT) {
+            bool isTopLevel = false;
+            aWebProgress->GetIsTopLevel(&isTopLevel);
+            if (!mIsLoadingDocument || isTopLevel) {
+                ResetMembers();
+            }
+            mIsLoadingDocument = true;
         }
-        if (aStateFlags & STATE_IS_REQUEST) {
-            ++mTotalRequests;
+    } else if (aStateFlags & STATE_STOP) {
+        // Flush pending status / progress update during document loading.
+        if (mIsLoadingDocument) {
+            bool isLoadingDocument = true;
+            aWebProgress->GetIsLoadingDocument(&isLoadingDocument);
+            mIsLoadingDocument &= isLoadingDocument;
 
-            // if the total requests exceeds 1, then we'll base our progress
-            // notifications on the percentage of completed requests.
-            // otherwise, progress for the single request will be reported.
-            mUseRealProgressFlag = (mTotalRequests == 1);
+            if (mTimer) {
+                mTimer->Cancel();
+                ProcessTimeout();
+            }
         }
-    }
-    else if (aStateFlags & STATE_STOP) {
-        if (aStateFlags & STATE_IS_REQUEST) {
-            ++mFinishedRequests;
-            // Note: Do not return from here. This is necessary so that the
-            // STATE_STOP can still be relayed to the listener if needed
-            // (bug 209330)
-            if (!mUseRealProgressFlag && mTotalRequests)
-                OnProgressChange(nullptr, nullptr, 0, 0,
-                                 mFinishedRequests, mTotalRequests);
-        }
-    }
-    else if (aStateFlags & STATE_TRANSFERRING) {
-        if (aStateFlags & STATE_IS_REQUEST) {
-            if (!mUseRealProgressFlag && mTotalRequests)
-                return OnProgressChange(nullptr, nullptr, 0, 0,
-                                        mFinishedRequests, mTotalRequests);
-        }
-
-        // no need to forward this state change
-        return NS_OK;
     } else {
-        // no need to forward this state change
+        // No need to forward this state change.
         return NS_OK;
     }
 
-    // If we're here, we have either STATE_START or STATE_STOP.  The
-    // listener only cares about these in certain conditions.
-    bool isLoadingDocument = false;
-    if ((aStateFlags & nsIWebProgressListener::STATE_IS_NETWORK ||
-         (aStateFlags & nsIWebProgressListener::STATE_IS_REQUEST &&
-          mFinishedRequests == mTotalRequests &&
-          (aWebProgress->GetIsLoadingDocument(&isLoadingDocument),
-           !isLoadingDocument)))) {
-        if (mTimer && (aStateFlags & nsIWebProgressListener::STATE_STOP)) {
-            mTimer->Cancel();
-            ProcessTimeout();
-        }
-
+    // Only notify listener for STATE_IS_NETWORK.
+    if (aStateFlags & STATE_IS_NETWORK) {
         return mListener->OnStateChange(aWebProgress, aRequest, aStateFlags,
                                         aStatus);
     }
@@ -185,9 +197,6 @@ nsBrowserStatusFilter::OnProgressChange(nsIWebProgress *aWebProgress,
                                         int32_t aMaxTotalProgress)
 {
     if (!mListener)
-        return NS_OK;
-
-    if (!mUseRealProgressFlag && aRequest)
         return NS_OK;
 
     //
@@ -308,19 +317,18 @@ nsBrowserStatusFilter::OnRefreshAttempted(nsIWebProgress *aWebProgress,
 void
 nsBrowserStatusFilter::ResetMembers()
 {
-    mTotalRequests = 0;
-    mFinishedRequests = 0;
-    mUseRealProgressFlag = false;
     mMaxProgress = 0;
     mCurProgress = 0;
     mCurrentPercentage = 0;
     mStatusIsDirty = true;
+    // We don't reset mIsLoadingDocument here.
+    // It's controlled by OnStateChange based on webProgress states.
 }
 
 void
-nsBrowserStatusFilter::MaybeSendProgress() 
+nsBrowserStatusFilter::MaybeSendProgress()
 {
-    if (mCurProgress > mMaxProgress || mCurProgress <= 0) 
+    if (mCurProgress > mMaxProgress || mCurProgress <= 0)
         return;
 
     // check our percentage
@@ -351,13 +359,11 @@ nsBrowserStatusFilter::StartDelayTimer()
 {
     NS_ASSERTION(!DelayInEffect(), "delay should not be in effect");
 
-    mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    if (!mTimer)
-        return NS_ERROR_FAILURE;
-
-    return mTimer->InitWithNamedFuncCallback(
-        TimeoutHandler, this, 160, nsITimer::TYPE_ONE_SHOT,
-        "nsBrowserStatusFilter::TimeoutHandler");
+    return NS_NewTimerWithFuncCallback(getter_AddRefs(mTimer),
+                                       TimeoutHandler, this, 160,
+                                       nsITimer::TYPE_ONE_SHOT,
+                                       "nsBrowserStatusFilter::TimeoutHandler",
+                                       mTarget);
 }
 
 void

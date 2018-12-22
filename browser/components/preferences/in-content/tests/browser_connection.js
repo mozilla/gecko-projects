@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function test() {
   waitForExplicitFinish();
@@ -18,52 +18,29 @@ function test() {
   });
 
   let connectionURL = "chrome://browser/content/preferences/connection.xul";
-  let windowWatcher = Services.ww;
-
-  // instantApply must be true, otherwise connection dialog won't save
-  // when opened from in-content prefs
-  Services.prefs.setBoolPref("browser.preferences.instantApply", true);
-
-  // this observer is registered after the pref tab loads
-  let observer = {
-    observe: function(aSubject, aTopic, aData) {
-      if (aTopic == "domwindowopened") {
-        // when connection window loads, run tests and acceptDialog()
-        let win = aSubject.QueryInterface(Components.interfaces.nsIDOMWindow);
-        win.addEventListener("load", function winLoadListener() {
-          win.removeEventListener("load", winLoadListener, false);
-          if (win.location.href == connectionURL) {
-            ok(true, "connection window opened");
-            runConnectionTests(win);
-            win.document.documentElement.acceptDialog();
-          }
-        }, false);
-      } else if (aTopic == "domwindowclosed") {
-        // finish up when connection window closes
-        let win = aSubject.QueryInterface(Components.interfaces.nsIDOMWindow);
-        if (win.location.href == connectionURL) {
-          windowWatcher.unregisterNotification(observer);
-          ok(true, "connection window closed");
-          // runConnectionTests will have changed this pref - make sure it was
-          // sanitized correctly when the dialog was accepted
-          is(Services.prefs.getCharPref("network.proxy.no_proxies_on"),
-             ".a.com,.b.com,.c.com", "no_proxies_on pref has correct value");
-          gBrowser.removeCurrentTab();
-          finish();
-        }
-      }
-    }
-  };
 
   /*
   The connection dialog alone won't save onaccept since it uses type="child",
   so it has to be opened as a sub dialog of the main pref tab.
   Open the main tab here.
   */
-  open_preferences(function tabOpened(aContentWindow) {
+  open_preferences(async function tabOpened(aContentWindow) {
     is(gBrowser.currentURI.spec, "about:preferences", "about:preferences loaded");
-    windowWatcher.registerNotification(observer);
-    gBrowser.contentWindow.gAdvancedPane.showConnections();
+    let dialog = await openAndLoadSubDialog(connectionURL);
+    let dialogClosingPromise = BrowserTestUtils.waitForEvent(dialog.document.documentElement, "dialogclosing");
+
+    ok(dialog, "connection window opened");
+    runConnectionTests(dialog);
+    dialog.document.documentElement.acceptDialog();
+
+    let dialogClosingEvent = await dialogClosingPromise;
+    ok(dialogClosingEvent, "connection window closed");
+    // runConnectionTests will have changed this pref - make sure it was
+    // sanitized correctly when the dialog was accepted
+    is(Services.prefs.getCharPref("network.proxy.no_proxies_on"),
+       ".a.com,.b.com,.c.com", "no_proxies_on pref has correct value");
+    gBrowser.removeCurrentTab();
+    finish();
   });
 }
 
@@ -71,14 +48,18 @@ function test() {
 function runConnectionTests(win) {
   let doc = win.document;
   let networkProxyNone = doc.getElementById("networkProxyNone");
-  let networkProxyNonePref = doc.getElementById("network.proxy.no_proxies_on");
-  let networkProxyTypePref = doc.getElementById("network.proxy.type");
+  let networkProxyNonePref = win.Preferences.get("network.proxy.no_proxies_on");
+  let networkProxyTypePref = win.Preferences.get("network.proxy.type");
 
   // make sure the networkProxyNone textbox is formatted properly
   is(networkProxyNone.getAttribute("multiline"), "true",
      "networkProxyNone textbox is multiline");
   is(networkProxyNone.getAttribute("rows"), "2",
      "networkProxyNone textbox has two rows");
+
+  // make sure manual proxy controls are disabled when the window is opened
+  let networkProxyHTTP = doc.getElementById("networkProxyHTTP");
+  is(networkProxyHTTP.disabled, true, "networkProxyHTTP textbox is disabled");
 
   // check if sanitizing the given input for the no_proxies_on pref results in
   // expected string

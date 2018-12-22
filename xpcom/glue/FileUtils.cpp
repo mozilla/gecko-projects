@@ -4,14 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/FileUtils.h"
+
 #include <errno.h>
 #include <stdio.h>
 
 #include "nscore.h"
-#include "nsStringGlue.h"
 #include "private/pprio.h"
+#include "prmem.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/FileUtils.h"
 
 #if defined(XP_MACOSX)
 #include <fcntl.h>
@@ -36,7 +37,9 @@
 
 // Functions that are not to be used in standalone glue must be implemented
 // within this #if block
-#if !defined(XPCOM_GLUE)
+#if defined(MOZILLA_INTERNAL_API)
+
+#include "nsString.h"
 
 bool
 mozilla::fallocate(PRFileDesc* aFD, int64_t aLength)
@@ -123,100 +126,6 @@ mozilla::fallocate(PRFileDesc* aFD, int64_t aLength)
   return false;
 }
 
-#ifdef ReadSysFile_PRESENT
-
-bool
-mozilla::ReadSysFile(
-  const char* aFilename,
-  char* aBuf,
-  size_t aBufSize)
-{
-  int fd = MOZ_TEMP_FAILURE_RETRY(open(aFilename, O_RDONLY));
-  if (fd < 0) {
-    return false;
-  }
-  ScopedClose autoClose(fd);
-  if (aBufSize == 0) {
-    return true;
-  }
-  ssize_t bytesRead;
-  size_t offset = 0;
-  do {
-    bytesRead = MOZ_TEMP_FAILURE_RETRY(read(fd, aBuf + offset,
-                                            aBufSize - offset));
-    if (bytesRead == -1) {
-      return false;
-    }
-    offset += bytesRead;
-  } while (bytesRead > 0 && offset < aBufSize);
-  MOZ_ASSERT(offset <= aBufSize);
-  if (offset > 0 && aBuf[offset - 1] == '\n') {
-    offset--;
-  }
-  if (offset == aBufSize) {
-    MOZ_ASSERT(offset > 0);
-    offset--;
-  }
-  aBuf[offset] = '\0';
-  return true;
-}
-
-bool
-mozilla::ReadSysFile(
-  const char* aFilename,
-  int* aVal)
-{
-  char valBuf[32];
-  if (!ReadSysFile(aFilename, valBuf, sizeof(valBuf))) {
-    return false;
-  }
-  return sscanf(valBuf, "%d", aVal) == 1;
-}
-
-bool
-mozilla::ReadSysFile(
-  const char* aFilename,
-  bool* aVal)
-{
-  int v;
-  if (!ReadSysFile(aFilename, &v)) {
-    return false;
-  }
-  *aVal = (v != 0);
-  return true;
-}
-
-#endif /* ReadSysFile_PRESENT */
-
-#ifdef WriteSysFile_PRESENT
-
-bool
-mozilla::WriteSysFile(
-  const char* aFilename,
-  const char* aBuf)
-{
-  size_t aBufSize = strlen(aBuf);
-  int fd = MOZ_TEMP_FAILURE_RETRY(open(aFilename, O_WRONLY));
-  if (fd < 0) {
-    return false;
-  }
-  ScopedClose autoClose(fd);
-  ssize_t bytesWritten;
-  size_t offset = 0;
-  do {
-    bytesWritten = MOZ_TEMP_FAILURE_RETRY(write(fd, aBuf + offset,
-                                                aBufSize - offset));
-    if (bytesWritten == -1) {
-      return false;
-    }
-    offset += bytesWritten;
-  } while (bytesWritten > 0 && offset < aBufSize);
-  MOZ_ASSERT(offset == aBufSize);
-  return true;
-}
-
-#endif /* WriteSysFile_PRESENT */
-
 void
 mozilla::ReadAheadLib(nsIFile* aFile)
 {
@@ -254,7 +163,62 @@ mozilla::ReadAheadFile(nsIFile* aFile, const size_t aOffset,
 #endif
 }
 
-#endif // !defined(XPCOM_GLUE)
+mozilla::PathString
+mozilla::GetLibraryName(mozilla::pathstr_t aDirectory, const char* aLib)
+{
+#ifdef XP_WIN
+  nsAutoString fullName;
+  if (aDirectory) {
+    fullName.Assign(aDirectory);
+    fullName.Append('\\');
+  }
+  AppendUTF8toUTF16(aLib, fullName);
+  if (!strstr(aLib, ".dll")) {
+    fullName.AppendLiteral(".dll");
+  }
+  return fullName;
+#else
+  char* temp = PR_GetLibraryName(aDirectory, aLib);
+  if (!temp) {
+    return EmptyCString();
+  }
+  nsAutoCString libname(temp);
+  PR_FreeLibraryName(temp);
+  return libname;
+#endif
+}
+
+mozilla::PathString
+mozilla::GetLibraryFilePathname(mozilla::pathstr_t aName, PRFuncPtr aAddr)
+{
+#ifdef XP_WIN
+  HMODULE handle = GetModuleHandleW(char16ptr_t(aName));
+  if (!handle) {
+    return EmptyString();
+  }
+
+  nsAutoString path;
+  path.SetLength(MAX_PATH);
+  DWORD len = GetModuleFileNameW(handle, char16ptr_t(path.BeginWriting()),
+                                 path.Length());
+  if (!len) {
+    return EmptyString();
+  }
+
+  path.SetLength(len);
+  return path;
+#else
+  char* temp = PR_GetLibraryFilePathname(aName, aAddr);
+  if (!temp) {
+    return EmptyCString();
+  }
+  nsAutoCString path(temp);
+  PR_Free(temp); // PR_GetLibraryFilePathname() uses PR_Malloc().
+  return path;
+#endif
+}
+
+#endif // defined(MOZILLA_INTERNAL_API)
 
 #if defined(LINUX) && !defined(ANDROID)
 

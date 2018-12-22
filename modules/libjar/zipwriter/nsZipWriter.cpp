@@ -33,14 +33,14 @@ using namespace mozilla;
  * nsZipWriter is used to create and add to zip files.
  * It is based on the spec available at
  * http://www.pkware.com/documents/casestudies/APPNOTE.TXT.
- * 
+ *
  * The basic structure of a zip file created is slightly simpler than that
  * illustrated in the spec because certain features of the zip format are
  * unsupported:
- * 
+ *
  * [local file header 1]
  * [file data 1]
- * . 
+ * .
  * .
  * .
  * [local file header n]
@@ -224,7 +224,7 @@ nsresult nsZipWriter::ReadFile(nsIFile *aFile)
         seek -= (1024 - ZIP_EOCDR_HEADER_SIZE);
     }
     // Will never reach here in reality
-    NS_NOTREACHED("Loop should never complete");
+    MOZ_ASSERT_UNREACHABLE("Loop should never complete");
     return NS_ERROR_UNEXPECTED;
 }
 
@@ -238,7 +238,7 @@ NS_IMETHODIMP nsZipWriter::Open(nsIFile *aFile, int32_t aIoFlags)
     // Need to be able to write to the file
     if (aIoFlags & PR_RDONLY)
         return NS_ERROR_FAILURE;
-    
+
     nsresult rv = aFile->Clone(getter_AddRefs(mFile));
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -270,9 +270,9 @@ NS_IMETHODIMP nsZipWriter::Open(nsIFile *aFile, int32_t aIoFlags)
         return rv;
     }
 
-    rv = NS_NewBufferedOutputStream(getter_AddRefs(mStream), stream, 64 * 1024);
+    rv = NS_NewBufferedOutputStream(getter_AddRefs(mStream), stream.forget(),
+                                    64 * 1024);
     if (NS_FAILED(rv)) {
-        stream->Close();
         mHeaders.Clear();
         mEntryHash.Clear();
         return rv;
@@ -418,14 +418,9 @@ NS_IMETHODIMP nsZipWriter::AddEntryChannel(const nsACString & aZipEntry,
         return NS_ERROR_FILE_ALREADY_EXISTS;
 
     nsCOMPtr<nsIInputStream> inputStream;
-    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-    nsresult rv;
-    if (loadInfo && loadInfo->GetSecurityMode()) {
-        rv = aChannel->Open2(getter_AddRefs(inputStream));
-    }
-    else {
-        rv = aChannel->Open(getter_AddRefs(inputStream));
-    }
+    nsresult rv = NS_MaybeOpenChannelUsingOpen2(aChannel,
+                    getter_AddRefs(inputStream));
+
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = AddEntryStream(aZipEntry, aModTime, aCompression, inputStream,
@@ -993,21 +988,16 @@ inline nsresult nsZipWriter::BeginProcessingAddition(nsZipQueueItem* aItem,
 
         if (aItem->mStream) {
             nsCOMPtr<nsIInputStreamPump> pump;
-            rv = NS_NewInputStreamPump(getter_AddRefs(pump), aItem->mStream,
-                                       -1, -1, 0, 0, true);
+            nsCOMPtr<nsIInputStream> tmpStream = aItem->mStream;
+            rv = NS_NewInputStreamPump(getter_AddRefs(pump),
+                                       tmpStream.forget(), 0, 0, true);
             NS_ENSURE_SUCCESS(rv, rv);
 
             rv = pump->AsyncRead(stream, nullptr);
             NS_ENSURE_SUCCESS(rv, rv);
         }
         else {
-            nsCOMPtr<nsILoadInfo> loadInfo = aItem->mChannel->GetLoadInfo();
-            if (loadInfo && loadInfo->GetSecurityMode()) {
-                rv = aItem->mChannel->AsyncOpen2(stream);
-            }
-            else {
-                rv = aItem->mChannel->AsyncOpen(stream, nullptr);
-            }
+            rv = NS_MaybeOpenChannelUsingAsyncOpen2(aItem->mChannel, stream);
             NS_ENSURE_SUCCESS(rv, rv);
         }
 
@@ -1028,8 +1018,9 @@ inline nsresult nsZipWriter::BeginProcessingRemoval(int32_t aPos)
                                              mFile);
     NS_ENSURE_SUCCESS(rv, rv);
     nsCOMPtr<nsIInputStreamPump> pump;
-    rv = NS_NewInputStreamPump(getter_AddRefs(pump), inputStream, -1, -1, 0,
-                               0, true);
+    nsCOMPtr<nsIInputStream> tmpStream = inputStream;
+    rv = NS_NewInputStreamPump(getter_AddRefs(pump), tmpStream.forget(), 0, 0,
+                               true);
     if (NS_FAILED(rv)) {
         inputStream->Close();
         return rv;

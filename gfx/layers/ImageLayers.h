@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -38,11 +39,11 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Set the filter used to resample this image if necessary.
    */
-  void SetFilter(gfx::Filter aFilter)
+  void SetSamplingFilter(gfx::SamplingFilter aSamplingFilter)
   {
-    if (mFilter != aFilter) {
+    if (mSamplingFilter != aSamplingFilter) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Filter", this));
-      mFilter = aFilter;
+      mSamplingFilter = aSamplingFilter;
       Mutated();
     }
   }
@@ -62,7 +63,7 @@ public:
 
 
   ImageContainer* GetContainer() { return mContainer; }
-  gfx::Filter GetFilter() { return mFilter; }
+  gfx::SamplingFilter GetSamplingFilter() { return mSamplingFilter; }
   const gfx::IntSize& GetScaleToSize() { return mScaleToSize; }
   ScaleMode GetScaleMode() { return mScaleMode; }
 
@@ -75,17 +76,7 @@ public:
     return mEffectiveTransformForBuffer;
   }
 
-  /**
-   * if true, the image will only be backed by a single tile texture
-   */
-  void SetDisallowBigImage(bool aDisallowBigImage)
-  {
-    if (mDisallowBigImage != aDisallowBigImage) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) DisallowBigImage", this));
-      mDisallowBigImage = aDisallowBigImage;
-      Mutated();
-    }
-  }
+  virtual ImageLayer* AsImageLayer() override { return this; }
 
 protected:
   ImageLayer(LayerManager* aManager, void* aImplData);
@@ -94,10 +85,9 @@ protected:
   virtual void DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent) override;
 
   RefPtr<ImageContainer> mContainer;
-  gfx::Filter mFilter;
+  gfx::SamplingFilter mSamplingFilter;
   gfx::IntSize mScaleToSize;
   ScaleMode mScaleMode;
-  bool mDisallowBigImage;
   gfx::Matrix4x4 mEffectiveTransformForBuffer;
 };
 

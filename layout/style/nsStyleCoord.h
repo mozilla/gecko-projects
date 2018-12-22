@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,14 +9,19 @@
 #ifndef nsStyleCoord_h___
 #define nsStyleCoord_h___
 
+#include <type_traits>
+
+#include "mozilla/EnumTypeTraits.h"
+#include "mozilla/gfx/Types.h"
 #include "nsCoord.h"
+#include "nsISupportsImpl.h"
 #include "nsStyleConsts.h"
 
 namespace mozilla {
 
 class WritingMode;
 
-// Logical axis, edge and side constants for use in various places.
+// Logical axis, edge, side and corner constants for use in various places.
 enum LogicalAxis {
   eLogicalAxisBlock  = 0x0,
   eLogicalAxisInline = 0x1
@@ -29,6 +35,14 @@ enum LogicalSide {
   eLogicalSideBEnd   = (eLogicalAxisBlock  << 1) | eLogicalEdgeEnd,    // 0x1
   eLogicalSideIStart = (eLogicalAxisInline << 1) | eLogicalEdgeStart,  // 0x2
   eLogicalSideIEnd   = (eLogicalAxisInline << 1) | eLogicalEdgeEnd     // 0x3
+};
+
+enum LogicalCorner
+{
+  eLogicalCornerBStartIStart = 0,
+  eLogicalCornerBStartIEnd   = 1,
+  eLogicalCornerBEndIEnd     = 2,
+  eLogicalCornerBEndIStart   = 3
 };
 
 } // namespace mozilla
@@ -72,6 +86,7 @@ typedef union {
  * the unit is a must before asking for the value in any particular
  * form.
  */
+ /** <div rustbindgen private accessor="unsafe"></div> */
 class nsStyleCoord {
 public:
   // Non-reference counted calc() value.  See nsStyleStruct.h for some uses
@@ -91,6 +106,11 @@ public:
       return !(*this == aOther);
     }
 
+    nscoord ToLength() const {
+      MOZ_ASSERT(!mHasPercent);
+      return mLength;
+    }
+
     // If this returns true the value is definitely zero. It it returns false
     // it might be zero. So it's best used for conservative optimization.
     bool IsDefinitelyZero() const { return mLength == 0 && mPercent == 0; }
@@ -99,7 +119,7 @@ public:
   // Reference counted calc() value.  This is the type that is used to store
   // the calc() value in nsStyleCoord.
   struct Calc final : public CalcValue {
-    NS_INLINE_DECL_REFCOUNTING(Calc)
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Calc)
     Calc() {}
 
   private:
@@ -169,10 +189,45 @@ public:
            (IsCalcUnit() && CalcHasPercent());
   }
 
-  bool ConvertsToLength() const {
-    return mUnit == eStyleUnit_Coord ||
-           (IsCalcUnit() && !CalcHasPercent());
+  static bool ConvertsToLength(const nsStyleUnit aUnit,
+                               const nsStyleUnion aValue) {
+    return aUnit == eStyleUnit_Coord ||
+           (IsCalcUnit(aUnit) && !AsCalcValue(aValue)->mHasPercent);
   }
+
+  bool ConvertsToLength() const {
+    return ConvertsToLength(mUnit, mValue);
+  }
+
+  static nscoord ToLength(nsStyleUnit aUnit, nsStyleUnion aValue) {
+    MOZ_ASSERT(ConvertsToLength(aUnit, aValue));
+    if (IsCalcUnit(aUnit)) {
+      return AsCalcValue(aValue)->ToLength(); // Note: This asserts !mHasPercent
+    }
+    MOZ_ASSERT(aUnit == eStyleUnit_Coord);
+    return aValue.mInt;
+  }
+
+  nscoord ToLength() const {
+    return ToLength(GetUnit(), mValue);
+  }
+
+  // Callers must verify IsCalcUnit before calling this function.
+  static Calc* AsCalcValue(nsStyleUnion aValue) {
+    return static_cast<Calc*>(aValue.mPointer);
+  }
+
+  // Compute the value that IsCalcUnit().
+  // @note the caller is expected to handle percentage of an indefinite size
+  // and NOT call this method with aPercentageBasis == NS_UNCONSTRAINEDSIZE.
+  // @note the return value may be negative, e.g. for "calc(a - b%)"
+  nscoord ComputeComputedCalc(nscoord aPercentageBasis) const;
+
+  // Compute the value that is either a coord, a percent, or a calc expression.
+  // @note the caller is expected to handle percentage of an indefinite size
+  // and NOT call this method with aPercentageBasis == NS_UNCONSTRAINEDSIZE.
+  // @note the return value may be negative, e.g. for "calc(a - b%)"
+  nscoord ComputeCoordPercentCalc(nscoord aPercentageBasis) const;
 
   nscoord     GetCoordValue() const;
   int32_t     GetIntValue() const;
@@ -184,7 +239,14 @@ public:
   double      GetAngleValueInRadians() const;
   float       GetFlexFractionValue() const;
   Calc*       GetCalcValue() const;
-  uint32_t    HashValue(uint32_t aHash) const;
+  template<typename T,
+           typename = typename std::enable_if<std::is_enum<T>::value>::type>
+  T GetEnumValue() const
+  {
+    MOZ_ASSERT(GetUnit() == eStyleUnit_Enumerated,
+               "The unit must be eStyleUnit_Enumerated!");
+    return static_cast<T>(GetIntValue());
+  }
 
   // Sets to null and releases any refcounted objects.  Only use this if the
   // object is initialized (i.e. don't use it in nsStyleCoord constructors).
@@ -200,6 +262,14 @@ public:
   void  SetAutoValue();
   void  SetNoneValue();
   void  SetCalcValue(Calc* aValue);
+  template<typename T,
+           typename = typename std::enable_if<std::is_enum<T>::value>::type>
+  void SetEnumValue(T aValue)
+  {
+    static_assert(mozilla::EnumTypeFitsWithin<T, int32_t>::value,
+                  "aValue must be an enum that fits within mValue.mInt!");
+    SetIntValue(static_cast<int32_t>(aValue), eStyleUnit_Enumerated);
+  }
 
   // Resets a coord represented by a unit/value pair.
   static inline void Reset(nsStyleUnit& aUnit, nsStyleUnion& aValue);
@@ -215,6 +285,15 @@ public:
   static inline void SetValue(nsStyleUnit& aUnit, nsStyleUnion& aValue,
                               const nsStyleCoord& aOther);
 
+  // Like the above, but do not reset before setting.
+  static inline void InitWithValue(nsStyleUnit& aUnit,
+                                   nsStyleUnion& aValue,
+                                   nsStyleUnit aOtherUnit,
+                                   const nsStyleUnion& aOtherValue);
+
+  static inline void InitWithValue(nsStyleUnit& aUnit, nsStyleUnion& aValue,
+                                   const nsStyleCoord& aOther);
+
 private:
   nsStyleUnit   mUnit;
   nsStyleUnion  mValue;
@@ -225,6 +304,7 @@ private:
  * This is commonly used to hold the widths of the borders, margins,
  * or paddings of a box.
  */
+ /** <div rustbindgen private accessor="unsafe"></div> */
 class nsStyleSides {
 public:
   nsStyleSides();
@@ -235,13 +315,13 @@ public:
   bool           operator==(const nsStyleSides& aOther) const;
   bool           operator!=(const nsStyleSides& aOther) const;
 
-  inline nsStyleUnit GetUnit(mozilla::css::Side aSide) const;
+  inline nsStyleUnit GetUnit(mozilla::Side aSide) const;
   inline nsStyleUnit GetLeftUnit() const;
   inline nsStyleUnit GetTopUnit() const;
   inline nsStyleUnit GetRightUnit() const;
   inline nsStyleUnit GetBottomUnit() const;
 
-  inline nsStyleCoord Get(mozilla::css::Side aSide) const;
+  inline nsStyleCoord Get(mozilla::Side aSide) const;
   inline nsStyleCoord GetLeft() const;
   inline nsStyleCoord GetTop() const;
   inline nsStyleCoord GetRight() const;
@@ -258,6 +338,10 @@ public:
   inline nsStyleUnit GetIEndUnit(mozilla::WritingMode aWritingMode) const;
   inline nsStyleUnit GetBEndUnit(mozilla::WritingMode aWritingMode) const;
 
+  // Return true if either the start or end side in the axis is 'auto'.
+  inline bool HasBlockAxisAuto(mozilla::WritingMode aWritingMode) const;
+  inline bool HasInlineAxisAuto(mozilla::WritingMode aWritingMode) const;
+
   inline nsStyleCoord Get(mozilla::WritingMode aWritingMode,
                           mozilla::LogicalSide aSide) const;
   inline nsStyleCoord GetIStart(mozilla::WritingMode aWritingMode) const;
@@ -270,11 +354,24 @@ public:
   // constructors).
   void Reset();
 
-  inline void Set(mozilla::css::Side aSide, const nsStyleCoord& aCoord);
+  inline void Set(mozilla::Side aSide, const nsStyleCoord& aCoord);
   inline void SetLeft(const nsStyleCoord& aCoord);
   inline void SetTop(const nsStyleCoord& aCoord);
   inline void SetRight(const nsStyleCoord& aCoord);
   inline void SetBottom(const nsStyleCoord& aCoord);
+
+  nscoord ToLength(mozilla::Side aSide) const {
+    return nsStyleCoord::ToLength(mUnits[aSide], mValues[aSide]);
+  }
+
+  bool ConvertsToLength() const {
+    NS_FOR_CSS_SIDES(side) {
+      if (!nsStyleCoord::ConvertsToLength(mUnits[side], mValues[side])) {
+        return false;
+      }
+    }
+    return true;
+  }
 
 protected:
   nsStyleUnit   mUnits[4];
@@ -282,10 +379,11 @@ protected:
 };
 
 /**
- * Class that represents a set of top-left/top-right/bottom-left/bottom-right
+ * Class that represents a set of top-left/top-right/bottom-right/bottom-left
  * nsStyleCoord pairs.  This is used to hold the dimensions of the
  * corners of a box (for, e.g., border-radius and outline-radius).
  */
+ /** <div rustbindgen private accessor="unsafe"></div> */
 class nsStyleCorners {
 public:
   nsStyleCorners();
@@ -297,7 +395,7 @@ public:
   bool           operator==(const nsStyleCorners& aOther) const;
   bool           operator!=(const nsStyleCorners& aOther) const;
 
-  // aCorner is always one of NS_CORNER_* defined in nsStyleConsts.h
+  // aHalfCorner is always one of enum HalfCorner in gfx/2d/Types.h.
   inline nsStyleUnit GetUnit(uint8_t aHalfCorner) const;
 
   inline nsStyleCoord Get(uint8_t aHalfCorner) const;
@@ -310,6 +408,11 @@ public:
   inline void Set(uint8_t aHalfCorner, const nsStyleCoord& aCoord);
 
 protected:
+  // Stored as:
+  // top-left.x, top-left.y,
+  // top-right.x, top-right.y,
+  // bottom-right.x, bottom-right.y,
+  // bottom-left.x, bottom-left.y
   nsStyleUnit   mUnits[8];
   nsStyleUnion  mValues[8];
 };
@@ -327,13 +430,13 @@ inline nsStyleCoord::nsStyleCoord(nscoord aValue, CoordConstructorType)
 inline nsStyleCoord::nsStyleCoord(const nsStyleCoord& aCopy)
   : mUnit(eStyleUnit_Null)
 {
-  SetValue(mUnit, mValue, aCopy);
+  InitWithValue(mUnit, mValue, aCopy);
 }
 
 inline nsStyleCoord::nsStyleCoord(const nsStyleUnion& aValue, nsStyleUnit aUnit)
   : mUnit(eStyleUnit_Null)
 {
-  SetValue(mUnit, mValue, aUnit, aValue);
+  InitWithValue(mUnit, mValue, aUnit, aValue);
 }
 
 inline bool nsStyleCoord::operator!=(const nsStyleCoord& aOther) const
@@ -412,7 +515,7 @@ inline nsStyleCoord::Calc* nsStyleCoord::GetCalcValue() const
 {
   NS_ASSERTION(IsCalcUnit(), "not a pointer value");
   if (IsCalcUnit()) {
-    return static_cast<Calc*>(mValue.mPointer);
+    return AsCalcValue(mValue);
   }
   return nullptr;
 }
@@ -442,7 +545,15 @@ nsStyleCoord::SetValue(nsStyleUnit& aUnit,
                        const nsStyleUnion& aOtherValue)
 {
   Reset(aUnit, aValue);
+  InitWithValue(aUnit, aValue, aOtherUnit, aOtherValue);
+}
 
+/* static */ inline void
+nsStyleCoord::InitWithValue(nsStyleUnit& aUnit,
+                            nsStyleUnion& aValue,
+                            nsStyleUnit aOtherUnit,
+                            const nsStyleUnion& aOtherValue)
+{
   aUnit = aOtherUnit;
   aValue = aOtherValue;
 
@@ -462,6 +573,13 @@ nsStyleCoord::SetValue(nsStyleUnit& aUnit, nsStyleUnion& aValue,
   SetValue(aUnit, aValue, aOther.mUnit, aOther.mValue);
 }
 
+/* static */ inline void
+nsStyleCoord::InitWithValue(nsStyleUnit& aUnit, nsStyleUnion& aValue,
+                            const nsStyleCoord& aOther)
+{
+  InitWithValue(aUnit, aValue, aOther.mUnit, aOther.mValue);
+}
+
 
 // -------------------------
 // nsStyleSides inlines
@@ -471,79 +589,79 @@ inline bool nsStyleSides::operator!=(const nsStyleSides& aOther) const
   return !((*this) == aOther);
 }
 
-inline nsStyleUnit nsStyleSides::GetUnit(mozilla::css::Side aSide) const
+inline nsStyleUnit nsStyleSides::GetUnit(mozilla::Side aSide) const
 {
   return (nsStyleUnit)mUnits[aSide];
 }
 
 inline nsStyleUnit nsStyleSides::GetLeftUnit() const
 {
-  return GetUnit(NS_SIDE_LEFT);
+  return GetUnit(mozilla::eSideLeft);
 }
 
 inline nsStyleUnit nsStyleSides::GetTopUnit() const
 {
-  return GetUnit(NS_SIDE_TOP);
+  return GetUnit(mozilla::eSideTop);
 }
 
 inline nsStyleUnit nsStyleSides::GetRightUnit() const
 {
-  return GetUnit(NS_SIDE_RIGHT);
+  return GetUnit(mozilla::eSideRight);
 }
 
 inline nsStyleUnit nsStyleSides::GetBottomUnit() const
 {
-  return GetUnit(NS_SIDE_BOTTOM);
+  return GetUnit(mozilla::eSideBottom);
 }
 
-inline nsStyleCoord nsStyleSides::Get(mozilla::css::Side aSide) const
+inline nsStyleCoord nsStyleSides::Get(mozilla::Side aSide) const
 {
   return nsStyleCoord(mValues[aSide], nsStyleUnit(mUnits[aSide]));
 }
 
 inline nsStyleCoord nsStyleSides::GetLeft() const
 {
-  return Get(NS_SIDE_LEFT);
+  return Get(mozilla::eSideLeft);
 }
 
 inline nsStyleCoord nsStyleSides::GetTop() const
 {
-  return Get(NS_SIDE_TOP);
+  return Get(mozilla::eSideTop);
 }
 
 inline nsStyleCoord nsStyleSides::GetRight() const
 {
-  return Get(NS_SIDE_RIGHT);
+  return Get(mozilla::eSideRight);
 }
 
 inline nsStyleCoord nsStyleSides::GetBottom() const
 {
-  return Get(NS_SIDE_BOTTOM);
+  return Get(mozilla::eSideBottom);
 }
 
-inline void nsStyleSides::Set(mozilla::css::Side aSide, const nsStyleCoord& aCoord)
+inline void nsStyleSides::Set(mozilla::Side aSide, const nsStyleCoord& aCoord)
 {
   nsStyleCoord::SetValue(mUnits[aSide], mValues[aSide], aCoord);
 }
 
 inline void nsStyleSides::SetLeft(const nsStyleCoord& aCoord)
 {
-  Set(NS_SIDE_LEFT, aCoord);
+  Set(mozilla::eSideLeft, aCoord);
 }
 
 inline void nsStyleSides::SetTop(const nsStyleCoord& aCoord)
 {
-  Set(NS_SIDE_TOP, aCoord);
+  Set(mozilla::eSideTop, aCoord);
 }
 
 inline void nsStyleSides::SetRight(const nsStyleCoord& aCoord)
 {
-  Set(NS_SIDE_RIGHT, aCoord);
+  Set(mozilla::eSideRight, aCoord);
 }
 
 inline void nsStyleSides::SetBottom(const nsStyleCoord& aCoord)
 {
-  Set(NS_SIDE_BOTTOM, aCoord);
+  Set(mozilla::eSideBottom, aCoord);
 }
 
 // -------------------------

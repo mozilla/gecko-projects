@@ -9,23 +9,22 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLFrameElement.h"
-#include "nsIDOMHTMLIFrameElement.h"
 #include "nsDOMTokenList.h"
 
 namespace mozilla {
 namespace dom {
 
 class HTMLIFrameElement final : public nsGenericHTMLFrameElement
-                              , public nsIDOMHTMLIFrameElement
 {
 public:
   explicit HTMLIFrameElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                              FromParser aFromParser = NOT_FROM_PARSER);
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLIFrameElement, iframe)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLIFrameElement, iframe)
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLIFrameElement,
+                                       nsGenericHTMLFrameElement)
 
   // Element
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override
@@ -33,40 +32,28 @@ public:
     return true;
   }
 
-  // nsIDOMHTMLIFrameElement
-  NS_DECL_NSIDOMHTMLIFRAMEELEMENT
-
   // nsIContent
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult) override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
-
-  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                   const nsAString& aValue, bool aNotify)
-  {
-    return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
-  }
-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                           nsIAtom* aPrefix, const nsAString& aValue,
-                           bool aNotify) override;
-  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue,
-                                bool aNotify) override;
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify) override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   uint32_t GetSandboxFlags();
 
   // Web IDL binding methods
-  // The XPCOM GetSrc is fine for our purposes
-  void SetSrc(const nsAString& aSrc, ErrorResult& aError)
+  void GetSrc(nsString& aSrc) const
   {
-    SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
+    GetURIAttr(nsGkAtoms::src, nullptr, aSrc);
+  }
+  void SetSrc(const nsAString& aSrc, nsIPrincipal* aTriggeringPrincipal, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::src, aSrc, aTriggeringPrincipal, aError);
   }
   void GetSrcdoc(DOMString& aSrcdoc)
   {
@@ -86,7 +73,7 @@ public:
   }
   nsDOMTokenList* Sandbox()
   {
-    return GetTokenList(nsGkAtoms::sandbox);
+    return GetTokenList(nsGkAtoms::sandbox, sSupportedSandboxTokens);
   }
   bool AllowFullscreen() const
   {
@@ -95,6 +82,14 @@ public:
   void SetAllowFullscreen(bool aAllow, ErrorResult& aError)
   {
     SetHTMLBoolAttr(nsGkAtoms::allowfullscreen, aAllow, aError);
+  }
+  bool AllowPaymentRequest() const
+  {
+    return GetBoolAttr(nsGkAtoms::allowpaymentrequest);
+  }
+  void SetAllowPaymentRequest(bool aAllow, ErrorResult& aError)
+  {
+    SetHTMLBoolAttr(nsGkAtoms::allowpaymentrequest, aAllow, aError);
   }
   void GetWidth(DOMString& aWidth)
   {
@@ -138,7 +133,10 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::frameborder, aFrameBorder, aError);
   }
-  // The XPCOM GetLongDesc is fine
+  void GetLongDesc(nsAString& aLongDesc) const
+  {
+    GetURIAttr(nsGkAtoms::longdesc, nullptr, aLongDesc);
+  }
   void SetLongDesc(const nsAString& aLongDesc, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::longdesc, aLongDesc, aError);
@@ -165,12 +163,12 @@ public:
   }
   void GetReferrerPolicy(nsAString& aReferrer)
   {
-    GetHTMLAttr(nsGkAtoms::referrerpolicy, aReferrer);
+    GetEnumAttr(nsGkAtoms::referrerpolicy, EmptyCString().get(), aReferrer);
   }
-
-  nsIDocument* GetSVGDocument()
+  nsIDocument*
+  GetSVGDocument(nsIPrincipal& aSubjectPrincipal)
   {
-    return GetContentDocument();
+    return GetContentDocument(aSubjectPrincipal);
   }
   bool Mozbrowser() const
   {
@@ -194,14 +192,33 @@ public:
 protected:
   virtual ~HTMLIFrameElement();
 
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
-
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+
+  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
+                                bool aNotify) override;
+  virtual nsresult OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
+                                          const nsAttrValueOrString& aValue,
+                                          bool aNotify) override;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
+                                    MappedDeclarations&);
+
+  static const DOMTokenListSupportedToken sSupportedSandboxTokens[];
+
+  /**
+   * This function is called by AfterSetAttr and OnAttrSetButNotChanged.
+   * This function will be called by AfterSetAttr whether the attribute is being
+   * set or unset.
+   *
+   * @param aNamespaceID the namespace of the attr being set
+   * @param aName the localname of the attribute being set
+   * @param aNotify Whether we plan to notify document observers.
+   */
+  void AfterMaybeChangeAttr(int32_t aNamespaceID, nsAtom* aName, bool aNotify);
 };
 
 } // namespace dom

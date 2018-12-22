@@ -6,13 +6,16 @@
 #ifndef nsAppShell_h__
 #define nsAppShell_h__
 
-#include "mozilla/HangMonitor.h"
+#include <time.h>
+
+#include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Move.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/jni/Natives.h"
 #include "nsBaseAppShell.h"
 #include "nsCOMPtr.h"
@@ -21,7 +24,6 @@
 #include "nsIAndroidBridge.h"
 
 namespace mozilla {
-class AndroidGeckoEvent;
 bool ProcessNextEvent();
 void NotifyEvent();
 }
@@ -34,7 +36,16 @@ class nsAppShell :
 public:
     struct Event : mozilla::LinkedListElement<Event>
     {
-        typedef mozilla::HangMonitor::ActivityType Type;
+        static uint64_t GetTime()
+        {
+            timespec time;
+            if (clock_gettime(CLOCK_MONOTONIC, &time)) {
+                return 0ull;
+            }
+            return uint64_t(time.tv_sec) * 1000000000ull + time.tv_nsec;
+        }
+
+        uint64_t mPostTime{ 0 };
 
         bool HasSameTypeAs(const Event* other) const
         {
@@ -51,13 +62,11 @@ public:
             queue.insertBack(this);
         }
 
-        virtual Type ActivityType() const
+        virtual bool IsUIEvent() const
         {
-            return Type::kGeneralActivity;
+            return false;
         }
     };
-
-    class LegacyGeckoEvent;
 
     template<typename T>
     class LambdaEvent : public Event
@@ -66,7 +75,7 @@ public:
         T lambda;
 
     public:
-        LambdaEvent(T&& l) : lambda(mozilla::Move(l)) {}
+        explicit LambdaEvent(T&& l) : lambda(std::move(l)) {}
         void Run() override { return lambda(); }
     };
 
@@ -76,8 +85,8 @@ public:
         mozilla::UniquePtr<Event> baseEvent;
 
     public:
-        ProxyEvent(mozilla::UniquePtr<Event>&& event)
-            : baseEvent(mozilla::Move(event))
+        explicit ProxyEvent(mozilla::UniquePtr<Event>&& event)
+            : baseEvent(std::move(event))
         {}
 
         void PostTo(mozilla::LinkedList<Event>& queue) override
@@ -116,7 +125,7 @@ public:
         if (!sAppShell) {
             return;
         }
-        sAppShell->mEventQueue.Post(mozilla::Move(event));
+        sAppShell->mEventQueue.Post(std::move(event));
     }
 
     // Post a event that will call a lambda
@@ -129,27 +138,36 @@ public:
             return;
         }
         sAppShell->mEventQueue.Post(mozilla::MakeUnique<LambdaEvent<T>>(
-                mozilla::Move(lambda)));
+                std::move(lambda)));
     }
-
-    static void PostEvent(mozilla::AndroidGeckoEvent* event);
 
     // Post a event and wait for it to finish running on the Gecko thread.
     static void SyncRunEvent(Event&& event,
                              mozilla::UniquePtr<Event>(*eventFactory)(
                                     mozilla::UniquePtr<Event>&&) = nullptr);
 
+    template<typename T> static
+    typename mozilla::EnableIf<!mozilla::IsBaseOf<Event, T>::value, void>::Type
+    SyncRunEvent(T&& lambda)
+    {
+        SyncRunEvent(LambdaEvent<T>(std::forward<T>(lambda)));
+    }
+
+    static already_AddRefed<nsIURI> ResolveURI(const nsCString& aUriStr);
+
     void SetBrowserApp(nsIAndroidBrowserApp* aBrowserApp) {
         mBrowserApp = aBrowserApp;
     }
 
-    void GetBrowserApp(nsIAndroidBrowserApp* *aBrowserApp) {
-        *aBrowserApp = mBrowserApp;
+    nsIAndroidBrowserApp* GetBrowserApp() {
+        return mBrowserApp;
     }
 
 protected:
     static nsAppShell* sAppShell;
     static mozilla::StaticAutoPtr<mozilla::Mutex> sAppShellLock;
+
+    static void RecordLatencies();
 
     virtual ~nsAppShell();
 
@@ -162,7 +180,7 @@ protected:
         nsAppShell* const appShell;
 
     public:
-        NativeCallbackEvent(nsAppShell* as) : appShell(as) {}
+        explicit NativeCallbackEvent(nsAppShell* as) : appShell(as) {}
         void Run() override { appShell->NativeEventCallback(); }
     };
 
@@ -178,6 +196,14 @@ protected:
         mozilla::LinkedList<Event> mQueue;
 
     public:
+        enum {
+            LATENCY_UI,
+            LATENCY_OTHER,
+            LATENCY_COUNT
+        };
+        static uint32_t sLatencyCount[LATENCY_COUNT];
+        static uint64_t sLatencyTime[LATENCY_COUNT];
+
         Queue() : mMonitor("nsAppShell.Queue")
         {}
 
@@ -194,6 +220,7 @@ protected:
             mozilla::MonitorAutoLock lock(mMonitor);
             event->PostTo(mQueue);
             if (event->isInList()) {
+                event->mPostTime = Event::GetTime();
                 // Ownership of event object transfers to the queue.
                 mozilla::Unused << event.release();
             }
@@ -205,10 +232,27 @@ protected:
             mozilla::MonitorAutoLock lock(mMonitor);
 
             if (mayWait && mQueue.isEmpty()) {
+#ifdef EARLY_BETA_OR_EARLIER
+                // Record latencies when we're about to be idle.
+                nsAppShell::RecordLatencies();
+#endif
                 lock.Wait();
             }
+
             // Ownership of event object transfers to the return value.
-            return mozilla::UniquePtr<Event>(mQueue.popFirst());
+            mozilla::UniquePtr<Event> event(mQueue.popFirst());
+            if (!event || !event->mPostTime) {
+                return event;
+            }
+
+#ifdef EARLY_BETA_OR_EARLIER
+            const size_t latencyType = event->IsUIEvent() ? LATENCY_UI : LATENCY_OTHER;
+            const uint64_t latency = Event::GetTime() - event->mPostTime;
+
+            sLatencyCount[latencyType]++;
+            sLatencyTime[latencyType] += latency;
+#endif
+            return event;
         }
 
     } mEventQueue;
@@ -220,19 +264,6 @@ protected:
 
     nsCOMPtr<nsIAndroidBrowserApp> mBrowserApp;
     nsInterfaceHashtable<nsStringHashKey, nsIObserver> mObserversHash;
-};
-
-// Class that implement native JNI methods can inherit from
-// UsesGeckoThreadProxy to have the native call forwarded
-// automatically to the Gecko thread.
-class UsesGeckoThreadProxy : public mozilla::jni::UsesNativeCallProxy
-{
-public:
-    template<class Functor>
-    static void OnNativeCall(Functor&& call)
-    {
-        nsAppShell::PostEvent(mozilla::Move(call));
-    }
 };
 
 #endif // nsAppShell_h__

@@ -1,16 +1,18 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that the preference helpers work properly.
 
-var { PrefsHelper } = require("devtools/client/shared/prefs");
+const { PrefsHelper } = require("devtools/client/shared/prefs");
 
 function test() {
-  let Prefs = new PrefsHelper("devtools.debugger", {
+  const Prefs = new PrefsHelper("devtools.debugger", {
     "foo": ["Bool", "enabled"]
   });
 
-  let originalPrefValue = Services.prefs.getBoolPref("devtools.debugger.enabled");
+  const originalPrefValue = Services.prefs.getBoolPref("devtools.debugger.enabled");
   is(Prefs.foo, originalPrefValue, "The pref value was correctly fetched.");
 
   Prefs.foo = !originalPrefValue;

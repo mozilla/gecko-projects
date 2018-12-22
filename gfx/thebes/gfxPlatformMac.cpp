@@ -6,7 +6,6 @@
 #include "gfxPlatformMac.h"
 
 #include "gfxQuartzSurface.h"
-#include "gfxQuartzImageSurface.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/MacIOSurface.h"
 
@@ -19,18 +18,22 @@
 #include "nsTArray.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/VsyncDispatcher.h"
+#include "nsCocoaFeatures.h"
+#include "nsUnicodeProperties.h"
 #include "qcms.h"
 #include "gfx2DGlue.h"
 
 #include <dlfcn.h>
 #include <CoreVideo/CoreVideo.h>
 
-#include "nsCocoaFeatures.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "VsyncSource.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
+using namespace mozilla::unicode;
+
+using mozilla::dom::SystemFontListEntry;
 
 // cribbed from CTFontManager.h
 enum {
@@ -76,32 +79,45 @@ gfxPlatformMac::gfxPlatformMac()
     DisableFontActivation();
     mFontAntiAliasingThreshold = ReadAntiAliasingThreshold();
 
-    uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
-                          BackendTypeBit(BackendType::SKIA) |
-                          BackendTypeBit(BackendType::COREGRAPHICS);
-    uint32_t contentMask = BackendTypeBit(BackendType::COREGRAPHICS) |
-                           BackendTypeBit(BackendType::SKIA);
-    InitBackendPrefs(canvasMask, BackendType::COREGRAPHICS,
-                     contentMask, BackendType::COREGRAPHICS);
-
-    // XXX: Bug 1036682 - we run out of fds on Mac when using tiled layers because
-    // with 256x256 tiles we can easily hit the soft limit of 800 when using double
-    // buffered tiles in e10s, so let's bump the soft limit to the hard limit for the OS
-    // up to a new cap of OPEN_MAX.
-    struct rlimit limits;
-    if (getrlimit(RLIMIT_NOFILE, &limits) == 0) {
-        limits.rlim_cur = std::min(rlim_t(OPEN_MAX), limits.rlim_max);
-        if (setrlimit(RLIMIT_NOFILE, &limits) != 0) {
-            NS_WARNING("Unable to bump RLIMIT_NOFILE to the maximum number on this OS");
-        }
-    }
+    InitBackendPrefs(GetBackendPrefs());
 
     MacIOSurfaceLib::LoadLibrary();
+
+    if (nsCocoaFeatures::OnHighSierraOrLater()) {
+        mHasNativeColrFontSupport = true;
+    }
 }
 
 gfxPlatformMac::~gfxPlatformMac()
 {
     gfxCoreTextShaper::Shutdown();
+}
+
+BackendPrefsData
+gfxPlatformMac::GetBackendPrefs() const
+{
+  BackendPrefsData data;
+
+  data.mCanvasBitmask = BackendTypeBit(BackendType::SKIA);
+  data.mContentBitmask = BackendTypeBit(BackendType::SKIA);
+  data.mCanvasDefault = BackendType::SKIA;
+  data.mContentDefault = BackendType::SKIA;
+
+  return data;
+}
+
+bool
+gfxPlatformMac::UsesTiling() const
+{
+    // The non-tiling ContentClient requires CrossProcessSemaphore which
+    // isn't implemented for OSX.
+    return true;
+}
+
+bool
+gfxPlatformMac::ContentUsesTiling() const
+{
+    return UsesTiling();
 }
 
 gfxPlatformFontList*
@@ -115,20 +131,24 @@ gfxPlatformMac::CreatePlatformFontList()
     return nullptr;
 }
 
+void
+gfxPlatformMac::ReadSystemFontList(
+    InfallibleTArray<SystemFontListEntry>* aFontList)
+{
+    gfxMacPlatformFontList::PlatformFontList()->ReadSystemFontList(aFontList);
+}
+
 already_AddRefed<gfxASurface>
 gfxPlatformMac::CreateOffscreenSurface(const IntSize& aSize,
                                        gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> newSurface =
       new gfxQuartzSurface(aSize, aFormat);
     return newSurface.forget();
-}
-
-already_AddRefed<ScaledFont>
-gfxPlatformMac::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
-{
-    gfxMacFont *font = static_cast<gfxMacFont*>(aFont);
-    return font->GetScaledFont(aTarget);
 }
 
 gfxFontGroup *
@@ -143,25 +163,19 @@ gfxPlatformMac::CreateFontGroup(const FontFamilyList& aFontFamilyList,
 }
 
 bool
-gfxPlatformMac::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags)
+gfxPlatformMac::IsFontFormatSupported(uint32_t aFormatFlags)
 {
-    // check for strange format flags
-    NS_ASSERTION(!(aFormatFlags & gfxUserFontSet::FLAG_FORMAT_NOT_USED),
-                 "strange font format hint set");
-
-    // accept supported formats
-    if (aFormatFlags & (gfxUserFontSet::FLAG_FORMATS_COMMON |
-                        gfxUserFontSet::FLAG_FORMAT_TRUETYPE_AAT)) {
+    if (gfxPlatform::IsFontFormatSupported(aFormatFlags)) {
         return true;
     }
 
-    // reject all other formats, known and unknown
-    if (aFormatFlags != 0) {
-        return false;
+    // If the generic method rejected the format hint, then check for any
+    // platform-specific format we know about.
+    if (aFormatFlags & gfxUserFontSet::FLAG_FORMAT_TRUETYPE_AAT) {
+        return true;
     }
 
-    // no format hint set, need to look at data
-    return true;
+    return false;
 }
 
 static const char kFontArialUnicodeMS[] = "Arial Unicode MS";
@@ -193,26 +207,27 @@ static const char kFontTamilMN[] = "Tamil MN";
 
 void
 gfxPlatformMac::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                                       int32_t aRunScript,
+                                       Script aRunScript,
                                        nsTArray<const char*>& aFontList)
 {
-    if (aNextCh == 0xfe0f) {
-        aFontList.AppendElement(kFontAppleColorEmoji);
+    EmojiPresentation emoji = GetEmojiPresentation(aCh);
+    if (emoji != EmojiPresentation::TextOnly) {
+        if (aNextCh == kVariationSelector16 ||
+           (aNextCh != kVariationSelector15 &&
+            emoji == EmojiPresentation::EmojiDefault)) {
+            // if char is followed by VS16, try for a color emoji glyph
+            aFontList.AppendElement(kFontAppleColorEmoji);
+        }
     }
 
     aFontList.AppendElement(kFontLucidaGrande);
 
     if (!IS_IN_BMP(aCh)) {
         uint32_t p = aCh >> 16;
-        uint32_t b = aCh >> 8;
         if (p == 1) {
-            if (b >= 0x1f0 && b < 0x1f7) {
-                aFontList.AppendElement(kFontAppleColorEmoji);
-            } else {
-                aFontList.AppendElement(kFontAppleSymbols);
-                aFontList.AppendElement(kFontSTIXGeneral);
-                aFontList.AppendElement(kFontGeneva);
-            }
+            aFontList.AppendElement(kFontAppleSymbols);
+            aFontList.AppendElement(kFontSTIXGeneral);
+            aFontList.AppendElement(kFontGeneva);
         } else if (p == 2) {
             // OSX installations with MS Office may have these fonts
             aFontList.AppendElement(kFontMingLiUExtB);
@@ -371,22 +386,9 @@ gfxPlatformMac::ReadAntiAliasingThreshold()
 }
 
 bool
-gfxPlatformMac::UseProgressivePaint()
-{
-  // Progressive painting requires cross-process mutexes, which don't work so
-  // well on OS X 10.6 so we disable there.
-  return nsCocoaFeatures::OnLionOrLater() && gfxPlatform::UseProgressivePaint();
-}
-
-bool
 gfxPlatformMac::AccelerateLayersByDefault()
 {
-  // 10.6.2 and lower have a bug involving textures and pixel buffer objects
-  // that caused bug 629016, so we don't allow OpenGL-accelerated layers on
-  // those versions of the OS.
-  // This will still let full-screen video be accelerated on OpenGL, because
-  // that XUL widget opts in to acceleration, but that's probably OK.
-  return nsCocoaFeatures::AccelerateByDefault();
+  return true;
 }
 
 // This is the renderer output callback function, called on the vsync thread
@@ -404,7 +406,7 @@ public:
   {
   }
 
-  virtual Display& GetGlobalDisplay() override
+  Display& GetGlobalDisplay() override
   {
     return mGlobalDisplay;
   }
@@ -416,15 +418,12 @@ public:
       : mDisplayLink(nullptr)
     {
       MOZ_ASSERT(NS_IsMainThread());
-      mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+      mTimer = NS_NewTimer();
     }
 
-    ~OSXDisplay()
+    ~OSXDisplay() override
     {
       MOZ_ASSERT(NS_IsMainThread());
-      mTimer->Cancel();
-      mTimer = nullptr;
-      DisableVsync();
     }
 
     static void RetryEnableVsync(nsITimer* aTimer, void* aOsxDisplay)
@@ -435,7 +434,7 @@ public:
       osxDisplay->EnableVsync();
     }
 
-    virtual void EnableVsync() override
+    void EnableVsync() override
     {
       MOZ_ASSERT(NS_IsMainThread());
       if (IsVsyncEnabled()) {
@@ -464,7 +463,8 @@ public:
         // because on a late 2013 15" retina, it takes about that
         // long to come back up from sleep.
         uint32_t delay = 100;
-        mTimer->InitWithFuncCallback(RetryEnableVsync, this, delay, nsITimer::TYPE_ONE_SHOT);
+        mTimer->InitWithNamedFuncCallback(RetryEnableVsync, this, delay, nsITimer::TYPE_ONE_SHOT,
+                                          "RetryEnableVsync");
         return;
       }
 
@@ -495,7 +495,7 @@ public:
       }
     }
 
-    virtual void DisableVsync() override
+    void DisableVsync() override
     {
       MOZ_ASSERT(NS_IsMainThread());
       if (!IsVsyncEnabled()) {
@@ -509,15 +509,23 @@ public:
       }
     }
 
-    virtual bool IsVsyncEnabled() override
+    bool IsVsyncEnabled() override
     {
       MOZ_ASSERT(NS_IsMainThread());
       return mDisplayLink != nullptr;
     }
 
-    virtual TimeDuration GetVsyncRate() override
+    TimeDuration GetVsyncRate() override
     {
       return mVsyncRate;
+    }
+
+    void Shutdown() override
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+      mTimer->Cancel();
+      mTimer = nullptr;
+      DisableVsync();
     }
 
     // The vsync timestamps given by the CVDisplayLinkCallback are
@@ -535,9 +543,7 @@ public:
   }; // OSXDisplay
 
 private:
-  virtual ~OSXVsyncSource()
-  {
-  }
+  ~OSXVsyncSource() override = default;
 
   OSXDisplay mGlobalDisplay;
 }; // OSXVsyncSource
@@ -626,4 +632,14 @@ gfxPlatformMac::GetPlatformCMSOutputProfile(void* &mem, size_t &size)
     }
 
     ::CFRelease(iccp);
+}
+
+bool
+gfxPlatformMac::CheckVariationFontSupport()
+{
+    // We don't allow variation fonts to be enabled before 10.13,
+    // as although the Core Text APIs existed, they are known to be
+    // fairly buggy.
+    // (Note that Safari also requires 10.13 for variation-font support.)
+    return nsCocoaFeatures::OnHighSierraOrLater();
 }

@@ -12,8 +12,6 @@
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsIChannelEventSink.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMNode.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIMutableArray.h"
 #include "nsIObserver.h"
@@ -54,7 +52,8 @@ public:
                              nsIPrincipal* aLoadingPrincipal,
                              nsIApplicationCache *aApplicationCache,
                              nsIApplicationCache *aPreviousApplicationCache,
-                             uint32_t aType);
+                             uint32_t aType,
+                             uint32_t aLoadFlags);
 
     nsCOMPtr<nsIURI>              mURI;
     nsCOMPtr<nsIURI>              mReferrerURI;
@@ -63,6 +62,7 @@ public:
     nsCOMPtr<nsIApplicationCache> mPreviousApplicationCache;
     nsCString                     mCacheKey;
     uint32_t                      mItemType;
+    uint32_t                      mLoadFlags;
 
     nsresult OpenChannel(nsOfflineCacheUpdate *aUpdate);
     nsresult Cancel();
@@ -107,6 +107,7 @@ public:
     virtual ~nsOfflineManifestItem();
 
     nsCOMArray<nsIURI> &GetExplicitURIs() { return mExplicitURIs; }
+    nsCOMArray<nsIURI> &GetAnonymousURIs() { return mAnonymousURIs; }
     nsCOMArray<nsIURI> &GetFallbackURIs() { return mFallbackURIs; }
 
     nsTArray<nsCString> &GetOpportunisticNamespaces()
@@ -122,12 +123,12 @@ public:
         { aManifestHash = mManifestHashValue; }
 
 private:
-    static NS_METHOD ReadManifest(nsIInputStream *aInputStream,
-                                  void *aClosure,
-                                  const char *aFromSegment,
-                                  uint32_t aOffset,
-                                  uint32_t aCount,
-                                  uint32_t *aBytesConsumed);
+    static nsresult ReadManifest(nsIInputStream *aInputStream,
+                                 void *aClosure,
+                                 const char *aFromSegment,
+                                 uint32_t aOffset,
+                                 uint32_t aCount,
+                                 uint32_t *aBytesConsumed);
 
     nsresult AddNamespace(uint32_t namespaceType,
                           const nsCString &namespaceSpec,
@@ -164,6 +165,7 @@ private:
     nsCString mReadBuf;
 
     nsCOMArray<nsIURI> mExplicitURIs;
+    nsCOMArray<nsIURI> mAnonymousURIs;
     nsCOMArray<nsIURI> mFallbackURIs;
 
     // All opportunistic caching namespaces.  Used to decide whether
@@ -219,7 +221,7 @@ public:
 
     void SetOwner(nsOfflineCacheUpdateOwner *aOwner);
 
-    bool IsForGroupID(const nsCSubstring &groupID);
+    bool IsForGroupID(const nsACString& groupID);
     bool IsForProfile(nsIFile* aCustomProfileDir);
 
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate) override;
@@ -233,7 +235,7 @@ protected:
 private:
     nsresult InitInternal(nsIURI *aManifestURI, nsIPrincipal* aPrincipal);
     nsresult HandleManifest(bool *aDoUpdate);
-    nsresult AddURI(nsIURI *aURI, uint32_t aItemType);
+    nsresult AddURI(nsIURI *aURI, uint32_t aItemType, uint32_t aLoadFlags = 0);
 
     nsresult ProcessNextURI();
 
@@ -339,7 +341,7 @@ public:
     nsresult Schedule(nsIURI *aManifestURI,
                       nsIURI *aDocumentURI,
                       nsIPrincipal* aLoadingPrincipal,
-                      nsIDOMDocument *aDocument,
+                      nsIDocument *aDocument,
                       nsPIDOMWindowInner* aWindow,
                       nsIFile* aCustomProfileDir,
                       nsIOfflineCacheUpdate **aUpdate);
@@ -352,8 +354,7 @@ public:
      */
     static nsOfflineCacheUpdateService *EnsureService();
 
-    /** Addrefs and returns the singleton nsOfflineCacheUpdateService. */
-    static nsOfflineCacheUpdateService *GetInstance();
+    static already_AddRefed<nsOfflineCacheUpdateService> GetInstance();
 
     static nsresult OfflineAppPinnedForURI(nsIURI *aDocumentURI,
                                            nsIPrefBranch *aPrefBranch,

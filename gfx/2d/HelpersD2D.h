@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -25,8 +26,7 @@
 namespace mozilla {
 namespace gfx {
 
-ID2D1Factory1* D2DFactory1();
-static ID2D1Factory* D2DFactory() { return D2DFactory1(); }
+RefPtr<ID2D1Factory1> D2DFactory();
 
 static inline D2D1_POINT_2F D2DPoint(const Point &aPoint)
 {
@@ -41,7 +41,7 @@ static inline D2D1_SIZE_U D2DIntSize(const IntSize &aSize)
 template <typename T>
 static inline D2D1_RECT_F D2DRect(const T &aRect)
 {
-  return D2D1::RectF(aRect.x, aRect.y, aRect.XMost(), aRect.YMost());
+  return D2D1::RectF(aRect.X(), aRect.Y(), aRect.XMost(), aRect.YMost());
 }
 
 static inline D2D1_EXTEND_MODE D2DExtend(ExtendMode aExtendMode, Axis aAxis)
@@ -75,20 +75,20 @@ static inline D2D1_EXTEND_MODE D2DExtend(ExtendMode aExtendMode, Axis aAxis)
   return extend;
 }
 
-static inline D2D1_BITMAP_INTERPOLATION_MODE D2DFilter(const Filter &aFilter)
+static inline D2D1_BITMAP_INTERPOLATION_MODE D2DFilter(const SamplingFilter aSamplingFilter)
 {
-  switch (aFilter) {
-  case Filter::POINT:
+  switch (aSamplingFilter) {
+  case SamplingFilter::POINT:
     return D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
   default:
     return D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
   }
 }
 
-static inline D2D1_INTERPOLATION_MODE D2DInterpolationMode(const Filter &aFilter)
+static inline D2D1_INTERPOLATION_MODE D2DInterpolationMode(const SamplingFilter aSamplingFilter)
 {
-  switch (aFilter) {
-  case Filter::POINT:
+  switch (aSamplingFilter) {
+  case SamplingFilter::POINT:
     return D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
   default:
     return D2D1_INTERPOLATION_MODE_LINEAR;
@@ -579,7 +579,7 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
 
   Rect uploadRect(0, 0, Float(size.width), Float(size.height));
   if (aSourceRect) {
-    uploadRect = Rect(aSourceRect->x, aSourceRect->y, aSourceRect->width, aSourceRect->height);
+    uploadRect = Rect(aSourceRect->X(), aSourceRect->Y(), aSourceRect->Width(), aSourceRect->Height());
   }
 
   // Limit the uploadRect as much as possible without supporting discontiguous uploads 
@@ -595,6 +595,8 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
   //
   //
 
+  int Bpp = BytesPerPixel(aSurface->GetFormat());
+
   if (uploadRect.Contains(rect)) {
     // Extend mode is irrelevant, the displayed rect is completely contained
     // by the source bitmap.
@@ -607,16 +609,21 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
 
     // We now proceed to check if we can limit at least one dimension of the
     // upload rect safely without looking at extend mode.
-  } else if (rect.x >= 0 && rect.XMost() < size.width) {
-    uploadRect.x = rect.x;
-    uploadRect.width = rect.width;
-  } else if (rect.y >= 0 && rect.YMost() < size.height) {
-    uploadRect.y = rect.y;
-    uploadRect.height = rect.height;
+  } else if (rect.X() >= 0 && rect.XMost() < size.width) {
+    uploadRect.MoveToX(rect.X());
+    uploadRect.SetWidth(rect.Width());
+  } else if (rect.Y() >= 0 && rect.YMost() < size.height) {
+    uploadRect.MoveToY(rect.Y());
+    uploadRect.SetHeight(rect.Height());
   }
 
-  if (uploadRect.width <= aRT->GetMaximumBitmapSize() &&
-      uploadRect.height <= aRT->GetMaximumBitmapSize()) {
+  if (uploadRect.IsEmpty()) {
+    // Nothing to be drawn.
+    return nullptr;
+  }
+
+  if (uploadRect.Width() <= aRT->GetMaximumBitmapSize() &&
+      uploadRect.Height() <= aRT->GetMaximumBitmapSize()) {
     {
       // Scope to auto-Unmap() |mapping|.
       DataSourceSurface::ScopedMap mapping(aSurface, DataSourceSurface::READ);
@@ -625,19 +632,17 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
       }
 
       // A partial upload will suffice.
-      aRT->CreateBitmap(D2D1::SizeU(uint32_t(uploadRect.width), uint32_t(uploadRect.height)),
-                        mapping.GetData() + int(uploadRect.x) * 4 + int(uploadRect.y) * mapping.GetStride(),
+      aRT->CreateBitmap(D2D1::SizeU(uint32_t(uploadRect.Width()), uint32_t(uploadRect.Height())),
+                        mapping.GetData() + int(uploadRect.X()) * Bpp + int(uploadRect.Y()) * mapping.GetStride(),
                         mapping.GetStride(),
                         D2D1::BitmapProperties(D2DPixelFormat(aSurface->GetFormat())),
                         getter_AddRefs(bitmap));
     }
 
-    aSourceTransform.PreTranslate(uploadRect.x, uploadRect.y);
+    aSourceTransform.PreTranslate(uploadRect.X(), uploadRect.Y());
 
     return bitmap.forget();
   } else {
-    int Bpp = BytesPerPixel(aSurface->GetFormat());
-
     if (Bpp != 4) {
       // This shouldn't actually happen in practice!
       MOZ_ASSERT(false);
@@ -653,10 +658,10 @@ CreatePartialBitmapForSurface(DataSourceSurface *aSurface, const Matrix &aDestin
       ImageHalfScaler scaler(mapping.GetData(), mapping.GetStride(), size);
 
       // Calculate the maximum width/height of the image post transform.
-      Point topRight = transform * Point(Float(size.width), 0);
-      Point topLeft = transform * Point(0, 0);
-      Point bottomRight = transform * Point(Float(size.width), Float(size.height));
-      Point bottomLeft = transform * Point(0, Float(size.height));
+      Point topRight = transform.TransformPoint(Point(Float(size.width), 0));
+      Point topLeft = transform.TransformPoint(Point(0, 0));
+      Point bottomRight = transform.TransformPoint(Point(Float(size.width), Float(size.height)));
+      Point bottomLeft = transform.TransformPoint(Point(0, Float(size.height)));
 
       IntSize scaleSize;
 
@@ -707,7 +712,7 @@ static inline void AddRectToSink(ID2D1GeometrySink* aSink, const D2D1_RECT_F& aR
 class DCCommandSink : public ID2D1CommandSink
 {
 public:
-  DCCommandSink(ID2D1DeviceContext* aCtx) : mCtx(aCtx)
+  explicit DCCommandSink(ID2D1DeviceContext* aCtx) : mCtx(aCtx)
   {
   }
 

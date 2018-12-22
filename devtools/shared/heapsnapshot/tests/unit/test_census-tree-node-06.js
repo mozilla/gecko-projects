@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Test inverting CensusTreeNode with a by alloaction stack breakdown.
@@ -11,8 +12,6 @@ function run_test() {
     then: { by: "count", count: true, bytes: true },
     noStack: { by: "count", count: true, bytes: true },
   };
-
-  let stack1, stack2, stack3, stack4;
 
   function a(n) {
     return b(n);
@@ -31,15 +30,15 @@ function run_test() {
   }
 
   const abc_Stack = a(3);
-  const  bc_Stack = b(2);
-  const   c_Stack = c(1);
+  const bc_Stack = b(2);
+  const c_Stack = c(1);
   const dbc_Stack = d(3);
-  const  ec_Stack = e(2);
+  const ec_Stack = e(2);
 
   const REPORT = new Map([
     [abc_Stack, { bytes: 10, count: 1 }],
     [ bc_Stack, { bytes: 10, count: 1 }],
-    [  c_Stack, { bytes: 10, count: 1 }],
+    [ c_Stack, { bytes: 10, count: 1 }],
     [dbc_Stack, { bytes: 10, count: 1 }],
     [ ec_Stack, { bytes: 10, count: 1 }],
     ["noStack", { bytes: 50, count: 5 }],

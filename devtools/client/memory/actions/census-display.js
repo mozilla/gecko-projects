@@ -8,9 +8,9 @@ const { actions } = require("../constants");
 const { refresh } = require("./refresh");
 
 exports.setCensusDisplayAndRefresh = function(heapWorker, display) {
-  return function*(dispatch, getState) {
+  return async function(dispatch, getState) {
     dispatch(setCensusDisplay(display));
-    yield dispatch(refresh(heapWorker));
+    await dispatch(refresh(heapWorker));
   };
 };
 
@@ -25,7 +25,8 @@ const setCensusDisplay = exports.setCensusDisplay = function(display) {
          && display
          && display.breakdown
          && display.breakdown.by,
-    `Breakdowns must be an object with a \`by\` property, attempted to set: ${uneval(display)}`);
+    "Breakdowns must be an object with a \`by\` property, attempted to set: " +
+  uneval(display));
 
   return {
     type: actions.SET_CENSUS_DISPLAY,

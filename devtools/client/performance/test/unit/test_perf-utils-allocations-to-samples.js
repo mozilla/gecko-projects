@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests if allocations data received from the performance actor is properly
@@ -7,13 +8,9 @@
  * received from the profiler.
  */
 
-function run_test() {
-  run_next_test();
-}
-
-add_task(function () {
+add_task(function() {
   const { getProfileThreadFromAllocations } = require("devtools/shared/performance/recording-utils");
-  let output = getProfileThreadFromAllocations(TEST_DATA);
+  const output = getProfileThreadFromAllocations(TEST_DATA);
   equal(output.toSource(), EXPECTED_OUTPUT.toSource(), "The output is correct.");
 });
 

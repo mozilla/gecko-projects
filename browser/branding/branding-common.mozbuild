@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,40 +6,28 @@
 
 @template
 def FirefoxBranding():
-    JS_PREFERENCE_FILES += [
-        'pref/firefox-branding.js',
-    ]
+    if CONFIG['MOZ_BRANDING_DIRECTORY'] == 'browser/branding/official':
+        JS_PREFERENCE_PP_FILES += [
+            'pref/firefox-branding.js',
+        ]
+    else:
+        JS_PREFERENCE_FILES += [
+            'pref/firefox-branding.js',
+        ]
 
     if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-        BRANDING_FILES += [
-            'appname.bmp',
-            'bgintro.bmp',
-            'branding.nsi',
-            'clock.bmp',
-            'document.ico',
-            'firefox.ico',
-            'newtab.ico',
-            'newwindow.ico',
-            'particles.bmp',
-            'pbmode.ico',
-            'pencil-rtl.bmp',
-            'pencil.bmp',
-            'wizHeader.bmp',
-            'wizHeaderRTL.bmp',
-            'wizWatermark.bmp',
-         ]
-    elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-        BRANDING_FILES += [
-            'background.png',
-            'disk.icns',
-            'document.icns',
-            'dsstore',
-            'firefox.icns',
+        FINAL_TARGET_FILES['..'] += [
+            'firefox.VisualElementsManifest.xml',
+        ]
+        FINAL_TARGET_FILES.VisualElements += [
+            'VisualElements_150.png',
+            'VisualElements_70.png',
         ]
     elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
-        BRANDING_FILES += [
+        FINAL_TARGET_FILES.chrome.icons.default += [
+            'default128.png',
             'default16.png',
             'default32.png',
             'default48.png',
-            'mozicon128.png',
+            'default64.png',
         ]

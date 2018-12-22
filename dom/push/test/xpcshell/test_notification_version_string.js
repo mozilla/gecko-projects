@@ -15,10 +15,10 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test_notification_version_string() {
+add_task(async function test_notification_version_string() {
   let db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {return db.drop().then(_ => db.close());});
-  yield db.put({
+  registerCleanupFunction(() => {return db.drop().then(_ => db.close());});
+  await db.put({
     channelID: '6ff97d56-d0c0-43bc-8f5b-61b855e1d93b',
     pushEndpoint: 'https://example.org/updates/1',
     scope: 'https://example.com/page/1',
@@ -34,7 +34,6 @@ add_task(function* test_notification_version_string() {
   let ackPromise = new Promise(resolve => ackDone = resolve);
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -57,12 +56,13 @@ add_task(function* test_notification_version_string() {
     }
   });
 
-  let {subject: notification, data: scope} = yield notifyPromise;
-  equal(notification, null, 'Unexpected data for Simple Push message');
+  let {subject: message, data: scope} = await notifyPromise;
+  equal(message.QueryInterface(Ci.nsIPushMessage).data, null,
+    'Unexpected data for Simple Push message');
 
-  yield ackPromise;
+  await ackPromise;
 
-  let storeRecord = yield db.getByKeyID(
+  let storeRecord = await db.getByKeyID(
     '6ff97d56-d0c0-43bc-8f5b-61b855e1d93b');
   strictEqual(storeRecord.version, 4, 'Wrong record version');
   equal(storeRecord.quota, Infinity, 'Wrong quota');

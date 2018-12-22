@@ -9,133 +9,105 @@
 
 const TAB_URL = EXAMPLE_URL + "doc_recursion-stack.html";
 
-var gTab, gPanel, gDebugger;
-var gFocusedWindow, gToolbox, gToolboxTab;
+add_task(async function() {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  let [tab,, panel] = await initDebugger(TAB_URL, options);
+  let panelWin = panel.panelWin;
+  let toolbox = panel._toolbox;
+  let toolboxTab = toolbox.doc.getElementById("toolbox-tab-jsdebugger");
 
-function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
-    gTab = aTab;
-    gPanel = aPanel;
-    gDebugger = gPanel.panelWin;
-    gToolbox = gPanel._toolbox;
-    gToolboxTab = gToolbox.doc.getElementById("toolbox-tab-jsdebugger");
+  let newTab = await addTab(TAB_URL);
+  isnot(newTab, tab,
+    "The newly added tab is different from the debugger's tab.");
+  is(gBrowser.selectedTab, newTab,
+    "Debugger's tab is not the selected tab.");
 
-    waitForSourceShown(gPanel, ".html").then(performTest);
-  });
-}
+  info("Run tests against bottom host.");
+  await testPause();
+  await testResume();
 
-function performTest() {
-  addTab(TAB_URL).then(aTab => {
-    isnot(aTab, gTab,
-      "The newly added tab is different from the debugger's tab.");
-    is(gBrowser.selectedTab, aTab,
-      "Debugger's tab is not the selected tab.");
+  // testResume selected the console, select back the debugger.
+  await toolbox.selectTool("jsdebugger");
 
-    gFocusedWindow = window;
-    testPause();
-  });
-}
+  info("Switching to a toolbox window host.");
+  await toolbox.switchHost(Toolbox.HostType.WINDOW);
 
-function focusMainWindow() {
-  // Make sure toolbox is not focused.
-  window.addEventListener("focus", onFocus, true);
-  info("Focusing main window.")
+  info("Run tests against window host.");
+  await testPause();
+  await testResume();
 
-  // Execute soon to avoid any race conditions between toolbox and main window
-  // getting focused.
-  executeSoon(() => {
-    window.focus();
-  });
-}
+  info("Cleanup after the test.");
+  await toolbox.switchHost(Toolbox.HostType.BOTTOM);
+  await closeDebuggerAndFinish(panel);
 
-function onFocus() {
-  window.removeEventListener("focus", onFocus, true);
-  info("Main window focused.")
+  async function testPause() {
+    is(panelWin.gThreadClient.paused, false,
+      "Should be running after starting the test.");
 
-  gFocusedWindow = window;
-  testPause();
-}
-
-function testPause() {
-  is(gDebugger.gThreadClient.paused, false,
-    "Should be running after starting the test.");
-
-  is(gFocusedWindow, window,
-    "Main window is the top level window before pause.");
-
-  if (gToolbox.hostType == Toolbox.HostType.WINDOW) {
-    gToolbox._host._window.addEventListener("focus", function onFocus() {
-      gToolbox._host._window.removeEventListener("focus", onFocus, true);
-      gFocusedWindow = gToolbox._host._window;
-    }, true);
-  }
-
-  gDebugger.gThreadClient.addOneTimeListener("paused", () => {
-    if (gToolbox.hostType == Toolbox.HostType.WINDOW) {
-      is(gFocusedWindow, gToolbox._host._window,
-         "Toolbox window is the top level window on pause.");
+    let onFocus, onTabSelect;
+    if (toolbox.hostType == Toolbox.HostType.WINDOW) {
+      onFocus = new Promise(done => {
+        toolbox.win.parent.addEventListener("focus", function () {
+          done();
+        }, {capture: true, once: true});
+      });
     } else {
-      is(gBrowser.selectedTab, gTab,
+      onTabSelect = new Promise(done => {
+        tab.parentNode.addEventListener("TabSelect", function listener({type}) {
+          tab.parentNode.removeEventListener(type, listener);
+          done();
+        });
+      });
+    }
+
+    let onPaused = waitForPause(panelWin.gThreadClient);
+
+    // Evaluate a script to fully pause the debugger
+    evalInTab(tab, "debugger;");
+
+    await onPaused;
+    await onFocus;
+    await onTabSelect;
+
+    if (toolbox.hostType != Toolbox.HostType.WINDOW) {
+      is(gBrowser.selectedTab, tab,
         "Debugger's tab got selected.");
     }
-    gToolbox.selectTool("webconsole").then(() => {
-      ok(gToolboxTab.hasAttribute("highlighted") &&
-         gToolboxTab.getAttribute("highlighted") == "true",
-        "The highlighted class is present");
-      ok(!gToolboxTab.hasAttribute("selected") ||
-          gToolboxTab.getAttribute("selected") != "true",
-        "The tab is not selected");
-    }).then(() => gToolbox.selectTool("jsdebugger")).then(() => {
-      ok(gToolboxTab.hasAttribute("highlighted") &&
-         gToolboxTab.getAttribute("highlighted") == "true",
-        "The highlighted class is present");
-      ok(gToolboxTab.hasAttribute("selected") &&
-         gToolboxTab.getAttribute("selected") == "true",
-        "...and the tab is selected, so the glow will not be present.");
-    }).then(testResume);
-  });
 
-  // Evaluate a script to fully pause the debugger
-  evalInTab(gTab, "debugger;");
-}
-
-function testResume() {
-  gDebugger.gThreadClient.addOneTimeListener("resumed", () => {
-    gToolbox.selectTool("webconsole").then(() => {
-      ok(!gToolboxTab.hasAttribute("highlighted") ||
-          gToolboxTab.getAttribute("highlighted") != "true",
-        "The highlighted class is not present now after the resume");
-      ok(!gToolboxTab.hasAttribute("selected") ||
-          gToolboxTab.getAttribute("selected") != "true",
-        "The tab is not selected");
-    }).then(maybeEndTest);
-  });
-
-  EventUtils.sendMouseEvent({ type: "mousedown" },
-    gDebugger.document.getElementById("resume"),
-    gDebugger);
-}
-
-function maybeEndTest() {
-  if (gToolbox.hostType == Toolbox.HostType.BOTTOM) {
-    info("Switching to a toolbox window host.");
-    gToolbox.switchHost(Toolbox.HostType.WINDOW).then(focusMainWindow);
-  } else {
-    info("Switching to main window host.");
-    gToolbox.switchHost(Toolbox.HostType.BOTTOM).then(() => closeDebuggerAndFinish(gPanel));
+    await toolbox.selectTool("webconsole");
+    ok(toolboxTab.classList.contains("highlighted"),
+      "The highlighted class is present");
+    ok(!toolboxTab.classList.contains("selected"),
+      "The tab is not selected");
+    await toolbox.selectTool("jsdebugger");
+    ok(toolboxTab.classList.contains("highlighted"),
+      "The highlighted class is present");
+    ok(toolboxTab.classList.contains("selected"),
+      "...and the tab is selected, so the glow will not be present.");
   }
-}
 
-registerCleanupFunction(function() {
+  async function testResume() {
+    let onPaused = waitForEvent(panelWin.gThreadClient, "resumed");
+
+    EventUtils.sendMouseEvent({ type: "mousedown" },
+      panelWin.document.getElementById("resume"),
+      panelWin);
+
+    await onPaused;
+
+    await toolbox.selectTool("webconsole");
+    ok(!toolboxTab.classList.contains("highlighted"),
+      "The highlighted class is not present now after the resume");
+    ok(!toolboxTab.classList.contains("selected"),
+      "The tab is not selected");
+  }
+});
+
+registerCleanupFunction(function () {
   // Revert to the default toolbox host, so that the following tests proceed
   // normally and not inside a non-default host.
   Services.prefs.setCharPref("devtools.toolbox.host", Toolbox.HostType.BOTTOM);
-
-  gTab = null;
-  gPanel = null;
-  gDebugger = null;
-
-  gFocusedWindow = null;
-  gToolbox = null;
-  gToolboxTab = null;
 });

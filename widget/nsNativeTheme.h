@@ -6,13 +6,17 @@
 // This defines a common base class for nsITheme implementations, to reduce
 // code duplication.
 
+#ifndef _NSNATIVETHEME_H_
+#define _NSNATIVETHEME_H_
+
 #include "nsAlgorithm.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsMargin.h"
 #include "nsGkAtoms.h"
 #include "nsTArray.h"
+#include "nsINamed.h"
 #include "nsITimer.h"
 #include "nsIContent.h"
 
@@ -21,16 +25,18 @@ class nsIPresShell;
 class nsPresContext;
 
 namespace mozilla {
+class ComputedStyle;
 class EventStates;
 } // namespace mozilla
 
-class nsNativeTheme : public nsITimerCallback
+class nsNativeTheme : public nsITimerCallback, public nsINamed
 {
  protected:
   virtual ~nsNativeTheme() {}
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   enum ScrollbarButtonType {
     eScrollbarButton_UpTop   = 0,
@@ -60,7 +66,7 @@ class nsNativeTheme : public nsITimerCallback
   bool IsDisabled(nsIFrame* aFrame, mozilla::EventStates aEventStates);
 
   // RTL chrome direction
-  bool IsFrameRTL(nsIFrame* aFrame);
+  static bool IsFrameRTL(nsIFrame* aFrame);
 
   bool IsHTMLContent(nsIFrame *aFrame);
   
@@ -159,8 +165,8 @@ class nsNativeTheme : public nsITimerCallback
   bool IsMenuListEditable(nsIFrame *aFrame);
 
   nsIPresShell *GetPresShell(nsIFrame* aFrame);
-  static bool CheckBooleanAttr(nsIFrame* aFrame, nsIAtom* aAtom);
-  static int32_t CheckIntAttr(nsIFrame* aFrame, nsIAtom* aAtom, int32_t defaultValue);
+  static bool CheckBooleanAttr(nsIFrame* aFrame, nsAtom* aAtom);
+  static int32_t CheckIntAttr(nsIFrame* aFrame, nsAtom* aAtom, int32_t defaultValue);
 
   // Helpers for progressbar.
   static double GetProgressValue(nsIFrame* aFrame);
@@ -179,9 +185,18 @@ class nsNativeTheme : public nsITimerCallback
 
   // scrollbar
   bool IsDarkBackground(nsIFrame* aFrame);
+  // custom scrollbar
+  typedef nscolor (*AutoColorGetter)(mozilla::ComputedStyle*);
+  bool IsWidgetScrollbarPart(uint8_t aWidgetType);
+  nscolor GetScrollbarFaceColor(mozilla::ComputedStyle* aStyle,
+                                AutoColorGetter aAutoGetter);
+  nscolor GetScrollbarTrackColor(mozilla::ComputedStyle* aStyle,
+                                 AutoColorGetter aAutoGetter);
 
  private:
   uint32_t mAnimatedContentTimeout;
   nsCOMPtr<nsITimer> mAnimatedContentTimer;
   AutoTArray<nsCOMPtr<nsIContent>, 20> mAnimatedContentList;
 };
+
+#endif // _NSNATIVETHEME_H_

@@ -15,15 +15,14 @@
 #include "NullHttpChannel.h"
 #include "nsQueryObject.h"
 #include "nsNetUtil.h"
+#include "TCPFastOpenLayer.h"
 
 namespace mozilla {
 namespace net {
 
 class CallObserveActivity final : public nsIRunnable
 {
-  ~CallObserveActivity()
-  {
-  }
+  ~CallObserveActivity() = default;
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   CallObserveActivity(nsIHttpActivityObserver *aActivityDistributor,
@@ -64,14 +63,16 @@ public:
     }
 
     RefPtr<NullHttpChannel> channel = new NullHttpChannel();
-    channel->Init(uri, 0, nullptr, 0, nullptr);
-    mActivityDistributor->ObserveActivity(
+    rv = channel->Init(uri, 0, nullptr, 0, nullptr);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = mActivityDistributor->ObserveActivity(
       nsCOMPtr<nsISupports>(do_QueryObject(channel)),
       mActivityType,
       mActivitySubtype,
       mTimestamp,
       mExtraSizeData,
       mExtraStringData);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
   }
@@ -100,6 +101,7 @@ NullHttpTransaction::NullHttpTransaction(nsHttpConnectionInfo *ci,
   , mCapsToClear(0)
   , mIsDone(false)
   , mClaimed(false)
+  , mFastOpenStatus(TFO_NOT_TRIED)
   , mCallbacks(callbacks)
   , mConnectionInfo(ci)
 {
@@ -140,6 +142,12 @@ NullHttpTransaction::Claim()
 }
 
 void
+NullHttpTransaction::Unclaim()
+{
+  mClaimed = false;
+}
+
+void
 NullHttpTransaction::SetConnection(nsAHttpConnection *conn)
 {
   mConnection = conn;
@@ -162,6 +170,40 @@ void
 NullHttpTransaction::OnTransportStatus(nsITransport* transport,
                                        nsresult status, int64_t progress)
 {
+  if (status == NS_NET_STATUS_RESOLVING_HOST) {
+    if (mTimings.domainLookupStart.IsNull()) {
+      mTimings.domainLookupStart = TimeStamp::Now();
+    }
+  } else if (status == NS_NET_STATUS_RESOLVED_HOST) {
+    if (mTimings.domainLookupEnd.IsNull()) {
+      mTimings.domainLookupEnd = TimeStamp::Now();
+    }
+  } else if (status == NS_NET_STATUS_CONNECTING_TO) {
+    if (mTimings.connectStart.IsNull()) {
+      mTimings.connectStart = TimeStamp::Now();
+    }
+  } else if (status == NS_NET_STATUS_CONNECTED_TO) {
+    TimeStamp tnow = TimeStamp::Now();
+    if (mTimings.connectEnd.IsNull()) {
+        mTimings.connectEnd = tnow;
+    }
+    if (mTimings.tcpConnectEnd.IsNull()) {
+        mTimings.tcpConnectEnd = tnow;
+    }
+    // After a socket is connected we know for sure whether data has been
+    // sent on SYN packet and if not we should update TLS start timing.
+    if ((mFastOpenStatus != TFO_DATA_SENT) &&
+        !mTimings.secureConnectionStart.IsNull()) {
+        mTimings.secureConnectionStart = tnow;
+    }
+  } else if (status == NS_NET_STATUS_TLS_HANDSHAKE_STARTING) {
+    if (mTimings.secureConnectionStart.IsNull()) {
+        mTimings.secureConnectionStart = TimeStamp::Now();
+    }
+  } else if (status == NS_NET_STATUS_TLS_HANDSHAKE_ENDED) {
+    mTimings.connectEnd = TimeStamp::Now();;
+  }
+
   if (mActivityDistributor) {
     NS_DispatchToMainThread(new CallObserveActivity(mActivityDistributor,
                                   mConnectionInfo->GetOrigin(),
@@ -198,12 +240,6 @@ NullHttpTransaction::SetDNSWasRefreshed()
 {
   MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
   mCapsToClear |= NS_HTTP_REFRESH_DNS;
-}
-
-uint64_t
-NullHttpTransaction::Available()
-{
-  return 0;
 }
 
 nsresult
@@ -244,7 +280,8 @@ NullHttpTransaction::RequestHead()
                                                   mConnectionInfo->OriginPort(),
                                                   hostHeader);
     if (NS_SUCCEEDED(rv)) {
-      mRequestHead->SetHeader(nsHttp::Host, hostHeader);
+      rv = mRequestHead->SetHeader(nsHttp::Host, hostHeader);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
       if (mActivityDistributor) {
         // Report request headers.
         nsCString reqHeaderBuf;
@@ -302,30 +339,6 @@ nsHttpConnectionInfo *
 NullHttpTransaction::ConnectionInfo()
 {
   return mConnectionInfo;
-}
-
-nsresult
-NullHttpTransaction::AddTransaction(nsAHttpTransaction *trans)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-uint32_t
-NullHttpTransaction::PipelineDepth()
-{
-  return 0;
-}
-
-nsresult
-NullHttpTransaction::SetPipelinePosition(int32_t position)
-{
-    return NS_OK;
-}
-
-int32_t
-NullHttpTransaction::PipelinePosition()
-{
-  return 1;
 }
 
 } // namespace net

@@ -8,7 +8,11 @@
 #define mozilla_dom_ElementInlines_h
 
 #include "mozilla/dom/Element.h"
+#include "mozilla/ServoBindingTypes.h"
+#include "nsIContentInlines.h"
 #include "nsIDocument.h"
+#include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,5 +31,27 @@ Element::UnregisterActivityObserver()
 
 } // namespace dom
 } // namespace mozilla
+
+inline Element*
+nsINode::GetFlattenedTreeParentElement() const
+{
+  nsINode* parentNode = GetFlattenedTreeParentNode();
+  if MOZ_LIKELY(parentNode && parentNode->IsElement()) {
+    return parentNode->AsElement();
+  }
+
+  return nullptr;
+}
+
+inline Element*
+nsINode::GetFlattenedTreeParentElementForStyle() const
+{
+  nsINode* parentNode = GetFlattenedTreeParentNodeForStyle();
+  if MOZ_LIKELY(parentNode && parentNode->IsElement()) {
+    return parentNode->AsElement();
+  }
+
+  return nullptr;
+}
 
 #endif // mozilla_dom_ElementInlines_h

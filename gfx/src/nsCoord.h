@@ -1,10 +1,13 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef NSCOORD_H
 #define NSCOORD_H
+
+#include "mozilla/FloatingPoint.h"
 
 #include "nsAlgorithm.h"
 #include "nscore.h"
@@ -29,24 +32,12 @@
 // want to eventually use floats.
 //#define NS_COORD_IS_FLOAT
 
-inline float NS_IEEEPositiveInfinity() {
-  union { uint32_t mPRUint32; float mFloat; } pun;
-  pun.mPRUint32 = 0x7F800000;
-  return pun.mFloat;
-}
-inline bool NS_IEEEIsNan(float aF) {
-  union { uint32_t mBits; float mFloat; } pun;
-  pun.mFloat = aF;
-  return (pun.mBits & 0x7F800000) == 0x7F800000 &&
-    (pun.mBits & 0x007FFFFF) != 0;
-}
-
 #ifdef NS_COORD_IS_FLOAT
 typedef float nscoord;
-#define nscoord_MAX NS_IEEEPositiveInfinity()
+#define nscoord_MAX (mozilla::PositiveInfinity<float>())
 #else
 typedef int32_t nscoord;
-#define nscoord_MAX nscoord(1 << 30)
+#define nscoord_MAX nscoord((1 << 30) - 1)
 #endif
 
 #define nscoord_MIN (-nscoord_MAX)
@@ -132,8 +123,8 @@ inline nscoord _nscoordSaturatingMultiply(nscoord aCoord, float aScale,
 #else
   float product = aCoord * aScale;
   if (requireNotNegative ? aCoord > 0 : (aCoord > 0) == (aScale > 0))
-    return NSToCoordRoundWithClamp(std::min<float>(nscoord_MAX, product));
-  return NSToCoordRoundWithClamp(std::max<float>(nscoord_MIN, product));
+    return NSToCoordRoundWithClamp(std::min<float>((float)nscoord_MAX, product));
+  return NSToCoordRoundWithClamp(std::max<float>((float)nscoord_MIN, product));
 #endif
 }
 
@@ -214,7 +205,7 @@ NSCoordSaturatingSubtract(nscoord a, nscoord b,
       return infMinusInfResult;
     } else {
       // case (b)
-      NS_NOTREACHED("Attempted to subtract [n - nscoord_MAX]");
+      MOZ_ASSERT_UNREACHABLE("Attempted to subtract [n - nscoord_MAX]");
       return 0;
     }
   } else {
@@ -237,7 +228,7 @@ NSCoordSaturatingSubtract(nscoord a, nscoord b,
 inline float NSCoordToFloat(nscoord aCoord) {
   VERIFY_COORD(aCoord);
 #ifdef NS_COORD_IS_FLOAT
-  NS_ASSERTION(!NS_IEEEIsNan(aCoord), "NaN encountered in float conversion");
+  NS_ASSERTION(!mozilla::IsNaN(aCoord), "NaN encountered in float conversion");
 #endif
   return (float)aCoord;
 }

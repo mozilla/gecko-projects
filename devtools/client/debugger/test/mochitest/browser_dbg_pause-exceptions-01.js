@@ -14,7 +14,11 @@ var gFrames, gVariables, gPrefs, gOptions;
 
 function test() {
   requestLongerTimeout(2);
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -35,7 +39,7 @@ function test() {
       .then(disablePauseOnExceptions)
       .then(enableIgnoreCaughtExceptions)
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -231,7 +235,7 @@ function disableIgnoreCaughtExceptions() {
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

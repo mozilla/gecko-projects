@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -88,7 +90,7 @@ class SyncWaiter : public WaitableEvent::Waiter {
         signaling_event_(NULL) {
   }
 
-  bool Fire(WaitableEvent *signaling_event) {
+  bool Fire(WaitableEvent *signaling_event) override {
     lock_->Acquire();
       const bool previous_value = fired_;
       fired_ = true;
@@ -113,7 +115,7 @@ class SyncWaiter : public WaitableEvent::Waiter {
   // These waiters are always stack allocated and don't delete themselves. Thus
   // there's no problem and the ABA tag is the same as the object pointer.
   // ---------------------------------------------------------------------------
-  bool Compare(void* tag) {
+  bool Compare(void* tag) override {
     return this == tag;
   }
 

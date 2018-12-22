@@ -14,10 +14,11 @@
 #include "mozilla/Logging.h"
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 #undef LOG
 //
-// NSPR_LOG_MODULES=nsStreamCopier:5
+// MOZ_LOG=nsStreamCopier:5
 //
 static LazyLogModule gStreamCopierLog("nsStreamCopier");
 #define LOG(args) MOZ_LOG(gStreamCopierLog, mozilla::LogLevel::Debug, args)
@@ -25,7 +26,7 @@ static LazyLogModule gStreamCopierLog("nsStreamCopier");
 /**
  * An event used to perform initialization off the main thread.
  */
-class AsyncApplyBufferingPolicyEvent final: public nsRunnable
+class AsyncApplyBufferingPolicyEvent final: public Runnable
 {
 public:
     /**
@@ -33,10 +34,12 @@ public:
      *        The nsAsyncStreamCopier requesting the information.
      */
     explicit AsyncApplyBufferingPolicyEvent(nsAsyncStreamCopier* aCopier)
-        : mCopier(aCopier)
-      , mTarget(NS_GetCurrentThread())
-      { }
-    NS_METHOD Run()
+      : mozilla::Runnable("AsyncApplyBufferingPolicyEvent")
+      , mCopier(aCopier)
+      , mTarget(GetCurrentThreadEventTarget())
+    {}
+
+    NS_IMETHOD Run() override
     {
       nsresult rv = mCopier->ApplyBufferingPolicy();
       if (NS_FAILED(rv)) {
@@ -44,8 +47,10 @@ public:
           return NS_OK;
       }
 
-      nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(mCopier, &nsAsyncStreamCopier::AsyncCopyInternal);
-      rv = mTarget->Dispatch(event, NS_DISPATCH_NORMAL);
+      rv = mTarget->Dispatch(NewRunnableMethod("nsAsyncStreamCopier::AsyncCopyInternal",
+                                               mCopier,
+					       &nsAsyncStreamCopier::AsyncCopyInternal),
+			     NS_DISPATCH_NORMAL);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
 
       if (NS_FAILED(rv)) {
@@ -53,6 +58,7 @@ public:
       }
       return NS_OK;
     }
+
 private:
       RefPtr<nsAsyncStreamCopier> mCopier;
       nsCOMPtr<nsIEventTarget> mTarget;
@@ -68,14 +74,16 @@ nsAsyncStreamCopier::nsAsyncStreamCopier()
     , mChunkSize(nsIOService::gDefaultSegmentSize)
     , mStatus(NS_OK)
     , mIsPending(false)
+    , mCloseSource{ false }
+    , mCloseSink{ false }
     , mShouldSniffBuffering(false)
 {
-    LOG(("Creating nsAsyncStreamCopier @%x\n", this));
+    LOG(("Creating nsAsyncStreamCopier @%p\n", this));
 }
 
 nsAsyncStreamCopier::~nsAsyncStreamCopier()
 {
-    LOG(("Destroying nsAsyncStreamCopier @%x\n", this));
+    LOG(("Destroying nsAsyncStreamCopier @%p\n", this));
 }
 
 bool
@@ -96,7 +104,8 @@ nsAsyncStreamCopier::AsRequest()
 void
 nsAsyncStreamCopier::Complete(nsresult status)
 {
-    LOG(("nsAsyncStreamCopier::Complete [this=%p status=%x]\n", this, status));
+    LOG(("nsAsyncStreamCopier::Complete [this=%p status=%" PRIx32 "]\n", this,
+         static_cast<uint32_t>(status)));
 
     nsCOMPtr<nsIRequestObserver> observer;
     nsCOMPtr<nsISupports> ctx;
@@ -115,7 +124,8 @@ nsAsyncStreamCopier::Complete(nsresult status)
     }
 
     if (observer) {
-        LOG(("  calling OnStopRequest [status=%x]\n", status));
+        LOG(("  calling OnStopRequest [status=%" PRIx32 "]\n",
+             static_cast<uint32_t>(status)));
         observer->OnStopRequest(AsRequest(), ctx, status);
     }
 }
@@ -194,14 +204,14 @@ nsAsyncStreamCopier::Cancel(nsresult status)
 NS_IMETHODIMP
 nsAsyncStreamCopier::Suspend()
 {
-    NS_NOTREACHED("nsAsyncStreamCopier::Suspend");
+    MOZ_ASSERT_UNREACHABLE("nsAsyncStreamCopier::Suspend");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 nsAsyncStreamCopier::Resume()
 {
-    NS_NOTREACHED("nsAsyncStreamCopier::Resume");
+    MOZ_ASSERT_UNREACHABLE("nsAsyncStreamCopier::Resume");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -345,7 +355,7 @@ nsAsyncStreamCopier::ApplyBufferingPolicy()
 NS_IMETHODIMP
 nsAsyncStreamCopier::AsyncCopy(nsIRequestObserver *observer, nsISupports *ctx)
 {
-    LOG(("nsAsyncStreamCopier::AsyncCopy [this=%p observer=%x]\n", this, observer));
+    LOG(("nsAsyncStreamCopier::AsyncCopy [this=%p observer=%p]\n", this, observer));
 
     NS_ASSERTION(mSource && mSink, "not initialized");
     nsresult rv;

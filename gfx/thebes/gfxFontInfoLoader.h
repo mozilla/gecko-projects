@@ -6,7 +6,6 @@
 #ifndef GFX_FONT_INFO_LOADER_H
 #define GFX_FONT_INFO_LOADER_H
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
@@ -22,21 +21,19 @@
 // data retrieved for a given face
 
 struct FontFaceData {
-    FontFaceData() : mUVSOffset(0), mSymbolFont(false) {}
+    FontFaceData() : mUVSOffset(0) {}
 
     FontFaceData(const FontFaceData& aFontFaceData) {
         mFullName = aFontFaceData.mFullName;
         mPostscriptName = aFontFaceData.mPostscriptName;
         mCharacterMap = aFontFaceData.mCharacterMap;
         mUVSOffset = aFontFaceData.mUVSOffset;
-        mSymbolFont = aFontFaceData.mSymbolFont;
     }
 
     nsString mFullName;
     nsString mPostscriptName;
     RefPtr<gfxCharacterMap> mCharacterMap;
     uint32_t mUVSOffset;
-    bool mSymbolFont;
 };
 
 // base class used to contain cached system-wide font info.
@@ -79,8 +76,7 @@ public:
     // fetches cmap data for a particular font from cached font data
     virtual already_AddRefed<gfxCharacterMap>
     GetCMAP(const nsAString& aFontName,
-            uint32_t& aUVSOffset,
-            bool& aSymbolFont)
+            uint32_t& aUVSOffset)
     {
         FontFaceData faceData;
         if (!mFontFaceData.Get(aFontName, &faceData) ||
@@ -89,7 +85,6 @@ public:
         }
 
         aUVSOffset = faceData.mUVSOffset;
-        aSymbolFont = faceData.mSymbolFont;
         RefPtr<gfxCharacterMap> cmap = faceData.mCharacterMap;
         return cmap.forget();
     }

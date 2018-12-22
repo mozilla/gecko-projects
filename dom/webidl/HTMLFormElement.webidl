@@ -11,25 +11,25 @@
  * and create derivative works of this document.
  */
 
-[OverrideBuiltins]
+[OverrideBuiltins, LegacyUnenumerableNamedProperties, HTMLConstructor]
 interface HTMLFormElement : HTMLElement {
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString acceptCharset;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString action;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString autocomplete;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString enctype;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString encoding;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString method;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString name;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute boolean noValidate;
-           [Pure, SetterThrows]
+           [CEReactions, Pure, SetterThrows]
            attribute DOMString target;
 
   [Constant]
@@ -43,9 +43,8 @@ interface HTMLFormElement : HTMLElement {
 
   [Throws]
   void submit();
+  [CEReactions]
   void reset();
   boolean checkValidity();
-
-  [Pref="dom.forms.requestAutocomplete"]
-  void requestAutocomplete();
+  boolean reportValidity();
 };

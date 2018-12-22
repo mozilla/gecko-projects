@@ -7,92 +7,99 @@
 #ifndef mozilla_image_FrameAnimator_h
 #define mozilla_image_FrameAnimator_h
 
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
-#include "gfx2DGlue.h"
 #include "gfxTypes.h"
 #include "imgFrame.h"
 #include "nsCOMPtr.h"
 #include "nsRect.h"
 #include "SurfaceCache.h"
+#include "gfxPrefs.h"
 
 namespace mozilla {
 namespace image {
 
 class RasterImage;
+class DrawableSurface;
 
-class FrameAnimator
+class AnimationState
 {
 public:
-  FrameAnimator(RasterImage* aImage,
-                gfx::IntSize aSize,
-                uint16_t aAnimationMode)
-    : mImage(aImage)
-    , mSize(aSize)
+  explicit AnimationState(uint16_t aAnimationMode)
+    : mFrameCount(0)
     , mCurrentAnimationFrameIndex(0)
     , mLoopRemainingCount(-1)
-    , mLastCompositedFrameIndex(-1)
     , mLoopCount(-1)
-    , mFirstFrameTimeout(0)
+    , mFirstFrameTimeout(FrameTimeout::FromRawMilliseconds(0))
     , mAnimationMode(aAnimationMode)
-    , mDoneDecoding(false)
-  {
-     MOZ_COUNT_CTOR(FrameAnimator);
+    , mHasBeenDecoded(false)
+    , mHasRequestedDecode(false)
+    , mIsCurrentlyDecoded(false)
+    , mCompositedFrameInvalid(false)
+    , mCompositedFrameRequested(false)
+    , mDiscarded(false)
+  { }
+
+  /**
+   * Call this whenever a decode completes, a decode starts, or the image is
+   * discarded. It will update the internal state. Specifically mDiscarded,
+   * mCompositedFrameInvalid, and mIsCurrentlyDecoded. If aAllowInvalidation
+   * is true then returns a rect to invalidate.
+   */
+  const gfx::IntRect UpdateState(bool aAnimationFinished,
+                            RasterImage *aImage,
+                            const gfx::IntSize& aSize,
+                            bool aAllowInvalidation = true);
+private:
+  const gfx::IntRect UpdateStateInternal(LookupResult& aResult,
+                                    bool aAnimationFinished,
+                                    const gfx::IntSize& aSize,
+                                    bool aAllowInvalidation = true);
+
+public:
+  /**
+   * Call when a decode of this image has been completed.
+   */
+  void NotifyDecodeComplete();
+
+  /**
+   * Returns true if this image has been fully decoded before.
+   */
+  bool GetHasBeenDecoded() { return mHasBeenDecoded; }
+
+  /**
+   * Returns true if this image has ever requested a decode before.
+   */
+  bool GetHasRequestedDecode() { return mHasRequestedDecode; }
+
+  /**
+   * Returns true if this image has been discarded and a decoded has not yet
+   * been created to redecode it.
+   */
+  bool IsDiscarded() { return mDiscarded; }
+
+  /**
+   * Sets the composited frame as valid or invalid.
+   */
+  void SetCompositedFrameInvalid(bool aInvalid) {
+    MOZ_ASSERT(!aInvalid || gfxPrefs::ImageMemAnimatedDiscardable());
+    mCompositedFrameInvalid = aInvalid;
   }
 
-  ~FrameAnimator()
-  {
-    MOZ_COUNT_DTOR(FrameAnimator);
+  /**
+   * Returns whether the composited frame is valid to draw to the screen.
+   */
+  bool GetCompositedFrameInvalid() {
+    return mCompositedFrameInvalid;
   }
 
   /**
-   * Return value from RequestRefresh. Tells callers what happened in that call
-   * to RequestRefresh.
+   * Returns whether the image is currently full decoded..
    */
-  struct RefreshResult
-  {
-    // The dirty rectangle to be re-drawn after this RequestRefresh().
-    nsIntRect dirtyRect;
-
-    // Whether any frame changed, and hence the dirty rect was set.
-    bool frameAdvanced : 1;
-
-    // Whether the animation has finished playing.
-    bool animationFinished : 1;
-
-    // Whether an error has occurred when trying to advance a frame. Note that
-    // errors do not, on their own, end the animation.
-    bool error : 1;
-
-    RefreshResult()
-      : frameAdvanced(false)
-      , animationFinished(false)
-      , error(false)
-    { }
-
-    void Accumulate(const RefreshResult& other)
-    {
-      frameAdvanced = frameAdvanced || other.frameAdvanced;
-      animationFinished = animationFinished || other.animationFinished;
-      error = error || other.error;
-      dirtyRect = dirtyRect.Union(other.dirtyRect);
-    }
-  };
-
-  /**
-   * Re-evaluate what frame we're supposed to be on, and do whatever blending
-   * is necessary to get us to that frame.
-   *
-   * Returns the result of that blending, including whether the current frame
-   * changed and what the resulting dirty rectangle is.
-   */
-  RefreshResult RequestRefresh(const TimeStamp& aTime);
-
-  /**
-   * Call when this image is finished decoding so we know that there aren't any
-   * more frames coming.
-   */
-  void SetDoneDecoding(bool aDone);
+  bool GetIsCurrentlyDecoded() {
+    return mIsCurrentlyDecoded;
+  }
 
   /**
    * Call when you need to re-start animating. Ensures we start from the first
@@ -107,11 +114,22 @@ public:
    */
   void SetAnimationMode(uint16_t aAnimationMode);
 
+  /// Update the number of frames of animation this image is known to have.
+  void UpdateKnownFrameCount(uint32_t aFrameCount);
+
+  /// @return the number of frames of animation we know about so far.
+  uint32_t KnownFrameCount() const { return mFrameCount; }
+
+  /// @return the number of frames this animation has, if we know for sure.
+  /// (In other words, if decoding is finished.) Otherwise, returns Nothing().
+  Maybe<uint32_t> FrameCount() const;
+
   /**
-   * Union the area to refresh when we loop around to the first frame with this
-   * rect.
+   * Get or set the area of the image to invalidate when we loop around to the
+   * first frame.
    */
-  void UnionFirstFrameRefreshArea(const nsIntRect& aRect);
+  void SetFirstFrameRefreshArea(const gfx::IntRect& aRefreshArea);
+  gfx::IntRect FirstFrameRefreshArea() const { return mFirstFrameRefreshArea; }
 
   /**
    * If the animation frame time has not yet been set, set it to
@@ -125,29 +143,16 @@ public:
   void SetAnimationFrameTime(const TimeStamp& aTime);
 
   /**
+   * Set the animation frame time to @aTime if we are configured to stop the
+   * animation when not visible and aTime is later than the current time.
+   * Returns true if the time was updated, else false.
+   */
+  bool MaybeAdvanceAnimationFrameTime(const TimeStamp& aTime);
+
+  /**
    * The current frame we're on, from 0 to (numFrames - 1).
    */
   uint32_t GetCurrentAnimationFrameIndex() const;
-
-  /**
-   * Get the area we refresh when we loop around to the first frame.
-   */
-  nsIntRect GetFirstFrameRefreshArea() const;
-
-  /**
-   * If we have a composited frame for @aFrameNum, returns it. Otherwise,
-   * returns an empty LookupResult. It is an error to call this method with
-   * aFrameNum == 0, because the first frame is never composited.
-   */
-  LookupResult GetCompositedFrame(uint32_t aFrameNum);
-
-  /*
-   * Returns the frame's adjusted timeout. If the animation loops and the
-   * timeout falls in between a certain range then the timeout is adjusted so
-   * that it's never 0. If the animation does not loop then no adjustments are
-   * made.
-   */
-  int32_t GetTimeoutForFrame(uint32_t aFrameNum) const;
 
   /*
    * Set number of times to loop the image.
@@ -156,11 +161,169 @@ public:
   void SetLoopCount(int32_t aLoopCount) { mLoopCount = aLoopCount; }
   int32_t LoopCount() const { return mLoopCount; }
 
+  /// Set the @aLength of a single loop through this image.
+  void SetLoopLength(FrameTimeout aLength) { mLoopLength = Some(aLength); }
+
+  /**
+   * @return the length of a single loop of this image. If this image is not
+   * finished decoding, is not animated, or it is animated but does not loop,
+   * returns FrameTimeout::Forever().
+   */
+  FrameTimeout LoopLength() const;
+
   /*
-   * Set the timeout for the first frame. This is used to allow animation
+   * Get or set the timeout for the first frame. This is used to allow animation
    * scheduling even before a full decode runs for this image.
    */
-  void SetFirstFrameTimeout(int32_t aTimeout) { mFirstFrameTimeout = aTimeout; }
+  void SetFirstFrameTimeout(FrameTimeout aTimeout) { mFirstFrameTimeout = aTimeout; }
+  FrameTimeout FirstFrameTimeout() const { return mFirstFrameTimeout; }
+
+private:
+  friend class FrameAnimator;
+
+  //! Area of the first frame that needs to be redrawn on subsequent loops.
+  gfx::IntRect mFirstFrameRefreshArea;
+
+  //! the time that the animation advanced to the current frame
+  TimeStamp mCurrentAnimationFrameTime;
+
+  //! The number of frames of animation this image has.
+  uint32_t mFrameCount;
+
+  //! The current frame index we're on, in the range [0, mFrameCount).
+  uint32_t mCurrentAnimationFrameIndex;
+
+  //! number of loops remaining before animation stops (-1 no stop)
+  int32_t mLoopRemainingCount;
+
+  //! The total number of loops for the image.
+  int32_t mLoopCount;
+
+  //! The length of a single loop through this image.
+  Maybe<FrameTimeout> mLoopLength;
+
+  //! The timeout for the first frame of this image.
+  FrameTimeout mFirstFrameTimeout;
+
+  //! The animation mode of this image. Constants defined in imgIContainer.
+  uint16_t mAnimationMode;
+
+  /**
+   * The following four bools (mHasBeenDecoded, mIsCurrentlyDecoded,
+   * mCompositedFrameInvalid, mDiscarded) track the state of the image with
+   * regards to decoding. They all start out false, including mDiscarded,
+   * because we want to treat being discarded differently from "not yet decoded
+   * for the first time".
+   *
+   * (When we are decoding the image for the first time we want to show the
+   * image at the speed of data coming in from the network or the speed
+   * specified in the image file, whichever is slower. But when redecoding we
+   * want to show nothing until the frame for the current time has been
+   * decoded. The prevents the user from seeing the image "fast forward"
+   * to the expected spot.)
+   *
+   * When the image is decoded for the first time mHasBeenDecoded and
+   * mIsCurrentlyDecoded get set to true. When the image is discarded
+   * mIsCurrentlyDecoded gets set to false, and mCompositedFrameInvalid
+   * & mDiscarded get set to true. When we create a decoder to redecode the
+   * image mDiscarded gets set to false. mCompositedFrameInvalid gets set to
+   * false when we are able to advance to the frame that should be showing
+   * for the current time. mIsCurrentlyDecoded gets set to true when the
+   * redecode finishes.
+   */
+
+  //! Whether this image has been decoded at least once.
+  bool mHasBeenDecoded;
+
+  //! Whether this image has ever requested a decode.
+  bool mHasRequestedDecode;
+
+  //! Whether this image is currently fully decoded.
+  bool mIsCurrentlyDecoded;
+
+  //! Whether the composited frame is valid to draw to the screen, note that
+  //! the composited frame can exist and be filled with image data but not
+  //! valid to draw to the screen.
+  bool mCompositedFrameInvalid;
+
+  //! Whether the composited frame was requested from the animator since the
+  //! last time we advanced the animation.
+  bool mCompositedFrameRequested;
+
+  //! Whether this image is currently discarded. Only set to true after the
+  //! image has been decoded at least once.
+  bool mDiscarded;
+};
+
+/**
+ * RefreshResult is used to let callers know how the state of the animation
+ * changed during a call to FrameAnimator::RequestRefresh().
+ */
+struct RefreshResult
+{
+  RefreshResult()
+    : mFrameAdvanced(false)
+    , mAnimationFinished(false)
+  { }
+
+  /// Merges another RefreshResult's changes into this RefreshResult.
+  void Accumulate(const RefreshResult& aOther)
+  {
+    mFrameAdvanced = mFrameAdvanced || aOther.mFrameAdvanced;
+    mAnimationFinished = mAnimationFinished || aOther.mAnimationFinished;
+    mDirtyRect = mDirtyRect.Union(aOther.mDirtyRect);
+  }
+
+  // The region of the image that has changed.
+  gfx::IntRect mDirtyRect;
+
+  // If true, we changed frames at least once. Note that, due to looping, we
+  // could still have ended up on the same frame!
+  bool mFrameAdvanced : 1;
+
+  // Whether the animation has finished playing.
+  bool mAnimationFinished : 1;
+};
+
+class FrameAnimator
+{
+public:
+  FrameAnimator(RasterImage* aImage, const gfx::IntSize& aSize)
+    : mImage(aImage)
+    , mSize(aSize)
+    , mLastCompositedFrameIndex(-1)
+  {
+     MOZ_COUNT_CTOR(FrameAnimator);
+  }
+
+  ~FrameAnimator()
+  {
+    MOZ_COUNT_DTOR(FrameAnimator);
+  }
+
+  /**
+   * Call when you need to re-start animating. Ensures we start from the first
+   * frame.
+   */
+  void ResetAnimation(AnimationState& aState);
+
+  /**
+   * Re-evaluate what frame we're supposed to be on, and do whatever blending
+   * is necessary to get us to that frame.
+   *
+   * Returns the result of that blending, including whether the current frame
+   * changed and what the resulting dirty rectangle is.
+   */
+  RefreshResult RequestRefresh(AnimationState& aState,
+                               const TimeStamp& aTime,
+                               bool aAnimationFinished);
+
+  /**
+   * Get the full frame for the current frame of the animation (it may or may
+   * not have required compositing). It may not be available because it hasn't
+   * been decoded yet, in which case we return an empty LookupResult.
+   */
+  LookupResult GetCompositedFrame(AnimationState& aState);
 
   /**
    * Collect an accounting of the memory occupied by the compositing surfaces we
@@ -172,15 +335,6 @@ public:
 
 private: // methods
   /**
-   * Gets the length of a single loop of this image, in milliseconds.
-   *
-   * If this image is not finished decoding, is not animated, or it is animated
-   * but does not loop, returns -1. Can return 0 in the case of an animated
-   * image that has a 0ms delay between its frames and does not loop.
-   */
-  int32_t GetSingleLoopTime() const;
-
-  /**
    * Advances the animation. Typically, this will advance a single frame, but it
    * may advance multiple frames. This may happen if we have infrequently
    * "ticking" refresh drivers (e.g. in background tabs), or extremely short-
@@ -189,25 +343,31 @@ private: // methods
    * @param aTime the time that the animation should advance to. This will
    *              typically be <= TimeStamp::Now().
    *
+   * @param aCurrentFrame the currently displayed frame of the animation. If
+   *                      we advance, it will replace aCurrentFrame with the
+   *                      new current frame we advanced to.
+   *
    * @returns a RefreshResult that shows whether the frame was successfully
    *          advanced, and its resulting dirty rect.
    */
-  RefreshResult AdvanceFrame(TimeStamp aTime);
+  RefreshResult AdvanceFrame(AnimationState& aState,
+                             DrawableSurface& aFrames,
+                             RawAccessFrameRef& aCurrentFrame,
+                             TimeStamp aTime);
 
   /**
    * Get the time the frame we're currently displaying is supposed to end.
    *
-   * In the error case, returns an "infinity" timestamp.
+   * In the error case (like if the requested frame is not currently
+   * decoded), returns None().
    */
-  TimeStamp GetCurrentImgFrameEndTime() const;
+  TimeStamp GetCurrentImgFrameEndTime(AnimationState& aState,
+                                      FrameTimeout aCurrentTimeout) const;
 
-  bool DoBlend(nsIntRect* aDirtyRect, uint32_t aPrevFrameIndex,
-               uint32_t aNextFrameIndex);
-
-  /**
-   * Get the @aIndex-th frame in the frame index, ignoring results of blending.
-   */
-  RawAccessFrameRef GetRawFrame(uint32_t aFrameNum) const;
+  bool DoBlend(const RawAccessFrameRef& aPrevFrame,
+               const RawAccessFrameRef& aNextFrame,
+               uint32_t aNextFrameIndex,
+               gfx::IntRect* aDirtyRect);
 
   /** Clears an area of <aFrame> with transparent black.
    *
@@ -216,15 +376,15 @@ private: // methods
    *
    * @note Does also clears the transparency mask
    */
-  static void ClearFrame(uint8_t* aFrameData, const nsIntRect& aFrameRect);
+  static void ClearFrame(uint8_t* aFrameData, const gfx::IntRect& aFrameRect);
 
   //! @overload
-  static void ClearFrame(uint8_t* aFrameData, const nsIntRect& aFrameRect,
-                         const nsIntRect& aRectToClear);
+  static void ClearFrame(uint8_t* aFrameData, const gfx::IntRect& aFrameRect,
+                         const gfx::IntRect& aRectToClear);
 
   //! Copy one frame's image and mask into another
-  static bool CopyFrameImage(const uint8_t* aDataSrc, const nsIntRect& aRectSrc,
-                             uint8_t* aDataDest, const nsIntRect& aRectDest);
+  static bool CopyFrameImage(const uint8_t* aDataSrc, const gfx::IntRect& aRectSrc,
+                             uint8_t* aDataDest, const gfx::IntRect& aRectDest);
 
   /**
    * Draws one frame's image to into another, at the position specified by
@@ -243,10 +403,11 @@ private: // methods
    * frame.
    */
   static nsresult DrawFrameTo(const uint8_t* aSrcData,
-                              const nsIntRect& aSrcRect,
+                              const gfx::IntRect& aSrcRect,
                               uint32_t aSrcPaletteLength, bool aSrcHasAlpha,
-                              uint8_t* aDstPixels, const nsIntRect& aDstRect,
-                              BlendMethod aBlendMethod);
+                              uint8_t* aDstPixels, const gfx::IntRect& aDstRect,
+                              BlendMethod aBlendMethod,
+                              const gfx::IntRect& aBlendRect);
 
 private: // data
   //! A weak pointer to our owning image.
@@ -273,32 +434,8 @@ private: // data
    */
   RawAccessFrameRef mCompositingPrevFrame;
 
-  //! Area of the first frame that needs to be redrawn on subsequent loops.
-  nsIntRect mFirstFrameRefreshArea;
-
-  //! the time that the animation advanced to the current frame
-  TimeStamp mCurrentAnimationFrameTime;
-
-  //! The current frame index we're on. 0 to (numFrames - 1).
-  uint32_t mCurrentAnimationFrameIndex;
-
-  //! number of loops remaining before animation stops (-1 no stop)
-  int32_t mLoopRemainingCount;
-
   //! Track the last composited frame for Optimizations (See DoComposite code)
   int32_t mLastCompositedFrameIndex;
-
-  //! The total number of loops for the image.
-  int32_t mLoopCount;
-
-  //! The timeout for the first frame of this image.
-  int32_t mFirstFrameTimeout;
-
-  //! The animation mode of this image. Constants defined in imgIContainer.
-  uint16_t mAnimationMode;
-
-  //! Whether this image is done being decoded.
-  bool mDoneDecoding;
 };
 
 } // namespace image

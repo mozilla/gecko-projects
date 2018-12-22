@@ -14,7 +14,7 @@
   
 </div>
 <pre id="test">
-<script class="testbody" type="application/javascript;version=1.8">
+<script class="testbody" type="application/javascript">
 
 const runPreflightTests = 1;
 const runCookieTests = 1;
@@ -30,15 +30,15 @@ function initTest() {
 
 function initTestCallback() {
   window.addEventListener("message", function(e) {
-    gen.send(e.data);
-  }, false);
+    gen.next(e.data);
+  });
 
   gen = runTest();
   
   gen.next()
 }
 
-function runTest() {
+function* runTest() {
   var loader = document.getElementById('loader');
   var loaderWindow = loader.contentWindow;
   loader.onload = function () { gen.next() };
@@ -664,16 +664,16 @@ function runTest() {
         return lName != "accept" &&
                lName != "accept-language" &&
                (lName != "content-type" ||
-                ["text/plain",
+                !["text/plain",
                  "multipart/form-data",
                  "application/x-www-form-urlencoded"]
-                   .indexOf(test.headers[name].toLowerCase()) == -1);
+                   .includes(test.headers[name].toLowerCase()));
       }
       req.url += "&headers=" + escape(test.headers.toSource());
       reqHeaders =
         escape(Object.keys(test.headers)
                .filter(isUnsafeHeader)
-               .map(String.toLowerCase)
+               .map(s => s.toLowerCase())
                .sort()
                .join(","));
       req.url += reqHeaders ? "&requestHeaders=" + reqHeaders : "";
@@ -731,7 +731,7 @@ function runTest() {
       }
       if (test.responseHeaders) {
         for (header in test.responseHeaders) {
-          if (test.expectedResponseHeaders.indexOf(header) == -1) {
+          if (!test.expectedResponseHeaders.includes(header)) {
             is(res.responseHeaders[header], null,
                "|xhr.getResponseHeader()|wrong response header (" + header + ") in test for " +
                test.toSource());
@@ -743,7 +743,7 @@ function runTest() {
             is(res.responseHeaders[header], test.responseHeaders[header],
                "|xhr.getResponseHeader()|wrong response header (" + header + ") in test for " +
                test.toSource());
-            is(res.allResponseHeaders[header], test.responseHeaders[header],
+            is(res.allResponseHeaders[header.toLowerCase()], test.responseHeaders[header],
               "|xhr.getAllResponseHeaderss()|wrong response header (" + header + ") in test for " +
               test.toSource());
           }
@@ -760,9 +760,15 @@ function runTest() {
       is(res.responseText, "",
          "wrong responseText in test for " + test.toSource());
       if (!res.sendThrew) {
-        is(res.events.join(","),
-           "opening,rs1,sending,loadstart,rs2,rs4,error,loadend",
-           "wrong events in test for " + test.toSource());
+        if (test.username) {
+          is(res.events.join(","),
+             "opening,rs1,sending,loadstart,rs4,error,loadend",
+             "wrong events in test for " + test.toSource());
+        } else {
+          is(res.events.join(","),
+             "opening,rs1,sending,loadstart,rs2,rs4,error,loadend",
+             "wrong events in test for " + test.toSource());
+        }
       }
       is(res.progressEvents, 0,
          "wrong events in test for " + test.toSource());
@@ -1445,8 +1451,6 @@ function runTest() {
 
 
   SimpleTest.finish();
-
-  yield undefined;
 }
 
 </script>

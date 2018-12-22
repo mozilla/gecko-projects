@@ -6,9 +6,7 @@
 #include "GTestRunner.h"
 #include "gtest/gtest.h"
 #include "mozilla/Attributes.h"
-#ifdef MOZ_CRASHREPORTER
 #include "nsICrashReporter.h"
-#endif
 #include "testing/TestHarness.h"
 #include "prenv.h"
 #ifdef XP_WIN
@@ -76,10 +74,9 @@ static void ReplaceGTestLogger()
   listeners.Append(new MozillaPrinter);
 }
 
-int RunGTestFunc()
+int RunGTestFunc(int* argc, char** argv)
 {
-  int c = 0;
-  InitGoogleTest(&c, static_cast<char**>(nullptr));
+  InitGoogleTest(argc, argv);
 
   if (getenv("MOZ_TBPL_PARSER")) {
     ReplaceGTestLogger();
@@ -92,7 +89,6 @@ int RunGTestFunc()
 #ifdef XP_WIN
   mozilla::ipc::windows::InitUIThread();
 #endif
-#ifdef MOZ_CRASHREPORTER
   nsCOMPtr<nsICrashReporter> crashreporter;
   char *crashreporterStr = PR_GetEnv("MOZ_CRASHREPORTER");
   if (crashreporterStr && !strcmp(crashreporterStr, "1")) {
@@ -113,7 +109,6 @@ int RunGTestFunc()
       crashreporter->SetMinidumpPath(cwd);
     }
   }
-#endif
 
   return RUN_ALL_TESTS();
 }

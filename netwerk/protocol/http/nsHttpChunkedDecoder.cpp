@@ -5,10 +5,13 @@
 
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
+
 #include <errno.h>
 #include "nsHttpChunkedDecoder.h"
 #include <algorithm>
 #include "plstr.h"
+
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 namespace net {
@@ -27,7 +30,7 @@ nsHttpChunkedDecoder::HandleChunkedContent(char *buf,
 
     *contentRead = 0;
 
-    // from RFC2617 section 3.6.1, the chunked transfer coding is defined as:
+    // from RFC2616 section 3.6.1, the chunked transfer coding is defined as:
     //
     //   Chunked-Body    = *chunk
     //                     last-chunk
@@ -88,22 +91,26 @@ nsHttpChunkedDecoder::ParseChunkRemaining(char *buf,
                                           uint32_t count,
                                           uint32_t *bytesConsumed)
 {
-    NS_PRECONDITION(mChunkRemaining == 0, "chunk remaining should be zero");
-    NS_PRECONDITION(count, "unexpected");
+    MOZ_ASSERT(mChunkRemaining == 0, "chunk remaining should be zero");
+    MOZ_ASSERT(count, "unexpected");
 
     *bytesConsumed = 0;
 
     char *p = static_cast<char *>(memchr(buf, '\n', count));
     if (p) {
         *p = 0;
-        if ((p > buf) && (*(p-1) == '\r')) // eliminate a preceding CR
+        count = p - buf; // new length
+        *bytesConsumed = count + 1; // length + newline
+        if ((p > buf) && (*(p-1) == '\r')) { // eliminate a preceding CR
             *(p-1) = 0;
-        *bytesConsumed = p - buf + 1;
+            count--;
+        }
 
         // make buf point to the full line buffer to parse
         if (!mLineBuf.IsEmpty()) {
-            mLineBuf.Append(buf);
+            mLineBuf.Append(buf, count);
             buf = (char *) mLineBuf.get();
+            count = mLineBuf.Length();
         }
 
         if (mWaitEOF) {
@@ -113,7 +120,17 @@ nsHttpChunkedDecoder::ParseChunkRemaining(char *buf,
                 if (!mTrailers) {
                     mTrailers = new nsHttpHeaderArray();
                 }
-                mTrailers->ParseHeaderLine(buf);
+
+                nsHttpAtom hdr = {nullptr};
+                nsAutoCString headerNameOriginal;
+                nsAutoCString val;
+                if (NS_SUCCEEDED(mTrailers->ParseHeaderLine(nsDependentCSubstring(buf, count),
+                                                            &hdr, &headerNameOriginal, &val))) {
+                    if (hdr == nsHttp::Server_Timing) {
+                        Unused << mTrailers->SetHeaderFromNet(hdr, headerNameOriginal,
+                                                              val, true);
+                    }
+                }
             }
             else {
                 mWaitEOF = false;

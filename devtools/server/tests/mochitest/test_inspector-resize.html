@@ -9,28 +9,26 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1222409
   <title>Test for Bug 1222409</title>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
-  <script type="application/javascript;version=1.8" src="inspector-helpers.js"></script>
-  <script type="application/javascript;version=1.8">
+  <script type="application/javascript" src="inspector-helpers.js"></script>
+  <script type="application/javascript">
+"use strict";
+
 window.onload = function() {
-  const Cu = Components.utils;
-  Cu.import("resource://devtools/shared/Loader.jsm");
-  const {Promise: promise} =
-    Cu.import("resource://gre/modules/Promise.jsm", {});
-  const {InspectorFront} =
-    devtools.require("devtools/server/actors/inspector");
-  const {console} = Cu.import("resource://gre/modules/Console.jsm", {});
+  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const {InspectorFront} = require("devtools/shared/fronts/inspector");
 
   SimpleTest.waitForExplicitFinish();
 
   let win = null;
   let inspector = null;
 
-  addAsyncTest(function* setup() {
-    info ("Setting up inspector and walker actors.");
+  addAsyncTest(async function setup() {
+    info("Setting up inspector and walker actors.");
 
-    let url = document.getElementById("inspectorContent").href;
+    const url = document.getElementById("inspectorContent").href;
 
-    yield new Promise(resolve => {
+    // eslint-disable-next-line new-cap
+    await new Promise(resolve => {
       attachURL(url, function(err, client, tab, doc) {
         win = doc.defaultView;
         inspector = InspectorFront(client, tab);
@@ -41,21 +39,22 @@ window.onload = function() {
     runNextTest();
   });
 
-  addAsyncTest(function*() {
-    let walker = yield inspector.getWalker();
+  addAsyncTest(async function() {
+    const walker = await inspector.getWalker();
 
     // We can't receive events from the walker if we haven't first executed a
     // method on the actor to initialize it.
-    yield walker.querySelector(walker.rootNode, "img");
+    await walker.querySelector(walker.rootNode, "img");
 
-    let {outerWidth, outerHeight} = win;
-    let onResize = new Promise(resolve => {
+    const {outerWidth, outerHeight} = win;
+    // eslint-disable-next-line new-cap
+    const onResize = new Promise(resolve => {
       walker.once("resize", () => {
         resolve();
       });
     });
     win.resizeTo(800, 600);
-    yield onResize;
+    await onResize;
 
     ok(true, "The resize event was emitted");
     win.resizeTo(outerWidth, outerHeight);

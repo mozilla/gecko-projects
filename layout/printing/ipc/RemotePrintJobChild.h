@@ -10,17 +10,20 @@
 #include "mozilla/layout/PRemotePrintJobChild.h"
 
 #include "mozilla/RefPtr.h"
+#include "nsIWebProgressListener.h"
 
 class nsPagePrintTimer;
-class nsPrintEngine;
+class nsPrintJob;
 
 namespace mozilla {
 namespace layout {
 
 class RemotePrintJobChild final : public PRemotePrintJobChild
+                                , public nsIWebProgressListener
 {
 public:
-  NS_INLINE_DECL_REFCOUNTING(RemotePrintJobChild)
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIWEBPROGRESSLISTENER
 
   RemotePrintJobChild();
 
@@ -31,25 +34,32 @@ public:
                            const int32_t& aStartPage,
                            const int32_t& aEndPage);
 
-  bool RecvPrintInitializationResult(const nsresult& aRv) final;
+  mozilla::ipc::IPCResult RecvPrintInitializationResult(
+    const nsresult& aRv,
+    const FileDescriptor& aFd) final;
 
-  void ProcessPage(Shmem& aStoredPage);
+  void ProcessPage();
 
-  bool RecvPageProcessed() final;
+  mozilla::ipc::IPCResult RecvPageProcessed(const FileDescriptor& aFd) final;
 
-  bool RecvAbortPrint(const nsresult& aRv) final;
+  mozilla::ipc::IPCResult RecvAbortPrint(const nsresult& aRv) final;
 
   void SetPagePrintTimer(nsPagePrintTimer* aPagePrintTimer);
 
-  void SetPrintEngine(nsPrintEngine* aPrintEngine);
+  void SetPrintJob(nsPrintJob* aPrintJob);
+
+  PRFileDesc* GetNextPageFD();
 
 private:
   ~RemotePrintJobChild() final;
+  void SetNextPageFD(const mozilla::ipc::FileDescriptor& aFd);
 
   bool mPrintInitialized = false;
+  bool mDestroyed = false;
   nsresult mInitializationResult = NS_OK;
   RefPtr<nsPagePrintTimer> mPagePrintTimer;
-  RefPtr<nsPrintEngine> mPrintEngine;
+  RefPtr<nsPrintJob> mPrintJob;
+  PRFileDesc* mNextPageFD = nullptr;
 };
 
 } // namespace layout

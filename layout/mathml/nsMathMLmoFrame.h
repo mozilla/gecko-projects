@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,20 +17,19 @@
 
 class nsMathMLmoFrame : public nsMathMLTokenFrame {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsMathMLmoFrame)
 
-  friend nsIFrame* NS_NewMathMLmoFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmoFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
 
   virtual eMathMLFrameType GetMathMLFrameType() override;
 
   virtual void
-  SetAdditionalStyleContext(int32_t          aIndex, 
-                            nsStyleContext*  aStyleContext) override;
-  virtual nsStyleContext*
-  GetAdditionalStyleContext(int32_t aIndex) const override;
+  SetAdditionalComputedStyle(int32_t          aIndex,
+                            ComputedStyle*  aComputedStyle) override;
+  virtual ComputedStyle*
+  GetAdditionalComputedStyle(int32_t aIndex) const override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   NS_IMETHOD
@@ -44,33 +44,33 @@ public:
 
   virtual void
   Reflow(nsPresContext*          aPresContext,
-         nsHTMLReflowMetrics&     aDesiredSize,
-         const nsHTMLReflowState& aReflowState,
+         ReflowOutput&     aDesiredSize,
+         const ReflowInput& aReflowInput,
          nsReflowStatus&          aStatus) override;
 
   virtual nsresult
   Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize) override;
+        ReflowOutput& aDesiredSize) override;
 
   virtual void MarkIntrinsicISizesDirty() override;
 
   virtual void
-  GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext,
-                           nsHTMLReflowMetrics& aDesiredSize) override;
+  GetIntrinsicISizeMetrics(gfxContext* aRenderingContext,
+                           ReflowOutput& aDesiredSize) override;
 
   virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
-                   nsIAtom*        aAttribute,
+                   nsAtom*        aAttribute,
                    int32_t         aModType) override;
 
-  // This method is called by the parent frame to ask <mo> 
+  // This method is called by the parent frame to ask <mo>
   // to stretch itself.
   NS_IMETHOD
   Stretch(DrawTarget*          aDrawTarget,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
-          nsHTMLReflowMetrics& aDesiredStretchSize) override;
+          ReflowOutput& aDesiredStretchSize) override;
 
   virtual nsresult
   ChildListChanged(int32_t aModType) override
@@ -80,9 +80,10 @@ public:
   }
 
 protected:
-  explicit nsMathMLmoFrame(nsStyleContext* aContext) : nsMathMLTokenFrame(aContext) {}
+  explicit nsMathMLmoFrame(ComputedStyle* aStyle) :
+    nsMathMLTokenFrame(aStyle, kClassID), mFlags(0), mMinSize(0), mMaxSize(0) {}
   virtual ~nsMathMLmoFrame();
-  
+
   nsMathMLChar     mMathMLChar; // Here is the MathMLChar that will deal with the operator.
   nsOperatorFlags  mFlags;
   float            mMinSize;
@@ -93,7 +94,7 @@ protected:
   // overload the base method so that we can setup our nsMathMLChar
   void ProcessTextData();
 
-  // helper to get our 'form' and lookup in the Operator Dictionary to fetch 
+  // helper to get our 'form' and lookup in the Operator Dictionary to fetch
   // our default data that may come from there, and to complete the setup
   // using attributes that we may have
   void

@@ -2,26 +2,30 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import os
 import posixpath
 import re
+import shutil
+import signal
 import subprocess
 import tempfile
 import time
 import traceback
 
 from abc import ABCMeta, abstractmethod
+from distutils import dir_util
 
 
 class ADBProcess(object):
     """ADBProcess encapsulates the data related to executing the adb process."""
+
     def __init__(self, args):
         #: command argument argument list.
         self.args = args
         #: Temporary file handle to be used for stdout.
-        self.stdout_file = tempfile.TemporaryFile()
-        #: Temporary file handle to be used for stderr.
-        self.stderr_file = tempfile.TemporaryFile()
+        self.stdout_file = tempfile.NamedTemporaryFile(mode='w+b')
         #: boolean indicating if the command timed out.
         self.timedout = None
         #: exitcode of the process.
@@ -29,7 +33,7 @@ class ADBProcess(object):
         #: subprocess Process object used to execute the command.
         self.proc = subprocess.Popen(args,
                                      stdout=self.stdout_file,
-                                     stderr=self.stderr_file)
+                                     stderr=subprocess.STDOUT)
 
     @property
     def stdout(self):
@@ -41,23 +45,14 @@ class ADBProcess(object):
             content = self.stdout_file.read().rstrip()
         return content
 
-    @property
-    def stderr(self):
-        """Return the contents of stderr."""
-        if not self.stderr_file or self.stderr_file.closed:
-            content = ""
-        else:
-            self.stderr_file.seek(0, os.SEEK_SET)
-            content = self.stderr_file.read().rstrip()
-        return content
-
     def __str__(self):
-        return ('args: %s, exitcode: %s, stdout: %s, stderr: %s' % (
-            ' '.join(self.args), self.exitcode, self.stdout, self.stderr))
+        return ('args: %s, exitcode: %s, stdout: %s' % (
+            ' '.join(self.args), self.exitcode, self.stdout))
 
 # ADBError, ADBRootError, and ADBTimeoutError are treated
 # differently in order that unhandled ADBRootErrors and
 # ADBTimeoutErrors can be handled distinctly from ADBErrors.
+
 
 class ADBError(Exception):
     """ADBError is raised in situations where a command executed on a
@@ -67,15 +62,27 @@ class ADBError(Exception):
     """
     pass
 
+
+class ADBProcessError(ADBError):
+    """ADBProcessError is raised when an associated ADBProcess is
+    available and relevant.
+    """
+    def __init__(self, adb_process):
+        ADBError.__init__(self, str(adb_process))
+        self.adb_process = adb_process
+
+
 class ADBListDevicesError(ADBError):
     """ADBListDevicesError is raised when errors are found listing the
     devices, typically not any permissions.
 
     The devices information is stocked with the *devices* member.
     """
+
     def __init__(self, msg, devices):
         ADBError.__init__(self, msg)
         self.devices = devices
+
 
 class ADBRootError(Exception):
     """ADBRootError is raised when a shell command is to be executed as
@@ -84,6 +91,7 @@ class ADBRootError(Exception):
     your device or change your scripts to not require running as root.
     """
     pass
+
 
 class ADBTimeoutError(Exception):
     """ADBTimeoutError is raised when either a host command or shell
@@ -155,15 +163,19 @@ class ADBCommand(object):
         self._adb_port = adb_port
         self._timeout = timeout
         self._polling_interval = 0.1
+        self._adb_version = ''
 
         self._logger.debug("%s: %s" % (self.__class__.__name__,
                                        self.__dict__))
 
         # catch early a missing or non executable adb command
+        # and get the adb version while we are at it.
         try:
-            subprocess.Popen([adb, 'help'],
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE).communicate()
+            output = subprocess.Popen([adb, 'version'],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE).communicate()
+            re_version = re.compile(r'Android Debug Bridge version (.*)')
+            self._adb_version = re_version.match(output[0]).group(1)
         except Exception as exc:
             raise ADBError('%s: %s is not executable.' % (exc, adb))
 
@@ -203,7 +215,7 @@ class ADBCommand(object):
         commands on the host via adb.
 
         command() executes on the host in such a fashion that stdout
-        and stderr of the adb process are file handles on the host and
+        of the adb process is a file handle on the host and
         the exit code is available as the exit code of the adb
         process.
 
@@ -211,11 +223,11 @@ class ADBCommand(object):
         timeout period in seconds.
 
         A subprocess is spawned to execute adb with stdout and stderr
-        directed to temporary files. If the process takes longer than
+        directed to a temporary file. If the process takes longer than
         the specified timeout, the process is terminated.
 
         It is the caller's responsibilty to clean up by closing
-        the stdout and stderr temporary files.
+        the stdout temporary file.
         """
         args = [self._adb_path]
         if self._adb_host:
@@ -233,17 +245,16 @@ class ADBCommand(object):
 
         start_time = time.time()
         adb_process.exitcode = adb_process.proc.poll()
-        while ((time.time() - start_time) <= timeout and
-               adb_process.exitcode == None):
+        while ((time.time() - start_time) <= float(timeout) and
+               adb_process.exitcode is None):
             time.sleep(self._polling_interval)
             adb_process.exitcode = adb_process.proc.poll()
-        if adb_process.exitcode == None:
+        if adb_process.exitcode is None:
             adb_process.proc.kill()
             adb_process.timedout = True
             adb_process.exitcode = adb_process.proc.poll()
 
         adb_process.stdout_file.seek(0, os.SEEK_SET)
-        adb_process.stderr_file.seek(0, os.SEEK_SET)
 
         return adb_process
 
@@ -279,7 +290,7 @@ class ADBCommand(object):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
+                raise ADBProcessError(adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('command_output: %s, '
@@ -296,7 +307,6 @@ class ADBCommand(object):
         finally:
             if adb_process and isinstance(adb_process.stdout_file, file):
                 adb_process.stdout_file.close()
-                adb_process.stderr_file.close()
 
 
 class ADBHost(ADBCommand):
@@ -310,6 +320,7 @@ class ADBHost(ADBCommand):
        adbhost = ADBHost()
        adbhost.start_server()
     """
+
     def __init__(self,
                  adb='adb',
                  adb_host=None,
@@ -350,7 +361,7 @@ class ADBHost(ADBCommand):
         commands on the host via adb.
 
         command() executes on the host in such a fashion that stdout
-        and stderr of the adb process are file handles on the host and
+        of the adb process is a file handle on the host and
         the exit code is available as the exit code of the adb
         process.
 
@@ -358,11 +369,11 @@ class ADBHost(ADBCommand):
         timeout period in seconds.
 
         A subprocess is spawned to execute adb with stdout and stderr
-        directed to temporary files. If the process takes longer than
+        directed to a temporary file. If the process takes longer than
         the specified timeout, the process is terminated.
 
         It is the caller's responsibilty to clean up by closing
-        the stdout and stderr temporary files.
+        the stdout temporary file.
         """
         return ADBCommand.command(self, cmds, timeout=timeout)
 
@@ -458,9 +469,11 @@ class ADBHost(ADBCommand):
         """
         # b313b945               device usb:1-7 product:d2vzw model:SCH_I535 device:d2vzw
         # from Android system/core/adb/transport.c statename()
-        re_device_info = re.compile(r'([^\s]+)\s+(offline|bootloader|device|host|recovery|sideload|no permissions|unauthorized|unknown)')
+        re_device_info = re.compile(
+            r"([^\s]+)\s+(offline|bootloader|device|host|recovery|sideload|"
+            "no permissions|unauthorized|unknown)")
         devices = []
-        lines = self.command_output(["devices", "-l"], timeout=timeout).split('\n')
+        lines = self.command_output(["devices", "-l"], timeout=timeout).splitlines()
         for line in lines:
             if line == 'List of devices attached ':
                 continue
@@ -593,20 +606,45 @@ class ADBDevice(ADBCommand):
         # there is /sbin/ls which embeds ansi escape codes to colorize
         # the output.  Detect if we are using busybox ls. We want each
         # entry on a single line and we don't want . or ..
-        if self.shell_bool("/system/bin/ls /", timeout=timeout):
+        if self.shell_bool("/system/bin/ls /data/local/tmp", timeout=timeout):
             self._ls = "/system/bin/ls"
-        elif self.shell_bool("/system/xbin/ls /", timeout=timeout):
+        elif self.shell_bool("/system/xbin/ls /data/local/tmp", timeout=timeout):
             self._ls = "/system/xbin/ls"
         else:
             raise ADBError("ADBDevice.__init__: ls not found")
         try:
-            self.shell_output("%s -1A /" % self._ls, timeout=timeout)
+            self.shell_output("%s -1A /data/local/tmp" % self._ls, timeout=timeout)
             self._ls += " -1A"
         except ADBError:
             self._ls += " -a"
 
+        self._logger.info("%s supported" % self._ls)
+
         # Do we have cp?
         self._have_cp = self.shell_bool("type cp", timeout=timeout)
+        self._logger.info("Native cp support: %s" % self._have_cp)
+
+        # Do we have chmod -R?
+        try:
+            self._chmod_R = False
+            re_recurse = re.compile(r'[-]R')
+            chmod_output = self.shell_output("chmod --help", timeout=timeout)
+            match = re_recurse.search(chmod_output)
+            if match:
+                self._chmod_R = True
+        except (ADBError, ADBTimeoutError) as e:
+            self._logger.debug('Check chmod -R: %s' % e)
+            match = re_recurse.search(e.message)
+            if match:
+                self._chmod_R = True
+        self._logger.info("Native chmod -R support: %s" % self._chmod_R)
+
+        try:
+            cleared = self.shell_bool('logcat -P ""', timeout=timeout)
+        except ADBError:
+            cleared = False
+        if not cleared:
+            self._logger.info("Unable to turn off logcat chatty")
 
         self._logger.debug("ADBDevice: %s" % self.__dict__)
 
@@ -656,15 +694,13 @@ class ADBDevice(ADBCommand):
 
         # Do we need to run adb root to get a root shell?
         try:
-            if (not self._have_root_shell and
-                self.command_output(
+            if (not self._have_root_shell and self.command_output(
                     ["root"],
                     timeout=timeout).find("cannot run as root") == -1):
                 self._have_root_shell = True
                 self._logger.info("adbd restarted as root")
         except ADBError:
             self._logger.debug("Check for root adbd failed")
-
 
     @staticmethod
     def _escape_command_line(cmd):
@@ -674,7 +710,7 @@ class ADBDevice(ADBCommand):
         quoted_cmd = []
 
         for arg in cmd:
-            arg.replace('&', '\&')
+            arg.replace('&', r'\&')
 
             needs_quoting = False
             for char in [' ', '(', ')', '"', '&']:
@@ -782,14 +818,15 @@ class ADBDevice(ADBCommand):
 
     def _try_test_root(self, test_root):
         base_path, sub_path = posixpath.split(test_root)
-        if not self.is_dir(base_path):
+        if not self.is_dir(base_path, root=True):
             return False
 
         try:
             dummy_dir = posixpath.join(test_root, 'dummy')
-            if self.is_dir(dummy_dir):
-                self.rm(dummy_dir, recursive=True)
-            self.mkdir(dummy_dir, parents=True)
+            if self.is_dir(dummy_dir, root=True):
+                self.rm(dummy_dir, recursive=True, root=True)
+            self.mkdir(dummy_dir, parents=True, root=True)
+            self.chmod(test_root, recursive=True, root=True)
         except ADBError:
             self._logger.debug("%s is not writable" % test_root)
             return False
@@ -815,7 +852,7 @@ class ADBDevice(ADBCommand):
         commands for a specific device on the host via adb.
 
         command() executes on the host in such a fashion that stdout
-        and stderr of the adb process are file handles on the host and
+        of the adb process are file handles on the host and
         the exit code is available as the exit code of the adb
         process.
 
@@ -824,12 +861,12 @@ class ADBDevice(ADBCommand):
         commands, as well as a timeout period in seconds.
 
         A subprocess is spawned to execute adb for the device with
-        stdout and stderr directed to temporary files. If the process
+        stdout and stderr directed to a temporary file. If the process
         takes longer than the specified timeout, the process is
         terminated.
 
         It is the caller's responsibilty to clean up by closing
-        the stdout and stderr temporary files.
+        the stdout temporary file.
         """
 
         return ADBCommand.command(self, cmds,
@@ -920,7 +957,7 @@ class ADBDevice(ADBCommand):
                  * ADBError
         """
         forwards = self.command_output(["forward", "--list"], timeout=timeout)
-        return [tuple(line.split(" ")) for line in forwards.split("\n") if line.strip()]
+        return [tuple(line.split(" ")) for line in forwards.splitlines() if line.strip()]
 
     def remove_forwards(self, local=None, timeout=None):
         """Remove existing port forwards.
@@ -948,7 +985,8 @@ class ADBDevice(ADBCommand):
 
     # Device Shell methods
 
-    def shell(self, cmd, env=None, cwd=None, timeout=None, root=False):
+    def shell(self, cmd, env=None, cwd=None, timeout=None, root=False,
+              stdout_callback=None):
         """Executes a shell command on the device.
 
         :param str cmd: The command to be executed.
@@ -965,6 +1003,7 @@ class ADBDevice(ADBCommand):
         :type timeout: integer or None
         :param bool root: Flag specifying if the command should
             be executed as root.
+        :param stdout_callback: Function called for each line of output.
         :returns: :class:`mozdevice.ADBProcess`
         :raises: ADBRootError
 
@@ -972,12 +1011,11 @@ class ADBDevice(ADBCommand):
         on the device via adb shell.
 
         shell() executes on the host in such as fashion that stdout
-        contains the stdout of the host abd process combined with the
-        combined stdout/stderr of the shell command on the device
-        while stderr is still the stderr of the adb process on the
-        host. The exit code of shell() is the exit code of
+        contains the stdout and stderr of the host abd process
+        combined with the stdout and stderr of the shell command
+        on the device. The exit code of shell() is the exit code of
         the adb command if it was non-zero or the extracted exit code
-        from the stdout/stderr of the shell command executed on the
+        from the output of the shell command executed on the
         device.
 
         The caller provides a flag indicating if the command is to be
@@ -995,14 +1033,41 @@ class ADBDevice(ADBCommand):
         exit code.
 
         A subprocess is spawned to execute adb shell for the device
-        with stdout and stderr directed to temporary files. If the
+        with stdout and stderr directed to a temporary file. If the
         process takes longer than the specified timeout, the process
         is terminated. The return code is extracted from the stdout
         and is then removed from the file.
 
         It is the caller's responsibilty to clean up by closing
-        the stdout and stderr temporary files.
+        the stdout temporary files.
+
         """
+        def _timed_read_line_handler(signum, frame):
+            raise IOError('ReadLineTimeout')
+
+        def _timed_read_line(filehandle, timeout=None):
+            """
+            Attempt to readline from filehandle. If readline does not return
+            within timeout seconds, raise IOError('ReadLineTimeout').
+            On Windows, required signal facilities are usually not available;
+            as a result, the timeout is not respected and some reads may
+            block on Windows.
+            """
+            if not hasattr(signal, 'SIGALRM'):
+                return filehandle.readline()
+            if timeout is None:
+                timeout = 5
+            line = ''
+            default_alarm_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _timed_read_line_handler)
+            signal.alarm(int(timeout))
+            try:
+                line = filehandle.readline()
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, default_alarm_handler)
+            return line
+
         if root and not self._have_root_shell:
             # If root was requested and we do not already have a root
             # shell, then use the appropriate version of su to invoke
@@ -1039,10 +1104,24 @@ class ADBDevice(ADBCommand):
 
         start_time = time.time()
         exitcode = adb_process.proc.poll()
-        while ((time.time() - start_time) <= timeout) and exitcode == None:
-            time.sleep(self._polling_interval)
-            exitcode = adb_process.proc.poll()
-        if exitcode == None:
+        if not stdout_callback:
+            while ((time.time() - start_time) <= float(timeout)) and exitcode is None:
+                time.sleep(self._polling_interval)
+                exitcode = adb_process.proc.poll()
+        else:
+            stdout2 = open(adb_process.stdout_file.name, 'rb')
+            while ((time.time() - start_time) <= float(timeout)) and exitcode is None:
+                try:
+                    line = _timed_read_line(stdout2)
+                    if line and len(line) > 0:
+                        stdout_callback(line.rstrip())
+                    else:
+                        # no new output, so sleep and poll
+                        time.sleep(self._polling_interval)
+                except IOError:
+                    pass
+                exitcode = adb_process.proc.poll()
+        if exitcode is None:
             adb_process.proc.kill()
             adb_process.timedout = True
             adb_process.exitcode = adb_process.proc.poll()
@@ -1051,8 +1130,14 @@ class ADBDevice(ADBCommand):
         else:
             adb_process.exitcode = exitcode
 
+        if stdout_callback:
+            line = stdout2.readline()
+            while line:
+                stdout_callback(line.rstrip())
+                line = stdout2.readline()
+            stdout2.close()
+
         adb_process.stdout_file.seek(0, os.SEEK_SET)
-        adb_process.stderr_file.seek(0, os.SEEK_SET)
 
         return adb_process
 
@@ -1090,7 +1175,6 @@ class ADBDevice(ADBCommand):
         finally:
             if adb_process:
                 adb_process.stdout_file.close()
-                adb_process.stderr_file.close()
 
     def shell_output(self, cmd, env=None, cwd=None, timeout=None, root=False):
         """Executes an adb shell on the device returning stdout.
@@ -1121,7 +1205,7 @@ class ADBDevice(ADBCommand):
             if adb_process.timedout:
                 raise ADBTimeoutError("%s" % adb_process)
             elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
+                raise ADBProcessError(adb_process)
             output = adb_process.stdout_file.read().rstrip()
             if self._verbose:
                 self._logger.debug('shell_output: %s, '
@@ -1130,18 +1214,17 @@ class ADBDevice(ADBCommand):
                                    'timedout: %s, '
                                    'exitcode: %s, '
                                    'output: %s' %
-                                (' '.join(adb_process.args),
-                                 timeout,
+                                   (' '.join(adb_process.args),
+                                    timeout,
                                     root,
-                                 adb_process.timedout,
-                                 adb_process.exitcode,
-                                 output))
+                                    adb_process.timedout,
+                                    adb_process.exitcode,
+                                    output))
 
             return output
         finally:
             if adb_process and isinstance(adb_process.stdout_file, file):
                 adb_process.stdout_file.close()
-                adb_process.stderr_file.close()
 
     # Informational methods
 
@@ -1210,7 +1293,7 @@ class ADBDevice(ADBCommand):
         """
         buffers = self._get_logcat_buffer_args(buffers)
         cmds = ["logcat", "-v", format, "-d"] + buffers + filter_specs
-        lines = self.command_output(cmds, timeout=timeout).split('\r')
+        lines = self.command_output(cmds, timeout=timeout).splitlines()
 
         for regex in filter_out_regexps:
             lines = [line for line in lines if not re.search(regex, line)]
@@ -1270,20 +1353,104 @@ class ADBDevice(ADBCommand):
         :raises: * ADBTimeoutError
                  * ADBError
         """
-        ip_regexp = re.compile(r'(\w+)\s+UP\s+([1-9]\d{0,2}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
-        data = self.shell_output('netcfg')
-        for line in data.split("\n"):
-            match = ip_regexp.search(line)
+        if not interfaces:
+            interfaces = ["wlan0", "eth0"]
+            wifi_interface = self.shell_output('getprop wifi.interface', timeout=timeout)
+            self._logger.debug('get_ip_address: wifi_interface: %s' % wifi_interface)
+            if wifi_interface and wifi_interface not in interfaces:
+                interfaces = interfaces.append(wifi_interface)
+
+        # ifconfig interface
+        # can return two different formats:
+        # eth0: ip 192.168.1.139 mask 255.255.255.0 flags [up broadcast running multicast]
+        # or
+        # wlan0     Link encap:Ethernet  HWaddr 00:9A:CD:B8:39:65
+        # inet addr:192.168.1.38  Bcast:192.168.1.255  Mask:255.255.255.0
+        # inet6 addr: fe80::29a:cdff:feb8:3965/64 Scope: Link
+        # UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+        # RX packets:180 errors:0 dropped:0 overruns:0 frame:0
+        # TX packets:218 errors:0 dropped:0 overruns:0 carrier:0
+        # collisions:0 txqueuelen:1000
+        # RX bytes:84577 TX bytes:31202
+
+        re1_ip = re.compile(r'(\w+): ip ([0-9.]+) mask.*')
+        # re1_ip will match output of the first format
+        # with group 1 returning the interface and group 2 returing the ip address.
+
+        # re2_interface will match the interface line in the second format
+        # while re2_ip will match the inet addr line of the second format.
+        re2_interface = re.compile(r'(\w+)\s+Link')
+        re2_ip = re.compile(r'\s+inet addr:([0-9.]+)')
+
+        matched_interface = None
+        matched_ip = None
+        re_bad_addr = re.compile(r'127.0.0.1|0.0.0.0')
+
+        self._logger.debug('get_ip_address: ifconfig')
+        for interface in interfaces:
+            try:
+                output = self.shell_output('ifconfig %s' % interface,
+                                           timeout=timeout)
+            except ADBError:
+                output = ''
+
+            for line in output.splitlines():
+                if not matched_interface:
+                    match = re1_ip.match(line)
+                    if match:
+                        matched_interface, matched_ip = match.groups()
+                    else:
+                        match = re2_interface.match(line)
+                        if match:
+                            matched_interface = match.group(1)
+                else:
+                    match = re2_ip.match(line)
+                    if match:
+                        matched_ip = match.group(1)
+
+                if matched_ip:
+                    if not re_bad_addr.match(matched_ip):
+                        self._logger.debug('get_ip_address: found: %s %s' %
+                                           (matched_interface, matched_ip))
+                        return matched_ip
+                    matched_interface = None
+                    matched_ip = None
+
+        self._logger.debug('get_ip_address: netcfg')
+        # Fall back on netcfg if ifconfig does not work.
+        # $ adb shell netcfg
+        # lo       UP   127.0.0.1/8       0x00000049 00:00:00:00:00:00
+        # dummy0   DOWN   0.0.0.0/0       0x00000082 8e:cd:67:48:b7:c2
+        # rmnet0   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet1   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet2   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet3   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet4   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet5   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet6   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # rmnet7   DOWN   0.0.0.0/0       0x00000000 00:00:00:00:00:00
+        # sit0     DOWN   0.0.0.0/0       0x00000080 00:00:00:00:00:00
+        # vip0     DOWN   0.0.0.0/0       0x00001012 00:01:00:00:00:01
+        # wlan0    UP   192.168.1.157/24  0x00001043 38:aa:3c:1c:f6:94
+
+        re3_netcfg = re.compile(r'(\w+)\s+UP\s+([1-9]\d{0,2}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
+        try:
+            output = self.shell_output('netcfg', timeout=timeout)
+        except ADBError:
+            output = ''
+        for line in output.splitlines():
+            match = re3_netcfg.search(line)
             if match:
-                interface, ip = match.groups()
-
-                if interface == "lo" or ip == "127.0.0.1":
-                    continue
-
-                if interfaces is None or interface in interfaces:
-                    return ip
-
-        return None
+                matched_interface, matched_ip = match.groups()
+                if matched_interface == "lo" or re_bad_addr.match(matched_ip):
+                    matched_interface = None
+                    matched_ip = None
+                elif matched_ip and matched_interface in interfaces:
+                    self._logger.debug('get_ip_address: found: %s %s' %
+                                       (matched_interface, matched_ip))
+                    return matched_ip
+        self._logger.debug('get_ip_address: not found')
+        return matched_ip
 
     # File management methods
 
@@ -1325,34 +1492,56 @@ class ADBDevice(ADBCommand):
                  * ADBRootError
                  * ADBError
         """
+        # Note that on some tests such as webappstartup, an error
+        # occurs during recursive calls to chmod where a "No such file
+        # or directory" error will occur for the
+        # /data/data/org.mozilla.fennec/files/mozilla/*.webapp0/lock
+        # which is a symbolic link to a socket: lock ->
+        # 127.0.0.1:+<port>.  On Linux, chmod -R ignores symbolic
+        # links but it appear Android's version does not. We ignore
+        # this type of error, but pass on any other errors that are
+        # detected.
         path = posixpath.normpath(path.strip())
         self._logger.debug('chmod: path=%s, recursive=%s, mask=%s, root=%s' %
                            (path, recursive, mask, root))
-        self.shell_output("chmod %s %s" % (mask, path),
-                          timeout=timeout, root=root)
-        if recursive and self.is_dir(path, timeout=timeout, root=root):
-            files = self.list_files(path, timeout=timeout, root=root)
-            for f in files:
-                entry = path + "/" + f
-                self._logger.debug('chmod: entry=%s' % entry)
-                if self.is_dir(entry, timeout=timeout, root=root):
-                    self._logger.debug('chmod: recursion entry=%s' % entry)
-                    self.chmod(entry, recursive=recursive, mask=mask,
-                               timeout=timeout, root=root)
-                elif self.is_file(entry, timeout=timeout, root=root):
-                    try:
-                        self.shell_output("chmod %s %s" % (mask, entry),
-                                          timeout=timeout, root=root)
-                        self._logger.debug('chmod: file entry=%s' % entry)
-                    except ADBError as e:
-                        if e.message.find('No such file or directory'):
-                            # some kind of race condition is causing files
-                            # to disappear. Catch and report the error here.
-                            self._logger.warning('chmod: File %s vanished!: %s' %
-                                                 (entry, e))
-                else:
-                    self._logger.warning('chmod: entry %s does not exist' %
-                                         entry)
+        if not recursive:
+            self.shell_output("chmod %s %s" % (mask, path),
+                              timeout=timeout, root=root)
+            return
+
+        if self._chmod_R:
+            try:
+                self.shell_output("chmod -R %s %s" % (mask, path),
+                                  timeout=timeout, root=root)
+            except ADBError as e:
+                if e.message.find('No such file or directory') == -1:
+                    raise
+                self._logger.warning('chmod -R %s %s: Ignoring Error: %s' %
+                                     (mask, path, e.message))
+            return
+        # Obtain a list of the directories and files which match path
+        # and construct a shell script which explictly calls chmod on
+        # each of them.
+        entries = self.ls(path, recursive=recursive, timeout=timeout,
+                          root=root)
+        tmpf = None
+        chmodsh = None
+        try:
+            tmpf = tempfile.NamedTemporaryFile(delete=False)
+            for entry in entries:
+                tmpf.write('chmod %s %s\n' % (mask, entry))
+            tmpf.close()
+            chmodsh = '/data/local/tmp/%s' % os.path.basename(tmpf.name)
+            self.push(tmpf.name, chmodsh)
+            self.shell_output('chmod 777 %s' % chmodsh, timeout=timeout,
+                              root=root)
+            self.shell_output('sh -c %s' % chmodsh, timeout=timeout,
+                              root=root)
+        finally:
+            if tmpf:
+                os.unlink(tmpf.name)
+            if chmodsh:
+                self.rm(chmodsh, timeout=timeout, root=root)
 
     def exists(self, path, timeout=None, root=False):
         """Returns True if the path exists on the device.
@@ -1442,15 +1631,98 @@ class ADBDevice(ADBCommand):
             try:
                 data = self.shell_output("%s %s" % (self._ls, path),
                                          timeout=timeout,
-                                         root=root).split('\r\n')
+                                         root=root).splitlines()
                 self._logger.debug('list_files: data: %s' % data)
             except ADBError:
                 self._logger.error('Ignoring exception in ADBDevice.list_files\n%s' %
                                    traceback.format_exc())
-                pass
         data[:] = [item for item in data if item]
         self._logger.debug('list_files: %s' % data)
         return data
+
+    def ls(self, path, recursive=False, timeout=None, root=False):
+        """Return a list of matching files/directories on the device.
+
+        The ls method emulates the behavior of the ls shell command.
+        It differs from the list_files method by supporting wild cards
+        and returning matches even if the path is not a directory and
+        by allowing a recursive listing.
+
+        ls /sdcard always returns /sdcard and not the contents of the
+        sdcard path. The ls method makes the behavior consistent with
+        others paths by adjusting /sdcard to /sdcard/. Note this is
+        also the case of other sdcard related paths such as
+        /storage/emulated/legacy but no adjustment is made in those
+        cases.
+
+        The ls method works around a Nexus 4 bug which prevents
+        recursive listing of directories on the sdcard unless the path
+        ends with "/*" by adjusting sdcard paths ending in "/" to end
+        with "/*". This adjustment is only made on official Nexus 4
+        builds with property ro.product.model "Nexus 4". Note that
+        this will fail to return any "hidden" files or directories
+        which begin with ".".
+
+        :param str path: The directory name on the device.
+        :param bool recursive: Flag specifying if a recursive listing
+            is to be returned. If recursive is False, the returned
+            matches will be relative to the path. If recursive is True,
+            the returned matches will be absolute paths.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADBDevice constructor is used.
+        :type timeout: integer or None
+        :param bool root: Flag specifying if the command should
+            be executed as root.
+        :returns: list of files/directories contained in the directory.
+        :raises: * ADBTimeoutError
+                 * ADBRootError
+        """
+        path = posixpath.normpath(path.strip())
+        parent = ''
+        entries = {}
+
+        if path == '/sdcard':
+            path += '/'
+
+        # Android 2.3 and later all appear to support ls -R however
+        # Nexus 4 does not perform a recursive search on the sdcard
+        # unless the path is a directory with * wild card.
+        if not recursive:
+            recursive_flag = ''
+        else:
+            recursive_flag = '-R'
+            if path.startswith('/sdcard') and path.endswith('/'):
+                model = self.shell_output('getprop ro.product.model',
+                                          timeout=timeout,
+                                          root=root)
+                if model == 'Nexus 4':
+                    path += '*'
+        lines = self.shell_output('%s %s %s' % (self._ls, recursive_flag, path),
+                                  timeout=timeout,
+                                  root=root).splitlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                parent = ''
+                continue
+            if line.endswith(':'):  # This is a directory
+                parent = line.replace(':', '/')
+                entry = parent
+                # Remove earlier entry which is marked as a file.
+                if parent[:-1] in entries:
+                    del entries[parent[:-1]]
+            elif parent:
+                entry = "%s%s" % (parent, line)
+            else:
+                entry = line
+            entries[entry] = 1
+        entry_list = entries.keys()
+        entry_list.sort()
+        return entry_list
 
     def mkdir(self, path, parents=False, timeout=None, root=False):
         """Create a directory on the device.
@@ -1521,8 +1793,33 @@ class ADBDevice(ADBCommand):
         :raises: * ADBTimeoutError
                  * ADBError
         """
-        self.command_output(["push", os.path.realpath(local), remote],
-                            timeout=timeout)
+        # remove trailing /
+        local = os.path.normpath(local)
+        remote = posixpath.normpath(remote)
+        copy_required = False
+        if os.path.isdir(local):
+            copy_required = True
+            temp_parent = tempfile.mkdtemp()
+            remote_name = os.path.basename(remote)
+            new_local = os.path.join(temp_parent, remote_name)
+            dir_util.copy_tree(local, new_local)
+            local = new_local
+            # See do_sync_push in
+            # https://android.googlesource.com/platform/system/core/+/master/adb/file_sync_client.cpp
+            # Work around change in behavior in adb 1.0.36 where if
+            # the remote destination directory exists, adb push will
+            # copy the source directory *into* the destination
+            # directory otherwise it will copy the source directory
+            # *onto* the destination directory.
+            if self._adb_version >= '1.0.36':
+                remote = '/'.join(remote.rstrip('/').split('/')[:-1])
+        try:
+            self.command_output(["push", local, remote], timeout=timeout)
+        except BaseException:
+            raise
+        finally:
+            if copy_required:
+                shutil.rmtree(temp_parent)
 
     def pull(self, remote, local, timeout=None):
         """Pulls a file or directory from the device.
@@ -1541,8 +1838,72 @@ class ADBDevice(ADBCommand):
         :raises: * ADBTimeoutError
                  * ADBError
         """
-        self.command_output(["pull", remote, os.path.realpath(local)],
-                            timeout=timeout)
+        # remove trailing /
+        local = os.path.normpath(local)
+        remote = posixpath.normpath(remote)
+        copy_required = False
+        original_local = local
+        if self._adb_version >= '1.0.36' and \
+           os.path.isdir(local) and self.is_dir(remote):
+            # See do_sync_pull in
+            # https://android.googlesource.com/platform/system/core/+/master/adb/file_sync_client.cpp
+            # Work around change in behavior in adb 1.0.36 where if
+            # the local destination directory exists, adb pull will
+            # copy the source directory *into* the destination
+            # directory otherwise it will copy the source directory
+            # *onto* the destination directory.
+            #
+            # If the destination directory does exist, pull to its
+            # parent directory. If the source and destination leaf
+            # directory names are different, pull the source directory
+            # into a temporary directory and then copy the temporary
+            # directory onto the destination.
+            local_name = os.path.basename(local)
+            remote_name = os.path.basename(remote)
+            if local_name != remote_name:
+                copy_required = True
+                temp_parent = tempfile.mkdtemp()
+                local = os.path.join(temp_parent, remote_name)
+            else:
+                local = '/'.join(local.rstrip('/').split('/')[:-1])
+        try:
+            self.command_output(["pull", remote, local], timeout=timeout)
+        except BaseException:
+            raise
+        finally:
+            if copy_required:
+                dir_util.copy_tree(local, original_local)
+                shutil.rmtree(temp_parent)
+
+    def get_file(self, remote, offset=None, length=None, timeout=None):
+        """Pull file from device and return the file's content
+
+        :param str remote: The path of the remote file.
+        :param offset: If specified, return only content beyond this offset.
+        :param length: If specified, limit content length accordingly.
+        :param timeout: The maximum time in
+            seconds for any spawned adb process to complete before
+            throwing an ADBTimeoutError.
+            This timeout is per adb call. The total time spent
+            may exceed this value. If it is not specified, the value
+            set in the ADBDevice constructor is used.
+        :type timeout: integer or None
+        :raises: * ADBTimeoutError
+                 * ADBError
+        """
+        with tempfile.NamedTemporaryFile() as tf:
+            self.pull(remote, tf.name, timeout=timeout)
+            with open(tf.name) as tf2:
+                # ADB pull does not support offset and length, but we can
+                # instead read only the requested portion of the local file
+                if offset is not None and length is not None:
+                    tf2.seek(offset)
+                    return tf2.read(length)
+                elif offset is not None:
+                    tf2.seek(offset)
+                    return tf2.read()
+                else:
+                    return tf2.read()
 
     def rm(self, path, recursive=False, force=False, timeout=None, root=False):
         """Delete files or directories on the device.
@@ -1617,27 +1978,31 @@ class ADBDevice(ADBCommand):
                  * ADBError
         """
         adb_process = None
+        max_attempts = 2
         try:
-            adb_process = self.shell("ps", timeout=timeout)
-            if adb_process.timedout:
-                raise ADBTimeoutError("%s" % adb_process)
-            elif adb_process.exitcode:
-                raise ADBError("%s" % adb_process)
-            # first line is the headers
-            header = adb_process.stdout_file.readline()
-            pid_i = -1
-            user_i = -1
-            els = header.split()
-            for i in range(len(els)):
-                item = els[i].lower()
-                if item == 'user':
-                    user_i = i
-                elif item == 'pid':
-                    pid_i = i
-            if user_i == -1 or pid_i == -1:
+            for attempt in range(1, max_attempts + 1):
+                adb_process = self.shell("ps", timeout=timeout)
+                if adb_process.timedout:
+                    raise ADBTimeoutError("%s" % adb_process)
+                elif adb_process.exitcode:
+                    raise ADBProcessError(adb_process)
+                # first line is the headers
+                header = adb_process.stdout_file.readline()
+                pid_i = -1
+                user_i = -1
+                els = header.split()
+                for i in range(len(els)):
+                    item = els[i].lower()
+                    if item == 'user':
+                        user_i = i
+                    elif item == 'pid':
+                        pid_i = i
+                if user_i != -1 and pid_i != -1:
+                    break
                 self._logger.error('get_process_list: %s' % header)
-                raise ADBError('get_process_list: Unknown format: %s: %s' % (
-                    header, adb_process))
+                if attempt >= max_attempts:
+                    raise ADBError('get_process_list: Unknown format: %s: %s' % (
+                        header, adb_process))
             ret = []
             line = adb_process.stdout_file.readline()
             while line:
@@ -1655,9 +2020,8 @@ class ADBDevice(ADBCommand):
         finally:
             if adb_process and isinstance(adb_process.stdout_file, file):
                 adb_process.stdout_file.close()
-                adb_process.stderr_file.close()
 
-    def kill(self, pids, sig=None,  attempts=3, wait=5,
+    def kill(self, pids, sig=None, attempts=3, wait=5,
              timeout=None, root=False):
         """Kills processes on the device given a list of process ids.
 
@@ -1698,7 +2062,7 @@ class ADBDevice(ADBCommand):
             if not pid_list:
                 break
             self._logger.debug("Attempt %d of %d to kill processes %s failed" %
-                               (attempt+1, attempts, pid_list))
+                               (attempt + 1, attempts, pid_list))
             time.sleep(wait)
 
         if pid_list:
@@ -1970,7 +2334,7 @@ class ADBDevice(ADBCommand):
         directives = ['battery', 'disk', 'id', 'os', 'process', 'systime',
                       'uptime']
 
-        if (directive in directives):
+        if directive in directives:
             directives = [directive]
 
         info = {}
@@ -1992,7 +2356,7 @@ class ADBDevice(ADBCommand):
         if 'uptime' in directives:
             uptime = self.shell_output('uptime', timeout=timeout)
             if uptime:
-                m = re.match('up time: ((\d+) days, )*(\d{2}):(\d{2}):(\d{2})',
+                m = re.match(r'up time: ((\d+) days, )*(\d{2}):(\d{2}):(\d{2})',
                              uptime)
                 if m:
                     uptime = '%d days %d hours %d minutes %d seconds' % tuple(

@@ -1,33 +1,35 @@
-add_task(function* test_enabled() {
+add_task(async function test_enabled() {
   // Test for bug 471903 to make sure searching in autocomplete can be turned on
   // and off. Also test bug 463535 for pref changing search.
-  let uri = NetUtil.newURI("http://url/0");
-  yield PlacesTestUtils.addVisits([ { uri: uri, title: "title" } ]);
+  Services.prefs.setBoolPref("browser.urlbar.autoFill", false);
 
-  do_print("plain search");
-  yield check_autocomplete({
+  let uri = NetUtil.newURI("http://url/0");
+  await PlacesTestUtils.addVisits([ { uri, title: "title" } ]);
+
+  info("plain search");
+  await check_autocomplete({
     search: "url",
-    matches: [ { uri: uri, title: "title" } ]
+    matches: [ { uri, title: "title" } ]
   });
 
-  do_print("search disabled");
+  info("search disabled");
   Services.prefs.setBoolPref("browser.urlbar.autocomplete.enabled", false);
-  yield check_autocomplete({
+  await check_autocomplete({
     search: "url",
     matches: [ ]
   });
 
-  do_print("resume normal search");
+  info("resume normal search");
   Services.prefs.setBoolPref("browser.urlbar.autocomplete.enabled", true);
-  yield check_autocomplete({
+  await check_autocomplete({
     search: "url",
-    matches: [ { uri: uri, title: "title" } ]
+    matches: [ { uri, title: "title" } ]
   });
 
-  yield cleanup();
+  await cleanup();
 });
 
-add_task(function* test_sync_enabled() {
+add_task(async function test_linked_enabled_prefs() {
   // Initialize unified complete.
   Cc["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
     .getService(Ci.mozIPlacesAutoComplete);

@@ -11,13 +11,13 @@
 #include "webrtc/modules/desktop_capture/win/cursor.h"
 
 #include <algorithm>
+#include <memory>
 
-#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/desktop_capture/win/scoped_gdi_object.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor.h"
-#include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/include/logging.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -42,15 +42,12 @@ namespace {
 
 #endif  // !defined(WEBRTC_ARCH_LITTLE_ENDIAN)
 
-const int kBytesPerPixel = DesktopFrame::kBytesPerPixel;
-
 // Pixel colors used when generating cursor outlines.
 const uint32_t kPixelRgbaBlack = RGBA(0, 0, 0, 0xff);
 const uint32_t kPixelRgbaWhite = RGBA(0xff, 0xff, 0xff, 0xff);
 const uint32_t kPixelRgbaTransparent = RGBA(0, 0, 0, 0);
 
 const uint32_t kPixelRgbWhite = RGB(0xff, 0xff, 0xff);
-const uint32_t kPixelRgbBlack = RGB(0, 0, 0);
 
 // Expands the cursor shape to add a white outline for visibility against
 // dark backgrounds.
@@ -77,7 +74,7 @@ void AddCursorOutline(int width, int height, uint32_t* data) {
 // Premultiplies RGB components of the pixel data in the given image by
 // the corresponding alpha components.
 void AlphaMul(uint32_t* data, int width, int height) {
-  static_assert(sizeof(uint32_t) == kBytesPerPixel,
+  static_assert(sizeof(uint32_t) == DesktopFrame::kBytesPerPixel,
                 "size of uint32 should be the number of bytes per pixel");
 
   for (uint32_t* data_end = data + width * height; data != data_end; ++data) {
@@ -136,7 +133,7 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
 
   int width = bitmap_info.bmWidth;
   int height = bitmap_info.bmHeight;
-  rtc::scoped_ptr<uint32_t[]> mask_data(new uint32_t[width * height]);
+  std::unique_ptr<uint32_t[]> mask_data(new uint32_t[width * height]);
 
   // Get pixel data from |scoped_mask| converting it to 32bpp along the way.
   // GetDIBits() sets the alpha component of every pixel to 0.
@@ -145,7 +142,7 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
   bmi.bV5Width = width;
   bmi.bV5Height = -height;  // request a top-down bitmap.
   bmi.bV5Planes = 1;
-  bmi.bV5BitCount = kBytesPerPixel * 8;
+  bmi.bV5BitCount = DesktopFrame::kBytesPerPixel * 8;
   bmi.bV5Compression = BI_RGB;
   bmi.bV5AlphaMask = 0xff000000;
   bmi.bV5CSType = LCS_WINDOWS_COLOR_SPACE;
@@ -163,7 +160,7 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
   }
 
   uint32_t* mask_plane = mask_data.get();
-  rtc::scoped_ptr<DesktopFrame> image(
+  std::unique_ptr<DesktopFrame> image(
       new BasicDesktopFrame(DesktopSize(width, height)));
   bool has_alpha = false;
 

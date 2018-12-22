@@ -70,6 +70,18 @@ SipccSdpAttributeList::Clear()
   }
 }
 
+uint32_t
+SipccSdpAttributeList::Count() const
+{
+  uint32_t count = 0;
+  for (size_t i = 0; i < kNumAttributeTypes; ++i) {
+    if (mAttributes[i]) {
+      count++;
+    }
+  }
+  return count;
+}
+
 void
 SipccSdpAttributeList::SetAttribute(SdpAttribute* attr)
 {
@@ -106,8 +118,6 @@ SipccSdpAttributeList::LoadSimpleStrings(sdp_t* sdp, uint16_t level,
                    errorHolder);
   LoadSimpleString(sdp, level, SDP_ATTR_LABEL, SdpAttribute::kLabelAttribute,
                    errorHolder);
-  LoadSimpleString(sdp, level, SDP_ATTR_IDENTITY,
-                   SdpAttribute::kIdentityAttribute, errorHolder);
 }
 
 void
@@ -135,6 +145,10 @@ SipccSdpAttributeList::LoadSimpleNumbers(sdp_t* sdp, uint16_t level,
                    errorHolder);
   LoadSimpleNumber(sdp, level, SDP_ATTR_MAXPTIME,
                    SdpAttribute::kMaxptimeAttribute, errorHolder);
+  LoadSimpleNumber(sdp, level, SDP_ATTR_SCTPPORT,
+                   SdpAttribute::kSctpPortAttribute, errorHolder);
+  LoadSimpleNumber(sdp, level, SDP_ATTR_MAXMESSAGESIZE,
+                   SdpAttribute::kMaxMessageSizeAttribute, errorHolder);
 }
 
 void
@@ -269,7 +283,7 @@ SipccSdpAttributeList::LoadFingerprint(sdp_t* sdp, uint16_t level,
 
     std::vector<uint8_t> fingerprint =
         SdpFingerprintAttributeList::ParseFingerprint(fingerprintToken);
-    if (fingerprint.size() == 0) {
+    if (fingerprint.empty()) {
       errorHolder.AddParseError(lineNumber, "Malformed fingerprint token");
       return false;
     }
@@ -361,6 +375,12 @@ SipccSdpAttributeList::GetCodecType(rtp_ptype type)
       return SdpRtpmapAttributeList::kVP8;
     case RTP_VP9:
       return SdpRtpmapAttributeList::kVP9;
+    case RTP_RED:
+      return SdpRtpmapAttributeList::kRed;
+    case RTP_ULPFEC:
+      return SdpRtpmapAttributeList::kUlpfec;
+    case RTP_TELEPHONE_EVENT:
+      return SdpRtpmapAttributeList::kTelephoneEvent;
     case RTP_NONE:
     // Happens when sipcc doesn't know how to translate to the enum
     case RTP_CELP:
@@ -375,7 +395,6 @@ SipccSdpAttributeList::GetCodecType(rtp_ptype type)
     case RTP_JPEG:
     case RTP_NV:
     case RTP_H261:
-    case RTP_AVT:
     case RTP_L16:
     case RTP_H263:
     case RTP_ILBC:
@@ -648,6 +667,29 @@ SipccSdpAttributeList::LoadMsidSemantics(sdp_t* sdp, uint16_t level,
 }
 
 void
+SipccSdpAttributeList::LoadIdentity(sdp_t* sdp, uint16_t level)
+{
+  const char* val = sdp_attr_get_long_string(sdp, SDP_ATTR_IDENTITY, level, 0, 1);
+  if (val) {
+    SetAttribute(new SdpStringAttribute(SdpAttribute::kIdentityAttribute,
+                                        std::string(val)));
+  }
+}
+
+void
+SipccSdpAttributeList::LoadDtlsMessage(sdp_t* sdp, uint16_t level)
+{
+  const char* val = sdp_attr_get_long_string(sdp, SDP_ATTR_DTLS_MESSAGE, level,
+                                             0, 1);
+  if (val) {
+    // sipcc does not expose parse code for this, so we use a SDParta-provided
+    // parser
+    std::string strval(val);
+    SetAttribute(new SdpDtlsMessageAttribute(strval));
+  }
+}
+
+void
 SipccSdpAttributeList::LoadFmtp(sdp_t* sdp, uint16_t level)
 {
   auto fmtps = MakeUnique<SdpFmtpAttributeList>();
@@ -713,18 +755,38 @@ SipccSdpAttributeList::LoadFmtp(sdp_t* sdp, uint16_t level)
 
         parameters.reset(vp8Parameters);
       } break;
+      case RTP_RED: {
+        SdpFmtpAttributeList::RedParameters* redParameters(
+            new SdpFmtpAttributeList::RedParameters);
+        for (int i = 0;
+             i < SDP_FMTP_MAX_REDUNDANT_ENCODINGS && fmtp->redundant_encodings[i];
+             ++i) {
+          redParameters->encodings.push_back(fmtp->redundant_encodings[i]);
+        }
+
+        parameters.reset(redParameters);
+      } break;
       case RTP_OPUS: {
         SdpFmtpAttributeList::OpusParameters* opusParameters(
             new SdpFmtpAttributeList::OpusParameters);
         opusParameters->maxplaybackrate = fmtp->maxplaybackrate;
         opusParameters->stereo = fmtp->stereo;
+        opusParameters->useInBandFec = fmtp->useinbandfec;
         parameters.reset(opusParameters);
+      } break;
+      case RTP_TELEPHONE_EVENT: {
+        SdpFmtpAttributeList::TelephoneEventParameters* teParameters(
+          new SdpFmtpAttributeList::TelephoneEventParameters);
+        if (strlen(fmtp->dtmf_tones) > 0) {
+          teParameters->dtmfTones = fmtp->dtmf_tones;
+        }
+        parameters.reset(teParameters);
       } break;
       default: {
       }
     }
 
-    fmtps->PushEntry(osPayloadType.str(), Move(parameters));
+    fmtps->PushEntry(osPayloadType.str(), std::move(parameters));
   }
 
   if (!fmtps->mFmtps.empty()) {
@@ -923,6 +985,9 @@ SipccSdpAttributeList::LoadRtcpFb(sdp_t* sdp, uint16_t level,
         os << rtcpfb->param.trr_int;
         parameter = os.str();
       } break;
+      case SDP_RTCP_FB_REMB: {
+        type = SdpRtcpFbAttributeList::kRemb;
+      } break;
       default:
         // Type we don't care about, ignore.
         continue;
@@ -996,12 +1061,13 @@ SipccSdpAttributeList::Load(sdp_t* sdp, uint16_t level,
     if (!LoadMsidSemantics(sdp, level, errorHolder)) {
       return false;
     }
+
+    LoadIdentity(sdp, level);
+    LoadDtlsMessage(sdp, level);
   } else {
     sdp_media_e mtype = sdp_get_media_type(sdp, level);
     if (mtype == SDP_MEDIA_APPLICATION) {
-      if (!LoadSctpmap(sdp, level, errorHolder)) {
-        return false;
-      }
+      LoadSctpmap(sdp, level, errorHolder);
     } else {
       if (!LoadRtpmap(sdp, level, errorHolder)) {
         return false;
@@ -1090,6 +1156,16 @@ SipccSdpAttributeList::GetDirection() const
 
   const SdpAttribute* attr = GetAttribute(SdpAttribute::kDirectionAttribute);
   return static_cast<const SdpDirectionAttribute*>(attr)->mValue;
+}
+
+const SdpDtlsMessageAttribute&
+SipccSdpAttributeList::GetDtlsMessage() const
+{
+  if (!HasAttribute(SdpAttribute::kDtlsMessageAttribute)) {
+    MOZ_CRASH();
+  }
+  const SdpAttribute* attr = GetAttribute(SdpAttribute::kDtlsMessageAttribute);
+  return *static_cast<const SdpDtlsMessageAttribute*>(attr);
 }
 
 const SdpExtmapAttributeList&
@@ -1310,6 +1386,28 @@ SipccSdpAttributeList::GetSctpmap() const
   }
   const SdpAttribute* attr = GetAttribute(SdpAttribute::kSctpmapAttribute);
   return *static_cast<const SdpSctpmapAttributeList*>(attr);
+}
+
+uint32_t
+SipccSdpAttributeList::GetSctpPort() const
+{
+  if (!HasAttribute(SdpAttribute::kSctpPortAttribute)) {
+    MOZ_CRASH();
+  }
+
+  const SdpAttribute* attr = GetAttribute(SdpAttribute::kSctpPortAttribute);
+  return static_cast<const SdpNumberAttribute*>(attr)->mValue;
+}
+
+uint32_t
+SipccSdpAttributeList::GetMaxMessageSize() const
+{
+  if (!HasAttribute(SdpAttribute::kMaxMessageSizeAttribute)) {
+    MOZ_CRASH();
+  }
+
+  const SdpAttribute* attr = GetAttribute(SdpAttribute::kMaxMessageSizeAttribute);
+  return static_cast<const SdpNumberAttribute*>(attr)->mValue;
 }
 
 const SdpSetupAttribute&

@@ -16,14 +16,12 @@
 interface WorkerGlobalScope : EventTarget {
   [Constant, Cached]
   readonly attribute WorkerGlobalScope self;
-
-  [Throws, Replaceable]
-  readonly attribute Console console;
-
   readonly attribute WorkerLocation location;
+  readonly attribute WorkerNavigator navigator;
 
   [Throws]
-  void close();
+  void importScripts(DOMString... urls);
+
   attribute OnErrorEventHandler onerror;
 
   attribute EventHandler onoffline;
@@ -31,35 +29,21 @@ interface WorkerGlobalScope : EventTarget {
   // also has additional members in a partial interface
 };
 
-partial interface WorkerGlobalScope {
-  [Throws]
-  void importScripts(DOMString... urls);
-
-  readonly attribute WorkerNavigator navigator;
-};
-
-// https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#self-caches
-partial interface WorkerGlobalScope {
-[Throws, Func="mozilla::dom::cache::CacheStorage::PrefEnabled", SameObject]
-readonly attribute CacheStorage caches;
-};
-
-WorkerGlobalScope implements WindowTimers;
-WorkerGlobalScope implements WindowBase64;
-WorkerGlobalScope implements GlobalFetch;
-WorkerGlobalScope implements IDBEnvironment;
-WorkerGlobalScope implements ImageBitmapFactories;
+WorkerGlobalScope implements GlobalCrypto;
+WorkerGlobalScope implements WindowOrWorkerGlobalScope;
 
 // Not implemented yet: bug 1072107.
 // WorkerGlobalScope implements FontFaceSource;
 
 // Mozilla extensions
 partial interface WorkerGlobalScope {
-  attribute EventHandler onclose;
 
   void dump(optional DOMString str);
 
   // XXXbz no spec for this yet, because the webperf WG is a bit dysfunctional
   [Constant, Cached]
   readonly attribute Performance performance;
+
+  [Func="WorkerGlobalScope::IsInAutomation", Throws]
+  object getJSTestingFunctions();
 };

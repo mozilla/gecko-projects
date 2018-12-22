@@ -1,73 +1,72 @@
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
-///////////////////
-//
-// Whitelisting this test.
-// As part of bug 1077403, the leaking uncaught rejection should be fixed.
-//
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: can't convert undefined to object");
+"use strict";
 
 /**
  * Tests if cached requests have the correct status code
  */
 
-var test = Task.async(function*() {
-  let [tab, debuggee, monitor] = yield initNetMonitor(STATUS_CODES_URL, null, true);
+add_task(async function() {
+  // Disable rcwn to make cache behavior deterministic.
+  await pushPref("network.http.rcwn.enabled", false);
+
+  const { tab, monitor } = await initNetMonitor(STATUS_CODES_URL, true);
   info("Starting test... ");
 
-  let { document, L10N, NetMonitorView } = monitor.panelWin;
-  let { RequestsMenu, NetworkDetails } = NetMonitorView;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const {
+    getDisplayedRequests,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
 
-  RequestsMenu.lazyUpdate = false;
-  NetworkDetails._params.lazyEmpty = false;
+  store.dispatch(Actions.batchEnable(false));
 
   const REQUEST_DATA = [
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=ok&cached",
       details: {
         status: 200,
-        statusText: 'OK',
+        statusText: "OK",
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=redirect&cached",
       details: {
         status: 301,
-        statusText: 'Moved Permanently',
+        statusText: "Moved Permanently",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
     },
     {
-      method: 'GET',
-      uri: 'http://example.com/redirected',
+      method: "GET",
+      uri: "http://example.com/redirected",
       details: {
         status: 404,
-        statusText: 'Not Found',
+        statusText: "Not Found",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=ok&cached",
       details: {
         status: 200,
         statusText: "OK (cached)",
-        displayedStatus : "cached",
+        displayedStatus: "cached",
         type: "plain",
         fullMimeType: "text/plain; charset=utf-8"
       }
     },
     {
-      method: 'GET',
+      method: "GET",
       uri: STATUS_CODES_SJS + "?sts=redirect&cached",
       details: {
         status: 301,
@@ -78,11 +77,11 @@ var test = Task.async(function*() {
       }
     },
     {
-      method: 'GET',
-      uri: 'http://example.com/redirected',
+      method: "GET",
+      uri: "http://example.com/redirected",
       details: {
         status: 404,
-        statusText: 'Not Found',
+        statusText: "Not Found",
         type: "html",
         fullMimeType: "text/html; charset=utf-8"
       }
@@ -90,23 +89,39 @@ var test = Task.async(function*() {
   ];
 
   info("Performing requests #1...");
-  debuggee.performCachedRequests();
-  yield waitForNetworkEvents(monitor, 3);
+  await performRequestsAndWait();
 
   info("Performing requests #2...");
-  debuggee.performCachedRequests();
-  yield waitForNetworkEvents(monitor, 3);
+  await performRequestsAndWait();
 
   let index = 0;
-  for (let request of REQUEST_DATA) {
-    let item = RequestsMenu.getItemAtIndex(index);
+  for (const request of REQUEST_DATA) {
+    const requestItem = document.querySelectorAll(".request-list-item")[index];
+    requestItem.scrollIntoView();
+    const requestsListStatus = requestItem.querySelector(".status-code");
+    EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
+    await waitUntil(() => requestsListStatus.title);
 
     info("Verifying request #" + index);
-    yield verifyRequestItemTarget(item, request.method, request.uri, request.details);
+    await verifyRequestItemTarget(
+      document,
+      getDisplayedRequests(store.getState()),
+      getSortedRequests(store.getState()).get(index),
+      request.method,
+      request.uri,
+      request.details
+    );
 
     index++;
   }
 
-  yield teardown(monitor);
-  finish();
+  await teardown(monitor);
+
+  async function performRequestsAndWait() {
+    const wait = waitForNetworkEvents(monitor, 3);
+    await ContentTask.spawn(tab.linkedBrowser, {}, async function() {
+      content.wrappedJSObject.performCachedRequests();
+    });
+    await wait;
+  }
 });

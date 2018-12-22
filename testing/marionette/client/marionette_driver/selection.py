@@ -3,6 +3,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 
 class SelectionManager(object):
     '''Interface for manipulating the selection and carets of the element.
@@ -53,13 +55,13 @@ class SelectionManager(object):
 
         '''
         cmd = self.js_selection_cmd() + '''
-              for (let i = 0; i < %d; ++i) {
-                  sel.modify("move", "%s", "character");
-              }
-              ''' % (offset, 'backward' if backward else 'forward')
+              for (let i = 0; i < {0}; ++i) {{
+                  sel.modify("move", "{1}", "character");
+              }}
+              '''.format(offset, 'backward' if backward else 'forward')
 
         self.element.marionette.execute_script(
-            cmd, script_args=[self.element], sandbox='system')
+            cmd, script_args=(self.element,), sandbox='system')
 
     def move_cursor_to_front(self):
         '''Move cursor in the element to the front of the content.'''
@@ -69,7 +71,8 @@ class SelectionManager(object):
             cmd = '''var sel = window.getSelection();
                   sel.collapse(arguments[0].firstChild, 0);'''
 
-        self.element.marionette.execute_script(cmd, script_args=[self.element])
+        self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox=None)
 
     def move_cursor_to_end(self):
         '''Move cursor in the element to the end of the content.'''
@@ -80,7 +83,8 @@ class SelectionManager(object):
             cmd = '''var sel = window.getSelection();
                   sel.collapse(arguments[0].lastChild, arguments[0].lastChild.length);'''
 
-        self.element.marionette.execute_script(cmd, script_args=[self.element])
+        self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox=None)
 
     def selection_rect_list(self, idx):
         '''Return the selection's DOMRectList object for the range at given idx.
@@ -91,18 +95,16 @@ class SelectionManager(object):
 
         '''
         cmd = self.js_selection_cmd() +\
-            '''return sel.getRangeAt(%d).getClientRects();''' % idx
-        return self.element.marionette.execute_script(cmd,
-                                                      script_args=[self.element],
-                                                      sandbox='system')
+            '''return sel.getRangeAt({}).getClientRects();'''.format(idx)
+        return self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox='system')
 
     def range_count(self):
         '''Get selection's range count'''
         cmd = self.js_selection_cmd() +\
             '''return sel.rangeCount;'''
-        return self.element.marionette.execute_script(cmd,
-                                                      script_args=[self.element],
-                                                      sandbox='system')
+        return self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox='system')
 
     def _selection_location_helper(self, location_type):
         '''Return the start and end location of the selection in the element.
@@ -120,7 +122,7 @@ class SelectionManager(object):
         first_rect, last_rect = first_rect_list['0'], last_rect_list[str(last_list_length - 1)]
         origin_x, origin_y = self.element.rect['x'], self.element.rect['y']
 
-        if self.element.get_attribute('dir') == 'rtl':  # such as Arabic
+        if self.element.get_property('dir') == 'rtl':  # such as Arabic
             start_pos, end_pos = 'right', 'left'
         else:
             start_pos, end_pos = 'left', 'right'
@@ -207,13 +209,14 @@ class SelectionManager(object):
                   sel.removeAllRanges();
                   sel.addRange(range);'''
 
-        self.element.marionette.execute_script(cmd, script_args=[self.element])
+        self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox=None)
 
     @property
     def content(self):
         '''Return all the content of the element.'''
         if self._input_or_textarea():
-            return self.element.get_attribute('value')
+            return self.element.get_property('value')
         else:
             return self.element.text
 
@@ -222,6 +225,5 @@ class SelectionManager(object):
         '''Return the selected portion of the content in the element.'''
         cmd = self.js_selection_cmd() +\
             '''return sel.toString();'''
-        return self.element.marionette.execute_script(cmd,
-                                                      script_args=[self.element],
-                                                      sandbox='system')
+        return self.element.marionette.execute_script(
+            cmd, script_args=(self.element,), sandbox='system')

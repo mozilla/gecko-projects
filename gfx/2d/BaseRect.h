@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -57,8 +58,10 @@ struct BaseRect {
   }
 
   // Emptiness. An empty rect is one that has no area, i.e. its height or width
-  // is <= 0
-  bool IsEmpty() const { return height <= 0 || width <= 0; }
+  // is <= 0.  Zero rect is the one with height and width set to zero.  Note
+  // that SetEmpty() may change a rectangle that identified as IsEmpty().
+  MOZ_ALWAYS_INLINE bool IsZeroArea() const { return height == 0 || width == 0; }
+  MOZ_ALWAYS_INLINE bool IsEmpty() const { return height <= 0 || width <= 0; }
   void SetEmpty() { width = height = 0; }
 
   // "Finite" means not inf and not NaN
@@ -83,10 +86,18 @@ struct BaseRect {
   // Returns true if this rectangle contains the point. Points are considered
   // in the rectangle if they are on the left or top edge, but outside if they
   // are on the right or bottom edge.
-  bool Contains(T aX, T aY) const
+  MOZ_ALWAYS_INLINE bool Contains(T aX, T aY) const
   {
     return x <= aX && aX < XMost() &&
            y <= aY && aY < YMost();
+  }
+  MOZ_ALWAYS_INLINE bool ContainsX(T aX) const
+  {
+    return x <= aX && aX < XMost();
+  }
+  MOZ_ALWAYS_INLINE bool ContainsY(T aY) const
+  {
+    return y <= aY && aY < YMost();
   }
   // Returns true if this rectangle contains the point. Points are considered
   // in the rectangle if they are on the left or top edge, but outside if they
@@ -106,13 +117,15 @@ struct BaseRect {
   // (including edges) of *this and aRect. If there are no points in that
   // intersection, returns an empty rectangle with x/y set to the std::max of the x/y
   // of *this and aRect.
-  MOZ_WARN_UNUSED_RESULT Sub Intersect(const Sub& aRect) const
+  MOZ_MUST_USE Sub Intersect(const Sub& aRect) const
   {
     Sub result;
     result.x = std::max<T>(x, aRect.x);
     result.y = std::max<T>(y, aRect.y);
     result.width = std::min<T>(x - result.x + width, aRect.x - result.x + aRect.width);
     result.height = std::min<T>(y - result.y + height, aRect.y - result.y + aRect.height);
+    // See bug 1457110, this function expects to -only- size to 0,0 if the width/height
+    // is explicitly negative.
     if (result.width < 0 || result.height < 0) {
       result.SizeTo(0, 0);
     }
@@ -126,15 +139,26 @@ struct BaseRect {
   // 'this' can be the same object as either aRect1 or aRect2
   bool IntersectRect(const Sub& aRect1, const Sub& aRect2)
   {
-    *static_cast<Sub*>(this) = aRect1.Intersect(aRect2);
-    return !IsEmpty();
+    T newX = std::max<T>(aRect1.x, aRect2.x);
+    T newY = std::max<T>(aRect1.y, aRect2.y);
+    width = std::min<T>(aRect1.x - newX + aRect1.width, aRect2.x - newX + aRect2.width);
+    height = std::min<T>(aRect1.y - newY + aRect1.height, aRect2.y - newY + aRect2.height);
+    x = newX;
+    y = newY;
+    if (width <= 0 || height <= 0) {
+      SizeTo(0, 0);
+      return false;
+    }
+    return true;
   }
 
   // Returns the smallest rectangle that contains both the area of both
   // this and aRect2.
   // Thus, empty input rectangles are ignored.
   // If both rectangles are empty, returns this.
-  MOZ_WARN_UNUSED_RESULT Sub Union(const Sub& aRect) const
+  // WARNING! This is not safe against overflow, prefer using SafeUnion instead
+  // when dealing with int-based rects.
+  MOZ_MUST_USE Sub Union(const Sub& aRect) const
   {
     if (IsEmpty()) {
       return aRect;
@@ -147,7 +171,9 @@ struct BaseRect {
   // Returns the smallest rectangle that contains both the points (including
   // edges) of both aRect1 and aRect2.
   // Thus, empty input rectangles are allowed to affect the result.
-  MOZ_WARN_UNUSED_RESULT Sub UnionEdges(const Sub& aRect) const
+  // WARNING! This is not safe against overflow, prefer using SafeUnionEdges
+  // instead when dealing with int-based rects.
+  MOZ_MUST_USE Sub UnionEdges(const Sub& aRect) const
   {
     Sub result;
     result.x = std::min(x, aRect.x);
@@ -165,6 +191,11 @@ struct BaseRect {
   void UnionRect(const Sub& aRect1, const Sub& aRect2)
   {
     *static_cast<Sub*>(this) = aRect1.Union(aRect2);
+  }
+
+  void OrWith(const Sub& aRect1)
+  {
+    UnionRect(*static_cast<Sub*>(this), aRect1);
   }
 
   // Computes the smallest rectangle that contains both the points (including
@@ -194,20 +225,55 @@ struct BaseRect {
     }
   }
 
-  void SetRect(T aX, T aY, T aWidth, T aHeight)
+  MOZ_ALWAYS_INLINE void SetRect(T aX, T aY, T aWidth, T aHeight)
   {
     x = aX; y = aY; width = aWidth; height = aHeight;
+  }
+  MOZ_ALWAYS_INLINE void SetRectX(T aX, T aWidth)
+  {
+    x = aX; width = aWidth;
+  }
+  MOZ_ALWAYS_INLINE void SetRectY(T aY, T aHeight)
+  {
+    y = aY; height = aHeight;
+  }
+  MOZ_ALWAYS_INLINE void SetBox(T aX, T aY, T aXMost, T aYMost)
+  {
+    x = aX; y = aY; width = aXMost - aX; height = aYMost - aY;
+  }
+  MOZ_ALWAYS_INLINE void SetNonEmptyBox(T aX, T aY, T aXMost, T aYMost)
+  {
+    x = aX; y = aY;
+    width = std::max(0,aXMost - aX);
+    height = std::max(0,aYMost - aY);
+  }
+  MOZ_ALWAYS_INLINE void SetBoxX(T aX, T aXMost)
+  {
+    x = aX; width = aXMost - aX;
+  }
+  MOZ_ALWAYS_INLINE void SetBoxY(T aY, T aYMost)
+  {
+    y = aY; height = aYMost - aY;
   }
   void SetRect(const Point& aPt, const SizeT& aSize)
   {
     SetRect(aPt.x, aPt.y, aSize.width, aSize.height);
   }
-  void MoveTo(T aX, T aY) { x = aX; y = aY; }
-  void MoveTo(const Point& aPoint) { x = aPoint.x; y = aPoint.y; }
-  void MoveBy(T aDx, T aDy) { x += aDx; y += aDy; }
-  void MoveBy(const Point& aPoint) { x += aPoint.x; y += aPoint.y; }
-  void SizeTo(T aWidth, T aHeight) { width = aWidth; height = aHeight; }
-  void SizeTo(const SizeT& aSize) { width = aSize.width; height = aSize.height; }
+  MOZ_ALWAYS_INLINE void GetRect(T* aX, T* aY, T* aWidth, T* aHeight) const
+  {
+    *aX = x; *aY = y; *aWidth = width; *aHeight = height;
+  }
+
+  MOZ_ALWAYS_INLINE void MoveTo(T aX, T aY) { x = aX; y = aY; }
+  MOZ_ALWAYS_INLINE void MoveToX(T aX) { x = aX; }
+  MOZ_ALWAYS_INLINE void MoveToY(T aY) { y = aY; }
+  MOZ_ALWAYS_INLINE void MoveTo(const Point& aPoint) { x = aPoint.x; y = aPoint.y; }
+  MOZ_ALWAYS_INLINE void MoveBy(T aDx, T aDy) { x += aDx; y += aDy; }
+  MOZ_ALWAYS_INLINE void MoveByX(T aDx) { x += aDx; }
+  MOZ_ALWAYS_INLINE void MoveByY(T aDy) { y += aDy; }
+  MOZ_ALWAYS_INLINE void MoveBy(const Point& aPoint) { x += aPoint.x; y += aPoint.y; }
+  MOZ_ALWAYS_INLINE void SizeTo(T aWidth, T aHeight) { width = aWidth; height = aHeight; }
+  MOZ_ALWAYS_INLINE void SizeTo(const SizeT& aSize) { width = aSize.width; height = aSize.height; }
 
   void Inflate(T aD) { Inflate(aD, aD); }
   void Inflate(T aDx, T aDy)
@@ -252,6 +318,20 @@ struct BaseRect {
     return x == aRect.x && y == aRect.y &&
            width == aRect.width && height == aRect.height;
   }
+  MOZ_ALWAYS_INLINE bool IsEqualRect(T aX, T aY, T aW, T aH)
+  {
+    return x == aX && y == aY && width == aW && height == aH;
+  }
+  MOZ_ALWAYS_INLINE bool IsEqualXY(T aX, T aY)
+  {
+    return x == aX && y == aY;
+  }
+
+  MOZ_ALWAYS_INLINE bool IsEqualSize(T aW, T aH)
+  {
+    return width == aW && height == aH;
+  }
+
   // Return true if the rectangles contain the same area of the plane.
   // Use when we do not care about differences in empty rectangles.
   bool IsEqualInterior(const Sub& aRect) const
@@ -315,74 +395,80 @@ struct BaseRect {
   Point TopRight() const { return Point(XMost(), y); }
   Point BottomLeft() const { return Point(x, YMost()); }
   Point BottomRight() const { return Point(XMost(), YMost()); }
-  Point AtCorner(int aCorner) const {
+  Point AtCorner(Corner aCorner) const {
     switch (aCorner) {
-      case RectCorner::TopLeft: return TopLeft();
-      case RectCorner::TopRight: return TopRight();
-      case RectCorner::BottomRight: return BottomRight();
-      case RectCorner::BottomLeft: return BottomLeft();
+      case eCornerTopLeft: return TopLeft();
+      case eCornerTopRight: return TopRight();
+      case eCornerBottomRight: return BottomRight();
+      case eCornerBottomLeft: return BottomLeft();
     }
-    MOZ_CRASH("Incomplete switch");
+    MOZ_CRASH("GFX: Incomplete switch");
   }
   Point CCWCorner(mozilla::Side side) const {
     switch (side) {
-      case NS_SIDE_TOP: return TopLeft();
-      case NS_SIDE_RIGHT: return TopRight();
-      case NS_SIDE_BOTTOM: return BottomRight();
-      case NS_SIDE_LEFT: return BottomLeft();
+      case eSideTop: return TopLeft();
+      case eSideRight: return TopRight();
+      case eSideBottom: return BottomRight();
+      case eSideLeft: return BottomLeft();
     }
-    MOZ_CRASH("Incomplete switch");
+    MOZ_CRASH("GFX: Incomplete switch");
   }
   Point CWCorner(mozilla::Side side) const {
     switch (side) {
-      case NS_SIDE_TOP: return TopRight();
-      case NS_SIDE_RIGHT: return BottomRight();
-      case NS_SIDE_BOTTOM: return BottomLeft();
-      case NS_SIDE_LEFT: return TopLeft();
+      case eSideTop: return TopRight();
+      case eSideRight: return BottomRight();
+      case eSideBottom: return BottomLeft();
+      case eSideLeft: return TopLeft();
     }
-    MOZ_CRASH("Incomplete switch");
+    MOZ_CRASH("GFX: Incomplete switch");
   }
   Point Center() const { return Point(x, y) + Point(width, height)/2; }
   SizeT Size() const { return SizeT(width, height); }
 
+  T Area() const { return width * height; }
+
   // Helper methods for computing the extents
-  T X() const { return x; }
-  T Y() const { return y; }
-  T Width() const { return width; }
-  T Height() const { return height; }
-  T XMost() const { return x + width; }
-  T YMost() const { return y + height; }
+  MOZ_ALWAYS_INLINE T X() const { return x; }
+  MOZ_ALWAYS_INLINE T Y() const { return y; }
+  MOZ_ALWAYS_INLINE T Width() const { return width; }
+  MOZ_ALWAYS_INLINE T Height() const { return height; }
+  MOZ_ALWAYS_INLINE T XMost() const { return x + width; }
+  MOZ_ALWAYS_INLINE T YMost() const { return y + height; }
+
+  // Set width and height. SizeTo() sets them together.
+  MOZ_ALWAYS_INLINE void SetWidth(T aWidth) { width = aWidth; }
+  MOZ_ALWAYS_INLINE void SetHeight(T aHeight) { height = aHeight; }
 
   // Get the coordinate of the edge on the given side.
   T Edge(mozilla::Side aSide) const
   {
     switch (aSide) {
-      case NS_SIDE_TOP: return Y();
-      case NS_SIDE_RIGHT: return XMost();
-      case NS_SIDE_BOTTOM: return YMost();
-      case NS_SIDE_LEFT: return X();
+      case eSideTop: return Y();
+      case eSideRight: return XMost();
+      case eSideBottom: return YMost();
+      case eSideLeft: return X();
     }
-    MOZ_CRASH("Incomplete switch");
+    MOZ_CRASH("GFX: Incomplete switch");
   }
 
   // Moves one edge of the rect without moving the opposite edge.
   void SetLeftEdge(T aX) {
-    MOZ_ASSERT(aX <= XMost());
     width = XMost() - aX;
     x = aX;
   }
-  void SetRightEdge(T aXMost) { 
-    MOZ_ASSERT(aXMost >= x);
-    width = aXMost - x; 
+  void SetRightEdge(T aXMost) {
+    width = aXMost - x;
   }
   void SetTopEdge(T aY) {
-    MOZ_ASSERT(aY <= YMost());
     height = YMost() - aY;
     y = aY;
   }
-  void SetBottomEdge(T aYMost) { 
-    MOZ_ASSERT(aYMost >= y);
-    height = aYMost - y; 
+  void SetBottomEdge(T aYMost) {
+    height = aYMost - y;
+  }
+  void Swap() {
+    std::swap(x, y);
+    std::swap(width, height);
   }
 
   // Round the rectangle edges to integer coordinates, such that the rounded
@@ -398,10 +484,10 @@ struct BaseRect {
   // new |RoundAwayFromZero()| method.
   void Round()
   {
-    T x0 = static_cast<T>(floor(T(X()) + 0.5));
-    T y0 = static_cast<T>(floor(T(Y()) + 0.5));
-    T x1 = static_cast<T>(floor(T(XMost()) + 0.5));
-    T y1 = static_cast<T>(floor(T(YMost()) + 0.5));
+    T x0 = static_cast<T>(std::floor(T(X()) + 0.5f));
+    T y0 = static_cast<T>(std::floor(T(Y()) + 0.5f));
+    T x1 = static_cast<T>(std::floor(T(XMost()) + 0.5f));
+    T y1 = static_cast<T>(std::floor(T(YMost()) + 0.5f));
 
     x = x0;
     y = y0;
@@ -414,10 +500,10 @@ struct BaseRect {
   // original rectangle contains the resulting rectangle.
   void RoundIn()
   {
-    T x0 = static_cast<T>(ceil(T(X())));
-    T y0 = static_cast<T>(ceil(T(Y())));
-    T x1 = static_cast<T>(floor(T(XMost())));
-    T y1 = static_cast<T>(floor(T(YMost())));
+    T x0 = static_cast<T>(std::ceil(T(X())));
+    T y0 = static_cast<T>(std::ceil(T(Y())));
+    T x1 = static_cast<T>(std::floor(T(XMost())));
+    T y1 = static_cast<T>(std::floor(T(YMost())));
 
     x = x0;
     y = y0;
@@ -430,10 +516,10 @@ struct BaseRect {
   // resulting rectangle contains the original rectangle.
   void RoundOut()
   {
-    T x0 = static_cast<T>(floor(T(X())));
-    T y0 = static_cast<T>(floor(T(Y())));
-    T x1 = static_cast<T>(ceil(T(XMost())));
-    T y1 = static_cast<T>(ceil(T(YMost())));
+    T x0 = static_cast<T>(std::floor(T(X())));
+    T y0 = static_cast<T>(std::floor(T(Y())));
+    T x1 = static_cast<T>(std::ceil(T(XMost())));
+    T y1 = static_cast<T>(std::ceil(T(YMost())));
 
     x = x0;
     y = y0;
@@ -523,7 +609,7 @@ struct BaseRect {
    * Clamp aPoint to this rectangle. It is allowed to end up on any
    * edge of the rectangle.
    */
-  MOZ_WARN_UNUSED_RESULT Point ClampPoint(const Point& aPoint) const
+  MOZ_MUST_USE Point ClampPoint(const Point& aPoint) const
   {
     return Point(std::max(x, std::min(XMost(), aPoint.x)),
                  std::max(y, std::min(YMost(), aPoint.y)));
@@ -534,7 +620,7 @@ struct BaseRect {
    * aRect then the dimensions that don't fit will be shrunk so that they
    * do fit. The resulting rect is returned.
    */
-  MOZ_WARN_UNUSED_RESULT Sub MoveInsideAndClamp(const Sub& aRect) const
+  MOZ_MUST_USE Sub MoveInsideAndClamp(const Sub& aRect) const
   {
     Sub rect(std::max(aRect.x, x),
              std::max(aRect.y, y),
@@ -554,12 +640,23 @@ struct BaseRect {
   static Sub MaxIntRect()
   {
     return Sub(
-      -std::numeric_limits<int32_t>::max() * 0.5,
-      -std::numeric_limits<int32_t>::max() * 0.5,
-      std::numeric_limits<int32_t>::max(),
-      std::numeric_limits<int32_t>::max()
+      static_cast<T>(-std::numeric_limits<int32_t>::max() * 0.5),
+      static_cast<T>(-std::numeric_limits<int32_t>::max() * 0.5),
+      static_cast<T>(std::numeric_limits<int32_t>::max()),
+      static_cast<T>(std::numeric_limits<int32_t>::max())
     );
   };
+
+  // Returns a point representing the distance, along each dimension, of the
+  // given point from this rectangle. The distance along a dimension is defined
+  // as zero if the point is within the bounds of the rectangle in that
+  // dimension; otherwise, it's the distance to the closer endpoint of the
+  // rectangle in that dimension.
+  Point DistanceTo(const Point& aPoint) const
+  {
+    return {DistanceFromInterval(aPoint.x, x, XMost()),
+            DistanceFromInterval(aPoint.y, y, YMost())};
+  }
 
   friend std::ostream& operator<<(std::ostream& stream,
       const BaseRect<T, Sub, Point, SizeT, MarginT>& aRect) {
@@ -572,6 +669,19 @@ private:
   // Use IsEqualEdges or IsEqualInterior explicitly.
   bool operator==(const Sub& aRect) const { return false; }
   bool operator!=(const Sub& aRect) const { return false; }
+
+  // Helper function for DistanceTo() that computes the distance of a
+  // coordinate along one dimension from an interval in that dimension.
+  static T DistanceFromInterval(T aCoord, T aIntervalStart, T aIntervalEnd)
+  {
+    if (aCoord < aIntervalStart) {
+      return aIntervalStart - aCoord;
+    }
+    if (aCoord > aIntervalEnd) {
+      return aCoord - aIntervalEnd;
+    }
+    return 0;
+  }
 };
 
 } // namespace gfx

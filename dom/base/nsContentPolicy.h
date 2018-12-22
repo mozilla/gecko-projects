@@ -8,10 +8,9 @@
 #define __nsContentPolicy_h__
 
 #include "nsIContentPolicy.h"
-#include "nsISimpleContentPolicy.h"
 #include "nsCategoryCache.h"
 
-/* 
+/*
  * Implementation of the "@mozilla.org/layout/content-policy;1" contract.
  */
 
@@ -29,31 +28,16 @@ class nsContentPolicy : public nsIContentPolicy
  private:
     //Array of policies
     nsCategoryCache<nsIContentPolicy> mPolicies;
-    nsCategoryCache<nsISimpleContentPolicy> mSimplePolicies;
 
     //Helper type for CheckPolicy
-    typedef
-    NS_STDCALL_FUNCPROTO(nsresult, CPMethod, nsIContentPolicy,
-                         ShouldProcess,
-                         (uint32_t, nsIURI*, nsIURI*, nsISupports*,
-                           const nsACString &, nsISupports*, nsIPrincipal*,
-                           int16_t*));
-
-    typedef
-    NS_STDCALL_FUNCPROTO(nsresult, SCPMethod, nsISimpleContentPolicy,
-                         ShouldProcess,
-                         (uint32_t, nsIURI*, nsIURI*, nsIDOMElement*, bool,
-                           const nsACString &, nsISupports*, nsIPrincipal*,
-                           int16_t*));
+    typedef decltype(&nsIContentPolicy::ShouldProcess) CPMethod;
 
     //Helper method that applies policyMethod across all policies in mPolicies
     // with the given parameters
-    nsresult CheckPolicy(CPMethod policyMethod, SCPMethod simplePolicyMethod,
-                         nsContentPolicyType contentType,
-                         nsIURI *aURI, nsIURI *origURI,
-                         nsISupports *requestingContext,
-                         const nsACString &mimeGuess, nsISupports *extra,
-                         nsIPrincipal *requestPrincipal,
+    nsresult CheckPolicy(CPMethod policyMethod,
+                         nsIURI *aURI, 
+                         nsILoadInfo *aLoadInfo,
+                         const nsACString &mimeGuess,
                          int16_t *decision);
 };
 

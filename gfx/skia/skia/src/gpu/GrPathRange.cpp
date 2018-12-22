@@ -10,7 +10,7 @@
 
 GrPathRange::GrPathRange(GrGpu* gpu,
                          PathGenerator* pathGenerator)
-    : INHERITED(gpu, kCached_LifeCycle),
+    : INHERITED(gpu),
       fPathGenerator(SkRef(pathGenerator)),
       fNumPaths(fPathGenerator->getNumPaths()) {
     const int numGroups = (fNumPaths + kPathsPerGroup - 1) / kPathsPerGroup;
@@ -20,7 +20,7 @@ GrPathRange::GrPathRange(GrGpu* gpu,
 
 GrPathRange::GrPathRange(GrGpu* gpu,
                          int numPaths)
-    : INHERITED(gpu, kCached_LifeCycle),
+    : INHERITED(gpu),
       fNumPaths(numPaths) {
 }
 
@@ -33,7 +33,7 @@ void GrPathRange::loadPathsIfNeeded(const void* indices, PathIndexType indexType
         case kU32_PathIndexType:
             return this->loadPathsIfNeeded(reinterpret_cast<const uint32_t*>(indices), count);
         default:
-            SkFAIL("Unknown path index type");
+            SK_ABORT("Unknown path index type");
     }
 }
 
@@ -48,7 +48,7 @@ void GrPathRange::assertPathsLoaded(const void* indices, PathIndexType indexType
         case kU32_PathIndexType:
             return this->assertPathsLoaded(reinterpret_cast<const uint32_t*>(indices), count);
         default:
-            SkFAIL("Unknown path index type");
+            SK_ABORT("Unknown path index type");
     }
 }
 

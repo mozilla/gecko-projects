@@ -4,7 +4,6 @@
 
 /* Tab Modal Prompt boxes */
 tabmodalprompt {
-  background-image: url(chrome://global/skin/icons/tabprompts-bgtexture.png);
   background-color: hsla(0,0%,10%,.5);
   font-family: sans-serif; /* use content font not system UI font */
   font-size: 110%;
@@ -32,7 +31,7 @@ button {
   -moz-appearance: none;
   padding: 2px 0;
   margin: 0;
-  -moz-margin-start: 8px;
+  margin-inline-start: 8px;
   border-radius: 2px;
   color: black !important;
   background-color: hsl(0,0%,90%);
@@ -43,7 +42,6 @@ button {
   box-shadow: 0 1px 0 hsla(0,0%,100%,.9) inset,
               0 1px 2px hsla(0,0%,0%,.1);
 }
-
 
 button[default=true] {
   background-color: hsl(0,0%,79%);
@@ -61,7 +59,5 @@ button:hover:active {
 }
 
 button:focus {
-  box-shadow: 0 0 1px -moz-mac-focusring inset,
-              0 0 4px 1px -moz-mac-focusring,
-              0 0 1.5px 1px -moz-mac-focusring;
+  box-shadow: var(--focus-ring-box-shadow)
 }

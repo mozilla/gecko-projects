@@ -16,7 +16,9 @@ namespace js {
 class BaseShape;
 class LazyScript;
 class ObjectGroup;
+class RegExpShared;
 class Shape;
+class Scope;
 namespace jit {
 class JitCode;
 } // namespace jit
@@ -39,9 +41,11 @@ enum class TraceKind
     // Note: The order here is determined by our Value packing. Other users
     //       should sort alphabetically, for consistency.
     Object = 0x00,
-    String = 0x01,
-    Symbol = 0x02,
-    Script = 0x03,
+    String = 0x02,
+    Symbol = 0x03,
+
+    // 0x1 is not used for any GCThing Value tag, so we use it for Script.
+    Script = 0x01,
 
     // Shape details are exposed through JS_TraceShapeCycleCollectorChildren.
     Shape = 0x04,
@@ -55,12 +59,24 @@ enum class TraceKind
     // The following kinds do not have an exposed C++ idiom.
     BaseShape = 0x0F,
     JitCode = 0x1F,
-    LazyScript = 0x2F
+    LazyScript = 0x2F,
+    Scope = 0x3F,
+    RegExpShared = 0x4F,
+#ifdef ENABLE_BIGINT
+    BigInt = 0x5F
+#endif
 };
 const static uintptr_t OutOfLineTraceKindMask = 0x07;
-static_assert(uintptr_t(JS::TraceKind::BaseShape) & OutOfLineTraceKindMask, "mask bits are set");
-static_assert(uintptr_t(JS::TraceKind::JitCode) & OutOfLineTraceKindMask, "mask bits are set");
-static_assert(uintptr_t(JS::TraceKind::LazyScript) & OutOfLineTraceKindMask, "mask bits are set");
+
+#define ASSERT_TRACE_KIND(tk) \
+    static_assert((uintptr_t(tk) & OutOfLineTraceKindMask) == OutOfLineTraceKindMask, \
+        "mask bits are set")
+ASSERT_TRACE_KIND(JS::TraceKind::BaseShape);
+ASSERT_TRACE_KIND(JS::TraceKind::JitCode);
+ASSERT_TRACE_KIND(JS::TraceKind::LazyScript);
+ASSERT_TRACE_KIND(JS::TraceKind::Scope);
+ASSERT_TRACE_KIND(JS::TraceKind::RegExpShared);
+#undef ASSERT_TRACE_KIND
 
 // When this header is imported inside SpiderMonkey, the class definitions are
 // available and we can query those definitions to find the correct kind
@@ -77,12 +93,15 @@ struct MapTypeToTraceKind {
     D(BaseShape,     js::BaseShape,     true) \
     D(JitCode,       js::jit::JitCode,  true) \
     D(LazyScript,    js::LazyScript,    true) \
+    D(Scope,         js::Scope,         true) \
     D(Object,        JSObject,          true) \
     D(ObjectGroup,   js::ObjectGroup,   true) \
     D(Script,        JSScript,          true) \
     D(Shape,         js::Shape,         true) \
     D(String,        JSString,          false) \
-    D(Symbol,        JS::Symbol,        false)
+    D(Symbol,        JS::Symbol,        false) \
+    IF_BIGINT(D(BigInt, JS::BigInt, false),) \
+    D(RegExpShared,  js::RegExpShared,  true)
 
 // Map from all public types to their trace kind.
 #define JS_EXPAND_DEF(name, type, _) \
@@ -98,15 +117,10 @@ JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
 enum class RootKind : int8_t
 {
     // These map 1:1 with trace kinds.
-    BaseShape = 0,
-    JitCode,
-    LazyScript,
-    Object,
-    ObjectGroup,
-    Script,
-    Shape,
-    String,
-    Symbol,
+#define EXPAND_ROOT_KIND(name, _0, _1) \
+    name,
+JS_FOR_EACH_TRACEKIND(EXPAND_ROOT_KIND)
+#undef EXPAND_ROOT_KIND
 
     // These tagged pointers are special-cased for performance.
     Id,
@@ -128,7 +142,7 @@ JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF)
 #undef JS_EXPAND_DEF
 
 // Specify the RootKind for all types. Value and jsid map to special cases;
-// pointer types we can derive directly from the TraceKind; everything else
+// Cell pointer types we can derive directly from the TraceKind; everything else
 // should go in the Traceable list and use GCPolicy<T>::trace for tracing.
 template <typename T>
 struct MapTypeToRootKind {
@@ -138,6 +152,10 @@ template <typename T>
 struct MapTypeToRootKind<T*> {
     static const JS::RootKind kind =
         JS::MapTraceKindToRootKind<JS::MapTypeToTraceKind<T>::kind>::kind;
+};
+template <> struct MapTypeToRootKind<JS::Realm*> {
+    // Not a pointer to a GC cell. Use GCPolicy.
+    static const JS::RootKind kind = JS::RootKind::Traceable;
 };
 template <typename T>
 struct MapTypeToRootKind<mozilla::UniquePtr<T>> {
@@ -165,12 +183,12 @@ template <> struct MapTypeToRootKind<JSFunction*> : public MapTypeToRootKind<JSO
 // type designated by |traceKind| as the functor's template argument. The
 // |thing| parameter is optional; without it, we simply pass through |... args|.
 
-// GCC and Clang require an explicit template declaration in front of the
-// specialization of operator() because it is a dependent template. MSVC, on
-// the other hand, gets very confused if we have a |template| token there.
+// VS2017+, GCC and Clang require an explicit template declaration in front of
+// the specialization of operator() because it is a dependent template. VS2015,
+// on the other hand, gets very confused if we have a |template| token there.
 // The clang-cl front end defines _MSC_VER, but still requires the explicit
 // template declaration, so we must test for __clang__ here as well.
-#if defined(_MSC_VER) && !defined(__clang__)
+#if (defined(_MSC_VER) && _MSC_VER < 1910) && !defined(__clang__)
 # define JS_DEPENDENT_TEMPLATE_HINT
 #else
 # define JS_DEPENDENT_TEMPLATE_HINT template
@@ -178,12 +196,12 @@ template <> struct MapTypeToRootKind<JSFunction*> : public MapTypeToRootKind<JSO
 template <typename F, typename... Args>
 auto
 DispatchTraceKindTyped(F f, JS::TraceKind traceKind, Args&&... args)
-  -> decltype(f. JS_DEPENDENT_TEMPLATE_HINT operator()<JSObject>(mozilla::Forward<Args>(args)...))
+  -> decltype(f. JS_DEPENDENT_TEMPLATE_HINT operator()<JSObject>(std::forward<Args>(args)...))
 {
     switch (traceKind) {
 #define JS_EXPAND_DEF(name, type, _) \
       case JS::TraceKind::name: \
-        return f. JS_DEPENDENT_TEMPLATE_HINT operator()<type>(mozilla::Forward<Args>(args)...);
+        return f. JS_DEPENDENT_TEMPLATE_HINT operator()<type>(std::forward<Args>(args)...);
       JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
 #undef JS_EXPAND_DEF
       default:
@@ -195,12 +213,12 @@ DispatchTraceKindTyped(F f, JS::TraceKind traceKind, Args&&... args)
 template <typename F, typename... Args>
 auto
 DispatchTraceKindTyped(F f, void* thing, JS::TraceKind traceKind, Args&&... args)
-  -> decltype(f(static_cast<JSObject*>(nullptr), mozilla::Forward<Args>(args)...))
+  -> decltype(f(static_cast<JSObject*>(nullptr), std::forward<Args>(args)...))
 {
     switch (traceKind) {
 #define JS_EXPAND_DEF(name, type, _) \
       case JS::TraceKind::name: \
-          return f(static_cast<type*>(thing), mozilla::Forward<Args>(args)...);
+          return f(static_cast<type*>(thing), std::forward<Args>(args)...);
       JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
 #undef JS_EXPAND_DEF
       default:

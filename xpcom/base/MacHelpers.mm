@@ -6,6 +6,8 @@
 
 #include "nsString.h"
 #include "MacHelpers.h"
+#include "MacStringHelpers.h"
+#include "nsObjCExceptions.h"
 
 #import <Foundation/Foundation.h>
 
@@ -14,19 +16,19 @@ namespace mozilla {
 nsresult
 GetSelectedCityInfo(nsAString& aCountryCode)
 {
-  NSDictionary* selected_city =
-    [[NSUserDefaults standardUserDefaults]
-      objectForKey:@"com.apple.preferences.timezone.selected_city"];
-  NSString *countryCode = (NSString *)
-    [selected_city objectForKey:@"CountryCode"];
-  const char *countryCodeUTF8 = [countryCode UTF8String];
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  if (!countryCodeUTF8) {
+  // Can be replaced with [[NSLocale currentLocale] countryCode] once we build
+  // with the 10.12 SDK.
+  id countryCode = [[NSLocale currentLocale] objectForKey:NSLocaleCountryCode];
+
+  if (![countryCode isKindOfClass:[NSString class]]) {
     return NS_ERROR_FAILURE;
   }
 
-  AppendUTF8toUTF16(countryCodeUTF8, aCountryCode);
-  return NS_OK;
+  return mozilla::CopyCocoaStringToXPCOMString((NSString*)countryCode, aCountryCode);
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
 } // namespace Mozilla

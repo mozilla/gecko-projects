@@ -1,10 +1,8 @@
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-  "resource://gre/modules/Promise.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserTestUtils",
+ChromeUtils.defineModuleGetter(this, "BrowserTestUtils",
   "resource://testing-common/BrowserTestUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContentTask",
+ChromeUtils.defineModuleGetter(this, "ContentTask",
   "resource://testing-common/ContentTask.jsm");
 
 const REFERRER_URL_BASE = "/browser/browser/base/content/test/referrer/";
@@ -12,8 +10,6 @@ const REFERRER_POLICYSERVER_URL =
   "test1.example.com" + REFERRER_URL_BASE + "file_referrer_policyserver.sjs";
 const REFERRER_POLICYSERVER_URL_ATTRIBUTE =
   "test1.example.com" + REFERRER_URL_BASE + "file_referrer_policyserver_attr.sjs";
-
-SpecialPowers.pushPrefEnv({"set": [['network.http.enablePerElementReferrer', true]]});
 
 var gTestWindow = null;
 var rounds = 0;
@@ -82,6 +78,23 @@ function getReferrerTest(aTestNumber) {
 }
 
 /**
+ * Returns shimmed test object for a given test number.
+ *
+ * @param aTestNumber The test number - 0, 1, 2, ...
+ * @return The test object with result hard-coded to "",
+ *          or undefined if the number is out of range.
+ */
+function getRemovedReferrerTest(aTestNumber) {
+  let testCase = _referrerTests[aTestNumber];
+  if (testCase) {
+    // We want all the referrer tests to fail!
+    testCase.result = "";
+  }
+
+  return testCase;
+}
+
+/**
  * Returns a brief summary of the test, for logging.
  * @param aTestNumber The test number - 0, 1, 2...
  * @return The test description.
@@ -129,7 +142,7 @@ function delayedStartupFinished(aWindow) {
         Services.obs.removeObserver(observer, aTopic);
         resolve();
       }
-    }, "browser-delayed-startup-finished", false);
+    }, "browser-delayed-startup-finished");
   });
 }
 
@@ -140,16 +153,7 @@ function delayedStartupFinished(aWindow) {
  * @resolves With the tab once it's loaded.
  */
 function someTabLoaded(aWindow) {
-  return new Promise(function(resolve) {
-    aWindow.gBrowser.addEventListener("load", function onLoad(aEvent) {
-      let tab = aWindow.gBrowser._getTabForContentWindow(
-          aEvent.target.defaultView.top);
-      if (tab) {
-        aWindow.gBrowser.removeEventListener("load", onLoad, true);
-        resolve(tab);
-      }
-    }, true);
-  });
+  return BrowserTestUtils.waitForNewTab(gTestWindow.gBrowser, null, true);
 }
 
 /**
@@ -195,17 +199,19 @@ function doContextMenuCommand(aWindow, aMenu, aItemId) {
  * @return {Promise}
  * @resolves When the source url for this test case is loaded.
  */
-function referrerTestCaseLoaded(aTestNumber) {
+function referrerTestCaseLoaded(aTestNumber, aParams) {
   let test = getReferrerTest(aTestNumber);
   let server = rounds == 0 ? REFERRER_POLICYSERVER_URL :
                              REFERRER_POLICYSERVER_URL_ATTRIBUTE;
   let url = test.fromScheme + server +
             "?scheme=" + escape(test.toScheme) +
             "&policy=" + escape(test.policy || "") +
-            "&rel=" + escape(test.rel || "");
-  var browser = gTestWindow.gBrowser;
-  browser.selectedTab = browser.addTab(url);
-  return BrowserTestUtils.browserLoaded(browser.selectedBrowser);
+            "&rel=" + escape(test.rel || "") +
+            "&cross=" + escape(test.cross || "");
+  let browser = gTestWindow.gBrowser;
+  return BrowserTestUtils.openNewForegroundTab(browser, () => {
+    browser.selectedTab = browser.addTab(url, aParams);
+  }, false, true);
 }
 
 /**
@@ -216,7 +222,7 @@ function referrerTestCaseLoaded(aTestNumber) {
  * @param aStartTestCase The callback to start the next test, aTestNumber + 1.
  */
 function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
-                                       aStartTestCase) {
+                                       aStartTestCase, aParams = {}) {
   referrerResultExtracted(aNewWindow || gTestWindow).then(function(result) {
     // Compare the actual result against the expected one.
     let test = getReferrerTest(aTestNumber);
@@ -232,13 +238,13 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
     // Move on to the next test.  Or finish if we're done.
     var nextTestNumber = aTestNumber + 1;
     if (getReferrerTest(nextTestNumber)) {
-      referrerTestCaseLoaded(nextTestNumber).then(function() {
+      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
         aStartTestCase(nextTestNumber);
       });
     } else if (rounds == 0) {
       nextTestNumber = 0;
       rounds = 1;
-      referrerTestCaseLoaded(nextTestNumber).then(function() {
+      referrerTestCaseLoaded(nextTestNumber, aParams).then(function() {
         aStartTestCase(nextTestNumber);
       });
     } else {
@@ -253,7 +259,7 @@ function checkReferrerAndStartNextTest(aTestNumber, aNewWindow, aNewTab,
  * the test number - 0, 1, 2... Needs to trigger the navigation from the source
  * page, and call checkReferrerAndStartNextTest() when the target is loaded.
  */
-function startReferrerTest(aStartTestCase) {
+function startReferrerTest(aStartTestCase, params = {}) {
   waitForExplicitFinish();
 
   // Open the window where we'll load the source URLs.
@@ -264,7 +270,7 @@ function startReferrerTest(aStartTestCase) {
 
   // Load and start the first test.
   delayedStartupFinished(gTestWindow).then(function() {
-    referrerTestCaseLoaded(0).then(function() {
+    referrerTestCaseLoaded(0, params).then(function() {
       aStartTestCase(0);
     });
   });

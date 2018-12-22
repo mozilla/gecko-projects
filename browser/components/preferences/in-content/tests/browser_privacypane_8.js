@@ -1,12 +1,11 @@
-let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
-             getService(Ci.mozIJSSubScriptLoader);
 let rootDir = getRootDirectory(gTestPath);
 let jar = getJar(rootDir);
 if (jar) {
   let tmpdir = extractJarToTmp(jar);
-  rootDir = "file://" + tmpdir.path + '/';
+  rootDir = "file://" + tmpdir.path + "/";
 }
-loader.loadSubScript(rootDir + "privacypane_tests_perwindow.js", this);
+/* import-globals-from privacypane_tests_perwindow.js */
+Services.scriptloader.loadSubScript(rootDir + "privacypane_tests_perwindow.js", this);
 
 run_test_subset([
   // history mode should be initialized to remember

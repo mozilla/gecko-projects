@@ -14,7 +14,7 @@
 #include "js/TracingAPI.h"
 #include "js/Vector.h"
 
-namespace js {
+namespace JS {
 
 // A GCVector is a Vector with an additional trace method that knows how
 // to visit all of the items stored in the Vector. For vectors that contain GC
@@ -32,7 +32,7 @@ namespace js {
 // it must either be used with Rooted, or barriered and traced manually.
 template <typename T,
           size_t MinInlineCapacity = 0,
-          typename AllocPolicy = TempAllocPolicy>
+          typename AllocPolicy = js::TempAllocPolicy>
 class GCVector
 {
     mozilla::Vector<T, MinInlineCapacity, AllocPolicy> vector;
@@ -43,11 +43,11 @@ class GCVector
     {}
 
     GCVector(GCVector&& vec)
-      : vector(mozilla::Move(vec.vector))
+      : vector(std::move(vec.vector))
     {}
 
     GCVector& operator=(GCVector&& vec) {
-        vector = mozilla::Move(vec.vector);
+        vector = std::move(vec.vector);
         return *this;
     }
 
@@ -68,24 +68,25 @@ class GCVector
     const T& back() const { return vector.back(); }
 
     bool initCapacity(size_t cap) { return vector.initCapacity(cap); }
-    bool reserve(size_t req) { return vector.reserve(req); }
+    MOZ_MUST_USE bool reserve(size_t req) { return vector.reserve(req); }
     void shrinkBy(size_t amount) { return vector.shrinkBy(amount); }
-    bool growBy(size_t amount) { return vector.growBy(amount); }
-    bool resize(size_t newLen) { return vector.resize(newLen); }
+    MOZ_MUST_USE bool growBy(size_t amount) { return vector.growBy(amount); }
+    MOZ_MUST_USE bool resize(size_t newLen) { return vector.resize(newLen); }
 
     void clear() { return vector.clear(); }
+    void clearAndFree() { return vector.clearAndFree(); }
 
-    template<typename U> bool append(U&& item) { return vector.append(mozilla::Forward<U>(item)); }
+    template<typename U> bool append(U&& item) { return vector.append(std::forward<U>(item)); }
 
     template<typename... Args>
-    bool
+    MOZ_MUST_USE bool
     emplaceBack(Args&&... args) {
-        return vector.emplaceBack(mozilla::Forward<Args>(args)...);
+        return vector.emplaceBack(std::forward<Args>(args)...);
     }
 
     template<typename U>
     void infallibleAppend(U&& aU) {
-        return vector.infallibleAppend(mozilla::Forward<U>(aU));
+        return vector.infallibleAppend(std::forward<U>(aU));
     }
     void infallibleAppendN(const T& aT, size_t aN) {
         return vector.infallibleAppendN(aT, aN);
@@ -98,12 +99,21 @@ class GCVector
         return vector.infallibleAppend(aBegin, aLength);
     }
 
-    bool appendN(const T& val, size_t count) { return vector.appendN(val, count); }
+    template<typename U>
+    MOZ_MUST_USE bool appendAll(const U& aU) {
+        return vector.append(aU.begin(), aU.end());
+    }
 
-    template<typename U> bool append(const U* aBegin, const U* aEnd) {
+    MOZ_MUST_USE bool appendN(const T& val, size_t count) {
+        return vector.appendN(val, count);
+    }
+
+    template<typename U>
+    MOZ_MUST_USE bool append(const U* aBegin, const U* aEnd) {
         return vector.append(aBegin, aEnd);
     }
-    template<typename U> bool append(const U* aBegin, size_t aLength) {
+    template<typename U>
+    MOZ_MUST_USE bool append(const U* aBegin, size_t aLength) {
         return vector.append(aBegin, aLength);
     }
 
@@ -124,13 +134,35 @@ class GCVector
         for (auto& elem : vector)
             GCPolicy<T>::trace(trc, &elem, "vector element");
     }
+
+    bool needsSweep() const {
+        return !this->empty();
+    }
+
+    void sweep() {
+        uint32_t src, dst = 0;
+        for (src = 0; src < length(); src++) {
+            if (!GCPolicy<T>::needsSweep(&vector[src])) {
+                if (dst != src)
+                    vector[dst] = vector[src].unbarrieredGet();
+                dst++;
+            }
+        }
+
+        if (dst != length())
+            vector.shrinkTo(dst);
+    }
 };
 
-template <typename Outer, typename T, size_t Capacity, typename AllocPolicy>
-class GCVectorOperations
+} // namespace JS
+
+namespace js {
+
+template <typename Wrapper, typename T, size_t Capacity, typename AllocPolicy>
+class WrappedPtrOperations<JS::GCVector<T, Capacity, AllocPolicy>, Wrapper>
 {
-    using Vec = GCVector<T, Capacity, AllocPolicy>;
-    const Vec& vec() const { return static_cast<const Outer*>(this)->get(); }
+    using Vec = JS::GCVector<T, Capacity, AllocPolicy>;
+    const Vec& vec() const { return static_cast<const Wrapper*>(this)->get(); }
 
   public:
     const AllocPolicy& allocPolicy() const { return vec().allocPolicy(); }
@@ -146,13 +178,13 @@ class GCVectorOperations
     }
 };
 
-template <typename Outer, typename T, size_t Capacity, typename AllocPolicy>
-class MutableGCVectorOperations
-  : public GCVectorOperations<Outer, T, Capacity, AllocPolicy>
+template <typename Wrapper, typename T, size_t Capacity, typename AllocPolicy>
+class MutableWrappedPtrOperations<JS::GCVector<T, Capacity, AllocPolicy>, Wrapper>
+  : public WrappedPtrOperations<JS::GCVector<T, Capacity, AllocPolicy>, Wrapper>
 {
-    using Vec = GCVector<T, Capacity, AllocPolicy>;
-    const Vec& vec() const { return static_cast<const Outer*>(this)->get(); }
-    Vec& vec() { return static_cast<Outer*>(this)->get(); }
+    using Vec = JS::GCVector<T, Capacity, AllocPolicy>;
+    const Vec& vec() const { return static_cast<const Wrapper*>(this)->get(); }
+    Vec& vec() { return static_cast<Wrapper*>(this)->get(); }
 
   public:
     const AllocPolicy& allocPolicy() const { return vec().allocPolicy(); }
@@ -171,31 +203,35 @@ class MutableGCVectorOperations
         return JS::MutableHandle<T>::fromMarkedLocation(&vec().operator[](aIndex));
     }
 
-    bool initCapacity(size_t aRequest) { return vec().initCapacity(aRequest); }
-    bool reserve(size_t aRequest) { return vec().reserve(aRequest); }
+    MOZ_MUST_USE bool initCapacity(size_t aRequest) { return vec().initCapacity(aRequest); }
+    MOZ_MUST_USE bool reserve(size_t aRequest) { return vec().reserve(aRequest); }
     void shrinkBy(size_t aIncr) { vec().shrinkBy(aIncr); }
-    bool growBy(size_t aIncr) { return vec().growBy(aIncr); }
-    bool resize(size_t aNewLength) { return vec().resize(aNewLength); }
-    bool growByUninitialized(size_t aIncr) { return vec().growByUninitialized(aIncr); }
+    MOZ_MUST_USE bool growBy(size_t aIncr) { return vec().growBy(aIncr); }
+    MOZ_MUST_USE bool resize(size_t aNewLength) { return vec().resize(aNewLength); }
+    MOZ_MUST_USE bool growByUninitialized(size_t aIncr) { return vec().growByUninitialized(aIncr); }
     void infallibleGrowByUninitialized(size_t aIncr) { vec().infallibleGrowByUninitialized(aIncr); }
-    bool resizeUninitialized(size_t aNewLength) { return vec().resizeUninitialized(aNewLength); }
+    MOZ_MUST_USE bool resizeUninitialized(size_t aNewLength) { return vec().resizeUninitialized(aNewLength); }
     void clear() { vec().clear(); }
     void clearAndFree() { vec().clearAndFree(); }
-    template<typename U> bool append(U&& aU) { return vec().append(mozilla::Forward<U>(aU)); }
-    template<typename... Args> bool emplaceBack(Args&&... aArgs) {
-        return vec().emplaceBack(mozilla::Forward<Args...>(aArgs...));
+    template<typename U>
+    MOZ_MUST_USE bool append(U&& aU) { return vec().append(std::forward<U>(aU)); }
+    template<typename... Args>
+    MOZ_MUST_USE bool emplaceBack(Args&&... aArgs) {
+        return vec().emplaceBack(std::forward<Args...>(aArgs...));
     }
-    template<typename U, size_t O, class BP>
-    bool appendAll(const mozilla::Vector<U, O, BP>& aU) { return vec().appendAll(aU); }
-    bool appendN(const T& aT, size_t aN) { return vec().appendN(aT, aN); }
-    template<typename U> bool append(const U* aBegin, const U* aEnd) {
+    template<typename U>
+    MOZ_MUST_USE bool appendAll(const U& aU) { return vec().appendAll(aU); }
+    MOZ_MUST_USE bool appendN(const T& aT, size_t aN) { return vec().appendN(aT, aN); }
+    template<typename U>
+    MOZ_MUST_USE bool append(const U* aBegin, const U* aEnd) {
         return vec().append(aBegin, aEnd);
     }
-    template<typename U> bool append(const U* aBegin, size_t aLength) {
+    template<typename U>
+    MOZ_MUST_USE bool append(const U* aBegin, size_t aLength) {
         return vec().append(aBegin, aLength);
     }
     template<typename U> void infallibleAppend(U&& aU) {
-        vec().infallibleAppend(mozilla::Forward<U>(aU));
+        vec().infallibleAppend(std::forward<U>(aU));
     }
     void infallibleAppendN(const T& aT, size_t aN) { vec().infallibleAppendN(aT, aN); }
     template<typename U> void infallibleAppend(const U* aBegin, const U* aEnd) {
@@ -207,32 +243,25 @@ class MutableGCVectorOperations
     void popBack() { vec().popBack(); }
     T popCopy() { return vec().popCopy(); }
     template<typename U> T* insert(T* aP, U&& aVal) {
-        return vec().insert(aP, mozilla::Forward<U>(aVal));
+        return vec().insert(aP, std::forward<U>(aVal));
     }
     void erase(T* aT) { vec().erase(aT); }
     void erase(T* aBegin, T* aEnd) { vec().erase(aBegin, aEnd); }
 };
 
-template <typename T, size_t N, typename AP>
-class RootedBase<GCVector<T,N,AP>>
-  : public MutableGCVectorOperations<JS::Rooted<GCVector<T,N,AP>>, T,N,AP>
-{};
-
-template <typename T, size_t N, typename AP>
-class MutableHandleBase<GCVector<T,N,AP>>
-  : public MutableGCVectorOperations<JS::MutableHandle<GCVector<T,N,AP>>, T,N,AP>
-{};
-
-template <typename T, size_t N, typename AP>
-class HandleBase<GCVector<T,N,AP>>
-  : public GCVectorOperations<JS::Handle<GCVector<T,N,AP>>, T,N,AP>
-{};
-
-template <typename T, size_t N, typename AP>
-class PersistentRootedBase<GCVector<T,N,AP>>
-  : public MutableGCVectorOperations<JS::PersistentRooted<GCVector<T,N,AP>>, T,N,AP>
-{};
-
 } // namespace js
+
+namespace JS {
+
+// An automatically rooted vector for stack use.
+template <typename T>
+class AutoVector : public Rooted<GCVector<T, 8>> {
+    using Vec = GCVector<T, 8>;
+    using Base = Rooted<Vec>;
+  public:
+    explicit AutoVector(JSContext* cx) : Base(cx, Vec(cx)) {}
+};
+
+} // namespace JS
 
 #endif // js_GCVector_h

@@ -5,6 +5,8 @@
 <script src=/resources/testharnessreport.js></script>
 <script src=/common/utils.js></script>
 <script src=../constants.js?pipe=sub></script>
+<meta name="variant" content="">
+<meta name="variant" content="?wss">
 <p>Test requires popup blocker disabled</p>
 <div id=log></div>
 <script>
@@ -19,6 +21,6 @@ t.step(function() {
   });
 });
 navigate = t.step_func(function() {
-  w.location = 'data:text/html,<body onload="history.back()">';
+  w.location = w.location.href.replace("002-1.html", "002-2.html");
 });
 </script>

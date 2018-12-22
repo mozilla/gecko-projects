@@ -9,7 +9,7 @@
 #include "txCore.h"
 
 class FunctionCall;
-class nsIAtom;
+class nsAtom;
 class txAExprResult;
 class txResultRecycler;
 class txXPathNode;
@@ -19,7 +19,7 @@ class txXPathNode;
  *
  * This interface describes the context needed to create
  * XPath Expressions and XSLT Patters.
- * (not completely though. key() requires the ProcessorState, which is 
+ * (not completely though. key() requires the ProcessorState, which is
  * not part of this interface.)
  */
 
@@ -33,13 +33,13 @@ public:
     /*
      * Return a namespaceID for a given prefix.
      */
-    virtual nsresult resolveNamespacePrefix(nsIAtom* aPrefix, int32_t& aID) = 0;
+    virtual nsresult resolveNamespacePrefix(nsAtom* aPrefix, int32_t& aID) = 0;
 
     /*
      * Create a FunctionCall, needed for extension function calls and
      * XSLT. XPath function calls are resolved by the Parser.
      */
-    virtual nsresult resolveFunctionCall(nsIAtom* aName, int32_t aID,
+    virtual nsresult resolveFunctionCall(nsAtom* aName, int32_t aID,
                                          FunctionCall** aFunction) = 0;
 
     /**
@@ -78,17 +78,18 @@ public:
     }
 
     /*
-     * Return the ExprResult associated with the variable with the 
+     * Return the ExprResult associated with the variable with the
      * given namespace and local name.
      */
-    virtual nsresult getVariable(int32_t aNamespace, nsIAtom* aLName,
+    virtual nsresult getVariable(int32_t aNamespace, nsAtom* aLName,
                                  txAExprResult*& aResult) = 0;
 
     /*
      * Is whitespace stripping allowed for the given node?
      * See http://www.w3.org/TR/xslt#strip
      */
-    virtual bool isStripSpaceAllowed(const txXPathNode& aNode) = 0;
+    virtual nsresult isStripSpaceAllowed(const txXPathNode& aNode,
+                                         bool& aAllowed) = 0;
 
     /**
      * Returns a pointer to the private context
@@ -104,12 +105,13 @@ public:
 };
 
 #define TX_DECL_MATCH_CONTEXT \
-    nsresult getVariable(int32_t aNamespace, nsIAtom* aLName, \
-                         txAExprResult*& aResult); \
-    bool isStripSpaceAllowed(const txXPathNode& aNode); \
-    void* getPrivateContext(); \
-    txResultRecycler* recycler(); \
-    void receiveError(const nsAString& aMsg, nsresult aRes)
+    nsresult getVariable(int32_t aNamespace, nsAtom* aLName, \
+                         txAExprResult*& aResult) override; \
+    nsresult isStripSpaceAllowed(const txXPathNode& aNode, \
+                                 bool& aAllowed) override; \
+    void* getPrivateContext() override; \
+    txResultRecycler* recycler() override; \
+    void receiveError(const nsAString& aMsg, nsresult aRes) override
 
 class txIEvalContext : public txIMatchContext
 {
@@ -133,8 +135,8 @@ public:
 
 #define TX_DECL_EVAL_CONTEXT \
     TX_DECL_MATCH_CONTEXT; \
-    const txXPathNode& getContextNode(); \
-    uint32_t size(); \
-    uint32_t position()
+    const txXPathNode& getContextNode() override; \
+    uint32_t size() override; \
+    uint32_t position() override
 
 #endif // __TX_I_XPATH_CONTEXT

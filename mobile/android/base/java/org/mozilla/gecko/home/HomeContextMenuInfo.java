@@ -5,9 +5,11 @@
 
 package org.mozilla.gecko.home;
 
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.util.StringUtils;
 
 import android.database.Cursor;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.AdapterView.AdapterContextMenuInfo;
@@ -21,36 +23,20 @@ public class HomeContextMenuInfo extends AdapterContextMenuInfo {
 
     public String url;
     public String title;
-    public boolean isFolder;
-    public int historyId = -1;
+    /* package-private */ boolean isFolder;
+    /* package-private */ int historyId = -1;
     public int bookmarkId = -1;
-    public int readingListItemId = -1;
-    public boolean isUnread;
     public RemoveItemType itemType = null;
 
+    /* package-private */ @Nullable Boolean isAsPinned;
+
     // Item type to be handled with "Remove" selection.
-    public static enum RemoveItemType {
-        BOOKMARKS, HISTORY, READING_LIST
+    /* package-private */ enum RemoveItemType {
+        BOOKMARKS, COMBINED, HISTORY
     }
 
     public HomeContextMenuInfo(View targetView, int position, long id) {
         super(targetView, position, id);
-    }
-
-    public boolean hasBookmarkId() {
-        return bookmarkId > -1;
-    }
-
-    public boolean hasHistoryId() {
-        return historyId > -1;
-    }
-
-    public boolean isInReadingList() {
-        return readingListItemId > -1;
-    }
-
-    public boolean canRemove() {
-        return hasBookmarkId() || hasHistoryId() || isInReadingList();
     }
 
     public String getDisplayTitle() {
@@ -60,24 +46,44 @@ public class HomeContextMenuInfo extends AdapterContextMenuInfo {
         return StringUtils.stripCommonSubdomains(StringUtils.stripScheme(url, StringUtils.UrlFlags.STRIP_HTTPS));
     }
 
+    /* package-private */ boolean hasBookmarkId() {
+        return bookmarkId > -1;
+    }
+
+    /* package-private */ boolean hasPartnerBookmarkId() {
+        return bookmarkId <= BrowserContract.Bookmarks.FAKE_PARTNER_BOOKMARKS_START;
+    }
+
+    /* package-private */ boolean canRemove() {
+        return hasBookmarkId() || hasHistoryId() || hasPartnerBookmarkId();
+    }
+
+    /* package-private */ void updateAsPinned(boolean pinnedState) {
+        isAsPinned = pinnedState;
+    }
+
+    private boolean hasHistoryId() {
+        return historyId > -1;
+    }
+
     /**
      * Interface for creating ContextMenuInfo instances from cursors.
      */
     public interface Factory {
-        public HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor);
+        HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor);
     }
 
     /**
      * Interface for creating ContextMenuInfo instances from ListAdapters.
      */
-    public interface ListFactory extends Factory {
-        public HomeContextMenuInfo makeInfoForAdapter(View view, int position, long id, ListAdapter adapter);
+    /* package-private */ interface ListFactory extends Factory {
+        HomeContextMenuInfo makeInfoForAdapter(View view, int position, long id, ListAdapter adapter);
     }
 
     /**
      * Interface for creating ContextMenuInfo instances from ExpandableListAdapters.
      */
-    public interface ExpandableFactory {
-        public HomeContextMenuInfo makeInfoForAdapter(View view, int position, long id, ExpandableListAdapter adapter);
+    /* package-private */ interface ExpandableFactory {
+        HomeContextMenuInfo makeInfoForAdapter(View view, int position, long id, ExpandableListAdapter adapter);
     }
 }

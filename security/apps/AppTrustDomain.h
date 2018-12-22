@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_psm_AppsTrustDomain_h
-#define mozilla_psm_AppsTrustDomain_h
+#ifndef AppTrustDomain_h
+#define AppTrustDomain_h
 
 #include "pkix/pkixtypes.h"
 #include "mozilla/StaticMutex.h"
@@ -21,9 +21,9 @@ class AppTrustDomain final : public mozilla::pkix::TrustDomain
 public:
   typedef mozilla::pkix::Result Result;
 
-  AppTrustDomain(ScopedCERTCertList&, void* pinArg);
+  AppTrustDomain(UniqueCERTCertList& certChain, void* pinArg);
 
-  SECStatus SetTrustedRoot(AppTrustedRoot trustedRoot);
+  nsresult SetTrustedRoot(AppTrustedRoot trustedRoot);
 
   virtual Result GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
                               const mozilla::pkix::CertPolicyId& policy,
@@ -40,7 +40,9 @@ public:
                     /*optional*/ const mozilla::pkix::Input* stapledOCSPresponse,
                     /*optional*/ const mozilla::pkix::Input* aiaExtension) override;
   virtual Result IsChainValid(const mozilla::pkix::DERArray& certChain,
-                              mozilla::pkix::Time time) override;
+                              mozilla::pkix::Time time,
+                              const mozilla::pkix::CertPolicyId& requiredPolicy)
+                              override;
   virtual Result CheckSignatureDigestAlgorithm(
                    mozilla::pkix::DigestAlgorithm digestAlg,
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
@@ -61,16 +63,21 @@ public:
                    mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
                    mozilla::pkix::EndEntityOrCA endEntityOrCA,
                    mozilla::pkix::KeyPurposeId keyPurpose) override;
+  virtual Result NetscapeStepUpMatchesServerAuth(
+                   mozilla::pkix::Time notBefore,
+                   /*out*/ bool& matches) override;
+  virtual void NoteAuxiliaryExtension(
+                   mozilla::pkix::AuxiliaryExtension extension,
+                   mozilla::pkix::Input extensionData) override;
   virtual Result DigestBuf(mozilla::pkix::Input item,
                            mozilla::pkix::DigestAlgorithm digestAlg,
                            /*out*/ uint8_t* digestBuf,
                            size_t digestBufLen) override;
 
 private:
-  /*out*/ ScopedCERTCertList& mCertChain;
+  /*out*/ UniqueCERTCertList& mCertChain;
   void* mPinArg; // non-owning!
-  ScopedCERTCertificate mTrustedRoot;
-  unsigned int mMinRSABits;
+  UniqueCERTCertificate mTrustedRoot;
 
   static StaticMutex sMutex;
   static UniquePtr<unsigned char[]> sDevImportedDERData;
@@ -79,4 +86,4 @@ private:
 
 } } // namespace mozilla::psm
 
-#endif // mozilla_psm_AppsTrustDomain_h
+#endif // AppTrustDomain_h

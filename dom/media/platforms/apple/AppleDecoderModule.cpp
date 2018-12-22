@@ -7,14 +7,12 @@
 #include "AppleATDecoder.h"
 #include "AppleCMLinker.h"
 #include "AppleDecoderModule.h"
-#include "AppleVDADecoder.h"
-#include "AppleVDALinker.h"
 #include "AppleVTDecoder.h"
 #include "AppleVTLinker.h"
 #include "MacIOSurfaceImage.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 
 namespace mozilla {
 
@@ -22,36 +20,23 @@ bool AppleDecoderModule::sInitialized = false;
 bool AppleDecoderModule::sIsCoreMediaAvailable = false;
 bool AppleDecoderModule::sIsVTAvailable = false;
 bool AppleDecoderModule::sIsVTHWAvailable = false;
-bool AppleDecoderModule::sIsVDAAvailable = false;
-bool AppleDecoderModule::sForceVDA = false;
 bool AppleDecoderModule::sCanUseHardwareVideoDecoder = true;
 
-AppleDecoderModule::AppleDecoderModule()
-{
-}
+AppleDecoderModule::AppleDecoderModule() { }
 
-AppleDecoderModule::~AppleDecoderModule()
-{
-}
+AppleDecoderModule::~AppleDecoderModule() { }
 
 /* static */
 void
 AppleDecoderModule::Init()
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
-
   if (sInitialized) {
     return;
   }
 
-  Preferences::AddBoolVarCache(&sForceVDA, "media.apple.forcevda", false);
-
   // Ensure IOSurface framework is loaded.
   MacIOSurfaceLib::LoadLibrary();
   const bool loaded = MacIOSurfaceLib::isInit();
-
-  // dlopen VideoDecodeAcceleration.framework if it's available.
-  sIsVDAAvailable = loaded && AppleVDALinker::Link();
 
   // dlopen CoreMedia.framework if it's available.
   sIsCoreMediaAvailable = AppleCMLinker::Link();
@@ -64,7 +49,7 @@ AppleDecoderModule::Init()
   sIsVTHWAvailable = AppleVTLinker::skPropEnableHWAccel != nullptr;
 
   sCanUseHardwareVideoDecoder = loaded &&
-    gfxPlatform::GetPlatform()->CanUseHardwareVideoDecoding();
+    gfx::gfxVars::CanUseHardwareVideoDecoding();
 
   sInitialized = true;
 }
@@ -72,69 +57,39 @@ AppleDecoderModule::Init()
 nsresult
 AppleDecoderModule::Startup()
 {
-  if (!sInitialized || (!sIsVDAAvailable && !sIsVTAvailable)) {
+  if (!sInitialized || !sIsVTAvailable) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
 }
 
 already_AddRefed<MediaDataDecoder>
-AppleDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
-                                       layers::LayersBackend aLayersBackend,
-                                       layers::ImageContainer* aImageContainer,
-                                       FlushableTaskQueue* aVideoTaskQueue,
-                                       MediaDataDecoderCallback* aCallback)
+AppleDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
-  RefPtr<MediaDataDecoder> decoder;
-
-  if (sIsVDAAvailable && (!sIsVTHWAvailable || sForceVDA)) {
-    decoder =
-      AppleVDADecoder::CreateVDADecoder(aConfig,
-                                        aVideoTaskQueue,
-                                        aCallback,
-                                        aImageContainer);
-    if (decoder) {
-      return decoder.forget();
-    }
-  }
-  // We fallback here if VDA isn't available, or is available but isn't
-  // supported by the current platform.
-  if (sIsVTAvailable) {
-    decoder =
-      new AppleVTDecoder(aConfig, aVideoTaskQueue, aCallback, aImageContainer);
-  }
+  RefPtr<MediaDataDecoder> decoder =
+    new AppleVTDecoder(aParams.VideoConfig(),
+                       aParams.mTaskQueue,
+                       aParams.mImageContainer);
   return decoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-AppleDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
-                                       FlushableTaskQueue* aAudioTaskQueue,
-                                       MediaDataDecoderCallback* aCallback)
+AppleDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
 {
   RefPtr<MediaDataDecoder> decoder =
-    new AppleATDecoder(aConfig, aAudioTaskQueue, aCallback);
+    new AppleATDecoder(aParams.AudioConfig(), aParams.mTaskQueue);
   return decoder.forget();
 }
 
 bool
-AppleDecoderModule::SupportsMimeType(const nsACString& aMimeType) const
+AppleDecoderModule::SupportsMimeType(const nsACString& aMimeType,
+                                     DecoderDoctorDiagnostics* aDiagnostics) const
 {
   return (sIsCoreMediaAvailable &&
           (aMimeType.EqualsLiteral("audio/mpeg") ||
            aMimeType.EqualsLiteral("audio/mp4a-latm"))) ||
-    ((sIsVTAvailable || sIsVDAAvailable) &&
-     (aMimeType.EqualsLiteral("video/mp4") ||
-      aMimeType.EqualsLiteral("video/avc")));
-}
-
-PlatformDecoderModule::ConversionRequired
-AppleDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
-{
-  if (aConfig.IsVideo()) {
-    return kNeedAVCC;
-  } else {
-    return kNeedNone;
-  }
+    (sIsVTAvailable && (aMimeType.EqualsLiteral("video/mp4") ||
+                        aMimeType.EqualsLiteral("video/avc")));
 }
 
 } // namespace mozilla

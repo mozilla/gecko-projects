@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,13 +15,13 @@
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
 #include "nsString.h"
+#include "nsTArrayForwardDeclare.h"
 #include "nsTHashtable.h"
 
 template <class> struct already_AddRefed;
 class nsIFile;
 class nsIRunnable;
 class nsIThreadPool;
-template <class> class nsTArray;
 
 namespace mozilla {
 
@@ -43,7 +45,7 @@ class FileHandleThreadPool final
   struct StoragesCompleteCallback;
 
   nsCOMPtr<nsIThreadPool> mThreadPool;
-  nsCOMPtr<nsIEventTarget> mOwningThread;
+  nsCOMPtr<nsIEventTarget> mOwningEventTarget;
 
   nsClassHashtable<nsCStringHashKey, DirectoryInfo> mDirectoryInfos;
 
@@ -200,7 +202,7 @@ protected:
   virtual PBackgroundFileHandleParent*
   AllocPBackgroundFileHandleParent(const FileMode& aMode) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvPBackgroundFileHandleConstructor(PBackgroundFileHandleParent* aActor,
                                        const FileMode& aMode) override;
 
@@ -208,10 +210,10 @@ protected:
   DeallocPBackgroundFileHandleParent(PBackgroundFileHandleParent* aActor)
                                      override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvDeleteMe() override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvGetFileId(int64_t* aFileId) override;
 };
 

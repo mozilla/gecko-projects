@@ -3,14 +3,14 @@ Any copyright is dedicated to the Public Domain.
 http://creativecommons.org/publicdomain/zero/1.0/
 */
 
-Components.utils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 function test() {
   waitForExplicitFinish();
 
   // We overload this test to include verifying that httpd.js is
   // importable as a testing-only JS module.
-  Components.utils.import("resource://testing-common/httpd.js", {});
+  ChromeUtils.import("resource://testing-common/httpd.js", {});
 
   nextTest();
 }
@@ -40,8 +40,8 @@ function test_asyncFetchBadCert() {
       uri: "https://untrusted.example.com",
       loadUsingSystemPrincipal: true});
     channel.notificationCallbacks = {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIProgressEventSink,
-                                             Ci.nsIInterfaceRequestor]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIProgressEventSink,
+                                              Ci.nsIInterfaceRequestor]),
       getInterface: function (aIID) { return this.QueryInterface(aIID); },
       onProgress: function () {},
       onStatus: function () {}
@@ -76,8 +76,6 @@ WindowListener.prototype = {
                               .getInterface(Ci.nsIDOMWindow);
     var self = this;
     domwindow.addEventListener("load", function() {
-      domwindow.removeEventListener("load", arguments.callee, false);
-
       if (domwindow.document.location.href != self.url)
         return;
 
@@ -85,8 +83,7 @@ WindowListener.prototype = {
       executeSoon(function() {
         self.callback(domwindow);
       });
-    }, false);
+    }, {once: true});
   },
   onCloseWindow: function(aXULWindow) {},
-  onWindowTitleChange: function(aXULWindow, aNewTitle) {}
 }

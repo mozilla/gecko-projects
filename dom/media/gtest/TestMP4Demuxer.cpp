@@ -5,17 +5,17 @@
 
 #include "gtest/gtest.h"
 #include "MP4Demuxer.h"
-#include "MP4Stream.h"
 #include "mozilla/MozPromise.h"
 #include "MediaDataDemuxer.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Unused.h"
 #include "MockMediaResource.h"
 #include "VideoUtils.h"
 
 using namespace mozilla;
-using namespace mp4_demuxer;
+using media::TimeUnit;
 
 class AutoTaskQueue;
 
@@ -43,7 +43,7 @@ public:
     , mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK)))
     , mIndex(0)
   {
-    EXPECT_EQ(NS_OK, resource->Open(nullptr));
+    EXPECT_EQ(NS_OK, resource->Open());
   }
 
   template<typename Function>
@@ -51,7 +51,7 @@ public:
   {
     Function func(aFunction);
     RefPtr<MP4DemuxerBinding> binding = this;
-    mDemuxer->Init()->Then(mTaskQueue, __func__, Move(func), DO_FAIL);
+    mDemuxer->Init()->Then(mTaskQueue, __func__, std::move(func), DO_FAIL);
     mTaskQueue->AwaitShutdownAndIdle();
   }
 
@@ -63,7 +63,7 @@ public:
     RefPtr<MediaTrackDemuxer> track = aTrackDemuxer;
     RefPtr<MP4DemuxerBinding> binding = this;
 
-    int64_t time = -1;
+    auto time = TimeUnit::Invalid();
     while (mIndex < mSamples.Length()) {
       uint32_t i = mIndex++;
       if (mSamples[i]->mKeyframe) {
@@ -74,7 +74,7 @@ public:
 
     RefPtr<GenericPromise> p = mCheckTrackKeyFramePromise.Ensure(__func__);
 
-    if (time == -1) {
+    if (!time.IsValid()) {
       mCheckTrackKeyFramePromise.Resolve(true, __func__);
       return p;
     }
@@ -82,7 +82,7 @@ public:
 
     DispatchTask(
       [track, time, binding] () {
-        track->Seek(media::TimeUnit::FromMicroseconds(time))->Then(binding->mTaskQueue, __func__,
+        track->Seek(time)->Then(binding->mTaskQueue, __func__,
           [track, time, binding] () {
             track->GetSamples()->Then(binding->mTaskQueue, __func__,
               [track, time, binding] (RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
@@ -119,19 +119,19 @@ public:
               binding->CheckTrackSamples(track);
             }
           },
-          [binding] (DemuxerFailureReason aReason) {
-            if (aReason == DemuxerFailureReason::DEMUXER_ERROR) {
-              EXPECT_TRUE(false);
-              binding->mCheckTrackSamples.Reject(NS_ERROR_FAILURE, __func__);
-            } else if (aReason == DemuxerFailureReason::END_OF_STREAM) {
+          [binding] (const MediaResult& aError) {
+            if (aError == NS_ERROR_DOM_MEDIA_END_OF_STREAM) {
               EXPECT_TRUE(binding->mSamples.Length() > 1);
               for (uint32_t i = 0; i < (binding->mSamples.Length() - 1); i++) {
                 EXPECT_LT(binding->mSamples[i]->mTimecode, binding->mSamples[i + 1]->mTimecode);
                 if (binding->mSamples[i]->mKeyframe) {
-                  binding->mKeyFrameTimecodes.AppendElement(binding->mSamples[i]->mTimecode);
+                  binding->mKeyFrameTimecodes.AppendElement(binding->mSamples[i]->mTimecode.ToMicroseconds());
                 }
               }
               binding->mCheckTrackSamples.Resolve(true, __func__);
+            } else {
+              EXPECT_TRUE(false);
+              binding->mCheckTrackSamples.Reject(aError, __func__);
             }
           }
         );
@@ -147,8 +147,9 @@ private:
   void
   DispatchTask(FunctionType aFun)
   {
-    RefPtr<nsRunnable> r = NS_NewRunnableFunction(aFun);
-    mTaskQueue->Dispatch(r.forget());
+    RefPtr<Runnable> r =
+      NS_NewRunnableFunction("MP4DemuxerBinding::DispatchTask", aFun);
+    Unused << mTaskQueue->Dispatch(r.forget());
   }
 
   virtual ~MP4DemuxerBinding()
@@ -183,7 +184,7 @@ ToCryptoString(const CryptoSample& aCrypto)
     for (size_t i = 0; i < aCrypto.mKeyId.Length(); i++) {
       res.AppendPrintf("%02x", aCrypto.mKeyId[i]);
     }
-    res.Append(" ");
+    res.AppendLiteral(" ");
     for (size_t i = 0; i < aCrypto.mIV.Length(); i++) {
       res.AppendPrintf("%02x", aCrypto.mIV[i]);
     }
@@ -193,7 +194,7 @@ ToCryptoString(const CryptoSample& aCrypto)
                        aCrypto.mEncryptedSizes[i]);
     }
   } else {
-    res.Append("no crypto");
+    res.AppendLiteral("no crypto");
   }
   return res;
 }
@@ -415,14 +416,14 @@ TEST(MP4Demuxer, GetNextKeyframe)
 
     // gizmp-frag has two keyframes; one at dts=cts=0, and another at
     // dts=cts=1000000. Verify we get expected results.
-    media::TimeUnit time;
+    TimeUnit time;
     binding->mVideoTrack = binding->mDemuxer->GetTrackDemuxer(TrackInfo::kVideoTrack, 0);
     binding->mVideoTrack->Reset();
     binding->mVideoTrack->GetNextRandomAccessPoint(&time);
     EXPECT_EQ(time.ToMicroseconds(), 0);
     binding->mVideoTrack->GetSamples()->Then(binding->mTaskQueue, __func__,
       [binding] () {
-        media::TimeUnit time;
+        TimeUnit time;
         binding->mVideoTrack->GetNextRandomAccessPoint(&time);
         EXPECT_EQ(time.ToMicroseconds(), 1000000);
         binding->mTaskQueue->BeginShutdown();
@@ -445,6 +446,15 @@ TEST(MP4Demuxer, ZeroInLastMoov)
 TEST(MP4Demuxer, ZeroInMoovQuickTime)
 {
   RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("short-zero-inband.mov");
+  binding->RunTestAndWait([binding] () {
+    // It demuxes without error. That is sufficient.
+    binding->mTaskQueue->BeginShutdown();
+  });
+}
+
+TEST(MP4Demuxer, IgnoreMinus1Duration)
+{
+  RefPtr<MP4DemuxerBinding> binding = new MP4DemuxerBinding("negative_duration.mp4");
   binding->RunTestAndWait([binding] () {
     // It demuxes without error. That is sufficient.
     binding->mTaskQueue->BeginShutdown();

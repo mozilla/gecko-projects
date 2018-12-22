@@ -13,28 +13,32 @@ const snapshot = require("./snapshot");
  *
  * @param {HeapAnalysesWorker} heapWorker
  */
-exports.refresh = function (heapWorker) {
-  return function* (dispatch, getState) {
-    switch (getState().view) {
+exports.refresh = function(heapWorker) {
+  return async function(dispatch, getState) {
+    switch (getState().view.state) {
       case viewState.DIFFING:
         assert(getState().diffing, "Should have diffing state if in diffing view");
-        yield dispatch(refreshDiffing(heapWorker));
+        await dispatch(refreshDiffing(heapWorker));
         return;
 
       case viewState.CENSUS:
-        yield dispatch(snapshot.refreshSelectedCensus(heapWorker));
+        await dispatch(snapshot.refreshSelectedCensus(heapWorker));
         return;
 
       case viewState.DOMINATOR_TREE:
-        yield dispatch(snapshot.refreshSelectedDominatorTree(heapWorker));
+        await dispatch(snapshot.refreshSelectedDominatorTree(heapWorker));
         return;
 
       case viewState.TREE_MAP:
-        yield dispatch(snapshot.refreshSelectedTreeMap(heapWorker));
+        await dispatch(snapshot.refreshSelectedTreeMap(heapWorker));
+        return;
+
+      case viewState.INDIVIDUALS:
+        await dispatch(snapshot.refreshIndividuals(heapWorker));
         return;
 
       default:
-        assert(false, `Unexpected view state: ${getState().view}`);
+        assert(false, `Unexpected view state: ${getState().view.state}`);
     }
   };
 };

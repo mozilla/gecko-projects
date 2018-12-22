@@ -5,12 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "xpcprivate.h"
-#include "jsprf.h"
 #include "nsThreadUtils.h"
 #include "nsContentUtils.h"
 
+#include "mozilla/Sprintf.h"
+
 #ifdef XP_WIN
 #include <windows.h>
+#endif
+
+#ifdef ANDROID
+#include <android/log.h>
 #endif
 
 static void DebugDump(const char* fmt, ...)
@@ -18,17 +23,14 @@ static void DebugDump(const char* fmt, ...)
   char buffer[2048];
   va_list ap;
   va_start(ap, fmt);
-#ifdef XPWIN
-  _vsnprintf(buffer, sizeof(buffer), fmt, ap);
-#else
-  vsnprintf(buffer, sizeof(buffer), fmt, ap);
-#endif
-  buffer[sizeof(buffer)-1] = '\0';
+  VsprintfLiteral(buffer, fmt, ap);
   va_end(ap);
 #ifdef XP_WIN
   if (IsDebuggerPresent()) {
     OutputDebugStringA(buffer);
   }
+#elif defined(ANDROID)
+  __android_log_write(ANDROID_LOG_DEBUG, "Gecko", buffer);
 #endif
   printf("%s", buffer);
 }
@@ -36,23 +38,22 @@ static void DebugDump(const char* fmt, ...)
 bool
 xpc_DumpJSStack(bool showArgs, bool showLocals, bool showThisProps)
 {
-    JSContext* cx = nsContentUtils::GetCurrentJSContextForThread();
+    JSContext* cx = nsContentUtils::GetCurrentJSContext();
     if (!cx) {
         printf("there is no JSContext on the stack!\n");
-    } else if (char* buf = xpc_PrintJSStack(cx, showArgs, showLocals, showThisProps)) {
-        DebugDump("%s\n", buf);
-        JS_smprintf_free(buf);
+    } else if (JS::UniqueChars buf = xpc_PrintJSStack(cx, showArgs, showLocals, showThisProps)) {
+        DebugDump("%s\n", buf.get());
     }
     return true;
 }
 
-char*
+JS::UniqueChars
 xpc_PrintJSStack(JSContext* cx, bool showArgs, bool showLocals,
                  bool showThisProps)
 {
     JS::AutoSaveExceptionState state(cx);
 
-    char* buf = JS::FormatStackDump(cx, nullptr, showArgs, showLocals, showThisProps);
+    JS::UniqueChars buf = JS::FormatStackDump(cx, nullptr, showArgs, showLocals, showThisProps);
     if (!buf)
         DebugDump("%s", "Failed to format JavaScript stack for dump\n");
 

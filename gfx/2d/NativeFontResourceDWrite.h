@@ -18,7 +18,8 @@ namespace gfx {
 class NativeFontResourceDWrite final : public NativeFontResource
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(NativeFontResourceDWrite)
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(NativeFontResourceDWrite, override)
+
   /**
    * Creates a NativeFontResourceDWrite if data is valid. Note aFontData will be
    * copied if required and so can be released after calling.
@@ -31,8 +32,10 @@ public:
   static already_AddRefed<NativeFontResourceDWrite>
     Create(uint8_t *aFontData, uint32_t aDataLength, bool aNeedsCairo);
 
-  already_AddRefed<ScaledFont>
-    CreateScaledFont(uint32_t aIndex, uint32_t aGlyphSize) final;
+  already_AddRefed<UnscaledFont>
+    CreateUnscaledFont(uint32_t aIndex,
+                       const uint8_t* aInstanceData,
+                       uint32_t aInstanceDataLength) final;
 
 private:
   NativeFontResourceDWrite(IDWriteFactory *aFactory,

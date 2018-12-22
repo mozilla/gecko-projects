@@ -7,10 +7,9 @@
 
 const { Cc, Ci, Cu, Cr } = require("chrome");
 const EventEmitter = require("devtools/shared/event-emitter");
-const { WebAudioFront } = require("devtools/server/actors/webaudio");
-var Promise = require("promise");
+const { WebAudioFront } = require("devtools/shared/fronts/webaudio");
 
-function WebAudioEditorPanel (iframeWindow, toolbox) {
+function WebAudioEditorPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
   this._toolbox = toolbox;
   this._destroyer = null;
@@ -44,9 +43,9 @@ WebAudioEditorPanel.prototype = {
         this.emit("ready");
         return this;
       })
-      .then(null, function onError(aReason) {
-        Cu.reportError("WebAudioEditorPanel open failed. " +
-                       aReason.error + ": " + aReason.message);
+      .catch(function onError(aReason) {
+        console.error("WebAudioEditorPanel open failed. " +
+                      aReason.error + ": " + aReason.message);
       });
   },
 

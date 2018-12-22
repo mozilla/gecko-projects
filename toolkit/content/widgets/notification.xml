@@ -12,7 +12,8 @@
 <bindings id="notificationBindings"
           xmlns="http://www.mozilla.org/xbl"
           xmlns:xbl="http://www.mozilla.org/xbl"
-          xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+          xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+          xmlns:html = "http://www.w3.org/1999/xhtml">
 
   <binding id="notificationbox">
     <content>
@@ -42,23 +43,35 @@
       <field name="_blockingCanvas">null</field>
       <field name="_animating">false</field>
 
+      <property name="_allowAnimation">
+        <getter>
+          <![CDATA[
+            var prefs = Cc["@mozilla.org/preferences-service;1"]
+                          .getService(Ci.nsIPrefBranch);
+            return prefs.getBoolPref("toolkit.cosmeticAnimations.enabled");
+          ]]>
+        </getter>
+      </property>
+
       <property name="notificationsHidden"
                 onget="return this.getAttribute('notificationshidden') == 'true';">
         <setter>
-          if (val)
-            this.setAttribute('notificationshidden', true);
-          else this.removeAttribute('notificationshidden');
-          return val;
+          <![CDATA[
+            if (val)
+              this.setAttribute("notificationshidden", true);
+            else this.removeAttribute("notificationshidden");
+            return val;
+          ]]>
         </setter>
       </property>
 
       <property name="allNotifications" readonly="true">
         <getter>
-        <![CDATA[
-          var closedNotification = this._closedNotification;
-          var notifications = this.getElementsByTagName('notification');
-          return Array.filter(notifications, n => n != closedNotification);
-        ]]>
+          <![CDATA[
+            var closedNotification = this._closedNotification;
+            var notifications = this.getElementsByTagName("notification");
+            return Array.filter(notifications, n => n != closedNotification);
+          ]]>
         </getter>
       </property>
 
@@ -206,8 +219,8 @@
             this.removeChild(aChild);
 
             // make sure focus doesn't get lost (workaround for bug 570835)
-            let fm = Components.classes["@mozilla.org/focus-manager;1"]
-                               .getService(Components.interfaces.nsIFocusManager);
+            let fm = Cc["@mozilla.org/focus-manager;1"]
+                       .getService(Ci.nsIFocusManager);
             if (!fm.getFocusedElementForWindow(window, false, {}))
               fm.moveFocus(window, this, fm.MOVEFOCUS_FORWARD, 0);
           ]]>
@@ -236,8 +249,13 @@
             }
             this.currentNotification = null;
 
-            // Must clear up any currently animating notification
-            if (aImmediate)
+            // Clean up any currently-animating notification; this is necessary
+            // if a notification was just opened and is still animating, but we
+            // want to close it *without* animating.  This can even happen if
+            // the user toggled `toolkit.cosmeticAnimations.enabled` to false
+            // and called this method immediately after an animated notification
+            // displayed (although this case isn't very likely).
+            if (aImmediate || !this._allowAnimation)
               this._finishAnimation();
           ]]>
         </body>
@@ -267,7 +285,9 @@
             this._finishAnimation();
 
             var height = aNotification.boxObject.height;
-            var skipAnimation = aSkipAnimation || (height == 0);
+            var skipAnimation = aSkipAnimation || height == 0 ||
+                                !this._allowAnimation;
+            aNotification.classList.toggle("animated", !skipAnimation);
 
             if (aSlideIn) {
               this.currentNotification = aNotification;
@@ -280,8 +300,7 @@
                 this._setBlockingState(this.currentNotification);
                 return;
               }
-            }
-            else {
+            } else {
               this._closedNotification = aNotification;
               var notifications = this.allNotifications;
               var idx = notifications.length - 1;
@@ -346,8 +365,8 @@
 
               var bgcolor = "white";
               try {
-                var prefService = Components.classes["@mozilla.org/preferences-service;1"].
-                                    getService(Components.interfaces.nsIPrefBranch);
+                var prefService = Cc["@mozilla.org/preferences-service;1"].
+                                    getService(Ci.nsIPrefBranch);
                 bgcolor = prefService.getCharPref("browser.display.background_color");
 
                 var win = content.contentWindow;
@@ -355,11 +374,9 @@
                 context.globalAlpha = 0.5;
                 context.drawWindow(win, win.scrollX, win.scrollY,
                                    width, height, bgcolor);
-              }
-              catch(ex) { }
-            }
-            else if (canvas) {
-              canvas.parentNode.removeChild(canvas);
+              } catch (ex) { }
+            } else if (canvas) {
+              canvas.remove();
               this._blockingCanvas = null;
               let content = this.firstChild;
               if (content)
@@ -381,22 +398,21 @@
 
   </binding>
 
-  <binding id="notification" role="xul:alert">
+  <binding id="notification">
     <content>
-      <xul:hbox class="notification-inner" flex="1" xbl:inherits="type">
-        <xul:hbox anonid="details" align="center" flex="1"
-                  oncommand="this.parentNode.parentNode._doButtonCommand(event);">
-          <xul:image anonid="messageImage" class="messageImage" xbl:inherits="src=image,type,value"/>
-          <xul:description anonid="messageText" class="messageText" flex="1" xbl:inherits="xbl:text=label"/>
-          <xul:spacer flex="1"/>
-          <children/>
-        </xul:hbox>
-        <xul:toolbarbutton ondblclick="event.stopPropagation();"
-                           class="messageCloseButton close-icon tabbable"
-                           xbl:inherits="hidden=hideclose"
-                           tooltiptext="&closeNotification.tooltip;"
-                           oncommand="document.getBindingParent(this).close();"/>
+      <xul:hbox anonid="details" align="center" flex="1"
+                oncommand="this.parentNode._doButtonCommand(event);">
+        <xul:image anonid="messageImage" class="messageImage" xbl:inherits="src=image,type,value"/>
+        <xul:description anonid="messageText" class="messageText" flex="1" xbl:inherits="xbl:text=label"/>
+        <xul:spacer flex="1"/>
+        <children/>
       </xul:hbox>
+      <xul:toolbarbutton ondblclick="event.stopPropagation();"
+                         class="messageCloseButton close-icon tabbable"
+                         anonid="close-button"
+                         xbl:inherits="hidden=hideclose"
+                         tooltiptext="&closeNotification.tooltip;"
+                         oncommand="document.getBindingParent(this).dismiss();"/>
     </content>
     <resources>
       <stylesheet src="chrome://global/skin/notification.css"/>
@@ -430,6 +446,21 @@
         </getter>
       </property>
 
+      <!-- This method should only be called when the user has
+           manually closed the notification. If you want to
+           programmatically close the notification, you should
+           call close() instead. -->
+      <method name="dismiss">
+        <body>
+          <![CDATA[
+            if (this.eventCallback) {
+              this.eventCallback("dismissed");
+            }
+            this.close();
+          ]]>
+        </body>
+      </method>
+
       <method name="close">
         <body>
           <![CDATA[
@@ -454,11 +485,10 @@
               document.getElementById(button.popup).
                 openPopup(aEvent.originalTarget, "after_start", 0, 0, false, false, aEvent);
               aEvent.stopPropagation();
-            }
-            else {
+            } else {
               var callback = button.callback;
               if (callback) {
-                var result = callback(this, button, aEvent.target);
+                var result = callback(this, button, aEvent.target, aEvent);
                 if (!result)
                   this.close();
                 aEvent.stopPropagation();
@@ -471,56 +501,79 @@
   </binding>
 
   <binding id="popup-notification">
-    <content>
-      <xul:vbox>
+    <content orient="vertical">
+      <xul:hbox align="start" class="popup-notification-body-container">
         <xul:image class="popup-notification-icon"
-                   xbl:inherits="popupid,src=icon"/>
-      </xul:vbox>
-      <xul:vbox class="popup-notification-body" xbl:inherits="popupid">
-        <xul:hbox align="start">
-          <xul:vbox flex="1">
-            <xul:label class="popup-notification-origin header"
-                       xbl:inherits="value=origin,tooltiptext=origin"
-                       crop="center"/>
-            <xul:description class="popup-notification-description"
-                             xbl:inherits="xbl:text=label,popupid"/>
-          </xul:vbox>
-          <xul:toolbarbutton anonid="closebutton"
-                             class="messageCloseButton close-icon popup-notification-closebutton tabbable"
-                             xbl:inherits="oncommand=closebuttoncommand"
-                             tooltiptext="&closeNotification.tooltip;"/>
-        </xul:hbox>
-        <children includes="popupnotificationcontent"/>
-        <xul:label class="text-link popup-notification-learnmore-link"
-               xbl:inherits="onclick=learnmoreclick,href=learnmoreurl">&learnMore;</xul:label>
-        <xul:spacer flex="1"/>
-        <xul:hbox class="popup-notification-button-container"
-                  pack="end" align="center">
-          <children includes="button"/>
-          <xul:button anonid="button"
-                      class="popup-notification-menubutton"
-                      type="menu-button"
-                      xbl:inherits="oncommand=buttoncommand,onpopupshown=buttonpopupshown,label=buttonlabel,accesskey=buttonaccesskey">
-            <xul:menupopup anonid="menupopup"
-                           xbl:inherits="oncommand=menucommand">
-              <children/>
-              <xul:menuitem class="menuitem-iconic popup-notification-closeitem"
-                            label="&closeNotificationItem.label;"
-                            xbl:inherits="oncommand=closeitemcommand,hidden=hidenotnow"/>
-            </xul:menupopup>
-          </xul:button>
-        </xul:hbox>
-      </xul:vbox>
+                   xbl:inherits="popupid,src=icon,class=iconclass"/>
+        <xul:vbox flex="1" pack="start"
+                  class="popup-notification-body" xbl:inherits="popupid">
+          <xul:hbox align="start">
+            <xul:vbox flex="1">
+              <xul:label class="popup-notification-origin header"
+                         xbl:inherits="value=origin,tooltiptext=origin"
+                         crop="center"/>
+              <!-- These need to be on the same line to avoid creating
+                   whitespace between them (whitespace is added in the
+                   localization file, if necessary). -->
+              <xul:description class="popup-notification-description" xbl:inherits="popupid"><html:span
+                xbl:inherits="xbl:text=label,popupid"/><html:b xbl:inherits="xbl:text=name,popupid"/><html:span
+              xbl:inherits="xbl:text=endlabel,popupid"/></xul:description>
+            </xul:vbox>
+            <xul:toolbarbutton anonid="closebutton"
+                               class="messageCloseButton close-icon popup-notification-closebutton tabbable"
+                               xbl:inherits="oncommand=closebuttoncommand,hidden=closebuttonhidden"
+                               tooltiptext="&closeNotification.tooltip;"/>
+          </xul:hbox>
+          <children includes="popupnotificationcontent"/>
+          <xul:label class="text-link popup-notification-learnmore-link"
+                     xbl:inherits="onclick=learnmoreclick,href=learnmoreurl">&learnMore;</xul:label>
+          <xul:checkbox anonid="checkbox"
+                        xbl:inherits="hidden=checkboxhidden,checked=checkboxchecked,label=checkboxlabel,oncommand=checkboxcommand" />
+          <xul:description class="popup-notification-warning" xbl:inherits="hidden=warninghidden,xbl:text=warninglabel"/>
+        </xul:vbox>
+      </xul:hbox>
+      <xul:hbox class="popup-notification-button-container">
+        <children includes="button"/>
+        <xul:button anonid="secondarybutton"
+                    class="popup-notification-button"
+                    xbl:inherits="oncommand=secondarybuttoncommand,label=secondarybuttonlabel,accesskey=secondarybuttonaccesskey,hidden=secondarybuttonhidden"/>
+        <xul:toolbarseparator xbl:inherits="hidden=dropmarkerhidden"/>
+        <xul:button anonid="menubutton"
+                    type="menu"
+                    class="popup-notification-button popup-notification-dropmarker"
+                    xbl:inherits="onpopupshown=dropmarkerpopupshown,hidden=dropmarkerhidden">
+          <xul:menupopup anonid="menupopup"
+                         position="after_end"
+                         xbl:inherits="oncommand=menucommand">
+            <children/>
+          </xul:menupopup>
+        </xul:button>
+        <xul:button anonid="button"
+                    class="popup-notification-button"
+                    default="true"
+                    label="&defaultButton.label;"
+                    accesskey="&defaultButton.accesskey;"
+                    xbl:inherits="oncommand=buttoncommand,label=buttonlabel,accesskey=buttonaccesskey,highlight=buttonhighlight,disabled=mainactiondisabled"/>
+      </xul:hbox>
     </content>
     <resources>
       <stylesheet src="chrome://global/skin/notification.css"/>
     </resources>
     <implementation>
+      <field name="checkbox" readonly="true">
+        document.getAnonymousElementByAttribute(this, "anonid", "checkbox");
+      </field>
       <field name="closebutton" readonly="true">
         document.getAnonymousElementByAttribute(this, "anonid", "closebutton");
       </field>
       <field name="button" readonly="true">
         document.getAnonymousElementByAttribute(this, "anonid", "button");
+      </field>
+      <field name="secondaryButton" readonly="true">
+        document.getAnonymousElementByAttribute(this, "anonid", "secondarybutton");
+      </field>
+      <field name="menubutton" readonly="true">
+        document.getAnonymousElementByAttribute(this, "anonid", "menubutton");
       </field>
       <field name="menupopup" readonly="true">
         document.getAnonymousElementByAttribute(this, "anonid", "menupopup");

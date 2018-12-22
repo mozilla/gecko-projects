@@ -10,7 +10,7 @@
 
 namespace mozilla {
 namespace a11y {
- 
+
 /**
  * Generic class used for text nodes.
  */
@@ -21,10 +21,10 @@ public:
   virtual ~TextLeafAccessible();
 
   // Accessible
-  virtual mozilla::a11y::role NativeRole() override;
+  virtual mozilla::a11y::role NativeRole() const override;
   virtual void AppendTextTo(nsAString& aText, uint32_t aStartOffset = 0,
                             uint32_t aLength = UINT32_MAX) override;
-  virtual ENameValueFlag Name(nsString& aName) override;
+  virtual ENameValueFlag Name(nsString& aName) const override;
 
   // TextLeafAccessible
   void SetText(const nsAString& aText) { mText = aText; }

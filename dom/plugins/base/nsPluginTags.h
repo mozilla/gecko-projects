@@ -8,9 +8,9 @@
 
 #include "mozilla/Attributes.h"
 #include "nscore.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
+#include "nsIBlocklistService.h"
 #include "nsIPluginTag.h"
 #include "nsITimer.h"
 #include "nsString.h"
@@ -31,6 +31,9 @@ struct FakePluginTagInit;
 { 0xe8fdd227, 0x27da, 0x46ee,     \
   { 0xbe, 0xf3, 0x1a, 0xef, 0x5a, 0x8f, 0xc5, 0xb4 } }
 
+#define NS_PLUGINTAG_IID \
+  { 0xcce2e8b9, 0x9702, 0x4d4b, \
+   { 0xbe, 0xa4, 0x7c, 0x1e, 0x13, 0x1f, 0xaf, 0x78 } }
 class nsIInternalPluginTag : public nsIPluginTag
 {
 public:
@@ -91,6 +94,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIInternalPluginTag, NS_IINTERNALPLUGINTAG_IID)
 class nsPluginTag final : public nsIInternalPluginTag
 {
 public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_PLUGINTAG_IID)
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPLUGINTAG
 
@@ -104,7 +109,8 @@ public:
 
   nsPluginTag(nsPluginInfo* aPluginInfo,
               int64_t aLastModifiedTime,
-              bool fromExtension);
+              bool fromExtension,
+              uint32_t aBlocklistState);
   nsPluginTag(const char* aName,
               const char* aDescription,
               const char* aFileName,
@@ -116,6 +122,7 @@ public:
               int32_t aVariants,
               int64_t aLastModifiedTime,
               bool fromExtension,
+              uint32_t aBlocklistState,
               bool aArgsAreUTF8 = false);
   nsPluginTag(uint32_t aId,
               const char* aName,
@@ -126,12 +133,12 @@ public:
               nsTArray<nsCString> aMimeTypes,
               nsTArray<nsCString> aMimeDescriptions,
               nsTArray<nsCString> aExtensions,
-              bool aIsJavaPlugin,
               bool aIsFlashPlugin,
-              bool aSupportsAsyncInit,
+              bool aSupportsAsyncRender,
               int64_t aLastModifiedTime,
               bool aFromExtension,
-              int32_t aSandboxLevel);
+              int32_t aSandboxLevel,
+              uint32_t aBlocklistState);
 
   void TryUnloadPlugin(bool inShutdown);
 
@@ -142,12 +149,11 @@ public:
   void SetEnabled(bool enabled);
   bool IsClicktoplay();
   bool IsBlocklisted();
+  uint32_t BlocklistState();
 
   PluginState GetPluginState();
   void SetPluginState(PluginState state);
-
-  // import legacy flags from plugin registry into the preferences
-  void ImportFlagsToPrefs(uint32_t flag);
+  void SetBlocklistState(uint32_t aBlocklistState);
 
   bool HasSameNameAndMimes(const nsPluginTag *aPluginTag) const;
   const nsCString& GetNiceFileName() override;
@@ -165,23 +171,20 @@ public:
 
   PRLibrary     *mLibrary;
   RefPtr<nsNPAPIPlugin> mPlugin;
-  bool          mIsJavaPlugin;
   bool          mIsFlashPlugin;
-  bool          mSupportsAsyncInit;
+  bool          mSupportsAsyncRender;
   nsCString     mFullPath; // UTF-8
   int64_t       mLastModifiedTime;
   nsCOMPtr<nsITimer> mUnloadTimer;
   int32_t       mSandboxLevel;
-
-  void          InvalidateBlocklistState();
+  bool          mIsSandboxLoggingEnabled;
 
 private:
   virtual ~nsPluginTag();
 
   nsCString     mNiceFileName; // UTF-8
-  uint16_t      mCachedBlocklistState;
-  bool          mCachedBlocklistStateValid;
   bool          mIsFromExtension;
+  uint32_t      mBlocklistState;
 
   void InitMime(const char* const* aMimeTypes,
                 const char* const* aMimeDescriptions,
@@ -193,6 +196,7 @@ private:
 
   static uint32_t sNextId;
 };
+NS_DEFINE_STATIC_IID_ACCESSOR(nsPluginTag, NS_PLUGINTAG_IID)
 
 // A class representing "fake" plugin tags; that is plugin tags not
 // corresponding to actual NPAPI plugins.  In practice these are all
@@ -207,6 +211,15 @@ public:
 
   static nsresult Create(const mozilla::dom::FakePluginTagInit& aInitDictionary,
                          nsFakePluginTag** aPluginTag);
+  nsFakePluginTag(uint32_t aId,
+                  already_AddRefed<nsIURI>&& aHandlerURI,
+                  const char* aName,
+                  const char* aDescription,
+                  const nsTArray<nsCString>& aMimeTypes,
+                  const nsTArray<nsCString>& aMimeDescriptions,
+                  const nsTArray<nsCString>& aExtensions,
+                  const nsCString& aNiceName,
+                  const nsString& aSandboxScript);
 
   bool IsEnabled() override;
   const nsCString& GetNiceFileName() override;
@@ -215,9 +228,22 @@ public:
 
   nsIURI* HandlerURI() const { return mHandlerURI; }
 
+  uint32_t Id() const { return mId; }
+
+  const nsString& SandboxScript() const { return mSandboxScript; }
+
+  static const int32_t NOT_JSPLUGIN = -1;
+
 private:
   nsFakePluginTag();
   virtual ~nsFakePluginTag();
+
+  // A unique id for this JS-implemented plugin. Registering a plugin through
+  // nsPluginHost::RegisterFakePlugin assigns a new id. The id is transferred
+  // through IPC when getting the list of JS-implemented plugins from child
+  // processes, so it should be consistent across processes.
+  // 0 is a valid id.
+  uint32_t      mId;
 
   // The URI of the handler for our fake plugin.
   // FIXME-jsplugins do we need to sanity check these?
@@ -226,7 +252,13 @@ private:
   nsCString     mFullPath;
   nsCString     mNiceName;
 
+  nsString      mSandboxScript;
+
   nsPluginTag::PluginState mState;
+
+  // Stores the id to use for the JS-implemented plugin that gets registered
+  // next through nsPluginHost::RegisterFakePlugin.
+  static uint32_t sNextId;
 };
 
 #endif // nsPluginTags_h_

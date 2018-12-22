@@ -46,17 +46,28 @@ public:
     // nsViewSourceChannel methods:
     nsViewSourceChannel()
         : mIsDocument(false)
-        , mOpened(false) {}
+        , mOpened(false)
+        , mIsSrcdocChannel(false) {}
 
-    nsresult Init(nsIURI* uri);
+    MOZ_MUST_USE nsresult Init(nsIURI* uri);
 
-    nsresult InitSrcdoc(nsIURI* aURI,
-                        nsIURI* aBaseURI,
-                        const nsAString &aSrcdoc,
-                        nsILoadInfo* aLoadInfo);
+    MOZ_MUST_USE nsresult InitSrcdoc(nsIURI* aURI,
+                                     nsIURI* aBaseURI,
+                                     const nsAString &aSrcdoc,
+                                     nsILoadInfo* aLoadInfo);
+
+    // Updates or sets the result principal URI of the underlying channel's
+    // loadinfo to be prefixed with the "view-source:" schema as:
+    //
+    // mChannel.loadInfo.resultPrincipalURI = "view-source:" +
+    //    (mChannel.loadInfo.resultPrincipalURI | mChannel.orignalURI);
+    nsresult UpdateLoadInfoResultPrincipalURI();
 
 protected:
-    ~nsViewSourceChannel() {}
+    ~nsViewSourceChannel() = default;
+
+    // Clones aURI and prefixes it with "view-source:" schema,
+    nsresult BuildViewSourceURI(nsIURI* aURI, nsIURI** aResult);
 
     nsCOMPtr<nsIChannel>        mChannel;
     nsCOMPtr<nsIHttpChannel>    mHttpChannel;

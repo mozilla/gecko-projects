@@ -3,13 +3,17 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<!DOCTYPE bindings [
+  <!ENTITY % globalKeysDTD SYSTEM "chrome://global/locale/globalKeys.dtd">
+  %globalKeysDTD;
+]>
 
 <bindings id="dialogBindings"
           xmlns="http://www.mozilla.org/xbl"
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
           xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="dialog" extends="chrome://global/content/bindings/general.xml#root-element">
+  <binding id="dialog">
     <resources>
       <stylesheet src="chrome://global/skin/dialog.css"/>
     </resources>
@@ -40,6 +44,16 @@
         <xul:button dlgtype="disclosure" class="dialog-button" hidden="true"/>
 #endif
       </xul:hbox>
+
+    <xul:keyset>
+      <xul:key phase="capturing" oncommand="document.documentElement.openHelp(event)"
+#ifdef XP_MACOSX
+           key="&openHelpMac.commandkey;" modifiers="accel"/>
+#else
+           keycode="&openHelp.commandkey;"/>
+#endif
+    </xul:keyset>
+
     </content>
 
     <implementation>
@@ -58,8 +72,7 @@
         <![CDATA[
           if (this.hasAttribute("defaultButton"))
             return this.getAttribute("defaultButton");
-          else // default to the accept button
-            return "accept";
+          return "accept"; // default to the accept button
         ]]>
         </getter>
         <setter>
@@ -134,8 +147,8 @@
       <method name="centerWindowOnScreen">
         <body>
         <![CDATA[
-          var xOffset = screen.availWidth/2 - window.outerWidth/2;
-          var yOffset = screen.availHeight/2 - window.outerHeight/2; //(opener.outerHeight *2)/10;
+          var xOffset = screen.availWidth / 2 - window.outerWidth / 2;
+          var yOffset = screen.availHeight / 2 - window.outerHeight / 2;
 
           xOffset = xOffset > 0 ? xOffset : 0;
           yOffset = yOffset > 0 ? yOffset : 0;
@@ -149,10 +162,10 @@
         this._configureButtons(this.buttons);
 
         // listen for when window is closed via native close buttons
-        window.addEventListener("close", this._closeHandler, false);
+        window.addEventListener("close", this._closeHandler);
 
         // for things that we need to initialize after onload fires
-        window.addEventListener("load", this.postLoadInit, false);
+        window.addEventListener("load", this.postLoadInit);
 
         window.moveToAlertPosition = this.moveToAlertPosition;
         window.centerWindowOnScreen = this.centerWindowOnScreen;
@@ -163,9 +176,6 @@
         <parameter name="aEvent"/>
         <body>
         <![CDATA[
-          let { AppConstants } =
-              Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
-
           function focusInit() {
             const dialog = document.documentElement;
             const defaultButton = dialog.getButton(dialog.defaultButton);
@@ -180,8 +190,12 @@
                        focusedElt.getAttribute("noinitialfocus") == "true") {
                   document.commandDispatcher.advanceFocusIntoSubtree(focusedElt);
                   focusedElt = document.commandDispatcher.focusedElement;
-                  if (focusedElt == initialFocusedElt)
+                  if (focusedElt == initialFocusedElt) {
+                    if (focusedElt.getAttribute("noinitialfocus") == "true") {
+                      focusedElt.blur();
+                    }
                     break;
+                  }
                 }
 
                 if (initialFocusedElt.localName == "tab") {
@@ -190,9 +204,8 @@
                     // so return focus to the tab itself
                     initialFocusedElt.focus();
                   }
-                }
-                else if (AppConstants.platform != "macosx" &&
-                         focusedElt.hasAttribute("dlgtype") && focusedElt != defaultButton) {
+                } else if (!/Mac/.test(navigator.platform) &&
+                           focusedElt.hasAttribute("dlgtype") && focusedElt != defaultButton) {
                   defaultButton.focus();
                 }
               }
@@ -210,15 +223,29 @@
         </body>
       </method>
 
+      <method name="openHelp">
+        <parameter name="event"/>
+        <body>
+        <![CDATA[
+          var helpButton = document.documentElement.getButton("help");
+          if (helpButton.disabled || helpButton.hidden)
+            return;
+          this._fireButtonEvent("help");
+          event.stopPropagation();
+          event.preventDefault();
+        ]]>
+        </body>
+      </method>
+
       <property name="mStrBundle">
         <getter>
         <![CDATA[
           if (!this._mStrBundle) {
             // need to create string bundle manually instead of using <xul:stringbundle/>
             // see bug 63370 for details
-            this._mStrBundle = Components.classes["@mozilla.org/intl/stringbundle;1"]
-                                         .getService(Components.interfaces.nsIStringBundleService)
-                                         .createBundle("chrome://global/locale/dialog.properties");
+            this._mStrBundle = Cc["@mozilla.org/intl/stringbundle;1"]
+                                 .getService(Ci.nsIStringBundleService)
+                                 .createBundle("chrome://global/locale/dialog.properties");
           }
           return this._mStrBundle;
         ]]></getter>
@@ -256,13 +283,13 @@
             // don't override custom labels with pre-defined labels on explicit buttons
             if (!button.hasAttribute("label")) {
               // dialog attributes override the default labels in dialog.properties
-              if (this.hasAttribute("buttonlabel"+dlgtype)) {
-                button.setAttribute("label", this.getAttribute("buttonlabel"+dlgtype));
-                if (this.hasAttribute("buttonaccesskey"+dlgtype))
-                  button.setAttribute("accesskey", this.getAttribute("buttonaccesskey"+dlgtype));
+              if (this.hasAttribute("buttonlabel" + dlgtype)) {
+                button.setAttribute("label", this.getAttribute("buttonlabel" + dlgtype));
+                if (this.hasAttribute("buttonaccesskey" + dlgtype))
+                  button.setAttribute("accesskey", this.getAttribute("buttonaccesskey" + dlgtype));
               } else if (dlgtype != "extra1" && dlgtype != "extra2") {
-                button.setAttribute("label", this.mStrBundle.GetStringFromName("button-"+dlgtype));
-                var accessKey = this.mStrBundle.GetStringFromName("accesskey-"+dlgtype);
+                button.setAttribute("label", this.mStrBundle.GetStringFromName("button-" + dlgtype));
+                var accessKey = this.mStrBundle.GetStringFromName("accesskey-" + dlgtype);
                 if (accessKey)
                   button.setAttribute("accesskey", accessKey);
               }
@@ -270,22 +297,22 @@
             // allow specifying alternate icons in the dialog header
             if (!button.hasAttribute("icon")) {
               // if there's an icon specified, use that
-              if (this.hasAttribute("buttonicon"+dlgtype))
-                button.setAttribute("icon", this.getAttribute("buttonicon"+dlgtype));
+              if (this.hasAttribute("buttonicon" + dlgtype))
+                button.setAttribute("icon", this.getAttribute("buttonicon" + dlgtype));
               // otherwise set defaults
               else
                 switch (dlgtype) {
                   case "accept":
-                    button.setAttribute("icon","accept");
+                    button.setAttribute("icon", "accept");
                     break;
                   case "cancel":
-                    button.setAttribute("icon","cancel");
+                    button.setAttribute("icon", "cancel");
                     break;
                   case "disclosure":
-                    button.setAttribute("icon","properties");
+                    button.setAttribute("icon", "properties");
                     break;
                   case "help":
-                    button.setAttribute("icon","help");
+                    button.setAttribute("icon", "help");
                     break;
                   default:
                     break;
@@ -311,13 +338,11 @@
             for (dlgtype in buttons)
               buttons[dlgtype].hidden = !shown[dlgtype];
 
-            let { AppConstants } =
-                Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
             // show the spacer on Windows only when the extra2 button is present
-            if (AppConstants.platform == "win") {
+            if (/Win/.test(navigator.platform)) {
               var spacer = document.getAnonymousElementByAttribute(this, "anonid", "spacer");
               spacer.removeAttribute("hidden");
-              spacer.setAttribute("flex", shown["extra2"]?"1":"0");
+              spacer.setAttribute("flex", shown.extra2 ? "1" : "0");
             }
           }
         ]]>
@@ -337,11 +362,10 @@
           if (newDefaultButton) {
             this.setAttribute("defaultButton", aNewDefault);
             newDefaultButton.setAttribute("default", "true");
-          }
-          else {
+          } else {
             this.setAttribute("defaultButton", "none");
             if (aNewDefault != "none")
-              dump("invalid new default button: " +  aNewDefault + ", assuming: none\n");
+              dump("invalid new default button: " + aNewDefault + ", assuming: none\n");
           }
         ]]>
         </body>
@@ -386,16 +410,17 @@
         <body>
         <![CDATA[
           var event = document.createEvent("Events");
-          event.initEvent("dialog"+aDlgType, true, true);
+          event.initEvent("dialog" + aDlgType, true, true);
 
           // handle dom event handlers
           var noCancel = this.dispatchEvent(event);
 
           // handle any xml attribute event handlers
-          var handler = this.getAttribute("ondialog"+aDlgType);
+          var handler = this.getAttribute("ondialog" + aDlgType);
           if (handler != "") {
             var fn = new Function("event", handler);
             var returned = fn(event);
+            // eslint-disable-next-line mozilla/no-compare-against-boolean-literals
             if (returned == false)
               noCancel = false;
           }
@@ -434,21 +459,11 @@
       <handler event="focus" phase="capturing">
         var btn = this.getButton(this.defaultButton);
         if (btn)
-          btn.setAttribute("default", event.originalTarget == btn || !(event.originalTarget instanceof Components.interfaces.nsIDOMXULButtonElement));
+          btn.setAttribute("default", event.originalTarget == btn || !(event.originalTarget instanceof Ci.nsIDOMXULButtonElement));
       </handler>
 #endif
     </handlers>
 
-  </binding>
-
-  <binding id="dialogheader">
-    <resources>
-      <stylesheet src="chrome://global/skin/dialog.css"/>
-    </resources>
-    <content>
-      <xul:label class="dialogheader-title" xbl:inherits="value=title,crop" crop="right" flex="1"/>
-      <xul:label class="dialogheader-description" xbl:inherits="value=description"/>
-    </content>
   </binding>
 
 </bindings>

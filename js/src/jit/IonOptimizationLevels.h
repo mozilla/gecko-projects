@@ -9,7 +9,6 @@
 
 #include "mozilla/EnumeratedArray.h"
 
-#include "jsbytecode.h"
 #include "jstypes.h"
 
 #include "jit/JitOptions.h"
@@ -21,7 +20,7 @@ namespace jit {
 enum class OptimizationLevel : uint8_t
 {
     Normal,
-    AsmJS,
+    Wasm,
     Count,
     DontCompile
 };
@@ -35,8 +34,8 @@ OptimizationLevelString(OptimizationLevel level)
         return "Optimization_DontCompile";
       case OptimizationLevel::Normal:
         return "Optimization_Normal";
-      case OptimizationLevel::AsmJS:
-        return "Optimization_AsmJS";
+      case OptimizationLevel::Wasm:
+        return "Optimization_Wasm";
       case OptimizationLevel::Count:;
     }
     MOZ_CRASH("Invalid OptimizationLevel");
@@ -99,7 +98,7 @@ class OptimizationInfo
     // The maximum total bytecode size of an inline call site. We use a lower
     // value if off-thread compilation is not available, to avoid stalling the
     // main thread.
-    uint32_t inlineMaxBytecodePerCallSiteOffThread_;
+    uint32_t inlineMaxBytecodePerCallSiteHelperThread_;
     uint32_t inlineMaxBytecodePerCallSiteMainThread_;
 
     // The maximum value we allow for baselineScript->inlinedBytecodeLength_
@@ -132,7 +131,14 @@ class OptimizationInfo
     uint32_t compilerWarmUpThreshold_;
 
     // Default compiler warmup threshold, unless it is overridden.
-    static const uint32_t CompilerWarmupThreshold = 1000;
+    static const uint32_t CompilerWarmupThreshold;
+
+    // How many invocations or loop iterations are needed before small functions
+    // are compiled.
+    uint32_t compilerSmallFunctionWarmUpThreshold_;
+
+    // Default small function compiler warmup threshold, unless it is overridden.
+    static const uint32_t CompilerSmallFunctionWarmupThreshold;
 
     // How many invocations or loop iterations are needed before calls
     // are inlined, as a fraction of compilerWarmUpThreshold.
@@ -143,11 +149,40 @@ class OptimizationInfo
     // as a multiplication of inliningWarmUpThreshold.
     uint32_t inliningRecompileThresholdFactor_;
 
-    OptimizationInfo()
+    constexpr OptimizationInfo()
+      : level_(OptimizationLevel::Normal),
+        eaa_(false),
+        ama_(false),
+        edgeCaseAnalysis_(false),
+        eliminateRedundantChecks_(false),
+        inlineInterpreted_(false),
+        inlineNative_(false),
+        eagerSimdUnbox_(false),
+        gvn_(false),
+        licm_(false),
+        rangeAnalysis_(false),
+        loopUnrolling_(false),
+        reordering_(false),
+        autoTruncate_(false),
+        sincos_(false),
+        sink_(false),
+        registerAllocator_(RegisterAllocator_Backtracking),
+        inlineMaxBytecodePerCallSiteHelperThread_(0),
+        inlineMaxBytecodePerCallSiteMainThread_(0),
+        inlineMaxCalleeInlinedBytecodeLength_(0),
+        inlineMaxTotalBytecodeLength_(0),
+        inliningMaxCallerBytecodeLength_(0),
+        maxInlineDepth_(0),
+        scalarReplacement_(false),
+        smallFunctionMaxInlineDepth_(0),
+        compilerWarmUpThreshold_(0),
+        compilerSmallFunctionWarmUpThreshold_(0),
+        inliningWarmUpThresholdFactor_(0.0),
+        inliningRecompileThresholdFactor_(0)
     { }
 
     void initNormalOptimizationInfo();
-    void initAsmjsOptimizationInfo();
+    void initWasmOptimizationInfo();
 
     OptimizationLevel level() const {
         return level_;
@@ -216,9 +251,8 @@ class OptimizationInfo
     }
 
     IonRegisterAllocator registerAllocator() const {
-        if (JitOptions.forcedRegisterAllocator.isSome())
-            return JitOptions.forcedRegisterAllocator.ref();
-        return registerAllocator_;
+        return JitOptions.forcedRegisterAllocator
+            .valueOr(registerAllocator_);
     }
 
     bool scalarReplacementEnabled() const {
@@ -237,7 +271,7 @@ class OptimizationInfo
 
     uint32_t inlineMaxBytecodePerCallSite(bool offThread) const {
         return (offThread || !JitOptions.limitScriptSize)
-               ? inlineMaxBytecodePerCallSiteOffThread_
+               ? inlineMaxBytecodePerCallSiteHelperThread_
                : inlineMaxBytecodePerCallSiteMainThread_;
     }
 
@@ -254,9 +288,8 @@ class OptimizationInfo
     }
 
     uint32_t inliningWarmUpThreshold() const {
-        uint32_t compilerWarmUpThreshold = compilerWarmUpThreshold_;
-        if (JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
-            compilerWarmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold.ref();
+        uint32_t compilerWarmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold
+            .valueOr(compilerWarmUpThreshold_);
         return compilerWarmUpThreshold * inliningWarmUpThresholdFactor_;
     }
 

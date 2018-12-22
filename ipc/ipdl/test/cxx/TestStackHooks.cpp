@@ -1,5 +1,6 @@
 #include "TestStackHooks.h"
 
+#include "base/task.h"
 #include "IPDLUnitTests.h"      // fail etc.
 
 
@@ -29,7 +30,7 @@ TestStackHooksParent::Main()
 }
 
 
-bool
+mozilla::ipc::IPCResult
 TestStackHooksParent::AnswerStackFrame()
 {
     if (!mOnStack)
@@ -44,7 +45,7 @@ TestStackHooksParent::AnswerStackFrame()
     if (1 != mIncallDepth)
         fail("missed EnteredCall or ExitedCall hook");
 
-    return true;
+    return IPC_OK();
 }
 
 //-----------------------------------------------------------------------------
@@ -54,7 +55,8 @@ TestStackHooksChild::TestStackHooksChild() :
     mOnStack(false),
     mEntered(0),
     mExited(0),
-    mIncallDepth(0)
+    mIncallDepth(0),
+    mNumAnswerStackFrame(0)
 {
     MOZ_COUNT_CTOR(TestStackHooksChild);
 }
@@ -70,7 +72,7 @@ void RunTestsFn() {
 }
 }
 
-bool
+mozilla::ipc::IPCResult
 TestStackHooksChild::RecvStart()
 {
     if (!mOnStack)
@@ -81,37 +83,38 @@ TestStackHooksChild::RecvStart()
 
     // kick off tests from a runnable so that we can start with
     // MessageChannel code on the C++ stack
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     NewRunnableFunction(RunTestsFn));
+    MessageLoop::current()->PostTask(NewRunnableFunction(RunTestsFn));
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestStackHooksChild::AnswerStackFrame()
 {
+    ++mNumAnswerStackFrame;
+
     if (!mOnStack)
         fail("missed stack notification");
 
     if (1 != mIncallDepth)
         fail("missed EnteredCall or ExitedCall hook");
 
-    if (PTestStackHooks::TEST4_3 == state()) {
+    if (mNumAnswerStackFrame == 1) {
+        // MOZ_ASSERT(PTestStackHooks::TEST4_3 == state());
         if (!SendAsync())
             fail("sending Async()");
-    }
-    else if (PTestStackHooks::TEST5_3 == state()) {
+    } else if (mNumAnswerStackFrame == 2) {
+        // MOZ_ASSERT(PTestStackHooks::TEST5_3 == state());
         if (!SendSync())
             fail("sending Sync()");
-    }
-    else {
+    } else {
         fail("unexpected state");
     }
 
     if (!mOnStack)
         fail("bad stack exit notification");
 
-    return true;
+    return IPC_OK();
 }
 
 void

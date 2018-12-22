@@ -13,7 +13,11 @@ var gTab, gPanel, gDebugger;
 var gEditor, gSources, gSearchBox, gFilteredFunctions;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_function-search-01.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -22,8 +26,7 @@ function test() {
     gSearchBox = gDebugger.DebuggerView.Filtering._searchbox;
     gFilteredFunctions = gDebugger.DebuggerView.Filtering.FilteredFunctions;
 
-    waitForSourceShown(gPanel, "-01.js")
-      .then(() => showSource("doc_function-search.html"))
+   showSource("doc_function-search.html")
       .then(htmlSearch)
       .then(() => showSource("code_function-search-01.js"))
       .then(firstJsSearch)
@@ -37,7 +40,7 @@ function test() {
       .then(incrementalSearch)
       .then(emptySearch)
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -54,7 +57,7 @@ function htmlSearch() {
     ok(gFilteredFunctions.selectedItem,
       "An item should be selected in the filtered functions view (2).");
 
-    if (gSources.selectedItem.attachment.source.url.indexOf(".html") != -1) {
+    if (gSources.selectedItem.attachment.source.url.includes(".html")) {
       let expectedResults = [
         ["inline", ".html", "", 19, 16],
         ["arrow", ".html", "", 20, 11],
@@ -119,7 +122,7 @@ function firstJsSearch() {
     ok(gFilteredFunctions.selectedItem,
       "An item should be selected in the filtered functions view (2).");
 
-    if (gSources.selectedItem.attachment.source.url.indexOf("-01.js") != -1) {
+    if (gSources.selectedItem.attachment.source.url.includes("-01.js")) {
       let s = " " + gDebugger.L10N.getStr("functionSearchSeparatorLabel") + " ";
       let expectedResults = [
         ["test", "-01.js", "", 4, 10],
@@ -169,7 +172,7 @@ function firstJsSearch() {
       ok(isCaretPos(gPanel, expectedResults[0][3], expectedResults[0][4]),
         "The editor didn't jump to the correct line again.");
 
-      deferred.resolve()
+      deferred.resolve();
     } else {
       ok(false, "How did you get here? Go away, you.");
     }
@@ -190,7 +193,7 @@ function secondJsSearch() {
     ok(gFilteredFunctions.selectedItem,
       "An item should be selected in the filtered functions view (2).");
 
-    if (gSources.selectedItem.attachment.source.url.indexOf("-02.js") != -1) {
+    if (gSources.selectedItem.attachment.source.url.includes("-02.js")) {
       let s = " " + gDebugger.L10N.getStr("functionSearchSeparatorLabel") + " ";
       let expectedResults = [
         ["test2", "-02.js", "", 4, 5],
@@ -261,7 +264,7 @@ function thirdJsSearch() {
     ok(gFilteredFunctions.selectedItem,
       "An item should be selected in the filtered functions view (2).");
 
-    if (gSources.selectedItem.attachment.source.url.indexOf("-03.js") != -1) {
+    if (gSources.selectedItem.attachment.source.url.includes("-03.js")) {
       let s = " " + gDebugger.L10N.getStr("functionSearchSeparatorLabel") + " ";
       let expectedResults = [
         ["namedEventListener", "-03.js", "", 4, 43],
@@ -332,7 +335,7 @@ function filterSearch() {
     ok(gFilteredFunctions.selectedItem,
       "An item should be selected in the filtered functions view (2).");
 
-    if (gSources.selectedItem.attachment.source.url.indexOf("-03.js") != -1) {
+    if (gSources.selectedItem.attachment.source.url.includes("-03.js")) {
       let s = " " + gDebugger.L10N.getStr("functionSearchSeparatorLabel") + " ";
       let expectedResults = [
         ["namedEventListener", "-03.js", "", 4, 43],
@@ -458,7 +461,7 @@ function writeInfo() {
   info("Debugger editor text:\n" + gEditor.getText());
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

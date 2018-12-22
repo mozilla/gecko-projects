@@ -10,8 +10,6 @@
 #include <ctype.h> // for |EOF|, |WEOF|
 #include <string.h> // for |memcpy|, et al
 
-#include "nscore.h" // for |char16_t|
-
 // This file may be used (through nsUTF8Utils.h) from non-XPCOM code, in
 // particular the standalone software updater. In that case stub out
 // the macros provided by nsDebug.h which are only usable when linking XPCOM
@@ -97,13 +95,6 @@ struct nsCharTraits<char16_t>
 
   static char_type* const sEmptyBuffer;
 
-  static void
-  assign(char_type& aLhs, char_type aRhs)
-  {
-    aLhs = aRhs;
-  }
-
-
   // integer representation of characters:
   typedef int int_type;
 
@@ -165,16 +156,6 @@ struct nsCharTraits<char16_t>
       *s = static_cast<char_type>(*aStr2);
     }
     return aStr1;
-  }
-
-  static char_type*
-  assign(char_type* aStr, size_t aN, char_type aChar)
-  {
-    char_type* result = aStr;
-    while (aN--) {
-      assign(*aStr++, aChar);
-    }
-    return result;
   }
 
   static int
@@ -322,13 +303,6 @@ struct nsCharTraits<char>
 
   static char_type* const sEmptyBuffer;
 
-  static void
-  assign(char_type& aLhs, char_type aRhs)
-  {
-    aLhs = aRhs;
-  }
-
-
   // integer representation of characters:
 
   typedef int int_type;
@@ -386,12 +360,6 @@ struct nsCharTraits<char>
   copyASCII(char_type* aStr1, const char* aStr2, size_t aN)
   {
     return copy(aStr1, aStr2, aN);
-  }
-
-  static char_type*
-  assign(char_type* aStr, size_t aN, char_type aChar)
-  {
-    return static_cast<char_type*>(memset(aStr, to_int_type(aChar), aN));
   }
 
   static int

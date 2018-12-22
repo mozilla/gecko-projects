@@ -1,6 +1,8 @@
+// © 2016 and later: Unicode, Inc. and others.
+// License & terms of use: http://www.unicode.org/copyright.html
 /*
 **********************************************************************
-*   Copyright (c) 2002-2009, International Business Machines
+*   Copyright (c) 2002-2016, International Business Machines
 *   Corporation and others.  All Rights Reserved.
 **********************************************************************
 */
@@ -20,6 +22,7 @@
 #include "rbbidata.h"
 #include "cstring.h"
 #include "uassert.h"
+#include "uvectr32.h"
 #include "cmemory.h"
 
 U_NAMESPACE_BEGIN
@@ -78,8 +81,8 @@ void  RBBITableBuilder::build() {
     fTree = fTree->flattenVariables();
 #ifdef RBBI_DEBUG
     if (fRB->fDebugEnv && uprv_strstr(fRB->fDebugEnv, "ftree")) {
-        RBBIDebugPuts("Parse tree after flattening variable references.");
-        fTree->printTree(TRUE);
+        RBBIDebugPuts("\nParse tree after flattening variable references.");
+        RBBINode::printTree(fTree, TRUE);
     }
 #endif
 
@@ -136,8 +139,8 @@ void  RBBITableBuilder::build() {
     fTree->flattenSets();
 #ifdef RBBI_DEBUG
     if (fRB->fDebugEnv && uprv_strstr(fRB->fDebugEnv, "stree")) {
-        RBBIDebugPuts("Parse tree after flattening Unicode Set references.");
-        fTree->printTree(TRUE);
+        RBBIDebugPuts("\nParse tree after flattening Unicode Set references.");
+        RBBINode::printTree(fTree, TRUE);
     }
 #endif
 
@@ -375,6 +378,25 @@ void RBBITableBuilder::calcFollowPos(RBBINode *n) {
 
 }
 
+//-----------------------------------------------------------------------------
+//
+//    addRuleRootNodes    Recursively walk a parse tree, adding all nodes flagged
+//                        as roots of a rule to a destination vector.
+//
+//-----------------------------------------------------------------------------
+void RBBITableBuilder::addRuleRootNodes(UVector *dest, RBBINode *node) {
+    if (node == NULL || U_FAILURE(*fStatus)) {
+        return;
+    }
+    if (node->fRuleRoot) {
+        dest->addElement(node, *fStatus);
+        // Note: rules cannot nest. If we found a rule start node,
+        //       no child node can also be a start node.
+        return;
+    }
+    addRuleRootNodes(dest, node->fLeftChild);
+    addRuleRootNodes(dest, node->fRightChild);
+}
 
 //-----------------------------------------------------------------------------
 //
@@ -401,19 +423,24 @@ void RBBITableBuilder::calcChainedFollowPos(RBBINode *tree) {
         return;
     }
 
-    // Get all nodes that can be the start a match, which is FirstPosition()
-    // of the portion of the tree corresponding to user-written rules.
-    // See the tree description in bofFixup().
-    RBBINode *userRuleRoot = tree;
-    if (fRB->fSetBuilder->sawBOF()) {
-        userRuleRoot = tree->fLeftChild->fRightChild;
+    // Collect all leaf nodes that can start matches for rules
+    // with inbound chaining enabled, which is the union of the 
+    // firstPosition sets from each of the rule root nodes.
+    
+    UVector ruleRootNodes(*fStatus);
+    addRuleRootNodes(&ruleRootNodes, tree);
+
+    UVector matchStartNodes(*fStatus);
+    for (int i=0; i<ruleRootNodes.size(); ++i) {
+        RBBINode *node = static_cast<RBBINode *>(ruleRootNodes.elementAt(i));
+        if (node->fChainIn) {
+            setAdd(&matchStartNodes, node->fFirstPosSet);
+        }
     }
-    U_ASSERT(userRuleRoot != NULL);
-    UVector *matchStartNodes = userRuleRoot->fFirstPosSet;
+    if (U_FAILURE(*fStatus)) {
+        return;
+    }
 
-
-    // Iteratate over all leaf nodes,
-    //
     int32_t  endNodeIx;
     int32_t  startNodeIx;
 
@@ -455,8 +482,8 @@ void RBBITableBuilder::calcChainedFollowPos(RBBINode *tree) {
         // Now iterate over the nodes that can start a match, looking for ones
         //   with the same char class as our ending node.
         RBBINode *startNode;
-        for (startNodeIx = 0; startNodeIx<matchStartNodes->size(); startNodeIx++) {
-            startNode = (RBBINode *)matchStartNodes->elementAt(startNodeIx);
+        for (startNodeIx = 0; startNodeIx<matchStartNodes.size(); startNodeIx++) {
+            startNode = (RBBINode *)matchStartNodes.elementAt(startNodeIx);
             if (startNode->fType != RBBINode::leafChar) {
                 continue;
             }
@@ -735,7 +762,7 @@ void     RBBITableBuilder::flagAcceptingStates() {
                 // if sd->fAccepting already had a value other than 0 or -1, leave it be.
 
                 // If the end marker node is from a look-ahead rule, set
-                //   the fLookAhead field or this state also.
+                //   the fLookAhead field for this state also.
                 if (endMarker->fLookAheadEnd) {
                     // TODO:  don't change value if already set?
                     // TODO:  allow for more than one active look-ahead rule in engine.
@@ -1032,7 +1059,9 @@ void RBBITableBuilder::printPosSets(RBBINode *n) {
     if (n==NULL) {
         return;
     }
-    n->printNode();
+    printf("\n");
+    RBBINode::printNodeHeader();
+    RBBINode::printNode(n);
     RBBIDebugPrintf("         Nullable:  %s\n", n->fNullable?"TRUE":"FALSE");
 
     RBBIDebugPrintf("         firstpos:  ");
@@ -1049,7 +1078,128 @@ void RBBITableBuilder::printPosSets(RBBINode *n) {
 }
 #endif
 
+//
+//    findDuplCharClassFrom()
+//
+bool RBBITableBuilder::findDuplCharClassFrom(int32_t &baseCategory, int32_t &duplCategory) {
+    int32_t numStates = fDStates->size();
+    int32_t numCols = fRB->fSetBuilder->getNumCharCategories();
 
+    uint16_t table_base;
+    uint16_t table_dupl;
+    for (; baseCategory < numCols-1; ++baseCategory) {
+        for (duplCategory=baseCategory+1; duplCategory < numCols; ++duplCategory) {
+             for (int32_t state=0; state<numStates; state++) {
+                 RBBIStateDescriptor *sd = (RBBIStateDescriptor *)fDStates->elementAt(state);
+                 table_base = (uint16_t)sd->fDtran->elementAti(baseCategory);
+                 table_dupl = (uint16_t)sd->fDtran->elementAti(duplCategory);
+                 if (table_base != table_dupl) {
+                     break;
+                 }
+             }
+             if (table_base == table_dupl) {
+                 return true;
+             }
+        }
+    }
+    return false;
+}
+
+
+//
+//    removeColumn()
+//
+void RBBITableBuilder::removeColumn(int32_t column) {
+    int32_t numStates = fDStates->size();
+    for (int32_t state=0; state<numStates; state++) {
+        RBBIStateDescriptor *sd = (RBBIStateDescriptor *)fDStates->elementAt(state);
+        U_ASSERT(column < sd->fDtran->size());
+        sd->fDtran->removeElementAt(column);
+    }
+}
+
+/*
+ * findDuplicateState
+ */
+bool RBBITableBuilder::findDuplicateState(int32_t &firstState, int32_t &duplState) {
+    int32_t numStates = fDStates->size();
+    int32_t numCols = fRB->fSetBuilder->getNumCharCategories();
+
+    for (; firstState<numStates-1; ++firstState) {
+        RBBIStateDescriptor *firstSD = (RBBIStateDescriptor *)fDStates->elementAt(firstState);
+        for (duplState=firstState+1; duplState<numStates; ++duplState) {
+            RBBIStateDescriptor *duplSD = (RBBIStateDescriptor *)fDStates->elementAt(duplState);
+            if (firstSD->fAccepting != duplSD->fAccepting ||
+                firstSD->fLookAhead != duplSD->fLookAhead ||
+                firstSD->fTagsIdx   != duplSD->fTagsIdx) {
+                continue;
+            }
+            bool rowsMatch = true;
+            for (int32_t col=0; col < numCols; ++col) {
+                int32_t firstVal = firstSD->fDtran->elementAti(col);
+                int32_t duplVal = duplSD->fDtran->elementAti(col);
+                if (!((firstVal == duplVal) ||
+                        ((firstVal == firstState || firstVal == duplState) &&
+                        (duplVal  == firstState || duplVal  == duplState)))) {
+                    rowsMatch = false;
+                    break;
+                }
+            }
+            if (rowsMatch) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void RBBITableBuilder::removeState(int32_t keepState, int32_t duplState) {
+    U_ASSERT(keepState < duplState);
+    U_ASSERT(duplState < fDStates->size());
+
+    RBBIStateDescriptor *duplSD = (RBBIStateDescriptor *)fDStates->elementAt(duplState);
+    fDStates->removeElementAt(duplState);
+    delete duplSD;
+
+    int32_t numStates = fDStates->size();
+    int32_t numCols = fRB->fSetBuilder->getNumCharCategories();
+    for (int32_t state=0; state<numStates; ++state) {
+        RBBIStateDescriptor *sd = (RBBIStateDescriptor *)fDStates->elementAt(state);
+        for (int32_t col=0; col<numCols; col++) {
+            int32_t existingVal = sd->fDtran->elementAti(col);
+            int32_t newVal = existingVal;
+            if (existingVal == duplState) {
+                newVal = keepState;
+            } else if (existingVal > duplState) {
+                newVal = existingVal - 1;
+            }
+            sd->fDtran->setElementAt(newVal, col);
+        }
+        if (sd->fAccepting == duplState) {
+            sd->fAccepting = keepState;
+        } else if (sd->fAccepting > duplState) {
+            sd->fAccepting--;
+        }
+        if (sd->fLookAhead == duplState) {
+            sd->fLookAhead = keepState;
+        } else if (sd->fLookAhead > duplState) {
+            sd->fLookAhead--;
+        }
+    }
+}
+
+
+/*
+ * RemoveDuplicateStates
+ */
+void RBBITableBuilder::removeDuplicateStates() {
+    int32_t firstState = 3;
+    int32_t duplicateState = 0;
+    while (findDuplicateState(firstState, duplicateState)) {
+        // printf("Removing duplicate states (%d, %d)\n", firstState, duplicateState);
+        removeState(firstState, duplicateState);
+    }
+}
 
 //-----------------------------------------------------------------------------
 //
@@ -1067,19 +1217,15 @@ int32_t  RBBITableBuilder::getTableSize() const {
         return 0;
     }
 
-    size    = sizeof(RBBIStateTable) - 4;    // The header, with no rows to the table.
+    size    = offsetof(RBBIStateTable, fTableData);    // The header, with no rows to the table.
 
     numRows = fDStates->size();
     numCols = fRB->fSetBuilder->getNumCharCategories();
 
-    //  Note  The declaration of RBBIStateTableRow is for a table of two columns.
-    //        Therefore we subtract two from numCols when determining
-    //        how much storage to add to a row for the total columns.
-    rowSize = sizeof(RBBIStateTableRow) + sizeof(uint16_t)*(numCols-2);
+    rowSize = offsetof(RBBIStateTableRow, fNextState) + sizeof(uint16_t)*numCols;
     size   += numRows * rowSize;
     return size;
 }
-
 
 
 //-----------------------------------------------------------------------------
@@ -1098,14 +1244,14 @@ void RBBITableBuilder::exportTable(void *where) {
         return;
     }
 
-    if (fRB->fSetBuilder->getNumCharCategories() > 0x7fff ||
+    int32_t catCount = fRB->fSetBuilder->getNumCharCategories();
+    if (catCount > 0x7fff ||
         fDStates->size() > 0x7fff) {
         *fStatus = U_BRK_INTERNAL_ERROR;
         return;
     }
 
-    table->fRowLen    = sizeof(RBBIStateTableRow) +
-                            sizeof(uint16_t) * (fRB->fSetBuilder->getNumCharCategories() - 2);
+    table->fRowLen    = offsetof(RBBIStateTableRow, fNextState) + sizeof(uint16_t) * catCount;
     table->fNumStates = fDStates->size();
     table->fFlags     = 0;
     if (fRB->fLookAheadHardBreak) {
@@ -1124,7 +1270,7 @@ void RBBITableBuilder::exportTable(void *where) {
         row->fAccepting = (int16_t)sd->fAccepting;
         row->fLookAhead = (int16_t)sd->fLookAhead;
         row->fTagIdx    = (int16_t)sd->fTagsIdx;
-        for (col=0; col<fRB->fSetBuilder->getNumCharCategories(); col++) {
+        for (col=0; col<catCount; col++) {
             row->fNextState[col] = (uint16_t)sd->fDtran->elementAti(col);
         }
     }
@@ -1141,8 +1287,8 @@ void RBBITableBuilder::exportTable(void *where) {
 void RBBITableBuilder::printSet(UVector *s) {
     int32_t  i;
     for (i=0; i<s->size(); i++) {
-        void *v = s->elementAt(i);
-        RBBIDebugPrintf("%10p", v);
+        const RBBINode *v = static_cast<const RBBINode *>(s->elementAt(i));
+        RBBIDebugPrintf("%5d", v==NULL? -1 : v->fSerialNum);
     }
     RBBIDebugPrintf("\n");
 }
@@ -1231,7 +1377,7 @@ RBBIStateDescriptor::RBBIStateDescriptor(int lastInputSymbol, UErrorCode *fStatu
     fPositions = NULL;
     fDtran     = NULL;
 
-    fDtran     = new UVector(lastInputSymbol+1, *fStatus);
+    fDtran     = new UVector32(lastInputSymbol+1, *fStatus);
     if (U_FAILURE(*fStatus)) {
         return;
     }
@@ -1239,7 +1385,7 @@ RBBIStateDescriptor::RBBIStateDescriptor(int lastInputSymbol, UErrorCode *fStatu
         *fStatus = U_MEMORY_ALLOCATION_ERROR;
         return;
     }
-    fDtran->setSize(lastInputSymbol+1, *fStatus);    // fDtran needs to be pre-sized.
+    fDtran->setSize(lastInputSymbol+1);    // fDtran needs to be pre-sized.
                                            //   It is indexed by input symbols, and will
                                            //   hold  the next state number for each
                                            //   symbol.

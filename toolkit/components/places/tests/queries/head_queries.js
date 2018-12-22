@@ -4,15 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
-
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // Import common head.
 {
+  /* import-globals-from ../head_common.js */
   let commonFile = do_get_file("../head_common.js", false);
   let uri = Services.io.newFileURI(commonFile);
   Services.scriptloader.loadSubScript(uri.spec, this);
@@ -23,11 +19,10 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 // Some Useful Date constants - PRTime uses microseconds, so convert
 const DAY_MICROSEC = 86400000000;
-const today = Date.now() * 1000;
+const today = PlacesUtils.toPRTime(Date.now());
 const yesterday = today - DAY_MICROSEC;
 const lastweek = today - (DAY_MICROSEC * 7);
 const daybefore = today - (DAY_MICROSEC * 2);
-const tomorrow = today + DAY_MICROSEC;
 const old = today - (DAY_MICROSEC * 3);
 const futureday = today + (DAY_MICROSEC * 3);
 const olderthansixmonths = today - (DAY_MICROSEC * 31 * 7);
@@ -39,17 +34,16 @@ const olderthansixmonths = today - (DAY_MICROSEC * 31 * 7);
  * appropriate.  This function is an asynchronous task, it can be called using
  * "Task.spawn" or using the "yield" function inside another task.
  */
-function* task_populateDB(aArray)
-{
+async function task_populateDB(aArray) {
   // Iterate over aArray and execute all instructions.
-  for (let data of aArray) {
+  for (let arrayItem of aArray) {
     try {
       // make the data object into a query data object in order to create proper
       // default values for anything left unspecified
-      var qdata = new queryData(data);
+      var qdata = new queryData(arrayItem);
       if (qdata.isVisit) {
         // Then we should add a visit for this node
-        yield PlacesTestUtils.addVisits({
+        await PlacesTestUtils.addVisits({
           uri: uri(qdata.uri),
           transition: qdata.transType,
           visitDate: qdata.lastVisit,
@@ -60,16 +54,14 @@ function* task_populateDB(aArray)
           // Set a fake visit_count, this is not a real count but can be used
           // to test sorting by visit_count.
           let stmt = DBConn().createAsyncStatement(
-            "UPDATE moz_places SET visit_count = :vc WHERE url = :url");
+            "UPDATE moz_places SET visit_count = :vc WHERE url_hash = hash(:url) AND url = :url");
           stmt.params.vc = qdata.visitCount;
           stmt.params.url = qdata.uri;
           try {
             stmt.executeAsync();
-          }
-          catch (ex) {
+          } catch (ex) {
             print("Error while setting visit_count.");
-          }
-          finally {
+          } finally {
             stmt.finalize();
           }
         }
@@ -79,22 +71,20 @@ function* task_populateDB(aArray)
         // This must be async to properly enqueue after the updateFrecency call
         // done by the visit addition.
         let stmt = DBConn().createAsyncStatement(
-          "UPDATE moz_places SET hidden = 1 WHERE url = :url");
+          "UPDATE moz_places SET hidden = 1 WHERE url_hash = hash(:url) AND url = :url");
         stmt.params.url = qdata.uri;
         try {
           stmt.executeAsync();
-        }
-        catch (ex) {
+        } catch (ex) {
           print("Error while setting hidden.");
-        }
-        finally {
+        } finally {
           stmt.finalize();
         }
       }
 
       if (qdata.isDetails) {
         // Then we add extraneous page details for testing
-        yield PlacesTestUtils.addVisits({
+        await PlacesTestUtils.addVisits({
           uri: uri(qdata.uri),
           visitDate: qdata.lastVisit,
           title: qdata.title
@@ -132,7 +122,7 @@ function* task_populateDB(aArray)
       }
 
       if (qdata.isFolder) {
-        yield PlacesUtils.bookmarks.insert({
+        await PlacesUtils.bookmarks.insert({
           parentGuid: qdata.parentGuid,
           type: PlacesUtils.bookmarks.TYPE_FOLDER,
           title: qdata.title,
@@ -141,11 +131,11 @@ function* task_populateDB(aArray)
       }
 
       if (qdata.isLivemark) {
-        yield PlacesUtils.livemarks.addLivemark({ title: qdata.title
-                                                , parentId: (yield PlacesUtils.promiseItemId(qdata.parentGuid))
-                                                , index: qdata.index
-                                                , feedURI: uri(qdata.feedURI)
-                                                , siteURI: uri(qdata.uri)
+        await PlacesUtils.livemarks.addLivemark({ title: qdata.title,
+                                                  parentId: (await PlacesUtils.promiseItemId(qdata.parentGuid)),
+                                                  index: qdata.index,
+                                                  feedURI: uri(qdata.feedURI),
+                                                  siteURI: uri(qdata.uri)
                                                 });
       }
 
@@ -165,10 +155,10 @@ function* task_populateDB(aArray)
           data.lastModified = new Date(qdata.lastModified / 1000);
         }
 
-        let item = yield PlacesUtils.bookmarks.insert(data);
+        await PlacesUtils.bookmarks.insert(data);
 
         if (qdata.keyword) {
-          yield PlacesUtils.keywords.insert({ url: qdata.uri,
+          await PlacesUtils.keywords.insert({ url: qdata.uri,
                                               keyword: qdata.keyword });
         }
       }
@@ -178,15 +168,15 @@ function* task_populateDB(aArray)
       }
 
       if (qdata.isSeparator) {
-        yield PlacesUtils.bookmarks.insert({
+        await PlacesUtils.bookmarks.insert({
           parentGuid: qdata.parentGuid,
           type: PlacesUtils.bookmarks.TYPE_SEPARATOR,
           index: qdata.index
         });
       }
     } catch (ex) {
-      // use the data object here in case instantiation of qdata failed
-      do_print("Problem with this URI: " + data.uri);
+      // use the arrayItem object here in case instantiation of qdata failed
+      info("Problem with this URI: " + arrayItem.uri);
       do_throw("Error creating database: " + ex + "\n");
     }
   }
@@ -206,7 +196,7 @@ function* task_populateDB(aArray)
  */
 function queryData(obj) {
   this.isVisit = obj.isVisit ? obj.isVisit : false;
-  this.isBookmark = obj.isBookmark ? obj.isBookmark: false;
+  this.isBookmark = obj.isBookmark ? obj.isBookmark : false;
   this.uri = obj.uri ? obj.uri : "";
   this.lastVisit = obj.lastVisit ? obj.lastVisit : today;
   this.referrer = obj.referrer ? obj.referrer : null;
@@ -216,7 +206,7 @@ function queryData(obj) {
   this.title = obj.title ? obj.title : "";
   this.markPageAsTyped = obj.markPageAsTyped ? obj.markPageAsTyped : false;
   this.isPageAnnotation = obj.isPageAnnotation ? obj.isPageAnnotation : false;
-  this.removeAnnotation= obj.removeAnnotation ? true : false;
+  this.removeAnnotation = !!obj.removeAnnotation;
   this.annoName = obj.annoName ? obj.annoName : "";
   this.annoVal = obj.annoVal ? obj.annoVal : "";
   this.annoFlags = obj.annoFlags ? obj.annoFlags : 0;
@@ -227,7 +217,7 @@ function queryData(obj) {
   this.isTag = obj.isTag ? obj.isTag : false;
   this.tagArray = obj.tagArray ? obj.tagArray : null;
   this.isLivemark = obj.isLivemark ? obj.isLivemark : false;
-  this.parentGuid = obj.parentGuid || PlacesUtils.bookmarks.rootGuid;
+  this.parentGuid = obj.parentGuid || PlacesUtils.bookmarks.unfiledGuid;
   this.feedURI = obj.feedURI ? obj.feedURI : "";
   this.index = obj.index ? obj.index : PlacesUtils.bookmarks.DEFAULT_INDEX;
   this.isFolder = obj.isFolder ? obj.isFolder : false;
@@ -244,7 +234,7 @@ function queryData(obj) {
 }
 
 // All attributes are set in the constructor above
-queryData.prototype = { }
+queryData.prototype = { };
 
 
 /**
@@ -254,7 +244,7 @@ queryData.prototype = { }
  * the results, where appropriate.
  */
 function compareArrayToResult(aArray, aRoot) {
-  do_print("Comparing Array to Results");
+  info("Comparing Array to Results");
 
   var wasOpen = aRoot.containerOpen;
   if (!wasOpen)
@@ -266,25 +256,25 @@ function compareArrayToResult(aArray, aRoot) {
     // Debugging code for failures.
     dump_table("moz_places");
     dump_table("moz_historyvisits");
-    do_print("Found children:");
+    info("Found children:");
     for (let i = 0; i < aRoot.childCount; i++) {
-      do_print(aRoot.getChild(i).uri);
+      info(aRoot.getChild(i).uri);
     }
-    do_print("Expected:");
+    info("Expected:");
     for (let i = 0; i < aArray.length; i++) {
       if (aArray[i].isInQuery)
-        do_print(aArray[i].uri);
+        info(aArray[i].uri);
     }
   }
-  do_check_eq(expectedResultCount, aRoot.childCount);
+  Assert.equal(expectedResultCount, aRoot.childCount);
 
   var inQueryIndex = 0;
   for (var i = 0; i < aArray.length; i++) {
     if (aArray[i].isInQuery) {
       var child = aRoot.getChild(inQueryIndex);
-      //do_print("testing testData[" + i + "] vs result[" + inQueryIndex + "]");
+      // do_print("testing testData[" + i + "] vs result[" + inQueryIndex + "]");
       if (!aArray[i].isFolder && !aArray[i].isSeparator) {
-        do_print("testing testData[" + aArray[i].uri + "] vs result[" + child.uri + "]");
+        info("testing testData[" + aArray[i].uri + "] vs result[" + child.uri + "]");
         if (aArray[i].uri != child.uri) {
           dump_table("moz_places");
           do_throw("Expected " + aArray[i].uri + " found " + child.uri);
@@ -306,7 +296,7 @@ function compareArrayToResult(aArray, aRoot) {
 
   if (!wasOpen)
     aRoot.containerOpen = false;
-  do_print("Comparing Array to Results passes");
+  info("Comparing Array to Results passes");
 }
 
 
@@ -334,7 +324,7 @@ function isInResult(aQueryData, aRoot) {
     uri = aQueryData[0].uri;
   }
 
-  for (var i=0; i < aRoot.childCount; i++) {
+  for (var i = 0; i < aRoot.childCount; i++) {
     if (uri == aRoot.getChild(i).uri) {
       rv = true;
       break;
@@ -358,12 +348,12 @@ function displayResultSet(aRoot) {
 
   if (!aRoot.hasChildren) {
     // Something wrong? Empty result set?
-    do_print("Result Set Empty");
+    info("Result Set Empty");
     return;
   }
 
-  for (var i=0; i < aRoot.childCount; ++i) {
-    do_print("Result Set URI: " + aRoot.getChild(i).uri + "   Title: " +
+  for (var i = 0; i < aRoot.childCount; ++i) {
+    info("Result Set URI: " + aRoot.getChild(i).uri + "   Title: " +
         aRoot.getChild(i).title + "   Visit Time: " + aRoot.getChild(i).time);
   }
   if (!wasOpen)

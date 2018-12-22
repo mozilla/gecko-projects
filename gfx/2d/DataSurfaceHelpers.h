@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -13,8 +14,30 @@
 namespace mozilla {
 namespace gfx {
 
-void
-ConvertBGRXToBGRA(uint8_t* aData, const IntSize &aSize, const int32_t aStride);
+int32_t
+StrideForFormatAndWidth(SurfaceFormat aFormat, int32_t aWidth);
+
+/**
+ * Create a DataSourceSurface and init the surface with the |aData|. The stride
+ * of this source surface might be different from the input data's |aDataStride|.
+ * System will try to use the optimal one.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceFromData(const IntSize& aSize,
+                                SurfaceFormat aFormat,
+                                const uint8_t* aData,
+                                int32_t aDataStride);
+
+/**
+ * Similar to CreateDataSourceSurfaceFromData(), but could setup the stride for
+ * this surface.
+ */
+already_AddRefed<DataSourceSurface>
+CreateDataSourceSurfaceWithStrideFromData(const IntSize &aSize,
+                                          SurfaceFormat aFormat,
+                                          int32_t aStride,
+                                          const uint8_t* aData,
+                                          int32_t aDataStride);
 
 /**
  * Copy the pixel data from aSrc and pack it into aDst. aSrcSize, aSrcStride
@@ -71,9 +94,26 @@ BufferSizeFromStrideAndHeight(int32_t aStride,
                               int32_t aExtraBytes = 0);
 
 /**
- * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ * Multiplies aWidth, aHeight, aDepth and makes sure the result is limited to
+ * something sane. To keep things consistent, this should always be used
+ * wherever we allocate a buffer based on surface dimensions.
+ *
+ * @param aExtra Optional argument to specify an additional number of trailing
+ *   bytes (useful for creating intermediate surfaces for filters, for
+ *   example).
+ *
+ * @return The result of the multiplication if it is acceptable, or else zero.
  */
-void
+size_t
+BufferSizeFromDimensions(int32_t aWidth,
+                         int32_t aHeight,
+                         int32_t aDepth,
+                         int32_t aExtraBytes = 0);
+/**
+ * Copy aSrcRect from aSrc to aDest starting at aDestPoint.
+ * @returns false if the copy is not successful or the aSrc's size is empty.
+ */
+bool
 CopyRect(DataSourceSurface* aSrc, DataSourceSurface* aDest,
          IntRect aSrcRect, IntPoint aDestPoint);
 

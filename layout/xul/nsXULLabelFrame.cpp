@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,49 +14,43 @@
 using namespace mozilla;
 
 nsIFrame*
-NS_NewXULLabelFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewXULLabelFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  nsXULLabelFrame* it = new (aPresShell) nsXULLabelFrame(aContext);
-  
-  it->SetFlags(NS_BLOCK_FLOAT_MGR | NS_BLOCK_MARGIN_ROOT);
-
+  nsXULLabelFrame* it = new (aPresShell) nsXULLabelFrame(aStyle);
+  it->AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   return it;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsXULLabelFrame)
 
-// If you make changes to this function, check its counterparts 
+// If you make changes to this function, check its counterparts
 // in nsBoxFrame and nsTextBoxFrame
 nsresult
 nsXULLabelFrame::RegUnregAccessKey(bool aDoReg)
 {
-  // if we have no content, we can't do anything
-  if (!mContent)
-    return NS_ERROR_FAILURE;
-
   // To filter out <label>s without a control attribute.
   // XXXjag a side-effect is that we filter out anonymous <label>s
   // in e.g. <menu>, <menuitem>, <button>. These <label>s inherit
   // |accesskey| and would otherwise register themselves, overwriting
   // the content we really meant to be registered.
-  if (!mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::control))
+  if (!mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::control))
     return NS_OK;
 
   nsAutoString accessKey;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey, accessKey);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey, accessKey);
 
   if (accessKey.IsEmpty())
     return NS_OK;
 
-  // With a valid PresContext we can get the ESM 
+  // With a valid PresContext we can get the ESM
   // and register the access key
   EventStateManager* esm = PresContext()->EventStateManager();
 
   uint32_t key = accessKey.First();
   if (aDoReg)
-    esm->RegisterAccessKey(mContent, key);
+    esm->RegisterAccessKey(mContent->AsElement(), key);
   else
-    esm->UnregisterAccessKey(mContent, key);
+    esm->UnregisterAccessKey(mContent->AsElement(), key);
 
   return NS_OK;
 }
@@ -75,19 +70,19 @@ nsXULLabelFrame::Init(nsIContent*       aContent,
 }
 
 void
-nsXULLabelFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsXULLabelFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   // unregister access key
   RegUnregAccessKey(false);
-  nsBlockFrame::DestroyFrom(aDestructRoot);
-} 
+  nsBlockFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
+}
 
 nsresult
 nsXULLabelFrame::AttributeChanged(int32_t aNameSpaceID,
-                                  nsIAtom* aAttribute,
+                                  nsAtom* aAttribute,
                                   int32_t aModType)
 {
-  nsresult rv = nsBlockFrame::AttributeChanged(aNameSpaceID, 
+  nsresult rv = nsBlockFrame::AttributeChanged(aNameSpaceID,
                                                aAttribute, aModType);
 
   // If the accesskey changed, register for the new value
@@ -96,12 +91,6 @@ nsXULLabelFrame::AttributeChanged(int32_t aNameSpaceID,
     RegUnregAccessKey(true);
 
   return rv;
-}
-
-nsIAtom*
-nsXULLabelFrame::GetType() const
-{
-  return nsGkAtoms::XULLabelFrame;
 }
 
 /////////////////////////////////////////////////////////////////////////////

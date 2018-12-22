@@ -6,52 +6,48 @@
 
 #include "mozilla/dom/DOMException.h"
 
-#include "jsprf.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/dom/Exceptions.h"
 #include "nsContentUtils.h"
 #include "nsCOMPtr.h"
-#include "nsIClassInfoImpl.h"
 #include "nsIDocument.h"
-#include "nsIDOMDOMException.h"
 #include "nsIException.h"
-#include "nsIProgrammingLanguage.h"
 #include "nsMemory.h"
-#include "prprf.h"
 #include "xpcprivate.h"
 
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/ErrorResult.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 enum DOM4ErrorTypeCodeMap {
   /* DOM4 errors from http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#domexception */
-  IndexSizeError             = nsIDOMDOMException::INDEX_SIZE_ERR,
-  HierarchyRequestError      = nsIDOMDOMException::HIERARCHY_REQUEST_ERR,
-  WrongDocumentError         = nsIDOMDOMException::WRONG_DOCUMENT_ERR,
-  InvalidCharacterError      = nsIDOMDOMException::INVALID_CHARACTER_ERR,
-  NoModificationAllowedError = nsIDOMDOMException::NO_MODIFICATION_ALLOWED_ERR,
-  NotFoundError              = nsIDOMDOMException::NOT_FOUND_ERR,
-  NotSupportedError          = nsIDOMDOMException::NOT_SUPPORTED_ERR,
+  IndexSizeError             = DOMException_Binding::INDEX_SIZE_ERR,
+  HierarchyRequestError      = DOMException_Binding::HIERARCHY_REQUEST_ERR,
+  WrongDocumentError         = DOMException_Binding::WRONG_DOCUMENT_ERR,
+  InvalidCharacterError      = DOMException_Binding::INVALID_CHARACTER_ERR,
+  NoModificationAllowedError = DOMException_Binding::NO_MODIFICATION_ALLOWED_ERR,
+  NotFoundError              = DOMException_Binding::NOT_FOUND_ERR,
+  NotSupportedError          = DOMException_Binding::NOT_SUPPORTED_ERR,
   // Can't remove until setNamedItem is removed
-  InUseAttributeError        = nsIDOMDOMException::INUSE_ATTRIBUTE_ERR,
-  InvalidStateError          = nsIDOMDOMException::INVALID_STATE_ERR,
-  SyntaxError                = nsIDOMDOMException::SYNTAX_ERR,
-  InvalidModificationError   = nsIDOMDOMException::INVALID_MODIFICATION_ERR,
-  NamespaceError             = nsIDOMDOMException::NAMESPACE_ERR,
-  InvalidAccessError         = nsIDOMDOMException::INVALID_ACCESS_ERR,
-  TypeMismatchError          = nsIDOMDOMException::TYPE_MISMATCH_ERR,
-  SecurityError              = nsIDOMDOMException::SECURITY_ERR,
-  NetworkError               = nsIDOMDOMException::NETWORK_ERR,
-  AbortError                 = nsIDOMDOMException::ABORT_ERR,
-  URLMismatchError           = nsIDOMDOMException::URL_MISMATCH_ERR,
-  QuotaExceededError         = nsIDOMDOMException::QUOTA_EXCEEDED_ERR,
-  TimeoutError               = nsIDOMDOMException::TIMEOUT_ERR,
-  InvalidNodeTypeError       = nsIDOMDOMException::INVALID_NODE_TYPE_ERR,
-  DataCloneError             = nsIDOMDOMException::DATA_CLONE_ERR,
-  InvalidPointerId           = nsIDOMDOMException::INVALID_POINTER_ERR,
+  InUseAttributeError        = DOMException_Binding::INUSE_ATTRIBUTE_ERR,
+  InvalidStateError          = DOMException_Binding::INVALID_STATE_ERR,
+  SyntaxError                = DOMException_Binding::SYNTAX_ERR,
+  InvalidModificationError   = DOMException_Binding::INVALID_MODIFICATION_ERR,
+  NamespaceError             = DOMException_Binding::NAMESPACE_ERR,
+  InvalidAccessError         = DOMException_Binding::INVALID_ACCESS_ERR,
+  TypeMismatchError          = DOMException_Binding::TYPE_MISMATCH_ERR,
+  SecurityError              = DOMException_Binding::SECURITY_ERR,
+  NetworkError               = DOMException_Binding::NETWORK_ERR,
+  AbortError                 = DOMException_Binding::ABORT_ERR,
+  URLMismatchError           = DOMException_Binding::URL_MISMATCH_ERR,
+  QuotaExceededError         = DOMException_Binding::QUOTA_EXCEEDED_ERR,
+  TimeoutError               = DOMException_Binding::TIMEOUT_ERR,
+  InvalidNodeTypeError       = DOMException_Binding::INVALID_NODE_TYPE_ERR,
+  DataCloneError             = DOMException_Binding::DATA_CLONE_ERR,
+  InvalidPointerId           = 0,
   EncodingError              = 0,
 
   /* XXX Should be JavaScript native errors */
@@ -75,27 +71,14 @@ enum DOM4ErrorTypeCodeMap {
   /* WebCrypto errors https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html#dfn-DataError */
   OperationError           = 0,
 
-  /* Bluetooth API errors */
-  BtFailError              = 0,
-  BtNotReadyError          = 0,
-  BtNoMemError             = 0,
-  BtBusyError              = 0,
-  BtDoneError              = 0,
-  BtUnsupportedError       = 0,
-  BtParmInvalidError       = 0,
-  BtUnhandledError         = 0,
-  BtAuthFailureError       = 0,
-  BtRmtDevDownError        = 0,
-  BtAuthRejectedError      = 0,
-
   /* Push API errors */
-  PermissionDeniedError    = 0,
+  NotAllowedError          = 0,
 };
 
 #define DOM4_MSG_DEF(name, message, nsresult) {(nsresult), name, #name, message},
 #define DOM_MSG_DEF(val, message) {(val), NS_ERROR_GET_CODE(val), #val, message},
 
-static const struct ResultStruct
+static constexpr struct ResultStruct
 {
   nsresult mNSResult;
   uint16_t mCode;
@@ -129,8 +112,6 @@ NSResultToNameAndMessage(nsresult aNSResult,
   }
 
   NS_WARNING("Huh, someone is throwing non-DOM errors using the DOM module!");
-
-  return;
 }
 
 nsresult
@@ -157,17 +138,11 @@ NS_GetNameAndMessageForDOMNSResult(nsresult aNSResult, nsACString& aName,
 namespace mozilla {
 namespace dom {
 
-bool Exception::sEverMadeOneFromFactory = false;
-
-NS_IMPL_CLASSINFO(Exception, nullptr, nsIClassInfo::DOM_OBJECT,
-                  NS_XPCEXCEPTION_CID)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Exception)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(Exception)
   NS_INTERFACE_MAP_ENTRY(nsIException)
-  NS_INTERFACE_MAP_ENTRY(nsIXPCException)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIException)
-  NS_IMPL_QUERY_CLASSINFO(Exception)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Exception)
@@ -178,7 +153,6 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Exception)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Exception)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mData)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Exception)
@@ -193,40 +167,26 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Exception)
   tmp->mThrownJSVal.setNull();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CI_INTERFACE_GETTER(Exception, nsIXPCException)
-
 Exception::Exception(const nsACString& aMessage,
                      nsresult aResult,
                      const nsACString& aName,
                      nsIStackFrame *aLocation,
                      nsISupports *aData)
-: mResult(NS_OK),
-  mLineNumber(0),
-  mInitialized(false),
-  mHoldingJSVal(false)
+  : mMessage(aMessage)
+  , mResult(aResult)
+  , mName(aName)
+  , mData(aData)
+  , mHoldingJSVal(false)
 {
-  // A little hack... The nsIGenericModule nsIClassInfo scheme relies on there
-  // having been at least one instance made via the factory. Otherwise, the
-  // shared factory/classinsance object never gets created and our QI getter
-  // for our instance's pointer to our nsIClassInfo will always return null.
-  // This is bad because it means that wrapped exceptions will never have a
-  // shared prototype. So... We force one to be created via the factory
-  // *once* and then go about our business.
-  if (!sEverMadeOneFromFactory) {
-    nsCOMPtr<nsIXPCException> e =
-        do_CreateInstance(XPC_EXCEPTION_CONTRACTID);
-    sEverMadeOneFromFactory = true;
+  if (aLocation) {
+    mLocation = aLocation;
+  } else {
+    mLocation = GetCurrentJSStack();
+    // it is legal for there to be no active JS stack, if C++ code
+    // is operating on a JS-implemented interface pointer without
+    // having been called in turn by JS.  This happens in the JS
+    // component loader.
   }
-
-  Initialize(aMessage, aResult, aName, aLocation, aData);
-}
-
-Exception::Exception()
-  : mResult(NS_OK),
-    mLineNumber(-1),
-    mInitialized(false),
-    mHoldingJSVal(false)
-{
 }
 
 Exception::~Exception()
@@ -267,32 +227,11 @@ Exception::StowJSVal(JS::Value& aVp)
   }
 }
 
-NS_IMETHODIMP
-Exception::GetMessageMoz(nsACString& aMessage)
+void
+Exception::GetName(nsAString& aName)
 {
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  aMessage.Assign(mMessage);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::GetResult(nsresult* aResult)
-{
-  NS_ENSURE_ARG_POINTER(aResult);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  *aResult = mResult;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::GetName(nsACString& aName)
-{
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
   if (!mName.IsEmpty()) {
-    aName.Assign(mName);
+    CopyUTF8toUTF16(mName, aName);
   } else {
     aName.Truncate();
 
@@ -300,91 +239,35 @@ Exception::GetName(nsACString& aName)
     nsXPCException::NameAndFormatForNSResult(mResult, &name, nullptr);
 
     if (name) {
-      aName.Assign(name);
+      CopyUTF8toUTF16(name, aName);
     }
   }
-
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Exception::GetFilename(JSContext* aCx, nsAString& aFilename)
 {
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
   if (mLocation) {
-    return mLocation->GetFilename(aCx, aFilename);
+    mLocation->GetFilename(aCx, aFilename);
+    return;
   }
 
-  aFilename.Assign(mFilename);
-  return NS_OK;
+  aFilename.Truncate();
 }
 
-NS_IMETHODIMP
-Exception::GetLineNumber(JSContext* aCx, uint32_t *aLineNumber)
-{
-  NS_ENSURE_ARG_POINTER(aLineNumber);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  if (mLocation) {
-    int32_t lineno;
-    nsresult rv = mLocation->GetLineNumber(aCx, &lineno);
-    *aLineNumber = lineno;
-    return rv;
-  }
-
-  *aLineNumber = mLineNumber;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::GetColumnNumber(uint32_t* aColumnNumber)
-{
-  NS_ENSURE_ARG_POINTER(aColumnNumber);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  *aColumnNumber = 0;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::GetLocation(nsIStackFrame** aLocation)
-{
-  NS_ENSURE_ARG_POINTER(aLocation);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  nsCOMPtr<nsIStackFrame> location = mLocation;
-  location.forget(aLocation);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::GetData(nsISupports** aData)
-{
-  NS_ENSURE_ARG_POINTER(aData);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  nsCOMPtr<nsISupports> data = mData;
-  data.forget(aData);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
+void
 Exception::ToString(JSContext* aCx, nsACString& _retval)
 {
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
   static const char defaultMsg[] = "<no message>";
   static const char defaultLocation[] = "<unknown>";
   static const char format[] =
-"[Exception... \"%s\"  nsresult: \"0x%x (%s)\"  location: \"%s\"  data: %s]";
+"[Exception... \"%s\"  nsresult: \"0x%" PRIx32 " (%s)\"  location: \"%s\"  data: %s]";
 
   nsCString location;
 
   if (mLocation) {
     // we need to free this if it does not fail
-    nsresult rv = mLocation->ToString(aCx, location);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mLocation->ToString(aCx, location);
   }
 
   if (location.IsEmpty()) {
@@ -405,54 +288,20 @@ Exception::ToString(JSContext* aCx, nsACString& _retval)
   const char* data = mData ? "yes" : "no";
 
   _retval.Truncate();
-  _retval.AppendPrintf(format, msg, mResult, resultName,
+  _retval.AppendPrintf(format, msg, static_cast<uint32_t>(mResult), resultName,
                        location.get(), data);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Exception::Initialize(const nsACString& aMessage, nsresult aResult,
-                      const nsACString& aName, nsIStackFrame *aLocation,
-                      nsISupports *aData)
-{
-  NS_ENSURE_FALSE(mInitialized, NS_ERROR_ALREADY_INITIALIZED);
-
-  mMessage = aMessage;
-  mName = aName;
-  mResult = aResult;
-
-  if (aLocation) {
-    mLocation = aLocation;
-  } else {
-    mLocation = GetCurrentJSStack();
-    // it is legal for there to be no active JS stack, if C++ code
-    // is operating on a JS-implemented interface pointer without
-    // having been called in turn by JS.  This happens in the JS
-    // component loader.
-  }
-
-  mData = aData;
-
-  mInitialized = true;
-  return NS_OK;
 }
 
 JSObject*
 Exception::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ExceptionBinding::Wrap(cx, this, aGivenProto);
+  return Exception_Binding::Wrap(cx, this, aGivenProto);
 }
 
 void
 Exception::GetMessageMoz(nsString& retval)
 {
-  nsCString str;
-#ifdef DEBUG
-  DebugOnly<nsresult> rv =
-#endif
-  GetMessageMoz(str);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-  CopyUTF8toUTF16(str, retval);
+  CopyUTF8toUTF16(mMessage, retval);
 }
 
 uint32_t
@@ -461,30 +310,14 @@ Exception::Result() const
   return (uint32_t)mResult;
 }
 
-void
-Exception::GetName(nsString& retval)
-{
-  nsCString str;
-#ifdef DEBUG
-  DebugOnly<nsresult> rv =
-#endif
-  GetName(str);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-  CopyUTF8toUTF16(str, retval);
-}
-
 uint32_t
 Exception::LineNumber(JSContext* aCx) const
 {
   if (mLocation) {
-    int32_t lineno;
-    if (NS_SUCCEEDED(mLocation->GetLineNumber(aCx, &lineno))) {
-      return lineno;
-    }
-    return 0;
+    return mLocation->GetLineNumber(aCx);
   }
 
-  return mLineNumber;
+  return 0;
 }
 
 uint32_t
@@ -500,18 +333,17 @@ Exception::GetLocation() const
   return location.forget();
 }
 
-already_AddRefed<nsISupports>
+nsISupports*
 Exception::GetData() const
 {
-  nsCOMPtr<nsISupports> data = mData;
-  return data.forget();
+  return mData;
 }
 
 void
-Exception::GetStack(JSContext* aCx, nsAString& aStack, ErrorResult& aRv) const
+Exception::GetStack(JSContext* aCx, nsAString& aStack) const
 {
   if (mLocation) {
-    aRv = mLocation->GetFormattedStack(aCx, aStack);
+    mLocation->GetFormattedStack(aCx, aStack);
   }
 }
 
@@ -519,48 +351,18 @@ void
 Exception::Stringify(JSContext* aCx, nsString& retval)
 {
   nsCString str;
-#ifdef DEBUG
-  DebugOnly<nsresult> rv =
-#endif
   ToString(aCx, str);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
   CopyUTF8toUTF16(str, retval);
 }
 
-NS_IMPL_ADDREF_INHERITED(DOMException, Exception)
-NS_IMPL_RELEASE_INHERITED(DOMException, Exception)
-NS_INTERFACE_MAP_BEGIN(DOMException)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMDOMException)
-NS_INTERFACE_MAP_END_INHERITING(Exception)
-
 DOMException::DOMException(nsresult aRv, const nsACString& aMessage,
                            const nsACString& aName, uint16_t aCode)
-  : Exception(EmptyCString(), aRv, EmptyCString(), nullptr, nullptr),
-    mName(aName),
-    mMessage(aMessage),
+  : Exception(aMessage, aRv, aName, nullptr, nullptr),
     mCode(aCode)
 {
 }
 
-NS_IMETHODIMP
-DOMException::GetCode(uint16_t* aCode)
-{
-  NS_ENSURE_ARG_POINTER(aCode);
-  *aCode = mCode;
-
-  // Warn only when the code was changed (other than DOM Core)
-  // or the code is useless (zero)
-  if (NS_ERROR_GET_MODULE(mResult) != NS_ERROR_MODULE_DOM || !mCode) {
-    nsCOMPtr<nsIDocument> doc = nsContentUtils::GetDocumentFromCaller();
-    if (doc) {
-      doc->WarnOnceAbout(nsIDocument::eDOMExceptionCode);
-    }
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
+void
 DOMException::ToString(JSContext* aCx, nsACString& aReturn)
 {
   aReturn.Truncate();
@@ -569,7 +371,7 @@ DOMException::ToString(JSContext* aCx, nsACString& aReturn)
   static const char defaultLocation[] = "<unknown>";
   static const char defaultName[] = "<unknown>";
   static const char format[] =
-    "[Exception... \"%s\"  code: \"%d\" nsresult: \"0x%x (%s)\"  location: \"%s\"]";
+    "[Exception... \"%s\"  code: \"%d\" nsresult: \"0x%" PRIx32 " (%s)\"  location: \"%s\"]";
 
   nsAutoCString location;
 
@@ -580,22 +382,14 @@ DOMException::ToString(JSContext* aCx, nsACString& aReturn)
   const char* msg = !mMessage.IsEmpty() ? mMessage.get() : defaultMsg;
   const char* resultName = !mName.IsEmpty() ? mName.get() : defaultName;
 
-  aReturn.AppendPrintf(format, msg, mCode, mResult, resultName,
+  aReturn.AppendPrintf(format, msg, mCode, static_cast<uint32_t>(mResult), resultName,
                        location.get());
-
-  return NS_OK;
 }
 
 void
 DOMException::GetName(nsString& retval)
 {
   CopyUTF8toUTF16(mName, retval);
-}
-
-void
-DOMException::GetMessageMoz(nsString& retval)
-{
-  CopyUTF8toUTF16(mMessage, retval);
 }
 
 already_AddRefed<DOMException>
@@ -630,7 +424,7 @@ DOMException::Constructor(GlobalObject& /* unused */,
 JSObject*
 DOMException::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DOMExceptionBinding::Wrap(aCx, this, aGivenProto);
+  return DOMException_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */already_AddRefed<DOMException>

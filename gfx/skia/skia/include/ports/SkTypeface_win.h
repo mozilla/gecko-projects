@@ -8,6 +8,7 @@
 #ifndef SkTypeface_win_DEFINED
 #define SkTypeface_win_DEFINED
 
+#include "../private/SkLeanWindows.h"
 #include "SkTypeface.h"
 #include <dwrite.h>
 
@@ -41,6 +42,8 @@ SK_API void SkTypeface_SetEnsureLOGFONTAccessibleProc(void (*)(const LOGFONT&));
 class SkFontMgr;
 class SkRemotableFontMgr;
 struct IDWriteFactory;
+struct IDWriteFontCollection;
+struct IDWriteFontFallback;
 
 /**
  *  Like the other Typeface create methods, this returns a new reference to the
@@ -49,11 +52,17 @@ struct IDWriteFactory;
  */
 SK_API SkTypeface* SkCreateTypefaceFromDWriteFont(IDWriteFactory* aFactory,
                                                   IDWriteFontFace* aFontFace,
-                                                  IDWriteFont* aFont,
-                                                  IDWriteFontFamily* aFontFamily);
+                                                  SkFontStyle aStyle,
+                                                  bool aForceGDI,
+                                                  float aGamma,
+                                                  float aContrast);
 
-SK_API SkFontMgr* SkFontMgr_New_GDI();
-SK_API SkFontMgr* SkFontMgr_New_DirectWrite(IDWriteFactory* factory = NULL);
+SK_API sk_sp<SkFontMgr> SkFontMgr_New_GDI();
+SK_API sk_sp<SkFontMgr> SkFontMgr_New_DirectWrite(IDWriteFactory* factory = NULL,
+                                                  IDWriteFontCollection* collection = NULL);
+SK_API sk_sp<SkFontMgr> SkFontMgr_New_DirectWrite(IDWriteFactory* factory,
+                                                  IDWriteFontCollection* collection,
+                                                  IDWriteFontFallback* fallback);
 
 /**
  *  Creates an SkFontMgr which renders using DirectWrite and obtains its data
@@ -61,7 +70,7 @@ SK_API SkFontMgr* SkFontMgr_New_DirectWrite(IDWriteFactory* factory = NULL);
  *
  *  If DirectWrite could not be initialized, will return NULL.
  */
-SK_API SkFontMgr* SkFontMgr_New_DirectWriteRenderer(SkRemotableFontMgr*);
+SK_API sk_sp<SkFontMgr> SkFontMgr_New_DirectWriteRenderer(sk_sp<SkRemotableFontMgr>);
 
 /**
  *  Creates an SkRemotableFontMgr backed by DirectWrite using the default
@@ -69,7 +78,7 @@ SK_API SkFontMgr* SkFontMgr_New_DirectWriteRenderer(SkRemotableFontMgr*);
  *
  *  If DirectWrite could not be initialized, will return NULL.
  */
-SK_API SkRemotableFontMgr* SkRemotableFontMgr_New_DirectWrite();
+SK_API sk_sp<SkRemotableFontMgr> SkRemotableFontMgr_New_DirectWrite();
 
 #endif  // SK_BUILD_FOR_WIN
 #endif  // SkTypeface_win_DEFINED

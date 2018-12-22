@@ -11,9 +11,9 @@ function deactivateDomainPolicy() {
   }
 }
 
-function* test_domainPolicy() {
+async function test_domainPolicy() {
 
-  XPCOMUtils.defineLazyModuleGetter(this, "Promise", "resource://gre/modules/Promise.jsm");
+  ChromeUtils.defineModuleGetter(this, "Promise", "resource://gre/modules/Promise.jsm");
   let deferred = Promise.defer();
   let currentTask = deferred.promise;
   SpecialPowers.pushPrefEnv(
@@ -21,18 +21,18 @@ function* test_domainPolicy() {
           ["browser.pagethumbnails.capturing_disabled", false],
           ["dom.mozBrowserFramesEnabled", false]]},
     () => { return deferred.resolve()});
-  yield currentTask;
+  await currentTask;
 
   // Create tab
   let tab;
 
   // Init test
   function initProcess() {
-    tab = gBrowser.addTab();
+    tab = BrowserTestUtils.addTab(gBrowser);
     gBrowser.selectedTab = tab;
 
     let initPromise = ContentTask.spawn(tab.linkedBrowser, null, function() {
-      Cu.import("resource://gre/modules/PromiseUtils.jsm");
+      ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
       function loadBase() {
         let deferred = PromiseUtils.defer();
         let listener = (event) => {
@@ -71,7 +71,7 @@ function* test_domainPolicy() {
         ifr.removeEventListener('load', onload);
         deferred.resolve();
       }
-      ifr.addEventListener('load', onload, false);
+      ifr.addEventListener('load', onload);
       ifr.setAttribute('src', src);
       return deferred.promise;
     }
@@ -94,7 +94,7 @@ function* test_domainPolicy() {
   function testDomain(domain) {
     ipcArgs.domain = domain;
     return (aUtils) => {
-      Cu.import("resource://gre/modules/PromiseUtils.jsm");
+      ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
       var ipcArgs;
       var utils = {};
       eval(aUtils);
@@ -113,27 +113,27 @@ function* test_domainPolicy() {
 
   info("Creating child process first, activating domainPolicy after");
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   activateDomainPolicy();
   var bl = policy.blacklist;
-  bl.add(Services.io.newURI('http://example.com', null, null));
+  bl.add(Services.io.newURI('http://example.com'));
   currentTask = runTest(testDomain("http://example.com"));
-  checkAndCleanup(yield currentTask);
+  checkAndCleanup(await currentTask);
 
   info("Activating domainPolicy first, creating child process after");
   activateDomainPolicy();
   var bl = policy.blacklist;
-  bl.add(Services.io.newURI('http://example.com', null, null));
+  bl.add(Services.io.newURI('http://example.com'));
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   currentTask = runTest(testDomain("http://example.com"));
-  checkAndCleanup(yield currentTask);
+  checkAndCleanup(await currentTask);
 
   function testList(expectEnabled, list) {
     ipcArgs.expectEnabled = expectEnabled;
     ipcArgs.list = list;
     return (aUtils) => {
-      Cu.import("resource://gre/modules/PromiseUtils.jsm");
+      ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
       var ipcArgs;
       var utils = {};
       eval(aUtils);
@@ -183,51 +183,51 @@ function* test_domainPolicy() {
   info("Activating domainPolicy first, creating child process after");
   activate(true, testPolicy.exceptions, testPolicy.superExceptions);
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   let results = [];
   currentTask = runTest(testList(true, testPolicy.notExempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   currentTask = runTest(testList(false, testPolicy.exempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   checkAndCleanup(results);
 
   info("Creating child process first, activating domainPolicy after");
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   activate(true, testPolicy.exceptions, testPolicy.superExceptions);
   results = [];
   currentTask = runTest(testList(true, testPolicy.notExempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   currentTask = runTest(testList(false, testPolicy.exempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   checkAndCleanup(results);
 
   info("Testing Whitelist-style Domain Policy");
   deferred = Promise.defer();
   currentTask = deferred.promise;
   SpecialPowers.pushPrefEnv({set:[["javascript.enabled", false]]}, () => { return deferred.resolve()});
-  yield currentTask;
+  await currentTask;
 
   info("Activating domainPolicy first, creating child process after");
   activate(false, testPolicy.exceptions, testPolicy.superExceptions);
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   results = [];
   currentTask = runTest(testList(false, testPolicy.notExempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   currentTask = runTest(testList(true, testPolicy.exempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   checkAndCleanup(results);
 
   info("Creating child process first, activating domainPolicy after");
   currentTask = initProcess();
-  yield currentTask;
+  await currentTask;
   activate(false, testPolicy.exceptions, testPolicy.superExceptions);
   results = [];
   currentTask = runTest(testList(false, testPolicy.notExempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   currentTask = runTest(testList(true, testPolicy.exempt));
-  results = results.concat(yield currentTask);
+  results = results.concat(await currentTask);
   checkAndCleanup(results);
   finish();
 }

@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -10,32 +9,27 @@
 #include "GrRenderTarget.h"
 
 #include "GrContext.h"
-#include "GrDrawContext.h"
-#include "GrDrawTarget.h"
+#include "GrContextPriv.h"
+#include "GrRenderTargetContext.h"
 #include "GrGpu.h"
+#include "GrRenderTargetOpList.h"
 #include "GrRenderTargetPriv.h"
 #include "GrStencilAttachment.h"
+#include "GrStencilSettings.h"
+#include "SkRectPriv.h"
 
-GrRenderTarget::~GrRenderTarget() {
-    if (fLastDrawTarget) {
-        fLastDrawTarget->clearRT();
-    }
-    SkSafeUnref(fLastDrawTarget);
-}
-
-void GrRenderTarget::discard() {
-    // go through context so that all necessary flushing occurs
-    GrContext* context = this->getContext();
-    if (!context) {
-        return;
-    }
-
-    SkAutoTUnref<GrDrawContext> drawContext(context->drawContext(this));
-    if (!drawContext) {
-        return;
-    }
-
-    drawContext->discard();
+GrRenderTarget::GrRenderTarget(GrGpu* gpu, const GrSurfaceDesc& desc,
+                               GrRenderTargetFlags flags,
+                               GrStencilAttachment* stencil)
+        : INHERITED(gpu, desc)
+        , fSampleCnt(desc.fSampleCnt)
+        , fStencilAttachment(stencil)
+        , fFlags(flags) {
+    SkASSERT(desc.fFlags & kRenderTarget_GrSurfaceFlag);
+    SkASSERT(!(fFlags & GrRenderTargetFlags::kMixedSampled) || fSampleCnt > 1);
+    SkASSERT(!(fFlags & GrRenderTargetFlags::kWindowRectsSupport) ||
+             gpu->caps()->maxWindowRectangles() > 0);
+    fResolveRect = SkRectPriv::MakeILargestInverted();
 }
 
 void GrRenderTarget::flagAsNeedingResolve(const SkIRect* rect) {
@@ -54,12 +48,16 @@ void GrRenderTarget::flagAsNeedingResolve(const SkIRect* rect) {
 void GrRenderTarget::overrideResolveRect(const SkIRect rect) {
     fResolveRect = rect;
     if (fResolveRect.isEmpty()) {
-        fResolveRect.setLargestInverted();
+        fResolveRect = SkRectPriv::MakeILargestInverted();
     } else {
         if (!fResolveRect.intersect(0, 0, this->width(), this->height())) {
-            fResolveRect.setLargestInverted();
+            fResolveRect = SkRectPriv::MakeILargestInverted();
         }
     }
+}
+
+void GrRenderTarget::flagAsResolved() {
+    fResolveRect = SkRectPriv::MakeILargestInverted();
 }
 
 void GrRenderTarget::onRelease() {
@@ -71,37 +69,26 @@ void GrRenderTarget::onRelease() {
 void GrRenderTarget::onAbandon() {
     SkSafeSetNull(fStencilAttachment);
 
-    // The contents of this renderTarget are gone/invalid. It isn't useful to point back
-    // the creating drawTarget.
-    this->setLastDrawTarget(nullptr);
-
     INHERITED::onAbandon();
-}
-
-void GrRenderTarget::setLastDrawTarget(GrDrawTarget* dt) {
-    if (fLastDrawTarget) {
-        // The non-MDB world never closes so we can't check this condition
-#ifdef ENABLE_MDB
-        SkASSERT(fLastDrawTarget->isClosed());
-#endif
-        fLastDrawTarget->clearRT();
-    }
-
-    SkRefCnt_SafeAssign(fLastDrawTarget, dt);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool GrRenderTargetPriv::attachStencilAttachment(GrStencilAttachment* stencil) {
+bool GrRenderTargetPriv::attachStencilAttachment(sk_sp<GrStencilAttachment> stencil) {
     if (!stencil && !fRenderTarget->fStencilAttachment) {
         // No need to do any work since we currently don't have a stencil attachment and
-        // we're not acctually adding one.
+        // we're not actually adding one.
         return true;
     }
-    fRenderTarget->fStencilAttachment = stencil;
+    fRenderTarget->fStencilAttachment = stencil.release();
     if (!fRenderTarget->completeStencilAttachment()) {
         SkSafeSetNull(fRenderTarget->fStencilAttachment);
         return false;
-    } 
+    }
     return true;
+}
+
+int GrRenderTargetPriv::numStencilBits() const {
+    SkASSERT(this->getStencilAttachment());
+    return this->getStencilAttachment()->bits();
 }

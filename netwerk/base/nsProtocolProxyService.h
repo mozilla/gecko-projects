@@ -2,7 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #ifndef nsProtocolProxyService_h__
 #define nsProtocolProxyService_h__
 
@@ -14,18 +14,23 @@
 #include "nsIProtocolProxyFilter.h"
 #include "nsIProxyInfo.h"
 #include "nsIObserver.h"
+#include "nsIThread.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "prio.h"
 #include "mozilla/Attributes.h"
 
-typedef nsDataHashtable<nsCStringHashKey, uint32_t> nsFailedProxyTable;
-
-class nsProxyInfo;
-struct nsProtocolInfo;
 class nsIPrefBranch;
 class nsISystemProxySettings;
+
+namespace mozilla {
+namespace net {
+
+typedef nsDataHashtable<nsCStringHashKey, uint32_t> nsFailedProxyTable;
+
 class nsPACMan;
+class nsProxyInfo;
+struct nsProtocolInfo;
 
 // CID for the nsProtocolProxyService class
 // 091eedd8-8bae-4fe3-ad62-0c87351e640d
@@ -47,12 +52,28 @@ public:
     nsProtocolProxyService();
 
     nsresult Init();
-    nsresult DeprecatedBlockingResolve(nsIChannel *aChannel,
-                                       uint32_t aFlags,
-                                       nsIProxyInfo **retval);
+
+public:
+    // An instance of this struct is allocated for each registered
+    // nsIProtocolProxyFilter and each nsIProtocolProxyChannelFilter.
+    class FilterLink {
+    public:
+      NS_INLINE_DECL_REFCOUNTING(FilterLink)
+
+      uint32_t position;
+      nsCOMPtr<nsIProtocolProxyFilter> filter;
+      nsCOMPtr<nsIProtocolProxyChannelFilter> channelFilter;
+
+      FilterLink(uint32_t p, nsIProtocolProxyFilter *f);
+      FilterLink(uint32_t p, nsIProtocolProxyChannelFilter *cf);
+
+    private:
+      ~FilterLink();
+    };
 
 protected:
     friend class nsAsyncResolveRequest;
+    friend class TestProtocolProxyService_LoadHostFilters_Test; // for gtest
 
     ~nsProtocolProxyService();
 
@@ -72,11 +93,11 @@ protected:
      * This method is called to create a nsProxyInfo instance from the given
      * PAC-style proxy string.  It parses up to the end of the string, or to
      * the next ';' character.
-     * 
+     *
      * @param proxy
      *        The PAC-style proxy string to parse.  This must not be null.
      * @param aResolveFlags
-     *        The flags passed to Resolve or AsyncResolve that are stored in 
+     *        The flags passed to Resolve or AsyncResolve that are stored in
      *        proxyInfo.
      * @param result
      *        Upon return this points to a newly allocated nsProxyInfo or null
@@ -90,7 +111,7 @@ protected:
 
     /**
      * Load the specified PAC file.
-     * 
+     *
      * @param pacURI
      *        The URI spec of the PAC file to load.
      */
@@ -103,7 +124,7 @@ protected:
      * @param pacString
      *        The PAC-style proxy string to parse.  This may be empty.
      * @param aResolveFlags
-     *        The flags passed to Resolve or AsyncResolve that are stored in 
+     *        The flags passed to Resolve or AsyncResolve that are stored in
      *        proxyInfo.
      * @param result
      *        The resulting list of proxy info objects.
@@ -211,10 +232,6 @@ protected:
      *
      * @param channel
      *        The channel to test.
-     * @param appId
-     *        The id of the app making the query.
-     * @param isInBrowser
-     *        True if the iframe has mozbrowser but has no mozapp attribute.
      * @param info
      *        Information about the URI's protocol.
      * @param flags
@@ -226,39 +243,28 @@ protected:
      *        The resulting proxy info or null.
      */
     nsresult Resolve_Internal(nsIChannel *channel,
-                              uint32_t appId,
-                              bool isInBrowser,
                               const nsProtocolInfo &info,
                               uint32_t flags,
                               bool *usePAC,
                               nsIProxyInfo **result);
 
     /**
-     * This method applies the registered filters to the given proxy info
-     * list, and returns a possibly modified list.
-     *
-     * @param channel
-     *        The channel corresponding to this proxy info list.
-     * @param info
-     *        Information about the URI's protocol.
-     * @param proxyInfo
-     *        The proxy info list to be modified.  This is an inout param.
+     * Shallow copy of the current list of registered filters so that
+     * we can safely let them asynchronously process a single proxy
+     * resolution request.
      */
-    void ApplyFilters(nsIChannel *channel, const nsProtocolInfo &info,
-                                  nsIProxyInfo **proxyInfo);
+    void CopyFilters(nsTArray<RefPtr<FilterLink>> &aCopy);
 
     /**
-     * This method is a simple wrapper around ApplyFilters that takes the
-     * proxy info list inout param as a nsCOMPtr.
+     * This method applies the provided filter to the given proxy info
+     * list, and expects |callback| be called on (synchronously or
+     * asynchronously) to provide the updated proxyinfo list.
      */
-    inline void ApplyFilters(nsIChannel *channel, const nsProtocolInfo &info,
-                             nsCOMPtr<nsIProxyInfo> &proxyInfo)
-    {
-      nsIProxyInfo *pi = nullptr;
-      proxyInfo.swap(pi);
-      ApplyFilters(channel, info, &pi);
-      proxyInfo.swap(pi);
-    }
+    bool ApplyFilter(FilterLink const* filterLink,
+                     nsIChannel *channel,
+                     const nsProtocolInfo &info,
+                     nsCOMPtr<nsIProxyInfo> proxyInfo,
+                     nsIProxyProtocolFilterResult* callback);
 
     /**
      * This method prunes out disabled and disallowed proxies from a given
@@ -270,7 +276,20 @@ protected:
      *        The proxy info list to be modified.  This is an inout param.
      */
     void PruneProxyInfo(const nsProtocolInfo &info,
-                                    nsIProxyInfo **proxyInfo);
+                        nsIProxyInfo **proxyInfo);
+
+    /**
+    * This method is a simple wrapper around PruneProxyInfo that takes the
+    * proxy info list inout param as a nsCOMPtr.
+    */
+    void PruneProxyInfo(const nsProtocolInfo &info,
+                        nsCOMPtr<nsIProxyInfo> &proxyInfo)
+    {
+      nsIProxyInfo *pi = nullptr;
+      proxyInfo.swap(pi);
+      PruneProxyInfo(info, &pi);
+      proxyInfo.swap(pi);
+    }
 
     /**
      * This method populates mHostFiltersArray from the given string.
@@ -278,7 +297,7 @@ protected:
      * @param hostFilters
      *        A "no-proxy-for" exclusion list.
      */
-    void LoadHostFilters(const char *hostFilters);
+    void LoadHostFilters(const nsACString& hostFilters);
 
     /**
      * This method checks the given URI against mHostFiltersArray.
@@ -301,9 +320,15 @@ protected:
     void MaybeDisableDNSPrefetch(nsIProxyInfo *aProxy);
 
 private:
-    nsresult SetupPACThread();
+    nsresult SetupPACThread(nsIEventTarget *mainThreadEventTarget = nullptr);
     nsresult ResetPACThread();
     nsresult ReloadNetworkPAC();
+
+    nsresult AsyncConfigureFromPAC(bool aForceReload, bool aResetPACThread);
+    nsresult OnAsyncGetPACURI(bool aForceReload,
+                              bool aResetPACThread,
+                              nsresult aResult,
+                              const nsACString& aUri);
 
 public:
     // The Sun Forte compiler and others implement older versions of the
@@ -334,6 +359,7 @@ protected:
 
         HostInfo()
             : is_ipaddr(false)
+            , port(0)
             { /* other members intentionally uninitialized */ }
        ~HostInfo() {
             if (!is_ipaddr && name.host)
@@ -341,24 +367,9 @@ protected:
         }
     };
 
-    // An instance of this struct is allocated for each registered
-    // nsIProtocolProxyFilter and each nsIProtocolProxyChannelFilter.
-    struct FilterLink {
-      struct FilterLink                *next;
-      uint32_t                          position;
-      nsCOMPtr<nsIProtocolProxyFilter> filter;
-      nsCOMPtr<nsIProtocolProxyChannelFilter> channelFilter;
-      FilterLink(uint32_t p, nsIProtocolProxyFilter *f)
-        : next(nullptr), position(p), filter(f), channelFilter(nullptr) {}
-      FilterLink(uint32_t p, nsIProtocolProxyChannelFilter *cf)
-        : next(nullptr), position(p), filter(nullptr), channelFilter(cf) {}
-      // Chain deletion to simplify cleaning up the filter links
-      ~FilterLink() { if (next) delete next; }
-    };
-
 private:
     // Private methods to insert and remove FilterLinks from the FilterLink chain.
-    nsresult InsertFilterLink(FilterLink *link, uint32_t position);
+    nsresult InsertFilterLink(RefPtr<FilterLink>&& link);
     nsresult RemoveFilterLink(nsISupports *givenObject);
 
 protected:
@@ -366,11 +377,10 @@ protected:
     bool mFilterLocalHosts;
 
     // Holds an array of HostInfo objects
-    nsTArray<nsAutoPtr<HostInfo> > mHostFiltersArray;
+    nsTArray<nsAutoPtr<HostInfo>> mHostFiltersArray;
 
-    // Points to the start of a sorted by position, singly linked list
-    // of FilterLink objects.
-    FilterLink                  *mFilters;
+    // Filters, always sorted by the position.
+    nsTArray<RefPtr<FilterLink>> mFilters;
 
     uint32_t                     mProxyConfig;
 
@@ -382,8 +392,10 @@ protected:
 
     nsCString                    mHTTPSProxyHost;
     int32_t                      mHTTPSProxyPort;
-    
-    nsCString                    mSOCKSProxyHost;
+
+    // mSOCKSProxyTarget could be a host, a domain socket path,
+    // or a named-pipe name.
+    nsCString                    mSOCKSProxyTarget;
     int32_t                      mSOCKSProxyPort;
     int32_t                      mSOCKSProxyVersion;
     bool                         mSOCKSProxyRemoteDNS;
@@ -400,10 +412,15 @@ private:
     nsresult AsyncResolveInternal(nsIChannel *channel, uint32_t flags,
                                   nsIProtocolProxyCallback *callback,
                                   nsICancelable **result,
-                                  bool isSyncOK);
-
+                                  bool isSyncOK,
+                                  nsIEventTarget *mainThreadEventTarget);
+    bool                          mIsShutdown;
+    nsCOMPtr<nsIThread>           mProxySettingThread;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsProtocolProxyService, NS_PROTOCOL_PROXY_SERVICE_IMPL_CID)
+
+} // namespace net
+} // namespace mozilla
 
 #endif // !nsProtocolProxyService_h__

@@ -5,9 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLTableCaptionElement.h"
+
+#include "mozilla/MappedDeclarations.h"
 #include "nsAttrValueInlines.h"
 #include "nsMappedAttributes.h"
-#include "nsRuleData.h"
 #include "mozilla/dom/HTMLTableCaptionElementBinding.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(TableCaption)
@@ -22,7 +23,7 @@ HTMLTableCaptionElement::~HTMLTableCaptionElement()
 JSObject*
 HTMLTableCaptionElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLTableCaptionElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLTableCaptionElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableCaptionElement)
@@ -32,13 +33,14 @@ static const nsAttrValue::EnumTable kCaptionAlignTable[] = {
   { "right",  NS_STYLE_CAPTION_SIDE_RIGHT },
   { "top",    NS_STYLE_CAPTION_SIDE_TOP },
   { "bottom", NS_STYLE_CAPTION_SIDE_BOTTOM },
-  { 0 }
+  { nullptr,  0 }
 };
 
 bool
 HTMLTableCaptionElement::ParseAttribute(int32_t aNamespaceID,
-                                        nsIAtom* aAttribute,
+                                        nsAtom* aAttribute,
                                         const nsAString& aValue,
+                                        nsIPrincipal* aMaybeScriptedPrincipal,
                                         nsAttrValue& aResult)
 {
   if (aAttribute == nsGkAtoms::align && aNamespaceID == kNameSpaceID_None) {
@@ -46,27 +48,24 @@ HTMLTableCaptionElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLTableCaptionElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                               nsRuleData* aData)
+                                               MappedDeclarations& aDecls)
 {
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TableBorder)) {
-    nsCSSValue* captionSide = aData->ValueForCaptionSide();
-    if (captionSide->GetUnit() == eCSSUnit_Null) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
-      if (value && value->Type() == nsAttrValue::eEnum)
-        captionSide->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
-    }
+  if (!aDecls.PropertyIsSet(eCSSProperty_caption_side)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
+    if (value && value->Type() == nsAttrValue::eEnum)
+      aDecls.SetKeywordValue(eCSSProperty_caption_side, value->GetEnumValue());
   }
 
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLTableCaptionElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLTableCaptionElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
     { &nsGkAtoms::align },

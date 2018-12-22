@@ -3,13 +3,15 @@
 
 "use strict";
 
-var Preferences = Cu.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
+var Preferences = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
 
 function test() {
   waitForExplicitFinish();
   resetPreferences();
 
+  let calledTestTelemetry = false;
   function testTelemetry() {
+    calledTestTelemetry = true;
     // Find the right bucket for the "Foo" engine.
     let engine = Services.search.getEngineByName("Foo");
     let histogramKey = (engine.identifier || "other-Foo") + ".searchbar";
@@ -24,7 +26,7 @@ function test() {
     }
 
     // Now perform a search and ensure the count is incremented.
-    let tab = gBrowser.addTab();
+    let tab = BrowserTestUtils.addTab(gBrowser);
     gBrowser.selectedTab = tab;
     let searchBar = BrowserSearch.searchBar;
 
@@ -41,11 +43,11 @@ function test() {
         Assert.equal(hs[histogramKey].sum, numSearchesBefore + 1,
                      "Performing a search increments the related SEARCH_COUNTS key by 1.");
 
-        let engine = Services.search.getEngineByName("Foo");
-        Services.search.removeEngine(engine);
+        let fooEngine = Services.search.getEngineByName("Foo");
+        Services.search.removeEngine(fooEngine);
       }
 
-      EventUtils.synthesizeKey("VK_RETURN", {});
+      EventUtils.synthesizeKey("KEY_Enter");
       executeSoon(() => executeSoon(afterSearch));
   }
 
@@ -58,21 +60,26 @@ function test() {
         break;
 
       case "engine-current":
-        is(Services.search.currentEngine.name, "Foo", "Current engine is Foo");
-        testTelemetry();
+        // We may be called again when resetting the engine at the end.
+        if (!calledTestTelemetry) {
+          is(Services.search.currentEngine.name, "Foo", "Current engine is Foo");
+          testTelemetry();
+        }
         break;
 
       case "engine-removed":
         Services.obs.removeObserver(observer, "browser-search-engine-modified");
+        gCUITestUtils.removeSearchBar();
         finish();
         break;
     }
   }
 
-  Services.obs.addObserver(observer, "browser-search-engine-modified", false);
-  Services.search.addEngine("http://mochi.test:8888/browser/browser/components/search/test/testEngine.xml",
-                            null, "data:image/x-icon,%00", false);
-
+  Services.obs.addObserver(observer, "browser-search-engine-modified");
+  gCUITestUtils.addSearchBar().then(function() {
+    Services.search.addEngine("http://mochi.test:8888/browser/browser/components/search/test/testEngine.xml",
+                              null, "data:image/x-icon,%00", false);
+  });
 }
 
 function resetPreferences() {

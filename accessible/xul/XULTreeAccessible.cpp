@@ -24,10 +24,8 @@
 #include "nsIAutoCompleteInput.h"
 #include "nsIAutoCompletePopup.h"
 #include "nsIBoxObject.h"
-#include "nsIDOMXULElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
-#include "nsIDOMXULTreeElement.h"
 #include "nsITreeSelection.h"
 #include "nsIMutableArray.h"
 #include "nsTreeBodyFrame.h"
@@ -74,7 +72,7 @@ XULTreeAccessible::~XULTreeAccessible()
 NS_IMPL_CYCLE_COLLECTION_INHERITED(XULTreeAccessible, Accessible,
                                    mTree, mAccessibleCache)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(XULTreeAccessible)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(XULTreeAccessible)
 NS_INTERFACE_MAP_END_INHERITING(Accessible)
 
 NS_IMPL_ADDREF_INHERITED(XULTreeAccessible, Accessible)
@@ -84,7 +82,7 @@ NS_IMPL_RELEASE_INHERITED(XULTreeAccessible, Accessible)
 // XULTreeAccessible: Accessible implementation
 
 uint64_t
-XULTreeAccessible::NativeState()
+XULTreeAccessible::NativeState() const
 {
   // Get focus status from base class.
   uint64_t state = Accessible::NativeState();
@@ -111,7 +109,7 @@ XULTreeAccessible::NativeState()
 }
 
 void
-XULTreeAccessible::Value(nsString& aValue)
+XULTreeAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
   if (!mTreeView)
@@ -124,15 +122,14 @@ XULTreeAccessible::Value(nsString& aValue)
     return;
 
   int32_t currentIndex;
-  nsCOMPtr<nsIDOMElement> selectItem;
   selection->GetCurrentIndex(&currentIndex);
   if (currentIndex >= 0) {
-    nsCOMPtr<nsITreeColumn> keyCol;
+    RefPtr<nsTreeColumn> keyCol;
 
-    nsCOMPtr<nsITreeColumns> cols;
+    RefPtr<nsTreeColumns> cols;
     mTree->GetColumns(getter_AddRefs(cols));
     if (cols)
-      cols->GetKeyColumn(getter_AddRefs(keyCol));
+      keyCol = cols->GetKeyColumn();
 
     mTreeView->GetCellText(currentIndex, keyCol, aValue);
   }
@@ -145,7 +142,7 @@ XULTreeAccessible::Value(nsString& aValue)
 void
 XULTreeAccessible::Shutdown()
 {
-  if (!mDoc->IsDefunct()) {
+  if (mDoc && !mDoc->IsDefunct()) {
     UnbindCacheEntriesFromDocument(mAccessibleCache);
   }
 
@@ -156,7 +153,7 @@ XULTreeAccessible::Shutdown()
 }
 
 role
-XULTreeAccessible::NativeRole()
+XULTreeAccessible::NativeRole() const
 {
   // No primary column means we're in a list. In fact, history and mail turn off
   // the primary flag when switching to a flat view.
@@ -169,8 +166,7 @@ XULTreeAccessible::NativeRole()
     return roles::LIST;
 
   RefPtr<nsTreeColumns> cols = treeFrame->Columns();
-  nsCOMPtr<nsITreeColumn> primaryCol;
-  cols->GetPrimaryColumn(getter_AddRefs(primaryCol));
+  nsTreeColumn* primaryCol = cols->GetPrimaryColumn();
 
   return primaryCol ? roles::OUTLINE : roles::LIST;
 }
@@ -192,13 +188,13 @@ XULTreeAccessible::ChildAtPoint(int32_t aX, int32_t aY,
   nsIFrame *rootFrame = presShell->GetRootFrame();
   NS_ENSURE_TRUE(rootFrame, nullptr);
 
-  nsIntRect rootRect = rootFrame->GetScreenRect();
+  CSSIntRect rootRect = rootFrame->GetScreenRect();
 
-  int32_t clientX = presContext->DevPixelsToIntCSSPixels(aX) - rootRect.x;
-  int32_t clientY = presContext->DevPixelsToIntCSSPixels(aY) - rootRect.y;
+  int32_t clientX = presContext->DevPixelsToIntCSSPixels(aX) - rootRect.X();
+  int32_t clientY = presContext->DevPixelsToIntCSSPixels(aY) - rootRect.Y();
 
   int32_t row = -1;
-  nsCOMPtr<nsITreeColumn> column;
+  RefPtr<nsTreeColumn> column;
   nsAutoString childEltUnused;
   mTree->GetCellAt(clientX, clientY, &row, getter_AddRefs(column),
                    childEltUnused);
@@ -225,7 +221,7 @@ XULTreeAccessible::ChildAtPoint(int32_t aX, int32_t aY,
 // XULTreeAccessible: SelectAccessible
 
 Accessible*
-XULTreeAccessible::CurrentItem()
+XULTreeAccessible::CurrentItem() const
 {
   if (!mTreeView)
     return nullptr;
@@ -243,7 +239,7 @@ XULTreeAccessible::CurrentItem()
 }
 
 void
-XULTreeAccessible::SetCurrentItem(Accessible* aItem)
+XULTreeAccessible::SetCurrentItem(const Accessible* aItem)
 {
   NS_ERROR("XULTreeAccessible::SetCurrentItem not implemented");
 }
@@ -436,7 +432,7 @@ XULTreeAccessible::ChildCount() const
 }
 
 Relation
-XULTreeAccessible::RelationByType(RelationType aType)
+XULTreeAccessible::RelationByType(RelationType aType) const
 {
   if (aType == RelationType::NODE_PARENT_OF) {
     if (mTreeView)
@@ -500,15 +496,11 @@ XULTreeAccessible::ContainerWidget() const
     nsCOMPtr<nsIDOMXULMenuListElement> menuListElm =
       do_QueryInterface(mContent->GetParent());
     if (menuListElm) {
-      nsCOMPtr<nsIDOMNode> inputElm;
+      RefPtr<mozilla::dom::Element> inputElm;
       menuListElm->GetInputField(getter_AddRefs(inputElm));
       if (inputElm) {
-        nsCOMPtr<nsINode> inputNode = do_QueryInterface(inputElm);
-        if (inputNode) {
-          Accessible* input = 
-            mDoc->GetAccessible(inputNode);
-          return input ? input->ContainerWidget() : nullptr;
-        }
+        Accessible* input = mDoc->GetAccessible(inputElm);
+        return input ? input->ContainerWidget() : nullptr;
       }
     }
   }
@@ -625,7 +617,7 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
     endRow = rowCount - 1;
   }
 
-  nsCOMPtr<nsITreeColumns> treeColumns;
+  RefPtr<nsTreeColumns> treeColumns;
   mTree->GetColumns(getter_AddRefs(treeColumns));
   if (!treeColumns)
     return;
@@ -633,12 +625,9 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
   int32_t endCol = aEndCol;
 
   if (endCol == -1) {
-    int32_t colCount = 0;
-    rv = treeColumns->GetCount(&colCount);
-    if (NS_FAILED(rv))
-      return;
-
-    endCol = colCount - 1;
+    // We need to make sure to cast to int32_t before we do the subtraction, in
+    // case the column count is 0.
+    endCol = static_cast<int32_t>(treeColumns->Count()) - 1;
   }
 
   for (int32_t rowIdx = aStartRow; rowIdx <= endRow; ++rowIdx) {
@@ -711,12 +700,9 @@ XULTreeItemAccessibleBase::~XULTreeItemAccessibleBase()
 NS_IMPL_CYCLE_COLLECTION_INHERITED(XULTreeItemAccessibleBase, Accessible,
                                    mTree)
 
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(XULTreeItemAccessibleBase)
-  NS_INTERFACE_TABLE_INHERITED(XULTreeItemAccessibleBase,
-                               XULTreeItemAccessibleBase)
-NS_INTERFACE_TABLE_TAIL_INHERITING(Accessible)
-NS_IMPL_ADDREF_INHERITED(XULTreeItemAccessibleBase, Accessible)
-NS_IMPL_RELEASE_INHERITED(XULTreeItemAccessibleBase, Accessible)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(XULTreeItemAccessibleBase,
+                                             Accessible,
+                                             XULTreeItemAccessibleBase)
 
 ////////////////////////////////////////////////////////////////////////////////
 // XULTreeItemAccessibleBase: Accessible
@@ -728,22 +714,24 @@ XULTreeItemAccessibleBase::FocusedChild()
 }
 
 nsIntRect
-XULTreeItemAccessibleBase::Bounds() const
+XULTreeItemAccessibleBase::BoundsInCSSPixels() const
 {
   // Get x coordinate and width from treechildren element, get y coordinate and
   // height from tree cell.
 
   nsCOMPtr<nsIBoxObject> boxObj = nsCoreUtils::GetTreeBodyBoxObject(mTree);
-  if (!boxObj)
+  if (!boxObj) {
     return nsIntRect();
+  }
 
-  nsCOMPtr<nsITreeColumn> column = nsCoreUtils::GetFirstSensibleColumn(mTree);
+  RefPtr<nsTreeColumn> column = nsCoreUtils::GetFirstSensibleColumn(mTree);
 
   int32_t x = 0, y = 0, width = 0, height = 0;
   nsresult rv = mTree->GetCoordsForCellItem(mRow, column, EmptyString(),
                                             &x, &y, &width, &height);
-  if (NS_FAILED(rv))
+  if (NS_FAILED(rv)) {
     return nsIntRect();
+  }
 
   boxObj->GetWidth(&width);
 
@@ -754,11 +742,18 @@ XULTreeItemAccessibleBase::Bounds() const
   x = tcX;
   y += tcY;
 
+  return nsIntRect(x, y, width, height);
+}
+
+nsRect
+XULTreeItemAccessibleBase::BoundsInAppUnits() const
+{
+  nsIntRect bounds = BoundsInCSSPixels();
   nsPresContext* presContext = mDoc->PresContext();
-  return nsIntRect(presContext->CSSPixelsToDevPixels(x),
-                   presContext->CSSPixelsToDevPixels(y),
-                   presContext->CSSPixelsToDevPixels(width),
-                   presContext->CSSPixelsToDevPixels(height));
+  return nsRect(presContext->CSSPixelsToAppUnits(bounds.X()),
+                presContext->CSSPixelsToAppUnits(bounds.Y()),
+                presContext->CSSPixelsToAppUnits(bounds.Width()),
+                presContext->CSSPixelsToAppUnits(bounds.Height()));
 }
 
 void
@@ -775,7 +770,7 @@ XULTreeItemAccessibleBase::SetSelected(bool aSelect)
 }
 
 void
-XULTreeItemAccessibleBase::TakeFocus()
+XULTreeItemAccessibleBase::TakeFocus() const
 {
   nsCOMPtr<nsITreeSelection> selection;
   mTreeView->GetSelection(getter_AddRefs(selection));
@@ -787,7 +782,7 @@ XULTreeItemAccessibleBase::TakeFocus()
 }
 
 Relation
-XULTreeItemAccessibleBase::RelationByType(RelationType aType)
+XULTreeItemAccessibleBase::RelationByType(RelationType aType) const
 {
 
   switch (aType) {
@@ -821,7 +816,7 @@ XULTreeItemAccessibleBase::RelationByType(RelationType aType)
 }
 
 uint8_t
-XULTreeItemAccessibleBase::ActionCount()
+XULTreeItemAccessibleBase::ActionCount() const
 {
   // "activate" action is available for all treeitems, "expand/collapse" action
   // is avaible for treeitem which is container.
@@ -847,7 +842,7 @@ XULTreeItemAccessibleBase::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULTreeItemAccessibleBase::DoAction(uint8_t aIndex)
+XULTreeItemAccessibleBase::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click &&
       (aIndex != eAction_Expand || !IsExpandable()))
@@ -866,6 +861,7 @@ XULTreeItemAccessibleBase::Shutdown()
   mTree = nullptr;
   mTreeView = nullptr;
   mRow = -1;
+  mParent = nullptr; // null-out to prevent base class's shutdown ops
 
   AccessibleWrap::Shutdown();
 }
@@ -915,7 +911,7 @@ XULTreeItemAccessibleBase::GroupPosition()
 }
 
 uint64_t
-XULTreeItemAccessibleBase::NativeState()
+XULTreeItemAccessibleBase::NativeState() const
 {
 
   // focusable and selectable states
@@ -978,26 +974,26 @@ XULTreeItemAccessibleBase::ContainerWidget() const
 
 void
 XULTreeItemAccessibleBase::DispatchClickEvent(nsIContent* aContent,
-                                              uint32_t aActionIndex)
+                                              uint32_t aActionIndex) const
 {
   if (IsDefunct())
     return;
 
-  nsCOMPtr<nsITreeColumns> columns;
+  RefPtr<nsTreeColumns> columns;
   mTree->GetColumns(getter_AddRefs(columns));
   if (!columns)
     return;
 
   // Get column and pseudo element.
-  nsCOMPtr<nsITreeColumn> column;
+  RefPtr<nsTreeColumn> column;
   nsAutoString pseudoElm;
 
   if (aActionIndex == eAction_Click) {
     // Key column is visible and clickable.
-    columns->GetKeyColumn(getter_AddRefs(column));
+    column = columns->GetKeyColumn();
   } else {
     // Primary column contains a twisty we should click on.
-    columns->GetPrimaryColumn(getter_AddRefs(column));
+    column = columns->GetPrimaryColumn();
     pseudoElm = NS_LITERAL_STRING("twisty");
   }
 
@@ -1019,7 +1015,7 @@ XULTreeItemAccessibleBase::GetSiblingAtOffset(int32_t aOffset,
 // XULTreeItemAccessibleBase: protected implementation
 
 bool
-XULTreeItemAccessibleBase::IsExpandable()
+XULTreeItemAccessibleBase::IsExpandable() const
 {
 
   bool isContainer = false;
@@ -1028,11 +1024,10 @@ XULTreeItemAccessibleBase::IsExpandable()
     bool isEmpty = false;
     mTreeView->IsContainerEmpty(mRow, &isEmpty);
     if (!isEmpty) {
-      nsCOMPtr<nsITreeColumns> columns;
+      RefPtr<nsTreeColumns> columns;
       mTree->GetColumns(getter_AddRefs(columns));
-      nsCOMPtr<nsITreeColumn> primaryColumn;
       if (columns) {
-        columns->GetPrimaryColumn(getter_AddRefs(primaryColumn));
+        nsTreeColumn* primaryColumn = columns->GetPrimaryColumn();
         if (primaryColumn &&
             !nsCoreUtils::IsColumnHidden(primaryColumn))
           return true;
@@ -1044,7 +1039,7 @@ XULTreeItemAccessibleBase::IsExpandable()
 }
 
 void
-XULTreeItemAccessibleBase::GetCellName(nsITreeColumn* aColumn, nsAString& aName)
+XULTreeItemAccessibleBase::GetCellName(nsTreeColumn* aColumn, nsAString& aName) const
 {
 
   mTreeView->GetCellText(mRow, aColumn, aName);
@@ -1086,7 +1081,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(XULTreeItemAccessible,
                                    XULTreeItemAccessibleBase,
                                    mColumn)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(XULTreeItemAccessible)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(XULTreeItemAccessible)
 NS_INTERFACE_MAP_END_INHERITING(XULTreeItemAccessibleBase)
 NS_IMPL_ADDREF_INHERITED(XULTreeItemAccessible, XULTreeItemAccessibleBase)
 NS_IMPL_RELEASE_INHERITED(XULTreeItemAccessible, XULTreeItemAccessibleBase)
@@ -1095,7 +1090,7 @@ NS_IMPL_RELEASE_INHERITED(XULTreeItemAccessible, XULTreeItemAccessibleBase)
 // XULTreeItemAccessible: nsIAccessible implementation
 
 ENameValueFlag
-XULTreeItemAccessible::Name(nsString& aName)
+XULTreeItemAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -1114,17 +1109,16 @@ XULTreeItemAccessible::Shutdown()
 }
 
 role
-XULTreeItemAccessible::NativeRole()
+XULTreeItemAccessible::NativeRole() const
 {
-  nsCOMPtr<nsITreeColumns> columns;
+  RefPtr<nsTreeColumns> columns;
   mTree->GetColumns(getter_AddRefs(columns));
   if (!columns) {
     NS_ERROR("No tree columns object in the tree!");
     return roles::NOTHING;
   }
 
-  nsCOMPtr<nsITreeColumn> primaryColumn;
-  columns->GetPrimaryColumn(getter_AddRefs(primaryColumn));
+  nsTreeColumn* primaryColumn = columns->GetPrimaryColumn();
 
   return primaryColumn ? roles::OUTLINEITEM : roles::LISTITEM;
 }

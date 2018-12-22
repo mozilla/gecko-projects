@@ -24,22 +24,20 @@ var behaviours = {
   tabs: "select-extended-keynav mac:select-keynav-wraps allow-other-value selection-required keynav-leftright"
 };
 
-function behaviourContains(tag, behaviour)
-{
+function behaviourContains(tag, behaviour) {
   var platform = "none:";
-  if (navigator.platform.indexOf("Mac") >= 0)
+  if (navigator.platform.includes("Mac"))
     platform = "mac:";
-  else if (navigator.platform.indexOf("Win") >= 0)
+  else if (navigator.platform.includes("Win"))
     platform = "win:";
-  else if (navigator.platform.indexOf("X") >= 0)
+  else if (navigator.platform.includes("X"))
     platform = "gtk:";
 
   var re = new RegExp("\\s" + platform + behaviour + "\\s|\\s" + behaviour + "\\s");
   return re.test(" " + behaviours[tag] + " ");
 }
 
-function test_nsIDOMXULSelectControlElement(element, childtag, testprefix)
-{
+function test_nsIDOMXULSelectControlElement(element, childtag, testprefix) {
   var testid = (testprefix) ? testprefix + " " : "";
   testid += element.localName + " nsIDOMXULSelectControlElement ";
 
@@ -47,7 +45,7 @@ function test_nsIDOMXULSelectControlElement(element, childtag, testprefix)
   var firstvalue = "first", secondvalue = "second", fourthvalue = "fourth";
   if (element.localName == "menulist" && element.editable) {
     firstvalue = "First Item";
-    secondvalue = "Second Item"
+    secondvalue = "Second Item";
     fourthvalue = "Fourth Item";
   }
 
@@ -121,87 +119,24 @@ function test_nsIDOMXULSelectControlElement(element, childtag, testprefix)
   if (allowOtherValue)
     element.value = "";
 
-  // 'removeItemAt' - check if removeItemAt removes the right item
-  if (selectionRequired)
-    element.value = secondvalue;
-  else
-    element.selectedIndex = -1;
-
-  var removeditem = element.removeItemAt(0);
-  is(removeditem, firstitem, testid + "removeItemAt return value");
-  test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt", 1,
-        selectionRequired ? seconditem : null, selectionRequired ? 0 : -1,
-        selectionRequired ? secondvalue : "");
-
-  is(removeditem.control, undefined, testid + "control not set");
-
-  var thirditem = element.appendItem("Third Item", "third");
   var fourthitem = element.appendItem("Fourth Item", fourthvalue);
-  var fifthitem = element.appendItem("Fifth Item", "fifth");
-
-  // 'removeItemAt 2' - check if removeItemAt removes the selected item and
-  //                    adjusts the selection to the next item
-  element.selectedItem = thirditem;
-  is(element.removeItemAt(1), thirditem, testid + "removeItemAt 2 return value");
-
-  // radio buttons don't handle removing quite right due to XBL issues,
-  // so disable testing some of these remove tests for now - bug 367400
-  var isnotradio = (element.localName != "radiogroup");
-  // XXXndeakin disable these tests for all widgets for now. They require bug 331513.
-  isnotradio = false;
-  if (isnotradio)
-    test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt 2", 3, fourthitem, 1, fourthvalue);
-
-  // 'removeItemAt 3' - check if removeItemAt adjusts the selection
-  //                    if an earlier item is removed
-  element.selectedItem = fourthitem;
-  element.removeItemAt(0);
-  test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt 3", 2, fourthitem, 0, fourthvalue);
-
-  // 'removeItemAt 4' - check if removeItemAt adjusts the selection if the
-  //                    last item is selected and removed
-  element.selectedItem = fifthitem;
-  element.removeItemAt(1);
-  if (isnotradio)
-    test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt 4", 1, fourthitem, 0, fourthvalue);
-
-  // 'removeItemAt 5' - check that removeItemAt doesn't fail when removing invalid items
-  is(element.removeItemAt(-1), null, testid + "removeItemAt 5 return value");
-  if (isnotradio)
-    test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt 5", 1, fourthitem, 0, fourthvalue);
-
-  // 'removeItemAt 6' - check that removeItemAt doesn't fail when removing invalid items
-  is(element.removeItemAt(1), null, testid + "removeItemAt 6 return value");
-  is("item removed", "item removed", testid + "removeItemAt 6");
-  if (isnotradio)
-    test_nsIDOMXULSelectControlElement_States(element, testid + "removeItemAt 6", 1, fourthitem, 0, fourthvalue);
-
-  // 'insertItemAt' - check if insertItemAt inserts items at the right locations
-  element.selectedIndex = 0;
-  test_nsIDOMXULSelectControlElement_insertItemAt(element, 0, 0, testid, 5);
-  test_nsIDOMXULSelectControlElement_insertItemAt(element, 2, 2, testid, 6);
-  test_nsIDOMXULSelectControlElement_insertItemAt(element, -1, 3, testid, 7);
-  test_nsIDOMXULSelectControlElement_insertItemAt(element, 6, 4, testid, 8);
-
   element.selectedIndex = 0;
   fourthitem.disabled = true;
-  element.selectedIndex = 1;
-  test_nsIDOMXULSelectControlElement_States(element, testid + "selectedIndex disabled", 5, fourthitem, 1, fourthvalue);
+  element.selectedIndex = 2;
+  test_nsIDOMXULSelectControlElement_States(element, testid + "selectedIndex disabled", 3, fourthitem, 2, fourthvalue);
 
   element.selectedIndex = 0;
   element.selectedItem = fourthitem;
-  test_nsIDOMXULSelectControlElement_States(element, testid + "selectedIndex disabled", 5, fourthitem, 1, fourthvalue);
+  test_nsIDOMXULSelectControlElement_States(element, testid + "selectedItem disabled", 3, fourthitem, 2, fourthvalue);
 
-  // 'removeall' - check if all items are removed
-  while (element.itemCount)
-    element.removeItemAt(0);
-  if (isnotradio)
-    test_nsIDOMXULSelectControlElement_States(element, testid + "remove all", 0, null, -1,
-                                              allowOtherValue ? "number8" : "");
+  if (element.menupopup) {
+    element.menupopup.textContent = "";
+  } else {
+    element.textContent = "";
+  }
 }
 
-function test_nsIDOMXULSelectControlElement_init(element, testprefix)
-{
+function test_nsIDOMXULSelectControlElement_init(element, testprefix) {
   // editable menulists use the label as the value
   var isEditable = (element.localName == "menulist" && element.editable);
 
@@ -225,8 +160,7 @@ function test_nsIDOMXULSelectControlElement_init(element, testprefix)
 
 function test_nsIDOMXULSelectControlElement_States(element, testid,
                                                    expectedcount, expecteditem,
-                                                   expectedindex, expectedvalue)
-{
+                                                   expectedindex, expectedvalue) {
   // need an itemCount property here
   var count = element.itemCount;
   is(count, expectedcount, testid + " item count");
@@ -239,26 +173,6 @@ function test_nsIDOMXULSelectControlElement_States(element, testid,
   }
 }
 
-function test_nsIDOMXULSelectControlElement_insertItemAt(element, index, expectedindex, testid, number)
-{
-  var expectedCount = element.itemCount;
-  var expectedSelItem = element.selectedItem;
-  var expectedSelIndex = element.selectedIndex;
-  var expectedSelValue = element.value;
-
-  var newitem = element.insertItemAt(index, "Item " + number, "number" + number);
-  is(element.getIndexOfItem(newitem), expectedindex,
-                testid + "insertItemAt " + expectedindex + " - get inserted item");
-  expectedCount++;
-  if (expectedSelIndex >= expectedindex)
-    expectedSelIndex++;
-
-  test_nsIDOMXULSelectControlElement_States(element, testid + "insertItemAt " + index,
-                                           expectedCount, expectedSelItem,
-                                           expectedSelIndex, expectedSelValue);
-  return newitem;
-}
-
 /** test_nsIDOMXULSelectControlElement_UI
   *
   * Test the UI aspects of an element which implements nsIDOMXULSelectControlElement
@@ -266,13 +180,15 @@ function test_nsIDOMXULSelectControlElement_insertItemAt(element, index, expecte
   * Parameters:
   *   element - element to test
   */
-function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
-{
+function test_nsIDOMXULSelectControlElement_UI(element, testprefix) {
   var testid = (testprefix) ? testprefix + " " : "";
   testid += element.localName + " nsIDOMXULSelectControlElement UI ";
 
-  while (element.itemCount)
-    element.removeItemAt(0);
+  if (element.menupopup) {
+    element.menupopup.textContent = "";
+  } else {
+    element.textContent = "";
+  }
 
   var firstitem = element.appendItem("First Item", "first");
   var seconditem = element.appendItem("Second Item", "second");
@@ -319,7 +235,7 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
   var thirditem = element.appendItem("Third Item", "third");
   var fourthitem = element.appendItem("Fourth Item", "fourth");
   if (behaviourContains(element.localName, "select-extended-keynav")) {
-    var fifthitem = element.appendItem("Fifth Item", "fifth");
+    element.appendItem("Fifth Item", "fifth");
     var sixthitem = element.appendItem("Sixth Item", "sixth");
 
     synthesizeKeyExpectEvent("VK_END", {}, element, "select", testid + "key end");
@@ -338,8 +254,8 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
     synthesizeKeyExpectEvent("VK_PAGE_UP", {}, element, "select", testid + "key page up to start");
     test_nsIDOMXULSelectControlElement_States(element, testid + "key page up to start", 6, firstitem, 0, "first");
 
-    element.removeItemAt(5);
-    element.removeItemAt(4);
+    element.getItemAtIndex(5).remove();
+    element.getItemAtIndex(4).remove();
   }
 
   // now test whether a disabled item works.
@@ -353,7 +269,7 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
                              dontSelectDisabled ? "!select" : "select",
                              testid + "mouse select disabled");
   test_nsIDOMXULSelectControlElement_States(element, testid + "mouse select disabled", 4,
-    dontSelectDisabled ? firstitem: seconditem, dontSelectDisabled ? 0 : 1,
+    dontSelectDisabled ? firstitem : seconditem, dontSelectDisabled ? 0 : 1,
     dontSelectDisabled ? "first" : "second");
 
   if (dontSelectDisabled) {
@@ -373,8 +289,7 @@ function test_nsIDOMXULSelectControlElement_UI(element, testprefix)
     expectedValue = keyWrap ? "fourth" : "third";
     test_nsIDOMXULSelectControlElement_States(element, testid + "key up disabled 2", 4,
       expectedItem, expectedIndex, expectedValue);
-  }
-  else {
+  } else {
     // in this case, disabled items should behave the same as non-disabled items.
     element.selectedIndex = 0;
     synthesizeKeyExpectEvent(forwardKey, {}, element, "select", testid + "key down disabled");

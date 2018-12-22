@@ -14,40 +14,36 @@
 #include "js/Proxy.h"
 #include "nsString.h"
 
-#define DOM_PROXY_OBJECT_SLOT js::PROXY_PRIVATE_SLOT
-
 namespace mozilla {
 namespace dom {
 
-enum {
-  /**
-   * DOM proxies have an extra slot for the expando object at index
-   * JSPROXYSLOT_EXPANDO.
-   *
-   * The expando object is a plain JSObject whose properties correspond to
-   * "expandos" (custom properties set by the script author).
-   *
-   * The exact value stored in the JSPROXYSLOT_EXPANDO slot depends on whether
-   * the interface is annotated with the [OverrideBuiltins] extended attribute.
-   *
-   * If it is, the proxy is initialized with a PrivateValue, which contains a
-   * pointer to a js::ExpandoAndGeneration object; this contains a pointer to
-   * the actual expando object as well as the "generation" of the object.
-   *
-   * If it is not, the proxy is initialized with an UndefinedValue. In
-   * EnsureExpandoObject, it is set to an ObjectValue that points to the
-   * expando object directly. (It is set back to an UndefinedValue only when
-   * the object is about to die.)
-   */
-  JSPROXYSLOT_EXPANDO = 0
-};
+/**
+ * DOM proxies store the expando object in the private slot.
+ *
+ * The expando object is a plain JSObject whose properties correspond to
+ * "expandos" (custom properties set by the script author).
+ *
+ * The exact value stored in the proxy's private slot depends on whether the
+ * interface is annotated with the [OverrideBuiltins] extended attribute.
+ *
+ * If it is, the proxy is initialized with a PrivateValue, which contains a
+ * pointer to a js::ExpandoAndGeneration object; this contains a pointer to
+ * the actual expando object as well as the "generation" of the object.  The
+ * proxy handler will trace the expando object stored in the
+ * js::ExpandoAndGeneration while the proxy itself is alive.
+ *
+ * If it is not, the proxy is initialized with an UndefinedValue. In
+ * EnsureExpandoObject, it is set to an ObjectValue that points to the
+ * expando object directly. (It is set back to an UndefinedValue only when
+ * the object is about to die.)
+ */
 
 template<typename T> struct Prefable;
 
 class BaseDOMProxyHandler : public js::BaseProxyHandler
 {
 public:
-  explicit MOZ_CONSTEXPR BaseDOMProxyHandler(const void* aProxyFamily, bool aHasPrototype = false)
+  explicit constexpr BaseDOMProxyHandler(const void* aProxyFamily, bool aHasPrototype = false)
     : js::BaseProxyHandler(aProxyFamily, aHasPrototype)
   {}
 
@@ -59,17 +55,16 @@ public:
   virtual bool ownPropertyKeys(JSContext* cx, JS::Handle<JSObject*> proxy,
                                JS::AutoIdVector &props) const override;
 
+  virtual bool getPrototypeIfOrdinary(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                      bool* isOrdinary,
+                                      JS::MutableHandle<JSObject*> proto) const override;
+
   // We override getOwnEnumerablePropertyKeys() and implement it directly
   // instead of using the default implementation, which would call
   // ownPropertyKeys and then filter out the non-enumerable ones. This avoids
   // unnecessary work during enumeration.
   virtual bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::Handle<JSObject*> proxy,
                                             JS::AutoIdVector &props) const override;
-
-  bool watch(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
-             JS::Handle<JSObject*> callable) const override;
-  bool unwatch(JSContext* cx, JS::Handle<JSObject*> proxy,
-               JS::Handle<jsid> id) const override;
 
 protected:
   // Hook for subclasses to implement shared ownPropertyKeys()/keys()
@@ -94,7 +89,7 @@ protected:
 class DOMProxyHandler : public BaseDOMProxyHandler
 {
 public:
-  MOZ_CONSTEXPR DOMProxyHandler()
+  constexpr DOMProxyHandler()
     : BaseDOMProxyHandler(&family)
   {}
 
@@ -126,14 +121,36 @@ public:
   virtual bool setCustom(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
                          JS::Handle<JS::Value> v, bool *done) const;
 
+  /*
+   * Get the expando object for the given DOM proxy.
+   */
   static JSObject* GetExpandoObject(JSObject* obj);
 
-  /* GetAndClearExpandoObject does not DROP or clear the preserving wrapper flag. */
+  /*
+   * Clear the expando object for the given DOM proxy and return it.  This
+   * function will ensure that the returned object is exposed to active JS if
+   * the given object is exposed.
+   *
+   * GetAndClearExpandoObject does not DROP or clear the preserving wrapper
+   * flag.
+   */
   static JSObject* GetAndClearExpandoObject(JSObject* obj);
+
+  /*
+   * Ensure that the given proxy (obj) has an expando object, and return it.
+   * Returns null on failure.
+   */
   static JSObject* EnsureExpandoObject(JSContext* cx,
                                        JS::Handle<JSObject*> obj);
 
   static const char family;
+};
+
+// Class used by shadowing handlers (the ones that have [OverrideBuiltins].
+// This handles tracing the expando in ExpandoAndGeneration.
+class ShadowingDOMProxyHandler : public DOMProxyHandler
+{
+  virtual void trace(JSTracer* trc, JSObject* proxy) const override;
 };
 
 inline bool IsDOMProxy(JSObject *obj)
@@ -206,7 +223,7 @@ FillPropertyDescriptor(JS::MutableHandle<JS::PropertyDescriptor> desc,
 
 inline void
 FillPropertyDescriptor(JS::MutableHandle<JS::PropertyDescriptor> desc,
-                       JSObject* obj, JS::Value v,
+                       JSObject* obj, const JS::Value& v,
                        bool readonly, bool enumerable = true)
 {
   desc.value().set(v);
@@ -215,7 +232,7 @@ FillPropertyDescriptor(JS::MutableHandle<JS::PropertyDescriptor> desc,
 
 inline void
 FillPropertyDescriptor(JS::MutableHandle<JS::PropertyDescriptor> desc,
-                       JSObject* obj, unsigned attributes, JS::Value v)
+                       JSObject* obj, unsigned attributes, const JS::Value& v)
 {
   desc.object().set(obj);
   desc.value().set(v);

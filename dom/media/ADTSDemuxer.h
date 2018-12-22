@@ -11,7 +11,6 @@
 #include "mozilla/Maybe.h"
 #include "MediaDataDemuxer.h"
 #include "MediaResource.h"
-#include "mp4_demuxer/ByteReader.h"
 
 namespace mozilla {
 
@@ -22,17 +21,23 @@ class FrameParser;
 
 class ADTSTrackDemuxer;
 
-class ADTSDemuxer : public MediaDataDemuxer {
+DDLoggedTypeDeclNameAndBase(ADTSDemuxer, MediaDataDemuxer);
+
+class ADTSDemuxer
+  : public MediaDataDemuxer
+  , public DecoderDoctorLifeLogger<ADTSDemuxer>
+{
 public:
   // MediaDataDemuxer interface.
   explicit ADTSDemuxer(MediaResource* aSource);
   RefPtr<InitPromise> Init() override;
-  bool HasTrackType(TrackInfo::TrackType aType) const override;
   uint32_t GetNumberTracks(TrackInfo::TrackType aType) const override;
-  already_AddRefed<MediaTrackDemuxer> GetTrackDemuxer(
-    TrackInfo::TrackType aType, uint32_t aTrackNumber) override;
+  already_AddRefed<MediaTrackDemuxer>
+  GetTrackDemuxer(TrackInfo::TrackType aType, uint32_t aTrackNumber) override;
   bool IsSeekable() const override;
-  bool ShouldComputeStartTime() const override { return false; }
+
+  // Return true if a valid ADTS frame header could be found.
+  static bool ADTSSniffer(const uint8_t* aData, const uint32_t aLength);
 
 private:
   bool InitInternal();
@@ -41,7 +46,12 @@ private:
   RefPtr<ADTSTrackDemuxer> mTrackDemuxer;
 };
 
-class ADTSTrackDemuxer : public MediaTrackDemuxer {
+DDLoggedTypeNameAndBase(ADTSTrackDemuxer, MediaTrackDemuxer);
+
+class ADTSTrackDemuxer
+  : public MediaTrackDemuxer
+  , public DecoderDoctorLifeLogger<ADTSTrackDemuxer>
+{
 public:
   explicit ADTSTrackDemuxer(MediaResource* aSource);
 
@@ -61,11 +71,11 @@ public:
 
   // MediaTrackDemuxer interface.
   UniquePtr<TrackInfo> GetInfo() const override;
-  RefPtr<SeekPromise> Seek(media::TimeUnit aTime) override;
+  RefPtr<SeekPromise> Seek(const media::TimeUnit& aTime) override;
   RefPtr<SamplesPromise> GetSamples(int32_t aNumSamples = 1) override;
   void Reset() override;
   RefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(
-    media::TimeUnit aTimeThreshold) override;
+    const media::TimeUnit& aTimeThreshold) override;
   int64_t GetResourceOffset() const override;
   media::TimeIntervals GetBuffered() override;
 

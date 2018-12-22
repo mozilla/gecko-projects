@@ -9,17 +9,18 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=
 
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
-  <script type="application/javascript;version=1.8" src="inspector-helpers.js"></script>
-  <script type="application/javascript;version=1.8">
-const inspector = require("devtools/server/actors/inspector");
+  <script type="application/javascript" src="inspector-helpers.js"></script>
+  <script type="application/javascript">
+"use strict";
 
 window.onload = function() {
   SimpleTest.waitForExplicitFinish();
   runNextTest();
-}
+};
 
-var gWalker = null;
-var gClient = null;
+let gWalker = null;
+let gClient = null;
+let gInspectee = null;
 
 function assertOwnership() {
   return assertOwnershipTrees(gWalker);
@@ -27,16 +28,16 @@ function assertOwnership() {
 
 function ignoreNode(node) {
   // Duplicate the walker logic to skip blank nodes...
-  return node.nodeType === Components.interfaces.nsIDOMNode.TEXT_NODE &&
+  return node.nodeType === Node.TEXT_NODE &&
     !/[^\s]/.test(node.nodeValue);
 }
 
 addTest(function setup() {
-  let url = document.getElementById("inspectorContent").href;
+  const url = document.getElementById("inspectorContent").href;
   attachURL(url, function(err, client, tab, doc) {
     gInspectee = doc;
-    let {InspectorFront} = require("devtools/server/actors/inspector");
-    let inspector = InspectorFront(client, tab);
+    const {InspectorFront} = require("devtools/shared/fronts/inspector");
+    const inspector = InspectorFront(client, tab);
     promiseDone(inspector.getWalker().then(walker => {
       ok(walker, "getWalker() should return an actor.");
       gClient = client;
@@ -80,14 +81,16 @@ addTest(function testRemoveSubtree() {
     is(originalOwnershipSize, 56, "Correct number of items in ownership tree");
     return gWalker.removeNode(longlist);
   }).then(siblings => {
-    is(siblings.previousSibling.rawNode(), previousSibling, "Should have returned the previous sibling.");
-    is(siblings.nextSibling.rawNode(), nextSibling, "Should have returned the next sibling.");
+    is(siblings.previousSibling.rawNode(), previousSibling,
+       "Should have returned the previous sibling.");
+    is(siblings.nextSibling.rawNode(), nextSibling,
+       "Should have returned the next sibling.");
     return waitForMutation(gWalker, isChildList);
   }).then(() => {
     // Our ownership size should now be 51 fewer (we forgot about #longlist + 26
     // children + 26 singleTextChild nodes, but learned about #longlist's
     // prev/next sibling)
-    let newOwnershipSize = assertOwnership();
+    const newOwnershipSize = assertOwnership();
     is(newOwnershipSize, originalOwnershipSize - 51,
       "Ownership tree should be lower");
     // Now verify that some nodes have gone away
@@ -96,12 +99,11 @@ addTest(function testRemoveSubtree() {
 });
 
 addTest(function cleanup() {
-  delete gWalker;
-  delete gClient;
+  gWalker = null;
+  gClient = null;
+  gInspectee = null;
   runNextTest();
 });
-
-
   </script>
 </head>
 <body>

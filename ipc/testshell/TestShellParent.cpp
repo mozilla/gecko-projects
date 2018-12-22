@@ -11,14 +11,12 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ScriptSettings.h"
 
-#include "nsAutoPtr.h"
 #include "xpcpublic.h"
 
 using namespace mozilla;
 using mozilla::ipc::TestShellParent;
 using mozilla::ipc::TestShellCommandParent;
 using mozilla::ipc::PTestShellCommandParent;
-using mozilla::dom::ContentParent;
 
 void
 TestShellParent::ActorDestroy(ActorDestroyReason aWhy)
@@ -52,7 +50,7 @@ TestShellParent::CommandDone(TestShellCommandParent* command,
 
 bool
 TestShellCommandParent::SetCallback(JSContext* aCx,
-                                    JS::Value aCallback)
+                                    const JS::Value& aCallback)
 {
   if (!mCallback.initialized()) {
     mCallback.init(aCx, aCallback);

@@ -33,14 +33,15 @@ class Response final : public nsISupports
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Response)
 
 public:
-  Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse);
+  Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse,
+           AbortSignal* aSignal);
 
   Response(const Response& aOther) = delete;
 
   JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return ResponseBinding::Wrap(aCx, this, aGivenProto);
+    return Response_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   ResponseType
@@ -48,15 +49,16 @@ public:
   {
     return mInternalResponse->Type();
   }
-
   void
   GetUrl(nsAString& aUrl) const
   {
-    nsCString url;
-    mInternalResponse->GetUrl(url);
-    CopyUTF8toUTF16(url, aUrl);
+    CopyUTF8toUTF16(mInternalResponse->GetURL(), aUrl);
   }
-
+  bool
+  Redirected() const
+  {
+    return mInternalResponse->IsRedirected();
+  }
   uint16_t
   Status() const
   {
@@ -103,7 +105,12 @@ public:
   Headers* Headers_();
 
   void
-  GetBody(nsIInputStream** aStream) { return mInternalResponse->GetBody(aStream); }
+  GetBody(nsIInputStream** aStream, int64_t* aBodyLength = nullptr)
+  {
+    mInternalResponse->GetBody(aStream, aBodyLength);
+  }
+
+  using FetchBody::GetBody;
 
   static already_AddRefed<Response>
   Error(const GlobalObject& aGlobal);
@@ -113,7 +120,7 @@ public:
 
   static already_AddRefed<Response>
   Constructor(const GlobalObject& aGlobal,
-              const Optional<ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams>& aBody,
+              const Optional<Nullable<fetch::ResponseBodyInit>>& aBody,
               const ResponseInit& aInit, ErrorResult& rv);
 
   nsIGlobalObject* GetParentObject() const
@@ -122,24 +129,30 @@ public:
   }
 
   already_AddRefed<Response>
-  Clone(ErrorResult& aRv) const;
+  Clone(JSContext* aCx, ErrorResult& aRv);
 
   already_AddRefed<Response>
-  CloneUnfiltered(ErrorResult& aRv) const;
+  CloneUnfiltered(JSContext* aCx, ErrorResult& aRv);
 
   void
-  SetBody(nsIInputStream* aBody);
+  SetBody(nsIInputStream* aBody, int64_t aBodySize);
 
   already_AddRefed<InternalResponse>
   GetInternalResponse() const;
 
+  AbortSignal*
+  GetSignal() const override
+  {
+    return mSignal;
+  }
+
 private:
   ~Response();
 
-  nsCOMPtr<nsIGlobalObject> mOwner;
   RefPtr<InternalResponse> mInternalResponse;
   // Lazily created
   RefPtr<Headers> mHeaders;
+  RefPtr<AbortSignal> mSignal;
 };
 
 } // namespace dom

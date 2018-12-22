@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,7 +11,6 @@
 #include "Layers.h"                     // for PaintedLayer, etc
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/TiledContentClient.h"
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsRegion.h"                   // for nsIntRegion
 
 namespace mozilla {
@@ -54,24 +55,29 @@ public:
   // PaintedLayer
   virtual Layer* AsLayer() override { return this; }
   virtual void InvalidateRegion(const nsIntRegion& aRegion) override {
-    mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(20);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion);
-    mLowPrecisionValidRegion.Sub(mLowPrecisionValidRegion, mInvalidRegion);
+    mInvalidRegion.Add(aRegion);
+    UpdateValidRegionAfterInvalidRegionChanged();
+    if (!mLowPrecisionValidRegion.IsEmpty()) {
+      // Also update mLowPrecisionValidRegion. Unfortunately we call
+      // mInvalidRegion.GetRegion() here, which is expensive.
+      mLowPrecisionValidRegion.SubOut(mInvalidRegion.GetRegion());
+    }
   }
 
   // Shadow methods
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override;
   virtual ShadowableLayer* AsShadowableLayer() override { return this; }
 
-  virtual void Disconnect() override
-  {
-    ClientLayer::Disconnect();
-  }
-
   virtual void RenderLayer() override;
 
   virtual void ClearCachedResources() override;
+
+  virtual void HandleMemoryPressure() override
+  {
+    if (mContentClient) {
+      mContentClient->HandleMemoryPressure();
+    }
+  }
 
   /**
    * Helper method to find the nearest ancestor layers which
@@ -112,7 +118,7 @@ private:
    * Helper function to do the high-precision paint.
    * This function returns true if it updated the paint buffer.
    */
-  bool RenderHighPrecision(nsIntRegion& aInvalidRegion,
+  bool RenderHighPrecision(const nsIntRegion& aInvalidRegion,
                            const nsIntRegion& aVisibleRegion,
                            LayerManager::DrawPaintedLayerCallback aCallback,
                            void* aCallbackData);
@@ -121,7 +127,7 @@ private:
    * Helper function to do the low-precision paint.
    * This function returns true if it updated the paint buffer.
    */
-  bool RenderLowPrecision(nsIntRegion& aInvalidRegion,
+  bool RenderLowPrecision(const nsIntRegion& aInvalidRegion,
                           const nsIntRegion& aVisibleRegion,
                           LayerManager::DrawPaintedLayerCallback aCallback,
                           void* aCallbackData);

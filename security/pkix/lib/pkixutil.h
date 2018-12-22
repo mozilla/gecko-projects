@@ -42,11 +42,13 @@ class BackCert final
 {
 public:
   // certDER and childCert must be valid for the lifetime of BackCert.
-  BackCert(Input certDER, EndEntityOrCA endEntityOrCA,
-           const BackCert* childCert)
-    : der(certDER)
-    , endEntityOrCA(endEntityOrCA)
-    , childCert(childCert)
+  BackCert(Input aCertDER,
+           EndEntityOrCA aEndEntityOrCA,
+           const BackCert* aChildCert)
+    : der(aCertDER)
+    , endEntityOrCA(aEndEntityOrCA)
+    , childCert(aChildCert)
+    , version(der::Version::Uninitialized)
   {
   }
 
@@ -106,6 +108,10 @@ public:
   {
     return MaybeInput(requiredTLSFeatures);
   }
+  const Input* GetSignedCertificateTimestamps() const
+  {
+    return MaybeInput(signedCertificateTimestamps);
+  }
 
 private:
   const Input der;
@@ -149,6 +155,7 @@ private:
   Input subjectAltName;
   Input criticalNetscapeCertificateType;
   Input requiredTLSFeatures;
+  Input signedCertificateTimestamps; // RFC 6962 (Certificate Transparency)
 
   Result RememberExtension(Reader& extnID, Input extnValue, bool critical,
                            /*out*/ bool& understood);
@@ -197,6 +204,12 @@ private:
   void operator=(const NonOwningDERArray&) = delete;
 };
 
+// Extracts the SignedCertificateTimestampList structure which is encoded as an
+// OCTET STRING within the X.509v3 / OCSP extensions (see RFC 6962 section 3.3).
+Result
+ExtractSignedCertificateTimestampListFromExtension(Input extnValue,
+                                                   Input& sctList);
+
 inline unsigned int
 DaysBeforeYear(unsigned int year)
 {
@@ -224,6 +237,12 @@ Result VerifySignedDigest(TrustDomain& trustDomain,
 Result VerifySignedData(TrustDomain& trustDomain,
                         const der::SignedDataWithSignature& signedData,
                         Input signerSubjectPublicKeyInfo);
+
+// Extracts the key parameters from |subjectPublicKeyInfo|, invoking
+// the relevant methods of |trustDomain|.
+Result
+CheckSubjectPublicKeyInfo(Input subjectPublicKeyInfo, TrustDomain& trustDomain,
+                          EndEntityOrCA endEntityOrCA);
 
 // In a switch over an enum, sometimes some compilers are not satisfied that
 // all control flow paths have been considered unless there is a default case.

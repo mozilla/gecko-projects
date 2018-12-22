@@ -1,10 +1,22 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Events")
+
+BROWSER_CHROME_MANIFESTS += [
+  'test/browser.ini',
+]
+
+MOCHITEST_MANIFESTS += [
+    'test/mochitest.ini',
+    'test/pointerevents/mochitest.ini',
+    'test/pointerevents/pointerlock/mochitest.ini',
+]
+
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
 
 XPIDL_SOURCES += [
@@ -21,6 +33,7 @@ EXPORTS.mozilla += [
     'EventNameList.h',
     'EventStateManager.h',
     'EventStates.h',
+    'IMEContentObserver.h',
     'IMEStateManager.h',
     'InternalMutationEvent.h',
     'JSEventHandler.h',
@@ -28,18 +41,20 @@ EXPORTS.mozilla += [
     'PhysicalKeyCodeNameList.h',
     'TextComposition.h',
     'VirtualKeyCodeList.h',
+    'WheelHandlingHelper.h',
 ]
 
 EXPORTS.mozilla.dom += [
     'AnimationEvent.h',
-    'BeforeAfterKeyboardEvent.h',
     'BeforeUnloadEvent.h',
     'ClipboardEvent.h',
     'CommandEvent.h',
     'CompositionEvent.h',
+    'ConstructibleEventTarget.h',
     'CustomEvent.h',
-    'DataContainerEvent.h',
     'DataTransfer.h',
+    'DataTransferItem.h',
+    'DataTransferItemList.h',
     'DeviceMotionEvent.h',
     'DragEvent.h',
     'Event.h',
@@ -55,9 +70,11 @@ EXPORTS.mozilla.dom += [
     'NotifyPaintEvent.h',
     'PaintRequest.h',
     'PointerEvent.h',
+    'PointerEventHandler.h',
     'ScrollAreaEvent.h',
     'SimpleGestureEvent.h',
     'StorageEvent.h',
+    'TextClause.h',
     'Touch.h',
     'TouchEvent.h',
     'TransitionEvent.h',
@@ -72,15 +89,16 @@ if CONFIG['MOZ_WEBSPEECH']:
 UNIFIED_SOURCES += [
     'AnimationEvent.cpp',
     'AsyncEventDispatcher.cpp',
-    'BeforeAfterKeyboardEvent.cpp',
     'BeforeUnloadEvent.cpp',
     'ClipboardEvent.cpp',
     'CommandEvent.cpp',
     'CompositionEvent.cpp',
+    'ConstructibleEventTarget.cpp',
     'ContentEventHandler.cpp',
     'CustomEvent.cpp',
-    'DataContainerEvent.cpp',
     'DataTransfer.cpp',
+    'DataTransferItem.cpp',
+    'DataTransferItemList.cpp',
     'DeviceMotionEvent.cpp',
     'DOMEventTargetHelper.cpp',
     'DragEvent.cpp',
@@ -103,9 +121,11 @@ UNIFIED_SOURCES += [
     'NotifyPaintEvent.cpp',
     'PaintRequest.cpp',
     'PointerEvent.cpp',
+    'PointerEventHandler.cpp',
     'ScrollAreaEvent.cpp',
     'SimpleGestureEvent.cpp',
     'StorageEvent.cpp',
+    'TextClause.cpp',
     'TextComposition.cpp',
     'Touch.cpp',
     'TouchEvent.cpp',
@@ -131,10 +151,8 @@ LOCAL_INCLUDES += [
     '/docshell/base',
     '/dom/base',
     '/dom/html',
-    '/dom/settings',
     '/dom/storage',
     '/dom/svg',
-    '/dom/workers',
     '/dom/xml',
     '/dom/xul',
     '/js/xpconnect/wrappers',
@@ -143,7 +161,5 @@ LOCAL_INCLUDES += [
     '/layout/xul/tree/',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    LOCAL_INCLUDES += [
-        '/dom/wifi',
-    ]
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

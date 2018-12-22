@@ -27,12 +27,6 @@ menulist:not([popuponly="true"]) {
   margin: 1px 3px !important;
 }
 
-.menulist-description {
-  font-style: italic;
-  color: GrayText;
-  -moz-margin-start: 1ex !important;
-}
-
 /* ..... dropmarker ..... */
 
 .menulist-dropmarker {
@@ -46,7 +40,7 @@ menulist[disabled="true"] {
 }
 
 menulist[disabled="true"] > .menulist-dropmarker {
-  -moz-padding-start: 7px !important;
+  padding-inline-start: 7px !important;
 }
 
 /* ::::: editable menulists ::::: */

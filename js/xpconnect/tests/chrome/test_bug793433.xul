@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <?xml-stylesheet type="text/css" href="chrome://global/skin"?>
-<?xml-stylesheet type="text/css" href="/tests/SimpleTest/test.css"?>
+<?xml-stylesheet type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"?>
 <!--
 https://bugzilla.mozilla.org/show_bug.cgi?id=793433
 -->
@@ -18,9 +18,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=793433
 
   <!-- test code goes here -->
   <script type="application/javascript"><![CDATA[
-
-var Cc = Components.classes;
-var Ci = Components.interfaces;
 
 function shouldThrow(fun, args, msg) {
   try {

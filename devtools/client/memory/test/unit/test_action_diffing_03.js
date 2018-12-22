@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Test selecting snapshots for diffing.
 
 const { diffingState, snapshotState, viewState } = require("devtools/client/memory/constants");
@@ -11,15 +13,16 @@ const {
 const { takeSnapshot } = require("devtools/client/memory/actions/snapshot");
 const { changeView } = require("devtools/client/memory/actions/view");
 
-function run_test() {
-  run_next_test();
-}
+// We test that you (1) cannot select a snapshot that is not in a diffable
+// state, and (2) cannot select more than 2 snapshots for diffing. Both attempts
+// trigger assertion failures.
+EXPECTED_DTU_ASSERT_FAILURE_COUNT = 2;
 
-add_task(function *() {
-  let front = new StubbedMemoryFront();
-  let heapWorker = new HeapAnalysesClient();
-  yield front.attach();
-  let store = Store();
+add_task(async function() {
+  const front = new StubbedMemoryFront();
+  const heapWorker = new HeapAnalysesClient();
+  await front.attach();
+  const store = Store();
   const { getState, dispatch } = store;
 
   dispatch(changeView(viewState.CENSUS));
@@ -29,9 +32,8 @@ add_task(function *() {
   dispatch(takeSnapshot(front, heapWorker));
   dispatch(takeSnapshot(front, heapWorker));
 
-  yield waitUntilSnapshotState(store, [snapshotState.SAVED,
-                                       snapshotState.SAVED,
-                                       snapshotState.SAVED]);
+  await waitUntilSnapshotState(store,
+        [snapshotState.SAVED, snapshotState.SAVED, snapshotState.SAVED]);
   dispatch(takeSnapshot(front));
 
   // Start diffing.
@@ -95,5 +97,5 @@ add_task(function *() {
   ok(threw, "Can't select more than two snapshots for diffing");
 
   heapWorker.destroy();
-  yield front.detach();
+  await front.detach();
 });

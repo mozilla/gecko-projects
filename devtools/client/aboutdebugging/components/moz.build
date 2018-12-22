@@ -2,15 +2,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+DIRS += [
+    'addons',
+    'tabs',
+    'workers',
+]
+
 DevToolsModules(
-    'aboutdebugging.js',
-    'addon-target.js',
-    'addons-controls.js',
-    'addons-tab.js',
-    'tab-header.js',
-    'tab-menu-entry.js',
-    'tab-menu.js',
-    'target-list.js',
-    'worker-target.js',
-    'workers-tab.js',
+    'Aboutdebugging.js',
+    'PanelHeader.js',
+    'PanelMenu.js',
+    'PanelMenuEntry.js',
+    'TargetList.js',
 )

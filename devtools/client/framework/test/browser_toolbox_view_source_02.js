@@ -10,14 +10,20 @@
 var URL = `${URL_ROOT}doc_viewsource.html`;
 var JS_URL = `${URL_ROOT}code_math.js`;
 
-function *viewSource() {
-  let toolbox = yield openNewTabAndToolbox(URL);
-  let { panelWin: debuggerWin } = yield toolbox.selectTool("jsdebugger");
-  let debuggerEvents = debuggerWin.EVENTS;
-  let { DebuggerView } = debuggerWin;
-  let Sources = DebuggerView.Sources;
+// Force the old debugger UI since it's directly used (see Bug 1301705)
+Services.prefs.setBoolPref("devtools.debugger.new-debugger-frontend", false);
+registerCleanupFunction(function() {
+  Services.prefs.clearUserPref("devtools.debugger.new-debugger-frontend");
+});
 
-  yield debuggerWin.once(debuggerEvents.SOURCE_SHOWN);
+async function viewSource() {
+  const toolbox = await openNewTabAndToolbox(URL);
+  const { panelWin: debuggerWin } = await toolbox.selectTool("jsdebugger");
+  const debuggerEvents = debuggerWin.EVENTS;
+  const { DebuggerView } = debuggerWin;
+  const Sources = DebuggerView.Sources;
+
+  await debuggerWin.once(debuggerEvents.SOURCE_SHOWN);
   ok("A source was shown in the debugger.");
 
   is(Sources.selectedValue, getSourceActor(Sources, JS_URL),
@@ -25,9 +31,9 @@ function *viewSource() {
   is(DebuggerView.editor.getCursor().line, 0,
     "The correct line is initially highlighted in the debugger's source editor.");
 
-  yield toolbox.viewSourceInDebugger(JS_URL, 2);
+  await toolbox.viewSourceInDebugger(JS_URL, 2);
 
-  let debuggerPanel = toolbox.getPanel("jsdebugger");
+  const debuggerPanel = toolbox.getPanel("jsdebugger");
   ok(debuggerPanel, "The debugger panel was opened.");
   is(toolbox.currentToolId, "jsdebugger", "The debugger panel was selected.");
 
@@ -36,12 +42,12 @@ function *viewSource() {
   is(DebuggerView.editor.getCursor().line + 1, 2,
     "The correct line is highlighted in the debugger's source editor.");
 
-  yield closeToolboxAndTab(toolbox);
+  await closeToolboxAndTab(toolbox);
   finish();
 }
 
-function test () {
-  Task.spawn(viewSource).then(finish, (aError) => {
+function test() {
+  viewSource().then(finish, (aError) => {
     ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
     finish();
   });

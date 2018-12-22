@@ -1,10 +1,12 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"         // for ArrayLength
 #include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "mozilla/MathAlgorithms.h"
 
 #include "nsColor.h"
 #include <sys/types.h>                  // for int32_t
@@ -75,47 +77,61 @@ static int ComponentValue(const char16_t* aColorSpec, int aLen, int color, int d
   return component;
 }
 
-bool NS_HexToRGB(const nsAString& aColorSpec, nscolor* aResult)
+bool
+NS_HexToRGBA(const nsAString& aColorSpec, nsHexColorType aType,
+             nscolor* aResult)
 {
   const char16_t* buffer = aColorSpec.BeginReading();
 
   int nameLen = aColorSpec.Length();
-  if ((nameLen == 3) || (nameLen == 6)) {
-    // Make sure the digits are legal
-    for (int i = 0; i < nameLen; i++) {
-      char16_t ch = buffer[i];
-      if (((ch >= '0') && (ch <= '9')) ||
-          ((ch >= 'a') && (ch <= 'f')) ||
-          ((ch >= 'A') && (ch <= 'F'))) {
-        // Legal character
-        continue;
-      }
-      // Whoops. Illegal character.
+  bool hasAlpha = false;
+  if (nameLen != 3 && nameLen != 6) {
+    if ((nameLen != 4 && nameLen != 8) || aType == nsHexColorType::NoAlpha) {
+      // Improperly formatted color value
       return false;
     }
-
-    // Convert the ascii to binary
-    int dpc = ((3 == nameLen) ? 1 : 2);
-    // Translate components from hex to binary
-    int r = ComponentValue(buffer, nameLen, 0, dpc);
-    int g = ComponentValue(buffer, nameLen, 1, dpc);
-    int b = ComponentValue(buffer, nameLen, 2, dpc);
-    if (dpc == 1) {
-      // Scale single digit component to an 8 bit value. Replicate the
-      // single digit to compute the new value.
-      r = (r << 4) | r;
-      g = (g << 4) | g;
-      b = (b << 4) | b;
-    }
-    NS_ASSERTION((r >= 0) && (r <= 255), "bad r");
-    NS_ASSERTION((g >= 0) && (g <= 255), "bad g");
-    NS_ASSERTION((b >= 0) && (b <= 255), "bad b");
-    *aResult = NS_RGB(r, g, b);
-    return true;
+    hasAlpha = true;
   }
 
-  // Improperly formatted color value
-  return false;
+  // Make sure the digits are legal
+  for (int i = 0; i < nameLen; i++) {
+    char16_t ch = buffer[i];
+    if (((ch >= '0') && (ch <= '9')) ||
+        ((ch >= 'a') && (ch <= 'f')) ||
+        ((ch >= 'A') && (ch <= 'F'))) {
+      // Legal character
+      continue;
+    }
+    // Whoops. Illegal character.
+    return false;
+  }
+
+  // Convert the ascii to binary
+  int dpc = ((nameLen <= 4) ? 1 : 2);
+  // Translate components from hex to binary
+  int r = ComponentValue(buffer, nameLen, 0, dpc);
+  int g = ComponentValue(buffer, nameLen, 1, dpc);
+  int b = ComponentValue(buffer, nameLen, 2, dpc);
+  int a;
+  if (hasAlpha) {
+    a = ComponentValue(buffer, nameLen, 3, dpc);
+  } else {
+    a = (dpc == 1) ? 0xf : 0xff;
+  }
+  if (dpc == 1) {
+    // Scale single digit component to an 8 bit value. Replicate the
+    // single digit to compute the new value.
+    r = (r << 4) | r;
+    g = (g << 4) | g;
+    b = (b << 4) | b;
+    a = (a << 4) | a;
+  }
+  NS_ASSERTION((r >= 0) && (r <= 255), "bad r");
+  NS_ASSERTION((g >= 0) && (g <= 255), "bad g");
+  NS_ASSERTION((b >= 0) && (b <= 255), "bad b");
+  NS_ASSERTION((a >= 0) && (a <= 255), "bad a");
+  *aResult = NS_RGBA(r, g, b, a);
+  return true;
 }
 
 // This implements part of the algorithm for legacy behavior described in
@@ -200,14 +216,6 @@ bool NS_ColorNameToRGB(const nsAString& aColorName, nscolor* aResult)
   return false;
 }
 
-// Returns kColorNames, an array of all possible color names, and sets
-// *aSizeArray to the size of that array. Do NOT call free() on this array.
-const char * const * NS_AllColorNames(size_t *aSizeArray)
-{
-  *aSizeArray = ArrayLength(kColorNames);
-  return kColorNames;
-}
-
 // Macro to blend two colors
 //
 // equivalent to target = (bg*(255-fgalpha) + fg*fgalpha)/255
@@ -274,9 +282,11 @@ NS_HSL2RGB(float h, float s, float l)
     m2 = l + s - l*s;
   }
   m1 = l*2 - m2;
-  r = uint8_t(255 * HSL_HueToRGB(m1, m2, h + 1.0f/3.0f));
-  g = uint8_t(255 * HSL_HueToRGB(m1, m2, h));
-  b = uint8_t(255 * HSL_HueToRGB(m1, m2, h - 1.0f/3.0f));
+  // We round, not floor, because that's how we handle
+  // percentage RGB values.
+  r = ClampColor(255 * HSL_HueToRGB(m1, m2, h + 1.0f/3.0f));
+  g = ClampColor(255 * HSL_HueToRGB(m1, m2, h));
+  b = ClampColor(255 * HSL_HueToRGB(m1, m2, h - 1.0f/3.0f));
   return NS_RGB(r, g, b);  
 }
 

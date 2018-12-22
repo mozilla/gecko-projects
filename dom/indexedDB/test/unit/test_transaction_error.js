@@ -5,7 +5,7 @@
 
 var testGenerator = testSteps();
 
-function testSteps() {
+function* testSteps() {
   const dbName = this.window ?
                  window.location.pathname :
                  "test_transaction_error";
@@ -34,6 +34,14 @@ function testSteps() {
   event = yield undefined;
 
   db = event.target.result;
+
+  try {
+    db.transaction(objectStoreName, "versionchange");
+    ok(false, "TypeError shall be thrown if transaction mode is wrong.");
+  } catch (e) {
+    ok(e instanceof DOMException, "got a database exception");
+    is(e.name, "TypeError", "correct error");
+  }
 
   let transaction = db.transaction(objectStoreName, "readwrite");
   transaction.onerror = grabEventAndContinueHandler;
@@ -80,22 +88,6 @@ function testSteps() {
 
   info("Adding duplicate entry without preventDefault()");
 
-  if ("SimpleTest" in this) {
-    SimpleTest.expectUncaughtException();
-  } else if ("DedicatedWorkerGlobalScope" in self &&
-             self instanceof DedicatedWorkerGlobalScope) {
-    let oldErrorFunction = self.onerror;
-    self.onerror = function(message, file, line) {
-      self.onerror = oldErrorFunction;
-      oldErrorFunction = null;
-
-      is(message,
-        "ConstraintError",
-        "Got expected ConstraintError on DedicatedWorkerGlobalScope");
-      return true;
-    };
-  }
-
   request = objectStore.add(data, dataKey);
   request.onsuccess = unexpectedSuccessHandler;
   request.onerror = grabEventAndContinueHandler;
@@ -124,5 +116,4 @@ function testSteps() {
      "Transaction has correct error");
 
   finishTest();
-  yield undefined;
 }

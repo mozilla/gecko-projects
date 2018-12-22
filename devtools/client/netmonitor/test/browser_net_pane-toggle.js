@@ -1,79 +1,71 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if toggling the details pane works as expected.
  */
 
-function test() {
-  initNetMonitor(SIMPLE_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(SIMPLE_URL);
+  info("Starting test... ");
 
-    let { document, NetMonitorView } = aMonitor.panelWin;
-    let { RequestsMenu } = NetMonitorView;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const { EVENTS } = windowRequire("devtools/client/netmonitor/src/constants");
+  const {
+    getSelectedRequest,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
 
-    RequestsMenu.lazyUpdate = false;
+  store.dispatch(Actions.batchEnable(false));
 
-    is(document.querySelector("#details-pane-toggle")
-      .hasAttribute("disabled"), true,
-      "The pane toggle button should be disabled when the frontend is opened.");
-    is(document.querySelector("#details-pane-toggle")
-      .hasAttribute("pane-collapsed"), true,
-      "The pane toggle button should indicate that the details pane is " +
-      "collapsed when the frontend is opened.");
-    is(NetMonitorView.detailsPaneHidden, true,
-      "The details pane should be hidden when the frontend is opened.");
-    is(RequestsMenu.selectedItem, null,
-      "There should be no selected item in the requests menu.");
+  ok(!document.querySelector(".sidebar-toggle"),
+    "The pane toggle button should not be visible.");
+  is(!!document.querySelector(".network-details-panel"), false,
+    "The details pane should be hidden when the frontend is opened.");
+  is(getSelectedRequest(store.getState()), null,
+    "There should be no selected item in the requests menu.");
 
-    aMonitor.panelWin.once(aMonitor.panelWin.EVENTS.NETWORK_EVENT, () => {
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("disabled"), false,
-        "The pane toggle button should be enabled after the first request.");
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("pane-collapsed"), true,
-        "The pane toggle button should still indicate that the details pane is " +
-        "collapsed after the first request.");
-      is(NetMonitorView.detailsPaneHidden, true,
-        "The details pane should still be hidden after the first request.");
-      is(RequestsMenu.selectedItem, null,
-        "There should still be no selected item in the requests menu.");
+  const networkEvent = monitor.panelWin.api.once(EVENTS.NETWORK_EVENT);
+  tab.linkedBrowser.reload();
+  await networkEvent;
 
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.getElementById("details-pane-toggle"));
+  ok(!document.querySelector(".sidebar-toggle"),
+    "The pane toggle button should not be visible after the first request.");
+  is(!!document.querySelector(".network-details-panel"), false,
+    "The details pane should still be hidden after the first request.");
+  is(getSelectedRequest(store.getState()), null,
+    "There should still be no selected item in the requests menu.");
 
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("disabled"), false,
-        "The pane toggle button should still be enabled after being pressed.");
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("pane-collapsed"), false,
-        "The pane toggle button should now indicate that the details pane is " +
-        "not collapsed anymore after being pressed.");
-      is(NetMonitorView.detailsPaneHidden, false,
-        "The details pane should not be hidden after toggle button was pressed.");
-      isnot(RequestsMenu.selectedItem, null,
-        "There should be a selected item in the requests menu.");
-      is(RequestsMenu.selectedIndex, 0,
-        "The first item should be selected in the requests menu.");
+  store.dispatch(Actions.toggleNetworkDetails());
 
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.getElementById("details-pane-toggle"));
+  const toggleButton = document.querySelector(".sidebar-toggle");
 
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("disabled"), false,
-        "The pane toggle button should still be enabled after being pressed again.");
-      is(document.querySelector("#details-pane-toggle")
-        .hasAttribute("pane-collapsed"), true,
-        "The pane toggle button should now indicate that the details pane is " +
-        "collapsed after being pressed again.");
-      is(NetMonitorView.detailsPaneHidden, true,
-        "The details pane should now be hidden after the toggle button was pressed again.");
-      is(RequestsMenu.selectedItem, null,
-        "There should now be no selected item in the requests menu.");
+  is(toggleButton.classList.contains("pane-collapsed"), false,
+    "The pane toggle button should now indicate that the details pane is " +
+    "not collapsed anymore.");
+  is(!!document.querySelector(".network-details-panel"), true,
+    "The details pane should not be hidden after toggle button was pressed.");
+  isnot(getSelectedRequest(store.getState()), null,
+    "There should be a selected item in the requests menu.");
+  is(getSelectedIndex(store.getState()), 0,
+    "The first item should be selected in the requests menu.");
 
-      teardown(aMonitor).then(finish);
-    });
+  EventUtils.sendMouseEvent({ type: "click" }, toggleButton);
 
-    aDebuggee.location.reload();
-  });
-}
+  is(!!document.querySelector(".network-details-panel"), false,
+    "The details pane should now be hidden after the toggle button was pressed again.");
+  is(getSelectedRequest(store.getState()), null,
+    "There should now be no selected item in the requests menu.");
+
+  await teardown(monitor);
+
+  function getSelectedIndex(state) {
+    if (!state.requests.selectedId) {
+      return -1;
+    }
+    return getSortedRequests(state).findIndex(r => r.id === state.requests.selectedId);
+  }
+});

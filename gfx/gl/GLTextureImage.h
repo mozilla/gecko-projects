@@ -6,7 +6,6 @@
 #ifndef GLTEXTUREIMAGE_H_
 #define GLTEXTUREIMAGE_H_
 
-#include "nsAutoPtr.h"
 #include "nsRegion.h"
 #include "nsTArray.h"
 #include "gfxTypes.h"
@@ -28,20 +27,9 @@ namespace gl {
 class GLContext;
 
 /**
- * A TextureImage encapsulates a surface that can be drawn to by a
- * Thebes gfxContext and (hopefully efficiently!) synchronized to a
- * texture in the server.  TextureImages are associated with one and
- * only one GLContext.
- *
- * Implementation note: TextureImages attempt to unify two categories
- * of backends
- *
- *  (1) proxy to server-side object that can be bound to a texture;
- *      e.g. Pixmap on X11.
- *
- *  (2) efficient manager of texture memory; e.g. by having clients draw
- *      into a scratch buffer which is then uploaded with
- *      glTexSubImage2D().
+ * A TextureImage provides a mechanism to synchronize data from a
+ * surface to a texture in the server.  TextureImages are associated
+ * with one and only one GLContext.
  */
 class TextureImage
 {
@@ -70,46 +58,6 @@ public:
                        TextureImage::ContentType aContentType,
                        GLenum aWrapMode,
                        TextureImage::Flags aFlags = TextureImage::NoFlags);
-
-    /**
-     * Returns a gfxASurface for updating |aRegion| of the client's
-     * image if successul, nullptr if not.  |aRegion|'s bounds must fit
-     * within Size(); its coordinate space (if any) is ignored.  If
-     * the update begins successfully, the returned gfxASurface is
-     * owned by this.  Otherwise, nullptr is returned.
-     *
-     * |aRegion| is an inout param: the returned region is what the
-     * client must repaint.  Category (1) regions above can
-     * efficiently handle repaints to "scattered" regions, while (2)
-     * can only efficiently handle repaints to rects.
-     *
-     * Painting the returned surface outside of |aRegion| results
-     * in undefined behavior.
-     *
-     * BeginUpdate() calls cannot be "nested", and each successful
-     * BeginUpdate() must be followed by exactly one EndUpdate() (see
-     * below).  Failure to do so can leave this in a possibly
-     * inconsistent state.  Unsuccessful BeginUpdate()s must not be
-     * followed by EndUpdate().
-     */
-    virtual gfx::DrawTarget* BeginUpdate(nsIntRegion& aRegion) = 0;
-    /**
-     * Retrieves the region that will require updating, given a
-     * region that needs to be updated. This can be used for
-     * making decisions about updating before calling BeginUpdate().
-     *
-     * |aRegion| is an inout param.
-     */
-    virtual void GetUpdateRegion(nsIntRegion& aForRegion) {
-    }
-    /**
-     * Finish the active update and synchronize with the server, if
-     * necessary.
-     *
-     * BeginUpdate() must have been called exactly once before
-     * EndUpdate().
-     */
-    virtual void EndUpdate() = 0;
 
     /**
      * The Image may contain several textures for different regions (tiles).
@@ -144,18 +92,10 @@ public:
 
     /**
      * Set this TextureImage's size, and ensure a texture has been
-     * allocated.  Must not be called between BeginUpdate and EndUpdate.
+     * allocated.
      * After a resize, the contents are undefined.
-     *
-     * If this isn't implemented by a subclass, it will just perform
-     * a dummy BeginUpdate/EndUpdate pair.
      */
-    virtual void Resize(const gfx::IntSize& aSize) {
-        mSize = aSize;
-        nsIntRegion r(gfx::IntRect(0, 0, aSize.width, aSize.height));
-        BeginUpdate(r);
-        EndUpdate();
-    }
+    virtual void Resize(const gfx::IntSize& aSize) = 0;
 
     /**
      * Mark this texture as having valid contents. Call this after modifying
@@ -169,15 +109,15 @@ public:
      * aFrom - offset in the source to update from
      */
     virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0)) = 0;
-    bool UpdateFromDataSource(gfx::DataSourceSurface *aSurf,
+    bool UpdateFromDataSource(gfx::DataSourceSurface* aSurf,
                               const nsIntRegion* aDstRegion = nullptr,
                               const gfx::IntPoint* aSrcOffset = nullptr);
 
     virtual void BindTexture(GLenum aTextureUnit) = 0;
 
     /**
-     * Returns the image format of the texture. Only valid after a matching
-     * BeginUpdate/EndUpdate pair have been called.
+     * Returns the image format of the texture. Only valid after
+     * DirectUpdate has been called.
      */
     virtual gfx::SurfaceFormat GetTextureFormat() {
         return mTextureFormat;
@@ -195,10 +135,11 @@ public:
 
     gfx::IntSize GetSize() const;
     ContentType GetContentType() const { return mContentType; }
-    virtual bool InUpdate() const = 0;
     GLenum GetWrapMode() const { return mWrapMode; }
 
-    void SetFilter(gfx::Filter aFilter) { mFilter = aFilter; }
+    void SetSamplingFilter(gfx::SamplingFilter aSamplingFilter) {
+      mSamplingFilter = aSamplingFilter;
+    }
 
 protected:
     friend class GLContext;
@@ -226,7 +167,7 @@ protected:
     GLenum mWrapMode;
     ContentType mContentType;
     gfx::SurfaceFormat mTextureFormat;
-    gfx::Filter mFilter;
+    gfx::SamplingFilter mSamplingFilter;
     Flags mFlags;
     size_t mUploadSize;
 };
@@ -253,39 +194,19 @@ public:
                       GLContext* aContext,
                       TextureImage::Flags aFlags = TextureImage::NoFlags);
 
-    virtual void BindTexture(GLenum aTextureUnit);
+    virtual void BindTexture(GLenum aTextureUnit) override;
 
-    virtual gfx::DrawTarget* BeginUpdate(nsIntRegion& aRegion);
-    virtual void GetUpdateRegion(nsIntRegion& aForRegion);
-    virtual void EndUpdate();
-    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0));
-    virtual GLuint GetTextureID() { return mTexture; }
-    virtual already_AddRefed<gfx::DrawTarget>
-      GetDrawTargetForUpdate(const gfx::IntSize& aSize, gfx::SurfaceFormat aFmt);
+    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0)) override;
+    virtual GLuint GetTextureID() override { return mTexture; }
 
-    virtual void MarkValid() { mTextureState = Valid; }
+    virtual void MarkValid() override { mTextureState = Valid; }
 
-    // Call when drawing into the update surface is complete.
-    // Returns true if textures should be upload with a relative
-    // offset - See UploadSurfaceToTexture.
-    virtual bool FinishedSurfaceUpdate();
-
-    // Call after surface data has been uploaded to a texture.
-    virtual void FinishedSurfaceUpload();
-
-    virtual bool InUpdate() const { return !!mUpdateDrawTarget; }
-
-    virtual void Resize(const gfx::IntSize& aSize);
+    virtual void Resize(const gfx::IntSize& aSize) override;
 
 protected:
     GLuint mTexture;
     TextureState mTextureState;
     RefPtr<GLContext> mGLContext;
-    RefPtr<gfx::DrawTarget> mUpdateDrawTarget;
-    nsIntRegion mUpdateRegion;
-
-    // The offset into the update surface at which the update rect is located.
-    nsIntPoint mUpdateOffset;
 };
 
 /**
@@ -304,38 +225,29 @@ public:
                       TextureImage::ImageFormat aImageFormat = gfx::SurfaceFormat::UNKNOWN);
     ~TiledTextureImage();
     void DumpDiv();
-    virtual gfx::DrawTarget* BeginUpdate(nsIntRegion& aRegion);
-    virtual void GetUpdateRegion(nsIntRegion& aForRegion);
-    virtual void EndUpdate();
-    virtual void Resize(const gfx::IntSize& aSize);
-    virtual uint32_t GetTileCount();
-    virtual void BeginBigImageIteration();
-    virtual bool NextTile();
+    virtual void Resize(const gfx::IntSize& aSize) override;
+    virtual uint32_t GetTileCount() override;
+    virtual void BeginBigImageIteration() override;
+    virtual bool NextTile() override;
     virtual void SetIterationCallback(BigImageIterationCallback aCallback,
-                                      void* aCallbackData);
-    virtual gfx::IntRect GetTileRect();
-    virtual GLuint GetTextureID() {
+                                      void* aCallbackData) override;
+    virtual gfx::IntRect GetTileRect() override;
+    virtual GLuint GetTextureID() override {
         return mImages[mCurrentImage]->GetTextureID();
     }
-    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0));
-    virtual bool InUpdate() const { return mInUpdate; }
-    virtual void BindTexture(GLenum);
+    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0)) override;
+    virtual void BindTexture(GLenum) override;
 
 protected:
-    virtual gfx::IntRect GetSrcTileRect();
+    virtual gfx::IntRect GetSrcTileRect() override;
 
     unsigned int mCurrentImage;
     BigImageIterationCallback mIterationCallback;
     void* mIterationCallbackData;
     nsTArray< RefPtr<TextureImage> > mImages;
-    bool mInUpdate;
     unsigned int mTileSize;
     unsigned int mRows, mColumns;
     GLContext* mGL;
-    // A temporary draw target to faciliate cross-tile updates.
-    RefPtr<gfx::DrawTarget> mUpdateDrawTarget;
-    // The region of update requested
-    nsIntRegion mUpdateRegion;
     TextureState mTextureState;
     TextureImage::ImageFormat mImageFormat;
 };
@@ -351,6 +263,17 @@ CreateBasicTextureImage(GLContext* aGL,
                         TextureImage::ContentType aContentType,
                         GLenum aWrapMode,
                         TextureImage::Flags aFlags);
+
+/**
+ * Creates a TiledTextureImage backed by platform-specific or basic TextureImages.
+ * In doubt, use GLContext::CreateTextureImage instead.
+ */
+already_AddRefed<TextureImage>
+CreateTiledTextureImage(GLContext* aGL,
+                        const gfx::IntSize& aSize,
+                        TextureImage::ContentType aContentType,
+                        TextureImage::Flags aFlags,
+                        TextureImage::ImageFormat aImageFormat);
 
 /**
   * Return a valid, allocated TextureImage of |aSize| with

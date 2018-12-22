@@ -11,7 +11,10 @@ using namespace mozilla::widget;
 
 NS_IMPL_ISUPPORTS(PuppetBidiKeyboard, nsIBidiKeyboard)
 
-PuppetBidiKeyboard::PuppetBidiKeyboard() : nsIBidiKeyboard()
+PuppetBidiKeyboard::PuppetBidiKeyboard()
+  : nsIBidiKeyboard()
+  , mIsLangRTL(false)
+  , mHaveBidiKeyboards(false)
 {
 }
 
@@ -33,14 +36,16 @@ PuppetBidiKeyboard::IsLangRTL(bool* aIsRTL)
 }
 
 void
-PuppetBidiKeyboard::SetIsLangRTL(bool aIsLangRTL)
+PuppetBidiKeyboard::SetBidiKeyboardInfo(bool aIsLangRTL,
+                                        bool aHaveBidiKeyboards)
 {
   mIsLangRTL = aIsLangRTL;
+  mHaveBidiKeyboards = aHaveBidiKeyboards;
 }
 
 NS_IMETHODIMP
 PuppetBidiKeyboard::GetHaveBidiKeyboards(bool* aResult)
 {
-  // not implemented yet
-  return NS_ERROR_NOT_IMPLEMENTED;
+  *aResult = mHaveBidiKeyboards;
+  return NS_OK;
 }

@@ -7,11 +7,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#if defined(MOZ_ENABLE_CONTENTACTION)
-#include <contentaction/contentaction.h>
-#include <QString>
-#endif
-
 #include "nsOSHelperAppService.h"
 #include "nsMIMEInfoUnix.h"
 #ifdef MOZ_WIDGET_GTK
@@ -21,7 +16,6 @@
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
-#include "nsXPIDLString.h"
 #include "nsIURL.h"
 #include "nsIFileStreams.h"
 #include "nsILineInputStream.h"
@@ -33,6 +27,7 @@
 #include "nsCRT.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
+#include "ContentHandlerService.h"
 #include "prenv.h"      // for PR_GetEnv()
 #include "nsAutoPtr.h"
 #include "mozilla/Preferences.h"
@@ -172,7 +167,7 @@ nsOSHelperAppService::GetFileLocation(const char* aPrefName,
   LOG(("-- GetFileLocation.  Pref: '%s'  EnvVar: '%s'\n",
        aPrefName,
        aEnvVarName));
-  NS_PRECONDITION(aPrefName, "Null pref name passed; don't do that!");
+  MOZ_ASSERT(aPrefName, "Null pref name passed; don't do that!");
 
   aFileLocation.Truncate();
   /* The lookup order is:
@@ -187,7 +182,7 @@ nsOSHelperAppService::GetFileLocation(const char* aPrefName,
     pref.  If we do not, we don't care.
   */
   if (Preferences::HasUserValue(aPrefName) &&
-      NS_SUCCEEDED(Preferences::GetString(aPrefName, &aFileLocation))) {
+      NS_SUCCEEDED(Preferences::GetString(aPrefName, aFileLocation))) {
     return NS_OK;
   }
 
@@ -212,7 +207,7 @@ nsOSHelperAppService::GetFileLocation(const char* aPrefName,
     }
   }
 
-  return Preferences::GetString(aPrefName, &aFileLocation);
+  return Preferences::GetString(aPrefName, aFileLocation);
 }
 
 
@@ -573,7 +568,8 @@ nsOSHelperAppService::GetExtensionsAndDescriptionFromMimetypesFile(const nsAStri
           aDescription.Assign(Substring(descriptionStart, descriptionEnd));
           mimeFile->Close();
           return NS_OK;
-        } else if (NS_FAILED(rv)) {
+        }
+        if (NS_FAILED(rv)) {
           LOG(("Failed to parse entry: %s\n", NS_LossyConvertUTF16toASCII(entry).get()));
         }
 
@@ -730,10 +726,6 @@ nsOSHelperAppService::ParseNetscapeMIMETypesEntry(const nsAString& aEntry,
         --aDescriptionEnd;
       } while (aDescriptionEnd != aDescriptionStart &&
                nsCRT::IsAsciiSpace(*aDescriptionEnd));
-
-      if (aDescriptionStart != aDescriptionStart && *aDescriptionEnd == '"') {
-        --aDescriptionEnd;
-      }
     } else {
       // desc= after exts=, so use end_iter for the description end
       aDescriptionEnd = end_iter;
@@ -1113,11 +1105,11 @@ nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& a
               // get out of here
               mailcapFile->Close();
               return NS_OK;
-            } else { // pretend that this match never happened
-              aDescription.Truncate();
-              aMozillaFlags.Truncate();
-              aHandler.Truncate();
             }
+            // pretend that this match never happened
+            aDescription.Truncate();
+            aMozillaFlags.Truncate();
+            aHandler.Truncate();
           }
         }
         // zero out the entry for the next cycle
@@ -1136,25 +1128,24 @@ nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& a
 
 nsresult nsOSHelperAppService::OSProtocolHandlerExists(const char * aProtocolScheme, bool * aHandlerExists)
 {
-  LOG(("-- nsOSHelperAppService::OSProtocolHandlerExists for '%s'\n",
-       aProtocolScheme));
-  *aHandlerExists = false;
+  nsresult rv = NS_OK;
 
-#if defined(MOZ_ENABLE_CONTENTACTION)
-  // libcontentaction requires character ':' after scheme
-  ContentAction::Action action =
-    ContentAction::Action::defaultActionForScheme(QString(aProtocolScheme) + ':');
-
-  if (action.isValid())
-    *aHandlerExists = true;
-#endif
-
+  if (!XRE_IsContentProcess()) {
 #ifdef MOZ_WIDGET_GTK
-  // Check the GNOME registry for a protocol handler
-  *aHandlerExists = nsGNOMERegistry::HandlerExists(aProtocolScheme);
+    // Check the GNOME registry for a protocol handler
+    *aHandlerExists = nsGNOMERegistry::HandlerExists(aProtocolScheme);
+#else
+    *aHandlerExists = false;
 #endif
+  } else {
+    *aHandlerExists = false;
+    nsCOMPtr<nsIHandlerService> handlerSvc = do_GetService(NS_HANDLERSERVICE_CONTRACTID, &rv);
+    if (NS_SUCCEEDED(rv) && handlerSvc) {
+      rv = handlerSvc->ExistsForProtocol(nsCString(aProtocolScheme), aHandlerExists);
+    }
+  }
 
-  return NS_OK;
+  return rv;
 }
 
 NS_IMETHODIMP nsOSHelperAppService::GetApplicationDescription(const nsACString& aScheme, nsAString& _retval)

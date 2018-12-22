@@ -9,14 +9,17 @@
 #include "nsISimpleEnumerator.h"
 
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPtr.h"
 
+#include "WorkerDebugger.h"
 #include "WorkerPrivate.h"
 
-USING_WORKERS_NAMESPACE
+namespace mozilla {
+namespace dom {
 
 namespace {
 
-class RegisterDebuggerMainThreadRunnable final : public nsRunnable
+class RegisterDebuggerMainThreadRunnable final : public mozilla::Runnable
 {
   WorkerPrivate* mWorkerPrivate;
   bool mNotifyListeners;
@@ -24,8 +27,9 @@ class RegisterDebuggerMainThreadRunnable final : public nsRunnable
 public:
   RegisterDebuggerMainThreadRunnable(WorkerPrivate* aWorkerPrivate,
                                      bool aNotifyListeners)
-  : mWorkerPrivate(aWorkerPrivate),
-    mNotifyListeners(aNotifyListeners)
+    : mozilla::Runnable("RegisterDebuggerMainThreadRunnable")
+    , mWorkerPrivate(aWorkerPrivate)
+    , mNotifyListeners(aNotifyListeners)
   { }
 
 private:
@@ -43,13 +47,14 @@ private:
   }
 };
 
-class UnregisterDebuggerMainThreadRunnable final : public nsRunnable
+class UnregisterDebuggerMainThreadRunnable final : public mozilla::Runnable
 {
   WorkerPrivate* mWorkerPrivate;
 
 public:
   explicit UnregisterDebuggerMainThreadRunnable(WorkerPrivate* aWorkerPrivate)
-  : mWorkerPrivate(aWorkerPrivate)
+    : mozilla::Runnable("UnregisterDebuggerMainThreadRunnable")
+    , mWorkerPrivate(aWorkerPrivate)
   { }
 
 private:
@@ -67,12 +72,9 @@ private:
   }
 };
 
-// Does not hold an owning reference.
-static WorkerDebuggerManager* gWorkerDebuggerManager;
+static StaticRefPtr<WorkerDebuggerManager> gWorkerDebuggerManager;
 
 } /* anonymous namespace */
-
-BEGIN_WORKERS_NAMESPACE
 
 class WorkerDebuggerEnumerator final : public nsISimpleEnumerator
 {
@@ -141,10 +143,11 @@ WorkerDebuggerManager::GetOrCreate()
   if (!gWorkerDebuggerManager) {
     // The observer service now owns us until shutdown.
     gWorkerDebuggerManager = new WorkerDebuggerManager();
-    if (NS_FAILED(gWorkerDebuggerManager->Init())) {
+    if (NS_SUCCEEDED(gWorkerDebuggerManager->Init())) {
+      ClearOnShutdown(&gWorkerDebuggerManager);
+    } else {
       NS_WARNING("Failed to initialize worker debugger manager!");
       gWorkerDebuggerManager = nullptr;
-      return nullptr;
     }
   }
 
@@ -169,7 +172,7 @@ WorkerDebuggerManager::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
-  NS_NOTREACHED("Unknown observer topic!");
+  MOZ_ASSERT_UNREACHABLE("Unknown observer topic!");
   return NS_OK;
 }
 
@@ -358,4 +361,17 @@ WorkerDebuggerManager::UnregisterDebuggerMainThread(
   aWorkerPrivate->SetIsDebuggerRegistered(false);
 }
 
-END_WORKERS_NAMESPACE
+uint32_t
+WorkerDebuggerManager::GetDebuggersLength() const
+{
+  return mDebuggers.Length();
+}
+
+WorkerDebugger*
+WorkerDebuggerManager::GetDebuggerAt(uint32_t aIndex) const
+{
+  return mDebuggers.SafeElementAt(aIndex, nullptr);
+}
+
+} // dom namespace
+} // mozilla namespace

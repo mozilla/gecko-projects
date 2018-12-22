@@ -1,16 +1,16 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Test that we can incrementally fetch a subtree of a dominator tree.
 
 const {
-  snapshotState: states,
   dominatorTreeState,
   viewState,
 } = require("devtools/client/memory/constants");
 const {
   takeSnapshotAndCensus,
-  selectSnapshotAndRefresh,
   fetchImmediatelyDominated,
 } = require("devtools/client/memory/actions/snapshot");
 const DominatorTreeLazyChildren
@@ -18,22 +18,18 @@ const DominatorTreeLazyChildren
 
 const { changeView } = require("devtools/client/memory/actions/view");
 
-function run_test() {
-  run_next_test();
-}
-
-add_task(function *() {
-  let front = new StubbedMemoryFront();
-  let heapWorker = new HeapAnalysesClient();
-  yield front.attach();
-  let store = Store();
-  let { getState, dispatch } = store;
+add_task(async function() {
+  const front = new StubbedMemoryFront();
+  const heapWorker = new HeapAnalysesClient();
+  await front.attach();
+  const store = Store();
+  const { getState, dispatch } = store;
 
   dispatch(changeView(viewState.DOMINATOR_TREE));
   dispatch(takeSnapshotAndCensus(front, heapWorker));
 
   // Wait for the dominator tree to finish being fetched.
-  yield waitUntilState(store, state =>
+  await waitUntilState(store, state =>
     state.snapshots[0] &&
     state.snapshots[0].dominatorTree &&
     state.snapshots[0].dominatorTree.state === dominatorTreeState.LOADED);
@@ -48,7 +44,7 @@ add_task(function *() {
     }
 
     if (node.children) {
-      for (let child of node.children) {
+      for (const child of node.children) {
         const found = findNode(child);
         if (found) {
           return found;
@@ -68,14 +64,15 @@ add_task(function *() {
   ok(oldNode !== oldRoot, "But the node should not be the root");
 
   const lazyChildren = new DominatorTreeLazyChildren(oldNode.nodeId, 0);
-  dispatch(fetchImmediatelyDominated(heapWorker, getState().snapshots[0].id, lazyChildren));
+  dispatch(fetchImmediatelyDominated(heapWorker, getState().snapshots[0].id,
+                                     lazyChildren));
 
   equal(getState().snapshots[0].dominatorTree.state,
         dominatorTreeState.INCREMENTAL_FETCHING,
         "Fetching immediately dominated children should put us in the " +
         "INCREMENTAL_FETCHING state");
 
-  yield waitUntilState(store, state =>
+  await waitUntilState(store, state =>
     state.snapshots[0].dominatorTree.state === dominatorTreeState.LOADED);
   ok(true,
      "The dominator tree should go back to LOADED after the incremental " +
@@ -106,7 +103,7 @@ add_task(function *() {
     }
 
     if (node.children) {
-      for (let child of node.children) {
+      for (const child of node.children) {
         const found = findNewNode(child);
         if (found) {
           return found;
@@ -119,9 +116,10 @@ add_task(function *() {
 
   const newNode = findNewNode(newRoot);
   ok(newNode, "Should find the node in the new tree again");
-  ok(newNode !== oldNode, "We did not mutate the old node in place, instead created a new node");
+  ok(newNode !== oldNode,
+    "We did not mutate the old node in place, instead created a new node");
   ok(newNode.children, "And the new node should have the children attached");
 
   heapWorker.destroy();
-  yield front.detach();
+  await front.detach();
 });

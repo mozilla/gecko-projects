@@ -6,7 +6,7 @@
 #include "nsTableColFrame.h"
 #include "nsTableFrame.h"
 #include "nsContainerFrame.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
@@ -23,8 +23,22 @@ using namespace mozilla;
 
 using namespace mozilla;
 
-nsTableColFrame::nsTableColFrame(nsStyleContext* aContext) :
-  nsSplittableFrame(aContext)
+nsTableColFrame::nsTableColFrame(ComputedStyle* aStyle)
+  : nsSplittableFrame(aStyle, kClassID)
+  , mMinCoord(0)
+  , mPrefCoord(0)
+  , mSpanMinCoord(0)
+  , mSpanPrefCoord(0)
+  , mPrefPercent(0.0f)
+  , mSpanPrefPercent(0.0f)
+  , mFinalISize(0)
+  , mColIndex(0)
+  , mIStartBorderWidth(0)
+  , mIEndBorderWidth(0)
+  , mBStartContBorderWidth(0)
+  , mIEndContBorderWidth(0)
+  , mBEndContBorderWidth(0)
+  , mHasSpecifiedCoord(false)
 {
   SetColType(eColContent);
   ResetIntrinsics();
@@ -56,16 +70,16 @@ nsTableColFrame::SetColType(nsTableColType aType)
 }
 
 /* virtual */ void
-nsTableColFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+nsTableColFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
-  nsSplittableFrame::DidSetStyleContext(aOldStyleContext);
+  nsSplittableFrame::DidSetComputedStyle(aOldComputedStyle);
 
-  if (!aOldStyleContext) //avoid this on init
+  if (!aOldComputedStyle) //avoid this on init
     return;
 
   nsTableFrame* tableFrame = GetTableFrame();
   if (tableFrame->IsBorderCollapse() &&
-      tableFrame->BCRecalcNeeded(aOldStyleContext, StyleContext())) {
+      tableFrame->BCRecalcNeeded(aOldComputedStyle, Style())) {
     TableArea damageArea(GetColIndex(), 0, 1, tableFrame->GetRowCount());
     tableFrame->AddBCDamageArea(damageArea);
   }
@@ -91,21 +105,28 @@ void nsTableColFrame::SetContinuousBCBorderWidth(LogicalSide aForSide,
 
 void
 nsTableColFrame::Reflow(nsPresContext*          aPresContext,
-                                  nsHTMLReflowMetrics&     aDesiredSize,
-                                  const nsHTMLReflowState& aReflowState,
+                                  ReflowOutput&     aDesiredSize,
+                                  const ReflowInput& aReflowInput,
                                   nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsTableColFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
   aDesiredSize.ClearSize();
   const nsStyleVisibility* colVis = StyleVisibility();
   bool collapseCol = (NS_STYLE_VISIBILITY_COLLAPSE == colVis->mVisible);
   if (collapseCol) {
     GetTableFrame()->SetNeedToCollapse(true);
   }
-  aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+}
+
+void
+nsTableColFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                  const nsDisplayListSet& aLists)
+{
+  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aLists);
 }
 
 int32_t nsTableColFrame::GetSpan()
@@ -153,9 +174,9 @@ void nsTableColFrame::Dump(int32_t aIndent)
 /* ----- global methods ----- */
 
 nsTableColFrame*
-NS_NewTableColFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewTableColFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsTableColFrame(aContext);
+  return new (aPresShell) nsTableColFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTableColFrame)
@@ -165,18 +186,12 @@ nsTableColFrame::GetNextCol() const
 {
   nsIFrame* childFrame = GetNextSibling();
   while (childFrame) {
-    if (nsGkAtoms::tableColFrame == childFrame->GetType()) {
+    if (childFrame->IsTableColFrame()) {
       return (nsTableColFrame*)childFrame;
     }
     childFrame = childFrame->GetNextSibling();
   }
   return nullptr;
-}
-
-nsIAtom*
-nsTableColFrame::GetType() const
-{
-  return nsGkAtoms::tableColFrame;
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -194,20 +209,22 @@ nsTableColFrame::GetSplittableType() const
 }
 
 void
-nsTableColFrame::InvalidateFrame(uint32_t aDisplayItemKey)
+nsTableColFrame::InvalidateFrame(uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
-  nsIFrame::InvalidateFrame(aDisplayItemKey);
-  GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey);
+  nsIFrame::InvalidateFrame(aDisplayItemKey, aRebuildDisplayItems);
+  if (GetTableFrame()->IsBorderCollapse()) {
+    GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey, false);
+  }
 }
 
 void
-nsTableColFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
+nsTableColFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
-  nsIFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+  nsIFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey, aRebuildDisplayItems);
 
   // If we have filters applied that would affects our bounds, then
   // we get an inactive layer created and this is computed
   // within FrameLayerBuilder
-  GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey);
+  GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey, false);
 }
 

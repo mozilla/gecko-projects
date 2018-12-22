@@ -7,13 +7,13 @@
 #define TRANSFRMX_XML_EVENT_HANDLER_H
 
 #include "txCore.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 
 #define kTXNameSpaceURI "http://www.mozilla.org/TransforMiix"
 #define kTXWrapper "transformiix:result"
 
 class txOutputFormat;
-class nsIDOMDocument;
+class nsIDocument;
 
 /**
  * An interface for handling XML documents, loosely modeled
@@ -34,8 +34,8 @@ public:
      * @param aNsID the namespace ID of the attribute
      * @param aValue the value of the attribute
      */
-    virtual nsresult attribute(nsIAtom* aPrefix, nsIAtom* aLocalName,
-                               nsIAtom* aLowercaseLocalName, int32_t aNsID,
+    virtual nsresult attribute(nsAtom* aPrefix, nsAtom* aLocalName,
+                               nsAtom* aLowercaseLocalName, int32_t aNsID,
                                const nsString& aValue) = 0;
 
     /**
@@ -46,8 +46,8 @@ public:
      * @param aNsID the namespace ID of the attribute
      * @param aValue the value of the attribute
      */
-    virtual nsresult attribute(nsIAtom* aPrefix,
-                               const nsSubstring& aLocalName,
+    virtual nsresult attribute(nsAtom* aPrefix,
+                               const nsAString& aLocalName,
                                const int32_t aNsID,
                                const nsString& aValue) = 0;
 
@@ -57,7 +57,7 @@ public:
      * @param aData the characters to receive
      * @param aDOE disable output escaping for these characters
      */
-    virtual nsresult characters(const nsSubstring& aData, bool aDOE) = 0;
+    virtual nsresult characters(const nsAString& aData, bool aDOE) = 0;
 
     /**
      * Signals to receive data that should be treated as a comment.
@@ -83,7 +83,7 @@ public:
      * @param aTarget the target of the processing instruction
      * @param aData the data of the processing instruction
      */
-    virtual nsresult processingInstruction(const nsString& aTarget, 
+    virtual nsresult processingInstruction(const nsString& aTarget,
                                            const nsString& aData) = 0;
 
     /**
@@ -99,9 +99,9 @@ public:
      * @param aLowercaseName the localname of the element in lower case
      * @param aNsID the namespace ID of the element
      */
-    virtual nsresult startElement(nsIAtom* aPrefix,
-                                  nsIAtom* aLocalName,
-                                  nsIAtom* aLowercaseLocalName,
+    virtual nsresult startElement(nsAtom* aPrefix,
+                                  nsAtom* aLocalName,
+                                  nsAtom* aLowercaseLocalName,
                                   int32_t aNsID) = 0;
 
     /**
@@ -112,33 +112,33 @@ public:
      * @param aLocalName the localname of the element
      * @param aNsID the namespace ID of the element
      */
-    virtual nsresult startElement(nsIAtom* aPrefix,
-                                  const nsSubstring& aLocalName,
+    virtual nsresult startElement(nsAtom* aPrefix,
+                                  const nsAString& aLocalName,
                                   const int32_t aNsID) = 0;
 };
 
 #define TX_DECL_TXAXMLEVENTHANDLER                                           \
-    virtual nsresult attribute(nsIAtom* aPrefix, nsIAtom* aLocalName,        \
-                               nsIAtom* aLowercaseLocalName, int32_t aNsID,  \
-                               const nsString& aValue);                      \
-    virtual nsresult attribute(nsIAtom* aPrefix,                             \
-                               const nsSubstring& aLocalName,                \
+    virtual nsresult attribute(nsAtom* aPrefix, nsAtom* aLocalName,        \
+                               nsAtom* aLowercaseLocalName, int32_t aNsID,  \
+                               const nsString& aValue) override;             \
+    virtual nsresult attribute(nsAtom* aPrefix,                             \
+                               const nsAString& aLocalName,                  \
                                const int32_t aNsID,                          \
-                               const nsString& aValue);                      \
-    virtual nsresult characters(const nsSubstring& aData, bool aDOE);      \
-    virtual nsresult comment(const nsString& aData);                         \
-    virtual nsresult endDocument(nsresult aResult = NS_OK);                  \
-    virtual nsresult endElement();                                           \
+                               const nsString& aValue) override;             \
+    virtual nsresult characters(const nsAString& aData, bool aDOE) override; \
+    virtual nsresult comment(const nsString& aData) override;                \
+    virtual nsresult endDocument(nsresult aResult = NS_OK) override;         \
+    virtual nsresult endElement() override;                                  \
     virtual nsresult processingInstruction(const nsString& aTarget,          \
-                                           const nsString& aData);           \
-    virtual nsresult startDocument();                                        \
-    virtual nsresult startElement(nsIAtom* aPrefix,                          \
-                                  nsIAtom* aLocalName,                       \
-                                  nsIAtom* aLowercaseLocalName,              \
-                                  int32_t aNsID);                            \
-    virtual nsresult startElement(nsIAtom* aPrefix,                          \
-                                  const nsSubstring& aName,                  \
-                                  const int32_t aNsID);
+                                           const nsString& aData) override;  \
+    virtual nsresult startDocument() override;                               \
+    virtual nsresult startElement(nsAtom* aPrefix,                          \
+                                  nsAtom* aLocalName,                       \
+                                  nsAtom* aLowercaseLocalName,              \
+                                  int32_t aNsID) override;                   \
+    virtual nsresult startElement(nsAtom* aPrefix,                          \
+                                  const nsAString& aName,                    \
+                                  const int32_t aNsID) override;
 
 
 class txAOutputXMLEventHandler : public txAXMLEventHandler
@@ -149,11 +149,11 @@ public:
      *
      * @param aDocument the Mozilla output document
      */
-    virtual void getOutputDocument(nsIDOMDocument** aDocument) = 0;
+    virtual void getOutputDocument(nsIDocument** aDocument) = 0;
 };
 
 #define TX_DECL_TXAOUTPUTXMLEVENTHANDLER                        \
-    virtual void getOutputDocument(nsIDOMDocument** aDocument);
+    virtual void getOutputDocument(nsIDocument** aDocument) override;
 
 /**
  * Interface used to create the appropriate outputhandler
@@ -182,17 +182,17 @@ public:
      */
     virtual nsresult
     createHandlerWith(txOutputFormat* aFormat,
-                      const nsSubstring& aName,
+                      const nsAString& aName,
                       int32_t aNsID,
                       txAXMLEventHandler** aHandler) = 0;
 };
 
 #define TX_DECL_TXAOUTPUTHANDLERFACTORY                        \
     nsresult createHandlerWith(txOutputFormat* aFormat,        \
-                               txAXMLEventHandler** aHandler); \
+                               txAXMLEventHandler** aHandler) override; \
     nsresult createHandlerWith(txOutputFormat* aFormat,        \
-                               const nsSubstring& aName,       \
+                               const nsAString& aName,         \
                                int32_t aNsID,                  \
-                               txAXMLEventHandler** aHandler);
+                               txAXMLEventHandler** aHandler) override;
 
 #endif

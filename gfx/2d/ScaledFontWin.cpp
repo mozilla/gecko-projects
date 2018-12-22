@@ -1,13 +1,15 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ScaledFontWin.h"
+#include "UnscaledFontGDI.h"
 
 #include "AutoHelpersWin.h"
 #include "Logging.h"
-#include "SFNTData.h"
+#include "nsString.h"
 
 #ifdef USE_SKIA
 #include "skia/include/ports/SkTypeface_win.h"
@@ -17,17 +19,21 @@
 #include "cairo-win32.h"
 #endif
 
+#include "HelpersWinFonts.h"
+
 namespace mozilla {
 namespace gfx {
 
-ScaledFontWin::ScaledFontWin(LOGFONT* aFont, Float aSize)
-  : ScaledFontBase(aSize)
+ScaledFontWin::ScaledFontWin(const LOGFONT* aFont,
+                             const RefPtr<UnscaledFont>& aUnscaledFont,
+                             Float aSize)
+  : ScaledFontBase(aUnscaledFont, aSize)
   , mLogFont(*aFont)
 {
 }
 
 bool
-ScaledFontWin::GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton)
+UnscaledFontGDI::GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton)
 {
   AutoDC dc;
   AutoSelectFont font(dc.GetDC(), &mLogFont);
@@ -52,27 +58,67 @@ ScaledFontWin::GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton)
     return false;
   }
 
-  // If it's a font collection then attempt to get the index.
-  uint32_t index = 0;
-  if (table != 0) {
-    UniquePtr<SFNTData> sfntData = SFNTData::Create(fontData.get(),
-                                                    tableSize);
-    if (!sfntData) {
-      gfxWarning() << "Failed to create SFNTData for GetFontFileData.";
-      return false;
-    }
+  aDataCallback(fontData.get(), tableSize, 0, aBaton);
+  return true;
+}
 
-    // We cast here because for VS2015 char16_t != wchar_t, even though they are
-    // both 16 bit.
-    if (!sfntData->GetIndexForU16Name(
-          reinterpret_cast<char16_t*>(mLogFont.lfFaceName), &index)) {
-      gfxWarning() << "Failed to get index for face name.";
-      return false;
-    }
+bool
+ScaledFontWin::GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton)
+{
+  aCb(reinterpret_cast<uint8_t*>(&mLogFont), sizeof(mLogFont), nullptr, 0, aBaton);
+  return true;
+}
+
+bool
+UnscaledFontGDI::GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton)
+{
+  aCb(reinterpret_cast<uint8_t*>(&mLogFont), sizeof(mLogFont), aBaton);
+  return true;
+}
+
+bool
+UnscaledFontGDI::GetFontDescriptor(FontDescriptorOutput aCb, void* aBaton)
+{
+  aCb(reinterpret_cast<uint8_t*>(&mLogFont), sizeof(mLogFont), 0, aBaton);
+  return true;
+}
+
+already_AddRefed<UnscaledFont>
+UnscaledFontGDI::CreateFromFontDescriptor(const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex)
+{
+  if (aDataLength < sizeof(LOGFONT)) {
+    gfxWarning() << "GDI font descriptor is truncated.";
+    return nullptr;
   }
 
-  aDataCallback(fontData.get(), tableSize, index, mSize, aBaton);
-  return true;
+  const LOGFONT* logFont = reinterpret_cast<const LOGFONT*>(aData);
+  RefPtr<UnscaledFont> unscaledFont = new UnscaledFontGDI(*logFont);
+  return unscaledFont.forget();
+}
+
+already_AddRefed<ScaledFont>
+UnscaledFontGDI::CreateScaledFont(Float aGlyphSize,
+                                  const uint8_t* aInstanceData,
+                                  uint32_t aInstanceDataLength,
+                                  const FontVariation* aVariations,
+                                  uint32_t aNumVariations)
+{
+  if (aInstanceDataLength < sizeof(LOGFONT)) {
+    gfxWarning() << "GDI unscaled font instance data is truncated.";
+    return nullptr;
+  }
+
+  NativeFont nativeFont;
+  nativeFont.mType = NativeFontType::GDI_LOGFONT;
+  nativeFont.mFont = (void*)aInstanceData;
+
+  return Factory::CreateScaledFontForNativeFont(nativeFont, this, aGlyphSize);
+}
+
+AntialiasMode
+ScaledFontWin::GetDefaultAAMode()
+{
+  return GetSystemDefaultAAMode();
 }
 
 #ifdef USE_SKIA

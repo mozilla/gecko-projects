@@ -14,6 +14,7 @@
 namespace mozilla {
 namespace dom {
 
+class Event;
 class HTMLMediaElement;
 class TextTrackManager;
 class CompareTextTracks;
@@ -37,7 +38,7 @@ public:
   }
 
   // Get all the current active cues.
-  void UpdateAndGetShowingCues(nsTArray<RefPtr<TextTrackCue> >& aCues);
+  void GetShowingCues(nsTArray<RefPtr<TextTrackCue> >& aCues);
 
   TextTrack* IndexedGetter(uint32_t aIndex, bool& aFound);
   TextTrack* operator[](uint32_t aIndex);
@@ -59,12 +60,18 @@ public:
   HTMLMediaElement* GetMediaElement();
   void SetTextTrackManager(TextTrackManager* aTextTrackManager);
 
-  nsresult DispatchTrackEvent(nsIDOMEvent* aEvent);
+  nsresult DispatchTrackEvent(Event* aEvent);
   void CreateAndDispatchChangeEvent();
+  void SetCuesInactive();
+
+  bool AreTextTracksLoaded();
+  nsTArray<RefPtr<TextTrack>>& GetTextTrackArray();
 
   IMPL_EVENT_HANDLER(change)
   IMPL_EVENT_HANDLER(addtrack)
   IMPL_EVENT_HANDLER(removetrack)
+
+  bool mPendingTextTrackChange = false;
 
 private:
   ~TextTrackList();

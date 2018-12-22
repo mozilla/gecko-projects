@@ -128,7 +128,7 @@ int NrIceResolver::destroy(void **objp) {
   if (!objp || !*objp)
     return 0;
   NrIceResolver *resolver = static_cast<NrIceResolver *>(*objp);
-  *objp = 0;
+  *objp = nullptr;
   resolver->DestroyResolver();
   return 0;
 }
@@ -151,6 +151,7 @@ int NrIceResolver::resolve(nr_resolver_resource *resource,
   ASSERT_ON_THREAD(sts_thread_);
   RefPtr<PendingResolution> pr;
   uint32_t resolve_flags = 0;
+  OriginAttributes attrs;
 
   if (resource->transport_protocol != IPPROTO_UDP &&
       resource->transport_protocol != IPPROTO_TCP) {
@@ -175,9 +176,10 @@ int NrIceResolver::resolve(nr_resolver_resource *resource,
       ABORT(R_BAD_ARGS);
   }
 
-  if (NS_FAILED(dns_->AsyncResolve(nsAutoCString(resource->domain_name),
-                                   resolve_flags, pr,
-                                   sts_thread_, getter_AddRefs(pr->request_)))) {
+  if (NS_FAILED(dns_->AsyncResolveNative(nsAutoCString(resource->domain_name),
+                                         resolve_flags, pr,
+                                         sts_thread_, attrs,
+                                         getter_AddRefs(pr->request_)))) {
     MOZ_MTLOG(ML_ERROR, "AsyncResolve failed.");
     ABORT(R_NOT_FOUND);
   }
@@ -199,7 +201,7 @@ nsresult NrIceResolver::PendingResolution::OnLookupComplete(
   ASSERT_ON_THREAD(thread_);
   // First check if we've been canceled. This is single-threaded on the STS
   // thread, but cancel() cannot guarantee this event isn't on the queue.
-  if (!canceled_) {
+  if (request_) {
     nr_transport_addr *cb_addr = nullptr;
     nr_transport_addr ta;
     // TODO(jib@mozilla.com): Revisit when we do TURN.
@@ -212,6 +214,7 @@ nsresult NrIceResolver::PendingResolution::OnLookupComplete(
       }
     }
     cb_(cb_arg_, cb_addr);
+    request_ = nullptr;
     Release();
   }
   return NS_OK;
@@ -226,7 +229,7 @@ int NrIceResolver::cancel(void *obj, void *handle) {
 
 int NrIceResolver::PendingResolution::cancel() {
   request_->Cancel (NS_ERROR_ABORT);
-  canceled_ = true; // in case OnLookupComplete is already on event queue.
+  request_ = nullptr;
   Release();
   return 0;
 }

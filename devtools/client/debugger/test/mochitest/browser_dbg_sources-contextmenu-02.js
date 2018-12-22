@@ -14,18 +14,21 @@ function test() {
   let gTab, gPanel, gDebugger;
   let gSources;
 
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: SCRIPT_URI,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gSources = gDebugger.DebuggerView.Sources;
 
-    waitForSourceShown(gPanel, "-01.js")
-      .then(openContextMenu)
+    openContextMenu()
       .then(testNewTabMenuItem)
       .then(testNewTabURI)
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -37,16 +40,14 @@ function test() {
 
   function waitForTabOpen() {
     return new Promise(resolve => {
-      gBrowser.tabContainer.addEventListener("TabOpen", function onOpen(e) {
-        gBrowser.tabContainer.removeEventListener("TabOpen", onOpen, false);
+      gBrowser.tabContainer.addEventListener("TabOpen", function (e) {
         ok(true, "A new tab loaded");
 
-        gBrowser.addEventListener("DOMContentLoaded", function onTabLoad(e){
-          gBrowser.removeEventListener("DOMContentLoaded", onTabLoad, false);
+        BrowserTestUtils.waitForContentEvent(e.target.linkedBrowser, "DOMContentLoaded").then(function () {
           // Pass along the new tab's URI.
           resolve(gBrowser.currentURI.spec);
-        }, false);
-      }, false);
+        });
+      }, {once: true});
     });
   }
 
@@ -66,7 +67,7 @@ function test() {
   function openContextMenu() {
     let contextMenu = gDebugger.document.getElementById("debuggerSourcesContextMenu");
     let contextMenuShown = once(contextMenu, "popupshown");
-    EventUtils.synthesizeMouseAtCenter(gSources.selectedItem.prebuiltNode, {type: 'contextmenu'}, gDebugger);
+    EventUtils.synthesizeMouseAtCenter(gSources.selectedItem.prebuiltNode, {type: "contextmenu"}, gDebugger);
     return contextMenuShown;
   }
 }

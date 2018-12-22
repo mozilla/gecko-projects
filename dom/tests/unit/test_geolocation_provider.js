@@ -1,9 +1,4 @@
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
-
-Cu.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://testing-common/httpd.js");
 
 var httpserver = null;
 var geolocation = null;
@@ -28,17 +23,17 @@ var observer = {
 
     observe: function(subject, topic, data) {
         if (data == "shutdown") {
-            do_check_true(1);
+            Assert.ok(1);
             this._numProviders--;
             if (!this._numProviders) {
                 httpserver.stop(function() {
-                        do_check_true(success);
+                        Assert.ok(success);
                         do_test_finished();
                     });
             }
         }
         else if (data == "starting") {
-            do_check_true(1);
+            Assert.ok(1);
             this._numProviders++;
         }
     },
@@ -85,7 +80,7 @@ function run_test()
 
     var obs = Cc["@mozilla.org/observer-service;1"].getService();
     obs = obs.QueryInterface(Ci.nsIObserverService);
-    obs.addObserver(observer, "geolocation-device-events", false);
+    obs.addObserver(observer, "geolocation-device-events");
 
     geolocation = Cc["@mozilla.org/geolocation;1"].getService(Ci.nsISupports);
     watchID = geolocation.watchPosition(successCallback, errorCallback);

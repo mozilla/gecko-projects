@@ -3,19 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Cc, Ci, Cu, Cr } = require("chrome");
-const { Task } = require("resource://gre/modules/Task.jsm");
+const { Cu } = require("chrome");
 
 loader.lazyRequireGetter(this, "Services");
-loader.lazyRequireGetter(this, "promise");
-loader.lazyRequireGetter(this, "extend",
-  "sdk/util/object", true);
-loader.lazyRequireGetter(this, "Class",
-  "sdk/core/heritage", true);
-loader.lazyRequireGetter(this, "EventTarget",
-  "sdk/event/target", true);
-loader.lazyRequireGetter(this, "events",
-  "sdk/event/core");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "Memory",
   "devtools/server/performance/memory", true);
@@ -25,12 +16,8 @@ loader.lazyRequireGetter(this, "Profiler",
   "devtools/server/performance/profiler", true);
 loader.lazyRequireGetter(this, "PerformanceRecordingActor",
   "devtools/server/actors/performance-recording", true);
-loader.lazyRequireGetter(this, "PerformanceRecordingFront",
-  "devtools/server/actors/performance-recording", true);
 loader.lazyRequireGetter(this, "mapRecordingOptions",
   "devtools/shared/performance/recording-utils", true);
-loader.lazyRequireGetter(this, "DevToolsUtils",
-  "devtools/shared/DevToolsUtils");
 loader.lazyRequireGetter(this, "getSystemInfo",
   "devtools/shared/system", true);
 
@@ -52,20 +39,20 @@ const DRAIN_ALLOCATIONS_TIMEOUT = 2000;
  * @param Target target
  *        The target owning this connection.
  */
-const PerformanceRecorder = exports.PerformanceRecorder = Class({
-  extends: EventTarget,
+function PerformanceRecorder(conn, targetActor) {
+  EventEmitter.decorate(this);
 
-  initialize: function (conn, tabActor) {
-    this.conn = conn;
-    this.tabActor = tabActor;
+  this.conn = conn;
+  this.targetActor = targetActor;
 
-    this._pendingConsoleRecordings = [];
-    this._recordings = [];
+  this._pendingConsoleRecordings = [];
+  this._recordings = [];
 
-    this._onTimelineData = this._onTimelineData.bind(this);
-    this._onProfilerEvent = this._onProfilerEvent.bind(this);
-  },
+  this._onTimelineData = this._onTimelineData.bind(this);
+  this._onProfilerEvent = this._onProfilerEvent.bind(this);
+}
 
+PerformanceRecorder.prototype = {
   /**
    * Initializes a connection to the profiler and other miscellaneous actors.
    * If in the process of opening, or already open, nothing happens.
@@ -76,7 +63,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * @return object
    *         A promise that is resolved once the connection is established.
    */
-  connect: function (options) {
+  connect: function(options) {
     if (this._connected) {
       return;
     }
@@ -96,7 +83,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
   /**
    * Destroys this connection.
    */
-  destroy: function () {
+  destroy: function() {
     this._unregisterListeners();
     this._disconnectComponents();
 
@@ -112,10 +99,10 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * Initializes fronts and connects to the underlying actors using the facades
    * found in ./actors.js.
    */
-  _connectComponents: function () {
-    this._profiler = new Profiler(this.tabActor);
-    this._memory = new Memory(this.tabActor);
-    this._timeline = new Timeline(this.tabActor);
+  _connectComponents: function() {
+    this._profiler = new Profiler(this.targetActor);
+    this._memory = new Memory(this.targetActor);
+    this._timeline = new Timeline(this.targetActor);
     this._profiler.registerEventNotifications({ events: PROFILER_EVENTS });
   },
 
@@ -123,7 +110,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * Registers listeners on events from the underlying
    * actors, so the connection can handle them.
    */
-  _registerListeners: function () {
+  _registerListeners: function() {
     this._timeline.on("*", this._onTimelineData);
     this._memory.on("*", this._onTimelineData);
     this._profiler.on("*", this._onProfilerEvent);
@@ -132,7 +119,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
   /**
    * Unregisters listeners on events on the underlying actors.
    */
-  _unregisterListeners: function () {
+  _unregisterListeners: function() {
     this._timeline.off("*", this._onTimelineData);
     this._memory.off("*", this._onTimelineData);
     this._profiler.off("*", this._onProfilerEvent);
@@ -141,14 +128,14 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
   /**
    * Closes the connections to non-profiler actors.
    */
-  _disconnectComponents: function () {
+  _disconnectComponents: function() {
     this._profiler.unregisterEventNotifications({ events: PROFILER_EVENTS });
     this._profiler.destroy();
     this._timeline.destroy();
     this._memory.destroy();
   },
 
-  _onProfilerEvent: function (topic, data) {
+  _onProfilerEvent: function(topic, data) {
     if (topic === "console-api-profiler") {
       if (data.subject.action === "profile") {
         this._onConsoleProfileStart(data.details);
@@ -158,7 +145,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
     } else if (topic === "profiler-stopped") {
       this._onProfilerUnexpectedlyStopped();
     } else if (topic === "profiler-status") {
-      events.emit(this, "profiler-status", data);
+      this.emit("profiler-status", data);
     }
   },
 
@@ -171,8 +158,8 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    *        The time (in milliseconds) when the call was made, relative to when
    *        the nsIProfiler module was started.
    */
-  _onConsoleProfileStart: Task.async(function *({ profileLabel, currentTime: startTime }) {
-    let recordings = this._recordings;
+  async _onConsoleProfileStart({ profileLabel, currentTime }) {
+    const recordings = this._recordings;
 
     // Abort if a profile with this label already exists.
     if (recordings.find(e => e.getLabel() === profileLabel)) {
@@ -181,13 +168,13 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
 
     // Immediately emit this so the client can start setting things up,
     // expecting a recording very soon.
-    events.emit(this, "console-profile-start");
+    this.emit("console-profile-start");
 
-    let model = yield this.startRecording(extend({}, getPerformanceRecordingPrefs(), {
+    await this.startRecording(Object.assign({}, getPerformanceRecordingPrefs(), {
       console: true,
       label: profileLabel
     }));
-  }),
+  },
 
   /**
    * Invoked whenever `console.profileEnd` is called.
@@ -198,15 +185,15 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    *        The time (in milliseconds) when the call was made, relative to when
    *        the nsIProfiler module was started.
    */
-  _onConsoleProfileEnd: Task.async(function *(data) {
+  async _onConsoleProfileEnd(data) {
     // If no data, abort; can occur if profiler isn't running and we get a surprise
     // call to console.profileEnd()
     if (!data) {
       return;
     }
-    let { profileLabel, currentTime: endTime } = data;
+    const { profileLabel } = data;
 
-    let pending = this._recordings.filter(r => r.isConsole() && r.isRecording());
+    const pending = this._recordings.filter(r => r.isConsole() && r.isRecording());
     if (pending.length === 0) {
       return;
     }
@@ -216,26 +203,26 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
     // a label was used in profileEnd(). If no matches, abort.
     if (profileLabel) {
       model = pending.find(e => e.getLabel() === profileLabel);
-    }
-    // If no label supplied, pop off the most recent pending console recording
-    else {
+    } else {
+      // If no label supplied, pop off the most recent pending console recording
       model = pending[pending.length - 1];
     }
 
     // If `profileEnd()` was called with a label, and there are no matching
     // sessions, abort.
     if (!model) {
-      Cu.reportError("console.profileEnd() called with label that does not match a recording.");
+      Cu.reportError(
+        "console.profileEnd() called with label that does not match a recording.");
       return;
     }
 
-    yield this.stopRecording(model);
-  }),
+    await this.stopRecording(model);
+  },
 
  /**
   * TODO handle bug 1144438
   */
-  _onProfilerUnexpectedlyStopped: function () {
+  _onProfilerUnexpectedlyStopped: function() {
     Cu.reportError("Profiler unexpectedly stopped.", arguments);
   },
 
@@ -247,7 +234,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * - ticks
    * - allocations
    */
-  _onTimelineData: function (eventName, ...data) {
+  _onTimelineData: function(eventName, ...data) {
     let eventData = Object.create(null);
 
     switch (eventName) {
@@ -275,10 +262,10 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
 
     // Filter by only recordings that are currently recording;
     // TODO should filter by recordings that have realtimeMarkers enabled.
-    let activeRecordings = this._recordings.filter(r => r.isRecording());
+    const activeRecordings = this._recordings.filter(r => r.isRecording());
 
     if (activeRecordings.length) {
-      events.emit(this, "timeline-data", eventName, eventData, activeRecordings);
+      this.emit("timeline-data", eventName, eventData, activeRecordings);
     }
   },
 
@@ -288,10 +275,10 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    */
   canCurrentlyRecord: function() {
     let success = true;
-    let reasons = [];
+    const reasons = [];
 
     if (!Profiler.canProfile()) {
-      success = false,
+      success = false;
       reasons.push("profiler-unavailable");
     }
 
@@ -318,15 +305,17 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * @return object
    *         A promise that is resolved once recording has started.
    */
-  startRecording: Task.async(function*(options) {
-    let profilerStart, timelineStart, memoryStart;
+  async startRecording(options) {
+    let timelineStart, memoryStart;
 
-    profilerStart = Task.spawn(function *() {
-      let data = yield this._profiler.isActive();
+    const profilerStart = (async function() {
+      const data = await this._profiler.isActive();
       if (data.isActive) {
         return data;
       }
-      let startData = yield this._profiler.start(mapRecordingOptions("profiler", options));
+      const startData = await this._profiler.start(
+        mapRecordingOptions("profiler", options)
+      );
 
       // If no current time is exposed from starting, set it to 0 -- this is an
       // older Gecko that does not return its starting time, and uses an epoch based
@@ -335,7 +324,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
         startData.currentTime = 0;
       }
       return startData;
-    }.bind(this));
+    }.bind(this))();
 
     // Timeline will almost always be on if using the DevTools, but using component
     // independently could result in no timeline.
@@ -347,55 +336,60 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
       if (this._memory.getState() === "detached") {
         this._memory.attach();
       }
-      memoryStart = this._memory.startRecordingAllocations(extend(mapRecordingOptions("memory", options), {
+      const recordingOptions = Object.assign(mapRecordingOptions("memory", options), {
         drainAllocationsTimeout: DRAIN_ALLOCATIONS_TIMEOUT
-      }));
+      });
+      memoryStart = this._memory.startRecordingAllocations(recordingOptions);
     }
 
-    let [profilerStartData, timelineStartData, memoryStartData] = yield promise.all([
+    const [profilerStartData, timelineStartData, memoryStartData] = await Promise.all([
       profilerStart, timelineStart, memoryStart
     ]);
 
-    let data = Object.create(null);
+    const data = Object.create(null);
     // Filter out start times that are not actually used (0 or undefined), and
     // find the earliest time since all sources use same epoch.
-    let startTimes = [profilerStartData.currentTime, memoryStartData, timelineStartData].filter(Boolean);
+    const startTimes = [
+      profilerStartData.currentTime,
+      memoryStartData,
+      timelineStartData
+    ].filter(Boolean);
     data.startTime = Math.min(...startTimes);
     data.position = profilerStartData.position;
     data.generation = profilerStartData.generation;
     data.totalSize = profilerStartData.totalSize;
 
     data.systemClient = this._systemClient;
-    data.systemHost = yield getSystemInfo();
+    data.systemHost = await getSystemInfo();
 
-    let model = new PerformanceRecordingActor(this.conn, options, data);
+    const model = new PerformanceRecordingActor(this.conn, options, data);
     this._recordings.push(model);
 
-    events.emit(this, "recording-started", model);
+    this.emit("recording-started", model);
     return model;
-  }),
+  },
 
   /**
    * Manually ends the recording session for the corresponding PerformanceRecording.
    *
    * @param PerformanceRecording model
-   *        The corresponding PerformanceRecording that belongs to the recording session wished to stop.
+   *        The corresponding PerformanceRecording that belongs to the recording
+   *        session wished to stop.
    * @return PerformanceRecording
    *         Returns the same model, populated with the profiling data.
    */
-  stopRecording: Task.async(function *(model) {
+  async stopRecording(model) {
     // If model isn't in the Recorder's internal store,
     // then do nothing, like if this was a console.profileEnd
     // from a different target.
-    if (this._recordings.indexOf(model) === -1) {
+    if (!this._recordings.includes(model)) {
       return model;
     }
 
     // Flag the recording as no longer recording, so that `model.isRecording()`
     // is false. Do this before we fetch all the data, and then subsequently
     // the recording can be considered "completed".
-    let endTime = Date.now();
-    events.emit(this, "recording-stopping", model);
+    this.emit("recording-stopping", model);
 
     // Currently there are two ways profiles stop recording. Either manually in the
     // performance tool, or via console.profileEnd. Once a recording is done,
@@ -407,8 +401,8 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
     // open), we initialize the Performance tool so it can listen to those events.
     this._recordings.splice(this._recordings.indexOf(model), 1);
 
-    let startTime = model._startTime;
-    let profilerData = this._profiler.getProfile({ startTime });
+    const startTime = model._startTime;
+    const profilerData = this._profiler.getProfile({ startTime });
 
     // Only if there are no more sessions recording do we stop
     // the underlying memory and timeline actors. If we're still recording,
@@ -423,16 +417,16 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
       this._timeline.stop();
     }
 
-    let recordingData = {
+    const recordingData = {
       // Data available only at the end of a recording.
       profile: profilerData.profile,
       // End times for all the actors.
       duration: profilerData.currentTime - startTime,
     };
 
-    events.emit(this, "recording-stopped", model, recordingData);
+    this.emit("recording-stopped", model, recordingData);
     return model;
-  }),
+  },
 
   /**
    * Checks all currently stored recording handles and returns a boolean
@@ -440,14 +434,14 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    *
    * @return Boolean
    */
-  isRecording: function () {
+  isRecording: function() {
     return this._recordings.some(h => h.isRecording());
   },
 
   /**
    * Returns all current recordings.
    */
-  getRecordings: function () {
+  getRecordings: function() {
     return this._recordings;
   },
 
@@ -455,7 +449,7 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    * Sets how often the "profiler-status" event should be emitted.
    * Used in tests.
    */
-  setProfilerStatusInterval: function (n) {
+  setProfilerStatusInterval: function(n) {
     this._profiler.setProfilerStatusInterval(n);
   },
 
@@ -466,29 +460,35 @@ const PerformanceRecorder = exports.PerformanceRecorder = Class({
    *
    * @return {object}
    */
-  getConfiguration: function () {
+  getConfiguration: function() {
     let allocationSettings = Object.create(null);
 
     if (this._memory.getState() === "attached") {
       allocationSettings = this._memory.getAllocationsSettings();
     }
 
-    return extend({}, allocationSettings, this._profiler.getStartOptions());
+    return Object.assign({}, allocationSettings, this._profiler.getStartOptions());
   },
 
   toString: () => "[object PerformanceRecorder]"
-});
+};
 
 /**
- * Creates an object of configurations based off of preferences for a PerformanceRecording.
+ * Creates an object of configurations based off of
+ * preferences for a PerformanceRecording.
  */
-function getPerformanceRecordingPrefs () {
+function getPerformanceRecordingPrefs() {
   return {
     withMarkers: true,
     withMemory: Services.prefs.getBoolPref("devtools.performance.ui.enable-memory"),
     withTicks: Services.prefs.getBoolPref("devtools.performance.ui.enable-framerate"),
-    withAllocations: Services.prefs.getBoolPref("devtools.performance.ui.enable-allocations"),
-    allocationsSampleProbability: +Services.prefs.getCharPref("devtools.performance.memory.sample-probability"),
-    allocationsMaxLogLength: Services.prefs.getIntPref("devtools.performance.memory.max-log-length")
+    withAllocations:
+      Services.prefs.getBoolPref("devtools.performance.ui.enable-allocations"),
+    allocationsSampleProbability:
+      +Services.prefs.getCharPref("devtools.performance.memory.sample-probability"),
+    allocationsMaxLogLength:
+      Services.prefs.getIntPref("devtools.performance.memory.max-log-length")
   };
 }
+
+exports.PerformanceRecorder = PerformanceRecorder;

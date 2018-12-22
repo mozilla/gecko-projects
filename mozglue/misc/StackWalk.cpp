@@ -13,20 +13,7 @@
 
 #include <string.h>
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
-
 using namespace mozilla;
-
-// The presence of this address is the stack must stop the stack walk. If
-// there is no such address, the structure will be {nullptr, true}.
-struct CriticalAddress
-{
-  void* mAddr;
-  bool mInit;
-};
-static CriticalAddress gCriticalAddress;
 
 // for _Unwind_Backtrace from libcxxrt or libunwind
 // cxxabi.h from libcxxrt implicitly includes unwind.h first
@@ -38,14 +25,20 @@ static CriticalAddress gCriticalAddress;
 #include <dlfcn.h>
 #endif
 
-#define MOZ_STACKWALK_SUPPORTS_MACOSX \
-  (defined(XP_DARWIN) && \
-   (defined(__i386) || defined(__ppc__) || defined(HAVE__UNWIND_BACKTRACE)))
+#if (defined(XP_DARWIN) && \
+     (defined(__i386) || defined(__ppc__) || defined(HAVE__UNWIND_BACKTRACE)))
+#define MOZ_STACKWALK_SUPPORTS_MACOSX 1
+#else
+#define MOZ_STACKWALK_SUPPORTS_MACOSX 0
+#endif
 
-#define MOZ_STACKWALK_SUPPORTS_LINUX \
-  (defined(linux) && \
-   ((defined(__GNUC__) && (defined(__i386) || defined(PPC))) || \
-    defined(HAVE__UNWIND_BACKTRACE)))
+#if (defined(linux) && \
+     ((defined(__GNUC__) && (defined(__i386) || defined(PPC))) || \
+      defined(HAVE__UNWIND_BACKTRACE)))
+#define MOZ_STACKWALK_SUPPORTS_LINUX 1
+#else
+#define MOZ_STACKWALK_SUPPORTS_LINUX 0
+#endif
 
 #if __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 1)
 #define HAVE___LIBC_STACK_END 1
@@ -63,154 +56,16 @@ extern MOZ_EXPORT void* __libc_stack_end; // from ld-linux.so
 #include <pthread.h>
 #endif
 
-#if MOZ_STACKWALK_SUPPORTS_MACOSX
-#include <pthread.h>
-#include <sys/errno.h>
-#ifdef MOZ_WIDGET_COCOA
-#include <CoreServices/CoreServices.h>
-#endif
-
-typedef void
-malloc_logger_t(uint32_t aType,
-                uintptr_t aArg1, uintptr_t aArg2, uintptr_t aArg3,
-                uintptr_t aResult, uint32_t aNumHotFramesToSkip);
-extern malloc_logger_t* malloc_logger;
-
-static void
-stack_callback(uint32_t aFrameNumber, void* aPc, void* aSp, void* aClosure)
-{
-  const char* name = static_cast<char*>(aClosure);
-  Dl_info info;
-
-  // On Leopard dladdr returns the wrong value for "new_sem_from_pool". The
-  // stack shows up as having two pthread_cond_wait$UNIX2003 frames. The
-  // correct one is the first that we find on our way up, so the
-  // following check for gCriticalAddress.mAddr is critical.
-  if (gCriticalAddress.mAddr || dladdr(aPc, &info) == 0  ||
-      !info.dli_sname || strcmp(info.dli_sname, name) != 0) {
-    return;
-  }
-  gCriticalAddress.mAddr = aPc;
-}
-
-#if defined(MOZ_WIDGET_COCOA) && defined(DEBUG)
-#define MAC_OS_X_VERSION_10_7_HEX 0x00001070
-
-static int32_t OSXVersion()
-{
-  static int32_t gOSXVersion = 0x0;
-  if (gOSXVersion == 0x0) {
-    OSErr err = ::Gestalt(gestaltSystemVersion, (SInt32*)&gOSXVersion);
-    MOZ_ASSERT(err == noErr);
-  }
-  return gOSXVersion;
-}
-
-static bool OnLionOrLater()
-{
-  return (OSXVersion() >= MAC_OS_X_VERSION_10_7_HEX);
-}
-#endif
-
-static void
-my_malloc_logger(uint32_t aType,
-                 uintptr_t aArg1, uintptr_t aArg2, uintptr_t aArg3,
-                 uintptr_t aResult, uint32_t aNumHotFramesToSkip)
-{
-  static bool once = false;
-  if (once) {
-    return;
-  }
-  once = true;
-
-  // On Leopard dladdr returns the wrong value for "new_sem_from_pool". The
-  // stack shows up as having two pthread_cond_wait$UNIX2003 frames.
-  const char* name = "new_sem_from_pool";
-  MozStackWalk(stack_callback, /* skipFrames */ 0, /* maxFrames */ 0,
-               const_cast<char*>(name), 0, nullptr);
-}
-
-// This is called from NS_LogInit() and from the stack walking functions, but
-// only the first call has any effect.  We need to call this function from both
-// places because it must run before any mutexes are created, and also before
-// any objects whose refcounts we're logging are created.  Running this
-// function during NS_LogInit() ensures that we meet the first criterion, and
-// running this function during the stack walking functions ensures we meet the
-// second criterion.
-MFBT_API void
-StackWalkInitCriticalAddress()
-{
-  if (gCriticalAddress.mInit) {
-    return;
-  }
-  gCriticalAddress.mInit = true;
-  // We must not do work when 'new_sem_from_pool' calls realloc, since
-  // it holds a non-reentrant spin-lock and we will quickly deadlock.
-  // new_sem_from_pool is not directly accessible using dlsym, so
-  // we force a situation where new_sem_from_pool is on the stack and
-  // use dladdr to check the addresses.
-
-  // malloc_logger can be set by external tools like 'Instruments' or 'leaks'
-  malloc_logger_t* old_malloc_logger = malloc_logger;
-  malloc_logger = my_malloc_logger;
-
-  pthread_cond_t cond;
-  int r = pthread_cond_init(&cond, 0);
-  MOZ_ASSERT(r == 0);
-  pthread_mutex_t mutex;
-  r = pthread_mutex_init(&mutex, 0);
-  MOZ_ASSERT(r == 0);
-  r = pthread_mutex_lock(&mutex);
-  MOZ_ASSERT(r == 0);
-  struct timespec abstime = { 0, 1 };
-  r = pthread_cond_timedwait_relative_np(&cond, &mutex, &abstime);
-
-  // restore the previous malloc logger
-  malloc_logger = old_malloc_logger;
-
-  // On Lion, malloc is no longer called from pthread_cond_*wait*. This prevents
-  // us from finding the address, but that is fine, since with no call to malloc
-  // there is no critical address.
-#ifdef MOZ_WIDGET_COCOA
-  MOZ_ASSERT(OnLionOrLater() || gCriticalAddress.mAddr != nullptr);
-#endif
-  MOZ_ASSERT(r == ETIMEDOUT);
-  r = pthread_mutex_unlock(&mutex);
-  MOZ_ASSERT(r == 0);
-  r = pthread_mutex_destroy(&mutex);
-  MOZ_ASSERT(r == 0);
-  r = pthread_cond_destroy(&cond);
-  MOZ_ASSERT(r == 0);
-}
-
-static bool
-IsCriticalAddress(void* aPC)
-{
-  return gCriticalAddress.mAddr == aPC;
-}
-#else
-static bool
-IsCriticalAddress(void* aPC)
-{
-  return false;
-}
-// We still initialize gCriticalAddress.mInit so that this code behaves
-// the same on all platforms. Otherwise a failure to init would be visible
-// only on OS X.
-MFBT_API void
-StackWalkInitCriticalAddress()
-{
-  gCriticalAddress.mInit = true;
-}
-#endif
-
-#if defined(_WIN32) && (defined(_M_IX86) || defined(_M_AMD64) || defined(_M_IA64)) // WIN32 x86 stack walking code
+#if MOZ_STACKWALK_SUPPORTS_WINDOWS
 
 #include <windows.h>
 #include <process.h>
 #include <stdio.h>
 #include <malloc.h>
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Atomics.h"
+#include "mozilla/StackWalk_windows.h"
+#include "mozilla/WindowsVersion.h"
 
 #include <imagehlp.h>
 // We need a way to know if we are building for WXP (or later), as if we are, we
@@ -237,11 +92,69 @@ struct WalkStackData
   void** sps;
   uint32_t sp_size;
   uint32_t sp_count;
-  void* platformData;
+  CONTEXT* context;
 };
 
-DWORD gStackWalkThread;
 CRITICAL_SECTION gDbgHelpCS;
+
+#ifdef _M_AMD64
+// Because various Win64 APIs acquire function-table locks, we need a way of
+// preventing stack walking while those APIs are being called. Otherwise, the
+// stack walker may suspend a thread holding such a lock, and deadlock when the
+// stack unwind code attempts to wait for that lock.
+//
+// We're using an atomic counter rather than a critical section because we
+// don't require mutual exclusion with the stack walker. If the stack walker
+// determines that it's safe to start unwinding the suspended thread (i.e.
+// there are no suppressions when the unwind begins), then it's safe to
+// continue unwinding that thread even if other threads request suppressions
+// in the meantime, because we can't deadlock with those other threads.
+//
+// XXX: This global variable is a larger-than-necessary hammer. A more scoped
+// solution would be to maintain a counter per thread, but then it would be
+// more difficult for WalkStackMain64 to read the suspended thread's counter.
+static Atomic<size_t> sStackWalkSuppressions;
+
+MFBT_API
+AutoSuppressStackWalking::AutoSuppressStackWalking()
+{
+  ++sStackWalkSuppressions;
+}
+
+MFBT_API
+AutoSuppressStackWalking::~AutoSuppressStackWalking()
+{
+  --sStackWalkSuppressions;
+}
+
+static uint8_t* sJitCodeRegionStart;
+static size_t sJitCodeRegionSize;
+uint8_t* sMsMpegJitCodeRegionStart;
+size_t sMsMpegJitCodeRegionSize;
+
+MFBT_API void
+RegisterJitCodeRegion(uint8_t* aStart, size_t aSize)
+{
+  // Currently we can only handle one JIT code region at a time
+  MOZ_RELEASE_ASSERT(!sJitCodeRegionStart);
+
+  sJitCodeRegionStart = aStart;
+  sJitCodeRegionSize = aSize;
+}
+
+MFBT_API void
+UnregisterJitCodeRegion(uint8_t* aStart, size_t aSize)
+{
+  // Currently we can only handle one JIT code region at a time
+  MOZ_RELEASE_ASSERT(sJitCodeRegionStart &&
+                     sJitCodeRegionStart == aStart &&
+                     sJitCodeRegionSize == aSize);
+
+  sJitCodeRegionStart = nullptr;
+  sJitCodeRegionSize = 0;
+}
+
+#endif // _M_AMD64
 
 // Routine to print an error message to standard error.
 static void
@@ -264,80 +177,34 @@ PrintError(const char* aPrefix)
   LocalFree(lpMsgBuf);
 }
 
-static unsigned int WINAPI WalkStackThread(void* aData);
-
-static bool
-EnsureWalkThreadReady()
+static void
+InitializeDbgHelpCriticalSection()
 {
-  static bool walkThreadReady = false;
-  static HANDLE stackWalkThread = nullptr;
-  static HANDLE readyEvent = nullptr;
-
-  if (walkThreadReady) {
-    return walkThreadReady;
+  static bool initialized = false;
+  if (initialized) {
+    return;
   }
-
-  if (!stackWalkThread) {
-    readyEvent = ::CreateEvent(nullptr, FALSE /* auto-reset*/,
-                               FALSE /* initially non-signaled */,
-                               nullptr);
-    if (!readyEvent) {
-      PrintError("CreateEvent");
-      return false;
-    }
-
-    unsigned int threadID;
-    stackWalkThread = (HANDLE)_beginthreadex(nullptr, 0, WalkStackThread,
-                                             (void*)readyEvent, 0, &threadID);
-    if (!stackWalkThread) {
-      PrintError("CreateThread");
-      ::CloseHandle(readyEvent);
-      readyEvent = nullptr;
-      return false;
-    }
-    gStackWalkThread = threadID;
-    ::CloseHandle(stackWalkThread);
-  }
-
-  MOZ_ASSERT((stackWalkThread && readyEvent) ||
-             (!stackWalkThread && !readyEvent));
-
-  // The thread was created. Try to wait an arbitrary amount of time (1 second
-  // should be enough) for its event loop to start before posting events to it.
-  DWORD waitRet = ::WaitForSingleObject(readyEvent, 1000);
-  if (waitRet == WAIT_TIMEOUT) {
-    // We get a timeout if we're called during static initialization because
-    // the thread will only start executing after we return so it couldn't
-    // have signalled the event. If that is the case, give up for now and
-    // try again next time we're called.
-    return false;
-  }
-  ::CloseHandle(readyEvent);
-  stackWalkThread = nullptr;
-  readyEvent = nullptr;
-
-
   ::InitializeCriticalSection(&gDbgHelpCS);
-
-  return walkThreadReady = true;
+  initialized = true;
 }
 
 static void
 WalkStackMain64(struct WalkStackData* aData)
 {
   // Get a context for the specified thread.
-  CONTEXT context;
-  if (!aData->platformData) {
-    memset(&context, 0, sizeof(CONTEXT));
-    context.ContextFlags = CONTEXT_FULL;
-    if (!GetThreadContext(aData->thread, &context)) {
-      if (aData->walkCallingThread) {
-        PrintError("GetThreadContext");
-      }
+  CONTEXT context_buf;
+  CONTEXT* context;
+  if (!aData->context) {
+    context = &context_buf;
+    memset(context, 0, sizeof(CONTEXT));
+    context->ContextFlags = CONTEXT_FULL;
+    if (aData->walkCallingThread) {
+      ::RtlCaptureContext(context);
+    } else if (!GetThreadContext(aData->thread, context)) {
       return;
     }
   } else {
-    context = *static_cast<CONTEXT*>(aData->platformData);
+    context = aData->context;
   }
 
 #if defined(_M_IX86) || defined(_M_IA64)
@@ -345,18 +212,38 @@ WalkStackMain64(struct WalkStackData* aData)
   STACKFRAME64 frame64;
   memset(&frame64, 0, sizeof(frame64));
 #ifdef _M_IX86
-  frame64.AddrPC.Offset    = context.Eip;
-  frame64.AddrStack.Offset = context.Esp;
-  frame64.AddrFrame.Offset = context.Ebp;
+  frame64.AddrPC.Offset    = context->Eip;
+  frame64.AddrStack.Offset = context->Esp;
+  frame64.AddrFrame.Offset = context->Ebp;
 #elif defined _M_IA64
-  frame64.AddrPC.Offset    = context.StIIP;
-  frame64.AddrStack.Offset = context.SP;
-  frame64.AddrFrame.Offset = context.RsBSP;
+  frame64.AddrPC.Offset    = context->StIIP;
+  frame64.AddrStack.Offset = context->SP;
+  frame64.AddrFrame.Offset = context->RsBSP;
 #endif
   frame64.AddrPC.Mode      = AddrModeFlat;
   frame64.AddrStack.Mode   = AddrModeFlat;
   frame64.AddrFrame.Mode   = AddrModeFlat;
   frame64.AddrReturn.Mode  = AddrModeFlat;
+#endif
+
+#ifdef _WIN64
+  // If there are any active suppressions, then at least one thread (we don't
+  // know which) is holding a lock that can deadlock RtlVirtualUnwind. Since
+  // that thread may be the one that we're trying to unwind, we can't proceed.
+  //
+  // But if there are no suppressions, then our target thread can't be holding
+  // a lock, and it's safe to proceed. By virtue of being suspended, the target
+  // thread can't acquire any new locks during the unwind process, so we only
+  // need to do this check once. After that, sStackWalkSuppressions can be
+  // changed by other threads while we're unwinding, and that's fine because
+  // we can't deadlock with those threads.
+  if (sStackWalkSuppressions) {
+    return;
+  }
+#endif
+
+#ifdef _M_AMD64
+  bool firstFrame = true;
 #endif
 
   // Skip our own stack walking frames.
@@ -380,7 +267,7 @@ WalkStackMain64(struct WalkStackData* aData)
       aData->process,
       aData->thread,
       &frame64,
-      &context,
+      context,
       nullptr,
       SymFunctionTableAccess64, // function table access routine
       SymGetModuleBase64,       // module base routine
@@ -404,32 +291,52 @@ WalkStackMain64(struct WalkStackData* aData)
     }
 
 #elif defined(_M_AMD64)
+    // If we reach a frame in JIT code, we don't have enough information to
+    // unwind, so we have to give up.
+    if (sJitCodeRegionStart &&
+        (uint8_t*)context->Rip >= sJitCodeRegionStart &&
+        (uint8_t*)context->Rip < sJitCodeRegionStart + sJitCodeRegionSize) {
+      break;
+    }
+
+    // We must also avoid msmpeg2vdec.dll's JIT region: they don't generate
+    // unwind data, so their JIT unwind callback just throws up its hands and
+    // terminates the process.
+    if (sMsMpegJitCodeRegionStart &&
+        (uint8_t*)context->Rip >= sMsMpegJitCodeRegionStart &&
+        (uint8_t*)context->Rip < sMsMpegJitCodeRegionStart + sMsMpegJitCodeRegionSize) {
+      break;
+    }
+
     // 64-bit frame unwinding.
     // Try to look up unwind metadata for the current function.
     ULONG64 imageBase;
     PRUNTIME_FUNCTION runtimeFunction =
-      RtlLookupFunctionEntry(context.Rip, &imageBase, NULL);
+      RtlLookupFunctionEntry(context->Rip, &imageBase, NULL);
 
-    if (!runtimeFunction) {
-      // Alas, this is probably a JIT frame, for which we don't generate unwind
-      // info and so we have to give up.
+    if (runtimeFunction) {
+      PVOID dummyHandlerData;
+      ULONG64 dummyEstablisherFrame;
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER,
+                       imageBase,
+                       context->Rip,
+                       runtimeFunction,
+                       context,
+                       &dummyHandlerData,
+                       &dummyEstablisherFrame,
+                       nullptr);
+    } else if (firstFrame) {
+      // Leaf functions can be unwound by hand.
+      context->Rip = *reinterpret_cast<DWORD64*>(context->Rsp);
+      context->Rsp += sizeof(void*);
+    } else {
+      // Something went wrong.
       break;
     }
 
-    PVOID dummyHandlerData;
-    ULONG64 dummyEstablisherFrame;
-    RtlVirtualUnwind(UNW_FLAG_NHANDLER,
-                     imageBase,
-                     context.Rip,
-                     runtimeFunction,
-                     &context,
-                     &dummyHandlerData,
-                     &dummyEstablisherFrame,
-                     nullptr);
-
-    addr = context.Rip;
-    spaddr = context.Rsp;
-
+    addr = context->Rip;
+    spaddr = context->Rsp;
+    firstFrame = false;
 #else
 #error "unknown platform"
 #endif
@@ -464,59 +371,6 @@ WalkStackMain64(struct WalkStackData* aData)
   }
 }
 
-static unsigned int WINAPI
-WalkStackThread(void* aData)
-{
-  BOOL msgRet;
-  MSG msg;
-
-  // Call PeekMessage to force creation of a message queue so that
-  // other threads can safely post events to us.
-  ::PeekMessage(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
-
-  // and tell the thread that created us that we're ready.
-  HANDLE readyEvent = (HANDLE)aData;
-  ::SetEvent(readyEvent);
-
-  while ((msgRet = ::GetMessage(&msg, (HWND)-1, 0, 0)) != 0) {
-    if (msgRet == -1) {
-      PrintError("GetMessage");
-    } else {
-      DWORD ret;
-
-      struct WalkStackData* data = (WalkStackData*)msg.lParam;
-      if (!data) {
-        continue;
-      }
-
-      // Don't suspend the calling thread until it's waiting for
-      // us; otherwise the number of frames on the stack could vary.
-      ret = ::WaitForSingleObject(data->eventStart, INFINITE);
-      if (ret != WAIT_OBJECT_0) {
-        PrintError("WaitForSingleObject");
-      }
-
-      // Suspend the calling thread, dump his stack, and then resume him.
-      // He's currently waiting for us to finish so now should be a good time.
-      ret = ::SuspendThread(data->thread);
-      if (ret == -1) {
-        PrintError("ThreadSuspend");
-      } else {
-        WalkStackMain64(data);
-
-        ret = ::ResumeThread(data->thread);
-        if (ret == -1) {
-          PrintError("ThreadResume");
-        }
-      }
-
-      ::SetEvent(data->eventEnd);
-    }
-  }
-
-  return 0;
-}
-
 /**
  * Walk the stack, translating PC's found into strings and recording the
  * chain in aBuffer. For this to work properly, the DLLs must be rebased
@@ -525,25 +379,26 @@ WalkStackThread(void* aData)
  * whose in memory address doesn't match its in-file address.
  */
 
-MFBT_API bool
-MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-             uint32_t aMaxFrames, void* aClosure, uintptr_t aThread,
-             void* aPlatformData)
+MFBT_API void
+MozStackWalkThread(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
+                   uint32_t aMaxFrames, void* aClosure,
+                   HANDLE aThread, CONTEXT* aContext)
 {
-  StackWalkInitCriticalAddress();
   static HANDLE myProcess = nullptr;
   HANDLE myThread;
-  DWORD walkerReturn;
   struct WalkStackData data;
 
-  if (!EnsureWalkThreadReady()) {
-    return false;
-  }
+  InitializeDbgHelpCriticalSection();
 
-  HANDLE currentThread = ::GetCurrentThread();
-  HANDLE targetThread =
-    aThread ? reinterpret_cast<HANDLE>(aThread) : currentThread;
-  data.walkCallingThread = (targetThread == currentThread);
+  HANDLE targetThread = aThread;
+  if (!aThread) {
+    targetThread = ::GetCurrentThread();
+    data.walkCallingThread = true;
+  } else {
+    DWORD threadId = ::GetThreadId(aThread);
+    DWORD currentThreadId = ::GetCurrentThreadId();
+    data.walkCallingThread = (threadId == currentThreadId);
+  }
 
   // Have to duplicate handle to get a real handle.
   if (!myProcess) {
@@ -555,7 +410,7 @@ MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
       if (data.walkCallingThread) {
         PrintError("DuplicateHandle (process)");
       }
-      return false;
+      return;
     }
   }
   if (!::DuplicateHandle(::GetCurrentProcess(),
@@ -566,7 +421,7 @@ MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
     if (data.walkCallingThread) {
       PrintError("DuplicateHandle (thread)");
     }
-    return false;
+    return;
   }
 
   data.skipFrames = aSkipFrames;
@@ -581,52 +436,18 @@ MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
   data.sps = local_sps;
   data.sp_count = 0;
   data.sp_size = ArrayLength(local_sps);
-  data.platformData = aPlatformData;
+  data.context = aContext;
 
-  if (aThread) {
-    // If we're walking the stack of another thread, we don't need to
-    // use a separate walker thread.
+  WalkStackMain64(&data);
+
+  if (data.pc_count > data.pc_size) {
+    data.pcs = (void**)_alloca(data.pc_count * sizeof(void*));
+    data.pc_size = data.pc_count;
+    data.pc_count = 0;
+    data.sps = (void**)_alloca(data.sp_count * sizeof(void*));
+    data.sp_size = data.sp_count;
+    data.sp_count = 0;
     WalkStackMain64(&data);
-
-    if (data.pc_count > data.pc_size) {
-      data.pcs = (void**)_alloca(data.pc_count * sizeof(void*));
-      data.pc_size = data.pc_count;
-      data.pc_count = 0;
-      data.sps = (void**)_alloca(data.sp_count * sizeof(void*));
-      data.sp_size = data.sp_count;
-      data.sp_count = 0;
-      WalkStackMain64(&data);
-    }
-  } else {
-    data.eventStart = ::CreateEvent(nullptr, FALSE /* auto-reset*/,
-                                    FALSE /* initially non-signaled */, nullptr);
-    data.eventEnd = ::CreateEvent(nullptr, FALSE /* auto-reset*/,
-                                  FALSE /* initially non-signaled */, nullptr);
-
-    ::PostThreadMessage(gStackWalkThread, WM_USER, 0, (LPARAM)&data);
-
-    walkerReturn = ::SignalObjectAndWait(data.eventStart,
-                                         data.eventEnd, INFINITE, FALSE);
-    if (walkerReturn != WAIT_OBJECT_0 && data.walkCallingThread) {
-      PrintError("SignalObjectAndWait (1)");
-    }
-    if (data.pc_count > data.pc_size) {
-      data.pcs = (void**)_alloca(data.pc_count * sizeof(void*));
-      data.pc_size = data.pc_count;
-      data.pc_count = 0;
-      data.sps = (void**)_alloca(data.sp_count * sizeof(void*));
-      data.sp_size = data.sp_count;
-      data.sp_count = 0;
-      ::PostThreadMessage(gStackWalkThread, WM_USER, 0, (LPARAM)&data);
-      walkerReturn = ::SignalObjectAndWait(data.eventStart,
-                                           data.eventEnd, INFINITE, FALSE);
-      if (walkerReturn != WAIT_OBJECT_0 && data.walkCallingThread) {
-        PrintError("SignalObjectAndWait (2)");
-      }
-    }
-
-    ::CloseHandle(data.eventStart);
-    ::CloseHandle(data.eventEnd);
   }
 
   ::CloseHandle(myThread);
@@ -634,10 +455,15 @@ MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
   for (uint32_t i = 0; i < data.pc_count; ++i) {
     (*aCallback)(i + 1, data.pcs[i], data.sps[i], aClosure);
   }
-
-  return data.pc_count != 0;
 }
 
+MFBT_API void
+MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
+             uint32_t aMaxFrames, void* aClosure)
+{
+  MozStackWalkThread(aCallback, aSkipFrames, aMaxFrames, aClosure,
+                     nullptr, nullptr);
+}
 
 static BOOL CALLBACK
 callbackEspecial64(
@@ -768,9 +594,7 @@ EnsureSymInitialized()
     return gInitialized;
   }
 
-  if (!EnsureWalkThreadReady()) {
-    return false;
-  }
+  InitializeDbgHelpCriticalSection();
 
   SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
   retStat = SymInitialize(GetCurrentProcess(), nullptr, TRUE);
@@ -889,18 +713,14 @@ void DemangleSymbol(const char* aSymbol,
 #endif // MOZ_DEMANGLE_SYMBOLS
 }
 
-#define X86_OR_PPC (defined(__i386) || defined(PPC) || defined(__ppc__))
-#if X86_OR_PPC && (MOZ_STACKWALK_SUPPORTS_MACOSX || MOZ_STACKWALK_SUPPORTS_LINUX) // i386 or PPC Linux or Mac stackwalking code
+// {x86, ppc} x {Linux, Mac} stackwalking code.
+#if ((defined(__i386) || defined(PPC) || defined(__ppc__)) && \
+     (MOZ_STACKWALK_SUPPORTS_MACOSX || MOZ_STACKWALK_SUPPORTS_LINUX))
 
-MFBT_API bool
+MFBT_API void
 MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-             uint32_t aMaxFrames, void* aClosure, uintptr_t aThread,
-             void* aPlatformData)
+             uint32_t aMaxFrames, void* aClosure)
 {
-  MOZ_ASSERT(!aThread);
-  MOZ_ASSERT(!aPlatformData);
-  StackWalkInitCriticalAddress();
-
   // Get the frame pointer
   void** bp = (void**)__builtin_frame_address(0);
 
@@ -937,8 +757,8 @@ MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
 #else
 #  error Unsupported configuration
 #endif
-  return FramePointerStackWalk(aCallback, aSkipFrames, aMaxFrames,
-                               aClosure, bp, stackEnd);
+  FramePointerStackWalk(aCallback, aSkipFrames, aMaxFrames, aClosure, bp,
+                        stackEnd);
 }
 
 #elif defined(HAVE__UNWIND_BACKTRACE)
@@ -952,7 +772,6 @@ struct unwind_info
   int skip;
   int maxFrames;
   int numFrames;
-  bool isCriticalAbort;
   void* closure;
 };
 
@@ -962,13 +781,6 @@ unwind_callback(struct _Unwind_Context* context, void* closure)
   unwind_info* info = static_cast<unwind_info*>(closure);
   void* pc = reinterpret_cast<void*>(_Unwind_GetIP(context));
   // TODO Use something like '_Unwind_GetGR()' to get the stack pointer.
-  if (IsCriticalAddress(pc)) {
-    info->isCriticalAbort = true;
-    // We just want to stop the walk, so any error code will do.  Using
-    // _URC_NORMAL_STOP would probably be the most accurate, but it is not
-    // defined on Android for ARM.
-    return _URC_FOREIGN_EXCEPTION_CAUGHT;
-  }
   if (--info->skip < 0) {
     info->numFrames++;
     (*info->callback)(info->numFrames, pc, nullptr, info->closure);
@@ -980,36 +792,27 @@ unwind_callback(struct _Unwind_Context* context, void* closure)
   return _URC_NO_REASON;
 }
 
-MFBT_API bool
+MFBT_API void
 MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-             uint32_t aMaxFrames, void* aClosure, uintptr_t aThread,
-             void* aPlatformData)
+             uint32_t aMaxFrames, void* aClosure)
 {
-  MOZ_ASSERT(!aThread);
-  MOZ_ASSERT(!aPlatformData);
-  StackWalkInitCriticalAddress();
   unwind_info info;
   info.callback = aCallback;
   info.skip = aSkipFrames + 1;
   info.maxFrames = aMaxFrames;
   info.numFrames = 0;
-  info.isCriticalAbort = false;
   info.closure = aClosure;
 
-  (void)_Unwind_Backtrace(unwind_callback, &info);
-
-  // We ignore the return value from _Unwind_Backtrace and instead determine
-  // the outcome from |info|.  There are two main reasons for this:
+  // We ignore the return value from _Unwind_Backtrace. There are three main
+  // reasons for this.
   // - On ARM/Android bionic's _Unwind_Backtrace usually (always?) returns
   //   _URC_FAILURE.  See
   //   https://bugzilla.mozilla.org/show_bug.cgi?id=717853#c110.
   // - If aMaxFrames != 0, we want to stop early, and the only way to do that
   //   is to make unwind_callback return something other than _URC_NO_REASON,
   //   which causes _Unwind_Backtrace to return a non-success code.
-  if (info.isCriticalAbort) {
-    return false;
-  }
-  return info.numFrames != 0;
+  // - MozStackWalk doesn't have a return value anyway.
+  (void)_Unwind_Backtrace(unwind_callback, &info);
 }
 
 #endif
@@ -1053,14 +856,10 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
 
 #else // unsupported platform.
 
-MFBT_API bool
+MFBT_API void
 MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-             uint32_t aMaxFrames, void* aClosure, uintptr_t aThread,
-             void* aPlatformData)
+             uint32_t aMaxFrames, void* aClosure)
 {
-  MOZ_ASSERT(!aThread);
-  MOZ_ASSERT(!aPlatformData);
-  return false;
 }
 
 MFBT_API bool
@@ -1079,64 +878,60 @@ MozDescribeCodeAddress(void* aPC, MozCodeAddressDetails* aDetails)
 
 #if defined(XP_WIN) || defined (XP_MACOSX) || defined (XP_LINUX)
 namespace mozilla {
-bool
+void
 FramePointerStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-                      uint32_t aMaxFrames, void* aClosure, void** bp,
+                      uint32_t aMaxFrames, void* aClosure, void** aBp,
                       void* aStackEnd)
 {
   // Stack walking code courtesy Kipp's "leaky".
 
   int32_t skip = aSkipFrames;
   uint32_t numFrames = 0;
-  while (bp) {
-    void** next = (void**)*bp;
-    // bp may not be a frame pointer on i386 if code was compiled with
+  while (aBp) {
+    void** next = (void**)*aBp;
+    // aBp may not be a frame pointer on i386 if code was compiled with
     // -fomit-frame-pointer, so do some sanity checks.
-    // (bp should be a frame pointer on ppc(64) but checking anyway may help
+    // (aBp should be a frame pointer on ppc(64) but checking anyway may help
     // a little if the stack has been corrupted.)
     // We don't need to check against the begining of the stack because
-    // we can assume that bp > sp
-    if (next <= bp ||
+    // we can assume that aBp > sp
+    if (next <= aBp ||
         next > aStackEnd ||
         (uintptr_t(next) & 3)) {
       break;
     }
 #if (defined(__ppc__) && defined(XP_MACOSX)) || defined(__powerpc64__)
     // ppc mac or powerpc64 linux
-    void* pc = *(bp + 2);
-    bp += 3;
+    void* pc = *(aBp + 2);
+    aBp += 3;
 #else // i386 or powerpc32 linux
-    void* pc = *(bp + 1);
-    bp += 2;
+    void* pc = *(aBp + 1);
+    aBp += 2;
 #endif
-    if (IsCriticalAddress(pc)) {
-      return false;
-    }
     if (--skip < 0) {
       // Assume that the SP points to the BP of the function
       // it called. We can't know the exact location of the SP
       // but this should be sufficient for our use the SP
       // to order elements on the stack.
       numFrames++;
-      (*aCallback)(numFrames, pc, bp, aClosure);
+      (*aCallback)(numFrames, pc, aBp, aClosure);
       if (aMaxFrames != 0 && numFrames == aMaxFrames) {
         break;
       }
     }
-    bp = next;
+    aBp = next;
   }
-  return numFrames != 0;
 }
 } // namespace mozilla
 
 #else
 
 namespace mozilla {
-MFBT_API bool
+MFBT_API void
 FramePointerStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,
-                      void* aClosure, void** aBp)
+                      uint32_t aMaxFrames, void* aClosure, void** aBp,
+                      void* aStackEnd)
 {
-  return false;
 }
 }
 

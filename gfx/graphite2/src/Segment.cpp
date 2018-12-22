@@ -59,7 +59,9 @@ Segment::Segment(unsigned int numchars, const Face* face, uint32 script, int tex
   m_dir(textDir),
   m_flags(((m_silf->flags() & 0x20) != 0) << 1)
 {
-    freeSlot(newSlot());
+    Slot *s = newSlot();
+    if (s)
+        freeSlot(s);
     m_bufSize = log_binary(numchars)+1;
 }
 
@@ -412,8 +414,9 @@ Position Segment::positionSlots(const Font *font, Slot * iStart, Slot * iEnd, bo
     Position currpos(0., 0.);
     float clusterMin = 0.;
     Rect bbox;
+    bool reorder = (currdir() != isRtl);
 
-    if (currdir() != isRtl)
+    if (reorder)
     {
         Slot *temp;
         reverseSlots();
@@ -443,6 +446,8 @@ Position Segment::positionSlots(const Font *font, Slot * iStart, Slot * iEnd, bo
                 currpos = s->finalise(this, font, currpos, bbox, 0, clusterMin = currpos.x, isRtl, isFinal);
         }
     }
+    if (reorder)
+        reverseSlots();
     return currpos;
 }
 

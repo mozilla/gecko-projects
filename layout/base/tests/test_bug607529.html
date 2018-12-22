@@ -31,7 +31,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=607529
   
     if (e.data == "loaded" && !doneOneLoad) {
       doneOneLoad = true;
-      w.location = "data:text/html,<script>window.onload = function() { opener.postMessage('goback', '*'); }</" + "script>";
+      w.location = "file_bug607529-1.html";
     }
     else if (e.data == "goback") {
       w.history.back();
@@ -44,10 +44,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=607529
       // more than one callbackHappened message before we manage to close it.
       // Protect against calling SimpleTest.finish() more than once.
       if (!done) {
-	w.close();
+        w.close();
         window.onmessage = null;
-	SimpleTest.finish();
-	done = true;
+        SimpleTest.finish();
+        done = true;
       }
     } else {
       var msg = JSON.parse(e.data);

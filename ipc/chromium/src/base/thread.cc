@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -18,11 +20,13 @@
 namespace base {
 
 // This task is used to trigger the message loop to exit.
-class ThreadQuitTask : public Task {
+class ThreadQuitTask : public mozilla::Runnable {
  public:
-  virtual void Run() {
+  ThreadQuitTask() : mozilla::Runnable("ThreadQuitTask") {}
+  NS_IMETHOD Run() override {
     MessageLoop::current()->Quit();
     Thread::SetThreadWasQuitProperly(true);
+    return NS_OK;
   }
 };
 
@@ -113,8 +117,10 @@ void Thread::Stop() {
   DCHECK_NE(thread_id_, PlatformThread::CurrentId());
 
   // StopSoon may have already been called.
-  if (message_loop_)
-    message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
+  if (message_loop_) {
+    RefPtr<ThreadQuitTask> task = new ThreadQuitTask();
+    message_loop_->PostTask(task.forget());
+  }
 
   // Wait for the thread to exit.  It should already have terminated but make
   // sure this assumption is valid.
@@ -143,12 +149,12 @@ void Thread::StopSoon() {
   // to someone calling Quit() on our message loop directly.
   DCHECK(message_loop_);
 
-  message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
+  RefPtr<ThreadQuitTask> task = new ThreadQuitTask();
+  message_loop_->PostTask(task.forget());
 }
 
 void Thread::ThreadMain() {
-  char aLocal;
-  profiler_register_thread(name_.c_str(), &aLocal);
+  AUTO_PROFILER_REGISTER_THREAD(name_.c_str());
   mozilla::IOInterposer::RegisterCurrentThread();
 
   // The message loop for this thread.
@@ -158,6 +164,7 @@ void Thread::ThreadMain() {
   // Complete the initialization of our Thread object.
   thread_id_ = PlatformThread::CurrentId();
   PlatformThread::SetName(name_.c_str());
+  NS_SetCurrentThreadName(name_.c_str());
   message_loop.set_thread_name(name_);
   message_loop.set_hang_timeouts(startup_data_->options.transient_hang_timeout,
                                  startup_data_->options.permanent_hang_timeout);
@@ -180,7 +187,6 @@ void Thread::ThreadMain() {
   DCHECK(GetThreadWasQuitProperly());
 
   mozilla::IOInterposer::UnregisterCurrentThread();
-  profiler_unregister_thread();
 
 #ifdef MOZ_TASK_TRACER
   mozilla::tasktracer::FreeTraceInfo();

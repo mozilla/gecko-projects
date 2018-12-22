@@ -2,23 +2,20 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
     openScratchpad(runTests);
-  }, true);
+  });
 
-  content.location = "data:text/html;charset=utf8,test Scratchpad pretty print.";
+  gBrowser.loadURI("data:text/html;charset=utf8,test Scratchpad pretty print.");
 }
 
 var gTabsize;
 
-function runTests(sw)
-{
+function runTests(sw) {
   gTabsize = Services.prefs.getIntPref("devtools.editor.tabsize");
   Services.prefs.setIntPref("devtools.editor.tabsize", 6);
   const space = " ".repeat(6);
@@ -29,12 +26,12 @@ function runTests(sw)
     const prettyText = sp.getText();
     ok(prettyText.includes(space));
     finish();
-  }).then(null, error => {
+  }).catch(error => {
     ok(false, error);
   });
 }
 
-registerCleanupFunction(function () {
+registerCleanupFunction(function() {
   Services.prefs.setIntPref("devtools.editor.tabsize", gTabsize);
   gTabsize = null;
 });

@@ -53,14 +53,15 @@ class StupidAllocator : public RegisterAllocator
 
   public:
     StupidAllocator(MIRGenerator* mir, LIRGenerator* lir, LIRGraph& graph)
-      : RegisterAllocator(mir, lir, graph)
+      : RegisterAllocator(mir, lir, graph),
+        registerCount(0)
     {
     }
 
-    bool go();
+    MOZ_MUST_USE bool go();
 
   private:
-    bool init();
+    MOZ_MUST_USE bool init();
 
     void syncForBlockEnd(LBlock* block, LInstruction* ins);
     void allocateForInstruction(LInstruction* ins);

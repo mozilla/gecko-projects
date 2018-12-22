@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,6 +9,7 @@
 #define nsMathMLmencloseFrame_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EnumSet.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -21,56 +23,55 @@
   The menclose element renders its content inside the enclosing notation
   specified by its notation attribute. menclose accepts any number of arguments;
   if this number is not 1, its contents are treated as a single "inferred mrow"
-  containing its arguments, as described in Section 3.1.3 Required Arguments. 
+  containing its arguments, as described in Section 3.1.3 Required Arguments.
 */
 
 enum nsMencloseNotation
   {
-    NOTATION_LONGDIV = 0x1,
-    NOTATION_RADICAL = 0x2,
-    NOTATION_ROUNDEDBOX = 0x4,
-    NOTATION_CIRCLE = 0x8,
-    NOTATION_LEFT = 0x10,
-    NOTATION_RIGHT = 0x20,
-    NOTATION_TOP = 0x40,
-    NOTATION_BOTTOM = 0x80,
-    NOTATION_UPDIAGONALSTRIKE = 0x100,
-    NOTATION_DOWNDIAGONALSTRIKE = 0x200,
-    NOTATION_VERTICALSTRIKE = 0x400,
-    NOTATION_HORIZONTALSTRIKE = 0x800,
-    NOTATION_UPDIAGONALARROW = 0x1000,
-    NOTATION_PHASORANGLE = 0x2000
+    NOTATION_LONGDIV,
+    NOTATION_RADICAL,
+    NOTATION_ROUNDEDBOX,
+    NOTATION_CIRCLE,
+    NOTATION_LEFT,
+    NOTATION_RIGHT,
+    NOTATION_TOP,
+    NOTATION_BOTTOM,
+    NOTATION_UPDIAGONALSTRIKE,
+    NOTATION_DOWNDIAGONALSTRIKE,
+    NOTATION_VERTICALSTRIKE,
+    NOTATION_HORIZONTALSTRIKE,
+    NOTATION_UPDIAGONALARROW,
+    NOTATION_PHASORANGLE
   };
 
 class nsMathMLmencloseFrame : public nsMathMLContainerFrame {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsMathMLmencloseFrame)
 
   friend nsIFrame* NS_NewMathMLmencloseFrame(nsIPresShell*   aPresShell,
-                                             nsStyleContext* aContext);
-  
+                                             ComputedStyle* aStyle);
+
   virtual nsresult
   Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize) override;
-  
+        ReflowOutput& aDesiredSize) override;
+
   virtual nsresult
   MeasureForWidth(DrawTarget* aDrawTarget,
-                  nsHTMLReflowMetrics& aDesiredSize) override;
-  
+                  ReflowOutput& aDesiredSize) override;
+
   virtual nsresult
   AttributeChanged(int32_t         aNameSpaceID,
-                   nsIAtom*        aAttribute,
+                   nsAtom*        aAttribute,
                    int32_t         aModType) override;
-  
+
   virtual void
-  SetAdditionalStyleContext(int32_t          aIndex, 
-                            nsStyleContext*  aStyleContext) override;
-  virtual nsStyleContext*
-  GetAdditionalStyleContext(int32_t aIndex) const override;
+  SetAdditionalComputedStyle(int32_t aIndex,
+                             ComputedStyle* aComputedStyle) override;
+  virtual ComputedStyle*
+  GetAdditionalComputedStyle(int32_t aIndex) const override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   NS_IMETHOD
@@ -80,7 +81,7 @@ public:
   TransmitAutomaticData() override;
 
   virtual nscoord
-  FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize) override;
+  FixInterFrameSpacing(ReflowOutput& aDesiredSize) override;
 
   bool
   IsMrowLike() override {
@@ -89,12 +90,12 @@ public:
   }
 
 protected:
-  explicit nsMathMLmencloseFrame(nsStyleContext* aContext);
+  explicit nsMathMLmencloseFrame(ComputedStyle* aStyle, ClassID aID = kClassID);
   virtual ~nsMathMLmencloseFrame();
 
   nsresult PlaceInternal(DrawTarget*          aDrawTarget,
                          bool                 aPlaceOrigin,
-                         nsHTMLReflowMetrics& aDesiredSize,
+                         ReflowOutput& aDesiredSize,
                          bool                 aWidthOnly);
 
   // functions to parse the "notation" attribute.
@@ -102,10 +103,10 @@ protected:
   void InitNotations();
 
   // Description of the notations to draw
-  uint32_t mNotationsToDraw;
-  bool IsToDraw(nsMencloseNotation mask)
+  mozilla::EnumSet<nsMencloseNotation> mNotationsToDraw;
+  bool IsToDraw(nsMencloseNotation notation)
   {
-    return mask & mNotationsToDraw;
+    return mNotationsToDraw.contains(notation);
   }
 
   nscoord mRuleThickness;

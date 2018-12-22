@@ -12,8 +12,6 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS_INHERITED0(ChannelMergerNode, AudioNode)
-
 class ChannelMergerNodeEngine final : public AudioNodeEngine
 {
 public:
@@ -71,19 +69,41 @@ ChannelMergerNode::ChannelMergerNode(AudioContext* aContext,
 {
   mStream = AudioNodeStream::Create(aContext,
                                     new ChannelMergerNodeEngine(this),
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-ChannelMergerNode::~ChannelMergerNode()
+/* static */ already_AddRefed<ChannelMergerNode>
+ChannelMergerNode::Create(AudioContext& aAudioContext,
+                          const ChannelMergerOptions& aOptions,
+                          ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  if (aOptions.mNumberOfInputs == 0 ||
+      aOptions.mNumberOfInputs > WebAudioUtils::MaxChannelCount) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+
+  RefPtr<ChannelMergerNode> audioNode =
+    new ChannelMergerNode(&aAudioContext, aOptions.mNumberOfInputs);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  return audioNode.forget();
 }
 
 JSObject*
 ChannelMergerNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ChannelMergerNodeBinding::Wrap(aCx, this, aGivenProto);
+  return ChannelMergerNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
 } // namespace mozilla
-

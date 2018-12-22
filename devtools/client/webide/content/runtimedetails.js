@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const {Connection} = require("devtools/shared/client/connection-manager");
@@ -12,8 +11,7 @@ const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.p
 
 const UNRESTRICTED_HELP_URL = "https://developer.mozilla.org/docs/Tools/WebIDE/Running_and_debugging_apps#Unrestricted_app_debugging_%28including_certified_apps_main_process_etc.%29";
 
-window.addEventListener("load", function onLoad() {
-  window.removeEventListener("load", onLoad);
+window.addEventListener("load", function() {
   document.querySelector("#close").onclick = CloseUI;
   document.querySelector("#devtools-check button").onclick = EnableCertApps;
   document.querySelector("#adb-check button").onclick = RootADB;
@@ -23,18 +21,17 @@ window.addEventListener("load", function onLoad() {
   AppManager.on("app-manager-update", OnAppManagerUpdate);
   BuildUI();
   CheckLockState();
-}, true);
+}, {capture: true, once: true});
 
-window.addEventListener("unload", function onUnload() {
-  window.removeEventListener("unload", onUnload);
+window.addEventListener("unload", function() {
   AppManager.off("app-manager-update", OnAppManagerUpdate);
-});
+}, {once: true});
 
 function CloseUI() {
   window.parent.UI.openProject();
 }
 
-function OnAppManagerUpdate(event, what) {
+function OnAppManagerUpdate(what) {
   if (what == "connection" || what == "runtime-global-actors") {
     BuildUI();
     CheckLockState();
@@ -42,9 +39,9 @@ function OnAppManagerUpdate(event, what) {
 }
 
 function generateFields(json) {
-  let table = document.querySelector("table");
-  for (let name in json) {
-    let tr = document.createElement("tr");
+  const table = document.querySelector("table");
+  for (const name in json) {
+    const tr = document.createElement("tr");
     let td = document.createElement("td");
     td.textContent = name;
     tr.appendChild(td);
@@ -52,12 +49,14 @@ function generateFields(json) {
     td.textContent = json[name];
     tr.appendChild(td);
     table.appendChild(tr);
-  };
+  }
 }
 
-var getDescriptionPromise; // Used by tests
+// Used by tests
+/* exported getDescriptionPromise */
+var getDescriptionPromise;
 function BuildUI() {
-  let table = document.querySelector("table");
+  const table = document.querySelector("table");
   table.innerHTML = "";
   if (AppManager.connection &&
       AppManager.connection.status == Connection.Status.CONNECTED &&
@@ -70,17 +69,16 @@ function BuildUI() {
 }
 
 function CheckLockState() {
-  let adbCheckResult = document.querySelector("#adb-check > .yesno");
-  let devtoolsCheckResult = document.querySelector("#devtools-check > .yesno");
-  let flipCertPerfButton = document.querySelector("#devtools-check button");
-  let adbRootButton = document.querySelector("#adb-check button");
-  let flipCertPerfAction = document.querySelector("#devtools-check > .action");
-  let adbRootAction = document.querySelector("#adb-check > .action");
+  const adbCheckResult = document.querySelector("#adb-check > .yesno");
+  const devtoolsCheckResult = document.querySelector("#devtools-check > .yesno");
+  const flipCertPerfButton = document.querySelector("#devtools-check button");
+  const flipCertPerfAction = document.querySelector("#devtools-check > .action");
+  const adbRootAction = document.querySelector("#adb-check > .action");
 
-  let sYes = Strings.GetStringFromName("runtimedetails_checkyes");
-  let sNo = Strings.GetStringFromName("runtimedetails_checkno");
-  let sUnknown = Strings.GetStringFromName("runtimedetails_checkunknown");
-  let sNotUSB = Strings.GetStringFromName("runtimedetails_notUSBDevice");
+  const sYes = Strings.GetStringFromName("runtimedetails_checkyes");
+  const sNo = Strings.GetStringFromName("runtimedetails_checkno");
+  const sUnknown = Strings.GetStringFromName("runtimedetails_checkunknown");
+  const sNotUSB = Strings.GetStringFromName("runtimedetails_notUSBDevice");
 
   flipCertPerfButton.setAttribute("disabled", "true");
   flipCertPerfAction.setAttribute("hidden", "true");
@@ -91,10 +89,9 @@ function CheckLockState() {
 
   if (AppManager.connection &&
       AppManager.connection.status == Connection.Status.CONNECTED) {
-
     // ADB check
     if (AppManager.selectedRuntime.type === RuntimeTypes.USB) {
-      let device = AppManager.selectedRuntime.device;
+      const device = AppManager.selectedRuntime.device;
       if (device && device.summonRoot) {
         device.isRoot().then(isRoot => {
           if (isRoot) {
@@ -104,7 +101,7 @@ function CheckLockState() {
             adbCheckResult.textContent = sNo;
             adbRootAction.removeAttribute("hidden");
           }
-        }, e => console.error(e));
+        }, console.error);
       } else {
         adbCheckResult.textContent = sUnknown;
       }
@@ -114,7 +111,7 @@ function CheckLockState() {
 
     // forbid-certified-apps check
     try {
-      let prefFront = AppManager.preferenceFront;
+      const prefFront = AppManager.preferenceFront;
       prefFront.getBoolPref("devtools.debugger.forbid-certified-apps").then(isForbidden => {
         if (isForbidden) {
           devtoolsCheckResult.textContent = sNo;
@@ -122,19 +119,17 @@ function CheckLockState() {
         } else {
           devtoolsCheckResult.textContent = sYes;
         }
-      }, e => console.error(e));
-    } catch(e) {
+      }, console.error);
+    } catch (e) {
       // Exception. pref actor is only accessible if forbird-certified-apps is false
       devtoolsCheckResult.textContent = sNo;
       flipCertPerfAction.removeAttribute("hidden");
     }
-
   }
-
 }
 
 function EnableCertApps() {
-  let device = AppManager.selectedRuntime.device;
+  const device = AppManager.selectedRuntime.device;
   // TODO: Remove `network.disable.ipc.security` once bug 1125916 is fixed.
   device.shell(
     "stop b2g && " +
@@ -142,12 +137,12 @@ function EnableCertApps() {
     "echo 'user_pref(\"devtools.debugger.forbid-certified-apps\", false);' >> prefs.js && " +
     "echo 'user_pref(\"dom.apps.developer_mode\", true);' >> prefs.js && " +
     "echo 'user_pref(\"network.disable.ipc.security\", true);' >> prefs.js && " +
-    "echo 'user_pref(\"dom.webcomponents.enabled\", true);' >> prefs.js && " +
+    "echo 'user_pref(\"dom.webcomponents.shadowdom.enabled\", true);' >> prefs.js && " +
     "start b2g"
   );
 }
 
 function RootADB() {
-  let device = AppManager.selectedRuntime.device;
-  device.summonRoot().then(CheckLockState, (e) => console.error(e));
+  const device = AppManager.selectedRuntime.device;
+  device.summonRoot().then(CheckLockState, console.error);
 }

@@ -7,85 +7,78 @@
 // Test editing a node's text content
 
 const TEST_URL = URL_ROOT + "doc_markup_edit.html";
+const {DEFAULT_VALUE_SUMMARY_LENGTH} = require("devtools/server/actors/inspector/walker");
 
-add_task(function*() {
-  let {inspector, testActor} = yield openInspectorForURL(TEST_URL);
+add_task(async function() {
+  const {inspector, testActor} = await openInspectorForURL(TEST_URL);
 
   info("Expanding all nodes");
-  yield inspector.markup.expandAll();
-  yield waitForMultipleChildrenUpdates(inspector);
+  await inspector.markup.expandAll();
+  await waitForMultipleChildrenUpdates(inspector);
 
-  yield editContainer(inspector, testActor, {
+  await editContainer(inspector, testActor, {
     selector: ".node6",
     newValue: "New text",
     oldValue: "line6"
   });
 
-  yield editContainer(inspector, testActor, {
+  await editContainer(inspector, testActor, {
     selector: "#node17",
     newValue: "LOREM IPSUM DOLOR SIT AMET, CONSECTETUR ADIPISCING ELIT. " +
               "DONEC POSUERE PLACERAT MAGNA ET IMPERDIET.",
     oldValue: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " +
-              "Donec posuere placerat magna et imperdiet.",
-    shortValue: true
+              "Donec posuere placerat magna et imperdiet."
   });
 
-  yield editContainer(inspector, testActor, {
+  await editContainer(inspector, testActor, {
     selector: "#node17",
     newValue: "New value",
     oldValue: "LOREM IPSUM DOLOR SIT AMET, CONSECTETUR ADIPISCING ELIT. " +
+              "DONEC POSUERE PLACERAT MAGNA ET IMPERDIET."
+  });
+
+  await editContainer(inspector, testActor, {
+    selector: "#node17",
+    newValue: "LOREM IPSUM DOLOR SIT AMET, CONSECTETUR ADIPISCING ELIT. " +
               "DONEC POSUERE PLACERAT MAGNA ET IMPERDIET.",
-    shortValue: true
+    oldValue: "New value"
   });
 });
 
-function* getNodeValue(selector, testActor) {
-  let nodeValue = yield testActor.eval(`
-    content.document.querySelector("${selector}").firstChild.nodeValue;
-  `);
-  return nodeValue;
-}
-
-function* editContainer(inspector, testActor,
-                        {selector, newValue, oldValue, shortValue}) {
-  let nodeValue = yield getNodeValue(selector, testActor);
+async function editContainer(inspector, testActor,
+                        {selector, newValue, oldValue}) {
+  let nodeValue = await getFirstChildNodeValue(selector, testActor);
   is(nodeValue, oldValue, "The test node's text content is correct");
 
   info("Changing the text content");
-  let onMutated = inspector.once("markupmutation");
-  let container = yield getContainerForSelector(selector, inspector);
-  let field = container.elt.querySelector("pre");
+  const onMutated = inspector.once("markupmutation");
+  const container = await focusNode(selector, inspector);
 
-  if (shortValue) {
-    is(oldValue.indexOf(
-       field.textContent.substring(0, field.textContent.length - 1)),
-       0,
-       "The shortened value starts with the full value " + field.textContent);
-    ok(oldValue.length > field.textContent.length,
-       "The shortened value is short");
-  } else {
-    is(field.textContent, oldValue,
-       "The text node has the correct original value");
-  }
+  const isOldValueInline = oldValue.length <= DEFAULT_VALUE_SUMMARY_LENGTH;
+  is(!!container.inlineTextChild, isOldValueInline, "inlineTextChild is as expected");
+  is(!container.canExpand, isOldValueInline, "canExpand property is as expected");
 
-  inspector.markup.markNodeAsSelected(container.node);
-
-  if (shortValue) {
-    info("Waiting for the text to be updated");
-    yield inspector.markup.once("text-expand");
-  }
-
+  const field = container.elt.querySelector("pre");
   is(field.textContent, oldValue,
      "The text node has the correct original value after selecting");
   setEditableFieldValue(field, newValue, inspector);
 
   info("Listening to the markupmutation event");
-  yield onMutated;
+  await onMutated;
 
-  nodeValue = yield getNodeValue(selector, testActor);
+  nodeValue = await getFirstChildNodeValue(selector, testActor);
   is(nodeValue, newValue, "The test node's text content has changed");
 
+  const isNewValueInline = newValue.length <= DEFAULT_VALUE_SUMMARY_LENGTH;
+  is(!!container.inlineTextChild, isNewValueInline, "inlineTextChild is as expected");
+  is(!container.canExpand, isNewValueInline, "canExpand property is as expected");
+
+  if (isOldValueInline != isNewValueInline) {
+    is(container.expanded, !isNewValueInline,
+      "Container was automatically expanded/collapsed");
+  }
+
   info("Selecting the <body> to reset the selection");
-  let bodyContainer = yield getContainerForSelector("body", inspector);
+  const bodyContainer = await getContainerForSelector("body", inspector);
   inspector.markup.markNodeAsSelected(bodyContainer.node);
 }

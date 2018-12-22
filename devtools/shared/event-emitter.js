@@ -2,46 +2,268 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/**
- * EventEmitter.
- */
+"use strict";
 
-(function (factory) { // Module boilerplate
-  if (this.module && module.id.indexOf("event-emitter") >= 0) { // require
-    factory.call(this, require, exports, module);
-  } else { // Cu.import
-      this.isWorker = false;
-      // Bug 1259045: This module is loaded early in firefox startup as a JSM,
-      // but it doesn't depends on any real module. We can save a few cycles
-      // and bytes by not loading Loader.jsm.
-      let require = function(module) {
-        const Cu = Components.utils;
-        switch(module) {
-          case "promise":
-            return Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
-          case "Services":
-            return Cu.import("resource://gre/modules/Services.jsm", {}).Services;
-          case "chrome":
-            return {
-              Cu,
-              components: Components
-            };
-        }
-        return null;
-      }
-      factory.call(this, require, this, { exports: this });
-      this.EXPORTED_SYMBOLS = ["EventEmitter"];
+const BAD_LISTENER = "The event listener must be a function, or an object that has " +
+                     "`EventEmitter.handler` Symbol.";
+
+const eventListeners = Symbol("EventEmitter/listeners");
+const onceOriginalListener = Symbol("EventEmitter/once-original-listener");
+const handler = Symbol("EventEmitter/event-handler");
+
+class EventEmitter {
+  constructor() {
+    this[eventListeners] = new Map();
   }
-}).call(this, function (require, exports, module) {
 
-this.EventEmitter = function EventEmitter() {};
+  /**
+   * Registers an event `listener` that is called every time events of
+   * specified `type` is emitted on the given event `target`.
+   *
+   * @param {Object} target
+   *    Event target object.
+   * @param {String} type
+   *    The type of event.
+   * @param {Function|Object} listener
+   *    The listener that processes the event.
+   */
+  static on(target, type, listener) {
+    if (typeof listener !== "function" && !isEventHandler(listener)) {
+      throw new Error(BAD_LISTENER);
+    }
+
+    if (!(eventListeners in target)) {
+      target[eventListeners] = new Map();
+    }
+
+    const events = target[eventListeners];
+
+    if (events.has(type)) {
+      events.get(type).add(listener);
+    } else {
+      events.set(type, new Set([listener]));
+    }
+  }
+
+  /**
+   * Removes an event `listener` for the given event `type` on the given event
+   * `target`. If no `listener` is passed removes all listeners of the given
+   * `type`. If `type` is not passed removes all the listeners of the given
+   * event `target`.
+   * @param {Object} target
+   *    The event target object.
+   * @param {String} [type]
+   *    The type of event.
+   * @param {Function|Object} [listener]
+   *    The listener that processes the event.
+   */
+  static off(target, type, listener) {
+    const length = arguments.length;
+    const events = target[eventListeners];
+
+    if (!events) {
+      return;
+    }
+
+    if (length === 3) {
+      // Trying to remove from the `target` the `listener` specified for the
+      // event's `type` given.
+      const listenersForType = events.get(type);
+
+      // If we don't have listeners for the event's type, we bail out.
+      if (!listenersForType) {
+        return;
+      }
+
+      // If the listeners list contains the listener given, we just remove it.
+      if (listenersForType.has(listener)) {
+        listenersForType.delete(listener);
+      } else {
+        // If it's not present, there is still the possibility that the listener
+        // have been added using `once`, since the method wraps the original listener
+        // in another function.
+        // So we iterate all the listeners to check if any of them is a wrapper to
+        // the `listener` given.
+        for (const value of listenersForType.values()) {
+          if (onceOriginalListener in value && value[onceOriginalListener] === listener) {
+            listenersForType.delete(value);
+            break;
+          }
+        }
+      }
+    } else if (length === 2) {
+      // No listener was given, it means we're removing all the listeners from
+      // the given event's `type`.
+      if (events.has(type)) {
+        events.delete(type);
+      }
+    } else if (length === 1) {
+      // With only the `target` given, we're removing all the isteners from the object.
+      events.clear();
+    }
+  }
+
+  /**
+   * Registers an event `listener` that is called only the next time an event
+   * of the specified `type` is emitted on the given event `target`.
+   * It returns a promised resolved once the specified event `type` is emitted.
+   *
+   * @param {Object} target
+   *    Event target object.
+   * @param {String} type
+   *    The type of the event.
+   * @param {Function|Object} [listener]
+   *    The listener that processes the event.
+   * @return {Promise}
+   *    The promise resolved once the event `type` is emitted.
+   */
+  static once(target, type, listener) {
+    return new Promise(resolve => {
+      // This is the actual listener that will be added to the target's listener, it wraps
+      // the call to the original `listener` given.
+      const newListener = (first, ...rest) => {
+        // To prevent side effects we're removing the listener upfront.
+        EventEmitter.off(target, type, newListener);
+
+        if (listener) {
+          if (isEventHandler(listener)) {
+            // if the `listener` given is actually an object that handles the events
+            // using `EventEmitter.handler`, we want to call that function, passing also
+            // the event's type as first argument, and the `listener` (the object) as
+            // contextual object.
+            listener[handler](type, first, ...rest);
+          } else {
+            // Otherwise we'll just call it
+            listener.call(target, first, ...rest);
+          }
+        }
+
+        // We resolve the promise once the listener is called.
+        resolve(first);
+      };
+
+      newListener[onceOriginalListener] = listener;
+      EventEmitter.on(target, type, newListener);
+    });
+  }
+
+  static emit(target, type, ...rest) {
+    logEvent(type, rest);
+
+    if (!(eventListeners in target)) {
+      return;
+    }
+
+    if (target[eventListeners].has(type)) {
+      // Creating a temporary Set with the original listeners, to avoiding side effects
+      // in emit.
+      const listenersForType = new Set(target[eventListeners].get(type));
+
+      for (const listener of listenersForType) {
+        // If the object was destroyed during event emission, stop emitting.
+        if (!(eventListeners in target)) {
+          break;
+        }
+
+        const events = target[eventListeners];
+        const listeners = events.get(type);
+
+        // If listeners were removed during emission, make sure the
+        // event handler we're going to fire wasn't removed.
+        if (listeners && listeners.has(listener)) {
+          try {
+            if (isEventHandler(listener)) {
+              listener[handler](type, ...rest);
+            } else {
+              listener.call(target, ...rest);
+            }
+          } catch (ex) {
+            // Prevent a bad listener from interfering with the others.
+            const msg = ex + ": " + ex.stack;
+            console.error(msg);
+            dump(msg + "\n");
+          }
+        }
+      }
+    }
+
+    // Backward compatibility with the SDK event-emitter: support wildcard listeners that
+    // will be called for any event. The arguments passed to the listener are the event
+    // type followed by the actual arguments.
+    // !!! This API will be removed by Bug 1391261.
+    const hasWildcardListeners = target[eventListeners].has("*");
+    if (type !== "*" && hasWildcardListeners) {
+      EventEmitter.emit(target, "*", type, ...rest);
+    }
+  }
+
+  /**
+   * Returns a number of event listeners registered for the given event `type`
+   * on the given event `target`.
+   *
+   * @param {Object} target
+   *    Event target object.
+   * @param {String} type
+   *    The type of event.
+   * @return {Number}
+   *    The number of event listeners.
+   */
+  static count(target, type) {
+    if (eventListeners in target) {
+      const listenersForType = target[eventListeners].get(type);
+
+      if (listenersForType) {
+        return listenersForType.size;
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Decorate an object with event emitter functionality; basically using the
+   * class' prototype as mixin.
+   *
+   * @param Object target
+   *    The object to decorate.
+   * @return Object
+   *    The object given, mixed.
+   */
+  static decorate(target) {
+    const descriptors = Object.getOwnPropertyDescriptors(this.prototype);
+    delete descriptors.constructor;
+    return Object.defineProperties(target, descriptors);
+  }
+
+  static get handler() {
+    return handler;
+  }
+
+  on(...args) {
+    EventEmitter.on(this, ...args);
+  }
+
+  off(...args) {
+    EventEmitter.off(this, ...args);
+  }
+
+  once(...args) {
+    return EventEmitter.once(this, ...args);
+  }
+
+  emit(...args) {
+    EventEmitter.emit(this, ...args);
+  }
+}
+
 module.exports = EventEmitter;
 
-// See comment in JSM module boilerplate when adding a new dependency.
-const { Cu, components } = require("chrome");
+const isEventHandler = (listener) =>
+  listener && handler in listener && typeof listener[handler] === "function";
+
 const Services = require("Services");
-const promise = require("promise");
-var loggingEnabled = true;
+const { getNthPathExcluding } = require("devtools/shared/platform/stack");
+let loggingEnabled = false;
 
 if (!isWorker) {
   loggingEnabled = Services.prefs.getBoolPref("devtools.dump.emit");
@@ -49,185 +271,106 @@ if (!isWorker) {
     observe: () => {
       loggingEnabled = Services.prefs.getBoolPref("devtools.dump.emit");
     }
-  }, false);
+  });
 }
 
-/**
- * Decorate an object with event emitter functionality.
- *
- * @param Object aObjectToDecorate
- *        Bind all public methods of EventEmitter to
- *        the aObjectToDecorate object.
- */
-EventEmitter.decorate = function EventEmitter_decorate (aObjectToDecorate) {
-  let emitter = new EventEmitter();
-  aObjectToDecorate.on = emitter.on.bind(emitter);
-  aObjectToDecorate.off = emitter.off.bind(emitter);
-  aObjectToDecorate.once = emitter.once.bind(emitter);
-  aObjectToDecorate.emit = emitter.emit.bind(emitter);
-};
+function serialize(target) {
+  const MAXLEN = 60;
 
-EventEmitter.prototype = {
-  /**
-   * Connect a listener.
-   *
-   * @param string aEvent
-   *        The event name to which we're connecting.
-   * @param function aListener
-   *        Called when the event is fired.
-   */
-  on: function EventEmitter_on(aEvent, aListener) {
-    if (!this._eventEmitterListeners)
-      this._eventEmitterListeners = new Map();
-    if (!this._eventEmitterListeners.has(aEvent)) {
-      this._eventEmitterListeners.set(aEvent, []);
+  // Undefined
+  if (typeof target === "undefined") {
+    return "undefined";
+  }
+
+  if (target === null) {
+    return "null";
+  }
+
+  // Number / String
+  if (typeof target === "string" ||
+      typeof target === "number") {
+    return truncate(target, MAXLEN);
+  }
+
+  // HTML Node
+  if (target.nodeName) {
+    let out = target.nodeName;
+
+    if (target.id) {
+      out += "#" + target.id;
     }
-    this._eventEmitterListeners.get(aEvent).push(aListener);
-  },
-
-  /**
-   * Listen for the next time an event is fired.
-   *
-   * @param string aEvent
-   *        The event name to which we're connecting.
-   * @param function aListener
-   *        (Optional) Called when the event is fired. Will be called at most
-   *        one time.
-   * @return promise
-   *        A promise which is resolved when the event next happens. The
-   *        resolution value of the promise is the first event argument. If
-   *        you need access to second or subsequent event arguments (it's rare
-   *        that this is needed) then use aListener
-   */
-  once: function EventEmitter_once(aEvent, aListener) {
-    let deferred = promise.defer();
-
-    let handler = (aEvent, aFirstArg, ...aRest) => {
-      this.off(aEvent, handler);
-      if (aListener) {
-        aListener.apply(null, [aEvent, aFirstArg, ...aRest]);
-      }
-      deferred.resolve(aFirstArg);
-    };
-
-    handler._originalListener = aListener;
-    this.on(aEvent, handler);
-
-    return deferred.promise;
-  },
-
-  /**
-   * Remove a previously-registered event listener.  Works for events
-   * registered with either on or once.
-   *
-   * @param string aEvent
-   *        The event name whose listener we're disconnecting.
-   * @param function aListener
-   *        The listener to remove.
-   */
-  off: function EventEmitter_off(aEvent, aListener) {
-    if (!this._eventEmitterListeners)
-      return;
-    let listeners = this._eventEmitterListeners.get(aEvent);
-    if (listeners) {
-      this._eventEmitterListeners.set(aEvent, listeners.filter(l => {
-        return l !== aListener && l._originalListener !== aListener;
-      }));
-    }
-  },
-
-  /**
-   * Emit an event.  All arguments to this method will
-   * be sent to listener functions.
-   */
-  emit: function EventEmitter_emit(aEvent) {
-    this.logEvent(aEvent, arguments);
-
-    if (!this._eventEmitterListeners || !this._eventEmitterListeners.has(aEvent)) {
-      return;
+    if (target.className) {
+      out += "." + target.className;
     }
 
-    let originalListeners = this._eventEmitterListeners.get(aEvent);
-    for (let listener of this._eventEmitterListeners.get(aEvent)) {
-      // If the object was destroyed during event emission, stop
-      // emitting.
-      if (!this._eventEmitterListeners) {
-        break;
+    return out;
+  }
+
+  // Array
+  if (Array.isArray(target)) {
+    return truncate(target.toSource(), MAXLEN);
+  }
+
+  // Function
+  if (typeof target === "function") {
+    return `function ${target.name ? target.name : "anonymous"}()`;
+  }
+
+  // Window
+  if (target.constructor &&
+      target.constructor.name &&
+      target.constructor.name === "Window") {
+    return `window (${target.location.origin})`;
+  }
+
+  // Object
+  if (typeof target === "object") {
+    let out = "{";
+
+    const entries = Object.entries(target);
+    for (let i = 0; i < Math.min(10, entries.length); i++) {
+      const [name, value] = entries[i];
+
+      if (i > 0) {
+        out += ", ";
       }
 
-      // If listeners were removed during emission, make sure the
-      // event handler we're going to fire wasn't removed.
-      if (originalListeners === this._eventEmitterListeners.get(aEvent) ||
-          this._eventEmitterListeners.get(aEvent).some(l => l === listener)) {
-        try {
-          listener.apply(null, arguments);
-        }
-        catch (ex) {
-          // Prevent a bad listener from interfering with the others.
-          let msg = ex + ": " + ex.stack;
-          Cu.reportError(msg);
-          dump(msg + "\n");
-        }
-      }
-    }
-  },
-
-  logEvent: function(aEvent, args) {
-    if (!loggingEnabled) {
-      return;
+      out += `${name}: ${truncate(value, MAXLEN)}`;
     }
 
-    let caller, func, path;
-    if (!isWorker) {
-      caller = components.stack.caller.caller;
-      func = caller.name;
-      let file = caller.filename;
-      if (file.includes(" -> ")) {
-        file = caller.filename.split(/ -> /)[1];
-      }
-      path = file + ":" + caller.lineNumber;
-    }
+    return out + "}";
+  }
 
-    let argOut = "(";
-    if (args.length === 1) {
-      argOut += aEvent;
-    }
+  // Other
+  return truncate(target.toSource(), MAXLEN);
+}
 
-    let out = "EMITTING: ";
+function truncate(value, maxLen) {
+  // We don't use value.toString() because it can throw.
+  const str = String(value);
+  return str.length > maxLen ? str.substring(0, maxLen) + "..." : str;
+}
 
-    // We need this try / catch to prevent any dead object errors.
-    try {
-      for (let i = 1; i < args.length; i++) {
-        if (i === 1) {
-          argOut = "(" + aEvent + ", ";
-        } else {
-          argOut += ", ";
-        }
+function logEvent(type, args) {
+  if (!loggingEnabled) {
+    return;
+  }
 
-        let arg = args[i];
-        argOut += arg;
+  let argsOut = "";
 
-        if (arg && arg.nodeName) {
-          argOut += " (" + arg.nodeName;
-          if (arg.id) {
-            argOut += "#" + arg.id;
-          }
-          if (arg.className) {
-            argOut += "." + arg.className;
-          }
-          argOut += ")";
-        }
-      }
-    } catch(e) {
-      // Object is dead so the toolbox is most likely shutting down,
-      // do nothing.
-    }
+  // We need this try / catch to prevent any dead object errors.
+  try {
+    argsOut = `${args.map(serialize).join(", ")}`;
+  } catch (e) {
+    // Object is dead so the toolbox is most likely shutting down,
+    // do nothing.
+  }
 
-    argOut += ")";
-    out += "emit" + argOut + " from " + func + "() -> " + path + "\n";
+  const path = getNthPathExcluding(0, "devtools/shared/event-emitter.js");
 
-    dump(out);
-  },
-};
-
-});
+  if (args.length > 0) {
+    dump(`EMITTING: emit(${type}, ${argsOut}) from ${path}\n`);
+  } else {
+    dump(`EMITTING: emit(${type}) from ${path}\n`);
+  }
+}

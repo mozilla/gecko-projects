@@ -7,12 +7,10 @@
 
 #include "Accessible-inl.h"
 #include "nsAccUtils.h"
-#include "nsCoreUtils.h"
 #include "DocAccessible.h"
 #include "Role.h"
 #include "States.h"
 
-#include "nsIDOMElement.h"
 #include "nsMenuPopupFrame.h"
 
 using namespace mozilla::a11y;
@@ -31,24 +29,24 @@ XULColorPickerTileAccessible::
 // XULColorPickerTileAccessible: Accessible
 
 void
-XULColorPickerTileAccessible::Value(nsString& aValue)
+XULColorPickerTileAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
 
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::color, aValue);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::color, aValue);
 }
 
 role
-XULColorPickerTileAccessible::NativeRole()
+XULColorPickerTileAccessible::NativeRole() const
 {
   return roles::PUSHBUTTON;
 }
 
 uint64_t
-XULColorPickerTileAccessible::NativeState()
+XULColorPickerTileAccessible::NativeState() const
 {
   uint64_t state = AccessibleWrap::NativeState();
-  if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::selected))
+  if (mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::selected))
     state |= states::SELECTED;
 
   return state;
@@ -91,14 +89,14 @@ XULColorPickerAccessible::
 // XULColorPickerAccessible: Accessible
 
 uint64_t
-XULColorPickerAccessible::NativeState()
+XULColorPickerAccessible::NativeState() const
 {
   uint64_t state = AccessibleWrap::NativeState();
   return state | states::HASPOPUP;
 }
 
 role
-XULColorPickerAccessible::NativeRole()
+XULColorPickerAccessible::NativeRole() const
 {
   return roles::BUTTONDROPDOWNGRID;
 }
@@ -135,9 +133,7 @@ XULColorPickerAccessible::AreItemsOperable() const
 bool
 XULColorPickerAccessible::IsAcceptableChild(nsIContent* aEl) const
 {
-  nsAutoString role;
-  nsCoreUtils::XBLBindingRole(aEl, role);
-  return role.EqualsLiteral("xul:panel") &&
-    aEl->AttrValueIs(kNameSpaceID_None, nsGkAtoms::noautofocus,
-                     nsGkAtoms::_true, eCaseMatters);
+  return aEl->IsXULElement(nsGkAtoms::panel) &&
+    aEl->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::noautofocus,
+                                  nsGkAtoms::_true, eCaseMatters);
 }

@@ -9,11 +9,10 @@
 #include "nsIDragService.h"
 #include "nsIDragSession.h"
 #include "nsITransferable.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMDataTransfer.h"
 #include "nsCOMPtr.h"
 #include "nsRect.h"
 #include "nsPoint.h"
+#include "nsString.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
@@ -24,7 +23,8 @@
 #define DRAG_TRANSLUCENCY 0.65
 
 class nsIContent;
-class nsIDOMNode;
+class nsIDocument;
+class nsINode;
 class nsPresContext;
 class nsIImageLoadingContent;
 
@@ -32,6 +32,11 @@ namespace mozilla {
 namespace gfx {
 class SourceSurface;
 } // namespace gfx
+
+namespace dom {
+class DataTransfer;
+class Selection;
+} // namespace dom
 } // namespace mozilla
 
 /**
@@ -75,7 +80,7 @@ protected:
    * in this process.  This is expected to ensure that StartDragSession() and
    * EndDragSession() get called if the platform drag is successfully invoked.
    */
-  virtual nsresult InvokeDragSessionImpl(nsISupportsArray* aTransferableArray,
+  virtual nsresult InvokeDragSessionImpl(nsIArray* aTransferableArray,
                                          nsIScriptableRegion* aDragRgn,
                                          uint32_t aActionType) = 0;
 
@@ -87,8 +92,8 @@ protected:
    * should be supplied using x and y coordinates measured in css pixels
    * that are relative to the upper-left corner of the window.
    *
-   * aScreenX and aScreenY should be the screen coordinates of the mouse click
-   * for the drag. These are in desktop pixels.
+   * aScreenPosition should be the screen coordinates of the mouse click
+   * for the drag. These are in CSS pixels.
    *
    * On return, aScreenDragRect will contain the screen coordinates of the
    * area being dragged. This is used by the platform-specific part of the
@@ -101,10 +106,10 @@ protected:
    * aPresContext will be set to the nsPresContext used determined from
    * whichever of mImage or aDOMNode is used.
    */
-  nsresult DrawDrag(nsIDOMNode* aDOMNode,
+  nsresult DrawDrag(nsINode* aDOMNode,
                     nsIScriptableRegion* aRegion,
-                    int32_t aScreenX, int32_t aScreenY,
-                    nsIntRect* aScreenDragRect,
+                    mozilla::CSSIntPoint aScreenPosition,
+                    mozilla::LayoutDeviceIntRect* aScreenDragRect,
                     RefPtr<SourceSurface>* aSurface,
                     nsPresContext **aPresContext);
 
@@ -112,23 +117,28 @@ protected:
    * Draw a drag image for an image node specified by aImageLoader or aCanvas.
    * This is called by DrawDrag.
    */
-  nsresult DrawDragForImage(nsIImageLoadingContent* aImageLoader,
+  nsresult DrawDragForImage(nsPresContext *aPresContext,
+                            nsIImageLoadingContent* aImageLoader,
                             mozilla::dom::HTMLCanvasElement* aCanvas,
-                            int32_t aScreenX, int32_t aScreenY,
-                            nsIntRect* aScreenDragRect,
+                            mozilla::LayoutDeviceIntRect* aScreenDragRect,
                             RefPtr<SourceSurface>* aSurface);
 
   /**
-   * Convert aScreenX and aScreenY from CSS pixels into unscaled device pixels.
+   * Convert aScreenPosition from CSS pixels into unscaled device pixels.
    */
-  void
+  mozilla::LayoutDeviceIntPoint
   ConvertToUnscaledDevPixels(nsPresContext* aPresContext,
-                             int32_t* aScreenX, int32_t* aScreenY);
+                             mozilla::CSSIntPoint aScreenPosition);
 
   /**
    * If the drag image is a popup, open the popup when the drag begins.
    */
   void OpenDragPopup();
+
+  /**
+   * Free resources contained in DataTransferItems that aren't needed by JS.
+   */
+  void DiscardInternalTransferData();
 
   // Returns true if a drag event was dispatched to a child process after
   // the previous TakeDragEventDispatchedToChildProcess() call.
@@ -153,35 +163,36 @@ protected:
   uint32_t mDragActionFromChildProcess;
 
   nsSize mTargetSize;
-  nsCOMPtr<nsIDOMNode> mSourceNode;
-  nsCOMPtr<nsIDOMDocument> mSourceDocument;       // the document at the drag source. will be null
+  nsCOMPtr<nsINode> mSourceNode;
+  nsCString mTriggeringPrincipalURISpec;
+  nsCOMPtr<nsIDocument> mSourceDocument;          // the document at the drag source. will be null
                                                   //  if it came from outside the app.
-  nsCOMPtr<nsIDOMDataTransfer> mDataTransfer;
+  nsContentPolicyType mContentPolicyType;         // the contentpolicy type passed to the channel
+                                                  // when initiating the drag session
+  RefPtr<mozilla::dom::DataTransfer> mDataTransfer;
 
   // used to determine the image to appear on the cursor while dragging
-  nsCOMPtr<nsIDOMNode> mImage;
+  nsCOMPtr<nsINode> mImage;
   // offset of cursor within the image
   mozilla::CSSIntPoint mImageOffset;
 
   // set if a selection is being dragged
-  nsCOMPtr<nsISelection> mSelection;
+  RefPtr<mozilla::dom::Selection> mSelection;
 
   // set if the image in mImage is a popup. If this case, the popup will be opened
   // and moved instead of using a drag image.
   nsCOMPtr<nsIContent> mDragPopup;
 
   // the screen position where drag gesture occurred, used for positioning the
-  // drag image when no image is specified. If a value is -1, no event was
-  // supplied so the screen position is not known
-  int32_t mScreenX;
-  int32_t mScreenY;
+  // drag image.
+  mozilla::CSSIntPoint mScreenPosition;
 
   // the screen position where the drag ended
   mozilla::LayoutDeviceIntPoint mEndDragPoint;
 
   uint32_t mSuppressLevel;
 
-  // The input source of the drag event. Possible values are from nsIDOMMouseEvent.
+  // The input source of the drag event. Possible values are from MouseEvent.
   uint16_t mInputSource;
 
   nsTArray<RefPtr<mozilla::dom::ContentParent>> mChildProcesses;

@@ -11,20 +11,17 @@ const TAB_URL = EXAMPLE_URL + "doc_inline-debugger-statement.html";
 
 var gClient, gThreadClient;
 var gAttached = promise.defer();
-var gNewGlobal = promise.defer()
-var gNewChromeSource = promise.defer()
+var gNewGlobal = promise.defer();
+var gNewChromeSource = promise.defer();
 
-var { DevToolsLoader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var loader = new DevToolsLoader();
-loader.invisibleToDebugger = true;
-loader.main("devtools/server/main");
-var DebuggerServer = loader.DebuggerServer;
+var { DevToolsLoader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var customLoader = new DevToolsLoader();
+customLoader.invisibleToDebugger = true;
+var { DebuggerServer } = customLoader.require("devtools/server/main");
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
   DebuggerServer.allowChromeProcess = true;
 
   let transport = DebuggerServer.connectPipe();
@@ -36,21 +33,21 @@ function test() {
     promise.all([gAttached.promise, gNewGlobal.promise, gNewChromeSource.promise])
       .then(resumeAndCloseConnection)
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
 
-    testChromeActor();
+    testParentProcessTargetActor();
   });
 }
 
-function testChromeActor() {
+function testParentProcessTargetActor() {
   gClient.getProcess().then(aResponse => {
     gClient.addListener("newGlobal", onNewGlobal);
 
     let actor = aResponse.form.actor;
-    gClient.attachTab(actor, (response, tabClient) => {
-      tabClient.attachThread(null, (aResponse, aThreadClient) => {
+    gClient.attachTab(actor).then(([response, tabClient]) => {
+      tabClient.attachThread(null).then(([aResponse, aThreadClient]) => {
         gThreadClient = aThreadClient;
         gThreadClient.addListener("newSource", onNewSource);
 
@@ -62,7 +59,7 @@ function testChromeActor() {
           gAttached.resolve();
 
           // Ensure that a new chrome global will be created.
-          gBrowser.selectedTab = gBrowser.addTab("about:mozilla");
+          gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, "about:mozilla");
         }
       });
     });
@@ -87,17 +84,17 @@ function onNewSource(aEvent, aPacket) {
 
 function resumeAndCloseConnection() {
   let deferred = promise.defer();
-  gThreadClient.resume(() => gClient.close(deferred.resolve));
+  gThreadClient.resume(() => deferred.resolve(gClient.close()));
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
   gThreadClient = null;
   gAttached = null;
   gNewGlobal = null;
   gNewChromeSource = null;
 
-  loader = null;
+  customLoader = null;
   DebuggerServer = null;
 });

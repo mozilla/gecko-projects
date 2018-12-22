@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,23 +7,26 @@
 #include "nsMenuBarListener.h"
 #include "nsMenuBarFrame.h"
 #include "nsMenuPopupFrame.h"
-#include "nsIDOMEvent.h"
+#include "nsPIWindowRoot.h"
 
 // Drag & Drop, Clipboard
 #include "nsIServiceManager.h"
 #include "nsWidgetsCID.h"
 #include "nsCOMPtr.h"
-#include "nsIDOMKeyEvent.h"
 #include "nsIContent.h"
-#include "nsIDOMNode.h"
-#include "nsIDOMElement.h"
 
 #include "nsContentUtils.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEvents.h"
+#include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventBinding.h"
+#include "mozilla/dom/KeyboardEvent.h"
+#include "mozilla/dom/KeyboardEventBinding.h"
 
 using namespace mozilla;
+using mozilla::dom::Event;
+using mozilla::dom::KeyboardEvent;
 
 /*
  * nsMenuBarListener implementation
@@ -36,21 +40,85 @@ int32_t nsMenuBarListener::mAccessKey = -1;
 Modifiers nsMenuBarListener::mAccessKeyMask = 0;
 bool nsMenuBarListener::mAccessKeyFocuses = false;
 
-nsMenuBarListener::nsMenuBarListener(nsMenuBarFrame* aMenuBar) 
-  :mAccessKeyDown(false), mAccessKeyDownCanceled(false)
+nsMenuBarListener::nsMenuBarListener(nsMenuBarFrame* aMenuBarFrame,
+                                     nsIContent* aMenuBarContent)
+  : mMenuBarFrame(aMenuBarFrame)
+  , mEventTarget(aMenuBarContent ? aMenuBarContent->GetComposedDoc() : nullptr)
+  , mTopWindowEventTarget(nullptr)
+  , mAccessKeyDown(false)
+  , mAccessKeyDownCanceled(false)
 {
-  mMenuBarFrame = aMenuBar;
+  MOZ_ASSERT(mEventTarget);
+
+  // Hook up the menubar as a key listener on the whole document.  This will
+  // see every keypress that occurs, but after everyone else does.
+
+  // Also hook up the listener to the window listening for focus events. This
+  // is so we can keep proper state as the user alt-tabs through processes.
+
+  mEventTarget->AddSystemEventListener(NS_LITERAL_STRING("keypress"),
+                                       this, false);
+  mEventTarget->AddSystemEventListener(NS_LITERAL_STRING("keydown"),
+                                       this, false);
+  mEventTarget->AddSystemEventListener(NS_LITERAL_STRING("keyup"), this, false);
+  mEventTarget->AddSystemEventListener(NS_LITERAL_STRING("mozaccesskeynotfound"),
+                                       this, false);
+  // Need a capturing event listener if the user has blocked pages from overriding
+  // system keys so that we can prevent menu accesskeys from being cancelled.
+  mEventTarget->AddEventListener(NS_LITERAL_STRING("keydown"), this, true);
+
+  // mousedown event should be handled in all phase
+  mEventTarget->AddEventListener(NS_LITERAL_STRING("mousedown"), this, true);
+  mEventTarget->AddEventListener(NS_LITERAL_STRING("mousedown"), this, false);
+  mEventTarget->AddEventListener(NS_LITERAL_STRING("blur"), this, true);
+
+  mEventTarget->AddEventListener(
+                  NS_LITERAL_STRING("MozDOMFullscreen:Entered"), this, false);
+
+  // Needs to listen to the deactivate event of the window.
+  RefPtr<dom::EventTarget> topWindowEventTarget =
+    nsContentUtils::GetWindowRoot(aMenuBarContent->GetComposedDoc());
+  mTopWindowEventTarget = topWindowEventTarget.get();
+
+  mTopWindowEventTarget->AddSystemEventListener(NS_LITERAL_STRING("deactivate"),
+                                                this, true);
 }
 
 ////////////////////////////////////////////////////////////////////////
-nsMenuBarListener::~nsMenuBarListener() 
+nsMenuBarListener::~nsMenuBarListener()
 {
+  MOZ_ASSERT(!mEventTarget,
+             "OnDestroyMenuBarFrame() should've alreay been called");
 }
 
 void
 nsMenuBarListener::OnDestroyMenuBarFrame()
 {
+  mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keypress"),
+                                          this, false);
+  mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keydown"),
+                                          this, false);
+  mEventTarget->RemoveSystemEventListener(NS_LITERAL_STRING("keyup"),
+                                          this, false);
+  mEventTarget->RemoveSystemEventListener(
+                  NS_LITERAL_STRING("mozaccesskeynotfound"), this, false);
+  mEventTarget->RemoveEventListener(NS_LITERAL_STRING("keydown"),
+                                    this, true);
+
+  mEventTarget->RemoveEventListener(NS_LITERAL_STRING("mousedown"), this, true);
+  mEventTarget->RemoveEventListener(NS_LITERAL_STRING("mousedown"),
+                                    this, false);
+  mEventTarget->RemoveEventListener(NS_LITERAL_STRING("blur"), this, true);
+
+  mEventTarget->RemoveEventListener(
+                  NS_LITERAL_STRING("MozDOMFullscreen:Entered"), this, false);
+
+  mTopWindowEventTarget->RemoveSystemEventListener(
+                           NS_LITERAL_STRING("deactivate"), this, true);
+
   mMenuBarFrame = nullptr;
+  mEventTarget = nullptr;
+  mTopWindowEventTarget = nullptr;
 }
 
 void
@@ -81,22 +149,32 @@ void nsMenuBarListener::InitAccessKey()
   mAccessKey = 0;
   mAccessKeyMask = 0;
 #else
-  mAccessKey = nsIDOMKeyEvent::DOM_VK_ALT;
+  mAccessKey = dom::KeyboardEvent_Binding::DOM_VK_ALT;
   mAccessKeyMask = MODIFIER_ALT;
 #endif
 
   // Get the menu access key value from prefs, overriding the default:
   mAccessKey = Preferences::GetInt("ui.key.menuAccessKey", mAccessKey);
-  if (mAccessKey == nsIDOMKeyEvent::DOM_VK_SHIFT)
+  switch (mAccessKey) {
+  case dom::KeyboardEvent_Binding::DOM_VK_SHIFT:
     mAccessKeyMask = MODIFIER_SHIFT;
-  else if (mAccessKey == nsIDOMKeyEvent::DOM_VK_CONTROL)
+    break;
+  case dom::KeyboardEvent_Binding::DOM_VK_CONTROL:
     mAccessKeyMask = MODIFIER_CONTROL;
-  else if (mAccessKey == nsIDOMKeyEvent::DOM_VK_ALT)
+    break;
+  case dom::KeyboardEvent_Binding::DOM_VK_ALT:
     mAccessKeyMask = MODIFIER_ALT;
-  else if (mAccessKey == nsIDOMKeyEvent::DOM_VK_META)
+    break;
+  case dom::KeyboardEvent_Binding::DOM_VK_META:
     mAccessKeyMask = MODIFIER_META;
-  else if (mAccessKey == nsIDOMKeyEvent::DOM_VK_WIN)
+    break;
+  case dom::KeyboardEvent_Binding::DOM_VK_WIN:
     mAccessKeyMask = MODIFIER_OS;
+    break;
+  default:
+    // Don't touch mAccessKeyMask.
+    break;
+  }
 }
 
 void
@@ -113,9 +191,9 @@ nsMenuBarListener::ToggleMenuActiveState()
 
 ////////////////////////////////////////////////////////////////////////
 nsresult
-nsMenuBarListener::KeyUp(nsIDOMEvent* aKeyEvent)
-{  
-  nsCOMPtr<nsIDOMKeyEvent> keyEvent = do_QueryInterface(aKeyEvent);
+nsMenuBarListener::KeyUp(Event* aKeyEvent)
+{
+  RefPtr<KeyboardEvent> keyEvent = aKeyEvent->AsKeyboardEvent();
   if (!keyEvent) {
     return NS_OK;
   }
@@ -123,23 +201,18 @@ nsMenuBarListener::KeyUp(nsIDOMEvent* aKeyEvent)
   InitAccessKey();
 
   //handlers shouldn't be triggered by non-trusted events.
-  bool trustedEvent = false;
-  aKeyEvent->GetIsTrusted(&trustedEvent);
-
-  if (!trustedEvent) {
+  if (!keyEvent->IsTrusted()) {
     return NS_OK;
   }
 
   if (mAccessKey && mAccessKeyFocuses)
   {
-    bool defaultPrevented = false;
-    aKeyEvent->GetDefaultPrevented(&defaultPrevented);
+    bool defaultPrevented = keyEvent->DefaultPrevented();
 
-    // On a press of the ALT key by itself, we toggle the menu's 
+    // On a press of the ALT key by itself, we toggle the menu's
     // active/inactive state.
     // Get the ascii key code.
-    uint32_t theChar;
-    keyEvent->GetKeyCode(&theChar);
+    uint32_t theChar = keyEvent->KeyCode();
 
     if (!defaultPrevented && mAccessKeyDown && !mAccessKeyDownCanceled &&
         (int32_t)theChar == mAccessKey)
@@ -171,115 +244,117 @@ nsMenuBarListener::KeyUp(nsIDOMEvent* aKeyEvent)
 
     bool active = !Destroyed() && mMenuBarFrame->IsActive();
     if (active) {
-      aKeyEvent->StopPropagation();
-      aKeyEvent->PreventDefault();
+      keyEvent->StopPropagation();
+      keyEvent->PreventDefault();
       return NS_OK; // I am consuming event
     }
   }
-  
+
   return NS_OK; // means I am NOT consuming event
 }
 
 ////////////////////////////////////////////////////////////////////////
 nsresult
-nsMenuBarListener::KeyPress(nsIDOMEvent* aKeyEvent)
+nsMenuBarListener::KeyPress(Event* aKeyEvent)
 {
   // if event has already been handled, bail
-  if (aKeyEvent) {
-    bool eventHandled = false;
-    aKeyEvent->GetDefaultPrevented(&eventHandled);
-    if (eventHandled) {
-      return NS_OK;       // don't consume event
-    }
+  if (!aKeyEvent || aKeyEvent->DefaultPrevented()) {
+    return NS_OK;       // don't consume event
   }
 
   //handlers shouldn't be triggered by non-trusted events.
-  bool trustedEvent = false;
-  if (aKeyEvent) {
-    aKeyEvent->GetIsTrusted(&trustedEvent);
+  if (!aKeyEvent->IsTrusted()) {
+    return NS_OK;
   }
 
-  if (!trustedEvent)
-    return NS_OK;
-
-  nsresult retVal = NS_OK;  // default is to not consume event
-  
   InitAccessKey();
 
   if (mAccessKey)
   {
-    bool preventDefault;
-    aKeyEvent->GetDefaultPrevented(&preventDefault);
-    if (!preventDefault) {
-      nsCOMPtr<nsIDOMKeyEvent> keyEvent = do_QueryInterface(aKeyEvent);
-      uint32_t keyCode, charCode;
-      keyEvent->GetKeyCode(&keyCode);
-      keyEvent->GetCharCode(&charCode);
+    // If accesskey handling was forwarded to a child process, wait for
+    // the mozaccesskeynotfound event before handling accesskeys.
+    WidgetKeyboardEvent* nativeKeyEvent =
+      aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
+    if (!nativeKeyEvent) {
+      return NS_OK;
+    }
 
-      bool hasAccessKeyCandidates = charCode != 0;
-      if (!hasAccessKeyCandidates) {
-        WidgetKeyboardEvent* nativeKeyEvent =
-          aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
-        if (nativeKeyEvent) {
-          AutoTArray<uint32_t, 10> keys;
-          nativeKeyEvent->GetAccessKeyCandidates(keys);
-          hasAccessKeyCandidates = !keys.IsEmpty();
+    RefPtr<KeyboardEvent> keyEvent = aKeyEvent->AsKeyboardEvent();
+    uint32_t keyCode = keyEvent->KeyCode();
+
+    // Cancel the access key flag unless we are pressing the access key.
+    if (keyCode != (uint32_t)mAccessKey) {
+      mAccessKeyDownCanceled = true;
+    }
+
+#ifndef XP_MACOSX
+    // Need to handle F10 specially on Non-Mac platform.
+    if (nativeKeyEvent->mMessage == eKeyPress && keyCode == NS_VK_F10) {
+      if ((GetModifiersForAccessKey(keyEvent) & ~MODIFIER_CONTROL) == 0) {
+        // If the keyboard event should activate the menubar and will be
+        // sent to a remote process, it should be executed with reply
+        // event from the focused remote process.  Note that if the menubar
+        // is active, the event is already marked as "stop cross
+        // process dispatching".  So, in that case, this won't wait
+        // reply from the remote content.
+        if (nativeKeyEvent->WillBeSentToRemoteProcess()) {
+          nativeKeyEvent->StopImmediatePropagation();
+          nativeKeyEvent->MarkAsWaitingReplyFromRemoteProcess();
+          return NS_OK;
         }
-      }
+        // The F10 key just went down by itself or with ctrl pressed.
+        // In Windows, both of these activate the menu bar.
+        mMenuBarFrame->SetActiveByKeyboard();
+        ToggleMenuActiveState();
 
-      // Cancel the access key flag unless we are pressing the access key.
-      if (keyCode != (uint32_t)mAccessKey) {
-        mAccessKeyDownCanceled = true;
-      }
-
-      if (IsAccessKeyPressed(keyEvent) && hasAccessKeyCandidates) {
-        // Do shortcut navigation.
-        // A letter was pressed. We want to see if a shortcut gets matched. If
-        // so, we'll know the menu got activated.
-        nsMenuFrame* result = mMenuBarFrame->FindMenuWithShortcut(keyEvent);
-        if (result) {
-          mMenuBarFrame->SetActiveByKeyboard();
-          mMenuBarFrame->SetActive(true);
-          result->OpenMenu(true);
-
-          // The opened menu will listen next keyup event.
-          // Therefore, we should clear the keydown flags here.
-          mAccessKeyDown = mAccessKeyDownCanceled = false;
-
+        if (mMenuBarFrame->IsActive()) {
+#ifdef MOZ_WIDGET_GTK
+          // In GTK, this also opens the first menu.
+          mMenuBarFrame->GetCurrentMenuItem()->OpenMenu(false);
+#endif
           aKeyEvent->StopPropagation();
           aKeyEvent->PreventDefault();
-          retVal = NS_OK;       // I am consuming event
-        }
-      }    
-#ifndef XP_MACOSX
-      // Also need to handle F10 specially on Non-Mac platform.
-      else if (keyCode == NS_VK_F10) {
-        if ((GetModifiersForAccessKey(keyEvent) & ~MODIFIER_CONTROL) == 0) {
-          // The F10 key just went down by itself or with ctrl pressed.
-          // In Windows, both of these activate the menu bar.
-          mMenuBarFrame->SetActiveByKeyboard();
-          ToggleMenuActiveState();
-
-          if (mMenuBarFrame->IsActive()) {
-#ifdef MOZ_WIDGET_GTK
-            // In GTK, this also opens the first menu.
-            mMenuBarFrame->GetCurrentMenuItem()->OpenMenu(true);
-#endif
-            aKeyEvent->StopPropagation();
-            aKeyEvent->PreventDefault();
-            return NS_OK; // consume the event
-          }
         }
       }
+
+      return NS_OK;
+    }
 #endif // !XP_MACOSX
-    } 
+
+    nsMenuFrame* menuFrameForKey = GetMenuForKeyEvent(keyEvent, false);
+    if (!menuFrameForKey) {
+      return NS_OK;
+    }
+
+    // If the keyboard event matches with a menu item's accesskey and
+    // will be sent to a remote process, it should be executed with
+    // reply event from the focused remote process.  Note that if the
+    // menubar is active, the event is already marked as "stop cross
+    // process dispatching".  So, in that case, this won't wait
+    // reply from the remote content.
+    if (nativeKeyEvent->WillBeSentToRemoteProcess()) {
+      nativeKeyEvent->StopImmediatePropagation();
+      nativeKeyEvent->MarkAsWaitingReplyFromRemoteProcess();
+      return NS_OK;
+    }
+
+    mMenuBarFrame->SetActiveByKeyboard();
+    mMenuBarFrame->SetActive(true);
+    menuFrameForKey->OpenMenu(true);
+
+    // The opened menu will listen next keyup event.
+    // Therefore, we should clear the keydown flags here.
+    mAccessKeyDown = mAccessKeyDownCanceled = false;
+
+    aKeyEvent->StopPropagation();
+    aKeyEvent->PreventDefault();
   }
 
-  return retVal;
+  return NS_OK;
 }
 
 bool
-nsMenuBarListener::IsAccessKeyPressed(nsIDOMKeyEvent* aKeyEvent)
+nsMenuBarListener::IsAccessKeyPressed(KeyboardEvent* aKeyEvent)
 {
   InitAccessKey();
   // No other modifiers are allowed to be down except for Shift.
@@ -291,10 +366,10 @@ nsMenuBarListener::IsAccessKeyPressed(nsIDOMKeyEvent* aKeyEvent)
 }
 
 Modifiers
-nsMenuBarListener::GetModifiersForAccessKey(nsIDOMKeyEvent* aKeyEvent)
+nsMenuBarListener::GetModifiersForAccessKey(KeyboardEvent* aKeyEvent)
 {
   WidgetInputEvent* inputEvent =
-    aKeyEvent->AsEvent()->WidgetEventPtr()->AsInputEvent();
+    aKeyEvent->WidgetEventPtr()->AsInputEvent();
   MOZ_ASSERT(inputEvent);
 
   static const Modifiers kPossibleModifiersForAccessKey =
@@ -303,29 +378,75 @@ nsMenuBarListener::GetModifiersForAccessKey(nsIDOMKeyEvent* aKeyEvent)
   return (inputEvent->mModifiers & kPossibleModifiersForAccessKey);
 }
 
+nsMenuFrame*
+nsMenuBarListener::GetMenuForKeyEvent(KeyboardEvent* aKeyEvent, bool aPeek)
+{
+  if (!IsAccessKeyPressed(aKeyEvent)) {
+    return nullptr;
+  }
+
+  uint32_t charCode = aKeyEvent->CharCode();
+  bool hasAccessKeyCandidates = charCode != 0;
+  if (!hasAccessKeyCandidates) {
+    WidgetKeyboardEvent* nativeKeyEvent =
+      aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
+
+    AutoTArray<uint32_t, 10> keys;
+    nativeKeyEvent->GetAccessKeyCandidates(keys);
+    hasAccessKeyCandidates = !keys.IsEmpty();
+  }
+
+  if (hasAccessKeyCandidates) {
+    // Do shortcut navigation.
+    // A letter was pressed. We want to see if a shortcut gets matched. If
+    // so, we'll know the menu got activated.
+    return mMenuBarFrame->FindMenuWithShortcut(aKeyEvent, aPeek);
+  }
+
+  return nullptr;
+}
+
+void
+nsMenuBarListener::ReserveKeyIfNeeded(Event* aKeyEvent)
+{
+  WidgetKeyboardEvent* nativeKeyEvent =
+    aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
+  if (nsContentUtils::ShouldBlockReservedKeys(nativeKeyEvent)) {
+    nativeKeyEvent->MarkAsReservedByChrome();
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////
 nsresult
-nsMenuBarListener::KeyDown(nsIDOMEvent* aKeyEvent)
+nsMenuBarListener::KeyDown(Event* aKeyEvent)
 {
   InitAccessKey();
 
   //handlers shouldn't be triggered by non-trusted events.
-  bool trustedEvent = false;
-  if (aKeyEvent) {
-    aKeyEvent->GetIsTrusted(&trustedEvent);
+  if (!aKeyEvent || !aKeyEvent->IsTrusted()) {
+    return NS_OK;
   }
 
-  if (!trustedEvent)
+  RefPtr<KeyboardEvent> keyEvent = aKeyEvent->AsKeyboardEvent();
+  if (!keyEvent) {
     return NS_OK;
+  }
+
+  uint32_t theChar = keyEvent->KeyCode();
+
+  uint16_t eventPhase = keyEvent->EventPhase();
+  bool capturing = (eventPhase == dom::Event_Binding::CAPTURING_PHASE);
+
+#ifndef XP_MACOSX
+  if (capturing && !mAccessKeyDown && theChar == NS_VK_F10 &&
+      (GetModifiersForAccessKey(keyEvent) & ~MODIFIER_CONTROL) == 0) {
+    ReserveKeyIfNeeded(aKeyEvent);
+  }
+#endif
 
   if (mAccessKey && mAccessKeyFocuses)
   {
-    bool defaultPrevented = false;
-    aKeyEvent->GetDefaultPrevented(&defaultPrevented);
-
-    nsCOMPtr<nsIDOMKeyEvent> keyEvent = do_QueryInterface(aKeyEvent);
-    uint32_t theChar;
-    keyEvent->GetKeyCode(&theChar);
+    bool defaultPrevented = aKeyEvent->DefaultPrevented();
 
     // No other modifiers can be down.
     // Especially CTRL.  CTRL+ALT == AltGR, and we'll fuck up on non-US
@@ -334,7 +455,7 @@ nsMenuBarListener::KeyDown(nsIDOMEvent* aKeyEvent)
       ((theChar == (uint32_t)mAccessKey) &&
        (GetModifiersForAccessKey(keyEvent) & ~mAccessKeyMask) == 0);
 
-    if (!mAccessKeyDown) {
+    if (!capturing && !mAccessKeyDown) {
       // If accesskey isn't being pressed and the key isn't the accesskey,
       // ignore the event.
       if (!isAccessKeyDownEvent) {
@@ -359,27 +480,44 @@ nsMenuBarListener::KeyDown(nsIDOMEvent* aKeyEvent)
     mAccessKeyDownCanceled = !isAccessKeyDownEvent;
   }
 
+  if (capturing && mAccessKey) {
+    nsMenuFrame* menuFrameForKey = GetMenuForKeyEvent(keyEvent, true);
+    if (menuFrameForKey) {
+      ReserveKeyIfNeeded(aKeyEvent);
+    }
+  }
+
   return NS_OK; // means I am NOT consuming event
 }
 
 ////////////////////////////////////////////////////////////////////////
 
 nsresult
-nsMenuBarListener::Blur(nsIDOMEvent* aEvent)
+nsMenuBarListener::Blur(Event* aEvent)
 {
   if (!mMenuBarFrame->IsMenuOpen() && mMenuBarFrame->IsActive()) {
     ToggleMenuActiveState();
+    mAccessKeyDown = false;
+    mAccessKeyDownCanceled = false;
   }
+  return NS_OK; // means I am NOT consuming event
+}
+
+////////////////////////////////////////////////////////////////////////
+
+nsresult
+nsMenuBarListener::OnWindowDeactivated(Event* aEvent)
+{
   // Reset the accesskey state because we cannot receive the keyup event for
   // the pressing accesskey.
   mAccessKeyDown = false;
   mAccessKeyDownCanceled = false;
   return NS_OK; // means I am NOT consuming event
 }
-  
+
 ////////////////////////////////////////////////////////////////////////
-nsresult 
-nsMenuBarListener::MouseDown(nsIDOMEvent* aMouseEvent)
+nsresult
+nsMenuBarListener::MouseDown(Event* aMouseEvent)
 {
   // NOTE: MouseDown method listens all phases
 
@@ -390,11 +528,8 @@ nsMenuBarListener::MouseDown(nsIDOMEvent* aMouseEvent)
     mAccessKeyDownCanceled = true;
   }
 
-  uint16_t phase = 0;
-  nsresult rv = aMouseEvent->GetEventPhase(&phase);
-  NS_ENSURE_SUCCESS(rv, rv);
   // Don't do anything at capturing phase, any behavior should be cancelable.
-  if (phase == nsIDOMEvent::CAPTURING_PHASE) {
+  if (aMouseEvent->EventPhase() == dom::Event_Binding::CAPTURING_PHASE) {
     return NS_OK;
   }
 
@@ -405,8 +540,19 @@ nsMenuBarListener::MouseDown(nsIDOMEvent* aMouseEvent)
 }
 
 ////////////////////////////////////////////////////////////////////////
+
 nsresult
-nsMenuBarListener::HandleEvent(nsIDOMEvent* aEvent)
+nsMenuBarListener::Fullscreen(Event* aEvent)
+{
+  if (mMenuBarFrame->IsActive()) {
+    ToggleMenuActiveState();
+  }
+  return NS_OK;
+}
+
+////////////////////////////////////////////////////////////////////////
+nsresult
+nsMenuBarListener::HandleEvent(Event* aEvent)
 {
   // If the menu bar is collapsed, don't do anything.
   if (!mMenuBarFrame->StyleVisibility()->IsVisible()) {
@@ -415,7 +561,7 @@ nsMenuBarListener::HandleEvent(nsIDOMEvent* aEvent)
 
   nsAutoString eventType;
   aEvent->GetType(eventType);
-  
+
   if (eventType.EqualsLiteral("keyup")) {
     return KeyUp(aEvent);
   }
@@ -425,14 +571,22 @@ nsMenuBarListener::HandleEvent(nsIDOMEvent* aEvent)
   if (eventType.EqualsLiteral("keypress")) {
     return KeyPress(aEvent);
   }
+  if (eventType.EqualsLiteral("mozaccesskeynotfound")) {
+    return KeyPress(aEvent);
+  }
   if (eventType.EqualsLiteral("blur")) {
     return Blur(aEvent);
+  }
+  if (eventType.EqualsLiteral("deactivate")) {
+    return OnWindowDeactivated(aEvent);
   }
   if (eventType.EqualsLiteral("mousedown")) {
     return MouseDown(aEvent);
   }
+  if (eventType.EqualsLiteral("MozDOMFullscreen:Entered")) {
+    return Fullscreen(aEvent);
+  }
 
-  NS_ABORT();
-
+  MOZ_ASSERT_UNREACHABLE("Unexpected eventType");
   return NS_OK;
 }

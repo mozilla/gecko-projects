@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Locale;
 
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.R;
 
@@ -29,6 +30,7 @@ import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.WindowManager;
@@ -45,8 +47,6 @@ public class DateTimePicker extends FrameLayout {
     private static final String LOGTAG = "GeckoDateTimePicker";
     private static final int DEFAULT_START_YEAR = 1;
     private static final int DEFAULT_END_YEAR = 9999;
-    // Minimal screen width (in inches) for which we can show the calendar;
-    private static final int SCREEN_SIZE_THRESHOLD = 5;
     private static final char DATE_FORMAT_DAY = 'd';
     private static final char DATE_FORMAT_MONTH = 'M';
     private static final char DATE_FORMAT_YEAR = 'y';
@@ -101,88 +101,51 @@ public class DateTimePicker extends FrameLayout {
         public void onValueChange(NumberPicker picker, int oldVal, int newVal) {
             updateInputState();
             mTempDate.setTimeInMillis(mCurrentDate.getTimeInMillis());
-            final boolean newBehavior = Versions.feature11Plus;
-            if (newBehavior) {
-                if (DEBUG) {
-                    Log.d(LOGTAG, "SDK version > 10, using new behavior");
-                }
+            if (DEBUG) {
+                Log.d(LOGTAG, "SDK version > 10, using new behavior");
+            }
 
-                // The native date picker widget on these SDKs increments
-                // the next field when one field reaches the maximum.
-                if (picker == mDaySpinner && mDayEnabled) {
-                    int maxDayOfMonth = mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH);
-                    int old = mTempDate.get(Calendar.DAY_OF_MONTH);
-                    setTempDate(Calendar.DAY_OF_MONTH, old, newVal, 1, maxDayOfMonth);
-                } else if (picker == mMonthSpinner && mMonthEnabled) {
-                    int old = mTempDate.get(Calendar.MONTH);
-                    setTempDate(Calendar.MONTH, old, newVal, Calendar.JANUARY, Calendar.DECEMBER);
-                } else if (picker == mWeekSpinner) {
-                    int old = mTempDate.get(Calendar.WEEK_OF_YEAR);
-                    int maxWeekOfYear = mTempDate.getActualMaximum(Calendar.WEEK_OF_YEAR);
-                    setTempDate(Calendar.WEEK_OF_YEAR, old, newVal, 0, maxWeekOfYear);
-                } else if (picker == mYearSpinner && mYearEnabled) {
-                    int month = mTempDate.get(Calendar.MONTH);
-                    mTempDate.set(Calendar.YEAR,newVal);
-                    // Changing the year shouldn't change the month. (in case of non-leap year a Feb 29)
-                    // change the day instead;
-                    if (month != mTempDate.get(Calendar.MONTH)) {
-                        mTempDate.set(Calendar.MONTH, month);
-                        mTempDate.set(Calendar.DAY_OF_MONTH,
-                        mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH));
-                    }
-                } else if (picker == mHourSpinner && mHourEnabled) {
-                    if (mIs12HourMode) {
-                        setTempDate(Calendar.HOUR, oldVal, newVal, 1, 12);
-                    } else {
-                        setTempDate(Calendar.HOUR_OF_DAY, oldVal, newVal, 0, 23);
-                    }
-                } else if (picker == mMinuteSpinner && mMinuteEnabled) {
-                    setTempDate(Calendar.MINUTE, oldVal, newVal, 0, 59);
-                } else if (picker == mAMPMSpinner && mHourEnabled) {
-                    mTempDate.set(Calendar.AM_PM,newVal);
-                } else {
-                    throw new IllegalArgumentException();
+            // The native date picker widget on these SDKs increments
+            // the next field when one field reaches the maximum.
+            if (picker == mDaySpinner && mDayEnabled) {
+                int maxDayOfMonth = mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH);
+                int old = mTempDate.get(Calendar.DAY_OF_MONTH);
+                setTempDate(Calendar.DAY_OF_MONTH, old, newVal, 1, maxDayOfMonth);
+            } else if (picker == mMonthSpinner && mMonthEnabled) {
+                int old = mTempDate.get(Calendar.MONTH);
+                setTempDate(Calendar.MONTH, old, newVal, Calendar.JANUARY, Calendar.DECEMBER);
+            } else if (picker == mWeekSpinner) {
+                int old = mTempDate.get(Calendar.WEEK_OF_YEAR);
+                int maxWeekOfYear = mTempDate.getActualMaximum(Calendar.WEEK_OF_YEAR);
+                setTempDate(Calendar.WEEK_OF_YEAR, old, newVal, 0, maxWeekOfYear);
+            } else if (picker == mYearSpinner && mYearEnabled) {
+                int month = mTempDate.get(Calendar.MONTH);
+                mTempDate.set(Calendar.YEAR, newVal);
+                // Changing the year shouldn't change the month. (in case of non-leap year a Feb 29)
+                // change the day instead;
+                if (month != mTempDate.get(Calendar.MONTH)) {
+                    mTempDate.set(Calendar.MONTH, month);
+                    mTempDate.set(Calendar.DAY_OF_MONTH,
+                    mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH));
                 }
+            } else if (picker == mHourSpinner && mHourEnabled) {
+                if (mIs12HourMode) {
+                    setTempDate(Calendar.HOUR, oldVal, newVal, 1, 12);
+                } else {
+                    setTempDate(Calendar.HOUR_OF_DAY, oldVal, newVal, 0, 23);
+                }
+            } else if (picker == mMinuteSpinner && mMinuteEnabled) {
+                setTempDate(Calendar.MINUTE, oldVal, newVal, 0, 59);
+            } else if (picker == mAMPMSpinner && mHourEnabled) {
+                mTempDate.set(Calendar.AM_PM, newVal);
             } else {
-                if (DEBUG) Log.d(LOGTAG,"Sdk version < 10, using old behavior");
-                if (picker == mDaySpinner && mDayEnabled){
-                    mTempDate.set(Calendar.DAY_OF_MONTH, newVal);
-                } else if (picker == mMonthSpinner && mMonthEnabled){
-                    mTempDate.set(Calendar.MONTH, newVal);
-                    if (mTempDate.get(Calendar.MONTH) == newVal+1){
-                        mTempDate.set(Calendar.MONTH, newVal);
-                        mTempDate.set(Calendar.DAY_OF_MONTH,
-                        mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH));
-                    }
-                } else if (picker == mWeekSpinner){
-                    mTempDate.set(Calendar.WEEK_OF_YEAR, newVal);
-                } else if (picker == mYearSpinner && mYearEnabled){
-                    int month = mTempDate.get(Calendar.MONTH);
-                    mTempDate.set(Calendar.YEAR, newVal);
-                    if (month != mTempDate.get(Calendar.MONTH)) {
-                        mTempDate.set(Calendar.MONTH, month);
-                        mTempDate.set(Calendar.DAY_OF_MONTH,
-                        mTempDate.getActualMaximum(Calendar.DAY_OF_MONTH));
-                    }
-                } else if (picker == mHourSpinner && mHourEnabled){
-                    if (mIs12HourMode) {
-                        mTempDate.set(Calendar.HOUR, newVal);
-                    } else {
-                        mTempDate.set(Calendar.HOUR_OF_DAY, newVal);
-                    }
-                } else if (picker == mMinuteSpinner && mMinuteEnabled){
-                    mTempDate.set(Calendar.MINUTE, newVal);
-                } else if (picker == mAMPMSpinner && mHourEnabled) {
-                    mTempDate.set(Calendar.AM_PM, newVal);
-                } else {
-                    throw new IllegalArgumentException();
-                }
+                throw new IllegalArgumentException();
             }
             setDate(mTempDate);
             if (mDayEnabled) {
                 mDaySpinner.setMaxValue(mCurrentDate.getActualMaximum(Calendar.DAY_OF_MONTH));
             }
-            if(mWeekEnabled) {
+            if (mWeekEnabled) {
                 mWeekSpinner.setMaxValue(mCurrentDate.getActualMaximum(Calendar.WEEK_OF_YEAR));
             }
             updateCalendar();
@@ -320,19 +283,20 @@ public class DateTimePicker extends FrameLayout {
         // If we're displaying a date, the screen is wide enough
         // (and if we're using an SDK where the calendar view exists)
         // then display a calendar.
-        if (Versions.feature11Plus &&
-            (mState == PickersState.DATE || mState == PickersState.DATETIME) &&
-            mScreenWidth >= SCREEN_SIZE_THRESHOLD) {
-
-            if (DEBUG) {
-                Log.d(LOGTAG,"SDK > 10 and screen wide enough, displaying calendar");
-            }
-
+        if (mState == PickersState.DATE || mState == PickersState.DATETIME) {
             mCalendar = new CalendarView(context);
             mCalendar.setVisibility(GONE);
 
-            LayoutParams layoutParams = new LayoutParams(250,280);
-            mCalendar.setLayoutParams(layoutParams);
+            // Modify the time of mMaxDate and mMinDate to the end of the date and the beginning of the date. (Bug 1339884)
+            mMaxDate.set(Calendar.HOUR, 23);
+            mMaxDate.set(Calendar.MINUTE, 59);
+            mMaxDate.set(Calendar.SECOND, 59);
+            mMaxDate.set(Calendar.MILLISECOND, 999);
+            mMinDate.set(Calendar.HOUR, 0);
+            mMinDate.set(Calendar.MINUTE, 0);
+            mMinDate.set(Calendar.SECOND, 0);
+            mMinDate.set(Calendar.MILLISECOND, 0);
+
             mCalendar.setFocusable(true);
             mCalendar.setFocusableInTouchMode(true);
             mCalendar.setMaxDate(mMaxDate.getTimeInMillis());
@@ -349,7 +313,17 @@ public class DateTimePicker extends FrameLayout {
                 }
             });
 
-            mPickers.addView(mCalendar);
+            final int height;
+            if (Versions.preLollipopMR1) {
+                // Older versions of CalendarView don't request any height, resulting in
+                // the whole dialog not appearing unless we manually request height.
+                height =  (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 200, getResources().getDisplayMetrics());;
+            } else {
+                height = LayoutParams.WRAP_CONTENT;
+            }
+
+            mPickers.addView(mCalendar, LayoutParams.MATCH_PARENT, height);
+
         } else {
             // If the screen is more wide than high, we are displaying day and
             // time spinners, and if there is no calendar displayed, we should
@@ -387,7 +361,7 @@ public class DateTimePicker extends FrameLayout {
         if (mIs12HourMode) {
             mHourSpinner = setupSpinner(R.id.hour, 1, 12);
             mAMPMSpinnerInput = (EditText) mAMPMSpinner.getChildAt(1);
-            mAMPMSpinner.setDisplayedValues(mShortAMPMs); 
+            mAMPMSpinner.setDisplayedValues(mShortAMPMs);
         } else {
             mHourSpinner = setupSpinner(R.id.hour, 0, 23);
             mAMPMSpinnerInput = null;
@@ -423,7 +397,7 @@ public class DateTimePicker extends FrameLayout {
         return mSpinner;
     }
 
-    public long getTimeInMillis(){
+    public long getTimeInMillis() {
         return mCurrentDate.getTimeInMillis();
     }
 
@@ -451,7 +425,7 @@ public class DateTimePicker extends FrameLayout {
         mDateSpinners.addView(mWeekSpinner);
     }
 
-    void setDate(Calendar calendar){
+    void setDate(Calendar calendar) {
         mCurrentDate = mTempDate;
         if (mCurrentDate.before(mMinDate)) {
             mCurrentDate.setTimeInMillis(mMinDate.getTimeInMillis());
@@ -542,7 +516,7 @@ public class DateTimePicker extends FrameLayout {
     }
 
     void updateCalendar() {
-        if (mCalendarEnabled){
+        if (mCalendarEnabled) {
             mCalendar.setDate(mCurrentDate.getTimeInMillis(), false, false);
         }
     }
@@ -552,12 +526,7 @@ public class DateTimePicker extends FrameLayout {
     }
 
     public void toggleCalendar(boolean shown) {
-        if ((mState != PickersState.DATE && mState != PickersState.DATETIME) ||
-            mScreenWidth < SCREEN_SIZE_THRESHOLD) {
-            if (DEBUG) {
-                Log.d(LOGTAG, "Cannot display calendar on this device, in this state" +
-                              ": screen width :" + mScreenWidth);
-            }
+        if ((mState != PickersState.DATE && mState != PickersState.DATETIME)) {
             return;
         }
 
@@ -633,7 +602,7 @@ public class DateTimePicker extends FrameLayout {
     private void setHourShown(boolean shown) {
         if (shown) {
             mHourSpinner.setVisibility(VISIBLE);
-            mHourEnabled= true;
+            mHourEnabled = true;
         } else {
             mHourSpinner.setVisibility(GONE);
             mAMPMSpinner.setVisibility(GONE);
@@ -646,7 +615,7 @@ public class DateTimePicker extends FrameLayout {
         if (shown) {
             mMinuteSpinner.setVisibility(VISIBLE);
             mTimeSpinners.findViewById(R.id.mincolon).setVisibility(VISIBLE);
-            mMinuteEnabled= true;
+            mMinuteEnabled = true;
         } else {
             mMinuteSpinner.setVisibility(GONE);
             mTimeSpinners.findViewById(R.id.mincolon).setVisibility(GONE);

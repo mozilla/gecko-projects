@@ -12,7 +12,7 @@ function test() {
   var triggers = encodeURIComponent(JSON.stringify({
     "Corrupt XPI": TESTROOT + "corrupt.xpi"
   }));
-  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
@@ -20,13 +20,19 @@ function download_failed(install) {
   is(install.error, AddonManager.ERROR_CORRUPT_FILE, "Install should fail");
 }
 
-function finish_test(count) {
+const finish_test = async function(count) {
   is(count, 0, "No add-ons should have been installed");
   Services.perms.remove(makeURI("http://example.com"), "install");
 
-  var doc = gBrowser.contentDocument;
-  is(doc.getElementById("status").textContent, "-207", "Callback should have seen the failure");
+  const results = await ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
+    return {
+      return: content.document.getElementById("return").textContent,
+      status: content.document.getElementById("status").textContent,
+    };
+  });
+
+  is(results.status, "-207", "Callback should have seen the failure");
 
   gBrowser.removeCurrentTab();
   Harness.finish();
-}
+};

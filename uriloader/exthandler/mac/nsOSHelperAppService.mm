@@ -6,14 +6,15 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "mozilla/net/NeckoCommon.h"
 #include "nsOSHelperAppService.h"
 #include "nsObjCExceptions.h"
 #include "nsISupports.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "nsXPIDLString.h"
 #include "nsIURL.h"
 #include "nsIFile.h"
+#include "nsIHandlerService.h"
 #include "nsILocalFileMac.h"
 #include "nsMimeTypes.h"
 #include "nsIStringBundle.h"
@@ -497,15 +498,17 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
   nsAutoCString mimeType;
   mimeInfoMac->GetMIMEType(mimeType);
   if (*aFound && !mimeType.IsEmpty()) {
-    // If we have a MIME type, make sure its preferred extension is included
-    // in our list.
+    // If we have a MIME type, make sure its extension list is included in our
+    // list.
     NSURLFileTypeMappings *map = [NSURLFileTypeMappings sharedMappings];
     NSString *typeStr = [NSString stringWithCString:mimeType.get() encoding:NSASCIIStringEncoding];
-    NSString *extStr = map ? [map preferredExtensionForMIMEType:typeStr] : NULL;
-    if (extStr) {
-      nsAutoCString preferredExt;
-      preferredExt.Assign((char *)[extStr cStringUsingEncoding:NSASCIIStringEncoding]);
-      mimeInfoMac->AppendExtension(preferredExt);
+    NSArray *extensionsList = map ? [map extensionsForMIMEType:typeStr] : NULL;
+    if (extensionsList) {
+      for (NSString* extension in extensionsList) {
+        nsAutoCString ext;
+        ext.Assign((char *)[extension cStringUsingEncoding:NSASCIIStringEncoding]);
+        mimeInfoMac->AppendExtension(ext);
+      }
     }
 
     CFStringRef cfType = ::CFStringCreateWithCString(NULL, mimeType.get(), kCFStringEncodingUTF8);
@@ -559,10 +562,46 @@ nsOSHelperAppService::GetProtocolHandlerInfoFromOS(const nsACString &aScheme,
     return NS_OK;
   }
 
-  nsAutoString desc;
-  GetApplicationDescription(aScheme, desc);
-  handlerInfo->SetDefaultDescription(desc);
+  // As a workaround for the OS X problem described in bug 1391186, don't
+  // attempt to get/set the application description from the child process.
+  if (!mozilla::net::IsNeckoChild()) {
+    nsAutoString desc;
+    rv = GetApplicationDescription(aScheme, desc);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "GetApplicationDescription failed");
+    handlerInfo->SetDefaultDescription(desc);
+  }
 
   return NS_OK;
 }
 
+/*
+ * Override GetMIMETypeFromOSForExtension() so that we can proxy requests for
+ * the MIME type to the parent when we're executing in the child process. If
+ * we're in the parent process, query the OS directly.
+ */
+bool
+nsOSHelperAppService::GetMIMETypeFromOSForExtension(const nsACString& aExtension,
+                                                    nsACString& aMIMEType)
+{
+  if (XRE_IsParentProcess()) {
+    return nsExternalHelperAppService::GetMIMETypeFromOSForExtension(aExtension,
+                                                                     aMIMEType);
+  }
+
+  nsCOMPtr<nsIHandlerService> handlerSvc =
+    do_GetService(NS_HANDLERSERVICE_CONTRACTID);
+  if (NS_WARN_IF(!handlerSvc)) {
+    return false;
+  }
+
+  nsresult rv = handlerSvc->GetTypeFromExtension(aExtension, aMIMEType);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  if (aMIMEType.IsEmpty()) {
+    return false;
+  }
+
+  return true;
+}

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:set ts=2 sts=2 sw=2 et cin:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +11,7 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/Assertions.h"
 #include "GLConsts.h"
+#include "GLContextCGL.h"
 
 using namespace mozilla;
 // IOSurface signatures
@@ -187,7 +188,7 @@ CFStringRef MacIOSurfaceLib::GetIOConst(const char* symbole) {
 void MacIOSurfaceLib::LoadLibrary() {
   if (isLoaded) {
     return;
-  } 
+  }
   isLoaded = true;
   sIOSurfaceFramework = dlopen(IOSURFACE_FRAMEWORK_PATH,
                             RTLD_LAZY | RTLD_LOCAL);
@@ -277,7 +278,7 @@ void MacIOSurfaceLib::CloseLibrary() {
   sCoreVideoFramework = nullptr;
 }
 
-MacIOSurface::MacIOSurface(const void* aIOSurfacePtr,
+MacIOSurface::MacIOSurface(IOSurfacePtr aIOSurfacePtr,
                            double aContentsScaleFactor, bool aHasAlpha)
   : mIOSurfacePtr(aIOSurfacePtr)
   , mContentsScaleFactor(aContentsScaleFactor)
@@ -321,10 +322,10 @@ already_AddRefed<MacIOSurface> MacIOSurface::CreateIOSurface(int aWidth, int aHe
   ::CFDictionaryAddValue(props, MacIOSurfaceLib::kPropHeight,
                                 cfHeight);
   ::CFRelease(cfHeight);
-  ::CFDictionaryAddValue(props, MacIOSurfaceLib::kPropBytesPerElem, 
+  ::CFDictionaryAddValue(props, MacIOSurfaceLib::kPropBytesPerElem,
                                 cfBytesPerElem);
   ::CFRelease(cfBytesPerElem);
-  ::CFDictionaryAddValue(props, MacIOSurfaceLib::kPropIsGlobal, 
+  ::CFDictionaryAddValue(props, MacIOSurfaceLib::kPropIsGlobal,
                                 kCFBooleanTrue);
 
   IOSurfacePtr surfaceRef = MacIOSurfaceLib::IOSurfaceCreate(props);
@@ -347,7 +348,7 @@ already_AddRefed<MacIOSurface> MacIOSurface::CreateIOSurface(int aWidth, int aHe
 
 already_AddRefed<MacIOSurface> MacIOSurface::LookupSurface(IOSurfaceID aIOSurfaceID,
                                                        double aContentsScaleFactor,
-                                                       bool aHasAlpha) { 
+                                                       bool aHasAlpha) {
   if (!MacIOSurfaceLib::isInit() || aContentsScaleFactor <= 0)
     return nullptr;
 
@@ -367,11 +368,11 @@ already_AddRefed<MacIOSurface> MacIOSurface::LookupSurface(IOSurfaceID aIOSurfac
   return ioSurface.forget();
 }
 
-IOSurfaceID MacIOSurface::GetIOSurfaceID() { 
+IOSurfaceID MacIOSurface::GetIOSurfaceID() {
   return MacIOSurfaceLib::IOSurfaceGetID(mIOSurfacePtr);
 }
 
-void* MacIOSurface::GetBaseAddress() { 
+void* MacIOSurface::GetBaseAddress() {
   return MacIOSurfaceLib::IOSurfaceGetBaseAddress(mIOSurfacePtr);
 }
 
@@ -432,19 +433,25 @@ void MacIOSurface::DecrementUseCount() {
 }
 
 #define READ_ONLY 0x1
-void MacIOSurface::Lock() {
-  MacIOSurfaceLib::IOSurfaceLock(mIOSurfacePtr, READ_ONLY, nullptr);
+void MacIOSurface::Lock(bool aReadOnly) {
+  MacIOSurfaceLib::IOSurfaceLock(mIOSurfacePtr, aReadOnly ? READ_ONLY : 0, nullptr);
 }
 
-void MacIOSurface::Unlock() {
-  MacIOSurfaceLib::IOSurfaceUnlock(mIOSurfacePtr, READ_ONLY, nullptr);
+void MacIOSurface::Unlock(bool aReadOnly) {
+  MacIOSurfaceLib::IOSurfaceUnlock(mIOSurfacePtr, aReadOnly ? READ_ONLY : 0, nullptr);
 }
 
-#include "SourceSurfaceRawData.h"
 using mozilla::gfx::SourceSurface;
-using mozilla::gfx::SourceSurfaceRawData;
 using mozilla::gfx::IntSize;
 using mozilla::gfx::SurfaceFormat;
+
+void
+MacIOSurfaceBufferDeallocator(void* aClosure)
+{
+  MOZ_ASSERT(aClosure);
+
+  delete [] static_cast<unsigned char*>(aClosure);
+}
 
 already_AddRefed<SourceSurface>
 MacIOSurface::GetAsSurface() {
@@ -454,7 +461,8 @@ MacIOSurface::GetAsSurface() {
   size_t ioHeight = GetDevicePixelHeight();
 
   unsigned char* ioData = (unsigned char*)GetBaseAddress();
-  unsigned char* dataCpy = (unsigned char*)malloc(bytesPerRow*ioHeight);
+  auto *dataCpy =
+      new unsigned char[bytesPerRow * ioHeight / sizeof(unsigned char)];
   for (size_t i = 0; i < ioHeight; i++) {
     memcpy(dataCpy + i * bytesPerRow,
            ioData + i * bytesPerRow, ioWidth * 4);
@@ -465,8 +473,13 @@ MacIOSurface::GetAsSurface() {
   SurfaceFormat format = HasAlpha() ? mozilla::gfx::SurfaceFormat::B8G8R8A8 :
                                       mozilla::gfx::SurfaceFormat::B8G8R8X8;
 
-  RefPtr<SourceSurfaceRawData> surf = new SourceSurfaceRawData();
-  surf->InitWrappingData(dataCpy, IntSize(ioWidth, ioHeight), bytesPerRow, format, true);
+  RefPtr<mozilla::gfx::DataSourceSurface> surf =
+      mozilla::gfx::Factory::CreateWrappingDataSourceSurface(dataCpy,
+                                                             bytesPerRow,
+                                                             IntSize(ioWidth, ioHeight),
+                                                             format,
+                                                             &MacIOSurfaceBufferDeallocator,
+                                                             static_cast<void*>(dataCpy));
 
   return surf.forget();
 }
@@ -498,9 +511,25 @@ MacIOSurface::GetReadFormat()
 }
 
 CGLError
-MacIOSurface::CGLTexImageIOSurface2D(CGLContextObj ctx, size_t plane)
+MacIOSurface::CGLTexImageIOSurface2D(CGLContextObj ctx,
+                                     GLenum target, GLenum internalFormat,
+                                     GLsizei width, GLsizei height,
+                                     GLenum format, GLenum type,
+                                     GLuint plane) const
+{
+  return MacIOSurfaceLib::CGLTexImageIOSurface2D(ctx, target, internalFormat, width,
+                                                 height, format, type, mIOSurfacePtr,
+                                                 plane);
+}
+
+CGLError
+MacIOSurface::CGLTexImageIOSurface2D(mozilla::gl::GLContext* aGL,
+                                     CGLContextObj ctx,
+                                     size_t plane,
+                                     mozilla::gfx::SurfaceFormat* aOutReadFormat)
 {
   MOZ_ASSERT(plane >= 0);
+  bool isCompatibilityProfile = aGL->IsCompatibilityProfile();
   OSType pixelFormat = GetPixelFormat();
 
   GLenum internalFormat;
@@ -510,34 +539,59 @@ MacIOSurface::CGLTexImageIOSurface2D(CGLContextObj ctx, size_t plane)
     MOZ_ASSERT(GetPlaneCount() == 2);
     MOZ_ASSERT(plane < 2);
 
+    // The LOCAL_GL_LUMINANCE and LOCAL_GL_LUMINANCE_ALPHA are the deprecated
+    // format. So, use LOCAL_GL_RED and LOCAL_GL_RB if we use core profile.
+    // https://www.khronos.org/opengl/wiki/Image_Format#Legacy_Image_Formats
     if (plane == 0) {
-      internalFormat = format = GL_LUMINANCE;
+      internalFormat = format = (isCompatibilityProfile) ? (LOCAL_GL_LUMINANCE)
+                                                          : (LOCAL_GL_RED);
     } else {
-      internalFormat = format = GL_LUMINANCE_ALPHA;
+      internalFormat = format = (isCompatibilityProfile) ? (LOCAL_GL_LUMINANCE_ALPHA)
+                                                          : (LOCAL_GL_RG);
     }
-    type = GL_UNSIGNED_BYTE;
+    type = LOCAL_GL_UNSIGNED_BYTE;
+    if (aOutReadFormat) {
+      *aOutReadFormat = mozilla::gfx::SurfaceFormat::NV12;
+    }
   } else if (pixelFormat == '2vuy') {
     MOZ_ASSERT(plane == 0);
-
-    internalFormat = GL_RGB;
-    format = LOCAL_GL_YCBCR_422_APPLE;
-    type = GL_UNSIGNED_SHORT_8_8_APPLE;
+    // The YCBCR_422_APPLE ext is only available in compatibility profile. So,
+    // we should use RGB_422_APPLE for core profile. The difference between
+    // YCBCR_422_APPLE and RGB_422_APPLE is that the YCBCR_422_APPLE converts
+    // the YCbCr value to RGB with REC 601 conversion. But the RGB_422_APPLE
+    // doesn't contain color conversion. You should do the color conversion by
+    // yourself for RGB_422_APPLE.
+    //
+    // https://www.khronos.org/registry/OpenGL/extensions/APPLE/APPLE_ycbcr_422.txt
+    // https://www.khronos.org/registry/OpenGL/extensions/APPLE/APPLE_rgb_422.txt
+    if (isCompatibilityProfile) {
+      format = LOCAL_GL_YCBCR_422_APPLE;
+      if (aOutReadFormat) {
+        *aOutReadFormat = mozilla::gfx::SurfaceFormat::R8G8B8X8;
+      }
+    } else {
+      format = LOCAL_GL_RGB_422_APPLE;
+      if (aOutReadFormat) {
+        *aOutReadFormat = mozilla::gfx::SurfaceFormat::YUV422;
+      }
+    }
+    internalFormat = LOCAL_GL_RGB;
+    type = LOCAL_GL_UNSIGNED_SHORT_8_8_APPLE;
   } else  {
     MOZ_ASSERT(plane == 0);
 
-    internalFormat = HasAlpha() ? GL_RGBA : GL_RGB;
-    format = GL_BGRA;
-    type = GL_UNSIGNED_INT_8_8_8_8_REV;
+    internalFormat = HasAlpha() ? LOCAL_GL_RGBA : LOCAL_GL_RGB;
+    format = LOCAL_GL_BGRA;
+    type = LOCAL_GL_UNSIGNED_INT_8_8_8_8_REV;
+    if (aOutReadFormat) {
+      *aOutReadFormat = HasAlpha() ? mozilla::gfx::SurfaceFormat::R8G8B8A8
+                                  : mozilla::gfx::SurfaceFormat::R8G8B8X8;
+    }
   }
-  CGLError temp =  MacIOSurfaceLib::CGLTexImageIOSurface2D(ctx,
-                                                GL_TEXTURE_RECTANGLE_ARB,
-                                                internalFormat,
-                                                GetDevicePixelWidth(plane),
-                                                GetDevicePixelHeight(plane),
-                                                format,
-                                                type,
-                                                mIOSurfacePtr, plane);
-  return temp;
+
+  return CGLTexImageIOSurface2D(ctx, LOCAL_GL_TEXTURE_RECTANGLE_ARB, internalFormat,
+                                GetDevicePixelWidth(plane), GetDevicePixelHeight(plane),
+                                format, type, plane);
 }
 
 static
@@ -584,7 +638,6 @@ already_AddRefed<MacIOSurface> MacIOSurface::IOSurfaceContextGetSurface(CGContex
   return ioSurface.forget();
 }
 
-
 CGContextType GetContextType(CGContextRef ref)
 {
   if (!MacIOSurfaceLib::isInit() || !MacIOSurfaceLib::sCGContextGetTypePtr)
@@ -599,5 +652,3 @@ CGContextType GetContextType(CGContextRef ref)
     return CG_CONTEXT_TYPE_UNKNOWN;
   }
 }
-
-

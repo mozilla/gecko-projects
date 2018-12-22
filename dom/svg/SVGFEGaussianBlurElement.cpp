@@ -19,7 +19,7 @@ namespace dom {
 JSObject*
 SVGFEGaussianBlurElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEGaussianBlurElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEGaussianBlurElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberPairInfo SVGFEGaussianBlurElement::sNumberPairInfo[1] =
@@ -34,7 +34,7 @@ nsSVGElement::StringInfo SVGFEGaussianBlurElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEGaussianBlurElement)
 
@@ -87,7 +87,7 @@ SVGFEGaussianBlurElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance
 
 bool
 SVGFEGaussianBlurElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                    nsIAtom* aAttribute) const
+                                                    nsAtom* aAttribute) const
 {
   return SVGFEGaussianBlurElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,24 +24,24 @@ class HTMLDetailsElement final : public nsGenericHTMLElement
 public:
   using NodeInfo = mozilla::dom::NodeInfo;
 
-  static bool IsDetailsEnabled();
-
   explicit HTMLDetailsElement(already_AddRefed<NodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
   }
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLDetailsElement, details)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLDetailsElement, details)
 
   nsIContent* GetFirstSummary() const;
 
-  nsresult Clone(NodeInfo* aNodeInfo, nsINode** aResult) const override;
+  nsresult Clone(NodeInfo* aNodeInfo, nsINode** aResult,
+                 bool aPreallocateChildren) const override;
 
-  nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+  nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                       int32_t aModType) const override;
 
-  nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                         nsAttrValueOrString* aValue, bool aNotify) override;
+  nsresult BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                         const nsAttrValueOrString* aValue,
+                         bool aNotify) override;
 
   // HTMLDetailsElement WebIDL
   bool Open() const { return GetBoolAttr(nsGkAtoms::open); }
@@ -57,31 +58,15 @@ public:
     rv.SuppressException();
   }
 
+  virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
+
 protected:
   virtual ~HTMLDetailsElement();
 
   JSObject* WrapNode(JSContext* aCx,
                      JS::Handle<JSObject*> aGivenProto) override;
 
-  class ToggleEventDispatcher final : public AsyncEventDispatcher
-  {
-  public:
-    // According to the html spec, a 'toggle' event is a simple event which does
-    // not bubble.
-    explicit ToggleEventDispatcher(nsINode* aTarget)
-      : AsyncEventDispatcher(aTarget, NS_LITERAL_STRING("toggle"), false)
-    {
-    }
-
-    NS_IMETHOD Run() override
-    {
-      auto* details = static_cast<HTMLDetailsElement*>(mTarget.get());
-      details->mToggleEventDispatcher = nullptr;
-      return AsyncEventDispatcher::Run();
-    }
-  };
-
-  RefPtr<ToggleEventDispatcher> mToggleEventDispatcher;
+  RefPtr<AsyncEventDispatcher> mToggleEventDispatcher;
 };
 
 } // namespace dom

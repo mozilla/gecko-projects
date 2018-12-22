@@ -4,18 +4,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["RemoteFinder", "RemoteFinderListener"];
+var EXPORTED_SYMBOLS = ["RemoteFinder", "RemoteFinderListener"];
 
-const { interfaces: Ci, classes: Cc, utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Geometry.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Geometry.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "GetClipboardSearchString",
-  () => Cu.import("resource://gre/modules/Finder.jsm", {}).GetClipboardSearchString
+  () => ChromeUtils.import("resource://gre/modules/Finder.jsm", {}).GetClipboardSearchString
 );
 XPCOMUtils.defineLazyGetter(this, "Rect",
-  () => Cu.import("resource://gre/modules/Geometry.jsm", {}).Rect
+  () => ChromeUtils.import("resource://gre/modules/Geometry.jsm", {}).Rect
 );
 
 function RemoteFinder(browser) {
@@ -26,14 +24,15 @@ function RemoteFinder(browser) {
 }
 
 RemoteFinder.prototype = {
-  swapBrowser: function(aBrowser) {
+  destroy() {},
+
+  swapBrowser(aBrowser) {
     if (this._messageManager) {
       this._messageManager.removeMessageListener("Finder:Result", this);
       this._messageManager.removeMessageListener("Finder:MatchesResult", this);
-      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult",this);
-      this._messageManager.removeMessageListener("Finder:HighlightFinished",this);
-    }
-    else {
+      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult", this);
+      this._messageManager.removeMessageListener("Finder:HighlightFinished", this);
+    } else {
       aBrowser.messageManager.sendAsyncMessage("Finder:Initialize");
     }
 
@@ -49,15 +48,15 @@ RemoteFinder.prototype = {
     this._listeners.clear();
   },
 
-  addResultListener: function (aListener) {
+  addResultListener(aListener) {
     this._listeners.add(aListener);
   },
 
-  removeResultListener: function (aListener) {
+  removeResultListener(aListener) {
     this._listeners.delete(aListener);
   },
 
-  receiveMessage: function (aMessage) {
+  receiveMessage(aMessage) {
     // Only Finder:Result messages have the searchString field.
     let callback;
     let params;
@@ -92,8 +91,9 @@ RemoteFinder.prototype = {
       } catch (e) {
         if (!l[callback]) {
           Cu.reportError(`Missing ${callback} callback on RemoteFinderListener`);
+        } else {
+          Cu.reportError(e);
         }
-        Cu.reportError(e);
       }
     }
   },
@@ -115,39 +115,45 @@ RemoteFinder.prototype = {
                                                   { caseSensitive: aSensitive });
   },
 
-  getInitialSelection: function() {
+  set entireWord(aEntireWord) {
+    this._browser.messageManager.sendAsyncMessage("Finder:EntireWord",
+                                                  { entireWord: aEntireWord });
+  },
+
+  getInitialSelection() {
     this._browser.messageManager.sendAsyncMessage("Finder:GetInitialSelection", {});
   },
 
-  fastFind: function (aSearchString, aLinksOnly, aDrawOutline) {
+  fastFind(aSearchString, aLinksOnly, aDrawOutline) {
     this._browser.messageManager.sendAsyncMessage("Finder:FastFind",
                                                   { searchString: aSearchString,
                                                     linksOnly: aLinksOnly,
                                                     drawOutline: aDrawOutline });
   },
 
-  findAgain: function (aFindBackwards, aLinksOnly, aDrawOutline) {
+  findAgain(aFindBackwards, aLinksOnly, aDrawOutline) {
     this._browser.messageManager.sendAsyncMessage("Finder:FindAgain",
                                                   { findBackwards: aFindBackwards,
                                                     linksOnly: aLinksOnly,
                                                     drawOutline: aDrawOutline });
   },
 
-  highlight: function (aHighlight, aWord) {
+  highlight(aHighlight, aWord, aLinksOnly) {
     this._browser.messageManager.sendAsyncMessage("Finder:Highlight",
                                                   { highlight: aHighlight,
+                                                    linksOnly: aLinksOnly,
                                                     word: aWord });
   },
 
-  enableSelection: function () {
+  enableSelection() {
     this._browser.messageManager.sendAsyncMessage("Finder:EnableSelection");
   },
 
-  removeSelection: function () {
+  removeSelection() {
     this._browser.messageManager.sendAsyncMessage("Finder:RemoveSelection");
   },
 
-  focusContent: function () {
+  focusContent() {
     // Allow Finder listeners to cancel focusing the content.
     for (let l of this._listeners) {
       try {
@@ -163,7 +169,27 @@ RemoteFinder.prototype = {
     this._browser.messageManager.sendAsyncMessage("Finder:FocusContent");
   },
 
-  keyPress: function (aEvent) {
+  onFindbarClose() {
+    this._browser.messageManager.sendAsyncMessage("Finder:FindbarClose");
+  },
+
+  onFindbarOpen() {
+    this._browser.messageManager.sendAsyncMessage("Finder:FindbarOpen");
+  },
+
+  onModalHighlightChange(aUseModalHighlight) {
+    this._browser.messageManager.sendAsyncMessage("Finder:ModalHighlightChange", {
+      useModalHighlight: aUseModalHighlight
+    });
+  },
+
+  onHighlightAllChange(aHighlightAll) {
+    this._browser.messageManager.sendAsyncMessage("Finder:HighlightAllChange", {
+      highlightAll: aHighlightAll
+    });
+  },
+
+  keyPress(aEvent) {
     this._browser.messageManager.sendAsyncMessage("Finder:KeyPress",
                                                   { keyCode: aEvent.keyCode,
                                                     ctrlKey: aEvent.ctrlKey,
@@ -172,16 +198,15 @@ RemoteFinder.prototype = {
                                                     shiftKey: aEvent.shiftKey });
   },
 
-  requestMatchesCount: function (aSearchString, aMatchLimit, aLinksOnly) {
+  requestMatchesCount(aSearchString, aLinksOnly) {
     this._browser.messageManager.sendAsyncMessage("Finder:MatchesCount",
                                                   { searchString: aSearchString,
-                                                    matchLimit: aMatchLimit,
                                                     linksOnly: aLinksOnly });
   }
-}
+};
 
 function RemoteFinderListener(global) {
-  let {Finder} = Cu.import("resource://gre/modules/Finder.jsm", {});
+  let {Finder} = ChromeUtils.import("resource://gre/modules/Finder.jsm", {});
   this._finder = new Finder(global.docShell);
   this._finder.addResultListener(this);
   this._global = global;
@@ -194,33 +219,38 @@ function RemoteFinderListener(global) {
 RemoteFinderListener.prototype = {
   MESSAGES: [
     "Finder:CaseSensitive",
+    "Finder:EntireWord",
     "Finder:FastFind",
     "Finder:FindAgain",
     "Finder:SetSearchStringToSelection",
     "Finder:GetInitialSelection",
     "Finder:Highlight",
+    "Finder:HighlightAllChange",
     "Finder:EnableSelection",
     "Finder:RemoveSelection",
     "Finder:FocusContent",
+    "Finder:FindbarClose",
+    "Finder:FindbarOpen",
     "Finder:KeyPress",
-    "Finder:MatchesCount"
+    "Finder:MatchesCount",
+    "Finder:ModalHighlightChange"
   ],
 
-  onFindResult: function (aData) {
+  onFindResult(aData) {
     this._global.sendAsyncMessage("Finder:Result", aData);
   },
 
   // When the child receives messages with results of requestMatchesCount,
   // it passes them forward to the parent.
-  onMatchesCountResult: function (aData) {
+  onMatchesCountResult(aData) {
     this._global.sendAsyncMessage("Finder:MatchesResult", aData);
   },
 
-  onHighlightFinished: function(aData) {
+  onHighlightFinished(aData) {
     this._global.sendAsyncMessage("Finder:HighlightFinished", aData);
   },
 
-  receiveMessage: function (aMessage) {
+  receiveMessage(aMessage) {
     let data = aMessage.data;
 
     switch (aMessage.name) {
@@ -228,10 +258,14 @@ RemoteFinderListener.prototype = {
         this._finder.caseSensitive = data.caseSensitive;
         break;
 
+      case "Finder:EntireWord":
+        this._finder.entireWord = data.entireWord;
+        break;
+
       case "Finder:SetSearchStringToSelection": {
         let selection = this._finder.setSearchStringToSelection();
         this._global.sendAsyncMessage("Finder:CurrentSelectionResult",
-                                      { selection: selection,
+                                      { selection,
                                         initial: false });
         break;
       }
@@ -239,7 +273,7 @@ RemoteFinderListener.prototype = {
       case "Finder:GetInitialSelection": {
         let selection = this._finder.getActiveSelectionText();
         this._global.sendAsyncMessage("Finder:CurrentSelectionResult",
-                                      { selection: selection,
+                                      { selection,
                                         initial: true });
         break;
       }
@@ -253,7 +287,11 @@ RemoteFinderListener.prototype = {
         break;
 
       case "Finder:Highlight":
-        this._finder.highlight(data.highlight, data.word);
+        this._finder.highlight(data.highlight, data.word, data.linksOnly);
+        break;
+
+      case "Finder:HighlightAllChange":
+        this._finder.onHighlightAllChange(data.highlightAll);
         break;
 
       case "Finder:EnableSelection":
@@ -268,13 +306,34 @@ RemoteFinderListener.prototype = {
         this._finder.focusContent();
         break;
 
+      case "Finder:FindbarClose":
+        this._finder.onFindbarClose();
+        break;
+
+      case "Finder:FindbarOpen":
+        this._finder.onFindbarOpen();
+        break;
+
       case "Finder:KeyPress":
-        this._finder.keyPress(data);
+        var KeyboardEvent = this._finder._getWindow().KeyboardEvent;
+        this._finder.keyPress(new KeyboardEvent("keypress", data));
         break;
 
       case "Finder:MatchesCount":
-        this._finder.requestMatchesCount(data.searchString, data.matchLimit, data.linksOnly);
+        this._finder.requestMatchesCount(data.searchString, data.linksOnly);
+        break;
+
+      case "Finder:ModalHighlightChange":
+        this._finder.onModalHighlightChange(data.useModalHighlight);
         break;
     }
   }
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(RemoteFinder, "_typeAheadLinksOnly",
+  "accessibility.typeaheadfind.linksonly");
+XPCOMUtils.defineLazyPreferenceGetter(RemoteFinder, "_findAsYouType",
+  "accessibility.typeaheadfind");
+XPCOMUtils.defineLazyPreferenceGetter(RemoteFinder, "_manualFAYT",
+  "accessibility.typeaheadfind.manual");
+

@@ -1,43 +1,69 @@
 <!DOCTYPE HTML>
 <html>
 <head>
-  <title>WebExtension idle API test</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
+  <title>WebExtension test</title>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/AddTask.js"></script>
+  <script src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head.js"></script>
-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+  <link rel="stylesheet" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
 
 <script type="text/javascript">
 "use strict";
 
-add_task(function* testIdle() {
+add_task(async function testWithRealIdleService() {
   function background() {
-    browser.idle.queryState(15).then(status => {
-      browser.test.assertEq("active", status, "Expected status");
-      browser.test.notifyPass("idle");
-    },
-    e => {
-      browser.test.fail(`Error: ${e} :: ${e.stack}`);
-      browser.test.notifyFail("idle");
+    browser.test.onMessage.addListener(async (msg, ...args) => {
+      let detectionInterval = args[0];
+      if (msg == "addListener") {
+        let status = await browser.idle.queryState(detectionInterval);
+        browser.test.assertEq("active", status, "Idle status is active");
+        browser.idle.setDetectionInterval(detectionInterval);
+        browser.idle.onStateChanged.addListener(newState => {
+          browser.test.assertEq("idle", newState, "listener fired with the expected state");
+          browser.test.sendMessage("listenerFired");
+        });
+        browser.test.sendMessage("listenerAdded");
+      } else if (msg == "checkState") {
+        let status = await browser.idle.queryState(detectionInterval);
+        browser.test.assertEq("idle", status, "Idle status is idle");
+        browser.test.notifyPass("idle");
+      }
     });
   }
 
   let extension = ExtensionTestUtils.loadExtension({
-    background: `(${background})()`,
-
+    background,
     manifest: {
       permissions: ["idle"],
     },
   });
 
-  yield extension.startup();
+  await extension.startup();
 
-  yield extension.awaitFinish("idle");
+  let chromeScript = loadChromeScript(() => {
+    const {sendAsyncMessage} = this;
+    const idleService = Cc["@mozilla.org/widget/idleservice;1"].getService(Ci.nsIIdleService);
+    let idleTime = idleService.idleTime;
+    sendAsyncMessage("detectionInterval", Math.max(Math.ceil(idleTime / 1000) + 10, 15));
+  });
+  let detectionInterval = await chromeScript.promiseOneMessage("detectionInterval");
+  chromeScript.destroy();
 
-  yield extension.unload();
+  info(`Setting interval to ${detectionInterval}`);
+  extension.sendMessage("addListener", detectionInterval);
+  await extension.awaitMessage("listenerAdded");
+  info("Listener added");
+  await extension.awaitMessage("listenerFired");
+  info("Listener fired");
+  extension.sendMessage("checkState", detectionInterval);
+  await extension.awaitFinish("idle");
+  await extension.unload();
 });
+
 </script>
+
 </body>
+</html>

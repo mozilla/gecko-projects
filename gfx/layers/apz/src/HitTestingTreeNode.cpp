@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,9 +5,9 @@
 #include "HitTestingTreeNode.h"
 
 #include "AsyncPanZoomController.h"                     // for AsyncPanZoomController
+#include "gfxPrefs.h"
 #include "LayersLogging.h"                              // for Stringify
 #include "mozilla/gfx/Point.h"                          // for Point4D
-#include "mozilla/layers/APZThreadUtils.h"              // for AssertOnCompositorThread
 #include "mozilla/layers/APZUtils.h"                    // for CompleteAsyncTransform
 #include "mozilla/layers/AsyncCompositionManager.h"     // for ViewTransform::operator Matrix4x4()
 #include "mozilla/layers/AsyncDragMetrics.h"            // for AsyncDragMetrics
@@ -19,28 +17,32 @@
 namespace mozilla {
 namespace layers {
 
+using gfx::CompositorHitTestInfo;
+
 HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
                                        bool aIsPrimaryHolder,
-                                       uint64_t aLayersId)
+                                       LayersId aLayersId)
   : mApzc(aApzc)
   , mIsPrimaryApzcHolder(aIsPrimaryHolder)
+  , mLockCount(0)
   , mLayersId(aLayersId)
-  , mScrollViewId(FrameMetrics::NULL_SCROLL_ID)
-  , mScrollDir(Layer::NONE)
-  , mScrollSize(0)
+  , mScrollbarAnimationId(0)
+  , mFixedPosTarget(FrameMetrics::NULL_SCROLL_ID)
+  , mIsBackfaceHidden(false)
   , mOverride(EventRegionsOverride::NoOverride)
 {
-if (mIsPrimaryApzcHolder) {
+  if (mIsPrimaryApzcHolder) {
     MOZ_ASSERT(mApzc);
   }
   MOZ_ASSERT(!mApzc || mApzc->GetLayersId() == mLayersId);
 }
 
 void
-HitTestingTreeNode::RecycleWith(AsyncPanZoomController* aApzc,
-                                uint64_t aLayersId)
+HitTestingTreeNode::RecycleWith(const RecursiveMutexAutoLock& aProofOfTreeLock,
+                                AsyncPanZoomController* aApzc,
+                                LayersId aLayersId)
 {
-  MOZ_ASSERT(!mIsPrimaryApzcHolder);
+  MOZ_ASSERT(IsRecyclable(aProofOfTreeLock));
   Destroy(); // clear out tree pointers
   mApzc = aApzc;
   mLayersId = aLayersId;
@@ -49,14 +51,13 @@ HitTestingTreeNode::RecycleWith(AsyncPanZoomController* aApzc,
   // fields.
 }
 
-HitTestingTreeNode::~HitTestingTreeNode()
-{
-}
+HitTestingTreeNode::~HitTestingTreeNode() = default;
 
 void
 HitTestingTreeNode::Destroy()
 {
-  APZThreadUtils::AssertOnCompositorThread();
+  // This runs on the updater thread, it's not worth passing around extra raw
+  // pointers just to assert it.
 
   mPrevSibling = nullptr;
   mLastChild = nullptr;
@@ -68,8 +69,12 @@ HitTestingTreeNode::Destroy()
     }
     mApzc = nullptr;
   }
+}
 
-  mLayersId = 0;
+bool
+HitTestingTreeNode::IsRecyclable(const RecursiveMutexAutoLock& aProofOfTreeLock)
+{
+  return !(IsPrimaryHolder() || (mLockCount > 0));
 }
 
 void
@@ -92,33 +97,69 @@ HitTestingTreeNode::SetLastChild(HitTestingTreeNode* aChild)
 }
 
 void
-HitTestingTreeNode::SetScrollbarData(FrameMetrics::ViewID aScrollViewId, Layer::ScrollDirection aDir, int32_t aScrollSize)
+HitTestingTreeNode::SetScrollbarData(const uint64_t& aScrollbarAnimationId,
+                                     const ScrollbarData& aScrollbarData)
 {
-  mScrollViewId = aScrollViewId;
-  mScrollDir = aDir;
-  mScrollSize = aScrollSize;;
+  mScrollbarAnimationId = aScrollbarAnimationId;
+  mScrollbarData = aScrollbarData;
 }
 
 bool
 HitTestingTreeNode::MatchesScrollDragMetrics(const AsyncDragMetrics& aDragMetrics) const
 {
-  return ((mScrollDir == Layer::HORIZONTAL &&
-           aDragMetrics.mDirection == AsyncDragMetrics::HORIZONTAL) ||
-          (mScrollDir == Layer::VERTICAL &&
-           aDragMetrics.mDirection == AsyncDragMetrics::VERTICAL)) &&
-         mScrollViewId == aDragMetrics.mViewId;
+  return IsScrollThumbNode() &&
+         mScrollbarData.mDirection == aDragMetrics.mDirection &&
+         mScrollbarData.mTargetViewId == aDragMetrics.mViewId;
 }
 
-int32_t
-HitTestingTreeNode::GetScrollSize() const
+bool
+HitTestingTreeNode::IsScrollThumbNode() const
 {
-  return mScrollSize;
+  return mScrollbarData.mScrollbarLayerType == layers::ScrollbarLayerType::Thumb;
 }
 
 bool
 HitTestingTreeNode::IsScrollbarNode() const
 {
-  return (mScrollDir != Layer::NONE);
+  return mScrollbarData.mScrollbarLayerType != layers::ScrollbarLayerType::None;
+}
+
+ScrollDirection
+HitTestingTreeNode::GetScrollbarDirection() const
+{
+  MOZ_ASSERT(IsScrollbarNode());
+  MOZ_ASSERT(mScrollbarData.mDirection.isSome());
+  return *mScrollbarData.mDirection;
+}
+
+FrameMetrics::ViewID
+HitTestingTreeNode::GetScrollTargetId() const
+{
+  return mScrollbarData.mTargetViewId;
+}
+
+const uint64_t&
+HitTestingTreeNode::GetScrollbarAnimationId() const
+{
+  return mScrollbarAnimationId;
+}
+
+const ScrollbarData&
+HitTestingTreeNode::GetScrollbarData() const
+{
+  return mScrollbarData;
+}
+
+void
+HitTestingTreeNode::SetFixedPosData(FrameMetrics::ViewID aFixedPosTarget)
+{
+  mFixedPosTarget = aFixedPosTarget;
+}
+
+FrameMetrics::ViewID
+HitTestingTreeNode::GetFixedPosTarget() const
+{
+  return mFixedPosTarget;
 }
 
 void
@@ -173,6 +214,17 @@ HitTestingTreeNode::GetParent() const
   return mParent;
 }
 
+bool
+HitTestingTreeNode::IsAncestorOf(const HitTestingTreeNode* aOther) const
+{
+  for (const HitTestingTreeNode* cur = aOther; cur; cur = cur->GetParent()) {
+    if (cur == this) {
+      return true;
+    }
+  }
+  return false;
+}
+
 AsyncPanZoomController*
 HitTestingTreeNode::GetApzc() const
 {
@@ -190,26 +242,13 @@ HitTestingTreeNode::GetNearestContainingApzc() const
   return nullptr;
 }
 
-AsyncPanZoomController*
-HitTestingTreeNode::GetNearestContainingApzcWithSameLayersId() const
-{
-  for (const HitTestingTreeNode* n = this;
-       n && n->mLayersId == mLayersId;
-       n = n->GetParent()) {
-    if (n->GetApzc()) {
-      return n->GetApzc();
-    }
-  }
-  return nullptr;
-}
-
 bool
 HitTestingTreeNode::IsPrimaryHolder() const
 {
   return mIsPrimaryApzcHolder;
 }
 
-uint64_t
+LayersId
 HitTestingTreeNode::GetLayersId() const
 {
   return mLayersId;
@@ -217,14 +256,18 @@ HitTestingTreeNode::GetLayersId() const
 
 void
 HitTestingTreeNode::SetHitTestData(const EventRegions& aRegions,
+                                   const LayerIntRegion& aVisibleRegion,
                                    const CSSTransformMatrix& aTransform,
                                    const Maybe<ParentLayerIntRegion>& aClipRegion,
-                                   const EventRegionsOverride& aOverride)
+                                   const EventRegionsOverride& aOverride,
+                                   bool aIsBackfaceHidden)
 {
   mEventRegions = aRegions;
+  mVisibleRegion = aVisibleRegion;
   mTransform = aTransform;
   mClipRegion = aClipRegion;
   mOverride = aOverride;
+  mIsBackfaceHidden = aIsBackfaceHidden;
 }
 
 bool
@@ -235,45 +278,82 @@ HitTestingTreeNode::IsOutsideClip(const ParentLayerPoint& aPoint) const
 }
 
 Maybe<LayerPoint>
-HitTestingTreeNode::Untransform(const ParentLayerPoint& aPoint) const
+HitTestingTreeNode::Untransform(const ParentLayerPoint& aPoint,
+                                const LayerToParentLayerMatrix4x4& aTransform) const
 {
-  // convert into Layer coordinate space
-  LayerToParentLayerMatrix4x4 transform = mTransform *
-      CompleteAsyncTransform(
-        mApzc
-      ? mApzc->GetCurrentAsyncTransformWithOverscroll(AsyncPanZoomController::NORMAL)
-      : AsyncTransformComponentMatrix());
-  return UntransformBy(transform.Inverse(), aPoint);
+  Maybe<ParentLayerToLayerMatrix4x4> inverse = aTransform.MaybeInverse();
+  if (inverse) {
+    return UntransformBy(inverse.ref(), aPoint);
+  }
+  return Nothing();
 }
 
-HitTestResult
-HitTestingTreeNode::HitTest(const ParentLayerPoint& aPoint) const
+CompositorHitTestInfo
+HitTestingTreeNode::HitTest(const LayerPoint& aPoint) const
 {
-  // This should only ever get called if the point is inside the clip region
-  // for this node.
-  MOZ_ASSERT(!IsOutsideClip(aPoint));
+  CompositorHitTestInfo result = CompositorHitTestInfo::eInvisibleToHitTest;
 
   if (mOverride & EventRegionsOverride::ForceEmptyHitRegion) {
-    return HitTestResult::HitNothing;
+    return result;
   }
 
-  // convert into Layer coordinate space
-  Maybe<LayerPoint> pointInLayerPixels = Untransform(aPoint);
-  if (!pointInLayerPixels) {
-    return HitTestResult::HitNothing;
+  auto point = LayerIntPoint::Round(aPoint);
+
+  // If the layer's backface is showing and it's hidden, don't hit it.
+  // This matches the behavior of main-thread hit testing in
+  // nsDisplayTransform::HitTest().
+  if (mIsBackfaceHidden) {
+    return result;
   }
-  LayerIntPoint point = RoundedToInt(pointInLayerPixels.ref());
 
   // test against event regions in Layer coordinate space
   if (!mEventRegions.mHitRegion.Contains(point.x, point.y)) {
-    return HitTestResult::HitNothing;
+    return result;
   }
+
+  result |= CompositorHitTestInfo::eVisibleToHitTest;
+
   if ((mOverride & EventRegionsOverride::ForceDispatchToContent) ||
       mEventRegions.mDispatchToContentHitRegion.Contains(point.x, point.y))
   {
-    return HitTestResult::HitDispatchToContentRegion;
+    result |= CompositorHitTestInfo::eDispatchToContent;
+    if (mEventRegions.mDTCRequiresTargetConfirmation) {
+      result |= CompositorHitTestInfo::eRequiresTargetConfirmation;
+    }
+  } else if (gfxPrefs::TouchActionEnabled()) {
+    if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
+      // set all the touch-action flags as disabled
+      result |= CompositorHitTestInfo::eTouchActionMask;
+    } else {
+      bool panX = mEventRegions.mHorizontalPanRegion.Contains(point.x, point.y);
+      bool panY = mEventRegions.mVerticalPanRegion.Contains(point.x, point.y);
+      if (panX && panY) {
+        // touch-action: pan-x pan-y
+        result |= CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled
+                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled;
+      } else if (panX) {
+        // touch-action: pan-x
+        result |= CompositorHitTestInfo::eTouchActionPanYDisabled
+                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled
+                | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+      } else if (panY) {
+        // touch-action: pan-y
+        result |= CompositorHitTestInfo::eTouchActionPanXDisabled
+                | CompositorHitTestInfo::eTouchActionPinchZoomDisabled
+                | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+      } // else we're in the touch-action: auto or touch-action: manipulation
+        // cases and we'll allow all actions. Technically we shouldn't allow
+        // double-tap zooming in the manipulation case but apparently this has
+        // been broken since the dawn of time.
+    }
   }
-  return HitTestResult::HitLayer;
+
+  // The scrollbar flags are set at the call site in GetAPZCAtPoint, because
+  // those require walking up the tree to see if we are contained inside a
+  // scrollbar or scrollthumb, and we do that there anyway to get the scrollbar
+  // node.
+
+  return result;
 }
 
 EventRegionsOverride
@@ -282,19 +362,34 @@ HitTestingTreeNode::GetEventRegionsOverride() const
   return mOverride;
 }
 
+const CSSTransformMatrix&
+HitTestingTreeNode::GetTransform() const
+{
+  return mTransform;
+}
+
+const LayerIntRegion&
+HitTestingTreeNode::GetVisibleRegion() const
+{
+  return mVisibleRegion;
+}
+
 void
 HitTestingTreeNode::Dump(const char* aPrefix) const
 {
   if (mPrevSibling) {
     mPrevSibling->Dump(aPrefix);
   }
-  printf_stderr("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%sr=(%s) t=(%s) c=(%s)\n",
+  printf_stderr("%sHitTestingTreeNode (%p) APZC (%p) g=(%s) %s%s%sr=(%s) t=(%s) c=(%s)%s%s\n",
     aPrefix, this, mApzc.get(),
-    mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=%" PRIu64, mLayersId).get(),
+    mApzc ? Stringify(mApzc->GetGuid()).c_str() : nsPrintfCString("l=0x%" PRIx64, uint64_t(mLayersId)).get(),
     (mOverride & EventRegionsOverride::ForceDispatchToContent) ? "fdtc " : "",
     (mOverride & EventRegionsOverride::ForceEmptyHitRegion) ? "fehr " : "",
+    (mFixedPosTarget != FrameMetrics::NULL_SCROLL_ID) ? nsPrintfCString("fixed=%" PRIu64 " ", mFixedPosTarget).get() : "",
     Stringify(mEventRegions).c_str(), Stringify(mTransform).c_str(),
-    mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none");
+    mClipRegion ? Stringify(mClipRegion.ref()).c_str() : "none",
+    mScrollbarData.mDirection.isSome() ? " scrollbar" : "",
+    IsScrollThumbNode() ? " scrollthumb" : "");
   if (mLastChild) {
     mLastChild->Dump(nsPrintfCString("%s  ", aPrefix).get());
   }
@@ -310,6 +405,58 @@ HitTestingTreeNode::SetApzcParent(AsyncPanZoomController* aParent)
   } else {
     MOZ_ASSERT(GetApzc()->GetParent() == aParent);
   }
+}
+
+void
+HitTestingTreeNode::Lock(const RecursiveMutexAutoLock& aProofOfTreeLock)
+{
+  mLockCount++;
+}
+
+void
+HitTestingTreeNode::Unlock(const RecursiveMutexAutoLock& aProofOfTreeLock)
+{
+  MOZ_ASSERT(mLockCount > 0);
+  mLockCount--;
+}
+
+HitTestingTreeNodeAutoLock::HitTestingTreeNodeAutoLock()
+  : mTreeMutex(nullptr)
+{
+}
+
+HitTestingTreeNodeAutoLock::~HitTestingTreeNodeAutoLock()
+{
+  Clear();
+}
+
+void
+HitTestingTreeNodeAutoLock::Initialize(const RecursiveMutexAutoLock& aProofOfTreeLock,
+                                       already_AddRefed<HitTestingTreeNode> aNode,
+                                       RecursiveMutex& aTreeMutex)
+{
+  MOZ_ASSERT(!mNode);
+
+  mNode = aNode;
+  mTreeMutex = &aTreeMutex;
+
+  mNode->Lock(aProofOfTreeLock);
+}
+
+void
+HitTestingTreeNodeAutoLock::Clear()
+{
+  if (!mNode) {
+    return;
+  }
+  MOZ_ASSERT(mTreeMutex);
+
+  { // scope lock
+    RecursiveMutexAutoLock lock(*mTreeMutex);
+    mNode->Unlock(lock);
+  }
+  mNode = nullptr;
+  mTreeMutex = nullptr;
 }
 
 } // namespace layers

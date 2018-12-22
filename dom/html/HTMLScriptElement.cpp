@@ -19,6 +19,7 @@
 #include "nsIArray.h"
 #include "nsTArray.h"
 #include "nsDOMJSUtils.h"
+#include "nsIScriptError.h"
 #include "nsISupportsImpl.h"
 #include "mozilla/dom/HTMLScriptElement.h"
 #include "mozilla/dom/HTMLScriptElementBinding.h"
@@ -31,13 +32,13 @@ namespace dom {
 JSObject*
 HTMLScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLScriptElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLScriptElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 HTMLScriptElement::HTMLScriptElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                                      FromParser aFromParser)
   : nsGenericHTMLElement(aNodeInfo)
-  , nsScriptElement(aFromParser)
+  , ScriptElement(aFromParser)
 {
   AddMutationObserver(this);
 }
@@ -47,7 +48,6 @@ HTMLScriptElement::~HTMLScriptElement()
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(HTMLScriptElement, nsGenericHTMLElement,
-                            nsIDOMHTMLScriptElement,
                             nsIScriptLoaderObserver,
                             nsIScriptElement,
                             nsIMutationObserver)
@@ -62,7 +62,7 @@ HTMLScriptElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (GetCrossShadowCurrentDoc()) {
+  if (GetComposedDoc()) {
     MaybeProcessScript();
   }
 
@@ -71,8 +71,9 @@ HTMLScriptElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 
 bool
 HTMLScriptElement::ParseAttribute(int32_t aNamespaceID,
-                                  nsIAtom* aAttribute,
+                                  nsAtom* aAttribute,
                                   const nsAString& aValue,
+                                  nsIPrincipal* aMaybeScriptedPrincipal,
                                   nsAttrValue& aResult)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -88,11 +89,12 @@ HTMLScriptElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 nsresult
-HTMLScriptElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
+HTMLScriptElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const
 {
   *aResult = nullptr;
 
@@ -100,7 +102,7 @@ HTMLScriptElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) c
   HTMLScriptElement* it = new HTMLScriptElement(ni, NOT_FROM_PARSER);
 
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
-  nsresult rv = const_cast<HTMLScriptElement*>(this)->CopyInnerTo(it);
+  nsresult rv = const_cast<HTMLScriptElement*>(this)->CopyInnerTo(it, aPreallocateChildren);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // The clone should be marked evaluated if we are.
@@ -113,147 +115,81 @@ HTMLScriptElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) c
   return NS_OK;
 }
 
-NS_IMETHODIMP
-HTMLScriptElement::GetText(nsAString& aValue)
-{
-  if (!nsContentUtils::GetNodeTextContent(this, false, aValue, fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLScriptElement::SetText(const nsAString& aValue)
-{
-  ErrorResult rv;
-  SetText(aValue, rv);
-  return rv.StealNSResult();
-}
-
-void
-HTMLScriptElement::SetText(const nsAString& aValue, ErrorResult& rv)
-{
-  rv = nsContentUtils::SetNodeTextContent(this, aValue, true);
-}
-
-
-NS_IMPL_STRING_ATTR(HTMLScriptElement, Charset, charset)
-NS_IMPL_BOOL_ATTR(HTMLScriptElement, Defer, defer)
-NS_IMPL_URI_ATTR(HTMLScriptElement, Src, src)
-NS_IMPL_STRING_ATTR(HTMLScriptElement, Type, type)
-NS_IMPL_STRING_ATTR(HTMLScriptElement, HtmlFor, _for)
-NS_IMPL_STRING_ATTR(HTMLScriptElement, Event, event)
-
-void
-HTMLScriptElement::SetCharset(const nsAString& aCharset, ErrorResult& rv)
-{
-  SetHTMLAttr(nsGkAtoms::charset, aCharset, rv);
-}
-
-void
-HTMLScriptElement::SetDefer(bool aDefer, ErrorResult& rv)
-{
-  SetHTMLBoolAttr(nsGkAtoms::defer, aDefer, rv);
-}
-
-bool
-HTMLScriptElement::Defer()
-{
-  return GetBoolAttr(nsGkAtoms::defer);
-}
-
-void
-HTMLScriptElement::SetSrc(const nsAString& aSrc, ErrorResult& rv)
-{
-  rv = SetAttrHelper(nsGkAtoms::src, aSrc);
-}
-
-void
-HTMLScriptElement::SetType(const nsAString& aType, ErrorResult& rv)
-{
-  SetHTMLAttr(nsGkAtoms::type, aType, rv);
-}
-
-void
-HTMLScriptElement::SetHtmlFor(const nsAString& aHtmlFor, ErrorResult& rv)
-{
-  SetHTMLAttr(nsGkAtoms::_for, aHtmlFor, rv);
-}
-
-void
-HTMLScriptElement::SetEvent(const nsAString& aEvent, ErrorResult& rv)
-{
-  SetHTMLAttr(nsGkAtoms::event, aEvent, rv);
-}
-
 nsresult
-HTMLScriptElement::GetAsync(bool* aValue)
-{
-  *aValue = Async();
-  return NS_OK;
-}
-
-bool
-HTMLScriptElement::Async()
-{
-  return mForceAsync || GetBoolAttr(nsGkAtoms::async);
-}
-
-nsresult
-HTMLScriptElement::SetAsync(bool aValue)
-{
-  ErrorResult rv;
-  SetAsync(aValue, rv);
-  return rv.StealNSResult();
-}
-
-void
-HTMLScriptElement::SetAsync(bool aValue, ErrorResult& rv)
-{
-  mForceAsync = false;
-  SetHTMLBoolAttr(nsGkAtoms::async, aValue, rv);
-}
-
-nsresult
-HTMLScriptElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify)
+HTMLScriptElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
+                                bool aNotify)
 {
   if (nsGkAtoms::async == aName && kNameSpaceID_None == aNamespaceID) {
     mForceAsync = false;
   }
-  return nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName, aValue,
+  if (nsGkAtoms::src == aName && kNameSpaceID_None == aNamespaceID) {
+    mSrcTriggeringPrincipal = nsContentUtils::GetAttrTriggeringPrincipal(
+        this, aValue ? aValue->GetStringValue() : EmptyString(),
+        aMaybeScriptedPrincipal);
+  }
+  return nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName,
+                                            aValue, aOldValue,
+                                            aMaybeScriptedPrincipal,
                                             aNotify);
 }
 
-NS_IMETHODIMP
-HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML)
+void
+HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError)
 {
   if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML, fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+    aError.ReportOOM();
   }
-  return NS_OK;
 }
 
 void
 HTMLScriptElement::SetInnerHTML(const nsAString& aInnerHTML,
+                                nsIPrincipal* aScriptedPrincipal,
                                 ErrorResult& aError)
 {
   aError = nsContentUtils::SetNodeTextContent(this, aInnerHTML, true);
 }
 
+void
+HTMLScriptElement::GetText(nsAString& aValue, ErrorResult& aRv)
+{
+  if (!nsContentUtils::GetNodeTextContent(this, false, aValue, fallible)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+  }
+}
+
+void
+HTMLScriptElement::SetText(const nsAString& aValue, ErrorResult& aRv)
+{
+  aRv = nsContentUtils::SetNodeTextContent(this, aValue, true);
+}
+
 // variation of this code in nsSVGScriptElement - check if changes
 // need to be transfered when modifying
 
-void
-HTMLScriptElement::GetScriptType(nsAString& type)
+bool
+HTMLScriptElement::GetScriptType(nsAString& aType)
 {
-  GetType(type);
+  nsAutoString type;
+  if (!GetAttr(kNameSpaceID_None, nsGkAtoms::type, type)) {
+    return false;
+  }
+
+  // ASCII whitespace https://infra.spec.whatwg.org/#ascii-whitespace:
+  // U+0009 TAB, U+000A LF, U+000C FF, U+000D CR, or U+0020 SPACE.
+  static const char kASCIIWhitespace[] = "\t\n\f\r ";
+  type.Trim(kASCIIWhitespace);
+
+  aType.Assign(type);
+  return true;
 }
 
 void
 HTMLScriptElement::GetScriptText(nsAString& text)
 {
-  GetText(text);
+  GetText(text, IgnoreErrors());
 }
 
 void
@@ -263,28 +199,59 @@ HTMLScriptElement::GetScriptCharset(nsAString& charset)
 }
 
 void
-HTMLScriptElement::FreezeUriAsyncDefer()
+HTMLScriptElement::FreezeExecutionAttrs(nsIDocument* aOwnerDoc)
 {
   if (mFrozen) {
     return;
   }
 
+  MOZ_ASSERT(!mIsModule && !mAsync && !mDefer && !mExternal);
+
+  // Determine whether this is a classic script or a module script.
+  nsAutoString type;
+  GetScriptType(type);
+  mIsModule = aOwnerDoc->ModuleScriptsEnabled() &&
+              !type.IsEmpty() && type.LowerCaseEqualsASCII("module");
+
   // variation of this code in nsSVGScriptElement - check if changes
-  // need to be transfered when modifying
-  if (HasAttr(kNameSpaceID_None, nsGkAtoms::src)) {
-    nsAutoString src;
-    GetSrc(src);
-    NS_NewURI(getter_AddRefs(mUri), src);
+  // need to be transfered when modifying.  Note that we don't use GetSrc here
+  // because it will return the base URL when the attr value is "".
+  nsAutoString src;
+  if (GetAttr(kNameSpaceID_None, nsGkAtoms::src, src)) {
+    // Empty src should be treated as invalid URL.
+    if (!src.IsEmpty()) {
+      nsCOMPtr<nsIURI> baseURI = GetBaseURI();
+      nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(mUri),
+                                                src, OwnerDoc(), baseURI);
+
+      if (!mUri) {
+        const char16_t* params[] = { u"src", src.get() };
+
+        nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+          NS_LITERAL_CSTRING("HTML"), OwnerDoc(),
+          nsContentUtils::eDOM_PROPERTIES, "ScriptSourceInvalidUri",
+          params, ArrayLength(params), nullptr,
+          EmptyString(), GetScriptLineNumber());
+      }
+    } else {
+      const char16_t* params[] = { u"src" };
+
+      nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+        NS_LITERAL_CSTRING("HTML"), OwnerDoc(),
+        nsContentUtils::eDOM_PROPERTIES, "ScriptSourceEmpty",
+        params, ArrayLength(params), nullptr,
+        EmptyString(), GetScriptLineNumber());
+    }
+
     // At this point mUri will be null for invalid URLs.
     mExternal = true;
-
-    bool defer, async;
-    GetAsync(&async);
-    GetDefer(&defer);
-
-    mDefer = !async && defer;
-    mAsync = async;
   }
+
+  bool async = (mExternal || mIsModule) && Async();
+  bool defer = mExternal && Defer();
+
+  mDefer = !async && defer;
+  mAsync = async;
 
   mFrozen = true;
 }

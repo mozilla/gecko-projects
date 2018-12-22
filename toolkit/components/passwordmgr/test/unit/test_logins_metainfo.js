@@ -10,8 +10,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
@@ -27,7 +26,7 @@ var gLooksLikeUUIDRegex = /^\{\w{8}-\w{4}-\w{4}-\w{4}-\w{12}\}$/;
 function retrieveLoginMatching(aLoginInfo)
 {
   let logins = Services.logins.findLogins({}, aLoginInfo.hostname, "", "");
-  do_check_eq(logins.length, 1);
+  Assert.equal(logins.length, 1);
   return logins[0].QueryInterface(Ci.nsILoginMetaInfo);
 }
 
@@ -37,17 +36,17 @@ function retrieveLoginMatching(aLoginInfo)
  */
 function assertMetaInfoEqual(aActual, aExpected)
 {
-  do_check_neq(aActual, aExpected);
+  Assert.notEqual(aActual, aExpected);
 
   // Check the nsILoginInfo properties.
-  do_check_true(aActual.equals(aExpected));
+  Assert.ok(aActual.equals(aExpected));
 
   // Check the nsILoginMetaInfo properties.
-  do_check_eq(aActual.guid, aExpected.guid);
-  do_check_eq(aActual.timeCreated, aExpected.timeCreated);
-  do_check_eq(aActual.timeLastUsed, aExpected.timeLastUsed);
-  do_check_eq(aActual.timePasswordChanged, aExpected.timePasswordChanged);
-  do_check_eq(aActual.timesUsed, aExpected.timesUsed);
+  Assert.equal(aActual.guid, aExpected.guid);
+  Assert.equal(aActual.timeCreated, aExpected.timeCreated);
+  Assert.equal(aActual.timeLastUsed, aExpected.timeLastUsed);
+  Assert.equal(aActual.timePasswordChanged, aExpected.timePasswordChanged);
+  Assert.equal(aActual.timesUsed, aExpected.timesUsed);
 }
 
 /**
@@ -65,8 +64,7 @@ var gLoginMetaInfo1;
 var gLoginMetaInfo2;
 var gLoginMetaInfo3;
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 /**
  * Prepare the test objects that will be used by the following tests.
@@ -99,20 +97,20 @@ add_task(function test_addLogin_metainfo()
   Services.logins.addLogin(gLoginInfo1);
 
   // The object provided to addLogin should not have been modified.
-  do_check_eq(gLoginInfo1.guid, null);
-  do_check_eq(gLoginInfo1.timeCreated, 0);
-  do_check_eq(gLoginInfo1.timeLastUsed, 0);
-  do_check_eq(gLoginInfo1.timePasswordChanged, 0);
-  do_check_eq(gLoginInfo1.timesUsed, 0);
+  Assert.equal(gLoginInfo1.guid, null);
+  Assert.equal(gLoginInfo1.timeCreated, 0);
+  Assert.equal(gLoginInfo1.timeLastUsed, 0);
+  Assert.equal(gLoginInfo1.timePasswordChanged, 0);
+  Assert.equal(gLoginInfo1.timesUsed, 0);
 
   // A login with valid metadata should have been stored.
   gLoginMetaInfo1 = retrieveLoginMatching(gLoginInfo1);
-  do_check_true(gLooksLikeUUIDRegex.test(gLoginMetaInfo1.guid));
+  Assert.ok(gLooksLikeUUIDRegex.test(gLoginMetaInfo1.guid));
   let creationTime = gLoginMetaInfo1.timeCreated;
   LoginTestUtils.assertTimeIsAboutNow(creationTime);
-  do_check_eq(gLoginMetaInfo1.timeLastUsed, creationTime);
-  do_check_eq(gLoginMetaInfo1.timePasswordChanged, creationTime);
-  do_check_eq(gLoginMetaInfo1.timesUsed, 1);
+  Assert.equal(gLoginMetaInfo1.timeLastUsed, creationTime);
+  Assert.equal(gLoginMetaInfo1.timePasswordChanged, creationTime);
+  Assert.equal(gLoginMetaInfo1.timesUsed, 1);
 
   // Add a login without metadata to the database.
   let originalLogin = gLoginInfo2.clone().QueryInterface(Ci.nsILoginMetaInfo);
@@ -184,11 +182,11 @@ add_task(function test_modifyLogin_nsIProperyBag_metainfo()
   }));
 
   gLoginMetaInfo1 = retrieveLoginMatching(gLoginInfo1);
-  do_check_eq(gLoginMetaInfo1.guid, newUUIDValue);
-  do_check_eq(gLoginMetaInfo1.timeCreated, newTimeMs);
-  do_check_eq(gLoginMetaInfo1.timeLastUsed, newTimeMs + 2);
-  do_check_eq(gLoginMetaInfo1.timePasswordChanged, newTimeMs + 1);
-  do_check_eq(gLoginMetaInfo1.timesUsed, 2);
+  Assert.equal(gLoginMetaInfo1.guid, newUUIDValue);
+  Assert.equal(gLoginMetaInfo1.timeCreated, newTimeMs);
+  Assert.equal(gLoginMetaInfo1.timeLastUsed, newTimeMs + 2);
+  Assert.equal(gLoginMetaInfo1.timePasswordChanged, newTimeMs + 1);
+  Assert.equal(gLoginMetaInfo1.timesUsed, 2);
 
   // Check that timePasswordChanged is updated when changing the password.
   let originalLogin = gLoginInfo2.clone().QueryInterface(Ci.nsILoginMetaInfo);
@@ -198,9 +196,9 @@ add_task(function test_modifyLogin_nsIProperyBag_metainfo()
   gLoginInfo2.password = "new password";
 
   gLoginMetaInfo2 = retrieveLoginMatching(gLoginInfo2);
-  do_check_eq(gLoginMetaInfo2.password, gLoginInfo2.password);
-  do_check_eq(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
-  do_check_eq(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
+  Assert.equal(gLoginMetaInfo2.password, gLoginInfo2.password);
+  Assert.equal(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
+  Assert.equal(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
   LoginTestUtils.assertTimeIsAboutNow(gLoginMetaInfo2.timePasswordChanged);
 
   // Check that timePasswordChanged is not set to the current time when changing
@@ -212,10 +210,10 @@ add_task(function test_modifyLogin_nsIProperyBag_metainfo()
   gLoginInfo2.password = "other password";
 
   gLoginMetaInfo2 = retrieveLoginMatching(gLoginInfo2);
-  do_check_eq(gLoginMetaInfo2.password, gLoginInfo2.password);
-  do_check_eq(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
-  do_check_eq(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
-  do_check_eq(gLoginMetaInfo2.timePasswordChanged, newTimeMs);
+  Assert.equal(gLoginMetaInfo2.password, gLoginInfo2.password);
+  Assert.equal(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
+  Assert.equal(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
+  Assert.equal(gLoginMetaInfo2.timePasswordChanged, newTimeMs);
 
   // Check the special timesUsedIncrement property.
   Services.logins.modifyLogin(gLoginInfo2, newPropertyBag({
@@ -223,10 +221,10 @@ add_task(function test_modifyLogin_nsIProperyBag_metainfo()
   }));
 
   gLoginMetaInfo2 = retrieveLoginMatching(gLoginInfo2);
-  do_check_eq(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
-  do_check_eq(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
-  do_check_eq(gLoginMetaInfo2.timePasswordChanged, newTimeMs);
-  do_check_eq(gLoginMetaInfo2.timesUsed, 4);
+  Assert.equal(gLoginMetaInfo2.timeCreated, originalLogin.timeCreated);
+  Assert.equal(gLoginMetaInfo2.timeLastUsed, originalLogin.timeLastUsed);
+  Assert.equal(gLoginMetaInfo2.timePasswordChanged, newTimeMs);
+  Assert.equal(gLoginMetaInfo2.timesUsed, 4);
 });
 
 /**
@@ -249,7 +247,7 @@ add_task(function test_searchLogins_metainfo()
   let logins = Services.logins.searchLogins({}, newPropertyBag({
     guid: gLoginMetaInfo1.guid,
   }));
-  do_check_eq(logins.length, 1);
+  Assert.equal(logins.length, 1);
   let foundLogin = logins[0].QueryInterface(Ci.nsILoginMetaInfo);
   assertMetaInfoEqual(foundLogin, gLoginMetaInfo1);
 
@@ -257,7 +255,7 @@ add_task(function test_searchLogins_metainfo()
   logins = Services.logins.searchLogins({}, newPropertyBag({
     timePasswordChanged: gLoginMetaInfo2.timePasswordChanged,
   }));
-  do_check_eq(logins.length, 1);
+  Assert.equal(logins.length, 1);
   foundLogin = logins[0].QueryInterface(Ci.nsILoginMetaInfo);
   assertMetaInfoEqual(foundLogin, gLoginMetaInfo2);
 
@@ -266,7 +264,7 @@ add_task(function test_searchLogins_metainfo()
     guid: gLoginMetaInfo3.guid,
     timePasswordChanged: gLoginMetaInfo3.timePasswordChanged,
   }));
-  do_check_eq(logins.length, 1);
+  Assert.equal(logins.length, 1);
   foundLogin = logins[0].QueryInterface(Ci.nsILoginMetaInfo);
   assertMetaInfoEqual(foundLogin, gLoginMetaInfo3);
 });
@@ -275,9 +273,9 @@ add_task(function test_searchLogins_metainfo()
  * Tests that the default nsILoginManagerStorage module attached to the Login
  * Manager service is able to save and reload nsILoginMetaInfo properties.
  */
-add_task(function* test_storage_metainfo()
+add_task(async function test_storage_metainfo()
 {
-  yield* LoginTestUtils.reloadData();
+  await LoginTestUtils.reloadData();
   LoginTestUtils.checkLogins([gLoginInfo1, gLoginInfo2, gLoginInfo3]);
 
   assertMetaInfoEqual(retrieveLoginMatching(gLoginInfo1), gLoginMetaInfo1);

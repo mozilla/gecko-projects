@@ -5,23 +5,24 @@
 
 // Tests the Filter Editor Widget's add button
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
-
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
-const STRINGS_URI = "chrome://devtools/locale/filterwidget.properties";
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const STRINGS_URI = "devtools/client/locales/filterwidget.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = CHROME_URL_ROOT + "doc_filter-editor-01.html";
 
-  const container = doc.querySelector("#container");
-  let widget = new CSSFilterEditorWidget(container, "none");
+add_task(async function() {
+  const [,, doc] = await createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
+
+  const container = doc.querySelector("#filter-container");
+  const widget = new CSSFilterEditorWidget(container, "none", cssIsValid);
 
   const select = widget.el.querySelector("select"),
-        add = widget.el.querySelector("#add-filter");
+    add = widget.el.querySelector("#add-filter");
 
   const TEST_DATA = [
     {
@@ -53,7 +54,7 @@ add_task(function*() {
 
   info("Test adding new filters with different units");
 
-  for (let [index, filter] of TEST_DATA.entries()) {
+  for (const [index, filter] of TEST_DATA.entries()) {
     select.value = filter.name;
     add.click();
 
@@ -61,7 +62,7 @@ add_task(function*() {
       is(widget.getValueAt(index), `0${filter.unit}`,
          `Should add ${filter.unit} to ${filter.type} filters`);
     } else if (filter.placeholder) {
-      let i = index + 1;
+      const i = index + 1;
       const input = widget.el.querySelector(`.filter:nth-child(${i}) input`);
       is(input.placeholder, filter.placeholder,
          "Should set the appropriate placeholder for string-type filters");

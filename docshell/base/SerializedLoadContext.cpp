@@ -13,11 +13,17 @@
 namespace IPC {
 
 SerializedLoadContext::SerializedLoadContext(nsILoadContext* aLoadContext)
+  : mIsContent(false)
+  , mUseRemoteTabs(false)
+  , mUseTrackingProtection(false)
 {
   Init(aLoadContext);
 }
 
 SerializedLoadContext::SerializedLoadContext(nsIChannel* aChannel)
+  : mIsContent(false)
+  , mUseRemoteTabs(false)
+  , mUseTrackingProtection(false)
 {
   if (!aChannel) {
     Init(nullptr);
@@ -38,13 +44,16 @@ SerializedLoadContext::SerializedLoadContext(nsIChannel* aChannel)
         NS_SUCCEEDED(pbChannel->IsPrivateModeOverriden(&isPrivate,
                                                        &isOverriden)) &&
         isOverriden) {
-      mUsePrivateBrowsing = isPrivate;
       mIsPrivateBitValid = true;
     }
+    mOriginAttributes.SyncAttributesWithPrivateBrowsing(isPrivate);
   }
 }
 
 SerializedLoadContext::SerializedLoadContext(nsIWebSocketChannel* aChannel)
+  : mIsContent(false)
+  , mUseRemoteTabs(false)
+  , mUseTrackingProtection(false)
 {
   nsCOMPtr<nsILoadContext> loadContext;
   if (aChannel) {
@@ -60,19 +69,17 @@ SerializedLoadContext::Init(nsILoadContext* aLoadContext)
     mIsNotNull = true;
     mIsPrivateBitValid = true;
     aLoadContext->GetIsContent(&mIsContent);
-    aLoadContext->GetUsePrivateBrowsing(&mUsePrivateBrowsing);
     aLoadContext->GetUseRemoteTabs(&mUseRemoteTabs);
-    if (!aLoadContext->GetOriginAttributes(mOriginAttributes)) {
-      NS_WARNING("GetOriginAttributes failed");
-    }
+    aLoadContext->GetUseTrackingProtection(&mUseTrackingProtection);
+    aLoadContext->GetOriginAttributes(mOriginAttributes);
   } else {
     mIsNotNull = false;
     mIsPrivateBitValid = false;
     // none of below values really matter when mIsNotNull == false:
     // we won't be GetInterfaced to nsILoadContext
     mIsContent = true;
-    mUsePrivateBrowsing = false;
     mUseRemoteTabs = false;
+    mUseTrackingProtection = false;
   }
 }
 

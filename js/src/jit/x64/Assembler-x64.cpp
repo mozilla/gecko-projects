@@ -31,7 +31,7 @@ ABIArgGenerator::next(MIRType type)
     JS_STATIC_ASSERT(NumIntArgRegs == NumFloatArgRegs);
     if (regIndex_ == NumIntArgRegs) {
         if (IsSimdType(type)) {
-            // On Win64, >64 bit args need to be passed by reference, but asm.js
+            // On Win64, >64 bit args need to be passed by reference, but wasm
             // doesn't allow passing SIMD values to FFIs. The only way to reach
             // here is asm to asm calls, so we can break the ABI here.
             stackOffset_ = AlignBytes(stackOffset_, SimdMemoryAlignment);
@@ -44,21 +44,25 @@ ABIArgGenerator::next(MIRType type)
         return current_;
     }
     switch (type) {
-      case MIRType_Int32:
-      case MIRType_Int64:
-      case MIRType_Pointer:
+      case MIRType::Int32:
+      case MIRType::Int64:
+      case MIRType::Pointer:
         current_ = ABIArg(IntArgRegs[regIndex_++]);
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         current_ = ABIArg(FloatArgRegs[regIndex_++].asSingle());
         break;
-      case MIRType_Double:
+      case MIRType::Double:
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
-      case MIRType_Bool32x4:
-      case MIRType_Int32x4:
-      case MIRType_Float32x4:
-        // On Win64, >64 bit args need to be passed by reference, but asm.js
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
+      case MIRType::Int32x4:
+      case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
+        // On Win64, >64 bit args need to be passed by reference, but wasm
         // doesn't allow passing SIMD values to FFIs. The only way to reach
         // here is asm to asm calls, so we can break the ABI here.
         current_ = ABIArg(FloatArgRegs[regIndex_++].asSimd128());
@@ -69,9 +73,9 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 #else
     switch (type) {
-      case MIRType_Int32:
-      case MIRType_Int64:
-      case MIRType_Pointer:
+      case MIRType::Int32:
+      case MIRType::Int64:
+      case MIRType::Pointer:
         if (intRegIndex_ == NumIntArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uint64_t);
@@ -79,21 +83,25 @@ ABIArgGenerator::next(MIRType type)
         }
         current_ = ABIArg(IntArgRegs[intRegIndex_++]);
         break;
-      case MIRType_Double:
-      case MIRType_Float32:
+      case MIRType::Double:
+      case MIRType::Float32:
         if (floatRegIndex_ == NumFloatArgRegs) {
             current_ = ABIArg(stackOffset_);
             stackOffset_ += sizeof(uint64_t);
             break;
         }
-        if (type == MIRType_Float32)
+        if (type == MIRType::Float32)
             current_ = ABIArg(FloatArgRegs[floatRegIndex_++].asSingle());
         else
             current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
-      case MIRType_Bool32x4:
-      case MIRType_Int32x4:
-      case MIRType_Float32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
+      case MIRType::Int32x4:
+      case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
         if (floatRegIndex_ == NumFloatArgRegs) {
             stackOffset_ = AlignBytes(stackOffset_, SimdMemoryAlignment);
             current_ = ABIArg(stackOffset_);
@@ -108,13 +116,6 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 #endif
 }
-
-// Avoid r11, which is the MacroAssembler's ScratchReg.
-const Register ABIArgGenerator::NonArgReturnReg0 = jit::r10;
-const Register ABIArgGenerator::NonArgReturnReg1 = jit::r12;
-const Register ABIArgGenerator::NonVolatileReg = jit::r13;
-const Register ABIArgGenerator::NonArg_VolatileReg = jit::rax;
-const Register ABIArgGenerator::NonReturn_VolatileReg0 = jit::rcx;
 
 void
 Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)
@@ -171,18 +172,25 @@ Assembler::PatchableJumpAddress(JitCode* code, size_t index)
 
 /* static */
 void
-Assembler::PatchJumpEntry(uint8_t* entry, uint8_t* target, ReprotectCode reprotect)
+Assembler::PatchJumpEntry(uint8_t* entry, uint8_t* target)
 {
     uint8_t** index = (uint8_t**) (entry + SizeOfExtendedJump - sizeof(void*));
-    MaybeAutoWritableJitCode awjc(index, sizeof(void*), reprotect);
     *index = target;
 }
 
 void
 Assembler::finish()
 {
-    if (!jumps_.length() || oom())
+    if (oom())
         return;
+
+    if (!jumps_.length()) {
+        // Since we may be folowed by non-executable data, eagerly insert an
+        // undefined instruction byte to prevent processors from decoding
+        // gibberish into their pipelines. See Intel performance guides.
+        masm.ud2();
+        return;
+    }
 
     // Emit the jump table.
     masm.haltingAlign(SizeOfJumpTableEntry);
@@ -213,7 +221,7 @@ Assembler::finish()
 }
 
 void
-Assembler::executableCopy(uint8_t* buffer)
+Assembler::executableCopy(uint8_t* buffer, bool flushICache)
 {
     AssemblerX86Shared::executableCopy(buffer);
 
@@ -254,7 +262,9 @@ class RelocationIterator
 
   public:
     explicit RelocationIterator(CompactBufferReader& reader)
-      : reader_(reader)
+      : reader_(reader),
+        offset_(0),
+        extOffset_(0)
     {
         tableStart_ = reader_.readFixedUint32_t();
     }

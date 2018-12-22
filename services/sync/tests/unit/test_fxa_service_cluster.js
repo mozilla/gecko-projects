@@ -1,12 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-sync/service.js");
-Cu.import("resource://services-sync/util.js");
-Cu.import("resource://testing-common/services/sync/fxa_utils.js");
-Cu.import("resource://testing-common/services/sync/utils.js");
+ChromeUtils.import("resource://services-sync/service.js");
+ChromeUtils.import("resource://services-sync/util.js");
+ChromeUtils.import("resource://testing-common/services/sync/fxa_utils.js");
 
-add_task(function* test_findCluster() {
+add_task(async function test_findCluster() {
   _("Test FxA _findCluster()");
 
   _("_findCluster() throws on 500 errors.");
@@ -16,13 +15,8 @@ add_task(function* test_findCluster() {
     body: "",
   });
 
-  yield Service.identity.initializeWithCurrentIdentity();
-  yield Assert.rejects(Service.identity.whenReadyToAuthenticate.promise,
-                       "should reject due to 500");
-
-  Assert.throws(function() {
-    Service._clusterManager._findCluster();
-  });
+  await Assert.rejects(Service.identity._findCluster(),
+    /TokenServerClientServerError/);
 
   _("_findCluster() returns null on authentication errors.");
   initializeIdentityWithTokenServerResponse({
@@ -31,11 +25,7 @@ add_task(function* test_findCluster() {
     body: "{}",
   });
 
-  yield Service.identity.initializeWithCurrentIdentity();
-  yield Assert.rejects(Service.identity.whenReadyToAuthenticate.promise,
-                       "should reject due to 401");
-
-  cluster = Service._clusterManager._findCluster();
+  let cluster = await Service.identity._findCluster();
   Assert.strictEqual(cluster, null);
 
   _("_findCluster() works with correct tokenserver response.");
@@ -53,16 +43,9 @@ add_task(function* test_findCluster() {
       })
   });
 
-  yield Service.identity.initializeWithCurrentIdentity();
-  yield Service.identity.whenReadyToAuthenticate.promise;
-  cluster = Service._clusterManager._findCluster();
+  cluster = await Service.identity._findCluster();
   // The cluster manager ensures a trailing "/"
   Assert.strictEqual(cluster, endpoint + "/");
 
   Svc.Prefs.resetBranch("");
 });
-
-function run_test() {
-  initTestLogging();
-  run_next_test();
-}

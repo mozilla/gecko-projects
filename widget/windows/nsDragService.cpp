@@ -11,6 +11,7 @@
 // shellapi.h is needed to build with WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
 
+#include "mozilla/RefPtr.h"
 #include "nsDragService.h"
 #include "nsITransferable.h"
 #include "nsDataObj.h"
@@ -19,14 +20,13 @@
 #include "nsNativeDragTarget.h"
 #include "nsNativeDragSource.h"
 #include "nsClipboard.h"
-#include "nsISupportsArray.h"
 #include "nsIDocument.h"
 #include "nsDataObjCollection.h"
 
-#include "nsAutoPtr.h"
-
+#include "nsArrayUtils.h"
 #include "nsString.h"
 #include "nsEscape.h"
+#include "nsIScreenManager.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIURL.h"
 #include "nsCWebBrowserPersist.h"
@@ -34,16 +34,18 @@
 #include "nsCRT.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsUnicharUtils.h"
-#include "gfxContext.h"
 #include "nsRect.h"
 #include "nsMathUtils.h"
 #include "WinUtils.h"
+#include "KeyboardLayout.h"
+#include "gfxContext.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/gfx/Tools.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
+using namespace mozilla::widget;
 
 //-------------------------------------------------------------------------
 //
@@ -66,7 +68,7 @@ nsDragService::~nsDragService()
 }
 
 bool
-nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
+nsDragService::CreateDragImage(nsINode *aDOMNode,
                                nsIScriptableRegion *aRegion,
                                SHDRAGIMAGE *psdi)
 {
@@ -74,20 +76,18 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
     return false;
 
   memset(psdi, 0, sizeof(SHDRAGIMAGE));
-  if (!aDOMNode) 
+  if (!aDOMNode)
     return false;
 
   // Prepare the drag image
-  nsIntRect dragRect;
+  LayoutDeviceIntRect dragRect;
   RefPtr<SourceSurface> surface;
   nsPresContext* pc;
-  DrawDrag(aDOMNode, aRegion,
-           mScreenX, mScreenY,
-           &dragRect, &surface, &pc);
+  DrawDrag(aDOMNode, aRegion, mScreenPosition, &dragRect, &surface, &pc);
   if (!surface)
     return false;
 
-  uint32_t bmWidth = dragRect.width, bmHeight = dragRect.height;
+  uint32_t bmWidth = dragRect.Width(), bmHeight = dragRect.Height();
 
   if (bmWidth == 0 || bmHeight == 0)
     return false;
@@ -138,7 +138,7 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
   HDC hdcSrc = CreateCompatibleDC(nullptr);
   void *lpBits = nullptr;
   if (hdcSrc) {
-    psdi->hbmpDragImage = 
+    psdi->hbmpDragImage =
     ::CreateDIBSection(hdcSrc, (BITMAPINFO*)&bmih, DIB_RGB_COLORS,
                        (void**)&lpBits, nullptr, 0);
     if (psdi->hbmpDragImage && lpBits) {
@@ -150,16 +150,10 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
     psdi->sizeDragImage.cx = bmWidth;
     psdi->sizeDragImage.cy = bmHeight;
 
-    // Mouse position in center
-    if (mScreenX == -1 || mScreenY == -1) {
-      psdi->ptOffset.x = (uint32_t)((float)bmWidth/2.0f);
-      psdi->ptOffset.y = (uint32_t)((float)bmHeight/2.0f);
-    } else {
-      int32_t sx = mScreenX, sy = mScreenY;
-      ConvertToUnscaledDevPixels(pc, &sx, &sy);
-      psdi->ptOffset.x = sx - dragRect.x;
-      psdi->ptOffset.y = sy - dragRect.y;
-    }
+    LayoutDeviceIntPoint screenPoint =
+      ConvertToUnscaledDevPixels(pc, mScreenPosition);
+    psdi->ptOffset.x = screenPoint.x - dragRect.X();
+    psdi->ptOffset.y = screenPoint.y - dragRect.Y();
 
     DeleteDC(hdcSrc);
   }
@@ -171,7 +165,7 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
 
 //-------------------------------------------------------------------------
 nsresult
-nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
+nsDragService::InvokeDragSessionImpl(nsIArray* anArrayTransferables,
                                      nsIScriptableRegion* aRegion,
                                      uint32_t aActionType)
 {
@@ -184,7 +178,7 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
   }
 
   uint32_t numItemsToDrag = 0;
-  nsresult rv = anArrayTransferables->Count(&numItemsToDrag);
+  nsresult rv = anArrayTransferables->GetLength(&numItemsToDrag);
   if (!numItemsToDrag)
     return NS_ERROR_FAILURE;
 
@@ -202,12 +196,12 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
       return NS_ERROR_OUT_OF_MEMORY;
     itemToDrag = dataObjCollection;
     for (uint32_t i=0; i<numItemsToDrag; ++i) {
-      nsCOMPtr<nsISupports> supports;
-      anArrayTransferables->GetElementAt(i, getter_AddRefs(supports));
-      nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
+      nsCOMPtr<nsITransferable> trans =
+          do_QueryElementAt(anArrayTransferables, i);
       if (trans) {
-        // set the requestingNode on the transferable
-        trans->SetRequestingNode(mSourceNode);
+        // set the requestingPrincipal on the transferable
+        trans->SetRequestingPrincipal(mSourceNode->NodePrincipal());
+        trans->SetContentPolicyType(mContentPolicyType);
         RefPtr<IDataObject> dataObj;
         rv = nsClipboard::CreateNativeDataObject(trans,
                                                  getter_AddRefs(dataObj), uri);
@@ -221,12 +215,12 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
     }
   } // if dragging multiple items
   else {
-    nsCOMPtr<nsISupports> supports;
-    anArrayTransferables->GetElementAt(0, getter_AddRefs(supports));
-    nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
+    nsCOMPtr<nsITransferable> trans =
+        do_QueryElementAt(anArrayTransferables, 0);
     if (trans) {
-      // set the requestingNode on the transferable
-      trans->SetRequestingNode(mSourceNode);
+      // set the requestingPrincipal on the transferable
+      trans->SetRequestingPrincipal(mSourceNode->NodePrincipal());
+      trans->SetContentPolicyType(mContentPolicyType);
       rv = nsClipboard::CreateNativeDataObject(trans,
                                                getter_AddRefs(itemToDrag),
                                                uri);
@@ -249,6 +243,40 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
 
   // Kick off the native drag session
   return StartInvokingDragSession(itemToDrag, aActionType);
+}
+
+static bool
+LayoutDevicePointToCSSPoint(const LayoutDevicePoint& aDevPos,
+                            CSSPoint& aCSSPos)
+{
+  nsCOMPtr<nsIScreenManager> screenMgr =
+    do_GetService("@mozilla.org/gfx/screenmanager;1");
+  if (!screenMgr) {
+    return false;
+  }
+
+  nsCOMPtr<nsIScreen> screen;
+  screenMgr->ScreenForRect(NSToIntRound(aDevPos.x), NSToIntRound(aDevPos.y),
+                           1, 1, getter_AddRefs(screen));
+  if (!screen) {
+    return false;
+  }
+
+  int32_t w,h; // unused
+  LayoutDeviceIntPoint screenOriginDev;
+  screen->GetRect(&screenOriginDev.x, &screenOriginDev.y, &w, &h);
+
+  double scale;
+  screen->GetDefaultCSSScaleFactor(&scale);
+  LayoutDeviceToCSSScale devToCSSScale =
+    CSSToLayoutDeviceScale(scale).Inverse();
+
+  // Desktop pixels and CSS pixels share the same screen origin.
+  CSSIntPoint screenOriginCSS;
+  screen->GetRectDisplayPix(&screenOriginCSS.x, &screenOriginCSS.y, &w, &h);
+
+  aCSSPos = (aDevPos - screenOriginDev) * devToCSSScale + screenOriginCSS;
+  return true;
 }
 
 //-------------------------------------------------------------------------
@@ -289,14 +317,14 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
                                          getter_AddRefs(pAsyncOp)))) {
     pAsyncOp->SetAsyncMode(VARIANT_TRUE);
   } else {
-    NS_NOTREACHED("When did our data object stop being async");
+    MOZ_ASSERT_UNREACHABLE("When did our data object stop being async");
   }
 
   // Call the native D&D method
   HRESULT res = ::DoDragDrop(aDataObj, nativeDragSrc, effects, &winDropRes);
 
   // In  cases where the drop operation completed outside the application, update
-  // the source node's nsIDOMDataTransfer dropEffect value so it is up to date.  
+  // the source node's DataTransfer dropEffect value so it is up to date.
   if (!mSentLocalDropEvent) {
     uint32_t dropResult;
     // Order is important, since multiple flags can be returned.
@@ -308,9 +336,9 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
         dropResult = DRAGDROP_ACTION_MOVE;
     else
         dropResult = DRAGDROP_ACTION_NONE;
-    
+
     if (mDataTransfer) {
-      if (res == DRAGDROP_S_DROP) // Success 
+      if (res == DRAGDROP_S_DROP) // Success
         mDataTransfer->SetDropEffectInt(dropResult);
       else
         mDataTransfer->SetDropEffectInt(DRAGDROP_ACTION_NONE);
@@ -325,13 +353,24 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   // Note that we must convert this from device pixels back to Windows logical
   // pixels (bug 818927).
   DWORD pos = ::GetMessagePos();
-  POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
-  HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-  double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
-  nsIntPoint logPos(NSToIntRound(GET_X_LPARAM(pos) / dpiScale),
-                    NSToIntRound(GET_Y_LPARAM(pos) / dpiScale));
-  SetDragEndPoint(logPos);
-  EndDragSession(true);
+  CSSPoint cssPos;
+  if (!LayoutDevicePointToCSSPoint(LayoutDevicePoint(GET_X_LPARAM(pos),
+                                                     GET_Y_LPARAM(pos)),
+                                   cssPos)) {
+    // fallback to the simple scaling
+    POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
+    HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+    double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
+    cssPos.x = GET_X_LPARAM(pos) / dpiScale;
+    cssPos.y = GET_Y_LPARAM(pos) / dpiScale;
+  }
+  // We have to abuse SetDragEndPoint to pass CSS pixels because
+  // Event::GetScreenCoords will not convert pixels for dragend events
+  // until bug 1224754 is fixed.
+  SetDragEndPoint(LayoutDeviceIntPoint(NSToIntRound(cssPos.x),
+                                       NSToIntRound(cssPos.y)));
+  ModifierKeyState modifierKeyState;
+  EndDragSession(true, modifierKeyState.GetModifiers());
 
   mDoingDrag = false;
 
@@ -372,7 +411,7 @@ nsDragService::GetNumDropItems(uint32_t * aNumItems)
     }
     else {
       // If the count cannot be determined just return 0.
-      // This can happen if we have collection data of type 
+      // This can happen if we have collection data of type
       // MULTI_MIME ("Mozilla/IDataObjectCollectionFormat") on the clipboard
       // from another process but we can't obtain an IID_IDataObjCollection
       // from this process.
@@ -587,7 +626,7 @@ nsDragService::IsCollectionObject(IDataObject* inDataObj)
 // w/out crashing when we're still holding onto their data
 //
 NS_IMETHODIMP
-nsDragService::EndDragSession(bool aDoneDrag)
+nsDragService::EndDragSession(bool aDoneDrag, uint32_t aKeyModifiers)
 {
   // Bug 100180: If we've got mouse events captured, make sure we release it -
   // that way, if we happen to call EndDragSession before diving into a nested
@@ -596,8 +635,34 @@ nsDragService::EndDragSession(bool aDoneDrag)
     ::ReleaseCapture();
   }
 
-  nsBaseDragService::EndDragSession(aDoneDrag);
+  nsBaseDragService::EndDragSession(aDoneDrag, aKeyModifiers);
   NS_IF_RELEASE(mDataObject);
 
   return NS_OK;
 }
+
+NS_IMETHODIMP
+nsDragService::UpdateDragImage(nsINode* aImage, int32_t aImageX, int32_t aImageY)
+{
+  if (!mDataObject) {
+    return NS_OK;
+  }
+
+  nsBaseDragService::UpdateDragImage(aImage, aImageX, aImageY);
+
+  IDragSourceHelper *pdsh;
+  if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr,
+                                 CLSCTX_INPROC_SERVER,
+                                 IID_IDragSourceHelper, (void**)&pdsh))) {
+    SHDRAGIMAGE sdi;
+    if (CreateDragImage(mSourceNode, nullptr, &sdi)) {
+      nsNativeDragTarget::DragImageChanged();
+      if (FAILED(pdsh->InitializeFromBitmap(&sdi, mDataObject)))
+        DeleteObject(sdi.hbmpDragImage);
+    }
+    pdsh->Release();
+  }
+
+  return NS_OK;
+}
+

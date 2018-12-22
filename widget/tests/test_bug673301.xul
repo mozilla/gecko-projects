@@ -5,7 +5,6 @@
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-<script type="application/javascript" src="chrome://mochikit/content/MochiKit/packed.js"/>
 <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
 
 <body  xmlns="http://www.w3.org/1999/xhtml">
@@ -15,7 +14,6 @@
 
 <script type="application/javascript">
 function getLoadContext() {
-  const Ci = Components.interfaces;
   return window.QueryInterface(Ci.nsIInterfaceRequestor)
                .getInterface(Ci.nsIWebNavigation)
                .QueryInterface(Ci.nsILoadContext);
@@ -32,6 +30,8 @@ transferable.addDataFlavor("text/unicode");
 transferable.setTransferData("text/unicode", document, 4);
 
 clipboard.setData(transferable, null, Components.interfaces.nsIClipboard.kGlobalClipboard);
+
+transferable.setTransferData("text/unicode", null, 0);
 
 SimpleTest.ok(true, "Didn't crash setting non-text data for text/unicode type");
 </script>

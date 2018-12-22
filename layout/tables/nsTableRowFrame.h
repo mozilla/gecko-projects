@@ -8,29 +8,31 @@
 #include "mozilla/Attributes.h"
 #include "nscore.h"
 #include "nsContainerFrame.h"
-#include "nsTablePainter.h"
 #include "nsTableRowGroupFrame.h"
 #include "mozilla/WritingModes.h"
 
 class  nsTableCellFrame;
-struct nsTableCellReflowState;
+namespace mozilla {
+struct TableCellReflowInput;
+} // namespace mozilla
 
 /**
- * nsTableRowFrame is the frame that maps table rows 
+ * nsTableRowFrame is the frame that maps table rows
  * (HTML tag TR). This class cannot be reused
- * outside of an nsTableRowGroupFrame.  It assumes that its parent is an nsTableRowGroupFrame,  
+ * outside of an nsTableRowGroupFrame.  It assumes that its parent is an nsTableRowGroupFrame,
  * and its children are nsTableCellFrames.
- * 
+ *
  * @see nsTableFrame
  * @see nsTableRowGroupFrame
  * @see nsTableCellFrame
  */
 class nsTableRowFrame : public nsContainerFrame
 {
+  using TableCellReflowInput = mozilla::TableCellReflowInput;
+
 public:
-  NS_DECL_QUERYFRAME_TARGET(nsTableRowFrame)
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsTableRowFrame)
 
   virtual ~nsTableRowFrame();
 
@@ -38,11 +40,11 @@ public:
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
 
-  /** @see nsIFrame::DidSetStyleContext */
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
-  
+  /** @see nsIFrame::DidSetComputedStyle */
+  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+
   virtual void AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList) override;
   virtual void InsertFrames(ChildListID     aListID,
@@ -57,12 +59,12 @@ public:
     * @return           the frame that was created
     */
   friend nsTableRowFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell,
-                                              nsStyleContext* aContext);
+                                              ComputedStyle* aStyle);
 
   nsTableRowGroupFrame* GetTableRowGroupFrame() const
   {
     nsIFrame* parent = GetParent();
-    MOZ_ASSERT(parent && parent->GetType() == nsGkAtoms::tableRowGroupFrame);
+    MOZ_ASSERT(parent && parent->IsTableRowGroupFrame());
     return static_cast<nsTableRowGroupFrame*>(parent);
   }
 
@@ -76,18 +78,19 @@ public:
   virtual nsMargin GetUsedPadding() const override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
-  nsTableCellFrame* GetFirstCell() ;
+  // Implemented in nsTableCellFrame.h, because it needs to know about the
+  // nsTableCellFrame class, but we can't include nsTableCellFrame.h here.
+  inline nsTableCellFrame* GetFirstCell() const;
 
   /** calls Reflow for all of its child cells.
     * Cells with rowspan=1 are all set to the same height and stacked horizontally.
     * <P> Cells are not split unless absolutely necessary.
-    * <P> Cells are resized in nsTableFrame::BalanceColumnWidths 
+    * <P> Cells are resized in nsTableFrame::BalanceColumnWidths
     * and nsTableFrame::ShrinkWrapChildren
     *
-    * @param aDesiredSize width set to width of the sum of the cells, height set to 
+    * @param aDesiredSize width set to width of the sum of the cells, height set to
     *                     height of cells with rowspan=1.
     *
     * @see nsIFrame::Reflow
@@ -95,26 +98,16 @@ public:
     * @see nsTableFrame::ShrinkWrapChildren
     */
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   void DidResize();
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::tableRowFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
-  virtual mozilla::WritingMode GetWritingMode() const override
-    { return GetTableFrame()->GetWritingMode(); }
- 
   void UpdateBSize(nscoord           aBSize,
                    nscoord           aAscent,
                    nscoord           aDescent,
@@ -123,14 +116,14 @@ public:
 
   void ResetBSize(nscoord aRowStyleBSize);
 
-  // calculate the bsize, considering content bsize of the 
+  // calculate the bsize, considering content bsize of the
   // cells and the style bsize of the row and cells, excluding pct bsizes
-  nscoord CalcBSize(const nsHTMLReflowState& aReflowState);
+  nscoord CalcBSize(const ReflowInput& aReflowInput);
 
   // Support for cells with 'vertical-align: baseline'.
 
   /**
-   * returns the max-ascent amongst all the cells that have 
+   * returns the max-ascent amongst all the cells that have
    * 'vertical-align: baseline', *including* cells with rowspans.
    * returns 0 if we don't have any cell with 'vertical-align: baseline'
    */
@@ -139,16 +132,22 @@ public:
   /* return the row ascent
    */
   nscoord GetRowBaseline(mozilla::WritingMode aWritingMode);
- 
+
   /** returns the ordinal position of this row in its table */
   virtual int32_t GetRowIndex() const;
 
   /** set this row's starting row index */
   void SetRowIndex (int aRowIndex);
 
+  // See nsTableFrame.h
+  int32_t GetAdjustmentForStoredIndex(int32_t aStoredIndex) const;
+
+  // See nsTableFrame.h
+  void AddDeletedRowIndex();
+
   /** used by row group frame code */
   nscoord ReflowCellFrame(nsPresContext*           aPresContext,
-                          const nsHTMLReflowState& aReflowState,
+                          const ReflowInput& aReflowInput,
                           bool                     aIsTopOfPage,
                           nsTableCellFrame*        aCellFrame,
                           nscoord                  aAvailableBSize,
@@ -217,7 +216,7 @@ public:
   void SetBStartBCBorderWidth(BCPixelSize aWidth) { mBStartBorderWidth = aWidth; }
   void SetBEndBCBorderWidth(BCPixelSize aWidth) { mBEndBorderWidth = aWidth; }
   mozilla::LogicalMargin GetBCBorderWidth(mozilla::WritingMode aWM);
-                             
+
   /**
    * Gets inner border widths before collapsing with cell borders
    * Caller must get block-end border from next row or from table
@@ -243,8 +242,8 @@ public:
     return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
 
-  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
-  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
+  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
+  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
 
 #ifdef ACCESSIBILITY
@@ -256,18 +255,18 @@ protected:
   /** protected constructor.
     * @see NewFrame
     */
-  explicit nsTableRowFrame(nsStyleContext *aContext);
+  explicit nsTableRowFrame(ComputedStyle* aStyle, ClassID aID = kClassID);
 
-  void InitChildReflowState(nsPresContext&              aPresContext,
+  void InitChildReflowInput(nsPresContext&              aPresContext,
                             const mozilla::LogicalSize& aAvailSize,
                             bool                        aBorderCollapse,
-                            nsTableCellReflowState&     aReflowState);
-  
-  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
+                            TableCellReflowInput&     aReflowInput);
+
+  virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
   // row-specific methods
 
-  nscoord ComputeCellXOffset(const nsHTMLReflowState& aState,
+  nscoord ComputeCellXOffset(const ReflowInput& aState,
                              nsIFrame*                aKidFrame,
                              const nsMargin&          aKidMargin) const;
   /**
@@ -275,8 +274,8 @@ protected:
    * only reflow dirty cells.
    */
   void ReflowChildren(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsTableFrame&            aTableFrame,
                       nsReflowStatus&          aStatus);
 
@@ -285,7 +284,7 @@ private:
     unsigned mRowIndex:29;
     unsigned mHasFixedBSize:1; // set if the dominating style bsize on the row or any cell is pixel based
     unsigned mHasPctBSize:1;   // set if the dominating style bsize on the row or any cell is pct based
-    unsigned mFirstInserted:1; // if true, then it was the bstart-most newly inserted row 
+    unsigned mFirstInserted:1; // if true, then it was the bstart-most newly inserted row
   } mBits;
 
   // the desired bsize based on the content of the tallest cell in the row
@@ -318,13 +317,34 @@ private:
 
 };
 
+inline int32_t
+nsTableRowFrame::GetAdjustmentForStoredIndex(int32_t aStoredIndex) const
+{
+  nsTableRowGroupFrame* parentFrame = GetTableRowGroupFrame();
+  return parentFrame->GetAdjustmentForStoredIndex(aStoredIndex);
+}
+
+inline void nsTableRowFrame::AddDeletedRowIndex()
+{
+  nsTableRowGroupFrame* parentFrame = GetTableRowGroupFrame();
+  parentFrame->AddDeletedRowIndex(int32_t(mBits.mRowIndex));
+}
+
 inline int32_t nsTableRowFrame::GetRowIndex() const
 {
-  return int32_t(mBits.mRowIndex);
+  int32_t storedRowIndex = int32_t(mBits.mRowIndex);
+  int32_t rowIndexAdjustment = GetAdjustmentForStoredIndex(storedRowIndex);
+  return (storedRowIndex - rowIndexAdjustment);
 }
 
 inline void nsTableRowFrame::SetRowIndex (int aRowIndex)
 {
+  // Note: Setting the index of a row (as in the case of adding new rows) should
+  // be preceded by a call to nsTableFrame::RecalculateRowIndices()
+  // so as to correctly clear mDeletedRowIndexRanges.
+  MOZ_ASSERT(GetTableRowGroupFrame()->
+               GetTableFrame()->IsDeletedRowIndexRangesEmpty(),
+             "mDeletedRowIndexRanges should be empty here!");
   mBits.mRowIndex = aRowIndex;
 }
 
@@ -406,21 +426,22 @@ inline void nsTableRowFrame::SetHasUnpaginatedBSize(bool aValue)
 inline mozilla::LogicalMargin
 nsTableRowFrame::GetBCBorderWidth(mozilla::WritingMode aWM)
 {
+  nsPresContext* presContext = PresContext();
   return mozilla::LogicalMargin(
-    aWM, nsPresContext::CSSPixelsToAppUnits(mBStartBorderWidth), 0,
-    nsPresContext::CSSPixelsToAppUnits(mBEndBorderWidth), 0);
+    aWM, presContext->DevPixelsToAppUnits(mBStartBorderWidth), 0,
+    presContext->DevPixelsToAppUnits(mBEndBorderWidth), 0);
 }
 
 inline void
 nsTableRowFrame::GetContinuousBCBorderWidth(mozilla::WritingMode aWM,
                                             mozilla::LogicalMargin& aBorder)
 {
-  int32_t aPixelsToTwips = nsPresContext::AppUnitsPerCSSPixel();
-  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(aPixelsToTwips,
+  int32_t d2a = PresContext()->AppUnitsPerDevPixel();
+  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(d2a,
                                                  mIStartContBorderWidth);
-  aBorder.BStart(aWM) = BC_BORDER_END_HALF_COORD(aPixelsToTwips,
+  aBorder.BStart(aWM) = BC_BORDER_END_HALF_COORD(d2a,
                                                  mBStartContBorderWidth);
-  aBorder.IStart(aWM) = BC_BORDER_END_HALF_COORD(aPixelsToTwips,
+  aBorder.IStart(aWM) = BC_BORDER_END_HALF_COORD(d2a,
                                                  mIEndContBorderWidth);
 }
 

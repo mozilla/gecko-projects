@@ -8,9 +8,7 @@
 interface nsISimpleEnumerator;
 interface nsIRequestObserver;
 interface nsIInterfaceRequestor;
-interface nsISchedulingContext;
-
-typedef unsigned long nsLoadFlags;
+interface nsIRequestContext;
 
 /**
  * A load group maintains a collection of nsIRequest objects.
@@ -83,7 +81,7 @@ interface nsILoadGroup : nsIRequest
      * Context for managing things like js/css connection blocking,
      * and per-tab connection grouping.
      */
-    [noscript] readonly attribute nsID schedulingContextID;
+    readonly attribute unsigned long long requestContextID;
 
     /**
      * The set of load flags that will be added to all new requests added to

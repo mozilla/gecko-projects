@@ -8,7 +8,9 @@
 #define GMP_LOADER_H__
 
 #include <stdint.h>
+#include "prlink.h"
 #include "gmp-entrypoints.h"
+#include "mozilla/UniquePtr.h"
 
 #if defined(XP_MACOSX) && defined(MOZ_GMP_SANDBOX)
 #include "mozilla/Sandbox.h"
@@ -29,58 +31,63 @@ public:
 #endif
 };
 
-// Encapsulates generating the device-bound node id, activating the sandbox,
-// loading the GMP, and passing the node id to the GMP (in that order).
-//
-// In Desktop Gecko, the implementation of this lives in the content process
-// host binary, and is passed into XUL code from on startup. The GMP IPC child
-// protocol actor uses this interface to load and retrieve interfaces from the
-// GMPs.
-//
-// In Desktop Gecko the implementation lives in the firefox-plugin-container
-// (Windows) or firefox-webcontent (other platforms) so that it can be covered
-// by DRM vendor's voucher. The reason for the extra executable on Windows is
-// because we can't programmatically change the executable name at runtime.
-//
-// On Android the GMPLoader implementation lives in libxul (because for the time
-// being GMPLoader relies upon NSPR, which we can't use in firefox-webcontent
-// on Android).
-//
-// There is exactly one GMPLoader per GMP child process, and only one GMP
-// per child process (so the GMPLoader only loads one GMP).
+// Interface that adapts a plugin to the GMP API.
+class GMPAdapter {
+public:
+  virtual ~GMPAdapter() {}
+  // Sets the adapted to plugin library module.
+  // Note: the GMPAdapter is responsible for calling PR_UnloadLibrary on aLib
+  // when it's finished with it.
+  virtual void SetAdaptee(PRLibrary* aLib) = 0;
+
+  // These are called in place of the corresponding GMP API functions.
+  virtual GMPErr GMPInit(const GMPPlatformAPI* aPlatformAPI) = 0;
+  virtual GMPErr GMPGetAPI(const char* aAPIName,
+                           void* aHostAPI,
+                           void** aPluginAPI,
+                           uint32_t aDecryptorId) = 0;
+  virtual void GMPShutdown() = 0;
+};
+
+// Encapsulates activating the sandbox, and loading the GMP.
+// Load() takes an optional GMPAdapter which can be used to adapt non-GMPs
+// to adhere to the GMP API.
 class GMPLoader {
 public:
-  virtual ~GMPLoader() {}
+  GMPLoader();
 
-  // Calculates the device-bound node id, then activates the sandbox,
-  // then loads the GMP library and (if applicable) passes the bound node id
-  // to the GMP.
-  virtual bool Load(const char* aUTF8LibPath,
-                    uint32_t aLibPathLen,
-                    char* aOriginSalt,
-                    uint32_t aOriginSaltLen,
-                    const GMPPlatformAPI* aPlatformAPI) = 0;
+  // Activates the sandbox, then loads the GMP library. If aAdapter is
+  // non-null, the lib path is assumed to be a non-GMP, and the adapter
+  // is initialized with the lib and the adapter is used to interact with
+  // the plugin.
+  bool Load(const char* aUTF8LibPath,
+            uint32_t aLibPathLen,
+            const GMPPlatformAPI* aPlatformAPI,
+            GMPAdapter* aAdapter = nullptr);
 
   // Retrieves an interface pointer from the GMP.
-  virtual GMPErr GetAPI(const char* aAPIName, void* aHostAPI, void** aPluginAPI) = 0;
+  GMPErr GetAPI(const char* aAPIName,
+                void* aHostAPI,
+                void** aPluginAPI,
+                uint32_t aDecryptorId);
 
   // Calls the GMPShutdown function exported by the GMP lib, and unloads the
   // plugin library.
-  virtual void Shutdown() = 0;
+  void Shutdown();
 
 #if defined(XP_MACOSX) && defined(MOZ_GMP_SANDBOX)
   // On OS X we need to set Mac-specific sandbox info just before we start the
   // sandbox, which we don't yet know when the GMPLoader and SandboxStarter
   // objects are created.
-  virtual void SetSandboxInfo(MacSandboxInfo* aSandboxInfo) = 0;
+  void SetSandboxInfo(MacSandboxInfo* aSandboxInfo);
 #endif
-};
 
-// On Desktop, this function resides in firefox-plugin-container on Windows, firefox-webcontent
-// for all other platforms.
-//
-// On Mobile, this function resides in XUL.
-GMPLoader* CreateGMPLoader(SandboxStarter* aStarter);
+  bool CanSandbox() const;
+
+private:
+  UniquePtr<SandboxStarter> mSandboxStarter;
+  UniquePtr<GMPAdapter> mAdapter;
+};
 
 } // namespace gmp
 } // namespace mozilla

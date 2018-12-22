@@ -26,6 +26,8 @@
 namespace mozilla {
 namespace dom {
 
+using namespace mozilla::dom::indexedDB;
+
 namespace {
 
 already_AddRefed<IDBRequest>
@@ -149,6 +151,63 @@ IDBIndex::Name() const
   return mMetadata->name();
 }
 
+void
+IDBIndex::SetName(const nsAString& aName, ErrorResult& aRv)
+{
+  AssertIsOnOwningThread();
+
+  IDBTransaction* transaction = mObjectStore->Transaction();
+
+  if (transaction->GetMode() != IDBTransaction::VERSION_CHANGE ||
+      mDeletedMetadata) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  if (!transaction->IsOpen()) {
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
+    return;
+  }
+
+  if (aName == mMetadata->name()) {
+    return;
+  }
+
+  // Cache logging string of this index before renaming.
+  const LoggingString loggingOldIndex(this);
+
+  const int64_t indexId = Id();
+
+  nsresult rv =
+    transaction->Database()->RenameIndex(mObjectStore->Id(),
+                                         indexId,
+                                         aName);
+
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+    return;
+  }
+
+  // Don't do this in the macro because we always need to increment the serial
+  // number to keep in sync with the parent.
+  const uint64_t requestSerialNumber = IDBRequest::NextSerialNumber();
+
+  IDB_LOG_MARK("IndexedDB %s: Child  Transaction[%lld] Request[%llu]: "
+                 "database(%s).transaction(%s).objectStore(%s).index(%s)."
+                 "rename(%s)",
+               "IndexedDB %s: C T[%lld] R[%llu]: IDBIndex.rename()",
+               IDB_LOG_ID_STRING(),
+               transaction->LoggingSerialNumber(),
+               requestSerialNumber,
+               IDB_LOG_STRINGIFY(transaction->Database()),
+               IDB_LOG_STRINGIFY(transaction),
+               IDB_LOG_STRINGIFY(mObjectStore),
+               loggingOldIndex.get(),
+               IDB_LOG_STRINGIFY(this));
+
+  transaction->RenameIndex(mObjectStore, indexId, aName);
+}
+
 bool
 IDBIndex::Unique() const
 {
@@ -194,7 +253,7 @@ IDBIndex::GetLocale(nsString& aLocale) const
   if (mMetadata->locale().IsEmpty()) {
     SetDOMStringToNull(aLocale);
   } else {
-    aLocale.AssignWithConversion(mMetadata->locale());
+    CopyASCIItoUTF16(mMetadata->locale(), aLocale);
   }
 }
 
@@ -233,7 +292,6 @@ IDBIndex::GetKeyPath(JSContext* aCx,
 
   if (!mCachedKeyPath.isUndefined()) {
     MOZ_ASSERT(mRooted);
-    JS::ExposeValueToActiveJS(mCachedKeyPath);
     aResult.set(mCachedKeyPath);
     return;
   }
@@ -250,7 +308,6 @@ IDBIndex::GetKeyPath(JSContext* aCx,
     mRooted = true;
   }
 
-  JS::ExposeValueToActiveJS(mCachedKeyPath);
   aResult.set(mCachedKeyPath);
 }
 
@@ -456,7 +513,7 @@ IDBIndex::OpenCursorInternal(bool aKeysOnly,
     SerializedKeyRange serializedKeyRange;
     keyRange->ToSerialized(serializedKeyRange);
 
-    optionalKeyRange = Move(serializedKeyRange);
+    optionalKeyRange = std::move(serializedKeyRange);
   } else {
     optionalKeyRange = void_t();
   }
@@ -468,18 +525,18 @@ IDBIndex::OpenCursorInternal(bool aKeysOnly,
     IndexOpenKeyCursorParams openParams;
     openParams.objectStoreId() = objectStoreId;
     openParams.indexId() = indexId;
-    openParams.optionalKeyRange() = Move(optionalKeyRange);
+    openParams.optionalKeyRange() = std::move(optionalKeyRange);
     openParams.direction() = direction;
 
-    params = Move(openParams);
+    params = std::move(openParams);
   } else {
     IndexOpenCursorParams openParams;
     openParams.objectStoreId() = objectStoreId;
     openParams.indexId() = indexId;
-    openParams.optionalKeyRange() = Move(optionalKeyRange);
+    openParams.optionalKeyRange() = std::move(optionalKeyRange);
     openParams.direction() = direction;
 
-    params = Move(openParams);
+    params = std::move(openParams);
   }
 
   RefPtr<IDBRequest> request = GenerateRequest(aCx, this);
@@ -597,7 +654,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBIndex)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBIndex)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mObjectStore)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -617,7 +673,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 JSObject*
 IDBIndex::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBIndexBinding::Wrap(aCx, this, aGivenProto);
+  return IDBIndex_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

@@ -82,7 +82,7 @@ Argument.prototype.beget = function(options) {
 
     // We need to add quotes when the replacement string has spaces or is empty
     if (!options.dontQuote) {
-      var needsQuote = text.indexOf(' ') >= 0 || text.length === 0;
+      var needsQuote = text.includes(' ') || text.length === 0;
       var hasQuote = /['"]$/.test(prefix);
       if (needsQuote && !hasQuote) {
         prefix = prefix + '\'';
@@ -827,7 +827,7 @@ Conversion.prototype.constrainPredictionIndex = function(context, index) {
     return Promise.resolve();
   }
 
-  return this.getPredictions(context).then(function(value) {
+  return this.getPredictions(context).then(value => {
     if (value.length === 0) {
       return undefined;
     }
@@ -837,7 +837,7 @@ Conversion.prototype.constrainPredictionIndex = function(context, index) {
       index = value.length + index;
     }
     return index;
-  }.bind(this));
+  });
 };
 
 /**

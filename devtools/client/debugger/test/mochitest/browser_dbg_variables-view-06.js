@@ -10,8 +10,11 @@
 const TAB_URL = EXAMPLE_URL + "doc_promise.html";
 
 var test = Task.async(function* () {
-  const [tab,, panel] = yield initDebugger(TAB_URL);
-  yield ensureSourceIs(panel, "doc_promise.html", true);
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  const [tab,, panel] = yield initDebugger(TAB_URL, options);
 
   const scopes = waitForCaretAndScopes(panel, 21);
   callInTab(tab, "doPause");
@@ -24,7 +27,7 @@ var test = Task.async(function* () {
   ok(scope, "Should get the current function's scope.");
 
   const promiseVariables = [...scope].filter(([name]) =>
-    ["p", "f", "r"].indexOf(name) !== -1);
+    ["p", "f", "r"].includes(name));
 
   is(promiseVariables.length, 3,
      "Should have our 3 promise variables: p, f, r");
@@ -117,8 +120,6 @@ var test = Task.async(function* () {
         break;
     }
   }
-
-  debugger;
 
   resumeDebuggerThenCloseAndFinish(panel);
 });

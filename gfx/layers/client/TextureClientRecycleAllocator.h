@@ -1,7 +1,8 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef MOZILLA_GFX_TEXTURECLIENT_RECYCLE_ALLOCATOR_H
 #define MOZILLA_GFX_TEXTURECLIENT_RECYCLE_ALLOCATOR_H
@@ -9,6 +10,7 @@
 #include <map>
 #include <stack>
 #include "mozilla/gfx/Types.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "mozilla/RefPtr.h"
 #include "TextureClient.h"
 #include "mozilla/Mutex.h"
@@ -17,6 +19,7 @@ namespace mozilla {
 namespace layers {
 
 class TextureClientHolder;
+struct PlanarYCbCrData;
 
 class ITextureClientRecycleAllocator
 {
@@ -46,7 +49,7 @@ public:
     , mAllocationFlags(aAllocationFlags)
   {}
 
-  virtual already_AddRefed<TextureClient> Allocate(CompositableForwarder* aAllocator) = 0;
+  virtual already_AddRefed<TextureClient> Allocate(KnowsCompositor* aAllocator) = 0;
   virtual bool IsCompatible(TextureClient* aTextureClient) = 0;
 
   const gfx::SurfaceFormat mFormat;
@@ -55,6 +58,21 @@ public:
   const TextureFlags mTextureFlags;
   const TextureAllocationFlags mAllocationFlags;
 };
+
+class YCbCrTextureClientAllocationHelper : public ITextureClientAllocationHelper
+{
+public:
+  YCbCrTextureClientAllocationHelper(const PlanarYCbCrData& aData,
+                                     TextureFlags aTextureFlags);
+
+  bool IsCompatible(TextureClient* aTextureClient) override;
+
+  already_AddRefed<TextureClient> Allocate(KnowsCompositor* aAllocator) override;
+
+protected:
+  const PlanarYCbCrData& mData;
+};
+
 
 /**
  * TextureClientRecycleAllocator provides TextureClients allocation and
@@ -71,7 +89,7 @@ protected:
   virtual ~TextureClientRecycleAllocator();
 
 public:
-  explicit TextureClientRecycleAllocator(CompositableForwarder* aAllocator);
+  explicit TextureClientRecycleAllocator(KnowsCompositor* aAllocator);
 
   void SetMaxPoolSize(uint32_t aMax);
 
@@ -86,6 +104,10 @@ public:
   already_AddRefed<TextureClient>
   CreateOrRecycle(ITextureClientAllocationHelper& aHelper);
 
+  void ShrinkToMinimumSize();
+
+  void Destroy();
+
 protected:
   virtual already_AddRefed<TextureClient>
   Allocate(gfx::SurfaceFormat aFormat,
@@ -94,7 +116,7 @@ protected:
            TextureFlags aTextureFlags,
            TextureAllocationFlags aAllocFlags);
 
-  RefPtr<CompositableForwarder> mSurfaceAllocator;
+  RefPtr<KnowsCompositor> mSurfaceAllocator;
 
   friend class DefaultTextureClientAllocationHelper;
   void RecycleTextureClient(TextureClient* aClient) override;
@@ -104,12 +126,10 @@ protected:
 
   std::map<TextureClient*, RefPtr<TextureClientHolder> > mInUseClients;
 
-  // On b2g gonk, std::queue might be a better choice.
-  // On ICS, fence wait happens implicitly before drawing.
-  // Since JB, fence wait happens explicitly when fetching a client from the pool.
   // stack is good from Graphics cache usage point of view.
   std::stack<RefPtr<TextureClientHolder> > mPooledClients;
   Mutex mLock;
+  bool mIsDestroyed;
 };
 
 } // namespace layers

@@ -12,6 +12,9 @@
 #include "nsCOMPtr.h"
 #include "nsIEventTarget.h"
 
+namespace mozilla {
+namespace net {
+
 class nsStreamListenerTee : public nsIStreamListenerTee
                           , public nsIThreadRetargetableStreamListener
 {
@@ -22,10 +25,10 @@ public:
     NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
     NS_DECL_NSISTREAMLISTENERTEE
 
-    nsStreamListenerTee() { }
+    nsStreamListenerTee() = default;
 
 private:
-    virtual ~nsStreamListenerTee() { }
+    virtual ~nsStreamListenerTee() = default;
 
     nsCOMPtr<nsIInputStreamTee>  mInputTee;
     nsCOMPtr<nsIOutputStream>    mSink;
@@ -33,5 +36,8 @@ private:
     nsCOMPtr<nsIRequestObserver> mObserver;
     nsCOMPtr<nsIEventTarget>     mEventTarget;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif

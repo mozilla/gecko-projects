@@ -4,21 +4,21 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ESEDBReader"];
+var EXPORTED_SYMBOLS = ["ESEDBReader"]; /* exported ESEDBReader */
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/ctypes.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let ConsoleAPI = Cu.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
+  let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
   let consoleOptions = {
     maxLogLevelPref: "browser.esedbreader.loglevel",
     prefix: "ESEDBReader",
   };
   return new ConsoleAPI(consoleOptions);
 });
+
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 // We have a globally unique identifier for ESE instances. A new one
 // is used for each different database opened.
@@ -31,7 +31,7 @@ const MAX_STR_LENGTH = 64 * 1024;
 const KERNEL = {};
 KERNEL.FILETIME = new ctypes.StructType("FILETIME", [
   {dwLowDateTime: ctypes.uint32_t},
-  {dwHighDateTime: ctypes.uint32_t}
+  {dwHighDateTime: ctypes.uint32_t},
 ]);
 KERNEL.SYSTEMTIME = new ctypes.StructType("SYSTEMTIME", [
   {wYear: ctypes.uint16_t},
@@ -41,7 +41,7 @@ KERNEL.SYSTEMTIME = new ctypes.StructType("SYSTEMTIME", [
   {wHour: ctypes.uint16_t},
   {wMinute: ctypes.uint16_t},
   {wSecond: ctypes.uint16_t},
-  {wMilliseconds: ctypes.uint16_t}
+  {wMilliseconds: ctypes.uint16_t},
 ]);
 
 // DB column types, cribbed from the ESE header
@@ -87,15 +87,15 @@ ESE.JET_COLTYP = ctypes.unsigned_long;
 ESE.JET_DBID = ctypes.unsigned_long;
 
 ESE.JET_COLUMNDEF = new ctypes.StructType("JET_COLUMNDEF", [
-  {"cbStruct": ctypes.unsigned_long},
-  {"columnid": ESE.JET_COLUMNID	},
+  {"cbStruct": ctypes.unsigned_long },
+  {"columnid": ESE.JET_COLUMNID },
   {"coltyp": ESE.JET_COLTYP },
   {"wCountry": ctypes.unsigned_short }, // sepcifies the country/region for the column definition
   {"langid": ctypes.unsigned_short },
   {"cp": ctypes.unsigned_short },
   {"wCollate": ctypes.unsigned_short }, /* Must be 0 */
   {"cbMax": ctypes.unsigned_long },
-  {"grbit": ESE.JET_GRBIT }
+  {"grbit": ESE.JET_GRBIT },
 ]);
 
 // Track open databases
@@ -109,24 +109,27 @@ this.gLibs = gLibs; // ditto
 
 function convertESEError(errorCode) {
   switch (errorCode) {
-    case -1213 /*JET_errPageSizeMismatch */:
-    case -1002 /*JET_errInvalidName*/:
-    case -1507 /*JET_errColumnNotFound */:
+    case -1213 /* JET_errPageSizeMismatch */:
+    case -1002 /* JET_errInvalidName*/:
+    case -1507 /* JET_errColumnNotFound */:
       // The DB format has changed and we haven't updated this migration code:
       return "The database format has changed, error code: " + errorCode;
-    case -1207 /*JET_errDatabaseLocked */:
-    case -1302 /*JET_errTableLocked */:
+    case -1032 /* JET_errFileAccessDenied */:
+    case -1207 /* JET_errDatabaseLocked */:
+    case -1302 /* JET_errTableLocked */:
       return "The database or table is locked, error code: " + errorCode;
+    case -1305 /* JET_errObjectNotFound */:
+      return "The table/object was not found.";
     case -1809 /* JET_errPermissionDenied*/:
     case -1907 /* JET_errAccessDenied */:
       return "Access or permission denied, error code: " + errorCode;
     case -1044 /* JET_errInvalidFilename */:
       return "Invalid file name";
-    case -1811 /*JET_errFileNotFound */:
+    case -1811 /* JET_errFileNotFound */:
       return "File not found";
-    case -550 /*JET_errDatabaseDirtyShutdown */:
+    case -550 /* JET_errDatabaseDirtyShutdown */:
       return "Database in dirty shutdown state (without the requisite logs?)";
-    case -514 /*JET_errBadLogVersion */:
+    case -514 /* JET_errBadLogVersion */:
       return "Database log version does not match the version of ESE in use.";
     default:
       return "Unknown error: " + errorCode;
@@ -134,7 +137,7 @@ function convertESEError(errorCode) {
 }
 
 function handleESEError(method, methodName, shouldThrow = true, errorLog = true) {
-  return function () {
+  return function() {
     let rv;
     try {
       rv = method.apply(null, arguments);
@@ -228,11 +231,11 @@ function unloadLibraries() {
 }
 
 function loadLibraries() {
-  Services.obs.addObserver(unloadLibraries, "xpcom-shutdown", false);
+  Services.obs.addObserver(unloadLibraries, "xpcom-shutdown");
   gLibs.ese = ctypes.open("esent.dll");
   gLibs.kernel = ctypes.open("kernel32.dll");
   KERNEL.FileTimeToSystemTime = gLibs.kernel.declare("FileTimeToSystemTime",
-    ctypes.default_abi, ctypes.int, KERNEL.FILETIME.ptr, KERNEL.SYSTEMTIME.ptr);
+    ctypes.winapi_abi, ctypes.int, KERNEL.FILETIME.ptr, KERNEL.SYSTEMTIME.ptr);
 
   declareESEFunctions();
 }
@@ -354,7 +357,7 @@ ESEDB.prototype = {
     return true;
   },
 
-  tableItems: function*(tableName, columns) {
+  * tableItems(tableName, columns) {
     if (!this._opened) {
       throw new Error("The database was closed!");
     }
@@ -389,7 +392,7 @@ ESEDB.prototype = {
           rowContents[column.name] = this._convertResult(column, buffer, err);
         }
         yield rowContents;
-      } while (0 === ESE.ManualMove(this._sessionId, tableId, 1 /* JET_MoveNext */, 0));
+      } while (ESE.ManualMove(this._sessionId, tableId, 1 /* JET_MoveNext */, 0) === 0);
     } catch (ex) {
       if (tableOpened) {
         this._closeTable(tableId);
@@ -432,7 +435,7 @@ ESEDB.prototype = {
         // Deal with null values:
         buffer = null;
       } else {
-        Cu.reportError("Unexpected JET error: " + err + ";" + " retrieving value for column " + column.name);
+        Cu.reportError("Unexpected JET error: " + err + "; retrieving value for column " + column.name);
         throw new Error(convertESEError(err));
       }
     }
@@ -440,7 +443,7 @@ ESEDB.prototype = {
       return buffer ? buffer.readString() : "";
     }
     if (column.type == "boolean") {
-      return buffer ? (255 == buffer.value) : false;
+      return buffer ? (buffer.value == 255) : false;
     }
     if (column.type == "guid") {
       if (buffer.length != 16) {
@@ -478,6 +481,7 @@ ESEDB.prototype = {
                                  systemTime.wSecond,
                                  systemTime.wMilliseconds));
     }
+    return undefined;
   },
 
   _getColumnInfo(tableName, columns) {
@@ -578,6 +582,21 @@ let ESEDBReader = {
     // ESE is really picky about the trailing slashes according to the docs,
     // so we do as we're told and ensure those are there:
     return new ESEDB(rootDir.path + "\\", dbFilePath, logDir.path + "\\");
+  },
+
+  async dbLocked(dbFile) {
+    let options = {winShare: OS.Constants.Win.FILE_SHARE_READ};
+    let locked = true;
+    await OS.File.open(dbFile.path, {read: true}, options).then(fileHandle => {
+      locked = false;
+      // Return the close promise so we wait for the file to be closed again.
+      // Otherwise the file might still be kept open by this handle by the time
+      // that we try to use the ESE APIs to access it.
+      return fileHandle.close();
+    }, () => {
+      Cu.reportError("ESE DB at " + dbFile.path + " is locked.");
+    });
+    return locked;
   },
 
   closeDB(db) {

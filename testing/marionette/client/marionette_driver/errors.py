@@ -2,19 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import traceback
-import types
-
-
-class InstallGeckoError(Exception):
-    pass
 
 
 class MarionetteException(Exception):
 
     """Raised when a generic non-recoverable exception has occured."""
 
-    code = (500,)
     status = "webdriver error"
 
     def __init__(self, message=None, cause=None, stacktrace=None):
@@ -31,30 +27,42 @@ class MarionetteException(Exception):
             be displayed in the exception's string representation.
 
         """
-
-        self.msg = message
         self.cause = cause
         self.stacktrace = stacktrace
 
+        super(MarionetteException, self).__init__(message)
+
     def __str__(self):
-        msg = str(self.msg)
+        msg = str(self.message)
         tb = None
 
         if self.cause:
             if type(self.cause) is tuple:
-                msg += ", caused by %r" % self.cause[0]
+                msg += ", caused by {0!r}".format(self.cause[0])
                 tb = self.cause[2]
             else:
-                msg += ", caused by %s" % self.cause
+                msg += ", caused by {}".format(self.cause)
         if self.stacktrace:
-            st = "".join(["\t%s\n" % x for x in self.stacktrace.splitlines()])
-            msg += "\nstacktrace:\n%s" % st
+            st = "".join(["\t{}\n".format(x)
+                          for x in self.stacktrace.splitlines()])
+            msg += "\nstacktrace:\n{}".format(st)
 
-        return "".join(traceback.format_exception(self.__class__, msg, tb))
+        if tb:
+            msg += ': ' + "".join(traceback.format_tb(tb))
+
+        return msg
 
 
 class ElementNotSelectableException(MarionetteException):
     status = "element not selectable"
+
+
+class ElementClickInterceptedException(MarionetteException):
+    status = "element click intercepted"
+
+
+class InsecureCertificateException(MarionetteException):
+    status = "insecure certificate"
 
 
 class InvalidArgumentException(MarionetteException):
@@ -64,126 +72,114 @@ class InvalidArgumentException(MarionetteException):
 class InvalidSessionIdException(MarionetteException):
     status = "invalid session id"
 
+
 class TimeoutException(MarionetteException):
-    code = (21,)
     status = "timeout"
 
 
 class JavascriptException(MarionetteException):
-    code = (17,)
     status = "javascript error"
 
 
 class NoSuchElementException(MarionetteException):
-    code = (7,)
     status = "no such element"
 
 
 class NoSuchWindowException(MarionetteException):
-    code = (23,)
     status = "no such window"
 
 
 class StaleElementException(MarionetteException):
-    code = (10,)
     status = "stale element reference"
 
 
 class ScriptTimeoutException(MarionetteException):
-    code = (28,)
     status = "script timeout"
 
 
 class ElementNotVisibleException(MarionetteException):
-    code = (11,)
+    """Deprecated.  Will be removed with the release of Firefox 54."""
+
     status = "element not visible"
 
-    def __init__(
-        self, message="Element is not currently visible and may not be manipulated",
+    def __init__(self,
+                 message="Element is not currently visible and may not be manipulated",
                  stacktrace=None, cause=None):
         super(ElementNotVisibleException, self).__init__(
             message, cause=cause, stacktrace=stacktrace)
 
 
 class ElementNotAccessibleException(MarionetteException):
-    code = (56,)
     status = "element not accessible"
 
 
+class ElementNotInteractableException(MarionetteException):
+    status = "element not interactable"
+
+
 class NoSuchFrameException(MarionetteException):
-    code = (8,)
     status = "no such frame"
 
 
 class InvalidElementStateException(MarionetteException):
-    code = (12,)
     status = "invalid element state"
 
 
 class NoAlertPresentException(MarionetteException):
-    code = (27,)
     status = "no such alert"
 
 
 class InvalidCookieDomainException(MarionetteException):
-    code = (24,)
     status = "invalid cookie domain"
 
 
 class UnableToSetCookieException(MarionetteException):
-    code = (25,)
     status = "unable to set cookie"
 
 
 class InvalidElementCoordinates(MarionetteException):
-    code = (29,)
     status = "invalid element coordinates"
 
 
 class InvalidSelectorException(MarionetteException):
-    code = (32, 51, 52)
     status = "invalid selector"
 
 
 class MoveTargetOutOfBoundsException(MarionetteException):
-    code = (34,)
     status = "move target out of bounds"
 
 
 class SessionNotCreatedException(MarionetteException):
-    code = (33, 71)
     status = "session not created"
 
 
 class UnexpectedAlertOpen(MarionetteException):
-    code = (26,)
     status = "unexpected alert open"
 
 
 class UnknownCommandException(MarionetteException):
-    code = (9,)
     status = "unknown command"
 
 
 class UnknownException(MarionetteException):
-    code = (13,)
     status = "unknown error"
 
 
 class UnsupportedOperationException(MarionetteException):
-    code = (405,)
     status = "unsupported operation"
+
+
+class UnresponsiveInstanceException(Exception):
+    pass
 
 
 es_ = [e for e in locals().values() if type(e) == type and issubclass(e, MarionetteException)]
 by_string = {e.status: e for e in es_}
-by_number = {c: e for e in es_ for c in e.code}
 
 
 def lookup(identifier):
     """Finds error exception class by associated Selenium JSON wire
-    protocol number code, or W3C WebDriver protocol string."""
-    lookup = by_string
-    if isinstance(identifier, int):
-        lookup = by_number
-    return lookup.get(identifier, MarionetteException)
+    protocol number code, or W3C WebDriver protocol string.
+
+    """
+    return by_string.get(identifier, MarionetteException)

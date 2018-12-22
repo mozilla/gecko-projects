@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -10,7 +11,6 @@
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/mozalloc.h"           // for operator new
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsPoint.h"                    // for nsIntPoint
@@ -24,10 +24,7 @@ namespace layers {
 
 BasicContainerLayer::~BasicContainerLayer()
 {
-  while (mFirstChild) {
-    ContainerLayer::RemoveChild(mFirstChild);
-  }
-
+  ContainerLayer::RemoveAllChildren();
   MOZ_COUNT_DTOR(BasicContainerLayer);
 }
 
@@ -38,18 +35,23 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
   // are aligned in device space, so it doesn't really matter how we snap
   // containers.
   Matrix residual;
-  Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
-  if (!Extend3DContext() && !Is3DContextLeaf()) {
-    // For 3D transform leaked from extended parent layer.
+  Matrix4x4 transformToSurface = aTransformToSurface;
+  bool participate3DCtx = Extend3DContext() || Is3DContextLeaf();
+  if (!participate3DCtx &&
+      GetContentFlags() & CONTENT_BACKFACE_HIDDEN) {
+    // For backface-hidden layers
+    transformToSurface.ProjectTo2D();
+  }
+  Matrix4x4 idealTransform = GetLocalTransform() * transformToSurface;
+  if (!participate3DCtx &&
+      !(GetContentFlags() & CONTENT_BACKFACE_HIDDEN)) {
+    // For non-backface-hidden layers,
+    // 3D components are required to handle CONTENT_BACKFACE_HIDDEN.
     idealTransform.ProjectTo2D();
   }
 
   if (!idealTransform.CanDraw2D()) {
-    if (!Extend3DContext() ||
-        (!idealTransform.Is2D() && Creates3DContextWithExtendingChildren())) {
-      if (!Creates3DContextWithExtendingChildren()) {
-        idealTransform.ProjectTo2D();
-      }
+    if (!Extend3DContext()) {
       mEffectiveTransform = idealTransform;
       ComputeEffectiveTransformsForChildren(Matrix4x4());
       ComputeEffectiveTransformForMaskLayers(Matrix4x4());
@@ -85,12 +87,12 @@ BasicContainerLayer::ComputeEffectiveTransforms(const Matrix4x4& aTransformToSur
     (GetMixBlendMode() != CompositionOp::OP_OVER && HasMultipleChildren()) ||
     (GetEffectiveOpacity() != 1.0 && ((HasMultipleChildren() && !Extend3DContext()) || hasSingleBlendingChild));
 
-  if (!Extend3DContext()) {
-    idealTransform.ProjectTo2D();
-  }
   mEffectiveTransform =
     !mUseIntermediateSurface ?
-    idealTransform : SnapTransformTranslation(idealTransform, &residual);
+    idealTransform :
+    (!(GetContentFlags() & CONTENT_BACKFACE_HIDDEN) ?
+     SnapTransformTranslation(idealTransform, &residual) :
+     SnapTransformTranslation3D(idealTransform, &residual));
   Matrix4x4 childTransformToSurface =
     (!mUseIntermediateSurface ||
      (mUseIntermediateSurface && !Extend3DContext() /* 2D */)) ?

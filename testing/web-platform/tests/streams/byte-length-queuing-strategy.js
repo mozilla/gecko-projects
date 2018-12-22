@@ -12,7 +12,7 @@ test(() => {
 
 test(() => {
 
-  for (let highWaterMark of [-Infinity, NaN, 'foo', {}, () => {}]) {
+  for (const highWaterMark of [-Infinity, NaN, 'foo', {}, () => {}]) {
     const strategy = new ByteLengthQueuingStrategy({ highWaterMark });
     assert_equals(strategy.highWaterMark, highWaterMark, `${highWaterMark} gets set correctly`);
   }
@@ -103,5 +103,12 @@ test(() => {
   assert_equals(strategy.highWaterMark, 'banana');
 
 }, 'ByteLengthQueuingStrategy\'s highWaterMark property can be set to anything');
+
+test(() => {
+
+  assert_equals(ByteLengthQueuingStrategy.name, 'ByteLengthQueuingStrategy',
+                'ByteLengthQueuingStrategy.name must be "ByteLengthQueuingStrategy"');
+
+}, 'ByteLengthQueuingStrategy.name is correct');
 
 done();

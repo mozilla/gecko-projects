@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,16 +6,20 @@
 
 mtransport_lcppsrcs = [
     'dtlsidentity.cpp',
+    'mediapacket.cpp',
     'nr_socket_prsock.cpp',
     'nr_timer.cpp',
     'nricectx.cpp',
+    'nricectxhandler.cpp',
     'nricemediastream.cpp',
     'nriceresolver.cpp',
     'nriceresolverfake.cpp',
+    'nricestunaddr.cpp',
     'nrinterfaceprioritizer.cpp',
-    'rlogringbuffer.cpp',
+    'rlogconnector.cpp',
     'simpletokenbucket.cpp',
-    'stun_udp_socket_filter.cpp',
+    'SrtpFlow.cpp',
+    'stun_socket_filter.cpp',
     'test_nr_socket.cpp',
     'transportflow.cpp',
     'transportlayer.cpp',
@@ -23,13 +27,8 @@ mtransport_lcppsrcs = [
     'transportlayerice.cpp',
     'transportlayerlog.cpp',
     'transportlayerloopback.cpp',
-    'transportlayerprsock.cpp',
+    'transportlayersrtp.cpp',
 ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    mtransport_lcppsrcs += [
-        'gonk_addrs.cpp',
-    ]
 
 mtransport_cppsrcs = [
     '/media/mtransport/%s' % s for s in sorted(mtransport_lcppsrcs)
@@ -51,6 +50,8 @@ LOCAL_INCLUDES += [
     '/media/mtransport/third_party/nrappkit/src/share',
     '/media/mtransport/third_party/nrappkit/src/stats',
     '/media/mtransport/third_party/nrappkit/src/util/libekr',
+    '/netwerk/srtp/src/crypto/include',
+    '/netwerk/srtp/src/include',
 ]
 
 if CONFIG['OS_TARGET'] in ['Darwin', 'DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD']:
@@ -89,3 +90,6 @@ DEFINES['R_DEFINED_INT4'] = 'int32_t'
 DEFINES['R_DEFINED_UINT4'] = 'uint32_t'
 DEFINES['R_DEFINED_INT8'] = 'int64_t'
 DEFINES['R_DEFINED_UINT8'] = 'uint64_t'
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

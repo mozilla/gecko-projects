@@ -27,12 +27,54 @@ ArrayBufferObjectMaybeShared::dataPointerEither()
     return buf->as<SharedArrayBufferObject>().dataPointerShared();
 }
 
+inline bool
+ArrayBufferObjectMaybeShared::isDetached() const
+{
+    if (this->is<ArrayBufferObject>())
+        return this->as<ArrayBufferObject>().isDetached();
+    return false;
+}
+
 inline uint32_t
 AnyArrayBufferByteLength(const ArrayBufferObjectMaybeShared* buf)
 {
     if (buf->is<ArrayBufferObject>())
         return buf->as<ArrayBufferObject>().byteLength();
     return buf->as<SharedArrayBufferObject>().byteLength();
+}
+
+inline uint32_t
+ArrayBufferObjectMaybeShared::byteLength()
+{
+    return AnyArrayBufferByteLength(this);
+}
+
+inline bool
+AnyArrayBufferIsPreparedForAsmJS(const ArrayBufferObjectMaybeShared* buf)
+{
+    if (buf->is<ArrayBufferObject>())
+        return buf->as<ArrayBufferObject>().isPreparedForAsmJS();
+    return buf->as<SharedArrayBufferObject>().isPreparedForAsmJS();
+}
+
+inline bool
+ArrayBufferObjectMaybeShared::isPreparedForAsmJS() const
+{
+    return AnyArrayBufferIsPreparedForAsmJS(this);
+}
+
+inline bool
+AnyArrayBufferIsWasm(const ArrayBufferObjectMaybeShared* buf)
+{
+    if (buf->is<ArrayBufferObject>())
+        return buf->as<ArrayBufferObject>().isWasm();
+    return buf->as<SharedArrayBufferObject>().isWasm();
+}
+
+inline bool
+ArrayBufferObjectMaybeShared::isWasm() const
+{
+    return AnyArrayBufferIsWasm(this);
 }
 
 inline ArrayBufferObjectMaybeShared&

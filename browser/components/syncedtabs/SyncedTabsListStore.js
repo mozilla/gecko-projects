@@ -4,11 +4,9 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+let { EventEmitter } = ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm", {});
 
-let { EventEmitter } = Cu.import("resource:///modules/syncedtabs/EventEmitter.jsm", {});
-
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "SyncedTabsListStore"
 ];
 
@@ -118,7 +116,7 @@ Object.assign(SyncedTabsListStore.prototype, EventEmitter.prototype, {
       this.selectRow(0, -1);
     } else if ((!branch.tabs.length || childRow >= branch.tabs.length - 1 || !this._isOpen(branch)) && branchRow < this.data.length) {
       this.selectRow(branchRow + 1, -1);
-    } else if(childRow < branch.tabs.length) {
+    } else if (childRow < branch.tabs.length) {
       this.selectRow(branchRow, childRow + 1);
     }
   },
@@ -126,7 +124,6 @@ Object.assign(SyncedTabsListStore.prototype, EventEmitter.prototype, {
   moveSelectionUp() {
     let branchRow = this._selectedRow[0];
     let childRow = this._selectedRow[1];
-    let branch = this.data[branchRow];
 
     if (this.filter) {
       this.selectRow(branchRow - 1);
@@ -151,7 +148,7 @@ Object.assign(SyncedTabsListStore.prototype, EventEmitter.prototype, {
     if (parent <= -1) {
       parentRow = 0;
     } else if (parent >= maxParentRow) {
-      parentRow = maxParentRow - 1;
+      return;
     }
 
     let childRow = child;
@@ -234,4 +231,3 @@ Object.assign(SyncedTabsListStore.prototype, EventEmitter.prototype, {
       .catch(Cu.reportError);
   }
 });
-

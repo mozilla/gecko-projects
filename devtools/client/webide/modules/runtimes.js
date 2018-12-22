@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cu, Ci} = require("chrome");
+"use strict";
+
+const {Ci} = require("chrome");
 const Services = require("Services");
-const {Devices} = Cu.import("resource://devtools/shared/apps/Devices.jsm");
-const {Connection} = require("devtools/shared/client/connection-manager");
+const {Devices} = require("resource://devtools/shared/apps/Devices.jsm");
 const {DebuggerServer} = require("devtools/server/main");
-const {Simulators} = require("devtools/client/webide/modules/simulators");
 const discovery = require("devtools/shared/discovery/discovery");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
@@ -124,9 +124,9 @@ var RuntimeScanners = {
       return this._scanPromise;
     }
 
-    let promises = [];
+    const promises = [];
 
-    for (let scanner of this._scanners) {
+    for (const scanner of this._scanners) {
       promises.push(scanner.scan());
     }
 
@@ -142,9 +142,9 @@ var RuntimeScanners = {
     return this._scanPromise;
   },
 
-  listRuntimes: function*() {
-    for (let scanner of this._scanners) {
-      for (let runtime of scanner.listRuntimes()) {
+  listRuntimes: function* () {
+    for (const scanner of this._scanners) {
+      for (const runtime of scanner.listRuntimes()) {
         yield runtime;
       }
     }
@@ -160,7 +160,7 @@ var RuntimeScanners = {
       return;
     }
     this._emitUpdated = this._emitUpdated.bind(this);
-    for (let scanner of this._scanners) {
+    for (const scanner of this._scanners) {
       this._enableScanner(scanner);
     }
   },
@@ -175,7 +175,7 @@ var RuntimeScanners = {
       // Already disabled scanners during a previous call
       return;
     }
-    for (let scanner of this._scanners) {
+    for (const scanner of this._scanners) {
       this._disableScanner(scanner);
     }
   },
@@ -192,105 +192,6 @@ EventEmitter.decorate(RuntimeScanners);
 exports.RuntimeScanners = RuntimeScanners;
 
 /* SCANNERS */
-
-var SimulatorScanner = {
-
-  _runtimes: [],
-
-  enable() {
-    this._updateRuntimes = this._updateRuntimes.bind(this);
-    Simulators.on("updated", this._updateRuntimes);
-    this._updateRuntimes();
-  },
-
-  disable() {
-    Simulators.off("updated", this._updateRuntimes);
-  },
-
-  _emitUpdated() {
-    this.emit("runtime-list-updated");
-  },
-
-  _updateRuntimes() {
-    Simulators.findSimulators().then(simulators => {
-      this._runtimes = [];
-      for (let simulator of simulators) {
-        this._runtimes.push(new SimulatorRuntime(simulator));
-      }
-      this._emitUpdated();
-    });
-  },
-
-  scan() {
-    return promise.resolve();
-  },
-
-  listRuntimes: function() {
-    return this._runtimes;
-  }
-
-};
-
-EventEmitter.decorate(SimulatorScanner);
-RuntimeScanners.add(SimulatorScanner);
-
-/**
- * TODO: Remove this comaptibility layer in the future (bug 1085393)
- * This runtime exists to support the ADB Helper add-on below version 0.7.0.
- *
- * This scanner will list all ADB devices as runtimes, even if they may or may
- * not actually connect (since the |DeprecatedUSBRuntime| assumes a Firefox OS
- * device).
- */
-var DeprecatedAdbScanner = {
-
-  _runtimes: [],
-
-  enable() {
-    this._updateRuntimes = this._updateRuntimes.bind(this);
-    Devices.on("register", this._updateRuntimes);
-    Devices.on("unregister", this._updateRuntimes);
-    Devices.on("addon-status-updated", this._updateRuntimes);
-    this._updateRuntimes();
-  },
-
-  disable() {
-    Devices.off("register", this._updateRuntimes);
-    Devices.off("unregister", this._updateRuntimes);
-    Devices.off("addon-status-updated", this._updateRuntimes);
-  },
-
-  _emitUpdated() {
-    this.emit("runtime-list-updated");
-  },
-
-  _updateRuntimes() {
-    this._runtimes = [];
-    for (let id of Devices.available()) {
-      let runtime = new DeprecatedUSBRuntime(id);
-      this._runtimes.push(runtime);
-      runtime.updateNameFromADB().then(() => {
-        this._emitUpdated();
-      }, () => {});
-    }
-    this._emitUpdated();
-  },
-
-  scan() {
-    return promise.resolve();
-  },
-
-  listRuntimes: function() {
-    return this._runtimes;
-  }
-
-};
-
-EventEmitter.decorate(DeprecatedAdbScanner);
-RuntimeScanners.add(DeprecatedAdbScanner);
-
-// ADB Helper 0.7.0 and later will replace this scanner on startup
-exports.DeprecatedAdbScanner = DeprecatedAdbScanner;
 
 /**
  * This is a lazy ADB scanner shim which only tells the ADB Helper to start and
@@ -327,7 +228,7 @@ var WiFiScanner = {
 
   init() {
     this.updateRegistration();
-    Services.prefs.addObserver(this.ALLOWED_PREF, this, false);
+    Services.prefs.addObserver(this.ALLOWED_PREF, this);
   },
 
   enable() {
@@ -350,7 +251,7 @@ var WiFiScanner = {
 
   _updateRuntimes() {
     this._runtimes = [];
-    for (let device of discovery.getRemoteDevicesWithService("devtools")) {
+    for (const device of discovery.getRemoteDevicesWithService("devtools")) {
       this._runtimes.push(new WiFiRuntime(device));
     }
     this._emitUpdated();
@@ -397,9 +298,11 @@ exports.WiFiScanner = WiFiScanner;
 var StaticScanner = {
   enable() {},
   disable() {},
-  scan() { return promise.resolve(); },
+  scan() {
+    return promise.resolve();
+  },
   listRuntimes() {
-    let runtimes = [gRemoteRuntime];
+    const runtimes = [gRemoteRuntime];
     if (Services.prefs.getBoolPref("devtools.webide.enableLocalRuntime")) {
       runtimes.push(gLocalRuntime);
     }
@@ -417,63 +320,10 @@ RuntimeScanners.add(StaticScanner);
 var RuntimeTypes = exports.RuntimeTypes = {
   USB: "USB",
   WIFI: "WIFI",
-  SIMULATOR: "SIMULATOR",
   REMOTE: "REMOTE",
   LOCAL: "LOCAL",
   OTHER: "OTHER"
 };
-
-/**
- * TODO: Remove this comaptibility layer in the future (bug 1085393)
- * This runtime exists to support the ADB Helper add-on below version 0.7.0.
- *
- * This runtime assumes it is connecting to a Firefox OS device.
- */
-function DeprecatedUSBRuntime(id) {
-  this._id = id;
-}
-
-DeprecatedUSBRuntime.prototype = {
-  type: RuntimeTypes.USB,
-  get device() {
-    return Devices.getByName(this._id);
-  },
-  connect: function(connection) {
-    if (!this.device) {
-      return promise.reject(new Error("Can't find device: " + this.name));
-    }
-    return this.device.connect().then((port) => {
-      connection.host = "localhost";
-      connection.port = port;
-      connection.connect();
-    });
-  },
-  get id() {
-    return this._id;
-  },
-  get name() {
-    return this._productModel || this._id;
-  },
-  updateNameFromADB: function() {
-    if (this._productModel) {
-      return promise.reject();
-    }
-    let deferred = promise.defer();
-    if (this.device && this.device.shell) {
-      this.device.shell("getprop ro.product.model").then(stdout => {
-        this._productModel = stdout;
-        deferred.resolve();
-      }, () => {});
-    } else {
-      this._productModel = null;
-      deferred.reject();
-    }
-    return deferred.promise;
-  },
-};
-
-// For testing use only
-exports._DeprecatedUSBRuntime = DeprecatedUSBRuntime;
 
 function WiFiRuntime(deviceName) {
   this.deviceName = deviceName;
@@ -484,7 +334,7 @@ WiFiRuntime.prototype = {
   // Mark runtime as taking a long time to connect
   prolongedConnection: true,
   connect: function(connection) {
-    let service = discovery.getRemoteService("devtools", this.deviceName);
+    const service = discovery.getRemoteService("devtools", this.deviceName);
     if (!service) {
       return promise.reject(new Error("Can't find device: " + this.name));
     }
@@ -531,7 +381,7 @@ WiFiRuntime.prototype = {
    */
   sendOOB(session) {
     const WINDOW_ID = "devtools:wifi-auth";
-    let { authResult } = session;
+    const { authResult } = session;
     // Only show in the PENDING state
     if (authResult != AuthenticationResult.PENDING) {
       throw new Error("Expected PENDING result, got " + authResult);
@@ -539,22 +389,20 @@ WiFiRuntime.prototype = {
 
     // Listen for the window our prompt opens, so we can close it programatically
     let promptWindow;
-    let windowListener = {
+    const windowListener = {
       onOpenWindow(xulWindow) {
-        let win = xulWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+        const win = xulWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindow);
-        win.addEventListener("load", function listener() {
-          win.removeEventListener("load", listener, false);
+        win.addEventListener("load", function() {
           if (win.document.documentElement.getAttribute("id") != WINDOW_ID) {
             return;
           }
           // Found the window
           promptWindow = win;
           Services.wm.removeListener(windowListener);
-        }, false);
+        }, {once: true});
       },
       onCloseWindow() {},
-      onWindowTitleChange() {}
     };
     Services.wm.addListener(windowListener);
 
@@ -563,9 +411,9 @@ WiFiRuntime.prototype = {
       // Height determines the size of the QR code.  Force a minimum size to
       // improve scanability.
       const MIN_HEIGHT = 600;
-      let win = Services.wm.getMostRecentWindow("devtools:webide");
-      let width = win.outerWidth * 0.8;
-      let height = Math.max(win.outerHeight * 0.5, MIN_HEIGHT);
+      const win = Services.wm.getMostRecentWindow("devtools:webide");
+      const width = win.outerWidth * 0.8;
+      const height = Math.max(win.outerHeight * 0.5, MIN_HEIGHT);
       win.openDialog("chrome://webide/content/wifi-auth.xhtml",
                      WINDOW_ID,
                      "modal=yes,width=" + width + ",height=" + height, session);
@@ -586,42 +434,11 @@ WiFiRuntime.prototype = {
 // For testing use only
 exports._WiFiRuntime = WiFiRuntime;
 
-function SimulatorRuntime(simulator) {
-  this.simulator = simulator;
-}
-
-SimulatorRuntime.prototype = {
-  type: RuntimeTypes.SIMULATOR,
-  connect: function(connection) {
-    return this.simulator.launch().then(port => {
-      connection.host = "localhost";
-      connection.port = port;
-      connection.keepConnecting = true;
-      connection.once(Connection.Events.DISCONNECTED, e => this.simulator.kill());
-      connection.connect();
-    });
-  },
-  configure() {
-    Simulators.emit("configure", this.simulator);
-  },
-  get id() {
-    return this.simulator.id;
-  },
-  get name() {
-    return this.simulator.name;
-  },
-};
-
-// For testing use only
-exports._SimulatorRuntime = SimulatorRuntime;
-
 var gLocalRuntime = {
   type: RuntimeTypes.LOCAL,
   connect: function(connection) {
-    if (!DebuggerServer.initialized) {
-      DebuggerServer.init();
-      DebuggerServer.addBrowserActors();
-    }
+    DebuggerServer.init();
+    DebuggerServer.registerAllActors();
     DebuggerServer.allowChromeProcess = true;
     connection.host = null; // Force Pipe transport
     connection.port = null;
@@ -642,15 +459,15 @@ exports._gLocalRuntime = gLocalRuntime;
 var gRemoteRuntime = {
   type: RuntimeTypes.REMOTE,
   connect: function(connection) {
-    let win = Services.wm.getMostRecentWindow("devtools:webide");
+    const win = Services.wm.getMostRecentWindow("devtools:webide");
     if (!win) {
       return promise.reject(new Error("No WebIDE window found"));
     }
-    let ret = {value: connection.host + ":" + connection.port};
-    let title = Strings.GetStringFromName("remote_runtime_promptTitle");
-    let message = Strings.GetStringFromName("remote_runtime_promptMessage");
-    let ok = Services.prompt.prompt(win, title, message, ret, null, {});
-    let [host,port] = ret.value.split(":");
+    const ret = {value: connection.host + ":" + connection.port};
+    const title = Strings.GetStringFromName("remote_runtime_promptTitle");
+    const message = Strings.GetStringFromName("remote_runtime_promptMessage");
+    const ok = Services.prompt.prompt(win, title, message, ret, null, {});
+    const [host, port] = ret.value.split(":");
     if (!ok) {
       return promise.reject({canceled: true});
     }

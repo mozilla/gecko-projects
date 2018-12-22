@@ -163,12 +163,13 @@ SourceBufferList::QueueAsyncSimpleEvent(const char* aName)
 {
   MSE_DEBUG("Queue event '%s'", aName);
   nsCOMPtr<nsIRunnable> event = new AsyncEventRunner<SourceBufferList>(this, aName);
-  NS_DispatchToMainThread(event);
+  mAbstractMainThread->Dispatch(event.forget());
 }
 
 SourceBufferList::SourceBufferList(MediaSource* aMediaSource)
   : DOMEventTargetHelper(aMediaSource->GetParentObject())
   , mMediaSource(aMediaSource)
+  , mAbstractMainThread(mMediaSource->AbstractMainThread())
 {
   MOZ_ASSERT(aMediaSource);
 }
@@ -179,10 +180,34 @@ SourceBufferList::GetParentObject() const
   return mMediaSource;
 }
 
+double
+SourceBufferList::HighestStartTime()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  double highestStartTime = 0;
+  for (auto& sourceBuffer : mSourceBuffers) {
+    highestStartTime =
+      std::max(sourceBuffer->HighestStartTime(), highestStartTime);
+  }
+  return highestStartTime;
+}
+
+double
+SourceBufferList::HighestEndTime()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  double highestEndTime = 0;
+  for (auto& sourceBuffer : mSourceBuffers) {
+    highestEndTime =
+      std::max(sourceBuffer->HighestEndTime(), highestEndTime);
+  }
+  return highestEndTime;
+}
+
 JSObject*
 SourceBufferList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SourceBufferListBinding::Wrap(aCx, this, aGivenProto);
+  return SourceBufferList_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(SourceBufferList, DOMEventTargetHelper,
@@ -191,7 +216,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(SourceBufferList, DOMEventTargetHelper,
 NS_IMPL_ADDREF_INHERITED(SourceBufferList, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(SourceBufferList, DOMEventTargetHelper)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SourceBufferList)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SourceBufferList)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 #undef MSE_API

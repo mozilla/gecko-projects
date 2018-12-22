@@ -8,6 +8,7 @@
 #define MOZILLA_SVGANIMATEDNUMBERLIST_H__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
 #include "nsISMILAttr.h"
 #include "SVGNumberList.h"
@@ -42,7 +43,9 @@ class SVGAnimatedNumberList
   friend class DOMSVGNumberList;
 
 public:
-  SVGAnimatedNumberList() {}
+  SVGAnimatedNumberList()
+    : mIsBaseSet(false)
+  {}
 
   /**
    * Because it's so important that mBaseVal and its DOMSVGNumberList wrapper
@@ -74,16 +77,16 @@ public:
   // set (either by animation, or by taking on the base value which has been
   // explicitly set by markup or a DOM call), false otherwise.
   // If this returns false, the animated value is still valid, that is,
-  // useable, and represents the default base value of the attribute.
+  // usable, and represents the default base value of the attribute.
   bool IsExplicitlySet() const
     { return !!mAnimVal || mIsBaseSet; }
-  
+
   bool IsAnimating() const {
     return !!mAnimVal;
   }
 
-  /// Callers own the returned nsISMILAttr
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement, uint8_t aAttrEnum);
+  UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement,
+                                    uint8_t aAttrEnum);
 
 private:
 

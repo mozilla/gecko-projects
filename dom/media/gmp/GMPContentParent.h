@@ -13,11 +13,10 @@
 namespace mozilla {
 namespace gmp {
 
-class GMPAudioDecoderParent;
-class GMPDecryptorParent;
 class GMPParent;
 class GMPVideoDecoderParent;
 class GMPVideoEncoderParent;
+class ChromiumCDMParent;
 
 class GMPContentParent final : public PGMPContentParent,
                                public GMPSharedMem
@@ -27,19 +26,17 @@ public:
 
   explicit GMPContentParent(GMPParent* aParent = nullptr);
 
-  nsresult GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD);
+  nsresult GetGMPVideoDecoder(GMPVideoDecoderParent** aGMPVD,
+                              uint32_t aDecryptorId);
   void VideoDecoderDestroyed(GMPVideoDecoderParent* aDecoder);
 
   nsresult GetGMPVideoEncoder(GMPVideoEncoderParent** aGMPVE);
   void VideoEncoderDestroyed(GMPVideoEncoderParent* aEncoder);
 
-  nsresult GetGMPDecryptor(GMPDecryptorParent** aGMPKS);
-  void DecryptorDestroyed(GMPDecryptorParent* aSession);
+  already_AddRefed<ChromiumCDMParent> GetChromiumCDM();
+  void ChromiumCDMDestroyed(ChromiumCDMParent* aCDM);
 
-  nsresult GetGMPAudioDecoder(GMPAudioDecoderParent** aGMPAD);
-  void AudioDecoderDestroyed(GMPAudioDecoderParent* aDecoder);
-
-  nsIThread* GMPThread();
+  nsCOMPtr<nsISerialEventTarget> GMPEventTarget();
 
   // GMPSharedMem
   void CheckThread() override;
@@ -61,25 +58,42 @@ public:
     return mPluginId;
   }
 
+  class CloseBlocker {
+  public:
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CloseBlocker)
+
+    explicit CloseBlocker(GMPContentParent* aParent)
+      : mParent(aParent)
+    {
+      mParent->AddCloseBlocker();
+    }
+    RefPtr<GMPContentParent> mParent;
+  private:
+    ~CloseBlocker() {
+      mParent->RemoveCloseBlocker();
+    }
+  };
+
 private:
+
+  void AddCloseBlocker();
+  void RemoveCloseBlocker();
+
   ~GMPContentParent();
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent() override;
+  PGMPVideoDecoderParent* AllocPGMPVideoDecoderParent(const uint32_t& aDecryptorId) override;
   bool DeallocPGMPVideoDecoderParent(PGMPVideoDecoderParent* aActor) override;
 
   PGMPVideoEncoderParent* AllocPGMPVideoEncoderParent() override;
   bool DeallocPGMPVideoEncoderParent(PGMPVideoEncoderParent* aActor) override;
 
-  PGMPDecryptorParent* AllocPGMPDecryptorParent() override;
-  bool DeallocPGMPDecryptorParent(PGMPDecryptorParent* aActor) override;
-
-  PGMPAudioDecoderParent* AllocPGMPAudioDecoderParent() override;
-  bool DeallocPGMPAudioDecoderParent(PGMPAudioDecoderParent* aActor) override;
+  PChromiumCDMParent* AllocPChromiumCDMParent() override;
+  bool DeallocPChromiumCDMParent(PChromiumCDMParent* aActor) override;
 
   void CloseIfUnused();
-  // Needed because NS_NewRunnableMethod tried to use the class that the method
+  // Needed because NewRunnableMethod tried to use the class that the method
   // lives on to store the receiver, but PGMPContentParent isn't refcounted.
   void Close()
   {
@@ -88,12 +102,12 @@ private:
 
   nsTArray<RefPtr<GMPVideoDecoderParent>> mVideoDecoders;
   nsTArray<RefPtr<GMPVideoEncoderParent>> mVideoEncoders;
-  nsTArray<RefPtr<GMPDecryptorParent>> mDecryptors;
-  nsTArray<RefPtr<GMPAudioDecoderParent>> mAudioDecoders;
-  nsCOMPtr<nsIThread> mGMPThread;
+  nsTArray<RefPtr<ChromiumCDMParent>> mChromiumCDMs;
+  nsCOMPtr<nsISerialEventTarget> mGMPEventTarget;
   RefPtr<GMPParent> mParent;
   nsCString mDisplayName;
   uint32_t mPluginId;
+  uint32_t mCloseBlockerCount = 0;
 };
 
 } // namespace gmp

@@ -8,6 +8,7 @@
 #define mozilla_dom_cache_StreamControl_h
 
 #include "mozilla/dom/cache/ReadStream.h"
+#include "mozilla/dom/cache/Types.h"
 #include "mozilla/RefPtr.h"
 #include "nsTObserverArray.h"
 
@@ -15,7 +16,7 @@ struct nsID;
 
 namespace mozilla {
 namespace ipc {
- class FileDescriptor;
+class AutoIPCStream;
 } // namespace ipc
 namespace dom {
 namespace cache {
@@ -33,12 +34,11 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) = 0;
 
   virtual void
-  SerializeFds(CacheReadStream* aReadStreamOut,
-               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) = 0;
+  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
+                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) = 0;
 
   virtual void
-  DeserializeFds(const CacheReadStream& aReadStream,
-                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) = 0;
+  OpenStream(const nsID& aId, InputStreamResolver&& aResolver) = 0;
 
   // inherited implementation of the ReadStream::Controllable list
 

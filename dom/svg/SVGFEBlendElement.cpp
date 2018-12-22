@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFEBlendElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEBlendElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEBlendElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGEnumMapping SVGFEBlendElement::sModeMap[] = {
@@ -57,7 +57,7 @@ nsSVGElement::StringInfo SVGFEBlendElement::sStringInfo[3] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEBlendElement)
 
@@ -96,7 +96,7 @@ SVGFEBlendElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFEBlendElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                             nsIAtom* aAttribute) const
+                                             nsAtom* aAttribute) const
 {
   return SVGFEBlendElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

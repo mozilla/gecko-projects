@@ -10,9 +10,8 @@
 
 const EXPORTED_SYMBOLS = ["BrowserWindows"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
-Cu.import("resource://services-sync/main.js");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://services-sync/main.js");
 
 var BrowserWindows = {
   /**
@@ -23,14 +22,11 @@ var BrowserWindows = {
    * @param aPrivate The private option.
    * @return nothing
    */
-  Add: function(aPrivate, fn) {
-    let wm = Cc["@mozilla.org/appshell/window-mediator;1"]
-               .getService(Ci.nsIWindowMediator);
-    let mainWindow = wm.getMostRecentWindow("navigator:browser");
+  Add(aPrivate, fn) {
+    let mainWindow = Services.wm.getMostRecentWindow("navigator:browser");
     let win = mainWindow.OpenBrowserWindow({private: aPrivate});
-    win.addEventListener("load", function onLoad() {
-      win.removeEventListener("load", onLoad, false);
+    win.addEventListener("load", function() {
       fn.call(win);
-    }, false);
+    }, {once: true});
   }
 };

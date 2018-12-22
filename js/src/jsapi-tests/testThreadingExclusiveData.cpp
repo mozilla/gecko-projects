@@ -8,6 +8,7 @@
 #include "js/Vector.h"
 #include "jsapi-tests/tests.h"
 #include "threading/ExclusiveData.h"
+#include "threading/Thread.h"
 
 // One thread for each bit in our counter.
 const static uint8_t NumThreads = 64;
@@ -27,13 +28,13 @@ struct CounterAndBit
 };
 
 void
-printDiagnosticMessage(uint64_t seen)
+printDiagnosticMessage(uint8_t bit, uint64_t seen)
 {
     if (!ShowDiagnostics)
         return;
 
-    fprintf(stderr, "Thread %p saw ", PR_GetCurrentThread());
-    for (auto i : mozilla::MakeRange(NumThreads)) {
+    fprintf(stderr, "Thread %d saw ", bit);
+    for (auto i : mozilla::IntegerRange(NumThreads)) {
         if (seen & (uint64_t(1) << i))
             fprintf(stderr, "1");
         else
@@ -43,25 +44,23 @@ printDiagnosticMessage(uint64_t seen)
 }
 
 void
-setBitAndCheck(void* arg)
+setBitAndCheck(CounterAndBit* counterAndBit)
 {
-    auto& counterAndBit = *static_cast<CounterAndBit*>(arg);
-
     while (true) {
         {
             // Set our bit. Repeatedly setting it is idempotent.
-            auto guard = counterAndBit.counter.lock();
-            printDiagnosticMessage(guard);
-            guard |= (uint64_t(1) << counterAndBit.bit);
+            auto guard = counterAndBit->counter.lock();
+            printDiagnosticMessage(counterAndBit->bit, guard);
+            guard |= (uint64_t(1) << counterAndBit->bit);
         }
 
         {
             // Check to see if we have observed all the other threads setting
             // their bit as well.
-            auto guard = counterAndBit.counter.lock();
-            printDiagnosticMessage(guard);
+            auto guard = counterAndBit->counter.lock();
+            printDiagnosticMessage(counterAndBit->bit, guard);
             if (guard == UINT64_MAX) {
-                js_delete(&counterAndBit);
+                js_delete(counterAndBit);
                 return;
             }
         }
@@ -70,28 +69,20 @@ setBitAndCheck(void* arg)
 
 BEGIN_TEST(testExclusiveData)
 {
-    js::ExclusiveData<uint64_t> counter(0);
+    js::ExclusiveData<uint64_t> counter(js::mutexid::TestMutex, 0);
 
-    js::Vector<PRThread*> threads(cx);
+    js::Vector<js::Thread> threads(cx);
     CHECK(threads.reserve(NumThreads));
 
-    for (auto i : mozilla::MakeRange(NumThreads)) {
+    for (auto i : mozilla::IntegerRange(NumThreads)) {
         auto counterAndBit = js_new<CounterAndBit>(i, counter);
         CHECK(counterAndBit);
-        auto thread = PR_CreateThread(PR_USER_THREAD,
-                                      setBitAndCheck,
-                                      (void *) counterAndBit,
-                                      PR_PRIORITY_NORMAL,
-                                      PR_LOCAL_THREAD,
-                                      PR_JOINABLE_THREAD,
-                                      0);
-        CHECK(thread);
-        threads.infallibleAppend(thread);
+        CHECK(threads.emplaceBack());
+        CHECK(threads.back().init(setBitAndCheck, counterAndBit));
     }
 
-    for (auto thread : threads) {
-        CHECK(PR_JoinThread(thread) == PR_SUCCESS);
-    }
+    for (auto& thread : threads)
+        thread.join();
 
     return true;
 }

@@ -4,7 +4,6 @@
  * See also Bug 1175858.
  */
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 const PREF = "privacy.trackingprotection.enabled";
 const PB_PREF = "privacy.trackingprotection.pbmode.enabled";
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/general/benignPage.html";
@@ -12,7 +11,7 @@ const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/
 var TrackingProtection = null;
 var tabbrowser = null;
 
-var {UrlClassifierTestUtils} = Cu.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
+var {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
 
 registerCleanupFunction(function() {
   TrackingProtection = tabbrowser = null;
@@ -28,9 +27,9 @@ function waitForSecurityChange(numChanges = 1) {
   return new Promise(resolve => {
     let n = 0;
     let listener = {
-      onSecurityChange: function() {
+      onSecurityChange() {
         n = n + 1;
-        info ("Recieved onSecurityChange event " + n + " of " + numChanges);
+        info("Received onSecurityChange event " + n + " of " + numChanges);
         if (n >= numChanges) {
           tabbrowser.removeProgressListener(listener);
           resolve();
@@ -41,15 +40,15 @@ function waitForSecurityChange(numChanges = 1) {
   });
 }
 
-function* testTrackingProtectionAnimation() {
+async function testTrackingProtectionAnimation() {
   info("Load a test page not containing tracking elements");
-  let benignTab = yield BrowserTestUtils.openNewForegroundTab(tabbrowser, BENIGN_PAGE);
+  let benignTab = await BrowserTestUtils.openNewForegroundTab(tabbrowser, BENIGN_PAGE);
 
   ok(!TrackingProtection.icon.hasAttribute("state"), "icon: no state");
   ok(TrackingProtection.icon.hasAttribute("animate"), "icon: animate");
 
   info("Load a test page containing tracking elements");
-  let trackingTab = yield BrowserTestUtils.openNewForegroundTab(tabbrowser, TRACKING_PAGE);
+  let trackingTab = await BrowserTestUtils.openNewForegroundTab(tabbrowser, TRACKING_PAGE);
 
   ok(TrackingProtection.icon.hasAttribute("state"), "icon: state");
   ok(TrackingProtection.icon.hasAttribute("animate"), "icon: animate");
@@ -57,7 +56,7 @@ function* testTrackingProtectionAnimation() {
   info("Switch from tracking -> benign tab");
   let securityChanged = waitForSecurityChange();
   tabbrowser.selectedTab = benignTab;
-  yield securityChanged;
+  await securityChanged;
 
   ok(!TrackingProtection.icon.hasAttribute("state"), "icon: no state");
   ok(!TrackingProtection.icon.hasAttribute("animate"), "icon: no animate");
@@ -65,7 +64,7 @@ function* testTrackingProtectionAnimation() {
   info("Switch from benign -> tracking tab");
   securityChanged = waitForSecurityChange();
   tabbrowser.selectedTab = trackingTab;
-  yield securityChanged;
+  await securityChanged;
 
   ok(TrackingProtection.icon.hasAttribute("state"), "icon: state");
   ok(!TrackingProtection.icon.hasAttribute("animate"), "icon: no animate");
@@ -73,14 +72,14 @@ function* testTrackingProtectionAnimation() {
   info("Reload tracking tab");
   securityChanged = waitForSecurityChange(2);
   tabbrowser.reload();
-  yield securityChanged;
+  await securityChanged;
 
   ok(TrackingProtection.icon.hasAttribute("state"), "icon: state");
   ok(TrackingProtection.icon.hasAttribute("animate"), "icon: animate");
 }
 
-add_task(function* testNormalBrowsing() {
-  yield UrlClassifierTestUtils.addTestTrackers();
+add_task(async function testNormalBrowsing() {
+  await UrlClassifierTestUtils.addTestTrackers();
 
   tabbrowser = gBrowser;
 
@@ -90,11 +89,11 @@ add_task(function* testNormalBrowsing() {
   Services.prefs.setBoolPref(PREF, true);
   ok(TrackingProtection.enabled, "TP is enabled after setting the pref");
 
-  yield testTrackingProtectionAnimation();
+  await testTrackingProtectionAnimation();
 });
 
-add_task(function* testPrivateBrowsing() {
-  let privateWin = yield promiseOpenAndLoadWindow({private: true}, true);
+add_task(async function testPrivateBrowsing() {
+  let privateWin = await promiseOpenAndLoadWindow({private: true}, true);
   tabbrowser = privateWin.gBrowser;
 
   TrackingProtection = tabbrowser.ownerGlobal.TrackingProtection;
@@ -103,7 +102,7 @@ add_task(function* testPrivateBrowsing() {
   Services.prefs.setBoolPref(PB_PREF, true);
   ok(TrackingProtection.enabled, "TP is enabled after setting the pref");
 
-  yield testTrackingProtectionAnimation();
+  await testTrackingProtectionAnimation();
 
   privateWin.close();
 });

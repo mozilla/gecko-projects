@@ -18,45 +18,46 @@
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/UnionConversions.h"
 #include "mozilla/EventDispatcher.h"
+#include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsIPresShell.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptError.h"
 #include "nsPresContext.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 namespace dom {
 
-PostMessageEvent::PostMessageEvent(nsGlobalWindow* aSource,
+PostMessageEvent::PostMessageEvent(nsGlobalWindowOuter* aSource,
                                    const nsAString& aCallerOrigin,
-                                   nsGlobalWindow* aTargetWindow,
+                                   nsGlobalWindowOuter* aTargetWindow,
                                    nsIPrincipal* aProvidedPrincipal,
                                    nsIDocument* aSourceDocument,
                                    bool aTrustedCaller)
-: StructuredCloneHolder(CloningSupported, TransferringSupported,
-                        SameProcessSameThread),
-  mSource(aSource),
-  mCallerOrigin(aCallerOrigin),
-  mTargetWindow(aTargetWindow),
-  mProvidedPrincipal(aProvidedPrincipal),
-  mSourceDocument(aSourceDocument),
-  mTrustedCaller(aTrustedCaller)
+  : Runnable("dom::PostMessageEvent")
+  , StructuredCloneHolder(CloningSupported,
+                          TransferringSupported,
+                          StructuredCloneScope::SameProcessSameThread)
+  , mSource(aSource)
+  , mCallerOrigin(aCallerOrigin)
+  , mTargetWindow(aTargetWindow)
+  , mProvidedPrincipal(aProvidedPrincipal)
+  , mSourceDocument(aSourceDocument)
+  , mTrustedCaller(aTrustedCaller)
 {
-  MOZ_COUNT_CTOR(PostMessageEvent);
 }
 
 PostMessageEvent::~PostMessageEvent()
 {
-  MOZ_COUNT_DTOR(PostMessageEvent);
 }
 
 NS_IMETHODIMP
 PostMessageEvent::Run()
 {
-  MOZ_ASSERT(mTargetWindow->IsOuterWindow(),
-             "should have been passed an outer window!");
-  MOZ_ASSERT(!mSource || mSource->IsOuterWindow(),
-             "should have been passed an outer window!");
-
+  // Note: We don't init this AutoJSAPI with targetWindow, because we do not
+  // want exceptions during message deserialization to trigger error events on
+  // targetWindow.
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
@@ -70,15 +71,13 @@ PostMessageEvent::Run()
   // If we bailed before this point we're going to leak mMessage, but
   // that's probably better than crashing.
 
-  RefPtr<nsGlobalWindow> targetWindow;
+  RefPtr<nsGlobalWindowInner> targetWindow;
   if (mTargetWindow->IsClosedOrClosing() ||
       !(targetWindow = mTargetWindow->GetCurrentInnerWindowInternal()) ||
-      targetWindow->IsClosedOrClosing())
+      targetWindow->IsDying())
     return NS_OK;
 
-  MOZ_ASSERT(targetWindow->IsInnerWindow(),
-             "we ordered an inner window!");
-  JSAutoCompartment ac(cx, targetWindow->GetWrapperPreserveColor());
+  JSAutoRealm ar(cx, targetWindow->GetWrapper());
 
   // Ensure that any origin which might have been provided is the origin of this
   // window's document.  Note that we do this *now* instead of when postMessage
@@ -102,6 +101,23 @@ PostMessageEvent::Run()
     //       now.  Long-term, we want HTML5 to address this so that we can
     //       be compliant while being safer.
     if (!targetPrin->Equals(mProvidedPrincipal)) {
+      OriginAttributes sourceAttrs = mProvidedPrincipal->OriginAttributesRef();
+      OriginAttributes targetAttrs = targetPrin->OriginAttributesRef();
+
+      MOZ_DIAGNOSTIC_ASSERT(sourceAttrs.mAppId == targetAttrs.mAppId,
+        "Target and source should have the same mAppId attribute.");
+      MOZ_DIAGNOSTIC_ASSERT(sourceAttrs.mUserContextId == targetAttrs.mUserContextId,
+        "Target and source should have the same userContextId attribute.");
+      MOZ_DIAGNOSTIC_ASSERT(sourceAttrs.mInIsolatedMozBrowser == targetAttrs.mInIsolatedMozBrowser,
+        "Target and source should have the same inIsolatedMozBrowser attribute.");
+
+      if (!nsContentUtils::IsSystemOrExpandedPrincipal(targetPrin) &&
+          !nsContentUtils::IsSystemOrExpandedPrincipal(mProvidedPrincipal) &&
+          !mTrustedCaller) {
+        MOZ_DIAGNOSTIC_ASSERT(sourceAttrs.mPrivateBrowsingId == targetAttrs.mPrivateBrowsingId,
+          "Target and source should have the same mPrivateBrowsingId attribute.");
+      }
+
       nsAutoString providedOrigin, targetOrigin;
       nsresult rv = nsContentUtils::GetUTFOrigin(targetPrin, targetOrigin);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -120,54 +136,77 @@ PostMessageEvent::Run()
     }
   }
 
-  ErrorResult rv;
+  IgnoredErrorResult rv;
   JS::Rooted<JS::Value> messageData(cx);
-  nsCOMPtr<nsPIDOMWindowInner> window = targetWindow->AsInner();
+  nsCOMPtr<mozilla::dom::EventTarget> eventTarget = do_QueryObject(targetWindow);
 
-  Read(window, cx, &messageData, rv);
+  Read(targetWindow->AsInner(), cx, &messageData, rv);
   if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
+    DispatchError(cx, targetWindow, eventTarget);
+    return NS_OK;
   }
 
   // Create the event
-  nsCOMPtr<mozilla::dom::EventTarget> eventTarget = do_QueryObject(targetWindow);
-  RefPtr<MessageEvent> event =
-    new MessageEvent(eventTarget, nullptr, nullptr);
+  RefPtr<MessageEvent> event = new MessageEvent(eventTarget, nullptr, nullptr);
 
 
-  Nullable<WindowProxyOrMessagePort> source;
+  Nullable<WindowProxyOrMessagePortOrServiceWorker> source;
   source.SetValue().SetAsWindowProxy() = mSource ? mSource->AsOuter() : nullptr;
 
+  Sequence<OwningNonNull<MessagePort>> ports;
+  if (!TakeTransferredPortsAsSequence(ports)) {
+    DispatchError(cx, targetWindow, eventTarget);
+    return NS_OK;
+  }
+
   event->InitMessageEvent(nullptr, NS_LITERAL_STRING("message"),
-                          false /*non-bubbling */, false /*cancelable */,
+                          CanBubble::eNo, Cancelable::eNo,
                           messageData, mCallerOrigin,
-                          EmptyString(), source, nullptr);
+                          EmptyString(), source, ports);
 
-  nsTArray<RefPtr<MessagePort>> ports = TakeTransferredPorts();
+  Dispatch(targetWindow, event);
+  return NS_OK;
+}
 
-  event->SetPorts(new MessagePortList(static_cast<dom::Event*>(event.get()),
-                                      ports));
+void
+PostMessageEvent::DispatchError(JSContext* aCx, nsGlobalWindowInner* aTargetWindow,
+                                mozilla::dom::EventTarget* aEventTarget)
+{
+  RootedDictionary<MessageEventInit> init(aCx);
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mOrigin = mCallerOrigin;
 
+  if (mSource) {
+    init.mSource.SetValue().SetAsWindowProxy() = mSource->AsOuter();
+  }
+
+  RefPtr<Event> event =
+    MessageEvent::Constructor(aEventTarget, NS_LITERAL_STRING("messageerror"),
+                              init);
+  Dispatch(aTargetWindow, event);
+}
+
+void
+PostMessageEvent::Dispatch(nsGlobalWindowInner* aTargetWindow, Event* aEvent)
+{
   // We can't simply call dispatchEvent on the window because doing so ends
   // up flipping the trusted bit on the event, and we don't want that to
   // happen because then untrusted content can call postMessage on a chrome
   // window if it can get a reference to it.
 
-  nsIPresShell *shell = targetWindow->GetExtantDoc()->GetShell();
-  RefPtr<nsPresContext> presContext;
-  if (shell)
-    presContext = shell->GetPresContext();
+  RefPtr<nsPresContext> presContext =
+    aTargetWindow->GetExtantDoc()->GetPresContext();
 
-  event->SetTrusted(mTrustedCaller);
-  WidgetEvent* internalEvent = event->WidgetEventPtr();
+  aEvent->SetTrusted(mTrustedCaller);
+  WidgetEvent* internalEvent = aEvent->WidgetEventPtr();
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  EventDispatcher::Dispatch(window,
+  EventDispatcher::Dispatch(aTargetWindow->AsInner(),
                             presContext,
                             internalEvent,
-                            static_cast<dom::Event*>(event.get()),
+                            aEvent,
                             &status);
-  return NS_OK;
 }
 
 } // namespace dom

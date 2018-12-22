@@ -5,18 +5,17 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "ContentPref",
   "cbHandleResult",
   "cbHandleError",
   "cbHandleCompletion",
   "safeCallback",
+  "_methodsCallableFromChild",
 ];
 
-const { interfaces: Ci, classes: Cc, results: Cr, utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function ContentPref(domain, name, value) {
   this.domain = domain;
@@ -25,7 +24,7 @@ function ContentPref(domain, name, value) {
 }
 
 ContentPref.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPref]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPref]),
 };
 
 function cbHandleResult(callback, pref) {
@@ -45,8 +44,24 @@ function safeCallback(callbackObj, methodName, args) {
     return;
   try {
     callbackObj[methodName].apply(callbackObj, args);
-  }
-  catch (err) {
+  } catch (err) {
     Cu.reportError(err);
   }
 }
+
+const _methodsCallableFromChild = Object.freeze([
+  ["getByName", ["name", "context", "callback"]],
+  ["getByDomainAndName", ["domain", "name", "context", "callback"]],
+  ["getBySubdomainAndName", ["domain", "name", "context", "callback"]],
+  ["getGlobal", ["name", "context", "callback"]],
+  ["set", ["domain", "name", "value", "context", "callback"]],
+  ["setGlobal", ["name", "value", "context", "callback"]],
+  ["removeByDomainAndName", ["domain", "name", "context", "callback"]],
+  ["removeBySubdomainAndName", ["domain", "name", "context", "callback"]],
+  ["removeGlobal", ["name", "context", "callback"]],
+  ["removeByDomain", ["domain", "context", "callback"]],
+  ["removeBySubdomain", ["domain", "context", "callback"]],
+  ["removeByName", ["name", "context", "callback"]],
+  ["removeAllDomains", ["context", "callback"]],
+  ["removeAllGlobals", ["context", "callback"]],
+]);

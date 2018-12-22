@@ -37,8 +37,6 @@
 #include <ucontext.h>
 #endif
 
-static const char* gProgname = "huh?";
-
 // Note: some tests manipulate this value.
 unsigned int _gdb_sleep_duration = 300;
 
@@ -59,6 +57,8 @@ unsigned int _gdb_sleep_duration = 300;
 #include <unistd.h>
 #include "nsISupportsUtils.h"
 #include "mozilla/StackWalk.h"
+
+static const char* gProgname = "huh?";
 
 // NB: keep me up to date with the same variable in
 // ipc/chromium/chrome/common/ipc_channel_posix.cc
@@ -89,8 +89,7 @@ ah_crap_handler(int signum)
          signum);
 
   printf("Stack:\n");
-  MozStackWalk(PrintStackFrame, /* skipFrames */ 2, /* maxFrames */ 0,
-               nullptr, 0, nullptr);
+  MozStackWalk(PrintStackFrame, /* skipFrames */ 2, /* maxFrames */ 0, nullptr);
 
   printf("Sleeping for %d seconds.\n",_gdb_sleep_duration);
   printf("Type 'gdb %s %d' to attach your debugger to this thread.\n",
@@ -229,10 +228,12 @@ static void fpehandler(int signum, siginfo_t *si, void *context)
 
 void InstallSignalHandlers(const char *aProgname)
 {
+#if defined(CRAWL_STACK_ON_SIGSEGV)
   const char* tmp = PL_strdup(aProgname);
   if (tmp) {
     gProgname = tmp;
   }
+#endif // CRAWL_STACK_ON_SIGSEGV
 
   const char *gdbSleep = PR_GetEnv("MOZ_GDB_SLEEP");
   if (gdbSleep && *gdbSleep)
@@ -264,7 +265,7 @@ void InstallSignalHandlers(const char *aProgname)
   sigaction(SIGFPE, &sa, &osa);
 #endif
 
-  if (XRE_IsContentProcess()) {
+  if (!XRE_IsParentProcess()) {
     /*
      * If the user is debugging a Gecko parent process in gdb and hits ^C to
      * suspend, a SIGINT signal will be sent to the child. We ignore this signal
@@ -285,30 +286,6 @@ void InstallSignalHandlers(const char *aProgname)
     setrlimit(RLIMIT_AS, &r);
   }
 #endif
-
-#if defined(SOLARIS)
-#define NOFILES 512
-
-    // Boost Solaris file descriptors
-    {
-	struct rlimit rl;
-	
-	if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
-
-	    if (rl.rlim_cur < NOFILES) {
-		rl.rlim_cur = NOFILES;
-
-		if (setrlimit(RLIMIT_NOFILE, &rl) < 0) {
-		    perror("setrlimit(RLIMIT_NOFILE)");
-		    fprintf(stderr, "Cannot exceed hard limit for open files");
-		}
-#if defined(DEBUG)
-	    	if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
-		    printf("File descriptors set to %d\n", rl.rlim_cur);
-#endif //DEBUG
-	    }
-    }
-#endif //SOLARIS
 
 #if defined(MOZ_WIDGET_GTK) && (GLIB_MAJOR_VERSION > 2 || (GLIB_MAJOR_VERSION == 2 && GLIB_MINOR_VERSION >= 6))
   const char *assertString = PR_GetEnv("XPCOM_DEBUG_BREAK");

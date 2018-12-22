@@ -6,25 +6,20 @@
 #ifndef mozilla_ICUUtils_h__
 #define mozilla_ICUUtils_h__
 
-// We only build the ICU utils if we're building ICU:
-#ifdef ENABLE_INTL_API
-
 // The ICU utils implementation needs internal things like XPCOM strings and
 // nsGkAtom, so we only build when included into internal libs:
 #ifdef MOZILLA_INTERNAL_API
 
 #include "mozilla/Scoped.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "unicode/unum.h" // for UNumberFormat
 
 class nsIContent;
 
-namespace {
-  struct ScopedUNumberFormatTraits {
-    typedef UNumberFormat* type;
-    static type empty() { return nullptr; }
-    static void release(type handle) { if (handle) unum_close(handle); }
-  };
+struct ScopedUNumberFormatTraits {
+  typedef UNumberFormat* type;
+  static type empty() { return nullptr; }
+  static void release(type handle) { if (handle) unum_close(handle); }
 };
 typedef mozilla::Scoped<ScopedUNumberFormatTraits> AutoCloseUNumberFormat;
 
@@ -107,8 +102,6 @@ public:
 #endif
 };
 
-#endif /* ENABLE_INTL_API */
 #endif /* MOZILLA_INTERNAL_API */
 
 #endif /* mozilla_ICUUtils_h__ */
-

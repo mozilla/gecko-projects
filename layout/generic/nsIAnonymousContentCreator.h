@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,8 +12,9 @@
 #ifndef nsIAnonymousContentCreator_h___
 #define nsIAnonymousContentCreator_h___
 
+#include "mozilla/ComputedStyle.h"
+
 #include "nsQueryFrame.h"
-#include "nsStyleContext.h"
 #include "nsTArrayForwardDeclare.h"
 
 class nsIContent;
@@ -34,12 +36,7 @@ public:
       mContent(aContent)
     {}
 
-    ContentInfo(nsIContent* aContent, nsStyleContext* aStyleContext) :
-      mContent(aContent), mStyleContext(aStyleContext)
-    {}
-
     nsIContent* mContent;
-    RefPtr<nsStyleContext> mStyleContext;
     nsTArray<ContentInfo> mChildren;
   };
 
@@ -66,18 +63,12 @@ public:
    * Appends "native" anonymous children created by CreateAnonymousContent()
    * to the given content list depending on the filter.
    *
-   * @see nsIContent::GetChildren for set of values used for filter.
+   * @see nsIContent::GetChildren for set of values used for filter.  Currently,
+   *   eSkipPlaceholderContent is the only flag that any implementation of
+   *   this method heeds.
    */
   virtual void AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                         uint32_t aFilter) = 0;
-
-  /**
-   * Implementations can override this method to create special frames for the
-   * anonymous content returned from CreateAnonymousContent.
-   * By default this method returns nullptr, which means the default frame
-   * is created.
-   */
-  virtual nsIFrame* CreateFrameFor(nsIContent* aContent) { return nullptr; }
 };
 
 #endif

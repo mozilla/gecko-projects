@@ -4,12 +4,12 @@
 
 "use strict";
 
-//Services.prefs.setBoolPref("signon.debug", true);
+// Services.prefs.setBoolPref("signon.debug", true);
 
-Cu.importGlobalProperties(["URL"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
-const LMCBackstagePass = Cu.import("resource://gre/modules/LoginManagerContent.jsm");
-const { LoginManagerContent, FormLikeFactory } = LMCBackstagePass;
+const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", {});
+const { LoginManagerContent, LoginFormFactory } = LMCBackstagePass;
 const TESTCASES = [
   {
     description: "1 password field outside of a <form>",
@@ -111,19 +111,19 @@ const TESTCASES = [
 ];
 
 for (let tc of TESTCASES) {
-  do_print("Sanity checking the testcase: " + tc.description);
+  info("Sanity checking the testcase: " + tc.description);
 
   (function() {
     let testcase = tc;
-    add_task(function*() {
-      do_print("Starting testcase: " + testcase.description);
+    add_task(async function() {
+      info("Starting testcase: " + testcase.description);
       let document = MockDocument.createTestDocument("http://localhost:8080/test/",
                                                       testcase.document);
 
       let input = document.querySelector("input");
       MockDocument.mockOwnerDocumentProperty(input, document, "http://localhost:8080/test/");
 
-      let formLike = FormLikeFactory.createFromField(input);
+      let formLike = LoginFormFactory.createFromField(input);
 
       let actual = LoginManagerContent._getFormFields(formLike,
                                                       testcase.skipEmptyFields,

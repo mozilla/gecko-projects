@@ -18,37 +18,34 @@ const TEST_URI = `
   Testing the color picker tooltip!
 `;
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {view} = yield openRuleView();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {view} = await openRuleView();
 
-  let cSwatch = getRuleViewProperty(view, "body", "color").valueSpan
-    .querySelector(".ruleview-colorswatch");
-  let bgSwatch = getRuleViewProperty(view, "body", "background-color").valueSpan
-    .querySelector(".ruleview-colorswatch");
-  let bSwatch = getRuleViewProperty(view, "body", "border").valueSpan
-    .querySelector(".ruleview-colorswatch");
+  const propertiesToTest = ["color", "background-color", "border"];
 
-  for (let swatch of [cSwatch, bgSwatch, bSwatch]) {
-    info("Testing that the colorpicker appears colorswatch click");
-    yield testColorPickerAppearsOnColorSwatchClick(view, swatch);
+  for (const property of propertiesToTest) {
+    info("Testing that the colorpicker appears on swatch click");
+    const value = getRuleViewProperty(view, "body", property).valueSpan;
+    const swatch = value.querySelector(".ruleview-colorswatch");
+    await testColorPickerAppearsOnColorSwatchClick(view, swatch);
   }
 });
 
-function* testColorPickerAppearsOnColorSwatchClick(view, swatch) {
-  let cPicker = view.tooltips.colorPicker;
+async function testColorPickerAppearsOnColorSwatchClick(view, swatch) {
+  const cPicker = view.tooltips.getTooltip("colorPicker");
   ok(cPicker, "The rule-view has the expected colorPicker property");
 
-  let cPickerPanel = cPicker.tooltip.panel;
+  const cPickerPanel = cPicker.tooltip.panel;
   ok(cPickerPanel, "The XUL panel for the color picker exists");
 
-  let onShown = cPicker.tooltip.once("shown");
+  const onColorPickerReady = cPicker.once("ready");
   swatch.click();
-  yield onShown;
+  await onColorPickerReady;
 
   ok(true, "The color picker was shown on click of the color swatch");
   ok(!inplaceEditor(swatch.parentNode),
     "The inplace editor wasn't shown as a result of the color swatch click");
 
-  yield hideTooltipAndWaitForRuleViewChanged(cPicker, view);
+  await hideTooltipAndWaitForRuleViewChanged(cPicker, view);
 }

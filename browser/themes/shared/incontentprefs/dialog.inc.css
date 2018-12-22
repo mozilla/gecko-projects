@@ -6,8 +6,7 @@
 
 dialog,
 window,
-prefpane,
-prefwindow,
+.prefpane,
 .windowDialog {
   -moz-appearance: none;
   background-color: #fbfbfb;
@@ -46,11 +45,10 @@ tree:not(#rejectsTree) {
 }
 
 caption {
-  -moz-padding-start: 0;
+  padding-inline-start: 0;
 }
 
 groupbox {
-  font-size: 1em;
   margin-top: 0;
   margin-right: 4px;
   margin-left: 4px;
@@ -58,11 +56,15 @@ groupbox {
   padding-bottom: 5px;
 }
 
-prefpane .groupbox-body {
+.prefpane .groupbox-body {
   padding: 0 0 5px;
 }
 
 groupbox description {
   margin-right: 0;
   margin-left: 0;
+}
+
+menulist label {
+  font-weight: unset;
 }

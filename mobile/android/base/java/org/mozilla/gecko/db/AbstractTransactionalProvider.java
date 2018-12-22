@@ -13,6 +13,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.text.TextUtils;
 import android.util.Log;
+import java.util.Arrays;
 
 /**
  * This abstract class exists to capture some of the transaction-handling
@@ -41,8 +42,6 @@ import android.util.Log;
  *
  * * {@link AbstractPerProfileDatabaseProvider} provides a simple abstraction for
  *   querying databases that are stored in the user's profile directory.
- * * {@link PerProfileDatabaseProvider} is a simple version that only allows a
- *   single ContentProvider to access each per-profile database.
  * * {@link SharedBrowserDatabaseProvider} is an example of a per-profile provider
  *   that allows for multiple providers to safely work with the same databases.
  */
@@ -89,15 +88,6 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
      */
     final ThreadLocal<Boolean> isInBatchOperation = new ThreadLocal<Boolean>();
 
-    /**
-     * Return true if OS version and database parallelism support indicates
-     * that this provider should bundle writes into transactions.
-     */
-    @SuppressWarnings("static-method")
-    protected boolean shouldUseTransactions() {
-        return Versions.feature11Plus;
-    }
-
     private boolean isInBatch() {
         final Boolean isInBatch = isInBatchOperation.get();
         if (isInBatch == null) {
@@ -116,7 +106,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
             return;
         }
 
-        if (shouldUseTransactions() && !db.inTransaction()) {
+        if (!db.inTransaction()) {
             trace("beginWrite: beginning transaction.");
             db.beginTransaction();
         }
@@ -132,7 +122,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
             return;
         }
 
-        if (shouldUseTransactions() && db.inTransaction()) {
+        if (db.inTransaction()) {
             trace("Marking write transaction successful.");
             db.setTransactionSuccessful();
         }
@@ -142,7 +132,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
      * If we're not in a batch, but we are in a write transaction,
      * end it.
      *
-     * @see PerProfileDatabaseProvider#markWriteSuccessful(SQLiteDatabase)
+     * @see AbstractTransactionalProvider#markWriteSuccessful(SQLiteDatabase)
      */
     protected void endWrite(final SQLiteDatabase db) {
         if (isInBatch()) {
@@ -150,7 +140,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
             return;
         }
 
-        if (shouldUseTransactions() && db.inTransaction()) {
+        if (db.inTransaction()) {
             trace("endWrite: ending transaction.");
             db.endTransaction();
         }
@@ -180,7 +170,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
-        trace("Calling delete on URI: " + uri + ", " + selection + ", " + selectionArgs);
+        trace("Calling delete on URI: " + uri + ", " + selection + ", " + Arrays.toString(selectionArgs));
 
         final SQLiteDatabase db = getWritableDatabase(uri);
         int deleted = 0;
@@ -227,7 +217,7 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
 
     @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
-        trace("Calling update on URI: " + uri + ", " + selection + ", " + selectionArgs);
+        trace("Calling update on URI: " + uri + ", " + selection + ", " + Arrays.toString(selectionArgs));
 
         final SQLiteDatabase db = getWritableDatabase(uri);
         int updated = 0;
@@ -321,6 +311,11 @@ public abstract class AbstractTransactionalProvider extends ContentProvider {
     protected static boolean isCallerSync(Uri uri) {
         String isSync = uri.getQueryParameter(BrowserContract.PARAM_IS_SYNC);
         return !TextUtils.isEmpty(isSync);
+    }
+
+    protected static boolean shouldIncrementLocalVersionFromSync(Uri uri) {
+        String shouldIncrement = uri.getQueryParameter(BrowserContract.PARAM_INCREMENT_LOCAL_VERSION_FROM_SYNC);
+        return !TextUtils.isEmpty(shouldIncrement);
     }
 
     protected static void trace(String message) {

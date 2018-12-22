@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -8,6 +9,7 @@
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/Compositor.h"
+#include "mozilla/layers/SyncObject.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureHost.h"
 #include "gfxWindowsPlatform.h"
@@ -17,24 +19,34 @@
 #include <vector>
 
 namespace mozilla {
+namespace gl {
+class GLBlitHelper;
+}
+
 namespace layers {
+
+class MOZ_RAII AutoTextureLock
+{
+public:
+  AutoTextureLock(IDXGIKeyedMutex* aMutex, HRESULT& aResult,
+                  uint32_t aTimeout = 0);
+  ~AutoTextureLock();
+
+private:
+  RefPtr<IDXGIKeyedMutex> mMutex;
+  HRESULT mResult;
+};
 
 class CompositorD3D11;
 
 class DXGITextureData : public TextureData
 {
 public:
-  virtual gfx::IntSize GetSize() const override { return mSize; }
- 
-  virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
- 
-  virtual bool SupportsMoz2D() const override { return true; }
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
 
-  virtual bool HasIntermediateBuffer() const override { return false; }
-
-  virtual bool HasSynchronization() const override { return mHasSynchronization; }
-
+  bool SerializeSpecific(SurfaceDescriptorD3D10* aOutDesc);
   virtual bool Serialize(SurfaceDescriptor& aOutDescrptor) override;
+  virtual void GetSubDescriptor(GPUVideoSubDescriptor* aOutDesc) override;
 
   static DXGITextureData*
   Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat, TextureAllocationFlags aFlags);
@@ -66,26 +78,30 @@ public:
   Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
          TextureAllocationFlags aAllocFlags,
          ID3D11Device* aDevice = nullptr);
+  static DXGITextureData*
+  Create(gfx::SourceSurface* aSurface,
+         TextureAllocationFlags aAllocFlags,
+         ID3D11Device* aDevice = nullptr);
 
   virtual bool UpdateFromSurface(gfx::SourceSurface* aSurface) override;
 
-  virtual bool Lock(OpenMode aMode, FenceHandle*) override;
+  virtual bool Lock(OpenMode aMode) override;
 
   virtual void Unlock() override;
 
   virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override;
 
   virtual TextureData*
-  CreateSimilar(ClientIPCAllocator* aAllocator,
+  CreateSimilar(LayersIPCChannel* aAllocator,
+                LayersBackend aLayersBackend,
                 TextureFlags aFlags,
                 TextureAllocationFlags aAllocFlags) const override;
 
-  // TODO - merge this with the FenceHandle API!
-  virtual void SyncWithObject(SyncObject* aSync) override;
+  virtual void SyncWithObject(SyncObjectClient* aSyncObject) override;
 
   ID3D11Texture2D* GetD3D11Texture() { return mTexture; }
 
-  virtual void Deallocate(ClientIPCAllocator* aAllocator) override;
+  virtual void Deallocate(LayersIPCChannel* aAllocator) override;
 
   D3D11TextureData* AsD3D11TextureData() override {
     return this;
@@ -100,6 +116,12 @@ protected:
 
   virtual void GetDXGIResource(IDXGIResource** aOutResource) override;
 
+  static DXGITextureData*
+  Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
+         gfx::SourceSurface* aSurface,
+         TextureAllocationFlags aAllocFlags,
+         ID3D11Device* aDevice = nullptr);
+
   RefPtr<ID3D11Texture2D> mTexture;
 };
 
@@ -107,58 +129,46 @@ already_AddRefed<TextureClient>
 CreateD3D11extureClientWithDevice(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
                                   TextureFlags aTextureFlags, TextureAllocationFlags aAllocFlags,
                                   ID3D11Device* aDevice,
-                                  ClientIPCAllocator* aAllocator);
+                                  LayersIPCChannel* aAllocator);
 
 class DXGIYCbCrTextureData : public TextureData
 {
+  friend class gl::GLBlitHelper;
 public:
   static DXGIYCbCrTextureData*
-  Create(ClientIPCAllocator* aAllocator,
-         TextureFlags aFlags,
-         IUnknown* aTextureY,
-         IUnknown* aTextureCb,
-         IUnknown* aTextureCr,
+  Create(IDirect3DTexture9* aTextureY,
+         IDirect3DTexture9* aTextureCb,
+         IDirect3DTexture9* aTextureCr,
          HANDLE aHandleY,
          HANDLE aHandleCb,
          HANDLE aHandleCr,
          const gfx::IntSize& aSize,
          const gfx::IntSize& aSizeY,
-         const gfx::IntSize& aSizeCbCr);
+         const gfx::IntSize& aSizeCbCr,
+         YUVColorSpace aYUVColorSpace);
 
   static DXGIYCbCrTextureData*
-  Create(ClientIPCAllocator* aAllocator,
-         TextureFlags aFlags,
-         ID3D11Texture2D* aTextureCb,
+  Create(ID3D11Texture2D* aTextureCb,
          ID3D11Texture2D* aTextureY,
          ID3D11Texture2D* aTextureCr,
          const gfx::IntSize& aSize,
          const gfx::IntSize& aSizeY,
-         const gfx::IntSize& aSizeCbCr);
+         const gfx::IntSize& aSizeCbCr,
+         YUVColorSpace aYUVColorSpace);
 
-  virtual bool Lock(OpenMode, FenceHandle*) override { return true; }
+  virtual bool Lock(OpenMode) override { return true; }
 
   virtual void Unlock() override {}
 
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
+
+  void SerializeSpecific(SurfaceDescriptorDXGIYCbCr* aOutDesc);
   virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
-
-  // TODO - DXGIYCbCrTextureClient returned true but that looks like a mistake
-  virtual bool HasIntermediateBuffer() const override{ return false; }
-
-  virtual gfx::IntSize GetSize() const override { return mSize; }
-
-  virtual gfx::SurfaceFormat GetFormat() const override { return gfx::SurfaceFormat::YUV; }
-
-  virtual bool SupportsMoz2D() const override { return false; }
+  virtual void GetSubDescriptor(GPUVideoSubDescriptor* aOutDesc) override;
 
   virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() override { return nullptr; }
 
-  // This TextureData should not be used in a context where we use CreateSimilar
-  // (ex. component alpha) because the underlying texture is always created by
-  // an external producer.
-  virtual DXGIYCbCrTextureData*
-  CreateSimilar(ClientIPCAllocator*, TextureFlags, TextureAllocationFlags) const override { return nullptr; }
-
-  virtual void Deallocate(ClientIPCAllocator* aAllocator) override;
+  virtual void Deallocate(LayersIPCChannel* aAllocator) override;
 
   virtual bool UpdateFromSurface(gfx::SourceSurface*) override { return false; }
 
@@ -167,12 +177,35 @@ public:
     return TextureFlags::DEALLOCATE_MAIN_THREAD;
   }
 
+  DXGIYCbCrTextureData* AsDXGIYCbCrTextureData() override {
+    return this;
+  }
+
+  gfx::IntSize GetYSize() const
+  {
+    return mSizeY;
+  }
+
+  gfx::IntSize GetCbCrSize() const
+  {
+    return mSizeCbCr;
+  }
+
+  YUVColorSpace GetYUVColorSpace() const
+  {
+    return mYUVColorSpace;
+  }
+
+  ID3D11Texture2D* GetD3D11Texture(size_t index) { return mD3D11Textures[index]; }
+
 protected:
-   RefPtr<IUnknown> mHoldRefs[3];
+   RefPtr<ID3D11Texture2D> mD3D11Textures[3];
+   RefPtr<IDirect3DTexture9> mD3D9Textures[3];
    HANDLE mHandles[3];
    gfx::IntSize mSize;
    gfx::IntSize mSizeY;
    gfx::IntSize mSizeCbCr;
+   YUVColorSpace mYUVColorSpace;
 };
 
 /**
@@ -206,11 +239,19 @@ class DataTextureSourceD3D11 : public DataTextureSource
                              , public BigImageIterator
 {
 public:
-  DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, CompositorD3D11* aCompositor,
-                         TextureFlags aFlags);
+  /// Constructor allowing the texture to perform texture uploads.
+  ///
+  /// The texture can be used as an actual DataTextureSource.
+  DataTextureSourceD3D11(ID3D11Device* aDevice, gfx::SurfaceFormat aFormat, TextureFlags aFlags);
 
-  DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, CompositorD3D11* aCompositor,
-                         ID3D11Texture2D* aTexture);
+  /// Constructor for textures created around DXGI shared handles, disallowing
+  /// texture uploads.
+  ///
+  /// The texture CANNOT be used as a DataTextureSource.
+  DataTextureSourceD3D11(ID3D11Device* aDevice, gfx::SurfaceFormat aFormat, ID3D11Texture2D* aTexture);
+
+  DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, TextureSourceProvider* aProvider, ID3D11Texture2D* aTexture);
+  DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, TextureSourceProvider* aProvider, TextureFlags aFlags);
 
   virtual ~DataTextureSourceD3D11();
 
@@ -230,15 +271,14 @@ public:
 
   virtual ID3D11ShaderResourceView* GetShaderResourceView() override;
 
-  virtual DataTextureSource* AsDataTextureSource() override { return this; }
+  // Returns nullptr if this texture was created by a DXGI TextureHost.
+  virtual DataTextureSource* AsDataTextureSource() override { return mAllowTextureUploads ? this : nullptr; }
 
   virtual void DeallocateDeviceData() override { mTexture = nullptr; }
 
   virtual gfx::IntSize GetSize() const  override { return mSize; }
 
   virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
-
-  virtual void SetCompositor(Compositor* aCompositor) override;
 
   // BigImageIterator
 
@@ -258,27 +298,34 @@ public:
     mCurrentTile = 0;
   }
 
+  RefPtr<TextureSource> ExtractCurrentTile() override;
+
+  void Reset();
 protected:
   gfx::IntRect GetTileRect(uint32_t aIndex) const;
 
-  void Reset();
-
   std::vector< RefPtr<ID3D11Texture2D> > mTileTextures;
   std::vector< RefPtr<ID3D11ShaderResourceView> > mTileSRVs;
-  RefPtr<CompositorD3D11> mCompositor;
+  RefPtr<ID3D11Device> mDevice;
   gfx::SurfaceFormat mFormat;
   TextureFlags mFlags;
   uint32_t mCurrentTile;
   bool mIsTiled;
   bool mIterating;
-
+  // Sadly, the code was originally organized so that this class is used both in
+  // the cases where we want to perform texture uploads through the DataTextureSource
+  // interface, and the cases where we wrap the texture around an existing DXGI
+  // handle in which case we should not use it as a DataTextureSource.
+  // This member differentiates the two scenarios. When it is false the texture
+  // "pretends" to not be a DataTextureSource.
+  bool mAllowTextureUploads;
 };
 
 already_AddRefed<TextureClient>
 CreateD3D11TextureClientWithDevice(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
                                    TextureFlags aTextureFlags, TextureAllocationFlags aAllocFlags,
                                    ID3D11Device* aDevice,
-                                   ClientIPCAllocator* aAllocator);
+                                   LayersIPCChannel* aAllocator);
 
 
 /**
@@ -291,32 +338,52 @@ public:
                        const SurfaceDescriptorD3D10& aDescriptor);
 
   virtual bool BindTextureSource(CompositableTextureSourceRef& aTexture) override;
+  virtual bool AcquireTextureSource(CompositableTextureSourceRef& aTexture) override;
 
   virtual void DeallocateDeviceData() override {}
 
-  virtual void SetCompositor(Compositor* aCompositor) override;
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) override;
 
   virtual gfx::SurfaceFormat GetFormat() const override { return mFormat; }
 
   virtual bool Lock() override;
-
   virtual void Unlock() override;
+
+  virtual bool LockWithoutCompositor() override;
+  virtual void UnlockWithoutCompositor() override;
 
   virtual gfx::IntSize GetSize() const override { return mSize; }
 
-  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override
-  {
-    return nullptr;
-  }
+  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
+
+  virtual void CreateRenderTexture(const wr::ExternalImageId& aExternalImageId) override;
+
+  virtual uint32_t NumSubTextures() const override;
+
+  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
+                                   ResourceUpdateOp aOp,
+                                   const Range<wr::ImageKey>& aImageKeys,
+                                   const wr::ExternalImageId& aExtID) override;
+
+  virtual void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                const wr::LayoutRect& aBounds,
+                                const wr::LayoutRect& aClip,
+                                wr::ImageRendering aFilter,
+                                const Range<wr::ImageKey>& aImageKeys) override;
 
 protected:
+  bool LockInternal();
+  void UnlockInternal();
+
+  bool EnsureTextureSource();
+
   RefPtr<ID3D11Device> GetDevice();
 
-  bool OpenSharedHandle();
+  bool EnsureTexture();
 
+  RefPtr<ID3D11Device> mDevice;
   RefPtr<ID3D11Texture2D> mTexture;
   RefPtr<DataTextureSourceD3D11> mTextureSource;
-  RefPtr<CompositorD3D11> mCompositor;
   gfx::IntSize mSize;
   WindowsHandle mHandle;
   gfx::SurfaceFormat mFormat;
@@ -330,12 +397,15 @@ public:
                             const SurfaceDescriptorDXGIYCbCr& aDescriptor);
 
   virtual bool BindTextureSource(CompositableTextureSourceRef& aTexture) override;
+  virtual bool AcquireTextureSource(CompositableTextureSourceRef& aTexture) override;
 
   virtual void DeallocateDeviceData() override{}
 
-  virtual void SetCompositor(Compositor* aCompositor) override;
+  virtual void SetTextureSourceProvider(TextureSourceProvider* aProvider) override;
 
   virtual gfx::SurfaceFormat GetFormat() const override{ return gfx::SurfaceFormat::YUV; }
+
+  virtual YUVColorSpace GetYUVColorSpace() const override { return mYUVColorSpace; }
 
   virtual bool Lock() override;
 
@@ -348,18 +418,37 @@ public:
     return nullptr;
   }
 
+  virtual void CreateRenderTexture(const wr::ExternalImageId& aExternalImageId) override;
+
+  virtual uint32_t NumSubTextures() const override;
+
+  virtual void PushResourceUpdates(wr::TransactionBuilder& aResources,
+                                   ResourceUpdateOp aOp,
+                                   const Range<wr::ImageKey>& aImageKeys,
+                                   const wr::ExternalImageId& aExtID) override;
+
+  virtual void PushDisplayItems(wr::DisplayListBuilder& aBuilder,
+                                const wr::LayoutRect& aBounds,
+                                const wr::LayoutRect& aClip,
+                                wr::ImageRendering aFilter,
+                                const Range<wr::ImageKey>& aImageKeys) override;
+
+private:
+  bool EnsureTextureSource();
+
 protected:
   RefPtr<ID3D11Device> GetDevice();
 
-  bool OpenSharedHandle();
+  bool EnsureTexture();
 
   RefPtr<ID3D11Texture2D> mTextures[3];
   RefPtr<DataTextureSourceD3D11> mTextureSources[3];
 
-  RefPtr<CompositorD3D11> mCompositor;
   gfx::IntSize mSize;
+  gfx::IntSize mSizeCbCr;
   WindowsHandle mHandles[3];
   bool mIsLocked;
+  YUVColorSpace mYUVColorSpace;
 };
 
 class CompositingRenderTargetD3D11 : public CompositingRenderTarget,
@@ -382,24 +471,53 @@ public:
 
 private:
   friend class CompositorD3D11;
-
   RefPtr<ID3D11RenderTargetView> mRTView;
 };
 
-class SyncObjectD3D11 : public SyncObject
+class SyncObjectD3D11Host : public SyncObjectHost
 {
 public:
-  SyncObjectD3D11(SyncHandle aSyncHandle);
-  virtual void FinalizeFrame();
+  explicit SyncObjectD3D11Host(ID3D11Device* aDevice);
 
-  virtual SyncType GetSyncType() { return SyncType::D3D11; }
+  virtual bool Init() override;
+
+  virtual SyncHandle GetSyncHandle() override;
+
+  virtual bool Synchronize() override;
+
+  IDXGIKeyedMutex* GetKeyedMutex() { return mKeyedMutex.get(); };
+
+private:
+  virtual ~SyncObjectD3D11Host() { }
+
+  SyncHandle mSyncHandle;
+  RefPtr<ID3D11Device> mDevice;
+  RefPtr<IDXGIResource> mSyncTexture;
+  RefPtr<IDXGIKeyedMutex> mKeyedMutex;
+};
+
+class SyncObjectD3D11Client : public SyncObjectClient
+{
+public:
+  explicit SyncObjectD3D11Client(SyncHandle aSyncHandle, ID3D11Device* aDevice);
+
+  virtual bool Synchronize(bool aFallible) override;
+
+  virtual bool IsSyncObjectValid() override;
+
+  virtual SyncType GetSyncType() override { return SyncType::D3D11; }
 
   void RegisterTexture(ID3D11Texture2D* aTexture);
 
 private:
-  RefPtr<ID3D11Texture2D> mD3D11Texture;
-  std::vector<ID3D11Texture2D*> mD3D11SyncedTextures;
-  SyncHandle mHandle;
+  bool Init(bool aFallible);
+
+  SyncHandle mSyncHandle;
+  RefPtr<ID3D11Device> mDevice;
+  RefPtr<ID3D11Texture2D> mSyncTexture;
+  RefPtr<IDXGIKeyedMutex> mKeyedMutex;
+  std::vector<ID3D11Texture2D*> mSyncedTextures;
+  Mutex mSyncLock;
 };
 
 inline uint32_t GetMaxTextureSizeForFeatureLevel(D3D_FEATURE_LEVEL aFeatureLevel)
@@ -423,7 +541,40 @@ inline uint32_t GetMaxTextureSizeForFeatureLevel(D3D_FEATURE_LEVEL aFeatureLevel
   return maxTextureSize;
 }
 
-}
-}
+uint32_t GetMaxTextureSizeFromDevice(ID3D11Device* aDevice);
+void ReportTextureMemoryUsage(ID3D11Texture2D* aTexture, size_t aBytes);
+
+class AutoLockD3D11Texture
+{
+public:
+  explicit AutoLockD3D11Texture(ID3D11Texture2D* aTexture);
+  ~AutoLockD3D11Texture();
+
+private:
+  RefPtr<IDXGIKeyedMutex> mMutex;
+};
+
+class D3D11MTAutoEnter
+{
+public:
+  explicit D3D11MTAutoEnter(already_AddRefed<ID3D10Multithread> aMT)
+    : mMT(aMT)
+  {
+    if (mMT) {
+      mMT->Enter();
+    }
+  }
+  ~D3D11MTAutoEnter() {
+    if (mMT) {
+      mMT->Leave();
+    }
+  }
+
+private:
+  RefPtr<ID3D10Multithread> mMT;
+};
+
+} // namespace layers
+} // namespace mozilla
 
 #endif /* MOZILLA_GFX_TEXTURED3D11_H */

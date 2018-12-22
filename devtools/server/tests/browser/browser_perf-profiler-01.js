@@ -7,38 +7,39 @@
  * a recording is stopped.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
-const { PMM_isProfilerActive, PMM_stopProfiler, PMM_loadFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+"use strict";
 
-add_task(function*() {
-  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
-  let doc = browser.contentDocument;
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
+const { pmmIsProfilerActive, pmmLoadFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+
+add_task(async function() {
+  await addTab(MAIN_DOMAIN + "doc_perf.html");
 
   initDebuggerServer();
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = PerformanceFront(client, form);
-  yield front.connect();
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = PerformanceFront(client, form);
+  await front.connect();
 
-  PMM_loadFrameScripts(gBrowser);
+  pmmLoadFrameScripts(gBrowser);
 
-  ok(!(yield PMM_isProfilerActive()),
+  ok(!(await pmmIsProfilerActive()),
     "The built-in profiler module should not have been automatically started.");
 
-  let rec = yield front.startRecording();
-  yield front.stopRecording(rec);
-  ok((yield PMM_isProfilerActive()),
+  let rec = await front.startRecording();
+  await front.stopRecording(rec);
+  ok((await pmmIsProfilerActive()),
     "The built-in profiler module should still be active (1).");
 
-  rec = yield front.startRecording();
-  yield front.stopRecording(rec);
-  ok((yield PMM_isProfilerActive()),
+  rec = await front.startRecording();
+  await front.stopRecording(rec);
+  ok((await pmmIsProfilerActive()),
     "The built-in profiler module should still be active (2).");
 
-  yield front.destroy();
-  yield closeDebuggerClient(client);
+  await front.destroy();
+  await client.close();
 
-  ok(!(yield PMM_isProfilerActive()),
+  ok(!(await pmmIsProfilerActive()),
     "The built-in profiler module should no longer be active.");
 
   gBrowser.removeCurrentTab();

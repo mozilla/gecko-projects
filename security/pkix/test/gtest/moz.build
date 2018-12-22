@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,6 +9,7 @@ SOURCES += [
     'pkixcert_extension_tests.cpp',
     'pkixcert_signature_algorithm_tests.cpp',
     'pkixcheck_CheckExtendedKeyUsage_tests.cpp',
+    'pkixcheck_CheckIssuer_tests.cpp',
     'pkixcheck_CheckKeyUsage_tests.cpp',
     'pkixcheck_CheckSignatureAlgorithm_tests.cpp',
     'pkixcheck_CheckValidity_tests.cpp',
@@ -36,17 +37,27 @@ FINAL_LIBRARY = 'xul-gtest'
 
 include('../../warnings.mozbuild')
 
+# GTest uses a variadic macro in a questionable way and it doesn't seem to be
+# possible to selectively disable just that error when -pedantic-errors is set.
+if CONFIG['CC_TYPE'] == 'gcc':
+  CXXFLAGS.remove('-pedantic-errors')
+
 # These warnings are disabled in order to minimize the amount of boilerplate
 # required to implement tests, and/or because they originate in the GTest
 # framework in a way we cannot otherwise work around.
-if CONFIG['CLANG_CXX']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
   CXXFLAGS += [
-    '-Wno-exit-time-destructors',
-    '-Wno-global-constructors',
     '-Wno-old-style-cast',
-    '-Wno-used-but-marked-unused',
   ]
-elif CONFIG['_MSC_VER']:
+  if CONFIG['CC_TYPE'] == 'clang':
+    CXXFLAGS += [
+      '-Wno-exit-time-destructors',
+      '-Wno-global-constructors',
+      '-Wno-thread-safety',
+      '-Wno-used-but-marked-unused',
+      '-Wno-zero-as-null-pointer-constant',
+    ]
+elif CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
   CXXFLAGS += [
     '-wd4350', # behavior change: 'std::_Wrap_alloc<std::allocator<_Ty>>::...
     '-wd4275', # non dll-interface class used as base for dll-interface class

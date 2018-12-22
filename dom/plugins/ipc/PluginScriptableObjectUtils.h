@@ -61,7 +61,7 @@ NPObjectFromVariant(const Variant& aRemoteVariant)
     }
 
     default:
-      NS_NOTREACHED("Shouldn't get here!");
+      MOZ_ASSERT_UNREACHABLE("Shouldn't get here!");
       return nullptr;
   }
 }
@@ -183,7 +183,7 @@ public:
   {
     for (uint32_t index = 0; index < aCount; index++) {
       Variant* remoteVariant = mArray.AppendElement();
-      if (!(remoteVariant && 
+      if (!(remoteVariant &&
             ConvertToRemoteVariant(aArgs[index], *remoteVariant, aInstance,
                                    true))) {
         mOk = false;
@@ -200,7 +200,7 @@ public:
   {
     for (uint32_t index = 0; index < aCount; index++) {
       Variant* remoteVariant = mArray.AppendElement();
-      if (!(remoteVariant && 
+      if (!(remoteVariant &&
             ConvertToRemoteVariant(aArgs[index], *remoteVariant, aInstance,
                                    true))) {
         mOk = false;

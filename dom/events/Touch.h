@@ -10,9 +10,9 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/TouchBinding.h"
 #include "nsWrapperCache.h"
-#include "nsAutoPtr.h"
 #include "Units.h"
 
 class nsPresContext;
@@ -57,7 +57,8 @@ public:
 
   void InitializePoints(nsPresContext* aPresContext, WidgetEvent* aEvent);
 
-  void SetTarget(EventTarget* aTarget);
+  // Note, this sets both mOriginalTarget and mTarget.
+  void SetTouchTarget(EventTarget* aTarget);
 
   bool Equals(Touch* aTouch);
 
@@ -68,20 +69,27 @@ public:
   // WebIDL
   int32_t Identifier() const { return mIdentifier; }
   EventTarget* GetTarget() const;
-  int32_t ScreenX() const { return mScreenPoint.x; }
-  int32_t ScreenY() const { return mScreenPoint.y; }
+  int32_t ScreenX(CallerType aCallerType) const;
+  int32_t ScreenY(CallerType aCallerType) const;
   int32_t ClientX() const { return mClientPoint.x; }
   int32_t ClientY() const { return mClientPoint.y; }
   int32_t PageX() const { return mPagePoint.x; }
   int32_t PageY() const { return mPagePoint.y; }
-  int32_t RadiusX() const { return mRadius.x; }
-  int32_t RadiusY() const { return mRadius.y; }
-  float RotationAngle() const { return mRotationAngle; }
-  float Force() const { return mForce; }
+  int32_t RadiusX(CallerType aCallerType) const;
+  int32_t RadiusY(CallerType aCallerType) const;
+  float RotationAngle(CallerType aCallerType) const;
+  float Force(CallerType aCallerType) const;
 
+  nsCOMPtr<EventTarget> mOriginalTarget;
   nsCOMPtr<EventTarget> mTarget;
   LayoutDeviceIntPoint mRefPoint;
   bool mChanged;
+
+  // Is this touch instance being suppressed to dispatch touch event to content.
+  // We can't remove touch instance from WidgetTouchEvent::mTouches because we
+  // still need it when dispatching pointer events.
+  bool mIsTouchEventSuppressed;
+
   uint32_t mMessage;
   int32_t mIdentifier;
   CSSIntPoint mPagePoint;

@@ -5,15 +5,11 @@
 
 "use strict";
 
-/**
- * Whitelisting this test.
- * As part of bug 1077403, the leaking uncaught rejection should be fixed.
- */
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed("Error: Shader Editor is " +
-  "still waiting for a WebGL context to be created.");
-
 const { DebuggerServer } = require("devtools/server/main");
-const { DebuggerClient } = require("devtools/shared/client/main");
+const { DebuggerClient } = require("devtools/shared/client/debugger-client");
+
+// Bug 1277805: Too slow for debug runs
+requestLongerTimeout(2);
 
 /**
  * Bug 979536: Ensure fronts are destroyed after toolbox close.
@@ -42,47 +38,43 @@ const { DebuggerClient } = require("devtools/shared/client/main");
  */
 
 function runTools(target) {
-  return Task.spawn(function*() {
-    let toolIds = gDevTools.getToolDefinitionArray()
+  return (async function() {
+    const toolIds = gDevTools.getToolDefinitionArray()
                            .filter(def => def.isTargetSupported(target))
                            .map(def => def.id);
 
     let toolbox;
     for (let index = 0; index < toolIds.length; index++) {
-      let toolId = toolIds[index];
+      const toolId = toolIds[index];
 
       info("About to open " + index + "/" + toolId);
-      toolbox = yield gDevTools.showToolbox(target, toolId, "window");
+      toolbox = await gDevTools.showToolbox(target, toolId, "window");
       ok(toolbox, "toolbox exists for " + toolId);
       is(toolbox.currentToolId, toolId, "currentToolId should be " + toolId);
 
-      let panel = toolbox.getCurrentPanel();
+      const panel = toolbox.getCurrentPanel();
       ok(panel.isReady, toolId + " panel should be ready");
     }
 
-    yield toolbox.destroy();
-  });
+    await toolbox.destroy();
+  })();
 }
 
 function getClient() {
-  let deferred = promise.defer();
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
-
-  let transport = DebuggerServer.connectPipe();
-  let client = new DebuggerClient(transport);
+  const transport = DebuggerServer.connectPipe();
+  const client = new DebuggerClient(transport);
 
   return client.connect().then(() => client);
 }
 
 function getTarget(client) {
-  let deferred = promise.defer();
+  const deferred = defer();
 
-  client.listTabs(tabList => {
-    let target = TargetFactory.forRemoteTab({
+  client.listTabs().then(tabList => {
+    const target = TargetFactory.forRemoteTab({
       client: client,
       form: tabList.tabs[tabList.selected],
       chrome: false
@@ -94,21 +86,21 @@ function getTarget(client) {
 }
 
 function test() {
-  Task.spawn(function*() {
+  (async function() {
     toggleAllTools(true);
-    yield addTab("about:blank");
+    await addTab("about:blank");
 
-    let client = yield getClient();
-    let target = yield getTarget(client);
-    yield runTools(target);
+    const client = await getClient();
+    const target = await getTarget(client);
+    await runTools(target);
 
     // Actor fronts should be destroyed now that the toolbox has closed, but
     // look for any that remain.
-    for (let pool of client.__pools) {
+    for (const pool of client.__pools) {
       if (!pool.__poolMap) {
         continue;
       }
-      for (let actor of pool.__poolMap.keys()) {
+      for (const actor of pool.__poolMap.keys()) {
         // Bug 1056342: Profiler fails today because of framerate actor, but
         // this appears more complex to rework, so leave it for that bug to
         // resolve.
@@ -128,5 +120,5 @@ function test() {
     DebuggerServer.destroy();
     toggleAllTools(false);
     finish();
-  }, console.error);
+  })();
 }

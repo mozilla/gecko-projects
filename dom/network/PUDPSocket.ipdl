@@ -7,8 +7,11 @@
 
 include protocol PNecko;
 include protocol PBackground;
-include protocol PBlob;
-include InputStreamParams;
+include protocol PFileDescriptorSet; // FIXME: bug #792908
+include protocol PChildToParentStream; //FIXME: bug #792908
+include protocol PParentToChildStream; //FIXME: bug #792908
+
+include IPCStream;
 
 include "mozilla/net/NeckoMessageUtils.h";
 include "mozilla/net/DNS.h";
@@ -29,7 +32,7 @@ union UDPSocketAddr {
 
 union UDPData {
   uint8_t[];
-  InputStreamParams;
+  IPCStream;
 };
 
 namespace mozilla {
@@ -41,7 +44,8 @@ protocol PUDPSocket
   manager PNecko or PBackground;
 
 parent:
-  async Bind(UDPAddressInfo addressInfo, bool addressReuse, bool loopback, uint32_t recvBufferSize);
+  async Bind(UDPAddressInfo addressInfo, bool addressReuse, bool loopback,
+             uint32_t recvBufferSize, uint32_t sendBufferSize);
   async Connect(UDPAddressInfo addressInfo);
 
   async OutgoingData(UDPData data, UDPSocketAddr addr);

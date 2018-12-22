@@ -9,8 +9,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 /**
  * Tests setLoginSavingEnabled and getAllDisabledHosts.
@@ -55,20 +54,20 @@ add_task(function test_setLoginSavingEnabled_getLoginSavingEnabled()
   let hostname2 = "https://disabled.example.com";
 
   // Hosts should not be disabled by default.
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname2));
 
   // Test setting initial values.
   Services.logins.setLoginSavingEnabled(hostname1, false);
   Services.logins.setLoginSavingEnabled(hostname2, true);
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname2));
 
   // Test changing values.
   Services.logins.setLoginSavingEnabled(hostname1, true);
   Services.logins.setLoginSavingEnabled(hostname2, false);
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname2));
 
   // Clean up.
   Services.logins.setLoginSavingEnabled(hostname2, true);
@@ -97,21 +96,21 @@ add_task(function test_rememberSignons()
   let hostname2 = "http://localhost";
 
   // The default value for the preference should be true.
-  do_check_true(Services.prefs.getBoolPref("signon.rememberSignons"));
+  Assert.ok(Services.prefs.getBoolPref("signon.rememberSignons"));
 
   // Hosts should not be disabled by default.
   Services.logins.setLoginSavingEnabled(hostname1, false);
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname2));
 
   // Disable storage of saved passwords globally.
   Services.prefs.setBoolPref("signon.rememberSignons", false);
-  do_register_cleanup(
+  registerCleanupFunction(
     () => Services.prefs.clearUserPref("signon.rememberSignons"));
 
   // All hosts should now appear disabled.
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname2));
 
   // The list of disabled hosts should be unaltered.
   LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(),
@@ -122,8 +121,8 @@ add_task(function test_rememberSignons()
   Services.logins.setLoginSavingEnabled(hostname2, false);
 
   // All hosts should still appear disabled.
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname2));
 
   // The list of disabled hosts should have been changed.
   LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(),
@@ -133,8 +132,8 @@ add_task(function test_rememberSignons()
   Services.prefs.setBoolPref("signon.rememberSignons", true);
 
   // Hosts should now appear enabled as requested.
-  do_check_true(Services.logins.getLoginSavingEnabled(hostname1));
-  do_check_false(Services.logins.getLoginSavingEnabled(hostname2));
+  Assert.ok(Services.logins.getLoginSavingEnabled(hostname1));
+  Assert.ok(!Services.logins.getLoginSavingEnabled(hostname2));
 
   // Clean up.
   Services.logins.setLoginSavingEnabled(hostname2, true);
@@ -143,15 +142,55 @@ add_task(function test_rememberSignons()
 });
 
 /**
- * Tests storing disabled hosts containing non-ASCII characters.
+ * Tests storing disabled hosts with non-ASCII characters where IDN is supported.
  */
-add_task(function* test_storage_setLoginSavingEnabled_nonascii()
+add_task(async function test_storage_setLoginSavingEnabled_nonascii_IDN_is_supported()
 {
-  let hostname = "http://" + String.fromCharCode(355) + ".example.com";
-  Services.logins.setLoginSavingEnabled(hostname, false);
+  let hostname = "http://大.net";
+  let encoding = "http://xn--pss.net";
 
-  yield* LoginTestUtils.reloadData();
-  LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(),
-                                          [hostname]);
+  // Test adding disabled host with nonascii URL (http://大.net).
+  Services.logins.setLoginSavingEnabled(hostname, false);
+  await LoginTestUtils.reloadData();
+  Assert.equal(Services.logins.getLoginSavingEnabled(hostname), false);
+  Assert.equal(Services.logins.getLoginSavingEnabled(encoding), false);
+  LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(), [hostname]);
+
+  LoginTestUtils.clearData();
+
+  // Test adding disabled host with IDN ("http://xn--pss.net").
+  Services.logins.setLoginSavingEnabled(encoding, false);
+  await LoginTestUtils.reloadData();
+  Assert.equal(Services.logins.getLoginSavingEnabled(hostname), false);
+  Assert.equal(Services.logins.getLoginSavingEnabled(encoding), false);
+  LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(), [hostname]);
+
+  LoginTestUtils.clearData();
+});
+
+/**
+ * Tests storing disabled hosts with non-ASCII characters where IDN is not supported.
+ */
+add_task(async function test_storage_setLoginSavingEnabled_nonascii_IDN_not_supported()
+{
+  let hostname = "http://√.com";
+  let encoding = "http://xn--19g.com";
+
+  // Test adding disabled host with nonascii URL (http://√.com).
+  Services.logins.setLoginSavingEnabled(hostname, false);
+  await LoginTestUtils.reloadData();
+  Assert.equal(Services.logins.getLoginSavingEnabled(hostname), false);
+  Assert.equal(Services.logins.getLoginSavingEnabled(encoding), false);
+  LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(), [encoding]);
+
+  LoginTestUtils.clearData();
+
+  // Test adding disabled host with IDN ("http://xn--19g.com").
+  Services.logins.setLoginSavingEnabled(encoding, false);
+  await LoginTestUtils.reloadData();
+  Assert.equal(Services.logins.getLoginSavingEnabled(hostname), false);
+  Assert.equal(Services.logins.getLoginSavingEnabled(encoding), false);
+  LoginTestUtils.assertDisabledHostsEqual(Services.logins.getAllDisabledHosts(), [encoding]);
+
   LoginTestUtils.clearData();
 });

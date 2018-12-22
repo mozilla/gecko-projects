@@ -3,36 +3,32 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+include('/media/webrtc/webrtc.mozbuild')
 
 if CONFIG['MOZ_WEBRTC']:
     EXPORTS += [
         'CamerasChild.h',
         'CamerasParent.h',
-        'CamerasUtils.h',
-        'LoadManager.h',
-        'LoadManagerFactory.h',
-        'LoadMonitor.h',
+        'VideoEngine.h',
+        'VideoFrameUtils.h'
     ]
     UNIFIED_SOURCES += [
         'CamerasChild.cpp',
         'CamerasParent.cpp',
-        'CamerasUtils.cpp',
-        'LoadManager.cpp',
-        'LoadManagerFactory.cpp',
-        'LoadMonitor.cpp',
         'ShmemPool.cpp',
+        'VideoEngine.cpp',
+        'VideoFrameUtils.cpp'
     ]
     LOCAL_INCLUDES += [
         '/media/webrtc/signaling',
         '/media/webrtc/trunk',
     ]
-if CONFIG['OS_TARGET'] == 'WINNT':
-    DEFINES['WEBRTC_WIN'] = True
-else:
-    DEFINES['WEBRTC_POSIX'] = True
+
+if CONFIG['OS_TARGET'] == 'Android':
+    DEFINES['WEBRTC_ANDROID'] = True
 
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
+if CONFIG['OS_TARGET'] == 'Android':
     EXPORTS += [
         'OpenSLESProvider.h'
     ]
@@ -44,17 +40,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
   UNIFIED_SOURCES += ['OSXRunLoopSingleton.cpp']
   EXPORTS += ['OSXRunLoopSingleton.h']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    if CONFIG['ANDROID_VERSION'] >= '17':
-        LOCAL_INCLUDES += [
-            '%' + '%s/frameworks/wilhelm/include' % CONFIG['ANDROID_SOURCE'],
-        ]
-    else:
-        LOCAL_INCLUDES += [
-            '%' + '%s/system/media/wilhelm/include' % CONFIG['ANDROID_SOURCE'],
-        ]
-
-if CONFIG['_MSC_VER']:
+if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
     DEFINES['__PRETTY_FUNCTION__'] = '__FUNCSIG__'
 
     # This is intended as a temporary workaround to enable building with VS2015.
@@ -64,7 +50,9 @@ if CONFIG['_MSC_VER']:
 
 EXPORTS.mozilla += ['ShmemPool.h',]
 
-EXPORTS.mozilla.media += ['MediaChild.h',
+EXPORTS.mozilla.media += ['CamerasTypes.h',
+                          'DeviceChangeCallback.h',
+                          'MediaChild.h',
                           'MediaParent.h',
                           'MediaSystemResourceClient.h',
                           'MediaSystemResourceManager.h',
@@ -73,6 +61,7 @@ EXPORTS.mozilla.media += ['MediaChild.h',
                           'MediaSystemResourceMessageUtils.h',
                           'MediaSystemResourceService.h',
                           'MediaSystemResourceTypes.h',
+                          'MediaTaskUtils.h',
                           'MediaUtils.h',
 ]
 UNIFIED_SOURCES += [
@@ -98,3 +87,6 @@ LOCAL_INCLUDES += [
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

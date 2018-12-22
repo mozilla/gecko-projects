@@ -70,9 +70,13 @@ struct nr_ice_component_ {
   struct nr_ice_cand_pair_ *nominated; /* Highest priority nomninated pair */
   struct nr_ice_cand_pair_ *active;
 
-  int keepalive_needed;
-  void *keepalive_timer;
-  nr_stun_client_ctx *keepalive_ctx;
+  nr_stun_client_ctx *consent_ctx;
+  void *consent_timer;
+  void *consent_timeout;
+  void *consent_handle;
+  int can_send;
+  int disconnected;
+  struct timeval consent_last_seen;
 
   STAILQ_ENTRY(nr_ice_component_)entry;
 };
@@ -94,6 +98,9 @@ int nr_ice_component_set_failed(nr_ice_component *comp);
 int nr_ice_component_finalize(nr_ice_component *lcomp, nr_ice_component *rcomp);
 int nr_ice_component_insert_pair(nr_ice_component *pcomp, nr_ice_cand_pair *pair);
 int nr_ice_component_get_default_candidate(nr_ice_component *comp, nr_ice_candidate **candp, int ip_version);
+void nr_ice_component_consent_destroy(nr_ice_component *comp);
+void nr_ice_component_refresh_consent_now(nr_ice_component *comp);
+void nr_ice_component_disconnected(nr_ice_component *comp);
 
 #ifdef __cplusplus
 }

@@ -20,13 +20,12 @@
  *    for certain types of links (_blank links for example) to open new tabs.
  */
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Task.jsm");
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource:///modules/RecentWindow.jsm");
+const ANIMATION_PREF = "toolkit.cosmeticAnimations.enabled";
 
-const TAB_ANIMATION_PREF = "browser.tabs.animate";
+const MULTI_OPT_OUT_PREF = "dom.ipc.multiOptOut";
 
 const TARGET_URI = "chrome://tabpaint/content/target.html";
 
@@ -68,8 +67,10 @@ var TabPaint = {
       Services.mm.addMessageListener(msgName, this);
     }
 
-    this.originalTabsAnimate = Services.prefs.getBoolPref(TAB_ANIMATION_PREF);
-    Services.prefs.setBoolPref(TAB_ANIMATION_PREF, false);
+    this.originalAnimate = Services.prefs.getBoolPref(ANIMATION_PREF);
+    Services.prefs.setBoolPref(ANIMATION_PREF, false);
+    Services.prefs.setIntPref(MULTI_OPT_OUT_PREF,
+                              Services.appinfo.E10S_MULTI_EXPERIMENT);
   },
 
   uninit() {
@@ -77,7 +78,8 @@ var TabPaint = {
       Services.mm.removeMessageListener(msgName, this);
     }
 
-    Services.prefs.setBoolPref(TAB_ANIMATION_PREF, this.originalTabsAnimate);
+    Services.prefs.setBoolPref(ANIMATION_PREF, this.originalAnimate);
+    Services.prefs.clearUserPref(MULTI_OPT_OUT_PREF);
   },
 
   receiveMessage(msg) {
@@ -85,7 +87,7 @@ var TabPaint = {
 
     let gBrowser = browser.ownerGlobal.gBrowser;
 
-    switch(msg.name) {
+    switch (msg.name) {
       case "TabPaint:Go": {
         // Our document has loaded, and we're off to the races!
         this.go(gBrowser).then((results) => {
@@ -128,7 +130,7 @@ var TabPaint = {
    *            The time (ms) it took to present a tab that
    *            was opened from content.
    */
-  go: Task.async(function*(gBrowser) {
+  go: Task.async(function* (gBrowser) {
     let fromParent = yield this.openTabFromParent(gBrowser);
     let fromContent = yield this.openTabFromContent(gBrowser);
 
@@ -147,11 +149,13 @@ var TabPaint = {
    *         with the time (in ms) it took to open the tab from the parent.
    */
   openTabFromParent(gBrowser) {
-    let win = gBrowser.ownerGlobal;
     return new Promise((resolve) => {
       this.Profiler.resume("tabpaint parent start");
 
-      gBrowser.selectedTab = gBrowser.addTab(TARGET_URI + "?" + Date.now());
+      // eslint-disable-next-line mozilla/avoid-Date-timing
+      gBrowser.selectedTab = gBrowser.addTab(TARGET_URI + "?" + Date.now(), {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      });
 
       this.whenTabShown().then(({tab, delta}) => {
         this.Profiler.pause("tabpaint parent end");
@@ -174,7 +178,6 @@ var TabPaint = {
    *         with the time (in ms) it took to open the tab from content.
    */
   openTabFromContent(gBrowser) {
-    let win = gBrowser.ownerGlobal;
     return new Promise((resolve) => {
       this.Profiler.resume("tabpaint content start");
 
@@ -220,7 +223,7 @@ var TabPaint = {
         }
       }, true);
 
-      tab.ownerDocument.defaultView.gBrowser.removeTab(tab);
+      tab.ownerGlobal.gBrowser.removeTab(tab);
     });
   },
 

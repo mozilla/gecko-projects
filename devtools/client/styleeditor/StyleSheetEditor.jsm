@@ -7,24 +7,19 @@
 
 this.EXPORTED_SYMBOLS = ["StyleSheetEditor"];
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const Editor = require("devtools/client/sourceeditor/editor");
 const promise = require("promise");
-const {CssLogic} = require("devtools/shared/inspector/css-logic");
-const {console} = require("resource://gre/modules/Console.jsm");
+const {shortSource, prettifyCSS} = require("devtools/shared/inspector/css-logic");
 const Services = require("Services");
-
-Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-const { TextDecoder, OS } = Cu.import("resource://gre/modules/osfile.jsm", {});
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://devtools/shared/event-emitter.js");
-/* import-globals-from StyleEditorUtil.jsm */
-Cu.import("resource://devtools/client/styleeditor/StyleEditorUtil.jsm");
+const EventEmitter = require("devtools/shared/event-emitter");
+const {FileUtils} = require("resource://gre/modules/FileUtils.jsm");
+const {NetUtil} = require("resource://gre/modules/NetUtil.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm", {});
+const {
+  getString,
+  showFilePicker,
+} = require("resource://devtools/client/styleeditor/StyleEditorUtil.jsm");
 
 const LOAD_ERROR = "error-load";
 const SAVE_ERROR = "error-save";
@@ -126,7 +121,7 @@ function StyleSheetEditor(styleSheet, win, file, isNew, walker, highlighter) {
   this.mediaRules = [];
   if (this.cssSheet.getMediaRules) {
     this.cssSheet.getMediaRules().then(this._onMediaRulesChanged,
-                                       Cu.reportError);
+                                       console.error);
   }
   this.cssSheet.on("media-rules-changed", this._onMediaRulesChanged);
   this.cssSheet.on("style-applied", this._onStyleApplied);
@@ -183,18 +178,18 @@ StyleSheetEditor.prototype = {
     }
 
     if (this._isNew) {
-      let index = this.styleSheet.styleSheetIndex + 1;
+      const index = this.styleSheet.styleSheetIndex + 1;
       return getString("newStyleSheet", index);
     }
 
     if (!this.styleSheet.href) {
-      let index = this.styleSheet.styleSheetIndex + 1;
+      const index = this.styleSheet.styleSheetIndex + 1;
       return getString("inlineStyleSheet", index);
     }
 
     if (!this._friendlyName) {
-      let sheetURI = this.styleSheet.href;
-      this._friendlyName = CssLogic.shortSource({ href: sheetURI });
+      const sheetURI = this.styleSheet.href;
+      this._friendlyName = shortSource({ href: sheetURI });
       try {
         this._friendlyName = decodeURI(this._friendlyName);
       } catch (ex) {
@@ -221,18 +216,21 @@ StyleSheetEditor.prototype = {
       return;
     }
 
-    let relatedSheet = this.styleSheet.relatedStyleSheet;
+    const relatedSheet = this.styleSheet.relatedStyleSheet;
+    if (!relatedSheet || !relatedSheet.href) {
+      return;
+    }
 
     let path;
-    let href = removeQuery(relatedSheet.href);
-    let uri = NetUtil.newURI(href);
+    const href = removeQuery(relatedSheet.href);
+    const uri = NetUtil.newURI(href);
 
     if (uri.scheme == "file") {
-      let file = uri.QueryInterface(Ci.nsIFileURL).file;
+      const file = uri.QueryInterface(Ci.nsIFileURL).file;
       path = file.path;
     } else if (this.savedFile) {
-      let origHref = removeQuery(this.styleSheet.href);
-      let origUri = NetUtil.newURI(origHref);
+      const origHref = removeQuery(this.styleSheet.href);
+      const origUri = NetUtil.newURI(origHref);
       path = findLinkedFilePath(uri, origUri, this.savedFile);
     } else {
       // we can't determine path to generated file on disk
@@ -257,9 +255,8 @@ StyleSheetEditor.prototype = {
 
   /**
    * A helper function that fetches the source text from the style
-   * sheet.  The text is possibly prettified using
-   * CssLogic.prettifyCSS.  This also sets |this._state.text| to the
-   * new text.
+   * sheet.  The text is possibly prettified using prettifyCSS.  This
+   * also sets |this._state.text| to the new text.
    *
    * @return {Promise} a promise that resolves to the new text
    */
@@ -267,9 +264,9 @@ StyleSheetEditor.prototype = {
     return this.styleSheet.getText().then((longStr) => {
       return longStr.string();
     }).then((source) => {
-      let ruleCount = this.styleSheet.ruleCount;
+      const ruleCount = this.styleSheet.ruleCount;
       if (!this.styleSheet.isOriginalSource) {
-        source = CssLogic.prettifyCSS(source, ruleCount);
+        source = prettifyCSS(source, ruleCount);
       }
       this._state.text = source;
       return source;
@@ -287,14 +284,16 @@ StyleSheetEditor.prototype = {
     return this._getSourceTextAndPrettify().then((source) => {
       this.sourceLoaded = true;
       return source;
-    }).then(null, e => {
+    }).catch(e => {
       if (this._isDestroyed) {
         console.warn("Could not fetch the source for " +
                      this.styleSheet.href +
                      ", the editor was destroyed");
-        Cu.reportError(e);
+        console.error(e);
       } else {
-        this.emit("error", { key: LOAD_ERROR, append: this.styleSheet.href });
+        console.error(e);
+        this.emit("error", { key: LOAD_ERROR, append: this.styleSheet.href,
+                             level: "warning" });
         throw e;
       }
     });
@@ -321,7 +320,7 @@ StyleSheetEditor.prototype = {
    * As addUnusedRegion except that it takes an array of regions
    */
   addUnusedRegions: function(regions) {
-    for (let region of regions) {
+    for (const region of regions) {
       this.addUnusedRegion(region);
     }
   },
@@ -355,11 +354,12 @@ StyleSheetEditor.prototype = {
       // We just applied an edit in the editor, so we can drop this
       // notification.
       this._isUpdating = false;
+      this.emit("style-applied");
     } else if (this.sourceEditor) {
       this._getSourceTextAndPrettify().then((newText) => {
         this._justSetText = true;
-        let firstLine = this.sourceEditor.getFirstVisibleLine();
-        let pos = this.sourceEditor.getCursor();
+        const firstLine = this.sourceEditor.getFirstVisibleLine();
+        const pos = this.sourceEditor.getCursor();
         this.sourceEditor.setText(newText);
         this.sourceEditor.setFirstVisibleLine(firstLine);
         this.sourceEditor.setCursor(pos);
@@ -379,13 +379,13 @@ StyleSheetEditor.prototype = {
     if (!rules.length && !this.mediaRules.length) {
       return;
     }
-    for (let rule of this.mediaRules) {
+    for (const rule of this.mediaRules) {
       rule.off("matches-change", this._onMediaRuleMatchesChange);
       rule.destroy();
     }
     this.mediaRules = rules;
 
-    for (let rule of rules) {
+    for (const rule of rules) {
       rule.on("matches-change", this._onMediaRuleMatchesChange);
     }
     this.emit("media-rules-changed", rules);
@@ -401,11 +401,9 @@ StyleSheetEditor.prototype = {
   /**
    * Forward error event from stylesheet.
    *
-   * @param  {string} event
-   *         Event type
-   * @param  {string} errorCode
+   * @param  {Object} data: The parameters to customize the error message
    */
-  _onError: function(event, data) {
+  _onError: function(data) {
     this.emit("error", data);
   },
 
@@ -413,11 +411,13 @@ StyleSheetEditor.prototype = {
    * Create source editor and load state into it.
    * @param  {DOMElement} inputElement
    *         Element to load source editor in
+   * @param  {CssProperties} cssProperties
+   *         A css properties database.
    *
    * @return {Promise}
    *         Promise that will resolve when the style editor is loaded.
    */
-  load: function(inputElement) {
+  load: function(inputElement, cssProperties) {
     if (this._isDestroyed) {
       return promise.reject("Won't load source editor as the style sheet has " +
                             "already been removed from Style Editor.");
@@ -425,7 +425,7 @@ StyleSheetEditor.prototype = {
 
     this._inputElement = inputElement;
 
-    let config = {
+    const config = {
       value: this._state.text,
       lineNumbers: true,
       mode: Editor.modes.css,
@@ -434,9 +434,10 @@ StyleSheetEditor.prototype = {
       extraKeys: this._getKeyBindings(),
       contextMenu: "sourceEditorContextMenu",
       autocomplete: Services.prefs.getBoolPref(AUTOCOMPLETION_PREF),
-      autocompleteOpts: { walker: this.walker }
+      autocompleteOpts: { walker: this.walker, cssProperties },
+      cssProperties
     };
-    let sourceEditor = this._sourceEditor = new Editor(config);
+    const sourceEditor = this._sourceEditor = new Editor(config);
 
     sourceEditor.on("dirty-change", this._onPropertyChange);
 
@@ -461,6 +462,9 @@ StyleSheetEditor.prototype = {
         sourceEditor.container.addEventListener("mousemove", this._onMouseMove);
       }
 
+      // Add the commands controller for the source-editor.
+      sourceEditor.insertCommandsController();
+
       this.emit("source-editor-load");
     });
   },
@@ -472,15 +476,17 @@ StyleSheetEditor.prototype = {
    *         Promise that will resolve with the editor.
    */
   getSourceEditor: function() {
-    let deferred = promise.defer();
+    const self = this;
 
     if (this.sourceEditor) {
-      return promise.resolve(this);
+      return Promise.resolve(this);
     }
-    this.on("source-editor-load", () => {
-      deferred.resolve(this);
+
+    return new Promise(resolve => {
+      this.on("source-editor-load", () => {
+        resolve(self);
+      });
     });
-    return deferred.promise;
   },
 
   /**
@@ -510,7 +516,7 @@ StyleSheetEditor.prototype = {
    * Toggled the disabled state of the underlying stylesheet.
    */
   toggleDisabled: function() {
-    this.styleSheet.toggleDisabled().then(null, Cu.reportError);
+    this.styleSheet.toggleDisabled().catch(console.error);
   },
 
   /**
@@ -552,7 +558,7 @@ StyleSheetEditor.prototype = {
 
     this._isUpdating = true;
     this.styleSheet.update(this._state.text, this.transitionsEnabled)
-                   .then(null, Cu.reportError);
+      .catch(console.error);
   },
 
   /**
@@ -579,16 +585,16 @@ StyleSheetEditor.prototype = {
    * @param {Number} x
    * @param {Number} y
    */
-  _highlightSelectorAt: Task.async(function*(x, y) {
-    let pos = this.sourceEditor.getPositionFromCoords({left: x, top: y});
-    let info = this.sourceEditor.getInfoAt(pos);
+  async _highlightSelectorAt(x, y) {
+    const pos = this.sourceEditor.getPositionFromCoords({left: x, top: y});
+    const info = this.sourceEditor.getInfoAt(pos);
     if (!info || info.state !== "selector") {
       return;
     }
 
-    let node =
-        yield this.walker.getStyleSheetOwnerNode(this.styleSheet.actorID);
-    yield this.highlighter.show(node, {
+    const node =
+        await this.walker.getStyleSheetOwnerNode(this.styleSheet.actorID);
+    await this.highlighter.show(node, {
       selector: info.selector,
       hideInfoBar: true,
       showOnly: "border",
@@ -596,7 +602,7 @@ StyleSheetEditor.prototype = {
     });
 
     this.emit("node-highlighted");
-  }),
+  },
 
   /**
    * Save the editor contents into a file and set savedFile property.
@@ -615,7 +621,7 @@ StyleSheetEditor.prototype = {
    * @see savedFile
    */
   saveToFile: function(file, callback) {
-    let onFile = (returnFile) => {
+    const onFile = (returnFile) => {
       if (!returnFile) {
         if (callback) {
           callback(null);
@@ -627,11 +633,11 @@ StyleSheetEditor.prototype = {
         this._state.text = this.sourceEditor.getText();
       }
 
-      let ostream = FileUtils.openSafeFileOutputStream(returnFile);
-      let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+      const ostream = FileUtils.openSafeFileOutputStream(returnFile);
+      const converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
                         .createInstance(Ci.nsIScriptableUnicodeConverter);
       converter.charset = "UTF-8";
-      let istream = converter.convertToInputStream(this._state.text);
+      const istream = converter.convertToInputStream(this._state.text);
 
       NetUtil.asyncCopy(istream, ostream, (status) => {
         if (!Components.isSuccessCode(status)) {
@@ -688,7 +694,7 @@ StyleSheetEditor.prototype = {
    */
   checkLinkedFileForChanges: function() {
     OS.File.stat(this.linkedCSSFile).then((info) => {
-      let lastChange = info.lastModificationDate.getTime();
+      const lastChange = info.lastModificationDate.getTime();
 
       if (this._fileModDate && lastChange != this._fileModDate) {
         this._fileModDate = lastChange;
@@ -722,7 +728,7 @@ StyleSheetEditor.prototype = {
 
     error += " querying " + this.linkedCSSFile +
              " original source location: " + this.savedFile.path;
-    Cu.reportError(error);
+    console.error(error);
   },
 
   /**
@@ -731,10 +737,13 @@ StyleSheetEditor.prototype = {
    */
   updateLinkedStyleSheet: function() {
     OS.File.read(this.linkedCSSFile).then((array) => {
-      let decoder = new TextDecoder();
-      let text = decoder.decode(array);
+      const decoder = new TextDecoder();
+      const text = decoder.decode(array);
 
-      let relatedSheet = this.styleSheet.relatedStyleSheet;
+      // Ensure we don't re-fetch the text from the original source
+      // actor when we're notified that the style sheet changed.
+      this._isUpdating = true;
+      const relatedSheet = this.styleSheet.relatedStyleSheet;
       relatedSheet.update(text, this.transitionsEnabled);
     }, this.markLinkedFileBroken);
   },
@@ -746,8 +755,8 @@ StyleSheetEditor.prototype = {
     * @return {array} key binding objects for the source editor
     */
   _getKeyBindings: function() {
-    let bindings = {};
-    let keybind = Editor.accel(getString("saveStyleSheet.commandkey"));
+    const bindings = {};
+    const keybind = Editor.accel(getString("saveStyleSheet.commandkey"));
 
     bindings[keybind] = () => {
       this.saveToFile(this.savedFile);
@@ -800,11 +809,11 @@ StyleSheetEditor.prototype = {
  *         The path of original file on disk
  */
 function findLinkedFilePath(uri, origUri, file) {
-  let { origBranch, branch } = findUnsharedBranches(origUri, uri);
-  let project = findProjectPath(file, origBranch);
+  const { origBranch, branch } = findUnsharedBranches(origUri, uri);
+  const project = findProjectPath(file, origBranch);
 
-  let parts = project.concat(branch);
-  let path = OS.Path.join.apply(this, parts);
+  const parts = project.concat(branch);
+  const path = OS.Path.join.apply(this, parts);
 
   return path;
 }
@@ -823,7 +832,7 @@ function findLinkedFilePath(uri, origUri, file) {
  *        array of path parts
  */
 function findProjectPath(file, branch) {
-  let path = OS.Path.split(file.path).components;
+  const path = OS.Path.split(file.path).components;
 
   for (let i = 2; i <= branch.length; i++) {
     // work backwards until we find a differing directory name
@@ -849,8 +858,8 @@ function findProjectPath(file, branch) {
  *         object with 'branch' and 'origBranch' array of path parts for branch
  */
 function findUnsharedBranches(origUri, uri) {
-  origUri = OS.Path.split(origUri.path).components;
-  uri = OS.Path.split(uri.path).components;
+  origUri = OS.Path.split(origUri.pathQueryRef).components;
+  uri = OS.Path.split(uri.pathQueryRef).components;
 
   for (let i = 0; i < uri.length - 1; i++) {
     if (uri[i] != origUri[i]) {

@@ -1,0 +1,2092 @@
+# This file contains a definition of the scalar probes that are recorded in Telemetry.
+# They are submitted with the "main" pings and can be inspected in about:telemetry.
+
+# The following section contains the accessibility scalars.
+a11y:
+  instantiators:
+    bug_numbers:
+      - 1323069
+      - 1462238
+    description: >
+      The leaf name and version number of the binary for the process responsible
+      for remotely instantiating a11y.
+    expires: never
+    kind: string
+    notification_emails:
+      - accessibility@mozilla.com
+      - jteh@mozilla.com
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+    keyed: false
+    cpp_guard: 'ACCESSIBILITY'
+
+  indicator_acted_on:
+    bug_numbers:
+      - 1412358
+    description: >
+      Recorded on click or SPACE/ENTER keypress event. Boolean stating if the
+      accessibility indicactor button was acted on.
+    expires: "62"
+    kind: boolean
+    notification_emails:
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains the aushelper system add-on scalars.
+aushelper:
+  websense_reg_version:
+    bug_numbers:
+      - 1305847
+    description: The Websense version from the Windows registry.
+    expires: "60"
+    kind: string
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains the browser engagement scalars.
+browser.engagement:
+  max_concurrent_tab_count:
+    bug_numbers:
+      - 1271304
+    description: >
+      The count of maximum number of tabs open during a subsession,
+      across all windows, including tabs in private windows and restored
+      at startup.
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  tab_open_event_count:
+    bug_numbers:
+      - 1271304
+    description: >
+      The count of tab open events per subsession, across all windows, after the
+      session has been restored. This includes tab open events from private windows
+      and from manual session restorations (i.e. after crashes and from about:home).
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  max_concurrent_window_count:
+    bug_numbers:
+      - 1271304
+    description: >
+      The count of maximum number of browser windows open during a subsession. This
+      includes private windows and the ones opened when starting the browser.
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  window_open_event_count:
+    bug_numbers:
+      - 1271304
+    description: >
+      The count of browser window open events per subsession, after the session
+      has been restored. The count includes private windows and the ones from manual
+      session restorations (i.e. after crashes and from about:home).
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  total_uri_count:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count of the total non-unique http(s) URIs visited in a subsession, including
+      page reloads, after the session has been restored. This does not include background
+      page requests and URIs from embedded pages or private browsing.
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  unfiltered_uri_count:
+    bug_numbers:
+      - 1304647
+    description: >
+      The count of the total non-unique URIs visited in a subsession, not restricted to
+      a specific protocol, including page reloads and about:* pages (other than initial
+      pages such as about:blank, ...), after the session has been restored. This does
+      not include background page requests and URIs from embedded pages or private browsing.
+    expires: never
+    kind: uint
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  unique_domains_count:
+    bug_numbers:
+      - 1271310
+    description: >
+      The count of the unique domains visited in a subsession, after the session
+      has been restored. Subdomains under eTLD are aggregated after the first level
+      (i.e. test.example.com and other.example.com are only counted once).
+      This does not include background page requests and domains from embedded pages
+      or private browsing. The count is limited to 100 unique domains.
+    expires: never
+    kind: uint
+    notification_emails:
+      - rweiss@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  restored_pinned_tabs_count:
+    bug_numbers:
+      - 1373728
+      - 1451475
+    description: >
+      The count of the number of pinned tabs that were restored.
+    expires: '67'
+    kind: uint
+    notification_emails:
+      - chutten@mozilla.com
+      - jrediger@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  active_ticks:
+    bug_numbers:
+      - 1376942
+    description: >
+      The count of the number of five-second intervals ('ticks') the user
+      was considered 'active' in a subsession. Session activity involves keyboard or mouse
+      interaction with the application. It does not take into account whether or not the window
+      has focus or is in the foreground, only if it is receiving these interaction events.
+    expires: never
+    kind: uint
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains the browser engagement scalars.
+browser.engagement.navigation:
+  urlbar:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count URI loads triggered in a subsession from the urlbar (awesomebar),
+      broken down by the originating action.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  searchbar:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count URI loads triggered in a subsession from the searchbar,
+      broken down by the originating action.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  about_home:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count URI loads triggered in a subsession from about:home,
+      broken down by the originating action.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  about_newtab:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count URI loads triggered in a subsession from about:newtab,
+      broken down by the originating action.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  contextmenu:
+    bug_numbers:
+      - 1271313
+    description: >
+      The count URI loads triggered in a subsession from the contextmenu,
+      broken down by the originating action.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - bcolloran@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains (RSS/Atom) feed usage
+browser.feeds:
+  preview_loaded:
+    bug_numbers:
+      - 1350349
+    description: >
+      The number of times a feed preview page is loaded.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - gijs@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  feed_subscribed:
+    bug_numbers:
+      - 1350349
+    description: >
+      The number of times a user subscribes to a feed.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - gijs@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  livebookmark_opened:
+    bug_numbers:
+      - 1350349
+    description: >
+      The number of times a user opens a live bookmark dropdown.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - gijs@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  livebookmark_item_opened:
+    bug_numbers:
+      - 1350349
+    description: >
+      The number of times a user opens an item that is part of a live bookmark.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - gijs@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  livebookmark_count:
+    bug_numbers:
+      - 1350349
+    description: >
+      The number of live bookmark folders the user has (ie not individual items).
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - gijs@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains the browser usage scalars.
+browser.usage:
+  graphite:
+    bug_numbers:
+      - 1331915
+    description: >
+      The number of times a graphite2 font has been loaded.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - tom@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all'
+
+  plugin_instantiated:
+    bug_numbers:
+      - 1381591
+    description: >-
+      The number of plugin instances that were created.
+    expires: never # Jan-2021 but we don't have a version number for that
+    kind: uint
+    notification_emails:
+      - bsmedberg@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+# The following section contains the session restore scalars.
+browser.session.restore:
+  worker_restart_count:
+    bug_numbers:
+      - 1402267
+    description: >
+      A counter incremented every time the SessionFile worker is restarted due
+      to too many failures, as defined in the browser.sessionstore.max_write_failures
+      pref.
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - mdeboer@mozilla.com
+      - session-restore-telemetry-alerts@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+extensions.updates:
+  rdf:
+    bug_numbers:
+      - 1460336
+    description: >
+      The number of RDF update requsts for a given extension ID.
+    expires: "66"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - addons-dev-internal@mozilla.com
+    record_in_processes:
+      - main
+
+# This section is for probes used to measure use of the Webextensions storage.sync API.
+storage.sync.api.usage:
+  extensions_using:
+    bug_numbers:
+      - 1328974
+    description: >
+      The count of webextensions that have data stored in the chrome.storage.sync API.
+      This includes extensions that have not used the storage.sync API this session.
+      This includes items that were not stored this session.
+      This scalar is collected after every sync.
+    expires: "64"
+    kind: uint
+    keyed: false
+    notification_emails:
+      - eglassercamp@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  items_stored:
+    bug_numbers:
+      - 1328974
+    description: >
+      The count of items in storage.sync storage, broken down by extension ID.
+      This includes extensions that have not used the storage.sync API this session.
+      This includes items that were not stored this session.
+      This scalar is collected after every sync.
+    expires: "64"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - eglassercamp@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  storage_consumed:
+    bug_numbers:
+      - 1328974
+    description: >
+      The count of bytes used in storage.sync, broken down by extension ID.
+      This includes extensions that have not used the storage.sync API this session.
+      This includes items that were not stored this session.
+      This scalar is collected after every sync.
+    expires: "64"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - eglassercamp@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
+services.sync:
+  sync_login_state_transitions:
+    bug_numbers:
+      - 1375635
+    description: >
+      Records transitions between login states of "success", "unverified"
+      and "rejected.
+    expires: "65"
+    kind: boolean
+    keyed: true
+    notification_emails:
+      - sync-staff@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
+security:
+  pkcs11_modules_loaded:
+    bug_numbers:
+      - 1369911
+      - 1445961
+    description: >
+      A keyed boolean indicating the library names of the PKCS#11 modules that
+      have been loaded by the browser.
+    expires: "69"
+    kind: boolean
+    keyed: true
+    notification_emails:
+      - seceng-telemetry@mozilla.com
+      - dkeeler@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  webauthn_used:
+    bug_numbers:
+      - 1265472
+    description: >
+      Counts of how often Web Authentication was used in this session, keyed
+      by authenticator protocol, method and result. Currently: U2FRegisterFinish,
+      U2FRegisterAbort, U2FSignFinish, U2FSignAbort.
+    expires: "70"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - seceng-telemetry@mozilla.com
+      - jjones@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  client_cert:
+    bug_numbers:
+      - 1255120
+    description: >
+      Counts of events related to client certificates this session. Currently:
+      "requested" (a server requested a client certificate), "sent" (a client
+      certificate was sent), "compat" (a compatibility workaround was required).
+    expires: "66"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - seceng-telemetry@mozilla.com
+      - dkeeler@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
+sandbox:
+  no_job:
+    bug_numbers:
+      - 1392570
+    description: >
+      Indicates that we can't use a job object for sandboxed child processes.
+      Keyed by whether we are in a remote session or not from ::GetSystemMetrics(SM_REMOTESESSION).
+    expires: "62"
+    kind: boolean
+    keyed: true
+    notification_emails:
+      - bowen@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+    cpp_guard: 'XP_WIN'
+
+preferences:
+  created_new_user_prefs_file:
+    bug_numbers:
+      - 1367813
+    description: >-
+      A boolean indicating that profile/prefs.js was not found and it is being
+      created for the first time in this session.
+    expires: "62"
+    kind: boolean
+    notification_emails:
+      - bsmedberg@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  prefs_file_was_invalid:
+    bug_numbers:
+      - 1367813
+    description: >-
+      Set to true if a failure occurred reading profile/prefs.js.
+    expires: "62"
+    kind: boolean
+    notification_emails:
+      - bsmedberg@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  read_user_js:
+    bug_numbers:
+      - 1367813
+    description: >-
+      Set to true if user.js exists and was read.
+    expires: "62"
+    kind: boolean
+    notification_emails:
+      - bsmedberg@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  search_query:
+    bug_numbers:
+      - 1359306
+    description: >-
+      Each key is a search query string when user performs a search action within
+      about:preferences, and each value is the number of times that key is recorded.
+      The telemetry data will be recorded if there is a successful search result highlighted.
+    expires: "62"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chsiang@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+  browser_home_page_change:
+    bug_numbers:
+      - 1392951
+    description: >-
+      The number of times the home page has been changed.
+      Recorded when a user changes his/her home page successfully.
+    expires: "62"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  browser_home_page_count:
+    bug_numbers:
+      - 1392951
+    description: >-
+      Each key is the number of home page urls when users change their home page,
+      multiple home pages can be set (delineated with a "|"),
+      and each value is the number of times that key is recorded.
+      The telemetry data will be recorded if a user changes his/her home page successfully.
+    expires: "62"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  use_current_page:
+    bug_numbers:
+      - 1392951
+    description: >-
+      The number of times the Use Current Page button has been clicked.
+      Recorded when a a user clicks the "Use Current Page" button.
+    expires: "62"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  use_bookmark:
+    bug_numbers:
+      - 1392951
+    description: >-
+      The number of times the "Use Bookmark..." button has been clicked.
+      Recorded when a a user clicks the "Use Bookmark..." button.
+    expires: "62"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  prevent_accessibility_services:
+    bug_numbers:
+      - 1412358
+    description: >
+      Recorded on command event. Boolean stating if the preference checkbox for
+      preventing accessibility from accessing the browser (Privacy & Security)
+      was checked.
+    expires: "62"
+    kind: boolean
+    notification_emails:
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains WebRTC nICEr scalars
+# For more info on ICE, see https://tools.ietf.org/html/rfc5245
+# For more info on STUN, see https://tools.ietf.org/html/rfc5389
+# For more info on TURN, see https://tools.ietf.org/html/rfc5766
+webrtc.nicer:
+  stun_retransmits:
+    bug_numbers:
+      - 1325536
+    description: >
+      The count of STUN message retransmissions during a WebRTC call.
+      When sending STUN request messages over UDP, messages may be
+      dropped by the network. Retransmissions are the mechanism used to
+      accomplish reliability of the STUN request/response transaction.
+      This can happen during both successful and unsuccessful WebRTC
+      calls.
+      For more info on ICE, see https://tools.ietf.org/html/rfc5245
+      For more info on STUN, see https://tools.ietf.org/html/rfc5389
+      For more info on TURN, see https://tools.ietf.org/html/rfc5766
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  turn_401s:
+    bug_numbers:
+      - 1325536
+    description: >
+      The count of TURN 401 (Unauthorized) responses to allocation
+      requests. Only 401 responses beyond the first, expected 401 are
+      counted. More than one 401 repsonse indicates the client is
+      experiencing difficulty authenticating with the TURN server. This
+      can happen during both successful and unsuccessful WebRTC calls.
+      For more info on ICE, see https://tools.ietf.org/html/rfc5245
+      For more info on STUN, see https://tools.ietf.org/html/rfc5389
+      For more info on TURN, see https://tools.ietf.org/html/rfc5766
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  turn_403s:
+    bug_numbers:
+      - 1325536
+    description: >
+      The count of TURN 403 (Forbidden) responses to CreatePermission or
+      ChannelBind requests.  This indicates that the TURN server is
+      refusing the request for an IP address or IP address/port
+      combination, likely due to administrative restrictions.
+      For more info on ICE, see https://tools.ietf.org/html/rfc5245
+      For more info on STUN, see https://tools.ietf.org/html/rfc5389
+      For more info on TURN, see https://tools.ietf.org/html/rfc5766
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  turn_438s:
+    bug_numbers:
+      - 1325536
+    description: >
+      The count of TURN 438 (Stale Nonce) responses to allocation
+      requests. This can happen during both successful and unsuccessful
+      WebRTC calls.
+      For more info on ICE, see https://tools.ietf.org/html/rfc5245
+      For more info on STUN, see https://tools.ietf.org/html/rfc5389
+      For more info on TURN, see https://tools.ietf.org/html/rfc5766
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+mathml:
+  doc_count:
+    bug_numbers:
+      - 1362187
+    description: >
+      The number of documents that contained enabled MathML elements.
+    expires: "63"
+    kind: uint
+    notification_emails:
+      - gsquelart@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'content'
+
+mediarecorder:
+  recording_count:
+    bug_numbers:
+      - 1400757
+    description: >
+      The number of times a MediaRecorder has been started. Recorded when a MediaRecorder starts
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - bvandyk@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - main
+      - content
+
+# The following section contains content process base counters.
+dom.contentprocess:
+  troubled_due_to_memory:
+    bug_numbers:
+      - 1305091
+    description: >
+      The number of content processes that were marked as troubled because
+      it was running low on virtual memory.
+    expires: "58"
+    kind: uint
+    notification_emails:
+      - benjamin@smedbergs.us
+      - mconley@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+  buildID_mismatch:
+    bug_numbers:
+      - 1366808
+    description: >
+      The number of times the about:restartrequired page appeared due to a
+      buildID mismatch between the parent and the content processes.
+    expires: never
+    kind: uint
+    notification_emails:
+      - spohl@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.toolbar.eyedropper:
+  opened:
+    bug_numbers:
+      - 1247985
+      - 1352115
+    description: Number of times the DevTools Eyedropper has been opened via the inspector toolbar.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.copy.unique.css.selector:
+  opened:
+    bug_numbers:
+      - 1323700
+      - 1352115
+    description: Number of times the DevTools copy unique CSS selector has been used.
+    expires: "59"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.copy.full.css.selector:
+  opened:
+    bug_numbers:
+      - 1323700
+      - 1352115
+    description: Number of times the DevTools copy full CSS selector has been used.
+    expires: "59"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.copy.xpath:
+  opened:
+    bug_numbers:
+      - 987877
+    description: Number of times the DevTools copy XPath has been used.
+    expires: "59"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.rules.gridinspector:
+  opened:
+    bug_numbers:
+      - 1373483
+    description: >
+      Number of times the DevTools grid inspector was opened from the rules view.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.grid.gridinspector:
+  opened:
+    bug_numbers:
+      - 1373483
+    description: >
+      Number of times the DevTools grid inspector was opened from the grid view.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.grid.showGridAreasOverlay:
+  checked:
+    bug_numbers:
+      - 1373483
+    description: >
+      Number of times the DevTools grid inspector's "Display grid areas" was checked.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.grid.showGridLineNumbers:
+  checked:
+    bug_numbers:
+      - 1373483
+    description: >
+      Number of times the DevTools grid inspector's "Display grid numbers" was checked.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.grid.showInfiniteLines:
+  checked:
+    bug_numbers:
+      - 1373483
+    description: >
+      Number of times the DevTools grid inspector's "Extend grid lines infinitely" was checked.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.inspector:
+  three_pane_enabled:
+    bug_numbers:
+      - 1437881
+    description: >
+      Number of times the DevTools inspector was opened with the 3 pane inspector enabled,
+      keyed by true/false.
+    expires: "65"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - gl@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools:
+  current_theme:
+    bug_numbers:
+      - 1396811
+    description: >
+      Number of times DevTools was opened, keyed by theme.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.aboutdevtools:
+  opened:
+    bug_numbers:
+      - 1412029
+    description: >
+      Number of times about:devtools was opened.
+    expires: "63"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
+    record_in_processes:
+      - 'main'
+  installed:
+    bug_numbers:
+      - 1412029
+    description: >
+      Number of times devtools were enabled/installed in about:devtools.
+    expires: "63"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
+    record_in_processes:
+      - 'main'
+  noinstall_exits:
+    bug_numbers:
+      - 1412029
+    description: >
+      Number of times the user left about:devtools without enabling devtools.
+    expires: "63"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
+    record_in_processes:
+      - 'main'
+
+devtools.onboarding:
+  is_devtools_user:
+    bug_numbers:
+      - 1408339
+    description: >
+      How many users are flagged as existing devtools users.
+    expires: "63"
+    kind: boolean
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
+    record_in_processes:
+      - 'main'
+
+devtools.responsive:
+  toolbox_opened_first:
+    bug_numbers:
+      - 1444497
+    description: >
+      Number of Responsive Design Mode opens with a toolbox already open.
+    expires: never
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jryans@mozilla.com
+    record_in_processes:
+      - main
+    release_channel_collection: opt-out
+  open_trigger:
+    bug_numbers:
+      - 1444497
+    description: >
+      Number of Responsive Design Mode opens keyed by the UI entry point used.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - jryans@mozilla.com
+    record_in_processes:
+      - main
+    release_channel_collection: opt-out
+
+devtools.tool:
+  registered:
+    bug_numbers:
+      - 1447302
+    description: >
+      Recorded on enable tool checkbox check/uncheck in Developer Tools options
+      panel. Boolean stating if the tool was enabled or disabled by the user.
+      Keyed by tool id. Current default tools with their id's are defined in
+      https://dxr.mozilla.org/mozilla-central/source/devtools/client/definitions.js
+    expires: "65"
+    kind: boolean
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.accessibility:
+  node_inspected_count:
+    bug_numbers:
+      - 1447302
+    description: >
+      Number of times a DOM node was inspected from within the Accessibility
+      tool.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  opened_count:
+    bug_numbers:
+      - 1447302
+    description: >
+      Number of times the DevTools Accessibility tool has been opened.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  picker_used_count:
+    bug_numbers:
+      - 1447302
+    description: >
+      Number of times the picker tool has been used in DevTools Accessibility
+      panel.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  select_accessible_for_node:
+    bug_numbers:
+      - 1447302
+    description: >
+      Number of times an accessible object was inspected from outside the
+      Accessibility tool (navigation to Accessibility panel). Keyed by the
+      source of user action (inspector context menu, browser context menu, etc).
+    expires: "65"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  service_enabled_count:
+    bug_numbers:
+      - 1447302
+    description: >
+      Number of times platform accessibility has been enabled in DevTools
+      Accessibility panel.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.toolbox:
+  tabs_reordered:
+    bug_numbers:
+      - 1456551
+    description: >
+      Number of times the DevTools tab was reordered.
+      Keyed by tab's id.
+    expires: "65"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - daisuke@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+navigator.storage:
+  estimate_count:
+    bug_numbers:
+      - 1359708
+    description: >
+      Number of times navigator.storage.estimate has been used.
+    expires: "60"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+      - ttung@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  persist_count:
+    bug_numbers:
+      - 1359708
+    description: >
+      Number of times navigator.storage.persist has been used.
+    expires: "60"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+      - ttung@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+telemetry:
+  accumulate_unknown_histogram_keys:
+    bug_numbers:
+      - 1343855
+    description: >
+      The count of attempted accumulations to unknown histogram keys for
+      histograms that restrict the set of allowed keys ('keys' property).
+      The names of the offending histograms are used as keys in this probe.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - all
+
+  accumulate_clamped_values:
+    bug_numbers:
+      - 1438335
+    description: >
+      The count of accumulations that had to be clamped down to not overflow,
+      keyed to the histogram name of the overflowing accumulation.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+      - chutten@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+  event_counts:
+    bug_numbers:
+      - 1440673
+    description: >
+      The counts of events recorded in the process, category, method, and
+      object of the key, even if event recording for the category was not
+      enabled.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+      - chutten@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all'
+
+  profile_directory_scans:
+    bug_numbers:
+      - 1458574
+    description: >
+      The number of times a profile directory scan was initiated in ProfileAge.jsm
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - jrediger@mozilla.com
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all'
+
+  # While the following probe could be restricted to GeckoView, we can't
+  # turn the product filter on as we don't run GeckoView test coverage on
+  # GeckoView.
+  persistence_timer_hit_count:
+    bug_numbers:
+      - 1463152
+    description: >
+      How many times the GeckoView Telemetry persistence timer was hit during
+      the current subsession.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+      - aplacitelli@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  pending_operations_highwatermark_reached:
+    bug_numbers:
+      - 1465052
+    description: >
+      The number of times the pending operations list reached the
+      high-water mark, leading to operations being applied immediately.
+    expires: "65"
+    kind: uint
+    keyed: false
+    notification_emails:
+      - jrediger@mozilla.com
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+telemetry.discarded:
+  accumulations:
+    bug_numbers:
+      - 1369041
+    description: >
+      Number of discarded accumulations to histograms in child processes
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all_childs'
+  keyed_accumulations:
+    bug_numbers:
+      - 1369041
+    description: >
+      Number of discarded accumulations to keyed histograms in child processes
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all_childs'
+  scalar_actions:
+    bug_numbers:
+      - 1369041
+    description: >
+      Number of discarded actions on scalars in child processes
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all_childs'
+  keyed_scalar_actions:
+    bug_numbers:
+      - 1369041
+    description: >
+      Number of discarded actions on keyed scalars in child processes
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all_childs'
+  child_events:
+    bug_numbers:
+      - 1369041
+    description: >
+      Number of discarded events in child processes
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all_childs'
+
+# The following section contains graphics-related scalars.
+gfx.advanced.layers:
+  failure_id:
+    bug_numbers:
+      - 1365879
+    description: >
+      Each key is a failure for initializing Advanced Layers, and each value
+      is the number of times that failure was recorded. The failure codes
+      are unique strings present in MLGDeviceD3D11::Initialize, such that
+      a failure can be traced back to a specific Direct3D API call.
+    keyed: true
+    kind: uint
+    expires: "61"
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+    record_in_processes:
+      - 'main'
+
+gfx.omtp:
+  paint_wait_ratio:
+    bug_numbers:
+      - 1386968
+    description: >
+      Ratio (in units of 1/100th of a percent) of how many times OMTP waited
+      for a paint for more than 200us, versus the total number of paints.
+    keyed: false
+    kind: uint
+    expires: "66"
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - rhunt@mozilla.com
+    record_in_processes:
+      - 'content'
+
+# The following section contains the form autofill related scalars.
+formautofill:
+  availability:
+    bug_numbers:
+      - 1386959
+    description: A boolean sent once per session to represent whether the formautofill is available in the build
+    expires: never
+    kind: boolean
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+formautofill.addresses:
+  fill_type_manual:
+    bug_numbers:
+      - 990200
+    description: Count at submission time whether the submitted form was filled manually.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill:
+    bug_numbers:
+      - 990200
+    description: Count at submission time whether the submitted form was autofilled.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill_update:
+    bug_numbers:
+      - 990200
+    description: >
+      Count at submission time whether the submitted form was autofilled, but
+      the data in form is changed and can not be merged to orginal address profile.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+formautofill.creditCards:
+  fill_type_manual:
+    bug_numbers:
+      - 1371232
+    description: Count at submission time whether the submitted credit card form was filled manually.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill:
+    bug_numbers:
+      - 1371232
+    description: Count at submission time whether the submitted credit card form was autofilled.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill_modified:
+    bug_numbers:
+      - 1371232
+    description: >
+      Count at submission time whether the submitted credit card form was autofilled but
+      the data in form is changed.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains scalars for Screenshots.
+screenshots:
+  download:
+    bug_numbers:
+      - 1412411
+    description: >
+      The count of new screenshots created, then downloaded per session
+      via the Firefox Screenshots feature. Excludes failed attempts due
+      to any error.
+    expires: never
+    kind: uint
+    notification_emails:
+      - jhirsch@mozilla.com
+      - ibicking@mozilla.com
+      - clouserw@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  upload:
+    bug_numbers:
+      - 1412411
+    description: >
+      The count of new screenshots created, then uploaded per session
+      via the Firefox Screenshots feature. Excludes attempts to create
+      and upload the screenshot that may have failed.
+    expires: never
+    kind: uint
+    notification_emails:
+      - jhirsch@mozilla.com
+      - ibicking@mozilla.com
+      - clouserw@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  copy:
+    bug_numbers:
+      - 1412411
+    description: >
+      The count of new screenshots created, then copied directly to the
+      clipboard per session via the Firefox Screenshots feature.
+    expires: never
+    kind: uint
+    notification_emails:
+      - jhirsch@mozilla.com
+      - ibicking@mozilla.com
+      - clouserw@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+idb.type:
+  persistent_count:
+    bug_numbers:
+      - 1360567
+    description: >
+      Number of times indexeddb.open(name, {storage: "persistent"}) has been used.
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  temporary_count:
+    bug_numbers:
+      - 1360567
+    description: >
+      Number of times indexeddb.open(name, {storage: "temporary"}) has been used.
+    expires: "62"
+    kind: uint
+    notification_emails:
+      - shuang@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+# The following section contains probes that record timestamps.
+timestamps:
+  first_paint:
+    bug_numbers:
+      - 1386186
+    description: >
+     Record the timestamp of the first content window paint, in milliseconds since process start.
+    expires: never
+    kind: uint
+    notification_emails:
+      - hkirschner@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+
+browser.timings:
+  last_shutdown:
+    bug_numbers:
+      - 1429510
+    description: >
+      The time, in milliseconds, it took to complete the last shutdown.
+      On successful shutdown, Telemetry saves this to disk into Telemetry.ShutdownTime.txt.
+      On the next startup this is loaded and recorded.
+    expires: never
+    kind: uint
+    notification_emails:
+      - florian@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+# The following section contains the service worker scalars.
+sw:
+  synthesized_res_count:
+    bug_numbers:
+      - 1416629
+    description: >
+      The count of number of synthesize response made by service workers.
+    expires: "61"
+    kind: uint
+    notification_emails:
+      - sw-telemetry@mozilla.com
+      - ttung@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  cors_res_for_so_req_count:
+    bug_numbers:
+      - 1416629
+    description: >
+      The count of number of synthesize response made by service workers and
+      it's a cors type resposne for a same-origin mode request.
+    expires: "61"
+    kind: uint
+    notification_emails:
+      - sw-telemetry@mozilla.com
+      - ttung@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  alternative_body_used_count:
+    bug_numbers:
+      - 1423623
+    description: >
+      The count of number of synthesize response using alternative body.
+    expires: "61"
+    kind: uint
+    notification_emails:
+      - sw-telemetry@mozilla.com
+      - echuang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+# The following section contains the BrowserErrorReporter scalars.
+browser.errors:
+  collected_count:
+    bug_numbers:
+      - 1444554
+    description: >
+      The count of all browser chrome JS errors that were collected locally.
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  collected_with_stack_count:
+    bug_numbers:
+      - 1444554
+    description: >
+      The count of browser chrome JS errors that were collected locally and had
+      a usable stack trace.
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  reported_success_count:
+    bug_numbers:
+      - 1444554
+    description: >
+      The count of all browser chrome JS errors that were reported to the
+      remote collection service.
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  reported_failure_count:
+    bug_numbers:
+      - 1444554
+    description: >
+      The count of all browser chrome JS errors that we attempted to report to
+      the remote collection service, but failed to.
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  sample_rate:
+    bug_numbers:
+      - 1444554
+    description: >
+      The sample rate at which collected errors were reported.
+    expires: "64"
+    kind: string
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  collected_count_by_filename:
+    bug_numbers:
+      - 1444554
+    description: >
+      The count of all browser chrome JS errors that were collected locally,
+      keyed by the filename of the file in which the error occurred. Collected
+      filenames are limited to specific paths under the resource:// and
+      chrome:// protocols; non-matching filenames are reported as "FILTERED".
+      Long filenames are truncated to the first 70 characters.
+    keyed: true
+    expires: "64"
+    kind: uint
+    notification_emails:
+      - nightly-js-errors@mozilla.com
+      - mkelly@mozilla.com
+    record_in_processes:
+      - 'main'
+
+widget:
+  ime_name_on_windows:
+    bug_numbers:
+      - 1215818
+    description: >
+      Locale ID and name of IME which was selected by users on Windows.  This
+      does NOT collect legacy IMM-IME names since we cannot get readable names
+      and we do not support IMM-IME so aggressively because IME vendors
+      should've already released TIP for TSF for supporting Windows 8 or later
+      completely.
+    keyed: true
+    expires: never
+    kind: boolean
+    notification_emails:
+      - mnakano@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  ime_name_on_mac:
+    bug_numbers:
+      - 1215818
+    description: >
+      Name of IME which was selected by users on macOS.  The value is Input
+      Source ID if non-Japanese IME was open.  Otherwise, if Japanese IME was
+      open, the value is Bundle ID.  Input Source ID includes input mode, but
+      Bundle ID does not include input mode.
+    keyed: true
+    expires: never
+    kind: boolean
+    notification_emails:
+      - mnakano@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  ime_name_on_linux:
+    bug_numbers:
+      - 1215818
+    description: >
+      Name of active IM (e.g., xim, fcitx, ibus, etc) which was actually set by
+      env on Linux.  Different from Windows and macOS, this value includes
+      non-IME users even though this is recoded when first compositionstart
+      event because dead key is also implemented by IME on Linux.
+    keyed: true
+    expires: never
+    kind: boolean
+    notification_emails:
+      - mnakano@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+# The following section contains memory reporter counters.
+memoryreporter:
+  max_ghost_windows:
+    bug_numbers:
+      - 1454724
+    description: >
+      The maximum number of leaked ghost windows seen.
+    expires: "66"
+    kind: uint
+    notification_emails:
+      - memshrink-telemetry-alerts@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'content'
+
+# The following section is for probes testing the Telemetry system. They will not be
+# submitted in pings and are only used for testing.
+telemetry.test:
+  unsigned_int_kind:
+    bug_numbers:
+      - 1276190
+    description: >
+      This is a test uint type with a really long description, maybe spanning even multiple
+      lines, to just prove a point: everything works just fine.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  string_kind:
+    bug_numbers:
+      - 1276190
+    description: A string test type with a one line comment that works just fine!
+    expires: never
+    kind: string
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  boolean_kind:
+    bug_numbers:
+      - 1281214
+    description: A boolean test type with a one line comment that works just fine!
+    expires: never
+    kind: boolean
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  expired:
+    bug_numbers:
+      - 1276190
+    description: This is an expired testing scalar; not meant to be touched.
+    expires: "4"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  unexpired:
+    bug_numbers:
+      - 1276190
+    description: This is an unexpired testing scalar; not meant to be touched.
+    expires: "375"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  release_optin:
+    bug_numbers:
+      - 1276190
+    description: A testing scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+  release_optout:
+    bug_numbers:
+      - 1276190
+    description: A testing scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  keyed_release_optin:
+    bug_numbers:
+      - 1277806
+    description: A testing scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+  keyed_release_optout:
+    bug_numbers:
+      - 1277806
+    description: A testing scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  keyed_expired:
+    bug_numbers:
+      - 1277806
+    description: This is an expired testing scalar; not meant to be touched.
+    expires: "4"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  keyed_unsigned_int:
+    bug_numbers:
+      - 1277806
+    description: A testing keyed uint scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+
+  child_keyed_unsigned_int:
+    bug_numbers:
+      - 1466490
+    description: A testing keyed uint scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'content'
+
+  keyed_boolean_kind:
+    bug_numbers:
+      - 1277806
+    description: A testing keyed boolean scalar; not meant to be touched.
+    expires: never
+    kind: boolean
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'main'
+      - 'content'
+
+  content_only_uint:
+    bug_numbers:
+      - 1278556
+    description: A testing uint scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'content'
+
+  all_processes_uint:
+    bug_numbers:
+      - 1278556
+    description: A testing uint scalar; not meant to be touched.
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+
+  all_child_processes_string:
+    bug_numbers:
+      - 1278556
+    description: A testing string scalar; not meant to be touched.
+    expires: never
+    kind: string
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all_childs'
+
+  default_products:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+
+  desktop_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+
+  keyed_desktop_only:
+    bug_numbers:
+      - 1452552
+    description: A keyed testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+
+  multiproduct:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+      - fennec
+      - geckoview
+
+  mobile_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - fennec
+      - geckoview
+
+  geckoview_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - geckoview
+
+  keyed_mobile_only:
+    bug_numbers:
+      - 1452552
+    description: A keyed testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - fennec
+      - geckoview
+
+# NOTE: Please don't add new definitions below this point. Consider adding
+# them earlier in the file and leave the telemetry.test category as the last
+# one for readability.

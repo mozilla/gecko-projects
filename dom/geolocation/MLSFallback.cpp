@@ -9,7 +9,7 @@
 #include "nsIGeolocationProvider.h"
 #include "nsServiceManagerUtils.h"
 
-NS_IMPL_ISUPPORTS(MLSFallback, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MLSFallback, nsITimerCallback, nsINamed)
 
 MLSFallback::MLSFallback(uint32_t delay)
 : mDelayMs(delay)
@@ -28,11 +28,14 @@ MLSFallback::Startup(nsIGeolocationUpdate* aWatcher)
   }
 
   mUpdateWatcher = aWatcher;
-  nsresult rv;
-  mHandoffTimer = do_CreateInstance("@mozilla.org/timer;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = mHandoffTimer->InitWithCallback(this, mDelayMs, nsITimer::TYPE_ONE_SHOT);
-  return rv;
+
+  // No need to schedule a timer callback if there is no startup delay.
+  if (mDelayMs == 0) {
+    return CreateMLSFallbackProvider();
+  }
+
+  return NS_NewTimerWithCallback(getter_AddRefs(mHandoffTimer),
+                                 this, mDelayMs, nsITimer::TYPE_ONE_SHOT);
 }
 
 nsresult
@@ -57,6 +60,13 @@ NS_IMETHODIMP
 MLSFallback::Notify(nsITimer* aTimer)
 {
   return CreateMLSFallbackProvider();
+}
+
+NS_IMETHODIMP
+MLSFallback::GetName(nsACString& aName)
+{
+  aName.AssignLiteral("MLSFallback");
+  return NS_OK;
 }
 
 nsresult

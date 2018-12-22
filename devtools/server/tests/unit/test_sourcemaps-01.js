@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Check basic source map integration with the "newSource" packet in the RDP.
  */
@@ -11,36 +13,35 @@ var gThreadClient;
 
 const {SourceNode} = require("source-map");
 
-function run_test()
-{
+function run_test() {
   initTestDebuggerServer();
   gDebuggee = addTestGlobal("test-source-map");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-source-map", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_simple_source_map();
-    });
+    attachTestTabAndResume(gClient, "test-source-map",
+                           function(response, tabClient, threadClient) {
+                             gThreadClient = threadClient;
+                             test_simple_source_map();
+                           });
   });
   do_test_pending();
 }
 
-function test_simple_source_map()
-{
+function test_simple_source_map() {
   // Because we are source mapping, we should be notified of a.js, b.js, and
   // c.js as sources, and shouldn't receive abc.js or test_sourcemaps-01.js.
-  let expectedSources = new Set(["http://example.com/www/js/a.js",
-                                 "http://example.com/www/js/b.js",
-                                 "http://example.com/www/js/c.js"]);
+  const expectedSources = new Set(["http://example.com/www/js/a.js",
+                                   "http://example.com/www/js/b.js",
+                                   "http://example.com/www/js/c.js"]);
 
-  gThreadClient.addListener("newSource", function _onNewSource(aEvent, aPacket) {
-    do_check_eq(aEvent, "newSource");
-    do_check_eq(aPacket.type, "newSource");
-    do_check_true(!!aPacket.source);
+  gThreadClient.addListener("newSource", function _onNewSource(event, packet) {
+    Assert.equal(event, "newSource");
+    Assert.equal(packet.type, "newSource");
+    Assert.ok(!!packet.source);
 
-    do_check_true(expectedSources.has(aPacket.source.url),
-                  "The source url should be one of our original sources.");
-    expectedSources.delete(aPacket.source.url);
+    Assert.ok(expectedSources.has(packet.source.url),
+              "The source url should be one of our original sources.");
+    expectedSources.delete(packet.source.url);
 
     if (expectedSources.size === 0) {
       gClient.removeListener("newSource", _onNewSource);
@@ -59,6 +60,6 @@ function test_simple_source_map()
 
   code += "//# sourceMappingURL=data:text/json;base64," + btoa(map.toString());
 
-  Components.utils.evalInSandbox(code, gDebuggee, "1.8",
-                                 "http://example.com/www/js/abc.js", 1);
+  Cu.evalInSandbox(code, gDebuggee, "1.8",
+                   "http://example.com/www/js/abc.js", 1);
 }

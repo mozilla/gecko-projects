@@ -12,18 +12,23 @@
 #define nsDOMTokenList_h___
 
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "nsDOMString.h"
+#include "nsWhitespaceTokenizer.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/DOMTokenListSupportedTokens.h"
 
 namespace mozilla {
 class ErrorResult;
-
+namespace dom {
+class DocGroup;
+} // namespace dom
 } // namespace mozilla
 
 class nsAttrValue;
-class nsIAtom;
+class nsAtom;
 
 // nsISupports must be on the primary inheritance chain
 
@@ -32,12 +37,16 @@ class nsDOMTokenList : public nsISupports,
 {
 protected:
   typedef mozilla::dom::Element Element;
+  typedef mozilla::dom::DocGroup DocGroup;
+  typedef nsWhitespaceTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
+    WhitespaceTokenizer;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMTokenList)
 
-  nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom);
+  nsDOMTokenList(Element* aElement, nsAtom* aAttrAtom,
+                 const mozilla::dom::DOMTokenListSupportedTokenArray = nullptr);
 
   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -46,6 +55,9 @@ public:
     return mElement;
   }
 
+  DocGroup* GetDocGroup() const;
+
+  void RemoveDuplicates(const nsAttrValue* aAttr);
   uint32_t Length();
   void Item(uint32_t aIndex, nsAString& aResult)
   {
@@ -56,17 +68,22 @@ public:
     }
   }
   void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aResult);
-  bool Contains(const nsAString& aToken, mozilla::ErrorResult& aError);
+  bool Contains(const nsAString& aToken);
   void Add(const nsAString& aToken, mozilla::ErrorResult& aError);
   void Add(const nsTArray<nsString>& aTokens,
            mozilla::ErrorResult& aError);
   void Remove(const nsAString& aToken, mozilla::ErrorResult& aError);
   void Remove(const nsTArray<nsString>& aTokens,
               mozilla::ErrorResult& aError);
+  bool Replace(const nsAString& aToken,
+               const nsAString& aNewToken,
+               mozilla::ErrorResult& aError);
   bool Toggle(const nsAString& aToken,
               const mozilla::dom::Optional<bool>& force,
               mozilla::ErrorResult& aError);
-  
+  bool Supports(const nsAString& aToken,
+                mozilla::ErrorResult& aError);
+
   void GetValue(nsAString& aResult) { Stringify(aResult); }
   void SetValue(const nsAString& aValue, mozilla::ErrorResult& rv);
   void Stringify(nsAString& aResult);
@@ -76,14 +93,20 @@ protected:
 
   nsresult CheckToken(const nsAString& aStr);
   nsresult CheckTokens(const nsTArray<nsString>& aStr);
+  void RemoveDuplicatesInternal(nsTArray<RefPtr<nsAtom>>* aArray,
+                                uint32_t aStart);
   void AddInternal(const nsAttrValue* aAttr,
                    const nsTArray<nsString>& aTokens);
   void RemoveInternal(const nsAttrValue* aAttr,
                       const nsTArray<nsString>& aTokens);
+  bool ReplaceInternal(const nsAttrValue* aAttr,
+                       const nsAString& aToken,
+                       const nsAString& aNewToken);
   inline const nsAttrValue* GetParsedAttr();
 
   nsCOMPtr<Element> mElement;
-  nsCOMPtr<nsIAtom> mAttrAtom;
+  RefPtr<nsAtom> mAttrAtom;
+  const mozilla::dom::DOMTokenListSupportedTokenArray mSupportedTokens;
 };
 
 #endif // nsDOMTokenList_h___

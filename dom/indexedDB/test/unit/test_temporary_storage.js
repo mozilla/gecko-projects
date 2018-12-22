@@ -2,10 +2,11 @@
  * Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
+/* eslint-disable mozilla/no-arbitrary-setTimeout */
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const name = this.window ?
                window.location.pathname :
@@ -40,28 +41,37 @@ function testSteps()
 
       info("Opening database for " + spec + " with version " + options.version);
 
-      let gotUpgradeNeeded = false;
+      let gotUpgradeIncomplete = false;
+      let gotUpgradeComplete = false;
 
       let request =
         indexedDB.openForPrincipal(getPrincipal(spec), name, options);
       request.onerror = function(event) {
-        is(request.error.name, "QuotaExceededError", "Reached quota limit");
+        is(request.error.name,
+           gotUpgradeIncomplete ? "AbortError" : "QuotaExceededError",
+           "Reached quota limit");
         event.preventDefault();
-        testGenerator.send(false);
-      }
+        testGenerator.next(false);
+      };
       request.onupgradeneeded = function(event) {
-        gotUpgradeNeeded = true;
-      }
+        event.target.transaction.onabort = function(e) {
+          gotUpgradeIncomplete = true;
+          is(e.target.error.name, "QuotaExceededError", "Reached quota limit");
+        };
+        event.target.transaction.oncomplete = function() {
+          gotUpgradeComplete = true;
+        };
+      };
       request.onsuccess = function(event) {
         let db = event.target.result;
         is(db.version, finalVersion, "Correct version " + finalVersion);
         databases.push(db);
-        testGenerator.send(true);
-      }
+        testGenerator.next(true);
+      };
 
       let shouldContinue = yield undefined;
       if (shouldContinue) {
-        is(gotUpgradeNeeded, true, "Got upgradeneeded event");
+        is(gotUpgradeComplete, true, "Got upgradeneeded event");
         ok(true, "Got success event");
       } else {
         break;
@@ -78,28 +88,37 @@ function testSteps()
 
       info("Opening database for " + spec + " with version " + options.version);
 
-      let gotUpgradeNeeded = false;
+      let gotUpgradeIncomplete = false;
+      let gotUpgradeComplete = false;
 
       let request =
         indexedDB.openForPrincipal(getPrincipal(spec), name, options);
       request.onerror = function(event) {
-        is(request.error.name, "QuotaExceededError", "Reached quota limit");
+        is(request.error.name,
+           gotUpgradeIncomplete ? "AbortError" : "QuotaExceededError",
+           "Reached quota limit");
         event.preventDefault();
-        testGenerator.send(false);
-      }
+        testGenerator.next(false);
+      };
       request.onupgradeneeded = function(event) {
-        gotUpgradeNeeded = true;
-      }
+        event.target.transaction.onabort = function(e) {
+          gotUpgradeIncomplete = true;
+          is(e.target.error.name, "QuotaExceededError", "Reached quota limit");
+        };
+        event.target.transaction.oncomplete = function() {
+          gotUpgradeComplete = true;
+        };
+      };
       request.onsuccess = function(event) {
         let db = event.target.result;
         is(db.version, finalVersion, "Correct version " + finalVersion);
         databases.push(db);
-        testGenerator.send(true);
-      }
+        testGenerator.next(true);
+      };
 
       let shouldContinue = yield undefined;
       if (shouldContinue) {
-        is(gotUpgradeNeeded, true, "Got upgradeneeded event");
+        is(gotUpgradeComplete, true, "Got upgradeneeded event");
         ok(true, "Got success event");
       } else {
         break;
@@ -219,7 +238,7 @@ function testSteps()
         if (!event.oldVersion) {
           newDatabaseCount++;
         }
-      }
+      };
       request.onsuccess = grabEventAndContinueHandler;
       let event = yield undefined;
 

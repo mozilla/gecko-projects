@@ -1,4 +1,5 @@
-//* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -22,12 +23,14 @@
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
-#include "base/sys_info.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
 #include "base/dir_reader_posix.h"
 
 #include "mozilla/UniquePtr.h"
+// For PR_DuplicateEnvironment:
+#include "prenv.h"
+#include "prmem.h"
 
 const int kMicrosecondsPerSecond = 1000000;
 
@@ -48,14 +51,9 @@ bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
   return true;
 }
 
-bool OpenPrivilegedProcessHandle(ProcessId pid,
-                                 ProcessHandle* handle,
-                                 int64_t* error) {
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
   // On POSIX permissions are checked for each operation on process,
   // not when opening a "handle".
-  if (error) {
-    *error = 0;
-  }
   return OpenProcessHandle(pid, handle);
 }
 
@@ -74,6 +72,11 @@ ProcessId GetProcId(ProcessHandle process) {
 bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
   bool result = kill(process_id, SIGTERM) == 0;
 
+  if (!result && (errno == ESRCH)) {
+    result = true;
+    wait = false;
+  }
+
   if (result && wait) {
     int tries = 60;
     bool exited = false;
@@ -81,6 +84,9 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
     while (tries-- > 0) {
       int pid = HANDLE_EINTR(waitpid(process_id, NULL, WNOHANG));
       if (pid == process_id) {
+        exited = true;
+        break;
+      } else if (errno == ECHILD) {
         exited = true;
         break;
       }
@@ -115,13 +121,14 @@ class ScopedDIRClose {
 typedef mozilla::UniquePtr<DIR, ScopedDIRClose> ScopedDIR;
 
 
-void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
-  // DANGER: no calls to malloc are allowed from now on:
-  // http://crbug.com/36678
+void CloseSuperfluousFds(std::function<bool(int)>&& should_preserve) {
+  // DANGER: no calls to malloc (or locks, etc.) are allowed from now on:
+  // https://crbug.com/36678
+  // Also, beware of STL iterators: https://crbug.com/331459
 #if defined(ANDROID)
   static const rlim_t kSystemDefaultMaxFds = 1024;
   static const char kFDDir[] = "/proc/self/fd";
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_SOLARIS)
   static const rlim_t kSystemDefaultMaxFds = 8192;
   static const char kFDDir[] = "/proc/self/fd";
 #elif defined(OS_MACOSX)
@@ -154,19 +161,14 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     // Fallback case: Try every possible fd.
     for (rlim_t i = 0; i < max_fds; ++i) {
       const int fd = static_cast<int>(i);
-      if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+      if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO ||
+          should_preserve(fd)) {
         continue;
-      InjectiveMultimap::const_iterator j;
-      for (j = saved_mapping.begin(); j != saved_mapping.end(); j++) {
-        if (fd == j->dest)
-          break;
       }
-      if (j != saved_mapping.end())
-        continue;
 
       // Since we're just trying to close anything we can find,
       // ignore any error return values of close().
-      HANDLE_EINTR(close(fd));
+      close(fd);
     }
     return;
   }
@@ -183,24 +185,19 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     const long int fd = strtol(fd_dir.name(), &endptr, 10);
     if (fd_dir.name()[0] == 0 || *endptr || fd < 0 || errno)
       continue;
-    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
-      continue;
-    InjectiveMultimap::const_iterator i;
-    for (i = saved_mapping.begin(); i != saved_mapping.end(); i++) {
-      if (fd == i->dest)
-        break;
-    }
-    if (i != saved_mapping.end())
-      continue;
     if (fd == dir_fd)
       continue;
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO ||
+        should_preserve(fd)) {
+      continue;
+    }
 
     // When running under Valgrind, Valgrind opens several FDs for its
     // own use and will complain if we try to close them.  All of
     // these FDs are >= |max_fds|, so we can check against that here
     // before closing.  See https://bugs.kde.org/show_bug.cgi?id=191758
     if (fd < static_cast<int>(max_fds)) {
-      int ret = HANDLE_EINTR(close(fd));
+      int ret = IGNORE_EINTR(close(fd));
       if (ret != 0) {
         DLOG(ERROR) << "Problem closing fd";
       }
@@ -213,7 +210,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 // TODO(agl): Remove this function. It's fundamentally broken for multithreaded
 // apps.
 void SetAllFDsToCloseOnExec() {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_SOLARIS)
   const char fd_dir[] = "/proc/self/fd";
 #elif defined(OS_MACOSX) || defined(OS_BSD)
   const char fd_dir[] = "/dev/fd";
@@ -241,19 +238,6 @@ void SetAllFDsToCloseOnExec() {
     }
   }
 }
-
-ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process),
-                                                        last_time_(0),
-                                                        last_system_time_(0) {
-  processor_count_ = base::SysInfo::NumberOfProcessors();
-}
-
-// static
-ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
-  return new ProcessMetrics(process);
-}
-
-ProcessMetrics::~ProcessMetrics() { }
 
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   int status;
@@ -302,51 +286,43 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   return false;
 }
 
-namespace {
-
-int64_t TimeValToMicroseconds(const struct timeval& tv) {
-  return tv.tv_sec * kMicrosecondsPerSecond + tv.tv_usec;
-}
-
-}
-
-int ProcessMetrics::GetCPUUsage() {
-  struct timeval now;
-  struct rusage usage;
-
-  int retval = gettimeofday(&now, NULL);
-  if (retval)
-    return 0;
-  retval = getrusage(RUSAGE_SELF, &usage);
-  if (retval)
-    return 0;
-
-  int64_t system_time = (TimeValToMicroseconds(usage.ru_stime) +
-                       TimeValToMicroseconds(usage.ru_utime)) /
-                        processor_count_;
-  int64_t time = TimeValToMicroseconds(now);
-
-  if ((last_system_time_ == 0) || (last_time_ == 0)) {
-    // First call, just set the last values.
-    last_system_time_ = system_time;
-    last_time_ = time;
-    return 0;
+void
+FreeEnvVarsArray::operator()(char** array)
+{
+  for (char** varPtr = array; *varPtr != nullptr; ++varPtr) {
+    free(*varPtr);
   }
+  delete[] array;
+}
 
-  int64_t system_time_delta = system_time - last_system_time_;
-  int64_t time_delta = time - last_time_;
-  DCHECK(time_delta != 0);
-  if (time_delta == 0)
-    return 0;
+EnvironmentArray
+BuildEnvironmentArray(const environment_map& env_vars_to_set)
+{
+  base::environment_map combined_env_vars = env_vars_to_set;
+  char **environ = PR_DuplicateEnvironment();
+  for (char** varPtr = environ; *varPtr != nullptr; ++varPtr) {
+    std::string varString = *varPtr;
+    size_t equalPos = varString.find_first_of('=');
+    std::string varName = varString.substr(0, equalPos);
+    std::string varValue = varString.substr(equalPos + 1);
+    if (combined_env_vars.find(varName) == combined_env_vars.end()) {
+      combined_env_vars[varName] = varValue;
+    }
+    PR_Free(*varPtr); // PR_DuplicateEnvironment() uses PR_Malloc().
+  }
+  PR_Free(environ); // PR_DuplicateEnvironment() uses PR_Malloc().
 
-  // We add time_delta / 2 so the result is rounded.
-  int cpu = static_cast<int>((system_time_delta * 100 + time_delta / 2) /
-                             time_delta);
-
-  last_system_time_ = system_time;
-  last_time_ = time;
-
-  return cpu;
+  EnvironmentArray array(new char*[combined_env_vars.size() + 1]);
+  size_t i = 0;
+  for (const auto& key_val : combined_env_vars) {
+    std::string entry(key_val.first);
+    entry += "=";
+    entry += key_val.second;
+    array[i] = strdup(entry.c_str());
+    i++;
+  }
+  array[i] = nullptr;
+  return array;
 }
 
 }  // namespace base

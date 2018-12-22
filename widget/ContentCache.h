@@ -23,6 +23,10 @@ namespace mozilla {
 
 class ContentCacheInParent;
 
+namespace dom {
+class TabParent;
+} // namespace dom
+
 /**
  * ContentCache stores various information of the child content.
  * This class has members which are necessary both in parent process and
@@ -41,6 +45,15 @@ protected:
   // Whole text in the target
   nsString mText;
 
+  // Start offset of the composition string.
+  uint32_t mCompositionStart;
+
+  enum
+  {
+    ePrevCharRect = 1,
+    eNextCharRect = 0
+  };
+
   struct Selection final
   {
     // Following values are offset in "flat text".
@@ -49,9 +62,13 @@ protected:
 
     WritingMode mWritingMode;
 
-    // Character rects at next character of mAnchor and mFocus.
-    LayoutDeviceIntRect mAnchorCharRect;
-    LayoutDeviceIntRect mFocusCharRect;
+    // Character rects at previous and next character of mAnchor and mFocus.
+    // The reason why ContentCache needs to store each previous character of
+    // them is IME may query character rect of the last character of a line
+    // when caret is at the end of the line.
+    // Note that use ePrevCharRect and eNextCharRect for accessing each item.
+    LayoutDeviceIntRect mAnchorCharRects[2];
+    LayoutDeviceIntRect mFocusCharRects[2];
 
     // Whole rect of selected text. This is empty if the selection is collapsed.
     LayoutDeviceIntRect mRect;
@@ -66,9 +83,22 @@ protected:
     {
       mAnchor = mFocus = UINT32_MAX;
       mWritingMode = WritingMode();
-      mAnchorCharRect.SetEmpty();
-      mFocusCharRect.SetEmpty();
+      ClearAnchorCharRects();
+      ClearFocusCharRects();
       mRect.SetEmpty();
+    }
+
+    void ClearAnchorCharRects()
+    {
+      for (size_t i = 0; i < ArrayLength(mAnchorCharRects); i++) {
+        mAnchorCharRects[i].SetEmpty();
+      }
+    }
+    void ClearFocusCharRects()
+    {
+      for (size_t i = 0; i < ArrayLength(mFocusCharRects); i++) {
+        mFocusCharRects[i].SetEmpty();
+      }
     }
 
     bool IsValid() const
@@ -104,6 +134,20 @@ protected:
       NS_ASSERTION(IsValid(),
                    "The caller should check if the selection is valid");
       return Reversed() ? mAnchor - mFocus : mFocus - mAnchor;
+    }
+    LayoutDeviceIntRect StartCharRect() const
+    {
+      NS_ASSERTION(IsValid(),
+                   "The caller should check if the selection is valid");
+      return Reversed() ? mFocusCharRects[eNextCharRect] :
+                          mAnchorCharRects[eNextCharRect];
+    }
+    LayoutDeviceIntRect EndCharRect() const
+    {
+      NS_ASSERTION(IsValid(),
+                   "The caller should check if the selection is valid");
+      return Reversed() ? mAnchorCharRects[eNextCharRect] :
+                          mFocusCharRects[eNextCharRect];
     }
   } mSelection;
 
@@ -167,6 +211,10 @@ protected:
         CheckedInt<uint32_t>(mStart) + mRects.Length();
       return endOffset.isValid();
     }
+    bool HasRects() const
+    {
+      return IsValid() && !mRects.IsEmpty();
+    }
     uint32_t StartOffset() const
     {
       NS_ASSERTION(IsValid(),
@@ -198,7 +246,7 @@ protected:
     }
     bool IsOverlappingWith(uint32_t aOffset, uint32_t aLength) const
     {
-      if (!IsValid() || aOffset == UINT32_MAX) {
+      if (!HasRects() || aOffset == UINT32_MAX || !aLength) {
         return false;
       }
       CheckedInt<uint32_t> endOffset =
@@ -206,12 +254,13 @@ protected:
       if (NS_WARN_IF(!endOffset.isValid())) {
         return false;
       }
-      return aOffset <= EndOffset() && endOffset.value() >= mStart;
+      return aOffset < EndOffset() && endOffset.value() > mStart;
     }
     LayoutDeviceIntRect GetRect(uint32_t aOffset) const;
     LayoutDeviceIntRect GetUnionRect(uint32_t aOffset, uint32_t aLength) const;
-    LayoutDeviceIntRect GetUnionRectAsFarAsPossible(uint32_t aOffset,
-                                                    uint32_t aLength) const;
+    LayoutDeviceIntRect GetUnionRectAsFarAsPossible(
+                          uint32_t aOffset, uint32_t aLength,
+                          bool aRoundToExistingOffset) const;
   } mTextRectArray;
 
   LayoutDeviceIntRect mEditorRect;
@@ -260,6 +309,10 @@ private:
   bool QueryCharRect(nsIWidget* aWidget,
                      uint32_t aOffset,
                      LayoutDeviceIntRect& aCharRect) const;
+  bool QueryCharRectArray(nsIWidget* aWidget,
+                          uint32_t aOffset,
+                          uint32_t aLength,
+                          RectArray& aCharRectArray) const;
   bool CacheCaret(nsIWidget* aWidget,
                   const IMENotification* aNotification = nullptr);
   bool CacheTextRects(nsIWidget* aWidget,
@@ -269,7 +322,7 @@ private:
 class ContentCacheInParent final : public ContentCache
 {
 public:
-  ContentCacheInParent();
+  explicit ContentCacheInParent(dom::TabParent& aTabParent);
 
   /**
    * AssignContent() is called when TabParent receives ContentCache from
@@ -277,6 +330,7 @@ public:
    * it's managed by TabParent itself.
    */
   void AssignContent(const ContentCache& aOther,
+                     nsIWidget* aWidget,
                      const IMENotification* aNotification = nullptr);
 
   /**
@@ -356,27 +410,118 @@ private:
   IMENotification mPendingLayoutChange;
   IMENotification mPendingCompositionUpdate;
 
+#if MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  // Log of event messages to be output to crash report.
+  nsTArray<EventMessage> mDispatchedEventMessages;
+  nsTArray<EventMessage> mReceivedEventMessages;
+  // Log of RequestIMEToCommitComposition() in the last 2 compositions.
+  enum class RequestIMEToCommitCompositionResult : uint8_t
+  {
+    eToOldCompositionReceived,
+    eToCommittedCompositionReceived,
+    eReceivedAfterTabParentBlur,
+    eReceivedButNoTextComposition,
+    eHandledAsynchronously,
+    eHandledSynchronously,
+  };
+  const char* ToReadableText(RequestIMEToCommitCompositionResult aResult) const
+  {
+    switch (aResult) {
+      case RequestIMEToCommitCompositionResult::eToOldCompositionReceived:
+        return "Commit request is not handled because it's for "
+               "older composition";
+      case RequestIMEToCommitCompositionResult::eToCommittedCompositionReceived:
+        return "Commit request is not handled because TabParent has already "
+               "sent commit event for the composition";
+      case RequestIMEToCommitCompositionResult::eReceivedAfterTabParentBlur:
+        return "Commit request is handled with stored composition string "
+               "because TabParent has already lost focus";
+      case RequestIMEToCommitCompositionResult::eReceivedButNoTextComposition:
+        return "Commit request is not handled because there is no "
+               "TextCompsition instance";
+      case RequestIMEToCommitCompositionResult::eHandledAsynchronously:
+        return "Commit request is handled but IME doesn't commit current "
+               "composition synchronously";
+      case RequestIMEToCommitCompositionResult::eHandledSynchronously:
+        return "Commit reqeust is handled synchronously";
+      default:
+        return "Unknown reason";
+    }
+  }
+  nsTArray<RequestIMEToCommitCompositionResult>
+    mRequestIMEToCommitCompositionResults;
+#endif // MOZ_DIAGNOSTIC_ASSERT_ENABLED
+
+  // mTabParent is owner of the instance.
+  dom::TabParent& MOZ_NON_OWNING_REF mTabParent;
+  // mCompositionString is composition string which were sent to the remote
+  // process but not yet committed in the remote process.
+  nsString mCompositionString;
   // This is not nullptr only while the instance is requesting IME to
   // composition.  Then, data value of dispatched composition events should
   // be stored into the instance.
   nsAString* mCommitStringByRequest;
-  // Start offset of the composition string.
-  uint32_t mCompositionStart;
   // mPendingEventsNeedingAck is increased before sending a composition event or
   // a selection event and decreased after they are received in the child
   // process.
   uint32_t mPendingEventsNeedingAck;
+  // mCompositionStartInChild stores current composition start offset in the
+  // remote process.
+  uint32_t mCompositionStartInChild;
+  // mPendingCommitLength is commit string length of the first pending
+  // composition.  This is used by relative offset query events when querying
+  // new composition start offset.
+  // Note that when mPendingCompositionCount is not 0, i.e., there are 2 or
+  // more pending compositions, this cache won't be used because in such case,
+  // anyway ContentCacheInParent cannot return proper character rect.
+  uint32_t mPendingCommitLength;
+  // mPendingCompositionCount is number of compositions which started in widget
+  // but not yet handled in the child process.
+  uint8_t mPendingCompositionCount;
+  // mPendingCommitCount is number of eCompositionCommit(AsIs) events which
+  // were sent to the child process but not yet handled in it.
+  uint8_t mPendingCommitCount;
+  // mWidgetHasComposition is true when the widget in this process thinks that
+  // IME has composition.  So, this is set to true when eCompositionStart is
+  // dispatched and set to false when eCompositionCommit(AsIs) is dispatched.
+  bool mWidgetHasComposition;
+  // mIsChildIgnoringCompositionEvents is set to true if the child process
+  // requests commit composition whose commit has already been sent to it.
+  // Then, set to false when the child process ignores the commit event.
+  bool mIsChildIgnoringCompositionEvents;
 
-  bool mIsComposing;
+  ContentCacheInParent() = delete;
 
-  bool GetCaretRect(uint32_t aOffset, LayoutDeviceIntRect& aCaretRect) const;
+  /**
+   * When following methods' aRoundToExistingOffset is true, even if specified
+   * offset or range is out of bounds, the result is computed with the existing
+   * cache forcibly.
+   */
+  bool GetCaretRect(uint32_t aOffset,
+                    bool aRoundToExistingOffset,
+                    LayoutDeviceIntRect& aCaretRect) const;
   bool GetTextRect(uint32_t aOffset,
+                   bool aRoundToExistingOffset,
                    LayoutDeviceIntRect& aTextRect) const;
   bool GetUnionTextRects(uint32_t aOffset,
                          uint32_t aLength,
+                         bool aRoundToExistingOffset,
                          LayoutDeviceIntRect& aUnionTextRect) const;
 
   void FlushPendingNotifications(nsIWidget* aWidget);
+
+#if MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  /**
+   * Remove unnecessary messages from mDispatchedEventMessages and
+   * mReceivedEventMessages.
+   */
+  void RemoveUnnecessaryEventMessageLog();
+
+  /**
+   * Append event message log to aLog.
+   */
+  void AppendEventMessageLog(nsACString& aLog) const;
+#endif // #if MOZ_DIAGNOSTIC_ASSERT_ENABLED
 };
 
 } // namespace mozilla

@@ -12,25 +12,27 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "ContentTaskUtils",
 ];
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
-Cu.import("resource://gre/modules/Timer.jsm");
-
-this.ContentTaskUtils = {
+var ContentTaskUtils = {
   /**
    * Will poll a condition function until it returns true.
    *
    * @param condition
    *        A condition function that must return true or false. If the
    *        condition ever throws, this is also treated as a false.
+   * @param msg
+   *        The message to use when the returned promise is rejected.
+   *        This message will be extended with additional information
+   *        about the number of tries or the thrown exception.
    * @param interval
    *        The time interval to poll the condition function. Defaults
    *        to 100ms.
-   * @param attempts
+   * @param maxTries
    *        The number of times to poll before giving up and rejecting
    *        if the condition has not yet returned true. Defaults to 50
    *        (~5 seconds for 100ms intervals)
@@ -38,7 +40,7 @@ this.ContentTaskUtils = {
    *        Resolves when condition is true.
    *        Rejects if timeout is exceeded or condition ever throws.
    */
-  waitForCondition(condition, msg, interval=100, maxTries=50) {
+  waitForCondition(condition, msg, interval = 100, maxTries = 50) {
     return new Promise((resolve, reject) => {
       let tries = 0;
       let intervalID = setInterval(() => {
@@ -52,7 +54,7 @@ this.ContentTaskUtils = {
         let conditionPassed = false;
         try {
           conditionPassed = condition();
-        } catch(e) {
+        } catch (e) {
           msg += ` - threw exception: ${e}`;
           clearInterval(intervalID);
           reject(msg);
@@ -61,7 +63,7 @@ this.ContentTaskUtils = {
 
         if (conditionPassed) {
           clearInterval(intervalID);
-          resolve();
+          resolve(conditionPassed);
         }
         tries++;
       }, interval);
@@ -97,7 +99,7 @@ this.ContentTaskUtils = {
    * @returns {Promise}
    * @resolves The Event object.
    */
-  waitForEvent(subject, eventName, capture, checkFn) {
+  waitForEvent(subject, eventName, capture, checkFn, wantsUntrusted = false) {
     return new Promise((resolve, reject) => {
       subject.addEventListener(eventName, function listener(event) {
         try {
@@ -105,16 +107,16 @@ this.ContentTaskUtils = {
             return;
           }
           subject.removeEventListener(eventName, listener, capture);
-          resolve(event);
+          setTimeout(() => resolve(event), 0);
         } catch (ex) {
           try {
             subject.removeEventListener(eventName, listener, capture);
           } catch (ex2) {
             // Maybe the provided object does not support removeEventListener.
           }
-          reject(ex);
+          setTimeout(() => reject(ex), 0);
         }
-      }, capture);
+      }, capture, wantsUntrusted);
     });
   },
 };

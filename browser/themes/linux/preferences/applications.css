@@ -11,18 +11,18 @@
 .actionsMenu {
   margin-top: -1px;
   margin-bottom: -1px;
-  -moz-margin-start: -1px;
-  -moz-margin-end: 0;
+  margin-inline-start: -1px;
+  margin-inline-end: 0;
 }
 
 .typeIcon,
 .actionIcon {
-  -moz-margin-start: 3px;
-  -moz-margin-end: 3px;
+  margin-inline-start: 3px;
+  margin-inline-end: 3px;
 }
 
 #handlersView > richlistitem label {
-  -moz-margin-start: 1px;
+  margin-inline-start: 1px;
   margin-top: 2px;
 }
 
@@ -47,20 +47,40 @@ menuitem[appHandlerIcon="feed"] {
 
 richlistitem[appHandlerIcon="plugin"],
 menuitem[appHandlerIcon="plugin"] {
-  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric-16.png");
+  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric.svg");
 }
 
 .actionsMenu .menulist-icon {
-  -moz-margin-end: 1px;
+  margin-inline-end: 1px;
   height: 16px;
   width: 16px;
 }
 
 .actionsMenu > menupopup > menuitem > .menu-iconic-left {
-  -moz-padding-start: 0;
-  -moz-padding-end: 4px !important;
+  padding-inline-start: 0;
+  padding-inline-end: 4px !important;
 }
 
 .actionsMenu > menupopup > menuitem {
-  -moz-padding-start: 3px;
+  padding-inline-start: 3px;
+}
+
+#appList {
+  min-height: 212px;
+}
+
+#appList > richlistitem {
+  -moz-box-align: center;
+}
+
+#appList > richlistitem > image {
+  margin: 5px;
+  width: 32px;
+  height: 32px;
+}
+
+#appList > richlistitem > label {
+  margin: 0px;
+  padding: 5px;
+  white-space: nowrap;
 }

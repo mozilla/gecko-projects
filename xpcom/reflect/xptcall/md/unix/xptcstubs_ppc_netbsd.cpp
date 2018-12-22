@@ -23,7 +23,7 @@
 // - 'args[]' contains the arguments passed on stack
 // - 'gprData[]' contains the arguments passed in integer registers
 // - 'fprData[]' contains the arguments passed in floating point registers
-// 
+//
 // The parameters are mapped into an array of type 'nsXPTCMiniVariant'
 // and then the method gets called.
 
@@ -36,7 +36,7 @@ PrepareAndDispatch(nsXPTCStubBase* self,
 {
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
     nsXPTCMiniVariant* dispatchParams = nullptr;
-    nsIInterfaceInfo* iface_info = nullptr;
+    const nsXPTInterfaceInfo* iface_info = nullptr;
     const nsXPTMethodInfo* info;
     uint32_t paramCount;
     uint32_t i;
@@ -76,7 +76,7 @@ PrepareAndDispatch(nsXPTCStubBase* self,
         const nsXPTParamInfo& param = info->GetParam(i);
         const nsXPTType& type = param.GetType();
         nsXPTCMiniVariant* dp = &dispatchParams[i];
-	
+
         if (!param.IsOut() && type == nsXPTType::T_DOUBLE) {
             if (fpr < FPR_COUNT)
                 dp->val.d = fprData[fpr++];
@@ -148,8 +148,6 @@ PrepareAndDispatch(nsXPTCStubBase* self,
     }
 
     result = self->CallMethod((uint16_t) methodIndex, info, dispatchParams);
-
-    NS_RELEASE(iface_info);
 
     if (dispatchParams != paramBuffer)
         delete [] dispatchParams;

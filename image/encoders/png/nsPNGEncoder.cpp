@@ -299,7 +299,7 @@ nsPNGEncoder::AddImageFrame(const uint8_t* aData,
     }
 
   } else {
-    NS_NOTREACHED("Bad format type");
+    MOZ_ASSERT_UNREACHABLE("Bad format type");
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -741,7 +741,8 @@ nsPNGEncoder::NotifyListener()
        mFinished)) {
     nsCOMPtr<nsIInputStreamCallback> callback;
     if (mCallbackTarget) {
-      callback = NS_NewInputStreamReadyEvent(mCallback, mCallbackTarget);
+      callback = NS_NewInputStreamReadyEvent("nsPNGEncoder::NotifyListener",
+                                             mCallback, mCallbackTarget);
     } else {
       callback = mCallback;
     }

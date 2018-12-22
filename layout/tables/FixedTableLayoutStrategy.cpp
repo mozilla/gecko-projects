@@ -28,7 +28,7 @@ FixedTableLayoutStrategy::~FixedTableLayoutStrategy()
 }
 
 /* virtual */ nscoord
-FixedTableLayoutStrategy::GetMinISize(nsRenderingContext* aRenderingContext)
+FixedTableLayoutStrategy::GetMinISize(gfxContext* aRenderingContext)
 {
   DISPLAY_MIN_WIDTH(mTableFrame, mMinISize);
   if (mMinISize != NS_INTRINSIC_WIDTH_UNKNOWN) {
@@ -69,9 +69,8 @@ FixedTableLayoutStrategy::GetMinISize(nsRenderingContext* aRenderingContext)
     nscoord spacing = mTableFrame->GetColSpacing(col);
     const nsStyleCoord *styleISize = &colFrame->StylePosition()->ISize(wm);
     if (styleISize->ConvertsToLength()) {
-      result += nsLayoutUtils::ComputeISizeValue(aRenderingContext,
-                                                 colFrame, 0, 0, 0,
-                                                 *styleISize);
+      result += colFrame->ComputeISizeValue(aRenderingContext,
+                                            0, 0, 0, *styleISize);
     } else if (styleISize->GetUnit() == eStyleUnit_Percent) {
       // do nothing
     } else {
@@ -119,7 +118,7 @@ FixedTableLayoutStrategy::GetMinISize(nsRenderingContext* aRenderingContext)
 }
 
 /* virtual */ nscoord
-FixedTableLayoutStrategy::GetPrefISize(nsRenderingContext* aRenderingContext,
+FixedTableLayoutStrategy::GetPrefISize(gfxContext* aRenderingContext,
                                        bool aComputingSize)
 {
   // It's theoretically possible to do something much better here that
@@ -153,9 +152,9 @@ AllocateUnassigned(nscoord aUnassignedSpace, float aShare)
 }
 
 /* virtual */ void
-FixedTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowState)
+FixedTableLayoutStrategy::ComputeColumnISizes(const ReflowInput& aReflowInput)
 {
-  nscoord tableISize = aReflowState.ComputedISize();
+  nscoord tableISize = aReflowInput.ComputedISize();
 
   if (mLastCalcISize == tableISize) {
     return;
@@ -213,9 +212,8 @@ FixedTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowSt
     const nsStyleCoord *styleISize = &colFrame->StylePosition()->ISize(wm);
     nscoord colISize;
     if (styleISize->ConvertsToLength()) {
-      colISize = nsLayoutUtils::ComputeISizeValue(aReflowState.rendContext,
-                                                  colFrame, 0, 0, 0,
-                                                  *styleISize);
+      colISize = colFrame->ComputeISizeValue(aReflowInput.mRenderingContext,
+                                             0, 0, 0, *styleISize);
       specTotal += colISize;
     } else if (styleISize->GetUnit() == eStyleUnit_Percent) {
       float pct = styleISize->GetPercentValue();
@@ -235,7 +233,8 @@ FixedTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowSt
       nsTableCellFrame *cellFrame = cellMap->GetCellInfoAt(0, col, &originates,
                                                            &colSpan);
       if (cellFrame) {
-        styleISize = &cellFrame->StylePosition()->ISize(wm);
+        const nsStylePosition* cellStylePos = cellFrame->StylePosition();
+        styleISize = &cellStylePos->ISize(wm);
         if (styleISize->ConvertsToLength() ||
             (styleISize->GetUnit() == eStyleUnit_Enumerated &&
              (styleISize->GetIntValue() == NS_STYLE_WIDTH_MAX_CONTENT ||
@@ -246,29 +245,19 @@ FixedTableLayoutStrategy::ComputeColumnISizes(const nsHTMLReflowState& aReflowSt
           // MIN_ISIZE for symmetry with GetMinISize above, just in case
           // there is a difference.
           colISize =
-            nsLayoutUtils::IntrinsicForContainer(aReflowState.rendContext,
+            nsLayoutUtils::IntrinsicForContainer(aReflowInput.mRenderingContext,
                                                  cellFrame,
                                                  nsLayoutUtils::MIN_ISIZE);
         } else if (styleISize->GetUnit() == eStyleUnit_Percent) {
           // XXX This should use real percentage padding
-          nsIFrame::IntrinsicISizeOffsetData offsets =
-            cellFrame->IntrinsicISizeOffsets();
           float pct = styleISize->GetPercentValue();
           colISize = NSToCoordFloor(pct * float(tableISize));
 
-          nscoord boxSizingAdjust = 0;
-          switch (cellFrame->StylePosition()->mBoxSizing) {
-            case StyleBoxSizing::Content:
-              boxSizingAdjust += offsets.hPadding;
-              MOZ_FALLTHROUGH;
-            case StyleBoxSizing::Padding:
-              boxSizingAdjust += offsets.hBorder;
-              MOZ_FALLTHROUGH;
-            case StyleBoxSizing::Border:
-              // Don't add anything
-              break;
+          if (cellStylePos->mBoxSizing == StyleBoxSizing::Content) {
+            nsIFrame::IntrinsicISizeOffsetData offsets =
+              cellFrame->IntrinsicISizeOffsets();
+            colISize += offsets.hPadding + offsets.hBorder;
           }
-          colISize += boxSizingAdjust;
 
           pct /= float(colSpan);
           colFrame->AddPrefPercent(pct);

@@ -1,8 +1,6 @@
 "use strict";
 
-var { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
-
-var {WebRequest} = Cu.import("resource://gre/modules/WebRequest.jsm", {});
+var {WebRequest} = ChromeUtils.import("resource://gre/modules/WebRequest.jsm", {});
 
 const BASE = "http://example.com/browser/toolkit/modules/tests/browser";
 const URL = BASE + "/WebRequest_dynamic.sjs";
@@ -10,8 +8,7 @@ const URL = BASE + "/WebRequest_dynamic.sjs";
 var countBefore = 0;
 var countAfter = 0;
 
-function onBeforeSendHeaders(details)
-{
+function onBeforeSendHeaders(details) {
   if (details.url != URL) {
     return undefined;
   }
@@ -36,8 +33,7 @@ function onBeforeSendHeaders(details)
   return {requestHeaders: headers};
 }
 
-function onResponseStarted(details)
-{
+function onResponseStarted(details) {
   if (details.url != URL) {
     return;
   }
@@ -56,19 +52,19 @@ function onResponseStarted(details)
   ok(found, "Saw cookie header");
 }
 
-add_task(function* filter_urls() {
+add_task(async function filter_urls() {
   // First load the URL so that we set cookie foopy=1.
-  gBrowser.selectedTab = gBrowser.addTab(URL);
-  yield waitForLoad();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, URL);
+  await waitForLoad();
   gBrowser.removeCurrentTab();
 
   // Now load with WebRequest set up.
   WebRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders, null, ["blocking"]);
   WebRequest.onResponseStarted.addListener(onResponseStarted, null);
 
-  gBrowser.selectedTab = gBrowser.addTab(URL);
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, URL);
 
-  yield waitForLoad();
+  await waitForLoad();
 
   gBrowser.removeCurrentTab();
 
@@ -80,10 +76,5 @@ add_task(function* filter_urls() {
 });
 
 function waitForLoad(browser = gBrowser.selectedBrowser) {
-  return new Promise(resolve => {
-    browser.addEventListener("load", function listener() {
-      browser.removeEventListener("load", listener, true);
-      resolve();
-    }, true);
-  });
+  return BrowserTestUtils.browserLoaded(browser);
 }

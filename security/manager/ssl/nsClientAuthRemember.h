@@ -7,6 +7,8 @@
 #ifndef __NSCLIENTAUTHREMEMBER_H__
 #define __NSCLIENTAUTHREMEMBER_H__
 
+#include "mozilla/HashFunctions.h"
+#include "mozilla/Move.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "nsTHashtable.h"
 #include "nsIObserver.h"
@@ -16,6 +18,12 @@
 #include "nsWeakReference.h"
 #include "mozilla/Attributes.h"
 
+namespace mozilla {
+  class OriginAttributes;
+}
+
+using mozilla::OriginAttributes;
+
 class nsClientAuthRemember
 {
 public:
@@ -23,17 +31,17 @@ public:
   nsClientAuthRemember()
   {
   }
-  
-  nsClientAuthRemember(const nsClientAuthRemember &other)
+
+  nsClientAuthRemember(const nsClientAuthRemember& aOther)
   {
-    this->operator=(other);
+    this->operator=(aOther);
   }
 
-  nsClientAuthRemember &operator=(const nsClientAuthRemember &other)
+  nsClientAuthRemember& operator=(const nsClientAuthRemember& aOther)
   {
-    mAsciiHost = other.mAsciiHost;
-    mFingerprint = other.mFingerprint;
-    mDBKey = other.mDBKey;
+    mAsciiHost = aOther.mAsciiHost;
+    mFingerprint = aOther.mFingerprint;
+    mDBKey = aOther.mDBKey;
     return *this;
   }
 
@@ -56,9 +64,10 @@ class nsClientAuthRememberEntry final : public PLDHashEntryHdr
     {
     }
 
-    nsClientAuthRememberEntry(const nsClientAuthRememberEntry& toCopy)
+    nsClientAuthRememberEntry(nsClientAuthRememberEntry&& aToMove)
+      : mSettings(std::move(aToMove.mSettings))
+      , mEntryKey(std::move(aToMove.mEntryKey))
     {
-      mSettings = toCopy.mSettings;
     }
 
     ~nsClientAuthRememberEntry()
@@ -67,17 +76,17 @@ class nsClientAuthRememberEntry final : public PLDHashEntryHdr
 
     KeyType GetKey() const
     {
-      return HostWithCertPtr();
+      return EntryKeyPtr();
     }
 
     KeyTypePointer GetKeyPointer() const
     {
-      return HostWithCertPtr();
+      return EntryKeyPtr();
     }
 
     bool KeyEquals(KeyTypePointer aKey) const
     {
-      return !strcmp(HostWithCertPtr(), aKey);
+      return !strcmp(EntryKeyPtr(), aKey);
     }
 
     static KeyTypePointer KeyToPointer(KeyType aKey)
@@ -87,21 +96,21 @@ class nsClientAuthRememberEntry final : public PLDHashEntryHdr
 
     static PLDHashNumber HashKey(KeyTypePointer aKey)
     {
-      return PLDHashTable::HashStringKey(aKey);
+      return mozilla::HashString(aKey);
     }
 
     enum { ALLOW_MEMMOVE = false };
 
     // get methods
-    inline const nsCString &HostWithCert() const { return mHostWithCert; }
+    inline const nsCString& GetEntryKey() const { return mEntryKey; }
 
-    inline KeyTypePointer HostWithCertPtr() const
+    inline KeyTypePointer EntryKeyPtr() const
     {
-      return mHostWithCert.get();
+      return mEntryKey.get();
     }
 
     nsClientAuthRemember mSettings;
-    nsCString mHostWithCert;
+    nsCString mEntryKey;
 };
 
 class nsClientAuthRememberService final : public nsIObserver,
@@ -115,14 +124,20 @@ public:
 
   nsresult Init();
 
-  static void GetHostWithCert(const nsACString & aHostName, 
-                              const nsACString & nickname, nsACString& _retval);
+  static void GetEntryKey(const nsACString& aHostName,
+                          const OriginAttributes& aOriginAttributes,
+                          const nsACString& aFingerprint,
+                          /*out*/ nsACString& aEntryKey);
 
-  nsresult RememberDecision(const nsACString & aHostName, 
-                            CERTCertificate *aServerCert, CERTCertificate *aClientCert);
-  nsresult HasRememberedDecision(const nsACString & aHostName, 
-                                 CERTCertificate *aServerCert, 
-                                 nsACString & aCertDBKey, bool *_retval);
+  nsresult RememberDecision(const nsACString& aHostName,
+                            const OriginAttributes& aOriginAttributes,
+                            CERTCertificate* aServerCert,
+                            CERTCertificate* aClientCert);
+
+  nsresult HasRememberedDecision(const nsACString& aHostName,
+                                 const OriginAttributes& aOriginAttributes,
+                                 CERTCertificate* aServerCert,
+                                 nsACString& aCertDBKey, bool* aRetVal);
 
   void ClearRememberedDecisions();
   static void ClearAllRememberedDecisions();
@@ -134,9 +149,10 @@ protected:
     nsTHashtable<nsClientAuthRememberEntry> mSettingsTable;
 
     void RemoveAllFromMemory();
-    nsresult AddEntryToList(const nsACString &host, 
-                            const nsACString &server_fingerprint,
-                            const nsACString &db_key);
+    nsresult AddEntryToList(const nsACString& aHost,
+                            const OriginAttributes& aOriginAttributes,
+                            const nsACString& aServerFingerprint,
+                            const nsACString& aDBKey);
 };
 
 #endif

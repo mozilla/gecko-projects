@@ -6,6 +6,9 @@
 
 #include "MediaElementAudioSourceNode.h"
 #include "mozilla/dom/MediaElementAudioSourceNodeBinding.h"
+#include "AudioDestinationNode.h"
+#include "nsIScriptError.h"
+#include "AudioNodeStream.h"
 
 namespace mozilla {
 namespace dom {
@@ -16,13 +19,29 @@ MediaElementAudioSourceNode::MediaElementAudioSourceNode(AudioContext* aContext)
 }
 
 /* static */ already_AddRefed<MediaElementAudioSourceNode>
-MediaElementAudioSourceNode::Create(AudioContext* aContext,
-                                    DOMMediaStream* aStream, ErrorResult& aRv)
+MediaElementAudioSourceNode::Create(AudioContext& aAudioContext,
+                                    const MediaElementAudioSourceOptions& aOptions,
+                                    ErrorResult& aRv)
 {
-  RefPtr<MediaElementAudioSourceNode> node =
-    new MediaElementAudioSourceNode(aContext);
+  if (aAudioContext.IsOffline()) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
 
-  node->Init(aStream, aRv);
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<MediaElementAudioSourceNode> node =
+    new MediaElementAudioSourceNode(&aAudioContext);
+
+  RefPtr<DOMMediaStream> stream =
+    aOptions.mMediaElement->CaptureAudio(aRv, aAudioContext.Destination()->Stream()->Graph());
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  node->Init(stream, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -33,7 +52,7 @@ MediaElementAudioSourceNode::Create(AudioContext* aContext,
 JSObject*
 MediaElementAudioSourceNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaElementAudioSourceNodeBinding::Wrap(aCx, this, aGivenProto);
+  return MediaElementAudioSourceNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

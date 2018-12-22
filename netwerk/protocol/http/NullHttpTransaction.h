@@ -9,6 +9,7 @@
 
 #include "nsAHttpTransaction.h"
 #include "mozilla/Attributes.h"
+#include "TimingStruct.h"
 
 // This is the minimal nsAHttpTransaction implementation. A NullHttpTransaction
 // can be used to drive connection level semantics (such as SSL handshakes
@@ -38,15 +39,35 @@ public:
                       nsIInterfaceRequestor *callbacks,
                       uint32_t caps);
 
-  bool Claim();
+  MOZ_MUST_USE bool Claim();
+  void Unclaim();
 
   // Overload of nsAHttpTransaction methods
-  bool IsNullTransaction() override final { return true; }
-  NullHttpTransaction *QueryNullTransaction() override final { return this; }
-  bool ResponseTimeoutEnabled() const override final {return true; }
-  PRIntervalTime ResponseTimeout() override final
+  bool IsNullTransaction() final { return true; }
+  NullHttpTransaction *QueryNullTransaction() final { return this; }
+  bool ResponseTimeoutEnabled() const final {return true; }
+  PRIntervalTime ResponseTimeout() final
   {
     return PR_SecondsToInterval(15);
+  }
+
+  // We have to override this function because |mTransaction| in nsHalfOpenSocket
+  // could be either nsHttpTransaction or NullHttpTransaction.
+  // NullHttpTransaction will be activated on the connection immediately after
+  // creation and be never put in a pending queue, so it's OK to just return 0.
+  uint64_t TopLevelOuterContentWindowId() override { return 0; }
+
+  TimingStruct Timings() { return mTimings; }
+
+  mozilla::TimeStamp GetTcpConnectEnd() { return mTimings.tcpConnectEnd; }
+  mozilla::TimeStamp GetSecureConnectionStart()
+  {
+    return mTimings.secureConnectionStart;
+  }
+
+  void SetFastOpenStatus(uint8_t aStatus) override
+  {
+    mFastOpenStatus = aStatus;
   }
 
 protected:
@@ -68,6 +89,8 @@ private:
   Atomic<uint32_t> mCapsToClear;
   bool mIsDone;
   bool mClaimed;
+  TimingStruct mTimings;
+  uint8_t mFastOpenStatus;
 
 protected:
   RefPtr<nsAHttpConnection> mConnection;

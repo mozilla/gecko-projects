@@ -5,68 +5,171 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EMEDecoderModule.h"
-#include "EMEAudioDecoder.h"
-#include "EMEVideoDecoder.h"
-#include "MediaDataDecoderProxy.h"
+
+#include <inttypes.h>
+
+#include "Adts.h"
+#include "GMPDecoderModule.h"
+#include "GMPService.h"
+#include "MediaInfo.h"
+#include "PDMFactory.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/CDMProxy.h"
-#include "mozilla/unused.h"
-#include "nsServiceManagerUtils.h"
-#include "MediaInfo.h"
+#include "mozilla/EMEUtils.h"
+#include "mozilla/StaticPrefs.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/Unused.h"
+#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
-#include "GMPDecoderModule.h"
+#include "nsServiceManagerUtils.h"
+#include "DecryptThroughputLimit.h"
+#include "ChromiumCDMVideoDecoder.h"
 
 namespace mozilla {
 
-typedef MozPromiseRequestHolder<CDMProxy::DecryptPromise> DecryptPromiseRequestHolder;
+typedef MozPromiseRequestHolder<DecryptPromise> DecryptPromiseRequestHolder;
+extern already_AddRefed<PlatformDecoderModule> CreateBlankDecoderModule();
 
-class EMEDecryptor : public MediaDataDecoder {
+DDLoggedTypeDeclNameAndBase(EMEDecryptor, MediaDataDecoder);
 
+class ADTSSampleConverter
+{
 public:
-
-  EMEDecryptor(MediaDataDecoder* aDecoder,
-               MediaDataDecoderCallback* aCallback,
-               CDMProxy* aProxy,
-               TaskQueue* aDecodeTaskQueue)
-    : mDecoder(aDecoder)
-    , mCallback(aCallback)
-    , mTaskQueue(aDecodeTaskQueue)
-    , mProxy(aProxy)
-    , mSamplesWaitingForKey(new SamplesWaitingForKey(this, mTaskQueue, mProxy))
-    , mIsShutdown(false)
+  explicit ADTSSampleConverter(const AudioInfo& aInfo)
+    : mNumChannels(aInfo.mChannels)
+    // Note: we set profile to 2 if we encounter an extended profile (which set
+    // mProfile to 0 and then set mExtendedProfile) such as HE-AACv2
+    // (profile 5). These can then pass through conversion to ADTS and back.
+    // This is done as ADTS only has 2 bits for profile, and the transform
+    // subtracts one from the value. We check if the profile supplied is > 4 for
+    // safety. 2 is used as a fallback value, though it seems the CDM doesn't
+    // care what is set.
+    , mProfile(aInfo.mProfile < 1 || aInfo.mProfile > 4 ? 2 : aInfo.mProfile)
+    , mFrequencyIndex(Adts::GetFrequencyIndex(aInfo.mRate))
   {
+    EME_LOG("ADTSSampleConvertor(): aInfo.mProfile=%" PRIi8
+            " aInfo.mExtendedProfile=%" PRIi8, aInfo.mProfile,
+            aInfo.mExtendedProfile);
+    if (aInfo.mProfile < 1 || aInfo.mProfile > 4) {
+      EME_LOG("ADTSSampleConvertor(): Profile not in [1, 4]! Samples will "
+              "their profile set to 2!");
+    }
+  }
+  bool Convert(MediaRawData* aSample) const
+  {
+    return Adts::ConvertSample(
+      mNumChannels, mFrequencyIndex, mProfile, aSample);
+  }
+  bool Revert(MediaRawData* aSample) const
+  {
+    return Adts::RevertSample(aSample);
   }
 
-  RefPtr<InitPromise> Init() override {
+private:
+  const uint32_t mNumChannels;
+  const uint8_t mProfile;
+  const uint8_t mFrequencyIndex;
+};
+
+class EMEDecryptor
+  : public MediaDataDecoder
+  , public DecoderDoctorLifeLogger<EMEDecryptor>
+{
+public:
+  EMEDecryptor(MediaDataDecoder* aDecoder,
+               CDMProxy* aProxy,
+               TaskQueue* aDecodeTaskQueue,
+               TrackInfo::TrackType aType,
+               MediaEventProducer<TrackInfo::TrackType>* aOnWaitingForKey,
+               UniquePtr<ADTSSampleConverter> aConverter = nullptr)
+    : mDecoder(aDecoder)
+    , mTaskQueue(aDecodeTaskQueue)
+    , mProxy(aProxy)
+    , mSamplesWaitingForKey(
+        new SamplesWaitingForKey(mProxy, aType, aOnWaitingForKey))
+    , mThroughputLimiter(aDecodeTaskQueue)
+    , mADTSSampleConverter(std::move(aConverter))
+    , mIsShutdown(false)
+  {
+    DDLINKCHILD("decoder", mDecoder.get());
+  }
+
+  RefPtr<InitPromise> Init() override
+  {
     MOZ_ASSERT(!mIsShutdown);
     return mDecoder->Init();
   }
 
-  nsresult Input(MediaRawData* aSample) override {
+  RefPtr<DecodePromise> Decode(MediaRawData* aSample) override
+  {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
-    MOZ_ASSERT(!mIsShutdown);
-    if (mSamplesWaitingForKey->WaitIfKeyNotUsable(aSample)) {
-      return NS_OK;
-    }
+    MOZ_RELEASE_ASSERT(mDecrypts.Count() == 0,
+                       "Can only process one sample at a time");
+    RefPtr<DecodePromise> p = mDecodePromise.Ensure(__func__);
 
-    nsAutoPtr<MediaRawDataWriter> writer(aSample->CreateWriter());
-    mProxy->GetSessionIdsForKeyId(aSample->mCrypto.mKeyId,
-                                  writer->mCrypto.mSessionIds);
+    RefPtr<EMEDecryptor> self = this;
+    mSamplesWaitingForKey->WaitIfKeyNotUsable(aSample)
+      ->Then(mTaskQueue, __func__,
+             [self](RefPtr<MediaRawData> aSample) {
+               self->mKeyRequest.Complete();
+               self->ThrottleDecode(aSample);
+             },
+             [self]() {
+               self->mKeyRequest.Complete();
+             })
+      ->Track(mKeyRequest);
 
-    mDecrypts.Put(aSample, new DecryptPromiseRequestHolder());
-    mDecrypts.Get(aSample)->Begin(mProxy->Decrypt(aSample)->Then(
-      mTaskQueue, __func__, this,
-      &EMEDecryptor::Decrypted,
-      &EMEDecryptor::Decrypted));
-    return NS_OK;
+    return p;
   }
 
-  void Decrypted(const DecryptResult& aDecrypted) {
+  void ThrottleDecode(MediaRawData* aSample)
+  {
+    RefPtr<EMEDecryptor> self = this;
+    mThroughputLimiter.Throttle(aSample)
+      ->Then(mTaskQueue, __func__,
+             [self] (RefPtr<MediaRawData> aSample) {
+               self->mThrottleRequest.Complete();
+               self->AttemptDecode(aSample);
+             },
+             [self]() {
+               self->mThrottleRequest.Complete();
+             })
+      ->Track(mThrottleRequest);
+  }
+
+  void AttemptDecode(MediaRawData* aSample)
+  {
+    MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+    if (mIsShutdown) {
+      NS_WARNING("EME encrypted sample arrived after shutdown");
+      mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+      return;
+    }
+
+    if (mADTSSampleConverter && !mADTSSampleConverter->Convert(aSample)) {
+      mDecodePromise.RejectIfExists(
+        MediaResult(
+          NS_ERROR_DOM_MEDIA_FATAL_ERR,
+          RESULT_DETAIL("Failed to convert encrypted AAC sample to ADTS")),
+        __func__);
+      return;
+    }
+
+    mDecrypts.Put(aSample, new DecryptPromiseRequestHolder());
+    mProxy->Decrypt(aSample)
+      ->Then(mTaskQueue, __func__, this,
+            &EMEDecryptor::Decrypted,
+            &EMEDecryptor::Decrypted)
+      ->Track(*mDecrypts.Get(aSample));
+  }
+
+  void Decrypted(const DecryptResult& aDecrypted)
+  {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
     MOZ_ASSERT(aDecrypted.mSample);
 
     nsAutoPtr<DecryptPromiseRequestHolder> holder;
-    mDecrypts.RemoveAndForget(aDecrypted.mSample, holder);
+    mDecrypts.Remove(aDecrypted.mSample, &holder);
     if (holder) {
       holder->Complete();
     } else {
@@ -75,141 +178,208 @@ public:
       return;
     }
 
+    if (mADTSSampleConverter &&
+        !mADTSSampleConverter->Revert(aDecrypted.mSample)) {
+      mDecodePromise.RejectIfExists(
+        MediaResult(
+          NS_ERROR_DOM_MEDIA_FATAL_ERR,
+          RESULT_DETAIL("Failed to revert decrypted ADTS sample to AAC")),
+        __func__);
+      return;
+    }
+
     if (mIsShutdown) {
       NS_WARNING("EME decrypted sample arrived after shutdown");
       return;
     }
 
-    if (aDecrypted.mStatus == GMPNoKeyErr) {
+    if (aDecrypted.mStatus == eme::NoKeyErr) {
       // Key became unusable after we sent the sample to CDM to decrypt.
-      // Call Input() again, so that the sample is enqueued for decryption
+      // Call Decode() again, so that the sample is enqueued for decryption
       // if the key becomes usable again.
-      Input(aDecrypted.mSample);
-    } else if (GMP_FAILED(aDecrypted.mStatus)) {
-      if (mCallback) {
-        mCallback->Error();
-      }
+      AttemptDecode(aDecrypted.mSample);
+    } else if (aDecrypted.mStatus != eme::Ok) {
+      mDecodePromise.RejectIfExists(
+        MediaResult(
+          NS_ERROR_DOM_MEDIA_FATAL_ERR,
+          RESULT_DETAIL("decrypted.mStatus=%u", uint32_t(aDecrypted.mStatus))),
+        __func__);
     } else {
       MOZ_ASSERT(!mIsShutdown);
-      // The Adobe GMP AAC decoder gets confused if we pass it non-encrypted
-      // samples with valid crypto data. So clear the crypto data, since the
-      // sample should be decrypted now anyway. If we don't do this and we're
-      // using the Adobe GMP for unencrypted decoding of data that is decrypted
-      // by gmp-clearkey, decoding will fail.
+      // The sample is no longer encrypted, so clear its crypto metadata.
       UniquePtr<MediaRawDataWriter> writer(aDecrypted.mSample->CreateWriter());
       writer->mCrypto = CryptoSample();
-      nsresult rv = mDecoder->Input(aDecrypted.mSample);
-      Unused << NS_WARN_IF(NS_FAILED(rv));
+      RefPtr<EMEDecryptor> self = this;
+      mDecoder->Decode(aDecrypted.mSample)
+        ->Then(mTaskQueue, __func__,
+               [self](const DecodedData& aResults) {
+                 self->mDecodeRequest.Complete();
+                 self->mDecodePromise.ResolveIfExists(aResults, __func__);
+               },
+               [self](const MediaResult& aError) {
+                 self->mDecodeRequest.Complete();
+                 self->mDecodePromise.RejectIfExists(aError, __func__);
+               })
+        ->Track(mDecodeRequest);
     }
   }
 
-  nsresult Flush() override {
+  RefPtr<FlushPromise> Flush() override
+  {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
     MOZ_ASSERT(!mIsShutdown);
+    mKeyRequest.DisconnectIfExists();
+    mThrottleRequest.DisconnectIfExists();
+    mDecodeRequest.DisconnectIfExists();
+    mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+    mThroughputLimiter.Flush();
     for (auto iter = mDecrypts.Iter(); !iter.Done(); iter.Next()) {
       nsAutoPtr<DecryptPromiseRequestHolder>& holder = iter.Data();
       holder->DisconnectIfExists();
       iter.Remove();
     }
-    nsresult rv = mDecoder->Flush();
-    Unused << NS_WARN_IF(NS_FAILED(rv));
-    mSamplesWaitingForKey->Flush();
-    return rv;
+    RefPtr<SamplesWaitingForKey> k = mSamplesWaitingForKey;
+    return mDecoder->Flush()->Then(
+      mTaskQueue, __func__,
+      [k]() {
+        k->Flush();
+        return FlushPromise::CreateAndResolve(true, __func__);
+      });
   }
 
-  nsresult Drain() override {
+  RefPtr<DecodePromise> Drain() override
+  {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
     MOZ_ASSERT(!mIsShutdown);
+    MOZ_ASSERT(mDecodePromise.IsEmpty() && !mDecodeRequest.Exists(),
+               "Must wait for decoding to complete");
     for (auto iter = mDecrypts.Iter(); !iter.Done(); iter.Next()) {
       nsAutoPtr<DecryptPromiseRequestHolder>& holder = iter.Data();
       holder->DisconnectIfExists();
       iter.Remove();
     }
-    nsresult rv = mDecoder->Drain();
-    Unused << NS_WARN_IF(NS_FAILED(rv));
-    return rv;
+    return mDecoder->Drain();
   }
 
-  nsresult Shutdown() override {
+  RefPtr<ShutdownPromise> Shutdown() override
+  {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
     MOZ_ASSERT(!mIsShutdown);
     mIsShutdown = true;
-    nsresult rv = mDecoder->Shutdown();
-    Unused << NS_WARN_IF(NS_FAILED(rv));
-    mSamplesWaitingForKey->BreakCycles();
     mSamplesWaitingForKey = nullptr;
-    mDecoder = nullptr;
+    RefPtr<MediaDataDecoder> decoder = mDecoder.forget();
     mProxy = nullptr;
-    mCallback = nullptr;
-    return rv;
+    return decoder->Shutdown();
   }
 
-  const char* GetDescriptionName() const override {
+  nsCString GetDescriptionName() const override
+  {
     return mDecoder->GetDescriptionName();
   }
 
-private:
+  ConversionRequired NeedsConversion() const override
+  {
+    return mDecoder->NeedsConversion();
+  }
 
+private:
   RefPtr<MediaDataDecoder> mDecoder;
-  MediaDataDecoderCallback* mCallback;
   RefPtr<TaskQueue> mTaskQueue;
   RefPtr<CDMProxy> mProxy;
-  nsClassHashtable<nsRefPtrHashKey<MediaRawData>, DecryptPromiseRequestHolder> mDecrypts;
+  nsClassHashtable<nsRefPtrHashKey<MediaRawData>, DecryptPromiseRequestHolder>
+    mDecrypts;
   RefPtr<SamplesWaitingForKey> mSamplesWaitingForKey;
+  MozPromiseRequestHolder<SamplesWaitingForKey::WaitForKeyPromise> mKeyRequest;
+  DecryptThroughputLimit mThroughputLimiter;
+  MozPromiseRequestHolder<DecryptThroughputLimit::ThrottlePromise> mThrottleRequest;
+  MozPromiseHolder<DecodePromise> mDecodePromise;
+  MozPromiseHolder<DecodePromise> mDrainPromise;
+  MozPromiseHolder<FlushPromise> mFlushPromise;
+  MozPromiseRequestHolder<DecodePromise> mDecodeRequest;
+  UniquePtr<ADTSSampleConverter> mADTSSampleConverter;
   bool mIsShutdown;
 };
 
-class EMEMediaDataDecoderProxy : public MediaDataDecoderProxy {
-public:
-  EMEMediaDataDecoderProxy(nsIThread* aProxyThread, MediaDataDecoderCallback* aCallback, CDMProxy* aProxy, FlushableTaskQueue* aTaskQueue)
-   : MediaDataDecoderProxy(aProxyThread, aCallback)
-   , mSamplesWaitingForKey(new SamplesWaitingForKey(this, aTaskQueue, aProxy))
-   , mProxy(aProxy)
-  {
-  }
-
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Shutdown() override;
-
-private:
-  RefPtr<SamplesWaitingForKey> mSamplesWaitingForKey;
-  RefPtr<CDMProxy> mProxy;
-};
-
-nsresult
-EMEMediaDataDecoderProxy::Input(MediaRawData* aSample)
+EMEMediaDataDecoderProxy::EMEMediaDataDecoderProxy(
+  already_AddRefed<AbstractThread> aProxyThread,
+  CDMProxy* aProxy,
+  const CreateDecoderParams& aParams)
+  : MediaDataDecoderProxy(std::move(aProxyThread))
+  , mTaskQueue(AbstractThread::GetCurrent()->AsTaskQueue())
+  , mSamplesWaitingForKey(
+      new SamplesWaitingForKey(aProxy,
+                               aParams.mType,
+                               aParams.mOnWaitingForKeyEvent))
+  , mProxy(aProxy)
 {
-  if (mSamplesWaitingForKey->WaitIfKeyNotUsable(aSample)) {
-    return NS_OK;
-  }
-
-  nsAutoPtr<MediaRawDataWriter> writer(aSample->CreateWriter());
-  mProxy->GetSessionIdsForKeyId(aSample->mCrypto.mKeyId,
-                                writer->mCrypto.mSessionIds);
-
-  return MediaDataDecoderProxy::Input(aSample);
 }
 
-nsresult
+EMEMediaDataDecoderProxy::EMEMediaDataDecoderProxy(
+  const CreateDecoderParams& aParams,
+  already_AddRefed<MediaDataDecoder> aProxyDecoder,
+  CDMProxy* aProxy)
+  : MediaDataDecoderProxy(std::move(aProxyDecoder))
+  , mTaskQueue(AbstractThread::GetCurrent()->AsTaskQueue())
+  , mSamplesWaitingForKey(
+      new SamplesWaitingForKey(aProxy,
+                               aParams.mType,
+                               aParams.mOnWaitingForKeyEvent))
+  , mProxy(aProxy)
+{
+}
+
+RefPtr<MediaDataDecoder::DecodePromise>
+EMEMediaDataDecoderProxy::Decode(MediaRawData* aSample)
+{
+  RefPtr<DecodePromise> p = mDecodePromise.Ensure(__func__);
+
+  RefPtr<EMEMediaDataDecoderProxy> self = this;
+  mSamplesWaitingForKey->WaitIfKeyNotUsable(aSample)
+    ->Then(mTaskQueue, __func__,
+           [self, this](RefPtr<MediaRawData> aSample) {
+             mKeyRequest.Complete();
+
+             MediaDataDecoderProxy::Decode(aSample)
+               ->Then(mTaskQueue, __func__,
+                      [self, this](const DecodedData& aResults) {
+                        mDecodeRequest.Complete();
+                        mDecodePromise.Resolve(aResults, __func__);
+                      },
+                      [self, this](const MediaResult& aError) {
+                        mDecodeRequest.Complete();
+                        mDecodePromise.Reject(aError, __func__);
+                      })
+               ->Track(mDecodeRequest);
+           },
+           [self]() {
+             self->mKeyRequest.Complete();
+             MOZ_CRASH("Should never get here");
+           })
+    ->Track(mKeyRequest);
+
+  return p;
+}
+
+RefPtr<MediaDataDecoder::FlushPromise>
+EMEMediaDataDecoderProxy::Flush()
+{
+  mKeyRequest.DisconnectIfExists();
+  mDecodeRequest.DisconnectIfExists();
+  mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+  return MediaDataDecoderProxy::Flush();
+}
+
+RefPtr<ShutdownPromise>
 EMEMediaDataDecoderProxy::Shutdown()
 {
-  nsresult rv = MediaDataDecoderProxy::Shutdown();
-
-  mSamplesWaitingForKey->BreakCycles();
   mSamplesWaitingForKey = nullptr;
   mProxy = nullptr;
-
-  return rv;
+  return MediaDataDecoderProxy::Shutdown();
 }
 
-EMEDecoderModule::EMEDecoderModule(CDMProxy* aProxy,
-                                   PDMFactory* aPDM,
-                                   bool aCDMDecodesAudio,
-                                   bool aCDMDecodesVideo)
+EMEDecoderModule::EMEDecoderModule(CDMProxy* aProxy, PDMFactory* aPDM)
   : mProxy(aProxy)
   , mPDM(aPDM)
-  , mCDMDecodesAudio(aCDMDecodesAudio)
-  , mCDMDecodesVideo(aCDMDecodesVideo)
 {
 }
 
@@ -218,103 +388,94 @@ EMEDecoderModule::~EMEDecoderModule()
 }
 
 static already_AddRefed<MediaDataDecoderProxy>
-CreateDecoderWrapper(MediaDataDecoderCallback* aCallback, CDMProxy* aProxy, FlushableTaskQueue* aTaskQueue)
+CreateDecoderWrapper(CDMProxy* aProxy, const CreateDecoderParams& aParams)
 {
-  nsCOMPtr<mozIGeckoMediaPluginService> gmpService = do_GetService("@mozilla.org/gecko-media-plugin-service;1");
-  if (!gmpService) {
+  RefPtr<gmp::GeckoMediaPluginService> s(
+    gmp::GeckoMediaPluginService::GetGeckoMediaPluginService());
+  if (!s) {
     return nullptr;
   }
-
-  nsCOMPtr<nsIThread> thread;
-  nsresult rv = gmpService->GetThread(getter_AddRefs(thread));
-  if (NS_FAILED(rv)) {
+  RefPtr<AbstractThread> thread(s->GetAbstractGMPThread());
+  if (!thread) {
     return nullptr;
   }
-
-  RefPtr<MediaDataDecoderProxy> decoder(new EMEMediaDataDecoderProxy(thread, aCallback, aProxy, aTaskQueue));
+  RefPtr<MediaDataDecoderProxy> decoder(new EMEMediaDataDecoderProxy(
+    thread.forget(), aProxy, aParams));
   return decoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-EMEDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
-                                     layers::LayersBackend aLayersBackend,
-                                     layers::ImageContainer* aImageContainer,
-                                     FlushableTaskQueue* aVideoTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
+EMEDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
-  MOZ_ASSERT(aConfig.mCrypto.mValid);
+  MOZ_ASSERT(aParams.mConfig.mCrypto.mValid);
 
-  if (mCDMDecodesVideo) {
-    RefPtr<MediaDataDecoderProxy> wrapper = CreateDecoderWrapper(aCallback, mProxy, aVideoTaskQueue);
-    wrapper->SetProxyTarget(new EMEVideoDecoder(mProxy,
-                                                aConfig,
-                                                aLayersBackend,
-                                                aImageContainer,
-                                                aVideoTaskQueue,
-                                                wrapper->Callback()));
+  if (StaticPrefs::MediaEmeVideoBlank()) {
+    EME_LOG("EMEDecoderModule::CreateVideoDecoder() creating a blank decoder.");
+    RefPtr<PlatformDecoderModule> m(CreateBlankDecoderModule());
+    return m->CreateVideoDecoder(aParams);
+  }
+
+  if (SupportsMimeType(aParams.mConfig.mMimeType, nullptr)) {
+    // GMP decodes. Assume that means it can decrypt too.
+    RefPtr<MediaDataDecoderProxy> wrapper =
+      CreateDecoderWrapper(mProxy, aParams);
+    auto params = GMPVideoDecoderParams(aParams);
+    wrapper->SetProxyTarget(new ChromiumCDMVideoDecoder(params, mProxy));
     return wrapper.forget();
   }
 
   MOZ_ASSERT(mPDM);
-  RefPtr<MediaDataDecoder> decoder(
-    mPDM->CreateDecoder(aConfig,
-                        aVideoTaskQueue,
-                        aCallback,
-                        aLayersBackend,
-                        aImageContainer));
+  RefPtr<MediaDataDecoder> decoder(mPDM->CreateDecoder(aParams));
   if (!decoder) {
     return nullptr;
   }
 
-  RefPtr<MediaDataDecoder> emeDecoder(new EMEDecryptor(decoder,
-                                                         aCallback,
-                                                         mProxy,
-                                                         AbstractThread::GetCurrent()->AsTaskQueue()));
+  RefPtr<MediaDataDecoder> emeDecoder(new EMEDecryptor(
+    decoder, mProxy, AbstractThread::GetCurrent()->AsTaskQueue(),
+    aParams.mType, aParams.mOnWaitingForKeyEvent));
   return emeDecoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-EMEDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
-                                     FlushableTaskQueue* aAudioTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
+EMEDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
 {
-  MOZ_ASSERT(aConfig.mCrypto.mValid);
+  MOZ_ASSERT(aParams.mConfig.mCrypto.mValid);
 
-  if (mCDMDecodesAudio) {
-    RefPtr<MediaDataDecoderProxy> wrapper = CreateDecoderWrapper(aCallback, mProxy, aAudioTaskQueue);
-    wrapper->SetProxyTarget(new EMEAudioDecoder(mProxy,
-                                                aConfig,
-                                                aAudioTaskQueue,
-                                                wrapper->Callback()));
-    return wrapper.forget();
+  // We don't support using the GMP to decode audio.
+  MOZ_ASSERT(!SupportsMimeType(aParams.mConfig.mMimeType, nullptr));
+  MOZ_ASSERT(mPDM);
+
+  if (StaticPrefs::MediaEmeAudioBlank()) {
+    EME_LOG("EMEDecoderModule::CreateAudioDecoder() creating a blank decoder.");
+    RefPtr<PlatformDecoderModule> m(CreateBlankDecoderModule());
+    return m->CreateAudioDecoder(aParams);
   }
 
-  MOZ_ASSERT(mPDM);
-  RefPtr<MediaDataDecoder> decoder(
-    mPDM->CreateDecoder(aConfig, aAudioTaskQueue, aCallback));
+  UniquePtr<ADTSSampleConverter> converter = nullptr;
+  if (MP4Decoder::IsAAC(aParams.mConfig.mMimeType)) {
+    // The CDM expects encrypted AAC to be in ADTS format.
+    // See bug 1433344.
+    converter = MakeUnique<ADTSSampleConverter>(aParams.AudioConfig());
+  }
+
+  RefPtr<MediaDataDecoder> decoder(mPDM->CreateDecoder(aParams));
   if (!decoder) {
     return nullptr;
   }
 
-  RefPtr<MediaDataDecoder> emeDecoder(new EMEDecryptor(decoder,
-                                                         aCallback,
-                                                         mProxy,
-                                                         AbstractThread::GetCurrent()->AsTaskQueue()));
+  RefPtr<MediaDataDecoder> emeDecoder(
+    new EMEDecryptor(decoder,
+                     mProxy,
+                     AbstractThread::GetCurrent()->AsTaskQueue(),
+                     aParams.mType,
+                     aParams.mOnWaitingForKeyEvent,
+                     std::move(converter)));
   return emeDecoder.forget();
 }
 
-PlatformDecoderModule::ConversionRequired
-EMEDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
-{
-  if (aConfig.IsVideo()) {
-    return kNeedAVCC;
-  } else {
-    return kNeedNone;
-  }
-}
-
 bool
-EMEDecoderModule::SupportsMimeType(const nsACString& aMimeType) const
+EMEDecoderModule::SupportsMimeType(const nsACString& aMimeType,
+                                   DecoderDoctorDiagnostics* aDiagnostics) const
 {
   Maybe<nsCString> gmp;
   gmp.emplace(NS_ConvertUTF16toUTF8(mProxy->KeySystem()));

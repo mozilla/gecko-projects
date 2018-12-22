@@ -1,33 +1,64 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/Compositor.h"
 #include "base/message_loop.h"          // for MessageLoop
 #include "mozilla/layers/CompositorBridgeParent.h"  // for CompositorBridgeParent
+#include "mozilla/layers/Diagnostics.h"
 #include "mozilla/layers/Effects.h"     // for Effect, EffectChain, etc
+#include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TextureHost.h"
+#include "mozilla/layers/CompositorThread.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "gfx2DGlue.h"
 #include "nsAppRunner.h"
-
-#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
-#include "libdisplay/GonkDisplay.h"     // for GonkDisplay
-#include <ui/Fence.h>
-#include "nsWindow.h"
-#include "nsScreenManagerGonk.h"
-#endif
+#include "LayersHelpers.h"
 
 namespace mozilla {
 
 namespace layers {
 
-/* static */ void
-Compositor::AssertOnCompositorThread()
+Compositor::Compositor(widget::CompositorWidget* aWidget,
+                      CompositorBridgeParent* aParent)
+  : mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
+  , mParent(aParent)
+  , mPixelsPerFrame(0)
+  , mPixelsFilled(0)
+  , mScreenRotation(ROTATION_0)
+  , mWidget(aWidget)
+  , mIsDestroyed(false)
+#if defined(MOZ_WIDGET_ANDROID)
+  // If the default color isn't white for Fennec, there is a black
+  // flash before the first page of a tab is loaded.
+  , mClearColor(1.0, 1.0, 1.0, 1.0)
+  , mDefaultClearColor(1.0, 1.0, 1.0, 1.0)
+#else
+  , mClearColor(0.0, 0.0, 0.0, 0.0)
+  , mDefaultClearColor(0.0, 0.0, 0.0, 0.0)
+#endif
 {
-  MOZ_ASSERT(!CompositorBridgeParent::CompositorLoop() ||
-             CompositorBridgeParent::CompositorLoop() == MessageLoop::current(),
-             "Can only call this from the compositor thread!");
+}
+
+Compositor::~Compositor()
+{
+  ReadUnlockTextures();
+}
+
+void
+Compositor::Destroy()
+{
+  TextureSourceProvider::Destroy();
+  mIsDestroyed = true;
+}
+
+void
+Compositor::EndFrame()
+{
+  ReadUnlockTextures();
+  mLastCompositionEndTime = TimeStamp::Now();
 }
 
 bool
@@ -49,7 +80,7 @@ Compositor::ShouldDrawDiagnostics(DiagnosticFlags aFlags)
 void
 Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
                             const nsIntRegion& aVisibleRegion,
-                            const gfx::Rect& aClipRect,
+                            const gfx::IntRect& aClipRect,
                             const gfx::Matrix4x4& aTransform,
                             uint32_t aFlashCounter)
 {
@@ -72,7 +103,7 @@ Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
 void
 Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
                             const gfx::Rect& aVisibleRect,
-                            const gfx::Rect& aClipRect,
+                            const gfx::IntRect& aClipRect,
                             const gfx::Matrix4x4& aTransform,
                             uint32_t aFlashCounter)
 {
@@ -87,13 +118,11 @@ Compositor::DrawDiagnostics(DiagnosticFlags aFlags,
 void
 Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
                                     const gfx::Rect& aVisibleRect,
-                                    const gfx::Rect& aClipRect,
+                                    const gfx::IntRect& aClipRect,
                                     const gfx::Matrix4x4& aTransform,
                                     uint32_t aFlashCounter)
 {
-#ifdef MOZ_B2G
-  int lWidth = 4;
-#elif defined(ANDROID)
+#ifdef ANDROID
   int lWidth = 10;
 #else
   int lWidth = 2;
@@ -143,9 +172,189 @@ Compositor::DrawDiagnosticsInternal(DiagnosticFlags aFlags,
   SlowDrawRect(aVisibleRect, color, aClipRect, aTransform, lWidth);
 }
 
+static void
+UpdateTextureCoordinates(gfx::TexturedTriangle& aTriangle,
+                         const gfx::Rect& aRect,
+                         const gfx::Rect& aIntersection,
+                         const gfx::Rect& aTextureCoords)
+{
+  // Calculate the relative offset of the intersection within the layer.
+  float dx = (aIntersection.X() - aRect.X()) / aRect.Width();
+  float dy = (aIntersection.Y() - aRect.Y()) / aRect.Height();
+
+  // Update the texture offset.
+  float x = aTextureCoords.X() + dx * aTextureCoords.Width();
+  float y = aTextureCoords.Y() + dy * aTextureCoords.Height();
+
+  // Scale the texture width and height.
+  float w = aTextureCoords.Width() * aIntersection.Width() / aRect.Width();
+  float h = aTextureCoords.Height() * aIntersection.Height() / aRect.Height();
+
+  static const auto Clamp = [](float& f)
+  {
+    if (f >= 1.0f) f = 1.0f;
+    if (f <= 0.0f) f = 0.0f;
+  };
+
+  auto UpdatePoint = [&](const gfx::Point& p, gfx::Point& t)
+  {
+    t.x = x + (p.x - aIntersection.X()) / aIntersection.Width() * w;
+    t.y = y + (p.y - aIntersection.Y()) / aIntersection.Height() * h;
+
+    Clamp(t.x);
+    Clamp(t.y);
+  };
+
+  UpdatePoint(aTriangle.p1, aTriangle.textureCoords.p1);
+  UpdatePoint(aTriangle.p2, aTriangle.textureCoords.p2);
+  UpdatePoint(aTriangle.p3, aTriangle.textureCoords.p3);
+}
+
+void
+Compositor::DrawGeometry(const gfx::Rect& aRect,
+                         const gfx::IntRect& aClipRect,
+                         const EffectChain& aEffectChain,
+                         gfx::Float aOpacity,
+                         const gfx::Matrix4x4& aTransform,
+                         const gfx::Rect& aVisibleRect,
+                         const Maybe<gfx::Polygon>& aGeometry)
+{
+  if (aRect.IsEmpty()) {
+    return;
+  }
+
+  if (!aGeometry || !SupportsLayerGeometry()) {
+    DrawQuad(aRect, aClipRect, aEffectChain,
+             aOpacity, aTransform, aVisibleRect);
+    return;
+  }
+
+  // Cull completely invisible polygons.
+  if (aRect.Intersect(aGeometry->BoundingBox()).IsEmpty()) {
+    return;
+  }
+
+  const gfx::Polygon clipped = aGeometry->ClipPolygon(aRect);
+
+  // Cull polygons with no area.
+  if (clipped.IsEmpty()) {
+    return;
+  }
+
+  DrawPolygon(clipped, aRect, aClipRect, aEffectChain,
+              aOpacity, aTransform, aVisibleRect);
+}
+
+void
+Compositor::DrawTriangles(const nsTArray<gfx::TexturedTriangle>& aTriangles,
+                          const gfx::Rect& aRect,
+                          const gfx::IntRect& aClipRect,
+                          const EffectChain& aEffectChain,
+                          gfx::Float aOpacity,
+                          const gfx::Matrix4x4& aTransform,
+                          const gfx::Rect& aVisibleRect)
+{
+  for (const gfx::TexturedTriangle& triangle : aTriangles) {
+    DrawTriangle(triangle, aClipRect, aEffectChain,
+                 aOpacity, aTransform, aVisibleRect);
+  }
+}
+
+nsTArray<gfx::TexturedTriangle>
+GenerateTexturedTriangles(const gfx::Polygon& aPolygon,
+                          const gfx::Rect& aRect,
+                          const gfx::Rect& aTexRect)
+{
+  nsTArray<gfx::TexturedTriangle> texturedTriangles;
+
+  gfx::Rect layerRects[4];
+  gfx::Rect textureRects[4];
+  size_t rects = DecomposeIntoNoRepeatRects(aRect, aTexRect,
+                                            &layerRects, &textureRects);
+  for (size_t i = 0; i < rects; ++i) {
+    const gfx::Rect& rect = layerRects[i];
+    const gfx::Rect& texRect = textureRects[i];
+    const gfx::Polygon clipped = aPolygon.ClipPolygon(rect);
+
+    if (clipped.IsEmpty()) {
+      continue;
+    }
+
+    for (const gfx::Triangle& triangle : clipped.ToTriangles()) {
+      const gfx::Rect intersection = rect.Intersect(triangle.BoundingBox());
+
+      // Cull completely invisible triangles.
+      if (intersection.IsEmpty()) {
+        continue;
+      }
+
+      MOZ_ASSERT(rect.Width() > 0.0f && rect.Height() > 0.0f);
+      MOZ_ASSERT(intersection.Width() > 0.0f && intersection.Height() > 0.0f);
+
+      // Since the texture was created for non-split geometry, we need to
+      // update the texture coordinates to account for the split.
+      gfx::TexturedTriangle t(triangle);
+      UpdateTextureCoordinates(t, rect, intersection, texRect);
+      texturedTriangles.AppendElement(std::move(t));
+    }
+  }
+
+  return texturedTriangles;
+}
+
+nsTArray<TexturedVertex>
+TexturedTrianglesToVertexArray(const nsTArray<gfx::TexturedTriangle>& aTriangles)
+{
+  const auto VertexFromPoints = [](const gfx::Point& p, const gfx::Point& t) {
+    return TexturedVertex { { p.x, p.y }, { t.x, t.y } };
+  };
+
+  nsTArray<TexturedVertex> vertices;
+
+  for (const gfx::TexturedTriangle& t : aTriangles) {
+    vertices.AppendElement(VertexFromPoints(t.p1, t.textureCoords.p1));
+    vertices.AppendElement(VertexFromPoints(t.p2, t.textureCoords.p2));
+    vertices.AppendElement(VertexFromPoints(t.p3, t.textureCoords.p3));
+  }
+
+  return vertices;
+}
+
+void
+Compositor::DrawPolygon(const gfx::Polygon& aPolygon,
+                        const gfx::Rect& aRect,
+                        const gfx::IntRect& aClipRect,
+                        const EffectChain& aEffectChain,
+                        gfx::Float aOpacity,
+                        const gfx::Matrix4x4& aTransform,
+                        const gfx::Rect& aVisibleRect)
+{
+  nsTArray<gfx::TexturedTriangle> texturedTriangles;
+
+  TexturedEffect* texturedEffect =
+    aEffectChain.mPrimaryEffect->AsTexturedEffect();
+
+  if (texturedEffect) {
+    texturedTriangles =
+      GenerateTexturedTriangles(aPolygon, aRect, texturedEffect->mTextureCoords);
+  } else {
+    for (const gfx::Triangle& triangle : aPolygon.ToTriangles()) {
+      texturedTriangles.AppendElement(gfx::TexturedTriangle(triangle));
+    }
+  }
+
+  if (texturedTriangles.IsEmpty()) {
+    // Nothing to render.
+    return;
+  }
+
+  DrawTriangles(texturedTriangles, aRect, aClipRect, aEffectChain,
+                aOpacity, aTransform, aVisibleRect);
+}
+
 void
 Compositor::SlowDrawRect(const gfx::Rect& aRect, const gfx::Color& aColor,
-                     const gfx::Rect& aClipRect,
+                     const gfx::IntRect& aClipRect,
                      const gfx::Matrix4x4& aTransform, int aStrokeWidth)
 {
   // TODO This should draw a rect using a single draw call but since
@@ -155,30 +364,30 @@ Compositor::SlowDrawRect(const gfx::Rect& aRect, const gfx::Color& aColor,
 
   effects.mPrimaryEffect = new EffectSolidColor(aColor);
   // left
-  this->DrawQuad(gfx::Rect(aRect.x, aRect.y,
-                           aStrokeWidth, aRect.height),
+  this->DrawQuad(gfx::Rect(aRect.X(), aRect.Y(),
+                           aStrokeWidth, aRect.Height()),
                  aClipRect, effects, opacity,
                  aTransform);
   // top
-  this->DrawQuad(gfx::Rect(aRect.x + aStrokeWidth, aRect.y,
-                           aRect.width - 2 * aStrokeWidth, aStrokeWidth),
+  this->DrawQuad(gfx::Rect(aRect.X() + aStrokeWidth, aRect.Y(),
+                           aRect.Width() - 2 * aStrokeWidth, aStrokeWidth),
                  aClipRect, effects, opacity,
                  aTransform);
   // right
-  this->DrawQuad(gfx::Rect(aRect.x + aRect.width - aStrokeWidth, aRect.y,
-                           aStrokeWidth, aRect.height),
+  this->DrawQuad(gfx::Rect(aRect.XMost() - aStrokeWidth, aRect.Y(),
+                           aStrokeWidth, aRect.Height()),
                  aClipRect, effects, opacity,
                  aTransform);
   // bottom
-  this->DrawQuad(gfx::Rect(aRect.x + aStrokeWidth, aRect.y + aRect.height - aStrokeWidth,
-                           aRect.width - 2 * aStrokeWidth, aStrokeWidth),
+  this->DrawQuad(gfx::Rect(aRect.X() + aStrokeWidth, aRect.YMost() - aStrokeWidth,
+                           aRect.Width() - 2 * aStrokeWidth, aStrokeWidth),
                  aClipRect, effects, opacity,
                  aTransform);
 }
 
 void
 Compositor::FillRect(const gfx::Rect& aRect, const gfx::Color& aColor,
-                     const gfx::Rect& aClipRect,
+                     const gfx::IntRect& aClipRect,
                      const gfx::Matrix4x4& aTransform)
 {
   float opacity = 1.0f;
@@ -237,23 +446,23 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
   // If the texture should be flipped, it will have negative height. Detect that
   // here and compensate for it. We will flip each rect as we emit it.
   bool flipped = false;
-  if (texCoordRect.height < 0) {
+  if (texCoordRect.Height() < 0) {
     flipped = true;
-    texCoordRect.y += texCoordRect.height;
-    texCoordRect.height = -texCoordRect.height;
+    texCoordRect.MoveByY(texCoordRect.Height());
+    texCoordRect.SetHeight(-texCoordRect.Height());
   }
 
   // Wrap the texture coordinates so they are within [0,1] and cap width/height
   // at 1. We rely on this below.
-  texCoordRect = gfx::Rect(gfx::Point(WrapTexCoord(texCoordRect.x),
-                                      WrapTexCoord(texCoordRect.y)),
-                           gfx::Size(std::min(texCoordRect.width, 1.0f),
-                                     std::min(texCoordRect.height, 1.0f)));
+  texCoordRect = gfx::Rect(gfx::Point(WrapTexCoord(texCoordRect.X()),
+                                      WrapTexCoord(texCoordRect.Y())),
+                           gfx::Size(std::min(texCoordRect.Width(), 1.0f),
+                                     std::min(texCoordRect.Height(), 1.0f)));
 
-  NS_ASSERTION(texCoordRect.x >= 0.0f && texCoordRect.x <= 1.0f &&
-               texCoordRect.y >= 0.0f && texCoordRect.y <= 1.0f &&
-               texCoordRect.width >= 0.0f && texCoordRect.width <= 1.0f &&
-               texCoordRect.height >= 0.0f && texCoordRect.height <= 1.0f &&
+  NS_ASSERTION(texCoordRect.X() >= 0.0f && texCoordRect.X() <= 1.0f &&
+               texCoordRect.Y() >= 0.0f && texCoordRect.Y() <= 1.0f &&
+               texCoordRect.Width() >= 0.0f && texCoordRect.Width() <= 1.0f &&
+               texCoordRect.Height() >= 0.0f && texCoordRect.Height() <= 1.0f &&
                texCoordRect.XMost() >= 0.0f && texCoordRect.XMost() <= 2.0f &&
                texCoordRect.YMost() >= 0.0f && texCoordRect.YMost() <= 2.0f,
                "We just wrapped the texture coordinates, didn't we?");
@@ -282,7 +491,7 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
   // xmid/ymid values.
   if (!xwrap && !ywrap) {
     SetRects(0, aLayerRects, aTextureRects,
-             aRect.x, aRect.y, aRect.XMost(), aRect.YMost(),
+             aRect.X(), aRect.Y(), aRect.XMost(), aRect.YMost(),
              tl.x, tl.y, br.x, br.y,
              flipped);
     return 1;
@@ -297,27 +506,30 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
   // tl.x .. 1.0 and then from 0.0 .. br.x (which we just wrapped above).
   // The same applies for the Y axis. The midpoints we calculate here are
   // only valid if we actually wrap around.
-  GLfloat xmid = aRect.x + (1.0f - tl.x) / texCoordRect.width * aRect.width;
-  GLfloat ymid = aRect.y + (1.0f - tl.y) / texCoordRect.height * aRect.height;
+  GLfloat xmid = aRect.X() + (1.0f - tl.x) / texCoordRect.Width() * aRect.Width();
+  GLfloat ymid = aRect.Y() + (1.0f - tl.y) / texCoordRect.Height() * aRect.Height();
 
+  // Due to floating-point inaccuracy, we have to use XMost()-x and YMost()-y
+  // to calculate width and height, respectively, to ensure that size will
+  // remain consistent going from absolute to relative and back again.
   NS_ASSERTION(!xwrap ||
-               (xmid > aRect.x &&
-                xmid < aRect.XMost() &&
-                FuzzyEqual((xmid - aRect.x) + (aRect.XMost() - xmid), aRect.width)),
+               (xmid >= aRect.X() &&
+                xmid <= aRect.XMost() &&
+                FuzzyEqual((xmid - aRect.X()) + (aRect.XMost() - xmid), aRect.XMost() - aRect.X())),
                "xmid should be within [x,XMost()] and the wrapped rect should have the same width");
   NS_ASSERTION(!ywrap ||
-               (ymid > aRect.y &&
-                ymid < aRect.YMost() &&
-                FuzzyEqual((ymid - aRect.y) + (aRect.YMost() - ymid), aRect.height)),
+               (ymid >= aRect.Y() &&
+                ymid <= aRect.YMost() &&
+                FuzzyEqual((ymid - aRect.Y()) + (aRect.YMost() - ymid), aRect.YMost() - aRect.Y())),
                "ymid should be within [y,YMost()] and the wrapped rect should have the same height");
 
   if (!xwrap && ywrap) {
     SetRects(0, aLayerRects, aTextureRects,
-             aRect.x, aRect.y, aRect.XMost(), ymid,
+             aRect.X(), aRect.Y(), aRect.XMost(), ymid,
              tl.x, tl.y, br.x, 1.0f,
              flipped);
     SetRects(1, aLayerRects, aTextureRects,
-             aRect.x, ymid, aRect.XMost(), aRect.YMost(),
+             aRect.X(), ymid, aRect.XMost(), aRect.YMost(),
              tl.x, 0.0f, br.x, br.y,
              flipped);
     return 2;
@@ -325,26 +537,26 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
 
   if (xwrap && !ywrap) {
     SetRects(0, aLayerRects, aTextureRects,
-             aRect.x, aRect.y, xmid, aRect.YMost(),
+             aRect.X(), aRect.Y(), xmid, aRect.YMost(),
              tl.x, tl.y, 1.0f, br.y,
              flipped);
     SetRects(1, aLayerRects, aTextureRects,
-             xmid, aRect.y, aRect.XMost(), aRect.YMost(),
+             xmid, aRect.Y(), aRect.XMost(), aRect.YMost(),
              0.0f, tl.y, br.x, br.y,
              flipped);
     return 2;
   }
 
   SetRects(0, aLayerRects, aTextureRects,
-           aRect.x, aRect.y, xmid, ymid,
+           aRect.X(), aRect.Y(), xmid, ymid,
            tl.x, tl.y, 1.0f, 1.0f,
            flipped);
   SetRects(1, aLayerRects, aTextureRects,
-           xmid, aRect.y, aRect.XMost(), ymid,
+           xmid, aRect.Y(), aRect.XMost(), ymid,
            0.0f, tl.y, br.x, 1.0f,
            flipped);
   SetRects(2, aLayerRects, aTextureRects,
-           aRect.x, ymid, xmid, aRect.YMost(),
+           aRect.X(), ymid, xmid, aRect.YMost(),
            tl.x, 0.0f, 1.0f, br.y,
            flipped);
   SetRects(3, aLayerRects, aTextureRects,
@@ -356,7 +568,7 @@ DecomposeIntoNoRepeatRects(const gfx::Rect& aRect,
 
 gfx::IntRect
 Compositor::ComputeBackdropCopyRect(const gfx::Rect& aRect,
-                                    const gfx::Rect& aClipRect,
+                                    const gfx::IntRect& aClipRect,
                                     const gfx::Matrix4x4& aTransform,
                                     gfx::Matrix4x4* aOutTransform,
                                     gfx::Rect* aOutLayerQuad)
@@ -365,37 +577,25 @@ Compositor::ComputeBackdropCopyRect(const gfx::Rect& aRect,
   gfx::IntPoint rtOffset = GetCurrentRenderTarget()->GetOrigin();
   gfx::IntSize rtSize = GetCurrentRenderTarget()->GetSize();
 
-  gfx::Rect renderBounds(0, 0, rtSize.width, rtSize.height);
-  renderBounds.IntersectRect(renderBounds, aClipRect);
-  renderBounds.MoveBy(rtOffset);
+  return layers::ComputeBackdropCopyRect(
+    aRect,
+    aClipRect,
+    aTransform,
+    gfx::IntRect(rtOffset, rtSize),
+    aOutTransform,
+    aOutLayerQuad);
+}
 
-  // Apply the layer transform.
-  gfx::RectDouble dest = aTransform.TransformAndClipBounds(
-    gfx::RectDouble(aRect.x, aRect.y, aRect.width, aRect.height),
-    gfx::RectDouble(renderBounds.x, renderBounds.y, renderBounds.width, renderBounds.height));
-  dest -= rtOffset;
-
-  // Ensure we don't round out to -1, which trips up Direct3D.
-  dest.IntersectRect(dest, gfx::RectDouble(0, 0, rtSize.width, rtSize.height));
-
-  if (aOutLayerQuad) {
-    *aOutLayerQuad = gfx::Rect(dest.x, dest.y, dest.width, dest.height);
-  }
-
-  // Round out to integer.
-  gfx::IntRect result;
-  dest.RoundOut();
-  dest.ToIntRect(&result);
-
-  // Create a transform from adjusted clip space to render target space,
-  // translate it for the backdrop rect, then transform it into the backdrop's
-  // uv-space.
-  gfx::Matrix4x4 transform;
-  transform.PostScale(rtSize.width, rtSize.height, 1.0);
-  transform.PostTranslate(-result.x, -result.y, 0.0);
-  transform.PostScale(1 / float(result.width), 1 / float(result.height), 1.0);
-  *aOutTransform = transform;
-  return result;
+gfx::IntRect
+Compositor::ComputeBackdropCopyRect(const gfx::Triangle& aTriangle,
+                                    const gfx::IntRect& aClipRect,
+                                    const gfx::Matrix4x4& aTransform,
+                                    gfx::Matrix4x4* aOutTransform,
+                                    gfx::Rect* aOutLayerQuad)
+{
+  gfx::Rect boundingBox = aTriangle.BoundingBox();
+  return ComputeBackdropCopyRect(boundingBox, aClipRect, aTransform,
+                                 aOutTransform, aOutLayerQuad);
 }
 
 void
@@ -407,52 +607,41 @@ Compositor::SetInvalid()
 bool
 Compositor::IsValid() const
 {
-  return !mParent;
+  return !!mParent;
 }
 
-#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
 void
-Compositor::SetDispAcquireFence(Layer* aLayer, nsIWidget* aWidget)
+Compositor::SetDispAcquireFence(Layer* aLayer)
 {
-  // OpenGL does not provide ReleaseFence for rendering.
-  // Instead use DispAcquireFence as layer buffer's ReleaseFence
-  // to prevent flickering and tearing.
-  // DispAcquireFence is DisplaySurface's AcquireFence.
-  // AcquireFence will be signaled when a buffer's content is available.
-  // See Bug 974152.
-
-  if (!aLayer || !aWidget) {
-    return;
-  }
-  nsWindow* window = static_cast<nsWindow*>(aWidget);
-  RefPtr<FenceHandle::FdObj> fence = new FenceHandle::FdObj(
-      window->GetScreen()->GetPrevDispAcquireFd());
-  mReleaseFenceHandle.Merge(FenceHandle(fence));
 }
 
-FenceHandle
-Compositor::GetReleaseFence()
-{
-  if (!mReleaseFenceHandle.IsValid()) {
-    return FenceHandle();
-  }
-
-  RefPtr<FenceHandle::FdObj> fdObj = mReleaseFenceHandle.GetDupFdObj();
-  return FenceHandle(fdObj);
-}
-
-#else
 void
-Compositor::SetDispAcquireFence(Layer* aLayer, nsIWidget* aWidget)
+Compositor::UnlockAfterComposition(TextureHost* aTexture)
 {
+  TextureSourceProvider::UnlockAfterComposition(aTexture);
+
+  // If this is being called after we shutdown the compositor, we must finish
+  // read unlocking now to prevent a cycle.
+  if (IsDestroyed()) {
+    ReadUnlockTextures();
+  }
 }
 
-FenceHandle
-Compositor::GetReleaseFence()
+bool
+Compositor::NotifyNotUsedAfterComposition(TextureHost* aTextureHost)
 {
-  return FenceHandle();
+  if (IsDestroyed() || AsBasicCompositor()) {
+    return false;
+  }
+  return TextureSourceProvider::NotifyNotUsedAfterComposition(aTextureHost);
 }
-#endif
+
+void
+Compositor::GetFrameStats(GPUStats* aStats)
+{
+  aStats->mInvalidPixels = mPixelsPerFrame;
+  aStats->mPixelsFilled = mPixelsFilled;
+}
 
 } // namespace layers
 } // namespace mozilla

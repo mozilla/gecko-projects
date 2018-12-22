@@ -66,6 +66,8 @@ private:
 
   bool mIsWaitingInternalMessage;
 
+  static void MaybeLogKeyState();
+
   static MouseScrollHandler* sInstance;
 
   /**
@@ -351,6 +353,12 @@ private:
       return mForceEnableSystemSettingCache;
     }
 
+    bool ShouldEmulateToMakeWindowUnderCursorForeground()
+    {
+      Init();
+      return mEmulateToMakeWindowUnderCursorForeground;
+    }
+
     int32_t GetOverriddenVerticalScrollAmout()
     {
       Init();
@@ -381,6 +389,7 @@ private:
     bool mScrollMessageHandledAsWheelMessage;
     bool mEnableSystemSettingCache;
     bool mForceEnableSystemSettingCache;
+    bool mEmulateToMakeWindowUnderCursorForeground;
     int32_t mOverriddenVerticalScrollAmount;
     int32_t mOverriddenHorizontalScrollAmount;
     int32_t mMouseScrollTransactionTimeout;

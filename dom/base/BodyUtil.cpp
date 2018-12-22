@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,7 +9,7 @@
 #include "nsError.h"
 #include "nsString.h"
 #include "nsIGlobalObject.h"
-#include "nsIUnicodeDecoder.h"
+#include "mozilla/Encoding.h"
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsDOMString.h"
@@ -17,7 +19,6 @@
 #include "nsStringStream.h"
 
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/File.h"
@@ -31,58 +32,12 @@ namespace dom {
 
 namespace {
 
-class StreamDecoder final
-{
-  nsCOMPtr<nsIUnicodeDecoder> mDecoder;
-  nsString mDecoded;
-
-public:
-  StreamDecoder()
-    : mDecoder(EncodingUtils::DecoderForEncoding("UTF-8"))
-  {
-    MOZ_ASSERT(mDecoder);
-  }
-
-  nsresult
-  AppendText(const char* aSrcBuffer, uint32_t aSrcBufferLen)
-  {
-    int32_t destBufferLen;
-    nsresult rv =
-      mDecoder->GetMaxLength(aSrcBuffer, aSrcBufferLen, &destBufferLen);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    if (!mDecoded.SetCapacity(mDecoded.Length() + destBufferLen, fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    char16_t* destBuffer = mDecoded.BeginWriting() + mDecoded.Length();
-    int32_t totalChars = mDecoded.Length();
-
-    int32_t srcLen = (int32_t) aSrcBufferLen;
-    int32_t outLen = destBufferLen;
-    rv = mDecoder->Convert(aSrcBuffer, &srcLen, destBuffer, &outLen);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-    totalChars += outLen;
-    mDecoded.SetLength(totalChars);
-
-    return NS_OK;
-  }
-
-  nsString&
-  GetText()
-  {
-    return mDecoded;
-  }
-};
-
 // Reads over a CRLF and positions start after it.
 static bool
-PushOverLine(nsACString::const_iterator& aStart)
+PushOverLine(nsACString::const_iterator& aStart,
+	     const nsACString::const_iterator& aEnd)
 {
-  if (*aStart == nsCRT::CR && (aStart.size_forward() > 1) && *(++aStart) == nsCRT::LF) {
+  if (*aStart == nsCRT::CR && (aEnd - aStart > 1) && *(++aStart) == nsCRT::LF) {
     ++aStart; // advance to after CRLF
     return true;
   }
@@ -91,7 +46,7 @@ PushOverLine(nsACString::const_iterator& aStart)
 }
 
 class MOZ_STACK_CLASS FillFormIterator final
-  : public URLSearchParams::ForEachIterator
+  : public URLParams::ForEachIterator
 {
 public:
   explicit FillFormIterator(FormData* aFormData)
@@ -100,8 +55,8 @@ public:
     MOZ_ASSERT(aFormData);
   }
 
-  bool URLParamsIterator(const nsString& aName,
-                         const nsString& aValue) override
+  bool URLParamsIterator(const nsAString& aName,
+                         const nsAString& aValue) override
   {
     ErrorResult rv;
     mFormData->Append(aName, aValue, rv);
@@ -324,6 +279,7 @@ private:
       ErrorResult rv;
       mFormData->Append(name, *file, dummy, rv);
       if (NS_WARN_IF(rv.Failed())) {
+        rv.SuppressException();
         return false;
       }
     }
@@ -340,6 +296,10 @@ public:
   bool
   Parse()
   {
+    if (mData.IsEmpty()) {
+      return false;
+    }
+
     // Determine boundary from mimetype.
     const char* boundaryId = nullptr;
     boundaryId = strstr(mMimeType.BeginWriting(), "boundary");
@@ -393,7 +353,7 @@ public:
             return true;
           }
 
-          if (!PushOverLine(start)) {
+          if (!PushOverLine(start, end)) {
             return false;
           }
           mState = PARSE_HEADER;
@@ -405,7 +365,7 @@ public:
             return false;
           }
 
-          if (emptyHeader && !PushOverLine(start)) {
+          if (emptyHeader && !PushOverLine(start, end)) {
             return false;
           }
 
@@ -431,7 +391,7 @@ public:
       }
     }
 
-    NS_NOTREACHED("Should never reach here.");
+    MOZ_ASSERT_UNREACHABLE("Should never reach here.");
     return false;
   }
 
@@ -513,12 +473,9 @@ BodyUtil::ConsumeFormData(nsIGlobalObject* aParent, const nsCString& aMimeType,
   }
 
   if (isValidUrlEncodedMimeType) {
-    URLParams params;
-    params.ParseInput(aStr);
-
     RefPtr<FormData> fd = new FormData(aParent);
     FillFormIterator iterator(fd);
-    DebugOnly<bool> status = params.ForEach(iterator);
+    DebugOnly<bool> status = URLParams::Parse(aStr, iterator);
     MOZ_ASSERT(status);
 
     return fd.forget();
@@ -533,13 +490,11 @@ nsresult
 BodyUtil::ConsumeText(uint32_t aInputLength, uint8_t* aInput,
                        nsString& aText)
 {
-  StreamDecoder decoder;
-  nsresult rv = decoder.AppendText(reinterpret_cast<char*>(aInput),
-                                   aInputLength);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  nsresult rv =
+    UTF_8_ENCODING->DecodeWithBOMRemoval(MakeSpan(aInput, aInputLength), aText);
+  if (NS_FAILED(rv)) {
     return rv;
   }
-  aText = decoder.GetText();
   return NS_OK;
 }
 
@@ -550,7 +505,6 @@ BodyUtil::ConsumeJson(JSContext* aCx, JS::MutableHandle<JS::Value> aValue,
 {
   aRv.MightThrowJSException();
 
-  AutoForceSetExceptionOnContext forceExn(aCx);
   JS::Rooted<JS::Value> json(aCx);
   if (!JS_ParseJSON(aCx, aStr.get(), aStr.Length(), &json)) {
     if (!JS_IsExceptionPending(aCx)) {

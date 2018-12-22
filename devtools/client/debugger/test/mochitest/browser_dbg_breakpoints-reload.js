@@ -13,10 +13,12 @@ const TAB_URL = EXAMPLE_URL + "doc_breakpoints-reload.html";
 var test = Task.async(function* () {
   requestLongerTimeout(4);
 
-  const [tab,, panel] = yield initDebugger(TAB_URL);
+  const options = {
+    source: TAB_URL,
+    line: 1
+  };
+  const [tab,, panel] = yield initDebugger(TAB_URL, options);
   const actions = bindActionCreators(panel);
-
-  yield ensureSourceIs(panel, "doc_breakpoints-reload.html", true);
 
   const sources = panel.panelWin.DebuggerView.Sources;
   yield actions.addBreakpoint({
@@ -25,7 +27,7 @@ var test = Task.async(function* () {
   });
 
   const paused = waitForThreadEvents(panel, "paused");
-  reloadActiveTab(panel);
+  yield reloadActiveTab(panel, panel.panelWin.EVENTS.SOURCE_SHOWN);
   const packet = yield paused;
 
   is(packet.why.type, "breakpoint",
@@ -33,6 +35,5 @@ var test = Task.async(function* () {
   is(packet.frame.where.line, 10,
      "Should have stopped at line 10, where we set the breakpoint");
 
-  yield waitForDebuggerEvents(panel, panel.panelWin.EVENTS.SOURCE_SHOWN)
   yield resumeDebuggerThenCloseAndFinish(panel);
 });

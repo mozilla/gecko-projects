@@ -24,13 +24,8 @@
 #endif
 #endif
 
-#include "nscore.h"
+#include "nsStringFwd.h"
 #include "nsXULAppAPI.h"
-
-// This directory service key is a lot like NS_APP_LOCALSTORE_50_FILE,
-// but it is always the "main" localstore file, even when we're in safe mode
-// and we load localstore from somewhere else.
-#define NS_LOCALSTORE_UNSAFE_FILE "LStoreS"
 
 class nsINativeAppSupport;
 class nsXREDirProvider;
@@ -42,17 +37,17 @@ class nsIFactory;
 
 extern nsXREDirProvider* gDirServiceProvider;
 
-// NOTE: gAppData will be null in embedded contexts. The "size" parameter
-// will be the size of the original structure passed to XRE_main, but the
-// structure will have all of the members available.
-extern const nsXREAppData* gAppData;
+// NOTE: gAppData will be null in embedded contexts.
+extern const mozilla::XREAppData* gAppData;
 extern bool gSafeMode;
 
 extern int    gArgc;
 extern char **gArgv;
 extern int    gRestartArgc;
 extern char **gRestartArgv;
+extern bool gRestartedByOS;
 extern bool gLogConsoleErrors;
+extern nsString gAbsoluteArgv0Path;
 
 extern bool gIsGtest;
 
@@ -96,6 +91,13 @@ WriteConsoleLog();
 void
 OverrideDefaultLocaleIfNeeded();
 
+/**
+ * Allow exit() calls to complete. This should be done from a proper Gecko
+ * shutdown path. Otherwise we aim to catch improper shutdowns.
+ */
+void
+MozExpectedExit();
+
 #ifdef XP_WIN
 void
 UseParentConsole();
@@ -104,14 +106,21 @@ BOOL
 WinLaunchChild(const wchar_t *exePath, int argc,
                char **argv, HANDLE userToken = nullptr,
                HANDLE *hProcess = nullptr);
+
+#define PREF_WIN_REGISTER_APPLICATION_RESTART "toolkit.winRegisterApplicationRestart"
 #endif
 
 #define NS_NATIVEAPPSUPPORT_CONTRACTID "@mozilla.org/toolkit/native-app-support;1"
 
 namespace mozilla {
 namespace startup {
+Result<nsCOMPtr<nsIFile>, nsresult> GetIncompleteStartupFile(nsIFile* aProfLD);
+
 extern GeckoProcessType sChildProcessType;
 } // namespace startup
+
+const char* PlatformBuildID();
+
 } // namespace mozilla
 
 /**
@@ -119,12 +128,5 @@ extern GeckoProcessType sChildProcessType;
  * and the JIT debugger on Windows, and install unix signal handlers.
  */
 void SetupErrorHandling(const char* progname);
-
-/**
- * A numeric value indicating whether multiprocess might be blocked.
- * Possible values can be found at nsAppRunner.cpp. A value of 0
- * represents not blocking.
- */
-uint32_t MultiprocessBlockPolicy();
 
 #endif // nsAppRunner_h__

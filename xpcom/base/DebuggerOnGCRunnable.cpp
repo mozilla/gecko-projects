@@ -7,23 +7,34 @@
 #include "mozilla/DebuggerOnGCRunnable.h"
 
 #include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Move.h"
+#include "mozilla/SystemGroup.h"
 #include "js/Debug.h"
 
 namespace mozilla {
 
-/* static */ NS_METHOD
-DebuggerOnGCRunnable::Enqueue(JSRuntime* aRt, const JS::GCDescription& aDesc)
+/* static */ nsresult
+DebuggerOnGCRunnable::Enqueue(JSContext* aCx, const JS::GCDescription& aDesc)
 {
-  auto gcEvent = aDesc.toGCEvent(aRt);
+  // Runnables are not fired when recording or replaying, as GCs can happen at
+  // non-deterministic points in execution.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return NS_OK;
+  }
+
+  auto gcEvent = aDesc.toGCEvent(aCx);
   if (!gcEvent) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
   RefPtr<DebuggerOnGCRunnable> runOnGC =
-    new DebuggerOnGCRunnable(Move(gcEvent));
-  return NS_DispatchToCurrentThread(runOnGC);
+    new DebuggerOnGCRunnable(std::move(gcEvent));
+  if (NS_IsMainThread()) {
+    return SystemGroup::Dispatch(TaskCategory::GarbageCollection, runOnGC.forget());
+  } else {
+    return NS_DispatchToCurrentThread(runOnGC);
+  }
 }
 
 NS_IMETHODIMP
@@ -31,13 +42,13 @@ DebuggerOnGCRunnable::Run()
 {
   AutoJSAPI jsapi;
   jsapi.Init();
-  if (!JS::dbg::FireOnGarbageCollectionHook(jsapi.cx(), Move(mGCData))) {
+  if (!JS::dbg::FireOnGarbageCollectionHook(jsapi.cx(), std::move(mGCData))) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 DebuggerOnGCRunnable::Cancel()
 {
   mGCData = nullptr;

@@ -6,7 +6,7 @@
 
 #include "mozilla/dom/cache/CacheStorageChild.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/cache/CacheChild.h"
 #include "mozilla/dom/cache/CacheOpChild.h"
 #include "mozilla/dom/cache/CacheStorage.h"
@@ -22,29 +22,30 @@ DeallocPCacheStorageChild(PCacheStorageChild* aActor)
   delete aActor;
 }
 
-CacheStorageChild::CacheStorageChild(CacheStorage* aListener, Feature* aFeature)
+CacheStorageChild::CacheStorageChild(CacheStorage* aListener,
+                                     CacheWorkerHolder* aWorkerHolder)
   : mListener(aListener)
   , mNumChildActors(0)
   , mDelayedDestroy(false)
 {
   MOZ_COUNT_CTOR(cache::CacheStorageChild);
-  MOZ_ASSERT(mListener);
+  MOZ_DIAGNOSTIC_ASSERT(mListener);
 
-  SetFeature(aFeature);
+  SetWorkerHolder(aWorkerHolder);
 }
 
 CacheStorageChild::~CacheStorageChild()
 {
   MOZ_COUNT_DTOR(cache::CacheStorageChild);
   NS_ASSERT_OWNINGTHREAD(CacheStorageChild);
-  MOZ_ASSERT(!mListener);
+  MOZ_DIAGNOSTIC_ASSERT(!mListener);
 }
 
 void
 CacheStorageChild::ClearListener()
 {
   NS_ASSERT_OWNINGTHREAD(CacheStorageChild);
-  MOZ_ASSERT(mListener);
+  MOZ_DIAGNOSTIC_ASSERT(mListener);
   mListener = nullptr;
 }
 
@@ -54,7 +55,7 @@ CacheStorageChild::ExecuteOp(nsIGlobalObject* aGlobal, Promise* aPromise,
 {
   mNumChildActors += 1;
   Unused << SendPCacheOpConstructor(
-    new CacheOpChild(GetFeature(), aGlobal, aParent, aPromise), aArgs);
+    new CacheOpChild(GetWorkerHolder(), aGlobal, aParent, aPromise), aArgs);
 }
 
 void
@@ -65,7 +66,7 @@ CacheStorageChild::StartDestroyFromListener()
   // The listener should be held alive by any async operations, so if it
   // is going away then there must not be any child actors.  This in turn
   // ensures that StartDestroy() will not trigger the delayed path.
-  MOZ_ASSERT(!mNumChildActors);
+  MOZ_DIAGNOSTIC_ASSERT(!mNumChildActors);
 
   StartDestroy();
 }
@@ -86,7 +87,8 @@ CacheStorageChild::StartDestroy()
 
   RefPtr<CacheStorage> listener = mListener;
 
-  // StartDestroy() can get called from either CacheStorage or the Feature.
+  // StartDestroy() can get called from either CacheStorage or the
+  // CacheWorkerHolder.
   // Theoretically we can get double called if the right race happens.  Handle
   // that by just ignoring the second StartDestroy() call.
   if (!listener) {
@@ -96,7 +98,7 @@ CacheStorageChild::StartDestroy()
   listener->DestroyInternal(this);
 
   // CacheStorage listener should call ClearListener() in DestroyInternal()
-  MOZ_ASSERT(!mListener);
+  MOZ_DIAGNOSTIC_ASSERT(!mListener);
 
   // Start actor destruction from parent process
   Unused << SendTeardown();
@@ -110,10 +112,10 @@ CacheStorageChild::ActorDestroy(ActorDestroyReason aReason)
   if (listener) {
     listener->DestroyInternal(this);
     // CacheStorage listener should call ClearListener() in DestroyInternal()
-    MOZ_ASSERT(!mListener);
+    MOZ_DIAGNOSTIC_ASSERT(!mListener);
   }
 
-  RemoveFeature();
+  RemoveWorkerHolder();
 }
 
 PCacheOpChild*
@@ -134,7 +136,7 @@ CacheStorageChild::DeallocPCacheOpChild(PCacheOpChild* aActor)
 void
 CacheStorageChild::NoteDeletedActor()
 {
-  MOZ_ASSERT(mNumChildActors);
+  MOZ_DIAGNOSTIC_ASSERT(mNumChildActors);
   mNumChildActors -= 1;
   if (!mNumChildActors && mDelayedDestroy) {
     StartDestroy();

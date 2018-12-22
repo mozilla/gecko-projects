@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Check that we source map frame locations for the frame we are paused at.
  */
@@ -16,20 +18,22 @@ function run_test() {
   gDebuggee = addTestGlobal("test-source-map");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-source-map", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      promise.resolve(define_code())
-        .then(run_code)
-        .then(test_frame_location)
-        .then(null, error => {
-          dump(error + "\n");
-          dump(error.stack);
-          do_check_true(false);
-        })
-        .then(() => {
-          finishClient(gClient);
-        });
-    });
+    attachTestTabAndResume(
+      gClient, "test-source-map",
+      function(response, tabClient, threadClient) {
+        gThreadClient = threadClient;
+        Promise.resolve(define_code())
+          .then(run_code)
+          .then(test_frame_location)
+          .catch(error => {
+            dump(error + "\n");
+            dump(error.stack);
+            Assert.ok(false);
+          })
+          .then(() => {
+            finishClient(gClient);
+          });
+      });
   });
   do_test_pending();
 }
@@ -52,14 +56,14 @@ function define_code() {
 
   code += "//# sourceMappingURL=data:text/json," + map.toString();
 
-  Components.utils.evalInSandbox(code, gDebuggee, "1.8",
-                                 "http://example.com/www/js/abc.js", 1);
+  Cu.evalInSandbox(code, gDebuggee, "1.8",
+                   "http://example.com/www/js/abc.js", 1);
 }
 
 function run_code() {
-  const d = promise.defer();
-  gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    d.resolve(aPacket);
+  const d = defer();
+  gClient.addOneTimeListener("paused", function(event, packet) {
+    d.resolve(packet);
     gThreadClient.resume();
   });
   gDebuggee.a();
@@ -67,7 +71,7 @@ function run_code() {
 }
 
 function test_frame_location({ frame: { where: { source, line, column } } }) {
-  do_check_eq(source.url, "http://example.com/www/js/c.js");
-  do_check_eq(line, 2);
-  do_check_eq(column, 0);
+  Assert.equal(source.url, "http://example.com/www/js/c.js");
+  Assert.equal(line, 2);
+  Assert.equal(column, 0);
 }

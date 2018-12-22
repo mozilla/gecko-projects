@@ -24,6 +24,11 @@ double Fake_MediaStream::StreamTimeToSeconds(mozilla::StreamTime aTime) {
   return static_cast<double>(aTime)/GRAPH_RATE;
 }
 
+mozilla::TrackTicks Fake_MediaStream::TimeToTicksRoundUp(mozilla::TrackRate aRate,
+                                                         mozilla::StreamTime aTime) {
+  return (aTime * aRate) / GRAPH_RATE;
+}
+
 mozilla::StreamTime
 Fake_MediaStream::TicksToTimeRoundDown(mozilla::TrackRate aRate,
                                        mozilla::TrackTicks aTicks) {
@@ -32,14 +37,8 @@ Fake_MediaStream::TicksToTimeRoundDown(mozilla::TrackRate aRate,
 
 // Fake_SourceMediaStream
 nsresult Fake_SourceMediaStream::Start() {
-  mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  if (!mTimer) {
-    return NS_ERROR_FAILURE;
-  }
-
-  mTimer->InitWithCallback(mPeriodic, 100, nsITimer::TYPE_REPEATING_SLACK);
-
-  return NS_OK;
+  return NS_NewTimerWithCallback(getter_AddRefs(mTimer),
+                                 mPeriodic, 100, nsITimer::TYPE_REPEATING_SLACK);
 }
 
 nsresult Fake_SourceMediaStream::Stop() {
@@ -58,7 +57,7 @@ void Fake_SourceMediaStream::Periodic() {
   if (mPullEnabled && !mStop) {
     // 100 ms matches timer interval and AUDIO_BUFFER_SIZE @ 16000 Hz
     mDesiredTime += 100;
-    for (std::set<Fake_MediaStreamListener *>::iterator it =
+    for (std::set<RefPtr<Fake_MediaStreamListener>>::iterator it =
              mListeners.begin(); it != mListeners.end(); ++it) {
       (*it)->NotifyPull(nullptr, TicksToTimeRoundDown(1000 /* ms per s */,
                                                       mDesiredTime));
@@ -66,16 +65,20 @@ void Fake_SourceMediaStream::Periodic() {
   }
 }
 
+// Fake_MediaStreamTrack
+void Fake_MediaStreamTrack::AddListener(Fake_MediaStreamTrackListener *aListener)
+{
+  mOwningStream->GetInputStream()->AddTrackListener(aListener, mTrackID);
+}
+void Fake_MediaStreamTrack::RemoveListener(Fake_MediaStreamTrackListener *aListener)
+{
+  mOwningStream->GetInputStream()->RemoveTrackListener(aListener, mTrackID);
+}
+
 // Fake_MediaStreamBase
 nsresult Fake_MediaStreamBase::Start() {
-  mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-  if (!mTimer) {
-    return NS_ERROR_FAILURE;
-  }
-
-  mTimer->InitWithCallback(mPeriodic, 100, nsITimer::TYPE_REPEATING_SLACK);
-
-  return NS_OK;
+  return NS_NewTimerWithCallback(getter_AddRefs(mTimer),
+                                 mPeriodic, 100, nsITimer::TYPE_REPEATING_SLACK);
 }
 
 nsresult Fake_MediaStreamBase::Stop() {
@@ -108,17 +111,26 @@ void Fake_AudioStreamSource::Periodic() {
   mozilla::AudioSegment segment;
   AutoTArray<const int16_t *,1> channels;
   channels.AppendElement(data);
-  segment.AppendFrames(samples.forget(), channels, AUDIO_BUFFER_SIZE);
+  segment.AppendFrames(samples.forget(),
+                       channels,
+                       AUDIO_BUFFER_SIZE,
+                       PRINCIPAL_HANDLE_NONE);
 
-  for(std::set<Fake_MediaStreamListener *>::iterator it = mListeners.begin();
+  for(std::set<RefPtr<Fake_MediaStreamListener>>::iterator it = mListeners.begin();
        it != mListeners.end(); ++it) {
     (*it)->NotifyQueuedTrackChanges(nullptr, // Graph
                                     0, // TrackID
                                     0, // Offset TODO(ekr@rtfm.com) fix
-                                    0, // ???
+                                    static_cast<mozilla::TrackEventCommand>(0), // ???
                                     segment,
                                     nullptr, // Input stream
                                     -1);     // Input track id
+  }
+  for(std::vector<BoundTrackListener>::iterator it = mTrackListeners.begin();
+       it != mTrackListeners.end(); ++it) {
+    it->mListener->NotifyQueuedChanges(nullptr, // Graph
+                                       0, // Offset TODO(ekr@rtfm.com) fix
+                                       segment);
   }
 }
 
@@ -155,7 +167,7 @@ Fake_VideoStreamSource::Notify(nsITimer* aTimer)
   const uint8_t chromaBpp = 4;
 
   int len = ((WIDTH * HEIGHT) * 3 / 2);
-  uint8_t* frame = (uint8_t*) PR_Malloc(len);
+  uint8_t* frame = (uint8_t*) malloc(len);
   memset(frame, 0x80, len); // Gray
 
   mozilla::layers::PlanarYCbCrData data;
@@ -189,11 +201,11 @@ mozilla::layers::BufferRecycleBin::BufferRecycleBin() :
 }
 
 void mozilla::layers::BufferRecycleBin::RecycleBuffer(uint8_t* buffer, uint32_t size) {
-  PR_Free(buffer);
+  free(buffer);
 }
 
 uint8_t *mozilla::layers::BufferRecycleBin::GetBuffer(uint32_t size) {
-  return (uint8_t *)PR_MALLOC(size);
+  return (uint8_t*) malloc(size);
 }
 
 // YCbCrImage constructor (from ImageLayers.cpp)

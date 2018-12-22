@@ -4,9 +4,13 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+[LegacyUnenumerableNamedProperties]
 interface MimeTypeArray {
+  [NeedsCallerType]
   readonly attribute unsigned long length;
 
+  [NeedsCallerType]
   getter MimeType? item(unsigned long index);
+  [NeedsCallerType]
   getter MimeType? namedItem(DOMString name);
 };

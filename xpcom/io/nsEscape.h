@@ -31,39 +31,39 @@ extern "C" {
 
 /**
  * Escape the given string according to mask
- * @param str The string to escape
- * @param mask How to escape the string
+ * @param aSstr The string to escape
+ * @param aLength The length of the string to escape
+ * @param aOutputLen A pointer that will be used to store the length of the
+ *        output string, if not null
+ * @param aMask How to escape the string
  * @return A newly allocated escaped string that must be free'd with
  *         nsCRT::free, or null on failure
+ * @note: Please, don't use this function. Use NS_Escape instead!
  */
-char* nsEscape(const char* aStr, nsEscapeMask aMask);
+char* nsEscape(const char* aStr, size_t aLength, size_t* aOutputLen,
+               nsEscapeMask aMask);
 
+/**
+ * Decodes '%'-escaped hex codes into character values, modifies the parameter,
+ * returns the same buffer
+ */
 char* nsUnescape(char* aStr);
-/* decode % escaped hex codes into character values,
- * modifies the parameter, returns the same buffer
- */
 
+/**
+ * Decodes '%'-escaped hex codes into character values, modifies the parameter
+ * buffer, returns the length of the result (result may contain \0's).
+ */
 int32_t nsUnescapeCount(char* aStr);
-/* decode % escaped hex codes into character values,
- * modifies the parameter buffer, returns the length of the result
- * (result may contain \0's).
- */
-
-char*
-nsEscapeHTML(const char* aString);
-
-char16_t*
-nsEscapeHTML2(const char16_t* aSourceBuffer,
-              int32_t aSourceBufferLen = -1);
-/*
- * Escape problem char's for HTML display
- */
-
 
 #ifdef __cplusplus
 }
 #endif
 
+/**
+ * Infallibly append aSrc to aDst, escaping chars that are problematic for HTML
+ * display.
+ */
+void nsAppendEscapedHTML(const nsACString& aSrc, nsACString& aDst);
 
 /**
  * NS_EscapeURL/NS_UnescapeURL constants for |flags| parameter:
@@ -93,7 +93,8 @@ enum EscapeMask {
                                     * ascii octets (<= 0x7F) to be skipped when unescaping */
   esc_AlwaysCopy     = 1u << 13, /* copy input to result buf even if escaping is unnecessary */
   esc_Colon          = 1u << 14, /* forces escape of colon */
-  esc_SkipControl    = 1u << 15  /* skips C0 and DEL from unescaping */
+  esc_SkipControl    = 1u << 15, /* skips C0 and DEL from unescaping */
+  esc_Spaces         = 1u << 16  /* forces escape of spaces */
 };
 
 /**
@@ -137,6 +138,20 @@ bool NS_UnescapeURL(const char* aStr,
                     uint32_t aFlags,
                     nsACString& aResult);
 
+/**
+ * Fallible version of |NS_UnescapeURL|. See above for details.
+ *
+ * @param aAppended Out param: true if aResult was written to (i.e. at least
+ *                  one character was unescaped or esc_AlwaysCopy was
+ *                  requested), false otherwise.
+ */
+nsresult NS_UnescapeURL(const char* aStr,
+                        int32_t aLen,
+                        uint32_t aFlags,
+                        nsACString& aResult,
+                        bool& aAppended,
+                        const mozilla::fallible_t&);
+
 /** returns resultant string length **/
 inline int32_t
 NS_UnescapeURL(char* aStr)
@@ -147,24 +162,47 @@ NS_UnescapeURL(char* aStr)
 /**
  * String friendly versions...
  */
-inline const nsCSubstring&
-NS_EscapeURL(const nsCSubstring& aStr, uint32_t aFlags, nsCSubstring& aResult)
+inline const nsACString&
+NS_EscapeURL(const nsACString& aStr, uint32_t aFlags, nsACString& aResult)
 {
   if (NS_EscapeURL(aStr.Data(), aStr.Length(), aFlags, aResult)) {
     return aResult;
   }
   return aStr;
 }
-inline const nsCSubstring&
-NS_UnescapeURL(const nsCSubstring& aStr, uint32_t aFlags, nsCSubstring& aResult)
+
+/**
+ * Fallible version of NS_EscapeURL. On success aResult will point to either
+ * the original string or an escaped copy.
+ */
+nsresult
+NS_EscapeURL(const nsACString& aStr, uint32_t aFlags, nsACString& aResult,
+             const mozilla::fallible_t&);
+
+// Forward declaration for nsASCIIMask.h
+typedef std::array<bool, 128> ASCIIMaskArray;
+
+/**
+ * The same as NS_EscapeURL, except it also filters out characters that match
+ * aFilterMask.
+ */
+nsresult
+NS_EscapeAndFilterURL(const nsACString& aStr, uint32_t aFlags,
+                      const ASCIIMaskArray* aFilterMask,
+                      nsACString& aResult, const mozilla::fallible_t&);
+
+
+inline const nsACString&
+NS_UnescapeURL(const nsACString& aStr, uint32_t aFlags, nsACString& aResult)
 {
   if (NS_UnescapeURL(aStr.Data(), aStr.Length(), aFlags, aResult)) {
     return aResult;
   }
   return aStr;
 }
-const nsSubstring&
-NS_EscapeURL(const nsSubstring& aStr, uint32_t aFlags, nsSubstring& aResult);
+
+const nsAString&
+NS_EscapeURL(const nsAString& aStr, uint32_t aFlags, nsAString& aResult);
 
 /**
  * Percent-escapes all characters in aStr that occurs in aForbidden.
@@ -175,31 +213,33 @@ NS_EscapeURL(const nsSubstring& aStr, uint32_t aFlags, nsSubstring& aResult);
  * @return aResult if some characters were escaped, or aStr otherwise (aResult
  *         is unmodified in that case)
  */
-const nsSubstring&
-NS_EscapeURL(const nsAFlatString& aStr, const nsTArray<char16_t>& aForbidden,
-             nsSubstring& aResult);
+const nsAString&
+NS_EscapeURL(const nsString& aStr, const nsTArray<char16_t>& aForbidden,
+             nsAString& aResult);
 
 /**
  * CString version of nsEscape. Returns true on success, false
  * on out of memory. To reverse this function, use NS_UnescapeURL.
  */
 inline bool
-NS_Escape(const nsCString& aOriginal, nsCString& aEscaped,
+NS_Escape(const nsACString& aOriginal, nsACString& aEscaped,
           nsEscapeMask aMask)
 {
-  char* esc = nsEscape(aOriginal.get(), aMask);
+  size_t escLen = 0;
+  char* esc = nsEscape(aOriginal.BeginReading(), aOriginal.Length(), &escLen,
+                       aMask);
   if (! esc) {
     return false;
   }
-  aEscaped.Adopt(esc);
+  aEscaped.Adopt(esc, escLen);
   return true;
 }
 
 /**
  * Inline unescape of mutable string object.
  */
-inline nsCString&
-NS_UnescapeURL(nsCString& aStr)
+inline nsACString&
+NS_UnescapeURL(nsACString& aStr)
 {
   aStr.SetLength(nsUnescapeCount(aStr.BeginWriting()));
   return aStr;

@@ -25,7 +25,7 @@
  *          - nodes: An array of unique node IDs. Every `from` and `to` id is
  *            guaranteed to be in this array exactly once.
  */
-exports.deduplicatePaths = function (target, paths) {
+exports.deduplicatePaths = function(target, paths) {
   // Use this structure to de-duplicate edges among many retaining paths from
   // start to target.
   //
@@ -48,8 +48,22 @@ exports.deduplicatePaths = function (target, paths) {
     nameSet.add(name);
   }
 
-  for (let path of paths) {
+  // eslint-disable-next-line no-labels
+  outer: for (const path of paths) {
     const pathLength = path.length;
+
+    // Check for duplicate predecessors in the path, and skip paths that contain
+    // them.
+    const predecessorsSeen = new Set();
+    predecessorsSeen.add(target);
+    for (let i = 0; i < pathLength; i++) {
+      if (predecessorsSeen.has(path[i].predecessor)) {
+        // eslint-disable-next-line no-labels
+        continue outer;
+      }
+      predecessorsSeen.add(path[i].predecessor);
+    }
+
     for (let i = 0; i < pathLength - 1; i++) {
       insert(path[i].predecessor, path[i + 1].predecessor, path[i].edge);
     }
@@ -60,7 +74,7 @@ exports.deduplicatePaths = function (target, paths) {
   const nodes = [target];
   const edges = [];
 
-  for (let [from, toMap] of deduped) {
+  for (const [from, toMap] of deduped) {
     // If the second/third/etc shortest path contains the `target` anywhere
     // other than the very last node, we could accidentally put the `target` in
     // `nodes` more than once.
@@ -68,8 +82,8 @@ exports.deduplicatePaths = function (target, paths) {
       nodes.push(from);
     }
 
-    for (let [to, edgeNameSet] of toMap) {
-      for (let name of edgeNameSet) {
+    for (const [to, edgeNameSet] of toMap) {
+      for (const name of edgeNameSet) {
         edges.push({ from, to, name });
       }
     }

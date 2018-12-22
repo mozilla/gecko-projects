@@ -19,6 +19,7 @@
 #include "nsTHashtable.h"
 
 class nsIDocument;
+class nsIEventTarget;
 class nsPIDOMWindowInner;
 
 namespace mozilla {
@@ -56,6 +57,9 @@ class IDBDatabase final
   class Observer;
   friend class Observer;
 
+  friend class IDBObjectStore;
+  friend class IDBIndex;
+
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
   // and the world will explode.
@@ -73,8 +77,6 @@ class IDBDatabase final
   nsDataHashtable<nsISupportsHashKey, indexedDB::PBackgroundIDBDatabaseFileChild*>
     mFileActors;
 
-  nsTHashtable<nsISupportsHashKey> mReceivedBlobs;
-
   RefPtr<Observer> mObserver;
 
   // Weak refs, IDBMutableFile strongly owns this IDBDatabase object.
@@ -83,6 +85,8 @@ class IDBDatabase final
   const bool mFileHandleDisabled;
   bool mClosed;
   bool mInvalidated;
+  bool mQuotaExceeded;
+  bool mIncreasedActiveDatabaseCount;
 
 public:
   static already_AddRefed<IDBDatabase>
@@ -91,17 +95,16 @@ public:
          indexedDB::BackgroundDatabaseChild* aActor,
          DatabaseSpec* aSpec);
 
-#ifdef DEBUG
-  void
-  AssertIsOnOwningThread() const;
-
-  PRThread*
-  OwningThread() const;
-#else
   void
   AssertIsOnOwningThread() const
+#ifdef DEBUG
+  ;
+#else
   { }
 #endif
+
+  nsIEventTarget*
+  EventTarget() const;
 
   const nsString&
   Name() const;
@@ -150,6 +153,12 @@ public:
   }
 
   void
+  SetQuotaExceeded()
+  {
+    mQuotaExceeded = true;
+  }
+
+  void
   EnterSetVersionTransaction(uint64_t aNewVersion);
 
   void
@@ -184,10 +193,10 @@ public:
   NoteFinishedFileActor(indexedDB::PBackgroundIDBDatabaseFileChild* aFileActor);
 
   void
-  NoteReceivedBlob(Blob* aBlob);
+  NoteActiveTransaction();
 
   void
-  DelayedMaybeExpireFileActors();
+  NoteInactiveTransaction();
 
   // XXX This doesn't really belong here... It's only needed for IDBMutableFile
   //     serialization and should be removed or fixed someday.
@@ -238,6 +247,7 @@ public:
   Storage() const;
 
   IMPL_EVENT_HANDLER(abort)
+  IMPL_EVENT_HANDLER(close)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(versionchange)
 
@@ -261,6 +271,10 @@ public:
   {
     AssertIsOnOwningThread();
 
+    // Decrease the number of active databases if it was not done in
+    // CloseInternal().
+    MaybeDecreaseActiveDatabaseCount();
+
     mBackgroundActor = nullptr;
   }
 
@@ -273,7 +287,10 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
-  // nsIDOMEventTarget
+  // DOMEventTargetHelper
+  void
+  DisconnectFromOwner() override;
+
   virtual void
   LastRelease() override;
 
@@ -316,10 +333,27 @@ private:
   InvalidateMutableFiles();
 
   void
+  NoteInactiveTransactionDelayed();
+
+  void
   LogWarning(const char* aMessageName,
              const nsAString& aFilename,
              uint32_t aLineNumber,
              uint32_t aColumnNumber);
+
+  // Only accessed by IDBObjectStore.
+  nsresult
+  RenameObjectStore(int64_t aObjectStoreId, const nsAString& aName);
+
+  // Only accessed by IDBIndex.
+  nsresult
+  RenameIndex(int64_t aObjectStoreId, int64_t aIndexId, const nsAString& aName);
+
+  void
+  IncreaseActiveDatabaseCount();
+
+  void
+  MaybeDecreaseActiveDatabaseCount();
 };
 
 } // namespace dom

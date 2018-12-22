@@ -7,6 +7,8 @@
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMErrorBinding.h"
 #include "mozilla/dom/DOMException.h"
+#include "mozilla/UseCounter.h"
+#include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
 
 namespace mozilla {
@@ -57,7 +59,7 @@ DOMError::~DOMError()
 JSObject*
 DOMError::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DOMErrorBinding::Wrap(aCx, this, aGivenProto);
+  return DOMError_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<DOMError>
@@ -66,6 +68,13 @@ DOMError::Constructor(const GlobalObject& aGlobal,
                       ErrorResult& aRv)
 {
   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
+
+  if (window) {
+    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    if (doc) {
+      doc->SetDocumentAndPageUseCounter(eUseCounter_custom_DOMErrorConstructor);
+    }
+  }
 
   // Window is null for chrome code.
 

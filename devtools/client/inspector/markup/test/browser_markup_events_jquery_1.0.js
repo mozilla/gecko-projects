@@ -18,13 +18,13 @@ const TEST_DATA = [
     selector: "html",
     expected: [
       {
-        type: "load",
-        filename: URL_ROOT + TEST_LIB,
+        type: "DOMContentLoaded",
+        filename: URL_ROOT + TEST_LIB + ":1117",
         attributes: [
-          "jQuery"
+          "Bubbling",
+          "DOM2"
         ],
-        handler: "// Handle when the DOM is ready\n" +
-                 "ready: function() {\n" +
+        handler: "function() {\n" +
                  "  // Make sure that the DOM is not already loaded\n" +
                  "  if (!jQuery.isReady) {\n" +
                  "    // Remember that the DOM is ready\n" +
@@ -44,10 +44,34 @@ const TEST_DATA = [
       },
       {
         type: "load",
-        filename: TEST_URL,
+        filename: URL_ROOT + TEST_LIB + ":1117",
+        attributes: [
+          "jQuery"
+        ],
+        handler: "function() {\n" +
+                 "  // Make sure that the DOM is not already loaded\n" +
+                 "  if (!jQuery.isReady) {\n" +
+                 "    // Remember that the DOM is ready\n" +
+                 "    jQuery.isReady = true;\n" +
+                 "\n" +
+                 "    // If there are functions bound, to execute\n" +
+                 "    if (jQuery.readyList) {\n" +
+                 "      // Execute all of them\n" +
+                 "      for (var i = 0; i < jQuery.readyList.length; i++)\n" +
+                 "        jQuery.readyList[i].apply(document);\n" +
+                 "\n" +
+                 "      // Reset the list of functions\n" +
+                 "      jQuery.readyList = null;\n" +
+                 "    }\n" +
+                 "  }\n" +
+                 "}"
+      },
+      {
+        type: "load",
+        filename: TEST_URL + ":27",
         attributes: [
           "Bubbling",
-          "DOM0"
+          "DOM2"
         ],
         handler: "() => {\n" +
                  "  var handler1 = function liveDivDblClick() {\n" +
@@ -105,12 +129,12 @@ const TEST_DATA = [
       },
       {
         type: "load",
-        filename: URL_ROOT + TEST_LIB,
+        filename: URL_ROOT + TEST_LIB + ":894",
         attributes: [
           "Bubbling",
-          "DOM0"
+          "DOM2"
         ],
-        handler: "handle: function(event) {\n" +
+        handler: "function(event) {\n" +
                  "  if (typeof jQuery == \"undefined\") return;\n" +
                  "\n" +
                  "  event = event || jQuery.event.fix(window.event);\n" +
@@ -144,7 +168,7 @@ const TEST_DATA = [
         attributes: [
           "jQuery"
         ],
-        handler: "var handler7 = function divClick1() {\n" +
+        handler: "function divClick1() {\n" +
                  "  alert(7);\n" +
                  "}"
       },
@@ -154,7 +178,7 @@ const TEST_DATA = [
         attributes: [
           "jQuery"
         ],
-        handler: "var handler8 = function divClick2() {\n" +
+        handler: "function divClick2() {\n" +
                  "  alert(8);\n" +
                  "}"
       },
@@ -165,7 +189,7 @@ const TEST_DATA = [
           "Bubbling",
           "DOM2"
         ],
-        handler: "handle: function(event) {\n" +
+        handler: "function(event) {\n" +
                  "  if (typeof jQuery == \"undefined\") return;\n" +
                  "\n" +
                  "  event = event || jQuery.event.fix(window.event);\n" +
@@ -194,7 +218,7 @@ const TEST_DATA = [
         attributes: [
           "jQuery"
         ],
-        handler: "var handler9 = function divKeyDown() {\n" +
+        handler: "function divKeyDown() {\n" +
                  "  alert(9);\n" +
                  "}"
       },
@@ -205,7 +229,7 @@ const TEST_DATA = [
           "Bubbling",
           "DOM2"
         ],
-        handler: "handle: function(event) {\n" +
+        handler: "function(event) {\n" +
                  "  if (typeof jQuery == \"undefined\") return;\n" +
                  "\n" +
                  "  event = event || jQuery.event.fix(window.event);\n" +
@@ -231,8 +255,8 @@ const TEST_DATA = [
     ]
   },
 ];
-/*eslint-enable */
+/* eslint-enable */
 
-add_task(function*() {
-  yield runEventPopupTests(TEST_URL, TEST_DATA);
+add_task(async function() {
+  await runEventPopupTests(TEST_URL, TEST_DATA);
 });

@@ -37,8 +37,9 @@ public:
   virtual ~HTMLSelectListAccessible() {}
 
   // Accessible
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
+  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
   // SelectAccessible
   virtual bool SelectAll() override;
@@ -48,10 +49,8 @@ public:
   virtual bool IsWidget() const override;
   virtual bool IsActiveWidget() const override;
   virtual bool AreItemsOperable() const override;
-  virtual Accessible* CurrentItem() override;
-  virtual void SetCurrentItem(Accessible* aItem) override;
-
-  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
+  virtual Accessible* CurrentItem() const override;
+  virtual void SetCurrentItem(const Accessible* aItem) override;
 };
 
 /*
@@ -66,8 +65,8 @@ public:
   virtual ~HTMLSelectOptionAccessible() {}
 
   // Accessible
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual uint64_t NativeInteractiveState() const override;
 
   virtual int32_t GetLevelInternal() override;
@@ -75,16 +74,16 @@ public:
   virtual void SetSelected(bool aSelect) override;
 
   // ActionAccessible
-  virtual uint8_t ActionCount() override;
+  virtual uint8_t ActionCount() const override;
   virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t aIndex) override;
+  virtual bool DoAction(uint8_t aIndex) const override;
 
   // Widgets
   virtual Accessible* ContainerWidget() const override;
 
 protected:
   // Accessible
-  virtual ENameValueFlag NativeName(nsString& aName) override;
+  virtual ENameValueFlag NativeName(nsString& aName) const override;
 
 private:
 
@@ -99,7 +98,7 @@ private:
 
     if (parent && parent->IsListControl()) {
       Accessible* combobox = parent->Parent();
-      return combobox && combobox->IsCombobox() ? combobox : mParent.get();
+      return combobox && combobox->IsCombobox() ? combobox : mParent;
     }
 
     return nullptr;
@@ -136,13 +135,14 @@ public:
   virtual ~HTMLSelectOptGroupAccessible() {}
 
   // Accessible
-  virtual a11y::role NativeRole() override;
+  virtual a11y::role NativeRole() const override;
   virtual uint64_t NativeInteractiveState() const override;
+  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
   // ActionAccessible
-  virtual uint8_t ActionCount() override;
+  virtual uint8_t ActionCount() const override;
   virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t aIndex) override;
+  virtual bool DoAction(uint8_t aIndex) const override;
 };
 
 /** ------------------------------------------------------ */
@@ -165,22 +165,23 @@ public:
   // Accessible
   virtual void Shutdown() override;
   virtual void Description(nsString& aDescription) override;
-  virtual void Value(nsString& aValue) override;
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual void Value(nsString& aValue) const override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual bool RemoveChild(Accessible* aChild) override;
+  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
   // ActionAccessible
-  virtual uint8_t ActionCount() override;
+  virtual uint8_t ActionCount() const override;
   virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
-  virtual bool DoAction(uint8_t aIndex) override;
+  virtual bool DoAction(uint8_t aIndex) const override;
 
   // Widgets
   virtual bool IsWidget() const override;
   virtual bool IsActiveWidget() const override;
   virtual bool AreItemsOperable() const override;
-  virtual Accessible* CurrentItem() override;
-  virtual void SetCurrentItem(Accessible* aItem) override;
+  virtual Accessible* CurrentItem() const override;
+  virtual void SetCurrentItem(const Accessible* aItem) override;
 
 protected:
   /**
@@ -207,9 +208,10 @@ public:
 
   // Accessible
   virtual nsIFrame* GetFrame() const override;
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual nsRect RelativeBounds(nsIFrame** aBoundingFrame) const override;
+  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
   // Widgets
   virtual bool IsActiveWidget() const override;

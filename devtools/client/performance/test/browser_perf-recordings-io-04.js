@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-
+"use strict";
+/* eslint-disable */
 /**
  * Tests if the performance tool can import profiler data from the
  * original profiler tool (Performance Recording v1, and Profiler data v2) and the correct views and graphs are loaded.
@@ -68,8 +69,8 @@ var PROFILER_DATA = (function () {
   return data;
 })();
 
-var test = Task.async(function*() {
-  let { target, panel, toolbox } = yield initPerformance(SIMPLE_URL);
+var test = async function () {
+  let { target, panel, toolbox } = await initPerformance(SIMPLE_URL);
   let { $, EVENTS, PerformanceController, DetailsView, OverviewView, JsCallTreeView } = panel.panelWin;
 
   // Enable memory to test the memory-calltree and memory-flamegraph.
@@ -89,20 +90,20 @@ var test = Task.async(function*() {
   // Save recording as an old profiler data.
   let file = FileUtils.getFile("TmpD", ["tmpprofile.json"]);
   file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("666", 8));
-  yield asyncCopy(oldProfilerData, file);
+  await asyncCopy(oldProfilerData, file);
 
   // Import recording.
 
   let calltreeRendered = once(OverviewView, EVENTS.UI_FRAMERATE_GRAPH_RENDERED);
   let fpsRendered = once(JsCallTreeView, EVENTS.UI_JS_CALL_TREE_RENDERED);
   let imported = once(PerformanceController, EVENTS.RECORDING_IMPORTED);
-  yield PerformanceController.importRecording("", file);
+  await PerformanceController.importRecording("", file);
 
-  yield imported;
+  await imported;
   ok(true, "The original profiler data appears to have been successfully imported.");
 
-  yield calltreeRendered;
-  yield fpsRendered;
+  await calltreeRendered;
+  await fpsRendered;
   ok(true, "The imported data was re-rendered.");
 
   // Ensure that only framerate and js calltree/flamegraph view are available
@@ -138,7 +139,7 @@ var test = Task.async(function*() {
       is(importedData.configuration[field], expected[field], `${field} successfully converted in legacy import.`);
     } else if (field === "profile") {
       is(importedData.profile.toSource(), expected.profile,
-        `profiler data's samples successfully converted in legacy import.`);
+        "profiler data's samples successfully converted in legacy import.");
       is(importedData.profile.meta.version, 3, "Updated meta version to 3.");
     } else {
       let data = importedData[field];
@@ -147,9 +148,9 @@ var test = Task.async(function*() {
     }
   }
 
-  yield teardown(panel);
+  await teardown(panel);
   finish();
-});
+};
 
 function getUnicodeConverter() {
   let className = "@mozilla.org/intl/scriptableunicodeconverter";
@@ -159,7 +160,7 @@ function getUnicodeConverter() {
 }
 
 function asyncCopy(data, file) {
-  let deferred = Promise.defer();
+  let deferred = defer();
 
   let string = JSON.stringify(data);
   let inputStream = getUnicodeConverter().convertToInputStream(string);
@@ -174,3 +175,4 @@ function asyncCopy(data, file) {
 
   return deferred.promise;
 }
+/* eslint-enable */

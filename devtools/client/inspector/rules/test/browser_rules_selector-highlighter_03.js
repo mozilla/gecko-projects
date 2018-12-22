@@ -19,12 +19,12 @@ const TEST_URI = `
   <div class="node-2">Node 2</div>
 `;
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
 
   // Mock the highlighter front.
-  let HighlighterFront = {
+  const HighlighterFront = {
     isShown: false,
     show: function() {
       this.isShown = true;
@@ -38,47 +38,41 @@ add_task(function*() {
   view.selectorHighlighter = HighlighterFront;
 
   info("Select .node-1 and click on the .node-1 selector icon");
-  yield selectNode(".node-1", inspector);
-  let icon = getRuleViewSelectorHighlighterIcon(view, ".node-1");
-  yield clickSelectorIcon(icon, view);
+  await selectNode(".node-1", inspector);
+  let icon = await getRuleViewSelectorHighlighterIcon(view, ".node-1");
+  await clickSelectorIcon(icon, view);
   ok(HighlighterFront.isShown, "The highlighter is shown");
 
   info("With .node-1 still selected, click again on the .node-1 selector icon");
-  yield clickSelectorIcon(icon, view);
+  await clickSelectorIcon(icon, view);
   ok(!HighlighterFront.isShown, "The highlighter is now hidden");
 
   info("With .node-1 still selected, click on the div selector icon");
-  icon = getRuleViewSelectorHighlighterIcon(view, "div");
-  yield clickSelectorIcon(icon, view);
+  icon = await getRuleViewSelectorHighlighterIcon(view, "div");
+  await clickSelectorIcon(icon, view);
   ok(HighlighterFront.isShown, "The highlighter is shown again");
 
   info("With .node-1 still selected, click again on the .node-1 selector icon");
-  icon = getRuleViewSelectorHighlighterIcon(view, ".node-1");
-  yield clickSelectorIcon(icon, view);
+  icon = await getRuleViewSelectorHighlighterIcon(view, ".node-1");
+  await clickSelectorIcon(icon, view);
   ok(HighlighterFront.isShown,
     "The highlighter is shown again since the clicked selector was different");
 
   info("Selecting .node-2");
-  yield selectNode(".node-2", inspector);
+  await selectNode(".node-2", inspector);
   ok(HighlighterFront.isShown,
     "The highlighter is still shown after selection");
 
   info("With .node-2 selected, click on the div selector icon");
-  icon = getRuleViewSelectorHighlighterIcon(view, "div");
-  yield clickSelectorIcon(icon, view);
+  icon = await getRuleViewSelectorHighlighterIcon(view, "div");
+  await clickSelectorIcon(icon, view);
   ok(HighlighterFront.isShown,
     "The highlighter is shown still since the selected was different");
 
   info("Switching back to .node-1 and clicking on the div selector");
-  yield selectNode(".node-1", inspector);
-  icon = getRuleViewSelectorHighlighterIcon(view, "div");
-  yield clickSelectorIcon(icon, view);
+  await selectNode(".node-1", inspector);
+  icon = await getRuleViewSelectorHighlighterIcon(view, "div");
+  await clickSelectorIcon(icon, view);
   ok(!HighlighterFront.isShown,
     "The highlighter is hidden now that the same selector was clicked");
 });
-
-function* clickSelectorIcon(icon, view) {
-  let onToggled = view.once("ruleview-selectorhighlighter-toggled");
-  EventUtils.synthesizeMouseAtCenter(icon, {}, view.styleWindow);
-  yield onToggled;
-}

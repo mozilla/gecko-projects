@@ -6,23 +6,26 @@
 
 #include "mozilla/dom/cache/CacheStreamControlParent.h"
 
-#include "mozilla/DebugOnly.h"
-#include "mozilla/unused.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/cache/CacheTypes.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/StreamList.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/ipc/PFileDescriptorSetParent.h"
 #include "nsISupportsImpl.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 namespace dom {
 namespace cache {
 
+using mozilla::dom::OptionalFileDescriptorSet;
+using mozilla::ipc::AutoIPCStream;
 using mozilla::ipc::FileDescriptor;
 using mozilla::ipc::FileDescriptorSetParent;
-using mozilla::ipc::OptionalFileDescriptorSet;
 using mozilla::ipc::PFileDescriptorSetParent;
 
 // declared in ActorUtils.h
@@ -40,7 +43,7 @@ CacheStreamControlParent::CacheStreamControlParent()
 CacheStreamControlParent::~CacheStreamControlParent()
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
-  MOZ_ASSERT(!mStreamList);
+  MOZ_DIAGNOSTIC_ASSERT(!mStreamList);
   MOZ_COUNT_DTOR(cache::CacheStreamControlParent);
 }
 
@@ -48,50 +51,43 @@ void
 CacheStreamControlParent::SerializeControl(CacheReadStream* aReadStreamOut)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
+  MOZ_DIAGNOSTIC_ASSERT(aReadStreamOut);
   aReadStreamOut->controlChild() = nullptr;
   aReadStreamOut->controlParent() = this;
 }
 
 void
-CacheStreamControlParent::SerializeFds(CacheReadStream* aReadStreamOut,
-                                       const nsTArray<FileDescriptor>& aFds)
+CacheStreamControlParent::SerializeStream(CacheReadStream* aReadStreamOut,
+                                          nsIInputStream* aStream,
+                                          nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
-  PFileDescriptorSetParent* fdSet = nullptr;
-  if (!aFds.IsEmpty()) {
-    fdSet = Manager()->SendPFileDescriptorSetConstructor(aFds[0]);
-    for (uint32_t i = 1; i < aFds.Length(); ++i) {
-      Unused << fdSet->SendAddFileDescriptor(aFds[i]);
-    }
-  }
+  MOZ_DIAGNOSTIC_ASSERT(aReadStreamOut);
 
-  if (fdSet) {
-    aReadStreamOut->fds() = fdSet;
-  } else {
-    aReadStreamOut->fds() = void_t();
-  }
+  UniquePtr<AutoIPCStream> autoStream(new AutoIPCStream(aReadStreamOut->stream()));
+  DebugOnly<bool> ok = autoStream->Serialize(aStream, Manager());
+  MOZ_ASSERT(ok);
+
+  aStreamCleanupList.AppendElement(std::move(autoStream));
 }
 
 void
-CacheStreamControlParent::DeserializeFds(const CacheReadStream& aReadStream,
-                                         nsTArray<FileDescriptor>& aFdsOut)
+CacheStreamControlParent::OpenStream(const nsID& aId,
+                                     InputStreamResolver&& aResolver)
 {
-  if (aReadStream.fds().type() !=
-      OptionalFileDescriptorSet::TPFileDescriptorSetParent) {
+  NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
+  MOZ_DIAGNOSTIC_ASSERT(aResolver);
+
+  if (!mStreamList || !mStreamList->ShouldOpenStreamFor(aId)) {
+    aResolver(nullptr);
     return;
   }
 
-  FileDescriptorSetParent* fdSetActor =
-    static_cast<FileDescriptorSetParent*>(aReadStream.fds().get_PFileDescriptorSetParent());
-  MOZ_ASSERT(fdSetActor);
-
-  fdSetActor->ForgetFileDescriptors(aFdsOut);
-  MOZ_ASSERT(!aFdsOut.IsEmpty());
-
-  if (!fdSetActor->Send__delete__(fdSetActor)) {
-    // child process is gone, warn and allow actor to clean up normally
-    NS_WARNING("Cache failed to delete fd set actor.");
-  }
+  // Make sure to add ourself as a Listener even thought we are using
+  // a separate resolver function to signal the completion of the
+  // operation.  The Manager uses the existence of the Listener to ensure
+  // that its safe to complete the operation.
+  mStreamList->GetManager()->ExecuteOpenStream(this, std::move(aResolver), aId);
 }
 
 void
@@ -114,25 +110,44 @@ CacheStreamControlParent::ActorDestroy(ActorDestroyReason aReason)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
   CloseAllReadStreamsWithoutReporting();
+  // If the initial SendPStreamControlConstructor() fails we will
+  // be called before mStreamList is set.
+  if (!mStreamList) {
+    return;
+  }
+  mStreamList->GetManager()->RemoveListener(this);
   mStreamList->RemoveStreamControl(this);
   mStreamList->NoteClosedAll();
   mStreamList = nullptr;
 }
 
-bool
+mozilla::ipc::IPCResult
+CacheStreamControlParent::RecvOpenStream(const nsID& aStreamId,
+                                         OpenStreamResolver&& aResolver)
+{
+  NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
+
+  OpenStream(aStreamId, [aResolver](nsCOMPtr<nsIInputStream>&& aStream) {
+      aResolver(aStream);
+    });
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 CacheStreamControlParent::RecvNoteClosed(const nsID& aId)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
-  MOZ_ASSERT(mStreamList);
+  MOZ_DIAGNOSTIC_ASSERT(mStreamList);
   mStreamList->NoteClosed(aId);
-  return true;
+  return IPC_OK();
 }
 
 void
 CacheStreamControlParent::SetStreamList(StreamList* aStreamList)
 {
   NS_ASSERT_OWNINGTHREAD(CacheStreamControlParent);
-  MOZ_ASSERT(!mStreamList);
+  MOZ_DIAGNOSTIC_ASSERT(!mStreamList);
   mStreamList = aStreamList;
 }
 

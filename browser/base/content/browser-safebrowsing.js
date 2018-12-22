@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Note: this file is not shipped (through jar.mn)
-// if MOZ_SAFE_BROWSING is not defined.
+// This file is loaded into the browser window scope.
+/* eslint-env mozilla/browser-window */
 
 var gSafeBrowsing = {
 
-  setReportPhishingMenu: function() {
+  setReportPhishingMenu() {
     // In order to detect whether or not we're at the phishing warning
     // page, we have to check the documentURI instead of the currentURI.
     // This is because when the DocShell loads an error page, the
@@ -23,29 +23,53 @@ var gSafeBrowsing = {
     document.getElementById("menu_HelpPopup_reportPhishingErrortoolmenu")
             .hidden = !isPhishingPage;
 
-    var broadcasterId = isPhishingPage
-                        ? "reportPhishingErrorBroadcaster"
-                        : "reportPhishingBroadcaster";
-
-    var broadcaster = document.getElementById(broadcasterId);
-    if (!broadcaster)
-      return;
-
     // Now look at the currentURI to learn which page we were trying
     // to browse to.
-    let uri = gBrowser.currentURI;
-    if (uri && (uri.schemeIs("http") || uri.schemeIs("https")))
-      broadcaster.removeAttribute("disabled");
-    else
-      broadcaster.setAttribute("disabled", true);
+    const uri = gBrowser.currentURI;
+    const isReportablePage = uri && (uri.schemeIs("http") || uri.schemeIs("https"));
+
+    const disabledByPolicy = !Services.policies.isAllowed("feedbackCommands");
+
+    const reportBroadcaster = document.getElementById("reportPhishingBroadcaster");
+    if (disabledByPolicy || isPhishingPage || !isReportablePage) {
+      reportBroadcaster.setAttribute("disabled", "true");
+    } else {
+      reportBroadcaster.removeAttribute("disabled");
+    }
+
+    const reportErrorBroadcaster = document.getElementById("reportPhishingErrorBroadcaster");
+    if (disabledByPolicy || !isPhishingPage || !isReportablePage) {
+      reportErrorBroadcaster.setAttribute("disabled", "true");
+    } else {
+      reportErrorBroadcaster.removeAttribute("disabled");
+    }
   },
 
   /**
    * Used to report a phishing page or a false positive
-   * @param name String One of "Phish", "Error", "Malware" or "MalwareError"
+   *
+   * @param name
+   *        String One of "PhishMistake", "MalwareMistake", or "Phish"
+   * @param info
+   *        Information about the reasons for blocking the resource.
+   *        In the case false positive, it may contain SafeBrowsing
+   *        matching list and provider of the list
    * @return String the report phishing URL.
    */
-  getReportURL: function(name) {
-    return SafeBrowsing.getReportURL(name, gBrowser.currentURI);
+  getReportURL(name, info) {
+    let reportInfo = info;
+    if (!reportInfo) {
+      let pageUri = gBrowser.currentURI;
+
+      // Remove the query to avoid including potentially sensitive data
+      if (pageUri instanceof Ci.nsIURL) {
+        pageUri = pageUri.mutate()
+                         .setQuery("")
+                         .finalize();
+      }
+
+      reportInfo = { uri: pageUri.asciiSpec };
+    }
+    return SafeBrowsing.getReportURL(name, reportInfo);
   }
-}
+};

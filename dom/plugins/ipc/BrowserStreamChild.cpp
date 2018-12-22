@@ -22,7 +22,6 @@ BrowserStreamChild::BrowserStreamChild(PluginInstanceChild* instance,
   , mStreamStatus(kStreamOpen)
   , mDestroyPending(NOT_DESTROYED)
   , mNotifyPending(false)
-  , mStreamAsFilePending(false)
   , mInstanceDying(false)
   , mState(CONSTRUCTING)
   , mURL(url)
@@ -60,6 +59,15 @@ BrowserStreamChild::StreamConstructed(
   rv = mInstance->mPluginIface->newstream(
     &mInstance->mData, const_cast<char*>(NullableStringGet(mimeType)),
     &mStream, seekable, stype);
+
+  // NP_NORMAL is the only permissible stream type
+  if (*stype != NP_NORMAL) {
+    rv = NPERR_INVALID_PARAM;
+    // The plugin thinks the stream is alive, so we kill it explicitly
+    (void) mInstance->mPluginIface
+      ->destroystream(&mInstance->mData, &mStream, NPRES_NETWORK_ERR);
+  }
+
   if (rv != NPERR_NO_ERROR) {
     mState = DELETING;
     if (mStreamNotify) {
@@ -79,20 +87,20 @@ BrowserStreamChild::~BrowserStreamChild()
   NS_ASSERTION(!mStreamNotify, "Should have nulled it by now!");
 }
 
-bool
+mozilla::ipc::IPCResult
 BrowserStreamChild::RecvWrite(const int32_t& offset,
-                              const Buffer& data,
-                              const uint32_t& newlength)
+                              const uint32_t& newlength,
+                              const Buffer& data)
 {
   PLUGIN_LOG_DEBUG_FUNCTION;
 
   AssertPluginThread();
 
   if (ALIVE != mState)
-    NS_RUNTIMEABORT("Unexpected state: received data after NPP_DestroyStream?");
+    MOZ_CRASH("Unexpected state: received data after NPP_DestroyStream?");
 
   if (kStreamOpen != mStreamStatus)
-    return true;
+    return IPC_OK();
 
   mStream.end = newlength;
 
@@ -105,36 +113,16 @@ BrowserStreamChild::RecvWrite(const int32_t& offset,
 
   EnsureDeliveryPending();
 
-  return true;
+  return IPC_OK();
 }
 
-bool
-BrowserStreamChild::RecvNPP_StreamAsFile(const nsCString& fname)
-{
-  PLUGIN_LOG_DEBUG(("%s (fname=%s)", FULLFUNCTION, fname.get()));
-
-  AssertPluginThread();
-
-  if (ALIVE != mState)
-    NS_RUNTIMEABORT("Unexpected state: received file after NPP_DestroyStream?");
-
-  if (kStreamOpen != mStreamStatus)
-    return true;
-
-  mStreamAsFilePending = true;
-  mStreamAsFileName = fname;
-  EnsureDeliveryPending();
-
-  return true;
-}
-
-bool
+mozilla::ipc::IPCResult
 BrowserStreamChild::RecvNPP_DestroyStream(const NPReason& reason)
 {
   PLUGIN_LOG_DEBUG_METHOD;
 
   if (ALIVE != mState)
-    NS_RUNTIMEABORT("Unexpected state: recevied NPP_DestroyStream twice?");
+    MOZ_CRASH("Unexpected state: recevied NPP_DestroyStream twice?");
 
   mState = DYING;
   mDestroyPending = DESTROY_PENDING;
@@ -142,55 +130,24 @@ BrowserStreamChild::RecvNPP_DestroyStream(const NPReason& reason)
     mStreamStatus = reason;
 
   EnsureDeliveryPending();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 BrowserStreamChild::Recv__delete__()
 {
   AssertPluginThread();
 
   if (DELETING != mState)
-    NS_RUNTIMEABORT("Bad state, not DELETING");
+    MOZ_CRASH("Bad state, not DELETING");
 
-  return true;
-}
-
-NPError
-BrowserStreamChild::NPN_RequestRead(NPByteRange* aRangeList)
-{
-  PLUGIN_LOG_DEBUG_FUNCTION;
-
-  AssertPluginThread();
-
-  if (ALIVE != mState || kStreamOpen != mStreamStatus)
-    return NPERR_GENERIC_ERROR;
-
-  IPCByteRanges ranges;
-  for (; aRangeList; aRangeList = aRangeList->next) {
-    IPCByteRange br = {aRangeList->offset, aRangeList->length};
-    ranges.AppendElement(br);
-  }
-
-  NPError result;
-  CallNPN_RequestRead(ranges, &result);
-  return result;
-}
-
-void
-BrowserStreamChild::NPN_DestroyStream(NPReason reason)
-{
-  mStreamStatus = reason;
-  if (ALIVE == mState)
-    SendNPN_DestroyStream(reason);
-
-  EnsureDeliveryPending();
+  return IPC_OK();
 }
 
 void
 BrowserStreamChild::EnsureDeliveryPending()
 {
-  MessageLoop::current()->PostTask(FROM_HERE,
+  MessageLoop::current()->PostTask(
     mDeliveryTracker.NewRunnableMethod(&BrowserStreamChild::Deliver));
 }
 
@@ -209,24 +166,10 @@ BrowserStreamChild::Deliver()
                "Exit out of the data-delivery loop with pending data");
   mPendingData.Clear();
 
-  // NPP_StreamAsFile() is documented (at MDN) to be called "when the stream
-  // is complete" -- i.e. after all calls to NPP_WriteReady() and NPP_Write()
-  // have finished.  We make these calls asynchronously (from
-  // DeliverPendingData()).  So we need to make sure all the "pending data"
-  // has been "delivered" before calling NPP_StreamAsFile() (also
-  // asynchronously).  Doing this resolves bug 687610, bug 670036 and possibly
-  // also other bugs.
-  if (mStreamAsFilePending) {
-    if (mStreamStatus == kStreamOpen)
-      mInstance->mPluginIface->asfile(&mInstance->mData, &mStream,
-                                      mStreamAsFileName.get());
-    mStreamAsFilePending = false;
-  }
-
   if (DESTROY_PENDING == mDestroyPending) {
     mDestroyPending = DESTROYED;
     if (mState != DYING)
-      NS_RUNTIMEABORT("mDestroyPending but state not DYING");
+      MOZ_CRASH("mDestroyPending but state not DYING");
 
     NS_ASSERTION(NPRES_DONE != mStreamStatus, "Success status set too early!");
     if (kStreamOpen == mStreamStatus)
@@ -237,7 +180,7 @@ BrowserStreamChild::Deliver()
   }
   if (DESTROYED == mDestroyPending && mNotifyPending) {
     NS_ASSERTION(mStreamNotify, "mDestroyPending but no mStreamNotify?");
-      
+
     mNotifyPending = false;
     mStreamNotify->NPP_URLNotify(mStreamStatus);
     delete mStreamNotify;
@@ -254,7 +197,7 @@ bool
 BrowserStreamChild::DeliverPendingData()
 {
   if (mState != ALIVE && mState != DYING)
-    NS_RUNTIMEABORT("Unexpected state");
+    MOZ_CRASH("Unexpected state");
 
   NS_ASSERTION(mPendingData.Length(), "Called from Deliver with empty pending");
 
@@ -275,7 +218,10 @@ BrowserStreamChild::DeliverPendingData()
     if (0 == r)
       return true;
     if (r < 0) { // error condition
-      NPN_DestroyStream(NPRES_NETWORK_ERR);
+      mStreamStatus = NPRES_NETWORK_ERR;
+
+      // Set up stream destruction
+      EnsureDeliveryPending();
       return false;
     }
     mPendingData[0].curpos += r;

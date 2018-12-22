@@ -10,6 +10,7 @@
 #include "mozilla/dom/WebGL2RenderingContextBinding.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Telemetry.h"
+#include "nsPrintfCString.h"
 #include "WebGLBuffer.h"
 #include "WebGLFormats.h"
 #include "WebGLTransformFeedback.h"
@@ -49,7 +50,7 @@ WebGL2Context::Create()
 JSObject*
 WebGL2Context::WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGL2RenderingContextBinding::Wrap(cx, this, givenProto);
+    return dom::WebGL2RenderingContext_Binding::Wrap(cx, this, givenProto);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -71,21 +72,19 @@ static const gl::GLFeature kRequiredFeatures[] = {
     gl::GLFeature::gpu_shader4,
     gl::GLFeature::instanced_arrays,
     gl::GLFeature::instanced_non_arrays,
-    gl::GLFeature::map_buffer_range,
+    gl::GLFeature::map_buffer_range, // Used by GetBufferSubData.
     gl::GLFeature::occlusion_query2,
     gl::GLFeature::packed_depth_stencil,
     gl::GLFeature::query_objects,
     gl::GLFeature::renderbuffer_color_float,
     gl::GLFeature::renderbuffer_color_half_float,
-    gl::GLFeature::sRGB_framebuffer,
-    gl::GLFeature::sRGB_texture,
+    gl::GLFeature::sRGB,
     gl::GLFeature::sampler_objects,
     gl::GLFeature::standard_derivatives,
     gl::GLFeature::texture_3D,
     gl::GLFeature::texture_3D_compressed,
     gl::GLFeature::texture_3D_copy,
     gl::GLFeature::texture_float,
-    gl::GLFeature::texture_float_linear,
     gl::GLFeature::texture_half_float,
     gl::GLFeature::texture_half_float_linear,
     gl::GLFeature::texture_non_power_of_two,
@@ -97,43 +96,58 @@ static const gl::GLFeature kRequiredFeatures[] = {
 };
 
 bool
-WebGLContext::InitWebGL2()
+WebGLContext::InitWebGL2(FailureReason* const out_failReason)
 {
     MOZ_ASSERT(IsWebGL2(), "WebGLContext is not a WebGL 2 context!");
 
-    // check OpenGL features
-    if (!gl->IsSupported(gl::GLFeature::occlusion_query) &&
-        !gl->IsSupported(gl::GLFeature::occlusion_query_boolean))
-    {
-        // On desktop, we fake occlusion_query_boolean with occlusion_query if
-        // necessary. (See WebGL2ContextQueries.cpp)
-        GenerateWarning("WebGL 2 unavailable. Requires occlusion queries.");
-        return false;
-    }
-
     std::vector<gl::GLFeature> missingList;
 
-    for (size_t i = 0; i < ArrayLength(kRequiredFeatures); i++) {
-        if (!gl->IsSupported(kRequiredFeatures[i]))
-            missingList.push_back(kRequiredFeatures[i]);
+    const auto fnGatherMissing = [&](gl::GLFeature cur) {
+        if (!gl->IsSupported(cur)) {
+            missingList.push_back(cur);
+        }
+    };
+
+    const auto fnGatherMissing2 = [&](gl::GLFeature main, gl::GLFeature alt) {
+        if (!gl->IsSupported(main) && !gl->IsSupported(alt)) {
+            missingList.push_back(main);
+        }
+    };
+
+    ////
+
+    for (const auto& cur : kRequiredFeatures) {
+        fnGatherMissing(cur);
     }
+
+    // On desktop, we fake occlusion_query_boolean with occlusion_query if
+    // necessary. (See WebGL2ContextQueries.cpp)
+    fnGatherMissing2(gl::GLFeature::occlusion_query_boolean,
+                     gl::GLFeature::occlusion_query);
 
 #ifdef XP_MACOSX
     // On OSX, GL core profile is used. This requires texture swizzle
     // support to emulate legacy texture formats: ALPHA, LUMINANCE,
     // and LUMINANCE_ALPHA.
-    if (!gl->IsSupported(gl::GLFeature::texture_swizzle))
-        missingList.push_back(gl::GLFeature::texture_swizzle);
+    fnGatherMissing(gl::GLFeature::texture_swizzle);
 #endif
 
-    if (missingList.size()) {
+    fnGatherMissing2(gl::GLFeature::prim_restart_fixed,
+                     gl::GLFeature::prim_restart);
+
+    ////
+
+    if (!missingList.empty()) {
         nsAutoCString exts;
         for (auto itr = missingList.begin(); itr != missingList.end(); ++itr) {
             exts.AppendLiteral("\n  ");
             exts.Append(gl::GLContext::GetFeatureName(*itr));
         }
-        GenerateWarning("WebGL 2 unavailable. The following required features are"
-                        " unavailible: %s", exts.BeginReading());
+
+        const nsPrintfCString reason("WebGL 2 requires support for the following"
+                                     " features: %s",
+                                     exts.BeginReading());
+        *out_failReason = FailureReason("FEATURE_FAILURE_WEBGL2_OCCL", reason);
         return false;
     }
 
@@ -143,18 +157,28 @@ WebGLContext::InitWebGL2()
     gl->GetUIntegerv(LOCAL_GL_MAX_UNIFORM_BUFFER_BINDINGS,
                      &mGLMaxUniformBufferBindings);
 
-    mBoundTransformFeedbackBuffers.SetLength(mGLMaxTransformFeedbackSeparateAttribs);
-    mBoundUniformBuffers.SetLength(mGLMaxUniformBufferBindings);
+    mIndexedUniformBufferBindings.resize(mGLMaxUniformBufferBindings);
 
     mDefaultTransformFeedback = new WebGLTransformFeedback(this, 0);
     mBoundTransformFeedback = mDefaultTransformFeedback;
 
+    gl->fGenTransformFeedbacks(1, &mEmptyTFO);
+
+    ////
+
     if (!gl->IsGLES()) {
         // Desktop OpenGL requires the following to be enabled in order to
         // support sRGB operations on framebuffers.
-        gl->MakeCurrent();
         gl->fEnable(LOCAL_GL_FRAMEBUFFER_SRGB_EXT);
     }
+
+    if (gl->IsSupported(gl::GLFeature::prim_restart_fixed)) {
+        gl->fEnable(LOCAL_GL_PRIMITIVE_RESTART_FIXED_INDEX);
+    } else {
+        MOZ_ASSERT(gl->IsSupported(gl::GLFeature::prim_restart));
+    }
+
+    //////
 
     return true;
 }

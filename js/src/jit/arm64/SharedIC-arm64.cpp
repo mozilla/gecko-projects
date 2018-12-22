@@ -13,6 +13,7 @@
 #include "jit/arm64/vixl/Debugger-vixl.h"
 #endif
 
+#include "jit/arm64/MacroAssembler-arm64-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -44,7 +45,6 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
     ARMRegister W1(R1_, 32);
     ARMRegister X1(R1_, 64);
     ARMRegister WTemp(ExtractTemp0, 32);
-    ARMRegister XTemp(ExtractTemp0, 64);
     Label maybeNegZero, revertRegister;
     switch(op_) {
       case JSOP_ADD:
@@ -143,7 +143,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
 
             masm.bind(&toUint);
             masm.convertUInt32ToDouble(Rscratch, ScratchDoubleReg);
-            masm.boxDouble(ScratchDoubleReg, R0);
+            masm.boxDouble(ScratchDoubleReg, R0, ScratchDoubleReg);
         } else {
             // Testing for negative is equivalent to testing bit 31
             masm.Tbnz(Wscratch, 31, &failure);
@@ -182,37 +182,6 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
     EmitStubGuardFailure(masm);
 
     return true;
-}
-
-bool
-ICUnaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
-{
-    Label failure;
-    masm.branchTestInt32(Assembler::NotEqual, R0, &failure);
-
-    switch (op) {
-      case JSOP_BITNOT:
-        masm.Mvn(ARMRegister(R1.valueReg(), 32), ARMRegister(R0.valueReg(), 32));
-        masm.movePayload(R1.valueReg(), R0.valueReg());
-        break;
-      case JSOP_NEG:
-        // Guard against 0 and MIN_INT, both result in a double.
-        masm.branchTest32(Assembler::Zero, R0.valueReg(), Imm32(0x7fffffff), &failure);
-
-        // Compile -x as 0 - x.
-        masm.Sub(ARMRegister(R1.valueReg(), 32), wzr, ARMRegister(R0.valueReg(), 32));
-        masm.movePayload(R1.valueReg(), R0.valueReg());
-        break;
-      default:
-        MOZ_CRASH("Unexpected op");
-    }
-
-    EmitReturnFromIC(masm);
-
-    masm.bind(&failure);
-    EmitStubGuardFailure(masm);
-    return true;
-
 }
 
 } // namespace jit

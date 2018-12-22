@@ -32,11 +32,16 @@ namespace Library
 
 typedef Rooted<JSFlatString*>    RootedFlatString;
 
+static const JSClassOps sLibraryClassOps = {
+  nullptr, nullptr, nullptr, nullptr,
+  nullptr, nullptr, Library::Finalize
+};
+
 static const JSClass sLibraryClass = {
   "Library",
-  JSCLASS_HAS_RESERVED_SLOTS(LIBRARY_SLOTS),
-  nullptr, nullptr, nullptr, nullptr,
-  nullptr, nullptr, nullptr, Library::Finalize
+  JSCLASS_HAS_RESERVED_SLOTS(LIBRARY_SLOTS) |
+  JSCLASS_FOREGROUND_FINALIZE,
+  &sLibraryClassOps
 };
 
 #define CTYPESFN_FLAGS \
@@ -53,7 +58,7 @@ Library::Name(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.length() != 1) {
-    JS_ReportError(cx, "libraryName takes one argument");
+    JS_ReportErrorASCII(cx, "libraryName takes one argument");
     return false;
   }
 
@@ -62,17 +67,19 @@ Library::Name(JSContext* cx, unsigned argc, Value* vp)
   if (arg.isString()) {
     str = arg.toString();
   } else {
-    JS_ReportError(cx, "name argument must be a string");
+    JS_ReportErrorASCII(cx, "name argument must be a string");
     return false;
   }
 
   AutoString resultString;
-  AppendString(resultString, DLL_PREFIX);
-  AppendString(resultString, str);
-  AppendString(resultString, DLL_SUFFIX);
+  AppendString(cx, resultString, DLL_PREFIX);
+  AppendString(cx, resultString, str);
+  AppendString(cx, resultString, DLL_SUFFIX);
+  if (!resultString)
+    return false;
+  auto resultStr = resultString.finish();
 
-  JSString* result = JS_NewUCStringCopyN(cx, resultString.begin(),
-                                         resultString.length());
+  JSString* result = JS_NewUCStringCopyN(cx, resultStr.begin(), resultStr.length());
   if (!result)
     return false;
 
@@ -81,9 +88,8 @@ Library::Name(JSContext* cx, unsigned argc, Value* vp)
 }
 
 JSObject*
-Library::Create(JSContext* cx, Value path_, const JSCTypesCallbacks* callbacks)
+Library::Create(JSContext* cx, HandleValue path, const JSCTypesCallbacks* callbacks)
 {
-  RootedValue path(cx, path_);
   RootedObject libraryObj(cx, JS_NewObject(cx, &sLibraryClass));
   if (!libraryObj)
     return nullptr;
@@ -96,7 +102,7 @@ Library::Create(JSContext* cx, Value path_, const JSCTypesCallbacks* callbacks)
     return nullptr;
 
   if (!path.isString()) {
-    JS_ReportError(cx, "open takes a string argument");
+    JS_ReportErrorASCII(cx, "open takes a string argument");
     return nullptr;
   }
 
@@ -144,26 +150,31 @@ Library::Create(JSContext* cx, Value path_, const JSCTypesCallbacks* callbacks)
   libSpec.type = PR_LibSpec_Pathname;
 #endif
 
-  PRLibrary* library = PR_LoadLibraryWithFlags(libSpec, 0);
-
-  if (!library) {
-    char* error = (char*) JS_malloc(cx, PR_GetErrorTextLength() + 1);
-    if (error)
-      PR_GetErrorText(error);
-
-#ifdef XP_WIN
-    JS_ReportError(cx, "couldn't open library %hs: %s", pathChars, error);
-#else
-    JS_ReportError(cx, "couldn't open library %s: %s", pathBytes, error);
-    JS_free(cx, pathBytes);
-#endif
-    JS_free(cx, error);
-    return nullptr;
-  }
+  PRLibrary* library = PR_LoadLibraryWithFlags(libSpec, PR_LD_NOW);
 
 #ifndef XP_WIN
   JS_free(cx, pathBytes);
 #endif
+
+  if (!library) {
+#define MAX_ERROR_LEN 1024
+    char error[MAX_ERROR_LEN] = "Cannot get error from NSPR.";
+    uint32_t errorLen = PR_GetErrorTextLength();
+    if (errorLen && errorLen < MAX_ERROR_LEN)
+      PR_GetErrorText(error);
+#undef MAX_ERROR_LEN
+
+    if (JS::StringIsASCII(error)) {
+      JSAutoByteString pathCharsUTF8;
+      if (pathCharsUTF8.encodeUtf8(cx, pathStr))
+        JS_ReportErrorUTF8(cx, "couldn't open library %s: %s", pathCharsUTF8.ptr(), error);
+    } else {
+      JSAutoByteString pathCharsLatin1;
+      if (pathCharsLatin1.encodeLatin1(cx, pathStr))
+        JS_ReportErrorLatin1(cx, "couldn't open library %s: %s", pathCharsLatin1.ptr(), error);
+    }
+    return nullptr;
+  }
 
   // stash the library
   JS_SetReservedSlot(libraryObj, SLOT_LIBRARY, PrivateValue(library));
@@ -204,16 +215,17 @@ bool
 Library::Open(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  JSObject* ctypesObj = JS_THIS_OBJECT(cx, vp);
+  JSObject* ctypesObj = GetThisObject(cx, args, "ctypes.open");
   if (!ctypesObj)
     return false;
+
   if (!IsCTypesGlobal(ctypesObj)) {
-    JS_ReportError(cx, "not a ctypes object");
+    JS_ReportErrorASCII(cx, "not a ctypes object");
     return false;
   }
 
   if (args.length() != 1 || args[0].isUndefined()) {
-    JS_ReportError(cx, "open requires a single argument");
+    JS_ReportErrorASCII(cx, "open requires a single argument");
     return false;
   }
 
@@ -229,16 +241,18 @@ bool
 Library::Close(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  JSObject* obj = JS_THIS_OBJECT(cx, vp);
+
+  RootedObject obj(cx, GetThisObject(cx, args, "ctypes.close"));
   if (!obj)
     return false;
+
   if (!IsLibrary(obj)) {
-    JS_ReportError(cx, "not a library");
+    JS_ReportErrorASCII(cx, "not a library");
     return false;
   }
 
   if (args.length() != 0) {
-    JS_ReportError(cx, "close doesn't take any arguments");
+    JS_ReportErrorASCII(cx, "close doesn't take any arguments");
     return false;
   }
 
@@ -254,17 +268,19 @@ bool
 Library::Declare(JSContext* cx, unsigned argc, Value* vp)
 {
   CallArgs args = CallArgsFromVp(argc, vp);
-  RootedObject obj(cx, JS_THIS_OBJECT(cx, vp));
+
+  RootedObject obj(cx, GetThisObject(cx, args, "ctypes.declare"));
   if (!obj)
     return false;
+
   if (!IsLibrary(obj)) {
-    JS_ReportError(cx, "not a library");
+    JS_ReportErrorASCII(cx, "not a library");
     return false;
   }
 
   PRLibrary* library = GetLibrary(obj);
   if (!library) {
-    JS_ReportError(cx, "library not open");
+    JS_ReportErrorASCII(cx, "library not open");
     return false;
   }
 
@@ -279,12 +295,12 @@ Library::Declare(JSContext* cx, unsigned argc, Value* vp)
   //    accessors. If 'type' is a PointerType to a FunctionType, the result will
   //    be a function pointer, as with 1).
   if (args.length() < 2) {
-    JS_ReportError(cx, "declare requires at least two arguments");
+    JS_ReportErrorASCII(cx, "declare requires at least two arguments");
     return false;
   }
 
   if (!args[0].isString()) {
-    JS_ReportError(cx, "first argument must be a string");
+    JS_ReportErrorASCII(cx, "first argument must be a string");
     return false;
   }
 
@@ -308,7 +324,7 @@ Library::Declare(JSContext* cx, unsigned argc, Value* vp)
     if (args[1].isPrimitive() ||
         !CType::IsCType(args[1].toObjectOrNull()) ||
         !CType::IsSizeDefined(args[1].toObjectOrNull())) {
-      JS_ReportError(cx, "second argument must be a type of defined size");
+      JS_ReportErrorASCII(cx, "second argument must be a type of defined size");
       return false;
     }
 
@@ -325,25 +341,29 @@ Library::Declare(JSContext* cx, unsigned argc, Value* vp)
   AutoCString symbol;
   if (isFunction) {
     // Build the symbol, with mangling if necessary.
-    FunctionType::BuildSymbolName(nameStr, fnObj, symbol);
-    AppendString(symbol, "\0");
+    FunctionType::BuildSymbolName(cx, nameStr, fnObj, symbol);
+    AppendString(cx, symbol, "\0");
+    if (!symbol)
+      return false;
 
     // Look up the function symbol.
-    fnptr = PR_FindFunctionSymbol(library, symbol.begin());
+    fnptr = PR_FindFunctionSymbol(library, symbol.finish().begin());
     if (!fnptr) {
-      JS_ReportError(cx, "couldn't find function symbol in library");
+      JS_ReportErrorASCII(cx, "couldn't find function symbol in library");
       return false;
     }
     data = &fnptr;
 
   } else {
     // 'typeObj' is another data type. Look up the data symbol.
-    AppendString(symbol, nameStr);
-    AppendString(symbol, "\0");
+    AppendString(cx, symbol, nameStr);
+    AppendString(cx, symbol, "\0");
+    if (!symbol)
+      return false;
 
-    data = PR_FindSymbol(library, symbol.begin());
+    data = PR_FindSymbol(library, symbol.finish().begin());
     if (!data) {
-      JS_ReportError(cx, "couldn't find symbol in library");
+      JS_ReportErrorASCII(cx, "couldn't find symbol in library");
       return false;
     }
   }

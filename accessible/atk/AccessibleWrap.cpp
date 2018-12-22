@@ -13,14 +13,13 @@
 #include "mozilla/a11y/PDocAccessible.h"
 #include "OuterDocAccessible.h"
 #include "ProxyAccessible.h"
+#include "DocAccessibleParent.h"
 #include "RootAccessible.h"
 #include "TableAccessible.h"
 #include "TableCellAccessible.h"
 #include "nsMai.h"
 #include "nsMaiHyperlink.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
-#include "prprf.h"
 #include "nsStateMap.h"
 #include "mozilla/a11y/Platform.h"
 #include "Relation.h"
@@ -29,7 +28,7 @@
 #include "nsISimpleEnumerator.h"
 
 #include "mozilla/ArrayUtils.h"
-#include "nsXPCOMStrings.h"
+#include "mozilla/Sprintf.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIPersistentProperties2.h"
 
@@ -66,8 +65,9 @@ enum MaiInterfaceType {
     MAI_INTERFACE_SELECTION,
     MAI_INTERFACE_TABLE,
     MAI_INTERFACE_TEXT,
-    MAI_INTERFACE_DOCUMENT, 
-    MAI_INTERFACE_IMAGE /* 10 */
+    MAI_INTERFACE_DOCUMENT,
+    MAI_INTERFACE_IMAGE, /* 10 */
+    MAI_INTERFACE_TABLE_CELL
 };
 
 static GType GetAtkTypeForMai(MaiInterfaceType type)
@@ -95,15 +95,20 @@ static GType GetAtkTypeForMai(MaiInterfaceType type)
       return ATK_TYPE_DOCUMENT;
     case MAI_INTERFACE_IMAGE:
       return ATK_TYPE_IMAGE;
+    case MAI_INTERFACE_TABLE_CELL:
+      MOZ_ASSERT(false);
   }
   return G_TYPE_INVALID;
 }
 
 #define NON_USER_EVENT ":system"
-    
+
+// The atk interfaces we can expose without checking what version of ATK we are
+// dealing with.  At the moment AtkTableCell is the only interface we can't
+// always expose.
 static const GInterfaceInfo atk_if_infos[] = {
     {(GInterfaceInitFunc)componentInterfaceInitCB,
-     (GInterfaceFinalizeFunc) nullptr, nullptr}, 
+     (GInterfaceFinalizeFunc) nullptr, nullptr},
     {(GInterfaceInitFunc)actionInterfaceInitCB,
      (GInterfaceFinalizeFunc) nullptr, nullptr},
     {(GInterfaceInitFunc)valueInterfaceInitCB,
@@ -286,7 +291,7 @@ AccessibleWrap::GetNativeInterface(void** aOutAccessible)
   *aOutAccessible = nullptr;
 
   if (!mAtkObject) {
-    if (IsDefunct() || !nsAccUtils::IsEmbeddedObject(this)) {
+    if (IsDefunct() || IsText()) {
       // We don't create ATK objects for node which has been shutdown or
       // plain text leaves
       return;
@@ -323,7 +328,7 @@ AccessibleWrap::GetAtkObject(Accessible* acc)
 {
     void *atkObjPtr = nullptr;
     acc->GetNativeInterface(&atkObjPtr);
-    return atkObjPtr ? ATK_OBJECT(atkObjPtr) : nullptr;    
+    return atkObjPtr ? ATK_OBJECT(atkObjPtr) : nullptr;
 }
 
 /* private */
@@ -367,7 +372,10 @@ AccessibleWrap::CreateMaiInterfaces(void)
     // Table interface.
     if (AsTable())
       interfacesBits |= 1 << MAI_INTERFACE_TABLE;
- 
+
+    if (AsTableCell())
+      interfacesBits |= 1 << MAI_INTERFACE_TABLE_CELL;
+
     // Selection interface.
     if (IsSelect()) {
       interfacesBits |= 1 << MAI_INTERFACE_SELECTION;
@@ -426,6 +434,15 @@ GetMaiAtkType(uint16_t interfacesBits)
       }
     }
 
+    // Special case AtkTableCell so we can check what version of Atk we are
+    // dealing with.
+    if (IsAtkVersionAtLeast(2, 12) && (interfacesBits & (1 << MAI_INTERFACE_TABLE_CELL))) {
+      const GInterfaceInfo cellInfo = {
+        (GInterfaceInitFunc)tableCellInterfaceInitCB,
+        (GInterfaceFinalizeFunc)nullptr, nullptr};
+      g_type_add_interface_static(type, gAtkTableCellGetTypeFunc(), &cellInfo);
+    }
+
     return type;
 }
 
@@ -437,8 +454,7 @@ GetUniqueMaiAtkTypeName(uint16_t interfacesBits)
     static gchar namePrefix[] = "MaiAtkType";   /* size = 10 */
     static gchar name[MAI_ATK_TYPE_NAME_LEN + 1];
 
-    PR_snprintf(name, MAI_ATK_TYPE_NAME_LEN, "%s%x", namePrefix,
-                interfacesBits);
+    SprintfLiteral(name, "%s%x", namePrefix, interfacesBits);
     name[MAI_ATK_TYPE_NAME_LEN] = '\0';
 
     return name;
@@ -597,8 +613,7 @@ static void
 MaybeFireNameChange(AtkObject* aAtkObj, const nsString& aNewName)
 {
   NS_ConvertUTF16toUTF8 newNameUTF8(aNewName);
-  if (aAtkObj->name &&
-      !strncmp(aAtkObj->name, newNameUTF8.get(), newNameUTF8.Length()))
+  if (aAtkObj->name && !strcmp(aAtkObj->name, newNameUTF8.get()))
     return;
 
   // Below we duplicate the functionality of atk_object_set_name(),
@@ -682,6 +697,12 @@ getRoleCB(AtkObject *aAtkObj)
     aAtkObj->role = ATK_ROLE_LIST_ITEM;
   else if (aAtkObj->role == ATK_ROLE_MATH && !IsAtkVersionAtLeast(2, 12))
     aAtkObj->role = ATK_ROLE_SECTION;
+  else if (aAtkObj->role == ATK_ROLE_COMMENT && !IsAtkVersionAtLeast(2, 12))
+    aAtkObj->role = ATK_ROLE_SECTION;
+  else if (aAtkObj->role == ATK_ROLE_LANDMARK && !IsAtkVersionAtLeast(2, 12))
+    aAtkObj->role = ATK_ROLE_SECTION;
+  else if (aAtkObj->role == ATK_ROLE_FOOTNOTE && !IsAtkVersionAtLeast(2, 25, 2))
+    aAtkObj->role = ATK_ROLE_SECTION;
   else if (aAtkObj->role == ATK_ROLE_STATIC && !IsAtkVersionAtLeast(2, 16))
     aAtkObj->role = ATK_ROLE_TEXT;
   else if ((aAtkObj->role == ATK_ROLE_MATH_FRACTION ||
@@ -733,17 +754,8 @@ AtkAttributeSet*
 GetAttributeSet(Accessible* aAccessible)
 {
   nsCOMPtr<nsIPersistentProperties> attributes = aAccessible->Attributes();
-  if (attributes) {
-    // There is no ATK state for haspopup, must use object attribute to expose
-    // the same info.
-    if (aAccessible->State() & states::HASPOPUP) {
-      nsAutoString unused;
-      attributes->SetStringProperty(NS_LITERAL_CSTRING("haspopup"),
-                                    NS_LITERAL_STRING("true"), unused);
-    }
-
+  if (attributes)
     return ConvertToAtkAttributeSet(attributes);
-  }
 
   return nullptr;
 }
@@ -793,24 +805,13 @@ getParentCB(AtkObject *aAtkObj)
   if (aAtkObj->accessible_parent)
     return aAtkObj->accessible_parent;
 
-  AtkObject* atkParent = nullptr;
-  if (AccessibleWrap* wrapper = GetAccessibleWrap(aAtkObj)) {
-    Accessible* parent = wrapper->Parent();
-    atkParent = parent ? AccessibleWrap::GetAtkObject(parent) : nullptr;
-  } else if (ProxyAccessible* proxy = GetProxy(aAtkObj)) {
-    ProxyAccessible* parent = proxy->Parent();
-    if (parent) {
-      atkParent = GetWrapperFor(parent);
-    } else {
-      // Otherwise this should be the proxy for the tab's top level document.
-      Accessible* outerDocParent = proxy->OuterDocOfRemoteBrowser();
-      NS_ASSERTION(outerDocParent, "this document should have an outerDoc as a parent");
-      if (outerDocParent) {
-        atkParent = AccessibleWrap::GetAtkObject(outerDocParent);
-      }
-    }
+  AccessibleOrProxy acc = GetInternalObj(aAtkObj);
+  if (acc.IsNull()) {
+    return nullptr;
   }
 
+  AccessibleOrProxy parent = acc.Parent();
+  AtkObject* atkParent = !parent.IsNull() ? GetWrapperFor(parent) : nullptr;
   if (atkParent)
     atk_object_set_parent(aAtkObj, atkParent);
 
@@ -929,9 +930,8 @@ TranslateStates(uint64_t aState, AtkStateSet* aStateSet)
     aState &= ~states::EDITABLE;
 
   // Convert every state to an entry in AtkStateMap
-  uint32_t stateIndex = 0;
   uint64_t bitMask = 1;
-  while (gAtkStateMap[stateIndex].stateMapEntryType != kNoSuchState) {
+  for (auto stateIndex = 0U; stateIndex < gAtkStateMapLen; stateIndex++) {
     if (gAtkStateMap[stateIndex].atkState) { // There's potentially an ATK state for this
       bool isStateOn = (aState & bitMask) != 0;
       if (gAtkStateMap[stateIndex].stateMapEntryType == kMapOpposite) {
@@ -942,7 +942,6 @@ TranslateStates(uint64_t aState, AtkStateSet* aStateSet)
       }
     }
     bitMask <<= 1;
-    ++ stateIndex;
   }
 }
 
@@ -1101,6 +1100,16 @@ GetWrapperFor(ProxyAccessible* aProxy)
   return reinterpret_cast<AtkObject*>(aProxy->GetWrapper() & ~IS_PROXY);
 }
 
+AtkObject*
+GetWrapperFor(AccessibleOrProxy aObj)
+{
+  if (aObj.IsProxy()) {
+    return GetWrapperFor(aObj.AsProxy());
+  }
+
+  return AccessibleWrap::GetAtkObject(aObj.AsAccessible());
+}
+
 static uint16_t
 GetInterfacesForProxy(ProxyAccessible* aProxy, uint32_t aInterfaces)
 {
@@ -1117,6 +1126,9 @@ GetInterfacesForProxy(ProxyAccessible* aProxy, uint32_t aInterfaces)
 
   if (aInterfaces & Interfaces::TABLE)
     interfaces |= 1 << MAI_INTERFACE_TABLE;
+
+  if (aInterfaces & Interfaces::TABLECELL)
+    interfaces |= 1 << MAI_INTERFACE_TABLE_CELL;
 
   if (aInterfaces & Interfaces::IMAGE)
     interfaces |= 1 << MAI_INTERFACE_IMAGE;
@@ -1158,6 +1170,10 @@ void
 a11y::ProxyDestroyed(ProxyAccessible* aProxy)
 {
   auto obj = reinterpret_cast<MaiAtkObject*>(aProxy->GetWrapper() & ~IS_PROXY);
+  if (!obj) {
+    return;
+  }
+
   obj->Shutdown();
   g_object_unref(obj);
   aProxy->SetWrapper(0);
@@ -1355,16 +1371,33 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
         break;
 
     case nsIAccessibleEvent::EVENT_SHOW:
-        return FireAtkShowHideEvent(aEvent, atkObj, true);
+      {
+        AccMutationEvent* event = downcast_accEvent(aEvent);
+        Accessible* parentAcc = event ? event->Parent() : accessible->Parent();
+        AtkObject* parent = AccessibleWrap::GetAtkObject(parentAcc);
+        NS_ENSURE_STATE(parent);
+        auto obj = reinterpret_cast<MaiAtkObject*>(atkObj);
+        obj->FireAtkShowHideEvent(parent, true, aEvent->IsFromUserInput());
+        return NS_OK;
+      }
 
     case nsIAccessibleEvent::EVENT_HIDE:
+      {
         // XXX - Handle native dialog accessibles.
         if (!accessible->IsRoot() && accessible->HasARIARole() &&
             accessible->ARIARole() == roles::DIALOG) {
           guint id = g_signal_lookup("deactivate", MAI_TYPE_ATK_OBJECT);
           g_signal_emit(atkObj, id, 0);
         }
-        return FireAtkShowHideEvent(aEvent, atkObj, false);
+
+        AccMutationEvent* event = downcast_accEvent(aEvent);
+        Accessible* parentAcc = event ? event->Parent() : accessible->Parent();
+        AtkObject* parent = AccessibleWrap::GetAtkObject(parentAcc);
+        NS_ENSURE_STATE(parent);
+        auto obj = reinterpret_cast<MaiAtkObject*>(atkObj);
+        obj->FireAtkShowHideEvent(parent, false, aEvent->IsFromUserInput());
+        return NS_OK;
+      }
 
         /*
          * Because dealing with menu is very different between nsIAccessible
@@ -1479,6 +1512,10 @@ a11y::ProxyEvent(ProxyAccessible* aTarget, uint32_t aEventType)
   case nsIAccessibleEvent::EVENT_VALUE_CHANGE:
     g_object_notify((GObject*)wrapper, "accessible-value");
     break;
+  case nsIAccessibleEvent::EVENT_TEXT_SELECTION_CHANGED:
+  case nsIAccessibleEvent::EVENT_SELECTION_WITHIN:
+    g_signal_emit_by_name(wrapper, "selection_changed");
+    break;
   }
 }
 
@@ -1500,24 +1537,32 @@ a11y::ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset)
 void
 MaiAtkObject::FireStateChangeEvent(uint64_t aState, bool aEnabled)
 {
-    int32_t stateIndex = AtkStateMap::GetStateIndexFor(aState);
-    if (stateIndex >= 0) {
-        NS_ASSERTION(gAtkStateMap[stateIndex].stateMapEntryType != kNoSuchState,
-                     "No such state");
+  auto state = aState;
+  int32_t stateIndex = -1;
+  while (state > 0) {
+    ++stateIndex;
+    state >>= 1;
+  }
 
-        if (gAtkStateMap[stateIndex].atkState != kNone) {
-            NS_ASSERTION(gAtkStateMap[stateIndex].stateMapEntryType != kNoStateChange,
-                         "State changes should not fired for this state");
+  MOZ_ASSERT(stateIndex >= 0 && stateIndex < static_cast<int32_t>(gAtkStateMapLen),
+             "No ATK state for internal state was found");
+  if (stateIndex < 0 || stateIndex >= static_cast<int32_t>(gAtkStateMapLen)) {
+    return;
+  }
 
-            if (gAtkStateMap[stateIndex].stateMapEntryType == kMapOpposite)
-                aEnabled = !aEnabled;
+  if (gAtkStateMap[stateIndex].atkState != kNone) {
+    MOZ_ASSERT(gAtkStateMap[stateIndex].stateMapEntryType != kNoStateChange,
+                 "State changes should not fired for this state");
 
-            // Fire state change for first state if there is one to map
-            atk_object_notify_state_change(&parent,
-                                           gAtkStateMap[stateIndex].atkState,
-                                           aEnabled);
-        }
+    if (gAtkStateMap[stateIndex].stateMapEntryType == kMapOpposite) {
+      aEnabled = !aEnabled;
     }
+
+    // Fire state change for first state if there is one to map
+    atk_object_notify_state_change(&parent,
+                                   gAtkStateMap[stateIndex].atkState,
+                                   aEnabled);
+  }
 }
 
 void
@@ -1569,6 +1614,14 @@ MaiAtkObject::FireTextChangeEvent(const nsString& aStr, int32_t aStart,
   }
 }
 
+void
+a11y::ProxyShowHideEvent(ProxyAccessible* aTarget, ProxyAccessible* aParent,
+                         bool aInsert, bool aFromUser)
+{
+  MaiAtkObject* obj = MAI_ATK_OBJECT(GetWrapperFor(aTarget));
+  obj->FireAtkShowHideEvent(GetWrapperFor(aParent), aInsert, aFromUser);
+}
+
 #define ADD_EVENT "children_changed::add"
 #define HIDE_EVENT "children_changed::remove"
 
@@ -1577,19 +1630,20 @@ static const char *kMutationStrings[2][2] = {
   { HIDE_EVENT, ADD_EVENT },
 };
 
-nsresult
-AccessibleWrap::FireAtkShowHideEvent(AccEvent* aEvent,
-                                     AtkObject* aObject, bool aIsAdded)
+void
+MaiAtkObject::FireAtkShowHideEvent(AtkObject* aParent, bool aIsAdded,
+                                   bool aFromUser)
 {
-    int32_t indexInParent = getIndexInParentCB(aObject);
-    AtkObject *parentObject = getParentCB(aObject);
-    NS_ENSURE_STATE(parentObject);
+    int32_t indexInParent = getIndexInParentCB(&this->parent);
+    const char *signal_name = kMutationStrings[aFromUser][aIsAdded];
+    g_signal_emit_by_name(aParent, signal_name, indexInParent, this, nullptr);
+}
 
-    bool isFromUserInput = aEvent->IsFromUserInput();
-    const char *signal_name = kMutationStrings[isFromUserInput][aIsAdded];
-    g_signal_emit_by_name(parentObject, signal_name, indexInParent, aObject, nullptr);
-
-    return NS_OK;
+void
+a11y::ProxySelectionEvent(ProxyAccessible*, ProxyAccessible* aWidget, uint32_t)
+{
+  MaiAtkObject* obj = MAI_ATK_OBJECT(GetWrapperFor(aWidget));
+    g_signal_emit_by_name(obj, "selection_changed");
 }
 
 // static

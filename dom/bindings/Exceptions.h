@@ -11,8 +11,8 @@
 
 #include <stdint.h>
 #include "jspubtd.h"
-#include "nsIException.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
+#include "jsapi.h"
 
 class nsIStackFrame;
 class nsPIDOMWindowInner;
@@ -33,20 +33,18 @@ Throw(JSContext* cx, nsresult rv, const nsACString& message = EmptyCString());
 void
 ThrowAndReport(nsPIDOMWindowInner* aWindow, nsresult aRv);
 
-bool
+// Both signatures of ThrowExceptionObject guarantee that an exception is set on
+// aCx before they return.
+void
 ThrowExceptionObject(JSContext* aCx, Exception* aException);
 
-bool
-ThrowExceptionObject(JSContext* aCx, nsIException* aException);
-
-// Create an exception object for the given nsresult and message but don't set
-// it pending on aCx.  If we're throwing a DOMException and aMessage is empty,
-// the default message for the nsresult in question will be used.
+// Create an exception object for the given nsresult and message. If we're
+// throwing a DOMException and aMessage is empty, the default message for the
+// nsresult in question will be used.
 //
 // This never returns null.
 already_AddRefed<Exception>
-CreateException(JSContext* aCx, nsresult aRv,
-                const nsACString& aMessage = EmptyCString());
+CreateException(nsresult aRv, const nsACString& aMessage = EmptyCString());
 
 // aMaxDepth can be used to define a maximal depth for the stack trace. If the
 // value is -1, a default maximal depth will be selected.  Will return null if
@@ -54,27 +52,11 @@ CreateException(JSContext* aCx, nsresult aRv,
 already_AddRefed<nsIStackFrame>
 GetCurrentJSStack(int32_t aMaxDepth = -1);
 
-// Throwing a TypeError on an ErrorResult may result in SpiderMonkey using its
-// own error reporting mechanism instead of just setting the exception on the
-// context.  This happens if no script is running. Bug 1107777 adds a flag that
-// forcibly turns this behaviour off. This is a stack helper to set the flag.
-class MOZ_STACK_CLASS AutoForceSetExceptionOnContext {
-private:
-  JSContext* mCx;
-  bool mOldValue;
-public:
-  explicit AutoForceSetExceptionOnContext(JSContext* aCx);
-  ~AutoForceSetExceptionOnContext();
-};
-
 // Internal stuff not intended to be widely used.
 namespace exceptions {
 
-// aMaxDepth can be used to define a maximal depth for the stack trace. If the
-// value is -1, a default maximal depth will be selected.  Will return null if
-// there is no JS stack right now.
 already_AddRefed<nsIStackFrame>
-CreateStack(JSContext* aCx, int32_t aMaxDepth = -1);
+CreateStack(JSContext* aCx, JS::StackCapture&& aCaptureMode);
 
 } // namespace exceptions
 } // namespace dom

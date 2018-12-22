@@ -19,6 +19,9 @@ include w3c-css/received/reftest.list
 include abs-pos/reftest.list
 include position-relative/reftest.list
 
+# apng-mime
+include apng-mime/reftest.list
+
 include async-scrolling/reftest.list
 
 # backgrounds/
@@ -26,6 +29,9 @@ include backgrounds/reftest.list
 
 # bidi/
 include bidi/reftest.list
+
+# border with dashed/dotted
+include border-dotted/reftest.list
 
 # border-image
 include border-image/reftest.list
@@ -100,6 +106,9 @@ include css-ruby/reftest.list
 # css required
 include css-required/reftest.list
 
+# css shapes
+include css-shapes/reftest.list
+
 # css optional
 include css-optional/reftest.list
 
@@ -123,6 +132,9 @@ include css-sizing/reftest.list
 
 # css transitions
 include css-transitions/reftest.list
+
+# css ui
+include css-ui/reftest.list
 
 # css :-moz-ui-invalid
 include css-ui-invalid/reftest.list
@@ -188,7 +200,7 @@ include font-face/reftest.list
 include font-features/reftest.list
 
 # mobile font size inflation
-skip-if((B2G&&browserIsRemote)||Mulet) include font-inflation/reftest.list # Bug 972697 # Initial mulet triage: parity with B2G/B2G Desktop
+include font-inflation/reftest.list
 
 # CSS Font Loading API
 include font-loading-api/reftest.list
@@ -196,8 +208,14 @@ include font-loading-api/reftest.list
 # font matching
 include font-matching/reftest.list
 
+# font variations
+include font-variations/reftest.list
+
 # forms
 include forms/reftest.list
+
+# frameset
+include frameset/reftest.list
 
 # gfx
 include ../../gfx/tests/reftest/reftest.list
@@ -245,8 +263,8 @@ include margin-collapsing/reftest.list
 include marquee/reftest.list
 
 # native-theme/
-# skipping for B2G since something around radio-nonnative.html makes the whole suite hang
-skip-if(B2G||Android||Mulet) include native-theme/reftest.list # Initial mulet triage: parity with B2G/B2G Desktop
+# (no XUL theme on Android)
+skip-if(Android) include native-theme/reftest.list
 
 # netwerk/
 include ../../netwerk/test/reftest/reftest.list
@@ -257,13 +275,13 @@ include outline/reftest.list
 include object/reftest.list
 
 # ogg-video/
-skip-if(!B2G&&browserIsRemote) include ogg-video/reftest.list
+skip-if(browserIsRemote) include ogg-video/reftest.list
 
 # webm-video/
-skip-if(!B2G&&browserIsRemote) include webm-video/reftest.list
+skip-if(browserIsRemote) include webm-video/reftest.list
 
 # mp4-video/
-skip-if(!B2G&&browserIsRemote) include mp4-video/reftest.list
+skip-if(browserIsRemote) include mp4-video/reftest.list
 
 # parser/
 include ../../parser/htmlparser/tests/reftest/reftest.list
@@ -281,11 +299,11 @@ include ../../dom/plugins/test/reftest/reftest.list
 include position-dynamic-changes/reftest.list
 
 # printing
-include printing/reftest.list
-include pagination/reftest.list
+# SkiaPDF is required for printing tests to control printing to PDF files.
+skip-if(!skiaPdf) include printing/reftest.list
 
-# <style scoped>
-include scoped-style/reftest.list
+# pagination
+include pagination/reftest.list
 
 # scrolling
 include scrolling/reftest.list
@@ -295,6 +313,9 @@ include selection/reftest.list
 
 # sticky positioning
 include position-sticky/reftest.list
+
+# stylesheet cloning
+include stylesheet-cloning/reftest.list
 
 # svg/
 include svg/reftest.list
@@ -327,6 +348,9 @@ include ../tables/reftests/reftest.list
 # text/
 include text/reftest.list
 
+# text-stroke
+include text-stroke/reftest.list
+
 # text-decoration/
 include text-decoration/reftest.list
 
@@ -348,7 +372,8 @@ include ../../toolkit/themes/osx/reftests/reftest.list
 include ../../toolkit/content/tests/reftests/reftest.list
 
 # -moz-transform/
-include transform/reftest.list
+# skipping on non-e10s windows because of assertion in bug 1401228
+skip-if(winWidget&&!browserIsRemote) include transform/reftest.list
 
 # 3d transforms
 include transform-3d/reftest.list
@@ -356,7 +381,13 @@ include transform-3d/reftest.list
 # unicode/ (verify that we don't do expend effort doing unicode-aware case checks)
 include unicode/reftest.list
 
+# usercss
+include usercss/reftest.list
+
 include view-source/reftest.list
+
+# vr
+include ../../dom/vr/test/reftest/reftest.list
 
 # web-animations
 include web-animations/reftest.list
@@ -396,7 +427,6 @@ include z-index/reftest.list
 
 # reftest(s) to verify content bugfixes
 include ../../dom/html/reftests/reftest.list
-include ../../dom/imptests/reftest.list
 
 # editor/
 include ../../editor/reftests/reftest.list
@@ -412,3 +442,9 @@ include ../../dom/encoding/test/reftest/reftest.list
 
 # APZ/async positioning tests
 include ../../gfx/layers/apz/test/reftest/reftest.list
+
+# Display list building
+include display-list/reftest.list
+
+# Media
+include ../../dom/media/test/reftest/reftest.list

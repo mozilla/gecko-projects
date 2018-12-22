@@ -10,19 +10,13 @@
    xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
    xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="menulist-base" extends="chrome://global/content/bindings/general.xml#basecontrol">
-    <resources>
-      <stylesheet src="chrome://global/content/menulist.css"/>
-      <stylesheet src="chrome://global/skin/menulist.css"/>
-    </resources>
-  </binding>
-
-  <binding id="menulist" display="xul:menu" role="xul:menulist"
-           extends="chrome://global/content/bindings/menulist.xml#menulist-base">
+  <binding id="menulist" display="xul:menu"
+           extends="chrome://global/content/bindings/general.xml#basecontrol">
     <content sizetopopup="pref">
       <xul:hbox class="menulist-label-box" flex="1">
         <xul:image class="menulist-icon" xbl:inherits="src=image,src"/>
-        <xul:label class="menulist-label" xbl:inherits="value=label,crop,accesskey" crop="right" flex="1"/>
+        <xul:label class="menulist-label" xbl:inherits="value=label,crop,accesskey,highlightable" crop="right" flex="1"/>
+        <xul:label class="menulist-highlightable-label" xbl:inherits="xbl:text=label,crop,accesskey,highlightable" crop="right" flex="1"/>
       </xul:hbox>
       <xul:dropmarker class="menulist-dropmarker" type="menu" xbl:inherits="disabled,open"/>
       <children includes="menupopup"/>
@@ -66,10 +60,11 @@
       </handler>
     </handlers>
 
-    <implementation implements="nsIDOMXULMenuListElement, nsIDOMEventListener">
+    <implementation implements="nsIDOMXULMenuListElement">
       <constructor>
         this.mInputField = null;
         this.mSelectedInternal = null;
+        this.mAttributeObserver = null;
         this.menuBoxObject = this.boxObject;
         this.setInitialSelection();
       </constructor>
@@ -79,12 +74,12 @@
           <![CDATA[
             var popup = this.menupopup;
             if (popup) {
-              var arr = popup.getElementsByAttribute('selected', 'true');
+              var arr = popup.getElementsByAttribute("selected", "true");
 
               var editable = this.editable;
               var value = this.value;
               if (!arr.item(0) && value)
-                arr = popup.getElementsByAttribute(editable ? 'label' : 'value', value);
+                arr = popup.getElementsByAttribute(editable ? "label" : "value", value);
 
               if (arr.item(0))
                 this.selectedItem = arr[0];
@@ -105,13 +100,13 @@
             var arr = null;
             var popup = this.menupopup;
             if (popup)
-              arr = popup.getElementsByAttribute('value', val);
+              arr = popup.getElementsByAttribute("value", val);
 
             if (arr && arr.item(0))
               this.selectedItem = arr[0];
             else {
               this.selectedItem = null;
-              this.setAttribute('value', val);
+              this.setAttribute("value", val);
             }
 
             return val;
@@ -128,8 +123,22 @@
       <property name="label" readonly="true" onget="return this.getAttribute('label');"/>
       <property name="description" onset="this.setAttribute('description',val); return val;"
                                    onget="return this.getAttribute('description');"/>
-      <property name="editable"  onset="this.setAttribute('editable',val); return val;"
-                                 onget="return this.getAttribute('editable') == 'true';"/>
+
+      <property name="editable" onget="return this.getAttribute('editable') == 'true';">
+        <setter>
+          <![CDATA[
+            if (!val && this.editable) {
+              // If we were focused and transition from editable to not editable,
+              // focus the parent menulist so that the focus does not get stuck.
+              if (this.inputField == document.activeElement)
+                window.setTimeout(() => this.focus(), 0);
+            }
+
+            this.setAttribute("editable", val);
+            return val;
+          ]]>
+        </setter>
+      </property>
 
       <property name="open" onset="this.menuBoxObject.openMenu(val);
                                    return val;"
@@ -186,8 +195,7 @@
             if (popup && 0 <= val) {
               if (val < popup.childNodes.length)
                 this.selectedItem = popup.childNodes[val];
-            }
-            else
+            } else
               this.selectedItem = null;
             return val;
           ]]>
@@ -210,40 +218,28 @@
               return val;
 
             if (oldval) {
-              oldval.removeAttribute('selected');
-              if (document instanceof Components.interfaces.nsIDOMXULDocument) {
-                document.removeBroadcastListenerFor(oldval, this, "value");
-                document.removeBroadcastListenerFor(oldval, this, "label");
-                document.removeBroadcastListenerFor(oldval, this, "image");
-                document.removeBroadcastListenerFor(oldval, this, "description");
-              }
-              else
-                oldval.removeEventListener("DOMAttrModified", this, false);
+              oldval.removeAttribute("selected");
+              this.mAttributeObserver.disconnect();
             }
 
             this.mSelectedInternal = val;
+            let attributeFilter = ["value", "label", "image", "description"];
             if (val) {
-              val.setAttribute('selected', 'true');
-              this.setAttribute('value', val.getAttribute('value'));
-              this.setAttribute('image', val.getAttribute('image'));
-              this.setAttribute('label', val.getAttribute('label'));
-              this.setAttribute('description', val.getAttribute('description'));
-              // DOMAttrModified listeners slow down setAttribute calls within
-              // the document, see bug 395496
-              if (document instanceof Components.interfaces.nsIDOMXULDocument) {
-                document.addBroadcastListenerFor(val, this, "value");
-                document.addBroadcastListenerFor(val, this, "label");
-                document.addBroadcastListenerFor(val, this, "image");
-                document.addBroadcastListenerFor(val, this, "description");
+              val.setAttribute("selected", "true");
+              for (let attr of attributeFilter) {
+                if (val.hasAttribute(attr)) {
+                  this.setAttribute(attr, val.getAttribute(attr));
+                } else {
+                  this.removeAttribute(attr);
+                }
               }
-              else
-                val.addEventListener("DOMAttrModified", this, false);
-            }
-            else {
-              this.removeAttribute('value');
-              this.removeAttribute('image');
-              this.removeAttribute('label');
-              this.removeAttribute('description');
+
+              this.mAttributeObserver = new MutationObserver(this.handleMutation.bind(this));
+              this.mAttributeObserver.observe(val, { attributeFilter });
+            } else {
+              for (let attr of attributeFilter) {
+                this.removeAttribute(attr);
+              }
             }
 
             var event = document.createEvent("Events");
@@ -259,19 +255,25 @@
         </setter>
       </property>
 
-      <method name="handleEvent">
-        <parameter name="aEvent"/>
+      <method name="handleMutation">
+        <parameter name="aRecords"/>
         <body>
           <![CDATA[
-            if (aEvent.type == "DOMAttrModified" &&
-                aEvent.target == this.mSelectedInternal) {
-              var attrName = aEvent.attrName;
-              switch (attrName) {
-                case "value":
-                case "label":
-                case "image":
-                case "description":
-                  this.setAttribute(attrName, aEvent.newValue);
+            for (let record of aRecords) {
+              let t = record.target;
+              if (t == this.mSelectedInternal) {
+                let attrName = record.attributeName;
+                switch (attrName) {
+                  case "value":
+                  case "label":
+                  case "image":
+                  case "description":
+                    if (t.hasAttribute(attrName)) {
+                      this.setAttribute(attrName, t.getAttribute(attrName));
+                    } else {
+                      this.removeAttribute(attrName);
+                    }
+                }
               }
             }
           ]]>
@@ -331,46 +333,6 @@
         </body>
       </method>
 
-      <method name="insertItemAt">
-        <parameter name="index"/>
-        <parameter name="label"/>
-        <parameter name="value"/>
-        <parameter name="description"/>
-        <body>
-        <![CDATA[
-          const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-          var popup = this.menupopup ||
-                      this.appendChild(document.createElementNS(XULNS, "menupopup"));
-          var item = document.createElementNS(XULNS, "menuitem");
-          item.setAttribute("label", label);
-          item.setAttribute("value", value);
-          if (description)
-            item.setAttribute("description", description);
-
-          if (index >= 0 && index < popup.childNodes.length)
-            popup.insertBefore(item, popup.childNodes[index]);
-          else
-            popup.appendChild(item);
-          return item;
-        ]]>
-        </body>
-      </method>
-
-      <method name="removeItemAt">
-        <parameter name="index"/>
-        <body>
-        <![CDATA[
-          var popup = this.menupopup;
-          if (popup && 0 <= index && index < popup.childNodes.length) {
-            var remove = popup.childNodes[index];
-            popup.removeChild(remove);
-            return remove;
-          }
-          return null;
-        ]]>
-        </body>
-      </method>
-
       <method name="removeAllItems">
         <body>
         <![CDATA[
@@ -384,15 +346,8 @@
 
       <destructor>
         <![CDATA[
-          if (this.mSelectedInternal) {
-            if (document instanceof Components.interfaces.nsIDOMXULDocument) {
-              document.removeBroadcastListenerFor(this.mSelectedInternal, this, "value");
-              document.removeBroadcastListenerFor(this.mSelectedInternal, this, "label");
-              document.removeBroadcastListenerFor(this.mSelectedInternal, this, "image");
-              document.removeBroadcastListenerFor(this.mSelectedInternal, this, "description");
-            }
-            else
-              this.mSelectedInternal.removeEventListener("DOMAttrModified", this, false);
+          if (this.mAttributeObserver) {
+            this.mAttributeObserver.disconnect();
           }
         ]]>
       </destructor>
@@ -422,7 +377,7 @@
           var popup = this.menupopup;
 
           if (popup)
-            arr = popup.getElementsByAttribute('label', this.inputField.value);
+            arr = popup.getElementsByAttribute("label", this.inputField.value);
 
           this.setSelectionInternal(arr ? arr.item(0) : null);
         ]]>
@@ -440,14 +395,14 @@
               return val;
 
             if (this.mSelectedInternal)
-              this.mSelectedInternal.removeAttribute('selected');
+              this.mSelectedInternal.removeAttribute("selected");
 
             this.mSelectedInternal = val;
 
             if (val)
-              val.setAttribute('selected', 'true');
+              val.setAttribute("selected", "true");
 
-            //Do NOT change the "value", which is owned by inputField
+            // Do NOT change the "value", which is owned by inputField
             return val;
           ]]>
         </body>
@@ -470,8 +425,8 @@
           // Override menulist's value setter to refer to the inputField's value
           // (Allows using "menulist.value" instead of "menulist.inputField.value")
           this.inputField.value = val;
-          this.setAttribute('value', val);
-          this.setAttribute('label', val);
+          this.setAttribute("value", val);
+          this.setAttribute("label", val);
           this._selectInputFieldValueInList();
           return val;
         ]]>
@@ -500,15 +455,14 @@
             this.setSelectionInternal(val);
             if (val) {
               // Editable menulist uses "label" as its "value"
-              var label = val.getAttribute('label');
+              var label = val.getAttribute("label");
               this.inputField.value = label;
-              this.setAttribute('value', label);
-              this.setAttribute('label', label);
-            }
-            else {
+              this.setAttribute("value", label);
+              this.setAttribute("label", label);
+            } else {
               this.inputField.value = "";
-              this.removeAttribute('value');
-              this.removeAttribute('label');
+              this.removeAttribute("value");
+              this.removeAttribute("label");
             }
 
             var event = document.createEvent("Events");
@@ -530,8 +484,7 @@
 
       <property name="editor" readonly="true">
         <getter><![CDATA[
-          const nsIDOMNSEditableElement = Components.interfaces.nsIDOMNSEditableElement;
-          return this.inputField.QueryInterface(nsIDOMNSEditableElement).editor;
+          return this.inputField.editor;
         ]]></getter>
       </property>
 
@@ -550,13 +503,13 @@
     <handlers>
       <handler event="focus" phase="capturing">
         <![CDATA[
-          this.setAttribute('focused','true');
+          this.setAttribute("focused", "true");
         ]]>
       </handler>
 
       <handler event="blur" phase="capturing">
         <![CDATA[
-          this.removeAttribute('focused');
+          this.removeAttribute("focused");
         ]]>
       </handler>
 
@@ -591,19 +544,6 @@
         ]]>
       </handler>
     </handlers>
-  </binding>
-
-  <binding id="menulist-description" display="xul:menu"
-           extends="chrome://global/content/bindings/menulist.xml#menulist">
-    <content sizetopopup="pref">
-      <xul:hbox class="menulist-label-box" flex="1">
-        <xul:image class="menulist-icon" xbl:inherits="src=image,src"/>
-        <xul:label class="menulist-label" xbl:inherits="value=label,crop,accesskey" crop="right" flex="1"/>
-        <xul:label class="menulist-label menulist-description" xbl:inherits="value=description" crop="right" flex="10000"/>
-      </xul:hbox>
-      <xul:dropmarker class="menulist-dropmarker" type="menu" xbl:inherits="disabled,open"/>
-      <children includes="menupopup"/>
-    </content>
   </binding>
 
   <binding id="menulist-popuponly" display="xul:menu"

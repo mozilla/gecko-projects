@@ -7,7 +7,7 @@
 #ifndef _xpc_WRAPPERFACTORY_H
 #define _xpc_WRAPPERFACTORY_H
 
-#include "jswrapper.h"
+#include "js/Wrapper.h"
 
 namespace xpc {
 
@@ -39,16 +39,17 @@ class WrapperFactory {
 
     // Computes whether we should allow the creation of an Xray waiver from
     // |target| to |origin|.
-    static bool AllowWaiver(JSCompartment* target, JSCompartment* origin);
+    static bool AllowWaiver(JS::Compartment* target, JS::Compartment* origin);
 
     // Convenience method for the above, operating on a wrapper.
     static bool AllowWaiver(JSObject* wrapper);
 
     // Prepare a given object for wrapping in a new compartment.
-    static JSObject* PrepareForWrapping(JSContext* cx,
-                                        JS::HandleObject scope,
-                                        JS::HandleObject obj,
-                                        JS::HandleObject objectPassedToWrap);
+    static void PrepareForWrapping(JSContext* cx,
+                                   JS::HandleObject scope,
+                                   JS::HandleObject obj,
+                                   JS::HandleObject objectPassedToWrap,
+                                   JS::MutableHandleObject retObj);
 
     // Rewrap an object that is about to cross compartment boundaries.
     static JSObject* Rewrap(JSContext* cx,

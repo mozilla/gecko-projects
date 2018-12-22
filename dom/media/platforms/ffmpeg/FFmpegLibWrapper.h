@@ -5,6 +5,7 @@
 #ifndef __FFmpegLibWrapper_h__
 #define __FFmpegLibWrapper_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/Types.h"
 
 struct AVCodec;
@@ -15,18 +16,35 @@ struct AVDictionary;
 struct AVCodecParserContext;
 struct PRLibrary;
 
-namespace mozilla
-{
+namespace mozilla {
 
-struct FFmpegLibWrapper
+struct MOZ_ONLY_USED_TO_AVOID_STATIC_CONSTRUCTORS FFmpegLibWrapper
 {
-  FFmpegLibWrapper();
-  ~FFmpegLibWrapper();
+  // The class is used only in static storage and so is zero initialized.
+  FFmpegLibWrapper() = default;
+  // The libraries are not unloaded in the destructor, because doing so would
+  // require a static constructor to register the static destructor.  As the
+  // class is in static storage, the destructor would only run on shutdown
+  // anyway.
+  ~FFmpegLibWrapper() = default;
 
-  // Attempt to resolve all symbols. Return true of successful.
+  enum class LinkResult
+  {
+    Success,
+    NoProvidedLib,
+    NoAVCodecVersion,
+    CannotUseLibAV57,
+    BlockedOldLibAVVersion,
+    UnknownFutureLibAVVersion,
+    UnknownFutureFFMpegVersion,
+    UnknownOlderFFMpegVersion,
+    MissingFFMpegFunction,
+    MissingLibAVFunction,
+  };
+  // Examine mAVCodecLib and mAVUtilLib, and attempt to resolve all symbols.
   // Upon failure, the entire object will be reset and any attached libraries
   // will be unlinked.
-  bool Link();
+  LinkResult Link();
 
   // Reset the wrapper and unlink all attached libraries.
   void Unlink();
@@ -52,21 +70,23 @@ struct FFmpegLibWrapper
   int (*av_parser_parse2)(AVCodecParserContext* s, AVCodecContext* avctx, uint8_t** poutbuf, int* poutbuf_size, const uint8_t* buf, int buf_size, int64_t pts, int64_t dts, int64_t pos);
 
   // only used in libavcodec <= 54
+  AVFrame* (*avcodec_alloc_frame)();
   void (*avcodec_get_frame_defaults)(AVFrame* pic);
+  // libavcodec v54 only
+  void (*avcodec_free_frame)(AVFrame** frame);
 
   // libavutil
   void (*av_log_set_level)(int level);
   void*	(*av_malloc)(size_t size);
   void (*av_freep)(void *ptr);
 
-  // libavutil v54 only
-  AVFrame* (*avcodec_alloc_frame)();
-  void (*avcodec_free_frame)(AVFrame** frame);
-
   // libavutil v55 and later only
   AVFrame* (*av_frame_alloc)();
   void (*av_frame_free)(AVFrame** frame);
   void (*av_frame_unref)(AVFrame* frame);
+
+  // libavutil optional
+  int (*av_frame_get_colorspace)(const AVFrame *frame);
 
   PRLibrary* mAVCodecLib;
   PRLibrary* mAVUtilLib;

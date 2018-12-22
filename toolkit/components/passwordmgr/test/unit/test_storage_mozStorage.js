@@ -6,14 +6,15 @@
 
 const ENCTYPE_BASE64 = 0;
 const ENCTYPE_SDR = 1;
+const PERMISSION_SAVE_LOGINS = "login-saving";
 
 // Current schema version used by storage-mozStorage.js. This will need to be
 // kept in sync with the version there (or else the tests fail).
-const CURRENT_SCHEMA = 5;
+const CURRENT_SCHEMA = 6;
 
-function* copyFile(aLeafName)
+async function copyFile(aLeafName)
 {
-  yield OS.File.copy(OS.Path.join(do_get_file("data").path, aLeafName),
+  await OS.File.copy(OS.Path.join(do_get_file("data").path, aLeafName),
                      OS.Path.join(OS.Constants.Path.profileDir, aLeafName));
 }
 
@@ -44,7 +45,7 @@ function reloadStorage(aInputPathName, aInputFileName)
   var inputFile = null;
   if (aInputFileName) {
       inputFile  = Cc["@mozilla.org/file/local;1"].
-                       createInstance(Ci.nsILocalFile);
+                       createInstance(Ci.nsIFile);
       inputFile.initWithPath(aInputPathName);
       inputFile.append(aInputFileName);
   }
@@ -61,11 +62,35 @@ function reloadStorage(aInputPathName, aInputFileName)
 function checkStorageData(storage, ref_disabledHosts, ref_logins)
 {
   LoginTestUtils.assertLoginListsEqual(storage.getAllLogins(), ref_logins);
-  LoginTestUtils.assertDisabledHostsEqual(storage.getAllDisabledHosts(),
+  LoginTestUtils.assertDisabledHostsEqual(getAllDisabledHostsFromPermissionManager(),
                                           ref_disabledHosts);
 }
 
-add_task(function* test_execute()
+function getAllDisabledHostsFromPermissionManager() {
+  let disabledHosts = [];
+  let enumerator = Services.perms.enumerator;
+
+  while (enumerator.hasMoreElements()) {
+    let perm = enumerator.getNext();
+    if (perm.type == PERMISSION_SAVE_LOGINS && perm.capability == Services.perms.DENY_ACTION) {
+      disabledHosts.push(perm.principal.URI.prePath);
+    }
+  }
+
+  return disabledHosts;
+}
+
+function setLoginSavingEnabled(origin, enabled) {
+  let uri = Services.io.newURI(origin);
+
+  if (enabled) {
+    Services.perms.remove(uri, PERMISSION_SAVE_LOGINS);
+  } else {
+    Services.perms.add(uri, PERMISSION_SAVE_LOGINS, Services.perms.DENY_ACTION);
+  }
+}
+
+add_task(async function test_execute()
 {
 
 const OUTDIR = OS.Constants.Path.profileDir;
@@ -89,14 +114,25 @@ function getEncTypeForID(conn, id) {
     return encType;
 }
 
+function getAllDisabledHostsFromMozStorage(conn) {
+    let disabledHosts = [];
+    let stmt = conn.createStatement("SELECT hostname from moz_disabledHosts");
+
+    while (stmt.executeStep()) {
+      disabledHosts.push(stmt.row.hostname);
+    }
+
+    return disabledHosts;
+}
+
 var storage;
 var dbConnection;
 var testnum = 0;
 var testdesc = "Setup of nsLoginInfo test-users";
 var nsLoginInfo = new Components.Constructor(
                     "@mozilla.org/login-manager/loginInfo;1",
-                    Components.interfaces.nsILoginInfo);
-do_check_true(nsLoginInfo != null);
+                    Ci.nsILoginInfo);
+Assert.ok(nsLoginInfo != null);
 
 var testuser1 = new nsLoginInfo;
 testuser1.init("http://test.com", "http://test.com", null,
@@ -120,53 +156,54 @@ testuser5.init("http://test.gov", "http://test.gov", null,
 
 /* ========== 1 ========== */
 testnum++;
-testdesc = "Test downgrade from v999 storage"
+testdesc = "Test downgrade from v999 storage";
 
-yield* copyFile("signons-v999.sqlite");
+await copyFile("signons-v999.sqlite");
 // Verify the schema version in the test file.
 dbConnection = openDB("signons-v999.sqlite");
-do_check_eq(999, dbConnection.schemaVersion);
+Assert.equal(999, dbConnection.schemaVersion);
 dbConnection.close();
 
 storage = reloadStorage(OUTDIR, "signons-v999.sqlite");
+setLoginSavingEnabled("https://disabled.net", false);
 checkStorageData(storage, ["https://disabled.net"], [testuser1]);
 
 // Check to make sure we downgraded the schema version.
 dbConnection = openDB("signons-v999.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 dbConnection.close();
 
 deleteFile(OUTDIR, "signons-v999.sqlite");
 
 /* ========== 2 ========== */
 testnum++;
-testdesc = "Test downgrade from incompat v999 storage"
+testdesc = "Test downgrade from incompat v999 storage";
 // This file has a testuser999/testpass999, but is missing an expected column
 
 var origFile = OS.Path.join(OUTDIR, "signons-v999-2.sqlite");
 var failFile = OS.Path.join(OUTDIR, "signons-v999-2.sqlite.corrupt");
 
 // Make sure we always start clean in a clean state.
-yield* copyFile("signons-v999-2.sqlite");
-yield OS.File.remove(failFile);
+await copyFile("signons-v999-2.sqlite");
+await OS.File.remove(failFile);
 
 Assert.throws(() => reloadStorage(OUTDIR, "signons-v999-2.sqlite"),
               /Initialization failed/);
 
 // Check to ensure the DB file was renamed to .corrupt.
-do_check_false(yield OS.File.exists(origFile));
-do_check_true(yield OS.File.exists(failFile));
+Assert.equal(false, await OS.File.exists(origFile));
+Assert.ok(await OS.File.exists(failFile));
 
-yield OS.File.remove(failFile);
+await OS.File.remove(failFile);
 
 /* ========== 3 ========== */
 testnum++;
-testdesc = "Test upgrade from v1->v2 storage"
+testdesc = "Test upgrade from v1->v2 storage";
 
-yield* copyFile("signons-v1.sqlite");
+await copyFile("signons-v1.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v1.sqlite");
-do_check_eq(1, dbConnection.schemaVersion);
+Assert.equal(1, dbConnection.schemaVersion);
 dbConnection.close();
 
 storage = reloadStorage(OUTDIR, "signons-v1.sqlite");
@@ -174,11 +211,11 @@ checkStorageData(storage, ["https://disabled.net"], [testuser1, testuser2]);
 
 // Check to see that we added a GUIDs to the logins.
 dbConnection = openDB("signons-v1.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 var guid = getGUIDforID(dbConnection, 1);
-do_check_true(isGUID.test(guid));
+Assert.ok(isGUID.test(guid));
 guid = getGUIDforID(dbConnection, 2);
-do_check_true(isGUID.test(guid));
+Assert.ok(isGUID.test(guid));
 dbConnection.close();
 
 deleteFile(OUTDIR, "signons-v1.sqlite");
@@ -190,10 +227,10 @@ testdesc = "Test upgrade v2->v1 storage";
 // are upgrading it again. Any logins added by the v1 code must be properly
 // upgraded.
 
-yield* copyFile("signons-v1v2.sqlite");
+await copyFile("signons-v1v2.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v1v2.sqlite");
-do_check_eq(1, dbConnection.schemaVersion);
+Assert.equal(1, dbConnection.schemaVersion);
 dbConnection.close();
 
 storage = reloadStorage(OUTDIR, "signons-v1v2.sqlite");
@@ -207,33 +244,33 @@ checkStorageData(storage, ["https://disabled.net"], [testuser1B, testuser2, test
 // Check the GUIDs. Logins 1 and 2 should retain their original GUID, login 3
 // should have one created (because it didn't have one previously).
 dbConnection = openDB("signons-v1v2.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 guid = getGUIDforID(dbConnection, 1);
-do_check_eq("{655c7358-f1d6-6446-adab-53f98ac5d80f}", guid);
+Assert.equal("{655c7358-f1d6-6446-adab-53f98ac5d80f}", guid);
 guid = getGUIDforID(dbConnection, 2);
-do_check_eq("{13d9bfdc-572a-4d4e-9436-68e9803e84c1}", guid);
+Assert.equal("{13d9bfdc-572a-4d4e-9436-68e9803e84c1}", guid);
 guid = getGUIDforID(dbConnection, 3);
-do_check_true(isGUID.test(guid));
+Assert.ok(isGUID.test(guid));
 dbConnection.close();
 
 deleteFile(OUTDIR, "signons-v1v2.sqlite");
 
 /* ========== 5 ========== */
 testnum++;
-testdesc = "Test upgrade from v2->v3 storage"
+testdesc = "Test upgrade from v2->v3 storage";
 
-yield* copyFile("signons-v2.sqlite");
+await copyFile("signons-v2.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v2.sqlite");
-do_check_eq(2, dbConnection.schemaVersion);
+Assert.equal(2, dbConnection.schemaVersion);
 
 storage = reloadStorage(OUTDIR, "signons-v2.sqlite");
 
 // Check to see that we added the correct encType to the logins.
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 var encTypes = [ENCTYPE_BASE64, ENCTYPE_SDR, ENCTYPE_BASE64, ENCTYPE_BASE64];
 for (let i = 0; i < encTypes.length; i++)
-    do_check_eq(encTypes[i], getEncTypeForID(dbConnection, i + 1));
+    Assert.equal(encTypes[i], getEncTypeForID(dbConnection, i + 1));
 dbConnection.close();
 
 // There are 4 logins, but 3 will be invalid because we can no longer decrypt
@@ -250,21 +287,21 @@ testdesc = "Test upgrade v3->v2 storage";
 // are upgrading it again. Any logins added by the v2 code must be properly
 // upgraded.
 
-yield* copyFile("signons-v2v3.sqlite");
+await copyFile("signons-v2v3.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v2v3.sqlite");
-do_check_eq(2, dbConnection.schemaVersion);
+Assert.equal(2, dbConnection.schemaVersion);
 encTypes = [ENCTYPE_BASE64, ENCTYPE_SDR, ENCTYPE_BASE64, ENCTYPE_BASE64, null];
 for (let i = 0; i < encTypes.length; i++)
-    do_check_eq(encTypes[i], getEncTypeForID(dbConnection, i + 1));
+    Assert.equal(encTypes[i], getEncTypeForID(dbConnection, i + 1));
 
 // Reload storage, check that the new login now has encType=1, others untouched
 storage = reloadStorage(OUTDIR, "signons-v2v3.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 
 encTypes = [ENCTYPE_BASE64, ENCTYPE_SDR, ENCTYPE_BASE64, ENCTYPE_BASE64, ENCTYPE_SDR];
 for (let i = 0; i < encTypes.length; i++)
-    do_check_eq(encTypes[i], getEncTypeForID(dbConnection, i + 1));
+    Assert.equal(encTypes[i], getEncTypeForID(dbConnection, i + 1));
 
 // Sanity check that the data gets migrated
 // There are 5 logins, but 3 will be invalid because we can no longer decrypt
@@ -272,7 +309,7 @@ for (let i = 0; i < encTypes.length; i++)
 checkStorageData(storage, ["https://disabled.net"], [testuser2, testuser3]);
 encTypes = [ENCTYPE_BASE64, ENCTYPE_SDR, ENCTYPE_BASE64, ENCTYPE_BASE64, ENCTYPE_SDR];
 for (let i = 0; i < encTypes.length; i++)
-    do_check_eq(encTypes[i], getEncTypeForID(dbConnection, i + 1));
+    Assert.equal(encTypes[i], getEncTypeForID(dbConnection, i + 1));
 dbConnection.close();
 
 deleteFile(OUTDIR, "signons-v2v3.sqlite");
@@ -280,23 +317,26 @@ deleteFile(OUTDIR, "signons-v2v3.sqlite");
 
 /* ========== 7 ========== */
 testnum++;
-testdesc = "Test upgrade from v3->v4 storage"
+testdesc = "Test upgrade from v3->v4 storage";
 
-yield* copyFile("signons-v3.sqlite");
+await copyFile("signons-v3.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v3.sqlite");
-do_check_eq(3, dbConnection.schemaVersion);
+Assert.equal(3, dbConnection.schemaVersion);
 
 storage = reloadStorage(OUTDIR, "signons-v3.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
+
+// Remove old entry from permission manager.
+setLoginSavingEnabled("https://disabled.net", true);
 
 // Check that timestamps and counts were initialized correctly
 checkStorageData(storage, [], [testuser1, testuser2]);
 
 var logins = storage.getAllLogins();
 for (var i = 0; i < 2; i++) {
-    do_check_true(logins[i] instanceof Ci.nsILoginMetaInfo);
-    do_check_eq(1, logins[i].timesUsed);
+    Assert.ok(logins[i] instanceof Ci.nsILoginMetaInfo);
+    Assert.equal(1, logins[i].timesUsed);
     LoginTestUtils.assertTimeIsAboutNow(logins[i].timeCreated);
     LoginTestUtils.assertTimeIsAboutNow(logins[i].timeLastUsed);
     LoginTestUtils.assertTimeIsAboutNow(logins[i].timePasswordChanged);
@@ -304,15 +344,15 @@ for (var i = 0; i < 2; i++) {
 
 /* ========== 8 ========== */
 testnum++;
-testdesc = "Test upgrade from v3->v4->v3 storage"
+testdesc = "Test upgrade from v3->v4->v3 storage";
 
-yield* copyFile("signons-v3v4.sqlite");
+await copyFile("signons-v3v4.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v3v4.sqlite");
-do_check_eq(3, dbConnection.schemaVersion);
+Assert.equal(3, dbConnection.schemaVersion);
 
 storage = reloadStorage(OUTDIR, "signons-v3v4.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
 
 // testuser1 already has timestamps, testuser2 does not.
 checkStorageData(storage, [], [testuser1, testuser2]);
@@ -328,15 +368,15 @@ if (logins[0].username == "testuser1") {
     t2 = logins[0];
 }
 
-do_check_true(t1 instanceof Ci.nsILoginMetaInfo);
-do_check_true(t2 instanceof Ci.nsILoginMetaInfo);
+Assert.ok(t1 instanceof Ci.nsILoginMetaInfo);
+Assert.ok(t2 instanceof Ci.nsILoginMetaInfo);
 
-do_check_eq(9, t1.timesUsed);
-do_check_eq(1262049951275, t1.timeCreated);
-do_check_eq(1262049951275, t1.timeLastUsed);
-do_check_eq(1262049951275, t1.timePasswordChanged);
+Assert.equal(9, t1.timesUsed);
+Assert.equal(1262049951275, t1.timeCreated);
+Assert.equal(1262049951275, t1.timeLastUsed);
+Assert.equal(1262049951275, t1.timePasswordChanged);
 
-do_check_eq(1, t2.timesUsed);
+Assert.equal(1, t2.timesUsed);
 LoginTestUtils.assertTimeIsAboutNow(t2.timeCreated);
 LoginTestUtils.assertTimeIsAboutNow(t2.timeLastUsed);
 LoginTestUtils.assertTimeIsAboutNow(t2.timePasswordChanged);
@@ -344,37 +384,74 @@ LoginTestUtils.assertTimeIsAboutNow(t2.timePasswordChanged);
 
 /* ========== 9 ========== */
 testnum++;
-testdesc = "Test upgrade from v4 storage"
+testdesc = "Test upgrade from v4 storage";
 
-yield* copyFile("signons-v4.sqlite");
+await copyFile("signons-v4.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v4.sqlite");
-do_check_eq(4, dbConnection.schemaVersion);
-do_check_false(dbConnection.tableExists("moz_deleted_logins"));
+Assert.equal(4, dbConnection.schemaVersion);
+Assert.ok(!dbConnection.tableExists("moz_deleted_logins"));
 
 storage = reloadStorage(OUTDIR, "signons-v4.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
-do_check_true(dbConnection.tableExists("moz_deleted_logins"));
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.ok(dbConnection.tableExists("moz_deleted_logins"));
 
 
 /* ========== 10 ========== */
 testnum++;
-testdesc = "Test upgrade from v4->v5->v4 storage"
+testdesc = "Test upgrade from v4->v5->v4 storage";
 
-yield copyFile("signons-v4v5.sqlite");
+await copyFile("signons-v4v5.sqlite");
 // Sanity check the test file.
 dbConnection = openDB("signons-v4v5.sqlite");
-do_check_eq(4, dbConnection.schemaVersion);
-do_check_true(dbConnection.tableExists("moz_deleted_logins"));
+Assert.equal(4, dbConnection.schemaVersion);
+Assert.ok(dbConnection.tableExists("moz_deleted_logins"));
 
 storage = reloadStorage(OUTDIR, "signons-v4v5.sqlite");
-do_check_eq(CURRENT_SCHEMA, dbConnection.schemaVersion);
-do_check_true(dbConnection.tableExists("moz_deleted_logins"));
-
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
+Assert.ok(dbConnection.tableExists("moz_deleted_logins"));
 
 /* ========== 11 ========== */
 testnum++;
-testdesc = "Create nsILoginInfo instances for testing with"
+testdesc = "Test upgrade from v5->v6 storage";
+
+await copyFile("signons-v5v6.sqlite");
+
+// Sanity check the test file.
+dbConnection = openDB("signons-v5v6.sqlite");
+Assert.equal(5, dbConnection.schemaVersion);
+Assert.ok(dbConnection.tableExists("moz_disabledHosts"));
+
+// Initial disabled hosts inside signons-v5v6.sqlite
+var disabledHosts = [
+  "http://disabled1.example.com",
+  "http://大.net",
+  "http://xn--19g.com"
+];
+
+LoginTestUtils.assertDisabledHostsEqual(disabledHosts, getAllDisabledHostsFromMozStorage(dbConnection));
+
+// Reload storage
+storage = reloadStorage(OUTDIR, "signons-v5v6.sqlite");
+Assert.equal(CURRENT_SCHEMA, dbConnection.schemaVersion);
+
+// moz_disabledHosts should now be empty after migration.
+LoginTestUtils.assertDisabledHostsEqual([], getAllDisabledHostsFromMozStorage(dbConnection));
+
+// Get all the other hosts currently saved in the permission manager.
+let hostsInPermissionManager = getAllDisabledHostsFromPermissionManager();
+
+// All disabledHosts should have migrated to the permission manager
+LoginTestUtils.assertDisabledHostsEqual(disabledHosts, hostsInPermissionManager);
+
+// Remove all disabled hosts from the permission manager before test ends
+for (let host of disabledHosts) {
+  setLoginSavingEnabled(host, true);
+}
+
+/* ========== 12 ========== */
+testnum++;
+testdesc = "Create nsILoginInfo instances for testing with";
 
 testuser1 = new nsLoginInfo;
 testuser1.init("http://dummyhost.mozilla.org", "", null,
@@ -387,14 +464,14 @@ testuser1.init("http://dummyhost.mozilla.org", "", null,
  * file, then upon next use create a new database file.
  */
 
-/* ========== 12 ========== */
+/* ========== 13 ========== */
 testnum++;
-testdesc = "Corrupt database and backup"
+testdesc = "Corrupt database and backup";
 
 const filename = "signons-c.sqlite";
 const filepath = OS.Path.join(OS.Constants.Path.profileDir, filename);
 
-yield OS.File.copy(do_get_file("data/corruptDB.sqlite").path, filepath);
+await OS.File.copy(do_get_file("data/corruptDB.sqlite").path, filepath);
 
 // will init mozStorage module with corrupt database, init should fail
 Assert.throws(
@@ -402,10 +479,10 @@ Assert.throws(
   /Initialization failed/);
 
 // check that the backup file exists
-do_check_true(yield OS.File.exists(filepath + ".corrupt"));
+Assert.ok(await OS.File.exists(filepath + ".corrupt"));
 
 // check that the original corrupt file has been deleted
-do_check_false(yield OS.File.exists(filepath));
+Assert.equal(false, await OS.File.exists(filepath));
 
 // initialize the storage module again
 storage = reloadStorage(OS.Constants.Path.profileDir, filename);
@@ -415,10 +492,10 @@ storage.addLogin(testuser1);
 checkStorageData(storage, [], [testuser1]);
 
 // check the file exists
-var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
 file.initWithPath(OS.Constants.Path.profileDir);
 file.append(filename);
-do_check_true(file.exists());
+Assert.ok(file.exists());
 
 deleteFile(OS.Constants.Path.profileDir, filename + ".corrupt");
 deleteFile(OS.Constants.Path.profileDir, filename);

@@ -7,9 +7,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Sprintf.h"
 #include "XRemoteClient.h"
-#include "prmem.h"
-#include "prprf.h"
+#include "RemoteUtils.h"
 #include "plstr.h"
 #include "prsystem.h"
 #include "mozilla/Logging.h"
@@ -51,7 +52,7 @@
 
 using mozilla::LogLevel;
 
-static PRLogModuleInfo *sRemoteLm = nullptr;
+static mozilla::LazyLogModule sRemoteLm("XRemoteClient");
 
 static int (*sOldHandler)(Display *, XErrorEvent *);
 static bool sGotBadWindow;
@@ -69,8 +70,6 @@ XRemoteClient::XRemoteClient()
   mMozProfileAtom = 0;
   mMozProgramAtom = 0;
   mLockData = 0;
-  if (!sRemoteLm)
-    sRemoteLm = PR_NewLogModule("XRemoteClient");
   MOZ_LOG(sRemoteLm, LogLevel::Debug, ("XRemoteClient::XRemoteClient"));
 }
 
@@ -151,9 +150,9 @@ HandleBadWindow(Display *display, XErrorEvent *event)
     sGotBadWindow = true;
     return 0; // ignored
   }
-  else {
+  
     return (*sOldHandler)(display, event);
-  }
+  
 }
 
 nsresult
@@ -208,7 +207,8 @@ XRemoteClient::SendCommandLine (const char *aProgram, const char *aUsername,
 
   XSetErrorHandler(sOldHandler);
 
-  MOZ_LOG(sRemoteLm, LogLevel::Debug, ("SendCommandInternal returning 0x%x\n", rv));
+  MOZ_LOG(sRemoteLm, LogLevel::Debug, ("SendCommandInternal returning 0x%" PRIx32 "\n",
+                                       static_cast<uint32_t>(rv)));
 
   return rv;
 }
@@ -293,7 +293,7 @@ XRemoteClient::GetLock(Window aWindow, bool *aDestroyed)
     
     char pidstr[32];
     char sysinfobuf[SYS_INFO_BUFFER_LENGTH];
-    PR_snprintf(pidstr, sizeof(pidstr), "pid%d@", getpid());
+    SprintfLiteral(pidstr, "pid%d@", getpid());
     PRStatus status;
     status = PR_GetSystemInfo(PR_SI_HOSTNAME, sysinfobuf,
 			      SYS_INFO_BUFFER_LENGTH);
@@ -357,7 +357,7 @@ XRemoteClient::GetLock(Window aWindow, bool *aDestroyed)
 	     ("window 0x%x is locked by %s; waiting...\n",
 	      (unsigned int) aWindow, data));
       waited = True;
-      while (1) {
+      while (true) {
 	XEvent event;
 	int select_retval;
 	fd_set select_set;
@@ -384,7 +384,7 @@ XRemoteClient::GetLock(Window aWindow, bool *aDestroyed)
           rv = NS_ERROR_FAILURE;
           break;
 	}
-	else if (event.xany.type == PropertyNotify &&
+	if (event.xany.type == PropertyNotify &&
 		 event.xproperty.state == PropertyDelete &&
 		 event.xproperty.window == aWindow &&
 		 event.xproperty.atom == mMozLockAtom) {
@@ -584,7 +584,7 @@ XRemoteClient::FreeLock(Window aWindow)
               " property\n"));
       return NS_ERROR_FAILURE;
   }
-  else if (!data || !*data){
+  if (!data || !*data){
       MOZ_LOG(sRemoteLm, LogLevel::Debug,
              ("invalid data on " MOZILLA_LOCK_PROP
               " of window 0x%x.\n",
@@ -603,17 +603,6 @@ XRemoteClient::FreeLock(Window aWindow)
   return NS_OK;
 }
 
-/* like strcpy, but return the char after the final null */
-static char*
-estrcpy(const char* s, char* d)
-{
-  while (*s)
-    *d++ = *s++;
-
-  *d++ = '\0';
-  return d;
-}
-
 nsresult
 XRemoteClient::DoSendCommandLine(Window aWindow, int32_t argc, char **argv,
                                  const char* aDesktopStartupID,
@@ -621,67 +610,13 @@ XRemoteClient::DoSendCommandLine(Window aWindow, int32_t argc, char **argv,
 {
   *aDestroyed = false;
 
-  char cwdbuf[MAX_PATH];
-  if (!getcwd(cwdbuf, MAX_PATH))
-    return NS_ERROR_UNEXPECTED;
-
-  // the commandline property is constructed as an array of int32_t
-  // followed by a series of null-terminated strings:
-  //
-  // [argc][offsetargv0][offsetargv1...]<workingdir>\0<argv[0]>\0argv[1]...\0
-  // (offset is from the beginning of the buffer)
-
-  static char desktopStartupPrefix[] = " DESKTOP_STARTUP_ID=";
-
-  int32_t argvlen = strlen(cwdbuf);
-  for (int i = 0; i < argc; ++i) {
-    int32_t len = strlen(argv[i]);
-    if (i == 0 && aDesktopStartupID) {
-      len += sizeof(desktopStartupPrefix) - 1 + strlen(aDesktopStartupID);
-    }
-    argvlen += len;
-  }
-
-  int32_t* buffer = (int32_t*) malloc(argvlen + argc + 1 +
-                                      sizeof(int32_t) * (argc + 1));
-  if (!buffer)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  buffer[0] = TO_LITTLE_ENDIAN32(argc);
-
-  char *bufend = (char*) (buffer + argc + 1);
-
-  bufend = estrcpy(cwdbuf, bufend);
-
-  for (int i = 0; i < argc; ++i) {
-    buffer[i + 1] = TO_LITTLE_ENDIAN32(bufend - ((char*) buffer));
-    bufend = estrcpy(argv[i], bufend);
-    if (i == 0 && aDesktopStartupID) {
-      bufend = estrcpy(desktopStartupPrefix, bufend - 1);
-      bufend = estrcpy(aDesktopStartupID, bufend - 1);
-    }
-  }
-
-#ifdef DEBUG_bsmedberg
-  int32_t   debug_argc   = TO_LITTLE_ENDIAN32(*buffer);
-  char *debug_workingdir = (char*) (buffer + argc + 1);
-
-  printf("Sending command line:\n"
-         "  working dir: %s\n"
-         "  argc:\t%i",
-         debug_workingdir,
-         debug_argc);
-
-  int32_t  *debug_offset = buffer + 1;
-  for (int debug_i = 0; debug_i < debug_argc; ++debug_i)
-    printf("  argv[%i]:\t%s\n", debug_i,
-           ((char*) buffer) + TO_LITTLE_ENDIAN32(debug_offset[debug_i]));
-#endif
-
+  int commandLineLength;
+  char* commandLine = ConstructCommandLine(argc, argv, aDesktopStartupID,
+                                           &commandLineLength);
   XChangeProperty (mDisplay, aWindow, mMozCommandLineAtom, XA_STRING, 8,
-                   PropModeReplace, (unsigned char *) buffer,
-                   bufend - ((char*) buffer));
-  free(buffer);
+                   PropModeReplace, (unsigned char *) commandLine,
+                   commandLineLength);
+  free(commandLine);
 
   if (!WaitForResponse(aWindow, aResponse, aDestroyed, mMozCommandLineAtom))
     return NS_ERROR_FAILURE;
@@ -709,7 +644,7 @@ XRemoteClient::WaitForResponse(Window aWindow, char **aResponse,
       *aDestroyed = true;
       return false;
     }
-    else if (event.xany.type == PropertyNotify &&
+    if (event.xany.type == PropertyNotify &&
              event.xproperty.state == PropertyNewValue &&
              event.xproperty.window == aWindow &&
              event.xproperty.atom == mMozResponseAtom) {

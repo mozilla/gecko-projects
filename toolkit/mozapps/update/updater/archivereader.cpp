@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+
 /* vim:set ts=2 sw=2 sts=2 et cindent: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,13 +8,17 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
-#include "bzlib.h"
+#ifdef XP_WIN
+#include <windows.h>
+#endif
 #include "archivereader.h"
 #include "errors.h"
 #ifdef XP_WIN
 #include "nsAlgorithm.h" // Needed by nsVersionComparator.cpp
 #include "updatehelper.h"
 #endif
+#define XZ_USE_CRC64
+#include "xz.h"
 
 // These are generated at compile time based on the DER file for the channel
 // being used
@@ -35,11 +40,6 @@
 #elif defined(XP_WIN)
 # include <io.h>
 #endif
-
-static int inbuf_size  = 262144;
-static int outbuf_size = 262144;
-static char *inbuf  = nullptr;
-static char *outbuf = nullptr;
 
 /**
  * Performs a verification on the opened MAR file with the passed in
@@ -68,9 +68,9 @@ VerifyLoadedCert(MarFile *archive, const uint8_t (&certData)[SIZE])
 }
 
 /**
- * Performs a verification on the opened MAR file.  Both the primary and backup 
- * keys stored are stored in the current process and at least the primary key 
- * will be tried.  Success will be returned as long as one of the two 
+ * Performs a verification on the opened MAR file.  Both the primary and backup
+ * keys stored are stored in the current process and at least the primary key
+ * will be tried.  Success will be returned as long as one of the two
  * signatures verify.
  *
  * @return OK on success
@@ -99,7 +99,7 @@ ArchiveReader::VerifySignature()
 
 /**
  * Verifies that the MAR file matches the current product, channel, and version
- * 
+ *
  * @param MARChannelID   The MAR channel name to use, only updates from MARs
  *                       with a matching MAR channel name will succeed.
  *                       If an empty string is passed, no check will be done
@@ -109,17 +109,17 @@ ArchiveReader::VerifySignature()
  * @param appVersion     The application version to use, only MARs with an
  *                       application version >= to appVersion will be applied.
  * @return OK on success
- *         COULD_NOT_READ_PRODUCT_INFO_BLOCK if the product info block 
+ *         COULD_NOT_READ_PRODUCT_INFO_BLOCK if the product info block
  *                                           could not be read.
- *         MARCHANNEL_MISMATCH_ERROR         if update-settings.ini's MAR 
+ *         MARCHANNEL_MISMATCH_ERROR         if update-settings.ini's MAR
  *                                           channel ID doesn't match the MAR
- *                                           file's MAR channel ID. 
+ *                                           file's MAR channel ID.
  *         VERSION_DOWNGRADE_ERROR           if the application version for
  *                                           this updater is newer than the
  *                                           one in the MAR.
  */
 int
-ArchiveReader::VerifyProductInformation(const char *MARChannelID, 
+ArchiveReader::VerifyProductInformation(const char *MARChannelID,
                                         const char *appVersion)
 {
   if (!mArchive) {
@@ -127,7 +127,7 @@ ArchiveReader::VerifyProductInformation(const char *MARChannelID,
   }
 
   ProductInformationBlock productInfoBlock;
-  int rv = mar_read_product_info_block(mArchive, 
+  int rv = mar_read_product_info_block(mArchive,
                                        &productInfoBlock);
   if (rv != OK) {
     return COULD_NOT_READ_PRODUCT_INFO_BLOCK_ERROR;
@@ -138,7 +138,7 @@ ArchiveReader::VerifyProductInformation(const char *MARChannelID,
   if (MARChannelID && strlen(MARChannelID)) {
     // Check for at least one match in the comma separated list of values.
     const char *delimiter = " ,\t";
-    // Make a copy of the string in case a read only memory buffer 
+    // Make a copy of the string in case a read only memory buffer
     // was specified.  strtok modifies the input buffer.
     char channelCopy[512] = { 0 };
     strncpy(channelCopy, MARChannelID, sizeof(channelCopy) - 1);
@@ -163,7 +163,7 @@ ArchiveReader::VerifyProductInformation(const char *MARChannelID,
         - 12.0a2 being older than 12.0b1
         - 12.0a1 being older than 12.0
         - 12.0 being older than 12.1a1 */
-    int versionCompareResult = 
+    int versionCompareResult =
       mozilla::CompareVersions(appVersion, productInfoBlock.productVersion);
     if (1 == versionCompareResult) {
       rv = VERSION_DOWNGRADE_ERROR;
@@ -181,24 +181,24 @@ ArchiveReader::Open(const NS_tchar *path)
   if (mArchive)
     Close();
 
-  if (!inbuf) {
-    inbuf = (char *)malloc(inbuf_size);
-    if (!inbuf) {
+  if (!mInBuf) {
+    mInBuf = (uint8_t *)malloc(mInBufSize);
+    if (!mInBuf) {
       // Try again with a smaller buffer.
-      inbuf_size = 1024;
-      inbuf = (char *)malloc(inbuf_size);
-      if (!inbuf)
+      mInBufSize = 1024;
+      mInBuf = (uint8_t *)malloc(mInBufSize);
+      if (!mInBuf)
         return ARCHIVE_READER_MEM_ERROR;
     }
   }
 
-  if (!outbuf) {
-    outbuf = (char *)malloc(outbuf_size);
-    if (!outbuf) {
+  if (!mOutBuf) {
+    mOutBuf = (uint8_t *)malloc(mOutBufSize);
+    if (!mOutBuf) {
       // Try again with a smaller buffer.
-      outbuf_size = 1024;
-      outbuf = (char *)malloc(outbuf_size);
-      if (!outbuf)
+      mOutBufSize = 1024;
+      mOutBuf = (uint8_t *)malloc(mOutBufSize);
+      if (!mOutBuf)
         return ARCHIVE_READER_MEM_ERROR;
     }
   }
@@ -211,6 +211,9 @@ ArchiveReader::Open(const NS_tchar *path)
   if (!mArchive)
     return READ_ERROR;
 
+  xz_crc32_init();
+  xz_crc64_init();
+
   return OK;
 }
 
@@ -222,14 +225,14 @@ ArchiveReader::Close()
     mArchive = nullptr;
   }
 
-  if (inbuf) {
-    free(inbuf);
-    inbuf = nullptr;
+  if (mInBuf) {
+    free(mInBuf);
+    mInBuf = nullptr;
   }
 
-  if (outbuf) {
-    free(outbuf);
-    outbuf = nullptr;
+  if (mOutBuf) {
+    free(mOutBuf);
+    mOutBuf = nullptr;
   }
 }
 
@@ -273,12 +276,21 @@ ArchiveReader::ExtractItemToStream(const MarItem *item, FILE *fp)
 {
   /* decompress the data chunk by chunk */
 
-  bz_stream strm;
-  int offset, inlen, outlen, ret = OK;
+  int offset, inlen, ret = OK;
+  struct xz_buf strm = { 0 };
+  enum xz_ret xz_rv = XZ_OK;
 
-  memset(&strm, 0, sizeof(strm));
-  if (BZ2_bzDecompressInit(&strm, 0, 0) != BZ_OK)
-    return UNEXPECTED_BZIP_ERROR;
+  struct xz_dec * dec = xz_dec_init(XZ_DYNALLOC, 64 * 1024 * 1024);
+  if (!dec) {
+    return UNEXPECTED_XZ_ERROR;
+  }
+
+  strm.in = mInBuf;
+  strm.in_pos = 0;
+  strm.in_size = 0;
+  strm.out = mOutBuf;
+  strm.out_pos = 0;
+  strm.out_size = mOutBufSize;
 
   offset = 0;
   for (;;) {
@@ -287,38 +299,49 @@ ArchiveReader::ExtractItemToStream(const MarItem *item, FILE *fp)
       break;
     }
 
-    if (offset < (int) item->length && strm.avail_in == 0) {
-      inlen = mar_read(mArchive, item, offset, inbuf, inbuf_size);
-      if (inlen <= 0)
-        return READ_ERROR;
+    if (offset < (int) item->length && strm.in_pos == strm.in_size) {
+      inlen = mar_read(mArchive, item, offset, mInBuf, mInBufSize);
+      if (inlen <= 0) {
+        ret = READ_ERROR;
+        break;
+      }
       offset += inlen;
-      strm.next_in = inbuf;
-      strm.avail_in = inlen;
+      strm.in_size = inlen;
+      strm.in_pos = 0;
     }
 
-    strm.next_out = outbuf;
-    strm.avail_out = outbuf_size;
+    xz_rv = xz_dec_run(dec, &strm);
 
-    ret = BZ2_bzDecompress(&strm);
-    if (ret != BZ_OK && ret != BZ_STREAM_END) {
-      ret = UNEXPECTED_BZIP_ERROR;
-      break;
-    }
-
-    outlen = outbuf_size - strm.avail_out;
-    if (outlen) {
-      if (fwrite(outbuf, outlen, 1, fp) != 1) {
+    if (strm.out_pos == mOutBufSize) {
+      if (fwrite(mOutBuf, 1, strm.out_pos, fp) != strm.out_pos) {
         ret = WRITE_ERROR_EXTRACT;
         break;
       }
+
+      strm.out_pos = 0;
     }
 
-    if (ret == BZ_STREAM_END) {
-      ret = OK;
+    if (xz_rv == XZ_OK) {
+      // There is still more data to decompress.
+      continue;
+    }
+
+    // The return value of xz_dec_run is not XZ_OK and if it isn't XZ_STREAM_END
+    // an error has occured.
+    if (xz_rv != XZ_STREAM_END) {
+      ret = UNEXPECTED_XZ_ERROR;
       break;
     }
+
+    // Write out the remainder of the decompressed data. In the case of
+    // strm.out_pos == 0 this is needed to create empty files included in the
+    // mar file.
+    if (fwrite(mOutBuf, 1, strm.out_pos, fp) != strm.out_pos) {
+      ret = WRITE_ERROR_EXTRACT;
+    }
+    break;
   }
 
-  BZ2_bzDecompressEnd(&strm);
+  xz_dec_end(dec);
   return ret;
 }

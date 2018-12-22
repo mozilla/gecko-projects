@@ -14,9 +14,10 @@
  *  0 - invalid
  *  4 - EMBED
  *  7 - DOWNLOAD
- *  7 - FRAMED_LINK
+ *  8 - FRAMED_LINK
+ *  9 - RELOAD
  **/
-#define EXCLUDED_VISIT_TYPES "0, 4, 7, 8"
+#define EXCLUDED_VISIT_TYPES "0, 4, 7, 8, 9"
 
 /**
  * This triggers update visit_count and last_visit_date based on historyvisits
@@ -26,6 +27,7 @@
   "CREATE TEMP TRIGGER moz_historyvisits_afterinsert_v2_trigger " \
   "AFTER INSERT ON moz_historyvisits FOR EACH ROW " \
   "BEGIN " \
+    "SELECT store_last_inserted_id('moz_historyvisits', NEW.id); " \
     "UPDATE moz_places SET " \
       "visit_count = visit_count + (SELECT NEW.visit_type NOT IN (" EXCLUDED_VISIT_TYPES ")), "\
       "last_visit_date = MAX(IFNULL(last_visit_date, 0), NEW.visit_date) " \
@@ -46,135 +48,143 @@
   "END" \
 )
 
-/**
- * A predicate matching pages on rev_host, based on a given host value.
- * 'host' may be either the moz_hosts.host column or an alias representing an
- * equivalent value.
- */
-#define HOST_TO_REVHOST_PREDICATE \
-  "rev_host = get_unreversed_host(host || '.') || '.' " \
-  "OR rev_host = get_unreversed_host(host || '.') || '.www.'"
-
-/**
- * Select the best prefix for a host, based on existing pages registered for it.
- * Prefixes have a priority, from the top to the bottom, so that secure pages
- * have higher priority, and more generically "www." prefixed hosts come before
- * unprefixed ones.
- * Given a host, examine associated pages and:
- *  - if all of the typed pages start with https://www. return https://www.
- *  - if all of the typed pages start with https:// return https://
- *  - if all of the typed pages start with ftp: return ftp://
- *  - if all of the typed pages start with www. return www.
- *  - otherwise don't use any prefix
- */
-#define HOSTS_PREFIX_PRIORITY_FRAGMENT \
-  "SELECT CASE " \
-    "WHEN 1 = ( " \
-      "SELECT min(substr(url,1,12) = 'https://www.') FROM moz_places h " \
-      "WHERE (" HOST_TO_REVHOST_PREDICATE ") AND +h.typed = 1 " \
-    ") THEN 'https://www.' " \
-    "WHEN 1 = ( " \
-      "SELECT min(substr(url,1,8) = 'https://') FROM moz_places h " \
-      "WHERE (" HOST_TO_REVHOST_PREDICATE ") AND +h.typed = 1 " \
-    ") THEN 'https://' " \
-    "WHEN 1 = ( " \
-      "SELECT min(substr(url,1,4) = 'ftp:') FROM moz_places h " \
-      "WHERE (" HOST_TO_REVHOST_PREDICATE ") AND +h.typed = 1 " \
-    ") THEN 'ftp://' " \
-    "WHEN 1 = ( " \
-      "SELECT min(substr(url,1,11) = 'http://www.') FROM moz_places h " \
-      "WHERE (" HOST_TO_REVHOST_PREDICATE ") AND +h.typed = 1 " \
-    ") THEN 'www.' " \
-  "END "
-
-/**
- * These triggers update the hostnames table whenever moz_places changes.
- */
-#define CREATE_PLACES_AFTERINSERT_TRIGGER NS_LITERAL_CSTRING( \
-  "CREATE TEMP TRIGGER moz_places_afterinsert_trigger " \
-  "AFTER INSERT ON moz_places FOR EACH ROW " \
-  "WHEN LENGTH(NEW.rev_host) > 1 " \
-  "BEGIN " \
-    "INSERT OR REPLACE INTO moz_hosts (id, host, frecency, typed, prefix) " \
-    "VALUES (" \
-      "(SELECT id FROM moz_hosts WHERE host = fixup_url(get_unreversed_host(NEW.rev_host))), " \
-      "fixup_url(get_unreversed_host(NEW.rev_host)), " \
-      "MAX(IFNULL((SELECT frecency FROM moz_hosts WHERE host = fixup_url(get_unreversed_host(NEW.rev_host))), -1), NEW.frecency), " \
-      "MAX(IFNULL((SELECT typed FROM moz_hosts WHERE host = fixup_url(get_unreversed_host(NEW.rev_host))), 0), NEW.typed), " \
-      "(" HOSTS_PREFIX_PRIORITY_FRAGMENT \
-       "FROM ( " \
-          "SELECT fixup_url(get_unreversed_host(NEW.rev_host)) AS host " \
-        ") AS match " \
-      ") " \
-    "); " \
-  "END" \
-)
-
-// This is a hack to workaround the lack of FOR EACH STATEMENT in Sqlite, until
-// bug 871908 can be fixed properly.
-// We store the modified hosts in a temp table, and after every DELETE FROM
-// moz_places, we issue a DELETE FROM moz_updatehosts_temp.  The AFTER DELETE
-// trigger will then take care of updating the moz_hosts table.
+// The next few triggers are a workaround for the lack of FOR EACH STATEMENT in
+// Sqlite, until bug 871908 can be fixed properly.
+// While doing inserts or deletes into moz_places, we accumulate the affected
+// origins into a temp table. Afterwards, we delete everything from the temp
+// table, causing the AFTER DELETE trigger to fire for it, which will then
+// update moz_origins.
 // Note this way we lose atomicity, crashing between the 2 queries may break the
-// hosts table coherency. So it's better to run those DELETE queries in a single
+// tables' coherency. So it's better to run those DELETE queries in a single
 // transaction.
 // Regardless, this is still better than hanging the browser for several minutes
 // on a fast machine.
+#define CREATE_PLACES_AFTERINSERT_TRIGGER NS_LITERAL_CSTRING( \
+  "CREATE TEMP TRIGGER moz_places_afterinsert_trigger " \
+  "AFTER INSERT ON moz_places FOR EACH ROW " \
+  "BEGIN " \
+    "SELECT store_last_inserted_id('moz_places', NEW.id); " \
+    "INSERT OR IGNORE INTO moz_updateoriginsinsert_temp (place_id, prefix, host) " \
+    "VALUES (NEW.id, get_prefix(NEW.url), get_host_and_port(NEW.url)); " \
+  "END" \
+)
+
+// This fragment updates frecency stats after a moz_places row is deleted.
+#define UPDATE_FRECENCY_STATS_AFTER_DELETE \
+  "INSERT OR REPLACE INTO moz_meta(key, value) VALUES " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_COUNT "', " \
+    "CAST((SELECT IFNULL(value, 0) FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_COUNT "') AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE 1 END) " \
+  "), " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_SUM "', " \
+    "CAST((SELECT IFNULL(value, 0) FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_SUM "') AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE OLD.frecency END) " \
+  "), " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_SUM_OF_SQUARES "', " \
+    "CAST((SELECT IFNULL(value, 0) FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_SUM_OF_SQUARES "') AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE OLD.frecency * OLD.frecency END) " \
+  "); "
+
+// This fragment updates frecency stats after frecency changes in a moz_places
+// row.  It's the same as UPDATE_FRECENCY_STATS_AFTER_DELETE except it accounts
+// for NEW values.
+#define UPDATE_FRECENCY_STATS_AFTER_UPDATE \
+  "INSERT OR REPLACE INTO moz_meta(key, value) VALUES " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_COUNT "', " \
+    "CAST(IFNULL((SELECT value FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_COUNT "'), 0) AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE 1 END) " \
+      "+ (CASE WHEN NEW.frecency <= 0 OR NEW.id < 0 THEN 0 ELSE 1 END) " \
+  "), " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_SUM "', " \
+    "CAST(IFNULL((SELECT value FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_SUM "'), 0) AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE OLD.frecency END) " \
+      "+ (CASE WHEN NEW.frecency <= 0 OR NEW.id < 0 THEN 0 ELSE NEW.frecency END) " \
+  "), " \
+  "( " \
+    "'" MOZ_META_KEY_FRECENCY_SUM_OF_SQUARES "', " \
+    "CAST(IFNULL((SELECT value FROM moz_meta WHERE key = '" MOZ_META_KEY_FRECENCY_SUM_OF_SQUARES "'), 0) AS INTEGER) " \
+      "- (CASE WHEN OLD.frecency <= 0 OR OLD.id < 0 THEN 0 ELSE OLD.frecency * OLD.frecency END) " \
+      "+ (CASE WHEN NEW.frecency <= 0 OR NEW.id < 0 THEN 0 ELSE NEW.frecency * NEW.frecency END) " \
+  "); "
+
+// See CREATE_PLACES_AFTERINSERT_TRIGGER. For each delete in moz_places we
+// add the origin to moz_updateoriginsdelete_temp - we then delete everything
+// from moz_updateoriginsdelete_temp, allowing us to run a trigger only once
+// per origin.
 #define CREATE_PLACES_AFTERDELETE_TRIGGER NS_LITERAL_CSTRING( \
   "CREATE TEMP TRIGGER moz_places_afterdelete_trigger " \
   "AFTER DELETE ON moz_places FOR EACH ROW " \
   "BEGIN " \
-    "INSERT OR IGNORE INTO moz_updatehosts_temp (host)" \
-    "VALUES (fixup_url(get_unreversed_host(OLD.rev_host)));" \
+    "INSERT OR IGNORE INTO moz_updateoriginsdelete_temp (origin_id, host) " \
+    "VALUES (OLD.origin_id, get_host_and_port(OLD.url)); " \
+    UPDATE_FRECENCY_STATS_AFTER_DELETE \
   "END" \
 )
 
-#define CREATE_UPDATEHOSTS_AFTERDELETE_TRIGGER NS_LITERAL_CSTRING( \
-  "CREATE TEMP TRIGGER moz_updatehosts_afterdelete_trigger " \
-  "AFTER DELETE ON moz_updatehosts_temp FOR EACH ROW " \
+// See CREATE_PLACES_AFTERINSERT_TRIGGER. This is the trigger that we want
+// to ensure gets run for each origin that we insert into moz_places.
+#define CREATE_UPDATEORIGINSINSERT_AFTERDELETE_TRIGGER NS_LITERAL_CSTRING( \
+  "CREATE TEMP TRIGGER moz_updateoriginsinsert_afterdelete_trigger " \
+  "AFTER DELETE ON moz_updateoriginsinsert_temp FOR EACH ROW " \
   "BEGIN " \
-    "DELETE FROM moz_hosts " \
-    "WHERE host = OLD.host " \
-      "AND NOT EXISTS(" \
-        "SELECT 1 FROM moz_places " \
-          "WHERE rev_host = get_unreversed_host(host || '.') || '.' " \
-             "OR rev_host = get_unreversed_host(host || '.') || '.www.' " \
-      "); " \
-    "UPDATE moz_hosts " \
-    "SET prefix = (" HOSTS_PREFIX_PRIORITY_FRAGMENT ") " \
-    "WHERE host = OLD.host; " \
+    "INSERT OR IGNORE INTO moz_origins (prefix, host, frecency) " \
+    "VALUES (OLD.prefix, OLD.host, 0); " \
+    "UPDATE moz_places SET origin_id = ( " \
+      "SELECT id " \
+      "FROM moz_origins " \
+      "WHERE prefix = OLD.prefix AND host = OLD.host " \
+    ") " \
+    "WHERE id = OLD.place_id; " \
+    "UPDATE moz_origins SET frecency = ( " \
+      "SELECT IFNULL(MAX(frecency), 0) " \
+      "FROM moz_places " \
+      "WHERE moz_places.origin_id = moz_origins.id " \
+    ") " \
+    "WHERE prefix = OLD.prefix AND host = OLD.host; " \
   "END" \
 )
 
-// For performance reasons the host frecency is updated only when the page
-// frecency changes by a meaningful percentage.  This is because the frecency
-// decay algorithm requires to update all the frecencies at once, causing a
-// too high overhead, while leaving the ordering unchanged.
+// See CREATE_PLACES_AFTERINSERT_TRIGGER. This is the trigger that we want
+// to ensure gets run for each origin that we delete from moz_places.
+#define CREATE_UPDATEORIGINSDELETE_AFTERDELETE_TRIGGER NS_LITERAL_CSTRING( \
+  "CREATE TEMP TRIGGER moz_updateoriginsdelete_afterdelete_trigger " \
+  "AFTER DELETE ON moz_updateoriginsdelete_temp FOR EACH ROW " \
+  "BEGIN " \
+    "DELETE FROM moz_origins " \
+    "WHERE id = OLD.origin_id " \
+      "AND id NOT IN (SELECT origin_id FROM moz_places); " \
+    "DELETE FROM moz_icons " \
+    "WHERE fixed_icon_url_hash = hash(fixup_url(OLD.host || '/favicon.ico')) " \
+      "AND fixup_url(icon_url) = fixup_url(OLD.host || '/favicon.ico') "\
+      "AND NOT EXISTS (SELECT 1 FROM moz_origins WHERE host = OLD.host " \
+                                                   "OR host = fixup_url(OLD.host)); " \
+  "END" \
+)
+
+// This trigger keeps frecencies in the moz_origins table in sync with
+// frecencies in moz_places.  However, we skip this when frecency changes are
+// due to frecency decay since (1) decay updates all frecencies at once, so this
+// trigger would run for each moz_place, which would be expensive; and (2) decay
+// does not change the ordering of frecencies since all frecencies decay by the
+// same percentage.
 #define CREATE_PLACES_AFTERUPDATE_FRECENCY_TRIGGER NS_LITERAL_CSTRING( \
   "CREATE TEMP TRIGGER moz_places_afterupdate_frecency_trigger " \
   "AFTER UPDATE OF frecency ON moz_places FOR EACH ROW " \
-  "WHEN NEW.frecency >= 0 " \
-    "AND ABS(" \
-      "IFNULL((NEW.frecency - OLD.frecency) / CAST(NEW.frecency AS REAL), " \
-             "(NEW.frecency - OLD.frecency))" \
-    ") > .05 " \
+  "WHEN NEW.frecency >= 0 AND NOT is_frecency_decaying() " \
   "BEGIN " \
-    "UPDATE moz_hosts " \
-    "SET frecency = (SELECT MAX(frecency) FROM moz_places " \
-                    "WHERE rev_host = get_unreversed_host(host || '.') || '.' " \
-                       "OR rev_host = get_unreversed_host(host || '.') || '.www.') " \
-    "WHERE host = fixup_url(get_unreversed_host(NEW.rev_host)); " \
-  "END" \
-)
-
-#define CREATE_PLACES_AFTERUPDATE_TYPED_TRIGGER NS_LITERAL_CSTRING( \
-  "CREATE TEMP TRIGGER moz_places_afterupdate_typed_trigger " \
-  "AFTER UPDATE OF typed ON moz_places FOR EACH ROW " \
-  "WHEN NEW.typed = 1 " \
-  "BEGIN " \
-    "UPDATE moz_hosts " \
-    "SET typed = 1 " \
-    "WHERE host = fixup_url(get_unreversed_host(NEW.rev_host)); " \
+    "UPDATE moz_origins " \
+    "SET frecency = ( " \
+      "SELECT IFNULL(MAX(frecency), 0) " \
+      "FROM moz_places " \
+      "WHERE moz_places.origin_id = moz_origins.id " \
+    ") " \
+    "WHERE id = NEW.origin_id; " \
+    UPDATE_FRECENCY_STATS_AFTER_UPDATE \
   "END" \
 )
 
@@ -190,7 +200,8 @@
   "WHEN NEW.open_count = 0 " \
   "BEGIN " \
     "DELETE FROM moz_openpages_temp " \
-    "WHERE url = NEW.url;" \
+    "WHERE url = NEW.url " \
+      "AND userContextId = NEW.userContextId;" \
   "END" \
 )
 
@@ -208,6 +219,7 @@
   "CREATE TEMP TRIGGER moz_bookmarks_foreign_count_afterinsert_trigger " \
   "AFTER INSERT ON moz_bookmarks FOR EACH ROW " \
   "BEGIN " \
+    "SELECT store_last_inserted_id('moz_bookmarks', NEW.id); " \
     "UPDATE moz_places " \
     "SET foreign_count = foreign_count + 1 " \
     "WHERE id = NEW.fk;" \
@@ -257,6 +269,14 @@
     "UPDATE moz_places " \
     "SET foreign_count = foreign_count - 1 " \
     "WHERE id = OLD.place_id; " \
+  "END" \
+)
+
+#define CREATE_ICONS_AFTERINSERT_TRIGGER NS_LITERAL_CSTRING( \
+  "CREATE TEMP TRIGGER moz_icons_afterinsert_v1_trigger " \
+  "AFTER INSERT ON moz_icons FOR EACH ROW " \
+  "BEGIN " \
+    "SELECT store_last_inserted_id('moz_icons', NEW.id); " \
   "END" \
 )
 

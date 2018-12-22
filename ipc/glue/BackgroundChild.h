@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,16 +11,12 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ipc/Transport.h"
 
-class nsIDOMBlob;
-class nsIIPCBackgroundChildCreateCallback;
-
 namespace mozilla {
 namespace dom {
 
 class BlobImpl;
 class ContentChild;
 class ContentParent;
-class PBlobChild;
 
 } // namespace dom
 
@@ -33,12 +31,9 @@ class PBackgroundChild;
 // across threads. Each PBackgroundChild is unique and valid as long as its
 // designated thread lives.
 //
-// Creation of PBackground is asynchronous. GetForCurrentThread() will return
-// null until the sequence is complete. GetOrCreateForCurrentThread() will start
-// the creation sequence and will call back via the
-// nsIIPCBackgroundChildCreateCallback interface when completed. Thereafter
-// (assuming success) GetForCurrentThread() will return the same actor every
-// time.
+// Creation of PBackground is synchronous. GetOrCreateForCurrentThread will
+// create the actor if it doesn't exist yet. Thereafter (assuming success)
+// GetForCurrentThread() will return the same actor every time.
 //
 // CloseForCurrentThread() will close the current PBackground actor.  Subsequent
 // calls to GetForCurrentThread will return null.  CloseForCurrentThread() may
@@ -61,16 +56,8 @@ public:
   GetForCurrentThread();
 
   // See above.
-  static bool
-  GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
-
-  static mozilla::dom::PBlobChild*
-  GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
-                          nsIDOMBlob* aBlob);
-
-  static mozilla::dom::PBlobChild*
-  GetOrCreateActorForBlobImpl(PBackgroundChild* aBackgroundActor,
-                              mozilla::dom::BlobImpl* aBlobImpl);
+  static PBackgroundChild*
+  GetOrCreateForCurrentThread();
 
   // See above.
   static void
@@ -80,10 +67,6 @@ private:
   // Only called by ContentChild or ContentParent.
   static void
   Startup();
-
-  // Only called by ContentChild.
-  static PBackgroundChild*
-  Alloc(Transport* aTransport, ProcessId aOtherProcess);
 };
 
 } // namespace ipc

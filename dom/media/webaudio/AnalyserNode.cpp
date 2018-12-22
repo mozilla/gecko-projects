@@ -22,21 +22,19 @@ static_assert((CHUNK_COUNT & (CHUNK_COUNT - 1)) == 0,
 
 namespace dom {
 
-NS_IMPL_ISUPPORTS_INHERITED0(AnalyserNode, AudioNode)
-
 class AnalyserNodeEngine final : public AudioNodeEngine
 {
-  class TransferBuffer final : public nsRunnable
+  class TransferBuffer final : public Runnable
   {
   public:
-    TransferBuffer(AudioNodeStream* aStream,
-                   const AudioChunk& aChunk)
-      : mStream(aStream)
+    TransferBuffer(AudioNodeStream* aStream, const AudioChunk& aChunk)
+      : Runnable("dom::AnalyserNodeEngine::TransferBuffer")
+      , mStream(aStream)
       , mChunk(aChunk)
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       RefPtr<AnalyserNode> node =
         static_cast<AnalyserNode*>(mStream->Engine()->NodeMainThread());
@@ -85,7 +83,7 @@ public:
 
     RefPtr<TransferBuffer> transfer =
       new TransferBuffer(aStream, aInput.AsAudioChunk());
-    NS_DispatchToMainThread(transfer);
+    mAbstractMainThread->Dispatch(transfer.forget());
   }
 
   virtual bool IsActive() const override
@@ -101,6 +99,42 @@ public:
   uint32_t mChunksToProcess = 0;
 };
 
+/* static */ already_AddRefed<AnalyserNode>
+AnalyserNode::Create(AudioContext& aAudioContext,
+                     const AnalyserOptions& aOptions,
+                     ErrorResult& aRv)
+{
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<AnalyserNode> analyserNode = new AnalyserNode(&aAudioContext);
+
+  analyserNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  analyserNode->SetFftSize(aOptions.mFftSize, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  analyserNode->SetMinAndMaxDecibels(aOptions.mMinDecibels,
+                                     aOptions.mMaxDecibels,
+                                     aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  analyserNode->SetSmoothingTimeConstant(aOptions.mSmoothingTimeConstant, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  return analyserNode.forget();
+}
+
 AnalyserNode::AnalyserNode(AudioContext* aContext)
   : AudioNode(aContext,
               1,
@@ -113,7 +147,8 @@ AnalyserNode::AnalyserNode(AudioContext* aContext)
 {
   mStream = AudioNodeStream::Create(aContext,
                                     new AnalyserNodeEngine(this),
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 
   // Enough chunks must be recorded to handle the case of fftSize being
   // increased to maximum immediately before getFloatTimeDomainData() is
@@ -142,7 +177,7 @@ AnalyserNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 AnalyserNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AnalyserNodeBinding::Wrap(aCx, this, aGivenProto);
+  return AnalyserNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -182,6 +217,17 @@ AnalyserNode::SetMaxDecibels(double aValue, ErrorResult& aRv)
 }
 
 void
+AnalyserNode::SetMinAndMaxDecibels(double aMinValue, double aMaxValue, ErrorResult& aRv)
+{
+  if (aMinValue >= aMaxValue) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
+  }
+  mMinDecibels = aMinValue;
+  mMaxDecibels = aMaxValue;
+}
+
+void
 AnalyserNode::SetSmoothingTimeConstant(double aValue, ErrorResult& aRv)
 {
   if (aValue < 0 || aValue > 1) {
@@ -205,7 +251,9 @@ AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray)
   size_t length = std::min(size_t(aArray.Length()), mOutputBuffer.Length());
 
   for (size_t i = 0; i < length; ++i) {
-    buffer[i] = WebAudioUtils::ConvertLinearToDecibels(mOutputBuffer[i], mMinDecibels);
+    buffer[i] =
+      WebAudioUtils::ConvertLinearToDecibels(mOutputBuffer[i],
+                                             -std::numeric_limits<float>::infinity());
   }
 }
 

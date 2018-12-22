@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: set ts=2 sw=2 et tw=78:
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
@@ -97,15 +97,10 @@ public:
 
   ~ArenaRefPtr() { assign(nullptr); }
 
-#ifdef MOZ_HAVE_REF_QUALIFIERS
   operator T*() const & { return get(); }
   operator T*() const && = delete;
   explicit operator bool() const { return !!mPtr; }
   bool operator!() const { return !mPtr; }
-#else
-  operator T*() const { return get(); }
-#endif
-
   T* operator->() const { return mPtr.operator->(); }
   T& operator*() const { return *get(); }
 
@@ -152,7 +147,7 @@ private:
       MOZ_ASSERT(mPtr->Arena());
       mPtr->Arena()->DeregisterArenaRefPtr(this);
     }
-    mPtr = Move(aPtr);
+    mPtr = std::move(aPtr);
     if (mPtr && !sameArena) {
       MOZ_ASSERT(mPtr->Arena());
       mPtr->Arena()->RegisterArenaRefPtr(this);

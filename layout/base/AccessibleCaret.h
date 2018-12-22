@@ -14,6 +14,7 @@
 #include "nsIDOMEventListener.h"
 #include "nsISupportsBase.h"
 #include "nsISupportsImpl.h"
+#include "nsLiteralString.h"
 #include "nsRect.h"
 #include "mozilla/RefPtr.h"
 #include "nsString.h"
@@ -24,6 +25,10 @@ class nsIPresShell;
 struct nsPoint;
 
 namespace mozilla {
+
+namespace dom {
+class Event;
+} // namespace dom
 
 // -----------------------------------------------------------------------------
 // Upon the creation of AccessibleCaret, it will insert DOM Element as an
@@ -38,7 +43,8 @@ namespace mozilla {
 // up to date.
 //
 // Please see the wiki page for more information.
-// https://wiki.mozilla.org/Copy_n_Paste
+// https://wiki.mozilla.org/AccessibleCaret
+//
 class AccessibleCaret
 {
 public:
@@ -121,7 +127,11 @@ public:
 
   // Is the point within the caret's rect? The point should be relative to root
   // frame.
-  bool Contains(const nsPoint& aPoint) const;
+  enum class TouchArea {
+    Full, // Contains both text overlay and caret image.
+    CaretImage
+  };
+  bool Contains(const nsPoint& aPoint, TouchArea aTouchArea) const;
 
   // The geometry center of the imaginary caret (nsCaret) to which this
   // AccessibleCaret is attached. It is needed when dragging the caret.
@@ -136,24 +146,36 @@ public:
     return mCaretElementHolder->GetContentNode();
   }
 
+  // Ensures that the caret element is made "APZ aware" so that the APZ code
+  // doesn't scroll the page when the user is trying to drag the caret.
+  void EnsureApzAware();
+
 protected:
   // Argument aRect should be relative to CustomContentContainerFrame().
   void SetCaretElementStyle(const nsRect& aRect, float aZoomLevel);
+  void SetTextOverlayElementStyle(const nsRect& aRect, float aZoomLevel);
+  void SetCaretImageElementStyle(const nsRect& aRect, float aZoomLevel);
   void SetSelectionBarElementStyle(const nsRect& aRect, float aZoomLevel);
 
   // Get current zoom level.
   float GetZoomLevel();
 
+  // Element which contains the text overly for the 'Contains' test.
+  dom::Element* TextOverlayElement() const
+  {
+    return mCaretElementHolder->GetElementById(sTextOverlayElementId);
+  }
+
   // Element which contains the caret image for 'Contains' test.
   dom::Element* CaretImageElement() const
   {
-    return CaretElement()->GetFirstElementChild();
+    return mCaretElementHolder->GetElementById(sCaretImageElementId);
   }
 
   // Element which represents the text selection bar.
   dom::Element* SelectionBarElement() const
   {
-    return CaretElement()->GetLastElementChild();
+    return mCaretElementHolder->GetElementById(sSelectionBarElementId);
   }
 
   nsIFrame* RootFrame() const
@@ -163,8 +185,8 @@ protected:
 
   nsIFrame* CustomContentContainerFrame() const;
 
-  // Transform Appearance to CSS class name in ua.css.
-  static nsString AppearanceString(Appearance aAppearance);
+  // Transform Appearance to CSS id used in ua.css.
+  static nsAutoString AppearanceString(Appearance aAppearance);
 
   already_AddRefed<dom::Element> CreateCaretElement(nsIDocument* aDocument) const;
 
@@ -185,7 +207,7 @@ protected:
   {
   public:
     NS_DECL_ISUPPORTS
-    NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent) override
+    NS_IMETHOD HandleEvent(mozilla::dom::Event* aEvent) override
     {
       return NS_OK;
     }
@@ -222,6 +244,9 @@ protected:
   static float sHeight;
   static float sMarginLeft;
   static float sBarWidth;
+  static const nsLiteralString sTextOverlayElementId;
+  static const nsLiteralString sCaretImageElementId;
+  static const nsLiteralString sSelectionBarElementId;
 
 }; // class AccessibleCaret
 

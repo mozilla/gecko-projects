@@ -86,6 +86,17 @@ public:
   * Does device have touch support
   */
   static uint32_t IsTouchDeviceSupportPresent();
+
+  /**
+   * Send bidi keyboard information to content process
+   */
+  static void SendBidiKeyboardInfoToContent();
+
+  /**
+   * Get branchShortName from string bundle
+   */
+  static void GetBrandShortName(nsAString& aBrandName);
+
 };
 
 } // namespace widget

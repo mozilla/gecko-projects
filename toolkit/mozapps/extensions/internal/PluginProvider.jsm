@@ -4,50 +4,27 @@
 
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
+/* exported logger */
 
-this.EXPORTED_SYMBOLS = [];
+var EXPORTED_SYMBOLS = [];
 
-Cu.import("resource://gre/modules/AddonManager.jsm");
-/*globals AddonManagerPrivate*/
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+/* globals AddonManagerPrivate*/
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+ChromeUtils.defineModuleGetter(this, "Blocklist",
+                               "resource://gre/modules/Blocklist.jsm");
 
 const URI_EXTENSION_STRINGS  = "chrome://mozapps/locale/extensions/extensions.properties";
-const STRING_TYPE_NAME       = "type.%ID%.name";
 const LIST_UPDATED_TOPIC     = "plugins-list-updated";
 const FLASH_MIME_TYPE        = "application/x-shockwave-flash";
 
-Cu.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.plugins";
 
 // Create a new logger for use by the Addons Plugin Provider
 // (Requires AddonManager.jsm)
 var logger = Log.repository.getLogger(LOGGER_ID);
-
-function getIDHashForString(aStr) {
-  // return the two-digit hexadecimal code for a byte
-  let toHexString = charCode => ("0" + charCode.toString(16)).slice(-2);
-
-  let hasher = Cc["@mozilla.org/security/hash;1"].
-               createInstance(Ci.nsICryptoHash);
-  hasher.init(Ci.nsICryptoHash.MD5);
-  let stringStream = Cc["@mozilla.org/io/string-input-stream;1"].
-                     createInstance(Ci.nsIStringInputStream);
-                     stringStream.data = aStr ? aStr : "null";
-  hasher.updateFromStream(stringStream, -1);
-
-  // convert the binary hash data to a hex string.
-  let binary = hasher.finish(false);
-  let hash = Array.from(binary, c => toHexString(c.charCodeAt(0)));
-  hash = hash.join("").toLowerCase();
-  return "{" + hash.substr(0, 8) + "-" +
-               hash.substr(8, 4) + "-" +
-               hash.substr(12, 4) + "-" +
-               hash.substr(16, 4) + "-" +
-               hash.substr(20) + "}";
-}
 
 var PluginProvider = {
   get name() {
@@ -57,42 +34,43 @@ var PluginProvider = {
   // A dictionary mapping IDs to names and descriptions
   plugins: null,
 
-  startup: function() {
-    Services.obs.addObserver(this, LIST_UPDATED_TOPIC, false);
-    Services.obs.addObserver(this, AddonManager.OPTIONS_NOTIFICATION_DISPLAYED, false);
+  startup() {
+    Services.obs.addObserver(this, LIST_UPDATED_TOPIC);
+    Services.obs.addObserver(this, AddonManager.OPTIONS_NOTIFICATION_DISPLAYED);
   },
 
   /**
    * Called when the application is shutting down. Only necessary for tests
    * to be able to simulate a shutdown.
    */
-  shutdown: function() {
+  shutdown() {
     this.plugins = null;
     Services.obs.removeObserver(this, AddonManager.OPTIONS_NOTIFICATION_DISPLAYED);
     Services.obs.removeObserver(this, LIST_UPDATED_TOPIC);
   },
 
-  observe: function(aSubject, aTopic, aData) {
+  async observe(aSubject, aTopic, aData) {
     switch (aTopic) {
     case AddonManager.OPTIONS_NOTIFICATION_DISPLAYED:
-      this.getAddonByID(aData, function(plugin) {
-        if (!plugin)
-          return;
+      let plugin = await this.getAddonByID(aData);
+      if (!plugin)
+        return;
 
-        let libLabel = aSubject.getElementById("pluginLibraries");
-        libLabel.textContent = plugin.pluginLibraries.join(", ");
+      let document = aSubject.getElementById("addon-options").contentDocument;
 
-        let typeLabel = aSubject.getElementById("pluginMimeTypes"), types = [];
-        for (let type of plugin.pluginMimeTypes) {
-          let extras = [type.description.trim(), type.suffixes].
-                       filter(x => x).join(": ");
-          types.push(type.type + (extras ? " (" + extras + ")" : ""));
-        }
-        typeLabel.textContent = types.join(",\n");
-        let showProtectedModePref = canDisableFlashProtectedMode(plugin);
-        aSubject.getElementById("pluginEnableProtectedMode")
-          .setAttribute("collapsed", showProtectedModePref ? "" : "true");
-      });
+      let libLabel = document.getElementById("pluginLibraries");
+      libLabel.textContent = plugin.pluginLibraries.join(", ");
+
+      let typeLabel = document.getElementById("pluginMimeTypes"), types = [];
+      for (let type of plugin.pluginMimeTypes) {
+        let extras = [type.description.trim(), type.suffixes].
+                     filter(x => x).join(": ");
+        types.push(type.type + (extras ? " (" + extras + ")" : ""));
+      }
+      typeLabel.textContent = types.join(",\n");
+      let showProtectedModePref = canDisableFlashProtectedMode(plugin);
+      document.getElementById("pluginEnableProtectedMode")
+        .setAttribute("collapsed", showProtectedModePref ? "" : "true");
       break;
     case LIST_UPDATED_TOPIC:
       if (this.plugins)
@@ -104,7 +82,7 @@ var PluginProvider = {
   /**
    * Creates a PluginWrapper for a plugin object.
    */
-  buildWrapper: function(aPlugin) {
+  buildWrapper(aPlugin) {
     return new PluginWrapper(aPlugin.id,
                              aPlugin.name,
                              aPlugin.description,
@@ -116,17 +94,14 @@ var PluginProvider = {
    *
    * @param  aId
    *         The ID of the add-on to retrieve
-   * @param  aCallback
-   *         A callback to pass the Addon to
    */
-  getAddonByID: function(aId, aCallback) {
+  async getAddonByID(aId) {
     if (!this.plugins)
       this.buildPluginList();
 
     if (aId in this.plugins)
-      aCallback(this.buildWrapper(this.plugins[aId]));
-    else
-      aCallback(null);
+      return this.buildWrapper(this.plugins[aId]);
+    return null;
   },
 
   /**
@@ -134,36 +109,17 @@ var PluginProvider = {
    *
    * @param  aTypes
    *         An array of types to fetch. Can be null to get all types.
-   * @param  callback
-   *         A callback to pass an array of Addons to
    */
-  getAddonsByTypes: function(aTypes, aCallback) {
-    if (aTypes && aTypes.indexOf("plugin") < 0) {
-      aCallback([]);
-      return;
+  async getAddonsByTypes(aTypes) {
+    if (aTypes && !aTypes.includes("plugin")) {
+      return [];
     }
 
     if (!this.plugins)
       this.buildPluginList();
 
-    let results = [];
-
-    for (let id in this.plugins)
-      this.getAddonByID(id, (addon) => results.push(addon));
-
-    aCallback(results);
-  },
-
-  /**
-   * Called to get Addons that have pending operations.
-   *
-   * @param  aTypes
-   *         An array of types to fetch. Can be null to get all types
-   * @param  aCallback
-   *         A callback to pass an array of Addons to
-   */
-  getAddonsWithOperationsByTypes: function(aTypes, aCallback) {
-    aCallback([]);
+    return Promise.all(Object.keys(this.plugins).map(
+      id => this.getAddonByID(id)));
   },
 
   /**
@@ -171,11 +127,9 @@ var PluginProvider = {
    *
    * @param  aTypes
    *         An array of types or null to get all types
-   * @param  aCallback
-   *         A callback to pass the array of AddonInstalls to
    */
-  getInstallsByTypes: function(aTypes, aCallback) {
-    aCallback([]);
+  getInstallsByTypes(aTypes) {
+    return [];
   },
 
   /**
@@ -183,7 +137,7 @@ var PluginProvider = {
    *
    * @return a dictionary of plugins indexed by our generated ID
    */
-  getPluginList: function() {
+  getPluginList() {
     let tags = Cc["@mozilla.org/plugin/host;1"].
                getService(Ci.nsIPluginHost).
                getPluginTags({});
@@ -195,7 +149,7 @@ var PluginProvider = {
         seenPlugins[tag.name] = {};
       if (!(tag.description in seenPlugins[tag.name])) {
         let plugin = {
-          id: getIDHashForString(tag.name + tag.description),
+          id: tag.name + tag.description,
           name: tag.name,
           description: tag.description,
           tags: [tag]
@@ -203,8 +157,7 @@ var PluginProvider = {
 
         seenPlugins[tag.name][tag.description] = plugin;
         list[plugin.id] = plugin;
-      }
-      else {
+      } else {
         seenPlugins[tag.name][tag.description].tags.push(tag);
       }
     }
@@ -215,7 +168,7 @@ var PluginProvider = {
   /**
    * Builds the list of known plugins from the plugin host
    */
-  buildPluginList: function() {
+  buildPluginList() {
     this.plugins = this.getPluginList();
   },
 
@@ -224,7 +177,7 @@ var PluginProvider = {
    * to the last known list sending out any necessary API notifications for
    * changes.
    */
-  updatePluginList: function() {
+  updatePluginList() {
     let newList = this.getPluginList();
 
     let lostPlugins = Object.keys(this.plugins).filter(id => !(id in newList)).
@@ -400,45 +353,21 @@ PluginWrapper.prototype = {
     return val;
   },
 
+  async enable() {
+    this.userDisabled = false;
+  },
+  async disable() {
+    this.userDisabled = true;
+  },
+
   get blocklistState() {
     let { tags: [tag] } = pluginFor(this);
-    let bs = Cc["@mozilla.org/extensions/blocklist;1"].
-             getService(Ci.nsIBlocklistService);
-    return bs.getPluginBlocklistState(tag);
+    return tag.blocklistState;
   },
 
-  get blocklistURL() {
+  async getBlocklistURL() {
     let { tags: [tag] } = pluginFor(this);
-    let bs = Cc["@mozilla.org/extensions/blocklist;1"].
-             getService(Ci.nsIBlocklistService);
-    return bs.getPluginBlocklistURL(tag);
-  },
-
-  get size() {
-    function getDirectorySize(aFile) {
-      let size = 0;
-      let entries = aFile.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
-      let entry;
-      while ((entry = entries.nextFile)) {
-        if (entry.isSymlink() || !entry.isDirectory())
-          size += entry.fileSize;
-        else
-          size += getDirectorySize(entry);
-      }
-      entries.close();
-      return size;
-    }
-
-    let size = 0;
-    let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    for (let tag of pluginFor(this).tags) {
-      file.initWithPath(tag.fullpath);
-      if (file.isDirectory())
-        size += getDirectorySize(file);
-      else
-        size += file.fileSize;
-    }
-    return size;
+    return Blocklist.getPluginBlockURL(tag);
   },
 
   get pluginLibraries() {
@@ -501,7 +430,7 @@ PluginWrapper.prototype = {
       if (path.startsWith(dir.path))
         return AddonManager.SCOPE_USER;
     } catch (e) {
-      if (!e.result || e.result != Components.results.NS_ERROR_FAILURE)
+      if (!e.result || e.result != Cr.NS_ERROR_FAILURE)
         throw e;
       // Do nothing: missing "Home".
     }
@@ -548,10 +477,7 @@ PluginWrapper.prototype = {
   },
 
   get optionsType() {
-    if (canDisableFlashProtectedMode(this)) {
-      return AddonManager.OPTIONS_TYPE_INLINE;
-    }
-    return AddonManager.OPTIONS_TYPE_INLINE_INFO;
+    return AddonManager.OPTIONS_TYPE_INLINE_BROWSER;
   },
 
   get optionsURL() {
@@ -578,11 +504,11 @@ PluginWrapper.prototype = {
     return true;
   },
 
-  isCompatibleWith: function(aAppVerison, aPlatformVersion) {
+  isCompatibleWith(aAppVersion, aPlatformVersion) {
     return true;
   },
 
-  findUpdates: function(aListener, aReason, aAppVersion, aPlatformVersion) {
+  findUpdates(aListener, aReason, aAppVersion, aPlatformVersion) {
     if ("onNoCompatibilityUpdateAvailable" in aListener)
       aListener.onNoCompatibilityUpdateAvailable(this);
     if ("onNoUpdateAvailable" in aListener)
@@ -594,7 +520,7 @@ PluginWrapper.prototype = {
 
 AddonManagerPrivate.registerProvider(PluginProvider, [
   new AddonManagerPrivate.AddonType("plugin", URI_EXTENSION_STRINGS,
-                                    STRING_TYPE_NAME,
+                                    "type.plugin.name",
                                     AddonManager.VIEW_TYPE_LIST, 6000,
                                     AddonManager.TYPE_SUPPORTS_ASK_TO_ACTIVATE)
 ]);

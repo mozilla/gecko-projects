@@ -6,12 +6,12 @@
 
 interface nsIInputStream;
 interface nsINetAddr;
-interface nsIPresentationChannelDescription;
-interface nsISocketTransport;
+
+webidl Blob;
 
 %{C++
-#define PRESENTATION_SESSION_TRANSPORT_CONTRACTID \
-  "@mozilla.org/presentation/presentationsessiontransport;1"
+#define PRESENTATION_TCP_SESSION_TRANSPORT_CONTRACTID \
+  "@mozilla.org/presentation/presentationtcpsessiontransport;1"
 %}
 
 /*
@@ -22,38 +22,25 @@ interface nsIPresentationSessionTransportCallback : nsISupports
 {
   void notifyTransportReady();
   void notifyTransportClosed(in nsresult reason);
-  void notifyData(in ACString data);
+  void notifyData(in ACString data, in boolean isBinary);
 };
 
 /*
  * App-to-App transport channel for the presentation session.
  */
-[scriptable, uuid(b6a416cf-03ae-4e74-9cda-88828e8ff418)]
+[scriptable, uuid(670b7e1b-65be-42b6-a596-be571907fa18)]
 interface nsIPresentationSessionTransport : nsISupports
 {
+  // Should be set once the underlying session transport is built
+  attribute nsIPresentationSessionTransportCallback callback;
+
+  // valid for TCP session transport
   readonly attribute nsINetAddr selfAddress;
-
-  /*
-   * Initialize the transport channel with an existent socket transport. (This
-   * is primarily used at the sender side.)
-   * @param transport The socket transport.
-   * @param callback The callback for followup notifications.
-   */
-  void initWithSocketTransport(in nsISocketTransport transport,
-                               in nsIPresentationSessionTransportCallback callback);
-
-  /*
-   * Initialize the transport channel with the channel description. (This is
-   * primarily used at the receiver side.)
-   * @param description The channel description.
-   * @param callback The callback for followup notifications.
-   */
-  void initWithChannelDescription(in nsIPresentationChannelDescription description,
-                                  in nsIPresentationSessionTransportCallback callback);
 
   /*
    * Enable the notification for incoming data. |notifyData| of
    * |nsIPresentationSessionTransportCallback| can start getting invoked.
+   * Should set callback before |enableDataNotification| is called.
    */
   void enableDataNotification();
 
@@ -61,7 +48,19 @@ interface nsIPresentationSessionTransport : nsISupports
    * Send message to the remote endpoint.
    * @param data The message to send.
    */
-  void send(in nsIInputStream data);
+  void send(in DOMString data);
+
+  /*
+   * Send the binary message to the remote endpoint.
+   * @param data: the message being sent out.
+   */
+  void sendBinaryMsg(in ACString data);
+
+  /*
+   * Send the blob to the remote endpoint.
+   * @param blob: The input blob to be sent.
+   */
+  void sendBlob(in Blob blob);
 
   /*
    * Close this session transport.

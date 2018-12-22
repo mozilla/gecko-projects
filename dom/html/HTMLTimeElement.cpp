@@ -29,25 +29,7 @@ NS_IMPL_ELEMENT_CLONE(HTMLTimeElement)
 JSObject*
 HTMLTimeElement::WrapNode(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLTimeElementBinding::Wrap(cx, this, aGivenProto);
-}
-
-void
-HTMLTimeElement::GetItemValueText(DOMString& text)
-{
-  if (HasAttr(kNameSpaceID_None, nsGkAtoms::datetime)) {
-    GetDateTime(text);
-  } else {
-    ErrorResult rv;
-    GetTextContentInternal(text, rv);
-  }
-}
-
-void
-HTMLTimeElement::SetItemValueText(const nsAString& text)
-{
-  ErrorResult rv;
-  SetDateTime(text, rv);
+  return HTMLTimeElement_Binding::Wrap(cx, this, aGivenProto);
 }
 
 } // namespace dom

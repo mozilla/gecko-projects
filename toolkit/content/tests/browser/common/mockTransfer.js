@@ -2,9 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Cc["@mozilla.org/moz/jssubscript-loader;1"]
-  .getService(Ci.mozIJSSubScriptLoader)
-  .loadSubScript("chrome://mochikit/content/tests/SimpleTest/MockObjects.js", this);
+Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/MockObjects.js", this);
 
 var mockTransferCallback;
 
@@ -18,7 +16,7 @@ function MockTransfer() {
 }
 
 MockTransfer.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIWebProgressListener,
     Ci.nsIWebProgressListener2,
     Ci.nsITransfer,
@@ -37,24 +35,24 @@ MockTransfer.prototype = {
       // Continue the test, reporting the success or failure condition.
       mockTransferCallback(this._downloadIsSuccessful);
   },
-  onProgressChange: function () {},
-  onLocationChange: function () {},
+  onProgressChange() {},
+  onLocationChange() {},
   onStatusChange: function MTFC_onStatusChange(aWebProgress, aRequest, aStatus,
                                                aMessage) {
     // If at least one notification reported an error, the download failed.
     if (!Components.isSuccessCode(aStatus))
       this._downloadIsSuccessful = false;
   },
-  onSecurityChange: function () {},
+  onSecurityChange() {},
 
   /* nsIWebProgressListener2 */
-  onProgressChange64: function () {},
-  onRefreshAttempted: function () {},
+  onProgressChange64() {},
+  onRefreshAttempted() {},
 
   /* nsITransfer */
-  init: function() {},
-  setSha256Hash: function() {},
-  setSignatureInfo: function() {}
+  init() {},
+  setSha256Hash() {},
+  setSignatureInfo() {}
 };
 
 // Create an instance of a MockObjectRegisterer whose methods can be used to
@@ -64,4 +62,4 @@ MockTransfer.prototype = {
 // transfer objects that are requested will be mock objects, until the
 // "unregister" method is called.
 var mockTransferRegisterer =
-  new MockObjectRegisterer("@mozilla.org/transfer;1",  MockTransfer);
+  new MockObjectRegisterer("@mozilla.org/transfer;1", MockTransfer);

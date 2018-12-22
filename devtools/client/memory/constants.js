@@ -12,9 +12,9 @@ exports.ALLOCATION_RECORDING_OPTIONS = {
 
 // If TREE_ROW_HEIGHT changes, be sure to change `var(--heap-tree-row-height)`
 // in `devtools/client/themes/memory.css`
-exports.TREE_ROW_HEIGHT = 14;
+exports.TREE_ROW_HEIGHT = 18;
 
-/*** Actions ******************************************************************/
+/** * Actions ******************************************************************/
 
 const actions = exports.actions = {};
 
@@ -75,13 +75,14 @@ actions.DIFFING_ERROR = "diffing-error";
 actions.SET_CENSUS_DISPLAY = "set-census-display";
 
 // Fired to change the display that controls the dominator tree labels.
-actions.SET_DOMINATOR_TREE_DISPLAY = "set-dominator-tree-display";
+actions.SET_LABEL_DISPLAY = "set-label-display";
 
 // Fired to set a tree map display
-actions.SET_TREEMAP_DISPLAY = "set-treemap-display";
+actions.SET_TREE_MAP_DISPLAY = "set-tree-map-display";
 
 // Fired when changing between census or dominators view.
 actions.CHANGE_VIEW = "change-view";
+actions.POP_VIEW = "pop-view";
 
 // Fired when there is an error processing a snapshot or taking a census.
 actions.SNAPSHOT_ERROR = "snapshot-error";
@@ -100,6 +101,11 @@ actions.FOCUS_CENSUS_NODE = "focus-census-node";
 actions.FOCUS_DIFFING_CENSUS_NODE = "focus-diffing-census-node";
 actions.FOCUS_DOMINATOR_TREE_NODE = "focus-dominator-tree-node";
 
+actions.FOCUS_INDIVIDUAL = "focus-individual";
+actions.FETCH_INDIVIDUALS_START = "fetch-individuals-start";
+actions.FETCH_INDIVIDUALS_END = "fetch-individuals-end";
+actions.INDIVIDUALS_ERROR = "individuals-error";
+
 actions.COMPUTE_DOMINATOR_TREE_START = "compute-dominator-tree-start";
 actions.COMPUTE_DOMINATOR_TREE_END = "compute-dominator-tree-end";
 actions.FETCH_DOMINATOR_TREE_START = "fetch-dominator-tree-start";
@@ -112,11 +118,14 @@ actions.COLLAPSE_DOMINATOR_TREE_NODE = "collapse-dominator-tree-node";
 
 actions.RESIZE_SHORTEST_PATHS = "resize-shortest-paths";
 
-/*** Census Displays ***************************************************************/
+/** * Census Displays ***************************************************************/
 
 const COUNT = Object.freeze({ by: "count", count: true, bytes: true });
 const INTERNAL_TYPE = Object.freeze({ by: "internalType", then: COUNT });
-const ALLOCATION_STACK = Object.freeze({ by: "allocationStack", then: COUNT, noStack: COUNT });
+const ALLOCATION_STACK = Object.freeze({
+  by: "allocationStack", then: COUNT,
+  noStack: COUNT
+});
 const OBJECT_CLASS = Object.freeze({ by: "objectClass", then: COUNT, other: COUNT });
 const COARSE_TYPE = Object.freeze({
   by: "coarseType",
@@ -179,7 +188,7 @@ const DOMINATOR_TREE_LABEL_COARSE_TYPE = Object.freeze({
   other: INTERNAL_TYPE,
 });
 
-exports.dominatorTreeDisplays = Object.freeze({
+exports.labelDisplays = Object.freeze({
   coarseType: Object.freeze({
     displayName: "Type",
     get tooltip() {
@@ -215,7 +224,7 @@ exports.treeMapDisplays = Object.freeze({
   })
 });
 
-/*** View States **************************************************************/
+/** * View States **************************************************************/
 
 /**
  * The various main views that the tool can be in.
@@ -225,8 +234,9 @@ viewState.CENSUS = "view-state-census";
 viewState.DIFFING = "view-state-diffing";
 viewState.DOMINATOR_TREE = "view-state-dominator-tree";
 viewState.TREE_MAP = "view-state-tree-map";
+viewState.INDIVIDUALS = "view-state-individuals";
 
-/*** Snapshot States **********************************************************/
+/** * Snapshot States **********************************************************/
 
 const snapshotState = exports.snapshotState = Object.create(null);
 
@@ -278,7 +288,7 @@ treeMapState.SAVING = "tree-map-state-saving";
 treeMapState.SAVED = "tree-map-state-saved";
 treeMapState.ERROR = "tree-map-state-error";
 
-/*** Diffing States ***********************************************************/
+/** * Diffing States ***********************************************************/
 
 /*
  * Various states the diffing model can be in.
@@ -302,7 +312,7 @@ diffingState.TOOK_DIFF = "diffing-state-took-diff";
 // An error occurred while computing the diff.
 diffingState.ERROR = "diffing-state-error";
 
-/*** Dominator Tree States ****************************************************/
+/** * Dominator Tree States ****************************************************/
 
 /*
  * Various states the dominator tree model can be in.
@@ -318,3 +328,18 @@ dominatorTreeState.FETCHING = "dominator-tree-state-fetching";
 dominatorTreeState.LOADED = "dominator-tree-state-loaded";
 dominatorTreeState.INCREMENTAL_FETCHING = "dominator-tree-state-incremental-fetching";
 dominatorTreeState.ERROR = "dominator-tree-state-error";
+
+/** * States for Individuals Model *********************************************/
+
+/*
+ * Various states the individuals model can be in.
+ *
+ *     COMPUTING_DOMINATOR_TREE -> FETCHING -> FETCHED
+ *
+ * Any state may lead to the ERROR state, from which it can never leave.
+ */
+const individualsState = exports.individualsState = Object.create(null);
+individualsState.COMPUTING_DOMINATOR_TREE = "individuals-state-computing-dominator-tree";
+individualsState.FETCHING = "individuals-state-fetching";
+individualsState.FETCHED = "individuals-state-fetched";
+individualsState.ERROR = "individuals-state-error";

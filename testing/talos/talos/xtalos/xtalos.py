@@ -1,10 +1,11 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import absolute_import, print_function
 
-import os
 import argparse
 import json
+import os
 
 DEBUG_CRITICAL = 0
 DEBUG_ERROR = 1
@@ -120,7 +121,7 @@ class XtalosOptions(argparse.ArgumentParser):
         # ensure xperf path exists
         options.xperf_path = os.path.abspath(options.xperf_path)
         if not os.path.exists(options.xperf_path):
-            print "ERROR: xperf_path '%s' does not exist" % options.xperf_path
+            print("ERROR: xperf_path '%s' does not exist" % options.xperf_path)
             return None
 
         return options

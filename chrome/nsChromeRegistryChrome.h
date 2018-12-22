@@ -36,6 +36,7 @@ class nsChromeRegistryChrome : public nsChromeRegistry
   NS_IMETHOD IsLocaleRTL(const nsACString& package,
                          bool *aResult) override;
   NS_IMETHOD GetSelectedLocale(const nsACString& aPackage,
+                               bool aAsBCP47,
                                nsACString& aLocale) override;
   NS_IMETHOD Observe(nsISupports *aSubject, const char *aTopic,
                      const char16_t *someData) override;
@@ -43,8 +44,6 @@ class nsChromeRegistryChrome : public nsChromeRegistry
 #ifdef MOZ_XUL
   NS_IMETHOD GetXULOverlays(nsIURI *aURI,
                             nsISimpleEnumerator **_retval) override;
-  NS_IMETHOD GetStyleOverlays(nsIURI *aURI,
-                              nsISimpleEnumerator **_retval) override;
 #endif
 
   // If aChild is non-null then it is a new child to notify. If aChild is
@@ -57,13 +56,10 @@ class nsChromeRegistryChrome : public nsChromeRegistry
   static void ChromePackageFromPackageEntry(const nsACString& aPackageName,
                                             PackageEntry* aPackage,
                                             ChromePackage* aChromePackage,
-                                            const nsCString& aSelectedLocale,
                                             const nsCString& aSelectedSkin);
 
   nsresult OverrideLocalePackage(const nsACString& aPackage,
                                  nsACString& aOverride);
-  nsresult SelectLocaleFromPref(nsIPrefBranch* prefs);
-  nsresult UpdateSelectedLocale() override;
   nsIURI* GetBaseURIFromPackage(const nsCString& aPackage,
                                  const nsCString& aProvider,
                                  const nsCString& aPath) override;
@@ -125,8 +121,8 @@ class nsChromeRegistryChrome : public nsChromeRegistry
     typedef nsURIHashKey::KeyTypePointer KeyTypePointer;
 
     explicit OverlayListEntry(KeyTypePointer aKey) : nsURIHashKey(aKey) { }
-    OverlayListEntry(OverlayListEntry&& toMove) : nsURIHashKey(mozilla::Move(toMove)),
-                                                  mArray(mozilla::Move(toMove.mArray)) { }
+    OverlayListEntry(OverlayListEntry&& toMove) : nsURIHashKey(std::move(toMove)),
+                                                  mArray(std::move(toMove.mArray)) { }
     ~OverlayListEntry() { }
 
     void AddURI(nsIURI* aURI);
@@ -149,14 +145,12 @@ class nsChromeRegistryChrome : public nsChromeRegistry
   };
 
   // Hashes on the file to be overlaid (chrome://browser/content/browser.xul)
-  // to a list of overlays/stylesheets
+  // to a list of overlays
   OverlayListHash mOverlayHash;
-  OverlayListHash mStyleHash;
 
   bool mProfileLoaded;
   bool mDynamicRegistration;
 
-  nsCString mSelectedLocale;
   nsCString mSelectedSkin;
 
   // Hash of package names ("global") to PackageEntry objects
@@ -170,8 +164,6 @@ class nsChromeRegistryChrome : public nsChromeRegistry
                             char *const * argv, int flags) override;
   virtual void ManifestOverlay(ManifestProcessingContext& cx, int lineno,
                                char *const * argv, int flags) override;
-  virtual void ManifestStyle(ManifestProcessingContext& cx, int lineno,
-                             char *const * argv, int flags) override;
   virtual void ManifestOverride(ManifestProcessingContext& cx, int lineno,
                                 char *const * argv, int flags) override;
   virtual void ManifestResource(ManifestProcessingContext& cx, int lineno,

@@ -13,13 +13,14 @@
 #define TestHarness_h__
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Attributes.h"
 
 #include "prenv.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -39,7 +40,7 @@ static uint32_t gFailCount = 0;
  * "TEST-UNEXPECTED-FAIL " for the benefit of the test harness and
  * appending "\n" to eliminate having to type it at each call site.
  */
-void fail(const char* msg, ...)
+MOZ_FORMAT_PRINTF(1, 2) void fail(const char* msg, ...)
 {
   va_list ap;
 
@@ -58,7 +59,7 @@ void fail(const char* msg, ...)
  * "TEST-PASS " for the benefit of the test harness and
  * appending "\n" to eliminate having to type it at each call site.
  */
-void passed(const char* msg, ...)
+MOZ_FORMAT_PRINTF(1, 2) void passed(const char* msg, ...)
 {
   va_list ap;
 
@@ -73,20 +74,6 @@ void passed(const char* msg, ...)
 
 //-----------------------------------------------------------------------------
 
-class ScopedLogging
-{
-public:
-    ScopedLogging()
-    {
-        NS_LogInit();
-    }
-
-    ~ScopedLogging()
-    {
-        NS_LogTerm();
-    }
-};
-
 class ScopedXPCOM : public nsIDirectoryServiceProvider2
 {
   public:
@@ -94,7 +81,8 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
 
     explicit ScopedXPCOM(const char* testName,
                          nsIDirectoryServiceProvider *dirSvcProvider = nullptr)
-    : mDirSvcProvider(dirSvcProvider)
+    : mServMgr(nullptr)
+    , mDirSvcProvider(dirSvcProvider)
     {
       mTestName = testName;
       printf("Running %s tests...\n", mTestName);
@@ -102,7 +90,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
       nsresult rv = NS_InitXPCOM2(&mServMgr, nullptr, this);
       if (NS_FAILED(rv))
       {
-        fail("NS_InitXPCOM2 returned failure code 0x%x", rv);
+        fail("NS_InitXPCOM2 returned failure code 0x%" PRIx32, static_cast<uint32_t>(rv));
         mServMgr = nullptr;
         return;
       }
@@ -114,13 +102,12 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
       if (mProfD) {
         nsCOMPtr<nsIObserverService> os =
           do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
-        MOZ_ASSERT(os);
-        if (os) {
-          MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-change-net-teardown", nullptr));
-          MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-change-teardown", nullptr));
-          MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-before-change", nullptr));
-          MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-before-change2", nullptr));
-        }
+        MOZ_RELEASE_ASSERT(os);
+        MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-change-net-teardown", nullptr));
+        MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-change-teardown", nullptr));
+        MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-before-change", nullptr));
+        MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-before-change-qm", nullptr));
+        MOZ_ALWAYS_SUCCEEDS(os->NotifyObservers(nullptr, "profile-before-change-telemetry", nullptr));
 
         if (NS_FAILED(mProfD->Remove(true))) {
           NS_WARNING("Problem removing profile directory");
@@ -135,7 +122,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
         nsresult rv = NS_ShutdownXPCOM(nullptr);
         if (NS_FAILED(rv))
         {
-          fail("XPCOM shutdown failed with code 0x%x", rv);
+          fail("XPCOM shutdown failed with code 0x%" PRIx32, static_cast<uint32_t>(rv));
           exit(1);
         }
       }
@@ -207,7 +194,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
 #ifdef XP_MACOSX
       nsAutoCString leafName;
       mGREBinD->GetNativeLeafName(leafName);
-      if (leafName.Equals("Resources")) {
+      if (leafName.EqualsLiteral("Resources")) {
         mGREBinD->SetNativeLeafName(NS_LITERAL_CSTRING("MacOS"));
       }
 #endif
@@ -219,8 +206,8 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
     ////////////////////////////////////////////////////////////////////////////
     //// nsIDirectoryServiceProvider
 
-    NS_IMETHODIMP GetFile(const char *aProperty, bool *_persistent,
-                          nsIFile **_result) override
+    NS_IMETHOD GetFile(const char *aProperty, bool *_persistent,
+                       nsIFile **_result) override
     {
       // If we were supplied a directory service provider, ask it first.
       if (mDirSvcProvider &&
@@ -265,7 +252,7 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
     ////////////////////////////////////////////////////////////////////////////
     //// nsIDirectoryServiceProvider2
 
-    NS_IMETHODIMP GetFiles(const char *aProperty, nsISimpleEnumerator **_enum) override
+    NS_IMETHOD GetFiles(const char *aProperty, nsISimpleEnumerator **_enum) override
     {
       // If we were supplied a directory service provider, ask it first.
       nsCOMPtr<nsIDirectoryServiceProvider2> provider =

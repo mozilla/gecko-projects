@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,6 +9,8 @@
 #include "nsCSSKeywords.h"
 #include "nsString.h"
 #include "nsXPCOM.h"
+
+using namespace mozilla;
 
 static const char* const kJunkNames[] = {
   nullptr,
@@ -22,8 +25,8 @@ static bool
 TestProps()
 {
   bool success = true;
-  nsCSSProperty id;
-  nsCSSProperty index;
+  nsCSSPropertyID id;
+  nsCSSPropertyID index;
 
   // Everything appears to assert if we don't do this first...
   nsCSSProps::AddRefTable();
@@ -38,10 +41,10 @@ TestProps()
   while (et < end) {
     char tagName[100];
     PL_strcpy(tagName, *et);
-    index = nsCSSProperty(int32_t(index) + 1);
+    index = nsCSSPropertyID(int32_t(index) + 1);
 
     id = nsCSSProps::LookupProperty(nsCString(tagName),
-                                    nsCSSProps::eIgnoreEnabledState);
+                                    CSSEnabledState::eIgnoreEnabledState);
     if (id == eCSSProperty_UNKNOWN) {
       printf("bug: can't find '%s'\n", tagName);
       success = false;
@@ -56,7 +59,7 @@ TestProps()
       tagName[0] = tagName[0] - 32;
     }
     id = nsCSSProps::LookupProperty(NS_ConvertASCIItoUTF16(tagName),
-                                    nsCSSProps::eIgnoreEnabledState);
+                                    CSSEnabledState::eIgnoreEnabledState);
     if (id < 0) {
       printf("bug: can't find '%s'\n", tagName);
       success = false;
@@ -72,7 +75,7 @@ TestProps()
   for (int i = 0; i < (int) (sizeof(kJunkNames) / sizeof(const char*)); i++) {
     const char* const tag = kJunkNames[i];
     id = nsCSSProps::LookupProperty(nsAutoCString(tag),
-                                    nsCSSProps::eIgnoreEnabledState);
+                                    CSSEnabledState::eIgnoreEnabledState);
     if (id >= 0) {
       printf("bug: found '%s'\n", tag ? tag : "(null)");
       success = false;

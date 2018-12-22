@@ -9,8 +9,7 @@
 
 "use strict";
 
-////////////////////////////////////////////////////////////////////////////////
-//// Globals
+// Globals
 
 /**
  * Verifies that the specified login is considered invalid by addLogin and by
@@ -75,8 +74,7 @@ function compareAttributes(objectA, objectB, attributes) {
   return attributes.every(attr => objectA[attr] == objectB[attr]);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Tests
+// Tests
 
 /**
  * Tests that adding logins to the database works.
@@ -300,7 +298,7 @@ add_task(function test_modifyLogin_nsIProperyBag()
   // Specifying a null property for a required value should throw.
   Assert.throws(() => Services.logins.modifyLogin(loginInfo, newPropertyBag({
     usernameField: null,
-  })));
+  })), /No matching logins/);
 
   // The login can be changed to have a different type and hostname.
   Services.logins.modifyLogin(updatedLoginInfo, differentLoginProperties);
@@ -340,7 +338,7 @@ add_task(function test_deduplicate_logins() {
     },
     {
       keyset: ["hostname", "username", "password", "formSubmitURL"],
-      results: 22,
+      results: 23,
     },
   ];
 

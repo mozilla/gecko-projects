@@ -4,34 +4,40 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ResetProfile"];
+var EXPORTED_SYMBOLS = ["ResetProfile"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const MOZ_APP_NAME = AppConstants.MOZ_APP_NAME;
 const MOZ_BUILD_APP = AppConstants.MOZ_BUILD_APP;
 
-this.ResetProfile = {
+var ResetProfile = {
   /**
    * Check if reset is supported for the currently running profile.
    *
    * @return boolean whether reset is supported.
    */
-  resetSupported: function() {
+  resetSupported() {
+    if (Services.policies && !Services.policies.isAllowed("profileRefresh")) {
+      return false;
+    }
+    // Reset is only supported if the self-migrator used for reset exists.
+    let migrator = "@mozilla.org/profile/migrator;1?app=" + MOZ_BUILD_APP +
+                   "&type=" + MOZ_APP_NAME;
+    if (!(migrator in Cc)) {
+      return false;
+    }
+    // We also need to be using a profile the profile manager knows about.
     let profileService = Cc["@mozilla.org/toolkit/profile-service;1"].
                          getService(Ci.nsIToolkitProfileService);
     let currentProfileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
-
-    // Reset is only supported for the default profile if the self-migrator used for reset exists.
-    try {
-      return currentProfileDir.equals(profileService.selectedProfile.rootDir) &&
-        ("@mozilla.org/profile/migrator;1?app=" + MOZ_BUILD_APP + "&type=" + MOZ_APP_NAME in Cc);
-    } catch (e) {
-      // Catch exception when there is no selected profile.
-      Cu.reportError(e);
+    let profileEnumerator = profileService.profiles;
+    while (profileEnumerator.hasMoreElements()) {
+      let profile = profileEnumerator.getNext().QueryInterface(Ci.nsIToolkitProfile);
+      if (profile.rootDir && profile.rootDir.equals(currentProfileDir)) {
+        return true;
+      }
     }
     return false;
   },
@@ -39,7 +45,7 @@ this.ResetProfile = {
   /**
    * Ask the user if they wish to restart the application to reset the profile.
    */
-  openConfirmationDialog: function(window) {
+  openConfirmationDialog(window) {
     // Prompt the user to confirm.
     let params = {
       reset: false,
@@ -54,7 +60,6 @@ this.ResetProfile = {
                 .getService(Ci.nsIEnvironment);
     env.set("MOZ_RESET_PROFILE_RESTART", "1");
 
-    let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
-    appStartup.quit(Ci.nsIAppStartup.eForceQuit | Ci.nsIAppStartup.eRestart);
+    Services.startup.quit(Ci.nsIAppStartup.eForceQuit | Ci.nsIAppStartup.eRestart);
   },
 };

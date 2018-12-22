@@ -10,16 +10,23 @@
 #include "AccessibleCaretManager.h"
 #include "Layers.h"
 #include "gfxPrefs.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/MouseEventBinding.h"
+#include "mozilla/dom/Selection.h"
 #include "nsCanvasFrame.h"
 #include "nsDocShell.h"
 #include "nsFocusManager.h"
 #include "nsFrameSelection.h"
+#include "nsIDocument.h"
 #include "nsITimer.h"
 #include "nsPresContext.h"
+
+using namespace mozilla;
+using namespace mozilla::dom;
 
 namespace mozilla {
 
@@ -41,19 +48,21 @@ class AccessibleCaretEventHub::NoActionState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "NoActionState"; }
+  const char* Name() const override { return "NoActionState"; }
 
-  virtual nsEventStatus OnPress(AccessibleCaretEventHub* aContext,
-                                const nsPoint& aPoint,
-                                int32_t aTouchId) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnPress(AccessibleCaretEventHub* aContext,
+                        const nsPoint& aPoint,
+                        int32_t aTouchId,
+                        EventClassID aEventClass) override
   {
     nsEventStatus rv = nsEventStatus_eIgnore;
 
-    if (NS_SUCCEEDED(aContext->mManager->PressCaret(aPoint))) {
-      aContext->SetState(aContext->PressCaretState());
+    if (NS_SUCCEEDED(aContext->mManager->PressCaret(aPoint, aEventClass))) {
+      aContext->SetState(AccessibleCaretEventHub::PressCaretState());
       rv = nsEventStatus_eConsumeNoDefault;
     } else {
-      aContext->SetState(aContext->PressNoCaretState());
+      aContext->SetState(AccessibleCaretEventHub::PressNoCaretState());
     }
 
     aContext->mPressPoint = aPoint;
@@ -62,37 +71,42 @@ public:
     return rv;
   }
 
-  virtual void OnScrollStart(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollStart(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnScrollStart();
-    aContext->SetState(aContext->ScrollState());
+    aContext->SetState(AccessibleCaretEventHub::ScrollState());
   }
 
-  virtual void OnScrollPositionChanged(
-    AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollPositionChanged(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnScrollPositionChanged();
   }
 
-  virtual void OnSelectionChanged(AccessibleCaretEventHub* aContext,
-                                  nsIDOMDocument* aDoc, nsISelection* aSel,
-                                  int16_t aReason) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnSelectionChanged(AccessibleCaretEventHub* aContext,
+                          nsIDocument* aDoc,
+                          dom::Selection* aSel,
+                          int16_t aReason) override
   {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
   }
 
-  virtual void OnBlur(AccessibleCaretEventHub* aContext,
-                      bool aIsLeavingDocument) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnBlur(AccessibleCaretEventHub* aContext,
+              bool aIsLeavingDocument) override
   {
     aContext->mManager->OnBlur();
   }
 
-  virtual void OnReflow(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnReflow(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnReflow();
   }
 
-  virtual void Enter(AccessibleCaretEventHub* aContext) override
+  void Enter(AccessibleCaretEventHub* aContext) override
   {
     aContext->mPressPoint = nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
     aContext->mActiveTouchId = kInvalidTouchId;
@@ -106,31 +120,33 @@ class AccessibleCaretEventHub::PressCaretState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "PressCaretState"; }
+  const char* Name() const override { return "PressCaretState"; }
 
-  virtual nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
-                               const nsPoint& aPoint) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
+                       const nsPoint& aPoint) override
   {
     if (aContext->MoveDistanceIsLarge(aPoint)) {
       if (NS_SUCCEEDED(aContext->mManager->DragCaret(aPoint))) {
-        aContext->SetState(aContext->DragCaretState());
+        aContext->SetState(AccessibleCaretEventHub::DragCaretState());
       }
     }
 
     return nsEventStatus_eConsumeNoDefault;
   }
 
-  virtual nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->ReleaseCaret();
     aContext->mManager->TapCaret(aContext->mPressPoint);
-    aContext->SetState(aContext->NoActionState());
+    aContext->SetState(AccessibleCaretEventHub::NoActionState());
 
     return nsEventStatus_eConsumeNoDefault;
   }
 
-  virtual nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
-                                  const nsPoint& aPoint) override
+  nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
+                          const nsPoint& aPoint) override
   {
     return nsEventStatus_eConsumeNoDefault;
   }
@@ -143,20 +159,22 @@ class AccessibleCaretEventHub::DragCaretState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "DragCaretState"; }
+  const char* Name() const override { return "DragCaretState"; }
 
-  virtual nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
-                               const nsPoint& aPoint) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
+                       const nsPoint& aPoint) override
   {
     aContext->mManager->DragCaret(aPoint);
 
     return nsEventStatus_eConsumeNoDefault;
   }
 
-  virtual nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->ReleaseCaret();
-    aContext->SetState(aContext->NoActionState());
+    aContext->SetState(AccessibleCaretEventHub::NoActionState());
 
     return nsEventStatus_eConsumeNoDefault;
   }
@@ -169,66 +187,72 @@ class AccessibleCaretEventHub::PressNoCaretState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "PressNoCaretState"; }
+  const char* Name() const override { return "PressNoCaretState"; }
 
-  virtual nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
-                               const nsPoint& aPoint) override
+  nsEventStatus OnMove(AccessibleCaretEventHub* aContext,
+                       const nsPoint& aPoint) override
   {
     if (aContext->MoveDistanceIsLarge(aPoint)) {
-      aContext->SetState(aContext->NoActionState());
+      aContext->SetState(AccessibleCaretEventHub::NoActionState());
     }
 
     return nsEventStatus_eIgnore;
   }
 
-  virtual nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
+  nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
   {
-    aContext->SetState(aContext->NoActionState());
+    aContext->SetState(AccessibleCaretEventHub::NoActionState());
 
     return nsEventStatus_eIgnore;
   }
 
-  virtual nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
-                                  const nsPoint& aPoint) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
+                          const nsPoint& aPoint) override
   {
-    aContext->SetState(aContext->LongTapState());
+    aContext->SetState(AccessibleCaretEventHub::LongTapState());
 
     return aContext->GetState()->OnLongTap(aContext, aPoint);
   }
 
-  virtual void OnScrollStart(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollStart(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnScrollStart();
-    aContext->SetState(aContext->ScrollState());
+    aContext->SetState(AccessibleCaretEventHub::ScrollState());
   }
 
-  virtual void OnBlur(AccessibleCaretEventHub* aContext,
-                      bool aIsLeavingDocument) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnBlur(AccessibleCaretEventHub* aContext,
+              bool aIsLeavingDocument) override
   {
     aContext->mManager->OnBlur();
     if (aIsLeavingDocument) {
-      aContext->SetState(aContext->NoActionState());
+      aContext->SetState(AccessibleCaretEventHub::NoActionState());
     }
   }
 
-  virtual void OnSelectionChanged(AccessibleCaretEventHub* aContext,
-                                  nsIDOMDocument* aDoc, nsISelection* aSel,
-                                  int16_t aReason) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnSelectionChanged(AccessibleCaretEventHub* aContext,
+                          nsIDocument* aDoc,
+                          dom::Selection* aSel,
+                          int16_t aReason) override
   {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
   }
 
-  virtual void OnReflow(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnReflow(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnReflow();
   }
 
-  virtual void Enter(AccessibleCaretEventHub* aContext) override
+  void Enter(AccessibleCaretEventHub* aContext) override
   {
     aContext->LaunchLongTapInjector();
   }
 
-  virtual void Leave(AccessibleCaretEventHub* aContext) override
+  void Leave(AccessibleCaretEventHub* aContext) override
   {
     aContext->CancelLongTapInjector();
   }
@@ -241,72 +265,29 @@ class AccessibleCaretEventHub::ScrollState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "ScrollState"; }
+  const char* Name() const override { return "ScrollState"; }
 
-  virtual void OnScrollEnd(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollEnd(AccessibleCaretEventHub* aContext) override
   {
-    aContext->SetState(aContext->PostScrollState());
+    aContext->mManager->OnScrollEnd();
+    aContext->SetState(AccessibleCaretEventHub::NoActionState());
   }
 
-  virtual void OnBlur(AccessibleCaretEventHub* aContext,
-                      bool aIsLeavingDocument) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollPositionChanged(AccessibleCaretEventHub* aContext) override
+  {
+    aContext->mManager->OnScrollPositionChanged();
+  }
+
+  MOZ_CAN_RUN_SCRIPT
+  void OnBlur(AccessibleCaretEventHub* aContext,
+              bool aIsLeavingDocument) override
   {
     aContext->mManager->OnBlur();
     if (aIsLeavingDocument) {
-      aContext->SetState(aContext->NoActionState());
+      aContext->SetState(AccessibleCaretEventHub::NoActionState());
     }
-  }
-};
-
-// -----------------------------------------------------------------------------
-// PostScrollState: In this state, we are waiting for another APZ start or press
-// event.
-//
-class AccessibleCaretEventHub::PostScrollState
-  : public AccessibleCaretEventHub::State
-{
-public:
-  virtual const char* Name() const override { return "PostScrollState"; }
-
-  virtual nsEventStatus OnPress(AccessibleCaretEventHub* aContext,
-                                const nsPoint& aPoint,
-                                int32_t aTouchId) override
-  {
-    aContext->mManager->OnScrollEnd();
-    aContext->SetState(aContext->NoActionState());
-
-    return aContext->GetState()->OnPress(aContext, aPoint, aTouchId);
-  }
-
-  virtual void OnScrollStart(AccessibleCaretEventHub* aContext) override
-  {
-    aContext->SetState(aContext->ScrollState());
-  }
-
-  virtual void OnScrollEnd(AccessibleCaretEventHub* aContext) override
-  {
-    aContext->mManager->OnScrollEnd();
-    aContext->SetState(aContext->NoActionState());
-  }
-
-  virtual void OnBlur(AccessibleCaretEventHub* aContext,
-                      bool aIsLeavingDocument) override
-  {
-    aContext->mManager->OnBlur();
-    if (aIsLeavingDocument) {
-      aContext->SetState(aContext->NoActionState());
-    }
-  }
-
-  virtual void Enter(AccessibleCaretEventHub* aContext) override
-  {
-    // Launch the injector to leave PostScrollState.
-    aContext->LaunchScrollEndInjector();
-  }
-
-  virtual void Leave(AccessibleCaretEventHub* aContext) override
-  {
-    aContext->CancelScrollEndInjector();
   }
 };
 
@@ -317,36 +298,38 @@ class AccessibleCaretEventHub::LongTapState
   : public AccessibleCaretEventHub::State
 {
 public:
-  virtual const char* Name() const override { return "LongTapState"; }
+  const char* Name() const override { return "LongTapState"; }
 
-  virtual nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
-                                  const nsPoint& aPoint) override
+  MOZ_CAN_RUN_SCRIPT
+  nsEventStatus OnLongTap(AccessibleCaretEventHub* aContext,
+                          const nsPoint& aPoint) override
   {
-    nsEventStatus rv = nsEventStatus_eIgnore;
-
-    if (NS_SUCCEEDED(aContext->mManager->SelectWordOrShortcut(aPoint))) {
-      rv = nsEventStatus_eConsumeNoDefault;
-    }
-
-    return rv;
+    // In general text selection is lower-priority than the context menu. If
+    // we consume this long-press event, then it prevents the context menu from
+    // showing up on desktop Firefox (because that happens on long-tap-up, if
+    // the long-tap was not cancelled). So we return eIgnore instead.
+    aContext->mManager->SelectWordOrShortcut(aPoint);
+    return nsEventStatus_eIgnore;
   }
 
-  virtual nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
+  nsEventStatus OnRelease(AccessibleCaretEventHub* aContext) override
   {
-    aContext->SetState(aContext->NoActionState());
+    aContext->SetState(AccessibleCaretEventHub::NoActionState());
 
     // Do not consume the release since the press is not consumed in
     // PressNoCaretState either.
     return nsEventStatus_eIgnore;
   }
 
-  virtual void OnScrollStart(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnScrollStart(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnScrollStart();
-    aContext->SetState(aContext->ScrollState());
+    aContext->SetState(AccessibleCaretEventHub::ScrollState());
   }
 
-  virtual void OnReflow(AccessibleCaretEventHub* aContext) override
+  MOZ_CAN_RUN_SCRIPT
+  void OnReflow(AccessibleCaretEventHub* aContext) override
   {
     aContext->mManager->OnReflow();
   }
@@ -378,10 +361,9 @@ MOZ_IMPL_STATE_CLASS_GETTER(PressCaretState)
 MOZ_IMPL_STATE_CLASS_GETTER(DragCaretState)
 MOZ_IMPL_STATE_CLASS_GETTER(PressNoCaretState)
 MOZ_IMPL_STATE_CLASS_GETTER(ScrollState)
-MOZ_IMPL_STATE_CLASS_GETTER(PostScrollState)
 MOZ_IMPL_STATE_CLASS_GETTER(LongTapState)
 
-bool AccessibleCaretEventHub::sUseLongTapInjector = true;
+bool AccessibleCaretEventHub::sUseLongTapInjector = false;
 
 AccessibleCaretEventHub::AccessibleCaretEventHub(nsIPresShell* aPresShell)
   : mPresShell(aPresShell)
@@ -394,13 +376,13 @@ AccessibleCaretEventHub::AccessibleCaretEventHub(nsIPresShell* aPresShell)
   }
 }
 
-AccessibleCaretEventHub::~AccessibleCaretEventHub()
-{
-}
-
 void
 AccessibleCaretEventHub::Init()
 {
+  if (mInitialized && mManager) {
+    mManager->OnFrameReconstruction();
+  }
+
   if (mInitialized || !mPresShell || !mPresShell->GetCanvasFrame() ||
       !mPresShell->GetCanvasFrame()->GetCustomContentContainer()) {
     return;
@@ -423,16 +405,21 @@ AccessibleCaretEventHub::Init()
     return;
   }
 
-  docShell->AddWeakReflowObserver(this);
-  docShell->AddWeakScrollObserver(this);
+  nsCOMPtr<nsIDocShell> curDocShell = docShell;
+  do {
+    curDocShell->AddWeakReflowObserver(this);
+    curDocShell->AddWeakScrollObserver(this);
+
+    nsCOMPtr<nsIDocShellTreeItem> tmp;
+    curDocShell->GetSameTypeParent(getter_AddRefs(tmp));
+    curDocShell = do_QueryInterface(tmp);
+  } while (curDocShell);
 
   mDocShell = static_cast<nsDocShell*>(docShell);
 
   if (sUseLongTapInjector) {
-    mLongTapInjectorTimer = do_CreateInstance("@mozilla.org/timer;1");
+    mLongTapInjectorTimer = NS_NewTimer();
   }
-
-  mScrollEndInjectorTimer = do_CreateInstance("@mozilla.org/timer;1");
 
   mManager = MakeUnique<AccessibleCaretManager>(mPresShell);
 
@@ -446,18 +433,18 @@ AccessibleCaretEventHub::Terminate()
     return;
   }
 
-  RefPtr<nsDocShell> docShell(mDocShell.get());
-  if (docShell) {
-    docShell->RemoveWeakReflowObserver(this);
-    docShell->RemoveWeakScrollObserver(this);
+  nsCOMPtr<nsIDocShell> curDocShell = mDocShell.get();
+  while (curDocShell) {
+    curDocShell->RemoveWeakReflowObserver(this);
+    curDocShell->RemoveWeakScrollObserver(this);
+
+    nsCOMPtr<nsIDocShellTreeItem> tmp;
+    curDocShell->GetSameTypeParent(getter_AddRefs(tmp));
+    curDocShell = do_QueryInterface(tmp);
   }
 
   if (mLongTapInjectorTimer) {
     mLongTapInjectorTimer->Cancel();
-  }
-
-  if (mScrollEndInjectorTimer) {
-    mScrollEndInjectorTimer->Cancel();
   }
 
   mManager->Terminate();
@@ -509,10 +496,20 @@ AccessibleCaretEventHub::HandleMouseEvent(WidgetMouseEvent* aEvent)
     (mActiveTouchId == kInvalidTouchId ? kDefaultTouchId : mActiveTouchId);
   nsPoint point = GetMouseEventPosition(aEvent);
 
+  if (aEvent->mMessage == eMouseDown ||
+      aEvent->mMessage == eMouseUp ||
+      aEvent->mMessage == eMouseClick ||
+      aEvent->mMessage == eMouseDoubleClick ||
+      aEvent->mMessage == eMouseLongTap) {
+    // Don't reset the source on mouse movement since that can
+    // happen anytime, even randomly during a touch sequence.
+    mManager->SetLastInputSource(aEvent->inputSource);
+  }
+
   switch (aEvent->mMessage) {
     case eMouseDown:
       AC_LOGV("Before eMouseDown, state: %s", mState->Name());
-      rv = mState->OnPress(this, point, id);
+      rv = mState->OnPress(this, point, id, eMouseEventClass);
       AC_LOGV("After eMouseDown, state: %s, consume: %d", mState->Name(), rv);
       break;
 
@@ -557,10 +554,12 @@ AccessibleCaretEventHub::HandleTouchEvent(WidgetTouchEvent* aEvent)
                                        : mActiveTouchId);
   nsPoint point = GetTouchEventPosition(aEvent, id);
 
+  mManager->SetLastInputSource(MouseEvent_Binding::MOZ_SOURCE_TOUCH);
+
   switch (aEvent->mMessage) {
     case eTouchStart:
       AC_LOGV("Before eTouchStart, state: %s", mState->Name());
-      rv = mState->OnPress(this, point, id);
+      rv = mState->OnPress(this, point, id, eTouchEventClass);
       AC_LOGV("After eTouchStart, state: %s, consume: %d", mState->Name(), rv);
       break;
 
@@ -591,6 +590,8 @@ AccessibleCaretEventHub::HandleTouchEvent(WidgetTouchEvent* aEvent)
 nsEventStatus
 AccessibleCaretEventHub::HandleKeyboardEvent(WidgetKeyboardEvent* aEvent)
 {
+  mManager->SetLastInputSource(MouseEvent_Binding::MOZ_SOURCE_KEYBOARD);
+
   switch (aEvent->mMessage) {
     case eKeyUp:
       AC_LOGV("eKeyUp, state: %s", mState->Name());
@@ -630,8 +631,12 @@ AccessibleCaretEventHub::LaunchLongTapInjector()
   }
 
   int32_t longTapDelay = gfxPrefs::UiClickHoldContextMenusDelay();
-  mLongTapInjectorTimer->InitWithFuncCallback(FireLongTap, this, longTapDelay,
-                                              nsITimer::TYPE_ONE_SHOT);
+  mLongTapInjectorTimer->InitWithNamedFuncCallback(
+    FireLongTap,
+    this,
+    longTapDelay,
+    nsITimer::TYPE_ONE_SHOT,
+    "AccessibleCaretEventHub::LaunchLongTapInjector");
 }
 
 void
@@ -648,7 +653,8 @@ AccessibleCaretEventHub::CancelLongTapInjector()
 AccessibleCaretEventHub::FireLongTap(nsITimer* aTimer,
                                      void* aAccessibleCaretEventHub)
 {
-  auto* self = static_cast<AccessibleCaretEventHub*>(aAccessibleCaretEventHub);
+  RefPtr<AccessibleCaretEventHub> self =
+    static_cast<AccessibleCaretEventHub*>(aAccessibleCaretEventHub);
   self->mState->OnLongTap(self, self->mPressPoint);
 }
 
@@ -662,6 +668,13 @@ AccessibleCaretEventHub::Reflow(DOMHighResTimeStamp aStart,
 
   MOZ_ASSERT(mRefCnt.get() > 1, "Expect caller holds us as well!");
 
+  if (mIsInReflowCallback) {
+    return NS_OK;
+  }
+
+  AutoRestore<bool> autoRestoreIsInReflowCallback(mIsInReflowCallback);
+  mIsInReflowCallback = true;
+
   AC_LOG("%s, state: %s", __FUNCTION__, mState->Name());
   mState->OnReflow(this);
   return NS_OK;
@@ -671,12 +684,7 @@ NS_IMETHODIMP
 AccessibleCaretEventHub::ReflowInterruptible(DOMHighResTimeStamp aStart,
                                              DOMHighResTimeStamp aEnd)
 {
-  if (!mInitialized) {
-    return NS_OK;
-  }
-
-  MOZ_ASSERT(mRefCnt.get() > 1, "Expect caller holds us as well!");
-
+  // Defer the error checking to Reflow().
   return Reflow(aStart, aEnd);
 }
 
@@ -719,38 +727,9 @@ AccessibleCaretEventHub::ScrollPositionChanged()
   mState->OnScrollPositionChanged(this);
 }
 
-void
-AccessibleCaretEventHub::LaunchScrollEndInjector()
-{
-  if (!mScrollEndInjectorTimer) {
-    return;
-  }
-
-  mScrollEndInjectorTimer->InitWithFuncCallback(
-    FireScrollEnd, this, kScrollEndTimerDelay, nsITimer::TYPE_ONE_SHOT);
-}
-
-void
-AccessibleCaretEventHub::CancelScrollEndInjector()
-{
-  if (!mScrollEndInjectorTimer) {
-    return;
-  }
-
-  mScrollEndInjectorTimer->Cancel();
-}
-
-/* static */ void
-AccessibleCaretEventHub::FireScrollEnd(nsITimer* aTimer,
-                                       void* aAccessibleCaretEventHub)
-{
-  auto* self = static_cast<AccessibleCaretEventHub*>(aAccessibleCaretEventHub);
-  self->mState->OnScrollEnd(self);
-}
-
 nsresult
-AccessibleCaretEventHub::NotifySelectionChanged(nsIDOMDocument* aDoc,
-                                                nsISelection* aSel,
+AccessibleCaretEventHub::NotifySelectionChanged(nsIDocument* aDoc,
+                                                dom::Selection* aSel,
                                                 int16_t aReason)
 {
   if (!mInitialized) {
@@ -797,7 +776,7 @@ AccessibleCaretEventHub::GetTouchEventPosition(WidgetTouchEvent* aEvent,
 nsPoint
 AccessibleCaretEventHub::GetMouseEventPosition(WidgetMouseEvent* aEvent) const
 {
-  LayoutDeviceIntPoint mouseIntPoint = aEvent->AsGUIEvent()->refPoint;
+  LayoutDeviceIntPoint mouseIntPoint = aEvent->AsGUIEvent()->mRefPoint;
 
   // Get event coordinate relative to root frame.
   nsIFrame* rootFrame = mPresShell->GetRootFrame();

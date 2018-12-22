@@ -32,6 +32,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/TypedArray.h"
+#include "mozilla/dom/DOMPrefs.h"
 
 #include "nsCOMPtr.h"
 #include "mozilla/RefPtr.h"
@@ -42,12 +43,11 @@ class nsIPrincipal;
 namespace mozilla {
 namespace dom {
 
-namespace workers {
-class WorkerPrivate;
-}
-
+class OwningArrayBufferViewOrArrayBufferOrString;
 class Promise;
 class PushManagerImpl;
+struct PushSubscriptionOptionsInit;
+class WorkerPrivate;
 
 class PushManager final : public nsISupports
                         , public nsWrapperCache
@@ -85,18 +85,27 @@ public:
                                       ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  Subscribe(ErrorResult& aRv);
+  PerformSubscriptionActionFromWorker(SubscriptionAction aAction,
+                                      const PushSubscriptionOptionsInit& aOptions,
+                                      ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  Subscribe(const PushSubscriptionOptionsInit& aOptions, ErrorResult& aRv);
 
   already_AddRefed<Promise>
   GetSubscription(ErrorResult& aRv);
 
   already_AddRefed<Promise>
-  PermissionState(ErrorResult& aRv);
-
-protected:
-  ~PushManager();
+  PermissionState(const PushSubscriptionOptionsInit& aOptions,
+                  ErrorResult& aRv);
 
 private:
+  ~PushManager();
+
+  nsresult
+  NormalizeAppServerKey(const OwningArrayBufferViewOrArrayBufferOrString& aSource,
+                        nsTArray<uint8_t>& aAppServerKey);
+
   // The following are only set and accessed on the main thread.
   nsCOMPtr<nsIGlobalObject> mGlobal;
   RefPtr<PushManagerImpl> mImpl;

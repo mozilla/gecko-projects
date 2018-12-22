@@ -6,13 +6,15 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from textwrap import TextWrapper
 
+from mach.config import TYPE_CLASSES
 from mach.decorators import (
+    CommandArgument,
     CommandProvider,
     Command,
 )
 
 
-#@CommandProvider
+@CommandProvider
 class Settings(object):
     """Interact with settings for mach.
 
@@ -21,30 +23,35 @@ class Settings(object):
     people create configs via a wizard, etc.
     """
     def __init__(self, context):
-        self.settings = context.settings
+        self._settings = context.settings
 
-    @Command('settings-list', category='devenv',
-        description='Show available config settings.')
-    def list_settings(self):
-        """List available settings in a concise list."""
-        for section in sorted(self.settings):
-            for option in sorted(self.settings[section]):
-                short, full = self.settings.option_help(section, option)
-                print('%s.%s -- %s' % (section, option, short))
-
-    @Command('settings-create', category='devenv',
-        description='Print a new settings file with usage info.')
-    def create(self):
-        """Create an empty settings file with full documentation."""
+    @Command('settings', category='devenv',
+             description='Show available config settings.')
+    @CommandArgument('-l', '--list', dest='short', action='store_true',
+                     help='Show settings in a concise list')
+    def settings(self, short=None):
+        """List available settings."""
+        types = {v: k for k, v in TYPE_CLASSES.items()}
         wrapper = TextWrapper(initial_indent='# ', subsequent_indent='# ')
+        for i, section in enumerate(sorted(self._settings)):
+            if not short:
+                print('%s[%s]' % ('' if i == 0 else '\n', section))
 
-        for section in sorted(self.settings):
-            print('[%s]' % section)
-            print('')
+            for option in sorted(self._settings[section]._settings):
+                meta = self._settings[section].get_meta(option)
+                desc = meta['description']
 
-            for option in sorted(self.settings[section]):
-                short, full = self.settings.option_help(section, option)
+                if short:
+                    print('%s.%s -- %s' % (section, option, desc.splitlines()[0]))
+                    continue
 
-                print(wrapper.fill(full))
-                print(';%s =' % option)
-                print('')
+                if option == '*':
+                    option = '<option>'
+
+                if 'choices' in meta:
+                    value = "{%s}" % ', '.join(meta['choices'])
+                else:
+                    value = '<%s>' % types[meta['type_cls']]
+
+                print(wrapper.fill(desc))
+                print(';%s=%s' % (option, value))

@@ -5,11 +5,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsfun.h"  // for js::IsInternalFunctionObject
-
 #include "jsapi-tests/tests.h"
 
-#include "jsobjinlines.h"
+#include "vm/JSFunction.h"  // for js::IsInternalFunctionObject
+
+#include "vm/JSObject-inl.h"
 
 BEGIN_TEST(testLookup_bug522590)
 {
@@ -73,10 +73,14 @@ document_resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* res
     return true;
 }
 
+static const JSClassOps document_classOps = {
+    nullptr, nullptr, nullptr, nullptr,
+    document_resolve, nullptr
+};
+
 static const JSClass document_class = {
     "document", 0,
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, document_resolve, nullptr
+    &document_classOps
 };
 
 BEGIN_TEST(testLookup_bug570195)

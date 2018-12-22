@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -40,21 +41,15 @@ public:
 
   ~SharedSurfaceTextureData();
 
-  virtual bool Lock(OpenMode, FenceHandle*) override { return false; }
+  virtual bool Lock(OpenMode) override { return false; }
 
   virtual void Unlock() override {}
 
-  virtual bool HasIntermediateBuffer() const override { return false; }
-
-  virtual gfx::SurfaceFormat GetFormat() const override {
-    return gfx::SurfaceFormat::UNKNOWN;
-  }
-
-  virtual gfx::IntSize GetSize() const override;
+  virtual void FillInfo(TextureData::Info& aInfo) const override;
 
   virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual void Deallocate(ClientIPCAllocator*) override;
+  virtual void Deallocate(LayersIPCChannel*) override;
 
   gl::SharedSurface* Surf() const { return mSurf.get(); }
 };
@@ -64,21 +59,13 @@ class SharedSurfaceTextureClient : public TextureClient
 public:
   SharedSurfaceTextureClient(SharedSurfaceTextureData* aData,
                              TextureFlags aFlags,
-                             ClientIPCAllocator* aAllocator);
+                             LayersIPCChannel* aAllocator);
 
   ~SharedSurfaceTextureClient();
 
   static already_AddRefed<SharedSurfaceTextureClient>
   Create(UniquePtr<gl::SharedSurface> surf, gl::SurfaceFactory* factory,
-         ClientIPCAllocator* aAllocator, TextureFlags aFlags);
-
-  virtual void SetReleaseFenceHandle(const FenceHandle& aReleaseFenceHandle) override;
-
-  virtual FenceHandle GetAndResetReleaseFenceHandle() override;
-
-  virtual void SetAcquireFenceHandle(const FenceHandle& aAcquireFenceHandle) override;
-
-  virtual const FenceHandle& GetAcquireFenceHandle() const override;
+         LayersIPCChannel* aAllocator, TextureFlags aFlags);
 
   gl::SharedSurface* Surf() const {
     return static_cast<const SharedSurfaceTextureData*>(GetInternalData())->Surf();

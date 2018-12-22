@@ -7,9 +7,8 @@ const VIDEO_URL = "http://mochi.test:8888/browser/browser/base/content/test/gene
  * mockTransfer.js provides a utility that lets us mock out
  * the "Save File" dialog.
  */
-Cc["@mozilla.org/moz/jssubscript-loader;1"]
-  .getService(Ci.mozIJSSubScriptLoader)
-  .loadSubScript("chrome://mochitests/content/browser/toolkit/content/tests/browser/common/mockTransfer.js",
+/* import-globals-from ../../../../../toolkit/content/tests/browser/common/mockTransfer.js */
+Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/toolkit/content/tests/browser/common/mockTransfer.js",
                  this);
 
 /**
@@ -19,9 +18,7 @@ Cc["@mozilla.org/moz/jssubscript-loader;1"]
  * @return nsIFile
  */
 function createTemporarySaveDirectory() {
-  let saveDir = Cc["@mozilla.org/file/directory_service;1"]
-                  .getService(Ci.nsIProperties)
-                  .get("TmpD", Ci.nsIFile);
+  let saveDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
   saveDir.append("testsavedir");
   if (!saveDir.exists())
     saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
@@ -37,7 +34,7 @@ function waitForTransferComplete() {
     mockTransferCallback = () => {
       ok(true, "Transfer completed");
       resolve();
-    }
+    };
   });
 }
 
@@ -47,7 +44,6 @@ function waitForTransferComplete() {
  */
 function rightClickVideo(browser) {
   let frame_script = () => {
-    const Ci = Components.interfaces;
     let utils = content.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDOMWindowUtils);
 
@@ -62,7 +58,7 @@ function rightClickVideo(browser) {
     utils.sendMouseEvent("contextmenu", left, top,
                          2, /* aButton */
                          1, /* aClickCount */
-                         0  /* aModifiers */);
+                         0 /* aModifiers */);
   };
   let mm = browser.messageManager;
   mm.loadFrameScript("data:,(" + frame_script.toString() + ")();", true);
@@ -73,7 +69,7 @@ function rightClickVideo(browser) {
  * to save a frame screenshot to the disk. Completes once we've
  * verified that the frame has been saved to disk.
  */
-add_task(function*() {
+add_task(async function() {
   let MockFilePicker = SpecialPowers.MockFilePicker;
   MockFilePicker.init(window);
 
@@ -84,43 +80,42 @@ add_task(function*() {
   MockFilePicker.displayDirectory = destDir;
   MockFilePicker.showCallback = function(fp) {
     destFile.append(fp.defaultString);
-    MockFilePicker.returnFiles = [destFile];
+    MockFilePicker.setFiles([destFile]);
     MockFilePicker.filterIndex = 1; // kSaveAsType_URL
   };
 
   mockTransferRegisterer.register();
 
   // Make sure that we clean these things up when we're done.
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     mockTransferRegisterer.unregister();
     MockFilePicker.cleanup();
     destDir.remove(true);
   });
 
-  let tab = gBrowser.addTab();
+  let tab = BrowserTestUtils.addTab(gBrowser);
   gBrowser.selectedTab = tab;
   let browser = tab.linkedBrowser;
   info("Loading video tab");
-  yield promiseTabLoadEvent(tab, VIDEO_URL);
+  await promiseTabLoadEvent(tab, VIDEO_URL);
   info("Video tab loaded.");
 
-  let video = browser.contentDocument.getElementById("video1");
   let context = document.getElementById("contentAreaContextMenu");
   let popupPromise = promisePopupShown(context);
 
   info("Synthesizing right-click on video element");
   rightClickVideo(browser);
   info("Waiting for popup to fire popupshown.");
-  yield popupPromise;
+  await popupPromise;
   info("Popup fired popupshown");
 
   let saveSnapshotCommand = document.getElementById("context-video-saveimage");
-  let promiseTransfer = waitForTransferComplete()
+  let promiseTransfer = waitForTransferComplete();
   info("Firing save snapshot command");
   saveSnapshotCommand.doCommand();
   context.hidePopup();
   info("Waiting for transfer completion");
-  yield promiseTransfer;
+  await promiseTransfer;
   info("Transfer complete");
   gBrowser.removeTab(tab);
 });

@@ -10,12 +10,9 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.util.Log;
 
-import org.json.JSONException;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.db.BrowserContract.UrlAnnotations.Key;
-import org.mozilla.gecko.feeds.subscriptions.FeedSubscription;
 
 public class LocalUrlAnnotations implements UrlAnnotations {
     private static final String LOGTAG = "LocalUrlAnnotations";
@@ -43,6 +40,18 @@ public class LocalUrlAnnotations implements UrlAnnotations {
     @Override
     public void insertFeedUrl(ContentResolver cr, String originUrl, String feedUrl) {
         insertAnnotation(cr, originUrl, Key.FEED, feedUrl);
+    }
+
+    @Override
+    public boolean hasAcceptedOrDeclinedHomeScreenShortcut(ContentResolver cr, String url) {
+        return hasResultsForSelection(cr,
+                BrowserContract.UrlAnnotations.URL + " = ?",
+                new String[]{url});
+    }
+
+    @Override
+    public void insertHomeScreenShortcut(ContentResolver cr, String url, boolean hasCreatedShortCut) {
+        insertAnnotation(cr, url, Key.HOME_SCREEN_SHORTCUT, String.valueOf(hasCreatedShortCut));
     }
 
     /**
@@ -85,63 +94,10 @@ public class LocalUrlAnnotations implements UrlAnnotations {
                 null);
     }
 
-    /**
-     * Returns true if there's a subscription for this feed URL. False otherwise.
-     */
-    @Override
-    public boolean hasFeedSubscription(ContentResolver cr, String feedUrl) {
-        return hasResultsForSelection(cr,
-                BrowserContract.UrlAnnotations.URL + " = ? AND " + BrowserContract.UrlAnnotations.KEY + " = ?",
-                new String[]{feedUrl, Key.FEED_SUBSCRIPTION.getDbValue()});
-    }
-
-    /**
-     * Insert the given feed subscription (Mapping from feed URL to the subscription object).
-     */
-    @Override
-    public void insertFeedSubscription(ContentResolver cr, FeedSubscription subscription) {
-        try {
-            insertAnnotation(cr, subscription.getFeedUrl(), Key.FEED_SUBSCRIPTION, subscription.toJSON().toString());
-        } catch (JSONException e) {
-            Log.w(LOGTAG, "Could not serialize subscription");
-        }
-    }
-
-    /**
-     * Update the feed subscription with new values.
-     */
-    @Override
-    public void updateFeedSubscription(ContentResolver cr, FeedSubscription subscription) {
-        try {
-            updateAnnotation(cr, subscription.getFeedUrl(), Key.FEED_SUBSCRIPTION, subscription.toJSON().toString());
-        } catch (JSONException e) {
-            Log.w(LOGTAG, "Could not serialize subscription");
-        }
-    }
-
-    /**
-     * Delete the subscription for the feed URL.
-     */
-    @Override
-    public void deleteFeedSubscription(ContentResolver cr, FeedSubscription subscription) {
-        deleteAnnotation(cr, subscription.getFeedUrl(), Key.FEED_SUBSCRIPTION);
-    }
-
     private int deleteAnnotation(final ContentResolver cr, final String url, final Key key) {
         return cr.delete(urlAnnotationsTableWithProfile,
                 BrowserContract.UrlAnnotations.KEY + " = ? AND " + BrowserContract.UrlAnnotations.URL + " = ?",
                 new String[] { key.getDbValue(), url  });
-    }
-
-    private int updateAnnotation(final ContentResolver cr, final String url, final Key key, final String value) {
-        ContentValues values = new ContentValues();
-        values.put(BrowserContract.UrlAnnotations.VALUE, value);
-        values.put(BrowserContract.UrlAnnotations.DATE_MODIFIED, System.currentTimeMillis());
-
-        return cr.update(urlAnnotationsTableWithProfile,
-                values,
-                BrowserContract.UrlAnnotations.KEY + " = ? AND " + BrowserContract.UrlAnnotations.URL + " = ?",
-                new String[]{key.getDbValue(), url});
     }
 
     private void insertAnnotation(final ContentResolver cr, final String url, final Key key, final String value) {
@@ -205,5 +161,37 @@ public class LocalUrlAnnotations implements UrlAnnotations {
 
     public void insertScreenshot(final ContentResolver cr, final String pageUrl, final String screenshotPath) {
         insertAnnotation(cr, pageUrl, Key.SCREENSHOT.getDbValue(), screenshotPath);
+    }
+
+    @Override
+    public void insertReaderViewUrl(final ContentResolver cr, final String pageUrl) {
+        insertAnnotation(cr, pageUrl, Key.READER_VIEW.getDbValue(), BrowserContract.UrlAnnotations.READER_VIEW_SAVED_VALUE);
+    }
+
+    @Override
+    public void deleteReaderViewUrl(ContentResolver cr, String pageURL) {
+        deleteAnnotation(cr, pageURL, Key.READER_VIEW);
+    }
+
+    public int getAnnotationCount(ContentResolver cr, Key key) {
+        final String countColumnname = "count";
+        final Cursor c = queryByKey(cr,
+                key,
+                new String[] {
+                        "COUNT(*) AS " + countColumnname
+                },
+                null);
+
+        try {
+            if (c != null && c.moveToFirst()) {
+                return c.getInt(c.getColumnIndexOrThrow(countColumnname));
+            } else {
+                return 0;
+            }
+        } finally {
+            if (c != null) {
+                c.close();
+            }
+        }
     }
 }

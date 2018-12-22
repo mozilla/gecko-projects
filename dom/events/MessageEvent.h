@@ -9,7 +9,6 @@
 
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/BindingUtils.h"
-#include "mozilla/dom/MessagePortList.h"
 #include "nsCycleCollectionParticipant.h"
 
 namespace mozilla {
@@ -17,9 +16,9 @@ namespace dom {
 
 struct MessageEventInit;
 class MessagePort;
-class MessagePortList;
-class OwningWindowProxyOrMessagePort;
-class WindowProxyOrMessagePort;
+class OwningWindowProxyOrMessagePortOrServiceWorker;
+class ServiceWorker;
+class WindowProxyOrMessagePortOrServiceWorker;
 
 /**
  * Implements the MessageEvent event, used for cross-document messaging and
@@ -38,31 +37,15 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(MessageEvent, Event)
 
-  // Forward to base class
-  NS_FORWARD_TO_EVENT
-
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   void GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aData,
                ErrorResult& aRv);
   void GetOrigin(nsAString&) const;
   void GetLastEventId(nsAString&) const;
-  void GetSource(Nullable<OwningWindowProxyOrMessagePort>& aValue) const;
+  void GetSource(Nullable<OwningWindowProxyOrMessagePortOrServiceWorker>& aValue) const;
 
-  MessagePortList* GetPorts()
-  {
-    return mPorts;
-  }
-
-  void SetPorts(MessagePortList* aPorts);
-
-  // Non WebIDL methods
-  void SetSource(mozilla::dom::MessagePort* aPort);
-
-  void SetSource(nsPIDOMWindowInner* aWindow)
-  {
-    mWindowSource = aWindow;
-  }
+  void GetPorts(nsTArray<RefPtr<MessagePort>>& aPorts);
 
   static already_AddRefed<MessageEvent>
   Constructor(const GlobalObject& aGlobal,
@@ -73,14 +56,29 @@ public:
   static already_AddRefed<MessageEvent>
   Constructor(EventTarget* aEventTarget,
               const nsAString& aType,
-              const MessageEventInit& aEventInit,
-              ErrorResult& aRv);
+              const MessageEventInit& aEventInit);
 
-  void InitMessageEvent(JSContext* aCx, const nsAString& aType, bool aCanBubble,
-                        bool aCancelable, JS::Handle<JS::Value> aData,
+  void InitMessageEvent(JSContext* aCx, const nsAString& aType,
+                        bool aCanBubble, bool aCancelable,
+                        JS::Handle<JS::Value> aData,
                         const nsAString& aOrigin, const nsAString& aLastEventId,
-                        const Nullable<WindowProxyOrMessagePort>& aSource,
-                        const Nullable<Sequence<OwningNonNull<MessagePort>>>& aPorts);
+                        const Nullable<WindowProxyOrMessagePortOrServiceWorker>& aSource,
+                        const Sequence<OwningNonNull<MessagePort>>& aPorts)
+  {
+    InitMessageEvent(aCx, aType,
+                     aCanBubble ? CanBubble::eYes : CanBubble::eNo,
+                     aCancelable ? Cancelable::eYes : Cancelable::eNo,
+                     aData,
+                     aOrigin, aLastEventId,
+                     aSource, aPorts);
+  }
+
+  void InitMessageEvent(JSContext* aCx, const nsAString& aType,
+                        mozilla::CanBubble, mozilla::Cancelable,
+                        JS::Handle<JS::Value> aData,
+                        const nsAString& aOrigin, const nsAString& aLastEventId,
+                        const Nullable<WindowProxyOrMessagePortOrServiceWorker>& aSource,
+                        const Sequence<OwningNonNull<MessagePort>>& aPorts);
 
 protected:
   ~MessageEvent();
@@ -89,17 +87,14 @@ private:
   JS::Heap<JS::Value> mData;
   nsString mOrigin;
   nsString mLastEventId;
-  RefPtr<nsPIDOMWindowInner> mWindowSource;
+  RefPtr<nsPIDOMWindowOuter> mWindowSource;
   RefPtr<MessagePort> mPortSource;
-  RefPtr<MessagePortList> mPorts;
+  RefPtr<ServiceWorker> mServiceWorkerSource;
+
+  nsTArray<RefPtr<MessagePort>> mPorts;
 };
 
 } // namespace dom
 } // namespace mozilla
-
-already_AddRefed<mozilla::dom::MessageEvent>
-NS_NewDOMMessageEvent(mozilla::dom::EventTarget* aOwner,
-                      nsPresContext* aPresContext,
-                      mozilla::WidgetEvent* aEvent);
 
 #endif // mozilla_dom_MessageEvent_h_

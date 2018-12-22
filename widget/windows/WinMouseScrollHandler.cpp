@@ -15,50 +15,23 @@
 #include "WinUtils.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMWindowUtils.h"
-#include "nsIDOMWheelEvent.h"
 
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/WindowsVersion.h"
+#include "mozilla/dom/WheelEventBinding.h"
 
 #include <psapi.h>
 
 namespace mozilla {
 namespace widget {
 
-PRLogModuleInfo* gMouseScrollLog = nullptr;
+LazyLogModule gMouseScrollLog("MouseScrollHandlerWidgets");
 
 static const char* GetBoolName(bool aBool)
 {
   return aBool ? "TRUE" : "FALSE";
 }
-
-static void LogKeyStateImpl()
-{
-  if (!MOZ_LOG_TEST(gMouseScrollLog, LogLevel::Debug)) {
-    return;
-  }
-  BYTE keyboardState[256];
-  if (::GetKeyboardState(keyboardState)) {
-    for (size_t i = 0; i < ArrayLength(keyboardState); i++) {
-      if (keyboardState[i]) {
-        MOZ_LOG(gMouseScrollLog, LogLevel::Debug,
-          ("    Current key state: keyboardState[0x%02X]=0x%02X (%s)",
-           i, keyboardState[i],
-           ((keyboardState[i] & 0x81) == 0x81) ? "Pressed and Toggled" :
-           (keyboardState[i] & 0x80) ? "Pressed" :
-           (keyboardState[i] & 0x01) ? "Toggled" : "Unknown"));
-      }
-    }
-  } else {
-    MOZ_LOG(gMouseScrollLog, LogLevel::Debug,
-      ("MouseScroll::Device::Elantech::HandleKeyMessage(): Failed to print "
-       "current keyboard state"));
-  }
-}
-
-#define LOG_KEYSTATE() LogKeyStateImpl()
 
 MouseScrollHandler* MouseScrollHandler::sInstance = nullptr;
 
@@ -107,9 +80,6 @@ MouseScrollHandler::GetCurrentMessagePos()
 void
 MouseScrollHandler::Initialize()
 {
-  if (!gMouseScrollLog) {
-    gMouseScrollLog = PR_NewLogModule("MouseScrollHandlerWidgets");
-  }
   Device::Init();
 }
 
@@ -147,6 +117,32 @@ MouseScrollHandler::~MouseScrollHandler()
      this, sInstance));
 
   delete mSynthesizingEvent;
+}
+
+/* static */
+void
+MouseScrollHandler::MaybeLogKeyState()
+{
+  if (!MOZ_LOG_TEST(gMouseScrollLog, LogLevel::Debug)) {
+    return;
+  }
+  BYTE keyboardState[256];
+  if (::GetKeyboardState(keyboardState)) {
+    for (size_t i = 0; i < ArrayLength(keyboardState); i++) {
+      if (keyboardState[i]) {
+        MOZ_LOG(gMouseScrollLog, LogLevel::Debug,
+          ("    Current key state: keyboardState[0x%02X]=0x%02X (%s)",
+           i, keyboardState[i],
+           ((keyboardState[i] & 0x81) == 0x81) ? "Pressed and Toggled" :
+           (keyboardState[i] & 0x80) ? "Pressed" :
+           (keyboardState[i] & 0x01) ? "Toggled" : "Unknown"));
+      }
+    }
+  } else {
+    MOZ_LOG(gMouseScrollLog, LogLevel::Debug,
+      ("MouseScroll::MaybeLogKeyState(): Failed to print current keyboard "
+       "state"));
+  }
 }
 
 /* static */
@@ -235,7 +231,7 @@ MouseScrollHandler::ProcessMessage(nsWindowBase* aWidget, UINT msg,
          aWidget, msg == WM_KEYDOWN ? "WM_KEYDOWN" :
                     msg == WM_KEYUP ? "WM_KEYUP" : "Unknown", msg, wParam,
          ::GetMessageTime()));
-      LOG_KEYSTATE();
+      MaybeLogKeyState();
       if (Device::Elantech::HandleKeyMessage(aWidget, msg, wParam, lParam)) {
         aResult.mResult = 0;
         aResult.mConsumed = true;
@@ -301,7 +297,8 @@ MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindowBase* aWidget,
   memset(kbdState, 0, sizeof(kbdState));
 
   AutoTArray<KeyPair,10> keySequence;
-  WinUtils::SetupKeyModifiersSequence(&keySequence, aModifierFlags);
+  WinUtils::SetupKeyModifiersSequence(&keySequence, aModifierFlags,
+                                      aNativeMessage);
 
   for (uint32_t i = 0; i < keySequence.Length(); ++i) {
     uint8_t key = keySequence[i].mGeneral;
@@ -355,6 +352,9 @@ MouseScrollHandler::GetModifierKeyState(UINT aMessage)
   // MouseScrollHandler::Device::Elantech::HandleKeyMessage().)
   if ((aMessage == MOZ_WM_MOUSEVWHEEL || aMessage == WM_MOUSEWHEEL) &&
       !result.IsControl() && Device::Elantech::IsZooming()) {
+    // XXX Do we need to unset MODIFIER_SHIFT, MODIFIER_ALT, MODIFIER_OS too?
+    //     If one of them are true, the default action becomes not zooming.
+    result.Unset(MODIFIER_ALTGRAPH);
     result.Set(MODIFIER_CONTROL);
   }
   return result;
@@ -399,7 +399,7 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindowBase* aWidget,
               aMessage == WM_MOUSEHWHEEL ? "WM_MOUSEHWHEEL" :
               aMessage == WM_VSCROLL ? "WM_VSCROLL" : "WM_HSCROLL",
      aWParam, aLParam, point.x, point.y));
-  LOG_KEYSTATE();
+  MaybeLogKeyState();
 
   HWND underCursorWnd = ::WindowFromPoint(point);
   if (!underCursorWnd) {
@@ -449,6 +449,14 @@ MouseScrollHandler::ProcessNativeMouseWheelMessage(nsWindowBase* aWidget,
     }
 
     MOZ_ASSERT(destWindow, "destWindow must not be NULL");
+
+    // Some odd touchpad utils sets focus to window under the mouse cursor.
+    // this emulates the odd behavior for debug.
+    if (mUserPrefs.ShouldEmulateToMakeWindowUnderCursorForeground() &&
+        (aMessage == WM_MOUSEWHEEL || aMessage == WM_MOUSEHWHEEL) &&
+        ::GetForegroundWindow() != destWindow->GetWindowHandle()) {
+      ::SetForegroundWindow(destWindow->GetWindowHandle());
+    }
 
     // If the found window is our plugin window, it means that the message
     // has been handled by the plugin but not consumed.  We should handle the
@@ -689,14 +697,14 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindowBase* aWidget
       delta = -1.0;
       lineOrPageDelta = -1;
     case SB_PAGEDOWN:
-      wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_PAGE;
+      wheelEvent.mDeltaMode = dom::WheelEvent_Binding::DOM_DELTA_PAGE;
       break;
 
     case SB_LINEUP:
       delta = -1.0;
       lineOrPageDelta = -1;
     case SB_LINEDOWN:
-      wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
+      wheelEvent.mDeltaMode = dom::WheelEvent_Binding::DOM_DELTA_LINE;
       break;
 
     default:
@@ -711,11 +719,11 @@ MouseScrollHandler::HandleScrollMessageAsMouseWheelMessage(nsWindowBase* aWidget
   MOZ_LOG(gMouseScrollLog, LogLevel::Info,
     ("MouseScroll::HandleScrollMessageAsMouseWheelMessage: aWidget=%p, "
      "aMessage=MOZ_WM_%sSCROLL, aWParam=0x%08X, aLParam=0x%08X, "
-     "wheelEvent { refPoint: { x: %d, y: %d }, mDeltaX: %f, mDeltaY: %f, "
+     "wheelEvent { mRefPoint: { x: %d, y: %d }, mDeltaX: %f, mDeltaY: %f, "
      "mLineOrPageDeltaX: %d, mLineOrPageDeltaY: %d, "
      "isShift: %s, isControl: %s, isAlt: %s, isMeta: %s }",
      aWidget, (aMessage == MOZ_WM_VSCROLL) ? "V" : "H", aWParam, aLParam,
-     wheelEvent.refPoint.x, wheelEvent.refPoint.y,
+     wheelEvent.mRefPoint.x, wheelEvent.mRefPoint.y,
      wheelEvent.mDeltaX, wheelEvent.mDeltaY,
      wheelEvent.mLineOrPageDeltaX, wheelEvent.mLineOrPageDeltaY,
      GetBoolName(wheelEvent.IsShift()),
@@ -845,8 +853,8 @@ MouseScrollHandler::LastEventInfo::InitWheelEvent(
   // Use orienter for computing our delta value with native delta value.
   int32_t orienter = mIsVertical ? -1 : 1;
 
-  aWheelEvent.mDeltaMode = mIsPage ? nsIDOMWheelEvent::DOM_DELTA_PAGE :
-                                     nsIDOMWheelEvent::DOM_DELTA_LINE;
+  aWheelEvent.mDeltaMode = mIsPage ? dom::WheelEvent_Binding::DOM_DELTA_PAGE :
+                                     dom::WheelEvent_Binding::DOM_DELTA_LINE;
 
   double& delta = mIsVertical ? aWheelEvent.mDeltaY : aWheelEvent.mDeltaX;
   int32_t& lineOrPageDelta = mIsVertical ? aWheelEvent.mLineOrPageDeltaY :
@@ -863,7 +871,7 @@ MouseScrollHandler::LastEventInfo::InitWheelEvent(
   mAccumulatedDelta -=
     lineOrPageDelta * orienter * RoundDelta(nativeDeltaPerUnit);
 
-  if (aWheelEvent.mDeltaMode != nsIDOMWheelEvent::DOM_DELTA_LINE) {
+  if (aWheelEvent.mDeltaMode != dom::WheelEvent_Binding::DOM_DELTA_LINE) {
     // If the scroll delta mode isn't per line scroll, we shouldn't allow to
     // override the system scroll speed setting.
     aWheelEvent.mAllowToOverrideSystemScrollSpeed = false;
@@ -896,12 +904,12 @@ MouseScrollHandler::LastEventInfo::InitWheelEvent(
 
   MOZ_LOG(gMouseScrollLog, LogLevel::Info,
     ("MouseScroll::LastEventInfo::InitWheelEvent: aWidget=%p, "
-     "aWheelEvent { refPoint: { x: %d, y: %d }, mDeltaX: %f, mDeltaY: %f, "
+     "aWheelEvent { mRefPoint: { x: %d, y: %d }, mDeltaX: %f, mDeltaY: %f, "
      "mLineOrPageDeltaX: %d, mLineOrPageDeltaY: %d, "
      "isShift: %s, isControl: %s, isAlt: %s, isMeta: %s, "
      "mAllowToOverrideSystemScrollSpeed: %s }, "
      "mAccumulatedDelta: %d",
-     aWidget, aWheelEvent.refPoint.x, aWheelEvent.refPoint.y,
+     aWidget, aWheelEvent.mRefPoint.x, aWheelEvent.mRefPoint.y,
      aWheelEvent.mDeltaX, aWheelEvent.mDeltaY,
      aWheelEvent.mLineOrPageDeltaX, aWheelEvent.mLineOrPageDeltaY,
      GetBoolName(aWheelEvent.IsShift()),
@@ -995,10 +1003,7 @@ MouseScrollHandler::SystemSettings::InitScrollChars()
                                      &mScrollChars, 0)) {
     MOZ_LOG(gMouseScrollLog, LogLevel::Info,
       ("MouseScroll::SystemSettings::InitScrollChars(): ::SystemParametersInfo("
-       "SPI_GETWHEELSCROLLCHARS) failed, %s",
-       IsVistaOrLater() ?
-         "this is unexpected on Vista or later" :
-         "but on XP or earlier, this is not a problem"));
+       "SPI_GETWHEELSCROLLCHARS) failed, this is unexpected on Vista or later"));
     // XXX Should we use DefaultScrollChars()?
     mScrollChars = 1;
   }
@@ -1084,7 +1089,7 @@ bool
 MouseScrollHandler::SystemSettings::IsOverridingSystemScrollSpeedAllowed()
 {
   return mScrollLines == DefaultScrollLines() &&
-         (!IsVistaOrLater() || mScrollChars == DefaultScrollChars());
+         mScrollChars == DefaultScrollChars();
 }
 
 /******************************************************************************
@@ -1099,7 +1104,7 @@ MouseScrollHandler::UserPrefs::UserPrefs() :
   // We need to reset mouse wheel transaction when all of mousewheel related
   // prefs are changed.
   DebugOnly<nsresult> rv =
-    Preferences::RegisterCallback(OnChange, "mousewheel.", this);
+    Preferences::RegisterPrefixCallback(OnChange, "mousewheel.", this);
   MOZ_ASSERT(NS_SUCCEEDED(rv),
     "Failed to register callback for mousewheel.");
 }
@@ -1107,7 +1112,7 @@ MouseScrollHandler::UserPrefs::UserPrefs() :
 MouseScrollHandler::UserPrefs::~UserPrefs()
 {
   DebugOnly<nsresult> rv =
-    Preferences::UnregisterCallback(OnChange, "mousewheel.", this);
+    Preferences::UnregisterPrefixCallback(OnChange, "mousewheel.", this);
   MOZ_ASSERT(NS_SUCCEEDED(rv),
     "Failed to unregister callback for mousewheel.");
 }
@@ -1128,6 +1133,9 @@ MouseScrollHandler::UserPrefs::Init()
   mForceEnableSystemSettingCache =
     Preferences::GetBool("mousewheel.system_settings_cache.force_enabled",
                          false);
+  mEmulateToMakeWindowUnderCursorForeground =
+    Preferences::GetBool("mousewheel.debug.make_window_under_cursor_foreground",
+                         false);
   mOverriddenVerticalScrollAmount =
     Preferences::GetInt("mousewheel.windows.vertical_amount_override", -1);
   mOverriddenHorizontalScrollAmount =
@@ -1141,12 +1149,14 @@ MouseScrollHandler::UserPrefs::Init()
        "mScrollMessageHandledAsWheelMessage=%s, "
        "mEnableSystemSettingCache=%s, "
        "mForceEnableSystemSettingCache=%s, "
+       "mEmulateToMakeWindowUnderCursorForeground=%s, "
        "mOverriddenVerticalScrollAmount=%d, "
        "mOverriddenHorizontalScrollAmount=%d, "
        "mMouseScrollTransactionTimeout=%d",
      GetBoolName(mScrollMessageHandledAsWheelMessage),
      GetBoolName(mEnableSystemSettingCache),
      GetBoolName(mForceEnableSystemSettingCache),
+     GetBoolName(mEmulateToMakeWindowUnderCursorForeground),
      mOverriddenVerticalScrollAmount, mOverriddenHorizontalScrollAmount,
      mMouseScrollTransactionTimeout));
 }

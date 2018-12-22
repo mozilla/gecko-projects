@@ -8,7 +8,6 @@
 #include "mozilla/ArrayUtils.h"
 
 #define CreateEvent CreateEventA
-#include "nsIDOMDocument.h"
 
 #include "Accessible-inl.h"
 #include "DocAccessible-inl.h"
@@ -23,13 +22,15 @@
 #include "XULTreeAccessible.h"
 #endif
 
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/CustomEvent.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/EventTarget.h"
-#include "nsIDOMCustomEvent.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIDocument.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -42,7 +43,6 @@
 #include "nsGlobalWindow.h"
 
 #ifdef MOZ_XUL
-#include "nsIXULDocument.h"
 #include "nsIXULWindow.h"
 #endif
 
@@ -53,7 +53,7 @@ using namespace mozilla::dom;
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED0(RootAccessible, DocAccessible)
+NS_IMPL_ISUPPORTS_INHERITED(RootAccessible, DocAccessible, nsIDOMEventListener)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor/destructor
@@ -73,11 +73,11 @@ RootAccessible::~RootAccessible()
 // Accessible
 
 ENameValueFlag
-RootAccessible::Name(nsString& aName)
+RootAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
-  if (mRoleMapEntry) {
+  if (ARIARoleMap()) {
     Accessible::Name(aName);
     if (!aName.IsEmpty())
       return eNameOK;
@@ -88,7 +88,7 @@ RootAccessible::Name(nsString& aName)
 }
 
 role
-RootAccessible::NativeRole()
+RootAccessible::NativeRole() const
 {
   // If it's a <dialog> or <wizard>, use roles::DIALOG instead
   dom::Element* rootElm = mDocumentNode->GetRootElement();
@@ -102,9 +102,9 @@ RootAccessible::NativeRole()
 // RootAccessible protected member
 #ifdef MOZ_XUL
 uint32_t
-RootAccessible::GetChromeFlags()
+RootAccessible::GetChromeFlags() const
 {
-  // Return the flag set for the top level window as defined 
+  // Return the flag set for the top level window as defined
   // by nsIWebBrowserChrome::CHROME_WINDOW_[FLAGNAME]
   // Not simple: nsIXULWindow is not just a QI from nsIDOMWindow
   nsCOMPtr<nsIDocShell> docShell = nsCoreUtils::GetDocShellFor(mDocumentNode);
@@ -123,7 +123,7 @@ RootAccessible::GetChromeFlags()
 #endif
 
 uint64_t
-RootAccessible::NativeState()
+RootAccessible::NativeState() const
 {
   uint64_t state = DocAccessibleWrap::NativeState();
   if (state & states::DEFUNCT)
@@ -191,7 +191,7 @@ RootAccessible::AddEventListeners()
                    * const* e_end = ArrayEnd(kEventTypes);
          e < e_end; ++e) {
       nsresult rv = nstarget->AddEventListener(NS_ConvertASCIItoUTF16(*e),
-                                               this, true, true, 2);
+                                               this, true, true);
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
@@ -203,12 +203,11 @@ nsresult
 RootAccessible::RemoveEventListeners()
 {
   nsCOMPtr<EventTarget> target = mDocumentNode;
-  if (target) { 
+  if (target) {
     for (const char* const* e = kEventTypes,
                    * const* e_end = ArrayEnd(kEventTypes);
          e < e_end; ++e) {
-      nsresult rv = target->RemoveEventListener(NS_ConvertASCIItoUTF16(*e), this, true);
-      NS_ENSURE_SUCCESS(rv, rv);
+      target->RemoveEventListener(NS_ConvertASCIItoUTF16(*e), this, true);
     }
   }
 
@@ -230,11 +229,10 @@ RootAccessible::DocumentActivated(DocAccessible* aDocument)
 // nsIDOMEventListener
 
 NS_IMETHODIMP
-RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
+RootAccessible::HandleEvent(Event* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
-  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
+  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(aDOMEvent->GetOriginalTarget());
   if (!origTargetNode)
     return NS_OK;
 
@@ -253,7 +251,7 @@ RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
     // Root accessible exists longer than any of its descendant documents so
     // that we are guaranteed notification is processed before root accessible
     // is destroyed.
-    document->HandleNotification<RootAccessible, nsIDOMEvent>
+    document->HandleNotification<RootAccessible, Event>
       (this, &RootAccessible::ProcessDOMEvent, aDOMEvent);
   }
 
@@ -262,11 +260,11 @@ RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
 
 // RootAccessible protected
 void
-RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
+RootAccessible::ProcessDOMEvent(Event* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
-  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
+  nsCOMPtr<nsINode> origTargetNode =
+    do_QueryInterface(aDOMEvent->GetOriginalTarget());
 
   nsAutoString eventType;
   aDOMEvent->GetType(eventType);
@@ -283,9 +281,12 @@ RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
 
   DocAccessible* targetDocument = GetAccService()->
     GetDocAccessible(origTargetNode->OwnerDoc());
-  NS_ASSERTION(targetDocument, "No document while accessible is in document?!");
+  if (!targetDocument) {
+    // Document has ceased to exist.
+    return;
+  }
 
-  Accessible* accessible = 
+  Accessible* accessible =
     targetDocument->GetAccessibleOrContainer(origTargetNode);
   if (!accessible)
     return;
@@ -479,13 +480,14 @@ RootAccessible::Shutdown()
 }
 
 Relation
-RootAccessible::RelationByType(RelationType aType)
+RootAccessible::RelationByType(RelationType aType) const
 {
   if (!mDocumentNode || aType != RelationType::EMBEDS)
     return DocAccessibleWrap::RelationByType(aType);
 
   if (nsPIDOMWindowOuter* rootWindow = mDocumentNode->GetWindow()) {
-    nsCOMPtr<nsPIDOMWindowOuter> contentWindow = nsGlobalWindow::Cast(rootWindow)->GetContent();
+    nsCOMPtr<nsPIDOMWindowOuter> contentWindow =
+      nsGlobalWindowOuter::Cast(rootWindow)->GetContent();
     if (contentWindow) {
       nsCOMPtr<nsIDocument> contentDocumentNode = contentWindow->GetDoc();
       if (contentDocumentNode) {
@@ -517,8 +519,8 @@ RootAccessible::HandlePopupShownEvent(Accessible* aAccessible)
 
   if (role == roles::TOOLTIP) {
     // There is a single <xul:tooltip> node which Mozilla moves around.
-    // The accessible for it stays the same no matter where it moves. 
-    // AT's expect to get an EVENT_SHOW for the tooltip. 
+    // The accessible for it stays the same no matter where it moves.
+    // AT's expect to get an EVENT_SHOW for the tooltip.
     // In event callback the tooltip's accessible will be ready.
     nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_SHOW, aAccessible);
     return;
@@ -530,9 +532,7 @@ RootAccessible::HandlePopupShownEvent(Accessible* aAccessible)
     if (!combobox)
       return;
 
-    roles::Role comboboxRole = combobox->Role();
-    if (comboboxRole == roles::COMBOBOX || 
-	comboboxRole == roles::AUTOCOMPLETE) {
+    if (combobox->IsCombobox() || combobox->IsAutoComplete()) {
       RefPtr<AccEvent> event =
         new AccStateChangeEvent(combobox, states::EXPANDED, true);
       if (event)
@@ -649,22 +649,42 @@ RootAccessible::HandlePopupHidingEvent(nsINode* aPopupNode)
 }
 
 #ifdef MOZ_XUL
-void
-RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
-                                               XULTreeAccessible* aAccessible)
+static void
+GetPropertyBagFromEvent(Event* aEvent, nsIPropertyBag2** aPropertyBag)
 {
-  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
+  *aPropertyBag = nullptr;
+
+  CustomEvent* customEvent = aEvent->AsCustomEvent();
   if (!customEvent)
     return;
 
-  nsCOMPtr<nsIVariant> detailVariant;
-  customEvent->GetDetail(getter_AddRefs(detailVariant));
-  if (!detailVariant)
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(customEvent->GetParentObject()))
     return;
 
-  nsCOMPtr<nsISupports> supports;
-  detailVariant->GetAsISupports(getter_AddRefs(supports));
-  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> detail(cx);
+  customEvent->GetDetail(cx, &detail);
+  if (!detail.isObject())
+    return;
+
+  JS::Rooted<JSObject*> detailObj(cx, &detail.toObject());
+
+  nsresult rv;
+  nsCOMPtr<nsIPropertyBag2> propBag;
+  rv = UnwrapArg<nsIPropertyBag2>(cx, detailObj, getter_AddRefs(propBag));
+  if (NS_FAILED(rv))
+    return;
+
+  propBag.forget(aPropertyBag);
+}
+
+void
+RootAccessible::HandleTreeRowCountChangedEvent(Event* aEvent,
+                                               XULTreeAccessible* aAccessible)
+{
+  nsCOMPtr<nsIPropertyBag2> propBag;
+  GetPropertyBagFromEvent(aEvent, getter_AddRefs(propBag));
   if (!propBag)
     return;
 
@@ -682,21 +702,11 @@ RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
 }
 
 void
-RootAccessible::HandleTreeInvalidatedEvent(nsIDOMEvent* aEvent,
+RootAccessible::HandleTreeInvalidatedEvent(Event* aEvent,
                                            XULTreeAccessible* aAccessible)
 {
-  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
-  if (!customEvent)
-    return;
-
-  nsCOMPtr<nsIVariant> detailVariant;
-  customEvent->GetDetail(getter_AddRefs(detailVariant));
-  if (!detailVariant)
-    return;
-
-  nsCOMPtr<nsISupports> supports;
-  detailVariant->GetAsISupports(getter_AddRefs(supports));
-  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
+  nsCOMPtr<nsIPropertyBag2> propBag;
+  GetPropertyBagFromEvent(aEvent, getter_AddRefs(propBag));
   if (!propBag)
     return;
 

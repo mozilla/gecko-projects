@@ -1,4 +1,3 @@
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.importGlobalProperties(["File"]);
 
 function createFileWithData(message) {
@@ -13,14 +12,17 @@ function createFileWithData(message) {
   outStream.write(message, message.length);
   outStream.close();
 
-  var domFile = new File(testFile);
-  return domFile;
+  return File.createFromNsIFile(testFile);
 }
 
 addMessageListener("file.open", function (message) {
-  sendAsyncMessage("file.opened", createFileWithData(message));
+  createFileWithData(message).then(function(file) {
+    sendAsyncMessage("file.opened", file);
+  });
 });
 
 addMessageListener("file.modify", function (message) {
-  sendAsyncMessage("file.modified", createFileWithData(message));
+  createFileWithData(message).then(function(file) {
+    sendAsyncMessage("file.modified", file);
+  });
 });

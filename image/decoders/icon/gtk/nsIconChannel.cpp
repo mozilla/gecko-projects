@@ -3,35 +3,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsIconChannel.h"
+
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include <algorithm>
 
-#ifdef MOZ_ENABLE_GIO
 #include <gio/gio.h>
-#endif
 
 #include <gtk/gtk.h>
 
 #include "nsMimeTypes.h"
 #include "nsIMIMEService.h"
 
-#include "nsIStringBundle.h"
-#include "nsIStringStream.h"
 #include "nsServiceManagerUtils.h"
 
 #include "nsNetUtil.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIStringStream.h"
 #include "nsServiceManagerUtils.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "nsIURL.h"
 #include "prlink.h"
-
-#include "nsIconChannel.h"
+#include "gfxPlatform.h"
 
 NS_IMPL_ISUPPORTS(nsIconChannel,
                   nsIRequest,
@@ -106,15 +103,16 @@ moz_gdk_pixbuf_to_channel(GdkPixbuf* aPixbuf, nsIURI* aURI,
   MOZ_ASSERT(NS_SUCCEEDED(rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
-  NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
-
+  // nsIconProtocolHandler::NewChannel2 will provide the correct loadInfo for
+  // this iconChannel. Use the most restrictive security settings for the
+  // temporary loadInfo to make sure the channel can not be openend.
+  nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
   return NS_NewInputStreamChannel(aChannel,
                                   aURI,
-                                  stream,
+                                  stream.forget(),
                                   nullPrincipal,
-                                  nsILoadInfo::SEC_NORMAL,
-                                  nsIContentPolicy::TYPE_OTHER,
+                                  nsILoadInfo::SEC_REQUIRE_SAME_ORIGIN_DATA_IS_BLOCKED,
+                                  nsIContentPolicy::TYPE_INTERNAL_IMAGE,
                                   NS_LITERAL_CSTRING(IMAGE_ICON_MS));
 }
 
@@ -168,7 +166,6 @@ moz_gtk_icon_size(const char* name)
   return GTK_ICON_SIZE_MENU;
 }
 
-#ifdef MOZ_ENABLE_GIO
 static int32_t
 GetIconSize(nsIMozIconURI* aIconURI)
 {
@@ -180,13 +177,12 @@ GetIconSize(nsIMozIconURI* aIconURI)
     mozilla::DebugOnly<nsresult> rv = aIconURI->GetImageSize(&size);
     NS_ASSERTION(NS_SUCCEEDED(rv), "GetImageSize failed");
     return size;
-  } else {
-    int size;
-
-    GtkIconSize icon_size = moz_gtk_icon_size(iconSizeString.get());
-    gtk_icon_size_lookup(icon_size, &size, nullptr);
-    return size;
   }
+  int size;
+
+  GtkIconSize icon_size = moz_gtk_icon_size(iconSizeString.get());
+  gtk_icon_size_lookup(icon_size, &size, nullptr);
+  return size;
 }
 
 /* Scale icon buffer to preferred size */
@@ -302,7 +298,6 @@ nsIconChannel::InitWithGIO(nsIMozIconURI* aIconURI)
   g_object_unref(buf);
   return rv;
 }
-#endif // MOZ_ENABLE_GIO
 
 nsresult
 nsIconChannel::Init(nsIURI* aURI)
@@ -310,14 +305,14 @@ nsIconChannel::Init(nsIURI* aURI)
   nsCOMPtr<nsIMozIconURI> iconURI = do_QueryInterface(aURI);
   NS_ASSERTION(iconURI, "URI is not an nsIMozIconURI");
 
+  if (gfxPlatform::IsHeadless()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
   nsAutoCString stockIcon;
   iconURI->GetStockIcon(stockIcon);
   if (stockIcon.IsEmpty()) {
-#ifdef MOZ_ENABLE_GIO
     return InitWithGIO(iconURI);
-#else
-    return NS_ERROR_NOT_AVAILABLE;
-#endif
   }
 
   // Search for stockIcon

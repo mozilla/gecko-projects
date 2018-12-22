@@ -3,13 +3,12 @@
     "namespace": "manifest",
     "types": [
       {
-        "$extend": "Permission",
+        "$extend": "OptionalPermission",
         "choices": [{
           "type": "string",
           "enum": [
             "downloads",
-            "downloads.open",
-            "downloads.shelf"
+            "downloads.open"
           ]
         }]
       }
@@ -17,6 +16,7 @@
   },
   {
     "namespace": "downloads",
+    "permissions": ["downloads"],
     "types": [
       {
         "id": "FilenameConflictAction",
@@ -95,7 +95,8 @@
             "type": "string"
           },
           "referrer": {
-            "type": "string"
+            "type": "string",
+            "optional": true
           },
           "filename": {
             "description": "Absolute local path.",
@@ -211,7 +212,7 @@
       },
       {
         "id": "DownloadTime",
-        "description": "A time specified as a Date object, a number of string representing milliseconds since the epoch, or an ISO 8601 string",
+        "description": "A time specified as a Date object, a number or string representing milliseconds since the epoch, or an ISO 8601 string",
         "choices": [
           {
             "type": "string",
@@ -375,18 +376,22 @@
                 "optional": true,
                 "type": "string"
               },
+              "incognito": {
+                "description": "Whether to associate the download with a private browsing session.",
+                "optional": true,
+                "default": false,
+                "type": "boolean"
+              },
               "conflictAction": {
                 "$ref": "FilenameConflictAction",
                 "optional": true
               },
               "saveAs": {
-                "unsupported": true,
-                "description": "Use a file-chooser to allow the user to select a filename.",
+                "description": "Use a file-chooser to allow the user to select a filename. If the option is not specified, the file chooser will be shown only if the Firefox \"Always ask you where to save files\" option is enabled (i.e. the pref <code>browser.download.useDownloadDir</code> is set to <code>false</code>).",
                 "optional": true,
                 "type": "boolean"
               },
               "method": {
-                "unsupported": true,
                 "description": "The HTTP method to use if the URL uses the HTTP[S] protocol.",
                 "enum": [
                   "GET",
@@ -396,7 +401,6 @@
                 "type": "string"
               },
               "headers": {
-                "unsupported": true,
                 "optional": true,
                 "type": "array",
                 "description": "Extra HTTP headers to send with the request if the URL uses the HTTP[s] protocol. Each header is represented as a dictionary containing the keys <code>name</code> and either <code>value</code> or <code>binaryValue</code>, restricted to those allowed by XMLHttpRequest.",
@@ -415,7 +419,6 @@
                 }
               },
               "body": {
-                "unsupported": true,
                 "description": "Post body.",
                 "optional": true,
                 "type": "string"
@@ -520,7 +523,7 @@
       {
         "name": "getFileIcon",
         "type": "function",
-        "unsupported": true,
+        "async": "callback",
         "description": "Retrieve an icon for the specified download. For new downloads, file icons are available after the <a href='#event-onCreated'>onCreated</a> event has been received. The image returned by this function while a download is in progress may be different from the image returned after the download is complete. Icon retrieval is done by querying the underlying operating system or toolkit depending on the platform. The icon that is returned will therefore depend on a number of factors including state of the download, platform, registered file types and visual theme. If a file icon cannot be determined, <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will contain an error message.",
         "parameters": [
           {
@@ -535,6 +538,8 @@
               "size": {
                 "description": "The size of the icon.  The returned icon will be square with dimensions size * size pixels.  The default size for the icon is 32x32 pixels.",
                 "optional": true,
+                "minimum": 1,
+                "maximum": 127,
                 "type": "integer"
               }
             },
@@ -557,7 +562,9 @@
         "name": "open",
         "type": "function",
         "async": "callback",
+        "requireUserInput": true,
         "description": "Open the downloaded file.",
+        "permissions": ["downloads.open"],
         "parameters": [
           {
             "name": "downloadId",

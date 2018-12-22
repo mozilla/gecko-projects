@@ -5,11 +5,19 @@
 #ifndef PublicKeyPinningService_h
 #define PublicKeyPinningService_h
 
-#include "cert.h"
 #include "CertVerifier.h"
+#include "ScopedNSSTypes.h"
+#include "cert.h"
+#include "nsNSSCertificate.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "pkix/Time.h"
+
+namespace mozilla {
+class OriginAttributes;
+}
+
+using mozilla::OriginAttributes;
 
 namespace mozilla {
 namespace psm {
@@ -26,10 +34,11 @@ public:
    * Note: if an alt name is a wildcard, it won't necessarily find a pinset
    * that would otherwise be valid for it
    */
-  static nsresult ChainHasValidPins(const CERTCertList* certList,
+  static nsresult ChainHasValidPins(const RefPtr<nsNSSCertList>& certList,
                                     const char* hostname,
                                     mozilla::pkix::Time time,
                                     bool enforceTestMode,
+                                    const OriginAttributes& originAttributes,
                             /*out*/ bool& chainHasValidPins,
                    /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo);
   /**
@@ -37,7 +46,7 @@ public:
    * certificate list and the pins specified in the aSHA256keys array.
    * Values passed in are assumed to be in base64 encoded form.
    */
-  static nsresult ChainMatchesPinset(const CERTCertList* certList,
+  static nsresult ChainMatchesPinset(const RefPtr<nsNSSCertList>& certList,
                                      const nsTArray<nsCString>& aSHA256keys,
                              /*out*/ bool& chainMatchesPinset);
 
@@ -49,6 +58,7 @@ public:
   static nsresult HostHasPins(const char* hostname,
                               mozilla::pkix::Time time,
                               bool enforceTestMode,
+                              const OriginAttributes& originAttributes,
                       /*out*/ bool& hostHasPins);
 
   /**
@@ -61,4 +71,4 @@ public:
 
 }} // namespace mozilla::psm
 
-#endif // PublicKeyPinningServiceService_h
+#endif // PublicKeyPinningService_h

@@ -5,80 +5,65 @@
  * found in the LICENSE file.
  */
 
+#include "GrShaderCaps.h"
 #include "glsl/GrGLSLVarying.h"
-
 #include "glsl/GrGLSLProgramBuilder.h"
 
 void GrGLSLVaryingHandler::addPassThroughAttribute(const GrGeometryProcessor::Attribute* input,
-                                                   const char* output) {
+                                                   const char* output,
+                                                   Interpolation interpolation) {
+    SkASSERT(!fProgramBuilder->primitiveProcessor().willUseGeoShader());
     GrSLType type = GrVertexAttribTypeToSLType(input->fType);
-    GrGLSLVertToFrag v(type);
-    this->addVarying(input->fName, &v);
+    GrGLSLVarying v(type);
+    this->addVarying(input->fName, &v, interpolation);
     fProgramBuilder->fVS.codeAppendf("%s = %s;", v.vsOut(), input->fName);
-
-    if (fProgramBuilder->primitiveProcessor().willUseGeoShader()) {
-        fProgramBuilder->fGS.codeAppendf("%s = %s[0];", v.gsOut(), v.gsIn());
-    }
-
     fProgramBuilder->fFS.codeAppendf("%s = %s;", output, v.fsIn());
 }
 
-void GrGLSLVaryingHandler::addVarying(const char* name,
-                                      GrGLSLVarying* varying,
-                                      GrSLPrecision precision) {
+static bool use_flat_interpolation(GrGLSLVaryingHandler::Interpolation interpolation,
+                                   const GrShaderCaps& shaderCaps) {
+    switch (interpolation) {
+        using Interpolation = GrGLSLVaryingHandler::Interpolation;
+        case Interpolation::kInterpolated:
+            return false;
+        case Interpolation::kCanBeFlat:
+            SkASSERT(!shaderCaps.preferFlatInterpolation() ||
+                     shaderCaps.flatInterpolationSupport());
+            return shaderCaps.preferFlatInterpolation();
+        case Interpolation::kMustBeFlat:
+            SkASSERT(shaderCaps.flatInterpolationSupport());
+            return true;
+    }
+    SK_ABORT("Invalid interpolation");
+    return false;
+}
+
+void GrGLSLVaryingHandler::addVarying(const char* name, GrGLSLVarying* varying,
+                                      Interpolation interpolation) {
+    SkASSERT(GrSLTypeIsFloatType(varying->type()) || Interpolation::kMustBeFlat == interpolation);
+    bool willUseGeoShader = fProgramBuilder->primitiveProcessor().willUseGeoShader();
+    VaryingInfo& v = fVaryings.push_back();
+
     SkASSERT(varying);
-    if (varying->vsVarying()) {
-        this->addVertexVarying(name, precision, varying);
+    SkASSERT(kVoid_GrSLType != varying->fType);
+    v.fType = varying->fType;
+    v.fIsFlat = use_flat_interpolation(interpolation, *fProgramBuilder->shaderCaps());
+    fProgramBuilder->nameVariable(&v.fVsOut, 'v', name);
+    v.fVisibility = kNone_GrShaderFlags;
+    if (varying->isInVertexShader()) {
+        varying->fVsOut = v.fVsOut.c_str();
+        v.fVisibility |= kVertex_GrShaderFlag;
     }
-    if (fProgramBuilder->primitiveProcessor().willUseGeoShader()) {
-        this->addGeomVarying(name, precision, varying);
+    if (willUseGeoShader) {
+        fProgramBuilder->nameVariable(&v.fGsOut, 'g', name);
+        varying->fGsIn = v.fVsOut.c_str();
+        varying->fGsOut = v.fGsOut.c_str();
+        v.fVisibility |= kGeometry_GrShaderFlag;
     }
-    if (varying->fsVarying()) {
-        this->addFragVarying(precision, varying);
+    if (varying->isInFragmentShader()) {
+        varying->fFsIn = (willUseGeoShader ? v.fGsOut : v.fVsOut).c_str();
+        v.fVisibility |= kFragment_GrShaderFlag;
     }
-}
-
-void GrGLSLVaryingHandler::addVertexVarying(const char* name,
-                                            GrSLPrecision precision,
-                                            GrGLSLVarying* v) {
-    fVertexOutputs.push_back();
-    fVertexOutputs.back().setType(v->fType);
-    fVertexOutputs.back().setTypeModifier(GrGLSLShaderVar::kVaryingOut_TypeModifier);
-    fVertexOutputs.back().setPrecision(precision);
-    fProgramBuilder->nameVariable(fVertexOutputs.back().accessName(), 'v', name);
-    v->fVsOut = fVertexOutputs.back().getName().c_str();
-}
-void GrGLSLVaryingHandler::addGeomVarying(const char* name,
-                                          GrSLPrecision precision,
-                                          GrGLSLVarying* v) {
-    // if we have a GS take each varying in as an array
-    // and output as non-array.
-    if (v->vsVarying()) {
-        fGeomInputs.push_back();
-        fGeomInputs.back().setType(v->fType);
-        fGeomInputs.back().setTypeModifier(GrGLSLShaderVar::kVaryingIn_TypeModifier);
-        fGeomInputs.back().setPrecision(precision);
-        fGeomInputs.back().setUnsizedArray();
-        *fGeomInputs.back().accessName() = v->fVsOut;
-        v->fGsIn = v->fVsOut;
-    }
-
-    if (v->fsVarying()) {
-        fGeomOutputs.push_back();
-        fGeomOutputs.back().setType(v->fType);
-        fGeomOutputs.back().setTypeModifier(GrGLSLShaderVar::kVaryingOut_TypeModifier);
-        fGeomOutputs.back().setPrecision(precision);
-        fProgramBuilder->nameVariable(fGeomOutputs.back().accessName(), 'g', name);
-        v->fGsOut = fGeomOutputs.back().getName().c_str();
-    }
-}
-
-void GrGLSLVaryingHandler::addFragVarying(GrSLPrecision precision, GrGLSLVarying* v) {
-    v->fFsIn = v->fGsOut ? v->fGsOut : v->fVsOut;
-    fFragInputs.push_back().set(v->fType,
-                                GrGLSLShaderVar::kVaryingIn_TypeModifier,
-                                v->fFsIn,
-                                precision);
 }
 
 void GrGLSLVaryingHandler::emitAttributes(const GrGeometryProcessor& gp) {
@@ -87,16 +72,15 @@ void GrGLSLVaryingHandler::emitAttributes(const GrGeometryProcessor& gp) {
         const GrGeometryProcessor::Attribute& attr = gp.getAttrib(i);
         this->addAttribute(GrShaderVar(attr.fName,
                                        GrVertexAttribTypeToSLType(attr.fType),
-                                       GrShaderVar::kAttribute_TypeModifier,
-                                       GrShaderVar::kNonArray,
-                                       attr.fPrecision));
+                                       GrShaderVar::kIn_TypeModifier,
+                                       GrShaderVar::kNonArray));
     }
 }
 
 void GrGLSLVaryingHandler::addAttribute(const GrShaderVar& var) {
-    SkASSERT(GrShaderVar::kAttribute_TypeModifier == var.getTypeModifier());
+    SkASSERT(GrShaderVar::kIn_TypeModifier == var.getTypeModifier());
     for (int j = 0; j < fVertexInputs.count(); ++j) {
-        const GrGLSLShaderVar& attr = fVertexInputs[j];
+        const GrShaderVar& attr = fVertexInputs[j];
         // if attribute already added, don't add it again
         if (attr.getName().equals(var.getName())) {
             return;
@@ -105,9 +89,52 @@ void GrGLSLVaryingHandler::addAttribute(const GrShaderVar& var) {
     fVertexInputs.push_back(var);
 }
 
+void GrGLSLVaryingHandler::setNoPerspective() {
+    const GrShaderCaps& caps = *fProgramBuilder->shaderCaps();
+    if (!caps.noperspectiveInterpolationSupport()) {
+        return;
+    }
+    if (const char* extension = caps.noperspectiveInterpolationExtensionString()) {
+        int bit = 1 << GrGLSLFragmentBuilder::kNoPerspectiveInterpolation_GLSLPrivateFeature;
+        fProgramBuilder->fVS.addFeature(bit, extension);
+        if (fProgramBuilder->primitiveProcessor().willUseGeoShader()) {
+            fProgramBuilder->fGS.addFeature(bit, extension);
+        }
+        fProgramBuilder->fFS.addFeature(bit, extension);
+    }
+    fDefaultInterpolationModifier = "noperspective";
+}
+
+void GrGLSLVaryingHandler::finalize() {
+    for (int i = 0; i < fVaryings.count(); ++i) {
+        const VaryingInfo& v = this->fVaryings[i];
+        const char* modifier = v.fIsFlat ? "flat" : fDefaultInterpolationModifier;
+        if (v.fVisibility & kVertex_GrShaderFlag) {
+            fVertexOutputs.push_back().set(v.fType, v.fVsOut, GrShaderVar::kOut_TypeModifier,
+                                           kDefault_GrSLPrecision, nullptr, modifier);
+            if (v.fVisibility & kGeometry_GrShaderFlag) {
+                fGeomInputs.push_back().set(v.fType, v.fVsOut, GrShaderVar::kUnsizedArray,
+                                            GrShaderVar::kIn_TypeModifier, kDefault_GrSLPrecision,
+                                            nullptr, modifier);
+            }
+        }
+        if (v.fVisibility & kFragment_GrShaderFlag) {
+            const char* fsIn = v.fVsOut.c_str();
+            if (v.fVisibility & kGeometry_GrShaderFlag) {
+                fGeomOutputs.push_back().set(v.fType, v.fGsOut, GrShaderVar::kOut_TypeModifier,
+                                             kDefault_GrSLPrecision, nullptr, modifier);
+                fsIn = v.fGsOut.c_str();
+            }
+            fFragInputs.push_back().set(v.fType, fsIn, GrShaderVar::kIn_TypeModifier,
+                                        kDefault_GrSLPrecision, nullptr, modifier);
+        }
+    }
+    this->onFinalize();
+}
+
 void GrGLSLVaryingHandler::appendDecls(const VarArray& vars, SkString* out) const {
     for (int i = 0; i < vars.count(); ++i) {
-        vars[i].appendDecl(fProgramBuilder->glslCaps(), out);
+        vars[i].appendDecl(fProgramBuilder->shaderCaps(), out);
         out->append(";");
     }
 }
@@ -124,9 +151,8 @@ void GrGLSLVaryingHandler::getGeomDecls(SkString* inputDecls, SkString* outputDe
 
 void GrGLSLVaryingHandler::getFragDecls(SkString* inputDecls, SkString* outputDecls) const {
     // We should not have any outputs in the fragment shader when using version 1.10
-    SkASSERT(k110_GrGLSLGeneration != fProgramBuilder->glslCaps()->generation() ||
+    SkASSERT(k110_GrGLSLGeneration != fProgramBuilder->shaderCaps()->generation() ||
              fFragOutputs.empty());
     this->appendDecls(fFragInputs, inputDecls);
     this->appendDecls(fFragOutputs, outputDecls);
 }
-

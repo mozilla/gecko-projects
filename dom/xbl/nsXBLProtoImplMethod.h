@@ -8,7 +8,7 @@
 #define nsXBLProtoImplMethod_h__
 
 #include "mozilla/Attributes.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsString.h"
 #include "nsString.h"
 #include "nsXBLMaybeCompiled.h"
@@ -87,7 +87,7 @@ public:
   void AddParameter(const nsAString& aName);
 
   void SetLineNumber(uint32_t aLineNumber);
-  
+
   virtual nsresult InstallMember(JSContext* aCx,
                                  JS::Handle<JSObject*> aTargetClassObject) override;
   virtual nsresult CompileMember(mozilla::dom::AutoJSAPI& jsapi, const nsString& aClassStr,
@@ -137,8 +137,8 @@ public:
   explicit nsXBLProtoImplAnonymousMethod(const char16_t* aName) :
     nsXBLProtoImplMethod(aName)
   {}
-  
-  nsresult Execute(nsIContent* aBoundElement, JSAddonId* aAddonId);
+
+  nsresult Execute(nsIContent* aBoundElement, const nsXBLPrototypeBinding&);
 
   // Override InstallMember; these methods never get installed as members on
   // binding instantiations (though they may hang out in mMembers on the

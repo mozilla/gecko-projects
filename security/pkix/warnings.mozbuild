@@ -1,4 +1,4 @@
-if CONFIG['CLANG_CXX']:
+if CONFIG['CC_TYPE'] == 'clang':
   CXXFLAGS += [
     '-Weverything',
 
@@ -8,10 +8,9 @@ if CONFIG['CLANG_CXX']:
     '-Wno-missing-variable-declarations',
     '-Wno-padded',
     '-Wno-reserved-id-macro', # NSPR and NSS use reserved IDs in their include guards.
-    '-Wno-shadow', # XXX: Clang's rules are too strict for constructors.
     '-Wno-weak-vtables', # We rely on the linker to merge the duplicate vtables.
   ]
-elif CONFIG['_MSC_VER']:
+elif CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
   CXXFLAGS += [
     '-sdl', # Enable additional security checks based on Microsoft's SDL.
 
@@ -25,6 +24,18 @@ elif CONFIG['_MSC_VER']:
     '-wd4711', # function 'function' selected for inline expansion
     '-wd4800', # forcing value to bool 'true' or 'false'
     '-wd4820', # 'bytes' bytes padding added after construct 'member_name'
+
+    # The following warnings are disabled because MSVC 2017 headers aren't
+    # warning free at the -Wall level.
+    '-wd4365', # 'action' : conversion from 'type_1' to 'type_2',
+               # signed/unsigned mismatch
+    '-wd4619', # #pragma warning : there is no warning number 'number'
+    '-wd4623', # 'derived class' : default constructor was implicitly defined as
+               # deleted because a base class default constructor is
+               # inaccessible or deleted
+    '-wd4774', # '<function>' : format string expected in argument <position> is
+               # not a string literal
+    '-wd4987', # nonstandard extension used: 'throw (...)'
 
     # XXX: We cannot use /Za (Disable Microsoft Extensions) because windows.h
     # won't copmile with it.

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,7 +7,6 @@
 #ifndef nsMathMLChar_h___
 #define nsMathMLChar_h___
 
-#include "nsAutoPtr.h"
 #include "nsColor.h"
 #include "nsMathMLOperators.h"
 #include "nsPoint.h"
@@ -15,15 +15,18 @@
 #include "nsBoundingMetrics.h"
 #include "gfxTextRun.h"
 
+class gfxContext;
 class nsGlyphTable;
 class nsIFrame;
 class nsDisplayListBuilder;
 class nsDisplayListSet;
 class nsPresContext;
-class nsRenderingContext;
 struct nsBoundingMetrics;
-class nsStyleContext;
 struct nsFont;
+
+namespace mozilla {
+class ComputedStyle;
+}
 
 // Hints for Stretch() to indicate criteria for stretching
 enum {
@@ -89,9 +92,11 @@ public:
   typedef mozilla::gfx::DrawTarget DrawTarget;
 
   // constructor and destructor
-  nsMathMLChar() {
+  nsMathMLChar()
+    : mDirection(NS_STRETCH_DIRECTION_DEFAULT)
+  {
     MOZ_COUNT_CTOR(nsMathMLChar);
-    mStyleContext = nullptr;
+    mComputedStyle = nullptr;
     mUnscaledAscent = 0;
     mScaleX = mScaleY = 1.0;
     mDraw = DRAW_NORMAL;
@@ -106,9 +111,9 @@ public:
                const nsDisplayListSet& aLists,
                uint32_t                aIndex,
                const nsRect*           aSelectedRect = nullptr);
-          
-  void PaintForeground(nsPresContext* aPresContext,
-                       nsRenderingContext& aRenderingContext,
+
+  void PaintForeground(nsIFrame* aForFrame,
+                       gfxContext& aRenderingContext,
                        nsPoint aPt,
                        bool aIsSelected);
 
@@ -116,7 +121,7 @@ public:
   // @param aContainerSize - IN - suggested size for the stretched char
   // @param aDesiredStretchSize - OUT - the size that the char wants
   nsresult
-  Stretch(nsPresContext*           aPresContext,
+  Stretch(nsIFrame*                aForFrame,
           DrawTarget*              aDrawTarget,
           float                    aFontSizeInflation,
           nsStretchDirection       aStretchDirection,
@@ -166,14 +171,14 @@ public:
   // @param aStretchHint can be the value that will be passed to Stretch().
   // It is used to determine whether the operator is stretchy or a largeop.
   nscoord
-  GetMaxWidth(nsPresContext* aPresContext,
+  GetMaxWidth(nsIFrame* aForFrame,
               DrawTarget* aDrawTarget,
               float aFontSizeInflation,
               uint32_t aStretchHint = NS_STRETCH_NORMAL);
 
   // Metrics that _exactly_ enclose the char. The char *must* have *already*
   // being stretched before you can call the GetBoundingMetrics() method.
-  // IMPORTANT: since chars have their own style contexts, and may be rendered
+  // IMPORTANT: since chars have their own ComputedStyles, and may be rendered
   // with glyphs that are not in the parent font, just calling the default
   // aRenderingContext.GetBoundingMetrics(aChar) can give incorrect results.
   void
@@ -186,13 +191,13 @@ public:
     mBoundingMetrics = aBoundingMetrics;
   }
 
-  // Hooks to access the extra leaf style contexts given to the MathMLChars.
+  // Hooks to access the extra leaf ComputedStyles given to the MathMLChars.
   // They provide an interface to make them accessible to the Style System via
-  // the Get/Set AdditionalStyleContext() APIs. Owners of MathMLChars
+  // the Get/Set AdditionalComputedStyle() APIs. Owners of MathMLChars
   // should honor these APIs.
-  nsStyleContext* GetStyleContext() const;
+  mozilla::ComputedStyle* GetComputedStyle() const;
 
-  void SetStyleContext(nsStyleContext* aStyleContext);
+  void SetComputedStyle(mozilla::ComputedStyle* aComputedStyle);
 
 protected:
   friend class nsGlyphTable;
@@ -204,10 +209,10 @@ private:
   nsRect             mRect;
   nsStretchDirection mDirection;
   nsBoundingMetrics  mBoundingMetrics;
-  nsStyleContext*    mStyleContext;
+  RefPtr<mozilla::ComputedStyle> mComputedStyle;
   // mGlyphs/mBmData are arrays describing the glyphs used to draw the operator.
   // See the drawing methods below.
-  nsAutoPtr<gfxTextRun> mGlyphs[4];
+  RefPtr<gfxTextRun> mGlyphs[4];
   nsBoundingMetrics     mBmData[4];
   // mUnscaledAscent is the actual ascent of the char.
   nscoord            mUnscaledAscent;
@@ -224,7 +229,7 @@ private:
   };
   DrawingMethod mDraw;
 
-  // mMirrored indicates whether the character is mirrored. 
+  // mMirrored indicates whether the character is mirrored.
   bool               mMirrored;
 
   class StretchEnumContext;
@@ -240,7 +245,7 @@ private:
                 RefPtr<gfxFontGroup>* aFontGroup);
 
   nsresult
-  StretchInternal(nsPresContext*           aPresContext,
+  StretchInternal(nsIFrame*                aForFrame,
                   DrawTarget*              aDrawTarget,
                   float                    aFontSizeInflation,
                   nsStretchDirection&      aStretchDirection,

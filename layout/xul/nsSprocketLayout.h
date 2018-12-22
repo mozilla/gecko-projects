@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -68,16 +69,16 @@ public:
   friend nsresult NS_NewSprocketLayout(nsCOMPtr<nsBoxLayout>& aNewLayout);
   static void Shutdown();
 
-  NS_IMETHOD Layout(nsIFrame* aBox, nsBoxLayoutState& aState) override;
+  NS_IMETHOD XULLayout(nsIFrame* aBox, nsBoxLayoutState& aState) override;
 
-  virtual nsSize GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
-  virtual nsSize GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
+  virtual nsSize GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
   virtual nscoord GetAscent(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) override;
 
   nsSprocketLayout();
 
-  static bool IsHorizontal(nsIFrame* aBox);
+  static bool IsXULHorizontal(nsIFrame* aBox);
 
   static void SetLargestSize(nsSize& aSize1, const nsSize& aSize2, bool aIsHorizontal);
   static void SetSmallestSize(nsSize& aSize1, const nsSize& aSize2, bool aIsHorizontal);
@@ -90,32 +91,32 @@ protected:
 
 
   void ComputeChildsNextPosition(nsIFrame* aBox,
-                                 const nscoord& aCurX, 
-                                 const nscoord& aCurY, 
-                                 nscoord& aNextX, 
-                                 nscoord& aNextY, 
+                                 const nscoord& aCurX,
+                                 const nscoord& aCurY,
+                                 nscoord& aNextX,
+                                 nscoord& aNextY,
                                  const nsRect& aChildSize);
 
   void ChildResized(nsIFrame* aBox,
-                    nsBoxLayoutState& aState, 
+                    nsBoxLayoutState& aState,
                     nsIFrame* aChild,
-                    nsBoxSize* aChildBoxSize, 
-                    nsComputedBoxSize* aChildComputedBoxSize, 
-                    nsBoxSize* aBoxSizes, 
-                    nsComputedBoxSize* aComputedBoxSizes, 
-                    const nsRect& aChildLayoutRect, 
-                    nsRect& aChildActualRect, 
-                    nsRect& aContainingRect, 
-                    int32_t aFlexes, 
+                    nsBoxSize* aChildBoxSize,
+                    nsComputedBoxSize* aChildComputedBoxSize,
+                    nsBoxSize* aBoxSizes,
+                    nsComputedBoxSize* aComputedBoxSizes,
+                    const nsRect& aChildLayoutRect,
+                    nsRect& aChildActualRect,
+                    nsRect& aContainingRect,
+                    int32_t aFlexes,
                     bool& aFinished);
 
   void AlignChildren(nsIFrame* aBox,
                      nsBoxLayoutState& aState);
 
-  virtual void ComputeChildSizes(nsIFrame* aBox, 
-                         nsBoxLayoutState& aState, 
-                         nscoord& aGivenSize, 
-                         nsBoxSize* aBoxSizes, 
+  virtual void ComputeChildSizes(nsIFrame* aBox,
+                         nsBoxLayoutState& aState,
+                         nscoord& aGivenSize,
+                         nsBoxSize* aBoxSizes,
                          nsComputedBoxSize*& aComputedBoxSizes);
 
 
@@ -132,7 +133,7 @@ protected:
 private:
 
 
-  // because the sprocket layout manager has no instance variables. We 
+  // because the sprocket layout manager has no instance variables. We
   // can make a static one and reuse it everywhere.
   static nsBoxLayout* gInstance;
 

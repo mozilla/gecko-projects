@@ -7,18 +7,8 @@ package org.mozilla.gecko.telemetry;
 
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 
-/**
- * Container for telemetry data and the data necessary to upload it.
- */
-public class TelemetryPing {
-    private final String url;
-    private final ExtendedJSONObject payload;
-
-    public TelemetryPing(final String url, final ExtendedJSONObject payload) {
-        this.url = url;
-        this.payload = payload;
-    }
-
-    public String getURL() { return url; }
-    public ExtendedJSONObject getPayload() { return payload; }
+public interface TelemetryPing {
+    ExtendedJSONObject getPayload();
+    String getDocID();
+    String getURLPath();
 }

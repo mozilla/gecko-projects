@@ -5,7 +5,6 @@
 /* globals dump */
 
 const { CC } = require("chrome");
-const { Task } = require("resource://gre/modules/Task.jsm");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { once, observeOnce } = require("devtools/client/performance/test/helpers/event-utils");
 
@@ -14,11 +13,13 @@ const { once, observeOnce } = require("devtools/client/performance/test/helpers/
  */
 exports.busyWait = function(time) {
   dump(`Busy waiting for: ${time} milliseconds.\n`);
-  let start = Date.now();
+  const start = Date.now();
+  /* eslint-disable no-unused-vars */
   let stack;
   while (Date.now() - start < time) {
     stack = CC.stack;
   }
+  /* eslint-enable no-unused-vars */
 };
 
 /**
@@ -32,13 +33,13 @@ exports.idleWait = function(time) {
 /**
  * Waits until a predicate returns true.
  */
-exports.waitUntil = function*(predicate, interval = 100, tries = 100) {
+exports.waitUntil = async function(predicate, interval = 100, tries = 100) {
   for (let i = 1; i <= tries; i++) {
-    if (yield Task.spawn(predicate)) {
+    if (await predicate()) {
       dump(`Predicate returned true after ${i} tries.\n`);
       return;
     }
-    yield exports.idleWait(interval);
+    await exports.idleWait(interval);
   }
   throw new Error(`Predicate returned false after ${tries} tries, aborting.\n`);
 };

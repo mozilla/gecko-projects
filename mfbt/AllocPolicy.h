@@ -12,6 +12,8 @@
 #ifndef mozilla_AllocPolicy_h
 #define mozilla_AllocPolicy_h
 
+#include "mozilla/Attributes.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/TemplateLib.h"
 
 #include <stddef.h>
@@ -40,7 +42,11 @@ namespace mozilla {
  *  - template <typename T> T* pod_realloc(T*, size_t, size_t)
  *      Responsible for OOM reporting when null is returned.  The old allocation
  *      size is passed in, in addition to the new allocation size requested.
- *  - void free_(void*)
+ *  - template <typename T> void free_(T*, size_t)
+ *      The capacity passed in must match the old allocation size.
+ *  - template <typename T> void free_(T*)
+ *      Frees a buffer without knowing its allocated size. This might not be
+ *      implemented by allocation policies that need the allocation size.
  *  - void reportAllocOverflow() const
  *      Called on allocation overflow (that is, an allocation implicitly tried
  *      to allocate more than the available memory space -- think allocating an
@@ -112,7 +118,8 @@ public:
     return maybe_pod_realloc<T>(aPtr, aOldSize, aNewSize);
   }
 
-  void free_(void* aPtr)
+  template <typename T>
+  void free_(T* aPtr, size_t aNumElems = 0)
   {
     free(aPtr);
   }
@@ -121,7 +128,69 @@ public:
   {
   }
 
-  bool checkSimulatedOOM() const
+  MOZ_MUST_USE bool checkSimulatedOOM() const
+  {
+    return true;
+  }
+};
+
+/*
+ * A policy which always fails to allocate memory, returning nullptr. Methods
+ * which expect an existing allocation assert.
+ *
+ * This type should be used in situations where you want to use a MFBT type with
+ * inline storage, and don't want to allow it to allocate on the heap.
+ */
+class NeverAllocPolicy
+{
+public:
+  template <typename T>
+  T* maybe_pod_malloc(size_t aNumElems)
+  {
+    return nullptr;
+  }
+
+  template <typename T>
+  T* maybe_pod_calloc(size_t aNumElems)
+  {
+    return nullptr;
+  }
+
+  template <typename T>
+  T* maybe_pod_realloc(T* aPtr, size_t aOldSize, size_t aNewSize)
+  {
+    MOZ_CRASH("NeverAllocPolicy::maybe_pod_realloc");
+  }
+
+  template <typename T>
+  T* pod_malloc(size_t aNumElems)
+  {
+    return nullptr;
+  }
+
+  template <typename T>
+  T* pod_calloc(size_t aNumElems)
+  {
+    return nullptr;
+  }
+
+  template <typename T>
+  T* pod_realloc(T* aPtr, size_t aOldSize, size_t aNewSize)
+  {
+    MOZ_CRASH("NeverAllocPolicy::pod_realloc");
+  }
+
+  template <typename T>
+  void free_(T* aPtr, size_t aNumElems = 0)
+  {
+    MOZ_CRASH("NeverAllocPolicy::free_");
+  }
+
+  void reportAllocOverflow() const
+  {
+  }
+
+  MOZ_MUST_USE bool checkSimulatedOOM() const
   {
     return true;
   }

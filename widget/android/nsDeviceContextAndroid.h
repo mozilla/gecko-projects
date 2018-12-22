@@ -2,6 +2,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+#ifndef nsDeviceContextAndroid_h__
+#define nsDeviceContextAndroid_h__
+
 #include "nsIDeviceContextSpec.h"
 #include "nsCOMPtr.h"
 
@@ -13,7 +16,7 @@ private:
 public:
     NS_DECL_ISUPPORTS
 
-    NS_IMETHOD GetSurfaceForPrinter(gfxASurface** surface) override;
+    already_AddRefed<PrintTarget> MakePrintTarget() final;
 
     NS_IMETHOD Init(nsIWidget* aWidget,
                     nsIPrintSettings* aPS,
@@ -30,3 +33,4 @@ private:
     nsCOMPtr<nsIPrintSettings> mPrintSettings;
     nsCOMPtr<nsIFile> mTempFile;
 };
+#endif // nsDeviceContextAndroid_h__

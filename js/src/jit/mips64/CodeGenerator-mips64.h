@@ -15,6 +15,10 @@ namespace jit {
 class CodeGeneratorMIPS64 : public CodeGeneratorMIPSShared
 {
   protected:
+    CodeGeneratorMIPS64(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm)
+      : CodeGeneratorMIPSShared(gen, graph, masm)
+    { }
+
     void testNullEmitBranch(Assembler::Condition cond, const ValueOperand& value,
                             MBasicBlock* ifTrue, MBasicBlock* ifFalse)
     {
@@ -37,36 +41,17 @@ class CodeGeneratorMIPS64 : public CodeGeneratorMIPSShared
         emitBranch(SecondScratchReg, ImmTag(JSVAL_TAG_OBJECT), cond, ifTrue, ifFalse);
     }
 
-    void emitTableSwitchDispatch(MTableSwitch* mir, Register index, Register base);
 
-  public:
-    virtual void visitCompareB(LCompareB* lir);
-    virtual void visitCompareBAndBranch(LCompareBAndBranch* lir);
-    virtual void visitCompareBitwise(LCompareBitwise* lir);
-    virtual void visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir);
-    virtual void visitAsmSelectI64(LAsmSelectI64* ins);
+    template <typename T>
+    void emitWasmLoadI64(T* ins);
+    template <typename T>
+    void emitWasmStoreI64(T* ins);
 
-    // Out of line visitors.
-    void visitOutOfLineBailout(OutOfLineBailout* ool);
-    void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
-  protected:
     ValueOperand ToValue(LInstruction* ins, size_t pos);
-    ValueOperand ToOutValue(LInstruction* ins);
     ValueOperand ToTempValue(LInstruction* ins, size_t pos);
 
     // Functions for LTestVAndBranch.
-    Register splitTagForTest(const ValueOperand& value);
-
-  public:
-    CodeGeneratorMIPS64(MIRGenerator* gen, LIRGraph* graph, MacroAssembler* masm)
-      : CodeGeneratorMIPSShared(gen, graph, masm)
-    { }
-
-  public:
-    void visitBox(LBox* box);
-    void visitUnbox(LUnbox* unbox);
-
-    void setReturnDoubleRegs(LiveRegisterSet* regs);
+    void splitTagForTest(const ValueOperand& value, ScratchTagScope& tag);
 };
 
 typedef CodeGeneratorMIPS64 CodeGeneratorSpecific;

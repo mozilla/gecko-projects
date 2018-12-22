@@ -32,7 +32,7 @@ public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIAUTHMODULE
 
-    nsAuthSSPI(pType package = PACKAGE_TYPE_NEGOTIATE);
+    explicit nsAuthSSPI(pType package = PACKAGE_TYPE_NEGOTIATE);
 
 private:
     ~nsAuthSSPI();
@@ -42,6 +42,8 @@ private:
     typedef TimeStamp MS_TimeStamp;
 
 private:
+    nsresult MakeSN(const char *principal, nsCString &result);
+
     CredHandle   mCred;
     CtxtHandle   mCtxt;
     nsCString    mServiceName;
@@ -51,8 +53,8 @@ private:
     nsString     mDomain;
     nsString     mUsername;
     nsString     mPassword;
-    bool         mIsFirst;	
-    void*        mCertDERData; 
+    bool         mIsFirst;
+    void*        mCertDERData;
     uint32_t     mCertDERLength;
 };
 

@@ -13,11 +13,12 @@
 #include "mozilla/UniquePtr.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
-#include "nsILocalFile.h"
+#include "nsIFile.h"
 #include "nsIObserverService.h"
 #include "nsProxyRelease.h"
 #include "nsTArray.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Scoped.h"
 
 namespace mozilla {
 
@@ -27,7 +28,7 @@ namespace {
 /**
  * An event used to notify the main thread when an error happens.
  */
-class WatchedErrorEvent final : public nsRunnable
+class WatchedErrorEvent final : public Runnable
 {
 public:
   /**
@@ -37,13 +38,14 @@ public:
    */
   WatchedErrorEvent(const nsMainThreadPtrHandle<nsINativeFileWatcherErrorCallback>& aOnError,
                     const nsresult& anError, const DWORD& osError)
-    : mOnError(aOnError)
+    : Runnable("WatchedErrorEvent")
+    , mOnError(aOnError)
     , mError(anError)
   {
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -65,7 +67,7 @@ public:
 /**
  * An event used to notify the main thread when an operation is successful.
  */
-class WatchedSuccessEvent final : public nsRunnable
+class WatchedSuccessEvent final : public Runnable
 {
 public:
   /**
@@ -75,13 +77,14 @@ public:
    */
   WatchedSuccessEvent(const nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback>& aOnSuccess,
                       const nsAString& aResourcePath)
-    : mOnSuccess(aOnSuccess)
+    : Runnable("WatchedSuccessEvent")
+    , mOnSuccess(aOnSuccess)
     , mResourcePath(aResourcePath)
   {
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -103,7 +106,7 @@ public:
  * An event used to notify the main thread of a change in a watched
  * resource.
  */
-class WatchedChangeEvent final : public nsRunnable
+class WatchedChangeEvent final : public Runnable
 {
 public:
   /**
@@ -112,13 +115,14 @@ public:
    */
   WatchedChangeEvent(const nsMainThreadPtrHandle<nsINativeFileWatcherCallback>& aOnChange,
                      const nsAString& aChangedResource)
-    : mOnChange(aOnChange)
+    : Runnable("WatchedChangeEvent")
+    , mOnChange(aOnChange)
     , mChangedResource(aChangedResource)
   {
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -224,16 +228,17 @@ struct PathRunnablesParametersWrapper {
  * This runnable is dispatched to the main thread in order to safely
  * shutdown the worker thread.
  */
-class NativeWatcherIOShutdownTask : public nsRunnable
+class NativeWatcherIOShutdownTask : public Runnable
 {
 public:
   NativeWatcherIOShutdownTask()
-    : mWorkerThread(do_GetCurrentThread())
+    : Runnable("NativeWatcherIOShutdownTask")
+    , mWorkerThread(do_GetCurrentThread())
   {
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     mWorkerThread->Shutdown();
@@ -255,16 +260,17 @@ private:
  * by issuing a NS_DispatchToCurrentThread(this) before exiting. This is done to allow
  * the execution of other runnables enqueued within the thread task queue.
  */
-class NativeFileWatcherIOTask : public nsRunnable
+class NativeFileWatcherIOTask : public Runnable
 {
 public:
-  NativeFileWatcherIOTask(HANDLE aIOCompletionPort)
-    : mIOCompletionPort(aIOCompletionPort)
+  explicit NativeFileWatcherIOTask(HANDLE aIOCompletionPort)
+    : Runnable("NativeFileWatcherIOTask")
+    , mIOCompletionPort(aIOCompletionPort)
     , mShuttingDown(false)
   {
   }
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() override;
   nsresult AddPathRunnableMethod(PathRunnablesParametersWrapper* aWrappedParameters);
   nsresult RemovePathRunnableMethod(PathRunnablesParametersWrapper* aWrappedParameters);
   nsresult DeactivateRunnableMethod();
@@ -453,7 +459,7 @@ NativeFileWatcherIOTask::RunInternal()
     nsAutoString resourceName(notificationInfo->FileName,
                               notificationInfo->FileNameLength / sizeof(WCHAR));
 
-    // Handle path normalisation using nsILocalFile.
+    // Handle path normalisation using nsIFile.
     nsString resourcePath;
     nsresult rv = MakeResourcePath(changedRes, resourceName, resourcePath);
     if (NS_SUCCEEDED(rv)) {
@@ -1160,14 +1166,14 @@ NativeFileWatcherIOTask::RemoveCallbacksFromHashtables(
 /**
  * Creates a string representing the native path for the changed resource.
  * It appends the resource name to the path of the changed descriptor by
- * using nsILocalFile.
+ * using nsIFile.
  * @param changedDescriptor
  *        The descriptor of the watched resource.
  * @param resourceName
  *        The resource which triggered the change.
  * @param nativeResourcePath
  *        The full path to the changed resource.
- * @return NS_OK if nsILocalFile succeeded in building the path.
+ * @return NS_OK if nsIFile succeeded in building the path.
  */
 nsresult
 NativeFileWatcherIOTask::MakeResourcePath(
@@ -1175,18 +1181,18 @@ NativeFileWatcherIOTask::MakeResourcePath(
   const nsAString& resourceName,
   nsAString& nativeResourcePath)
 {
-  nsCOMPtr<nsILocalFile>
+  nsCOMPtr<nsIFile>
     localPath(do_CreateInstance("@mozilla.org/file/local;1"));
   if (!localPath) {
     FILEWATCHERLOG(
-      "NativeFileWatcherIOTask::MakeResourcePath - Failed to create a nsILocalFile instance.");
+      "NativeFileWatcherIOTask::MakeResourcePath - Failed to create a nsIFile instance.");
     return NS_ERROR_FAILURE;
   }
 
   nsresult rv = localPath->InitWithPath(changedDescriptor->mPath);
   if (NS_FAILED(rv)) {
     FILEWATCHERLOG(
-      "NativeFileWatcherIOTask::MakeResourcePath - Failed to init nsILocalFile with %S (%x).",
+      "NativeFileWatcherIOTask::MakeResourcePath - Failed to init nsIFile with %S (%x).",
       changedDescriptor->mPath.get(), rv);
     return rv;
   }
@@ -1202,7 +1208,7 @@ NativeFileWatcherIOTask::MakeResourcePath(
   rv = localPath->GetPath(nativeResourcePath);
   if (NS_FAILED(rv)) {
     FILEWATCHERLOG(
-      "NativeFileWatcherIOTask::MakeResourcePath - Failed to get native path from nsILocalFile (%x).",
+      "NativeFileWatcherIOTask::MakeResourcePath - Failed to get native path from nsIFile (%x).",
       rv);
     return rv;
   }
@@ -1253,16 +1259,14 @@ NativeFileWatcherService::Init()
 
   // Start the IO worker thread.
   mWorkerIORunnable = new NativeFileWatcherIOTask(completionPort);
-  nsresult rv = NS_NewThread(getter_AddRefs(mIOThread), mWorkerIORunnable);
+  nsresult rv = NS_NewNamedThread("FileWatcher IO", getter_AddRefs(mIOThread),
+                                  mWorkerIORunnable);
   if (NS_FAILED(rv)) {
     FILEWATCHERLOG(
       "NativeFileWatcherIOTask::Init - Unable to create and dispatch the worker thread (%x).",
       rv);
     return rv;
   }
-
-  // Set the name for the worker thread.
-  NS_SetThreadName(mIOThread, "FileWatcher IO");
 
   mIOCompletionPort = completionPort.forget();
 
@@ -1303,15 +1307,18 @@ NativeFileWatcherService::AddPath(const nsAString& aPathToWatch,
   }
 
   nsMainThreadPtrHandle<nsINativeFileWatcherCallback> changeCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherCallback>(aOnChange));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherCallback>(
+      "nsINativeFileWatcherCallback", aOnChange));
 
   nsMainThreadPtrHandle<nsINativeFileWatcherErrorCallback> errorCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherErrorCallback>(aOnError));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherErrorCallback>(
+      "nsINativeFileWatcherErrorCallback", aOnError));
 
   nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback> successCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(aOnSuccess));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(
+      "nsINativeFileWatcherSuccessCallback", aOnSuccess));
 
-  // Wrap the path and the callbacks in order to pass them using NS_NewRunnableMethodWithArg.
+  // Wrap the path and the callbacks in order to pass them using NewRunnableMethod.
   UniquePtr<PathRunnablesParametersWrapper> wrappedCallbacks(
     new PathRunnablesParametersWrapper(
       aPathToWatch,
@@ -1322,7 +1329,8 @@ NativeFileWatcherService::AddPath(const nsAString& aPathToWatch,
   // Since this function does a bit of I/O stuff , run it in the IO thread.
   nsresult rv =
     mIOThread->Dispatch(
-      NS_NewRunnableMethodWithArg<PathRunnablesParametersWrapper*>(
+      NewRunnableMethod<PathRunnablesParametersWrapper*>(
+        "NativeFileWatcherIOTask::AddPathRunnableMethod",
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::AddPathRunnableMethod,
         wrappedCallbacks.get()),
@@ -1332,7 +1340,7 @@ NativeFileWatcherService::AddPath(const nsAString& aPathToWatch,
   }
 
   // Since the dispatch succeeded, we let the runnable own the pointer.
-  wrappedCallbacks.release();
+  Unused << wrappedCallbacks.release();
 
   WakeUpWorkerThread();
 
@@ -1373,15 +1381,18 @@ NativeFileWatcherService::RemovePath(const nsAString& aPathToRemove,
   }
 
   nsMainThreadPtrHandle<nsINativeFileWatcherCallback> changeCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherCallback>(aOnChange));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherCallback>(
+      "nsINativeFileWatcherCallback", aOnChange));
 
   nsMainThreadPtrHandle<nsINativeFileWatcherErrorCallback> errorCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherErrorCallback>(aOnError));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherErrorCallback>(
+      "nsINativeFileWatcherErrorCallback", aOnError));
 
   nsMainThreadPtrHandle<nsINativeFileWatcherSuccessCallback> successCallbackHandle(
-    new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(aOnSuccess));
+    new nsMainThreadPtrHolder<nsINativeFileWatcherSuccessCallback>(
+      "nsINativeFileWatcherSuccessCallback", aOnSuccess));
 
-  // Wrap the path and the callbacks in order to pass them using NS_NewRunnableMethodWithArg.
+  // Wrap the path and the callbacks in order to pass them using NewRunnableMethod.
   UniquePtr<PathRunnablesParametersWrapper> wrappedCallbacks(
     new PathRunnablesParametersWrapper(
       aPathToRemove,
@@ -1392,7 +1403,8 @@ NativeFileWatcherService::RemovePath(const nsAString& aPathToRemove,
   // Since this function does a bit of I/O stuff, run it in the IO thread.
   nsresult rv =
     mIOThread->Dispatch(
-      NS_NewRunnableMethodWithArg<PathRunnablesParametersWrapper*>(
+      NewRunnableMethod<PathRunnablesParametersWrapper*>(
+        "NativeFileWatcherIOTask::RemovePathRunnableMethod",
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::RemovePathRunnableMethod,
         wrappedCallbacks.get()),
@@ -1402,7 +1414,7 @@ NativeFileWatcherService::RemovePath(const nsAString& aPathToRemove,
   }
 
   // Since the dispatch succeeded, we let the runnable own the pointer.
-  wrappedCallbacks.release();
+  Unused << wrappedCallbacks.release();
 
   WakeUpWorkerThread();
 
@@ -1441,7 +1453,8 @@ NativeFileWatcherService::Uninit()
   // in the IO thread.
   nsresult rv =
     ioThread->Dispatch(
-      NS_NewRunnableMethod(
+      NewRunnableMethod(
+        "NativeFileWatcherIOTask::DeactivateRunnableMethod",
         static_cast<NativeFileWatcherIOTask*>(mWorkerIORunnable.get()),
         &NativeFileWatcherIOTask::DeactivateRunnableMethod),
       nsIEventTarget::DISPATCH_NORMAL);
@@ -1481,7 +1494,7 @@ NativeFileWatcherService::Observe(nsISupports* aSubject, const char* aTopic,
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!strcmp("xpcom-shutdown-threads", aTopic)) {
-    nsresult rv = Uninit();
+    DebugOnly<nsresult> rv = Uninit();
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     return NS_OK;
   }

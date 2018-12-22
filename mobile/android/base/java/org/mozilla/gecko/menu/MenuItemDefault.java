@@ -5,11 +5,13 @@
 package org.mozilla.gecko.menu;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.util.ResourceDrawableUtils;
 
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.support.v4.widget.TextViewCompat;
 import android.util.AttributeSet;
 import android.widget.TextView;
 
@@ -19,14 +21,15 @@ public class MenuItemDefault extends TextView
     private static final int[] STATE_CHECKED = new int[] { android.R.attr.state_checkable, android.R.attr.state_checked };
     private static final int[] STATE_UNCHECKED = new int[] { android.R.attr.state_checkable };
 
-    private Drawable mIcon;
+    protected Drawable mIcon;
+    protected boolean mShowIcon;
+
     private final Drawable mState;
     private static Rect sIconBounds;
 
     private boolean mCheckable;
     private boolean mChecked;
     private boolean mHasSubMenu;
-    private boolean mShowIcon;
 
     public MenuItemDefault(Context context) {
         this(context, null);
@@ -56,7 +59,7 @@ public class MenuItemDefault extends TextView
             sIconBounds = new Rect(0, 0, iconSize, iconSize);
         }
 
-        setCompoundDrawables(mIcon, null, mState, null);
+        TextViewCompat.setCompoundDrawablesRelative(this, mIcon, null, mState, null);
     }
 
     @Override
@@ -78,7 +81,7 @@ public class MenuItemDefault extends TextView
         if (item == null)
             return;
 
-        setTitle(item.getTitle());        
+        setTitle(item.getTitle());
         setIcon(item.getIcon());
         setEnabled(item.isEnabled());
         setCheckable(item.isCheckable());
@@ -86,8 +89,8 @@ public class MenuItemDefault extends TextView
         setSubMenuIndicator(item.hasSubMenu());
     }
 
-    private void refreshIcon() {
-        setCompoundDrawables(mShowIcon ? mIcon : null, null, mState, null);
+    protected void refreshIcon() {
+        TextViewCompat.setCompoundDrawablesRelative(this, mShowIcon ? mIcon : null, null, mState, null);
     }
 
     void setIcon(Drawable icon) {
@@ -102,7 +105,7 @@ public class MenuItemDefault extends TextView
     }
 
     void setIcon(int icon) {
-        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
+        setIcon((icon == 0) ? null : ResourceDrawableUtils.getDrawable(getContext(), icon));
     }
 
     void setTitle(CharSequence title) {

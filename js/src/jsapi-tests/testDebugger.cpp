@@ -5,9 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jscntxt.h"
-
 #include "jsapi-tests/tests.h"
+#include "vm/JSContext.h"
 
 using namespace js;
 
@@ -15,13 +14,13 @@ BEGIN_TEST(testDebugger_newScriptHook)
 {
     // Test that top-level indirect eval fires the newScript hook.
     CHECK(JS_DefineDebuggerObject(cx, global));
-    JS::CompartmentOptions options;
+    JS::RealmOptions options;
     JS::RootedObject g(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
                                               JS::FireOnNewGlobalHook, options));
     CHECK(g);
     {
-        JSAutoCompartment ae(cx, g);
-        CHECK(JS_InitStandardClasses(cx, g));
+        JSAutoRealm ae(cx, g);
+        CHECK(JS::InitRealmStandardClasses(cx));
     }
 
     JS::RootedObject gWrapper(cx, g);
@@ -49,7 +48,7 @@ bool testIndirectEval(JS::HandleObject scope, const char* code)
     EXEC("hits = 0;");
 
     {
-        JSAutoCompartment ae(cx, scope);
+        JSAutoRealm ae(cx, scope);
         JSString* codestr = JS_NewStringCopyZ(cx, code);
         CHECK(codestr);
         JS::RootedValue arg(cx, JS::StringValue(codestr));

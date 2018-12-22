@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,12 +8,13 @@
 #define mozilla_layers_APZThreadUtils_h
 
 #include "base/message_loop.h"
-#include "mozilla/TimeStamp.h"  // for TimeDuration
+#include "nsINamed.h"
 #include "nsITimer.h"
 
-class Task;
-
 namespace mozilla {
+
+class Runnable;
+
 namespace layers {
 
 class APZThreadUtils
@@ -39,24 +41,11 @@ public:
   static void AssertOnControllerThread();
 
   /**
-   * This can be used to assert that the current thread is the
-   * compositor thread (which applies the async transform).
-   * This does nothing if thread assertions are disabled.
-   */
-  static void AssertOnCompositorThread();
-
-  /**
    * Run the given task on the APZ "controller thread" for this platform. If
    * this function is called from the controller thread itself then the task is
    * run immediately without getting queued.
    */
-  static void RunOnControllerThread(Task* aTask);
-
-  /**
-   * Runs the given task on the current thread after a delay of |aDelay|.
-   */
-  static void RunDelayedTaskOnCurrentThread(Task* aTask,
-                                            const TimeDuration& aDelay);
+  static void RunOnControllerThread(already_AddRefed<Runnable> aTask);
 
   /**
    * Returns true if currently on APZ "controller thread".
@@ -64,44 +53,60 @@ public:
   static bool IsControllerThread();
 };
 
-// A base class for GenericTimerCallback<Function>.
+// A base class for GenericNamedTimerCallback<Function>.
 // This is necessary because NS_IMPL_ISUPPORTS doesn't work for a class
 // template.
-class GenericTimerCallbackBase : public nsITimerCallback
+class GenericNamedTimerCallbackBase : public nsITimerCallback,
+                                      public nsINamed
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
 protected:
-  virtual ~GenericTimerCallbackBase() {}
+  virtual ~GenericNamedTimerCallbackBase() {}
 };
 
-// An nsITimerCallback implementation that can be used with any function
-// object that's callable with no arguments.
+// An nsITimerCallback implementation with nsINamed that can be used with any
+// function object that's callable with no arguments.
 template <typename Function>
-class GenericTimerCallback final : public GenericTimerCallbackBase
+class GenericNamedTimerCallback final : public GenericNamedTimerCallbackBase
 {
 public:
-  explicit GenericTimerCallback(const Function& aFunction) : mFunction(aFunction) {}
+  explicit GenericNamedTimerCallback(const Function& aFunction,
+                                     const char* aName)
+    : mFunction(aFunction)
+    , mName(aName)
+  {
+  }
 
-  NS_IMETHODIMP Notify(nsITimer*) override
+  NS_IMETHOD Notify(nsITimer*) override
   {
     mFunction();
     return NS_OK;
   }
+
+  NS_IMETHOD GetName(nsACString& aName) override
+  {
+    aName = mName;
+    return NS_OK;
+  }
+
 private:
   Function mFunction;
+  nsCString mName;
 };
 
-// Convenience function for constructing a GenericTimerCallback.
+// Convenience function for constructing a GenericNamedTimerCallback.
 // Returns a raw pointer, suitable for passing directly as an argument to
 // nsITimer::InitWithCallback(). The intention is to enable the following
 // terse inline usage:
-//    timer->InitWithCallback(NewTimerCallback([](){ ... }), delay);
+//    timer->InitWithCallback(NewNamedTimerCallback([](){ ... }, name), delay);
 template <typename Function>
-GenericTimerCallback<Function>* NewTimerCallback(const Function& aFunction)
+GenericNamedTimerCallback<Function>*
+  NewNamedTimerCallback(const Function& aFunction,
+                        const char* aName)
 {
-  return new GenericTimerCallback<Function>(aFunction);
+  return new GenericNamedTimerCallback<Function>(aFunction, aName);
 }
 
 } // namespace layers

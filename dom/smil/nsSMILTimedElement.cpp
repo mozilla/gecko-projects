@@ -9,6 +9,7 @@
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/dom/SVGAnimationElement.h"
+#include "mozilla/TaskCategory.h"
 #include "nsSMILTimedElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsSMILAnimationFunction.h"
@@ -78,7 +79,7 @@ nsSMILTimedElement::InstanceTimeComparator::LessThan(
 
 namespace
 {
-  class AsyncTimeEventRunner : public nsRunnable
+  class AsyncTimeEventRunner : public Runnable
   {
   protected:
     RefPtr<nsIContent> mTarget;
@@ -86,26 +87,25 @@ namespace
     int32_t              mDetail;
 
   public:
-    AsyncTimeEventRunner(nsIContent* aTarget, EventMessage aMsg,
+    AsyncTimeEventRunner(nsIContent* aTarget,
+                         EventMessage aMsg,
                          int32_t aDetail)
-      : mTarget(aTarget)
+      : mozilla::Runnable("AsyncTimeEventRunner")
+      , mTarget(aTarget)
       , mMsg(aMsg)
       , mDetail(aDetail)
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       InternalSMILTimeEvent event(true, mMsg);
       event.mDetail = mDetail;
 
       nsPresContext* context = nullptr;
-      nsIDocument* doc = mTarget->GetCurrentDoc();
+      nsIDocument* doc = mTarget->GetUncomposedDoc();
       if (doc) {
-        nsCOMPtr<nsIPresShell> shell = doc->GetShell();
-        if (shell) {
-          context = shell->GetPresContext();
-        }
+        context = doc->GetPresContext();
       }
 
       return EventDispatcher::Dispatch(mTarget, context, &event);
@@ -213,20 +213,21 @@ nsSMILTimedElement::RemoveInstanceTimes(InstanceTimeList& aArray,
 //----------------------------------------------------------------------
 // Static members
 
-nsAttrValue::EnumTable nsSMILTimedElement::sFillModeTable[] = {
+const nsAttrValue::EnumTable nsSMILTimedElement::sFillModeTable[] = {
       {"remove", FILL_REMOVE},
       {"freeze", FILL_FREEZE},
       {nullptr, 0}
 };
 
-nsAttrValue::EnumTable nsSMILTimedElement::sRestartModeTable[] = {
+const nsAttrValue::EnumTable nsSMILTimedElement::sRestartModeTable[] = {
       {"always", RESTART_ALWAYS},
       {"whenNotActive", RESTART_WHENNOTACTIVE},
       {"never", RESTART_NEVER},
       {nullptr, 0}
 };
 
-const nsSMILMilestone nsSMILTimedElement::sMaxMilestone(INT64_MAX, false);
+const nsSMILMilestone nsSMILTimedElement::sMaxMilestone(
+  std::numeric_limits<nsSMILTime>::max(), false);
 
 // The thresholds at which point we start filtering intervals and instance times
 // indiscriminately.
@@ -316,7 +317,7 @@ nsSMILTimedElement::GetTargetElement()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMElementTimeControl methods
+// ElementTimeControl methods
 //
 // The definition of the ElementTimeControl interface differs between SMIL
 // Animation and SVG 1.1. In SMIL Animation all methods have a void return
@@ -628,7 +629,7 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
          : STATE_POSTACTIVE;
         stateChanged = true;
         if (mElementState == STATE_WAITING) {
-          mCurrentInterval = new nsSMILInterval(firstInterval);
+          mCurrentInterval = MakeUnique<nsSMILInterval>(firstInterval);
           NotifyNewInterval();
         }
       }
@@ -671,7 +672,7 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
         if (mCurrentInterval->End()->Time() <= sampleTime) {
           nsSMILInterval newInterval;
           mElementState =
-            GetNextInterval(mCurrentInterval, nullptr, nullptr, newInterval)
+            GetNextInterval(mCurrentInterval.get(), nullptr, nullptr, newInterval)
             ? STATE_WAITING
             : STATE_POSTACTIVE;
           if (mClient) {
@@ -682,27 +683,25 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
             FireTimeEventAsync(eSMILEndEvent, 0);
           }
           mCurrentRepeatIteration = 0;
-          mOldIntervals.AppendElement(mCurrentInterval.forget());
+          mOldIntervals.AppendElement(std::move(mCurrentInterval));
           SampleFillValue();
           if (mElementState == STATE_WAITING) {
-            mCurrentInterval = new nsSMILInterval(newInterval);
+            mCurrentInterval = MakeUnique<nsSMILInterval>(newInterval);
           }
           // We are now in a consistent state to dispatch notifications
           if (didApplyEarlyEnd) {
             NotifyChangedInterval(
-                mOldIntervals[mOldIntervals.Length() - 1], false, true);
+                mOldIntervals[mOldIntervals.Length() - 1].get(), false, true);
           }
           if (mElementState == STATE_WAITING) {
             NotifyNewInterval();
           }
           FilterHistory();
           stateChanged = true;
-        } else {
+        } else if (mCurrentInterval->Begin()->Time() <= sampleTime) {
           MOZ_ASSERT(!didApplyEarlyEnd,
                      "We got an early end, but didn't end");
           nsSMILTime beginTime = mCurrentInterval->Begin()->Time().GetMillis();
-          NS_ASSERTION(aContainerTime >= beginTime,
-                       "Sample time should not precede current interval");
           nsSMILTime activeTime = aContainerTime - beginTime;
 
           // The 'min' attribute can cause the active interval to be longer than
@@ -732,6 +731,11 @@ nsSMILTimedElement::DoSampleAt(nsSMILTime aContainerTime, bool aEndOnly)
             }
           }
         }
+        // Otherwise |sampleTime| is *before* the current interval. That
+        // normally doesn't happen but can happen if we get a stray milestone
+        // sample (e.g. if we registered a milestone with a time container that
+        // later got re-attached as a child of a more advanced time container).
+        // In that case we should just ignore the sample.
       }
       break;
 
@@ -763,7 +767,7 @@ nsSMILTimedElement::HandleContainerTimeChange()
   // the nsSMILTimeValueSpec we'll check if anything has changed and if not, we
   // won't go any further.
   if (mElementState == STATE_WAITING || mElementState == STATE_ACTIVE) {
-    NotifyChangedInterval(mCurrentInterval, false, false);
+    NotifyChangedInterval(mCurrentInterval.get(), false, false);
   }
 }
 
@@ -849,7 +853,7 @@ namespace
 } // namespace
 
 bool
-nsSMILTimedElement::SetAttr(nsIAtom* aAttribute, const nsAString& aValue,
+nsSMILTimedElement::SetAttr(nsAtom* aAttribute, const nsAString& aValue,
                             nsAttrValue& aResult,
                             Element* aContextNode,
                             nsresult* aParseResult)
@@ -890,7 +894,7 @@ nsSMILTimedElement::SetAttr(nsIAtom* aAttribute, const nsAString& aValue,
 }
 
 bool
-nsSMILTimedElement::UnsetAttr(nsIAtom* aAttribute)
+nsSMILTimedElement::UnsetAttr(nsAtom* aAttribute)
 {
   bool foundMatch = true;
 
@@ -1254,7 +1258,7 @@ nsSMILTimedElement::Traverse(nsCycleCollectionTraversalCallback* aCallback)
 {
   uint32_t count = mBeginSpecs.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i];
+    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i].get();
     MOZ_ASSERT(beginSpec,
                "null nsSMILTimeValueSpec in list of begin specs");
     beginSpec->Traverse(aCallback);
@@ -1262,7 +1266,7 @@ nsSMILTimedElement::Traverse(nsCycleCollectionTraversalCallback* aCallback)
 
   count = mEndSpecs.Length();
   for (uint32_t j = 0; j < count; ++j) {
-    nsSMILTimeValueSpec* endSpec = mEndSpecs[j];
+    nsSMILTimeValueSpec* endSpec = mEndSpecs[j].get();
     MOZ_ASSERT(endSpec, "null nsSMILTimeValueSpec in list of end specs");
     endSpec->Traverse(aCallback);
   }
@@ -1276,7 +1280,7 @@ nsSMILTimedElement::Unlink()
   // Remove dependencies on other elements
   uint32_t count = mBeginSpecs.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i];
+    nsSMILTimeValueSpec* beginSpec = mBeginSpecs[i].get();
     MOZ_ASSERT(beginSpec,
                "null nsSMILTimeValueSpec in list of begin specs");
     beginSpec->Unlink();
@@ -1284,7 +1288,7 @@ nsSMILTimedElement::Unlink()
 
   count = mEndSpecs.Length();
   for (uint32_t j = 0; j < count; ++j) {
-    nsSMILTimeValueSpec* endSpec = mEndSpecs[j];
+    nsSMILTimeValueSpec* endSpec = mEndSpecs[j].get();
     MOZ_ASSERT(endSpec, "null nsSMILTimeValueSpec in list of end specs");
     endSpec->Unlink();
   }
@@ -1316,21 +1320,22 @@ nsSMILTimedElement::SetBeginOrEndSpec(const nsAString& aSpec,
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = NS_OK;
-  while (tokenizer.hasMoreTokens() && NS_SUCCEEDED(rv)) {
-    nsAutoPtr<nsSMILTimeValueSpec>
-      spec(new nsSMILTimeValueSpec(*this, aIsBegin));
-    rv = spec->SetSpec(tokenizer.nextToken(), aContextNode);
+  bool hadFailure = false;
+  while (tokenizer.hasMoreTokens()) {
+    auto spec = MakeUnique<nsSMILTimeValueSpec>(*this, aIsBegin);
+    nsresult rv = spec->SetSpec(tokenizer.nextToken(), aContextNode);
     if (NS_SUCCEEDED(rv)) {
-      timeSpecsList.AppendElement(spec.forget());
+      timeSpecsList.AppendElement(std::move(spec));
+    } else {
+      hadFailure = true;
     }
   }
 
-  if (NS_FAILED(rv)) {
-    ClearSpecs(timeSpecsList, instances, aRemove);
-  }
-
-  return rv;
+  // The return value from this function is only used to determine if we should
+  // print a console message or not, so we return failure if we had one or more
+  // failures but we don't need to differentiate between different types of
+  // failures or the number of failures.
+  return hadFailure ? NS_ERROR_FAILURE : NS_OK;
 }
 
 namespace
@@ -1473,15 +1478,15 @@ nsSMILTimedElement::RebuildTimingState(RemovalTestFunction aRemove)
   MOZ_ASSERT(mElementState == STATE_STARTUP,
              "Rebuilding timing state from non-startup state");
 
-  if (mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) {
+  if (mAnimationElement->HasAttr(nsGkAtoms::begin)) {
     nsAutoString attValue;
-    mAnimationElement->GetAnimAttr(nsGkAtoms::begin, attValue);
+    mAnimationElement->GetAttr(nsGkAtoms::begin, attValue);
     SetBeginSpec(attValue, mAnimationElement, aRemove);
   }
 
-  if (mAnimationElement->HasAnimAttr(nsGkAtoms::end)) {
+  if (mAnimationElement->HasAttr(nsGkAtoms::end)) {
     nsAutoString attValue;
-    mAnimationElement->GetAnimAttr(nsGkAtoms::end, attValue);
+    mAnimationElement->GetAttr(nsGkAtoms::end, attValue);
     SetEndSpec(attValue, mAnimationElement, aRemove);
   }
 
@@ -1606,7 +1611,7 @@ nsSMILTimedElement::FilterIntervals()
         (i < threshold || !interval->IsDependencyChainLink())) {
       interval->Unlink(true /*filtered, not deleted*/);
     } else {
-      filteredList.AppendElement(mOldIntervals[i].forget());
+      filteredList.AppendElement(std::move(mOldIntervals[i]));
     }
   }
   mOldIntervals.Clear();
@@ -1731,7 +1736,7 @@ nsSMILTimedElement::GetNextInterval(const nsSMILInterval* aPrevInterval,
       // our ref-counting is not const-correct
       tempBegin = const_cast<nsSMILInstanceTime*>(aFixedBeginTime);
     } else if ((!mAnimationElement ||
-                !mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) &&
+                !mAnimationElement->HasAttr(nsGkAtoms::begin)) &&
                beginAfter <= zeroTime) {
       tempBegin = new nsSMILInstanceTime(nsSMILTimeValue(0));
     } else {
@@ -1847,7 +1852,7 @@ nsSMILTimedElement::GetNextInterval(const nsSMILInterval* aPrevInterval,
 
     beginAfter = tempEnd->Time();
   }
-  NS_NOTREACHED("Hmm... we really shouldn't be here");
+  MOZ_ASSERT_UNREACHABLE("Hmm... we really shouldn't be here");
 
   return false;
 }
@@ -1923,8 +1928,11 @@ nsSMILTimedElement::GetRepeatDuration() const
 {
   nsSMILTimeValue multipliedDuration;
   if (mRepeatCount.IsDefinite() && mSimpleDur.IsDefinite()) {
-    multipliedDuration.SetMillis(
-      nsSMILTime(mRepeatCount * double(mSimpleDur.GetMillis())));
+    if (mRepeatCount * double(mSimpleDur.GetMillis()) <=
+        std::numeric_limits<nsSMILTime>::max()) {
+      multipliedDuration.SetMillis(
+        nsSMILTime(mRepeatCount * mSimpleDur.GetMillis()));
+    }
   } else {
     multipliedDuration.SetIndefinite();
   }
@@ -2079,14 +2087,14 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
                                       ? mCurrentInterval->Begin()
                                       : nullptr;
   nsSMILInterval updatedInterval;
-  if (GetNextInterval(GetPreviousInterval(), mCurrentInterval,
+  if (GetNextInterval(GetPreviousInterval(), mCurrentInterval.get(),
                       beginTime, updatedInterval)) {
 
     if (mElementState == STATE_POSTACTIVE) {
 
       MOZ_ASSERT(!mCurrentInterval,
                  "In postactive state but the interval has been set");
-      mCurrentInterval = new nsSMILInterval(updatedInterval);
+      mCurrentInterval = MakeUnique<nsSMILInterval>(updatedInterval);
       mElementState = STATE_WAITING;
       NotifyNewInterval();
 
@@ -2108,7 +2116,7 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
       }
 
       if (beginChanged || endChanged || aForceChangeNotice) {
-        NotifyChangedInterval(mCurrentInterval, beginChanged, endChanged);
+        NotifyChangedInterval(mCurrentInterval.get(), beginChanged, endChanged);
       }
     }
 
@@ -2122,7 +2130,7 @@ nsSMILTimedElement::UpdateCurrentInterval(bool aForceChangeNotice)
       if (!mCurrentInterval->End()->SameTimeAndBase(*mCurrentInterval->Begin()))
       {
         mCurrentInterval->SetEnd(*mCurrentInterval->Begin());
-        NotifyChangedInterval(mCurrentInterval, false, true);
+        NotifyChangedInterval(mCurrentInterval.get(), false, true);
       }
       // The transition to the postactive state will take place on the next
       // sample (along with firing end events, clearing intervals etc.)
@@ -2203,13 +2211,13 @@ nsresult
 nsSMILTimedElement::AddInstanceTimeFromCurrentTime(nsSMILTime aCurrentTime,
     double aOffsetSeconds, bool aIsBegin)
 {
-  double offset = aOffsetSeconds * PR_MSEC_PER_SEC;
+  double offset = NS_round(aOffsetSeconds * PR_MSEC_PER_SEC);
 
   // Check we won't overflow the range of nsSMILTime
-  if (aCurrentTime + NS_round(offset) > INT64_MAX)
+  if (aCurrentTime + offset > std::numeric_limits<nsSMILTime>::max())
     return NS_ERROR_ILLEGAL_VALUE;
 
-  nsSMILTimeValue timeVal(aCurrentTime + int64_t(NS_round(offset)));
+  nsSMILTimeValue timeVal(aCurrentTime + int64_t(offset));
 
   RefPtr<nsSMILInstanceTime> instanceTime =
     new nsSMILInstanceTime(timeVal, nsSMILInstanceTime::SOURCE_DOM);
@@ -2330,7 +2338,7 @@ nsSMILTimedElement::NotifyNewInterval()
   }
 
   for (auto iter = mTimeDependents.Iter(); !iter.Done(); iter.Next()) {
-    nsSMILInterval* interval = mCurrentInterval;
+    nsSMILInterval* interval = mCurrentInterval.get();
     // It's possible that in notifying one new time dependent of a new interval
     // that a chain reaction is triggered which results in the original
     // interval disappearing. If that's the case we can skip sending further
@@ -2375,7 +2383,8 @@ nsSMILTimedElement::FireTimeEventAsync(EventMessage aMsg, int32_t aDetail)
 
   nsCOMPtr<nsIRunnable> event =
     new AsyncTimeEventRunner(mAnimationElement, aMsg, aDetail);
-  NS_DispatchToMainThread(event);
+  mAnimationElement->OwnerDoc()->Dispatch(TaskCategory::Other,
+                                          event.forget());
 }
 
 const nsSMILInstanceTime*

@@ -25,7 +25,7 @@ class ChunkedJSONWriteFunc : public mozilla::JSONWriteFunc
 public:
   friend class SpliceableJSONWriter;
 
-  ChunkedJSONWriteFunc() {
+  ChunkedJSONWriteFunc() : mChunkPtr{nullptr}, mChunkEnd{nullptr} {
     AllocChunk(kChunkSize);
   }
 
@@ -82,10 +82,10 @@ class SpliceableJSONWriter : public mozilla::JSONWriter
 {
 public:
   explicit SpliceableJSONWriter(mozilla::UniquePtr<mozilla::JSONWriteFunc> aWriter)
-    : JSONWriter(mozilla::Move(aWriter))
+    : JSONWriter(std::move(aWriter))
   { }
 
-  void StartBareList(CollectionStyle aStyle = SingleLineStyle) {
+  void StartBareList(CollectionStyle aStyle = MultiLineStyle) {
     StartCollection(nullptr, "", aStyle);
   }
 
@@ -101,6 +101,13 @@ public:
 
   void Splice(const ChunkedJSONWriteFunc* aFunc);
   void Splice(const char* aStr);
+
+  // Splice the given JSON directly in, without quoting.
+  void SplicedJSONProperty(const char* aMaybePropertyName,
+                           const char* aJsonValue)
+  {
+    Scalar(aMaybePropertyName, aJsonValue);
+  }
 
   // Takes the chunks from aFunc and write them. If move is not possible
   // (e.g., using OStreamJSONWriteFunc), aFunc's chunks are copied and its

@@ -5,7 +5,7 @@
 
 /**
  * HSplitBox Component
- * Styles for React component at `devtools/client/shared/components/h-split-box.js`
+ * Styles for React component at `devtools/client/shared/components/HSplitBox.js`
  */
 
 .h-split-box,
@@ -21,11 +21,4 @@
   display: flex;
   flex-direction: row;
   flex: 1;
-}
-
-.h-split-box-splitter {
-  -moz-border-end: 1px solid var(--theme-splitter-color);
-  cursor: ew-resize;
-  width: 3px;
-  -moz-margin-start: -3px;
 }

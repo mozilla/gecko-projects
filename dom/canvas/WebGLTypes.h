@@ -16,6 +16,9 @@ typedef int64_t WebGLintptr;
 typedef bool WebGLboolean;
 
 namespace mozilla {
+namespace gl {
+class GLContext; // This is going to be needed a lot.
+} // namespace gl
 
 /*
  * WebGLTextureFakeBlackStatus is an enum to track what needs to use a dummy 1x1 black
@@ -139,12 +142,14 @@ enum class WebGLTexDimensions : uint8_t {
 enum class WebGLExtensionID : uint8_t {
     ANGLE_instanced_arrays,
     EXT_blend_minmax,
+    EXT_color_buffer_float,
     EXT_color_buffer_half_float,
     EXT_frag_depth,
     EXT_sRGB,
     EXT_shader_texture_lod,
     EXT_texture_filter_anisotropic,
     EXT_disjoint_timer_query,
+    MOZ_debug,
     OES_element_index_uint,
     OES_standard_derivatives,
     OES_texture_float,
@@ -153,11 +158,13 @@ enum class WebGLExtensionID : uint8_t {
     OES_texture_half_float_linear,
     OES_vertex_array_object,
     WEBGL_color_buffer_float,
+    WEBGL_compressed_texture_astc,
     WEBGL_compressed_texture_atc,
-    WEBGL_compressed_texture_es3,
+    WEBGL_compressed_texture_etc,
     WEBGL_compressed_texture_etc1,
     WEBGL_compressed_texture_pvrtc,
     WEBGL_compressed_texture_s3tc,
+    WEBGL_compressed_texture_s3tc_srgb,
     WEBGL_debug_renderer_info,
     WEBGL_debug_shaders,
     WEBGL_depth_texture,
@@ -165,6 +172,50 @@ enum class WebGLExtensionID : uint8_t {
     WEBGL_lose_context,
     Max,
     Unknown
+};
+
+class UniqueBuffer
+{
+    // Like UniquePtr<>, but for void* and malloc/calloc/free.
+    void* mBuffer;
+
+public:
+    UniqueBuffer()
+        : mBuffer(nullptr)
+    { }
+
+    MOZ_IMPLICIT UniqueBuffer(void* buffer)
+        : mBuffer(buffer)
+    { }
+
+    ~UniqueBuffer() {
+        free(mBuffer);
+    }
+
+    UniqueBuffer(UniqueBuffer&& other) {
+        this->mBuffer = other.mBuffer;
+        other.mBuffer = nullptr;
+    }
+
+    UniqueBuffer& operator =(UniqueBuffer&& other) {
+        free(this->mBuffer);
+        this->mBuffer = other.mBuffer;
+        other.mBuffer = nullptr;
+        return *this;
+    }
+
+    UniqueBuffer& operator =(void* newBuffer) {
+        free(this->mBuffer);
+        this->mBuffer = newBuffer;
+        return *this;
+    }
+
+    explicit operator bool() const { return bool(mBuffer); }
+
+    void* get() const { return mBuffer; }
+
+    UniqueBuffer(const UniqueBuffer& other) = delete; // construct using std::move()!
+    void operator =(const UniqueBuffer& other) = delete; // assign using std::move()!
 };
 
 } // namespace mozilla

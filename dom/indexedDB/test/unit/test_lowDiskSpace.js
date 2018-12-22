@@ -10,7 +10,7 @@ var self = this;
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const dbName = self.window ? window.location.pathname : "test_lowDiskSpace";
   const dbVersion = 1;
@@ -164,7 +164,7 @@ function testSteps()
     setLowDiskMode(true);
 
     let request = indexedDB.open(dbName, dbVersion + 2);
-    request.onerror = expectedErrorHandler("QuotaExceededError");
+    request.onerror = errorHandler;
     request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = unexpectedSuccessHandler;
 
@@ -175,12 +175,20 @@ function testSteps()
     let db = event.target.result;
     db.onerror = errorHandler;
 
-    let objectStore = db.createObjectStore(objectStoreName, objectStoreOptions);
+    let txn = event.target.transaction;
+    txn.onerror = expectedErrorHandler("AbortError");
+    txn.onabort = grabEventAndContinueHandler;
+
+    db.createObjectStore(objectStoreName, objectStoreOptions);
 
     request.onupgradeneeded = unexpectedSuccessHandler;
     event = yield undefined;
 
-    is(event.type, "error", "Failed database upgrade");
+    is(event.type, "abort", "Got correct event type");
+    is(event.target.error.name, "QuotaExceededError", "Got correct error type");
+
+    request.onerror = expectedErrorHandler("AbortError");
+    event = yield undefined;
   }
 
   { // Make sure creating indexes in low disk mode fails.
@@ -214,7 +222,7 @@ function testSteps()
     setLowDiskMode(true);
 
     request = indexedDB.open(dbName, dbVersion + 3);
-    request.onerror = expectedErrorHandler("QuotaExceededError");
+    request.onerror = errorHandler;
     request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = unexpectedSuccessHandler;
     event = yield undefined;
@@ -223,14 +231,21 @@ function testSteps()
 
     db = event.target.result;
     db.onerror = errorHandler;
+    let txn = event.target.transaction;
+    txn.onerror = expectedErrorHandler("AbortError");
+    txn.onabort = grabEventAndContinueHandler;
 
     objectStore = event.target.transaction.objectStore(objectStoreName);
-    let index = objectStore.createIndex(indexName, indexName, indexOptions);
+    objectStore.createIndex(indexName, indexName, indexOptions);
 
     request.onupgradeneeded = unexpectedSuccessHandler;
     event = yield undefined;
 
-    is(event.type, "error", "Failed database upgrade");
+    is(event.type, "abort", "Got correct event type");
+    is(event.target.error.name, "QuotaExceededError", "Got correct error type");
+
+    request.onerror = expectedErrorHandler("AbortError");
+    event = yield undefined;
   }
 
   { // Make sure deleting indexes in low disk mode succeeds.
@@ -251,7 +266,7 @@ function testSteps()
     db.onerror = errorHandler;
 
     let objectStore = event.target.transaction.objectStore(objectStoreName);
-    let index = objectStore.createIndex(indexName, indexName, indexOptions);
+    objectStore.createIndex(indexName, indexName, indexOptions);
 
     request.onupgradeneeded = unexpectedSuccessHandler;
     request.onsuccess = grabEventAndContinueHandler;
@@ -338,7 +353,7 @@ function testSteps()
     db.onerror = errorHandler;
 
     let objectStore = db.createObjectStore(objectStoreName, objectStoreOptions);
-    let index = objectStore.createIndex(indexName, indexName, indexOptions);
+    objectStore.createIndex(indexName, indexName, indexOptions);
 
     for (let data of dbData) {
       objectStore.add(data);
@@ -700,40 +715,39 @@ function testSteps()
   }
 
   finishTest();
-  yield undefined;
 }
 
 function RequestCounter(expectedType) {
   this._counter = 0;
 }
 RequestCounter.prototype = {
-  incr: function() {
+  incr() {
     this._counter++;
   },
 
-  decr: function() {
+  decr() {
     if (!--this._counter) {
       continueToNextStepSync();
     }
   },
 
-  handler: function(type, preventDefault) {
+  handler(type, preventDefault) {
     this.incr();
-    return function(event) {
+    return event => {
       is(event.type, type || "success", "Correct type");
       this.decr();
-    }.bind(this);
+    };
   },
 
-  errorHandler: function(eventType, errorName) {
+  errorHandler(eventType, errorName) {
     this.incr();
-    return function(event) {
+    return event => {
       is(event.type, eventType || "error", "Correct type");
       is(event.target.error.name, errorName || "QuotaExceededError",
           "Correct error name");
       event.preventDefault();
       event.stopPropagation();
       this.decr();
-    }.bind(this);
+    };
   }
 };

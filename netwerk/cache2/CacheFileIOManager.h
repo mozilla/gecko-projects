@@ -7,11 +7,14 @@
 
 #include "CacheIOThread.h"
 #include "CacheStorageService.h"
+#include "CacheHashUtils.h"
 #include "nsIEventTarget.h"
+#include "nsINamed.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/SHA1.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "nsTArray.h"
 #include "nsString.h"
@@ -40,7 +43,7 @@ class CacheFileHandlesEntry;
 #define TRASH_DIR   "trash"
 
 
-class CacheFileHandle : public nsISupports
+class CacheFileHandle final : public nsISupports
 {
 public:
   enum class PinningStatus : uint32_t {
@@ -67,6 +70,7 @@ public:
 
   // Returns false when this handle has been doomed based on the pinning state update.
   bool SetPinned(bool aPinned);
+  void SetInvalid() { mInvalid = true; }
 
   // Memory reporting
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -80,16 +84,36 @@ private:
   virtual ~CacheFileHandle();
 
   const SHA1Sum::Hash *mHash;
-  mozilla::Atomic<bool,ReleaseAcquire> mIsDoomed;
-  bool                 mPriority;
-  bool                 mClosed;
-  bool                 mSpecialFile;
-  bool                 mInvalid;
-  bool                 mFileExists; // This means that the file should exists,
-                                    // but it can be still deleted by OS/user
-                                    // and then a subsequent OpenNSPRFileDesc()
-                                    // will fail.
+  mozilla::Atomic<bool, ReleaseAcquire> mIsDoomed;
+  mozilla::Atomic<bool, ReleaseAcquire> mClosed;
 
+  // mPriority and mSpecialFile are plain "bool", not "bool:1", so as to
+  // avoid bitfield races with the byte containing mInvalid et al.  See
+  // bug 1278502.
+  bool const           mPriority;
+  bool const           mSpecialFile;
+
+  mozilla::Atomic<bool, Relaxed> mInvalid;
+
+  // These bit flags are all accessed only on the IO thread
+  bool                 mFileExists : 1; // This means that the file should exists,
+                                        // but it can be still deleted by OS/user
+                                        // and then a subsequent OpenNSPRFileDesc()
+                                        // will fail.
+
+  // Both initially false.  Can be raised to true only when this handle is to be doomed
+  // during the period when the pinning status is unknown.  After the pinning status
+  // determination we check these flags and possibly doom.
+  // These flags are only accessed on the IO thread.
+  bool                 mDoomWhenFoundPinned : 1;
+  bool                 mDoomWhenFoundNonPinned : 1;
+  // Set when after shutdown AND:
+  // - when writing: writing data (not metadata) OR the physical file handle is not currently open
+  // - when truncating: the physical file handle is not currently open
+  // When set it prevents any further writes or truncates on such handles to happen immediately
+  // after shutdown and gives a chance to write metadata of already open files quickly as possible
+  // (only that renders them actually usable by the cache.)
+  bool                 mKilled : 1;
   // For existing files this is always pre-set to UNKNOWN.  The status is udpated accordingly
   // after the matadata has been parsed.
   // For new files the flag is set according to which storage kind is opening
@@ -98,12 +122,6 @@ private:
   // and it stays unchanged afterwards.
   // This status is only accessed on the IO thread.
   PinningStatus        mPinning;
-  // Both initially false.  Can be raised to true only when this handle is to be doomed
-  // during the period when the pinning status is unknown.  After the pinning status
-  // determination we check these flags and possibly doom.
-  // These flags are only accessed on the IO thread.
-  bool                 mDoomWhenFoundPinned : 1;
-  bool                 mDoomWhenFoundNonPinned : 1;
 
   nsCOMPtr<nsIFile>    mFile;
   int64_t              mFileSize;
@@ -147,7 +165,7 @@ public:
     }
     HandleHashKey(const HandleHashKey& aOther)
     {
-      NS_NOTREACHED("HandleHashKey copy constructor is forbidden!");
+      MOZ_ASSERT_UNREACHABLE("HandleHashKey copy constructor is forbidden!");
     }
     ~HandleHashKey()
     {
@@ -241,11 +259,14 @@ public:
 NS_DEFINE_STATIC_IID_ACCESSOR(CacheFileIOListener, CACHEFILEIOLISTENER_IID)
 
 
-class CacheFileIOManager : public nsITimerCallback
+class CacheFileIOManager final
+  : public nsITimerCallback
+  , public nsINamed
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   enum {
     OPEN         =  0U,
@@ -314,13 +335,15 @@ public:
                                  bool aPinning);
 
   static nsresult InitIndexEntry(CacheFileHandle *aHandle,
-                                 uint32_t         aAppId,
+                                 OriginAttrsHash  aOriginAttrsHash,
                                  bool             aAnonymous,
-                                 bool             aInIsolatedMozBrowser,
                                  bool             aPinning);
   static nsresult UpdateIndexEntry(CacheFileHandle *aHandle,
                                    const uint32_t  *aFrecency,
-                                   const uint32_t  *aExpirationTime);
+                                   const uint32_t  *aExpirationTime,
+                                   const bool      *aHasAltData,
+                                   const uint16_t  *aOnStartTime,
+                                   const uint16_t  *aOnStopTime);
 
   static nsresult UpdateIndexEntry();
 
@@ -384,7 +407,7 @@ private:
   nsresult DoomFileInternal(CacheFileHandle *aHandle,
                             PinningDoomRestriction aPinningStatusRestriction = NO_RESTRICTION);
   nsresult DoomFileByKeyInternal(const SHA1Sum::Hash *aHash);
-  nsresult ReleaseNSPRHandleInternal(CacheFileHandle *aHandle,
+  nsresult MaybeReleaseNSPRHandleInternal(CacheFileHandle *aHandle,
                                      bool aIgnoreShutdownLag = false);
   nsresult TruncateSeekSetEOFInternal(CacheFileHandle *aHandle,
                                       int64_t aTruncatePos, int64_t aEOFPos);
@@ -432,20 +455,12 @@ private:
   // before we start an eviction loop.
   nsresult UpdateSmartCacheSize(int64_t aFreeSpace);
 
-  // May return true after shutdown only when time for flushing all data
-  // has already passed.
-  bool IsPastShutdownIOLag();
-
   // Memory reporting (private part)
   size_t SizeOfExcludingThisInternal(mozilla::MallocSizeOf mallocSizeOf) const;
 
-  static CacheFileIOManager           *gInstance;
+  static StaticRefPtr<CacheFileIOManager> gInstance;
+
   TimeStamp                            mStartTime;
-  // Shutdown time stamp, accessed only on the I/O thread.  Used to bypass
-  // I/O after a certain time pass the shutdown has been demanded.
-  TimeStamp                            mShutdownDemandedTime;
-  // Set true on the main thread when cache shutdown is first demanded.
-  Atomic<bool, Relaxed>                mShutdownDemanded;
   // Set true on the IO thread, CLOSE level as part of the internal shutdown
   // procedure.
   bool                                 mShuttingDown;
@@ -459,12 +474,17 @@ private:
   nsCOMPtr<nsIFile>                    mCacheProfilelessDirectory;
 #endif
   bool                                 mTreeCreated;
+  bool                                 mTreeCreationFailed;
   CacheFileHandles                     mHandles;
   nsTArray<CacheFileHandle *>          mHandlesByLastUsed;
   nsTArray<CacheFileHandle *>          mSpecialHandles;
   nsTArray<RefPtr<CacheFile> >         mScheduledMetadataWrites;
   nsCOMPtr<nsITimer>                   mMetadataWritesTimer;
   bool                                 mOverLimitEvicting;
+  // When overlimit eviction is too slow and cache size reaches 105% of the
+  // limit, this flag is set and no other content is cached to prevent
+  // uncontrolled cache growing.
+  bool                                 mCacheSizeOnHardLimit;
   bool                                 mRemovingTrashDirs;
   nsCOMPtr<nsITimer>                   mTrashTimer;
   nsCOMPtr<nsIFile>                    mTrashDir;

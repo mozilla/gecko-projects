@@ -77,21 +77,19 @@ function testRequest(request1, request2, request3, unknownRequest,
   }).then(function() {
     return c.matchAll(new Request(request1, {method: "HEAD"}));
   }).then(function(r) {
-    is(r.length, 1, "Should only find 1 item");
-    return checkResponse(r[0], response1, "");
-  }).then(function() {
+    is(r.length, 0, "Should be an empty array when match a HEAD request.");
     return c.matchAll(new Request(request1, {method: "HEAD"}), {ignoreMethod: true});
   }).then(function(r) {
     is(r.length, 1, "Should only find 1 item");
     return checkResponse(r[0], response1, response1Text);
   }).then(function() {
     return Promise.all(
-      ["POST", "PUT", "DELETE", "OPTIONS"]
+      ["HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
         .map(function(method) {
           var req = new Request(request1, {method: method});
           return c.matchAll(req)
             .then(function(r) {
-              is(r.length, 0, "Searching for a request with a non-GET/HEAD method should not succeed");
+              is(r.length, 0, "Searching for a request with a non-GET method should not succeed");
               return c.matchAll(req, {ignoreMethod: true});
             }).then(function(r) {
               is(r.length, 1, "Should only find 1 item");
@@ -129,9 +127,10 @@ function testRequest(request1, request2, request3, unknownRequest,
   }).then(function() {
     return caches.match(request1, {cacheName: name + "mambojambo"})
       .then(function() {
-        ok(false, "Promise should be rejected");
-      }, function(err) {
-        is(err.name, "NotFoundError", "Searching in the wrong cache should not succeed");
+        is(typeof r, "undefined", 'Searching in the wrong cache should resolve to undefined');
+        return caches.has(name + "mambojambo");
+      }).then(function(hasCache) {
+        ok(!hasCache, 'The wrong cache should still not exist');
       });
   }).then(function() {
     return c.matchAll(unknownRequest);

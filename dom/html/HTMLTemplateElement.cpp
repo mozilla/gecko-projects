@@ -7,10 +7,10 @@
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLTemplateElementBinding.h"
 
+#include "mozilla/MappedDeclarations.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
-#include "nsIAtom.h"
-#include "nsRuleData.h"
+#include "nsAtom.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Template)
 
@@ -38,8 +38,8 @@ HTMLTemplateElement::~HTMLTemplateElement()
   }
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLTemplateElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLTemplateElement, Element)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLTemplateElement,
+                                               nsGenericHTMLElement)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLTemplateElement)
 
@@ -56,16 +56,12 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLTemplateElement,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-// QueryInterface implementation for HTMLTemplateElement
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLTemplateElement)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLTemplateElement)
 
 JSObject*
 HTMLTemplateElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLTemplateElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLTemplateElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

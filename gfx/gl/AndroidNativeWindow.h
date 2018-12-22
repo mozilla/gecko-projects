@@ -9,59 +9,47 @@
 #ifdef MOZ_WIDGET_ANDROID
 
 #include <jni.h>
-#include "GLDefs.h"
-
-#include "nsISupports.h"
-#include "mozilla/gfx/2D.h"
-
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include "GeneratedJNIWrappers.h"
+#include "SurfaceTexture.h"
 
 namespace mozilla {
 namespace gl {
 
-enum class AndroidWindowFormat {
-  Unknown = -1,
-  RGBA_8888 = 1,
-  RGBX_8888 = 1 << 1,
-  RGB_565 = 1 << 2
-};
-
-/**
- * This class is a wrapper around Android's SurfaceTexture class.
- * Usage is pretty much exactly like the Java class, so see
- * the Android documentation for details.
- */
 class AndroidNativeWindow {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AndroidNativeWindow)
-
 public:
-
-  static AndroidNativeWindow* CreateFromSurface(JNIEnv* aEnv, jobject aSurface);
-
-  gfx::IntSize Size();
-  AndroidWindowFormat Format();
-
-  bool SetBuffersGeometry(int32_t aWidth, int32_t aHeight, AndroidWindowFormat aFormat);
-
-  bool Lock(void** out_bits, int32_t* out_width, int32_t* out_height, int32_t* out_stride, AndroidWindowFormat* out_format);
-  bool UnlockAndPost();
-
-  void* Handle() { return mWindow; }
-
-protected:
-  AndroidNativeWindow(void* aWindow)
-    : mWindow(aWindow)
-  {
-
+  AndroidNativeWindow() : mNativeWindow(nullptr) {
   }
 
-  virtual ~AndroidNativeWindow();
+  explicit AndroidNativeWindow(java::sdk::Surface::Param aSurface) {
+    mNativeWindow = ANativeWindow_fromSurface(jni::GetEnvForThread(),
+                                              aSurface.Get());
+  }
 
-  void* mWindow;
+  explicit AndroidNativeWindow(java::GeckoSurface::Param aSurface) {
+    auto surf = java::sdk::Surface::LocalRef(java::sdk::Surface::Ref::From(aSurface));
+    mNativeWindow = ANativeWindow_fromSurface(jni::GetEnvForThread(),
+                                              surf.Get());
+  }
+
+  ~AndroidNativeWindow() {
+    if (mNativeWindow) {
+      ANativeWindow_release(mNativeWindow);
+      mNativeWindow = nullptr;
+    }
+  }
+
+  ANativeWindow* NativeWindow() const {
+    return mNativeWindow;
+  }
+
+private:
+  ANativeWindow* mNativeWindow;
 };
 
-}
-}
+} // gl
+} // mozilla
 
-
-#endif
-#endif
+#endif // MOZ_WIDGET_ANDROID
+#endif // AndroidNativeWindow_h__

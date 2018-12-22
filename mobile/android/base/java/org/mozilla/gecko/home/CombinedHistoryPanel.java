@@ -5,16 +5,21 @@
 
 package org.mozilla.gecko.home;
 
+import android.accounts.Account;
 import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.res.Configuration;
+import android.content.Intent;
 import android.database.Cursor;
 import android.os.Bundle;
+import android.support.annotation.UiThread;
 import android.support.v4.app.LoaderManager;
 import android.support.v4.content.Loader;
+import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.widget.DefaultItemAnimator;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.SpannableStringBuilder;
 import android.text.TextPaint;
 import android.text.method.LinkMovementMethod;
@@ -27,75 +32,104 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewStub;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.json.JSONArray;
 import org.mozilla.gecko.EventDispatcher;
-import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.RemoteClientsDialogFragment;
+import org.mozilla.gecko.fxa.FirefoxAccounts;
+import org.mozilla.gecko.fxa.FxAccountConstants;
+import org.mozilla.gecko.fxa.SyncStatusListener;
+import org.mozilla.gecko.home.CombinedHistoryPanel.OnPanelLevelChangeListener.PanelLevel;
 import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
-import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.RemoteClient;
-import org.mozilla.gecko.db.RemoteTab;
-import org.mozilla.gecko.home.HistorySectionsHelper.SectionDateRange;
 import org.mozilla.gecko.restrictions.Restrictable;
-import org.mozilla.gecko.widget.DividerItemDecoration;
+import org.mozilla.gecko.widget.HistoryDividerItemDecoration;
+import org.mozilla.gecko.util.GeckoBundle;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.mozilla.gecko.home.CombinedHistoryPanel.OnPanelLevelChangeListener.PanelLevel.PARENT;
+import static org.mozilla.gecko.home.CombinedHistoryPanel.OnPanelLevelChangeListener.PanelLevel.CHILD_SYNC;
+import static org.mozilla.gecko.home.CombinedHistoryPanel.OnPanelLevelChangeListener.PanelLevel.CHILD_RECENT_TABS;
+
 public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsDialogFragment.RemoteClientsListener {
     private static final String LOGTAG = "GeckoCombinedHistoryPnl";
-    private final int LOADER_ID_HISTORY = 0;
-    private final int LOADER_ID_REMOTE = 1;
 
-    // Semantic names for the time covered by each section
-    public enum SectionHeader {
-        TODAY,
-        YESTERDAY,
-        WEEK,
-        THIS_MONTH,
-        MONTH_AGO,
-        TWO_MONTHS_AGO,
-        THREE_MONTHS_AGO,
-        FOUR_MONTHS_AGO,
-        FIVE_MONTHS_AGO,
-        OLDER_THAN_SIX_MONTHS
-    }
-
-    // Array for the time ranges in milliseconds covered by each section.
-    private static final SectionDateRange[] sectionDateRangeArray = new SectionDateRange[SectionHeader.values().length];
+    private static final String[] STAGES_TO_SYNC_ON_REFRESH = new String[] { "clients", "tabs" };
+    private static final int LOADER_ID_HISTORY = 0;
+    private static final int LOADER_ID_REMOTE = 1;
 
     // String placeholders to mark formatting.
     private final static String FORMAT_S1 = "%1$s";
     private final static String FORMAT_S2 = "%2$s";
 
     private CombinedHistoryRecyclerView mRecyclerView;
-    private CombinedHistoryAdapter mAdapter;
+    private CombinedHistoryAdapter mHistoryAdapter;
+    private ClientsAdapter mClientsAdapter;
+    private RecentTabsAdapter mRecentTabsAdapter;
     private CursorLoaderCallbacks mCursorLoaderCallbacks;
-    private int mSavedParentIndex = -1;
 
-    private OnPanelLevelChangeListener.PanelLevel mPanelLevel = OnPanelLevelChangeListener.PanelLevel.PARENT;
+    private Bundle mSavedRestoreBundle;
+
+    private PanelLevel mPanelLevel;
     private Button mPanelFooterButton;
+
+    private PanelStateUpdateHandler mPanelStateUpdateHandler;
+
+    // Child refresh layout view.
+    protected SwipeRefreshLayout mRefreshLayout;
+
+    // Sync listener that stops refreshing when a sync is completed.
+    protected RemoteTabsSyncListener mSyncStatusListener;
+
     // Reference to the View to display when there are no results.
-    private View mEmptyView;
+    private View mHistoryEmptyView;
+    private View mClientsEmptyView;
+    private View mRecentTabsEmptyView;
 
     public interface OnPanelLevelChangeListener {
         enum PanelLevel {
-        PARENT, CHILD
+        PARENT, CHILD_SYNC, CHILD_RECENT_TABS
+    }
+
+        /**
+         * Propagates level changes.
+         * @param level
+         * @return true if level changed, false otherwise.
+         */
+        boolean changeLevel(PanelLevel level);
+    }
+
+    @Override
+    public void onCreate(Bundle savedInstance) {
+        super.onCreate(savedInstance);
+
+        int cachedRecentTabsCount = 0;
+        if (mPanelStateChangeListener != null ) {
+            cachedRecentTabsCount = mPanelStateChangeListener.getCachedRecentTabsCount();
+        }
+        mHistoryAdapter = new CombinedHistoryAdapter(getResources(), cachedRecentTabsCount);
+        if (mPanelStateChangeListener != null) {
+            mHistoryAdapter.setPanelStateChangeListener(mPanelStateChangeListener);
         }
 
-        void onPanelLevelChange(PanelLevel level);
+        mClientsAdapter = new ClientsAdapter(getContext());
+        // The RecentTabsAdapter doesn't use a cursor and therefore can't use the CursorLoader's
+        // onLoadFinished() callback for updating the panel state when the closed tab count changes.
+        // Instead, we provide it with independent callbacks as necessary.
+        mRecentTabsAdapter = new RecentTabsAdapter(getContext(),
+                mHistoryAdapter.getRecentTabsUpdateHandler(), getPanelStateUpdateHandler());
+
+        mSyncStatusListener = new RemoteTabsSyncListener();
+        FirefoxAccounts.addSyncStatusListener(mSyncStatusListener);
     }
 
     @Override
@@ -103,39 +137,149 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
         return inflater.inflate(R.layout.home_combined_history_panel, container, false);
     }
 
+    @UiThread
     @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
         mRecyclerView = (CombinedHistoryRecyclerView) view.findViewById(R.id.combined_recycler_view);
-        mAdapter = new CombinedHistoryAdapter(getContext(), mSavedParentIndex);
-        mRecyclerView.setAdapter(mAdapter);
-        mRecyclerView.setItemAnimator(new DefaultItemAnimator());
-        mRecyclerView.addItemDecoration(new DividerItemDecoration(getContext()));
+        setUpRecyclerView();
+
+        mRefreshLayout = (SwipeRefreshLayout) view.findViewById(R.id.refresh_layout);
+        setUpRefreshLayout();
+
+        mClientsEmptyView = view.findViewById(R.id.home_clients_empty_view);
+        mHistoryEmptyView = view.findViewById(R.id.home_history_empty_view);
+        mRecentTabsEmptyView = view.findViewById(R.id.home_recent_tabs_empty_view);
+        setUpEmptyViews();
+
+        mPanelFooterButton = (Button) view.findViewById(R.id.history_panel_footer_button);
+        mPanelFooterButton.setText(R.string.home_clear_history_button);
+        mPanelFooterButton.setOnClickListener(new OnFooterButtonClickListener());
+
+        mRecentTabsAdapter.startListeningForClosedTabs();
+        mRecentTabsAdapter.startListeningForHistorySanitize();
+
+        if (mSavedRestoreBundle != null) {
+            setPanelStateFromBundle(mSavedRestoreBundle);
+            mSavedRestoreBundle = null;
+        }
+    }
+
+    @UiThread
+    private void setUpRecyclerView() {
+        if (mPanelLevel == null) {
+            mPanelLevel = PARENT;
+        }
+
+        mRecyclerView.setAdapter(mPanelLevel == PARENT ? mHistoryAdapter :
+                mPanelLevel == CHILD_SYNC ? mClientsAdapter : mRecentTabsAdapter);
+
+        final RecyclerView.ItemAnimator animator = new DefaultItemAnimator();
+        animator.setAddDuration(100);
+        animator.setChangeDuration(100);
+        animator.setMoveDuration(100);
+        animator.setRemoveDuration(100);
+        mRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        mHistoryAdapter.setLinearLayoutManager((LinearLayoutManager) mRecyclerView.getLayoutManager());
+        mRecyclerView.setItemAnimator(animator);
+        mRecyclerView.addItemDecoration(new HistoryDividerItemDecoration(getContext()));
         mRecyclerView.setOnHistoryClickedListener(mUrlOpenListener);
         mRecyclerView.setOnPanelLevelChangeListener(new OnLevelChangeListener());
         mRecyclerView.setHiddenClientsDialogBuilder(new HiddenClientsHelper());
-        registerForContextMenu(mRecyclerView);
+        mRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                super.onScrolled(recyclerView, dx, dy);
+                final LinearLayoutManager llm = (LinearLayoutManager) recyclerView.getLayoutManager();
+                if ((mPanelLevel == PARENT) && (llm.findLastCompletelyVisibleItemPosition() == HistoryCursorLoader.HISTORY_LIMIT)) {
+                    Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.LIST, "history_scroll_max");
+                }
 
-        mPanelFooterButton = (Button) view.findViewById(R.id.clear_history_button);
-        mPanelFooterButton.setOnClickListener(new OnFooterButtonClickListener());
+            }
+        });
+        registerForContextMenu(mRecyclerView);
+    }
+
+    private void setUpRefreshLayout() {
+        mRefreshLayout.setColorSchemeResources(R.color.fennec_ui_accent, R.color.action_accent);
+        mRefreshLayout.setOnRefreshListener(new RemoteTabsRefreshListener());
+        mRefreshLayout.setEnabled(false);
+    }
+
+    private void setUpEmptyViews() {
+        // Set up history empty view.
+        final ImageView historyIcon = (ImageView) mHistoryEmptyView.findViewById(R.id.home_empty_image);
+        historyIcon.setVisibility(View.GONE);
+
+        final TextView historyText = (TextView) mHistoryEmptyView.findViewById(R.id.home_empty_text);
+        historyText.setText(R.string.home_most_recent_empty);
+
+        final TextView historyHint = (TextView) mHistoryEmptyView.findViewById(R.id.home_empty_hint);
+
+        if (!Restrictions.isAllowed(getActivity(), Restrictable.PRIVATE_BROWSING)) {
+            historyHint.setVisibility(View.GONE);
+        } else {
+            final String hintText = getResources().getString(R.string.home_most_recent_emptyhint);
+            final SpannableStringBuilder hintBuilder = formatHintText(hintText);
+            if (hintBuilder != null) {
+                historyHint.setText(hintBuilder);
+                historyHint.setMovementMethod(LinkMovementMethod.getInstance());
+                historyHint.setVisibility(View.VISIBLE);
+            }
+        }
+
+        // Set up Clients empty view.
+        final Button syncSetupButton = (Button) mClientsEmptyView.findViewById(R.id.sync_setup_button);
+        syncSetupButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, "history_syncsetup");
+                // This Activity will redirect to the correct Activity as needed.
+                final Intent intent = new Intent(FxAccountConstants.ACTION_FXA_GET_STARTED);
+                startActivity(intent);
+            }
+        });
+
+        // Set up Recent Tabs empty view.
+        final ImageView recentTabsIcon = (ImageView) mRecentTabsEmptyView.findViewById(R.id.home_empty_image);
+        recentTabsIcon.setImageResource(R.drawable.icon_remote_tabs_empty);
+
+        final TextView recentTabsText = (TextView) mRecentTabsEmptyView.findViewById(R.id.home_empty_text);
+        recentTabsText.setText(R.string.home_last_tabs_empty);
+    }
+
+    @Override
+    public void setPanelStateChangeListener(
+            PanelStateChangeListener panelStateChangeListener) {
+        super.setPanelStateChangeListener(panelStateChangeListener);
+        if (mHistoryAdapter != null) {
+            mHistoryAdapter.setPanelStateChangeListener(panelStateChangeListener);
+        }
+    }
+
+    @Override
+    public void restoreData(Bundle data) {
+        if (mRecyclerView != null) {
+            setPanelStateFromBundle(data);
+        } else {
+            mSavedRestoreBundle = data;
+        }
+    }
+
+    private void setPanelStateFromBundle(Bundle data) {
+        if (data != null && data.getBoolean("goToRecentTabs", false) && mPanelLevel != CHILD_RECENT_TABS) {
+            mPanelLevel = CHILD_RECENT_TABS;
+            mRecyclerView.swapAdapter(mRecentTabsAdapter, true);
+            updateEmptyView(CHILD_RECENT_TABS);
+            updateButtonFromLevel();
+        }
     }
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         mCursorLoaderCallbacks = new CursorLoaderCallbacks();
-    }
-
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-
-        if (isVisible()) {
-            // The parent stack is saved just so that the folder state can be
-            // restored on rotation.
-            mSavedParentIndex = mAdapter.getParentIndex();
-        }
     }
 
     @Override
@@ -154,40 +298,25 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
 
         @Override
         public Cursor loadCursor() {
-            return mProfile.getDB().getTabsAccessor().getRemoteTabsCursor(getContext());
+            return BrowserDB.from(mProfile).getTabsAccessor().getRemoteTabsCursor(getContext());
         }
     }
 
     private static class HistoryCursorLoader extends SimpleCursorLoader {
         // Max number of history results
-        private static final int HISTORY_LIMIT = 100;
+        public static final int HISTORY_LIMIT = 100;
         private final BrowserDB mDB;
 
         public HistoryCursorLoader(Context context) {
             super(context);
-            mDB = GeckoProfile.get(context).getDB();
+            mDB = BrowserDB.from(context);
         }
 
         @Override
         public Cursor loadCursor() {
             final ContentResolver cr = getContext().getContentResolver();
-            HistorySectionsHelper.updateRecentSectionOffset(getContext().getResources(), sectionDateRangeArray);
             return mDB.getRecentHistory(cr, HISTORY_LIMIT);
         }
-    }
-
-    protected static String getSectionHeaderTitle(SectionHeader section) {
-        return sectionDateRangeArray[section.ordinal()].displayName;
-    }
-
-    protected static SectionHeader getSectionFromTime(long time) {
-        for (int i = 0; i < SectionHeader.OLDER_THAN_SIX_MONTHS.ordinal(); i++) {
-            if (time > sectionDateRangeArray[i].start) {
-                return SectionHeader.values()[i];
-            }
-        }
-
-        return SectionHeader.OLDER_THAN_SIX_MONTHS;
     }
 
     private class CursorLoaderCallbacks implements LoaderManager.LoaderCallbacks<Cursor> {
@@ -196,7 +325,7 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
         @Override
         public Loader<Cursor> onCreateLoader(int id, Bundle args) {
             if (mDB == null) {
-                mDB = GeckoProfile.get(getActivity()).getDB();
+                mDB = BrowserDB.from(getActivity());
             }
 
             switch (id) {
@@ -215,50 +344,94 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
             final int loaderId = loader.getId();
             switch (loaderId) {
                 case LOADER_ID_HISTORY:
-                    mAdapter.setHistory(c);
+                    mHistoryAdapter.setHistory(c);
+                    updateEmptyView(PARENT);
                     break;
 
                 case LOADER_ID_REMOTE:
                     final List<RemoteClient> clients = mDB.getTabsAccessor().getClientsFromCursor(c);
-
-                    mAdapter.setClients(clients);
+                    mHistoryAdapter.getDeviceUpdateHandler().onDeviceCountUpdated(clients.size());
+                    mClientsAdapter.setClients(clients);
+                    updateEmptyView(CHILD_SYNC);
                     break;
             }
 
-            // Check and set empty state.
-            updateButtonFromLevel(mPanelLevel);
-            updateEmptyView(mAdapter.getItemCount() == 0);
+            updateButtonFromLevel();
         }
 
         @Override
         public void onLoaderReset(Loader<Cursor> loader) {
-            mAdapter.setClients(Collections.<RemoteClient>emptyList());
-            mAdapter.setHistory(null);
+            mClientsAdapter.setClients(Collections.<RemoteClient>emptyList());
+            mHistoryAdapter.setHistory(null);
         }
+    }
+
+    public interface PanelStateUpdateHandler {
+        void onPanelStateUpdated(PanelLevel level);
+    }
+
+    public PanelStateUpdateHandler getPanelStateUpdateHandler() {
+        if (mPanelStateUpdateHandler == null) {
+            mPanelStateUpdateHandler = new PanelStateUpdateHandler() {
+                @Override
+                public void onPanelStateUpdated(PanelLevel level) {
+                    updateEmptyView(level);
+                    updateButtonFromLevel();
+                }
+            };
+        }
+        return mPanelStateUpdateHandler;
     }
 
     protected class OnLevelChangeListener implements OnPanelLevelChangeListener {
         @Override
-        public void onPanelLevelChange(PanelLevel level) {
-            updateButtonFromLevel(level);
+        public boolean changeLevel(PanelLevel level) {
+            if (level == mPanelLevel) {
+                return false;
+            }
+
+            mPanelLevel = level;
+            switch (level) {
+                case PARENT:
+                    mRecyclerView.swapAdapter(mHistoryAdapter, true);
+                    mRefreshLayout.setEnabled(false);
+                    break;
+                case CHILD_SYNC:
+                    mRecyclerView.swapAdapter(mClientsAdapter, true);
+                    mRefreshLayout.setEnabled(mClientsAdapter.getClientsCount() > 0);
+                    break;
+                case CHILD_RECENT_TABS:
+                    mRecyclerView.swapAdapter(mRecentTabsAdapter, true);
+                    break;
+            }
+
+            updateEmptyView(level);
+            updateButtonFromLevel();
+            return true;
         }
     }
 
-    private void updateButtonFromLevel(OnPanelLevelChangeListener.PanelLevel level) {
-        mPanelLevel = level;
-        switch (level) {
-            case CHILD:
-                mPanelFooterButton.setVisibility(View.VISIBLE);
-                mPanelFooterButton.setText(R.string.home_open_all);
-                break;
+    private void updateButtonFromLevel() {
+        switch (mPanelLevel) {
             case PARENT:
                 final boolean historyRestricted = !Restrictions.isAllowed(getActivity(), Restrictable.CLEAR_HISTORY);
-                if (historyRestricted || !mAdapter.containsHistory()) {
+                if (historyRestricted || mHistoryAdapter.getItemCount() == mHistoryAdapter.getNumVisibleSmartFolders()) {
                     mPanelFooterButton.setVisibility(View.GONE);
                 } else {
-                    mPanelFooterButton.setVisibility(View.VISIBLE);
                     mPanelFooterButton.setText(R.string.home_clear_history_button);
+                    mPanelFooterButton.setVisibility(View.VISIBLE);
                 }
+                break;
+            case CHILD_RECENT_TABS:
+                if (mRecentTabsAdapter.getClosedTabsCount() > 1) {
+                    mPanelFooterButton.setText(R.string.home_restore_all);
+                    mPanelFooterButton.setVisibility(View.VISIBLE);
+                } else {
+                    mPanelFooterButton.setVisibility(View.GONE);
+                }
+                break;
+            case CHILD_SYNC:
+                mPanelFooterButton.setVisibility(View.GONE);
                 break;
         }
     }
@@ -283,72 +456,55 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
                             dialog.dismiss();
 
                             // Send message to Java to clear history.
-                            final JSONObject json = new JSONObject();
-                            try {
-                                json.put("history", true);
-                            } catch (JSONException e) {
-                                Log.e(LOGTAG, "JSON error", e);
-                            }
+                            final GeckoBundle data = new GeckoBundle(1);
+                            data.putBoolean("history", true);
+                            EventDispatcher.getInstance().dispatch("Sanitize:ClearData", data);
 
-                            GeckoAppShell.notifyObservers("Sanitize:ClearData", json.toString());
                             Telemetry.sendUIEvent(TelemetryContract.Event.SANITIZE, TelemetryContract.Method.BUTTON, "history");
                         }
                     });
 
                     dialogBuilder.show();
                     break;
-
-                case CHILD:
-                    final JSONArray tabUrls = mAdapter.getCurrentChildTabs();
-                    if (tabUrls != null) {
-                        final JSONObject message = new JSONObject();
-                        try {
-                            message.put("urls", tabUrls);
-                            message.put("shouldNotifyTabsOpenedToJava", false);
-                            GeckoAppShell.notifyObservers("Tabs:OpenMultiple", message.toString());
-                        } catch (JSONException e) {
-                            Log.e(LOGTAG, "Error making JSON message to open tabs");
-                        }
+                case CHILD_RECENT_TABS:
+                    final String telemetryExtra = mRecentTabsAdapter.restoreAllTabs();
+                    if (telemetryExtra != null) {
+                        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.BUTTON, telemetryExtra);
                     }
                     break;
             }
         }
     }
 
-    private void updateEmptyView(boolean isEmpty) {
-        if (isEmpty) {
-            if (mEmptyView == null) {
-                // Set empty panel view if it needs to be shown and hasn't been inflated.
-                final ViewStub emptyViewStub = (ViewStub) getView().findViewById(R.id.home_empty_view_stub);
-                mEmptyView = emptyViewStub.inflate();
+    private void updateEmptyView(PanelLevel level) {
+        boolean showEmptyHistoryView = (mPanelLevel == PARENT && mHistoryEmptyView.isShown());
+        boolean showEmptyClientsView = (mPanelLevel == CHILD_SYNC && mClientsEmptyView.isShown());
+        boolean showEmptyRecentTabsView = (mPanelLevel == CHILD_RECENT_TABS && mRecentTabsEmptyView.isShown());
 
-                final ImageView emptyIcon = (ImageView) mEmptyView.findViewById(R.id.home_empty_image);
-                emptyIcon.setImageResource(R.drawable.icon_most_recent_empty);
+        if (mPanelLevel == level) {
+            switch (mPanelLevel) {
+                case PARENT:
+                    showEmptyHistoryView = mHistoryAdapter.getItemCount() == mHistoryAdapter.getNumVisibleSmartFolders();
+                    break;
 
-                final TextView emptyText = (TextView) mEmptyView.findViewById(R.id.home_empty_text);
-                emptyText.setText(R.string.home_most_recent_empty);
+                case CHILD_SYNC:
+                    showEmptyClientsView = mClientsAdapter.getItemCount() == 1;
+                    break;
 
-                final TextView emptyHint = (TextView) mEmptyView.findViewById(R.id.home_empty_hint);
-                final String hintText = getResources().getString(R.string.home_most_recent_emptyhint);
-
-                final SpannableStringBuilder hintBuilder = formatHintText(hintText);
-                if (hintBuilder != null) {
-                    emptyHint.setText(hintBuilder);
-                    emptyHint.setMovementMethod(LinkMovementMethod.getInstance());
-                    emptyHint.setVisibility(View.VISIBLE);
-                }
-
-                if (!Restrictions.isAllowed(getActivity(), Restrictable.PRIVATE_BROWSING)) {
-                    emptyHint.setVisibility(View.GONE);
-                }
-                mEmptyView.setVisibility(View.VISIBLE);
-            } else {
-                if (mEmptyView != null) {
-                    mEmptyView.setVisibility(View.GONE);
-                }
+                case CHILD_RECENT_TABS:
+                    showEmptyRecentTabsView = mRecentTabsAdapter.getClosedTabsCount() == 0;
+                    break;
             }
         }
+
+        final boolean showEmptyView = showEmptyClientsView || showEmptyHistoryView || showEmptyRecentTabsView;
+        mRecyclerView.setOverScrollMode(showEmptyView ? View.OVER_SCROLL_NEVER : View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+
+        mHistoryEmptyView.setVisibility(showEmptyHistoryView ? View.VISIBLE : View.GONE);
+        mClientsEmptyView.setVisibility(showEmptyClientsView ? View.VISIBLE : View.GONE);
+        mRecentTabsEmptyView.setVisibility(showEmptyRecentTabsView ? View.VISIBLE : View.GONE);
     }
+
     /**
      * Make Span that is clickable, and underlined
      * between the string markers <code>FORMAT_S1</code> and
@@ -374,14 +530,8 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
         final ClickableSpan clickableSpan = new ClickableSpan() {
             @Override
             public void onClick(View widget) {
-                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.PANEL, "hint-private-browsing");
-                try {
-                    final JSONObject json = new JSONObject();
-                    json.put("type", "Menu:Open");
-                    EventDispatcher.getInstance().dispatchEvent(json, null);
-                } catch (JSONException e) {
-                    Log.e(LOGTAG, "Error forming JSON for Private Browsing contextual hint", e);
-                }
+                Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, "hint_private_browsing");
+                EventDispatcher.getInstance().dispatch("Menu:Open", null);
             }
         };
 
@@ -439,7 +589,7 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
 
         final int itemId = item.getItemId();
         if (itemId == R.id.home_remote_tabs_hide_client) {
-            mAdapter.removeItem(info.position);
+            mClientsAdapter.removeItem(info.position);
             return true;
         }
 
@@ -453,20 +603,18 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
     protected class HiddenClientsHelper implements DialogBuilder<RemoteClient> {
         @Override
         public void createAndShowDialog(List<RemoteClient> clientsList) {
-                        final RemoteClientsDialogFragment dialog = RemoteClientsDialogFragment.newInstance(
+            final RemoteClientsDialogFragment dialog = RemoteClientsDialogFragment.newInstance(
                     getResources().getString(R.string.home_remote_tabs_hidden_devices_title),
                     getResources().getString(R.string.home_remote_tabs_unhide_selected_devices),
                     RemoteClientsDialogFragment.ChoiceMode.MULTIPLE, new ArrayList<>(clientsList));
             dialog.setTargetFragment(CombinedHistoryPanel.this, 0);
             dialog.show(getActivity().getSupportFragmentManager(), "show-clients");
         }
-
-
     }
 
     @Override
     public void onClients(List<RemoteClient> clients) {
-        mAdapter.unhideClients(clients);
+        mClientsAdapter.unhideClients(clients);
     }
 
     /**
@@ -481,25 +629,55 @@ public class CombinedHistoryPanel extends HomeFragment implements RemoteClientsD
         }
     }
 
-    protected static HomeContextMenuInfo populateHistoryInfoFromCursor(HomeContextMenuInfo info, Cursor cursor) {
-        info.url = cursor.getString(cursor.getColumnIndexOrThrow(BrowserContract.Combined.URL));
-        info.title = cursor.getString(cursor.getColumnIndexOrThrow(BrowserContract.Combined.TITLE));
-        info.historyId = cursor.getInt(cursor.getColumnIndexOrThrow(BrowserContract.Combined.HISTORY_ID));
-        info.itemType = HomeContextMenuInfo.RemoveItemType.HISTORY;
-        final int bookmarkIdCol = cursor.getColumnIndexOrThrow(BrowserContract.Combined.BOOKMARK_ID);
-        if (cursor.isNull(bookmarkIdCol)) {
-            // If this is a combined cursor, we may get a history item without a
-            // bookmark, in which case the bookmarks ID column value will be null.
-            info.bookmarkId =  -1;
-        } else {
-            info.bookmarkId = cursor.getInt(bookmarkIdCol);
+    protected class RemoteTabsRefreshListener implements SwipeRefreshLayout.OnRefreshListener {
+        @Override
+        public void onRefresh() {
+            if (FirefoxAccounts.firefoxAccountsExist(getActivity())) {
+                final Account account = FirefoxAccounts.getFirefoxAccount(getActivity());
+                FirefoxAccounts.requestImmediateSync(account, STAGES_TO_SYNC_ON_REFRESH, null, true);
+            } else {
+                Log.wtf(LOGTAG, "No Firefox Account found; this should never happen. Ignoring.");
+                mRefreshLayout.setRefreshing(false);
+            }
         }
-        return info;
     }
 
-    protected static HomeContextMenuInfo populateChildInfoFromTab(HomeContextMenuInfo info, RemoteTab tab) {
-        info.url = tab.url;
-        info.title = tab.title;
-        return info;
+    protected class RemoteTabsSyncListener implements SyncStatusListener {
+        @Override
+        public Context getContext() {
+            return getActivity();
+        }
+
+        @Override
+        public Account getAccount() {
+            return FirefoxAccounts.getFirefoxAccount(getContext());
+        }
+
+        @Override
+        public void onSyncStarted() {
+        }
+
+        @Override
+        public void onSyncFinished() {
+            mRefreshLayout.setRefreshing(false);
+        }
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+
+        mRecentTabsAdapter.stopListeningForClosedTabs();
+        mRecentTabsAdapter.stopListeningForHistorySanitize();
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+
+        if (mSyncStatusListener != null) {
+            FirefoxAccounts.removeSyncStatusListener(mSyncStatusListener);
+            mSyncStatusListener = null;
+        }
     }
 }

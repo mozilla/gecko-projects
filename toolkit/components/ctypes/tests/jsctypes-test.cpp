@@ -9,10 +9,6 @@
 #include <stdio.h>
 #include "typedefs.h"
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#define snprintf _snprintf
-#endif
-
 template <typename T> struct ValueTraits {
   static T literal() { return static_cast<T>(109.25); }
   static T sum(T a, T b) { return a + b; }
@@ -41,7 +37,6 @@ void
 test_void_t_cdecl()
 {
   // do nothing
-  return;
 }
 
 // The "AndUnderscore" bit here is an unfortunate hack: the first argument to

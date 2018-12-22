@@ -35,7 +35,7 @@ audio.loop = true;
 
 var tests = [
   function() {
-    observerService.addObserver(observer, "audio-playback", false);
+    observerService.addObserver(observer, "audio-playback");
     ok(true, "Observer set");
 
     audio.src = "audio.ogg";
@@ -50,7 +50,7 @@ var tests = [
   },
 
   function() {
-    expectedNotification = 'inactive';
+    expectedNotification = 'inactive-nonaudible';
     audio.muted = true;
   },
 
@@ -86,7 +86,7 @@ var tests = [
   },
 
   function() {
-    expectedNotification = 'inactive';
+    expectedNotification = 'inactive-pause';
     audio.pause();
   },
 
@@ -97,7 +97,7 @@ var tests = [
   },
 
   function() {
-    expectedNotification = 'inactive';
+    expectedNotification = 'inactive-nonaudible';
     audio.muted = true;
   },
 
@@ -133,7 +133,7 @@ var tests = [
   },
 
   function() {
-    expectedNotification = 'inactive';
+    expectedNotification = 'inactive-pause';
     audio.pause();
   },
 

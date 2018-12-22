@@ -22,8 +22,8 @@
 
 // static
 nsresult
-XMLUtils::splitExpatName(const char16_t *aExpatName, nsIAtom **aPrefix,
-                         nsIAtom **aLocalName, int32_t* aNameSpaceID)
+XMLUtils::splitExpatName(const char16_t *aExpatName, nsAtom **aPrefix,
+                         nsAtom **aLocalName, int32_t* aNameSpaceID)
 {
     /**
      *  Expat can send the following:
@@ -81,10 +81,10 @@ XMLUtils::splitExpatName(const char16_t *aExpatName, nsIAtom **aPrefix,
 }
 
 nsresult
-XMLUtils::splitQName(const nsAString& aName, nsIAtom** aPrefix,
-                     nsIAtom** aLocalName)
+XMLUtils::splitQName(const nsAString& aName, nsAtom** aPrefix,
+                     nsAtom** aLocalName)
 {
-    const nsAFlatString& qName = PromiseFlatString(aName);
+    const nsString& qName = PromiseFlatString(aName);
     const char16_t* colon;
     bool valid = XMLUtils::isValidQName(qName, &colon);
     if (!valid) {
@@ -109,9 +109,9 @@ XMLUtils::splitQName(const nsAString& aName, nsIAtom** aPrefix,
 /**
  * Returns true if the given string has only whitespace characters
  */
-bool XMLUtils::isWhitespace(const nsAFlatString& aText)
+bool XMLUtils::isWhitespace(const nsString& aText)
 {
-    nsAFlatString::const_char_iterator start, end;
+    nsString::const_char_iterator start, end;
     aText.BeginReading(start);
     aText.EndReading(end);
     for ( ; start != end; ++start) {
@@ -155,8 +155,7 @@ void XMLUtils::normalizePIValue(nsAString& piValue)
 }
 
 //static
-bool XMLUtils::isValidQName(const nsAFlatString& aQName,
-                            const char16_t** aColon)
+bool XMLUtils::isValidQName(const nsString& aQName, const char16_t** aColon)
 {
   return NS_SUCCEEDED(nsContentUtils::CheckQName(aQName, true, aColon));
 }

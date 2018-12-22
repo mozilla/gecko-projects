@@ -5,34 +5,33 @@
  * Tests audio param connection rendering.
  */
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(CONNECT_MULTI_PARAM_URL);
-  let { panelWin } = panel;
-  let { gFront, $, $$, EVENTS } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(CONNECT_MULTI_PARAM_URL);
+  const { panelWin } = panel;
+  const { gFront, $, $$, EVENTS } = panelWin;
 
-  let started = once(gFront, "start-context");
+  const started = once(gFront, "start-context");
 
-  reload(target);
-
-  let [actors] = yield Promise.all([
+  const events = Promise.all([
     getN(gFront, "create-node", 5),
     waitForGraphRendered(panelWin, 5, 2, 3)
   ]);
+  reload(target);
+  const [actors] = await events;
+  const nodeIDs = actors.map(actor => actor.actorID);
 
-  let nodeIDs = actors.map(actor => actor.actorID);
+  const [, carrier, gain, mod1, mod2] = nodeIDs;
 
-  let [, carrier, gain, mod1, mod2] = nodeIDs;
-
-  let edges = [
+  const edges = [
     [mod1, gain, "gain", "mod1 -> gain[gain]"],
     [mod2, carrier, "frequency", "mod2 -> carrier[frequency]"],
     [mod2, carrier, "detune", "mod2 -> carrier[detune]"]
   ];
 
   edges.forEach(([source, target, param, msg], i) => {
-    let edge = findGraphEdge(panelWin, source, target, param);
+    const edge = findGraphEdge(panelWin, source, target, param);
     ok(edge.classList.contains("param-connection"), "edge is classified as a param-connection");
   });
 
-  yield teardown(target);
+  await teardown(target);
 });

@@ -69,21 +69,25 @@ TEST(ThreadPool, Parallelism)
   EXPECT_TRUE(pool);
 
   // Dispatch and sleep to ensure we have an idle thread
-  nsCOMPtr<nsIRunnable> r0 = new nsRunnable();
+  nsCOMPtr<nsIRunnable> r0 = new Runnable("TestRunnable");
   pool->Dispatch(r0, NS_DISPATCH_SYNC);
   PR_Sleep(PR_SecondsToInterval(2));
 
-  class Runnable1 : public nsRunnable {
+  class Runnable1 : public Runnable {
   public:
     Runnable1(Monitor& aMonitor, bool& aDone)
-      : mMonitor(aMonitor), mDone(aDone) {}
+      : mozilla::Runnable("Runnable1")
+      , mMonitor(aMonitor)
+      , mDone(aDone)
+    {
+    }
 
     NS_IMETHOD Run() override {
       MonitorAutoLock mon(mMonitor);
       if (!mDone) {
         // Wait for a reasonable timeout since we don't want to block gtests
         // forever should any regression happen.
-        mon.Wait(PR_SecondsToInterval(300));
+        mon.Wait(TimeDuration::FromSeconds(300));
       }
       EXPECT_TRUE(mDone);
       return NS_OK;
@@ -93,10 +97,14 @@ TEST(ThreadPool, Parallelism)
     bool& mDone;
   };
 
-  class Runnable2 : public nsRunnable {
+  class Runnable2 : public Runnable {
   public:
     Runnable2(Monitor& aMonitor, bool& aDone)
-      : mMonitor(aMonitor), mDone(aDone) {}
+      : mozilla::Runnable("Runnable2")
+      , mMonitor(aMonitor)
+      , mDone(aDone)
+    {
+    }
 
     NS_IMETHOD Run() override {
       MonitorAutoLock mon(mMonitor);

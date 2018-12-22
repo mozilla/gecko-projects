@@ -10,13 +10,67 @@
 #include "nsIURI.h"
 #include "nsIDocShell.h"
 #include "mozilla/net/ReferrerPolicy.h"
+#include "mozilla/Unused.h"
+
+namespace mozilla {
+
+void
+GetMaybeResultPrincipalURI(nsIDocShellLoadInfo* aLoadInfo, Maybe<nsCOMPtr<nsIURI>>& aRPURI)
+{
+  if (!aLoadInfo) {
+    return;
+  }
+
+  nsresult rv;
+
+  bool isSome;
+  rv = aLoadInfo->GetResultPrincipalURIIsSome(&isSome);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  aRPURI.reset();
+
+  if (!isSome) {
+    return;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  rv = aLoadInfo->GetResultPrincipalURI(getter_AddRefs(uri));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  aRPURI.emplace(std::move(uri));
+}
+
+void
+SetMaybeResultPrincipalURI(nsIDocShellLoadInfo* aLoadInfo, Maybe<nsCOMPtr<nsIURI>> const& aRPURI)
+{
+  if (!aLoadInfo) {
+    return;
+  }
+
+  nsresult rv;
+
+  rv = aLoadInfo->SetResultPrincipalURI(aRPURI.refOr(nullptr));
+  Unused << NS_WARN_IF(NS_FAILED(rv));
+
+  rv = aLoadInfo->SetResultPrincipalURIIsSome(aRPURI.isSome());
+  Unused << NS_WARN_IF(NS_FAILED(rv));
+}
+
+} // mozilla
 
 nsDocShellLoadInfo::nsDocShellLoadInfo()
-  : mLoadReplace(false)
-  , mInheritOwner(false)
-  , mOwnerIsExplicit(false)
+  : mResultPrincipalURIIsSome(false)
+  , mLoadReplace(false)
+  , mInheritPrincipal(false)
+  , mPrincipalIsExplicit(false)
+  , mForceAllowDataURI(false)
+  , mOriginalFrameSrc(false)
   , mSendReferrer(true)
-  , mReferrerPolicy(mozilla::net::RP_Default)
+  , mReferrerPolicy(mozilla::net::RP_Unset)
   , mLoadType(nsIDocShellLoadInfo::loadNormal)
   , mIsSrcdocLoad(false)
 {
@@ -69,6 +123,37 @@ nsDocShellLoadInfo::SetOriginalURI(nsIURI* aOriginalURI)
 }
 
 NS_IMETHODIMP
+nsDocShellLoadInfo::GetResultPrincipalURI(nsIURI** aResultPrincipalURI)
+{
+  NS_ENSURE_ARG_POINTER(aResultPrincipalURI);
+
+  *aResultPrincipalURI = mResultPrincipalURI;
+  NS_IF_ADDREF(*aResultPrincipalURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetResultPrincipalURI(nsIURI* aResultPrincipalURI)
+{
+  mResultPrincipalURI = aResultPrincipalURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::GetResultPrincipalURIIsSome(bool* aIsSome)
+{
+  *aIsSome = mResultPrincipalURIIsSome;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetResultPrincipalURIIsSome(bool aIsSome)
+{
+  mResultPrincipalURIIsSome = aIsSome;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocShellLoadInfo::GetLoadReplace(bool* aLoadReplace)
 {
   *aLoadReplace = mLoadReplace;
@@ -83,49 +168,74 @@ nsDocShellLoadInfo::SetLoadReplace(bool aLoadReplace)
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::GetOwner(nsISupports** aOwner)
+nsDocShellLoadInfo::GetTriggeringPrincipal(nsIPrincipal** aTriggeringPrincipal)
 {
-  NS_ENSURE_ARG_POINTER(aOwner);
-
-  *aOwner = mOwner;
-  NS_IF_ADDREF(*aOwner);
+  NS_ENSURE_ARG_POINTER(aTriggeringPrincipal);
+  NS_IF_ADDREF(*aTriggeringPrincipal = mTriggeringPrincipal);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::SetOwner(nsISupports* aOwner)
+nsDocShellLoadInfo::SetTriggeringPrincipal(nsIPrincipal* aTriggeringPrincipal)
 {
-  mOwner = aOwner;
+  mTriggeringPrincipal = aTriggeringPrincipal;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::GetInheritOwner(bool* aInheritOwner)
+nsDocShellLoadInfo::GetInheritPrincipal(bool* aInheritPrincipal)
 {
-  NS_ENSURE_ARG_POINTER(aInheritOwner);
-
-  *aInheritOwner = mInheritOwner;
+  NS_ENSURE_ARG_POINTER(aInheritPrincipal);
+  *aInheritPrincipal = mInheritPrincipal;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::SetInheritOwner(bool aInheritOwner)
+nsDocShellLoadInfo::SetInheritPrincipal(bool aInheritPrincipal)
 {
-  mInheritOwner = aInheritOwner;
+  mInheritPrincipal = aInheritPrincipal;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::GetOwnerIsExplicit(bool* aOwnerIsExplicit)
+nsDocShellLoadInfo::GetPrincipalIsExplicit(bool* aPrincipalIsExplicit)
 {
-  *aOwnerIsExplicit = mOwnerIsExplicit;
+  *aPrincipalIsExplicit = mPrincipalIsExplicit;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDocShellLoadInfo::SetOwnerIsExplicit(bool aOwnerIsExplicit)
+nsDocShellLoadInfo::SetPrincipalIsExplicit(bool aPrincipalIsExplicit)
 {
-  mOwnerIsExplicit = aOwnerIsExplicit;
+  mPrincipalIsExplicit = aPrincipalIsExplicit;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::GetForceAllowDataURI(bool* aForceAllowDataURI)
+{
+  *aForceAllowDataURI = mForceAllowDataURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetForceAllowDataURI(bool aForceAllowDataURI)
+{
+  mForceAllowDataURI = aForceAllowDataURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::GetOriginalFrameSrc(bool* aOriginalFrameSrc)
+{
+  *aOriginalFrameSrc = mOriginalFrameSrc;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellLoadInfo::SetOriginalFrameSrc(bool aOriginalFrameSrc)
+{
+  mOriginalFrameSrc = aOriginalFrameSrc;
   return NS_OK;
 }
 

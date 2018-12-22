@@ -36,7 +36,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGPathSegList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGPathSegList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGPathSegList)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
@@ -114,7 +113,7 @@ DOMSVGPathSegList::~DOMSVGPathSegList()
 JSObject*
 DOMSVGPathSegList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::SVGPathSegListBinding::Wrap(cx, this, aGivenProto);
+  return mozilla::dom::SVGPathSegList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 void
@@ -127,7 +126,8 @@ DOMSVGPathSegList::InternalListWillChangeTo(const SVGPathData& aNewValue)
   // mean that - assuming we aren't reading bad memory - we would likely end up
   // decoding command types from argument floats when looking in our
   // SVGPathData's data array! Either way, we'll likely then go down
-  // NS_NOTREACHED code paths, or end up reading/setting more bad memory!!
+  // MOZ_ASSERT_UNREACHABLE code paths, or end up reading/setting more bad
+  // memory!!
 
   // The only time that our other DOM list type implementations remove items is
   // if those items become surplus items due to an attribute change or SMIL
@@ -248,7 +248,7 @@ DOMSVGPathSegList::AnimListMirrorsBaseList() const
   return GetDOMWrapperIfExists(InternalAList().GetAnimValKey()) &&
            !AttrIsAnimating();
 }
- 
+
 SVGPathData&
 DOMSVGPathSegList::InternalList() const
 {

@@ -41,7 +41,7 @@ public:
     virtual type getType() = 0;
 };
 
-#define TX_DECL_TOPLEVELITEM virtual type getType();
+#define TX_DECL_TOPLEVELITEM virtual type getType() override;
 #define TX_IMPL_GETTYPE(_class, _type) \
 txToplevelItem::type \
 _class::getType() { return _type;}
@@ -124,7 +124,7 @@ class txVariableItem : public txInstructionContainer
 public:
     txVariableItem(const txExpandedName& aName, nsAutoPtr<Expr>&& aValue,
                    bool aIsParam);
-    
+
     TX_DECL_TOPLEVELITEM
 
     txExpandedName mName;

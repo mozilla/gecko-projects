@@ -1,20 +1,22 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that text metrics and data conversion from profiler samples
 // widget work properly in the flame graph.
 
-var {FlameGraphUtils} = require("devtools/client/shared/widgets/FlameGraph");
-var {PALLETTE_SIZE} = require("devtools/client/shared/widgets/FlameGraph");
+const {FlameGraphUtils} = require("devtools/client/shared/widgets/FlameGraph");
+const {PALLETTE_SIZE} = require("devtools/client/shared/widgets/FlameGraph");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  yield performTest();
+add_task(async function() {
+  await addTab("about:blank");
+  await performTest();
   gBrowser.removeCurrentTab();
 });
 
-function* performTest() {
-  let out = FlameGraphUtils.createFlameGraphDataFromThread(TEST_DATA);
+function performTest() {
+  const out = FlameGraphUtils.createFlameGraphDataFromThread(TEST_DATA);
 
   ok(out, "Some data was outputted properly");
   is(out.length, PALLETTE_SIZE, "The outputted length is correct.");
@@ -22,8 +24,8 @@ function* performTest() {
   info("Got flame graph data:\n" + out.toSource() + "\n");
 
   for (let i = 0; i < out.length; i++) {
-    let found = out[i];
-    let expected = EXPECTED_OUTPUT[i];
+    const found = out[i];
+    const expected = EXPECTED_OUTPUT[i];
 
     is(found.blocks.length, expected.blocks.length,
       "The correct number of blocks were found in this bucket.");

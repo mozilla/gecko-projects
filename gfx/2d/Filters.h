@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -21,7 +22,8 @@ class SourceSurface;
 enum FilterBackend {
   FILTER_BACKEND_SOFTWARE = 0,
   FILTER_BACKEND_DIRECT2D1_1,
-  FILTER_BACKEND_RECORDING
+  FILTER_BACKEND_RECORDING,
+  FILTER_BACKEND_CAPTURE
 };
 
 enum TransformFilterAtts
@@ -474,7 +476,7 @@ enum UnpremultiplyInputs
   IN_UNPREMULTIPLY_IN = 0
 };
 
-class FilterNode : public RefCounted<FilterNode>
+class FilterNode : public external::AtomicRefCounted<FilterNode>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(FilterNode)
@@ -482,23 +484,23 @@ public:
 
   virtual FilterBackend GetBackendType() = 0;
 
-  virtual void SetInput(uint32_t aIndex, SourceSurface *aSurface) { MOZ_CRASH(); }
-  virtual void SetInput(uint32_t aIndex, FilterNode *aFilter) { MOZ_CRASH(); }
+  virtual void SetInput(uint32_t aIndex, SourceSurface *aSurface) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetInput(uint32_t aIndex, FilterNode *aFilter) { MOZ_CRASH("GFX: FilterNode"); }
 
-  virtual void SetAttribute(uint32_t aIndex, bool) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, uint32_t) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, Float) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Size &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const IntSize &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const IntPoint &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Rect &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const IntRect &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Point &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Matrix &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Matrix5x4 &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Point3D &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Color &) { MOZ_CRASH(); }
-  virtual void SetAttribute(uint32_t aIndex, const Float* aFloat, uint32_t aSize) { MOZ_CRASH(); }
+  virtual void SetAttribute(uint32_t aIndex, bool) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, uint32_t) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, Float) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Size &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const IntSize &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const IntPoint &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Rect &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const IntRect &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Point &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Matrix &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Matrix5x4 &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Point3D &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Color &) { MOZ_CRASH("GFX: FilterNode"); }
+  virtual void SetAttribute(uint32_t aIndex, const Float* aFloat, uint32_t aSize) { MOZ_CRASH("GFX: FilterNode"); }
 
 protected:
   friend class Factory;

@@ -1,6 +1,5 @@
-function run_test()
-{
-  if (!("@mozilla.org/toolkit/crash-reporter;1" in Components.classes)) {
+function run_test() {
+  if (!("@mozilla.org/toolkit/crash-reporter;1" in Cc)) {
     dump("INFO | test_crash_after_js_oom_reporting.js | Can't test crashreporter in a non-libxul build.\n");
     return;
   }
@@ -14,14 +13,12 @@ function run_test()
         CrashTestUtils.crash(crashType);
       }
 
-      var observerService = Components.classes["@mozilla.org/observer-service;1"]
-        .getService(Components.interfaces.nsIObserverService);
-      observerService.addObserver(crashWhileReporting, "memory-pressure", false);
-      Components.utils.getJSTestingFunctions().reportLargeAllocationFailure();
+      Services.obs.addObserver(crashWhileReporting, "memory-pressure");
+      Cu.getJSTestingFunctions().reportLargeAllocationFailure();
     },
     function(mdump, extra) {
-      do_check_eq(extra.TestingOOMCrash, "Yes");
-      do_check_eq(extra.JSLargeAllocationFailure, "Reporting");
+      Assert.equal(extra.TestingOOMCrash, "Yes");
+      Assert.equal(extra.JSLargeAllocationFailure, "Reporting");
     },
     true);
 }

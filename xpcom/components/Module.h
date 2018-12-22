@@ -11,6 +11,7 @@
 #include "nsID.h"
 #include "nsIFactory.h"
 #include "nsCOMPtr.h" // for already_AddRefed
+#include "mozilla/Attributes.h"
 
 namespace mozilla {
 
@@ -22,7 +23,7 @@ namespace mozilla {
  */
 struct Module
 {
-  static const unsigned int kVersion = 48;
+  static const unsigned int kVersion = 63;
 
   struct CIDEntry;
 
@@ -38,13 +39,20 @@ struct Module
 
   /**
    * This selector allows CIDEntrys to be marked so that they're only loaded
-   * into certain kinds of processes.
+   * into certain kinds of processes. Selectors can be combined.
    */
   enum ProcessSelector
   {
-    ANY_PROCESS = 0,
-    MAIN_PROCESS_ONLY,
-    CONTENT_PROCESS_ONLY
+    ANY_PROCESS          = 0x0,
+    MAIN_PROCESS_ONLY    = 0x1,
+    CONTENT_PROCESS_ONLY = 0x2,
+
+    /**
+     * By default, modules are not loaded in the GPU process, even if
+     * ANY_PROCESS is specified. This flag enables a module in the
+     * GPU process.
+     */
+    ALLOW_IN_GPU_PROCESS = 0x4
   };
 
   /**
@@ -113,6 +121,12 @@ struct Module
    */
   LoadFuncPtr loadProc;
   UnloadFuncPtr unloadProc;
+
+  /**
+   * Optional flags which control whether the module loads on a process-type
+   * basis.
+   */
+  ProcessSelector selector;
 };
 
 } // namespace mozilla
@@ -125,20 +139,24 @@ struct Module
 #    define NSMODULE_SECTION __declspec(allocate(".kPStaticModules$M"), dllexport)
 #  elif defined(__GNUC__)
 #    if defined(__ELF__)
-#      define NSMODULE_SECTION __attribute__((section(".kPStaticModules"), visibility("protected")))
+#      define NSMODULE_SECTION __attribute__((section("kPStaticModules"), visibility("default")))
 #    elif defined(__MACH__)
 #      define NSMODULE_SECTION __attribute__((section("__DATA, .kPStaticModules"), visibility("default")))
 #    elif defined (_WIN32)
-#      define NSMODULE_SECTION __attribute__((section(".kPStaticModules"), dllexport))
+#      define NSMODULE_SECTION __attribute__((section("kPStaticModules"), dllexport))
 #    endif
 #  endif
 #  if !defined(NSMODULE_SECTION)
 #    error Do not know how to define sections.
 #  endif
-#  define NSMODULE_DEFN(_name) extern NSMODULE_SECTION mozilla::Module const *const NSMODULE_NAME(_name)
+#  if defined(MOZ_HAVE_ASAN_BLACKLIST)
+#    define NSMODULE_ASAN_BLACKLIST __attribute__((no_sanitize_address))
+#  else
+#    define NSMODULE_ASAN_BLACKLIST
+#  endif
+#  define NSMODULE_DEFN(_name) extern NSMODULE_SECTION NSMODULE_ASAN_BLACKLIST mozilla::Module const *const NSMODULE_NAME(_name)
 #else
-#  define NSMODULE_NAME(_name) NSModule
-#  define NSMODULE_DEFN(_name) extern "C" NS_EXPORT mozilla::Module const *const NSModule
+#  error Building binary XPCOM components is not supported anymore.
 #endif
 
 #endif // mozilla_Module_h

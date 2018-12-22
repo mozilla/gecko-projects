@@ -9,8 +9,10 @@
 #include "nsArrayEnumerator.h"
 #include "nsIVariant.h"
 #include "nsIProperty.h"
+#include "nsThreadUtils.h"
 #include "nsVariant.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Move.h"
 
 /*
  * nsHashPropertyBagBase implementation.
@@ -59,18 +61,7 @@ nsHashPropertyBagBase::SetProperty(const nsAString& aName, nsIVariant* aValue)
 NS_IMETHODIMP
 nsHashPropertyBagBase::DeleteProperty(const nsAString& aName)
 {
-  // is it too much to ask for ns*Hashtable to return
-  // a boolean indicating whether RemoveEntry succeeded
-  // or not?!?!
-  bool isFound = mPropertyHash.Get(aName, nullptr);
-  if (!isFound) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // then from the hash
-  mPropertyHash.Remove(aName);
-
-  return NS_OK;
+  return mPropertyHash.Remove(aName) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 
@@ -126,7 +117,7 @@ nsHashPropertyBagBase::GetEnumerator(nsISimpleEnumerator** aResult)
     const nsAString& key = iter.Key();
     nsIVariant* data = iter.UserData();
     nsSimpleProperty* sprop = new nsSimpleProperty(key, data);
-    propertyArray->AppendElement(sprop, false);
+    propertyArray->AppendElement(sprop);
   }
 
   return NS_NewArrayEnumerator(aResult, propertyArray);
@@ -265,6 +256,39 @@ NS_INTERFACE_MAP_BEGIN(nsHashPropertyBag)
   NS_INTERFACE_MAP_ENTRY(nsIWritablePropertyBag2)
 NS_INTERFACE_MAP_END
 
+/*
+ * We need to ensure that the hashtable is destroyed on the main thread, as
+ * the nsIVariant values are main-thread only objects.
+ */
+class ProxyHashtableDestructor final : public mozilla::Runnable
+{
+public:
+  using HashtableType = nsInterfaceHashtable<nsStringHashKey, nsIVariant>;
+  explicit ProxyHashtableDestructor(HashtableType&& aTable)
+    : mozilla::Runnable("ProxyHashtableDestructor")
+    , mPropertyHash(std::move(aTable))
+  {}
+
+  NS_IMETHODIMP
+  Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    HashtableType table(std::move(mPropertyHash));
+    return NS_OK;
+  }
+
+private:
+  HashtableType mPropertyHash;
+};
+
+nsHashPropertyBag::~nsHashPropertyBag()
+{
+  if (!NS_IsMainThread()) {
+    RefPtr<ProxyHashtableDestructor> runnable =
+      new ProxyHashtableDestructor(std::move(mPropertyHash));
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+  }
+}
 
 /*
  * nsHashPropertyBagCC implementation.

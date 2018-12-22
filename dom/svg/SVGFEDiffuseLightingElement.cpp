@@ -19,11 +19,11 @@ namespace dom {
 JSObject*
 SVGFEDiffuseLightingElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEDiffuseLightingElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEDiffuseLightingElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEDiffuseLightingElement)
 
@@ -76,7 +76,7 @@ SVGFEDiffuseLightingElement::GetPrimitiveDescription(nsSVGFilterInstance* aInsta
 
 bool
 SVGFEDiffuseLightingElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                       nsIAtom* aAttribute) const
+                                                       nsAtom* aAttribute) const
 {
   return SVGFEDiffuseLightingElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

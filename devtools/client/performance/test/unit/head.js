@@ -1,12 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
-
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+/* exported Cc, Ci, Cu, Cr, Services, console, PLATFORM_DATA_PREF, getFrameNodePath,
+   synthesizeProfileForTest */
+var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 var Services = require("Services");
-var { console } = require("resource://gre/modules/Console.jsm");
 const RecordingUtils = require("devtools/shared/performance/recording-utils");
 const PLATFORM_DATA_PREF = "devtools.performance.ui.show-platform-data";
 
@@ -15,15 +13,15 @@ const PLATFORM_DATA_PREF = "devtools.performance.ui.show-platform-data";
  */
 function getFrameNodePath(root, path) {
   let calls = root.calls;
-  let node;
-  for (let key of path.split(" > ")) {
-    node = calls.find((node) => node.key == key);
-    if (!node) {
+  let foundNode;
+  for (const key of path.split(" > ")) {
+    foundNode = calls.find((node) => node.key == key);
+    if (!foundNode) {
       break;
     }
-    calls = node.calls;
+    calls = foundNode.calls;
   }
-  return node;
+  return foundNode;
 }
 
 /**
@@ -37,7 +35,7 @@ function synthesizeProfileForTest(samples) {
     ]
   });
 
-  let uniqueStacks = new RecordingUtils.UniqueStacks();
+  const uniqueStacks = new RecordingUtils.UniqueStacks();
   return RecordingUtils.deflateThread({
     samples: samples,
     markers: []

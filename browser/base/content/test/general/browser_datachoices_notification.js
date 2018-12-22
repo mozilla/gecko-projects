@@ -6,9 +6,9 @@
 
 // Pass an empty scope object to the import to prevent "leaked window property"
 // errors in tests.
-var Preferences = Cu.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
+var Preferences = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
 var TelemetryReportingPolicy =
-  Cu.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).TelemetryReportingPolicy;
+  ChromeUtils.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).TelemetryReportingPolicy;
 
 const PREF_BRANCH = "datareporting.policy.";
 const PREF_BYPASS_NOTIFICATION = PREF_BRANCH + "dataSubmissionPolicyBypassNotification";
@@ -20,14 +20,14 @@ const TEST_POLICY_VERSION = 37;
 
 function fakeShowPolicyTimeout(set, clear) {
   let reportingPolicy =
-    Cu.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).Policy;
+    ChromeUtils.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).Policy;
   reportingPolicy.setShowInfobarTimeout = set;
   reportingPolicy.clearShowInfobarTimeout = clear;
 }
 
 function sendSessionRestoredNotification() {
   let reportingPolicyImpl =
-    Cu.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).TelemetryReportingPolicyImpl;
+    ChromeUtils.import("resource://gre/modules/TelemetryReportingPolicy.jsm", {}).TelemetryReportingPolicyImpl;
   reportingPolicyImpl.observe(null, "sessionstore-windows-restored", null);
 }
 
@@ -45,10 +45,9 @@ function promiseNextTick() {
  */
 function promiseWaitForAlertActive(aNotificationBox) {
   let deferred = PromiseUtils.defer();
-  aNotificationBox.addEventListener("AlertActive", function onActive() {
-    aNotificationBox.removeEventListener("AlertActive", onActive, true);
+  aNotificationBox.addEventListener("AlertActive", function() {
     deferred.resolve();
-  });
+  }, {once: true});
   return deferred.promise;
 }
 
@@ -78,25 +77,20 @@ function triggerInfoBar(expectedTimeoutMs) {
   showInfobarCallback();
 }
 
-var checkInfobarButton = Task.async(function* (aNotification) {
+var checkInfobarButton = async function(aNotification) {
   // Check that the button on the data choices infobar does the right thing.
   let buttons = aNotification.getElementsByTagName("button");
   Assert.equal(buttons.length, 1, "There is 1 button in the data reporting notification.");
   let button = buttons[0];
 
-  // Add an observer to ensure the "advanced" pane opened (but don't bother
-  // closing it - we close the entire window when done.)
-  let paneLoadedPromise = promiseTopicObserved("advanced-pane-loaded");
-
   // Click on the button.
   button.click();
 
   // Wait for the preferences panel to open.
-  let preferenceWindow = yield paneLoadedPromise;
-  yield promiseNextTick();
-});
+  await promiseNextTick();
+};
 
-add_task(function* setup(){
+add_task(async function setup() {
   const bypassNotification = Preferences.get(PREF_BYPASS_NOTIFICATION, true);
   const currentPolicyVersion = Preferences.get(PREF_CURRENT_POLICY_VERSION, 1);
 
@@ -120,11 +114,11 @@ function clearAcceptedPolicy() {
   Preferences.reset(PREF_ACCEPTED_POLICY_DATE);
 }
 
-add_task(function* test_single_window(){
+add_task(async function test_single_window() {
   clearAcceptedPolicy();
 
   // Close all the notifications, then try to trigger the data choices infobar.
-  yield closeAllNotifications();
+  await closeAllNotifications();
 
   let notificationBox = document.getElementById("global-notificationbox");
 
@@ -142,15 +136,15 @@ add_task(function* test_single_window(){
 
   // Wait for the infobar to be displayed.
   triggerInfoBar(10 * 1000);
-  yield alertShownPromise;
+  await alertShownPromise;
 
   Assert.equal(notificationBox.allNotifications.length, 1, "Notification Displayed.");
   Assert.ok(TelemetryReportingPolicy.canUpload(), "User should be allowed to upload now.");
 
-  yield promiseNextTick();
+  await promiseNextTick();
   let promiseClosed = promiseWaitForNotificationClose(notificationBox.currentNotification);
-  yield checkInfobarButton(notificationBox.currentNotification);
-  yield promiseClosed;
+  await checkInfobarButton(notificationBox.currentNotification);
+  await promiseClosed;
 
   Assert.equal(notificationBox.allNotifications.length, 0, "No notifications remain.");
 
@@ -164,15 +158,15 @@ add_task(function* test_single_window(){
                  "Date pref set.");
 });
 
-add_task(function* test_multiple_windows(){
+add_task(async function test_multiple_windows() {
   clearAcceptedPolicy();
 
   // Close all the notifications, then try to trigger the data choices infobar.
-  yield closeAllNotifications();
+  await closeAllNotifications();
 
   // Ensure we see the notification on all windows and that action on one window
   // results in dismiss on every window.
-  let otherWindow = yield BrowserTestUtils.openNewBrowserWindow();
+  let otherWindow = await BrowserTestUtils.openNewBrowserWindow();
 
   // Get the notification box for both windows.
   let notificationBoxes = [
@@ -197,7 +191,7 @@ add_task(function* test_multiple_windows(){
 
   // Wait for the infobars.
   triggerInfoBar(10 * 1000);
-  yield Promise.all(showAlertPromises);
+  await Promise.all(showAlertPromises);
 
   // Both notification were displayed. Close one and check that both gets closed.
   let closeAlertPromises = [
@@ -205,13 +199,13 @@ add_task(function* test_multiple_windows(){
     promiseWaitForNotificationClose(notificationBoxes[1].currentNotification)
   ];
   notificationBoxes[0].currentNotification.close();
-  yield Promise.all(closeAlertPromises);
+  await Promise.all(closeAlertPromises);
 
   // Close the second window we opened.
-  yield BrowserTestUtils.closeWindow(otherWindow);
+  await BrowserTestUtils.closeWindow(otherWindow);
 
   // Check that we are clear to upload and that the policy data us saved.
-  Assert.ok(TelemetryReportingPolicy.canUpload(),"User should be allowed to upload now.");
+  Assert.ok(TelemetryReportingPolicy.canUpload(), "User should be allowed to upload now.");
   Assert.equal(TelemetryReportingPolicy.testIsUserNotified(), true,
                "User notified about datareporting policy.");
   Assert.equal(Preferences.get(PREF_ACCEPTED_POLICY_VERSION, 0), TEST_POLICY_VERSION,

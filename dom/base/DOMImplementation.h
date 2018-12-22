@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_DOMImplementation_h
 #define mozilla_dom_DOMImplementation_h
 
-#include "nsIDOMDOMImplementation.h"
 #include "nsWrapperCache.h"
 
 #include "mozilla/Attributes.h"
@@ -20,13 +19,11 @@
 #include "nsIWeakReferenceUtils.h"
 #include "nsString.h"
 
-class nsIDOMDocument;
-
 namespace mozilla {
 namespace dom {
 class DocumentType;
 
-class DOMImplementation final : public nsIDOMDOMImplementation
+class DOMImplementation final : public nsISupports
                               , public nsWrapperCache
 {
   ~DOMImplementation()
@@ -56,10 +53,10 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  // nsIDOMDOMImplementation
-  NS_DECL_NSIDOMDOMIMPLEMENTATION
-
-  bool HasFeature(const nsAString& aFeature, const nsAString& aVersion);
+  bool HasFeature()
+  {
+    return true;
+  }
 
   already_AddRefed<DocumentType>
   CreateDocumentType(const nsAString& aQualifiedName,
@@ -70,7 +67,7 @@ public:
   already_AddRefed<nsIDocument>
   CreateDocument(const nsAString& aNamespaceURI,
                  const nsAString& aQualifiedName,
-                 nsIDOMDocumentType* aDoctype,
+                 DocumentType* aDoctype,
                  ErrorResult& aRv);
 
   already_AddRefed<nsIDocument>
@@ -79,12 +76,10 @@ public:
 private:
   nsresult CreateDocument(const nsAString& aNamespaceURI,
                           const nsAString& aQualifiedName,
-                          nsIDOMDocumentType* aDoctype,
-                          nsIDocument** aDocument,
-                          nsIDOMDocument** aDOMDocument);
+                          DocumentType* aDoctype,
+                          nsIDocument** aDocument);
   nsresult CreateHTMLDocument(const nsAString& aTitle,
-                              nsIDocument** aDocument,
-                              nsIDOMDocument** aDOMDocument);
+                              nsIDocument** aDocument);
 
   nsCOMPtr<nsIDocument> mOwner;
   nsWeakPtr mScriptObject;

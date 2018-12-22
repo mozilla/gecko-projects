@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/SVGPointBinding.h"
@@ -145,7 +144,7 @@ public:
   virtual void SetY(float aY, ErrorResult& rv) = 0;
   virtual already_AddRefed<nsISVGPoint> MatrixTransform(dom::SVGMatrix& matrix) = 0;
   virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto) override
-    { return dom::SVGPointBinding::Wrap(cx, this, aGivenProto); }
+    { return dom::SVGPoint_Binding::Wrap(cx, this, aGivenProto); }
 
   virtual nsISupports* GetParentObject() = 0;
 

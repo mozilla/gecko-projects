@@ -67,6 +67,14 @@ const Services = require("Services");
 // The cache used in the `nsIURL` function.
 const gNSURLStore = new Map();
 
+// "Lax", "Strict" and "Unset" are special values of the SameSite cookie
+// attribute that should not be translated.
+const COOKIE_SAMESITE = {
+  LAX: "Lax",
+  STRICT: "Strict",
+  UNSET: "Unset"
+};
+
 /**
  * Helper object for networking stuff.
  *
@@ -85,7 +93,7 @@ var NetworkHelper = {
    *          Converted text.
    */
   convertToUnicode: function(text, charset) {
-    let conv = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+    const conv = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
         .createInstance(Ci.nsIScriptableUnicodeConverter);
     try {
       conv.charset = charset || "UTF-8";
@@ -125,7 +133,7 @@ var NetworkHelper = {
    */
   readPostTextFromRequest: function(request, charset) {
     if (request instanceof Ci.nsIUploadChannel) {
-      let iStream = request.uploadStream;
+      const iStream = request.uploadStream;
 
       let isSeekableStream = false;
       if (iStream instanceof Ci.nsISeekableStream) {
@@ -139,7 +147,7 @@ var NetworkHelper = {
       }
 
       // Read data from the stream.
-      let text = this.readAndConvertFromStream(iStream, charset);
+      const text = this.readAndConvertFromStream(iStream, charset);
 
       // Seek locks the file, so seek to the beginning only if necko hasn't
       // read it yet, since necko doesn't seek to 0 before reading (at lest
@@ -162,7 +170,7 @@ var NetworkHelper = {
    *          docShell otherwise null.
    */
   readPostTextFromPage: function(docShell, charset) {
-    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    const webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     return this.readPostTextFromPageViaWebNav(webNav, charset);
   },
 
@@ -178,7 +186,7 @@ var NetworkHelper = {
    */
   readPostTextFromPageViaWebNav: function(webNav, charset) {
     if (webNav instanceof Ci.nsIWebPageDescriptor) {
-      let descriptor = webNav.currentDescriptor;
+      const descriptor = webNav.currentDescriptor;
 
       if (descriptor instanceof Ci.nsISHEntry && descriptor.postData &&
           descriptor instanceof Ci.nsISeekableStream) {
@@ -212,7 +220,7 @@ var NetworkHelper = {
    * the content/chrome boundary.
    *
    * @param nsIHttpChannel request
-   * @returns nsIDOMElement|null
+   * @returns Element|null
    *          The top frame element for the given request.
    */
   getTopFrameForRequest: function(request) {
@@ -271,8 +279,8 @@ var NetworkHelper = {
    */
   isTopLevelLoad: function(request) {
     if (request instanceof Ci.nsIChannel) {
-      let loadInfo = request.loadInfo;
-      if (loadInfo && loadInfo.parentOuterWindowID == loadInfo.outerWindowID) {
+      const loadInfo = request.loadInfo;
+      if (loadInfo && loadInfo.isTopLevelLoad) {
         return (request.loadFlags & Ci.nsIChannel.LOAD_DOCUMENT_URI);
       }
     }
@@ -293,8 +301,8 @@ var NetworkHelper = {
    *        or null if something failed while getting the cached content.
    */
   loadFromCache: function(url, charset, callback) {
-    let channel = NetUtil.newChannel({uri: url,
-                                      loadUsingSystemPrincipal: true});
+    const channel = NetUtil.newChannel({uri: url,
+                                        loadUsingSystemPrincipal: true});
 
     // Ensure that we only read from the cache and not the server.
     channel.loadFlags = Ci.nsIRequest.LOAD_FROM_CACHE |
@@ -311,8 +319,8 @@ var NetworkHelper = {
 
         // Try to get the encoding from the channel. If there is none, then use
         // the passed assumed charset.
-        let requestChannel = request.QueryInterface(Ci.nsIChannel);
-        let contentCharset = requestChannel.contentCharset || charset;
+        const requestChannel = request.QueryInterface(Ci.nsIChannel);
+        const contentCharset = requestChannel.contentCharset || charset;
 
         // Read the content of the stream using contentCharset as encoding.
         callback(this.readAndConvertFromStream(inputStream, contentCharset));
@@ -329,13 +337,13 @@ var NetworkHelper = {
    *         following properties: name and value.
    */
   parseCookieHeader: function(header) {
-    let cookies = header.split(";");
-    let result = [];
+    const cookies = header.split(";");
+    const result = [];
 
     cookies.forEach(function(cookie) {
-      let equal = cookie.indexOf("=");
-      let name = cookie.substr(0, equal);
-      let value = cookie.substr(equal + 1);
+      const equal = cookie.indexOf("=");
+      const name = cookie.substr(0, equal);
+      const value = cookie.substr(equal + 1);
       result.push({name: unescape(name.trim()),
                    value: unescape(value.trim())});
     });
@@ -351,17 +359,28 @@ var NetworkHelper = {
    * @return array
    *         Array holding an object for each cookie. Each object holds the
    *         following properties: name, value, secure (boolean), httpOnly
-   *         (boolean), path, domain and expires (ISO date string).
+   *         (boolean), path, domain, samesite and expires (ISO date string).
    */
   parseSetCookieHeader: function(header) {
-    let rawCookies = header.split(/\r\n|\n|\r/);
-    let cookies = [];
+    function parseSameSiteAttribute(attribute) {
+      switch (attribute) {
+        case COOKIE_SAMESITE.LAX:
+          return COOKIE_SAMESITE.LAX;
+        case COOKIE_SAMESITE.STRICT:
+          return COOKIE_SAMESITE.STRICT;
+        default:
+          return COOKIE_SAMESITE.UNSET;
+      }
+    }
+
+    const rawCookies = header.split(/\r\n|\n|\r/);
+    const cookies = [];
 
     rawCookies.forEach(function(cookie) {
-      let equal = cookie.indexOf("=");
-      let name = unescape(cookie.substr(0, equal).trim());
-      let parts = cookie.substr(equal + 1).split(";");
-      let value = unescape(parts.shift().trim());
+      const equal = cookie.indexOf("=");
+      const name = unescape(cookie.substr(0, equal).trim());
+      const parts = cookie.substr(equal + 1).split(";");
+      const value = unescape(parts.shift().trim());
 
       cookie = {name: name, value: value};
 
@@ -372,10 +391,12 @@ var NetworkHelper = {
         } else if (part.toLowerCase() == "httponly") {
           cookie.httpOnly = true;
         } else if (part.indexOf("=") > -1) {
-          let pair = part.split("=");
+          const pair = part.split("=");
           pair[0] = pair[0].toLowerCase();
           if (pair[0] == "path" || pair[0] == "domain") {
             cookie[pair[0]] = pair[1];
+          } else if (pair[0] == "samesite") {
+            cookie[pair[0]] = parseSameSiteAttribute(pair[1]);
           } else if (pair[0] == "expires") {
             try {
               pair[1] = pair[1].replace(/-/g, " ");
@@ -487,7 +508,7 @@ var NetworkHelper = {
       return true;
     }
 
-    let category = this.mimeCategoryMap[mimeType] || null;
+    const category = this.mimeCategoryMap[mimeType] || null;
     switch (category) {
       case "txt":
       case "js":
@@ -523,10 +544,9 @@ var NetworkHelper = {
    *                    * "broken": secure connection failed (e.g. expired cert)
    *                    * "secure": the connection was properly secured.
    *          If state == broken:
-   *            - errorMessage: full error message from
-   *                            nsITransportSecurityInfo.
+   *            - errorMessage: error code string.
    *          If state == secure:
-   *            - protocolVersion: one of TLSv1, TLSv1.1, TLSv1.2.
+   *            - protocolVersion: one of TLSv1, TLSv1.1, TLSv1.2, TLSv1.3.
    *            - cipherSuite: the cipher suite used in this connection.
    *            - cert: information about certificate used in this connection.
    *                    See parseCertificateInfo for the contents.
@@ -570,7 +590,7 @@ var NetworkHelper = {
      *      => state === "insecure"
      *
      * - request is HTTPS but it uses a weak cipher or old protocol, see
-     *   http://hg.mozilla.org/mozilla-central/annotate/def6ed9d1c1a/
+     *   https://hg.mozilla.org/mozilla-central/annotate/def6ed9d1c1a/
      *   security/manager/ssl/nsNSSCallbacks.cpp#l1233
      * - request is mixed content (which makes no sense whatsoever)
      *   => .securityState has STATE_IS_BROKEN flag
@@ -620,6 +640,12 @@ var NetworkHelper = {
       // Cipher suite.
       info.cipherSuite = SSLStatus.cipherName;
 
+      // Key exchange group name.
+      info.keaGroupName = SSLStatus.keaGroupName;
+
+      // Certificate signature scheme.
+      info.signatureSchemeName = SSLStatus.signatureSchemeName;
+
       // Protocol version.
       info.protocolVersion =
         this.formatSecurityProtocol(SSLStatus.protocolVersion);
@@ -627,21 +653,28 @@ var NetworkHelper = {
       // Certificate.
       info.cert = this.parseCertificateInfo(SSLStatus.serverCert);
 
+      // Certificate transparency status.
+      info.certificateTransparency = SSLStatus.certificateTransparencyStatus;
+
       // HSTS and HPKP if available.
       if (httpActivity.hostname) {
         const sss = Cc["@mozilla.org/ssservice;1"]
                       .getService(Ci.nsISiteSecurityService);
 
         // SiteSecurityService uses different storage if the channel is
-        // private. Thus we must give isSecureHost correct flags or we
+        // private. Thus we must give isSecureURI correct flags or we
         // might get incorrect results.
-        let flags = (httpActivity.private) ?
+        const flags = (httpActivity.private) ?
                       Ci.nsISocketProvider.NO_PERMANENT_STORAGE : 0;
 
-        let host = httpActivity.hostname;
+        if (!uri) {
+          // isSecureURI only cares about the host, not the scheme.
+          const host = httpActivity.hostname;
+          uri = Services.io.newURI("https://" + host);
+        }
 
-        info.hsts = sss.isSecureHost(sss.HEADER_HSTS, host, flags);
-        info.hpkp = sss.isSecureHost(sss.HEADER_HPKP, host, flags);
+        info.hsts = sss.isSecureURI(sss.HEADER_HSTS, uri, flags);
+        info.hpkp = sss.isSecureURI(sss.HEADER_HPKP, uri, flags);
       } else {
         DevToolsUtils.reportException("NetworkHelper.parseSecurityInfo",
           "Could not get HSTS/HPKP status as hostname is not available.");
@@ -651,7 +684,7 @@ var NetworkHelper = {
     } else {
       // The connection failed.
       info.state = "broken";
-      info.errorMessage = securityInfo.errorMessage;
+      info.errorMessage = securityInfo.errorCodeString;
     }
 
     return info;
@@ -672,7 +705,7 @@ var NetworkHelper = {
    *           }
    */
   parseCertificateInfo: function(cert) {
-    let info = {};
+    const info = {};
     if (cert) {
       info.subject = {
         commonName: cert.commonName,
@@ -710,8 +743,8 @@ var NetworkHelper = {
    * @param Number version
    *        One of nsISSLStatus version constants.
    * @return string
-   *         One of TLSv1, TLSv1.1, TLSv1.2 if @param version is valid,
-   *         Unknown otherwise.
+   *         One of TLSv1, TLSv1.1, TLSv1.2, TLSv1.3 if @param version
+   *         is valid, Unknown otherwise.
    */
   formatSecurityProtocol: function(version) {
     switch (version) {
@@ -721,6 +754,8 @@ var NetworkHelper = {
         return "TLSv1.1";
       case Ci.nsISSLStatus.TLS_VERSION_1_2:
         return "TLSv1.2";
+      case Ci.nsISSLStatus.TLS_VERSION_1_3:
+        return "TLSv1.3";
       default:
         DevToolsUtils.reportException("NetworkHelper.formatSecurityProtocol",
           "protocolVersion " + version + " is unknown.");
@@ -743,12 +778,12 @@ var NetworkHelper = {
     const wpl = Ci.nsIWebProgressListener;
 
     // If there's non-fatal security issues the request has STATE_IS_BROKEN
-    // flag set. See http://hg.mozilla.org/mozilla-central/file/44344099d119
+    // flag set. See https://hg.mozilla.org/mozilla-central/file/44344099d119
     // /security/manager/ssl/nsNSSCallbacks.cpp#l1233
-    let reasons = [];
+    const reasons = [];
 
     if (state & wpl.STATE_IS_BROKEN) {
-      let isCipher = state & wpl.STATE_USES_WEAK_CRYPTO;
+      const isCipher = state & wpl.STATE_USES_WEAK_CRYPTO;
 
       if (isCipher) {
         reasons.push("cipher");
@@ -780,8 +815,8 @@ var NetworkHelper = {
     }
 
     // Turn the params string into an array containing { name: value } tuples.
-    let paramsArray = queryString.replace(/^[?&]/, "").split("&").map(e => {
-      let param = e.split("=");
+    const paramsArray = queryString.replace(/^[?&]/, "").split("&").map(e => {
+      const param = e.split("=");
       return {
         name: param[0] ?
           NetworkHelper.convertToUnicode(unescape(param[0])) : "",
@@ -801,12 +836,12 @@ var NetworkHelper = {
       return store.get(url);
     }
 
-    let uri = Services.io.newURI(url, null, null).QueryInterface(Ci.nsIURL);
+    const uri = Services.io.newURI(url).QueryInterface(Ci.nsIURL);
     store.set(url, uri);
     return uri;
   }
 };
 
-for (let prop of Object.getOwnPropertyNames(NetworkHelper)) {
+for (const prop of Object.getOwnPropertyNames(NetworkHelper)) {
   exports[prop] = NetworkHelper[prop];
 }

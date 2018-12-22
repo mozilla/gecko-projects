@@ -19,11 +19,7 @@ function AutoCompleteInput(aSearches) {
 }
 AutoCompleteInput.prototype = Object.create(AutoCompleteInputBase.prototype);
 
-function run_test() {
-  run_next_test();
-}
-
-add_test(function test_handleEnter() {
+add_test(function test_handleEnter_key() {
   let results = [
     ["mozilla.com", "http://www.mozilla.com"],
     ["mozilla.org", "http://www.mozilla.org"],
@@ -35,7 +31,9 @@ add_test(function test_handleEnter() {
     Assert.equal(aController.getFinalCompleteValueAt(1), "http://www.mozilla.org");
 
     Assert.equal(aController.input.popup.selectedIndex, 0);
-    aController.handleKeyNavigation(Ci.nsIDOMKeyEvent.DOM_VK_DOWN);
+    // Hardcode KeyboardEvent.DOM_VK_DOWN, because we can't easily
+    // include KeyboardEvent here.
+    aController.handleKeyNavigation(0x28 /* KeyboardEvent.DOM_VK_DOWN */);
     Assert.equal(aController.input.popup.selectedIndex, 1);
     // Simulate mouse interaction changing selectedIndex
     // ie NOT keyboard interaction:
@@ -46,7 +44,13 @@ add_test(function test_handleEnter() {
     // and not the mouse selection:
     Assert.equal(aController.input.textValue, "http://www.mozilla.org");
   });
+});
 
+add_test(function test_handleEnter_mouse() {
+  let results = [
+    ["mozilla.com", "http://www.mozilla.com"],
+    ["mozilla.org", "http://www.mozilla.org"],
+  ];
   // Then the case where we do not:
   doSearch("moz", results, function(aController) {
     Assert.equal(aController.input.textValue, "moz");
@@ -65,6 +69,26 @@ add_test(function test_handleEnter() {
     // Verify that the input stayed the same, because no selection was made
     // with the keyboard:
     Assert.equal(aController.input.textValue, "moz");
+  });
+});
+
+add_test(function test_handleEnter_preselected() {
+  let results = [
+    ["mozilla.com", "http://www.mozilla.com"],
+    ["mozilla.org", "http://www.mozilla.org"],
+  ];
+  // Then test a preselection.
+  doSearch("moz", results, function(aController) {
+    Assert.equal(aController.input.textValue, "moz");
+    Assert.equal(aController.getFinalCompleteValueAt(0), "http://www.mozilla.com");
+    Assert.equal(aController.getFinalCompleteValueAt(1), "http://www.mozilla.org");
+
+    aController.setInitiallySelectedIndex(0);
+
+    aController.handleEnter(false);
+    // Verify that the input stayed the same, because no selection was made
+    // with the keyboard:
+    Assert.equal(aController.input.textValue, "http://www.mozilla.com");
   });
 });
 

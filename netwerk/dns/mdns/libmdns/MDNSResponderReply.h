@@ -17,7 +17,7 @@
 namespace mozilla {
 namespace net {
 
-class BrowseReplyRunnable final : public nsRunnable
+class BrowseReplyRunnable final : public Runnable
 {
 public:
   BrowseReplyRunnable(DNSServiceRef aSdRef,
@@ -29,7 +29,7 @@ public:
                       const nsACString& aReplyDomain,
                       BrowseOperator* aContext);
 
-  NS_IMETHODIMP Run() override;
+  NS_IMETHOD Run() override;
 
   static void Reply(DNSServiceRef aSdRef,
                     DNSServiceFlags aFlags,
@@ -51,7 +51,7 @@ private:
   RefPtr<BrowseOperator> mContext;
 };
 
-class RegisterReplyRunnable final : public nsRunnable
+class RegisterReplyRunnable final : public Runnable
 {
 public:
   RegisterReplyRunnable(DNSServiceRef aSdRef,
@@ -62,7 +62,7 @@ public:
                         const nsACString& aDomain,
                         RegisterOperator* aContext);
 
-  NS_IMETHODIMP Run() override;
+  NS_IMETHOD Run() override;
 
   static void Reply(DNSServiceRef aSdRef,
                     DNSServiceFlags aFlags,
@@ -82,7 +82,7 @@ private:
   RefPtr<RegisterOperator> mContext;
 };
 
-class ResolveReplyRunnable final : public nsRunnable
+class ResolveReplyRunnable final : public Runnable
 {
 public:
   ResolveReplyRunnable(DNSServiceRef aSdRef,
@@ -95,9 +95,9 @@ public:
                        uint16_t aTxtLen,
                        const unsigned char* aTxtRecord,
                        ResolveOperator* aContext);
-  ~ResolveReplyRunnable();
+  ~ResolveReplyRunnable() = default;
 
-  NS_IMETHODIMP Run() override;
+  NS_IMETHOD Run() override;
 
   static void Reply(DNSServiceRef aSdRef,
                     DNSServiceFlags aFlags,
@@ -123,7 +123,7 @@ private:
   RefPtr<ResolveOperator> mContext;
 };
 
-class GetAddrInfoReplyRunnable final : public nsRunnable
+class GetAddrInfoReplyRunnable final : public Runnable
 {
 public:
   GetAddrInfoReplyRunnable(DNSServiceRef aSdRef,
@@ -134,9 +134,9 @@ public:
                            const mozilla::net::NetAddr& aAddress,
                            uint32_t aTTL,
                            GetAddrInfoOperator* aContext);
-  ~GetAddrInfoReplyRunnable();
+  ~GetAddrInfoReplyRunnable() = default;
 
-  NS_IMETHODIMP Run() override;
+  NS_IMETHOD Run() override;
 
   static void Reply(DNSServiceRef aSdRef,
                     DNSServiceFlags aFlags,

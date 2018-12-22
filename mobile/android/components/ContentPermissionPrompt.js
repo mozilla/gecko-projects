@@ -2,21 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
-const Cc = Components.classes;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "RuntimePermissions",
+                               "resource://gre/modules/RuntimePermissions.jsm");
+
+ChromeUtils.defineModuleGetter(this, "DoorHanger",
+                               "resource://gre/modules/Prompt.jsm");
 
 const kEntities = {
   "contacts": "contacts",
   "desktop-notification": "desktopNotification2",
-  "device-storage:music": "deviceStorageMusic",
-  "device-storage:pictures": "deviceStoragePictures",
-  "device-storage:sdcard": "deviceStorageSdcard",
-  "device-storage:videos": "deviceStorageVideos",
   "geolocation": "geolocation",
 };
 
@@ -31,22 +28,22 @@ function ContentPermissionPrompt() {}
 ContentPermissionPrompt.prototype = {
   classID: Components.ID("{C6E8C44D-9F39-4AF7-BCC0-76E38A8310F5}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionPrompt]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionPrompt]),
 
-  handleExistingPermission: function handleExistingPermission(request, type, denyUnknown) {
+  handleExistingPermission: function handleExistingPermission(request, type, denyUnknown, callback) {
     let result = Services.perms.testExactPermissionFromPrincipal(request.principal, type);
     if (result == Ci.nsIPermissionManager.ALLOW_ACTION) {
-      request.allow();
+      callback(/* allow */ true);
       return true;
     }
 
     if (result == Ci.nsIPermissionManager.DENY_ACTION) {
-      request.cancel();
+      callback(/* allow */ false);
       return true;
     }
 
     if (denyUnknown && result == Ci.nsIPermissionManager.UNKNOWN_ACTION) {
-      request.cancel();
+      callback(/* allow */ false);
       return true;
     }
 
@@ -69,7 +66,7 @@ ContentPermissionPrompt.prototype = {
       let requestingWindow = request.window.top;
       return this.getChromeWindow(requestingWindow).wrappedJSObject;
     }
-    return request.element.ownerDocument.defaultView;
+    return request.element.ownerGlobal;
   },
 
   prompt: function(request) {
@@ -81,19 +78,31 @@ ContentPermissionPrompt.prototype = {
       request.cancel();
       return;
     }
+
     let perm = types.queryElementAt(0, Ci.nsIContentPermissionType);
+
+    let callback = (allow) => {
+      if (!allow) {
+        request.cancel();
+        return;
+      }
+      if (perm.type === "geolocation") {
+        RuntimePermissions.waitForPermissions(
+          RuntimePermissions.ACCESS_FINE_LOCATION).then((granted) => {
+            (granted ? request.allow : request.cancel)();
+          });
+        return;
+      }
+      request.allow();
+    };
 
     // Returns true if the request was handled
     let access = (perm.access && perm.access !== "unused") ?
                  (perm.type + "-" + perm.access) : perm.type;
     if (this.handleExistingPermission(request, access,
-          /* denyUnknown */ isApp || PROMPT_FOR_UNKNOWN.indexOf(perm.type) < 0))
+          /* denyUnknown */ isApp || !PROMPT_FOR_UNKNOWN.includes(perm.type), callback)) {
        return;
-
-    let chromeWin = this.getChromeForRequest(request);
-    let tab = chromeWin.BrowserApp.getTabForWindow(request.window.top);
-    if (!tab)
-      return;
+    }
 
     let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
     let entityName = kEntities[perm.type];
@@ -105,7 +114,7 @@ ContentPermissionPrompt.prototype = {
         if (aChecked || entityName == "desktopNotification2")
           Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.DENY_ACTION);
 
-        request.cancel();
+        callback(/* allow */ false);
       }
     },
     {
@@ -119,12 +128,14 @@ ContentPermissionPrompt.prototype = {
           Services.perms.addFromPrincipal(request.principal, access, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
         }
 
-        request.allow();
+        callback(/* allow */ true);
       },
       positive: true
     }];
 
-    let requestor = chromeWin.BrowserApp.manifest ? "'" + chromeWin.BrowserApp.manifest.name + "'" : request.principal.URI.host;
+    let chromeWin = this.getChromeForRequest(request);
+    let requestor = (chromeWin.BrowserApp && chromeWin.BrowserApp.manifest) ?
+        "'" + chromeWin.BrowserApp.manifest.name + "'" : request.principal.URI.host;
     let message = browserBundle.formatStringFromName(entityName + ".ask", [requestor], 1);
     // desktopNotification doesn't have a checkbox
     let options;
@@ -139,10 +150,16 @@ ContentPermissionPrompt.prototype = {
       options = { checkbox: browserBundle.GetStringFromName(entityName + ".dontAskAgain") };
     }
 
-    chromeWin.NativeWindow.doorhanger.show(message, entityName + request.principal.URI.host, buttons, tab.id, options, entityName.toUpperCase());
+    options.defaultCallback = () => {
+      callback(/* allow */ false);
+    };
+
+    DoorHanger.show(request.window || request.element.ownerGlobal,
+                    message, entityName + request.principal.URI.host,
+                    buttons, options, entityName.toUpperCase());
   }
 };
 
 
-//module initialization
+// module initialization
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([ContentPermissionPrompt]);

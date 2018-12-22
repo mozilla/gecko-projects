@@ -7,7 +7,6 @@
 #ifndef __NS_SVGNUMBERPAIR_H__
 #define __NS_SVGNUMBERPAIR_H__
 
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
 #include "nsISMILAttr.h"
@@ -16,6 +15,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/SVGAnimatedNumber.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/UniquePtr.h"
 
 
 class nsSMILValue;
@@ -59,18 +59,16 @@ public:
   // set (either by animation, or by taking on the base value which has been
   // explicitly set by markup or a DOM call), false otherwise.
   // If this returns false, the animated value is still valid, that is,
-  // useable, and represents the default base value of the attribute.
+  // usable, and represents the default base value of the attribute.
   bool IsExplicitlySet() const
     { return mIsAnimated || mIsBaseSet; }
 
   already_AddRefed<mozilla::dom::SVGAnimatedNumber>
     ToDOMAnimatedNumber(PairIndex aIndex,
                         nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
+  mozilla::UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
-
   float mAnimVal[2];
   float mBaseVal[2];
   uint8_t mAttrEnum; // element specified tracking for attribute

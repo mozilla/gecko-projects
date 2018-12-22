@@ -1,47 +1,36 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Workers")
+
 # Public stuff.
 EXPORTS.mozilla.dom += [
-    'FileReaderSync.h',
-    'ServiceWorkerCommon.h',
-    'ServiceWorkerContainer.h',
-    'ServiceWorkerEvents.h',
-    'ServiceWorkerMessageEvent.h',
-    'ServiceWorkerRegistrar.h',
-    'ServiceWorkerRegistration.h',
+    'ChromeWorker.h',
+    'SharedWorker.h',
+    'Worker.h',
+    'WorkerCommon.h',
+    'WorkerDebugger.h',
+    'WorkerDebuggerManager.h',
+    'WorkerHolder.h',
+    'WorkerHolderToken.h',
+    'WorkerLoadInfo.h',
     'WorkerLocation.h',
     'WorkerNavigator.h',
-    'WorkerPrefs.h',
     'WorkerPrivate.h',
+    'WorkerRef.h',
     'WorkerRunnable.h',
     'WorkerScope.h',
 ]
 
-EXPORTS.mozilla.dom.workers += [
+# Private stuff.
+EXPORTS.mozilla.dom.workerinternals += [
+    'JSSettings.h',
+    'Queue.h',
     'RuntimeService.h',
-    'ServiceWorkerManager.h',
-    'WorkerDebuggerManager.h',
-    'Workers.h',
-]
-
-# Stuff needed for the bindings, not really public though.
-EXPORTS.mozilla.dom.workers.bindings += [
-    'DataStore.h',
-    'DataStoreCursor.h',
-    'Performance.h',
-    'ServiceWorker.h',
-    'ServiceWorkerClient.h',
-    'ServiceWorkerClients.h',
-    'ServiceWorkerWindowClient.h',
-    'SharedWorker.h',
-    'URL.h',
-    'WorkerFeature.h',
-    'XMLHttpRequest.h',
-    'XMLHttpRequestUpload.h',
 ]
 
 XPIDL_MODULE = 'dom_workers'
@@ -52,52 +41,38 @@ XPIDL_SOURCES += [
 ]
 
 UNIFIED_SOURCES += [
+    'ChromeWorker.cpp',
     'ChromeWorkerScope.cpp',
-    'DataStore.cpp',
-    'DataStoreCursor.cpp',
-    'FileReaderSync.cpp',
-    'Performance.cpp',
+    'MessageEventRunnable.cpp',
     'Principal.cpp',
     'RegisterBindings.cpp',
     'RuntimeService.cpp',
     'ScriptLoader.cpp',
-    'ServiceWorker.cpp',
-    'ServiceWorkerClient.cpp',
-    'ServiceWorkerClients.cpp',
-    'ServiceWorkerContainer.cpp',
-    'ServiceWorkerEvents.cpp',
-    'ServiceWorkerManager.cpp',
-    'ServiceWorkerManagerChild.cpp',
-    'ServiceWorkerManagerParent.cpp',
-    'ServiceWorkerManagerService.cpp',
-    'ServiceWorkerMessageEvent.cpp',
-    'ServiceWorkerPrivate.cpp',
-    'ServiceWorkerRegistrar.cpp',
-    'ServiceWorkerRegistration.cpp',
-    'ServiceWorkerScriptCache.cpp',
-    'ServiceWorkerWindowClient.cpp',
     'SharedWorker.cpp',
-    'URL.cpp',
+    'Worker.cpp',
+    'WorkerDebugger.cpp',
     'WorkerDebuggerManager.cpp',
+    'WorkerError.cpp',
+    'WorkerEventTarget.cpp',
+    'WorkerHolder.cpp',
+    'WorkerHolderToken.cpp',
+    'WorkerLoadInfo.cpp',
     'WorkerLocation.cpp',
     'WorkerNavigator.cpp',
     'WorkerPrivate.cpp',
+    'WorkerRef.cpp',
     'WorkerRunnable.cpp',
     'WorkerScope.cpp',
     'WorkerThread.cpp',
-    'XMLHttpRequest.cpp',
-    'XMLHttpRequestUpload.cpp',
-]
-
-IPDL_SOURCES += [
-    'PServiceWorkerManager.ipdl',
-    'ServiceWorkerRegistrarTypes.ipdlh',
 ]
 
 LOCAL_INCLUDES += [
-    '../base',
-    '../system',
+    '/caps',
     '/dom/base',
+    '/dom/bindings',
+    '/dom/system',
+    '/js/xpconnect/loader',
+    '/netwerk/base',
     '/xpcom/build',
     '/xpcom/threads',
 ]
@@ -106,27 +81,20 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
-TEST_DIRS += [
-    'test/extensions/bootstrap',
-    'test/extensions/traditional',
-]
-
 MOCHITEST_MANIFESTS += [
     'test/mochitest.ini',
-    'test/serviceworkers/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += [
     'test/chrome.ini',
-    'test/serviceworkers/chrome.ini'
-]
-
-BROWSER_CHROME_MANIFESTS += [
-    'test/serviceworkers/browser.ini',
 ]
 
 XPCSHELL_TESTS_MANIFESTS += ['test/xpcshell/xpcshell.ini']
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
-TEST_DIRS += ['test/gtest']
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['NIGHTLY_BUILD']:
+    DEFINES['ENABLE_WASM_GC'] = True

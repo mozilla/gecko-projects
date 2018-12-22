@@ -14,8 +14,10 @@ import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoSharedPrefs;
-import org.mozilla.gecko.gfx.BitmapUtils;
-import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.BitmapUtils;
+import org.mozilla.gecko.util.BundleEventListener;
+import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.WindowUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
@@ -31,13 +33,14 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.ColorInt;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewParent;
 
-public class LightweightTheme implements GeckoEventListener {
+public class LightweightTheme implements BundleEventListener {
     private static final String LOGTAG = "GeckoLightweightTheme";
 
     private static final String PREFS_URL = "lightweightTheme.headerURL";
@@ -48,11 +51,11 @@ public class LightweightTheme implements GeckoEventListener {
     private final Application mApplication;
 
     private Bitmap mBitmap;
-    private int mColor;
+    private @ColorInt int mColor;
     private boolean mIsLight;
 
     public static interface OnChangeListener {
-        // The View should change its background/text color. 
+        // The View should change its background/text color.
         public void onLightweightThemeChanged();
 
         // The View should reset to its default background/text color.
@@ -143,7 +146,7 @@ public class LightweightTheme implements GeckoEventListener {
                 if (stream != null) {
                     try {
                         stream.close();
-                    } catch (IOException e) {}
+                    } catch (IOException e) { }
                 }
             }
         }
@@ -163,7 +166,7 @@ public class LightweightTheme implements GeckoEventListener {
         mListeners = new ArrayList<OnChangeListener>();
 
         // unregister isn't needed as the lifetime is same as the application.
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+        EventDispatcher.getInstance().registerUiThreadListener(this,
             "LightweightTheme:Update",
             "LightweightTheme:Disable");
 
@@ -181,28 +184,19 @@ public class LightweightTheme implements GeckoEventListener {
     }
 
     @Override
-    public void handleMessage(String event, JSONObject message) {
-        try {
-            if (event.equals("LightweightTheme:Update")) {
-                JSONObject lightweightTheme = message.getJSONObject("data");
-                final String headerURL = lightweightTheme.getString("headerURL");
-                final String color = lightweightTheme.optString("accentcolor");
+    public void handleMessage(String event, GeckoBundle message, EventCallback callback) {
+        if (event.equals("LightweightTheme:Update")) {
+            GeckoBundle lightweightTheme = message.getBundle("data");
+            final String headerURL = lightweightTheme.getString("headerURL");
+            final String color = lightweightTheme.getString("accentcolor", "");
 
-                ThreadUtils.postToBackgroundThread(new LightweightThemeRunnable(headerURL, color));
-            } else if (event.equals("LightweightTheme:Disable")) {
-                // Clear the saved data when a theme is disabled.
-                // Called on the Gecko thread, but should be very lightweight.
-                clearPrefs();
+            ThreadUtils.postToBackgroundThread(new LightweightThemeRunnable(headerURL, color));
 
-                ThreadUtils.postToUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        resetLightweightTheme();
-                    }
-                });
-            }
-        } catch (Exception e) {
-            Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
+        } else if (event.equals("LightweightTheme:Disable")) {
+            // Clear the saved data when a theme is disabled.
+            // Called on the Gecko thread, but should be very lightweight.
+            clearPrefs();
+            resetLightweightTheme();
         }
     }
 
@@ -242,14 +236,14 @@ public class LightweightTheme implements GeckoEventListener {
             mColor = Color.parseColor(color);
         } catch (Exception e) {
             // Malformed or missing color.
-            // Default to TRANSPARENT.
-            mColor = Color.TRANSPARENT;
+            // We attempt calculating an accent colour ourselves, falling back to TRANSPARENT.
+            mColor = BitmapUtils.getDominantColor(bitmap, Color.TRANSPARENT);
         }
 
         // Calculate the luminance to determine if it's a light or a dark theme.
         double luminance = (0.2125 * ((mColor & 0x00FF0000) >> 16)) +
                            (0.7154 * ((mColor & 0x0000FF00) >> 8)) +
-                           (0.0721 * (mColor &0x000000FF));
+                           (0.0721 * (mColor & 0x000000FF));
         mIsLight = luminance > 110;
 
         // The bitmap image might be smaller than the device's width.
@@ -324,6 +318,13 @@ public class LightweightTheme implements GeckoEventListener {
     }
 
     /**
+     * @return The accent color of the theme.
+     */
+    public @ColorInt int getColor() {
+        return mColor;
+    }
+
+    /**
      * Crop the image based on the position of the view on the window.
      * Either the View or one of its ancestors might have scrolled or translated.
      * This value should be taken into account while mapping the View to the Bitmap.
@@ -357,13 +358,8 @@ public class LightweightTheme implements GeckoEventListener {
         ViewParent parent;
         View curView = view;
         do {
-            if (Versions.feature11Plus) {
-                offsetX += (int) curView.getTranslationX() - curView.getScrollX();
-                offsetY += (int) curView.getTranslationY() - curView.getScrollY();
-            } else {
-                offsetX -= curView.getScrollX();
-                offsetY -= curView.getScrollY();
-            }
+            offsetX += (int) curView.getTranslationX() - curView.getScrollX();
+            offsetY += (int) curView.getTranslationY() - curView.getScrollY();
 
             parent = curView.getParent();
 
@@ -371,7 +367,7 @@ public class LightweightTheme implements GeckoEventListener {
                 curView = (View) parent;
             }
 
-        } while(parent instanceof View);
+        } while (parent instanceof View);
 
         // Adjust the coordinates for the offset.
         left -= offsetX;

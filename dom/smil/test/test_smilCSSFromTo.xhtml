@@ -65,14 +65,10 @@ function main()
   // Run the actual tests
   testBundleList(gFromToBundles, new SMILTimingData(1.0, 1.0));
 
-  // Set "display:none" on everything and run the tests again
-  SMILUtil.hideSubtree(SMILUtil.getSVGRoot(), false, false);
-  testBundleList(gFromToBundles, new SMILTimingData(1.0, 1.0));
-
   SimpleTest.finish();
 }
 
-window.addEventListener("load", main, false);
+window.addEventListener("load", main);
 ]]>
 </script>
 </pre>

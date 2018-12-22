@@ -18,7 +18,7 @@
 //    c) Schema 3: the 'creationTime' column already exists; or the
 //       'moz_uniqueid' index already exists.
 
-var COOKIE_DATABASE_SCHEMA_CURRENT = 7;
+var COOKIE_DATABASE_SCHEMA_CURRENT = 9;
 
 var test_generator = do_run_test();
 
@@ -28,13 +28,13 @@ function run_test() {
 }
 
 function finish_test() {
-  do_execute_soon(function() {
-    test_generator.close();
+  executeSoon(function() {
+    test_generator.return();
     do_test_finished();
   });
 }
 
-function do_run_test() {
+function* do_run_test() {
   // Set up a profile.
   this.profile = do_get_profile();
 
@@ -46,8 +46,8 @@ function do_run_test() {
   cookieFile.append("cookies.sqlite");
   this.backupFile = profile.clone();
   backupFile.append("cookies.sqlite.bak");
-  do_check_false(cookieFile.exists());
-  do_check_false(backupFile.exists());
+  Assert.ok(!cookieFile.exists());
+  Assert.ok(!backupFile.exists());
 
   // Create a cookie object for testing.
   this.now = Date.now() * 1000;
@@ -113,8 +113,8 @@ function create_garbage_file(file)
 {
   // Create an empty database file.
   file.create(Ci.nsIFile.NORMAL_FILE_TYPE, -1);
-  do_check_true(file.exists());
-  do_check_eq(file.fileSize, 0);
+  Assert.ok(file.exists());
+  Assert.equal(file.fileSize, 0);
 
   // Write some garbage to it.
   let ostream = Cc["@mozilla.org/network/file-output-stream;1"].
@@ -125,18 +125,18 @@ function create_garbage_file(file)
   ostream.close();
 
   file = file.clone(); // Windows maintains a stat cache. It's lame.
-  do_check_eq(file.fileSize, garbage.length);
+  Assert.equal(file.fileSize, garbage.length);
 }
 
 function check_garbage_file(file)
 {
-  do_check_true(file.exists());
-  do_check_eq(file.fileSize, garbage.length);
+  Assert.ok(file.exists());
+  Assert.equal(file.fileSize, garbage.length);
   file.remove(false);
-  do_check_false(file.exists());
+  Assert.ok(!file.exists());
 }
 
-function run_test_1(generator)
+function* run_test_1(generator)
 {
   // Create a garbage database file.
   create_garbage_file(cookieFile);
@@ -152,7 +152,7 @@ function run_test_1(generator)
 
   // Check that the new database contains the cookie, and the old file was
   // renamed.
-  do_check_eq(do_count_cookies(), 1);
+  Assert.equal(do_count_cookies(), 1);
   check_garbage_file(backupFile);
 
   // Close the profile.
@@ -161,11 +161,11 @@ function run_test_1(generator)
 
   // Clean up.
   cookieFile.remove(false);
-  do_check_false(cookieFile.exists());
+  Assert.ok(!cookieFile.exists());
   do_run_generator(generator);
 }
 
-function run_test_2(generator)
+function* run_test_2(generator)
 {
   // Load the profile and populate it.
   do_load_profile();
@@ -183,8 +183,8 @@ function run_test_2(generator)
 
   // Load the profile and check that the table is recreated in-place.
   do_load_profile();
-  do_check_eq(do_count_cookies(), 0);
-  do_check_false(backupFile.exists());
+  Assert.equal(do_count_cookies(), 0);
+  Assert.ok(!backupFile.exists());
 
   // Close the profile.
   do_close_profile(sub_generator);
@@ -192,11 +192,11 @@ function run_test_2(generator)
 
   // Clean up.
   cookieFile.remove(false);
-  do_check_false(cookieFile.exists());
+  Assert.ok(!cookieFile.exists());
   do_run_generator(generator);
 }
 
-function run_test_3(generator, schema)
+function* run_test_3(generator, schema)
 {
   // Manually create a schema 2 database, populate it, and set the schema
   // version to the desired number.
@@ -207,7 +207,7 @@ function run_test_3(generator, schema)
 
   // Load the profile and check that the column existence test fails.
   do_load_profile();
-  do_check_eq(do_count_cookies(), 0);
+  Assert.equal(do_count_cookies(), 0);
 
   // Close the profile.
   do_close_profile(sub_generator);
@@ -215,16 +215,16 @@ function run_test_3(generator, schema)
 
   // Check that the schema version has been reset.
   let db = Services.storage.openDatabase(cookieFile);
-  do_check_eq(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
+  Assert.equal(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
   db.close();
 
   // Clean up.
   cookieFile.remove(false);
-  do_check_false(cookieFile.exists());
+  Assert.ok(!cookieFile.exists());
   do_run_generator(generator);
 }
 
-function run_test_4_exists(generator, schema, stmt)
+function* run_test_4_exists(generator, schema, stmt)
 {
   // Manually create a database, populate it, and add the desired column.
   let db = new CookieDatabaseConnection(do_get_cookie_file(profile), schema);
@@ -234,7 +234,7 @@ function run_test_4_exists(generator, schema, stmt)
 
   // Load the profile and check that migration fails.
   do_load_profile();
-  do_check_eq(do_count_cookies(), 0);
+  Assert.equal(do_count_cookies(), 0);
 
   // Close the profile.
   do_close_profile(sub_generator);
@@ -242,19 +242,19 @@ function run_test_4_exists(generator, schema, stmt)
 
   // Check that the schema version has been reset and the backup file exists.
   db = Services.storage.openDatabase(cookieFile);
-  do_check_eq(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
+  Assert.equal(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
   db.close();
-  do_check_true(backupFile.exists());
+  Assert.ok(backupFile.exists());
 
   // Clean up.
   cookieFile.remove(false);
   backupFile.remove(false);
-  do_check_false(cookieFile.exists());
-  do_check_false(backupFile.exists());
+  Assert.ok(!cookieFile.exists());
+  Assert.ok(!backupFile.exists());
   do_run_generator(generator);
 }
 
-function run_test_4_baseDomain(generator)
+function* run_test_4_baseDomain(generator)
 {
   // Manually create a database and populate it with a bad host.
   let db = new CookieDatabaseConnection(do_get_cookie_file(profile), 2);
@@ -265,7 +265,7 @@ function run_test_4_baseDomain(generator)
 
   // Load the profile and check that migration fails.
   do_load_profile();
-  do_check_eq(do_count_cookies(), 0);
+  Assert.equal(do_count_cookies(), 0);
 
   // Close the profile.
   do_close_profile(sub_generator);
@@ -273,14 +273,14 @@ function run_test_4_baseDomain(generator)
 
   // Check that the schema version has been reset and the backup file exists.
   db = Services.storage.openDatabase(cookieFile);
-  do_check_eq(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
+  Assert.equal(db.schemaVersion, COOKIE_DATABASE_SCHEMA_CURRENT);
   db.close();
-  do_check_true(backupFile.exists());
+  Assert.ok(backupFile.exists());
 
   // Clean up.
   cookieFile.remove(false);
   backupFile.remove(false);
-  do_check_false(cookieFile.exists());
-  do_check_false(backupFile.exists());
+  Assert.ok(!cookieFile.exists());
+  Assert.ok(!backupFile.exists());
   do_run_generator(generator);
 }

@@ -11,7 +11,6 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
 #include "nsIRedirectResultListener.h"
-#include "nsIPackagedAppChannelListener.h"
 #include "nsINetworkInterceptController.h"
 #include "nsIStreamListener.h"
 
@@ -31,7 +30,6 @@ class HttpChannelParent;
 class HttpChannelParentListener final : public nsIInterfaceRequestor
                                       , public nsIChannelEventSink
                                       , public nsIRedirectResultListener
-                                      , public nsIPackagedAppChannelListener
                                       , public nsIStreamListener
                                       , public nsINetworkInterceptController
 {
@@ -39,7 +37,6 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSICHANNELEVENTSINK
-  NS_DECL_NSIPACKAGEDAPPCHANNELLISTENER
   NS_DECL_NSIREDIRECTRESULTLISTENER
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
@@ -50,18 +47,18 @@ public:
   explicit HttpChannelParentListener(HttpChannelParent* aInitialChannel);
 
   // For channel diversion from child to parent.
-  nsresult DivertTo(nsIStreamListener *aListener);
-  nsresult SuspendForDiversion();
+  MOZ_MUST_USE nsresult DivertTo(nsIStreamListener *aListener);
+  MOZ_MUST_USE nsresult SuspendForDiversion();
 
   void SetupInterception(const nsHttpResponseHead& aResponseHead);
   void SetupInterceptionAfterRedirect(bool aShouldIntercept);
-  void ClearInterceptedChannel();
+  void ClearInterceptedChannel(nsIStreamListener* aListener);
 
 private:
-  virtual ~HttpChannelParentListener();
+  virtual ~HttpChannelParentListener() = default;
 
   // Private partner function to SuspendForDiversion.
-  nsresult ResumeForDiversion();
+  MOZ_MUST_USE nsresult ResumeForDiversion();
 
   // Can be the original HttpChannelParent that created this object (normal
   // case), a different {HTTP|FTP}ChannelParent that we've been redirected to,
@@ -76,11 +73,19 @@ private:
   bool mShouldIntercept;
   // Set if this channel should suspend on interception.
   bool mShouldSuspendIntercept;
+  // Set if the channel interception has been canceled.  Can be set before
+  // interception first occurs.  In this case cancelation is deferred until
+  // the interception takes place.
+  bool mInterceptCanceled;
 
   nsAutoPtr<nsHttpResponseHead> mSynthesizedResponseHead;
 
   // Handle to the channel wrapper if this channel has been intercepted.
   nsCOMPtr<nsIInterceptedChannel> mInterceptedChannel;
+
+  // This will be populated with a real network controller if parent-side
+  // interception is enabled.
+  nsCOMPtr<nsINetworkInterceptController> mInterceptController;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(HttpChannelParentListener,

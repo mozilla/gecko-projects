@@ -46,7 +46,7 @@ using namespace mozilla;
 // Number of seconds in a day.
 #define SECONDS_PER_DAY 86400
 
-static PRLogModuleInfo *sLog = nullptr;
+static LazyLogModule sLog("idleService");
 
 #define LOG_TAG "GeckoIdleService"
 #define LOG_LEVEL ANDROID_LOG_DEBUG
@@ -143,17 +143,18 @@ nsIdleServiceDaily::Observe(nsISupports *,
          ("nsIdleServiceDaily: Restarting daily timer"));
 
   // Start timer for the next check in one day.
-  (void)mTimer->InitWithFuncCallback(DailyCallback,
-                                     this,
-                                     SECONDS_PER_DAY * PR_MSEC_PER_SEC,
-                                     nsITimer::TYPE_ONE_SHOT);
+  (void)mTimer->InitWithNamedFuncCallback(DailyCallback,
+                                          this,
+                                          SECONDS_PER_DAY * PR_MSEC_PER_SEC,
+                                          nsITimer::TYPE_ONE_SHOT,
+                                          "nsIdleServiceDaily::Observe");
 
   return NS_OK;
 }
 
 nsIdleServiceDaily::nsIdleServiceDaily(nsIIdleService* aIdleService)
   : mIdleService(aIdleService)
-  , mTimer(do_CreateInstance(NS_TIMER_CONTRACTID))
+  , mTimer(NS_NewTimer())
   , mCategoryObservers(OBSERVER_TOPIC_IDLE_DAILY)
   , mShutdownInProgress(false)
   , mExpectedTriggerTime(0)
@@ -218,10 +219,11 @@ nsIdleServiceDaily::Init()
     mExpectedTriggerTime  = PR_Now() +
       (milliSecLeftUntilDaily * PR_USEC_PER_MSEC);
 
-    (void)mTimer->InitWithFuncCallback(DailyCallback,
-                                       this,
-                                       milliSecLeftUntilDaily,
-                                       nsITimer::TYPE_ONE_SHOT);
+    (void)mTimer->InitWithNamedFuncCallback(DailyCallback,
+                                            this,
+                                            milliSecLeftUntilDaily,
+                                            nsITimer::TYPE_ONE_SHOT,
+                                            "nsIdleServiceDaily::Init");
   }
 
   // Register for when we should terminate/pause
@@ -284,18 +286,20 @@ nsIdleServiceDaily::DailyCallback(nsITimer* aTimer, void* aClosure)
     // Add 10 ms to ensure we don't undershoot, and never get a "0" timer.
     delayTime += 10 * PR_USEC_PER_MSEC;
 
-    MOZ_LOG(sLog, LogLevel::Debug, ("nsIdleServiceDaily: DailyCallback resetting timer to %lld msec",
+    MOZ_LOG(sLog, LogLevel::Debug, ("nsIdleServiceDaily: DailyCallback resetting timer to %" PRId64 " msec",
                         delayTime / PR_USEC_PER_MSEC));
 #ifdef MOZ_WIDGET_ANDROID
     __android_log_print(LOG_LEVEL, LOG_TAG,
-                        "DailyCallback resetting timer to %lld msec",
+                        "DailyCallback resetting timer to %" PRId64 " msec",
                         delayTime / PR_USEC_PER_MSEC);
 #endif
 
-    (void)self->mTimer->InitWithFuncCallback(DailyCallback,
-                                             self,
-                                             delayTime / PR_USEC_PER_MSEC,
-                                             nsITimer::TYPE_ONE_SHOT);
+    (void)self->mTimer->InitWithNamedFuncCallback(
+      DailyCallback,
+      self,
+      delayTime / PR_USEC_PER_MSEC,
+      nsITimer::TYPE_ONE_SHOT,
+      "nsIdleServiceDaily::DailyCallback");
     return;
   }
 
@@ -394,8 +398,6 @@ nsIdleService::nsIdleService() : mCurrentlySetToTimeoutAt(TimeStamp()),
                                  mDeltaToNextIdleSwitchInS(UINT32_MAX),
                                  mLastUserInteraction(TimeStamp::Now())
 {
-  if (sLog == nullptr)
-    sLog = PR_NewLogModule("idleService");
   MOZ_ASSERT(!gIdleService);
   gIdleService = this;
   if (XRE_IsParentProcess()) {
@@ -449,9 +451,8 @@ nsIdleService::AddIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS)
 
   // Create our timer callback if it's not there already.
   if (!mTimer) {
-    nsresult rv;
-    mTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mTimer = NS_NewTimer();
+    NS_ENSURE_TRUE(mTimer, NS_ERROR_OUT_OF_MEMORY);
   }
 
   // Check if the newly added observer has a smaller wait time than what we
@@ -543,7 +544,6 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
   }
 
   // Mark all idle services as non-idle, and calculate the next idle timeout.
-  Telemetry::AutoTimer<Telemetry::IDLE_NOTIFY_BACK_MS> timer;
   nsCOMArray<nsIObserver> notifyList;
   mDeltaToNextIdleSwitchInS = UINT32_MAX;
 
@@ -569,8 +569,6 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
   ReconfigureTimer();
 
   int32_t numberOfPendingNotifications = notifyList.Count();
-  Telemetry::Accumulate(Telemetry::IDLE_NOTIFY_BACK_LISTENERS,
-                        numberOfPendingNotifications);
 
   // Bail if nothing to do.
   if (!numberOfPendingNotifications) {
@@ -755,8 +753,6 @@ nsIdleService::IdleTimerCallback(void)
   ReconfigureTimer();
 
   int32_t numberOfPendingNotifications = notifyList.Count();
-  Telemetry::Accumulate(Telemetry::IDLE_NOTIFY_IDLE_LISTENERS,
-                        numberOfPendingNotifications);
 
   // Bail if nothing to do.
   if (!numberOfPendingNotifications) {
@@ -835,11 +831,11 @@ nsIdleService::SetTimerExpiryIfBefore(TimeStamp aNextTimeout)
 #endif
 
     // Start the timer
-    mTimer->InitWithFuncCallback(StaticIdleTimerCallback,
-                                 this,
-                                 deltaTime.ToMilliseconds(),
-                                 nsITimer::TYPE_ONE_SHOT);
-
+    mTimer->InitWithNamedFuncCallback(StaticIdleTimerCallback,
+                                      this,
+                                      deltaTime.ToMilliseconds(),
+                                      nsITimer::TYPE_ONE_SHOT,
+                                      "nsIdleService::SetTimerExpiryIfBefore");
   }
 }
 

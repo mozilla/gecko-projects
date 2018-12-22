@@ -29,7 +29,7 @@ namespace _ipdltest {
 
 //-----------------------------------------------------------------------------
 // both processes
-const char* const IPDLUnitTestName();
+const char* IPDLUnitTestName();
 
 // NB: these are named like the similar functions in
 // xpcom/test/TestHarness.h.  The names should nominally be kept in
@@ -47,7 +47,7 @@ inline void fail(const char* fmt, ...)
 
   fputc('\n', stderr);
 
-  NS_RUNTIMEABORT("failed test");
+  MOZ_CRASH("failed test");
 }
 
 inline void passed(const char* fmt, ...)

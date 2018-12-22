@@ -9,10 +9,13 @@
 #include "mozilla/DebugOnly.h"
 
 #include "ipc/IPCMessageUtils.h"
-#include "nsStringGlue.h"
+#include "nsExceptionHandler.h"
+#include "nsPrintfCString.h"
+#include "nsString.h"
 #include "prio.h"
 #include "mozilla/net/DNS.h"
 #include "TimingStruct.h"
+
 
 namespace IPC {
 
@@ -24,7 +27,12 @@ struct Permission
   uint32_t capability, expireType;
   int64_t expireTime;
 
-  Permission() { }
+  Permission()
+    : capability(0)
+    , expireType(0)
+    , expireTime(0)
+  {}
+  
   Permission(const nsCString& aOrigin,
              const nsCString& aType,
              const uint32_t aCapability,
@@ -49,7 +57,7 @@ struct ParamTraits<Permission>
     WriteParam(aMsg, aParam.expireTime);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, Permission* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, Permission* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->origin) &&
            ReadParam(aMsg, aIter, &aResult->type) &&
@@ -92,28 +100,27 @@ struct ParamTraits<mozilla::net::NetAddr>
 #if defined(XP_UNIX)
     } else if (aParam.raw.family == AF_LOCAL) {
       // Train's already off the rails:  let's get a stack trace at least...
-      NS_RUNTIMEABORT("Error: please post stack trace to "
+      MOZ_CRASH("Error: please post stack trace to "
                       "https://bugzilla.mozilla.org/show_bug.cgi?id=661158");
       aMsg->WriteBytes(aParam.local.path, sizeof(aParam.local.path));
 #endif
-    }
+    } else {
+      if (XRE_IsParentProcess()) {
+        nsPrintfCString msg("%d", aParam.raw.family);
+        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Unknown NetAddr socket family"), msg);
+      }
 
-    /* If we get here without hitting any of the cases above, there's not much
-     * we can do but let the deserializer fail when it gets this message */
+      MOZ_CRASH("Unknown socket family");
+    }
   }
 
-  static bool Read(const Message* aMsg, void** aIter, mozilla::net::NetAddr* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, mozilla::net::NetAddr* aResult)
   {
     if (!ReadParam(aMsg, aIter, &aResult->raw.family))
       return false;
 
     if (aResult->raw.family == AF_UNSPEC) {
-      const char *tmp;
-      if (aMsg->ReadBytes(aIter, &tmp, sizeof(aResult->raw.data))) {
-        memcpy(&(aResult->raw.data), tmp, sizeof(aResult->raw.data));
-        return true;
-      }
-      return false;
+      return aMsg->ReadBytesInto(aIter, &aResult->raw.data, sizeof(aResult->raw.data));
     } else if (aResult->raw.family == AF_INET) {
       return ReadParam(aMsg, aIter, &aResult->inet.port) &&
              ReadParam(aMsg, aIter, &aResult->inet.ip);
@@ -125,12 +132,7 @@ struct ParamTraits<mozilla::net::NetAddr>
              ReadParam(aMsg, aIter, &aResult->inet6.scope_id);
 #if defined(XP_UNIX)
     } else if (aResult->raw.family == AF_LOCAL) {
-      const char *tmp;
-      if (aMsg->ReadBytes(aIter, &tmp, sizeof(aResult->local.path))) {
-        memcpy(&(aResult->local.path), tmp, sizeof(aResult->local.path));
-        return true;
-      }
-      return false;
+      return aMsg->ReadBytesInto(aIter, &aResult->local.path, sizeof(aResult->local.path));
 #endif
     }
 
@@ -147,6 +149,8 @@ struct ParamTraits<mozilla::net::ResourceTimingStruct>
     WriteParam(aMsg, aParam.domainLookupStart);
     WriteParam(aMsg, aParam.domainLookupEnd);
     WriteParam(aMsg, aParam.connectStart);
+    WriteParam(aMsg, aParam.tcpConnectEnd);
+    WriteParam(aMsg, aParam.secureConnectionStart);
     WriteParam(aMsg, aParam.connectEnd);
     WriteParam(aMsg, aParam.requestStart);
     WriteParam(aMsg, aParam.responseStart);
@@ -164,11 +168,13 @@ struct ParamTraits<mozilla::net::ResourceTimingStruct>
     WriteParam(aMsg, aParam.cacheReadEnd);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, mozilla::net::ResourceTimingStruct* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, mozilla::net::ResourceTimingStruct* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->domainLookupStart) &&
            ReadParam(aMsg, aIter, &aResult->domainLookupEnd) &&
            ReadParam(aMsg, aIter, &aResult->connectStart) &&
+           ReadParam(aMsg, aIter, &aResult->tcpConnectEnd) &&
+           ReadParam(aMsg, aIter, &aResult->secureConnectionStart) &&
            ReadParam(aMsg, aIter, &aResult->connectEnd) &&
            ReadParam(aMsg, aIter, &aResult->requestStart) &&
            ReadParam(aMsg, aIter, &aResult->responseStart) &&

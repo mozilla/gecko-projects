@@ -6,11 +6,10 @@
 
 #include "mozilla/dom/HTMLBRElement.h"
 #include "mozilla/dom/HTMLBRElementBinding.h"
-
+#include "mozilla/MappedDeclarations.h"
 #include "nsAttrValueInlines.h"
 #include "nsStyleConsts.h"
 #include "nsMappedAttributes.h"
-#include "nsRuleData.h"
 
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(BR)
@@ -30,17 +29,18 @@ HTMLBRElement::~HTMLBRElement()
 NS_IMPL_ELEMENT_CLONE(HTMLBRElement)
 
 static const nsAttrValue::EnumTable kClearTable[] = {
-  { "left", NS_STYLE_CLEAR_LEFT },
-  { "right", NS_STYLE_CLEAR_RIGHT },
-  { "all", NS_STYLE_CLEAR_BOTH },
-  { "both", NS_STYLE_CLEAR_BOTH },
-  { 0 }
+  { "left", StyleClear::Left },
+  { "right", StyleClear::Right },
+  { "all", StyleClear::Both },
+  { "both", StyleClear::Both },
+  { nullptr, 0 }
 };
 
 bool
 HTMLBRElement::ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
+                              nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult)
 {
   if (aAttribute == nsGkAtoms::clear && aNamespaceID == kNameSpaceID_None) {
@@ -48,27 +48,23 @@ HTMLBRElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLBRElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                     nsRuleData* aData)
+                                     MappedDeclarations& aDecls)
 {
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
-    nsCSSValue* clear = aData->ValueForClear();
-    if (clear->GetUnit() == eCSSUnit_Null) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::clear);
-      if (value && value->Type() == nsAttrValue::eEnum)
-        clear->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
-    }
+  if (!aDecls.PropertyIsSet(eCSSProperty_clear)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::clear);
+    if (value && value->Type() == nsAttrValue::eEnum)
+      aDecls.SetKeywordValue(eCSSProperty_clear, value->GetEnumValue());
   }
-
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLBRElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLBRElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
     { &nsGkAtoms::clear },
@@ -92,7 +88,7 @@ HTMLBRElement::GetAttributeMappingFunction() const
 JSObject*
 HTMLBRElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLBRElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLBRElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

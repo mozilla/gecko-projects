@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -15,12 +15,25 @@
 #include "Units.h"
 
 struct nsRect;
+class gfxContext;
+class nsAttrValue;
 class nsPresContext;
-class nsRenderingContext;
 class nsDeviceContext;
 class nsIFrame;
-class nsIAtom;
+class nsAtom;
 class nsIWidget;
+
+namespace mozilla {
+class ComputedStyle;
+namespace layers {
+class StackingContextHelper;
+class WebRenderLayerManager;
+}
+namespace wr {
+class DisplayListBuilder;
+class IpcResourceUpdateQueue;
+}
+}
 
 // IID for the nsITheme interface
 // {7329f760-08cb-450f-8225-dae729096dec}
@@ -43,6 +56,9 @@ class nsIWidget;
  * the constants in nsThemeConstants.h).
  */
 class nsITheme: public nsISupports {
+protected:
+  using LayoutDeviceIntMargin = mozilla::LayoutDeviceIntMargin;
+
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ITHEME_IID)
 
@@ -54,19 +70,40 @@ public:
    * @param aRect the rectangle defining the area occupied by the widget
    * @param aDirtyRect the rectangle that needs to be drawn
    */
-  NS_IMETHOD DrawWidgetBackground(nsRenderingContext* aContext,
+  NS_IMETHOD DrawWidgetBackground(gfxContext* aContext,
                                   nsIFrame* aFrame,
                                   uint8_t aWidgetType,
                                   const nsRect& aRect,
                                   const nsRect& aDirtyRect) = 0;
 
   /**
-   * Get the computed CSS border for the widget, in pixels.
+   * Get the used color of the given widget when it's specified as auto.
+   * It's currently only used for scrollbar-*-color properties.
    */
-  NS_IMETHOD GetWidgetBorder(nsDeviceContext* aContext, 
-                             nsIFrame* aFrame,
-                             uint8_t aWidgetType,
-                             nsIntMargin* aResult)=0;
+  virtual nscolor GetWidgetAutoColor(mozilla::ComputedStyle* aStyle,
+                                     uint8_t aWidgetType)
+  { return NS_RGB(0, 0, 0); }
+
+  /**
+   * Create WebRender commands for the theme background.
+   * @return true if the theme knows how to create WebRender commands for the
+   *         given widget type, false if DrawWidgetBackground need sto be called
+   *         instead.
+   */
+  virtual bool CreateWebRenderCommandsForWidget(mozilla::wr::DisplayListBuilder& aBuilder,
+                                                mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                                const mozilla::layers::StackingContextHelper& aSc,
+                                                mozilla::layers::WebRenderLayerManager* aManager,
+                                                nsIFrame* aFrame,
+                                                uint8_t aWidgetType,
+                                                const nsRect& aRect) { return false; }
+
+  /**
+   * Return the border for the widget, in device pixels.
+   */
+  virtual MOZ_MUST_USE LayoutDeviceIntMargin GetWidgetBorder(nsDeviceContext* aContext,
+                                                             nsIFrame* aFrame,
+                                                             uint8_t aWidgetType) = 0;
 
   /**
    * This method can return false to indicate that the CSS padding
@@ -80,7 +117,7 @@ public:
   virtual bool GetWidgetPadding(nsDeviceContext* aContext,
                                   nsIFrame* aFrame,
                                   uint8_t aWidgetType,
-                                  nsIntMargin* aResult) = 0;
+                                  LayoutDeviceIntMargin* aResult) = 0;
 
   /**
    * On entry, *aResult is positioned at 0,0 and sized to the new size
@@ -127,8 +164,14 @@ public:
   virtual Transparency GetWidgetTransparency(nsIFrame* aFrame, uint8_t aWidgetType)
   { return eUnknownTransparency; }
 
+  /**
+   * Sets |*aShouldRepaint| to indicate whether an attribute or content state
+   * change should trigger a repaint.  Call with null |aAttribute| (and
+   * null |aOldValue|) for content state changes.
+   */
   NS_IMETHOD WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType, 
-                                nsIAtom* aAttribute, bool* aShouldRepaint)=0;
+                                nsAtom* aAttribute, bool* aShouldRepaint,
+                                const nsAttrValue* aOldValue)=0;
 
   NS_IMETHOD ThemeChanged()=0;
 
@@ -137,10 +180,6 @@ public:
 
   virtual bool NeedToClearBackgroundBehindWidget(nsIFrame* aFrame,
                                                  uint8_t aWidgetType)
-  { return false; }
-
-  virtual bool WidgetProvidesFontSmoothingBackgroundColor(nsIFrame* aFrame,
-                                      uint8_t aWidgetType, nscolor* aColor)
   { return false; }
 
   /**
@@ -188,12 +227,6 @@ public:
     * Should we insert a dropmarker inside of combobox button?
    */
   virtual bool ThemeNeedsComboboxDropmarker()=0;
-
-  /**
-   * Should we hide scrollbars?
-   */
-  virtual bool ShouldHideScrollbars()
-  { return false; }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsITheme, NS_ITHEME_IID)

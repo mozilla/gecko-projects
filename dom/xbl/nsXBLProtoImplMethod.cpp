@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsString.h"
 #include "jsapi.h"
 #include "nsIContent.h"
@@ -44,8 +44,8 @@ nsXBLProtoImplMethod::~nsXBLProtoImplMethod()
 void
 nsXBLProtoImplMethod::AppendBodyText(const nsAString& aText)
 {
-  NS_PRECONDITION(!IsCompiled(),
-                  "Must not be compiled when accessing uncompiled method");
+  MOZ_ASSERT(!IsCompiled(),
+             "Must not be compiled when accessing uncompiled method");
 
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
@@ -59,8 +59,8 @@ nsXBLProtoImplMethod::AppendBodyText(const nsAString& aText)
 void
 nsXBLProtoImplMethod::AddParameter(const nsAString& aText)
 {
-  NS_PRECONDITION(!IsCompiled(),
-                  "Must not be compiled when accessing uncompiled method");
+  MOZ_ASSERT(!IsCompiled(),
+             "Must not be compiled when accessing uncompiled method");
 
   if (aText.IsEmpty()) {
     NS_WARNING("Empty name attribute in xbl:parameter!");
@@ -79,8 +79,8 @@ nsXBLProtoImplMethod::AddParameter(const nsAString& aText)
 void
 nsXBLProtoImplMethod::SetLineNumber(uint32_t aLineNumber)
 {
-  NS_PRECONDITION(!IsCompiled(),
-                  "Must not be compiled when accessing uncompiled method");
+  MOZ_ASSERT(!IsCompiled(),
+             "Must not be compiled when accessing uncompiled method");
 
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
   if (!uncompiledMethod) {
@@ -95,7 +95,7 @@ nsresult
 nsXBLProtoImplMethod::InstallMember(JSContext* aCx,
                                     JS::Handle<JSObject*> aTargetClassObject)
 {
-  NS_PRECONDITION(IsCompiled(),
+  MOZ_ASSERT(IsCompiled(),
                   "Should not be installing an uncompiled method");
   MOZ_ASSERT(js::IsObjectInContextCompartment(aTargetClassObject, aCx));
 
@@ -103,7 +103,6 @@ nsXBLProtoImplMethod::InstallMember(JSContext* aCx,
   {
     JS::Rooted<JSObject*> globalObject(aCx, JS_GetGlobalForObject(aCx, aTargetClassObject));
     MOZ_ASSERT(xpc::IsInContentXBLScope(globalObject) ||
-               xpc::IsInAddonScope(globalObject) ||
                globalObject == xpc::GetXBLScope(aCx, globalObject));
     MOZ_ASSERT(JS::CurrentGlobalOrNull(aCx) == globalObject);
   }
@@ -131,9 +130,9 @@ nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsString& aClassStr,
                                     JS::Handle<JSObject*> aClassObject)
 {
   AssertInCompilationScope();
-  NS_PRECONDITION(!IsCompiled(),
+  MOZ_ASSERT(!IsCompiled(),
                   "Trying to compile an already-compiled method");
-  NS_PRECONDITION(aClassObject,
+  MOZ_ASSERT(aClassObject,
                   "Must have class object to compile");
 
   nsXBLUncompiledMethod* uncompiledMethod = GetUncompiledMethod();
@@ -189,11 +188,10 @@ nsXBLProtoImplMethod::CompileMember(AutoJSAPI& jsapi, const nsString& aClassStr,
   }
 
   JSContext *cx = jsapi.cx();
-  JSAutoCompartment ac(cx, aClassObject);
+  JSAutoRealm ar(cx, aClassObject);
   JS::CompileOptions options(cx);
   options.setFileAndLine(functionUri.get(),
-                         uncompiledMethod->mBodyText.GetLineNumber())
-         .setVersion(JSVERSION_LATEST);
+                         uncompiledMethod->mBodyText.GetLineNumber());
   JS::Rooted<JSObject*> methodObject(cx);
   JS::AutoObjectVector emptyVector(cx);
   nsresult rv = nsJSUtils::CompileFunction(jsapi, emptyVector, options, cname,
@@ -253,11 +251,7 @@ nsXBLProtoImplMethod::Write(nsIObjectOutputStream* aStream)
     rv = aStream->WriteWStringZ(mName);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Calling fromMarkedLocation() is safe because mMethod is traced by the
-    // Trace() method above, and because its value is never changed after it has
-    // been set to a compiled method.
-    JS::Handle<JSObject*> method =
-      JS::Handle<JSObject*>::fromMarkedLocation(mMethod.AsHeapObject().address());
+    JS::Rooted<JSObject*> method(RootingCx(), GetCompiledMethod());
     return XBL_SerializeFunction(aStream, method);
   }
 
@@ -265,10 +259,11 @@ nsXBLProtoImplMethod::Write(nsIObjectOutputStream* aStream)
 }
 
 nsresult
-nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAddonId)
+nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement,
+                                       const nsXBLPrototypeBinding& aProtoBinding)
 {
   MOZ_ASSERT(aBoundElement->IsElement());
-  NS_PRECONDITION(IsCompiled(), "Can't execute uncompiled method");
+  MOZ_ASSERT(IsCompiled(), "Can't execute uncompiled method");
 
   if (!GetCompiledMethod()) {
     // Nothing to do here
@@ -289,18 +284,26 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAd
 
   // We are going to run script via JS::Call, so we need a script entry point,
   // but as this is XBL related it does not appear in the HTML spec.
-  dom::AutoEntryScript aes(global, "XBL <constructor>/<destructor> invocation");
-  JSContext* cx = aes.cx();
+  // We need an actual JSContext to do GetXBLScopeOrGlobal, and it needs to
+  // be in the compartment of globalObject.  But we want our XBL execution scope
+  // to be our entry global.
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(global)) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
-  JS::Rooted<JSObject*> globalObject(cx, global->GetGlobalJSObject());
-
-  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetScopeForXBLExecution(cx, globalObject, aAddonId));
+  JS::Rooted<JSObject*> scopeObject(jsapi.cx(),
+    xpc::GetXBLScopeOrGlobal(jsapi.cx(), global->GetGlobalJSObject()));
   NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
 
-  JSAutoCompartment ac(cx, scopeObject);
+  dom::AutoEntryScript aes(scopeObject,
+                           "XBL <constructor>/<destructor> invocation",
+                           true);
+  JSContext* cx = aes.cx();
   JS::AutoObjectVector scopeChain(cx);
-  if (!nsJSUtils::GetScopeChainForElement(cx, aBoundElement->AsElement(),
-                                          scopeChain)) {
+  if (!nsJSUtils::GetScopeChainForXBL(cx, aBoundElement->AsElement(),
+                                      aProtoBinding,
+                                      scopeChain)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   MOZ_ASSERT(scopeChain.length() != 0);
@@ -316,8 +319,7 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement, JSAddonId* aAd
   // Now call the method
 
   // Check whether script is enabled.
-  bool scriptAllowed = nsContentUtils::GetSecurityManager()->
-                         ScriptAllowed(js::GetGlobalForObjectCrossCompartment(method));
+  bool scriptAllowed = xpc::Scriptability::Get(method).Allowed();
 
   if (scriptAllowed) {
     JS::Rooted<JS::Value> retval(cx);
@@ -343,11 +345,7 @@ nsXBLProtoImplAnonymousMethod::Write(nsIObjectOutputStream* aStream,
     rv = aStream->WriteWStringZ(mName);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Calling fromMarkedLocation() is safe because mMethod is traced by the
-    // Trace() method above, and because its value is never changed after it has
-    // been set to a compiled method.
-    JS::Handle<JSObject*> method =
-      JS::Handle<JSObject*>::fromMarkedLocation(mMethod.AsHeapObject().address());
+    JS::Rooted<JSObject*> method(RootingCx(), GetCompiledMethod());
     rv = XBL_SerializeFunction(aStream, method);
     NS_ENSURE_SUCCESS(rv, rv);
   }

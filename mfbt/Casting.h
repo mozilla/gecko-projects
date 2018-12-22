@@ -12,31 +12,61 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/TypeTraits.h"
 
+#include <cstring>
 #include <limits.h>
+#include <type_traits>
 
 namespace mozilla {
 
 /**
- * Return a value of type |To|, containing the underlying bit pattern of
+ * Sets the outparam value of type |To| with the same underlying bit pattern of
  * |aFrom|.
  *
  * |To| and |From| must be types of the same size; be careful of cross-platform
  * size differences, or this might fail to compile on some but not all
  * platforms.
+ *
+ * There is also a variant that returns the value directly.  In most cases, the
+ * two variants should be identical.  However, in the specific case of x86
+ * chips, the behavior differs: returning floating-point values directly is done
+ * through the x87 stack, and x87 loads and stores turn signaling NaNs into
+ * quiet NaNs... silently.  Returning floating-point values via outparam,
+ * however, is done entirely within the SSE registers when SSE2 floating-point
+ * is enabled in the compiler, which has semantics-preserving behavior you would
+ * expect.
+ *
+ * If preserving the distinction between signaling NaNs and quiet NaNs is
+ * important to you, you should use the outparam version.  In all other cases,
+ * you should use the direct return version.
  */
+template<typename To, typename From>
+inline void
+BitwiseCast(const From aFrom, To* aResult)
+{
+  static_assert(sizeof(From) == sizeof(To),
+                "To and From must have the same size");
+
+  // We could maybe downgrade these to std::is_trivially_copyable, but the
+  // various STLs we use don't all provide it.
+  static_assert(std::is_trivial<From>::value,
+                "shouldn't bitwise-copy a type having non-trivial "
+                "initialization");
+  static_assert(std::is_trivial<To>::value,
+                "shouldn't bitwise-copy a type having non-trivial "
+                "initialization");
+
+  std::memcpy(static_cast<void*>(aResult),
+              static_cast<const void*>(&aFrom),
+              sizeof(From));
+}
+
 template<typename To, typename From>
 inline To
 BitwiseCast(const From aFrom)
 {
-  static_assert(sizeof(From) == sizeof(To),
-                "To and From must have the same size");
-  union
-  {
-    From mFrom;
-    To mTo;
-  } u;
-  u.mFrom = aFrom;
-  return u.mTo;
+  To temp;
+  BitwiseCast<To, From>(aFrom, &temp);
+  return temp;
 }
 
 namespace detail {
@@ -213,6 +243,19 @@ inline To
 AssertedCast(const From aFrom)
 {
   MOZ_ASSERT((detail::IsInBounds<From, To>(aFrom)));
+  return static_cast<To>(aFrom);
+}
+
+/**
+ * Cast a value of integral type |From| to a value of integral type |To|,
+ * release asserting that the cast will be a safe cast per C++ (that is, that
+ * |to| is in the range of values permitted for the type |From|).
+ */
+template<typename To, typename From>
+inline To
+ReleaseAssertedCast(const From aFrom)
+{
+  MOZ_RELEASE_ASSERT((detail::IsInBounds<From, To>(aFrom)));
   return static_cast<To>(aFrom);
 }
 

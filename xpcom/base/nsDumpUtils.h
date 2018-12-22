@@ -89,9 +89,8 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 
-    XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &FdWatcher::StopWatching));
+    XRE_GetIOMessageLoop()->PostTask(mozilla::NewRunnableMethod(
+      "FdWatcher::StopWatching", this, &FdWatcher::StopWatching));
 
     return NS_OK;
   }
@@ -121,9 +120,9 @@ public:
 
   virtual ~FifoWatcher();
 
-  virtual int OpenFd();
+  virtual int OpenFd() override;
 
-  virtual void OnFileCanReadWithoutBlocking(int aFd);
+  virtual void OnFileCanReadWithoutBlocking(int aFd) override;
 
 private:
   nsAutoCString mDirPath;
@@ -159,11 +158,11 @@ public:
 
   virtual ~SignalPipeWatcher();
 
-  virtual int OpenFd();
+  virtual int OpenFd() override;
 
-  virtual void StopWatching();
+  virtual void StopWatching() override;
 
-  virtual void OnFileCanReadWithoutBlocking(int aFd);
+  virtual void OnFileCanReadWithoutBlocking(int aFd) override;
 
 private:
   static mozilla::StaticRefPtr<SignalPipeWatcher> sSingleton;

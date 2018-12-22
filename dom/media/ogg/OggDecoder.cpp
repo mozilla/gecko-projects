@@ -4,15 +4,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MediaDecoderStateMachine.h"
-#include "OggReader.h"
 #include "OggDecoder.h"
+#include "MediaContainerType.h"
+#include "MediaDecoder.h"
+#include "nsMimeTypes.h"
+#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
 
-MediaDecoderStateMachine* OggDecoder::CreateStateMachine()
+/* static */
+bool
+OggDecoder::IsSupportedType(const MediaContainerType& aContainerType)
 {
-  return new MediaDecoderStateMachine(this, new OggReader(this));
+  if (!StaticPrefs::MediaOggEnabled()) {
+    return false;
+  }
+
+  if (aContainerType.Type() != MEDIAMIMETYPE(AUDIO_OGG) &&
+      aContainerType.Type() != MEDIAMIMETYPE(VIDEO_OGG) &&
+      aContainerType.Type() != MEDIAMIMETYPE("application/ogg")) {
+    return false;
+  }
+
+  const bool isOggVideo = (aContainerType.Type() != MEDIAMIMETYPE(AUDIO_OGG));
+
+  const MediaCodecs& codecs = aContainerType.ExtendedType().Codecs();
+  if (codecs.IsEmpty()) {
+    // WebM guarantees that the only codecs it contained are vp8, vp9, opus or vorbis.
+    return true;
+  }
+  // Verify that all the codecs specified are ones that we expect that
+  // we can play.
+  for (const auto& codec : codecs.Range()) {
+    if ((MediaDecoder::IsOpusEnabled() && codec.EqualsLiteral("opus")) ||
+        codec.EqualsLiteral("vorbis") ||
+        (StaticPrefs::MediaOggFlacEnabled() &&
+         codec.EqualsLiteral("flac"))) {
+      continue;
+    }
+    // Note: Only accept Theora in a video container type, not in an audio
+    // container type.
+    if (isOggVideo && codec.EqualsLiteral("theora")) {
+      continue;
+    }
+    // Some unsupported codec.
+    return false;
+  }
+  return true;
 }
 
 } // namespace mozilla

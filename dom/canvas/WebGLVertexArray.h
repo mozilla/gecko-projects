@@ -10,7 +10,7 @@
 #include "mozilla/LinkedList.h"
 #include "nsWrapperCache.h"
 
-#include "WebGLBuffer.h"
+#include "CacheMap.h"
 #include "WebGLObjectModel.h"
 #include "WebGLStrongTypes.h"
 #include "WebGLVertexAttribData.h"
@@ -18,12 +18,15 @@
 namespace mozilla {
 
 class WebGLVertexArrayFake;
+namespace webgl {
+struct LinkedProgramInfo;
+}
 
 class WebGLVertexArray
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLVertexArray>
     , public LinkedListElement<WebGLVertexArray>
-    , public WebGLContextBoundObject
+    , public CacheMapInvalidator
 {
 public:
     static WebGLVertexArray* Create(WebGLContext* webgl);
@@ -34,17 +37,9 @@ public:
         BindVertexArrayImpl();
     };
 
-    void EnsureAttrib(GLuint index);
-    bool HasAttrib(GLuint index) const {
-        return index < mAttribs.Length();
-    }
-    bool IsAttribArrayEnabled(GLuint index) const {
-        return HasAttrib(index) && mAttribs[index].enabled;
-    }
-
     // Implement parent classes:
     void Delete();
-    bool IsVertexArray();
+    bool IsVertexArray() const;
 
     WebGLContext* GetParentObject() const {
         return mContext;
@@ -57,25 +52,26 @@ public:
 
     GLuint GLName() const { return mGLName; }
 
+    void AddBufferBindCounts(int8_t addVal) const;
+
 protected:
     explicit WebGLVertexArray(WebGLContext* webgl);
-
-    virtual ~WebGLVertexArray() {
-        MOZ_ASSERT(IsDeleted());
-    }
+    virtual ~WebGLVertexArray();
 
     virtual void GenVertexArray() = 0;
     virtual void BindVertexArrayImpl() = 0;
     virtual void DeleteImpl() = 0;
-    virtual bool IsVertexArrayImpl() = 0;
+    virtual bool IsVertexArrayImpl() const = 0;
 
     GLuint mGLName;
     nsTArray<WebGLVertexAttribData> mAttribs;
     WebGLRefPtr<WebGLBuffer> mElementArrayBuffer;
 
+    friend class ScopedDrawHelper;
     friend class WebGLContext;
     friend class WebGLVertexArrayFake;
     friend class WebGL2Context;
+    friend struct webgl::LinkedProgramInfo;
 };
 
 } // namespace mozilla

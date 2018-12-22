@@ -19,12 +19,15 @@
 #include "nsConsoleMessage.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIConsoleListener.h"
+#include "nsIObserverService.h"
 #include "nsPrintfCString.h"
 #include "nsProxyRelease.h"
 #include "nsIScriptError.h"
 #include "nsISupportsPrimitives.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
+#include "mozilla/SystemGroup.h"
 
 #if defined(ANDROID)
 #include <android/log.h>
@@ -49,10 +52,13 @@ NS_IMPL_CLASSINFO(nsConsoleService, nullptr,
 NS_IMPL_QUERY_INTERFACE_CI(nsConsoleService, nsIConsoleService, nsIObserver)
 NS_IMPL_CI_INTERFACE_GETTER(nsConsoleService, nsIConsoleService, nsIObserver)
 
-static bool sLoggingEnabled = true;
-static bool sLoggingBuffered = true;
+static const bool gLoggingEnabled = true;
+static const bool gLoggingBuffered = true;
+#ifdef XP_WIN
+static bool gLoggingToDebugger = true;
+#endif // XP_WIN
 #if defined(ANDROID)
-static bool sLoggingLogcat = true;
+static bool gLoggingLogcat = false;
 #endif // defined(ANDROID)
 
 nsConsoleService::MessageElement::~MessageElement()
@@ -68,6 +74,18 @@ nsConsoleService::nsConsoleService()
   // hm, but worry about circularity, bc we want to be able to report
   // prefs errs...
   mMaximumSize = 250;
+
+#ifdef XP_WIN
+  // This environment variable controls whether the console service
+  // should be prevented from putting output to the attached debugger.
+  // It only affects the Windows platform.
+  //
+  // To disable OutputDebugString, set:
+  //   MOZ_CONSOLESERVICE_DISABLE_DEBUGGER_OUTPUT=1
+  //
+  const char* disableDebugLoggingVar = getenv("MOZ_CONSOLESERVICE_DISABLE_DEBUGGER_OUTPUT");
+  gLoggingToDebugger = !disableDebugLoggingVar || (disableDebugLoggingVar[0] == '0');
+#endif // XP_WIN
 }
 
 
@@ -121,19 +139,25 @@ nsConsoleService::~nsConsoleService()
   ClearMessages();
 }
 
-class AddConsolePrefWatchers : public nsRunnable
+class AddConsolePrefWatchers : public Runnable
 {
 public:
-  explicit AddConsolePrefWatchers(nsConsoleService* aConsole) : mConsole(aConsole)
+  explicit AddConsolePrefWatchers(nsConsoleService* aConsole)
+    : mozilla::Runnable("AddConsolePrefWatchers")
+    , mConsole(aConsole)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
-    Preferences::AddBoolVarCache(&sLoggingEnabled, "consoleservice.enabled", true);
-    Preferences::AddBoolVarCache(&sLoggingBuffered, "consoleservice.buffered", true);
 #if defined(ANDROID)
-    Preferences::AddBoolVarCache(&sLoggingLogcat, "consoleservice.logcat", true);
+    Preferences::AddBoolVarCache(&gLoggingLogcat, "consoleservice.logcat",
+    #ifdef RELEASE_OR_BETA
+      false
+    #else
+      true
+    #endif
+    );
 #endif // defined(ANDROID)
 
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -141,7 +165,7 @@ public:
     obs->AddObserver(mConsole, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
     obs->AddObserver(mConsole, "inner-window-destroyed", false);
 
-    if (!sLoggingBuffered) {
+    if (!gLoggingBuffered) {
       mConsole->Reset();
     }
     return NS_OK;
@@ -161,11 +185,12 @@ nsConsoleService::Init()
 
 namespace {
 
-class LogMessageRunnable : public nsRunnable
+class LogMessageRunnable : public Runnable
 {
 public:
   LogMessageRunnable(nsIConsoleMessage* aMessage, nsConsoleService* aService)
-    : mMessage(aMessage)
+    : mozilla::Runnable("LogMessageRunnable")
+    , mMessage(aMessage)
     , mService(aService)
   { }
 
@@ -215,7 +240,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (!sLoggingEnabled) {
+  if (!gLoggingEnabled) {
     return NS_OK;
   }
 
@@ -239,7 +264,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     MutexAutoLock lock(mLock);
 
 #if defined(ANDROID)
-    if (sLoggingLogcat && aOutputMode == OutputToLog) {
+    if (gLoggingLogcat && aOutputMode == OutputToLog) {
       nsCString msg;
       aMessage->ToString(msg);
 
@@ -276,7 +301,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     }
 #endif
 #ifdef XP_WIN
-    if (IsDebuggerPresent()) {
+    if (gLoggingToDebugger && IsDebuggerPresent()) {
       nsString msg;
       aMessage->GetMessageMoz(getter_Copies(msg));
       msg.Append('\n');
@@ -284,7 +309,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     }
 #endif
 #ifdef MOZ_TASK_TRACER
-    {
+    if (IsStartLogging()) {
       nsCString msg;
       aMessage->ToString(msg);
       int prefixPos = msg.Find(GetJSLabelPrefix());
@@ -295,7 +320,7 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     }
 #endif
 
-    if (sLoggingBuffered) {
+    if (gLoggingBuffered) {
       MessageElement* e = new MessageElement(aMessage);
       mMessages.insertBack(e);
       if (mCurrentSize != mMaximumSize) {
@@ -317,14 +342,15 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage* aMessage,
     // Release |retiredMessage| on the main thread in case it is an instance of
     // a mainthread-only class like nsScriptErrorWithStack and we're off the
     // main thread.
-    NS_ReleaseOnMainThread(retiredMessage.forget());
+    NS_ReleaseOnMainThreadSystemGroup(
+      "nsConsoleService::retiredMessage", retiredMessage.forget());
   }
 
   if (r) {
     // avoid failing in XPCShell tests
     nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
     if (mainThread) {
-      NS_DispatchToMainThread(r.forget());
+      SystemGroup::Dispatch(TaskCategory::Other, r.forget());
     }
   }
 
@@ -345,7 +371,7 @@ nsConsoleService::CollectCurrentListeners(
 NS_IMETHODIMP
 nsConsoleService::LogStringMessage(const char16_t* aMessage)
 {
-  if (!sLoggingEnabled) {
+  if (!gLoggingEnabled) {
     return NS_OK;
   }
 

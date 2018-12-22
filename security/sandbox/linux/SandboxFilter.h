@@ -7,7 +7,9 @@
 #ifndef mozilla_SandboxFilter_h
 #define mozilla_SandboxFilter_h
 
+#include <vector>
 #include "mozilla/Atomics.h"
+#include "mozilla/Range.h"
 #include "mozilla/UniquePtr.h"
 
 namespace sandbox {
@@ -20,17 +22,17 @@ namespace mozilla {
 
 #ifdef MOZ_CONTENT_SANDBOX
 class SandboxBrokerClient;
+struct ContentProcessSandboxParams;
 
-UniquePtr<sandbox::bpf_dsl::Policy> GetContentSandboxPolicy(SandboxBrokerClient* aMaybeBroker);
+UniquePtr<sandbox::bpf_dsl::Policy> GetContentSandboxPolicy(SandboxBrokerClient* aMaybeBroker,
+                                                            ContentProcessSandboxParams&& aParams);
 #endif
 
 #ifdef MOZ_GMP_SANDBOX
-struct SandboxOpenedFile {
-  const char *mPath;
-  Atomic<int> mFd;
-};
+class SandboxOpenedFiles;
 
-UniquePtr<sandbox::bpf_dsl::Policy> GetMediaSandboxPolicy(SandboxOpenedFile* aPlugin);
+// The SandboxOpenedFiles object must live until the process exits.
+UniquePtr<sandbox::bpf_dsl::Policy> GetMediaSandboxPolicy(const SandboxOpenedFiles* aFiles);
 #endif
 
 } // namespace mozilla

@@ -7,14 +7,16 @@
 #ifndef nsSHEntryShared_h__
 #define nsSHEntryShared_h__
 
-#include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsCOMArray.h"
-#include "nsIBFCacheEntry.h"
-#include "nsIMutationObserver.h"
+#include "nsCOMPtr.h"
 #include "nsExpirationTracker.h"
+#include "nsIBFCacheEntry.h"
 #include "nsRect.h"
 #include "nsString.h"
+#include "nsStubMutationObserver.h"
+#include "nsWeakPtr.h"
+
 #include "mozilla/Attributes.h"
 
 class nsSHEntry;
@@ -24,7 +26,7 @@ class nsIContentViewer;
 class nsIDocShellTreeItem;
 class nsILayoutHistoryState;
 class nsDocShellEditorData;
-class nsISupportsArray;
+class nsIMutableArray;
 
 // A document may have multiple SHEntries, either due to hash navigations or
 // calls to history.pushState.  SHEntries corresponding to the same document
@@ -34,7 +36,7 @@ class nsISupportsArray;
 // nsSHEntryShared is the vehicle for this sharing.
 class nsSHEntryShared final
   : public nsIBFCacheEntry
-  , public nsIMutationObserver
+  , public nsStubMutationObserver
 {
 public:
   static void EnsureHistoryTracker();
@@ -43,22 +45,25 @@ public:
   nsSHEntryShared();
 
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIMUTATIONOBSERVER
   NS_DECL_NSIBFCACHEENTRY
+
+  // The nsIMutationObserver bits we actually care about.
+  NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
+  NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+  NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
+  NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
+  NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
+
+  nsExpirationState *GetExpirationState() { return &mExpirationState; }
 
 private:
   ~nsSHEntryShared();
 
   friend class nsSHEntry;
 
-  friend class HistoryTracker;
-  friend class nsExpirationTracker<nsSHEntryShared, 3>;
-  nsExpirationState *GetExpirationState() { return &mExpirationState; }
-
   static already_AddRefed<nsSHEntryShared> Duplicate(nsSHEntryShared* aEntry);
 
   void RemoveFromExpirationTracker();
-  void Expire();
   nsresult SyncPresentationState();
   void DropPresentationState();
 
@@ -68,15 +73,13 @@ private:
 
   // These members are copied by nsSHEntryShared::Duplicate().  If you add a
   // member here, be sure to update the Duplicate() implementation.
-  uint64_t mDocShellID;
+  nsID mDocShellID;
   nsCOMArray<nsIDocShellTreeItem> mChildShells;
-  nsCOMPtr<nsISupports> mOwner;
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
+  nsCOMPtr<nsIPrincipal> mPrincipalToInherit;
   nsCString mContentType;
-  bool mIsFrameNavigation;
-  bool mSaveLayoutState;
-  bool mSticky;
-  bool mDynamicallyCreated;
-  nsCOMPtr<nsISupports> mCacheKey;
+
+  uint32_t mCacheKey;
   uint32_t mLastTouched;
 
   // These members aren't copied by nsSHEntryShared::Duplicate() because
@@ -85,12 +88,20 @@ private:
   nsCOMPtr<nsIContentViewer> mContentViewer;
   nsCOMPtr<nsIDocument> mDocument;
   nsCOMPtr<nsILayoutHistoryState> mLayoutHistoryState;
-  bool mExpired;
   nsCOMPtr<nsISupports> mWindowState;
   nsIntRect mViewerBounds;
-  nsCOMPtr<nsISupportsArray> mRefreshURIList;
+  nsCOMPtr<nsIMutableArray> mRefreshURIList;
   nsExpirationState mExpirationState;
   nsAutoPtr<nsDocShellEditorData> mEditorData;
+  nsWeakPtr mSHistory;
+
+  bool mIsFrameNavigation;
+  bool mSaveLayoutState;
+  bool mSticky;
+  bool mDynamicallyCreated;
+
+  // This flag is about necko cache, not bfcache.
+  bool mExpired;
 };
 
 #endif

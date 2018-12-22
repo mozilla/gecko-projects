@@ -77,7 +77,7 @@ DOMSVGStringList::GetDOMWrapper(SVGStringList *aList,
   RefPtr<DOMSVGStringList> wrapper =
     SVGStringListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
-    wrapper = new DOMSVGStringList(aElement, 
+    wrapper = new DOMSVGStringList(aElement,
                                    aIsConditionalProcessingAttribute,
                                    aAttrEnum);
     SVGStringListTearoffTable().AddTearoff(aList, wrapper);
@@ -94,7 +94,7 @@ DOMSVGStringList::~DOMSVGStringList()
 /* virtual */ JSObject*
 DOMSVGStringList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGStringListBinding::Wrap(aCx, this, aGivenProto);
+  return SVGStringList_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 // ----------------------------------------------------------------------------

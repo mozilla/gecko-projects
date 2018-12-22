@@ -12,6 +12,7 @@
 #include "nsCOMPtr.h"
 #include "nsStringFwd.h"
 #include "mozilla/Logging.h"
+#include "mozilla/BasePrincipal.h"
 #include "ARefBase.h"
 
 //-----------------------------------------------------------------------------
@@ -31,7 +32,7 @@ namespace mozilla { namespace net {
 
 extern LazyLogModule gHttpLog;
 
-class nsHttpConnectionInfo: public ARefBase
+class nsHttpConnectionInfo final : public ARefBase
 {
 public:
     nsHttpConnectionInfo(const nsACString &originHost,
@@ -39,6 +40,7 @@ public:
                          const nsACString &npnToken,
                          const nsACString &username,
                          nsProxyInfo *proxyInfo,
+                         const OriginAttributes &originAttributes,
                          bool endToEndSSL = false);
 
     // this version must use TLS and you may supply separate
@@ -49,19 +51,20 @@ public:
                          const nsACString &npnToken,
                          const nsACString &username,
                          nsProxyInfo *proxyInfo,
+                         const OriginAttributes &originAttributes,
                          const nsACString &routedHost,
                          int32_t routedPort);
 
 private:
     virtual ~nsHttpConnectionInfo()
     {
-        MOZ_LOG(gHttpLog, LogLevel::Debug, ("Destroying nsHttpConnectionInfo @%x\n", this));
+        MOZ_LOG(gHttpLog, LogLevel::Debug, ("Destroying nsHttpConnectionInfo @%p\n", this));
     }
 
     void BuildHashKey();
 
 public:
-    const nsAFlatCString &HashKey() const { return mHashKey; }
+    const nsCString& HashKey() const { return mHashKey; }
 
     const nsCString &GetOrigin() const { return mOrigin; }
     const char   *Origin()       const { return mOrigin.get(); }
@@ -71,15 +74,10 @@ public:
     const char      *RoutedHost() const { return mRoutedHost.get(); }
     int32_t          RoutedPort() const { return mRoutedPort; }
 
-    // With overhead rebuilding the hash key. The initial
-    // network interface is empty. So you can reduce one call
-    // if there's no explicit route after ctor.
-    void SetNetworkInterfaceId(const nsACString& aNetworkInterfaceId);
-
     // OK to treat these as an infalible allocation
     nsHttpConnectionInfo* Clone() const;
     void CloneAsDirectRoute(nsHttpConnectionInfo **outParam);
-    nsresult CreateWildCard(nsHttpConnectionInfo **outParam);
+    MOZ_MUST_USE nsresult CreateWildCard(nsHttpConnectionInfo **outParam);
 
     const char *ProxyHost() const { return mProxyInfo ? mProxyInfo->Host().get() : nullptr; }
     int32_t     ProxyPort() const { return mProxyInfo ? mProxyInfo->Port() : -1; }
@@ -115,10 +113,17 @@ public:
                                        { mHashKey.SetCharAt(aNoSpdy ? 'X' : '.', 5); }
     bool          GetNoSpdy() const    { return mHashKey.CharAt(5) == 'X'; }
 
-    const nsCString &GetNetworkInterfaceId() const { return mNetworkInterfaceId; }
+    void          SetBeConservative(bool aBeConservative)
+                                            { mHashKey.SetCharAt(aBeConservative ? 'C' : '.', 6); }
+    bool          GetBeConservative() const { return mHashKey.CharAt(6) == 'C'; }
+
+    void          SetTlsFlags(uint32_t aTlsFlags);
+    uint32_t      GetTlsFlags() const { return mTlsFlags; }
 
     const nsCString &GetNPNToken() { return mNPNToken; }
     const nsCString &GetUsername() { return mUsername; }
+
+    const OriginAttributes &GetOriginAttributes() { return mOriginAttributes; }
 
     // Returns true for any kind of proxy (http, socks, https, etc..)
     bool UsingProxy();
@@ -147,6 +152,7 @@ private:
               const nsACString &npnToken,
               const nsACString &username,
               nsProxyInfo* proxyInfo,
+              const OriginAttributes &originAttributes,
               bool EndToEndSSL);
     void SetOriginServer(const nsACString &host, int32_t port);
 
@@ -156,7 +162,6 @@ private:
     int32_t                mRoutedPort;
 
     nsCString              mHashKey;
-    nsCString              mNetworkInterfaceId;
     nsCString              mUsername;
     nsCOMPtr<nsProxyInfo>  mProxyInfo;
     bool                   mUsingHttpProxy;
@@ -164,9 +169,12 @@ private:
     bool                   mEndToEndSSL;
     bool                   mUsingConnect;  // if will use CONNECT with http proxy
     nsCString              mNPNToken;
+    OriginAttributes       mOriginAttributes;
+
+    uint32_t               mTlsFlags;
 
 // for RefPtr
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsHttpConnectionInfo)
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsHttpConnectionInfo, override)
 };
 
 } // namespace net

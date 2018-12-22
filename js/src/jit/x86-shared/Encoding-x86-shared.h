@@ -16,6 +16,41 @@ namespace X86Encoding {
 
 static const size_t MaxInstructionSize = 16;
 
+// These enumerated values are following the Intel documentation Volume 2C [1],
+// Appendix A.2 and Appendix A.3.
+//
+// Operand size/types as listed in the Appendix A.2.  Tables of the instructions
+// and their operands can be found in the Appendix A.3.
+//
+// E = reg/mem
+// G = reg (reg field of ModR/M)
+// U = xmm (R/M field of ModR/M)
+// V = xmm (reg field of ModR/M)
+// W = xmm/mem64
+// I = immediate
+// O = offset
+//
+// b = byte (8-bit)
+// w = word (16-bit)
+// v = register size
+// d = double (32-bit)
+// dq = double-quad (128-bit) (xmm)
+// ss = scalar float 32 (xmm)
+// ps = packed float 32 (xmm)
+// sd = scalar double (xmm)
+// pd = packed double (xmm)
+// z = 16/32/64-bit
+// vqp = (*)
+//
+// (*) Some website [2] provides a convenient list of all instructions, but be
+// aware that they do not follow the Intel documentation naming, as the
+// following enumeration does. Do not use these names as a reference for adding
+// new instructions.
+//
+// [1] http://www.intel.com/content/www/us/en/architecture-and-technology/64-ia-32-architectures-software-developer-manual-325462.html
+// [2] http://ref.x86asm.net/geek.html
+//
+// OPn_NAME_DstSrc
 enum OneByteOpcodeID {
     OP_NOP_00                       = 0x00,
     OP_ADD_EbGb                     = 0x00,
@@ -29,6 +64,7 @@ enum OneByteOpcodeID {
     OP_2BYTE_ESCAPE                 = 0x0F,
     OP_NOP_0F                       = 0x0F,
     OP_ADC_GvEv                     = 0x13,
+    OP_SBB_GvEv                     = 0x1B,
     OP_NOP_1F                       = 0x1F,
     OP_AND_EbGb                     = 0x20,
     OP_AND_EvGv                     = 0x21,
@@ -94,6 +130,7 @@ enum OneByteOpcodeID {
     OP_MOV_EbIb                     = 0xB0,
     OP_MOV_EAXIv                    = 0xB8,
     OP_GROUP2_EvIb                  = 0xC1,
+    OP_ADDP_ST0_ST1                 = 0xC1,
     OP_RET_Iz                       = 0xC2,
     PRE_VEX_C4                      = 0xC4,
     PRE_VEX_C5                      = 0xC5,
@@ -105,6 +142,8 @@ enum OneByteOpcodeID {
     OP_GROUP2_EvCL                  = 0xD3,
     OP_FPU6                         = 0xDD,
     OP_FPU6_F32                     = 0xD9,
+    OP_FPU6_ADDP                    = 0xDE,
+    OP_FILD                         = 0xDF,
     OP_CALL_rel32                   = 0xE8,
     OP_JMP_rel32                    = 0xE9,
     OP_JMP_rel8                     = 0xEB,
@@ -119,12 +158,10 @@ enum OneByteOpcodeID {
 };
 
 enum class ShiftID {
-    vpsrld = 2,
-    vpsrlq = 2,
+    vpsrlx = 2,
     vpsrldq = 3,
     vpsrad = 4,
-    vpslld = 6,
-    vpsllq = 6
+    vpsllx = 6
 };
 
 enum TwoByteOpcodeID {
@@ -146,7 +183,7 @@ enum TwoByteOpcodeID {
     OP2_CVTSI2SD_VsdEd  = 0x2A,
     OP2_CVTTSD2SI_GdWsd = 0x2C,
     OP2_UCOMISD_VsdWsd  = 0x2E,
-    OP2_CMOVZ_GvqpEvqp  = 0x44,
+    OP2_CMOVCC_GvEv     = 0x40,
     OP2_MOVMSKPD_EdVd   = 0x50,
     OP2_ANDPS_VpsWps    = 0x54,
     OP2_ANDNPS_VpsWps   = 0x55,
@@ -179,16 +216,24 @@ enum TwoByteOpcodeID {
     OP2_ORPD_VpdWpd     = 0x56,
     OP2_XORPD_VpdWpd    = 0x57,
     OP2_PUNPCKLDQ       = 0x62,
+    OP2_PCMPGTB_VdqWdq  = 0x64,
+    OP2_PCMPGTW_VdqWdq  = 0x65,
     OP2_PCMPGTD_VdqWdq  = 0x66,
     OP2_MOVD_VdEd       = 0x6E,
     OP2_MOVDQ_VsdWsd    = 0x6F,
     OP2_MOVDQ_VdqWdq    = 0x6F,
     OP2_PSHUFD_VdqWdqIb = 0x70,
+    OP2_PSHUFLW_VdqWdqIb = 0x70,
+    OP2_PSHUFHW_VdqWdqIb = 0x70,
+    OP2_PSLLW_UdqIb     = 0x71,
+    OP2_PSRAW_UdqIb     = 0x71,
+    OP2_PSRLW_UdqIb     = 0x71,
     OP2_PSLLD_UdqIb     = 0x72,
     OP2_PSRAD_UdqIb     = 0x72,
     OP2_PSRLD_UdqIb     = 0x72,
     OP2_PSRLDQ_Vd       = 0x73,
-    OP2_PCMPEQW         = 0x75,
+    OP2_PCMPEQB_VdqWdq  = 0x74,
+    OP2_PCMPEQW_VdqWdq  = 0x75,
     OP2_PCMPEQD_VdqWdq  = 0x76,
     OP2_HADDPD          = 0x7C,
     OP2_MOVD_EdVd       = 0x7E,
@@ -197,7 +242,9 @@ enum TwoByteOpcodeID {
     OP2_JCC_rel32       = 0x80,
     OP_SETCC            = 0x90,
     OP2_SHLD            = 0xA4,
+    OP2_SHLD_GvEv       = 0xA5,
     OP2_SHRD            = 0xAC,
+    OP2_SHRD_GvEv       = 0xAD,
     OP_FENCE            = 0xAE,
     OP2_IMUL_GvEv       = 0xAF,
     OP2_CMPXCHG_GvEb    = 0xB0,
@@ -212,28 +259,50 @@ enum TwoByteOpcodeID {
     OP2_XADD_EbGb       = 0xC0,
     OP2_XADD_EvGv       = 0xC1,
     OP2_CMPPS_VpsWps    = 0xC2,
+    OP2_PINSRW          = 0xC4,
     OP2_PEXTRW_GdUdIb   = 0xC5,
     OP2_SHUFPS_VpsWpsIb = 0xC6,
+    OP2_CMPXCHGNB       = 0xC7, // CMPXCHG8B; CMPXCHG16B with REX
+    OP2_PSRLW_VdqWdq    = 0xD1,
     OP2_PSRLD_VdqWdq    = 0xD2,
+    OP2_PMULLW_VdqWdq   = 0xD5,
     OP2_MOVQ_WdVd       = 0xD6,
+    OP2_PMOVMSKB_EdVd   = 0xD7,
+    OP2_PSUBUSB_VdqWdq  = 0xD8,
+    OP2_PSUBUSW_VdqWdq  = 0xD9,
     OP2_PANDDQ_VdqWdq   = 0xDB,
+    OP2_PADDUSB_VdqWdq  = 0xDC,
+    OP2_PADDUSW_VdqWdq  = 0xDD,
     OP2_PANDNDQ_VdqWdq  = 0xDF,
+    OP2_PSRAW_VdqWdq    = 0xE1,
     OP2_PSRAD_VdqWdq    = 0xE2,
+    OP2_PSUBSB_VdqWdq   = 0xE8,
+    OP2_PSUBSW_VdqWdq   = 0xE9,
     OP2_PORDQ_VdqWdq    = 0xEB,
+    OP2_PADDSB_VdqWdq   = 0xEC,
+    OP2_PADDSW_VdqWdq   = 0xED,
     OP2_PXORDQ_VdqWdq   = 0xEF,
+    OP2_PSLLW_VdqWdq    = 0xF1,
     OP2_PSLLD_VdqWdq    = 0xF2,
     OP2_PMULUDQ_VdqWdq  = 0xF4,
+    OP2_PSUBB_VdqWdq    = 0xF8,
+    OP2_PSUBW_VdqWdq    = 0xF9,
     OP2_PSUBD_VdqWdq    = 0xFA,
+    OP2_PADDB_VdqWdq    = 0xFC,
+    OP2_PADDW_VdqWdq    = 0xFD,
     OP2_PADDD_VdqWdq    = 0xFE
 };
 
 enum ThreeByteOpcodeID {
+    OP3_PSHUFB_VdqWdq   = 0x00,
     OP3_ROUNDSS_VsdWsd  = 0x0A,
     OP3_ROUNDSD_VsdWsd  = 0x0B,
     OP3_BLENDVPS_VdqWdq = 0x14,
+    OP3_PEXTRB_EdVdqIb  = 0x14,
     OP3_PEXTRD_EdVdqIb  = 0x16,
     OP3_BLENDPS_VpsWpsIb = 0x0C,
     OP3_PTEST_VdVd      = 0x17,
+    OP3_PINSRB_VdqEdIb  = 0x20,
     OP3_INSERTPS_VpsUps = 0x21,
     OP3_PINSRD_VdqEdIb  = 0x22,
     OP3_PMULLD_VdqWdq   = 0x40,
@@ -247,7 +316,6 @@ inline bool IsXMMReversedOperands(TwoByteOpcodeID opcode)
       case OP2_MOVSD_WsdVsd: // also OP2_MOVPS_WpsVps
       case OP2_MOVAPS_WsdVsd:
       case OP2_MOVDQ_WdqVdq:
-      case OP3_PEXTRD_EdVdqIb:
         return true;
       default:
         break;
@@ -279,11 +347,16 @@ inline TwoByteOpcodeID setccOpcode(Condition cond)
 {
     return TwoByteOpcodeID(OP_SETCC + cond);
 }
+inline TwoByteOpcodeID cmovccOpcode(Condition cond)
+{
+    return TwoByteOpcodeID(OP2_CMOVCC_GvEv + cond);
+}
 
 enum GroupOpcodeID {
     GROUP1_OP_ADD = 0,
     GROUP1_OP_OR  = 1,
     GROUP1_OP_ADC = 2,
+    GROUP1_OP_SBB = 3,
     GROUP1_OP_AND = 4,
     GROUP1_OP_SUB = 5,
     GROUP1_OP_XOR = 6,
@@ -291,6 +364,8 @@ enum GroupOpcodeID {
 
     GROUP1A_OP_POP = 0,
 
+    GROUP2_OP_ROL = 0,
+    GROUP2_OP_ROR = 1,
     GROUP2_OP_SHL = 4,
     GROUP2_OP_SHR = 5,
     GROUP2_OP_SAR = 7,
@@ -309,9 +384,13 @@ enum GroupOpcodeID {
     GROUP5_OP_JMPN  = 4,
     GROUP5_OP_PUSH  = 6,
 
+    FILD_OP_64      = 5,
+
     FPU6_OP_FLD     = 0,
     FPU6_OP_FISTTP  = 1,
     FPU6_OP_FSTP    = 3,
+    FPU6_OP_FLDCW   = 5,
+    FPU6_OP_FISTP   = 7,
 
     GROUP11_MOV = 0
 };

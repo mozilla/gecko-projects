@@ -16,7 +16,8 @@
 #include "nsDOMMutationObserver.h"
 #include "nsTArray.h"
 
-class nsIAtom;
+class nsAtom;
+class nsIFrame;
 class nsPresContext;
 
 namespace mozilla {
@@ -35,10 +36,9 @@ class AnimationCollection
   typedef AnimationCollection<AnimationType> SelfType;
   typedef AnimationTypeTraits<AnimationType> TraitsType;
 
-  AnimationCollection(dom::Element* aElement, nsIAtom* aElementProperty)
+  AnimationCollection(dom::Element* aElement, nsAtom* aElementProperty)
     : mElement(aElement)
     , mElementProperty(aElementProperty)
-    , mCheckGeneration(0)
 #ifdef DEBUG
     , mCalledPropertyDtor(false)
 #endif
@@ -61,13 +61,13 @@ public:
     mElement->DeleteProperty(mElementProperty);
   }
 
-  static void PropertyDtor(void *aObject, nsIAtom *aPropertyName,
+  static void PropertyDtor(void *aObject, nsAtom *aPropertyName,
                            void *aPropertyValue, void *aData);
 
   // Get the collection of animations for the given |aElement| and
   // |aPseudoType|.
   static AnimationCollection<AnimationType>*
-    GetAnimationCollection(dom::Element* aElement,
+    GetAnimationCollection(const dom::Element* aElement,
                            CSSPseudoElementType aPseudoType);
 
   // Given the frame |aFrame| with possibly animated content, finds its
@@ -88,53 +88,17 @@ public:
                                    CSSPseudoElementType aPseudoType,
                                    bool* aCreatedCollection);
 
-  bool IsForElement() const { // rather than for a pseudo-element
-    return mElementProperty == TraitsType::ElementPropertyAtom();
-  }
-
-  bool IsForBeforePseudo() const {
-    return mElementProperty == TraitsType::BeforePropertyAtom();
-  }
-
-  bool IsForAfterPseudo() const {
-    return mElementProperty == TraitsType::AfterPropertyAtom();
-  }
-
-  CSSPseudoElementType PseudoElementType() const
-  {
-    if (IsForElement()) {
-      return CSSPseudoElementType::NotPseudo;
-    }
-    if (IsForBeforePseudo()) {
-      return CSSPseudoElementType::before;
-    }
-    MOZ_ASSERT(IsForAfterPseudo(),
-               "::before & ::after should be the only pseudo-elements here");
-    return CSSPseudoElementType::after;
-  }
-
-  static nsString PseudoTypeAsString(CSSPseudoElementType aPseudoType);
-
   dom::Element *mElement;
 
   // the atom we use in mElement's prop table (must be a static atom,
   // i.e., in an atom list)
-  nsIAtom *mElementProperty;
+  nsAtom *mElementProperty;
 
   InfallibleTArray<RefPtr<AnimationType>> mAnimations;
 
-  // For CSS transitions only, we record the most recent generation
-  // for which we've done the transition update, so that we avoid doing
-  // it more than once per style change.
-  // (Note that we also store an animation generation on each EffectSet in
-  // order to track when we need to update animations on layers.)
-  uint64_t mCheckGeneration;
-
-  // Update mCheckGeneration to RestyleManager's count
-  void UpdateCheckGeneration(nsPresContext* aPresContext);
 
 private:
-  static nsIAtom* GetPropertyAtomForPseudoType(
+  static nsAtom* GetPropertyAtomForPseudoType(
     CSSPseudoElementType aPseudoType);
 
 #ifdef DEBUG

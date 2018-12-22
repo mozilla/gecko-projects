@@ -8,25 +8,27 @@
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
+#include "mozilla/RefPtr.h"
 #include "nsIStringBundle.h"
 #include "nsIUUIDGenerator.h"
 #include "nsIXULAppInfo.h"
 
 //#include "AudioSession.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Mutex.h"
+#include "mozilla/WindowsVersion.h"
 
 #include <objbase.h>
 
 namespace mozilla {
 namespace widget {
 
-/* 
+/*
  * To take advantage of what Vista+ have to offer with respect to audio,
  * we need to maintain an audio session.  This class wraps IAudioSessionControl
  * and implements IAudioSessionEvents (for callbacks from Windows)
@@ -54,6 +56,8 @@ public:
   STDMETHODIMP OnSessionDisconnected(AudioSessionDisconnectReason aReason);
 private:
   nsresult OnSessionDisconnectedInternal();
+  nsresult CommitAudioSessionData();
+
 public:
   STDMETHODIMP OnSimpleVolumeChanged(float aVolume,
                                      BOOL aMute,
@@ -86,6 +90,8 @@ protected:
   nsString mIconPath;
   nsID mSessionGroupingParameter;
   SessionState mState;
+  // Guards the IAudioSessionControl
+  mozilla::Mutex mMutex;
 
   ThreadSafeAutoRefCnt mRefCnt;
   NS_DECL_OWNINGTHREAD
@@ -127,7 +133,8 @@ RecvAudioSessionData(const nsID& aID,
 
 AudioSession* AudioSession::sService = nullptr;
 
-AudioSession::AudioSession()
+AudioSession::AudioSession() :
+  mMutex("AudioSessionControl")
 {
   mState = UNINITIALIZED;
 }
@@ -201,7 +208,7 @@ AudioSession::Start()
     MOZ_ASSERT(XRE_IsParentProcess(),
                "Should only get here in a chrome process!");
 
-    nsCOMPtr<nsIStringBundleService> bundleService = 
+    nsCOMPtr<nsIStringBundleService> bundleService =
       do_GetService(NS_STRINGBUNDLE_CONTRACTID);
     NS_ENSURE_TRUE(bundleService, NS_ERROR_FAILURE);
     nsCOMPtr<nsIStringBundle> bundle;
@@ -209,8 +216,7 @@ AudioSession::Start()
                                 getter_AddRefs(bundle));
     NS_ENSURE_TRUE(bundle, NS_ERROR_FAILURE);
 
-    bundle->GetStringFromName(MOZ_UTF16("brandFullName"),
-                              getter_Copies(mDisplayName));
+    bundle->GetStringFromName("brandFullName", mDisplayName);
 
     wchar_t *buffer;
     mIconPath.GetMutableData(&buffer, MAX_PATH);
@@ -255,6 +261,7 @@ AudioSession::Start()
     return NS_ERROR_FAILURE;
   }
 
+  MutexAutoLock lock(mMutex);
   hr = manager->GetAudioSessionControl(&GUID_NULL,
                                        0,
                                        getter_AddRefs(mAudioSessionControl));
@@ -263,30 +270,17 @@ AudioSession::Start()
     return NS_ERROR_FAILURE;
   }
 
-  hr = mAudioSessionControl->SetGroupingParam((LPGUID)&mSessionGroupingParameter,
-                                              nullptr);
-  if (FAILED(hr)) {
-    StopInternal();
-    return NS_ERROR_FAILURE;
-  }
-
-  hr = mAudioSessionControl->SetDisplayName(mDisplayName.get(), nullptr);
-  if (FAILED(hr)) {
-    StopInternal();
-    return NS_ERROR_FAILURE;
-  }
-
-  hr = mAudioSessionControl->SetIconPath(mIconPath.get(), nullptr);
-  if (FAILED(hr)) {
-    StopInternal();
-    return NS_ERROR_FAILURE;
-  }
-
+  // Increments refcount of 'this'.
   hr = mAudioSessionControl->RegisterAudioSessionNotification(this);
   if (FAILED(hr)) {
     StopInternal();
     return NS_ERROR_FAILURE;
   }
+
+  nsCOMPtr<nsIRunnable> runnable =
+    NewRunnableMethod("AudioSession::CommitAudioSessionData",
+                      this, &AudioSession::CommitAudioSessionData);
+  NS_DispatchToMainThread(runnable);
 
   mState = STARTED;
 
@@ -294,10 +288,43 @@ AudioSession::Start()
 }
 
 void
+SpawnASCReleaseThread(RefPtr<IAudioSessionControl>&& aASC)
+{
+  // Fake moving to the other thread by circumventing the ref count.
+  // (RefPtrs don't play well with C++11 lambdas and we don't want to use
+  // XPCOM here.)
+  IAudioSessionControl* rawPtr = nullptr;
+  aASC.forget(&rawPtr);
+  MOZ_ASSERT(rawPtr);
+  PRThread* thread =
+    PR_CreateThread(PR_USER_THREAD,
+                    [](void* aRawPtr) { static_cast<IAudioSessionControl*>(aRawPtr)->Release(); },
+                    rawPtr, PR_PRIORITY_NORMAL, PR_LOCAL_THREAD, PR_UNJOINABLE_THREAD, 0);
+  if (!thread) {
+    // We can't make a thread so just destroy the IAudioSessionControl here.
+    rawPtr->Release();
+  }
+}
+
+
+void
 AudioSession::StopInternal()
 {
-  if (mAudioSessionControl) {
+  mMutex.AssertCurrentThreadOwns();
+
+  if (mAudioSessionControl &&
+      (mState == STARTED || mState == STOPPED)) {
+    // Decrement refcount of 'this'
     mAudioSessionControl->UnregisterAudioSessionNotification(this);
+  }
+
+  // Win7 is the only Windows version supported before Win8.
+  if (mAudioSessionControl && !IsWin8OrLater()) {
+    // bug 1419488: Avoid hanging due to Win7 race condition when destroying
+    // AudioSessionControl.  We do that by Moving the AudioSessionControl
+    // to a worker thread (that we never 'join') for destruction.
+    SpawnASCReleaseThread(std::move(mAudioSessionControl));
+  } else {
     mAudioSessionControl = nullptr;
   }
 }
@@ -316,6 +343,7 @@ AudioSession::Stop()
     RefPtr<AudioSession> kungFuDeathGrip;
     kungFuDeathGrip.swap(sService);
 
+    MutexAutoLock lock(mMutex);
     StopInternal();
   }
 
@@ -372,6 +400,39 @@ AudioSession::SetSessionData(const nsID& aID,
   return NS_OK;
 }
 
+nsresult
+AudioSession::CommitAudioSessionData()
+{
+  MutexAutoLock lock(mMutex);
+
+  if (!mAudioSessionControl) {
+    // Stop() was called before we had a chance to do this.
+    return NS_OK;
+  }
+
+  HRESULT hr =
+    mAudioSessionControl->SetGroupingParam((LPGUID)&mSessionGroupingParameter,
+                                           nullptr);
+  if (FAILED(hr)) {
+    StopInternal();
+    return NS_ERROR_FAILURE;
+  }
+
+  hr = mAudioSessionControl->SetDisplayName(mDisplayName.get(), nullptr);
+  if (FAILED(hr)) {
+    StopInternal();
+    return NS_ERROR_FAILURE;
+  }
+
+  hr = mAudioSessionControl->SetIconPath(mIconPath.get(), nullptr);
+  if (FAILED(hr)) {
+    StopInternal();
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 STDMETHODIMP
 AudioSession::OnChannelVolumeChanged(DWORD aChannelCount,
                                      float aChannelVolumeArray[],
@@ -408,7 +469,8 @@ AudioSession::OnSessionDisconnected(AudioSessionDisconnectReason aReason)
   // Run our code asynchronously.  Per MSDN we can't do anything interesting
   // in this callback.
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &AudioSession::OnSessionDisconnectedInternal);
+    NewRunnableMethod("widget::AudioSession::OnSessionDisconnectedInternal",
+                      this, &AudioSession::OnSessionDisconnectedInternal);
   NS_DispatchToMainThread(runnable);
   return S_OK;
 }
@@ -416,11 +478,21 @@ AudioSession::OnSessionDisconnected(AudioSessionDisconnectReason aReason)
 nsresult
 AudioSession::OnSessionDisconnectedInternal()
 {
-  if (!mAudioSessionControl)
-    return NS_OK;
+  // When successful, UnregisterAudioSessionNotification will decrement the
+  // refcount of 'this'.  Start will re-increment it.  In the interim,
+  // we'll need to reference ourselves.
+  RefPtr<AudioSession> kungFuDeathGrip(this);
 
-  mAudioSessionControl->UnregisterAudioSessionNotification(this);
-  mAudioSessionControl = nullptr;
+  {
+    // We need to release the mutex before we call Start().
+    MutexAutoLock lock(mMutex);
+
+    if (!mAudioSessionControl)
+      return NS_OK;
+
+    mAudioSessionControl->UnregisterAudioSessionNotification(this);
+    mAudioSessionControl = nullptr;
+  }
 
   mState = AUDIO_SESSION_DISCONNECTED;
   CoUninitialize();

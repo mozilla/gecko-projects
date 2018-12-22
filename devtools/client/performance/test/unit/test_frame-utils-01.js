@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests that frame-utils isContent and parseLocation work as intended
@@ -14,7 +15,6 @@ const CONTENT_LOCATIONS = [
   "hello/<.world (http://foo/bar.js?myquery=params&search=1:123:987)",
   "hello/<.world (http://foo/#bar:123:987)",
   "hello/<.world (http://foo/:123:987)",
-  "hello/<.world (app://myfxosapp/file.js:100:1)",
 
   // Test scripts with port numbers (bug 1164131)
   "hello/<.world (http://localhost:8888/file.js:100:1)",
@@ -42,28 +42,28 @@ const CHROME_LOCATIONS = [
   "EnterJIT",
 ].map(argify);
 
-function run_test() {
-  run_next_test();
-}
-
-add_task(function () {
+add_task(function() {
   const { computeIsContentAndCategory, parseLocation } = require("devtools/client/performance/modules/logic/frame-utils");
-  let isContent = (frame) => {
+  const isContent = (frame) => {
     computeIsContentAndCategory(frame);
     return frame.isContent;
   };
 
-
-  for (let frame of CONTENT_LOCATIONS) {
-    ok(isContent.apply(null, frameify(frame)), `${frame[0]} should be considered a content frame.`);
+  for (const frame of CONTENT_LOCATIONS) {
+    ok(isContent.apply(null, frameify(frame)),
+       `${frame[0]} should be considered a content frame.`);
   }
 
-  for (let frame of CHROME_LOCATIONS) {
-    ok(!isContent.apply(null, frameify(frame)), `${frame[0]} should not be considered a content frame.`);
+  for (const frame of CHROME_LOCATIONS) {
+    ok(!isContent.apply(null, frameify(frame)),
+       `${frame[0]} should not be considered a content frame.`);
   }
 
   // functionName, fileName, host, url, line, column
-  const FIELDS = ["functionName", "fileName", "host", "url", "line", "column", "host", "port"];
+  const FIELDS = ["functionName", "fileName", "host", "url", "line", "column", "host",
+                  "port"];
+
+  /* eslint-disable max-len */
   const PARSED_CONTENT = [
     ["hello/<.world", "bar.js", "foo", "https://foo/bar.js", 123, 987, "foo", null],
     ["hello/<.world", "bar.js", "foo", "http://foo/bar.js", 123, 987, "foo", null],
@@ -72,7 +72,6 @@ add_task(function () {
     ["hello/<.world", "bar.js", "foo", "http://foo/bar.js?myquery=params&search=1", 123, 987, "foo", null],
     ["hello/<.world", "/", "foo", "http://foo/#bar", 123, 987, "foo", null],
     ["hello/<.world", "/", "foo", "http://foo/", 123, 987, "foo", null],
-    ["hello/<.world", "file.js", "myfxosapp", "app://myfxosapp/file.js", 100, 1, "myfxosapp", null],
     ["hello/<.world", "file.js", "localhost:8888", "http://localhost:8888/file.js", 100, 1, "localhost:8888", 8888],
     ["hello/<.world", "file.js", "localhost:8888", "http://localhost:8888/file.js", 100, null, "localhost:8888", 8888],
     ["hello/<.world", "file.js (eval:1)", "localhost:8888", "http://localhost:8888/file.js", 65, null, "localhost:8888", 8888],
@@ -81,11 +80,13 @@ add_task(function () {
     ["Native[\"arraycopy(blah)\"]", "profiler.html", "localhost:8888", "http://localhost:8888/profiler.html", 4, null, "localhost:8888", 8888],
     ["Native[\"arraycopy(blah)\"]", "profiler.html", "localhost:8888", "http://localhost:8888/profiler.html", 4, 5, "localhost:8888", 8888],
   ];
+  /* eslint-enable max-len */
 
   for (let i = 0; i < PARSED_CONTENT.length; i++) {
-    let parsed = parseLocation.apply(null, CONTENT_LOCATIONS[i]);
+    const parsed = parseLocation.apply(null, CONTENT_LOCATIONS[i]);
     for (let j = 0; j < FIELDS.length; j++) {
-      equal(parsed[FIELDS[j]], PARSED_CONTENT[i][j], `${CONTENT_LOCATIONS[i]} was parsed to correct ${FIELDS[j]}`);
+      equal(parsed[FIELDS[j]], PARSED_CONTENT[i][j],
+            `${CONTENT_LOCATIONS[i]} was parsed to correct ${FIELDS[j]}`);
     }
   }
 
@@ -93,15 +94,17 @@ add_task(function () {
     ["Startup::XRE_InitChildProcess", null, null, null, 456, 123, null, null],
     ["chrome://browser/content/content.js", null, null, null, 456, 123, null, null],
     ["setTimeout_timer", "foo.js", null, "resource://gre/foo.js", 123, 434, null, null],
-    ["hello/<.world (jar:file://Users/mcurie/Dev/jetpacks.js)", null, null, null, null, null, null, null],
+    ["hello/<.world (jar:file://Users/mcurie/Dev/jetpacks.js)", null, null, null,
+     null, null, null, null],
     ["hello/<.world", "baz.js", "bar", "http://bar/baz.js", 123, 987, "bar", null],
     ["EnterJIT", null, null, null, null, null, null, null],
   ];
 
   for (let i = 0; i < PARSED_CHROME.length; i++) {
-    let parsed = parseLocation.apply(null, CHROME_LOCATIONS[i]);
+    const parsed = parseLocation.apply(null, CHROME_LOCATIONS[i]);
     for (let j = 0; j < FIELDS.length; j++) {
-      equal(parsed[FIELDS[j]], PARSED_CHROME[i][j], `${CHROME_LOCATIONS[i]} was parsed to correct ${FIELDS[j]}`);
+      equal(parsed[FIELDS[j]], PARSED_CHROME[i][j],
+            `${CHROME_LOCATIONS[i]} was parsed to correct ${FIELDS[j]}`);
     }
   }
 });
@@ -110,12 +113,11 @@ add_task(function () {
  * Takes either a string or an object and turns it into an array that
  * parseLocation.apply expects.
  */
-function argify (val) {
+function argify(val) {
   if (typeof val === "string") {
     return [val];
-  } else {
-    return [val.location, val.line, val.column];
   }
+  return [val.location, val.line, val.column];
 }
 
 /**

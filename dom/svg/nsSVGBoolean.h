@@ -11,8 +11,9 @@
 #include "nsError.h"
 #include "nsISMILAttr.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtr.h"
 
-class nsIAtom;
+class nsAtom;
 class nsSMILValue;
 class nsSVGElement;
 
@@ -33,8 +34,8 @@ public:
     mIsAnimated = false;
   }
 
-  nsresult SetBaseValueAtom(const nsIAtom* aValue, nsSVGElement *aSVGElement);
-  nsIAtom* GetBaseValueAtom() const;
+  nsresult SetBaseValueAtom(const nsAtom* aValue, nsSVGElement *aSVGElement);
+  nsAtom* GetBaseValueAtom() const;
 
   void SetBaseValue(bool aValue, nsSVGElement *aSVGElement);
   bool GetBaseValue() const
@@ -46,8 +47,7 @@ public:
 
   already_AddRefed<mozilla::dom::SVGAnimatedBoolean>
     ToDOMAnimatedBoolean(nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
+  mozilla::UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
 

@@ -9,10 +9,13 @@
 
 #include "mozilla/HashFunctions.h"
 
+#include <algorithm>
+
 #include "jsfriendapi.h"
 #include "jstypes.h"
 
 #include "js/Value.h"
+#include "vm/StringType.h"
 
 namespace js {
 namespace jit {
@@ -102,9 +105,7 @@ enum BailoutKind
     Bailout_NonSymbolInput,
 
     // SIMD Unbox expects a given type, bails out if it doesn't match.
-    Bailout_NonSimdBool32x4Input,
-    Bailout_NonSimdInt32x4Input,
-    Bailout_NonSimdFloat32x4Input,
+    Bailout_UnexpectedSimdInput,
 
     // Atomic operations require shared memory, bail out if the typed array
     // maps unshared memory.
@@ -129,10 +130,6 @@ enum BailoutKind
 
     // Like Bailout_Overflow, but causes immediate invalidation.
     Bailout_OverflowInvalidate,
-
-    // Like NonStringInput, but should cause immediate invalidation.
-    // Used for jsop_iternext.
-    Bailout_NonStringInputInvalidate,
 
     // Used for integer division, multiplication and modulo.
     // If there's a remainder, bails to return a double.
@@ -211,12 +208,8 @@ BailoutKindString(BailoutKind kind)
         return "Bailout_NonStringInput";
       case Bailout_NonSymbolInput:
         return "Bailout_NonSymbolInput";
-      case Bailout_NonSimdBool32x4Input:
-        return "Bailout_NonSimdBool32x4Input";
-      case Bailout_NonSimdInt32x4Input:
-        return "Bailout_NonSimdInt32x4Input";
-      case Bailout_NonSimdFloat32x4Input:
-        return "Bailout_NonSimdFloat32x4Input";
+      case Bailout_UnexpectedSimdInput:
+        return "Bailout_UnexpectedSimdInput";
       case Bailout_NonSharedTypedArrayInput:
         return "Bailout_NonSharedTypedArrayInput";
       case Bailout_Debugger:
@@ -231,8 +224,6 @@ BailoutKindString(BailoutKind kind)
       // Bailouts caused by invalid assumptions.
       case Bailout_OverflowInvalidate:
         return "Bailout_OverflowInvalidate";
-      case Bailout_NonStringInputInvalidate:
-        return "Bailout_NonStringInputInvalidate";
       case Bailout_DoubleOutput:
         return "Bailout_DoubleOutput";
 
@@ -257,24 +248,30 @@ BailoutKindString(BailoutKind kind)
 static const uint32_t ELEMENT_TYPE_BITS = 5;
 static const uint32_t ELEMENT_TYPE_SHIFT = 0;
 static const uint32_t ELEMENT_TYPE_MASK = (1 << ELEMENT_TYPE_BITS) - 1;
-static const uint32_t VECTOR_SCALE_BITS = 2;
+static const uint32_t VECTOR_SCALE_BITS = 3;
 static const uint32_t VECTOR_SCALE_SHIFT = ELEMENT_TYPE_BITS + ELEMENT_TYPE_SHIFT;
 static const uint32_t VECTOR_SCALE_MASK = (1 << VECTOR_SCALE_BITS) - 1;
 
 class SimdConstant {
   public:
     enum Type {
+        Int8x16,
+        Int16x8,
         Int32x4,
         Float32x4,
         Undefined = -1
     };
 
+    typedef int8_t I8x16[16];
+    typedef int16_t I16x8[8];
     typedef int32_t I32x4[4];
     typedef float F32x4[4];
 
   private:
     Type type_;
     union {
+        I8x16 i8x16;
+        I16x8 i16x8;
         I32x4 i32x4;
         F32x4 f32x4;
     } u;
@@ -283,74 +280,83 @@ class SimdConstant {
         return type_ != Undefined;
     }
 
-    void fillInt32x4(int32_t x, int32_t y, int32_t z, int32_t w)
-    {
-        type_ = Int32x4;
-        u.i32x4[0] = x;
-        u.i32x4[1] = y;
-        u.i32x4[2] = z;
-        u.i32x4[3] = w;
-    }
-
-    void fillFloat32x4(float x, float y, float z, float w)
-    {
-        type_ = Float32x4;
-        u.f32x4[0] = x;
-        u.f32x4[1] = y;
-        u.f32x4[2] = z;
-        u.f32x4[3] = w;
-    }
-
   public:
     // Doesn't have a default constructor, as it would prevent it from being
     // included in unions.
 
-    static SimdConstant CreateX4(int32_t x, int32_t y, int32_t z, int32_t w) {
+    static SimdConstant CreateX16(const int8_t* array) {
         SimdConstant cst;
-        cst.fillInt32x4(x, y, z, w);
+        cst.type_ = Int8x16;
+        memcpy(cst.u.i8x16, array, sizeof(cst.u));
+        return cst;
+    }
+    static SimdConstant SplatX16(int8_t v) {
+        SimdConstant cst;
+        cst.type_ = Int8x16;
+        std::fill_n(cst.u.i8x16, 16, v);
+        return cst;
+    }
+    static SimdConstant CreateX8(const int16_t* array) {
+        SimdConstant cst;
+        cst.type_ = Int16x8;
+        memcpy(cst.u.i16x8, array, sizeof(cst.u));
+        return cst;
+    }
+    static SimdConstant SplatX8(int16_t v) {
+        SimdConstant cst;
+        cst.type_ = Int16x8;
+        std::fill_n(cst.u.i16x8, 8, v);
         return cst;
     }
     static SimdConstant CreateX4(const int32_t* array) {
         SimdConstant cst;
-        cst.fillInt32x4(array[0], array[1], array[2], array[3]);
+        cst.type_ = Int32x4;
+        memcpy(cst.u.i32x4, array, sizeof(cst.u));
         return cst;
     }
     static SimdConstant SplatX4(int32_t v) {
         SimdConstant cst;
-        cst.fillInt32x4(v, v, v, v);
-        return cst;
-    }
-    static SimdConstant CreateX4(float x, float y, float z, float w) {
-        SimdConstant cst;
-        cst.fillFloat32x4(x, y, z, w);
+        cst.type_ = Int32x4;
+        std::fill_n(cst.u.i32x4, 4, v);
         return cst;
     }
     static SimdConstant CreateX4(const float* array) {
         SimdConstant cst;
-        cst.fillFloat32x4(array[0], array[1], array[2], array[3]);
+        cst.type_ = Float32x4;
+        memcpy(cst.u.f32x4, array, sizeof(cst.u));
         return cst;
     }
     static SimdConstant SplatX4(float v) {
         SimdConstant cst;
-        cst.fillFloat32x4(v, v, v, v);
+        cst.type_ = Float32x4;
+        std::fill_n(cst.u.f32x4, 4, v);
         return cst;
     }
 
-    uint32_t length() const {
-        MOZ_ASSERT(defined());
-        switch(type_) {
-          case Int32x4:
-          case Float32x4:
-            return 4;
-          case Undefined:
-            break;
-        }
-        MOZ_CRASH("Unexpected SIMD kind");
-    }
+    // Overloads for use by templates.
+    static SimdConstant CreateSimd128(const int8_t* array) { return CreateX16(array); }
+    static SimdConstant CreateSimd128(const int16_t* array) { return CreateX8(array); }
+    static SimdConstant CreateSimd128(const int32_t* array) { return CreateX4(array); }
+    static SimdConstant CreateSimd128(const float* array) { return CreateX4(array); }
 
     Type type() const {
         MOZ_ASSERT(defined());
         return type_;
+    }
+
+    // Get the raw bytes of the constant.
+    const void* bytes() const {
+        return u.i8x16;
+    }
+
+    const I8x16& asInt8x16() const {
+        MOZ_ASSERT(defined() && type_ == Int8x16);
+        return u.i8x16;
+    }
+
+    const I16x8& asInt16x8() const {
+        MOZ_ASSERT(defined() && type_ == Int16x8);
+        return u.i16x8;
     }
 
     const I32x4& asInt32x4() const {
@@ -385,42 +391,104 @@ class SimdConstant {
     }
 };
 
+enum class IntConversionBehavior {
+    // These two try to convert the input to an int32 using ToNumber and
+    // will fail if the resulting int32 isn't strictly equal to the input.
+    Normal,
+    NegativeZeroCheck,
+    // These two will convert the input to an int32 with loss of precision.
+    Truncate,
+    ClampToUint8,
+};
+
+enum class IntConversionInputKind {
+    NumbersOnly,
+    NumbersOrBoolsOnly,
+    Any
+};
+
 // The ordering of this enumeration is important: Anything < Value is a
 // specialized type. Furthermore, anything < String has trivial conversion to
 // a number.
-enum MIRType
+enum class MIRType
 {
-    MIRType_Undefined,
-    MIRType_Null,
-    MIRType_Boolean,
-    MIRType_Int32,
-    MIRType_Int64,
-    MIRType_Double,
-    MIRType_Float32,
-    MIRType_String,
-    MIRType_Symbol,
-    MIRType_Object,
-    MIRType_MagicOptimizedArguments,   // JS_OPTIMIZED_ARGUMENTS magic value.
-    MIRType_MagicOptimizedOut,         // JS_OPTIMIZED_OUT magic value.
-    MIRType_MagicHole,                 // JS_ELEMENTS_HOLE magic value.
-    MIRType_MagicIsConstructing,       // JS_IS_CONSTRUCTING magic value.
-    MIRType_MagicUninitializedLexical, // JS_UNINITIALIZED_LEXICAL magic value.
-    MIRType_Value,
-    MIRType_SinCosDouble,              // Optimizing a sin/cos to sincos.
-    MIRType_ObjectOrNull,
-    MIRType_None,                      // Invalid, used as a placeholder.
-    MIRType_Slots,                     // A slots vector
-    MIRType_Elements,                  // An elements vector
-    MIRType_Pointer,                   // An opaque pointer that receives no special treatment
-    MIRType_Shape,                     // A Shape pointer.
-    MIRType_ObjectGroup,               // An ObjectGroup pointer.
-    MIRType_Last = MIRType_ObjectGroup,
-    MIRType_Float32x4 = MIRType_Float32 | (2 << VECTOR_SCALE_SHIFT),
-    // Representing both SIMD.Int32x4 and SIMD.Uint32x4.
-    MIRType_Int32x4   = MIRType_Int32   | (2 << VECTOR_SCALE_SHIFT),
-    MIRType_Bool32x4  = MIRType_Boolean | (2 << VECTOR_SCALE_SHIFT),
-    MIRType_Doublex2  = MIRType_Double  | (1 << VECTOR_SCALE_SHIFT)
+    Undefined,
+    Null,
+    Boolean,
+    Int32,
+    Int64,
+    Double,
+    Float32,
+    // Types above have trivial conversion to a number.
+    String,
+    Symbol,
+    // Types above are primitive (including undefined and null).
+    Object,
+    MagicOptimizedArguments,   // JS_OPTIMIZED_ARGUMENTS magic value.
+    MagicOptimizedOut,         // JS_OPTIMIZED_OUT magic value.
+    MagicHole,                 // JS_ELEMENTS_HOLE magic value.
+    MagicIsConstructing,       // JS_IS_CONSTRUCTING magic value.
+    MagicUninitializedLexical, // JS_UNINITIALIZED_LEXICAL magic value.
+    // Types above are specialized.
+    Value,
+    SinCosDouble,              // Optimizing a sin/cos to sincos.
+    ObjectOrNull,
+    None,                      // Invalid, used as a placeholder.
+    Slots,                     // A slots vector
+    Elements,                  // An elements vector
+    Pointer,                   // An opaque pointer that receives no special treatment
+    Shape,                     // A Shape pointer.
+    ObjectGroup,               // An ObjectGroup pointer.
+    Last = ObjectGroup,
+    // Representing both SIMD.IntBxN and SIMD.UintBxN.
+    Int8x16   = Int32   | (4 << VECTOR_SCALE_SHIFT),
+    Int16x8   = Int32   | (3 << VECTOR_SCALE_SHIFT),
+    Int32x4   = Int32   | (2 << VECTOR_SCALE_SHIFT),
+    Float32x4 = Float32 | (2 << VECTOR_SCALE_SHIFT),
+    Bool8x16  = Boolean | (4 << VECTOR_SCALE_SHIFT),
+    Bool16x8  = Boolean | (3 << VECTOR_SCALE_SHIFT),
+    Bool32x4  = Boolean | (2 << VECTOR_SCALE_SHIFT),
+    Doublex2  = Double  | (1 << VECTOR_SCALE_SHIFT)
 };
+
+static inline bool
+IsSimdType(MIRType type)
+{
+    return ((unsigned(type) >> VECTOR_SCALE_SHIFT) & VECTOR_SCALE_MASK) != 0;
+}
+
+// Returns the number of vector elements (hereby called "length") for a given
+// SIMD kind. It is the Y part of the name "Foo x Y".
+static inline unsigned
+SimdTypeToLength(MIRType type)
+{
+    MOZ_ASSERT(IsSimdType(type));
+    return 1 << ((unsigned(type) >> VECTOR_SCALE_SHIFT) & VECTOR_SCALE_MASK);
+}
+
+// Get the type of the individual lanes in a SIMD type.
+// For example, Int32x4 -> Int32, Float32x4 -> Float32 etc.
+static inline MIRType
+SimdTypeToLaneType(MIRType type)
+{
+    MOZ_ASSERT(IsSimdType(type));
+    static_assert(unsigned(MIRType::Last) <= ELEMENT_TYPE_MASK,
+                  "ELEMENT_TYPE_MASK should be larger than the last MIRType");
+    return MIRType((unsigned(type) >> ELEMENT_TYPE_SHIFT) & ELEMENT_TYPE_MASK);
+}
+
+// Get the type expected when inserting a lane into a SIMD type.
+// This is the argument type expected by the MSimdValue constructors as well as
+// MSimdSplat and MSimdInsertElement.
+static inline MIRType
+SimdTypeToLaneArgumentType(MIRType type)
+{
+    MIRType laneType = SimdTypeToLaneType(type);
+
+    // Boolean lanes should be pre-converted to an Int32 with the values 0 or -1.
+    // All other lane types are inserted directly.
+    return laneType == MIRType::Boolean ? MIRType::Int32 : laneType;
+}
 
 static inline MIRType
 MIRTypeFromValueType(JSValueType type)
@@ -429,23 +497,23 @@ MIRTypeFromValueType(JSValueType type)
     // filtered out in MIRTypeFromValue.
     switch (type) {
       case JSVAL_TYPE_DOUBLE:
-        return MIRType_Double;
+        return MIRType::Double;
       case JSVAL_TYPE_INT32:
-        return MIRType_Int32;
+        return MIRType::Int32;
       case JSVAL_TYPE_UNDEFINED:
-        return MIRType_Undefined;
+        return MIRType::Undefined;
       case JSVAL_TYPE_STRING:
-        return MIRType_String;
+        return MIRType::String;
       case JSVAL_TYPE_SYMBOL:
-        return MIRType_Symbol;
+        return MIRType::Symbol;
       case JSVAL_TYPE_BOOLEAN:
-        return MIRType_Boolean;
+        return MIRType::Boolean;
       case JSVAL_TYPE_NULL:
-        return MIRType_Null;
+        return MIRType::Null;
       case JSVAL_TYPE_OBJECT:
-        return MIRType_Object;
+        return MIRType::Object;
       case JSVAL_TYPE_UNKNOWN:
-        return MIRType_Value;
+        return MIRType::Value;
       default:
         MOZ_CRASH("unexpected jsval type");
     }
@@ -455,29 +523,29 @@ static inline JSValueType
 ValueTypeFromMIRType(MIRType type)
 {
   switch (type) {
-    case MIRType_Undefined:
+    case MIRType::Undefined:
       return JSVAL_TYPE_UNDEFINED;
-    case MIRType_Null:
+    case MIRType::Null:
       return JSVAL_TYPE_NULL;
-    case MIRType_Boolean:
+    case MIRType::Boolean:
       return JSVAL_TYPE_BOOLEAN;
-    case MIRType_Int32:
+    case MIRType::Int32:
       return JSVAL_TYPE_INT32;
-    case MIRType_Float32: // Fall through, there's no JSVAL for Float32
-    case MIRType_Double:
+    case MIRType::Float32: // Fall through, there's no JSVAL for Float32
+    case MIRType::Double:
       return JSVAL_TYPE_DOUBLE;
-    case MIRType_String:
+    case MIRType::String:
       return JSVAL_TYPE_STRING;
-    case MIRType_Symbol:
+    case MIRType::Symbol:
       return JSVAL_TYPE_SYMBOL;
-    case MIRType_MagicOptimizedArguments:
-    case MIRType_MagicOptimizedOut:
-    case MIRType_MagicHole:
-    case MIRType_MagicIsConstructing:
-    case MIRType_MagicUninitializedLexical:
+    case MIRType::MagicOptimizedArguments:
+    case MIRType::MagicOptimizedOut:
+    case MIRType::MagicHole:
+    case MIRType::MagicIsConstructing:
+    case MIRType::MagicUninitializedLexical:
       return JSVAL_TYPE_MAGIC;
     default:
-      MOZ_ASSERT(type == MIRType_Object);
+      MOZ_ASSERT(type == MIRType::Object);
       return JSVAL_TYPE_OBJECT;
   }
 }
@@ -488,146 +556,165 @@ MIRTypeToTag(MIRType type)
     return JSVAL_TYPE_TO_TAG(ValueTypeFromMIRType(type));
 }
 
+static inline size_t
+MIRTypeToSize(MIRType type)
+{
+    switch (type) {
+      case MIRType::Int32:
+        return 4;
+      case MIRType::Int64:
+        return 8;
+      case MIRType::Float32:
+        return 4;
+      case MIRType::Double:
+        return 8;
+      case MIRType::Pointer:
+        return sizeof(uintptr_t);
+      default:
+        MOZ_CRASH("MIRTypeToSize - unhandled case");
+    }
+}
+
 static inline const char*
 StringFromMIRType(MIRType type)
 {
   switch (type) {
-    case MIRType_Undefined:
+    case MIRType::Undefined:
       return "Undefined";
-    case MIRType_Null:
+    case MIRType::Null:
       return "Null";
-    case MIRType_Boolean:
+    case MIRType::Boolean:
       return "Bool";
-    case MIRType_Int32:
+    case MIRType::Int32:
       return "Int32";
-    case MIRType_Int64:
+    case MIRType::Int64:
       return "Int64";
-    case MIRType_Double:
+    case MIRType::Double:
       return "Double";
-    case MIRType_Float32:
+    case MIRType::Float32:
       return "Float32";
-    case MIRType_String:
+    case MIRType::String:
       return "String";
-    case MIRType_Symbol:
+    case MIRType::Symbol:
       return "Symbol";
-    case MIRType_Object:
+    case MIRType::Object:
       return "Object";
-    case MIRType_MagicOptimizedArguments:
+    case MIRType::MagicOptimizedArguments:
       return "MagicOptimizedArguments";
-    case MIRType_MagicOptimizedOut:
+    case MIRType::MagicOptimizedOut:
       return "MagicOptimizedOut";
-    case MIRType_MagicHole:
+    case MIRType::MagicHole:
       return "MagicHole";
-    case MIRType_MagicIsConstructing:
+    case MIRType::MagicIsConstructing:
       return "MagicIsConstructing";
-    case MIRType_MagicUninitializedLexical:
+    case MIRType::MagicUninitializedLexical:
       return "MagicUninitializedLexical";
-    case MIRType_Value:
+    case MIRType::Value:
       return "Value";
-    case MIRType_SinCosDouble:
+    case MIRType::SinCosDouble:
       return "SinCosDouble";
-    case MIRType_ObjectOrNull:
+    case MIRType::ObjectOrNull:
       return "ObjectOrNull";
-    case MIRType_None:
+    case MIRType::None:
       return "None";
-    case MIRType_Slots:
+    case MIRType::Slots:
       return "Slots";
-    case MIRType_Elements:
+    case MIRType::Elements:
       return "Elements";
-    case MIRType_Pointer:
+    case MIRType::Pointer:
       return "Pointer";
-    case MIRType_Shape:
+    case MIRType::Shape:
       return "Shape";
-    case MIRType_ObjectGroup:
+    case MIRType::ObjectGroup:
       return "ObjectGroup";
-    case MIRType_Float32x4:
-      return "Float32x4";
-    case MIRType_Int32x4:
+    case MIRType::Int32x4:
       return "Int32x4";
-    case MIRType_Bool32x4:
+    case MIRType::Int16x8:
+      return "Int16x8";
+    case MIRType::Int8x16:
+      return "Int8x16";
+    case MIRType::Float32x4:
+      return "Float32x4";
+    case MIRType::Bool32x4:
       return "Bool32x4";
-    case MIRType_Doublex2:
+    case MIRType::Bool16x8:
+      return "Bool16x8";
+    case MIRType::Bool8x16:
+      return "Bool8x16";
+    case MIRType::Doublex2:
       return "Doublex2";
   }
   MOZ_CRASH("Unknown MIRType.");
 }
 
 static inline bool
+IsIntType(MIRType type)
+{
+    return type == MIRType::Int32 ||
+           type == MIRType::Int64;
+}
+
+static inline bool
 IsNumberType(MIRType type)
 {
-    return type == MIRType_Int32 ||
-           type == MIRType_Double ||
-           type == MIRType_Float32 ||
-           type == MIRType_Int64;
+    return type == MIRType::Int32 ||
+           type == MIRType::Double ||
+           type == MIRType::Float32 ||
+           type == MIRType::Int64;
 }
 
 static inline bool
 IsTypeRepresentableAsDouble(MIRType type)
 {
-    return type == MIRType_Int32 ||
-           type == MIRType_Double ||
-           type == MIRType_Float32;
+    return type == MIRType::Int32 ||
+           type == MIRType::Double ||
+           type == MIRType::Float32;
 }
 
 static inline bool
 IsFloatType(MIRType type)
 {
-    return type == MIRType_Int32 || type == MIRType_Float32;
+    return type == MIRType::Int32 || type == MIRType::Float32;
 }
 
 static inline bool
 IsFloatingPointType(MIRType type)
 {
-    return type == MIRType_Double || type == MIRType_Float32;
+    return type == MIRType::Double || type == MIRType::Float32;
 }
 
 static inline bool
 IsNullOrUndefined(MIRType type)
 {
-    return type == MIRType_Null || type == MIRType_Undefined;
-}
-
-static inline bool
-IsSimdType(MIRType type)
-{
-    return type == MIRType_Int32x4 || type == MIRType_Float32x4 || type == MIRType_Bool32x4;
+    return type == MIRType::Null || type == MIRType::Undefined;
 }
 
 static inline bool
 IsFloatingPointSimdType(MIRType type)
 {
-    return type == MIRType_Float32x4;
+    return type == MIRType::Float32x4;
 }
 
 static inline bool
 IsIntegerSimdType(MIRType type)
 {
-    return type == MIRType_Int32x4;
+    return IsSimdType(type) && SimdTypeToLaneType(type) == MIRType::Int32;
 }
 
 static inline bool
 IsBooleanSimdType(MIRType type)
 {
-    return type == MIRType_Bool32x4;
+    return IsSimdType(type) && SimdTypeToLaneType(type) == MIRType::Boolean;
 }
 
 static inline bool
 IsMagicType(MIRType type)
 {
-    return type == MIRType_MagicHole ||
-           type == MIRType_MagicOptimizedOut ||
-           type == MIRType_MagicIsConstructing ||
-           type == MIRType_MagicOptimizedArguments ||
-           type == MIRType_MagicUninitializedLexical;
-}
-
-// Returns the number of vector elements (hereby called "length") for a given
-// SIMD kind. It is the Y part of the name "Foo x Y".
-static inline unsigned
-SimdTypeToLength(MIRType type)
-{
-    MOZ_ASSERT(IsSimdType(type));
-    return 1 << ((type >> VECTOR_SCALE_SHIFT) & VECTOR_SCALE_MASK);
+    return type == MIRType::MagicHole ||
+           type == MIRType::MagicOptimizedOut ||
+           type == MIRType::MagicIsConstructing ||
+           type == MIRType::MagicOptimizedArguments ||
+           type == MIRType::MagicUninitializedLexical;
 }
 
 static inline MIRType
@@ -641,15 +728,21 @@ ScalarTypeToMIRType(Scalar::Type type)
       case Scalar::Int32:
       case Scalar::Uint32:
       case Scalar::Uint8Clamped:
-        return MIRType_Int32;
+        return MIRType::Int32;
+      case Scalar::Int64:
+        return MIRType::Int64;
       case Scalar::Float32:
-        return MIRType_Float32;
+        return MIRType::Float32;
       case Scalar::Float64:
-        return MIRType_Double;
+        return MIRType::Double;
       case Scalar::Float32x4:
-        return MIRType_Float32x4;
+        return MIRType::Float32x4;
+      case Scalar::Int8x16:
+        return MIRType::Int8x16;
+      case Scalar::Int16x8:
+        return MIRType::Int16x8;
       case Scalar::Int32x4:
-        return MIRType_Int32x4;
+        return MIRType::Int32x4;
       case Scalar::MaxTypedArrayViewType:
         break;
     }
@@ -666,6 +759,7 @@ ScalarTypeToLength(Scalar::Type type)
       case Scalar::Uint16:
       case Scalar::Int32:
       case Scalar::Uint32:
+      case Scalar::Int64:
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Uint8Clamped:
@@ -673,44 +767,24 @@ ScalarTypeToLength(Scalar::Type type)
       case Scalar::Float32x4:
       case Scalar::Int32x4:
         return 4;
+      case Scalar::Int16x8:
+        return 8;
+      case Scalar::Int8x16:
+        return 16;
       case Scalar::MaxTypedArrayViewType:
         break;
     }
     MOZ_CRASH("unexpected SIMD kind");
 }
 
-// Get the type of the individual lanes in a SIMD type.
-// For example, Int32x4 -> Int32, Float32x4 -> Float32 etc.
-static inline MIRType
-SimdTypeToLaneType(MIRType type)
+static inline const char*
+PropertyNameToExtraName(PropertyName* name)
 {
-    MOZ_ASSERT(IsSimdType(type));
-    static_assert(MIRType_Last <= ELEMENT_TYPE_MASK,
-                  "ELEMENT_TYPE_MASK should be larger than the last MIRType");
-    return MIRType((type >> ELEMENT_TYPE_SHIFT) & ELEMENT_TYPE_MASK);
+    JS::AutoCheckCannotGC nogc;
+    if (!name->hasLatin1Chars())
+        return nullptr;
+    return reinterpret_cast<const char *>(name->latin1Chars(nogc));
 }
-
-// Get the type expected when inserting a lane into a SIMD type.
-// This is the argument type expected by the MSimdValue constructors as well as
-// MSimdSplat and MSimdInsertElement.
-static inline MIRType
-SimdTypeToLaneArgumentType(MIRType type)
-{
-    MIRType laneType = SimdTypeToLaneType(type);
-
-    // Boolean lanes should be pre-converted to an Int32 with the values 0 or -1.
-    // All other lane types are inserted directly.
-    return laneType == MIRType_Boolean ? MIRType_Int32 : laneType;
-}
-
-// Indicates a lane in a SIMD register: X for the first lane, Y for the second,
-// Z for the third (if any), W for the fourth (if any).
-enum SimdLane {
-    LaneX = 0x0,
-    LaneY = 0x1,
-    LaneZ = 0x2,
-    LaneW = 0x3
-};
 
 #ifdef DEBUG
 
@@ -723,14 +797,15 @@ enum SimdLane {
 
 #endif // DEBUG
 
-enum {
+enum ABIArgType {
     ArgType_General = 0x1,
     ArgType_Double  = 0x2,
     ArgType_Float32 = 0x3,
+    ArgType_Int64   = 0x4,
 
     RetType_Shift   = 0x0,
-    ArgType_Shift   = 0x2,
-    ArgType_Mask    = 0x3
+    ArgType_Shift   = 0x3,
+    ArgType_Mask    = 0x7
 };
 
 enum ABIFunctionType
@@ -747,6 +822,9 @@ enum ABIFunctionType
     Args_General7 = Args_General6 | (ArgType_General << (ArgType_Shift * 7)),
     Args_General8 = Args_General7 | (ArgType_General << (ArgType_Shift * 8)),
 
+    // int64 f(double)
+    Args_Int64_Double = (ArgType_Int64 << RetType_Shift) | (ArgType_Double << ArgType_Shift),
+
     // double f()
     Args_Double_None = ArgType_Double << RetType_Shift,
 
@@ -756,11 +834,19 @@ enum ABIFunctionType
     // float f(float)
     Args_Float32_Float32 = (ArgType_Float32 << RetType_Shift) | (ArgType_Float32 << ArgType_Shift),
 
+    // float f(int, int)
+    Args_Float32_IntInt = (ArgType_Float32 << RetType_Shift) |
+        (ArgType_General << (ArgType_Shift * 1)) |
+        (ArgType_General << (ArgType_Shift * 2)),
+
     // double f(double)
     Args_Double_Double = Args_Double_None | (ArgType_Double << ArgType_Shift),
 
     // double f(int)
     Args_Double_Int = Args_Double_None | (ArgType_General << ArgType_Shift),
+
+    // double f(int, int)
+    Args_Double_IntInt = Args_Double_Int | (ArgType_General << (ArgType_Shift * 2)),
 
     // double f(double, int)
     Args_Double_DoubleInt = Args_Double_None |
@@ -769,6 +855,9 @@ enum ABIFunctionType
 
     // double f(double, double)
     Args_Double_DoubleDouble = Args_Double_Double | (ArgType_Double << (ArgType_Shift * 2)),
+
+    // float f(float, float)
+    Args_Float32_Float32Float32 = Args_Float32_Float32 | (ArgType_Float32 << (ArgType_Shift * 2)),
 
     // double f(int, double)
     Args_Double_IntDouble = Args_Double_None |
@@ -797,8 +886,19 @@ enum ABIFunctionType
         (ArgType_General << (ArgType_Shift * 1)) |
         (ArgType_General << (ArgType_Shift * 2)) |
         (ArgType_Double  << (ArgType_Shift * 3)) |
-        (ArgType_General << (ArgType_Shift * 4))
+        (ArgType_General << (ArgType_Shift * 4)),
 
+    Args_Int_GeneralGeneralGeneralInt64 = Args_General0 |
+        (ArgType_General << (ArgType_Shift * 1)) |
+        (ArgType_General << (ArgType_Shift * 2)) |
+        (ArgType_General << (ArgType_Shift * 3)) |
+        (ArgType_Int64 << (ArgType_Shift * 4)),
+
+    Args_Int_GeneralGeneralInt64Int64 = Args_General0 |
+        (ArgType_General << (ArgType_Shift * 1)) |
+        (ArgType_General << (ArgType_Shift * 2)) |
+        (ArgType_Int64 << (ArgType_Shift * 3)) |
+        (ArgType_Int64 << (ArgType_Shift * 4))
 };
 
 enum class BarrierKind : uint32_t {
@@ -815,6 +915,24 @@ enum class BarrierKind : uint32_t {
 };
 
 enum ReprotectCode { Reprotect = true, DontReprotect = false };
+
+// Rounding modes for round instructions.
+enum class RoundingMode {
+    Down,
+    Up,
+    NearestTiesToEven,
+    TowardsZero
+};
+
+// If a function contains no calls, we can assume the caller has checked the
+// stack limit up to this maximum frame size. This works because the jit stack
+// limit has a generous buffer before the real end of the native stack.
+static const uint32_t MAX_UNCHECKED_LEAF_FRAME_SIZE = 64;
+
+// Truncating conversion modifiers.
+typedef uint32_t TruncFlags;
+static const TruncFlags TRUNC_UNSIGNED   = TruncFlags(1) << 0;
+static const TruncFlags TRUNC_SATURATING = TruncFlags(1) << 1;
 
 } // namespace jit
 } // namespace js

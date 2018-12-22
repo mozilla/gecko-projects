@@ -9,6 +9,8 @@
 /* globals document, window */
 "use strict";
 
+const {setTooltipVariableContent} = require("devtools/client/shared/widgets/tooltip/VariableContentHelper");
+
 /**
  * Functions handling the variables bubble UI.
  */
@@ -26,15 +28,26 @@ function VariableBubbleView(DebuggerController, DebuggerView) {
 
 VariableBubbleView.prototype = {
   /**
+   * Delay before showing the variables bubble tooltip when hovering a valid
+   * target.
+   */
+  TOOLTIP_SHOW_DELAY: 750,
+
+  /**
+   * Tooltip position for the variables bubble tooltip.
+   */
+  TOOLTIP_POSITION: "topcenter bottomleft",
+
+  /**
    * Initialization function, called when the debugger is started.
    */
-  initialize: function() {
+  initialize: function () {
     dumpn("Initializing the VariableBubbleView");
 
     this._toolbox = DebuggerController._toolbox;
     this._editorContainer = document.getElementById("editor");
-    this._editorContainer.addEventListener("mousemove", this._onMouseMove, false);
-    this._editorContainer.addEventListener("mouseout", this._onMouseOut, false);
+    this._editorContainer.addEventListener("mousemove", this._onMouseMove);
+    this._editorContainer.addEventListener("mouseout", this._onMouseOut);
 
     this._tooltip = new Tooltip(document, {
       closeOnEvents: [{
@@ -49,20 +62,19 @@ VariableBubbleView.prototype = {
         event: "keydown"
       }]
     });
-    this._tooltip.defaultPosition = EDITOR_VARIABLE_POPUP_POSITION;
-    this._tooltip.defaultShowDelay = EDITOR_VARIABLE_HOVER_DELAY;
+    this._tooltip.defaultPosition = this.TOOLTIP_POSITION;
     this._tooltip.panel.addEventListener("popuphiding", this._onPopupHiding);
   },
 
   /**
    * Destruction function, called when the debugger is closed.
    */
-  destroy: function() {
+  destroy: function () {
     dumpn("Destroying the VariableBubbleView");
 
     this._tooltip.panel.removeEventListener("popuphiding", this._onPopupHiding);
-    this._editorContainer.removeEventListener("mousemove", this._onMouseMove, false);
-    this._editorContainer.removeEventListener("mouseout", this._onMouseOut, false);
+    this._editorContainer.removeEventListener("mousemove", this._onMouseMove);
+    this._editorContainer.removeEventListener("mouseout", this._onMouseOut);
   },
 
   /**
@@ -78,7 +90,7 @@ VariableBubbleView.prototype = {
    * @param number x, y
    *        The left/top coordinates where to look for an identifier.
    */
-  _findIdentifier: function(x, y) {
+  _findIdentifier: function (x, y) {
     let editor = this.DebuggerView.editor;
 
     // Calculate the editor's line and column at the current x and y coords.
@@ -144,7 +156,7 @@ VariableBubbleView.prototype = {
           dumpn(msg);
         }
       })
-      .then(null, err => {
+      .catch(err => {
         let msg = "Couldn't evaluate: " + err.message;
         console.error(msg);
         dumpn(msg);
@@ -161,7 +173,7 @@ VariableBubbleView.prototype = {
    *          - evalPrefix: a prefix for the variables view evaluation macros.
    *          - objectActor: the value grip for the object actor.
    */
-  showContents: function({ coords, evalPrefix, objectActor }) {
+  showContents: function ({ coords, evalPrefix, objectActor }) {
     let editor = this.DebuggerView.editor;
     let { line, column, length } = coords;
 
@@ -180,7 +192,7 @@ VariableBubbleView.prototype = {
         messagesClass: className,
         containerClass: "plain"
       }, [{
-        label: L10N.getStr('addWatchExpressionButton'),
+        label: L10N.getStr("addWatchExpressionButton"),
         className: "dbg-expression-button",
         command: () => {
           this.DebuggerView.VariableBubble.hideContents();
@@ -188,7 +200,7 @@ VariableBubbleView.prototype = {
         }
       }]);
     } else {
-      this._tooltip.setVariableContent(objectActor, {
+      setTooltipVariableContent(this._tooltip, objectActor, {
         searchPlaceholder: L10N.getStr("emptyPropertiesFilterText"),
         searchEnabled: Prefs.variablesSearchboxVisible,
         eval: (variable, value) => {
@@ -203,7 +215,7 @@ VariableBubbleView.prototype = {
         getterOrSetterEvalMacro: this._getGetterOrSetterEvalMacro(evalPrefix),
         overrideValueEvalMacro: this._getOverrideValueEvalMacro(evalPrefix)
       }, {
-        fetched: (aEvent, aType) => {
+        fetched: aType => {
           if (aType == "properties") {
             window.emit(EVENTS.FETCHED_BUBBLE_PROPERTIES);
           }
@@ -224,7 +236,7 @@ VariableBubbleView.prototype = {
   /**
    * Hides the inspection popup.
    */
-  hideContents: function() {
+  hideContents: function () {
     clearNamedTimeout("editor-mouse-move");
     this._tooltip.hide();
   },
@@ -235,7 +247,7 @@ VariableBubbleView.prototype = {
    * @return boolean
    *         True if the panel is shown or showing, false otherwise.
    */
-  contentsShown: function() {
+  contentsShown: function () {
     return this._tooltip.isShown();
   },
 
@@ -245,15 +257,15 @@ VariableBubbleView.prototype = {
    * @param string aPrefix
    *        See the corresponding VariablesView.* functions.
    */
-  _getSimpleValueEvalMacro: function(aPrefix) {
+  _getSimpleValueEvalMacro: function (aPrefix) {
     return (item, string) =>
       VariablesView.simpleValueEvalMacro(item, string, aPrefix);
   },
-  _getGetterOrSetterEvalMacro: function(aPrefix) {
+  _getGetterOrSetterEvalMacro: function (aPrefix) {
     return (item, string) =>
       VariablesView.getterOrSetterEvalMacro(item, string, aPrefix);
   },
-  _getOverrideValueEvalMacro: function(aPrefix) {
+  _getOverrideValueEvalMacro: function (aPrefix) {
     return (item, string) =>
       VariablesView.overrideValueEvalMacro(item, string, aPrefix);
   },
@@ -261,7 +273,7 @@ VariableBubbleView.prototype = {
   /**
    * The mousemove listener for the source editor.
    */
-  _onMouseMove: function(e) {
+  _onMouseMove: function (e) {
     // Prevent the variable inspection popup from showing when the thread client
     // is not paused, or while a popup is already visible, or when the user tries
     // to select text in the editor.
@@ -275,20 +287,20 @@ VariableBubbleView.prototype = {
     // Allow events to settle down first. If the mouse hovers over
     // a certain point in the editor long enough, try showing a variable bubble.
     setNamedTimeout("editor-mouse-move",
-      EDITOR_VARIABLE_HOVER_DELAY, () => this._findIdentifier(e.clientX, e.clientY));
+      this.TOOLTIP_SHOW_DELAY, () => this._findIdentifier(e.clientX, e.clientY));
   },
 
   /**
    * The mouseout listener for the source editor container node.
    */
-  _onMouseOut: function() {
+  _onMouseOut: function () {
     clearNamedTimeout("editor-mouse-move");
   },
 
   /**
    * Listener handling the popup hiding event.
    */
-  _onPopupHiding: function({ target }) {
+  _onPopupHiding: function ({ target }) {
     if (this._tooltip.panel != target) {
       return;
     }

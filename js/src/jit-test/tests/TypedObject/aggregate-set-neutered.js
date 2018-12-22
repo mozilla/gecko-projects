@@ -9,20 +9,17 @@ load(libdir + "asserts.js")
 var StructType = TypedObject.StructType;
 var uint32 = TypedObject.uint32;
 
-function main(variant)
+function main()
 {
   var Point = new StructType({ x: uint32, y: uint32 });
   var Line = new StructType({ from: Point, to: Point });
 
-  var buf = new ArrayBuffer(16);
-  var line = new Line(buf);
+  var line = new Line();
 
-  assertThrowsInstanceOf(function()
-  {
-    line.to = { x: 22,
-                get y() { detachArrayBuffer(buf, variant); return 44; } };
-  }, TypeError, "setting into a detached buffer is bad mojo");
+  line.to = { x: 22, get y() { return 44; } };
+
+  assertEq(line.to.x, 22);
+  assertEq(line.to.y, 44);
 }
 
-main("same-data");
-main("change-data");
+main();

@@ -20,7 +20,7 @@ import ch.boye.httpclientandroidlib.client.methods.HttpRequestBase;
 import ch.boye.httpclientandroidlib.impl.client.DefaultHttpClient;
 
 public class SyncStorageRequest implements Resource {
-  public static HashMap<String, String> SERVER_ERROR_MESSAGES;
+  public static final HashMap<String, String> SERVER_ERROR_MESSAGES;
   static {
     HashMap<String, String> errors = new HashMap<String, String>();
 
@@ -95,7 +95,7 @@ public class SyncStorageRequest implements Resource {
   /**
    * A ResourceDelegate that mediates between Resource-level notifications and the SyncStorageRequest.
    */
-  public class SyncStorageResourceDelegate extends BaseResourceDelegate {
+  public static class SyncStorageResourceDelegate extends BaseResourceDelegate {
     private static final String LOG_TAG = "SSResourceDelegate";
     protected SyncStorageRequest request;
 
@@ -120,7 +120,9 @@ public class SyncStorageRequest implements Resource {
       SyncStorageRequestDelegate d = this.request.delegate;
       SyncStorageResponse res = new SyncStorageResponse(response);
       // It is the responsibility of the delegate handlers to completely consume the response.
-      if (res.wasSuccessful()) {
+      // In context of a Sync storage response, success is either a 200 OK or 202 Accepted.
+      // 202 is returned during uploads of data in a batching mode, indicating that more is expected.
+      if (res.getStatusCode() == 200 || res.getStatusCode() == 202) {
         d.handleRequestSuccess(res);
       } else {
         Logger.warn(LOG_TAG, "HTTP request failed.");
@@ -156,19 +158,12 @@ public class SyncStorageRequest implements Resource {
         Logger.debug(LOG_TAG, "Making request with X-If-Unmodified-Since = " + ifUnmodifiedSince);
         request.setHeader("x-if-unmodified-since", ifUnmodifiedSince);
       }
-      if (request.getMethod().equalsIgnoreCase("DELETE")) {
-        request.addHeader("x-confirm-delete", "1");
-      }
     }
   }
 
   protected BaseResourceDelegate resourceDelegate;
   public SyncStorageRequestDelegate delegate;
   protected BaseResource resource;
-
-  public SyncStorageRequest() {
-    super();
-  }
 
   // Default implementation. Override this.
   protected BaseResourceDelegate makeResourceDelegate(SyncStorageRequest request) {

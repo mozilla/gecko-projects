@@ -1,10 +1,14 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files('nsBlock*'):
+    # Parts of these files are really Layout: Floats
+    BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
+
+with Files('Block*'):
     # Parts of these files are really Layout: Floats
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
@@ -15,7 +19,7 @@ with Files('nsLine*'):
 with Files('nsInlineFrame.*'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
-with Files('nsBRFrame.*'):
+with Files('BRFrame.*'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 
 with Files('nsBulletFrame.*'):
@@ -54,14 +58,16 @@ with Files('nsImage*'):
 with Files('nsAbsoluteContainingBlock.*'):
     BUG_COMPONENT = ('Core', 'Layout: R & A Pos')
 
+with Files('Sticky*'):
+    BUG_COMPONENT = ('Core', 'Layout: R & A Pos')
+
 with Files('nsPluginFrame.*'):
     BUG_COMPONENT = ('Core', 'Plug-ins')
 
 with Files('nsVideoFrame.*'):
-    BUG_COMPONENT = ('Core', 'Video/Audio')
+    BUG_COMPONENT = ('Core', 'Audio/Video')
 
 EXPORTS += [
-    'AsyncScrollBase.h',
     'nsCanvasFrame.h',
     'nsContainerFrame.h',
     'nsDirection.h',
@@ -72,12 +78,9 @@ EXPORTS += [
     'nsFrameState.h',
     'nsFrameStateBits.h',
     'nsHTMLParts.h',
-    'nsHTMLReflowMetrics.h',
-    'nsHTMLReflowState.h',
     'nsIAnonymousContentCreator.h',
     'nsIFrame.h',
     'nsIFrameInlines.h',
-    'nsIFrameUtil.h',
     'nsILineIterator.h',
     'nsIObjectFrame.h',
     'nsIPageSequenceFrame.h',
@@ -93,19 +96,26 @@ EXPORTS += [
     'nsRubyTextFrame.h',
     'nsSplittableFrame.h',
     'nsSubDocumentFrame.h',
+    'nsTextFrameUtils.h',
     'nsTextRunTransformations.h',
     'RubyUtils.h',
+    'ScrollAnimationBezierPhysics.h',
+    'ScrollAnimationMSDPhysics.h',
+    'ScrollAnimationPhysics.h',
     'ScrollbarActivity.h',
     'ScrollSnap.h',
+    'TextDrawTarget.h',
     'Visibility.h',
 ]
 
 EXPORTS.mozilla += [
+    'CSSAlignUtils.h',
+    'CSSOrderAwareFrameIterator.h',
+    'FrameTypeList.h',
+    'ReflowInput.h',
+    'ReflowOutput.h',
+    'ViewportFrame.h',
     'WritingModes.h',
-]
-
-EXPORTS.mozilla.dom += [
-    'Selection.h',
 ]
 
 EXPORTS.mozilla.layout += [
@@ -113,7 +123,10 @@ EXPORTS.mozilla.layout += [
 ]
 
 UNIFIED_SOURCES += [
-    'AsyncScrollBase.cpp',
+    'BlockReflowInput.cpp',
+    'BRFrame.cpp',
+    'CSSAlignUtils.cpp',
+    'CSSOrderAwareFrameIterator.cpp',
     'DetailsFrame.cpp',
     'FrameChildList.cpp',
     'MathMLTextRunFactory.cpp',
@@ -121,8 +134,6 @@ UNIFIED_SOURCES += [
     'nsBackdropFrame.cpp',
     'nsBlockFrame.cpp',
     'nsBlockReflowContext.cpp',
-    'nsBlockReflowState.cpp',
-    'nsBRFrame.cpp',
     'nsBulletFrame.cpp',
     'nsCanvasFrame.cpp',
     'nsColumnSetFrame.cpp',
@@ -133,20 +144,19 @@ UNIFIED_SOURCES += [
     'nsFontInflationData.cpp',
     'nsFrame.cpp',
     'nsFrameList.cpp',
+    'nsFrameSelection.cpp',
     'nsFrameSetFrame.cpp',
     'nsFrameState.cpp',
-    'nsFrameUtil.cpp',
     'nsGfxScrollFrame.cpp',
     'nsGridContainerFrame.cpp',
     'nsHTMLCanvasFrame.cpp',
-    'nsHTMLReflowMetrics.cpp',
-    'nsHTMLReflowState.cpp',
     'nsImageFrame.cpp',
     'nsImageMap.cpp',
     'nsInlineFrame.cpp',
     'nsIntervalSet.cpp',
     'nsLeafFrame.cpp',
     'nsLineBox.cpp',
+    'nsLineLayout.cpp',
     'nsPageContentFrame.cpp',
     'nsPageFrame.cpp',
     'nsPlaceholderFrame.cpp',
@@ -156,7 +166,6 @@ UNIFIED_SOURCES += [
     'nsRubyFrame.cpp',
     'nsRubyTextContainerFrame.cpp',
     'nsRubyTextFrame.cpp',
-    'nsSelection.cpp',
     'nsSimplePageSequenceFrame.cpp',
     'nsSplittableFrame.cpp',
     'nsSubDocumentFrame.cpp',
@@ -164,20 +173,21 @@ UNIFIED_SOURCES += [
     'nsTextFrameUtils.cpp',
     'nsTextRunTransformations.cpp',
     'nsVideoFrame.cpp',
-    'nsViewportFrame.cpp',
+    'ReflowInput.cpp',
+    'ReflowOutput.cpp',
     'RubyUtils.cpp',
+    'ScrollAnimationBezierPhysics.cpp',
+    'ScrollAnimationMSDPhysics.cpp',
     'ScrollbarActivity.cpp',
     'ScrollSnap.cpp',
     'ScrollVelocityQueue.cpp',
     'StickyScrollContainer.cpp',
-    'SummaryFrame.cpp',
     'TextOverflow.cpp',
+    'ViewportFrame.cpp',
 ]
 
-# nsLineLayout.cpp needs to be built separately because it uses plarena.h.
 # nsPluginFrame.cpp needs to be built separately because of name clashes in the OS X headers.
 SOURCES += [
-    'nsLineLayout.cpp',
     'nsPluginFrame.cpp',
 ]
 
@@ -189,19 +199,20 @@ LOCAL_INCLUDES += [
     '../../dom/plugins/base',
     '../base',
     '../forms',
+    '../painting',
     '../style',
     '../svg',
     '../tables',
     '../xul',
+    '/docshell/base',
     '/dom/base',
     '/dom/html',
     '/dom/xul',
-    '/editor/libeditor'
 ]
 
 JAR_MANIFESTS += ['jar.mn']
 
-RESOURCE_FILES.html = [
+CONTENT_ACCESSIBLE_FILES.html = [
     'folder.png',
 ]
 
@@ -213,5 +224,5 @@ CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
 
-if CONFIG['MOZ_ENABLE_QT']:
-    CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

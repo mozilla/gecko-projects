@@ -23,8 +23,9 @@
 
 #include "nsBinaryStream.h"
 
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 
 #include "nsCRT.h"
@@ -40,6 +41,26 @@
 using mozilla::MakeUnique;
 using mozilla::PodCopy;
 using mozilla::UniquePtr;
+
+already_AddRefed<nsIObjectOutputStream>
+NS_NewObjectOutputStream(nsIOutputStream* aOutputStream)
+{
+  MOZ_ASSERT(aOutputStream);
+  auto stream = mozilla::MakeRefPtr<nsBinaryOutputStream>();
+
+  MOZ_ALWAYS_SUCCEEDS(stream->SetOutputStream(aOutputStream));
+  return stream.forget();
+}
+
+already_AddRefed<nsIObjectInputStream>
+NS_NewObjectInputStream(nsIInputStream* aInputStream)
+{
+  MOZ_ASSERT(aInputStream);
+  auto stream = mozilla::MakeRefPtr<nsBinaryInputStream>();
+
+  MOZ_ALWAYS_SUCCEEDS(stream->SetInputStream(aInputStream));
+  return stream.forget();
+}
 
 NS_IMPL_ISUPPORTS(nsBinaryOutputStream,
                   nsIObjectOutputStream,
@@ -78,7 +99,7 @@ NS_IMETHODIMP
 nsBinaryOutputStream::WriteFrom(nsIInputStream* aInStr, uint32_t aCount,
                                 uint32_t* aResult)
 {
-  NS_NOTREACHED("WriteFrom");
+  MOZ_ASSERT_UNREACHABLE("WriteFrom");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -86,7 +107,7 @@ NS_IMETHODIMP
 nsBinaryOutputStream::WriteSegments(nsReadSegmentFun aReader, void* aClosure,
                                     uint32_t aCount, uint32_t* aResult)
 {
-  NS_NOTREACHED("WriteSegments");
+  MOZ_ASSERT_UNREACHABLE("WriteSegments");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -176,15 +197,15 @@ nsBinaryOutputStream::Write64(uint64_t aNum)
 NS_IMETHODIMP
 nsBinaryOutputStream::WriteFloat(float aFloat)
 {
-  NS_ASSERTION(sizeof(float) == sizeof(uint32_t),
-               "False assumption about sizeof(float)");
+  static_assert(sizeof(float) == sizeof(uint32_t),
+                "False assumption about sizeof(float)");
   return Write32(*reinterpret_cast<uint32_t*>(&aFloat));
 }
 
 NS_IMETHODIMP
 nsBinaryOutputStream::WriteDouble(double aDouble)
 {
-  NS_ASSERTION(sizeof(double) == sizeof(uint64_t),
+  static_assert(sizeof(double) == sizeof(uint64_t),
                "False assumption about sizeof(double)");
   return Write64(*reinterpret_cast<uint64_t*>(&aDouble));
 }
@@ -349,11 +370,9 @@ nsBinaryOutputStream::WriteID(const nsIID& aIID)
     return rv;
   }
 
-  for (int i = 0; i < 8; ++i) {
-    rv = Write8(aIID.m3[i]);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+  rv = WriteBytes(reinterpret_cast<const char*>(&aIID.m3[0]), sizeof(aIID.m3));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
-    }
   }
 
   return NS_OK;
@@ -438,7 +457,7 @@ struct MOZ_STACK_CLASS ReadSegmentsClosure
 };
 
 // the thunking function
-static NS_METHOD
+static nsresult
 ReadSegmentForwardingThunk(nsIInputStream* aStream,
                            void* aClosure,
                            const char* aFromSegment,
@@ -604,20 +623,20 @@ nsBinaryInputStream::Read64(uint64_t* aNum)
 NS_IMETHODIMP
 nsBinaryInputStream::ReadFloat(float* aFloat)
 {
-  NS_ASSERTION(sizeof(float) == sizeof(uint32_t),
-               "False assumption about sizeof(float)");
+  static_assert(sizeof(float) == sizeof(uint32_t),
+                "False assumption about sizeof(float)");
   return Read32(reinterpret_cast<uint32_t*>(aFloat));
 }
 
 NS_IMETHODIMP
 nsBinaryInputStream::ReadDouble(double* aDouble)
 {
-  NS_ASSERTION(sizeof(double) == sizeof(uint64_t),
+  static_assert(sizeof(double) == sizeof(uint64_t),
                "False assumption about sizeof(double)");
   return Read64(reinterpret_cast<uint64_t*>(aDouble));
 }
 
-static NS_METHOD
+static nsresult
 WriteSegmentToCString(nsIInputStream* aStream,
                       void* aClosure,
                       const char* aFromSegment,
@@ -684,7 +703,7 @@ struct WriteStringClosure
 
 
 // same version of the above, but with correct casting and endian swapping
-static NS_METHOD
+static nsresult
 WriteSegmentToString(nsIInputStream* aStream,
                      void* aClosure,
                      const char* aFromSegment,
@@ -692,8 +711,8 @@ WriteSegmentToString(nsIInputStream* aStream,
                      uint32_t aCount,
                      uint32_t* aWriteCount)
 {
-  NS_PRECONDITION(aCount > 0, "Why are we being told to write 0 bytes?");
-  NS_PRECONDITION(sizeof(char16_t) == 2, "We can't handle other sizes!");
+  MOZ_ASSERT(aCount > 0, "Why are we being told to write 0 bytes?");
+  static_assert(sizeof(char16_t) == 2, "We can't handle other sizes!");
 
   WriteStringClosure* closure = static_cast<WriteStringClosure*>(aClosure);
   char16_t* cursor = closure->mWriteCursor;
@@ -988,11 +1007,14 @@ nsBinaryInputStream::ReadID(nsID* aResult)
     return rv;
   }
 
-  for (int i = 0; i < 8; ++i) {
-    rv = Read8(&aResult->m3[i]);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+  const uint32_t toRead = sizeof(aResult->m3);
+  uint32_t bytesRead = 0;
+  rv = Read(reinterpret_cast<char*>(&aResult->m3[0]), toRead, &bytesRead);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  if (bytesRead != toRead) {
+    return NS_ERROR_FAILURE;
   }
 
   return NS_OK;

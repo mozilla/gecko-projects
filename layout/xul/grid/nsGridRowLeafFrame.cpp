@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,10 +21,10 @@ already_AddRefed<nsBoxLayout> NS_NewGridRowLeafLayout();
 
 nsIFrame*
 NS_NewGridRowLeafFrame(nsIPresShell* aPresShell,
-                       nsStyleContext* aContext)
+                       ComputedStyle* aStyle)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewGridRowLeafLayout();
-  return new (aPresShell) nsGridRowLeafFrame(aContext, false, layout);
+  return new (aPresShell) nsGridRowLeafFrame(aStyle, false, layout);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridRowLeafFrame)
@@ -33,22 +34,22 @@ NS_IMPL_FRAMEARENA_HELPERS(nsGridRowLeafFrame)
  * Let's go check it out.
  */
 nsresult
-nsGridRowLeafFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
+nsGridRowLeafFrame::GetXULBorderAndPadding(nsMargin& aBorderAndPadding)
 {
   // if our columns have made our padding larger add it in.
-  nsresult rv = nsBoxFrame::GetBorderAndPadding(aBorderAndPadding);
+  nsresult rv = nsBoxFrame::GetXULBorderAndPadding(aBorderAndPadding);
 
   nsIGridPart* part = nsGrid::GetPartFromBox(this);
   if (!part)
     return rv;
-    
+
   int32_t index = 0;
   nsGrid* grid = part->GetGrid(this, &index);
 
-  if (!grid) 
+  if (!grid)
     return rv;
 
-  bool isHorizontal = IsHorizontal();
+  bool isHorizontal = IsXULHorizontal();
 
   int32_t firstIndex = 0;
   int32_t lastIndex = 0;
@@ -58,7 +59,7 @@ nsGridRowLeafFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
 
   // only the first and last rows can be affected.
   if (firstRow && firstRow->GetBox() == this) {
-    
+
     nscoord top = 0;
     nscoord bottom = 0;
     grid->GetRowOffsets(firstIndex, top, bottom, isHorizontal);
@@ -69,11 +70,11 @@ nsGridRowLeafFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
     } else {
       if (top > aBorderAndPadding.left)
         aBorderAndPadding.left = top;
-    } 
+    }
   }
 
   if (lastRow && lastRow->GetBox() == this) {
-    
+
     nscoord top = 0;
     nscoord bottom = 0;
     grid->GetRowOffsets(lastIndex, top, bottom, isHorizontal);
@@ -85,9 +86,9 @@ nsGridRowLeafFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
       if (bottom > aBorderAndPadding.right)
         aBorderAndPadding.right = bottom;
     }
-    
-  }  
-  
+
+  }
+
   return rv;
 }
 

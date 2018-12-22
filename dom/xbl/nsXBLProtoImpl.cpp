@@ -12,11 +12,9 @@
 #include "nsContentUtils.h"
 #include "nsIXPConnect.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMNode.h"
 #include "nsXBLPrototypeBinding.h"
 #include "nsXBLProtoImplProperty.h"
 #include "nsIURI.h"
-#include "mozilla/AddonPathService.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/XULElementBinding.h"
 #include "xpcpublic.h"
@@ -81,15 +79,14 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
   // bother about the field accessors here, since we don't use/support those
   // for in-content bindings.
 
-  // First, start by entering the compartment of the XBL scope. This may or may
-  // not be the same compartment as globalObject.
-  JSAddonId* addonId = MapURIToAddonID(aPrototypeBinding->BindingURI());
+  // First, start by entering the realm of the XBL scope. This may or may
+  // not be the same realm as globalObject.
   JS::Rooted<JSObject*> globalObject(cx,
     GetGlobalForObjectCrossCompartment(targetClassObject));
-  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetScopeForXBLExecution(cx, globalObject, addonId));
+  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScopeOrGlobal(cx, globalObject));
   NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
   MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(scopeObject) == scopeObject);
-  JSAutoCompartment ac(cx, scopeObject);
+  JSAutoRealm ar(cx, scopeObject);
 
   // Determine the appropriate property holder.
   //
@@ -120,8 +117,7 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
     // Define it as a property on the scopeObject, using the same name used on
     // the content side.
     bool ok = JS_DefineUCProperty(cx, scopeObject, className, -1, propertyHolder,
-                                  JSPROP_PERMANENT | JSPROP_READONLY,
-                                  JS_STUBGETTER, JS_STUBSETTER);
+                                  JSPROP_PERMANENT | JSPROP_READONLY);
     NS_ENSURE_TRUE(ok, NS_ERROR_UNEXPECTED);
   } else {
     propertyHolder = targetClassObject;
@@ -167,7 +163,7 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
   }
 
   // From here on out, work in the scope of the bound element.
-  JSAutoCompartment ac2(cx, targetClassObject);
+  JSAutoRealm ar2(cx, targetClassObject);
 
   // Install all of our field accessors.
   for (nsXBLProtoImplField* curr = mFields;
@@ -178,9 +174,9 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
   return NS_OK;
 }
 
-nsresult 
+nsresult
 nsXBLProtoImpl::InitTargetObjects(nsXBLPrototypeBinding* aBinding,
-                                  nsIContent* aBoundElement, 
+                                  nsIContent* aBoundElement,
                                   JS::MutableHandle<JSObject*> aTargetClassObject,
                                   bool* aTargetIsNew)
 {
@@ -209,18 +205,18 @@ nsXBLProtoImpl::InitTargetObjects(nsXBLPrototypeBinding* aBinding,
   JS::Rooted<JSObject*> global(cx, sgo->GetGlobalJSObject());
   JS::Rooted<JS::Value> v(cx);
 
-  JSAutoCompartment ac(cx, global);
+  JSAutoRealm ar(cx, global);
   // Make sure the interface object is created before the prototype object
   // so that XULElement is hidden from content. See bug 909340.
-  bool defineOnGlobal = dom::XULElementBinding::ConstructorEnabled(cx, global);
-  dom::XULElementBinding::GetConstructorObjectHandle(cx, global, defineOnGlobal);
+  bool defineOnGlobal = dom::XULElement_Binding::ConstructorEnabled(cx, global);
+  dom::XULElement_Binding::GetConstructorObjectHandle(cx, defineOnGlobal);
 
   rv = nsContentUtils::WrapNative(cx, aBoundElement, &v,
                                   /* aAllowWrapping = */ false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   JS::Rooted<JSObject*> value(cx, &v.toObject());
-  JSAutoCompartment ac2(cx, value);
+  JSAutoRealm ar2(cx, value);
 
   // All of the above code was just obtaining the bound element's script object and its immediate
   // concrete base class.  We need to alter the object so that our concrete class is interposed
@@ -239,8 +235,8 @@ nsXBLProtoImpl::InitTargetObjects(nsXBLPrototypeBinding* aBinding,
 nsresult
 nsXBLProtoImpl::CompilePrototypeMembers(nsXBLPrototypeBinding* aBinding)
 {
-  // We want to pre-compile our implementation's members against a "prototype context". Then when we actually 
-  // bind the prototype to a real xbl instance, we'll clone the pre-compiled JS into the real instance's 
+  // We want to pre-compile our implementation's members against a "prototype context". Then when we actually
+  // bind the prototype to a real xbl instance, we'll clone the pre-compiled JS into the real instance's
   // context.
   AutoJSAPI jsapi;
   if (NS_WARN_IF(!jsapi.Init(xpc::CompilationScope())))
@@ -513,9 +509,9 @@ nsXBLProtoImpl::Write(nsIObjectOutputStream* aStream,
   return aStream->Write8(XBLBinding_Serialize_NoMoreItems);
 }
 
-nsresult
-NS_NewXBLProtoImpl(nsXBLPrototypeBinding* aBinding, 
-                   const char16_t* aClassName, 
+void
+NS_NewXBLProtoImpl(nsXBLPrototypeBinding* aBinding,
+                   const char16_t* aClassName,
                    nsXBLProtoImpl** aResult)
 {
   nsXBLProtoImpl* impl = new nsXBLProtoImpl();
@@ -523,13 +519,13 @@ NS_NewXBLProtoImpl(nsXBLPrototypeBinding* aBinding,
     impl->mClassName = aClassName;
   } else {
     nsCString spec;
-    aBinding->BindingURI()->GetSpec(spec);
+    nsresult rv = aBinding->BindingURI()->GetSpec(spec);
+    // XXX: should handle this better
+    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     impl->mClassName = NS_ConvertUTF8toUTF16(spec);
   }
 
   aBinding->SetImplementation(impl);
   *aResult = impl;
-
-  return NS_OK;
 }
 

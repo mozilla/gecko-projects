@@ -64,8 +64,8 @@ function testCharacterData(aNode, aText)
   is(aNode.length, aText.length, "Text length should match");
   is(aNode.data, aText, "Text content should match");
   is(aNode.nodeValue, aText, "Check nodeValue");
-  is(aNode.localName, null, "Check localName")
-  is(aNode.namespaceURI, null, "Check namespaceURI");
+  is(aNode.localName, undefined, "Check localName")
+  is(aNode.namespaceURI, undefined, "Check namespaceURI");
 }
 
 function testComment(aText)
@@ -75,8 +75,7 @@ function testComment(aText)
     var types = [ Comment, CharacterData, Node ];
     checkTypes(comment, "comment", types);
 
-    var interfaces = [ "nsIDOMComment", "nsIDOMCharacterData", "nsIDOMNode",
-                       "nsIDOMEventTarget" ];
+    var interfaces = [];
     checkInterfaces(comment, "comment", interfaces);
 
     testCharacterData(comment, aText);
@@ -94,8 +93,7 @@ function testCDATASection(aText, aShouldSucceed)
     var types = [ CDATASection, CharacterData, Node ];
     checkTypes(cdataSection, "CDATA section", types);
 
-    var interfaces = [ "nsIDOMCDATASection", "nsIDOMCharacterData",
-                       "nsIDOMNode", "nsIDOMEventTarget" ];
+    var interfaces = [];
     checkInterfaces(cdataSection, "CDATA section", interfaces);
 
     testCharacterData(cdataSection, aText);
@@ -126,16 +124,15 @@ function testPI(aTarget, aData, aShouldSucceed, aReason)
     var types = [ ProcessingInstruction, Node ];
     checkTypes(pi, "processing instruction", types);
 
-    var interfaces = [ "nsIDOMProcessingInstruction", "nsIDOMNode",
-                       "nsIDOMEventTarget" ];
+    var interfaces = [];
     checkInterfaces(pi, "processing instruction", interfaces);
 
     is(pi.target, aTarget, "Check target");
     is(pi.data, aData, "Check data");
     is(pi.nodeName, aTarget, "Check nodeName");
     is(pi.nodeValue, aData, "Check nodeValue");
-    is(pi.localName, null, "Check localName")
-    is(pi.namespaceURI, null, "Check namespaceURI");
+    is(pi.localName, undefined, "Check localName")
+    is(pi.namespaceURI, undefined, "Check namespaceURI");
     
     is(pi.nodeType, Node.PROCESSING_INSTRUCTION_NODE, "Check nodeType");
 

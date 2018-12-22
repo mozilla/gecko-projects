@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import, print_function
+
 import fileinput
 import glob
 import os
@@ -17,10 +19,12 @@ import urlparse
 import urllib2
 from distutils.spawn import find_executable
 
-from mozdevice import DeviceManagerADB, DMError
+from mozdevice import ADBHost, ADBAndroid
 from mozprocess import ProcessHandler
 
 EMULATOR_HOME_DIR = os.path.join(os.path.expanduser('~'), '.mozbuild', 'android-device')
+
+EMULATOR_AUTH_FILE = os.path.join(os.path.expanduser('~'), '.emulator_console_auth_token')
 
 TOOLTOOL_URL = 'https://raw.githubusercontent.com/mozilla/build-tooltool/master/tooltool.py'
 
@@ -29,18 +33,21 @@ TRY_URL = 'https://hg.mozilla.org/try/raw-file/default'
 MANIFEST_PATH = 'testing/config/tooltool-manifests'
 
 verbose_logging = False
+devices = {}
+
 
 class AvdInfo(object):
     """
        Simple class to contain an AVD description.
     """
+
     def __init__(self, description, name, tooltool_manifest, extra_args,
-                 port):
+                 x86):
         self.description = description
         self.name = name
         self.tooltool_manifest = tooltool_manifest
         self.extra_args = extra_args
-        self.port = port
+        self.x86 = x86
 
 
 """
@@ -52,20 +59,123 @@ class AvdInfo(object):
 AVD_DICT = {
     '4.3': AvdInfo('Android 4.3',
                    'mozemulator-4.3',
-                   'testing/config/tooltool-manifests/androidarm_4_3/releng.manifest',
-                   ['-show-kernel', '-debug',
-                    'init,console,gles,memcheck,adbserver,adbclient,adb,avd_config,socket'],
-                   5554),
+                   'testing/config/tooltool-manifests/androidarm_4_3/mach-emulator.manifest',
+                   ['-skip-adb-auth', '-verbose', '-show-kernel'],
+                   False),
+    '7.0': AvdInfo('Android 7.0',
+                   'mozemulator-7.0',
+                   'testing/config/tooltool-manifests/androidarm_7_0/mach-emulator.manifest',
+                   ['-skip-adb-auth', '-verbose',
+                    # does not boot if '-show-kernel' -- how strange!
+                    '-ranchu',
+                    '-selinux', 'permissive',
+                    '-memory', '3072', '-cores', '4'],
+                   False),
     'x86': AvdInfo('Android 4.2 x86',
                    'mozemulator-x86',
-                   'testing/config/tooltool-manifests/androidx86/releng.manifest',
-                   ['-debug',
-                    'init,console,gles,memcheck,adbserver,adbclient,adb,avd_config,socket',
+                   'testing/config/tooltool-manifests/androidx86/mach-emulator.manifest',
+                   ['-skip-adb-auth', '-verbose', '-show-kernel',
                     '-qemu', '-m', '1024', '-enable-kvm'],
-                   5554)
+                   True),
+    'x86-7.0': AvdInfo('Android 7.0 x86',
+                       'mozemulator-x86-7.0',
+                       'testing/config/tooltool-manifests/androidx86_7_0/mach-emulator.manifest',
+                       ['-skip-adb-auth', '-verbose', '-show-kernel',
+                        '-ranchu',
+                        '-engine', 'qemu2',
+                        '-selinux', 'permissive',
+                        '-memory', '3072', '-cores', '4',
+                        '-qemu', '-enable-kvm'],
+                       True)
 }
 
-def verify_android_device(build_obj, install=False, xre=False, debugger=False):
+
+def _get_device(substs, device_serial=None):
+    global devices
+    if device_serial in devices:
+        device = devices[device_serial]
+    else:
+        adb_path = _find_sdk_exe(substs, 'adb', False)
+        if not adb_path:
+            adb_path = 'adb'
+        device = ADBAndroid(adb=adb_path, verbose=verbose_logging, device=device_serial)
+        devices[device_serial] = device
+    return device
+
+
+def _install_host_utils(build_obj):
+    _log_info("Installing host utilities. This may take a while...")
+    installed = False
+    host_platform = _get_host_platform()
+    if host_platform:
+        path = os.path.join(MANIFEST_PATH, host_platform, 'hostutils.manifest')
+        _get_tooltool_manifest(build_obj.substs, path, EMULATOR_HOME_DIR,
+                               'releng.manifest')
+        _tooltool_fetch()
+        xre_path = glob.glob(os.path.join(EMULATOR_HOME_DIR, 'host-utils*'))
+        for path in xre_path:
+            if os.path.isdir(path) and os.path.isfile(os.path.join(path, 'xpcshell')):
+                os.environ['MOZ_HOST_BIN'] = path
+                installed = True
+                break
+        if not installed:
+            _log_warning("Unable to install host utilities.")
+    else:
+        _log_warning(
+            "Unable to install host utilities -- your platform is not supported!")
+
+
+def _maybe_update_host_utils(build_obj):
+    """
+       Compare the installed host-utils to the version name in the manifest;
+       if the installed version is older, offer to update.
+    """
+
+    # Determine existing/installed version
+    existing_path = None
+    xre_paths = glob.glob(os.path.join(EMULATOR_HOME_DIR, 'host-utils*'))
+    for path in xre_paths:
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, 'xpcshell')):
+            existing_path = path
+            break
+    if existing_path is None:
+        # if not installed, no need to upgrade (new version will be installed)
+        return
+    existing_version = os.path.basename(existing_path)
+
+    # Determine manifest version
+    manifest_version = None
+    host_platform = _get_host_platform()
+    if host_platform:
+        # Extract tooltool file name from manifest, something like:
+        #     "filename": "host-utils-58.0a1.en-US-linux-x86_64.tar.gz",
+        manifest_path = os.path.join(MANIFEST_PATH, host_platform, 'hostutils.manifest')
+        with open(manifest_path, 'r') as f:
+            for line in f.readlines():
+                m = re.search('.*\"(host-utils-.*)\"', line)
+                if m:
+                    manifest_version = m.group(1)
+                    break
+
+    # Compare, prompt, update
+    if existing_version and manifest_version:
+        manifest_version = manifest_version[:len(existing_version)]
+        if existing_version < manifest_version:
+            _log_info("Your host utilities are out of date!")
+            _log_info("You have %s installed, but %s is available" %
+                      (existing_version, manifest_version))
+            response = raw_input(
+                "Update host utilities? (Y/n) ").strip()
+            if response.lower().startswith('y') or response == '':
+                parts = os.path.split(existing_path)
+                backup_dir = '_backup-' + parts[1]
+                backup_path = os.path.join(parts[0], backup_dir)
+                shutil.move(existing_path, backup_path)
+                _install_host_utils(build_obj)
+
+
+def verify_android_device(build_obj, install=False, xre=False, debugger=False,
+                          verbose=False, app=None, device_serial=None):
     """
        Determine if any Android device is connected via adb.
        If no device is found, prompt to start an emulator.
@@ -81,9 +191,13 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
        already connected.
     """
     device_verified = False
-    emulator = AndroidEmulator('*', substs=build_obj.substs)
-    devices = emulator.dm.devices()
-    if (len(devices) > 0) and ('device' in [d[1] for d in devices]):
+    emulator = AndroidEmulator('*', substs=build_obj.substs, verbose=verbose)
+    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
+    if not adb_path:
+        adb_path = 'adb'
+    adbhost = ADBHost(adb=adb_path, verbose=verbose, timeout=10)
+    devices = adbhost.devices(timeout=10)
+    if 'device' in [d['state'] for d in devices]:
         device_verified = True
     elif emulator.is_available():
         response = raw_input(
@@ -93,7 +207,7 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
                 _log_info("Fetching AVD. This may take a while...")
                 emulator.update_avd()
             _log_info("Starting emulator running %s..." %
-                emulator.get_avd_description())
+                      emulator.get_avd_description())
             emulator.start()
             emulator.wait_for_start()
             device_verified = True
@@ -111,16 +225,23 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
         # Installing every time is problematic because:
         #  - it prevents testing against other builds (downloaded apk)
         #  - installation may take a couple of minutes.
-        installed = emulator.dm.shellCheckOutput(['pm', 'list',
-            'packages', 'org.mozilla.'])
-        if not 'fennec' in installed and not 'firefox' in installed:
-            response = raw_input(
-                "It looks like Firefox is not installed on this device.\n"
-                "Install Firefox? (Y/n) ").strip()
-            if response.lower().startswith('y') or response == '':
-                _log_info("Installing Firefox. This may take a while...")
-                build_obj._run_make(directory=".", target='install',
-                    ensure_exit_code=False)
+        if not app:
+            app = build_obj.substs["ANDROID_PACKAGE_NAME"]
+        device = _get_device(build_obj.substs, device_serial)
+        if not device.is_app_installed(app):
+            if 'fennec' not in app and 'firefox' not in app:
+                raw_input(
+                    "It looks like %s is not installed on this device,\n"
+                    "but I don't know how to install it.\n"
+                    "Install it now, then hit Enter " % app)
+            else:
+                response = raw_input(
+                    "It looks like %s is not installed on this device.\n"
+                    "Install Firefox? (Y/n) " % app).strip()
+                if response.lower().startswith('y') or response == '':
+                    _log_info("Installing Firefox. This may take a while...")
+                    build_obj._run_make(directory=".", target='install',
+                                        ensure_exit_code=False)
 
     if device_verified and xre:
         # Check whether MOZ_HOST_BIN has been set to a valid xre; if not,
@@ -128,12 +249,14 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
         xre_path = os.environ.get('MOZ_HOST_BIN')
         err = None
         if not xre_path:
-            err = 'environment variable MOZ_HOST_BIN is not set to a directory containing host xpcshell'
+            err = "environment variable MOZ_HOST_BIN is not set to a directory " \
+                  "containing host xpcshell"
         elif not os.path.isdir(xre_path):
             err = '$MOZ_HOST_BIN does not specify a directory'
         elif not os.path.isfile(os.path.join(xre_path, 'xpcshell')):
             err = '$MOZ_HOST_BIN/xpcshell does not exist'
         if err:
+            _maybe_update_host_utils(build_obj)
             xre_path = glob.glob(os.path.join(EMULATOR_HOME_DIR, 'host-utils*'))
             for path in xre_path:
                 if os.path.isdir(path) and os.path.isfile(os.path.join(path, 'xpcshell')):
@@ -145,22 +268,7 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
             response = raw_input(
                 "Download and setup your host utilities? (Y/n) ").strip()
             if response.lower().startswith('y') or response == '':
-                _log_info("Installing host utilities. This may take a while...")
-                host_platform = _get_host_platform()
-                if host_platform:
-                    path = os.path.join(MANIFEST_PATH, host_platform, 'hostutils.manifest')
-                    _get_tooltool_manifest(build_obj.substs, path, EMULATOR_HOME_DIR, 'releng.manifest')
-                    _tooltool_fetch()
-                    xre_path = glob.glob(os.path.join(EMULATOR_HOME_DIR, 'host-utils*'))
-                    for path in xre_path:
-                        if os.path.isdir(path) and os.path.isfile(os.path.join(path, 'xpcshell')):
-                            os.environ['MOZ_HOST_BIN'] = path
-                            err = None
-                            break
-                    if err:
-                        _log_warning("Unable to install host utilities.")
-                else:
-                    _log_warning("Unable to install host utilities -- your platform is not supported!")
+                _install_host_utils(build_obj)
 
     if debugger:
         # Optionally set up JimDB. See https://wiki.mozilla.org/Mobile/Fennec/Android/GDB.
@@ -180,9 +288,13 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
             if response.lower().startswith('y') or response == '':
                 host_platform = _get_host_platform()
                 if host_platform:
-                    _log_info("Installing JimDB (%s/%s). This may take a while..." % (host_platform, build_platform))
-                    path = os.path.join(MANIFEST_PATH, host_platform, 'jimdb-%s.manifest' % build_platform)
-                    _get_tooltool_manifest(build_obj.substs, path, EMULATOR_HOME_DIR, 'releng.manifest')
+                    _log_info(
+                        "Installing JimDB (%s/%s). This may take a while..." % (host_platform,
+                                                                                build_platform))
+                    path = os.path.join(MANIFEST_PATH, host_platform,
+                                        'jimdb-%s.manifest' % build_platform)
+                    _get_tooltool_manifest(build_obj.substs, path,
+                                           EMULATOR_HOME_DIR, 'releng.manifest')
                     _tooltool_fetch()
                     if os.path.isfile(gdb_path):
                         # Get JimDB utilities from git repository
@@ -193,11 +305,12 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
                             proc.wait()
                             if proc.proc.returncode == 0:
                                 git_pull_complete = True
-                        except:
+                        except Exception:
                             if proc.poll() is None:
                                 proc.kill(signal.SIGTERM)
                         if not git_pull_complete:
-                            _log_warning("Unable to update JimDB utils from git -- some JimDB features may be unavailable.")
+                            _log_warning("Unable to update JimDB utils from git -- "
+                                         "some JimDB features may be unavailable.")
                     else:
                         _log_warning("Unable to install JimDB -- unable to fetch from tooltool.")
                 else:
@@ -211,58 +324,59 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False):
 
     return device_verified
 
+
+def get_adb_path(build_obj):
+    return _find_sdk_exe(build_obj.substs, 'adb', False)
+
+
 def run_firefox_for_android(build_obj, params):
     """
        Launch Firefox for Android on the connected device.
        Optional 'params' allow parameters to be passed to Firefox.
     """
-    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
-    if not adb_path:
-        adb_path = 'adb'
-    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
+    device = _get_device(build_obj.substs)
     try:
         #
         # Construct an adb command similar to:
         #
-        #   adb shell am start -a android.activity.MAIN -n org.mozilla.fennec_$USER -d <url param> --es args "<params>"
+        # $ adb shell am start -a android.activity.MAIN \
+        #   -n org.mozilla.fennec_$USER \
+        #   -d <url param> \
+        #   --es args "<params>"
         #
-        app = "%s/org.mozilla.gecko.BrowserApp" % build_obj.substs['ANDROID_PACKAGE_NAME']
-        cmd = ['am', 'start', '-a', 'android.activity.MAIN', '-n', app]
+        app = build_obj.substs['ANDROID_PACKAGE_NAME']
+        url = None
         if params:
             for p in params:
                 if urlparse.urlparse(p).scheme != "":
-                    cmd.extend(['-d', p])
+                    url = p
                     params.remove(p)
                     break
-        if params:
-            cmd.extend(['--es', 'args', '"%s"' % ' '.join(params)])
-        _log_debug(cmd)
-        output = dm.shellCheckOutput(cmd, timeout=10)
-        _log_info(output)
-    except DMError:
+        device.launch_fennec(app, extra_args=params, url=url)
+    except Exception:
         _log_warning("unable to launch Firefox for Android")
         return 1
     return 0
 
-def grant_runtime_permissions(build_obj, app):
+
+def grant_runtime_permissions(build_obj, app, device_serial=None):
     """
-       Grant required runtime permissions to the specified app (typically org.mozilla.fennec_$USER).
+    Grant required runtime permissions to the specified app
+    (typically org.mozilla.fennec_$USER).
     """
-    adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
-    if not adb_path:
-        adb_path = 'adb'
-    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
-    dm.default_timeout = 10
+    device = _get_device(build_obj.substs, device_serial)
     try:
-        sdk_level = dm.shellCheckOutput(['getprop', 'ro.build.version.sdk'])
-        if sdk_level and int(sdk_level) >= 23:
+        sdk_level = device.version
+        if sdk_level and sdk_level >= 23:
             _log_info("Granting important runtime permissions to %s" % app)
-            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.WRITE_EXTERNAL_STORAGE'])
-            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.ACCESS_FINE_LOCATION'])
-            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.CAMERA'])
-            dm.shellCheckOutput(['pm', 'grant', app, 'android.permission.WRITE_CONTACTS'])
-    except DMError:
+            device.shell_output('pm grant %s android.permission.WRITE_EXTERNAL_STORAGE' % app)
+            device.shell_output('pm grant %s android.permission.READ_EXTERNAL_STORAGE' % app)
+            device.shell_output('pm grant %s android.permission.ACCESS_COARSE_LOCATION' % app)
+            device.shell_output('pm grant %s android.permission.ACCESS_FINE_LOCATION' % app)
+            device.shell_output('pm grant %s android.permission.CAMERA' % app)
+    except Exception:
         _log_warning("Unable to grant runtime permissions to %s" % app)
+
 
 class AndroidEmulator(object):
 
@@ -281,7 +395,7 @@ class AndroidEmulator(object):
                 emulator.wait()
     """
 
-    def __init__(self, avd_type='4.3', verbose=False, substs=None, device_serial=None):
+    def __init__(self, avd_type=None, verbose=False, substs=None, device_serial=None):
         global verbose_logging
         self.emulator_log = None
         self.emulator_path = 'emulator'
@@ -289,12 +403,10 @@ class AndroidEmulator(object):
         self.substs = substs
         self.avd_type = self._get_avd_type(avd_type)
         self.avd_info = AVD_DICT[self.avd_type]
-        adb_path = _find_sdk_exe(substs, 'adb', False)
-        if not adb_path:
-            adb_path = 'adb'
-        self.dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1,
-            deviceSerial=device_serial)
-        self.dm.default_timeout = 10
+        self.gpu = True
+        self.restarted = False
+        self.device_serial = device_serial
+        _log_debug("Running on %s" % platform.platform())
         _log_debug("Emulator created with type %s" % self.avd_type)
 
     def __del__(self):
@@ -354,11 +466,15 @@ class AndroidEmulator(object):
         """
         avd = os.path.join(
             EMULATOR_HOME_DIR, 'avd', self.avd_info.name + '.avd')
+        ini_file = os.path.join(
+            EMULATOR_HOME_DIR, 'avd', self.avd_info.name + '.ini')
         if force and os.path.exists(avd):
             shutil.rmtree(avd)
         if not os.path.exists(avd):
-            url = '%s/%s' % (TRY_URL, self.avd_info.tooltool_manifest)
-            _download_file(url, 'releng.manifest', EMULATOR_HOME_DIR)
+            if os.path.exists(ini_file):
+                os.remove(ini_file)
+            path = self.avd_info.tooltool_manifest
+            _get_tooltool_manifest(self.substs, path, EMULATOR_HOME_DIR, 'releng.manifest')
             _tooltool_fetch()
             self._update_avd_paths()
 
@@ -366,12 +482,24 @@ class AndroidEmulator(object):
         """
            Launch the emulator.
         """
+        if self.avd_info.x86 and 'linux' in _get_host_platform():
+            _verify_kvm(self.substs)
+        if os.path.exists(EMULATOR_AUTH_FILE):
+            os.remove(EMULATOR_AUTH_FILE)
+            _log_debug("deleted %s" % EMULATOR_AUTH_FILE)
+        # create an empty auth file to disable emulator authentication
+        auth_file = open(EMULATOR_AUTH_FILE, 'w')
+        auth_file.close()
+
         def outputHandler(line):
             self.emulator_log.write("<%s>\n" % line)
+            if "Invalid value for -gpu" in line or "Invalid GPU mode" in line:
+                self.gpu = False
         env = os.environ
         env['ANDROID_AVD_HOME'] = os.path.join(EMULATOR_HOME_DIR, "avd")
-        command = [self.emulator_path, "-avd",
-                   self.avd_info.name, "-port", "5554"]
+        command = [self.emulator_path, "-avd", self.avd_info.name]
+        if self.gpu:
+            command += ['-gpu', 'swiftshader']
         if self.avd_info.extra_args:
             # -enable-kvm option is not valid on OSX
             if _get_host_platform() == 'macosx64' and '-enable-kvm' in self.avd_info.extra_args:
@@ -380,15 +508,15 @@ class AndroidEmulator(object):
         log_path = os.path.join(EMULATOR_HOME_DIR, 'emulator.log')
         self.emulator_log = open(log_path, 'w')
         _log_debug("Starting the emulator with this command: %s" %
-                        ' '.join(command))
+                   ' '.join(command))
         _log_debug("Emulator output will be written to '%s'" %
-                        log_path)
+                   log_path)
         self.proc = ProcessHandler(
             command, storeOutput=False, processOutputLine=outputHandler,
-            env=env)
+            env=env, ignore_children=True)
         self.proc.run()
         _log_debug("Emulator started with pid %d" %
-                        int(self.proc.proc.pid))
+                   int(self.proc.proc.pid))
 
     def wait_for_start(self):
         """
@@ -398,39 +526,62 @@ class AndroidEmulator(object):
         if not self.proc:
             _log_warning("Emulator not started!")
             return False
-        if self.proc.proc.poll() is not None:
-            _log_warning("Emulator has already completed!")
+        if self.check_completed():
             return False
         _log_debug("Waiting for device status...")
-        while(('emulator-5554', 'device') not in self.dm.devices()):
+        adb_path = _find_sdk_exe(self.substs, 'adb', False)
+        if not adb_path:
+            adb_path = 'adb'
+        adbhost = ADBHost(adb=adb_path, verbose=verbose_logging, timeout=10)
+        devs = adbhost.devices(timeout=10)
+        devs = [(d['device_serial'], d['state']) for d in devs]
+        while ('emulator-5554', 'device') not in devs:
             time.sleep(10)
-            if self.proc.proc.poll() is not None:
-                _log_warning("Emulator has already completed!")
+            if self.check_completed():
                 return False
+            devs = adbhost.devices(timeout=10)
+            devs = [(d['device_serial'], d['state']) for d in devs]
         _log_debug("Device status verified.")
 
         _log_debug("Checking that Android has booted...")
+        device = _get_device(self.substs, self.device_serial)
         complete = False
-        while(not complete):
+        while not complete:
             output = ''
             try:
-                output = self.dm.shellCheckOutput(
-                    ['getprop', 'sys.boot_completed'], timeout=5)
-            except DMError:
+                output = device.get_prop('sys.boot_completed', timeout=5)
+            except Exception:
                 # adb not yet responding...keep trying
                 pass
             if output.strip() == '1':
                 complete = True
             else:
                 time.sleep(10)
-                if self.proc.proc.poll() is not None:
-                    _log_warning("Emulator has already completed!")
+                if self.check_completed():
                     return False
         _log_debug("Android boot status verified.")
 
         if not self._verify_emulator():
             return False
+        if self.avd_info.x86:
+            _log_info("Running the x86 emulator; be sure to install an x86 APK!")
+        else:
+            _log_info("Running the arm emulator; be sure to install an arm APK!")
         return True
+
+    def check_completed(self):
+        if self.proc.proc.poll() is not None:
+            if not self.gpu and not self.restarted:
+                _log_warning("Emulator failed to start. Your emulator may be out of date.")
+                _log_warning("Trying to restart the emulator without -gpu argument.")
+                self.restarted = True
+                self.start()
+                return False
+            _log_warning("Emulator has already completed!")
+            log_path = os.path.join(EMULATOR_HOME_DIR, 'emulator.log')
+            _log_warning("See log at %s and/or use --verbose for more information." % log_path)
+            return True
+        return False
 
     def wait(self):
         """
@@ -438,7 +589,7 @@ class AndroidEmulator(object):
         """
         try:
             self.proc.wait()
-        except:
+        except Exception:
             if self.proc.poll() is None:
                 self.cleanup()
         return self.proc.poll()
@@ -491,9 +642,9 @@ class AndroidEmulator(object):
         tn = None
         while(not telnet_ok):
             try:
-                tn = telnetlib.Telnet('localhost', self.avd_info.port, 10)
+                tn = telnetlib.Telnet('localhost', 5554, 10)
                 if tn is not None:
-                    res = tn.read_until('OK', 10)
+                    tn.read_until('OK', 10)
                     self._telnet_cmd(tn, 'avd status')
                     self._telnet_cmd(tn, 'redir list')
                     self._telnet_cmd(tn, 'network status')
@@ -501,8 +652,8 @@ class AndroidEmulator(object):
                     tn.read_all()
                     telnet_ok = True
                 else:
-                    _log_warning("Unable to connect to port %d" % port)
-            except:
+                    _log_warning("Unable to connect to port 5554")
+            except Exception:
                 _log_warning("Trying again after unexpected exception")
             finally:
                 if tn is not None:
@@ -519,14 +670,17 @@ class AndroidEmulator(object):
             return requested
         if self.substs:
             if not self.substs['TARGET_CPU'].startswith('arm'):
-                return 'x86'
-        return '4.3'
+                return 'x86-7.0'
+            else:
+                return '7.0'
+        return 'x86-7.0'
+
 
 def _find_sdk_exe(substs, exe, tools):
     if tools:
-        subdir = 'tools'
+        subdirs = ['emulator', 'tools']
     else:
-        subdir = 'platform-tools'
+        subdirs = ['platform-tools']
 
     found = False
     if not found and substs:
@@ -551,27 +705,31 @@ def _find_sdk_exe(substs, exe, tools):
         # Can exe be found in the Android SDK?
         try:
             android_sdk_root = os.environ['ANDROID_SDK_ROOT']
-            exe_path = os.path.join(
-                android_sdk_root, subdir, exe)
-            if os.path.exists(exe_path):
-                found = True
-            else:
-                _log_debug(
-                    "Unable to find executable at %s" % exe_path)
+            for subdir in subdirs:
+                exe_path = os.path.join(
+                    android_sdk_root, subdir, exe)
+                if os.path.exists(exe_path):
+                    found = True
+                    break
+                else:
+                    _log_debug(
+                        "Unable to find executable at %s" % exe_path)
         except KeyError:
             _log_debug("ANDROID_SDK_ROOT not set")
 
     if not found:
         # Can exe be found in the default bootstrap location?
         mozbuild_path = os.environ.get('MOZBUILD_STATE_PATH',
-            os.path.expanduser(os.path.join('~', '.mozbuild')))
-        exe_path = os.path.join(
-            mozbuild_path, 'android-sdk-linux', subdir, exe)
-        if os.path.exists(exe_path):
-            found = True
-        else:
-            _log_debug(
-                "Unable to find executable at %s" % exe_path)
+                                       os.path.expanduser(os.path.join('~', '.mozbuild')))
+        for subdir in subdirs:
+            exe_path = os.path.join(
+                mozbuild_path, 'android-sdk-linux', subdir, exe)
+            if os.path.exists(exe_path):
+                found = True
+                break
+            else:
+                _log_debug(
+                    "Unable to find executable at %s" % exe_path)
 
     if not found:
         # Is exe on PATH?
@@ -583,26 +741,45 @@ def _find_sdk_exe(substs, exe, tools):
 
     if found:
         _log_debug("%s found at %s" % (exe, exe_path))
+        try:
+            creation_time = os.path.getctime(exe_path)
+            _log_debug("  ...with creation time %s" % time.ctime(creation_time))
+        except Exception:
+            _log_warning("Could not get creation time for %s" % exe_path)
+
+        prop_path = os.path.join(os.path.dirname(exe_path), "source.properties")
+        if os.path.exists(prop_path):
+            with open(prop_path, 'r') as f:
+                for line in f.readlines():
+                    if line.startswith("Pkg.Revision"):
+                        line = line.strip()
+                        _log_debug("  ...with SDK version in %s: %s" % (prop_path, line))
+                        break
     else:
         exe_path = None
     return exe_path
 
+
 def _log_debug(text):
     if verbose_logging:
-        print "DEBUG: %s" % text
+        print("DEBUG: %s" % text)
+
 
 def _log_warning(text):
-    print "WARNING: %s" % text
+    print("WARNING: %s" % text)
+
 
 def _log_info(text):
-    print "%s" % text
+    print("%s" % text)
+
 
 def _download_file(url, filename, path):
+    _log_debug("Download %s to %s/%s..." % (url, path, filename))
     f = urllib2.urlopen(url)
     if not os.path.isdir(path):
         try:
             os.makedirs(path)
-        except Exception, e:
+        except Exception as e:
             _log_warning(str(e))
             return False
     local_file = open(os.path.join(path, filename), 'wb')
@@ -611,11 +788,12 @@ def _download_file(url, filename, path):
     _log_debug("Downloaded %s to %s/%s" % (url, path, filename))
     return True
 
+
 def _get_tooltool_manifest(substs, src_path, dst_path, filename):
     if not os.path.isdir(dst_path):
         try:
             os.makedirs(dst_path)
-        except Exception, e:
+        except Exception as e:
             _log_warning(str(e))
     copied = False
     if substs and 'top_srcdir' in substs:
@@ -629,20 +807,23 @@ def _get_tooltool_manifest(substs, src_path, dst_path, filename):
         url = os.path.join(TRY_URL, src_path)
         _download_file(url, filename, dst_path)
 
+
 def _tooltool_fetch():
     def outputHandler(line):
         _log_debug(line)
     _download_file(TOOLTOOL_URL, 'tooltool.py', EMULATOR_HOME_DIR)
-    command = ['python', 'tooltool.py', 'fetch', '-o', '-m', 'releng.manifest']
+    command = [sys.executable, 'tooltool.py',
+               'fetch', '-o', '-m', 'releng.manifest']
     proc = ProcessHandler(
         command, processOutputLine=outputHandler, storeOutput=False,
         cwd=EMULATOR_HOME_DIR)
     proc.run()
     try:
         proc.wait()
-    except:
+    except Exception:
         if proc.poll() is None:
             proc.kill(signal.SIGTERM)
+
 
 def _get_host_platform():
     plat = None
@@ -655,27 +836,18 @@ def _get_host_platform():
             plat = 'linux32'
     return plat
 
+
 def _get_device_platform(substs):
     # PIE executables are required when SDK level >= 21 - important for gdbserver
-    adb_path = _find_sdk_exe(substs, 'adb', False)
-    if not adb_path:
-        adb_path = 'adb'
-    dm = DeviceManagerADB(autoconnect=False, adbPath=adb_path, retryLimit=1)
-    sdk_level = None
-    try:
-        cmd = ['getprop', 'ro.build.version.sdk']
-        _log_debug(cmd)
-        output = dm.shellCheckOutput(cmd, timeout=10)
-        if output:
-            sdk_level = int(output)
-    except:
-        _log_warning("unable to determine Android sdk level")
+    device = _get_device(substs)
+    sdk_level = device.version
     pie = ''
     if sdk_level and sdk_level >= 21:
         pie = '-pie'
     if substs['TARGET_CPU'].startswith('arm'):
         return 'arm%s' % pie
     return 'x86%s' % pie
+
 
 def _update_gdbinit(substs, path):
     if os.path.exists(path):
@@ -705,3 +877,26 @@ def _update_gdbinit(substs, path):
                 f.write("python feninit.default.objdir = '%s'\n" % substs['MOZ_BUILD_ROOT'])
             if substs and 'top_srcdir' in substs:
                 f.write("python feninit.default.srcroot = '%s'\n" % substs['top_srcdir'])
+
+
+def _verify_kvm(substs):
+    # 'emulator -accel-check' should produce output like:
+    # accel:
+    # 0
+    # KVM (version 12) is installed and usable
+    # accel
+    emulator_path = _find_sdk_exe(substs, 'emulator', True)
+    if not emulator_path:
+        emulator_path = 'emulator'
+    command = [emulator_path, '-accel-check']
+    try:
+        p = ProcessHandler(command, storeOutput=True)
+        p.run()
+        p.wait()
+        out = p.output
+        if 'is installed and usable' in ''.join(out):
+            return
+    except Exception as e:
+        _log_warning(str(e))
+    _log_warning("Unable to verify kvm acceleration!")
+    _log_warning("The x86 emulator may fail to start without kvm.")

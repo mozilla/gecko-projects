@@ -28,7 +28,9 @@
 #include "mozilla/Telemetry.h"
 
 // Defined in dwmapi in a header that needs a higher numbered _WINNT #define
+#ifndef DWM_SIT_DISPLAYFRAME
 #define DWM_SIT_DISPLAYFRAME 0x1
+#endif
 
 namespace mozilla {
 namespace widget {
@@ -137,7 +139,7 @@ TaskbarPreview::Invalidate() {
     return NS_OK;
 
   HWND previewWindow = PreviewWindow();
-  return FAILED(WinUtils::dwmInvalidateIconicBitmapsPtr(previewWindow))
+  return FAILED(DwmInvalidateIconicBitmaps(previewWindow))
        ? NS_ERROR_FAILURE
        : NS_OK;
 }
@@ -175,6 +177,11 @@ TaskbarPreview::Enable() {
 
 nsresult
 TaskbarPreview::Disable() {
+  if (!IsWindowAvailable()) {
+    // Window is already destroyed
+    return NS_OK;
+  }
+
   WindowHook &hook = GetWindowHook();
   (void) hook.RemoveMonitor(nsAppShell::GetTaskbarButtonCreatedMessage(), MainWindowHook, this);
 
@@ -277,13 +284,13 @@ TaskbarPreview::GetWindowHook() {
 void
 TaskbarPreview::EnableCustomDrawing(HWND aHWND, bool aEnable) {
   BOOL enabled = aEnable;
-  WinUtils::dwmSetWindowAttributePtr(
+  DwmSetWindowAttribute(
       aHWND,
       DWMWA_FORCE_ICONIC_REPRESENTATION,
       &enabled,
       sizeof(enabled));
 
-  WinUtils::dwmSetWindowAttributePtr(
+  DwmSetWindowAttribute(
       aHWND,
       DWMWA_HAS_ICONIC_BITMAP,
       &enabled,
@@ -340,8 +347,8 @@ TaskbarPreviewCallback::Done(nsISupports *aCanvas, bool aDrawBorder) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIDOMHTMLCanvasElement> domcanvas(do_QueryInterface(aCanvas));
-  dom::HTMLCanvasElement * canvas = ((dom::HTMLCanvasElement*)domcanvas.get());
+  nsCOMPtr<nsIContent> content(do_QueryInterface(aCanvas));
+  auto canvas = dom::HTMLCanvasElement::FromNodeOrNull(content);
   if (!canvas) {
     return NS_ERROR_FAILURE;
   }
@@ -378,11 +385,11 @@ TaskbarPreviewCallback::Done(nsISupports *aCanvas, bool aDrawBorder) {
   POINT pptClient = { 0, 0 };
   HRESULT hr;
   if (!mIsThumbnail) {
-    hr = WinUtils::dwmSetIconicLivePreviewBitmapPtr(mPreview->PreviewWindow(),
-                                                    hBitmap, &pptClient, flags);
+    hr = DwmSetIconicLivePreviewBitmap(mPreview->PreviewWindow(),
+                                       hBitmap, &pptClient, flags);
   } else {
-    hr = WinUtils::dwmSetIconicThumbnailPtr(mPreview->PreviewWindow(),
-                                            hBitmap, flags);
+    hr = DwmSetIconicThumbnail(mPreview->PreviewWindow(),
+                               hBitmap, flags);
   }
   MOZ_ASSERT(SUCCEEDED(hr));
   return NS_OK;

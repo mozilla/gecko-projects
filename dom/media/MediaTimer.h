@@ -7,14 +7,15 @@
 #if !defined(MediaTimer_h_)
 #define MediaTimer_h_
 
+#include "mozilla/AbstractThread.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/MozPromise.h"
-#include "mozilla/TimeStamp.h"
-
-#include <queue>
-
-#include "nsITimer.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/TimeStamp.h"
+#include "mozilla/Unused.h"
+#include "nsITimer.h"
+#include <queue>
 
 namespace mozilla {
 
@@ -22,7 +23,7 @@ extern LazyLogModule gMediaTimerLog;
 
 #define TIMER_LOG(x, ...) \
   MOZ_ASSERT(gMediaTimerLog); \
-  MOZ_LOG(gMediaTimerLog, LogLevel::Debug, ("[MediaTimer=%p relative_t=%lld]" x, this, \
+  MOZ_LOG(gMediaTimerLog, LogLevel::Debug, ("[MediaTimer=%p relative_t=%" PRId64 "]" x, this, \
                                         RelativeMicroseconds(TimeStamp::Now()), ##__VA_ARGS__))
 
 // This promise type is only exclusive because so far there isn't a reason for
@@ -36,13 +37,15 @@ typedef MozPromise<bool, bool, /* IsExclusive = */ true> MediaTimerPromise;
 class MediaTimer
 {
 public:
-  MediaTimer();
+  explicit MediaTimer(bool aFuzzy = false);
 
   // We use a release with a custom Destroy().
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
   NS_IMETHOD_(MozExternalRefCountType) Release(void);
 
+  RefPtr<MediaTimerPromise> WaitFor(const TimeDuration& aDuration, const char* aCallSite);
   RefPtr<MediaTimerPromise> WaitUntil(const TimeStamp& aTimeStamp, const char* aCallSite);
+  void Cancel(); // Cancel and reject any unresolved promises with false.
 
 private:
   virtual ~MediaTimer() { MOZ_ASSERT(OnMediaTimerThread()); }
@@ -54,6 +57,8 @@ private:
   void ScheduleUpdate();
   void Update();
   void UpdateLocked();
+  bool IsExpired(const TimeStamp& aTarget, const TimeStamp& aNow);
+  void Reject();
 
   static void TimerCallback(nsITimer* aTimer, void* aClosure);
   void TimerFired();
@@ -111,13 +116,14 @@ private:
   }
 
   bool mUpdateScheduled;
+  const bool mFuzzy;
 };
 
 // Class for managing delayed dispatches on target thread.
 class DelayedScheduler {
 public:
-  explicit DelayedScheduler(AbstractThread* aTargetThread)
-    : mTargetThread(aTargetThread), mMediaTimer(new MediaTimer())
+  explicit DelayedScheduler(AbstractThread* aTargetThread, bool aFuzzy = false)
+    : mTargetThread(aTargetThread), mMediaTimer(new MediaTimer(aFuzzy))
   {
     MOZ_ASSERT(mTargetThread);
   }
@@ -145,10 +151,11 @@ public:
     }
     Reset();
     mTarget = aTarget;
-    mRequest.Begin(mMediaTimer->WaitUntil(mTarget, __func__)->Then(
+    mMediaTimer->WaitUntil(mTarget, __func__)->Then(
       mTargetThread, __func__,
-      Forward<ResolveFunc>(aResolver),
-      Forward<RejectFunc>(aRejector)));
+      std::forward<ResolveFunc>(aResolver),
+      std::forward<RejectFunc>(aRejector))
+    ->Track(mRequest);
   }
 
   void CompleteRequest()

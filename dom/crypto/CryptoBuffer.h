@@ -24,10 +24,14 @@ public:
   uint8_t* Assign(const uint8_t* aData, uint32_t aLength);
   uint8_t* Assign(const nsACString& aString);
   uint8_t* Assign(const SECItem* aItem);
+  uint8_t* Assign(const InfallibleTArray<uint8_t>& aData);
   uint8_t* Assign(const ArrayBuffer& aData);
   uint8_t* Assign(const ArrayBufferView& aData);
   uint8_t* Assign(const ArrayBufferViewOrArrayBuffer& aData);
   uint8_t* Assign(const OwningArrayBufferViewOrArrayBuffer& aData);
+
+  uint8_t* AppendSECItem(const SECItem* aItem);
+  uint8_t* AppendSECItem(const SECItem& aItem);
 
   template<typename T,
            JSObject* UnwrapArray(JSObject*),
@@ -40,9 +44,11 @@ public:
   }
 
   nsresult FromJwkBase64(const nsString& aBase64);
-  nsresult ToJwkBase64(nsString& aBase64);
+  nsresult ToJwkBase64(nsString& aBase64) const;
   bool ToSECItem(PLArenaPool* aArena, SECItem* aItem) const;
   JSObject* ToUint8Array(JSContext* aCx) const;
+  JSObject* ToArrayBuffer(JSContext* aCx) const;
+  bool ToNewUnsignedBuffer(uint8_t** aBuf, uint32_t* aBufLen) const;
 
   bool GetBigIntValue(unsigned long& aRetVal);
 };

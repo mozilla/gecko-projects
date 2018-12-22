@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -20,20 +22,10 @@ namespace base {
 
 MessagePumpForUI::MessagePumpForUI()
   : state_(NULL)
-  , pump(*this)
 {
 }
 
 MessagePumpForUI::~MessagePumpForUI() {
-}
-
-MessagePumpAndroid::MessagePumpAndroid(MessagePumpForUI &aPump)
-  : pump(aPump)
-{
-}
-
-MessagePumpAndroid::~MessagePumpAndroid()
-{
 }
 
 void MessagePumpForUI::Run(Delegate* delegate) {

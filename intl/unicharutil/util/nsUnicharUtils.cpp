@@ -1,10 +1,9 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsUnicharUtils.h"
-#include "nsXPCOMStrings.h"
 #include "nsUTF8Utils.h"
 #include "nsUnicodeProperties.h"
 #include "mozilla/Likely.h"
@@ -22,12 +21,6 @@ static const uint8_t gASCIIToLower [128] = {
     0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
     0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
 };
-
-#define IS_ASCII(u)       ((u) < 0x80)
-#define IS_ASCII_UPPER(u) (('A' <= (u)) && ((u) <= 'Z'))
-#define IS_ASCII_LOWER(u) (('a' <= (u)) && ((u) <= 'z'))
-#define IS_ASCII_ALPHA(u) (IS_ASCII_UPPER(u) || IS_ASCII_LOWER(u))
-#define IS_ASCII_SPACE(u) (' ' == (u))
 
 // We want ToLowerCase(uint32_t) and ToLowerCaseASCII(uint32_t) to be fast
 // when they're called from within the case-insensitive comparators, so we
@@ -60,15 +53,36 @@ ToLowerCase(nsAString& aString)
 }
 
 void
+ToLowerCaseASCII(nsAString& aString)
+{
+  char16_t *buf = aString.BeginWriting();
+  ToLowerCaseASCII(buf, buf, aString.Length());
+}
+
+void
 ToLowerCase(const nsAString& aSource,
             nsAString& aDest)
 {
-  const char16_t *in;
-  char16_t *out;
-  uint32_t len = NS_StringGetData(aSource, &in);
-  NS_StringGetMutableData(aDest, len, &out);
-  NS_ASSERTION(out, "Uh...");
+  const char16_t *in = aSource.BeginReading();
+  uint32_t len = aSource.Length();
+
+  aDest.SetLength(len);
+  char16_t *out = aDest.BeginWriting();
+
   ToLowerCase(in, out, len);
+}
+
+void
+ToLowerCaseASCII(const nsAString& aSource,
+                 nsAString& aDest)
+{
+  const char16_t *in = aSource.BeginReading();
+  uint32_t len = aSource.Length();
+
+  aDest.SetLength(len);
+  char16_t *out = aDest.BeginWriting();
+
+  ToLowerCaseASCII(in, out, len);
 }
 
 uint32_t
@@ -88,11 +102,12 @@ void
 ToUpperCase(const nsAString& aSource,
             nsAString& aDest)
 {
-  const char16_t *in;
-  char16_t *out;
-  uint32_t len = NS_StringGetData(aSource, &in);
-  NS_StringGetMutableData(aDest, len, &out);
-  NS_ASSERTION(out, "Uh...");
+  const char16_t *in = aSource.BeginReading();
+  uint32_t len = aSource.Length();
+
+  aDest.SetLength(len);
+  char16_t *out = aDest.BeginWriting();
+
   ToUpperCase(in, out, len);
 }
 
@@ -171,6 +186,15 @@ ToLowerCase(const char16_t *aIn, char16_t *aOut, uint32_t aLen)
       continue;
     }
     aOut[i] = ToLowerCase(ch);
+  }
+}
+
+void
+ToLowerCaseASCII(const char16_t *aIn, char16_t *aOut, uint32_t aLen)
+{
+  for (uint32_t i = 0; i < aLen; i++) {
+    char16_t ch = aIn[i];
+    aOut[i] = IS_ASCII_UPPER(ch) ? (ch + 0x20) : ch;
   }
 }
 
@@ -260,15 +284,12 @@ CaseInsensitiveCompare(const char16_t *a,
   return 0;
 }
 
-// Calculates the codepoint of the UTF8 sequence starting at aStr.  Sets aNext
-// to the byte following the end of the sequence.
-//
-// If the sequence is invalid, or if computing the codepoint would take us off
-// the end of the string (as marked by aEnd), returns -1 and does not set
-// aNext.  Note that this function doesn't check that aStr < aEnd -- it assumes
-// you've done that already.
+// Inlined definition of GetLowerUTF8Codepoint, which we use because we want
+// to be fast when called from the case-insensitive comparators.
 static MOZ_ALWAYS_INLINE uint32_t
-GetLowerUTF8Codepoint(const char* aStr, const char* aEnd, const char **aNext)
+GetLowerUTF8Codepoint_inline(const char* aStr,
+                             const char* aEnd,
+                             const char **aNext)
 {
   // Convert to unsigned char so that stuffing chars into PRUint32s doesn't
   // sign extend.
@@ -331,6 +352,11 @@ GetLowerUTF8Codepoint(const char* aStr, const char* aEnd, const char **aNext)
   return -1;
 }
 
+uint32_t
+GetLowerUTF8Codepoint(const char* aStr, const char* aEnd, const char **aNext) {
+  return GetLowerUTF8Codepoint_inline(aStr, aEnd, aNext);
+}
+
 int32_t CaseInsensitiveCompare(const char *aLeft,
                                const char *aRight,
                                uint32_t aLeftBytes,
@@ -340,11 +366,11 @@ int32_t CaseInsensitiveCompare(const char *aLeft,
   const char *rightEnd = aRight + aRightBytes;
 
   while (aLeft < leftEnd && aRight < rightEnd) {
-    uint32_t leftChar = GetLowerUTF8Codepoint(aLeft, leftEnd, &aLeft);
+    uint32_t leftChar = GetLowerUTF8Codepoint_inline(aLeft, leftEnd, &aLeft);
     if (MOZ_UNLIKELY(leftChar == uint32_t(-1)))
       return -1;
 
-    uint32_t rightChar = GetLowerUTF8Codepoint(aRight, rightEnd, &aRight);
+    uint32_t rightChar = GetLowerUTF8Codepoint_inline(aRight, rightEnd, &aRight);
     if (MOZ_UNLIKELY(rightChar == uint32_t(-1)))
       return -1;
 
@@ -378,13 +404,13 @@ CaseInsensitiveUTF8CharsEqual(const char* aLeft, const char* aRight,
   NS_ASSERTION(aLeft < aLeftEnd, "aLeft must be less than aLeftEnd.");
   NS_ASSERTION(aRight < aRightEnd, "aRight must be less than aRightEnd.");
 
-  uint32_t leftChar = GetLowerUTF8Codepoint(aLeft, aLeftEnd, aLeftNext);
+  uint32_t leftChar = GetLowerUTF8Codepoint_inline(aLeft, aLeftEnd, aLeftNext);
   if (MOZ_UNLIKELY(leftChar == uint32_t(-1))) {
     *aErr = true;
     return false;
   }
 
-  uint32_t rightChar = GetLowerUTF8Codepoint(aRight, aRightEnd, aRightNext);
+  uint32_t rightChar = GetLowerUTF8Codepoint_inline(aRight, aRightEnd, aRightNext);
   if (MOZ_UNLIKELY(rightChar == uint32_t(-1))) {
     *aErr = true;
     return false;
@@ -423,6 +449,13 @@ HashUTF8AsUTF16(const char* aUTF8, uint32_t aLength, bool* aErr)
   }
 
   return hash;
+}
+
+bool
+IsSegmentBreakSkipChar(uint32_t u)
+{
+  return unicode::IsEastAsianWidthFWH(u) &&
+         unicode::GetScriptCode(u) != unicode::Script::HANGUL;
 }
 
 } // namespace mozilla

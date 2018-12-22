@@ -18,8 +18,8 @@
       Mozilla Bug 633602</a>
     <p id="display"></p>
 
-    <svg width="100" height="100" viewbox="0 0 100 100">
-        <rect id="svg-elem" x="10" y="10" width="50" height="50"
+    <svg id="svg-elem" width="100" height="100" viewbox="0 0 100 100">
+        <rect x="10" y="10" width="50" height="50"
         fill="black" stroke="blue" stroke-width="2"/>
     </svg>
 
@@ -35,27 +35,25 @@
         var elem,
           elemWasLocked = false;
 
-        document.addEventListener("mozpointerlockchange", function (e) {
+        document.addEventListener("pointerlockchange", function (e) {
           if (document.fullscreenElement &&
-              document.mozPointerLockElement === elem) {
+              document.pointerLockElement === elem) {
             elemWasLocked = true;
-            document.mozExitPointerLock();
+            document.exitPointerLock();
           } else {
+            addFullscreenChangeContinuation("exit", function() {
+              ok(elemWasLocked, "Expected SVG elem to become locked.");
+              SimpleTest.finish();
+            });
             document.exitFullscreen();
           }
-        }, false);
-
-        document.addEventListener("fullscreenchange", function (e) {
-          if (document.fullscreenElement === elem) {
-            elem.mozRequestPointerLock();
-          } else {
-            ok(elemWasLocked, "Expected SVG elem to become locked.");
-            SimpleTest.finish();
-          }
-        }, false);
+        });
 
         function start() {
           elem = document.getElementById("svg-elem");
+          addFullscreenChangeContinuation("enter", function() {
+            elem.requestPointerLock();
+          });
           elem.requestFullscreen();
         }
       </script>

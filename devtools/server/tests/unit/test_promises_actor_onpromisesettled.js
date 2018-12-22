@@ -8,29 +8,29 @@
 
 "use strict";
 
-Cu.import("resource://testing-common/PromiseTestUtils.jsm", this);
+ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
 
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 
-var events = require("sdk/event/core");
+var EventEmitter = require("devtools/shared/event-emitter");
 
-add_task(function*() {
-  let client = yield startTestDebuggerServer("promises-actor-test");
-  let chromeActors = yield getChromeActors(client);
+add_task(async function() {
+  const client = await startTestDebuggerServer("promises-actor-test");
+  const parentProcessActors = await getParentProcessActors(client);
 
-  ok(Promise.toString().contains("native code"), "Expect native DOM Promise");
+  ok(Promise.toString().includes("native code"), "Expect native DOM Promise");
 
-  // We have to attach the chrome TabActor before playing with the PromiseActor
-  yield attachTab(client, chromeActors);
-  yield testPromisesSettled(client, chromeActors,
+  // We have to attach the chrome target actor before playing with the PromiseActor
+  await attachTab(client, parentProcessActors);
+  await testPromisesSettled(client, parentProcessActors,
     v => new Promise(resolve => resolve(v)),
     v => new Promise((resolve, reject) => reject(v)));
 
-  let response = yield listTabs(client);
-  let targetTab = findTab(response.tabs, "promises-actor-test");
+  const response = await listTabs(client);
+  const targetTab = findTab(response.tabs, "promises-actor-test");
   ok(targetTab, "Found our target tab.");
 
-  yield testPromisesSettled(client, targetTab, v => {
+  await testPromisesSettled(client, targetTab, v => {
     const debuggee = DebuggerServer.getTestGlobal("promises-actor-test");
     return debuggee.Promise.resolve(v);
   }, v => {
@@ -38,29 +38,29 @@ add_task(function*() {
     return debuggee.Promise.reject(v);
   });
 
-  yield close(client);
+  await close(client);
 });
 
-function* testPromisesSettled(client, form, makeResolvePromise,
+async function testPromisesSettled(client, form, makeResolvePromise,
     makeRejectPromise) {
-  let front = PromisesFront(client, form);
-  let resolution = "MyLittleSecret" + Math.random();
+  const front = PromisesFront(client, form);
+  const resolution = "MyLittleSecret" + Math.random();
 
-  yield front.attach();
-  yield front.listPromises();
+  await front.attach();
+  await front.listPromises();
 
   let onPromiseSettled = oncePromiseSettled(front, resolution, true, false);
-  let resolvedPromise = makeResolvePromise(resolution);
-  let foundResolvedPromise = yield onPromiseSettled;
+  const resolvedPromise = makeResolvePromise(resolution);
+  const foundResolvedPromise = await onPromiseSettled;
   ok(foundResolvedPromise, "Found our resolved promise");
 
   PromiseTestUtils.expectUncaughtRejection(r => r.message == resolution);
   onPromiseSettled = oncePromiseSettled(front, resolution, false, true);
-  let rejectedPromise = makeRejectPromise(resolution);
-  let foundRejectedPromise = yield onPromiseSettled;
+  const rejectedPromise = makeRejectPromise(resolution);
+  const foundRejectedPromise = await onPromiseSettled;
   ok(foundRejectedPromise, "Found our rejected promise");
 
-  yield front.detach();
+  await front.detach();
   // Appease eslint
   void resolvedPromise;
   void rejectedPromise;
@@ -68,8 +68,8 @@ function* testPromisesSettled(client, form, makeResolvePromise,
 
 function oncePromiseSettled(front, resolution, resolveValue, rejectValue) {
   return new Promise(resolve => {
-    events.on(front, "promises-settled", promises => {
-      for (let p of promises) {
+    EventEmitter.on(front, "promises-settled", promises => {
+      for (const p of promises) {
         equal(p.type, "object", "Expect type to be Object");
         equal(p.class, "Promise", "Expect class to be Promise");
         equal(typeof p.promiseState.creationTimestamp, "number",

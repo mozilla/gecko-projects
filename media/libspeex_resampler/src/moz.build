@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -16,7 +16,7 @@ SOURCES += [
 ]
 
 # We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
+AllowCompilerWarnings()
 
 FINAL_LIBRARY = 'gkmedias'
 
@@ -44,8 +44,14 @@ if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     SOURCES += [
         'resample_neon.c'
     ]
-    SOURCES['resample_neon.c'].flags += ['-mfpu=neon']
+    SOURCES['resample_neon.c'].flags += CONFIG['NEON_FLAGS']
 
 # Suppress warnings in third-party code.
-if CONFIG['GNU_CC']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CFLAGS += ['-Wno-sign-compare']
+
+if CONFIG['CC_TYPE'] == 'msvc':
+    CFLAGS += [
+        '-wd4018', # '<' : signed/unsigned mismatch
+        '-wd4101', # unreferenced local variable
+    ]

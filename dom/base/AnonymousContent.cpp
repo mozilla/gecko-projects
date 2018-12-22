@@ -7,9 +7,10 @@
 #include "AnonymousContent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/AnonymousContentBinding.h"
+#include "nsComputedDOMStyle.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDocument.h"
-#include "nsIDOMHTMLCollection.h"
+#include "nsIFrame.h"
 #include "nsStyledElement.h"
 #include "HTMLCanvasElement.h"
 
@@ -29,7 +30,7 @@ AnonymousContent::~AnonymousContent()
 {
 }
 
-nsCOMPtr<Element>
+Element*
 AnonymousContent::GetContentNode()
 {
   return mContentNode;
@@ -73,6 +74,7 @@ void
 AnonymousContent::SetAttributeForElement(const nsAString& aElementId,
                                          const nsAString& aName,
                                          const nsAString& aValue,
+                                         nsIPrincipal* aSubjectPrincipal,
                                          ErrorResult& aRv)
 {
   Element* element = GetElementById(aElementId);
@@ -81,7 +83,7 @@ AnonymousContent::SetAttributeForElement(const nsAString& aElementId,
     return;
   }
 
-  element->SetAttribute(aName, aValue, aRv);
+  element->SetAttribute(aName, aValue, aSubjectPrincipal, aRv);
 }
 
 void
@@ -137,19 +139,63 @@ AnonymousContent::GetCanvasContext(const nsAString& aElementId,
   return context.forget();
 }
 
+already_AddRefed<Animation>
+AnonymousContent::SetAnimationForElement(JSContext* aContext,
+                                         const nsAString& aElementId,
+                                         JS::Handle<JSObject*> aKeyframes,
+                                         const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
+                                         ErrorResult& aRv)
+{
+  Element* element = GetElementById(aElementId);
+
+  if (!element) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return nullptr;
+  }
+
+  return element->Animate(aContext, aKeyframes, aOptions, aRv);
+}
+
+void
+AnonymousContent::SetCutoutRectsForElement(const nsAString& aElementId,
+                                           const Sequence<OwningNonNull<DOMRect>>& aRects,
+                                           ErrorResult& aRv)
+{
+  Element* element = GetElementById(aElementId);
+
+  if (!element) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return;
+  }
+
+  nsRegion cutOutRegion;
+  for (const auto& r : aRects) {
+    CSSRect rect(r->X(), r->Y(), r->Width(), r->Height());
+    cutOutRegion.OrWith(CSSRect::ToAppUnits(rect));
+  }
+
+  element->SetProperty(nsGkAtoms::cutoutregion, new nsRegion(cutOutRegion),
+                       nsINode::DeleteProperty<nsRegion>);
+
+  nsIFrame* frame = element->GetPrimaryFrame();
+  if (frame) {
+    frame->SchedulePaint();
+  }
+}
+
 Element*
 AnonymousContent::GetElementById(const nsAString& aElementId)
 {
   // This can be made faster in the future if needed.
-  nsCOMPtr<nsIAtom> elementId = NS_Atomize(aElementId);
-  for (nsIContent* kid = mContentNode->GetFirstChild(); kid;
-       kid = kid->GetNextNode(mContentNode)) {
-    if (!kid->IsElement()) {
+  RefPtr<nsAtom> elementId = NS_Atomize(aElementId);
+  for (nsIContent* node = mContentNode; node;
+       node = node->GetNextNode(mContentNode)) {
+    if (!node->IsElement()) {
       continue;
     }
-    nsIAtom* id = kid->AsElement()->GetID();
+    nsAtom* id = node->AsElement()->GetID();
     if (id && id == elementId) {
-      return kid->AsElement();
+      return node->AsElement();
     }
   }
   return nullptr;
@@ -160,7 +206,33 @@ AnonymousContent::WrapObject(JSContext* aCx,
                              JS::Handle<JSObject*> aGivenProto,
                              JS::MutableHandle<JSObject*> aReflector)
 {
-  return AnonymousContentBinding::Wrap(aCx, this, aGivenProto, aReflector);
+  return AnonymousContent_Binding::Wrap(aCx, this, aGivenProto, aReflector);
+}
+
+void
+AnonymousContent::GetComputedStylePropertyValue(const nsAString& aElementId,
+                                                const nsAString& aPropertyName,
+                                                DOMString& aResult,
+                                                ErrorResult& aRv)
+{
+  Element* element = GetElementById(aElementId);
+  if (!element) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return;
+  }
+
+  nsIPresShell* shell = element->OwnerDoc()->GetShell();
+  if (!shell) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return;
+  }
+
+  RefPtr<nsComputedDOMStyle> cs =
+    new nsComputedDOMStyle(element,
+                           NS_LITERAL_STRING(""),
+                           element->OwnerDoc(),
+                           nsComputedDOMStyle::eAll);
+  aRv = cs->GetPropertyValue(aPropertyName, aResult);
 }
 
 } // namespace dom

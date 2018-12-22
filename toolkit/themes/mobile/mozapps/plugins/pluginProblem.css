@@ -63,13 +63,6 @@ html|a {
   margin-bottom: 6px;
 }
 
-:-moz-type-unsupported .icon,
-:-moz-type-unsupported-platform .icon {
-  background-image: url(chrome://mozapps/skin/plugins/contentPluginMissing.png);
-}
-:-moz-type-unsupported .icon[installable] {
-  background-image: url(chrome://mozapps/skin/plugins/contentPluginDownload.png);
-}
 :-moz-handler-vulnerable-updatable .icon,
 :-moz-handler-vulnerable-no-update .icon {
   background-image: url(chrome://mozapps/skin/plugins/contentPluginBlocked.png);
@@ -81,9 +74,6 @@ html|a {
 :-moz-handler-clicktoplay .icon {
   background-image: url(chrome://mozapps/skin/plugins/contentPluginActivate.png);
   -moz-user-focus: normal;
-}
-:-moz-handler-disabled .icon {
-  background-image: url(chrome://mozapps/skin/plugins/contentPluginDisabled.png);
 }
 :-moz-handler-crashed .icon {
   background-image: url(chrome://mozapps/skin/plugins/contentPluginCrashed.png);
@@ -100,7 +90,7 @@ html|a {
   text-decoration: underline;
 }
 
-@media not all and (-moz-touch-enabled) {
+@media (-moz-touch-enabled: 0) {
   :-moz-handler-clicktoplay .msgTapToPlay {
     display: none;
   }
@@ -170,8 +160,8 @@ html|a {
   width: 16px;
   height: 16px;
   margin-top: 4px;
-  -moz-margin-start: -20px;
-  -moz-margin-end: 4px;
+  margin-inline-start: -20px;
+  margin-inline-end: 4px;
   border: none;
   background-color: transparent;
   background-image: url("chrome://mozapps/skin/plugins/contentPluginClose.png");

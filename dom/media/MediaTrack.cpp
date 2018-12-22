@@ -5,16 +5,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaTrack.h"
+#include "AudioTrack.h"
 #include "MediaTrackList.h"
+#include "VideoTrack.h"
 
 namespace mozilla {
 namespace dom {
 
-MediaTrack::MediaTrack(const nsAString& aId,
+MediaTrack::MediaTrack(nsIGlobalObject* aOwnerGlobal,
+                       const nsAString& aId,
                        const nsAString& aKind,
                        const nsAString& aLabel,
                        const nsAString& aLanguage)
-  : DOMEventTargetHelper()
+  : DOMEventTargetHelper(aOwnerGlobal)
   , mId(aId)
   , mKind(aKind)
   , mLabel(aLabel)
@@ -30,19 +33,13 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaTrack, DOMEventTargetHelper, mList)
 
 NS_IMPL_ADDREF_INHERITED(MediaTrack, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(MediaTrack, DOMEventTargetHelper)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaTrack)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaTrack)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 void
 MediaTrack::SetTrackList(MediaTrackList* aList)
 {
   mList = aList;
-}
-
-void
-MediaTrack::Init(nsPIDOMWindowInner* aOwnerWindow)
-{
-  BindToOwner(aOwnerWindow);
 }
 
 } // namespace dom

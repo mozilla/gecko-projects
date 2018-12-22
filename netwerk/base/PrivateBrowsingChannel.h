@@ -14,6 +14,7 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsNetUtil.h"
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 namespace net {
@@ -28,7 +29,7 @@ public:
   {
   }
 
-  NS_IMETHOD SetPrivate(bool aPrivate)
+  NS_IMETHOD SetPrivate(bool aPrivate) override
   {
       // Make sure that we don't have a load context
       // This is a fatal error in debug builds, and a runtime error in release
@@ -45,14 +46,14 @@ public:
       return NS_OK;
   }
 
-  NS_IMETHOD GetIsChannelPrivate(bool *aResult)
+  NS_IMETHOD GetIsChannelPrivate(bool *aResult) override
   {
       NS_ENSURE_ARG_POINTER(aResult);
       *aResult = mPrivateBrowsing;
       return NS_OK;
   }
 
-  NS_IMETHOD IsPrivateModeOverriden(bool* aValue, bool *aResult)
+  NS_IMETHOD IsPrivateModeOverriden(bool* aValue, bool *aResult) override
   {
       NS_ENSURE_ARG_POINTER(aValue);
       NS_ENSURE_ARG_POINTER(aResult);
@@ -71,10 +72,20 @@ public:
           return;
       }
 
+      auto channel = static_cast<Channel*>(this);
+
       nsCOMPtr<nsILoadContext> loadContext;
-      NS_QueryNotificationCallbacks(static_cast<Channel*>(this), loadContext);
+      NS_QueryNotificationCallbacks(channel, loadContext);
       if (loadContext) {
           mPrivateBrowsing = loadContext->UsePrivateBrowsing();
+          return;
+      }
+
+      nsCOMPtr<nsILoadInfo> loadInfo;
+      Unused << channel->GetLoadInfo(getter_AddRefs(loadInfo));
+      if (loadInfo) {
+          OriginAttributes attrs = loadInfo->GetOriginAttributes();
+          mPrivateBrowsing = attrs.mPrivateBrowsingId > 0;
       }
   }
 

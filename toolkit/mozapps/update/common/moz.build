@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,8 +6,8 @@
 
 EXPORTS += [
     'readstrings.h',
+    'updatecommon.h',
     'updatedefines.h',
-    'updatelogging.h',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
@@ -26,7 +26,27 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
 Library('updatecommon')
 
 DEFINES['NS_NO_XPCOM'] = True
+USE_STATIC_LIBS = True
 
-srcdir = '.'
+DisableStlWrapping()
 
-include('sources.mozbuild')
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    SOURCES += [
+        'pathhash.cpp',
+        'uachelper.cpp',
+        'updatehelper.cpp',
+    ]
+    if CONFIG['MOZ_MAINTENANCE_SERVICE']:
+        SOURCES += [
+            'certificatecheck.cpp',
+            'registrycertificates.cpp',
+        ]
+        OS_LIBS += [
+            'crypt32',
+            'wintrust',
+        ]
+
+SOURCES += [
+    'readstrings.cpp',
+    'updatecommon.cpp',
+]

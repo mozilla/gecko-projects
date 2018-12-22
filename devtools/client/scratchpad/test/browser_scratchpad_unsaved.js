@@ -6,16 +6,13 @@
 // only finish() when correct number of tests are done
 const expected = 4;
 var count = 0;
-function done()
-{
+function done() {
   if (++count == expected) {
     finish();
   }
 }
 
-
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
   testListeners();
@@ -23,12 +20,11 @@ function test()
   testRestoreFromFileSaved();
   testRestoreFromFileUnsaved();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location = "data:text/html,<p>test star* UI for unsaved file changes";
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.loadURI("data:text/html,<p>test star* UI for unsaved file changes");
 }
 
-function testListeners()
-{
+function testListeners() {
   openScratchpad(function(aWin, aScratchpad) {
     aScratchpad.setText("new text");
     ok(isStar(aWin), "show star if scratchpad text changes");
@@ -57,14 +53,13 @@ function testListeners()
   }, {noFocus: true});
 }
 
-function testRestoreNotFromFile()
-{
-  let session = [{
+function testRestoreNotFromFile() {
+  const session = [{
     text: "test1",
     executionContext: 1
   }];
 
-  let [win] = ScratchpadManager.restoreSession(session);
+  const [win] = ScratchpadManager.restoreSession(session);
   openScratchpad(function(aWin, aScratchpad) {
     aScratchpad.setText("new text");
     ok(isStar(win), "show star if restored scratchpad isn't from a file");
@@ -74,16 +69,15 @@ function testRestoreNotFromFile()
   }, {window: win, noFocus: true});
 }
 
-function testRestoreFromFileSaved()
-{
-  let session = [{
+function testRestoreFromFileSaved() {
+  const session = [{
     filename: "test.js",
     text: "test1",
     executionContext: 1,
     saved: true
   }];
 
-  let [win] = ScratchpadManager.restoreSession(session);
+  const [win] = ScratchpadManager.restoreSession(session);
   openScratchpad(function(aWin, aScratchpad) {
     ok(!isStar(win), "no star before changing text in scratchpad restored from file");
 
@@ -95,16 +89,15 @@ function testRestoreFromFileSaved()
   }, {window: win, noFocus: true});
 }
 
-function testRestoreFromFileUnsaved()
-{
-  let session = [{
+function testRestoreFromFileUnsaved() {
+  const session = [{
     filename: "test.js",
     text: "test1",
     executionContext: 1,
     saved: false
   }];
 
-  let [win] = ScratchpadManager.restoreSession(session);
+  const [win] = ScratchpadManager.restoreSession(session);
   openScratchpad(function() {
     ok(isStar(win), "star with scratchpad restored with unsaved text");
 
@@ -113,7 +106,6 @@ function testRestoreFromFileUnsaved()
   }, {window: win, noFocus: true});
 }
 
-function isStar(win)
-{
+function isStar(win) {
   return win.document.title.match(/^\*[^\*]/);
 }

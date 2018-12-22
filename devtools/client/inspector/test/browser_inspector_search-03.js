@@ -189,34 +189,51 @@ var TEST_DATA = [
     key: "p", suggestions: []
   },
   {
-    key: "]",
+    key: "]", suggestions: []
+  },
+  {
+    key: ".",
     suggestions: [
-      {label: "p[id*=p]"}
+      {label: "p[id*=p].c1"},
+      {label: "p[id*=p].c2"}
+    ]
+  },
+  {
+    key: "VK_BACK_SPACE",
+    suggestions: []
+  },
+  {
+    key: "#",
+    suggestions: [
+      {label: "p[id*=p]#p1"},
+      {label: "p[id*=p]#p2"},
+      {label: "p[id*=p]#p3"}
     ]
   }
 ];
 
-add_task(function* () {
-  let { inspector } = yield openInspectorForURL(TEST_URL);
-  let searchBox = inspector.searchBox;
-  let popup = inspector.searchSuggestions.searchPopup;
+add_task(async function() {
+  const { inspector } = await openInspectorForURL(TEST_URL);
+  const searchBox = inspector.searchBox;
+  const popup = inspector.searchSuggestions.searchPopup;
 
-  yield focusSearchBoxUsingShortcut(inspector.panelWin);
+  await focusSearchBoxUsingShortcut(inspector.panelWin);
 
-  for (let { key, suggestions } of TEST_DATA) {
+  for (const { key, suggestions } of TEST_DATA) {
     info("Pressing " + key + " to get " + formatSuggestions(suggestions));
 
-    let command = once(searchBox, "command");
+    const command = once(searchBox, "input");
     EventUtils.synthesizeKey(key, {}, inspector.panelWin);
-    yield command;
+    await command;
 
     info("Waiting for search query to complete");
-    yield inspector.searchSuggestions._lastQuery;
+    await inspector.searchSuggestions._lastQuery;
 
-    info("Query completed. Performing checks for input '" + searchBox.value + "'");
-    let actualSuggestions = popup.getItems().reverse();
+    info("Query completed. Performing checks for input '" +
+         searchBox.value + "'");
+    const actualSuggestions = popup.getItems().reverse();
 
-    is(popup.isOpen ? actualSuggestions.length: 0, suggestions.length,
+    is(popup.isOpen ? actualSuggestions.length : 0, suggestions.length,
        "There are expected number of suggestions.");
 
     for (let i = 0; i < suggestions.length; i++) {

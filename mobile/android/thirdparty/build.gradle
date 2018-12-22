@@ -3,12 +3,12 @@ buildDir "${topobjdir}/gradle/build/mobile/android/thirdparty"
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 23
-    buildToolsVersion "23.0.1"
+    compileSdkVersion project.ext.compileSdkVersion
 
     defaultConfig {
-        targetSdkVersion 23
-        minSdkVersion 15
+        targetSdkVersion project.ext.targetSdkVersion
+        minSdkVersion project.ext.minSdkVersion
+        manifestPlaceholders = project.ext.manifestPlaceholders
     }
 
     compileOptions {
@@ -25,8 +25,13 @@ android {
             manifest.srcFile 'AndroidManifest.xml'
             java {
                 srcDir '.'
+
                 if (!mozconfig.substs.MOZ_INSTALL_TRACKING) {
                     exclude 'com/adjust/**'
+                }
+
+                if (!mozconfig.substs.MOZ_ANDROID_MMA) {
+                    exclude 'com/leanplum/**'
                 }
 
                 // Exclude LeakCanary: It will be added again via a gradle dependency. This version
@@ -38,7 +43,12 @@ android {
 }
 
 dependencies {
-    compile 'com.android.support:support-v4:23.0.1'
+    implementation "com.android.support:support-v4:$support_library_version"
+    if (mozconfig.substs.MOZ_ANDROID_MMA) {
+        implementation "com.android.support:appcompat-v7:$support_library_version"
+        implementation "com.android.support:support-annotations:$support_library_version"
+        implementation "com.google.android.gms:play-services-gcm:$google_play_services_version"
+    }
 }
 
 apply plugin: 'idea'
@@ -49,5 +59,12 @@ idea {
         if (!mozconfig.substs.MOZ_INSTALL_TRACKING) {
             excludeDirs += file('com/adjust/sdk')
         }
+        if (!mozconfig.substs.MOZ_ANDROID_MMA) {
+            excludeDirs += file('com/leanplum')
+        }
     }
 }
+
+// Bug 1353055 - Strip 'vars' debugging information to agree with moz.build.
+apply from: "${topsrcdir}/mobile/android/gradle/debug_level.gradle"
+android.libraryVariants.all configureVariantDebugLevel

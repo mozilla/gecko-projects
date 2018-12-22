@@ -11,6 +11,8 @@
 #include "gfxFailure.h"
 #include "prenv.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/layers/CompositorOptions.h"
+#include "mozilla/widget/CompositorWidget.h"
 #include "GeckoProfiler.h"
 
 #import <UIKit/UIKit.h>
@@ -18,17 +20,17 @@
 namespace mozilla {
 namespace gl {
 
-GLContextEAGL::GLContextEAGL(const SurfaceCaps& caps, EAGLContext* context,
-                             GLContext* sharedContext,
-                             bool isOffscreen, ContextProfile profile)
-    : GLContext(caps, sharedContext, isOffscreen)
+using namespace mozilla::widget;
+
+GLContextEAGL::GLContextEAGL(CreateContextFlags flags, const SurfaceCaps& caps,
+                             EAGLContext* context, GLContext* sharedContext,
+                             bool isOffscreen)
+    : GLContext(flags, caps, sharedContext, isOffscreen)
     , mContext(context)
     , mBackbufferRB(0)
     , mBackbufferFB(0)
     , mLayer(nil)
 {
-    SetProfileVersion(ContextProfile::OpenGLES,
-                      [context API] == kEAGLRenderingAPIOpenGLES3 ? 300 : 200);
 }
 
 GLContextEAGL::~GLContextEAGL()
@@ -111,12 +113,8 @@ GLContextEAGL::RecreateRB()
 }
 
 bool
-GLContextEAGL::MakeCurrentImpl(bool aForce)
+GLContextEAGL::MakeCurrentImpl() const
 {
-    if (!aForce && [EAGLContext currentContext] == mContext) {
-        return true;
-    }
-
     if (mContext) {
         if(![EAGLContext setCurrentContext:mContext]) {
             return false;
@@ -126,7 +124,8 @@ GLContextEAGL::MakeCurrentImpl(bool aForce)
 }
 
 bool
-GLContextEAGL::IsCurrent() {
+GLContextEAGL::IsCurrentImpl() const
+{
     return [EAGLContext currentContext] == mContext;
 }
 
@@ -143,21 +142,19 @@ GLContextEAGL::IsDoubleBuffered() const
 }
 
 bool
-GLContextEAGL::SupportsRobustness() const
-{
-    return false;
-}
-
-bool
 GLContextEAGL::SwapBuffers()
 {
-  PROFILER_LABEL("GLContextEAGL", "SwapBuffers",
-    js::ProfileEntry::Category::GRAPHICS);
+  AUTO_PROFILER_LABEL("GLContextEAGL::SwapBuffers", GRAPHICS);
 
   [mContext presentRenderbuffer:LOCAL_GL_RENDERBUFFER];
   return true;
 }
 
+void
+GLContextEAGL::GetWSIInfo(nsCString* const out) const
+{
+    out->AppendLiteral("EAGL");
+}
 
 already_AddRefed<GLContext>
 GLContextProviderEAGL::CreateWrappingExisting(void*, void*)
@@ -172,7 +169,7 @@ GetGlobalContextEAGL()
 }
 
 static already_AddRefed<GLContext>
-CreateEAGLContext(bool aOffscreen, GLContextEAGL* sharedContext)
+CreateEAGLContext(CreateContextFlags flags, bool aOffscreen, GLContextEAGL* sharedContext)
 {
     EAGLRenderingAPI apis[] = { kEAGLRenderingAPIOpenGLES3, kEAGLRenderingAPIOpenGLES2 };
 
@@ -195,13 +192,9 @@ CreateEAGLContext(bool aOffscreen, GLContextEAGL* sharedContext)
         return nullptr;
     }
 
-    SurfaceCaps caps = SurfaceCaps::ForRGBA();
-    ContextProfile profile = ContextProfile::OpenGLES;
-    RefPtr<GLContextEAGL> glContext = new GLContextEAGL(caps, context,
-                                                        sharedContext,
-                                                        aOffscreen,
-                                                        profile);
-
+    RefPtr<GLContextEAGL> glContext = new GLContextEAGL(flags, SurfaceCaps::ForRGBA(),
+                                                        context, sharedContext,
+                                                        aOffscreen);
     if (!glContext->Init()) {
         glContext = nullptr;
         return nullptr;
@@ -211,9 +204,20 @@ CreateEAGLContext(bool aOffscreen, GLContextEAGL* sharedContext)
 }
 
 already_AddRefed<GLContext>
-GLContextProviderEAGL::CreateForWindow(nsIWidget* aWidget, bool aForceAccelerated)
+GLContextProviderEAGL::CreateForCompositorWidget(CompositorWidget* aCompositorWidget, bool aForceAccelerated)
 {
-    RefPtr<GLContext> glContext = CreateEAGLContext(false, GetGlobalContextEAGL());
+    return CreateForWindow(aCompositorWidget->RealWidget(),
+                           aCompositorWidget->GetCompositorOptions().UseWebRender(),
+                           aForceAccelerated);
+}
+
+already_AddRefed<GLContext>
+GLContextProviderEAGL::CreateForWindow(nsIWidget* aWidget,
+                                       bool aWebRender,
+                                       bool aForceAccelerated)
+{
+    RefPtr<GLContext> glContext = CreateEAGLContext(CreateContextFlags::NONE, false,
+                                                    GetGlobalContextEAGL());
     if (!glContext) {
         return nullptr;
     }
@@ -226,17 +230,19 @@ GLContextProviderEAGL::CreateForWindow(nsIWidget* aWidget, bool aForceAccelerate
 }
 
 already_AddRefed<GLContext>
-GLContextProviderEAGL::CreateHeadless(CreateContextFlags flags)
+GLContextProviderEAGL::CreateHeadless(CreateContextFlags flags,
+                                      nsACString* const out_failureId)
 {
-    return CreateEAGLContext(true, GetGlobalContextEAGL());
+    return CreateEAGLContext(flags, true, GetGlobalContextEAGL());
 }
 
 already_AddRefed<GLContext>
 GLContextProviderEAGL::CreateOffscreen(const mozilla::gfx::IntSize& size,
                                        const SurfaceCaps& caps,
-                                       CreateContextFlags flags)
+                                       CreateContextFlags flags,
+                                       nsACString* const out_failureId)
 {
-    RefPtr<GLContext> glContext = CreateHeadless(flags);
+    RefPtr<GLContext> glContext = CreateHeadless(flags, out_failureId);
     if (!glContext->InitOffscreen(size, caps)) {
         return nullptr;
     }
@@ -249,11 +255,15 @@ static RefPtr<GLContext> gGlobalContext;
 GLContext*
 GLContextProviderEAGL::GetGlobalContext()
 {
-    if (!gGlobalContext) {
-        gGlobalContext = CreateEAGLContext(true, nullptr);
-        if (!gGlobalContext ||
-            !static_cast<GLContextEAGL*>(gGlobalContext.get())->Init())
-        {
+    static bool triedToCreateContext = false;
+    if (!triedToCreateContext) {
+        triedToCreateContext = true;
+
+        MOZ_RELEASE_ASSERT(!gGlobalContext, "GFX: Global GL context already initialized.");
+        RefPtr<GLContext> temp = CreateHeadless(CreateContextFlags::NONE);
+        gGlobalContext = temp;
+
+        if (!gGlobalContext) {
             MOZ_CRASH("Failed to create global context");
         }
     }

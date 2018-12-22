@@ -6,11 +6,11 @@
 #include <string.h>
 
 #include "mozilla/RangedPtr.h"
+#include "mozilla/TextUtils.h"
 
 #include "nsURLParsers.h"
 #include "nsURLHelper.h"
 #include "nsString.h"
-#include "nsCRT.h"
 
 using namespace mozilla;
 
@@ -137,7 +137,7 @@ nsBaseURLParser::ParseURL(const char *spec, int32_t specLen,
         }
     }
     else {
-        // 
+        //
         // spec = <authority-no-port-or-password>/<path>
         // spec = <path>
         //
@@ -224,9 +224,9 @@ nsBaseURLParser::ParsePath(const char *path, int32_t pathLen,
     // XXX PL_strnpbrk would be nice, but it's buggy
 
     // search for first occurrence of either ? or #
-    const char *query_beg = 0, *query_end = 0;
-    const char *ref_beg = 0;
-    const char *p = 0;
+    const char *query_beg = nullptr, *query_end = nullptr;
+    const char *ref_beg = nullptr;
+    const char *p = nullptr;
     for (p = path; p < path + pathLen; ++p) {
         // only match the query string if it precedes the reference fragment
         if (!ref_beg && !query_beg && *p == '?')
@@ -297,7 +297,7 @@ nsBaseURLParser::ParseFilePath(const char *filepath, int32_t filepathLen,
         ;
     if (*p == '/') {
         // catch /.. and /.
-        if ((p+1 < end && *(p+1) == '.') && 
+        if ((p+1 < end && *(p+1) == '.') &&
            (p+2 == end || (*(p+2) == '.' && p+3 == end)))
             p = end - 1;
         // filepath = <directory><filename>.<extension>
@@ -359,7 +359,7 @@ nsNoAuthURLParser::ParseAuthority(const char *auth, int32_t authLen,
                                  uint32_t *hostnamePos, int32_t *hostnameLen,
                                  int32_t *port)
 {
-    NS_NOTREACHED("Shouldn't parse auth in a NoAuthURL!");
+    MOZ_ASSERT_UNREACHABLE("Shouldn't parse auth in a NoAuthURL!");
     return NS_ERROR_UNEXPECTED;
 }
 
@@ -368,7 +368,7 @@ nsNoAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                     uint32_t *authPos, int32_t *authLen,
                                     uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     // everything is the path
     uint32_t pos = 0;
@@ -381,18 +381,17 @@ nsNoAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
             const char *p = nullptr;
             if (specLen > 2) {
                 // looks like there is an authority section
-#if defined(XP_WIN)
+
                 // if the authority looks like a drive number then we
                 // really want to treat it as part of the path
                 // [a-zA-Z][:|]{/\}
                 // i.e one of:   c:   c:\foo  c:/foo  c|  c|\foo  c|/foo
                 if ((specLen > 3) && (spec[3] == ':' || spec[3] == '|') &&
-                    nsCRT::IsAsciiAlpha(spec[2]) &&
+                    IsAsciiAlpha(spec[2]) &&
                     ((specLen == 4) || (spec[4] == '/') || (spec[4] == '\\'))) {
                     pos = 1;
-                    break;  
-                } 
-#endif
+                    break;
+                }
                 // Ignore apparent authority; path is everything after it
                 for (p = spec + 2; p < spec + specLen; ++p) {
                     if (*p == '/' || *p == '?' || *p == '#')
@@ -435,7 +434,7 @@ nsNoAuthURLParser::ParseFilePath(const char *filepath, int32_t filepathLen,
         const char *p = filepath;
         if (*p == '/')
             p++;
-        if ((end-p == 2) && (p[1]==':' || p[1]=='|') && nsCRT::IsAsciiAlpha(*p)) {
+        if ((end-p == 2) && (p[1]==':' || p[1]=='|') && IsAsciiAlpha(*p)) {
             // filepath = <drive-number>:
             SET_RESULT(directory, 0, filepathLen);
             SET_RESULT(basename, 0, -1);
@@ -484,7 +483,7 @@ nsAuthURLParser::ParseAuthority(const char *auth, int32_t authLen,
     // search backwards for @
     const char *p = auth + authLen - 1;
     for (; (*p != '@') && (p > auth); --p) {
-      continue;
+        continue; 
     }
     if ( *p == '@' ) {
         // auth = <user-info@server-info>
@@ -497,6 +496,12 @@ nsAuthURLParser::ParseAuthority(const char *auth, int32_t authLen,
                              port);
         if (NS_FAILED(rv)) return rv;
         OFFSET_RESULT(hostname, p + 1 - auth);
+
+        // malformed if has a username or password
+        // but no host info, such as: http://u:p@/
+        if ((usernamePos || passwordPos) && (!hostnamePos || !*hostnameLen)) {
+            return NS_ERROR_MALFORMED_URI;
+        }
     }
     else {
         // auth = <server-info>
@@ -600,7 +605,7 @@ nsAuthURLParser::ParseServerInfo(const char *serverinfo, int32_t serverinfoLen,
 
                 nsresult err;
                 *port = buf.ToInteger(&err);
-                if (NS_FAILED(err) || *port < 0)
+                if (NS_FAILED(err) || *port < 0 || *port > std::numeric_limits<uint16_t>::max())
                     return NS_ERROR_MALFORMED_URI;
             }
         }
@@ -626,7 +631,7 @@ nsAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                   uint32_t *authPos, int32_t *authLen,
                                   uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     uint32_t nslash = CountConsecutiveSlashes(spec, specLen);
 
@@ -658,7 +663,7 @@ nsStdURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                  uint32_t *authPos, int32_t *authLen,
                                  uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     uint32_t nslash = CountConsecutiveSlashes(spec, specLen);
 

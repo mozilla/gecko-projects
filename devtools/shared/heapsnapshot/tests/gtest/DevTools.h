@@ -15,7 +15,7 @@
 #include "gmock/gmock.h"
 #include "mozilla/devtools/HeapSnapshot.h"
 #include "mozilla/dom/ChromeUtils.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Move.h"
 #include "js/Principals.h"
 #include "js/UbiNode.h"
@@ -29,34 +29,29 @@ using namespace testing;
 // GTest fixture class that all of our tests derive from.
 struct DevTools : public ::testing::Test {
   bool                       _initialized;
-  JSRuntime*                 rt;
   JSContext*                 cx;
-  JSCompartment*             compartment;
+  JS::Compartment*           compartment;
   JS::Zone*                  zone;
   JS::PersistentRootedObject global;
 
   DevTools()
     : _initialized(false),
-      rt(nullptr),
       cx(nullptr)
   { }
 
   virtual void SetUp() {
     MOZ_ASSERT(!_initialized);
 
-    rt = getRuntime();
-    if (!rt)
-      return;
-
-    cx = createContext();
+    cx = getContext();
     if (!cx)
       return;
+
     JS_BeginRequest(cx);
 
-    global.init(rt, createGlobal());
+    global.init(cx, createGlobal());
     if (!global)
       return;
-    JS_EnterCompartment(cx, global);
+    JS::EnterRealm(cx, global);
 
     compartment = js::GetContextCompartment(cx);
     zone = js::GetContextZone(cx);
@@ -64,26 +59,8 @@ struct DevTools : public ::testing::Test {
     _initialized = true;
   }
 
-  JSRuntime* getRuntime() {
-    return CycleCollectedJSRuntime::Get()->Runtime();
-  }
-
-  static void setNativeStackQuota(JSRuntime* rt)
-  {
-    const size_t MAX_STACK_SIZE =
-      /* Assume we can't use more than 5e5 bytes of C stack by default. */
-#if (defined(DEBUG) && defined(__SUNPRO_CC))  || defined(JS_CPU_SPARC)
-      /*
-       * Sun compiler uses a larger stack space for js::Interpret() with
-       * debug.  Use a bigger gMaxStackSize to make "make check" happy.
-       */
-      5000000
-#else
-      500000
-#endif
-      ;
-
-    JS_SetNativeStackQuota(rt, MAX_STACK_SIZE);
+  JSContext* getContext() {
+    return CycleCollectedJSContext::Get()->Context();
   }
 
   static void reportError(JSContext* cx, const char* message, JSErrorReport* report) {
@@ -93,17 +70,16 @@ struct DevTools : public ::testing::Test {
             message);
   }
 
-  JSContext* createContext() {
-    return JS_NewContext(rt, 8192);
-  }
-
   static const JSClass* getGlobalClass() {
+    static const JSClassOps globalClassOps = {
+      nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr,
+      JS_GlobalObjectTraceHook
+    };
     static const JSClass globalClass = {
       "global", JSCLASS_GLOBAL_FLAGS,
-      nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr,
-      JS_GlobalObjectTraceHook
+      &globalClassOps
     };
     return &globalClass;
   }
@@ -112,18 +88,17 @@ struct DevTools : public ::testing::Test {
   {
     /* Create the global object. */
     JS::RootedObject newGlobal(cx);
-    JS::CompartmentOptions options;
-    options.behaviors().setVersion(JSVERSION_LATEST);
+    JS::RealmOptions options;
     newGlobal = JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
                                    JS::FireOnNewGlobalHook, options);
     if (!newGlobal)
       return nullptr;
 
-    JSAutoCompartment ac(cx, newGlobal);
+    JSAutoRealm ar(cx, newGlobal);
 
     /* Populate the global object with the standard globals, like Object and
        Array. */
-    if (!JS_InitStandardClasses(cx, newGlobal))
+    if (!JS::InitRealmStandardClasses(cx))
       return nullptr;
 
     return newGlobal;
@@ -133,14 +108,11 @@ struct DevTools : public ::testing::Test {
     _initialized = false;
 
     if (global) {
-      JS_LeaveCompartment(cx, nullptr);
+      JS::LeaveRealm(cx, nullptr);
       global = nullptr;
     }
-    if (cx) {
+    if (cx)
       JS_EndRequest(cx);
-      JS_DestroyContext(cx);
-      cx = nullptr;
-    }
   }
 };
 
@@ -158,7 +130,7 @@ class MOZ_STACK_CLASS FakeNode
 {
 public:
   JS::ubi::EdgeVector edges;
-  JSCompartment*      compartment;
+  JS::Compartment*    compartment;
   JS::Zone*           zone;
   size_t              size;
 
@@ -180,7 +152,7 @@ class Concrete<FakeNode> : public Base
     return concreteTypeName;
   }
 
-  js::UniquePtr<EdgeRange> edges(JSRuntime*, bool) const override {
+  js::UniquePtr<EdgeRange> edges(JSContext*, bool) const override {
     return js::UniquePtr<EdgeRange>(js_new<PreComputedEdgeRange>(get().edges));
   }
 
@@ -192,7 +164,7 @@ class Concrete<FakeNode> : public Base
     return get().zone;
   }
 
-  JSCompartment* compartment() const override {
+  JS::Compartment* compartment() const override {
     return get().compartment;
   }
 
@@ -207,7 +179,7 @@ public:
   }
 };
 
-const char16_t Concrete<FakeNode>::concreteTypeName[] = MOZ_UTF16("FakeNode");
+const char16_t Concrete<FakeNode>::concreteTypeName[] = u"FakeNode";
 
 } // namespace ubi
 } // namespace JS
@@ -220,7 +192,7 @@ void AddEdge(FakeNode& node, FakeNode& referent, const char16_t* edgeName = null
   }
 
   JS::ubi::Edge edge(ownedEdgeName, &referent);
-  ASSERT_TRUE(node.edges.append(mozilla::Move(edge)));
+  ASSERT_TRUE(node.edges.append(std::move(edge)));
 }
 
 
@@ -231,8 +203,8 @@ void AddEdge(FakeNode& node, FakeNode& referent, const char16_t* edgeName = null
 namespace testing {
 
 // Ensure that given node has the expected number of edges.
-MATCHER_P2(EdgesLength, rt, expectedLength, "") {
-  auto edges = arg.edges(rt);
+MATCHER_P2(EdgesLength, cx, expectedLength, "") {
+  auto edges = arg.edges(cx);
   if (!edges)
     return false;
 
@@ -245,8 +217,8 @@ MATCHER_P2(EdgesLength, rt, expectedLength, "") {
 }
 
 // Get the nth edge and match it with the given matcher.
-MATCHER_P3(Edge, rt, n, matcher, "") {
-  auto edges = arg.edges(rt);
+MATCHER_P3(Edge, cx, n, matcher, "") {
+  auto edges = arg.edges(cx);
   if (!edges)
     return false;
 

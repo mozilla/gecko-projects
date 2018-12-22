@@ -10,6 +10,7 @@
 #include "mozilla/dom/SVGDocument.h"
 #include "mozilla/dom/SVGForeignObjectElement.h"
 #include "mozilla/dom/SVGForeignObjectElementBinding.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(ForeignObject)
 
@@ -19,15 +20,15 @@ namespace dom {
 JSObject*
 SVGForeignObjectElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGForeignObjectElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGForeignObjectElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
-  { &nsGkAtoms::y, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
-  { &nsGkAtoms::height, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
+  { &nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
+  { &nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::X },
+  { &nsGkAtoms::height, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER, SVGContentUtils::Y },
 };
 
 //----------------------------------------------------------------------
@@ -39,7 +40,7 @@ SVGForeignObjectElement::SVGForeignObjectElement(already_AddRefed<mozilla::dom::
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGForeignObjectElement)
 
@@ -106,34 +107,8 @@ SVGForeignObjectElement::HasValidDimensions() const
 //----------------------------------------------------------------------
 // nsIContent methods
 
-nsresult
-SVGForeignObjectElement::BindToTree(nsIDocument* aDocument,
-                                    nsIContent* aParent,
-                                    nsIContent* aBindingParent,
-                                    bool aCompileEventHandlers)
-{
-  nsresult rv = SVGGraphicsElement::BindToTree(aDocument, aParent,
-                                               aBindingParent,
-                                               aCompileEventHandlers);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsIDocument* doc = GetComposedDoc();
-  if (doc && doc->IsSVGDocument()) {
-    // We assume that we're going to have HTML content, so we ensure that the
-    // UA style sheets that nsDocumentViewer::CreateStyleSet skipped when
-    // it saw the document was an SVG document are loaded.
-    //
-    // We setup these style sheets during binding, not element construction,
-    // because elements can be moved from the document that creates them to
-    // another document.
-    doc->AsSVGDocument()->EnsureNonSVGUserAgentStyleSheetsLoaded();
-  }
-
-  return rv;
-}
-
 NS_IMETHODIMP_(bool)
-SVGForeignObjectElement::IsAttributeMapped(const nsIAtom* name) const
+SVGForeignObjectElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sFEFloodMap,

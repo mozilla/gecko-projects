@@ -8,15 +8,13 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
-#include "nsIDOMHTMLTableCellElement.h"
 
 namespace mozilla {
 namespace dom {
 
 class HTMLTableElement;
 
-class HTMLTableCellElement final : public nsGenericHTMLElement,
-                                   public nsIDOMHTMLTableCellElement
+class HTMLTableCellElement final : public nsGenericHTMLElement
 {
 public:
   explicit HTMLTableCellElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
@@ -26,10 +24,8 @@ public:
   }
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMHTMLTableCellElement
-  NS_DECL_NSIDOMHTMLTABLECELLELEMENT
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLTableCellElement,
+                                       nsGenericHTMLElement)
 
   uint32_t ColSpan() const
   {
@@ -37,7 +33,7 @@ public:
   }
   void SetColSpan(uint32_t aColSpan, ErrorResult& aError)
   {
-    SetHTMLIntAttr(nsGkAtoms::colspan, aColSpan, aError);
+    SetUnsignedIntAttr(nsGkAtoms::colspan, aColSpan, 1, aError);
   }
   uint32_t RowSpan() const
   {
@@ -45,7 +41,7 @@ public:
   }
   void SetRowSpan(uint32_t aRowSpan, ErrorResult& aError)
   {
-    SetHTMLIntAttr(nsGkAtoms::rowspan, aRowSpan, aError);
+    SetUnsignedIntAttr(nsGkAtoms::rowspan, aRowSpan, 1, aError);
   }
   //already_AddRefed<nsDOMTokenList> Headers() const;
   void GetHeaders(DOMString& aHeaders)
@@ -66,10 +62,7 @@ public:
   {
     SetHTMLAttr(nsGkAtoms::abbr, aAbbr, aError);
   }
-  void GetScope(DOMString& aScope)
-  {
-    GetHTMLAttr(nsGkAtoms::scope, aScope);
-  }
+  void GetScope(DOMString& aScope);
   void SetScope(const nsAString& aScope, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::scope, aScope, aError);
@@ -145,14 +138,17 @@ public:
   }
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
+                              nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
-  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+  // Get mapped attributes of ancestor table, if any
+  nsMappedAttributes* GetMappedAttributesInheritedFromTable() const;
 
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
 protected:
   virtual ~HTMLTableCellElement();
@@ -165,7 +161,7 @@ protected:
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
+                                    MappedDeclarations&);
 };
 
 } // namespace dom

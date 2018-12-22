@@ -16,10 +16,6 @@ nsIncrementalStreamLoader::nsIncrementalStreamLoader()
 {
 }
 
-nsIncrementalStreamLoader::~nsIncrementalStreamLoader()
-{
-}
-
 NS_IMETHODIMP
 nsIncrementalStreamLoader::Init(nsIIncrementalStreamLoaderObserver* observer)
 {
@@ -69,10 +65,15 @@ nsIncrementalStreamLoader::OnStartRequest(nsIRequest* request, nsISupports *ctxt
     int64_t contentLength = -1;
     chan->GetContentLength(&contentLength);
     if (contentLength >= 0) {
-      if (uint64_t(contentLength) > std::numeric_limits<size_t>::max()) {
+      // On 64bit platforms size of uint64_t coincides with the size of size_t,
+      // so we want to compare with the minimum from size_t and int64_t.
+      if (static_cast<uint64_t>(contentLength) >
+          std::min(std::numeric_limits<size_t>::max(),
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()))) {
         // Too big to fit into size_t, so let's bail.
         return NS_ERROR_OUT_OF_MEMORY;
       }
+
       // preallocate buffer
       if (!mData.initCapacity(contentLength)) {
         return NS_ERROR_OUT_OF_MEMORY;
@@ -87,14 +88,13 @@ NS_IMETHODIMP
 nsIncrementalStreamLoader::OnStopRequest(nsIRequest* request, nsISupports *ctxt,
                                          nsresult aStatus)
 {
-  PROFILER_LABEL("nsIncrementalStreamLoader", "OnStopRequest",
-    js::ProfileEntry::Category::NETWORK);
+  AUTO_PROFILER_LABEL("nsIncrementalStreamLoader::OnStopRequest", NETWORK);
 
   if (mObserver) {
     // provide nsIIncrementalStreamLoader::request during call to OnStreamComplete
     mRequest = request;
     size_t length = mData.length();
-    uint8_t* elems = mData.extractRawBuffer();
+    uint8_t* elems = mData.extractOrCopyRawBuffer();
     nsresult rv = mObserver->OnStreamComplete(this, mContext, aStatus,
                                               length, elems);
     if (rv != NS_SUCCESS_ADOPTED_DATA) {
@@ -104,14 +104,14 @@ nsIncrementalStreamLoader::OnStopRequest(nsIRequest* request, nsISupports *ctxt,
     }
     // done.. cleanup
     ReleaseData();
-    mRequest = 0;
-    mObserver = 0;
-    mContext = 0;
+    mRequest = nullptr;
+    mObserver = nullptr;
+    mContext = nullptr;
   }
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 nsIncrementalStreamLoader::WriteSegmentFun(nsIInputStream *inStr,
                                            void *closure,
                                            const char *fromSegment,
@@ -153,7 +153,7 @@ nsIncrementalStreamLoader::WriteSegmentFun(nsIInputStream *inStr,
     }
     size_t length = self->mData.length();
     uint32_t reportCount = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
-    uint8_t* elems = self->mData.extractRawBuffer();
+    uint8_t* elems = self->mData.extractOrCopyRawBuffer();
 
     rv = self->mObserver->OnIncrementalData(self, self->mContext,
                                             reportCount, elems, &consumedCount);
@@ -197,7 +197,7 @@ nsIncrementalStreamLoader::OnDataAvailable(nsIRequest* request, nsISupports *ctx
   }
   uint32_t countRead;
   nsresult rv = inStr->ReadSegments(WriteSegmentFun, this, count, &countRead);
-  mRequest = 0;
+  mRequest = nullptr;
   return rv;
 }
 

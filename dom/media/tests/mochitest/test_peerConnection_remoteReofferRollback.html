@@ -14,13 +14,12 @@
   var test;
   runNetworkTest(function (options) {
     test = new PeerConnectionTest(options);
-    var firstNegotiationSize = test.chain.commands.length;
     addRenegotiation(test.chain,
       [
         function PC_LOCAL_ADD_SECOND_STREAM(test) {
           test.setMediaConstraints([{audio: true}, {audio: true}],
                                    [{audio: true}]);
-          return test.pcLocal.getAllUserMedia([{audio: true}]);
+          return test.pcLocal.getAllUserMediaAndAddStreams([{audio: true}]);
         },
       ]
     );
@@ -36,10 +35,9 @@
         },
 
         function PC_REMOTE_ROLLBACK(test) {
-          return test.setRemoteDescription(
-              test.pcRemote,
-              new RTCSessionDescription({ type: "rollback" }),
-              STABLE);
+          return test.setRemoteDescription(test.pcRemote, { type: "rollback" },
+                                           STABLE)
+            .then(() => test.pcRemote.rollbackRemoteTracksIfNotNegotiated());
         },
 
         function PC_LOCAL_ROLLBACK(test) {
@@ -56,7 +54,7 @@
           return test.pcLocal.endOfTrickleIce;
         },
       ],
-      firstNegotiationSize // Second PC_REMOTE_SET_REMOTE_DESCRIPTION
+      1 // Second PC_REMOTE_SET_REMOTE_DESCRIPTION
     );
     test.chain.append(commandsPeerConnectionOfferAnswer);
     test.setMediaConstraints([{audio: true}], [{audio: true}]);

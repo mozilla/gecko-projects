@@ -9,8 +9,11 @@
 #include "nsFileChannel.h"
 #include "nsStandardURL.h"
 #include "nsURLHelper.h"
+#include "nsIURIMutator.h"
 
 #include "nsNetUtil.h"
+
+#include "FileChannelChild.h"
 
 // URL file handling, copied and modified from xpfe/components/bookmarks/src/nsBookmarksService.cpp
 #ifdef XP_WIN
@@ -29,10 +32,6 @@
 #endif
 
 //-----------------------------------------------------------------------------
-
-nsFileProtocolHandler::nsFileProtocolHandler()
-{
-}
 
 nsresult
 nsFileProtocolHandler::Init()
@@ -105,6 +104,12 @@ nsFileProtocolHandler::ReadURLFile(nsIFile* aFile, nsIURI** aURI)
 	!StringEndsWith(leafName, NS_LITERAL_CSTRING(".desktop")))
         return NS_ERROR_NOT_AVAILABLE;
 
+    bool isFile = false;
+    rv = aFile->IsFile(&isFile);
+    if (NS_FAILED(rv) || !isFile) {
+        return NS_ERROR_NOT_AVAILABLE;
+    }
+
     nsINIParser parser;
     rv = parser.Init(aFile);
     if (NS_FAILED(rv))
@@ -148,33 +153,32 @@ nsFileProtocolHandler::GetDefaultPort(int32_t *result)
 NS_IMETHODIMP
 nsFileProtocolHandler::GetProtocolFlags(uint32_t *result)
 {
-    *result = URI_NOAUTH | URI_IS_LOCAL_FILE | URI_IS_LOCAL_RESOURCE;
+    *result = URI_NOAUTH | URI_IS_LOCAL_FILE |
+              URI_IS_LOCAL_RESOURCE | URI_IS_POTENTIALLY_TRUSTWORTHY;
     return NS_OK;
 }
 
 NS_IMETHODIMP
 nsFileProtocolHandler::NewURI(const nsACString &spec,
                               const char *charset,
-                              nsIURI *baseURI,
+                              nsIURI *aBaseURI,
                               nsIURI **result)
 {
-    nsCOMPtr<nsIStandardURL> url = new nsStandardURL(true);
-    if (!url)
-        return NS_ERROR_OUT_OF_MEMORY;
-
-    const nsACString *specPtr = &spec;
-
+    nsAutoCString buf(spec);
 #if defined(XP_WIN)
-    nsAutoCString buf;
-    if (net_NormalizeFileURL(spec, buf))
-        specPtr = &buf;
+    buf.Truncate();
+    if (!net_NormalizeFileURL(spec, buf)) {
+        buf = spec;
+    }
 #endif
 
-    nsresult rv = url->Init(nsIStandardURL::URLTYPE_NO_AUTHORITY, -1,
-                            *specPtr, charset, baseURI);
-    if (NS_FAILED(rv)) return rv;
-
-    return CallQueryInterface(url, result);
+    nsCOMPtr<nsIURI> base(aBaseURI);
+    return NS_MutateURI(new nsStandardURL::Mutator())
+      .Apply(NS_MutatorMethod(&nsIFileURLMutator::MarkFileURL))
+      .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
+                              nsIStandardURL::URLTYPE_NO_AUTHORITY,
+                              -1, buf, charset, base, nullptr))
+      .Finalize(result);
 }
 
 NS_IMETHODIMP
@@ -182,19 +186,28 @@ nsFileProtocolHandler::NewChannel2(nsIURI* uri,
                                    nsILoadInfo* aLoadInfo,
                                    nsIChannel** result)
 {
-    nsFileChannel *chan = new nsFileChannel(uri);
+    nsresult rv;
+
+    nsFileChannel *chan;
+    if (IsNeckoChild()) {
+        chan = new mozilla::net::FileChannelChild(uri);
+    } else {
+        chan = new nsFileChannel(uri);
+    }
     if (!chan)
         return NS_ERROR_OUT_OF_MEMORY;
     NS_ADDREF(chan);
 
-    nsresult rv = chan->Init();
+    // set the loadInfo on the new channel ; must do this
+    // before calling Init() on it, since it needs the load
+    // info be already set.
+    rv = chan->SetLoadInfo(aLoadInfo);
     if (NS_FAILED(rv)) {
         NS_RELEASE(chan);
         return rv;
     }
 
-    // set the loadInfo on the new channel
-    rv = chan->SetLoadInfo(aLoadInfo);
+    rv = chan->Init();
     if (NS_FAILED(rv)) {
         NS_RELEASE(chan);
         return rv;
@@ -210,10 +223,10 @@ nsFileProtocolHandler::NewChannel(nsIURI *uri, nsIChannel **result)
     return NewChannel2(uri, nullptr, result);
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsFileProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *result)
 {
-    // don't override anything.  
+    // don't override anything.
     *result = false;
     return NS_OK;
 }
@@ -222,21 +235,39 @@ nsFileProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *result)
 // nsIFileProtocolHandler methods:
 
 NS_IMETHODIMP
-nsFileProtocolHandler::NewFileURI(nsIFile *file, nsIURI **result)
+nsFileProtocolHandler::NewFileURI(nsIFile *aFile, nsIURI **aResult)
 {
-    NS_ENSURE_ARG_POINTER(file);
+    NS_ENSURE_ARG_POINTER(aFile);
+
+    RefPtr<nsIFile> file(aFile);
+    // NOTE: the origin charset is assigned the value of the platform
+    // charset by the SetFile method.
+    return NS_MutateURI(new nsStandardURL::Mutator())
+             .Apply(NS_MutatorMethod(&nsIFileURLMutator::SetFile, file))
+             .Finalize(aResult);
+}
+
+NS_IMETHODIMP
+nsFileProtocolHandler::NewFileURIMutator(nsIFile *aFile, nsIURIMutator **aResult)
+{
+    NS_ENSURE_ARG_POINTER(aFile);
     nsresult rv;
 
-    nsCOMPtr<nsIFileURL> url = new nsStandardURL(true);
-    if (!url)
-        return NS_ERROR_OUT_OF_MEMORY;
+    nsCOMPtr<nsIURIMutator> mutator = new nsStandardURL::Mutator();
+    nsCOMPtr<nsIFileURLMutator> fileMutator = do_QueryInterface(mutator, &rv);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
     // NOTE: the origin charset is assigned the value of the platform
     // charset by the SetFile method.
-    rv = url->SetFile(file);
-    if (NS_FAILED(rv)) return rv;
+    rv = fileMutator->SetFile(aFile);
+    if (NS_FAILED(rv)) {
+        return rv;
+    }
 
-    return CallQueryInterface(url, result);
+    mutator.forget(aResult);
+    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -247,7 +278,7 @@ nsFileProtocolHandler::GetURLSpecFromFile(nsIFile *file, nsACString &result)
 }
 
 NS_IMETHODIMP
-nsFileProtocolHandler::GetURLSpecFromActualFile(nsIFile *file, 
+nsFileProtocolHandler::GetURLSpecFromActualFile(nsIFile *file,
                                                 nsACString &result)
 {
     NS_ENSURE_ARG_POINTER(file);

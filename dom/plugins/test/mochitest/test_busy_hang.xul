@@ -20,6 +20,7 @@
   <script class="testbody" type="application/javascript">
     <![CDATA[
 SimpleTest.waitForExplicitFinish();
+SimpleTest.expectChildProcessCrash();
 
 function runTests() {
   // Default plugin hang timeout is too high for mochitests

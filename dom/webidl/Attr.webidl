@@ -12,11 +12,14 @@
 
 interface Attr : Node {
   readonly attribute DOMString localName;
-           [SetterThrows]
+           [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, SetterThrows]
            attribute DOMString value;
 
+  [Constant]
   readonly attribute DOMString name;
+  [Constant]
   readonly attribute DOMString? namespaceURI;
+  [Constant]
   readonly attribute DOMString? prefix;
 
   readonly attribute boolean specified;

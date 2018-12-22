@@ -19,8 +19,7 @@
 class nsPerformanceGroup;
 class nsPerformanceGroupDetails;
 
-typedef mozilla::Vector<RefPtr<js::PerformanceGroup>> JSGroupVector;
-typedef mozilla::Vector<RefPtr<nsPerformanceGroup>> GroupVector;
+typedef mozilla::Vector<RefPtr<nsPerformanceGroup>, 8> GroupVector;
 
 /**
  * A data structure for registering observers interested in
@@ -28,7 +27,7 @@ typedef mozilla::Vector<RefPtr<nsPerformanceGroup>> GroupVector;
  *
  * Each performance group owns a single instance of this class.
  * Additionally, the service owns instances designed to observe the
- * performance alerts in all add-ons (respectively webpages).
+ * performance alerts in all webpages.
  */
 class nsPerformanceObservationTarget final: public nsIPerformanceObservable {
 public:
@@ -65,16 +64,14 @@ private:
 };
 
 /**
- * The base class for entries of maps from addon id/window id to
+ * The base class for entries of maps from window id to
  * performance group.
  *
  * Performance observers may be registered before their group is
- * created (e.g., one may register an observer for an add-on before
- * all its modules are loaded, or even before the add-on is loaded at
- * all or for an observer for a webpage before all its iframes are
- * loaded). This class serves to hold the observation target until the
- * performance group may be created, and then to associate the
- * observation target and the performance group.
+ * created (e.g., one may register an observer for a webpage before all
+ * its iframes are loaded). This class serves to hold the observation
+ * target until the performance group may be created, and then to
+ * associate the observation target and the performance group.
  */
 class nsGroupHolder {
 public:
@@ -143,16 +140,16 @@ protected:
   bool mIsAvailable;
 
   /**
+   * `true` once we have called `Dispose()`.
+   */
+  bool mDisposed;
+
+  /**
    * A unique identifier for the process.
    *
    * Process HANDLE under Windows, pid under Unix.
    */
   const uint64_t mProcessId;
-
-  /**
-   * The JS Runtime for the main thread.
-   */
-  JSRuntime* const mRuntime;
 
   /**
    * Generate unique identifiers.
@@ -177,8 +174,6 @@ protected:
    * - the top group, shared by the entire process;
    * - the window group, if the code is executed in a window, shared
    *     by all compartments for that window (typically, all frames);
-   * - the add-on group, if the code is executed as an add-on, shared
-   *     by all compartments for that add-on (typically, all modules);
    * - the compartment's own group.
    *
    * Pre-condition: the VM must have entered the JS compartment.
@@ -187,8 +182,8 @@ protected:
    * calling it more than once may not return the same instances of
    * performance groups.
    */
-  bool GetPerformanceGroups(JSContext* cx, JSGroupVector&);
-  static bool GetPerformanceGroupsCallback(JSContext* cx, JSGroupVector&, void* closure);
+  bool GetPerformanceGroups(JSContext* cx, js::PerformanceGroupVector&);
+  static bool GetPerformanceGroupsCallback(JSContext* cx, js::PerformanceGroupVector&, void* closure);
 
 
 
@@ -202,23 +197,10 @@ protected:
    * we Dispose() of the service.
    *
    * A `nsPerformanceGroup` is typically kept alive (as a
-   * `js::PerformanceGroup`) by the JSCompartment to which it is
+   * `js::PerformanceGroup`) by the JS::Compartment to which it is
    * associated. It may also temporarily be kept alive by the JS
    * stack, in particular in case of nested event loops.
    */
-
-  /**
-   * Set of performance groups associated to add-ons, indexed
-   * by add-on id. Each item is shared by all the compartments
-   * that belong to the add-on.
-   */
-  struct AddonIdToGroup: public nsStringHashKey,
-                         public nsGroupHolder {
-    explicit AddonIdToGroup(const nsAString* key)
-      : nsStringHashKey(key)
-    { }
-  };
-  nsTHashtable<AddonIdToGroup> mAddonIdToGroup;
 
   /**
    * Set of performance groups associated to windows, indexed by outer
@@ -324,8 +306,10 @@ protected:
    * @param recentGroups The groups that have seen activity during this
    * event.
    */
-  static bool StopwatchCommitCallback(uint64_t iteration, JSGroupVector& recentGroups, void* closure);
-  bool StopwatchCommit(uint64_t iteration, JSGroupVector& recentGroups);
+  static bool StopwatchCommitCallback(uint64_t iteration,
+                                      js::PerformanceGroupVector& recentGroups,
+                                      void* closure);
+  bool StopwatchCommit(uint64_t iteration, js::PerformanceGroupVector& recentGroups);
 
   /**
    * The number of times we have started executing JavaScript code.
@@ -447,11 +431,6 @@ private:
   struct UniversalTargets {
     UniversalTargets();
     /**
-     * A target for observers interested in watching all addons.
-     */
-    RefPtr<nsPerformanceObservationTarget> mAddons;
-
-    /**
      * A target for observers interested in watching all windows.
      */
     RefPtr<nsPerformanceObservationTarget> mWindows;
@@ -549,13 +528,11 @@ public:
 
   nsPerformanceGroupDetails(const nsAString& aName,
                             const nsAString& aGroupId,
-                            const nsAString& aAddonId,
                             const uint64_t aWindowId,
                             const uint64_t aProcessId,
                             const bool aIsSystem)
     : mName(aName)
     , mGroupId(aGroupId)
-    , mAddonId(aAddonId)
     , mWindowId(aWindowId)
     , mProcessId(aProcessId)
     , mIsSystem(aIsSystem)
@@ -563,10 +540,8 @@ public:
 public:
   const nsAString& Name() const;
   const nsAString& GroupId() const;
-  const nsAString& AddonId() const;
   uint64_t WindowId() const;
   uint64_t ProcessId() const;
-  bool IsAddon() const;
   bool IsWindow() const;
   bool IsSystem() const;
   bool IsContentProcess() const;
@@ -575,7 +550,6 @@ private:
 
   const nsString mName;
   const nsString mGroupId;
-  const nsString mAddonId;
   const uint64_t mWindowId;
   const uint64_t mProcessId;
   const bool mIsSystem;
@@ -596,11 +570,6 @@ enum class PerformanceGroupScope {
   WINDOW,
 
   /**
-   * This group represents all the compartments provided by an addon.
-   */
-  ADDON,
-
-  /**
    * This group represents a single compartment.
    */
   COMPARTMENT,
@@ -609,7 +578,7 @@ enum class PerformanceGroupScope {
 /**
  * A concrete implementation of `js::PerformanceGroup`, also holding
  * performance data. Instances may represent individual compartments,
- * windows, addons or the entire runtime.
+ * windows or the entire runtime.
  *
  * This class is intended to be the sole implementation of
  * `js::PerformanceGroup`.
@@ -624,13 +593,11 @@ public:
   /**
    * Construct a performance group.
    *
-   * @param rt The container runtime. Used to generate a unique identifier.
+   * @param cx The container context. Used to generate a unique identifier.
    * @param service The performance service. Used during destruction to
    *   cleanup the hash tables.
    * @param name A name for the group, designed mostly for debugging purposes,
    *   so it should be at least somewhat human-readable.
-   * @param addonId The identifier of the add-on. Should be "" when the
-   *   group is not part of an add-on,
    * @param windowId The identifier of the window. Should be 0 when the
    *   group is not part of a window.
    * @param processId A unique identifier for the process.
@@ -639,10 +606,8 @@ public:
    * @param scope the scope of this group.
    */
   static nsPerformanceGroup*
-    Make(JSRuntime* rt,
-         nsPerformanceStatsService* service,
+    Make(nsPerformanceStatsService* service,
          const nsAString& name,
-         const nsAString& addonId,
          uint64_t windowId,
          uint64_t processId,
          bool isSystem,
@@ -700,7 +665,6 @@ protected:
   nsPerformanceGroup(nsPerformanceStatsService* service,
                      const nsAString& name,
                      const nsAString& groupId,
-                     const nsAString& addonId,
                      uint64_t windowId,
                      uint64_t processId,
                      bool isSystem,

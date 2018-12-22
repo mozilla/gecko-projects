@@ -30,15 +30,36 @@ ARIAGridAccessible::
   ARIAGridAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
+  mGenericTypes |= eTable;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ARIAGridAccessible, Accessible)
+role
+ARIAGridAccessible::NativeRole() const
+{
+  a11y::role r = GetAccService()->MarkupRole(mContent);
+  return r != roles::NOTHING ? r : roles::TABLE;
+}
+
+already_AddRefed<nsIPersistentProperties>
+ARIAGridAccessible::NativeAttributes()
+{
+  nsCOMPtr<nsIPersistentProperties> attributes =
+    AccessibleWrap::NativeAttributes();
+
+  if (IsProbablyLayoutTable()) {
+    nsAutoString unused;
+    attributes->SetStringProperty(NS_LITERAL_CSTRING("layout-guess"),
+                                  NS_LITERAL_STRING("true"), unused);
+  }
+
+  return attributes.forget();
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Table
 
 uint32_t
-ARIAGridAccessible::ColCount()
+ARIAGridAccessible::ColCount() const
 {
   AccIterator rowIter(this, filters::GetRow);
   Accessible* row = rowIter.Next();
@@ -465,16 +486,18 @@ ARIAGridAccessible::SetARIASelected(Accessible* aAccessible,
   if (IsARIARole(nsGkAtoms::table))
     return NS_OK;
 
-  nsIContent *content = aAccessible->GetContent();
+  nsIContent* content = aAccessible->GetContent();
   NS_ENSURE_STATE(content);
 
   nsresult rv = NS_OK;
-  if (aIsSelected)
-    rv = content->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
-                          NS_LITERAL_STRING("true"), aNotify);
-  else
-    rv = content->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
-                          NS_LITERAL_STRING("false"), aNotify);
+  if (content->IsElement()) {
+    if (aIsSelected)
+      rv = content->AsElement()->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
+                                         NS_LITERAL_STRING("true"), aNotify);
+    else
+      rv = content->AsElement()->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
+                                         NS_LITERAL_STRING("false"), aNotify);
+  }
 
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -541,7 +564,12 @@ ARIARowAccessible::
   mGenericTypes |= eTableRow;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ARIARowAccessible, Accessible)
+role
+ARIARowAccessible::NativeRole() const
+{
+  a11y::role r = GetAccService()->MarkupRole(mContent);
+  return r != roles::NOTHING ? r : roles::ROW;
+}
 
 GroupPos
 ARIARowAccessible::GroupPosition()
@@ -573,7 +601,12 @@ ARIAGridCellAccessible::
   mGenericTypes |= eTableCell;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ARIAGridCellAccessible, HyperTextAccessible)
+role
+ARIAGridCellAccessible::NativeRole() const
+{
+  a11y::role r = GetAccService()->MarkupRole(mContent);
+  return r != roles::NOTHING ? r : roles::CELL;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // TableCell
@@ -639,11 +672,10 @@ ARIAGridCellAccessible::ApplyARIAState(uint64_t* aState) const
     return;
 
   nsIContent *rowContent = row->GetContent();
-  if (nsAccUtils::HasDefinedARIAToken(rowContent,
-                                      nsGkAtoms::aria_selected) &&
-      !rowContent->AttrValueIs(kNameSpaceID_None,
-                               nsGkAtoms::aria_selected,
-                               nsGkAtoms::_false, eCaseMatters))
+  if (nsAccUtils::HasDefinedARIAToken(rowContent, nsGkAtoms::aria_selected) &&
+      !rowContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                            nsGkAtoms::aria_selected,
+                                            nsGkAtoms::_false, eCaseMatters))
     *aState |= states::SELECTABLE | states::SELECTED;
 }
 

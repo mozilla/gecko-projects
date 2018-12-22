@@ -4,21 +4,17 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "Translation",
   "TranslationTelemetry",
 ];
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
 const TRANSLATION_PREF_SHOWUI = "browser.translation.ui.show";
 const TRANSLATION_PREF_DETECT_LANG = "browser.translation.detectLanguage";
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://gre/modules/Task.jsm", this);
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-this.Translation = {
+var Translation = {
   STATE_OFFER: 0,
   STATE_TRANSLATING: 1,
   STATE_TRANSLATED: 2,
@@ -33,22 +29,20 @@ this.Translation = {
   _defaultTargetLanguage: "",
   get defaultTargetLanguage() {
     if (!this._defaultTargetLanguage) {
-      this._defaultTargetLanguage = Cc["@mozilla.org/chrome/chrome-registry;1"]
-                                      .getService(Ci.nsIXULChromeRegistry)
-                                      .getSelectedLocale("global")
+      this._defaultTargetLanguage = Services.locale.getAppLocaleAsLangTag()
                                       .split("-")[0];
     }
     return this._defaultTargetLanguage;
   },
 
-  documentStateReceived: function(aBrowser, aData) {
+  documentStateReceived(aBrowser, aData) {
     if (aData.state == this.STATE_OFFER) {
       if (aData.detectedLanguage == this.defaultTargetLanguage) {
         // Detected language is the same as the user's locale.
         return;
       }
 
-      if (this.supportedSourceLanguages.indexOf(aData.detectedLanguage) == -1) {
+      if (!this.supportedSourceLanguages.includes(aData.detectedLanguage)) {
         // Detected language is not part of the supported languages.
         TranslationTelemetry.recordMissedTranslationOpportunity(aData.detectedLanguage);
         return;
@@ -78,18 +72,18 @@ this.Translation = {
       trUI.showTranslationInfoBar();
   },
 
-  openProviderAttribution: function() {
+  openProviderAttribution() {
     let attribution = this.supportedEngines[this.translationEngine];
-    Cu.import("resource:///modules/RecentWindow.jsm");
-    RecentWindow.getMostRecentBrowserWindow().openUILinkIn(attribution, "tab");
+    ChromeUtils.import("resource:///modules/BrowserWindowTracker.jsm");
+    BrowserWindowTracker.getTopWindow().openUILinkIn(attribution, "tab");
   },
 
   /**
    * The list of translation engines and their attributions.
    */
   supportedEngines: {
-    "bing"    : "http://aka.ms/MicrosoftTranslatorAttribution",
-    "yandex"  : "http://translate.yandex.com/"
+    "bing": "http://aka.ms/MicrosoftTranslatorAttribution",
+    "yandex": "http://translate.yandex.com/"
   },
 
   /**
@@ -105,7 +99,7 @@ this.Translation = {
    */
   get translationEngine() {
     let engine = Services.prefs.getCharPref("browser.translation.engine");
-    return Object.keys(this.supportedEngines).indexOf(engine) == -1 ? this.defaultEngine : engine;
+    return !Object.keys(this.supportedEngines).includes(engine) ? this.defaultEngine : engine;
   },
 };
 
@@ -138,7 +132,7 @@ TranslationUI.prototype = {
     aBrowser.messageManager.addMessageListener("Translation:Finished", this);
     this._browser = aBrowser;
   },
-  translate: function(aFrom, aTo) {
+  translate(aFrom, aTo) {
     if (aFrom == aTo ||
         (this.state == Translation.STATE_TRANSLATED &&
          this.translatedFrom == aFrom && this.translatedTo == aTo)) {
@@ -166,7 +160,7 @@ TranslationUI.prototype = {
     );
   },
 
-  showURLBarIcon: function() {
+  showURLBarIcon() {
     let chromeWin = this.browser.ownerGlobal;
     let PopupNotifications = chromeWin.PopupNotifications;
     let removeId = this.originalShown ? "translated" : "translate";
@@ -188,9 +182,9 @@ TranslationUI.prototype = {
 
       if (aTopic != "showing")
         return false;
-      let notification = this.notificationBox.getNotificationWithValue("translation");
-      if (notification)
-        notification.close();
+      let translationNotification = this.notificationBox.getNotificationWithValue("translation");
+      if (translationNotification)
+        translationNotification.close();
       else
         this.showTranslationInfoBar();
       return true;
@@ -214,14 +208,14 @@ TranslationUI.prototype = {
   },
 
   originalShown: true,
-  showOriginalContent: function() {
+  showOriginalContent() {
     this.originalShown = true;
     this.showURLBarIcon();
     this.browser.messageManager.sendAsyncMessage("Translation:ShowOriginal");
     TranslationTelemetry.recordShowOriginalContent();
   },
 
-  showTranslatedContent: function() {
+  showTranslatedContent() {
     this.originalShown = false;
     this.showURLBarIcon();
     this.browser.messageManager.sendAsyncMessage("Translation:ShowTranslation");
@@ -231,7 +225,7 @@ TranslationUI.prototype = {
     return this.browser.ownerGlobal.gBrowser.getNotificationBox(this.browser);
   },
 
-  showTranslationInfoBar: function() {
+  showTranslationInfoBar() {
     let notificationBox = this.notificationBox;
     let notif = notificationBox.appendNotification("", "translation", null,
                                                    notificationBox.PRIORITY_INFO_HIGH);
@@ -239,7 +233,7 @@ TranslationUI.prototype = {
     return notif;
   },
 
-  shouldShowInfoBar: function(aURI) {
+  shouldShowInfoBar(aURI) {
     // Never show the infobar automatically while the translation
     // service is temporarily unavailable.
     if (Translation.serviceUnavailable)
@@ -248,14 +242,14 @@ TranslationUI.prototype = {
     // Check if we should never show the infobar for this language.
     let neverForLangs =
       Services.prefs.getCharPref("browser.translation.neverForLanguages");
-    if (neverForLangs.split(",").indexOf(this.detectedLanguage) != -1) {
+    if (neverForLangs.split(",").includes(this.detectedLanguage)) {
       TranslationTelemetry.recordAutoRejectedTranslationOffer();
       return false;
     }
 
     // or if we should never show the infobar for this domain.
     let perms = Services.perms;
-    if (perms.testExactPermission(aURI, "translate") ==  perms.DENY_ACTION) {
+    if (perms.testExactPermission(aURI, "translate") == perms.DENY_ACTION) {
       TranslationTelemetry.recordAutoRejectedTranslationOffer();
       return false;
     }
@@ -263,7 +257,7 @@ TranslationUI.prototype = {
     return true;
   },
 
-  receiveMessage: function(msg) {
+  receiveMessage(msg) {
     switch (msg.name) {
       case "Translation:Finished":
         if (msg.data.success) {
@@ -284,7 +278,7 @@ TranslationUI.prototype = {
     }
   },
 
-  infobarClosed: function() {
+  infobarClosed() {
     if (this.state == Translation.STATE_OFFER)
       TranslationTelemetry.recordDeniedTranslationOffer();
   }
@@ -296,25 +290,25 @@ TranslationUI.prototype = {
  *
  * NOTE: Metrics are only recorded if the user enabled the telemetry option.
  */
-this.TranslationTelemetry = {
+var TranslationTelemetry = {
 
-  init: function () {
+  init() {
     // Constructing histograms.
     const plain = (id) => Services.telemetry.getHistogramById(id);
     const keyed = (id) => Services.telemetry.getKeyedHistogramById(id);
     this.HISTOGRAMS = {
-      OPPORTUNITIES         : () => plain("TRANSLATION_OPPORTUNITIES"),
-      OPPORTUNITIES_BY_LANG : () => keyed("TRANSLATION_OPPORTUNITIES_BY_LANGUAGE"),
-      PAGES                 : () => plain("TRANSLATED_PAGES"),
-      PAGES_BY_LANG         : () => keyed("TRANSLATED_PAGES_BY_LANGUAGE"),
-      CHARACTERS            : () => plain("TRANSLATED_CHARACTERS"),
-      DENIED                : () => plain("DENIED_TRANSLATION_OFFERS"),
-      AUTO_REJECTED         : () => plain("AUTO_REJECTED_TRANSLATION_OFFERS"),
-      SHOW_ORIGINAL         : () => plain("REQUESTS_OF_ORIGINAL_CONTENT"),
-      TARGET_CHANGES        : () => plain("CHANGES_OF_TARGET_LANGUAGE"),
-      DETECTION_CHANGES     : () => plain("CHANGES_OF_DETECTED_LANGUAGE"),
-      SHOW_UI               : () => plain("SHOULD_TRANSLATION_UI_APPEAR"),
-      DETECT_LANG           : () => plain("SHOULD_AUTO_DETECT_LANGUAGE"),
+      OPPORTUNITIES: () => plain("TRANSLATION_OPPORTUNITIES"),
+      OPPORTUNITIES_BY_LANG: () => keyed("TRANSLATION_OPPORTUNITIES_BY_LANGUAGE"),
+      PAGES: () => plain("TRANSLATED_PAGES"),
+      PAGES_BY_LANG: () => keyed("TRANSLATED_PAGES_BY_LANGUAGE"),
+      CHARACTERS: () => plain("TRANSLATED_CHARACTERS"),
+      DENIED: () => plain("DENIED_TRANSLATION_OFFERS"),
+      AUTO_REJECTED: () => plain("AUTO_REJECTED_TRANSLATION_OFFERS"),
+      SHOW_ORIGINAL: () => plain("REQUESTS_OF_ORIGINAL_CONTENT"),
+      TARGET_CHANGES: () => plain("CHANGES_OF_TARGET_LANGUAGE"),
+      DETECTION_CHANGES: () => plain("CHANGES_OF_DETECTED_LANGUAGE"),
+      SHOW_UI: () => plain("SHOULD_TRANSLATION_UI_APPEAR"),
+      DETECT_LANG: () => plain("SHOULD_AUTO_DETECT_LANGUAGE"),
     };
 
     // Capturing the values of flags at the startup.
@@ -326,7 +320,7 @@ this.TranslationTelemetry = {
    * @param language
    *        The language of the page.
    */
-  recordTranslationOpportunity: function (language) {
+  recordTranslationOpportunity(language) {
     return this._recordOpportunity(language, true);
   },
 
@@ -337,7 +331,7 @@ this.TranslationTelemetry = {
    * @param language
    *        The language of the page.
    */
-  recordMissedTranslationOpportunity: function (language) {
+  recordMissedTranslationOpportunity(language) {
     return this._recordOpportunity(language, false);
   },
 
@@ -351,8 +345,7 @@ this.TranslationTelemetry = {
    * These translation opportunities should still be recorded in addition to
    * recording the automatic rejection of the offer.
    */
-  recordAutoRejectedTranslationOffer: function () {
-    if (!this._canRecord) return;
+  recordAutoRejectedTranslationOffer() {
     this.HISTOGRAMS.AUTO_REJECTED().add();
   },
 
@@ -365,8 +358,7 @@ this.TranslationTelemetry = {
    * @param numCharacters
    *        The number of characters that were translated
    */
-  recordTranslation: function (langFrom, langTo, numCharacters) {
-    if (!this._canRecord) return;
+  recordTranslation(langFrom, langTo, numCharacters) {
     this.HISTOGRAMS.PAGES().add();
     this.HISTOGRAMS.PAGES_BY_LANG().add(langFrom + " -> " + langTo);
     this.HISTOGRAMS.CHARACTERS().add(numCharacters);
@@ -384,8 +376,7 @@ this.TranslationTelemetry = {
    *        the user has manually adjusted the detected language false should
    *        be passed.
    */
-  recordDetectedLanguageChange: function (beforeFirstTranslation) {
-    if (!this._canRecord) return;
+  recordDetectedLanguageChange(beforeFirstTranslation) {
     this.HISTOGRAMS.DETECTION_CHANGES().add(beforeFirstTranslation);
   },
 
@@ -394,32 +385,28 @@ this.TranslationTelemetry = {
    * only be called when actually executing a translation, not every time the
    * user changes in the language in the UI.
    */
-  recordTargetLanguageChange: function () {
-    if (!this._canRecord) return;
+  recordTargetLanguageChange() {
     this.HISTOGRAMS.TARGET_CHANGES().add();
   },
 
   /**
    * Record a denied translation offer.
    */
-  recordDeniedTranslationOffer: function () {
-    if (!this._canRecord) return;
+  recordDeniedTranslationOffer() {
     this.HISTOGRAMS.DENIED().add();
   },
 
   /**
    * Record a "Show Original" command use.
    */
-  recordShowOriginalContent: function () {
-    if (!this._canRecord) return;
+  recordShowOriginalContent() {
     this.HISTOGRAMS.SHOW_ORIGINAL().add();
   },
 
   /**
    * Record the state of translation preferences.
    */
-  recordPreferences: function () {
-    if (!this._canRecord) return;
+  recordPreferences() {
     if (Services.prefs.getBoolPref(TRANSLATION_PREF_SHOWUI)) {
       this.HISTOGRAMS.SHOW_UI().add(1);
     }
@@ -428,19 +415,10 @@ this.TranslationTelemetry = {
     }
   },
 
-  _recordOpportunity: function(language, success) {
-    if (!this._canRecord) return;
+  _recordOpportunity(language, success) {
     this.HISTOGRAMS.OPPORTUNITIES().add(success);
     this.HISTOGRAMS.OPPORTUNITIES_BY_LANG().add(language, success);
   },
-
-  /**
-   * A shortcut for reading the telemetry preference.
-   *
-   */
-  _canRecord: function () {
-    return Services.prefs.getBoolPref("toolkit.telemetry.enabled");
-  }
 };
 
 this.TranslationTelemetry.init();

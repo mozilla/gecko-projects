@@ -9,7 +9,7 @@
 
 #include "vm/ErrorObject.h"
 
-#include "jscntxt.h"
+#include "vm/JSContext.h"
 
 inline JSString*
 js::ErrorObject::fileName(JSContext* cx) const
@@ -36,6 +36,12 @@ inline JSObject*
 js::ErrorObject::stack() const
 {
     return getReservedSlotRef(STACK_SLOT).toObjectOrNull();
+}
+
+inline uint64_t
+js::ErrorObject::timeWarpTarget() const
+{
+    return (uint64_t) getReservedSlot(TIME_WARP_SLOT).toDouble();
 }
 
 #endif /* vm_ErrorObject_inl_h */

@@ -11,14 +11,17 @@ See the adjacent README.txt for more details.
 
 from __future__ import print_function
 
-import os, sys, textwrap, platform
+import os
+import sys
+import textwrap
+import platform
 from os.path import abspath, dirname, isfile, realpath
 from contextlib import contextmanager
 from copy import copy
 from subprocess import list2cmdline, call
 
 from lib.tests import RefTestCase, get_jitflags, get_cpu_count, \
-                      get_environment_overlay, change_env
+    get_environment_overlay, change_env
 from lib.results import ResultsSink
 from lib.progressbar import ProgressBar
 
@@ -36,6 +39,43 @@ def changedir(dirname):
         yield
     finally:
         os.chdir(pwd)
+
+
+class PathOptions(object):
+    def __init__(self, location, requested_paths, excluded_paths):
+        self.requested_paths = requested_paths
+        self.excluded_files, self.excluded_dirs = PathOptions._split_files_and_dirs(
+            location, excluded_paths)
+
+    @staticmethod
+    def _split_files_and_dirs(location, paths):
+        """Split up a set of paths into files and directories"""
+        files, dirs = set(), set()
+        for path in paths:
+            fullpath = os.path.join(location, path)
+            if path.endswith('/'):
+                dirs.add(path[:-1])
+            elif os.path.isdir(fullpath):
+                dirs.add(path)
+            elif os.path.exists(fullpath):
+                files.add(path)
+
+        return files, dirs
+
+    def should_run(self, filename):
+        # If any tests are requested by name, skip tests that do not match.
+        if self.requested_paths and not any(req in filename for req in self.requested_paths):
+            return False
+
+        # Skip excluded tests.
+        if filename in self.excluded_files:
+            return False
+
+        for dir in self.excluded_dirs:
+            if filename.startswith(dir + '/'):
+                return False
+
+        return True
 
 
 def parse_args():
@@ -66,6 +106,12 @@ def parse_args():
     harness_og.add_option('-t', '--timeout', type=float, default=150.0,
                           help='Set maximum time a test is allows to run'
                           ' (in seconds).')
+    harness_og.add_option('--show-slow', action='store_true',
+                          help='Show tests taking longer than a minimum time'
+                          ' (in seconds).')
+    harness_og.add_option('--slow-test-threshold', type=float, default=5.0,
+                          help='Time in seconds a test can take until it is'
+                          'considered slow (default %default).')
     harness_og.add_option('-a', '--args', dest='shell_args', default='',
                           help='Extra args to pass to the JS shell.')
     harness_og.add_option('--jitflags', dest='jitflags', default='none',
@@ -96,6 +142,8 @@ def parse_args():
                           help='Extra args to pass to valgrind.')
     harness_og.add_option('--rr', action='store_true',
                           help='Run tests under RR record-and-replay debugger.')
+    harness_og.add_option('-C', '--check-output', action='store_true',
+                          help='Run tests to check output for different jit-flags')
     op.add_option_group(harness_og)
 
     input_og = OptionGroup(op, "Inputs", "Change what tests are run.")
@@ -103,6 +151,10 @@ def parse_args():
                         help='Get tests from the given file.')
     input_og.add_option('-x', '--exclude-file', action='append',
                         help='Exclude tests from the given file.')
+    input_og.add_option('--include', action='append', dest='requested_paths', default=[],
+                        help='Include the given test file or directory.')
+    input_og.add_option('--exclude', action='append', dest='excluded_paths', default=[],
+                        help='Exclude the given test file or directory.')
     input_og.add_option('-d', '--exclude-random', dest='random',
                         action='store_false',
                         help='Exclude tests marked as "random."')
@@ -144,8 +196,8 @@ def parse_args():
                          const='automation',
                          help='Use automation-parseable output format.')
     output_og.add_option('--format', dest='format', default='none',
-                          type='choice', choices=['automation', 'none'],
-                          help='Output format. Either automation or none'
+                         type='choice', choices=['automation', 'none'],
+                         help='Output format. Either automation or none'
                          ' (default %default).')
     op.add_option_group(output_og)
 
@@ -158,7 +210,7 @@ def parse_args():
 
     # Acquire the JS shell given on the command line.
     options.js_shell = None
-    requested_paths = set()
+    requested_paths = set(options.requested_paths)
     if len(args) > 0:
         options.js_shell = abspath(args[0])
         requested_paths |= set(args[1:])
@@ -207,20 +259,20 @@ def parse_args():
             requested_paths |= set(
                 [line.strip() for line in open(test_file).readlines()])
 
+    excluded_paths = set(options.excluded_paths)
+
     # If files with lists of tests to exclude were specified, add them to the
     # excluded tests set.
-    excluded_paths = set()
     if options.exclude_file:
         for filename in options.exclude_file:
-            try:
-                fp = open(filename, 'r')
+            with open(filename, 'r') as fp:
                 for line in fp:
-                    if line.startswith('#'): continue
+                    if line.startswith('#'):
+                        continue
                     line = line.strip()
-                    if not line: continue
-                    excluded_paths |= set((line,))
-            finally:
-                fp.close()
+                    if not line:
+                        continue
+                    excluded_paths.add(line)
 
     # Handle output redirection, if requested and relevant.
     options.output_fp = sys.stdout
@@ -242,7 +294,7 @@ def parse_args():
 
 def load_tests(options, requested_paths, excluded_paths):
     """
-    Returns a tuple: (skipped_tests, test_list)
+    Returns a tuple: (test_count, test_gen)
         test_count: [int] Number of tests that will be in test_gen
         test_gen: [iterable<Test>] Tests found that should be run.
     """
@@ -260,9 +312,9 @@ def load_tests(options, requested_paths, excluded_paths):
         xul_tester = manifest.XULInfoTester(xul_info, options.js_shell)
 
     test_dir = dirname(abspath(__file__))
-    test_count = manifest.count_tests(test_dir, requested_paths, excluded_paths)
-    test_gen = manifest.load_reftests(test_dir, requested_paths, excluded_paths,
-                                      xul_tester)
+    path_options = PathOptions(test_dir, requested_paths, excluded_paths)
+    test_count = manifest.count_tests(test_dir, path_options)
+    test_gen = manifest.load_reftests(test_dir, path_options, xul_tester)
 
     if options.test_reflect_stringify is not None:
         def trs_gen(tests):
@@ -335,9 +387,9 @@ def main():
         if (platform.system() != 'Windows' or
             isfile(options.js_shell) or not
             isfile(options.js_shell + ".exe") or not
-            os.access(options.js_shell + ".exe", os.X_OK)):
-           print('Could not find executable shell: ' + options.js_shell)
-           return 1
+                os.access(options.js_shell + ".exe", os.X_OK)):
+            print('Could not find executable shell: ' + options.js_shell)
+            return 1
 
     test_count, test_gen = load_tests(options, requested_paths, excluded_paths)
     test_environment = get_environment_overlay(options.js_shell)
@@ -364,7 +416,7 @@ def main():
         return 0
 
     with changedir(test_dir), change_env(test_environment):
-        results = ResultsSink(options, test_count)
+        results = ResultsSink('jstests', options, test_count)
         try:
             for out in run_all_tests(test_gen, prefix, results.pb, options):
                 results.push(out)
@@ -375,6 +427,7 @@ def main():
         return 0 if results.all_passed() else 1
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())

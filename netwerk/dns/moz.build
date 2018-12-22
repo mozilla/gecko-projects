@@ -1,8 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files('**'):
+    BUG_COMPONENT = ('Core', 'Networking: DNS')
 
 DIRS += [
     'mdns',
@@ -26,6 +29,7 @@ EXPORTS.mozilla.net += [
     'DNSRequestChild.h',
     'DNSRequestParent.h',
     'PDNSParams.h',
+    'TRRService.h',
 ]
 
 SOURCES += [
@@ -43,6 +47,8 @@ UNIFIED_SOURCES += [
     'nsDNSService2.cpp',
     'nsIDNService.cpp',
     'punycode.c',
+    'TRR.cpp',
+    'TRRService.cpp',
 ]
 
 IPDL_SOURCES = [
@@ -66,23 +72,7 @@ LOCAL_INCLUDES += [
     '/netwerk/base',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk' and CONFIG['ANDROID_VERSION'] > '19':
-    LOCAL_INCLUDES += ['%' + '%s/bionic/libc/dns/include' % CONFIG['ANDROID_SOURCE']]
+USE_LIBS += ['icu']
 
-if CONFIG['ENABLE_INTL_API']:
-    DEFINES['IDNA2008'] = True
-    CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
-    CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
-    LOCAL_INCLUDES += CONFIG['MOZ_ICU_INCLUDES']
-    USE_LIBS += ['icu']
-else:
-    UNIFIED_SOURCES += [
-        'nameprep.c',
-    ]
-
-if CONFIG['_MSC_VER']:
-    # This is intended as a temporary hack to support building with VS2015.
-    # icu\source\common\unicode/ucasemap.h(93): warning C4577:
-    # 'noexcept' used with no exception handling mode specified;
-    # termination on exception is not guaranteed. Specify /EHsc from unified dns
-    CXXFLAGS += ['-wd4577']
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

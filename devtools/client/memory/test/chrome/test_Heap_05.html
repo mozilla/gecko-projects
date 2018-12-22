@@ -12,13 +12,13 @@ Test that we show a message when the census results are empty.
 <body>
     <div id="container"></div>
     <pre id="test">
-        <script src="head.js" type="application/javascript;version=1.8"></script>
-        <script type="application/javascript;version=1.8">
-         window.onload = Task.async(function* () {
+        <script src="head.js" type="application/javascript"></script>
+        <script type="application/javascript">
+         window.onload = async function () {
            try {
              const container = document.getElementById("container");
 
-             yield renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
+             await renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
                snapshot: immutableUpdate(TEST_HEAP_PROPS.snapshot, {
                  census: immutableUpdate(TEST_HEAP_PROPS.snapshot.census, {
                    report: {
@@ -71,11 +71,15 @@ Test that we show a message when the census results are empty.
                  parent: undefined,
                  children: undefined,
                },
-               expanded: new Set(),
+               parentMap: Object.create(null),
                display: censusDisplays.allocationStack,
+               filter: null,
+               expanded: new Immutable.Set(),
+               focused: null,
+               state: censusState.SAVED,
              };
 
-             yield renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
+             await renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
                snapshot: immutableUpdate(TEST_HEAP_PROPS.snapshot, {
                  census: immutableUpdate(TEST_HEAP_PROPS.snapshot.census, emptyCensus),
                }),
@@ -83,12 +87,12 @@ Test that we show a message when the census results are empty.
 
              ok(container.querySelector(".empty"),
                 "When the report is empty in census view, we show the empty message");
-             ok(container.textContent.indexOf(L10N.getStr("heapview.empty")) >= 0);
+             ok(container.textContent.includes(L10N.getStr("heapview.empty")));
 
              // Empty Diffing Report
 
-             yield renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
-               view: viewState.DIFFING,
+             await renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
+               view: { state: viewState.DIFFING, },
                diffing: {
                  firstSnapshotId: 1,
                  secondSnapshotId: 2,
@@ -100,11 +104,11 @@ Test that we show a message when the census results are empty.
 
              ok(container.querySelector(".empty"),
                 "When the report is empty in diffing view, the empty message is shown");
-             ok(container.textContent.indexOf(L10N.getStr("heapview.no-difference")) >= 0);
+             ok(container.textContent.includes(L10N.getStr("heapview.no-difference")));
 
              // Empty Filtered Census
 
-             yield renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
+             await renderComponent(Heap(immutableUpdate(TEST_HEAP_PROPS, {
                snapshot: immutableUpdate(TEST_HEAP_PROPS.snapshot, {
                  census: immutableUpdate(TEST_HEAP_PROPS.snapshot.census, immutableUpdate(emptyCensus, {
                    filter: "zzzz"
@@ -114,14 +118,14 @@ Test that we show a message when the census results are empty.
 
              ok(container.querySelector(".empty"),
                 "When the report is empty in census view w/ filter, we show the empty message");
-             ok(container.textContent.indexOf(L10N.getStr("heapview.none-match")) >= 0);
+             ok(container.textContent.includes(L10N.getStr("heapview.none-match")));
 
            } catch(e) {
              ok(false, "Got an error: " + DevToolsUtils.safeErrorString(e));
            } finally {
              SimpleTest.finish();
            }
-         });
+         };
         </script>
     </pre>
 </body>

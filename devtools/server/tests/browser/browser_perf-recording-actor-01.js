@@ -6,35 +6,37 @@
  * completed, and rec data.
  */
 
-const { PerformanceFront } = require("devtools/server/actors/performance");
+"use strict";
 
-add_task(function*() {
-  let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
-  let doc = browser.contentDocument;
+const { PerformanceFront } = require("devtools/shared/fronts/performance");
+
+add_task(async function() {
+  await addTab(MAIN_DOMAIN + "doc_perf.html");
 
   initDebuggerServer();
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = PerformanceFront(client, form);
-  yield front.connect();
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = PerformanceFront(client, form);
+  await front.connect();
 
-  let rec = yield front.startRecording({ withMarkers: true, withTicks: true, withMemory: true });
+  const rec = await front.startRecording(
+    { withMarkers: true, withTicks: true, withMemory: true });
   ok(rec.isRecording(), "RecordingModel is recording when created");
-  yield busyWait(100);
-  yield waitUntil(() => rec.getMemory().length);
+  await busyWait(100);
+  await waitUntil(() => rec.getMemory().length);
   ok(true, "RecordingModel populates memory while recording");
-  yield waitUntil(() => rec.getTicks().length);
+  await waitUntil(() => rec.getTicks().length);
   ok(true, "RecordingModel populates ticks while recording");
-  yield waitUntil(() => rec.getMarkers().length);
+  await waitUntil(() => rec.getMarkers().length);
   ok(true, "RecordingModel populates markers while recording");
 
   ok(!rec.isCompleted(), "RecordingModel is not completed when still recording");
 
-  let stopping = once(front, "recording-stopping");
-  let stopped = once(front, "recording-stopped");
+  const stopping = once(front, "recording-stopping");
+  const stopped = once(front, "recording-stopped");
   front.stopRecording(rec);
 
-  yield stopping;
+  await stopping;
   ok(!rec.isRecording(), "on 'recording-stopping', model is no longer recording");
   // This handler should be called BEFORE "recording-stopped" is called, as
   // there is some delay, but in the event where "recording-stopped" finishes
@@ -43,10 +45,11 @@ add_task(function*() {
     ok(rec.isCompleted(), "recording is completed once it has profile data");
   } else {
     ok(!rec.isCompleted(), "recording is not yet completed on 'recording-stopping'");
-    ok(rec.isFinalizing(), "recording is considered finalizing between 'recording-stopping' and 'recording-stopped'");
+    ok(rec.isFinalizing(),
+      "recording is finalized between 'recording-stopping' and 'recording-stopped'");
   }
 
-  yield stopped;
+  await stopped;
   ok(!rec.isRecording(), "on 'recording-stopped', model is still no longer recording");
   ok(rec.isCompleted(), "on 'recording-stopped', model is considered 'complete'");
 
@@ -54,11 +57,11 @@ add_task(function*() {
   checkSystemInfo(rec, "Client");
 
   // Export and import a rec, and ensure it has the correct state.
-  let file = FileUtils.getFile("TmpD", ["tmpprofile.json"]);
+  const file = FileUtils.getFile("TmpD", ["tmpprofile.json"]);
   file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("666", 8));
-  yield rec.exportRecording(file);
+  await rec.exportRecording(file);
 
-  let importedModel = yield front.importRecording(file);
+  const importedModel = await front.importRecording(file);
 
   ok(importedModel.isCompleted(), "All imported recordings should be completed");
   ok(!importedModel.isRecording(), "All imported recordings should not be recording");
@@ -67,14 +70,14 @@ add_task(function*() {
   checkSystemInfo(importedModel, "Host");
   checkSystemInfo(importedModel, "Client");
 
-  yield front.destroy();
-  yield closeDebuggerClient(client);
+  await front.destroy();
+  await client.close();
   gBrowser.removeCurrentTab();
 });
 
-function checkSystemInfo (recording, type) {
-  let data = recording[`get${type}SystemInfo`]();
-  for (let field of ["appid", "apptype", "vendor", "name", "version"]) {
+function checkSystemInfo(recording, type) {
+  const data = recording[`get${type}SystemInfo`]();
+  for (const field of ["appid", "apptype", "vendor", "name", "version"]) {
     ok(data[field], `get${type}SystemInfo() has ${field} property`);
   }
 }

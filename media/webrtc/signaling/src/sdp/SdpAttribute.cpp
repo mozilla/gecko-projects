@@ -6,7 +6,6 @@
 
 #include "signaling/src/sdp/SdpAttribute.h"
 #include "signaling/src/sdp/SdpHelper.h"
-
 #include <iomanip>
 
 #ifdef CRLF
@@ -16,6 +15,48 @@
 
 namespace mozilla
 {
+
+static unsigned char
+PeekChar(std::istream& is, std::string* error)
+{
+  int next = is.peek();
+  if (next == EOF) {
+    *error = "Truncated";
+    return 0;
+  }
+
+  return next;
+}
+
+static std::string ParseToken(std::istream& is,
+                              const std::string& delims,
+                              std::string* error)
+{
+  std::string token;
+  while (is) {
+    unsigned char c = PeekChar(is, error);
+    if (!c || (delims.find(c) != std::string::npos)) {
+      break;
+    }
+    token.push_back(std::tolower(is.get()));
+  }
+  return token;
+}
+
+static bool
+SkipChar(std::istream& is, unsigned char c, std::string* error)
+{
+  if (PeekChar(is, error) != c) {
+    *error = "Expected \'";
+    error->push_back(c);
+    error->push_back('\'');
+    return false;
+  }
+
+  is.get();
+  return true;
+}
+
 
 void
 SdpConnectionAttribute::Serialize(std::ostream& os) const
@@ -27,6 +68,33 @@ void
 SdpDirectionAttribute::Serialize(std::ostream& os) const
 {
   os << "a=" << mValue << CRLF;
+}
+
+void
+SdpDtlsMessageAttribute::Serialize(std::ostream& os) const
+{
+  os << "a=" << mType << ":" << mRole << " " << mValue << CRLF;
+}
+
+bool
+SdpDtlsMessageAttribute::Parse(std::istream& is, std::string* error)
+{
+  std::string roleToken = ParseToken(is, " ", error);
+  if (roleToken == "server") {
+    mRole = kServer;
+  } else if (roleToken == "client") {
+    mRole = kClient;
+  } else {
+    *error = "Invalid dtls-message role; must be either client or server";
+    return false;
+  }
+
+  is >> std::ws;
+
+  std::string s(std::istreambuf_iterator<char>(is), {});
+  mValue = s;
+
+  return true;
 }
 
 void
@@ -176,7 +244,7 @@ static std::ostream& operator<<(std::ostream& os, SkipFirstDelimiter& delim)
 void
 SdpImageattrAttributeList::XYRange::Serialize(std::ostream& os) const
 {
-  if (discreteValues.size() == 0) {
+  if (discreteValues.empty()) {
     os << "[" << min << ":";
     if (step != 1) {
       os << step << ":";
@@ -192,32 +260,6 @@ SdpImageattrAttributeList::XYRange::Serialize(std::ostream& os) const
     }
     os << "]";
   }
-}
-
-static unsigned char
-PeekChar(std::istream& is, std::string* error)
-{
-  int next = is.peek();
-  if (next == EOF) {
-    *error = "Truncated";
-    return 0;
-  }
-
-  return next;
-}
-
-static bool
-SkipChar(std::istream& is, unsigned char c, std::string* error)
-{
-  if (PeekChar(is, error) != c) {
-    *error = "Expected \'";
-    error->push_back(c);
-    error->push_back('\'');
-    return false;
-  }
-
-  is.get();
-  return true;
 }
 
 template<typename T>
@@ -458,7 +500,7 @@ void
 SdpImageattrAttributeList::SRange::Serialize(std::ostream& os) const
 {
   os << std::setprecision(4) << std::fixed;
-  if (discreteValues.size() == 0) {
+  if (discreteValues.empty()) {
     os << "[" << min << "-" << max << "]";
   } else if (discreteValues.size() == 1) {
     os << discreteValues.front();
@@ -477,21 +519,6 @@ SdpImageattrAttributeList::PRange::Serialize(std::ostream& os) const
 {
   os << std::setprecision(4) << std::fixed;
   os << "[" << min << "-" << max << "]";
-}
-
-static std::string ParseToken(std::istream& is,
-                              const std::string& delims,
-                              std::string* error)
-{
-  std::string token;
-  while (is) {
-    unsigned char c = PeekChar(is, error);
-    if (!c || (delims.find(c) != std::string::npos)) {
-      break;
-    }
-    token.push_back(std::tolower(is.get()));
-  }
-  return token;
 }
 
 static std::string ParseKey(std::istream& is, std::string* error)
@@ -834,6 +861,7 @@ SdpRemoteCandidatesAttribute::Serialize(std::ostream& os) const
   os << CRLF;
 }
 
+// Remove this function. See Bug 1469702
 bool
 SdpRidAttributeList::Rid::ParseParameters(std::istream& is, std::string* error)
 {
@@ -896,6 +924,7 @@ SdpRidAttributeList::Rid::ParseParameters(std::istream& is, std::string* error)
   return true;
 }
 
+// Remove this function. See Bug 1469702
 bool
 SdpRidAttributeList::Rid::ParseDepend(
     std::istream& is,
@@ -912,6 +941,7 @@ SdpRidAttributeList::Rid::ParseDepend(
   return true;
 }
 
+// Remove this function. See Bug 1469702
 bool
 SdpRidAttributeList::Rid::ParseFormats(
     std::istream& is,
@@ -980,6 +1010,7 @@ SdpRidAttributeList::Rid::SerializeParameters(std::ostream& os) const
   }
 }
 
+// Remove this function. See Bug 1469702
 bool
 SdpRidAttributeList::Rid::Parse(std::istream& is, std::string* error)
 {
@@ -1012,13 +1043,13 @@ SdpRidAttributeList::Rid::Serialize(std::ostream& os) const
 bool
 SdpRidAttributeList::Rid::HasFormat(const std::string& format) const
 {
+  if (formats.empty()) {
+    return true;
+  }
+
   uint16_t formatAsInt;
   if (!SdpHelper::GetPtAsInt(format, &formatAsInt)) {
     return false;
-  }
-
-  if (formats.empty()) {
-    return true;
   }
 
   return (std::find(formats.begin(), formats.end(), formatAsInt) !=
@@ -1035,6 +1066,7 @@ SdpRidAttributeList::Serialize(std::ostream& os) const
   }
 }
 
+// Remove this function. See Bug 1469702
 bool
 SdpRidAttributeList::PushEntry(const std::string& raw,
                                std::string* error,
@@ -1051,6 +1083,23 @@ SdpRidAttributeList::PushEntry(const std::string& raw,
 
   mRids.push_back(rid);
   return true;
+}
+
+void
+SdpRidAttributeList::PushEntry(const std::string& id, sdp::Direction dir,
+                               const std::vector<uint16_t>& formats,
+                               const EncodingConstraints& constraints,
+                               const std::vector<std::string>& dependIds)
+{
+  SdpRidAttributeList::Rid rid;
+
+  rid.id = id;
+  rid.direction = dir;
+  rid.formats = formats;
+  rid.constraints = constraints;
+  rid.dependIds = dependIds;
+
+  mRids.push_back(std::move(rid));
 }
 
 void
@@ -1072,6 +1121,7 @@ const char* SdpRtcpFbAttributeList::fir = "fir";
 const char* SdpRtcpFbAttributeList::tmmbr = "tmmbr";
 const char* SdpRtcpFbAttributeList::tstr = "tstr";
 const char* SdpRtcpFbAttributeList::vbcm = "vbcm";
+
 
 void
 SdpRtcpFbAttributeList::Serialize(std::ostream& os) const
@@ -1102,6 +1152,9 @@ ShouldSerializeChannels(SdpRtpmapAttributeList::CodecType type)
     case SdpRtpmapAttributeList::kiLBC:
     case SdpRtpmapAttributeList::kiSAC:
     case SdpRtpmapAttributeList::kH264:
+    case SdpRtpmapAttributeList::kRed:
+    case SdpRtpmapAttributeList::kUlpfec:
+    case SdpRtpmapAttributeList::kTelephoneEvent:
       return false;
     case SdpRtpmapAttributeList::kOtherCodec:
       return true;
@@ -1392,6 +1445,8 @@ SdpAttribute::IsAllowedAtMediaLevel(AttributeType type)
       return true;
     case kDirectionAttribute:
       return true;
+    case kDtlsMessageAttribute:
+      return false;
     case kEndOfCandidatesAttribute:
       return true;
     case kExtmapAttribute:
@@ -1419,8 +1474,6 @@ SdpAttribute::IsAllowedAtMediaLevel(AttributeType type)
       return false;
     case kImageattrAttribute:
       return true;
-    case kInactiveAttribute:
-      return true;
     case kLabelAttribute:
       return true;
     case kMaxptimeAttribute:
@@ -1432,8 +1485,6 @@ SdpAttribute::IsAllowedAtMediaLevel(AttributeType type)
     case kMsidSemanticAttribute:
       return false;
     case kPtimeAttribute:
-      return true;
-    case kRecvonlyAttribute:
       return true;
     case kRemoteCandidatesAttribute:
       return true;
@@ -1451,10 +1502,6 @@ SdpAttribute::IsAllowedAtMediaLevel(AttributeType type)
       return true;
     case kSctpmapAttribute:
       return true;
-    case kSendonlyAttribute:
-      return true;
-    case kSendrecvAttribute:
-      return true;
     case kSetupAttribute:
       return true;
     case kSimulcastAttribute:
@@ -1462,6 +1509,10 @@ SdpAttribute::IsAllowedAtMediaLevel(AttributeType type)
     case kSsrcAttribute:
       return true;
     case kSsrcGroupAttribute:
+      return true;
+    case kSctpPortAttribute:
+      return true;
+    case kMaxMessageSizeAttribute:
       return true;
   }
   MOZ_CRASH("Unknown attribute type");
@@ -1478,6 +1529,8 @@ SdpAttribute::IsAllowedAtSessionLevel(AttributeType type)
     case kConnectionAttribute:
       return true;
     case kDirectionAttribute:
+      return true;
+    case kDtlsMessageAttribute:
       return true;
     case kEndOfCandidatesAttribute:
       return true;
@@ -1503,8 +1556,6 @@ SdpAttribute::IsAllowedAtSessionLevel(AttributeType type)
       return true;
     case kImageattrAttribute:
       return false;
-    case kInactiveAttribute:
-      return true;
     case kLabelAttribute:
       return false;
     case kMaxptimeAttribute:
@@ -1517,8 +1568,6 @@ SdpAttribute::IsAllowedAtSessionLevel(AttributeType type)
       return false;
     case kPtimeAttribute:
       return false;
-    case kRecvonlyAttribute:
-      return true;
     case kRemoteCandidatesAttribute:
       return false;
     case kRidAttribute:
@@ -1535,10 +1584,6 @@ SdpAttribute::IsAllowedAtSessionLevel(AttributeType type)
       return false;
     case kSctpmapAttribute:
       return false;
-    case kSendonlyAttribute:
-      return true;
-    case kSendrecvAttribute:
-      return true;
     case kSetupAttribute:
       return true;
     case kSimulcastAttribute:
@@ -1546,6 +1591,10 @@ SdpAttribute::IsAllowedAtSessionLevel(AttributeType type)
     case kSsrcAttribute:
       return false;
     case kSsrcGroupAttribute:
+      return false;
+    case kSctpPortAttribute:
+      return false;
+    case kMaxMessageSizeAttribute:
       return false;
   }
   MOZ_CRASH("Unknown attribute type");
@@ -1561,6 +1610,8 @@ SdpAttribute::GetAttributeTypeString(AttributeType type)
       return "candidate";
     case kConnectionAttribute:
       return "connection";
+    case kDtlsMessageAttribute:
+      return "dtls-message";
     case kEndOfCandidatesAttribute:
       return "end-of-candidates";
     case kExtmapAttribute:
@@ -1585,8 +1636,6 @@ SdpAttribute::GetAttributeTypeString(AttributeType type)
       return "identity";
     case kImageattrAttribute:
       return "imageattr";
-    case kInactiveAttribute:
-      return "inactive";
     case kLabelAttribute:
       return "label";
     case kMaxptimeAttribute:
@@ -1599,8 +1648,6 @@ SdpAttribute::GetAttributeTypeString(AttributeType type)
       return "msid-semantic";
     case kPtimeAttribute:
       return "ptime";
-    case kRecvonlyAttribute:
-      return "recvonly";
     case kRemoteCandidatesAttribute:
       return "remote-candidates";
     case kRidAttribute:
@@ -1617,10 +1664,6 @@ SdpAttribute::GetAttributeTypeString(AttributeType type)
       return "rtpmap";
     case kSctpmapAttribute:
       return "sctpmap";
-    case kSendonlyAttribute:
-      return "sendonly";
-    case kSendrecvAttribute:
-      return "sendrecv";
     case kSetupAttribute:
       return "setup";
     case kSimulcastAttribute:
@@ -1629,6 +1672,10 @@ SdpAttribute::GetAttributeTypeString(AttributeType type)
       return "ssrc";
     case kSsrcGroupAttribute:
       return "ssrc-group";
+    case kSctpPortAttribute:
+      return "sctp-port";
+    case kMaxMessageSizeAttribute:
+      return "max-message-size";
     case kDirectionAttribute:
       MOZ_CRASH("kDirectionAttribute not valid here");
   }

@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -19,7 +20,7 @@ namespace gfx {
 class OpeningGeometrySink : public ID2D1SimplifiedGeometrySink
 {
 public:
-  OpeningGeometrySink(ID2D1SimplifiedGeometrySink *aSink)
+  explicit OpeningGeometrySink(ID2D1SimplifiedGeometrySink *aSink)
     : mSink(aSink)
     , mNeedsFigureEnded(false)
   {
@@ -90,10 +91,35 @@ private:
   bool mNeedsFigureEnded;
 };
 
+class MOZ_STACK_CLASS AutoRestoreFP
+{
+public:
+  AutoRestoreFP()
+  {
+    // save the current floating point control word
+    _controlfp_s(&savedFPSetting, 0, 0);
+    UINT unused;
+    // set the floating point control word to its default value
+    _controlfp_s(&unused, _CW_DEFAULT, MCW_PC);
+  }
+  ~AutoRestoreFP()
+  {
+    UINT unused;
+    // restore the saved floating point control word
+    _controlfp_s(&unused, savedFPSetting, MCW_PC);
+  }
+private:
+  UINT savedFPSetting;
+};
+
+// Note that overrides of ID2D1SimplifiedGeometrySink methods in this class may
+// get called from D2D with nonstandard floating point settings (see comments in
+// bug 1134549) - use AutoRestoreFP to reset the floating point control word to
+// what we expect
 class StreamingGeometrySink : public ID2D1SimplifiedGeometrySink
 {
 public:
-  StreamingGeometrySink(PathSink *aSink)
+  explicit StreamingGeometrySink(PathSink *aSink)
     : mSink(aSink)
   {
   }
@@ -129,11 +155,18 @@ public:
   STDMETHOD_(void, SetFillMode)(D2D1_FILL_MODE aMode)
   { return; }
   STDMETHOD_(void, BeginFigure)(D2D1_POINT_2F aPoint, D2D1_FIGURE_BEGIN aBegin)
-  { mSink->MoveTo(ToPoint(aPoint)); }
+  {
+    AutoRestoreFP resetFloatingPoint;
+    mSink->MoveTo(ToPoint(aPoint));
+  }
   STDMETHOD_(void, AddLines)(const D2D1_POINT_2F *aLines, UINT aCount)
-  { for (UINT i = 0; i < aCount; i++) { mSink->LineTo(ToPoint(aLines[i])); } }
+  {
+    AutoRestoreFP resetFloatingPoint;
+    for (UINT i = 0; i < aCount; i++) { mSink->LineTo(ToPoint(aLines[i])); }
+  }
   STDMETHOD_(void, AddBeziers)(const D2D1_BEZIER_SEGMENT *aSegments, UINT aCount)
   {
+    AutoRestoreFP resetFloatingPoint;
     for (UINT i = 0; i < aCount; i++) {
       mSink->BezierTo(ToPoint(aSegments[i].point1), ToPoint(aSegments[i].point2), ToPoint(aSegments[i].point3));
     }
@@ -145,6 +178,7 @@ public:
 
   STDMETHOD_(void, EndFigure)(D2D1_FIGURE_END aEnd)
   {
+    AutoRestoreFP resetFloatingPoint;
     if (aEnd == D2D1_FIGURE_END_CLOSED) {
       return mSink->Close();
     }
@@ -218,6 +252,8 @@ void
 PathBuilderD2D::Arc(const Point &aOrigin, Float aRadius, Float aStartAngle,
                  Float aEndAngle, bool aAntiClockwise)
 {
+  MOZ_ASSERT(aRadius >= 0);
+
   if (aAntiClockwise && aStartAngle < aEndAngle) {
     // D2D does things a little differently, and draws the arc by specifying an
     // beginning and an end point. This means the circle will be the wrong way
@@ -334,7 +370,7 @@ PathBuilderD2D::Finish()
 
   HRESULT hr = mSink->Close();
   if (FAILED(hr)) {
-    gfxDebug() << "Failed to close PathSink. Code: " << hexa(hr);
+    gfxCriticalNote << "Failed to close PathSink. Code: " << hexa(hr);
     return nullptr;
   }
 
@@ -371,18 +407,22 @@ PathD2D::TransformedCopyToBuilder(const Matrix &aTransform, FillRule aFillRule) 
 
   if (mEndedActive) {
     OpeningGeometrySink wrapSink(sink);
-    mGeometry->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
-                        D2DMatrix(aTransform),
-                        &wrapSink);
+    hr = mGeometry->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+                             D2DMatrix(aTransform),
+                             &wrapSink);
   } else {
-    mGeometry->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
-                        D2DMatrix(aTransform),
-                        sink);
+    hr = mGeometry->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+                             D2DMatrix(aTransform),
+                             sink);
+  }
+  if (FAILED(hr)) {
+    gfxWarning() << "Failed to simplify PathGeometry to tranformed copy. Code: " << hexa(hr) << " Active: " << mEndedActive;
+    return nullptr;
   }
 
   RefPtr<PathBuilderD2D> pathBuilder = new PathBuilderD2D(sink, path, aFillRule, mBackendType);
   
-  pathBuilder->mCurrentPoint = aTransform * mEndPoint;
+  pathBuilder->mCurrentPoint = aTransform.TransformPoint(mEndPoint);
   
   if (mEndedActive) {
     pathBuilder->mFigureActive = true;

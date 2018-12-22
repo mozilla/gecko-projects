@@ -30,7 +30,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 
 #include <algorithm>
 #include <elf.h>
@@ -82,7 +82,7 @@ public:
   bool unwind(const EHEntry *aEntry, const void *stackBase);
   uint32_t &operator[](int i) { return mRegs[i]; }
   const uint32_t &operator[](int i) const { return mRegs[i]; }
-  EHState(const mcontext_t &);
+  explicit EHState(const mcontext_t &);
 };
 
 enum {
@@ -181,7 +181,7 @@ size_t EHABIStackWalk(const mcontext_t &aContext, void *stackBase,
     if (!state.unwind(entry, stackBase))
       break;
   }
-  
+
   return count;
 }
 
@@ -336,7 +336,7 @@ bool EHInterp::unwind() {
   while (!mFailed) {
     uint8_t insn = next();
 #if DEBUG_EHABI_UNWIND
-    LOGF("unwind insn = %02x", (unsigned)insn);
+    LOG("unwind insn = %02x", (unsigned)insn);
 #endif
     // Try to put the common cases first.
 
@@ -466,7 +466,7 @@ bool EHInterp::unwind() {
 
     // unhandled instruction
 #ifdef DEBUG_EHABI_UNWIND
-    LOGF("Unhandled EHABI instruction 0x%02x", insn);
+    LOG("Unhandled EHABI instruction 0x%02x", insn);
 #endif
     mFailed = true;
   }
@@ -475,7 +475,7 @@ bool EHInterp::unwind() {
 
 
 bool operator<(const EHTable &lhs, const EHTable &rhs) {
-  return lhs.startPC() < rhs.endPC();
+  return lhs.startPC() < rhs.startPC();
 }
 
 // Async signal unsafe.
@@ -638,7 +638,7 @@ void EHAddrSpace::Update() {
       // itself.
       continue;
     EHTable tab(reinterpret_cast<const void *>(lib.GetStart()),
-              lib.GetEnd() - lib.GetStart(), lib.GetName());
+              lib.GetEnd() - lib.GetStart(), lib.GetNativeDebugPath());
     if (tab.isValid())
       tables.push_back(tab);
   }

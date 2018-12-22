@@ -13,8 +13,8 @@
 // between different Linux architectures.
 
 #include "mozilla/Maybe.h"
-#include "sandbox/linux/services/linux_syscalls.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 namespace mozilla {
 
@@ -23,7 +23,8 @@ namespace mozilla {
 // respectively; on most other architectures they're individual system
 // calls. It translates the syscalls into socketcall/ipc selector
 // values, because those are defined (even if not used) for all
-// architectures.
+// architectures.  (As of kernel 4.2.0, x86 also has regular system
+// calls, but userland will typically still use socketcall.)
 //
 // This EvaluateSyscall() routine always returns InvalidSyscall() for
 // everything else.  It's assumed that subclasses will be implementing
@@ -35,26 +36,19 @@ public:
   using ResultExpr = sandbox::bpf_dsl::ResultExpr;
 
   virtual ResultExpr EvaluateSyscall(int aSysno) const override;
-  virtual Maybe<ResultExpr> EvaluateSocketCall(int aCall) const {
+
+  // aHasArgs is true if this is a normal syscall, where the arguments
+  // can be inspected by seccomp-bpf, rather than a case of socketcall().
+  virtual Maybe<ResultExpr> EvaluateSocketCall(int aCall, bool aHasArgs) const {
     return Nothing();
   }
+
 #ifndef ANDROID
   // Android doesn't use SysV IPC (and doesn't define the selector
   // constants in its headers), so this isn't implemented there.
   virtual Maybe<ResultExpr> EvaluateIpcCall(int aCall) const {
     return Nothing();
   }
-#endif
-
-#ifdef __NR_socketcall
-  // socketcall(2) takes the actual call's arguments via a pointer, so
-  // seccomp-bpf can't inspect them; ipc(2) takes them at different indices.
-  static const bool kSocketCallHasArgs = false;
-  static const bool kIpcCallNormalArgs = false;
-#else
-  // Otherwise, the bpf_dsl Arg<> class can be used normally.
-  static const bool kSocketCallHasArgs = true;
-  static const bool kIpcCallNormalArgs = true;
 #endif
 };
 
@@ -74,13 +68,19 @@ public:
 #define CASES_FOR_mmap   case __NR_mmap
 #endif
 
+#ifdef __NR_fchown32
+#define CASES_FOR_fchown   case __NR_fchown32: case __NR_fchown
+#else
+#define CASES_FOR_fchown   case __NR_fchown
+#endif
+
 #ifdef __NR_getuid32
 #define CASES_FOR_getuid   case __NR_getuid32
 #define CASES_FOR_getgid   case __NR_getgid32
 #define CASES_FOR_geteuid   case __NR_geteuid32
 #define CASES_FOR_getegid   case __NR_getegid32
-#define CASES_FOR_getresuid   case __NR_getresuid32
-#define CASES_FOR_getresgid   case __NR_getresgid32
+#define CASES_FOR_getresuid   case __NR_getresuid32: case __NR_getresuid
+#define CASES_FOR_getresgid   case __NR_getresgid32: case __NR_getresgid
 // The set*id syscalls are omitted; we'll probably never need to allow them.
 #else
 #define CASES_FOR_getuid   case __NR_getuid
@@ -96,10 +96,9 @@ public:
 #define CASES_FOR_lstat   case __NR_lstat64
 #define CASES_FOR_fstat   case __NR_fstat64
 #define CASES_FOR_fstatat   case __NR_fstatat64
-#define CASES_FOR_statfs   case __NR_statfs64
+#define CASES_FOR_statfs   case __NR_statfs64: case __NR_statfs
+#define CASES_FOR_fstatfs   case __NR_fstatfs64: case __NR_fstatfs
 #define CASES_FOR_fcntl   case __NR_fcntl64
-// We're using the 32-bit version on 32-bit desktop for some reason.
-#define CASES_FOR_getdents   case __NR_getdents64: case __NR_getdents
 // FIXME: we might not need the compat cases for these on non-Android:
 #define CASES_FOR_lseek   case __NR_lseek: case __NR__llseek
 #define CASES_FOR_ftruncate   case __NR_ftruncate: case __NR_ftruncate64
@@ -108,11 +107,18 @@ public:
 #define CASES_FOR_lstat   case __NR_lstat
 #define CASES_FOR_fstatat   case __NR_newfstatat
 #define CASES_FOR_fstat   case __NR_fstat
+#define CASES_FOR_fstatfs   case __NR_fstatfs
 #define CASES_FOR_statfs   case __NR_statfs
 #define CASES_FOR_fcntl   case __NR_fcntl
-#define CASES_FOR_getdents   case __NR_getdents
 #define CASES_FOR_lseek   case __NR_lseek
 #define CASES_FOR_ftruncate   case __NR_ftruncate
+#endif
+
+// getdents is not like the other FS-related syscalls with a "64" variant
+#ifdef __NR_getdents
+#define CASES_FOR_getdents   case __NR_getdents64: case __NR_getdents
+#else
+#define CASES_FOR_getdents   case __NR_getdents64
 #endif
 
 #ifdef __NR_sigprocmask

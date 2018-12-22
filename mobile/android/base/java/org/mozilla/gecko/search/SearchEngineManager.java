@@ -22,7 +22,10 @@ import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.GeckoJarReader;
 import org.mozilla.gecko.util.HardwareUtils;
+import org.mozilla.gecko.util.IOUtils;
+import org.mozilla.gecko.util.ProxySelector;
 import org.mozilla.gecko.util.RawResource;
+import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.xmlpull.v1.XmlPullParserException;
 
@@ -37,10 +40,12 @@ import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Locale;
+import org.json.JSONObject;
+import org.json.JSONArray;
 
 /**
  * This class is not thread-safe, except where otherwise noted.
@@ -60,10 +65,13 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
     private static final String PREF_DEFAULT_ENGINE_KEY = "search.engines.defaultname";
 
     // Key for shared preference that stores search region.
-    private static final String PREF_REGION_KEY = "search.region";
+    public static final String PREF_REGION_KEY = "search.region";
 
     // URL for the geo-ip location service. Keep in sync with "browser.search.geoip.url" perference in Gecko.
     private static final String GEOIP_LOCATION_URL = "https://location.services.mozilla.com/v1/country?key=" + AppConstants.MOZ_MOZILLA_API_KEY;
+
+    // The API we're using requires a file size, so set an arbitrarily large one
+    public static final int MAX_LISTJSON_SIZE = 8192;
 
     // This should go through GeckoInterface to get the UA, but the search activity
     // doesn't use a GeckoView yet. Until it does, get the UA directly.
@@ -84,7 +92,7 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
     private String distributionLocale;
 
     public static interface SearchEngineCallback {
-        public void execute(SearchEngine engine);
+        public void execute(@Nullable SearchEngine engine);
     }
 
     public SearchEngineManager(Context context, Distribution distribution) {
@@ -301,7 +309,7 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
         }
 
         try {
-            final JSONObject all = new JSONObject(FileUtils.getFileContents(prefFile));
+            final JSONObject all = FileUtils.readJSONObjectFromFile(prefFile);
 
             // First, look for a default locale specified by the distribution.
             if (all.has("Preferences")) {
@@ -381,8 +389,8 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
         try {
             String responseText = null;
 
-            URL url = new URL(GEOIP_LOCATION_URL);
-            HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
+            URI uri = new URI(GEOIP_LOCATION_URL);
+            HttpURLConnection urlConnection = (HttpURLConnection) ProxySelector.openConnectionWithProxy(uri);
             try {
                 // POST an empty JSON object.
                 final String message = "{}";
@@ -393,7 +401,7 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
                 urlConnection.setRequestMethod("POST");
                 urlConnection.setRequestProperty("User-Agent", USER_AGENT);
                 urlConnection.setRequestProperty("Content-Type", "application/json");
-                urlConnection.setFixedLengthStreamingMode(message.getBytes().length);
+                urlConnection.setFixedLengthStreamingMode(message.getBytes(StringUtils.UTF_8).length);
 
                 final OutputStream out = urlConnection.getOutputStream();
                 out.write(message.getBytes());
@@ -425,8 +433,13 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
      * @return search engine name.
      */
     private String getDefaultEngineNameFromLocale() {
+        final InputStream in = getInputStreamFromSearchPluginsJar("list.json");
+        if (in == null) {
+            Log.e(LOG_TAG, "Error missing list.json");
+            return null;
+        }
         try {
-            final JSONObject browsersearch = new JSONObject(RawResource.getAsString(context, R.raw.browsersearch));
+            final JSONObject json = new JSONObject(FileUtils.readStringFromInputStreamAndCloseStream(in, MAX_LISTJSON_SIZE));
 
             // Get the region used to fence search engines.
             String region = fetchCountryCode();
@@ -439,25 +452,31 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
                             .apply();
 
             if (region != null) {
-                if (browsersearch.has("regions")) {
-                    final JSONObject regions = browsersearch.getJSONObject("regions");
-                    if (regions.has(region)) {
-                        final JSONObject regionData = regions.getJSONObject(region);
+                if (json.has(region)) {
+                    final JSONObject regionData = json.getJSONObject(region);
+                    if (regionData.has("searchDefault")) {
                         Log.d(LOG_TAG, "Found region-specific default engine name in browsersearch.json.");
-                        return regionData.getString("default");
+                        return regionData.getString("searchDefault");
                     }
                 }
             }
 
             // Either we have no geoip region, or we didn't find the right region and we are falling back to the default.
-            if (browsersearch.has("default")) {
-                Log.d(LOG_TAG, "Found default engine name in browsersearch.json.");
-                return browsersearch.getString("default");
+            if (json.has("default")) {
+                final JSONObject defaultData = json.getJSONObject("default");
+                if (defaultData.has("searchDefault")) {
+                  Log.d(LOG_TAG, "Found default engine name in list.json.");
+                  return defaultData.getString("searchDefault");
+                }
             }
+            // We should never get here
+            Log.e(LOG_TAG, "Error missing defaultSearch in list.json");
         } catch (IOException e) {
-            Log.e(LOG_TAG, "Error getting search engine name from browsersearch.json", e);
+            Log.e(LOG_TAG, "Error getting search engine name from list.json", e);
         } catch (JSONException e) {
-            Log.e(LOG_TAG, "Error parsing browsersearch.json", e);
+            Log.e(LOG_TAG, "Error parsing list.json", e);
+        } finally {
+            IOUtils.safeStreamClose(in);
         }
         return null;
     }
@@ -558,7 +577,7 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
     /**
      * Creates a SearchEngine instance for a search plugin shipped in the locale.
      *
-     * This method reads the list of search plugin file names from list.txt, then
+     * This method reads the list of search plugin file names from list.json, then
      * iterates through the files, creating SearchEngine instances until it finds one
      * with the right name. Unfortunately, we need to do this because there is no
      * other way to map the search engine "name" to the file for the search plugin.
@@ -567,26 +586,42 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
      * @return SearchEngine instance for name.
      */
     private SearchEngine createEngineFromLocale(String name) {
-        final InputStream in = getInputStreamFromSearchPluginsJar("list.txt");
-        final BufferedReader br = getBufferedReader(in);
-
+        final InputStream in = getInputStreamFromSearchPluginsJar("list.json");
+        if (in == null) {
+            return null;
+        }
+        JSONObject json;
         try {
-            String identifier;
-            while ((identifier = br.readLine()) != null) {
-                final InputStream pluginIn = getInputStreamFromSearchPluginsJar(identifier + ".xml");
-                final SearchEngine engine = createEngineFromInputStream(identifier, pluginIn);
-                if (engine != null && engine.getName().equals(name)) {
-                    return engine;
+            json = new JSONObject(FileUtils.readStringFromInputStreamAndCloseStream(in, MAX_LISTJSON_SIZE));
+        } catch (IOException e) {
+            Log.e(LOG_TAG, "Error reading list.json", e);
+            return null;
+        } catch (JSONException e) {
+            Log.e(LOG_TAG, "Error parsing list.json", e);
+            return null;
+        } finally {
+            IOUtils.safeStreamClose(in);
+        }
+        try {
+            String region = GeckoSharedPrefs.forApp(context).getString(PREF_REGION_KEY, null);
+
+            JSONArray engines;
+            if (json.has(region)) {
+                engines = json.getJSONObject(region).getJSONArray("visibleDefaultEngines");
+            } else {
+                engines = json.getJSONObject("default").getJSONArray("visibleDefaultEngines");
+            }
+            for (int i = 0; i < engines.length(); i++) {
+                final InputStream pluginIn = getInputStreamFromSearchPluginsJar(engines.getString(i) + ".xml");
+                if (pluginIn != null) {
+                    final SearchEngine engine = createEngineFromInputStream(engines.getString(i), pluginIn);
+                    if (engine != null && engine.getName().equals(name)) {
+                        return engine;
+                    }
                 }
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             Log.e(LOG_TAG, "Error creating shipped search engine from name: " + name, e);
-        } finally {
-            try {
-                br.close();
-            } catch (IOException e) {
-                // Ignore.
-            }
         }
         return null;
     }
@@ -654,7 +689,7 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
             } finally {
                 in.close();
             }
-        } catch (IOException | XmlPullParserException e) {
+        } catch (Exception e) {
             Log.e(LOG_TAG, "Exception creating search engine", e);
         }
 
@@ -707,6 +742,9 @@ public class SearchEngineManager implements SharedPreferences.OnSharedPreference
 
         final InputStream in = GeckoJarReader.getStream(
                 context, GeckoJarReader.getJarURL(context, "chrome/chrome.manifest"));
+        if (in == null) {
+            return null;
+        }
         final BufferedReader br = getBufferedReader(in);
 
         try {

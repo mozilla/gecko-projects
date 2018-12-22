@@ -1,10 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /**
  * Dummy nsIAutoCompleteInput source that returns
@@ -36,7 +33,7 @@ AutoCompleteInputBase.prototype = {
   get selectionEnd() {
     return this._selEnd;
   },
-  selectTextRange: function(aStart, aEnd) {
+  selectTextRange(aStart, aEnd) {
     this._selStart = aStart;
     this._selEnd = aEnd;
   },
@@ -45,12 +42,12 @@ AutoCompleteInputBase.prototype = {
     return this.searches.length;
   },
 
-  getSearchAt: function(aIndex) {
+  getSearchAt(aIndex) {
     return this.searches[aIndex];
   },
 
-  onSearchBegin: function() {},
-  onSearchComplete: function() {},
+  onSearchBegin() {},
+  onSearchComplete() {},
 
   popupOpen: false,
 
@@ -62,8 +59,8 @@ AutoCompleteInputBase.prototype = {
   },
 
   // nsISupports implementation
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompleteInput])
-}
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteInput])
+};
 
 /**
  * nsIAutoCompleteResult implementation
@@ -84,44 +81,39 @@ AutoCompleteResultBase.prototype = {
 
   defaultIndex: -1,
 
-  _typeAheadResult: false,
-  get typeAheadResult() {
-    return this._typeAheadResult;
-  },
-
   get matchCount() {
     return this._values.length;
   },
 
-  getValueAt: function(aIndex) {
+  getValueAt(aIndex) {
     return this._values[aIndex];
   },
 
-  getLabelAt: function(aIndex) {
+  getLabelAt(aIndex) {
     return this.getValueAt(aIndex);
   },
 
-  getCommentAt: function(aIndex) {
+  getCommentAt(aIndex) {
     return this._comments[aIndex];
   },
 
-  getStyleAt: function(aIndex) {
+  getStyleAt(aIndex) {
     return this._styles[aIndex];
   },
 
-  getImageAt: function(aIndex) {
+  getImageAt(aIndex) {
     return "";
   },
 
-  getFinalCompleteValueAt: function(aIndex) {
+  getFinalCompleteValueAt(aIndex) {
     return this._finalCompleteValues[aIndex] || this._values[aIndex];
   },
 
-  removeValueAt: function (aRowIndex, aRemoveFromDb) {},
+  removeValueAt(aRowIndex, aRemoveFromDb) {},
 
   // nsISupports implementation
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompleteResult])
-}
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteResult])
+};
 
 /**
  * nsIAutoCompleteSearch implementation that always returns
@@ -139,7 +131,7 @@ AutoCompleteSearchBase.prototype = {
   // AutoCompleteResult
   _result: null,
 
-  startSearch: function(aSearchString,
+  startSearch(aSearchString,
                         aSearchParam,
                         aPreviousResult,
                         aListener) {
@@ -149,17 +141,17 @@ AutoCompleteSearchBase.prototype = {
     aListener.onSearchResult(this, result);
   },
 
-  stopSearch: function() {},
+  stopSearch() {},
 
   // nsISupports implementation
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIFactory,
-                                         Ci.nsIAutoCompleteSearch]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory,
+                                          Ci.nsIAutoCompleteSearch]),
 
   // nsIFactory implementation
-  createInstance: function(outer, iid) {
+  createInstance(outer, iid) {
     return this.QueryInterface(iid);
   }
-}
+};
 
 function AutocompletePopupBase(input) {
   this.input = input;
@@ -177,7 +169,7 @@ AutocompletePopupBase.prototype = {
       }
     }
   },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompletePopup]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompletePopup]),
 };
 
 /**

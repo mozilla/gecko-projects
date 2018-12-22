@@ -1,11 +1,10 @@
 <html>
 <head>
 <script>
-function replaceBody()
-{
-  var accRetrieval = Components.classes["@mozilla.org/accessibleRetrieval;1"].
-    getService(Components.interfaces.nsIAccessibleRetrieval);
-  accRetrieval.getAccessibleFor(document);
+function replaceBody() {
+  var accService = Cc["@mozilla.org/accessibilityService;1"].
+    getService(Ci.nsIAccessibilityService);
+  accService.getAccessibleFor(document);
 
   var newBody = document.createElement("body");
   newBody.setAttribute("contentEditable", "true");

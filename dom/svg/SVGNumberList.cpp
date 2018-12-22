@@ -33,7 +33,7 @@ SVGNumberList::GetValueAsString(nsAString& aValue) const
     // Would like to use aValue.AppendPrintf("%f", mNumbers[i]), but it's not
     // possible to always avoid trailing zeros.
     nsTextFormatter::snprintf(buf, ArrayLength(buf),
-                              MOZ_UTF16("%g"),
+                              u"%g",
                               double(mNumbers[i]));
     // We ignore OOM, since it's not useful for us to return an error.
     aValue.Append(buf);
@@ -48,7 +48,7 @@ SVGNumberList::SetValueFromString(const nsAString& aValue)
 {
   SVGNumberList temp;
 
-  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
+  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
     tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
   while (tokenizer.hasMoreTokens()) {

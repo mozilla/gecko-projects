@@ -5,10 +5,6 @@
 from __future__ import absolute_import, unicode_literals
 
 import sys
-import os
-import stat
-import platform
-import errno
 
 from mach.decorators import (
     CommandArgument,
@@ -21,17 +17,8 @@ from mozbuild.base import MachCommandBase, MozbuildObject
 
 @CommandProvider
 class SearchProvider(object):
-    @Command('mxr', category='misc',
-        description='Search for something in MXR.')
-    @CommandArgument('term', nargs='+', help='Term(s) to search for.')
-    def mxr(self, term):
-        import webbrowser
-        term = ' '.join(term)
-        uri = 'https://mxr.mozilla.org/mozilla-central/search?string=%s' % term
-        webbrowser.open_new_tab(uri)
-
     @Command('dxr', category='misc',
-        description='Search for something in DXR.')
+             description='Search for something in DXR.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
     def dxr(self, term):
         import webbrowser
@@ -40,7 +27,7 @@ class SearchProvider(object):
         webbrowser.open_new_tab(uri)
 
     @Command('mdn', category='misc',
-        description='Search for something on MDN.')
+             description='Search for something on MDN.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
     def mdn(self, term):
         import webbrowser
@@ -49,7 +36,7 @@ class SearchProvider(object):
         webbrowser.open_new_tab(uri)
 
     @Command('google', category='misc',
-        description='Search for something on Google.')
+             description='Search for something on Google.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
     def google(self, term):
         import webbrowser
@@ -58,20 +45,20 @@ class SearchProvider(object):
         webbrowser.open_new_tab(uri)
 
     @Command('search', category='misc',
-        description='Search for something on the Internets. '
-        'This will open 3 new browser tabs and search for the term on Google, '
-        'MDN, and MXR.')
+             description='Search for something on the Internets. '
+             'This will open 3 new browser tabs and search for the term on Google, '
+             'MDN, and DXR.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
     def search(self, term):
         self.google(term)
         self.mdn(term)
-        self.mxr(term)
+        self.dxr(term)
 
 
 @CommandProvider
 class UUIDProvider(object):
     @Command('uuid', category='misc',
-        description='Generate a uuid.')
+             description='Generate a uuid.')
     @CommandArgument('--format', '-f', choices=['idl', 'cpp', 'c++'],
                      help='Output format for the generated uuid.')
     def uuid(self, format=None):
@@ -91,7 +78,7 @@ class UUIDProvider(object):
 @CommandProvider
 class PastebinProvider(object):
     @Command('pastebin', category='misc',
-        description='Command line interface to pastebin.mozilla.org.')
+             description='Command line interface to pastebin.mozilla.org.')
     @CommandArgument('--language', default=None,
                      help='Language to use for syntax highlighting')
     @CommandArgument('--poster', default='',
@@ -101,7 +88,6 @@ class PastebinProvider(object):
                      help='Keep for specified duration (default: %(default)s)')
     @CommandArgument('file', nargs='?', default=None,
                      help='Specify the file to upload to pastebin.mozilla.org')
-
     def pastebin(self, language, poster, duration, file):
         import urllib
         import urllib2
@@ -109,23 +95,23 @@ class PastebinProvider(object):
         URL = 'https://pastebin.mozilla.org/'
 
         FILE_TYPES = [{'value': 'text', 'name': 'None', 'extension': 'txt'},
-        {'value': 'bash', 'name': 'Bash', 'extension': 'sh'},
-        {'value': 'c', 'name': 'C', 'extension': 'c'},
-        {'value': 'cpp', 'name': 'C++', 'extension': 'cpp'},
-        {'value': 'html4strict', 'name': 'HTML', 'extension': 'html'},
-        {'value': 'javascript', 'name': 'Javascript', 'extension': 'js'},
-        {'value': 'javascript', 'name': 'Javascript', 'extension': 'jsm'},
-        {'value': 'lua', 'name': 'Lua', 'extension': 'lua'},
-        {'value': 'perl', 'name': 'Perl', 'extension': 'pl'},
-        {'value': 'php', 'name': 'PHP', 'extension': 'php'},
-        {'value': 'python', 'name': 'Python', 'extension': 'py'},
-        {'value': 'ruby', 'name': 'Ruby', 'extension': 'rb'},
-        {'value': 'css', 'name': 'CSS', 'extension': 'css'},
-        {'value': 'diff', 'name': 'Diff', 'extension': 'diff'},
-        {'value': 'ini', 'name': 'INI file', 'extension': 'ini'},
-        {'value': 'java', 'name': 'Java', 'extension': 'java'},
-        {'value': 'xml', 'name': 'XML', 'extension': 'xml'},
-        {'value': 'xml', 'name': 'XML', 'extension': 'xul'}]
+                      {'value': 'bash', 'name': 'Bash', 'extension': 'sh'},
+                      {'value': 'c', 'name': 'C', 'extension': 'c'},
+                      {'value': 'cpp', 'name': 'C++', 'extension': 'cpp'},
+                      {'value': 'html4strict', 'name': 'HTML', 'extension': 'html'},
+                      {'value': 'javascript', 'name': 'Javascript', 'extension': 'js'},
+                      {'value': 'javascript', 'name': 'Javascript', 'extension': 'jsm'},
+                      {'value': 'lua', 'name': 'Lua', 'extension': 'lua'},
+                      {'value': 'perl', 'name': 'Perl', 'extension': 'pl'},
+                      {'value': 'php', 'name': 'PHP', 'extension': 'php'},
+                      {'value': 'python', 'name': 'Python', 'extension': 'py'},
+                      {'value': 'ruby', 'name': 'Ruby', 'extension': 'rb'},
+                      {'value': 'css', 'name': 'CSS', 'extension': 'css'},
+                      {'value': 'diff', 'name': 'Diff', 'extension': 'diff'},
+                      {'value': 'ini', 'name': 'INI file', 'extension': 'ini'},
+                      {'value': 'java', 'name': 'Java', 'extension': 'java'},
+                      {'value': 'xml', 'name': 'XML', 'extension': 'xml'},
+                      {'value': 'xml', 'name': 'XML', 'extension': 'xul'}]
 
         lang = ''
 
@@ -150,7 +136,6 @@ class PastebinProvider(object):
         if language:
             lang = language
 
-
         params = [
             ('parent_pid', ''),
             ('format', lang),
@@ -166,100 +151,22 @@ class PastebinProvider(object):
             response = urllib2.urlopen(req)
             http_response_code = response.getcode()
             if http_response_code == 200:
-                print(response.geturl())
+                pasteurl = response.geturl()
+                if pasteurl == URL:
+                    if "Query failure: Data too long for column" in response.readline():
+                        print('ERROR. Request too large. Limit is 64KB.')
+                    else:
+                        print('ERROR. Unknown error')
+                else:
+                    print(pasteurl)
             else:
                 print('Could not upload the file, '
-                      'HTTP Response Code %s' %(http_response_code))
+                      'HTTP Response Code %s' % (http_response_code))
         except urllib2.URLError:
             print('ERROR. Could not connect to pastebin.mozilla.org.')
             return 1
         return 0
 
-
-@CommandProvider
-class FormatProvider(MachCommandBase):
-    @Command('clang-format', category='misc',
-        description='Run clang-format on current changes')
-    @CommandArgument('--show', '-s', action = 'store_true',
-        help = 'Show diff output on instead of applying changes')
-    def clang_format(self, show=False):
-        import urllib2
-
-        plat = platform.system()
-        fmt = plat.lower() + "/clang-format-3.5"
-        fmt_diff = "clang-format-diff-3.5"
-
-        # We are currently using a modified version of clang-format hosted on people.mozilla.org.
-        # This is a temporary work around until we upstream the necessary changes and we can use
-        # a system version of clang-format. See bug 961541.
-        if plat == "Windows":
-            fmt += ".exe"
-        else:
-            arch = os.uname()[4]
-            if (plat != "Linux" and plat != "Darwin") or arch != 'x86_64':
-                print("Unsupported platform " + plat + "/" + arch +
-                      ". Supported platforms are Windows/*, Linux/x86_64 and Darwin/x86_64")
-                return 1
-
-        os.chdir(self.topsrcdir)
-        self.prompt = True
-
-        try:
-            if not self.locate_or_fetch(fmt):
-                return 1
-            clang_format_diff = self.locate_or_fetch(fmt_diff)
-            if not clang_format_diff:
-                return 1
-
-        except urllib2.HTTPError as e:
-            print("HTTP error {0}: {1}".format(e.code, e.reason))
-            return 1
-
-        from subprocess import Popen, PIPE
-
-        if os.path.exists(".hg"):
-            diff_process = Popen(["hg", "diff", "-U0", "-r", "tip^",
-                                  "--include", "glob:**.c", "--include", "glob:**.cpp", "--include", "glob:**.h",
-                                  "--exclude", "listfile:.clang-format-ignore"], stdout=PIPE)
-        else:
-            git_process = Popen(["git", "diff", "-U0", "HEAD^"], stdout=PIPE)
-            try:
-                diff_process = Popen(["filterdiff", "--include=*.h", "--include=*.cpp",
-                                      "--exclude-from-file=.clang-format-ignore"],
-                                     stdin=git_process.stdout, stdout=PIPE)
-            except OSError as e:
-                if e.errno == errno.ENOENT:
-                    print("Can't find filterdiff. Please install patchutils.")
-                else:
-                    print("OSError {0}: {1}".format(e.code, e.reason))
-                return 1
-
-
-        args = [sys.executable, clang_format_diff, "-p1"]
-        if not show:
-           args.append("-i")
-        cf_process = Popen(args, stdin=diff_process.stdout)
-        return cf_process.communicate()[0]
-
-    def locate_or_fetch(self, root):
-        target = os.path.join(self._mach_context.state_dir, os.path.basename(root))
-        if not os.path.exists(target):
-            site = "https://people.mozilla.org/~ajones/clang-format/"
-            if self.prompt and raw_input("Download clang-format executables from {0} (yN)? ".format(site)).lower() != 'y':
-                print("Download aborted.")
-                return 1
-            self.prompt = False
-
-            u = site + root
-            print("Downloading {0} to {1}".format(u, target))
-            data = urllib2.urlopen(url=u).read()
-            temp = target + ".tmp"
-            with open(temp, "wb") as fh:
-                fh.write(data)
-                fh.close()
-            os.chmod(temp, os.stat(temp).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-            os.rename(temp, target)
-        return target
 
 def mozregression_import():
     # Lazy loading of mozregression.

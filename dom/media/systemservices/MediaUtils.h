@@ -7,11 +7,19 @@
 #ifndef mozilla_MediaUtils_h
 #define mozilla_MediaUtils_h
 
-#include "nsAutoPtr.h"
-#include "nsThreadUtils.h"
-#include "nsIAsyncShutdown.h"
+#include "AutoTaskQueue.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Monitor.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/SharedThreadPool.h"
 #include "mozilla/UniquePtr.h"
-#include "base/task.h"
+#include "nsCOMPtr.h"
+#include "nsIAsyncShutdown.h"
+#include "nsISupportsImpl.h"
+#include "nsThreadUtils.h"
+
+class nsIEventTarget;
 
 namespace mozilla {
 namespace media {
@@ -73,7 +81,7 @@ public:
   template<typename OnSuccessType>
   void Then(OnSuccessType&& aOnSuccess)
   {
-    Then(Forward<OnSuccessType>(aOnSuccess), [](ErrorType&){});
+    Then(std::forward<OnSuccessType>(aOnSuccess), [](ErrorType&){});
   }
 
   template<typename OnSuccessType, typename OnFailureType>
@@ -82,8 +90,8 @@ public:
     class Functors : public FunctorsBase
     {
     public:
-      Functors(OnSuccessType&& aOnSuccess, OnFailureType&& aOnFailure)
-        : mOnSuccess(Move(aOnSuccess)), mOnFailure(Move(aOnFailure)) {}
+      Functors(OnSuccessType&& aOnSuccessRef, OnFailureType&& aOnFailureRef)
+        : mOnSuccess(std::move(aOnSuccessRef)), mOnFailure(std::move(aOnFailureRef)) {}
 
       void Succeed(ValueType& result)
       {
@@ -97,8 +105,8 @@ public:
       OnSuccessType mOnSuccess;
       OnFailureType mOnFailure;
     };
-    mFunctors = MakeUnique<Functors>(Forward<OnSuccessType>(aOnSuccess),
-                                     Forward<OnFailureType>(aOnFailure));
+    mFunctors = MakeUnique<Functors>(std::forward<OnSuccessType>(aOnSuccess),
+                                     std::forward<OnFailureType>(aOnFailure));
     if (mDone) {
       if (!mRejected) {
         mFunctors->Succeed(mValue);
@@ -146,18 +154,17 @@ private:
   UniquePtr<FunctorsBase> mFunctors;
 };
 
-/* media::NewRunnableFrom() - Create an nsRunnable from a lambda.
- * media::NewTaskFrom()     - Create a Task from a lambda.
+/* media::NewRunnableFrom() - Create a Runnable from a lambda.
  *
- * Passing variables (closures) to an async function is clunky with nsRunnable:
+ * Passing variables (closures) to an async function is clunky with Runnable:
  *
  *   void Foo()
  *   {
- *     class FooRunnable : public nsRunnable
+ *     class FooRunnable : public Runnable
  *     {
  *     public:
  *       FooRunnable(const Bar &aBar) : mBar(aBar) {}
- *       NS_IMETHOD Run()
+ *       NS_IMETHOD Run() override
  *       {
  *         // Use mBar
  *       }
@@ -176,7 +183,7 @@ private:
  *     RefPtr<Bar> bar = new Bar();
  *     NS_DispatchToMainThread(media::NewRunnableFrom([bar]() mutable {
  *       // use bar
- *     });
+ *     }));
  *   }
  *
  * Capture is by-copy by default, so the nsRefPtr 'bar' is safely copied for
@@ -186,13 +193,18 @@ private:
  */
 
 template<typename OnRunType>
-class LambdaRunnable : public nsRunnable
+class LambdaRunnable : public Runnable
 {
 public:
-  explicit LambdaRunnable(OnRunType&& aOnRun) : mOnRun(Move(aOnRun)) {}
+  explicit LambdaRunnable(OnRunType&& aOnRun)
+    : Runnable("media::LambdaRunnable")
+    , mOnRun(std::move(aOnRun))
+  {
+  }
+
 private:
   NS_IMETHODIMP
-  Run()
+  Run() override
   {
     return mOnRun();
   }
@@ -200,31 +212,12 @@ private:
 };
 
 template<typename OnRunType>
-LambdaRunnable<OnRunType>*
+already_AddRefed<LambdaRunnable<OnRunType>>
 NewRunnableFrom(OnRunType&& aOnRun)
 {
-  return new LambdaRunnable<OnRunType>(Forward<OnRunType>(aOnRun));
-}
-
-template<typename OnRunType>
-class LambdaTask : public Task
-{
-public:
-  explicit LambdaTask(OnRunType&& aOnRun) : mOnRun(Move(aOnRun)) {}
-private:
-  void
-  Run()
-  {
-    return mOnRun();
-  }
-  OnRunType mOnRun;
-};
-
-template<typename OnRunType>
-LambdaTask<OnRunType>*
-NewTaskFrom(OnRunType&& aOnRun)
-{
-  return new LambdaTask<OnRunType>(Forward<OnRunType>(aOnRun));
+  typedef LambdaRunnable<OnRunType> LambdaType;
+  RefPtr<LambdaType> lambda = new LambdaType(std::forward<OnRunType>(aOnRun));
+  return lambda.forget();
 }
 
 /* media::CoatCheck - There and back again. Park an object in exchange for an id.
@@ -341,11 +334,28 @@ private:
  * a constructor. Please add below (UniquePtr covers a lot of ground though).
  */
 
-template<typename T>
-class Refcountable : public T
+class RefcountableBase
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Refcountable<T>)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RefcountableBase)
+protected:
+  virtual ~RefcountableBase() {}
+};
+
+template<typename T>
+class Refcountable : public T, public RefcountableBase
+{
+public:
+  NS_METHOD_(MozExternalRefCountType) AddRef()
+  {
+    return RefcountableBase::AddRef();
+  }
+
+  NS_METHOD_(MozExternalRefCountType) Release()
+  {
+    return RefcountableBase::Release();
+  }
+
 private:
   ~Refcountable<T>() {}
 };
@@ -360,8 +370,11 @@ private:
   ~Refcountable<UniquePtr<T>>() {}
 };
 
-/* media::ShutdownBlocker - Async shutdown helper.
+/* Async shutdown helpers
  */
+
+already_AddRefed<nsIAsyncShutdownClient>
+GetShutdownBarrier();
 
 class ShutdownBlocker : public nsIAsyncShutdownBlocker
 {
@@ -388,6 +401,147 @@ protected:
 private:
   const nsString mName;
 };
+
+class ShutdownTicket final
+{
+public:
+  explicit ShutdownTicket(nsIAsyncShutdownBlocker* aBlocker) : mBlocker(aBlocker) {}
+  NS_INLINE_DECL_REFCOUNTING(ShutdownTicket)
+private:
+  ~ShutdownTicket()
+  {
+    nsCOMPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
+    barrier->RemoveBlocker(mBlocker);
+  }
+
+  nsCOMPtr<nsIAsyncShutdownBlocker> mBlocker;
+};
+
+/**
+ * Await convenience methods to block until the promise has been resolved or
+ * rejected. The Resolve/Reject functions, while called on a different thread,
+ * would be running just as on the current thread thanks to the memory barrier
+ * provided by the monitor.
+ * For now Await can only be used with an exclusive MozPromise if passed a
+ * Resolve/Reject function.
+ * Await() can *NOT* be called from a task queue/nsISerialEventTarget used for
+ * resolving/rejecting aPromise, otherwise things will deadlock.
+ */
+template<typename ResolveValueType,
+         typename RejectValueType,
+         typename ResolveFunction,
+         typename RejectFunction>
+void
+Await(
+  already_AddRefed<nsIEventTarget> aPool,
+  RefPtr<MozPromise<ResolveValueType, RejectValueType, true>> aPromise,
+  ResolveFunction&& aResolveFunction,
+  RejectFunction&& aRejectFunction)
+{
+  RefPtr<AutoTaskQueue> taskQueue =
+    new AutoTaskQueue(std::move(aPool), "MozPromiseAwait");
+  // We can't use a Monitor allocated on the stack (see bug 1426067)
+  Monitor& mon = taskQueue->Monitor();
+  bool done = false;
+
+  aPromise->Then(taskQueue,
+                 __func__,
+                 [&](ResolveValueType&& aResolveValue) {
+                   MonitorAutoLock lock(mon);
+                   aResolveFunction(std::forward<ResolveValueType>(aResolveValue));
+                   done = true;
+                   mon.Notify();
+                 },
+                 [&](RejectValueType&& aRejectValue) {
+                   MonitorAutoLock lock(mon);
+                   aRejectFunction(std::forward<RejectValueType>(aRejectValue));
+                   done = true;
+                   mon.Notify();
+                 });
+
+  MonitorAutoLock lock(mon);
+  while (!done) {
+    mon.Wait();
+  }
+}
+
+template<typename ResolveValueType, typename RejectValueType, bool Excl>
+typename MozPromise<ResolveValueType, RejectValueType, Excl>::
+  ResolveOrRejectValue
+Await(already_AddRefed<nsIEventTarget> aPool,
+      RefPtr<MozPromise<ResolveValueType, RejectValueType, Excl>> aPromise)
+{
+  RefPtr<AutoTaskQueue> taskQueue =
+    new AutoTaskQueue(std::move(aPool), "MozPromiseAwait");
+  // We can't use a Monitor allocated on the stack (see bug 1426067)
+  Monitor& mon = taskQueue->Monitor();
+  bool done = false;
+
+  typename MozPromise<ResolveValueType, RejectValueType, Excl>::ResolveOrRejectValue val;
+  aPromise->Then(taskQueue,
+                 __func__,
+                 [&](ResolveValueType aResolveValue) {
+                   val.SetResolve(std::move(aResolveValue));
+                   MonitorAutoLock lock(mon);
+                   done = true;
+                   mon.Notify();
+                 },
+                 [&](RejectValueType aRejectValue) {
+                   val.SetReject(std::move(aRejectValue));
+                   MonitorAutoLock lock(mon);
+                   done = true;
+                   mon.Notify();
+                 });
+
+  MonitorAutoLock lock(mon);
+  while (!done) {
+    mon.Wait();
+  }
+
+  return val;
+}
+
+/**
+ * Similar to Await, takes an array of promises of the same type.
+ * MozPromise::All is used to handle the resolution/rejection of the promises.
+ */
+template<typename ResolveValueType,
+         typename RejectValueType,
+         typename ResolveFunction,
+         typename RejectFunction>
+void
+AwaitAll(already_AddRefed<nsIEventTarget> aPool,
+         nsTArray<RefPtr<MozPromise<ResolveValueType, RejectValueType, true>>>&
+           aPromises,
+         ResolveFunction&& aResolveFunction,
+         RejectFunction&& aRejectFunction)
+{
+  typedef MozPromise<ResolveValueType, RejectValueType, true> Promise;
+  RefPtr<nsIEventTarget> pool = aPool;
+  RefPtr<AutoTaskQueue> taskQueue =
+    new AutoTaskQueue(do_AddRef(pool), "MozPromiseAwaitAll");
+  RefPtr<typename Promise::AllPromiseType> p = Promise::All(taskQueue, aPromises);
+  Await(pool.forget(), p, std::move(aResolveFunction), std::move(aRejectFunction));
+}
+
+// Note: only works with exclusive MozPromise, as Promise::All would attempt
+// to perform copy of nsTArrays which are disallowed.
+template<typename ResolveValueType, typename RejectValueType>
+typename MozPromise<ResolveValueType,
+                    RejectValueType,
+                    true>::AllPromiseType::ResolveOrRejectValue
+AwaitAll(already_AddRefed<nsIEventTarget> aPool,
+         nsTArray<RefPtr<MozPromise<ResolveValueType, RejectValueType, true>>>&
+           aPromises)
+{
+  typedef MozPromise<ResolveValueType, RejectValueType, true> Promise;
+  RefPtr<nsIEventTarget> pool = aPool;
+  RefPtr<AutoTaskQueue> taskQueue =
+    new AutoTaskQueue(do_AddRef(pool), "MozPromiseAwaitAll");
+  RefPtr<typename Promise::AllPromiseType> p =
+    Promise::All(taskQueue, aPromises);
+  return Await(pool.forget(), p);
+}
 
 } // namespace media
 } // namespace mozilla

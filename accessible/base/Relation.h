@@ -9,7 +9,7 @@
 
 #include "AccIterator.h"
 
-#include "mozilla/Move.h"
+#include <memory>
 
 namespace mozilla {
 namespace a11y {
@@ -35,14 +35,14 @@ public:
     { AppendTarget(aDocument, aContent); }
 
   Relation(Relation&& aOther) :
-    mFirstIter(Move(aOther.mFirstIter)), mLastIter(aOther.mLastIter)
+    mFirstIter(std::move(aOther.mFirstIter)), mLastIter(aOther.mLastIter)
   {
     aOther.mLastIter = nullptr;
   }
 
   Relation& operator = (Relation&& aRH)
   {
-    mFirstIter = Move(aRH.mFirstIter);
+    mFirstIter = std::move(aRH.mFirstIter);
     mLastIter = aRH.mLastIter;
     aRH.mLastIter = nullptr;
     return *this;
@@ -51,9 +51,9 @@ public:
   inline void AppendIter(AccIterable* aIter)
   {
     if (mLastIter)
-      mLastIter->mNextIter = aIter;
+      mLastIter->mNextIter.reset(aIter);
     else
-      mFirstIter = aIter;
+      mFirstIter.reset(aIter);
 
     mLastIter = aIter;
   }
@@ -84,9 +84,8 @@ public:
   {
     Accessible* target = nullptr;
 
-    // a trick nsAutoPtr deletes what it used to point to when assigned to
     while (mFirstIter && !(target = mFirstIter->Next()))
-      mFirstIter = mFirstIter->mNextIter;
+      mFirstIter = std::move(mFirstIter->mNextIter);
 
     if (!mFirstIter)
       mLastIter = nullptr;
@@ -98,7 +97,7 @@ private:
   Relation& operator = (const Relation&) = delete;
   Relation(const Relation&) = delete;
 
-  nsAutoPtr<AccIterable> mFirstIter;
+  std::unique_ptr<AccIterable> mFirstIter;
   AccIterable* mLastIter;
 };
 

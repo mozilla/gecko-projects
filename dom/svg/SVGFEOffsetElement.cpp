@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFEOffsetElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEOffsetElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEOffsetElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEOffsetElement::sNumberInfo[2] =
@@ -34,7 +34,7 @@ nsSVGElement::StringInfo SVGFEOffsetElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEOffsetElement)
@@ -77,7 +77,7 @@ SVGFEOffsetElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFEOffsetElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                              nsIAtom* aAttribute) const
+                                              nsAtom* aAttribute) const
 {
   return SVGFEOffsetElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

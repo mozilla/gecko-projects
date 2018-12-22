@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -13,6 +13,9 @@ EXPORTS.mozilla.a11y += [
     'Compatibility.h',
     'HyperTextAccessibleWrap.h',
     'IDSet.h',
+    'LazyInstantiator.h',
+    'MsaaIdGenerator.h',
+    'nsWinUtils.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -20,22 +23,31 @@ UNIFIED_SOURCES += [
     'ApplicationAccessibleWrap.cpp',
     'ARIAGridAccessibleWrap.cpp',
     'Compatibility.cpp',
+    'CompatibilityUIA.cpp',
     'DocAccessibleWrap.cpp',
     'EnumVariant.cpp',
+    'GeckoCustom.cpp',
     'HTMLTableAccessibleWrap.cpp',
     'HTMLWin32ObjectAccessible.cpp',
     'HyperTextAccessibleWrap.cpp',
     'ImageAccessibleWrap.cpp',
     'IUnknownImpl.cpp',
+    'MsaaIdGenerator.cpp',
     'nsWinUtils.cpp',
     'Platform.cpp',
     'RootAccessibleWrap.cpp',
     'TextLeafAccessibleWrap.cpp',
 ]
 
-# This file cannot be built in unified mode because it includes ISimpleDOMNode_i.c.
 SOURCES += [
+    # This file cannot be built in unified mode because it redefines _WIN32_WINNT
+    'LazyInstantiator.cpp',
+    # This file cannot be built in unified mode because it includes ISimpleDOMNode_i.c.
     'ServiceProvider.cpp',
+]
+
+OS_LIBS += [
+    'ntdll',
 ]
 
 if CONFIG['MOZ_XUL']:
@@ -49,6 +61,8 @@ LOCAL_INCLUDES += [
     '/accessible/base',
     '/accessible/generic',
     '/accessible/html',
+    '/accessible/ipc',
+    '/accessible/ipc/win',
     '/accessible/windows',
     '/accessible/windows/ia2',
     '/accessible/windows/sdn',
@@ -64,12 +78,9 @@ LOCAL_INCLUDES += [
 #   #endif !_MIDL_USE_GUIDDEF_
 #
 # which clang-cl complains about.  MSVC doesn't, so turn this warning off.
-if CONFIG['CLANG_CL']:
+if CONFIG['CC_TYPE'] == 'clang-cl':
     CXXFLAGS += ['-Wno-extra-tokens']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
-
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wshadow']

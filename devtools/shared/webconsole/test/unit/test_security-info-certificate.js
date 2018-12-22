@@ -6,7 +6,7 @@
 // Tests that NetworkHelper.parseCertificateInfo parses certificate information
 // correctly.
 
-const { require } = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 
 Object.defineProperty(this, "NetworkHelper", {
   get: function() {
@@ -17,7 +17,6 @@ Object.defineProperty(this, "NetworkHelper", {
   enumerable: true
 });
 
-var Ci = Components.interfaces;
 const DUMMY_CERT = {
   commonName: "cn",
   organization: "o",
@@ -34,16 +33,16 @@ const DUMMY_CERT = {
 };
 
 function run_test() {
-  do_print("Testing NetworkHelper.parseCertificateInfo.");
+  info("Testing NetworkHelper.parseCertificateInfo.");
 
-  let result = NetworkHelper.parseCertificateInfo(DUMMY_CERT);
+  const result = NetworkHelper.parseCertificateInfo(DUMMY_CERT);
 
   // Subject
   equal(result.subject.commonName, DUMMY_CERT.commonName,
     "Common name is correct.");
   equal(result.subject.organization, DUMMY_CERT.organization,
     "Organization is correct.");
-  equal(result.subject.organizationalUnit, DUMMY_CERT.organizationalUnit,
+  equal(result.subject.organizationUnit, DUMMY_CERT.organizationUnit,
     "Organizational unit is correct.");
 
   // Issuer
@@ -51,7 +50,7 @@ function run_test() {
     "Common name of the issuer is correct.");
   equal(result.issuer.organization, DUMMY_CERT.issuerOrganization,
     "Organization of the issuer is correct.");
-  equal(result.issuer.organizationalUnit, DUMMY_CERT.issuerOrganizationalUnit,
+  equal(result.issuer.organizationUnit, DUMMY_CERT.issuerOrganizationUnit,
     "Organizational unit of the issuer is correct.");
 
   // Validity

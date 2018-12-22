@@ -7,7 +7,7 @@
 #ifndef nsXBLMaybeCompiled_h__
 #define nsXBLMaybeCompiled_h__
 
-#include "js/GCAPI.h"
+#include "js/RootingAPI.h"
 
 /*
  * A union containing either a pointer representing uncompiled source or a
@@ -83,13 +83,17 @@ private:
 };
 
 /* Add support for JS::Heap<nsXBLMaybeCompiled>. */
-namespace js {
+namespace JS {
 
 template <class UncompiledT>
 struct GCPolicy<nsXBLMaybeCompiled<UncompiledT>>
 {
   static nsXBLMaybeCompiled<UncompiledT> initial() { return nsXBLMaybeCompiled<UncompiledT>(); }
 };
+
+} // namespace JS
+
+namespace js {
 
 template <class UncompiledT>
 struct BarrierMethods<nsXBLMaybeCompiled<UncompiledT>>
@@ -110,17 +114,28 @@ struct BarrierMethods<nsXBLMaybeCompiled<UncompiledT>>
                         nullptr);
     }
   }
+  static void exposeToJS(nsXBLMaybeCompiled<UncompiledT> fun) {
+    if (fun.IsCompiled()) {
+      JS::ExposeObjectToActiveJS(fun.UnsafeGetJSFunction());
+    }
+  }
 };
 
-template <class UncompiledT>
-class HeapBase<nsXBLMaybeCompiled<UncompiledT>>
+template <class T>
+struct IsHeapConstructibleType<nsXBLMaybeCompiled<T>>
+{ // Yes, this is the exception to the rule. Sorry.
+  static constexpr bool value = true;
+};
+
+template <class UncompiledT, class Wrapper>
+class HeapBase<nsXBLMaybeCompiled<UncompiledT>, Wrapper>
 {
-  const JS::Heap<nsXBLMaybeCompiled<UncompiledT>>& wrapper() const {
-    return *static_cast<const JS::Heap<nsXBLMaybeCompiled<UncompiledT>>*>(this);
+  const Wrapper& wrapper() const {
+    return *static_cast<const Wrapper*>(this);
   }
 
-  JS::Heap<nsXBLMaybeCompiled<UncompiledT>>& wrapper() {
-    return *static_cast<JS::Heap<nsXBLMaybeCompiled<UncompiledT>>*>(this);
+  Wrapper& wrapper() {
+    return *static_cast<Wrapper*>(this);
   }
 
   const nsXBLMaybeCompiled<UncompiledT>* extract() const {

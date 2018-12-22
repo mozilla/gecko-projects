@@ -4,6 +4,7 @@
 
 #include "WebGLExtensions.h"
 
+#include "GLContext.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
 #include "WebGLContext.h"
 #include "WebGLFormats.h"
@@ -13,6 +14,7 @@ namespace mozilla {
 WebGLExtensionTextureHalfFloatLinear::WebGLExtensionTextureHalfFloatLinear(WebGLContext* webgl)
     : WebGLExtensionBase(webgl)
 {
+    MOZ_ASSERT(!webgl->IsWebGL2());
     auto& fua = webgl->mFormatUsage;
 
     fua->EditUsage(webgl::EffectiveFormat::RGBA16F)->isFilterable = true;

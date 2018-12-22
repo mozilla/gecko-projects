@@ -1,255 +1,292 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if different response content types are handled correctly.
  */
 
-function test() {
-  initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
+  info("Starting test... ");
 
-    let { document, L10N, Editor, NetMonitorView } = aMonitor.panelWin;
-    let { RequestsMenu } = NetMonitorView;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const { L10N } = windowRequire("devtools/client/netmonitor/src/utils/l10n");
+  const {
+    getDisplayedRequests,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
 
-    RequestsMenu.lazyUpdate = false;
+  store.dispatch(Actions.batchEnable(false));
 
-    waitForNetworkEvents(aMonitor, 7).then(() => {
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(0),
-        "GET", CONTENT_TYPE_SJS + "?fmt=xml", {
-          status: 200,
-          statusText: "OK",
-          type: "xml",
-          fullMimeType: "text/xml; charset=utf-8",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.04),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(1),
-        "GET", CONTENT_TYPE_SJS + "?fmt=css", {
-          status: 200,
-          statusText: "OK",
-          type: "css",
-          fullMimeType: "text/css; charset=utf-8",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.03),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(2),
-        "GET", CONTENT_TYPE_SJS + "?fmt=js", {
-          status: 200,
-          statusText: "OK",
-          type: "js",
-          fullMimeType: "application/javascript; charset=utf-8",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.03),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(3),
-        "GET", CONTENT_TYPE_SJS + "?fmt=json", {
-          status: 200,
-          statusText: "OK",
-          type: "json",
-          fullMimeType: "application/json; charset=utf-8",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.03),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(4),
-        "GET", CONTENT_TYPE_SJS + "?fmt=bogus", {
-          status: 404,
-          statusText: "Not Found",
-          type: "html",
-          fullMimeType: "text/html; charset=utf-8",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.02),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(5),
-        "GET", TEST_IMAGE, {
-          fuzzyUrl: true,
-          status: 200,
-          statusText: "OK",
-          type: "png",
-          fullMimeType: "image/png",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 0.57),
-          time: true
-        });
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(6),
-        "GET", CONTENT_TYPE_SJS + "?fmt=gzip", {
-          status: 200,
-          statusText: "OK",
-          type: "plain",
-          fullMimeType: "text/plain",
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 10.73),
-          time: true
-        });
+  // Execute requests.
+  await performRequests(monitor, tab, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
 
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.getElementById("details-pane-toggle"));
-      EventUtils.sendMouseEvent({ type: "mousedown" },
-        document.querySelectorAll("#details-pane tab")[3]);
+  for (const requestItem of document.querySelectorAll(".request-list-item")) {
+    const requestsListStatus = requestItem.querySelector(".status-code");
+    requestItem.scrollIntoView();
+    EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
+    await waitUntil(() => requestsListStatus.title);
+  }
 
-      Task.spawn(function*() {
-        yield waitForResponseBodyDisplayed();
-        yield testResponseTab("xml");
-        RequestsMenu.selectedIndex = 1;
-        yield waitForTabUpdated();
-        yield testResponseTab("css");
-        RequestsMenu.selectedIndex = 2;
-        yield waitForTabUpdated();
-        yield testResponseTab("js");
-        RequestsMenu.selectedIndex = 3;
-        yield waitForTabUpdated();
-        yield testResponseTab("json");
-        RequestsMenu.selectedIndex = 4;
-        yield waitForTabUpdated();
-        yield testResponseTab("html");
-        RequestsMenu.selectedIndex = 5;
-        yield waitForTabUpdated();
-        yield testResponseTab("png");
-        RequestsMenu.selectedIndex = 6;
-        yield waitForTabUpdated();
-        yield testResponseTab("gzip");
-        yield teardown(aMonitor);
-        finish();
-      });
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(0),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=xml",
+    {
+      status: 200,
+      statusText: "OK",
+      type: "xml",
+      fullMimeType: "text/xml; charset=utf-8",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 42),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(1),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=css",
+    {
+      status: 200,
+      statusText: "OK",
+      type: "css",
+      fullMimeType: "text/css; charset=utf-8",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 34),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(2),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=js",
+    {
+      status: 200,
+      statusText: "OK",
+      type: "js",
+      fullMimeType: "application/javascript; charset=utf-8",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 34),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(3),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=json",
+    {
+      status: 200,
+      statusText: "OK",
+      type: "json",
+      fullMimeType: "application/json; charset=utf-8",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 29),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(4),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=bogus",
+    {
+      status: 404,
+      statusText: "Not Found",
+      type: "html",
+      fullMimeType: "text/html; charset=utf-8",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 24),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(5),
+    "GET",
+    TEST_IMAGE,
+    {
+      fuzzyUrl: true,
+      status: 200,
+      statusText: "OK",
+      type: "png",
+      fullMimeType: "image/png",
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 580),
+      time: true
+    }
+  );
+  verifyRequestItemTarget(
+    document,
+    getDisplayedRequests(store.getState()),
+    getSortedRequests(store.getState()).get(6),
+    "GET",
+    CONTENT_TYPE_SJS + "?fmt=gzip",
+    {
+      status: 200,
+      statusText: "OK",
+      type: "plain",
+      fullMimeType: "text/plain",
+      transferred: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 324),
+      size: L10N.getFormatStrWithNumbers("networkMenu.sizeKB", 10.73),
+      time: true
+    }
+  );
 
-      function testResponseTab(aType) {
-        let tab = document.querySelectorAll("#details-pane tab")[3];
-        let tabpanel = document.querySelectorAll("#details-pane tabpanel")[3];
+  await selectIndexAndWaitForSourceEditor(monitor, 0);
+  await testResponseTab("xml");
 
-        is(tab.getAttribute("selected"), "true",
-          "The response tab in the network details pane should be selected.");
+  await selectIndexAndWaitForSourceEditor(monitor, 1);
+  await testResponseTab("css");
 
-        function checkVisibility(aBox) {
-          is(tabpanel.querySelector("#response-content-info-header")
-            .hasAttribute("hidden"), true,
-            "The response info header doesn't have the intended visibility.");
-          is(tabpanel.querySelector("#response-content-json-box")
-            .hasAttribute("hidden"), aBox != "json",
-            "The response content json box doesn't have the intended visibility.");
-          is(tabpanel.querySelector("#response-content-textarea-box")
-            .hasAttribute("hidden"), aBox != "textarea",
-            "The response content textarea box doesn't have the intended visibility.");
-          is(tabpanel.querySelector("#response-content-image-box")
-            .hasAttribute("hidden"), aBox != "image",
-            "The response content image box doesn't have the intended visibility.");
-        }
+  await selectIndexAndWaitForSourceEditor(monitor, 2);
+  await testResponseTab("js");
 
-        switch (aType) {
-          case "xml": {
-            checkVisibility("textarea");
+  await selectIndexAndWaitForJSONView(3);
+  await testResponseTab("json");
 
-            return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
-              is(aEditor.getText(), "<label value='greeting'>Hello XML!</label>",
-                "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.html,
-                "The mode active in the source editor is incorrect for the xml request.");
-            });
-          }
-          case "css": {
-            checkVisibility("textarea");
+  await selectIndexAndWaitForSourceEditor(monitor, 4);
+  await testResponseTab("html");
 
-            return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
-              is(aEditor.getText(), "body:pre { content: 'Hello CSS!' }",
-                "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.css,
-                "The mode active in the source editor is incorrect for the xml request.");
-            });
-          }
-          case "js": {
-            checkVisibility("textarea");
+  await selectIndexAndWaitForImageView(5);
+  await testResponseTab("png");
 
-            return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
-              is(aEditor.getText(), "function() { return 'Hello JS!'; }",
-                "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.js,
-                "The mode active in the source editor is incorrect for the xml request.");
-            });
-          }
-          case "json": {
-            checkVisibility("json");
+  await selectIndexAndWaitForSourceEditor(monitor, 6);
+  await testResponseTab("gzip");
 
-            is(tabpanel.querySelectorAll(".variables-view-scope").length, 1,
-              "There should be 1 json scope displayed in this tabpanel.");
-            is(tabpanel.querySelectorAll(".variables-view-property").length, 2,
-              "There should be 2 json properties displayed in this tabpanel.");
-            is(tabpanel.querySelectorAll(".variables-view-empty-notice").length, 0,
-              "The empty notice should not be displayed in this tabpanel.");
+  await teardown(monitor);
 
-            let jsonScope = tabpanel.querySelectorAll(".variables-view-scope")[0];
+  function testResponseTab(type) {
+    const tabpanel = document.querySelector("#response-panel");
 
-            is(jsonScope.querySelector(".name").getAttribute("value"),
-              L10N.getStr("jsonScopeName"),
-              "The json scope doesn't have the correct title.");
+    function checkVisibility(box) {
+      is(tabpanel.querySelector(".response-error-header") === null,
+        true,
+        "The response error header doesn't display");
+      const jsonView = tabpanel.querySelector(".tree-section .treeLabel") || {};
+      is(jsonView.textContent !== L10N.getStr("jsonScopeName"),
+        box != "json",
+        "The response json view doesn't display");
+      is(tabpanel.querySelector(".CodeMirror-code") === null,
+        (box !== "textarea" && box !== "json"),
+        "The response editor doesn't display");
+      is(tabpanel.querySelector(".response-image-box") === null,
+        box != "image",
+        "The response image view doesn't display");
+    }
 
-            is(jsonScope.querySelectorAll(".variables-view-property .name")[0].getAttribute("value"),
-              "greeting", "The first json property name was incorrect.");
-            is(jsonScope.querySelectorAll(".variables-view-property .value")[0].getAttribute("value"),
-              "\"Hello JSON!\"", "The first json property value was incorrect.");
+    switch (type) {
+      case "xml": {
+        checkVisibility("textarea");
 
-            is(jsonScope.querySelectorAll(".variables-view-property .name")[1].getAttribute("value"),
-              "__proto__", "The second json property name was incorrect.");
-            is(jsonScope.querySelectorAll(".variables-view-property .value")[1].getAttribute("value"),
-              "Object", "The second json property value was incorrect.");
+        const text = document.querySelector(".CodeMirror-line").textContent;
 
-            return promise.resolve();
-          }
-          case "html": {
-            checkVisibility("textarea");
-
-            return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
-              is(aEditor.getText(), "<blink>Not Found</blink>",
-                "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.html,
-                "The mode active in the source editor is incorrect for the xml request.");
-            });
-          }
-          case "png": {
-            checkVisibility("image");
-
-            let imageNode = tabpanel.querySelector("#response-content-image");
-            let deferred = promise.defer();
-
-            imageNode.addEventListener("load", function onLoad() {
-              imageNode.removeEventListener("load", onLoad);
-
-              is(tabpanel.querySelector("#response-content-image-name-value")
-                .getAttribute("value"), "test-image.png",
-                "The image name info isn't correct.");
-              is(tabpanel.querySelector("#response-content-image-mime-value")
-                .getAttribute("value"), "image/png",
-                "The image mime info isn't correct.");
-              is(tabpanel.querySelector("#response-content-image-dimensions-value")
-                .getAttribute("value"), "16" + " \u00D7 " + "16",
-                "The image dimensions info isn't correct.");
-
-              deferred.resolve();
-            });
-
-            return deferred.promise;
-          }
-
-          case "gzip": {
-            checkVisibility("textarea");
-
-            let expected = new Array(1000).join("Hello gzip!");
-            return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
-              is(aEditor.getText(), expected,
-                "The text shown in the source editor is incorrect for the gzip request.");
-              is(aEditor.getMode(), Editor.modes.text,
-                "The mode active in the source editor is incorrect for the gzip request.");
-            });
-          }
-
-        }
+        is(text, "<label value='greeting'>Hello XML!</label>",
+          "The text shown in the source editor is incorrect for the xml request.");
+        break;
       }
+      case "css": {
+        checkVisibility("textarea");
 
-      function waitForTabUpdated () {
-        return waitFor(aMonitor.panelWin, aMonitor.panelWin.EVENTS.TAB_UPDATED);
+        const text = document.querySelector(".CodeMirror-line").textContent;
+
+        is(text, "body:pre { content: 'Hello CSS!' }",
+          "The text shown in the source editor is incorrect for the css request.");
+        break;
       }
+      case "js": {
+        checkVisibility("textarea");
 
-      function waitForResponseBodyDisplayed () {
-        return waitFor(aMonitor.panelWin, aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED);
+        const text = document.querySelector(".CodeMirror-line").textContent;
+
+        is(text, "function() { return 'Hello JS!'; }",
+          "The text shown in the source editor is incorrect for the js request.");
+        break;
       }
-    });
+      case "json": {
+        checkVisibility("json");
 
-    aDebuggee.performRequests();
-  });
-}
+        is(tabpanel.querySelectorAll(".tree-section").length, 2,
+          "There should be 2 tree sections displayed in this tabpanel.");
+        is(tabpanel.querySelectorAll(".empty-notice").length, 0,
+          "The empty notice should not be displayed in this tabpanel.");
+
+        is(tabpanel.querySelector(".tree-section .treeLabel").textContent,
+          L10N.getStr("jsonScopeName"),
+          "The json view section doesn't have the correct title.");
+
+        const labels = tabpanel
+          .querySelectorAll("tr:not(.tree-section) .treeLabelCell .treeLabel");
+        const values = tabpanel
+          .querySelectorAll("tr:not(.tree-section) .treeValueCell .objectBox");
+
+        is(labels[0].textContent, "greeting",
+          "The first json property name was incorrect.");
+        is(values[0].textContent,
+          "Hello JSON!", "The first json property value was incorrect.");
+        break;
+      }
+      case "html": {
+        checkVisibility("textarea");
+
+        const text = document.querySelector(".CodeMirror-line").textContent;
+
+        is(text, "<blink>Not Found</blink>",
+          "The text shown in the source editor is incorrect for the html request.");
+        break;
+      }
+      case "png": {
+        checkVisibility("image");
+
+        const [name, dimensions, mime] = tabpanel
+          .querySelectorAll(".response-image-box .tabpanel-summary-value");
+
+        is(name.textContent, "test-image.png",
+          "The image name info isn't correct.");
+        is(mime.textContent, "image/png",
+          "The image mime info isn't correct.");
+        is(dimensions.textContent, "16" + " \u00D7 " + "16",
+          "The image dimensions info isn't correct.");
+        break;
+      }
+      case "gzip": {
+        checkVisibility("textarea");
+
+        const text = document.querySelector(".CodeMirror-line").textContent;
+
+        is(text, new Array(1000).join("Hello gzip!"),
+          "The text shown in the source editor is incorrect for the gzip request.");
+        break;
+      }
+    }
+  }
+
+  async function selectIndexAndWaitForJSONView(index) {
+    const onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    const tabpanel = document.querySelector("#response-panel");
+    const waitDOM = waitForDOM(tabpanel, ".treeTable");
+    store.dispatch(Actions.selectRequestByIndex(index));
+    await waitDOM;
+    await onResponseContent;
+
+    // Waiting for RECEIVED_RESPONSE_CONTENT isn't enough.
+    // DOM may not be fully updated yet and checkVisibility(json) may still fail.
+    await waitForTick();
+  }
+
+  async function selectIndexAndWaitForImageView(index) {
+    const onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    const tabpanel = document.querySelector("#response-panel");
+    const waitDOM = waitForDOM(tabpanel, ".response-image");
+    store.dispatch(Actions.selectRequestByIndex(index));
+    const [imageNode] = await waitDOM;
+    await once(imageNode, "load");
+    await onResponseContent;
+  }
+});

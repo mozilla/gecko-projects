@@ -1,5 +1,5 @@
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var httpserver = null;
 
@@ -11,7 +11,7 @@ function make_channel(url) {
   return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
 }
 
-var multipartBody = "--boundary\r\n\r\nSome text\r\n--boundary\r\n\r\n<?xml version='1.0'?><root/>\r\n--boundary--";
+var multipartBody = "--boundary\r\nSet-Cookie: foo=bar\r\n\r\nSome text\r\n--boundary\r\nContent-Type: text/x-test\r\n\r\n<?xml version='1.1'?>\r\n<root/>\r\n--boundary\r\n\r\n<?xml version='1.0'?><root/>\r\n--boundary--";
 
 function contentHandler(metadata, response)
 {
@@ -25,16 +25,17 @@ var testNum = 0;
 var testData =
   [
    { data: "Some text", type: "text/plain" },
+   { data: "<?xml version='1.1'?>\r\n<root/>", type: "text/x-test" },
    { data: "<?xml version='1.0'?><root/>", type: "text/xml" }
   ];
 
 function responseHandler(request, buffer)
 {
-    do_check_eq(buffer, testData[testNum].data);
-    do_check_eq(request.QueryInterface(Ci.nsIChannel).contentType,
-		testData[testNum].type);
-    if (++testNum == numTests)
-	httpserver.stop(do_test_finished);
+  Assert.equal(buffer, testData[testNum].data);
+  Assert.equal(request.QueryInterface(Ci.nsIChannel).contentType,
+  testData[testNum].type);
+  if (++testNum == numTests)
+    httpserver.stop(do_test_finished);
 }
 
 var multipartListener = {
@@ -42,11 +43,11 @@ var multipartListener = {
   _index: 0,
 
   QueryInterface: function(iid) {
-    if (iid.equals(Components.interfaces.nsIStreamListener) ||
-        iid.equals(Components.interfaces.nsIRequestObserver) ||
-        iid.equals(Components.interfaces.nsISupports))
+    if (iid.equals(Ci.nsIStreamListener) ||
+        iid.equals(Ci.nsIRequestObserver) ||
+        iid.equals(Ci.nsISupports))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   onStartRequest: function(request, context) {
@@ -65,7 +66,7 @@ var multipartListener = {
   onStopRequest: function(request, context, status) {
     this._index++;
     // Second part should be last part
-    do_check_eq(request.QueryInterface(Ci.nsIMultiPartChannel).isLastPart, this._index == 2);
+    Assert.equal(request.QueryInterface(Ci.nsIMultiPartChannel).isLastPart, this._index == testData.length);
     try {
       responseHandler(request, this._buffer);
     } catch (ex) {

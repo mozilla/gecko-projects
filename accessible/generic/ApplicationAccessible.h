@@ -32,21 +32,22 @@ public:
 
   ApplicationAccessible();
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(ApplicationAccessible, AccessibleWrap)
 
   // Accessible
   virtual void Shutdown() override;
   virtual nsIntRect Bounds() const override;
+  virtual nsRect BoundsInAppUnits() const override;
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
   virtual GroupPos GroupPosition() override;
-  virtual ENameValueFlag Name(nsString& aName) override;
+  virtual ENameValueFlag Name(nsString& aName) const override;
   virtual void ApplyARIAState(uint64_t* aState) const override;
   virtual void Description(nsString& aDescription) override;
-  virtual void Value(nsString& aValue) override;
-  virtual mozilla::a11y::role NativeRole() override;
+  virtual void Value(nsString& aValue) const override;
+  virtual mozilla::a11y::role NativeRole() const override;
   virtual uint64_t State() override;
-  virtual uint64_t NativeState() override;
-  virtual Relation RelationByType(RelationType aType) override;
+  virtual uint64_t NativeState() const override;
+  virtual Relation RelationByType(RelationType aType) const override;
 
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild) override;
@@ -60,16 +61,24 @@ public:
 
   void AppName(nsAString& aName) const
   {
-    nsAutoCString cname;
-    mAppInfo->GetName(cname);
-    AppendUTF8toUTF16(cname, aName);
+    MOZ_ASSERT(mAppInfo, "no application info");
+
+    if (mAppInfo) {
+      nsAutoCString cname;
+      mAppInfo->GetName(cname);
+      AppendUTF8toUTF16(cname, aName);
+    }
   }
 
   void AppVersion(nsAString& aVersion) const
   {
-    nsAutoCString cversion;
-    mAppInfo->GetVersion(cversion);
-    AppendUTF8toUTF16(cversion, aVersion);
+    MOZ_ASSERT(mAppInfo, "no application info");
+
+    if (mAppInfo) {
+      nsAutoCString cversion;
+      mAppInfo->GetVersion(cversion);
+      AppendUTF8toUTF16(cversion, aVersion);
+    }
   }
 
   void PlatformName(nsAString& aName) const
@@ -79,9 +88,13 @@ public:
 
   void PlatformVersion(nsAString& aVersion) const
   {
-    nsAutoCString cversion;
-    mAppInfo->GetPlatformVersion(cversion);
-    AppendUTF8toUTF16(cversion, aVersion);
+    MOZ_ASSERT(mAppInfo, "no application info");
+
+    if (mAppInfo) {
+      nsAutoCString cversion;
+      mAppInfo->GetPlatformVersion(cversion);
+      AppendUTF8toUTF16(cversion, aVersion);
+    }
   }
 
 protected:

@@ -11,6 +11,8 @@ function test() {
   // Bug 992270: Ignore uncaught about:home exceptions (related to snippets from IndexedDB)
   ignoreAllUncaughtExceptions(true);
 
+  let previouslySelectedEngine = Services.search.currentEngine;
+
   function replaceUrl(base) {
     return base;
   }
@@ -21,7 +23,6 @@ function test() {
     let engine = Services.search.getEngineByName(engine_name);
     ok(engine, engine_name + " is installed");
 
-    let previouslySelectedEngine = Services.search.currentEngine;
     Services.search.currentEngine = engine;
 
     // load about:home, but remove the listener first so it doesn't
@@ -30,7 +31,7 @@ function test() {
     gBrowser.loadURI("about:home");
     info("Waiting for about:home load");
     tab.linkedBrowser.addEventListener("load", function load(event) {
-      if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+      if (event.originalTarget != tab.linkedBrowser.contentDocumentAsCPOW ||
           event.target.location.href == "about:blank") {
         info("skipping spurious load event");
         return;
@@ -38,13 +39,13 @@ function test() {
       tab.linkedBrowser.removeEventListener("load", load, true);
 
       // Observe page setup
-      let doc = gBrowser.contentDocument;
-      gMutationObserver = new MutationObserver(function (mutations) {
+      let doc = gBrowser.contentDocumentAsCPOW;
+      gMutationObserver = new MutationObserver(function(mutations) {
         for (let mutation of mutations) {
           if (mutation.attributeName == "searchEngineName") {
             // Re-add the listener, and perform a search
             gBrowser.addProgressListener(listener);
-            gMutationObserver.disconnect()
+            gMutationObserver.disconnect();
             gMutationObserver = null;
             executeSoon(function() {
               doc.getElementById("searchText").value = "foo";
@@ -63,35 +64,21 @@ function test() {
     {
       name: "Search with Bing from about:home",
       searchURL: replaceUrl("http://www.bing.com/search?q=foo&pc=MOZI&form=MOZSPG"),
-      run: function () {
+      run() {
         verify_about_home_search("Bing");
-      }
-    },
-    {
-      name: "Search with Yahoo from about:home",
-      searchURL: replaceUrl("https://search.yahoo.com/search?p=foo&ei=UTF-8&fr=moz35"),
-      run: function () {
-        verify_about_home_search("Yahoo");
-      }
-    },
-    {
-      name: "Search with eBay from about:home",
-      searchURL: replaceUrl("http://rover.ebay.com/rover/1/711-47294-18009-3/4?mfe=search&mpre=http://www.ebay.com/sch/i.html?_nkw=foo"),
-      run: function () {
-        verify_about_home_search("eBay");
       }
     },
     {
       name: "Search with Google from about:home",
       searchURL: replaceUrl("https://www.google.com/search?q=foo&ie=utf-8&oe=utf-8"),
-      run: function () {
+      run() {
         verify_about_home_search("Google");
       }
     },
     {
       name: "Search with Amazon.com from about:home",
       searchURL: replaceUrl("https://www.amazon.com/exec/obidos/external-search/?field-keywords=foo&mode=blended&tag=mozilla-20&sourceid=Mozilla-search"),
-      run: function () {
+      run() {
         verify_about_home_search("Amazon.com");
       }
     }
@@ -108,7 +95,7 @@ function test() {
     }
   }
 
-  let tab = gBrowser.selectedTab = gBrowser.addTab();
+  let tab = gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
 
   let listener = {
     onStateChange: function onStateChange(webProgress, req, flags, status) {
@@ -128,22 +115,22 @@ function test() {
       is(req.originalURI.spec, gCurrTest.searchURL, "search URL was loaded");
       info("Actual URI: " + req.URI.spec);
 
-      req.cancel(Components.results.NS_ERROR_FAILURE);
+      req.cancel(Cr.NS_ERROR_FAILURE);
 
       executeSoon(nextTest);
     }
-  }
+  };
 
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
+    Services.search.currentEngine = previouslySelectedEngine;
     gBrowser.removeProgressListener(listener);
     gBrowser.removeTab(tab);
     if (gMutationObserver)
       gMutationObserver.disconnect();
   });
 
-  tab.linkedBrowser.addEventListener("load", function load() {
-    tab.linkedBrowser.removeEventListener("load", load, true);
+  tab.linkedBrowser.addEventListener("load", function() {
     gBrowser.addProgressListener(listener);
     nextTest();
-  }, true);
+  }, {capture: true, once: true});
 }

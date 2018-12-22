@@ -7,6 +7,8 @@
 #ifndef jit_shared_IonAssemblerBufferWithConstantPools_h
 #define jit_shared_IonAssemblerBufferWithConstantPools_h
 
+#include "mozilla/MathAlgorithms.h"
+
 #include <algorithm>
 
 #include "jit/JitSpewer.h"
@@ -241,6 +243,7 @@ class BranchDeadlineSet
 
   public:
     explicit BranchDeadlineSet(LifoAlloc& alloc)
+      : earliestRange_(0)
     {
         // Manually construct vectors in the uninitialized aligned storage.
         // This is because C++ arrays can otherwise only be constructed with
@@ -640,6 +643,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
     // followed.
     const uint32_t nopFillInst_;
     const unsigned nopFill_;
+
     // For inhibiting the insertion of fill NOPs in the dynamic context in which
     // they are being inserted.
     bool inhibitNops_;
@@ -726,7 +730,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
     }
 
     static const unsigned OOM_FAIL = unsigned(-1);
-    static const unsigned NO_DATA = unsigned(-2);
+    static const unsigned DUMMY_INDEX = unsigned(-2);
 
     // Check if it is possible to add numInst instructions and numPoolEntries
     // constant pool entries without needing to flush the current pool.
@@ -790,7 +794,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
             if (numPoolEntries)
                 JitSpew(JitSpew_Pools, "[%d] Inserting pool entry caused a spill", id);
             else
-                JitSpew(JitSpew_Pools, "[%d] Inserting instruction(%d) caused a spill", id,
+                JitSpew(JitSpew_Pools, "[%d] Inserting instruction(%zu) caused a spill", id,
                         sizeExcludingCurrentPool());
 
             finishPool();
@@ -810,7 +814,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         // The pool entry index is returned above when allocating an entry, but
         // when not allocating an entry a dummy value is returned - it is not
         // expected to be used by the caller.
-        return NO_DATA;
+        return DUMMY_INDEX;
     }
 
   public:
@@ -826,9 +830,9 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         return this->nextOffset();
     }
 
+    MOZ_NEVER_INLINE
     BufferOffset allocEntry(size_t numInst, unsigned numPoolEntries,
-                            uint8_t* inst, uint8_t* data, PoolEntry* pe = nullptr,
-                            bool markAsBranch = false)
+                            uint8_t* inst, uint8_t* data, PoolEntry* pe = nullptr)
     {
         // The allocation of pool entries is not supported in a no-pool region,
         // check.
@@ -861,7 +865,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         // Now to get an instruction to write.
         PoolEntry retPE;
         if (numPoolEntries) {
-            JitSpew(JitSpew_Pools, "[%d] Entry has index %u, offset %u", id, index,
+            JitSpew(JitSpew_Pools, "[%d] Entry has index %u, offset %zu", id, index,
                     sizeExcludingCurrentPool());
             Asm::InsertIndexIntoTag(inst, index);
             // Figure out the offset within the pool entries.
@@ -874,8 +878,34 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         return this->putBytes(numInst * InstSize, inst);
     }
 
-    BufferOffset putInt(uint32_t value, bool markAsBranch = false) {
-        return allocEntry(1, 0, (uint8_t*)&value, nullptr, nullptr, markAsBranch);
+
+    // putInt is the workhorse for the assembler and higher-level buffer
+    // abstractions: it places one instruction into the instruction stream.
+    // Under normal circumstances putInt should just check that the constant
+    // pool does not need to be flushed, that there is space for the single word
+    // of the instruction, and write that word and update the buffer pointer.
+    //
+    // To do better here we need a status variable that handles both nopFill_
+    // and capacity, so that we can quickly know whether to go the slow path.
+    // That could be a variable that has the remaining number of simple
+    // instructions that can be inserted before a more expensive check,
+    // which is set to zero when nopFill_ is set.
+    //
+    // We assume that we don't have to check this->oom() if there is space to
+    // insert a plain instruction; there will always come a later time when it will be
+    // checked anyway.
+
+    MOZ_ALWAYS_INLINE
+    BufferOffset putInt(uint32_t value) {
+        if (nopFill_ || !hasSpaceForInsts(/* numInsts= */ 1, /* numPoolEntries= */ 0))
+            return allocEntry(1, 0, (uint8_t*)&value, nullptr, nullptr);
+
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+    defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+        return this->putU32Aligned(value);
+#else
+        return this->AssemblerBuffer<SliceSize, Inst>::putInt(value);
+#endif
     }
 
     // Register a short-range branch deadline.
@@ -933,8 +963,8 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
     }
 
     void finishPool() {
-        JitSpew(JitSpew_Pools, "[%d] Attempting to finish pool %d with %d entries.", id,
-                poolInfo_.length(), pool_.numEntries());
+        JitSpew(JitSpew_Pools, "[%d] Attempting to finish pool %zu with %u entries.",
+                id, poolInfo_.length(), pool_.numEntries());
 
         if (pool_.numEntries() == 0 && !hasExpirableShortRangeBranches()) {
             // If there is no data in the pool being dumped, don't dump anything.
@@ -1002,7 +1032,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
             // the pool entry that is being loaded.  We need to do a non-trivial
             // amount of math here, since the pool that we've made does not
             // actually reside there in memory.
-            JitSpew(JitSpew_Pools, "[%d] Fixing entry %d offset to %u", id, idx, codeOffset);
+            JitSpew(JitSpew_Pools, "[%d] Fixing entry %d offset to %zu", id, idx, codeOffset);
             Asm::PatchConstantPoolLoad(inst, (uint8_t*)inst + codeOffset);
         }
 
@@ -1035,7 +1065,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         // assumed that no pool entries are allocated in a no-pool region and
         // this is asserted when allocating entries.
         if (!hasSpaceForInsts(maxInst, 0)) {
-            JitSpew(JitSpew_Pools, "[%d] No-Pool instruction(%d) caused a spill.", id,
+            JitSpew(JitSpew_Pools, "[%d] No-Pool instruction(%zu) caused a spill.", id,
                     sizeExcludingCurrentPool());
             finishPool();
         }
@@ -1055,11 +1085,22 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         canNotPlacePool_ = false;
 
         // Validate the maxInst argument supplied to enterNoPool().
-        MOZ_ASSERT(this->nextOffset().getOffset() - canNotPlacePoolStartOffset_ <= canNotPlacePoolMaxInst_ * InstSize);
+        MOZ_ASSERT(this->nextOffset().getOffset() - canNotPlacePoolStartOffset_ <=
+                   canNotPlacePoolMaxInst_ * InstSize);
+    }
+
+    void enterNoNops() {
+        MOZ_ASSERT(!inhibitNops_);
+        inhibitNops_ = true;
+    }
+    void leaveNoNops() {
+        MOZ_ASSERT(inhibitNops_);
+        inhibitNops_ = false;
     }
 
     void align(unsigned alignment) {
-        MOZ_ASSERT(IsPowerOfTwo(alignment) && alignment >= InstSize);
+        MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
+        MOZ_ASSERT(alignment >= InstSize);
 
         // A pool many need to be dumped at this point, so insert NOP fill here.
         insertNopFill();
@@ -1074,8 +1115,8 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         // dumped at the aligned code position.
         if (!hasSpaceForInsts(requiredFill / InstSize + 1, 0)) {
             // Alignment would cause a pool dump, so dump the pool now.
-            JitSpew(JitSpew_Pools, "[%d] Alignment of %d at %d caused a spill.", id, alignment,
-                    sizeExcludingCurrentPool());
+            JitSpew(JitSpew_Pools, "[%d] Alignment of %d at %zu caused a spill.",
+                    id, alignment, sizeExcludingCurrentPool());
             finishPool();
         }
 
@@ -1097,17 +1138,18 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         }
     }
 
-    bool appendBuffer(const AssemblerBufferWithConstantPools& other) {
+    bool appendRawCode(const uint8_t* code, size_t numBytes) {
         if (this->oom())
             return false;
         // The pools should have all been flushed, check.
         MOZ_ASSERT(pool_.numEntries() == 0);
-        for (Slice* cur = other.getHead(); cur != nullptr; cur = cur->getNext()) {
-            this->putBytes(cur->length(), &cur->instructions[0]);
-            if (this->oom())
-                return false;
+        while (numBytes > SliceSize) {
+            this->putBytes(SliceSize, code);
+            numBytes -= SliceSize;
+            code += SliceSize;
         }
-        return true;
+        this->putBytes(numBytes, code);
+        return !this->oom();
     }
 
   public:

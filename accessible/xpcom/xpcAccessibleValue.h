@@ -21,18 +21,18 @@ class Accessible;
 class xpcAccessibleValue : public nsIAccessibleValue
 {
 public:
-  NS_IMETHOD GetMaximumValue(double* aValue) final override;
-  NS_IMETHOD GetMinimumValue(double* aValue) final override;
-  NS_IMETHOD GetCurrentValue(double* aValue) final override;
-  NS_IMETHOD SetCurrentValue(double aValue) final override;
-  NS_IMETHOD GetMinimumIncrement(double* aMinIncrement) final override;
+  NS_IMETHOD GetMaximumValue(double* aValue) final;
+  NS_IMETHOD GetMinimumValue(double* aValue) final;
+  NS_IMETHOD GetCurrentValue(double* aValue) final;
+  NS_IMETHOD SetCurrentValue(double aValue) final;
+  NS_IMETHOD GetMinimumIncrement(double* aMinIncrement) final;
 
 protected:
   xpcAccessibleValue() { }
   virtual ~xpcAccessibleValue() {}
 
 private:
-  Accessible* Intl();
+  AccessibleOrProxy Intl();
 
   xpcAccessibleValue(const xpcAccessibleValue&) = delete;
   xpcAccessibleValue& operator =(const xpcAccessibleValue&) = delete;
@@ -40,5 +40,4 @@ private:
 
 } // namespace a11y
 } // namespace mozilla
-
 #endif

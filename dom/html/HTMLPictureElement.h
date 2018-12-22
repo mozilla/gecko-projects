@@ -8,30 +8,24 @@
 #define mozilla_dom_HTMLPictureElement_h
 
 #include "mozilla/Attributes.h"
-#include "nsIDOMHTMLPictureElement.h"
 #include "nsGenericHTMLElement.h"
-
-#include "mozilla/dom/HTMLUnknownElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLPictureElement final : public nsGenericHTMLElement,
-                                 public nsIDOMHTMLPictureElement
+class HTMLPictureElement final : public nsGenericHTMLElement
 {
 public:
   explicit HTMLPictureElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLPictureElement, nsGenericHTMLElement)
 
-  // nsIDOMHTMLPictureElement
-  NS_DECL_NSIDOMHTMLPICTUREELEMENT
-
-  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const override;
-  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) override;
-
-  static bool IsPictureEnabled();
+  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
+                         bool aPreallocateChildren) const override;
+  virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
+  virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                                     bool aNotify) override;
 
 protected:
   virtual ~HTMLPictureElement();

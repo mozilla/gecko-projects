@@ -11,6 +11,8 @@
 #include "GLXLibrary.h"
 #include "mozilla/X11Util.h"
 
+class gfxXlibSurface;
+
 namespace mozilla {
 namespace gl {
 
@@ -19,21 +21,25 @@ class GLContextGLX : public GLContext
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextGLX, override)
     static already_AddRefed<GLContextGLX>
-    CreateGLContext(const SurfaceCaps& caps,
-                    GLContextGLX* shareContext,
+    CreateGLContext(CreateContextFlags flags,
+                    const SurfaceCaps& caps,
                     bool isOffscreen,
                     Display* display,
                     GLXDrawable drawable,
                     GLXFBConfig cfg,
                     bool deleteDrawable,
-                    gfxXlibSurface* pixmap = nullptr,
-                    ContextProfile profile = ContextProfile::OpenGLCompatibility);
+                    gfxXlibSurface* pixmap);
+
+    static bool
+    FindVisual(Display* display, int screen, bool useWebRender,
+               bool useAlpha, int* const out_visualId);
 
     // Finds a GLXFBConfig compatible with the provided window.
     static bool
     FindFBConfigForWindow(Display* display, int screen, Window window,
                           ScopedXFree<GLXFBConfig>* const out_scopedConfigArr,
-                          GLXFBConfig* const out_config, int* const out_visid);
+                          GLXFBConfig* const out_config, int* const out_visid,
+                          bool aWebRender);
 
     ~GLContextGLX();
 
@@ -46,17 +52,17 @@ public:
 
     bool Init() override;
 
-    virtual bool MakeCurrentImpl(bool aForce) override;
+    virtual bool MakeCurrentImpl() const override;
 
-    virtual bool IsCurrent() override;
+    virtual bool IsCurrentImpl() const override;
 
     virtual bool SetupLookupFunction() override;
 
     virtual bool IsDoubleBuffered() const override;
 
-    virtual bool SupportsRobustness() const override;
-
     virtual bool SwapBuffers() override;
+
+    virtual void GetWSIInfo(nsCString* const out) const override;
 
     // Overrides the current GLXDrawable backing the context and makes the
     // context current.
@@ -65,24 +71,21 @@ public:
     // Undoes the effect of a drawable override.
     bool RestoreDrawable();
 
-    virtual Maybe<gfx::IntSize> GetTargetSize() override;
-
 private:
     friend class GLContextProviderGLX;
 
-    GLContextGLX(const SurfaceCaps& caps,
-                 GLContext* shareContext,
+    GLContextGLX(CreateContextFlags flags,
+                 const SurfaceCaps& caps,
                  bool isOffscreen,
-                 Display *aDisplay,
+                 Display* aDisplay,
                  GLXDrawable aDrawable,
                  GLXContext aContext,
                  bool aDeleteDrawable,
                  bool aDoubleBuffered,
-                 gfxXlibSurface *aPixmap,
-                 ContextProfile profile);
+                 gfxXlibSurface* aPixmap);
 
     GLXContext mContext;
-    Display *mDisplay;
+    Display* mDisplay;
     GLXDrawable mDrawable;
     bool mDeleteDrawable;
     bool mDoubleBuffered;

@@ -6,9 +6,8 @@
 
 #include "jit/IonOptimizationLevels.h"
 
-#include "jsscript.h"
-
 #include "jit/Ion.h"
+#include "vm/JSScript.h"
 
 using namespace js;
 using namespace js::jit;
@@ -17,6 +16,9 @@ namespace js {
 namespace jit {
 
 OptimizationLevelInfo IonOptimizations;
+
+const uint32_t OptimizationInfo::CompilerWarmupThreshold = 1000;
+const uint32_t OptimizationInfo::CompilerSmallFunctionWarmupThreshold = CompilerWarmupThreshold;
 
 void
 OptimizationInfo::initNormalOptimizationInfo()
@@ -40,36 +42,37 @@ OptimizationInfo::initNormalOptimizationInfo()
 
     registerAllocator_ = RegisterAllocator_Backtracking;
 
-    inlineMaxBytecodePerCallSiteMainThread_ = 500;
-    inlineMaxBytecodePerCallSiteOffThread_ = 1000;
-    inlineMaxCalleeInlinedBytecodeLength_ = 3350;
-    inlineMaxTotalBytecodeLength_ = 80000;
-    inliningMaxCallerBytecodeLength_ = 1500;
+    inlineMaxBytecodePerCallSiteMainThread_ = 550;
+    inlineMaxBytecodePerCallSiteHelperThread_ = 1100;
+    inlineMaxCalleeInlinedBytecodeLength_ = 3550;
+    inlineMaxTotalBytecodeLength_ = 85000;
+    inliningMaxCallerBytecodeLength_ = 1600;
     maxInlineDepth_ = 3;
     scalarReplacement_ = true;
     smallFunctionMaxInlineDepth_ = 10;
     compilerWarmUpThreshold_ = CompilerWarmupThreshold;
+    compilerSmallFunctionWarmUpThreshold_ = CompilerSmallFunctionWarmupThreshold;
     inliningWarmUpThresholdFactor_ = 0.125;
     inliningRecompileThresholdFactor_ = 4;
 }
 
 void
-OptimizationInfo::initAsmjsOptimizationInfo()
+OptimizationInfo::initWasmOptimizationInfo()
 {
-    // The AsmJS optimization level
-    // Disables some passes that don't work well with asmjs.
+    // The Wasm optimization level
+    // Disables some passes that don't work well with wasm.
 
     // Take normal option values for not specified values.
     initNormalOptimizationInfo();
 
-    level_ = OptimizationLevel::AsmJS;
+    level_ = OptimizationLevel::Wasm;
 
     ama_ = true;
     autoTruncate_ = false;
-    eagerSimdUnbox_ = false;           // AsmJS has no boxing / unboxing.
+    eagerSimdUnbox_ = false;           // wasm has no boxing / unboxing.
     edgeCaseAnalysis_ = false;
     eliminateRedundantChecks_ = false;
-    scalarReplacement_ = false;        // AsmJS has no objects.
+    scalarReplacement_ = false;        // wasm has no objects.
     sincos_ = false;
     sink_ = false;
 }
@@ -82,9 +85,13 @@ OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) cons
     if (pc == script->code())
         pc = nullptr;
 
-    uint32_t warmUpThreshold = compilerWarmUpThreshold_;
-    if (JitOptions.forcedDefaultIonWarmUpThreshold.isSome())
-        warmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold.ref();
+    uint32_t warmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold
+        .valueOr(compilerWarmUpThreshold_);
+
+    if (JitOptions.isSmallFunction(script)) {
+        warmUpThreshold = JitOptions.forcedDefaultIonSmallFunctionWarmUpThreshold
+            .valueOr(compilerSmallFunctionWarmUpThreshold_);
+    }
 
     // If the script is too large to compile on the main thread, we can still
     // compile it off thread. In these cases, increase the warm-up counter
@@ -92,11 +99,11 @@ OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) cons
     // avoid later recompilation.
 
     if (script->length() > MAX_MAIN_THREAD_SCRIPT_SIZE)
-        warmUpThreshold *= (script->length() / (double) MAX_MAIN_THREAD_SCRIPT_SIZE);
+        warmUpThreshold *= (script->length() / double(MAX_MAIN_THREAD_SCRIPT_SIZE));
 
     uint32_t numLocalsAndArgs = NumLocalsAndArgs(script);
     if (numLocalsAndArgs > MAX_MAIN_THREAD_LOCALS_AND_ARGS)
-        warmUpThreshold *= (numLocalsAndArgs / (double) MAX_MAIN_THREAD_LOCALS_AND_ARGS);
+        warmUpThreshold *= (numLocalsAndArgs / double(MAX_MAIN_THREAD_LOCALS_AND_ARGS));
 
     if (!pc || JitOptions.eagerCompilation)
         return warmUpThreshold;
@@ -112,7 +119,7 @@ OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) cons
 OptimizationLevelInfo::OptimizationLevelInfo()
 {
     infos_[OptimizationLevel::Normal].initNormalOptimizationInfo();
-    infos_[OptimizationLevel::AsmJS].initAsmjsOptimizationInfo();
+    infos_[OptimizationLevel::Wasm].initWasmOptimizationInfo();
 
 #ifdef DEBUG
     OptimizationLevel level = firstLevel();
@@ -132,7 +139,7 @@ OptimizationLevelInfo::nextLevel(OptimizationLevel level) const
       case OptimizationLevel::DontCompile:
         return OptimizationLevel::Normal;
       case OptimizationLevel::Normal:
-      case OptimizationLevel::AsmJS:
+      case OptimizationLevel::Wasm:
       case OptimizationLevel::Count:;
     }
     MOZ_CRASH("Unknown optimization level.");

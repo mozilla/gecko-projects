@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -7,6 +8,8 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BinarySearch.h"
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/ComputedStyleInlines.h"
 
 #include "nsStyleConsts.h"
 #include "nsTextFrameUtils.h"
@@ -542,7 +545,7 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
   bool mergeNeeded = false;
 
   bool singleCharMI =
-    aTextRun->GetFlags() & nsTextFrameUtils::TEXT_IS_SINGLE_CHAR_MI;
+    !!(aTextRun->GetFlags2() & nsTextFrameUtils::Flags::TEXT_IS_SINGLE_CHAR_MI);
 
   uint32_t length = aTextRun->GetLength();
   const char16_t* str = aTextRun->mString.BeginReading();
@@ -633,15 +636,15 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
       // This overrides the initial values specified in fontStyle, to avoid
       // inconsistencies in which attributes allow CSS changes and which do not.
       if (mFlags & MATH_FONT_WEIGHT_BOLD) {
-        font.weight = NS_FONT_WEIGHT_BOLD;
+        font.weight = FontWeight::Bold();
         if (mFlags & MATH_FONT_STYLING_NORMAL) {
-          font.style = NS_FONT_STYLE_NORMAL;
+          font.style = FontSlantStyle::Normal();
         } else {
-          font.style = NS_FONT_STYLE_ITALIC;
+          font.style = FontSlantStyle::Italic();
         }
       } else if (mFlags & MATH_FONT_STYLING_NORMAL) {
-        font.style = NS_FONT_STYLE_NORMAL;
-        font.weight = NS_FONT_WEIGHT_NORMAL;
+        font.style = FontSlantStyle::Normal();
+        font.weight = FontWeight::Normal();
       } else {
         mathVar = NS_MATHML_MATHVARIANT_ITALIC;
       }
@@ -667,9 +670,9 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
         // Bug 930504. Some platforms do not have fonts for Mathematical
         // Alphanumeric Symbols. Hence we check whether the transformed
         // character is actually available.
-        uint8_t matchType;
+        gfxTextRange::MatchType matchType;
         RefPtr<gfxFont> mathFont = fontGroup->
-          FindFontForChar(ch2, 0, 0, HB_SCRIPT_COMMON, nullptr, &matchType);
+          FindFontForChar(ch2, 0, 0, unicode::Script::COMMON, nullptr, &matchType);
         if (mathFont) {
           // Don't apply the CSS style if there is a math font for at least one
           // of the transformed character in this text run.
@@ -678,7 +681,7 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
           // We fallback to the original character.
           ch2 = ch;
           if (aMFR) {
-            aMFR->RecordScript(MOZ_SCRIPT_MATHEMATICAL_NOTATION);
+            aMFR->RecordScript(unicode::Script::MATHEMATICAL_NOTATION);
           }
         }
       }
@@ -710,30 +713,30 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
     }
   }
 
-  uint32_t flags;
+  gfx::ShapedTextFlags flags;
   gfxTextRunFactory::Parameters innerParams =
       GetParametersForInner(aTextRun, &flags, aRefDrawTarget);
 
-  nsAutoPtr<nsTransformedTextRun> transformedChild;
-  nsAutoPtr<gfxTextRun> cachedChild;
+  RefPtr<nsTransformedTextRun> transformedChild;
+  RefPtr<gfxTextRun> cachedChild;
   gfxTextRun* child;
 
   if (mathVar == NS_MATHML_MATHVARIANT_BOLD && doMathvariantStyling) {
-    font.style = NS_FONT_STYLE_NORMAL;
-    font.weight = NS_FONT_WEIGHT_BOLD;
+    font.style = FontSlantStyle::Normal();
+    font.weight = FontWeight::Bold();
   } else if (mathVar == NS_MATHML_MATHVARIANT_ITALIC && doMathvariantStyling) {
-    font.style = NS_FONT_STYLE_ITALIC;
-    font.weight = NS_FONT_WEIGHT_NORMAL;
+    font.style = FontSlantStyle::Italic();
+    font.weight = FontWeight::Normal();
   } else if (mathVar == NS_MATHML_MATHVARIANT_BOLD_ITALIC &&
              doMathvariantStyling) {
-    font.style = NS_FONT_STYLE_ITALIC;
-    font.weight = NS_FONT_WEIGHT_BOLD;
+    font.style = FontSlantStyle::Italic();
+    font.weight = FontWeight::Bold();
   } else if (mathVar != NS_MATHML_MATHVARIANT_NONE) {
     // Mathvariant overrides fontstyle and fontweight
     // Need to check to see if mathvariant is actually applied as this function
     // is used for other purposes.
-    font.style = NS_FONT_STYLE_NORMAL;
-    font.weight = NS_FONT_WEIGHT_NORMAL;
+    font.style = FontSlantStyle::Normal();
+    font.weight = FontWeight::Normal();
   }
   gfxFontGroup* newFontGroup = nullptr;
 
@@ -760,12 +763,13 @@ MathMLTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
   if (mInnerTransformingTextRunFactory) {
     transformedChild = mInnerTransformingTextRunFactory->MakeTextRun(
         convertedString.BeginReading(), convertedString.Length(),
-        &innerParams, newFontGroup, flags, Move(styleArray), false);
+        &innerParams, newFontGroup, flags, nsTextFrameUtils::Flags(),
+        std::move(styleArray), false);
     child = transformedChild.get();
   } else {
     cachedChild = newFontGroup->MakeTextRun(
         convertedString.BeginReading(), convertedString.Length(),
-        &innerParams, flags, aMFR);
+        &innerParams, flags, nsTextFrameUtils::Flags(), aMFR);
     child = cachedChild.get();
   }
   if (!child)

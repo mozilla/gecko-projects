@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2013 Google Inc.
  *
@@ -31,8 +30,15 @@ public:
     SkTMultiMap() : fCount(0) {}
 
     ~SkTMultiMap() {
-        SkASSERT(fCount == 0);
-        SkASSERT(fHash.count() == 0);
+        typename SkTDynamicHash<ValueList, Key>::Iter iter(&fHash);
+        for ( ; !iter.done(); ++iter) {
+            ValueList* next;
+            for (ValueList* cur = &(*iter); cur; cur = next) {
+                HashTraits::OnFree(cur->fValue);
+                next = cur->fNext;
+                delete cur;
+            }
+        }
     }
 
     void insert(const Key& key, T* value) {
@@ -64,20 +70,7 @@ public:
             list = list->fNext;
         }
 
-        if (list->fNext) {
-            ValueList* next = list->fNext;
-            list->fValue = next->fValue;
-            list->fNext = next->fNext;
-            delete next;
-        } else if (prev) {
-            prev->fNext = nullptr;
-            delete list;
-        } else {
-            fHash.remove(key);
-            delete list;
-        }
-
-        --fCount;
+        this->internalRemove(prev, list, key);
     }
 
     T* find(const Key& key) const {
@@ -100,9 +93,71 @@ public:
         return nullptr;
     }
 
+    template<class FindPredicate>
+    T* findAndRemove(const Key& key, const FindPredicate f) {
+        ValueList* list = fHash.find(key);
+
+        ValueList* prev = nullptr;
+        while (list) {
+            if (f(list->fValue)){
+                T* value = list->fValue;
+                this->internalRemove(prev, list, key);
+                return value;
+            }
+            prev = list;
+            list = list->fNext;
+        }
+        return nullptr;
+    }
+
     int count() const { return fCount; }
 
 #ifdef SK_DEBUG
+    class ConstIter {
+    public:
+        explicit ConstIter(const SkTMultiMap* mmap)
+            : fIter(&(mmap->fHash))
+            , fList(nullptr) {
+            if (!fIter.done()) {
+                fList = &(*fIter);
+            }
+        }
+
+        bool done() const {
+            return fIter.done();
+        }
+
+        const T* operator*() {
+            SkASSERT(fList);
+            return fList->fValue;
+        }
+
+        void operator++() {
+            if (fList) {
+                fList = fList->fNext;
+            }
+            if (!fList) {
+                ++fIter;
+                if (!fIter.done()) {
+                    fList = &(*fIter);
+                }
+            }
+        }
+
+    private:
+        typename SkTDynamicHash<ValueList, Key>::ConstIter fIter;
+        const ValueList* fList;
+    };
+
+    bool has(const T* value, const Key& key) const {
+        for (ValueList* list = fHash.find(key); list; list = list->fNext) {
+            if (list->fValue == value) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // This is not particularly fast and only used for validation, so debug only.
     int countForKey(const Key& key) const {
         int count = 0;
@@ -118,6 +173,24 @@ public:
 private:
     SkTDynamicHash<ValueList, Key> fHash;
     int fCount;
+
+    void internalRemove(ValueList* prev, ValueList* elem, const Key& key) {
+        if (elem->fNext) {
+            ValueList* next = elem->fNext;
+            elem->fValue = next->fValue;
+            elem->fNext = next->fNext;
+            delete next;
+        } else if (prev) {
+            prev->fNext = nullptr;
+            delete elem;
+        } else {
+            fHash.remove(key);
+            delete elem;
+        }
+
+        --fCount;
+    }
+
 };
 
 #endif

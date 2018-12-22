@@ -40,7 +40,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_ADDREF_INHERITED(UDPSocket, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(UDPSocket, DOMEventTargetHelper)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(UDPSocket)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UDPSocket)
   NS_INTERFACE_MAP_ENTRY(nsIUDPSocketListener)
   NS_INTERFACE_MAP_ENTRY(nsIUDPSocketInternal)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
@@ -123,7 +123,6 @@ UDPSocket::UDPSocket(nsPIDOMWindowInner* aOwner,
   , mReadyState(SocketReadyState::Opening)
 {
   MOZ_ASSERT(aOwner);
-  MOZ_ASSERT(aOwner->IsInnerWindow());
 
   nsIDocument* aDoc = aOwner->GetExtantDoc();
   if (aDoc) {
@@ -139,7 +138,7 @@ UDPSocket::~UDPSocket()
 JSObject*
 UDPSocket::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return UDPSocketBinding::Wrap(aCx, this, aGivenProto);
+  return UDPSocket_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -198,7 +197,7 @@ UDPSocket::CloseWithReason(nsresult aReason)
 
   if (mClosed) {
     if (NS_SUCCEEDED(aReason)) {
-      mClosed->MaybeResolve(JS::UndefinedHandleValue);
+      mClosed->MaybeResolveWithUndefined();
     } else {
       mClosed->MaybeReject(aReason);
     }
@@ -230,7 +229,7 @@ UDPSocket::JoinMulticastGroup(const nsAString& aMulticastGroupAddress,
     MOZ_ASSERT(!mSocketChild);
 
     aRv = mSocket->JoinMulticast(address, EmptyCString());
-    NS_WARN_IF(aRv.Failed());
+    NS_WARNING_ASSERTION(!aRv.Failed(), "JoinMulticast failed");
 
     return;
   }
@@ -238,7 +237,7 @@ UDPSocket::JoinMulticastGroup(const nsAString& aMulticastGroupAddress,
   MOZ_ASSERT(mSocketChild);
 
   aRv = mSocketChild->JoinMulticast(address, EmptyCString());
-  NS_WARN_IF(aRv.Failed());
+  NS_WARNING_ASSERTION(!aRv.Failed(), "JoinMulticast failed");
 }
 
 void
@@ -263,14 +262,14 @@ UDPSocket::LeaveMulticastGroup(const nsAString& aMulticastGroupAddress,
     MOZ_ASSERT(!mSocketChild);
 
     aRv = mSocket->LeaveMulticast(address, EmptyCString());
-    NS_WARN_IF(aRv.Failed());
+    NS_WARNING_ASSERTION(!aRv.Failed(), "mSocket->LeaveMulticast failed");
     return;
   }
 
   MOZ_ASSERT(mSocketChild);
 
   aRv = mSocketChild->LeaveMulticast(address, EmptyCString());
-  NS_WARN_IF(aRv.Failed());
+  NS_WARNING_ASSERTION(!aRv.Failed(), "mSocketChild->LeaveMulticast failed");
 }
 
 nsresult
@@ -343,7 +342,7 @@ UDPSocket::Send(const StringOrBlobOrArrayBufferOrArrayBufferView& aData,
   if (aData.IsBlob()) {
     Blob& blob = aData.GetAsBlob();
 
-    blob.GetInternalStream(getter_AddRefs(stream), aRv);
+    blob.CreateInputStream(getter_AddRefs(stream), aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return false;
     }
@@ -469,7 +468,7 @@ UDPSocket::InitLocal(const nsAString& aLocalAddress,
     return rv;
   }
 
-  mOpened->MaybeResolve(JS::UndefinedHandleValue);
+  mOpened->MaybeResolveWithUndefined();
 
   return NS_OK;
 }
@@ -498,13 +497,20 @@ UDPSocket::InitRemote(const nsAString& aLocalAddress,
     return NS_ERROR_FAILURE;
   }
 
+  nsCOMPtr<nsIEventTarget> target;
+  if (nsCOMPtr<nsIGlobalObject> global = GetOwnerGlobal()) {
+    target = global->EventTargetFor(TaskCategory::Other);
+  }
+
   rv = sock->Bind(mListenerProxy,
                   principal,
                   NS_ConvertUTF16toUTF8(aLocalAddress),
                   aLocalPort,
                   mAddressReuse,
                   mLoopback,
-                  0);
+                  0,
+                  0,
+                  target);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -541,10 +547,12 @@ UDPSocket::Init(const nsString& aLocalAddress,
     return rv.StealNSResult();
   }
 
-  class OpenSocketRunnable final : public nsRunnable
+  class OpenSocketRunnable final : public Runnable
   {
   public:
-    explicit OpenSocketRunnable(UDPSocket* aSocket) : mSocket(aSocket)
+    explicit OpenSocketRunnable(UDPSocket* aSocket)
+      : mozilla::Runnable("OpenSocketRunnable")
+      , mSocket(aSocket)
     { }
 
     NS_IMETHOD Run() override
@@ -735,7 +743,7 @@ UDPSocket::CallListenerOpened()
     return NS_OK;
   }
 
-  mOpened->MaybeResolve(JS::UndefinedHandleValue);
+  mOpened->MaybeResolveWithUndefined();
 
   return NS_OK;
 }

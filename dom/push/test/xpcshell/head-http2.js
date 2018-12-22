@@ -1,3 +1,14 @@
+// Returns the test H/2 server port, throwing if it's missing or invalid.
+function getTestServerPort() {
+  let portEnv = Cc["@mozilla.org/process/environment;1"]
+                  .getService(Ci.nsIEnvironment).get("MOZHTTP2_PORT");
+  let port = parseInt(portEnv, 10);
+  if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid port in MOZHTTP2_PORT env var: ${portEnv}`);
+  }
+  info(`Using HTTP/2 server on port ${port}`);
+  return port;
+}
 
 // Support for making sure we can talk to the invalid cert the server presents
 var CertOverrideListener = function(host, port, bits) {
@@ -19,7 +30,7 @@ CertOverrideListener.prototype = {
         aIID.equals(Ci.nsIInterfaceRequestor) ||
         aIID.equals(Ci.nsISupports))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   notifyCertProblem: function(socketInfo, sslStatus, targetHost) {
@@ -33,8 +44,7 @@ CertOverrideListener.prototype = {
 };
 
 function addCertOverride(host, port, bits) {
-  var req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-            .createInstance(Ci.nsIXMLHttpRequest);
+  var req = new XMLHttpRequest();
   try {
     var url;
     if (port && (port > 0) && (port !== 443)) {

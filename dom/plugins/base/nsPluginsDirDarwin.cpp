@@ -5,9 +5,9 @@
 
 /*
   nsPluginsDirDarwin.cpp
-  
+
   Mac OS X implementation of the nsPluginsDir/nsPluginsFile classes.
-  
+
   by Patrick C. Beard.
  */
 
@@ -26,9 +26,7 @@
 #include "mozilla/UniquePtr.h"
 
 #include "nsCocoaFeatures.h"
-#if defined(MOZ_CRASHREPORTER)
 #include "nsExceptionHandler.h"
-#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -65,19 +63,6 @@ static CFBundleRef getPluginBundle(const char* path)
   return bundle;
 }
 
-static nsresult toCFURLRef(nsIFile* file, CFURLRef& outURL)
-{
-  nsCOMPtr<nsILocalFileMac> lfm = do_QueryInterface(file);
-  if (!lfm)
-    return NS_ERROR_FAILURE;
-  CFURLRef url;
-  nsresult rv = lfm->GetCFURL(&url);
-  if (NS_SUCCEEDED(rv))
-    outURL = url;
-  
-  return rv;
-}
-
 bool nsPluginsDir::IsPluginFile(nsIFile* file)
 {
   nsCString fileName;
@@ -101,13 +86,10 @@ static char* CFStringRefToUTF8Buffer(CFStringRef cfString)
     return PL_strdup(buffer);
   }
 
-  int bufferLength =
+  int64_t bufferLength =
     ::CFStringGetMaximumSizeForEncoding(::CFStringGetLength(cfString),
                                         kCFStringEncodingUTF8) + 1;
   char* newBuffer = static_cast<char*>(moz_xmalloc(bufferLength));
-  if (!newBuffer) {
-    return nullptr;
-  }
 
   if (!::CFStringGetCString(cfString, newBuffer, bufferLength,
                             kCFStringEncodingUTF8)) {
@@ -138,7 +120,7 @@ static Boolean MimeTypeEnabled(CFDictionaryRef mimeDict) {
   if (!mimeDict) {
     return true;
   }
-  
+
   CFTypeRef value;
   if (::CFDictionaryGetValueIfPresent(mimeDict, CFSTR("WebPluginTypeEnabled"), &value)) {
     if (value && ::CFGetTypeID(value) == ::CFBooleanGetTypeID()) {
@@ -154,29 +136,29 @@ static CFDictionaryRef ParsePlistForMIMETypesFilename(CFBundleRef bundle)
   if (!mimeFileName || ::CFGetTypeID(mimeFileName) != ::CFStringGetTypeID()) {
     return nullptr;
   }
-  
+
   FSRef homeDir;
   if (::FSFindFolder(kUserDomain, kCurrentUserFolderType, kDontCreateFolder, &homeDir) != noErr) {
     return nullptr;
   }
-  
+
   CFURLRef userDirURL = ::CFURLCreateFromFSRef(kCFAllocatorDefault, &homeDir);
   if (!userDirURL) {
     return nullptr;
   }
-  
+
   AutoCFTypeObject userDirURLAutorelease(userDirURL);
   CFStringRef mimeFilePath = ::CFStringCreateWithFormat(kCFAllocatorDefault, nullptr, CFSTR("Library/Preferences/%@"), static_cast<CFStringRef>(mimeFileName));
   if (!mimeFilePath) {
     return nullptr;
   }
-  
+
   AutoCFTypeObject mimeFilePathAutorelease(mimeFilePath);
   CFURLRef mimeFileURL = ::CFURLCreateWithFileSystemPathRelativeToBase(kCFAllocatorDefault, mimeFilePath, kCFURLPOSIXPathStyle, false, userDirURL);
   if (!mimeFileURL) {
     return nullptr;
   }
-  
+
   AutoCFTypeObject mimeFileURLAutorelease(mimeFileURL);
   SInt32 errorCode = 0;
   CFDataRef mimeFileData = nullptr;
@@ -184,17 +166,17 @@ static CFDictionaryRef ParsePlistForMIMETypesFilename(CFBundleRef bundle)
   if (!result) {
     return nullptr;
   }
-  
+
   AutoCFTypeObject mimeFileDataAutorelease(mimeFileData);
   if (errorCode != 0) {
     return nullptr;
   }
-  
+
   CFPropertyListRef propertyList = ::CFPropertyListCreateFromXMLData(kCFAllocatorDefault, mimeFileData, kCFPropertyListImmutable, nullptr);
   if (!propertyList) {
     return nullptr;
   }
-  
+
   AutoCFTypeObject propertyListAutorelease(propertyList);
   if (::CFGetTypeID(propertyList) != ::CFDictionaryGetTypeID()) {
     return nullptr;
@@ -204,21 +186,21 @@ static CFDictionaryRef ParsePlistForMIMETypesFilename(CFBundleRef bundle)
   if (!mimeTypes || ::CFGetTypeID(mimeTypes) != ::CFDictionaryGetTypeID() || ::CFDictionaryGetCount(static_cast<CFDictionaryRef>(mimeTypes)) == 0) {
     return nullptr;
   }
-  
+
   return static_cast<CFDictionaryRef>(::CFRetain(mimeTypes));
 }
 
 static void ParsePlistPluginInfo(nsPluginInfo& info, CFBundleRef bundle)
 {
   CFDictionaryRef mimeDict = ParsePlistForMIMETypesFilename(bundle);
-  
+
   if (!mimeDict) {
     CFTypeRef mimeTypes = ::CFBundleGetValueForInfoDictionaryKey(bundle, CFSTR("WebPluginMIMETypes"));
     if (!mimeTypes || ::CFGetTypeID(mimeTypes) != ::CFDictionaryGetTypeID() || ::CFDictionaryGetCount(static_cast<CFDictionaryRef>(mimeTypes)) == 0)
       return;
     mimeDict = static_cast<CFDictionaryRef>(::CFRetain(mimeTypes));
   }
-  
+
   AutoCFTypeObject mimeDictAutorelease(mimeDict);
   int mimeDictKeyCount = ::CFDictionaryGetCount(mimeDict);
 
@@ -244,7 +226,7 @@ static void ParsePlistPluginInfo(nsPluginInfo& info, CFBundleRef bundle)
   mozilla::UniquePtr<CFTypeRef[]> values(new CFTypeRef[mimeDictKeyCount]);
   if (!values)
     return;
-  
+
   info.fVariantCount = 0;
 
   ::CFDictionaryGetKeysAndValues(mimeDict, keys.get(), values.get());
@@ -285,8 +267,9 @@ static void ParsePlistPluginInfo(nsPluginInfo& info, CFBundleRef bundle)
   }
 }
 
-nsPluginFile::nsPluginFile(nsIFile *spec)
-    : mPlugin(spec)
+nsPluginFile::nsPluginFile(nsIFile* spec)
+  : pLibrary(nullptr)
+  , mPlugin(spec)
 {
 }
 
@@ -328,7 +311,7 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
       }
       ::CFRelease(bundleURL);
     }
-    ::CFRelease(pathRef); 
+    ::CFRelease(pathRef);
   }
 #else
   nsAutoCString bundlePath;
@@ -365,49 +348,6 @@ static char* GetNextPluginStringFromHandle(Handle h, short *index)
   return ret;
 }
 
-static bool IsCompatibleArch(nsIFile *file)
-{
-  CFURLRef pluginURL = nullptr;
-  if (NS_FAILED(toCFURLRef(file, pluginURL)))
-    return false;
-  
-  bool isPluginFile = false;
-
-  CFBundleRef pluginBundle = ::CFBundleCreate(kCFAllocatorDefault, pluginURL);
-  if (pluginBundle) {
-    UInt32 packageType, packageCreator;
-    ::CFBundleGetPackageInfo(pluginBundle, &packageType, &packageCreator);
-    if (packageType == 'BRPL' || packageType == 'IEPL' || packageType == 'NSPL') {
-      // Get path to plugin as a C string.
-      char executablePath[PATH_MAX];
-      executablePath[0] = '\0';
-      if (!::CFURLGetFileSystemRepresentation(pluginURL, true, (UInt8*)&executablePath, PATH_MAX)) {
-        executablePath[0] = '\0';
-      }
-
-      uint32_t pluginLibArchitectures;
-      nsresult rv = mozilla::ipc::GeckoChildProcessHost::GetArchitecturesForBinary(executablePath, &pluginLibArchitectures);
-      if (NS_FAILED(rv)) {
-        return false;
-      }
-
-      uint32_t supportedArchitectures =
-#ifdef __LP64__
-          mozilla::ipc::GeckoChildProcessHost::GetSupportedArchitecturesForProcessType(GeckoProcessType_Plugin);
-#else
-          base::GetCurrentProcessArchitecture();
-#endif
-
-      // Consider the plugin architecture valid if there is any overlap in the masks.
-      isPluginFile = !!(supportedArchitectures & pluginLibArchitectures);
-    }
-    ::CFRelease(pluginBundle);
-  }
-
-  ::CFRelease(pluginURL);
-  return isPluginFile;
-}
-
 /**
  * Obtains all of the information currently available for this plugin.
  */
@@ -416,10 +356,6 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
   *outLibrary = nullptr;
 
   nsresult rv = NS_OK;
-
-  if (!IsCompatibleArch(mPlugin)) {
-      return NS_ERROR_FAILURE;
-  }
 
   // clear out the info, except for the first field.
   memset(&info, 0, sizeof(info));
@@ -487,14 +423,13 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
       NS_WARNING(msg.get());
       return NS_ERROR_FAILURE;
     }
-#if defined(MOZ_CRASHREPORTER)
+
     // The block above assumes that "fbplugin" is the filename of the plugin
     // to be blocked, or that the filename starts with "fbplugin_".  But we
     // don't yet know for sure if this is always true.  So for the time being
     // record extra information in our crash logs.
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Bug_1086977"),
                                        fileName);
-#endif
   }
 
   // It's possible that our plugin has 2 entry points that'll give us mime type
@@ -504,20 +439,20 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
 
   // Sadly we have to load the library for this to work.
   rv = LoadPlugin(outLibrary);
-#if defined(MOZ_CRASHREPORTER)
+
   if (nsCocoaFeatures::OnYosemiteOrLater()) {
     // If we didn't crash in LoadPlugin(), change the previous annotation so we
     // don't sow confusion.
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("Bug_1086977"),
                                        NS_LITERAL_CSTRING("Didn't crash, please ignore"));
   }
-#endif
+
   if (NS_FAILED(rv))
     return rv;
 
   // Try to get data from NP_GetMIMEDescription
   if (pLibrary) {
-    NP_GETMIMEDESCRIPTION pfnGetMimeDesc = (NP_GETMIMEDESCRIPTION)PR_FindFunctionSymbol(pLibrary, NP_GETMIMEDESCRIPTION_NAME); 
+    NP_GETMIMEDESCRIPTION pfnGetMimeDesc = (NP_GETMIMEDESCRIPTION)PR_FindFunctionSymbol(pLibrary, NP_GETMIMEDESCRIPTION_NAME);
     if (pfnGetMimeDesc)
       ParsePluginMimeDescription(pfnGetMimeDesc(), info);
     if (info.fVariantCount)

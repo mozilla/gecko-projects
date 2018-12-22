@@ -1,13 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
+'use strict';
 
-const refMARPrefix = (mozinfo.os == "win" ? "win_" : "");
 const BIN_SUFFIX = mozinfo.bin_suffix;
-
-var tempDir = do_get_tempdir();
+const tempDir = do_get_tempdir();
 
 /**
  * Compares binary data of 2 arrays and throws if they aren't the same.
@@ -15,9 +12,9 @@ var tempDir = do_get_tempdir();
  *
  * @param arr1 The first array to compare
  * @param arr2 The second array to compare
-*/
+ */
 function compareBinaryData(arr1, arr2) {
-  do_check_eq(arr1.length, arr2.length);
+  Assert.equal(arr1.length, arr2.length);
   for (let i = 0; i < arr1.length; i++) {
     if (arr1[i] != arr2[i]) {
       throw "Data differs at index " + i + 
@@ -26,12 +23,12 @@ function compareBinaryData(arr1, arr2) {
   }
 }
 
-/** 
+/**
  * Reads a file's data and returns it
  *
  * @param file The file to read the data from
  * @return a byte array for the data in the file.
-*/
+ */
 function getBinaryFileData(file) {
   let fileStream = Cc["@mozilla.org/network/file-input-stream;1"].
                    createInstance(Ci.nsIFileInputStream);
@@ -54,14 +51,14 @@ function getBinaryFileData(file) {
  * registered to be the cleanup function, and it will be run between each test.
  *
  * @return The number of tests ran
-*/
+ */
 function run_tests(obj) {
   let cleanup_per_test = obj.cleanup_per_test;
   if (cleanup_per_test === undefined) {
-    cleanup_per_test = function() {};
+    cleanup_per_test = function __cleanup_per_test() {};
   }
 
-  do_register_cleanup(cleanup_per_test);
+  registerCleanupFunction(cleanup_per_test);
 
   // Make sure there's nothing left over from a preious failed test
   cleanup_per_test();
@@ -69,7 +66,7 @@ function run_tests(obj) {
   let ranCount = 0;
   // hasOwnProperty ensures we only see direct properties and not all
   for (let f in obj) {
-    if (typeof obj[f] === "function" && 
+    if (typeof obj[f] === "function" &&
         obj.hasOwnProperty(f) &&
         f.toString().indexOf("test_") === 0) {
       obj[f]();
@@ -86,10 +83,10 @@ function run_tests(obj) {
  * @param outMAR  The file where the MAR should be created to
  * @param dataDir The directory where the relative file paths exist
  * @param files   The relative file paths of the files to include in the MAR
-*/
+ */
 function createMAR(outMAR, dataDir, files) {
   // You cannot create an empy MAR.
-  do_check_true(files.length > 0);
+  Assert.ok(files.length > 0);
 
   // Get an nsIProcess to the signmar binary.
   let process = Cc["@mozilla.org/process/util;1"].
@@ -97,34 +94,34 @@ function createMAR(outMAR, dataDir, files) {
   let signmarBin = do_get_file("signmar" + BIN_SUFFIX);
 
   // Make sure the signmar binary exists and is an executable.
-  do_check_true(signmarBin.exists());
-  do_check_true(signmarBin.isExecutable());
+  Assert.ok(signmarBin.exists());
+  Assert.ok(signmarBin.isExecutable());
 
   // Ensure on non Windows platforms we encode the same permissions
   // as the refernence MARs contain.  On Windows this is also safe.
   // The reference MAR files have permissions of 0o664, so in case
   // someone is running these tests locally with another permission
   // (perhaps 0o777), make sure that we encode them as 0o664.
-  for (filePath of files) {
+  for (let filePath of files) {
     let f = dataDir.clone();
     f.append(filePath);
     f.permissions = 0o664;
   }
 
   // Setup the command line arguments to create the MAR.
-  let args = ["-C", dataDir.path, "-H", "\@MAR_CHANNEL_ID\@", 
+  let args = ["-C", dataDir.path, "-H", "\@MAR_CHANNEL_ID\@",
               "-V", "13.0a1", "-c", outMAR.path];
   args = args.concat(files);
 
-  do_print('Running: ' + signmarBin.path);
+  info('Running: ' + signmarBin.path + " " + args.join(" "));
   process.init(signmarBin);
   process.run(true, args, args.length);
 
   // Verify signmar returned 0 for success.
-  do_check_eq(process.exitValue, 0);
+  Assert.equal(process.exitValue, 0);
 
   // Verify the out MAR file actually exists.
-  do_check_true(outMAR.exists());
+  Assert.ok(outMAR.exists());
 }
 
 /**
@@ -132,7 +129,7 @@ function createMAR(outMAR, dataDir, files) {
  *
  * @param mar     The MAR file that should be matched
  * @param dataDir The directory to extract to
-*/
+ */
 function extractMAR(mar, dataDir) {
   // Get an nsIProcess to the signmar binary.
   let process = Cc["@mozilla.org/process/util;1"].
@@ -140,18 +137,16 @@ function extractMAR(mar, dataDir) {
   let signmarBin = do_get_file("signmar" + BIN_SUFFIX);
 
   // Make sure the signmar binary exists and is an executable.
-  do_check_true(signmarBin.exists());
-  do_check_true(signmarBin.isExecutable());
+  Assert.ok(signmarBin.exists());
+  Assert.ok(signmarBin.isExecutable());
 
   // Setup the command line arguments to create the MAR.
   let args = ["-C", dataDir.path, "-x", mar.path];
 
-  do_print('Running: ' + signmarBin.path);
+  info('Running: ' + signmarBin.path + " " + args.join(" "));
   process.init(signmarBin);
   process.run(true, args, args.length);
 
   // Verify signmar returned 0 for success.
-  do_check_eq(process.exitValue, 0);
+  Assert.equal(process.exitValue, 0);
 }
-
-

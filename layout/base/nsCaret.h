@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +10,7 @@
 #define nsCaret_h__
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/dom/Selection.h"
 #include "nsCoord.h"
 #include "nsISelectionListener.h"
 #include "nsIWeakReferenceUtils.h"
@@ -20,16 +21,12 @@
 class nsDisplayListBuilder;
 class nsFrameSelection;
 class nsIContent;
-class nsIDOMNode;
 class nsIFrame;
 class nsINode;
 class nsIPresShell;
 class nsITimer;
 
 namespace mozilla {
-namespace dom {
-class Selection;
-} // namespace dom
 namespace gfx {
 class DrawTarget;
 } // namespace gfx
@@ -54,8 +51,8 @@ class nsCaret final : public nsISelectionListener
     nsresult Init(nsIPresShell *inPresShell);
     void Terminate();
 
-    void SetSelection(nsISelection *aDOMSel);
-    nsISelection* GetSelection();
+    void SetSelection(mozilla::dom::Selection *aDOMSel);
+    mozilla::dom::Selection* GetSelection();
 
     /**
      * Sets whether the caret should only be visible in nodes that are not
@@ -77,7 +74,30 @@ class nsCaret final : public nsISelectionListener
      *  It does not take account of blinking or the caret being hidden
      *  because we're in non-editable/disabled content.
      */
-    bool IsVisible();
+    bool IsVisible(mozilla::dom::Selection* aSelection = nullptr)
+    {
+      if (!mVisible || mHideCount) {
+        return false;
+      }
+
+      if (!mShowDuringSelection) {
+        mozilla::dom::Selection* selection;
+        if (aSelection) {
+          selection = aSelection;
+        } else {
+          selection = GetSelection();
+        }
+        if (!selection || !selection->IsCollapsed()) {
+          return false;
+        }
+      }
+
+      if (IsMenuPopupHidingCaret()) {
+        return false;
+      }
+
+      return true;
+    }
     /**
      * AddForceHide() increases mHideCount and hide the caret even if
      * SetVisible(true) has been or will be called.  This is useful when the
@@ -109,13 +129,13 @@ class nsCaret final : public nsISelectionListener
      * instead of tracking its selection.
      * Passing null for aNode would set the caret to track its selection again.
      **/
-    void SetCaretPosition(nsIDOMNode* aNode, int32_t aOffset);
+    void SetCaretPosition(nsINode* aNode, int32_t aOffset);
 
     /**
      * Schedule a repaint for the frame where the caret would appear.
      * Does not check visibility etc.
      */
-    void SchedulePaint();
+    void SchedulePaint(mozilla::dom::Selection* aSelection = nullptr);
 
     /**
      * Returns a frame to paint in, and the bounds of the painted caret
@@ -154,7 +174,7 @@ class nsCaret final : public nsISelectionListener
      * This rect does not include any extra decorations for bidi.
      * @param aRect must be non-null
      */
-    static nsIFrame* GetGeometry(nsISelection* aSelection,
+    static nsIFrame* GetGeometry(mozilla::dom::Selection* aSelection,
                                  nsRect* aRect);
     static nsresult GetCaretFrameForNodeOffset(nsFrameSelection* aFrameSelection,
                                                nsIContent* aContentNode,
@@ -179,6 +199,10 @@ class nsCaret final : public nsISelectionListener
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
+    nsIFrame*     GetFrame(int32_t* aContentOffset);
+    void          ComputeCaretRects(nsIFrame* aFrame, int32_t aFrameOffset,
+                                    nsRect* aCaretRect, nsRect* aHookRect);
+
 protected:
     static void   CaretBlinkCallback(nsITimer *aTimer, void *aClosure);
 
@@ -187,17 +211,12 @@ protected:
     void          ResetBlinking();
     void          StopBlinking();
 
-    mozilla::dom::Selection* GetSelectionInternal();
-
     struct Metrics {
       nscoord mBidiIndicatorSize; // width and height of bidi indicator
       nscoord mCaretWidth;        // full caret width including bidi indicator
     };
     static Metrics ComputeMetrics(nsIFrame* aFrame, int32_t aOffset,
                                   nscoord aCaretHeight);
-
-    void          ComputeCaretRects(nsIFrame* aFrame, int32_t aFrameOffset,
-                                    nsRect* aCaretRect, nsRect* aHookRect);
 
     // Returns true if we should not draw the caret because of XUL menu popups.
     // The caret should be hidden if:
@@ -210,7 +229,7 @@ protected:
     bool IsMenuPopupHidingCaret();
 
     nsWeakPtr             mPresShell;
-    nsWeakPtr             mDomSelectionWeak;
+    mozilla::WeakPtr<mozilla::dom::Selection> mDomSelectionWeak;
 
     nsCOMPtr<nsITimer>    mBlinkTimer;
 
@@ -230,6 +249,12 @@ protected:
      * blinking.
      */
     int32_t               mBlinkCount;
+    /**
+     * mBlinkRate is the rate of the caret blinking the last time we read it.
+     * It is used as a way to optimize whether we need to reset the blinking
+     * timer.
+     */
+    uint32_t              mBlinkRate;
     /**
      * mHideCount is not 0, it means that somebody doesn't want the caret
      * to be visible.  See AddForceHide() and RemoveForceHide().

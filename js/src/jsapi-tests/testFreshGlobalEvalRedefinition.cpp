@@ -8,12 +8,6 @@
 #include "jsapi-tests/tests.h"
 
 static bool
-GlobalEnumerate(JSContext* cx, JS::Handle<JSObject*> obj)
-{
-    return JS_EnumerateStandardClasses(cx, obj);
-}
-
-static bool
 GlobalResolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp)
 {
     return JS_ResolveStandardClass(cx, obj, id, resolvedp);
@@ -21,21 +15,25 @@ GlobalResolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolv
 
 BEGIN_TEST(testRedefineGlobalEval)
 {
-    static const JSClass cls = {
-        "global", JSCLASS_GLOBAL_FLAGS,
-        nullptr, nullptr, nullptr, nullptr,
-        GlobalEnumerate, GlobalResolve, nullptr, nullptr,
+    static const JSClassOps clsOps = {
+        nullptr, nullptr,
+        nullptr, JS_NewEnumerateStandardClasses, GlobalResolve, nullptr, nullptr,
         nullptr, nullptr, nullptr,
         JS_GlobalObjectTraceHook
     };
 
+    static const JSClass cls = {
+        "global", JSCLASS_GLOBAL_FLAGS,
+        &clsOps
+    };
+
     /* Create the global object. */
-    JS::CompartmentOptions options;
+    JS::RealmOptions options;
     JS::Rooted<JSObject*> g(cx, JS_NewGlobalObject(cx, &cls, nullptr, JS::FireOnNewGlobalHook, options));
     if (!g)
         return false;
 
-    JSAutoCompartment ac(cx, g);
+    JSAutoRealm ar(cx, g);
     JS::Rooted<JS::Value> v(cx);
     CHECK(JS_GetProperty(cx, g, "Object", &v));
 

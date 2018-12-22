@@ -8,7 +8,9 @@
 #define mozilla_IOInterposer_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/GuardObjects.h"
 #include "mozilla/TimeStamp.h"
+#include "nsString.h"
 
 namespace mozilla {
 
@@ -93,8 +95,8 @@ public:
      */
     const char* Reference() const { return mReference; }
 
-    /** Request filename associated with the I/O operation, null if unknown */
-    virtual const char16_t* Filename() { return nullptr; }
+    /** Request filename associated with the I/O operation, empty if unknown */
+    virtual void Filename(nsAString& aString) { aString.Truncate(); }
 
     virtual ~Observation() {}
 
@@ -170,6 +172,12 @@ void Clear();
  * thread-safe manner. Primarily for use by the crash reporter.
  */
 void Disable();
+
+/**
+ * This function re-enables IOInterposer functionality in a fast, thread-safe
+ * manner.  Primarily for use by the crash reporter.
+ */
+void Enable();
 
 /**
  * Report IO to registered observers.
@@ -253,17 +261,34 @@ class IOInterposerInit
 public:
   IOInterposerInit()
   {
-#if !defined(RELEASE_BUILD)
+#if !defined(RELEASE_OR_BETA)
     IOInterposer::Init();
 #endif
   }
 
   ~IOInterposerInit()
   {
-#if !defined(RELEASE_BUILD)
+#if !defined(RELEASE_OR_BETA)
     IOInterposer::Clear();
 #endif
   }
+};
+
+class MOZ_RAII AutoIOInterposerDisable final
+{
+public:
+  explicit AutoIOInterposerDisable(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    IOInterposer::Disable();
+  }
+  ~AutoIOInterposerDisable()
+  {
+    IOInterposer::Enable();
+  }
+
+private:
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 } // namespace mozilla

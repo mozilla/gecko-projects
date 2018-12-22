@@ -8,6 +8,7 @@
 
 #include "nsBaseAppShell.h"
 #include <windows.h>
+#include <vector>
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Mutex.h"
 
@@ -34,9 +35,18 @@ public:
 
   static UINT GetTaskbarButtonCreatedMessage();
 
+  NS_IMETHOD AfterProcessNextEvent(nsIThreadInternal* thread,
+                                   bool eventWasProcessed) final;
+
 protected:
-  NS_IMETHOD Run();
-  NS_IMETHOD Exit();
+  NS_IMETHOD Run() override;
+  NS_IMETHOD Exit() override;
+
+#if defined(ACCESSIBILITY)
+  NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
+                     const char16_t* aData) override;
+#endif // defined(ACCESSIBILITY)
+
   virtual void ScheduleNativeEventCallback();
   virtual bool ProcessNextNativeEvent(bool mayWait);
   virtual ~nsAppShell();
@@ -49,6 +59,7 @@ protected:
 
   Mutex mLastNativeEventScheduledMutex;
   TimeStamp mLastNativeEventScheduled;
+  std::vector<MSG> mMsgsToRepost;
 };
 
 #endif // nsAppShell_h__

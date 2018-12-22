@@ -108,40 +108,19 @@ NS_NewXULPrototypeDocument(nsXULPrototypeDocument** aResult)
 NS_IMETHODIMP
 nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
 {
-    nsresult rv;
-
     nsCOMPtr<nsISupports> supports;
-    rv = aStream->ReadObject(true, getter_AddRefs(supports));
-    mURI = do_QueryInterface(supports);
-
-    uint32_t count, i;
-    nsCOMPtr<nsIURI> styleOverlayURI;
-
-    nsresult tmp = aStream->Read32(&count);
-    if (NS_FAILED(tmp)) {
-      return tmp;
-    }
+    nsresult rv = aStream->ReadObject(true, getter_AddRefs(supports));
     if (NS_FAILED(rv)) {
       return rv;
     }
-
-    for (i = 0; i < count; ++i) {
-        tmp = aStream->ReadObject(true, getter_AddRefs(supports));
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
-        }
-        styleOverlayURI = do_QueryInterface(supports);
-        mStyleSheetReferences.AppendObject(styleOverlayURI);
-    }
-
+    mURI = do_QueryInterface(supports);
 
     // nsIPrincipal mNodeInfoManager->mPrincipal
-    nsCOMPtr<nsIPrincipal> principal;
-    tmp = aStream->ReadObject(true, getter_AddRefs(supports));
-    principal = do_QueryInterface(supports);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    rv = aStream->ReadObject(true, getter_AddRefs(supports));
+    if (NS_FAILED(rv)) {
+      return rv;
     }
+    nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(supports);
     // Better safe than sorry....
     mNodeInfoManager->SetDocumentPrincipal(principal);
 
@@ -150,45 +129,46 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
     // mozilla::dom::NodeInfo table
     nsTArray<RefPtr<mozilla::dom::NodeInfo>> nodeInfos;
 
-    tmp = aStream->Read32(&count);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    uint32_t count, i;
+    rv = aStream->Read32(&count);
+    if (NS_FAILED(rv)) {
+      return rv;
     }
     nsAutoString namespaceURI, prefixStr, localName;
     bool prefixIsNull;
-    nsCOMPtr<nsIAtom> prefix;
+    RefPtr<nsAtom> prefix;
     for (i = 0; i < count; ++i) {
-        tmp = aStream->ReadString(namespaceURI);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
+        rv = aStream->ReadString(namespaceURI);
+        if (NS_FAILED(rv)) {
+          return rv;
         }
-        tmp = aStream->ReadBoolean(&prefixIsNull);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
+        rv = aStream->ReadBoolean(&prefixIsNull);
+        if (NS_FAILED(rv)) {
+          return rv;
         }
         if (prefixIsNull) {
             prefix = nullptr;
         } else {
-            tmp = aStream->ReadString(prefixStr);
-            if (NS_FAILED(tmp)) {
-              rv = tmp;
+            rv = aStream->ReadString(prefixStr);
+            if (NS_FAILED(rv)) {
+              return rv;
             }
             prefix = NS_Atomize(prefixStr);
         }
-        tmp = aStream->ReadString(localName);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
+        rv = aStream->ReadString(localName);
+        if (NS_FAILED(rv)) {
+          return rv;
         }
 
         RefPtr<mozilla::dom::NodeInfo> nodeInfo;
         // Using UINT16_MAX here as we don't know which nodeinfos will be
         // used for attributes and which for elements. And that doesn't really
         // matter.
-        tmp = mNodeInfoManager->GetNodeInfo(localName, prefix, namespaceURI,
-                                            UINT16_MAX,
-                                            getter_AddRefs(nodeInfo));
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
+        rv = mNodeInfoManager->GetNodeInfo(localName, prefix, namespaceURI,
+                                           UINT16_MAX,
+                                           getter_AddRefs(nodeInfo));
+        if (NS_FAILED(rv)) {
+          return rv;
         }
         nodeInfos.AppendElement(nodeInfo);
     }
@@ -196,40 +176,36 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream)
     // Document contents
     uint32_t type;
     while (NS_SUCCEEDED(rv)) {
-        tmp = aStream->Read32(&type);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
+        rv = aStream->Read32(&type);
+        if (NS_FAILED(rv)) {
+          return rv;
+          break;
         }
 
         if ((nsXULPrototypeNode::Type)type == nsXULPrototypeNode::eType_PI) {
             RefPtr<nsXULPrototypePI> pi = new nsXULPrototypePI();
 
-            tmp = pi->Deserialize(aStream, this, mURI, &nodeInfos);
-            if (NS_FAILED(tmp)) {
-              rv = tmp;
+            rv = pi->Deserialize(aStream, this, mURI, &nodeInfos);
+            if (NS_FAILED(rv)) {
+              return rv;
             }
-            tmp = AddProcessingInstruction(pi);
-            if (NS_FAILED(tmp)) {
-              rv = tmp;
+            rv = AddProcessingInstruction(pi);
+            if (NS_FAILED(rv)) {
+              return rv;
             }
         } else if ((nsXULPrototypeNode::Type)type == nsXULPrototypeNode::eType_Element) {
-            tmp = mRoot->Deserialize(aStream, this, mURI, &nodeInfos);
-            if (NS_FAILED(tmp)) {
-              rv = tmp;
+            rv = mRoot->Deserialize(aStream, this, mURI, &nodeInfos);
+            if (NS_FAILED(rv)) {
+              return rv;
             }
             break;
         } else {
-            NS_NOTREACHED("Unexpected prototype node type");
-            rv = NS_ERROR_FAILURE;
-            break;
+            MOZ_ASSERT_UNREACHABLE("Unexpected prototype node type");
+            return NS_ERROR_FAILURE;
         }
     }
-    tmp = NotifyLoadDone();
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
-    }
 
-    return rv;
+    return NotifyLoadDone();
 }
 
 static nsresult
@@ -248,7 +224,7 @@ GetNodeInfos(nsXULPrototypeElement* aPrototype,
         if (name->IsAtom()) {
             ni = aPrototype->mNodeInfo->NodeInfoManager()->
                 GetNodeInfo(name->Atom(), nullptr, kNameSpaceID_None,
-                            nsIDOMNode::ATTRIBUTE_NODE);
+                            nsINode::ATTRIBUTE_NODE);
         }
         else {
             ni = name->NodeInfo();
@@ -278,31 +254,15 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
     nsresult rv;
 
     rv = aStream->WriteCompoundObject(mURI, NS_GET_IID(nsIURI), true);
-    
-    uint32_t count;
 
-    count = mStyleSheetReferences.Count();
-    nsresult tmp = aStream->Write32(count);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
-    }
-
-    uint32_t i;
-    for (i = 0; i < count; ++i) {
-        tmp = aStream->WriteCompoundObject(mStyleSheetReferences[i],
-                                           NS_GET_IID(nsIURI), true);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
-        }
-    }
 
     // nsIPrincipal mNodeInfoManager->mPrincipal
-    tmp = aStream->WriteObject(mNodeInfoManager->DocumentPrincipal(),
+    nsresult tmp = aStream->WriteObject(mNodeInfoManager->DocumentPrincipal(),
                                true);
     if (NS_FAILED(tmp)) {
       rv = tmp;
     }
-    
+
 #ifdef DEBUG
     // XXX Worrisome if we're caching things without system principal.
     if (!nsContentUtils::IsSystemPrincipal(mNodeInfoManager->DocumentPrincipal())) {
@@ -324,6 +284,7 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
     if (NS_FAILED(tmp)) {
       rv = tmp;
     }
+    uint32_t i;
     for (i = 0; i < nodeInfoCount; ++i) {
         mozilla::dom::NodeInfo *nodeInfo = nodeInfos[i];
         NS_ENSURE_TRUE(nodeInfo, NS_ERROR_FAILURE);
@@ -358,7 +319,7 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
     }
 
     // Now serialize the document contents
-    count = mProcessingInstructions.Length();
+    uint32_t count = mProcessingInstructions.Length();
     for (i = 0; i < count; ++i) {
         nsXULPrototypePI* pi = mProcessingInstructions[i];
         tmp = pi->Serialize(aStream, this, &nodeInfos);
@@ -373,7 +334,7 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
         rv = tmp;
       }
     }
- 
+
     return rv;
 }
 
@@ -390,7 +351,7 @@ nsXULPrototypeDocument::InitPrincipal(nsIURI* aURI, nsIPrincipal* aPrincipal)
     mNodeInfoManager->SetDocumentPrincipal(aPrincipal);
     return NS_OK;
 }
-    
+
 
 nsIURI*
 nsXULPrototypeDocument::GetURI()
@@ -416,7 +377,7 @@ nsXULPrototypeDocument::SetRootElement(nsXULPrototypeElement* aElement)
 nsresult
 nsXULPrototypeDocument::AddProcessingInstruction(nsXULPrototypePI* aPI)
 {
-    NS_PRECONDITION(aPI, "null ptr");
+    MOZ_ASSERT(aPI, "null ptr");
     if (!mProcessingInstructions.AppendElement(aPI)) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -429,44 +390,10 @@ nsXULPrototypeDocument::GetProcessingInstructions() const
     return mProcessingInstructions;
 }
 
-void
-nsXULPrototypeDocument::AddStyleSheetReference(nsIURI* aURI)
-{
-    NS_PRECONDITION(aURI, "null ptr");
-    if (!mStyleSheetReferences.AppendObject(aURI)) {
-        NS_WARNING("mStyleSheetReferences->AppendElement() failed."
-                   "Stylesheet overlay dropped.");
-    }
-}
-
-const nsCOMArray<nsIURI>&
-nsXULPrototypeDocument::GetStyleSheetReferences() const
-{
-    return mStyleSheetReferences;
-}
-
-NS_IMETHODIMP
-nsXULPrototypeDocument::GetHeaderData(nsIAtom* aField, nsAString& aData) const
-{
-    // XXX Not implemented
-    aData.Truncate();
-    return NS_OK;
-}
-
-
-NS_IMETHODIMP
-nsXULPrototypeDocument::SetHeaderData(nsIAtom* aField, const nsAString& aData)
-{
-    // XXX Not implemented
-    return NS_OK;
-}
-
-
-
 nsIPrincipal*
 nsXULPrototypeDocument::DocumentPrincipal()
 {
-    NS_PRECONDITION(mNodeInfoManager, "missing nodeInfoManager");
+    MOZ_ASSERT(mNodeInfoManager, "missing nodeInfoManager");
     return mNodeInfoManager->DocumentPrincipal();
 }
 
@@ -530,14 +457,17 @@ nsXULPrototypeDocument::NotifyLoadDone()
 }
 
 void
-nsXULPrototypeDocument::TraceProtos(JSTracer* aTrc, uint32_t aGCNumber)
+nsXULPrototypeDocument::TraceProtos(JSTracer* aTrc)
 {
-  // Only trace the protos once per GC.
-  if (mGCNumber == aGCNumber) {
-    return;
+  // Only trace the protos once per GC if we are marking.
+  if (aTrc->isMarkingTracer()) {
+    uint32_t currentGCNumber = aTrc->gcNumberForMarking();
+    if (mGCNumber == currentGCNumber) {
+      return;
+    }
+    mGCNumber = currentGCNumber;
   }
 
-  mGCNumber = aGCNumber;
   if (mRoot) {
     mRoot->TraceAllScripts(aTrc);
   }

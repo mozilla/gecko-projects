@@ -7,20 +7,85 @@
 var Cc = SpecialPowers.Cc;
 var Ci = SpecialPowers.Ci;
 
-// Specifies whether we are using fake streams to run this automation
-var FAKE_ENABLED = true;
-var TEST_AUDIO_FREQ = 1000;
-try {
-  var audioDevice = SpecialPowers.getCharPref('media.audio_loopback_dev');
-  var videoDevice = SpecialPowers.getCharPref('media.video_loopback_dev');
-  dump('TEST DEVICES: Using media devices:\n');
-  dump('audio: ' + audioDevice + '\nvideo: ' + videoDevice + '\n');
-  FAKE_ENABLED = false;
-  TEST_AUDIO_FREQ = 440;
-} catch (e) {
-  dump('TEST DEVICES: No test devices found (in media.{audio,video}_loopback_dev, using fake streams.\n');
-  FAKE_ENABLED = true;
+// Specifies if we want fake audio streams for this run
+let WANT_FAKE_AUDIO = true;
+// Specifies if we want fake video streams for this run
+let WANT_FAKE_VIDEO = true;
+let TEST_AUDIO_FREQ = 1000;
+
+/**
+ * Reads the current values of preferences affecting fake and loopback devices
+ * and sets the WANT_FAKE_AUDIO and WANT_FAKE_VIDEO gloabals appropriately.
+*/
+function updateConfigFromFakeAndLoopbackPrefs() {
+  let audioDevice = SpecialPowers.getCharPref("media.audio_loopback_dev", "");
+  if (audioDevice) {
+    WANT_FAKE_AUDIO = false;
+    dump("TEST DEVICES: Got loopback audio: " + audioDevice + "\n");
+  } else {
+    WANT_FAKE_AUDIO = true;
+    dump("TEST DEVICES: No test device found in media.audio_loopback_dev, using fake audio streams.\n");
+  }
+  let videoDevice = SpecialPowers.getCharPref("media.video_loopback_dev", "");
+  if (videoDevice) {
+    WANT_FAKE_VIDEO = false;
+    dump("TEST DEVICES: Got loopback video: " + videoDevice + "\n");
+  } else {
+    WANT_FAKE_VIDEO = true;
+    dump("TEST DEVICES: No test device found in media.video_loopback_dev, using fake video streams.\n");
+  }
 }
+
+updateConfigFromFakeAndLoopbackPrefs();
+
+/**
+ *  Global flag to skip LoopbackTone
+ */
+let DISABLE_LOOPBACK_TONE = false;
+/**
+ * Helper class to setup a sine tone of a given frequency.
+ */
+class LoopbackTone {
+  constructor(audioContext, frequency) {
+    if (!audioContext) {
+      throw new Error("You must provide a valid AudioContext");
+    }
+    this.oscNode = audioContext.createOscillator();
+    var gainNode = audioContext.createGain();
+    gainNode.gain.value = 0.5;
+    this.oscNode.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    this.changeFrequency(frequency);
+  }
+
+  // Method should be used when WANT_FAKE_AUDIO is false.
+  start() {
+    if (!this.oscNode) {
+      throw new Error("Attempt to start a stopped LoopbackTone");
+    }
+    info(`Start loopback tone at ${this.oscNode.frequency.value}`);
+    this.oscNode.start();
+  }
+
+  // Change the frequency of the tone. It can be used after start.
+  // Frequency will change on the fly. No need to stop and create a new instance.
+  changeFrequency(frequency) {
+    if (!this.oscNode) {
+      throw new Error("Attempt to change frequency on a stopped LoopbackTone");
+    }
+    this.oscNode.frequency.value = frequency;
+  }
+
+  stop() {
+    if (!this.oscNode) {
+      throw new Error("Attempt to stop a stopped LoopbackTone");
+    }
+    this.oscNode.stop();
+    this.oscNode = null;
+  }
+}
+// Object that holds the default loopback tone.
+var DefaultLoopbackTone = null;
 
 /**
  * This class provides helpers around analysing the audio content in a stream
@@ -33,12 +98,19 @@ try {
 function AudioStreamAnalyser(ac, stream) {
   this.audioContext = ac;
   this.stream = stream;
-  this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
+  this.sourceNodes = [];
   this.analyser = this.audioContext.createAnalyser();
   // Setting values lower than default for speedier testing on emulators
   this.analyser.smoothingTimeConstant = 0.2;
   this.analyser.fftSize = 1024;
-  this.sourceNode.connect(this.analyser);
+  this.connectTrack = t => {
+    let source = this.audioContext.createMediaStreamSource(new MediaStream([t]));
+    this.sourceNodes.push(source);
+    source.connect(this.analyser);
+  };
+  this.stream.getAudioTracks().forEach(t => this.connectTrack(t));
+  this.onaddtrack = ev => this.connectTrack(ev.track);
+  this.stream.addEventListener("addtrack", this.onaddtrack);
   this.data = new Uint8Array(this.analyser.frequencyBinCount);
 }
 
@@ -59,7 +131,8 @@ AudioStreamAnalyser.prototype = {
    */
   enableDebugCanvas: function() {
     var cvs = this.debugCanvas = document.createElement("canvas");
-    document.getElementById("content").appendChild(cvs);
+    const content = document.getElementById("content");
+    content.insertBefore(cvs, content.children[0]);
 
     // Easy: 1px per bin
     cvs.width = this.analyser.frequencyBinCount;
@@ -74,7 +147,7 @@ AudioStreamAnalyser.prototype = {
       c.clearRect(0, 0, cvs.width, cvs.height);
       var array = self.getByteFrequencyData();
       for (var i = 0; i < array.length; i++) {
-        c.fillRect(i, (cvs.height - (array[i])), 1, cvs.height);
+        c.fillRect(i, (cvs.height - (array[i] / 2)), 1, cvs.height);
       }
       if (!cvs.stopDrawing) {
         requestAnimationFrame(render);
@@ -97,28 +170,43 @@ AudioStreamAnalyser.prototype = {
   },
 
   /**
+   * Disconnects the input stream from our internal analyser node.
+   * Call this to reduce main thread processing, mostly necessary on slow
+   * devices.
+   */
+  disconnect: function() {
+    this.disableDebugCanvas();
+    this.sourceNodes.forEach(n => n.disconnect());
+    this.sourceNodes = [];
+    this.stream.removeEventListener("addtrack", this.onaddtrack);
+  },
+
+  /**
    * Return a Promise, that will be resolved when the function passed as
    * argument, when called, returns true (meaning the analysis was a
-   * success).
+   * success). The promise is rejected if the cancel promise resolves first.
    *
    * @param {function} analysisFunction
-   *        A fonction that performs an analysis, and returns true if the
+   *        A function that performs an analysis, and resolves with true if the
    *        analysis was a success (i.e. it found what it was looking for)
+   * @param {promise} cancel
+   *        A promise that on resolving will reject the promise we returned.
    */
-  waitForAnalysisSuccess: function(analysisFunction) {
-    var self = this;
-    return new Promise((resolve, reject) => {
-      function analysisLoop() {
-        var success = analysisFunction(self.getByteFrequencyData());
-        if (success) {
-          resolve();
-          return;
-        }
-        // else, we need more time
-        requestAnimationFrame(analysisLoop);
+  waitForAnalysisSuccess: async function(analysisFunction,
+                                         cancel = wait(60000, new Error("Audio analysis timed out"))) {
+    let aborted = false;
+    cancel.then(() => aborted = true);
+
+    // We need to give the Analyser some time to start gathering data.
+    await wait(200);
+
+    do {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      if (aborted) {
+        throw await cancel;
       }
-      analysisLoop();
-    });
+    }
+    while (!analysisFunction(this.getByteFrequencyData()));
   },
 
   /**
@@ -212,33 +300,56 @@ function realCreateHTML(meta) {
   document.body.appendChild(content);
 }
 
-
 /**
- * Create the HTML element if it doesn't exist yet and attach
- * it to the content node.
+ * Creates an element of the given type, assigns the given id, sets the controls
+ * and autoplay attributes and adds it to the content node.
  *
  * @param {string} type
- *        Type of media element to create ('audio' or 'video')
- * @param {string} label
- *        Description to use for the element
- * @return {HTMLMediaElement} The created HTML media element
+ *        Defining if we should create an "audio" or "video" element
+ * @param {string} id
+ *        A string to use as the element id.
  */
-function createMediaElement(type, label) {
-  var id = label + '_' + type;
-  var element = document.getElementById(id);
-
-  // Sanity check that we haven't created the element already
-  if (element) {
-    return element;
-  }
-
-  element = document.createElement(type === 'audio' ? 'audio' : 'video');
+function createMediaElement(type, id) {
+  const element = document.createElement(type);
   element.setAttribute('id', id);
   element.setAttribute('height', 100);
   element.setAttribute('width', 150);
   element.setAttribute('controls', 'controls');
   element.setAttribute('autoplay', 'autoplay');
+  element.setAttribute('muted', 'muted');
+  element.muted = true;
   document.getElementById('content').appendChild(element);
+
+  return element;
+}
+
+/**
+ * Returns an existing element for the given track with the given idPrefix,
+ * as it was added by createMediaElementForTrack().
+ *
+ * @param {MediaStreamTrack} track
+ *        Track used as the element's source.
+ * @param {string} idPrefix
+ *        A string to use as the element id. The track id will also be appended.
+ */
+function getMediaElementForTrack(track, idPrefix) {
+  return document.getElementById(idPrefix + '_' + track.id);
+}
+
+/**
+ * Create a media element with a track as source and attach it to the content
+ * node.
+ *
+ * @param {MediaStreamTrack} track
+ *        Track for use as source.
+ * @param {string} idPrefix
+ *        A string to use as the element id. The track id will also be appended.
+ * @return {HTMLMediaElement} The created HTML media element
+ */
+function createMediaElementForTrack(track, idPrefix) {
+  const id = idPrefix + '_' + track.id;
+  const element = createMediaElement(track.kind, id);
+  element.srcObject = new MediaStream([track]);
 
   return element;
 }
@@ -252,6 +363,28 @@ function createMediaElement(type, label) {
  *        The constraints for this mozGetUserMedia callback
  */
 function getUserMedia(constraints) {
+  // Tests may have changed the values of prefs, so recheck
+  updateConfigFromFakeAndLoopbackPrefs();
+  if (!WANT_FAKE_AUDIO
+      && !constraints.fake
+      && constraints.audio
+      && !DISABLE_LOOPBACK_TONE) {
+    // Loopback device is configured, start the default loopback tone
+    if (!DefaultLoopbackTone) {
+      TEST_AUDIO_FREQ = 440;
+      DefaultLoopbackTone = new LoopbackTone(new AudioContext, TEST_AUDIO_FREQ);
+      DefaultLoopbackTone.start();
+    }
+    // Disable input processing mode when it's not explicity enabled.
+    // This is to avoid distortion of the loopback tone
+    constraints.audio = Object.assign({}, {autoGainControl: false}
+                                        , {echoCancellation: false}
+                                        , {noiseSuppression: false}
+                                        , constraints.audio);
+  } else {
+    // Fake device configured, ensure our test freq is correct.
+    TEST_AUDIO_FREQ = 1000;
+  }
   info("Call getUserMedia for " + JSON.stringify(constraints));
   return navigator.mediaDevices.getUserMedia(constraints)
     .then(stream => (checkMediaStreamTracks(constraints, stream), stream));
@@ -261,6 +394,10 @@ function getUserMedia(constraints) {
 // are in place before running it.
 var setTestOptions;
 var testConfigured = new Promise(r => setTestOptions = r);
+
+function pushPrefs(...p) {
+  return SpecialPowers.pushPrefEnv({set: p});
+}
 
 function setupEnvironment() {
   if (!window.SimpleTest) {
@@ -275,14 +412,25 @@ function setupEnvironment() {
       ['media.peerconnection.identity.timeout', 120000],
       ['media.peerconnection.ice.stun_client_maximum_transmits', 14],
       ['media.peerconnection.ice.trickle_grace_period', 30000],
+      ['media.peerconnection.remoteTrackId.enabled', true],
+      ['media.peerconnection.rtpsourcesapi.enabled', true],
       ['media.navigator.permission.disabled', true],
-      ['media.navigator.streams.fake', FAKE_ENABLED],
-      ['media.getusermedia.screensharing.enabled', true],
-      ['media.getusermedia.screensharing.allowed_domains', "mochi.test"],
+      // If either fake audio or video is desired we enable fake streams.
+      // If loopback devices are set they will be chosen instead of fakes in gecko.
+      ['media.navigator.streams.fake', WANT_FAKE_AUDIO || WANT_FAKE_VIDEO],
       ['media.getusermedia.audiocapture.enabled', true],
-      ['media.recorder.audio_node.enabled', true]
+      ['media.getusermedia.screensharing.enabled', true],
+      ['media.getusermedia.window.focus_source.enabled', false],
+      ['media.recorder.audio_node.enabled', true],
+      ['media.webaudio.audiocontextoptions-samplerate.enabled', true]
     ]
   };
+
+  if (!WANT_FAKE_AUDIO) {
+    defaultMochitestPrefs.set.push(
+      ["media.volume_scale", "1"],
+    );
+  }
 
   const isAndroid = !!navigator.userAgent.includes("Android");
 
@@ -290,7 +438,8 @@ function setupEnvironment() {
     defaultMochitestPrefs.set.push(
       ["media.navigator.video.default_width", 320],
       ["media.navigator.video.default_height", 240],
-      ["media.navigator.video.max_fr", 10]
+      ["media.navigator.video.max_fr", 10],
+      ["media.autoplay.enabled", true]
     );
   }
 
@@ -301,7 +450,7 @@ function setupEnvironment() {
 
   // We don't care about waiting for this to complete, we just want to ensure
   // that we don't build up a huge backlog of GC work.
-  SpecialPowers.exactGC(window);
+  SpecialPowers.exactGC();
 }
 
 // This is called by steeplechase; which provides the test configuration options
@@ -325,15 +474,18 @@ function run_test(is_initiator,timeout) {
 function runTestWhenReady(testFunc) {
   setupEnvironment();
   return testConfigured.then(options => testFunc(options))
-    .catch(e => ok(false, 'Error executing test: ' + e +
+    .catch(e => {
+      ok(false, 'Error executing test: ' + e +
         ((typeof e.stack === 'string') ?
-        (' ' + e.stack.split('\n').join(' ... ')) : '')));
+        (' ' + e.stack.split('\n').join(' ... ')) : ''));
+      SimpleTest.finish();
+    });
 }
 
 
 /**
  * Checks that the media stream tracks have the expected amount of tracks
- * with the correct kind and id based on the type and constraints given.
+ * with the correct attributes based on the type and constraints given.
  *
  * @param {Object} constraints specifies whether the stream should have
  *                             audio, video, or both
@@ -348,6 +500,7 @@ function checkMediaStreamTracksByType(constraints, type, mediaStreamTracks) {
     if (mediaStreamTracks.length) {
       is(mediaStreamTracks[0].kind, type, 'Track kind should be ' + type);
       ok(mediaStreamTracks[0].id, 'Track id should be defined');
+      ok(!mediaStreamTracks[0].muted, 'Track should not be muted');
     }
   } else {
     is(mediaStreamTracks.length, 0, 'No ' + type + ' tracks shall be present');
@@ -378,18 +531,52 @@ function checkMediaStreamTracks(constraints, mediaStream) {
  */
 function checkMediaStreamContains(mediaStream, tracks, message) {
   message = message ? (message + ": ") : "";
-  tracks.forEach(t => ok(mediaStream.getTracks().includes(t),
+  tracks.forEach(t => ok(mediaStream.getTrackById(t.id),
                          message + "MediaStream " + mediaStream.id +
                          " contains track " + t.id));
   is(mediaStream.getTracks().length, tracks.length,
      message + "MediaStream " + mediaStream.id + " contains no extra tracks");
 }
 
+function checkMediaStreamCloneAgainstOriginal(clone, original) {
+  isnot(clone.id.length, 0, "Stream clone should have an id string");
+  isnot(clone, original,
+        "Stream clone should be different from the original");
+  isnot(clone.id, original.id,
+        "Stream clone's id should be different from the original's");
+  is(clone.getAudioTracks().length, original.getAudioTracks().length,
+     "All audio tracks should get cloned");
+  is(clone.getVideoTracks().length, original.getVideoTracks().length,
+     "All video tracks should get cloned");
+  is(clone.active, original.active,
+     "Active state should be preserved");
+  original.getTracks()
+          .forEach(t => ok(!clone.getTrackById(t.id),
+                           "The clone's tracks should be originals"));
+}
+
+function checkMediaStreamTrackCloneAgainstOriginal(clone, original) {
+  isnot(clone.id.length, 0,
+        "Track clone should have an id string");
+  isnot(clone, original,
+        "Track clone should be different from the original");
+  isnot(clone.id, original.id,
+        "Track clone's id should be different from the original's");
+  is(clone.kind, original.kind,
+     "Track clone's kind should be same as the original's");
+  is(clone.enabled, original.enabled,
+     "Track clone's kind should be same as the original's");
+  is(clone.readyState, original.readyState,
+     "Track clone's readyState should be same as the original's");
+  is(clone.muted, original.muted,
+     "Track clone's muted state should be same as the original's");
+}
+
 /*** Utility methods */
 
 /** The dreadful setTimeout, use sparingly */
-function wait(time) {
-  return new Promise(r => setTimeout(r, time));
+function wait(time, message) {
+  return new Promise(r => setTimeout(() => r(message), time));
 }
 
 /** The even more dreadful setInterval, use even more sparingly */
@@ -408,16 +595,34 @@ function waitUntil(func, time) {
 var timeout = (promise, time, msg) =>
   Promise.race([promise, wait(time).then(() => Promise.reject(new Error(msg)))]);
 
+/** Adds a |finally| function to a promise whose argument is invoked whether the
+ * promise is resolved or rejected, and that does not interfere with chaining.*/
+var addFinallyToPromise = promise => {
+  promise.finally = func => {
+    return promise.then(
+      result => {
+        func();
+        return Promise.resolve(result);
+      },
+      error => {
+        func();
+        return Promise.reject(error);
+      }
+    );
+  }
+  return promise;
+}
+
 /** Use event listener to call passed-in function on fire until it returns true */
 var listenUntil = (target, eventName, onFire) => {
   return new Promise(resolve => target.addEventListener(eventName,
-                                                        function callback() {
-    var result = onFire();
+                                                        function callback(event) {
+    var result = onFire(event);
     if (result) {
-      target.removeEventListener(eventName, callback, false);
+      target.removeEventListener(eventName, callback);
       resolve(result);
     }
-  }, false));
+  }));
 };
 
 /* Test that a function throws the right error */
@@ -430,6 +635,20 @@ function mustThrowWith(msg, reason, f) {
   }
 };
 
+/* Get a dummy audio track */
+function getSilentTrack() {
+  let ctx = new AudioContext(), oscillator = ctx.createOscillator();
+  let dst = oscillator.connect(ctx.createMediaStreamDestination());
+  oscillator.start();
+  return Object.assign(dst.stream.getAudioTracks()[0], {enabled: false});
+}
+
+function getBlackTrack({width = 640, height = 480} = {}) {
+  let canvas = Object.assign(document.createElement("canvas"), {width, height});
+  canvas.getContext('2d').fillRect(0, 0, width, height);
+  let stream = canvas.captureStream();
+  return Object.assign(stream.getVideoTracks()[0], {enabled: false});
+}
 
 /*** Test control flow methods */
 
@@ -519,6 +738,90 @@ function createOneShotEventWrapper(wrapper, obj, event) {
   };
 }
 
+/**
+ * Returns a promise that resolves when `target` has raised an event with the
+ * given name the given number of times. Cancel the returned promise by passing
+ * in a `cancel` promise and resolving it.
+ *
+ * @param {object} target
+ *        The target on which the event should occur.
+ * @param {string} name
+ *        The name of the event that should occur.
+ * @param {integer} count
+ *        Optional number of times the event should be raised before resolving.
+ * @param {promise} cancel
+ *        Optional promise that on resolving rejects the returned promise,
+ *        so we can avoid logging results after a test has finished.
+ * @returns {promise} A promise that resolves to the last of the seen events.
+ */
+function haveEvents(target, name, count, cancel) {
+  var listener;
+  var counter = count || 1;
+  return Promise.race([
+    (cancel || new Promise(() => {})).then(e => Promise.reject(e)),
+    new Promise(resolve =>
+        target.addEventListener(name, listener = e => (--counter < 1 && resolve(e))))
+  ])
+  .then(e => (target.removeEventListener(name, listener), e));
+};
+
+/**
+ * Returns a promise that resolves when `target` has raised an event with the
+ * given name. Cancel the returned promise by passing in a `cancel` promise and
+ * resolving it.
+ *
+ * @param {object} target
+ *        The target on which the event should occur.
+ * @param {string} name
+ *        The name of the event that should occur.
+ * @param {promise} cancel
+ *        Optional promise that on resolving rejects the returned promise,
+ *        so we can avoid logging results after a test has finished.
+ * @returns {promise} A promise that resolves to the seen event.
+ */
+function haveEvent(target, name, cancel) {
+  return haveEvents(target, name, 1, cancel);
+};
+
+/**
+ * Returns a promise that resolves if the target has not seen the given event
+ * after one crank (or until the given timeoutPromise resolves) of the event
+ * loop.
+ *
+ * @param {object} target
+ *        The target on which the event should not occur.
+ * @param {string} name
+ *        The name of the event that should not occur.
+ * @param {promise} timeoutPromise
+ *        Optional promise defining how long we should wait before resolving.
+ * @returns {promise} A promise that is rejected if we see the given event, or
+ *                    resolves after a timeout otherwise.
+ */
+function haveNoEvent(target, name, timeoutPromise) {
+  return haveEvent(target, name, timeoutPromise || wait(0))
+    .then(() => Promise.reject(new Error("Too many " + name + " events")),
+          () => {});
+};
+
+/**
+ * Returns a promise that resolves after the target has seen the given number
+ * of events but no such event in a following crank of the event loop.
+ *
+ * @param {object} target
+ *        The target on which the events should occur.
+ * @param {string} name
+ *        The name of the event that should occur.
+ * @param {integer} count
+ *        Optional number of times the event should be raised before resolving.
+ * @param {promise} cancel
+ *        Optional promise that on resolving rejects the returned promise,
+ *        so we can avoid logging results after a test has finished.
+ * @returns {promise} A promise that resolves to the last of the seen events.
+ */
+function haveEventsButNoMore(target, name, count, cancel) {
+  return haveEvents(target, name, count, cancel)
+    .then(e => haveNoEvent(target, name).then(() => e));
+};
 
 /**
  * This class executes a series of functions in a continuous sequence.
@@ -567,23 +870,29 @@ CommandChain.prototype = {
 
   /**
    * Returns the index of the specified command in the chain.
-   * @param {start} Optional param specifying the index at which the search will
-   * start. If not specified, the search starts at index 0.
+   * @param {occurrence} Optional param specifying which occurrence to match,
+   * with 0 representing the first occurrence.
    */
-  indexOf: function(functionOrName, start) {
-    start = start || 0;
-    if (typeof functionOrName === 'string') {
-      var index = this.commands.slice(start).findIndex(f => f.name === functionOrName);
-      if (index !== -1) {
-        index += start;
+  indexOf: function(functionOrName, occurrence) {
+    occurrence = occurrence || 0;
+    return this.commands.findIndex(func => {
+      if (typeof functionOrName === 'string') {
+        if (func.name !== functionOrName) {
+          return false;
+        }
+      } else if (func !== functionOrName) {
+        return false;
       }
-      return index;
-    }
-    return this.commands.indexOf(functionOrName, start);
+      if (occurrence) {
+        --occurrence;
+        return false;
+      }
+      return true;
+    });
   },
 
-  mustHaveIndexOf: function(functionOrName, start) {
-    var index = this.indexOf(functionOrName, start);
+  mustHaveIndexOf: function(functionOrName, occurrence) {
+    var index = this.indexOf(functionOrName, occurrence);
     if (index == -1) {
       throw new Error("Unknown test: " + functionOrName);
     }
@@ -593,8 +902,8 @@ CommandChain.prototype = {
   /**
    * Inserts the new commands after the specified command.
    */
-  insertAfter: function(functionOrName, commands, all, start) {
-    this._insertHelper(functionOrName, commands, 1, all, start);
+  insertAfter: function(functionOrName, commands, all, occurrence) {
+    this._insertHelper(functionOrName, commands, 1, all, occurrence);
   },
 
   /**
@@ -607,48 +916,44 @@ CommandChain.prototype = {
   /**
    * Inserts the new commands before the specified command.
    */
-  insertBefore: function(functionOrName, commands, all, start) {
-    this._insertHelper(functionOrName, commands, 0, all, start);
+  insertBefore: function(functionOrName, commands, all, occurrence) {
+    this._insertHelper(functionOrName, commands, 0, all, occurrence);
   },
 
-  _insertHelper: function(functionOrName, commands, delta, all, start) {
-    var index = this.mustHaveIndexOf(functionOrName);
-    start = start || 0;
-    for (; index !== -1; index = this.indexOf(functionOrName, index)) {
-      if (!start) {
-        this.commands = [].concat(
-          this.commands.slice(0, index + delta),
-          commands,
-          this.commands.slice(index + delta));
-        if (!all) {
-          break;
-        }
-      } else {
-        start -= 1;
+  _insertHelper: function(functionOrName, commands, delta, all, occurrence) {
+    occurrence = occurrence || 0;
+    for (var index = this.mustHaveIndexOf(functionOrName, occurrence);
+         index !== -1;
+         index = this.indexOf(functionOrName, ++occurrence)) {
+      this.commands = [].concat(
+        this.commands.slice(0, index + delta),
+        commands,
+        this.commands.slice(index + delta));
+      if (!all) {
+        break;
       }
-      index += (commands.length + 1);
     }
   },
 
   /**
    * Removes the specified command, returns what was removed.
    */
-  remove: function(functionOrName) {
-    return this.commands.splice(this.mustHaveIndexOf(functionOrName), 1);
+  remove: function(functionOrName, occurrence) {
+    return this.commands.splice(this.mustHaveIndexOf(functionOrName, occurrence), 1);
   },
 
   /**
    * Removes all commands after the specified one, returns what was removed.
    */
-  removeAfter: function(functionOrName, start) {
-    return this.commands.splice(this.mustHaveIndexOf(functionOrName, start) + 1);
+  removeAfter: function(functionOrName, occurrence) {
+    return this.commands.splice(this.mustHaveIndexOf(functionOrName, occurrence) + 1);
   },
 
   /**
    * Removes all commands before the specified one, returns what was removed.
    */
-  removeBefore: function(functionOrName) {
-    return this.commands.splice(0, this.mustHaveIndexOf(functionOrName));
+  removeBefore: function(functionOrName, occurrence) {
+    return this.commands.splice(0, this.mustHaveIndexOf(functionOrName, occurrence));
   },
 
   /**
@@ -662,8 +967,8 @@ CommandChain.prototype = {
   /**
    * Replaces all commands after the specified one, returns what was removed.
    */
-  replaceAfter: function(functionOrName, commands, start) {
-    var oldCommands = this.removeAfter(functionOrName, start);
+  replaceAfter: function(functionOrName, commands, occurrence) {
+    var oldCommands = this.removeAfter(functionOrName, occurrence);
     this.append(commands);
     return oldCommands;
   },
@@ -684,6 +989,155 @@ CommandChain.prototype = {
     this.commands = this.commands.filter(c => !id_match.test(c.name));
   },
 };
+
+function AudioStreamHelper() {
+  this._context = new AudioContext();
+}
+
+AudioStreamHelper.prototype = {
+  checkAudio: function(stream, analyser, fun) {
+    /*
+    analyser.enableDebugCanvas();
+    return analyser.waitForAnalysisSuccess(fun)
+      .then(() => analyser.disableDebugCanvas());
+    */
+    return analyser.waitForAnalysisSuccess(fun);
+  },
+
+  checkAudioFlowing: function(stream) {
+    var analyser = new AudioStreamAnalyser(this._context, stream);
+    var freq = analyser.binIndexForFrequency(TEST_AUDIO_FREQ);
+    return this.checkAudio(stream, analyser, array => array[freq] > 200);
+  },
+
+  checkAudioNotFlowing: function(stream) {
+    var analyser = new AudioStreamAnalyser(this._context, stream);
+    var freq = analyser.binIndexForFrequency(TEST_AUDIO_FREQ);
+    return this.checkAudio(stream, analyser, array => array[freq] < 50);
+  }
+}
+
+class VideoFrameEmitter {
+  constructor(color1, color2, width, height) {
+    if (!width) {
+      width = 50;
+    }
+    if (!height) {
+      height = width;
+    }
+    this._helper = new CaptureStreamTestHelper2D(width, height);
+    this._canvas = this._helper.createAndAppendElement('canvas', 'source_canvas');
+    this._color1 = color1 ? color1 : this._helper.green;
+    this._color2 = color2 ? color2 : this._helper.red;
+    // Make sure this is initted
+    this._helper.drawColor(this._canvas, this._color1);
+    this._stream = this._canvas.captureStream();
+    this._started = false;
+  }
+
+  stream() {
+    return this._stream;
+  }
+
+  helper() {
+    return this._helper;
+  }
+
+  colors(color1, color2) {
+    this._color1 = color1 ? color1 : this._helper.green;
+    this._color2 = color2 ? color2 : this._helper.red;
+    try {
+      this._helper.drawColor(this._canvas, this._color1);
+    } catch (e) {
+      // ignore; stream might have shut down
+    }
+  }
+
+  start() {
+    if (this._started) {
+      info("*** emitter already started");
+      return;
+    }
+
+    let i = 0;
+    this._started = true;
+    this._intervalId = setInterval(() => {
+      try {
+        this._helper.drawColor(this._canvas, i ? this._color1: this._color2);
+        i = 1 - i;
+      } catch (e) {
+        // ignore; stream might have shut down, and we don't bother clearing
+        // the setInterval.
+      }
+    }, 500);
+  }
+
+  stop() {
+    if (this._started) {
+      clearInterval(this._intervalId);
+      this._started = false;
+    }
+  }
+}
+
+class VideoStreamHelper {
+  constructor() {
+    this._helper = new CaptureStreamTestHelper2D(50,50);
+  }
+
+  async checkHasFrame(video, { offsetX, offsetY, threshold } = {}) {
+    const h = this._helper;
+    await h.waitForPixel(video, px => {
+      let result = h.isOpaquePixelNot(px, h.black, threshold);
+      info("Checking that we have a frame, got [" +
+           Array.slice(px) + "]. Ref=[" +
+           Array.slice(h.black.data) + "]. Threshold=" + threshold +
+           ". Pass=" + result);
+      return result;
+    }, { offsetX, offsetY });
+  }
+
+  async checkVideoPlaying(video, { offsetX = 10, offsetY = 10,
+                                   threshold = 16,
+                                 } = {}) {
+    const h = this._helper;
+    await this.checkHasFrame(video, { offsetX, offsetY, threshold });
+    let startPixel = {
+      data: h.getPixel(video, offsetX, offsetY),
+      name: "startcolor",
+    };
+    await h.waitForPixel(video, px => {
+      let result = h.isPixelNot(px, startPixel, threshold);
+      info("Checking playing, [" +
+           Array.slice(px) + "] vs [" + Array.slice(startPixel.data) +
+           "]. Threshold=" + threshold + " Pass=" + result);
+      return result;
+    }, { offsetX, offsetY });
+  }
+
+  async checkVideoPaused(video, { offsetX = 10, offsetY = 10,
+                                  threshold = 16, time = 5000,
+                                }={}) {
+    const h = this._helper;
+    await this.checkHasFrame(video, { offsetX, offsetY, threshold });
+    let startPixel = {
+      data: h.getPixel(video, offsetX, offsetY),
+      name: "startcolor",
+    };
+    try {
+      await h.waitForPixel(video, px => {
+          let result = h.isOpaquePixelNot(px, startPixel, threshold);
+          info("Checking paused, [" +
+               Array.slice(px) + "] vs [" + Array.slice(startPixel.data) +
+               "]. Threshold=" + threshold + " Pass=" + result);
+          return result;
+        }, { offsetX, offsetY, cancel: wait(time, "timeout") });
+      ok(false, "Frame changed within " + time/1000 + " seconds");
+    } catch (e) {
+      is(e, "timeout", "Frame shouldn't change for " + time/1000 + " seconds");
+    }
+  }
+}
 
 
 function IsMacOSX10_6orOlder() {

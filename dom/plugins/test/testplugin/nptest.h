@@ -1,11 +1,11 @@
 /* ***** BEGIN LICENSE BLOCK *****
- * 
+ *
  * Copyright (c) 2008, Mozilla Corporation
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * * Redistributions of source code must retain the above copyright notice, this
  *   list of conditions and the following disclaimer.
  * * Redistributions in binary form must reproduce the above copyright notice,
@@ -14,7 +14,7 @@
  * * Neither the name of the Mozilla Corporation nor the names of its
  *   contributors may be used to endorse or promote products derived from this
  *   software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -25,10 +25,10 @@
  * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * Contributor(s):
  *   Josh Aas <josh@mozilla.com>
- * 
+ *
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef nptest_h_
@@ -91,10 +91,6 @@ typedef struct TestNPObject : NPObject {
 
 typedef struct _PlatformData PlatformData;
 
-typedef struct TestRange : NPByteRange {
-  bool waiting;
-} TestRange;
-
 typedef struct InstanceData {
   NPP npp;
   NPWindow window;
@@ -109,7 +105,6 @@ typedef struct InstanceData {
   bool dontTouchElement;
   uint32_t timerID[2];
   bool timerTestResult;
-  bool asyncCallbackResult;
   bool invalidateDuringPaint;
   bool slowPaint;
   bool playingAudio;
@@ -122,7 +117,6 @@ typedef struct InstanceData {
   int32_t paintCount;
   int32_t writeCount;
   int32_t writeReadyCount;
-  int32_t asyncTestPhase;
   TestFunction testFunction;
   TestFunction functionToFail;
   NPError failureCode;
@@ -131,15 +125,10 @@ typedef struct InstanceData {
   std::string testUrl;
   std::string frame;
   std::string timerTestScriptCallback;
-  std::string asyncTestScriptCallback;
   std::ostringstream err;
-  uint16_t streamMode;
   int32_t streamChunkSize;
   int32_t streamBufSize;
-  int32_t fileBufSize;
-  TestRange* testrange;
   void* streamBuf;
-  void* fileBuf;
   bool crashOnDestroy;
   bool cleanupWidget;
   ActivationState topLevelWindowActivationState;
@@ -152,7 +141,6 @@ typedef struct InstanceData {
   bool wantsAllStreams;
   int32_t mouseUpEventCount;
   int32_t bugMode;
-  std::string javaCodebase;
   AsyncDrawing asyncDrawing;
   NPAsyncSurface *frontBuffer;
   NPAsyncSurface *backBuffer;

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,20 +11,20 @@
 #include "nsMathMLContainerFrame.h"
 
 //
-// <mrow> -- horizontally group any number of subexpressions 
+// <mrow> -- horizontally group any number of subexpressions
 // <mphantom> -- make content invisible but preserve its size
 // <mstyle> -- make style changes that affect the rendering of its contents
 //
 
 class nsMathMLmrowFrame : public nsMathMLContainerFrame {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsMathMLmrowFrame)
 
-  friend nsIFrame* NS_NewMathMLmrowFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmrowFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
 
   virtual nsresult
   AttributeChanged(int32_t  aNameSpaceID,
-                   nsIAtom* aAttribute,
+                   nsAtom* aAttribute,
                    int32_t  aModType) override;
 
   NS_IMETHOD
@@ -35,7 +36,7 @@ public:
   }
 
   virtual eMathMLFrameType
-  GetMathMLFrameType() override; 
+  GetMathMLFrameType() override;
 
   bool
   IsMrowLike() override {
@@ -47,7 +48,8 @@ public:
   }
 
 protected:
-  explicit nsMathMLmrowFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
+  explicit nsMathMLmrowFrame(ComputedStyle* aStyle)
+    : nsMathMLContainerFrame(aStyle, kClassID) {}
   virtual ~nsMathMLmrowFrame();
 };
 

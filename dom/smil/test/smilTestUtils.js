@@ -35,7 +35,7 @@ var SMILUtil =
   // Simple wrapper for getComputedStyle
   getComputedStyleSimple: function(elem, prop)
   {
-    return window.getComputedStyle(elem, null).getPropertyValue(prop);
+    return window.getComputedStyle(elem).getPropertyValue(prop);
   },
 
   getAttributeValue: function(elem, attr)
@@ -109,33 +109,13 @@ var SMILUtil =
     }
     return computedStyle;
   },
-  
-  // This method hides (i.e. sets "display: none" on) all of the given node's
-  // descendents.  It also hides the node itself, if requested.
-  hideSubtree : function(node, hideNodeItself, useXMLAttribute)
-  {
-    // Hide node, if requested
-    if (hideNodeItself) {
-      if (useXMLAttribute) {
-        if (node.setAttribute) {
-          node.setAttribute("display", "none");
-        }
-      } else if (node.style) {
-        node.style.display = "none";
-      }
-    }
-
-    // Hide node's descendents
-    var child = node.firstChild;
-    while (child) {
-      SMILUtil.hideSubtree(child, true, useXMLAttribute);
-      child = child.nextSibling;
-    }
-  },
 
   getMotionFakeAttributeName : function() {
     return "_motion";
   },
+
+  // Return stripped px value from specified value.
+  stripPx: str => str.replace(/px\s*$/, ''),
 };
 
 
@@ -348,7 +328,7 @@ AnimTestcase.prototype =
   _animElementTagName : "animate", // Can be overridden for e.g. animateColor
   computedValMap      : null,
   skipReason          : null,
-  
+
   // Methods
   /**
    * runTest: Runs this AnimTestcase
@@ -416,7 +396,7 @@ AnimTestcase.prototype =
     if (this.computedValMap.noEffect) {
       return this.buildSeekListStatic(aAnimAttr, aBaseVal, aTimeData,
                                       "testcase specified to have no effect");
-    }      
+    }
     return this.buildSeekListAnimated(aAnimAttr, aBaseVal,
                                       aTimeData, aIsFreeze)
   },
@@ -427,6 +407,19 @@ AnimTestcase.prototype =
     for (var i in aSeekList) {
       var entry = aSeekList[i];
       SMILUtil.getSVGRoot().setCurrentTime(entry[0]);
+
+      // Bug 1379908: The computed value of stroke-* properties should be
+      // serialized with px units, but currently Gecko and Servo don't do that
+      // when animating these values.
+      if (['stroke-width',
+           'stroke-dasharray',
+           'stroke-dashoffset'].includes(aTargetAttr.attrName)) {
+        var attr = SMILUtil.stripPx(
+          SMILUtil.getAttributeValue(aTargetElem, aTargetAttr));
+        var expectedVal = SMILUtil.stripPx(entry[1]);
+        is(attr, expectedVal, entry[2]);
+        return;
+      }
       is(SMILUtil.getAttributeValue(aTargetElem, aTargetAttr),
          entry[1], entry[2]);
     }
@@ -654,7 +647,7 @@ AnimTestcasePaced.prototype =
 {
   // Member variables
   valuesString : null,
-  
+
   // Methods
   setupAnimationElement : function(aAnimAttr, aTimeData, aIsFreeze)
   {
@@ -768,7 +761,7 @@ AnimMotionTestcase.prototype =
 {
   // Member variables
   _animElementTagName : "animateMotion",
-  
+
   // Implementations of inherited methods that we need to override:
   // --------------------------------------------------------------
   setupAnimationElement : function(aAnimAttr, aTimeData, aIsFreeze)

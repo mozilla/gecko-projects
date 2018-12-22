@@ -5,37 +5,29 @@
 <script src=/resources/testharnessreport.js></script>
 <script src=/resources/WebIDLParser.js></script>
 <script src=/resources/idlharness.js></script>
-<script type=text/plain>
-interface Selection {
-  readonly attribute Node? anchorNode;
-  readonly attribute unsigned long anchorOffset;
-  readonly attribute Node? focusNode;
-  readonly attribute unsigned long focusOffset;
-
-  readonly attribute boolean isCollapsed;
-  void               collapse(Node node, unsigned long offset);
-  void               collapseToStart();
-  void               collapseToEnd();
-
-  void               extend(Node node, unsigned long offset);
-
-  void               selectAllChildren(Node node);
-  void               deleteFromDocument();
-
-  readonly attribute unsigned long rangeCount;
-  Range              getRangeAt(unsigned long index);
-  void               addRange(Range range);
-  void               removeRange(Range range);
-  void               removeAllRanges();
-
-  stringifier;
-};
-</script>
 <script>
 "use strict";
 
-var idlArray = new IdlArray();
-idlArray.add_idls(document.querySelector("script[type=text\\/plain]").textContent);
-idlArray.add_objects({Selection: ['getSelection()']});
-idlArray.test();
+function doTest([selection, dom, cssom, touchevents, uievents, html]) {
+  var idlArray = new IdlArray();
+  idlArray.add_untested_idls('interface SVGElement {};');
+  idlArray.add_untested_idls(dom + cssom + touchevents + uievents + html);
+  idlArray.add_idls(selection);
+  idlArray.add_objects({Selection: ['getSelection()']});
+  idlArray.test();
+}
+
+function fetchData(url) {
+  return fetch(url).then((response) => response.text());
+}
+
+promise_test(function() {
+  return Promise.all([fetchData("/interfaces/selection-api.idl"),
+                      fetchData("/interfaces/dom.idl"),
+                      fetchData("/interfaces/cssom.idl"),
+                      fetchData("/interfaces/touchevents.idl"),
+                      fetchData("/interfaces/uievents.idl"),
+                      fetchData("/interfaces/html.idl")])
+                .then(doTest);
+}, "Test driver");
 </script>

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <?xml-stylesheet type="text/css" href="chrome://global/skin"?>
-<?xml-stylesheet type="text/css" href="/tests/SimpleTest/test.css"?>
+<?xml-stylesheet type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"?>
 <!--
 https://bugzilla.mozilla.org/show_bug.cgi?id=760802
 -->
@@ -21,9 +21,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=760802
   <!-- test code goes here -->
   <script type="application/javascript"><![CDATA[
 SimpleTest.waitForExplicitFinish();
-
-var Cc = Components.classes;
-var Ci = Components.interfaces;
 
 function getBaseWindowInterface(win) {
   return win.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -65,7 +62,7 @@ var docShell = getBaseWindowInterfaceFromDocShell(win);
 
 ok(
   shouldThrowException(function(){docShell.nativeHandle;},
-              Components.results.NS_ERROR_NOT_IMPLEMENTED),
+              Cr.NS_ERROR_NOT_IMPLEMENTED),
   "nativeHandle should not be implemented for nsDocShell"
 );
 

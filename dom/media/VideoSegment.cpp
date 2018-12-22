@@ -16,11 +16,12 @@ using namespace layers;
 
 VideoFrame::VideoFrame(already_AddRefed<Image>& aImage,
                        const gfx::IntSize& aIntrinsicSize)
-  : mImage(aImage), mIntrinsicSize(aIntrinsicSize), mForceBlack(false)
+  : mImage(aImage), mIntrinsicSize(aIntrinsicSize), mForceBlack(false),
+    mPrincipalHandle(PRINCIPAL_HANDLE_NONE)
 {}
 
 VideoFrame::VideoFrame()
-  : mIntrinsicSize(0, 0), mForceBlack(false)
+  : mIntrinsicSize(0, 0), mForceBlack(false), mPrincipalHandle(PRINCIPAL_HANDLE_NONE)
 {}
 
 VideoFrame::~VideoFrame()
@@ -30,6 +31,7 @@ void
 VideoFrame::SetNull() {
   mImage = nullptr;
   mIntrinsicSize = gfx::IntSize(0, 0);
+  mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
 }
 
 void
@@ -38,15 +40,16 @@ VideoFrame::TakeFrom(VideoFrame* aFrame)
   mImage = aFrame->mImage.forget();
   mIntrinsicSize = aFrame->mIntrinsicSize;
   mForceBlack = aFrame->GetForceBlack();
+  mPrincipalHandle = aFrame->mPrincipalHandle;
 }
 
 /* static */ already_AddRefed<Image>
 VideoFrame::CreateBlackImage(const gfx::IntSize& aSize)
 {
-  RefPtr<ImageContainer> container = LayerManager::CreateImageContainer();
+  RefPtr<ImageContainer> container =
+    LayerManager::CreateImageContainer(ImageContainer::ASYNCHRONOUS);
   RefPtr<PlanarYCbCrImage> image = container->CreatePlanarYCbCrImage();
   if (!image) {
-    MOZ_ASSERT(false);
     return nullptr;
   }
 
@@ -76,35 +79,36 @@ VideoFrame::CreateBlackImage(const gfx::IntSize& aSize)
   data.mPicSize = gfx::IntSize(aSize.width, aSize.height);
   data.mStereoMode = StereoMode::MONO;
 
-  // SetData copies data, so we can free data.
-  if (!image->SetData(data)) {
-    MOZ_ASSERT(false);
+  // Copies data, so we can free data.
+  if (!image->CopyData(data)) {
     return nullptr;
   }
 
   return image.forget();
 }
 
-VideoChunk::VideoChunk()
-{}
-
-VideoChunk::~VideoChunk()
-{}
-
 void
 VideoSegment::AppendFrame(already_AddRefed<Image>&& aImage,
                           StreamTime aDuration,
                           const IntSize& aIntrinsicSize,
-                          bool aForceBlack)
+                          const PrincipalHandle& aPrincipalHandle,
+                          bool aForceBlack,
+                          TimeStamp aTimeStamp)
 {
   VideoChunk* chunk = AppendChunk(aDuration);
+  chunk->mTimeStamp = aTimeStamp;
   VideoFrame frame(aImage, aIntrinsicSize);
   frame.SetForceBlack(aForceBlack);
+  frame.SetPrincipalHandle(aPrincipalHandle);
   chunk->mFrame.TakeFrom(&frame);
 }
 
 VideoSegment::VideoSegment()
   : MediaSegmentBase<VideoSegment, VideoChunk>(VIDEO)
+{}
+
+VideoSegment::VideoSegment(VideoSegment&& aSegment)
+  : MediaSegmentBase<VideoSegment, VideoChunk>(std::move(aSegment))
 {}
 
 VideoSegment::~VideoSegment()

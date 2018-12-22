@@ -25,12 +25,13 @@ class EventChainPreVisitor;
 
 namespace dom {
 
-class DOMError;
+class DOMException;
 class DOMStringList;
 class IDBDatabase;
 class IDBObjectStore;
 class IDBOpenDBRequest;
 class IDBRequest;
+class StrongWorkerRef;
 
 namespace indexedDB {
 class BackgroundCursorChild;
@@ -50,8 +51,8 @@ class IDBTransaction final
   friend class indexedDB::BackgroundCursorChild;
   friend class indexedDB::BackgroundRequestChild;
 
-  class WorkerFeature;
-  friend class WorkerFeature;
+  class WorkerHolder;
+  friend class WorkerHolder;
 
 public:
   enum Mode
@@ -76,11 +77,11 @@ public:
 
 private:
   RefPtr<IDBDatabase> mDatabase;
-  RefPtr<DOMError> mError;
+  RefPtr<DOMException> mError;
   nsTArray<nsString> mObjectStoreNames;
   nsTArray<RefPtr<IDBObjectStore>> mObjectStores;
   nsTArray<RefPtr<IDBObjectStore>> mDeletedObjectStores;
-  nsAutoPtr<WorkerFeature> mWorkerFeature;
+  RefPtr<StrongWorkerRef> mWorkerRef;
 
   // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
   // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
@@ -109,6 +110,7 @@ private:
   bool mCreating;
   bool mRegistered;
   bool mAbortedByScript;
+  bool mNotedActiveTransaction;
 
 #ifdef DEBUG
   bool mSentCommitOrAbort;
@@ -152,6 +154,10 @@ public:
     } else {
       mBackgroundActor.mNormalBackgroundActor = nullptr;
     }
+
+    // Note inactive transaction here if we didn't receive the Complete message
+    // from the parent.
+    MaybeNoteInactiveTransaction();
   }
 
   indexedDB::BackgroundRequestChild*
@@ -246,10 +252,16 @@ public:
   DeleteObjectStore(int64_t aObjectStoreId);
 
   void
+  RenameObjectStore(int64_t aObjectStoreId, const nsAString& aName);
+
+  void
   CreateIndex(IDBObjectStore* aObjectStore, const indexedDB::IndexMetadata& aMetadata);
 
   void
   DeleteIndex(IDBObjectStore* aObjectStore, int64_t aIndexId);
+
+  void
+  RenameIndex(IDBObjectStore* aObjectStore, int64_t aIndexId, const nsAString& aName);
 
   void
   Abort(IDBRequest* aRequest);
@@ -271,7 +283,7 @@ public:
   IDBTransactionMode
   GetMode(ErrorResult& aRv) const;
 
-  DOMError*
+  DOMException*
   GetError() const;
 
   already_AddRefed<IDBObjectStore>
@@ -306,9 +318,8 @@ public:
   virtual JSObject*
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  // nsIDOMEventTarget
-  virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) override;
+  // EventTarget
+  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
 private:
   IDBTransaction(IDBDatabase* aDatabase,
@@ -317,13 +328,19 @@ private:
   ~IDBTransaction();
 
   void
-  AbortInternal(nsresult aAbortCode, already_AddRefed<DOMError> aError);
+  AbortInternal(nsresult aAbortCode, already_AddRefed<DOMException> aError);
 
   void
   SendCommit();
 
   void
   SendAbort(nsresult aResultCode);
+
+  void
+  NoteActiveTransaction();
+
+  void
+  MaybeNoteInactiveTransaction();
 
   void
   OnNewRequest();

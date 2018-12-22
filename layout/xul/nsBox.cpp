@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,181 +7,68 @@
 #include "nsBoxLayoutState.h"
 #include "nsBox.h"
 #include "nsBoxFrame.h"
+#include "nsDOMAttributeMap.h"
 #include "nsPresContext.h"
 #include "nsCOMPtr.h"
 #include "nsIContent.h"
 #include "nsContainerFrame.h"
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMNode.h"
-#include "nsIDOMMozNamedAttrMap.h"
-#include "nsIDOMAttr.h"
 #include "nsITheme.h"
 #include "nsIServiceManager.h"
 #include "nsBoxLayout.h"
 #include "FrameLayerBuilder.h"
+#include "mozilla/dom/Attr.h"
+#include "mozilla/dom/Element.h"
 #include <algorithm>
 
 using namespace mozilla;
 
-#ifdef DEBUG_LAYOUT
-int32_t gIndent = 0;
-#endif
-
-#ifdef DEBUG_LAYOUT
-void
-nsBoxAddIndents()
-{
-    for(int32_t i=0; i < gIndent; i++)
-    {
-        printf(" ");
-    }
-}
-#endif
-
-#ifdef DEBUG_LAYOUT
-void
-nsBox::AppendAttribute(const nsAutoString& aAttribute, const nsAutoString& aValue, nsAutoString& aResult)
-{
-   aResult.Append(aAttribute);
-   aResult.AppendLiteral("='");
-   aResult.Append(aValue);
-   aResult.AppendLiteral("' ");
-}
-
-void
-nsBox::ListBox(nsAutoString& aResult)
-{
-    nsAutoString name;
-    GetBoxName(name);
-
-    char addr[100];
-    sprintf(addr, "[@%p] ", static_cast<void*>(this));
-
-    aResult.AppendASCII(addr);
-    aResult.Append(name);
-    aResult.Append(' ');
-
-    nsIContent* content = GetContent();
-
-    // add on all the set attributes
-    if (content) {
-      nsCOMPtr<nsIDOMNode> node(do_QueryInterface(content));
-      nsCOMPtr<nsIDOMMozNamedAttrMap> namedMap;
-
-      node->GetAttributes(getter_AddRefs(namedMap));
-      uint32_t length;
-      namedMap->GetLength(&length);
-
-      nsCOMPtr<nsIDOMAttr> attribute;
-      for (uint32_t i = 0; i < length; ++i)
-      {
-        namedMap->Item(i, getter_AddRefs(attribute));
-        attribute->GetName(name);
-        nsAutoString value;
-        attribute->GetValue(value);
-        AppendAttribute(name, value, aResult);
-      }
-    }
-}
-
 nsresult
-nsBox::DumpBox(FILE* aFile)
+nsBox::BeginXULLayout(nsBoxLayoutState& aState)
 {
-  nsAutoString s;
-  ListBox(s);
-  fprintf(aFile, "%s", NS_LossyConvertUTF16toASCII(s).get());
-  return NS_OK;
-}
-
-void
-nsBox::PropagateDebug(nsBoxLayoutState& aState)
-{
-  // propagate debug information
-  if (mState & NS_STATE_DEBUG_WAS_SET) {
-    if (mState & NS_STATE_SET_TO_DEBUG)
-      SetDebug(aState, true);
-    else
-      SetDebug(aState, false);
-  } else if (mState & NS_STATE_IS_ROOT) {
-    SetDebug(aState, gDebug);
-  }
-}
-#endif
-
-#ifdef DEBUG_LAYOUT
-void
-nsBox::GetBoxName(nsAutoString& aName)
-{
-  aName.AssignLiteral("Box");
-}
-#endif
-
-nsresult
-nsBox::BeginLayout(nsBoxLayoutState& aState)
-{
-#ifdef DEBUG_LAYOUT 
-
-  nsBoxAddIndents();
-  printf("Layout: ");
-  DumpBox(stdout);
-  printf("\n");
-  gIndent++;
-#endif
-
   // mark ourselves as dirty so no child under us
   // can post an incremental layout.
   // XXXldb Is this still needed?
-  mState |= NS_FRAME_HAS_DIRTY_CHILDREN;
+  AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
 
   if (GetStateBits() & NS_FRAME_IS_DIRTY)
   {
-    // If the parent is dirty, all the children are dirty (nsHTMLReflowState
+    // If the parent is dirty, all the children are dirty (ReflowInput
     // does this too).
     nsIFrame* box;
-    for (box = GetChildBox(this); box; box = GetNextBox(box))
+    for (box = GetChildXULBox(this); box; box = GetNextXULBox(box))
       box->AddStateBits(NS_FRAME_IS_DIRTY);
   }
 
-  // Another copy-over from nsHTMLReflowState.
+  // Another copy-over from ReflowInput.
   // Since we are in reflow, we don't need to store these properties anymore.
-  FrameProperties props = Properties();
-  props.Delete(UsedBorderProperty());
-  props.Delete(UsedPaddingProperty());
-  props.Delete(UsedMarginProperty());
-
-#ifdef DEBUG_LAYOUT
-  PropagateDebug(aState);
-#endif
+  DeleteProperty(UsedBorderProperty());
+  DeleteProperty(UsedPaddingProperty());
+  DeleteProperty(UsedMarginProperty());
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsBox::DoLayout(nsBoxLayoutState& aState)
+nsBox::DoXULLayout(nsBoxLayoutState& aState)
 {
   return NS_OK;
 }
 
 nsresult
-nsBox::EndLayout(nsBoxLayoutState& aState)
+nsBox::EndXULLayout(nsBoxLayoutState& aState)
 {
-
-  #ifdef DEBUG_LAYOUT
-      --gIndent;
-  #endif
-
   return SyncLayout(aState);
 }
 
 bool nsBox::gGotTheme = false;
 nsITheme* nsBox::gTheme = nullptr;
 
-nsBox::nsBox()
+nsBox::nsBox(ClassID aID)
+  : nsIFrame(aID)
 {
   MOZ_COUNT_CTOR(nsBox);
-  //mX = 0;
-  //mY = 0;
   if (!gGotTheme) {
     gGotTheme = true;
     CallGetService("@mozilla.org/chrome/chrome-native-theme;1", &gTheme);
@@ -202,19 +90,19 @@ nsBox::Shutdown()
 }
 
 nsresult
-nsBox::RelayoutChildAtOrdinal(nsIFrame* aChild)
+nsBox::XULRelayoutChildAtOrdinal(nsIFrame* aChild)
 {
   return NS_OK;
 }
 
 nsresult
-nsIFrame::GetClientRect(nsRect& aClientRect)
+nsIFrame::GetXULClientRect(nsRect& aClientRect)
 {
   aClientRect = mRect;
   aClientRect.MoveTo(0,0);
 
   nsMargin borderPadding;
-  GetBorderAndPadding(borderPadding);
+  GetXULBorderAndPadding(borderPadding);
 
   aClientRect.Deflate(borderPadding);
 
@@ -224,20 +112,15 @@ nsIFrame::GetClientRect(nsRect& aClientRect)
   if (aClientRect.height < 0)
      aClientRect.height = 0;
 
- // NS_ASSERTION(aClientRect.width >=0 && aClientRect.height >= 0, "Content Size < 0");
-
   return NS_OK;
 }
 
 void
-nsBox::SetBounds(nsBoxLayoutState& aState, const nsRect& aRect, bool aRemoveOverflowAreas)
+nsBox::SetXULBounds(nsBoxLayoutState& aState, const nsRect& aRect, bool aRemoveOverflowAreas)
 {
-    NS_BOX_ASSERTION(this, aRect.width >=0 && aRect.height >= 0, "SetBounds Size < 0");
-
     nsRect rect(mRect);
 
-    uint32_t flags = 0;
-    GetLayoutFlags(flags);
+    uint32_t flags = GetXULLayoutFlags();
 
     uint32_t stateFlags = aState.LayoutFlags();
 
@@ -261,38 +144,18 @@ nsBox::SetBounds(nsBoxLayoutState& aState, const nsRect& aRect, bool aRemoveOver
       if ((rect.x != aRect.x) || (rect.y != aRect.y))
         nsContainerFrame::PositionChildViews(this);
     }
-  
-
-   /*  
-    // only if the origin changed
-    if ((rect.x != aRect.x) || (rect.y != aRect.y))  {
-      if (frame->HasView()) {
-        nsContainerFrame::PositionFrameView(presContext, frame,
-                                            frame->GetView());
-      } else {
-        nsContainerFrame::PositionChildViews(presContext, frame);
-      }
-    }
-    */
 }
-
-void
-nsBox::GetLayoutFlags(uint32_t& aFlags)
-{
-  aFlags = 0;
-}
-
 
 nsresult
-nsIFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
+nsIFrame::GetXULBorderAndPadding(nsMargin& aBorderAndPadding)
 {
   aBorderAndPadding.SizeTo(0, 0, 0, 0);
-  nsresult rv = GetBorder(aBorderAndPadding);
+  nsresult rv = GetXULBorder(aBorderAndPadding);
   if (NS_FAILED(rv))
     return rv;
 
   nsMargin padding;
-  rv = GetPadding(padding);
+  rv = GetXULPadding(padding);
   if (NS_FAILED(rv))
     return rv;
 
@@ -302,22 +165,20 @@ nsIFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
 }
 
 nsresult
-nsBox::GetBorder(nsMargin& aMargin)
+nsBox::GetXULBorder(nsMargin& aMargin)
 {
   aMargin.SizeTo(0,0,0,0);
-    
+
   const nsStyleDisplay* disp = StyleDisplay();
   if (disp->mAppearance && gTheme) {
     // Go to the theme for the border.
     nsPresContext *context = PresContext();
     if (gTheme->ThemeSupportsWidget(context, this, disp->mAppearance)) {
-      nsIntMargin margin(0, 0, 0, 0);
-      gTheme->GetWidgetBorder(context->DeviceContext(), this,
-                              disp->mAppearance, &margin);
-      aMargin.top = context->DevPixelsToAppUnits(margin.top);
-      aMargin.right = context->DevPixelsToAppUnits(margin.right);
-      aMargin.bottom = context->DevPixelsToAppUnits(margin.bottom);
-      aMargin.left = context->DevPixelsToAppUnits(margin.left);
+      LayoutDeviceIntMargin margin =
+        gTheme->GetWidgetBorder(context->DeviceContext(), this,
+                                disp->mAppearance);
+      aMargin = LayoutDevicePixel::ToAppUnits(margin,
+                                              context->AppUnitsPerDevPixel());
       return NS_OK;
     }
   }
@@ -328,37 +189,33 @@ nsBox::GetBorder(nsMargin& aMargin)
 }
 
 nsresult
-nsBox::GetPadding(nsMargin& aMargin)
+nsBox::GetXULPadding(nsMargin& aPadding)
 {
   const nsStyleDisplay *disp = StyleDisplay();
   if (disp->mAppearance && gTheme) {
     // Go to the theme for the padding.
     nsPresContext *context = PresContext();
     if (gTheme->ThemeSupportsWidget(context, this, disp->mAppearance)) {
-      nsIntMargin margin(0, 0, 0, 0);
-      bool useThemePadding;
-
-      useThemePadding = gTheme->GetWidgetPadding(context->DeviceContext(),
-                                                 this, disp->mAppearance,
-                                                 &margin);
+      LayoutDeviceIntMargin padding;
+      bool useThemePadding =
+        gTheme->GetWidgetPadding(context->DeviceContext(),
+                                 this, disp->mAppearance, &padding);
       if (useThemePadding) {
-        aMargin.top = context->DevPixelsToAppUnits(margin.top);
-        aMargin.right = context->DevPixelsToAppUnits(margin.right);
-        aMargin.bottom = context->DevPixelsToAppUnits(margin.bottom);
-        aMargin.left = context->DevPixelsToAppUnits(margin.left);
+        aPadding = LayoutDevicePixel::ToAppUnits(padding,
+                                                context->AppUnitsPerDevPixel());
         return NS_OK;
       }
     }
   }
 
-  aMargin.SizeTo(0,0,0,0);
-  StylePadding()->GetPadding(aMargin);
+  aPadding.SizeTo(0,0,0,0);
+  StylePadding()->GetPadding(aPadding);
 
   return NS_OK;
 }
 
 nsresult
-nsBox::GetMargin(nsMargin& aMargin)
+nsBox::GetXULMargin(nsMargin& aMargin)
 {
   aMargin.SizeTo(0,0,0,0);
   StyleMargin()->GetMargin(aMargin);
@@ -392,77 +249,77 @@ nsBox::DoesNeedRecalc(nscoord aCoord)
 }
 
 nsSize
-nsBox::GetPrefSize(nsBoxLayoutState& aState)
+nsBox::GetXULPrefSize(nsBoxLayoutState& aState)
 {
   NS_ASSERTION(aState.GetRenderingContext(), "must have rendering context");
 
   nsSize pref(0,0);
   DISPLAY_PREF_SIZE(this, pref);
 
-  if (IsCollapsed())
+  if (IsXULCollapsed())
     return pref;
 
   AddBorderAndPadding(pref);
   bool widthSet, heightSet;
-  nsIFrame::AddCSSPrefSize(this, pref, widthSet, heightSet);
+  nsIFrame::AddXULPrefSize(this, pref, widthSet, heightSet);
 
-  nsSize minSize = GetMinSize(aState);
-  nsSize maxSize = GetMaxSize(aState);
+  nsSize minSize = GetXULMinSize(aState);
+  nsSize maxSize = GetXULMaxSize(aState);
   return BoundsCheck(minSize, pref, maxSize);
 }
 
 nsSize
-nsBox::GetMinSize(nsBoxLayoutState& aState)
+nsBox::GetXULMinSize(nsBoxLayoutState& aState)
 {
   NS_ASSERTION(aState.GetRenderingContext(), "must have rendering context");
 
   nsSize min(0,0);
   DISPLAY_MIN_SIZE(this, min);
 
-  if (IsCollapsed())
+  if (IsXULCollapsed())
     return min;
 
   AddBorderAndPadding(min);
   bool widthSet, heightSet;
-  nsIFrame::AddCSSMinSize(aState, this, min, widthSet, heightSet);
+  nsIFrame::AddXULMinSize(aState, this, min, widthSet, heightSet);
   return min;
 }
 
 nsSize
-nsBox::GetMinSizeForScrollArea(nsBoxLayoutState& aBoxLayoutState)
+nsBox::GetXULMinSizeForScrollArea(nsBoxLayoutState& aBoxLayoutState)
 {
   return nsSize(0, 0);
 }
 
 nsSize
-nsBox::GetMaxSize(nsBoxLayoutState& aState)
+nsBox::GetXULMaxSize(nsBoxLayoutState& aState)
 {
   NS_ASSERTION(aState.GetRenderingContext(), "must have rendering context");
 
   nsSize maxSize(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
   DISPLAY_MAX_SIZE(this, maxSize);
 
-  if (IsCollapsed())
+  if (IsXULCollapsed())
     return maxSize;
 
   AddBorderAndPadding(maxSize);
   bool widthSet, heightSet;
-  nsIFrame::AddCSSMaxSize(this, maxSize, widthSet, heightSet);
+  nsIFrame::AddXULMaxSize(this, maxSize, widthSet, heightSet);
   return maxSize;
 }
 
 nscoord
-nsBox::GetFlex()
+nsBox::GetXULFlex()
 {
   nscoord flex = 0;
 
-  nsIFrame::AddCSSFlex(this, flex);
+  nsIFrame::AddXULFlex(this, flex);
 
   return flex;
 }
 
 uint32_t
-nsIFrame::GetOrdinal()
+nsIFrame::GetXULOrdinal()
 {
   uint32_t ordinal = StyleXUL()->mBoxOrdinal;
 
@@ -472,7 +329,7 @@ nsIFrame::GetOrdinal()
     nsresult error;
     nsAutoString value;
 
-    content->GetAttr(kNameSpaceID_None, nsGkAtoms::ordinal, value);
+    content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::ordinal, value);
     if (!value.IsEmpty()) {
       ordinal = value.ToInteger(&error);
     }
@@ -482,33 +339,33 @@ nsIFrame::GetOrdinal()
 }
 
 nscoord
-nsBox::GetBoxAscent(nsBoxLayoutState& aState)
+nsBox::GetXULBoxAscent(nsBoxLayoutState& aState)
 {
-  if (IsCollapsed())
+  if (IsXULCollapsed())
     return 0;
 
-  return GetPrefSize(aState).height;
+  return GetXULPrefSize(aState).height;
 }
 
 bool
-nsBox::IsCollapsed()
+nsBox::IsXULCollapsed()
 {
   return StyleVisibility()->mVisible == NS_STYLE_VISIBILITY_COLLAPSE;
 }
 
 nsresult
-nsIFrame::Layout(nsBoxLayoutState& aState)
+nsIFrame::XULLayout(nsBoxLayoutState& aState)
 {
   NS_ASSERTION(aState.GetRenderingContext(), "must have rendering context");
 
   nsBox *box = static_cast<nsBox*>(this);
   DISPLAY_LAYOUT(box);
 
-  box->BeginLayout(aState);
+  box->BeginXULLayout(aState);
 
-  box->DoLayout(aState);
+  box->DoXULLayout(aState);
 
-  box->EndLayout(aState);
+  box->EndXULLayout(aState);
 
   return NS_OK;
 }
@@ -527,23 +384,22 @@ nsresult
 nsBox::SyncLayout(nsBoxLayoutState& aState)
 {
   /*
-  if (IsCollapsed()) {
+  if (IsXULCollapsed()) {
     CollapseChild(aState, this, true);
     return NS_OK;
   }
   */
-  
+
 
   if (GetStateBits() & NS_FRAME_IS_DIRTY)
-     Redraw(aState);
+     XULRedraw(aState);
 
   RemoveStateBits(NS_FRAME_HAS_DIRTY_CHILDREN | NS_FRAME_IS_DIRTY
                   | NS_FRAME_FIRST_REFLOW | NS_FRAME_IN_REFLOW);
 
   nsPresContext* presContext = aState.PresContext();
 
-  uint32_t flags = 0;
-  GetLayoutFlags(flags);
+  uint32_t flags = GetXULLayoutFlags();
 
   uint32_t stateFlags = aState.LayoutFlags();
 
@@ -557,7 +413,7 @@ nsBox::SyncLayout(nsBoxLayoutState& aState)
   else {
     nsRect rect(nsPoint(0, 0), GetSize());
     nsOverflowAreas overflowAreas(rect, rect);
-    if (!DoesClipChildren() && !IsCollapsed()) {
+    if (!DoesClipChildren() && !IsXULCollapsed()) {
       // See if our child frames caused us to overflow after being laid
       // out. If so, store the overflow area.  This normally can't happen
       // in XUL, but it can happen with the CSS 'outline' property and
@@ -576,13 +432,13 @@ nsBox::SyncLayout(nsBoxLayoutState& aState)
     // things like opacity correct
     nsContainerFrame::SyncFrameViewAfterReflow(presContext, this, view,
                                                visualOverflow, flags);
-  } 
+  }
 
   return NS_OK;
 }
 
 nsresult
-nsIFrame::Redraw(nsBoxLayoutState& aState)
+nsIFrame::XULRedraw(nsBoxLayoutState& aState)
 {
   if (aState.PaintingDisabled())
     return NS_OK;
@@ -595,7 +451,7 @@ nsIFrame::Redraw(nsBoxLayoutState& aState)
 }
 
 bool
-nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aHeightSet)
+nsIFrame::AddXULPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aHeightSet)
 {
     aWidthSet = false;
     aHeightSet = false;
@@ -606,7 +462,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
     // see if the width or height was specifically set
     // XXX Handle eStyleUnit_Enumerated?
     // (Handling the eStyleUnit_Enumerated types requires
-    // GetPrefSize/GetMinSize methods that don't consider
+    // GetXULPrefSize/GetXULMinSize methods that don't consider
     // (min-/max-/)(width/height) properties.)
     const nsStyleCoord &width = position->mWidth;
     if (width.GetUnit() == eStyleUnit_Coord) {
@@ -615,7 +471,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
     } else if (width.IsCalcUnit()) {
         if (!width.CalcHasPercent()) {
             // pass 0 for percentage basis since we know there are no %s
-            aSize.width = nsRuleNode::ComputeComputedCalc(width, 0);
+            aSize.width = width.ComputeComputedCalc(0);
             if (aSize.width < 0)
                 aSize.width = 0;
             aWidthSet = true;
@@ -629,7 +485,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
     } else if (height.IsCalcUnit()) {
         if (!height.CalcHasPercent()) {
             // pass 0 for percentage basis since we know there are no %s
-            aSize.height = nsRuleNode::ComputeComputedCalc(height, 0);
+            aSize.height = height.ComputeComputedCalc(0);
             if (aSize.height < 0)
                 aSize.height = 0;
             aHeightSet = true;
@@ -644,7 +500,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -653,7 +509,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -668,7 +524,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
 
 
 bool
-nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
+nsIFrame::AddXULMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
                       bool &aWidthSet, bool &aHeightSet)
 {
     aWidthSet = false;
@@ -704,7 +560,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     if ((minWidth.GetUnit() == eStyleUnit_Coord &&
          minWidth.GetCoordValue() != 0) ||
         (minWidth.IsCalcUnit() && !minWidth.CalcHasPercent())) {
-        nscoord min = nsRuleNode::ComputeCoordPercentCalc(minWidth, 0);
+        nscoord min = minWidth.ComputeCoordPercentCalc(0);
         if (!aWidthSet || (min > aSize.width && canOverride)) {
            aSize.width = min;
            aWidthSet = true;
@@ -718,7 +574,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     }
     // XXX Handle eStyleUnit_Enumerated?
     // (Handling the eStyleUnit_Enumerated types requires
-    // GetPrefSize/GetMinSize methods that don't consider
+    // GetXULPrefSize/GetXULMinSize methods that don't consider
     // (min-/max-/)(width/height) properties.
     // calc() with percentage is treated like '0' (unset)
 
@@ -726,7 +582,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     if ((minHeight.GetUnit() == eStyleUnit_Coord &&
          minHeight.GetCoordValue() != 0) ||
         (minHeight.IsCalcUnit() && !minHeight.CalcHasPercent())) {
-        nscoord min = nsRuleNode::ComputeCoordPercentCalc(minHeight, 0);
+        nscoord min = minHeight.ComputeCoordPercentCalc(0);
         if (!aHeightSet || (min > aSize.height && canOverride)) {
            aSize.height = min;
            aHeightSet = true;
@@ -745,7 +601,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::minwidth, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::minwidth, value);
         if (!value.IsEmpty())
         {
             value.Trim("%");
@@ -757,7 +613,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::minheight, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::minheight, value);
         if (!value.IsEmpty())
         {
             value.Trim("%");
@@ -775,7 +631,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
 }
 
 bool
-nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aHeightSet)
+nsIFrame::AddXULMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aHeightSet)
 {
     aWidthSet = false;
     aHeightSet = false;
@@ -787,18 +643,18 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
     // see if the width or height was specifically set
     // XXX Handle eStyleUnit_Enumerated?
     // (Handling the eStyleUnit_Enumerated types requires
-    // GetPrefSize/GetMinSize methods that don't consider
+    // GetXULPrefSize/GetXULMinSize methods that don't consider
     // (min-/max-/)(width/height) properties.)
     const nsStyleCoord maxWidth = position->mMaxWidth;
     if (maxWidth.ConvertsToLength()) {
-        aSize.width = nsRuleNode::ComputeCoordPercentCalc(maxWidth, 0);
+        aSize.width = maxWidth.ComputeCoordPercentCalc(0);
         aWidthSet = true;
     }
     // percentages and calc() with percentages are treated like 'none'
 
     const nsStyleCoord &maxHeight = position->mMaxHeight;
     if (maxHeight.ConvertsToLength()) {
-        aSize.height = nsRuleNode::ComputeCoordPercentCalc(maxHeight, 0);
+        aSize.height = maxHeight.ComputeCoordPercentCalc(0);
         aHeightSet = true;
     }
     // percentages and calc() with percentages are treated like 'none'
@@ -808,7 +664,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::maxwidth, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::maxwidth, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -818,7 +674,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::maxheight, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::maxheight, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -834,7 +690,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
 }
 
 bool
-nsIFrame::AddCSSFlex(nsIFrame* aBox, nscoord& aFlex)
+nsIFrame::AddXULFlex(nsIFrame* aBox, nscoord& aFlex)
 {
     bool flexSet = false;
 
@@ -847,7 +703,7 @@ nsIFrame::AddCSSFlex(nsIFrame* aBox, nscoord& aFlex)
         nsresult error;
         nsAutoString value;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::flex, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::flex, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
             aFlex = value.ToInteger(&error);
@@ -873,7 +729,7 @@ void
 nsBox::AddBorderAndPadding(nsIFrame* aBox, nsSize& aSize)
 {
   nsMargin borderPadding(0,0,0,0);
-  aBox->GetBorderAndPadding(borderPadding);
+  aBox->GetXULBorderAndPadding(borderPadding);
   AddMargin(aSize, borderPadding);
 }
 
@@ -881,7 +737,7 @@ void
 nsBox::AddMargin(nsIFrame* aChild, nsSize& aSize)
 {
   nsMargin margin(0,0,0,0);
-  aChild->GetMargin(margin);
+  aChild->GetXULMargin(margin);
   AddMargin(aSize, margin);
 }
 
@@ -922,69 +778,24 @@ nsBox::BoundsCheck(const nsSize& aMinSize, const nsSize& aPrefSize, const nsSize
 }
 
 /*static*/ nsIFrame*
-nsBox::GetChildBox(const nsIFrame* aFrame)
+nsBox::GetChildXULBox(const nsIFrame* aFrame)
 {
   // box layout ends at box-wrapped frames, so don't allow these frames
   // to report child boxes.
-  return aFrame->IsBoxFrame() ? aFrame->PrincipalChildList().FirstChild() : nullptr;
+  return aFrame->IsXULBoxFrame() ? aFrame->PrincipalChildList().FirstChild() : nullptr;
 }
 
 /*static*/ nsIFrame*
-nsBox::GetNextBox(const nsIFrame* aFrame)
+nsBox::GetNextXULBox(const nsIFrame* aFrame)
 {
   return aFrame->GetParent() &&
-    aFrame->GetParent()->IsBoxFrame() ? aFrame->GetNextSibling() : nullptr;
+    aFrame->GetParent()->IsXULBoxFrame() ? aFrame->GetNextSibling() : nullptr;
 }
 
 /*static*/ nsIFrame*
-nsBox::GetParentBox(const nsIFrame* aFrame)
+nsBox::GetParentXULBox(const nsIFrame* aFrame)
 {
   return aFrame->GetParent() &&
-    aFrame->GetParent()->IsBoxFrame() ? aFrame->GetParent() : nullptr;
+    aFrame->GetParent()->IsXULBoxFrame() ? aFrame->GetParent() : nullptr;
 }
 
-#ifdef DEBUG_LAYOUT
-nsresult
-nsBox::SetDebug(nsBoxLayoutState& aState, bool aDebug)
-{
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBox::GetDebugBoxAt( const nsPoint& aPoint,
-                      nsIFrame**     aBox)
-{
-  nsRect thisRect(nsPoint(0,0), GetSize());
-  if (!thisRect.Contains(aPoint))
-    return NS_ERROR_FAILURE;
-
-  nsIFrame* child = nsBox::GetChildBox(this);
-  nsIFrame* hit = nullptr;
-
-  *aBox = nullptr;
-  while (nullptr != child) {
-    nsresult rv = child->GetDebugBoxAt(aPoint - child->GetOffsetTo(this), &hit);
-
-    if (NS_SUCCEEDED(rv) && hit) {
-      *aBox = hit;
-    }
-    child = GetNextBox(child);
-  }
-
-  // found a child
-  if (*aBox) {
-    return NS_OK;
-  }
-
-  return NS_ERROR_FAILURE;
-}
-
-
-nsresult
-nsBox::GetDebug(bool& aDebug)
-{
-  aDebug = false;
-  return NS_OK;
-}
-
-#endif

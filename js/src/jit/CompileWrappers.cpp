@@ -4,7 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "jit/CompileWrappers.h"
+
+#include "gc/GC.h"
 #include "jit/Ion.h"
+#include "jit/JitRealm.h"
+
+#include "vm/Realm-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -21,61 +27,6 @@ CompileRuntime::get(JSRuntime* rt)
     return reinterpret_cast<CompileRuntime*>(rt);
 }
 
-bool
-CompileRuntime::onMainThread()
-{
-    return js::CurrentThreadCanAccessRuntime(runtime());
-}
-
-js::PerThreadData*
-CompileRuntime::mainThread()
-{
-    MOZ_ASSERT(onMainThread());
-    return &runtime()->mainThread;
-}
-
-const void*
-CompileRuntime::addressOfJitTop()
-{
-    return &runtime()->jitTop;
-}
-
-const void*
-CompileRuntime::addressOfJitActivation()
-{
-    return &runtime()->jitActivation;
-}
-
-const void*
-CompileRuntime::addressOfProfilingActivation()
-{
-    return (const void*) &runtime()->profilingActivation_;
-}
-
-const void*
-CompileRuntime::addressOfJitStackLimit()
-{
-    return runtime()->addressOfJitStackLimit();
-}
-
-const void*
-CompileRuntime::addressOfJSContext()
-{
-    return &runtime()->jitJSContext;
-}
-
-const void*
-CompileRuntime::addressOfActivation()
-{
-    return runtime()->addressOfActivation();
-}
-
-const void*
-CompileRuntime::addressOfLastCachedNativeIterator()
-{
-    return &runtime()->nativeIterCache.last;
-}
-
 #ifdef JS_GC_ZEAL
 const void*
 CompileRuntime::addressOfGCZealModeBits()
@@ -84,28 +35,16 @@ CompileRuntime::addressOfGCZealModeBits()
 }
 #endif
 
-const void*
-CompileRuntime::addressOfInterruptUint32()
-{
-    return runtime()->addressOfInterruptUint32();
-}
-
 const JitRuntime*
 CompileRuntime::jitRuntime()
 {
     return runtime()->jitRuntime();
 }
 
-SPSProfiler&
-CompileRuntime::spsProfiler()
+GeckoProfilerRuntime&
+CompileRuntime::geckoProfiler()
 {
-    return runtime()->spsProfiler;
-}
-
-bool
-CompileRuntime::canUseSignalHandlers()
-{
-    return runtime()->canUseSignalHandlers();
+    return runtime()->geckoProfiler();
 }
 
 bool
@@ -159,8 +98,25 @@ CompileRuntime::positiveInfinityValue()
 const WellKnownSymbols&
 CompileRuntime::wellKnownSymbols()
 {
-    MOZ_ASSERT(onMainThread());
     return *runtime()->wellKnownSymbols;
+}
+
+const void*
+CompileRuntime::mainContextPtr()
+{
+    return runtime()->mainContextFromAnyThread();
+}
+
+const void*
+CompileRuntime::addressOfJitStackLimit()
+{
+    return runtime()->mainContextFromAnyThread()->addressOfJitStackLimit();
+}
+
+const void*
+CompileRuntime::addressOfInterruptBits()
+{
+    return runtime()->mainContextFromAnyThread()->addressOfInterruptBits();
 }
 
 #ifdef DEBUG
@@ -174,26 +130,13 @@ CompileRuntime::isInsideNursery(gc::Cell* cell)
 const DOMCallbacks*
 CompileRuntime::DOMcallbacks()
 {
-    return GetDOMCallbacks(runtime());
+    return runtime()->DOMcallbacks;
 }
 
-const MathCache*
-CompileRuntime::maybeGetMathCache()
+bool
+CompileRuntime::runtimeMatches(JSRuntime* rt)
 {
-    return runtime()->maybeGetMathCache();
-}
-
-const Nursery&
-CompileRuntime::gcNursery()
-{
-    return runtime()->gc.nursery;
-}
-
-void
-CompileRuntime::setMinorGCShouldCancelIonCompilations()
-{
-    MOZ_ASSERT(onMainThread());
-    runtime()->gc.storeBuffer.setShouldCancelIonCompilations();
+    return rt == runtime();
 }
 
 Zone*
@@ -208,6 +151,26 @@ CompileZone::get(Zone* zone)
     return reinterpret_cast<CompileZone*>(zone);
 }
 
+CompileRuntime*
+CompileZone::runtime()
+{
+    return CompileRuntime::get(zone()->runtimeFromAnyThread());
+}
+
+bool
+CompileZone::isAtomsZone()
+{
+    return zone()->isAtomsZone();
+}
+
+#ifdef DEBUG
+const void*
+CompileZone::addressOfIonBailAfter()
+{
+    return zone()->runtimeFromAnyThread()->jitRuntime()->addressOfIonBailAfter();
+}
+#endif
+
 const void*
 CompileZone::addressOfNeedsIncrementalBarrier()
 {
@@ -220,52 +183,108 @@ CompileZone::addressOfFreeList(gc::AllocKind allocKind)
     return zone()->arenas.addressOfFreeList(allocKind);
 }
 
-JSCompartment*
-CompileCompartment::compartment()
+const void*
+CompileZone::addressOfNurseryPosition()
 {
-    return reinterpret_cast<JSCompartment*>(this);
-}
-
-/* static */ CompileCompartment*
-CompileCompartment::get(JSCompartment* comp)
-{
-    return reinterpret_cast<CompileCompartment*>(comp);
-}
-
-CompileZone*
-CompileCompartment::zone()
-{
-    return CompileZone::get(compartment()->zone());
-}
-
-CompileRuntime*
-CompileCompartment::runtime()
-{
-    return CompileRuntime::get(compartment()->runtimeFromAnyThread());
+    return zone()->runtimeFromAnyThread()->gc.addressOfNurseryPosition();
 }
 
 const void*
-CompileCompartment::addressOfEnumerators()
+CompileZone::addressOfStringNurseryPosition()
 {
-    return &compartment()->enumerators;
+    // Objects and strings share a nursery, for now at least.
+    return zone()->runtimeFromAnyThread()->gc.addressOfNurseryPosition();
 }
 
 const void*
-CompileCompartment::addressOfRandomNumberGenerator()
+CompileZone::addressOfNurseryCurrentEnd()
 {
-    return compartment()->randomNumberGenerator.ptr();
+    return zone()->runtimeFromAnyThread()->gc.addressOfNurseryCurrentEnd();
 }
 
-const JitCompartment*
-CompileCompartment::jitCompartment()
+const void*
+CompileZone::addressOfStringNurseryCurrentEnd()
 {
-    return compartment()->jitCompartment();
+    return zone()->runtimeFromAnyThread()->gc.addressOfStringNurseryCurrentEnd();
 }
 
 bool
-CompileCompartment::hasAllocationMetadataBuilder()
+CompileZone::canNurseryAllocateStrings()
 {
-    return compartment()->hasAllocationMetadataBuilder();
+    return nurseryExists() &&
+        zone()->runtimeFromAnyThread()->gc.nursery().canAllocateStrings() &&
+        zone()->allocNurseryStrings;
+}
+
+bool
+CompileZone::nurseryExists()
+{
+    return zone()->runtimeFromAnyThread()->gc.nursery().exists();
+}
+
+void
+CompileZone::setMinorGCShouldCancelIonCompilations()
+{
+    MOZ_ASSERT(CurrentThreadCanAccessZone(zone()));
+    JSRuntime* rt = zone()->runtimeFromMainThread();
+    rt->gc.storeBuffer().setShouldCancelIonCompilations();
+}
+
+JS::Realm*
+CompileRealm::realm()
+{
+    return reinterpret_cast<JS::Realm*>(this);
+}
+
+/* static */ CompileRealm*
+CompileRealm::get(JS::Realm* realm)
+{
+    return reinterpret_cast<CompileRealm*>(realm);
+}
+
+CompileZone*
+CompileRealm::zone()
+{
+    return CompileZone::get(realm()->zone());
+}
+
+CompileRuntime*
+CompileRealm::runtime()
+{
+    return CompileRuntime::get(realm()->runtimeFromAnyThread());
+}
+
+const void*
+CompileRealm::addressOfRandomNumberGenerator()
+{
+    return realm()->addressOfRandomNumberGenerator();
+}
+
+const JitRealm*
+CompileRealm::jitRealm()
+{
+    return realm()->jitRealm();
+}
+
+const GlobalObject*
+CompileRealm::maybeGlobal()
+{
+    // This uses unsafeUnbarrieredMaybeGlobal() so as not to trigger the read
+    // barrier on the global from off thread.  This is safe because we
+    // abort Ion compilation when we GC.
+    return realm()->unsafeUnbarrieredMaybeGlobal();
+}
+
+const uint32_t*
+CompileRealm::addressOfGlobalWriteBarriered()
+{
+    return &realm()->globalWriteBarriered;
+}
+
+bool
+CompileRealm::hasAllocationMetadataBuilder()
+{
+    return realm()->hasAllocationMetadataBuilder();
 }
 
 // Note: This function is thread-safe because setSingletonAsValue sets a boolean
@@ -276,22 +295,22 @@ CompileCompartment::hasAllocationMetadataBuilder()
 // and this would be an unfortunate allocation, but this will not change the
 // semantics of the JavaScript code which is executed.
 void
-CompileCompartment::setSingletonsAsValues()
+CompileRealm::setSingletonsAsValues()
 {
-    compartment()->behaviors().setSingletonsAsValues();
+    realm()->behaviors().setSingletonsAsValues();
 }
 
 JitCompileOptions::JitCompileOptions()
   : cloneSingletons_(false),
-    spsSlowAssertionsEnabled_(false),
+    profilerSlowAssertionsEnabled_(false),
     offThreadCompilationAvailable_(false)
 {
 }
 
 JitCompileOptions::JitCompileOptions(JSContext* cx)
 {
-    cloneSingletons_ = cx->compartment()->creationOptions().cloneSingletons();
-    spsSlowAssertionsEnabled_ = cx->runtime()->spsProfiler.enabled() &&
-                                cx->runtime()->spsProfiler.slowAssertionsEnabled();
+    cloneSingletons_ = cx->realm()->creationOptions().cloneSingletons();
+    profilerSlowAssertionsEnabled_ = cx->runtime()->geckoProfiler().enabled() &&
+                                     cx->runtime()->geckoProfiler().slowAssertionsEnabled();
     offThreadCompilationAvailable_ = OffThreadCompilationAvailable(cx);
 }

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -24,7 +25,7 @@ TexturedEffect::PrintInfo(std::stringstream& aStream, const char* aPrefix)
     aStream << " [not-premultiplied]";
   }
 
-  AppendToString(aStream, mFilter, " [filter=", "]");
+  AppendToString(aStream, mSamplingFilter, " [filter=", "]");
 }
 
 void
@@ -65,10 +66,3 @@ EffectColorMatrix::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   AppendToString(aStream, mColorMatrix, " [matrix=", "]");
 }
 
-void
-EffectVRDistortion::PrintInfo(std::stringstream& aStream, const char* aPrefix)
-{
-  aStream << aPrefix;
-  aStream << nsPrintfCString("EffectVRDistortion (0x%p) [hmd=%p] [render-target=%p] [texture=%p]",
-                             this, mHMD.get(), mRenderTarget.get(), mTexture).get();
-}

@@ -16,13 +16,15 @@
 #include "nsDocShellLoadTypes.h"
 #include "nsIChannel.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsISelectionPrivate.h"
+#include "nsISelectionController.h"
 #include "nsTraceRefcnt.h"
 #include "nsIWebProgress.h"
 #include "prenv.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIURI.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLBodyElement.h"
+#include "mozilla/dom/Selection.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -44,6 +46,7 @@ static ModuleRep sModuleMap[] = {
   { "doclifecycle", logging::eDocLifeCycle },
 
   { "events", logging::eEvents },
+  { "eventTree", logging::eEventTree },
   { "platforms", logging::ePlatforms },
   { "text", logging::eText },
   { "tree", logging::eTree },
@@ -89,10 +92,7 @@ EnableLogging(const char* aModulesStr)
 static void
 LogDocURI(nsIDocument* aDocumentNode)
 {
-  nsIURI* uri = aDocumentNode->GetDocumentURI();
-  nsAutoCString spec;
-  uri->GetSpec(spec);
-  printf("uri: %s", spec.get());
+  printf("uri: %s", aDocumentNode->GetDocumentURI()->GetSpecOrDefault().get());
 }
 
 static void
@@ -104,16 +104,18 @@ LogDocShellState(nsIDocument* aDocumentNode)
   nsCOMPtr<nsIDocShell> docShell = aDocumentNode->GetDocShell();
   uint32_t busyFlags = nsIDocShell::BUSY_FLAGS_NONE;
   docShell->GetBusyFlags(&busyFlags);
-  if (busyFlags == nsIDocShell::BUSY_FLAGS_NONE)
+  if (busyFlags == nsIDocShell::BUSY_FLAGS_NONE) {
     printf("'none'");
-  if (busyFlags & nsIDocShell::BUSY_FLAGS_BUSY)
+  }
+  if (busyFlags & nsIDocShell::BUSY_FLAGS_BUSY) {
     printf("'busy'");
-  if (busyFlags & nsIDocShell::BUSY_FLAGS_BEFORE_PAGE_LOAD)
+  }
+  if (busyFlags & nsIDocShell::BUSY_FLAGS_BEFORE_PAGE_LOAD) {
     printf(", 'before page load'");
-  if (busyFlags & nsIDocShell::BUSY_FLAGS_PAGE_LOADING)
+  }
+  if (busyFlags & nsIDocShell::BUSY_FLAGS_PAGE_LOADING) {
     printf(", 'page loading'");
-
-    printf("[failed]");
+  }
 }
 
 static void
@@ -396,7 +398,7 @@ void
 logging::DocLoad(const char* aMsg, nsIWebProgress* aWebProgress,
                  nsIRequest* aRequest, uint32_t aStateFlags)
 {
-  MsgBegin(sDocLoadTitle, aMsg);
+  MsgBegin(sDocLoadTitle, "%s", aMsg);
 
   nsCOMPtr<mozIDOMWindowProxy> DOMWindow;
   aWebProgress->GetDOMWindow(getter_AddRefs(DOMWindow));
@@ -433,7 +435,7 @@ logging::DocLoad(const char* aMsg, nsIWebProgress* aWebProgress,
 void
 logging::DocLoad(const char* aMsg, nsIDocument* aDocumentNode)
 {
-  MsgBegin(sDocLoadTitle, aMsg);
+  MsgBegin(sDocLoadTitle, "%s", aMsg);
 
   DocAccessible* document = GetExistingDocAccessible(aDocumentNode);
   LogDocInfo(aDocumentNode, document);
@@ -497,7 +499,7 @@ logging::DocCreate(const char* aMsg, nsIDocument* aDocumentNode,
   DocAccessible* document = aDocument ?
     aDocument : GetExistingDocAccessible(aDocumentNode);
 
-  MsgBegin(sDocCreateTitle, aMsg);
+  MsgBegin(sDocCreateTitle, "%s", aMsg);
   LogDocInfo(aDocumentNode, document);
   MsgEnd();
 }
@@ -509,7 +511,7 @@ logging::DocDestroy(const char* aMsg, nsIDocument* aDocumentNode,
   DocAccessible* document = aDocument ?
     aDocument : GetExistingDocAccessible(aDocumentNode);
 
-  MsgBegin(sDocDestroyTitle, aMsg);
+  MsgBegin(sDocDestroyTitle, "%s", aMsg);
   LogDocInfo(aDocumentNode, document);
   MsgEnd();
 }
@@ -526,7 +528,7 @@ void
 logging::FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
                                  Accessible* aTarget)
 {
-  MsgBegin(sFocusTitle, aMsg);
+  MsgBegin(sFocusTitle, "%s", aMsg);
   AccessibleNNode(aTargetDescr, aTarget);
   MsgEnd();
 }
@@ -535,7 +537,7 @@ void
 logging::FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
                                  nsINode* aTargetNode)
 {
-  MsgBegin(sFocusTitle, aMsg);
+  MsgBegin(sFocusTitle, "%s", aMsg);
   Node(aTargetDescr, aTargetNode);
   MsgEnd();
 }
@@ -544,7 +546,7 @@ void
 logging::FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
                                  nsISupports* aTargetThing)
 {
-  MsgBegin(sFocusTitle, aMsg);
+  MsgBegin(sFocusTitle, "%s", aMsg);
 
   if (aTargetThing) {
     nsCOMPtr<nsINode> targetNode(do_QueryInterface(aTargetThing));
@@ -589,18 +591,15 @@ logging::FocusDispatched(Accessible* aTarget)
 }
 
 void
-logging::SelChange(nsISelection* aSelection, DocAccessible* aDocument,
+logging::SelChange(dom::Selection* aSelection, DocAccessible* aDocument,
                    int16_t aReason)
 {
-  nsCOMPtr<nsISelectionPrivate> privSel(do_QueryInterface(aSelection));
-
-  int16_t type = 0;
-  privSel->GetType(&type);
+  SelectionType type = aSelection->GetType();
 
   const char* strType = 0;
-  if (type == nsISelectionController::SELECTION_NORMAL)
+  if (type == SelectionType::eNormal)
     strType = "normal";
-  else if (type == nsISelectionController::SELECTION_SPELLCHECK)
+  else if (type == SelectionType::eSpellCheck)
     strType = "spellcheck";
   else
     strType = "unknown";
@@ -616,16 +615,21 @@ void
 logging::TreeInfo(const char* aMsg, uint32_t aExtraFlags, ...)
 {
   if (IsEnabledAll(logging::eTree | aExtraFlags)) {
-    MsgBegin("TREE", aMsg);
-
     va_list vl;
     va_start(vl, aExtraFlags);
-    const char* descr = nullptr;
-    while ((descr = va_arg(vl, const char*))) {
-      AccessibleInfo(descr, va_arg(vl, Accessible*));
+    const char* descr = va_arg(vl, const char*);
+    if (descr) {
+      Accessible* acc = va_arg(vl, Accessible*);
+      MsgBegin("TREE", "%s; doc: %p", aMsg, acc ? acc->Document() : nullptr);
+      AccessibleInfo(descr, acc);
+      while ((descr = va_arg(vl, const char*))) {
+        AccessibleInfo(descr, va_arg(vl, Accessible*));
+      }
+    }
+    else {
+      MsgBegin("TREE", "%s", aMsg);
     }
     va_end(vl);
-
     MsgEnd();
 
     if (aExtraFlags & eStack) {
@@ -639,10 +643,10 @@ logging::TreeInfo(const char* aMsg, uint32_t aExtraFlags,
                   const char* aMsg1, Accessible* aAcc,
                   const char* aMsg2, nsINode* aNode)
 {
-  if (IsEnabledAll(logging::eTree | logging::eVerbose)) {
-    MsgBegin("TREE", aMsg);
+  if (IsEnabledAll(logging::eTree | aExtraFlags)) {
+    MsgBegin("TREE", "%s; doc: %p", aMsg, aAcc ? aAcc->Document() : nullptr);
     AccessibleInfo(aMsg1, aAcc);
-    Accessible* acc = aAcc->Document()->GetAccessible(aNode);
+    Accessible* acc = aAcc ? aAcc->Document()->GetAccessible(aNode) : nullptr;
     if (acc) {
       AccessibleInfo(aMsg2, acc);
     }
@@ -658,13 +662,85 @@ void
 logging::TreeInfo(const char* aMsg, uint32_t aExtraFlags, Accessible* aParent)
 {
   if (IsEnabledAll(logging::eTree | aExtraFlags)) {
-    MsgBegin("TREE", aMsg);
+    MsgBegin("TREE", "%s; doc: %p", aMsg, aParent->Document());
     AccessibleInfo("container", aParent);
     for (uint32_t idx = 0; idx < aParent->ChildCount(); idx++) {
       AccessibleInfo("child", aParent->GetChildAt(idx));
     }
     MsgEnd();
   }
+}
+
+void
+logging::Tree(const char* aTitle, const char* aMsgText,
+              Accessible* aRoot, GetTreePrefix aPrefixFunc,
+              void* aGetTreePrefixData)
+{
+  logging::MsgBegin(aTitle, "%s", aMsgText);
+
+  nsAutoString level;
+  Accessible* root = aRoot;
+  do {
+    const char* prefix = aPrefixFunc ? aPrefixFunc(aGetTreePrefixData, root) : "";
+    printf("%s", NS_ConvertUTF16toUTF8(level).get());
+    logging::AccessibleInfo(prefix, root);
+    if (root->FirstChild() && !root->FirstChild()->IsDoc()) {
+      level.AppendLiteral(u"  ");
+      root = root->FirstChild();
+      continue;
+    }
+    int32_t idxInParent = root != aRoot && root->mParent ?
+      root->mParent->mChildren.IndexOf(root) : -1;
+    if (idxInParent != -1 &&
+        idxInParent < static_cast<int32_t>(root->mParent->mChildren.Length() - 1)) {
+      root = root->mParent->mChildren.ElementAt(idxInParent + 1);
+      continue;
+    }
+    while (root != aRoot && (root = root->Parent())) {
+      level.Cut(0, 2);
+      int32_t idxInParent = !root->IsDoc() && root->mParent ?
+        root->mParent->mChildren.IndexOf(root) : -1;
+      if (idxInParent != -1 &&
+          idxInParent < static_cast<int32_t>(root->mParent->mChildren.Length() - 1)) {
+        root = root->mParent->mChildren.ElementAt(idxInParent + 1);
+        break;
+      }
+    }
+  }
+  while (root && root != aRoot);
+
+  logging::MsgEnd();
+}
+
+void
+logging::DOMTree(const char* aTitle, const char* aMsgText,
+                 DocAccessible* aDocument)
+{
+  logging::MsgBegin(aTitle, "%s", aMsgText);
+  nsAutoString level;
+  nsINode* root = aDocument->DocumentNode();
+  do {
+    printf("%s", NS_ConvertUTF16toUTF8(level).get());
+    logging::Node("", root);
+    if (root->GetFirstChild()) {
+      level.AppendLiteral(u"  ");
+      root = root->GetFirstChild();
+      continue;
+    }
+    if (root->GetNextSibling()) {
+      root = root->GetNextSibling();
+      continue;
+    }
+    while ((root = root->GetParentNode())) {
+      level.Cut(0, 2);
+      if (root->GetNextSibling()) {
+        root = root->GetNextSibling();
+        break;
+      }
+    }
+  }
+  while (root);
+  logging::MsgEnd();
 }
 
 void
@@ -681,7 +757,7 @@ logging::MsgBegin(const char* aTitle, const char* aMsgText, ...)
   uint32_t mins = (PR_IntervalToSeconds(time) / 60) % 60;
   uint32_t secs = PR_IntervalToSeconds(time) % 60;
   uint32_t msecs = PR_IntervalToMilliseconds(time) % 1000;
-  printf("; %02d:%02d.%03d", mins, secs, msecs);
+  printf("; %02u:%02u.%03u", mins, secs, msecs);
 
   printf("\n  {\n");
 }
@@ -751,15 +827,15 @@ logging::Node(const char* aDescr, nsINode* aNode)
     return;
   }
 
-  if (aNode->IsNodeOfType(nsINode::eDOCUMENT)) {
+  if (aNode->IsDocument()) {
     printf("%s: %p, document\n", aDescr, static_cast<void*>(aNode));
     return;
   }
 
   nsINode* parentNode = aNode->GetParentNode();
-  int32_t idxInParent = parentNode ? parentNode->IndexOf(aNode) : - 1;
+  int32_t idxInParent = parentNode ? parentNode->ComputeIndexOf(aNode) : - 1;
 
-  if (aNode->IsNodeOfType(nsINode::eTEXT)) {
+  if (aNode->IsText()) {
     printf("%s: %p, text node, idx in parent: %d\n",
            aDescr, static_cast<void*>(aNode), idxInParent);
     return;
@@ -776,7 +852,7 @@ logging::Node(const char* aDescr, nsINode* aNode)
   nsAutoCString tag;
   elm->NodeInfo()->NameAtom()->ToUTF8String(tag);
 
-  nsIAtom* idAtom = elm->GetID();
+  nsAtom* idAtom = elm->GetID();
   nsAutoCString id;
   if (idAtom)
     idAtom->ToUTF8String(id);
@@ -830,10 +906,10 @@ logging::AccessibleInfo(const char* aDescr, Accessible* aAccessible)
   if (!node) {
     printf(", node: null\n");
   }
-  else if (node->IsNodeOfType(nsINode::eDOCUMENT)) {
+  else if (node->IsDocument()) {
     printf(", document node: %p\n", static_cast<void*>(node));
   }
-  else if (node->IsNodeOfType(nsINode::eTEXT)) {
+  else if (node->IsText()) {
     printf(", text node: %p\n", static_cast<void*>(node));
   }
   else if (node->IsElement()) {
@@ -842,7 +918,7 @@ logging::AccessibleInfo(const char* aDescr, Accessible* aAccessible)
     nsAutoCString tag;
     el->NodeInfo()->NameAtom()->ToUTF8String(tag);
 
-    nsIAtom* idAtom = el->GetID();
+    nsAtom* idAtom = el->GetID();
     nsAutoCString id;
     if (idAtom) {
       idAtom->ToUTF8String(id);
@@ -949,7 +1025,7 @@ logging::IsEnabled(const nsAString& aModuleStr)
 }
 
 void
-logging::Enable(const nsAFlatCString& aModules)
+logging::Enable(const nsCString& aModules)
 {
   EnableLogging(aModules.get());
 }

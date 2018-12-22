@@ -50,7 +50,7 @@ struct DMDFuncs
 
   virtual void SizeOf(Sizes*);
 
-  virtual void StatusMsg(const char*, va_list);
+  virtual void StatusMsg(const char*, va_list) MOZ_FORMAT_PRINTF(2, 0);
 
   virtual void ResetEverything(const char*);
 
@@ -256,7 +256,7 @@ Analyze(UniquePtr<JSONWriteFunc> aWriteFunc)
 {
   DMDFuncs* funcs = DMDFuncs::Get();
   if (funcs) {
-    funcs->Analyze(Move(aWriteFunc));
+    funcs->Analyze(std::move(aWriteFunc));
   }
 }
 
@@ -272,6 +272,7 @@ SizeOf(Sizes* aSizes)
 }
 
 // Prints a status message prefixed with "DMD[<pid>]". Use sparingly.
+MOZ_FORMAT_PRINTF(1, 2)
 inline void
 StatusMsg(const char* aFmt, ...)
 {

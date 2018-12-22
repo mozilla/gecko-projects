@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +9,7 @@
   Eric D Vaughan
   A frame that can have multiple children. Only one child may be displayed at one time. So the
   can be flipped though like a deck of cards.
- 
+
 **/
 
 #ifndef nsGridRowGroupFrame_h___
@@ -23,10 +24,10 @@
  * all the columns).  However, multiple levels of groups are allowed, so
  * the parent or child could instead be another group.
  */
-class nsGridRowGroupFrame : public nsBoxFrame
+class nsGridRowGroupFrame final : public nsBoxFrame
 {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsGridRowGroupFrame)
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override
@@ -35,11 +36,11 @@ public:
   }
 #endif
 
-  nsGridRowGroupFrame(nsStyleContext* aContext,
+  nsGridRowGroupFrame(ComputedStyle* aStyle,
                       nsBoxLayout* aLayoutManager):
-    nsBoxFrame(aContext, false, aLayoutManager) {}
+    nsBoxFrame(aStyle, kClassID, false, aLayoutManager) {}
 
-  virtual nscoord GetFlex() override;
+  virtual nscoord GetXULFlex() override;
 
 }; // class nsGridRowGroupFrame
 

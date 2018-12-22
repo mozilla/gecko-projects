@@ -6,41 +6,30 @@
 // Test "Copy color" item of the context menu #1: Test _isColorPopup.
 
 const TEST_URI = `
-  <div style="color: #123ABC; margin: 0px; background: span[data-color];">
+  <div style="color:rgb(18, 58, 188);margin:0px;background:span[data-color];">
     Test "Copy color" context menu option
   </div>
 `;
 
-const TEST_CASES = [
-  {
-    viewName: "RuleView",
-    initializer: openRuleView
-  },
-  {
-    viewName: "ComputedView",
-    initializer: openComputedView
-  }
-];
-
-add_task(function* () {
+add_task(async function() {
   // Test is slow on Linux EC2 instances - Bug 1137765
   requestLongerTimeout(2);
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-
-  for (let test of TEST_CASES) {
-    yield testView(test);
-  }
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector} = await openInspector();
+  await testView("ruleview", inspector);
+  await testView("computedview", inspector);
 });
 
-function* testView({viewName, initializer}) {
-  info("Testing " + viewName);
+async function testView(viewId, inspector) {
+  info("Testing " + viewId);
 
-  let {inspector, view} = yield initializer();
-  yield selectNode("div", inspector);
+  await inspector.sidebar.select(viewId);
+  const view = inspector.getPanel(viewId).view || inspector.getPanel(viewId).computedView;
+  await selectNode("div", inspector);
 
   testIsColorValueNode(view);
   testIsColorPopupOnAllNodes(view);
-  yield clearCurrentNodeSelection(inspector);
+  await clearCurrentNodeSelection(inspector);
 }
 
 /**
@@ -49,11 +38,11 @@ function* testView({viewName, initializer}) {
  */
 function testIsColorValueNode(view) {
   info("Testing that child nodes of color nodes are detected.");
-  let root = rootElement(view);
-  let colorNode = root.querySelector("span[data-color]");
+  const root = rootElement(view);
+  const colorNode = root.querySelector("span[data-color]");
 
   ok(colorNode, "Color node found");
-  for (let node of iterateNodes(colorNode)) {
+  for (const node of iterateNodes(colorNode)) {
     ok(isColorValueNode(node), "Node is part of color value.");
   }
 }
@@ -63,8 +52,8 @@ function testIsColorValueNode(view) {
  * in the view.
  */
 function testIsColorPopupOnAllNodes(view) {
-  let root = rootElement(view);
-  for (let node of iterateNodes(root)) {
+  const root = rootElement(view);
+  for (const node of iterateNodes(root)) {
     testIsColorPopupOnNode(view, node);
   }
 }
@@ -79,13 +68,13 @@ function testIsColorPopupOnAllNodes(view) {
 function testIsColorPopupOnNode(view, node) {
   info("Testing node " + node);
   view.styleDocument.popupNode = node;
-  view._contextmenu._colorToCopy = "";
+  view.contextMenu._colorToCopy = "";
 
-  let result = view._contextmenu._isColorPopup();
-  let correct = isColorValueNode(node);
+  const result = view.contextMenu._isColorPopup();
+  const correct = isColorValueNode(node);
 
   is(result, correct, "_isColorPopup returned the expected value " + correct);
-  is(view._contextmenu._colorToCopy, (correct) ? "rgb(18, 58, 188)" : "",
+  is(view.contextMenu._colorToCopy, (correct) ? "rgb(18, 58, 188)" : "",
      "_colorToCopy was set to the expected value");
 }
 
@@ -97,7 +86,7 @@ function isColorValueNode(node) {
   let container = (node.nodeType == node.TEXT_NODE) ?
                    node.parentElement : node;
 
-  let isColorNode = el => el.dataset && "color" in el.dataset;
+  const isColorNode = el => el.dataset && "color" in el.dataset;
 
   while (!isColorNode(container)) {
     container = container.parentNode;
@@ -118,7 +107,7 @@ function isColorValueNode(node) {
 function* iterateNodes(baseNode) {
   yield baseNode;
 
-  for (let child of baseNode.childNodes) {
+  for (const child of baseNode.childNodes) {
     yield* iterateNodes(child);
   }
 }

@@ -19,16 +19,16 @@
 extern "C" int MOZ_XMLIsLetter(const char* ptr);
 extern "C" int MOZ_XMLIsNCNameChar(const char* ptr);
 
-class nsIAtom;
+class nsAtom;
 
 class XMLUtils {
 
 public:
     static nsresult splitExpatName(const char16_t *aExpatName,
-                                   nsIAtom **aPrefix, nsIAtom **aLocalName,
+                                   nsAtom **aPrefix, nsAtom **aLocalName,
                                    int32_t* aNameSpaceID);
-    static nsresult splitQName(const nsAString& aName, nsIAtom** aPrefix,
-                               nsIAtom** aLocalName);
+    static nsresult splitQName(const nsAString& aName, nsAtom** aPrefix,
+                               nsAtom** aLocalName);
 
     /*
      * Returns true if the given character is whitespace.
@@ -43,7 +43,7 @@ public:
     /**
      * Returns true if the given string has only whitespace characters
      */
-    static bool isWhitespace(const nsAFlatString& aText);
+    static bool isWhitespace(const nsString& aText);
 
     /**
      * Normalizes the value of a XML processingInstruction
@@ -53,8 +53,7 @@ public:
     /**
      * Returns true if the given string is a valid XML QName
      */
-    static bool isValidQName(const nsAFlatString& aQName,
-                             const char16_t** aColon);
+    static bool isValidQName(const nsString& aQName, const char16_t** aColon);
 
     /**
      * Returns true if the given character represents an Alpha letter
@@ -62,7 +61,7 @@ public:
     static bool isLetter(char16_t aChar)
     {
         return !!MOZ_XMLIsLetter(reinterpret_cast<const char*>(&aChar));
-    }   
+    }
 
     /**
      * Returns true if the given character is an allowable NCName character

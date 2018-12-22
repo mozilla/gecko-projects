@@ -12,15 +12,15 @@
 #ifndef BackgroundFileSaver_h__
 #define BackgroundFileSaver_h__
 
+#include "ScopedNSSTypes.h"
 #include "mozilla/Mutex.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsNSSShutDown.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIBackgroundFileSaver.h"
 #include "nsIStreamListener.h"
 #include "nsStreamUtils.h"
-#include "ScopedNSSTypes.h"
+#include "nsString.h"
 
 class nsIAsyncInputStream;
 class nsIThread;
@@ -34,8 +34,7 @@ class DigestOutputStream;
 ////////////////////////////////////////////////////////////////////////////////
 //// BackgroundFileSaver
 
-class BackgroundFileSaver : public nsIBackgroundFileSaver,
-                            public nsNSSShutDownObject
+class BackgroundFileSaver : public nsIBackgroundFileSaver
 {
 public:
   NS_DECL_NSIBACKGROUNDFILESAVER
@@ -49,11 +48,6 @@ public:
    * fails, the factory will delete this object without returning a reference.
    */
   nsresult Init();
-
-  /**
-   * Used by nsNSSShutDownList to manage nsNSSShutDownObjects.
-   */
-  void virtualDestroyNSSReference() override;
 
   /**
    * Number of worker threads that are currently running.
@@ -74,14 +68,9 @@ protected:
   virtual ~BackgroundFileSaver();
 
   /**
-   * Helper function for managing NSS objects (mDigestContext).
-   */
-  void destructorSafeDestroyNSSReference();
-
-  /**
    * Thread that constructed this object.
    */
-  nsCOMPtr<nsIThread> mControlThread;
+  nsCOMPtr<nsIEventTarget> mControlEventTarget;
 
   /**
    * Thread to which the actual input/output is delegated.
@@ -242,7 +231,7 @@ private:
    * Used to calculate the file hash. This keeps state across file renames and
    * is lazily initialized in ProcessStateChange.
    */
-  ScopedPK11Context mDigestContext;
+  UniquePK11Context mDigestContext;
 
   //////////////////////////////////////////////////////////////////////////////
   //// Private methods
@@ -323,7 +312,7 @@ protected:
   virtual nsAsyncCopyProgressFun GetProgressCallback() override;
 
 private:
-  ~BackgroundFileSaverOutputStream();
+  ~BackgroundFileSaverOutputStream() = default;
 
   /**
    * Original callback provided to our AsyncWait wrapper.
@@ -350,7 +339,7 @@ protected:
   virtual nsAsyncCopyProgressFun GetProgressCallback() override;
 
 private:
-  ~BackgroundFileSaverStreamListener();
+  ~BackgroundFileSaverStreamListener() = default;
 
   /**
    * Protects the state related to whether the request should be suspended.
@@ -387,8 +376,7 @@ private:
 // A wrapper around nsIOutputStream, so that we can compute hashes on the
 // stream without copying and without polluting pristine NSS code with XPCOM
 // interfaces.
-class DigestOutputStream : public nsNSSShutDownObject,
-                           public nsIOutputStream
+class DigestOutputStream : public nsIOutputStream
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -396,11 +384,8 @@ public:
   // Constructor. Neither parameter may be null. The caller owns both.
   DigestOutputStream(nsIOutputStream* outputStream, PK11Context* aContext);
 
-  // We don't own any NSS objects here, so no need to clean up
-  void virtualDestroyNSSReference() override { }
-
 private:
-  ~DigestOutputStream();
+  virtual ~DigestOutputStream() = default;
 
   // Calls to write are passed to this stream.
   nsCOMPtr<nsIOutputStream> mOutputStream;
@@ -408,7 +393,7 @@ private:
   PK11Context* mDigestContext;
 
   // Don't accidentally copy construct.
-  DigestOutputStream(const DigestOutputStream& d);
+  DigestOutputStream(const DigestOutputStream& d) = delete;
 };
 
 } // namespace net

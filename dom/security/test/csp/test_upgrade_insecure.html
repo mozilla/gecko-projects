@@ -30,6 +30,7 @@
 
 const UPGRADE_POLICY =
   "upgrade-insecure-requests;" +               // upgrade all http requests to https
+  "block-all-mixed-content;" +                 // upgrade should be enforced before block-all.
   "default-src https: wss: 'unsafe-inline';" + // only allow https: and wss:
   "form-action https:;";                       // explicit, no fallback to default-src
 
@@ -118,7 +119,7 @@ function loadTestPage() {
 }
 
 function finishTest() {
-  window.removeEventListener("message", receiveMessage, false);
+  window.removeEventListener("message", receiveMessage);
   SimpleTest.finish();
 }
 
@@ -146,7 +147,7 @@ function checkResults(result) {
 
 // a postMessage handler that is used by sandboxed iframes without
 // 'allow-same-origin' to bubble up results back to this main page.
-window.addEventListener("message", receiveMessage, false);
+window.addEventListener("message", receiveMessage);
 function receiveMessage(event) {
   checkResults(event.data.result);
 }

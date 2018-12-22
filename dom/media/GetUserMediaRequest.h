@@ -23,7 +23,11 @@ public:
   GetUserMediaRequest(nsPIDOMWindowInner* aInnerWindow,
                       const nsAString& aCallID,
                       const MediaStreamConstraints& aConstraints,
-                      bool aIsSecure);
+                      bool aIsSecure,
+                      bool aIsHandlingUserInput);
+  GetUserMediaRequest(nsPIDOMWindowInner* aInnerWindow,
+                      const nsAString& aRawId,
+                      const nsAString& aMediaSource);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(GetUserMediaRequest)
@@ -34,16 +38,22 @@ public:
   uint64_t WindowID();
   uint64_t InnerWindowID();
   bool IsSecure();
+  bool IsHandlingUserInput() const;
   void GetCallID(nsString& retval);
+  void GetRawID(nsString& retval);
+  void GetMediaSource(nsString& retval);
   void GetConstraints(MediaStreamConstraints &result);
 
 private:
-  virtual ~GetUserMediaRequest() {}
+  virtual ~GetUserMediaRequest() = default;
 
   uint64_t mInnerWindowID, mOuterWindowID;
   const nsString mCallID;
+  const nsString mRawID;
+  const nsString mMediaSource;
   nsAutoPtr<MediaStreamConstraints> mConstraints;
   bool mIsSecure;
+  bool mIsHandlingUserInput;
 };
 
 } // namespace dom

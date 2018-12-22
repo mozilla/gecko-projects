@@ -4,11 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CTVerifyResult.h"
+#include "mozilla/Casting.h"
 #include "nsSSLStatus.h"
-#include "plstr.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIObjectInputStream.h"
+#include "nsNSSCertificate.h"
 #include "ssl.h"
 
 NS_IMETHODIMP
@@ -75,6 +77,28 @@ nsSSLStatus::GetCipherName(nsACString& aCipherName)
 }
 
 NS_IMETHODIMP
+nsSSLStatus::GetKeaGroupName(nsACString& aKeaGroup)
+{
+  if (!mHaveCipherSuiteAndProtocol) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aKeaGroup.Assign(mKeaGroup);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSSLStatus::GetSignatureSchemeName(nsACString& aSignatureScheme)
+{
+  if (!mHaveCipherSuiteAndProtocol) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aSignatureScheme.Assign(mSignatureSchemeName);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsSSLStatus::GetProtocolVersion(uint16_t* aProtocolVersion)
 {
   NS_ENSURE_ARG_POINTER(aProtocolVersion);
@@ -83,6 +107,16 @@ nsSSLStatus::GetProtocolVersion(uint16_t* aProtocolVersion)
   }
 
   *aProtocolVersion = mProtocolVersion;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSSLStatus::GetCertificateTransparencyStatus(
+  uint16_t* aCertificateTransparencyStatus)
+{
+  NS_ENSURE_ARG_POINTER(aCertificateTransparencyStatus);
+
+  *aCertificateTransparencyStatus = mCertificateTransparencyStatus;
   return NS_OK;
 }
 
@@ -129,11 +163,7 @@ nsSSLStatus::GetIsExtendedValidation(bool* aIsEV)
     return NS_OK;
   }
 
-#ifdef MOZ_NO_EV_CERTS
-  return NS_OK;
-#else
   return NS_ERROR_NOT_AVAILABLE;
-#endif
 }
 
 NS_IMETHODIMP
@@ -150,8 +180,19 @@ nsSSLStatus::Read(nsIObjectInputStream* aStream)
 
   rv = aStream->Read16(&mCipherSuite);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = aStream->Read16(&mProtocolVersion);
+
+  // The code below is a workaround to allow serializing new fields
+  // while preserving binary compatibility with older streams. For more details
+  // on the binary compatibility requirement, refer to bug 1248628.
+  // Here, we take advantage of the fact that mProtocolVersion was originally
+  // stored as a 16 bits integer, but the highest 8 bits were never used.
+  // These bits are now used for stream versioning.
+  uint16_t protocolVersionAndStreamFormatVersion;
+  rv = aStream->Read16(&protocolVersionAndStreamFormatVersion);
   NS_ENSURE_SUCCESS(rv, rv);
+  mProtocolVersion = protocolVersionAndStreamFormatVersion & 0xFF;
+  const uint8_t streamFormatVersion =
+    (protocolVersionAndStreamFormatVersion >> 8) & 0xFF;
 
   rv = aStream->ReadBoolean(&mIsDomainMismatch);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -169,12 +210,47 @@ nsSSLStatus::Read(nsIObjectInputStream* aStream)
   rv = aStream->ReadBoolean(&mHaveCertErrorBits);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Added in version 1 (see bug 1305289).
+  if (streamFormatVersion >= 1) {
+    rv = aStream->Read16(&mCertificateTransparencyStatus);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // Added in version 2 (see bug 1304923).
+  if (streamFormatVersion >= 2) {
+    rv = aStream->ReadCString(mKeaGroup);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = aStream->ReadCString(mSignatureSchemeName);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // Added in version 3 (see bug 1406856).
+  if (streamFormatVersion >= 3) {
+    nsCOMPtr<nsISupports> succeededCertChainSupports;
+    rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(succeededCertChainSupports));
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    mSucceededCertChain = do_QueryInterface(succeededCertChainSupports);
+
+    nsCOMPtr<nsISupports> failedCertChainSupports;
+    rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(failedCertChainSupports));
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    mFailedCertChain = do_QueryInterface(failedCertChainSupports);
+  }
+
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsSSLStatus::Write(nsIObjectOutputStream* aStream)
 {
+  // The current version of the binary stream format.
+  const uint8_t STREAM_FORMAT_VERSION = 3;
+
   nsresult rv = aStream->WriteCompoundObject(mServerCert,
                                              NS_GET_IID(nsIX509Cert),
                                              true);
@@ -182,7 +258,11 @@ nsSSLStatus::Write(nsIObjectOutputStream* aStream)
 
   rv = aStream->Write16(mCipherSuite);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = aStream->Write16(mProtocolVersion);
+
+  uint16_t protocolVersionAndStreamFormatVersion =
+    mozilla::AssertedCast<uint8_t>(mProtocolVersion) |
+    (STREAM_FORMAT_VERSION << 8);
+  rv = aStream->Write16(protocolVersionAndStreamFormatVersion);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = aStream->WriteBoolean(mIsDomainMismatch);
@@ -200,6 +280,34 @@ nsSSLStatus::Write(nsIObjectOutputStream* aStream)
   NS_ENSURE_SUCCESS(rv, rv);
   rv = aStream->WriteBoolean(mHaveCertErrorBits);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Added in version 1.
+  rv = aStream->Write16(mCertificateTransparencyStatus);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Added in version 2.
+  rv = aStream->WriteStringZ(mKeaGroup.get());
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = aStream->WriteStringZ(mSignatureSchemeName.get());
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Added in version 3.
+  rv = NS_WriteOptionalCompoundObject(aStream,
+                                      mSucceededCertChain,
+                                      NS_GET_IID(nsIX509CertList),
+                                      true);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  rv = NS_WriteOptionalCompoundObject(aStream,
+                                      mFailedCertChain,
+                                      NS_GET_IID(nsIX509CertList),
+                                      true);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   return NS_OK;
 }
@@ -220,16 +328,16 @@ nsSSLStatus::GetScriptableHelper(nsIXPCScriptable** aHelper)
 }
 
 NS_IMETHODIMP
-nsSSLStatus::GetContractID(char** aContractID)
+nsSSLStatus::GetContractID(nsACString& aContractID)
 {
-  *aContractID = nullptr;
+  aContractID.SetIsVoid(true);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSSLStatus::GetClassDescription(char** aClassDescription)
+nsSSLStatus::GetClassDescription(nsACString& aClassDescription)
 {
-  *aClassDescription = nullptr;
+  aClassDescription.SetIsVoid(true);
   return NS_OK;
 }
 
@@ -262,6 +370,10 @@ nsSSLStatus::GetClassIDNoAlloc(nsCID* aClassIDNoAlloc)
 nsSSLStatus::nsSSLStatus()
 : mCipherSuite(0)
 , mProtocolVersion(0)
+, mCertificateTransparencyStatus(nsISSLStatus::
+    CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE)
+, mKeaGroup()
+, mSignatureSchemeName()
 , mIsDomainMismatch(false)
 , mIsNotValidAtThisTime(false)
 , mIsUntrusted(false)
@@ -274,29 +386,82 @@ nsSSLStatus::nsSSLStatus()
 
 NS_IMPL_ISUPPORTS(nsSSLStatus, nsISSLStatus, nsISerializable, nsIClassInfo)
 
-nsSSLStatus::~nsSSLStatus()
+void
+nsSSLStatus::SetServerCert(nsNSSCertificate* aServerCert, EVStatus aEVStatus)
 {
+  MOZ_ASSERT(aServerCert);
+
+  mServerCert = aServerCert;
+  mIsEV = (aEVStatus == EVStatus::EV);
+  mHasIsEVStatus = true;
+}
+
+nsresult
+nsSSLStatus::SetSucceededCertChain(UniqueCERTCertList aCertList)
+{
+  // nsNSSCertList takes ownership of certList
+  mSucceededCertChain = new nsNSSCertList(std::move(aCertList));
+
+  return NS_OK;
 }
 
 void
-nsSSLStatus::SetServerCert(nsNSSCertificate* aServerCert,
-                           nsNSSCertificate::EVStatus aEVStatus)
+nsSSLStatus::SetFailedCertChain(nsIX509CertList* aX509CertList)
 {
-  mServerCert = aServerCert;
+  mFailedCertChain = aX509CertList;
+}
 
-  if (aEVStatus != nsNSSCertificate::ev_status_unknown) {
-    mIsEV = (aEVStatus == nsNSSCertificate::ev_status_valid);
-    mHasIsEVStatus = true;
+NS_IMETHODIMP
+nsSSLStatus::GetSucceededCertChain(nsIX509CertList** _result)
+{
+  NS_ENSURE_ARG_POINTER(_result);
+
+  nsCOMPtr<nsIX509CertList> tmpList = mSucceededCertChain;
+  tmpList.forget(_result);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSSLStatus::GetFailedCertChain(nsIX509CertList** _result)
+{
+  NS_ENSURE_ARG_POINTER(_result);
+
+  nsCOMPtr<nsIX509CertList> tmpList = mFailedCertChain;
+  tmpList.forget(_result);
+
+  return NS_OK;
+}
+
+void
+nsSSLStatus::SetCertificateTransparencyInfo(
+  const mozilla::psm::CertificateTransparencyInfo& info)
+{
+  using mozilla::ct::CTPolicyCompliance;
+
+  mCertificateTransparencyStatus =
+    nsISSLStatus::CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE;
+
+  if (!info.enabled) {
+    // CT disabled.
     return;
   }
 
-#ifndef MOZ_NO_EV_CERTS
-  if (aServerCert) {
-    nsresult rv = aServerCert->GetIsExtendedValidation(&mIsEV);
-    if (NS_FAILED(rv)) {
-      return;
-    }
-    mHasIsEVStatus = true;
+  switch (info.policyCompliance) {
+    case CTPolicyCompliance::Compliant:
+      mCertificateTransparencyStatus =
+        nsISSLStatus::CERTIFICATE_TRANSPARENCY_POLICY_COMPLIANT;
+      break;
+    case CTPolicyCompliance::NotEnoughScts:
+      mCertificateTransparencyStatus =
+        nsISSLStatus::CERTIFICATE_TRANSPARENCY_POLICY_NOT_ENOUGH_SCTS;
+      break;
+    case CTPolicyCompliance::NotDiverseScts:
+      mCertificateTransparencyStatus =
+        nsISSLStatus::CERTIFICATE_TRANSPARENCY_POLICY_NOT_DIVERSE_SCTS;
+      break;
+    case CTPolicyCompliance::Unknown:
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected CTPolicyCompliance type");
   }
-#endif
 }

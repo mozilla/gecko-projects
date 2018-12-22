@@ -15,34 +15,34 @@ const TEST_URI = 'data:text/xml,<?xml version="1.0" standalone="no"?>' +
 '  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">' +
 '<svg width="4cm" height="4cm" viewBox="0 0 400 400"' +
 '     xmlns="http://www.w3.org/2000/svg" version="1.1">' +
-'  <title>Example triangle01- simple example of a path</title>' +
-'  <desc>A path that draws a triangle</desc>' +
+"  <title>Example triangle01- simple example of a path</title>" +
+"  <desc>A path that draws a triangle</desc>" +
 '  <rect x="1" y="1" width="398" height="398"' +
 '        fill="none" stroke="blue" />' +
 '  <path d="M 100 100 L 300 100 L 200 300 z"' +
 '        fill="red" stroke="blue" stroke-width="3" />' +
-'</svg>';
+"</svg>";
 
-add_task(function* () {
-  let { inspector, testActor } = yield openInspectorForURL(TEST_URI);
+add_task(async function() {
+  const { inspector, testActor } = await openInspectorForURL(TEST_URI);
 
-  let markupLoaded = inspector.once("markuploaded");
+  const markupLoaded = inspector.once("markuploaded");
 
   info("Reloading page.");
-  yield testActor.eval("location.reload()");
+  await testActor.eval("location.reload()");
 
   info("Waiting for markupview to load after reload.");
-  yield markupLoaded;
+  await markupLoaded;
 
-  let svgFront = yield getNodeFront("svg", inspector);
+  const svgFront = await getNodeFront("svg", inspector);
   is(inspector.selection.nodeFront, svgFront, "<svg> selected after reload.");
 
   info("Selecting a node to see that inspector still works.");
-  yield selectNode("rect", inspector);
+  await selectNode("rect", inspector);
 
   info("Reloading page.");
-  yield testActor.eval("location.reload");
+  await testActor.eval("location.reload");
 
-  let rectFront = yield getNodeFront("rect", inspector);
+  const rectFront = await getNodeFront("rect", inspector);
   is(inspector.selection.nodeFront, rectFront, "<rect> selected after reload.");
 });

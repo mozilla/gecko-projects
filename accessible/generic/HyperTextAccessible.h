@@ -20,7 +20,7 @@ class nsRange;
 class nsIWidget;
 
 namespace mozilla {
-
+class TextEditor;
 namespace dom {
 class Selection;
 }
@@ -51,19 +51,19 @@ class HyperTextAccessible : public AccessibleWrap
 public:
   HyperTextAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HyperTextAccessible, AccessibleWrap)
 
   // Accessible
-  virtual nsIAtom* LandmarkRole() const override;
+  virtual nsAtom* LandmarkRole() const override;
   virtual int32_t GetLevelInternal() override;
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
-  virtual mozilla::a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual mozilla::a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
 
   virtual void Shutdown() override;
   virtual bool RemoveChild(Accessible* aAccessible) override;
   virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override;
-  virtual Relation RelationByType(RelationType aType) override;
+  virtual Relation RelationByType(RelationType aType) const override;
 
   // HyperTextAccessible (static helper method)
 
@@ -422,8 +422,9 @@ public:
 
   /**
    * Return the editor associated with the accessible.
+   * The result may be either TextEditor or HTMLEditor.
    */
-  virtual already_AddRefed<nsIEditor> GetEditor() const;
+  virtual already_AddRefed<TextEditor> GetEditor() const;
 
   /**
    * Return DOM selection object for the accessible.
@@ -434,7 +435,7 @@ protected:
   virtual ~HyperTextAccessible() { }
 
   // Accessible
-  virtual ENameValueFlag NativeName(nsString& aName) override;
+  virtual ENameValueFlag NativeName(nsString& aName) const override;
 
   // HyperTextAccessible
 
@@ -518,7 +519,8 @@ protected:
   /**
    * Return selection ranges within the accessible subtree.
    */
-  void GetSelectionDOMRanges(int16_t aType, nsTArray<nsRange*>* aRanges);
+  void GetSelectionDOMRanges(SelectionType aSelectionType,
+                             nsTArray<nsRange*>* aRanges);
 
   nsresult SetSelectionRange(int32_t aStartPos, int32_t aEndPos);
 

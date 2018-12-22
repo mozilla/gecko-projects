@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,9 +9,10 @@ with Files('*'):
 
 DIRS += ['blink']
 
-TEST_DIRS += ['compiledtest']
+TEST_DIRS += ['gtest']
 
 MOCHITEST_MANIFESTS += [
+    'test/blink/mochitest.ini',
     'test/mochitest.ini',
 ]
 
@@ -48,18 +49,22 @@ EXPORTS.mozilla.dom += [
     'AudioListener.h',
     'AudioNode.h',
     'AudioParam.h',
+    'AudioParamMap.h',
     'AudioProcessingEvent.h',
+    'AudioScheduledSourceNode.h',
+    'AudioWorkletNode.h',
     'BiquadFilterNode.h',
     'ChannelMergerNode.h',
     'ChannelSplitterNode.h',
+    'ConstantSourceNode.h',
     'ConvolverNode.h',
     'DelayNode.h',
     'DynamicsCompressorNode.h',
     'GainNode.h',
+    'IIRFilterNode.h',
     'MediaElementAudioSourceNode.h',
     'MediaStreamAudioDestinationNode.h',
     'MediaStreamAudioSourceNode.h',
-    'OfflineAudioCompletionEvent.h',
     'OscillatorNode.h',
     'PannerNode.h',
     'PeriodicWave.h',
@@ -75,28 +80,32 @@ UNIFIED_SOURCES += [
     'AudioBufferSourceNode.cpp',
     'AudioContext.cpp',
     'AudioDestinationNode.cpp',
+    'AudioEventTimeline.cpp',
     'AudioListener.cpp',
     'AudioNode.cpp',
     'AudioNodeEngine.cpp',
     'AudioNodeExternalInputStream.cpp',
     'AudioNodeStream.cpp',
     'AudioParam.cpp',
+    'AudioParamMap.cpp',
     'AudioProcessingEvent.cpp',
+    'AudioScheduledSourceNode.cpp',
+    'AudioWorkletNode.cpp',
     'BiquadFilterNode.cpp',
-    'BufferDecoder.cpp',
     'ChannelMergerNode.cpp',
     'ChannelSplitterNode.cpp',
+    'ConstantSourceNode.cpp',
     'ConvolverNode.cpp',
     'DelayBuffer.cpp',
     'DelayNode.cpp',
     'DynamicsCompressorNode.cpp',
     'FFTBlock.cpp',
     'GainNode.cpp',
+    'IIRFilterNode.cpp',
     'MediaBufferDecoder.cpp',
     'MediaElementAudioSourceNode.cpp',
     'MediaStreamAudioDestinationNode.cpp',
     'MediaStreamAudioSourceNode.cpp',
-    'OfflineAudioCompletionEvent.cpp',
     'OscillatorNode.cpp',
     'PannerNode.cpp',
     'PeriodicWave.cpp',
@@ -109,10 +118,17 @@ UNIFIED_SOURCES += [
 
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     SOURCES += ['AudioNodeEngineNEON.cpp']
-    SOURCES['AudioNodeEngineNEON.cpp'].flags += ['-mfpu=neon']
+    SOURCES['AudioNodeEngineNEON.cpp'].flags += CONFIG['NEON_FLAGS']
     LOCAL_INCLUDES += [
         '/media/openmax_dl/dl/api/'
     ]
+
+# Are we targeting x86 or x64?  If so, build SSE2 files.
+if CONFIG['INTEL_ARCHITECTURE']:
+    SOURCES += ['AudioNodeEngineSSE2.cpp']
+    DEFINES['USE_SSE2'] = True
+    SOURCES['AudioNodeEngineSSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -121,3 +137,5 @@ LOCAL_INCLUDES += [
     '..'
 ]
 
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

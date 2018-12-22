@@ -54,7 +54,7 @@ class MultiPrefMultiChoicePreference extends MultiChoicePreference {
         super.loadPersistedValues();
 
         // First check if we've already done the import the old data. If so, nothing to load.
-        final SharedPreferences prefs = GeckoSharedPrefs.forApp(getContext());
+        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(getContext());
         final boolean imported = getPersistedBoolean(prefs, getKey() + IMPORT_SUFFIX, false);
         if (imported) {
             return;
@@ -92,7 +92,7 @@ class MultiPrefMultiChoicePreference extends MultiChoicePreference {
                     persist(edit);
                     edit.putBoolean(getKey() + IMPORT_SUFFIX, true);
                     edit.apply();
-                } catch(Exception ex) {
+                } catch (Exception ex) {
                     Log.i(LOGTAG, "Err", ex);
                 }
             }

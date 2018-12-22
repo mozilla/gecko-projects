@@ -131,7 +131,7 @@ TypedObjectPrediction::ofArrayKind() const
 }
 
 bool
-TypedObjectPrediction::hasKnownSize(int32_t* out) const
+TypedObjectPrediction::hasKnownSize(uint32_t* out) const
 {
     switch (predictionKind()) {
       case TypedObjectPrediction::Empty:
@@ -201,7 +201,7 @@ TypedObjectPrediction::scalarType() const
     return extractType<ScalarTypeDescr>();
 }
 
-ReferenceTypeDescr::Type
+ReferenceType
 TypedObjectPrediction::referenceType() const
 {
     return extractType<ReferenceTypeDescr>();

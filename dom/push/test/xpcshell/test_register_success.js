@@ -18,14 +18,13 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test_register_success() {
+add_task(async function test_register_success() {
   let db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {return db.drop().then(_ => db.close());});
+  registerCleanupFunction(() => {return db.drop().then(_ => db.close());});
 
   PushServiceWebSocket._generateID = () => channelID;
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     db,
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
@@ -53,7 +52,10 @@ add_task(function* test_register_success() {
     }
   });
 
-  let newRecord = yield PushService.register({
+  let subModifiedPromise = promiseObserverNotification(
+    PushServiceComponent.subscriptionModifiedTopic);
+
+  let newRecord = await PushService.register({
     scope: 'https://example.org/1',
     originAttributes: ChromeUtils.originAttributesToSuffix(
       { appId: Ci.nsIScriptSecurityManager.NO_APP_ID, inIsolatedMozBrowser: false }),
@@ -61,7 +63,11 @@ add_task(function* test_register_success() {
   equal(newRecord.endpoint, 'https://example.com/update/1',
     'Wrong push endpoint in registration record');
 
-  let record = yield db.getByKeyID(channelID);
+  let {data: subModifiedScope} = await subModifiedPromise;
+  equal(subModifiedScope, 'https://example.org/1',
+    'Should fire a subscription modified event after subscribing');
+
+  let record = await db.getByKeyID(channelID);
   equal(record.channelID, channelID,
     'Wrong channel ID in database record');
   equal(record.pushEndpoint, 'https://example.com/update/1',

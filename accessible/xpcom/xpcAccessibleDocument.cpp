@@ -11,32 +11,33 @@
 
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "DocAccessible-inl.h"
-#include "nsIDOMDocument.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
 
 ////////////////////////////////////////////////////////////////////////////////
-// nsISupports and cycle collection
+// nsISupports
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(xpcAccessibleDocument)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(xpcAccessibleDocument,
-                                                  xpcAccessibleGeneric)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCache)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(xpcAccessibleDocument,
-                                                xpcAccessibleGeneric)
-  tmp->mCache.Clear();
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(xpcAccessibleDocument)
-  NS_INTERFACE_MAP_ENTRY(nsIAccessibleDocument)
-NS_INTERFACE_MAP_END_INHERITING(xpcAccessibleHyperText)
-
+NS_IMPL_QUERY_INTERFACE_INHERITED(xpcAccessibleDocument, xpcAccessibleHyperText,
+                                  nsIAccessibleDocument)
 NS_IMPL_ADDREF_INHERITED(xpcAccessibleDocument, xpcAccessibleHyperText)
-NS_IMPL_RELEASE_INHERITED(xpcAccessibleDocument, xpcAccessibleHyperText)
+NS_IMETHODIMP_(MozExternalRefCountType) xpcAccessibleDocument::Release(void)
+{
+  nsrefcnt r = xpcAccessibleHyperText::Release();
+  NS_LOG_RELEASE(this, r, "xpcAccessibleDocument");
+
+  // The only reference to the xpcAccessibleDocument is in DocManager's cache.
+  if (r == 1 && !mIntl.IsNull() && mCache.Count() == 0) {
+    if (mIntl.IsAccessible()) {
+      GetAccService()->RemoveFromXPCDocumentCache(
+        mIntl.AsAccessible()->AsDoc());
+    } else {
+      GetAccService()->RemoveFromRemoteXPCDocumentCache(
+        mIntl.AsProxy()->AsDoc());
+    }
+  }
+  return r;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessibleDocument
@@ -84,7 +85,7 @@ xpcAccessibleDocument::GetDocType(nsAString& aType)
 }
 
 NS_IMETHODIMP
-xpcAccessibleDocument::GetDOMDocument(nsIDOMDocument** aDOMDocument)
+xpcAccessibleDocument::GetDOMDocument(nsIDocument** aDOMDocument)
 {
   NS_ENSURE_ARG_POINTER(aDOMDocument);
   *aDOMDocument = nullptr;
@@ -93,7 +94,7 @@ xpcAccessibleDocument::GetDOMDocument(nsIDOMDocument** aDOMDocument)
     return NS_ERROR_FAILURE;
 
   if (Intl()->DocumentNode())
-    CallQueryInterface(Intl()->DocumentNode(), aDOMDocument);
+    NS_ADDREF(*aDOMDocument = Intl()->DocumentNode());
 
   return NS_OK;
 }
@@ -179,7 +180,7 @@ xpcAccessibleDocument::GetAccessible(Accessible* aAccessible)
   if (aAccessible->IsDoc())
     return this;
 
-  xpcAccessibleGeneric* xpcAcc = mCache.GetWeak(aAccessible);
+  xpcAccessibleGeneric* xpcAcc = mCache.Get(aAccessible);
   if (xpcAcc)
     return xpcAcc;
 
@@ -207,13 +208,30 @@ xpcAccessibleDocument::GetXPCAccessible(ProxyAccessible* aProxy)
     return this;
   }
 
-  xpcAccessibleGeneric* acc = mCache.GetWeak(aProxy);
+  xpcAccessibleGeneric* acc = mCache.Get(aProxy);
   if (acc) {
     return acc;
   }
 
   // XXX support exposing optional interfaces.
-  acc = new xpcAccessibleGeneric(aProxy, 0);
+  uint8_t interfaces = 0;
+  if (aProxy->mHasValue) {
+    interfaces |= eValue;
+  }
+
+  if (aProxy->mIsHyperLink) {
+    interfaces |= eHyperLink;
+  }
+
+  if (aProxy->mIsHyperText) {
+    interfaces |= eText;
+    acc = new xpcAccessibleHyperText(aProxy, interfaces);
+    mCache.Put(aProxy, acc);
+
+    return acc;
+  }
+
+  acc = new xpcAccessibleGeneric(aProxy, interfaces);
   mCache.Put(aProxy, acc);
 
   return acc;

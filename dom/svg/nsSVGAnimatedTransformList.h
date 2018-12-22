@@ -8,11 +8,12 @@
 #define MOZILLA_SVGANIMATEDTRANSFORMLIST_H__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
 #include "nsISMILAttr.h"
 #include "SVGTransformList.h"
 
-class nsIAtom;
+class nsAtom;
 class nsSMILValue;
 class nsSVGElement;
 
@@ -46,7 +47,7 @@ class nsSVGAnimatedTransformList
 public:
   nsSVGAnimatedTransformList()
     : mIsAttrSet(false),
-      mHadTransformBeforeLastBaseValChange(false) { }
+      mRequiresFrameReconstruction(true) { }
 
   /**
    * Because it's so important that mBaseVal and its DOMSVGTransformList wrapper
@@ -59,9 +60,11 @@ public:
     return mBaseVal;
   }
 
-  nsresult SetBaseValue(const SVGTransformList& aValue);
+  nsresult SetBaseValue(const SVGTransformList& aValue,
+                        nsSVGElement* aSVGElement);
 
-  nsresult SetBaseValueString(const nsAString& aValue);
+  nsresult SetBaseValueString(const nsAString& aValue,
+                              nsSVGElement* aSVGElement);
 
   void ClearBaseValue();
 
@@ -95,8 +98,8 @@ public:
   }
 
   /**
-   * Returns true iff "HasTransform" returned true just before our most recent
-   * SetBaseValue/SetBaseValueString/ClearBaseValue change.
+   * Returns true if we need to reconstruct the frame of the element associated
+   * with this transform list because the stacking context has changed.
    *
    * (This is used as part of an optimization in
    * SVGTransformableElement::GetAttributeChangeHint. That function reports an
@@ -105,12 +108,11 @@ public:
    * a transform where we previously had none. These cases require a more
    * thorough nsChangeHint.)
    */
-  bool HadTransformBeforeLastBaseValChange() const {
-    return mHadTransformBeforeLastBaseValChange;
+  bool RequiresFrameReconstruction() const {
+    return mRequiresFrameReconstruction;
   }
 
-  /// Callers own the returned nsISMILAttr
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
+  mozilla::UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
 
@@ -122,8 +124,8 @@ private:
   SVGTransformList mBaseVal;
   nsAutoPtr<SVGTransformList> mAnimVal;
   bool mIsAttrSet;
-   // (See documentation for accessor, HadTransformBeforeLastBaseValChange.)
-  bool mHadTransformBeforeLastBaseValChange;
+   // (See documentation for accessor, RequiresFrameReconstruction.)
+  bool mRequiresFrameReconstruction;
 
   struct SMILAnimatedTransformList : public nsISMILAttr
   {
@@ -145,7 +147,7 @@ private:
 
   protected:
     static void ParseValue(const nsAString& aSpec,
-                           const nsIAtom* aTransformType,
+                           const nsAtom* aTransformType,
                            nsSMILValue& aResult);
     static int32_t ParseParameterList(const nsAString& aSpec, float* aVars,
                                       int32_t aNVars);

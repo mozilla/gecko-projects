@@ -1,4 +1,5 @@
-Components.utils.import("resource://gre/modules/Services.jsm");
+/* exported startup, shutdown, install, uninstall */
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const VERSION = 1;
 

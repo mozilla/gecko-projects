@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -7,7 +8,7 @@
 #define GFX_BASICPAINTEDLAYER_H
 
 #include "Layers.h"                     // for PaintedLayer, LayerManager, etc
-#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
+#include "RotatedBuffer.h"              // for RotatedBuffer, etc
 #include "BasicImplData.h"              // for BasicImplData
 #include "BasicLayers.h"                // for BasicLayerManager
 #include "gfxPoint.h"                   // for gfxPoint
@@ -27,12 +28,13 @@ class ReadbackProcessor;
 
 class BasicPaintedLayer : public PaintedLayer, public BasicImplData {
 public:
-  typedef RotatedContentBuffer::PaintState PaintState;
-  typedef RotatedContentBuffer::ContentType ContentType;
+  typedef ContentClient::PaintState PaintState;
+  typedef ContentClient::ContentType ContentType;
 
-  explicit BasicPaintedLayer(BasicLayerManager* aLayerManager) :
+  explicit BasicPaintedLayer(BasicLayerManager* aLayerManager, gfx::BackendType aBackend) :
     PaintedLayer(aLayerManager, static_cast<BasicImplData*>(this)),
     mContentClient(nullptr)
+    , mBackend(aBackend)
   {
     MOZ_COUNT_CTOR(BasicPaintedLayer);
   }
@@ -54,9 +56,8 @@ public:
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
-    mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(20);
-    mValidRegion.Sub(mValidRegion, mInvalidRegion);
+    mInvalidRegion.Add(aRegion);
+    UpdateValidRegionAfterInvalidRegionChanged();
   }
 
   virtual void PaintThebes(gfxContext* aContext,
@@ -73,7 +74,7 @@ public:
     if (mContentClient) {
       mContentClient->Clear();
     }
-    mValidRegion.SetEmpty();
+    ClearValidRegion();
   }
 
   virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) override
@@ -84,7 +85,7 @@ public:
       mEffectiveTransform = GetLocalTransform() * aTransformToSurface;
       if (gfxPoint(0,0) != mResidualTranslation) {
         mResidualTranslation = gfxPoint(0,0);
-        mValidRegion.SetEmpty();
+        ClearValidRegion();
       }
       ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
       return;
@@ -103,7 +104,6 @@ protected:
               const nsIntRegion& aRegionToDraw,
               const nsIntRegion& aExtendedRegionToDraw,
               const nsIntRegion& aRegionToInvalidate,
-              bool aDidSelfCopy,
               DrawRegionClip aClip,
               LayerManager::DrawPaintedLayerCallback aCallback,
               void* aCallbackData)
@@ -120,10 +120,11 @@ protected:
     // representation of a region.)
     nsIntRegion tmp;
     tmp.Or(mVisibleRegion.ToUnknownRegion(), aExtendedRegionToDraw);
-    mValidRegion.Or(mValidRegion, tmp);
+    AddToValidRegion(tmp);
   }
 
   RefPtr<ContentClientBasic> mContentClient;
+  gfx::BackendType mBackend;
 };
 
 } // namespace layers

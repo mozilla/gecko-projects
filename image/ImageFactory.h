@@ -9,15 +9,15 @@
 
 #include "nsCOMPtr.h"
 #include "nsProxyRelease.h"
+#include "nsStringFwd.h"
 
-class nsCString;
 class nsIRequest;
+class nsIURI;
 
 namespace mozilla {
 namespace image {
 
 class Image;
-class ImageURL;
 class MultipartImage;
 class ProgressTracker;
 
@@ -43,7 +43,7 @@ public:
   static already_AddRefed<Image> CreateImage(nsIRequest* aRequest,
                                              ProgressTracker* aProgressTracker,
                                              const nsCString& aMimeType,
-                                             ImageURL* aURI,
+                                             nsIURI* aURI,
                                              bool aIsMultiPart,
                                              uint32_t aInnerWindowId);
   /**
@@ -51,9 +51,10 @@ public:
    * the usual image loading mechanism.
    *
    * @param aMimeType      The mimetype of the image.
+   * @param aSizeHint      The length of the source data for the image.
    */
   static already_AddRefed<Image>
-  CreateAnonymousImage(const nsCString& aMimeType);
+  CreateAnonymousImage(const nsCString& aMimeType, uint32_t aSizeHint = 0);
 
   /**
    * Creates a new multipart/x-mixed-replace image wrapper, and initializes it
@@ -73,7 +74,7 @@ private:
   CreateRasterImage(nsIRequest* aRequest,
                     ProgressTracker* aProgressTracker,
                     const nsCString& aMimeType,
-                    ImageURL* aURI,
+                    nsIURI* aURI,
                     uint32_t aImageFlags,
                     uint32_t aInnerWindowId);
 
@@ -81,7 +82,7 @@ private:
   CreateVectorImage(nsIRequest* aRequest,
                     ProgressTracker* aProgressTracker,
                     const nsCString& aMimeType,
-                    ImageURL* aURI,
+                    nsIURI* aURI,
                     uint32_t aImageFlags,
                     uint32_t aInnerWindowId);
 

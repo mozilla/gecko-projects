@@ -4,9 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* global assert */
+
 "use strict";
 
-const { ActorClass, method } = require("devtools/server/protocol");
+const { ActorClassWithSpec } = require("devtools/shared/protocol");
+const { breakpointSpec } = require("devtools/shared/specs/breakpoint");
 
 /**
  * Set breakpoints on all the given entry points with the given
@@ -18,9 +21,9 @@ const { ActorClass, method } = require("devtools/server/protocol");
  *        An array of objects of the form `{ script, offsets }`.
  */
 function setBreakpointAtEntryPoints(actor, entryPoints) {
-  for (let { script, offsets } of entryPoints) {
+  for (const { script, offsets } of entryPoints) {
     actor.addScript(script);
-    for (let offset of offsets) {
+    for (const offset of offsets) {
       script.setBreakpoint(offset, actor);
     }
   }
@@ -33,9 +36,7 @@ exports.setBreakpointAtEntryPoints = setBreakpointAtEntryPoints;
  * responsible for deleting breakpoints, handling breakpoint hits and
  * associating breakpoints with scripts.
  */
-let BreakpointActor = ActorClass({
-  typeName: "breakpoint",
-
+const BreakpointActor = ActorClassWithSpec(breakpointSpec, {
   /**
    * Create a Breakpoint actor.
    *
@@ -55,7 +56,7 @@ let BreakpointActor = ActorClass({
     this.isPending = true;
   },
 
-  disconnect: function() {
+  destroy: function() {
     this.removeScripts();
   },
 
@@ -79,7 +80,7 @@ let BreakpointActor = ActorClass({
    * Remove the breakpoints from associated scripts and clear the script cache.
    */
   removeScripts: function() {
-    for (let script of this.scripts) {
+    for (const script of this.scripts) {
       script.clearBreakpoint(this);
     }
     this.scripts.clear();
@@ -100,7 +101,7 @@ let BreakpointActor = ActorClass({
    *            If the condition throws, this is the thrown message.
    */
   checkCondition: function(frame) {
-    let completion = frame.eval(this.condition);
+    const completion = frame.eval(this.condition);
     if (completion) {
       if (completion.throw) {
         // The evaluation failed and threw
@@ -112,7 +113,9 @@ let BreakpointActor = ActorClass({
           } else if (completion.toString) {
             message = completion.toString();
           }
-        } catch (ex) {}
+        } catch (ex) {
+          // ignore
+        }
         return {
           result: true,
           message: message
@@ -120,12 +123,11 @@ let BreakpointActor = ActorClass({
       } else if (completion.yield) {
         assert(false, "Shouldn't ever get yield completions from an eval");
       } else {
-        return { result: completion.return ? true : false };
+        return { result: !!completion.return };
       }
-    } else {
-      // The evaluation was killed (possibly by the slow script dialog)
-      return { result: undefined };
     }
+    // The evaluation was killed (possibly by the slow script dialog)
+    return { result: undefined };
   },
 
   /**
@@ -134,20 +136,34 @@ let BreakpointActor = ActorClass({
    * @param frame Debugger.Frame
    *        The stack frame that contained the breakpoint.
    */
-  hit: function (frame) {
+  hit: function(frame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
-    let generatedLocation = this.threadActor.sources.getFrameLocation(frame);
-    let { originalSourceActor } = this.threadActor.unsafeSynchronize(
+    const generatedLocation = this.threadActor.sources.getFrameLocation(frame);
+    const {
+      originalSourceActor,
+      originalLine,
+      originalColumn
+    } = this.threadActor.unsafeSynchronize(
       this.threadActor.sources.getOriginalLocation(generatedLocation));
-    let url = originalSourceActor.url;
+    const url = originalSourceActor.url;
 
     if (this.threadActor.sources.isBlackBoxed(url)
+        || this.threadActor.skipBreakpoints
         || frame.onStep) {
       return undefined;
     }
 
-    let reason = {};
+    // If we're trying to pop this frame, and we see a breakpoint at
+    // the spot at which popping started, ignore it.  See bug 970469.
+    const locationAtFinish = frame.onPop && frame.onPop.originalLocation;
+    if (locationAtFinish &&
+        locationAtFinish.originalLine === originalLine &&
+        locationAtFinish.originalColumn === originalColumn) {
+      return undefined;
+    }
+
+    const reason = {};
 
     if (this.threadActor._hiddenBreakpoints.has(this.actorID)) {
       reason.type = "pauseOnDOMEvents";
@@ -156,7 +172,7 @@ let BreakpointActor = ActorClass({
       // TODO: add the rest of the breakpoints on that line (bug 676602).
       reason.actors = [ this.actorID ];
     } else {
-      let { result, message } = this.checkCondition(frame)
+      const { result, message } = this.checkCondition(frame);
 
       if (result) {
         if (!message) {
@@ -176,7 +192,7 @@ let BreakpointActor = ActorClass({
   /**
    * Handle a protocol request to remove this breakpoint.
    */
-  delete: method(function() {
+  delete: function() {
     // Remove from the breakpoint store.
     if (this.originalLocation) {
       this.threadActor.breakpointActorMap.deleteActor(this.originalLocation);
@@ -184,7 +200,7 @@ let BreakpointActor = ActorClass({
     this.threadActor.threadLifetimePool.removeActor(this);
     // Remove the actual breakpoint from the associated scripts.
     this.removeScripts();
-  })
+  }
 });
 
 exports.BreakpointActor = BreakpointActor;

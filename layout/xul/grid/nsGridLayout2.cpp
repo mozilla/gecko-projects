@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,7 +17,7 @@
 #include "nsBox.h"
 #include "nsIScrollableFrame.h"
 #include "nsSprocketLayout.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/ReflowInput.h"
 
 nsresult
 NS_NewGridLayout2( nsIPresShell* aPresShell, nsBoxLayout** aNewLayout)
@@ -25,8 +26,8 @@ NS_NewGridLayout2( nsIPresShell* aPresShell, nsBoxLayout** aNewLayout)
   NS_IF_ADDREF(*aNewLayout);
 
   return NS_OK;
-  
-} 
+
+}
 
 nsGridLayout2::nsGridLayout2(nsIPresShell* aPresShell):nsStackLayout()
 {
@@ -47,13 +48,13 @@ nsGridLayout2::AddOffset(nsIFrame* aChild, nsSize& aSize)
 }
 
 NS_IMETHODIMP
-nsGridLayout2::Layout(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
+nsGridLayout2::XULLayout(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
 {
   // XXX This should be set a better way!
   mGrid.SetBox(aBox);
-  NS_ASSERTION(aBox->GetLayoutManager() == this, "setting incorrect box");
+  NS_ASSERTION(aBox->GetXULLayoutManager() == this, "setting incorrect box");
 
-  nsresult rv = nsStackLayout::Layout(aBox, aBoxLayoutState);
+  nsresult rv = nsStackLayout::XULLayout(aBox, aBoxLayoutState);
 #ifdef DEBUG_grid
   mGrid.PrintCellMap();
 #endif
@@ -75,7 +76,7 @@ nsGridLayout2::GetGrid(nsIFrame* aBox, int32_t* aIndex, nsGridRowLayout* aReques
 {
   // XXX This should be set a better way!
   mGrid.SetBox(aBox);
-  NS_ASSERTION(aBox->GetLayoutManager() == this, "setting incorrect box");
+  NS_ASSERTION(aBox->GetXULLayoutManager() == this, "setting incorrect box");
   return &mGrid;
 }
 
@@ -93,9 +94,9 @@ nsGridLayout2::AddWidth(nsSize& aSize, nscoord aSize2, bool aIsHorizontal)
 }
 
 nsSize
-nsGridLayout2::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridLayout2::GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 {
-  nsSize minSize = nsStackLayout::GetMinSize(aBox, aState); 
+  nsSize minSize = nsStackLayout::GetXULMinSize(aBox, aState);
 
   // if there are no <rows> tags that will sum up our columns,
   // sum up our columns here.
@@ -108,7 +109,7 @@ nsGridLayout2::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
       int32_t rows = mGrid.GetRowCount();
       for (int32_t i=0; i < rows; i++)
       {
-        nscoord height = mGrid.GetMinRowHeight(aState, i, true); 
+        nscoord height = mGrid.GetMinRowHeight(aState, i, true);
         AddWidth(total, height, false); // AddHeight
       }
     }
@@ -118,7 +119,7 @@ nsGridLayout2::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
       int32_t columns = mGrid.GetColumnCount();
       for (int32_t i=0; i < columns; i++)
       {
-        nscoord width = mGrid.GetMinRowHeight(aState, i, false); 
+        nscoord width = mGrid.GetMinRowHeight(aState, i, false);
         AddWidth(total, width, true); // AddWidth
       }
     }
@@ -127,14 +128,14 @@ nsGridLayout2::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
     AddOffset(aBox, total);
     AddLargestSize(minSize, total);
   }
-  
+
   return minSize;
 }
 
 nsSize
-nsGridLayout2::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridLayout2::GetXULPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 {
-  nsSize pref = nsStackLayout::GetPrefSize(aBox, aState); 
+  nsSize pref = nsStackLayout::GetXULPrefSize(aBox, aState);
 
   // if there are no <rows> tags that will sum up our columns,
   // sum up our columns here.
@@ -147,7 +148,7 @@ nsGridLayout2::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
       int32_t rows = mGrid.GetRowCount();
       for (int32_t i=0; i < rows; i++)
       {
-        nscoord height = mGrid.GetPrefRowHeight(aState, i, true); 
+        nscoord height = mGrid.GetPrefRowHeight(aState, i, true);
         AddWidth(total, height, false); // AddHeight
       }
     }
@@ -171,9 +172,9 @@ nsGridLayout2::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 }
 
 nsSize
-nsGridLayout2::GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
+nsGridLayout2::GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 {
-  nsSize maxSize = nsStackLayout::GetMaxSize(aBox, aState); 
+  nsSize maxSize = nsStackLayout::GetXULMaxSize(aBox, aState);
 
   // if there are no <rows> tags that will sum up our columns,
   // sum up our columns here.
@@ -187,7 +188,7 @@ nsGridLayout2::GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
       int32_t rows = mGrid.GetRowCount();
       for (int32_t i=0; i < rows; i++)
       {
-        nscoord height = mGrid.GetMaxRowHeight(aState, i, true); 
+        nscoord height = mGrid.GetMaxRowHeight(aState, i, true);
         AddWidth(total, height, false); // AddHeight
       }
     }

@@ -10,7 +10,11 @@ var gTab, gPanel, gClient, gThreadClient, gSource;
 const TAB_URL = EXAMPLE_URL + "doc_pretty-print-2.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_ugly-2.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gClient = gPanel.panelWin.gClient;
@@ -38,7 +42,7 @@ function findSource() {
 }
 
 function prettyPrintSource(source) {
-  gThreadClient.source(gSource).prettyPrint(2, runCode);
+  gThreadClient.source(gSource).prettyPrint(2).then(runCode);
 }
 
 function runCode({ error }) {
@@ -58,13 +62,11 @@ function testDbgStatement(event, { why, frame }) {
 function setBreakpoint() {
   gThreadClient.source(gSource).setBreakpoint(
     { line: BP_LOCATION.line,
-      column: BP_LOCATION.column },
-    ({ error, actualLocation }) => {
-      ok(!error, "error should not exist");
+      column: BP_LOCATION.column })
+    .then(([{ actualLocation }]) => {
       ok(!actualLocation, "actualLocation should not exist");
       testStepping();
-    }
-  );
+    });
 }
 
 function testStepping() {
@@ -90,6 +92,6 @@ function testHitBreakpoint() {
   gThreadClient.resume();
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = gPanel = gClient = gThreadClient = gSource = null;
 });

@@ -3,34 +3,30 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 /* Bug 650760 */
 
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location = "data:text/html,Test keybindings for opening Scratchpad MDN Documentation, bug 650760";
-  gBrowser.selectedBrowser.addEventListener("load", function onTabLoad() {
-    gBrowser.selectedBrowser.removeEventListener("load", onTabLoad, true);
-
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.loadURI("data:text/html,Test keybindings for opening Scratchpad MDN Documentation, bug 650760");
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
     openScratchpad(runTest);
-  }, true);
+  });
 }
 
-function runTest()
-{
-  let sp = gScratchpadWindow.Scratchpad;
+function runTest() {
+  const sp = gScratchpadWindow.Scratchpad;
   ok(sp, "Scratchpad object exists in new window");
   ok(sp.editor.hasFocus(), "the editor has focus");
 
-  let keyid = gScratchpadWindow.document.getElementById("key_openHelp");
-  let modifiers = keyid.getAttribute("modifiers");
+  const keyid = gScratchpadWindow.document.getElementById("key_openHelp");
+  const modifiers = keyid.getAttribute("modifiers");
 
   let key = null;
-  if (keyid.getAttribute("keycode"))
+  if (keyid.getAttribute("keycode")) {
     key = keyid.getAttribute("keycode");
-
-  else if (keyid.getAttribute("key"))
+  } else if (keyid.getAttribute("key")) {
     key = keyid.getAttribute("key");
+  }
 
   isnot(key, null, "Successfully retrieved keycode/key");
 
@@ -40,11 +36,13 @@ function runTest()
     altKey: modifiers.match("alt"),
     metaKey: modifiers.match("meta"),
     accelKey: modifiers.match("accel")
-  }
+  };
 
   info("check that the MDN page is opened on \"F1\"");
   let linkClicked = false;
-  sp.openDocumentationPage = function(event) { linkClicked = true; };
+  sp.openDocumentationPage = function(event) {
+    linkClicked = true;
+  };
 
   EventUtils.synthesizeKey(key, aEvent, gScratchpadWindow);
 
@@ -52,8 +50,7 @@ function runTest()
   finishTest();
 }
 
-function finishTest()
-{
+function finishTest() {
   gScratchpadWindow.close();
   finish();
 }

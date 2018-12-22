@@ -6,7 +6,7 @@
 
 #include "mozilla/chrome/RegistryMessageUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "SubstitutingProtocolHandler.h"
 #include "nsIChannel.h"
@@ -14,12 +14,14 @@
 #include "nsIFile.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsReadableUtils.h"
 #include "nsURLHelper.h"
 #include "nsEscape.h"
 
 using mozilla::dom::ContentParent;
 
 namespace mozilla {
+namespace net {
 
 // Log module for Substituting Protocol logging. We keep the pre-existing module
 // name of "nsResProtocol" to avoid disruption.
@@ -30,6 +32,16 @@ static NS_DEFINE_CID(kSubstitutingURLCID, NS_SUBSTITUTINGURL_CID);
 //---------------------------------------------------------------------------------
 // SubstitutingURL : overrides nsStandardURL::GetFile to provide nsIFile resolution
 //---------------------------------------------------------------------------------
+
+// The list of interfaces should be in sync with nsStandardURL
+// Queries this list of interfaces. If none match, it queries mURI.
+NS_IMPL_NSIURIMUTATOR_ISUPPORTS(SubstitutingURL::Mutator,
+                                nsIURISetters,
+                                nsIURIMutator,
+                                nsIStandardURLMutator,
+                                nsIURLMutator,
+                                nsIFileURLMutator,
+                                nsISerializable)
 
 nsresult
 SubstitutingURL::EnsureFile()
@@ -112,45 +124,51 @@ SubstitutingProtocolHandler::ConstructInternal()
 // IPC marshalling.
 //
 
-void
+nsresult
 SubstitutingProtocolHandler::CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aMappings)
 {
   for (auto iter = mSubstitutions.ConstIter(); !iter.Done(); iter.Next()) {
-    nsCOMPtr<nsIURI> uri = iter.Data();
+    SubstitutionEntry& entry = iter.Data();
+    nsCOMPtr<nsIURI> uri = entry.baseURI;
     SerializedURI serialized;
     if (uri) {
-      uri->GetSpec(serialized.spec);
-      uri->GetOriginCharset(serialized.charset);
+      nsresult rv = uri->GetSpec(serialized.spec);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
-    SubstitutionMapping substitution = { mScheme, nsCString(iter.Key()), serialized };
+    SubstitutionMapping substitution = { mScheme, nsCString(iter.Key()), serialized, entry.flags };
     aMappings.AppendElement(substitution);
   }
+
+  return NS_OK;
 }
 
-void
-SubstitutingProtocolHandler::SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI)
+nsresult
+SubstitutingProtocolHandler::SendSubstitution(const nsACString& aRoot, nsIURI* aBaseURI, uint32_t aFlags)
 {
   if (GeckoProcessType_Content == XRE_GetProcessType()) {
-    return;
+    return NS_OK;
   }
 
   nsTArray<ContentParent*> parents;
   ContentParent::GetAll(parents);
   if (!parents.Length()) {
-    return;
+    return NS_OK;
   }
 
   SubstitutionMapping mapping;
   mapping.scheme = mScheme;
   mapping.path = aRoot;
   if (aBaseURI) {
-    aBaseURI->GetSpec(mapping.resolvedURI.spec);
-    aBaseURI->GetOriginCharset(mapping.resolvedURI.charset);
+    nsresult rv = aBaseURI->GetSpec(mapping.resolvedURI.spec);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
+  mapping.flags = aFlags;
 
   for (uint32_t i = 0; i < parents.Length(); i++) {
     Unused << parents[i]->SendRegisterChromeItem(mapping);
   }
+
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -189,12 +207,6 @@ SubstitutingProtocolHandler::NewURI(const nsACString &aSpec,
                                     nsIURI *aBaseURI,
                                     nsIURI **result)
 {
-  nsresult rv;
-
-  RefPtr<SubstitutingURL> url = new SubstitutingURL();
-  if (!url)
-    return NS_ERROR_OUT_OF_MEMORY;
-
   // unescape any %2f and %2e to make sure nsStandardURL coalesces them.
   // Later net_GetFileFromURLSpec() will do a full unescape and we want to
   // treat them the same way the file system will. (bugs 380994, 394075)
@@ -226,11 +238,12 @@ SubstitutingProtocolHandler::NewURI(const nsACString &aSpec,
   if (last < src)
     spec.Append(last, src-last);
 
-  rv = url->Init(nsIStandardURL::URLTYPE_STANDARD, -1, spec, aCharset, aBaseURI);
-  if (NS_SUCCEEDED(rv)) {
-    url.forget(result);
-  }
-  return rv;
+  nsCOMPtr<nsIURI> base(aBaseURI);
+  return NS_MutateURI(new SubstitutingURL::Mutator())
+    .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
+                            nsIStandardURL::URLTYPE_STANDARD,
+                            -1, spec, aCharset, base, nullptr))
+    .Finalize(result);
 }
 
 nsresult
@@ -239,6 +252,8 @@ SubstitutingProtocolHandler::NewChannel2(nsIURI* uri,
                                          nsIChannel** result)
 {
   NS_ENSURE_ARG_POINTER(uri);
+  NS_ENSURE_ARG_POINTER(aLoadInfo);
+
   nsAutoCString spec;
   nsresult rv = ResolveURI(uri, spec);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -247,12 +262,18 @@ SubstitutingProtocolHandler::NewChannel2(nsIURI* uri,
   rv = NS_NewURI(getter_AddRefs(newURI), spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // We don't want to allow the inner protocol handler to modify the result
+  // principal URI since we want either |uri| or anything pre-set by upper
+  // layers to prevail.
+  nsCOMPtr<nsIURI> savedResultPrincipalURI;
+  rv = aLoadInfo->GetResultPrincipalURI(getter_AddRefs(savedResultPrincipalURI));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   rv = NS_NewChannelInternal(result, newURI, aLoadInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsLoadFlags loadFlags = 0;
-  (*result)->GetLoadFlags(&loadFlags);
-  (*result)->SetLoadFlags(loadFlags & ~nsIChannel::LOAD_REPLACE);
+  rv = aLoadInfo->SetResultPrincipalURI(savedResultPrincipalURI);
+  NS_ENSURE_SUCCESS(rv, rv);
   rv = (*result)->SetOriginalURI(uri);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -280,10 +301,21 @@ SubstitutingProtocolHandler::AllowPort(int32_t port, const char *scheme, bool *_
 nsresult
 SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *baseURI)
 {
+  // Add-ons use this API but they should not be able to make anything
+  // content-accessible.
+  return SetSubstitutionWithFlags(root, baseURI, 0);
+}
+
+nsresult
+SubstitutingProtocolHandler::SetSubstitutionWithFlags(const nsACString& origRoot, nsIURI *baseURI, uint32_t flags)
+{
+  nsAutoCString root;
+  ToLowerCase(origRoot, root);
+
   if (!baseURI) {
     mSubstitutions.Remove(root);
-    SendSubstitution(root, baseURI);
-    return NS_OK;
+    NotifyObservers(root, baseURI);
+    return SendSubstitution(root, baseURI, flags);
   }
 
   // If baseURI isn't a same-scheme URI, we can set the substitution immediately.
@@ -297,9 +329,11 @@ SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *bas
       return NS_ERROR_INVALID_ARG;
     }
 
-    mSubstitutions.Put(root, baseURI);
-    SendSubstitution(root, baseURI);
-    return NS_OK;
+    SubstitutionEntry& entry = mSubstitutions.GetOrInsert(root);
+    entry.baseURI = baseURI;
+    entry.flags = flags;
+    NotifyObservers(root, baseURI);
+    return SendSubstitution(root, baseURI, flags);
   }
 
   // baseURI is a same-type substituting URI, let's resolve it first.
@@ -311,26 +345,60 @@ SubstitutingProtocolHandler::SetSubstitution(const nsACString& root, nsIURI *bas
   rv = mIOService->NewURI(newBase, nullptr, nullptr, getter_AddRefs(newBaseURI));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mSubstitutions.Put(root, newBaseURI);
-  SendSubstitution(root, newBaseURI);
-  return NS_OK;
+  SubstitutionEntry& entry = mSubstitutions.GetOrInsert(root);
+  entry.baseURI = newBaseURI;
+  entry.flags = flags;
+  NotifyObservers(root, baseURI);
+  return SendSubstitution(root, newBaseURI, flags);
 }
 
 nsresult
-SubstitutingProtocolHandler::GetSubstitution(const nsACString& root, nsIURI **result)
+SubstitutingProtocolHandler::GetSubstitution(const nsACString& origRoot, nsIURI **result)
 {
   NS_ENSURE_ARG_POINTER(result);
 
-  if (mSubstitutions.Get(root, result))
+  nsAutoCString root;
+  ToLowerCase(origRoot, root);
+
+  SubstitutionEntry entry;
+  if (mSubstitutions.Get(root, &entry)) {
+    nsCOMPtr<nsIURI> baseURI = entry.baseURI;
+    baseURI.forget(result);
     return NS_OK;
+  }
 
-  return GetSubstitutionInternal(root, result);
+  uint32_t flags;
+  return GetSubstitutionInternal(root, result, &flags);
 }
 
 nsresult
-SubstitutingProtocolHandler::HasSubstitution(const nsACString& root, bool *result)
+SubstitutingProtocolHandler::GetSubstitutionFlags(const nsACString& root, uint32_t* flags)
+{
+#ifdef DEBUG
+  nsAutoCString lcRoot;
+  ToLowerCase(root, lcRoot);
+  MOZ_ASSERT(root.Equals(lcRoot), "GetSubstitutionFlags should never receive mixed-case root name");
+#endif
+
+  *flags = 0;
+  SubstitutionEntry entry;
+  if (mSubstitutions.Get(root, &entry)) {
+    *flags = entry.flags;
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIURI> baseURI;
+  return GetSubstitutionInternal(root, getter_AddRefs(baseURI), flags);
+}
+
+nsresult
+SubstitutingProtocolHandler::HasSubstitution(const nsACString& origRoot, bool *result)
 {
   NS_ENSURE_ARG_POINTER(result);
+
+  nsAutoCString root;
+  ToLowerCase(origRoot, root);
+
   *result = HasSubstitution(root);
   return NS_OK;
 }
@@ -342,39 +410,70 @@ SubstitutingProtocolHandler::ResolveURI(nsIURI *uri, nsACString &result)
 
   nsAutoCString host;
   nsAutoCString path;
+  nsAutoCString pathname;
+
+  nsCOMPtr<nsIURL> url = do_QueryInterface(uri);
+  if (!url) {
+    return NS_ERROR_MALFORMED_URI;
+  }
 
   rv = uri->GetAsciiHost(host);
   if (NS_FAILED(rv)) return rv;
 
-  rv = uri->GetPath(path);
+  rv = uri->GetPathQueryRef(path);
   if (NS_FAILED(rv)) return rv;
 
-  if (ResolveSpecialCases(host, path, result)) {
+  rv = url->GetFilePath(pathname);
+  if (NS_FAILED(rv)) return rv;
+
+  if (ResolveSpecialCases(host, path, pathname, result)) {
     return NS_OK;
   }
-
-  // Unescape the path so we can perform some checks on it.
-  nsAutoCString unescapedPath(path);
-  NS_UnescapeURL(unescapedPath);
-
-  // Don't misinterpret the filepath as an absolute URI.
-  if (unescapedPath.FindChar(':') != -1)
-    return NS_ERROR_MALFORMED_URI;
-
-  if (unescapedPath.FindChar('\\') != -1)
-    return NS_ERROR_MALFORMED_URI;
-
-  const char *p = path.get() + 1; // path always starts with a slash
-  NS_ASSERTION(*(p-1) == '/', "Path did not begin with a slash!");
-
-  if (*p == '/')
-    return NS_ERROR_MALFORMED_URI;
 
   nsCOMPtr<nsIURI> baseURI;
   rv = GetSubstitution(host, getter_AddRefs(baseURI));
   if (NS_FAILED(rv)) return rv;
 
-  rv = baseURI->Resolve(nsDependentCString(p, path.Length()-1), result);
+  // Unescape the path so we can perform some checks on it.
+  NS_UnescapeURL(pathname);
+  if (pathname.FindChar('\\') != -1) {
+    return NS_ERROR_MALFORMED_URI;
+  }
+
+  // Some code relies on an empty path resolving to a file rather than a
+  // directory.
+  NS_ASSERTION(path.CharAt(0) == '/', "Path must begin with '/'");
+  if (path.Length() == 1) {
+    rv = baseURI->GetSpec(result);
+  } else {
+    // Make sure we always resolve the path as file-relative to our target URI.
+    // When the baseURI is a nsIFileURL, and the directory it points to doesn't
+    // exist, it doesn't end with a /. In that case, a file-relative resolution
+    // is going to pick something in the parent directory, so we resolve using
+    // an absolute path derived from the full path in that case.
+    nsCOMPtr<nsIFileURL> baseDir = do_QueryInterface(baseURI);
+    if (baseDir) {
+      nsAutoCString basePath;
+      rv = baseURI->GetFilePath(basePath);
+      if (NS_SUCCEEDED(rv) && !StringEndsWith(basePath, NS_LITERAL_CSTRING("/"))) {
+        // Cf. the assertion above, path already starts with a /, so prefixing
+        // with a string that doesn't end with one will leave us wit the right
+        // amount of /.
+        path.Insert(basePath, 0);
+      } else {
+        // Allow to fall through below.
+        baseDir = nullptr;
+      }
+    }
+    if (!baseDir) {
+      path.Insert('.', 0);
+    }
+    rv = baseURI->Resolve(path, result);
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   if (MOZ_LOG_TEST(gResLog, LogLevel::Debug)) {
     nsAutoCString spec;
@@ -384,4 +483,38 @@ SubstitutingProtocolHandler::ResolveURI(nsIURI *uri, nsACString &result)
   return rv;
 }
 
+nsresult
+SubstitutingProtocolHandler::AddObserver(nsISubstitutionObserver* aObserver)
+{
+  NS_ENSURE_ARG(aObserver);
+  if (mObservers.Contains(aObserver)) {
+    return NS_ERROR_DUPLICATE_HANDLE;
+  }
+
+  mObservers.AppendElement(aObserver);
+  return NS_OK;
+}
+
+nsresult
+SubstitutingProtocolHandler::RemoveObserver(nsISubstitutionObserver* aObserver)
+{
+  NS_ENSURE_ARG(aObserver);
+  if (!mObservers.Contains(aObserver)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  mObservers.RemoveElement(aObserver);
+  return NS_OK;
+}
+
+void
+SubstitutingProtocolHandler::NotifyObservers(const nsACString& aRoot,
+                                             nsIURI* aBaseURI)
+{
+  for (size_t i = 0; i < mObservers.Length(); ++i) {
+    mObservers[i]->OnSetSubstitution(aRoot, aBaseURI);
+  }
+}
+
+} // namespace net
 } // namespace mozilla

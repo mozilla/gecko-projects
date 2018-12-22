@@ -4,16 +4,16 @@
 
 import time
 
+from firefox_puppeteer import PuppeteerMixin
 from marionette_driver import By, Wait
 from marionette_driver.errors import MarionetteException
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestSecurityNotification(FirefoxTestCase):
+class TestSecurityNotification(PuppeteerMixin, MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestSecurityNotification, self).setUp()
 
         self.urls = [
             # Invalid cert page
@@ -21,7 +21,7 @@ class TestSecurityNotification(FirefoxTestCase):
             # Secure page
             'https://ssl-ev.mozqa.com/',
             # Insecure page
-            'http://www.mozqa.com'
+            'http://no-ssl.mozqa.com'
         ]
 
         self.identity_box = self.browser.navbar.locationbar.identity_box
@@ -35,22 +35,22 @@ class TestSecurityNotification(FirefoxTestCase):
             time.sleep(1)
 
             # Verify the text in Technical Content contains the page with invalid cert
-            text = self.marionette.find_element(By.ID, 'technicalContentText')
-            self.assertIn(self.urls[0][8:], text.get_attribute('textContent'))
+            text = self.marionette.find_element(By.ID, 'badCertTechnicalInfo')
+            self.assertIn(self.urls[0][8:], text.get_property('textContent'))
 
             # Verify the "Go Back" and "Advanced" buttons appear
             self.assertIsNotNone(self.marionette.find_element(By.ID, 'returnButton'))
             self.assertIsNotNone(self.marionette.find_element(By.ID, 'advancedButton'))
 
             # Verify the error code is correct
-            self.assertIn('SEC_ERROR_EXPIRED_CERTIFICATE', text.get_attribute('textContent'))
+            self.assertIn('SEC_ERROR_EXPIRED_CERTIFICATE', text.get_property('textContent'))
 
     def test_secure_website(self):
         with self.marionette.using_context('content'):
             self.marionette.navigate(self.urls[1])
 
         Wait(self.marionette).until(lambda _: (
-            self.identity_box.get_attribute('className') == 'verifiedIdentity')
+            self.identity_box.get_property('className') == 'verifiedIdentity')
         )
 
     def test_insecure_website(self):
@@ -58,5 +58,5 @@ class TestSecurityNotification(FirefoxTestCase):
             self.marionette.navigate(self.urls[2])
 
         Wait(self.marionette).until(lambda _: (
-            self.identity_box.get_attribute('className') == 'unknownIdentity')
+            self.identity_box.get_property('className') == 'unknownIdentity')
         )

@@ -11,13 +11,13 @@
 #include "npapi.h"
 #include "npfunctions.h"
 #include "nscore.h"
+#include "nsStringFwd.h"
 #include "nsTArray.h"
 #include "nsError.h"
 #include "mozilla/EventForwards.h"
 #include "nsSize.h"
 #include "nsRect.h"
 
-class nsCString;
 class nsNPAPIPlugin;
 
 namespace mozilla {
@@ -57,7 +57,7 @@ public:
 
   virtual bool HasRequiredFunctions() = 0;
 
-#if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(MOZ_WIDGET_GONK)
+#if defined(XP_UNIX) && !defined(XP_MACOSX)
   virtual nsresult NP_Initialize(NPNetscapeFuncs* bFuncs, NPPluginFuncs* pFuncs, NPError* error) = 0;
 #else
   virtual nsresult NP_Initialize(NPNetscapeFuncs* bFuncs, NPError* error) = 0;
@@ -70,7 +70,7 @@ public:
   virtual nsresult NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* error) = 0;
 #endif
   virtual nsresult NPP_New(NPMIMEType pluginType, NPP instance,
-                           uint16_t mode, int16_t argc, char* argn[],
+                           int16_t argc, char* argn[],
                            char* argv[], NPSavedData* saved,
                            NPError* error) = 0;
 
@@ -85,12 +85,17 @@ public:
   virtual bool IsOOP() = 0;
 #if defined(XP_MACOSX)
   virtual nsresult IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing) = 0;
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
   virtual nsresult ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor) = 0;
 #endif
 #if defined(XP_WIN)
     virtual nsresult GetScrollCaptureContainer(NPP aInstance, mozilla::layers::ImageContainer** aContainer) = 0;
-    virtual nsresult UpdateScrollState(NPP aInstance, bool aIsScrolling) = 0;
 #endif
+  virtual nsresult HandledWindowedPluginKeyEvent(
+                     NPP aInstance,
+                     const mozilla::NativeEventData& aNativeKeyData,
+                     bool aIsCOnsumed) = 0;
 
   /**
    * The next three methods are the third leg in the trip to

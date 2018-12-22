@@ -5,6 +5,7 @@
 
 #include "nspr.h"
 #include "mozilla/Logging.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
 #include "nsDocLoader.h"
 #include "nsCURILoader.h"
@@ -13,7 +14,7 @@
 #include "nsIWebProgressListener2.h"
 
 #include "nsIServiceManager.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 
 #include "nsIURL.h"
 #include "nsCOMPtr.h"
@@ -30,25 +31,23 @@
 #include "nsITransport.h"
 #include "nsISocketTransport.h"
 #include "nsIDocShell.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 
+using mozilla::DebugOnly;
 using mozilla::LogLevel;
-
-static NS_DEFINE_CID(kThisImplCID, NS_THIS_DOCLOADER_IMPL_CID);
 
 //
 // Log module for nsIDocumentLoader logging...
 //
-// To enable logging (see prlog.h for full details):
+// To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=DocLoader:5
-//    set NSPR_LOG_FILE=nspr.log
+//    set MOZ_LOG=DocLoader:5
+//    set MOZ_LOG_FILE=debug.log
 //
 // this enables LogLevel::Debug level information and places all output in
-// the file nspr.log
+// the file 'debug.log'.
 //
 mozilla::LazyLogModule gDocLoaderLog("DocLoader");
 
@@ -104,6 +103,7 @@ class nsDefaultComparator <nsDocLoader::nsListenerInfo, nsIWebProgressListener*>
 
 nsDocLoader::nsDocLoader()
   : mParent(nullptr),
+    mProgressStateFlags(0),
     mCurrentSelfProgress(0),
     mMaxSelfProgress(0),
     mCurrentTotalProgress(0),
@@ -135,7 +135,7 @@ nsDocLoader::Init()
   if (NS_FAILED(rv)) return rv;
 
   MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
-         ("DocLoader:%p: load group %x.\n", this, mLoadGroup.get()));
+         ("DocLoader:%p: load group %p.\n", this, mLoadGroup.get()));
 
   return NS_OK;
 }
@@ -161,15 +161,14 @@ nsDocLoader::~nsDocLoader()
          ("DocLoader:%p: deleted.\n", this));
 }
 
-
 /*
  * Implementation of ISupports methods...
  */
-NS_IMPL_ADDREF(nsDocLoader)
-NS_IMPL_RELEASE(nsDocLoader)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDocLoader)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDocLoader)
 
-NS_INTERFACE_MAP_BEGIN(nsDocLoader)
-   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIRequestObserver)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocLoader)
+   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDocumentLoader)
    NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
    NS_INTERFACE_MAP_ENTRY(nsIDocumentLoader)
    NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -179,10 +178,10 @@ NS_INTERFACE_MAP_BEGIN(nsDocLoader)
    NS_INTERFACE_MAP_ENTRY(nsIChannelEventSink)
    NS_INTERFACE_MAP_ENTRY(nsISecurityEventSink)
    NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
-   if (aIID.Equals(kThisImplCID))
-     foundInterface = static_cast<nsIDocumentLoader *>(this);
-   else
+   NS_INTERFACE_MAP_ENTRY_CONCRETE(nsDocLoader)
 NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTION(nsDocLoader, mChildrenInOnload)
 
 
 /*
@@ -345,7 +344,8 @@ nsDocLoader::Destroy()
   // Remove the document loader from the parent list of loaders...
   if (mParent)
   {
-    mParent->RemoveChildLoader(this);
+    DebugOnly<nsresult> rv = mParent->RemoveChildLoader(this);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "RemoveChildLoader failed");
   }
 
   // Release all the information about network requests...
@@ -354,7 +354,7 @@ nsDocLoader::Destroy()
   mListenerInfoList.Clear();
   mListenerInfoList.Compact();
 
-  mDocumentRequest = 0;
+  mDocumentRequest = nullptr;
 
   if (mLoadGroup)
     mLoadGroup->SetGroupObserver(nullptr);
@@ -376,7 +376,9 @@ nsDocLoader::DestroyChildren()
     if (loader) {
       // This is a safe cast, as we only put nsDocLoader objects into the
       // array
-      static_cast<nsDocLoader*>(loader)->SetDocLoaderParent(nullptr);
+      DebugOnly<nsresult> rv =
+        static_cast<nsDocLoader*>(loader)->SetDocLoaderParent(nullptr);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "SetDocLoaderParent failed");
     }
   }
   mChildList.Clear();
@@ -455,7 +457,24 @@ nsDocLoader::OnStartRequest(nsIRequest *request, nsISupports *aCtxt)
   NS_ASSERTION(!mIsLoadingDocument || mDocumentRequest,
                "mDocumentRequest MUST be set for the duration of a page load!");
 
-  doStartURLLoad(request);
+  // This is the only way to catch document request start event after a redirect
+  // has occured without changing inherited Firefox behaviour significantly.
+  // Problem description:
+  // The combination of |STATE_START + STATE_IS_DOCUMENT| is only sent for
+  // initial request (see |doStartDocumentLoad| call above).
+  // And |STATE_REDIRECTING + STATE_IS_DOCUMENT| is sent with old channel, which
+  // makes it impossible to filter by destination URL (see
+  // |AsyncOnChannelRedirect| implementation).
+  // Fixing any of those bugs may cause unpredictable consequences in any part
+  // of the browser, so we just add a custom flag for this exact situation.
+  int32_t extraFlags = 0;
+  if (mIsLoadingDocument &&
+      !bJustStartedLoading &&
+      (loadFlags & nsIChannel::LOAD_DOCUMENT_URI) &&
+      (loadFlags & nsIChannel::LOAD_REPLACE)) {
+    extraFlags = nsIWebProgressListener::STATE_IS_REDIRECTED_DOCUMENT;
+  }
+  doStartURLLoad(request, extraFlags);
 
   return NS_OK;
 }
@@ -476,9 +495,9 @@ nsDocLoader::OnStopRequest(nsIRequest *aRequest,
       mLoadGroup->GetActiveCount(&count);
 
     MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
-           ("DocLoader:%p: OnStopRequest[%p](%s) status=%x mIsLoadingDocument=%s, %u active URLs",
+           ("DocLoader:%p: OnStopRequest[%p](%s) status=%" PRIx32 " mIsLoadingDocument=%s, %u active URLs",
            this, aRequest, name.get(),
-           aStatus, (mIsLoadingDocument ? "true" : "false"),
+            static_cast<uint32_t>(aStatus), (mIsLoadingDocument ? "true" : "false"),
            count));
   }
 
@@ -616,7 +635,7 @@ nsresult nsDocLoader::RemoveChildLoader(nsDocLoader* aChild)
 {
   nsresult rv = mChildList.RemoveElement(aChild) ? NS_OK : NS_ERROR_FAILURE;
   if (NS_SUCCEEDED(rv)) {
-    aChild->SetDocLoaderParent(nullptr);
+    rv = aChild->SetDocLoaderParent(nullptr);
   }
   return rv;
 }
@@ -625,7 +644,7 @@ nsresult nsDocLoader::AddChildLoader(nsDocLoader* aChild)
 {
   nsresult rv = mChildList.AppendElement(aChild) ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
   if (NS_SUCCEEDED(rv)) {
-    aChild->SetDocLoaderParent(this);
+    rv = aChild->SetDocLoaderParent(this);
   }
   return rv;
 }
@@ -656,23 +675,20 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
     }
 
     NS_ASSERTION(!mIsFlushingLayout, "Someone screwed up");
+    NS_ASSERTION(mDocumentRequest, "No Document Request!");
 
     // The load group for this DocumentLoader is idle.  Flush if we need to.
     if (aFlushLayout && !mDontFlushLayout) {
-      nsCOMPtr<nsIDOMDocument> domDoc = do_GetInterface(GetAsSupports(this));
-      nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+      nsCOMPtr<nsIDocument> doc = do_GetInterface(GetAsSupports(this));
       if (doc) {
         // We start loads from style resolution, so we need to flush out style
         // no matter what.  If we have user fonts, we also need to flush layout,
         // since the reflow is what starts font loads.
-        mozFlushType flushType = Flush_Style;
-        nsIPresShell* shell = doc->GetShell();
-        if (shell) {
-          // Be safe in case this presshell is in teardown now
-          nsPresContext* presContext = shell->GetPresContext();
-          if (presContext && presContext->GetUserFontSet()) {
-            flushType = Flush_Layout;
-          }
+        mozilla::FlushType flushType = mozilla::FlushType::Style;
+        // Be safe in case this presshell is in teardown now
+        nsPresContext* presContext = doc->GetPresContext();
+        if (presContext && presContext->GetUserFontSet()) {
+          flushType = mozilla::FlushType::Layout;
         }
         mDontFlushLayout = mIsFlushingLayout = true;
         doc->FlushPendingNotifications(flushType);
@@ -682,7 +698,9 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
     // And now check whether we're really busy; that might have changed with
     // the layout flush.
-    if (!IsBusy()) {
+    // Note, mDocumentRequest can be null if the flushing above re-entered this
+    // method.
+    if (!IsBusy() && mDocumentRequest) {
       // Clear out our request info hash, now that our load really is done and
       // we don't need it anymore to CalculateMaxProgress().
       ClearInternalProgress();
@@ -692,8 +710,7 @@ void nsDocLoader::DocLoaderIsEmpty(bool aFlushLayout)
 
       nsCOMPtr<nsIRequest> docRequest = mDocumentRequest;
 
-      NS_ASSERTION(mDocumentRequest, "No Document Request!");
-      mDocumentRequest = 0;
+      mDocumentRequest = nullptr;
       mIsLoadingDocument = false;
 
       // Update the progress status state - the document is done
@@ -757,7 +774,7 @@ void nsDocLoader::doStartDocumentLoad(void)
                     NS_OK);
 }
 
-void nsDocLoader::doStartURLLoad(nsIRequest *request)
+void nsDocLoader::doStartURLLoad(nsIRequest *request, int32_t aExtraFlags)
 {
 #if defined(DEBUG)
   nsAutoCString buffer;
@@ -772,7 +789,8 @@ void nsDocLoader::doStartURLLoad(nsIRequest *request)
   FireOnStateChange(this,
                     request,
                     nsIWebProgressListener::STATE_START |
-                    nsIWebProgressListener::STATE_IS_REQUEST,
+                    nsIWebProgressListener::STATE_IS_REQUEST |
+                    aExtraFlags,
                     NS_OK);
 }
 
@@ -784,8 +802,8 @@ void nsDocLoader::doStopURLLoad(nsIRequest *request, nsresult aStatus)
   GetURIStringFromRequest(request, buffer);
     MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
           ("DocLoader:%p: ++ Firing OnStateChange for end url load (...)."
-           "\tURI: %s status=%x\n",
-            this, buffer.get(), aStatus));
+           "\tURI: %s status=%" PRIx32 "\n",
+           this, buffer.get(), static_cast<uint32_t>(aStatus)));
 #endif /* DEBUG */
 
   FireOnStateChange(this,
@@ -813,8 +831,8 @@ void nsDocLoader::doStopDocumentLoad(nsIRequest *request,
   GetURIStringFromRequest(request, buffer);
   MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
          ("DocLoader:%p: ++ Firing OnStateChange for end document load (...)."
-         "\tURI: %s Status=%x\n",
-          this, buffer.get(), aStatus));
+         "\tURI: %s Status=%" PRIx32 "\n",
+          this, buffer.get(), static_cast<uint32_t>(aStatus)));
 #endif /* DEBUG */
 
   // Firing STATE_STOP|STATE_IS_DOCUMENT will fire onload handlers.
@@ -892,8 +910,29 @@ nsDocLoader::GetDOMWindowID(uint64_t *aResult)
   nsCOMPtr<nsPIDOMWindowOuter> piwindow = nsPIDOMWindowOuter::From(window);
   NS_ENSURE_STATE(piwindow);
 
-  MOZ_ASSERT(piwindow->IsOuterWindow());
   *aResult = piwindow->WindowID();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocLoader::GetInnerDOMWindowID(uint64_t *aResult)
+{
+  *aResult = 0;
+
+  nsCOMPtr<mozIDOMWindowProxy> window;
+  nsresult rv = GetDOMWindow(getter_AddRefs(window));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsPIDOMWindowOuter> outer = nsPIDOMWindowOuter::From(window);
+  NS_ENSURE_STATE(outer);
+
+  nsPIDOMWindowInner* inner = outer->GetCurrentInnerWindow();
+  if (!inner) {
+    // If we don't have an inner window, return 0.
+    return NS_OK;
+  }
+
+  *aResult = inner->WindowID();
   return NS_OK;
 }
 
@@ -931,12 +970,32 @@ nsDocLoader::GetLoadType(uint32_t *aLoadType)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+NS_IMETHODIMP
+nsDocLoader::GetTarget(nsIEventTarget** aTarget)
+{
+  nsCOMPtr<mozIDOMWindowProxy> window;
+  nsresult rv = GetDOMWindow(getter_AddRefs(window));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(window);
+  NS_ENSURE_STATE(global);
+
+  nsCOMPtr<nsIEventTarget> target = global->EventTargetFor(mozilla::TaskCategory::Other);
+  target.forget(aTarget);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocLoader::SetTarget(nsIEventTarget* aTarget)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 int64_t nsDocLoader::GetMaxTotalProgress()
 {
   int64_t newMaxTotal = 0;
 
   uint32_t count = mChildList.Length();
-  nsCOMPtr<nsIWebProgress> webProgress;
   for (uint32_t i=0; i < count; i++)
   {
     int64_t individualProgress = 0;
@@ -1092,9 +1151,8 @@ NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt,
       mozilla::services::GetStringBundleService();
     if (!sbs)
       return NS_ERROR_FAILURE;
-    nsXPIDLString msg;
-    nsresult rv = sbs->FormatStatusMessage(aStatus, aStatusArg,
-                                           getter_Copies(msg));
+    nsAutoString msg;
+    nsresult rv = sbs->FormatStatusMessage(aStatus, aStatusArg, msg);
     if (NS_FAILED(rv))
       return rv;
 
@@ -1115,7 +1173,7 @@ NS_IMETHODIMP nsDocLoader::OnStatus(nsIRequest* aRequest, nsISupports* ctxt,
       // Put the info at the front of the list
       mStatusInfoList.insertFront(info->mLastStatus);
     }
-    FireOnStatusChange(this, aRequest, aStatus, msg);
+    FireOnStatusChange(this, aRequest, aStatus, msg.get());
   }
   return NS_OK;
 }
@@ -1175,7 +1233,8 @@ void nsDocLoader::FireOnProgressChange(nsDocLoader *aLoadInitiator,
 
   GetURIStringFromRequest(request, buffer);
   MOZ_LOG(gDocLoaderLog, LogLevel::Debug,
-         ("DocLoader:%p: Progress (%s): curSelf: %d maxSelf: %d curTotal: %d maxTotal %d\n",
+         ("DocLoader:%p: Progress (%s): curSelf: %" PRId64 " maxSelf: %"
+          PRId64 " curTotal: %" PRId64 " maxTotal %" PRId64 "\n",
           this, buffer.get(), aProgress, aProgressMax, aTotalProgress, aMaxTotalProgress));
 #endif /* DEBUG */
 
@@ -1380,8 +1439,12 @@ NS_IMETHODIMP nsDocLoader::AsyncOnChannelRedirect(nsIChannel *aOldChannel,
       stateFlags |= nsIWebProgressListener::STATE_IS_DOCUMENT;
 
 #if defined(DEBUG)
-      nsCOMPtr<nsIRequest> request(do_QueryInterface(aOldChannel));
-      NS_ASSERTION(request == mDocumentRequest, "Wrong Document Channel");
+      // We only set mDocumentRequest in OnStartRequest(), but its possible
+      // to get a redirect before that for service worker interception.
+      if (mDocumentRequest) {
+        nsCOMPtr<nsIRequest> request(do_QueryInterface(aOldChannel));
+        NS_ASSERTION(request == mDocumentRequest, "Wrong Document Channel");
+      }
 #endif /* DEBUG */
     }
 

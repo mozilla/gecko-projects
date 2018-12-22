@@ -7,15 +7,12 @@
 
 #include <string>
 
-#include "base/basictypes.h"
 #include "base/strings/string16.h"
 #include "sandbox/win/src/crosscall_server.h"
 #include "sandbox/win/src/policy_low_level.h"
 #include "sandbox/win/src/sandbox_policy.h"
 
 namespace sandbox {
-
-enum EvalResult;
 
 // This class centralizes most of the knowledge related to named pipe creation.
 class NamedPipePolicy {

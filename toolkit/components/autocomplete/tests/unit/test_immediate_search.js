@@ -11,9 +11,9 @@ AutoCompleteImmediateSearch.prototype = Object.create(AutoCompleteSearchBase.pro
 AutoCompleteImmediateSearch.prototype.searchType =
   Ci.nsIAutoCompleteSearchDescriptor.SEARCH_TYPE_IMMEDIATE;
 AutoCompleteImmediateSearch.prototype.QueryInterface =
-  XPCOMUtils.generateQI([Ci.nsIFactory,
-                         Ci.nsIAutoCompleteSearch,
-                         Ci.nsIAutoCompleteSearchDescriptor]);
+  ChromeUtils.generateQI([Ci.nsIFactory,
+                          Ci.nsIAutoCompleteSearch,
+                          Ci.nsIAutoCompleteSearchDescriptor]);
 
 function AutoCompleteDelayedSearch(aName, aResult) {
   this.name = aName;
@@ -27,15 +27,10 @@ function AutoCompleteResult(aValues, aDefaultIndex) {
 }
 AutoCompleteResult.prototype = Object.create(AutoCompleteResultBase.prototype);
 
-function run_test() {
-  run_next_test();
-}
-
 /**
  * An immediate search should be executed synchronously.
  */
 add_test(function test_immediate_search() {
-  let immediateResults = ["mozillaTest"];
   let inputStr = "moz";
 
   let immediateSearch = new AutoCompleteImmediateSearch(
@@ -62,12 +57,12 @@ add_test(function test_immediate_search() {
   controller.startSearch(inputStr);
 
   // Immediately check the result, the immediate search should have finished.
-  do_check_eq(input.textValue, "moz-immediate");
+  Assert.equal(input.textValue, "moz-immediate");
 
   // Wait for both queries to finish.
   input.onSearchComplete = function() {
     // Sanity check.
-    do_check_eq(input.textValue, "moz-immediate");
+    Assert.equal(input.textValue, "moz-immediate");
 
     unregisterAutoCompleteSearch(immediateSearch);
     unregisterAutoCompleteSearch(delayedSearch);
@@ -79,7 +74,6 @@ add_test(function test_immediate_search() {
  * An immediate search should be executed before any delayed search.
  */
 add_test(function test_immediate_search_notimeout() {
-  let immediateResults = ["mozillaTest"];
   let inputStr = "moz";
 
   let immediateSearch = new AutoCompleteImmediateSearch(
@@ -110,10 +104,10 @@ add_test(function test_immediate_search_notimeout() {
     complete = true;
   };
   controller.startSearch(inputStr);
-  do_check_true(complete);
+  Assert.ok(complete);
 
   // Immediately check the result, the immediate search should have finished.
-  do_check_eq(input.textValue, "moz-immediate");
+  Assert.equal(input.textValue, "moz-immediate");
 
   unregisterAutoCompleteSearch(immediateSearch);
   unregisterAutoCompleteSearch(delayedSearch);
@@ -124,7 +118,6 @@ add_test(function test_immediate_search_notimeout() {
  * A delayed search should be executed synchronously with a zero timeout.
  */
 add_test(function test_delayed_search_notimeout() {
-  let immediateResults = ["mozillaTest"];
   let inputStr = "moz";
 
   let delayedSearch = new AutoCompleteDelayedSearch(
@@ -150,10 +143,10 @@ add_test(function test_delayed_search_notimeout() {
     complete = true;
   };
   controller.startSearch(inputStr);
-  do_check_true(complete);
+  Assert.ok(complete);
 
   // Immediately check the result, the delayed search should have finished.
-  do_check_eq(input.textValue, "moz-delayed");
+  Assert.equal(input.textValue, "moz-delayed");
 
   unregisterAutoCompleteSearch(delayedSearch);
   run_next_test();

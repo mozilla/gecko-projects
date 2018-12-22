@@ -10,11 +10,11 @@ const {
   addDeviceType,
 } = require("devtools/client/responsive.html/actions/devices");
 
-add_task(function*() {
-  let store = Store();
+add_task(async function() {
+  const store = Store();
   const { getState, dispatch } = store;
 
-  let device = {
+  const device = {
     "name": "Firefox OS Flame",
     "width": 320,
     "height": 570,

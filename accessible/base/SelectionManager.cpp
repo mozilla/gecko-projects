@@ -15,7 +15,7 @@
 #include "nsFrameSelection.h"
 
 #include "nsIAccessibleTypes.h"
-#include "nsIDOMDocument.h"
+#include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
@@ -48,26 +48,18 @@ SelectionManager::SelectionManager() :
 void
 SelectionManager::ClearControlSelectionListener()
 {
-  if (!mCurrCtrlFrame)
-    return;
-
-  const nsFrameSelection* frameSel = mCurrCtrlFrame->GetConstFrameSelection();
-  NS_ASSERTION(frameSel, "No frame selection for the element!");
-
-  mCurrCtrlFrame = nullptr;
-  if (!frameSel)
-    return;
-
   // Remove 'this' registered as selection listener for the normal selection.
-  Selection* normalSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_NORMAL);
-  normalSel->RemoveSelectionListener(this);
+  if (mCurrCtrlNormalSel) {
+    mCurrCtrlNormalSel->RemoveSelectionListener(this);
+    mCurrCtrlNormalSel = nullptr;
+  }
 
   // Remove 'this' registered as selection listener for the spellcheck
   // selection.
-  Selection* spellSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_SPELLCHECK);
-  spellSel->RemoveSelectionListener(this);
+  if (mCurrCtrlSpellSel) {
+    mCurrCtrlSpellSel->RemoveSelectionListener(this);
+    mCurrCtrlSpellSel = nullptr;
+  }
 }
 
 void
@@ -78,24 +70,24 @@ SelectionManager::SetControlSelectionListener(dom::Element* aFocusedElm)
   // the current focus.
   ClearControlSelectionListener();
 
-  mCurrCtrlFrame = aFocusedElm->GetPrimaryFrame();
-  if (!mCurrCtrlFrame)
+  nsIFrame* controlFrame = aFocusedElm->GetPrimaryFrame();
+  if (!controlFrame)
     return;
 
-  const nsFrameSelection* frameSel = mCurrCtrlFrame->GetConstFrameSelection();
+  const nsFrameSelection* frameSel = controlFrame->GetConstFrameSelection();
   NS_ASSERTION(frameSel, "No frame selection for focused element!");
   if (!frameSel)
     return;
 
   // Register 'this' as selection listener for the normal selection.
-  Selection* normalSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  Selection* normalSel = frameSel->GetSelection(SelectionType::eNormal);
   normalSel->AddSelectionListener(this);
+  mCurrCtrlNormalSel = normalSel;
 
   // Register 'this' as selection listener for the spell check selection.
-  Selection* spellSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_SPELLCHECK);
+  Selection* spellSel = frameSel->GetSelection(SelectionType::eSpellCheck);
   spellSel->AddSelectionListener(this);
+  mCurrCtrlSpellSel = spellSel;
 }
 
 void
@@ -104,13 +96,11 @@ SelectionManager::AddDocSelectionListener(nsIPresShell* aPresShell)
   const nsFrameSelection* frameSel = aPresShell->ConstFrameSelection();
 
   // Register 'this' as selection listener for the normal selection.
-  Selection* normalSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  Selection* normalSel = frameSel->GetSelection(SelectionType::eNormal);
   normalSel->AddSelectionListener(this);
 
   // Register 'this' as selection listener for the spell check selection.
-  Selection* spellSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_SPELLCHECK);
+  Selection* spellSel = frameSel->GetSelection(SelectionType::eSpellCheck);
   spellSel->AddSelectionListener(this);
 }
 
@@ -120,14 +110,12 @@ SelectionManager::RemoveDocSelectionListener(nsIPresShell* aPresShell)
   const nsFrameSelection* frameSel = aPresShell->ConstFrameSelection();
 
   // Remove 'this' registered as selection listener for the normal selection.
-  Selection* normalSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  Selection* normalSel = frameSel->GetSelection(SelectionType::eNormal);
   normalSel->RemoveSelectionListener(this);
 
   // Remove 'this' registered as selection listener for the spellcheck
   // selection.
-  Selection* spellSel =
-    frameSel->GetSelection(nsISelectionController::SELECTION_SPELLCHECK);
+  Selection* spellSel = frameSel->GetSelection(SelectionType::eSpellCheck);
   spellSel->RemoveSelectionListener(this);
 }
 
@@ -171,14 +159,15 @@ SelectionManager::ProcessTextSelChangeEvent(AccEvent* aEvent)
 }
 
 NS_IMETHODIMP
-SelectionManager::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
-                                         nsISelection* aSelection,
+SelectionManager::NotifySelectionChanged(nsIDocument* aDocument,
+                                         Selection* aSelection,
                                          int16_t aReason)
 {
-  NS_ENSURE_ARG(aDOMDocument);
+  if (NS_WARN_IF(!aDocument) || NS_WARN_IF(!aSelection)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
-  nsCOMPtr<nsIDocument> documentNode(do_QueryInterface(aDOMDocument));
-  DocAccessible* document = GetAccService()->GetDocAccessible(documentNode);
+  DocAccessible* document = GetAccService()->GetDocAccessible(aDocument);
 
 #ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eSelection))
@@ -189,8 +178,7 @@ SelectionManager::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
     // Selection manager has longer lifetime than any document accessible,
     // so that we are guaranteed that the notification is processed before
     // the selection manager is destroyed.
-    RefPtr<SelData> selData =
-      new SelData(static_cast<Selection*>(aSelection), aReason);
+    RefPtr<SelData> selData = new SelData(aSelection, aReason);
     document->HandleNotification<SelectionManager, SelData>
       (this, &SelectionManager::ProcessSelectionChanged, selData);
   }
@@ -225,12 +213,12 @@ SelectionManager::ProcessSelectionChanged(SelData* aSelData)
     return;
   }
 
-  if (selection->GetType() == nsISelectionController::SELECTION_NORMAL) {
+  if (selection->GetType() == SelectionType::eNormal) {
     RefPtr<AccEvent> event =
       new AccTextSelChangeEvent(text, selection, aSelData->mReason);
     text->Document()->FireDelayedEvent(event);
 
-  } else if (selection->GetType() == nsISelectionController::SELECTION_SPELLCHECK) {
+  } else if (selection->GetType() == SelectionType::eSpellCheck) {
     // XXX: fire an event for container accessible of the focus/anchor range
     // of the spelcheck selection.
     text->Document()->FireDelayedEvent(nsIAccessibleEvent::EVENT_TEXT_ATTRIBUTE_CHANGED,

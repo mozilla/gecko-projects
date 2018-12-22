@@ -5,8 +5,9 @@
 
 #include "perf/jsperf.h"
 
-#include "jscntxt.h" /* for error messages */
-#include "jsobj.h" /* for unwrapping without a context */
+#include "gc/FreeOp.h"
+#include "vm/JSContext.h" /* for error messages */
+#include "vm/JSObject.h" /* for unwrapping without a context */
 
 using namespace js;
 using JS::PerfMeasurement;
@@ -93,7 +94,7 @@ pm_canMeasureSomething(JSContext* cx, unsigned argc, Value* vp)
     if (!p)
         return false;
 
-    args.rval().setBoolean(p->canMeasureSomething());
+    args.rval().setBoolean(PerfMeasurement::canMeasureSomething());
     return true;
 }
 
@@ -159,10 +160,21 @@ static const struct pm_const {
 static bool pm_construct(JSContext* cx, unsigned argc, Value* vp);
 static void pm_finalize(JSFreeOp* fop, JSObject* obj);
 
+static const JSClassOps pm_classOps = {
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    pm_finalize
+};
+
 static const JSClass pm_class = {
-    "PerfMeasurement", JSCLASS_HAS_PRIVATE,
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, pm_finalize
+    "PerfMeasurement",
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_FOREGROUND_FINALIZE,
+    &pm_classOps
 };
 
 // Constructor and destructor
@@ -188,10 +200,8 @@ pm_construct(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     PerfMeasurement* p = cx->new_<PerfMeasurement>(PerfMeasurement::EventMask(mask));
-    if (!p) {
-        JS_ReportOutOfMemory(cx);
+    if (!p)
         return false;
-    }
 
     JS_SetPrivate(obj, p);
     args.rval().setObject(*obj);
@@ -213,7 +223,7 @@ GetPM(JSContext* cx, JS::HandleValue value, const char* fname)
         UniqueChars bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, value, nullptr);
         if (!bytes)
             return nullptr;
-        JS_ReportErrorNumber(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, 0, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
         return nullptr;
     }
     RootedObject obj(cx, &value.toObject());
@@ -224,8 +234,8 @@ GetPM(JSContext* cx, JS::HandleValue value, const char* fname)
 
     // JS_GetInstancePrivate only sets an exception if its last argument
     // is nonzero, so we have to do it by hand.
-    JS_ReportErrorNumber(cx, GetErrorMessage, 0, JSMSG_INCOMPATIBLE_PROTO,
-                         pm_class.name, fname, JS_GetClass(obj)->name);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, 0, JSMSG_INCOMPATIBLE_PROTO,
+                              pm_class.name, fname, JS_GetClass(obj)->name);
     return nullptr;
 }
 
@@ -250,8 +260,7 @@ RegisterPerfMeasurement(JSContext* cx, HandleObject globalArg)
         return 0;
 
     for (const pm_const* c = pm_consts; c->name; c++) {
-        if (!JS_DefineProperty(cx, ctor, c->name, c->value, PM_CATTRS,
-                               JS_STUBGETTER, JS_STUBSETTER))
+        if (!JS_DefineProperty(cx, ctor, c->name, c->value, PM_CATTRS))
             return 0;
     }
 
@@ -264,7 +273,7 @@ RegisterPerfMeasurement(JSContext* cx, HandleObject globalArg)
 }
 
 PerfMeasurement*
-ExtractPerfMeasurement(Value wrapper)
+ExtractPerfMeasurement(const Value& wrapper)
 {
     if (wrapper.isPrimitive())
         return 0;

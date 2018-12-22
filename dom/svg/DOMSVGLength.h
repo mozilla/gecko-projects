@@ -8,10 +8,8 @@
 #define MOZILLA_DOMSVGLENGTH_H__
 
 #include "DOMSVGLengthList.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
-#include "nsIDOMSVGLength.h"
 #include "nsTArray.h"
 #include "SVGLength.h"
 #include "mozilla/Attributes.h"
@@ -75,7 +73,7 @@ class ErrorResult;
  * if-else as appropriate. The bug for doing that work is:
  * https://bugzilla.mozilla.org/show_bug.cgi?id=571734
  */
-class DOMSVGLength final : public nsIDOMSVGLength,
+class DOMSVGLength final : public nsISupports,
                            public nsWrapperCache
 {
   friend class AutoChangeLengthNotifier;
@@ -91,7 +89,6 @@ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOMSVGLENGTH_IID)
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGLength)
-  NS_DECL_NSIDOMSVGLENGTH
 
   /**
    * Generic ctor for DOMSVGLength objects that are created for an attribute.
@@ -178,7 +175,7 @@ public:
   void SetValue(float aValue, ErrorResult& aRv);
   float ValueInSpecifiedUnits();
   void SetValueInSpecifiedUnits(float aValue, ErrorResult& aRv);
-  // The XPCOM GetValueAsString is good
+  void GetValueAsString(nsAString& aValue);
   void SetValueAsString(const nsAString& aValue, ErrorResult& aRv);
   void NewValueSpecifiedUnits(uint16_t aUnit, float aValue,
                               ErrorResult& aRv);
@@ -186,7 +183,7 @@ public:
 
   nsISupports* GetParentObject() const {
     auto svgElement = mList ? Element() : mSVGElement.get();
-    return static_cast<nsIDOMSVGElement*> (svgElement);
+    return svgElement;
   }
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -223,6 +220,13 @@ private:
 #ifdef DEBUG
   bool IndexIsValid();
 #endif
+
+  /**
+   * Clears soon-to-be-invalid weak references in external objects that were
+   * set up during the creation of this object. This should be called during
+   * destruction and during cycle collection.
+   */
+  void CleanupWeakRefs();
 
   RefPtr<DOMSVGLengthList> mList;
 

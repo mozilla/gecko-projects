@@ -9,16 +9,18 @@
 
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
+#include "mozilla/AnimationPerformanceWarning.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CycleCollectedJSContext.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EffectCompositor.h" // For EffectCompositor::CascadeLevel
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h" // for TimeStamp, TimeDuration
 #include "mozilla/dom/AnimationBinding.h" // for AnimationPlayState
-#include "mozilla/dom/AnimationTimeline.h" // for AnimationTimeline
-#include "mozilla/DOMEventTargetHelper.h" // for DOMEventTargetHelper
-#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadOnly
-#include "mozilla/dom/Promise.h" // for Promise
-#include "nsCSSProperty.h" // for nsCSSProperty
+#include "mozilla/dom/AnimationEffect.h"
+#include "mozilla/dom/AnimationTimeline.h"
+#include "mozilla/dom/Promise.h"
+#include "nsCSSPropertyID.h"
 #include "nsIGlobalObject.h"
 
 // X11 has a #define for CurrentTime.
@@ -33,16 +35,17 @@
 #endif
 
 struct JSContext;
-class nsCSSPropertySet;
+class nsCSSPropertyIDSet;
 class nsIDocument;
-class nsPresContext;
+class nsIFrame;
 
 namespace mozilla {
 
-class AnimValuesStyleRule;
+struct AnimationRule;
 
 namespace dom {
 
+class AsyncFinishNotification;
 class CSSAnimation;
 class CSSTransition;
 
@@ -62,6 +65,7 @@ public:
     , mFinishedAtLastComposeStyle(false)
     , mIsRelevant(false)
     , mFinishedIsResolved(false)
+    , mSyncWithGeometricAnimations(false)
   {
   }
 
@@ -69,7 +73,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(Animation,
                                            DOMEventTargetHelper)
 
-  AnimationTimeline* GetParentObject() const { return mTimeline; }
+  nsIGlobalObject* GetParentObject() const { return GetOwnerGlobal(); }
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -92,29 +96,33 @@ public:
   // Animation interface methods
   static already_AddRefed<Animation>
   Constructor(const GlobalObject& aGlobal,
-              KeyframeEffectReadOnly* aEffect,
-              AnimationTimeline* aTimeline,
+              AnimationEffect* aEffect,
+              const Optional<AnimationTimeline*>& aTimeline,
               ErrorResult& aRv);
   void GetId(nsAString& aResult) const { aResult = mId; }
   void SetId(const nsAString& aId);
-  KeyframeEffectReadOnly* GetEffect() const { return mEffect; }
-  void SetEffect(KeyframeEffectReadOnly* aEffect);
+  AnimationEffect* GetEffect() const { return mEffect; }
+  void SetEffect(AnimationEffect* aEffect);
   AnimationTimeline* GetTimeline() const { return mTimeline; }
   void SetTimeline(AnimationTimeline* aTimeline);
   Nullable<TimeDuration> GetStartTime() const { return mStartTime; }
   void SetStartTime(const Nullable<TimeDuration>& aNewStartTime);
-  Nullable<TimeDuration> GetCurrentTime() const;
+  Nullable<TimeDuration> GetCurrentTime() const {
+    return GetCurrentTimeForHoldTime(mHoldTime);
+  }
   void SetCurrentTime(const TimeDuration& aNewCurrentTime);
   double PlaybackRate() const { return mPlaybackRate; }
   void SetPlaybackRate(double aPlaybackRate);
   AnimationPlayState PlayState() const;
+  bool Pending() const { return mPendingState != PendingState::NotPending; }
   virtual Promise* GetReady(ErrorResult& aRv);
-  virtual Promise* GetFinished(ErrorResult& aRv);
+  Promise* GetFinished(ErrorResult& aRv);
   void Cancel();
-  virtual void Finish(ErrorResult& aRv);
+  void Finish(ErrorResult& aRv);
   virtual void Play(ErrorResult& aRv, LimitBehavior aLimitBehavior);
   virtual void Pause(ErrorResult& aRv);
-  virtual void Reverse(ErrorResult& aRv);
+  void Reverse(ErrorResult& aRv);
+  void UpdatePlaybackRate(double aPlaybackRate);
   bool IsRunningOnCompositor() const;
   IMPL_EVENT_HANDLER(finish);
   IMPL_EVENT_HANDLER(cancel);
@@ -131,6 +139,7 @@ public:
   void SetCurrentTimeAsDouble(const Nullable<double>& aCurrentTime,
                               ErrorResult& aRv);
   virtual AnimationPlayState PlayStateFromJS() const { return PlayState(); }
+  virtual bool PendingFromJS() const { return Pending(); }
   virtual void PlayFromJS(ErrorResult& aRv)
   {
     Play(aRv, LimitBehavior::AutoRewind);
@@ -144,14 +153,14 @@ public:
 
   // Wrapper functions for Animation DOM methods when called from style.
 
-  virtual void CancelFromStyle() { DoCancel(); }
+  virtual void CancelFromStyle() { CancelNoUpdate(); }
+  void SetTimelineNoUpdate(AnimationTimeline* aTimeline);
+  void SetEffectNoUpdate(AnimationEffect* aEffect);
 
   virtual void Tick();
   bool NeedsTicks() const
   {
-    AnimationPlayState playState = PlayState();
-    return playState == AnimationPlayState::Running ||
-           playState == AnimationPlayState::Pending;
+    return Pending() || PlayState() == AnimationPlayState::Running;
   }
 
   /**
@@ -163,7 +172,7 @@ public:
    * should begin.
    *
    * When the document finishes painting, any pending animations in its table
-   * are marked as being ready to start by calling StartOnNextTick.
+   * are marked as being ready to start by calling TriggerOnNextTick.
    * The moment when the paint completed is also recorded, converted to a
    * timeline time, and passed to StartOnTick. This is so that when these
    * animations do start, they can be timed from the point when painting
@@ -218,8 +227,9 @@ public:
    */
   void TriggerNow();
   /**
-   * When StartOnNextTick is called, we store the ready time but we don't apply
-   * it until the next tick. In the meantime, GetStartTime() will return null.
+   * When TriggerOnNextTick is called, we store the ready time but we don't
+   * apply it until the next tick. In the meantime, GetStartTime() will return
+   * null.
    *
    * However, if we build layer animations again before the next tick, we
    * should initialize them with the start time that GetStartTime() will return
@@ -238,6 +248,56 @@ public:
   Nullable<TimeDuration> GetCurrentOrPendingStartTime() const;
 
   /**
+   * As with the start time, we should use the pending playback rate when
+   * producing layer animations.
+   */
+  double CurrentOrPendingPlaybackRate() const
+  {
+    return mPendingPlaybackRate.valueOr(mPlaybackRate);
+  }
+  bool HasPendingPlaybackRate() const { return mPendingPlaybackRate.isSome(); }
+
+  /**
+   * The following relationship from the definition of the 'current time' is
+   * re-used in many algorithms so we extract it here into a static method that
+   * can be re-used:
+   *
+   *   current time = (timeline time - start time) * playback rate
+   *
+   * As per https://drafts.csswg.org/web-animations-1/#current-time
+   */
+  static TimeDuration CurrentTimeFromTimelineTime(
+    const TimeDuration& aTimelineTime,
+    const TimeDuration& aStartTime,
+    float aPlaybackRate)
+  {
+    return (aTimelineTime - aStartTime).MultDouble(aPlaybackRate);
+  }
+
+  /**
+   * As with calculating the current time, we often need to calculate a start
+   * time from a current time. The following method simply inverts the current
+   * time relationship.
+   *
+   * In each case where this is used, the desired behavior for playbackRate ==
+   * 0 is to return the specified timeline time (often referred to as the ready
+   * time).
+   */
+  static TimeDuration StartTimeFromTimelineTime(
+    const TimeDuration& aTimelineTime,
+    const TimeDuration& aCurrentTime,
+    float aPlaybackRate)
+  {
+    TimeDuration result = aTimelineTime;
+    if (aPlaybackRate == 0) {
+      return result;
+    }
+
+    result -= aCurrentTime.MultDouble(1.0 / aPlaybackRate);
+    return result;
+  }
+
+  /**
    * Converts a time in the timescale of this Animation's currentTime, to a
    * TimeStamp. Returns a null TimeStamp if the conversion cannot be performed
    * because of the current state of this Animation (e.g. it has no timeline, a
@@ -246,16 +306,15 @@ public:
    */
   TimeStamp AnimationTimeToTimeStamp(const StickyTimeDuration& aTime) const;
 
+  // Converts an AnimationEvent's elapsedTime value to an equivalent TimeStamp
+  // that can be used to sort events by when they occurred.
+  TimeStamp ElapsedTimeToTimeStamp(const StickyTimeDuration& aElapsedTime) const;
+
   bool IsPausedOrPausing() const
   {
-    return PlayState() == AnimationPlayState::Paused ||
-           mPendingState == PendingState::PausePending;
+    return PlayState() == AnimationPlayState::Paused;
   }
 
-  bool HasInPlayEffect() const
-  {
-    return GetEffect() && GetEffect()->IsInPlay();
-  }
   bool HasCurrentEffect() const
   {
     return GetEffect() && GetEffect()->IsCurrent();
@@ -265,23 +324,19 @@ public:
     return GetEffect() && GetEffect()->IsInEffect();
   }
 
-  /**
-   * "Playing" is different to "running". An animation in its delay phase is
-   * still running but we only consider it playing when it is in its active
-   * interval. This definition is used for fetching the animations that are
-   * candidates for running on the compositor (since we don't ship animations
-   * to the compositor when they are in their delay phase or paused including
-   * being effectively paused due to having a zero playback rate).
-   */
   bool IsPlaying() const
   {
-    // We need to have an effect in its active interval, and
-    // be either running or waiting to run with a non-zero playback rate.
-    return HasInPlayEffect() &&
-           mPlaybackRate != 0.0 &&
-           (PlayState() == AnimationPlayState::Running ||
-            mPendingState == PendingState::PlayPending);
+    return mPlaybackRate != 0.0 &&
+           mTimeline &&
+           !mTimeline->GetCurrentTime().IsNull() &&
+           PlayState() == AnimationPlayState::Running;
   }
+
+  bool ShouldBeSynchronizedWithMainThread(
+    nsCSSPropertyID aProperty,
+    const nsIFrame* aFrame,
+    AnimationPerformanceWarning::Type& aPerformanceWarning) const;
+
   bool IsRelevant() const { return mIsRelevant; }
   void UpdateRelevance();
 
@@ -305,23 +360,40 @@ public:
    * running on the compositor).
    */
   bool CanThrottle() const;
+
   /**
-   * Updates |aStyleRule| with the animation values of this animation's effect,
-   * if any.
-   * Any properties already contained in |aSetProperties| are not changed. Any
-   * properties that are changed are added to |aSetProperties|.
+   * Updates various bits of state that we need to update as the result of
+   * running ComposeStyle().
+   * See the comment of KeyframeEffect::WillComposeStyle for more detail.
    */
-  void ComposeStyle(RefPtr<AnimValuesStyleRule>& aStyleRule,
-                    nsCSSPropertySet& aSetProperties);
+  void WillComposeStyle();
+
+  /**
+   * Updates |aComposeResult| with the animation values of this animation's
+   * effect, if any.
+   * Any properties contained in |aPropertiesToSkip| will not be added or
+   * updated in |aComposeResult|.
+   */
+  void ComposeStyle(RawServoAnimationValueMap& aComposeResult,
+                    const nsCSSPropertyIDSet& aPropertiesToSkip);
 
   void NotifyEffectTimingUpdated();
+  void NotifyGeometricAnimationsStartingThisFrame();
+
+  /**
+   * Used by subclasses to synchronously queue a cancel event in situations
+   * where the Animation may have been cancelled.
+   *
+   * We need to do this synchronously because after a CSS animation/transition
+   * is canceled, it will be released by its owning element and may not still
+   * exist when we would normally go to queue events on the next tick.
+   */
+  virtual void MaybeQueueCancelEvent(const StickyTimeDuration& aActiveTime) {};
 
 protected:
   void SilentlySetCurrentTime(const TimeDuration& aNewCurrentTime);
-  void SilentlySetPlaybackRate(double aPlaybackRate);
-  void DoCancel();
-  void DoPlay(ErrorResult& aRv, LimitBehavior aLimitBehavior);
-  void DoPause(ErrorResult& aRv);
+  void CancelNoUpdate();
+  void PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior);
   void ResumeAt(const TimeDuration& aReadyTime);
   void PauseAt(const TimeDuration& aReadyTime);
   void FinishPendingAt(const TimeDuration& aReadyTime)
@@ -331,7 +403,14 @@ protected:
     } else if (mPendingState == PendingState::PausePending) {
       PauseAt(aReadyTime);
     } else {
-      NS_NOTREACHED("Can't finish pending if we're not in a pending state");
+      MOZ_ASSERT_UNREACHABLE("Can't finish pending if we're not in a pending state");
+    }
+  }
+  void ApplyPendingPlaybackRate()
+  {
+    if (mPendingPlaybackRate) {
+      mPlaybackRate = *mPendingPlaybackRate;
+      mPendingPlaybackRate.reset();
     }
   }
 
@@ -354,12 +433,17 @@ protected:
   void UpdateFinishedState(SeekFlag aSeekFlag,
                            SyncNotifyFlag aSyncNotifyFlag);
   void UpdateEffect();
-  void FlushStyle() const;
+  /**
+   * Flush all pending styles other than throttled animation styles (e.g.
+   * animations running on the compositor).
+   */
+  void FlushUnanimatedStyle() const;
   void PostUpdate();
   void ResetFinishedPromise();
   void MaybeResolveFinishedPromise();
   void DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag);
-  void DoFinishNotificationImmediately();
+  friend class AsyncFinishNotification;
+  void DoFinishNotificationImmediately(MicroTaskRunnable* aAsync = nullptr);
   void DispatchPlaybackEvent(const nsAString& aName);
 
   /**
@@ -369,32 +453,62 @@ protected:
    */
   void CancelPendingTasks();
 
+  /**
+   * Performs the same steps as CancelPendingTasks and also rejects and
+   * recreates the ready promise if the animation was pending.
+   */
+  void ResetPendingTasks();
+
+  /**
+   * Returns true if this animation is not only play-pending, but has
+   * yet to be given a pending ready time. This roughly corresponds to
+   * animations that are waiting to be painted (since we set the pending
+   * ready time at the end of painting). Identifying such animations is
+   * useful because in some cases animations that are painted together
+   * may need to be synchronized.
+   *
+   * We don't, however, want to include animations with a fixed start time such
+   * as animations that are simply having their playbackRate updated or which
+   * are resuming from an aborted pause.
+   */
+  bool IsNewlyStarted() const {
+    return mPendingState == PendingState::PlayPending &&
+           mPendingReadyTime.IsNull() &&
+           mStartTime.IsNull();
+  }
   bool IsPossiblyOrphanedPendingAnimation() const;
   StickyTimeDuration EffectEnd() const;
 
+  Nullable<TimeDuration> GetCurrentTimeForHoldTime(
+    const Nullable<TimeDuration>& aHoldTime) const;
+  Nullable<TimeDuration> GetUnconstrainedCurrentTime() const
+  {
+    return GetCurrentTimeForHoldTime(Nullable<TimeDuration>());
+  }
+
   nsIDocument* GetRenderedDocument() const;
-  nsPresContext* GetPresContext() const;
 
   RefPtr<AnimationTimeline> mTimeline;
-  RefPtr<KeyframeEffectReadOnly> mEffect;
+  RefPtr<AnimationEffect> mEffect;
   // The beginning of the delay period.
   Nullable<TimeDuration> mStartTime; // Timeline timescale
   Nullable<TimeDuration> mHoldTime;  // Animation timescale
   Nullable<TimeDuration> mPendingReadyTime; // Timeline timescale
   Nullable<TimeDuration> mPreviousCurrentTime; // Animation timescale
   double mPlaybackRate;
+  Maybe<double> mPendingPlaybackRate;
 
   // A Promise that is replaced on each call to Play()
   // and fulfilled when Play() is successfully completed.
   // This object is lazily created by GetReady.
-  // See http://w3c.github.io/web-animations/#current-ready-promise
+  // See http://drafts.csswg.org/web-animations/#current-ready-promise
   RefPtr<Promise> mReady;
 
   // A Promise that is resolved when we reach the end of the effect, or
   // 0 when playing backwards. The Promise is replaced if the animation is
   // finished but then a state change makes it not finished.
   // This object is lazily created by GetFinished.
-  // See http://w3c.github.io/web-animations/#current-finished-promise
+  // See http://drafts.csswg.org/web-animations/#current-finished-promise
   RefPtr<Promise> mFinished;
 
   // Indicates if the animation is in the pending state (and what state it is
@@ -422,12 +536,17 @@ protected:
   // getAnimations() list.
   bool mIsRelevant;
 
-  nsRevocableEventPtr<nsRunnableMethod<Animation>> mFinishNotificationTask;
+  RefPtr<MicroTaskRunnable> mFinishNotificationTask;
   // True if mFinished is resolved or would be resolved if mFinished has
   // yet to be created. This is not set when mFinished is rejected since
   // in that case mFinished is immediately reset to represent a new current
   // finished promise.
   bool mFinishedIsResolved;
+
+  // True if this animation was triggered at the same time as one or more
+  // geometric animations and hence we should run any transform animations on
+  // the main thread.
+  bool mSyncWithGeometricAnimations;
 
   nsString mId;
 };

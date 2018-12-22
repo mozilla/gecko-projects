@@ -7,7 +7,6 @@ package org.mozilla.gecko.preferences;
 
 import java.util.Locale;
 
-import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.BrowserLocaleManager;
 import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.GeckoSharedPrefs;
@@ -17,11 +16,10 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
-import org.mozilla.gecko.fxa.AccountLoaderNative;
+import org.mozilla.gecko.fxa.AccountLoader;
 import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 
 import android.accounts.Account;
-import android.app.ActionBar;
 import android.app.Activity;
 import android.app.LoaderManager;
 import android.content.Context;
@@ -29,14 +27,11 @@ import android.content.Loader;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
-import android.preference.PreferenceActivity;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceScreen;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
-
-import com.squareup.leakcanary.RefWatcher;
 
 /* A simple implementation of PreferenceFragment for large screen devices
  * This will strip category headers (so that they aren't shown to the user twice)
@@ -45,6 +40,7 @@ import com.squareup.leakcanary.RefWatcher;
 public class GeckoPreferenceFragment extends PreferenceFragment {
 
     public static final int ACCOUNT_LOADER_ID = 1;
+    public static final int HEADER_ID_UNDEFINED = -1;
     private AccountLoaderCallbacks accountLoaderCallbacks;
     private SyncPreference syncPreference;
 
@@ -97,30 +93,30 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
     /**
      * Return the title to use for this preference fragment.
      *
-     * We only return titles for the preference screens that are
-     * launched directly, and thus might need to be redisplayed.
-     *
-     * This method sets the title that you see on non-multi-pane devices.
+     * The result will be used to set the title that you see on non-multi-pane devices.
      */
     private String getTitle() {
         final int res = getResource();
         if (res == R.xml.preferences) {
             return getString(R.string.settings_title);
-        }
-
-        // We can launch this category from the Data Reporting notification.
-        if (res == R.xml.preferences_privacy) {
-            return getString(R.string.pref_category_privacy_short);
-        }
-
-        // We can launch this category from the the magnifying glass in the quick search bar.
-        if (res == R.xml.preferences_search) {
+        } else if (res == R.xml.preferences_general || res == R.xml.preferences_general_tablet) {
+            return getString(R.string.pref_category_general);
+        } else if (res == R.xml.preferences_home) {
+            return getString(R.string.pref_category_home);
+        } else if (res == R.xml.preferences_locale) {
+            return getString(R.string.pref_category_language);
+        } else if (res == R.xml.preferences_search) {
             return getString(R.string.pref_category_search);
-        }
-
-        // Launched as action from content notifications.
-        if (res == R.xml.preferences_notifications) {
+        } else if (res == R.xml.preferences_privacy) {
+            return getString(R.string.pref_category_privacy_short);
+        } else if (res == R.xml.preferences_accessibility) {
+            return getString(R.string.pref_category_accessibility);
+        } else if (res == R.xml.preferences_notifications) {
             return getString(R.string.pref_category_notifications);
+        } else if (res == R.xml.preferences_advanced) {
+            return getString(R.string.pref_category_advanced);
+        } else if (res == R.xml.preferences_vendor) {
+            return getString(R.string.pref_category_vendor);
         }
 
         return null;
@@ -150,39 +146,27 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
             return R.id.pref_header_search;
         }
 
-        // Launched as action from content notifications.
         if (res == R.xml.preferences_notifications) {
             return R.id.pref_header_notifications;
         }
 
-        return -1;
+        return HEADER_ID_UNDEFINED;
     }
 
-    private void updateTitle() {
+    private void updateParentTitle() {
         final String newTitle = getTitle();
         if (newTitle == null) {
             Log.d(LOGTAG, "No new title to show.");
             return;
         }
 
-        final PreferenceActivity activity = (PreferenceActivity) getActivity();
-        if (Versions.feature11Plus && activity.isMultiPane()) {
-            // In a multi-pane activity, the title is "Settings", and the action
-            // bar is along the top of the screen. We don't want to change those.
-            activity.showBreadCrumbs(newTitle, newTitle);
-            ((GeckoPreferences) activity).switchToHeader(getHeader());
+        final GeckoPreferences activity = (GeckoPreferences) getActivity();
+        if (activity.isMultiPane()) {
+            activity.trySwitchToHeader(getHeader());
             return;
         }
-
         Log.v(LOGTAG, "Setting activity title to " + newTitle);
         activity.setTitle(newTitle);
-
-        if (Versions.feature14Plus) {
-            final ActionBar actionBar = activity.getActionBar();
-            if (actionBar != null) {
-                actionBar.setTitle(newTitle);
-            }
-        }
     }
 
     @Override
@@ -196,6 +180,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
     public void onResume() {
         // This is a little delicate. Ensure that you do nothing prior to
         // super.onResume that you wouldn't do in onCreate.
+        // This will also set the title in the parent activity's ActionBar to the title of the current PreferenceScreen
         applyLocale(Locale.getDefault());
         super.onResume();
 
@@ -219,7 +204,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
         }
 
         // Fix the parent title regardless.
-        updateTitle();
+        updateParentTitle();
     }
 
     /*
@@ -244,8 +229,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
             // The resource was invalid. Use the default resource.
             Log.e(LOGTAG, "Failed to find resource: " + resourceName + ". Displaying default settings.");
 
-            boolean isMultiPane = Versions.feature11Plus &&
-                                  ((PreferenceActivity) activity).isMultiPane();
+            boolean isMultiPane = ((GeckoPreferences) activity).isMultiPane();
             resid = isMultiPane ? R.xml.preferences_general_tablet : R.xml.preferences;
         }
 
@@ -277,7 +261,7 @@ public class GeckoPreferenceFragment extends PreferenceFragment {
     private class AccountLoaderCallbacks implements LoaderManager.LoaderCallbacks<Account> {
         @Override
         public Loader<Account> onCreateLoader(int id, Bundle args) {
-            return new AccountLoaderNative(getActivity());
+            return new AccountLoader(getActivity());
         }
 
         @Override

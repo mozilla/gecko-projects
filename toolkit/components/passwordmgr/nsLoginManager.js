@@ -4,22 +4,22 @@
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
+const PERMISSION_SAVE_LOGINS = "login-saving";
 
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Timer.jsm");
-Cu.import("resource://gre/modules/LoginManagerContent.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
+ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
-                                  "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
-                                  "resource://gre/modules/BrowserUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
-                                  "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "BrowserUtils",
+                               "resource://gre/modules/BrowserUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginHelper",
+                               "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginFormFactory",
+                               "resource://gre/modules/LoginManagerContent.jsm");
+ChromeUtils.defineModuleGetter(this, "InsecurePasswordUtils",
+                               "resource://gre/modules/InsecurePasswordUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   let logger = LoginHelper.createLogger("nsLoginManager");
@@ -35,9 +35,9 @@ function LoginManager() {
 LoginManager.prototype = {
 
   classID: Components.ID("{cb9e0de8-3598-4ed7-857b-827f011ad5d8}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsILoginManager,
-                                         Ci.nsISupportsWeakReference,
-                                         Ci.nsIInterfaceRequestor]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsILoginManager,
+                                          Ci.nsISupportsWeakReference,
+                                          Ci.nsIInterfaceRequestor]),
   getInterface(aIID) {
     if (aIID.equals(Ci.mozIStorageConnection) && this._storage) {
       let ir = this._storage.QueryInterface(Ci.nsIInterfaceRequestor);
@@ -85,23 +85,23 @@ LoginManager.prototype = {
 
     // Preferences. Add observer so we get notified of changes.
     this._prefBranch = Services.prefs.getBranch("signon.");
-    this._prefBranch.addObserver("rememberSignons", this._observer, false);
+    this._prefBranch.addObserver("rememberSignons", this._observer);
 
     this._remember = this._prefBranch.getBoolPref("rememberSignons");
+    this._autoCompleteLookupPromise = null;
 
     // Form submit observer checks forms for new logins and pw changes.
-    Services.obs.addObserver(this._observer, "xpcom-shutdown", false);
+    Services.obs.addObserver(this._observer, "xpcom-shutdown");
 
     if (Services.appinfo.processType ===
         Services.appinfo.PROCESS_TYPE_DEFAULT) {
-      Services.obs.addObserver(this._observer, "passwordmgr-storage-replace",
-                               false);
+      Services.obs.addObserver(this._observer, "passwordmgr-storage-replace");
 
       // Initialize storage so that asynchronous data loading can start.
       this._initStorage();
     }
 
-    Services.obs.addObserver(this._observer, "gather-telemetry", false);
+    Services.obs.addObserver(this._observer, "gather-telemetry");
   },
 
 
@@ -138,8 +138,8 @@ LoginManager.prototype = {
   _observer: {
     _pwmgr: null,
 
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                           Ci.nsISupportsWeakReference]),
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                            Ci.nsISupportsWeakReference]),
 
     // nsIObserver
     observe(subject, topic, data) {
@@ -159,13 +159,13 @@ LoginManager.prototype = {
         delete this._pwmgr._prefBranch;
         this._pwmgr = null;
       } else if (topic == "passwordmgr-storage-replace") {
-        Task.spawn(function* () {
-          yield this._pwmgr._storage.terminate();
+        (async () => {
+          await this._pwmgr._storage.terminate();
           this._pwmgr._initStorage();
-          yield this._pwmgr.initializationPromise;
+          await this._pwmgr.initializationPromise;
           Services.obs.notifyObservers(null,
-                       "passwordmgr-storage-replace-complete", null);
-        }.bind(this));
+                       "passwordmgr-storage-replace-complete");
+        })();
       } else if (topic == "gather-telemetry") {
         // When testing, the "data" parameter is a string containing the
         // reference time in milliseconds for time-based statistics.
@@ -243,26 +243,13 @@ LoginManager.prototype = {
   },
 
 
-
-
-
-  /* ---------- Primary Public interfaces ---------- */
-
-
-
-
   /**
-   * @type Promise
-   * This promise is resolved when initialization is complete, and is rejected
-   * in case the asynchronous part of initialization failed.
+   * Ensures that a login isn't missing any necessary fields.
+   *
+   * @param login
+   *        The login to check.
    */
-  initializationPromise: null,
-
-
-  /**
-   * Add a new login to login storage.
-   */
-  addLogin(login) {
+  _checkLogin(login) {
     // Sanity check the login
     if (login.hostname == null || login.hostname.length == 0) {
       throw new Error("Can't add a login with a null or empty hostname.");
@@ -291,7 +278,29 @@ LoginManager.prototype = {
       // Need one or the other!
       throw new Error("Can't add a login without a httpRealm or formSubmitURL.");
     }
+  },
 
+
+
+
+  /* ---------- Primary Public interfaces ---------- */
+
+
+
+
+  /**
+   * @type Promise
+   * This promise is resolved when initialization is complete, and is rejected
+   * in case the asynchronous part of initialization failed.
+   */
+  initializationPromise: null,
+
+
+  /**
+   * Add a new login to login storage.
+   */
+  addLogin(login) {
+    this._checkLogin(login);
 
     // Look for an existing entry.
     var logins = this.findLogins({}, login.hostname, login.formSubmitURL,
@@ -303,6 +312,39 @@ LoginManager.prototype = {
 
     log.debug("Adding login");
     return this._storage.addLogin(login);
+  },
+
+  async addLogins(logins) {
+    let crypto = Cc["@mozilla.org/login-manager/crypto/SDR;1"].
+                 getService(Ci.nsILoginManagerCrypto);
+    let plaintexts = logins.map(l => l.username).concat(logins.map(l => l.password));
+    let ciphertexts = await crypto.encryptMany(plaintexts);
+    let usernames = ciphertexts.slice(0, logins.length);
+    let passwords = ciphertexts.slice(logins.length);
+    let resultLogins = [];
+    for (let i = 0; i < logins.length; i++) {
+      try {
+        this._checkLogin(logins[i]);
+      } catch (e) {
+        Cu.reportError(e);
+        continue;
+      }
+
+      let plaintextUsername = logins[i].username;
+      let plaintextPassword = logins[i].password;
+      logins[i].username = usernames[i];
+      logins[i].password = passwords[i];
+      log.debug("Adding login");
+      let resultLogin = this._storage.addLogin(logins[i], true);
+      // Reset the username and password to keep the same guarantees as addLogin
+      logins[i].username = plaintextUsername;
+      logins[i].password = plaintextPassword;
+
+      resultLogin.username = plaintextUsername;
+      resultLogin.password = plaintextPassword;
+      resultLogins.push(resultLogin);
+    }
+    return resultLogins;
   },
 
   /**
@@ -346,14 +388,29 @@ LoginManager.prototype = {
   /**
    * Get a list of all origins for which logins are disabled.
    *
-   * |count| is only needed for XPCOM.
+   * @param {Number} count - only needed for XPCOM.
    *
    * @return {String[]} of disabled origins. If there are no disabled origins,
    *                    the array is empty.
    */
   getAllDisabledHosts(count) {
     log.debug("Getting a list of all disabled origins");
-    return this._storage.getAllDisabledHosts(count);
+
+    let disabledHosts = [];
+    let enumerator = Services.perms.enumerator;
+
+    while (enumerator.hasMoreElements()) {
+      let perm = enumerator.getNext();
+      if (perm.type == PERMISSION_SAVE_LOGINS && perm.capability == Services.perms.DENY_ACTION) {
+        disabledHosts.push(perm.principal.URI.displayPrePath);
+      }
+    }
+
+    if (count)
+      count.value = disabledHosts.length; // needed for XPCOM
+
+    log.debug("getAllDisabledHosts: returning", disabledHosts.length, "disabled hosts.");
+    return disabledHosts;
   },
 
 
@@ -377,6 +434,17 @@ LoginManager.prototype = {
    */
   searchLogins(count, matchData) {
     log.debug("Searching for logins");
+
+    matchData.QueryInterface(Ci.nsIPropertyBag2);
+    if (!matchData.hasKey("guid")) {
+      if (!matchData.hasKey("hostname")) {
+        log.warn("searchLogins: A `hostname` is recommended");
+      }
+
+      if (!matchData.hasKey("formSubmitURL") && !matchData.hasKey("httpRealm")) {
+        log.warn("searchLogins: `formSubmitURL` or `httpRealm` is recommended");
+      }
+    }
 
     return this._storage.searchLogins(count, matchData);
   },
@@ -413,7 +481,8 @@ LoginManager.prototype = {
       return false;
     }
 
-    return this._storage.getLoginSavingEnabled(origin);
+    let uri = Services.io.newURI(origin);
+    return Services.perms.testPermission(uri, PERMISSION_SAVE_LOGINS) != Services.perms.DENY_ACTION;
   },
 
 
@@ -421,13 +490,18 @@ LoginManager.prototype = {
    * Enable or disable storing logins for the specified origin.
    */
   setLoginSavingEnabled(origin, enabled) {
-    // Nulls won't round-trip with getAllDisabledHosts().
-    if (origin.indexOf("\0") != -1) {
-      throw new Error("Invalid hostname");
+    // Throws if there are bogus values.
+    LoginHelper.checkHostnameValue(origin);
+
+    let uri = Services.io.newURI(origin);
+    if (enabled) {
+      Services.perms.remove(uri, PERMISSION_SAVE_LOGINS);
+    } else {
+      Services.perms.add(uri, PERMISSION_SAVE_LOGINS, Services.perms.DENY_ACTION);
     }
 
     log.debug("Login saving for", origin, "now enabled?", enabled);
-    return this._storage.setLoginSavingEnabled(origin, enabled);
+    LoginHelper.notifyStorageChanged(enabled ? "hostSavingEnabled" : "hostSavingDisabled", origin);
   },
 
   /**
@@ -441,12 +515,38 @@ LoginManager.prototype = {
   autoCompleteSearchAsync(aSearchString, aPreviousResult,
                           aElement, aCallback) {
     // aPreviousResult is an nsIAutoCompleteResult, aElement is
-    // nsIDOMHTMLInputElement
+    // HTMLInputElement
+
+    let form = LoginFormFactory.createFromField(aElement);
+    let isSecure = InsecurePasswordUtils.isFormSecure(form);
+    let isPasswordField = aElement.type == "password";
+
+    let completeSearch = (autoCompleteLookupPromise, { logins, messageManager }) => {
+      // If the search was canceled before we got our
+      // results, don't bother reporting them.
+      if (this._autoCompleteLookupPromise !== autoCompleteLookupPromise) {
+        return;
+      }
+
+      this._autoCompleteLookupPromise = null;
+      let results = new UserAutoCompleteResult(aSearchString, logins, {
+        messageManager,
+        isSecure,
+        isPasswordField,
+      });
+      aCallback.onSearchCompletion(results);
+    };
+
+    if (isPasswordField && aSearchString) {
+      // Return empty result on password fields with password already filled.
+      let acLookupPromise = this._autoCompleteLookupPromise = Promise.resolve({ logins: [] });
+      acLookupPromise.then(completeSearch.bind(this, acLookupPromise));
+      return;
+    }
 
     if (!this._remember) {
-      setTimeout(function() {
-        aCallback.onSearchCompletion(new UserAutoCompleteResult(aSearchString, []));
-      }, 0);
+      let acLookupPromise = this._autoCompleteLookupPromise = Promise.resolve({ logins: [] });
+      acLookupPromise.then(completeSearch.bind(this, acLookupPromise));
       return;
     }
 
@@ -461,14 +561,15 @@ LoginManager.prototype = {
     }
 
     let rect = BrowserUtils.getElementBoundingScreenRect(aElement);
-    LoginManagerContent._autoCompleteSearchAsync(aSearchString, previousResult,
-                                                 aElement, rect)
-                       .then(function(logins) {
-                         let results =
-                             new UserAutoCompleteResult(aSearchString, logins);
-                         aCallback.onSearchCompletion(results);
-                       })
-                       .then(null, Cu.reportError);
+    let acLookupPromise = this._autoCompleteLookupPromise =
+      LoginManagerContent._autoCompleteSearchAsync(aSearchString, previousResult,
+                                                   aElement, rect);
+    acLookupPromise.then(completeSearch.bind(this, acLookupPromise))
+                             .catch(Cu.reportError);
+  },
+
+  stopSearch() {
+    this._autoCompleteLookupPromise = null;
   },
 }; // end of LoginManager implementation
 

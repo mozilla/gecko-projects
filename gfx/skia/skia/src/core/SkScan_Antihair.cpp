@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 The Android Open Source Project
  *
@@ -9,7 +8,7 @@
 
 #include "SkScan.h"
 #include "SkBlitter.h"
-#include "SkColorPriv.h"
+#include "SkColorData.h"
 #include "SkLineClipper.h"
 #include "SkRasterClip.h"
 #include "SkFDot6.h"
@@ -748,8 +747,6 @@ void SkScan::AntiFillXRect(const SkXRect& xr, const SkRasterClip& clip,
             AntiFillXRect(xr, nullptr, blitter);
         } else {
             SkAAClipBlitterWrapper wrapper(clip, blitter);
-            blitter = wrapper.getBlitter();
-
             AntiFillXRect(xr, &wrapper.getRgn(), wrapper.getBlitter());
         }
     }

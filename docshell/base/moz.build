@@ -1,8 +1,35 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files('**'):
+    BUG_COMPONENT = ('Core', 'Document Navigation')
+
+with Files('crashtests/430628*'):
+    BUG_COMPONENT = ('Core', 'Editor')
+
+with Files('crashtests/432114*'):
+    BUG_COMPONENT = ('Core', 'Editor')
+
+with Files('crashtests/500328*'):
+    BUG_COMPONENT = ('Firefox', 'Bookmarks & History')
+
+with Files('IHistory.h'):
+    BUG_COMPONENT = ('Toolkit', 'Places')
+
+with Files('*LoadContext.*'):
+    BUG_COMPONENT = ('Core', 'Networking')
+
+with Files('nsAboutRedirector.*'):
+    BUG_COMPONENT = ('Core', 'General')
+
+with Files('nsILinkHandler.*'):
+    BUG_COMPONENT = ('Core', 'DOM: Core & HTML')
+
+with Files('nsIScrollObserver.*'):
+    BUG_COMPONENT = ('Core', 'Panning and Zooming')
 
 DIRS += [
     'timeline',
@@ -12,10 +39,7 @@ XPIDL_SOURCES += [
     'nsCDefaultURIFixup.idl',
     'nsIClipboardCommands.idl',
     'nsIContentViewer.idl',
-    'nsIContentViewerContainer.idl',
     'nsIContentViewerEdit.idl',
-    'nsIContentViewerFile.idl',
-    'nsIDocCharset.idl',
     'nsIDocShell.idl',
     'nsIDocShellLoadInfo.idl',
     'nsIDocShellTreeItem.idl',
@@ -29,6 +53,8 @@ XPIDL_SOURCES += [
     'nsIRefreshURI.idl',
     'nsIScrollable.idl',
     'nsITextScroll.idl',
+    'nsITooltipListener.idl',
+    'nsITooltipTextProvider.idl',
     'nsIURIFixup.idl',
     'nsIWebNavigation.idl',
     'nsIWebNavigationInfo.idl',
@@ -38,7 +64,9 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'docshell'
 
 EXPORTS += [
+    'nsCTooltipTextProvider.h',
     'nsDocShellLoadTypes.h',
+    'nsDocShellTreeOwner.h',
     'nsILinkHandler.h',
     'nsIScrollObserver.h',
     'nsIWebShellServices.h',
@@ -58,12 +86,16 @@ UNIFIED_SOURCES += [
     'nsDocShellEditorData.cpp',
     'nsDocShellEnumerator.cpp',
     'nsDocShellLoadInfo.cpp',
-    'nsDocShellTransferableHooks.cpp',
-    'nsDownloadHistory.cpp',
+    'nsDocShellTreeOwner.cpp',
     'nsDSURIContentListener.cpp',
+    'nsPingListener.cpp',
+    'nsRefreshTimer.cpp',
     'nsWebNavigationInfo.cpp',
     'SerializedLoadContext.cpp',
 ]
+
+if not CONFIG['MOZ_PLACES']:
+    UNIFIED_SOURCES += ['nsDownloadHistory.cpp']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -73,13 +105,16 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/layout/base',
     '/layout/generic',
+    '/layout/style',
     '/layout/xul',
+    '/netwerk/base',
     '/netwerk/protocol/viewsource',
+    '/toolkit/components/browser',
     '/tools/profiler',
 ]
 
 if CONFIG['MOZ_TOOLKIT_SEARCH']:
     DEFINES['MOZ_TOOLKIT_SEARCH'] = True
 
-if CONFIG['MOZ_DEVTOOLS'] == 'all':
-    DEFINES['MOZ_DEVTOOLS_ALL'] = True
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

@@ -4,31 +4,29 @@
 
 "use strict";
 
-//
+// Test adding a valid property to a CSS rule, and navigating through the fields
+// by pressing ENTER.
 
 const TEST_URI = `
   <style type="text/css">
     #testid {
-      background-color: blue;
+      color: blue;
     }
-    .testclass, .unmatched {
-      background-color: green;
-    };
   </style>
-  <div id='testid' class='testclass'>Styled Node</div>
-  <div id='testid2'>Styled Node</div>
+  <div id='testid'>Styled Node</div>
 `;
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
+  await selectNode("#testid", inspector);
 
   info("Focus the new property name field");
-  let elementRuleEditor = getRuleViewRuleEditor(view, 0);
-  let editor = yield focusNewRuleViewProperty(elementRuleEditor);
-  let input = editor.input;
+  const ruleEditor = getRuleViewRuleEditor(view, 1);
+  let editor = await focusNewRuleViewProperty(ruleEditor);
+  const input = editor.input;
 
-  is(inplaceEditor(elementRuleEditor.newPropSpan), editor,
+  is(inplaceEditor(ruleEditor.newPropSpan), editor,
     "Next focused editor should be the new property editor.");
   ok(input.selectionStart === 0 && input.selectionEnd === input.value.length,
     "Editor contents are selected.");
@@ -42,28 +40,26 @@ add_task(function*() {
   editor.input.value = "background-color";
 
   info("Pressing RETURN and waiting for the value field focus");
-  let onNameAdded = view.once("ruleview-changed");
+  const onNameAdded = view.once("ruleview-changed");
   EventUtils.synthesizeKey("VK_RETURN", {}, view.styleWindow);
-  yield onNameAdded;
+
+  await onNameAdded;
 
   editor = inplaceEditor(view.styleDocument.activeElement);
 
-  is(elementRuleEditor.rule.textProps.length, 1,
+  is(ruleEditor.rule.textProps.length, 2,
     "Should have created a new text property.");
-  is(elementRuleEditor.propertyList.children.length, 1,
+  is(ruleEditor.propertyList.children.length, 2,
     "Should have created a property editor.");
-  let textProp = elementRuleEditor.rule.textProps[0];
+  const textProp = ruleEditor.rule.textProps[1];
   is(editor, inplaceEditor(textProp.editor.valueSpan),
     "Should be editing the value span now.");
 
   info("Entering the property value");
-  // We're editing inline style, so expect a style attribute mutation.
-  let onMutated = inspector.once("markupmutation");
-  let onValueAdded = view.once("ruleview-changed");
+  const onValueAdded = view.once("ruleview-changed");
   editor.input.value = "purple";
   EventUtils.synthesizeKey("VK_RETURN", {}, view.styleWindow);
-  yield onValueAdded;
-  yield onMutated;
+  await onValueAdded;
 
   is(textProp.value, "purple", "Text prop should have been changed.");
 });

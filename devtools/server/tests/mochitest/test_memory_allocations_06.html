@@ -11,21 +11,23 @@ Bug 1132764 - Test controlling the maximum allocations log length over the RDP.
 </head>
 <body>
 <pre id="test">
-<script src="memory-helpers.js" type="application/javascript;version=1.8"></script>
+<script src="memory-helpers.js" type="application/javascript"></script>
 <script>
+"use strict";
+
 window.onload = function() {
   SimpleTest.waitForExplicitFinish();
 
-  Task.spawn(function* () {
-    var { memory, client } = yield startServerAndGetSelectedTabMemory();
-    yield memory.attach();
+  (async function() {
+    const { memory, client } = await startServerAndGetSelectedTabMemory();
+    await memory.attach();
 
-    var allocs = [];
+    const allocs = [];
     function allocator() {
-      allocs.push(new Object);
+      allocs.push(new Object());
     }
 
-    yield memory.startRecordingAllocations({
+    await memory.startRecordingAllocations({
       maxLogLength: 1
     });
 
@@ -33,15 +35,15 @@ window.onload = function() {
     allocator();
     allocator();
 
-    var response = yield memory.getAllocations();
-    yield memory.stopRecordingAllocations();
+    const response = await memory.getAllocations();
+    await memory.stopRecordingAllocations();
 
     is(response.allocations.length, 1,
        "There should only be one entry in the allocations log.");
 
-    yield memory.detach();
+    await memory.detach();
     destroyServerAndFinish(client);
-  });
+  })();
 };
 </script>
 </pre>

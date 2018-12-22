@@ -4,13 +4,24 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
+ * https://webaudio.github.io/web-audio-api/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
-interface AudioBufferSourceNode : AudioNode {
+dictionary AudioBufferSourceOptions {
+             AudioBuffer? buffer;
+             float        detune = 0;
+             boolean      loop = false;
+             double       loopEnd = 0;
+             double       loopStart = 0;
+             float        playbackRate = 1;
+};
+
+[Pref="dom.webaudio.enabled",
+ Constructor(BaseAudioContext context, optional AudioBufferSourceOptions options)]
+interface AudioBufferSourceNode : AudioScheduledSourceNode {
 
     attribute AudioBuffer? buffer;
 
@@ -21,13 +32,9 @@ interface AudioBufferSourceNode : AudioNode {
     attribute double loopStart;
     attribute double loopEnd;
 
-    [Throws, UnsafeInPrerendering]
+    [Throws]
     void start(optional double when = 0, optional double grainOffset = 0,
                optional double grainDuration);
-    [Throws, UnsafeInPrerendering]
-    void stop(optional double when = 0);
-
-    attribute EventHandler onended;
 };
 
 // Mozilla extensions

@@ -16,15 +16,15 @@
 
 using namespace mozilla;
 
-class DataStorageTest : public ::testing::Test
+class psm_DataStorageTest : public ::testing::Test
 {
 protected:
-  virtual void SetUp()
+  void SetUp() override
   {
     const ::testing::TestInfo* const testInfo =
       ::testing::UnitTest::GetInstance()->current_test_info();
     NS_ConvertUTF8toUTF16 testName(testInfo->name());
-    storage = DataStorage::Get(testName);
+    storage = DataStorage::GetFromRawFileName(testName);
     storage->Init(dataWillPersist);
   }
 
@@ -36,7 +36,7 @@ NS_NAMED_LITERAL_CSTRING(testKey, "test");
 NS_NAMED_LITERAL_CSTRING(testValue, "value");
 NS_NAMED_LITERAL_CSTRING(privateTestValue, "private");
 
-TEST_F(DataStorageTest, GetPutRemove)
+TEST_F(psm_DataStorageTest, GetPutRemove)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -92,7 +92,7 @@ TEST_F(DataStorageTest, GetPutRemove)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(DataStorageTest, InputValidation)
+TEST_F(psm_DataStorageTest, InputValidation)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -130,7 +130,7 @@ TEST_F(DataStorageTest, InputValidation)
   EXPECT_EQ(NS_OK, storage->Put(longKey, testValue, DataStorage_Persistent));
   result = storage->Get(longKey, DataStorage_Persistent);
   EXPECT_STREQ("value", result.get());
-  longKey.Append("a");
+  longKey.AppendLiteral("a");
   // A key longer than that will not work
   EXPECT_EQ(NS_ERROR_INVALID_ARG,
             storage->Put(longKey, testValue, DataStorage_Persistent));
@@ -145,7 +145,7 @@ TEST_F(DataStorageTest, InputValidation)
   EXPECT_EQ(NS_OK, storage->Put(testKey, longValue, DataStorage_Persistent));
   result = storage->Get(testKey, DataStorage_Persistent);
   EXPECT_STREQ(longValue.get(), result.get());
-  longValue.Append("a");
+  longValue.AppendLiteral("a");
   // A value longer than that will not work
   storage->Remove(testKey, DataStorage_Persistent);
   EXPECT_EQ(NS_ERROR_INVALID_ARG,
@@ -154,7 +154,7 @@ TEST_F(DataStorageTest, InputValidation)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(DataStorageTest, Eviction)
+TEST_F(psm_DataStorageTest, Eviction)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -182,7 +182,7 @@ TEST_F(DataStorageTest, Eviction)
   EXPECT_STREQ("value", result.get());
 }
 
-TEST_F(DataStorageTest, ClearPrivateData)
+TEST_F(psm_DataStorageTest, ClearPrivateData)
 {
   EXPECT_TRUE(dataWillPersist);
 
@@ -195,7 +195,7 @@ TEST_F(DataStorageTest, ClearPrivateData)
   EXPECT_TRUE(result.IsEmpty());
 }
 
-TEST_F(DataStorageTest, Shutdown)
+TEST_F(psm_DataStorageTest, Shutdown)
 {
   EXPECT_TRUE(dataWillPersist);
 

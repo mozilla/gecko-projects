@@ -227,17 +227,11 @@
   </span>
   <script><![CDATA[
   window.onload = function() {
-    if (window.parent && window.parent.SpecialPowers) {
-      window.parent.SpecialPowers.pushPrefEnv(
-        { 'set': [[ "layout.css.scope-pseudo.enabled", true]] },
-        doTest);
-    } else {
-      doTest();
-    }
+    doTest();
   }
 
   function doTest(){
-    if ( window.location.hash.indexOf("target") == -1 )
+    if ( !window.location.hash.includes("target") )
       window.location.hash = "#target";
 
     var root = document.getElementById("root");
@@ -295,7 +289,7 @@
     runTest( ecss, "SyntaxError: Fragment", fragment, false );
     cacheCheck( "Fragment", fragment );
 
-    root.parentNode.removeChild( root );
+    root.remove( );
     
     interfaceCheck(document, "Document");
     runTest( css, "Document", document, true );
@@ -476,7 +470,7 @@
             // make sure it kicks in immediately
             document.body.offsetWidth;
           }
-          var view = document.defaultView.getComputedStyle(div, null);
+          var view = document.defaultView.getComputedStyle(div);
           var bg = view.getPropertyValue("background-color") || div.style.backgroundColor;
           if (needToggle) {
             window.frameElement.style.display = "none";
@@ -484,7 +478,7 @@
             document.body.offsetWidth;
           }
 
-          var pass = bg && bg.indexOf("(255, 0, 0") == -1 && bg.indexOf("#ff0000") == -1 && bg.indexOf("red") == -1;
+          var pass = bg && !bg.includes("(255, 0, 0") && !bg.includes("#ff0000") && !bg.includes("red");
           //var pass = bg && bg.indexOf("(255, 0, 0") == -1 && bg.indexOf("#ff0000") == -1;
           assert(pass === expect, type + ": " + (div.title || div.parentNode.title));
         }

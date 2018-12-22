@@ -27,6 +27,7 @@
  */
 
 #include "DynamicsCompressor.h"
+#include "AlignmentUtils.h"
 #include "AudioBlock.h"
 
 #include <cmath>
@@ -85,7 +86,7 @@ void DynamicsCompressor::setParameterValue(unsigned parameterID, float value)
 void DynamicsCompressor::initializeParameters()
 {
     // Initializes compressor to default values.
-    
+
     m_parameters[ParamThreshold] = -24; // dB
     m_parameters[ParamKnee] = 30; // dB
     m_parameters[ParamRatio] = 12; // unit-less
@@ -102,7 +103,7 @@ void DynamicsCompressor::initializeParameters()
     m_parameters[ParamFilterStageGain] = 4.4f; // dB
     m_parameters[ParamFilterStageRatio] = 2;
     m_parameters[ParamFilterAnchor] = 15000 / nyquist();
-    
+
     m_parameters[ParamPostGain] = 0; // dB
     m_parameters[ParamReduction] = 0; // dB
 
@@ -198,7 +199,9 @@ void DynamicsCompressor::process(const AudioBlock* sourceChunk, AudioBlock* dest
         setEmphasisParameters(filterStageGain, anchor, filterStageRatio);
     }
 
-    float sourceWithVolume[WEBAUDIO_BLOCK_SIZE];
+    float sourceWithVolume[WEBAUDIO_BLOCK_SIZE + 4];
+    float* alignedSourceWithVolume = ALIGNED16(sourceWithVolume);
+    ASSERT_ALIGNED16(alignedSourceWithVolume);
 
     // Apply pre-emphasis filter.
     // Note that the final three stages are computed in-place in the destination buffer.
@@ -210,8 +213,8 @@ void DynamicsCompressor::process(const AudioBlock* sourceChunk, AudioBlock* dest
         } else {
           AudioBlockCopyChannelWithScale(m_sourceChannels[i],
                                          sourceChunk->mVolume,
-                                         sourceWithVolume);
-          sourceData = sourceWithVolume;
+                                         alignedSourceWithVolume);
+          sourceData = alignedSourceWithVolume;
         }
 
         float* destinationData = m_destinationChannels[i];
@@ -264,8 +267,8 @@ void DynamicsCompressor::process(const AudioBlock* sourceChunk, AudioBlock* dest
                          releaseZone3,
                          releaseZone4
                          );
-                         
-    // Update the compression amount.                     
+
+    // Update the compression amount.
     setParameterValue(ParamReduction, m_compressor.meteringGain());
 
     // Apply de-emphasis filter.

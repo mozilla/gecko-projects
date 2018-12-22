@@ -2,8 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-'use strict';
+"use strict";
 
+/* import-globals-from ../../devtools/server/main.js */
+/* eslint "mozilla/use-chromeutils-import": ["error", {allowCu: true}] */
+
+// eslint-disable-next-line mozilla/no-define-cc-etc
+const Cu = Components.utils; // eslint-disable-line mozilla/use-cc-etc
 const { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
 var { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
 const { devtools } = Cu.import("resource://devtools/shared/Loader.jsm", {});
@@ -19,15 +24,14 @@ const { BrowserTabList } = devtools.require("devtools/server/actors/webbrowser")
  * Construct a root actor appropriate for use in a server running xpcshell
  * tests. <snip boilerplate> :)
  */
-function createRootActor(connection)
-{
+function createRootActor(connection) {
   let parameters = {
     tabList: new XPCSTTabList(connection),
     globalActorFactories: DebuggerServer.globalActorFactories,
     onShutdown() {
       // If the user never switches to the "debugger" tab we might get a
       // shutdown before we've attached.
-      Services.obs.notifyObservers(null, "xpcshell-test-devtools-shutdown", null);
+      Services.obs.notifyObservers(null, "xpcshell-test-devtools-shutdown");
     }
   };
   return new RootActor(connection, parameters);
@@ -37,8 +41,7 @@ function createRootActor(connection)
  * A "stub" TabList implementation that provides no tabs.
  */
 
-function XPCSTTabList(connection)
-{
+function XPCSTTabList(connection) {
   BrowserTabList.call(this, connection);
 }
 

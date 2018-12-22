@@ -11,25 +11,29 @@
 "use strict";
 
 const TAB_URL = EXAMPLE_URL + "doc_large-array-buffer.html";
+const {ELLIPSIS} = require("devtools/shared/l10n");
 
-var gTab, gPanel, gDebugger;
-var gVariables, gEllipsis;
+
+var gTab, gPanel, gDebugger, gVariables;
 
 function test() {
   // this test does a lot of work on large objects, default 45s is not enough
   requestLongerTimeout(4);
 
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gVariables = gDebugger.DebuggerView.Variables;
-    gEllipsis = Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data;
 
-    waitForSourceAndCaretAndScopes(gPanel, ".html", 28)
+    waitForCaretAndScopes(gPanel, 28, 1)
       .then(() => performTests())
       .then(() => resumeDebuggerThenCloseAndFinish(gPanel))
-      .then(null, error => {
+      .catch(error => {
         ok(false, "Got an error: " + error.message + "\n" + error.stack);
       });
 
@@ -86,7 +90,7 @@ const PAGE_RANGES = [
 ];
 
 function toPageNames(ranges) {
-  return ranges.map(([ from, to ]) => "[" + from + gEllipsis + to + "]");
+  return ranges.map(([ from, to ]) => "[" + from + ELLIPSIS + to + "]");
 }
 
 function performTests() {
@@ -241,10 +245,9 @@ function verifyNextLevels3(lastPage2, varName) {
   });
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;
   gVariables = null;
-  gEllipsis = null;
 });

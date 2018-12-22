@@ -16,21 +16,34 @@ class SkGpuDevice;
 
 class SkSurface_Gpu : public SkSurface_Base {
 public:
-    SkSurface_Gpu(SkGpuDevice*);
-    virtual ~SkSurface_Gpu();
+    SkSurface_Gpu(sk_sp<SkGpuDevice>);
+    ~SkSurface_Gpu() override;
+
+    // This is an internal-only factory
+    static sk_sp<SkSurface> MakeWrappedRenderTarget(GrContext*, sk_sp<GrRenderTargetContext>);
 
     GrBackendObject onGetTextureHandle(BackendHandleAccess) override;
     bool onGetRenderTargetHandle(GrBackendObject*, BackendHandleAccess) override;
     SkCanvas* onNewCanvas() override;
-    SkSurface* onNewSurface(const SkImageInfo&) override;
-    SkImage* onNewImageSnapshot(Budgeted) override;
+    sk_sp<SkSurface> onNewSurface(const SkImageInfo&) override;
+    sk_sp<SkImage> onNewImageSnapshot() override;
+    void onWritePixels(const SkPixmap&, int x, int y) override;
     void onCopyOnWrite(ContentChangeMode) override;
     void onDiscard() override;
+    GrSemaphoresSubmitted onFlush(int numSemaphores,
+                                  GrBackendSemaphore signalSemaphores[]) override;
+    bool onWait(int numSemaphores, const GrBackendSemaphore* waitSemaphores) override;
+    bool onCharacterize(SkSurfaceCharacterization*) const override;
+    bool isCompatible(const SkSurfaceCharacterization&) const;
+    bool onDraw(const SkDeferredDisplayList*) override;
 
-    SkGpuDevice* getDevice() { return fDevice; }
+    SkGpuDevice* getDevice() { return fDevice.get(); }
+
+    static bool Valid(const SkImageInfo&);
+    static bool Valid(GrContext*, GrPixelConfig, SkColorSpace*);
 
 private:
-    SkGpuDevice* fDevice;
+    sk_sp<SkGpuDevice> fDevice;
 
     typedef SkSurface_Base INHERITED;
 };

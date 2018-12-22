@@ -1,53 +1,60 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if the network monitor leaks on initialization and sudden destruction.
  * You can also use this initialization format as a template for other tests.
  */
 
-function test() {
-  let monitor, reqMenu;
-  initNetMonitor(SINGLE_GET_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(SINGLE_GET_URL);
+  info("Starting test... ");
 
-    monitor = aMonitor;
-    let { document, NetMonitorView, NetMonitorController } = aMonitor.panelWin;
-    let { RequestsMenu, NetworkDetails } = NetMonitorView;
-    reqMenu = RequestsMenu;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
 
-    Services.prefs.setBoolPref("devtools.webconsole.persistlog", false);
-    content.location.reload(true);
-  })
-  .then(() => {
-    return waitForNetworkEvents(monitor, 2);
-  })
-  .then(() => {
-    is(reqMenu.itemCount, 2,
-      "The request menu should have two items at this point.");
-  })
-  .then(() => {
-     content.location.reload(true);
-     return waitForNetworkEvents(monitor, 2);
-   })
-  .then(() => {
-    // Since the reload clears the log, we still expect two requests in the log
-    is(reqMenu.itemCount, 2,
-      "The request menu should still have two items at this point.");
-  })
-  .then(() => {
-    // Now we toggle the persistence logs on
-     Services.prefs.setBoolPref("devtools.webconsole.persistlog", true);
-     content.location.reload(true);
-     return waitForNetworkEvents(monitor, 2);
-   })
-  .then(() => {
-    // Since we togged the persistence logs, we expect four items after the reload
-    is(reqMenu.itemCount, 4,
-      "The request menu should now have four items at this point.");
-  })
-  .then(() => {
-    Services.prefs.setBoolPref("devtools.webconsole.persistlog", false);
-    return teardown(monitor).then(finish);
-  });
-}
+  store.dispatch(Actions.batchEnable(false));
+
+  Services.prefs.setBoolPref("devtools.netmonitor.persistlog", false);
+
+  await reloadAndWait();
+
+  // Using waitUntil in the test is necessary to ensure all requests are added correctly.
+  // Because reloadAndWait call may catch early uncaught requests from initNetMonitor, so
+  // the actual number of requests after reloadAndWait could be wrong since all requests
+  // haven't finished.
+  await waitUntil(() => document.querySelectorAll(".request-list-item").length === 2);
+  is(document.querySelectorAll(".request-list-item").length, 2,
+    "The request list should have two items at this point.");
+
+  await reloadAndWait();
+
+  await waitUntil(() => document.querySelectorAll(".request-list-item").length === 2);
+  // Since the reload clears the log, we still expect two requests in the log
+  is(document.querySelectorAll(".request-list-item").length, 2,
+    "The request list should still have two items at this point.");
+
+  // Now we toggle the persistence logs on
+  Services.prefs.setBoolPref("devtools.netmonitor.persistlog", true);
+
+  await reloadAndWait();
+
+  await waitUntil(() => document.querySelectorAll(".request-list-item").length === 4);
+  // Since we togged the persistence logs, we expect four items after the reload
+  is(document.querySelectorAll(".request-list-item").length, 4,
+    "The request list should now have four items at this point.");
+
+  Services.prefs.setBoolPref("devtools.netmonitor.persistlog", false);
+  return teardown(monitor);
+
+  /**
+   * Reload the page and wait for 2 GET requests. Race-free.
+   */
+  function reloadAndWait() {
+    const wait = waitForNetworkEvents(monitor, 2);
+    tab.linkedBrowser.reload();
+    return wait;
+  }
+});

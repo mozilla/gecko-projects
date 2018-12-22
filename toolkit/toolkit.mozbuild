@@ -1,14 +1,48 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+include('/js/app.mozbuild')
+
+PYTHON_UNITTEST_MANIFESTS += [
+    '/layout/tools/reftest/selftest/python.ini',
+    '/testing/marionette/harness/marionette_harness/tests/harness_unit/python.ini',
+    '/testing/mochitest/tests/python/python.ini',
+    '/testing/raptor/test/python.ini',
+    '/testing/talos/talos/unittests/python.ini'
+]
+
+CONFIGURE_SUBST_FILES += [
+    '/tools/update-packaging/Makefile',
+]
+
+DIRS += [
+    '/tools',
+    '/xpcom/xpidl',
+]
+
+if CONFIG['COMPILE_ENVIRONMENT']:
+    DIRS += [
+        '/config/external',
+        '/security',
+    ]
+
+if CONFIG['ENABLE_TESTS']:
+    DIRS += [
+        '/toolkit/library/gtest/rust',
+    ]
+
+DIRS += [
+    '/toolkit/library/rust',
+]
+
 if CONFIG['MOZ_SANDBOX']:
     DIRS += ['/security/sandbox']
 
 DIRS += [
-    # Depends on NSS and NSPR, and must be built after sandbox or else B2G emulator
-    # builds fail.
+    # Depends on NSS and NSPR
     '/security/certverifier',
     # Depends on certverifier
     '/security/apps',
@@ -29,7 +63,7 @@ DIRS += [
 if CONFIG['MOZ_AUTH_EXTENSION']:
     DIRS += ['/extensions/auth']
 
-if CONFIG['MOZ_UPDATER']:
+if CONFIG['MOZ_UPDATER'] and CONFIG['OS_TARGET'] != 'Android':
     DIRS += ['/other-licenses/bsdiff']
 
 # Gecko/Core components.
@@ -40,42 +74,24 @@ DIRS += [
     '/hal',
     '/js/xpconnect',
     '/intl/chardet',
-    '/media/libyuv',
     '/modules/libjar',
     '/storage',
 ]
 
-if CONFIG['MOZ_PERMISSIONS']:
+if CONFIG['COMPILE_ENVIRONMENT']:
     DIRS += [
-        '/extensions/cookie',
-        '/extensions/permissions',
+        '/media/libyuv',
     ]
 
 DIRS += [
-    '/rdf',
+    '/extensions/cookie',
+    '/extensions/permissions',
 ]
 
-if CONFIG['MOZ_WEBRTC']:
+if CONFIG['MOZ_WEBRTC'] and CONFIG['COMPILE_ENVIRONMENT']:
     DIRS += [
         '/media/webrtc',
         '/media/mtransport',
-    ]
-
-if CONFIG['MOZ_OMX_PLUGIN']:
-    DIRS += [
-        '/media/omx-plugin/lib/ics/libutils',
-        '/media/omx-plugin/lib/ics/libstagefright',
-        '/media/omx-plugin/lib/ics/libvideoeditorplayer',
-        '/media/omx-plugin/lib/gb/libutils',
-        '/media/omx-plugin/lib/gb/libstagefright',
-        '/media/omx-plugin/lib/gb/libstagefright_color_conversion',
-        '/media/omx-plugin/lib/gb235/libstagefright',
-        '/media/omx-plugin',
-        '/media/omx-plugin/gb',
-        '/media/omx-plugin/gb235',
-        '/media/omx-plugin/lib/hc/libstagefright',
-        '/media/omx-plugin/hc',
-        '/media/omx-plugin/kk',
     ]
 
 if CONFIG['ENABLE_TESTS']:
@@ -94,15 +110,8 @@ DIRS += [
     '/editor',
     '/layout',
     '/docshell',
-    '/embedding',
     '/xpfe/appshell'
 ]
-
-# This needs to be built after the gfx/ directory
-# to ensure all dependencies for skia (e.g. mozalloc, xpcom)
-# have been built
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    DIRS += ['/other-licenses/skia-npapi']
 
 if CONFIG['MOZ_UNIVERSALCHARDET']:
     DIRS += ['/extensions/universalchardet']
@@ -119,10 +128,9 @@ if CONFIG['MOZ_JPROF']:
     DIRS += ['/tools/jprof']
 
 DIRS += [
+    '/tools/code-coverage',
     '/tools/power',
     '/tools/profiler',
-    '/tools/memory-profiler',
-    '/xpfe/components',
 ]
 
 if CONFIG['MOZ_ENABLE_XREMOTE']:
@@ -141,27 +149,24 @@ if CONFIG['MOZ_PREF_EXTENSIONS']:
 
 DIRS += [
     '/devtools',
+    '/toolkit/library',
     '/services',
     '/startupcache',
     '/js/ductwork/debugger',
     '/other-licenses/snappy',
 ]
 
-if CONFIG['MOZ_GIO_COMPONENT']:
-    DIRS += ['/extensions/gio']
-
-DIRS += [
-    '/toolkit/library/StaticXULComponentsEnd',
-    '/toolkit/library',
-]
-
 if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     DIRS += ['/toolkit/system/gnome']
 
-DIRS += ['/addon-sdk']
+if CONFIG['ENABLE_MARIONETTE']:
+    DIRS += [
+        '/testing/firefox-ui',
+        '/testing/marionette',
+    ]
 
-if CONFIG['ENABLE_MARIONETTE'] or CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('gonk', 'android'):
-    DIRS += ['/testing/marionette']
+if CONFIG['ENABLE_GECKODRIVER']:
+    DIRS += ['/testing/geckodriver']
 
 DIRS += [
     '/tools/quitter',
@@ -175,7 +180,6 @@ if CONFIG['ENABLE_TESTS']:
         '/testing/tools/minidumpwriter',
         '/testing/tools/screenshot',
         '/testing/profiles',
-        '/testing/mozbase',
         '/testing/modules',
         '/testing/runtimes',
         '/testing/web-platform',
@@ -185,8 +189,13 @@ if CONFIG['ENABLE_TESTS']:
     if CONFIG['MOZ_CRASHREPORTER']:
         DIRS += ['/testing/tools/fileid']
 
-    if CONFIG['MOZ_WEBRTC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk' and not CONFIG['MOZ_TASK_TRACER']:
-            DIRS += [
-                '/media/webrtc/signaling/test',
-                '/media/mtransport/test',
-            ]
+    if CONFIG['MOZ_MEMORY']:
+        DIRS += ['/memory/gtest']
+
+    if CONFIG['MOZ_WEBRTC'] and not CONFIG['MOZ_TASK_TRACER']:
+        DIRS += [
+            '/media/mtransport/test',
+        ]
+
+if CONFIG['FUZZING']:
+    DIRS += ['/tools/fuzzing']

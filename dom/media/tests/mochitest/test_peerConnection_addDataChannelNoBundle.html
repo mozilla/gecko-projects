@@ -20,17 +20,17 @@
                      commandsCreateDataChannel.concat(
                        [
                          function PC_LOCAL_EXPECT_ICE_CHECKING(test) {
-                           test.pcLocal.iceCheckingRestartExpected = true;
+                           test.pcLocal.expectIceChecking();
                          },
                          function PC_REMOTE_EXPECT_ICE_CHECKING(test) {
-                           test.pcRemote.iceCheckingRestartExpected = true;
+                           test.pcRemote.expectIceChecking();
                          },
                        ]
                       ),
                      commandsCheckDataChannel);
 
-    // Insert before the second PC_LOCAL_CHECK_MEDIA_TRACKS
-    test.chain.insertBefore('PC_LOCAL_CHECK_MEDIA_TRACKS',
+    // Insert before the second PC_LOCAL_WAIT_FOR_MEDIA_FLOW
+    test.chain.insertBefore('PC_LOCAL_WAIT_FOR_MEDIA_FLOW',
                             commandsWaitForDataChannel,
                             false,
                             1);

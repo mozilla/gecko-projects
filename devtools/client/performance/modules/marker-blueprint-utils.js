@@ -25,12 +25,12 @@ exports.MarkerBlueprintUtils = {
 
     // If this marker isn't yet defined in the blueprint, simply check if the
     // entire category of "UNKNOWN" markers are supposed to be visible or not.
-    let isUnknown = !(marker.name in TIMELINE_BLUEPRINT);
+    const isUnknown = !(marker.name in TIMELINE_BLUEPRINT);
     if (isUnknown) {
-      return hiddenMarkerNames.indexOf("UNKNOWN") == -1;
+      return !hiddenMarkerNames.includes("UNKNOWN");
     }
 
-    return hiddenMarkerNames.indexOf(marker.name) == -1;
+    return !hiddenMarkerNames.includes(marker.name);
   },
 
   /**
@@ -51,9 +51,9 @@ exports.MarkerBlueprintUtils = {
    * @return string
    */
   getMarkerLabel: function(marker) {
-    let blueprint = this.getBlueprintFor(marker);
-    let dynamic = typeof blueprint.label === "function";
-    let label = dynamic ? blueprint.label(marker) : blueprint.label;
+    const blueprint = this.getBlueprintFor(marker);
+    const dynamic = typeof blueprint.label === "function";
+    const label = dynamic ? blueprint.label(marker) : blueprint.label;
     return label;
   },
 
@@ -65,16 +65,17 @@ exports.MarkerBlueprintUtils = {
    * @return string
    */
   getMarkerGenericName: function(markerName) {
-    let blueprint = this.getBlueprintFor({ name: markerName });
-    let dynamic = typeof blueprint.label === "function";
-    let generic = dynamic ? blueprint.label() : blueprint.label;
+    const blueprint = this.getBlueprintFor({ name: markerName });
+    const dynamic = typeof blueprint.label === "function";
+    const generic = dynamic ? blueprint.label() : blueprint.label;
 
     // If no class name found, attempt to throw a descriptive error as to
     // how the marker implementor can fix this.
     if (!generic) {
       let message = `Could not find marker generic name for "${markerName}".`;
       if (typeof blueprint.label === "function") {
-        message += ` The following function must return a generic name string when no marker passed: ${blueprint.label}`;
+        message += ` The following function must return a generic name string when no` +
+                   ` marker passed: ${blueprint.label}`;
       } else {
         message += ` ${markerName}.label must be defined in the marker blueprint.`;
       }
@@ -92,9 +93,9 @@ exports.MarkerBlueprintUtils = {
    * @return array<object>
    */
   getMarkerFields: function(marker) {
-    let blueprint = this.getBlueprintFor(marker);
-    let dynamic = typeof blueprint.fields === "function";
-    let fields = dynamic ? blueprint.fields(marker) : blueprint.fields;
+    const blueprint = this.getBlueprintFor(marker);
+    const dynamic = typeof blueprint.fields === "function";
+    const fields = dynamic ? blueprint.fields(marker) : blueprint.fields;
 
     return Object.entries(fields || {})
       .filter(([_, value]) => dynamic ? true : value in marker)

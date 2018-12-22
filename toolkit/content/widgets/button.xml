@@ -9,7 +9,7 @@
    xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
    xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="button-base" extends="chrome://global/content/bindings/general.xml#basetext" role="xul:button">
+  <binding id="button-base" extends="chrome://global/content/bindings/general.xml#basetext">
     <implementation implements="nsIDOMXULButtonElement">
       <property name="type"
                 onget="return this.getAttribute('type');"
@@ -27,13 +27,11 @@
         <setter><![CDATA[
           if (this.boxObject instanceof MenuBoxObject) {
             this.boxObject.openMenu(val);
-          } else {
+          } else if (val) {
             // Fall back to just setting the attribute
-            if (val) {
-              this.setAttribute('open', 'true');
-            } else {
-              this.removeAttribute('open');
-            }
+            this.setAttribute("open", "true");
+          } else {
+            this.removeAttribute("open");
           }
           return val;
         ]]></setter>
@@ -41,9 +39,7 @@
 
       <property name="checked" onget="return this.hasAttribute('checked');">
         <setter><![CDATA[
-          if (this.type == "checkbox") {
-            this.checkState = val ? 1 : 0;
-          } else if (this.type == "radio" && val) {
+          if (this.type == "radio" && val) {
             var sibs = this.parentNode.getElementsByAttribute("group", this.group);
             for (var i = 0; i < sibs.length; ++i)
               sibs[i].removeAttribute("checked");
@@ -58,33 +54,12 @@
         ]]></setter>
       </property>
 
-      <property name="checkState">
-        <getter><![CDATA[
-          var state = this.getAttribute("checkState");
-          if (state == "")
-            return this.checked ? 1 : 0;
-          if (state == "0")
-            return 0;
-          if (state == "2")
-            return 2;
-          return 1;
-        ]]></getter>
-        <setter><![CDATA[
-          this.setAttribute("checkState", val);
-          return val;
-        ]]></setter>
-      </property>
-
-      <property name="autoCheck"
-                onget="return this.getAttribute('autoCheck') == 'true';"
-                onset="this.setAttribute('autoCheck', val); return val;"/>
-
       <method name ="filterButtons">
         <parameter name="node"/>
         <body>
         <![CDATA[
           // if the node isn't visible, don't descend into it.
-          var cs = node.ownerDocument.defaultView.getComputedStyle(node, null);
+          var cs = node.ownerGlobal.getComputedStyle(node);
           if (cs.visibility != "visible" || cs.display == "none") {
             return NodeFilter.FILTER_REJECT;
           }
@@ -125,9 +100,7 @@
       <method name="_handleClick">
         <body>
         <![CDATA[
-          if (!this.disabled &&
-              (this.autoCheck || !this.hasAttribute("autoCheck"))) {
-
+          if (!this.disabled) {
             if (this.type == "checkbox") {
               this.checked = !this.checked;
             } else if (this.type == "radio") {
@@ -145,7 +118,13 @@
            and then they would see the incorrect value of checked. Additionally
            a command attribute would redirect the command events anyway.-->
       <handler event="click" button="0" action="this._handleClick();"/>
-      <handler event="keypress" key=" " action="this._handleClick();"/>
+      <handler event="keypress" key=" ">
+      <![CDATA[
+        this._handleClick();
+        // Prevent page from scrolling on the space key.
+        event.preventDefault();
+      ]]>
+      </handler>
 
       <handler event="keypress">
       <![CDATA[
@@ -155,10 +134,10 @@
         } else {
           if (event.keyCode == KeyEvent.DOM_VK_UP ||
               (event.keyCode == KeyEvent.DOM_VK_LEFT &&
-                document.defaultView.getComputedStyle(this.parentNode, "")
+                document.defaultView.getComputedStyle(this.parentNode)
                         .direction == "ltr") ||
               (event.keyCode == KeyEvent.DOM_VK_RIGHT &&
-                document.defaultView.getComputedStyle(this.parentNode, "")
+                document.defaultView.getComputedStyle(this.parentNode)
                         .direction == "rtl")) {
             event.preventDefault();
             window.document.commandDispatcher.rewindFocus();
@@ -167,10 +146,10 @@
 
           if (event.keyCode == KeyEvent.DOM_VK_DOWN ||
               (event.keyCode == KeyEvent.DOM_VK_RIGHT &&
-                document.defaultView.getComputedStyle(this.parentNode, "")
+                document.defaultView.getComputedStyle(this.parentNode)
                         .direction == "ltr") ||
               (event.keyCode == KeyEvent.DOM_VK_LEFT &&
-                document.defaultView.getComputedStyle(this.parentNode, "")
+                document.defaultView.getComputedStyle(this.parentNode)
                         .direction == "rtl")) {
             event.preventDefault();
             window.document.commandDispatcher.advanceFocus();
@@ -180,7 +159,7 @@
 
         if (event.keyCode || event.charCode <= 32 || event.altKey ||
             event.ctrlKey || event.metaKey)
-          return;  // No printable char pressed, not a potential accesskey
+          return; // No printable char pressed, not a potential accesskey
 
         // Possible accesskey pressed
         var charPressedLower = String.fromCharCode(event.charCode).toLowerCase();
@@ -194,8 +173,8 @@
         // Search for accesskey in the list of buttons for this doc and each subdoc
         // Get the buttons for the main document and all sub-frames
         for (var frameCount = -1; frameCount < window.top.frames.length; frameCount++) {
-          var doc = (frameCount == -1)? window.top.document:
-            window.top.frames[frameCount].document
+          var doc = (frameCount == -1) ? window.top.document :
+            window.top.frames[frameCount].document;
           if (this.fireAccessKeyButton(doc.documentElement, charPressedLower))
             return;
         }
@@ -221,10 +200,9 @@
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:hbox class="box-inherit button-box" xbl:inherits="align,dir,pack,orient"
                 align="center" pack="center" flex="1" anonid="button-box">
-        <children>
-          <xul:image class="button-icon" xbl:inherits="src=image"/>
-          <xul:label class="button-text" xbl:inherits="value=label,accesskey,crop"/>
-        </children>
+        <xul:image class="button-icon" xbl:inherits="src=image"/>
+        <xul:label class="button-text" xbl:inherits="value=label,accesskey,crop,highlightable"/>
+        <xul:label class="button-highlightable-text" xbl:inherits="xbl:text=label,accesskey,crop,highlightable"/>
       </xul:hbox>
     </content>
   </binding>
@@ -235,26 +213,30 @@
       <children includes="observes|template|menupopup|panel|tooltip"/>
       <xul:hbox class="box-inherit button-box" xbl:inherits="align,dir,pack,orient"
                 align="center" pack="center" flex="1">
-        <children>
-          <xul:hbox class="box-inherit" xbl:inherits="align,dir,pack,orient"
-                    align="center" pack="center" flex="1">
-            <xul:image class="button-icon" xbl:inherits="src=image"/>
-            <xul:label class="button-text" xbl:inherits="value=label,accesskey,crop"/>
-          </xul:hbox>
-          <xul:dropmarker class="button-menu-dropmarker" xbl:inherits="open,disabled,label"/>
-        </children>
+        <xul:hbox class="box-inherit" xbl:inherits="align,dir,pack,orient"
+                  align="center" pack="center" flex="1">
+          <xul:image class="button-icon" xbl:inherits="src=image"/>
+          <xul:label class="button-text" xbl:inherits="value=label,accesskey,crop"/>
+        </xul:hbox>
+        <xul:dropmarker class="button-menu-dropmarker" xbl:inherits="open,disabled,label"/>
       </xul:hbox>
     </content>
 
     <handlers>
       <handler event="keypress" keycode="VK_RETURN" action="this.open = true;"/>
-      <handler event="keypress" key=" " action="this.open = true;"/>
+      <handler event="keypress" key=" ">
+      <![CDATA[
+        this.open = true;
+        // Prevent page from scrolling on the space key.
+        event.preventDefault();
+      ]]>
+      </handler>
     </handlers>
   </binding>
 
   <binding id="menu-button-base"
            extends="chrome://global/content/bindings/button.xml#button-base">
-    <implementation implements="nsIDOMEventListener">
+    <implementation>
       <constructor>
         this.init();
       </constructor>
@@ -291,12 +273,9 @@
           if (!v && this.buttondown) {
             this.buttondown = false;
             this._pendingActive = true;
-          }
-          else {
-            if (this._pendingActive) {
-              this.buttondown = true;
-              this._pendingActive = false;
-            }
+          } else if (this._pendingActive) {
+            this.buttondown = true;
+            this._pendingActive = false;
           }
 
           if (v)
@@ -341,8 +320,11 @@
           this.open = true;
       </handler>
       <handler event="keypress" key=" ">
-        if (event.originalTarget == this)
+        if (event.originalTarget == this) {
           this.open = true;
+          // Prevent page from scrolling on the space key.
+          event.preventDefault();
+        }
       </handler>
     </handlers>
   </binding>
@@ -364,15 +346,5 @@
       <xul:dropmarker class="button-menubutton-dropmarker" xbl:inherits="open,disabled,label"/>
     </content>
   </binding>
-
-  <binding id="button-image" display="xul:button"
-           extends="chrome://global/content/bindings/button.xml#button">
-    <content>
-      <xul:image class="button-image-icon" xbl:inherits="src=image"/>
-    </content>
-  </binding>
-
-  <binding id="button-repeat" display="xul:autorepeatbutton"
-           extends="chrome://global/content/bindings/button.xml#button"/>
 
 </bindings>

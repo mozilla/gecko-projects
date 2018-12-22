@@ -1,10 +1,19 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM")
+
 TEST_DIRS += ['test']
+
+XPIDL_SOURCES += [
+    'nsIScriptError.idl'
+]
+
+XPIDL_MODULE = 'dom_bindings'
 
 EXPORTS.ipc += [
     'ErrorIPCUtils.h',
@@ -12,6 +21,8 @@ EXPORTS.ipc += [
 
 EXPORTS.mozilla += [
     'ErrorResult.h',
+    'RootedOwningNonNull.h',
+    'RootedRefPtr.h',
 ]
 
 EXPORTS.mozilla.dom += [
@@ -27,18 +38,23 @@ EXPORTS.mozilla.dom += [
     'DOMString.h',
     'Errors.msg',
     'Exceptions.h',
+    'FakeString.h',
     'IterableIterator.h',
     'JSSlots.h',
-    'MozMap.h',
     'NonRefcountedDOMObject.h',
     'Nullable.h',
     'PrimitiveConversions.h',
+    'ReadableStream.h',
+    'Record.h',
     'RootedDictionary.h',
     'SimpleGlobalObject.h',
+    'SpiderMonkeyInterface.h',
     'StructuredClone.h',
     'ToJSValue.h',
     'TypedArray.h',
     'UnionMember.h',
+    'WebIDLGlobalNameHash.h',
+    'XrayExpandoClass.h',
 ]
 
 # Generated bindings reference *Binding.h, not mozilla/dom/*Binding.h. And,
@@ -54,8 +70,6 @@ LOCAL_INCLUDES += [
 LOCAL_INCLUDES += [
     '/dom/base',
     '/dom/battery',
-    '/dom/bluetooth/common/webapi',
-    '/dom/camera',
     '/dom/canvas',
     '/dom/geolocation',
     '/dom/html',
@@ -63,7 +77,6 @@ LOCAL_INCLUDES += [
     '/dom/media/webaudio',
     '/dom/media/webspeech/recognition',
     '/dom/svg',
-    '/dom/workers',
     '/dom/xbl',
     '/dom/xml',
     '/dom/xslt/base',
@@ -71,13 +84,18 @@ LOCAL_INCLUDES += [
     '/dom/xul',
     '/js/xpconnect/src',
     '/js/xpconnect/wrappers',
+    '/layout/generic',
     '/layout/style',
     '/layout/xul/tree',
     '/media/mtransport',
     '/media/webrtc/',
     '/media/webrtc/signaling/src/common/time_profiling',
     '/media/webrtc/signaling/src/peerconnection',
+    '/media/webrtc/trunk/',
 ]
+
+DEFINES['GOOGLE_PROTOBUF_NO_RTTI'] = True
+DEFINES['GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER'] = True
 
 UNIFIED_SOURCES += [
     'BindingUtils.cpp',
@@ -87,8 +105,11 @@ UNIFIED_SOURCES += [
     'DOMJSProxyHandler.cpp',
     'Exceptions.cpp',
     'IterableIterator.cpp',
+    'nsScriptError.cpp',
+    'nsScriptErrorWithStack.cpp',
     'SimpleGlobalObject.cpp',
     'ToJSValue.cpp',
+    'WebIDLGlobalNameHash.cpp',
 ]
 
 SOURCES += [
@@ -100,10 +121,11 @@ SOURCES += [
 # rule stated in the test/ directory, but it's the only way this will work.
 # Test classes are only built in debug mode, and all tests requiring use of
 # them are only run in debug mode.
-if CONFIG['MOZ_DEBUG']:
+if CONFIG['MOZ_DEBUG'] and CONFIG['ENABLE_TESTS']:
     EXPORTS.mozilla.dom += [
         "test/TestFunctions.h",
         "test/TestInterfaceIterableDouble.h",
+        "test/TestInterfaceIterableDoubleUnion.h",
         "test/TestInterfaceIterableSingle.h",
         "test/TestInterfaceMaplike.h",
         "test/TestInterfaceMaplikeObject.h",
@@ -113,6 +135,7 @@ if CONFIG['MOZ_DEBUG']:
     UNIFIED_SOURCES += [
         "test/TestFunctions.cpp",
         "test/TestInterfaceIterableDouble.cpp",
+        "test/TestInterfaceIterableDoubleUnion.cpp",
         "test/TestInterfaceIterableSingle.cpp",
         "test/TestInterfaceMaplike.cpp",
         "test/TestInterfaceMaplikeObject.cpp",
@@ -122,24 +145,39 @@ if CONFIG['MOZ_DEBUG']:
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-if CONFIG['MOZ_AUDIO_CHANNEL_MANAGER']:
-    LOCAL_INCLUDES += [
-        '/dom/system/gonk',
-    ]
-
 FINAL_LIBRARY = 'xul'
 
 SPHINX_TREES['webidl'] = 'docs'
+
+with Files('docs/**'):
+    SCHEDULES.exclusive = ['docs']
+
 SPHINX_PYTHON_PACKAGE_DIRS += ['mozwebidlcodegen']
+
+with Files('mozwebidlcodegen/**.py'):
+    SCHEDULES.inclusive += ['docs']
 
 if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
     # This is needed for Window.webidl
     DEFINES['HAVE_SIDEBAR'] = True
 
 
-if CONFIG['MOZ_SIMPLEPUSH']:
-    DEFINES['MOZ_SIMPLEPUSH'] = True
-
-PYTHON_UNIT_TESTS += [
-    'mozwebidlcodegen/test/test_mozwebidlcodegen.py',
+PYTHON_UNITTEST_MANIFESTS += [
+    'mozwebidlcodegen/test/python.ini',
 ]
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']
+    # Suppress warnings in third-party code.
+    CXXFLAGS += [
+        '-Wno-maybe-uninitialized',
+    ]
+
+if CONFIG['COMPILE_ENVIRONMENT']:
+    GENERATED_FILES += ['CSS2Properties.webidl']
+    css_props = GENERATED_FILES['CSS2Properties.webidl']
+    css_props.script = 'GenerateCSS2PropertiesWebIDL.py:generate'
+    css_props.inputs = [
+        '/dom/webidl/CSS2Properties.webidl.in',
+        '!/layout/style/ServoCSSPropList.py',
+    ]

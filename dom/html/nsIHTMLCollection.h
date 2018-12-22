@@ -7,14 +7,14 @@
 #ifndef nsIHTMLCollection_h___
 #define nsIHTMLCollection_h___
 
-#include "nsIDOMHTMLCollection.h"
+#include "nsISupports.h"
+#include "nsStringFwd.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsWrapperCache.h"
-#include "js/GCAPI.h"
+#include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 
 class nsINode;
-class nsString;
 
 namespace mozilla {
 namespace dom {
@@ -30,7 +30,7 @@ class Element;
 /**
  * An internal interface
  */
-class nsIHTMLCollection : public nsIDOMHTMLCollection
+class nsIHTMLCollection : public nsISupports
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IHTMLCOLLECTION_IID)
@@ -40,15 +40,7 @@ public:
    */
   virtual nsINode* GetParentObject() = 0;
 
-  using nsIDOMHTMLCollection::Item;
-  using nsIDOMHTMLCollection::NamedItem;
-
-  uint32_t Length()
-  {
-    uint32_t length;
-    GetLength(&length);
-    return length;
-  }
+  virtual uint32_t Length() = 0;
   virtual mozilla::dom::Element* GetElementAt(uint32_t index) = 0;
   mozilla::dom::Element* Item(uint32_t index)
   {
@@ -69,15 +61,10 @@ public:
   {
     return GetFirstNamedElement(aName, aFound);
   }
-  bool NameIsEnumerable(const nsAString& aName)
-  {
-    return false;
-  }
   virtual mozilla::dom::Element*
   GetFirstNamedElement(const nsAString& aName, bool& aFound) = 0;
 
-  virtual void GetSupportedNames(unsigned aFlags,
-                                 nsTArray<nsString>& aNames) = 0;
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) = 0;
 
   JSObject* GetWrapperPreserveColor()
   {
@@ -91,9 +78,16 @@ public:
     }
     return obj;
   }
+  void PreserveWrapper(nsISupports* aScriptObjectHolder)
+  {
+    PreserveWrapperInternal(aScriptObjectHolder);
+  }
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) = 0;
 protected:
+  // Hook for calling nsWrapperCache::GetWrapperPreserveColor.
   virtual JSObject* GetWrapperPreserveColorInternal() = 0;
+  // Hook for calling nsWrapperCache::PreserveWrapper.
+  virtual void PreserveWrapperInternal(nsISupports* aScriptObjectHolder) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIHTMLCollection, NS_IHTMLCOLLECTION_IID)

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -21,10 +21,15 @@ LOCAL_INCLUDES += [
     '/js/src/ctypes',
 ]
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wshadow']
+# Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc.
+DisableStlWrapping()
+
+NO_PGO = True
 
 if CONFIG['COMPILE_ENVIRONMENT']:
     shared_library = '!%sjsctypes-test%s' % (CONFIG['DLL_PREFIX'], CONFIG['DLL_SUFFIX'])
     TEST_HARNESS_FILES.xpcshell.toolkit.components.ctypes.tests.unit += [shared_library]
     TEST_HARNESS_FILES.testing.mochitest.chrome.toolkit.components.ctypes.tests.chrome += [shared_library]
+
+if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
+    CXXFLAGS += ['-Wno-varargs']

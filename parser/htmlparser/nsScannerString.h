@@ -21,7 +21,7 @@
    * to live in xpcom/string.  Now that nsAString is limited to representing
    * only single fragment strings, nsSlidingString can no longer be used.
    *
-   * An advantage to this design is that it does not employ any virtual 
+   * An advantage to this design is that it does not employ any virtual
    * functions.
    *
    * This file uses SCC-style indenting in deference to the nsSlidingString
@@ -101,14 +101,17 @@ class nsScannerBufferList
       class Position
         {
           public:
+            Position()
+              : mBuffer(nullptr)
+              , mPosition(nullptr)
+            {
+            }
 
-            Position() {}
-            
             Position( Buffer* buffer, char16_t* position )
               : mBuffer(buffer)
               , mPosition(position)
               {}
-            
+
             inline
             explicit Position( const nsScannerIterator& aIter );
 
@@ -133,7 +136,7 @@ class nsScannerBufferList
       void  AddRef()  { ++mRefCnt; }
       void  Release() { if (--mRefCnt == 0) delete this; }
 
-      void  Append( Buffer* buf ) { mBuffers.insertBack(buf); } 
+      void  Append( Buffer* buf ) { mBuffers.insertBack(buf); }
       void  InsertAfter( Buffer* buf, Buffer* prev ) { prev->setNext(buf); }
       void  SplitBuffer( const Position& );
       void  DiscardUnreferencedPrefix( Buffer* );
@@ -198,7 +201,7 @@ class nsScannerSubstring
       void Rebind( const nsScannerSubstring&, const nsScannerIterator&, const nsScannerIterator& );
       void Rebind( const nsAString& );
 
-      const nsSubstring& AsString() const;
+      const nsAString& AsString() const;
 
       bool GetNextFragment( nsScannerFragment& ) const;
       bool GetPrevFragment( nsScannerFragment& ) const;
@@ -223,7 +226,7 @@ class nsScannerSubstring
               mBufferList->Release();
             }
         }
-      
+
       void init_range_from_buffer_list()
         {
           mStart.mBuffer = mBufferList->Head();
@@ -267,7 +270,6 @@ class nsScannerString : public nsScannerSubstring
         // any other way you want to do this?
 
       void UngetReadable(const nsAString& aReadable, const nsScannerIterator& aCurrentPosition);
-      void ReplaceCharacter(nsScannerIterator& aPosition, char16_t aChar);
   };
 
 
@@ -295,7 +297,7 @@ class nsScannerSharedSubstring
                               const nsScannerIterator& aEnd);
 
        // Get a mutable reference to this string
-      nsSubstring& writable()
+      nsAString& writable()
         {
           if (mBufferList)
             MakeMutable();
@@ -304,7 +306,7 @@ class nsScannerSharedSubstring
         }
 
         // Get a const reference to this string
-      const nsSubstring& str() const { return mString; }
+      const nsAString& str() const { return mString; }
 
     private:
       typedef nsScannerBufferList::Buffer Buffer;
@@ -341,7 +343,7 @@ class nsScannerIterator
       friend class nsScannerSharedSubstring;
 
     public:
-      nsScannerIterator() {}
+      // nsScannerIterator();                                       // auto-generate default constructor is OK
       // nsScannerIterator( const nsScannerIterator& );             // auto-generated copy-constructor OK
       // nsScannerIterator& operator=( const nsScannerIterator& );  // auto-generated copy-assignment operator OK
 
@@ -352,7 +354,7 @@ class nsScannerIterator
         {
           return mPosition;
         }
-      
+
       char16_t operator*() const
         {
           return *get();
@@ -468,7 +470,7 @@ struct nsCharSourceTraits<nsScannerIterator>
       {
         return iter.get();
       }
-    
+
     static
     void
     advance( nsScannerIterator& s, difference_type n )
@@ -594,7 +596,7 @@ RFindInReadable( const nsAString& aPattern,
 
 inline
 bool
-CaseInsensitiveFindInReadable( const nsAString& aPattern, 
+CaseInsensitiveFindInReadable( const nsAString& aPattern,
                                nsScannerIterator& aStart,
                                nsScannerIterator& aEnd )
   {

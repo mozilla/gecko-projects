@@ -5,31 +5,40 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaRecorder.h"
+
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "DOMMediaStream.h"
-#include "EncodedBufferCache.h"
+#include "GeckoProfiler.h"
 #include "MediaDecoder.h"
 #include "MediaEncoder.h"
-#include "mozilla/StaticPtr.h"
+#include "MediaStreamGraphImpl.h"
+#include "VideoUtils.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/dom/AudioStreamTrack.h"
 #include "mozilla/dom/BlobEvent.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/RecordErrorEvent.h"
+#include "mozilla/dom/MediaRecorderErrorEvent.h"
+#include "mozilla/dom/MutableBlobStorage.h"
 #include "mozilla/dom/VideoStreamTrack.h"
+#include "mozilla/media/MediaUtils.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/TaskQueue.h"
+#include "nsAutoPtr.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsContentTypeParser.h"
 #include "nsContentUtils.h"
+#include "nsDocShell.h"
 #include "nsError.h"
 #include "nsIDocument.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptError.h"
 #include "nsMimeTypes.h"
 #include "nsProxyRelease.h"
 #include "nsTArray.h"
-#include "GeckoProfiler.h"
-#include "nsContentTypeParser.h"
-#include "nsCharSeparatedTokenizer.h"
 
 #ifdef LOG
 #undef LOG
@@ -42,77 +51,121 @@ namespace mozilla {
 
 namespace dom {
 
+using namespace mozilla::media;
+
+/* static */ StaticRefPtr<nsIAsyncShutdownBlocker> gMediaRecorderShutdownBlocker;
+static nsTHashtable<nsRefPtrHashKey<MediaRecorder::Session>> gSessions;
+
 /**
-+ * MediaRecorderReporter measures memory being used by the Media Recorder.
-+ *
-+ * It is a singleton reporter and the single class object lives as long as at
-+ * least one Recorder is registered. In MediaRecorder, the reporter is unregistered
-+ * when it is destroyed.
-+ */
+ * MediaRecorderReporter measures memory being used by the Media Recorder.
+ *
+ * It is a singleton reporter and the single class object lives as long as at
+ * least one Recorder is registered. In MediaRecorder, the reporter is unregistered
+ * when it is destroyed.
+ */
 class MediaRecorderReporter final : public nsIMemoryReporter
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  MediaRecorderReporter() {};
-  static MediaRecorderReporter* UniqueInstance();
-  void InitMemoryReporter();
-
   static void AddMediaRecorder(MediaRecorder *aRecorder)
   {
-    GetRecorders().AppendElement(aRecorder);
+    if (!sUniqueInstance) {
+      sUniqueInstance = MakeAndAddRef<MediaRecorderReporter>();
+      RegisterWeakAsyncMemoryReporter(sUniqueInstance);
+    }
+    sUniqueInstance->mRecorders.AppendElement(aRecorder);
   }
 
   static void RemoveMediaRecorder(MediaRecorder *aRecorder)
   {
-    RecordersArray& recorders = GetRecorders();
-    recorders.RemoveElement(aRecorder);
-    if (recorders.IsEmpty()) {
+    if (!sUniqueInstance) {
+      return;
+    }
+
+    sUniqueInstance->mRecorders.RemoveElement(aRecorder);
+    if (sUniqueInstance->mRecorders.IsEmpty()) {
+      UnregisterWeakMemoryReporter(sUniqueInstance);
       sUniqueInstance = nullptr;
     }
   }
 
-  NS_METHOD
+  NS_DECL_THREADSAFE_ISUPPORTS
+
+  MediaRecorderReporter() = default;
+
+  NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport,
                  nsISupports* aData, bool aAnonymize) override
   {
-    int64_t amount = 0;
-    RecordersArray& recorders = GetRecorders();
-    for (size_t i = 0; i < recorders.Length(); ++i) {
-      amount += recorders[i]->SizeOfExcludingThis(MallocSizeOf);
+    nsTArray<RefPtr<MediaRecorder::SizeOfPromise>> promises;
+    for (const RefPtr<MediaRecorder>& recorder: mRecorders) {
+      promises.AppendElement(recorder->SizeOfExcludingThis(MallocSizeOf));
     }
 
-  #define MEMREPORT(_path, _amount, _desc)                                    \
-    do {                                                                      \
-      nsresult rv;                                                            \
-      rv = aHandleReport->Callback(EmptyCString(), NS_LITERAL_CSTRING(_path), \
-                                   KIND_HEAP, UNITS_BYTES, _amount,           \
-                                   NS_LITERAL_CSTRING(_desc), aData);         \
-      NS_ENSURE_SUCCESS(rv, rv);                                              \
-    } while (0)
+    nsCOMPtr<nsIHandleReportCallback> handleReport = aHandleReport;
+    nsCOMPtr<nsISupports> data = aData;
+    MediaRecorder::SizeOfPromise::All(GetCurrentThreadSerialEventTarget(), promises)
+      ->Then(GetCurrentThreadSerialEventTarget(), __func__,
+          [handleReport, data](const nsTArray<size_t>& sizes) {
+            nsCOMPtr<nsIMemoryReporterManager> manager =
+              do_GetService("@mozilla.org/memory-reporter-manager;1");
+            if (!manager) {
+              return;
+            }
 
-    MEMREPORT("explicit/media/recorder", amount,
-              "Memory used by media recorder.");
+            size_t sum = 0;
+            for (const size_t& size : sizes) {
+              sum += size;
+            }
+
+            handleReport->Callback(
+              EmptyCString(), NS_LITERAL_CSTRING("explicit/media/recorder"),
+              KIND_HEAP, UNITS_BYTES, sum,
+              NS_LITERAL_CSTRING("Memory used by media recorder."),
+              data);
+
+            manager->EndReport();
+          },
+          [](size_t) { MOZ_CRASH("Unexpected reject"); });
 
     return NS_OK;
   }
 
 private:
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
-  virtual ~MediaRecorderReporter();
-  static StaticRefPtr<MediaRecorderReporter> sUniqueInstance;
-  typedef nsTArray<MediaRecorder*> RecordersArray;
-  static RecordersArray& GetRecorders()
+
+  virtual ~MediaRecorderReporter()
   {
-    return UniqueInstance()->mRecorders;
+    MOZ_ASSERT(mRecorders.IsEmpty(), "All recorders must have been removed");
   }
-  RecordersArray mRecorders;
+
+  static StaticRefPtr<MediaRecorderReporter> sUniqueInstance;
+
+  nsTArray<RefPtr<MediaRecorder>> mRecorders;
 };
 NS_IMPL_ISUPPORTS(MediaRecorderReporter, nsIMemoryReporter);
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaRecorder, DOMEventTargetHelper,
-                                   mDOMStream, mAudioNode)
+NS_IMPL_CYCLE_COLLECTION_CLASS(MediaRecorder)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaRecorder)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MediaRecorder,
+                                                  DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMStream)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioNode)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSecurityDomException)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUnknownDomException)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaRecorder,
+                                                DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDOMStream)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAudioNode)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSecurityDomException)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mUnknownDomException)
+  tmp->UnRegisterActivityObserver();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaRecorder)
   NS_INTERFACE_MAP_ENTRY(nsIDocumentActivity)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
@@ -122,11 +175,11 @@ NS_IMPL_RELEASE_INHERITED(MediaRecorder, DOMEventTargetHelper)
 /**
  * Session is an object to represent a single recording event.
  * In original design, all recording context is stored in MediaRecorder, which causes
- * a problem if someone calls MediaRecoder::Stop and MedaiRecorder::Start quickly.
+ * a problem if someone calls MediaRecorder::Stop and MediaRecorder::Start quickly.
  * To prevent blocking main thread, media encoding is executed in a second thread,
  * named as Read Thread. For the same reason, we do not wait Read Thread shutdown in
- * MediaRecorder::Stop. If someone call MediaRecoder::Start before Read Thread shutdown,
- * the same recording context in MediaRecoder might be access by two Reading Threads,
+ * MediaRecorder::Stop. If someone call MediaRecorder::Start before Read Thread shutdown,
+ * the same recording context in MediaRecorder might be access by two Reading Threads,
  * which cause a  problem.
  * In the new design, we put recording context into Session object, including Read
  * Thread.  Each Session has its own recording context and Read Thread, problem is been
@@ -147,60 +200,129 @@ NS_IMPL_RELEASE_INHERITED(MediaRecorder, DOMEventTargetHelper)
  *
  * Lifetime of MediaRecorder and Session objects.
  * 1) MediaRecorder creates a Session in MediaRecorder::Start function and holds
- *    a reference to Session. Then the Session registers itself to
- *    ShutdownObserver and also holds a reference to MediaRecorder.
+ *    a reference to Session. Then the Session registers itself to a
+ *    ShutdownBlocker and also holds a reference to MediaRecorder.
  *    Therefore, the reference dependency in gecko is:
- *    ShutdownObserver -> Session <-> MediaRecorder, note that there is a cycle
+ *    ShutdownBlocker -> Session <-> MediaRecorder, note that there is a cycle
  *    reference between Session and MediaRecorder.
  * 2) A Session is destroyed in DestroyRunnable after MediaRecorder::Stop being called
  *    _and_ all encoded media data been passed to OnDataAvailable handler.
  * 3) MediaRecorder::Stop is called by user or the document is going to
  *    inactive or invisible.
  */
-class MediaRecorder::Session: public nsIObserver
+class MediaRecorder::Session: public PrincipalChangeObserver<MediaStreamTrack>,
+                              public DOMMediaStream::TrackListener
 {
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Session)
 
   // Main thread task.
   // Create a blob event and send back to client.
-  class PushBlobRunnable : public nsRunnable
+  class PushBlobRunnable : public Runnable
+                         , public MutableBlobStorageCallback
   {
   public:
-    explicit PushBlobRunnable(Session* aSession)
-      : mSession(aSession)
+    // We need to always declare refcounting because
+    // MutableBlobStorageCallback has pure-virtual refcounting.
+    NS_DECL_ISUPPORTS_INHERITED
+
+    // aDestroyRunnable can be null. If it's not, it will be dispatched after
+    // the PushBlobRunnable::Run().
+    PushBlobRunnable(Session* aSession, Runnable* aDestroyRunnable)
+      : Runnable("dom::MediaRecorder::Session::PushBlobRunnable")
+      , mSession(aSession)
+      , mDestroyRunnable(aDestroyRunnable)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.PushBlobRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
 
+      mSession->GetBlobWhenReady(this);
+      return NS_OK;
+    }
+
+    void
+    BlobStoreCompleted(MutableBlobStorage* aBlobStorage, Blob* aBlob,
+                       nsresult aRv) override
+    {
       RefPtr<MediaRecorder> recorder = mSession->mRecorder;
       if (!recorder) {
-        return NS_OK;
+        return;
       }
 
-      nsresult rv = recorder->CreateAndDispatchBlobEvent(mSession->GetEncodedData());
+      if (NS_FAILED(aRv)) {
+        mSession->DoSessionEndTask(aRv);
+        return;
+      }
+
+      nsresult rv = recorder->CreateAndDispatchBlobEvent(aBlob);
       if (NS_FAILED(rv)) {
-        recorder->NotifyError(rv);
+        mSession->DoSessionEndTask(aRv);
+      }
+
+      if (mDestroyRunnable &&
+          NS_FAILED(NS_DispatchToMainThread(mDestroyRunnable.forget()))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread failed");
+      }
+    }
+
+  private:
+    ~PushBlobRunnable() = default;
+
+    RefPtr<Session> mSession;
+
+    // The generation of the blob is async. In order to avoid dispatching the
+    // DestroyRunnable before pushing the blob event, we store the runnable
+    // here.
+    RefPtr<Runnable> mDestroyRunnable;
+  };
+
+  class StoreEncodedBufferRunnable final : public Runnable
+  {
+    RefPtr<Session> mSession;
+    nsTArray<nsTArray<uint8_t>> mBuffer;
+
+  public:
+    StoreEncodedBufferRunnable(Session* aSession,
+                               nsTArray<nsTArray<uint8_t>>&& aBuffer)
+      : Runnable("StoreEncodedBufferRunnable")
+      , mSession(aSession)
+      , mBuffer(std::move(aBuffer))
+    {}
+
+    NS_IMETHOD
+    Run() override
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+      mSession->MaybeCreateMutableBlobStorage();
+      for (uint32_t i = 0; i < mBuffer.Length(); i++) {
+        if (mBuffer[i].IsEmpty()) {
+          continue;
+        }
+
+        nsresult rv = mSession->mMutableBlobStorage->Append(mBuffer[i].Elements(),
+                                                            mBuffer[i].Length());
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          mSession->DoSessionEndTask(rv);
+          break;
+        }
       }
 
       return NS_OK;
     }
-
-  private:
-    RefPtr<Session> mSession;
   };
 
   // Notify encoder error, run in main thread task. (Bug 1095381)
-  class EncoderErrorNotifierRunnable : public nsRunnable
+  class EncoderErrorNotifierRunnable : public Runnable
   {
   public:
     explicit EncoderErrorNotifierRunnable(Session* aSession)
-      : mSession(aSession)
+      : Runnable("dom::MediaRecorder::Session::EncoderErrorNotifierRunnable")
+      , mSession(aSession)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.ErrorNotifyRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
@@ -210,9 +332,7 @@ class MediaRecorder::Session: public nsIObserver
         return NS_OK;
       }
 
-      if (mSession->IsEncoderError()) {
-        recorder->NotifyError(NS_ERROR_UNEXPECTED);
-      }
+      recorder->NotifyError(NS_ERROR_UNEXPECTED);
       return NS_OK;
     }
 
@@ -221,15 +341,15 @@ class MediaRecorder::Session: public nsIObserver
   };
 
   // Fire start event and set mimeType, run in main thread task.
-  class DispatchStartEventRunnable : public nsRunnable
+  class DispatchStartEventRunnable : public Runnable
   {
   public:
-    DispatchStartEventRunnable(Session* aSession, const nsAString & aEventName)
-      : mSession(aSession)
-      , mEventName(aEventName)
+    explicit DispatchStartEventRunnable(Session* aSession)
+      : Runnable("dom::MediaRecorder::Session::DispatchStartEventRunnable")
+      , mSession(aSession)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.DispatchStartEventRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
@@ -237,49 +357,8 @@ class MediaRecorder::Session: public nsIObserver
       NS_ENSURE_TRUE(mSession->mRecorder, NS_OK);
       RefPtr<MediaRecorder> recorder = mSession->mRecorder;
 
-      recorder->SetMimeType(mSession->mMimeType);
-      recorder->DispatchSimpleEvent(mEventName);
+      recorder->DispatchSimpleEvent(NS_LITERAL_STRING("start"));
 
-      return NS_OK;
-    }
-
-  private:
-    RefPtr<Session> mSession;
-    nsString mEventName;
-  };
-
-  // Record thread task and it run in Media Encoder thread.
-  // Fetch encoded Audio/Video data from MediaEncoder.
-  class ExtractRunnable : public nsRunnable
-  {
-  public:
-    explicit ExtractRunnable(Session* aSession)
-      : mSession(aSession) {}
-
-    ~ExtractRunnable()
-    {}
-
-    NS_IMETHODIMP Run()
-    {
-      MOZ_ASSERT(NS_GetCurrentThread() == mSession->mReadThread);
-
-      LOG(LogLevel::Debug, ("Session.ExtractRunnable shutdown = %d", mSession->mEncoder->IsShutdown()));
-      if (!mSession->mEncoder->IsShutdown()) {
-        mSession->Extract(false);
-        nsCOMPtr<nsIRunnable> event = new ExtractRunnable(mSession);
-        if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-          NS_WARNING("Failed to dispatch ExtractRunnable to encoder thread");
-        }
-      } else {
-        // Flush out remaining encoded data.
-        mSession->Extract(true);
-        if (mSession->mIsRegisterProfiler)
-           profiler_unregister_thread();
-        if (NS_FAILED(NS_DispatchToMainThread(
-                        new DestroyRunnable(mSession)))) {
-          MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
-        }
-      }
       return NS_OK;
     }
 
@@ -287,45 +366,41 @@ class MediaRecorder::Session: public nsIObserver
     RefPtr<Session> mSession;
   };
 
-  // For Ensure recorder has tracks to record.
-  class TracksAvailableCallback : public DOMMediaStream::OnTracksAvailableCallback
+  // To ensure that MediaRecorder has tracks to record.
+  class TracksAvailableCallback : public OnTracksAvailableCallback
   {
   public:
     explicit TracksAvailableCallback(Session *aSession)
      : mSession(aSession) {}
+
     virtual void NotifyTracksAvailable(DOMMediaStream* aStream)
     {
-      uint8_t trackTypes = 0;
-      nsTArray<RefPtr<mozilla::dom::AudioStreamTrack>> audioTracks;
-      aStream->GetAudioTracks(audioTracks);
-      if (!audioTracks.IsEmpty()) {
-        trackTypes |= ContainerWriter::CREATE_AUDIO_TRACK;
-      }
-
-      nsTArray<RefPtr<mozilla::dom::VideoStreamTrack>> videoTracks;
-      aStream->GetVideoTracks(videoTracks);
-      if (!videoTracks.IsEmpty()) {
-        trackTypes |= ContainerWriter::CREATE_VIDEO_TRACK;
-      }
-
-      LOG(LogLevel::Debug, ("Session.NotifyTracksAvailable track type = (%d)", trackTypes));
-      mSession->InitEncoder(trackTypes);
+      mSession->MediaStreamReady(aStream);
     }
   private:
     RefPtr<Session> mSession;
   };
   // Main thread task.
   // To delete RecordingSession object.
-  class DestroyRunnable : public nsRunnable
+  class DestroyRunnable : public Runnable
   {
   public:
     explicit DestroyRunnable(Session* aSession)
-      : mSession(aSession) {}
-
-    NS_IMETHODIMP Run()
+      : Runnable("dom::MediaRecorder::Session::DestroyRunnable")
+      , mSession(aSession)
     {
-      LOG(LogLevel::Debug, ("Session.DestroyRunnable session refcnt = (%d) stopIssued %d s=(%p)",
-                         (int)mSession->mRefCnt, mSession->mStopIssued, mSession.get()));
+    }
+
+    explicit DestroyRunnable(already_AddRefed<Session> aSession)
+      : Runnable("dom::MediaRecorder::Session::DestroyRunnable")
+      , mSession(aSession)
+    {
+    }
+
+    NS_IMETHOD Run() override
+    {
+      LOG(LogLevel::Debug, ("Session.DestroyRunnable session refcnt = (%d) s=(%p)",
+                            static_cast<int>(mSession->mRefCnt), mSession.get()));
       MOZ_ASSERT(NS_IsMainThread() && mSession);
       RefPtr<MediaRecorder> recorder = mSession->mRecorder;
       if (!recorder) {
@@ -337,21 +412,39 @@ class MediaRecorder::Session: public nsIObserver
       // MediaRecorder is not associated with this Session anymore, then, it's
       // safe to delete this Session.
       // Also avoid to run if this session already call stop before
-      if (!mSession->mStopIssued) {
-        ErrorResult result;
-        mSession->mStopIssued = true;
-        recorder->Stop(result);
-        if (NS_FAILED(NS_DispatchToMainThread(new DestroyRunnable(mSession)))) {
+      if (mSession->mRunningState.isOk() &&
+          mSession->mRunningState.unwrap() != RunningState::Stopping &&
+          mSession->mRunningState.unwrap() != RunningState::Stopped) {
+        recorder->StopForSessionDestruction();
+        if (NS_FAILED(NS_DispatchToMainThread(new DestroyRunnable(mSession.forget())))) {
           MOZ_ASSERT(false, "NS_DispatchToMainThread failed");
         }
         return NS_OK;
+      }
+
+      if (mSession->mRunningState.isOk()) {
+        mSession->mRunningState = RunningState::Stopped;
       }
 
       // Dispatch stop event and clear MIME type.
       mSession->mMimeType = NS_LITERAL_STRING("");
       recorder->SetMimeType(mSession->mMimeType);
       recorder->DispatchSimpleEvent(NS_LITERAL_STRING("stop"));
-      mSession->BreakCycle();
+
+      RefPtr<Session> session = mSession.forget();
+      session->Shutdown()->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [session]() {
+          gSessions.RemoveEntry(session);
+          if (gSessions.Count() == 0 &&
+              gMediaRecorderShutdownBlocker) {
+            // All sessions finished before shutdown, no need to keep the blocker.
+            RefPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
+            barrier->RemoveBlocker(gMediaRecorderShutdownBlocker);
+            gMediaRecorderShutdownBlocker = nullptr;
+          }
+        },
+        []() { MOZ_CRASH("Not reached"); });
       return NS_OK;
     }
 
@@ -360,9 +453,59 @@ class MediaRecorder::Session: public nsIObserver
     RefPtr<Session> mSession;
   };
 
+  class EncoderListener : public MediaEncoderListener
+  {
+  public:
+    EncoderListener(TaskQueue* aEncoderThread, Session* aSession)
+      : mEncoderThread(aEncoderThread)
+      , mSession(aSession)
+    {}
+
+    void Forget()
+    {
+      MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+      mSession = nullptr;
+    }
+
+    void Initialized() override
+    {
+      MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+      if (mSession) {
+        mSession->MediaEncoderInitialized();
+      }
+    }
+
+    void DataAvailable() override
+    {
+      MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+      if (mSession) {
+        mSession->MediaEncoderDataAvailable();
+      }
+    }
+
+    void Error() override
+    {
+      MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+      if (mSession) {
+        mSession->MediaEncoderError();
+      }
+    }
+
+    void Shutdown() override
+    {
+      MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+      if (mSession) {
+        mSession->MediaEncoderShutdown();
+      }
+    }
+
+  protected:
+    RefPtr<TaskQueue> mEncoderThread;
+    RefPtr<Session> mSession;
+  };
+
   friend class EncoderErrorNotifierRunnable;
   friend class PushBlobRunnable;
-  friend class ExtractRunnable;
   friend class DestroyRunnable;
   friend class TracksAvailableCallback;
 
@@ -370,17 +513,44 @@ public:
   Session(MediaRecorder* aRecorder, int32_t aTimeSlice)
     : mRecorder(aRecorder)
     , mTimeSlice(aTimeSlice)
-    , mStopIssued(false)
-    , mIsStartEventFired(false)
-    , mIsRegisterProfiler(false)
-    , mNeedSessionEndTask(true)
+    , mRunningState(RunningState::Idling)
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    uint32_t maxMem = Preferences::GetUint("media.recorder.max_memory",
-                                           MAX_ALLOW_MEMORY_BUFFER);
-    mEncodedBufferCache = new EncodedBufferCache(maxMem);
+    mMaxMemory = Preferences::GetUint("media.recorder.max_memory",
+                                      MAX_ALLOW_MEMORY_BUFFER);
     mLastBlobTimeStamp = TimeStamp::Now();
+  }
+
+  void PrincipalChanged(MediaStreamTrack* aTrack) override
+  {
+    NS_ASSERTION(mMediaStreamTracks.Contains(aTrack),
+                 "Principal changed for unrecorded track");
+    if (!MediaStreamTracksPrincipalSubsumes()) {
+      DoSessionEndTask(NS_ERROR_DOM_SECURITY_ERR);
+    }
+  }
+
+  void NotifyTrackAdded(const RefPtr<MediaStreamTrack>& aTrack) override
+  {
+    LOG(LogLevel::Warning, ("Session.NotifyTrackAdded %p Raising error due to track set change", this));
+    DoSessionEndTask(NS_ERROR_ABORT);
+  }
+
+  void NotifyTrackRemoved(const RefPtr<MediaStreamTrack>& aTrack) override
+  {
+    if (aTrack->Ended()) {
+      // TrackEncoder will pickup tracks that end itself.
+      return;
+    }
+
+    MOZ_ASSERT(mEncoder);
+    if (mEncoder) {
+      mEncoder->RemoveMediaStreamTrack(aTrack);
+    }
+
+    LOG(LogLevel::Warning, ("Session.NotifyTrackRemoved %p Raising error due to track set change", this));
+    DoSessionEndTask(NS_ERROR_ABORT);
   }
 
   void Start()
@@ -388,21 +558,53 @@ public:
     LOG(LogLevel::Debug, ("Session.Start %p", this));
     MOZ_ASSERT(NS_IsMainThread());
 
-    SetupStreams();
+    DOMMediaStream* domStream = mRecorder->Stream();
+    if (domStream) {
+      // The callback reports back when tracks are available and can be
+      // attached to MediaEncoder. This allows `recorder.start()` before any tracks are available.
+      // We have supported this historically and have mochitests assuming this behavior.
+      TracksAvailableCallback* tracksAvailableCallback = new TracksAvailableCallback(this);
+      domStream->OnTracksAvailable(tracksAvailableCallback);
+      return;
+    }
+
+    if (mRecorder->mAudioNode) {
+      // Check that we may access the audio node's content.
+      if (!AudioNodePrincipalSubsumes()) {
+        LOG(LogLevel::Warning, ("Session.Start AudioNode principal check failed"));
+        DoSessionEndTask(NS_ERROR_DOM_SECURITY_ERR);
+        return;
+      }
+
+      TrackRate trackRate = mRecorder->mAudioNode->Context()->Graph()->GraphRate();
+
+      // Web Audio node has only audio.
+      InitEncoder(ContainerWriter::CREATE_AUDIO_TRACK, trackRate);
+      return;
+    }
+
+    MOZ_ASSERT(false, "Unknown source");
   }
 
   void Stop()
   {
     LOG(LogLevel::Debug, ("Session.Stop %p", this));
     MOZ_ASSERT(NS_IsMainThread());
-    mStopIssued = true;
-    CleanupStreams();
-    if (mNeedSessionEndTask) {
-      LOG(LogLevel::Debug, ("Session.Stop mNeedSessionEndTask %p", this));
+
+    if (mEncoder) {
+      mEncoder->Stop();
+    }
+
+    if (mRunningState.isOk() &&
+        mRunningState.unwrap() == RunningState::Idling) {
+      LOG(LogLevel::Debug, ("Session.Stop Explicit end task %p", this));
       // End the Session directly if there is no ExtractRunnable.
       DoSessionEndTask(NS_OK);
+    } else if (mRunningState.isOk() &&
+               (mRunningState.unwrap() == RunningState::Starting ||
+                mRunningState.unwrap() == RunningState::Running)) {
+      mRunningState = RunningState::Stopping;
     }
-    nsContentUtils::UnregisterShutdownObserver(this);
   }
 
   nsresult Pause()
@@ -410,12 +612,11 @@ public:
     LOG(LogLevel::Debug, ("Session.Pause"));
     MOZ_ASSERT(NS_IsMainThread());
 
-    NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
-    mTrackUnionStream->Suspend();
-    if (mEncoder) {
-      mEncoder->Suspend();
+    if (!mEncoder) {
+      return NS_ERROR_FAILURE;
     }
 
+    mEncoder->Suspend(TimeStamp::Now());
     return NS_OK;
   }
 
@@ -424,12 +625,11 @@ public:
     LOG(LogLevel::Debug, ("Session.Resume"));
     MOZ_ASSERT(NS_IsMainThread());
 
-    NS_ENSURE_TRUE(mTrackUnionStream, NS_ERROR_FAILURE);
-    if (mEncoder) {
-      mEncoder->Resume();
+    if (!mEncoder) {
+      return NS_ERROR_FAILURE;
     }
-    mTrackUnionStream->Resume();
 
+    mEncoder->Resume(TimeStamp::Now());
     return NS_OK;
   }
 
@@ -438,8 +638,7 @@ public:
     LOG(LogLevel::Debug, ("Session.RequestData"));
     MOZ_ASSERT(NS_IsMainThread());
 
-    if (NS_FAILED(NS_DispatchToMainThread(new EncoderErrorNotifierRunnable(this))) ||
-        NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
+    if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, nullptr)))) {
       MOZ_ASSERT(false, "RequestData NS_DispatchToMainThread failed");
       return NS_ERROR_FAILURE;
     }
@@ -447,356 +646,607 @@ public:
     return NS_OK;
   }
 
-  already_AddRefed<nsIDOMBlob> GetEncodedData()
+  void
+  MaybeCreateMutableBlobStorage()
+  {
+    if (!mMutableBlobStorage) {
+      mMutableBlobStorage =
+        new MutableBlobStorage(MutableBlobStorage::eCouldBeInTemporaryFile,
+                               nullptr, mMaxMemory);
+    }
+  }
+
+  void
+  GetBlobWhenReady(MutableBlobStorageCallback* aCallback)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    return mEncodedBufferCache->ExtractBlob(mRecorder->GetParentObject(),
-                                            mMimeType);
+
+    MaybeCreateMutableBlobStorage();
+    mMutableBlobStorage->GetBlobWhenReady(mRecorder->GetParentObject(),
+                                          NS_ConvertUTF16toUTF8(mMimeType),
+                                          aCallback);
+    mMutableBlobStorage = nullptr;
   }
 
-  bool IsEncoderError()
+  RefPtr<SizeOfPromise>
+  SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   {
-    if (mEncoder && mEncoder->HasError()) {
-      return true;
+    MOZ_ASSERT(NS_IsMainThread());
+    size_t encodedBufferSize = mMutableBlobStorage
+                                 ? mMutableBlobStorage->SizeOfCurrentMemoryBuffer()
+                                 : 0;
+
+    if (!mEncoder) {
+      return SizeOfPromise::CreateAndResolve(encodedBufferSize, __func__);
     }
-    return false;
-  }
 
-  size_t
-  SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-  {
-    return (mEncoder ?  mEncoder->SizeOfExcludingThis(aMallocSizeOf) : 0);
+    auto& encoder = mEncoder;
+    return InvokeAsync(mEncoderThread, __func__,
+      [encoder, encodedBufferSize, aMallocSizeOf]() {
+        return SizeOfPromise::CreateAndResolve(
+          encodedBufferSize + encoder->SizeOfExcludingThis(aMallocSizeOf), __func__);
+      });
   }
-
 
 private:
-  // Only DestroyRunnable is allowed to delete Session object.
+  // Only DestroyRunnable is allowed to delete Session object on main thread.
   virtual ~Session()
   {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(mShutdownPromise);
     LOG(LogLevel::Debug, ("Session.~Session (%p)", this));
-    CleanupStreams();
   }
-  // Pull encoded media data from MediaEncoder and put into EncodedBufferCache.
+  // Pull encoded media data from MediaEncoder and put into MutableBlobStorage.
   // Destroy this session object in the end of this function.
   // If the bool aForceFlush is true, we will force to dispatch a
   // PushBlobRunnable to main thread.
-  void Extract(bool aForceFlush)
+  void Extract(bool aForceFlush, Runnable* aDestroyRunnable)
   {
-    MOZ_ASSERT(NS_GetCurrentThread() == mReadThread);
+    MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+
     LOG(LogLevel::Debug, ("Session.Extract %p", this));
 
-    if (!mIsRegisterProfiler) {
-      char aLocal;
-      profiler_register_thread("Media_Encoder", &aLocal);
-      mIsRegisterProfiler = true;
-    }
-
-    PROFILER_LABEL("MediaRecorder", "Session Extract",
-      js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("MediaRecorder::Session::Extract", OTHER);
 
     // Pull encoded media data from MediaEncoder
     nsTArray<nsTArray<uint8_t> > encodedBuf;
-    mEncoder->GetEncodedData(&encodedBuf, mMimeType);
+    nsresult rv = mEncoder->GetEncodedData(&encodedBuf);
+    if (NS_FAILED(rv)) {
+      MOZ_RELEASE_ASSERT(encodedBuf.IsEmpty());
+      // Even if we failed to encode more data, it might be time to push a blob
+      // with already encoded data.
+    }
 
     // Append pulled data into cache buffer.
-    for (uint32_t i = 0; i < encodedBuf.Length(); i++) {
-      if (!encodedBuf[i].IsEmpty()) {
-        mEncodedBufferCache->AppendBuffer(encodedBuf[i]);
-        // Fire the start event when encoded data is available.
-        if (!mIsStartEventFired) {
-          NS_DispatchToMainThread(
-            new DispatchStartEventRunnable(this, NS_LITERAL_STRING("start")));
-          mIsStartEventFired = true;
-        }
-      }
-    }
+    NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
+                                                           std::move(encodedBuf)));
 
     // Whether push encoded data back to onDataAvailable automatically or we
     // need a flush.
-    bool pushBlob = false;
-    if ((mTimeSlice > 0) &&
-        ((TimeStamp::Now()-mLastBlobTimeStamp).ToMilliseconds() > mTimeSlice)) {
+    bool pushBlob = aForceFlush;
+    if (!pushBlob &&
+        mTimeSlice > 0 &&
+        (TimeStamp::Now()-mLastBlobTimeStamp).ToMilliseconds() > mTimeSlice) {
       pushBlob = true;
     }
-    if (pushBlob || aForceFlush) {
-      // Fire the start event before the blob.
-      if (!mIsStartEventFired) {
-        NS_DispatchToMainThread(
-          new DispatchStartEventRunnable(this, NS_LITERAL_STRING("start")));
-        mIsStartEventFired = true;
-      }
-      if (NS_FAILED(NS_DispatchToMainThread(new EncoderErrorNotifierRunnable(this)))) {
-        MOZ_ASSERT(false, "NS_DispatchToMainThread EncoderErrorNotifierRunnable failed");
-      }
-      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
+    if (pushBlob) {
+      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, aDestroyRunnable)))) {
         MOZ_ASSERT(false, "NS_DispatchToMainThread PushBlobRunnable failed");
       } else {
         mLastBlobTimeStamp = TimeStamp::Now();
       }
+    } else if (aDestroyRunnable) {
+      if (NS_FAILED(NS_DispatchToMainThread(aDestroyRunnable))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
+      }
     }
   }
 
-  // Bind media source with MediaEncoder to receive raw media data.
-  void SetupStreams()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
+  void MediaStreamReady(DOMMediaStream* aStream) {
+    MOZ_RELEASE_ASSERT(aStream);
 
-    // Create a Track Union Stream
-    MediaStreamGraph* gm = mRecorder->GetSourceMediaStream()->Graph();
-    mTrackUnionStream = gm->CreateTrackUnionStream(nullptr);
-    MOZ_ASSERT(mTrackUnionStream, "CreateTrackUnionStream failed");
-
-    mTrackUnionStream->SetAutofinish(true);
-
-    // Bind this Track Union Stream with Source Media.
-    mInputPort = mTrackUnionStream->AllocateInputPort(mRecorder->GetSourceMediaStream());
-
-    DOMMediaStream* domStream = mRecorder->Stream();
-    if (domStream) {
-      // Get the track type hint from DOM media stream.
-      TracksAvailableCallback* tracksAvailableCallback = new TracksAvailableCallback(this);
-      domStream->OnTracksAvailable(tracksAvailableCallback);
-    } else {
-      // Web Audio node has only audio.
-      InitEncoder(ContainerWriter::CREATE_AUDIO_TRACK);
+    if (!mRunningState.isOk() || mRunningState.unwrap() != RunningState::Idling) {
+      return;
     }
+
+    mMediaStream = aStream;
+    aStream->RegisterTrackListener(this);
+
+    nsTArray<RefPtr<mozilla::dom::MediaStreamTrack>> tracks;
+    aStream->GetTracks(tracks);
+    uint8_t trackTypes = 0;
+    int32_t audioTracks = 0;
+    int32_t videoTracks = 0;
+    for (auto& track : tracks) {
+      if (track->Ended()) {
+        continue;
+      }
+
+      ConnectMediaStreamTrack(*track);
+
+      if (track->AsAudioStreamTrack()) {
+        ++audioTracks;
+        trackTypes |= ContainerWriter::CREATE_AUDIO_TRACK;
+      } else if (track->AsVideoStreamTrack()) {
+        ++videoTracks;
+        trackTypes |= ContainerWriter::CREATE_VIDEO_TRACK;
+      } else {
+        MOZ_CRASH("Unexpected track type");
+      }
+    }
+
+    if (audioTracks > 1 ||
+        videoTracks > 1) {
+      // When MediaRecorder supports multiple tracks, we should set up a single
+      // MediaInputPort from the input stream, and let main thread check
+      // track principals async later.
+      nsPIDOMWindowInner* window = mRecorder->GetParentObject();
+      nsIDocument* document = window ? window->GetExtantDoc() : nullptr;
+      nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
+                                      NS_LITERAL_CSTRING("Media"),
+                                      document,
+                                      nsContentUtils::eDOM_PROPERTIES,
+                                      "MediaRecorderMultiTracksNotSupported");
+      DoSessionEndTask(NS_ERROR_ABORT);
+      return;
+    }
+
+    NS_ASSERTION(trackTypes != 0, "TracksAvailableCallback without any tracks available");
+
+    // Check that we may access the tracks' content.
+    if (!MediaStreamTracksPrincipalSubsumes()) {
+      LOG(LogLevel::Warning, ("Session.NotifyTracksAvailable MediaStreamTracks principal check failed"));
+      DoSessionEndTask(NS_ERROR_DOM_SECURITY_ERR);
+      return;
+    }
+
+    LOG(LogLevel::Debug, ("Session.NotifyTracksAvailable track type = (%d)", trackTypes));
+    InitEncoder(trackTypes, aStream->GraphRate());
   }
 
-  bool CheckPermission(const char* aType)
+  void ConnectMediaStreamTrack(MediaStreamTrack& aTrack)
   {
-    if (!mRecorder || !mRecorder->GetOwner()) {
+    for (auto& track : mMediaStreamTracks) {
+      if (track->AsAudioStreamTrack() && aTrack.AsAudioStreamTrack()) {
+        // We only allow one audio track. See bug 1276928.
+        return;
+      }
+      if (track->AsVideoStreamTrack() && aTrack.AsVideoStreamTrack()) {
+        // We only allow one video track. See bug 1276928.
+        return;
+      }
+    }
+    mMediaStreamTracks.AppendElement(&aTrack);
+    aTrack.AddPrincipalChangeObserver(this);
+  }
+
+  bool PrincipalSubsumes(nsIPrincipal* aPrincipal)
+  {
+    if (!mRecorder->GetOwner())
       return false;
-    }
-
     nsCOMPtr<nsIDocument> doc = mRecorder->GetOwner()->GetExtantDoc();
     if (!doc) {
       return false;
     }
-
-    uint16_t appStatus = nsIPrincipal::APP_STATUS_NOT_INSTALLED;
-    doc->NodePrincipal()->GetAppStatus(&appStatus);
-
-    // Certified applications can always assign AUDIO_3GPP
-    if (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED) {
-      return true;
-    }
-
-    nsCOMPtr<nsIPermissionManager> pm =
-       do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-
-    if (!pm) {
+    if (!aPrincipal) {
       return false;
     }
-
-    uint32_t perm = nsIPermissionManager::DENY_ACTION;
-    pm->TestExactPermissionFromPrincipal(doc->NodePrincipal(), aType, &perm);
-    return perm == nsIPermissionManager::ALLOW_ACTION;
+    bool subsumes;
+    if (NS_FAILED(doc->NodePrincipal()->Subsumes(aPrincipal, &subsumes))) {
+      return false;
+    }
+    return subsumes;
   }
 
-  void InitEncoder(uint8_t aTrackTypes)
+  bool MediaStreamTracksPrincipalSubsumes()
+  {
+    MOZ_ASSERT(mRecorder->mDOMStream);
+    nsCOMPtr<nsIPrincipal> principal = nullptr;
+    for (RefPtr<MediaStreamTrack>& track : mMediaStreamTracks) {
+      nsContentUtils::CombineResourcePrincipals(&principal, track->GetPrincipal());
+    }
+    return PrincipalSubsumes(principal);
+  }
+
+  bool AudioNodePrincipalSubsumes()
+  {
+    MOZ_ASSERT(mRecorder->mAudioNode);
+    nsIDocument* doc = mRecorder->mAudioNode->GetOwner()
+                       ? mRecorder->mAudioNode->GetOwner()->GetExtantDoc()
+                       : nullptr;
+    nsCOMPtr<nsIPrincipal> principal = doc ? doc->NodePrincipal() : nullptr;
+    return PrincipalSubsumes(principal);
+  }
+
+  void InitEncoder(uint8_t aTrackTypes, TrackRate aTrackRate)
   {
     LOG(LogLevel::Debug, ("Session.InitEncoder %p", this));
     MOZ_ASSERT(NS_IsMainThread());
 
-    if (!mRecorder) {
-      LOG(LogLevel::Debug, ("Session.InitEncoder failure, mRecorder is null %p", this));
+    if (!mRunningState.isOk() || mRunningState.unwrap() != RunningState::Idling) {
+      MOZ_ASSERT_UNREACHABLE("Double-init");
       return;
     }
+
+    // Create a TaskQueue to read encode media data from MediaEncoder.
+    MOZ_RELEASE_ASSERT(!mEncoderThread);
+    RefPtr<SharedThreadPool> pool =
+      GetMediaThreadPool(MediaThreadType::WEBRTC_DECODER);
+    if (!pool) {
+      LOG(LogLevel::Debug, ("Session.InitEncoder %p Failed to create "
+                            "MediaRecorderReadThread thread pool", this));
+      DoSessionEndTask(NS_ERROR_FAILURE);
+      return;
+    }
+
+    mEncoderThread =
+      MakeAndAddRef<TaskQueue>(pool.forget(), "MediaRecorderReadThread");
+
+    if (!gMediaRecorderShutdownBlocker) {
+      // Add a shutdown blocker so mEncoderThread can be shutdown async.
+      class Blocker : public ShutdownBlocker
+      {
+      public:
+        Blocker()
+          : ShutdownBlocker(NS_LITERAL_STRING(
+              "MediaRecorder::Session: shutdown"))
+        {}
+
+        NS_IMETHOD BlockShutdown(nsIAsyncShutdownClient*) override
+        {
+          // Distribute the global async shutdown blocker in a ticket. If there
+          // are zero graphs then shutdown is unblocked when we go out of scope.
+          RefPtr<ShutdownTicket> ticket =
+              MakeAndAddRef<ShutdownTicket>(gMediaRecorderShutdownBlocker);
+          gMediaRecorderShutdownBlocker = nullptr;
+
+          nsTArray<RefPtr<ShutdownPromise>> promises(gSessions.Count());
+          for (auto iter = gSessions.Iter(); !iter.Done(); iter.Next()) {
+            promises.AppendElement(iter.Get()->GetKey()->Shutdown());
+          }
+          gSessions.Clear();
+          ShutdownPromise::All(GetCurrentThreadSerialEventTarget(), promises)->Then(
+            GetCurrentThreadSerialEventTarget(), __func__,
+            [ticket]() mutable {
+              MOZ_ASSERT(gSessions.Count() == 0);
+              // Unblock shutdown
+              ticket = nullptr;
+            },
+            []() { MOZ_CRASH("Not reached"); });
+          return NS_OK;
+        }
+      };
+
+      gMediaRecorderShutdownBlocker = MakeAndAddRef<Blocker>();
+      RefPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
+      nsresult rv = barrier->AddBlocker(gMediaRecorderShutdownBlocker,
+                                        NS_LITERAL_STRING(__FILE__), __LINE__,
+                                        NS_LITERAL_STRING("MediaRecorder::Session: shutdown"));
+      MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+    }
+
+    gSessions.PutEntry(this);
+
+    uint32_t audioBitrate = mRecorder->GetAudioBitrate();
+    uint32_t videoBitrate = mRecorder->GetVideoBitrate();
+    uint32_t bitrate = mRecorder->GetBitrate();
+    if (bitrate > 0) {
+      // There's a total cap set. We have to make sure the type-specific limits
+      // are within range.
+      if ((aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK) &&
+          (aTrackTypes & ContainerWriter::CREATE_VIDEO_TRACK) &&
+          audioBitrate + videoBitrate > bitrate) {
+        LOG(LogLevel::Info, ("Session.InitEncoder Bitrates higher than total cap. Recalculating."));
+        double factor = bitrate / static_cast<double>(audioBitrate + videoBitrate);
+        audioBitrate = static_cast<uint32_t>(audioBitrate * factor);
+        videoBitrate = static_cast<uint32_t>(videoBitrate * factor);
+      } else if ((aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK) &&
+                 !(aTrackTypes & ContainerWriter::CREATE_VIDEO_TRACK)) {
+        audioBitrate = std::min(audioBitrate, bitrate);
+        videoBitrate = 0;
+      } else if (!(aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK) &&
+                 (aTrackTypes & ContainerWriter::CREATE_VIDEO_TRACK)) {
+        audioBitrate = 0;
+        videoBitrate = std::min(videoBitrate, bitrate);
+      }
+      MOZ_ASSERT(audioBitrate + videoBitrate <= bitrate);
+    }
+
     // Allocate encoder and bind with union stream.
     // At this stage, the API doesn't allow UA to choose the output mimeType format.
 
-    // Make sure the application has permission to assign AUDIO_3GPP
-    if (mRecorder->mMimeType.EqualsLiteral(AUDIO_3GPP) && CheckPermission("audio-capture:3gpp")) {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes);
-    } else if (mRecorder->mMimeType.EqualsLiteral(AUDIO_3GPP2) && CheckPermission("audio-capture:3gpp2")) {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(AUDIO_3GPP2),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes);
-    } else {
-      mEncoder = MediaEncoder::CreateEncoder(NS_LITERAL_STRING(""),
-                                             mRecorder->GetAudioBitrate(),
-                                             mRecorder->GetVideoBitrate(),
-                                             mRecorder->GetBitrate(),
-                                             aTrackTypes);
-    }
+    mEncoder = MediaEncoder::CreateEncoder(mEncoderThread,
+                                           NS_LITERAL_STRING(""),
+                                           audioBitrate, videoBitrate,
+                                           aTrackTypes, aTrackRate);
 
     if (!mEncoder) {
-      LOG(LogLevel::Debug, ("Session.InitEncoder !mEncoder %p", this));
+      LOG(LogLevel::Error, ("Session.InitEncoder !mEncoder %p", this));
       DoSessionEndTask(NS_ERROR_ABORT);
       return;
     }
 
-    // Media stream is ready but UA issues a stop method follow by start method.
-    // The Session::stop would clean the mTrackUnionStream. If the AfterTracksAdded
-    // comes after stop command, this function would crash.
-    if (!mTrackUnionStream) {
-      LOG(LogLevel::Debug, ("Session.InitEncoder !mTrackUnionStream %p", this));
-      DoSessionEndTask(NS_OK);
-      return;
-    }
-    mTrackUnionStream->AddListener(mEncoder);
-    // Try to use direct listeners if possible
-    DOMMediaStream* domStream = mRecorder->Stream();
-    if (domStream && domStream->GetInputStream()) {
-      mInputStream = domStream->GetInputStream()->AsSourceStream();
-      if (mInputStream) {
-        mInputStream->AddDirectListener(mEncoder);
-        mEncoder->SetDirectConnect(true);
-      }
+    mEncoderListener = MakeAndAddRef<EncoderListener>(mEncoderThread, this);
+    nsresult rv =
+      mEncoderThread->Dispatch(
+        NewRunnableMethod<RefPtr<EncoderListener>>(
+          "mozilla::MediaEncoder::RegisterListener",
+          mEncoder, &MediaEncoder::RegisterListener, mEncoderListener));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
+
+    if (mRecorder->mAudioNode) {
+      mEncoder->ConnectAudioNode(mRecorder->mAudioNode,
+                                 mRecorder->mAudioNodeOutput);
     }
 
-    // Create a thread to read encode media data from MediaEncoder.
-    if (!mReadThread) {
-      nsresult rv = NS_NewNamedThread("Media_Encoder", getter_AddRefs(mReadThread));
-      if (NS_FAILED(rv)) {
-        LOG(LogLevel::Debug, ("Session.InitEncoder !mReadThread %p", this));
-        DoSessionEndTask(rv);
-        return;
-      }
+    for (auto& track : mMediaStreamTracks) {
+      mEncoder->ConnectMediaStreamTrack(track);
     }
 
-    // In case source media stream does not notify track end, receive
-    // shutdown notification and stop Read Thread.
-    nsContentUtils::RegisterShutdownObserver(this);
+    // If user defines timeslice interval for video blobs we have to set
+    // appropriate video keyframe interval defined in milliseconds.
+    mEncoder->SetVideoKeyFrameInterval(mTimeSlice);
 
-    nsCOMPtr<nsIRunnable> event = new ExtractRunnable(this);
-    if (NS_FAILED(mReadThread->Dispatch(event, NS_DISPATCH_NORMAL))) {
-      NS_WARNING("Failed to dispatch ExtractRunnable at beginning");
-      LOG(LogLevel::Debug, ("Session.InitEncoder !ReadThread->Dispatch %p", this));
-      DoSessionEndTask(NS_ERROR_ABORT);
-    }
-    // Set mNeedSessionEndTask to false because the
-    // ExtractRunnable/DestroyRunnable will take the response to
-    // end the session.
-    mNeedSessionEndTask = false;
+    // Set mRunningState to Running so that ExtractRunnable/DestroyRunnable will
+    // take the responsibility to end the session.
+    mRunningState = RunningState::Starting;
   }
+
   // application should get blob and onstop event
   void DoSessionEndTask(nsresult rv)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    CleanupStreams();
-    NS_DispatchToMainThread(
-      new DispatchStartEventRunnable(this, NS_LITERAL_STRING("start")));
+    if (mRunningState.isErr()) {
+      // We have already ended with an error.
+      return;
+    }
+
+    if (mRunningState.isOk() &&
+        mRunningState.unwrap() == RunningState::Stopped) {
+      // We have already ended gracefully.
+      return;
+    }
+
+    if (mRunningState.isOk() &&
+        (mRunningState.unwrap() == RunningState::Idling ||
+         mRunningState.unwrap() == RunningState::Starting)) {
+      NS_DispatchToMainThread(new DispatchStartEventRunnable(this));
+    }
+
+    if (rv == NS_OK) {
+      mRunningState = RunningState::Stopped;
+    } else {
+      mRunningState = Err(rv);
+    }
 
     if (NS_FAILED(rv)) {
-      nsCOMPtr<nsIRunnable> runnable =
-        NS_NewRunnableMethodWithArg<nsresult>(mRecorder,
-                                              &MediaRecorder::NotifyError, rv);
-      NS_DispatchToMainThread(runnable);
+      mRecorder->ForceInactive();
+      NS_DispatchToMainThread(
+        NewRunnableMethod<nsresult>("dom::MediaRecorder::NotifyError",
+                                    mRecorder,
+                                    &MediaRecorder::NotifyError,
+                                    rv));
     }
-    if (NS_FAILED(NS_DispatchToMainThread(new EncoderErrorNotifierRunnable(this)))) {
-      MOZ_ASSERT(false, "NS_DispatchToMainThread EncoderErrorNotifierRunnable failed");
+
+    RefPtr<Runnable> destroyRunnable = new DestroyRunnable(this);
+
+    if (rv != NS_ERROR_DOM_SECURITY_ERR) {
+      // Don't push a blob if there was a security error.
+      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, destroyRunnable)))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread PushBlobRunnable failed");
+      }
+    } else {
+      if (NS_FAILED(NS_DispatchToMainThread(destroyRunnable))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
+      }
     }
-    if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
-      MOZ_ASSERT(false, "NS_DispatchToMainThread PushBlobRunnable failed");
-    }
-    if (NS_FAILED(NS_DispatchToMainThread(new DestroyRunnable(this)))) {
-      MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
-    }
-    mNeedSessionEndTask = false;
   }
-  void CleanupStreams()
+
+  void MediaEncoderInitialized()
   {
-    if (mInputStream) {
-      if (mEncoder) {
-        mInputStream->RemoveDirectListener(mEncoder);
-      }
-      mInputStream = nullptr;
-    }
-    if (mInputPort) {
-      mInputPort->Destroy();
-      mInputPort = nullptr;
+    MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+
+    // Pull encoded metadata from MediaEncoder
+    nsTArray<nsTArray<uint8_t> > encodedBuf;
+    nsString mime;
+    nsresult rv = mEncoder->GetEncodedMetadata(&encodedBuf, mime);
+
+    if (NS_FAILED(rv)) {
+      MOZ_ASSERT(false);
+      return;
     }
 
-    if (mTrackUnionStream) {
-      if (mEncoder) {
-        mTrackUnionStream->RemoveListener(mEncoder);
+    // Append pulled data into cache buffer.
+    NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
+                                                           std::move(encodedBuf)));
+
+    RefPtr<Session> self = this;
+    NS_DispatchToMainThread(NewRunnableFrom([self, mime]() {
+      if (!self->mRecorder) {
+        MOZ_ASSERT_UNREACHABLE("Recorder should be live");
+        return NS_OK;
       }
-      mTrackUnionStream->Destroy();
-      mTrackUnionStream = nullptr;
-    }
+      if (self->mRunningState.isOk()) {
+        auto state = self->mRunningState.unwrap();
+        if (state == RunningState::Starting || state == RunningState::Stopping) {
+          if (state == RunningState::Starting) {
+            // We set it to Running in the runnable since we can only assign
+            // mRunningState on main thread. We set it before running the start
+            // event runnable since that dispatches synchronously (and may cause
+            // js calls to methods depending on mRunningState).
+            self->mRunningState = RunningState::Running;
+          }
+          self->mMimeType = mime;
+          self->mRecorder->SetMimeType(self->mMimeType);
+          auto startEvent = MakeRefPtr<DispatchStartEventRunnable>(self);
+          startEvent->Run();
+        }
+      }
+      return NS_OK;
+    }));
   }
 
-  NS_IMETHODIMP Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
+  void MediaEncoderDataAvailable()
+  {
+    MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+
+    Extract(false, nullptr);
+  }
+
+  void MediaEncoderError()
+  {
+    MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+    NS_DispatchToMainThread(
+      NewRunnableMethod<nsresult>(
+        "dom::MediaRecorder::Session::DoSessionEndTask",
+        this, &Session::DoSessionEndTask, NS_ERROR_FAILURE));
+  }
+
+  void MediaEncoderShutdown()
+  {
+    MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
+    MOZ_ASSERT(mEncoder->IsShutdown());
+
+    // For the stop event. Let's the creation of the blob to dispatch this runnable.
+    RefPtr<Runnable> destroyRunnable = new DestroyRunnable(this);
+
+    // Forces the last blob even if it's not time for it yet.
+    Extract(true, destroyRunnable);
+
+    // Clean up.
+    mEncoderListener->Forget();
+    DebugOnly<bool> unregistered =
+      mEncoder->UnregisterListener(mEncoderListener);
+    MOZ_ASSERT(unregistered);
+  }
+
+  RefPtr<ShutdownPromise> Shutdown()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    LOG(LogLevel::Debug, ("Session.Observe XPCOM_SHUTDOWN %p", this));
-    if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
-      // Force stop Session to terminate Read Thread.
-      mEncoder->Cancel();
-      if (mReadThread) {
-        mReadThread->Shutdown();
-        mReadThread = nullptr;
-      }
-      BreakCycle();
-      Stop();
+    LOG(LogLevel::Debug, ("Session Shutdown %p", this));
+
+    if (mShutdownPromise) {
+      return mShutdownPromise;
     }
 
-    return NS_OK;
-  }
+    mShutdownPromise = ShutdownPromise::CreateAndResolve(true, __func__);
+    RefPtr<Session> self = this;
 
-  // Break the cycle reference between Session and MediaRecorder.
-  void BreakCycle()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
+    if (mEncoder) {
+      auto& encoder = mEncoder;
+      encoder->Cancel();
+
+      MOZ_RELEASE_ASSERT(mEncoderListener);
+      auto& encoderListener = mEncoderListener;
+      mShutdownPromise = mShutdownPromise->Then(
+        mEncoderThread, __func__,
+        [encoder, encoderListener]() {
+          encoder->UnregisterListener(encoderListener);
+          encoderListener->Forget();
+          return ShutdownPromise::CreateAndResolve(true, __func__);
+        },
+        []() {
+          MOZ_ASSERT_UNREACHABLE("Unexpected reject");
+          return ShutdownPromise::CreateAndReject(false, __func__);
+        });
+    }
+
+    // Remove main thread state.
+    if (mMediaStream) {
+      mMediaStream->UnregisterTrackListener(this);
+      mMediaStream = nullptr;
+    }
+
+    {
+      auto tracks(std::move(mMediaStreamTracks));
+      for (RefPtr<MediaStreamTrack>& track : tracks) {
+        track->RemovePrincipalChangeObserver(this);
+      }
+    }
+
+    // Break the cycle reference between Session and MediaRecorder.
     if (mRecorder) {
-      mRecorder->RemoveSession(this);
-      mRecorder = nullptr;
+      mShutdownPromise = mShutdownPromise->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [self]() {
+          self->mRecorder->RemoveSession(self);
+          self->mRecorder = nullptr;
+          return ShutdownPromise::CreateAndResolve(true, __func__);
+        },
+        []() {
+          MOZ_ASSERT_UNREACHABLE("Unexpected reject");
+          return ShutdownPromise::CreateAndReject(false, __func__);
+        });
     }
+
+    if (mEncoderThread) {
+      RefPtr<TaskQueue>& encoderThread = mEncoderThread;
+      mShutdownPromise = mShutdownPromise->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [encoderThread]() {
+          return encoderThread->BeginShutdown();
+        },
+        []() {
+          MOZ_ASSERT_UNREACHABLE("Unexpected reject");
+          return ShutdownPromise::CreateAndReject(false, __func__);
+        });
+    }
+
+    return mShutdownPromise;
   }
 
 private:
-  // Hold reference to MediaRecoder that ensure MediaRecorder is alive
+  enum class RunningState {
+    Idling, // Session has been created
+    Starting, // MediaEncoder started, waiting for data
+    Running, // MediaEncoder has produced data
+    Stopping, // Stop() has been called
+    Stopped, // Session has stopped without any error
+  };
+
+  // Hold reference to MediaRecorder that ensure MediaRecorder is alive
   // if there is an active session. Access ONLY on main thread.
   RefPtr<MediaRecorder> mRecorder;
 
-  // Receive track data from source and dispatch to Encoder.
-  // Pause/ Resume controller.
-  RefPtr<ProcessedMediaStream> mTrackUnionStream;
-  RefPtr<SourceMediaStream> mInputStream;
-  RefPtr<MediaInputPort> mInputPort;
+  // Stream currently recorded.
+  RefPtr<DOMMediaStream> mMediaStream;
 
-  // Runnable thread for read data from MediaEncode.
-  nsCOMPtr<nsIThread> mReadThread;
+  // Tracks currently recorded. This should be a subset of mMediaStream's track
+  // set.
+  nsTArray<RefPtr<MediaStreamTrack>> mMediaStreamTracks;
+
+  // Runnable thread for reading data from MediaEncoder.
+  RefPtr<TaskQueue> mEncoderThread;
   // MediaEncoder pipeline.
   RefPtr<MediaEncoder> mEncoder;
-  // A buffer to cache encoded meda data.
-  nsAutoPtr<EncodedBufferCache> mEncodedBufferCache;
+  // Listener through which MediaEncoder signals us.
+  RefPtr<EncoderListener> mEncoderListener;
+  // Set in Shutdown() and resolved when shutdown is complete.
+  RefPtr<ShutdownPromise> mShutdownPromise;
+  // A buffer to cache encoded media data.
+  RefPtr<MutableBlobStorage> mMutableBlobStorage;
+  // Max memory to use for the MutableBlobStorage.
+  uint64_t mMaxMemory;
   // Current session mimeType
   nsString mMimeType;
   // Timestamp of the last fired dataavailable event.
   TimeStamp mLastBlobTimeStamp;
-  // The interval of passing encoded data from EncodedBufferCache to onDataAvailable
-  // handler. "mTimeSlice < 0" means Session object does not push encoded data to
-  // onDataAvailable, instead, it passive wait the client side pull encoded data
-  // by calling requestData API.
+  // The interval of passing encoded data from MutableBlobStorage to
+  // onDataAvailable handler. "mTimeSlice < 0" means Session object does not
+  // push encoded data to onDataAvailable, instead, it passive wait the client
+  // side pull encoded data by calling requestData API.
   const int32_t mTimeSlice;
-  // Indicate this session's stop has been called.
-  bool mStopIssued;
-  // Indicate the session had fire start event. Encoding thread only.
-  bool mIsStartEventFired;
-  // The register flag for "Media_Encoder" thread to profiler
-  bool mIsRegisterProfiler;
-  // False if the InitEncoder called successfully, ensure the
-  // ExtractRunnable/DestroyRunnable will end the session.
+  // The session's current main thread state. The error type gets setwhen ending
+  // a recording with an error. An NS_OK error is invalid.
   // Main thread only.
-  bool mNeedSessionEndTask;
+  Result<RunningState, nsresult> mRunningState;
 };
 
-NS_IMPL_ISUPPORTS(MediaRecorder::Session, nsIObserver)
+NS_IMPL_ISUPPORTS_INHERITED0(MediaRecorder::Session::PushBlobRunnable, Runnable)
 
 MediaRecorder::~MediaRecorder()
 {
-  if (mPipeStream != nullptr) {
-    mInputPort->Destroy();
-    mPipeStream->Destroy();
-  }
   LOG(LogLevel::Debug, ("~MediaRecorder (%p)", this));
   UnRegisterActivityObserver();
 }
@@ -804,10 +1254,13 @@ MediaRecorder::~MediaRecorder()
 MediaRecorder::MediaRecorder(DOMMediaStream& aSourceMediaStream,
                              nsPIDOMWindowInner* aOwnerWindow)
   : DOMEventTargetHelper(aOwnerWindow)
+  , mAudioNodeOutput(0)
   , mState(RecordingState::Inactive)
+  , mAudioBitsPerSecond(0)
+  , mVideoBitsPerSecond(0)
+  , mBitsPerSecond(0)
 {
   MOZ_ASSERT(aOwnerWindow);
-  MOZ_ASSERT(aOwnerWindow->IsInnerWindow());
   mDOMStream = &aSourceMediaStream;
 
   RegisterActivityObserver();
@@ -817,28 +1270,14 @@ MediaRecorder::MediaRecorder(AudioNode& aSrcAudioNode,
                              uint32_t aSrcOutput,
                              nsPIDOMWindowInner* aOwnerWindow)
   : DOMEventTargetHelper(aOwnerWindow)
+  , mAudioNodeOutput(aSrcOutput)
   , mState(RecordingState::Inactive)
+  , mAudioBitsPerSecond(0)
+  , mVideoBitsPerSecond(0)
+  , mBitsPerSecond(0)
 {
   MOZ_ASSERT(aOwnerWindow);
-  MOZ_ASSERT(aOwnerWindow->IsInnerWindow());
 
-  // Only AudioNodeStream of kind EXTERNAL_STREAM stores output audio data in
-  // the track (see AudioNodeStream::AdvanceOutputSegment()). That means track
-  // union stream in recorder session won't be able to copy data from the
-  // stream of non-destination node. Create a pipe stream in this case.
-  if (aSrcAudioNode.NumberOfOutputs() > 0) {
-    AudioContext* ctx = aSrcAudioNode.Context();
-    AudioNodeEngine* engine = new AudioNodeEngine(nullptr);
-    AudioNodeStream::Flags flags =
-      AudioNodeStream::EXTERNAL_OUTPUT |
-      AudioNodeStream::NEED_MAIN_THREAD_FINISHED;
-    mPipeStream = AudioNodeStream::Create(ctx, engine, flags);
-    AudioNodeStream* ns = aSrcAudioNode.GetStream();
-    if (ns) {
-      mInputPort = mPipeStream->AllocateInputPort(aSrcAudioNode.GetStream(),
-                                                  TRACK_ANY, 0, aSrcOutput);
-    }
-  }
   mAudioNode = &aSrcAudioNode;
 
   RegisterActivityObserver();
@@ -848,9 +1287,9 @@ void
 MediaRecorder::RegisterActivityObserver()
 {
   if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      doc->RegisterActivityObserver(
+    mDocument = window->GetExtantDoc();
+    if (mDocument) {
+      mDocument->RegisterActivityObserver(
         NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
     }
   }
@@ -859,12 +1298,9 @@ MediaRecorder::RegisterActivityObserver()
 void
 MediaRecorder::UnRegisterActivityObserver()
 {
-  if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsIDocument* doc = window->GetExtantDoc();
-    if (doc) {
-      doc->UnregisterActivityObserver(
-        NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
-    }
+  if (mDocument) {
+    mDocument->UnregisterActivityObserver(
+      NS_ISUPPORTS_CAST(nsIDocumentActivity*, this));
   }
 }
 
@@ -884,25 +1320,32 @@ void
 MediaRecorder::Start(const Optional<int32_t>& aTimeSlice, ErrorResult& aResult)
 {
   LOG(LogLevel::Debug, ("MediaRecorder.Start %p", this));
+
+  InitializeDomExceptions();
+
   if (mState != RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
-  if (GetSourceMediaStream()->IsFinished() || GetSourceMediaStream()->IsDestroyed()) {
-    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return;
+  nsTArray<RefPtr<MediaStreamTrack>> tracks;
+  if (mDOMStream) {
+    mDOMStream->GetTracks(tracks);
   }
-
-  // Check if source media stream is valid. See bug 919051.
-  if (mDOMStream && !mDOMStream->GetPrincipal()) {
-    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return;
-  }
-
-  if (!CheckPrincipal()) {
-    aResult.Throw(NS_ERROR_DOM_SECURITY_ERR);
-    return;
+  if (!tracks.IsEmpty()) {
+    // If there are tracks already available that we're not allowed
+    // to record, we should throw a security error.
+    bool subsumes = false;
+    nsPIDOMWindowInner* window;
+    nsIDocument* doc;
+    if (!(window = GetOwner()) ||
+        !(doc = window->GetExtantDoc()) ||
+        NS_FAILED(doc->NodePrincipal()->Subsumes(
+                    mDOMStream->GetPrincipal(), &subsumes)) ||
+        !subsumes) {
+      aResult.Throw(NS_ERROR_DOM_SECURITY_ERR);
+      return;
+    }
   }
 
   int32_t timeSlice = 0;
@@ -920,6 +1363,8 @@ MediaRecorder::Start(const Optional<int32_t>& aTimeSlice, ErrorResult& aResult)
   mSessions.AppendElement();
   mSessions.LastElement() = new Session(this, timeSlice);
   mSessions.LastElement()->Start();
+  mStartTime = TimeStamp::Now();
+  Telemetry::ScalarAdd(Telemetry::ScalarID::MEDIARECORDER_RECORDING_COUNT, 1);
 }
 
 void
@@ -975,7 +1420,7 @@ MediaRecorder::Resume(ErrorResult& aResult)
 void
 MediaRecorder::RequestData(ErrorResult& aResult)
 {
-  if (mState != RecordingState::Recording) {
+  if (mState == RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -989,7 +1434,7 @@ MediaRecorder::RequestData(ErrorResult& aResult)
 JSObject*
 MediaRecorder::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaRecorderBinding::Wrap(aCx, this, aGivenProto);
+  return MediaRecorder_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<MediaRecorder>
@@ -1049,8 +1494,8 @@ MediaRecorder::Constructor(const GlobalObject& aGlobal,
   }
 
   RefPtr<MediaRecorder> object = new MediaRecorder(aSrcAudioNode,
-                                                     aSrcOutput,
-                                                     ownerWindow);
+                                                   aSrcOutput,
+                                                   ownerWindow);
   object->SetOptions(aInitDict);
   return object.forget();
 }
@@ -1078,14 +1523,7 @@ MediaRecorder::SetOptions(const MediaRecorderOptions& aInitDict)
   }
 }
 
-static char const *const gWebMAudioEncoderCodecs[3] = {
-  "vorbis",
-  "opus",
-  // no VP9 yet
-  nullptr,
-};
-static char const *const gWebMVideoEncoderCodecs[5] = {
-  "vorbis",
+static char const *const gWebMVideoEncoderCodecs[4] = {
   "opus",
   "vp8",
   "vp8.0",
@@ -1145,17 +1583,6 @@ MediaRecorder::IsTypeSupported(const nsAString& aMIMEType)
     codeclist = gWebMVideoEncoderCodecs;
   }
 #endif
-#ifdef MOZ_OMX_ENCODER
-    // We're working on MP4 encoder support for desktop
-  else if (mimeType.EqualsLiteral(VIDEO_MP4) ||
-           mimeType.EqualsLiteral(AUDIO_3GPP) ||
-           mimeType.EqualsLiteral(AUDIO_3GPP2)) {
-    if (MediaEncoder::IsOMXEncoderEnabled()) {
-      // XXX check codecs for MP4/3GPP
-      return true;
-    }
-  }
-#endif
 
   // codecs don't matter if we don't support the container
   if (!codeclist) {
@@ -1180,27 +1607,23 @@ MediaRecorder::IsTypeSupported(const nsAString& aMIMEType)
 }
 
 nsresult
-MediaRecorder::CreateAndDispatchBlobEvent(already_AddRefed<nsIDOMBlob>&& aBlob)
+MediaRecorder::CreateAndDispatchBlobEvent(Blob* aBlob)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Not running on main thread");
-  if (!CheckPrincipal()) {
-    // Media is not same-origin, don't allow the data out.
-    RefPtr<nsIDOMBlob> blob = aBlob;
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+
   BlobEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
-
-  nsCOMPtr<nsIDOMBlob> blob = aBlob;
-  init.mData = static_cast<Blob*>(blob.get());
+  init.mData = aBlob;
 
   RefPtr<BlobEvent> event =
     BlobEvent::Constructor(this,
                            NS_LITERAL_STRING("dataavailable"),
                            init);
   event->SetTrusted(true);
-  return DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+  ErrorResult rv;
+  DispatchEvent(*event, rv);
+  return rv.StealNSResult();
 }
 
 void
@@ -1216,8 +1639,9 @@ MediaRecorder::DispatchSimpleEvent(const nsAString & aStr)
   event->InitEvent(aStr, false, false);
   event->SetTrusted(true);
 
-  rv = DispatchDOMEvent(nullptr, event, nullptr, nullptr);
-  if (NS_FAILED(rv)) {
+  IgnoredErrorResult res;
+  DispatchEvent(*event, res);
+  if (res.Failed()) {
     NS_ERROR("Failed to dispatch the event!!!");
     return;
   }
@@ -1231,56 +1655,41 @@ MediaRecorder::NotifyError(nsresult aRv)
   if (NS_FAILED(rv)) {
     return;
   }
-  nsString errorMsg;
-  switch (aRv) {
-  case NS_ERROR_DOM_SECURITY_ERR:
-    errorMsg = NS_LITERAL_STRING("SecurityError");
-    break;
-  case NS_ERROR_OUT_OF_MEMORY:
-    errorMsg = NS_LITERAL_STRING("OutOfMemoryError");
-    break;
-  default:
-    errorMsg = NS_LITERAL_STRING("GenericError");
-  }
-
-  RecordErrorEventInit init;
+  MediaRecorderErrorEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
-  init.mName = errorMsg;
+  // These DOMExceptions have been created earlier so they can contain stack
+  // traces. We attach the appropriate one here to be fired. We should have
+  // exceptions here, but defensively check.
+  switch (aRv) {
+    case NS_ERROR_DOM_SECURITY_ERR:
+      if (!mSecurityDomException) {
+        LOG(LogLevel::Debug, ("MediaRecorder.NotifyError: "
+          "mSecurityDomException was not initialized"));
+        mSecurityDomException = DOMException::Create(NS_ERROR_DOM_SECURITY_ERR);
+      }
+      init.mError = mSecurityDomException.forget();
+      break;
+    default:
+      if (!mUnknownDomException) {
+        LOG(LogLevel::Debug, ("MediaRecorder.NotifyError: "
+          "mUnknownDomException was not initialized"));
+        mUnknownDomException = DOMException::Create(NS_ERROR_DOM_UNKNOWN_ERR);
+      }
+      LOG(LogLevel::Debug, ("MediaRecorder.NotifyError: "
+        "mUnknownDomException being fired for aRv: %X", uint32_t(aRv)));
+      init.mError = mUnknownDomException.forget();
+  }
 
-  RefPtr<RecordErrorEvent> event =
-    RecordErrorEvent::Constructor(this, NS_LITERAL_STRING("error"), init);
+  RefPtr<MediaRecorderErrorEvent> event = MediaRecorderErrorEvent::Constructor(
+    this, NS_LITERAL_STRING("error"), init);
   event->SetTrusted(true);
 
-  rv = DispatchDOMEvent(nullptr, event, nullptr, nullptr);
-  if (NS_FAILED(rv)) {
+  IgnoredErrorResult res;
+  DispatchEvent(*event, res);
+  if (res.Failed()) {
     NS_ERROR("Failed to dispatch the error event!!!");
-    return;
   }
-  return;
-}
-
-bool MediaRecorder::CheckPrincipal()
-{
-  MOZ_ASSERT(NS_IsMainThread(), "Not running on main thread");
-  if (!mDOMStream && !mAudioNode) {
-    return false;
-  }
-  if (!GetOwner())
-    return false;
-  nsCOMPtr<nsIDocument> doc = GetOwner()->GetExtantDoc();
-  if (!doc) {
-    return false;
-  }
-  nsIPrincipal* srcPrincipal = GetSourcePrincipal();
-  if (!srcPrincipal) {
-    return false;
-  }
-  bool subsumes;
-  if (NS_FAILED(doc->NodePrincipal()->Subsumes(srcPrincipal, &subsumes))) {
-    return false;
-  }
-  return subsumes;
 }
 
 void
@@ -1298,9 +1707,20 @@ MediaRecorder::NotifyOwnerDocumentActivityChanged()
   nsIDocument* doc = window->GetExtantDoc();
   NS_ENSURE_TRUE_VOID(doc);
 
-  LOG(LogLevel::Debug, ("MediaRecorder %p document IsActive %d isVisible %d\n",
-                     this, doc->IsActive(), doc->IsVisible()));
-  if (!doc->IsActive() || !doc->IsVisible()) {
+  bool inFrameSwap = false;
+  if (nsDocShell* docShell = static_cast<nsDocShell*>(doc->GetDocShell())) {
+    inFrameSwap = docShell->InFrameSwap();
+  }
+
+  LOG(LogLevel::Debug, ("MediaRecorder %p NotifyOwnerDocumentActivityChanged "
+                        "IsActive=%d, "
+                        "IsVisible=%d, "
+                        "InFrameSwap=%d",
+                        this,
+                        doc->IsActive(),
+                        doc->IsVisible(),
+                        inFrameSwap));
+  if (!doc->IsActive() || !(inFrameSwap || doc->IsVisible())) {
     // Stop the session.
     ErrorResult result;
     Stop(result);
@@ -1308,57 +1728,70 @@ MediaRecorder::NotifyOwnerDocumentActivityChanged()
   }
 }
 
-MediaStream*
-MediaRecorder::GetSourceMediaStream()
+void
+MediaRecorder::ForceInactive()
 {
-  if (mDOMStream != nullptr) {
-    return mDOMStream->GetPlaybackStream();
-  }
-  MOZ_ASSERT(mAudioNode != nullptr);
-  return mPipeStream ? mPipeStream.get() : mAudioNode->GetStream();
+  LOG(LogLevel::Debug, ("MediaRecorder.ForceInactive %p", this));
+  mState = RecordingState::Inactive;
 }
 
-nsIPrincipal*
-MediaRecorder::GetSourcePrincipal()
+void
+MediaRecorder::StopForSessionDestruction()
 {
-  if (mDOMStream != nullptr) {
-    return mDOMStream->GetPrincipal();
-  }
-  MOZ_ASSERT(mAudioNode != nullptr);
-  nsIDocument* doc = mAudioNode->GetOwner() ? mAudioNode->GetOwner()->GetExtantDoc() : nullptr;
-  return doc ? doc->NodePrincipal() : nullptr;
+  LOG(LogLevel::Debug, ("MediaRecorder.StopForSessionDestruction %p", this));
+  MediaRecorderReporter::RemoveMediaRecorder(this);
+  // We do not perform a mState != RecordingState::Recording) check here as
+  // we may already be inactive due to ForceInactive().
+  mState = RecordingState::Inactive;
+  MOZ_ASSERT(mSessions.Length() > 0);
+  mSessions.LastElement()->Stop();
+  // This is a coarse calculation and does not reflect the duration of the
+  // final recording for reasons such as pauses. However it allows us an idea
+  // of how long people are running their recorders for.
+  TimeDuration timeDelta = TimeStamp::Now() - mStartTime;
+  Telemetry::Accumulate(Telemetry::MEDIA_RECORDER_RECORDING_DURATION,
+                        timeDelta.ToSeconds());
 }
 
-size_t
-MediaRecorder::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+void
+MediaRecorder::InitializeDomExceptions()
 {
-  size_t amount = 42;
-  for (size_t i = 0; i < mSessions.Length(); ++i) {
-    amount += mSessions[i]->SizeOfExcludingThis(aMallocSizeOf);
+  mSecurityDomException = DOMException::Create(NS_ERROR_DOM_SECURITY_ERR);
+  mUnknownDomException = DOMException::Create(NS_ERROR_DOM_UNKNOWN_ERR);
+}
+
+RefPtr<MediaRecorder::SizeOfPromise>
+MediaRecorder::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // The return type of a chained MozPromise cannot be changed, so we create a
+  // holder for our desired return type and resolve that from All()->Then().
+  auto holder = MakeRefPtr<Refcountable<MozPromiseHolder<SizeOfPromise>>>();
+  RefPtr<SizeOfPromise> promise = holder->Ensure(__func__);
+
+  nsTArray<RefPtr<SizeOfPromise>> promises(mSessions.Length());
+  for (const RefPtr<Session>& session : mSessions) {
+    promises.AppendElement(session->SizeOfExcludingThis(aMallocSizeOf));
   }
-  return amount;
+
+  SizeOfPromise::All(GetCurrentThreadSerialEventTarget(), promises)->Then(
+    GetCurrentThreadSerialEventTarget(), __func__,
+    [holder](const nsTArray<size_t>& sizes) {
+      size_t total = 0;
+      for (const size_t& size : sizes) {
+        total += size;
+      }
+      holder->Resolve(total, __func__);
+    },
+    []() {
+      MOZ_CRASH("Unexpected reject");
+    });
+
+  return promise;
 }
 
 StaticRefPtr<MediaRecorderReporter> MediaRecorderReporter::sUniqueInstance;
-
-MediaRecorderReporter* MediaRecorderReporter::UniqueInstance()
-{
-  if (!sUniqueInstance) {
-    sUniqueInstance = new MediaRecorderReporter();
-    sUniqueInstance->InitMemoryReporter();
-  }
-  return sUniqueInstance;
- }
-
-void MediaRecorderReporter::InitMemoryReporter()
-{
-  RegisterWeakMemoryReporter(this);
-}
-
-MediaRecorderReporter::~MediaRecorderReporter()
-{
-  UnregisterWeakMemoryReporter(this);
-}
 
 } // namespace dom
 } // namespace mozilla

@@ -12,6 +12,7 @@
 #ifndef nsNavHistoryResult_h_
 #define nsNavHistoryResult_h_
 
+#include "INativePlacesEventCallback.h"
 #include "nsTArray.h"
 #include "nsInterfaceHashtable.h"
 #include "nsDataHashtable.h"
@@ -78,23 +79,13 @@ private:
                             const nsACString& aGUID, uint16_t aReason,  \
                             uint32_t aTransitionType) __VA_ARGS__;
 
-// The internal version has an output aAdded parameter, it is incremented by
-// query nodes when the visited uri belongs to them. If no such query exists,
-// the history result creates a new query node dynamically.
+// The internal version is used by query nodes.
 #define NS_DECL_BOOKMARK_HISTORY_OBSERVER_INTERNAL                      \
-  NS_DECL_BOOKMARK_HISTORY_OBSERVER_BASE()                              \
-  NS_IMETHOD OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,      \
-                     int64_t aSessionId, int64_t aReferringId,          \
-                     uint32_t aTransitionType, const nsACString& aGUID, \
-                     bool aHidden, uint32_t* aAdded);
+  NS_DECL_BOOKMARK_HISTORY_OBSERVER_BASE()
 
 // The external version is used by results.
 #define NS_DECL_BOOKMARK_HISTORY_OBSERVER_EXTERNAL(...)                 \
-  NS_DECL_BOOKMARK_HISTORY_OBSERVER_BASE(__VA_ARGS__)                   \
-  NS_IMETHOD OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,      \
-                     int64_t aSessionId, int64_t aReferringId,          \
-                     uint32_t aTransitionType, const nsACString& aGUID, \
-                     bool aHidden) __VA_ARGS__;
+  NS_DECL_BOOKMARK_HISTORY_OBSERVER_BASE(__VA_ARGS__)
 
 // nsNavHistoryResult
 //
@@ -108,42 +99,42 @@ private:
 class nsNavHistoryResult final : public nsSupportsWeakReference,
                                  public nsINavHistoryResult,
                                  public nsINavBookmarkObserver,
-                                 public nsINavHistoryObserver
+                                 public nsINavHistoryObserver,
+                                 public mozilla::places::INativePlacesEventCallback
 {
 public:
-  static nsresult NewHistoryResult(nsINavHistoryQuery** aQueries,
-                                   uint32_t aQueryCount,
-                                   nsNavHistoryQueryOptions* aOptions,
-                                   nsNavHistoryContainerResultNode* aRoot,
-                                   bool aBatchInProgress,
-                                   nsNavHistoryResult** result);
-
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_NAVHISTORYRESULT_IID)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSINAVHISTORYRESULT
-  NS_DECL_BOOKMARK_HISTORY_OBSERVER_EXTERNAL(override)
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsNavHistoryResult, nsINavHistoryResult)
+  NS_DECL_BOOKMARK_HISTORY_OBSERVER_EXTERNAL(override)
 
   void AddHistoryObserver(nsNavHistoryQueryResultNode* aNode);
   void AddBookmarkFolderObserver(nsNavHistoryFolderResultNode* aNode, int64_t aFolder);
   void AddAllBookmarksObserver(nsNavHistoryQueryResultNode* aNode);
+  void AddMobilePrefsObserver(nsNavHistoryQueryResultNode* aNode);
   void RemoveHistoryObserver(nsNavHistoryQueryResultNode* aNode);
   void RemoveBookmarkFolderObserver(nsNavHistoryFolderResultNode* aNode, int64_t aFolder);
   void RemoveAllBookmarksObserver(nsNavHistoryQueryResultNode* aNode);
+  void RemoveMobilePrefsObserver(nsNavHistoryQueryResultNode* aNode);
   void StopObserving();
 
+  nsresult OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
+                   uint32_t aTransitionType, const nsACString& aGUID,
+                   bool aHidden, uint32_t aVisitCount,
+                   const nsAString& aLastKnownTitle);
+
 public:
-  // two-stage init, use NewHistoryResult to construct
-  explicit nsNavHistoryResult(nsNavHistoryContainerResultNode* mRoot);
-  nsresult Init(nsINavHistoryQuery** aQueries,
-                uint32_t aQueryCount,
-                nsNavHistoryQueryOptions *aOptions);
+  explicit nsNavHistoryResult(nsNavHistoryContainerResultNode* mRoot,
+                              const RefPtr<nsNavHistoryQuery>& aQuery,
+                              const RefPtr<nsNavHistoryQueryOptions>& aOptions,
+                              bool aBatchInProgress);
 
   RefPtr<nsNavHistoryContainerResultNode> mRootNode;
 
-  nsCOMArray<nsINavHistoryQuery> mQueries;
-  nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
+  RefPtr<nsNavHistoryQuery> mQuery;
+  RefPtr<nsNavHistoryQueryOptions> mOptions;
 
   // One of nsNavHistoryQueryOptions.SORY_BY_* This is initialized to mOptions.sortingMode,
   // but may be overridden if the user clicks on one of the columns.
@@ -153,17 +144,16 @@ public:
   // This var states the fact we need to apply sortingMode in such a situation.
   bool mNeedsToApplySortingMode;
 
-  // The sorting annotation to be used for in SORT_BY_ANNOTATION_* modes
-  nsCString mSortingAnnotation;
-
   // node observers
   bool mIsHistoryObserver;
   bool mIsBookmarkFolderObserver;
   bool mIsAllBookmarksObserver;
+  bool mIsMobilePrefObserver;
 
   typedef nsTArray< RefPtr<nsNavHistoryQueryResultNode> > QueryObserverList;
   QueryObserverList mHistoryObservers;
   QueryObserverList mAllBookmarksObservers;
+  QueryObserverList mMobilePrefObservers;
 
   typedef nsTArray< RefPtr<nsNavHistoryFolderResultNode> > FolderObserverList;
   nsDataHashtable<nsTrimInt64HashKey, FolderObserverList*> mBookmarkFolderObservers;
@@ -183,6 +173,12 @@ public:
 
   ContainerObserverList mRefreshParticipants;
   void requestRefresh(nsNavHistoryContainerResultNode* aContainer);
+
+  void HandlePlacesEvent(const PlacesEventSequence& aEvents) override;
+
+  void OnMobilePrefChanged();
+
+  static void OnMobilePrefChangedCallback(const char* prefName, void* closure);
 
 protected:
   virtual ~nsNavHistoryResult();
@@ -228,7 +224,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryResult, NS_NAVHISTORYRESULT_IID)
 // short and we can save a virtual function call.
 //
 // (GetUri is redefined only by QueryResultNode and FolderResultNode because
-// the queries might not necessarily be parsed. The rest just return the node's
+// the query might not necessarily be parsed. The rest just return the node's
 // buffer.)
 #define NS_FORWARD_COMMON_RESULTNODE_TO_BASE \
   NS_IMPLEMENT_SIMPLE_RESULTNODE \
@@ -243,14 +239,19 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryResult, NS_NAVHISTORYRESULT_IID)
   NS_IMETHOD GetPageGuid(nsACString& aPageGuid) override \
     { return nsNavHistoryResultNode::GetPageGuid(aPageGuid); } \
   NS_IMETHOD GetBookmarkGuid(nsACString& aBookmarkGuid) override \
-    { return nsNavHistoryResultNode::GetBookmarkGuid(aBookmarkGuid); }
+    { return nsNavHistoryResultNode::GetBookmarkGuid(aBookmarkGuid); } \
+  NS_IMETHOD GetVisitId(int64_t* aVisitId) override \
+    { return nsNavHistoryResultNode::GetVisitId(aVisitId); } \
+  NS_IMETHOD GetFromVisitId(int64_t* aFromVisitId) override \
+    { return nsNavHistoryResultNode::GetFromVisitId(aFromVisitId); } \
+  NS_IMETHOD GetVisitType(uint32_t* aVisitType) override \
+    { return nsNavHistoryResultNode::GetVisitType(aVisitType); }
 
 class nsNavHistoryResultNode : public nsINavHistoryResultNode
 {
 public:
   nsNavHistoryResultNode(const nsACString& aURI, const nsACString& aTitle,
-                         uint32_t aAccessCount, PRTime aTime,
-                         const nsACString& aIconURI);
+                         uint32_t aAccessCount, PRTime aTime);
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_NAVHISTORYRESULTNODE_IID)
 
@@ -268,6 +269,9 @@ public:
   NS_IMETHOD GetTags(nsAString& aTags) override;
   NS_IMETHOD GetPageGuid(nsACString& aPageGuid) override;
   NS_IMETHOD GetBookmarkGuid(nsACString& aBookmarkGuid) override;
+  NS_IMETHOD GetVisitId(int64_t* aVisitId) override;
+  NS_IMETHOD GetFromVisitId(int64_t* aFromVisitId) override;
+  NS_IMETHOD GetVisitType(uint32_t* aVisitType) override;
 
   virtual void OnRemoving();
 
@@ -282,7 +286,12 @@ public:
                            int64_t aParentId,
                            const nsACString& aGUID,
                            const nsACString& aParentGUID,
-                           const nsACString &aOldValue);
+                           const nsACString &aOldValue,
+                           uint16_t aSource);
+
+  virtual nsresult OnMobilePrefChanged(bool newValue) {
+    return NS_OK;
+  };
 
 protected:
   virtual ~nsNavHistoryResultNode() {}
@@ -290,7 +299,6 @@ protected:
 public:
 
   nsNavHistoryResult* GetResult();
-  nsNavHistoryQueryOptions* GetGeneratingOptions();
 
   // These functions test the type. We don't use a virtual function since that
   // would take a vtable slot for every one of (potentially very many) nodes.
@@ -355,10 +363,11 @@ public:
   bool mAreTagsSorted;
   uint32_t mAccessCount;
   int64_t mTime;
-  nsCString mFaviconURI;
   int32_t mBookmarkIndex;
   int64_t mItemId;
   int64_t mFolderId;
+  int64_t mVisitId;
+  int64_t mFromVisitId;
   PRTime mDateAdded;
   PRTime mLastModified;
 
@@ -407,11 +416,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsNavHistoryResultNode, NS_NAVHISTORYRESULTNODE_II
     { return nsNavHistoryContainerResultNode::GetChild(index, _retval); } \
   NS_IMETHOD GetChildIndex(nsINavHistoryResultNode* aNode, uint32_t* _retval) override \
     { return nsNavHistoryContainerResultNode::GetChildIndex(aNode, _retval); } \
-  NS_IMETHOD FindNodeByDetails(const nsACString& aURIString, PRTime aTime, \
-                               int64_t aItemId, bool aRecursive, \
-                               nsINavHistoryResultNode** _retval) override \
-    { return nsNavHistoryContainerResultNode::FindNodeByDetails(aURIString, aTime, aItemId, \
-                                                                aRecursive, _retval); }
 
 #define NS_NAVHISTORYCONTAINERRESULTNODE_IID \
   { 0x6e3bf8d3, 0x22aa, 0x4065, { 0x86, 0xbc, 0x37, 0x46, 0xb5, 0xb3, 0x2c, 0xe8 } }
@@ -422,13 +426,7 @@ class nsNavHistoryContainerResultNode : public nsNavHistoryResultNode,
 public:
   nsNavHistoryContainerResultNode(
     const nsACString& aURI, const nsACString& aTitle,
-    const nsACString& aIconURI, uint32_t aContainerType,
-    nsNavHistoryQueryOptions* aOptions);
-  nsNavHistoryContainerResultNode(
-    const nsACString& aURI, const nsACString& aTitle,
-    PRTime aTime,
-    const nsACString& aIconURI, uint32_t aContainerType,
-    nsNavHistoryQueryOptions* aOptions);
+    PRTime aTime, uint32_t aContainerType, nsNavHistoryQueryOptions* aOptions);
 
   virtual nsresult Refresh();
 
@@ -472,23 +470,29 @@ public:
   // Filled in by the result type generator in nsNavHistory.
   nsCOMArray<nsNavHistoryResultNode> mChildren;
 
-  nsCOMPtr<nsNavHistoryQueryOptions> mOptions;
+  // mOriginalOptions is the options object used to _define_ this specific
+  // container node. It may differ from mOptions, that is the options used
+  // to _fill_ this container node, because mOptions may be modified by
+  // the direct parent of this container node, see SetAsParentOfNode. For
+  // example, if the parent has excludeItems, options will have it too, even if
+  // originally this object was not defined with that option.
+  RefPtr<nsNavHistoryQueryOptions> mOriginalOptions;
+  RefPtr<nsNavHistoryQueryOptions> mOptions;
 
   void FillStats();
+  // Sets this container as parent of aNode, propagating the appropriate options.
+  void SetAsParentOfNode(nsNavHistoryResultNode* aNode);
   nsresult ReverseUpdateStats(int32_t aAccessCountChange);
 
   // Sorting methods.
   typedef nsCOMArray<nsNavHistoryResultNode>::nsCOMArrayComparatorFunc SortComparator;
   virtual uint16_t GetSortType();
-  virtual void GetSortingAnnotation(nsACString& aSortingAnnotation);
 
   static SortComparator GetSortingComparator(uint16_t aSortType);
-  virtual void RecursiveSort(const char* aData,
-                             SortComparator aComparator);
+  virtual void RecursiveSort(SortComparator aComparator);
   uint32_t FindInsertionPoint(nsNavHistoryResultNode* aNode, SortComparator aComparator,
-                              const char* aData, bool* aItemExists);
-  bool DoesChildNeedResorting(uint32_t aIndex, SortComparator aComparator,
-                                const char* aData);
+                              bool* aItemExists);
+  bool DoesChildNeedResorting(uint32_t aIndex, SortComparator aComparator);
 
   static int32_t SortComparison_StringLess(const nsAString& a, const nsAString& b);
 
@@ -517,18 +521,6 @@ public:
                                                nsNavHistoryResultNode* b,
                                                void* closure);
   static int32_t SortComparison_VisitCountGreater(nsNavHistoryResultNode* a,
-                                                  nsNavHistoryResultNode* b,
-                                                  void* closure);
-  static int32_t SortComparison_KeywordLess(nsNavHistoryResultNode* a,
-                                            nsNavHistoryResultNode* b,
-                                            void* closure);
-  static int32_t SortComparison_KeywordGreater(nsNavHistoryResultNode* a,
-                                               nsNavHistoryResultNode* b,
-                                               void* closure);
-  static int32_t SortComparison_AnnotationLess(nsNavHistoryResultNode* a,
-                                               nsNavHistoryResultNode* b,
-                                               void* closure);
-  static int32_t SortComparison_AnnotationGreater(nsNavHistoryResultNode* a,
                                                   nsNavHistoryResultNode* b,
                                                   void* closure);
   static int32_t SortComparison_DateAddedLess(nsNavHistoryResultNode* a,
@@ -562,6 +554,9 @@ public:
   // returns the index of the given node, -1 if not found
   int32_t FindChild(nsNavHistoryResultNode* aNode)
     { return mChildren.IndexOf(aNode); }
+
+  nsNavHistoryResultNode* FindChildByGuid(const nsACString& guid,
+                                          int32_t* nodeIndex);
 
   nsresult InsertChildAt(nsNavHistoryResultNode* aNode, int32_t aIndex);
   nsresult InsertSortedChild(nsNavHistoryResultNode* aNode,
@@ -611,17 +606,10 @@ class nsNavHistoryQueryResultNode final : public nsNavHistoryContainerResultNode
 {
 public:
   nsNavHistoryQueryResultNode(const nsACString& aTitle,
-                              const nsACString& aIconURI,
-                              const nsACString& aQueryURI);
-  nsNavHistoryQueryResultNode(const nsACString& aTitle,
-                              const nsACString& aIconURI,
-                              const nsCOMArray<nsNavHistoryQuery>& aQueries,
-                              nsNavHistoryQueryOptions* aOptions);
-  nsNavHistoryQueryResultNode(const nsACString& aTitle,
-                              const nsACString& aIconURI,
                               PRTime aTime,
-                              const nsCOMArray<nsNavHistoryQuery>& aQueries,
-                              nsNavHistoryQueryOptions* aOptions);
+                              const nsACString& aQueryURI,
+                              const RefPtr<nsNavHistoryQuery>& aQuery,
+                              const RefPtr<nsNavHistoryQueryOptions>& aOptions);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_COMMON_RESULTNODE_TO_BASE
@@ -632,27 +620,29 @@ public:
   NS_IMETHOD GetHasChildren(bool* aHasChildren) override;
   NS_DECL_NSINAVHISTORYQUERYRESULTNODE
 
+  virtual nsresult OnMobilePrefChanged(bool newValue) override;
+
   bool CanExpand();
   bool IsContainersQuery();
 
   virtual nsresult OpenContainer() override;
 
   NS_DECL_BOOKMARK_HISTORY_OBSERVER_INTERNAL
+
+  // The internal version has an output aAdded parameter, it is incremented by
+  // query nodes when the visited uri belongs to them. If no such query exists,
+  // the history result creates a new query node dynamically.
+  nsresult OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
+                   uint32_t aTransitionType, bool aHidden,
+                   uint32_t* aAdded);
   virtual void OnRemoving() override;
 
 public:
-  // this constructs lazily mURI from mQueries and mOptions, call
-  // VerifyQueriesSerialized either this or mQueries/mOptions should be valid
-  nsresult VerifyQueriesSerialized();
-
-  // these may be constructed lazily from mURI, call VerifyQueriesParsed
-  // either this or mURI should be valid
-  nsCOMArray<nsNavHistoryQuery> mQueries;
+  RefPtr<nsNavHistoryQuery> mQuery;
   uint32_t mLiveUpdate; // one of QUERYUPDATE_* in nsNavHistory.h
   bool mHasSearchTerms;
-  nsresult VerifyQueriesParsed();
 
-  // safe options getter, ensures queries are parsed
+  // safe options getter, ensures query is parsed
   nsNavHistoryQueryOptions* Options();
 
   // this indicates whether the query contents are valid, they don't go away
@@ -664,15 +654,13 @@ public:
   nsresult Refresh() override;
 
   virtual uint16_t GetSortType() override;
-  virtual void GetSortingAnnotation(nsACString& aSortingAnnotation) override;
-  virtual void RecursiveSort(const char* aData,
-                             SortComparator aComparator) override;
+  virtual void RecursiveSort(SortComparator aComparator) override;
 
   nsresult NotifyIfTagsChanged(nsIURI* aURI);
 
   uint32_t mBatchChanges;
 
-  // Tracks transition type filters shared by all mQueries.
+  // Tracks transition type filters.
   nsTArray<uint32_t> mTransitions;
 
 protected:
@@ -688,7 +676,7 @@ protected:
 class nsNavHistoryFolderResultNode final : public nsNavHistoryContainerResultNode,
                                            public nsINavHistoryQueryResultNode,
                                            public nsINavBookmarkObserver,
-                                           public mozilla::places::AsyncStatementCallback
+                                           public mozilla::places::WeakAsyncStatementCallback
 {
 public:
   nsNavHistoryFolderResultNode(const nsACString& aTitle,
@@ -763,7 +751,7 @@ class nsNavHistorySeparatorResultNode : public nsNavHistoryResultNode
 public:
   nsNavHistorySeparatorResultNode();
 
-  NS_IMETHOD GetType(uint32_t* type)
+  NS_IMETHOD GetType(uint32_t* type) override
     { *type = nsNavHistoryResultNode::RESULT_TYPE_SEPARATOR; return NS_OK; }
 };
 

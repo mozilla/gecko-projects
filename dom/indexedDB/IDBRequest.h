@@ -19,7 +19,6 @@
   {0xe68901e5, 0x1d50, 0x4ee9, {0xaf, 0x49, 0x90, 0x99, 0x4a, 0xff, 0xc8, 0x39}}
 
 class nsPIDOMWindowInner;
-struct PRThread;
 
 namespace mozilla {
 
@@ -27,7 +26,7 @@ class ErrorResult;
 
 namespace dom {
 
-class DOMError;
+class DOMException;
 class IDBCursor;
 class IDBDatabase;
 class IDBFactory;
@@ -36,6 +35,7 @@ class IDBObjectStore;
 class IDBTransaction;
 template <typename> struct Nullable;
 class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
+class StrongWorkerRef;
 
 class IDBRequest
   : public IDBWrapperCache
@@ -49,12 +49,8 @@ protected:
 
   RefPtr<IDBTransaction> mTransaction;
 
-#ifdef DEBUG
-  PRThread* mOwningThread;
-#endif
-
   JS::Heap<JS::Value> mResultVal;
-  RefPtr<DOMError> mError;
+  RefPtr<DOMException> mError;
 
   nsString mFilename;
   uint64_t mLoggingSerialNumber;
@@ -88,18 +84,14 @@ public:
   static uint64_t
   NextSerialNumber();
 
-  // nsIDOMEventTarget
-  virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) override;
+  // EventTarget
+  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   void
   GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const;
 
   void
   Reset();
-
-  void
-  DispatchNonTransactionError(nsresult aErrorCode);
 
   void
   SetResultCallback(ResultCallback* aCallback);
@@ -117,7 +109,7 @@ public:
   }
 #endif
 
-  DOMError*
+  DOMException*
   GetErrorAfterResult() const
 #ifdef DEBUG
   ;
@@ -127,7 +119,7 @@ public:
   }
 #endif
 
-  DOMError*
+  DOMException*
   GetError(ErrorResult& aRv);
 
   void
@@ -186,11 +178,9 @@ public:
 
   void
   AssertIsOnOwningThread() const
-#ifdef DEBUG
-  ;
-#else
-  { }
-#endif
+  {
+    NS_ASSERT_OWNINGTHREAD(IDBRequest);
+  }
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
@@ -226,14 +216,13 @@ protected:
 class IDBOpenDBRequest final
   : public IDBRequest
 {
-  class WorkerFeature;
-
   // Only touched on the owning thread.
   RefPtr<IDBFactory> mFactory;
 
-  nsAutoPtr<WorkerFeature> mWorkerFeature;
+  RefPtr<StrongWorkerRef> mWorkerRef;
 
   const bool mFileHandleDisabled;
+  bool mIncreasedActiveDatabaseCount;
 
 public:
   static already_AddRefed<IDBOpenDBRequest>
@@ -257,9 +246,12 @@ public:
   SetTransaction(IDBTransaction* aTransaction);
 
   void
+  DispatchNonTransactionError(nsresult aErrorCode);
+
+  void
   NoteComplete();
 
-  // nsIDOMEventTarget
+  // EventTarget
   virtual nsresult
   PostHandleEvent(EventChainPostVisitor& aVisitor) override;
 
@@ -285,6 +277,12 @@ private:
                    bool aFileHandleDisabled);
 
   ~IDBOpenDBRequest();
+
+  void
+  IncreaseActiveDatabaseCount();
+
+  void
+  MaybeDecreaseActiveDatabaseCount();
 };
 
 } // namespace dom

@@ -14,17 +14,18 @@ FakeSSLStatus.prototype = {
   isNotValidAtThisTime: false,
   isUntrusted: false,
   isExtendedValidation: false,
-  getInterface: function(aIID) {
+  getInterface(aIID) {
     return this.QueryInterface(aIID);
   },
-  QueryInterface: function(aIID) {
-    if (aIID.equals(Ci.nsISSLStatus) ||
-        aIID.equals(Ci.nsISupports)) {
-      return this;
-    }
-    throw new Error(Cr.NS_ERROR_NO_INTERFACE);
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsISSLStatus"]),
 };
+
+function whenNewWindowLoaded(aOptions, aCallback) {
+  let win = OpenBrowserWindow(aOptions);
+  win.addEventListener("load", function() {
+    aCallback(win);
+  }, {once: true});
+}
 
 // This is a template to help porting global private browsing tests
 // to per-window private browsing tests
@@ -42,16 +43,18 @@ function test() {
   }
 
   function doTest(aIsPrivateMode, aWindow, aCallback) {
-    aWindow.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-      aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+    BrowserTestUtils.browserLoaded(aWindow.gBrowser.selectedBrowser).then(() => {
       let sslStatus = new FakeSSLStatus();
-      uri = aWindow.Services.io.newURI("https://localhost/img.png", null, null);
+      uri = aWindow.Services.io.newURI("https://localhost/img.png");
       gSSService.processHeader(Ci.nsISiteSecurityService.HEADER_HSTS, uri,
-                               "max-age=1000", sslStatus, privacyFlags(aIsPrivateMode));
-      ok(gSSService.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS, "localhost", privacyFlags(aIsPrivateMode)), "checking sts host");
+                               "max-age=1000", sslStatus, privacyFlags(aIsPrivateMode),
+                               Ci.nsISiteSecurityService.SOURCE_ORGANIC_REQUEST);
+      ok(gSSService.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS, uri,
+                                privacyFlags(aIsPrivateMode)),
+                                "checking sts host");
 
       aCallback();
-    }, true);
+    });
 
     aWindow.gBrowser.selectedBrowser.loadURI(testURI);
   }
@@ -71,17 +74,17 @@ function test() {
     windowsToClose.forEach(function(aWin) {
       aWin.close();
     });
-    uri = Services.io.newURI("http://localhost", null, null);
+    uri = Services.io.newURI("http://localhost");
     gSSService.removeState(Ci.nsISiteSecurityService.HEADER_HSTS, uri, 0);
   });
 
   // test first when on private mode
   testOnWindow({private: true}, function(aWin) {
     doTest(true, aWin, function() {
-      //test when not on private mode
+      // test when not on private mode
       testOnWindow({}, function(aWin) {
         doTest(false, aWin, function() {
-          //test again when on private mode
+          // test again when on private mode
           testOnWindow({private: true}, function(aWin) {
             doTest(true, aWin, function () {
               finish();

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,15 +9,15 @@
 #ifndef nsGenConList_h___
 #define nsGenConList_h___
 
+#include "mozilla/LinkedList.h"
 #include "nsIFrame.h"
 #include "nsStyleStruct.h"
-#include "prclist.h"
 #include "nsCSSPseudoElements.h"
 #include "nsTextNode.h"
 
 class nsGenConList;
 
-struct nsGenConNode : public PRCList {
+struct nsGenConNode : public mozilla::LinkedListElement<nsGenConNode> {
   // The wrapper frame for all of the pseudo-element's content.  This
   // frame generally has useful style data and has the
   // NS_FRAME_GENERATED_CONTENT bit set (so we use it to track removal),
@@ -51,7 +52,7 @@ struct nsGenConNode : public PRCList {
    * @return true iff this marked the list dirty
    */
   virtual bool InitTextFrame(nsGenConList* aList, nsIFrame* aPseudoFrame,
-                               nsIFrame* aTextFrame)
+                             nsIFrame* aTextFrame)
   {
     mPseudoFrame = aPseudoFrame;
     CheckFrameAssertions();
@@ -69,9 +70,9 @@ protected:
       // 'counter-increment'.
 
     NS_ASSERTION(mContentIndex < 0 ||
-                 mPseudoFrame->StyleContext()->GetPseudo() ==
+                 mPseudoFrame->Style()->GetPseudo() ==
                    nsCSSPseudoElements::before ||
-                 mPseudoFrame->StyleContext()->GetPseudo() ==
+                 mPseudoFrame->Style()->GetPseudo() ==
                    nsCSSPseudoElements::after,
                  "not :before/:after generated content and not counter change");
     NS_ASSERTION(mContentIndex < 0 ||
@@ -82,28 +83,55 @@ protected:
 
 class nsGenConList {
 protected:
-  nsGenConNode* mFirstNode;
+  mozilla::LinkedList<nsGenConNode> mList;
   uint32_t mSize;
+
 public:
-  nsGenConList() : mFirstNode(nullptr), mSize(0) {}
+  nsGenConList() : mSize(0), mLastInserted(nullptr) {}
   ~nsGenConList() { Clear(); }
   void Clear();
   static nsGenConNode* Next(nsGenConNode* aNode) {
-    return static_cast<nsGenConNode*>(PR_NEXT_LINK(aNode));
+    MOZ_ASSERT(aNode, "aNode cannot be nullptr!");
+    return aNode->getNext();
   }
   static nsGenConNode* Prev(nsGenConNode* aNode) {
-    return static_cast<nsGenConNode*>(PR_PREV_LINK(aNode));
+    MOZ_ASSERT(aNode, "aNode cannot be nullptr!");
+    return aNode->getPrevious();
   }
   void Insert(nsGenConNode* aNode);
-  // returns whether any nodes have been destroyed
-  bool DestroyNodesFor(nsIFrame* aFrame); //destroy all nodes with aFrame as parent
+
+  // Destroy all nodes with aFrame as parent. Returns true if some nodes
+  // have been destroyed; otherwise false.
+  bool DestroyNodesFor(nsIFrame* aFrame);
 
   // Return true if |aNode1| is after |aNode2|.
   static bool NodeAfter(const nsGenConNode* aNode1,
-                          const nsGenConNode* aNode2);
+                        const nsGenConNode* aNode2);
 
-  void Remove(nsGenConNode* aNode) { PR_REMOVE_LINK(aNode); mSize--; }
-  bool IsLast(nsGenConNode* aNode) { return (Next(aNode) == mFirstNode); }
+  bool IsFirst(nsGenConNode* aNode) {
+    MOZ_ASSERT(aNode, "aNode cannot be nullptr!");
+    return aNode == mList.getFirst();
+  }
+
+  bool IsLast(nsGenConNode* aNode) {
+    MOZ_ASSERT(aNode, "aNode cannot be nullptr!");
+    return aNode == mList.getLast();
+  }
+
+private:
+  void Destroy(nsGenConNode* aNode)
+  {
+    MOZ_ASSERT(aNode, "aNode cannot be nullptr!");
+    delete aNode;
+    mSize--;
+  }
+
+  // Map from frame to the first nsGenConNode of it in the list.
+  nsDataHashtable<nsPtrHashKey<nsIFrame>, nsGenConNode*> mNodes;
+
+  // A weak pointer to the node most recently inserted, used to avoid repeated
+  // list traversals in Insert().
+  nsGenConNode* mLastInserted;
 };
 
 #endif /* nsGenConList_h___ */

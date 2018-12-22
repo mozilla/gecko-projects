@@ -1,178 +1,184 @@
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+*  http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var gPanelWin;
-var gPanelDoc;
-
-const ADD_QUERY = "t1=t2";
-const ADD_HEADER = "Test-header: true";
-const ADD_POSTDATA = "t3=t4";
+"use strict";
 
 /**
  * Tests if resending a request works.
  */
 
-function test() {
-  initNetMonitor(POST_DATA_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+const ADD_QUERY = "t1=t2";
+const ADD_HEADER = "Test-header: true";
+const ADD_UA_HEADER = "User-Agent: Custom-Agent";
+const ADD_POSTDATA = "&t3=t4";
 
-    gPanelWin = aMonitor.panelWin;
-    gPanelDoc = gPanelWin.document;
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(POST_DATA_URL);
+  info("Starting test... ");
 
-    let { NetMonitorView } = gPanelWin;
-    let { RequestsMenu } = NetMonitorView;
-    let TAB_UPDATED = aMonitor.panelWin.EVENTS.TAB_UPDATED;
-    let CUSTOMREQUESTVIEW_POPULATED = aMonitor.panelWin.EVENTS.CUSTOMREQUESTVIEW_POPULATED;
+  const { document, store, windowRequire, connector } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const {
+    getSelectedRequest,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
 
-    RequestsMenu.lazyUpdate = false;
+  store.dispatch(Actions.batchEnable(false));
 
-    waitForNetworkEvents(aMonitor, 0, 2).then(() => {
-      let origItem = RequestsMenu.getItemAtIndex(0);
-      RequestsMenu.selectedItem = origItem;
+  // Execute requests.
+  await performRequests(monitor, tab, 2);
 
-      waitFor(aMonitor.panelWin, TAB_UPDATED).then(() => {
-        // add a new custom request cloned from selected request
-        RequestsMenu.cloneSelectedRequest();
-        return waitFor(aMonitor.panelWin, CUSTOMREQUESTVIEW_POPULATED);
-      }).then(() => {
-        testCustomForm(origItem.attachment);
+  const origItemId = getSortedRequests(store.getState()).get(0).id;
 
-        let customItem = RequestsMenu.selectedItem;
-        testCustomItem(customItem, origItem);
+  store.dispatch(Actions.selectRequest(origItemId));
+  await waitForRequestData(store, ["requestHeaders", "requestPostData"], origItemId);
 
-        // edit the custom request
-        editCustomForm(() => {
-          testCustomItemChanged(customItem, origItem);
+  let origItem = getSortedRequests(store.getState()).get(0);
 
-          waitForNetworkEvents(aMonitor, 0, 1).then(() => {
-            let sentItem = RequestsMenu.selectedItem;
-            testSentRequest(sentItem.attachment, origItem.attachment);
-            finishUp(aMonitor);
-          });
-          // send the new request
-          RequestsMenu.sendCustomRequest();
-        });
-      });
-    });
+  // add a new custom request cloned from selected request
 
-    aDebuggee.performRequests();
+  store.dispatch(Actions.cloneSelectedRequest());
+  await testCustomForm(origItem);
+
+  let customItem = getSelectedRequest(store.getState());
+  testCustomItem(customItem, origItem);
+
+  // edit the custom request
+  await editCustomForm();
+
+  // FIXME: reread the customItem, it's been replaced by a new object (immutable!)
+  customItem = getSelectedRequest(store.getState());
+  testCustomItemChanged(customItem, origItem);
+
+  // send the new request
+  wait = waitForNetworkEvents(monitor, 1);
+  store.dispatch(Actions.sendCustomRequest(connector));
+  await wait;
+
+  let sentItem;
+  // Testing sent request will require updated requestHeaders and requestPostData,
+  // we must wait for both properties get updated before starting test.
+  await waitUntil(() => {
+    sentItem = getSelectedRequest(store.getState());
+    origItem = getSortedRequests(store.getState()).get(0);
+    return sentItem.requestHeaders && sentItem.requestPostData &&
+      origItem.requestHeaders && origItem.requestPostData;
   });
-}
 
-function testCustomItem(aItem, aOrigItem) {
-  let method = aItem.target.querySelector(".requests-menu-method").value;
-  let origMethod = aOrigItem.target.querySelector(".requests-menu-method").value;
-  is(method, origMethod, "menu item is showing the same method as original request");
+  await testSentRequest(sentItem, origItem);
 
-  let file = aItem.target.querySelector(".requests-menu-file").value;
-  let origFile = aOrigItem.target.querySelector(".requests-menu-file").value;
-  is(file, origFile, "menu item is showing the same file name as original request");
+  // Ensure the UI shows the new request, selected, and that the detail panel was closed.
+  is(getSortedRequests(store.getState()).length, 3, "There are 3 requests shown");
+  is(document.querySelector(".request-list-item.selected").getAttribute("data-id"),
+    sentItem.id, "The sent request is selected");
+  is(document.querySelector(".network-details-panel"), null,
+    "The detail panel is hidden");
 
-  let domain = aItem.target.querySelector(".requests-menu-domain").value;
-  let origDomain = aOrigItem.target.querySelector(".requests-menu-domain").value;
-  is(domain, origDomain, "menu item is showing the same domain as original request");
-}
+  return teardown(monitor);
 
-function testCustomItemChanged(aItem, aOrigItem) {
-  let file = aItem.target.querySelector(".requests-menu-file").value;
-  let expectedFile = aOrigItem.target.querySelector(".requests-menu-file").value + "&" + ADD_QUERY;
-
-  is(file, expectedFile, "menu item is updated to reflect url entered in form");
-}
-
-/*
- * Test that the New Request form was populated correctly
- */
-function testCustomForm(aData) {
-  is(gPanelDoc.getElementById("custom-method-value").value, aData.method,
-     "new request form showing correct method");
-
-  is(gPanelDoc.getElementById("custom-url-value").value, aData.url,
-     "new request form showing correct url");
-
-  let query = gPanelDoc.getElementById("custom-query-value");
-  is(query.value, "foo=bar\nbaz=42\ntype=urlencoded",
-     "new request form showing correct query string");
-
-  let headers = gPanelDoc.getElementById("custom-headers-value").value.split("\n");
-  for (let {name, value} of aData.requestHeaders.headers) {
-    ok(headers.indexOf(name + ": " + value) >= 0, "form contains header from request");
+  function testCustomItem(item, orig) {
+    is(item.method, orig.method, "item is showing the same method as original request");
+    is(item.url, orig.url, "item is showing the same URL as original request");
   }
 
-  let postData = gPanelDoc.getElementById("custom-postdata-value");
-  is(postData.value, aData.requestPostData.postData.text,
-     "new request form showing correct post data");
-}
+  function testCustomItemChanged(item, orig) {
+    const url = item.url;
+    const expectedUrl = orig.url + "&" + ADD_QUERY;
 
-/*
- * Add some params and headers to the request form
- */
-function editCustomForm(callback) {
-  gPanelWin.focus();
+    is(url, expectedUrl, "menu item is updated to reflect url entered in form");
+  }
 
-  let query = gPanelDoc.getElementById("custom-query-value");
-  query.addEventListener("focus", function onFocus() {
-    query.removeEventListener("focus", onFocus, false);
+  /*
+   * Test that the New Request form was populated correctly
+   */
+  async function testCustomForm(data) {
+    await waitUntil(() => document.querySelector(".custom-request-panel"));
+    is(document.getElementById("custom-method-value").value, data.method,
+       "new request form showing correct method");
+
+    is(document.getElementById("custom-url-value").value, data.url,
+       "new request form showing correct url");
+
+    const query = document.getElementById("custom-query-value");
+    is(query.value, "foo=bar\nbaz=42\ntype=urlencoded",
+       "new request form showing correct query string");
+
+    const headers = document.getElementById("custom-headers-value").value.split("\n");
+    for (const {name, value} of data.requestHeaders.headers) {
+      ok(headers.includes(name + ": " + value), "form contains header from request");
+    }
+
+    const postData = document.getElementById("custom-postdata-value");
+    is(postData.value, data.requestPostData.postData.text,
+       "new request form showing correct post data");
+  }
+
+  /*
+   * Add some params and headers to the request form
+   */
+  async function editCustomForm() {
+    monitor.panelWin.focus();
+
+    const query = document.getElementById("custom-query-value");
+    const queryFocus = once(query, "focus", false);
+    // Bug 1195825: Due to some unexplained dark-matter with promise,
+    // focus only works if delayed by one tick.
+    query.setSelectionRange(query.value.length, query.value.length);
+    executeSoon(() => query.focus());
+    await queryFocus;
 
     // add params to url query string field
     type(["VK_RETURN"]);
     type(ADD_QUERY);
 
-    let headers = gPanelDoc.getElementById("custom-headers-value");
-    headers.addEventListener("focus", function onFocus() {
-      headers.removeEventListener("focus", onFocus, false);
-
-      // add a header
-      type(["VK_RETURN"]);
-      type(ADD_HEADER);
-
-      let postData = gPanelDoc.getElementById("custom-postdata-value");
-      postData.addEventListener("focus", function onFocus() {
-        postData.removeEventListener("focus", onFocus, false);
-
-        // add to POST data
-        type(ADD_POSTDATA);
-        callback();
-      }, false);
-      postData.focus();
-    }, false);
+    const headers = document.getElementById("custom-headers-value");
+    const headersFocus = once(headers, "focus", false);
+    headers.setSelectionRange(headers.value.length, headers.value.length);
     headers.focus();
-  }, false);
+    await headersFocus;
 
-  // Bug 1195825: Due to some unexplained dark-matter with promise,
-  // focus only works if delayed by one tick.
-  executeSoon(() => {
-    query.focus();
-  });
-}
+    // add a header
+    type(["VK_RETURN"]);
+    type(ADD_HEADER);
 
-/*
- * Make sure newly created event matches expected request
- */
-function testSentRequest(aData, aOrigData) {
-  is(aData.method, aOrigData.method, "correct method in sent request");
-  is(aData.url, aOrigData.url + "&" + ADD_QUERY, "correct url in sent request");
+    // add a User-Agent header, to check if default headers can be modified
+    // (there will be two of them, first gets overwritten by the second)
+    type(["VK_RETURN"]);
+    type(ADD_UA_HEADER);
 
-  let hasHeader = aData.requestHeaders.headers.some((header) => {
-    return (header.name + ": " + header.value) == ADD_HEADER;
-  })
-  ok(hasHeader, "new header added to sent request");
+    const postData = document.getElementById("custom-postdata-value");
+    const postFocus = once(postData, "focus", false);
+    postData.setSelectionRange(postData.value.length, postData.value.length);
+    postData.focus();
+    await postFocus;
 
-  is(aData.requestPostData.postData.text,
-     aOrigData.requestPostData.postData.text + ADD_POSTDATA,
-     "post data added to sent request");
-}
-
-
-function type(aString) {
-  for (let ch of aString) {
-    EventUtils.synthesizeKey(ch, {}, gPanelWin);
+    // add to POST data once textarea has updated
+    await waitUntil(() => postData.textContent !== "");
+    type(ADD_POSTDATA);
   }
-}
 
-function finishUp(aMonitor) {
-  gPanelWin = null;
-  gPanelDoc = null;
+  /*
+   * Make sure newly created event matches expected request
+   */
+  async function testSentRequest(data, origData) {
+    is(data.method, origData.method, "correct method in sent request");
+    is(data.url, origData.url + "&" + ADD_QUERY, "correct url in sent request");
 
-  teardown(aMonitor).then(finish);
-}
+    const { headers } = data.requestHeaders;
+    const hasHeader = headers.some(h => `${h.name}: ${h.value}` == ADD_HEADER);
+    ok(hasHeader, "new header added to sent request");
+
+    const hasUAHeader = headers.some(h => `${h.name}: ${h.value}` == ADD_UA_HEADER);
+    ok(hasUAHeader, "User-Agent header added to sent request");
+
+    is(data.requestPostData.postData.text,
+      origData.requestPostData.postData.text + ADD_POSTDATA,
+      "post data added to sent request");
+  }
+
+  function type(string) {
+    for (const ch of string) {
+      EventUtils.synthesizeKey(ch, {}, monitor.panelWin);
+    }
+  }
+});

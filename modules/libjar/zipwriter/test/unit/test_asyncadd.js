@@ -3,8 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-var Cu = Components.utils;
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 // Values taken from using zipinfo to list the test.zip contents
 var TESTS = [
@@ -29,12 +28,12 @@ var observer = {
 
   onStopRequest: function(request, context, status)
   {
-    do_check_eq(status, Components.results.NS_OK);
+    Assert.equal(status, Cr.NS_OK);
 
     zipW.close();
     size += ZIP_EOCDR_HEADER_SIZE;
 
-    do_check_eq(size, tmpFile.fileSize);
+    Assert.equal(size, tmpFile.fileSize);
 
     // Test the stored data with the zipreader
     var zipR = new ZipReader(tmpFile);
@@ -43,14 +42,14 @@ var observer = {
       var source = do_get_file(DATA_DIR + TESTS[i].name);
       for (let method in methods) {
         var entryName = method + "/" + TESTS[i].name;
-        do_check_true(zipR.hasEntry(entryName));
+        Assert.ok(zipR.hasEntry(entryName));
 
         var entry = zipR.getEntry(entryName);
-        do_check_eq(entry.realSize, TESTS[i].size);
-        do_check_eq(entry.size, TESTS[i].size);
-        do_check_eq(entry.CRC32, TESTS[i].crc);
-        do_check_eq(Math.floor(entry.lastModifiedTime / PR_USEC_PER_SEC),
-                    Math.floor(source.lastModifiedTime / PR_MSEC_PER_SEC));
+        Assert.equal(entry.realSize, TESTS[i].size);
+        Assert.equal(entry.size, TESTS[i].size);
+        Assert.equal(entry.CRC32, TESTS[i].crc);
+        Assert.equal(Math.floor(entry.lastModifiedTime / PR_USEC_PER_SEC),
+                     Math.floor(source.lastModifiedTime / PR_MSEC_PER_SEC));
 
         zipR.test(entryName);
       }
@@ -71,23 +70,19 @@ var methods = {
   {
     zipW.addEntryChannel(entry, source.lastModifiedTime * PR_MSEC_PER_SEC,
                          Ci.nsIZipWriter.COMPRESSION_NONE,
-                         ioSvc.newChannelFromURI2(ioSvc.newFileURI(source),
-                                                  null,      // aLoadingNode
-                                                  Services.scriptSecurityManager.getSystemPrincipal(),
-                                                  null,      // aTriggeringPrincipal
-                                                  Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-                                                  Ci.nsIContentPolicy.TYPE_OTHER), true);
+                         NetUtil.newChannel({
+                           uri: ioSvc.newFileURI(source),
+                           loadUsingSystemPrincipal: true
+                         }), true);
   },
   stream: function method_stream(entry, source)
   {
     zipW.addEntryStream(entry, source.lastModifiedTime * PR_MSEC_PER_SEC,
                         Ci.nsIZipWriter.COMPRESSION_NONE,
-                        ioSvc.newChannelFromURI2(ioSvc.newFileURI(source),
-                                                 null,      // aLoadingNode
-                                                 Services.scriptSecurityManager.getSystemPrincipal(),
-                                                 null,      // aTriggeringPrincipal
-                                                 Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-                                                 Ci.nsIContentPolicy.TYPE_OTHER).open(), true);
+                        NetUtil.newChannel({
+                          uri: ioSvc.newFileURI(source),
+                          loadUsingSystemPrincipal: true
+                        }).open2(), true);
   }
 }
 
@@ -107,5 +102,5 @@ function run_test()
   }
   do_test_pending();
   zipW.processQueue(observer, null);
-  do_check_true(zipW.inQueue);
+  Assert.ok(zipW.inQueue);
 }

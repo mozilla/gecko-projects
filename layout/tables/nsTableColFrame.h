@@ -13,9 +13,10 @@
 #include "nsTableColGroupFrame.h"
 #include "mozilla/WritingModes.h"
 
-class nsTableColFrame : public nsSplittableFrame {
+class nsTableColFrame final : public nsSplittableFrame
+{
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsTableColFrame)
 
   enum {eWIDTH_SOURCE_NONE          =0,   // no cell has contributed to the width style
         eWIDTH_SOURCE_CELL          =1,   // a cell specified a width
@@ -31,12 +32,40 @@ public:
     * @return           the frame that was created
     */
   friend nsTableColFrame* NS_NewTableColFrame(nsIPresShell* aPresShell,
-                                              nsStyleContext*  aContext);
+                                              ComputedStyle*  aContext);
+
+  // nsIFrame overrides
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override
+  {
+    nsSplittableFrame::Init(aContent, aParent, aPrevInFlow);
+    if (!aPrevInFlow) {
+      mWritingMode = GetTableFrame()->GetWritingMode();
+    }
+  }
+
+  /** @see nsIFrame::DidSetComputedStyle */
+  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+
+  virtual void Reflow(nsPresContext*           aPresContext,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
+                      nsReflowStatus&          aStatus) override;
+
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsDisplayListSet& aLists) override;
+
+#ifdef DEBUG_FRAME_DUMP
+  virtual nsresult GetFrameName(nsAString& aResult) const override;
+#endif
+
+  virtual nsSplittableType GetSplittableType() const override;
 
   nsTableColGroupFrame* GetTableColGroupFrame() const
   {
     nsIFrame* parent = GetParent();
-    MOZ_ASSERT(parent && parent->GetType() == nsGkAtoms::tableColGroupFrame);
+    MOZ_ASSERT(parent && parent->IsTableColGroupFrame());
     return static_cast<nsTableColGroupFrame*>(parent);
   }
 
@@ -45,42 +74,11 @@ public:
     return GetTableColGroupFrame()->GetTableFrame();
   }
 
-  /** @see nsIFrame::DidSetStyleContext */
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
-
   int32_t GetColIndex() const;
 
   void SetColIndex (int32_t aColIndex);
 
   nsTableColFrame* GetNextCol() const;
-
-  virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus) override;
-
-  /**
-   * Table columns never paint anything, nor receive events.
-   */
-  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
-                                const nsDisplayListSet& aLists) override {}
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::tableColFrame
-   */
-  virtual nsIAtom* GetType() const override;
-
-#ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const override;
-#endif
-
-  virtual nsSplittableType GetSplittableType() const override;
-
-  virtual mozilla::WritingMode GetWritingMode() const override
-    { return GetTableFrame()->GetWritingMode(); }
 
   /** return the number of the columns the col represents.  always >= 1 */
   int32_t GetSpan();
@@ -279,13 +277,13 @@ public:
     return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
 
-  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
-  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
+  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
+  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
 
 protected:
 
-  explicit nsTableColFrame(nsStyleContext* aContext);
+  explicit nsTableColFrame(ComputedStyle* aStyle);
   ~nsTableColFrame();
 
   nscoord mMinCoord;
@@ -329,14 +327,14 @@ inline nscoord
 nsTableColFrame::GetContinuousBCBorderWidth(mozilla::WritingMode aWM,
                                             mozilla::LogicalMargin& aBorder)
 {
-  int32_t aPixelsToTwips = nsPresContext::AppUnitsPerCSSPixel();
-  aBorder.BStart(aWM) = BC_BORDER_END_HALF_COORD(aPixelsToTwips,
+  int32_t d2a = PresContext()->AppUnitsPerDevPixel();
+  aBorder.BStart(aWM) = BC_BORDER_END_HALF_COORD(d2a,
                                                  mBStartContBorderWidth);
-  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(aPixelsToTwips,
+  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(d2a,
                                                  mIEndContBorderWidth);
-  aBorder.BEnd(aWM) = BC_BORDER_START_HALF_COORD(aPixelsToTwips,
+  aBorder.BEnd(aWM) = BC_BORDER_START_HALF_COORD(d2a,
                                                  mBEndContBorderWidth);
-  return BC_BORDER_END_HALF_COORD(aPixelsToTwips, mIEndContBorderWidth);
+  return BC_BORDER_END_HALF_COORD(d2a, mIEndContBorderWidth);
 }
 
 #endif

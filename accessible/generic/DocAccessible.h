@@ -8,14 +8,14 @@
 
 #include "nsIAccessiblePivot.h"
 
-#include "AccEvent.h"
 #include "HyperTextAccessibleWrap.h"
+#include "AccEvent.h"
 
+#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
 #include "nsIDocument.h"
 #include "nsIDocumentObserver.h"
-#include "nsIEditor.h"
 #include "nsIObserver.h"
 #include "nsIScrollPositionListener.h"
 #include "nsITimer.h"
@@ -26,6 +26,9 @@ class nsAccessiblePivot;
 const uint32_t kDefaultCacheLength = 128;
 
 namespace mozilla {
+
+class TextEditor;
+
 namespace a11y {
 
 class DocManager;
@@ -66,17 +69,17 @@ public:
   virtual nsINode* GetNode() const override { return mDocumentNode; }
   nsIDocument* DocumentNode() const { return mDocumentNode; }
 
-  virtual mozilla::a11y::ENameValueFlag Name(nsString& aName) override;
+  virtual mozilla::a11y::ENameValueFlag Name(nsString& aName) const override;
   virtual void Description(nsString& aDescription) override;
   virtual Accessible* FocusedChild() override;
-  virtual mozilla::a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual mozilla::a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual uint64_t NativeInteractiveState() const override;
   virtual bool NativelyUnavailable() const override;
   virtual void ApplyARIAState(uint64_t* aState) const override;
   virtual already_AddRefed<nsIPersistentProperties> Attributes() override;
 
-  virtual void TakeFocus() override;
+  virtual void TakeFocus() const override;
 
 #ifdef A11Y_LOG
   virtual nsresult HandleAccEvent(AccEvent* aEvent) override;
@@ -85,7 +88,7 @@ public:
   virtual nsRect RelativeBounds(nsIFrame** aRelativeFrame) const override;
 
   // HyperTextAccessible
-  virtual already_AddRefed<nsIEditor> GetEditor() const override;
+  virtual already_AddRefed<TextEditor> GetEditor() const override;
 
   // DocAccessible
 
@@ -136,6 +139,11 @@ public:
       (mDocumentNode->IsShowing() || HasLoadState(eDOMLoaded));
   }
 
+  bool IsHidden() const
+  {
+    return mDocumentNode->Hidden();
+  }
+
   /**
    * Document load states.
    */
@@ -156,7 +164,7 @@ public:
    * Return true if the document has given document state.
    */
   bool HasLoadState(LoadState aState) const
-    { return (mLoadState & static_cast<uint32_t>(aState)) == 
+    { return (mLoadState & static_cast<uint32_t>(aState)) ==
         static_cast<uint32_t>(aState); }
 
   /**
@@ -187,9 +195,7 @@ public:
    */
   void FireDelayedEvent(AccEvent* aEvent);
   void FireDelayedEvent(uint32_t aEventType, Accessible* aTarget);
-  void FireEventsOnInsertion(Accessible* aContainer,
-                             AccReorderEvent* aReorderEvent,
-                             uint32_t aUpdateFlags);
+  void FireEventsOnInsertion(Accessible* aContainer);
 
   /**
    * Fire value change event on the given accessible if applicable.
@@ -343,18 +349,10 @@ public:
                        nsIContent* aEndChildNode);
 
   /**
-   * Notify the document accessible that content was removed.
+   * Update the tree on content removal.
    */
-  void ContentRemoved(Accessible* aContainer, nsIContent* aChildNode)
-  {
-    // Update the whole tree of this document accessible when the container is
-    // null (document element is removed).
-    UpdateTreeOnRemoval((aContainer ? aContainer : this), aChildNode);
-  }
-  void ContentRemoved(nsIContent* aContainerNode, nsIContent* aChildNode)
-  {
-    ContentRemoved(GetAccessibleOrContainer(aContainerNode), aChildNode);
-  }
+  void ContentRemoved(Accessible* aAccessible);
+  void ContentRemoved(nsIContent* aContentNode);
 
   /**
    * Updates accessible tree when rendered text is changed.
@@ -365,6 +363,17 @@ public:
    * Recreate an accessible, results in hide/show events pair.
    */
   void RecreateAccessible(nsIContent* aContent);
+
+  /**
+   * Schedule ARIA owned element relocation if needed. Return true if relocation
+   * was scheduled.
+   */
+  bool RelocateARIAOwnedIfNeeded(nsIContent* aEl);
+
+  /**
+   * Return a notification controller associated with the document.
+   */
+  NotificationController* Controller() const { return mNotificationController; }
 
   /**
    * If this document is in a content process return the object responsible for
@@ -439,7 +448,7 @@ protected:
    * @param aRelAttr     [in, optional] relation attribute
    */
   void AddDependentIDsFor(Accessible* aRelProvider,
-                          nsIAtom* aRelAttr = nullptr);
+                          nsAtom* aRelAttr = nullptr);
 
   /**
    * Remove dependent IDs pointed by accessible element by relation attribute
@@ -450,7 +459,7 @@ protected:
    * @param aRelAttr     [in, optional] relation attribute
    */
   void RemoveDependentIDsFor(Accessible* aRelProvider,
-                             nsIAtom* aRelAttr = nullptr);
+                             nsAtom* aRelAttr = nullptr);
 
   /**
    * Update or recreate an accessible depending on a changed attribute.
@@ -460,7 +469,7 @@ protected:
    * @return            true if an action was taken on the attribute change
    */
   bool UpdateAccessibleOnAttrChange(mozilla::dom::Element* aElement,
-                                    nsIAtom* aAttribute);
+                                    nsAtom* aAttribute);
 
   /**
    * Fire accessible events when attribute is changed.
@@ -470,7 +479,7 @@ protected:
    * @param aAttribute    [in] changed attribute
    */
   void AttributeChangedImpl(Accessible* aAccessible,
-                            int32_t aNameSpaceID, nsIAtom* aAttribute);
+                            int32_t aNameSpaceID, nsAtom* aAttribute);
 
   /**
    * Fire accessible events when ARIA attribute is changed.
@@ -478,7 +487,7 @@ protected:
    * @param aAccessible  [in] accesislbe the DOM attribute is changed for
    * @param aAttribute   [in] changed attribute
    */
-  void ARIAAttributeChanged(Accessible* aAccessible, nsIAtom* aAttribute);
+  void ARIAAttributeChanged(Accessible* aAccessible, nsAtom* aAttribute);
 
   /**
    * Process ARIA active-descendant attribute change.
@@ -503,34 +512,6 @@ protected:
   void ProcessInvalidationList();
 
   /**
-   * Update the accessible tree for content removal.
-   */
-  void UpdateTreeOnRemoval(Accessible* aContainer, nsIContent* aChildNode);
-
-  /**
-   * Helper for UpdateTreeOn methods. Go down to DOM subtree and updates
-   * accessible tree. Return one of these flags.
-   */
-  enum EUpdateTreeFlags {
-    eNoAccessible = 0,
-    eAccessible = 1,
-    eAlertAccessible = 2
-  };
-
-  uint32_t UpdateTreeInternal(Accessible* aChild, bool aIsInsert,
-                              AccReorderEvent* aReorderEvent);
-
-  /**
-   * Schedule ARIA owned element relocation if needed.
-   */
-  void RelocateARIAOwnedIfNeeded(nsIContent* aEl);
-
-  /**
-   * Validates all aria-owns connections and updates the tree accordingly.
-   */
-  void ValidateARIAOwned();
-
-  /**
    * Steals or puts back accessible subtrees.
    */
   void DoARIAOwnsRelocation(Accessible* aOwner);
@@ -553,6 +534,7 @@ protected:
    */
   void CacheChildrenInSubtree(Accessible* aRoot,
                               Accessible** aFocusedAcc = nullptr);
+  void CreateSubtree(Accessible* aRoot);
 
   /**
    * Remove accessibles in subtree from node to accessible map.
@@ -584,7 +566,7 @@ protected:
    */
   void SetIPCDoc(DocAccessibleChild* aIPCDoc) { mIPCDoc = aIPCDoc; }
 
-  friend class DocAccessibleChild;
+  friend class DocAccessibleChildBase;
 
   /**
    * Used to fire scrolling end event after page scroll.
@@ -644,7 +626,7 @@ protected:
    */
   union {
     // ARIA attribute value
-    nsIAtom* mARIAAttrOldValue;
+    nsAtom* mARIAAttrOldValue;
 
     // True if the accessible state bit was on
     bool mStateBitWasOn;
@@ -663,10 +645,10 @@ protected:
   class AttrRelProvider
   {
   public:
-    AttrRelProvider(nsIAtom* aRelAttr, nsIContent* aContent) :
+    AttrRelProvider(nsAtom* aRelAttr, nsIContent* aContent) :
       mRelAttr(aRelAttr), mContent(aContent) { }
 
-    nsIAtom* mRelAttr;
+    nsAtom* mRelAttr;
     nsCOMPtr<nsIContent> mContent;
 
   private:
@@ -690,7 +672,7 @@ protected:
    *
    * @see ProcessInvalidationList
    */
-  nsTArray<nsIContent*> mInvalidationList;
+  nsTArray<RefPtr<nsIContent>> mInvalidationList;
 
   /**
    * Holds a list of aria-owns relocations.
@@ -702,7 +684,7 @@ protected:
    * Used to process notification from core and accessible events.
    */
   RefPtr<NotificationController> mNotificationController;
-  friend class EventQueue;
+  friend class EventTree;
   friend class NotificationController;
 
 private:

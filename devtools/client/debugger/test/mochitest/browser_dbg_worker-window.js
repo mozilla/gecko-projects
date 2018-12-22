@@ -1,49 +1,62 @@
 // Check to make sure that a worker can be attached to a toolbox
 // directly, and that the toolbox has expected properties.
 
-// Whitelisting this test.
-// As part of bug 1077403, the leaking uncaught rejections should be fixed.
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed("[object Object]");
+"use strict";
 
-var TAB_URL = EXAMPLE_URL + "doc_WorkerActor.attachThread-tab.html";
-var WORKER_URL = "code_WorkerActor.attachThread-worker.js";
+// The following "connectionClosed" rejection should not be left uncaught. This
+// test has been whitelisted until the issue is fixed.
+ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
+PromiseTestUtils.expectUncaughtRejection(/[object Object]/);
 
-add_task(function* () {
-  yield pushPrefs(["devtools.scratchpad.enabled", true]);
+var TAB_URL = EXAMPLE_URL + "doc_WorkerTargetActor.attachThread-tab.html";
+var WORKER_URL = "code_WorkerTargetActor.attachThread-worker.js";
+
+add_task(async function() {
+  await pushPrefs(["devtools.scratchpad.enabled", true]);
 
   DebuggerServer.init();
-  DebuggerServer.addBrowserActors();
+  DebuggerServer.registerAllActors();
 
   let client = new DebuggerClient(DebuggerServer.connectPipe());
-  yield connect(client);
+  await connect(client);
 
-  let tab = yield addTab(TAB_URL);
-  let { tabs } = yield listTabs(client);
-  let [, tabClient] = yield attachTab(client, findTab(tabs, TAB_URL));
+  let tab = await addTab(TAB_URL);
+  let { tabs } = await listTabs(client);
+  let [, tabClient] = await attachTab(client, findTab(tabs, TAB_URL));
 
-  yield listWorkers(tabClient);
-  yield createWorkerInTab(tab, WORKER_URL);
+  await listWorkers(tabClient);
+  await createWorkerInTab(tab, WORKER_URL);
 
-  let { workers } = yield listWorkers(tabClient);
-  let [, workerClient] = yield attachWorker(tabClient,
+  let { workers } = await listWorkers(tabClient);
+  let [, workerClient] = await attachWorker(tabClient,
                                              findWorker(workers, WORKER_URL));
 
-  let toolbox = yield gDevTools.showToolbox(TargetFactory.forWorker(workerClient),
+  let toolbox = await gDevTools.showToolbox(TargetFactory.forWorker(workerClient),
                                             "jsdebugger",
                                             Toolbox.HostType.WINDOW);
 
-  is(toolbox._host.type, "window", "correct host");
-  ok(toolbox._host._window.document.title.contains(WORKER_URL),
+  is(toolbox.hostType, "window", "correct host");
+
+  await new Promise(done => {
+    toolbox.win.parent.addEventListener("message", function onmessage(event) {
+      if (event.data.name == "set-host-title") {
+        toolbox.win.parent.removeEventListener("message", onmessage);
+        done();
+      }
+    });
+  });
+  ok(toolbox.win.parent.document.title.includes(WORKER_URL),
      "worker URL in host title");
 
   let toolTabs = toolbox.doc.querySelectorAll(".devtools-tab");
-  let activeTools = [...toolTabs].map(tab=>tab.getAttribute("toolid"));
+  let activeTools = [...toolTabs].map(tab=>tab.getAttribute("data-id"));
 
-  is(activeTools.join(","), "webconsole,jsdebugger,scratchpad,options",
+  is(activeTools.join(","), "webconsole,jsdebugger,scratchpad",
     "Correct set of tools supported by worker");
 
-  yield toolbox.destroy();
   terminateWorkerInTab(tab, WORKER_URL);
-  yield waitForWorkerClose(workerClient);
-  yield close(client);
+  await waitForWorkerClose(workerClient);
+  await close(client);
+
+  await toolbox.destroy();
 });

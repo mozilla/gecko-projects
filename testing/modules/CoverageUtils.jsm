@@ -4,23 +4,19 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "CoverageCollector",
-]
+];
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-const {TextEncoder, OS} = Cu.import("resource://gre/modules/osfile.jsm", {});
-const {addDebuggerToGlobal} = Cu.import("resource://gre/modules/jsdebugger.jsm",
-                                        {});
-addDebuggerToGlobal(this);
+/* globals Debugger */
+const {addDebuggerToGlobal} = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm",
+                                                 {});
+addDebuggerToGlobal(Cu.getGlobalForObject(this));
 
 /**
  * Records coverage for each test by way of the js debugger.
  */
-this.CoverageCollector = function (prefix) {
+var CoverageCollector = function(prefix) {
   this._prefix = prefix;
   this._dbg = new Debugger();
   this._dbg.collectCoverageInfo = true;
@@ -34,10 +30,11 @@ this.CoverageCollector = function (prefix) {
   // Source -> coverage data;
   this._allCoverage = {};
   this._encoder = new TextEncoder();
-  this._testIndex = 0;
-}
 
-CoverageCollector.prototype._getLinesCovered = function () {
+  this._testIndex = 0;
+};
+
+CoverageCollector.prototype._getLinesCovered = function() {
   let coveredLines = {};
   let currentCoverage = {};
   this._scripts.forEach(s => {
@@ -60,7 +57,7 @@ CoverageCollector.prototype._getLinesCovered = function () {
         this._allCoverage[scriptName] = {};
       }
 
-      let key = [lineNumber, columnNumber, offset].join('#');
+      let key = [lineNumber, columnNumber, offset].join("#");
       if (!currentCoverage[scriptName][key]) {
         currentCoverage[scriptName][key] = count;
       } else {
@@ -80,7 +77,8 @@ CoverageCollector.prototype._getLinesCovered = function () {
           !this._allCoverage[scriptName][key] ||
           (this._allCoverage[scriptName][key] <
            currentCoverage[scriptName][key])) {
-        let [lineNumber, colNumber, offset] = key.split('#');
+        // eslint-disable-next-line no-unused-vars
+        let [lineNumber, colNumber, offset] = key.split("#");
         if (!coveredLines[scriptName]) {
           coveredLines[scriptName] = new Set();
         }
@@ -91,39 +89,125 @@ CoverageCollector.prototype._getLinesCovered = function () {
   }
 
   return coveredLines;
-}
+};
 
+CoverageCollector.prototype._getUncoveredLines = function() {
+  let uncoveredLines = {};
+  this._scripts.forEach(s => {
+    let scriptName = s.url;
+    let scriptOffsets = s.getAllOffsets();
+
+    if (!uncoveredLines[scriptName]) {
+      uncoveredLines[scriptName] = new Set();
+    }
+
+    // Get all lines in the script
+    scriptOffsets.forEach( function(element, index) {
+      if (!element) {
+        return;
+      }
+      uncoveredLines[scriptName].add(index);
+    });
+  });
+
+  // For all covered lines, delete their entry
+  for (let scriptName in this._allCoverage) {
+    for (let key in this._allCoverage[scriptName]) {
+      // eslint-disable-next-line no-unused-vars
+      let [lineNumber, columnNumber, offset] = key.split("#");
+      uncoveredLines[scriptName].delete(parseInt(lineNumber, 10));
+    }
+  }
+
+  return uncoveredLines;
+};
+
+CoverageCollector.prototype._getMethodNames = function() {
+  let methodNames = {};
+  this._scripts.forEach(s => {
+    let method = s.displayName;
+    // If the method name is undefined, we return early
+    if (!method) {
+      return;
+    }
+
+    let scriptName = s.url;
+    let tempMethodCov = [];
+    let scriptOffsets = s.getAllOffsets();
+
+    if (!methodNames[scriptName]) {
+      methodNames[scriptName] = {};
+    }
+
+    /**
+    * Get all lines contained within the method and
+    * push a record of the form:
+    * <method name> : <lines covered>
+    */
+    scriptOffsets.forEach( function(element, index) {
+      if (!element) {
+        return;
+      }
+      tempMethodCov.push(index);
+    });
+    methodNames[scriptName][method] = tempMethodCov;
+  });
+
+  return methodNames;
+};
 
 /**
  * Records lines covered since the last time coverage was recorded,
  * associating them with the given test name. The result is written
  * to a json file in a specified directory.
  */
-CoverageCollector.prototype.recordTestCoverage = function (testName) {
+CoverageCollector.prototype.recordTestCoverage = function(testName) {
+  let ccov_scope = {};
+  const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm", ccov_scope);
+
   dump("Collecting coverage for: " + testName + "\n");
   let rawLines = this._getLinesCovered(testName);
+  let methods = this._getMethodNames();
+  let uncoveredLines = this._getUncoveredLines();
   let result = [];
+  let versionControlBlock = {version: 1.0};
+  result.push(versionControlBlock);
+
   for (let scriptName in rawLines) {
     let rec = {
       testUrl: testName,
       sourceFile: scriptName,
-      covered: []
+      methods: {},
+      covered: [],
+      uncovered: []
     };
+
+    if (typeof(methods[scriptName]) != "undefined" && methods[scriptName] != null) {
+      for (let [methodName, methodLines] of Object.entries(methods[scriptName])) {
+        rec.methods[methodName] = methodLines;
+      }
+    }
+
     for (let line of rawLines[scriptName]) {
       rec.covered.push(line);
     }
+
+    for (let line of uncoveredLines[scriptName]) {
+      rec.uncovered.push(line);
+    }
+
     result.push(rec);
   }
   let arr = this._encoder.encode(JSON.stringify(result, null, 2));
-  let path = this._prefix + '/' + 'jscov_' + Date.now() + '.json';
+  let path = this._prefix + "/jscov_" + Date.now() + ".json";
   dump("Writing coverage to: " + path + "\n");
-  return OS.File.writeAtomic(path, arr, {tmpPath: path + '.tmp'});
-}
+  return OS.File.writeAtomic(path, arr, {tmpPath: path + ".tmp"});
+};
 
 /**
  * Tear down the debugger after all tests are complete.
  */
-CoverageCollector.prototype.finalize = function () {
+CoverageCollector.prototype.finalize = function() {
   this._dbg.removeAllDebuggees();
   this._dbg.enabled = false;
-}
+};

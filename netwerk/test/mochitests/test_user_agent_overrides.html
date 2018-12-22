@@ -29,6 +29,11 @@ const UA_PARTIAL_TO = UA_WHOLE_OVERRIDE;
 const UA_PARTIAL_OVERRIDE = UA_PARTIAL_FROM + UA_PARTIAL_SEP + UA_PARTIAL_TO;
 const UA_PARTIAL_EXPECTED = DEFAULT_UA.replace(new RegExp(UA_PARTIAL_FROM, 'g'), UA_PARTIAL_TO);
 
+const UA_PARTIAL_FROM2 = "[0-9]+";
+const UA_PARTIAL_TO2 = "number";
+const UA_PARTIAL_OVERRIDE2 = UA_PARTIAL_FROM2 + UA_PARTIAL_SEP + UA_PARTIAL_TO2;
+const UA_PARTIAL_EXPECTED2 = DEFAULT_UA.replace(new RegExp(UA_PARTIAL_FROM2, 'g'), UA_PARTIAL_TO2);
+
 function testUAIFrame(host, expected, sameQ, message, testNavQ, navSameQ, navMessage, callback) {
   let url = location.pathname;
   url = host + url.slice(0, url.lastIndexOf('/')) + '/user_agent.sjs';
@@ -39,13 +44,13 @@ function testUAIFrame(host, expected, sameQ, message, testNavQ, navSameQ, navMes
   document.getElementById('content').appendChild(ifr);
 
   window.addEventListener("message", function recv(e) {
-    ok(sameQ == (e.data.header.indexOf(expected) != -1), message);
+    ok(sameQ == (e.data.header.includes(expected)), message);
     if (testNavQ) {
-      ok(navSameQ == (e.data.nav.indexOf(expected) != -1), navMessage);
+      ok(navSameQ == (e.data.nav.includes(expected)), navMessage);
     }
-    window.removeEventListener("message", recv, false);
+    window.removeEventListener("message", recv);
     callback();
-  }, false);
+  });
 
 }
 
@@ -99,8 +104,8 @@ function testUA(options, callback) {
           });
         });
       });
-      window.removeEventListener("message", recv, false);
-    }, false);
+      window.removeEventListener("message", recv);
+    });
   })();
 }
 
@@ -120,6 +125,13 @@ var tests = [
     override: UA_PARTIAL_OVERRIDE,
     test_hosts: [location.origin],
     expected: UA_PARTIAL_EXPECTED
+  },
+
+  {
+    domain: location.hostname,
+    override: UA_PARTIAL_OVERRIDE2,
+    test_hosts: [location.origin],
+    expected: UA_PARTIAL_EXPECTED2
   },
 
   // should match domain and subdomains
@@ -219,14 +231,9 @@ function testOverrides(callback) {
   });
 }
 
-SpecialPowers.Cu.import('resource://gre/modules/UserAgentOverrides.jsm', window);
-SpecialPowers.wrap(UserAgentOverrides).init();
-
 SimpleTest.waitForExplicitFinish();
 SimpleTest.requestCompleteLog();
 SimpleTest.requestLongerTimeout(5);
-
-info(SpecialPowers.Cc["@mozilla.org/dom/site-specific-user-agent;1"].number);
 
 testOverrides(function() {
   testInactive(function() {

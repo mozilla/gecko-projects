@@ -8,28 +8,32 @@
 
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGMaskElement.h"
 #include "mozilla/dom/SVGMaskElementBinding.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Mask)
 
 namespace mozilla {
 namespace dom {
 
+using namespace SVGUnitTypes_Binding;
+
 JSObject*
 SVGMaskElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGMaskElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGMaskElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //--------------------- Masks ------------------------
 
 nsSVGElement::LengthInfo SVGMaskElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, -10, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, -10, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
 
 nsSVGElement::EnumInfo SVGMaskElement::sEnumInfo[2] =
@@ -53,7 +57,7 @@ SVGMaskElement::SVGMaskElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeIn
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode method
+// nsINode method
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGMaskElement)
 
@@ -125,7 +129,7 @@ SVGMaskElement::GetEnumInfo()
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGMaskElement::IsAttributeMapped(const nsIAtom* name) const
+SVGMaskElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sColorMap,

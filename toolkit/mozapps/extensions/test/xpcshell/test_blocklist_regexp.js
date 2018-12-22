@@ -6,18 +6,13 @@
 // behavior specific to RegExp entries - general behavior is already tested
 // in test_blocklistchange.js.
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
 const URI_EXTENSION_BLOCKLIST_DIALOG = "chrome://mozapps/content/extensions/blocklist.xul";
 
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://testing-common/MockRegistrar.jsm");
-var testserver = new HttpServer();
-testserver.start(-1);
+ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
+var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 gPort = testserver.identity.primaryPort;
 
-// register static files with server and interpolate port numbers in them
-mapFile("/data/test_blocklist_regexp_1.xml", testserver);
+testserver.registerDirectory("/data/", do_get_file("data"));
 
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
@@ -25,9 +20,9 @@ profileDir.append("extensions");
 // Don't need the full interface, attempts to call other methods will just
 // throw which is just fine
 var WindowWatcher = {
-  openWindow: function(parent, url, name, features, args) {
+  openWindow(parent, url, name, features, args) {
     // Should be called to list the newly blocklisted items
-    do_check_eq(url, URI_EXTENSION_BLOCKLIST_DIALOG);
+    Assert.equal(url, URI_EXTENSION_BLOCKLIST_DIALOG);
 
     // Simulate auto-disabling any softblocks
     var list = args.wrappedJSObject.list;
@@ -36,54 +31,49 @@ var WindowWatcher = {
         aItem.disable = true;
     });
 
-    //run the code after the blocklist is closed
-    Services.obs.notifyObservers(null, "addon-blocklist-closed", null);
+    // run the code after the blocklist is closed
+    Services.obs.notifyObservers(null, "addon-blocklist-closed");
 
   },
 
-  QueryInterface: function(iid) {
-    if (iid.equals(Ci.nsIWindowWatcher)
-     || iid.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIWindowWatcher"])
 };
 
 MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1", WindowWatcher);
 
 
 function load_blocklist(aFile, aCallback) {
-  Services.obs.addObserver(function() {
-    Services.obs.removeObserver(arguments.callee, "blocklist-updated");
+  Services.obs.addObserver(function observer() {
+    Services.obs.removeObserver(observer, "blocklist-updated");
 
-    do_execute_soon(aCallback);
-  }, "blocklist-updated", false);
+    executeSoon(aCallback);
+  }, "blocklist-updated");
 
   Services.prefs.setCharPref("extensions.blocklist.url", "http://localhost:" +
                              gPort + "/data/" + aFile);
   var blocklist = Cc["@mozilla.org/extensions/blocklist;1"].
                   getService(Ci.nsITimerCallback);
-  ok(Services.prefs.getBoolPref("services.kinto.update_enabled", false),
+  ok(Services.prefs.getBoolPref("services.blocklist.update_enabled"),
                                 "Kinto update should be enabled");
   blocklist.notify(null);
 }
 
 
 function end_test() {
-  testserver.stop(do_test_finished);
+  do_test_finished();
 }
 
 
-function run_test() {
+async function run_test() {
   do_test_pending();
 
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
 
-  writeInstallRDFForExtension({
+  await promiseWriteInstallRDFForExtension({
     id: "block1@tests.mozilla.org",
     version: "1.0",
     name: "RegExp blocked add-on",
+    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "1",
@@ -91,26 +81,22 @@ function run_test() {
     }]
   }, profileDir);
 
-  startupManager();
+  await promiseStartupManager();
 
-  AddonManager.getAddonsByIDs(["block1@tests.mozilla.org"], function([a1]) {
-    do_check_eq(a1.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  let [a1] = await AddonManager.getAddonsByIDs(["block1@tests.mozilla.org"]);
+  Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
 
-    run_test_1();
-  });
+  run_test_1();
 }
 
 function run_test_1() {
-  load_blocklist("test_blocklist_regexp_1.xml", function() {
-    restartManager();
+  load_blocklist("test_blocklist_regexp_1.xml", async function() {
+    await promiseRestartManager();
 
-    AddonManager.getAddonsByIDs(["block1@tests.mozilla.org"], function([a1]) {
-      // Blocklist contains two entries that will match this addon - ensure
-      // that the first one is applied.
-      do_check_neq(a1, null);
-      do_check_eq(a1.blocklistState, Ci.nsIBlocklistService.STATE_SOFTBLOCKED);
+    let [a1] = await AddonManager.getAddonsByIDs(["block1@tests.mozilla.org"]);
+    Assert.notEqual(a1, null);
+    Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_SOFTBLOCKED);
 
-      end_test();
-    });
+    end_test();
   });
 }

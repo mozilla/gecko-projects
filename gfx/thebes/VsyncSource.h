@@ -37,7 +37,6 @@ public:
       // Notified when this display's vsync occurs, on the vsync thread
       // The aVsyncTimestamp should normalize to the Vsync time that just occured
       // However, different platforms give different vsync notification times.
-      // b2g - The vsync timestamp of the previous frame that was just displayed
       // OSX - The vsync timestamp of the upcoming frame, in the future
       // Windows: It's messy, see gfxWindowsPlatform.
       // Android: TODO
@@ -56,6 +55,7 @@ public:
       virtual void EnableVsync() = 0;
       virtual void DisableVsync() = 0;
       virtual bool IsVsyncEnabled() = 0;
+      virtual void Shutdown() = 0;
 
     private:
       void UpdateVsyncStatus();
@@ -71,6 +71,7 @@ public:
 
   RefPtr<RefreshTimerVsyncDispatcher> GetRefreshTimerVsyncDispatcher();
   virtual Display& GetGlobalDisplay() = 0; // Works across all displays
+  void Shutdown();
 
 protected:
   virtual ~VsyncSource() {}

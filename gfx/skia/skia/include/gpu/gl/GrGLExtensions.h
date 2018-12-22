@@ -8,11 +8,12 @@
 #ifndef GrGLExtensions_DEFINED
 #define GrGLExtensions_DEFINED
 
+#include "../../private/SkTArray.h"
 #include "GrGLFunctions.h"
 #include "SkString.h"
-#include "SkTArray.h"
 
 struct GrGLInterface;
+class SkJSONWriter;
 
 /**
  * This helper queries the current GL context for its extensions, remembers them, and can be
@@ -39,10 +40,10 @@ public:
      * NULL if on desktop GL with version 3.0 or higher. Otherwise it will fail.
      */
     bool init(GrGLStandard standard,
-              GrGLGetStringProc getString,
-              GrGLGetStringiProc getStringi,
-              GrGLGetIntegervProc getIntegerv,
-              GrEGLQueryStringProc queryString = nullptr,
+              GrGLFunction<GrGLGetStringProc> getString,
+              GrGLFunction<GrGLGetStringiProc> getStringi,
+              GrGLFunction<GrGLGetIntegervProc> getIntegerv,
+              GrGLFunction<GrEGLQueryStringProc> queryString = nullptr,
               GrEGLDisplay eglDisplay = nullptr);
 
     bool isInitialized() const { return fInitialized; }
@@ -64,11 +65,11 @@ public:
 
     void reset() { fStrings->reset(); }
 
-    void print(const char* sep = "\n") const;
+    void dumpJSON(SkJSONWriter*) const;
 
 private:
     bool                                fInitialized;
-    SkAutoTDelete<SkTArray<SkString> >  fStrings;
+    std::unique_ptr<SkTArray<SkString>> fStrings;
 };
 
 #endif

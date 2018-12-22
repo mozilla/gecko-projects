@@ -9,8 +9,13 @@
 'use strict';
 const {
   classes: Cc,
-  interfaces: Ci
+  interfaces: Ci,
+  utils: Cu
 } = Components;
+
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyGlobalGetters(this, ["InspectorUtils"]);
 
 function ValueExtractor(aConsole, aBundle) {
   this.console = aConsole;
@@ -48,10 +53,8 @@ ValueExtractor.prototype = {
   },
   extractColorValue(spec) {
     const value = this.extractValue(spec);
-    const DOMUtils = Cc['@mozilla.org/inspector/dom-utils;1']
-      .getService(Ci.inIDOMUtils);
     let color;
-    if (DOMUtils.isValidCSSColor(value)) {
+    if (InspectorUtils.isValidCSSColor(value)) {
       color = value;
     } else if (value) {
       this.console.warn(this.domBundle.formatStringFromName("ManifestInvalidCSSColor",
@@ -61,5 +64,4 @@ ValueExtractor.prototype = {
     return color;
   }
 };
-this.ValueExtractor = ValueExtractor; // jshint ignore:line
-this.EXPORTED_SYMBOLS = ['ValueExtractor']; // jshint ignore:line
+var EXPORTED_SYMBOLS = ['ValueExtractor']; // jshint ignore:line

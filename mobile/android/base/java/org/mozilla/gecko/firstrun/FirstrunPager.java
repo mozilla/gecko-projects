@@ -9,7 +9,6 @@ import android.content.Context;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentPagerAdapter;
-import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,8 +16,11 @@ import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 
+import com.booking.rtlviewpager.RtlViewPager;
+
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
+import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.home.HomePager.Decor;
 import org.mozilla.gecko.home.TabMenuStrip;
 import org.mozilla.gecko.restrictions.Restrictions;
@@ -30,12 +32,11 @@ import java.util.List;
  *
  * @see FirstrunPanel for the first run pages that are used in this pager.
  */
-public class FirstrunPager extends ViewPager {
+public class FirstrunPager extends RtlViewPager {
 
     private Context context;
     protected FirstrunPanel.PagerNavigation pagerNavigation;
     private Decor mDecor;
-    private View mTabStrip;
 
     public FirstrunPager(Context context) {
         this(context, null);
@@ -49,10 +50,8 @@ public class FirstrunPager extends ViewPager {
     @Override
     public void addView(View child, int index, ViewGroup.LayoutParams params) {
         if (child instanceof Decor) {
-            ((ViewPager.LayoutParams) params).isDecor = true;
+            ((RtlViewPager.LayoutParams) params).isDecor = true;
             mDecor = (Decor) child;
-            mTabStrip = child;
-
             mDecor.setOnTitleClickListener(new TabMenuStrip.OnTitleClickListener() {
                 @Override
                 public void onTitleClicked(int index) {
@@ -67,13 +66,12 @@ public class FirstrunPager extends ViewPager {
     public void load(Context appContext, FragmentManager fm, final FirstrunAnimationContainer.OnFinishListener onFinishListener) {
         final List<FirstrunPagerConfig.FirstrunPanelConfig> panels;
 
-        if (Restrictions.isUserRestricted(context)) {
+        if (Restrictions.isRestrictedProfile(context)) {
             panels = FirstrunPagerConfig.getRestricted();
+        } else if (FirefoxAccounts.firefoxAccountsExist(context)) {
+            panels = FirstrunPagerConfig.forFxAUser(appContext);
         } else {
             panels = FirstrunPagerConfig.getDefault(appContext);
-            if (panels.size() == 1) {
-                mTabStrip.setVisibility(GONE);
-            }
         }
 
         setAdapter(new ViewPagerAdapter(fm, panels));

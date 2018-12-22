@@ -30,10 +30,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-
-
-static char *RCSSTRING __UNUSED__="$Id: ice_candidate_pair.c,v 1.2 2008/04/28 17:59:01 ekr Exp $";
-
 #include <assert.h>
 #include <string.h>
 #include <nr_api.h>
@@ -125,7 +121,6 @@ int nr_ice_candidate_pair_create(nr_ice_peer_ctx *pctx, nr_ice_candidate *lcand,
     if(r=r_data_copy(&pair->stun_client->params.ice_binding_request.password,
       &rcand->stream->l2r_pass))
       ABORT(r);
-    pair->stun_client->params.ice_binding_request.priority=t_priority;
     /* TODO(ekr@rtfm.com): Do we need to frob this when we change role. Bug 890667 */
     pair->stun_client->params.ice_binding_request.control = pctx->controlling?
       NR_ICE_CONTROLLING:NR_ICE_CONTROLLED;
@@ -152,6 +147,11 @@ int nr_ice_candidate_pair_destroy(nr_ice_cand_pair **pairp)
 
     pair=*pairp;
     *pairp=0;
+
+    // record stats back to the ice ctx on destruction
+    if (pair->stun_client) {
+      nr_accumulate_count(&(pair->local->ctx->stats.stun_retransmits), pair->stun_client->retransmit_ct);
+    }
 
     RFREE(pair->as_string);
     RFREE(pair->foundation);
@@ -182,7 +182,8 @@ int nr_ice_candidate_pair_unfreeze(nr_ice_peer_ctx *pctx, nr_ice_cand_pair *pair
 static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
   {
     int r,_status;
-    nr_ice_cand_pair *pair=cb_arg,*orig_pair;
+    nr_ice_cand_pair *pair=cb_arg;
+    nr_ice_cand_pair *actual_pair=0;
     nr_ice_candidate *cand=0;
     nr_stun_message *sres;
     nr_transport_addr *request_src;
@@ -257,14 +258,17 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
 
           cand=TAILQ_FIRST(&pair->local->component->candidates);
           while(cand){
-            if(!nr_transport_addr_cmp(&cand->addr,&pair->stun_client->results.ice_binding_response.mapped_addr,NR_TRANSPORT_ADDR_CMP_MODE_ALL))
+            if(!nr_transport_addr_cmp(&cand->addr,&pair->stun_client->results.ice_binding_response.mapped_addr,NR_TRANSPORT_ADDR_CMP_MODE_ALL)) {
+              r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): found pre-existing local candidate of type %d for mapped address %s", pair->pctx->label,cand->type,cand->addr.as_string);
+              assert(cand->type != HOST);
               break;
+            }
 
             cand=TAILQ_NEXT(cand,entry_comp);
           }
 
-          /* OK, nothing found, must be peer reflexive */
           if(!cand) {
+            /* OK, nothing found, must be a new peer reflexive */
             if (pair->pctx->ctx->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY) {
               /* Any STUN response with a reflexive address in it is unwanted
                  when we'll send on relay only. Bail since cand is used below. */
@@ -278,27 +282,31 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
               ABORT(r);
             cand->state=NR_ICE_CAND_STATE_INITIALIZED;
             TAILQ_INSERT_TAIL(&pair->local->component->candidates,cand,entry_comp);
+          } else {
+            /* Check if we have a pair for this candidate already. */
+            if(r=nr_ice_media_stream_find_pair(pair->remote->stream, cand, pair->remote, &actual_pair)) {
+              r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s): no pair exists for %s and %s", pair->pctx->label,cand->addr.as_string, pair->remote->addr.as_string);
+            }
           }
 
-          /* Note: we stomp the existing pair! */
-          orig_pair=pair;
-          if(r=nr_ice_candidate_pair_create(pair->pctx,cand,pair->remote,
-            &pair))
-            ABORT(r);
+          if(!actual_pair) {
+            if(r=nr_ice_candidate_pair_create(pair->pctx,cand,pair->remote, &actual_pair))
+              ABORT(r);
 
-          nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_SUCCEEDED);
+            if(r=nr_ice_component_insert_pair(actual_pair->remote->component,actual_pair))
+              ABORT(r);
 
-          if(r=nr_ice_component_insert_pair(pair->remote->component,pair))
-            ABORT(r);
+            /* If the original pair was nominated, make us nominated too. */
+            if(pair->peer_nominated)
+              actual_pair->peer_nominated=1;
 
-          /* If the original pair was nominated, make us nominated,
-             since we replace him*/
-          if(orig_pair->peer_nominated)
-            pair->peer_nominated=1;
+            /* Now mark the orig pair failed */
+            nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_FAILED);
+          }
 
-
-          /* Now mark the orig pair failed */
-          nr_ice_candidate_pair_set_state(orig_pair->pctx,orig_pair,NR_ICE_PAIR_STATE_FAILED);
+          assert(actual_pair);
+          nr_ice_candidate_pair_set_state(actual_pair->pctx,actual_pair,NR_ICE_PAIR_STATE_SUCCEEDED);
+          pair=actual_pair;
 
         }
 
@@ -345,6 +353,12 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
   done:
     _status=0;
   abort:
+    if (_status) {
+      // cb doesn't return anything, but we should probably log that we aborted
+      // This also quiets the unused variable warnings.
+      r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s): STUN cb pair addr = %s abort with status: %d",
+        pair->pctx->label,pair->local->stream->label,pair->codeword,pair->as_string, _status);
+    }
     return;
   }
 
@@ -631,6 +645,12 @@ void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void 
 
     _status=0;
   abort:
+    if (_status) {
+      // cb doesn't return anything, but we should probably log that we aborted
+      // This also quiets the unused variable warnings.
+      r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s)/COMP(%d): STUN nominated cb pair as nominated: %s abort with status: %d",
+        pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id,pair->as_string, _status);
+    }
     return;
   }
 

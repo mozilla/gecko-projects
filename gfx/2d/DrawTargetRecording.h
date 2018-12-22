@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: set ts=8 sts=2 et sw=2 tw=80:
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -17,33 +17,28 @@ class DrawTargetRecording : public DrawTarget
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetRecording, override)
-  DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT, bool aHasData = false);
-
-  /**
-   * Used for creating a DrawTargetRecording for a CreateSimilarDrawTarget call.
-   *
-   * @param aDT DrawTargetRecording on which CreateSimilarDrawTarget  was called
-   * @param aSize size for the similar DrawTarget
-   * @param aFormat format for the similar DrawTarget
-   */
-  DrawTargetRecording(const DrawTargetRecording *aDT, const IntSize &aSize,
-                      SurfaceFormat aFormat);
+  DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT, IntSize aSize, bool aHasData = false);
 
   ~DrawTargetRecording();
 
   virtual DrawTargetType GetType() const override { return mFinalDT->GetType(); }
-  virtual BackendType GetBackendType() const override { return mFinalDT->GetBackendType(); }
+  virtual BackendType GetBackendType() const override { return BackendType::RECORDING; }
   virtual bool IsRecording() const override { return true; }
 
   virtual already_AddRefed<SourceSurface> Snapshot() override;
+  virtual already_AddRefed<SourceSurface> IntoLuminanceSource(LuminanceType aLuminanceType, float aOpacity) override;
 
-  virtual IntSize GetSize() override { return mFinalDT->GetSize(); }
+  virtual void DetachAllSnapshots() override;
+
+  virtual IntSize GetSize() const override { return mSize; }
 
   /* Ensure that the DrawTarget backend has flushed all drawing operations to
    * this draw target. This must be called before using the backing surface of
    * this draw target outside of GFX 2D code.
    */
   virtual void Flush() override { mFinalDT->Flush(); }
+
+  virtual void FlushItem(const IntRect &aBounds) override;
 
   /*
    * Draw a surface to the draw target. Possibly doing partial drawing or
@@ -176,8 +171,7 @@ public:
   virtual void FillGlyphs(ScaledFont *aFont,
                           const GlyphBuffer &aBuffer,
                           const Pattern &aPattern,
-                          const DrawOptions &aOptions = DrawOptions(),
-                          const GlyphRenderingOptions *aRenderingOptions = nullptr) override;
+                          const DrawOptions &aOptions = DrawOptions()) override;
 
   /*
    * This takes a source pattern and a mask, and composites the source pattern
@@ -240,6 +234,32 @@ public:
                          bool aCopyBackground = false) override;
 
   /**
+   * Push a 'layer' to the DrawTarget, a layer is a temporary surface that all
+   * drawing will be redirected to, this is used for example to support group
+   * opacity or the masking of groups. Clips must be balanced within a layer,
+   * i.e. between a matching PushLayer/PopLayer pair there must be as many
+   * PushClip(Rect) calls as there are PopClip calls.
+   *
+   * @param aOpaque Whether the layer will be opaque
+   * @param aOpacity Opacity of the layer
+   * @param aMask Mask applied to the layer
+   * @param aMaskTransform Transform applied to the layer mask
+   * @param aBounds Optional bounds in device space to which the layer is
+   *                limited in size.
+   * @param aCopyBackground Whether to copy the background into the layer, this
+   *                        is only supported when aOpaque is true.a
+   * @param aCompositionOp The CompositionOp to use when blending the layer into
+   *                       the destination
+   */
+  virtual void PushLayerWithBlend(bool aOpaque, Float aOpacity,
+                         SourceSurface* aMask,
+                         const Matrix& aMaskTransform,
+                         const IntRect& aBounds = IntRect(),
+                         bool aCopyBackground = false,
+                         CompositionOp aCompositionOp = CompositionOp::OP_OVER) override;
+
+
+  /**
    * This balances a call to PushLayer and proceeds to blend the layer back
    * onto the background. This blend will blend the temporary surface back
    * onto the target in device space using POINT sampling and operator over.
@@ -277,6 +297,14 @@ public:
    */
   virtual already_AddRefed<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const override;
+
+   /**
+   * Create a similar DrawTarget whose requested size may be clipped based
+   * on this DrawTarget's rect transformed to the new target's space.
+   */
+  virtual RefPtr<DrawTarget> CreateClippedDrawTarget(const IntSize& aMaxSize,
+                                                     const Matrix& aTransform,
+                                                     SurfaceFormat aFormat) const override;
 
   /*
    * Create a path builder with the specified fillmode.
@@ -320,12 +348,23 @@ public:
   }
 
 private:
+  /**
+   * Used for creating a DrawTargetRecording for a CreateSimilarDrawTarget call.
+   *
+   * @param aDT DrawTargetRecording on which CreateSimilarDrawTarget was called
+   * @param aSize size of the the similar DrawTarget
+   * @param aFormat format of the similar DrawTarget
+   */
+  DrawTargetRecording(const DrawTargetRecording *aDT,
+                      IntSize aSize, SurfaceFormat aFormat);
+
   Path *GetPathForPathRecording(const Path *aPath) const;
   already_AddRefed<PathRecording> EnsurePathStored(const Path *aPath);
   void EnsurePatternDependenciesStored(const Pattern &aPattern);
 
   RefPtr<DrawEventRecorderPrivate> mRecorder;
   RefPtr<DrawTarget> mFinalDT;
+  IntSize mSize;
 };
 
 } // namespace gfx

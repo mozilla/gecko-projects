@@ -4,14 +4,12 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "EventEmitter"
 ];
 
 // Simple event emitter abstraction for storage objects to use.
-function EventEmitter () {
+function EventEmitter() {
   this._events = new Map();
 }
 

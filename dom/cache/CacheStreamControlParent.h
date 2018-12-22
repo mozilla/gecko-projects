@@ -7,11 +7,15 @@
 #ifndef mozilla_dom_cache_CacheStreamControlParent_h
 #define mozilla_dom_cache_CacheStreamControlParent_h
 
+#include "mozilla/dom/cache/Manager.h"
 #include "mozilla/dom/cache/PCacheStreamControlParent.h"
 #include "mozilla/dom/cache/StreamControl.h"
 #include "nsTObserverArray.h"
 
 namespace mozilla {
+namespace ipc {
+class AutoIPCStream;
+} // namespace ipc
 namespace dom {
 namespace cache {
 
@@ -20,6 +24,7 @@ class StreamList;
 
 class CacheStreamControlParent final : public PCacheStreamControlParent
                                      , public StreamControl
+                                     , Manager::Listener
 {
 public:
   CacheStreamControlParent();
@@ -35,12 +40,11 @@ public:
   SerializeControl(CacheReadStream* aReadStreamOut) override;
 
   virtual void
-  SerializeFds(CacheReadStream* aReadStreamOut,
-               const nsTArray<mozilla::ipc::FileDescriptor>& aFds) override;
+  SerializeStream(CacheReadStream* aReadStreamOut, nsIInputStream* aStream,
+                  nsTArray<UniquePtr<mozilla::ipc::AutoIPCStream>>& aStreamCleanupList) override;
 
   virtual void
-  DeserializeFds(const CacheReadStream& aReadStream,
-                 nsTArray<mozilla::ipc::FileDescriptor>& aFdsOut) override;
+  OpenStream(const nsID& aId, InputStreamResolver&& aResolver) override;
 
 private:
   virtual void
@@ -53,7 +57,11 @@ private:
 
   // PCacheStreamControlParent methods
   virtual void ActorDestroy(ActorDestroyReason aReason) override;
-  virtual bool RecvNoteClosed(const nsID& aId) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvOpenStream(const nsID& aStreamId, OpenStreamResolver&& aResolve) override;
+
+  virtual mozilla::ipc::IPCResult RecvNoteClosed(const nsID& aId) override;
 
   void NotifyClose(const nsID& aId);
   void NotifyCloseAll();

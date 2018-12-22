@@ -6,20 +6,21 @@
 #if !defined(MediaQueue_h_)
 #define MediaQueue_h_
 
-#include "mozilla/ReentrantMonitor.h"
+#include "mozilla/RecursiveMutex.h"
 #include "mozilla/TaskQueue.h"
 
 #include "nsDeque.h"
 #include "MediaEventSource.h"
+#include "TimeUnits.h"
 
 namespace mozilla {
 
 // Thread and type safe wrapper around nsDeque.
 template <class T>
 class MediaQueueDeallocator : public nsDequeFunctor {
-  virtual void* operator() (void* aObject) {
+  virtual void operator()(void* aObject) override
+  {
     RefPtr<T> releaseMe = dont_AddRef(static_cast<T*>(aObject));
-    return nullptr;
   }
 };
 
@@ -28,7 +29,7 @@ class MediaQueue : private nsDeque {
 public:
   MediaQueue()
     : nsDeque(new MediaQueueDeallocator<T>()),
-      mReentrantMonitor("mediaqueue"),
+      mRecursiveMutex("mediaqueue"),
       mEndOfStream(false)
   {}
 
@@ -36,29 +37,23 @@ public:
     Reset();
   }
 
-  inline size_t GetSize() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  inline size_t GetSize() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     return nsDeque::GetSize();
   }
 
   inline void Push(T* aItem) {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    MOZ_ASSERT(!mEndOfStream);
     MOZ_ASSERT(aItem);
     NS_ADDREF(aItem);
+    MOZ_ASSERT(aItem->GetEndTime() >= aItem->mTime);
     nsDeque::Push(aItem);
     mPushEvent.Notify(RefPtr<T>(aItem));
   }
 
-  inline void PushFront(T* aItem) {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    MOZ_ASSERT(aItem);
-    NS_ADDREF(aItem);
-    nsDeque::PushFront(aItem);
-    mPushEvent.Notify(RefPtr<T>(aItem));
-  }
-
   inline already_AddRefed<T> PopFront() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     RefPtr<T> rv = dont_AddRef(static_cast<T*>(nsDeque::PopFront()));
     if (rv) {
       mPopEvent.Notify(rv);
@@ -66,70 +61,67 @@ public:
     return rv.forget();
   }
 
-  inline T* Peek() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    return static_cast<T*>(nsDeque::Peek());
-  }
-
-  inline T* PeekFront() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  inline RefPtr<T> PeekFront() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     return static_cast<T*>(nsDeque::PeekFront());
   }
 
   void Reset() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     while (GetSize() > 0) {
-      RefPtr<T> x = PopFront();
+      RefPtr<T> x = dont_AddRef(static_cast<T*>(nsDeque::PopFront()));
     }
     mEndOfStream = false;
   }
 
-  bool AtEndOfStream() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  bool AtEndOfStream() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     return GetSize() == 0 && mEndOfStream;
   }
 
   // Returns true if the media queue has had its last item added to it.
   // This happens when the media stream has been completely decoded. Note this
   // does not mean that the corresponding stream has finished playback.
-  bool IsFinished() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  bool IsFinished() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     return mEndOfStream;
   }
 
   // Informs the media queue that it won't be receiving any more items.
   void Finish() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    mEndOfStream = true;
-    mFinishEvent.Notify();
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    if (!mEndOfStream) {
+      mEndOfStream = true;
+      mFinishEvent.Notify();
+    }
   }
 
   // Returns the approximate number of microseconds of items in the queue.
   int64_t Duration() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     if (GetSize() == 0) {
       return 0;
     }
-    T* last = Peek();
-    T* first = PeekFront();
-    return last->GetEndTime() - first->mTime;
+    T* last = static_cast<T*>(nsDeque::Peek());
+    T* first = static_cast<T*>(nsDeque::PeekFront());
+    return (last->GetEndTime() - first->mTime).ToMicroseconds();
   }
 
   void LockedForEach(nsDequeFunctor& aFunctor) const {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     ForEach(aFunctor);
   }
 
   // Extracts elements from the queue into aResult, in order.
   // Elements whose start time is before aTime are ignored.
   void GetElementsAfter(int64_t aTime, nsTArray<RefPtr<T>>* aResult) {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     if (GetSize() == 0)
       return;
     size_t i;
     for (i = GetSize() - 1; i > 0; --i) {
       T* v = static_cast<T*>(ObjectAt(i));
-      if (v->GetEndTime() < aTime)
+      if (v->GetEndTime().ToMicroseconds() < aTime)
         break;
     }
     // Elements less than i have a end time before aTime. It's also possible
@@ -140,15 +132,20 @@ public:
     }
   }
 
+  void GetElementsAfter(const media::TimeUnit& aTime,
+                        nsTArray<RefPtr<T>>* aResult) {
+    GetElementsAfter(aTime.ToMicroseconds(), aResult);
+  }
+
   void GetFirstElements(uint32_t aMaxElements, nsTArray<RefPtr<T>>* aResult) {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     for (size_t i = 0; i < aMaxElements && i < GetSize(); ++i) {
       *aResult->AppendElement() = static_cast<T*>(ObjectAt(i));
     }
   }
 
   uint32_t FrameCount() {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
     uint32_t frames = 0;
     for (size_t i = 0; i < GetSize(); ++i) {
       T* v = static_cast<T*>(ObjectAt(i));
@@ -170,7 +167,7 @@ public:
   }
 
 private:
-  mutable ReentrantMonitor mReentrantMonitor;
+  mutable RecursiveMutex mRecursiveMutex;
   MediaEventProducer<RefPtr<T>> mPopEvent;
   MediaEventProducer<RefPtr<T>> mPushEvent;
   MediaEventProducer<void> mFinishEvent;

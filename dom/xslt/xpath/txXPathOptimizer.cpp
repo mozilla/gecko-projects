@@ -6,7 +6,7 @@
 #include "mozilla/Assertions.h"
 #include "txXPathOptimizer.h"
 #include "txExprResult.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsGkAtoms.h"
 #include "txXPathNode.h"
 #include "txExpr.h"
@@ -21,35 +21,36 @@ public:
     }
 
     // txIEvalContext
-    nsresult getVariable(int32_t aNamespace, nsIAtom* aLName,
-                         txAExprResult*& aResult)
+    nsresult getVariable(int32_t aNamespace, nsAtom* aLName,
+                         txAExprResult*& aResult) override
     {
         MOZ_CRASH("shouldn't depend on this context");
     }
-    bool isStripSpaceAllowed(const txXPathNode& aNode)
+    nsresult isStripSpaceAllowed(const txXPathNode& aNode,
+                                 bool& aAllowed) override
     {
         MOZ_CRASH("shouldn't depend on this context");
     }
-    void* getPrivateContext()
+    void* getPrivateContext() override
     {
         MOZ_CRASH("shouldn't depend on this context");
     }
-    txResultRecycler* recycler()
+    txResultRecycler* recycler() override
     {
         return mRecycler;
     }
-    void receiveError(const nsAString& aMsg, nsresult aRes)
+    void receiveError(const nsAString& aMsg, nsresult aRes) override
     {
     }
-    const txXPathNode& getContextNode()
-    {
-        MOZ_CRASH("shouldn't depend on this context");
-    }
-    uint32_t size()
+    const txXPathNode& getContextNode() override
     {
         MOZ_CRASH("shouldn't depend on this context");
     }
-    uint32_t position()
+    uint32_t size() override
+    {
+        MOZ_CRASH("shouldn't depend on this context");
+    }
+    uint32_t position() override
     {
         MOZ_CRASH("shouldn't depend on this context");
     }
@@ -57,7 +58,6 @@ public:
 private:
     txResultRecycler* mRecycler;
 };
-
 
 nsresult
 txXPathOptimizer::optimize(Expr* aInExpr, Expr** aOutExpr)
@@ -80,7 +80,7 @@ txXPathOptimizer::optimize(Expr* aInExpr, Expr** aOutExpr)
         if (NS_SUCCEEDED(rv)) {
             *aOutExpr = new txLiteralExpr(exprRes);
         }
-        
+
         return NS_OK;
     }
 
@@ -244,7 +244,7 @@ txXPathOptimizer::optimizeUnion(Expr* aInExpr, Expr** aOutExpr)
             if (step->getAxisIdentifier() != axis) {
                 continue;
             }
-            
+
             // Create a txUnionNodeTest if needed
             if (!unionTest) {
                 nsAutoPtr<txNodeTest> owner(unionTest = new txUnionNodeTest);
@@ -273,7 +273,7 @@ txXPathOptimizer::optimizeUnion(Expr* aInExpr, Expr** aOutExpr)
             uni->setSubExprAt(0, nullptr);
             *aOutExpr = currentStep;
 
-            // Return right away since we no longer have a union            
+            // Return right away since we no longer have a union
             return NS_OK;
         }
     }

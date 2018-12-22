@@ -2,12 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 const { assert } = require("devtools/shared/DevToolsUtils");
 const { actions } = require("../constants");
 
-let handlers = Object.create(null);
+const handlers = Object.create(null);
 
-handlers[actions.TOGGLE_RECORD_ALLOCATION_STACKS_START] = function (state, action) {
+handlers[actions.TOGGLE_RECORD_ALLOCATION_STACKS_START] = function(state, action) {
   assert(!state.togglingInProgress,
          "Changing recording state must not be reentrant.");
 
@@ -17,7 +19,7 @@ handlers[actions.TOGGLE_RECORD_ALLOCATION_STACKS_START] = function (state, actio
   };
 };
 
-handlers[actions.TOGGLE_RECORD_ALLOCATION_STACKS_END] = function (state, action) {
+handlers[actions.TOGGLE_RECORD_ALLOCATION_STACKS_END] = function(state, action) {
   assert(state.togglingInProgress,
          "Should not complete changing recording state if we weren't changing "
          + "recording state already.");
@@ -33,8 +35,8 @@ const DEFAULT_ALLOCATIONS_STATE = {
   togglingInProgress: false
 };
 
-module.exports = function (state = DEFAULT_ALLOCATIONS_STATE, action) {
-  let handle = handlers[action.type];
+module.exports = function(state = DEFAULT_ALLOCATIONS_STATE, action) {
+  const handle = handlers[action.type];
   if (handle) {
     return handle(state, action);
   }

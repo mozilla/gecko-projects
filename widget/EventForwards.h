@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "nsStringFwd.h"
 #include "nsTArray.h"
 
 /**
@@ -31,6 +32,37 @@ enum nsEventStatus
 };
 
 namespace mozilla {
+
+enum class CanBubble
+{
+  eYes,
+  eNo
+};
+
+enum class Cancelable
+{
+  eYes,
+  eNo
+};
+
+enum class ChromeOnlyDispatch
+{
+  eYes,
+  eNo
+};
+
+enum class Trusted
+{
+  eYes,
+  eNo
+};
+
+enum class Composed
+{
+  eYes,
+  eNo,
+  eDefault
+};
 
 /**
  * Event messages
@@ -83,7 +115,8 @@ typedef uint16_t Modifiers;
 #define NS_DEFINE_KEYNAME(aCPPName, aDOMKeyName) \
   KEY_NAME_INDEX_##aCPPName,
 
-enum KeyNameIndex
+typedef uint16_t KeyNameIndexType;
+enum KeyNameIndex : KeyNameIndexType
 {
 #include "mozilla/KeyNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -93,10 +126,13 @@ enum KeyNameIndex
 
 #undef NS_DEFINE_KEYNAME
 
+const nsCString ToString(KeyNameIndex aKeyNameIndex);
+
 #define NS_DEFINE_PHYSICAL_KEY_CODE_NAME(aCPPName, aDOMCodeName) \
   CODE_NAME_INDEX_##aCPPName,
 
-enum CodeNameIndex
+typedef uint8_t CodeNameIndexType;
+enum CodeNameIndex : CodeNameIndexType
 {
 #include "mozilla/PhysicalKeyCodeNameList.h"
   // If a DOM keyboard event is synthesized by script, this is used.  Then,
@@ -106,7 +142,10 @@ enum CodeNameIndex
 
 #undef NS_DEFINE_PHYSICAL_KEY_CODE_NAME
 
+const nsCString ToString(CodeNameIndex aCodeNameIndex);
+
 #define NS_DEFINE_COMMAND(aName, aCommandStr) , Command##aName
+#define NS_DEFINE_COMMAND_NO_EXEC_COMMAND(aName) , Command##aName
 
 typedef int8_t CommandInt;
 enum Command : CommandInt
@@ -116,6 +155,9 @@ enum Command : CommandInt
 #include "mozilla/CommandList.h"
 };
 #undef NS_DEFINE_COMMAND
+#undef NS_DEFINE_COMMAND_NO_EXEC_COMMAND
+
+const char* ToChar(Command aCommand);
 
 } // namespace mozilla
 
@@ -139,7 +181,11 @@ struct EventFlags;
 
 class WidgetEventTime;
 
+class NativeEventData;
+
 // TextEvents.h
+enum class AccessKeyType;
+
 struct AlternativeCharCode;
 struct ShortcutKeyCandidate;
 
@@ -147,9 +193,13 @@ typedef nsTArray<ShortcutKeyCandidate> ShortcutKeyCandidateArray;
 typedef AutoTArray<ShortcutKeyCandidate, 10> AutoShortcutKeyCandidateArray;
 
 // TextRange.h
+typedef uint8_t RawTextRangeType;
+enum class TextRangeType : RawTextRangeType;
+
 struct TextRangeStyle;
 struct TextRange;
 
+class EditCommands;
 class TextRangeArray;
 
 // FontRange.h

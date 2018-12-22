@@ -3,6 +3,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+XPCOMUtils.defineLazyGetter(this, "GlobalEventDispatcher", () => EventDispatcher.instance);
+
 var PluginHelper = {
   showDoorHanger: function(aTab) {
     if (!aTab.browser)
@@ -83,6 +85,10 @@ var PluginHelper = {
 
   playPlugin: function(plugin) {
     let objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
+    let mimeType = objLoadingContent.actualType;
+    if (mimeType) {
+      GlobalEventDispatcher.sendRequest({ type: "PluginHelper:playFlash" });
+    }
     if (!objLoadingContent.activated)
       objLoadingContent.playPlugin();
   },
@@ -114,7 +120,7 @@ var PluginHelper = {
   },
 
   // Copied from /browser/base/content/browser.js
-  isTooSmall : function (plugin, overlay) {
+  isTooSmall: function(plugin, overlay) {
     // Is the <object>'s size too small to hold what we want to show?
     let pluginRect = plugin.getBoundingClientRect();
     // XXX bug 446693. The text-shadow on the submitted-report text at
@@ -125,7 +131,7 @@ var PluginHelper = {
     return overflows;
   },
 
-  getPluginMimeType: function (plugin) {
+  getPluginMimeType: function(plugin) {
     var tagMimetype = plugin.actualType;
 
     if (tagMimetype == "") {
@@ -135,7 +141,7 @@ var PluginHelper = {
     return tagMimetype;
   },
 
-  handlePluginBindingAttached: function (aTab, aEvent) {
+  handlePluginBindingAttached: function(aTab, aEvent) {
     let plugin = aEvent.target;
     let doc = plugin.ownerDocument;
     let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
@@ -150,7 +156,7 @@ var PluginHelper = {
       return;
     }
 
-    switch  (eventType) {
+    switch (eventType) {
       case "PluginClickToPlay": {
         // Check if plugins have already been activated for this page, or if
         // the user has set a permission to always play plugins on the site
@@ -161,7 +167,7 @@ var PluginHelper = {
           return;
         }
 
-        // If the plugin is hidden, or if the overlay is too small, show a 
+        // If the plugin is hidden, or if the overlay is too small, show a
         // doorhanger notification
         if (PluginHelper.isTooSmall(plugin, overlay)) {
           PluginHelper.delayAndShowDoorHanger(aTab);
@@ -177,7 +183,7 @@ var PluginHelper = {
           if (!e.isTrusted)
             return;
           e.preventDefault();
-          let win = e.target.ownerDocument.defaultView.top;
+          let win = e.target.ownerGlobal.top;
           let tab = BrowserApp.getTabForWindow(win);
           tab.clickToPlayPluginsActivated = true;
           PluginHelper.playAllPlugins(win);
@@ -198,17 +204,6 @@ var PluginHelper = {
           }
         });
 
-        break;
-      }
-
-      case "PluginNotFound": {
-        // On devices where we don't support Flash, there will be a
-        // "Learn More..." link in the missing plugin error message.
-        let learnMoreLink = doc.getAnonymousElementByAttribute(plugin, "class", "unsupportedLearnMoreLink");
-        let learnMoreUrl = Services.urlFormatter.formatURLPref("app.support.baseURL");
-        learnMoreUrl += "mobile-flash-unsupported";
-        learnMoreLink.href = learnMoreUrl;
-        overlay.classList.add("visible");
         break;
       }
     }

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,14 +39,22 @@ public:
 
   // Bind a VsyncObserver into VsyncChild after ipc channel connected.
   void SetVsyncObserver(VsyncObserver* aVsyncObserver);
+  // GetVsyncRate is a getter for mVsyncRate which sends a requests to
+  // VsyncParent to retreive the hardware vsync rate if mVsyncRate
+  // hasn't already been set.
   TimeDuration GetVsyncRate();
+  // VsyncRate is a getter for mVsyncRate which always returns
+  // mVsyncRate directly, potentially returning
+  // TimeDuration::Forever() if mVsyncRate hasn't been set by calling
+  // GetVsyncRate.
+  TimeDuration VsyncRate();
 
 private:
   VsyncChild();
   virtual ~VsyncChild();
 
-  virtual bool RecvNotify(const TimeStamp& aVsyncTimestamp) override;
-  virtual bool RecvVsyncRate(const float& aVsyncRate) override;
+  virtual mozilla::ipc::IPCResult RecvNotify(const TimeStamp& aVsyncTimestamp) override;
+  virtual mozilla::ipc::IPCResult RecvVsyncRate(const float& aVsyncRate) override;
   virtual void ActorDestroy(ActorDestroyReason aActorDestroyReason) override;
 
   bool mObservingVsync;

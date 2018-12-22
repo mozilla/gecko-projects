@@ -22,7 +22,7 @@ namespace cache {
 
 class ManagerId;
 
-class PrincipalVerifier final : public nsRunnable
+class PrincipalVerifier final : public Runnable
 {
 public:
   // An interface to be implemented by code wishing to use the
@@ -64,7 +64,7 @@ private:
   RefPtr<ContentParent> mActor;
 
   const mozilla::ipc::PrincipalInfo mPrincipalInfo;
-  nsCOMPtr<nsIThread> mInitiatingThread;
+  nsCOMPtr<nsIEventTarget> mInitiatingEventTarget;
   nsresult mResult;
   RefPtr<ManagerId> mManagerId;
 

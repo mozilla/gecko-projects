@@ -17,19 +17,23 @@ function test() {
   // Debug test slaves are a bit slow at this test.
   requestLongerTimeout(2);
 
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gVariables = gDebugger.DebuggerView.Variables;
 
-    waitForSourceAndCaretAndScopes(gPanel, ".html", 24)
+    waitForCaretAndScopes(gPanel, 24)
       .then(expandGlobalScope)
       .then(testGlobalScope)
       .then(expandWindowVariable)
       .then(testWindowVariable)
       .then(() => resumeDebuggerThenCloseAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
 
@@ -145,7 +149,7 @@ function testWindowVariable() {
     "Should have no child non-enumerable properties for 'undefined'.");
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

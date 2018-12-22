@@ -23,8 +23,8 @@ struct nsSMILTargetIdentifier;
 class nsIDocument;
 
 namespace mozilla {
-class RestyleTracker;
 namespace dom {
+class Element;
 class SVGAnimationElement;
 } // namespace dom
 } // namespace mozilla
@@ -107,11 +107,13 @@ public:
     return mAnimationElementTable.Count() != 0;
   }
 
-  void AddStyleUpdatesTo(mozilla::RestyleTracker& aTracker);
   bool MightHavePendingStyleUpdates() const
   {
     return mMightHavePendingStyleUpdates;
   }
+
+  bool PreTraverse();
+  bool PreTraverseInSubtree(mozilla::dom::Element* aRoot);
 
 protected:
   ~nsSMILAnimationController();
@@ -142,8 +144,12 @@ protected:
 
   static void SampleTimedElement(mozilla::dom::SVGAnimationElement* aElement,
                                  TimeContainerHashtable* aActiveContainers);
+
   static void AddAnimationToCompositorTable(
-    mozilla::dom::SVGAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable);
+      mozilla::dom::SVGAnimationElement* aElement,
+      nsSMILCompositorTable* aCompositorTable,
+      bool& aStyleFlushNeeded);
+
   static bool GetTargetIdentifierForAnimation(
       mozilla::dom::SVGAnimationElement* aAnimElem, nsSMILTargetIdentifier& aResult);
 

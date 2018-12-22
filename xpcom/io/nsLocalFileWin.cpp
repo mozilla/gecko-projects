@@ -6,7 +6,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/WindowsVersion.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
@@ -21,11 +21,9 @@
 #include "nsIComponentManager.h"
 #include "prio.h"
 #include "private/pprio.h"  // To get PR_ImportFile
-#include "prprf.h"
-#include "prmem.h"
 #include "nsHashKeys.h"
 
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsReadableUtils.h"
 
 #include <direct.h>
@@ -41,10 +39,10 @@
 #include  <stdlib.h>
 #include  <mbstring.h>
 
-#include "nsXPIDLString.h"
 #include "prproces.h"
 #include "prlink.h"
 
+#include "mozilla/FilePreferences.h"
 #include "mozilla/Mutex.h"
 #include "SpecialSystemDirectory.h"
 
@@ -53,13 +51,19 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
+#include "nsIWindowMediator.h"
+#include "mozIDOMWindow.h"
+#include "nsPIDOMWindow.h"
+#include "nsIWidget.h"
+#include "mozilla/WidgetUtils.h"
+
 using namespace mozilla;
 
 #define CHECK_mWorkingPath()                    \
-    PR_BEGIN_MACRO                              \
+    do {                                        \
         if (mWorkingPath.IsEmpty())             \
             return NS_ERROR_NOT_INITIALIZED;    \
-    PR_END_MACRO
+    } while(0)
 
 // CopyFileEx only supports unbuffered I/O in Windows Vista and above
 #ifndef COPY_FILE_NO_BUFFERING
@@ -74,21 +78,49 @@ using namespace mozilla;
 #define DRIVE_REMOTE 4
 #endif
 
+static HWND
+GetMostRecentNavigatorHWND()
+{
+  nsresult rv;
+  nsCOMPtr<nsIWindowMediator> winMediator(
+      do_GetService(NS_WINDOWMEDIATOR_CONTRACTID, &rv));
+  if (NS_FAILED(rv)) {
+    return nullptr;
+  }
+
+  nsCOMPtr<mozIDOMWindowProxy> navWin;
+  rv = winMediator->GetMostRecentWindow(u"navigator:browser",
+                                        getter_AddRefs(navWin));
+  if (NS_FAILED(rv) || !navWin) {
+    return nullptr;
+  }
+
+  nsPIDOMWindowOuter* win = nsPIDOMWindowOuter::From(navWin);
+  nsCOMPtr<nsIWidget> widget = widget::WidgetUtils::DOMWindowToWidget(win);
+  if (!widget) {
+    return nullptr;
+  }
+
+  return reinterpret_cast<HWND>(widget->GetNativeData(NS_NATIVE_WINDOW));
+}
+
+
 /**
  * A runnable to dispatch back to the main thread when
- * AsyncLocalFileWinOperation completes.
+ * AsyncRevealOperation completes.
 */
-class AsyncLocalFileWinDone : public nsRunnable
+class AsyncLocalFileWinDone : public Runnable
 {
 public:
   AsyncLocalFileWinDone() :
+    Runnable("AsyncLocalFileWinDone"),
     mWorkerThread(do_GetCurrentThread())
   {
     // Objects of this type must only be created on worker threads
     MOZ_ASSERT(!NS_IsMainThread());
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // This event shuts down the worker thread and so must be main thread.
     MOZ_ASSERT(NS_IsMainThread());
@@ -107,37 +139,29 @@ private:
  * A runnable to dispatch from the main thread when an async operation should
  * be performed.
 */
-class AsyncLocalFileWinOperation : public nsRunnable
+class AsyncRevealOperation : public Runnable
 {
 public:
-  enum FileOp { RevealOp, LaunchOp };
-
-  AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::FileOp aOperation,
-                             const nsAString& aResolvedPath) :
-    mOperation(aOperation),
-    mResolvedPath(aResolvedPath)
+  explicit AsyncRevealOperation(const nsAString& aResolvedPath)
+    : Runnable("AsyncRevealOperation"),
+      mResolvedPath(aResolvedPath)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(!NS_IsMainThread(),
-               "AsyncLocalFileWinOperation should not be run on the main thread!");
+               "AsyncRevealOperation should not be run on the main thread!");
 
-    CoInitialize(nullptr);
-    switch (mOperation) {
-      case RevealOp: {
-        Reveal();
-      }
-      break;
-      case LaunchOp: {
-        Launch();
-      }
-      break;
+    bool doCoUninitialize = SUCCEEDED(
+      CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    Reveal();
+    if (doCoUninitialize) {
+      CoUninitialize();
     }
-    CoUninitialize();
 
-    // Send the result back to the main thread so that it can shutdown
+    // Send the result back to the main thread so that this thread can be
+    // cleanly shut down
     nsCOMPtr<nsIRunnable> resultrunnable = new AsyncLocalFileWinDone();
     NS_DispatchToMainThread(resultrunnable);
     return NS_OK;
@@ -155,13 +179,12 @@ private:
     HRESULT hr;
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
       // We have a directory so we should open the directory itself.
-      ITEMIDLIST* dir =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(mResolvedPath.get()));
+      LPITEMIDLIST dir = ILCreateFromPathW(mResolvedPath.get());
       if (!dir) {
         return NS_ERROR_FAILURE;
       }
 
-      const ITEMIDLIST* selection[] = { dir };
+      LPCITEMIDLIST selection[] = { dir };
       UINT count = ArrayLength(selection);
 
       //Perform the open of the directory.
@@ -179,21 +202,19 @@ private:
       PathRemoveFileSpecW(parentDirectoryPath);
 
       // We have a file so we should open the parent directory.
-      ITEMIDLIST* dir =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(parentDirectoryPath));
+      LPITEMIDLIST dir = ILCreateFromPathW(parentDirectoryPath);
       if (!dir) {
         return NS_ERROR_FAILURE;
       }
 
       // Set the item in the directory to select to the file we want to reveal.
-      ITEMIDLIST* item =
-        static_cast<ITEMIDLIST*>(ILCreateFromPathW(mResolvedPath.get()));
+      LPITEMIDLIST item = ILCreateFromPathW(mResolvedPath.get());
       if (!item) {
         CoTaskMemFree(dir);
         return NS_ERROR_FAILURE;
       }
 
-      const ITEMIDLIST* selection[] = { item };
+      LPCITEMIDLIST selection[] = { item };
       UINT count = ArrayLength(selection);
 
       //Perform the selection of the file.
@@ -206,93 +227,39 @@ private:
     return SUCCEEDED(hr) ? NS_OK : NS_ERROR_FAILURE;
   }
 
-  // Launches the default shell operation for the file path
-  nsresult Launch()
-  {
-    // use the app registry name to launch a shell execute....
-    SHELLEXECUTEINFOW seinfo;
-    memset(&seinfo, 0, sizeof(seinfo));
-    seinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
-    seinfo.hwnd   = nullptr;
-    seinfo.lpVerb = nullptr;
-    seinfo.lpFile = mResolvedPath.get();
-    seinfo.lpParameters =  nullptr;
-    seinfo.lpDirectory  = nullptr;
-    seinfo.nShow  = SW_SHOWNORMAL;
-
-    // Use the directory of the file we're launching as the working
-    // directory.  That way if we have a self extracting EXE it won't
-    // suggest to extract to the install directory.
-    WCHAR workingDirectory[MAX_PATH + 1] = { L'\0' };
-    wcsncpy(workingDirectory,  mResolvedPath.get(), MAX_PATH);
-    if (PathRemoveFileSpecW(workingDirectory)) {
-      seinfo.lpDirectory = workingDirectory;
-    } else {
-      NS_WARNING("Could not set working directory for launched file.");
-    }
-
-    if (ShellExecuteExW(&seinfo)) {
-      return NS_OK;
-    }
-    DWORD r = GetLastError();
-    // if the file has no association, we launch windows'
-    // "what do you want to do" dialog
-    if (r == SE_ERR_NOASSOC) {
-      nsAutoString shellArg;
-      shellArg.AssignLiteral(MOZ_UTF16("shell32.dll,OpenAs_RunDLL "));
-      shellArg.Append(mResolvedPath);
-      seinfo.lpFile = L"RUNDLL32.EXE";
-      seinfo.lpParameters = shellArg.get();
-      if (ShellExecuteExW(&seinfo)) {
-        return NS_OK;
-      }
-      r = GetLastError();
-    }
-    if (r < 32) {
-      switch (r) {
-        case 0:
-        case SE_ERR_OOM:
-          return NS_ERROR_OUT_OF_MEMORY;
-        case ERROR_FILE_NOT_FOUND:
-          return NS_ERROR_FILE_NOT_FOUND;
-        case ERROR_PATH_NOT_FOUND:
-          return NS_ERROR_FILE_UNRECOGNIZED_PATH;
-        case ERROR_BAD_FORMAT:
-          return NS_ERROR_FILE_CORRUPTED;
-        case SE_ERR_ACCESSDENIED:
-          return NS_ERROR_FILE_ACCESS_DENIED;
-        case SE_ERR_ASSOCINCOMPLETE:
-        case SE_ERR_NOASSOC:
-          return NS_ERROR_UNEXPECTED;
-        case SE_ERR_DDEBUSY:
-        case SE_ERR_DDEFAIL:
-        case SE_ERR_DDETIMEOUT:
-          return NS_ERROR_NOT_AVAILABLE;
-        case SE_ERR_DLLNOTFOUND:
-          return NS_ERROR_FAILURE;
-        case SE_ERR_SHARE:
-          return NS_ERROR_FILE_IS_LOCKED;
-        default:
-          return NS_ERROR_FILE_EXECUTION_FAILED;
-      }
-    }
-    return NS_OK;
-  }
-
-  // Stores the operation that will be performed on the thread
-  AsyncLocalFileWinOperation::FileOp mOperation;
-
   // Stores the path to perform the operation on
   nsString mResolvedPath;
 };
 
-class nsDriveEnumerator : public nsISimpleEnumerator
+class nsDriveEnumerator : public nsIDirectoryEnumerator
 {
 public:
   nsDriveEnumerator();
   NS_DECL_ISUPPORTS
   NS_DECL_NSISIMPLEENUMERATOR
   nsresult Init();
+
+  NS_IMETHOD GetNextFile(nsIFile** aResult) override
+  {
+    bool hasMore = false;
+    nsresult rv = HasMoreElements(&hasMore);
+    if (NS_FAILED(rv) || !hasMore) {
+      return rv;
+    }
+    nsCOMPtr<nsISupports> next;
+    rv = GetNext(getter_AddRefs(next));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIFile> result = do_QueryInterface(next);
+    result.forget(aResult);
+    return NS_OK;
+  }
+
+  NS_IMETHOD Close() override
+  {
+    return NS_OK;
+  }
+
 private:
   virtual ~nsDriveEnumerator();
 
@@ -306,169 +273,32 @@ private:
   nsAString::const_iterator mEndOfDrivesString;
 };
 
-//----------------------------------------------------------------------------
-// short cut resolver
-//----------------------------------------------------------------------------
-class ShortcutResolver
+
+//-----------------------------------------------------------------------------
+// static helper functions
+//-----------------------------------------------------------------------------
+
+// |out| must be an allocated buffer of size MAX_PATH
+static nsresult
+ResolveShellLink(const WCHAR* aIn, WCHAR* aOut)
 {
-public:
-  ShortcutResolver();
-  // nonvirtual since we're not subclassed
-  ~ShortcutResolver();
-
-  nsresult Init();
-  nsresult Resolve(const WCHAR* aIn, WCHAR* aOut);
-  nsresult SetShortcut(bool aUpdateExisting,
-                       const WCHAR* aShortcutPath,
-                       const WCHAR* aTargetPath,
-                       const WCHAR* aWorkingDir,
-                       const WCHAR* aArgs,
-                       const WCHAR* aDescription,
-                       const WCHAR* aIconFile,
-                       int32_t aIconIndex);
-
-private:
-  Mutex                  mLock;
-  RefPtr<IPersistFile> mPersistFile;
-  RefPtr<IShellLinkW>  mShellLink;
-};
-
-ShortcutResolver::ShortcutResolver() :
-  mLock("ShortcutResolver.mLock")
-{
-  CoInitialize(nullptr);
-}
-
-ShortcutResolver::~ShortcutResolver()
-{
-  CoUninitialize();
-}
-
-nsresult
-ShortcutResolver::Init()
-{
+  RefPtr<IPersistFile> persistFile;
+  RefPtr<IShellLinkW>  shellLink;
   // Get a pointer to the IPersistFile interface.
   if (FAILED(CoCreateInstance(CLSID_ShellLink,
                               nullptr,
                               CLSCTX_INPROC_SERVER,
                               IID_IShellLinkW,
-                              getter_AddRefs(mShellLink))) ||
-      FAILED(mShellLink->QueryInterface(IID_IPersistFile,
-                                        getter_AddRefs(mPersistFile)))) {
-    mShellLink = nullptr;
+                              getter_AddRefs(shellLink))) ||
+      FAILED(shellLink->QueryInterface(IID_IPersistFile,
+                                       getter_AddRefs(persistFile))) ||
+      FAILED(persistFile->Load(aIn, STGM_READ)) ||
+      FAILED(shellLink->Resolve(nullptr, SLR_NO_UI)) ||
+      FAILED(shellLink->GetPath(aOut, MAX_PATH, nullptr, SLGP_UNCPRIORITY))) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
 }
-
-// |out| must be an allocated buffer of size MAX_PATH
-nsresult
-ShortcutResolver::Resolve(const WCHAR* aIn, WCHAR* aOut)
-{
-  if (!mShellLink) {
-    return NS_ERROR_FAILURE;
-  }
-
-  MutexAutoLock lock(mLock);
-
-  if (FAILED(mPersistFile->Load(aIn, STGM_READ)) ||
-      FAILED(mShellLink->Resolve(nullptr, SLR_NO_UI)) ||
-      FAILED(mShellLink->GetPath(aOut, MAX_PATH, nullptr, SLGP_UNCPRIORITY))) {
-    return NS_ERROR_FAILURE;
-  }
-  return NS_OK;
-}
-
-nsresult
-ShortcutResolver::SetShortcut(bool aUpdateExisting,
-                              const WCHAR* aShortcutPath,
-                              const WCHAR* aTargetPath,
-                              const WCHAR* aWorkingDir,
-                              const WCHAR* aArgs,
-                              const WCHAR* aDescription,
-                              const WCHAR* aIconPath,
-                              int32_t aIconIndex)
-{
-  if (!mShellLink) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (!aShortcutPath) {
-    return NS_ERROR_FAILURE;
-  }
-
-  MutexAutoLock lock(mLock);
-
-  if (aUpdateExisting) {
-    if (FAILED(mPersistFile->Load(aShortcutPath, STGM_READWRITE))) {
-      return NS_ERROR_FAILURE;
-    }
-  } else {
-    if (!aTargetPath) {
-      return NS_ERROR_FILE_TARGET_DOES_NOT_EXIST;
-    }
-
-    // Since we reuse our IPersistFile, we have to clear out any values that
-    // may be left over from previous calls to SetShortcut.
-    if (FAILED(mShellLink->SetWorkingDirectory(L"")) ||
-        FAILED(mShellLink->SetArguments(L"")) ||
-        FAILED(mShellLink->SetDescription(L"")) ||
-        FAILED(mShellLink->SetIconLocation(L"", 0))) {
-      return NS_ERROR_FAILURE;
-    }
-  }
-
-  if (aTargetPath && FAILED(mShellLink->SetPath(aTargetPath))) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (aWorkingDir && FAILED(mShellLink->SetWorkingDirectory(aWorkingDir))) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (aArgs && FAILED(mShellLink->SetArguments(aArgs))) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (aDescription && FAILED(mShellLink->SetDescription(aDescription))) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (aIconPath && FAILED(mShellLink->SetIconLocation(aIconPath, aIconIndex))) {
-    return NS_ERROR_FAILURE;
-  }
-
-  if (FAILED(mPersistFile->Save(aShortcutPath,
-                                TRUE))) {
-    // Second argument indicates whether the file path specified in the
-    // first argument should become the "current working file" for this
-    // IPersistFile
-    return NS_ERROR_FAILURE;
-  }
-
-  return NS_OK;
-}
-
-static ShortcutResolver* gResolver = nullptr;
-
-static nsresult
-NS_CreateShortcutResolver()
-{
-  gResolver = new ShortcutResolver();
-  return gResolver->Init();
-}
-
-static void
-NS_DestroyShortcutResolver()
-{
-  delete gResolver;
-  gResolver = nullptr;
-}
-
-
-//-----------------------------------------------------------------------------
-// static helper functions
-//-----------------------------------------------------------------------------
 
 // certainly not all the error that can be
 // encountered, but many of them common ones
@@ -603,7 +433,7 @@ struct PRFilePrivate
 // copied from nsprpub/pr/src/{io/prfile.c | md/windows/w95io.c} :
 // PR_Open and _PR_MD_OPEN
 nsresult
-OpenFile(const nsAFlatString& aName,
+OpenFile(const nsString& aName,
          int aOsflags,
          int aMode,
          bool aShareDelete,
@@ -695,7 +525,7 @@ FileTimeToPRTime(const FILETIME* aFiletime, PRTime* aPrtm)
   const PRTime _pr_filetime_offset = 116444736000000000i64;
 #endif
 
-  PR_ASSERT(sizeof(FILETIME) == sizeof(PRTime));
+  MOZ_ASSERT(sizeof(FILETIME) == sizeof(PRTime));
   ::CopyMemory(aPrtm, aFiletime, sizeof(PRTime));
 #ifdef __GNUC__
   *aPrtm = (*aPrtm - _pr_filetime_offset) / 10LL;
@@ -707,11 +537,11 @@ FileTimeToPRTime(const FILETIME* aFiletime, PRTime* aPrtm)
 // copied from nsprpub/pr/src/{io/prfile.c | md/windows/w95io.c} with some
 // changes : PR_GetFileInfo64, _PR_MD_GETFILEINFO64
 static nsresult
-GetFileInfo(const nsAFlatString& aName, PRFileInfo64* aInfo)
+GetFileInfo(const nsString& aName, PRFileInfo64* aInfo)
 {
   WIN32_FILE_ATTRIBUTE_DATA fileData;
 
-  if (aName.IsEmpty() || aName.FindCharInSet(MOZ_UTF16("?*")) != kNotFound) {
+  if (aName.IsEmpty() || aName.FindCharInSet(u"?*") != kNotFound) {
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -748,7 +578,7 @@ struct nsDir
 };
 
 static nsresult
-OpenDir(const nsAFlatString& aName, nsDir** aDir)
+OpenDir(const nsString& aName, nsDir** aDir)
 {
   if (NS_WARN_IF(!aDir)) {
     return NS_ERROR_INVALID_ARG;
@@ -851,8 +681,7 @@ CloseDir(nsDir*& aDir)
 //-----------------------------------------------------------------------------
 
 class nsDirEnumerator final
-  : public nsISimpleEnumerator
-  , public nsIDirectoryEnumerator
+  : public nsIDirectoryEnumerator
 {
 private:
   ~nsDirEnumerator()
@@ -891,7 +720,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD HasMoreElements(bool* aResult)
+  NS_IMETHOD HasMoreElements(bool* aResult) override
   {
     nsresult rv;
     if (!mNext && mDir) {
@@ -921,7 +750,7 @@ public:
         return rv;
       }
 
-      mNext = do_QueryInterface(file);
+      mNext = file.forget();
     }
     *aResult = mNext != nullptr;
     if (!*aResult) {
@@ -930,7 +759,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD GetNext(nsISupports** aResult)
+  NS_IMETHOD GetNext(nsISupports** aResult) override
   {
     nsresult rv;
     bool hasMore;
@@ -939,14 +768,11 @@ public:
       return rv;
     }
 
-    *aResult = mNext;        // might return nullptr
-    NS_IF_ADDREF(*aResult);
-
-    mNext = nullptr;
+    mNext.forget(aResult);
     return NS_OK;
   }
 
-  NS_IMETHOD GetNextFile(nsIFile** aResult)
+  NS_IMETHOD GetNextFile(nsIFile** aResult) override
   {
     *aResult = nullptr;
     bool hasMore = false;
@@ -954,13 +780,11 @@ public:
     if (NS_FAILED(rv) || !hasMore) {
       return rv;
     }
-    *aResult = mNext;
-    NS_IF_ADDREF(*aResult);
-    mNext = nullptr;
+    mNext.forget(aResult);
     return NS_OK;
   }
 
-  NS_IMETHOD Close()
+  NS_IMETHOD Close() override
   {
     if (mDir) {
       nsresult rv = CloseDir(mDir);
@@ -992,6 +816,12 @@ nsLocalFile::nsLocalFile()
 {
 }
 
+nsLocalFile::nsLocalFile(const nsAString& aFilePath)
+  : mFollowSymlinks(false)
+{
+  InitWithPath(aFilePath);
+}
+
 nsresult
 nsLocalFile::nsLocalFileConstructor(nsISupports* aOuter, const nsIID& aIID,
                                     void** aInstancePtr)
@@ -1018,7 +848,6 @@ nsLocalFile::nsLocalFileConstructor(nsISupports* aOuter, const nsIID& aIID,
 //-----------------------------------------------------------------------------
 
 NS_IMPL_ISUPPORTS(nsLocalFile,
-                  nsILocalFile,
                   nsIFile,
                   nsILocalFileWin,
                   nsIHashable)
@@ -1041,20 +870,15 @@ nsLocalFile::nsLocalFile(const nsLocalFile& aOther)
 nsresult
 nsLocalFile::ResolveShortcut()
 {
-  // we can't do anything without the resolver
-  if (!gResolver) {
-    return NS_ERROR_FAILURE;
-  }
-
   mResolvedPath.SetLength(MAX_PATH);
   if (mResolvedPath.Length() != MAX_PATH) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  wchar_t* resolvedPath = wwc(mResolvedPath.BeginWriting());
+  wchar_t* resolvedPath = mResolvedPath.get();
 
   // resolve this shortcut
-  nsresult rv = gResolver->Resolve(mWorkingPath.get(), resolvedPath);
+  nsresult rv = ResolveShellLink(mWorkingPath.get(), resolvedPath);
 
   size_t len = NS_FAILED(rv) ? 0 : wcslen(resolvedPath);
   mResolvedPath.SetLength(len);
@@ -1072,7 +896,7 @@ nsLocalFile::ResolveAndStat()
     return NS_OK;
   }
 
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsLocalFile::ResolveAndStat", OTHER);
   // we can't resolve/stat anything that isn't a valid NSPR addressable path
   if (mWorkingPath.IsEmpty()) {
     return NS_ERROR_FILE_INVALID_PATH;
@@ -1081,9 +905,9 @@ nsLocalFile::ResolveAndStat()
   // this is usually correct
   mResolvedPath.Assign(mWorkingPath);
 
-  // slutty hack designed to work around bug 134796 until it is fixed
-  nsAutoString nsprPath(mWorkingPath.get());
-  if (mWorkingPath.Length() == 2 && mWorkingPath.CharAt(1) == L':') {
+  // Make sure root paths have a trailing slash.
+  nsAutoString nsprPath(mWorkingPath);
+  if (mWorkingPath.Length() == 2 && mWorkingPath.CharAt(1) == u':') {
     nsprPath.Append('\\');
   }
 
@@ -1170,7 +994,7 @@ nsLocalFile::Resolve()
 }
 
 //-----------------------------------------------------------------------------
-// nsLocalFile::nsIFile,nsILocalFile
+// nsLocalFile::nsIFile
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
@@ -1221,6 +1045,10 @@ nsLocalFile::InitWithPath(const nsAString& aFilePath)
     return NS_ERROR_FILE_UNRECOGNIZED_PATH;
   }
 
+  if (FilePreferences::IsBlockedUNCPath(aFilePath)) {
+    return NS_ERROR_FILE_ACCESS_DENIED;
+  }
+
   if (secondChar != L':' && (secondChar != L'\\' || firstChar != L'\\')) {
     return NS_ERROR_FILE_UNRECOGNIZED_PATH;
   }
@@ -1243,6 +1071,128 @@ nsLocalFile::InitWithPath(const nsAString& aFilePath)
 
 }
 
+// Strip a handler command string of its quotes and parameters.
+static void
+CleanupHandlerPath(nsString& aPath)
+{
+  // Example command strings passed into this routine:
+
+  // 1) C:\Program Files\Company\some.exe -foo -bar
+  // 2) C:\Program Files\Company\some.dll
+  // 3) C:\Windows\some.dll,-foo -bar
+  // 4) C:\Windows\some.cpl,-foo -bar
+
+  int32_t lastCommaPos = aPath.RFindChar(',');
+  if (lastCommaPos != kNotFound)
+    aPath.Truncate(lastCommaPos);
+
+  aPath.Append(' ');
+
+  // case insensitive
+  int32_t index = aPath.Find(".exe ", true);
+  if (index == kNotFound)
+    index = aPath.Find(".dll ", true);
+  if (index == kNotFound)
+    index = aPath.Find(".cpl ", true);
+
+  if (index != kNotFound)
+    aPath.Truncate(index + 4);
+  aPath.Trim(" ", true, true);
+}
+
+// Strip the windows host process bootstrap executable rundll32.exe
+// from a handler's command string if it exists.
+static void
+StripRundll32(nsString& aCommandString)
+{
+  // Example rundll formats:
+  // C:\Windows\System32\rundll32.exe "path to dll"
+  // rundll32.exe "path to dll"
+  // C:\Windows\System32\rundll32.exe "path to dll", var var
+  // rundll32.exe "path to dll", var var
+
+  NS_NAMED_LITERAL_STRING(rundllSegment, "rundll32.exe ");
+  NS_NAMED_LITERAL_STRING(rundllSegmentShort, "rundll32 ");
+
+  // case insensitive
+  int32_t strLen = rundllSegment.Length();
+  int32_t index = aCommandString.Find(rundllSegment, true);
+  if (index == kNotFound) {
+    strLen = rundllSegmentShort.Length();
+    index = aCommandString.Find(rundllSegmentShort, true);
+  }
+
+  if (index != kNotFound) {
+    uint32_t rundllSegmentLength = index + strLen;
+    aCommandString.Cut(0, rundllSegmentLength);
+  }
+}
+
+// Returns the fully qualified path to an application handler based on
+// a parameterized command string. Note this routine should not be used
+// to launch the associated application as it strips parameters and
+// rundll.exe from the string. Designed for retrieving display information
+// on a particular handler.
+/* static */ bool
+nsLocalFile::CleanupCmdHandlerPath(nsAString& aCommandHandler)
+{
+  nsAutoString handlerCommand(aCommandHandler);
+
+  // Straight command path:
+  //
+  // %SystemRoot%\system32\NOTEPAD.EXE var
+  // "C:\Program Files\iTunes\iTunes.exe" var var
+  // C:\Program Files\iTunes\iTunes.exe var var
+  //
+  // Example rundll handlers:
+  //
+  // rundll32.exe "%ProgramFiles%\Win...ery\PhotoViewer.dll", var var
+  // rundll32.exe "%ProgramFiles%\Windows Photo Gallery\PhotoViewer.dll"
+  // C:\Windows\System32\rundll32.exe "path to dll", var var
+  // %SystemRoot%\System32\rundll32.exe "%ProgramFiles%\Win...ery\Photo
+  //    Viewer.dll", var var
+
+  // Expand environment variables so we have full path strings.
+  uint32_t bufLength = ::ExpandEnvironmentStringsW(handlerCommand.get(),
+                                                   nullptr, 0);
+  if (bufLength == 0) // Error
+    return false;
+
+  auto destination = mozilla::MakeUniqueFallible<wchar_t[]>(bufLength);
+  if (!destination)
+    return false;
+  if (!::ExpandEnvironmentStringsW(handlerCommand.get(), destination.get(),
+                                   bufLength))
+    return false;
+
+  handlerCommand.Assign(destination.get());
+
+  // Remove quotes around paths
+  handlerCommand.StripChars("\"");
+
+  // Strip windows host process bootstrap so we can get to the actual
+  // handler.
+  StripRundll32(handlerCommand);
+
+  // Trim any command parameters so that we have a native path we can
+  // initialize a local file with.
+  CleanupHandlerPath(handlerCommand);
+
+  aCommandHandler.Assign(handlerCommand);
+  return true;
+}
+
+
+NS_IMETHODIMP
+nsLocalFile::InitWithCommandLine(const nsAString& aCommandLine)
+{
+  nsAutoString commandLine(aCommandLine);
+  if (!CleanupCmdHandlerPath(commandLine)) {
+    return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+  }
+  return InitWithPath(commandLine);
+}
+
 NS_IMETHODIMP
 nsLocalFile::OpenNSPRFileDesc(int32_t aFlags, int32_t aMode,
                               PRFileDesc** aResult)
@@ -1259,7 +1209,7 @@ nsLocalFile::OpenNSPRFileDesc(int32_t aFlags, int32_t aMode,
 NS_IMETHODIMP
 nsLocalFile::OpenANSIFileDesc(const char* aMode, FILE** aResult)
 {
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
     return rv;
   }
@@ -1281,7 +1231,7 @@ nsLocalFile::Create(uint32_t aType, uint32_t aAttributes)
     return NS_ERROR_FILE_UNKNOWN_TYPE;
   }
 
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
     return rv;
   }
@@ -1299,7 +1249,7 @@ nsLocalFile::Create(uint32_t aType, uint32_t aAttributes)
   // Skip the first 'X:\' for the first form, and skip the first full
   // '\\machine\volume\' segment for the second form.
 
-  wchar_t* path = wwc(mResolvedPath.BeginWriting());
+  wchar_t* path = char16ptr_t(mResolvedPath.BeginWriting());
 
   if (path[0] == L'\\' && path[1] == L'\\') {
     // dealing with a UNC path here; skip past '\\machine\'
@@ -1401,7 +1351,7 @@ nsLocalFile::AppendRelativePath(const nsAString& aNode)
 
 
 nsresult
-nsLocalFile::AppendInternal(const nsAFlatString& aNode,
+nsLocalFile::AppendInternal(const nsString& aNode,
                             bool aMultipleComponents)
 {
   if (aNode.IsEmpty()) {
@@ -1538,8 +1488,9 @@ nsLocalFile::Normalize()
       path.Replace(0, 2, currentDir + NS_LITERAL_STRING("\\"));
     }
   }
-  NS_POSTCONDITION(0 < rootIdx && rootIdx < (int32_t)path.Length(), "rootIdx is invalid");
-  NS_POSTCONDITION(path.CharAt(rootIdx) == '\\', "rootIdx is invalid");
+
+  MOZ_ASSERT(0 < rootIdx && rootIdx < (int32_t)path.Length(), "rootIdx is invalid");
+  MOZ_ASSERT(path.CharAt(rootIdx) == '\\', "rootIdx is invalid");
 
   // if there is nothing following the root path then it is already normalized
   if (rootIdx + 1 == (int32_t)path.Length()) {
@@ -1695,7 +1646,7 @@ typedef struct
 NS_IMETHODIMP
 nsLocalFile::GetVersionInfoField(const char* aField, nsAString& aResult)
 {
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1741,66 +1692,6 @@ nsLocalFile::GetVersionInfoField(const char* aField, nsAString& aResult)
     }
   }
   free(ver);
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsLocalFile::SetShortcut(nsIFile* aTargetFile,
-                         nsIFile* aWorkingDir,
-                         const char16_t* aArgs,
-                         const char16_t* aDescription,
-                         nsIFile* aIconFile,
-                         int32_t aIconIndex)
-{
-  bool exists;
-  nsresult rv = this->Exists(&exists);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  const WCHAR* targetFilePath = nullptr;
-  const WCHAR* workingDirPath = nullptr;
-  const WCHAR* iconFilePath = nullptr;
-
-  nsAutoString targetFilePathAuto;
-  if (aTargetFile) {
-    rv = aTargetFile->GetPath(targetFilePathAuto);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    targetFilePath = targetFilePathAuto.get();
-  }
-
-  nsAutoString workingDirPathAuto;
-  if (aWorkingDir) {
-    rv = aWorkingDir->GetPath(workingDirPathAuto);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    workingDirPath = workingDirPathAuto.get();
-  }
-
-  nsAutoString iconPathAuto;
-  if (aIconFile) {
-    rv = aIconFile->GetPath(iconPathAuto);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    iconFilePath = iconPathAuto.get();
-  }
-
-  rv = gResolver->SetShortcut(exists,
-                              mWorkingPath.get(),
-                              targetFilePath,
-                              workingDirPath,
-                              char16ptr_t(aArgs),
-                              char16ptr_t(aDescription),
-                              iconFilePath,
-                              iconFilePath ? aIconIndex : 0);
-  if (targetFilePath && NS_SUCCEEDED(rv)) {
-    MakeDirty();
-  }
 
   return rv;
 }
@@ -1866,7 +1757,10 @@ nsLocalFile::CopySingleFile(nsIFile* aSourceFile, nsIFile* aDestParent,
   // resolve shortcuts, we must work with the
   // target.
   nsAutoString destPath;
-  aDestParent->GetTarget(destPath);
+  rv = aDestParent->GetTarget(destPath);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   destPath.Append('\\');
 
@@ -1902,13 +1796,15 @@ nsLocalFile::CopySingleFile(nsIFile* aSourceFile, nsIFile* aDestParent,
   // So we only use COPY_FILE_NO_BUFFERING when we have a remote drive.
   int copyOK;
   DWORD dwCopyFlags = COPY_FILE_ALLOW_DECRYPTED_DESTINATION;
-  if (IsVistaOrLater()) {
-    bool path1Remote, path2Remote;
-    if (!IsRemoteFilePath(filePath.get(), path1Remote) ||
-        !IsRemoteFilePath(destPath.get(), path2Remote) ||
-        path1Remote || path2Remote) {
-      dwCopyFlags |= COPY_FILE_NO_BUFFERING;
-    }
+  bool path1Remote, path2Remote;
+  if (!IsRemoteFilePath(filePath.get(), path1Remote) ||
+      !IsRemoteFilePath(destPath.get(), path2Remote) ||
+      path1Remote || path2Remote) {
+    dwCopyFlags |= COPY_FILE_NO_BUFFERING;
+  }
+
+  if (FilePreferences::IsBlockedUNCPath(destPath)) {
+    return NS_ERROR_FILE_ACCESS_DENIED;
   }
 
   if (!move) {
@@ -1990,27 +1886,41 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
   }
 
   // make sure it exists and is a directory.  Create it if not there.
-  bool exists;
-  newParentDir->Exists(&exists);
+  bool exists = false;
+  rv = newParentDir->Exists(&exists);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   if (!exists) {
     rv = newParentDir->Create(DIRECTORY_TYPE, 0644);  // TODO, what permissions should we use
     if (NS_FAILED(rv)) {
       return rv;
     }
   } else {
-    bool isDir;
-    newParentDir->IsDirectory(&isDir);
+    bool isDir = false;
+    rv = newParentDir->IsDirectory(&isDir);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
     if (!isDir) {
       if (followSymlinks) {
-        bool isLink;
-        newParentDir->IsSymlink(&isLink);
+        bool isLink = false;
+        rv = newParentDir->IsSymlink(&isLink);
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+
         if (isLink) {
           nsAutoString target;
-          newParentDir->GetTarget(target);
+          rv = newParentDir->GetTarget(target);
+          if (NS_FAILED(rv)) {
+            return rv;
+          }
 
           nsCOMPtr<nsIFile> realDest = new nsLocalFile();
           rv = realDest->InitWithPath(target);
-
           if (NS_FAILED(rv)) {
             return rv;
           }
@@ -2025,10 +1935,18 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
 
   // Try different ways to move/copy files/directories
   bool done = false;
-  bool isDir;
-  IsDirectory(&isDir);
-  bool isSymlink;
-  IsSymlink(&isSymlink);
+
+  bool isDir = false;
+  rv = IsDirectory(&isDir);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  bool isSymlink = false;
+  rv = IsSymlink(&isSymlink);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   // Try to move the file or directory, or try to copy a single file (or non-followed symlink)
   if (move || !isDir || (isSymlink && !followSymlinks)) {
@@ -2050,18 +1968,25 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
     // create a new target destination in the new parentDir;
     nsCOMPtr<nsIFile> target;
     rv = newParentDir->Clone(getter_AddRefs(target));
-
     if (NS_FAILED(rv)) {
       return rv;
     }
 
     nsAutoString allocatedNewName;
     if (aNewName.IsEmpty()) {
-      bool isLink;
-      IsSymlink(&isLink);
+      bool isLink = false;
+      rv = IsSymlink(&isLink);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+
       if (isLink) {
         nsAutoString temp;
-        GetTarget(temp);
+        rv = GetTarget(temp);
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+
         int32_t offset = temp.RFindChar(L'\\');
         if (offset == kNotFound) {
           allocatedNewName = temp;
@@ -2083,7 +2008,11 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
     allocatedNewName.Truncate();
 
     // check if the destination directory already exists
-    target->Exists(&exists);
+    rv = target->Exists(&exists);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
     if (!exists) {
       // if the destination directory cannot be created, return an error
       rv = target->Create(DIRECTORY_TYPE, 0644);  // TODO, what permissions should we use
@@ -2092,9 +2021,13 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
       }
     } else {
       // check if the destination directory is writable and empty
-      bool isWritable;
+      bool isWritable = false;
+      rv = target->IsWritable(&isWritable);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
 
-      target->IsWritable(&isWritable);
+
       if (!isWritable) {
         return NS_ERROR_FILE_ACCESS_DENIED;
       }
@@ -2121,36 +2054,37 @@ nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
       return rv;
     }
 
-    bool more = false;
-    while (NS_SUCCEEDED(dirEnum->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsISupports> item;
-      nsCOMPtr<nsIFile> file;
-      dirEnum->GetNext(getter_AddRefs(item));
-      file = do_QueryInterface(item);
-      if (file) {
-        bool isDir, isLink;
+    nsCOMPtr<nsIFile> file;
+    while (NS_SUCCEEDED(dirEnum->GetNextFile(getter_AddRefs(file))) && file) {
+      bool isDir = false;
+      rv = file->IsDirectory(&isDir);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
 
-        file->IsDirectory(&isDir);
-        file->IsSymlink(&isLink);
+      bool isLink = false;
+      rv = file->IsSymlink(&isLink);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
 
-        if (move) {
-          if (followSymlinks) {
-            return NS_ERROR_FAILURE;
-          }
+      if (move) {
+        if (followSymlinks) {
+          return NS_ERROR_FAILURE;
+        }
 
-          rv = file->MoveTo(target, EmptyString());
-          if (NS_FAILED(rv)) {
-            return rv;
-          }
+        rv = file->MoveTo(target, EmptyString());
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+      } else {
+        if (followSymlinks) {
+          rv = file->CopyToFollowingLinks(target, EmptyString());
         } else {
-          if (followSymlinks) {
-            rv = file->CopyToFollowingLinks(target, EmptyString());
-          } else {
-            rv = file->CopyTo(target, EmptyString());
-          }
-          if (NS_FAILED(rv)) {
-            return rv;
-          }
+          rv = file->CopyTo(target, EmptyString());
+        }
+        if (NS_FAILED(rv)) {
+          return rv;
         }
       }
     }
@@ -2243,16 +2177,23 @@ nsLocalFile::RenameTo(nsIFile* aNewParentDir, const nsAString& aNewName)
   }
 
   // make sure it exists and is a directory.  Create it if not there.
-  bool exists;
-  targetParentDir->Exists(&exists);
+  bool exists = false;
+  rv = targetParentDir->Exists(&exists);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   if (!exists) {
     rv = targetParentDir->Create(DIRECTORY_TYPE, 0644);
     if (NS_FAILED(rv)) {
       return rv;
     }
   } else {
-    bool isDir;
-    targetParentDir->IsDirectory(&isDir);
+    bool isDir = false;
+    rv = targetParentDir->IsDirectory(&isDir);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
     if (!isDir) {
       return NS_ERROR_FILE_DESTINATION_NOT_DIR;
     }
@@ -2338,16 +2279,16 @@ nsLocalFile::Remove(bool aRecursive)
   // Check we are correctly initialized.
   CHECK_mWorkingPath();
 
-  bool isDir, isLink;
-  nsresult rv;
+  nsresult rv = NS_OK;
 
-  isDir = false;
+  bool isLink = false;
   rv = IsSymlink(&isLink);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
   // only check to see if we have a directory if it isn't a link
+  bool isDir = false;
   if (!isLink) {
     rv = IsDirectory(&isDir);
     if (NS_FAILED(rv)) {
@@ -2444,7 +2385,7 @@ nsLocalFile::SetLastModifiedTime(PRTime aLastModifiedTime)
   // Check we are correctly initialized.
   CHECK_mWorkingPath();
 
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -2536,9 +2477,17 @@ nsLocalFile::GetPermissions(uint32_t* aPermissions)
     return rv;
   }
 
-  bool isWritable, isExecutable;
-  IsWritable(&isWritable);
-  IsExecutable(&isExecutable);
+  bool isWritable = false;
+  rv = IsWritable(&isWritable);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  bool isExecutable = false;
+  rv = IsExecutable(&isExecutable);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   *aPermissions = PR_IRUSR | PR_IRGRP | PR_IROTH;     // all read
   if (isWritable) {
@@ -2590,7 +2539,7 @@ nsLocalFile::SetPermissions(uint32_t aPermissions)
   // If true, then this will be for the target of the shortcut file,
   // otherwise it will be for the shortcut file itself (i.e. the same
   // results as SetPermissionsOfLink)
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -2679,7 +2628,7 @@ nsLocalFile::SetFileSize(int64_t aFileSize)
   // Check we are correctly initialized.
   CHECK_mWorkingPath();
 
-  nsresult rv = ResolveAndStat();
+  nsresult rv = Resolve();
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -2907,7 +2856,7 @@ nsLocalFile::IsExecutable(bool* aResult)
   }
 
   //TODO: shouldn't we be checking mFollowSymlinks here?
-  bool symLink;
+  bool symLink = false;
   rv = IsSymlink(&symLink);
   if (NS_FAILED(rv)) {
     return rv;
@@ -2997,6 +2946,7 @@ nsLocalFile::IsExecutable(bool* aResult)
       "scf",         // Windows explorer command
       "scr",
       "sct",
+      "settingcontent-ms",
       "shb",
       "shs",
       "url",
@@ -3172,8 +3122,7 @@ nsLocalFile::GetTarget(nsAString& aResult)
 {
   aResult.Truncate();
 #if STRICT_FAKE_SYMLINKS
-  bool symLink;
-
+  bool symLink = false;
   nsresult rv = IsSymlink(&symLink);
   if (NS_FAILED(rv)) {
     return rv;
@@ -3183,7 +3132,7 @@ nsLocalFile::GetTarget(nsAString& aResult)
     return NS_ERROR_FILE_INVALID_PATH;
   }
 #endif
-  ResolveAndStat();
+  Resolve();
 
   aResult = mResolvedPath;
   return NS_OK;
@@ -3206,7 +3155,7 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 
 
 NS_IMETHODIMP
-nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator** aEntries)
+nsLocalFile::GetDirectoryEntriesImpl(nsIDirectoryEnumerator** aEntries)
 {
   nsresult rv;
 
@@ -3313,9 +3262,7 @@ nsLocalFile::Reveal()
     return rv;
   }
 
-  nsCOMPtr<nsIRunnable> runnable =
-    new AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::RevealOp,
-                                   mResolvedPath);
+  nsCOMPtr<nsIRunnable> runnable = new AsyncRevealOperation(mResolvedPath);
 
   // After the dispatch, the result runnable will shut down the worker
   // thread, so we can let it go.
@@ -3335,21 +3282,74 @@ nsLocalFile::Launch()
     return rv;
   }
 
-  // To create a new thread, get the thread manager
-  nsCOMPtr<nsIThreadManager> tm = do_GetService(NS_THREADMANAGER_CONTRACTID);
-  nsCOMPtr<nsIThread> mythread;
-  rv = tm->NewThread(0, 0, getter_AddRefs(mythread));
-  if (NS_FAILED(rv)) {
-    return rv;
+  // use the app registry name to launch a shell execute....
+  SHELLEXECUTEINFOW seinfo;
+  memset(&seinfo, 0, sizeof(seinfo));
+  seinfo.cbSize = sizeof(SHELLEXECUTEINFOW);
+  seinfo.fMask = SEE_MASK_ASYNCOK;
+  seinfo.hwnd = GetMostRecentNavigatorHWND();
+  seinfo.lpVerb = nullptr;
+  seinfo.lpFile = mResolvedPath.get();
+  seinfo.lpParameters = nullptr;
+  seinfo.lpDirectory = nullptr;
+  seinfo.nShow = SW_SHOWNORMAL;
+
+  // Use the directory of the file we're launching as the working
+  // directory. That way if we have a self extracting EXE it won't
+  // suggest to extract to the install directory.
+  WCHAR workingDirectory[MAX_PATH + 1] = { L'\0' };
+  wcsncpy(workingDirectory, mResolvedPath.get(), MAX_PATH);
+  if (PathRemoveFileSpecW(workingDirectory)) {
+    seinfo.lpDirectory = workingDirectory;
+  } else {
+    NS_WARNING("Could not set working directory for launched file.");
   }
 
-  nsCOMPtr<nsIRunnable> runnable =
-    new AsyncLocalFileWinOperation(AsyncLocalFileWinOperation::LaunchOp,
-                                   mResolvedPath);
-
-  // After the dispatch, the result runnable will shut down the worker
-  // thread, so we can let it go.
-  mythread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+  if (ShellExecuteExW(&seinfo)) {
+    return NS_OK;
+  }
+  DWORD r = GetLastError();
+  // if the file has no association, we launch windows'
+  // "what do you want to do" dialog
+  if (r == SE_ERR_NOASSOC) {
+    nsAutoString shellArg;
+    shellArg.AssignLiteral(u"shell32.dll,OpenAs_RunDLL ");
+    shellArg.Append(mResolvedPath);
+    seinfo.lpFile = L"RUNDLL32.EXE";
+    seinfo.lpParameters = shellArg.get();
+    if (ShellExecuteExW(&seinfo)) {
+      return NS_OK;
+    }
+    r = GetLastError();
+  }
+  if (r < 32) {
+    switch (r) {
+      case 0:
+      case SE_ERR_OOM:
+        return NS_ERROR_OUT_OF_MEMORY;
+      case ERROR_FILE_NOT_FOUND:
+        return NS_ERROR_FILE_NOT_FOUND;
+      case ERROR_PATH_NOT_FOUND:
+        return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+      case ERROR_BAD_FORMAT:
+        return NS_ERROR_FILE_CORRUPTED;
+      case SE_ERR_ACCESSDENIED:
+        return NS_ERROR_FILE_ACCESS_DENIED;
+      case SE_ERR_ASSOCINCOMPLETE:
+      case SE_ERR_NOASSOC:
+        return NS_ERROR_UNEXPECTED;
+      case SE_ERR_DDEBUSY:
+      case SE_ERR_DDEFAIL:
+      case SE_ERR_DDETIMEOUT:
+        return NS_ERROR_NOT_AVAILABLE;
+      case SE_ERR_DLLNOTFOUND:
+        return NS_ERROR_FAILURE;
+      case SE_ERR_SHARE:
+        return NS_ERROR_FILE_IS_LOCKED;
+      default:
+        return NS_ERROR_FILE_EXECUTION_FAILED;
+    }
+  }
   return NS_OK;
 }
 
@@ -3437,17 +3437,19 @@ nsLocalFile::SetNativeLeafName(const nsACString& aLeafName)
 }
 
 
-NS_IMETHODIMP
-nsLocalFile::GetNativePath(nsACString& aResult)
+nsString
+nsLocalFile::NativePath()
 {
-  //NS_WARNING("This API is lossy. Use GetPath !");
-  nsAutoString tmp;
-  nsresult rv = GetPath(tmp);
-  if (NS_SUCCEEDED(rv)) {
-    rv = NS_CopyUnicodeToNative(tmp, aResult);
-  }
+  return mWorkingPath;
+}
 
-  return rv;
+nsCString
+nsIFile::HumanReadablePath()
+{
+  nsString path;
+  DebugOnly<nsresult> rv = GetPath(path);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  return NS_ConvertUTF16toUTF8(path);
 }
 
 
@@ -3590,24 +3592,7 @@ nsLocalFile::GetHashCode(uint32_t* aResult)
   return NS_OK;
 }
 
-//-----------------------------------------------------------------------------
-// nsLocalFile <static members>
-//-----------------------------------------------------------------------------
-
-void
-nsLocalFile::GlobalInit()
-{
-  DebugOnly<nsresult> rv = NS_CreateShortcutResolver();
-  NS_ASSERTION(NS_SUCCEEDED(rv), "Shortcut resolver could not be created");
-}
-
-void
-nsLocalFile::GlobalShutdown()
-{
-  NS_DestroyShortcutResolver();
-}
-
-NS_IMPL_ISUPPORTS(nsDriveEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS(nsDriveEnumerator, nsIDirectoryEnumerator, nsISimpleEnumerator)
 
 nsDriveEnumerator::nsDriveEnumerator()
 {
@@ -3628,7 +3613,7 @@ nsDriveEnumerator::Init()
   if (!mDrives.SetLength(length + 1, fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-  if (!GetLogicalDriveStringsW(length, wwc(mDrives.BeginWriting()))) {
+  if (!GetLogicalDriveStringsW(length, mDrives.get())) {
     return NS_ERROR_FAILURE;
   }
   mDrives.BeginReading(mStartOfCurrentDrive);

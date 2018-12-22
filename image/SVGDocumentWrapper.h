@@ -30,6 +30,7 @@ class nsIFrame;
 namespace mozilla {
 namespace dom {
 class SVGSVGElement;
+class SVGDocument;
 } // namespace dom
 
 namespace image {
@@ -54,7 +55,7 @@ public:
   /**
    * Returns the wrapped document, or nullptr on failure. (No AddRef.)
    */
-  nsIDocument* GetDocument();
+  mozilla::dom::SVGDocument* GetDocument();
 
   /**
    * Returns the root <svg> element for the wrapped document, or nullptr on
@@ -82,7 +83,7 @@ public:
 
   /**
    * Modifier to update the viewport dimensions of the wrapped document. This
-   * method performs a synchronous "Flush_Layout" on the wrapped document,
+   * method performs a synchronous "FlushType::Layout" on the wrapped document,
    * since a viewport-change affects layout.
    *
    * @param aViewportSize The new viewport dimensions.

@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFEPointLightElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEPointLightElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEPointLightElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEPointLightElement::sNumberInfo[3] =
@@ -29,7 +29,7 @@ nsSVGElement::NumberInfo SVGFEPointLightElement::sNumberInfo[3] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEPointLightElement)
 
@@ -38,7 +38,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEPointLightElement)
 
 bool
 SVGFEPointLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                  nsIAtom* aAttribute) const
+                                                  nsAtom* aAttribute) const
 {
   return aNameSpaceID == kNameSpaceID_None &&
          (aAttribute == nsGkAtoms::x ||
@@ -53,7 +53,7 @@ SVGFEPointLightElement::ComputeLightAttributes(nsSVGFilterInstance* aInstance)
 {
   Point3D lightPos;
   GetAnimatedNumberValues(&lightPos.x, &lightPos.y, &lightPos.z, nullptr);
-  
+
   AttributeMap map;
   map.Set(eLightType, (uint32_t)eLightTypePoint);
   map.Set(ePointLightPosition, aInstance->ConvertLocation(lightPos));

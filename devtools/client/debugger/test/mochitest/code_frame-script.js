@@ -1,7 +1,6 @@
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-const { loadSubScript } = Cc['@mozilla.org/moz/jssubscript-loader;1'].
+const { loadSubScript } = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                           getService(Ci.mozIJSSubScriptLoader);
 
 // Set up a dummy environment so that EventUtils works. We need to be careful to
@@ -10,15 +9,15 @@ const { loadSubScript } = Cc['@mozilla.org/moz/jssubscript-loader;1'].
 let EventUtils = {};
 EventUtils.window = content;
 EventUtils.parent = EventUtils.window;
-EventUtils._EU_Ci = Components.interfaces;
-EventUtils._EU_Cc = Components.classes;
+EventUtils._EU_Ci = Ci;
+EventUtils._EU_Cc = Cc;
 EventUtils.navigator = content.navigator;
 EventUtils.KeyboardEvent = content.KeyboardEvent;
 loadSubScript("chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
 
 dump("Frame script loaded.\n");
 
-var workers = {}
+var workers = {};
 
 this.call = function (name, args) {
   dump("Calling function with name " + name + ".\n");
@@ -46,11 +45,10 @@ this.createWorker = function (url) {
 
   return new Promise(function (resolve, reject) {
     let worker = new content.Worker(url);
-    worker.addEventListener("message", function listener() {
-      worker.removeEventListener("message", listener);
+    worker.addEventListener("message", function () {
       workers[url] = worker;
       resolve();
-    });
+    }, {once: true});
   });
 };
 
@@ -67,10 +65,9 @@ this.postMessageToWorker = function (url, message) {
   return new Promise(function (resolve) {
     let worker = workers[url];
     worker.postMessage(message);
-    worker.addEventListener("message", function listener() {
-      worker.removeEventListener("message", listener);
+    worker.addEventListener("message", function () {
       resolve();
-    });
+    }, {once: true});
   });
 };
 
@@ -99,8 +96,7 @@ addMessageListener("test:postMessageToWorker", function (message) {
 
   let worker = workers[message.data.url];
   worker.postMessage(message.data.message);
-  worker.addEventListener("message", function listener() {
-    worker.removeEventListener("message", listener);
+  worker.addEventListener("message", function () {
     sendAsyncMessage("test:postMessageToWorker");
-  });
+  }, {once: true});
 });

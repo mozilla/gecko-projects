@@ -4,37 +4,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cc, Ci, Cu} = require("chrome");
 const Services = require("Services");
-const promise = require("promise");
+const defer = require("devtools/shared/defer");
 
-function l10n(name) {
-  const bundle = Services.strings.createBundle("chrome://devtools/locale/toolbox.properties");
-  try {
-    return bundle.GetStringFromName(name);
-  } catch (e) {
-    throw new Error("Failed loading l10n string: " + name);
-  }
-}
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
 function handleThreadState(toolbox, event, packet) {
   // Suppress interrupted events by default because the thread is
   // paused/resumed a lot for various actions.
-  if (event !== "paused" || packet.why.type !== "interrupted") {
-    // TODO: Bug 1225492, we continue emitting events on the target
-    // like we used to, but we should emit these only on the
-    // threadClient now.
-    toolbox.target.emit("thread-" + event);
+  if (event === "paused" && packet.why.type === "interrupted") {
+    return;
   }
+
+  // TODO: Bug 1225492, we continue emitting events on the target
+  // like we used to, but we should emit these only on the
+  // threadClient now.
+  toolbox.target.emit("thread-" + event);
 
   if (event === "paused") {
     toolbox.highlightTool("jsdebugger");
 
-    if (packet.why.type === 'debuggerStatement' ||
-       packet.why.type === 'breakpoint' ||
-       packet.why.type === 'exception') {
+    if (packet.why.type === "debuggerStatement" ||
+       packet.why.type === "breakpoint" ||
+       packet.why.type === "exception") {
       toolbox.raise();
-      toolbox.selectTool("jsdebugger");
+      toolbox.selectTool("jsdebugger", packet.why.type);
     }
   } else if (event === "resumed") {
     toolbox.unhighlightTool("jsdebugger");
@@ -42,16 +37,28 @@ function handleThreadState(toolbox, event, packet) {
 }
 
 function attachThread(toolbox) {
-  let deferred = promise.defer();
+  const deferred = defer();
 
-  let target = toolbox.target;
-  let { form: { chromeDebugger, actor } } = target;
-  let threadOptions = {
-    useSourceMaps: Services.prefs.getBoolPref("devtools.debugger.source-maps-enabled"),
-    autoBlackBox: Services.prefs.getBoolPref("devtools.debugger.auto-black-box")
-  };
+  const target = toolbox.target;
+  const { form: { chromeDebugger, actor } } = target;
 
-  let handleResponse = (res, threadClient) => {
+  // Sourcemaps are always turned off when using the new debugger
+  // frontend. This is because it does sourcemapping on the
+  // client-side, so the server should not do it.
+  let useSourceMaps = false;
+  let autoBlackBox = false;
+  let ignoreFrameEnvironment = false;
+  const newDebuggerEnabled = Services.prefs.getBoolPref("devtools.debugger.new-debugger-frontend");
+  if (!newDebuggerEnabled) {
+    useSourceMaps = Services.prefs.getBoolPref("devtools.debugger.source-maps-enabled");
+    autoBlackBox = Services.prefs.getBoolPref("devtools.debugger.auto-black-box");
+  } else {
+    ignoreFrameEnvironment = true;
+  }
+
+  const threadOptions = { useSourceMaps, autoBlackBox, ignoreFrameEnvironment };
+
+  const handleResponse = ([res, threadClient]) => {
     if (res.error) {
       deferred.reject(new Error("Couldn't attach to thread: " + res.error));
       return;
@@ -78,28 +85,28 @@ function attachThread(toolbox) {
       if (res.error === "wrongOrder") {
         const box = toolbox.getNotificationBox();
         box.appendNotification(
-          l10n("toolbox.resumeOrderWarning"),
+          L10N.getStr("toolbox.resumeOrderWarning"),
           "wrong-resume-order",
           "",
           box.PRIORITY_WARNING_HIGH
         );
       }
 
-      deferred.resolve(threadClient)
+      deferred.resolve(threadClient);
     });
-  }
+  };
 
-  if (target.isAddon) {
-    // Attaching an addon
-    target.client.attachAddon(actor, res => {
-      target.client.attachThread(res.threadActor, handleResponse);
+  if (target.isBrowsingContext) {
+    // Attaching a tab, a browser process, or a WebExtensions add-on.
+    target.activeTab.attachThread(threadOptions).then(handleResponse);
+  } else if (target.isAddon) {
+    // Attaching a legacy addon.
+    target.client.attachAddon(actor).then(([res]) => {
+      target.client.attachThread(res.threadActor).then(handleResponse);
     });
-  } else if (target.isTabActor) {
-    // Attaching a normal thread
-    target.activeTab.attachThread(threadOptions, handleResponse);
   } else {
-    // Attaching the browser debugger
-    target.client.attachThread(chromeDebugger, handleResponse);
+    // Attaching an old browser debugger or a content process.
+    target.client.attachThread(chromeDebugger).then(handleResponse);
   }
 
   return deferred.promise;

@@ -11,6 +11,7 @@
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsJSUtils.h"
+#include "nsPrintfCString.h"
 #include "xpcpublic.h"
 
 #include "mozilla/dom/BindingDeclarations.h"
@@ -103,10 +104,10 @@ GetJSValFromKeyPathString(JSContext* aCx,
     bool hasProp;
     if (!targetObject) {
       // We're still walking the chain of existing objects
-      // http://w3c.github.io/IndexedDB/#dfn-evaluate-a-key-path-on-a-value
+      // http://w3c.github.io/IndexedDB/#evaluate-a-key-path-on-a-value
       // step 4 substep 1: check for .length on a String value.
       if (currentVal.isString() && !tokenizer.hasMoreTokens() &&
-          token.EqualsLiteral("length") && aOptions == DoNotCreateProperties) {
+          token.EqualsLiteral("length")) {
         aKeyJSVal->setNumber(double(JS_GetStringLength(currentVal.toString())));
         break;
       }
@@ -306,7 +307,7 @@ KeyPath::AppendStringWithValidation(const nsAString& aString)
     return true;
   }
 
-  NS_NOTREACHED("What?!");
+  MOZ_ASSERT_UNREACHABLE("What?!");
   return false;
 }
 
@@ -428,7 +429,7 @@ KeyPath::SerializeToString(nsAString& aString) const
     return;
   }
 
-  NS_NOTREACHED("What?");
+  MOZ_ASSERT_UNREACHABLE("What?");
 }
 
 // static

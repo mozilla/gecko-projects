@@ -13,13 +13,13 @@
 NS_NAMED_LITERAL_CSTRING(HOST, "example.org");
 const int16_t PORT = 443;
 
-class TLSIntoleranceTest : public ::testing::Test
+class psm_TLSIntoleranceTest : public ::testing::Test
 {
 protected:
   nsSSLIOLayerHelpers helpers;
 };
 
-TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
+TEST_F(psm_TLSIntoleranceTest, FullFallbackProcess)
 {
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, helpers.mVersionFallbackLimit);
 
@@ -27,29 +27,18 @@ TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
-
-    ASSERT_TRUE(
-      helpers.rememberStrongCiphersFailed(
-        HOST, PORT, SSL_ERROR_NO_CYPHER_OVERLAP));
-    ASSERT_EQ(SSL_ERROR_NO_CYPHER_OVERLAP,
-              helpers.getIntoleranceReason(HOST, PORT));
   }
 
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
 
-    ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                     range.min, range.max, 0));
   }
@@ -57,13 +46,10 @@ TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
 
-    ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                     range.min, range.max, 0));
   }
@@ -71,13 +57,10 @@ TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
 
-    ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
     ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                      range.min, range.max, 0));
   }
@@ -85,17 +68,15 @@ TEST_F(TLSIntoleranceTest, Test_Full_Fallback_Process)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     // When rememberIntolerantAtVersion returns false, it also resets the
     // intolerance information for the server.
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
   }
 }
 
-TEST_F(TLSIntoleranceTest, Test_Disable_Fallback_With_High_Limit)
+TEST_F(psm_TLSIntoleranceTest, DisableFallbackWithHighLimit)
 {
   // this value disables version fallback entirely: with this value, all efforts
   // to mark an origin as version intolerant fail
@@ -114,7 +95,7 @@ TEST_F(TLSIntoleranceTest, Test_Disable_Fallback_With_High_Limit)
                                                    0));
 }
 
-TEST_F(TLSIntoleranceTest, Test_Fallback_Limit_Below_Min)
+TEST_F(psm_TLSIntoleranceTest, FallbackLimitBelowMin)
 {
   // check that we still respect the minimum version,
   // when it is higher than the fallback limit
@@ -125,11 +106,9 @@ TEST_F(TLSIntoleranceTest, Test_Fallback_Limit_Below_Min)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
   }
 
   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
@@ -138,7 +117,7 @@ TEST_F(TLSIntoleranceTest, Test_Fallback_Limit_Below_Min)
                                                    0));
 }
 
-TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_1)
+TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant1)
 {
   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                   SSL_LIBRARY_VERSION_TLS_1_0,
@@ -147,14 +126,12 @@ TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_1)
   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
   SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                             SSL_LIBRARY_VERSION_TLS_1_2 };
-  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+  helpers.adjustForTLSIntolerance(HOST, PORT, range);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_2)
+TEST_F(psm_TLSIntoleranceTest, TolerantOverridesIntolerant2)
 {
   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
                                                   SSL_LIBRARY_VERSION_TLS_1_0,
@@ -163,14 +140,12 @@ TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_2)
   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_2);
   SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                             SSL_LIBRARY_VERSION_TLS_1_2 };
-  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+  helpers.adjustForTLSIntolerance(HOST, PORT, range);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(TLSIntoleranceTest, Test_Intolerant_Does_Not_Override_Tolerant)
+TEST_F(psm_TLSIntoleranceTest, IntolerantDoesNotOverrideTolerant)
 {
   // No adjustment made when there is no entry for the site.
   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
@@ -181,14 +156,12 @@ TEST_F(TLSIntoleranceTest, Test_Intolerant_Does_Not_Override_Tolerant)
                                                    0));
   SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                             SSL_LIBRARY_VERSION_TLS_1_2 };
-  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+  helpers.adjustForTLSIntolerance(HOST, PORT, range);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
 }
 
-TEST_F(TLSIntoleranceTest, Test_Port_Is_Relevant)
+TEST_F(psm_TLSIntoleranceTest, PortIsRelevant)
 {
   helpers.rememberTolerantAtVersion(HOST, 1, SSL_LIBRARY_VERSION_TLS_1_2);
   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, 1,
@@ -203,21 +176,19 @@ TEST_F(TLSIntoleranceTest, Test_Port_Is_Relevant)
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, 1, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, 1, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
   }
 
   {
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, 2, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, 2, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
   }
 }
 
-TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Initial)
+TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonInitial)
 {
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 
@@ -225,7 +196,7 @@ TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Initial)
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 2));
 }
 
-TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Stored)
+TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonStored)
 {
   helpers.rememberIntolerantAtVersion(HOST, 1, SSL_LIBRARY_VERSION_TLS_1_0,
                                       SSL_LIBRARY_VERSION_TLS_1_2,
@@ -238,7 +209,7 @@ TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Stored)
   ASSERT_EQ(SSL_ERROR_BAD_MAC_READ, helpers.getIntoleranceReason(HOST, 1));
 }
 
-TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Cleared)
+TEST_F(psm_TLSIntoleranceTest, IntoleranceReasonCleared)
 {
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 
@@ -252,148 +223,7 @@ TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Cleared)
   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
 }
 
-TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed)
-{
-  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_1;
-
-  ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-
-    ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                    range.min, range.max, 0));
-  }
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-
-    ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                     range.min, range.max, 0));
-  }
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-    // When rememberIntolerantAtVersion returns false, it also resets the
-    // intolerance information for the server.
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
-  }
-}
-
-TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_At_1_1)
-{
-  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_0;
-
-  // No adjustment made when there is no entry for the site.
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                    range.min, range.max, 0));
-  }
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-  }
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-
-    ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                    range.min, range.max, 0));
-  }
-
-  {
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.max);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-  }
-}
-
-TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_With_High_Limit)
-{
-  // this value disables version fallback entirely: with this value, all efforts
-  // to mark an origin as version intolerant fail
-  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_2;
-  // ...but weak ciphers fallback will not be disabled
-  ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-  ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                   SSL_LIBRARY_VERSION_TLS_1_0,
-                                                   SSL_LIBRARY_VERSION_TLS_1_2,
-                                                   0));
-  ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                   SSL_LIBRARY_VERSION_TLS_1_0,
-                                                   SSL_LIBRARY_VERSION_TLS_1_1,
-                                                   0));
-  ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
-                                                   SSL_LIBRARY_VERSION_TLS_1_0,
-                                                   SSL_LIBRARY_VERSION_TLS_1_0,
-                                                   0));
-}
-
-TEST_F(TLSIntoleranceTest, Test_Tolerant_Does_Not_Override_Weak_Ciphers_Fallback)
-{
-  ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-  // No adjustment made when intolerant is zero.
-  helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
-  SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                            SSL_LIBRARY_VERSION_TLS_1_2 };
-  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-  ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-}
-
-TEST_F(TLSIntoleranceTest, Test_Weak_Ciphers_Fallback_Does_Not_Override_Tolerant)
-{
-  // No adjustment made when there is no entry for the site.
-  helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
-  // false because strongCipherWorked is set by rememberTolerantAtVersion.
-  ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-  SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                            SSL_LIBRARY_VERSION_TLS_1_2 };
-  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
-  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
-}
-
-TEST_F(TLSIntoleranceTest, TLS_Forget_Intolerance)
+TEST_F(psm_TLSIntoleranceTest, TLSForgetIntolerance)
 {
   {
     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
@@ -403,11 +233,9 @@ TEST_F(TLSIntoleranceTest, TLS_Forget_Intolerance)
 
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
   }
 
   {
@@ -415,49 +243,22 @@ TEST_F(TLSIntoleranceTest, TLS_Forget_Intolerance)
 
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
   }
 }
 
-TEST_F(TLSIntoleranceTest, TLS_Forget_Strong_Cipher_Failed)
-{
-  {
-    ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
-
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
-  }
-
-  {
-    helpers.forgetIntolerance(HOST, PORT);
-
-    SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
-                              SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
-    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
-  }
-}
-
-TEST_F(TLSIntoleranceTest, TLS_Dont_Forget_Tolerance)
+TEST_F(psm_TLSIntoleranceTest, TLSDontForgetTolerance)
 {
   {
     helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
 
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
   }
 
   {
@@ -468,11 +269,9 @@ TEST_F(TLSIntoleranceTest, TLS_Dont_Forget_Tolerance)
 
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
-    ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
   }
 
   {
@@ -480,15 +279,13 @@ TEST_F(TLSIntoleranceTest, TLS_Dont_Forget_Tolerance)
 
     SSLVersionRange range = { SSL_LIBRARY_VERSION_TLS_1_0,
                               SSL_LIBRARY_VERSION_TLS_1_2 };
-    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
+    helpers.adjustForTLSIntolerance(HOST, PORT, range);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.min);
     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
-    ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
   }
 }
 
-TEST_F(TLSIntoleranceTest, TLS_Per_Site_Fallback_Limit)
+TEST_F(psm_TLSIntoleranceTest, TLSPerSiteFallbackLimit)
 {
   NS_NAMED_LITERAL_CSTRING(example_com, "example.com");
   NS_NAMED_LITERAL_CSTRING(example_net, "example.net");

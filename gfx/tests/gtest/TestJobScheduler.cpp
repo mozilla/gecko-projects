@@ -20,6 +20,7 @@ namespace test_scheduler {
 
 using namespace mozilla::gfx;
 using namespace mozilla;
+using mozilla::gfx::SyncObject;
 
 // Artificially cause threads to yield randomly in an attempt to make racy
 // things more apparent (if any).
@@ -66,12 +67,12 @@ struct JoinTestSanityCheck : public SanityChecker {
   {
     // Job 0 is the special task executed when everything is joined after task 1
     if (aCmdId == 0) {
-      MOZ_RELEASE_ASSERT(!mSpecialJobHasRun);
+      MOZ_RELEASE_ASSERT(!mSpecialJobHasRun, "GFX: A special task has been executed.");
       mSpecialJobHasRun = true;
       for (auto advancement : mAdvancements) {
         // Because of the synchronization point (beforeFilter), all
         // task buffers should have run task 1 when task 0 is run.
-        MOZ_RELEASE_ASSERT(advancement == 1);
+        MOZ_RELEASE_ASSERT(advancement == 1, "GFX: task buffer has not run task 1.");
       }
     } else {
       // This check does not apply to task 0.
@@ -79,7 +80,7 @@ struct JoinTestSanityCheck : public SanityChecker {
     }
 
     if (aCmdId == 2) {
-      MOZ_RELEASE_ASSERT(mSpecialJobHasRun);
+      MOZ_RELEASE_ASSERT(mSpecialJobHasRun, "GFX: Special job has not run.");
     }
   }
 };
@@ -208,6 +209,7 @@ void TestSchedulerChain(uint32_t aNumThreads, uint32_t aNumCmdBuffers)
 
 } // namespace test_scheduler
 
+#if !defined(MOZ_CODE_COVERAGE) || !defined(XP_WIN)
 TEST(Moz2D, JobScheduler_Shutdown) {
   srand(time(nullptr));
   for (uint32_t threads = 1; threads < 16; ++threads) {
@@ -217,6 +219,7 @@ TEST(Moz2D, JobScheduler_Shutdown) {
     }
   }
 }
+#endif
 
 TEST(Moz2D, JobScheduler_Join) {
   srand(time(nullptr));

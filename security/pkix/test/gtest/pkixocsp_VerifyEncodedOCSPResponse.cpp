@@ -22,6 +22,7 @@
  * limitations under the License.
  */
 
+#include "pkixder.h"
 #include "pkixgtest.h"
 
 using namespace mozilla::pkix;
@@ -43,6 +44,19 @@ public:
     trustLevel = TrustLevel::InheritsTrust;
     return Success;
   }
+
+  virtual void NoteAuxiliaryExtension(AuxiliaryExtension extension,
+                                      Input extensionData) override
+  {
+    if (extension == AuxiliaryExtension::SCTListFromOCSPResponse) {
+      signedCertificateTimestamps = InputToByteString(extensionData);
+    } else {
+      // We do not currently expect to receive any other extension here.
+      ADD_FAILURE();
+    }
+  }
+
+  ByteString signedCertificateTimestamps;
 };
 
 namespace {
@@ -199,7 +213,9 @@ public:
                     time_t producedAt, time_t thisUpdate,
        /*optional*/ const time_t* nextUpdate,
                     const TestSignatureAlgorithm& signatureAlgorithm,
-       /*optional*/ const ByteString* certs = nullptr)
+       /*optional*/ const ByteString* certs = nullptr,
+       /*optional*/ OCSPResponseExtension* singleExtensions = nullptr,
+       /*optional*/ OCSPResponseExtension* responseExtensions = nullptr)
   {
     OCSPResponseContext context(certID, producedAt);
     if (signerName) {
@@ -212,6 +228,8 @@ public:
     context.producedAt = producedAt;
     context.signatureAlgorithm = signatureAlgorithm;
     context.certs = certs;
+    context.singleExtensions = singleExtensions;
+    context.responseExtensions = responseExtensions;
 
     context.certStatus = static_cast<uint8_t>(certStatus);
     context.thisUpdate = thisUpdate;
@@ -395,6 +413,46 @@ TEST_F(pkixocsp_VerifyEncodedResponse_successful, check_validThrough)
                                         response, expired));
     ASSERT_TRUE(expired);
   }
+}
+
+TEST_F(pkixocsp_VerifyEncodedResponse_successful, ct_extension)
+{
+  // python DottedOIDToCode.py --tlv
+  //   id_ocsp_singleExtensionSctList 1.3.6.1.4.1.11129.2.4.5
+  static const uint8_t tlv_id_ocsp_singleExtensionSctList[] = {
+    0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x05
+  };
+  static const uint8_t dummySctList[] = {
+    0x01, 0x02, 0x03, 0x04, 0x05
+  };
+
+  OCSPResponseExtension ctExtension;
+  ctExtension.id = BytesToByteString(tlv_id_ocsp_singleExtensionSctList);
+  // SignedCertificateTimestampList structure is encoded as an OCTET STRING
+  // within the extension value (see RFC 6962 section 3.3).
+  // pkix decodes it internally and returns the actual structure.
+  ctExtension.value = TLV(der::OCTET_STRING, BytesToByteString(dummySctList));
+
+  ByteString responseString(
+               CreateEncodedOCSPSuccessfulResponse(
+                         OCSPResponseContext::good, *endEntityCertID, byKey,
+                         *rootKeyPair, oneDayBeforeNow,
+                         oneDayBeforeNow, &oneDayAfterNow,
+                         sha256WithRSAEncryption(),
+                         /*certs*/ nullptr,
+                         &ctExtension));
+  Input response;
+  ASSERT_EQ(Success,
+            response.Init(responseString.data(), responseString.length()));
+
+  bool expired;
+  ASSERT_EQ(Success,
+            VerifyEncodedOCSPResponse(trustDomain, *endEntityCertID,
+                                      Now(), END_ENTITY_MAX_LIFETIME_IN_DAYS,
+                                      response, expired));
+  ASSERT_FALSE(expired);
+  ASSERT_EQ(BytesToByteString(dummySctList),
+            trustDomain.signedCertificateTimestamps);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -764,10 +822,11 @@ TEST_F(pkixocsp_VerifyEncodedResponse_DelegatedResponder,
 {
   static const char* subCAName = "good_indirect_subca_1_first sub-CA";
   static const char* signerName = "good_indirect_subca_1_first OCSP signer";
+  static const long zero = 0;
 
   // sub-CA of root (root is the direct issuer of endEntity)
   const ByteString subCAExtensions[] = {
-    CreateEncodedBasicConstraints(true, 0, Critical::No),
+    CreateEncodedBasicConstraints(true, &zero, Critical::No),
     ByteString()
   };
   ScopedTestKeyPair subCAKeyPair(GenerateKeyPair());
@@ -817,10 +876,11 @@ TEST_F(pkixocsp_VerifyEncodedResponse_DelegatedResponder,
 {
   static const char* subCAName = "good_indirect_subca_1_second sub-CA";
   static const char* signerName = "good_indirect_subca_1_second OCSP signer";
+  static const long zero = 0;
 
   // sub-CA of root (root is the direct issuer of endEntity)
   const ByteString subCAExtensions[] = {
-    CreateEncodedBasicConstraints(true, 0, Critical::No),
+    CreateEncodedBasicConstraints(true, &zero, Critical::No),
     ByteString()
   };
   ScopedTestKeyPair subCAKeyPair(GenerateKeyPair());
@@ -917,10 +977,10 @@ public:
     {
     }
 
-    bool SetCertTrust(const ByteString& certDER, TrustLevel certTrustLevel)
+    bool SetCertTrust(const ByteString& aCertDER, TrustLevel aCertTrustLevel)
     {
-      this->certDER = certDER;
-      this->certTrustLevel = certTrustLevel;
+      this->certDER = aCertDER;
+      this->certTrustLevel = aCertTrustLevel;
       return true;
     }
   private:
@@ -941,7 +1001,23 @@ public:
     TrustLevel certTrustLevel;
   };
 
+// trustDomain deliberately shadows the inherited field so that it isn't used
+// by accident. See bug 1339921.
+// Unfortunately GCC can't parse __has_warning("-Wshadow-field") even if it's
+// the latter part of a conjunction that would evaluate to false, so we have to
+// wrap it in a separate preprocessor conditional rather than using &&.
+#if defined(__clang__)
+  #if __has_warning("-Wshadow-field")
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wshadow-field"
+  #endif
+#endif
   TrustDomain trustDomain;
+#if defined(__clang__)
+  #if __has_warning("-Wshadow-field")
+    #pragma clang diagnostic pop
+  #endif
+#endif
   ByteString signerCertDER;
   ByteString responseString;
   Input response; // references data in responseString

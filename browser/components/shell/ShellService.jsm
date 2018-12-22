@@ -4,15 +4,13 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ShellService"];
+var EXPORTED_SYMBOLS = ["ShellService"];
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "WindowsRegistry",
-                                  "resource://gre/modules/WindowsRegistry.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "WindowsRegistry",
+                               "resource://gre/modules/WindowsRegistry.jsm");
 
 /**
  * Internal functionality to save and restore the docShell.allow* properties.
@@ -90,6 +88,7 @@ let ShellServiceInternal = {
     if (this.shellService) {
       return this.shellService.isDefaultBrowser(startupCheck, forAllTypes);
     }
+    return false;
   }
 };
 
@@ -99,9 +98,15 @@ XPCOMUtils.defineLazyServiceGetter(ShellServiceInternal, "shellService",
 /**
  * The external API exported by this module.
  */
-this.ShellService = new Proxy(ShellServiceInternal, {
+var ShellService = new Proxy(ShellServiceInternal, {
   get(target, name) {
-    return name in target ? target[name] :
-                            target.shellService[name];
+    if (name in target) {
+      return target[name];
+    }
+    if (target.shellService) {
+      return target.shellService[name];
+    }
+    Services.console.logStringMessage(`${name} not found in ShellService: ${target.shellService}`);
+    return undefined;
   }
 });

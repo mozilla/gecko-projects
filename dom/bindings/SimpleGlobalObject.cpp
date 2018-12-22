@@ -9,12 +9,14 @@
 #include "jsapi.h"
 #include "js/Class.h"
 
-#include "nsContentUtils.h"
 #include "nsJSPrincipals.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "nsThreadUtils.h"
+#include "nsContentUtils.h"
 
 #include "xpcprivate.h"
+
+#include "mozilla/dom/ScriptSettings.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,8 +29,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SimpleGlobalObject)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(SimpleGlobalObject)
-
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   tmp->TraverseHostObjectURIs(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -41,34 +41,41 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SimpleGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
 NS_INTERFACE_MAP_END
 
-static bool
-SimpleGlobal_enumerate(JSContext *cx, JS::Handle<JSObject *> obj)
-{
-  return JS_EnumerateStandardClasses(cx, obj);
-}
-
-static bool
-SimpleGlobal_resolve(JSContext *cx, JS::Handle<JSObject *> obj,
-                    JS::Handle<jsid> id, bool *resolvedp)
-{
-  return JS_ResolveStandardClass(cx, obj, id, resolvedp);
-}
-
 static void
 SimpleGlobal_finalize(js::FreeOp *fop, JSObject *obj)
 {
   SimpleGlobalObject* globalObject =
     static_cast<SimpleGlobalObject*>(JS_GetPrivate(obj));
-  NS_RELEASE(globalObject);
+  if (globalObject) {
+    globalObject->ClearWrapper(obj);
+    NS_RELEASE(globalObject);
+  }
 }
 
-static void
-SimpleGlobal_moved(JSObject *obj, const JSObject *old)
+static size_t
+SimpleGlobal_moved(JSObject *obj, JSObject *old)
 {
   SimpleGlobalObject* globalObject =
     static_cast<SimpleGlobalObject*>(JS_GetPrivate(obj));
-  globalObject->UpdateWrapper(obj, old);
+  if (globalObject) {
+    globalObject->UpdateWrapper(obj, old);
+  }
+  return 0;
 }
+
+static const js::ClassOps SimpleGlobalClassOps = {
+    nullptr,
+    nullptr,
+    nullptr,
+    JS_NewEnumerateStandardClasses,
+    JS_ResolveStandardClass,
+    JS_MayResolveStandardClass,
+    SimpleGlobal_finalize,
+    nullptr,
+    nullptr,
+    nullptr,
+    JS_GlobalObjectTraceHook,
+};
 
 static const js::ClassExtension SimpleGlobalClassExtension = {
   nullptr,
@@ -77,19 +84,11 @@ static const js::ClassExtension SimpleGlobalClassExtension = {
 
 const js::Class SimpleGlobalClass = {
     "",
-    JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    SimpleGlobal_enumerate,
-    SimpleGlobal_resolve,
-    nullptr,
-    SimpleGlobal_finalize,
-    nullptr,
-    nullptr,
-    nullptr,
-    JS_GlobalObjectTraceHook,
+    JSCLASS_GLOBAL_FLAGS |
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_PRIVATE_IS_NSISUPPORTS |
+    JSCLASS_FOREGROUND_FINALIZE,
+    &SimpleGlobalClassOps,
     JS_NULL_CLASS_SPEC,
     &SimpleGlobalClassExtension,
     JS_NULL_OBJECT_OPS
@@ -99,59 +98,73 @@ const js::Class SimpleGlobalClass = {
 JSObject*
 SimpleGlobalObject::Create(GlobalType globalType, JS::Handle<JS::Value> proto)
 {
-  JSContext* cx = nsContentUtils::GetDefaultJSContextForThread();
-  JSAutoRequest ar(cx);
+  // We can't root our return value with our AutoJSAPI because the rooting
+  // analysis thinks ~AutoJSAPI can GC.  So we need to root in a scope outside
+  // the lifetime of the AutoJSAPI.
+  JS::Rooted<JSObject*> global(RootingCx());
 
-  JS::CompartmentOptions options;
-  options.creationOptions().setInvisibleToDebugger(true);
+  { // Scope to ensure the AutoJSAPI destructor runs before we end up returning
+    AutoJSAPI jsapi;
+    jsapi.Init();
+    JSContext* cx = jsapi.cx();
 
-  nsCOMPtr<nsIPrincipal> principal;
-  if (NS_IsMainThread()) {
-    principal = nsNullPrincipal::Create();
-    if (!principal) {
-      return nullptr;
+    JS::RealmOptions options;
+    options.creationOptions()
+           .setInvisibleToDebugger(true)
+           // Put our SimpleGlobalObjects in the system zone, so we won't create
+           // lots of zones for what are probably very short-lived
+           // compartments.  This should help them be GCed quicker and take up
+           // less memory before they're GCed.
+           .setNewCompartmentInSystemZone();
+
+    if (NS_IsMainThread()) {
+      nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithoutOriginAttributes();
+      options.creationOptions().setTrace(xpc::TraceXPCGlobal);
+      global = xpc::CreateGlobalObject(cx, js::Jsvalify(&SimpleGlobalClass),
+                                       nsJSPrincipals::get(principal),
+                                       options);
+    } else {
+      global = JS_NewGlobalObject(cx, js::Jsvalify(&SimpleGlobalClass),
+                                  nullptr,
+                                  JS::DontFireOnNewGlobalHook, options);
     }
-  }
 
-  JS::Rooted<JSObject*> global(cx,
-    JS_NewGlobalObject(cx, js::Jsvalify(&SimpleGlobalClass),
-                       nsJSPrincipals::get(principal),
-                       JS::DontFireOnNewGlobalHook, options));
-
-  if (!global) {
-    JS_ClearPendingException(cx);
-    return nullptr;
-  }
-
-  JSAutoCompartment ac(cx, global);
-
-  // It's important to create the nsIGlobalObject for our new global before we
-  // start trying to wrap things like the prototype into its compartment,
-  // because the wrap operation relies on the global having its nsIGlobalObject
-  // already.
-  RefPtr<SimpleGlobalObject> globalObject =
-    new SimpleGlobalObject(global, globalType);
-
-  // Pass on ownership of globalObject to |global|.
-  JS_SetPrivate(global, globalObject.forget().take());
-
-  if (proto.isObjectOrNull()) {
-    JS::Rooted<JSObject*> protoObj(cx, proto.toObjectOrNull());
-    if (!JS_WrapObject(cx, &protoObj)) {
-      JS_ClearPendingException(cx);
+    if (!global) {
+      jsapi.ClearException();
       return nullptr;
     }
 
-    if (!JS_SetPrototype(cx, global, protoObj)) {
-      JS_ClearPendingException(cx);
+    JSAutoRealm ar(cx, global);
+
+    // It's important to create the nsIGlobalObject for our new global before we
+    // start trying to wrap things like the prototype into its compartment,
+    // because the wrap operation relies on the global having its
+    // nsIGlobalObject already.
+    RefPtr<SimpleGlobalObject> globalObject =
+      new SimpleGlobalObject(global, globalType);
+
+    // Pass on ownership of globalObject to |global|.
+    JS_SetPrivate(global, globalObject.forget().take());
+
+    if (proto.isObjectOrNull()) {
+      JS::Rooted<JSObject*> protoObj(cx, proto.toObjectOrNull());
+      if (!JS_WrapObject(cx, &protoObj)) {
+        jsapi.ClearException();
+        return nullptr;
+      }
+
+      if (!JS_SplicePrototype(cx, global, protoObj)) {
+        jsapi.ClearException();
+        return nullptr;
+      }
+    } else if (!proto.isUndefined()) {
+      // Bogus proto.
       return nullptr;
     }
-  } else if (!proto.isUndefined()) {
-    // Bogus proto.
-    return nullptr;
+
+    JS_FireOnNewGlobalObject(cx, global);
   }
 
-  JS_FireOnNewGlobalObject(cx, global);
   return global;
 }
 

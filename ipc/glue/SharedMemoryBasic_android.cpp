@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,6 +37,7 @@ LogError(const char* what)
 SharedMemoryBasic::SharedMemoryBasic()
   : mShmFd(-1)
   , mMemory(nullptr)
+  , mOpenRights(RightsReadWrite)
 { }
 
 SharedMemoryBasic::~SharedMemoryBasic()
@@ -47,10 +47,11 @@ SharedMemoryBasic::~SharedMemoryBasic()
 }
 
 bool
-SharedMemoryBasic::SetHandle(const Handle& aHandle)
+SharedMemoryBasic::SetHandle(const Handle& aHandle, OpenRights aRights)
 {
   MOZ_ASSERT(-1 == mShmFd, "Already Create()d");
   mShmFd = aHandle.fd;
+  mOpenRights = aRights;
   return true;
 }
 
@@ -82,8 +83,13 @@ SharedMemoryBasic::Map(size_t nBytes)
 {
   MOZ_ASSERT(nullptr == mMemory, "Already Map()d");
 
+  int prot = PROT_READ;
+  if (mOpenRights == RightsReadWrite) {
+    prot |= PROT_WRITE;
+  }
+
   mMemory = mmap(nullptr, nBytes,
-                 PROT_READ | PROT_WRITE,
+                 prot,
                  MAP_SHARED,
                  mShmFd,
                  0);
@@ -133,6 +139,7 @@ SharedMemoryBasic::CloseHandle()
   if (mShmFd != -1) {
     close(mShmFd);
     mShmFd = -1;
+    mOpenRights = RightsReadWrite;
   }
 }
 

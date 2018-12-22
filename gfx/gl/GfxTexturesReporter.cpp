@@ -6,12 +6,9 @@
 
 #include <string>
 #include <sstream>
+#include "nsExceptionHandler.h"
 #include "GfxTexturesReporter.h"
 #include "gfxPrefs.h"
-
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::gl;
@@ -47,6 +44,9 @@ FormatBytes(size_t amount)
       case 3:
       unit = "GB";
       break;
+      default:
+      unit = "";
+      break;
   }
 
   stream << val << " " << unit;
@@ -57,7 +57,7 @@ FormatBytes(size_t amount)
 GfxTexturesReporter::UpdateAmount(MemoryUse action, size_t amount)
 {
     if (action == MemoryFreed) {
-        MOZ_RELEASE_ASSERT(amount <= sAmount);
+        MOZ_RELEASE_ASSERT(amount <= sAmount, "GFX: Current texture usage greater than update amount.");
         sAmount -= amount;
 
         if (gfxPrefs::GfxLoggingTextureUsageEnabled()) {
@@ -73,7 +73,5 @@ GfxTexturesReporter::UpdateAmount(MemoryUse action, size_t amount)
         }
     }
 
-#ifdef MOZ_CRASHREPORTER
     CrashReporter::AnnotateTexturesSize(sAmount);
-#endif
 }

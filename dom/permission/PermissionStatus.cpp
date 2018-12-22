@@ -65,7 +65,7 @@ PermissionStatus::~PermissionStatus()
 JSObject*
 PermissionStatus::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PermissionStatusBinding::Wrap(aCx, this, aGivenProto);
+  return PermissionStatus_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsresult
@@ -93,7 +93,7 @@ PermissionStatus::UpdateState()
   return NS_OK;
 }
 
-nsIPrincipal*
+already_AddRefed<nsIPrincipal>
 PermissionStatus::GetPrincipal() const
 {
   nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
@@ -106,7 +106,11 @@ PermissionStatus::GetPrincipal() const
     return nullptr;
   }
 
-  return doc->NodePrincipal();
+  nsCOMPtr<nsIPrincipal> principal =
+    mozilla::BasePrincipal::Cast(doc->NodePrincipal())->CloneStrippingUserContextIdAndFirstPartyDomain();
+  NS_ENSURE_TRUE(principal, nullptr);
+
+  return principal.forget();
 }
 
 void
@@ -116,7 +120,7 @@ PermissionStatus::PermissionChanged()
   UpdateState();
   if (mState != oldState) {
     RefPtr<AsyncEventDispatcher> eventDispatcher =
-      new AsyncEventDispatcher(this, NS_LITERAL_STRING("change"), false);
+      new AsyncEventDispatcher(this, NS_LITERAL_STRING("change"), CanBubble::eNo);
     eventDispatcher->PostDOMEvent();
   }
 }

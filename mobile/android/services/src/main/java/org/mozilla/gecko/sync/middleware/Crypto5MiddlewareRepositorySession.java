@@ -4,7 +4,6 @@
 
 package org.mozilla.gecko.sync.middleware;
 
-import java.io.UnsupportedEncodingException;
 import java.util.concurrent.ExecutorService;
 
 import org.mozilla.gecko.sync.CryptoRecord;
@@ -29,7 +28,7 @@ import org.mozilla.gecko.sync.repositories.domain.Record;
 
 
                  +------------------------------------+
-                 |    Server11RepositorySession       |
+                 |    Server15RepositorySession       |
                  +-------------------------+----------+
                            ^               |
                            |               |
@@ -79,8 +78,8 @@ public class Crypto5MiddlewareRepositorySession extends MiddlewareRepositorySess
     }
 
     @Override
-    public void onFetchFailed(Exception ex, Record record) {
-      next.onFetchFailed(ex, record);
+    public void onFetchFailed(Exception ex) {
+      next.onFetchFailed(ex);
     }
 
     @Override
@@ -89,29 +88,29 @@ public class Crypto5MiddlewareRepositorySession extends MiddlewareRepositorySess
       try {
         r = (CryptoRecord) record;
       } catch (ClassCastException e) {
-        next.onFetchFailed(e, record);
+        next.onFetchFailed(e);
         return;
       }
       r.keyBundle = keyBundle;
       try {
         r.decrypt();
       } catch (Exception e) {
-        next.onFetchFailed(e, r);
+        next.onFetchFailed(e);
         return;
       }
       Record transformed;
       try {
         transformed = this.recordFactory.createRecord(r);
       } catch (Exception e) {
-        next.onFetchFailed(e, r);
+        next.onFetchFailed(e);
         return;
       }
       next.onFetchedRecord(transformed);
     }
 
     @Override
-    public void onFetchCompleted(final long fetchEnd) {
-      next.onFetchCompleted(fetchEnd);
+    public void onFetchCompleted() {
+      next.onFetchCompleted();
     }
 
     @Override
@@ -130,9 +129,8 @@ public class Crypto5MiddlewareRepositorySession extends MiddlewareRepositorySess
   }
 
   @Override
-  public void fetchSince(long timestamp,
-                         RepositorySessionFetchRecordsDelegate delegate) {
-    inner.fetchSince(timestamp, makeUnwrappingDelegate(delegate));
+  public void fetchModified(RepositorySessionFetchRecordsDelegate delegate) {
+    inner.fetchModified(makeUnwrappingDelegate(delegate));
   }
 
   @Override
@@ -150,20 +148,20 @@ public class Crypto5MiddlewareRepositorySession extends MiddlewareRepositorySess
   public void setStoreDelegate(RepositorySessionStoreDelegate delegate) {
     // TODO: it remains to be seen how this will work.
     inner.setStoreDelegate(delegate);
-    this.delegate = delegate;             // So we can handle errors without involving inner.
+    this.storeDelegate = delegate;             // So we can handle errors without involving inner.
   }
 
   @Override
   public void store(Record record) throws NoStoreDelegateException {
-    if (delegate == null) {
+    if (storeDelegate == null) {
       throw new NoStoreDelegateException();
     }
     CryptoRecord rec = record.getEnvelope();
     rec.keyBundle = this.keyBundle;
     try {
       rec.encrypt();
-    } catch (UnsupportedEncodingException | CryptoException e) {
-      delegate.onRecordStoreFailed(e, record.guid);
+    } catch (CryptoException e) {
+      storeDelegate.onRecordStoreFailed(e, record.guid);
       return;
     }
     // Allow the inner session to do delegate handling.

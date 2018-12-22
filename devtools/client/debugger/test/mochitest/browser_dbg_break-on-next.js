@@ -14,7 +14,11 @@ function test() {
   let gTab, gPanel, gDebugger;
   let gSources, gBreakpoints, gTarget, gResumeButton, gResumeKey, gThreadClient;
 
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  const options = {
+    source: EXAMPLE_URL + "code_script-eval.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -24,8 +28,7 @@ function test() {
     gResumeButton = gDebugger.document.getElementById("resume");
     gResumeKey = gDebugger.document.getElementById("resumeKey");
 
-    waitForSourceShown(gPanel, "-eval.js")
-      .then(testInterval)
+    testInterval()
       .then(testEvent)
       .then(() => closeDebuggerAndFinish(gPanel));
   });
@@ -34,7 +37,7 @@ function test() {
   // it's less likely to fail due to timing issues.  If the
   // first callback happens to fire before the break request
   // happens then we'll just get it next time.
-  let testInterval = Task.async(function*() {
+  let testInterval = Task.async(function* () {
     info("Starting testInterval");
 
     yield evalInTab(gTab, `
@@ -50,15 +53,13 @@ function test() {
     yield waitForDebuggerEvents(gPanel, gDebugger.EVENTS.SOURCE_SHOWN);
     let variables = gDebugger.DebuggerView.Variables;
 
-    is(variables._store.length, 4, "Correct number of scopes available");
+    is(variables._store.length, 3, "Correct number of scopes available");
     is(variables.getScopeAtIndex(0).name, "Function scope [interval<]",
         "Paused with correct scope (0)");
     is(variables.getScopeAtIndex(1).name, "Block scope",
         "Paused with correct scope (1)");
-    is(variables.getScopeAtIndex(2).name, "Block scope",
+    is(variables.getScopeAtIndex(2).name, "Global scope [Window]",
         "Paused with correct scope (2)");
-    is(variables.getScopeAtIndex(3).name, "Global scope [Window]",
-        "Paused with correct scope (3)");
 
     yield evalInTab(gTab, "clearInterval(interval)");
     let onceResumed = gTarget.once("thread-resumed");
@@ -66,7 +67,7 @@ function test() {
     yield onceResumed;
   });
 
-  let testEvent = Task.async(function*() {
+  let testEvent = Task.async(function* () {
     info("Starting testEvent");
 
     let oncePaused = gTarget.once("thread-paused");

@@ -265,6 +265,18 @@ txFormatNumberFunctionCall::evaluate(txIEvalContext* aContext,
 
     value = fabs(value) * multiplier;
 
+    // Make sure the multiplier didn't push value to infinity.
+    if (value == mozilla::PositiveInfinity<double>()) {
+        return aContext->recycler()->getStringResult(format->mInfinity,
+                                                     aResult);
+    }
+
+    // Make sure the multiplier didn't push value to infinity.
+    if (value == mozilla::PositiveInfinity<double>()) {
+        return aContext->recycler()->getStringResult(format->mInfinity,
+                                                     aResult);
+    }
+
     // Prefix
     nsAutoString res(prefix);
 
@@ -308,7 +320,7 @@ txFormatNumberFunctionCall::evaluate(txIEvalContext* aContext,
         else {
             digit = buf[i] - '0';
         }
-        
+
         if (carry) {
             digit = (digit + 1) % 10;
             carry = digit == 0;
@@ -341,7 +353,7 @@ txFormatNumberFunctionCall::evaluate(txIEvalContext* aContext,
         else {
             digit = buf[bufIntDigits-i-1] - '0';
         }
-        
+
         if (carry) {
             digit = (digit + 1) % 10;
             carry = digit == 0;
@@ -388,12 +400,10 @@ txFormatNumberFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-nsresult
-txFormatNumberFunctionCall::getNameAtom(nsIAtom** aAtom)
+void
+txFormatNumberFunctionCall::appendName(nsAString& aDest)
 {
-    *aAtom = nsGkAtoms::formatNumber;
-    NS_ADDREF(*aAtom);
-    return NS_OK;
+    aDest.Append(nsGkAtoms::formatNumber->GetUTF16String());
 }
 #endif
 

@@ -2,18 +2,17 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cu} = require("chrome");
-
 const Services = require("Services");
 const {AppProjects} = require("devtools/client/webide/modules/app-projects");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
-const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
 const utils = require("devtools/client/webide/modules/utils");
 const Telemetry = require("devtools/client/shared/telemetry");
 
-const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.properties");
+const Strings =
+  Services.strings.createBundle("chrome://devtools/locale/webide.properties");
+
+const TELEMETRY_WEBIDE_NEW_PROJECT_COUNT = "DEVTOOLS_WEBIDE_NEW_PROJECT_COUNT";
 
 var ProjectList;
 
@@ -38,12 +37,11 @@ ProjectList.prototype = {
     return this._doc;
   },
 
-  appManagerUpdate: function(event, what, details) {
+  appManagerUpdate: function(what, details) {
     // Got a message from app-manager.js
     // See AppManager.update() for descriptions of what these events mean.
     switch (what) {
       case "project-removed":
-      case "runtime-apps-icons":
       case "runtime-targets":
       case "connection":
         this.update(details);
@@ -52,10 +50,10 @@ ProjectList.prototype = {
         this.updateCommands();
         this.update(details);
         break;
-    };
+    }
   },
 
-  onWebIDEUpdate: function(event, what, details) {
+  onWebIDEUpdate: function(what, details) {
     if (what == "busy" || what == "unbusy") {
       this.updateCommands();
     }
@@ -69,52 +67,53 @@ ProjectList.prototype = {
    * }
    */
   newApp: function(testOptions) {
-    let parentWindow = this._parentWindow;
-    let self = this;
-    return this._UI.busyUntil(Task.spawn(function*() {
+    const parentWindow = this._parentWindow;
+    const self = this;
+    return this._UI.busyUntil((async function() {
       // Open newapp.xul, which will feed ret.location
-      let ret = {location: null, testOptions: testOptions};
+      const ret = {location: null, testOptions: testOptions};
       parentWindow.openDialog("chrome://webide/content/newapp.xul", "newapp", "chrome,modal", ret);
-      if (!ret.location)
+      if (!ret.location) {
         return;
+      }
 
       // Retrieve added project
-      let project = AppProjects.get(ret.location);
+      const project = AppProjects.get(ret.location);
 
       // Select project
       AppManager.selectedProject = project;
 
-      self._telemetry.actionOccurred("webideNewProject");
-    }), "creating new app");
+      self._telemetry.getHistogramById(TELEMETRY_WEBIDE_NEW_PROJECT_COUNT).add(true);
+    })(), "creating new app");
   },
 
   importPackagedApp: function(location) {
-    let parentWindow = this._parentWindow;
-    let UI = this._UI;
-    return UI.busyUntil(Task.spawn(function*() {
-      let directory = utils.getPackagedDirectory(parentWindow, location);
+    const parentWindow = this._parentWindow;
+    const UI = this._UI;
+    return UI.busyUntil((async function() {
+      const directory = await utils.getPackagedDirectory(parentWindow, location);
 
       if (!directory) {
         // User cancelled directory selection
         return;
       }
 
-      yield UI.importAndSelectApp(directory);
-    }), "importing packaged app");
+      await UI.importAndSelectApp(directory);
+    })(), "importing packaged app");
   },
 
   importHostedApp: function(location) {
-    let parentWindow = this._parentWindow;
-    let UI = this._UI;
-    return UI.busyUntil(Task.spawn(function*() {
-      let url = utils.getHostedURL(parentWindow, location);
+    const parentWindow = this._parentWindow;
+    const UI = this._UI;
+    return UI.busyUntil((async function() {
+      const url = utils.getHostedURL(parentWindow, location);
 
       if (!url) {
         return;
       }
 
-      yield UI.importAndSelectApp(url);
-    }), "importing hosted app");
+      await UI.importAndSelectApp(url);
+    })(), "importing hosted app");
   },
 
   /**
@@ -125,9 +124,9 @@ ProjectList.prototype = {
    * }
    */
   _renderProjectItem: function(opts) {
-    let span = opts.panel.querySelector("span") || this._doc.createElement("span");
+    const span = opts.panel.querySelector("span") || this._doc.createElement("span");
     span.textContent = opts.name;
-    let icon = opts.panel.querySelector("img") || this._doc.createElement("img");
+    const icon = opts.panel.querySelector("img") || this._doc.createElement("img");
     icon.className = "project-image";
     icon.setAttribute("src", opts.icon);
     opts.panel.appendChild(icon);
@@ -144,8 +143,8 @@ ProjectList.prototype = {
   },
 
   updateTabs: function() {
-    let tabsHeaderNode = this._doc.querySelector("#panel-header-tabs");
-    let tabsNode = this._doc.querySelector("#project-panel-tabs");
+    const tabsHeaderNode = this._doc.querySelector("#panel-header-tabs");
+    const tabsNode = this._doc.querySelector("#project-panel-tabs");
 
     while (tabsNode.hasChildNodes()) {
       tabsNode.firstChild.remove();
@@ -156,18 +155,18 @@ ProjectList.prototype = {
       return;
     }
 
-    let tabs = AppManager.tabStore.tabs;
+    const tabs = AppManager.tabStore.tabs;
 
     tabsHeaderNode.removeAttribute("hidden");
 
     for (let i = 0; i < tabs.length; i++) {
-      let tab = tabs[i];
-      let URL = this._parentWindow.URL;
+      const tab = tabs[i];
+      const URL = this._parentWindow.URL;
       let url;
       try {
         url = new URL(tab.url);
       } catch (e) {
-        // Don't try to handle invalid URLs, especially from Valence.
+        // Don't try to handle invalid URLs
         continue;
       }
       // Wanted to use nsIFaviconService here, but it only works for visited
@@ -181,7 +180,7 @@ ProjectList.prototype = {
       if (url.protocol.startsWith("http")) {
         tab.name = url.hostname + ": " + tab.name;
       }
-      let panelItemNode = this._doc.createElement(this._panelNodeEl);
+      const panelItemNode = this._doc.createElement(this._panelNodeEl);
       panelItemNode.className = "panel-item";
       tabsNode.appendChild(panelItemNode);
       this._renderProjectItem({
@@ -200,33 +199,33 @@ ProjectList.prototype = {
       }, true);
     }
 
-    return promise.resolve();
+    return Promise.resolve();
   },
 
   updateApps: function() {
-    let doc = this._doc;
-    let runtimeappsHeaderNode = doc.querySelector("#panel-header-runtimeapps");
+    const doc = this._doc;
+    const runtimeappsHeaderNode = doc.querySelector("#panel-header-runtimeapps");
     let sortedApps = [];
-    for (let [manifestURL, app] of AppManager.apps) {
+    for (const [/* manifestURL */, app] of AppManager.apps) {
       sortedApps.push(app);
     }
     sortedApps = sortedApps.sort((a, b) => {
       return a.manifest.name > b.manifest.name;
     });
-    let mainProcess = AppManager.isMainProcessDebuggable();
+    const mainProcess = AppManager.isMainProcessDebuggable();
     if (AppManager.connected && (sortedApps.length > 0 || mainProcess)) {
       runtimeappsHeaderNode.removeAttribute("hidden");
     } else {
       runtimeappsHeaderNode.setAttribute("hidden", "true");
     }
 
-    let runtimeAppsNode = doc.querySelector("#project-panel-runtimeapps");
+    const runtimeAppsNode = doc.querySelector("#project-panel-runtimeapps");
     while (runtimeAppsNode.hasChildNodes()) {
       runtimeAppsNode.firstChild.remove();
     }
 
     if (mainProcess) {
-      let panelItemNode = doc.createElement(this._panelNodeEl);
+      const panelItemNode = doc.createElement(this._panelNodeEl);
       panelItemNode.className = "panel-item";
       this._renderProjectItem({
         panel: panelItemNode,
@@ -244,8 +243,8 @@ ProjectList.prototype = {
     }
 
     for (let i = 0; i < sortedApps.length; i++) {
-      let app = sortedApps[i];
-      let panelItemNode = doc.createElement(this._panelNodeEl);
+      const app = sortedApps[i];
+      const panelItemNode = doc.createElement(this._panelNodeEl);
       panelItemNode.className = "panel-item";
       this._renderProjectItem({
         panel: panelItemNode,
@@ -263,18 +262,15 @@ ProjectList.prototype = {
       }, true);
     }
 
-    return promise.resolve();
+    return Promise.resolve();
   },
 
   updateCommands: function() {
-    let doc = this._doc;
-    let newAppCmd;
-    let packagedAppCmd;
-    let hostedAppCmd;
+    const doc = this._doc;
 
-    newAppCmd = doc.querySelector("#new-app");
-    packagedAppCmd = doc.querySelector("#packaged-app");
-    hostedAppCmd = doc.querySelector("#hosted-app");
+    const newAppCmd = doc.querySelector("#new-app");
+    const packagedAppCmd = doc.querySelector("#packaged-app");
+    const hostedAppCmd = doc.querySelector("#hosted-app");
 
     if (!newAppCmd || !packagedAppCmd || !hostedAppCmd) {
       return;
@@ -299,69 +295,67 @@ ProjectList.prototype = {
    *        what is updated to only those sections.
    */
   update: function(options) {
-    let deferred = promise.defer();
-
     if (options && options.type === "apps") {
       return this.updateApps();
     } else if (options && options.type === "tabs") {
       return this.updateTabs();
     }
 
-    let doc = this._doc;
-    let projectsNode = doc.querySelector("#project-panel-projects");
+    return new Promise((resolve, reject) => {
+      const doc = this._doc;
+      const projectsNode = doc.querySelector("#project-panel-projects");
 
-    while (projectsNode.hasChildNodes()) {
-      projectsNode.firstChild.remove();
-    }
-
-    AppProjects.load().then(() => {
-      let projects = AppProjects.projects;
-      for (let i = 0; i < projects.length; i++) {
-        let project = projects[i];
-        let panelItemNode = doc.createElement(this._panelNodeEl);
-        panelItemNode.className = "panel-item";
-        projectsNode.appendChild(panelItemNode);
-        if (!project.validationStatus) {
-          // The result of the validation process (storing names, icons, …) is not stored in
-          // the IndexedDB database when App Manager v1 is used.
-          // We need to run the validation again and update the name and icon of the app.
-          AppManager.validateAndUpdateProject(project).then(() => {
-            this._renderProjectItem({
-              panel: panelItemNode,
-              name: project.name,
-              icon: project.icon
-            });
-          });
-        } else {
-          this._renderProjectItem({
-            panel: panelItemNode,
-            name: project.name || AppManager.DEFAULT_PROJECT_NAME,
-            icon: project.icon || AppManager.DEFAULT_PROJECT_ICON
-          });
-        }
-        panelItemNode.addEventListener("click", () => {
-          AppManager.selectedProject = project;
-        }, true);
+      while (projectsNode.hasChildNodes()) {
+        projectsNode.firstChild.remove();
       }
 
-      deferred.resolve();
-    }, deferred.reject);
+      AppProjects.load().then(() => {
+        const projects = AppProjects.projects;
+        for (let i = 0; i < projects.length; i++) {
+          const project = projects[i];
+          const panelItemNode = doc.createElement(this._panelNodeEl);
+          panelItemNode.className = "panel-item";
+          projectsNode.appendChild(panelItemNode);
+          if (!project.validationStatus) {
+            // The result of the validation process (storing names, icons, …) is not stored in
+            // the IndexedDB database when App Manager v1 is used.
+            // We need to run the validation again and update the name and icon of the app.
+            AppManager.validateAndUpdateProject(project).then(() => {
+              this._renderProjectItem({
+                panel: panelItemNode,
+                name: project.name,
+                icon: project.icon
+              });
+            });
+          } else {
+            this._renderProjectItem({
+              panel: panelItemNode,
+              name: project.name || AppManager.DEFAULT_PROJECT_NAME,
+              icon: project.icon || AppManager.DEFAULT_PROJECT_ICON
+            });
+          }
+          panelItemNode.addEventListener("click", () => {
+            AppManager.selectedProject = project;
+          }, true);
+        }
 
-    // List remote apps and the main process, if they exist
-    this.updateApps();
+        resolve();
+      }, reject);
 
-    // Build the tab list right now, so it's fast...
-    this.updateTabs();
+      // List remote apps and the main process, if they exist
+      this.updateApps();
 
-    // But re-list them and rebuild, in case any tabs navigated since the last
-    // time they were listed.
-    if (AppManager.connected) {
-      AppManager.listTabs().then(() => {
-        this.updateTabs();
-      }).catch(console.error);
-    }
+      // Build the tab list right now, so it's fast...
+      this.updateTabs();
 
-    return deferred.promise;
+      // But re-list them and rebuild, in case any tabs navigated since the last
+      // time they were listed.
+      if (AppManager.connected) {
+        AppManager.listTabs().then(() => {
+          this.updateTabs();
+        }).catch(console.error);
+      }
+    });
   },
 
   destroy: function() {

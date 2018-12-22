@@ -19,17 +19,12 @@ using namespace mozilla::a11y;
 STDMETHODIMP
 ia2AccessibleHypertext::get_nHyperlinks(long* aHyperlinkCount)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aHyperlinkCount)
     return E_INVALIDARG;
 
   *aHyperlinkCount = 0;
 
-  if (ProxyAccessible* proxy = HyperTextProxyFor(this)) {
-    *aHyperlinkCount = proxy->LinkCount();
-    return S_OK;
-  }
+  MOZ_ASSERT(!HyperTextProxyFor(this));
 
   HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperText->IsDefunct())
@@ -37,35 +32,25 @@ ia2AccessibleHypertext::get_nHyperlinks(long* aHyperlinkCount)
 
   *aHyperlinkCount = hyperText->LinkCount();
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 ia2AccessibleHypertext::get_hyperlink(long aLinkIndex,
                                       IAccessibleHyperlink** aHyperlink)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aHyperlink)
     return E_INVALIDARG;
 
   *aHyperlink = nullptr;
 
   AccessibleWrap* hyperLink;
-  if (ProxyAccessible* proxy = HyperTextProxyFor(this)) {
-    ProxyAccessible* link = proxy->LinkAt(aLinkIndex);
-    if (!link)
-      return E_FAIL;
-
-    hyperLink = WrapperFor(link);
-  } else {
-    HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
-    if (hyperText->IsDefunct())
-      return CO_E_OBJNOTCONNECTED;
-
-    hyperLink = static_cast<AccessibleWrap*>(hyperText->LinkAt(aLinkIndex));
+  MOZ_ASSERT(!HyperTextProxyFor(this));
+  HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
+  if (hyperText->IsDefunct()) {
+    return CO_E_OBJNOTCONNECTED;
   }
+
+  hyperLink = static_cast<AccessibleWrap*>(hyperText->LinkAt(aLinkIndex));
 
   if (!hyperLink)
     return E_FAIL;
@@ -74,24 +59,17 @@ ia2AccessibleHypertext::get_hyperlink(long aLinkIndex,
     static_cast<IAccessibleHyperlink*>(hyperLink);
   (*aHyperlink)->AddRef();
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 ia2AccessibleHypertext::get_hyperlinkIndex(long aCharIndex, long* aHyperlinkIndex)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aHyperlinkIndex)
     return E_INVALIDARG;
 
   *aHyperlinkIndex = 0;
 
-  if (ProxyAccessible* proxy = HyperTextProxyFor(this)) {
-    *aHyperlinkIndex = proxy->LinkIndexAtOffset(aCharIndex);
-    return S_OK;
-  }
+  MOZ_ASSERT(!HyperTextProxyFor(this));
 
   HyperTextAccessibleWrap* hyperAcc = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperAcc->IsDefunct())
@@ -99,7 +77,47 @@ ia2AccessibleHypertext::get_hyperlinkIndex(long aCharIndex, long* aHyperlinkInde
 
   *aHyperlinkIndex = hyperAcc->LinkIndexAtOffset(aCharIndex);
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
+STDMETHODIMP
+ia2AccessibleHypertext::get_hyperlinks(IAccessibleHyperlink*** aHyperlinks,
+                                      long* aNHyperlinks)
+{
+  if (!aHyperlinks || !aNHyperlinks) {
+    return E_INVALIDARG;
+  }
+
+  *aHyperlinks = nullptr;
+  *aNHyperlinks = 0;
+
+  MOZ_ASSERT(!HyperTextProxyFor(this));
+
+  HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
+  if (hyperText->IsDefunct()) {
+    return CO_E_OBJNOTCONNECTED;
+  }
+
+  uint32_t count = hyperText->LinkCount();
+  *aNHyperlinks = count;
+
+  if (count == 0) {
+    *aHyperlinks = nullptr;
+    return S_FALSE;
+  }
+
+  *aHyperlinks = static_cast<IAccessibleHyperlink**>(::CoTaskMemAlloc(
+    sizeof(IAccessibleHyperlink*) * count));
+  if (!*aHyperlinks) {
+    return E_OUTOFMEMORY;
+  }
+
+  for (uint32_t i = 0; i < count; ++i) {
+    AccessibleWrap* hyperLink =
+      static_cast<AccessibleWrap*>(hyperText->LinkAt(i));
+    MOZ_ASSERT(hyperLink);
+    (*aHyperlinks)[i] = static_cast<IAccessibleHyperlink*>(hyperLink);
+    (*aHyperlinks)[i]->AddRef();
+  }
+
+  return S_OK;
+}

@@ -8,12 +8,14 @@
 
 #include "nsXPLookAndFeel.h"
 
-class nsLookAndFeel: public nsXPLookAndFeel
+class nsLookAndFeel final : public nsXPLookAndFeel
 {
 public:
     nsLookAndFeel();
     virtual ~nsLookAndFeel();
 
+    void NativeInit() final;
+    virtual void RefreshImpl();
     virtual nsresult NativeGetColor(const ColorID aID, nscolor &aResult);
     virtual nsresult GetIntImpl(IntID aID, int32_t &aResult);
     virtual nsresult GetFloatImpl(FloatID aID, float &aResult);
@@ -30,6 +32,14 @@ public:
     {
         return true;
     }
+
+private:
+    nscolor mColorTextSelectForeground;
+    nscolor mColorDarkText;
+
+    bool mInitialized;
+
+    void EnsureInit();
 };
 
 #endif

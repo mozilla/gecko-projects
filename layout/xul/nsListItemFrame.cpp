@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,10 +15,12 @@
 #include "nsBoxLayout.h"
 #include "nsIContent.h"
 
-nsListItemFrame::nsListItemFrame(nsStyleContext* aContext,
+using namespace mozilla;
+
+nsListItemFrame::nsListItemFrame(ComputedStyle* aStyle,
                                  bool aIsRoot,
                                  nsBoxLayout* aLayoutManager)
-  : nsGridRowLeafFrame(aContext, aIsRoot, aLayoutManager) 
+  : nsGridRowLeafFrame(aStyle, aIsRoot, aLayoutManager, kClassID)
 {
 }
 
@@ -26,9 +29,9 @@ nsListItemFrame::~nsListItemFrame()
 }
 
 nsSize
-nsListItemFrame::GetPrefSize(nsBoxLayoutState& aState)
+nsListItemFrame::GetXULPrefSize(nsBoxLayoutState& aState)
 {
-  nsSize size = nsBoxFrame::GetPrefSize(aState);  
+  nsSize size = nsBoxFrame::GetXULPrefSize(aState);
   DISPLAY_PREF_SIZE(this, size);
 
   // guarantee that our preferred height doesn't exceed the standard
@@ -39,16 +42,16 @@ nsListItemFrame::GetPrefSize(nsBoxLayoutState& aState)
 
 void
 nsListItemFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
-                                             const nsRect&           aDirtyRect,
                                              const nsDisplayListSet& aLists)
 {
   if (aBuilder->IsForEventDelivery()) {
-    if (!mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::allowevents,
-                               nsGkAtoms::_true, eCaseMatters))
+    if (!mContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                            nsGkAtoms::allowevents,
+                                            nsGkAtoms::_true, eCaseMatters))
       return;
   }
-  
-  nsGridRowLeafFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+
+  nsGridRowLeafFrame::BuildDisplayListForChildren(aBuilder, aLists);
 }
 
 // Creation Routine ///////////////////////////////////////////////////////////////////////
@@ -56,14 +59,14 @@ nsListItemFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
 already_AddRefed<nsBoxLayout> NS_NewGridRowLeafLayout();
 
 nsIFrame*
-NS_NewListItemFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewListItemFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewGridRowLeafLayout();
   if (!layout) {
     return nullptr;
   }
-  
-  return new (aPresShell) nsListItemFrame(aContext, false, layout);
+
+  return new (aPresShell) nsListItemFrame(aStyle, false, layout);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsListItemFrame)

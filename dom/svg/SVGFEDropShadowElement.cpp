@@ -19,7 +19,7 @@ namespace dom {
 JSObject*
 SVGFEDropShadowElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEDropShadowElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEDropShadowElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEDropShadowElement::sNumberInfo[2] =
@@ -40,7 +40,7 @@ nsSVGElement::StringInfo SVGFEDropShadowElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEDropShadowElement)
 
@@ -109,9 +109,9 @@ SVGFEDropShadowElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
   nsIFrame* frame = GetPrimaryFrame();
   if (frame) {
-    nsStyleContext* style = frame->StyleContext();
-    Color color(Color::FromABGR(style->StyleSVGReset()->mFloodColor));
-    color.a *= style->StyleSVGReset()->mFloodOpacity;
+    const nsStyleSVGReset* styleSVGReset = frame->Style()->StyleSVGReset();
+    Color color(Color::FromABGR(styleSVGReset->mFloodColor.CalcColor(frame)));
+    color.a *= styleSVGReset->mFloodOpacity;
     descr.Attributes().Set(eDropShadowColor, color);
   } else {
     descr.Attributes().Set(eDropShadowColor, Color());
@@ -121,7 +121,7 @@ SVGFEDropShadowElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFEDropShadowElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                  nsIAtom* aAttribute) const
+                                                  nsAtom* aAttribute) const
 {
   return SVGFEDropShadowElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&
@@ -141,7 +141,7 @@ SVGFEDropShadowElement::GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources)
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGFEDropShadowElement::IsAttributeMapped(const nsIAtom* name) const
+SVGFEDropShadowElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sFEFloodMap

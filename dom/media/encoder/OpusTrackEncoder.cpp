@@ -5,16 +5,13 @@
 #include "OpusTrackEncoder.h"
 #include "nsString.h"
 #include "GeckoProfiler.h"
+#include "mozilla/CheckedInt.h"
+#include "VideoUtils.h"
 
 #include <opus/opus.h>
 
 #undef LOG
-#ifdef MOZ_WIDGET_GONK
-#include <android/log.h>
-#define LOG(args...) __android_log_print(ANDROID_LOG_INFO, "MediaEncoder", ## args);
-#else
 #define LOG(args, ...)
-#endif
 
 namespace mozilla {
 
@@ -124,11 +121,12 @@ SerializeOpusCommentHeader(const nsCString& aVendor,
 
 }  // Anonymous namespace.
 
-OpusTrackEncoder::OpusTrackEncoder()
-  : AudioTrackEncoder()
+OpusTrackEncoder::OpusTrackEncoder(TrackRate aTrackRate)
+  : AudioTrackEncoder(aTrackRate)
   , mEncoder(nullptr)
   , mLookahead(0)
   , mResampler(nullptr)
+  , mOutputTimeStamp(0)
 {
 }
 
@@ -146,10 +144,6 @@ OpusTrackEncoder::~OpusTrackEncoder()
 nsresult
 OpusTrackEncoder::Init(int aChannels, int aSamplingRate)
 {
-  // This monitor is used to wake up other methods that are waiting for encoder
-  // to be completely initialized.
-  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-
   NS_ENSURE_TRUE((aChannels <= MAX_SUPPORTED_AUDIO_CHANNELS) && (aChannels > 0),
                  NS_ERROR_FAILURE);
 
@@ -188,13 +182,13 @@ OpusTrackEncoder::Init(int aChannels, int aSamplingRate)
                                  OPUS_APPLICATION_AUDIO, &error);
 
 
-  mInitialized = (error == OPUS_OK);
+  if (error == OPUS_OK) {
+    SetInitialized();
+  }
 
   if (mAudioBitrate) {
     opus_encoder_ctl(mEncoder, OPUS_SET_BITRATE(static_cast<int>(mAudioBitrate)));
   }
-
-  mReentrantMonitor.NotifyAll();
 
   return error == OPUS_OK ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -214,21 +208,21 @@ OpusTrackEncoder::GetPacketDuration()
 already_AddRefed<TrackMetadataBase>
 OpusTrackEncoder::GetMetadata()
 {
-  PROFILER_LABEL("OpusTrackEncoder", "GetMetadata",
-    js::ProfileEntry::Category::OTHER);
-  {
-    // Wait if mEncoder is not initialized.
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    while (!mCanceled && !mInitialized) {
-      mReentrantMonitor.Wait();
-    }
-  }
+  AUTO_PROFILER_LABEL("OpusTrackEncoder::GetMetadata", OTHER);
+
+  MOZ_ASSERT(mInitialized || mCanceled);
 
   if (mCanceled || mEncodingComplete) {
     return nullptr;
   }
 
+  if (!mInitialized) {
+    return nullptr;
+  }
+
   RefPtr<OpusMetadata> meta = new OpusMetadata();
+  meta->mChannels = mChannels;
+  meta->mSamplingFrequency = mSamplingRate;
 
   mLookahead = 0;
   int error = opus_encoder_ctl(mEncoder, OPUS_GET_LOOKAHEAD(&mLookahead));
@@ -256,53 +250,43 @@ OpusTrackEncoder::GetMetadata()
 nsresult
 OpusTrackEncoder::GetEncodedTrack(EncodedFrameContainer& aData)
 {
-  PROFILER_LABEL("OpusTrackEncoder", "GetEncodedTrack",
-    js::ProfileEntry::Category::OTHER);
-  {
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    // Wait until initialized or cancelled.
-    while (!mCanceled && !mInitialized) {
-      mReentrantMonitor.Wait();
-    }
-    if (mCanceled || mEncodingComplete) {
-      return NS_ERROR_FAILURE;
-    }
+  AUTO_PROFILER_LABEL("OpusTrackEncoder::GetEncodedTrack", OTHER);
+
+  MOZ_ASSERT(mInitialized || mCanceled);
+
+  if (mCanceled || mEncodingComplete) {
+    return NS_ERROR_FAILURE;
   }
 
-  // calculation below depends on the truth that mInitialized is true.
-  MOZ_ASSERT(mInitialized);
+  if (!mInitialized) {
+    // calculation below depends on the truth that mInitialized is true.
+    return NS_ERROR_FAILURE;
+  }
 
-  // re-sampled frames left last time which didn't fit into an Opus packet duration.
-  const int framesLeft = mResampledLeftover.Length() / mChannels;
-  // When framesLeft is 0, (GetPacketDuration() - framesLeft) is a multiple
-  // of kOpusSamplingRate. There is not precision loss in the integer division
-  // in computing framesToFetch. If frameLeft > 0, we need to add 1 to
-  // framesToFetch to ensure there will be at least n frames after re-sampling.
-  const int frameRoundUp = framesLeft ? 1 : 0;
+  TakeTrackData(mSourceSegment);
 
-  MOZ_ASSERT(GetPacketDuration() >= framesLeft);
-  // Try to fetch m frames such that there will be n frames
-  // where (n + frameLeft) >= GetPacketDuration() after re-sampling.
-  const int framesToFetch = !mResampler ? GetPacketDuration()
-    : (GetPacketDuration() - framesLeft) * mSamplingRate / kOpusSamplingRate
-      + frameRoundUp;
-  {
-    // Move all the samples from mRawSegment to mSourceSegment. We only hold
-    // the monitor in this block.
-    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  int result = 0;
+  // Loop until we run out of packets of input data
+  while (result >= 0 && !mEncodingComplete) {
+    // re-sampled frames left last time which didn't fit into an Opus packet duration.
+    const int framesLeft = mResampledLeftover.Length() / mChannels;
+    // When framesLeft is 0, (GetPacketDuration() - framesLeft) is a multiple
+    // of kOpusSamplingRate. There is not precision loss in the integer division
+    // in computing framesToFetch. If frameLeft > 0, we need to add 1 to
+    // framesToFetch to ensure there will be at least n frames after re-sampling.
+    const int frameRoundUp = framesLeft ? 1 : 0;
 
-    // Wait until enough raw data, end of stream or cancelled.
-    while (!mCanceled && mRawSegment.GetDuration() +
-        mSourceSegment.GetDuration() < framesToFetch &&
-        !mEndOfStream) {
-      mReentrantMonitor.Wait();
+    MOZ_ASSERT(GetPacketDuration() >= framesLeft);
+    // Try to fetch m frames such that there will be n frames
+    // where (n + frameLeft) >= GetPacketDuration() after re-sampling.
+    const int framesToFetch = !mResampler ? GetPacketDuration()
+                              : (GetPacketDuration() - framesLeft) * mSamplingRate / kOpusSamplingRate
+                              + frameRoundUp;
+
+    if (!mEndOfStream && mSourceSegment.GetDuration() < framesToFetch) {
+      // Not enough raw data
+      return NS_OK;
     }
-
-    if (mCanceled || mEncodingComplete) {
-      return NS_ERROR_FAILURE;
-    }
-
-    mSourceSegment.AppendFrom(&mRawSegment);
 
     // Pad |mLookahead| samples to the end of source stream to prevent lost of
     // original data, the pcm duration will be calculated at rate 48K later.
@@ -310,134 +294,158 @@ OpusTrackEncoder::GetEncodedTrack(EncodedFrameContainer& aData)
       mEosSetInEncoder = true;
       mSourceSegment.AppendNullData(mLookahead);
     }
-  }
 
-  // Start encoding data.
-  AutoTArray<AudioDataValue, 9600> pcm;
-  pcm.SetLength(GetPacketDuration() * mChannels);
-  AudioSegment::ChunkIterator iter(mSourceSegment);
-  int frameCopied = 0;
+    // Start encoding data.
+    AutoTArray<AudioDataValue, 9600> pcm;
+    pcm.SetLength(GetPacketDuration() * mChannels);
 
-  while (!iter.IsEnded() && frameCopied < framesToFetch) {
-    AudioChunk chunk = *iter;
+    int frameCopied = 0;
 
-    // Chunk to the required frame size.
-    int frameToCopy = chunk.GetDuration();
-    if (frameCopied + frameToCopy > framesToFetch) {
-      frameToCopy = framesToFetch - frameCopied;
+    for (AudioSegment::ChunkIterator iter(mSourceSegment);
+         !iter.IsEnded() && frameCopied < framesToFetch;
+         iter.Next()) {
+      AudioChunk chunk = *iter;
+
+      // Chunk to the required frame size.
+      StreamTime frameToCopy = chunk.GetDuration();
+      if (frameToCopy > framesToFetch - frameCopied) {
+        frameToCopy = framesToFetch - frameCopied;
+      }
+      // Possible greatest value of framesToFetch = 3844: see
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=1349421#c8. frameToCopy
+      // should not be able to exceed this value.
+      MOZ_ASSERT(frameToCopy <= 3844, "frameToCopy exceeded expected range");
+
+      if (!chunk.IsNull()) {
+        // Append the interleaved data to the end of pcm buffer.
+        AudioTrackEncoder::InterleaveTrackData(chunk, frameToCopy, mChannels,
+                                               pcm.Elements() + frameCopied * mChannels);
+      } else {
+        CheckedInt<int> memsetLength = CheckedInt<int>(frameToCopy) *
+                                       mChannels *
+                                       sizeof(AudioDataValue);
+        if (!memsetLength.isValid()) {
+          // This should never happen, but we use a defensive check because
+          // we really don't want a bad memset
+          MOZ_ASSERT_UNREACHABLE("memsetLength invalid!");
+          return NS_ERROR_FAILURE;
+        }
+        memset(pcm.Elements() + frameCopied * mChannels, 0,
+               memsetLength.value());
+      }
+
+      frameCopied += frameToCopy;
     }
 
-    if (!chunk.IsNull()) {
-      // Append the interleaved data to the end of pcm buffer.
-      AudioTrackEncoder::InterleaveTrackData(chunk, frameToCopy, mChannels,
-        pcm.Elements() + frameCopied * mChannels);
-    } else {
-      memset(pcm.Elements() + frameCopied * mChannels, 0,
-             frameToCopy * mChannels * sizeof(AudioDataValue));
-    }
+    // Possible greatest value of framesToFetch = 3844: see
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1349421#c8. frameCopied
+    // should not be able to exceed this value.
+    MOZ_ASSERT(frameCopied <= 3844, "frameCopied exceeded expected range");
 
-    frameCopied += frameToCopy;
-    iter.Next();
-  }
+    RefPtr<EncodedFrame> audiodata = new EncodedFrame();
+    audiodata->SetFrameType(EncodedFrame::OPUS_AUDIO_FRAME);
+    int framesInPCM = frameCopied;
+    if (mResampler) {
+      AutoTArray<AudioDataValue, 9600> resamplingDest;
+      // We want to consume all the input data, so we slightly oversize the
+      // resampled data buffer so we can fit the output data in. We cannot really
+      // predict the output frame count at each call.
+      uint32_t outframes = frameCopied * kOpusSamplingRate / mSamplingRate + 1;
+      uint32_t inframes = frameCopied;
 
-  RefPtr<EncodedFrame> audiodata = new EncodedFrame();
-  audiodata->SetFrameType(EncodedFrame::OPUS_AUDIO_FRAME);
-  int framesInPCM = frameCopied;
-  if (mResampler) {
-    AutoTArray<AudioDataValue, 9600> resamplingDest;
-    // We want to consume all the input data, so we slightly oversize the
-    // resampled data buffer so we can fit the output data in. We cannot really
-    // predict the output frame count at each call.
-    uint32_t outframes = frameCopied * kOpusSamplingRate / mSamplingRate + 1;
-    uint32_t inframes = frameCopied;
-
-    resamplingDest.SetLength(outframes * mChannels);
+      resamplingDest.SetLength(outframes * mChannels);
 
 #if MOZ_SAMPLE_TYPE_S16
-    short* in = reinterpret_cast<short*>(pcm.Elements());
-    short* out = reinterpret_cast<short*>(resamplingDest.Elements());
-    speex_resampler_process_interleaved_int(mResampler, in, &inframes,
-                                                        out, &outframes);
+      short* in = reinterpret_cast<short*>(pcm.Elements());
+      short* out = reinterpret_cast<short*>(resamplingDest.Elements());
+      speex_resampler_process_interleaved_int(mResampler, in, &inframes,
+                                              out, &outframes);
 #else
-    float* in = reinterpret_cast<float*>(pcm.Elements());
-    float* out = reinterpret_cast<float*>(resamplingDest.Elements());
-    speex_resampler_process_interleaved_float(mResampler, in, &inframes,
-                                                          out, &outframes);
+      float* in = reinterpret_cast<float*>(pcm.Elements());
+      float* out = reinterpret_cast<float*>(resamplingDest.Elements());
+      speex_resampler_process_interleaved_float(mResampler, in, &inframes,
+                                                out, &outframes);
 #endif
 
-    MOZ_ASSERT(pcm.Length() >= mResampledLeftover.Length());
-    PodCopy(pcm.Elements(), mResampledLeftover.Elements(),
-        mResampledLeftover.Length());
+      MOZ_ASSERT(pcm.Length() >= mResampledLeftover.Length());
+      PodCopy(pcm.Elements(), mResampledLeftover.Elements(),
+              mResampledLeftover.Length());
 
-    uint32_t outframesToCopy = std::min(outframes,
-        static_cast<uint32_t>(GetPacketDuration() - framesLeft));
+      uint32_t outframesToCopy = std::min(outframes,
+                                          static_cast<uint32_t>(GetPacketDuration() - framesLeft));
 
-    MOZ_ASSERT(pcm.Length() - mResampledLeftover.Length() >=
-        outframesToCopy * mChannels);
-    PodCopy(pcm.Elements() + mResampledLeftover.Length(),
-        resamplingDest.Elements(), outframesToCopy * mChannels);
-    int frameLeftover = outframes - outframesToCopy;
-    mResampledLeftover.SetLength(frameLeftover * mChannels);
-    PodCopy(mResampledLeftover.Elements(),
-        resamplingDest.Elements() + outframesToCopy * mChannels,
-        mResampledLeftover.Length());
-    // This is always at 48000Hz.
-    framesInPCM = framesLeft + outframesToCopy;
-    audiodata->SetDuration(framesInPCM);
-  } else {
-    // The ogg time stamping and pre-skip is always timed at 48000.
-    audiodata->SetDuration(frameCopied * (kOpusSamplingRate / mSamplingRate));
-  }
-
-  // Remove the raw data which has been pulled to pcm buffer.
-  // The value of frameCopied should equal to (or smaller than, if eos)
-  // GetPacketDuration().
-  mSourceSegment.RemoveLeading(frameCopied);
-
-  // Has reached the end of input stream and all queued data has pulled for
-  // encoding.
-  if (mSourceSegment.GetDuration() == 0 && mEndOfStream) {
-    mEncodingComplete = true;
-    LOG("[Opus] Done encoding.");
-  }
-
-  MOZ_ASSERT(mEndOfStream || framesInPCM == GetPacketDuration());
-
-  // Append null data to pcm buffer if the leftover data is not enough for
-  // opus encoder.
-  if (framesInPCM < GetPacketDuration() && mEndOfStream) {
-    PodZero(pcm.Elements() + framesInPCM * mChannels,
-        (GetPacketDuration() - framesInPCM) * mChannels);
-  }
-  nsTArray<uint8_t> frameData;
-  // Encode the data with Opus Encoder.
-  frameData.SetLength(MAX_DATA_BYTES);
-  // result is returned as opus error code if it is negative.
-  int result = 0;
-#ifdef MOZ_SAMPLE_TYPE_S16
-  const opus_int16* pcmBuf = static_cast<opus_int16*>(pcm.Elements());
-  result = opus_encode(mEncoder, pcmBuf, GetPacketDuration(),
-                       frameData.Elements(), MAX_DATA_BYTES);
-#else
-  const float* pcmBuf = static_cast<float*>(pcm.Elements());
-  result = opus_encode_float(mEncoder, pcmBuf, GetPacketDuration(),
-                             frameData.Elements(), MAX_DATA_BYTES);
-#endif
-  frameData.SetLength(result >= 0 ? result : 0);
-
-  if (result < 0) {
-    LOG("[Opus] Fail to encode data! Result: %s.", opus_strerror(result));
-  }
-  if (mEncodingComplete) {
-    if (mResampler) {
-      speex_resampler_destroy(mResampler);
-      mResampler = nullptr;
+      MOZ_ASSERT(pcm.Length() - mResampledLeftover.Length() >=
+                 outframesToCopy * mChannels);
+      PodCopy(pcm.Elements() + mResampledLeftover.Length(),
+              resamplingDest.Elements(), outframesToCopy * mChannels);
+      int frameLeftover = outframes - outframesToCopy;
+      mResampledLeftover.SetLength(frameLeftover * mChannels);
+      PodCopy(mResampledLeftover.Elements(),
+              resamplingDest.Elements() + outframesToCopy * mChannels,
+              mResampledLeftover.Length());
+      // This is always at 48000Hz.
+      framesInPCM = framesLeft + outframesToCopy;
+      audiodata->SetDuration(framesInPCM);
+    } else {
+      // The ogg time stamping and pre-skip is always timed at 48000.
+      audiodata->SetDuration(frameCopied * (kOpusSamplingRate / mSamplingRate));
     }
-    mResampledLeftover.SetLength(0);
+
+    // Remove the raw data which has been pulled to pcm buffer.
+    // The value of frameCopied should equal to (or smaller than, if eos)
+    // GetPacketDuration().
+    mSourceSegment.RemoveLeading(frameCopied);
+
+    // Has reached the end of input stream and all queued data has pulled for
+    // encoding.
+    if (mSourceSegment.GetDuration() == 0 && mEosSetInEncoder) {
+      mEncodingComplete = true;
+      LOG("[Opus] Done encoding.");
+    }
+
+    MOZ_ASSERT(mEosSetInEncoder || framesInPCM == GetPacketDuration());
+
+    // Append null data to pcm buffer if the leftover data is not enough for
+    // opus encoder.
+    if (framesInPCM < GetPacketDuration() && mEosSetInEncoder) {
+      PodZero(pcm.Elements() + framesInPCM * mChannels,
+              (GetPacketDuration() - framesInPCM) * mChannels);
+    }
+    nsTArray<uint8_t> frameData;
+    // Encode the data with Opus Encoder.
+    frameData.SetLength(MAX_DATA_BYTES);
+    // result is returned as opus error code if it is negative.
+    result = 0;
+#ifdef MOZ_SAMPLE_TYPE_S16
+    const opus_int16* pcmBuf = static_cast<opus_int16*>(pcm.Elements());
+    result = opus_encode(mEncoder, pcmBuf, GetPacketDuration(),
+                         frameData.Elements(), MAX_DATA_BYTES);
+#else
+    const float* pcmBuf = static_cast<float*>(pcm.Elements());
+    result = opus_encode_float(mEncoder, pcmBuf, GetPacketDuration(),
+                               frameData.Elements(), MAX_DATA_BYTES);
+#endif
+    frameData.SetLength(result >= 0 ? result : 0);
+
+    if (result < 0) {
+      LOG("[Opus] Fail to encode data! Result: %s.", opus_strerror(result));
+    }
+    if (mEncodingComplete) {
+      if (mResampler) {
+        speex_resampler_destroy(mResampler);
+        mResampler = nullptr;
+      }
+      mResampledLeftover.SetLength(0);
+    }
+
+    audiodata->SwapInFrameData(frameData);
+    // timestamp should be the time of the first sample
+    audiodata->SetTimeStamp(mOutputTimeStamp);
+    mOutputTimeStamp += FramesToUsecs(GetPacketDuration(), kOpusSamplingRate).value();
+    LOG("[Opus] mOutputTimeStamp %lld.",mOutputTimeStamp);
+    aData.AppendEncodedFrame(audiodata);
   }
 
-  audiodata->SwapInFrameData(frameData);
-  aData.AppendEncodedFrame(audiodata);
   return result >= 0 ? NS_OK : NS_ERROR_FAILURE;
 }
 

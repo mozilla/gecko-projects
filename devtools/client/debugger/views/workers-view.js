@@ -13,19 +13,20 @@ function WorkersView() {
   this._onWorkerSelect = this._onWorkerSelect.bind(this);
 }
 
-WorkersView.prototype = Heritage.extend(WidgetMethods, {
+WorkersView.prototype = extend(WidgetMethods, {
   initialize: function () {
     if (!Prefs.workersEnabled) {
       return;
     }
 
     document.getElementById("workers-pane").removeAttribute("hidden");
+    document.getElementById("workers-splitter").removeAttribute("hidden");
 
     this.widget = new SideMenuWidget(document.getElementById("workers"), {
       showArrows: true,
     });
     this.emptyText = L10N.getStr("noWorkersText");
-    this.widget.addEventListener("select", this._onWorkerSelect, false);
+    this.widget.addEventListener("select", this._onWorkerSelect);
   },
 
   addWorker: function (workerForm) {

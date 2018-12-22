@@ -7,38 +7,78 @@
 #ifndef mozilla_dom_GamepadServiceTest_h_
 #define mozilla_dom_GamepadServiceTest_h_
 
-#include "nsIGamepadServiceTest.h"
+#include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/GamepadBinding.h"
 
 namespace mozilla {
 namespace dom {
 
-class GamepadService;
+class GamepadChangeEvent;
+class GamepadManager;
+class GamepadTestChannelChild;
+class Promise;
 
 // Service for testing purposes
-class GamepadServiceTest : public nsIGamepadServiceTest
+class GamepadServiceTest final : public DOMEventTargetHelper
 {
 public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIGAMEPADSERVICETEST
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(GamepadServiceTest,
+                                           DOMEventTargetHelper)
 
-  GamepadServiceTest();
+  GamepadMappingType NoMapping() const { return GamepadMappingType::_empty; }
+  GamepadMappingType StandardMapping() const { return GamepadMappingType::Standard; }
+  GamepadHand NoHand() const { return GamepadHand::_empty; }
+  GamepadHand LeftHand() const { return GamepadHand::Left; }
+  GamepadHand RightHand() const { return GamepadHand::Right; }
 
-  static already_AddRefed<GamepadServiceTest> CreateService();
+  already_AddRefed<Promise> AddGamepad(const nsAString& aID,
+                                       GamepadMappingType aMapping,
+                                       GamepadHand aHand,
+                                       uint32_t aNumButtons,
+                                       uint32_t aNumAxes,
+                                       uint32_t aNumHaptics,
+                                       ErrorResult& aRv);
+  void RemoveGamepad(uint32_t aIndex);
+  void NewButtonEvent(uint32_t aIndex, uint32_t aButton, bool aPressed, bool aTouched);
+  void NewButtonValueEvent(uint32_t aIndex, uint32_t aButton, bool aPressed, bool aTouched,
+                           double aValue);
+  void NewAxisMoveEvent(uint32_t aIndex, uint32_t aAxis, double aValue);
+  void NewPoseMove(uint32_t aIndex,
+                   const Nullable<Float32Array>& aOrient,
+                   const Nullable<Float32Array>& aPos,
+                   const Nullable<Float32Array>& aAngVelocity,
+                   const Nullable<Float32Array>& aAngAcceleration,
+                   const Nullable<Float32Array>& aLinVelocity,
+                   const Nullable<Float32Array>& aLinAcceleration);
+  void Shutdown();
+
+  static already_AddRefed<GamepadServiceTest> CreateTestService(nsPIDOMWindowInner* aWindow);
+  nsPIDOMWindowInner* GetParentObject() const { return mWindow; }
+  JSObject* WrapObject(JSContext* aCx, JS::HandleObject aGivenProto) override;
 
 private:
-  static GamepadServiceTest* sSingleton;
+
   // Hold a reference to the gamepad service so we don't have to worry about
   // execution order in tests.
-  RefPtr<GamepadService> mService;
-  virtual ~GamepadServiceTest();
+  RefPtr<GamepadManager> mService;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  uint32_t mEventNumber;
+  bool mShuttingDown;
+
+  // IPDL Channel for us to send test events to GamepadPlatformService, it
+  // will only be used in this singleton class and deleted during the IPDL
+  // shutdown chain
+  GamepadTestChannelChild* MOZ_NON_OWNING_REF mChild;
+
+  explicit GamepadServiceTest(nsPIDOMWindowInner* aWindow);
+  ~GamepadServiceTest();
+  void InitPBackgroundActor();
+  void DestroyPBackgroundActor();
+
 };
 
 } // namespace dom
 } // namespace mozilla
-
-#define NS_GAMEPAD_TEST_CID \
-{ 0xfb1fcb57, 0xebab, 0x4cf4, \
-{ 0x96, 0x3b, 0x1e, 0x4d, 0xb8, 0x52, 0x16, 0x96 } }
-#define NS_GAMEPAD_TEST_CONTRACTID "@mozilla.org/gamepad-test;1"
 
 #endif

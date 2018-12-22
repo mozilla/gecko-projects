@@ -3,15 +3,15 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-var {classes: Cc, interfaces: Ci, manager: Cm, utils: Cu} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
+var Cm = Components.manager;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const VKB_ENTER_KEY = 13;   // User press of VKB enter key
-const INITIAL_PAGE_DELAY = 500;   // Initial pause on program start for scroll alignment
-const PREFS_BUFFER_MAX = 30;   // Max prefs buffer size for getPrefsBuffer()
-const PAGE_SCROLL_TRIGGER = 200;     // Triggers additional getPrefsBuffer() on user scroll-to-bottom
-const FILTER_CHANGE_TRIGGER = 200;     // Delay between responses to filterInput changes
-const INNERHTML_VALUE_DELAY = 100;    // Delay before providing prefs innerHTML value
+const VKB_ENTER_KEY = 13; // User press of VKB enter key
+const INITIAL_PAGE_DELAY = 500; // Initial pause on program start for scroll alignment
+const PREFS_BUFFER_MAX = 30; // Max prefs buffer size for getPrefsBuffer()
+const PAGE_SCROLL_TRIGGER = 200; // Triggers additional getPrefsBuffer() on user scroll-to-bottom
+const FILTER_CHANGE_TRIGGER = 200; // Delay between responses to filterInput changes
+const INNERHTML_VALUE_DELAY = 100; // Delay before providing prefs innerHTML value
 
 var gStringBundle = Services.strings.createBundle("chrome://browser/locale/config.properties");
 var gClipboardHelper = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
@@ -46,7 +46,7 @@ var NewPrefDialog = {
 
   set type(aType) {
     this._prefTypeSelectElt.value = aType;
-    switch(this._prefTypeSelectElt.value) {
+    switch (this._prefTypeSelectElt.value) {
       case "boolean":
         this._prefTypeSelectElt.selectedIndex = 0;
         break;
@@ -87,7 +87,7 @@ var NewPrefDialog = {
     }
 
     // If item already in list, it's being changed, else added
-    let item = AboutConfig._list.filter(i => { return i.name == aPrefName });
+    let item = AboutConfig._list.filter(i => { return i.name == aPrefName; });
     if (item.length) {
       this._positiveButton.textContent = gStringBundle.GetStringFromName("newPref.changeButton");
     } else {
@@ -120,7 +120,7 @@ var NewPrefDialog = {
 
     this._prefNameInputElt.focus();
 
-    window.addEventListener("keypress", this.handleKeypress, false);
+    window.addEventListener("keypress", this.handleKeypress);
   },
 
   // When we want to cancel/hide the new pref dialog / un-shield the prefs list
@@ -128,7 +128,7 @@ var NewPrefDialog = {
     this._newPrefsDialog.classList.remove("show");
     this._prefsShield.removeAttribute("shown");
 
-    window.removeEventListener("keypress", this.handleKeypress, false);
+    window.removeEventListener("keypress", this.handleKeypress);
   },
 
   // Watch user key input so we can provide Enter key action, commit input values
@@ -145,9 +145,9 @@ var NewPrefDialog = {
       return;
     }
 
-    switch(this.type) {
+    switch (this.type) {
       case "boolean":
-        Services.prefs.setBoolPref(this._prefNameInputElt.value, (this._booleanValue.value == "true") ? true : false);
+        Services.prefs.setBoolPref(this._prefNameInputElt.value, !!(this._booleanValue.value == "true"));
         break;
       case "string":
         Services.prefs.setCharPref(this._prefNameInputElt.value, this._stringValue.value);
@@ -178,7 +178,7 @@ var NewPrefDialog = {
   toggleBoolValue: function AC_toggleBoolValue() {
     this._booleanValue.value = (this._booleanValue.value == "true" ? "false" : "true");
   }
-}
+};
 
 
 /* ============================== AboutConfig ==============================
@@ -219,7 +219,7 @@ var AboutConfig = {
     this.bufferFilterInput();
 
     // Setup the prefs observers
-    Services.prefs.addObserver("", this, false);
+    Services.prefs.addObserver("", this);
   },
 
   // Uninit the main AboutConfig dialog
@@ -240,11 +240,11 @@ var AboutConfig = {
       clearTimeout(this._filterChangeTimer);
     }
 
-    this._filterChangeTimer = setTimeout((function() {
+    this._filterChangeTimer = setTimeout(() => {
       this._filterChangeTimer = null;
       // Display updated prefs list when filterInput value settles
       this._displayNewList();
-    }).bind(this), FILTER_CHANGE_TRIGGER);
+    }, FILTER_CHANGE_TRIGGER);
   },
 
   // Update displayed list when filterInput value changes
@@ -265,16 +265,16 @@ var AboutConfig = {
     window.onscroll = this.onScroll.bind(this);
 
     // Pause for screen to settle, then ensure at top
-    setTimeout((function() {
+    setTimeout(() => {
       window.scrollTo(0, 0);
-    }).bind(this), INITIAL_PAGE_DELAY);
+    }, INITIAL_PAGE_DELAY);
   },
 
   // Clear the displayed preferences list
   _clearPrefsContainer: function AC_clearPrefsContainer() {
     // Quick clear the prefsContainer list
     let empty = this._prefsContainer.cloneNode(false);
-    this._prefsContainer.parentNode.replaceChild(empty, this._prefsContainer); 
+    this._prefsContainer.parentNode.replaceChild(empty, this._prefsContainer);
     this._prefsContainer = empty;
 
     // Quick clear the prefs li.HTML list
@@ -346,13 +346,13 @@ var AboutConfig = {
     // Clear any previous selection
     if (currentSelection) {
       currentSelection.classList.remove("selected");
-      currentSelection.removeEventListener("keypress", this.handleKeypress, false);
+      currentSelection.removeEventListener("keypress", this.handleKeypress);
     }
 
     // Set any current selection
     if (aSelection) {
       aSelection.classList.add("selected");
-      aSelection.addEventListener("keypress", this.handleKeypress, false);
+      aSelection.addEventListener("keypress", this.handleKeypress);
     }
   },
 
@@ -492,7 +492,7 @@ var AboutConfig = {
     }
 
     // If pref not already in list, refresh display as it's being added
-    let anyWhere = this._list.filter(i => { return i.name == pref.name });
+    let anyWhere = this._list.filter(i => { return i.name == pref.name; });
     if (!anyWhere.length) {
       document.location.reload();
     }
@@ -501,13 +501,13 @@ var AboutConfig = {
   // Quick context menu helpers for about:config
   clipboardCopy: function AC_clipboardCopy(aField) {
     let pref = this._getPrefForNode(this.contextMenuLINode);
-    if (aField == 'name') {
+    if (aField == "name") {
       gClipboardHelper.copyString(pref.name);
     } else {
       gClipboardHelper.copyString(pref.value);
     }
   }
-}
+};
 
 
 /* ============================== Pref ==============================
@@ -584,46 +584,72 @@ Pref.prototype = {
       this.li.addEventListener("click",
         function(aEvent) {
           AboutConfig.selected = AboutConfig.getLINodeForEvent(aEvent);
-        },
-        false
+        }
       );
 
       // Contextmenu callback to identify selected list item
       this.li.addEventListener("contextmenu",
         function(aEvent) {
           AboutConfig.contextMenuLINode = AboutConfig.getLINodeForEvent(aEvent);
-        },
-        false
+        }
       );
 
       this.li.setAttribute("contextmenu", "prefs-context-menu");
 
-      // Create list item outline, bind to object actions
-      this.li.innerHTML =
-        "<div class='pref-name' " +
-            "onclick='AboutConfig.selectOrToggleBoolPref(event);'>" +
-            this.name +
-        "</div>" +
-        "<div class='pref-item-line'>" +
-          "<input class='pref-value' value='' " +
-            "onblur='AboutConfig.setIntOrStringPref(event);' " +
-            "onclick='AboutConfig.selectOrToggleBoolPref(event);'>" +
-          "</input>" +
-          "<div class='pref-button reset' " +
-            "onclick='AboutConfig.resetDefaultPref(event);'>" +
-            gStringBundle.GetStringFromName("pref.resetButton") +
-          "</div>" +
-          "<div class='pref-button toggle' " +
-            "onclick='AboutConfig.toggleBoolPref(event);'>" +
-            gStringBundle.GetStringFromName("pref.toggleButton") +
-          "</div>" +
-          "<div class='pref-button up' " +
-            "onclick='AboutConfig.incrOrDecrIntPref(event, 1);'>" +
-          "</div>" +
-          "<div class='pref-button down' " +
-            "onclick='AboutConfig.incrOrDecrIntPref(event, -1);'>" +
-          "</div>" +
-        "</div>";
+      let prefName = document.createElement("div");
+      prefName.className = "pref-name";
+      prefName.addEventListener("click", function(event) {
+        AboutConfig.selectOrToggleBoolPref(event);
+      });
+      prefName.textContent = this.name;
+
+      this.li.appendChild(prefName);
+
+      let prefItemLine = document.createElement("div");
+      prefItemLine.className = "pref-item-line";
+
+      let prefValue = document.createElement("input");
+      prefValue.className = "pref-value";
+      prefValue.addEventListener("blur", function(event) {
+        AboutConfig.setIntOrStringPref(event);
+      });
+      prefValue.addEventListener("click", function(event) {
+        AboutConfig.selectOrToggleBoolPref(event);
+      });
+      prefValue.value = "";
+      prefItemLine.appendChild(prefValue);
+
+      let resetButton = document.createElement("div");
+      resetButton.className = "pref-button reset";
+      resetButton.addEventListener("click", function(event) {
+        AboutConfig.resetDefaultPref(event);
+      });
+      resetButton.textContent = gStringBundle.GetStringFromName("pref.resetButton");
+      prefItemLine.appendChild(resetButton);
+
+      let toggleButton = document.createElement("div");
+      toggleButton.className = "pref-button toggle";
+      toggleButton.addEventListener("click", function(event) {
+        AboutConfig.toggleBoolPref(event);
+      });
+      toggleButton.textContent = gStringBundle.GetStringFromName("pref.toggleButton");
+      prefItemLine.appendChild(toggleButton);
+
+      let upButton = document.createElement("div");
+      upButton.className = "pref-button up";
+      upButton.addEventListener("click", function(event) {
+        AboutConfig.incrOrDecrIntPref(event, 1);
+      });
+      prefItemLine.appendChild(upButton);
+
+      let downButton = document.createElement("div");
+      downButton.className = "pref-button down";
+      downButton.addEventListener("click", function(event) {
+        AboutConfig.incrOrDecrIntPref(event, -1);
+      });
+      prefItemLine.appendChild(downButton);
+
+      this.li.appendChild(prefItemLine);
 
       // Delay providing the list item values, until the LI is returned and added to the document
       setTimeout(this._valueSetup.bind(this), INNERHTML_VALUE_DELAY);
@@ -641,7 +667,7 @@ Pref.prototype = {
     let valDiv = this.li.querySelector(".pref-value");
     valDiv.value = this.value;
 
-    switch(this.type) {
+    switch (this.type) {
       case Services.prefs.PREF_BOOL:
         valDiv.setAttribute("type", "button");
         this.li.querySelector(".up").setAttribute("disabled", true);
@@ -669,5 +695,5 @@ Pref.prototype = {
       this.li.querySelector(".pref-name").setAttribute("locked", true);
     }
   }
-}
+};
 

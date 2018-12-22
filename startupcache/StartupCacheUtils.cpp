@@ -11,6 +11,7 @@
 #include "nsIResProtocolHandler.h"
 #include "nsIChromeRegistry.h"
 #include "nsAutoPtr.h"
+#include "nsStringStream.h"
 #include "StartupCacheUtils.h"
 #include "mozilla/scache/StartupCache.h"
 #include "mozilla/Omnijar.h"
@@ -18,23 +19,24 @@
 namespace mozilla {
 namespace scache {
 
-NS_EXPORT nsresult
-NewObjectInputStreamFromBuffer(UniquePtr<char[]> buffer, uint32_t len, 
+nsresult
+NewObjectInputStreamFromBuffer(UniquePtr<char[]> buffer, uint32_t len,
                                nsIObjectInputStream** stream)
 {
-  nsCOMPtr<nsIStringInputStream> stringStream
-    = do_CreateInstance("@mozilla.org/io/string-input-stream;1");
-  nsCOMPtr<nsIObjectInputStream> objectInput 
-    = do_CreateInstance("@mozilla.org/binaryinputstream;1");
-  
-  stringStream->AdoptData(buffer.release(), len);
-  objectInput->SetInputStream(stringStream);
-  
+  nsCOMPtr<nsIInputStream> stringStream;
+  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream),
+                                      buffer.release(), len,
+                                      NS_ASSIGNMENT_ADOPT);
+  MOZ_ALWAYS_SUCCEEDS(rv);
+
+  nsCOMPtr<nsIObjectInputStream> objectInput =
+    NS_NewObjectInputStream(stringStream);
+
   objectInput.forget(stream);
   return NS_OK;
 }
 
-NS_EXPORT nsresult
+nsresult
 NewObjectOutputWrappedStorageStream(nsIObjectOutputStream **wrapperStream,
                                     nsIStorageStream** stream,
                                     bool wantDebugStream)
@@ -44,16 +46,15 @@ NewObjectOutputWrappedStorageStream(nsIObjectOutputStream **wrapperStream,
   nsresult rv = NS_NewStorageStream(256, UINT32_MAX, getter_AddRefs(storageStream));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIObjectOutputStream> objectOutput
-    = do_CreateInstance("@mozilla.org/binaryoutputstream;1");
   nsCOMPtr<nsIOutputStream> outputStream
     = do_QueryInterface(storageStream);
-  
-  objectOutput->SetOutputStream(outputStream);
-  
+
+  nsCOMPtr<nsIObjectOutputStream> objectOutput
+    = NS_NewObjectOutputStream(outputStream);
+
 #ifdef DEBUG
   if (wantDebugStream) {
-    // Wrap in debug stream to detect unsupported writes of 
+    // Wrap in debug stream to detect unsupported writes of
     // multiply-referenced non-singleton objects
     StartupCache* sc = StartupCache::GetSingleton();
     NS_ENSURE_TRUE(sc, NS_ERROR_UNEXPECTED);
@@ -66,20 +67,20 @@ NewObjectOutputWrappedStorageStream(nsIObjectOutputStream **wrapperStream,
 #else
   objectOutput.forget(wrapperStream);
 #endif
-  
+
   storageStream.forget(stream);
   return NS_OK;
 }
 
-NS_EXPORT nsresult
-NewBufferFromStorageStream(nsIStorageStream *storageStream, 
-                           UniquePtr<char[]>* buffer, uint32_t* len) 
+nsresult
+NewBufferFromStorageStream(nsIStorageStream *storageStream,
+                           UniquePtr<char[]>* buffer, uint32_t* len)
 {
   nsresult rv;
   nsCOMPtr<nsIInputStream> inputStream;
   rv = storageStream->NewInputStream(0, getter_AddRefs(inputStream));
   NS_ENSURE_SUCCESS(rv, rv);
-  
+
   uint64_t avail64;
   rv = inputStream->Available(&avail64);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -91,13 +92,13 @@ NewBufferFromStorageStream(nsIStorageStream *storageStream,
   rv = inputStream->Read(temp.get(), avail, &read);
   if (NS_SUCCEEDED(rv) && avail != read)
     rv = NS_ERROR_UNEXPECTED;
-  
+
   if (NS_FAILED(rv)) {
     return rv;
   }
-  
+
   *len = avail;
-  *buffer = Move(temp);
+  *buffer = std::move(temp);
   return NS_OK;
 }
 
@@ -143,6 +144,47 @@ canonicalizeBase(nsAutoCString &spec,
 }
 
 /**
+ * ResolveURI transforms a chrome: or resource: URI into the URI for its
+ * underlying resource, or returns any other URI unchanged.
+ */
+nsresult
+ResolveURI(nsIURI *in, nsIURI **out)
+{
+    bool equals;
+    nsresult rv;
+
+    // Resolve resource:// URIs. At the end of this if/else block, we
+    // have both spec and uri variables identifying the same URI.
+    if (NS_SUCCEEDED(in->SchemeIs("resource", &equals)) && equals) {
+        nsCOMPtr<nsIIOService> ioService = do_GetIOService(&rv);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        nsCOMPtr<nsIProtocolHandler> ph;
+        rv = ioService->GetProtocolHandler("resource", getter_AddRefs(ph));
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        nsCOMPtr<nsIResProtocolHandler> irph(do_QueryInterface(ph, &rv));
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        nsAutoCString spec;
+        rv = irph->ResolveURI(in, spec);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        return ioService->NewURI(spec, nullptr, nullptr, out);
+    } else if (NS_SUCCEEDED(in->SchemeIs("chrome", &equals)) && equals) {
+        nsCOMPtr<nsIChromeRegistry> chromeReg =
+            mozilla::services::GetChromeRegistryService();
+        if (!chromeReg)
+            return NS_ERROR_UNEXPECTED;
+
+        return chromeReg->ConvertChromeURL(in, out);
+    }
+
+    *out = do_AddRef(in).take();
+    return NS_OK;
+}
+
+/**
  * PathifyURI transforms uris into useful zip paths
  * to make it easier to manipulate startup cache entries
  * using standard zip tools.
@@ -167,46 +209,19 @@ canonicalizeBase(nsAutoCString &spec,
  *  jar:file://$PROFILE_DIR/extensions/some.xpi!/components/component.js becomes
  *     jsloader/$PROFILE_DIR/extensions/some.xpi/components/component.js
  */
-NS_EXPORT nsresult
+nsresult
 PathifyURI(nsIURI *in, nsACString &out)
 {
     bool equals;
     nsresult rv;
-    nsCOMPtr<nsIURI> uri = in;
+
+    nsCOMPtr<nsIURI> uri;
+    rv = ResolveURI(in, getter_AddRefs(uri));
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsAutoCString spec;
-
-    // Resolve resource:// URIs. At the end of this if/else block, we
-    // have both spec and uri variables identifying the same URI.
-    if (NS_SUCCEEDED(in->SchemeIs("resource", &equals)) && equals) {
-        nsCOMPtr<nsIIOService> ioService = do_GetIOService(&rv);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        nsCOMPtr<nsIProtocolHandler> ph;
-        rv = ioService->GetProtocolHandler("resource", getter_AddRefs(ph));
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        nsCOMPtr<nsIResProtocolHandler> irph(do_QueryInterface(ph, &rv));
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        rv = irph->ResolveURI(in, spec);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        rv = ioService->NewURI(spec, nullptr, nullptr, getter_AddRefs(uri));
-        NS_ENSURE_SUCCESS(rv, rv);
-    } else {
-        if (NS_SUCCEEDED(in->SchemeIs("chrome", &equals)) && equals) {
-            nsCOMPtr<nsIChromeRegistry> chromeReg =
-                mozilla::services::GetChromeRegistryService();
-            if (!chromeReg)
-                return NS_ERROR_UNEXPECTED;
-
-            rv = chromeReg->ConvertChromeURL(in, getter_AddRefs(uri));
-            NS_ENSURE_SUCCESS(rv, rv);
-        }
-
-        rv = uri->GetSpec(spec);
-        NS_ENSURE_SUCCESS(rv, rv);
-    }
+    rv = uri->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     if (!canonicalizeBase(spec, out)) {
         if (NS_SUCCEEDED(uri->SchemeIs("file", &equals)) && equals) {
@@ -215,7 +230,7 @@ PathifyURI(nsIURI *in, nsACString &out)
             NS_ENSURE_SUCCESS(rv, rv);
 
             nsAutoCString path;
-            rv = baseFileURL->GetPath(path);
+            rv = baseFileURL->GetPathQueryRef(path);
             NS_ENSURE_SUCCESS(rv, rv);
 
             out.Append(path);
@@ -236,7 +251,6 @@ PathifyURI(nsIURI *in, nsACString &out)
             out.Append('/');
             out.Append(path);
         } else { // Very unlikely
-            nsAutoCString spec;
             rv = uri->GetSpec(spec);
             NS_ENSURE_SUCCESS(rv, rv);
 

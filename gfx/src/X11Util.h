@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,13 +12,10 @@
 #if defined(MOZ_WIDGET_GTK)
 #  include <gdk/gdk.h>
 #  include <gdk/gdkx.h>
-#elif defined(MOZ_WIDGET_QT)
-#include "gfxQtPlatform.h"
-#undef CursorShape
-#  include <X11/Xlib.h>
+#  include "X11UndefineNone.h"
 #else
 #  error Unknown toolkit
-#endif 
+#endif
 
 #include <string.h>                     // for memset
 #include "mozilla/Scoped.h"             // for SCOPED_TEMPLATE
@@ -34,8 +30,6 @@ DefaultXDisplay()
 {
 #if defined(MOZ_WIDGET_GTK)
   return GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-#elif defined(MOZ_WIDGET_QT)
-  return gfxQtPlatform::GetXDisplay();
 #endif
 }
 
@@ -123,7 +117,10 @@ public:
     static int
     ErrorHandler(Display *, XErrorEvent *ev);
 
-    ScopedXErrorHandler();
+    /**
+     * @param aAllowOffMainThread whether to warn if used off main thread
+     */
+    explicit ScopedXErrorHandler(bool aAllowOffMainThread = false);
 
     ~ScopedXErrorHandler();
 
@@ -134,6 +131,15 @@ public:
      *           the first one will be returned.
      */
     bool SyncAndGetError(Display *dpy, XErrorEvent *ev = nullptr);
+};
+
+class OffMainThreadScopedXErrorHandler : public ScopedXErrorHandler
+{
+public:
+  OffMainThreadScopedXErrorHandler()
+    : ScopedXErrorHandler(true)
+  {
+  }
 };
 
 } // namespace mozilla

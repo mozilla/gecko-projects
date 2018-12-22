@@ -35,7 +35,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=792324
   />
 </panel>
 
-<script class="testbody" type="application/javascript;version=1.7"><![CDATA[
+<script class="testbody" type="application/javascript"><![CDATA[
 
 /** Test for Bug 792324 **/
 let after_click;
@@ -54,7 +54,7 @@ function checkAccessKeyOnPanel(panelid, buttonid, cb) {
       panel.hidePopup();
       cb();
     }
-    synthesizeKey("X", {});
+    sendString("X");
   });
  panel.openPopup(null, "", 100, 100, false, false);
 }

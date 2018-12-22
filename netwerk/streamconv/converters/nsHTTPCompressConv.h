@@ -9,8 +9,11 @@
 
 #include "nsIStreamConverter.h"
 #include "nsICompressConvStats.h"
+#include "nsIThreadRetargetableStreamListener.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
+#include "mozilla/Atomics.h"
+#include "mozilla/Mutex.h"
 
 #include "zlib.h"
 
@@ -57,17 +60,22 @@ public:
   BrotliWrapper()
     : mTotalOut(0)
     , mStatus(NS_OK)
+    , mBrotliStateIsStreamEnd(false)
+    , mRequest(nullptr)
+    , mContext(nullptr)
+    , mSourceOffset(0)
   {
-    BrotliStateInit(&mState);
+    BrotliDecoderStateInit(&mState, 0, 0, 0);
   }
   ~BrotliWrapper()
   {
-    BrotliStateCleanup(&mState);
+    BrotliDecoderStateCleanup(&mState);
   }
 
-  BrotliState mState;
-  size_t       mTotalOut;
-  nsresult     mStatus;
+  BrotliDecoderState      mState;
+  Atomic<size_t, Relaxed> mTotalOut;
+  nsresult                mStatus;
+  Atomic<bool, Relaxed>   mBrotliStateIsStreamEnd;
 
   nsIRequest  *mRequest;
   nsISupports *mContext;
@@ -77,6 +85,7 @@ public:
 class nsHTTPCompressConv
   : public nsIStreamConverter
   , public nsICompressConvStats
+  , public nsIThreadRetargetableStreamListener
 {
   public:
   // nsISupports methods
@@ -84,6 +93,7 @@ class nsHTTPCompressConv
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
     NS_DECL_NSICOMPRESSCONVSTATS
+    NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
   // nsIStreamConverter methods
     NS_DECL_NSISTREAMCONVERTER
@@ -94,7 +104,7 @@ private:
     virtual ~nsHTTPCompressConv ();
 
     nsCOMPtr<nsIStreamListener> mListener; // this guy gets the converted data via his OnDataAvailable ()
-    CompressMode        mMode;
+    Atomic<CompressMode, Relaxed> mMode;
 
     unsigned char *mOutBuffer;
     unsigned char *mInpBuffer;
@@ -104,10 +114,9 @@ private:
 
     nsAutoPtr<BrotliWrapper> mBrotli;
 
-    nsCOMPtr<nsISupports>   mAsyncConvContext;
     nsCOMPtr<nsIStringInputStream>  mStream;
 
-    static NS_METHOD
+    static nsresult
     BrotliHandler(nsIInputStream *stream, void *closure, const char *dataIn,
                   uint32_t, uint32_t avail, uint32_t *countRead);
 
@@ -115,18 +124,20 @@ private:
                                  uint64_t aSourceOffset, const char *buffer,
                                  uint32_t aCount);
 
-    bool        mCheckHeaderDone;
-    bool        mStreamEnded;
-    bool        mStreamInitialized;
-    bool        mDummyStreamInitialised;
-    bool        mFailUncleanStops;
+    bool         mCheckHeaderDone;
+    Atomic<bool> mStreamEnded;
+    bool         mStreamInitialized;
+    bool         mDummyStreamInitialised;
+    bool         mFailUncleanStops;
 
     z_stream d_stream;
     unsigned mLen, hMode, mSkipCount, mFlags;
 
     uint32_t check_header (nsIInputStream *iStr, uint32_t streamLen, nsresult *rv);
 
-    uint32_t mDecodedDataLength;
+    Atomic<uint32_t, Relaxed> mDecodedDataLength;
+
+    mutable mozilla::Mutex mMutex;
 };
 
 } // namespace net

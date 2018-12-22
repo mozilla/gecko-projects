@@ -35,28 +35,24 @@ namespace dom {
 class ExplicitChildIterator
 {
 public:
-  explicit ExplicitChildIterator(nsIContent* aParent, bool aStartAtBeginning = true)
-    : mParent(aParent),
-      mChild(nullptr),
-      mDefaultChild(nullptr),
-      mIndexInInserted(0),
-      mIsFirst(aStartAtBeginning)
-  {
-  }
+  explicit ExplicitChildIterator(const nsIContent* aParent,
+                                 bool aStartAtBeginning = true);
 
   ExplicitChildIterator(const ExplicitChildIterator& aOther)
-    : mParent(aOther.mParent), mChild(aOther.mChild),
+    : mParent(aOther.mParent),
+      mParentAsSlot(aOther.mParentAsSlot),
+      mChild(aOther.mChild),
       mDefaultChild(aOther.mDefaultChild),
-      mShadowIterator(aOther.mShadowIterator ?
-                      new ExplicitChildIterator(*aOther.mShadowIterator) :
-                      nullptr),
-      mIndexInInserted(aOther.mIndexInInserted), mIsFirst(aOther.mIsFirst) {}
+      mIsFirst(aOther.mIsFirst),
+      mIndexInInserted(aOther.mIndexInInserted) {}
 
   ExplicitChildIterator(ExplicitChildIterator&& aOther)
-    : mParent(aOther.mParent), mChild(aOther.mChild),
+    : mParent(aOther.mParent),
+      mParentAsSlot(aOther.mParentAsSlot),
+      mChild(aOther.mChild),
       mDefaultChild(aOther.mDefaultChild),
-      mShadowIterator(Move(aOther.mShadowIterator)),
-      mIndexInInserted(aOther.mIndexInInserted), mIsFirst(aOther.mIsFirst) {}
+      mIsFirst(aOther.mIsFirst),
+      mIndexInInserted(aOther.mIndexInInserted) {}
 
   nsIContent* GetNextChild();
 
@@ -64,13 +60,13 @@ public:
   // found.  This version can take shortcuts that the two-argument version
   // can't, so can be faster (and in fact can be O(1) instead of O(N) in many
   // cases).
-  bool Seek(nsIContent* aChildToFind);
+  bool Seek(const nsIContent* aChildToFind);
 
   // Looks for aChildToFind respecting insertion points until aChildToFind is found.
   // or aBound is found. If aBound is nullptr then the seek is unbounded. Returns
   // whether aChildToFind was found as an explicit child prior to encountering
   // aBound.
-  bool Seek(nsIContent* aChildToFind, nsIContent* aBound)
+  bool Seek(const nsIContent* aChildToFind, nsIContent* aBound)
   {
     // It would be nice to assert that we find aChildToFind, but bz thinks that
     // we might not find aChildToFind when called from ContentInserted
@@ -99,7 +95,11 @@ protected:
   // The parent of the children being iterated. For the FlattenedChildIterator,
   // if there is a binding attached to the original parent, mParent points to
   // the <xbl:content> element for the binding.
-  nsIContent* mParent;
+  const nsIContent* mParent;
+
+  // If parent is a slot element, this points to the parent as HTMLSlotElement,
+  // otherwise, it's null.
+  const HTMLSlotElement* mParentAsSlot;
 
   // The current child. When we encounter an insertion point,
   // mChild remains as the insertion point whose content we're iterating (and
@@ -113,19 +113,14 @@ protected:
   // to null, we continue iterating at mChild's next sibling.
   nsIContent* mDefaultChild;
 
-  // If non-null, this points to an iterator of the explicit children of
-  // the ShadowRoot projected by the current shadow element that we're
-  // iterating.
-  nsAutoPtr<ExplicitChildIterator> mShadowIterator;
+  // A flag to let us know that we haven't started iterating yet.
+  bool mIsFirst;
 
   // If not zero, we're iterating inserted children for an insertion point. This
   // is an index into mChild's inserted children array (mChild must be an
   // nsXBLChildrenElement). The index is one past the "current" child (as
   // opposed to mChild which represents the "current" child).
   uint32_t mIndexInInserted;
-
-  // A flag to let us know that we haven't started iterating yet.
-  bool mIsFirst;
 };
 
 // Iterates over the flattened children of a node, which accounts for anonymous
@@ -136,37 +131,62 @@ protected:
 class FlattenedChildIterator : public ExplicitChildIterator
 {
 public:
-  explicit FlattenedChildIterator(nsIContent* aParent, bool aStartAtBeginning = true)
-    : ExplicitChildIterator(aParent, aStartAtBeginning), mXBLInvolved(false)
+  explicit FlattenedChildIterator(const nsIContent* aParent,
+                                  bool aStartAtBeginning = true)
+    : ExplicitChildIterator(aParent, aStartAtBeginning)
+    , mOriginalContent(aParent)
   {
     Init(false);
   }
 
   FlattenedChildIterator(FlattenedChildIterator&& aOther)
-    : ExplicitChildIterator(Move(aOther)), mXBLInvolved(aOther.mXBLInvolved) {}
+    : ExplicitChildIterator(std::move(aOther))
+    , mOriginalContent(aOther.mOriginalContent)
+    , mXBLInvolved(aOther.mXBLInvolved)
+  {}
 
   FlattenedChildIterator(const FlattenedChildIterator& aOther)
-    : ExplicitChildIterator(aOther), mXBLInvolved(aOther.mXBLInvolved) {}
+    : ExplicitChildIterator(aOther)
+    , mOriginalContent(aOther.mOriginalContent)
+    , mXBLInvolved(aOther.mXBLInvolved)
+  {}
 
-  bool XBLInvolved() { return mXBLInvolved; }
+  bool XBLInvolved() {
+    if (mXBLInvolved.isNothing()) {
+      mXBLInvolved = Some(ComputeWhetherXBLIsInvolved());
+    }
+    return *mXBLInvolved;
+  }
+
+  const nsIContent* Parent() const { return mOriginalContent; }
+
+private:
+  bool ComputeWhetherXBLIsInvolved() const;
+
+  void Init(bool aIgnoreXBL);
 
 protected:
   /**
    * This constructor is a hack to help AllChildrenIterator which sometimes
    * doesn't want to consider XBL.
    */
-  FlattenedChildIterator(nsIContent* aParent, uint32_t aFlags, bool aStartAtBeginning = true)
-    : ExplicitChildIterator(aParent, aStartAtBeginning), mXBLInvolved(false)
+  FlattenedChildIterator(const nsIContent* aParent, uint32_t aFlags,
+                         bool aStartAtBeginning = true)
+    : ExplicitChildIterator(aParent, aStartAtBeginning)
+    , mOriginalContent(aParent)
   {
     bool ignoreXBL = aFlags & nsIContent::eAllButXBL;
     Init(ignoreXBL);
   }
 
-  void Init(bool aIgnoreXBL);
+  const nsIContent* mOriginalContent;
 
-  // For certain optimizations, nsCSSFrameConstructor needs to know if the
-  // child list of the element that we're iterating matches its .childNodes.
-  bool mXBLInvolved;
+private:
+  // For certain optimizations, nsCSSFrameConstructor needs to know if the child
+  // list of the element that we're iterating matches its .childNodes.
+  //
+  // This is lazily computed when asked for it.
+  Maybe<bool> mXBLInvolved;
 };
 
 /**
@@ -181,15 +201,15 @@ protected:
 class AllChildrenIterator : private FlattenedChildIterator
 {
 public:
-  AllChildrenIterator(nsIContent* aNode, uint32_t aFlags, bool aStartAtBeginning = true) :
+  AllChildrenIterator(const nsIContent* aNode, uint32_t aFlags,
+                      bool aStartAtBeginning = true) :
     FlattenedChildIterator(aNode, aFlags, aStartAtBeginning),
-    mOriginalContent(aNode), mAnonKidsIdx(aStartAtBeginning ? UINT32_MAX : 0),
+    mAnonKidsIdx(aStartAtBeginning ? UINT32_MAX : 0),
     mFlags(aFlags), mPhase(aStartAtBeginning ? eAtBegin : eAtEnd) { }
 
   AllChildrenIterator(AllChildrenIterator&& aOther)
-    : FlattenedChildIterator(Move(aOther)),
-      mOriginalContent(aOther.mOriginalContent),
-      mAnonKids(Move(aOther.mAnonKids)), mAnonKidsIdx(aOther.mAnonKidsIdx),
+    : FlattenedChildIterator(std::move(aOther)),
+      mAnonKids(std::move(aOther.mAnonKids)), mAnonKidsIdx(aOther.mAnonKidsIdx),
       mFlags(aOther.mFlags), mPhase(aOther.mPhase)
 #ifdef DEBUG
       , mMutationGuard(aOther.mMutationGuard)
@@ -207,11 +227,10 @@ public:
   // Seeks the given node in children of a parent element, starting from
   // the current iterator's position, and sets the iterator at the given child
   // node if it was found.
-  bool Seek(nsIContent* aChildToFind);
+  bool Seek(const nsIContent* aChildToFind);
 
   nsIContent* GetNextChild();
   nsIContent* GetPreviousChild();
-  nsIContent* Parent() const { return mOriginalContent; }
 
   enum IteratorPhase
   {
@@ -225,7 +244,8 @@ public:
   IteratorPhase Phase() const { return mPhase; }
 
 private:
-  nsIContent* mOriginalContent;
+  // Helpers.
+  void AppendNativeAnonymousChildren();
 
   // mAnonKids is an array of native anonymous children, mAnonKidsIdx is index
   // in the array. If mAnonKidsIdx < mAnonKids.Length() and mPhase is
@@ -243,6 +263,38 @@ private:
   // there's no easy way to do that.
   nsMutationGuard mMutationGuard;
 #endif
+};
+
+/**
+ * StyleChildrenIterator traverses the children of the element from the
+ * perspective of the style system, particularly the children we need to
+ * traverse during restyle.
+ *
+ * At present, this is identical to AllChildrenIterator with
+ * (eAllChildren | eSkipDocumentLevelNativeAnonymousContent). We used to have
+ * detect and skip any native anonymous children that are used to implement some
+ * special magic in here that went away, but we keep the separate class so
+ * we can reintroduce special magic back if needed.
+ *
+ * Note: it assumes that no mutation of the DOM or frame tree takes place during
+ * iteration, and will break horribly if that is not true.
+ *
+ * We require this to be memmovable since Rust code can create and move
+ * StyleChildrenIterators.
+ */
+class MOZ_NEEDS_MEMMOVABLE_MEMBERS StyleChildrenIterator : private AllChildrenIterator
+{
+public:
+  explicit StyleChildrenIterator(const nsIContent* aContent)
+    : AllChildrenIterator(aContent,
+                          nsIContent::eAllChildren |
+                          nsIContent::eSkipDocumentLevelNativeAnonymousContent)
+  {
+    MOZ_COUNT_CTOR(StyleChildrenIterator);
+  }
+  ~StyleChildrenIterator() { MOZ_COUNT_DTOR(StyleChildrenIterator); }
+
+  nsIContent* GetNextChild();
 };
 
 } // namespace dom

@@ -17,18 +17,10 @@
 #include <linux/kernel.h>
 #include <unistd.h>
 
-/* Use this stub version of getdtablesize
- * instead of the one in the header */
-__attribute__((unused))
-static int getdtablesize_stub(void)
-{
-    struct rlimit r;
-    if (getrlimit(RLIMIT_NOFILE, &r) < 0) {
-        return sysconf(_SC_OPEN_MAX);
-    }
-    return r.rlim_cur;
-}
-#define getdtablesize() getdtablesize_stub()
+#ifndef ANDROID_VERSION
+#include <android/api-level.h>
+#define ANDROID_VERSION __ANDROID_API__
+#endif
 
 #if ANDROID_VERSION < 21
 #define RTLD_NOLOAD 0

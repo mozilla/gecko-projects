@@ -9,7 +9,7 @@
    xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
    xmlns:xbl="http://www.mozilla.org/xbl">
 
-  <binding id="radiogroup" role="xul:radiogroup"
+  <binding id="radiogroup"
            extends="chrome://global/content/bindings/general.xml#basecontrol">
     <resources>
       <stylesheet src="chrome://global/skin/radio.css"/>
@@ -56,7 +56,7 @@
       <property name="disabled">
         <getter>
         <![CDATA[
-          if (this.getAttribute('disabled') == 'true')
+          if (this.getAttribute("disabled") == "true")
             return true;
           var children = this._getRadioChildren();
           for (var i = 0; i < children.length; ++i) {
@@ -69,9 +69,9 @@
         <setter>
         <![CDATA[
           if (val)
-            this.setAttribute('disabled', 'true');
+            this.setAttribute("disabled", "true");
           else
-            this.removeAttribute('disabled');
+            this.removeAttribute("disabled");
           var children = this._getRadioChildren();
           for (var i = 0; i < children.length; ++i) {
             children[i].disabled = val;
@@ -124,8 +124,7 @@
             val.setAttribute("focused", focused);
             val.setAttribute("selected", "true");
             this.setAttribute("value", val.value);
-          }
-          else {
+          } else {
             this.removeAttribute("value");
           }
 
@@ -218,8 +217,7 @@
 
             this.selectedItem = children[i];
             children[i].doCommand();
-          }
-          else {
+          } else {
             do {
               if (i == 0)
                 i = children.length;
@@ -250,9 +248,8 @@
             // collecting the child nodes could trigger constructors
             // which would blow away our list.
 
-            const nsIDOMNodeFilter = Components.interfaces.nsIDOMNodeFilter;
             var iterator = doc.createTreeWalker(this,
-                                                nsIDOMNodeFilter.SHOW_ELEMENT,
+                                                NodeFilter.SHOW_ELEMENT,
                                                 this._filterRadioGroup);
             while (iterator.nextNode())
               radioChildren.push(iterator.currentNode);
@@ -319,41 +316,6 @@
         ]]>
         </body>
       </method>
-
-      <method name="insertItemAt">
-        <parameter name="index"/>
-        <parameter name="label"/>
-        <parameter name="value"/>
-        <body>
-        <![CDATA[
-          var XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-          var radio = document.createElementNS(XULNS, "radio");
-          radio.setAttribute("label", label);
-          radio.setAttribute("value", value);
-          var before = this.getItemAtIndex(index);
-          if (before)
-            before.parentNode.insertBefore(radio, before);
-          else
-            this.appendChild(radio);
-          this._radioChildren = null;
-          return radio;
-        ]]>
-        </body>
-      </method>
-
-      <method name="removeItemAt">
-        <parameter name="index"/>
-        <body>
-        <![CDATA[
-          var remove = this.getItemAtIndex(index);
-          if (remove) {
-            remove.parentNode.removeChild(remove);
-            this._radioChildren = null;
-          }
-          return remove;
-        ]]>
-        </body>
-      </method>
     </implementation>
 
     <handlers>
@@ -370,8 +332,10 @@
            is done solely through the arrow keys and not the tab button. Tab
            takes you to the next widget in the tab order -->
       <handler event="keypress" key=" " phase="target">
-         this.selectedItem = this.focusedItem;
-         this.selectedItem.doCommand();
+        this.selectedItem = this.focusedItem;
+        this.selectedItem.doCommand();
+        // Prevent page from scrolling on the space key.
+        event.preventDefault();
       </handler>
       <handler event="keypress" keycode="VK_UP" phase="target">
         this.checkAdjacentElement(false);
@@ -381,7 +345,7 @@
       <handler event="keypress" keycode="VK_LEFT" phase="target">
         // left arrow goes back when we are ltr, forward when we are rtl
         this.checkAdjacentElement(document.defaultView.getComputedStyle(
-                                    this, "").direction == "rtl");
+                                    this).direction == "rtl");
         event.stopPropagation();
         event.preventDefault();
       </handler>
@@ -393,7 +357,7 @@
       <handler event="keypress" keycode="VK_RIGHT" phase="target">
         // right arrow goes forward when we are ltr, back when we are rtl
         this.checkAdjacentElement(document.defaultView.getComputedStyle(
-                                    this, "").direction == "ltr");
+                                    this).direction == "ltr");
         event.stopPropagation();
         event.preventDefault();
       </handler>
@@ -428,8 +392,8 @@
     </handlers>
   </binding>
 
-  <binding id="radio" role="xul:radiobutton"
-    extends="chrome://global/content/bindings/general.xml#control-item">
+  <binding id="radio"
+    extends="chrome://global/content/bindings/general.xml#basetext">
     <resources>
       <stylesheet src="chrome://global/skin/radio.css"/>
     </resources>
@@ -467,10 +431,12 @@
           }
         ]]>
       </destructor>
+      <property name="value" onset="this.setAttribute('value', val); return val;"
+                             onget="return this.getAttribute('value');"/>
       <property name="selected" readonly="true">
         <getter>
           <![CDATA[
-            return this.hasAttribute('selected');
+            return this.hasAttribute("selected");
           ]]>
         </getter>
       </property>

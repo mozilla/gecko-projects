@@ -13,7 +13,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=759124
 <p id="display"></p>
 <div id="content" style="display: none"></div>
 
-<iframe id="svg" src="fragments-helper.svg"></iframe>
+<iframe id="svg"></iframe>
 
 <pre id="test">
 <script class="testbody" type="application/javascript">
@@ -30,7 +30,7 @@ function runTests()
 {
   var svg = $("svg");
   var doc = svg.contentWindow.document;
-  var rootElement = doc.rootElement;
+  var rootElement = doc.documentElement;
 
   var tests = [
       new Test("unknown", false),
@@ -109,7 +109,8 @@ function runTests()
   SimpleTest.finish();
 }
 
-$(svg).addEventListener("load", runTests, false);
+$(svg).addEventListener("load", runTests);
+$(svg).setAttribute("src", "fragments-helper.svg");
 </script>
 </pre>
 </body>

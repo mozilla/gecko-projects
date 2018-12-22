@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,7 +22,7 @@ static float ClampFactor(float aFactor)
   if (aFactor > 1) {
     return 1;
   } else if (aFactor < 0) {
-    NS_NOTREACHED("A negative value should not have been parsed.");
+    MOZ_ASSERT_UNREACHABLE("A negative value should not have been parsed.");
     return 0;
   }
 
@@ -40,54 +41,75 @@ nsCSSFilterInstance::nsCSSFilterInstance(const nsStyleFilter& aFilter,
 }
 
 nsresult
-nsCSSFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs)
+nsCSSFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
+                                     bool aInputIsTainted)
 {
   FilterPrimitiveDescription descr;
   nsresult result;
 
   switch(mFilter.GetType()) {
     case NS_STYLE_FILTER_BLUR:
-      descr = CreatePrimitiveDescription(PrimitiveType::GaussianBlur, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::GaussianBlur,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForBlur(descr);
       break;
     case NS_STYLE_FILTER_BRIGHTNESS:
-      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForBrightness(descr);
       break;
     case NS_STYLE_FILTER_CONTRAST:
-      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForContrast(descr);
       break;
     case NS_STYLE_FILTER_DROP_SHADOW:
-      descr = CreatePrimitiveDescription(PrimitiveType::DropShadow, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::DropShadow,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForDropShadow(descr);
       break;
     case NS_STYLE_FILTER_GRAYSCALE:
-      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForGrayscale(descr);
       break;
     case NS_STYLE_FILTER_HUE_ROTATE:
-      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForHueRotate(descr);
       break;
     case NS_STYLE_FILTER_INVERT:
-      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForInvert(descr);
       break;
     case NS_STYLE_FILTER_OPACITY:
-      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ComponentTransfer,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForOpacity(descr);
       break;
     case NS_STYLE_FILTER_SATURATE:
-      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForSaturate(descr);
       break;
     case NS_STYLE_FILTER_SEPIA:
-      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix, aPrimitiveDescrs);
+      descr = CreatePrimitiveDescription(PrimitiveType::ColorMatrix,
+                                         aPrimitiveDescrs,
+                                         aInputIsTainted);
       result = SetAttributesForSepia(descr);
       break;
     default:
-      NS_NOTREACHED("not a valid CSS filter type");
+      MOZ_ASSERT_UNREACHABLE("not a valid CSS filter type");
       return NS_ERROR_FAILURE;
   }
 
@@ -106,11 +128,12 @@ nsCSSFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
 
 FilterPrimitiveDescription
 nsCSSFilterInstance::CreatePrimitiveDescription(PrimitiveType aType,
-                                                const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs) {
+                                                const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
+                                                bool aInputIsTainted) {
   FilterPrimitiveDescription descr(aType);
   int32_t inputIndex = GetLastResultIndex(aPrimitiveDescrs);
   descr.SetInputPrimitive(0, inputIndex);
-  descr.SetIsTainted(inputIndex < 0 ? true : aPrimitiveDescrs[inputIndex].IsTainted());
+  descr.SetIsTainted(inputIndex < 0 ? aInputIsTainted : aPrimitiveDescrs[inputIndex].IsTainted());
   descr.SetInputColorSpace(0, ColorSpace::SRGB);
   descr.SetOutputColorSpace(ColorSpace::SRGB);
   return descr;
@@ -121,7 +144,7 @@ nsCSSFilterInstance::SetAttributesForBlur(FilterPrimitiveDescription& aDescr)
 {
   const nsStyleCoord& radiusInFrameSpace = mFilter.GetFilterParameter();
   if (radiusInFrameSpace.GetUnit() != eStyleUnit_Coord) {
-    NS_NOTREACHED("unexpected unit");
+    MOZ_ASSERT_UNREACHABLE("unexpected unit");
     return NS_ERROR_FAILURE;
   }
 
@@ -186,7 +209,7 @@ nsCSSFilterInstance::SetAttributesForDropShadow(FilterPrimitiveDescription& aDes
 {
   nsCSSShadowArray* shadows = mFilter.GetDropShadow();
   if (!shadows || shadows->Length() != 1) {
-    NS_NOTREACHED("Exactly one drop shadow should have been parsed.");
+    MOZ_ASSERT_UNREACHABLE("Exactly one drop shadow should have been parsed.");
     return NS_ERROR_FAILURE;
   }
 
@@ -201,7 +224,7 @@ nsCSSFilterInstance::SetAttributesForDropShadow(FilterPrimitiveDescription& aDes
   aDescr.Attributes().Set(eDropShadowOffset, offsetInFilterSpace);
 
   // Set color. If unspecified, use the CSS color property.
-  nscolor shadowColor = shadow->mHasColor ? shadow->mColor : mShadowFallbackColor;
+  nscolor shadowColor = shadow->mColor.CalcColor(mShadowFallbackColor);
   aDescr.Attributes().Set(eDropShadowColor, ToAttributeColor(shadowColor));
 
   return NS_OK;
@@ -333,9 +356,11 @@ nsCSSFilterInstance::BlurRadiusToFilterSpace(nscoord aRadiusInFrameSpace)
 
   // Check the radius limits.
   if (radiusInFilterSpace.width < 0 || radiusInFilterSpace.height < 0) {
-    NS_NOTREACHED("we shouldn't have parsed a negative radius in the style");
+    MOZ_ASSERT_UNREACHABLE("we shouldn't have parsed a negative radius in the "
+                           "style");
     return Size();
   }
+
   Float maxStdDeviation = (Float)kMaxStdDeviation;
   radiusInFilterSpace.width = std::min(radiusInFilterSpace.width, maxStdDeviation);
   radiusInFilterSpace.height = std::min(radiusInFilterSpace.height, maxStdDeviation);

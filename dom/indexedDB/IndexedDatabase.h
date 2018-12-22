@@ -8,9 +8,12 @@
 #define mozilla_dom_indexeddatabase_h__
 
 #include "js/StructuredClone.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
+
+namespace JS {
+struct WasmModule;
+} // namespace JS
 
 namespace mozilla {
 namespace dom {
@@ -26,10 +29,20 @@ class SerializedStructuredCloneReadInfo;
 
 struct StructuredCloneFile
 {
+  enum FileType {
+    eBlob,
+    eMutableFile,
+    eStructuredClone,
+    eWasmBytecode,
+    eWasmCompiled,
+    eEndGuard
+  };
+
   RefPtr<Blob> mBlob;
   RefPtr<IDBMutableFile> mMutableFile;
+  RefPtr<JS::WasmModule> mWasmModule;
   RefPtr<FileInfo> mFileInfo;
-  bool mMutable;
+  FileType mType;
 
   // In IndexedDatabaseInlines.h
   inline
@@ -46,12 +59,14 @@ struct StructuredCloneFile
 
 struct StructuredCloneReadInfo
 {
-  nsTArray<uint8_t> mData;
+  JSStructuredCloneData mData;
   nsTArray<StructuredCloneFile> mFiles;
   IDBDatabase* mDatabase;
+  bool mHasPreprocessInfo;
 
-  // XXX Remove!
-  JSAutoStructuredCloneBuffer mCloneBuffer;
+  // In IndexedDatabaseInlines.h
+  inline explicit
+  StructuredCloneReadInfo(JS::StructuredCloneScope aScope);
 
   // In IndexedDatabaseInlines.h
   inline
@@ -62,12 +77,20 @@ struct StructuredCloneReadInfo
   ~StructuredCloneReadInfo();
 
   // In IndexedDatabaseInlines.h
+  inline
+  StructuredCloneReadInfo(StructuredCloneReadInfo&& aOther);
+
+  // In IndexedDatabaseInlines.h
   inline StructuredCloneReadInfo&
   operator=(StructuredCloneReadInfo&& aOther);
 
   // In IndexedDatabaseInlines.h
   inline
   MOZ_IMPLICIT StructuredCloneReadInfo(SerializedStructuredCloneReadInfo&& aOther);
+
+  // In IndexedDatabaseInlines.h
+  inline
+  size_t Size() const;
 };
 
 } // namespace indexedDB

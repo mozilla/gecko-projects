@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=2:et:sw=2:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,7 +17,7 @@
 #include "nsIFrameInlines.h"
 #include "nsPresArena.h"
 #include "nsPrintfCString.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #ifdef DEBUG
 static int32_t ctorCount;
@@ -33,11 +33,23 @@ using namespace mozilla;
 
 nsLineBox::nsLineBox(nsIFrame* aFrame, int32_t aCount, bool aIsBlock)
   : mFirstChild(aFrame)
+  , mWritingMode()
   , mContainerSize(-1, -1)
   , mBounds(WritingMode()) // mBounds will be initialized with the correct
                            // writing mode when it is set
-// NOTE: memory is already zeroed since we allocate with AllocateByObjectID.
+  , mFrames()
+  , mAscent()
+  , mAllFlags(0)
+  , mData(nullptr)
 {
+  // Assert that the union elements chosen for initialisation are at
+  // least as large as all other elements in their respective unions, so
+  // as to ensure that no parts are missed.
+  static_assert(sizeof(mFrames) >= sizeof(mChildCount), "nsLineBox init #1");
+  static_assert(sizeof(mAllFlags) >= sizeof(mFlags), "nsLineBox init #2");
+  static_assert(sizeof(mData) >= sizeof(mBlockData), "nsLineBox init #3");
+  static_assert(sizeof(mData) >= sizeof(mInlineData), "nsLineBox init #4");
+
   MOZ_COUNT_CTOR(nsLineBox);
 #ifdef DEBUG
   ++ctorCount;
@@ -48,13 +60,9 @@ nsLineBox::nsLineBox(nsIFrame* aFrame, int32_t aCount, bool aIsBlock)
                  "wrong kind of child frame");
   }
 #endif
-
-  static_assert(NS_STYLE_CLEAR_MAX <= 15,
+  static_assert(static_cast<int>(StyleClear::Max) <= 15,
                 "FlagBits needs more bits to store the full range of "
                 "break type ('clear') values");
-#if NS_STYLE_CLEAR_NONE > 0
-  mFlags.mBreakType = NS_STYLE_CLEAR_NONE;
-#endif
   mChildCount = aCount;
   MarkDirty();
   mFlags.mBlock = aIsBlock;
@@ -65,7 +73,7 @@ nsLineBox::~nsLineBox()
   MOZ_COUNT_DTOR(nsLineBox);
   if (MOZ_UNLIKELY(mFlags.mHasHashedFrames)) {
     delete mFrames;
-  }  
+  }
   Cleanup();
 }
 
@@ -147,7 +155,7 @@ nsLineBox::NoteFramesMovedFrom(nsLineBox* aFromLine)
 }
 
 void*
-nsLineBox::operator new(size_t sz, nsIPresShell* aPresShell) CPP_THROW_NEW
+nsLineBox::operator new(size_t sz, nsIPresShell* aPresShell)
 {
   return aPresShell->AllocateByObjectID(eArenaObjectID_nsLineBox, sz);
 }
@@ -195,17 +203,18 @@ ListFloats(FILE* out, const char* aPrefix, const nsFloatCacheList& aFloats)
   }
 }
 
-const char *
-BreakTypeToString(uint8_t aBreakType)
+/* static */ const char*
+nsLineBox::BreakTypeToString(StyleClear aBreakType)
 {
   switch (aBreakType) {
-  case NS_STYLE_CLEAR_NONE: return "nobr";
-  case NS_STYLE_CLEAR_LEFT: return "leftbr";
-  case NS_STYLE_CLEAR_RIGHT: return "rightbr";
-  case NS_STYLE_CLEAR_BOTH: return "leftbr+rightbr";
-  case NS_STYLE_CLEAR_LINE: return "linebr";
-  default:
-    break;
+    case StyleClear::None: return "nobr";
+    case StyleClear::Left: return "leftbr";
+    case StyleClear::Right: return "rightbr";
+    case StyleClear::InlineStart: return "inlinestartbr";
+    case StyleClear::InlineEnd: return "inlineendbr";
+    case StyleClear::Both: return "leftbr+rightbr";
+    case StyleClear::Line: return "linebr";
+    case StyleClear::Max: return "leftbr+rightbr+linebr";
   }
   return "unknown";
 }
@@ -285,9 +294,7 @@ nsLineBox::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
   }
   fprintf_stderr(out, "%s>\n", aPrefix);
 }
-#endif
 
-#ifdef DEBUG
 nsIFrame*
 nsLineBox::LastChild() const
 {
@@ -341,7 +348,7 @@ nsLineBox::CachedIsEmpty()
   if (mFlags.mDirty) {
     return IsEmpty();
   }
-  
+
   if (mFlags.mEmptyCacheValid) {
     return mFlags.mEmptyCacheState;
   }
@@ -374,7 +381,8 @@ nsLineBox::CachedIsEmpty()
 
 void
 nsLineBox::DeleteLineList(nsPresContext* aPresContext, nsLineList& aLines,
-                          nsIFrame* aDestructRoot, nsFrameList* aFrames)
+                          nsIFrame* aDestructRoot, nsFrameList* aFrames,
+                          PostDestroyData& aPostDestroyData)
 {
   nsIPresShell* shell = aPresContext->PresShell();
 
@@ -388,12 +396,14 @@ nsLineBox::DeleteLineList(nsPresContext* aPresContext, nsLineList& aLines,
     }
     while (line->GetChildCount() > 0) {
       nsIFrame* child = aFrames->RemoveFirstChild();
-      MOZ_ASSERT(child == line->mFirstChild, "Lines out of sync");
+      MOZ_DIAGNOSTIC_ASSERT(child->PresContext() == aPresContext);
+      MOZ_DIAGNOSTIC_ASSERT(child == line->mFirstChild, "Lines out of sync");
       line->mFirstChild = aFrames->FirstChild();
       line->NoteFrameRemoved(child);
-      child->DestroyFrom(aDestructRoot);
+      child->DestroyFrom(aDestructRoot, aPostDestroyData);
     }
-
+    MOZ_DIAGNOSTIC_ASSERT(line == aLines.front(),
+                          "destroying child frames messed up our lines!");
     aLines.pop_front();
     line->Destroy(shell);
   }
@@ -406,7 +416,7 @@ nsLineBox::RFindLineContaining(nsIFrame* aFrame,
                                nsIFrame* aLastFrameBeforeEnd,
                                int32_t* aFrameIndexInLine)
 {
-  NS_PRECONDITION(aFrame, "null ptr");
+  MOZ_ASSERT(aFrame, "null ptr");
 
   nsIFrame* curFrame = aLastFrameBeforeEnd;
   while (aBegin != aEnd) {
@@ -507,7 +517,7 @@ nsLineBox::FreeFloats(nsFloatCacheFreeList& aFreeList)
 
 void
 nsLineBox::AppendFloats(nsFloatCacheFreeList& aFreeList)
-{ 
+{
   MOZ_ASSERT(IsInline(), "block line can't have floats");
   if (IsInline()) {
     if (aFreeList.NotEmpty()) {
@@ -535,6 +545,27 @@ nsLineBox::RemoveFloat(nsIFrame* aFrame)
     }
   }
   return false;
+}
+
+void
+nsLineBox::SetFloatEdges(nscoord aStart, nscoord aEnd)
+{
+  MOZ_ASSERT(IsInline(), "block line can't have float edges");
+  if (!mInlineData) {
+    mInlineData = new ExtraInlineData(GetPhysicalBounds());
+  }
+  mInlineData->mFloatEdgeIStart = aStart;
+  mInlineData->mFloatEdgeIEnd = aEnd;
+}
+
+void
+nsLineBox::ClearFloatEdges()
+{
+  MOZ_ASSERT(IsInline(), "block line can't have float edges");
+  if (mInlineData) {
+    mInlineData->mFloatEdgeIStart = nscoord_MIN;
+    mInlineData->mFloatEdgeIEnd = nscoord_MIN;
+  }
 }
 
 void
@@ -664,7 +695,7 @@ nsLineIterator::GetLine(int32_t aLineNumber,
 int32_t
 nsLineIterator::FindLineContaining(nsIFrame* aFrame, int32_t aStartLine)
 {
-  NS_PRECONDITION(aStartLine <= mNumLines, "Bogus line numbers");
+  MOZ_ASSERT(aStartLine <= mNumLines, "Bogus line numbers");
   int32_t lineNumber = aStartLine;
   while (lineNumber != mNumLines) {
     nsLineBox* line = mLines[lineNumber];
@@ -710,8 +741,9 @@ nsLineIterator::FindFrameAt(int32_t aLineNumber,
                             bool* aPosIsBeforeFirstFrame,
                             bool* aPosIsAfterLastFrame)
 {
-  NS_PRECONDITION(aFrameFound && aPosIsBeforeFirstFrame && aPosIsAfterLastFrame,
-                  "null OUT ptr");
+  MOZ_ASSERT(aFrameFound && aPosIsBeforeFirstFrame && aPosIsAfterLastFrame,
+             "null OUT ptr");
+
   if (!aFrameFound || !aPosIsBeforeFirstFrame || !aPosIsAfterLastFrame) {
     return NS_ERROR_NULL_POINTER;
   }
@@ -749,7 +781,7 @@ nsLineIterator::FindFrameAt(int32_t aLineNumber,
         break;
       }
       if (rect.IStart(wm) < pos.I(wm)) {
-        if (!closestFromStart || 
+        if (!closestFromStart ||
             rect.IEnd(wm) > closestFromStart->
                               GetLogicalRect(wm, containerSize).IEnd(wm))
           closestFromStart = frame;
@@ -843,8 +875,8 @@ nsFloatCacheList::Tail() const
 void
 nsFloatCacheList::Append(nsFloatCacheFreeList& aList)
 {
-  NS_PRECONDITION(aList.NotEmpty(), "Appending empty list will fail");
-  
+  MOZ_ASSERT(aList.NotEmpty(), "Appending empty list will fail");
+
   nsFloatCache* tail = Tail();
   if (tail) {
     NS_ASSERTION(!tail->mNext, "Bogus!");
@@ -905,12 +937,12 @@ nsFloatCacheFreeList::~nsFloatCacheFreeList()
   MOZ_COUNT_DTOR(nsFloatCacheFreeList);
 }
 #endif
-  
+
 void
 nsFloatCacheFreeList::Append(nsFloatCacheList& aList)
 {
-  NS_PRECONDITION(aList.NotEmpty(), "Appending empty list will fail");
-  
+  MOZ_ASSERT(aList.NotEmpty(), "Appending empty list will fail");
+
   if (mTail) {
     NS_ASSERTION(!mTail->mNext, "Bogus");
     mTail->mNext = aList.mHead;
@@ -942,8 +974,9 @@ nsFloatCacheFreeList::DeleteAll()
 nsFloatCache*
 nsFloatCacheFreeList::Alloc(nsIFrame* aFloat)
 {
-  NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
-                  "This is a float cache, why isn't the frame out-of-flow?");
+  MOZ_ASSERT(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
+             "This is a float cache, why isn't the frame out-of-flow?");
+
   nsFloatCache* fc = mHead;
   if (mHead) {
     if (mHead == mTail) {

@@ -47,14 +47,14 @@ CreateCert(const char* issuerCN,
 class AlgorithmTestsTrustDomain final : public DefaultCryptoTrustDomain
 {
 public:
-  AlgorithmTestsTrustDomain(const ByteString& rootDER,
-                            const ByteString& rootSubjectDER,
-               /*optional*/ const ByteString& intDER,
-               /*optional*/ const ByteString& intSubjectDER)
-    : rootDER(rootDER)
-    , rootSubjectDER(rootSubjectDER)
-    , intDER(intDER)
-    , intSubjectDER(intSubjectDER)
+  AlgorithmTestsTrustDomain(const ByteString& aRootDER,
+                            const ByteString& aRootSubjectDER,
+               /*optional*/ const ByteString& aIntDER,
+               /*optional*/ const ByteString& aIntSubjectDER)
+    : rootDER(aRootDER)
+    , rootSubjectDER(aRootSubjectDER)
+    , intDER(aIntDER)
+    , intSubjectDER(aIntSubjectDER)
   {
   }
 
@@ -97,7 +97,7 @@ private:
     return Success;
   }
 
-  Result IsChainValid(const DERArray&, Time) override
+  Result IsChainValid(const DERArray&, Time, const CertPolicyId&) override
   {
     return Success;
   }
@@ -118,14 +118,14 @@ static const TestSignatureAlgorithm NO_INTERMEDIATE
 
 struct ChainValidity final
 {
-  ChainValidity(const TestSignatureAlgorithm& endEntitySignatureAlgorithm,
-                const TestSignatureAlgorithm& optionalIntSignatureAlgorithm,
-                const TestSignatureAlgorithm& rootSignatureAlgorithm,
-                bool isValid)
-    : endEntitySignatureAlgorithm(endEntitySignatureAlgorithm)
-    , optionalIntermediateSignatureAlgorithm(optionalIntSignatureAlgorithm)
-    , rootSignatureAlgorithm(rootSignatureAlgorithm)
-    , isValid(isValid)
+  ChainValidity(const TestSignatureAlgorithm& aEndEntitySignatureAlgorithm,
+                const TestSignatureAlgorithm& aOptionalIntSignatureAlgorithm,
+                const TestSignatureAlgorithm& aRootSignatureAlgorithm,
+                bool aIsValid)
+    : endEntitySignatureAlgorithm(aEndEntitySignatureAlgorithm)
+    , optionalIntermediateSignatureAlgorithm(aOptionalIntSignatureAlgorithm)
+    , rootSignatureAlgorithm(aRootSignatureAlgorithm)
+    , isValid(aIsValid)
   { }
 
   // In general, a certificate is generated for each of these.  However, if
@@ -185,6 +185,17 @@ class pkixcert_IsValidChainForAlgorithm
   , public ::testing::WithParamInterface<ChainValidity>
 {
 };
+
+::std::ostream& operator<<(::std::ostream& os,
+                           const pkixcert_IsValidChainForAlgorithm&)
+{
+  return os << "TODO (bug 1318770)";
+}
+
+::std::ostream& operator<<(::std::ostream& os, const ChainValidity&)
+{
+  return os << "TODO (bug 1318770)";
+}
 
 TEST_P(pkixcert_IsValidChainForAlgorithm, IsValidChainForAlgorithm)
 {

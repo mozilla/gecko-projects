@@ -5,6 +5,8 @@
 #ifndef WebrtcMediaCodecVP8VideoCodec_h__
 #define WebrtcMediaCodecVP8VideoCodec_h__
 
+#include <jni.h>
+
 #include "mozilla/Mutex.h"
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
@@ -12,6 +14,9 @@
 #include "MediaConduitInterface.h"
 #include "AudioConduit.h"
 #include "VideoConduit.h"
+#include "GeneratedJNIWrappers.h"
+
+#include "webrtc/modules/video_coding/include/video_codec_interface.h"
 
 namespace mozilla {
 
@@ -37,9 +42,9 @@ public:
                              int32_t numberOfCores,
                              size_t maxPayloadSize) override;
 
-  virtual int32_t Encode(const webrtc::I420VideoFrame& inputImage,
+  virtual int32_t Encode(const webrtc::VideoFrame& inputImage,
                           const webrtc::CodecSpecificInfo* codecSpecificInfo,
-                          const std::vector<webrtc::VideoFrameType>* frame_types) override;
+                          const std::vector<webrtc::FrameType>* frame_types) override;
 
   virtual int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback* callback) override;
 
@@ -55,7 +60,6 @@ private:
   bool ResetOutputBuffers();
 
   size_t mMaxPayloadSize;
-  uint32_t mTimestamp;
   webrtc::EncodedImage mEncodedImage;
   webrtc::EncodedImageCallback* mCallback;
   uint32_t mFrameWidth;
@@ -65,6 +69,39 @@ private:
 
   jobjectArray mInputBuffers;
   jobjectArray mOutputBuffers;
+};
+
+class WebrtcMediaCodecVP8VideoRemoteEncoder : public WebrtcVideoEncoder {
+public:
+  WebrtcMediaCodecVP8VideoRemoteEncoder() : mConvertBuf(nullptr), mConvertBufsize(0), mCallback(nullptr) {}
+
+  ~WebrtcMediaCodecVP8VideoRemoteEncoder() override;
+
+  // Implement VideoEncoder interface.
+  uint64_t PluginID() const override { return 0; }
+
+  int32_t InitEncode(const webrtc::VideoCodec* codecSettings,
+                     int32_t numberOfCores,
+                     size_t maxPayloadSize) override;
+
+  int32_t Encode(const webrtc::VideoFrame& inputImage,
+                 const webrtc::CodecSpecificInfo* codecSpecificInfo,
+                 const std::vector<webrtc::FrameType>* frame_types) override;
+
+  int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback* callback) override;
+
+  int32_t Release() override;
+
+  int32_t SetChannelParameters(uint32_t packetLoss, int64_t rtt) override { return 0; }
+
+  int32_t SetRates(uint32_t newBitRate, uint32_t frameRate) override;
+
+private:
+  java::CodecProxy::GlobalRef mJavaEncoder;
+  java::CodecProxy::NativeCallbacks::GlobalRef mJavaCallbacks;
+  uint8_t* mConvertBuf;
+  uint8_t mConvertBufsize;
+  webrtc::EncodedImageCallback* mCallback;
 };
 
 class WebrtcMediaCodecVP8VideoDecoder : public WebrtcVideoDecoder {
@@ -89,8 +126,6 @@ public:
   virtual int32_t RegisterDecodeCompleteCallback(webrtc::DecodedImageCallback* callback) override;
 
   virtual int32_t Release() override;
-
-  virtual int32_t Reset() override;
 
 private:
   void DecodeFrame(EncodedFrame* frame);

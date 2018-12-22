@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,9 +8,10 @@
 #include "nsSVGFilterFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "AutoReferenceChainGuard.h"
 #include "gfxUtils.h"
 #include "nsGkAtoms.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "nsSVGElement.h"
 #include "mozilla/dom/SVGFilterElement.h"
 #include "nsSVGFilterInstance.h"
@@ -17,67 +19,67 @@
 #include "nsSVGUtils.h"
 #include "nsContentUtils.h"
 
+using namespace mozilla;
 using namespace mozilla::dom;
 
 nsIFrame*
-NS_NewSVGFilterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewSVGFilterFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsSVGFilterFrame(aContext);
+  return new (aPresShell) nsSVGFilterFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGFilterFrame)
-
-class MOZ_RAII nsSVGFilterFrame::AutoFilterReferencer
-{
-public:
-  explicit AutoFilterReferencer(nsSVGFilterFrame *aFrame MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-    : mFrame(aFrame)
-  {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    // Reference loops should normally be detected in advance and handled, so
-    // we're not expecting to encounter them here
-    MOZ_ASSERT(!mFrame->mLoopFlag, "Undetected reference loop!");
-    mFrame->mLoopFlag = true;
-  }
-  ~AutoFilterReferencer() {
-    mFrame->mLoopFlag = false;
-  }
-private:
-  nsSVGFilterFrame *mFrame;
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
 
 uint16_t
 nsSVGFilterFrame::GetEnumValue(uint32_t aIndex, nsIContent *aDefault)
 {
   nsSVGEnum& thisEnum =
-    static_cast<SVGFilterElement *>(mContent)->mEnumAttributes[aIndex];
+    static_cast<SVGFilterElement *>(GetContent())->mEnumAttributes[aIndex];
 
   if (thisEnum.IsExplicitlySet())
     return thisEnum.GetAnimValue();
 
-  AutoFilterReferencer filterRef(this);
+  // Before we recurse, make sure we'll break reference loops and over long
+  // reference chains:
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mLoopFlag,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    // Break reference chain
+    return static_cast<SVGFilterElement *>(aDefault)->
+    mEnumAttributes[aIndex].GetAnimValue();
+  }
 
-  nsSVGFilterFrame *next = GetReferencedFilterIfNotInUse();
-  return next ? next->GetEnumValue(aIndex, aDefault) :
-    static_cast<SVGFilterElement *>(aDefault)->
-      mEnumAttributes[aIndex].GetAnimValue();
+  nsSVGFilterFrame *next = GetReferencedFilter();
+
+  return next ? next->GetEnumValue(aIndex, aDefault)
+              : static_cast<SVGFilterElement *>(aDefault)->
+                  mEnumAttributes[aIndex].GetAnimValue();
 }
 
 const nsSVGLength2 *
 nsSVGFilterFrame::GetLengthValue(uint32_t aIndex, nsIContent *aDefault)
 {
   const nsSVGLength2 *thisLength =
-    &static_cast<SVGFilterElement *>(mContent)->mLengthAttributes[aIndex];
+    &static_cast<SVGFilterElement *>(GetContent())->mLengthAttributes[aIndex];
 
   if (thisLength->IsExplicitlySet())
     return thisLength;
 
-  AutoFilterReferencer filterRef(this);
+  // Before we recurse, make sure we'll break reference loops and over long
+  // reference chains:
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mLoopFlag,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    // Break reference chain
+    return &static_cast<SVGFilterElement*>(aDefault)->mLengthAttributes[aIndex];
+  }
 
-  nsSVGFilterFrame *next = GetReferencedFilterIfNotInUse();
-  return next ? next->GetLengthValue(aIndex, aDefault) :
-    &static_cast<SVGFilterElement *>(aDefault)->mLengthAttributes[aIndex];
+  nsSVGFilterFrame *next = GetReferencedFilter();
+
+  return next ? next->GetLengthValue(aIndex, aDefault)
+              : &static_cast<SVGFilterElement *>(aDefault)->mLengthAttributes[aIndex];
 }
 
 const SVGFilterElement *
@@ -89,15 +91,24 @@ nsSVGFilterFrame::GetFilterContent(nsIContent *aDefault)
     RefPtr<nsSVGFE> primitive;
     CallQueryInterface(child, (nsSVGFE**)getter_AddRefs(primitive));
     if (primitive) {
-      return static_cast<SVGFilterElement *>(mContent);
+      return static_cast<SVGFilterElement *>(GetContent());
     }
   }
 
-  AutoFilterReferencer filterRef(this);
+  // Before we recurse, make sure we'll break reference loops and over long
+  // reference chains:
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mLoopFlag,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    // Break reference chain
+    return static_cast<SVGFilterElement*>(aDefault);
+  }
 
-  nsSVGFilterFrame *next = GetReferencedFilterIfNotInUse();
-  return next ? next->GetFilterContent(aDefault) :
-    static_cast<SVGFilterElement *>(aDefault);
+  nsSVGFilterFrame *next = GetReferencedFilter();
+
+  return next ? next->GetFilterContent(aDefault)
+              : static_cast<SVGFilterElement*>(aDefault);
 }
 
 nsSVGFilterFrame *
@@ -106,14 +117,21 @@ nsSVGFilterFrame::GetReferencedFilter()
   if (mNoHRefURI)
     return nullptr;
 
-  nsSVGPaintingProperty *property = static_cast<nsSVGPaintingProperty*>
-    (Properties().Get(nsSVGEffects::HrefProperty()));
+  nsSVGPaintingProperty *property =
+    GetProperty(SVGObserverUtils::HrefAsPaintingProperty());
 
   if (!property) {
-    // Fetch our Filter element's xlink:href attribute
-    SVGFilterElement *filter = static_cast<SVGFilterElement *>(mContent);
+    // Fetch our Filter element's href or xlink:href attribute
+    SVGFilterElement *filter = static_cast<SVGFilterElement *>(GetContent());
     nsAutoString href;
-    filter->mStringAttributes[SVGFilterElement::HREF].GetAnimValue(href, filter);
+    if (filter->mStringAttributes[SVGFilterElement::HREF].IsExplicitlySet()) {
+      filter->mStringAttributes[SVGFilterElement::HREF]
+        .GetAnimValue(href, filter);
+    } else {
+      filter->mStringAttributes[SVGFilterElement::XLINK_HREF]
+        .GetAnimValue(href, filter);
+    }
+
     if (href.IsEmpty()) {
       mNoHRefURI = true;
       return nullptr; // no URL
@@ -123,10 +141,11 @@ nsSVGFilterFrame::GetReferencedFilter()
     nsCOMPtr<nsIURI> targetURI;
     nsCOMPtr<nsIURI> base = mContent->GetBaseURI();
     nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
-                                              mContent->GetCurrentDoc(), base);
+                                              mContent->GetUncomposedDoc(), base);
 
     property =
-      nsSVGEffects::GetPaintingProperty(targetURI, this, nsSVGEffects::HrefProperty());
+      SVGObserverUtils::GetPaintingProperty(targetURI, this,
+                          SVGObserverUtils::HrefAsPaintingProperty());
     if (!property)
       return nullptr;
   }
@@ -135,32 +154,16 @@ nsSVGFilterFrame::GetReferencedFilter()
   if (!result)
     return nullptr;
 
-  nsIAtom* frameType = result->GetType();
-  if (frameType != nsGkAtoms::svgFilterFrame)
+  LayoutFrameType frameType = result->Type();
+  if (frameType != LayoutFrameType::SVGFilter)
     return nullptr;
 
   return static_cast<nsSVGFilterFrame*>(result);
 }
 
-nsSVGFilterFrame *
-nsSVGFilterFrame::GetReferencedFilterIfNotInUse()
-{
-  nsSVGFilterFrame *referenced = GetReferencedFilter();
-  if (!referenced)
-    return nullptr;
-
-  if (referenced->mLoopFlag) {
-    // XXXjwatt: we should really send an error to the JavaScript Console here:
-    NS_WARNING("Filter reference loop detected while inheriting attribute!");
-    return nullptr;
-  }
-
-  return referenced;
-}
-
 nsresult
 nsSVGFilterFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                   nsIAtom* aAttribute,
+                                   nsAtom* aAttribute,
                                    int32_t  aModType)
 {
   if (aNameSpaceID == kNameSpaceID_None &&
@@ -170,17 +173,18 @@ nsSVGFilterFrame::AttributeChanged(int32_t  aNameSpaceID,
        aAttribute == nsGkAtoms::height ||
        aAttribute == nsGkAtoms::filterUnits ||
        aAttribute == nsGkAtoms::primitiveUnits)) {
-    nsSVGEffects::InvalidateDirectRenderingObservers(this);
-  } else if (aNameSpaceID == kNameSpaceID_XLink &&
+    SVGObserverUtils::InvalidateDirectRenderingObservers(this);
+  } else if ((aNameSpaceID == kNameSpaceID_XLink ||
+              aNameSpaceID == kNameSpaceID_None) &&
              aAttribute == nsGkAtoms::href) {
     // Blow away our reference, if any
-    Properties().Delete(nsSVGEffects::HrefProperty());
+    DeleteProperty(SVGObserverUtils::HrefAsPaintingProperty());
     mNoHRefURI = false;
     // And update whoever references us
-    nsSVGEffects::InvalidateDirectRenderingObservers(this);
+    SVGObserverUtils::InvalidateDirectRenderingObservers(this);
   }
-  return nsSVGFilterFrameBase::AttributeChanged(aNameSpaceID,
-                                                aAttribute, aModType);
+  return nsSVGContainerFrame::AttributeChanged(aNameSpaceID,
+                                               aAttribute, aModType);
 }
 
 #ifdef DEBUG
@@ -192,12 +196,6 @@ nsSVGFilterFrame::Init(nsIContent*       aContent,
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::filter),
                "Content is not an SVG filter");
 
-  nsSVGFilterFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
-
-nsIAtom *
-nsSVGFilterFrame::GetType() const
-{
-  return nsGkAtoms::svgFilterFrame;
-}

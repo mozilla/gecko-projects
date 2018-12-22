@@ -7,16 +7,12 @@
 #ifndef __NS_SVGGRADIENTELEMENT_H__
 #define __NS_SVGGRADIENTELEMENT_H__
 
+#include "nsAutoPtr.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "nsSVGElement.h"
 #include "nsSVGLength2.h"
 #include "nsSVGEnum.h"
 #include "nsSVGString.h"
-
-static const unsigned short SVG_SPREADMETHOD_UNKNOWN = 0;
-static const unsigned short SVG_SPREADMETHOD_PAD     = 1;
-static const unsigned short SVG_SPREADMETHOD_REFLECT = 2;
-static const unsigned short SVG_SPREADMETHOD_REPEAT  = 3;
 
 class nsSVGGradientFrame;
 class nsSVGLinearGradientFrame;
@@ -47,14 +43,15 @@ protected:
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override = 0;
 
 public:
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override = 0;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override = 0;
 
   // nsIContent
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
   virtual nsSVGAnimatedTransformList*
     GetAnimatedTransformList(uint32_t aFlags = 0) override;
-  virtual nsIAtom* GetTransformListAttrName() const override {
+  virtual nsAtom* GetTransformListAttrName() const override {
     return nsGkAtoms::gradientTransform;
   }
 
@@ -73,9 +70,9 @@ protected:
   static nsSVGEnumMapping sSpreadMethodMap[];
   static EnumInfo sEnumInfo[2];
 
-  enum { HREF };
-  nsSVGString mStringAttributes[1];
-  static StringInfo sStringInfo[1];
+  enum { HREF, XLINK_HREF };
+  nsSVGString mStringAttributes[2];
+  static StringInfo sStringInfo[2];
 
   // SVGGradientElement values
   nsAutoPtr<nsSVGAnimatedTransformList> mGradientTransform;
@@ -97,7 +94,8 @@ protected:
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 public:
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   // WebIDL
   already_AddRefed<SVGAnimatedLength> X1();
@@ -130,7 +128,8 @@ protected:
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 public:
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   // WebIDL
   already_AddRefed<SVGAnimatedLength> Cx();
@@ -138,13 +137,14 @@ public:
   already_AddRefed<SVGAnimatedLength> R();
   already_AddRefed<SVGAnimatedLength> Fx();
   already_AddRefed<SVGAnimatedLength> Fy();
+  already_AddRefed<SVGAnimatedLength> Fr();
 protected:
 
   virtual LengthAttributesInfo GetLengthInfo() override;
 
-  enum { ATTR_CX, ATTR_CY, ATTR_R, ATTR_FX, ATTR_FY };
-  nsSVGLength2 mLengthAttributes[5];
-  static LengthInfo sLengthInfo[5];
+  enum { ATTR_CX, ATTR_CY, ATTR_R, ATTR_FX, ATTR_FY, ATTR_FR };
+  nsSVGLength2 mLengthAttributes[6];
+  static LengthInfo sLengthInfo[6];
 };
 
 } // namespace dom

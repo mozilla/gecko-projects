@@ -30,7 +30,7 @@ NS_INTERFACE_MAP_END
 JSObject*
 MediaDeviceInfo::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaDeviceInfoBinding::Wrap(aCx, this, aGivenProto);
+  return MediaDeviceInfo_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsISupports* MediaDeviceInfo::GetParentObject()
@@ -60,8 +60,6 @@ void MediaDeviceInfo::GetLabel(nsString& retval)
 }
 
 MediaDeviceKind Kind();
-void GetLabel(nsString& retval);
-void GetGroupId(nsString& retval);
 
 } // namespace dom
 } // namespace mozilla

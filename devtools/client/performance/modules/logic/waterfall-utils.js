@@ -7,7 +7,6 @@
  * Utility functions for collapsing markers into a waterfall.
  */
 
-const { extend } = require("sdk/util/object");
 const { MarkerBlueprintUtils } = require("devtools/client/performance/modules/marker-blueprint-utils");
 
 /**
@@ -18,10 +17,9 @@ const { MarkerBlueprintUtils } = require("devtools/client/performance/modules/ma
  * @param object marker
  * @return object
  */
-function createParentNode (marker) {
-  return extend(marker, { submarkers: [] });
+function createParentNode(marker) {
+  return Object.assign({}, marker, { submarkers: [] });
 }
-
 
 /**
  * Collapses markers into a tree-like structure.
@@ -30,14 +28,14 @@ function createParentNode (marker) {
  * @param array filter
  */
 function collapseMarkersIntoNode({ rootNode, markersList, filter }) {
-  let {
+  const {
     getCurrentParentNode,
     pushNode,
     popParentNode
   } = createParentNodeFactory(rootNode);
 
   for (let i = 0, len = markersList.length; i < len; i++) {
-    let curr = markersList[i];
+    const curr = markersList[i];
 
     // If this marker type should not be displayed, just skip
     if (!MarkerBlueprintUtils.shouldDisplayMarker(curr, filter)) {
@@ -45,19 +43,19 @@ function collapseMarkersIntoNode({ rootNode, markersList, filter }) {
     }
 
     let parentNode = getCurrentParentNode();
-    let blueprint = MarkerBlueprintUtils.getBlueprintFor(curr);
+    const blueprint = MarkerBlueprintUtils.getBlueprintFor(curr);
 
-    let nestable = "nestable" in blueprint ? blueprint.nestable : true;
-    let collapsible = "collapsible" in blueprint ? blueprint.collapsible : true;
+    const nestable = "nestable" in blueprint ? blueprint.nestable : true;
+    const collapsible = "collapsible" in blueprint ? blueprint.collapsible : true;
 
     let finalized = false;
 
-    // If this marker is collapsible, turn it into a parent marker.
-    // If there are no children within it later, it will be turned
-    // back into a normal node.
+    // Extend the marker with extra properties needed in the marker tree
+    const extendedProps = { index: i };
     if (collapsible) {
-      curr = createParentNode(curr);
+      extendedProps.submarkers = [];
     }
+    Object.assign(curr, extendedProps);
 
     // If not nestible, just push it inside the root node. Additionally,
     // markers originating outside the main thread are considered to be
@@ -110,9 +108,9 @@ function collapseMarkersIntoNode({ rootNode, markersList, filter }) {
  * @param {object} root
  * @return {object}
  */
-function createParentNodeFactory (root) {
-  let parentMarkers = [];
-  let factory = {
+function createParentNodeFactory(root) {
+  const parentMarkers = [];
+  const factory = {
     /**
      * Pops the most recent parent node off the stack, finalizing it.
      * Sets the `end` time based on the most recent child if not defined.
@@ -122,7 +120,7 @@ function createParentNodeFactory (root) {
         throw new Error("Cannot pop parent markers when none exist.");
       }
 
-      let lastParent = parentMarkers.pop();
+      const lastParent = parentMarkers.pop();
 
       // If this finished parent marker doesn't have an end time,
       // so probably a synthesized marker, use the last marker's end time.

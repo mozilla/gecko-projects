@@ -20,6 +20,8 @@
 #include <windows.h>
 #include <process.h>
 #else
+#include <pthread.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -47,33 +49,7 @@
 
 // replace_malloc.h needs to be included before replace_malloc_bridge.h,
 // which DMD.h includes, so DMD.h needs to be included after replace_malloc.h.
-// MOZ_REPLACE_ONLY_MEMALIGN saves us from having to define
-// replace_{posix_memalign,aligned_alloc,valloc}.  It requires defining
-// PAGE_SIZE.  Nb: sysconf() is expensive, but it's only used for (the obsolete
-// and rarely used) valloc.
-#define MOZ_REPLACE_ONLY_MEMALIGN 1
-
-#ifndef PAGE_SIZE
-#define DMD_DEFINED_PAGE_SIZE
-#ifdef XP_WIN
-#define PAGE_SIZE GetPageSize()
-static long GetPageSize()
-{
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  return si.dwPageSize;
-}
-#else // XP_WIN
-#define PAGE_SIZE sysconf(_SC_PAGESIZE)
-#endif // XP_WIN
-#endif // PAGE_SIZE
 #include "replace_malloc.h"
-#undef MOZ_REPLACE_ONLY_MEMALIGN
-#ifdef DMD_DEFINED_PAGE_SIZE
-#undef DMD_DEFINED_PAGE_SIZE
-#undef PAGE_SIZE
-#endif // DMD_DEFINED_PAGE_SIZE
-
 #include "DMD.h"
 
 namespace mozilla {
@@ -93,6 +69,7 @@ DMDBridge::GetDMDFuncs()
   return &gDMDFuncs;
 }
 
+MOZ_FORMAT_PRINTF(1, 2)
 inline void
 StatusMsg(const char* aFmt, ...)
 {
@@ -112,10 +89,7 @@ StatusMsg(const char* aFmt, ...)
   void operator=(const T&)
 #endif
 
-static const malloc_table_t* gMallocTable = nullptr;
-
-// Whether DMD finished initializing.
-static bool gIsDMDInitialized = false;
+static malloc_table_t gMallocTable;
 
 // This provides infallible allocations (they abort on OOM).  We use it for all
 // of DMD's own allocations, which fall into the following three cases.
@@ -141,13 +115,13 @@ public:
   {
     if (aNumElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
       return nullptr;
-    return (T*)gMallocTable->malloc(aNumElems * sizeof(T));
+    return (T*)gMallocTable.malloc(aNumElems * sizeof(T));
   }
 
   template <typename T>
   static T* maybe_pod_calloc(size_t aNumElems)
   {
-    return (T*)gMallocTable->calloc(aNumElems, sizeof(T));
+    return (T*)gMallocTable.calloc(aNumElems, sizeof(T));
   }
 
   template <typename T>
@@ -155,12 +129,12 @@ public:
   {
     if (aNewSize & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
       return nullptr;
-    return (T*)gMallocTable->realloc(aPtr, aNewSize * sizeof(T));
+    return (T*)gMallocTable.realloc(aPtr, aNewSize * sizeof(T));
   }
 
   static void* malloc_(size_t aSize)
   {
-    void* p = gMallocTable->malloc(aSize);
+    void* p = gMallocTable.malloc(aSize);
     ExitOnFailure(p);
     return p;
   }
@@ -175,7 +149,7 @@ public:
 
   static void* calloc_(size_t aSize)
   {
-    void* p = gMallocTable->calloc(1, aSize);
+    void* p = gMallocTable.calloc(1, aSize);
     ExitOnFailure(p);
     return p;
   }
@@ -191,7 +165,7 @@ public:
   // This realloc_ is the one we use for direct reallocs within DMD.
   static void* realloc_(void* aPtr, size_t aNewSize)
   {
-    void* p = gMallocTable->realloc(aPtr, aNewSize);
+    void* p = gMallocTable.realloc(aPtr, aNewSize);
     ExitOnFailure(p);
     return p;
   }
@@ -207,12 +181,13 @@ public:
 
   static void* memalign_(size_t aAlignment, size_t aSize)
   {
-    void* p = gMallocTable->memalign(aAlignment, aSize);
+    void* p = gMallocTable.memalign(aAlignment, aSize);
     ExitOnFailure(p);
     return p;
   }
 
-  static void free_(void* aPtr) { gMallocTable->free(aPtr); }
+  template <typename T>
+  static void free_(T* aPtr, size_t aSize = 0) { gMallocTable.free(aPtr); }
 
   static char* strdup_(const char* aStr)
   {
@@ -252,18 +227,13 @@ public:
 static size_t
 MallocSizeOf(const void* aPtr)
 {
-  return gMallocTable->malloc_usable_size(const_cast<void*>(aPtr));
+  return gMallocTable.malloc_usable_size(const_cast<void*>(aPtr));
 }
 
 void
 DMDFuncs::StatusMsg(const char* aFmt, va_list aAp)
 {
 #ifdef ANDROID
-#ifdef MOZ_B2G_LOADER
-  // Don't call __android_log_vprint() during initialization, or the magic file
-  // descriptors will be occupied by android logcat.
-  if (gIsDMDInitialized)
-#endif
     __android_log_vprint(ANDROID_LOG_INFO, "DMD", aFmt, aAp);
 #else
   // The +64 is easily enough for the "DMD[<pid>] " prefix and the NUL.
@@ -445,9 +415,6 @@ public:
 
 #else
 
-#include <pthread.h>
-#include <sys/types.h>
-
 class MutexBase
 {
   pthread_mutex_t mMutex;
@@ -531,8 +498,6 @@ public:
 #define DMD_SET_TLS_DATA(i_, v_)        TlsSetValue((i_), (v_))
 
 #else
-
-#include <pthread.h>
 
 #define DMD_TLS_INDEX_TYPE               pthread_key_t
 #define DMD_CREATE_TLS_INDEX(i_)         pthread_key_create(&(i_), nullptr)
@@ -786,13 +751,49 @@ StackTrace::Get(Thread* aT)
   StackTrace tmp;
   {
     AutoUnlockState unlock;
-    uint32_t skipFrames = 2;
-    if (MozStackWalk(StackWalkCallback, skipFrames,
-                     MaxFrames, &tmp, 0, nullptr)) {
-      // Handle the common case first.  All is ok.  Nothing to do.
-    } else {
-      tmp.mLength = 0;
-    }
+    // In each of the following cases, skipFrames is chosen so that the
+    // first frame in each stack trace is a replace_* function (or as close as
+    // possible, given the vagaries of inlining on different platforms).
+#if defined(XP_WIN) && defined(_M_IX86)
+    // This avoids MozStackWalk(), which causes unusably slow startup on Win32
+    // when it is called during static initialization (see bug 1241684).
+    //
+    // This code is cribbed from the Gecko Profiler, which also uses
+    // FramePointerStackWalk() on Win32: Registers::SyncPopulate() for the
+    // frame pointer, and GetStackTop() for the stack end.
+    CONTEXT context;
+    RtlCaptureContext(&context);
+    void** fp = reinterpret_cast<void**>(context.Ebp);
+
+    PNT_TIB pTib = reinterpret_cast<PNT_TIB>(NtCurrentTeb());
+    void* stackEnd = static_cast<void*>(pTib->StackBase);
+    FramePointerStackWalk(StackWalkCallback, /* skipFrames = */ 0, MaxFrames,
+                          &tmp, fp, stackEnd);
+#elif defined(XP_MACOSX)
+    // This avoids MozStackWalk(), which has become unusably slow on Mac due to
+    // changes in libunwind.
+    //
+    // This code is cribbed from the Gecko Profiler, which also uses
+    // FramePointerStackWalk() on Mac: Registers::SyncPopulate() for the frame
+    // pointer, and GetStackTop() for the stack end.
+    void** fp;
+    asm (
+        // Dereference %rbp to get previous %rbp
+        "movq (%%rbp), %0\n\t"
+        :
+        "=r"(fp)
+    );
+    void* stackEnd = pthread_get_stackaddr_np(pthread_self());
+    FramePointerStackWalk(StackWalkCallback, /* skipFrames = */ 0, MaxFrames,
+                          &tmp, fp, stackEnd);
+#else
+#if defined(XP_WIN) && defined(_M_X64)
+    int skipFrames = 1;
+#else
+    int skipFrames = 2;
+#endif
+    MozStackWalk(StackWalkCallback, skipFrames, MaxFrames, &tmp);
+#endif
   }
 
   StackTraceTable::AddPtr p = gStackTraceTable->lookupForAdd(&tmp);
@@ -1064,9 +1065,7 @@ public:
     : mReqSize(aLb.ReqSize())
     , mSlopSize(aLb.SlopSize())
     , mAllocStackTrace(aLb.AllocStackTrace())
-  {
-    MOZ_ASSERT(AllocStackTrace());
-  }
+  {}
 
   ~DeadBlock() {}
 
@@ -1204,7 +1203,7 @@ AllocCallback(void* aPtr, size_t aReqSize, Thread* aT)
   AutoLockState lock;
   AutoBlockIntercepts block(aT);
 
-  size_t actualSize = gMallocTable->malloc_usable_size(aPtr);
+  size_t actualSize = gMallocTable.malloc_usable_size(aPtr);
 
   // We may or may not record the allocation stack trace, depending on the
   // options and the outcome of a Bernoulli trial.
@@ -1243,35 +1242,15 @@ FreeCallback(void* aPtr, Thread* aT, DeadBlock* aDeadBlock)
 // malloc/free interception
 //---------------------------------------------------------------------------
 
-static void Init(const malloc_table_t* aMallocTable);
+static bool Init(malloc_table_t* aMallocTable);
 
 } // namespace dmd
 } // namespace mozilla
 
-void
-replace_init(const malloc_table_t* aMallocTable)
-{
-  mozilla::dmd::Init(aMallocTable);
-}
-
-ReplaceMallocBridge*
-replace_get_bridge()
-{
-  return mozilla::dmd::gDMDBridge;
-}
-
-void*
+static void*
 replace_malloc(size_t aSize)
 {
   using namespace mozilla::dmd;
-
-  if (!gIsDMDInitialized) {
-    // DMD hasn't started up, either because it wasn't enabled by the user, or
-    // we're still in Init() and something has indirectly called malloc.  Do a
-    // vanilla malloc.  (In the latter case, if it fails we'll crash.  But
-    // OOM is highly unlikely so early on.)
-    return gMallocTable->malloc(aSize);
-  }
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
@@ -1281,38 +1260,30 @@ replace_malloc(size_t aSize)
   }
 
   // This must be a call to malloc from outside DMD.  Intercept it.
-  void* ptr = gMallocTable->malloc(aSize);
+  void* ptr = gMallocTable.malloc(aSize);
   AllocCallback(ptr, aSize, t);
   return ptr;
 }
 
-void*
+static void*
 replace_calloc(size_t aCount, size_t aSize)
 {
   using namespace mozilla::dmd;
-
-  if (!gIsDMDInitialized) {
-    return gMallocTable->calloc(aCount, aSize);
-  }
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
     return InfallibleAllocPolicy::calloc_(aCount * aSize);
   }
 
-  void* ptr = gMallocTable->calloc(aCount, aSize);
+  void* ptr = gMallocTable.calloc(aCount, aSize);
   AllocCallback(ptr, aCount * aSize, t);
   return ptr;
 }
 
-void*
+static void*
 replace_realloc(void* aOldPtr, size_t aSize)
 {
   using namespace mozilla::dmd;
-
-  if (!gIsDMDInitialized) {
-    return gMallocTable->realloc(aOldPtr, aSize);
-  }
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
@@ -1330,7 +1301,7 @@ replace_realloc(void* aOldPtr, size_t aSize)
   // move, but doing better isn't worth the effort.
   DeadBlock db;
   FreeCallback(aOldPtr, t, &db);
-  void* ptr = gMallocTable->realloc(aOldPtr, aSize);
+  void* ptr = gMallocTable.realloc(aOldPtr, aSize);
   if (ptr) {
     AllocCallback(ptr, aSize, t);
     MaybeAddToDeadBlockTable(db);
@@ -1341,39 +1312,30 @@ replace_realloc(void* aOldPtr, size_t aSize)
     // block will end up looking like it was allocated for the first time here,
     // which is untrue, and the slop bytes will be zero, which may be untrue.
     // But this case is rare and doing better isn't worth the effort.
-    AllocCallback(aOldPtr, gMallocTable->malloc_usable_size(aOldPtr), t);
+    AllocCallback(aOldPtr, gMallocTable.malloc_usable_size(aOldPtr), t);
   }
   return ptr;
 }
 
-void*
+static void*
 replace_memalign(size_t aAlignment, size_t aSize)
 {
   using namespace mozilla::dmd;
-
-  if (!gIsDMDInitialized) {
-    return gMallocTable->memalign(aAlignment, aSize);
-  }
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
     return InfallibleAllocPolicy::memalign_(aAlignment, aSize);
   }
 
-  void* ptr = gMallocTable->memalign(aAlignment, aSize);
+  void* ptr = gMallocTable.memalign(aAlignment, aSize);
   AllocCallback(ptr, aSize, t);
   return ptr;
 }
 
-void
+static void
 replace_free(void* aPtr)
 {
   using namespace mozilla::dmd;
-
-  if (!gIsDMDInitialized) {
-    gMallocTable->free(aPtr);
-    return;
-  }
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
@@ -1386,7 +1348,18 @@ replace_free(void* aPtr)
   DeadBlock db;
   FreeCallback(aPtr, t, &db);
   MaybeAddToDeadBlockTable(db);
-  gMallocTable->free(aPtr);
+  gMallocTable.free(aPtr);
+}
+
+void
+replace_init(malloc_table_t* aMallocTable, ReplaceMallocBridge** aBridge)
+{
+  if (mozilla::dmd::Init(aMallocTable)) {
+#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC_BASE
+#define MALLOC_DECL(name, ...) aMallocTable->name = replace_ ## name;
+#include "malloc_decls.h"
+    *aBridge = mozilla::dmd::gDMDBridge;
+  }
 }
 
 namespace mozilla {
@@ -1453,9 +1426,6 @@ Options::Options(const char* aDMDEnvVar)
   , mStacks(Stacks::Partial)
   , mShowDumpStats(false)
 {
-  // It's no longer necessary to set the DMD env var to "1" if you want default
-  // options (you can leave it undefined) but we still accept "1" for
-  // backwards compatibility.
   char* e = mDMDEnvVar;
   if (e && strcmp(e, "1") != 0) {
     bool isEnd = false;
@@ -1545,46 +1515,54 @@ Options::ModeString() const
 // DMD start-up
 //---------------------------------------------------------------------------
 
-#ifdef XP_MACOSX
 static void
-NopStackWalkCallback(uint32_t aFrameNumber, void* aPc, void* aSp,
-                     void* aClosure)
+prefork()
 {
+  if (gStateLock) {
+    gStateLock->Lock();
+  }
 }
-#endif
+
+static void
+postfork()
+{
+  if (gStateLock) {
+    gStateLock->Unlock();
+  }
+}
 
 // WARNING: this function runs *very* early -- before all static initializers
 // have run.  For this reason, non-scalar globals such as gStateLock and
 // gStackTraceTable are allocated dynamically (so we can guarantee their
 // construction in this function) rather than statically.
-static void
-Init(const malloc_table_t* aMallocTable)
+static bool
+Init(malloc_table_t* aMallocTable)
 {
-  gMallocTable = aMallocTable;
-  gDMDBridge = InfallibleAllocPolicy::new_<DMDBridge>();
-
   // DMD is controlled by the |DMD| environment variable.
   const char* e = getenv("DMD");
 
-  if (e) {
-    StatusMsg("$DMD = '%s'\n", e);
-  } else {
-    StatusMsg("$DMD is undefined\n", e);
+  if (!e) {
+    return false;
   }
+  // Initialize the function table first, because StatusMsg uses
+  // InfallibleAllocPolicy::malloc_, which uses it.
+  gMallocTable = *aMallocTable;
 
+  StatusMsg("$DMD = '%s'\n", e);
+
+  gDMDBridge = InfallibleAllocPolicy::new_<DMDBridge>();
+
+#ifndef XP_WIN
+  // Avoid deadlocks when forking by acquiring our state lock prior to forking
+  // and releasing it after forking. See |LogAlloc|'s |replace_init| for
+  // in-depth details.
+  //
+  // Note: This must run after attempting an allocation so as to give the
+  // system malloc a chance to insert its own atfork handler.
+  pthread_atfork(prefork, postfork, postfork);
+#endif
   // Parse $DMD env var.
   gOptions = InfallibleAllocPolicy::new_<Options>(e);
-
-#ifdef XP_MACOSX
-  // On Mac OS X we need to call StackWalkInitCriticalAddress() very early
-  // (prior to the creation of any mutexes, apparently) otherwise we can get
-  // hangs when getting stack traces (bug 821577).  But
-  // StackWalkInitCriticalAddress() isn't exported from xpcom/, so instead we
-  // just call MozStackWalk, because that calls StackWalkInitCriticalAddress().
-  // See the comment above StackWalkInitCriticalAddress() for more details.
-  (void)MozStackWalk(NopStackWalkCallback, /* skipFrames */ 0,
-                     /* maxFrames */ 1, nullptr, 0, nullptr);
-#endif
 
   gStateLock = InfallibleAllocPolicy::new_<Mutex>();
 
@@ -1611,7 +1589,7 @@ Init(const malloc_table_t* aMallocTable)
     MOZ_ALWAYS_TRUE(gDeadBlockTable->init(tableSize));
   }
 
-  gIsDMDInitialized = true;
+  return true;
 }
 
 //---------------------------------------------------------------------------
@@ -1635,7 +1613,9 @@ ReportHelper(const void* aPtr, bool aReportedOnAlloc)
   } else {
     // We have no record of the block. It must be a bogus pointer. This should
     // be extremely rare because Report() is almost always called in
-    // conjunction with a malloc_size_of-style function.
+    // conjunction with a malloc_size_of-style function. Print a message so
+    // that we get some feedback.
+    StatusMsg("Unknown pointer %p\n", aPtr);
   }
 }
 
@@ -1831,6 +1811,15 @@ WriteBlockContents(JSONWriter& aWriter, const LiveBlock& aBlock)
 static void
 AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
 {
+  // Some blocks may have been allocated while creating |aWriter|. Those blocks
+  // will be freed at the end of this function when |write| is destroyed. The
+  // allocations will have occurred while intercepts were not blocked, so the
+  // frees better be as well, otherwise we'll get assertion failures.
+  // Therefore, this declaration must precede the AutoBlockIntercepts
+  // declaration, to ensure that |write| is destroyed *after* intercepts are
+  // unblocked.
+  JSONWriter writer(std::move(aWriter));
+
   AutoBlockIntercepts block(Thread::Fetch());
   AutoLockState lock;
 
@@ -1848,7 +1837,6 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
   static int analysisCount = 1;
   StatusMsg("Dump %d {\n", analysisCount++);
 
-  JSONWriter writer(Move(aWriter));
   writer.Start();
   {
     writer.IntProperty("version", kOutputVersionNumber);
@@ -2091,7 +2079,7 @@ AnalyzeImpl(UniquePtr<JSONWriteFunc> aWriter)
 void
 DMDFuncs::Analyze(UniquePtr<JSONWriteFunc> aWriter)
 {
-  AnalyzeImpl(Move(aWriter));
+  AnalyzeImpl(std::move(aWriter));
   ClearReports();
 }
 

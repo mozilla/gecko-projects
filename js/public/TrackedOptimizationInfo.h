@@ -16,6 +16,7 @@ namespace JS {
     _(GetProp_ArgumentsCallee)                          \
     _(GetProp_InferredConstant)                         \
     _(GetProp_Constant)                                 \
+    _(GetProp_NotDefined)                               \
     _(GetProp_StaticName)                               \
     _(GetProp_SimdGetter)                               \
     _(GetProp_TypedObject)                              \
@@ -23,9 +24,9 @@ namespace JS {
     _(GetProp_Unboxed)                                  \
     _(GetProp_CommonGetter)                             \
     _(GetProp_InlineAccess)                             \
+    _(GetProp_InlineProtoAccess)                        \
     _(GetProp_Innerize)                                 \
     _(GetProp_InlineCache)                              \
-    _(GetProp_SharedCache)                              \
     _(GetProp_ModuleNamespace)                          \
                                                         \
     _(SetProp_CommonSetter)                             \
@@ -36,16 +37,16 @@ namespace JS {
     _(SetProp_InlineCache)                              \
                                                         \
     _(GetElem_TypedObject)                              \
+    _(GetElem_CallSiteObject)                           \
     _(GetElem_Dense)                                    \
-    _(GetElem_TypedStatic)                              \
     _(GetElem_TypedArray)                               \
     _(GetElem_String)                                   \
     _(GetElem_Arguments)                                \
-    _(GetElem_ArgumentsInlined)                         \
+    _(GetElem_ArgumentsInlinedConstant)                 \
+    _(GetElem_ArgumentsInlinedSwitch)                   \
     _(GetElem_InlineCache)                              \
                                                         \
     _(SetElem_TypedObject)                              \
-    _(SetElem_TypedStatic)                              \
     _(SetElem_TypedArray)                               \
     _(SetElem_Dense)                                    \
     _(SetElem_Arguments)                                \
@@ -58,6 +59,20 @@ namespace JS {
     _(BinaryArith_Call)                                 \
                                                         \
     _(InlineCache_OptimizedStub)                        \
+                                                        \
+    _(NewArray_TemplateObject)                          \
+    _(NewArray_SharedCache)                             \
+    _(NewArray_Call)                                    \
+                                                        \
+    _(NewObject_TemplateObject)                         \
+    _(NewObject_SharedCache)                            \
+    _(NewObject_Call)                                   \
+                                                        \
+    _(Compare_SpecializedTypes)                         \
+    _(Compare_Bitwise)                                  \
+    _(Compare_SpecializedOnBaselineTypes)               \
+    _(Compare_SharedCache)                              \
+    _(Compare_Call)                                     \
                                                         \
     _(Call_Inline)
 
@@ -80,6 +95,7 @@ namespace JS {
     _(NotObject)                                                        \
     _(NotStruct)                                                        \
     _(NotUnboxed)                                                       \
+    _(NotUndefined)                                                     \
     _(UnboxedConvertedToNative)                                         \
     _(StructNoField)                                                    \
     _(InconsistentFieldType)                                            \
@@ -105,8 +121,7 @@ namespace JS {
     _(OperandNotNumber)                                                 \
     _(OperandNotStringOrNumber)                                         \
     _(OperandNotSimpleArith)                                            \
-    _(StaticTypedArrayUint32)                                           \
-    _(StaticTypedArrayCantComputeMask)                                  \
+    _(OperandNotEasilyCoercibleToString)                                \
     _(OutOfBounds)                                                      \
     _(GetElemStringNotCached)                                           \
     _(NonNativeReceiver)                                                \
@@ -117,6 +132,19 @@ namespace JS {
     _(UnknownSimdProperty)                                              \
     _(NotModuleNamespace)                                               \
     _(UnknownProperty)                                                  \
+    _(NoTemplateObject)                                                 \
+    _(TemplateObjectIsUnboxedWithoutInlineElements)                     \
+    _(TemplateObjectIsPlainObjectWithDynamicSlots)                      \
+    _(LengthTooBig)                                                     \
+    _(SpeculationOnInputTypesFailed)                                    \
+    _(RelationalCompare)                                                \
+    _(OperandTypeNotBitwiseComparable)                                  \
+    _(OperandMaybeEmulatesUndefined)                                    \
+    _(LoosyUndefinedNullCompare)                                        \
+    _(LoosyInt32BooleanCompare)                                         \
+    _(CallsValueOf)                                                     \
+    _(StrictCompare)                                                    \
+    _(InitHole)                                                         \
                                                                         \
     _(ICOptStub_GenericSuccess)                                         \
                                                                         \
@@ -167,7 +195,6 @@ namespace JS {
     _(CantInlineTooManyArgs)                                            \
     _(CantInlineNeedsArgsObj)                                           \
     _(CantInlineDebuggee)                                               \
-    _(CantInlineUnknownProps)                                           \
     _(CantInlineExceededDepth)                                          \
     _(CantInlineExceededTotalBytecodeLength)                            \
     _(CantInlineBigCaller)                                              \
@@ -272,7 +299,7 @@ struct ForEachTrackedOptimizationTypeInfoOp
     // The location parameter is the only one that may need escaping if being
     // quoted.
     virtual void readType(const char* keyedBy, const char* name,
-                          const char* location, mozilla::Maybe<unsigned> lineno) = 0;
+                          const char* location, const mozilla::Maybe<unsigned>& lineno) = 0;
 
     // Called once per entry.
     virtual void operator()(TrackedTypeSite site, const char* mirType) = 0;

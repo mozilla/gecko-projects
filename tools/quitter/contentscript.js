@@ -2,16 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cu = Components.utils;
+/* eslint-env mozilla/frame-script */
 
 function Quitter() {
 }
 
 Quitter.prototype = {
-  toString: function() { return "[Quitter]"; },
-  quit: function() { sendSyncMessage('Quitter.Quit', {}); }
+  toString() { return "[Quitter]"; },
+  quit() { sendSyncMessage("Quitter.Quit", {}); }
 };
 
 // This is a frame script, so it may be running in a content process.

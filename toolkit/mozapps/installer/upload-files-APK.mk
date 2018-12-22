@@ -19,105 +19,21 @@ ROOT_FILES := \
   removed-files \
   $(NULL)
 
-GECKO_APP_AP_PATH = $(topobjdir)/mobile/android/base
-
 ifdef ENABLE_TESTS
 INNER_ROBOCOP_PACKAGE=true
 ifeq ($(MOZ_BUILD_APP),mobile/android)
 UPLOAD_EXTRA_FILES += robocop.apk
-UPLOAD_EXTRA_FILES += geckoview_library/geckoview_library.zip
-UPLOAD_EXTRA_FILES += geckoview_library/geckoview_assets.zip
 
-# Robocop/Robotium tests, Android Background tests, and Fennec need to
-# be signed with the same key, which means release signing them all.
-
-ifndef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
-robocop_apk := $(topobjdir)/mobile/android/tests/browser/robocop/robocop-debug-unsigned-unaligned.apk
-else
-robocop_apk := $(topobjdir)/gradle/build/mobile/android/app/outputs/apk/app-automation-debug-androidTest-unaligned.apk
-endif
+# Robocop/Robotium tests and Fennec need to be signed with the same
+# key, which means release signing them all.
 
 INNER_ROBOCOP_PACKAGE= \
-  $(call RELEASE_SIGN_ANDROID_APK,$(robocop_apk),$(ABS_DIST)/robocop.apk)
+  $(call RELEASE_SIGN_ANDROID_APK,$(GRADLE_ANDROID_APP_ANDROIDTEST_APK),$(ABS_DIST)/robocop.apk)
 endif
 else
 INNER_ROBOCOP_PACKAGE=echo 'Testing is disabled - No Android Robocop for you'
 endif
 
-ifdef MOZ_ANDROID_PACKAGE_INSTALL_BOUNCER
-INNER_INSTALL_BOUNCER_PACKAGE=true
-ifdef ENABLE_TESTS
-UPLOAD_EXTRA_FILES += bouncer.apk
-
-bouncer_package=$(ABS_DIST)/bouncer.apk
-
-# Package and release sign the install bouncer APK.  This assumes that the main
-# APK (that is, $(PACKAGE)) has already been produced, and verifies that the
-# bouncer APK and the main APK define the same set of permissions.  The
-# intention is to avoid permission-related surprises when bouncing to the
-# installation process in the Play Store.  N.b.: sort -u is Posix and saves
-# invoking uniq separately.  diff -u is *not* Posix, so we only add -c.
-INNER_INSTALL_BOUNCER_PACKAGE=\
-  $(call RELEASE_SIGN_ANDROID_APK,$(topobjdir)/mobile/android/bouncer/bouncer-unsigned-unaligned.apk,$(bouncer_package)) && \
-  ($(AAPT) dump permissions $(PACKAGE) | sort -u > $(PACKAGE).permissions && \
-   $(AAPT) dump permissions $(bouncer_package) | sort -u > $(bouncer_package).permissions && \
-   diff -c $(PACKAGE).permissions $(bouncer_package).permissions || \
-   (echo "*** Error: The permissions of the bouncer package differ from the permissions of the main package.  Ensure the bouncer and main package Android manifests agree, rebuild mobile/android, and re-package." && exit 1))
-else
-INNER_INSTALL_BOUNCER_PACKAGE=echo 'Testing is disabled, so the install bouncer is disabled - No trampolines for you'
-endif # ENABLE_TESTS
-else
-INNER_INSTALL_BOUNCER_PACKAGE=echo 'Install bouncer is disabled - No trampolines for you'
-endif # MOZ_ANDROID_PACKAGE_INSTALL_BOUNCER
-
-# Create geckoview_library/geckoview_{assets,library}.zip for third-party GeckoView consumers.
-ifdef NIGHTLY_BUILD
-ifndef MOZ_DISABLE_GECKOVIEW
-INNER_MAKE_GECKOVIEW_LIBRARY= \
-  $(MAKE) -C ../mobile/android/geckoview_library package
-else
-INNER_MAKE_GECKOVIEW_LIBRARY=echo 'GeckoView library packaging is disabled'
-endif
-else
-INNER_MAKE_GECKOVIEW_LIBRARY=echo 'GeckoView library packaging is only enabled on Nightly'
-endif
-
-# Create Android ARchives and metadata for download by local
-# developers using Gradle.
-ifdef MOZ_ANDROID_GECKOLIBS_AAR
-ifndef MOZ_DISABLE_GECKOVIEW
-geckoaar-revision := $(BUILDID)
-
-UPLOAD_EXTRA_FILES += \
-  geckolibs-$(geckoaar-revision).aar \
-  geckolibs-$(geckoaar-revision).aar.sha1 \
-  geckolibs-$(geckoaar-revision).pom \
-  geckolibs-$(geckoaar-revision).pom.sha1 \
-  ivy-geckolibs-$(geckoaar-revision).xml \
-  ivy-geckolibs-$(geckoaar-revision).xml.sha1 \
-  geckoview-$(geckoaar-revision).aar \
-  geckoview-$(geckoaar-revision).aar.sha1 \
-  geckoview-$(geckoaar-revision).pom \
-  geckoview-$(geckoaar-revision).pom.sha1 \
-  ivy-geckoview-$(geckoaar-revision).xml \
-  ivy-geckoview-$(geckoaar-revision).xml.sha1 \
-  $(NULL)
-
-INNER_MAKE_GECKOLIBS_AAR= \
-  $(PYTHON) -m mozbuild.action.package_geckolibs_aar \
-    --verbose \
-    --revision $(geckoaar-revision) \
-    --topsrcdir '$(topsrcdir)' \
-    --distdir '$(ABS_DIST)' \
-    --appname '$(MOZ_APP_NAME)' \
-    --purge-old \
-    '$(ABS_DIST)'
-else
-INNER_MAKE_GECKOLIBS_AAR=echo 'Android geckolibs.aar packaging requires packaging geckoview'
-endif # MOZ_DISABLE_GECKOVIEW
-else
-INNER_MAKE_GECKOLIBS_AAR=echo 'Android geckolibs.aar packaging is disabled'
-endif # MOZ_ANDROID_GECKOLIBS_AAR
 
 # Fennec's OMNIJAR_NAME can include a directory; for example, it might
 # be "assets/omni.ja". This path specifies where the omni.ja file
@@ -141,38 +57,31 @@ OMNIJAR_NAME := $(notdir $(OMNIJAR_NAME))
 PKG_SUFFIX = .apk
 
 INNER_FENNEC_PACKAGE = \
-  $(MAKE) -C $(GECKO_APP_AP_PATH) gecko-nodeps.ap_ && \
   $(PYTHON) -m mozbuild.action.package_fennec_apk \
     --verbose \
-    --inputs \
-      $(GECKO_APP_AP_PATH)/gecko-nodeps.ap_ \
-    --omnijar $(STAGEPATH)$(MOZ_PKG_DIR)/$(OMNIJAR_NAME) \
-    --classes-dex $(GECKO_APP_AP_PATH)/classes.dex \
-    --lib-dirs $(STAGEPATH)$(MOZ_PKG_DIR)/lib \
-    --assets-dirs $(STAGEPATH)$(MOZ_PKG_DIR)/assets \
-    $(if $(COMPILE_ENVIRONMENT),$(if $(MOZ_ENABLE_SZIP),--szip-assets-libs-with $(ABS_DIST)/host/bin/szip)) \
-    --root-files $(foreach f,$(ROOT_FILES),$(STAGEPATH)$(MOZ_PKG_DIR)/$(f)) \
+    --inputs $(GRADLE_ANDROID_APP_APK) \
+    --omnijar $(MOZ_PKG_DIR)/$(OMNIJAR_NAME) \
+    --lib-dirs $(MOZ_PKG_DIR)/lib \
+    --assets-dirs $(MOZ_PKG_DIR)/assets \
+    --features-dirs $(MOZ_PKG_DIR)/features \
+    --root-files $(foreach f,$(ROOT_FILES),$(MOZ_PKG_DIR)/$(f)) \
     --output $(PACKAGE:.apk=-unsigned-unaligned.apk) && \
   $(call RELEASE_SIGN_ANDROID_APK,$(PACKAGE:.apk=-unsigned-unaligned.apk),$(PACKAGE))
 
 # Packaging produces many optional artifacts.
 package_fennec = \
   $(INNER_FENNEC_PACKAGE) && \
-  $(INNER_ROBOCOP_PACKAGE) && \
-  $(INNER_INSTALL_BOUNCER_PACKAGE) && \
-  $(INNER_MAKE_GECKOLIBS_AAR) && \
-  $(INNER_MAKE_GECKOVIEW_LIBRARY)
+  $(INNER_ROBOCOP_PACKAGE)
 
 # Re-packaging only replaces Android resources and the omnijar before
 # (re-)signing.
 repackage_fennec = \
-  $(MAKE) -C $(GECKO_APP_AP_PATH) gecko-nodeps.ap_ && \
   $(PYTHON) -m mozbuild.action.package_fennec_apk \
     --verbose \
     --inputs \
       $(UNPACKAGE) \
-      $(GECKO_APP_AP_PATH)/gecko-nodeps.ap_ \
-    --omnijar $(STAGEPATH)$(MOZ_PKG_DIR)/$(OMNIJAR_NAME) \
+      $(GRADLE_ANDROID_APP_APK) \
+    --omnijar $(MOZ_PKG_DIR)/$(OMNIJAR_NAME) \
     --output $(PACKAGE:.apk=-unsigned-unaligned.apk) && \
   $(call RELEASE_SIGN_ANDROID_APK,$(PACKAGE:.apk=-unsigned-unaligned.apk),$(PACKAGE))
 

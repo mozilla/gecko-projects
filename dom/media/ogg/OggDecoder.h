@@ -6,46 +6,17 @@
 #if !defined(OggDecoder_h_)
 #define OggDecoder_h_
 
-#include "MediaDecoder.h"
-
 namespace mozilla {
 
-class OggDecoder : public MediaDecoder
+class MediaContainerType;
+
+class OggDecoder
 {
 public:
-  explicit OggDecoder(MediaDecoderOwner* aOwner)
-    : MediaDecoder(aOwner)
-    , mShutdownBitMonitor("mShutdownBitMonitor")
-    , mShutdownBit(false)
-  {}
-
-  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override {
-    if (!IsOggEnabled()) {
-      return nullptr;
-    }
-    return new OggDecoder(aOwner);
-  }
-  MediaDecoderStateMachine* CreateStateMachine() override;
-
-  // For yucky legacy reasons, the ogg decoder needs to do a cross-thread read
-  // to check for shutdown while it hogs its own task queue. We don't want to
-  // protect the general state with a lock, so we make a special copy and a
-  // special-purpose lock. This method may be called on any thread.
-  bool IsOggDecoderShutdown() override
-  {
-    MonitorAutoLock lock(mShutdownBitMonitor);
-    return mShutdownBit;
-  }
-
-protected:
-  void ShutdownBitChanged() override
-  {
-    MonitorAutoLock lock(mShutdownBitMonitor);
-    mShutdownBit = mStateMachineIsShutdown;
-  }
-
-  Monitor mShutdownBitMonitor;
-  bool mShutdownBit;
+  // Returns true if aContainerType is an Ogg type that we think we can render
+  // with an enabled platform decoder backend.
+  // If provided, codecs are checked for support.
+  static bool IsSupportedType(const MediaContainerType& aContainerType);
 };
 
 } // namespace mozilla

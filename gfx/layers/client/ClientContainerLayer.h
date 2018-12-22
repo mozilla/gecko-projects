@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -36,10 +37,7 @@ public:
 protected:
   virtual ~ClientContainerLayer()
   {
-    while (mFirstChild) {
-      ContainerLayer::RemoveChild(mFirstChild);
-    }
-
+    ContainerLayer::RemoveAllChildren();
     MOZ_COUNT_DTOR(ClientContainerLayer);
   }
 
@@ -47,20 +45,15 @@ public:
   virtual void RenderLayer() override
   {
     RenderMaskLayers(this);
-    
-    DefaultComputeSupportsComponentAlphaChildren();
 
-    AutoTArray<Layer*, 12> children;
-    SortChildrenBy3DZOrder(children);
+    DefaultComputeSupportsComponentAlphaChildren();
 
     ReadbackProcessor readback;
     readback.BuildUpdates(this);
 
+    nsTArray<Layer*> children = CollectChildren();
     for (uint32_t i = 0; i < children.Length(); i++) {
       Layer* child = children.ElementAt(i);
-      if (!child->IsVisible()) {
-        continue;
-      }
 
       ToClientLayer(child)->RenderLayerWithReadback(&readback);
 
@@ -159,17 +152,12 @@ protected:
   }
 
 public:
-  virtual Layer* AsLayer() { return this; }
-  virtual ShadowableLayer* AsShadowableLayer() { return this; }
+  virtual Layer* AsLayer() override { return this; }
+  virtual ShadowableLayer* AsShadowableLayer() override { return this; }
 
-  virtual void Disconnect()
-  {
-    ClientLayer::Disconnect();
-  }
+  virtual void RenderLayer() override { }
 
-  virtual void RenderLayer() { }
-
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
+  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) override
   {
     DefaultComputeEffectiveTransforms(aTransformToSurface);
   }

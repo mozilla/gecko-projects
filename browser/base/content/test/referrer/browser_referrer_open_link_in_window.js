@@ -6,7 +6,7 @@ function startNewWindowTestCase(aTestNumber) {
        getReferrerTestDescription(aTestNumber));
   contextMenuOpened(gTestWindow, "testlink").then(function(aContextMenu) {
     newWindowOpened().then(function(aNewWindow) {
-      someTabLoaded(aNewWindow).then(function() {
+      BrowserTestUtils.firstBrowserLoaded(aNewWindow, false).then(function() {
         checkReferrerAndStartNextTest(aTestNumber, aNewWindow, null,
                                       startNewWindowTestCase);
       });
@@ -17,6 +17,6 @@ function startNewWindowTestCase(aTestNumber) {
 }
 
 function test() {
-  requestLongerTimeout(10);  // slowwww shutdown on e10s
+  requestLongerTimeout(10); // slowwww shutdown on e10s
   startReferrerTest(startNewWindowTestCase);
 }

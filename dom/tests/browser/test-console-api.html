@@ -47,11 +47,11 @@
       function testGroups() {
         console.groupCollapsed("a", "group");
         console.group("b", "group");
-        console.groupEnd("b", "group");
+        console.groupEnd();
       }
 
       function nativeCallback() {
-        new Promise(function(resolve, reject) { resolve(42); }).then(console.log.bind(console));
+        new Promise(function(resolve, reject) { resolve(42); }).then(console.log);
       }
 
       function timeStamp(val) {

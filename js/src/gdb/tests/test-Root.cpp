@@ -1,16 +1,16 @@
 #include "gdb-tests.h"
 
 #include "jsapi.h"
-#include "jsfun.h"
 
 #include "gc/Barrier.h"
+#include "vm/JSFunction.h"
 
 FRAGMENT(Root, null) {
   JS::Rooted<JSObject*> null(cx, nullptr);
 
   breakpoint();
 
-  (void) null;
+  use(null);
 }
 
 void callee(JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> mutableObj)
@@ -24,7 +24,7 @@ void callee(JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> mutableObj)
 FRAGMENT(Root, handle) {
   JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
   callee(global, &global);
-  (void) global;
+  use(global);
 }
 
 FRAGMENT(Root, HeapSlot) {
@@ -33,29 +33,29 @@ FRAGMENT(Root, HeapSlot) {
 
   breakpoint();
 
-  (void) plinth;
-  (void) array;
+  use(plinth);
+  use(array);
 }
 
 FRAGMENT(Root, barriers) {
   JSObject* obj = JS_NewPlainObject(cx);
   js::PreBarriered<JSObject*> prebarriered(obj);
-  js::HeapPtr<JSObject*> heapptr(obj);
-  js::RelocatablePtr<JSObject*> relocatable(obj);
+  js::GCPtrObject heapptr(obj);
+  js::HeapPtr<JSObject*> relocatable(obj);
 
   JS::Value val = JS::ObjectValue(*obj);
   js::PreBarrieredValue prebarrieredValue(JS::ObjectValue(*obj));
-  js::HeapValue heapValue(JS::ObjectValue(*obj));
-  js::RelocatableValue relocatableValue(JS::ObjectValue(*obj));
+  js::GCPtrValue heapValue(JS::ObjectValue(*obj));
+  js::HeapPtr<JS::Value> relocatableValue(JS::ObjectValue(*obj));
 
   breakpoint();
 
-  (void) prebarriered;
-  (void) heapptr;
-  (void) relocatable;
-  (void) val;
-  (void) prebarrieredValue;
-  (void) heapValue;
-  (void) relocatableValue;
+  use(prebarriered);
+  use(heapptr);
+  use(relocatable);
+  use(val);
+  use(prebarrieredValue);
+  use(heapValue);
+  use(relocatableValue);
 }
 

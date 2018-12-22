@@ -20,7 +20,6 @@ extern "C" {
 #include "stun.h"
 }
 
-#include "databuffer.h"
 #include "dummysocket.h"
 
 #include "nr_socket_prsock.h"
@@ -50,7 +49,7 @@ class BufferedStunSocketTest : public MtransportTest {
     nr_socket_destroy(&test_socket_);
   }
 
-  void SetUp() {
+  void SetUp() override {
     MtransportTest::SetUp();
 
     RefPtr<DummySocket> dummy(new DummySocket());

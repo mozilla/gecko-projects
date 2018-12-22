@@ -52,33 +52,34 @@ class SyncPreference extends Preference {
                 public void run() {
                     setTitle(R.string.pref_sync);
                     setSummary(R.string.pref_sync_summary);
-                    if (AppConstants.Versions.feature11Plus) {
                         // Cancel any pending task.
                         Picasso.with(mContext).cancelRequest(profileAvatarTarget);
                         // Clear previously set icon.
+                        // Bug 1312719 - IconDrawable is prior to IconResId, drawable must be set null before setIcon(resId)
+                        // http://androidxref.com/5.1.1_r6/xref/frameworks/base/core/java/android/preference/Preference.java#562
+                        setIcon(null);
                         setIcon(R.drawable.sync_avatar_default);
-                    }
-
                 }
             });
             return;
         }
 
-        // Update title from account email.
+        final ExtendedJSONObject profileJSON = fxAccount.getProfileJSON();
+        final String displayName = profileJSON != null ? profileJSON.getString(FxAccountConstants.KEY_PROFILE_JSON_USERNAME) : null;
+
+        // Update title from account email/display name.
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
             public void run() {
-                setTitle(fxAccount.getEmail());
-                setSummary("");
+                if (!TextUtils.isEmpty(displayName)) {
+                    setTitle(displayName);
+                } else {
+                    setTitle(R.string.pref_sync_default_title);
+                }
+                setSummary(fxAccount.getEmail());
             }
         });
 
-        // Updating icons from Java is not supported prior to API 11.
-        if (!AppConstants.Versions.feature11Plus) {
-            return;
-        }
-
-        final ExtendedJSONObject profileJSON = fxAccount.getProfileJSON();
         if (profileJSON == null) {
             return;
         }

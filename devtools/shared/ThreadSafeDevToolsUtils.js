@@ -47,9 +47,9 @@ exports.immutableUpdate = function(...objs) {
  *        can pass as many as you like.
  */
 exports.update = function update(target, ...args) {
-  for (let attrs of args) {
-    for (let key in attrs) {
-      let desc = Object.getOwnPropertyDescriptor(attrs, key);
+  for (const attrs of args) {
+    for (const key in attrs) {
+      const desc = Object.getOwnPropertyDescriptor(attrs, key);
 
       if (desc) {
         Object.defineProperty(target, key, desc);
@@ -67,6 +67,14 @@ exports.update = function update(target, ...args) {
  */
 exports.values = function values(object) {
   return Object.keys(object).map(k => object[k]);
+};
+
+/**
+ * This is overridden in DevToolsUtils for the main thread, where we have the
+ * Cu object available.
+ */
+exports.isCPOW = function() {
+  return false;
 };
 
 /**
@@ -96,7 +104,7 @@ exports.reportException = function reportException(who, exception) {
  * don't have a way to get at them from JavaScript at the moment.)
  */
 exports.makeInfallible = function(handler, name = handler.name) {
-  return function(/* arguments */) {
+  return function() {
     try {
       return handler.apply(this, arguments);
     } catch (ex) {
@@ -123,12 +131,14 @@ exports.safeErrorString = function(error) {
       // isn't a string, don't use it.
       try {
         if (error.stack) {
-          let stack = error.stack.toString();
+          const stack = error.stack.toString();
           if (typeof stack == "string") {
             errorString += "\nStack: " + stack;
           }
         }
-      } catch (ee) { }
+      } catch (ee) {
+        // Ignore.
+      }
 
       // Append additional line and column number information to the output,
       // since it might not be part of the stringified error.
@@ -138,7 +148,9 @@ exports.safeErrorString = function(error) {
 
       return errorString;
     }
-  } catch (ee) { }
+  } catch (ee) {
+    // Ignore.
+  }
 
   // We failed to find a good error description, so do the next best thing.
   return Object.prototype.toString.call(error);
@@ -188,7 +200,7 @@ exports.entries = function entries(obj) {
  */
 exports.toObject = function(arr) {
   const obj = {};
-  for (let [k, v] of arr) {
+  for (const [k, v] of arr) {
     obj[k] = v;
   }
   return obj;
@@ -215,15 +227,15 @@ exports.compose = function compose(...funcs) {
 /**
  * Return true if `thing` is a generator function, false otherwise.
  */
-exports.isGenerator = function (fn) {
+exports.isGenerator = function(fn) {
   if (typeof fn !== "function") {
     return false;
   }
-  let proto = Object.getPrototypeOf(fn);
+  const proto = Object.getPrototypeOf(fn);
   if (!proto) {
     return false;
   }
-  let ctor = proto.constructor;
+  const ctor = proto.constructor;
   if (!ctor) {
     return false;
   }
@@ -231,16 +243,34 @@ exports.isGenerator = function (fn) {
 };
 
 /**
+ * Return true if `thing` is an async function, false otherwise.
+ */
+exports.isAsyncFunction = function(fn) {
+  if (typeof fn !== "function") {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(fn);
+  if (!proto) {
+    return false;
+  }
+  const ctor = proto.constructor;
+  if (!ctor) {
+    return false;
+  }
+  return ctor.name == "AsyncFunction";
+};
+
+/**
  * Return true if `thing` is a Promise or then-able, false otherwise.
  */
-exports.isPromise = function (p) {
+exports.isPromise = function(p) {
   return p && typeof p.then === "function";
 };
 
 /**
  * Return true if `thing` is a SavedFrame, false otherwise.
  */
-exports.isSavedFrame = function (thing) {
+exports.isSavedFrame = function(thing) {
   return Object.prototype.toString.call(thing) === "[object SavedFrame]";
 };
 
@@ -260,4 +290,75 @@ exports.isSet = function(thing) {
  */
 exports.flatten = function(lists) {
   return Array.prototype.concat.apply([], lists);
+};
+
+/**
+ * Returns a promise that is resolved or rejected when all promises have settled
+ * (resolved or rejected).
+ *
+ * This differs from Promise.all, which will reject immediately after the first
+ * rejection, instead of waiting for the remaining promises to settle.
+ *
+ * @param values
+ *        Iterable of promises that may be pending, resolved, or rejected. When
+ *        when all promises have settled (resolved or rejected), the returned
+ *        promise will be resolved or rejected as well.
+ *
+ * @return A new promise that is fulfilled when all values have settled
+ *         (resolved or rejected). Its resolution value will be an array of all
+ *         resolved values in the given order, or undefined if values is an
+ *         empty array. The reject reason will be forwarded from the first
+ *         promise in the list of given promises to be rejected.
+ */
+exports.settleAll = values => {
+  if (values === null || typeof (values[Symbol.iterator]) != "function") {
+    throw new Error("settleAll() expects an iterable.");
+  }
+
+  return new Promise((resolve, reject) => {
+    values = Array.isArray(values) ? values : [...values];
+    let countdown = values.length;
+    const resolutionValues = new Array(countdown);
+    let rejectionValue;
+    let rejectionOccurred = false;
+
+    if (!countdown) {
+      resolve(resolutionValues);
+      return;
+    }
+
+    function checkForCompletion() {
+      if (--countdown > 0) {
+        return;
+      }
+      if (!rejectionOccurred) {
+        resolve(resolutionValues);
+      } else {
+        reject(rejectionValue);
+      }
+    }
+
+    for (let i = 0; i < values.length; i++) {
+      const index = i;
+      const value = values[i];
+      const resolver = result => {
+        resolutionValues[index] = result;
+        checkForCompletion();
+      };
+      const rejecter = error => {
+        if (!rejectionOccurred) {
+          rejectionValue = error;
+          rejectionOccurred = true;
+        }
+        checkForCompletion();
+      };
+
+      if (value && typeof (value.then) == "function") {
+        value.then(resolver, rejecter);
+      } else {
+        // Given value is not a promise, forward it as a resolution value.
+        resolver(value);
+      }
+    }
+  });
 };

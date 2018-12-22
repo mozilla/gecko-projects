@@ -161,7 +161,6 @@ compartment.
         * "API"
         * "EAGER_ALLOC_TRIGGER"
         * "DESTROY_RUNTIME"
-        * "DESTROY_CONTEXT"
         * "LAST_DITCH"
         * "TOO_MUCH_MALLOC"
         * "ALLOC_TRIGGER"
@@ -191,7 +190,6 @@ compartment.
         * "REFRESH_FRAME"
         * "FULL_GC_TIMER"
         * "SHUTDOWN_CC"
-        * "FINISH_LARGE_EVALUATE"
         * "USER_INACTIVE"
 
     `nonincrementalReason`

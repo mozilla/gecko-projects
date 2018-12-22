@@ -6,11 +6,7 @@
 /* TEST_PATH=toolkit/components/places/tests/browser/browser_bug680727.js make -C $(OBJDIR) mochitest-browser-chrome */
 
 
-const kUniqueURI = Services.io.newURI("http://mochi.test:8888/#bug_680727",
-                                      null, null);
-var gAsyncHistory =
-  Cc["@mozilla.org/browser/history;1"].getService(Ci.mozIAsyncHistory);
-
+const kUniqueURI = Services.io.newURI("http://mochi.test:8888/#bug_680727");
 var proxyPrefValue;
 var ourTab;
 
@@ -23,9 +19,7 @@ function test() {
   Services.prefs.setIntPref("network.proxy.type", 0);
 
   // Clear network cache.
-  Components.classes["@mozilla.org/netwerk/cache-storage-service;1"]
-            .getService(Components.interfaces.nsICacheStorageService)
-            .clear();
+  Services.cache2.clear();
 
   // Go offline, expecting the error page.
   Services.io.offline = true;
@@ -38,7 +32,7 @@ function test() {
   });
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // listen to loading the neterror page. (offline mode)
 function errorListener() {
   ok(Services.io.offline, "Services.io.offline is true.");
@@ -52,8 +46,10 @@ function errorListener() {
     Assert.equal(content.location.href, uri, "Docshell URI is the original URI.");
   }).then(() => {
     // Global history does not record URI of a failed request.
-    return PlacesTestUtils.promiseAsyncUpdates().then(() => {
-      gAsyncHistory.isURIVisited(kUniqueURI, errorAsyncListener);
+    PlacesTestUtils.promiseAsyncUpdates().then(() => {
+      PlacesUtils.history.hasVisits(kUniqueURI).then(isVisited => {
+        errorAsyncListener(kUniqueURI, isVisited);
+      });
     });
   });
 }
@@ -77,7 +73,7 @@ function errorAsyncListener(aURI, aIsVisited) {
   });
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // listen to reload of neterror.
 function reloadListener() {
   // This listener catches "DOMContentLoaded" on being called
@@ -92,18 +88,20 @@ function reloadListener() {
   }).then(() => {
     // Check if global history remembers the successfully-requested URI.
     PlacesTestUtils.promiseAsyncUpdates().then(() => {
-      gAsyncHistory.isURIVisited(kUniqueURI, reloadAsyncListener);
+      PlacesUtils.history.hasVisits(kUniqueURI).then(isVisited => {
+          reloadAsyncListener(kUniqueURI, isVisited);
+      });
     });
   });
 }
 
 function reloadAsyncListener(aURI, aIsVisited) {
   ok(kUniqueURI.equals(aURI) && aIsVisited, "We have visited the URI.");
-  PlacesTestUtils.clearHistory().then(finish);
+  PlacesUtils.history.clear().then(finish);
 }
 
-registerCleanupFunction(function* () {
+registerCleanupFunction(async function() {
   Services.prefs.setIntPref("network.proxy.type", proxyPrefValue);
   Services.io.offline = false;
-  yield BrowserTestUtils.removeTab(ourTab);
+  BrowserTestUtils.removeTab(ourTab);
 });

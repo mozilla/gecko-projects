@@ -9,7 +9,6 @@
 /* globals document, window */
 "use strict";
 
-
 /**
  * Functions handling the filtering UI.
  */
@@ -34,7 +33,7 @@ FilterView.prototype = {
   /**
    * Initialization function, called when the debugger is started.
    */
-  initialize: function() {
+  initialize: function () {
     dumpn("Initializing the FilterView");
 
     this._searchbox = document.getElementById("searchbox");
@@ -58,11 +57,11 @@ FilterView.prototype = {
     this._lineSearchKey = ShortcutUtils.prettifyShortcut(document.getElementById("lineSearchKey"));
     this._variableSearchKey = ShortcutUtils.prettifyShortcut(document.getElementById("variableSearchKey"));
 
-    this._searchbox.addEventListener("click", this._onClick, false);
-    this._searchbox.addEventListener("select", this._onInput, false);
-    this._searchbox.addEventListener("input", this._onInput, false);
-    this._searchbox.addEventListener("keypress", this._onKeyPress, false);
-    this._searchbox.addEventListener("blur", this._onBlur, false);
+    this._searchbox.addEventListener("click", this._onClick);
+    this._searchbox.addEventListener("select", this._onInput);
+    this._searchbox.addEventListener("input", this._onInput);
+    this._searchbox.addEventListener("keypress", this._onKeyPress);
+    this._searchbox.addEventListener("blur", this._onBlur);
 
     let placeholder = L10N.getFormatStr("emptySearchText", this._fileSearchKey);
     this._searchbox.setAttribute("placeholder", placeholder);
@@ -95,14 +94,14 @@ FilterView.prototype = {
   /**
    * Destruction function, called when the debugger is closed.
    */
-  destroy: function() {
+  destroy: function () {
     dumpn("Destroying the FilterView");
 
-    this._searchbox.removeEventListener("click", this._onClick, false);
-    this._searchbox.removeEventListener("select", this._onInput, false);
-    this._searchbox.removeEventListener("input", this._onInput, false);
-    this._searchbox.removeEventListener("keypress", this._onKeyPress, false);
-    this._searchbox.removeEventListener("blur", this._onBlur, false);
+    this._searchbox.removeEventListener("click", this._onClick);
+    this._searchbox.removeEventListener("select", this._onInput);
+    this._searchbox.removeEventListener("input", this._onInput);
+    this._searchbox.removeEventListener("keypress", this._onKeyPress);
+    this._searchbox.removeEventListener("blur", this._onBlur);
 
     this.FilteredSources.destroy();
     this.FilteredFunctions.destroy();
@@ -111,8 +110,8 @@ FilterView.prototype = {
   /**
    * Add commands that XUL can fire.
    */
-  _addCommands: function() {
-    XULUtils.addCommands(document.getElementById('debuggerCommands'), {
+  _addCommands: function () {
+    XULUtils.addCommands(document.getElementById("debuggerCommands"), {
       fileSearchCommand: () => this._doFileSearch(),
       globalSearchCommand: () => this._doGlobalSearch(),
       functionSearchCommand: () => this._doFunctionSearch(),
@@ -191,7 +190,7 @@ FilterView.prototype = {
   /**
    * Clears the text from the searchbox and any changed views.
    */
-  clearSearch: function() {
+  clearSearch: function () {
     this._searchbox.value = "";
     this.clearViews();
 
@@ -202,7 +201,7 @@ FilterView.prototype = {
   /**
    * Clears all the views that may pop up when searching.
    */
-  clearViews: function() {
+  clearViews: function () {
     this.DebuggerView.GlobalSearch.clearView();
     this.FilteredSources.clearView();
     this.FilteredFunctions.clearView();
@@ -216,7 +215,7 @@ FilterView.prototype = {
    * @param number aLine
    *        The source line number to jump to.
    */
-  _performLineSearch: function(aLine) {
+  _performLineSearch: function (aLine) {
     // Make sure we're actually searching for a valid line.
     if (aLine) {
       this.DebuggerView.editor.setCursor({ line: aLine - 1, ch: 0 }, "center");
@@ -230,7 +229,7 @@ FilterView.prototype = {
    * @param string aToken
    *        The source token to find.
    */
-  _performTokenSearch: function(aToken) {
+  _performTokenSearch: function (aToken) {
     // Make sure we're actually searching for a valid token.
     if (!aToken) {
       return;
@@ -241,7 +240,7 @@ FilterView.prototype = {
   /**
    * The click listener for the search container.
    */
-  _onClick: function() {
+  _onClick: function () {
     // If there's some text in the searchbox, displaying a panel would
     // interfere with double/triple click default behaviors.
     if (!this._searchbox.value) {
@@ -252,7 +251,7 @@ FilterView.prototype = {
   /**
    * The input listener for the search container.
    */
-  _onInput: function() {
+  _onInput: function () {
     this.clearViews();
 
     // Make sure we're actually searching for something.
@@ -294,7 +293,7 @@ FilterView.prototype = {
   /**
    * The key press listener for the search container.
    */
-  _onKeyPress: function(e) {
+  _onKeyPress: function (e) {
     // This attribute is not implemented in Gecko at this time, see bug 680830.
     e.char = String.fromCharCode(e.charCode);
 
@@ -321,15 +320,15 @@ FilterView.prototype = {
     // Return, enter, down and up keys focus next or previous matches, while
     // the escape key switches focus from the search container.
     else switch (e.keyCode) {
-      case e.DOM_VK_RETURN:
+      case KeyCodes.DOM_VK_RETURN:
         var isReturnKey = true;
         // If the shift key is pressed, focus on the previous result
         actionToPerform = e.shiftKey ? "selectPrev" : "selectNext";
         break;
-      case e.DOM_VK_DOWN:
+      case KeyCodes.DOM_VK_DOWN:
         actionToPerform = "selectNext";
         break;
-      case e.DOM_VK_UP:
+      case KeyCodes.DOM_VK_UP:
         actionToPerform = "selectPrev";
         break;
     }
@@ -423,7 +422,7 @@ FilterView.prototype = {
   /**
    * The blur listener for the search container.
    */
-  _onBlur: function() {
+  _onBlur: function () {
     this.clearViews();
   },
 
@@ -433,7 +432,7 @@ FilterView.prototype = {
    * @param string aOperator
    *        The operator to use for filtering.
    */
-  _doSearch: function(aOperator = "", aText = "") {
+  _doSearch: function (aOperator = "", aText = "") {
     this._searchbox.focus();
     this._searchbox.value = ""; // Need to clear value beforehand. Bug 779738.
 
@@ -448,11 +447,11 @@ FilterView.prototype = {
 
     let content = this.DebuggerView.editor.getText();
     if (content.length < this.DebuggerView.LARGE_FILE_SIZE &&
-        SEARCH_AUTOFILL.indexOf(aOperator) != -1) {
+        SEARCH_AUTOFILL.includes(aOperator)) {
       let cursor = this.DebuggerView.editor.getCursor();
       let location = this.DebuggerView.Sources.selectedItem.attachment.source.url;
       let source = this.Parser.get(content, location);
-      let identifier = source.getIdentifierAt({ line: cursor.line+1, column: cursor.ch });
+      let identifier = source.getIdentifierAt({ line: cursor.line + 1, column: cursor.ch });
 
       if (identifier && identifier.name) {
         this._searchbox.value = aOperator + identifier.name;
@@ -467,7 +466,7 @@ FilterView.prototype = {
   /**
    * Called when the source location filter key sequence was pressed.
    */
-  _doFileSearch: function() {
+  _doFileSearch: function () {
     this._doSearch();
     this._searchboxHelpPanel.openPopup(this._searchbox);
   },
@@ -475,7 +474,7 @@ FilterView.prototype = {
   /**
    * Called when the global search filter key sequence was pressed.
    */
-  _doGlobalSearch: function() {
+  _doGlobalSearch: function () {
     this._doSearch(SEARCH_GLOBAL_FLAG);
     this._searchboxHelpPanel.hidePopup();
   },
@@ -483,7 +482,7 @@ FilterView.prototype = {
   /**
    * Called when the source function filter key sequence was pressed.
    */
-  _doFunctionSearch: function() {
+  _doFunctionSearch: function () {
     this._doSearch(SEARCH_FUNCTION_FLAG);
     this._searchboxHelpPanel.hidePopup();
   },
@@ -491,7 +490,7 @@ FilterView.prototype = {
   /**
    * Called when the source token filter key sequence was pressed.
    */
-  _doTokenSearch: function() {
+  _doTokenSearch: function () {
     this._doSearch(SEARCH_TOKEN_FLAG);
     this._searchboxHelpPanel.hidePopup();
   },
@@ -499,7 +498,7 @@ FilterView.prototype = {
   /**
    * Called when the source line filter key sequence was pressed.
    */
-  _doLineSearch: function() {
+  _doLineSearch: function () {
     this._doSearch(SEARCH_LINE_FLAG);
     this._searchboxHelpPanel.hidePopup();
   },
@@ -507,7 +506,7 @@ FilterView.prototype = {
   /**
    * Called when the variable search filter key sequence was pressed.
    */
-  _doVariableSearch: function() {
+  _doVariableSearch: function () {
     this._doSearch(SEARCH_VARIABLE_FLAG);
     this._searchboxHelpPanel.hidePopup();
   },
@@ -515,7 +514,7 @@ FilterView.prototype = {
   /**
    * Called when the variables focus key sequence was pressed.
    */
-  _doVariablesFocus: function() {
+  _doVariablesFocus: function () {
     this.DebuggerView.showInstrumentsPane();
     this.DebuggerView.Variables.focusFirstVisibleItem();
   },
@@ -552,26 +551,26 @@ function FilteredSourcesView(DebuggerView) {
   this._onSelect = this._onSelect.bind(this);
 }
 
-FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype, {
+FilteredSourcesView.prototype = extend(ResultsPanelContainer.prototype, {
   /**
    * Initialization function, called when the debugger is started.
    */
-  initialize: function() {
+  initialize: function () {
     dumpn("Initializing the FilteredSourcesView");
 
     this.anchor = document.getElementById("searchbox");
-    this.widget.addEventListener("select", this._onSelect, false);
-    this.widget.addEventListener("click", this._onClick, false);
+    this.widget.addEventListener("select", this._onSelect);
+    this.widget.addEventListener("click", this._onClick);
   },
 
   /**
    * Destruction function, called when the debugger is closed.
    */
-  destroy: function() {
+  destroy: function () {
     dumpn("Destroying the FilteredSourcesView");
 
-    this.widget.removeEventListener("select", this._onSelect, false);
-    this.widget.removeEventListener("click", this._onClick, false);
+    this.widget.removeEventListener("select", this._onSelect);
+    this.widget.removeEventListener("click", this._onClick);
     this.anchor = null;
   },
 
@@ -583,7 +582,7 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
    * @param number aWait
    *        The amount of milliseconds to wait until draining.
    */
-  scheduleSearch: function(aToken, aWait) {
+  scheduleSearch: function (aToken, aWait) {
     // The amount of time to wait for the requests to settle.
     let maxDelay = FILE_SEARCH_ACTION_MAX_DELAY;
     let delay = aWait === undefined ? maxDelay / aToken.length : aWait;
@@ -598,7 +597,7 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
    * @param string aToken
    *        The string to search for.
    */
-  _doSearch: function(aToken, aStore = []) {
+  _doSearch: function (aToken, aStore = []) {
     // Don't continue filtering if the searched token is an empty string.
     // In contrast with function searching, in this case we don't want to
     // show a list of all the files when no search token was supplied.
@@ -632,7 +631,7 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
    * @param array aSearchResults
    *        The results array, containing search details for each source.
    */
-  _syncView: function(aSearchResults) {
+  _syncView: function (aSearchResults) {
     // If there are no matches found, keep the popup hidden and avoid
     // creating the view.
     if (!aSearchResults.length) {
@@ -675,7 +674,7 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
   /**
    * The click listener for this container.
    */
-  _onClick: function(e) {
+  _onClick: function (e) {
     let locationItem = this.getItemForElement(e.target);
     if (locationItem) {
       this.selectedItem = locationItem;
@@ -689,7 +688,7 @@ FilteredSourcesView.prototype = Heritage.extend(ResultsPanelContainer.prototype,
    * @param object aItem
    *        The item associated with the element to select.
    */
-  _onSelect: function({ detail: locationItem }) {
+  _onSelect: function ({ detail: locationItem }) {
     if (locationItem) {
       let source = queries.getSourceByURL(DebuggerController.getState(),
                                           locationItem.attachment.url);
@@ -715,26 +714,26 @@ function FilteredFunctionsView(SourceScripts, Parser, DebuggerView) {
   this._onSelect = this._onSelect.bind(this);
 }
 
-FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototype, {
+FilteredFunctionsView.prototype = extend(ResultsPanelContainer.prototype, {
   /**
    * Initialization function, called when the debugger is started.
    */
-  initialize: function() {
+  initialize: function () {
     dumpn("Initializing the FilteredFunctionsView");
 
     this.anchor = document.getElementById("searchbox");
-    this.widget.addEventListener("select", this._onSelect, false);
-    this.widget.addEventListener("click", this._onClick, false);
+    this.widget.addEventListener("select", this._onSelect);
+    this.widget.addEventListener("click", this._onClick);
   },
 
   /**
    * Destruction function, called when the debugger is closed.
    */
-  destroy: function() {
+  destroy: function () {
     dumpn("Destroying the FilteredFunctionsView");
 
-    this.widget.removeEventListener("select", this._onSelect, false);
-    this.widget.removeEventListener("click", this._onClick, false);
+    this.widget.removeEventListener("select", this._onSelect);
+    this.widget.removeEventListener("click", this._onClick);
     this.anchor = null;
   },
 
@@ -746,7 +745,7 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
    * @param number aWait
    *        The amount of milliseconds to wait until draining.
    */
-  scheduleSearch: function(aToken, aWait) {
+  scheduleSearch: function (aToken, aWait) {
     // The amount of time to wait for the requests to settle.
     let maxDelay = FUNCTION_SEARCH_ACTION_MAX_DELAY;
     let delay = aWait === undefined ? maxDelay / aToken.length : aWait;
@@ -769,7 +768,7 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
    * @param array aSources
    *        An array of [url, text] tuples for each source.
    */
-  _doSearch: function(aToken, aSources, aStore = []) {
+  _doSearch: function (aToken, aSources, aStore = []) {
     // Continue parsing even if the searched token is an empty string, to
     // cache the syntax tree nodes generated by the reflection API.
 
@@ -829,7 +828,7 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
    * @param array aSearchResults
    *        The results array, containing search details for each source.
    */
-  _syncView: function(aSearchResults) {
+  _syncView: function (aSearchResults) {
     // If there are no matches found, keep the popup hidden and avoid
     // creating the view.
     if (!aSearchResults.length) {
@@ -891,7 +890,7 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
   /**
    * The click listener for this container.
    */
-  _onClick: function(e) {
+  _onClick: function (e) {
     let functionItem = this.getItemForElement(e.target);
     if (functionItem) {
       this.selectedItem = functionItem;
@@ -902,7 +901,7 @@ FilteredFunctionsView.prototype = Heritage.extend(ResultsPanelContainer.prototyp
   /**
    * The select listener for this container.
    */
-  _onSelect: function({ detail: functionItem }) {
+  _onSelect: function ({ detail: functionItem }) {
     if (functionItem) {
       let sourceUrl = functionItem.attachment.sourceUrl;
       let actor = queries.getSourceByURL(DebuggerController.getState(), sourceUrl).actor;

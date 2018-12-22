@@ -5,15 +5,16 @@ function startMiddleClickTestCase(aTestNumber) {
   info("browser_referrer_middle_click: " +
        getReferrerTestDescription(aTestNumber));
   someTabLoaded(gTestWindow).then(function(aNewTab) {
-    gTestWindow.gBrowser.selectedTab = aNewTab;
-    checkReferrerAndStartNextTest(aTestNumber, null, aNewTab,
-                                  startMiddleClickTestCase);
+    BrowserTestUtils.switchTab(gTestWindow.gBrowser, aNewTab).then(() => {
+      checkReferrerAndStartNextTest(aTestNumber, null, aNewTab,
+                                    startMiddleClickTestCase);
+    });
   });
 
   clickTheLink(gTestWindow, "testlink", {button: 1});
 }
 
 function test() {
-  requestLongerTimeout(10);  // slowwww shutdown on e10s
+  requestLongerTimeout(10); // slowwww shutdown on e10s
   startReferrerTest(startMiddleClickTestCase);
 }

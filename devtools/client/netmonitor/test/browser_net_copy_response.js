@@ -1,40 +1,32 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if copying a request's response works.
  */
 
-function test() {
-  initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
+  info("Starting test... ");
 
-    const EXPECTED_RESULT = '{ "greeting": "Hello JSON!" }';
+  const EXPECTED_RESULT = '{ "greeting": "Hello JSON!" }';
 
-    let { NetMonitorView } = aMonitor.panelWin;
-    let { RequestsMenu } = NetMonitorView;
+  const { document } = monitor.panelWin;
 
-    RequestsMenu.lazyUpdate = false;
+  // Execute requests.
+  await performRequests(monitor, tab, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
 
-    waitForNetworkEvents(aMonitor, 7).then(() => {
-      let requestItem = RequestsMenu.getItemAtIndex(3);
-      RequestsMenu.selectedItem = requestItem;
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[3]);
+  EventUtils.sendMouseEvent({ type: "contextmenu" },
+    document.querySelectorAll(".request-list-item")[3]);
 
-      waitForClipboard(EXPECTED_RESULT, function setup() {
-        RequestsMenu.copyResponse();
-      }, function onSuccess() {
-        ok(true, "Clipboard contains the currently selected item's response.");
-        cleanUp();
-      }, function onFailure() {
-        ok(false, "Copying the currently selected item's response was unsuccessful.");
-        cleanUp();
-      });
-    });
+  await waitForClipboardPromise(function setup() {
+    monitor.panelWin.parent.document
+      .querySelector("#request-list-context-copy-response").click();
+  }, EXPECTED_RESULT);
 
-    aDebuggee.performRequests();
-
-    function cleanUp(){
-      teardown(aMonitor).then(finish);
-    }
-  });
-}
+  await teardown(monitor);
+});

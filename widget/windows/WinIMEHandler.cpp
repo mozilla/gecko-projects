@@ -7,6 +7,7 @@
 
 #include "IMMHandler.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/WindowsVersion.h"
 #include "nsWindowDefs.h"
 #include "WinTextEventDispatcherListener.h"
 
@@ -42,11 +43,13 @@ namespace widget {
 nsWindow* IMEHandler::sFocusedWindow = nullptr;
 InputContextAction::Cause IMEHandler::sLastContextActionCause =
   InputContextAction::CAUSE_UNKNOWN;
+bool IMEHandler::sForceDisableCurrentIMM_IME = false;
 bool IMEHandler::sPluginHasFocus = false;
 
 #ifdef NS_ENABLE_TSF
 bool IMEHandler::sIsInTSFMode = false;
 bool IMEHandler::sIsIMMEnabled = true;
+bool IMEHandler::sAssociateIMCOnlyWhenIMM_IMEActive = false;
 decltype(SetInputScopes)* IMEHandler::sSetInputScopes = nullptr;
 #endif // #ifdef NS_ENABLE_TSF
 
@@ -62,6 +65,10 @@ IMEHandler::Initialize()
   sIsInTSFMode = TSFTextStore::IsInTSFMode();
   sIsIMMEnabled =
     !sIsInTSFMode || Preferences::GetBool("intl.tsf.support_imm", true);
+  sAssociateIMCOnlyWhenIMM_IMEActive =
+    sIsIMMEnabled &&
+    Preferences::GetBool("intl.tsf.associate_imc_only_when_imm_ime_is_active",
+                         false);
   if (!sIsInTSFMode) {
     // When full TSFTextStore is not available, try to use SetInputScopes API
     // to enable at least InputScope. Use GET_MODULE_HANDLE_EX_FLAG_PIN to
@@ -76,6 +83,8 @@ IMEHandler::Initialize()
 #endif // #ifdef NS_ENABLE_TSF
 
   IMMHandler::Initialize();
+
+  sForceDisableCurrentIMM_IME = IMMHandler::IsActiveIMEInBlockList();
 }
 
 // static
@@ -173,14 +182,29 @@ IMEHandler::ProcessMessage(nsWindow* aWindow, UINT aMessage,
     }
     // IME isn't implemented with IMM, IMMHandler shouldn't handle any
     // messages.
-    if (!TSFTextStore::IsIMM_IME()) {
+    if (!IsIMMActive()) {
       return false;
     }
   }
 #endif // #ifdef NS_ENABLE_TSF
 
-  return IMMHandler::ProcessMessage(aWindow, aMessage, aWParam, aLParam,
-                                    aResult);
+  bool keepGoing =
+    IMMHandler::ProcessMessage(aWindow, aMessage, aWParam, aLParam, aResult);
+
+  // If user changes active IME to an IME which is listed in our block list,
+  // we should disassociate IMC from the window for preventing the IME to work
+  // and crash.
+  if (aMessage == WM_INPUTLANGCHANGE) {
+    bool disableIME = IMMHandler::IsActiveIMEInBlockList();
+    if (disableIME != sForceDisableCurrentIMM_IME) {
+      bool enable =
+        !disableIME && WinUtils::IsIMEEnabled(aWindow->InputContextRef());
+      AssociateIMEContext(aWindow, enable);
+      sForceDisableCurrentIMM_IME = disableIME;
+    }
+  }
+
+  return keepGoing;
 }
 
 #ifdef NS_ENABLE_TSF
@@ -188,8 +212,9 @@ IMEHandler::ProcessMessage(nsWindow* aWindow, UINT aMessage,
 bool
 IMEHandler::IsIMMActive()
 {
-  return TSFTextStore::IsIMM_IME();
+  return TSFTextStore::IsIMM_IMEActive();
 }
+
 #endif // #ifdef NS_ENABLE_TSF
 
 // static
@@ -239,7 +264,7 @@ IMEHandler::NotifyIME(nsWindow* aWindow,
         IMMHandler::OnSelectionChange(aWindow, aIMENotification, isIMMActive);
         return rv;
       }
-      case NOTIFY_IME_OF_COMPOSITION_UPDATE:
+      case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
         // If IMM IME is active, we need to notify IMMHandler of updating
         // composition change.  It will adjust candidate window position or
         // composition window position.
@@ -302,7 +327,7 @@ IMEHandler::NotifyIME(nsWindow* aWindow,
       IMMHandler::CancelComposition(aWindow);
       return NS_OK;
     case NOTIFY_IME_OF_POSITION_CHANGE:
-    case NOTIFY_IME_OF_COMPOSITION_UPDATE:
+    case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
       IMMHandler::OnUpdateComposition(aWindow);
       return NS_OK;
     case NOTIFY_IME_OF_SELECTION_CHANGE:
@@ -334,31 +359,31 @@ IMEHandler::NotifyIME(nsWindow* aWindow,
 }
 
 // static
-nsIMEUpdatePreference
-IMEHandler::GetUpdatePreference()
+IMENotificationRequests
+IMEHandler::GetIMENotificationRequests()
 {
   // While a plugin has focus, neither TSFTextStore nor IMMHandler needs
   // notifications.
   if (sPluginHasFocus) {
-    return nsIMEUpdatePreference();
+    return IMENotificationRequests();
   }
 
 #ifdef NS_ENABLE_TSF
   if (IsTSFAvailable()) {
     if (!sIsIMMEnabled) {
-      return TSFTextStore::GetIMEUpdatePreference();
+      return TSFTextStore::GetIMENotificationRequests();
     }
     // Even if TSF is available, the active IME may be an IMM-IME.
-    // Unfortunately, changing the result of GetUpdatePreference() while an
-    // editor has focus isn't supported by IMEContentObserver nor
+    // Unfortunately, changing the result of GetIMENotificationRequests() while
+    // an editor has focus isn't supported by IMEContentObserver nor
     // ContentCacheInParent.  Therefore, we need to request whole notifications
     // which are necessary either IMMHandler or TSFTextStore.
-    return IMMHandler::GetIMEUpdatePreference() |
-             TSFTextStore::GetIMEUpdatePreference();
+    return IMMHandler::GetIMENotificationRequests() |
+             TSFTextStore::GetIMENotificationRequests();
   }
 #endif //NS_ENABLE_TSF
 
-  return IMMHandler::GetIMEUpdatePreference();
+  return IMMHandler::GetIMENotificationRequests();
 }
 
 // static
@@ -391,8 +416,9 @@ IMEHandler::OnDestroyWindow(nsWindow* aWindow)
   // here because TabParent already lost the reference to the nsWindow when
   // it receives from the remote process.
   if (sFocusedWindow == aWindow) {
-    NS_ASSERTION(aWindow->GetInputContext().IsOriginContentProcess(),
-      "input context of focused widget should be set from a remote process");
+    MOZ_ASSERT(aWindow->GetInputContext().IsOriginContentProcess(),
+      "input context of focused widget should've been set by a remote process "
+      "if IME focus isn't cleared before destroying the widget");
     NotifyIME(aWindow, IMENotification(NOTIFY_IME_OF_BLUR));
   }
 
@@ -407,6 +433,16 @@ IMEHandler::OnDestroyWindow(nsWindow* aWindow)
 #endif // #ifdef NS_ENABLE_TSF
   AssociateIMEContext(aWindow, true);
 }
+
+#ifdef NS_ENABLE_TSF
+// static
+bool
+IMEHandler::NeedsToAssociateIMC()
+{
+  return !sForceDisableCurrentIMM_IME &&
+         (!sAssociateIMCOnlyWhenIMM_IMEActive || !IsIMMActive());
+}
+#endif // #ifdef NS_ENABLE_TSF
 
 // static
 void
@@ -439,8 +475,8 @@ IMEHandler::SetInputContext(nsWindow* aWindow,
     TSFTextStore::SetInputContext(aWindow, aInputContext, aAction);
     if (IsTSFAvailable()) {
       if (sIsIMMEnabled) {
-        // Associate IME context for IMM-IMEs.
-        AssociateIMEContext(aWindow, enable);
+        // Associate IMC with aWindow only when it's necessary.
+        AssociateIMEContext(aWindow, enable && NeedsToAssociateIMC());
       } else if (oldInputContext.mIMEState.mEnabled == IMEState::PLUGIN) {
         // Disassociate the IME context from the window when plugin loses focus
         // in pure TSF mode.
@@ -468,15 +504,15 @@ IMEHandler::SetInputContext(nsWindow* aWindow,
 
 // static
 void
-IMEHandler::AssociateIMEContext(nsWindow* aWindow, bool aEnable)
+IMEHandler::AssociateIMEContext(nsWindowBase* aWindowBase, bool aEnable)
 {
-  IMEContext context(aWindow);
+  IMEContext context(aWindowBase);
   if (aEnable) {
     context.AssociateDefaultContext();
     return;
   }
   // Don't disassociate the context after the window is destroyed.
-  if (aWindow->Destroyed()) {
+  if (aWindowBase->Destroyed()) {
     return;
   }
   context.Disassociate();
@@ -486,6 +522,22 @@ IMEHandler::AssociateIMEContext(nsWindow* aWindow, bool aEnable)
 void
 IMEHandler::InitInputContext(nsWindow* aWindow, InputContext& aInputContext)
 {
+  MOZ_ASSERT(aWindow);
+  MOZ_ASSERT(aWindow->GetWindowHandle(),
+             "IMEHandler::SetInputContext() requires non-nullptr HWND");
+
+  static bool sInitialized = false;
+  if (!sInitialized) {
+    sInitialized = true;
+    // Some TIPs like QQ Input (Simplified Chinese) may need normal window
+    // (i.e., windows except message window) when initializing themselves.
+    // Therefore, we need to initialize TSF/IMM modules after first normal
+    // window is created.  InitInputContext() should be called immediately
+    // after creating each normal window, so, here is a good place to
+    // initialize these modules.
+    Initialize();
+  }
+
   // For a11y, the default enabled state should be 'enabled'.
   aInputContext.mIMEState.mEnabled = IMEState::ENABLED;
 
@@ -493,7 +545,7 @@ IMEHandler::InitInputContext(nsWindow* aWindow, InputContext& aInputContext)
   if (sIsInTSFMode) {
     TSFTextStore::SetInputContext(aWindow, aInputContext,
       InputContextAction(InputContextAction::CAUSE_UNKNOWN,
-                         InputContextAction::GOT_FOCUS));
+                         InputContextAction::WIDGET_CREATED));
     // IME context isn't necessary in pure TSF mode.
     if (!sIsIMMEnabled) {
       AssociateIMEContext(aWindow, false);
@@ -526,6 +578,45 @@ IMEHandler::CurrentKeyboardLayoutHasIME()
 
 // static
 void
+IMEHandler::OnKeyboardLayoutChanged()
+{
+  // Be aware, this method won't be called until TSFStaticSink starts to
+  // observe active TIP change.  If you need to be notified of this, you
+  // need to create TSFStaticSink::Observe() or something and call it
+  // TSFStaticSink::EnsureInitActiveTIPKeyboard() forcibly.
+
+  if (!sIsIMMEnabled || !IsTSFAvailable()) {
+    return;
+  }
+
+  // We don't need to do anything when sAssociateIMCOnlyWhenIMM_IMEActive is
+  // false because IMContext won't be associated/disassociated when changing
+  // active keyboard layout/IME.
+  if (!sAssociateIMCOnlyWhenIMM_IMEActive) {
+    return;
+  }
+
+  // If there is no TSFTextStore which has focus, i.e., no editor has focus,
+  // nothing to do here.
+  nsWindowBase* windowBase = TSFTextStore::GetEnabledWindowBase();
+  if (!windowBase) {
+    return;
+  }
+
+  // If IME isn't available, nothing to do here.
+  InputContext inputContext = windowBase->GetInputContext();
+  if (!WinUtils::IsIMEEnabled(inputContext)) {
+    return;
+  }
+
+  // Associate or Disassociate IMC if it's necessary.
+  // Note that this does nothing if the window has already associated with or
+  // disassociated from the window.
+  AssociateIMEContext(windowBase, NeedsToAssociateIMC());
+}
+
+// static
+void
 IMEHandler::SetInputScopeForIMM32(nsWindow* aWindow,
                                   const nsAString& aHTMLInputType,
                                   const nsAString& aHTMLInputInputmode)
@@ -541,6 +632,32 @@ IMEHandler::SetInputScopeForIMM32(nsWindow* aWindow,
       static const InputScope inputScopes[] = { IS_URL };
       scopes = &inputScopes[0];
       arraySize = ArrayLength(inputScopes);
+    } else if (aHTMLInputInputmode.EqualsLiteral("mozAwesomebar")) {
+      // Even if Awesomebar has focus, user may not input URL directly.
+      // However, on-screen keyboard for URL should be shown because it has
+      // some useful additional keys like ".com" and they are not hindrances
+      // even when inputting non-URL text, e.g., words to search something in
+      // the web.  On the other hand, a lot of Microsoft's IMEs and Google
+      // Japanese Input make their open state "closed" automatically if we
+      // notify them of URL as the input scope.  However, this is very annoying
+      // for the users when they try to input some words to search the web or
+      // bookmark/history items.  Therefore, if they are active, we need to
+      // notify them of the default input scope for avoiding this issue.
+      // FYI: We cannot check active TIP without TSF.  Therefore, if it's
+      //      not in TSF mode, this will check only if active IMM-IME is Google
+      //      Japanese Input.  Google Japanese Input is a TIP of TSF basically.
+      //      However, if the OS is Win7 or it's installed on Win7 but has not
+      //      been updated yet even after the OS is upgraded to Win8 or later,
+      //      it's installed as IMM-IME.
+      if (TSFTextStore::ShouldSetInputScopeOfURLBarToDefault()) {
+        static const InputScope inputScopes[] = { IS_DEFAULT };
+        scopes = &inputScopes[0];
+        arraySize = ArrayLength(inputScopes);
+      } else {
+        static const InputScope inputScopes[] = { IS_URL };
+        scopes = &inputScopes[0];
+        arraySize = ArrayLength(inputScopes);
+      }
     } else if (aHTMLInputInputmode.EqualsLiteral("email")) {
       static const InputScope inputScopes[] = { IS_EMAIL_SMTPEMAILADDRESS };
       scopes = &inputScopes[0];
@@ -686,7 +803,7 @@ IMEHandler::NeedOnScreenKeyboard()
   // avoids cases where the keyboard would pop up "just" because e.g. a
   // web page chooses to focus a search field on the page, even when that
   // really isn't what the user is trying to do at that moment.
-  if (!InputContextAction::IsUserAction(sLastContextActionCause)) {
+  if (!InputContextAction::IsHandlingUserInput(sLastContextActionCause)) {
     return false;
   }
 
@@ -706,44 +823,13 @@ IMEHandler::NeedOnScreenKeyboard()
 
   // To determine whether a keyboard is present on the device, we do the
   // following:-
-  // 1. Check whether the device supports auto rotation. If it does then
-  //    it possibly supports flipping from laptop to slate mode. If it
-  //    does not support auto rotation, then we assume it is a desktop
-  //    or a normal laptop and assume that there is a keyboard.
+  // 1. If the platform role is that of a mobile or slate device, check the
+  //    system metric SM_CONVERTIBLESLATEMODE to see if it is being used
+  //    in slate mode. If it is, also check that the last input was a touch.
+  //    If all of this is true, then we should show the on-screen keyboard.
 
-  // 2. If the device supports auto rotation, then we get its platform role
-  //    and check the system metric SM_CONVERTIBLESLATEMODE to see if it is
-  //    being used in slate mode. If not then we return false here to ensure
-  //    that the OSK is not displayed.
-
-  // 3. If step 1 and 2 both confirm this *could* be a device with no usable
-  //    keyboard, we check whether the last input was touch-based. If so,
-  //    we return true immediately to get an on-screen keyboard.
-
-  // 4. If this was a mouse or (on-screen) keyboard event, we check if
+  // 2. If step 1 didn't determine we should show the keyboard, we check if
   //    this device has keyboards attached to it.
-
-  typedef BOOL (WINAPI* GetAutoRotationState)(PAR_STATE state);
-  GetAutoRotationState get_rotation_state =
-    reinterpret_cast<GetAutoRotationState>(::GetProcAddress(
-      ::GetModuleHandleW(L"user32.dll"), "GetAutoRotationState"));
-
-  if (get_rotation_state) {
-    AR_STATE auto_rotation_state = AR_ENABLED;
-    get_rotation_state(&auto_rotation_state);
-    // If there is no auto rotation sensor or rotation is not supported in
-    // the current configuration, then we can assume that this is a desktop
-    // or a traditional laptop.
-    if (auto_rotation_state & AR_NOSENSOR) {
-      Preferences::SetString(kOskDebugReason,
-                             L"IKPOS: Rotation sensor not found.");
-      return false;
-    } else if (auto_rotation_state & AR_NOT_SUPPORTED) {
-      Preferences::SetString(kOskDebugReason,
-                             L"IKPOS: Auto-rotation not supported.");
-      return false;
-    }
-  }
 
   // Check if the device is being used as a laptop or a tablet. This can be
   // checked by first checking the role of the device and then the
@@ -762,27 +848,16 @@ IMEHandler::NeedOnScreenKeyboard()
     }
   }
 
-  // If this is not a mobile or slate (tablet) device, we don't need to
-  // do anything here.
-  if (sPowerPlatformRole != PlatformRoleMobile &&
-      sPowerPlatformRole != PlatformRoleSlate) {
-    Preferences::SetString(kOskDebugReason, L"IKPOS: PlatformRole is neither Mobile nor Slate.");
-    return false;
-  }
-
-  // Likewise, if the tablet/mobile isn't in "slate" mode, we should bail:
-  if (::GetSystemMetrics(SM_CONVERTIBLESLATEMODE) != 0) {
-    Preferences::SetString(kOskDebugReason, L"IKPOS: ConvertibleSlateMode is non-zero");
-    return false;
-  }
-
-  // Before we check for a keyboard, we should check if the last input was touch,
-  // in which case we ignore whether or not a keyboard is present:
-  if (sLastContextActionCause == InputContextAction::CAUSE_TOUCH) {
-    Preferences::SetString(kOskDebugReason,
-      L"IKPOS: Used touch to focus control, ignoring keyboard presence");
+  // If this a mobile or slate (tablet) device, check if it is in slate mode.
+  // If the last input was touch, ignore whether or not a keyboard is present.
+  if ((sPowerPlatformRole == PlatformRoleMobile ||
+       sPowerPlatformRole == PlatformRoleSlate) &&
+      ::GetSystemMetrics(SM_CONVERTIBLESLATEMODE) == 0 &&
+      sLastContextActionCause == InputContextAction::CAUSE_TOUCH) {
+    Preferences::SetString(kOskDebugReason, L"IKPOS: Mobile/Slate Platform role, in slate mode with touch event.");
     return true;
   }
+
   return !IMEHandler::IsKeyboardPresentOnSlate();
 }
 
@@ -919,7 +994,7 @@ void
 IMEHandler::ShowOnScreenKeyboard()
 {
   nsAutoString cachedPath;
-  nsresult result = Preferences::GetString(kOskPathPrefName, &cachedPath);
+  nsresult result = Preferences::GetString(kOskPathPrefName, cachedPath);
   if (NS_FAILED(result) || cachedPath.IsEmpty()) {
     wchar_t path[MAX_PATH];
     // The path to TabTip.exe is defined at the following registry key.
@@ -964,8 +1039,8 @@ IMEHandler::ShowOnScreenKeyboard()
       } else {
         PWSTR path = nullptr;
         HRESULT hres =
-          WinUtils::SHGetKnownFolderPath(FOLDERID_ProgramFilesCommon, 0,
-                                         nullptr, &path);
+          SHGetKnownFolderPath(FOLDERID_ProgramFilesCommon, 0,
+                               nullptr, &path);
         if (FAILED(hres) || !path) {
           return;
         }

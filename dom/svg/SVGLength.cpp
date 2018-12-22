@@ -16,6 +16,8 @@
 
 namespace mozilla {
 
+using namespace mozilla;
+
 // Declare some helpers defined below:
 static void GetUnitString(nsAString& unit, uint16_t unitType);
 static uint16_t GetUnitTypeForString(const nsAString& unitStr);
@@ -23,11 +25,7 @@ static uint16_t GetUnitTypeForString(const nsAString& unitStr);
 void
 SVGLength::GetValueAsString(nsAString &aValue) const
 {
-  char16_t buf[24];
-  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-                            MOZ_UTF16("%g"),
-                            (double)mValue);
-  aValue.Assign(buf);
+  nsTextFormatter::ssprintf(aValue, u"%g", (double)mValue);
 
   nsAutoString unitString;
   GetUnitString(unitString, mUnit);
@@ -61,8 +59,8 @@ SVGLength::SetValueFromString(const nsAString &aString)
 inline static bool
 IsAbsoluteUnit(uint8_t aUnit)
 {
-  return aUnit >= nsIDOMSVGLength::SVG_LENGTHTYPE_CM &&
-         aUnit <= nsIDOMSVGLength::SVG_LENGTHTYPE_PC;
+  return aUnit >= SVGLength_Binding::SVG_LENGTHTYPE_CM &&
+         aUnit <= SVGLength_Binding::SVG_LENGTHTYPE_PC;
 }
 
 /**
@@ -73,8 +71,8 @@ IsAbsoluteUnit(uint8_t aUnit)
  *
  * Example usage: to find out how many centimeters there are per inch:
  *
- *   GetAbsUnitsPerAbsUnit(nsIDOMSVGLength::SVG_LENGTHTYPE_CM,
- *                         nsIDOMSVGLength::SVG_LENGTHTYPE_IN)
+ *   GetAbsUnitsPerAbsUnit(SVGLength_Binding::SVG_LENGTHTYPE_CM,
+ *                         SVGLength_Binding::SVG_LENGTHTYPE_IN)
  */
 inline static float GetAbsUnitsPerAbsUnit(uint8_t aUnits, uint8_t aPerUnit)
 {
@@ -106,18 +104,18 @@ SVGLength::GetValueInSpecifiedUnit(uint8_t aUnit,
   if (aUnit == mUnit) {
     return mValue;
   }
-  if ((aUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER &&
-       mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_PX) ||
-      (aUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_PX &&
-       mUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER)) {
+  if ((aUnit == SVGLength_Binding::SVG_LENGTHTYPE_NUMBER &&
+       mUnit == SVGLength_Binding::SVG_LENGTHTYPE_PX) ||
+      (aUnit == SVGLength_Binding::SVG_LENGTHTYPE_PX &&
+       mUnit == SVGLength_Binding::SVG_LENGTHTYPE_NUMBER)) {
     return mValue;
   }
   if (IsAbsoluteUnit(aUnit) && IsAbsoluteUnit(mUnit)) {
     return mValue * GetAbsUnitsPerAbsUnit(aUnit, mUnit);
   }
 
-  // Otherwise we do a two step convertion via user units. This can only
-  // succeed if aElement is non-null (although that's not sufficent to
+  // Otherwise we do a two step conversion via user units. This can only
+  // succeed if aElement is non-null (although that's not sufficient to
   // guarantee success).
 
   float userUnitsPerCurrentUnit = GetUserUnitsPerUnit(aElement, aAxis);
@@ -148,27 +146,27 @@ float
 SVGLength::GetUserUnitsPerUnit(const nsSVGElement *aElement, uint8_t aAxis) const
 {
   switch (mUnit) {
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER:
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_PX:
+    case SVGLength_Binding::SVG_LENGTHTYPE_NUMBER:
+    case SVGLength_Binding::SVG_LENGTHTYPE_PX:
       return 1.0f;
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_MM:
+    case SVGLength_Binding::SVG_LENGTHTYPE_MM:
       return INCHES_PER_MM_FLOAT * GetUserUnitsPerInch();
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_CM:
+    case SVGLength_Binding::SVG_LENGTHTYPE_CM:
       return INCHES_PER_CM_FLOAT * GetUserUnitsPerInch();
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_IN:
+    case SVGLength_Binding::SVG_LENGTHTYPE_IN:
       return GetUserUnitsPerInch();
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_PT:
+    case SVGLength_Binding::SVG_LENGTHTYPE_PT:
       return (1.0f/POINTS_PER_INCH_FLOAT) * GetUserUnitsPerInch();
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_PC:
+    case SVGLength_Binding::SVG_LENGTHTYPE_PC:
       return (12.0f/POINTS_PER_INCH_FLOAT) * GetUserUnitsPerInch();
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE:
+    case SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE:
       return GetUserUnitsPerPercent(aElement, aAxis);
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_EMS:
+    case SVGLength_Binding::SVG_LENGTHTYPE_EMS:
       return SVGContentUtils::GetFontSize(const_cast<nsSVGElement*>(aElement));
-    case nsIDOMSVGLength::SVG_LENGTHTYPE_EXS:
+    case SVGLength_Binding::SVG_LENGTHTYPE_EXS:
       return SVGContentUtils::GetFontXHeight(const_cast<nsSVGElement*>(aElement));
     default:
-      NS_NOTREACHED("Unknown unit type");
+      MOZ_ASSERT_UNREACHABLE("Unknown unit type");
       return std::numeric_limits<float>::quiet_NaN();
   }
 }
@@ -177,7 +175,7 @@ SVGLength::GetUserUnitsPerUnit(const nsSVGElement *aElement, uint8_t aAxis) cons
 SVGLength::GetUserUnitsPerPercent(const nsSVGElement *aElement, uint8_t aAxis)
 {
   if (aElement) {
-    dom::SVGSVGElement *viewportElement = aElement->GetCtx();
+    dom::SVGViewportElement *viewportElement = aElement->GetCtx();
     if (viewportElement) {
       return std::max(viewportElement->GetLength(aAxis) / 100.0f, 0.0f);
     }
@@ -187,8 +185,8 @@ SVGLength::GetUserUnitsPerPercent(const nsSVGElement *aElement, uint8_t aAxis)
 
 // Helpers:
 
-// These items must be at the same index as the nsIDOMSVGLength constants!
-static nsIAtom** const unitMap[] =
+// These items must be at the same index as the SVGLength constants!
+static nsStaticAtom** const unitMap[] =
 {
   nullptr, /* SVG_LENGTHTYPE_UNKNOWN */
   nullptr, /* SVG_LENGTHTYPE_NUMBER */
@@ -212,17 +210,17 @@ GetUnitString(nsAString& unit, uint16_t unitType)
     }
     return;
   }
-  NS_NOTREACHED("Unknown unit type"); // Someone's using an SVGLength with an invalid unit?
-  return;
+  MOZ_ASSERT_UNREACHABLE("Unknown unit type! Someone's using an SVGLength "
+                         "with an invalid unit?");
 }
 
 static uint16_t
 GetUnitTypeForString(const nsAString& unitStr)
 {
   if (unitStr.IsEmpty())
-    return nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER;
+    return SVGLength_Binding::SVG_LENGTHTYPE_NUMBER;
 
-  nsIAtom* unitAtom = NS_GetStaticAtom(unitStr);
+  nsAtom* unitAtom = NS_GetStaticAtom(unitStr);
 
   if (unitAtom) {
     for (uint32_t i = 1 ; i < ArrayLength(unitMap) ; i++) {
@@ -231,7 +229,7 @@ GetUnitTypeForString(const nsAString& unitStr)
       }
     }
   }
-  return nsIDOMSVGLength::SVG_LENGTHTYPE_UNKNOWN;
+  return SVGLength_Binding::SVG_LENGTHTYPE_UNKNOWN;
 }
 
 } // namespace mozilla

@@ -6,8 +6,13 @@
 
 #include "FileSnapshot.h"
 
+#include "IDBDatabase.h"
 #include "IDBFileHandle.h"
+#include "IDBMutableFile.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Mutex.h"
+#include "nsIAsyncInputStream.h"
+#include "nsICloneableInputStream.h"
 #include "nsIIPCSerializableInputStream.h"
 
 namespace mozilla {
@@ -19,7 +24,9 @@ using namespace mozilla::ipc;
 namespace {
 
 class StreamWrapper final
-  : public nsIInputStream
+  : public nsIAsyncInputStream
+  , public nsIInputStreamCallback
+  , public nsICloneableInputStream
   , public nsIIPCSerializableInputStream
 {
   class CloseRunnable;
@@ -29,13 +36,20 @@ class StreamWrapper final
   RefPtr<IDBFileHandle> mFileHandle;
   bool mFinished;
 
+  // This is needed to call OnInputStreamReady() with the correct inputStream.
+  // It is protected by mutex.
+  nsCOMPtr<nsIInputStreamCallback> mAsyncWaitCallback;
+
+  Mutex mMutex;
+
 public:
   StreamWrapper(nsIInputStream* aInputStream,
                 IDBFileHandle* aFileHandle)
-    : mOwningThread(NS_GetCurrentThread())
+    : mOwningThread(aFileHandle->GetMutableFile()->Database()->EventTarget())
     , mInputStream(aInputStream)
     , mFileHandle(aFileHandle)
     , mFinished(false)
+    , mMutex("StreamWrapper::mMutex")
   {
     AssertIsOnOwningThread();
     MOZ_ASSERT(aInputStream);
@@ -86,32 +100,61 @@ private:
       return;
     }
 
-    nsCOMPtr<nsIRunnable> destroyRunnable =
-      NS_NewNonOwningRunnableMethod(this, &StreamWrapper::Destroy);
+    RefPtr<Runnable> destroyRunnable =
+      NewNonOwningRunnableMethod("StreamWrapper::Destroy",
+                                 this,
+                                 &StreamWrapper::Destroy);
 
     MOZ_ALWAYS_SUCCEEDS(mOwningThread->Dispatch(destroyRunnable,
                                                 NS_DISPATCH_NORMAL));
   }
 
+  bool
+  IsCloneableInputStream() const
+  {
+    nsCOMPtr<nsICloneableInputStream> stream =
+      do_QueryInterface(mInputStream);
+    return !!stream;
+  }
+
+  bool
+  IsIPCSerializableInputStream() const
+  {
+    nsCOMPtr<nsIIPCSerializableInputStream> stream =
+      do_QueryInterface(mInputStream);
+    return !!stream;
+  }
+
+  bool
+  IsAsyncInputStream() const
+  {
+    nsCOMPtr<nsIAsyncInputStream> stream = do_QueryInterface(mInputStream);
+    return !!stream;
+  }
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIINPUTSTREAM
+  NS_DECL_NSIASYNCINPUTSTREAM
+  NS_DECL_NSIINPUTSTREAMCALLBACK
+  NS_DECL_NSICLONEABLEINPUTSTREAM
   NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 };
 
 class StreamWrapper::CloseRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   friend class StreamWrapper;
 
   RefPtr<StreamWrapper> mStreamWrapper;
 
 public:
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(CloseRunnable, Runnable)
 
 private:
   explicit
   CloseRunnable(StreamWrapper* aStreamWrapper)
-    : mStreamWrapper(aStreamWrapper)
+    : Runnable("StreamWrapper::CloseRunnable")
+    , mStreamWrapper(aStreamWrapper)
   { }
 
   ~CloseRunnable()
@@ -167,7 +210,7 @@ BlobImplSnapshot::CreateSlice(uint64_t aStart,
 }
 
 void
-BlobImplSnapshot::GetInternalStream(nsIInputStream** aStream, ErrorResult& aRv)
+BlobImplSnapshot::CreateInputStream(nsIInputStream** aStream, ErrorResult& aRv)
 {
   nsCOMPtr<EventTarget> et = do_QueryReferent(mFileHandle);
   RefPtr<IDBFileHandle> fileHandle = static_cast<IDBFileHandle*>(et.get());
@@ -177,7 +220,7 @@ BlobImplSnapshot::GetInternalStream(nsIInputStream** aStream, ErrorResult& aRv)
   }
 
   nsCOMPtr<nsIInputStream> stream;
-  mBlobImpl->GetInternalStream(getter_AddRefs(stream), aRv);
+  mBlobImpl->CreateInputStream(getter_AddRefs(stream), aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
@@ -208,15 +251,23 @@ StreamWrapper::~StreamWrapper()
 
 NS_IMPL_ADDREF(StreamWrapper)
 NS_IMPL_RELEASE_WITH_DESTROY(StreamWrapper, Destroy())
-NS_IMPL_QUERY_INTERFACE(StreamWrapper,
-                        nsIInputStream,
-                        nsIIPCSerializableInputStream)
+
+NS_INTERFACE_MAP_BEGIN(StreamWrapper)
+  NS_INTERFACE_MAP_ENTRY(nsIInputStream)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAsyncInputStream,
+                                     IsAsyncInputStream())
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIInputStreamCallback,
+                                     IsAsyncInputStream())
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsICloneableInputStream,
+                                     IsCloneableInputStream())
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIIPCSerializableInputStream,
+                                     IsIPCSerializableInputStream())
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInputStream)
+NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP
 StreamWrapper::Close()
 {
-  MOZ_ASSERT(!IsOnOwningThread());
-
   RefPtr<CloseRunnable> closeRunnable = new CloseRunnable(this);
 
   MOZ_ALWAYS_SUCCEEDS(mOwningThread->Dispatch(closeRunnable,
@@ -228,17 +279,12 @@ StreamWrapper::Close()
 NS_IMETHODIMP
 StreamWrapper::Available(uint64_t* _retval)
 {
-  // Can't assert here, this method is sometimes called on the owning thread
-  // (nsInputStreamChannel::OpenContentStream calls Available before setting
-  // the content length property).
-
   return mInputStream->Available(_retval);
 }
 
 NS_IMETHODIMP
 StreamWrapper::Read(char* aBuf, uint32_t aCount, uint32_t* _retval)
 {
-  MOZ_ASSERT(!IsOnOwningThread());
   return mInputStream->Read(aBuf, aCount, _retval);
 }
 
@@ -246,7 +292,6 @@ NS_IMETHODIMP
 StreamWrapper::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
                             uint32_t aCount, uint32_t* _retval)
 {
-  MOZ_ASSERT(!IsOnOwningThread());
   return mInputStream->ReadSegments(aWriter, aClosure, aCount, _retval);
 }
 
@@ -272,18 +317,113 @@ bool
 StreamWrapper::Deserialize(const InputStreamParams& aParams,
                            const FileDescriptorArray& aFileDescriptors)
 {
+  MOZ_CRASH("This method should never be called");
+  return false;
+}
+
+Maybe<uint64_t>
+StreamWrapper::ExpectedSerializedLength()
+{
   nsCOMPtr<nsIIPCSerializableInputStream> stream =
     do_QueryInterface(mInputStream);
 
   if (stream) {
-    return stream->Deserialize(aParams, aFileDescriptors);
+    return stream->ExpectedSerializedLength();
   }
-
-  return false;
+  return Nothing();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(StreamWrapper::CloseRunnable,
-                             nsRunnable)
+NS_IMETHODIMP
+StreamWrapper::CloseWithStatus(nsresult aStatus)
+{
+  nsCOMPtr<nsIAsyncInputStream> stream = do_QueryInterface(mInputStream);
+  if (!stream) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  nsresult rv = stream->CloseWithStatus(aStatus);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return Close();
+}
+
+NS_IMETHODIMP
+StreamWrapper::AsyncWait(nsIInputStreamCallback* aCallback,
+                         uint32_t aFlags,
+                         uint32_t aRequestedCount,
+                         nsIEventTarget* aEventTarget)
+{
+  nsCOMPtr<nsIAsyncInputStream> stream = do_QueryInterface(mInputStream);
+  if (!stream) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  nsCOMPtr<nsIInputStreamCallback> callback = aCallback ? this : nullptr;
+  {
+    MutexAutoLock lock(mMutex);
+
+    if (mAsyncWaitCallback && aCallback) {
+      return NS_ERROR_FAILURE;
+    }
+
+    mAsyncWaitCallback = aCallback;
+  }
+
+  return stream->AsyncWait(callback, aFlags, aRequestedCount, aEventTarget);
+}
+
+// nsIInputStreamCallback
+
+NS_IMETHODIMP
+StreamWrapper::OnInputStreamReady(nsIAsyncInputStream* aStream)
+{
+  nsCOMPtr<nsIAsyncInputStream> stream = do_QueryInterface(mInputStream);
+  if (!stream) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  nsCOMPtr<nsIInputStreamCallback> callback;
+  {
+    MutexAutoLock lock(mMutex);
+
+    // We have been canceled in the meanwhile.
+    if (!mAsyncWaitCallback) {
+      return NS_OK;
+    }
+
+    callback.swap(mAsyncWaitCallback);
+  }
+
+  MOZ_ASSERT(callback);
+  return callback->OnInputStreamReady(this);
+}
+
+// nsICloneableInputStream
+
+NS_IMETHODIMP
+StreamWrapper::GetCloneable(bool* aCloneable)
+{
+  nsCOMPtr<nsICloneableInputStream> stream = do_QueryInterface(mInputStream);
+  if (!stream) {
+    *aCloneable = false;
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  return stream->GetCloneable(aCloneable);
+}
+
+NS_IMETHODIMP
+StreamWrapper::Clone(nsIInputStream** aResult)
+{
+  nsCOMPtr<nsICloneableInputStream> stream = do_QueryInterface(mInputStream);
+  if (!stream) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+
+  return stream->Clone(aResult);
+}
 
 NS_IMETHODIMP
 StreamWrapper::

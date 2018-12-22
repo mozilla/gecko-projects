@@ -56,16 +56,15 @@ class txLoadedDocumentsHash : public nsTHashtable<txLoadedDocumentEntry>
 {
 public:
     txLoadedDocumentsHash()
-        : nsTHashtable<txLoadedDocumentEntry>(4),
-          mSourceDocument(nullptr)
+        : nsTHashtable<txLoadedDocumentEntry>(4)
     {
     }
     ~txLoadedDocumentsHash();
-    void init(txXPathNode* aSourceDocument);
+    MOZ_MUST_USE nsresult init(const txXPathNode& aSource);
 
 private:
     friend class txExecutionState;
-    txXPathNode* mSourceDocument;
+    nsAutoPtr<txXPathNode> mSourceDocument;
 };
 
 
@@ -87,23 +86,31 @@ public:
     public:
         txStylesheet::ImportFrame* mFrame;
         int32_t mModeNsId;
-        nsCOMPtr<nsIAtom> mModeLocalName;
-        txVariableMap* mParams;
+        RefPtr<nsAtom> mModeLocalName;
+        RefPtr<txParameterMap> mParams;
     };
 
     // Stack functions
     nsresult pushEvalContext(txIEvalContext* aContext);
     txIEvalContext* popEvalContext();
+
+    /**
+     * Helper that deletes all entries before |aContext| and then
+     * pops it off the stack. The caller must delete |aContext| if
+     * desired.
+     */
+    void popAndDeleteEvalContextUntil(txIEvalContext* aContext);
+
     nsresult pushBool(bool aBool);
     bool popBool();
     nsresult pushResultHandler(txAXMLEventHandler* aHandler);
     txAXMLEventHandler* popResultHandler();
     void pushTemplateRule(txStylesheet::ImportFrame* aFrame,
                           const txExpandedName& aMode,
-                          txVariableMap* aParams);
+                          txParameterMap* aParams);
     void popTemplateRule();
-    nsresult pushParamMap(txVariableMap* aParams);
-    txVariableMap* popParamMap();
+    void pushParamMap(txParameterMap* aParams);
+    already_AddRefed<txParameterMap> popParamMap();
 
     // state-getting functions
     txIEvalContext* getEvalContext();
@@ -137,7 +144,7 @@ public:
     nsAutoPtr<txAXMLEventHandler> mObsoleteHandler;
     txAOutputHandlerFactory* mOutputHandlerFactory;
 
-    nsAutoPtr<txVariableMap> mTemplateParams;
+    RefPtr<txParameterMap> mTemplateParams;
 
     RefPtr<txStylesheet> mStylesheet;
 
@@ -147,7 +154,7 @@ private:
     txStack mEvalContextStack;
     nsTArray<bool> mBoolStack;
     txStack mResultHandlerStack;
-    txStack mParamStack;
+    nsTArray<RefPtr<txParameterMap>> mParamStack;
     txInstruction* mNextInstruction;
     txVariableMap* mLocalVariables;
     txVariableMap mGlobalVariableValues;

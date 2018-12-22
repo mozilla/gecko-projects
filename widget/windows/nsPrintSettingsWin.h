@@ -46,9 +46,10 @@ public:
 
 protected:
   void CopyDevMode(DEVMODEW* aInDevMode, DEVMODEW *& aOutDevMode);
+  void InitUnwriteableMargin(HDC aHdc);
 
-  wchar_t*      mDeviceName;
-  wchar_t*      mDriverName;
+  nsString      mDeviceName;
+  nsString      mDriverName;
   LPDEVMODEW mDevMode;
   double mPrintableWidthInInches = 0l;
   double mPrintableHeightInInches = 0l;

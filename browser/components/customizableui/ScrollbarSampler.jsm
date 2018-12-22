@@ -4,39 +4,32 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ScrollbarSampler"];
+var EXPORTED_SYMBOLS = ["ScrollbarSampler"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var gSystemScrollbarWidth = null;
 
-this.ScrollbarSampler = {
-  getSystemScrollbarWidth: function() {
-    let deferred = Promise.defer();
-
+var ScrollbarSampler = {
+  getSystemScrollbarWidth() {
     if (gSystemScrollbarWidth !== null) {
-      deferred.resolve(gSystemScrollbarWidth);
-      return deferred.promise;
+      return Promise.resolve(gSystemScrollbarWidth);
     }
 
-    this._sampleSystemScrollbarWidth().then(function(systemScrollbarWidth) {
-      gSystemScrollbarWidth = systemScrollbarWidth;
-      deferred.resolve(gSystemScrollbarWidth);
+    return new Promise(resolve => {
+      this._sampleSystemScrollbarWidth().then(function(systemScrollbarWidth) {
+        gSystemScrollbarWidth = systemScrollbarWidth;
+        resolve(gSystemScrollbarWidth);
+      });
     });
-    return deferred.promise;
   },
 
-  resetSystemScrollbarWidth: function() {
+  resetSystemScrollbarWidth() {
     gSystemScrollbarWidth = null;
   },
 
-  _sampleSystemScrollbarWidth: function() {
-    let deferred = Promise.defer();
+  _sampleSystemScrollbarWidth() {
     let hwin = Services.appShell.hiddenDOMWindow;
     let hdoc = hwin.document.documentElement;
     let iframe = hwin.document.createElementNS("http://www.w3.org/1999/xhtml",
@@ -48,23 +41,22 @@ this.ScrollbarSampler = {
     let utils = cwindow.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDOMWindowUtils);
 
-    cwindow.addEventListener("load", function onLoad(aEvent) {
-      cwindow.removeEventListener("load", onLoad);
-      let sbWidth = {};
-      try {
-        utils.getScrollbarSize(true, sbWidth, {});
-      } catch(e) {
-        Cu.reportError("Could not sample scrollbar size: " + e + " -- " +
-                       e.stack);
-        sbWidth.value = 0;
-      }
-      // Minimum width of 10 so that we have enough padding:
-      sbWidth.value = Math.max(sbWidth.value, 10);
-      deferred.resolve(sbWidth.value);
-      iframe.remove();
+    return new Promise(resolve => {
+      cwindow.addEventListener("load", function(aEvent) {
+        let sbWidth = {};
+        try {
+          utils.getScrollbarSize(true, sbWidth, {});
+        } catch (e) {
+          Cu.reportError("Could not sample scrollbar size: " + e + " -- " +
+                         e.stack);
+          sbWidth.value = 0;
+        }
+        // Minimum width of 10 so that we have enough padding:
+        sbWidth.value = Math.max(sbWidth.value, 10);
+        resolve(sbWidth.value);
+        iframe.remove();
+      }, {once: true});
     });
-
-    return deferred.promise;
   }
 };
 Object.freeze(this.ScrollbarSampler);

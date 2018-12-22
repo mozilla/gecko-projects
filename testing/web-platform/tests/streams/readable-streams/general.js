@@ -6,10 +6,14 @@ if (self.importScripts) {
   self.importScripts('/resources/testharness.js');
 }
 
+const error1 = new Error('error1');
+error1.name = 'error1';
+
 test(() => {
 
   new ReadableStream(); // ReadableStream constructed with no parameters
   new ReadableStream({ }); // ReadableStream constructed with an empty object as parameter
+  new ReadableStream({ type: undefined }); // ReadableStream constructed with undefined type
   new ReadableStream(undefined); // ReadableStream constructed with undefined as parameter
 
   let x;
@@ -25,6 +29,19 @@ test(() => {
 
 test(() => {
 
+  assert_throws(new RangeError(), () => new ReadableStream({ type: null }),
+    'constructor should throw when the type is null');
+  assert_throws(new RangeError(), () => new ReadableStream({ type: '' }),
+    'constructor should throw when the type is empty string');
+  assert_throws(new RangeError(), () => new ReadableStream({ type: 'asdf' }),
+    'constructor should throw when the type is asdf');
+  assert_throws(error1, () => new ReadableStream({ type: { get toString() {throw error1;} } }), 'constructor should throw when ToString() throws');
+  assert_throws(error1, () => new ReadableStream({ type: { toString() {throw error1;} } }), 'constructor should throw when ToString() throws');
+
+}, 'ReadableStream can\'t be constructed with an invalid type');
+
+test(() => {
+
   const methods = ['cancel', 'constructor', 'getReader', 'pipeThrough', 'pipeTo', 'tee'];
   const properties = methods.concat(['locked']).sort();
 
@@ -33,12 +50,14 @@ test(() => {
 
   assert_array_equals(Object.getOwnPropertyNames(proto).sort(), properties, 'should have all the correct methods');
 
-  for (let m of methods) {
+  for (const m of methods) {
     const propDesc = Object.getOwnPropertyDescriptor(proto, m);
     assert_false(propDesc.enumerable, 'method should be non-enumerable');
     assert_true(propDesc.configurable, 'method should be configurable');
     assert_true(propDesc.writable, 'method should be writable');
     assert_equals(typeof rs[m], 'function', 'method should be a function');
+    const expectedName = m === 'constructor' ? 'ReadableStream' : m;
+    assert_equals(rs[m].name, expectedName, 'method should have the correct name');
   }
 
   const lockedPropDesc = Object.getOwnPropertyDescriptor(proto, 'locked');
@@ -67,15 +86,15 @@ test(() => {
 
 test(() => {
 
-  new ReadableStream({ cancel: '2' });
+  assert_throws(new TypeError(), () => new ReadableStream({ cancel: '2' }), 'constructor should throw');
 
-}, 'ReadableStream constructor can get initial garbage as cancel argument');
+}, 'ReadableStream constructor will not tolerate initial garbage as cancel argument');
 
 test(() => {
 
-  new ReadableStream({ pull: { } });
+  assert_throws(new TypeError(), () => new ReadableStream({ pull: { } }), 'constructor should throw');
 
-}, 'ReadableStream constructor can get initial garbage as pull argument');
+}, 'ReadableStream constructor will not tolerate initial garbage as pull argument');
 
 test(() => {
 
@@ -92,12 +111,14 @@ test(() => {
       assert_array_equals(Object.getOwnPropertyNames(proto).sort(), properties,
         'the controller should have the right properties');
 
-      for (let m of methods) {
+      for (const m of methods) {
         const propDesc = Object.getOwnPropertyDescriptor(proto, m);
         assert_equals(typeof controller[m], 'function', `should have a ${m} method`);
         assert_false(propDesc.enumerable, m + ' should be non-enumerable');
         assert_true(propDesc.configurable, m + ' should be configurable');
         assert_true(propDesc.writable, m + ' should be writable');
+        const expectedName = m === 'constructor' ? 'ReadableStreamDefaultController' : m;
+        assert_equals(controller[m].name, expectedName, 'method should have the correct name');
       }
 
       const desiredSizePropDesc = Object.getOwnPropertyDescriptor(proto, 'desiredSize');
@@ -108,7 +129,7 @@ test(() => {
       assert_true(desiredSizePropDesc.configurable, 'desiredSize should be configurable');
 
       assert_equals(controller.close.length, 0, 'close should have no parameters');
-      assert_equals(controller.constructor.length, 1, 'constructor should have 1 parameter');
+      assert_equals(controller.constructor.length, 0, 'constructor should have no parameters');
       assert_equals(controller.enqueue.length, 1, 'enqueue should have 1 parameter');
       assert_equals(controller.error.length, 1, 'error should have 1 parameter');
 
@@ -144,6 +165,13 @@ test(() => {
   assert_true(startCalled);
 
 }, 'ReadableStream start controller parameter should be extensible');
+
+test(() => {
+  (new ReadableStream()).getReader(undefined);
+  (new ReadableStream()).getReader({});
+  (new ReadableStream()).getReader({ mode: undefined, notmode: 'ignored' });
+  assert_throws(new RangeError(), () => (new ReadableStream()).getReader({ mode: 'potato' }));
+}, 'default ReadableStream getReader() should only accept mode:undefined');
 
 promise_test(() => {
 
@@ -183,7 +211,9 @@ promise_test(() => {
   const theError = new Error('rejected!');
   const rs = new ReadableStream({
     start() {
-      return delay(1).then(() => { throw theError; });
+      return delay(1).then(() => {
+        throw theError;
+      });
     }
   });
 
@@ -205,7 +235,7 @@ promise_test(() => {
 
   const rs = new ReadableStream({
     start(c) {
-      for (let o of objects) {
+      for (const o of objects) {
         c.enqueue(o);
       }
       c.close();
@@ -281,8 +311,12 @@ promise_test(() => {
 promise_test(() => {
 
   let pullCount = 0;
+  const startPromise = Promise.resolve();
 
   const rs = new ReadableStream({
+    start() {
+      return startPromise;
+    },
     pull(c) {
       // Don't enqueue immediately after start. We want the stream to be empty when we call .read() on it.
       if (pullCount > 0) {
@@ -292,9 +326,9 @@ promise_test(() => {
     }
   });
 
-  return delay(1).then(() => {
+  return startPromise.then(() => {
     assert_equals(pullCount, 1, 'pull should be called once start finishes');
-
+  }).then(() => {
     const reader = rs.getReader();
     const read = reader.read();
     assert_equals(pullCount, 2, 'pull should be called when read is called');
@@ -608,6 +642,36 @@ promise_test(() => {
 
 }, 'ReadableStream pull should be able to close a stream.');
 
+promise_test(t => {
+
+  const controllerError = { name: 'controller error' };
+
+  const rs = new ReadableStream({
+    pull(c) {
+      c.error(controllerError);
+    }
+  });
+
+  return promise_rejects(t, controllerError, rs.getReader().closed);
+
+}, 'ReadableStream pull should be able to error a stream.');
+
+promise_test(t => {
+
+  const controllerError = { name: 'controller error' };
+  const thrownError = { name: 'thrown error' };
+
+  const rs = new ReadableStream({
+    pull(c) {
+      c.error(controllerError);
+      throw thrownError;
+    }
+  });
+
+  return promise_rejects(t, controllerError, rs.getReader().closed);
+
+}, 'ReadableStream pull should be able to error a stream and throw.');
+
 test(() => {
 
   let startCalled = false;
@@ -642,24 +706,6 @@ test(() => {
   assert_true(startCalled);
 
 }, 'ReadableStream: enqueue should throw when the stream is closed');
-
-test(() => {
-
-  let startCalled = false;
-  const expectedError = new Error('i am sad');
-
-  new ReadableStream({
-    start(c) {
-      c.error(expectedError);
-
-      assert_throws(expectedError, () => c.enqueue('a'), 'enqueue after error should throw that error');
-      startCalled = true;
-    }
-  });
-
-  assert_true(startCalled);
-
-}, 'ReadableStream: enqueue should throw the stored error when the stream is errored');
 
 promise_test(() => {
 
@@ -703,6 +749,30 @@ promise_test(() => {
   });
 
 }, 'ReadableStream: should call underlying source methods as methods');
+
+test(() => {
+  new ReadableStream({
+    start(c) {
+      assert_equals(c.desiredSize, 10, 'desiredSize must start at highWaterMark');
+      c.close();
+      assert_equals(c.desiredSize, 0, 'after closing, desiredSize must be 0');
+    }
+  }, {
+    highWaterMark: 10
+  });
+}, 'ReadableStream: desiredSize when closed');
+
+test(() => {
+  new ReadableStream({
+    start(c) {
+      assert_equals(c.desiredSize, 10, 'desiredSize must start at highWaterMark');
+      c.error();
+      assert_equals(c.desiredSize, null, 'after erroring, desiredSize must be null');
+    }
+  }, {
+    highWaterMark: 10
+  });
+}, 'ReadableStream: desiredSize when errored');
 
 test(() => {
 
@@ -799,7 +869,7 @@ promise_test(t => {
 
   return readableStreamToArray(rs).then(chunks => {
     assert_equals(chunks.length, 8, '8 chunks should be read');
-    for (let chunk of chunks) {
+    for (const chunk of chunks) {
       assert_equals(chunk.length, 128, 'chunk should have 128 bytes');
     }
   });

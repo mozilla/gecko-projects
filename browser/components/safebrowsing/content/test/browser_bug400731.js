@@ -1,5 +1,7 @@
 /* Check presence of the "Ignore this warning" button */
 
+/* eslint-env mozilla/frame-script */
+
 function onDOMContentLoaded(callback) {
   function complete({ data }) {
     mm.removeMessageListener("Test:DOMContentLoaded", complete);
@@ -10,10 +12,10 @@ function onDOMContentLoaded(callback) {
   mm.addMessageListener("Test:DOMContentLoaded", complete);
 
   function contentScript() {
-    let listener = function () {
+    let listener = function() {
       removeEventListener("DOMContentLoaded", listener);
 
-      let button = content.document.getElementById("ignoreWarningButton");
+      let button = content.document.getElementById("ignore_warning_link");
 
       sendAsyncMessage("Test:DOMContentLoaded", { buttonPresent: !!button });
     };
@@ -25,12 +27,14 @@ function onDOMContentLoaded(callback) {
 function test() {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab("http://www.itisatrap.org/firefox/its-an-attack.html");
-  onDOMContentLoaded(testMalware);
+  waitForDBInit(() => {
+    gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, "http://www.itisatrap.org/firefox/its-an-attack.html");
+    onDOMContentLoaded(testMalware);
+  });
 }
 
 function testMalware(data) {
-  ok(data.buttonPresent, "Ignore warning button should be present for malware");
+  ok(data.buttonPresent, "Ignore warning link should be present for malware");
 
   Services.prefs.setBoolPref("browser.safebrowsing.allowOverride", false);
 
@@ -41,7 +45,7 @@ function testMalware(data) {
 
 function testUnwanted(data) {
   // Confirm that "Ignore this warning" is visible - bug 422410
-  ok(!data.buttonPresent, "Ignore warning button should be missing for unwanted software");
+  ok(!data.buttonPresent, "Ignore warning link should be missing for unwanted software");
 
   Services.prefs.setBoolPref("browser.safebrowsing.allowOverride", true);
 
@@ -51,7 +55,7 @@ function testUnwanted(data) {
 }
 
 function testPhishing(data) {
-  ok(data.buttonPresent, "Ignore warning button should be present for phishing");
+  ok(data.buttonPresent, "Ignore warning link should be present for phishing");
 
   gBrowser.removeCurrentTab();
   finish();

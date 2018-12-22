@@ -15,14 +15,13 @@ NS_IMPL_RELEASE(nsSystemAlertsService)
 NS_INTERFACE_MAP_BEGIN(nsSystemAlertsService)
    NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIAlertsService)
    NS_INTERFACE_MAP_ENTRY(nsIAlertsService)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
 nsSystemAlertsService::nsSystemAlertsService()
-{
-}
+= default;
 
 nsSystemAlertsService::~nsSystemAlertsService()
-{}
+= default;
 
 nsresult
 nsSystemAlertsService::Init()
@@ -30,7 +29,7 @@ nsSystemAlertsService::Init()
   return NS_OK;
 }
 
-NS_IMETHODIMP nsSystemAlertsService::ShowAlertNotification(const nsAString & aImageUrl, const nsAString & aAlertTitle, 
+NS_IMETHODIMP nsSystemAlertsService::ShowAlertNotification(const nsAString & aImageUrl, const nsAString & aAlertTitle,
                                                            const nsAString & aAlertText, bool aAlertTextClickable,
                                                            const nsAString & aAlertCookie,
                                                            nsIObserver * aAlertListener,
@@ -39,7 +38,8 @@ NS_IMETHODIMP nsSystemAlertsService::ShowAlertNotification(const nsAString & aIm
                                                            const nsAString & aLang,
                                                            const nsAString & aData,
                                                            nsIPrincipal * aPrincipal,
-                                                           bool aInPrivateBrowsing)
+                                                           bool aInPrivateBrowsing,
+                                                           bool aRequireInteraction)
 {
   nsCOMPtr<nsIAlertNotification> alert =
     do_CreateInstance(ALERT_NOTIFICATION_CONTRACTID);
@@ -47,9 +47,17 @@ NS_IMETHODIMP nsSystemAlertsService::ShowAlertNotification(const nsAString & aIm
   nsresult rv = alert->Init(aAlertName, aImageUrl, aAlertTitle,
                             aAlertText, aAlertTextClickable,
                             aAlertCookie, aBidi, aLang, aData,
-                            aPrincipal, aInPrivateBrowsing);
+                            aPrincipal, aInPrivateBrowsing,
+                            aRequireInteraction);
   NS_ENSURE_SUCCESS(rv, rv);
   return ShowAlert(alert, aAlertListener);
+}
+
+NS_IMETHODIMP nsSystemAlertsService::ShowPersistentNotification(const nsAString& aPersistentData,
+                                                                nsIAlertNotification* aAlert,
+                                                                nsIObserver* aAlertListener)
+{
+  return ShowAlert(aAlert, aAlertListener);
 }
 
 NS_IMETHODIMP nsSystemAlertsService::ShowAlert(nsIAlertNotification* aAlert,

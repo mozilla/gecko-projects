@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-%include ../shared.inc
 %include ../../shared/syncedtabs/sidebar.inc.css
 
 /* These styles are intended to mimic XUL trees and the XUL search box. */
 
-html {
+.content-container {
+  -moz-appearance: -moz-mac-source-list;
+  -moz-font-smoothing-background-color: -moz-mac-source-list;
 }
 
 .item {
@@ -27,68 +28,44 @@ html {
 }
 
 .item.selected > .item-title-container {
-  background: @sidebarItemBackground@;
-  border-top: @sidebarItemBorderTop@;
-  border-bottom: @sidebarItemBorderBottom@;
+  -moz-appearance: -moz-mac-source-list-selection;
+  -moz-font-smoothing-background-color: -moz-mac-source-list-selection;
 }
 
 .item.selected:focus > .item-title-container {
-  background: @sidebarItemFocusedBackground@;
-  border-top: @sidebarItemFocusedBorderTop@;
-  border-bottom: @sidebarItemFocusedBorderBottom@;
+  -moz-appearance: -moz-mac-active-source-list-selection;
+  -moz-font-smoothing-background-color: -moz-mac-active-source-list-selection;
 }
 
 .item.client .item-twisty-container {
-  width: 16px;
+  min-width: 16px;
   height: 16px;
-  background-image: url("chrome://global/skin/tree/arrow-disclosure.svg#arrow-disclosure-expanded");
+  background-image: url("chrome://global/skin/tree/arrow-expanded.svg");
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 1;
 }
 
 .item.client.closed .item-twisty-container {
-  background-image: url("chrome://global/skin/tree/arrow-disclosure.svg#arrow-disclosure-collapsed");
+  background-image: url("chrome://global/skin/tree/arrow-collapsed.svg");
+}
+
+.item.client.closed .item-twisty-container:dir(rtl) {
+  background-image: url("chrome://global/skin/tree/arrow-collapsed-rtl.svg");
 }
 
 .item.client.selected:focus .item-twisty-container {
-  background-image: url("chrome://global/skin/tree/arrow-disclosure.svg#arrow-disclosure-expanded-inverted");
+  fill-opacity: 1;
 }
 
-.item.client.selected.closed:focus .item-twisty-container {
-  background-image: url("chrome://global/skin/tree/arrow-disclosure.svg#arrow-disclosure-collapsed-inverted");
+@media (-moz-mac-yosemite-theme: 0) {
+  .item.client.selected .item-twisty-container {
+    fill-opacity: 1;
+  }
 }
+
 
 @media (-moz-mac-yosemite-theme) {
-  .item.selected > .item-title-container {
-    font-weight: 500;
-  }
-
-  .item.selected > .item-title-container {
-    background-image: none;
-    background-color: @sidebarItemBackgroundYosemite@;
-    border-top: none;
-    border-bottom: none;
-  }
-
-  .item.selected:focus > .item-title-container {
-    background-image: none;
-    background-color: @sidebarItemFocusedBackgroundYosemite@;
-    border-top: none;
-    border-bottom: none;
-  }
-
-  .item.selected:-moz-system-metric(mac-graphite-theme) > .item-title-container {
-    background-image: none;
-    background-color: @sidebarItemGraphiteBackgroundYosemite@;
-    border-top: none;
-    border-bottom: none;
-  }
-
-  .item.selected:focus:-moz-system-metric(mac-graphite-theme) > .item-title-container {
-    background-image: none;
-    background-color: @sidebarItemGraphiteFocusedBackgroundYosemite@;
-    border-top: none;
-    border-bottom: none;
-  }
-
   .item.selected > .item-title-container {
     color: -moz-dialogtext;
     font-weight: 500;
@@ -99,9 +76,8 @@ html {
   }
 }
 
-
 .sidebar-search-container {
-  border-bottom: 1px solid #bdbdbd;
+  padding: 4px;
 }
 
 .search-box {
@@ -109,24 +85,13 @@ html {
   padding: 1px;
   font-size: 12px;
   cursor: text;
-  margin: 4px 8px 10px;
-  border-width: 3px;
-  border-style: solid;
-  border-color: -moz-use-text-color;
-  border-image: none;
-  -moz-border-top-colors: transparent #888 #000;
-  -moz-border-right-colors: transparent #FFF #000;
-  -moz-border-bottom-colors: transparent #FFF #000;
-  -moz-border-left-colors: transparent #888 #000;
-  border-top-right-radius: 2px;
-  border-bottom-left-radius: 2px;
-  background-color: #FFF;
-  color: #000;
+  margin: 4px;
+  color: -moz-fieldText;
   -moz-user-select: text;
   text-shadow: none;
 }
 
-.search-box.compact > .textbox-input-box > .textbox-search-icons > .textbox-search-clear {
+.search-box > .textbox-input-box > .textbox-search-icons > .textbox-search-clear {
   background-image: url(chrome://global/skin/icons/searchfield-cancel.svg);
   background-repeat: no-repeat;
   background-size: 11px 11px;
@@ -134,24 +99,6 @@ html {
   height: 11px;
 }
 
-.search-box.compact > .textbox-input-box > .textbox-search-icons > .textbox-search-icon {
-  display: none;
-}
-
-.search-box[focused="true"] {
-  -moz-border-top-colors: -moz-mac-focusring -moz-mac-focusring #000000;
-  -moz-border-right-colors: -moz-mac-focusring -moz-mac-focusring #000000;
-  -moz-border-bottom-colors: -moz-mac-focusring -moz-mac-focusring #000000;
-  -moz-border-left-colors: -moz-mac-focusring -moz-mac-focusring #000000;
-}
-
-.search-box.compact {
-    padding: 0px;
-    /* font size is in px because the XUL it was copied from uses px */
-    font-size: 11px;
-}
-
-.textbox-search-clear,
-.textbox-search-icon {
+.textbox-search-clear {
   margin-top: 1px;
 }

@@ -20,11 +20,9 @@ var phases = { "phase1": "profile1",
 var bookmarks_initial = {
   "menu": [
     { uri: "http://www.google.com",
-      loadInSidebar: true,
       tags: ["google", "computers", "internet", "www"],
       changes: {
         title: "Google",
-        loadInSidebar: false,
         tags: ["google", "computers", "misc"],
       }
     },
@@ -32,7 +30,7 @@ var bookmarks_initial = {
       title: "Bugzilla",
       keyword: "bz",
       changes: {
-        keyword: "bugzilla" 
+        keyword: "bugzilla"
       }
     },
     { folder: "foldera" },
@@ -92,7 +90,6 @@ var bookmarks_after_first_modify = {
     },
     { uri: "http://www.google.com",
       title: "Google",
-      loadInSidebar: false,
       tags: [ "google", "computers", "misc"]
     },
     { uri: "http://bugzilla.mozilla.org/show_bug.cgi?id=%s",
@@ -137,7 +134,6 @@ var bookmarks_to_delete = {
   "menu": [
     { uri: "http://www.google.com",
       title: "Google",
-      loadInSidebar: false,
       tags: [ "google", "computers", "misc" ]
     }
   ]
@@ -374,14 +370,14 @@ var passwords_after_second_modify = [
  * Test phases
  */
 
-Phase('phase1', [
+Phase("phase1", [
   [Bookmarks.add, bookmarks_initial],
   [Passwords.add, passwords_initial],
   [History.add, history_initial],
   [Sync],
 ]);
 
-Phase('phase2', [
+Phase("phase2", [
   [Sync],
   [Bookmarks.verify, bookmarks_initial],
   [Passwords.verify, passwords_initial],
@@ -396,7 +392,7 @@ Phase('phase2', [
   [Sync],
 ]);
 
-Phase('phase3', [
+Phase("phase3", [
   [Sync],
   [Bookmarks.verify, bookmarks_after_first_modify],
   [Passwords.verify, passwords_after_first_modify],
@@ -412,7 +408,7 @@ Phase('phase3', [
   [Sync],
 ]);
 
-Phase('phase4', [
+Phase("phase4", [
   [Sync],
   [Bookmarks.verify, bookmarks_after_second_modify],
   [Passwords.verify, passwords_after_second_modify],
@@ -420,5 +416,3 @@ Phase('phase4', [
   [Passwords.verifyNot, passwords_absent],
   [History.verifyNot, history_absent],
 ]);
-
-

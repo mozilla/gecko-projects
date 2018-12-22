@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
-import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.PrivateTab;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.db.BrowserContract;
@@ -69,6 +68,8 @@ public class testFilterOpenTab extends ContentProviderTest {
     }
 
     public void testFilterOpenTab() throws Exception {
+        blockForGeckoReady();
+
         for (int i = 0; i < mTests.size(); i++) {
             Runnable test = mTests.get(i);
 

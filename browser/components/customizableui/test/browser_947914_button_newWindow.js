@@ -4,28 +4,32 @@
 
 "use strict";
 
-add_task(function*() {
+add_task(async function() {
   info("Check new window button existence and functionality");
-  yield PanelUI.show();
+  CustomizableUI.addWidgetToArea("new-window-button", CustomizableUI.AREA_FIXED_OVERFLOW_PANEL);
+  registerCleanupFunction(() => CustomizableUI.reset());
+
+  await waitForOverflowButtonShown();
+
+  await document.getElementById("nav-bar").overflowable.show();
   info("Menu panel was opened");
 
   let windowWasHandled = false;
   let newWindow = null;
 
   let observerWindowOpened = {
-    observe: function(aSubject, aTopic, aData) {
+    observe(aSubject, aTopic, aData) {
       if (aTopic == "domwindowopened") {
-        newWindow = aSubject.QueryInterface(Components.interfaces.nsIDOMWindow);
-        newWindow.addEventListener("load", function newWindowHandler() {
-          newWindow.removeEventListener("load", newWindowHandler, false);
+        newWindow = aSubject.QueryInterface(Ci.nsIDOMWindow);
+        newWindow.addEventListener("load", function() {
           is(newWindow.location.href, "chrome://browser/content/browser.xul",
              "A new browser window was opened");
           ok(!PrivateBrowsingUtils.isWindowPrivate(newWindow), "Window is not private");
           windowWasHandled = true;
-        }, false);
+        }, {once: true});
       }
     }
-  }
+  };
 
   Services.ww.registerNotification(observerWindowOpened);
 
@@ -34,14 +38,12 @@ add_task(function*() {
   newWindowButton.click();
 
   try {
-    yield waitForCondition(() => windowWasHandled);
-    yield promiseWindowClosed(newWindow);
+    await waitForCondition(() => windowWasHandled);
+    await promiseWindowClosed(newWindow);
     info("The new window was closed");
-  }
-  catch(e) {
+  } catch (e) {
     ok(false, "The new browser window was not properly handled");
-  }
-  finally {
+  } finally {
     Services.ww.unregisterNotification(observerWindowOpened);
   }
 });

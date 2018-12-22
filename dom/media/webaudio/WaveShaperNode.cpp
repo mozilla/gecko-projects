@@ -6,6 +6,7 @@
 
 #include "WaveShaperNode.h"
 #include "mozilla/dom/WaveShaperNodeBinding.h"
+#include "AlignmentUtils.h"
 #include "AudioNode.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
@@ -18,19 +19,16 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(WaveShaperNode)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WaveShaperNode, AudioNode)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-  tmp->ClearCurve();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WaveShaperNode, AudioNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(WaveShaperNode)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCurve)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(WaveShaperNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WaveShaperNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
 NS_IMPL_ADDREF_INHERITED(WaveShaperNode, AudioNode)
@@ -43,7 +41,7 @@ static uint32_t ValueOf(OverSampleType aType)
   case OverSampleType::_2x:  return 2;
   case OverSampleType::_4x:  return 4;
   default:
-    NS_NOTREACHED("We should never reach here");
+    MOZ_ASSERT_UNREACHABLE("We should never reach here");
     return 1;
   }
 }
@@ -221,25 +219,48 @@ public:
                     bool* aFinished) override
   {
     uint32_t channelCount = aInput.ChannelCount();
-    if (!mCurve.Length() || !channelCount) {
-      // Optimize the case where we don't have a curve buffer,
-      // or the input is null.
+    if (!mCurve.Length()) {
+      // Optimize the case where we don't have a curve buffer
       *aOutput = aInput;
       return;
+    }
+
+    // If the input is null, check to see if non-null output will be produced
+    bool nullInput = false;
+    if (channelCount == 0) {
+      float index = (mCurve.Length() - 1) * 0.5;
+      uint32_t indexLower = index;
+      uint32_t indexHigher = indexLower + 1;
+      float interpolationFactor = index - indexLower;
+      if ((1.0f - interpolationFactor) * mCurve[indexLower] +
+          interpolationFactor * mCurve[indexHigher] == 0.0) {
+        *aOutput = aInput;
+        return;
+      } else {
+        nullInput = true;
+        channelCount = 1;
+      }
     }
 
     aOutput->AllocateChannels(channelCount);
     for (uint32_t i = 0; i < channelCount; ++i) {
       const float* inputSamples;
-      float scaledInput[WEBAUDIO_BLOCK_SIZE];
-      if (aInput.mVolume != 1.0f) {
-        AudioBlockCopyChannelWithScale(
-            static_cast<const float*>(aInput.mChannelData[i]),
-                                      aInput.mVolume,
-                                      scaledInput);
-        inputSamples = scaledInput;
+      float scaledInput[WEBAUDIO_BLOCK_SIZE + 4];
+      float* alignedScaledInput = ALIGNED16(scaledInput);
+      ASSERT_ALIGNED16(alignedScaledInput);
+      if (!nullInput) {
+        if (aInput.mVolume != 1.0f) {
+          AudioBlockCopyChannelWithScale(
+              static_cast<const float*>(aInput.mChannelData[i]),
+                                        aInput.mVolume,
+                                        alignedScaledInput);
+          inputSamples = alignedScaledInput;
+        } else {
+          inputSamples = static_cast<const float*>(aInput.mChannelData[i]);
+        }
       } else {
-        inputSamples = static_cast<const float*>(aInput.mChannelData[i]);
+        PodZero(alignedScaledInput, WEBAUDIO_BLOCK_SIZE);
+        inputSamples = alignedScaledInput;
       }
       float* outputBuffer = aOutput->ChannelFloatsForWrite(i);
       float* sampleBuffer;
@@ -262,7 +283,7 @@ public:
         mResampler.DownSample(i, outputBuffer, 4);
         break;
       default:
-        NS_NOTREACHED("We should never reach here");
+        MOZ_ASSERT_UNREACHABLE("We should never reach here");
       }
     }
   }
@@ -291,76 +312,129 @@ WaveShaperNode::WaveShaperNode(AudioContext* aContext)
               2,
               ChannelCountMode::Max,
               ChannelInterpretation::Speakers)
-  , mCurve(nullptr)
   , mType(OverSampleType::None)
 {
-  mozilla::HoldJSObjects(this);
-
   WaveShaperNodeEngine* engine = new WaveShaperNodeEngine(this);
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-WaveShaperNode::~WaveShaperNode()
+/* static */ already_AddRefed<WaveShaperNode>
+WaveShaperNode::Create(AudioContext& aAudioContext,
+                       const WaveShaperOptions& aOptions,
+                       ErrorResult& aRv)
 {
-  ClearCurve();
-}
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
 
-void
-WaveShaperNode::ClearCurve()
-{
-  mCurve = nullptr;
-  mozilla::DropJSObjects(this);
+  RefPtr<WaveShaperNode> audioNode = new WaveShaperNode(&aAudioContext);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  if (aOptions.mCurve.WasPassed()) {
+    audioNode->SetCurveInternal(aOptions.mCurve.Value(), aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
+  }
+
+  audioNode->SetOversample(aOptions.mOversample);
+  return audioNode.forget();
 }
 
 JSObject*
 WaveShaperNode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return WaveShaperNodeBinding::Wrap(aCx, this, aGivenProto);
+  return WaveShaperNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
 WaveShaperNode::SetCurve(const Nullable<Float32Array>& aCurve, ErrorResult& aRv)
 {
-  nsTArray<float> curve;
-  if (!aCurve.IsNull()) {
-    const Float32Array& floats = aCurve.Value();
+  // Let's purge the cached value for the curve attribute.
+  WaveShaperNode_Binding::ClearCachedCurveValue(this);
 
-    floats.ComputeLengthAndData();
-    if (floats.IsShared()) {
-      // Throw if the object is mapping shared memory (must opt in).
-      aRv.ThrowTypeError<MSG_TYPEDARRAY_IS_SHARED>(NS_LITERAL_STRING("Argument of WaveShaperNode.setCurve"));
-      return;
-    }
-
-    uint32_t argLength = floats.Length();
-    if (argLength < 2) {
-      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-      return;
-    }
-
-    if (!curve.SetLength(argLength, fallible)) {
-      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-      return;
-    }
-
-    PodCopy(curve.Elements(), floats.Data(), floats.Length());
-
-    mCurve = floats.Obj();
-  } else {
-    mCurve = nullptr;
+  if (aCurve.IsNull()) {
+    CleanCurveInternal();
+    return;
   }
 
+  const Float32Array& floats = aCurve.Value();
+
+  floats.ComputeLengthAndData();
+  if (floats.IsShared()) {
+    // Throw if the object is mapping shared memory (must opt in).
+    aRv.ThrowTypeError<MSG_TYPEDARRAY_IS_SHARED>(NS_LITERAL_STRING("Argument of WaveShaperNode.setCurve"));
+    return;
+  }
+
+  nsTArray<float> curve;
+  uint32_t argLength = floats.Length();
+  if (!curve.SetLength(argLength, fallible)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+
+  PodCopy(curve.Elements(), floats.Data(), argLength);
+  SetCurveInternal(curve, aRv);
+}
+
+void
+WaveShaperNode::SetCurveInternal(const nsTArray<float>& aCurve,
+                                 ErrorResult& aRv)
+{
+  if (aCurve.Length() < 2) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  mCurve = aCurve;
+  SendCurveToStream();
+}
+
+void
+WaveShaperNode::CleanCurveInternal()
+{
+  mCurve.Clear();
+  SendCurveToStream();
+}
+
+void
+WaveShaperNode::SendCurveToStream()
+{
   AudioNodeStream* ns = mStream;
   MOZ_ASSERT(ns, "Why don't we have a stream here?");
-  ns->SetRawArrayData(curve);
+
+  nsTArray<float> copyCurve(mCurve);
+  ns->SetRawArrayData(copyCurve);
+}
+
+void
+WaveShaperNode::GetCurve(JSContext* aCx,
+                         JS::MutableHandle<JSObject*> aRetval)
+{
+  // Let's return a null value if the list is empty.
+  if (mCurve.IsEmpty()) {
+    aRetval.set(nullptr);
+    return;
+  }
+
+  MOZ_ASSERT(mCurve.Length() >= 2);
+  aRetval.set(Float32Array::Create(aCx, this, mCurve.Length(),
+                                   mCurve.Elements()));
 }
 
 void
 WaveShaperNode::SetOversample(OverSampleType aType)
 {
   mType = aType;
-  SendInt32ParameterToStream(WaveShaperNodeEngine::TYPE, static_cast<int32_t>(aType));
+  SendInt32ParameterToStream(WaveShaperNodeEngine::TYPE,
+                             static_cast<int32_t>(aType));
 }
 
 } // namespace dom

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +9,7 @@
 #include <string.h>
 #include "nsColor.h"
 #include "nsColorNames.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsString.h"
 #include "mozilla/ArrayUtils.h"
 
@@ -66,14 +67,15 @@ void RunColorTests() {
     uint8_t g = NS_GET_G(rgb);
     uint8_t b = NS_GET_B(rgb);
     uint8_t a = NS_GET_A(rgb);
-    if (a != UINT8_MAX) {
-      // NS_HexToRGB() can not handle a color with alpha channel
-      rgb = NS_RGB(r, g, b);
-    }
     char cbuf[50];
-    snprintf_literal(cbuf, "%02x%02x%02x", r, g, b);
+    if (a != UINT8_MAX) {
+      SprintfLiteral(cbuf, "%02x%02x%02x%02x", r, g, b, a);
+    } else {
+      SprintfLiteral(cbuf, "%02x%02x%02x", r, g, b);
+    }
     nscolor hexrgb;
-    ASSERT_TRUE(NS_HexToRGB(NS_ConvertASCIItoUTF16(cbuf), &hexrgb)) <<
+    ASSERT_TRUE(NS_HexToRGBA(NS_ConvertASCIItoUTF16(cbuf),
+                             nsHexColorType::AllowAlpha, &hexrgb)) <<
       "hex conversion to color of '" << cbuf << "'";
     ASSERT_TRUE(hexrgb == rgb);
   }

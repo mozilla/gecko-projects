@@ -17,7 +17,7 @@ const TOPICDATA_FORCE_PLACES_INIT = "force-places-init";
 var bg = Cc["@mozilla.org/browser/browserglue;1"].
          getService(Ci.nsIObserver);
 
-function run_test() {
+add_task(async function setup() {
   // Create our bookmarks.html from bookmarks.glue.html.
   create_bookmarks_html("bookmarks.glue.html");
 
@@ -26,46 +26,45 @@ function run_test() {
   // Create our JSON backup from bookmarks.glue.json.
   create_JSON_backup("bookmarks.glue.json");
 
-  run_next_test();
-}
+  registerCleanupFunction(function() {
+    remove_bookmarks_html();
+    remove_all_JSON_backups();
 
-do_register_cleanup(function () {
-  remove_bookmarks_html();
-  remove_all_JSON_backups();
-
-  return PlacesUtils.bookmarks.eraseEverything();
+    return PlacesUtils.bookmarks.eraseEverything();
+  });
 });
 
 function simulatePlacesInit() {
-  do_print("Simulate Places init");
+  info("Simulate Places init");
   // Force nsBrowserGlue::_initPlaces().
   bg.observe(null, TOPIC_BROWSERGLUE_TEST, TOPICDATA_FORCE_PLACES_INIT);
   return promiseTopicObserved("places-browser-init-complete");
 }
 
-add_task(function* test_checkPreferences() {
+add_task(async function test_checkPreferences() {
   // Initialize Places through the History Service and check that a new
   // database has been created.
+  let promiseComplete = promiseTopicObserved("places-browser-init-complete");
   Assert.equal(PlacesUtils.history.databaseStatus,
                PlacesUtils.history.DATABASE_STATUS_CREATE);
-
-  // Wait for Places init notification.
-  yield promiseTopicObserved("places-browser-init-complete");
+  await promiseComplete;
 
   // Ensure preferences status.
   Assert.ok(!Services.prefs.getBoolPref(PREF_AUTO_EXPORT_HTML));
 
-  Assert.throws(() => Services.prefs.getBoolPref(PREF_IMPORT_BOOKMARKS_HTML));
-  Assert.throws(() => Services.prefs.getBoolPref(PREF_RESTORE_DEFAULT_BOOKMARKS));
+  Assert.throws(() => Services.prefs.getBoolPref(PREF_IMPORT_BOOKMARKS_HTML),
+    /NS_ERROR_UNEXPECTED/);
+  Assert.throws(() => Services.prefs.getBoolPref(PREF_RESTORE_DEFAULT_BOOKMARKS),
+    /NS_ERROR_UNEXPECTED/);
 });
 
-add_task(function* test_import() {
-  do_print("Import from bookmarks.html if importBookmarksHTML is true.");
+add_task(async function test_import() {
+  info("Import from bookmarks.html if importBookmarksHTML is true.");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -73,11 +72,11 @@ add_task(function* test_import() {
   // Set preferences.
   Services.prefs.setBoolPref(PREF_IMPORT_BOOKMARKS_HTML, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been imported, and a smart bookmark has been
   // created.
-  let bm = yield PlacesUtils.bookmarks.fetch({
+  let bm = await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: SMART_BOOKMARKS_ON_TOOLBAR
   });
@@ -87,14 +86,14 @@ add_task(function* test_import() {
   Assert.ok(!Services.prefs.getBoolPref(PREF_IMPORT_BOOKMARKS_HTML));
 });
 
-add_task(function* test_import_noSmartBookmarks() {
-  do_print("import from bookmarks.html, but don't create smart bookmarks " +
-              "if they are disabled");
+add_task(async function test_import_noSmartBookmarks() {
+  info("import from bookmarks.html, but don't create smart bookmarks " +
+          "if they are disabled");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -103,11 +102,11 @@ add_task(function* test_import_noSmartBookmarks() {
   Services.prefs.setIntPref(PREF_SMART_BOOKMARKS_VERSION, -1);
   Services.prefs.setBoolPref(PREF_IMPORT_BOOKMARKS_HTML, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been imported, but smart bookmarks have not
   // been created.
-  let bm = yield PlacesUtils.bookmarks.fetch({
+  let bm = await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   });
@@ -117,14 +116,14 @@ add_task(function* test_import_noSmartBookmarks() {
   Assert.ok(!Services.prefs.getBoolPref(PREF_IMPORT_BOOKMARKS_HTML));
 });
 
-add_task(function* test_import_autoExport_updatedSmartBookmarks() {
-  do_print("Import from bookmarks.html, but don't create smart bookmarks " +
-              "if autoExportHTML is true and they are at latest version");
+add_task(async function test_import_autoExport_updatedSmartBookmarks() {
+  info("Import from bookmarks.html, but don't create smart bookmarks " +
+          "if autoExportHTML is true and they are at latest version");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -134,11 +133,11 @@ add_task(function* test_import_autoExport_updatedSmartBookmarks() {
   Services.prefs.setBoolPref(PREF_AUTO_EXPORT_HTML, true);
   Services.prefs.setBoolPref(PREF_IMPORT_BOOKMARKS_HTML, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been imported, but smart bookmarks have not
   // been created.
-  let bm = yield PlacesUtils.bookmarks.fetch({
+  let bm = await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   });
@@ -150,14 +149,14 @@ add_task(function* test_import_autoExport_updatedSmartBookmarks() {
   Services.prefs.setBoolPref(PREF_AUTO_EXPORT_HTML, false);
 });
 
-add_task(function* test_import_autoExport_oldSmartBookmarks() {
-  do_print("Import from bookmarks.html, and create smart bookmarks if " +
-              "autoExportHTML is true and they are not at latest version.");
+add_task(async function test_import_autoExport_oldSmartBookmarks() {
+  info("Import from bookmarks.html, and create smart bookmarks if " +
+          "autoExportHTML is true and they are not at latest version.");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -167,11 +166,11 @@ add_task(function* test_import_autoExport_oldSmartBookmarks() {
   Services.prefs.setBoolPref(PREF_AUTO_EXPORT_HTML, true);
   Services.prefs.setBoolPref(PREF_IMPORT_BOOKMARKS_HTML, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been imported, but smart bookmarks have not
   // been created.
-  let bm = yield PlacesUtils.bookmarks.fetch({
+  let bm = await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: SMART_BOOKMARKS_ON_TOOLBAR
   });
@@ -183,14 +182,14 @@ add_task(function* test_import_autoExport_oldSmartBookmarks() {
   Services.prefs.setBoolPref(PREF_AUTO_EXPORT_HTML, false);
 });
 
-add_task(function* test_restore() {
-  do_print("restore from default bookmarks.html if " +
-              "restore_default_bookmarks is true.");
+add_task(async function test_restore() {
+  info("restore from default bookmarks.html if " +
+          "restore_default_bookmarks is true.");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -198,10 +197,10 @@ add_task(function* test_restore() {
   // Set preferences.
   Services.prefs.setBoolPref(PREF_RESTORE_DEFAULT_BOOKMARKS, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been restored.
-  Assert.ok(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: SMART_BOOKMARKS_ON_TOOLBAR
   }));
@@ -210,14 +209,14 @@ add_task(function* test_restore() {
   Assert.ok(!Services.prefs.getBoolPref(PREF_RESTORE_DEFAULT_BOOKMARKS));
 });
 
-add_task(function* test_restore_import() {
-  do_print("setting both importBookmarksHTML and " +
-              "restore_default_bookmarks should restore defaults.");
+add_task(async function test_restore_import() {
+  info("setting both importBookmarksHTML and " +
+          "restore_default_bookmarks should restore defaults.");
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
 
   // Sanity check: we should not have any bookmark on the toolbar.
-  Assert.ok(!(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(!(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: 0
   })));
@@ -226,10 +225,10 @@ add_task(function* test_restore_import() {
   Services.prefs.setBoolPref(PREF_IMPORT_BOOKMARKS_HTML, true);
   Services.prefs.setBoolPref(PREF_RESTORE_DEFAULT_BOOKMARKS, true);
 
-  yield simulatePlacesInit();
+  await simulatePlacesInit();
 
   // Check bookmarks.html has been restored.
-  Assert.ok(yield PlacesUtils.bookmarks.fetch({
+  Assert.ok(await PlacesUtils.bookmarks.fetch({
     parentGuid: PlacesUtils.bookmarks.toolbarGuid,
     index: SMART_BOOKMARKS_ON_TOOLBAR
   }));

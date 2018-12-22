@@ -1,11 +1,11 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsPrintObject.h"
 #include "nsIContentViewer.h"
-#include "nsIDOMDocument.h"
 #include "nsContentUtils.h" // for nsAutoScriptBlocker
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsPIDOMWindow.h"
@@ -31,10 +31,6 @@ nsPrintObject::nsPrintObject() :
 nsPrintObject::~nsPrintObject()
 {
   MOZ_COUNT_DTOR(nsPrintObject);
-  for (uint32_t i=0;i<mKids.Length();i++) {
-    nsPrintObject* po = mKids[i];
-    delete po;
-  }
 
   DestroyPresentation();
   if (mDidCreateDocShell && mDocShell) {
@@ -42,16 +38,18 @@ nsPrintObject::~nsPrintObject()
     if (baseWin) {
       baseWin->Destroy();
     }
-  }                            
+  }
   mDocShell = nullptr;
-  mTreeOwner = nullptr; // mTreeOwner must be released after mDocShell; 
+  mTreeOwner = nullptr; // mTreeOwner must be released after mDocShell;
 }
 
 //------------------------------------------------------------------
-nsresult 
-nsPrintObject::Init(nsIDocShell* aDocShell, nsIDOMDocument* aDoc,
+nsresult
+nsPrintObject::Init(nsIDocShell* aDocShell, nsIDocument* aDoc,
                     bool aPrintPreview)
 {
+  NS_ENSURE_STATE(aDoc);
+
   mPrintPreview = aPrintPreview;
 
   if (mPrintPreview || mParent) {
@@ -67,34 +65,33 @@ nsPrintObject::Init(nsIDocShell* aDocShell, nsIDOMDocument* aDoc,
   }
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDOMDocument> dummy = do_GetInterface(mDocShell);
+  // Keep the document related to this docshell alive
+  nsCOMPtr<nsIDocument> dummy = do_GetInterface(mDocShell);
+  mozilla::Unused << dummy;
+
   nsCOMPtr<nsIContentViewer> viewer;
   mDocShell->GetContentViewer(getter_AddRefs(viewer));
   NS_ENSURE_STATE(viewer);
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDoc);
-  NS_ENSURE_STATE(doc);
-
   if (mParent) {
-    nsCOMPtr<nsPIDOMWindowOuter> window = doc->GetWindow();
+    nsCOMPtr<nsPIDOMWindowOuter> window = aDoc->GetWindow();
     if (window) {
       mContent = window->GetFrameElementInternal();
     }
-    mDocument = doc;
+    mDocument = aDoc;
     return NS_OK;
   }
 
-  mDocument = doc->CreateStaticClone(mDocShell);
-  nsCOMPtr<nsIDOMDocument> clonedDOMDoc = do_QueryInterface(mDocument);
-  NS_ENSURE_STATE(clonedDOMDoc);
+  mDocument = aDoc->CreateStaticClone(mDocShell);
+  NS_ENSURE_STATE(mDocument);
 
-  viewer->SetDOMDocument(clonedDOMDoc);
+  viewer->SetDocument(mDocument);
   return NS_OK;
 }
 
 //------------------------------------------------------------------
 // Resets PO by destroying the presentation
-void 
+void
 nsPrintObject::DestroyPresentation()
 {
   if (mPresShell) {

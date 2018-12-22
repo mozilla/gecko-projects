@@ -26,7 +26,7 @@ class DomainPolicyClone;
 [ptr] native JSObjectPtr(JSObject);
 [ptr] native DomainPolicyClonePtr(mozilla::dom::DomainPolicyClone);
 
-[scriptable, uuid(b7ae2310-576e-11e5-a837-0800200c9a66)]
+[scriptable, uuid(51daad87-3a0c-44cc-b620-7356801c9022)]
 interface nsIScriptSecurityManager : nsISupports
 {
     /**
@@ -127,9 +127,11 @@ interface nsIScriptSecurityManager : nsISupports
                                       in unsigned long flags);
 
     /**
-     * Return true if scripts may be executed in the scope of the given global.
+     * Returns true if the URI is from a domain that is white-listed through
+     * prefs to be allowed to use file:// URIs.
+     * @param aUri the URI to be tested
      */
-    [noscript,notxpcom] boolean scriptAllowed(in JSObjectPtr aGlobal);
+    bool inFileURIWhitelist(in nsIURI aUri);
 
     ///////////////// Principals ///////////////////////
 
@@ -139,55 +141,18 @@ interface nsIScriptSecurityManager : nsISupports
     nsIPrincipal getSystemPrincipal();
 
     /**
-     * Return a principal that has the same origin as aURI.
-     * This principals should not be used for any data/permission check, it will
-     * have appId = UNKNOWN_APP_ID.
-     */
-    nsIPrincipal getSimpleCodebasePrincipal(in nsIURI aURI);
-
-    /**
-     * Returns a principal that has the given information.
-     * @param appId is the app id of the principal. It can't be UNKNOWN_APP_ID.
-     * @param inMozBrowser is true if the principal has to be considered as
-     * inside a mozbrowser frame.
-     *
-     * @deprecated use createCodebasePrincipal instead.
-     */
-    [deprecated] nsIPrincipal getAppCodebasePrincipal(in nsIURI uri,
-                                                      in unsigned long appId,
-                                                      in boolean inMozBrowser);
-
-    /**
-     * Returns a principal that has the appId and inMozBrowser of the load
-     * context.
-     * @param loadContext to get appId/inMozBrowser from.
+     * Returns a principal that has the OriginAttributes of the load context.
+     * @param loadContext to get the OriginAttributes from.
      */
     nsIPrincipal getLoadContextCodebasePrincipal(in nsIURI uri,
                                                  in nsILoadContext loadContext);
 
     /**
-     * Returns a principal that has the appId and inMozBrowser of the docshell
-     * inside a mozbrowser frame.
-     * @param docShell to get appId/inMozBrowser from.
+     * Returns a principal that has the OriginAttributes of the docshell.
+     * @param docShell to get the OriginAttributes from.
      */
     nsIPrincipal getDocShellCodebasePrincipal(in nsIURI uri,
                                               in nsIDocShell docShell);
-
-    /**
-     * Returns a principal with that has the same origin as uri and is not part
-     * of an appliction.
-     * The returned principal will have appId = NO_APP_ID.
-     *
-     * @deprecated use createCodebasePrincipal instead.
-     */
-    [deprecated] nsIPrincipal getNoAppCodebasePrincipal(in nsIURI uri);
-
-    /**
-     * Legacy method for getting a principal with no origin attributes.
-     *
-     * @deprecated use createCodebasePrincipal instead.
-     */
-    [deprecated] nsIPrincipal getCodebasePrincipal(in nsIURI uri);
 
     /**
      * Returns a principal whose origin is composed of |uri| and |originAttributes|.
@@ -213,20 +178,6 @@ interface nsIScriptSecurityManager : nsISupports
     nsIPrincipal createNullPrincipal(in jsval originAttributes);
 
     /**
-     * Creates an expanded principal whose capabilities are the union of the
-     * given principals. An expanded principal has an asymmetric privilege
-     * relationship with its sub-principals (that is to say, it subsumes the
-     * sub-principals, but the sub-principals do not subsume it), even if
-     * there's only one. This presents a legitimate use-case for making an
-     * expanded principal around a single sub-principal, which we do frequently.
-     *
-     * Expanded principals cannot have origin attributes themselves, but rather
-     * have them through their sub-principals - so we don't accept them here.
-     */
-    nsIPrincipal createExpandedPrincipal([array, size_is(aLength)] in nsIPrincipal aPrincipalArray,
-                                         [optional] in unsigned long aLength);
-
-    /**
      * Returns OK if aSourceURI and target have the same "origin"
      * (scheme, host, and port).
      * ReportError flag suppresses error reports for functions that
@@ -241,6 +192,24 @@ interface nsIScriptSecurityManager : nsISupports
      * channel's URI otherwise.  aChannel must not be null.
      */
     nsIPrincipal getChannelResultPrincipal(in nsIChannel aChannel);
+
+    /**
+     * Temporary API until bug 1220687 is fixed.
+     *
+     * Returns the same value as getChannelResultPrincipal, but ignoring
+     * sandboxing.  Specifically, if sandboxing would have prevented the
+     * channel's triggering principal from being returned by
+     * getChannelResultPrincipal, the triggering principal will be returned
+     * by this method.
+     *
+     * Note that this method only ignores sandboxing of the channel in
+     * question, it does not ignore sandboxing of any channels further up a
+     * document chain.  The triggering principal itself may still be the null
+     * principal due to sandboxing further up a document chain.  In that regard
+     * the ignoring of sandboxing is limited.
+     */
+    [noscript, nostdcall]
+    nsIPrincipal getChannelResultPrincipalIfNotSandboxed(in nsIChannel aChannel);
 
     /**
      * Get the codebase principal for the channel's URI.
@@ -264,17 +233,8 @@ interface nsIScriptSecurityManager : nsISupports
 
     const unsigned long NO_APP_ID = 0;
     const unsigned long UNKNOWN_APP_ID = 4294967295; // UINT32_MAX
-    const unsigned long SAFEBROWSING_APP_ID = 4294967294; // UINT32_MAX - 1
 
     const unsigned long DEFAULT_USER_CONTEXT_ID = 0;
-
-    /**
-     * Returns the jar prefix for the app.
-     * appId can be NO_APP_ID or a valid app id. appId should not be
-     * UNKNOWN_APP_ID.
-     * inMozBrowser has to be true if the app is inside a mozbrowser iframe.
-     */
-    AUTF8String getJarPrefix(in unsigned long appId, in boolean inMozBrowser);
 
     /**
      * Per-domain controls to enable and disable script. This system is designed

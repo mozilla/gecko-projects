@@ -7,7 +7,10 @@ var gTestTab;
 var gContentAPI;
 var gContentWindow;
 
-Components.utils.import("resource://testing-common/TelemetryArchiveTesting.jsm", this);
+ChromeUtils.import("resource://testing-common/TelemetryArchiveTesting.jsm", this);
+ChromeUtils.import("resource://gre/modules/ProfileAge.jsm", this);
+ChromeUtils.import("resource://gre/modules/UpdateUtils.jsm", this);
+
 
 function test() {
   UITourTest();
@@ -16,6 +19,8 @@ function test() {
 var tests = [
   function test_untrusted_host(done) {
     loadUITourTestPage(function() {
+      CustomizableUI.addWidgetToArea("bookmarks-menu-button", CustomizableUI.AREA_NAVBAR, 0);
+      registerCleanupFunction(() => CustomizableUI.removeWidgetFromArea("bookmarks-menu-button"));
       let bookmarksMenu = document.getElementById("bookmarks-menu-button");
       is(bookmarksMenu.open, false, "Bookmark menu should initially be closed");
 
@@ -102,25 +107,24 @@ var tests = [
     gContentAPI.showHighlight("urlbar");
     waitForElementToBeVisible(highlight, test_highlight_2, "Highlight should be shown after showHighlight()");
   },
-  function test_highlight_circle(done) {
+  function test_highlight_toolbar_button(done) {
     function check_highlight_size() {
       let panel = highlight.parentElement;
       let anchor = panel.anchorNode;
       let anchorRect = anchor.getBoundingClientRect();
       info("addons target: width: " + anchorRect.width + " height: " + anchorRect.height);
-      let maxDimension = Math.round(Math.max(anchorRect.width, anchorRect.height));
+      let dimension = anchorRect.width;
       let highlightRect = highlight.getBoundingClientRect();
       info("highlight: width: " + highlightRect.width + " height: " + highlightRect.height);
-      is(Math.round(highlightRect.width), maxDimension, "The width of the highlight should be equal to the largest dimension of the target");
-      is(Math.round(highlightRect.height), maxDimension, "The height of the highlight should be equal to the largest dimension of the target");
-      is(Math.round(highlightRect.height), Math.round(highlightRect.width), "The height and width of the highlight should be the same to create a circle");
-      is(highlight.style.borderRadius, "100%", "The border-radius should be 100% to create a circle");
+      is(Math.round(highlightRect.width), dimension, "The width of the highlight should be equal to the width of the target");
+      is(Math.round(highlightRect.height), dimension, "The height of the highlight should be equal to the width of the target");
+      is(highlight.classList.contains("rounded-highlight"), true, "Highlight should be rounded-rectangle styled");
       done();
     }
     let highlight = document.getElementById("UITourHighlight");
     is_element_hidden(highlight, "Highlight should initially be hidden");
 
-    gContentAPI.showHighlight("addons");
+    gContentAPI.showHighlight("home");
     waitForElementToBeVisible(highlight, check_highlight_size, "Highlight should be shown after showHighlight()");
   },
   function test_highlight_customize_auto_open_close(done) {
@@ -128,14 +132,18 @@ var tests = [
     gContentAPI.showHighlight("customize");
     waitForElementToBeVisible(highlight, function checkPanelIsOpen() {
       isnot(PanelUI.panel.state, "closed", "Panel should have opened");
+      isnot(highlight.classList.contains("rounded-highlight"), true, "Highlight should not be round-rectangle styled.");
 
+      let hiddenPromise = promisePanelElementHidden(window, PanelUI.panel);
       // Move the highlight outside which should close the app menu.
       gContentAPI.showHighlight("appMenu");
-      waitForElementToBeVisible(highlight, function checkPanelIsClosed() {
-        isnot(PanelUI.panel.state, "open",
-              "Panel should have closed after the highlight moved elsewhere.");
-        done();
-      }, "Highlight should move to the appMenu button");
+      hiddenPromise.then(() => {
+        waitForElementToBeVisible(highlight, function checkPanelIsClosed() {
+          isnot(PanelUI.panel.state, "open",
+                "Panel should have closed after the highlight moved elsewhere.");
+          done();
+        }, "Highlight should move to the appMenu button");
+      });
     }, "Highlight should be shown after showHighlight() for fixed panel items");
   },
   function test_highlight_customize_manual_open_close(done) {
@@ -152,14 +160,14 @@ var tests = [
 
         // Move the highlight outside which shouldn't close the app menu since it was manually opened.
         gContentAPI.showHighlight("appMenu");
-        waitForElementToBeVisible(highlight, function () {
+        waitForElementToBeVisible(highlight, function() {
           isnot(PanelUI.panel.state, "closed",
                 "Panel should remain open since UITour didn't open it in the first place");
           gContentAPI.hideMenu("appMenu");
           done();
         }, "Highlight should move to the appMenu button");
       }, "Highlight should be shown after showHighlight() for fixed panel items");
-    }).then(null, Components.utils.reportError);
+    }).catch(Cu.reportError);
   },
   function test_highlight_effect(done) {
     function waitForHighlightWithEffect(highlightEl, effect, next, error) {
@@ -184,11 +192,10 @@ var tests = [
     function checkSameEffectOnDifferentTarget() {
       gContentAPI.showHighlight("appMenu", "wobble");
       waitForHighlightWithEffect(highlight, "wobble", () => {
-        highlight.addEventListener("animationstart", function onAnimationStart(aEvent) {
-          highlight.removeEventListener("animationstart", onAnimationStart);
+        highlight.addEventListener("animationstart", function(aEvent) {
           ok(true, "Animation occurred again even though the effect was the same");
           checkRandomEffect();
-        });
+        }, {once: true});
         gContentAPI.showHighlight("backForward", "wobble");
       }, "There should be a wobble effect");
     }
@@ -235,80 +242,112 @@ var tests = [
     let icon = document.getElementById("UITourTooltipIcon");
     let buttons = document.getElementById("UITourTooltipButtons");
 
-    popup.addEventListener("popupshown", function onPopupShown() {
-      popup.removeEventListener("popupshown", onPopupShown);
-      is(popup.popupBoxObject.anchorNode, document.getElementById("urlbar"), "Popup should be anchored to the urlbar");
+    popup.addEventListener("popupshown", function() {
+      is(popup.anchorNode, document.getElementById("urlbar"), "Popup should be anchored to the urlbar");
       is(title.textContent, "test title", "Popup should have correct title");
       is(desc.textContent, "test text", "Popup should have correct description text");
       is(icon.src, "", "Popup should have no icon");
       is(buttons.hasChildNodes(), false, "Popup should have no buttons");
 
-      popup.addEventListener("popuphidden", function onPopupHidden() {
-        popup.removeEventListener("popuphidden", onPopupHidden);
-
-        popup.addEventListener("popupshown", function onPopupShown() {
-          popup.removeEventListener("popupshown", onPopupShown);
+      popup.addEventListener("popuphidden", function() {
+        popup.addEventListener("popupshown", function() {
           done();
-        });
+        }, {once: true});
 
         gContentAPI.showInfo("urlbar", "test title", "test text");
 
-      });
+      }, {once: true});
       gContentAPI.hideInfo();
-    });
+    }, {once: true});
 
     gContentAPI.showInfo("urlbar", "test title", "test text");
   },
-  taskify(function* test_info_2() {
+  taskify(async function test_info_2() {
     let popup = document.getElementById("UITourTooltip");
     let title = document.getElementById("UITourTooltipTitle");
     let desc = document.getElementById("UITourTooltipDescription");
     let icon = document.getElementById("UITourTooltipIcon");
     let buttons = document.getElementById("UITourTooltipButtons");
 
-    yield showInfoPromise("urlbar", "urlbar title", "urlbar text");
+    await showInfoPromise("urlbar", "urlbar title", "urlbar text");
 
-    is(popup.popupBoxObject.anchorNode, document.getElementById("urlbar"), "Popup should be anchored to the urlbar");
+    is(popup.anchorNode, document.getElementById("urlbar"), "Popup should be anchored to the urlbar");
     is(title.textContent, "urlbar title", "Popup should have correct title");
     is(desc.textContent, "urlbar text", "Popup should have correct description text");
     is(icon.src, "", "Popup should have no icon");
     is(buttons.hasChildNodes(), false, "Popup should have no buttons");
 
-    yield showInfoPromise("search", "search title", "search text");
+    // Place the search bar in the navigation toolbar temporarily.
+    await SpecialPowers.pushPrefEnv({ set: [
+      ["browser.search.widget.inNavBar", true],
+    ]});
 
-    is(popup.popupBoxObject.anchorNode, document.getElementById("searchbar"), "Popup should be anchored to the searchbar");
+    await showInfoPromise("search", "search title", "search text");
+
+    is(popup.anchorNode, document.getElementById("searchbar"), "Popup should be anchored to the searchbar");
     is(title.textContent, "search title", "Popup should have correct title");
     is(desc.textContent, "search text", "Popup should have correct description text");
+
+    await SpecialPowers.popPrefEnv();
   }),
   function test_getConfigurationVersion(done) {
     function callback(result) {
-      let props = ["defaultUpdateChannel", "version"];
-      for (let property of props) {
-        ok(typeof(result[property]) !== "undefined", "Check " + property + " isn't undefined.");
-        is(result[property], Services.appinfo[property], "Should have the same " + property + " property.");
-      }
+      ok(typeof result.version !== "undefined", "Check version isn't undefined.");
+      is(result.version, Services.appinfo.version, "Should have the same version property.");
+      is(result.defaultUpdateChannel, UpdateUtils.getUpdateChannel(false), "Should have the correct update channel.");
       done();
     }
 
     gContentAPI.getConfiguration("appinfo", callback);
+  },
+  function test_getConfigurationDistribution(done) {
+    gContentAPI.getConfiguration("appinfo", (result) => {
+      ok(typeof(result.distribution) !== "undefined", "Check distribution isn't undefined.");
+      is(result.distribution, "default", "Should be \"default\" without preference set.");
+
+      let defaults = Services.prefs.getDefaultBranch("distribution.");
+      let testDistributionID = "TestDistribution";
+      defaults.setCharPref("id", testDistributionID);
+      gContentAPI.getConfiguration("appinfo", (result2) => {
+        ok(typeof(result2.distribution) !== "undefined", "Check distribution isn't undefined.");
+        is(result2.distribution, testDistributionID, "Should have the distribution as set in preference.");
+
+        done();
+      });
+    });
+  },
+  function test_getConfigurationProfileAge(done) {
+    gContentAPI.getConfiguration("appinfo", (result) => {
+      ok(typeof(result.profileCreatedWeeksAgo) === "number", "profileCreatedWeeksAgo should be number.");
+      ok(result.profileResetWeeksAgo === null, "profileResetWeeksAgo should be null.");
+
+      // Set profile reset date to 15 days ago.
+      let profileAccessor = new ProfileAge();
+      profileAccessor.recordProfileReset(Date.now() - (15 * 24 * 60 * 60 * 1000));
+      gContentAPI.getConfiguration("appinfo", (result2) => {
+        ok(typeof(result2.profileResetWeeksAgo) === "number", "profileResetWeeksAgo should be number.");
+        is(result2.profileResetWeeksAgo, 2, "profileResetWeeksAgo should be 2.");
+        done();
+      });
+    });
   },
   function test_addToolbarButton(done) {
     let placement = CustomizableUI.getPlacementOfWidget("panic-button");
     is(placement, null, "default UI has panic button in the palette");
 
     gContentAPI.getConfiguration("availableTargets", (data) => {
-      let available = (data.targets.indexOf("forget") != -1);
+      let available = (data.targets.includes("forget"));
       ok(!available, "Forget button should not be available by default");
 
       gContentAPI.addNavBarWidget("forget", () => {
         info("addNavBarWidget callback successfully called");
 
-        let placement = CustomizableUI.getPlacementOfWidget("panic-button");
-        is(placement.area, CustomizableUI.AREA_NAVBAR);
+        let updatedPlacement = CustomizableUI.getPlacementOfWidget("panic-button");
+        is(updatedPlacement.area, CustomizableUI.AREA_NAVBAR);
 
-        gContentAPI.getConfiguration("availableTargets", (data) => {
-          let available = (data.targets.indexOf("forget") != -1);
-          ok(available, "Forget button should now be available");
+        gContentAPI.getConfiguration("availableTargets", (data2) => {
+          let updatedAvailable = data2.targets.includes("forget");
+          ok(updatedAvailable, "Forget button should now be available");
 
           // Cleanup
           CustomizableUI.removeWidgetFromArea("panic-button");
@@ -341,14 +380,14 @@ var tests = [
         let someOtherEngineID = data.engines.filter(t => t != "searchEngine-" + defaultEngine.identifier)[0];
         someOtherEngineID = someOtherEngineID.replace(/^searchEngine-/, "");
 
-        let observe = function (subject, topic, verb) {
+        let observe = function(subject, topic, verb) {
           info("browser-search-engine-modified: " + verb);
           if (verb == "engine-current") {
             is(Services.search.defaultEngine.identifier, someOtherEngineID, "correct engine was switched to");
             done();
           }
         };
-        Services.obs.addObserver(observe, "browser-search-engine-modified", false);
+        Services.obs.addObserver(observe, "browser-search-engine-modified");
         registerCleanupFunction(() => {
           // Clean up
           Services.obs.removeObserver(observe, "browser-search-engine-modified");
@@ -359,11 +398,14 @@ var tests = [
       });
     });
   },
-  taskify(function* test_treatment_tag() {
+  taskify(async function test_treatment_tag() {
     let ac = new TelemetryArchiveTesting.Checker();
-    yield ac.promiseInit();
-    yield gContentAPI.setTreatmentTag("foobar", "baz");
-    yield new Promise((resolve) => {
+    await ac.promiseInit();
+    await gContentAPI.setTreatmentTag("foobar", "baz");
+    // Wait until the treatment telemetry is sent before looking in the archive.
+    await BrowserTestUtils.waitForContentEvent(gTestTab.linkedBrowser, "mozUITourNotification", false,
+                                               event => event.detail.event === "TreatmentTag:TelemetrySent");
+    await new Promise((resolve) => {
       gContentAPI.getTreatmentTag("foobar", (data) => {
         is(data.value, "baz", "set and retrieved treatmentTag");
         ac.promiseFindPing("uitour-tag", [
@@ -381,9 +423,9 @@ var tests = [
   }),
 
   // Make sure this test is last in the file so the appMenu gets left open and done will confirm it got tore down.
-  taskify(function* cleanupMenus() {
+  taskify(async function cleanupMenus() {
     let shownPromise = promisePanelShown(window);
     gContentAPI.showMenu("appMenu");
-    yield shownPromise;
+    await shownPromise;
   }),
 ];

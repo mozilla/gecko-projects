@@ -14,12 +14,7 @@ class nsSMILNullType : public nsISMILType
 {
 public:
   // Singleton for nsSMILValue objects to hold onto.
-  static nsSMILNullType*
-  Singleton()
-  {
-    static nsSMILNullType sSingleton;
-    return &sSingleton;
-  }
+  static nsSMILNullType* Singleton();
 
 protected:
   // nsISMILType Methods
@@ -44,7 +39,7 @@ protected:
 
 private:
   // Private constructor: prevent instances beyond my singleton.
-  MOZ_CONSTEXPR nsSMILNullType() {}
+  constexpr nsSMILNullType() {}
 };
 
 #endif // NS_SMILNULLTYPE_H_

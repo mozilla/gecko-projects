@@ -7,7 +7,6 @@
 #ifndef nsFakeSynthServices_h
 #define nsFakeSynthServices_h
 
-#include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsIObserver.h"
 #include "nsIThread.h"
@@ -26,7 +25,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
-  nsFakeSynthServices();
+  nsFakeSynthServices() = default;
 
   static nsFakeSynthServices* GetInstance();
 
@@ -36,13 +35,11 @@ public:
 
 private:
 
-  virtual ~nsFakeSynthServices();
+  virtual ~nsFakeSynthServices() = default;
 
   void Init();
 
-  nsCOMPtr<nsISpeechService> mDirectService;
-
-  nsCOMPtr<nsISpeechService> mIndirectService;
+  nsCOMPtr<nsISpeechService> mSynthService;
 
   static StaticRefPtr<nsFakeSynthServices> sSingleton;
 };

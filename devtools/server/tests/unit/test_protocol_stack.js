@@ -10,9 +10,8 @@
  * device.
  */
 
-var protocol = require("devtools/server/protocol");
-var {method, Arg, Option, RetVal} = protocol;
-var events = require("sdk/event/core");
+var protocol = require("devtools/shared/protocol");
+var {RetVal} = protocol;
 
 function simpleHello() {
   return {
@@ -22,8 +21,17 @@ function simpleHello() {
   };
 }
 
-var RootActor = protocol.ActorClass({
+const rootSpec = protocol.generateActorSpec({
   typeName: "root",
+
+  methods: {
+    simpleReturn: {
+      response: { value: RetVal() },
+    }
+  }
+});
+
+var RootActor = protocol.ActorClassWithSpec(rootSpec, {
   initialize: function(conn) {
     protocol.Actor.prototype.initialize.call(this, conn);
     // Root actor owns itself.
@@ -34,14 +42,12 @@ var RootActor = protocol.ActorClass({
 
   sayHello: simpleHello,
 
-  simpleReturn: method(function() {
+  simpleReturn: function() {
     return this.sequence++;
-  }, {
-    response: { value: RetVal() },
-  })
+  }
 });
 
-var RootFront = protocol.FrontClass(RootActor, {
+var RootFront = protocol.FrontClassWithSpec(rootSpec, {
   initialize: function(client) {
     this.actorID = "root";
     protocol.Front.prototype.initialize.call(this, client);
@@ -52,15 +58,15 @@ var RootFront = protocol.FrontClass(RootActor, {
 
 function run_test() {
   if (!Services.prefs.getBoolPref("javascript.options.asyncstack")) {
-    do_print("Async stacks are disabled.");
+    info("Async stacks are disabled.");
     return;
   }
 
   DebuggerServer.createRootActor = RootActor;
   DebuggerServer.init();
 
-  let trace = connectPipeTracing();
-  let client = new DebuggerClient(trace);
+  const trace = connectPipeTracing();
+  const client = new DebuggerClient(trace);
   let rootClient;
 
   client.connect().then(function onConnect() {
@@ -69,8 +75,8 @@ function run_test() {
     rootClient.simpleReturn().then(() => {
       let stack = Components.stack;
       while (stack) {
-        do_print(stack.name);
-        if (stack.name == "onConnect") {
+        info(stack.name);
+        if (stack.name.includes("run_test/onConnect")) {
           // Reached back to outer function before request
           ok(true, "Complete stack");
           return;
@@ -81,10 +87,10 @@ function run_test() {
     }, () => {
       ok(false, "Request failed unexpectedly");
     }).then(() => {
-      client.close(() => {
+      client.close().then(() => {
         do_test_finished();
       });
-    })
+    });
   });
 
   do_test_pending();

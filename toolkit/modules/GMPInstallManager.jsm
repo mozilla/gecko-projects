@@ -4,43 +4,25 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [];
-
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu, manager: Cm} =
-  Components;
 // 1 day default
 const DEFAULT_SECONDS_BETWEEN_CHECKS = 60 * 60 * 24;
 
-var GMPInstallFailureReason = {
-  GMP_INVALID: 1,
-  GMP_HIDDEN: 2,
-  GMP_DISABLED: 3,
-  GMP_UPDATE_DISABLED: 4,
-};
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
+ChromeUtils.import("resource://gre/modules/GMPUtils.jsm");
+ChromeUtils.import("resource://gre/modules/addons/ProductAddonChecker.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/GMPUtils.jsm");
-Cu.import("resource://gre/modules/addons/ProductAddonChecker.jsm");
+var EXPORTED_SYMBOLS = ["GMPInstallManager", "GMPExtractor", "GMPDownloader",
+                        "GMPAddon"];
 
-this.EXPORTED_SYMBOLS = ["GMPInstallManager", "GMPExtractor", "GMPDownloader",
-                         "GMPAddon"];
-
-// Shared code for suppressing bad cert dialogs
-XPCOMUtils.defineLazyGetter(this, "gCertUtils", function() {
-  let temp = { };
-  Cu.import("resource://gre/modules/CertUtils.jsm", temp);
-  return temp;
-});
-
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "CertUtils",
+                               "resource://gre/modules/CertUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "UpdateUtils",
+                               "resource://gre/modules/UpdateUtils.jsm");
 
 function getScopedLogger(prefix) {
   // `PARENT_LOGGER_ID.` being passed here effectively links this logger
@@ -60,19 +42,19 @@ GMPInstallManager.prototype = {
   /**
    * Obtains a URL with replacement of vars
    */
-  _getURL: function() {
+  async _getURL() {
     let log = getScopedLogger("GMPInstallManager._getURL");
     // Use the override URL if it is specified.  The override URL is just like
     // the normal URL but it does not check the cert.
-    let url = GMPPrefs.get(GMPPrefs.KEY_URL_OVERRIDE);
+    let url = GMPPrefs.getString(GMPPrefs.KEY_URL_OVERRIDE, "");
     if (url) {
       log.info("Using override url: " + url);
     } else {
-      url = GMPPrefs.get(GMPPrefs.KEY_URL);
+      url = GMPPrefs.getString(GMPPrefs.KEY_URL);
       log.info("Using url: " + url);
     }
 
-    url = UpdateUtils.formatUpdateURL(url);
+    url = await UpdateUtils.formatUpdateURL(url);
 
     log.info("Using url (with replacement): " + url);
     return url;
@@ -80,43 +62,49 @@ GMPInstallManager.prototype = {
   /**
    * Performs an addon check.
    * @return a promise which will be resolved or rejected.
-   *         The promise is resolved with an array of GMPAddons
+   *         The promise is resolved with an object with properties:
+   *           gmpAddons: array of GMPAddons
+   *           usedFallback: whether the data was collected from online or
+   *                         from fallback data within the build
    *         The promise is rejected with an object with properties:
    *           target: The XHR request object
    *           status: The HTTP status code
    *           type: Sometimes specifies type of rejection
    */
-  checkForAddons: function() {
+  async checkForAddons() {
     let log = getScopedLogger("GMPInstallManager.checkForAddons");
     if (this._deferred) {
         log.error("checkForAddons already called");
         return Promise.reject({type: "alreadycalled"});
     }
-    this._deferred = Promise.defer();
-    let url = this._getURL();
+    this._deferred = PromiseUtils.defer();
 
     let allowNonBuiltIn = true;
     let certs = null;
     if (!Services.prefs.prefHasUserValue(GMPPrefs.KEY_URL_OVERRIDE)) {
-      allowNonBuiltIn = !GMPPrefs.get(GMPPrefs.KEY_CERT_REQUIREBUILTIN, true);
-      if (GMPPrefs.get(GMPPrefs.KEY_CERT_CHECKATTRS, true)) {
-        certs = gCertUtils.readCertPrefs(GMPPrefs.KEY_CERTS_BRANCH);
+      allowNonBuiltIn = !GMPPrefs.getString(GMPPrefs.KEY_CERT_REQUIREBUILTIN, true);
+      if (GMPPrefs.getBool(GMPPrefs.KEY_CERT_CHECKATTRS, true)) {
+        certs = CertUtils.readCertPrefs(GMPPrefs.KEY_CERTS_BRANCH);
       }
     }
 
-    ProductAddonChecker.getProductAddonList(url, allowNonBuiltIn, certs).then((addons) => {
-      if (!addons) {
-        this._deferred.resolve([]);
-      }
-      else {
-        this._deferred.resolve(addons.map(a => new GMPAddon(a)));
+    let url = await this._getURL();
+
+    let addonPromise = ProductAddonChecker
+        .getProductAddonList(url, allowNonBuiltIn, certs);
+
+    addonPromise.then(res => {
+      if (!res || !res.gmpAddons) {
+        this._deferred.resolve({gmpAddons: []});
+      } else {
+        res.gmpAddons = res.gmpAddons.map(a => new GMPAddon(a));
+        this._deferred.resolve(res);
       }
       delete this._deferred;
     }, (ex) => {
       this._deferred.reject(ex);
       delete this._deferred;
     });
-
     return this._deferred.promise;
   },
   /**
@@ -130,19 +118,20 @@ GMPInstallManager.prototype = {
    *           type: A string to represent the type of error
    *                 downloaderr, verifyerr or previouserrorencountered
    */
-  installAddon: function(gmpAddon) {
+  installAddon(gmpAddon) {
     if (this._deferred) {
+        let log = getScopedLogger("GMPInstallManager.installAddon");
         log.error("previous error encountered");
         return Promise.reject({type: "previouserrorencountered"});
     }
     this.gmpDownloader = new GMPDownloader(gmpAddon);
     return this.gmpDownloader.start();
   },
-  _getTimeSinceLastCheck: function() {
+  _getTimeSinceLastCheck() {
     let now = Math.round(Date.now() / 1000);
     // Default to 0 here because `now - 0` will be returned later if that case
     // is hit. We want a large value so a check will occur.
-    let lastCheck = GMPPrefs.get(GMPPrefs.KEY_UPDATE_LAST_CHECK, 0);
+    let lastCheck = GMPPrefs.getInt(GMPPrefs.KEY_UPDATE_LAST_CHECK, 0);
     // Handle clock jumps, return now since we want it to represent
     // a lot of time has passed since the last check.
     if (now < lastCheck) {
@@ -151,26 +140,26 @@ GMPInstallManager.prototype = {
     return now - lastCheck;
   },
   get _isEMEEnabled() {
-    return GMPPrefs.get(GMPPrefs.KEY_EME_ENABLED, true);
+    return GMPPrefs.getBool(GMPPrefs.KEY_EME_ENABLED, true);
   },
-  _isAddonEnabled: function(aAddon) {
-    return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_ENABLED, true, aAddon);
+  _isAddonEnabled(aAddon) {
+    return GMPPrefs.getBool(GMPPrefs.KEY_PLUGIN_ENABLED, true, aAddon);
   },
-  _isAddonUpdateEnabled: function(aAddon) {
+  _isAddonUpdateEnabled(aAddon) {
     return this._isAddonEnabled(aAddon) &&
-           GMPPrefs.get(GMPPrefs.KEY_PLUGIN_AUTOUPDATE, true, aAddon);
+           GMPPrefs.getBool(GMPPrefs.KEY_PLUGIN_AUTOUPDATE, true, aAddon);
   },
-  _updateLastCheck: function() {
+  _updateLastCheck() {
     let now = Math.round(Date.now() / 1000);
-    GMPPrefs.set(GMPPrefs.KEY_UPDATE_LAST_CHECK, now);
+    GMPPrefs.setInt(GMPPrefs.KEY_UPDATE_LAST_CHECK, now);
   },
-  _versionchangeOccurred: function() {
-    let savedBuildID = GMPPrefs.get(GMPPrefs.KEY_BUILDID, null);
-    let buildID = Services.appinfo.platformBuildID;
+  _versionchangeOccurred() {
+    let savedBuildID = GMPPrefs.getString(GMPPrefs.KEY_BUILDID, "");
+    let buildID = Services.appinfo.platformBuildID || "";
     if (savedBuildID == buildID) {
       return false;
     }
-    GMPPrefs.set(GMPPrefs.KEY_BUILDID, buildID);
+    GMPPrefs.setString(GMPPrefs.KEY_BUILDID, buildID);
     return true;
   },
   /**
@@ -180,7 +169,7 @@ GMPInstallManager.prototype = {
    * @return a promise which will be resolved if all addons could be installed
    *         successfully, rejected otherwise.
    */
-  simpleCheckAndInstall: Task.async(function*() {
+  async simpleCheckAndInstall() {
     let log = getScopedLogger("GMPInstallManager.simpleCheckAndInstall");
 
     if (this._versionchangeOccurred()) {
@@ -189,8 +178,8 @@ GMPInstallManager.prototype = {
                "new or updated GMPs.");
     } else {
       let secondsBetweenChecks =
-        GMPPrefs.get(GMPPrefs.KEY_SECONDS_BETWEEN_CHECKS,
-                     DEFAULT_SECONDS_BETWEEN_CHECKS)
+        GMPPrefs.getInt(GMPPrefs.KEY_SECONDS_BETWEEN_CHECKS,
+                        DEFAULT_SECONDS_BETWEEN_CHECKS);
       let secondsSinceLast = this._getTimeSinceLastCheck();
       log.info("Last check was: " + secondsSinceLast +
                " seconds ago, minimum seconds: " + secondsBetweenChecks);
@@ -201,24 +190,18 @@ GMPInstallManager.prototype = {
     }
 
     try {
-      let gmpAddons = yield this.checkForAddons();
+      let {usedFallback, gmpAddons} = await this.checkForAddons();
       this._updateLastCheck();
       log.info("Found " + gmpAddons.length + " addons advertised.");
       let addonsToInstall = gmpAddons.filter(function(gmpAddon) {
         log.info("Found addon: " + gmpAddon.toString());
 
         if (!gmpAddon.isValid) {
-          GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                        "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                        GMPInstallFailureReason.GMP_INVALID);
           log.info("Addon |" + gmpAddon.id + "| is invalid.");
           return false;
         }
 
         if (GMPUtils.isPluginHidden(gmpAddon)) {
-          GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                        "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                        GMPInstallFailureReason.GMP_HIDDEN);
           log.info("Addon |" + gmpAddon.id + "| has been hidden.");
           return false;
         }
@@ -228,17 +211,19 @@ GMPInstallManager.prototype = {
           return false;
         }
 
+        // Do not install from fallback if already installed as it
+        // may be a downgrade
+        if (usedFallback && gmpAddon.isUpdate) {
+         log.info("Addon |" + gmpAddon.id + "| not installing updates based " +
+                  "on fallback.");
+         return false;
+        }
+
         let addonUpdateEnabled = false;
-        if (GMP_PLUGIN_IDS.indexOf(gmpAddon.id) >= 0) {
+        if (GMP_PLUGIN_IDS.includes(gmpAddon.id)) {
           if (!this._isAddonEnabled(gmpAddon.id)) {
-            GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                          "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                          GMPInstallFailureReason.GMP_DISABLED);
             log.info("GMP |" + gmpAddon.id + "| has been disabled; skipping check.");
           } else if (!this._isAddonUpdateEnabled(gmpAddon.id)) {
-            GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                          "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                          GMPInstallFailureReason.GMP_UPDATE_DISABLED);
             log.info("Auto-update is off for " + gmpAddon.id +
                      ", skipping check.");
           } else {
@@ -262,7 +247,7 @@ GMPInstallManager.prototype = {
       let failureEncountered = false;
       for (let addon of addonsToInstall) {
         try {
-          yield this.installAddon(addon);
+          await this.installAddon(addon);
           installResults.push({
             id:     addon.id,
             result: "succeeded",
@@ -281,16 +266,16 @@ GMPInstallManager.prototype = {
       }
       return {status:  "succeeded",
               results: installResults};
-    } catch(e) {
+    } catch (e) {
       log.error("Could not check for addons", e);
       throw e;
     }
-  }),
+  },
 
   /**
    * Makes sure everything is cleaned up
    */
-  uninit: function() {
+  uninit() {
     let log = getScopedLogger("GMPInstallManager.uninit");
     if (this._request) {
       log.info("Aborting request");
@@ -322,18 +307,18 @@ function GMPAddon(addon) {
   for (let name of Object.keys(addon)) {
     this[name] = addon[name];
   }
-  log.info ("Created new addon: " + this.toString());
+  log.info("Created new addon: " + this.toString());
 }
 
 GMPAddon.prototype = {
   /**
    * Returns a string representation of the addon
    */
-  toString: function() {
+  toString() {
     return this.id + " (" +
            "isValid: " + this.isValid +
            ", isInstalled: " + this.isInstalled +
-           ", hashFunction: " + this.hashFunction+
+           ", hashFunction: " + this.hashFunction +
            ", hashValue: " + this.hashValue +
            (this.size !== undefined ? ", size: " + this.size : "" ) +
            ")";
@@ -348,10 +333,18 @@ GMPAddon.prototype = {
   },
   get isInstalled() {
     return this.version &&
-      GMPPrefs.get(GMPPrefs.KEY_PLUGIN_VERSION, "", this.id) === this.version;
+      GMPPrefs.getString(GMPPrefs.KEY_PLUGIN_VERSION, "", this.id) === this.version;
   },
   get isEME() {
-    return this.id.indexOf("gmp-eme-") == 0;
+    return this.id == "gmp-widevinecdm" || this.id.indexOf("gmp-eme-") == 0;
+  },
+  /**
+   * @return true if the addon has been previously installed and this is
+   * a new version, if this is a fresh install return false
+   */
+  get isUpdate() {
+    return this.version &&
+      GMPPrefs.getBool(GMPPrefs.KEY_PLUGIN_VERSION, false, this.id);
   },
 };
 /**
@@ -359,27 +352,11 @@ GMPAddon.prototype = {
  * into the specified location. (Which typically leties per platform)
  * @param zipPath The path on disk of the zip file to extract
  */
-function GMPExtractor(zipPath, installToDirPath) {
+function GMPExtractor(zipPath, relativeInstallPath) {
     this.zipPath = zipPath;
-    this.installToDirPath = installToDirPath;
+    this.relativeInstallPath = relativeInstallPath;
 }
 GMPExtractor.prototype = {
-  /**
-   * Obtains a list of all the entries in a zipfile in the format of *.*.
-   * This also includes files inside directories.
-   *
-   * @param zipReader the nsIZipReader to check
-   * @return An array of string name entries which can be used
-   *         in nsIZipReader.extract
-   */
-  _getZipEntries: function(zipReader) {
-    let entries = [];
-    let enumerator = zipReader.findEntries("*.*");
-    while (enumerator.hasMore()) {
-      entries.push(enumerator.getNext());
-    }
-    return entries;
-  },
   /**
    * Installs the this.zipPath contents into the directory used to store GMP
    * addons for the current platform.
@@ -387,63 +364,27 @@ GMPExtractor.prototype = {
    * @return a promise which will be resolved or rejected
    *         See GMPInstallManager.installAddon for resolve/rejected info
    */
-  install: function() {
-    try {
-      let log = getScopedLogger("GMPExtractor.install");
-      this._deferred = Promise.defer();
-      log.info("Installing " + this.zipPath + "...");
-      // Get the input zip file
-      let zipFile = Cc["@mozilla.org/file/local;1"].
-                    createInstance(Ci.nsIFile);
-      zipFile.initWithPath(this.zipPath);
-
-      // Initialize a zipReader and obtain the entries
-      var zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].
-                      createInstance(Ci.nsIZipReader);
-      zipReader.open(zipFile)
-      let entries = this._getZipEntries(zipReader);
-      let extractedPaths = [];
-
-      // Extract each of the entries
-      entries.forEach(entry => {
-        // We don't need these types of files
-        if (entry.includes("__MACOSX")) {
-          return;
-        }
-        let outFile = Cc["@mozilla.org/file/local;1"].
-                      createInstance(Ci.nsILocalFile);
-        outFile.initWithPath(this.installToDirPath);
-        outFile.appendRelativePath(entry);
-
-        // Make sure the directory hierarchy exists
-        if(!outFile.parent.exists()) {
-          outFile.parent.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("0755", 8));
-        }
-        zipReader.extract(entry, outFile);
-        extractedPaths.push(outFile.path);
-        // Ensure files are writable and executable. Otherwise we may be unable to
-        // execute or uninstall them.
-        outFile.permissions |= parseInt("0700", 8);
-        log.info(entry + " was successfully extracted to: " +
-            outFile.path);
-      });
-      zipReader.close();
-      if (!GMPInstallManager.overrideLeaveDownloadedZip) {
-        zipFile.remove(false);
+  install() {
+    this._deferred = PromiseUtils.defer();
+    let deferredPromise = this._deferred;
+    let {zipPath, relativeInstallPath} = this;
+    let worker =
+      new ChromeWorker("resource://gre/modules/GMPExtractorWorker.js");
+    worker.onmessage = function(msg) {
+      let log = getScopedLogger("GMPExtractor");
+      worker.terminate();
+      if (msg.data.result != "success") {
+        log.error("Failed to extract zip file: " + zipPath);
+        return deferredPromise.reject({
+          target: this,
+          status: msg.data.exception,
+          type: "exception"
+        });
       }
-
-      log.info(this.zipPath + " was installed successfully");
-      this._deferred.resolve(extractedPaths);
-    } catch (e) {
-      if (zipReader) {
-        zipReader.close();
-      }
-      this._deferred.reject({
-        target: this,
-        status: e,
-        type: "exception"
-      });
-    }
+      log.info("Successfully extracted zip file: " + zipPath);
+      return deferredPromise.resolve(msg.data.extractedPaths);
+    };
+    worker.postMessage({zipPath, relativeInstallPath});
     return this._deferred.promise;
   }
 };
@@ -454,8 +395,7 @@ GMPExtractor.prototype = {
  * the specified GMPAddon object.
  * @param gmpAddon The addon to install.
  */
-function GMPDownloader(gmpAddon)
-{
+function GMPDownloader(gmpAddon) {
   this._gmpAddon = gmpAddon;
 }
 
@@ -465,7 +405,7 @@ GMPDownloader.prototype = {
    * @return a promise which will be resolved or rejected
    *         See GMPInstallManager.installAddon for resolve/rejected info
    */
-  start: function() {
+  start() {
     let log = getScopedLogger("GMPDownloader");
     let gmpAddon = this._gmpAddon;
 
@@ -473,30 +413,28 @@ GMPDownloader.prototype = {
       log.info("gmpAddon is not valid, will not continue");
       return Promise.reject({
         target: this,
-        status: status,
         type: "downloaderr"
       });
     }
 
     return ProductAddonChecker.downloadAddon(gmpAddon).then((zipPath) => {
-      let path = OS.Path.join(OS.Constants.Path.profileDir,
-                              gmpAddon.id,
-                              gmpAddon.version);
-      log.info("install to directory path: " + path);
-      let gmpInstaller = new GMPExtractor(zipPath, path);
+      let relativePath = OS.Path.join(gmpAddon.id,
+                                      gmpAddon.version);
+      log.info("install to directory path: " + relativePath);
+      let gmpInstaller = new GMPExtractor(zipPath, relativePath);
       let installPromise = gmpInstaller.install();
       return installPromise.then(extractedPaths => {
         // Success, set the prefs
         let now = Math.round(Date.now() / 1000);
-        GMPPrefs.set(GMPPrefs.KEY_PLUGIN_LAST_UPDATE, now, gmpAddon.id);
+        GMPPrefs.setInt(GMPPrefs.KEY_PLUGIN_LAST_UPDATE, now, gmpAddon.id);
         // Remember our ABI, so that if the profile is migrated to another
         // platform or from 32 -> 64 bit, we notice and don't try to load the
         // unexecutable plugin library.
-        GMPPrefs.set(GMPPrefs.KEY_PLUGIN_ABI, UpdateUtils.ABI, gmpAddon.id);
+        GMPPrefs.setString(GMPPrefs.KEY_PLUGIN_ABI, UpdateUtils.ABI, gmpAddon.id);
         // Setting the version pref signals installation completion to consumers,
         // if you need to set other prefs etc. do it before this.
-        GMPPrefs.set(GMPPrefs.KEY_PLUGIN_VERSION, gmpAddon.version,
-                     gmpAddon.id);
+        GMPPrefs.setString(GMPPrefs.KEY_PLUGIN_VERSION, gmpAddon.version,
+                           gmpAddon.id);
         return extractedPaths;
       });
     });

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -10,13 +10,20 @@ EXTRA_JS_MODULES.osfile += [
     'osfile_native.jsm',
     'osfile_shared_allthreads.jsm',
     'osfile_shared_front.jsm',
-    'osfile_unix_allthreads.jsm',
-    'osfile_unix_back.jsm',
-    'osfile_unix_front.jsm',
-    'osfile_win_allthreads.jsm',
-    'osfile_win_back.jsm',
-    'osfile_win_front.jsm',
     'ospath.jsm',
     'ospath_unix.jsm',
     'ospath_win.jsm',
 ]
+
+if CONFIG['OS_TARGET'] == 'WINNT':
+    EXTRA_JS_MODULES.osfile += [
+        'osfile_win_allthreads.jsm',
+        'osfile_win_back.jsm',
+        'osfile_win_front.jsm',
+    ]
+else:
+    EXTRA_JS_MODULES.osfile += [
+        'osfile_unix_allthreads.jsm',
+        'osfile_unix_back.jsm',
+        'osfile_unix_front.jsm',
+    ]

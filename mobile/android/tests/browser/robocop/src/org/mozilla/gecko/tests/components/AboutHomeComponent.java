@@ -34,9 +34,7 @@ public class AboutHomeComponent extends BaseComponent {
     private static final List<PanelType> PANEL_ORDERING = Arrays.asList(
             PanelType.TOP_SITES,
             PanelType.BOOKMARKS,
-            PanelType.COMBINED_HISTORY,
-            PanelType.RECENT_TABS,
-            PanelType.READING_LIST
+            PanelType.COMBINED_HISTORY
     );
 
     // The percentage of the panel to swipe between 0 and 1. This value was set through
@@ -48,7 +46,7 @@ public class AboutHomeComponent extends BaseComponent {
     }
 
     private View getHomePagerContainer() {
-        return mSolo.getView(R.id.home_pager_container);
+        return mSolo.getView(R.id.home_screen_container);
     }
 
     private ViewPager getHomePagerView() {
@@ -87,20 +85,11 @@ public class AboutHomeComponent extends BaseComponent {
 
     public AboutHomeComponent assertBannerNotVisible() {
         View banner = getHomeBannerView();
-        if (Build.VERSION.SDK_INT >= 11) {
-            fAssertTrue("The HomeBanner is not visible",
-                        getHomePagerContainer().getVisibility() != View.VISIBLE ||
-                        banner == null ||
-                        banner.getVisibility() != View.VISIBLE ||
-                        banner.getTranslationY() == banner.getHeight());
-        } else {
-            // getTranslationY is not available before api 11.
-            // This check is a little less specific.
-            fAssertTrue("The HomeBanner is not visible",
-                        getHomePagerContainer().getVisibility() != View.VISIBLE ||
-                        banner == null ||
-                        banner.isShown() == false);
-        }
+        fAssertTrue("The HomeBanner is not visible",
+                    getHomePagerContainer().getVisibility() != View.VISIBLE ||
+                    banner == null ||
+                    banner.getVisibility() != View.VISIBLE ||
+                    banner.getTranslationY() == banner.getHeight());
         return this;
     }
 

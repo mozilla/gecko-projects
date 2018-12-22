@@ -3,16 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 function LOG(str) {
-  dump("*** " + str + "\n");
+  // dump("*** " + str + "\n");
 }
 
 const WCCR_CONTRACTID = "@mozilla.org/embeddor.implemented/web-content-handler-registrar;1";
@@ -30,7 +27,6 @@ const PREF_SELECTED_WEB = "browser.feeds.handlers.webservice";
 const PREF_SELECTED_ACTION = "browser.feeds.handler";
 const PREF_SELECTED_READER = "browser.feeds.handler.default";
 const PREF_HANDLER_EXTERNAL_PREFIX = "network.protocol-handler.external";
-const PREF_ALLOW_DIFFERENT_HOST = "gecko.handlerService.allowRegisterFromDifferentHost";
 
 const STRING_BUNDLE_URI = "chrome://browser/locale/feeds/subscribe.properties";
 
@@ -52,13 +48,8 @@ WebContentConverter.prototype = {
     wccr.loadPreferredHandler(request);
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIStreamConverter) ||
-        iid.equals(Ci.nsIStreamListener) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIStreamConverter",
+                                          "nsIStreamListener"]),
 };
 
 let WebContentConverterFactory = {
@@ -68,12 +59,7 @@ let WebContentConverterFactory = {
     return new WebContentConverter().QueryInterface(iid);
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIFactory) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIFactory"]),
 };
 
 function ServiceInfo(contentType, uri, name) {
@@ -125,12 +111,7 @@ ServiceInfo.prototype = {
     return this._uri.replace(/%s/gi, encodeURIComponent(uri));
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIWebContentHandlerInfo) ||
-        iid.equals(Ci.nsISupports))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIWebContentHandlerInfo"]),
 };
 
 const Utils = {
@@ -149,52 +130,60 @@ const Utils = {
 
     // For security reasons we reject non-http(s) urls (see bug 354316),
     // we may need to revise this once we support more content types
-    // XXX this should be a "security exception" according to spec, but that
-    // isn't defined yet.
-    if (uri.scheme != "http" && uri.scheme != "https")
-      throw("Permission denied to add " + uri.spec + " as a content or protocol handler");
+    if (uri.scheme != "http" && uri.scheme != "https") {
+      throw this.getSecurityError(
+        "Permission denied to add " + uri.spec + " as a content or protocol handler",
+        aContentWindow);
+    }
 
     // We also reject handlers registered from a different host (see bug 402287)
-    // The pref allows us to test the feature
-    let pb = Services.prefs;
-    if (!pb.getBoolPref(PREF_ALLOW_DIFFERENT_HOST) &&
-        (!["http:", "https:"].includes(aContentWindow.location.protocol) ||
-         aContentWindow.location.hostname != uri.host)) {
-      throw("Permission denied to add " + uri.spec + " as a content or protocol handler");
+    if (!["http:", "https:"].includes(aContentWindow.location.protocol) ||
+        aContentWindow.location.hostname != uri.host) {
+      throw this.getSecurityError(
+        "Permission denied to add " + uri.spec + " as a content or protocol handler",
+        aContentWindow);
     }
 
     // If the uri doesn't contain '%s', it won't be a good handler
-    if (uri.spec.indexOf("%s") < 0)
+    if (!uri.spec.includes("%s"))
       throw NS_ERROR_DOM_SYNTAX_ERR;
 
     return uri;
   },
 
   // NB: Throws if aProtocol is not allowed.
-  checkProtocolHandlerAllowed(aProtocol, aURIString) {
+  checkProtocolHandlerAllowed(aProtocol, aURIString, aWindowOrNull) {
     // First, check to make sure this isn't already handled internally (we don't
     // want to let them take over, say "chrome").
     let handler = Services.io.getProtocolHandler(aProtocol);
     if (!(handler instanceof Ci.nsIExternalProtocolHandler)) {
       // This is handled internally, so we don't want them to register
-      // XXX this should be a "security exception" according to spec, but that
-      // isn't defined yet.
-      throw(`Permission denied to add ${aURIString} as a protocol handler`);
+      throw this.getSecurityError(
+        `Permission denied to add ${aURIString} as a protocol handler`,
+        aWindowOrNull);
     }
 
     // check if it is in the black list
     let pb = Services.prefs;
-    let allowed;
-    try {
-      allowed = pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "." + aProtocol);
-    }
-    catch (e) {
-      allowed = pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "-default");
-    }
+    let allowed =
+      pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "." + aProtocol,
+                     pb.getBoolPref(PREF_HANDLER_EXTERNAL_PREFIX + "-default"));
     if (!allowed) {
-      // XXX this should be a "security exception" according to spec
-      throw(`Not allowed to register a protocol handler for ${aProtocol}`);
+      throw this.getSecurityError(
+        `Not allowed to register a protocol handler for ${aProtocol}`,
+        aWindowOrNull);
     }
+  },
+
+  // Return a SecurityError exception from the given Window if one is given.  If
+  // none is given, just return the given error string, for lack of anything
+  // better.
+  getSecurityError(errorString, aWindowOrNull) {
+    if (!aWindowOrNull) {
+      return errorString;
+    }
+
+    return new aWindowOrNull.DOMException(errorString, "SecurityError");
   },
 
   /**
@@ -290,11 +279,15 @@ WebContentConverterRegistrar.prototype = {
     if (handler) {
       request.cancel(Cr.NS_ERROR_FAILURE);
 
+      let triggeringPrincipal = channel.loadInfo
+        ? channel.loadInfo.triggeringPrincipal
+        : Services.scriptSecurityManager.getSystemPrincipal();
+
       let webNavigation =
           channel.notificationCallbacks.getInterface(Ci.nsIWebNavigation);
       webNavigation.loadURI(handler.getHandlerURI(channel.URI.spec),
                             Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
-                            null, null, null);
+                            null, null, null, triggeringPrincipal);
     }
   },
 
@@ -404,7 +397,8 @@ WebContentConverterRegistrar.prototype = {
       return;
     }
 
-    Utils.checkProtocolHandlerAllowed(aProtocol, aURIString);
+    Utils.checkProtocolHandlerAllowed(aProtocol, aURIString,
+                                      haveWindow ? aBrowserOrWindow : null);
 
     // Now Ask the user and provide the proper callback
     let message = this._getFormattedString("addProtocolHandler",
@@ -419,18 +413,17 @@ WebContentConverterRegistrar.prototype = {
 
       callback(aNotification, aButtonInfo) {
           let protocol = aButtonInfo.protocolInfo.protocol;
-          let uri      = aButtonInfo.protocolInfo.uri;
           let name     = aButtonInfo.protocolInfo.name;
 
           let handler = Cc["@mozilla.org/uriloader/web-handler-app;1"].
                         createInstance(Ci.nsIWebHandlerApp);
           handler.name = name;
-          handler.uriTemplate = uri;
+          handler.uriTemplate = aButtonInfo.protocolInfo.uri;
 
           let eps = Cc["@mozilla.org/uriloader/external-protocol-service;1"].
                     getService(Ci.nsIExternalProtocolService);
           let handlerInfo = eps.getProtocolHandlerInfo(protocol);
-          handlerInfo.possibleApplicationHandlers.appendElement(handler, false);
+          handlerInfo.possibleApplicationHandlers.appendElement(handler);
 
           // Since the user has agreed to add a new handler, chances are good
           // that the next time they see a handler of this type, they're going
@@ -459,33 +452,39 @@ WebContentConverterRegistrar.prototype = {
   registerContentHandler(aContentType, aURIString, aTitle, aWindowOrBrowser) {
     LOG("registerContentHandler(" + aContentType + "," + aURIString + "," + aTitle + ")");
 
+    // Make sure to do our URL checks up front, before our content type check,
+    // just like the WebContentConverterRegistrarContent does.
+    let haveWindow = aWindowOrBrowser &&
+                     (aWindowOrBrowser instanceof Ci.nsIDOMWindow);
+    let uri;
+    if (haveWindow) {
+      uri = Utils.checkAndGetURI(aURIString, aWindowOrBrowser);
+    } else if (aWindowOrBrowser) {
+      // uri was vetted in the content process.
+      uri = Utils.makeURI(aURIString, null);
+    }
+
     // We only support feed types at present.
-    // XXX this should be a "security exception" according to spec, but that
-    // isn't defined yet.
     let contentType = Utils.resolveContentType(aContentType);
-    if (contentType != TYPE_MAYBE_FEED)
+    // XXX We should be throwing a Utils.getSecurityError() here in at least
+    // some cases.  See bug 1266492.
+    if (contentType != TYPE_MAYBE_FEED) {
       return;
+    }
 
     if (aWindowOrBrowser) {
-      let haveWindow = (aWindowOrBrowser instanceof Ci.nsIDOMWindow);
-      let uri;
       let notificationBox;
       if (haveWindow) {
-        uri = Utils.checkAndGetURI(aURIString, aWindowOrBrowser);
-
         let browserWindow = this._getBrowserWindowForContentWindow(aWindowOrBrowser);
         let browserElement = this._getBrowserForContentWindow(browserWindow, aWindowOrBrowser);
         notificationBox = browserElement.getTabBrowser().getNotificationBox(browserElement);
       } else {
-        // uri was vetted in the content process.
-        uri = Utils.makeURI(aURIString, null);
         notificationBox = aWindowOrBrowser.getTabBrowser()
                                           .getNotificationBox(aWindowOrBrowser);
       }
 
       this._appendFeedReaderNotification(uri, aTitle, notificationBox);
-    }
-    else {
+    } else {
       this._registerContentHandler(contentType, aURIString, aTitle);
     }
   },
@@ -616,8 +615,7 @@ WebContentConverterRegistrar.prototype = {
       try {
         typeBranch.getCharPref("type");
         ++i;
-      }
-      catch (e) {
+      } catch (e) {
         // No more handlers
         break;
       }
@@ -684,12 +682,7 @@ WebContentConverterRegistrar.prototype = {
       let pb = Services.prefs.getBranch(null);
       pb.setCharPref(PREF_SELECTED_READER, "web");
 
-      let supportsString =
-        Cc["@mozilla.org/supports-string;1"].
-        createInstance(Ci.nsISupportsString);
-        supportsString.data = uri;
-      pb.setComplexValue(PREF_SELECTED_WEB, Ci.nsISupportsString,
-                         supportsString);
+      pb.setStringPref(PREF_SELECTED_WEB, uri);
       pb.setCharPref(PREF_SELECTED_ACTION, "ask");
       this._setAutoHandler(TYPE_MAYBE_FEED, null);
     }
@@ -795,7 +788,7 @@ WebContentConverterRegistrar.prototype = {
 
 
     // now register them
-    for (num of nums) {
+    for (let num of nums) {
       let branch = ps.getBranch(PREF_CONTENTHANDLERS_BRANCH + num + ".");
       try {
         this._registerContentHandlerHavingBranch(branch);
@@ -811,7 +804,7 @@ WebContentConverterRegistrar.prototype = {
       autoBranch = ps.getBranch(PREF_CONTENTHANDLERS_AUTO);
     } catch (e) {
       // No auto branch yet, that's fine
-      //LOG("WCCR.init: There is no auto branch, benign");
+      // LOG("WCCR.init: There is no auto branch, benign");
     }
 
     if (autoBranch) {
@@ -834,7 +827,7 @@ WebContentConverterRegistrar.prototype = {
     let os = Services.obs;
     switch (topic) {
     case "app-startup":
-      os.addObserver(this, "browser-ui-startup-complete", false);
+      os.addObserver(this, "browser-ui-startup-complete");
       break;
     case "browser-ui-startup-complete":
       os.removeObserver(this, "browser-ui-startup-complete");
@@ -857,7 +850,7 @@ WebContentConverterRegistrar.prototype = {
   /**
    * See nsISupports
    */
-  QueryInterface: XPCOMUtils.generateQI(
+  QueryInterface: ChromeUtils.generateQI(
      [Ci.nsIWebContentConverterService,
       Ci.nsIWebContentHandlerRegistrar,
       Ci.nsIObserver,
@@ -893,11 +886,11 @@ WebContentConverterRegistrarContent.prototype = {
       .sort();
 
     // now register them
-    for (num of nums) {
+    for (let num of nums) {
       let branch = ps.getBranch(PREF_CONTENTHANDLERS_BRANCH + num + ".");
       try {
         this._registerContentHandlerHavingBranch(branch);
-      } catch(ex) {
+      } catch (ex) {
         // do nothing, the next branch might have values
       }
     }
@@ -992,6 +985,8 @@ WebContentConverterRegistrarContent.prototype = {
                                          .messageManager;
 
     let uri = Utils.checkAndGetURI(aURIString, aBrowserOrWindow);
+    // XXX We should be throwing a Utils.getSecurityError() here in at least
+    // some cases.  See bug 1266492.
     if (Utils.resolveContentType(aContentType) != TYPE_MAYBE_FEED) {
       return;
     }
@@ -1012,7 +1007,7 @@ WebContentConverterRegistrarContent.prototype = {
                                          .messageManager;
 
     let uri = Utils.checkAndGetURI(aURIString, aBrowserOrWindow);
-    Utils.checkProtocolHandlerAllowed(aProtocol, aURIString);
+    Utils.checkProtocolHandlerAllowed(aProtocol, aURIString, aBrowserOrWindow);
 
     messageManager.sendAsyncMessage("WCCR:registerProtocolHandler",
                                     { protocol: aProtocol,
@@ -1034,7 +1029,7 @@ WebContentConverterRegistrarContent.prototype = {
   /**
    * See nsISupports
    */
-  QueryInterface: XPCOMUtils.generateQI(
+  QueryInterface: ChromeUtils.generateQI(
                      [Ci.nsIWebContentHandlerRegistrar,
                       Ci.nsIWebContentConverterService,
                       Ci.nsIFactory])

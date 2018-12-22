@@ -43,7 +43,7 @@ public:
                                 GLint x, GLint y, GLsizei width, GLsizei height,
                                 GLint border) override;
     virtual bool ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                            GLenum format, GLenum type, GLvoid *pixels) override;
+                            GLenum format, GLenum type, GLvoid* pixels) override;
 
     virtual GLuint ProdTexture() override {
         return mProdTex;
@@ -53,7 +53,7 @@ public:
         return LOCAL_GL_TEXTURE_RECTANGLE_ARB;
     }
 
-    static SharedSurface_IOSurface* Cast(SharedSurface *surf) {
+    static SharedSurface_IOSurface* Cast(SharedSurface* surf) {
         MOZ_ASSERT(surf->mType == SharedSurfaceType::IOSurface);
         return static_cast<SharedSurface_IOSurface*>(surf);
     }
@@ -77,13 +77,13 @@ public:
     // Infallible.
     static UniquePtr<SurfaceFactory_IOSurface> Create(GLContext* gl,
                                                       const SurfaceCaps& caps,
-                                                      const RefPtr<layers::ClientIPCAllocator>& allocator,
+                                                      const RefPtr<layers::LayersIPCChannel>& allocator,
                                                       const layers::TextureFlags& flags);
 protected:
     const gfx::IntSize mMaxDims;
 
     SurfaceFactory_IOSurface(GLContext* gl, const SurfaceCaps& caps,
-                             const RefPtr<layers::ClientIPCAllocator>& allocator,
+                             const RefPtr<layers::LayersIPCChannel>& allocator,
                              const layers::TextureFlags& flags,
                              const gfx::IntSize& maxDims)
         : SurfaceFactory(SharedSurfaceType::IOSurface, gl, caps, allocator, flags)

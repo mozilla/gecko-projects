@@ -8,9 +8,11 @@
 #ifndef SkDrawable_DEFINED
 #define SkDrawable_DEFINED
 
-#include "SkRefCnt.h"
+#include "SkFlattenable.h"
+#include "SkScalar.h"
 
 class SkCanvas;
+class SkMatrix;
 class SkPicture;
 struct SkRect;
 
@@ -21,7 +23,7 @@ struct SkRect;
  *  allow for clients of the drawable that may want to cache the results, the drawable must
  *  change its generation ID whenever its internal state changes such that it will draw differently.
  */
-class SkDrawable : public SkRefCnt {
+class SK_API SkDrawable : public SkFlattenable {
 public:
     SkDrawable();
 
@@ -30,7 +32,7 @@ public:
      *  (i.e. the saveLevel() on the canvas will match what it was when draw() was called,
      *  and the current matrix and clip settings will not be changed.
      */
-    void draw(SkCanvas*, const SkMatrix* = NULL);
+    void draw(SkCanvas*, const SkMatrix* = nullptr);
     void draw(SkCanvas*, SkScalar x, SkScalar y);
 
     SkPicture* newPictureSnapshot();
@@ -58,10 +60,13 @@ public:
      */
     void notifyDrawingChanged();
 
+    SK_DEFINE_FLATTENABLE_TYPE(SkDrawable)
+    Factory getFactory() const override { return nullptr; }
+
 protected:
     virtual SkRect onGetBounds() = 0;
     virtual void onDraw(SkCanvas*) = 0;
-    
+
     /**
      *  Default implementation calls onDraw() with a canvas that records into a picture. Subclasses
      *  may override if they have a more efficient way to return a picture for the current state

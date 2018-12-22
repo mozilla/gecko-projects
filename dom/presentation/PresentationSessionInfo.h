@@ -11,13 +11,17 @@
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
+#include "nsINamed.h"
+#include "nsINetworkInfoService.h"
 #include "nsIPresentationControlChannel.h"
 #include "nsIPresentationDevice.h"
 #include "nsIPresentationListener.h"
 #include "nsIPresentationService.h"
 #include "nsIPresentationSessionTransport.h"
+#include "nsIPresentationSessionTransportBuilder.h"
 #include "nsIServerSocket.h"
 #include "nsITimer.h"
 #include "nsString.h"
@@ -28,23 +32,28 @@ namespace dom {
 
 class PresentationSessionInfo : public nsIPresentationSessionTransportCallback
                               , public nsIPresentationControlChannelListener
+                              , public nsIPresentationSessionTransportBuilderListener
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPRESENTATIONSESSIONTRANSPORTCALLBACK
+  NS_DECL_NSIPRESENTATIONSESSIONTRANSPORTBUILDERLISTENER
 
   PresentationSessionInfo(const nsAString& aUrl,
                           const nsAString& aSessionId,
-                          nsIPresentationServiceCallback* aCallback)
+                          const uint8_t aRole)
     : mUrl(aUrl)
     , mSessionId(aSessionId)
     , mIsResponderReady(false)
     , mIsTransportReady(false)
-    , mState(nsIPresentationSessionListener::STATE_CLOSED)
-    , mCallback(aCallback)
+    , mState(nsIPresentationSessionListener::STATE_CONNECTING)
+    , mReason(NS_OK)
   {
     MOZ_ASSERT(!mUrl.IsEmpty());
     MOZ_ASSERT(!mSessionId.IsEmpty());
+    MOZ_ASSERT(aRole == nsIPresentationService::ROLE_CONTROLLER ||
+               aRole == nsIPresentationService::ROLE_RECEIVER);
+    mRole = aRole;
   }
 
   virtual nsresult Init(nsIPresentationControlChannel* aControlChannel);
@@ -59,9 +68,9 @@ public:
     return mSessionId;
   }
 
-  void SetCallback(nsIPresentationServiceCallback* aCallback)
+  uint8_t GetRole() const
   {
-    mCallback = aCallback;
+    return mRole;
   }
 
   nsresult SetListener(nsIPresentationSessionListener* aListener);
@@ -89,14 +98,26 @@ public:
     }
   }
 
-  nsresult Send(nsIInputStream* aData);
+  nsresult Send(const nsAString& aData);
+
+  nsresult SendBinaryMsg(const nsACString& aData);
+
+  nsresult SendBlob(Blob* aBlob);
 
   nsresult Close(nsresult aReason,
                  uint32_t aState);
 
+  nsresult OnTerminate(nsIPresentationControlChannel* aControlChannel);
+
   nsresult ReplyError(nsresult aReason);
 
   virtual bool IsAccessible(base::ProcessId aProcessId);
+
+  void SetTransportBuilderConstructor(
+    nsIPresentationTransportBuilderConstructor* aBuilderConstructor)
+  {
+    mBuilderConstructor = aBuilderConstructor;
+  }
 
 protected:
   virtual ~PresentationSessionInfo()
@@ -115,51 +136,77 @@ protected:
 
   virtual nsresult UntrackFromService();
 
-  void SetState(uint32_t aState)
+  void SetStateWithReason(uint32_t aState, nsresult aReason)
   {
     if (mState == aState) {
       return;
     }
 
     mState = aState;
+    mReason = aReason;
 
     // Notify session state change.
     if (mListener) {
-      nsresult rv = mListener->NotifyStateChange(mSessionId, mState);
-      NS_WARN_IF(NS_FAILED(rv));
+      DebugOnly<nsresult> rv =
+        mListener->NotifyStateChange(mSessionId, mState, aReason);
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "NotifyStateChanged");
     }
   }
 
+  void ContinueTermination();
+
+  void ResetBuilder()
+  {
+    mBuilder = nullptr;
+  }
+
+  // Should be nsIPresentationChannelDescription::TYPE_TCP/TYPE_DATACHANNEL
+  uint8_t mTransportType = 0;
+
+  nsPIDOMWindowInner* GetWindow();
+
   nsString mUrl;
   nsString mSessionId;
+  // mRole should be nsIPresentationService::ROLE_CONTROLLER
+  //              or nsIPresentationService::ROLE_RECEIVER.
+  uint8_t mRole;
   bool mIsResponderReady;
   bool mIsTransportReady;
+  bool mIsOnTerminating = false;
   uint32_t mState; // CONNECTED, CLOSED, TERMINATED
-  nsCOMPtr<nsIPresentationServiceCallback> mCallback;
+  nsresult mReason;
   nsCOMPtr<nsIPresentationSessionListener> mListener;
   nsCOMPtr<nsIPresentationDevice> mDevice;
   nsCOMPtr<nsIPresentationSessionTransport> mTransport;
   nsCOMPtr<nsIPresentationControlChannel> mControlChannel;
+  nsCOMPtr<nsIPresentationSessionTransportBuilder> mBuilder;
+  nsCOMPtr<nsIPresentationTransportBuilderConstructor> mBuilderConstructor;
 };
 
 // Session info with controlling browsing context (sender side) behaviors.
 class PresentationControllingInfo final : public PresentationSessionInfo
                                         , public nsIServerSocketListener
+                                        , public nsIListNetworkAddressesListener
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIPRESENTATIONCONTROLCHANNELLISTENER
   NS_DECL_NSISERVERSOCKETLISTENER
+  NS_DECL_NSILISTNETWORKADDRESSESLISTENER
+  NS_DECL_NSIPRESENTATIONSESSIONTRANSPORTCALLBACK
 
   PresentationControllingInfo(const nsAString& aUrl,
-                              const nsAString& aSessionId,
-                              nsIPresentationServiceCallback* aCallback)
-    : PresentationSessionInfo(aUrl, aSessionId, aCallback)
-  {
-    MOZ_ASSERT(mCallback);
-  }
+                              const nsAString& aSessionId)
+    : PresentationSessionInfo(aUrl,
+                              aSessionId,
+                              nsIPresentationService::ROLE_CONTROLLER)
+  {}
 
   nsresult Init(nsIPresentationControlChannel* aControlChannel) override;
+
+  nsresult Reconnect(nsIPresentationServiceCallback* aCallback);
+
+  nsresult BuildTransport();
 
 private:
   ~PresentationControllingInfo()
@@ -173,32 +220,45 @@ private:
 
   nsresult OnGetAddress(const nsACString& aAddress);
 
+  nsresult ContinueReconnect();
+
+  nsresult NotifyReconnectResult(nsresult aStatus);
+
   nsCOMPtr<nsIServerSocket> mServerSocket;
+  nsCOMPtr<nsIPresentationServiceCallback> mReconnectCallback;
+  bool mIsReconnecting = false;
+  bool mDoReconnectAfterClose = false;
 };
 
 // Session info with presenting browsing context (receiver side) behaviors.
 class PresentationPresentingInfo final : public PresentationSessionInfo
                                        , public PromiseNativeHandler
                                        , public nsITimerCallback
+                                       , public nsINamed
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIPRESENTATIONCONTROLCHANNELLISTENER
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   PresentationPresentingInfo(const nsAString& aUrl,
                              const nsAString& aSessionId,
                              nsIPresentationDevice* aDevice)
-    : PresentationSessionInfo(aUrl, aSessionId, nullptr)
+    : PresentationSessionInfo(aUrl,
+                              aSessionId,
+                              nsIPresentationService::ROLE_RECEIVER)
   {
     MOZ_ASSERT(aDevice);
-
     SetDevice(aDevice);
   }
 
   nsresult Init(nsIPresentationControlChannel* aControlChannel) override;
 
   nsresult NotifyResponderReady();
+  nsresult NotifyResponderFailure();
+
+  NS_IMETHODIMP OnSessionTransport(nsIPresentationSessionTransport* transport) override;
 
   void ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override;
 
@@ -212,6 +272,8 @@ public:
 
   bool IsAccessible(base::ProcessId aProcessId) override;
 
+  nsresult DoReconnect();
+
 private:
   ~PresentationPresentingInfo()
   {
@@ -224,9 +286,14 @@ private:
 
   nsresult UntrackFromService() override;
 
+  NS_IMETHODIMP
+  FlushPendingEvents(nsIPresentationDataChannelSessionTransportBuilder* builder);
+
+  bool mHasFlushPendingEvents = false;
   RefPtr<PresentationResponderLoadingCallback> mLoadingCallback;
   nsCOMPtr<nsITimer> mTimer;
   nsCOMPtr<nsIPresentationChannelDescription> mRequesterDescription;
+  nsTArray<nsString> mPendingCandidates;
   RefPtr<Promise> mPromise;
 
   // The content parent communicating with the content process which the OOP

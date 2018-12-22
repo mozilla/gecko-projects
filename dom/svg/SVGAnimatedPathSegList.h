@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
 #include "nsISMILAttr.h"
 #include "SVGPathData.h"
@@ -73,6 +74,11 @@ public:
   void ClearAnimValue(nsSVGElement *aElement);
 
   /**
+   * Empty paths are not rendered.
+   */
+  bool IsRendered() const;
+
+  /**
    * Needed for correct DOM wrapper construction since GetAnimValue may
    * actually return the baseVal!
    */
@@ -82,13 +88,12 @@ public:
   void *GetAnimValKey() const {
     return (void*)&mAnimVal;
   }
-  
+
   bool IsAnimating() const {
     return !!mAnimVal;
   }
 
-  /// Callers own the returned nsISMILAttr
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aElement);
+  UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aElement);
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
 

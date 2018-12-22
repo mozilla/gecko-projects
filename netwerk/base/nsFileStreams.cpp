@@ -15,23 +15,30 @@
 #endif
 
 #include "private/pprio.h"
+#include "prerror.h"
 
+#include "IOActivityMonitor.h"
 #include "nsFileStreams.h"
 #include "nsIFile.h"
 #include "nsReadLine.h"
 #include "nsIClassInfoImpl.h"
+#include "nsLiteralString.h"
+#include "nsSocketTransport2.h"    // for ErrorAccordingToNSPR()
 #include "mozilla/ipc/InputStreamUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/FileUtils.h"
 #include "nsNetCID.h"
 #include "nsXULAppAPI.h"
 
-#define NS_NO_INPUT_BUFFERING 1 // see http://bugzilla.mozilla.org/show_bug.cgi?id=41067
-
 typedef mozilla::ipc::FileDescriptor::PlatformHandleType FileHandleType;
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
+
 using mozilla::DebugOnly;
+using mozilla::Maybe;
+using mozilla::Nothing;
+using mozilla::Some;
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsFileStreamBase
@@ -39,12 +46,16 @@ using mozilla::DebugOnly;
 nsFileStreamBase::nsFileStreamBase()
     : mFD(nullptr)
     , mBehaviorFlags(0)
-    , mDeferredOpen(false)
+    , mState(eUnitialized)
+    , mErrorValue(NS_ERROR_FAILURE)
 {
 }
 
 nsFileStreamBase::~nsFileStreamBase()
 {
+    // We don't want to try to rewrind the stream when shutting down.
+    mBehaviorFlags &= ~nsIFileInputStream::REOPEN_ON_REWIND;
+
     Close();
 }
 
@@ -57,9 +68,6 @@ nsFileStreamBase::Seek(int32_t whence, int64_t offset)
 {
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (mFD == nullptr)
-        return NS_BASE_STREAM_CLOSED;
 
     int64_t cnt = PR_Seek64(mFD, offset, (PRSeekWhence)whence);
     if (cnt == int64_t(-1)) {
@@ -74,9 +82,6 @@ nsFileStreamBase::Tell(int64_t *result)
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (mFD == nullptr)
-        return NS_BASE_STREAM_CLOSED;
-
     int64_t cnt = PR_Seek64(mFD, 0, PR_SEEK_CUR);
     if (cnt == int64_t(-1)) {
         return NS_ErrorAccordingToNSPR();
@@ -90,9 +95,6 @@ nsFileStreamBase::SetEOF()
 {
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (mFD == nullptr)
-        return NS_BASE_STREAM_CLOSED;
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
     // Some system calls require an EOF offset.
@@ -124,10 +126,6 @@ nsFileStreamBase::GetSize(int64_t* _retval)
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!mFD) {
-        return NS_BASE_STREAM_CLOSED;
-    }
-
     PRFileInfo64 info;
     if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
         return NS_BASE_STREAM_OSERROR;
@@ -143,10 +141,6 @@ nsFileStreamBase::GetLastModified(int64_t* _retval)
 {
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mFD) {
-        return NS_BASE_STREAM_CLOSED;
-    }
 
     PRFileInfo64 info;
     if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
@@ -164,6 +158,16 @@ nsFileStreamBase::GetLastModified(int64_t* _retval)
     return NS_OK;
 }
 
+NS_IMETHODIMP
+nsFileStreamBase::GetFileDescriptor(PRFileDesc** _retval)
+{
+    nsresult rv = DoPendingOpen();
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    *_retval = mFD;
+    return NS_OK;
+}
+
 nsresult
 nsFileStreamBase::Close()
 {
@@ -174,6 +178,7 @@ nsFileStreamBase::Close()
         if (PR_Close(mFD) == PR_FAILURE)
             rv = NS_BASE_STREAM_OSERROR;
         mFD = nullptr;
+        mState = eClosed;
     }
     return rv;
 }
@@ -183,10 +188,6 @@ nsFileStreamBase::Available(uint64_t* aResult)
 {
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mFD) {
-        return NS_BASE_STREAM_CLOSED;
-    }
 
     // PR_Available with files over 4GB returns an error, so we have to
     // use the 64-bit version of PR_Available.
@@ -204,16 +205,13 @@ nsresult
 nsFileStreamBase::Read(char* aBuf, uint32_t aCount, uint32_t* aResult)
 {
     nsresult rv = DoPendingOpen();
-    if (rv == NS_ERROR_FILE_NOT_FOUND) {
-      // Don't warn if this is just a deferred file not found.
-      return rv;
-    }
-
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mFD) {
+    if (rv == NS_BASE_STREAM_CLOSED) {
         *aResult = 0;
         return NS_OK;
+    }
+
+    if (NS_FAILED(rv)) {
+        return rv;
     }
 
     int32_t bytesRead = PR_Read(mFD, aBuf, aCount);
@@ -234,9 +232,6 @@ nsFileStreamBase::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
     // wrap a BufferedInputStream around the file stream.  That will call
     // Read().
 
-    // If this is ever implemented you might need to modify
-    // nsPartialFileInputStream::ReadSegments
-
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -253,9 +248,6 @@ nsFileStreamBase::Flush(void)
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (mFD == nullptr)
-        return NS_BASE_STREAM_CLOSED;
-
     int32_t cnt = PR_Sync(mFD);
     if (cnt == -1) {
         return NS_ErrorAccordingToNSPR();
@@ -269,9 +261,6 @@ nsFileStreamBase::Write(const char *buf, uint32_t count, uint32_t *result)
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (mFD == nullptr)
-        return NS_BASE_STREAM_CLOSED;
-
     int32_t cnt = PR_Write(mFD, buf, count);
     if (cnt == -1) {
         return NS_ErrorAccordingToNSPR();
@@ -283,7 +272,7 @@ nsFileStreamBase::Write(const char *buf, uint32_t count, uint32_t *result)
 nsresult
 nsFileStreamBase::WriteFrom(nsIInputStream *inStr, uint32_t count, uint32_t *_retval)
 {
-    NS_NOTREACHED("WriteFrom (see source comment)");
+    MOZ_ASSERT_UNREACHABLE("WriteFrom (see source comment)");
     return NS_ERROR_NOT_IMPLEMENTED;
     // File streams intentionally do not support this method.
     // If you need something like this, then you should wrap
@@ -314,10 +303,10 @@ nsFileStreamBase::MaybeOpen(nsIFile* aFile, int32_t aIoFlags,
         nsresult rv = aFile->Clone(getter_AddRefs(file));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        mOpenParams.localFile = do_QueryInterface(file);
+        mOpenParams.localFile = file.forget();
         NS_ENSURE_TRUE(mOpenParams.localFile, NS_ERROR_UNEXPECTED);
 
-        mDeferredOpen = true;
+        mState = eDeferredOpen;
         return NS_OK;
     }
 
@@ -332,17 +321,29 @@ void
 nsFileStreamBase::CleanUpOpen()
 {
     mOpenParams.localFile = nullptr;
-    mDeferredOpen = false;
 }
 
 nsresult
 nsFileStreamBase::DoOpen()
 {
+    MOZ_ASSERT(mState == eDeferredOpen || mState == eUnitialized ||
+               mState == eClosed);
     NS_ASSERTION(!mFD, "Already have a file descriptor!");
     NS_ASSERTION(mOpenParams.localFile, "Must have a file to open");
 
     PRFileDesc* fd;
     nsresult rv;
+
+    if (mOpenParams.ioFlags & PR_CREATE_FILE) {
+        nsCOMPtr<nsIFile> parent;
+        mOpenParams.localFile->GetParent(getter_AddRefs(parent));
+
+        // Result doesn't need to be checked. If the file's parent path does not
+        // exist, make it. If it does exist, do nothing.
+        if (parent) {
+            Unused << parent->Create(nsIFile::DIRECTORY_TYPE, 0755);
+        }
+    }
 
 #ifdef XP_WIN
     if (mBehaviorFlags & nsIFileInputStream::SHARE_DELETE) {
@@ -360,10 +361,30 @@ nsFileStreamBase::DoOpen()
                                                    &fd);
     }
 
+    if (rv == NS_OK && IOActivityMonitor::IsActive()) {
+      auto nativePath = mOpenParams.localFile->NativePath();
+      if (!nativePath.IsEmpty()) {
+        // registering the file to the activity monitor
+        #ifdef XP_WIN
+        // 16 bits unicode
+        IOActivityMonitor::MonitorFile(fd, NS_ConvertUTF16toUTF8(nativePath.get()).get());
+        #else
+        // 8 bit unicode
+        IOActivityMonitor::MonitorFile(fd, nativePath.get());
+        #endif
+      }
+    }
+
     CleanUpOpen();
-    if (NS_FAILED(rv))
+
+    if (NS_FAILED(rv)) {
+        mState = eError;
+        mErrorValue = rv;
         return rv;
+    }
+
     mFD = fd;
+    mState = eOpened;
 
     return NS_OK;
 }
@@ -371,12 +392,33 @@ nsFileStreamBase::DoOpen()
 nsresult
 nsFileStreamBase::DoPendingOpen()
 {
-    if (!mDeferredOpen) {
+    switch (mState) {
+    case eUnitialized:
+        MOZ_CRASH("This should not happen.");
+        return NS_ERROR_FAILURE;
+
+    case eDeferredOpen:
+        return DoOpen();
+
+    case eOpened:
+        MOZ_ASSERT(mFD);
+        if (NS_WARN_IF(!mFD)) {
+          return NS_ERROR_FAILURE;
+        }
         return NS_OK;
+
+    case eClosed:
+        MOZ_ASSERT(!mFD);
+        return NS_BASE_STREAM_CLOSED;
+
+    case eError:
+        return mErrorValue;
     }
 
-    return DoOpen();
+    MOZ_CRASH("Invalid mState value.");
+    return NS_ERROR_FAILURE;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsFileInputStream
@@ -393,6 +435,7 @@ NS_INTERFACE_MAP_BEGIN(nsFileInputStream)
     NS_INTERFACE_MAP_ENTRY(nsILineInputStream)
     NS_INTERFACE_MAP_ENTRY(nsIIPCSerializableInputStream)
     NS_IMPL_QUERY_CLASSINFO(nsFileInputStream)
+    NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsICloneableInputStream, IsCloneable())
 NS_INTERFACE_MAP_END_INHERITING(nsFileStreamBase)
 
 NS_IMPL_CI_INTERFACE_GETTER(nsFileInputStream,
@@ -406,13 +449,8 @@ nsFileInputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
 {
     NS_ENSURE_NO_AGGREGATION(aOuter);
 
-    nsFileInputStream* stream = new nsFileInputStream();
-    if (stream == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(stream);
-    nsresult rv = stream->QueryInterface(aIID, aResult);
-    NS_RELEASE(stream);
-    return rv;
+    RefPtr<nsFileInputStream> stream = new nsFileInputStream();
+    return stream->QueryInterface(aIID, aResult);
 }
 
 nsresult
@@ -432,28 +470,8 @@ nsFileInputStream::Open(nsIFile* aFile, int32_t aIOFlags, int32_t aPerm)
     if (aPerm == -1)
         aPerm = 0;
 
-    rv = MaybeOpen(aFile, aIOFlags, aPerm,
-                   mBehaviorFlags & nsIFileInputStream::DEFER_OPEN);
-
-    if (NS_FAILED(rv)) return rv;
-
-    // if defer open is set, do not remove the file here.
-    // remove the file while Close() is called.
-    if ((mBehaviorFlags & DELETE_ON_CLOSE) &&
-        !(mBehaviorFlags & nsIFileInputStream::DEFER_OPEN)) {
-      // POSIX compatible filesystems allow a file to be unlinked while a
-      // file descriptor is still referencing the file.  since we've already
-      // opened the file descriptor, we'll try to remove the file.  if that
-      // fails, then we'll just remember the nsIFile and remove it after we
-      // close the file descriptor.
-      rv = aFile->Remove(false);
-      if (NS_SUCCEEDED(rv)) {
-        // No need to remove it later. Clear the flag.
-        mBehaviorFlags &= ~DELETE_ON_CLOSE;
-      }
-    }
-
-    return NS_OK;
+    return MaybeOpen(aFile, aIOFlags, aPerm,
+                     mBehaviorFlags & nsIFileInputStream::DEFER_OPEN);
 }
 
 NS_IMETHODIMP
@@ -461,9 +479,11 @@ nsFileInputStream::Init(nsIFile* aFile, int32_t aIOFlags, int32_t aPerm,
                         int32_t aBehaviorFlags)
 {
     NS_ENSURE_TRUE(!mFD, NS_ERROR_ALREADY_INITIALIZED);
-    NS_ENSURE_TRUE(!mDeferredOpen, NS_ERROR_ALREADY_INITIALIZED);
+    NS_ENSURE_TRUE(mState == eUnitialized || mState == eClosed,
+                   NS_ERROR_ALREADY_INITIALIZED);
 
     mBehaviorFlags = aBehaviorFlags;
+    mState = eUnitialized;
 
     mFile = aFile;
     mIOFlags = aIOFlags;
@@ -485,17 +505,7 @@ nsFileInputStream::Close()
 
     // null out mLineBuffer in case Close() is called again after failing
     mLineBuffer = nullptr;
-    nsresult rv = nsFileStreamBase::Close();
-    if (NS_FAILED(rv)) return rv;
-    if (mFile && (mBehaviorFlags & DELETE_ON_CLOSE)) {
-        rv = mFile->Remove(false);
-        NS_ASSERTION(NS_SUCCEEDED(rv), "failed to delete file");
-        // If we don't need to save the file for reopening, free it up
-        if (!(mBehaviorFlags & REOPEN_ON_REWIND)) {
-          mFile = nullptr;
-        }
-    }
-    return rv;
+    return nsFileStreamBase::Close();
 }
 
 NS_IMETHODIMP
@@ -536,12 +546,15 @@ nsresult
 nsFileInputStream::SeekInternal(int32_t aWhence, int64_t aOffset, bool aClearBuf)
 {
     nsresult rv = DoPendingOpen();
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (rv != NS_OK && rv != NS_BASE_STREAM_CLOSED) {
+        return rv;
+    }
 
     if (aClearBuf) {
         mLineBuffer = nullptr;
     }
-    if (!mFD) {
+
+    if (rv == NS_BASE_STREAM_CLOSED) {
         if (mBehaviorFlags & REOPEN_ON_REWIND) {
             rv = Open(mFile, mIOFlags, mPerm);
             NS_ENSURE_SUCCESS(rv, rv);
@@ -579,7 +592,8 @@ nsFileInputStream::Serialize(InputStreamParams& aParams,
 {
     FileInputStreamParams params;
 
-    if (mFD) {
+    if (NS_SUCCEEDED(DoPendingOpen())) {
+        MOZ_ASSERT(mFD);
         FileHandleType fd = FileHandleType(PR_FileDesc2NativeHandle(mFD));
         NS_ASSERTION(fd, "This should never be null!");
 
@@ -613,7 +627,7 @@ nsFileInputStream::Deserialize(const InputStreamParams& aParams,
                                const FileDescriptorArray& aFileDescriptors)
 {
     NS_ASSERTION(!mFD, "Already have a file descriptor?!");
-    NS_ASSERTION(!mDeferredOpen, "Deferring open?!");
+    NS_ASSERTION(mState == nsFileStreamBase::eUnitialized, "Deferring open?!");
     NS_ASSERTION(!mFile, "Should never have a file here!");
     NS_ASSERTION(!mPerm, "This should always be 0!");
 
@@ -629,18 +643,24 @@ nsFileInputStream::Deserialize(const InputStreamParams& aParams,
     FileDescriptor fd;
     if (fileDescriptorIndex < aFileDescriptors.Length()) {
         fd = aFileDescriptors[fileDescriptorIndex];
-        NS_WARN_IF_FALSE(fd.IsValid(), "Received an invalid file descriptor!");
+        NS_WARNING_ASSERTION(fd.IsValid(),
+                             "Received an invalid file descriptor!");
     } else {
         NS_WARNING("Received a bad file descriptor index!");
     }
 
     if (fd.IsValid()) {
-        PRFileDesc* fileDesc = PR_ImportFile(PROsfd(fd.PlatformHandle()));
+        auto rawFD = fd.ClonePlatformHandle();
+        PRFileDesc* fileDesc = PR_ImportFile(PROsfd(rawFD.release()));
         if (!fileDesc) {
             NS_WARNING("Failed to import file handle!");
             return false;
         }
         mFD = fileDesc;
+        mState = eOpened;
+    } else {
+      mState = eError;
+      mErrorValue = NS_ERROR_FILE_NOT_FOUND;
     }
 
     mBehaviorFlags = params.behaviorFlags();
@@ -660,217 +680,35 @@ nsFileInputStream::Deserialize(const InputStreamParams& aParams,
     return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// nsPartialFileInputStream
-
-NS_IMPL_ADDREF_INHERITED(nsPartialFileInputStream, nsFileStreamBase)
-NS_IMPL_RELEASE_INHERITED(nsPartialFileInputStream, nsFileStreamBase)
-
-NS_IMPL_CLASSINFO(nsPartialFileInputStream, nullptr, nsIClassInfo::THREADSAFE,
-                  NS_PARTIALLOCALFILEINPUTSTREAM_CID)
-
-// Don't forward to nsFileInputStream as we don't want to QI to
-// nsIFileInputStream
-NS_INTERFACE_MAP_BEGIN(nsPartialFileInputStream)
-    NS_INTERFACE_MAP_ENTRY(nsIInputStream)
-    NS_INTERFACE_MAP_ENTRY(nsIPartialFileInputStream)
-    NS_INTERFACE_MAP_ENTRY(nsILineInputStream)
-    NS_INTERFACE_MAP_ENTRY(nsIIPCSerializableInputStream)
-    NS_IMPL_QUERY_CLASSINFO(nsPartialFileInputStream)
-NS_INTERFACE_MAP_END_INHERITING(nsFileStreamBase)
-
-NS_IMPL_CI_INTERFACE_GETTER(nsPartialFileInputStream,
-                            nsIInputStream,
-                            nsIPartialFileInputStream,
-                            nsISeekableStream,
-                            nsILineInputStream)
-
-nsresult
-nsPartialFileInputStream::Create(nsISupports *aOuter, REFNSIID aIID,
-                                 void **aResult)
+Maybe<uint64_t>
+nsFileInputStream::ExpectedSerializedLength()
 {
-    NS_ENSURE_NO_AGGREGATION(aOuter);
-
-    nsPartialFileInputStream* stream = new nsPartialFileInputStream();
-
-    NS_ADDREF(stream);
-    nsresult rv = stream->QueryInterface(aIID, aResult);
-    NS_RELEASE(stream);
-    return rv;
-}
-
-NS_IMETHODIMP
-nsPartialFileInputStream::Init(nsIFile* aFile, uint64_t aStart,
-                               uint64_t aLength, int32_t aIOFlags,
-                               int32_t aPerm, int32_t aBehaviorFlags)
-{
-    mStart = aStart;
-    mLength = aLength;
-    mPosition = 0;
-
-    nsresult rv = nsFileInputStream::Init(aFile, aIOFlags, aPerm,
-                                          aBehaviorFlags);
-
-    // aFile is a partial file, it must exist.
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    mDeferredSeek = true;
-
-    return rv;
-}
-
-NS_IMETHODIMP
-nsPartialFileInputStream::Tell(int64_t *aResult)
-{
-    int64_t tell = 0;
-
-    nsresult rv = DoPendingSeek();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = nsFileInputStream::Tell(&tell);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-
-    *aResult = tell - mStart;
-    return rv;
-}
-
-NS_IMETHODIMP
-nsPartialFileInputStream::Available(uint64_t* aResult)
-{
-    uint64_t available = 0;
-
-    nsresult rv = DoPendingSeek();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = nsFileInputStream::Available(&available);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    *aResult = TruncateSize(available);
-    return rv;
-}
-
-NS_IMETHODIMP
-nsPartialFileInputStream::Read(char* aBuf, uint32_t aCount, uint32_t* aResult)
-{
-    nsresult rv = DoPendingSeek();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    uint32_t readsize = (uint32_t) TruncateSize(aCount);
-    if (readsize == 0 && mBehaviorFlags & CLOSE_ON_EOF) {
-        Close();
-        *aResult = 0;
-        return NS_OK;
-    }
-
-    rv = nsFileInputStream::Read(aBuf, readsize, aResult);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    mPosition += readsize;
-    return rv;
-}
-
-NS_IMETHODIMP
-nsPartialFileInputStream::Seek(int32_t aWhence, int64_t aOffset)
-{
-    nsresult rv = DoPendingSeek();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    int64_t offset;
-    switch (aWhence) {
-        case NS_SEEK_SET:
-            offset = mStart + aOffset;
-            break;
-        case NS_SEEK_CUR:
-            offset = mStart + mPosition + aOffset;
-            break;
-        case NS_SEEK_END:
-            offset = mStart + mLength + aOffset;
-            break;
-        default:
-            return NS_ERROR_ILLEGAL_VALUE;
-    }
-
-    if (offset < (int64_t)mStart || offset > (int64_t)(mStart + mLength)) {
-        return NS_ERROR_INVALID_ARG;
-    }
-
-    rv = nsFileInputStream::Seek(NS_SEEK_SET, offset);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    mPosition = offset - mStart;
-    return rv;
-}
-
-void
-nsPartialFileInputStream::Serialize(InputStreamParams& aParams,
-                                    FileDescriptorArray& aFileDescriptors)
-{
-    // Serialize the base class first.
-    InputStreamParams fileParams;
-    nsFileInputStream::Serialize(fileParams, aFileDescriptors);
-
-    PartialFileInputStreamParams params;
-
-    params.fileStreamParams() = fileParams.get_FileInputStreamParams();
-    params.begin() = mStart;
-    params.length() = mLength;
-
-    aParams = params;
+    return Nothing();
 }
 
 bool
-nsPartialFileInputStream::Deserialize(
-                                    const InputStreamParams& aParams,
-                                    const FileDescriptorArray& aFileDescriptors)
+nsFileInputStream::IsCloneable() const
 {
-    NS_ASSERTION(!mFD, "Already have a file descriptor?!");
-    NS_ASSERTION(!mStart, "Already have a start?!");
-    NS_ASSERTION(!mLength, "Already have a length?!");
-    NS_ASSERTION(!mPosition, "Already have a position?!");
-
-    if (aParams.type() != InputStreamParams::TPartialFileInputStreamParams) {
-        NS_WARNING("Received unknown parameters from the other process!");
-        return false;
-    }
-
-    const PartialFileInputStreamParams& params =
-        aParams.get_PartialFileInputStreamParams();
-
-    // Deserialize the base class first.
-    InputStreamParams fileParams(params.fileStreamParams());
-    if (!nsFileInputStream::Deserialize(fileParams, aFileDescriptors)) {
-        NS_WARNING("Base class deserialize failed!");
-        return false;
-    }
-
-    NS_ASSERTION(mFD, "Must have a file descriptor now!");
-
-    mStart = params.begin();
-    mLength = params.length();
-    mPosition = 0;
-
-    if (!mStart) {
-      return true;
-    }
-
-    // XXX This is so broken. Main thread IO alert.
-    return NS_SUCCEEDED(nsFileInputStream::Seek(NS_SEEK_SET, mStart));
+    // This inputStream is cloneable only if has been created using Init() and
+    // it owns a nsIFile. This is not true when it is deserialized from IPC.
+    return XRE_IsParentProcess() && mFile;
 }
 
-nsresult
-nsPartialFileInputStream::DoPendingSeek()
+NS_IMETHODIMP
+nsFileInputStream::GetCloneable(bool* aCloneable)
 {
-    if (!mDeferredSeek) {
-       return NS_OK;
-    }
-
-    mDeferredSeek = false;
-
-    // This is the first time to open the file, don't clear mLinebuffer.
-    // mLineBuffer might be already initialized by ReadLine().
-    return nsFileInputStream::SeekInternal(NS_SEEK_SET, mStart, false);
+    *aCloneable = IsCloneable();
+    return NS_OK;
 }
+
+NS_IMETHODIMP
+nsFileInputStream::Clone(nsIInputStream** aResult)
+{
+    MOZ_ASSERT(IsCloneable());
+    return NS_NewLocalFileInputStream(aResult, mFile, mIOFlags, mPerm,
+                                      mBehaviorFlags);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsFileOutputStream
 
@@ -884,13 +722,8 @@ nsFileOutputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
 {
     NS_ENSURE_NO_AGGREGATION(aOuter);
 
-    nsFileOutputStream* stream = new nsFileOutputStream();
-    if (stream == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(stream);
-    nsresult rv = stream->QueryInterface(aIID, aResult);
-    NS_RELEASE(stream);
-    return rv;
+    RefPtr<nsFileOutputStream> stream = new nsFileOutputStream();
+    return stream->QueryInterface(aIID, aResult);
 }
 
 NS_IMETHODIMP
@@ -898,9 +731,11 @@ nsFileOutputStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
                          int32_t behaviorFlags)
 {
     NS_ENSURE_TRUE(mFD == nullptr, NS_ERROR_ALREADY_INITIALIZED);
-    NS_ENSURE_TRUE(!mDeferredOpen, NS_ERROR_ALREADY_INITIALIZED);
+    NS_ENSURE_TRUE(mState == eUnitialized || mState == eClosed,
+                   NS_ERROR_ALREADY_INITIALIZED);
 
     mBehaviorFlags = behaviorFlags;
+    mState = eUnitialized;
 
     if (ioFlags == -1)
         ioFlags = PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE;
@@ -956,6 +791,9 @@ nsAtomicFileOutputStream::DoOpen()
     nsCOMPtr<nsIFile> file;
     file.swap(mOpenParams.localFile);
 
+    if (!file) {
+        return NS_ERROR_NOT_INITIALIZED;
+    }
     nsresult rv = file->Exists(&mTargetFileExists);
     if (NS_FAILED(rv)) {
         NS_ERROR("Can't tell if target file exists");
@@ -978,11 +816,18 @@ nsAtomicFileOutputStream::DoOpen()
     }
 
     if (NS_SUCCEEDED(rv) && mTargetFileExists) {
+        // Abort if |file| is not writable; it won't work as an output stream.
+        bool isWritable;
+        if (NS_SUCCEEDED(file->IsWritable(&isWritable)) && !isWritable) {
+            return NS_ERROR_FILE_ACCESS_DENIED;
+        }
+
         uint32_t origPerm;
         if (NS_FAILED(file->GetPermissions(&origPerm))) {
             NS_ERROR("Can't get permissions of target file");
             origPerm = mOpenParams.perm;
         }
+
         // XXX What if |perm| is more restrictive then |origPerm|?
         // This leaves the user supplied permissions as they were.
         rv = tempResult->CreateUnique(nsIFile::NORMAL_FILE_TYPE, origPerm);
@@ -1100,9 +945,11 @@ nsFileStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
                    int32_t behaviorFlags)
 {
     NS_ENSURE_TRUE(mFD == nullptr, NS_ERROR_ALREADY_INITIALIZED);
-    NS_ENSURE_TRUE(!mDeferredOpen, NS_ERROR_ALREADY_INITIALIZED);
+    NS_ENSURE_TRUE(mState == eUnitialized || mState == eClosed,
+                   NS_ERROR_ALREADY_INITIALIZED);
 
     mBehaviorFlags = behaviorFlags;
+    mState = eUnitialized;
 
     if (ioFlags == -1)
         ioFlags = PR_RDWR;

@@ -1,28 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
-const { Services } = Cu.import('resource://gre/modules/Services.jsm');
+const { Services } = ChromeUtils.import('resource://gre/modules/Services.jsm');
 
 var browser = Services.wm.getMostRecentWindow('navigator:browser');
 var connection = browser.navigator.mozMobileConnections[0];
 
 // provide a fake APN and enable data connection.
-function enableDataConnection() {
-  let setLock = browser.navigator.mozSettings.createLock();
-  setLock.set({
-    'ril.data.enabled': true,
-    'ril.data.apnSettings': [
-      [
-        {'carrier':'T-Mobile US',
-         'apn':'epc.tmobile.com',
-         'mmsc':'http://mms.msg.eng.t-mobile.com/mms/wapenc',
-         'types':['default','supl','mms']}
-      ]
-    ]
-  });
-}
-
 // enable 3G radio
 function enableRadio() {
   if (connection.radioState !== 'enabled') {
@@ -47,7 +31,6 @@ addMessageListener('prepare-network', function(message) {
   });
 
   enableRadio();
-  enableDataConnection();
 });
 
 addMessageListener('network-cleanup', function(message) {

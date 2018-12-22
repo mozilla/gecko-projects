@@ -17,10 +17,6 @@ class nsSMILValue;
 
 namespace mozilla {
 
-namespace gfx {
-class Matrix;
-} // namespace gfx
-
 /**
  * MotionRotateType: Enum to indicate the type of our "rotate" attribute.
  */
@@ -78,7 +74,7 @@ public:
 
 private:
   // Private constructor: prevent instances beyond my singleton.
-  MOZ_CONSTEXPR SVGMotionSMILType() {}
+  constexpr SVGMotionSMILType() {}
 };
 
 } // namespace mozilla

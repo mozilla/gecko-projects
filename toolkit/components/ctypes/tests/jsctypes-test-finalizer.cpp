@@ -1,11 +1,8 @@
 #include "errno.h"
+#include "string.h"
 
 #include "jsctypes-test.h"
 #include "jsctypes-test-finalizer.h"
-
-#if defined(_MSC_VER) && _MSC_VER < 1900
-#define snprintf _snprintf
-#endif // defined(XP_WIN)
 
 /**
  * Shared infrastructure
@@ -236,8 +233,8 @@ test_finalizer_acq_string_t(int i)
 {
   gFinalizerTestResources[i] = 1;
   if (!gFinalizerTestNames[i]) {
-    char* buf = new char[10];
-    snprintf(buf, 10, "%d", i);
+    char* buf = new char[12];
+    snprintf(buf, 12, "%d", i);
     gFinalizerTestNames[i] = buf;
     return buf;
   }
@@ -325,4 +322,3 @@ reset_errno()
 {
   errno = 0;
 }
-

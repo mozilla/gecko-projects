@@ -29,7 +29,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(ImageData)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(ImageData)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ImageData)
@@ -116,7 +115,7 @@ ImageData::DropData()
 bool
 ImageData::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector)
 {
-  return ImageDataBinding::Wrap(aCx, this, aGivenProto, aReflector);
+  return ImageData_Binding::Wrap(aCx, this, aGivenProto, aReflector);
 }
 
 } // namespace dom

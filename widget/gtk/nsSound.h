@@ -13,13 +13,14 @@
 
 #include <gtk/gtk.h>
 
-class nsSound : public nsISound, 
+class nsSound : public nsISound,
                 public nsIStreamLoaderObserver
-{ 
-public: 
-    nsSound(); 
+{
+public:
+    nsSound();
 
     static void Shutdown();
+    static already_AddRefed<nsISound> GetInstance();
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSISOUND

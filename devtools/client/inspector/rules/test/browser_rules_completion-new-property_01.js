@@ -7,66 +7,67 @@
 // Tests that CSS property names are autocompleted and cycled correctly when
 // creating a new property in the rule view.
 
-const MAX_ENTRIES = 10;
-
 // format :
 //  [
 //    what key to press,
 //    expected input box value after keypress,
-//    selectedIndex of the popup,
-//    total items in the popup
+//    is the popup open,
+//    is a suggestion selected in the popup,
 //  ]
+const OPEN = true, SELECTED = true;
 var testData = [
-  ["d", "display", 1, 3],
-  ["VK_DOWN", "dominant-baseline", 2, 3],
-  ["VK_DOWN", "direction", 0, 3],
-  ["VK_DOWN", "display", 1, 3],
-  ["VK_UP", "direction", 0, 3],
-  ["VK_UP", "dominant-baseline", 2, 3],
-  ["VK_UP", "display", 1, 3],
-  ["VK_BACK_SPACE", "d", -1, 0],
-  ["i", "display", 1, 2],
-  ["s", "display", -1, 0],
-  ["VK_BACK_SPACE", "dis", -1, 0],
-  ["VK_BACK_SPACE", "di", -1, 0],
-  ["VK_BACK_SPACE", "d", -1, 0],
-  ["VK_BACK_SPACE", "", -1, 0],
-  ["f", "filter", 3, MAX_ENTRIES],
-  ["i", "filter", 3, 4],
-  ["VK_ESCAPE", null, -1, 0],
+  ["d", "display", OPEN, SELECTED],
+  ["VK_DOWN", "dominant-baseline", OPEN, SELECTED],
+  ["VK_DOWN", "direction", OPEN, SELECTED],
+  ["VK_DOWN", "display", OPEN, SELECTED],
+  ["VK_UP", "direction", OPEN, SELECTED],
+  ["VK_UP", "dominant-baseline", OPEN, SELECTED],
+  ["VK_UP", "display", OPEN, SELECTED],
+  ["VK_BACK_SPACE", "d", !OPEN, !SELECTED],
+  ["i", "display", OPEN, SELECTED],
+  ["s", "display", !OPEN, !SELECTED],
+  ["VK_BACK_SPACE", "dis", !OPEN, !SELECTED],
+  ["VK_BACK_SPACE", "di", !OPEN, !SELECTED],
+  ["VK_BACK_SPACE", "d", !OPEN, !SELECTED],
+  ["VK_BACK_SPACE", "", !OPEN, !SELECTED],
+  ["f", "font-size", OPEN, SELECTED],
+  ["i", "filter", OPEN, SELECTED],
+  ["VK_ESCAPE", null, !OPEN, !SELECTED],
 ];
 
 const TEST_URI = "<h1 style='border: 1px solid red'>Header</h1>";
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {toolbox, inspector, view, testActor} = yield openRuleView();
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {toolbox, inspector, view, testActor} = await openRuleView();
 
   info("Test autocompletion after 1st page load");
-  yield runAutocompletionTest(toolbox, inspector, view);
+  await runAutocompletionTest(toolbox, inspector, view);
 
   info("Test autocompletion after page navigation");
-  yield reloadPage(inspector, testActor);
-  yield runAutocompletionTest(toolbox, inspector, view);
+  await reloadPage(inspector, testActor);
+  await runAutocompletionTest(toolbox, inspector, view);
 });
 
-function* runAutocompletionTest(toolbox, inspector, view) {
+async function runAutocompletionTest(toolbox, inspector, view) {
   info("Selecting the test node");
-  yield selectNode("h1", inspector);
+  await selectNode("h1", inspector);
 
   info("Focusing the css property editable field");
-  let ruleEditor = getRuleViewRuleEditor(view, 0);
-  let editor = yield focusNewRuleViewProperty(ruleEditor);
+  const ruleEditor = getRuleViewRuleEditor(view, 0);
+  const editor = await focusNewRuleViewProperty(ruleEditor);
 
   info("Starting to test for css property completion");
   for (let i = 0; i < testData.length; i++) {
-    yield testCompletion(testData[i], editor, view);
+    await testCompletion(testData[i], editor, view);
   }
 }
 
-function* testCompletion([key, completion, index, total], editor, view) {
+async function testCompletion([key, completion, open, isSelected], editor, view) {
   info("Pressing key " + key);
-  info("Expecting " + completion + ", " + index + ", " + total);
+  info("Expecting " + completion);
+  info("Is popup opened: " + open);
+  info("Is item selected: " + isSelected);
 
   let onSuggest;
 
@@ -78,22 +79,26 @@ function* testCompletion([key, completion, index, total], editor, view) {
     onSuggest = editor.once("after-suggest");
   }
 
+  // Also listening for popup opened/closed events if needed.
+  const popupEvent = open ? "popup-opened" : "popup-closed";
+  const onPopupEvent = editor.popup.isOpen !== open
+    ? once(editor.popup, popupEvent)
+    : null;
+
   info("Synthesizing key " + key);
   EventUtils.synthesizeKey(key, {}, view.styleWindow);
 
-  yield onSuggest;
-  yield waitForTick();
+  await onSuggest;
+  await onPopupEvent;
 
   info("Checking the state");
-  if (completion != null) {
+  if (completion !== null) {
     is(editor.input.value, completion, "Correct value is autocompleted");
   }
-  if (total == 0) {
+  if (!open) {
     ok(!(editor.popup && editor.popup.isOpen), "Popup is closed");
   } else {
-    ok(editor.popup._panel.state == "open" ||
-       editor.popup._panel.state == "showing", "Popup is open");
-    is(editor.popup.getItems().length, total, "Number of suggestions match");
-    is(editor.popup.selectedIndex, index, "Correct item is selected");
+    ok(editor.popup.isOpen, "Popup is open");
+    is(editor.popup.selectedIndex !== -1, isSelected, "An item is selected");
   }
 }

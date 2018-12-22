@@ -7,17 +7,18 @@
 #include "ProcessGlobal.h"
 
 #include "nsContentCID.h"
-#include "nsDOMClassInfoID.h"
-#include "mozilla/HoldDropJSObjects.h"
+#include "mozilla/dom/MessageManagerBinding.h"
+#include "mozilla/dom/ResolveSystemBinding.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
+bool ProcessGlobal::sWasCreated = false;
+
 ProcessGlobal::ProcessGlobal(nsFrameMessageManager* aMessageManager)
- : mInitialized(false),
-   mMessageManager(aMessageManager)
+ : MessageManagerGlobal(aMessageManager),
+   mInitialized(false)
 {
-  SetIsNotDOMBinding();
   mozilla::HoldJSObjects(this);
 }
 
@@ -27,32 +28,68 @@ ProcessGlobal::~ProcessGlobal()
   mozilla::DropJSObjects(this);
 }
 
+bool
+ProcessGlobal::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                         JS::Handle<jsid> aId,
+                         JS::MutableHandle<JS::PropertyDescriptor> aDesc)
+{
+    bool found;
+    if (!SystemGlobalResolve(aCx, aObj, aId, &found)) {
+      return false;
+    }
+    if (found) {
+      FillPropertyDescriptor(aDesc, aObj, JS::UndefinedValue(), false);
+    }
+    return true;
+}
+
+/* static */
+bool
+ProcessGlobal::MayResolve(jsid aId)
+{
+  return MayResolveAsSystemBindingName(aId);
+}
+
+void
+ProcessGlobal::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
+                                   bool aEnumerableOnly, ErrorResult& aRv)
+{
+  JS::Rooted<JSObject*> thisObj(aCx, GetWrapper());
+  GetSystemBindingNames(aCx, thisObj, aNames, aEnumerableOnly, aRv);
+}
+
 ProcessGlobal*
 ProcessGlobal::Get()
 {
-  nsCOMPtr<nsISyncMessageSender> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
+  nsCOMPtr<nsIGlobalObject> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
   if (!service) {
     return nullptr;
   }
-  return static_cast<ProcessGlobal*>(service.get());
+  ProcessGlobal* global = static_cast<ProcessGlobal*>(service.get());
+  if (global) {
+    sWasCreated = true;
+  }
+  return global;
 }
 
-// This method isn't automatically forwarded safely because it's notxpcom, so
-// the IDL binding doesn't know what value to return.
-NS_IMETHODIMP_(bool)
+bool
+ProcessGlobal::WasCreated()
+{
+  return sWasCreated;
+}
+
+void
 ProcessGlobal::MarkForCC()
 {
   MarkScopesForCC();
-  return mMessageManager ? mMessageManager->MarkForCC() : false;
+  MessageManagerGlobal::MarkForCC();
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(ProcessGlobal)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(ProcessGlobal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGlobal)
   tmp->TraverseHostObjectURIs(cb);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(ProcessGlobal)
@@ -63,22 +100,17 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ProcessGlobal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnonymousGlobalScopes)
+  tmp->nsMessageManagerScriptExecutor::Unlink();
   tmp->UnlinkHostObjectURIs();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ProcessGlobal)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContentProcessMessageManager)
-  NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsIContentProcessMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentProcessMessageManager)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(ProcessGlobal)
@@ -92,15 +124,30 @@ ProcessGlobal::Init()
   }
   mInitialized = true;
 
-  nsISupports* scopeSupports = NS_ISUPPORTS_CAST(nsIContentProcessMessageManager*, this);
-  return InitChildGlobalInternal(scopeSupports, NS_LITERAL_CSTRING("processChildGlobal"));
+  return InitChildGlobalInternal(NS_LITERAL_CSTRING("processChildGlobal"));
+}
+
+bool
+ProcessGlobal::WrapGlobalObject(JSContext* aCx,
+                                JS::RealmOptions& aOptions,
+                                JS::MutableHandle<JSObject*> aReflector)
+{
+  bool ok = ContentProcessMessageManager_Binding::Wrap(aCx, this, this, aOptions,
+                                                         nsJSPrincipals::get(mPrincipal),
+                                                         true, aReflector);
+  if (ok) {
+    // Since we can't rewrap we have to preserve the global's wrapper here.
+    PreserveWrapper(ToSupports(this));
+  }
+  return ok;
 }
 
 void
 ProcessGlobal::LoadScript(const nsAString& aURL)
 {
   Init();
-  LoadScriptInternal(aURL, false);
+  JS::Rooted<JSObject*> global(mozilla::dom::RootingCx(), GetWrapper());
+  LoadScriptInternal(global, aURL, false);
 }
 
 void

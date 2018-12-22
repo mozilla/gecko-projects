@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -16,7 +17,9 @@
 #include "gfxQuad.h"                    // for gfxQuad
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxTypes.h"                   // for gfxFloat
+#include "gfxUtils.h"                   // for TransformToQuad
 #include "mozilla/gfx/BasePoint3D.h"    // for BasePoint3D
+#include "mozilla/Sprintf.h"            // for SprintfLiteral
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nsTArray.h"                   // for nsTArray, etc
 #include "limits.h"
@@ -45,7 +48,7 @@ static gfxFloat RecoverZDepth(const Matrix4x4& aTransform, const gfxPoint& aPoin
 {
     const Point3D l(0, 0, 1);
     Point3D l0 = Point3D(aPoint.x, aPoint.y, 0);
-    Point3D p0 = aTransform * Point3D(0, 0, 0);
+    Point3D p0 = aTransform.TransformPoint(Point3D(0, 0, 0));
     Point3D normal = aTransform.GetNormalVector();
 
     gfxFloat n = normal.DotProduct(p0 - l0); 
@@ -88,8 +91,8 @@ static LayerSortOrder CompareDepth(Layer* aOne, Layer* aTwo) {
     aTwo->GetLocalTransform() * aTwo->GetParent()->GetEffectiveTransform();
 
   // Transform both rectangles and project into 2d space.
-  gfxQuad ourTransformedRect = ourRect.TransformToQuad(ourTransform);
-  gfxQuad otherTransformedRect = otherRect.TransformToQuad(otherTransform);
+  gfxQuad ourTransformedRect = gfxUtils::TransformToQuad(ourRect, ourTransform);
+  gfxQuad otherTransformedRect = gfxUtils::TransformToQuad(otherRect, otherTransform);
 
   gfxRect ourBounds = ourTransformedRect.GetBounds();
   gfxRect otherBounds = otherTransformedRect.GetBounds();
@@ -183,9 +186,9 @@ static void SetTextColor(uint32_t aColor)
   char command[13];
 
   /* Command is the control command to the terminal */
-  sprintf(command, "%c[%d;%d;%dm", 0x1B, RESET,
-          aColor + XTERM_FOREGROUND_COLOR_OFFSET,
-          BLACK + XTERM_BACKGROUND_COLOR_OFFSET);
+  SprintfLiteral(command, "%c[%d;%d;%dm", 0x1B, RESET,
+                 aColor + XTERM_FOREGROUND_COLOR_OFFSET,
+                 BLACK + XTERM_BACKGROUND_COLOR_OFFSET);
   printf("%s", command);
 }
 

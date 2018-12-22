@@ -1,9 +1,14 @@
-var Cu = Components.utils;
-var Ci = Components.interfaces;
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+var prefs = Cc["@mozilla.org/preferences-service;1"].
+              getService(Ci.nsIPrefBranch);
+
+// Since this test creates a TYPE_DOCUMENT channel via javascript, it will
+// end up using the wrong LoadInfo constructor. Setting this pref will disable
+// the ContentPolicyType assertion in the constructor.
+prefs.setBoolPref("network.loadinfo.skip_type_assertion", true);
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -57,7 +62,7 @@ ChannelListener.prototype = {
     }
     // debug
     // dump("executing test: " + curTest.description);
-    do_check_eq(upgrade_insecure_header, curTest.expectingHeader)
+    Assert.equal(upgrade_insecure_header, curTest.expectingHeader)
     run_next_test();
   },
 };
@@ -84,7 +89,7 @@ function run_next_test() {
     return;
   }
   channel = setupChannel(curTest.contentType);
-  channel.asyncOpen(new ChannelListener(), null);
+  channel.asyncOpen2(new ChannelListener());
 }
 
 function run_test() {

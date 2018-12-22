@@ -1,92 +1,81 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* global getURL, getFamilyName */
 "use strict";
 
 requestLongerTimeout(2);
 
 const TEST_URI = URL_ROOT + "browser_fontinspector.html";
-const FONTS = [
-  {name: "Ostrich Sans Medium", remote: true, url: URL_ROOT + "ostrich-regular.ttf",
-   format: "truetype", cssName: "bar"},
-  {name: "Ostrich Sans Black", remote: true, url: URL_ROOT + "ostrich-black.ttf",
-   format: "", cssName: "bar"},
-  {name: "Ostrich Sans Black", remote: true, url: URL_ROOT + "ostrich-black.ttf",
-   format: "", cssName: "bar"},
-  {name: "Ostrich Sans Medium", remote: true, url: URL_ROOT + "ostrich-regular.ttf",
-   format: "", cssName: "barnormal"},
-];
 
-add_task(function*() {
-  let { inspector, view } = yield openFontInspectorForURL(TEST_URI);
+add_task(async function() {
+  await pushPref("devtools.inspector.fonteditor.enabled", true);
+  const { inspector, view } = await openFontInspectorForURL(TEST_URI);
   ok(!!view, "Font inspector document is alive.");
 
-  let viewDoc = view.chromeDoc;
+  const viewDoc = view.document;
 
-  yield testBodyFonts(inspector, viewDoc);
-  yield testDivFonts(inspector, viewDoc);
-  yield testShowAllFonts(inspector, viewDoc);
+  await testBodyFonts(inspector, viewDoc);
+  await testDivFonts(inspector, viewDoc);
 });
 
-function* testBodyFonts(inspector, viewDoc) {
-  let s = viewDoc.querySelectorAll("#all-fonts > section");
-  is(s.length, 5, "Found 5 fonts");
+function isRemote(fontLi) {
+  return fontLi.querySelector(".font-origin").classList.contains("remote");
+}
 
-  for (let i = 0; i < FONTS.length; i++) {
-    let section = s[i];
-    let font = FONTS[i];
-    is(section.querySelector(".font-name").textContent, font.name,
-       "font " + i + " right font name");
-    is(section.classList.contains("is-remote"), font.remote,
-       "font " + i + " remote value correct");
-    is(section.querySelector(".font-url").value, font.url,
-       "font " + i + " url correct");
-    is(section.querySelector(".font-format").hidden, !font.format,
-       "font " + i + " format hidden value correct");
-    is(section.querySelector(".font-format").textContent,
-       font.format, "font " + i + " format correct");
-    is(section.querySelector(".font-css-name").textContent,
-       font.cssName, "font " + i + " css name correct");
-  }
+async function testBodyFonts(inspector, viewDoc) {
+  await selectNode("body", inspector);
 
-  // test that the bold and regular fonts have different previews
-  let regSrc = s[0].querySelector(".font-preview").src;
-  let boldSrc = s[1].querySelector(".font-preview").src;
-  isnot(regSrc, boldSrc, "preview for bold font is different from regular");
-
+  const lis = getUsedFontsEls(viewDoc);
   // test system font
-  let localFontName = s[4].querySelector(".font-name").textContent;
-  let localFontCSSName = s[4].querySelector(".font-css-name").textContent;
-
+  const localFontName = getName(lis[0]);
   // On Linux test machines, the Arial font doesn't exist.
   // The fallback is "Liberation Sans"
+  is(lis.length, 1, "Found 1 font on BODY");
   ok((localFontName == "Arial") || (localFontName == "Liberation Sans"),
      "local font right font name");
-  ok(s[4].classList.contains("is-local"), "local font is local");
-  ok((localFontCSSName == "Arial") || (localFontCSSName == "Liberation Sans"),
-     "Arial", "local font has right css name");
+  ok(!isRemote(lis[0]), "local font is local");
 }
 
-function* testDivFonts(inspector, viewDoc) {
-  let updated = inspector.once("fontinspector-updated");
-  yield selectNode("div", inspector);
-  yield updated;
+async function testDivFonts(inspector, viewDoc) {
+  const FONTS = [{
+    selector: "div",
+    familyName: "bar",
+    name: "Ostrich Sans Medium",
+    remote: true,
+    url: URL_ROOT + "ostrich-regular.ttf",
+  },
+  {
+    selector: ".normal-text",
+    familyName: "barnormal",
+    name: "Ostrich Sans Medium",
+    remote: true,
+    url: URL_ROOT + "ostrich-regular.ttf",
+  },
+  {
+    selector: ".bold-text",
+    familyName: "bar",
+    name: "Ostrich Sans Black",
+    remote: true,
+    url: URL_ROOT + "ostrich-black.ttf",
+  }, {
+    selector: ".black-text",
+    familyName: "bar",
+    name: "Ostrich Sans Black",
+    remote: true,
+    url: URL_ROOT + "ostrich-black.ttf",
+  }];
 
-  let sections1 = viewDoc.querySelectorAll("#all-fonts > section");
-  is(sections1.length, 1, "Found 1 font on DIV");
-  is(sections1[0].querySelector(".font-name").textContent, "Ostrich Sans Medium",
-    "The DIV font has the right name");
-}
+  for (let i = 0; i < FONTS.length; i++) {
+    await selectNode(FONTS[i].selector, inspector);
+    const lis = getUsedFontsEls(viewDoc);
+    const li = lis[0];
+    const font = FONTS[i];
 
-function* testShowAllFonts(inspector, viewDoc) {
-  info("testing showing all fonts");
-
-  let updated = inspector.once("fontinspector-updated");
-  viewDoc.querySelector("#font-showall").click();
-  yield updated;
-
-  // shouldn't change the node selection
-  is(inspector.selection.nodeFront.nodeName, "DIV", "Show all fonts selected");
-  let sections = viewDoc.querySelectorAll("#all-fonts > section");
-  is(sections.length, 6, "Font inspector shows 6 fonts (1 from iframe)");
+    is(lis.length, 1, `Found 1 font on ${FONTS[i].selector}`);
+    is(getName(li), font.name, "The DIV font has the right name");
+    is(getFamilyName(li), font.familyName, `font has the right family name`);
+    is(isRemote(li), font.remote, `font remote value correct`);
+    is(getURL(li), font.url, `font url correct`);
+  }
 }

@@ -1,38 +1,42 @@
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+/* eslint-env mozilla/frame-script */
+// assert is available to chrome scripts loaded via SpecialPowers.loadChromeScript.
+/* global assert */
 
-Cu.import("resource://gre/modules/FormHistory.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://testing-common/ContentTaskUtils.jsm");
+ChromeUtils.import("resource://gre/modules/FormHistory.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm");
 
-var gAutocompletePopup = Services.ww.activeWindow.
-                                   document.
-                                   getElementById("PopupAutoComplete");
+var gAutocompletePopup = Services.ww.activeWindow
+                                    .document
+                                    .getElementById("PopupAutoComplete");
 assert.ok(gAutocompletePopup, "Got autocomplete popup");
 
 var ParentUtils = {
   getMenuEntries() {
     let entries = [];
-    let column = gAutocompletePopup.tree.columns[0];
-    let numRows = gAutocompletePopup.tree.view.rowCount;
+    let numRows = gAutocompletePopup.view.matchCount;
     for (let i = 0; i < numRows; i++) {
-      entries.push(gAutocompletePopup.tree.view.getCellText(i, column));
+      entries.push(gAutocompletePopup.view.getValueAt(i));
     }
     return entries;
   },
 
-  cleanUpFormHist() {
-    FormHistory.update({ op: "remove" });
+  cleanUpFormHist(callback) {
+    FormHistory.update({ op: "remove" }, {
+      handleCompletion: callback,
+    });
   },
 
   updateFormHistory(changes) {
     let handler = {
-      handleError: function (error) {
+      handleError(error) {
         assert.ok(false, error);
         sendAsyncMessage("formHistoryUpdated", { ok: false });
       },
-      handleCompletion: function (reason) {
-        if (!reason)
+      handleCompletion(reason) {
+        if (!reason) {
           sendAsyncMessage("formHistoryUpdated", { ok: true });
+        }
       },
     };
     FormHistory.update(changes, handler);
@@ -45,14 +49,16 @@ var ParentUtils = {
 
   countEntries(name, value) {
     let obj = {};
-    if (name)
+    if (name) {
       obj.fieldname = name;
-    if (value)
+    }
+    if (value) {
       obj.value = value;
+    }
 
     let count = 0;
     let listener = {
-      handleResult(result) { count = result },
+      handleResult(result) { count = result; },
       handleError(error) {
         assert.ok(false, error);
         sendAsyncMessage("entriesCounted", { ok: false });
@@ -61,7 +67,7 @@ var ParentUtils = {
         if (!reason) {
           sendAsyncMessage("entriesCounted", { ok: true, count });
         }
-      }
+      },
     };
 
     FormHistory.count(obj, listener);
@@ -69,12 +75,18 @@ var ParentUtils = {
 
   checkRowCount(expectedCount, expectedFirstValue = null) {
     ContentTaskUtils.waitForCondition(() => {
-      return gAutocompletePopup.tree.view.rowCount === expectedCount &&
-        (!expectedFirstValue ||
-          expectedCount <= 1 ||
-          gAutocompletePopup.tree.view.getCellText(0, gAutocompletePopup.tree.columns[0]) ===
-          expectedFirstValue);
-    }).then(() => {
+      // This may be called before gAutocompletePopup has initialised
+      // which causes it to throw
+      try {
+        return gAutocompletePopup.view.matchCount === expectedCount &&
+          (!expectedFirstValue ||
+           expectedCount <= 1 ||
+           gAutocompletePopup.view.getValueAt(0) === expectedFirstValue);
+      } catch (e) {
+        return false;
+      }
+    }, "Waiting for row count change: " + expectedCount + " First value: " + expectedFirstValue)
+    .then(() => {
       let results = this.getMenuEntries();
       sendAsyncMessage("gotMenuChange", { results });
     });
@@ -84,7 +96,7 @@ var ParentUtils = {
     ContentTaskUtils.waitForCondition(() => {
       return gAutocompletePopup.popupOpen &&
              gAutocompletePopup.selectedIndex === expectedIndex;
-    }).then(() => {
+    }, "Checking selected index").then(() => {
       sendAsyncMessage("gotSelectedIndex");
     });
   },
@@ -104,8 +116,10 @@ var ParentUtils = {
 
   cleanup() {
     gAutocompletePopup.removeEventListener("popupshown", this._popupshownListener);
-    this.cleanUpFormHist();
-  }
+    this.cleanUpFormHist(() => {
+      sendAsyncMessage("cleanup-done");
+    });
+  },
 };
 
 ParentUtils._popupshownListener =
@@ -134,7 +148,7 @@ addMessageListener("getPopupState", () => {
 });
 
 addMessageListener("addObserver", () => {
-  Services.obs.addObserver(ParentUtils, "satchel-storage-changed", false);
+  Services.obs.addObserver(ParentUtils, "satchel-storage-changed");
 });
 addMessageListener("removeObserver", () => {
   Services.obs.removeObserver(ParentUtils, "satchel-storage-changed");

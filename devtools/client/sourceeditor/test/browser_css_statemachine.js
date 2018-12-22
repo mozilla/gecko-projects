@@ -5,7 +5,6 @@
 "use strict";
 
 const CSSCompleter = require("devtools/client/sourceeditor/css-autocompleter");
-const { Cc, Ci } = require("chrome");
 
 const CSS_URI = "http://mochi.test:8888/browser/devtools/client/sourceeditor" +
                 "/test/css_statemachine_testcases.css";
@@ -13,7 +12,7 @@ const TESTS_URI = "http://mochi.test:8888/browser/devtools/client" +
                   "/sourceeditor/test/css_statemachine_tests.json";
 
 const source = read(CSS_URI);
-const tests = eval(read(TESTS_URI));
+const {tests} = JSON.parse(read(TESTS_URI));
 
 const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
   ["<!DOCTYPE html>",
@@ -55,19 +54,14 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    " </html>"
   ].join("\n"));
 
-var doc = null;
-function test() {
-  waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab(TEST_URI);
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    doc = content.document;
-    runTests();
-  });
-}
+add_task(async function test() {
+  const tab = await addTab(TEST_URI);
+  const browser = tab.linkedBrowser;
 
-function runTests() {
-  let completer = new CSSCompleter();
-  let checkState = state => {
+  const completer = new CSSCompleter({
+    cssProperties: getClientCssProperties()
+  });
+  const checkState = state => {
     if (state[0] == "null" && (!completer.state || completer.state == "null")) {
       return true;
     } else if (state[0] == completer.state && state[0] == "selector" &&
@@ -87,24 +81,29 @@ function runTests() {
     return false;
   };
 
-  let progress = doc.getElementById("progress");
-  let progressDiv = doc.querySelector("#progress > div");
   let i = 0;
-  for (let test of tests) {
-    progress.dataset.progress = ++i;
-    progressDiv.style.width = 100 * i / tests.length + "%";
-    completer.resolveState(limit(source, test[0]),
-                           {line: test[0][0], ch: test[0][1]});
-    if (checkState(test[1])) {
+  for (const testcase of tests) {
+    ++i;
+    await ContentTask.spawn(browser, [i, tests.length], function([idx, len]) {
+      const progress = content.document.getElementById("progress");
+      const progressDiv = content.document.querySelector("#progress > div");
+      progress.dataset.progress = idx;
+      progressDiv.style.width = 100 * idx / len + "%";
+    });
+    completer.resolveState(limit(source, testcase[0]),
+                           {line: testcase[0][0], ch: testcase[0][1]});
+    if (checkState(testcase[1])) {
       ok(true, "Test " + i + " passed. ");
     } else {
-      ok(false, "Test " + i + " failed. Expected state : [" + test[1] + "] " +
+      ok(false, "Test " + i + " failed. Expected state : [" + testcase[1] + "] " +
          "but found [" + completer.state + ", " + completer.selectorState +
          ", " + completer.completing + ", " +
          (completer.propertyName || completer.selector) + "].");
-      progress.classList.add("failed");
+      await ContentTask.spawn(browser, null, function() {
+        const progress = content.document.getElementById("progress");
+        progress.classList.add("failed");
+      });
     }
   }
   gBrowser.removeCurrentTab();
-  finish();
-}
+});

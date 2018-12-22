@@ -14,7 +14,7 @@ using namespace mozilla;
 using namespace mozilla::net;
 extern LazyLogModule gFTPLog;
 
-// There are two transport connections established for an 
+// There are two transport connections established for an
 // ftp connection. One is used for the command channel , and
 // the other for the data channel. The command channel is the first
 // connection made and is used to negotiate the second, data, channel.
@@ -45,7 +45,7 @@ nsFtpChannel::SetUploadStream(nsIInputStream *stream,
     mUploadStream = stream;
 
     // NOTE: contentLength is intentionally ignored here.
- 
+
     return NS_OK;
 }
 
@@ -134,29 +134,31 @@ namespace {
 
 class FTPEventSinkProxy final : public nsIFTPEventSink
 {
-    ~FTPEventSinkProxy() {}
+    ~FTPEventSinkProxy() = default;
 
 public:
     explicit FTPEventSinkProxy(nsIFTPEventSink* aTarget)
         : mTarget(aTarget)
-        , mTargetThread(do_GetCurrentThread())
+        , mEventTarget(GetCurrentThreadEventTarget())
     { }
-        
+
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIFTPEVENTSINK
 
-    class OnFTPControlLogRunnable : public nsRunnable
+    class OnFTPControlLogRunnable : public Runnable
     {
     public:
-        OnFTPControlLogRunnable(nsIFTPEventSink* aTarget,
-                                bool aServer,
-                                const char* aMessage)
-            : mTarget(aTarget)
-            , mServer(aServer)
-            , mMessage(aMessage)
-        { }
+      OnFTPControlLogRunnable(nsIFTPEventSink* aTarget,
+                              bool aServer,
+                              const char* aMessage)
+        : mozilla::Runnable("FTPEventSinkProxy::OnFTPControlLogRunnable")
+        , mTarget(aTarget)
+        , mServer(aServer)
+        , mMessage(aMessage)
+      {
+      }
 
-        NS_DECL_NSIRUNNABLE
+      NS_DECL_NSIRUNNABLE
 
     private:
         nsCOMPtr<nsIFTPEventSink> mTarget;
@@ -166,7 +168,7 @@ public:
 
 private:
     nsCOMPtr<nsIFTPEventSink> mTarget;
-    nsCOMPtr<nsIThread> mTargetThread;
+    nsCOMPtr<nsIEventTarget> mEventTarget;
 };
 
 NS_IMPL_ISUPPORTS(FTPEventSinkProxy, nsIFTPEventSink)
@@ -176,7 +178,7 @@ FTPEventSinkProxy::OnFTPControlLog(bool aServer, const char* aMsg)
 {
     RefPtr<OnFTPControlLogRunnable> r =
         new OnFTPControlLogRunnable(mTarget, aServer, aMsg);
-    return mTargetThread->Dispatch(r, NS_DISPATCH_NORMAL);
+    return mEventTarget->Dispatch(r, NS_DISPATCH_NORMAL);
 }
 
 NS_IMETHODIMP
@@ -231,7 +233,7 @@ nsFtpChannel::Suspend()
 {
     LOG(("nsFtpChannel::Suspend [this=%p]\n", this));
 
-    nsresult rv = nsBaseChannel::Suspend();
+    nsresult rv = SuspendInternal();
 
     nsresult rvParentChannel = NS_OK;
     if (mParentChannel) {
@@ -246,7 +248,7 @@ nsFtpChannel::Resume()
 {
     LOG(("nsFtpChannel::Resume [this=%p]\n", this));
 
-    nsresult rv = nsBaseChannel::Resume();
+    nsresult rv = ResumeInternal();
 
     nsresult rvParentChannel = NS_OK;
     if (mParentChannel) {
@@ -265,6 +267,11 @@ nsFtpChannel::MessageDiversionStarted(ADivertableParentChannel *aParentChannel)
 {
   MOZ_ASSERT(!mParentChannel);
   mParentChannel = aParentChannel;
+  // If the channel is suspended, propagate that info to the parent's mEventQ.
+  uint32_t suspendCount = mSuspendCount;
+  while (suspendCount--) {
+    mParentChannel->SuspendMessageDiversion();
+  }
   return NS_OK;
 }
 
@@ -281,7 +288,7 @@ NS_IMETHODIMP
 nsFtpChannel::SuspendInternal()
 {
     LOG(("nsFtpChannel::SuspendInternal [this=%p]\n", this));
-
+    ++mSuspendCount;
     return nsBaseChannel::Suspend();
 }
 
@@ -289,6 +296,7 @@ NS_IMETHODIMP
 nsFtpChannel::ResumeInternal()
 {
     LOG(("nsFtpChannel::ResumeInternal [this=%p]\n", this));
-
+    NS_ENSURE_TRUE(mSuspendCount > 0, NS_ERROR_UNEXPECTED);
+    --mSuspendCount;
     return nsBaseChannel::Resume();
 }

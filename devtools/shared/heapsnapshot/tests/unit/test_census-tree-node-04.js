@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests CensusTreeNode with `allocationStack` breakdown.
@@ -14,7 +15,7 @@ function run_test() {
     noStack: countBreakdown,
   };
 
-  let stack1, stack2, stack3, stack4, stack5;
+  let stack1, stack2, stack3, stack4;
 
   (function a() {
     (function b() {
@@ -29,14 +30,14 @@ function run_test() {
     }());
   }());
 
-  stack5 = saveStack(1);
+  const stack5 = saveStack(1);
 
   const REPORT = new Map([
-    [stack1,    { bytes: 10, count: 1 }],
-    [stack2,    { bytes: 20, count: 2 }],
-    [stack3,    { bytes: 30, count: 3 }],
-    [stack4,    { bytes: 40, count: 4 }],
-    [stack5,    { bytes: 50, count: 5 }],
+    [stack1, { bytes: 10, count: 1 }],
+    [stack2, { bytes: 20, count: 2 }],
+    [stack3, { bytes: 30, count: 3 }],
+    [stack4, { bytes: 40, count: 4 }],
+    [stack5, { bytes: 50, count: 5 }],
     ["noStack", { bytes: 60, count: 6 }],
   ]);
 

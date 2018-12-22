@@ -1565,6 +1565,8 @@ XML_Parse(XML_Parser parser, const char *s, int len, int isFinal)
     nLeftOver = s + len - end;
     if (nLeftOver) {
       if (buffer == NULL || nLeftOver > bufferLim - buffer) {
+/* BEGIN MOZILLA CHANGE (check for overflow) */
+#if 0
         /* FIXME avoid integer overflow */
         char *temp;
         temp = (buffer == NULL
@@ -1582,6 +1584,30 @@ XML_Parse(XML_Parser parser, const char *s, int len, int isFinal)
           return XML_STATUS_ERROR;
         }
         bufferLim = buffer + len * 2;
+#else
+        char *temp;
+        int newLen = len * 2;
+        if (newLen < 0) {
+          errorCode = XML_ERROR_NO_MEMORY;
+          return XML_STATUS_ERROR;
+        }
+        temp = (buffer == NULL
+                ? (char *)MALLOC(newLen)
+                : (char *)REALLOC(buffer, newLen));
+        if (temp == NULL) {
+          errorCode = XML_ERROR_NO_MEMORY;
+          return XML_STATUS_ERROR;
+        }
+        buffer = temp;
+        if (!buffer) {
+          errorCode = XML_ERROR_NO_MEMORY;
+          eventPtr = eventEndPtr = NULL;
+          processor = errorProcessor;
+          return XML_STATUS_ERROR;
+        }
+        bufferLim = buffer + newLen;
+#endif
+/* END MOZILLA CHANGE */
       }
       memcpy(buffer, end, nLeftOver);
     }
@@ -4880,7 +4906,29 @@ processInternalEntity(XML_Parser parser, ENTITY *entity,
     }
     else {
       entity->open = XML_FALSE;
+/* BEGIN MOZILLA CHANGE (Deal with parser interruption from nested entities) */
+#if 0
       openInternalEntities = openEntity->next;
+#else
+      if (openInternalEntities == openEntity) {
+        openInternalEntities = openEntity->next;
+      }
+      else {
+        /* openEntity should be closed, but it contains an inner entity that is
+           still open. Remove openEntity from the openInternalEntities linked
+           list by looking for the inner entity in the list that links to
+           openEntity and fixing up its 'next' member
+        */
+        OPEN_INTERNAL_ENTITY *innerOpenEntity = openInternalEntities;
+        do {
+          if (innerOpenEntity->next == openEntity) {
+            innerOpenEntity->next = openEntity->next;
+            break;
+          }
+        } while ((innerOpenEntity = innerOpenEntity->next));
+      }
+#endif
+/* END MOZILLA CHANGE */
       /* put openEntity back in list of free instances */
       openEntity->next = freeInternalEntities;
       freeInternalEntities = openEntity;
@@ -6286,6 +6334,9 @@ poolGrow(STRING_POOL *pool)
   }
   if (pool->blocks && pool->start == pool->blocks->s) {
     int blockSize = (int)(pool->end - pool->start)*2;
+    if (blockSize < 0)
+      return XML_FALSE;
+
     pool->blocks = (BLOCK *)
       pool->mem->realloc_fcn(pool->blocks,
                              (offsetof(BLOCK, s)
@@ -6300,10 +6351,17 @@ poolGrow(STRING_POOL *pool)
   else {
     BLOCK *tem;
     int blockSize = (int)(pool->end - pool->start);
+    if (blockSize < 0)
+      return XML_FALSE;
+
     if (blockSize < INIT_BLOCK_SIZE)
       blockSize = INIT_BLOCK_SIZE;
     else
       blockSize *= 2;
+
+    if (blockSize < 0)
+      return XML_FALSE;
+
     tem = (BLOCK *)pool->mem->malloc_fcn(offsetof(BLOCK, s)
                                         + blockSize * sizeof(XML_Char));
     if (!tem)

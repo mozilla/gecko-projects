@@ -4,10 +4,8 @@
 
 'use strict';
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import('resource://gre/modules/Services.jsm');
+ChromeUtils.import('resource://gre/modules/XPCOMUtils.jsm');
+ChromeUtils.import('resource://gre/modules/Services.jsm');
 
 const manager = Cc['@mozilla.org/presentation-device/manager;1']
                   .getService(Ci.nsIPresentationDeviceManager);
@@ -18,16 +16,19 @@ function TestPresentationDevice() {}
 function TestPresentationControlChannel() {}
 
 TestPresentationControlChannel.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationControlChannel]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPresentationControlChannel]),
   sendOffer: function(offer) {},
   sendAnswer: function(answer) {},
-  close: function() {},
+  disconnect: function() {},
+  launch: function() {},
+  terminate: function() {},
+  reconnect: function() {},
   set listener(listener) {},
   get listener() {},
 };
 
 var testProvider = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationDeviceProvider]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPresentationDeviceProvider]),
 
   forceDiscovery: function() {
   },
@@ -37,13 +38,18 @@ var testProvider = {
   },
 };
 
+const forbiddenRequestedUrl = 'http://example.com';
 var testDevice = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPresentationDevice]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPresentationDevice]),
   id: 'id',
   name: 'name',
   type: 'type',
   establishControlChannel: function(url, presentationId) {
     return null;
+  },
+  disconnect: function() {},
+  isRequestedUrlSupported: function(requestedUrl) {
+    return forbiddenRequestedUrl !== requestedUrl;
   },
 };
 
@@ -89,7 +95,7 @@ function addDevice() {
     Assert.equal(device.type, testDevice.type, 'expected device type');
 
     run_next_test();
-  }, 'presentation-device-change', false);
+  }, 'presentation-device-change');
   manager.QueryInterface(Ci.nsIPresentationDeviceListener).addDevice(testDevice);
 }
 
@@ -114,9 +120,19 @@ function updateDevice() {
     Assert.equal(device.type, testDevice.type, 'expected device type');
 
     run_next_test();
-  }, 'presentation-device-change', false);
+  }, 'presentation-device-change');
   testDevice.name = 'updated-name';
   manager.QueryInterface(Ci.nsIPresentationDeviceListener).updateDevice(testDevice);
+}
+
+function filterDevice() {
+  let presentationUrls = Cc['@mozilla.org/array;1'].createInstance(Ci.nsIMutableArray);
+  let url = Cc['@mozilla.org/supports-string;1'].createInstance(Ci.nsISupportsString);
+  url.data = forbiddenRequestedUrl;
+  presentationUrls.appendElement(url);
+  let devices = manager.getAvailableDevices(presentationUrls);
+  Assert.equal(devices.length, 0, 'expect 0 available device for example.com');
+  run_next_test();
 }
 
 function sessionRequest() {
@@ -133,9 +149,49 @@ function sessionRequest() {
     Assert.equal(request.presentationId, testPresentationId, 'expected presentation Id');
 
     run_next_test();
-  }, 'presentation-session-request', false);
+  }, 'presentation-session-request');
   manager.QueryInterface(Ci.nsIPresentationDeviceListener)
          .onSessionRequest(testDevice, testUrl, testPresentationId, testControlChannel);
+}
+
+function terminateRequest() {
+  let testUrl = 'http://www.example.org/';
+  let testPresentationId = 'test-presentation-id';
+  let testControlChannel = new TestPresentationControlChannel();
+  let testIsFromReceiver = true;
+  Services.obs.addObserver(function observer(subject, topic, data) {
+    Services.obs.removeObserver(observer, topic);
+
+    let request = subject.QueryInterface(Ci.nsIPresentationTerminateRequest);
+
+    Assert.equal(request.device.id, testDevice.id, 'expected device');
+    Assert.equal(request.presentationId, testPresentationId, 'expected presentation Id');
+    Assert.equal(request.isFromReceiver, testIsFromReceiver, 'expected isFromReceiver');
+
+    run_next_test();
+  }, 'presentation-terminate-request');
+  manager.QueryInterface(Ci.nsIPresentationDeviceListener)
+         .onTerminateRequest(testDevice, testPresentationId,
+                             testControlChannel, testIsFromReceiver);
+}
+
+function reconnectRequest() {
+  let testUrl = 'http://www.example.org/';
+  let testPresentationId = 'test-presentation-id';
+  let testControlChannel = new TestPresentationControlChannel();
+  Services.obs.addObserver(function observer(subject, topic, data) {
+    Services.obs.removeObserver(observer, topic);
+
+    let request = subject.QueryInterface(Ci.nsIPresentationSessionRequest);
+
+    Assert.equal(request.device.id, testDevice.id, 'expected device');
+    Assert.equal(request.url, testUrl, 'expected requesting URL');
+    Assert.equal(request.presentationId, testPresentationId, 'expected presentation Id');
+
+    run_next_test();
+  }, 'presentation-reconnect-request');
+  manager.QueryInterface(Ci.nsIPresentationDeviceListener)
+         .onReconnectRequest(testDevice, testUrl, testPresentationId, testControlChannel);
 }
 
 function removeDevice() {
@@ -154,7 +210,7 @@ function removeDevice() {
     Assert.equal(devices.length, 0, 'expect 0 available device');
 
     run_next_test();
-  }, 'presentation-device-change', false);
+  }, 'presentation-device-change');
   manager.QueryInterface(Ci.nsIPresentationDeviceListener).removeDevice(testDevice);
 }
 
@@ -174,7 +230,10 @@ add_test(addProvider);
 add_test(forceDiscovery);
 add_test(addDevice);
 add_test(updateDevice);
+add_test(filterDevice);
 add_test(sessionRequest);
+add_test(terminateRequest);
+add_test(reconnectRequest);
 add_test(removeDevice);
 add_test(removeProvider);
 

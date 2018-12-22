@@ -8,7 +8,6 @@
 #define MOZILLA_DOMSVGNUMBER_H__
 
 #include "DOMSVGNumberList.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsTArray.h"
 #include "mozilla/Attributes.h"
@@ -126,12 +125,6 @@ public:
   }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
-
-  static already_AddRefed<DOMSVGNumber>
-  Constructor(const dom::GlobalObject& aGlobal, ErrorResult& aRv);
-
-  static already_AddRefed<DOMSVGNumber>
-  Constructor(const dom::GlobalObject& aGlobal, float aValue, ErrorResult& aRv);
 
   float Value();
 

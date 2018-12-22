@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGFEMergeNodeElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEMergeNodeElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEMergeNodeElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGFEMergeNodeElement::sStringInfo[1] =
@@ -24,7 +24,7 @@ nsSVGElement::StringInfo SVGFEMergeNodeElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEMergeNodeElement)
 
@@ -33,7 +33,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEMergeNodeElement)
 
 bool
 SVGFEMergeNodeElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                 nsIAtom* aAttribute) const
+                                                 nsAtom* aAttribute) const
 {
   return aNameSpaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::in;
 }

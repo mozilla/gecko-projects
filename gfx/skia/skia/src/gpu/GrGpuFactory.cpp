@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
@@ -8,30 +7,26 @@
 
 
 #include "GrGpuFactory.h"
-
-#include "GrGpu.h"
-#include "gl/GrGLConfig.h"
 #include "gl/GrGLGpu.h"
-
-static CreateGpuProc gGpuFactories[kBackendCount] = { GrGLGpu::Create, nullptr };
-
+#include "mock/GrMockGpu.h"
 #ifdef SK_VULKAN
-extern GrGpu* vk_gpu_create(GrBackendContext backendContext, const GrContextOptions& options,
-                            GrContext* context);
-GrGpuFactoryRegistrar gVkGpuFactoryProc(kVulkan_GrBackend, vk_gpu_create);
+#include "vk/GrVkGpu.h"
 #endif
 
-GrGpuFactoryRegistrar::GrGpuFactoryRegistrar(int i, CreateGpuProc proc) {
-    gGpuFactories[i] = proc;
-}
-
-GrGpu* GrGpu::Create(GrBackend backend,
-                     GrBackendContext backendContext,
-                     const GrContextOptions& options,
-                     GrContext* context) {
-    SkASSERT((int)backend < kBackendCount);
-    if (!gGpuFactories[backend]) {
-        return nullptr;
+sk_sp<GrGpu> GrGpu::Make(GrBackend backend,
+                         GrBackendContext backendContext,
+                         const GrContextOptions& options,
+                         GrContext* context) {
+    switch (backend) {
+        case kOpenGL_GrBackend:
+            return GrGLGpu::Make(backendContext, options, context);
+#ifdef SK_VULKAN
+        case kVulkan_GrBackend:
+            return GrVkGpu::Make(backendContext, options, context);
+#endif
+        case kMock_GrBackend:
+            return GrMockGpu::Make(backendContext, options, context);
+        default:
+            return nullptr;
     }
-    return (gGpuFactories[backend])(backendContext, options, context);
 }

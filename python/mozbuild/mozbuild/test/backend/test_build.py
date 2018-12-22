@@ -34,6 +34,7 @@ class TestBuild(unittest.TestCase):
         self._old_env = dict(os.environ)
         os.environ.pop('MOZCONFIG', None)
         os.environ.pop('MOZ_OBJDIR', None)
+        os.environ.pop('MOZ_PGO', None)
 
     def tearDown(self):
         os.environ.clear()
@@ -84,7 +85,7 @@ class TestBuild(unittest.TestCase):
                                    config.topobjdir)
             overrides = [
                 'install_manifest_depends=',
-                'MOZ_CHROME_FILE_FORMAT=flat',
+                'MOZ_JAR_MAKER_FILE_FORMAT=flat',
                 'TEST_MOZBUILD=1',
             ]
             with self.line_handler() as handle_make_line:
@@ -108,7 +109,7 @@ class TestBuild(unittest.TestCase):
                                    config.topobjdir)
             overrides = [
                 'install_manifest_depends=',
-                'MOZ_CHROME_FILE_FORMAT=flat',
+                'MOZ_JAR_MAKER_FILE_FORMAT=flat',
                 'TEST_MOZBUILD=1',
             ]
             with self.line_handler() as handle_make_line:

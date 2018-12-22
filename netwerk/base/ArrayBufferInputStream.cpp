@@ -8,12 +8,12 @@
 #include "nsStreamUtils.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 NS_IMPL_ISUPPORTS(ArrayBufferInputStream, nsIArrayBufferInputStream, nsIInputStream);
 
 ArrayBufferInputStream::ArrayBufferInputStream()
 : mBufferLength(0)
-, mOffset(0)
 , mPos(0)
 , mClosed(false)
 {
@@ -25,6 +25,8 @@ ArrayBufferInputStream::SetData(JS::Handle<JS::Value> aBuffer,
                                 uint32_t aLength,
                                 JSContext* aCx)
 {
+  NS_ASSERT_OWNINGTHREAD(ArrayBufferInputStream);
+
   if (!aBuffer.isObject()) {
     return NS_ERROR_FAILURE;
   }
@@ -33,11 +35,21 @@ ArrayBufferInputStream::SetData(JS::Handle<JS::Value> aBuffer,
     return NS_ERROR_FAILURE;
   }
 
-  mArrayBuffer.emplace(aCx, arrayBuffer);
-
   uint32_t buflen = JS_GetArrayBufferByteLength(arrayBuffer);
-  mOffset = std::min(buflen, aByteOffset);
-  mBufferLength = std::min(buflen - mOffset, aLength);
+  uint32_t offset = std::min(buflen, aByteOffset);
+  uint32_t bufferLength = std::min(buflen - offset, aLength);
+
+  mArrayBuffer = mozilla::MakeUniqueFallible<char[]>(bufferLength);
+  if (!mArrayBuffer) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  mBufferLength = bufferLength;
+
+  JS::AutoCheckCannotGC nogc;
+  bool isShared;
+  char* src = (char*) JS_GetArrayBufferData(arrayBuffer, &isShared, nogc) + offset;
+  memcpy(&mArrayBuffer[0], src, mBufferLength);
   return NS_OK;
 }
 
@@ -55,8 +67,7 @@ ArrayBufferInputStream::Available(uint64_t* aCount)
     return NS_BASE_STREAM_CLOSED;
   }
   if (mArrayBuffer) {
-    uint32_t buflen = JS_GetArrayBufferByteLength(mArrayBuffer->get());
-    *aCount = buflen ? buflen - mPos : 0;
+    *aCount = mBufferLength ? mBufferLength - mPos : 0;
   } else {
     *aCount = 0;
   }
@@ -86,32 +97,14 @@ ArrayBufferInputStream::ReadSegments(nsWriteSegmentFun writer, void *closure,
   while (mPos < mBufferLength) {
     uint32_t remaining = mBufferLength - mPos;
     MOZ_ASSERT(mArrayBuffer);
-    uint32_t byteLength = JS_GetArrayBufferByteLength(mArrayBuffer->get());
-    if (byteLength == 0) {
-      mClosed = true;
-      return NS_BASE_STREAM_CLOSED;
-    }
 
-    char buffer[8192];
-    uint32_t count = std::min(std::min(aCount, remaining), uint32_t(mozilla::ArrayLength(buffer)));
+    uint32_t count = std::min(aCount, remaining);
     if (count == 0) {
       break;
     }
 
-    // It is just barely possible that writer() will detach the ArrayBuffer's
-    // data, setting its length to zero. Or move the data to a different memory
-    // area. (This would only happen in a subclass that passed something other
-    // than NS_CopySegmentToBuffer as 'writer'). So copy the data out into a
-    // holding area before passing it to writer().
-    {
-      JS::AutoCheckCannotGC nogc;
-      bool isShared;
-      char* src = (char*) JS_GetArrayBufferData(mArrayBuffer->get(), &isShared, nogc) + mOffset + mPos;
-      MOZ_ASSERT(!isShared);    // Because ArrayBuffer
-      memcpy(buffer, src, count);
-    }
     uint32_t written;
-    nsresult rv = writer(this, closure, buffer, 0, count, &written);
+    nsresult rv = writer(this, closure, &mArrayBuffer[0] + mPos, *result, count, &written);
     if (NS_FAILED(rv)) {
       // InputStreams do not propagate errors to caller.
       return NS_OK;

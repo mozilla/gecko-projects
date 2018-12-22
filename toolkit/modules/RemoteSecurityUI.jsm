@@ -3,22 +3,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["RemoteSecurityUI"];
+var EXPORTED_SYMBOLS = ["RemoteSecurityUI"];
 
-const Ci = Components.interfaces;
-const Cc = Components.classes;
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-function RemoteSecurityUI()
-{
+function RemoteSecurityUI() {
     this._SSLStatus = null;
     this._state = 0;
 }
 
 RemoteSecurityUI.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISSLStatusProvider, Ci.nsISecureBrowserUI]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISSLStatusProvider, Ci.nsISecureBrowserUI]),
 
   // nsISSLStatusProvider
   get SSLStatus() { return this._SSLStatus; },
@@ -27,7 +22,7 @@ RemoteSecurityUI.prototype = {
   get state() { return this._state; },
   get tooltipText() { return ""; },
 
-  _update: function (aStatus, aState) {
+  _update(aStatus, aState) {
     this._SSLStatus = aStatus;
     this._state = aState;
   }

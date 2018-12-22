@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,38 +7,11 @@
 #include "mozilla/dom/HTMLDetailsElement.h"
 
 #include "mozilla/dom/HTMLDetailsElementBinding.h"
-#include "mozilla/dom/HTMLUnknownElement.h"
-#include "mozilla/Preferences.h"
 
-// Expand NS_IMPL_NS_NEW_HTML_ELEMENT(Details) to add pref check.
-nsGenericHTMLElement*
-NS_NewHTMLDetailsElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                         mozilla::dom::FromParser aFromParser)
-{
-  if (!mozilla::dom::HTMLDetailsElement::IsDetailsEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
-  }
-
-  return new mozilla::dom::HTMLDetailsElement(aNodeInfo);
-}
+NS_IMPL_NS_NEW_HTML_ELEMENT(Details)
 
 namespace mozilla {
 namespace dom {
-
-/* static */ bool
-HTMLDetailsElement::IsDetailsEnabled()
-{
-  static bool isDetailsEnabled = false;
-  static bool added = false;
-
-  if (!added) {
-    Preferences::AddBoolVarCache(&isDetailsEnabled,
-                                 "dom.details_element.enabled");
-    added = true;
-  }
-
-  return isDetailsEnabled;
-}
 
 HTMLDetailsElement::~HTMLDetailsElement()
 {
@@ -60,20 +34,20 @@ HTMLDetailsElement::GetFirstSummary() const
 }
 
 nsChangeHint
-HTMLDetailsElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
+HTMLDetailsElement::GetAttributeChangeHint(const nsAtom* aAttribute,
                                            int32_t aModType) const
 {
   nsChangeHint hint =
     nsGenericHTMLElement::GetAttributeChangeHint(aAttribute, aModType);
   if (aAttribute == nsGkAtoms::open) {
-    NS_UpdateHint(hint, nsChangeHint_ReconstructFrame);
+    hint |= nsChangeHint_ReconstructFrame;
   }
   return hint;
 }
 
 nsresult
-HTMLDetailsElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                  nsAttrValueOrString* aValue, bool aNotify)
+HTMLDetailsElement::BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                                  const nsAttrValueOrString* aValue, bool aNotify)
 {
   if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::open) {
     bool setOpen = aValue != nullptr;
@@ -81,7 +55,12 @@ HTMLDetailsElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (mToggleEventDispatcher) {
         mToggleEventDispatcher->Cancel();
       }
-      mToggleEventDispatcher = new ToggleEventDispatcher(this);
+      // According to the html spec, a 'toggle' event is a simple event which
+      // does not bubble.
+      mToggleEventDispatcher =
+        new AsyncEventDispatcher(this,
+                                 NS_LITERAL_STRING("toggle"),
+                                 CanBubble::eNo);
       mToggleEventDispatcher->PostDOMEvent();
     }
   }
@@ -90,10 +69,18 @@ HTMLDetailsElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                              aNotify);
 }
 
+void
+HTMLDetailsElement::AsyncEventRunning(AsyncEventDispatcher* aEvent)
+{
+  if (mToggleEventDispatcher == aEvent) {
+    mToggleEventDispatcher = nullptr;
+  }
+}
+
 JSObject*
 HTMLDetailsElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLDetailsElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLDetailsElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

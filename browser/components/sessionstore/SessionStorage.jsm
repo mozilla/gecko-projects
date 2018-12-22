@@ -4,16 +4,16 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["SessionStorage"];
+var EXPORTED_SYMBOLS = ["SessionStorage"];
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+const ssu = Cc["@mozilla.org/browser/sessionstore/utils;1"]
+              .createInstance(Ci.nsISessionStoreUtils);
 
-XPCOMUtils.defineLazyModuleGetter(this, "console",
-  "resource://gre/modules/Console.jsm");
+// A bound to the size of data to store for DOM Storage.
+const DOM_STORAGE_LIMIT_PREF = "browser.sessionstore.dom_storage_limit";
 
 // Returns the principal for a given |frame| contained in a given |docShell|.
 function getPrincipalForFrame(docShell, frame) {
@@ -22,19 +22,17 @@ function getPrincipalForFrame(docShell, frame) {
   return ssm.getDocShellCodebasePrincipal(uri, docShell);
 }
 
-this.SessionStorage = Object.freeze({
+var SessionStorage = Object.freeze({
   /**
    * Updates all sessionStorage "super cookies"
-   * @param docShell
-   *        That tab's docshell (containing the sessionStorage)
-   * @param frameTree
-   *        The docShell's FrameTree instance.
-   * @return Returns a nested object that will have hosts as keys and per-host
+   * @param content
+   *        A tab's global, i.e. the root frame we want to collect for.
+   * @return Returns a nested object that will have hosts as keys and per-origin
    *         session storage data as strings. For example:
-   *         {"example.com": {"key": "value", "my_number": "123"}}
+   *         {"https://example.com^userContextId=1": {"key": "value", "my_number": "123"}}
    */
-  collect: function (docShell, frameTree) {
-    return SessionStorageInternal.collect(docShell, frameTree);
+  collect(content) {
+    return SessionStorageInternal.collect(content);
   },
 
   /**
@@ -43,30 +41,44 @@ this.SessionStorage = Object.freeze({
    *        A tab's docshell (containing the sessionStorage)
    * @param aStorageData
    *        A nested object with storage data to be restored that has hosts as
-   *        keys and per-host session storage data as strings. For example:
-   *        {"example.com": {"key": "value", "my_number": "123"}}
+   *        keys and per-origin session storage data as strings. For example:
+   *        {"https://example.com^userContextId=1": {"key": "value", "my_number": "123"}}
    */
-  restore: function (aDocShell, aStorageData) {
+  restore(aDocShell, aStorageData) {
     SessionStorageInternal.restore(aDocShell, aStorageData);
   },
 });
 
+/**
+ * Calls the given callback |cb|, passing |frame| and each of its descendants.
+ */
+function forEachNonDynamicChildFrame(frame, cb) {
+  // Call for current frame.
+  cb(frame);
+
+  // Call the callback recursively for each descendant.
+  ssu.forEachNonDynamicChildFrame(frame, subframe => {
+    return forEachNonDynamicChildFrame(subframe, cb);
+  });
+}
+
 var SessionStorageInternal = {
   /**
    * Reads all session storage data from the given docShell.
-   * @param docShell
-   *        A tab's docshell (containing the sessionStorage)
-   * @param frameTree
-   *        The docShell's FrameTree instance.
-   * @return Returns a nested object that will have hosts as keys and per-host
+   * @param content
+   *        A tab's global, i.e. the root frame we want to collect for.
+   * @return Returns a nested object that will have hosts as keys and per-origin
    *         session storage data as strings. For example:
-   *         {"example.com": {"key": "value", "my_number": "123"}}
+   *         {"https://example.com^userContextId=1": {"key": "value", "my_number": "123"}}
    */
-  collect: function (docShell, frameTree) {
+  collect(content) {
     let data = {};
     let visitedOrigins = new Set();
+    let docShell = content.QueryInterface(Ci.nsIInterfaceRequestor)
+                          .getInterface(Ci.nsIWebNavigation)
+                          .QueryInterface(Ci.nsIDocShell);
 
-    frameTree.forEach(frame => {
+    forEachNonDynamicChildFrame(content, frame => {
       let principal = getPrincipalForFrame(docShell, frame);
       if (!principal) {
         return;
@@ -74,7 +86,14 @@ var SessionStorageInternal = {
 
       // Get the origin of the current history entry
       // and use that as a key for the per-principal storage data.
-      let origin = principal.origin;
+      let origin;
+      try {
+        // The origin getter may throw for about:blank iframes as of bug 1340710,
+        // but we should ignore them anyway.
+        origin = principal.origin;
+      } catch (e) {
+        return;
+      }
       if (visitedOrigins.has(origin)) {
         // Don't read a host twice.
         return;
@@ -98,19 +117,34 @@ var SessionStorageInternal = {
    *        A tab's docshell (containing the sessionStorage)
    * @param aStorageData
    *        A nested object with storage data to be restored that has hosts as
-   *        keys and per-host session storage data as strings. For example:
-   *        {"example.com": {"key": "value", "my_number": "123"}}
+   *        keys and per-origin session storage data as strings. For example:
+   *        {"https://example.com^userContextId=1": {"key": "value", "my_number": "123"}}
    */
-  restore: function (aDocShell, aStorageData) {
+  restore(aDocShell, aStorageData) {
     for (let origin of Object.keys(aStorageData)) {
       let data = aStorageData[origin];
 
       let principal;
 
       try {
+        // NOTE: In capture() we record the full origin for the URI which the
+        // sessionStorage is being captured for. As of bug 1235657 this code
+        // stopped parsing any origins which have originattributes correctly, as
+        // it decided to use the origin attributes from the docshell, and try to
+        // interpret the origin as a URI. Since bug 1353844 this code now correctly
+        // parses the full origin, and then discards the origin attributes, to
+        // make the behavior line up with the original intentions in bug 1235657
+        // while preserving the ability to read all session storage from
+        // previous versions. In the future, if this behavior is desired, we may
+        // want to use the spec instead of the origin as the key, and avoid
+        // transmitting origin attribute information which we then discard when
+        // restoring.
+        //
+        // If changing this logic, make sure to also change the principal
+        // computation logic in SessionStore::_sendRestoreHistory.
         let attrs = aDocShell.getOriginAttributes();
-        let originURI = Services.io.newURI(origin, null, null);
-        principal = Services.scriptSecurityManager.createCodebasePrincipal(originURI, attrs);
+        let dataPrincipal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(origin);
+        principal = Services.scriptSecurityManager.createCodebasePrincipal(dataPrincipal.URI, attrs);
       } catch (e) {
         console.error(e);
         continue;
@@ -142,7 +176,7 @@ var SessionStorageInternal = {
    * @param aDocShell
    *        A tab's docshell (containing the sessionStorage)
    */
-  _readEntry: function (aPrincipal, aDocShell) {
+  _readEntry(aPrincipal, aDocShell) {
     let hostData = {};
     let storage;
 
@@ -157,14 +191,24 @@ var SessionStorageInternal = {
       storage = null;
     }
 
-    if (storage && storage.length) {
-       for (let i = 0; i < storage.length; i++) {
-        try {
-          let key = storage.key(i);
-          hostData[key] = storage.getItem(key);
-        } catch (e) {
-          // This currently throws for secured items (cf. bug 442048).
-        }
+    if (!storage || !storage.length) {
+      return hostData;
+    }
+
+    // If the DOMSessionStorage contains too much data, ignore it.
+    let usage = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIDOMWindowUtils)
+                      .getStorageUsage(storage);
+    if (usage > Services.prefs.getIntPref(DOM_STORAGE_LIMIT_PREF)) {
+      return hostData;
+    }
+
+    for (let i = 0; i < storage.length; i++) {
+      try {
+        let key = storage.key(i);
+        hostData[key] = storage.getItem(key);
+      } catch (e) {
+        // This currently throws for secured items (cf. bug 442048).
       }
     }
 

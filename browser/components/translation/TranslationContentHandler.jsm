@@ -4,20 +4,18 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [ "TranslationContentHandler" ];
+var EXPORTED_SYMBOLS = [ "TranslationContentHandler" ];
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LanguageDetector",
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "LanguageDetector",
   "resource:///modules/translation/LanguageDetector.jsm");
 
 const STATE_OFFER = 0;
 const STATE_TRANSLATED = 2;
 const STATE_ERROR = 3;
 
-this.TranslationContentHandler = function(global, docShell) {
+var TranslationContentHandler = function(global, docShell) {
   let webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                             .getInterface(Ci.nsIWebProgress);
   webProgress.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT);
@@ -28,10 +26,10 @@ this.TranslationContentHandler = function(global, docShell) {
   global.addMessageListener("Translation:ShowTranslation", this);
   global.addMessageListener("Translation:ShowOriginal", this);
   this.global = global;
-}
+};
 
 TranslationContentHandler.prototype = {
-  handleEvent: function(aEvent) {
+  handleEvent(aEvent) {
     // We are only listening to pageshow events.
     let target = aEvent.target;
 
@@ -61,7 +59,7 @@ TranslationContentHandler.prototype = {
   },
 
   /* nsIWebProgressListener implementation */
-  onStateChange: function(aWebProgress, aRequest, aStateFlags, aStatus) {
+  onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
     if (!aWebProgress.isTopLevel ||
         !(aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) ||
         !this.global.content)
@@ -107,20 +105,14 @@ TranslationContentHandler.prototype = {
     });
   },
 
-  // Unused methods.
-  onProgressChange: function() {},
-  onLocationChange: function() {},
-  onStatusChange:   function() {},
-  onSecurityChange: function() {},
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
+                                          Ci.nsISupportsWeakReference]),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsISupportsWeakReference]),
-
-  receiveMessage: function(msg) {
+  receiveMessage(msg) {
     switch (msg.name) {
       case "Translation:TranslateDocument":
       {
-        Cu.import("resource:///modules/translation/TranslationDocument.jsm");
+        ChromeUtils.import("resource:///modules/translation/TranslationDocument.jsm");
 
         // If a TranslationDocument already exists for this document, it should
         // be used instead of creating a new one so that we can use the original
@@ -132,12 +124,12 @@ TranslationContentHandler.prototype = {
         let preferredEngine = Services.prefs.getCharPref("browser.translation.engine");
         let translator = null;
         if (preferredEngine == "yandex") {
-          Cu.import("resource:///modules/translation/YandexTranslator.jsm");
+          ChromeUtils.import("resource:///modules/translation/YandexTranslator.jsm");
           translator = new YandexTranslator(translationDocument,
                                             msg.data.from,
                                             msg.data.to);
         } else {
-          Cu.import("resource:///modules/translation/BingTranslator.jsm");
+          ChromeUtils.import("resource:///modules/translation/BingTranslator.jsm");
           translator = new BingTranslator(translationDocument,
                                           msg.data.from,
                                           msg.data.to);

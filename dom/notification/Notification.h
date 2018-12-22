@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- *//* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,9 +10,10 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/NotificationBinding.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/WorkerHolder.h"
 
 #include "nsIObserver.h"
+#include "nsISupports.h"
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
@@ -30,23 +32,20 @@ namespace dom {
 class NotificationRef;
 class WorkerNotificationObserver;
 class Promise;
-
-namespace workers {
-  class WorkerPrivate;
-} // namespace workers
+class WorkerPrivate;
 
 class Notification;
-class NotificationFeature final : public workers::WorkerFeature
+class NotificationWorkerHolder final : public WorkerHolder
 {
   // Since the feature is strongly held by a Notification, it is ok to hold
   // a raw pointer here.
   Notification* mNotification;
 
 public:
-  explicit NotificationFeature(Notification* aNotification);
+  explicit NotificationWorkerHolder(Notification* aNotification);
 
   bool
-  Notify(workers::Status aStatus) override;
+  Notify(WorkerStatus aStatus) override;
 };
 
 // Records telemetry probes at application startup, when a notification is
@@ -64,19 +63,14 @@ public:
   nsresult Init();
   void RecordDNDSupported();
   void RecordPermissions();
-  nsresult RecordSender(nsIPrincipal* aPrincipal);
 
 private:
   virtual ~NotificationTelemetryService();
-
-  nsresult AddPermissionChangeObserver();
-  nsresult RemovePermissionChangeObserver();
 
   bool GetNotificationPermission(nsISupports* aSupports,
                                  uint32_t* aCapability);
 
   bool mDNDRecorded;
-  nsTHashtable<nsStringHashKey> mOrigins;
 };
 
 /*
@@ -185,7 +179,7 @@ public:
     const nsAString& aTag,
     const nsAString& aIcon,
     const nsAString& aData,
-    const nsAString& aServiceWorkerRegistrationID,
+    const nsAString& aServiceWorkerRegistrationScope,
     ErrorResult& aRv);
 
   void GetID(nsAString& aRetval) {
@@ -252,7 +246,7 @@ public:
                                        const GetNotificationOptions& aFilter,
                                        ErrorResult& aRv);
 
-  static already_AddRefed<Promise> WorkerGet(workers::WorkerPrivate* aWorkerPrivate,
+  static already_AddRefed<Promise> WorkerGet(WorkerPrivate* aWorkerPrivate,
                                              const GetNotificationOptions& aFilter,
                                              const nsAString& aScope,
                                              ErrorResult& aRv);
@@ -280,6 +274,8 @@ public:
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
+  bool RequireInteraction() const;
+
   void GetData(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval);
 
   void InitFromJSVal(JSContext* aCx, JS::Handle<JS::Value> aData, ErrorResult& aRv);
@@ -293,7 +289,7 @@ public:
 
   // Initialized on the worker thread, never unset, and always used in
   // a read-only capacity. Used on any thread.
-  workers::WorkerPrivate* mWorkerPrivate;
+  WorkerPrivate* mWorkerPrivate;
 
   // Main thread only.
   WorkerNotificationObserver* mObserver;
@@ -317,16 +313,21 @@ public:
   static NotificationPermission GetPermissionInternal(nsIPrincipal* aPrincipal,
                                                       ErrorResult& rv);
 
+  static NotificationPermission TestPermission(nsIPrincipal* aPrincipal);
+
   bool DispatchClickEvent();
   bool DispatchNotificationClickEvent();
 
   static nsresult RemovePermission(nsIPrincipal* aPrincipal);
   static nsresult OpenSettings(nsIPrincipal* aPrincipal);
+
+  nsresult DispatchToMainThread(already_AddRefed<nsIRunnable>&& aRunnable);
 protected:
   Notification(nsIGlobalObject* aGlobal, const nsAString& aID,
                const nsAString& aTitle, const nsAString& aBody,
                NotificationDirection aDir, const nsAString& aLang,
                const nsAString& aTag, const nsAString& aIconUrl,
+               bool aRequireNotification,
                const NotificationBehavior& aBehavior);
 
   static already_AddRefed<Notification> CreateInternal(nsIGlobalObject* aGlobal,
@@ -369,7 +370,7 @@ protected:
 
   void GetAlertName(nsAString& aRetval)
   {
-    workers::AssertIsOnMainThread();
+    AssertIsOnMainThread();
     if (mAlertName.IsEmpty()) {
       SetAlertName();
     }
@@ -395,6 +396,7 @@ protected:
   const nsString mLang;
   const nsString mTag;
   const nsString mIconUrl;
+  const bool mRequireInteraction;
   nsString mDataAsBase64;
   const NotificationBehavior mBehavior;
 
@@ -446,13 +448,13 @@ private:
     return NS_IsMainThread() == !mWorkerPrivate;
   }
 
-  bool RegisterFeature();
-  void UnregisterFeature();
+  bool RegisterWorkerHolder();
+  void UnregisterWorkerHolder();
 
   nsresult ResolveIconAndSoundURL(nsString&, nsString&);
 
   // Only used for Notifications on Workers, worker thread only.
-  UniquePtr<NotificationFeature> mFeature;
+  UniquePtr<NotificationWorkerHolder> mWorkerHolder;
   // Target thread only.
   uint32_t mTaskCount;
 };

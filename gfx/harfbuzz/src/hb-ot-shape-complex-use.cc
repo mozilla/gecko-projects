@@ -144,7 +144,7 @@ collect_features_use (hb_ot_shape_planner_t *plan)
   /* "Topographical features" */
   for (unsigned int i = 0; i < ARRAY_LENGTH (arabic_features); i++)
     map->add_feature (arabic_features[i], 1, F_NONE);
-  map->add_gsub_pause (NULL);
+  map->add_gsub_pause (nullptr);
 
   /* "Standard typographic presentation" and "Positional feature application" */
   for (unsigned int i = 0; i < ARRAY_LENGTH (other_features); i++)
@@ -184,6 +184,9 @@ has_arabic_joining (hb_script_t script)
     case HB_SCRIPT_MANICHAEAN:
     case HB_SCRIPT_PSALTER_PAHLAVI:
 
+    /* Unicode-9.0 additions */
+    case HB_SCRIPT_ADLAM:
+
       return true;
 
     default:
@@ -196,7 +199,7 @@ data_create_use (const hb_ot_shape_plan_t *plan)
 {
   use_shape_plan_t *use_plan = (use_shape_plan_t *) calloc (1, sizeof (use_shape_plan_t));
   if (unlikely (!use_plan))
-    return NULL;
+    return nullptr;
 
   use_plan->rphf_mask = plan->map.get_1_mask (HB_TAG('r','p','h','f'));
 
@@ -206,7 +209,7 @@ data_create_use (const hb_ot_shape_plan_t *plan)
     if (unlikely (!use_plan->arabic_plan))
     {
       free (use_plan);
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -227,12 +230,12 @@ data_destroy_use (void *data)
 enum syllable_type_t {
   independent_cluster,
   virama_terminated_cluster,
-  consonant_cluster,
-  vowel_cluster,
+  standard_cluster,
   number_joiner_terminated_cluster,
   numeral_cluster,
   symbol_cluster,
   broken_cluster,
+  non_cluster,
 };
 
 #include "hb-ot-shape-complex-use-machine.hh"
@@ -259,7 +262,7 @@ setup_masks_use (const hb_ot_shape_plan_t *plan,
   unsigned int count = buffer->len;
   hb_glyph_info_t *info = buffer->info;
   for (unsigned int i = 0; i < count; i++)
-    info[i].use_category() = hb_use_get_categories (info[i].codepoint);
+    info[i].use_category() = hb_use_get_category (info[i].codepoint);
 }
 
 static void
@@ -289,7 +292,7 @@ setup_topographical_masks (const hb_ot_shape_plan_t *plan,
   if (use_plan->arabic_plan)
     return;
 
-  ASSERT_STATIC (INIT < 4 && ISOL < 4 && MEDI < 4 && FINA < 4);
+  static_assert ((INIT < 4 && ISOL < 4 && MEDI < 4 && FINA < 4), "");
   hb_mask_t masks[4], all_masks = 0;
   for (unsigned int i = 0; i < 4; i++)
   {
@@ -312,13 +315,13 @@ setup_topographical_masks (const hb_ot_shape_plan_t *plan,
     {
       case independent_cluster:
       case symbol_cluster:
+      case non_cluster:
 	/* These don't join.  Nothing to do. */
 	last_form = _NONE;
 	break;
 
       case virama_terminated_cluster:
-      case consonant_cluster:
-      case vowel_cluster:
+      case standard_cluster:
       case number_joiner_terminated_cluster:
       case numeral_cluster:
       case broken_cluster:
@@ -351,6 +354,8 @@ setup_syllables (const hb_ot_shape_plan_t *plan,
 		 hb_buffer_t *buffer)
 {
   find_syllables (buffer);
+  foreach_syllable (buffer, start, end)
+    buffer->unsafe_to_break (start, end);
   setup_rphf_mask (plan, buffer);
   setup_topographical_masks (plan, buffer);
 }
@@ -419,17 +424,16 @@ reorder_syllable (hb_buffer_t *buffer, unsigned int start, unsigned int end)
 {
   syllable_type_t syllable_type = (syllable_type_t) (buffer->info[start].syllable() & 0x0F);
   /* Only a few syllable types need reordering. */
-  if (unlikely (!(FLAG_SAFE (syllable_type) &
+  if (unlikely (!(FLAG_UNSAFE (syllable_type) &
 		  (FLAG (virama_terminated_cluster) |
-		   FLAG (consonant_cluster) |
-		   FLAG (vowel_cluster) |
+		   FLAG (standard_cluster) |
 		   FLAG (broken_cluster) |
 		   0))))
     return;
 
   hb_glyph_info_t *info = buffer->info;
 
-#define BASE_FLAGS (FLAG (USE_B) | FLAG (USE_GB) | FLAG (USE_IV))
+#define BASE_FLAGS (FLAG (USE_B) | FLAG (USE_GB))
 
   /* Move things forward. */
   if (info[start].use_category() == USE_R && end - start > 1)
@@ -499,9 +503,9 @@ insert_dotted_circles (const hb_ot_shape_plan_t *plan HB_UNUSED,
     return;
 
   hb_glyph_info_t dottedcircle = {0};
-  if (!font->get_glyph (0x25CCu, 0, &dottedcircle.codepoint))
+  if (!font->get_nominal_glyph (0x25CCu, &dottedcircle.codepoint))
     return;
-  dottedcircle.use_category() = hb_use_get_categories (0x25CC);
+  dottedcircle.use_category() = hb_use_get_category (0x25CC);
 
   buffer->clear_output ();
 
@@ -557,6 +561,25 @@ reorder (const hb_ot_shape_plan_t *plan,
 }
 
 static bool
+decompose_use (const hb_ot_shape_normalize_context_t *c,
+                hb_codepoint_t  ab,
+                hb_codepoint_t *a,
+                hb_codepoint_t *b)
+{
+  switch (ab)
+  {
+    /* Chakma:
+     * Special case where the Unicode decomp gives matras in the wrong order
+     * for cluster validation.
+     */
+    case 0x1112Eu : *a = 0x11127u; *b= 0x11131u; return true;
+    case 0x1112Fu : *a = 0x11127u; *b= 0x11132u; return true;
+  }
+
+  return (bool) c->unicode->decompose (ab, a, b);
+}
+
+static bool
 compose_use (const hb_ot_shape_normalize_context_t *c,
 	     hb_codepoint_t  a,
 	     hb_codepoint_t  b,
@@ -572,17 +595,18 @@ compose_use (const hb_ot_shape_normalize_context_t *c,
 
 const hb_ot_complex_shaper_t _hb_ot_complex_shaper_use =
 {
-  "use",
   collect_features_use,
-  NULL, /* override_features */
+  nullptr, /* override_features */
   data_create_use,
   data_destroy_use,
-  NULL, /* preprocess_text */
-  NULL, /* postprocess_glyphs */
+  nullptr, /* preprocess_text */
+  nullptr, /* postprocess_glyphs */
   HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT,
-  NULL, /* decompose */
+  decompose_use,
   compose_use,
   setup_masks_use,
+  nullptr, /* disable_otl */
+  nullptr, /* reorder_marks */
   HB_OT_SHAPE_ZERO_WIDTH_MARKS_BY_GDEF_EARLY,
   false, /* fallback_position */
 };

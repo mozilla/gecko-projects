@@ -40,8 +40,11 @@ HTMLMeterElement::IntrinsicState() const
 }
 
 bool
-HTMLMeterElement::ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
-                                 const nsAString& aValue, nsAttrValue& aResult)
+HTMLMeterElement::ParseAttribute(int32_t aNamespaceID,
+                                 nsAtom* aAttribute,
+                                 const nsAString& aValue,
+                                 nsIPrincipal* aMaybeScriptedPrincipal,
+                                 nsAttrValue& aResult)
 {
   if (aNamespaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::value || aAttribute == nsGkAtoms::max ||
@@ -52,7 +55,9 @@ HTMLMeterElement::ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute,
-                                                  aValue, aResult);
+                                              aValue,
+                                              aMaybeScriptedPrincipal,
+                                              aResult);
 }
 
 /*
@@ -259,7 +264,7 @@ HTMLMeterElement::GetOptimumState() const
 JSObject*
 HTMLMeterElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLMeterElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLMeterElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

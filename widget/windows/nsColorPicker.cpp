@@ -12,6 +12,7 @@
 #include "nsIWidget.h"
 #include "nsString.h"
 #include "WidgetUtils.h"
+#include "nsPIDOMWindow.h"
 
 using namespace mozilla::widget;
 
@@ -96,7 +97,8 @@ static AsyncColorChooser* gColorChooser;
 AsyncColorChooser::AsyncColorChooser(COLORREF aInitialColor,
                                      nsIWidget* aParentWidget,
                                      nsIColorPickerShownCallback* aCallback)
-  : mInitialColor(aInitialColor)
+  : mozilla::Runnable("AsyncColorChooser")
+  , mInitialColor(aInitialColor)
   , mColor(aInitialColor)
   , mParentWidget(aParentWidget)
   , mCallback(aCallback)
@@ -194,7 +196,7 @@ nsColorPicker::Init(mozIDOMWindowProxy* parent,
                     const nsAString& title,
                     const nsAString& aInitialColor)
 {
-  NS_PRECONDITION(parent,
+  MOZ_ASSERT(parent,
       "Null parent passed to colorpicker, no color picker for you!");
   mParentWidget =  WidgetUtils::DOMWindowToWidget(nsPIDOMWindowOuter::From(parent));
   mInitialColor = ColorStringToRGB(aInitialColor);

@@ -12,38 +12,39 @@ const { CallView } = require("devtools/client/performance/modules/widgets/tree-v
 const { synthesizeProfile } = require("devtools/client/performance/test/helpers/synth-utils");
 
 add_task(function() {
-  let profile = synthesizeProfile();
-  let threadNode = new ThreadNode(profile.threads[0], { startTime: 0, endTime: 20 });
+  const profile = synthesizeProfile();
+  const threadNode = new ThreadNode(profile.threads[0], { startTime: 0, endTime: 20 });
 
   // Don't display the synthesized (root) and the real (root) node twice.
   threadNode.calls = threadNode.calls[0].calls;
 
-  let treeRoot = new CallView({ frame: threadNode });
-  let container = document.createElement("vbox");
+  const treeRoot = new CallView({ frame: threadNode });
+  const container = document.createElement("vbox");
   treeRoot.attachTo(container);
 
-  let $$fun = i => container.querySelectorAll(".call-tree-cell[type=function]")[i];
-  let $$nam = i => container.querySelectorAll(".call-tree-cell[type=function] > .call-tree-name")[i];
-  let $$dur = i => container.querySelectorAll(".call-tree-cell[type=duration]")[i];
+  const $$fun = i => container.querySelectorAll(".call-tree-cell[type=function]")[i];
+  const $$nam = i => container.querySelectorAll(
+    ".call-tree-cell[type=function] > .call-tree-name")[i];
+  const $$dur = i => container.querySelectorAll(".call-tree-cell[type=duration]")[i];
 
   is(container.childNodes.length, 7,
     "The container node should have all children available.");
   is(Array.filter(container.childNodes, e => e.className != "call-tree-item").length, 0,
     "All item nodes in the tree have the correct class name.");
 
-  is($$fun(0).style.MozMarginStart, "0px",
+  is($$fun(0).style.marginInlineStart, "0px",
     "The root node's function cell has the correct indentation.");
-  is($$fun(1).style.MozMarginStart, "16px",
+  is($$fun(1).style.marginInlineStart, "16px",
     "The .A node's function cell has the correct indentation.");
-  is($$fun(2).style.MozMarginStart, "32px",
+  is($$fun(2).style.marginInlineStart, "32px",
     "The .A.B node's function cell has the correct indentation.");
-  is($$fun(3).style.MozMarginStart, "48px",
+  is($$fun(3).style.marginInlineStart, "48px",
     "The .A.B.D node's function cell has the correct indentation.");
-  is($$fun(4).style.MozMarginStart, "48px",
+  is($$fun(4).style.marginInlineStart, "48px",
     "The .A.B.C node's function cell has the correct indentation.");
-  is($$fun(5).style.MozMarginStart, "32px",
+  is($$fun(5).style.marginInlineStart, "32px",
     "The .A.E node's function cell has the correct indentation.");
-  is($$fun(6).style.MozMarginStart, "48px",
+  is($$fun(6).style.marginInlineStart, "48px",
     "The .A.E.F node's function cell has the correct indentation.");
 
   is($$nam(0).textContent.trim(), "(root)",

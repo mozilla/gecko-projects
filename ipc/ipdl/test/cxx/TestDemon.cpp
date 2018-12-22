@@ -14,20 +14,6 @@
 #include <windows.h>
 #endif
 
-template<>
-struct RunnableMethodTraits<mozilla::_ipdltest::TestDemonParent>
-{
-    static void RetainCallee(mozilla::_ipdltest::TestDemonParent* obj) { }
-    static void ReleaseCallee(mozilla::_ipdltest::TestDemonParent* obj) { }
-};
-
-template<>
-struct RunnableMethodTraits<mozilla::_ipdltest::TestDemonChild>
-{
-    static void RetainCallee(mozilla::_ipdltest::TestDemonChild* obj) { }
-    static void ReleaseCallee(mozilla::_ipdltest::TestDemonChild* obj) { }
-};
-
 namespace mozilla {
 namespace _ipdltest {
 
@@ -115,7 +101,7 @@ TestDemonParent::ArtificialSleep()
 }
 #endif
 
-bool
+mozilla::ipc::IPCResult
 TestDemonParent::RecvAsyncMessage(const int& n)
 {
   DEMON_LOG("Start RecvAsync [%d]", n);
@@ -126,19 +112,19 @@ TestDemonParent::RecvAsyncMessage(const int& n)
   RunLimitedSequence();
 
   DEMON_LOG("End RecvAsync [%d]", n);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonParent::RecvHiPrioSyncMessage()
 {
   DEMON_LOG("Start RecvHiPrioSyncMessage");
   RunLimitedSequence();
   DEMON_LOG("End RecvHiPrioSyncMessage");
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonParent::RecvSyncMessage(const int& n)
 {
   DEMON_LOG("Start RecvSync [%d]", n);
@@ -149,10 +135,10 @@ TestDemonParent::RecvSyncMessage(const int& n)
   RunLimitedSequence(ASYNC_ONLY);
 
   DEMON_LOG("End RecvSync [%d]", n);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonParent::RecvUrgentAsyncMessage(const int& n)
 {
   DEMON_LOG("Start RecvUrgentAsyncMessage [%d]", n);
@@ -163,10 +149,10 @@ TestDemonParent::RecvUrgentAsyncMessage(const int& n)
   RunLimitedSequence(ASYNC_ONLY);
 
   DEMON_LOG("End RecvUrgentAsyncMessage [%d]", n);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonParent::RecvUrgentSyncMessage(const int& n)
 {
   DEMON_LOG("Start RecvUrgentSyncMessage [%d]", n);
@@ -177,7 +163,7 @@ TestDemonParent::RecvUrgentSyncMessage(const int& n)
   RunLimitedSequence(ASYNC_ONLY);
 
   DEMON_LOG("End RecvUrgentSyncMessage [%d]", n);
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -190,8 +176,10 @@ TestDemonParent::RunUnlimitedSequence()
   gFlushStack = false;
   DoAction();
 
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   NewRunnableMethod(this, &TestDemonParent::RunUnlimitedSequence));
+  MessageLoop::current()->PostTask(NewNonOwningRunnableMethod(
+    "_ipdltest::TestDemonParent::RunUnlimitedSequence",
+    this,
+    &TestDemonParent::RunUnlimitedSequence));
 }
 
 void
@@ -275,7 +263,7 @@ TestDemonChild::~TestDemonChild()
   MOZ_COUNT_DTOR(TestDemonChild);
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonChild::RecvStart()
 {
 #ifdef OS_POSIX
@@ -287,7 +275,7 @@ TestDemonChild::RecvStart()
   DEMON_LOG("RecvStart");
 
   RunUnlimitedSequence();
-  return true;
+  return IPC_OK();
 }
 
 #ifdef DEBUG
@@ -306,7 +294,7 @@ TestDemonChild::ArtificialSleep()
 }
 #endif
 
-bool
+mozilla::ipc::IPCResult
 TestDemonChild::RecvAsyncMessage(const int& n)
 {
   DEMON_LOG("Start RecvAsyncMessage [%d]", n);
@@ -317,16 +305,16 @@ TestDemonChild::RecvAsyncMessage(const int& n)
   RunLimitedSequence();
 
   DEMON_LOG("End RecvAsyncMessage [%d]", n);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestDemonChild::RecvHiPrioSyncMessage()
 {
   DEMON_LOG("Start RecvHiPrioSyncMessage");
   RunLimitedSequence();
   DEMON_LOG("End RecvHiPrioSyncMessage");
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -335,8 +323,10 @@ TestDemonChild::RunUnlimitedSequence()
   gFlushStack = false;
   DoAction();
 
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   NewRunnableMethod(this, &TestDemonChild::RunUnlimitedSequence));
+  MessageLoop::current()->PostTask(NewNonOwningRunnableMethod(
+    "_ipdltest::TestDemonChild::RunUnlimitedSequence",
+    this,
+    &TestDemonChild::RunUnlimitedSequence));
 }
 
 void

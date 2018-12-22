@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -18,7 +19,12 @@ namespace gfx {
  */
 template <class T, class Sub>
 struct BasePoint3D {
-  T x, y, z;
+  union {
+    struct {
+      T x, y, z;
+    };
+    T components[3];
+  };
 
   // Constructors
   BasePoint3D() : x(0), y(0), z(0) {}
@@ -108,6 +114,10 @@ struct BasePoint3D {
   // Invalid for points with distance from origin of 0.
   void Normalize() {
       *this /= Length();
+  }
+
+  friend std::ostream& operator<<(std::ostream& stream, const BasePoint3D<T, Sub>& aPoint) {
+    return stream << '(' << aPoint.x << ',' << aPoint.y << ',' << aPoint.z << ')';
   }
 };
 

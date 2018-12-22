@@ -4,14 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "pk11pub.h"
+#include "CryptoKey.h"
+
 #include "cryptohi.h"
-#include "nsNSSComponent.h"
-#include "ScopedNSSTypes.h"
-#include "mozilla/dom/CryptoKey.h"
-#include "mozilla/dom/WebCryptoCommon.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/SubtleCryptoBinding.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "nsNSSComponent.h"
+#include "pk11pub.h"
 
 // Templates taken from security/nss/lib/cryptohi/seckey.c
 // These would ideally be exported by NSS and until that
@@ -64,27 +64,91 @@ StringToUsage(const nsString& aUsage, CryptoKey::KeyUsage& aUsageOut)
   return NS_OK;
 }
 
-SECKEYPrivateKey*
-PrivateKeyFromPrivateKeyTemplate(SECItem* aObjID,
-                                 CK_ATTRIBUTE* aTemplate,
+// This helper function will release the memory backing a SECKEYPrivateKey and
+// any resources acquired in its creation. It will leave the backing PKCS#11
+// object untouched, however. This should only be called from
+// PrivateKeyFromPrivateKeyTemplate.
+static void
+DestroyPrivateKeyWithoutDestroyingPKCS11Object(SECKEYPrivateKey* key)
+{
+  PK11_FreeSlot(key->pkcs11Slot);
+  PORT_FreeArena(key->arena, PR_TRUE);
+}
+
+// To protect against key ID collisions, PrivateKeyFromPrivateKeyTemplate
+// generates a random ID for each key. The given template must contain an
+// attribute slot for a key ID, but it must consist of a null pointer and have a
+// length of 0.
+UniqueSECKEYPrivateKey
+PrivateKeyFromPrivateKeyTemplate(CK_ATTRIBUTE* aTemplate,
                                  CK_ULONG aTemplateSize)
 {
   // Create a generic object with the contents of the key
-  ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalSlot());
   if (!slot) {
     return nullptr;
   }
 
-  ScopedPK11GenericObject obj(PK11_CreateGenericObject(slot,
+  // Generate a random 160-bit object ID. This ID must be unique.
+  UniqueSECItem objID(::SECITEM_AllocItem(nullptr, nullptr, 20));
+  SECStatus rv = PK11_GenerateRandomOnSlot(slot.get(), objID->data, objID->len);
+  if (rv != SECSuccess) {
+    return nullptr;
+  }
+  // Check if something is already using this ID.
+  SECKEYPrivateKey* preexistingKey = PK11_FindKeyByKeyID(slot.get(),
+                                                         objID.get(),
+                                                         nullptr);
+  if (preexistingKey) {
+    // Note that we can't just call SECKEY_DestroyPrivateKey here because that
+    // will destroy the PKCS#11 object that is backing a preexisting key (that
+    // we still have a handle on somewhere else in memory). If that object were
+    // destroyed, cryptographic operations performed by that other key would
+    // fail.
+    DestroyPrivateKeyWithoutDestroyingPKCS11Object(preexistingKey);
+    // Try again with a new ID (but only once - collisions are very unlikely).
+    rv = PK11_GenerateRandomOnSlot(slot.get(), objID->data, objID->len);
+    if (rv != SECSuccess) {
+      return nullptr;
+    }
+    preexistingKey = PK11_FindKeyByKeyID(slot.get(), objID.get(), nullptr);
+    if (preexistingKey) {
+      DestroyPrivateKeyWithoutDestroyingPKCS11Object(preexistingKey);
+      return nullptr;
+    }
+  }
+
+  CK_ATTRIBUTE* idAttributeSlot = nullptr;
+  for (CK_ULONG i = 0; i < aTemplateSize; i++) {
+    if (aTemplate[i].type == CKA_ID) {
+      if (aTemplate[i].pValue != nullptr || aTemplate[i].ulValueLen != 0) {
+        return nullptr;
+      }
+      idAttributeSlot = aTemplate + i;
+      break;
+    }
+  }
+  if (!idAttributeSlot) {
+    return nullptr;
+  }
+
+  idAttributeSlot->pValue = objID->data;
+  idAttributeSlot->ulValueLen = objID->len;
+  UniquePK11GenericObject obj(PK11_CreateGenericObject(slot.get(),
                                                        aTemplate,
                                                        aTemplateSize,
                                                        PR_FALSE));
+  // Unset the ID attribute slot's pointer and length so that data that only
+  // lives for the scope of this function doesn't escape.
+  idAttributeSlot->pValue = nullptr;
+  idAttributeSlot->ulValueLen = 0;
   if (!obj) {
     return nullptr;
   }
 
   // Have NSS translate the object to a private key.
-  return PK11_FindKeyByKeyID(slot, aObjID, nullptr);
+  return UniqueSECKEYPrivateKey(
+    PK11_FindKeyByKeyID(slot.get(), objID.get(), nullptr));
 }
 
 CryptoKey::CryptoKey(nsIGlobalObject* aGlobal)
@@ -96,20 +160,10 @@ CryptoKey::CryptoKey(nsIGlobalObject* aGlobal)
 {
 }
 
-CryptoKey::~CryptoKey()
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return;
-  }
-  destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
-}
-
 JSObject*
 CryptoKey::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CryptoKeyBinding::Wrap(aCx, this, aGivenProto);
+  return CryptoKey_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -144,8 +198,10 @@ CryptoKey::GetAlgorithm(JSContext* cx, JS::MutableHandle<JSObject*> aRetVal,
       break;
     case KeyAlgorithmProxy::RSA: {
       RootedDictionary<RsaHashedKeyAlgorithm> rsa(cx);
-      mAlgorithm.mRsa.ToKeyAlgorithm(cx, rsa);
-      converted = ToJSValue(cx, rsa, &val);
+      converted = mAlgorithm.mRsa.ToKeyAlgorithm(cx, rsa);
+      if (converted) {
+        converted = ToJSValue(cx, rsa, &val);
+      }
       break;
     }
     case KeyAlgorithmProxy::EC:
@@ -153,8 +209,10 @@ CryptoKey::GetAlgorithm(JSContext* cx, JS::MutableHandle<JSObject*> aRetVal,
       break;
     case KeyAlgorithmProxy::DH: {
       RootedDictionary<DhKeyAlgorithm> dh(cx);
-      mAlgorithm.mDh.ToKeyAlgorithm(cx, dh);
-      converted = ToJSValue(cx, dh, &val);
+      converted = mAlgorithm.mDh.ToKeyAlgorithm(cx, dh);
+      if (converted) {
+        converted = ToJSValue(cx, dh, &val);
+      }
       break;
     }
   }
@@ -261,31 +319,18 @@ CryptoKey::AddPublicKeyData(SECKEYPublicKey* aPublicKey)
   // The given public key should have the same key type.
   MOZ_ASSERT(aPublicKey->keyType == mPrivateKey->keyType);
 
-  nsNSSShutDownPreventionLock locker;
-
-  ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
-  if (!slot) {
-    return NS_ERROR_DOM_OPERATION_ERR;
-  }
-
-  // Generate a random 160-bit object ID.
-  ScopedSECItem objID(::SECITEM_AllocItem(nullptr, nullptr, 20));
-  SECStatus rv = PK11_GenerateRandomOnSlot(slot, objID->data, objID->len);
-  if (rv != SECSuccess) {
-    return NS_ERROR_DOM_OPERATION_ERR;
-  }
-
   // Read EC params.
-  ScopedSECItem params(::SECITEM_AllocItem(nullptr, nullptr, 0));
-  rv = PK11_ReadRawAttribute(PK11_TypePrivKey, mPrivateKey, CKA_EC_PARAMS,
-                             params);
+  ScopedAutoSECItem params;
+  SECStatus rv = PK11_ReadRawAttribute(PK11_TypePrivKey, mPrivateKey.get(),
+                                       CKA_EC_PARAMS, &params);
   if (rv != SECSuccess) {
     return NS_ERROR_DOM_OPERATION_ERR;
   }
 
   // Read private value.
-  ScopedSECItem value(::SECITEM_AllocItem(nullptr, nullptr, 0));
-  rv = PK11_ReadRawAttribute(PK11_TypePrivKey, mPrivateKey, CKA_VALUE, value);
+  ScopedAutoSECItem value;
+  rv = PK11_ReadRawAttribute(PK11_TypePrivKey, mPrivateKey.get(), CKA_VALUE,
+                             &value);
   if (rv != SECSuccess) {
     return NS_ERROR_DOM_OPERATION_ERR;
   }
@@ -301,14 +346,15 @@ CryptoKey::AddPublicKeyData(SECKEYPublicKey* aPublicKey)
     { CKA_TOKEN,            &falseValue,          sizeof(falseValue) },
     { CKA_SENSITIVE,        &falseValue,          sizeof(falseValue) },
     { CKA_PRIVATE,          &falseValue,          sizeof(falseValue) },
-    { CKA_ID,               objID->data,          objID->len },
-    { CKA_EC_PARAMS,        params->data,         params->len },
+    // PrivateKeyFromPrivateKeyTemplate sets the ID.
+    { CKA_ID,               nullptr,              0 },
+    { CKA_EC_PARAMS,        params.data,          params.len },
     { CKA_EC_POINT,         point->data,          point->len },
-    { CKA_VALUE,            value->data,          value->len },
+    { CKA_VALUE,            value.data,           value.len },
   };
 
-  mPrivateKey = PrivateKeyFromPrivateKeyTemplate(objID, keyTemplate,
-                                                 PR_ARRAY_SIZE(keyTemplate));
+  mPrivateKey = PrivateKeyFromPrivateKeyTemplate(keyTemplate,
+                                                 ArrayLength(keyTemplate));
   NS_ENSURE_TRUE(mPrivateKey, NS_ERROR_DOM_OPERATION_ERR);
 
   return NS_OK;
@@ -397,28 +443,24 @@ nsresult CryptoKey::SetSymKey(const CryptoBuffer& aSymKey)
 nsresult
 CryptoKey::SetPrivateKey(SECKEYPrivateKey* aPrivateKey)
 {
-  nsNSSShutDownPreventionLock locker;
-
-  if (!aPrivateKey || isAlreadyShutDown()) {
+  if (!aPrivateKey) {
     mPrivateKey = nullptr;
     return NS_OK;
   }
 
-  mPrivateKey = SECKEY_CopyPrivateKey(aPrivateKey);
+  mPrivateKey = UniqueSECKEYPrivateKey(SECKEY_CopyPrivateKey(aPrivateKey));
   return mPrivateKey ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 nsresult
 CryptoKey::SetPublicKey(SECKEYPublicKey* aPublicKey)
 {
-  nsNSSShutDownPreventionLock locker;
-
-  if (!aPublicKey || isAlreadyShutDown()) {
+  if (!aPublicKey) {
     mPublicKey = nullptr;
     return NS_OK;
   }
 
-  mPublicKey = SECKEY_CopyPublicKey(aPublicKey);
+  mPublicKey = UniqueSECKEYPublicKey(SECKEY_CopyPublicKey(aPublicKey));
   return mPublicKey ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
@@ -428,63 +470,49 @@ CryptoKey::GetSymKey() const
   return mSymKey;
 }
 
-SECKEYPrivateKey*
+UniqueSECKEYPrivateKey
 CryptoKey::GetPrivateKey() const
 {
-  nsNSSShutDownPreventionLock locker;
-  if (!mPrivateKey || isAlreadyShutDown()) {
+  if (!mPrivateKey) {
     return nullptr;
   }
-  return SECKEY_CopyPrivateKey(mPrivateKey.get());
+  return UniqueSECKEYPrivateKey(SECKEY_CopyPrivateKey(mPrivateKey.get()));
 }
 
-SECKEYPublicKey*
+UniqueSECKEYPublicKey
 CryptoKey::GetPublicKey() const
 {
-  nsNSSShutDownPreventionLock locker;
-  if (!mPublicKey || isAlreadyShutDown()) {
+  if (!mPublicKey) {
     return nullptr;
   }
-  return SECKEY_CopyPublicKey(mPublicKey.get());
-}
-
-void CryptoKey::virtualDestroyNSSReference()
-{
-  destructorSafeDestroyNSSReference();
-}
-
-void CryptoKey::destructorSafeDestroyNSSReference()
-{
-  mPrivateKey.dispose();
-  mPublicKey.dispose();
+  return UniqueSECKEYPublicKey(SECKEY_CopyPublicKey(mPublicKey.get()));
 }
 
 
 // Serialization and deserialization convenience methods
 
-SECKEYPrivateKey*
-CryptoKey::PrivateKeyFromPkcs8(CryptoBuffer& aKeyData,
-                         const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+UniqueSECKEYPrivateKey
+CryptoKey::PrivateKeyFromPkcs8(CryptoBuffer& aKeyData)
 {
-  SECKEYPrivateKey* privKey;
-  ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalSlot());
   if (!slot) {
     return nullptr;
   }
 
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return nullptr;
   }
 
   SECItem pkcs8Item = { siBuffer, nullptr, 0 };
-  if (!aKeyData.ToSECItem(arena, &pkcs8Item)) {
+  if (!aKeyData.ToSECItem(arena.get(), &pkcs8Item)) {
     return nullptr;
   }
 
   // Allow everything, we enforce usage ourselves
   unsigned int usage = KU_ALL;
 
+  SECKEYPrivateKey* privKey;
   SECStatus rv = PK11_ImportDERPrivateKeyInfoAndReturnKey(
                  slot.get(), &pkcs8Item, nullptr, nullptr, false, false,
                  usage, &privKey, nullptr);
@@ -492,24 +520,25 @@ CryptoKey::PrivateKeyFromPkcs8(CryptoBuffer& aKeyData,
   if (rv == SECFailure) {
     return nullptr;
   }
-  return privKey;
+
+  return UniqueSECKEYPrivateKey(privKey);
 }
 
-SECKEYPublicKey*
-CryptoKey::PublicKeyFromSpki(CryptoBuffer& aKeyData,
-                       const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+UniqueSECKEYPublicKey
+CryptoKey::PublicKeyFromSpki(CryptoBuffer& aKeyData)
 {
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return nullptr;
   }
 
   SECItem spkiItem = { siBuffer, nullptr, 0 };
-  if (!aKeyData.ToSECItem(arena, &spkiItem)) {
+  if (!aKeyData.ToSECItem(arena.get(), &spkiItem)) {
     return nullptr;
   }
 
-  ScopedCERTSubjectPublicKeyInfo spki(SECKEY_DecodeDERSubjectPublicKeyInfo(&spkiItem));
+  UniqueCERTSubjectPublicKeyInfo spki(
+    SECKEY_DecodeDERSubjectPublicKeyInfo(&spkiItem));
   if (!spki) {
     return nullptr;
   }
@@ -544,20 +573,18 @@ CryptoKey::PublicKeyFromSpki(CryptoBuffer& aKeyData,
     }
   }
 
-  ScopedSECKEYPublicKey tmp(SECKEY_ExtractPublicKey(spki.get()));
+  UniqueSECKEYPublicKey tmp(SECKEY_ExtractPublicKey(spki.get()));
   if (!tmp.get() || !PublicKeyValid(tmp.get())) {
     return nullptr;
   }
 
-  return SECKEY_CopyPublicKey(tmp);
+  return UniqueSECKEYPublicKey(SECKEY_CopyPublicKey(tmp.get()));
 }
 
 nsresult
-CryptoKey::PrivateKeyToPkcs8(SECKEYPrivateKey* aPrivKey,
-                       CryptoBuffer& aRetVal,
-                       const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PrivateKeyToPkcs8(SECKEYPrivateKey* aPrivKey, CryptoBuffer& aRetVal)
 {
-  ScopedSECItem pkcs8Item(PK11_ExportDERPrivateKeyInfo(aPrivKey, nullptr));
+  UniqueSECItem pkcs8Item(PK11_ExportDERPrivateKeyInfo(aPrivKey, nullptr));
   if (!pkcs8Item.get()) {
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
@@ -602,22 +629,20 @@ PublicDhKeyToSpki(SECKEYPublicKey* aPubKey,
 }
 
 nsresult
-CryptoKey::PublicKeyToSpki(SECKEYPublicKey* aPubKey,
-                           CryptoBuffer& aRetVal,
-                           const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PublicKeyToSpki(SECKEYPublicKey* aPubKey, CryptoBuffer& aRetVal)
 {
-  ScopedCERTSubjectPublicKeyInfo spki;
+  UniqueCERTSubjectPublicKeyInfo spki;
 
   // NSS doesn't support exporting DH public keys.
   if (aPubKey->keyType == dhKey) {
     // Mimic the behavior of SECKEY_CreateSubjectPublicKeyInfo() and create
     // a new arena for the SPKI object.
-    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
     if (!arena) {
       return NS_ERROR_DOM_OPERATION_ERR;
     }
 
-    spki = PORT_ArenaZNew(arena, CERTSubjectPublicKeyInfo);
+    spki.reset(PORT_ArenaZNew(arena.get(), CERTSubjectPublicKeyInfo));
     if (!spki) {
       return NS_ERROR_DOM_OPERATION_ERR;
     }
@@ -625,12 +650,12 @@ CryptoKey::PublicKeyToSpki(SECKEYPublicKey* aPubKey,
     // Assign |arena| to |spki| and null the variable afterwards so that the
     // arena created above that holds the SPKI object is free'd when |spki|
     // goes out of scope, not when |arena| does.
-    spki->arena = arena.forget();
+    spki->arena = arena.release();
 
-    nsresult rv = PublicDhKeyToSpki(aPubKey, spki);
+    nsresult rv = PublicDhKeyToSpki(aPubKey, spki.get());
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    spki = SECKEY_CreateSubjectPublicKeyInfo(aPubKey);
+    spki.reset(SECKEY_CreateSubjectPublicKeyInfo(aPubKey));
     if (!spki) {
       return NS_ERROR_DOM_OPERATION_ERR;
     }
@@ -658,7 +683,7 @@ CryptoKey::PublicKeyToSpki(SECKEYPublicKey* aPubKey,
   }
 
   const SEC_ASN1Template* tpl = SEC_ASN1_GET(CERT_SubjectPublicKeyInfoTemplate);
-  ScopedSECItem spkiItem(SEC_ASN1EncodeItem(nullptr, nullptr, spki, tpl));
+  UniqueSECItem spkiItem(SEC_ASN1EncodeItem(nullptr, nullptr, spki.get(), tpl));
 
   if (!aRetVal.Assign(spkiItem.get())) {
     return NS_ERROR_DOM_OPERATION_ERR;
@@ -690,9 +715,8 @@ CreateECPointForCoordinates(const CryptoBuffer& aX,
   return point;
 }
 
-SECKEYPrivateKey*
-CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
-                             const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+UniqueSECKEYPrivateKey
+CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk)
 {
   CK_OBJECT_CLASS privateKeyValue = CKO_PRIVATE_KEY;
   CK_BBOOL falseValue = CK_FALSE;
@@ -712,7 +736,7 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       return nullptr;
     }
 
-    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
     if (!arena) {
       return nullptr;
     }
@@ -728,13 +752,6 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       return nullptr;
     }
 
-    // Compute the ID for this key
-    // This is generated with a SHA-1 hash, so unlikely to collide
-    ScopedSECItem objID(PK11_MakeIDFromPubKey(ecPoint));
-    if (!objID.get()) {
-      return nullptr;
-    }
-
     // Populate template from parameters
     CK_KEY_TYPE ecValue = CKK_EC;
     CK_ATTRIBUTE keyTemplate[9] = {
@@ -743,14 +760,15 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       { CKA_TOKEN,            &falseValue,          sizeof(falseValue) },
       { CKA_SENSITIVE,        &falseValue,          sizeof(falseValue) },
       { CKA_PRIVATE,          &falseValue,          sizeof(falseValue) },
-      { CKA_ID,               objID->data,          objID->len },
+      // PrivateKeyFromPrivateKeyTemplate sets the ID.
+      { CKA_ID,               nullptr,              0 },
       { CKA_EC_PARAMS,        params->data,         params->len },
       { CKA_EC_POINT,         ecPoint->data,        ecPoint->len },
       { CKA_VALUE,            (void*) d.Elements(), (CK_ULONG) d.Length() },
     };
 
-    return PrivateKeyFromPrivateKeyTemplate(objID, keyTemplate,
-                                            PR_ARRAY_SIZE(keyTemplate));
+    return PrivateKeyFromPrivateKeyTemplate(keyTemplate,
+                                            ArrayLength(keyTemplate));
   }
 
   if (aJwk.mKty.EqualsLiteral(JWK_TYPE_RSA)) {
@@ -767,23 +785,6 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       return nullptr;
     }
 
-    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
-    if (!arena) {
-      return nullptr;
-    }
-
-    // Compute the ID for this key
-    // This is generated with a SHA-1 hash, so unlikely to collide
-    SECItem nItem = { siBuffer, nullptr, 0 };
-    if (!n.ToSECItem(arena, &nItem)) {
-      return nullptr;
-    }
-
-    ScopedSECItem objID(PK11_MakeIDFromPubKey(&nItem));
-    if (!objID.get()) {
-      return nullptr;
-    }
-
     // Populate template from parameters
     CK_KEY_TYPE rsaValue = CKK_RSA;
     CK_ATTRIBUTE keyTemplate[14] = {
@@ -792,7 +793,8 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       { CKA_TOKEN,            &falseValue,           sizeof(falseValue) },
       { CKA_SENSITIVE,        &falseValue,           sizeof(falseValue) },
       { CKA_PRIVATE,          &falseValue,           sizeof(falseValue) },
-      { CKA_ID,               objID->data,           objID->len },
+      // PrivateKeyFromPrivateKeyTemplate sets the ID.
+      { CKA_ID,               nullptr,               0 },
       { CKA_MODULUS,          (void*) n.Elements(),  (CK_ULONG) n.Length() },
       { CKA_PUBLIC_EXPONENT,  (void*) e.Elements(),  (CK_ULONG) e.Length() },
       { CKA_PRIVATE_EXPONENT, (void*) d.Elements(),  (CK_ULONG) d.Length() },
@@ -803,8 +805,8 @@ CryptoKey::PrivateKeyFromJwk(const JsonWebKey& aJwk,
       { CKA_COEFFICIENT,      (void*) qi.Elements(), (CK_ULONG) qi.Length() },
     };
 
-    return PrivateKeyFromPrivateKeyTemplate(objID, keyTemplate,
-                                            PR_ARRAY_SIZE(keyTemplate));
+    return PrivateKeyFromPrivateKeyTemplate(keyTemplate,
+                                            ArrayLength(keyTemplate));
   }
 
   return nullptr;
@@ -814,18 +816,14 @@ bool ReadAndEncodeAttribute(SECKEYPrivateKey* aKey,
                             CK_ATTRIBUTE_TYPE aAttribute,
                             Optional<nsString>& aDst)
 {
-  ScopedSECItem item(::SECITEM_AllocItem(nullptr, nullptr, 0));
-  if (!item) {
-    return false;
-  }
-
-  if (PK11_ReadRawAttribute(PK11_TypePrivKey, aKey, aAttribute, item)
+  ScopedAutoSECItem item;
+  if (PK11_ReadRawAttribute(PK11_TypePrivKey, aKey, aAttribute, &item)
         != SECSuccess) {
     return false;
   }
 
   CryptoBuffer buffer;
-  if (!buffer.Assign(item)) {
+  if (!buffer.Assign(&item)) {
     return false;
   }
 
@@ -881,8 +879,8 @@ ECKeyToJwk(const PK11ObjectType aKeyType, void* aKey, const SECItem* aEcParams,
     return false;
   }
 
-  ScopedSECItem ecPointX(::SECITEM_AllocItem(nullptr, nullptr, flen));
-  ScopedSECItem ecPointY(::SECITEM_AllocItem(nullptr, nullptr, flen));
+  UniqueSECItem ecPointX(::SECITEM_AllocItem(nullptr, nullptr, flen));
+  UniqueSECItem ecPointY(::SECITEM_AllocItem(nullptr, nullptr, flen));
   if (!ecPointX || !ecPointY) {
     return false;
   }
@@ -892,8 +890,10 @@ ECKeyToJwk(const PK11ObjectType aKeyType, void* aKey, const SECItem* aEcParams,
   memcpy(ecPointY->data, aPublicValue->data + 1 + flen, flen);
 
   CryptoBuffer x, y;
-  if (!x.Assign(ecPointX) || NS_FAILED(x.ToJwkBase64(aRetVal.mX.Value())) ||
-      !y.Assign(ecPointY) || NS_FAILED(y.ToJwkBase64(aRetVal.mY.Value()))) {
+  if (!x.Assign(ecPointX.get()) ||
+      NS_FAILED(x.ToJwkBase64(aRetVal.mX.Value())) ||
+      !y.Assign(ecPointY.get()) ||
+      NS_FAILED(y.ToJwkBase64(aRetVal.mY.Value()))) {
     return false;
   }
 
@@ -902,9 +902,7 @@ ECKeyToJwk(const PK11ObjectType aKeyType, void* aKey, const SECItem* aEcParams,
 }
 
 nsresult
-CryptoKey::PrivateKeyToJwk(SECKEYPrivateKey* aPrivKey,
-                           JsonWebKey& aRetVal,
-                           const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PrivateKeyToJwk(SECKEYPrivateKey* aPrivKey, JsonWebKey& aRetVal)
 {
   switch (aPrivKey->keyType) {
     case rsaKey: {
@@ -933,22 +931,22 @@ CryptoKey::PrivateKeyToJwk(SECKEYPrivateKey* aPrivKey,
     }
     case ecKey: {
       // Read EC params.
-      ScopedSECItem params(::SECITEM_AllocItem(nullptr, nullptr, 0));
+      ScopedAutoSECItem params;
       SECStatus rv = PK11_ReadRawAttribute(PK11_TypePrivKey, aPrivKey,
-                                           CKA_EC_PARAMS, params);
+                                           CKA_EC_PARAMS, &params);
       if (rv != SECSuccess) {
         return NS_ERROR_DOM_OPERATION_ERR;
       }
 
       // Read public point Q.
-      ScopedSECItem ecPoint(::SECITEM_AllocItem(nullptr, nullptr, 0));
+      ScopedAutoSECItem ecPoint;
       rv = PK11_ReadRawAttribute(PK11_TypePrivKey, aPrivKey, CKA_EC_POINT,
-                                 ecPoint);
+                                 &ecPoint);
       if (rv != SECSuccess) {
         return NS_ERROR_DOM_OPERATION_ERR;
       }
 
-      if (!ECKeyToJwk(PK11_TypePrivKey, aPrivKey, params, ecPoint, aRetVal)) {
+      if (!ECKeyToJwk(PK11_TypePrivKey, aPrivKey, &params, &ecPoint, aRetVal)) {
         return NS_ERROR_DOM_OPERATION_ERR;
       }
 
@@ -966,19 +964,19 @@ CryptoKey::PrivateKeyToJwk(SECKEYPrivateKey* aPrivKey,
   }
 }
 
-SECKEYPublicKey*
+UniqueSECKEYPublicKey
 CreateECPublicKey(const SECItem* aKeyData, const nsString& aNamedCurve)
 {
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return nullptr;
   }
 
-  // It's important that this be a ScopedSECKEYPublicKey, as this ensures that
+  // It's important that this be a UniqueSECKEYPublicKey, as this ensures that
   // SECKEY_DestroyPublicKey will be called on it. If this doesn't happen, when
   // CryptoKey::PublicKeyValid is called on it and it gets moved to the internal
   // PKCS#11 slot, it will leak a reference to the slot.
-  ScopedSECKEYPublicKey key(PORT_ArenaZNew(arena, SECKEYPublicKey));
+  UniqueSECKEYPublicKey key(PORT_ArenaZNew(arena.get(), SECKEYPublicKey));
   if (!key) {
     return nullptr;
   }
@@ -989,7 +987,7 @@ CreateECPublicKey(const SECItem* aKeyData, const nsString& aNamedCurve)
   key->pkcs11ID = CK_INVALID_HANDLE;
 
   // Create curve parameters.
-  SECItem* params = CreateECParamsForCurve(aNamedCurve, arena);
+  SECItem* params = CreateECParamsForCurve(aNamedCurve, arena.get());
   if (!params) {
     return nullptr;
   }
@@ -999,16 +997,15 @@ CreateECPublicKey(const SECItem* aKeyData, const nsString& aNamedCurve)
   key->u.ec.publicValue = *aKeyData;
 
   // Ensure the given point is on the curve.
-  if (!CryptoKey::PublicKeyValid(key)) {
+  if (!CryptoKey::PublicKeyValid(key.get())) {
     return nullptr;
   }
 
-  return SECKEY_CopyPublicKey(key);
+  return UniqueSECKEYPublicKey(SECKEY_CopyPublicKey(key.get()));
 }
 
-SECKEYPublicKey*
-CryptoKey::PublicKeyFromJwk(const JsonWebKey& aJwk,
-                            const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+UniqueSECKEYPublicKey
+CryptoKey::PublicKeyFromJwk(const JsonWebKey& aJwk)
 {
   if (aJwk.mKty.EqualsLiteral(JWK_TYPE_RSA)) {
     // Verify that all of the required parameters are present
@@ -1034,13 +1031,13 @@ CryptoKey::PublicKeyFromJwk(const JsonWebKey& aJwk,
       {0,}
     };
 
-    ScopedSECItem pkDer(SEC_ASN1EncodeItem(nullptr, nullptr, &input,
+    UniqueSECItem pkDer(SEC_ASN1EncodeItem(nullptr, nullptr, &input,
                                            rsaPublicKeyTemplate));
     if (!pkDer.get()) {
       return nullptr;
     }
 
-    return SECKEY_ImportDERPublicKey(pkDer.get(), CKK_RSA);
+    return UniqueSECKEYPublicKey(SECKEY_ImportDERPublicKey(pkDer.get(), CKK_RSA));
   }
 
   if (aJwk.mKty.EqualsLiteral(JWK_TYPE_EC)) {
@@ -1052,7 +1049,7 @@ CryptoKey::PublicKeyFromJwk(const JsonWebKey& aJwk,
       return nullptr;
     }
 
-    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
     if (!arena) {
       return nullptr;
     }
@@ -1075,9 +1072,7 @@ CryptoKey::PublicKeyFromJwk(const JsonWebKey& aJwk,
 }
 
 nsresult
-CryptoKey::PublicKeyToJwk(SECKEYPublicKey* aPubKey,
-                          JsonWebKey& aRetVal,
-                          const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PublicKeyToJwk(SECKEYPublicKey* aPubKey, JsonWebKey& aRetVal)
 {
   switch (aPubKey->keyType) {
     case rsaKey: {
@@ -1106,18 +1101,17 @@ CryptoKey::PublicKeyToJwk(SECKEYPublicKey* aPubKey,
   }
 }
 
-SECKEYPublicKey*
+UniqueSECKEYPublicKey
 CryptoKey::PublicDhKeyFromRaw(CryptoBuffer& aKeyData,
                               const CryptoBuffer& aPrime,
-                              const CryptoBuffer& aGenerator,
-                              const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+                              const CryptoBuffer& aGenerator)
 {
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return nullptr;
   }
 
-  SECKEYPublicKey* key = PORT_ArenaZNew(arena, SECKEYPublicKey);
+  SECKEYPublicKey* key = PORT_ArenaZNew(arena.get(), SECKEYPublicKey);
   if (!key) {
     return nullptr;
   }
@@ -1127,9 +1121,9 @@ CryptoKey::PublicDhKeyFromRaw(CryptoBuffer& aKeyData,
   key->pkcs11ID = CK_INVALID_HANDLE;
 
   // Set DH public key params.
-  if (!aPrime.ToSECItem(arena, &key->u.dh.prime) ||
-      !aGenerator.ToSECItem(arena, &key->u.dh.base) ||
-      !aKeyData.ToSECItem(arena, &key->u.dh.publicValue)) {
+  if (!aPrime.ToSECItem(arena.get(), &key->u.dh.prime) ||
+      !aGenerator.ToSECItem(arena.get(), &key->u.dh.base) ||
+      !aKeyData.ToSECItem(arena.get(), &key->u.dh.publicValue)) {
     return nullptr;
   }
 
@@ -1137,13 +1131,11 @@ CryptoKey::PublicDhKeyFromRaw(CryptoBuffer& aKeyData,
   key->u.dh.base.type = siUnsignedInteger;
   key->u.dh.publicValue.type = siUnsignedInteger;
 
-  return SECKEY_CopyPublicKey(key);
+  return UniqueSECKEYPublicKey(SECKEY_CopyPublicKey(key));
 }
 
 nsresult
-CryptoKey::PublicDhKeyToRaw(SECKEYPublicKey* aPubKey,
-                            CryptoBuffer& aRetVal,
-                            const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PublicDhKeyToRaw(SECKEYPublicKey* aPubKey, CryptoBuffer& aRetVal)
 {
   if (!aRetVal.Assign(&aPubKey->u.dh.publicValue)) {
     return NS_ERROR_DOM_OPERATION_ERR;
@@ -1151,18 +1143,17 @@ CryptoKey::PublicDhKeyToRaw(SECKEYPublicKey* aPubKey,
   return NS_OK;
 }
 
-SECKEYPublicKey*
+UniqueSECKEYPublicKey
 CryptoKey::PublicECKeyFromRaw(CryptoBuffer& aKeyData,
-                              const nsString& aNamedCurve,
-                              const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+                              const nsString& aNamedCurve)
 {
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     return nullptr;
   }
 
   SECItem rawItem = { siBuffer, nullptr, 0 };
-  if (!aKeyData.ToSECItem(arena, &rawItem)) {
+  if (!aKeyData.ToSECItem(arena.get(), &rawItem)) {
     return nullptr;
   }
 
@@ -1192,9 +1183,7 @@ CryptoKey::PublicECKeyFromRaw(CryptoBuffer& aKeyData,
 }
 
 nsresult
-CryptoKey::PublicECKeyToRaw(SECKEYPublicKey* aPubKey,
-                            CryptoBuffer& aRetVal,
-                            const nsNSSShutDownPreventionLock& /*proofOfLock*/)
+CryptoKey::PublicECKeyToRaw(SECKEYPublicKey* aPubKey, CryptoBuffer& aRetVal)
 {
   if (!aRetVal.Assign(&aPubKey->u.ec.publicValue)) {
     return NS_ERROR_DOM_OPERATION_ERR;
@@ -1205,7 +1194,7 @@ CryptoKey::PublicECKeyToRaw(SECKEYPublicKey* aPubKey,
 bool
 CryptoKey::PublicKeyValid(SECKEYPublicKey* aPubKey)
 {
-  ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalSlot());
   if (!slot.get()) {
     return false;
   }
@@ -1213,23 +1202,18 @@ CryptoKey::PublicKeyValid(SECKEYPublicKey* aPubKey)
   // This assumes that NSS checks the validity of a public key when
   // it is imported into a PKCS#11 module, and returns CK_INVALID_HANDLE
   // if it is invalid.
-  CK_OBJECT_HANDLE id = PK11_ImportPublicKey(slot, aPubKey, PR_FALSE);
+  CK_OBJECT_HANDLE id = PK11_ImportPublicKey(slot.get(), aPubKey, PR_FALSE);
   if (id == CK_INVALID_HANDLE) {
     return false;
   }
 
-  SECStatus rv = PK11_DestroyObject(slot, id);
+  SECStatus rv = PK11_DestroyObject(slot.get(), id);
   return (rv == SECSuccess);
 }
 
 bool
 CryptoKey::WriteStructuredClone(JSStructuredCloneWriter* aWriter) const
 {
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return false;
-  }
-
   // Write in five pieces
   // 1. Attributes
   // 2. Symmetric key as raw (if present)
@@ -1239,13 +1223,13 @@ CryptoKey::WriteStructuredClone(JSStructuredCloneWriter* aWriter) const
   CryptoBuffer priv, pub;
 
   if (mPrivateKey) {
-    if (NS_FAILED(CryptoKey::PrivateKeyToPkcs8(mPrivateKey, priv, locker))) {
+    if (NS_FAILED(CryptoKey::PrivateKeyToPkcs8(mPrivateKey.get(), priv))) {
       return false;
     }
   }
 
   if (mPublicKey) {
-    if (NS_FAILED(CryptoKey::PublicKeyToSpki(mPublicKey, pub, locker))) {
+    if (NS_FAILED(CryptoKey::PublicKeyToSpki(mPublicKey.get(), pub))) {
       return false;
     }
   }
@@ -1260,11 +1244,6 @@ CryptoKey::WriteStructuredClone(JSStructuredCloneWriter* aWriter) const
 bool
 CryptoKey::ReadStructuredClone(JSStructuredCloneReader* aReader)
 {
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
-    return false;
-  }
-
   // Ensure that NSS is initialized.
   if (!EnsureNSSInitializedChromeOrContent()) {
     return false;
@@ -1287,10 +1266,10 @@ CryptoKey::ReadStructuredClone(JSStructuredCloneReader* aReader)
     return false;
   }
   if (priv.Length() > 0) {
-    mPrivateKey = CryptoKey::PrivateKeyFromPkcs8(priv, locker);
+    mPrivateKey = CryptoKey::PrivateKeyFromPkcs8(priv);
   }
   if (pub.Length() > 0)  {
-    mPublicKey = CryptoKey::PublicKeyFromSpki(pub, locker);
+    mPublicKey = CryptoKey::PublicKeyFromSpki(pub);
   }
 
   // Ensure that what we've read is consistent

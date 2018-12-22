@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://notifications.spec.whatwg.org/
+ * https://notifications.spec.whatwg.org/
  *
  * Copyright:
  * To the extent possible under law, the editors have waived all copyright and
@@ -13,8 +13,7 @@
 
 [Constructor(DOMString title, optional NotificationOptions options),
  Exposed=(Window,Worker),
- Func="mozilla::dom::Notification::PrefEnabled",
- UnsafeInPrerendering]
+ Func="mozilla::dom::Notification::PrefEnabled"]
 interface Notification : EventTarget {
   [GetterThrows]
   static readonly attribute NotificationPermission permission;
@@ -51,6 +50,9 @@ interface Notification : EventTarget {
   [Pure]
   readonly attribute DOMString? icon;
 
+  [Constant, Func="mozilla::dom::DOMPrefs::NotificationRIEnabled"]
+  readonly attribute boolean requireInteraction;
+
   [Constant]
   readonly attribute any data;
 
@@ -63,6 +65,7 @@ dictionary NotificationOptions {
   DOMString body = "";
   DOMString tag = "";
   DOMString icon = "";
+  boolean requireInteraction = false;
   any data = null;
   NotificationBehavior mozbehavior = null;
 };
@@ -91,11 +94,4 @@ enum NotificationDirection {
   "auto",
   "ltr",
   "rtl"
-};
-
-partial interface ServiceWorkerRegistration {
-  [Throws, Func="mozilla::dom::ServiceWorkerNotificationAPIVisible"]
-  Promise<void> showNotification(DOMString title, optional NotificationOptions options);
-  [Throws, Func="mozilla::dom::ServiceWorkerNotificationAPIVisible"]
-  Promise<sequence<Notification>> getNotifications(optional GetNotificationOptions filter);
 };

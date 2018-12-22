@@ -6,15 +6,15 @@
 
 #include "mozilla/dom/cache/TypeUtils.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/CacheBinding.h"
 #include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/Response.h"
-#include "mozilla/dom/cache/CachePushStreamChild.h"
 #include "mozilla/dom/cache/CacheTypes.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PFileDescriptorSetChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -34,6 +34,7 @@ namespace mozilla {
 namespace dom {
 namespace cache {
 
+using mozilla::ipc::AutoIPCStream;
 using mozilla::ipc::BackgroundChild;
 using mozilla::ipc::FileDescriptor;
 using mozilla::ipc::PBackgroundChild;
@@ -44,55 +45,27 @@ namespace {
 static bool
 HasVaryStar(mozilla::dom::InternalHeaders* aHeaders)
 {
-  AutoTArray<nsCString, 16> varyHeaders;
+  nsCString varyHeaders;
   ErrorResult rv;
-  aHeaders->GetAll(NS_LITERAL_CSTRING("vary"), varyHeaders, rv);
+  aHeaders->Get(NS_LITERAL_CSTRING("vary"), varyHeaders, rv);
   MOZ_ALWAYS_TRUE(!rv.Failed());
 
-  for (uint32_t i = 0; i < varyHeaders.Length(); ++i) {
-    nsAutoCString varyValue(varyHeaders[i]);
-    char* rawBuffer = varyValue.BeginWriting();
-    char* token = nsCRT::strtok(rawBuffer, NS_HTTP_HEADER_SEPS, &rawBuffer);
-    for (; token;
-         token = nsCRT::strtok(rawBuffer, NS_HTTP_HEADER_SEPS, &rawBuffer)) {
-      nsDependentCString header(token);
-      if (header.EqualsLiteral("*")) {
-        return true;
-      }
+  char* rawBuffer = varyHeaders.BeginWriting();
+  char* token = nsCRT::strtok(rawBuffer, NS_HTTP_HEADER_SEPS, &rawBuffer);
+  for (; token;
+       token = nsCRT::strtok(rawBuffer, NS_HTTP_HEADER_SEPS, &rawBuffer)) {
+    nsDependentCString header(token);
+    if (header.EqualsLiteral("*")) {
+      return true;
     }
   }
   return false;
 }
 
 void
-SerializeNormalStream(nsIInputStream* aStream, CacheReadStream& aReadStreamOut)
-{
-  AutoTArray<FileDescriptor, 4> fds;
-  SerializeInputStream(aStream, aReadStreamOut.params(), fds);
-
-  PFileDescriptorSetChild* fdSet = nullptr;
-  if (!fds.IsEmpty()) {
-    // We should not be serializing until we have an actor ready
-    PBackgroundChild* manager = BackgroundChild::GetForCurrentThread();
-    MOZ_ASSERT(manager);
-
-    fdSet = manager->SendPFileDescriptorSetConstructor(fds[0]);
-    for (uint32_t i = 1; i < fds.Length(); ++i) {
-      Unused << fdSet->SendAddFileDescriptor(fds[i]);
-    }
-  }
-
-  if (fdSet) {
-    aReadStreamOut.fds() = fdSet;
-  } else {
-    aReadStreamOut.fds() = void_t();
-  }
-}
-
-void
 ToHeadersEntryList(nsTArray<HeadersEntry>& aOut, InternalHeaders* aHeaders)
 {
-  MOZ_ASSERT(aHeaders);
+  MOZ_DIAGNOSTIC_ASSERT(aHeaders);
 
   AutoTArray<InternalHeaders::Entry, 16> entryList;
   aHeaders->GetEntries(entryList);
@@ -106,7 +79,7 @@ ToHeadersEntryList(nsTArray<HeadersEntry>& aOut, InternalHeaders* aHeaders)
 } // namespace
 
 already_AddRefed<InternalRequest>
-TypeUtils::ToInternalRequest(const RequestOrUSVString& aIn,
+TypeUtils::ToInternalRequest(JSContext* aCx, const RequestOrUSVString& aIn,
                              BodyAction aBodyAction, ErrorResult& aRv)
 {
   if (aIn.IsRequest()) {
@@ -114,7 +87,7 @@ TypeUtils::ToInternalRequest(const RequestOrUSVString& aIn,
 
     // Check and set bodyUsed flag immediately because its on Request
     // instead of InternalRequest.
-    CheckAndSetBodyUsed(&request, aBodyAction, aRv);
+    CheckAndSetBodyUsed(aCx, &request, aBodyAction, aRv);
     if (aRv.Failed()) { return nullptr; }
 
     return request.GetInternalRequest();
@@ -124,7 +97,8 @@ TypeUtils::ToInternalRequest(const RequestOrUSVString& aIn,
 }
 
 already_AddRefed<InternalRequest>
-TypeUtils::ToInternalRequest(const OwningRequestOrUSVString& aIn,
+TypeUtils::ToInternalRequest(JSContext* aCx,
+                             const OwningRequestOrUSVString& aIn,
                              BodyAction aBodyAction, ErrorResult& aRv)
 {
 
@@ -133,7 +107,7 @@ TypeUtils::ToInternalRequest(const OwningRequestOrUSVString& aIn,
 
     // Check and set bodyUsed flag immediately because its on Request
     // instead of InternalRequest.
-    CheckAndSetBodyUsed(request, aBodyAction, aRv);
+    CheckAndSetBodyUsed(aCx, request, aBodyAction, aRv);
     if (aRv.Failed()) { return nullptr; }
 
     return request->GetInternalRequest();
@@ -145,21 +119,17 @@ TypeUtils::ToInternalRequest(const OwningRequestOrUSVString& aIn,
 void
 TypeUtils::ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
                           BodyAction aBodyAction, SchemeAction aSchemeAction,
+                          nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
                           ErrorResult& aRv)
 {
-  MOZ_ASSERT(aIn);
-
+  MOZ_DIAGNOSTIC_ASSERT(aIn);
   aIn->GetMethod(aOut.method());
-
-  nsAutoCString url;
-  aIn->GetURL(url);
-
+  nsCString url(aIn->GetURLWithoutFragment());
   bool schemeValid;
   ProcessURL(url, &schemeValid, &aOut.urlWithoutQuery(), &aOut.urlQuery(), aRv);
   if (aRv.Failed()) {
     return;
   }
-
   if (!schemeValid) {
     if (aSchemeAction == TypeErrorOnInvalidScheme) {
       NS_ConvertUTF8toUTF16 urlUTF16(url);
@@ -168,12 +138,12 @@ TypeUtils::ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
       return;
     }
   }
+  aOut.urlFragment() = aIn->GetFragment();
 
   aIn->GetReferrer(aOut.referrer());
   aOut.referrerPolicy() = aIn->ReferrerPolicy_();
-
   RefPtr<InternalHeaders> headers = aIn->Headers();
-  MOZ_ASSERT(headers);
+  MOZ_DIAGNOSTIC_ASSERT(headers);
   ToHeadersEntryList(aOut.headers(), headers);
   aOut.headersGuard() = headers->Guard();
   aOut.mode() = aIn->Mode();
@@ -181,6 +151,8 @@ TypeUtils::ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
   aOut.contentPolicyType() = aIn->ContentPolicyType();
   aOut.requestCache() = aIn->GetCacheMode();
   aOut.requestRedirect() = aIn->GetRedirectMode();
+
+  aOut.integrity() = aIn->GetIntegrity();
 
   if (aBodyAction == IgnoreBody) {
     aOut.body() = void_t();
@@ -191,7 +163,7 @@ TypeUtils::ToCacheRequest(CacheRequest& aOut, InternalRequest* aIn,
 
   nsCOMPtr<nsIInputStream> stream;
   aIn->GetBody(getter_AddRefs(stream));
-  SerializeCacheStream(stream, &aOut.body(), aRv);
+  SerializeCacheStream(stream, &aOut.body(), aStreamCleanupList, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
@@ -203,21 +175,21 @@ TypeUtils::ToCacheResponseWithoutBody(CacheResponse& aOut,
 {
   aOut.type() = aIn.Type();
 
-  aIn.GetUnfilteredUrl(aOut.url());
+  aIn.GetUnfilteredURLList(aOut.urlList());
+  AutoTArray<nsCString, 4> urlList;
+  aIn.GetURLList(urlList);
 
-  if (aOut.url() != EmptyCString()) {
+  for (uint32_t i = 0; i < aOut.urlList().Length(); i++) {
+    MOZ_DIAGNOSTIC_ASSERT(!aOut.urlList()[i].IsEmpty());
     // Pass all Response URL schemes through... The spec only requires we take
     // action on invalid schemes for Request objects.
-    ProcessURL(aOut.url(), nullptr, nullptr, nullptr, aRv);
-    if (aRv.Failed()) {
-      return;
-    }
+    ProcessURL(aOut.urlList()[i], nullptr, nullptr, nullptr, aRv);
   }
 
   aOut.status() = aIn.GetUnfilteredStatus();
   aOut.statusText() = aIn.GetUnfilteredStatusText();
   RefPtr<InternalHeaders> headers = aIn.UnfilteredHeaders();
-  MOZ_ASSERT(headers);
+  MOZ_DIAGNOSTIC_ASSERT(headers);
   if (HasVaryStar(headers)) {
     aRv.ThrowTypeError<MSG_RESPONSE_HAS_VARY_STAR>();
     return;
@@ -230,10 +202,15 @@ TypeUtils::ToCacheResponseWithoutBody(CacheResponse& aOut,
   } else {
     aOut.principalInfo() = void_t();
   }
+
+  aOut.paddingInfo() = aIn.GetPaddingInfo();
+  aOut.paddingSize() = aIn.GetPaddingSize();
 }
 
 void
-TypeUtils::ToCacheResponse(CacheResponse& aOut, Response& aIn, ErrorResult& aRv)
+TypeUtils::ToCacheResponse(JSContext* aCx, CacheResponse& aOut, Response& aIn,
+                           nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
+                           ErrorResult& aRv)
 {
   if (aIn.BodyUsed()) {
     aRv.ThrowTypeError<MSG_FETCH_BODY_CONSUMED_ERROR>();
@@ -249,10 +226,13 @@ TypeUtils::ToCacheResponse(CacheResponse& aOut, Response& aIn, ErrorResult& aRv)
   nsCOMPtr<nsIInputStream> stream;
   ir->GetUnfilteredBody(getter_AddRefs(stream));
   if (stream) {
-    aIn.SetBodyUsed();
+    aIn.SetBodyUsed(aCx, aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return;
+    }
   }
 
-  SerializeCacheStream(stream, &aOut.body(), aRv);
+  SerializeCacheStream(stream, &aOut.body(), aStreamCleanupList, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
@@ -278,31 +258,35 @@ already_AddRefed<Response>
 TypeUtils::ToResponse(const CacheResponse& aIn)
 {
   if (aIn.type() == ResponseType::Error) {
-    RefPtr<InternalResponse> error = InternalResponse::NetworkError();
-    RefPtr<Response> r = new Response(GetGlobalObject(), error);
+    // We don't bother tracking the internal error code for cached responses...
+    RefPtr<InternalResponse> error = InternalResponse::NetworkError(NS_ERROR_FAILURE);
+    RefPtr<Response> r = new Response(GetGlobalObject(), error, nullptr);
     return r.forget();
   }
 
   RefPtr<InternalResponse> ir = new InternalResponse(aIn.status(),
                                                        aIn.statusText());
-  ir->SetUrl(aIn.url());
+  ir->SetURLList(aIn.urlList());
 
   RefPtr<InternalHeaders> internalHeaders =
     ToInternalHeaders(aIn.headers(), aIn.headersGuard());
   ErrorResult result;
-  ir->Headers()->SetGuard(aIn.headersGuard(), result);
-  MOZ_ASSERT(!result.Failed());
+
+  // Be careful to fill the headers before setting the guard in order to
+  // correctly re-create the original headers.
   ir->Headers()->Fill(*internalHeaders, result);
-  MOZ_ASSERT(!result.Failed());
+  MOZ_DIAGNOSTIC_ASSERT(!result.Failed());
+  ir->Headers()->SetGuard(aIn.headersGuard(), result);
+  MOZ_DIAGNOSTIC_ASSERT(!result.Failed());
 
   ir->InitChannelInfo(aIn.channelInfo());
   if (aIn.principalInfo().type() == mozilla::ipc::OptionalPrincipalInfo::TPrincipalInfo) {
     UniquePtr<mozilla::ipc::PrincipalInfo> info(new mozilla::ipc::PrincipalInfo(aIn.principalInfo().get_PrincipalInfo()));
-    ir->SetPrincipalInfo(Move(info));
+    ir->SetPrincipalInfo(std::move(info));
   }
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aIn.body());
-  ir->SetBody(stream);
+  ir->SetBody(stream, InternalResponse::UNKNOWN_BODY_SIZE);
 
   switch (aIn.type())
   {
@@ -323,23 +307,21 @@ TypeUtils::ToResponse(const CacheResponse& aIn)
     default:
       MOZ_CRASH("Unexpected ResponseType!");
   }
-  MOZ_ASSERT(ir);
+  MOZ_DIAGNOSTIC_ASSERT(ir);
 
-  RefPtr<Response> ref = new Response(GetGlobalObject(), ir);
+  ir->SetPaddingSize(aIn.paddingSize());
+
+  RefPtr<Response> ref = new Response(GetGlobalObject(), ir, nullptr);
   return ref.forget();
 }
-
 already_AddRefed<InternalRequest>
 TypeUtils::ToInternalRequest(const CacheRequest& aIn)
 {
-  RefPtr<InternalRequest> internalRequest = new InternalRequest();
-
-  internalRequest->SetMethod(aIn.method());
-
   nsAutoCString url(aIn.urlWithoutQuery());
   url.Append(aIn.urlQuery());
-  internalRequest->SetURL(url);
-
+  RefPtr<InternalRequest> internalRequest =
+    new InternalRequest(url, aIn.urlFragment());
+  internalRequest->SetMethod(aIn.method());
   internalRequest->SetReferrer(aIn.referrer());
   internalRequest->SetReferrerPolicy(aIn.referrerPolicy());
   internalRequest->SetMode(aIn.mode());
@@ -347,6 +329,7 @@ TypeUtils::ToInternalRequest(const CacheRequest& aIn)
   internalRequest->SetContentPolicyType(aIn.contentPolicyType());
   internalRequest->SetCacheMode(aIn.requestCache());
   internalRequest->SetRedirectMode(aIn.requestRedirect());
+  internalRequest->SetIntegrity(aIn.integrity());
 
   RefPtr<InternalHeaders> internalHeaders =
     ToInternalHeaders(aIn.headers(), aIn.headersGuard());
@@ -355,14 +338,14 @@ TypeUtils::ToInternalRequest(const CacheRequest& aIn)
   // Be careful to fill the headers before setting the guard in order to
   // correctly re-create the original headers.
   internalRequest->Headers()->Fill(*internalHeaders, result);
-  MOZ_ASSERT(!result.Failed());
+  MOZ_DIAGNOSTIC_ASSERT(!result.Failed());
 
   internalRequest->Headers()->SetGuard(aIn.headersGuard(), result);
-  MOZ_ASSERT(!result.Failed());
+  MOZ_DIAGNOSTIC_ASSERT(!result.Failed());
 
   nsCOMPtr<nsIInputStream> stream = ReadStream::Create(aIn.body());
 
-  internalRequest->SetBody(stream);
+  internalRequest->SetBody(stream, -1);
 
   return internalRequest.forget();
 }
@@ -371,7 +354,8 @@ already_AddRefed<Request>
 TypeUtils::ToRequest(const CacheRequest& aIn)
 {
   RefPtr<InternalRequest> internalRequest = ToInternalRequest(aIn);
-  RefPtr<Request> request = new Request(GetGlobalObject(), internalRequest);
+  RefPtr<Request> request =
+    new Request(GetGlobalObject(), internalRequest, nullptr);
   return request.forget();
 }
 
@@ -388,7 +372,7 @@ TypeUtils::ToInternalHeaders(const nsTArray<HeadersEntry>& aHeadersEntryList,
                                                    headersEntry.value()));
   }
 
-  RefPtr<InternalHeaders> ref = new InternalHeaders(Move(entryList), aGuard);
+  RefPtr<InternalHeaders> ref = new InternalHeaders(std::move(entryList), aGuard);
   return ref.forget();
 }
 
@@ -401,7 +385,7 @@ TypeUtils::ProcessURL(nsACString& aUrl, bool* aSchemeValidOut,
                       nsACString* aUrlWithoutQueryOut,nsACString* aUrlQueryOut,
                       ErrorResult& aRv)
 {
-  const nsAFlatCString& flatURL = PromiseFlatCString(aUrl);
+  const nsCString& flatURL = PromiseFlatCString(aUrl);
   const char* url = flatURL.get();
 
   // off the main thread URL parsing using nsStdURLParser.
@@ -419,8 +403,7 @@ TypeUtils::ProcessURL(nsACString& aUrl, bool* aSchemeValidOut,
   if (aSchemeValidOut) {
     nsAutoCString scheme(Substring(flatURL, schemePos, schemeLen));
     *aSchemeValidOut = scheme.LowerCaseEqualsLiteral("http") ||
-                       scheme.LowerCaseEqualsLiteral("https") ||
-                       scheme.LowerCaseEqualsLiteral("app");
+                       scheme.LowerCaseEqualsLiteral("https");
   }
 
   uint32_t queryPos;
@@ -438,7 +421,7 @@ TypeUtils::ProcessURL(nsACString& aUrl, bool* aSchemeValidOut,
     return;
   }
 
-  MOZ_ASSERT(aUrlQueryOut);
+  MOZ_DIAGNOSTIC_ASSERT(aUrlQueryOut);
 
   if (queryLen < 0) {
     *aUrlWithoutQueryOut = aUrl;
@@ -454,10 +437,10 @@ TypeUtils::ProcessURL(nsACString& aUrl, bool* aSchemeValidOut,
 }
 
 void
-TypeUtils::CheckAndSetBodyUsed(Request* aRequest, BodyAction aBodyAction,
-                               ErrorResult& aRv)
+TypeUtils::CheckAndSetBodyUsed(JSContext* aCx, Request* aRequest,
+                               BodyAction aBodyAction, ErrorResult& aRv)
 {
-  MOZ_ASSERT(aRequest);
+  MOZ_DIAGNOSTIC_ASSERT(aRequest);
 
   if (aBodyAction == IgnoreBody) {
     return;
@@ -471,7 +454,10 @@ TypeUtils::CheckAndSetBodyUsed(Request* aRequest, BodyAction aBodyAction,
   nsCOMPtr<nsIInputStream> stream;
   aRequest->GetBody(getter_AddRefs(stream));
   if (stream) {
-    aRequest->SetBodyUsed();
+    aRequest->SetBodyUsed(aCx, aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return;
+    }
   }
 }
 
@@ -489,7 +475,7 @@ TypeUtils::ToInternalRequest(const nsAString& aIn, ErrorResult& aRv)
   }
   JSContext* cx = jsapi.cx();
   GlobalObject global(cx, GetGlobalObject()->GetGlobalJSObject());
-  MOZ_ASSERT(!global.Failed());
+  MOZ_DIAGNOSTIC_ASSERT(!global.Failed());
 
   RefPtr<Request> request = Request::Constructor(global, requestOrString,
                                                    RequestInit(), aRv);
@@ -501,6 +487,7 @@ TypeUtils::ToInternalRequest(const nsAString& aIn, ErrorResult& aRv)
 void
 TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
                                 CacheReadStreamOrVoid* aStreamOut,
+                                nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
                                 ErrorResult& aRv)
 {
   *aStreamOut = void_t();
@@ -508,61 +495,22 @@ TypeUtils::SerializeCacheStream(nsIInputStream* aStream,
     return;
   }
 
-  // Option 1: Send a cache-specific ReadStream if we can.
   RefPtr<ReadStream> controlled = do_QueryObject(aStream);
   if (controlled) {
-    controlled->Serialize(aStreamOut);
+    controlled->Serialize(aStreamOut, aStreamCleanupList, aRv);
     return;
   }
 
-  CacheReadStream readStream;
-  readStream.controlChild() = nullptr;
-  readStream.controlParent() = nullptr;
-  readStream.pushStreamChild() = nullptr;
-  readStream.pushStreamParent() = nullptr;
+  *aStreamOut = CacheReadStream();
+  CacheReadStream& cacheStream = aStreamOut->get_CacheReadStream();
 
-  // Option 2: Do normal stream serialization if its supported.
-  nsCOMPtr<nsIIPCSerializableInputStream> serial = do_QueryInterface(aStream);
-  if (serial) {
-    SerializeNormalStream(aStream, readStream);
+  cacheStream.controlChild() = nullptr;
+  cacheStream.controlParent() = nullptr;
 
-  // Option 3: As a last resort push data across manually.  Should only be
-  //           needed for nsPipe input stream.  Only works for async,
-  //           non-blocking streams.
-  } else {
-    SerializePushStream(aStream, readStream, aRv);
-    if (NS_WARN_IF(aRv.Failed())) { return; }
-  }
+  UniquePtr<AutoIPCStream> autoStream(new AutoIPCStream(cacheStream.stream()));
+  autoStream->Serialize(aStream, GetIPCManager());
 
-  *aStreamOut = readStream;
-}
-
-void
-TypeUtils::SerializePushStream(nsIInputStream* aStream,
-                               CacheReadStream& aReadStreamOut,
-                               ErrorResult& aRv)
-{
-  nsCOMPtr<nsIAsyncInputStream> asyncStream = do_QueryInterface(aStream);
-  if (NS_WARN_IF(!asyncStream)) {
-    aRv = NS_ERROR_FAILURE;
-    return;
-  }
-
-  bool nonBlocking = false;
-  aRv = asyncStream->IsNonBlocking(&nonBlocking);
-  if (NS_WARN_IF(aRv.Failed())) { return; }
-  if (NS_WARN_IF(!nonBlocking)) {
-    aRv = NS_ERROR_FAILURE;
-    return;
-  }
-
-  aReadStreamOut.pushStreamChild() = CreatePushStream(asyncStream);
-  MOZ_ASSERT(aReadStreamOut.pushStreamChild());
-  aReadStreamOut.params() = void_t();
-  aReadStreamOut.fds() = void_t();
-
-  // CachePushStreamChild::Start() must be called after sending the stream
-  // across to the parent side.
+  aStreamCleanupList.AppendElement(std::move(autoStream));
 }
 
 } // namespace cache

@@ -27,14 +27,11 @@ public:
 
     nsCOMPtr<nsIPersistentProperties> mProps;
 
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
+    size_t SizeOfIncludingThisIfUnshared(mozilla::MallocSizeOf aMallocSizeOf) const override;
+
 protected:
     virtual ~nsStringBundle();
-
-    //
-    // functional decomposition of the funitions repeatively called
-    //
-    nsresult GetStringFromID(int32_t aID, nsAString& aResult);
-    nsresult GetStringFromName(const nsAString& aName, nsAString& aResult);
 
     nsresult GetCombinedEnumeration(nsIStringBundleOverride* aOverrideString,
                                     nsISimpleEnumerator** aResult);
@@ -48,7 +45,7 @@ private:
 public:
     static nsresult FormatString(const char16_t *formatStr,
                                  const char16_t **aParams, uint32_t aLength,
-                                 char16_t **aResult);
+                                 nsAString& aResult);
 };
 
 class nsExtensibleStringBundle;
@@ -68,6 +65,8 @@ class nsExtensibleStringBundle final : public nsIStringBundle
 
 public:
   nsExtensibleStringBundle();
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
+  size_t SizeOfIncludingThisIfUnshared(mozilla::MallocSizeOf aMallocSizeOf) const override;
 
 private:
   virtual ~nsExtensibleStringBundle();

@@ -8,8 +8,6 @@
           src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
   <script type="text/javascript"
           src="chrome://mochikit/content/tests/SimpleTest/NativeKeyCodes.js"></script>
-  <script type="text/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js"></script>
   <link rel="stylesheet" type="text/css"
           href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 </head>
@@ -83,7 +81,7 @@
     ok(true, "Not crashed: input on <input type=\"text\"> changed from type=\"password\"");
 
     otherWindow =
-      window.open("data:text/html,<input id=\"text\" type\"text\"><input id=\"password\" type\"password\">",
+      window.open("file_secure_input.html",
                   "_blank", "chrome,width=100,height=100");
     ok(otherWindow, "failed to open other window");
     if (!otherWindow) {

@@ -7,33 +7,33 @@
  * in the UI.
  */
 
-const { PMM_loadFrameScripts, PMM_isProfilerActive, PMM_clearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+const { pmmLoadFrameScripts, pmmIsProfilerActive, pmmClearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
 
-add_task(function*() {
-  let { panel } = yield initPerformanceInNewTab({
+add_task(async function() {
+  const { panel } = await initPerformanceInNewTab({
     url: SIMPLE_URL,
     win: window
   });
 
-  PMM_loadFrameScripts(gBrowser);
+  pmmLoadFrameScripts(gBrowser);
 
-  ok(!(yield PMM_isProfilerActive()),
+  ok(!(await pmmIsProfilerActive()),
     "The built-in profiler module should not have been automatically started.");
 
-  yield startRecording(panel);
+  await startRecording(panel);
 
-  ok((yield PMM_isProfilerActive()),
+  ok((await pmmIsProfilerActive()),
     "The built-in profiler module should now be active.");
 
-  yield stopRecording(panel);
+  await stopRecording(panel);
 
-  ok((yield PMM_isProfilerActive()),
+  ok((await pmmIsProfilerActive()),
     "The built-in profiler module should still be active.");
 
-  yield teardownToolboxAndRemoveTab(panel);
+  await teardownToolboxAndRemoveTab(panel);
 
-  PMM_clearFrameScripts();
+  pmmClearFrameScripts();
 });

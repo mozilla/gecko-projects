@@ -221,8 +221,7 @@ SECKEY_CreateECPrivateKey(SECKEYECParams *param, SECKEYPublicKey **pubk, void *c
                                             PK11_ATTR_SESSION |
                                                 PK11_ATTR_INSENSITIVE |
                                                 PK11_ATTR_PUBLIC,
-                                            CKF_DERIVE, CKF_DERIVE |
-                                                            CKF_SIGN,
+                                            CKF_DERIVE, CKF_DERIVE | CKF_SIGN,
                                             cx);
     if (!privk)
         privk = PK11_GenerateKeyPairWithOpFlags(slot, CKM_EC_KEY_PAIR_GEN,
@@ -230,8 +229,7 @@ SECKEY_CreateECPrivateKey(SECKEYECParams *param, SECKEYPublicKey **pubk, void *c
                                                 PK11_ATTR_SESSION |
                                                     PK11_ATTR_SENSITIVE |
                                                     PK11_ATTR_PRIVATE,
-                                                CKF_DERIVE, CKF_DERIVE |
-                                                                CKF_SIGN,
+                                                CKF_DERIVE, CKF_DERIVE | CKF_SIGN,
                                                 cx);
 
     PK11_FreeSlot(slot);
@@ -314,8 +312,6 @@ seckey_UpdateCertPQGChain(CERTCertificate *subjectCert, int count)
     CERTSubjectPublicKeyInfo *subjectSpki = NULL;
     CERTSubjectPublicKeyInfo *issuerSpki = NULL;
     CERTCertificate *issuerCert = NULL;
-
-    rv = SECSuccess;
 
     /* increment cert chain length counter*/
     count++;
@@ -549,6 +545,23 @@ CERT_GetCertKeyType(const CERTSubjectPublicKeyInfo *spki)
     return seckey_GetKeyType(SECOID_GetAlgorithmTag(&spki->algorithm));
 }
 
+/* Ensure pubKey contains an OID */
+static SECStatus
+seckey_HasCurveOID(const SECKEYPublicKey *pubKey)
+{
+    SECItem oid;
+    SECStatus rv;
+    PORTCheapArenaPool tmpArena;
+
+    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
+    /* If we can decode it, an OID is available. */
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, &oid,
+                                SEC_ASN1_GET(SEC_ObjectIDTemplate),
+                                &pubKey->u.ec.DEREncodedParams);
+    PORT_DestroyCheapArena(&tmpArena);
+    return rv;
+}
+
 static SECKEYPublicKey *
 seckey_ExtractPublicKey(const CERTSubjectPublicKeyInfo *spki)
 {
@@ -585,6 +598,7 @@ seckey_ExtractPublicKey(const CERTSubjectPublicKeyInfo *spki)
         switch (tag) {
             case SEC_OID_X500_RSA_ENCRYPTION:
             case SEC_OID_PKCS1_RSA_ENCRYPTION:
+            case SEC_OID_PKCS1_RSA_PSS_SIGNATURE:
                 pubk->keyType = rsaKey;
                 prepare_rsa_pub_key_for_asn1(pubk);
                 rv = SEC_QuickDERDecodeItem(arena, pubk, SECKEY_RSAPublicKeyTemplate, &newOs);
@@ -633,16 +647,22 @@ seckey_ExtractPublicKey(const CERTSubjectPublicKeyInfo *spki)
                  */
                 rv = SECITEM_CopyItem(arena, &pubk->u.ec.DEREncodedParams,
                                       &spki->algorithm.parameters);
-                if (rv != SECSuccess)
+                if (rv != SECSuccess) {
                     break;
+                }
                 rv = SECITEM_CopyItem(arena, &pubk->u.ec.publicValue, &newOs);
-                if (rv == SECSuccess)
+                if (rv != SECSuccess) {
+                    break;
+                }
+                pubk->u.ec.encoding = ECPoint_Undefined;
+                rv = seckey_HasCurveOID(pubk);
+                if (rv == SECSuccess) {
                     return pubk;
+                }
                 break;
 
             default:
                 PORT_SetError(SEC_ERROR_UNSUPPORTED_KEYALG);
-                rv = SECFailure;
                 break;
         }
 
@@ -660,16 +680,6 @@ SECKEY_ExtractPublicKey(const CERTSubjectPublicKeyInfo *spki)
 SECKEYPublicKey *
 CERT_ExtractPublicKey(CERTCertificate *cert)
 {
-    SECStatus rv;
-
-    if (!cert) {
-        PORT_SetError(SEC_ERROR_INVALID_ARGS);
-        return NULL;
-    }
-    rv = SECKEY_UpdateCertPQG(cert);
-    if (rv != SECSuccess)
-        return NULL;
-
     return seckey_ExtractPublicKey(&cert->subjectPublicKeyInfo);
 }
 
@@ -795,6 +805,9 @@ SECKEY_ECParamsToKeySize(const SECItem *encodedParams)
         case SEC_OID_SECG_EC_SECT571K1:
         case SEC_OID_SECG_EC_SECT571R1:
             return 571;
+
+        case SEC_OID_CURVE25519:
+            return 255;
 
         default:
             PORT_SetError(SEC_ERROR_UNSUPPORTED_ELLIPTIC_CURVE);
@@ -943,6 +956,9 @@ SECKEY_ECParamsToBasePointOrderLen(const SECItem *encodedParams)
         case SEC_OID_SECG_EC_SECT571R1:
             return 570;
 
+        case SEC_OID_CURVE25519:
+            return 255;
+
         default:
             PORT_SetError(SEC_ERROR_UNSUPPORTED_ELLIPTIC_CURVE);
             return 0;
@@ -1030,6 +1046,7 @@ SECKEY_SignatureLen(const SECKEYPublicKey *pubk)
 
     switch (pubk->keyType) {
         case rsaKey:
+        case rsaPssKey:
             b0 = pubk->u.rsa.modulus.data[0];
             return b0 ? pubk->u.rsa.modulus.len : pubk->u.rsa.modulus.len - 1;
         case dsaKey:
@@ -1162,10 +1179,16 @@ SECKEY_CopyPublicKey(const SECKEYPublicKey *pubk)
             break;
         case ecKey:
             copyk->u.ec.size = pubk->u.ec.size;
+            rv = seckey_HasCurveOID(pubk);
+            if (rv != SECSuccess) {
+                break;
+            }
             rv = SECITEM_CopyItem(arena, &copyk->u.ec.DEREncodedParams,
                                   &pubk->u.ec.DEREncodedParams);
-            if (rv != SECSuccess)
+            if (rv != SECSuccess) {
                 break;
+            }
+            copyk->u.ec.encoding = ECPoint_Undefined;
             rv = SECITEM_CopyItem(arena, &copyk->u.ec.publicValue,
                                   &pubk->u.ec.publicValue);
             break;
@@ -1236,6 +1259,19 @@ SECKEY_ConvertToPublicKey(SECKEYPrivateKey *privk)
                 break;
             return pubk;
             break;
+        case ecKey:
+            rv = PK11_ReadAttribute(privk->pkcs11Slot, privk->pkcs11ID,
+                                    CKA_EC_PARAMS, arena, &pubk->u.ec.DEREncodedParams);
+            if (rv != SECSuccess) {
+                break;
+            }
+            rv = PK11_ReadAttribute(privk->pkcs11Slot, privk->pkcs11ID,
+                                    CKA_EC_POINT, arena, &pubk->u.ec.publicValue);
+            if (rv != SECSuccess || pubk->u.ec.publicValue.len == 0) {
+                break;
+            }
+            pubk->u.ec.encoding = ECPoint_Undefined;
+            return pubk;
         default:
             break;
     }
@@ -1936,4 +1972,119 @@ SECKEY_GetECCOid(const SECKEYECParams *params)
         return 0;
 
     return oidData->offset;
+}
+
+static CK_MECHANISM_TYPE
+sec_GetHashMechanismByOidTag(SECOidTag tag)
+{
+    switch (tag) {
+        case SEC_OID_SHA512:
+            return CKM_SHA512;
+        case SEC_OID_SHA384:
+            return CKM_SHA384;
+        case SEC_OID_SHA256:
+            return CKM_SHA256;
+        case SEC_OID_SHA224:
+            return CKM_SHA224;
+        case SEC_OID_SHA1:
+            return CKM_SHA_1;
+        default:
+            PORT_SetError(SEC_ERROR_INVALID_ALGORITHM);
+            return CKM_INVALID_MECHANISM;
+    }
+}
+
+static CK_RSA_PKCS_MGF_TYPE
+sec_GetMgfTypeByOidTag(SECOidTag tag)
+{
+    switch (tag) {
+        case SEC_OID_SHA512:
+            return CKG_MGF1_SHA512;
+        case SEC_OID_SHA384:
+            return CKG_MGF1_SHA384;
+        case SEC_OID_SHA256:
+            return CKG_MGF1_SHA256;
+        case SEC_OID_SHA224:
+            return CKG_MGF1_SHA224;
+        case SEC_OID_SHA1:
+            return CKG_MGF1_SHA1;
+        default:
+            PORT_SetError(SEC_ERROR_INVALID_ALGORITHM);
+            return 0;
+    }
+}
+
+SECStatus
+sec_RSAPSSParamsToMechanism(CK_RSA_PKCS_PSS_PARAMS *mech,
+                            const SECKEYRSAPSSParams *params)
+{
+    SECStatus rv = SECSuccess;
+    SECOidTag hashAlgTag;
+    unsigned long saltLength;
+    unsigned long trailerField;
+
+    PORT_Memset(mech, 0, sizeof(CK_RSA_PKCS_PSS_PARAMS));
+
+    if (params->hashAlg) {
+        hashAlgTag = SECOID_GetAlgorithmTag(params->hashAlg);
+    } else {
+        hashAlgTag = SEC_OID_SHA1; /* default, SHA-1 */
+    }
+    mech->hashAlg = sec_GetHashMechanismByOidTag(hashAlgTag);
+    if (mech->hashAlg == CKM_INVALID_MECHANISM) {
+        return SECFailure;
+    }
+
+    if (params->maskAlg) {
+        SECAlgorithmID maskHashAlg;
+        SECOidTag maskHashAlgTag;
+        PORTCheapArenaPool tmpArena;
+
+        if (SECOID_GetAlgorithmTag(params->maskAlg) != SEC_OID_PKCS1_MGF1) {
+            /* only MGF1 is known to PKCS#11 */
+            PORT_SetError(SEC_ERROR_INVALID_ALGORITHM);
+            return SECFailure;
+        }
+
+        PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
+        rv = SEC_QuickDERDecodeItem(&tmpArena.arena, &maskHashAlg,
+                                    SEC_ASN1_GET(SECOID_AlgorithmIDTemplate),
+                                    &params->maskAlg->parameters);
+        PORT_DestroyCheapArena(&tmpArena);
+        if (rv != SECSuccess) {
+            return rv;
+        }
+        maskHashAlgTag = SECOID_GetAlgorithmTag(&maskHashAlg);
+        mech->mgf = sec_GetMgfTypeByOidTag(maskHashAlgTag);
+        if (mech->mgf == 0) {
+            return SECFailure;
+        }
+    } else {
+        mech->mgf = CKG_MGF1_SHA1; /* default, MGF1 with SHA-1 */
+    }
+
+    if (params->saltLength.data) {
+        rv = SEC_ASN1DecodeInteger((SECItem *)&params->saltLength, &saltLength);
+        if (rv != SECSuccess) {
+            return rv;
+        }
+    } else {
+        saltLength = 20; /* default, 20 */
+    }
+    mech->sLen = saltLength;
+
+    if (params->trailerField.data) {
+        rv = SEC_ASN1DecodeInteger((SECItem *)&params->trailerField, &trailerField);
+        if (rv != SECSuccess) {
+            return rv;
+        }
+        if (trailerField != 1) {
+            /* the value must be 1, which represents the trailer field
+             * with hexadecimal value 0xBC */
+            PORT_SetError(SEC_ERROR_INVALID_ARGS);
+            return SECFailure;
+        }
+    }
+
+    return rv;
 }

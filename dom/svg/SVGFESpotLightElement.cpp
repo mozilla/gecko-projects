@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFESpotLightElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFESpotLightElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFESpotLightElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFESpotLightElement::sNumberInfo[8] =
@@ -34,7 +34,7 @@ nsSVGElement::NumberInfo SVGFESpotLightElement::sNumberInfo[8] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFESpotLightElement)
 
@@ -43,7 +43,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFESpotLightElement)
 
 bool
 SVGFESpotLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                 nsIAtom* aAttribute) const
+                                                 nsAtom* aAttribute) const
 {
   return aNameSpaceID == kNameSpaceID_None &&
          (aAttribute == nsGkAtoms::x ||

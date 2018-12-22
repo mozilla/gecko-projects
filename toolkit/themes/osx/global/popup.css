@@ -4,17 +4,10 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
-.panel-arrowcontent {
-  --panel-arrowcontent-padding: 16px;
-  --panel-arrowcontent-background: linear-gradient(hsla(0,0%,99%,1), hsla(0,0%,99%,.975) 10%, hsla(0,0%,98%,.975));
-  --panel-arrowcontent-color: hsl(0,0%,10%);
-  --panel-arrowcontent-border: none;
-  --panel-arrowcontent-border-radius: 3.5px;
-}
-
 menupopup,
 panel {
   -moz-appearance: menupopup;
+  -moz-font-smoothing-background-color: -moz-mac-menupopup;
   background-color: Menu;
 }
 
@@ -49,24 +42,31 @@ panel[type="arrow"][side="right"] {
 
 .panel-arrowcontent {
   -moz-appearance: none;
-  background: var(--panel-arrowcontent-background);
-  border-radius: var(--panel-arrowcontent-border-radius);
-  box-shadow: 0 0 0 1px hsla(210,4%,10%,.05);
-  color: var(--panel-arrowcontent-color);
-  border: var(--panel-arrowcontent-border);
-  padding: var(--panel-arrowcontent-padding);
+  -moz-font-smoothing-background-color: var(--arrowpanel-background);
+  background: var(--arrowpanel-background);
+  border-radius: var(--arrowpanel-border-radius);
+  box-shadow: 0 0 0 1px var(--arrowpanel-border-color);
+  color: var(--arrowpanel-color);
+  border: none;
+  padding: var(--arrowpanel-padding);
   margin: 1px;
 }
 
+.panel-arrow {
+  -moz-context-properties: fill, stroke;
+  fill: var(--arrowpanel-background);
+  stroke: var(--arrowpanel-border-color);
+}
+
 .panel-arrow[side="top"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.png");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
   margin-left: 16px;
   margin-right: 16px;
   margin-bottom: -1px;
 }
 
 .panel-arrow[side="bottom"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.png");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
   -moz-transform: scaleY(-1);
   margin-left: 16px;
   margin-right: 16px;
@@ -74,40 +74,25 @@ panel[type="arrow"][side="right"] {
 }
 
 .panel-arrow[side="left"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.png");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.svg");
   margin-top: 16px;
   margin-bottom: 16px;
   margin-right: -1px;
 }
 
 .panel-arrow[side="right"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.png");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.svg");
   transform: scaleX(-1);
   margin-top: 16px;
   margin-bottom: 16px;
   margin-left: -1px;
 }
 
-@media (min-resolution: 2dppx) {
-  .panel-arrow[side="top"],
-  .panel-arrow[side="bottom"] {
-    list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical@2x.png");
-    width: 18px;
-    height: 10px;
-  }
-
-  .panel-arrow[side="left"],
-  .panel-arrow[side="right"] {
-    list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal@2x.png");
-    width: 10px;
-    height: 18px;
-  }
-}
-
 /* ::::: tooltip ::::: */
 
 tooltip {
   -moz-appearance: tooltip;
+  -moz-font-smoothing-background-color: -moz-mac-tooltip;
   margin-top: 18px;
   padding: 2px 3px;
   max-width: 40em;
@@ -129,10 +114,25 @@ menulist > menupopup {
   min-width: 0px;
 }
 
+menulist > menupopup:not([position]) {
+  margin-inline-start: -13px;
+  margin-top: -2px;
+}
+
 menulist[editable="true"] > menupopup {
   -moz-appearance: none;
 }
 
-menulist[editable="true"] > menupopup > .popup-internal-box {
+menulist > menupopup > .popup-internal-box {
   padding: 0;
+}
+
+menulist:not([editable="true"]) > menupopup {
+  padding: 4px 0;
+}
+
+menupopup[customoptionstyling="true"] {
+  -moz-appearance: none;
+  padding-top: 0;
+  padding-bottom: 0;
 }

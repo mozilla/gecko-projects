@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,9 +12,11 @@
 
 struct nsPresentationData;
 struct nsEmbellishData;
-class nsHTMLReflowMetrics;
-class nsRenderingContext;
+class gfxContext;
 class nsIFrame;
+namespace mozilla {
+class ReflowOutput;
+} // namespace mozilla
 
 // For MathML, this 'type' will be used to determine the spacing between frames
 // Subclasses can return a 'type' that will give them a particular spacing
@@ -40,13 +43,13 @@ public:
 
  /* SUPPORT FOR PRECISE POSITIONING */
  /*====================================================================*/
- 
+
  /* Metrics that _exactly_ enclose the text of the frame.
   * The frame *must* have *already* being reflowed, before you can call
   * the GetBoundingMetrics() method.
   * Note that for a frame with nested children, the bounding metrics
   * will exactly enclose its children. For example, the bounding metrics
-  * of msub is the smallest rectangle that exactly encloses both the 
+  * of msub is the smallest rectangle that exactly encloses both the
   * base and the subscript.
   */
   NS_IMETHOD
@@ -75,19 +78,19 @@ public:
   * @param aStretchDirection [in] the direction where to attempt to
   *        stretch.
   * @param aContainerSize [in] struct that suggests the maximumn size for
-  *        the stretched frame. Only member data of the struct that are 
-  *        relevant to the direction are used (the rest is ignored). 
+  *        the stretched frame. Only member data of the struct that are
+  *        relevant to the direction are used (the rest is ignored).
   * @param aDesiredStretchSize [in/out] On input the current size
   *        of the frame, on output the size after stretching.
   */
-  NS_IMETHOD 
+  NS_IMETHOD
   Stretch(mozilla::gfx::DrawTarget* aDrawTarget,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
-          nsHTMLReflowMetrics& aDesiredStretchSize) = 0;
+          mozilla::ReflowOutput& aDesiredStretchSize) = 0;
 
  /* Get the mEmbellishData member variable. */
- 
+
   NS_IMETHOD
   GetEmbellishData(nsEmbellishData& aEmbellishData) = 0;
 
@@ -171,7 +174,7 @@ public:
   * Sets compression flag on the whole tree. For child frames
   * at aFirstIndex up to aLastIndex, this method sets their
   * compression flags. The update is propagated down the subtrees of each of
-  * these child frames. 
+  * these child frames.
   *
   * @param aFirstIndex [in]
   *        Index of the first child from where the update is propagated.
@@ -215,7 +218,7 @@ public:
 // that occurs in the embellished hierarchy. The struct remains in its nil
 // state in those frames that are not part of the embellished hierarchy.
 struct nsEmbellishData {
-  // bits used to mark certain properties of our embellishments 
+  // bits used to mark certain properties of our embellishments
   uint32_t flags;
 
   // pointer on the <mo> frame at the core of the embellished hierarchy
@@ -267,7 +270,7 @@ struct nsPresentationData {
 // Bits used for the presentation flags -- these bits are set
 // in their relevant situation as they become available
 
-// This bit is used to emulate TeX rendering. 
+// This bit is used to emulate TeX rendering.
 // Internal use only, cannot be set by the user with an attribute.
 #define NS_MATHML_COMPRESSED                          0x00000002U
 
@@ -279,7 +282,7 @@ struct nsPresentationData {
 
 // This bit is set if the frame will fire a horizontal stretch
 // command on all its (non-empty) children.
-// Tags like munder, mover, munderover, will fire a 
+// Tags like munder, mover, munderover, will fire a
 // horizontal stretch command on all their non-empty children
 #define NS_MATHML_STRETCH_ALL_CHILDREN_HORIZONTALLY   0x00000008U
 
@@ -334,7 +337,7 @@ struct nsPresentationData {
 // Bits used for the embellish flags -- these bits are set
 // in their relevant situation as they become available
 
-// This bit is set if the frame is an embellished operator. 
+// This bit is set if the frame is an embellished operator.
 #define NS_MATHML_EMBELLISH_OPERATOR                0x00000001
 
 // This bit is set if the frame is an <mo> frame or an embellihsed

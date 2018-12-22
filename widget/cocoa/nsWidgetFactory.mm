@@ -20,6 +20,8 @@
 
 #include "nsClipboard.h"
 #include "nsClipboardHelper.h"
+#include "HeadlessClipboard.h"
+#include "gfxPlatform.h"
 #include "nsTransferable.h"
 #include "nsHTMLFormatConverter.h"
 #include "nsDragService.h"
@@ -32,15 +34,36 @@
 #include "NativeKeyBindings.h"
 #include "OSXNotificationCenter.h"
 
-#include "nsScreenManagerCocoa.h"
 #include "nsDeviceContextSpecX.h"
-#include "nsPrintOptionsX.h"
+#include "nsPrintSettingsServiceX.h"
 #include "nsPrintDialogX.h"
 #include "nsPrintSession.h"
 #include "nsToolkitCompsCID.h"
 
+#include "mozilla/widget/ScreenManager.h"
+
 using namespace mozilla;
 using namespace mozilla::widget;
+
+static nsresult
+nsClipboardConstructor(nsISupports *aOuter, REFNSIID aIID,
+                            void **aResult)
+{
+  nsCOMPtr<nsIClipboard> inst;
+
+  *aResult = nullptr;
+  if (aOuter != nullptr) {
+    return NS_ERROR_NO_AGGREGATION;
+  }
+
+  if (gfxPlatform::IsHeadless()) {
+    inst = new HeadlessClipboard();
+  } else {
+    inst = new nsClipboard();
+  }
+
+  return inst->QueryInterface(aIID, aResult);
+}
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsCocoaWindow)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsChildView)
@@ -49,15 +72,14 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsColorPicker)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSound)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsTransferable)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHTMLFormatConverter)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsClipboard)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsClipboardHelper)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDragService)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsScreenManagerCocoa)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDeviceContextSpecX)
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintOptionsX, Init)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintSettingsServiceX, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintDialogServiceX, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintSession, Init)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIdleServiceX, nsIdleServiceX::GetInstance)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(ScreenManager, ScreenManager::GetAddRefedSingleton)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(OSXNotificationCenter, Init)
 
 #include "nsMenuBarX.h"
@@ -71,6 +93,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsNativeThemeCocoa)
 
 #include "nsMacDockSupport.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacDockSupport)
+
+#include "nsMacSharingService.h"
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacSharingService)
 
 #include "nsMacWebAppUtils.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMacWebAppUtils)
@@ -112,6 +137,7 @@ NS_DEFINE_NAMED_CID(NS_IDLE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_SYSTEMALERTSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_NATIVEMENUSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MACDOCKSUPPORT_CID);
+NS_DEFINE_NAMED_CID(NS_MACSHARINGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MACWEBAPPUTILS_CID);
 NS_DEFINE_NAMED_CID(NS_STANDALONENATIVEMENU_CID);
 NS_DEFINE_NAMED_CID(NS_MACSYSTEMSTATUSBAR_CID);
@@ -125,7 +151,7 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
     mozilla::Module::MAIN_PROCESS_ONLY },
   { &kNS_COLORPICKER_CID, false, NULL, nsColorPickerConstructor,
     mozilla::Module::MAIN_PROCESS_ONLY },
-  { &kNS_APPSHELL_CID, false, NULL, nsAppShellConstructor },
+  { &kNS_APPSHELL_CID, false, NULL, nsAppShellConstructor, mozilla::Module::ALLOW_IN_GPU_PROCESS },
   { &kNS_SOUND_CID, false, NULL, nsSoundConstructor,
     mozilla::Module::MAIN_PROCESS_ONLY },
   { &kNS_TRANSFERABLE_CID, false, NULL, nsTransferableConstructor },
@@ -138,16 +164,17 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_BIDIKEYBOARD_CID, false, NULL, nsBidiKeyboardConstructor,
     mozilla::Module::MAIN_PROCESS_ONLY },
   { &kNS_THEMERENDERER_CID, false, NULL, nsNativeThemeCocoaConstructor },
-  { &kNS_SCREENMANAGER_CID, false, NULL, nsScreenManagerCocoaConstructor,
+  { &kNS_SCREENMANAGER_CID, false, NULL, ScreenManagerConstructor,
     mozilla::Module::MAIN_PROCESS_ONLY },
   { &kNS_DEVICE_CONTEXT_SPEC_CID, false, NULL, nsDeviceContextSpecXConstructor },
   { &kNS_PRINTSESSION_CID, false, NULL, nsPrintSessionConstructor },
-  { &kNS_PRINTSETTINGSSERVICE_CID, false, NULL, nsPrintOptionsXConstructor },
+  { &kNS_PRINTSETTINGSSERVICE_CID, false, NULL, nsPrintSettingsServiceXConstructor },
   { &kNS_PRINTDIALOGSERVICE_CID, false, NULL, nsPrintDialogServiceXConstructor },
   { &kNS_IDLE_SERVICE_CID, false, NULL, nsIdleServiceXConstructor },
   { &kNS_SYSTEMALERTSSERVICE_CID, false, NULL, OSXNotificationCenterConstructor },
   { &kNS_NATIVEMENUSERVICE_CID, false, NULL, nsNativeMenuServiceXConstructor },
   { &kNS_MACDOCKSUPPORT_CID, false, NULL, nsMacDockSupportConstructor },
+  { &kNS_MACSHARINGSERVICE_CID, false, NULL, nsMacSharingServiceConstructor },
   { &kNS_MACWEBAPPUTILS_CID, false, NULL, nsMacWebAppUtilsConstructor },
   { &kNS_STANDALONENATIVEMENU_CID, false, NULL, nsStandaloneNativeMenuConstructor },
   { &kNS_MACSYSTEMSTATUSBAR_CID, false, NULL, nsSystemStatusBarCocoaConstructor },
@@ -163,7 +190,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
     mozilla::Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID,
     mozilla::Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/widget/appshell/mac;1", &kNS_APPSHELL_CID },
+  { "@mozilla.org/widget/appshell/mac;1", &kNS_APPSHELL_CID, mozilla::Module::ALLOW_IN_GPU_PROCESS },
   { "@mozilla.org/sound;1", &kNS_SOUND_CID,
     mozilla::Module::MAIN_PROCESS_ONLY },
   { "@mozilla.org/widget/transferable;1", &kNS_TRANSFERABLE_CID },
@@ -186,6 +213,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/system-alerts-service;1", &kNS_SYSTEMALERTSSERVICE_CID },
   { "@mozilla.org/widget/nativemenuservice;1", &kNS_NATIVEMENUSERVICE_CID },
   { "@mozilla.org/widget/macdocksupport;1", &kNS_MACDOCKSUPPORT_CID },
+  { "@mozilla.org/widget/macsharingservice;1", &kNS_MACSHARINGSERVICE_CID },
   { "@mozilla.org/widget/mac-web-app-utils;1", &kNS_MACWEBAPPUTILS_CID },
   { "@mozilla.org/widget/standalonenativemenu;1", &kNS_STANDALONENATIVEMENU_CID },
   { "@mozilla.org/widget/macsystemstatusbar;1", &kNS_MACSYSTEMSTATUSBAR_CID },
@@ -212,7 +240,8 @@ static const mozilla::Module kWidgetModule = {
   NULL,
   NULL,
   nsAppShellInit,
-  nsWidgetCocoaModuleDtor
+  nsWidgetCocoaModuleDtor,
+  mozilla::Module::ALLOW_IN_GPU_PROCESS
 };
 
 NSMODULE_DEFN(nsWidgetMacModule) = &kWidgetModule;

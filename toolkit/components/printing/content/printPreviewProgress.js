@@ -17,9 +17,11 @@ var docTitle = "";
 var docURL   = "";
 var progressParams = null;
 
-function ellipseString(aStr, doFront)
-{
-  if (aStr.length > 3 && (aStr.substr(0, 3) == "..." || aStr.substr(aStr.length-4, 3) == "..."))
+function ellipseString(aStr, doFront) {
+  if (!aStr)
+    return "";
+
+  if (aStr.length > 3 && (aStr.substr(0, 3) == "..." || aStr.substr(aStr.length - 4, 3) == "..."))
     return aStr;
 
   var fixedLen = 64;
@@ -27,7 +29,7 @@ function ellipseString(aStr, doFront)
     return aStr;
 
   if (doFront)
-    return "..." + aStr.substr(aStr.length-fixedLen, fixedLen);
+    return "..." + aStr.substr(aStr.length - fixedLen, fixedLen);
 
   return aStr.substr(0, fixedLen) + "...";
 }
@@ -35,14 +37,12 @@ function ellipseString(aStr, doFront)
 // all progress notifications are done through the nsIWebProgressListener implementation...
 var progressListener = {
 
-  onStateChange: function (aWebProgress, aRequest, aStateFlags, aStatus)
-  {
-    if (aStateFlags & Components.interfaces.nsIWebProgressListener.STATE_STOP)
+  onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
+    if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP)
       window.close();
   },
 
-  onProgressChange: function (aWebProgress, aRequest, aCurSelfProgress, aMaxSelfProgress, aCurTotalProgress, aMaxTotalProgress)
-  {
+  onProgressChange(aWebProgress, aRequest, aCurSelfProgress, aMaxSelfProgress, aCurTotalProgress, aMaxTotalProgress) {
     if (!progressParams)
       return;
     var docTitleStr = ellipseString(progressParams.docTitle, false);
@@ -58,28 +58,23 @@ var progressListener = {
     }
   },
 
-  onLocationChange: function (aWebProgress, aRequest, aLocation, aFlags) {},
-  onSecurityChange: function (aWebProgress, aRequest, state) {},
+  onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {},
+  onSecurityChange(aWebProgress, aRequest, state) {},
 
-  onStatusChange: function (aWebProgress, aRequest, aStatus, aMessage)
-  {
+  onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {
     if (aMessage)
       dialog.title.setAttribute("value", aMessage);
   },
 
-  QueryInterface: function (iid)
-  {
-    if (iid.equals(Components.interfaces.nsIWebProgressListener) || iid.equals(Components.interfaces.nsISupportsWeakReference))
-      return this;
-    throw Components.results.NS_NOINTERFACE;
-  }
-}
+  QueryInterface: ChromeUtils.generateQI(["nsIWebProgressListener",
+                                          "nsISupportsWeakReference"]),
+};
 
 function onLoad() {
   // Set global variables.
   printProgress = window.arguments[0];
   if (window.arguments[1]) {
-    progressParams = window.arguments[1].QueryInterface(Components.interfaces.nsIPrintProgressParams)
+    progressParams = window.arguments[1].QueryInterface(Ci.nsIPrintProgressParams);
     if (progressParams) {
       docTitle = ellipseString(progressParams.docTitle, false);
       docURL   = ellipseString(progressParams.docURL, true);
@@ -88,12 +83,12 @@ function onLoad() {
 
   if (!printProgress) {
     dump( "Invalid argument to printPreviewProgress.xul\n" );
-    window.close()
+    window.close();
     return;
   }
 
-  dialog         = new Object;
-  dialog.strings = new Array;
+  dialog         = {};
+  dialog.strings = [];
   dialog.title   = document.getElementById("dialog.title");
   dialog.titleLabel = document.getElementById("dialog.titleLabel");
 
@@ -101,28 +96,25 @@ function onLoad() {
 
   // set our web progress listener on the helper app launcher
   printProgress.registerListener(progressListener);
-  moveToAlertPosition();
 
-  //We need to delay the set title else dom will overwrite it
+  // We need to delay the set title else dom will overwrite it
   window.setTimeout(doneIniting, 100);
 }
 
-function onUnload()
-{
+function onUnload() {
   if (!printProgress)
     return;
   try {
     printProgress.unregisterListener(progressListener);
     printProgress = null;
-  }
-  catch(e) {}
+  } catch (e) {}
 }
 
-function getString (stringId) {
+function getString(stringId) {
   // Check if we've fetched this string already.
   if (!(stringId in dialog.strings)) {
     // Try to get it.
-    var elem = document.getElementById( "dialog.strings."+stringId);
+    var elem = document.getElementById( "dialog.strings." + stringId);
     try {
       if (elem && elem.childNodes && elem.childNodes[0] &&
           elem.childNodes[0].nodeValue)
@@ -136,20 +128,17 @@ function getString (stringId) {
 }
 
 // If the user presses cancel, tell the app launcher and close the dialog...
-function onCancel ()
-{
+function onCancel() {
   // Cancel app launcher.
   try {
     printProgress.processCanceledByUser = true;
-  }
-  catch(e) {return true;}
+  } catch (e) { return true; }
 
   // don't Close up dialog by returning false, the backend will close the dialog when everything will be aborted.
   return false;
 }
 
-function doneIniting()
-{
+function doneIniting() {
   // called by function timeout in onLoad
   printProgress.doneIniting();
 }

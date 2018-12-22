@@ -7,6 +7,7 @@
 
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/LookAndFeel.h"
+#include "nsIWidget.h"
 
 namespace IPC {
 
@@ -21,7 +22,7 @@ struct ParamTraits<LookAndFeelInt>
     WriteParam(aMsg, aParam.value);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     int32_t id, value;
     if (ReadParam(aMsg, aIter, &id) &&
@@ -32,6 +33,16 @@ struct ParamTraits<LookAndFeelInt>
     }
     return false;
   }
+};
+
+template<>
+struct ParamTraits<nsTransparencyMode> : public ContiguousEnumSerializerInclusive<nsTransparencyMode, eTransparencyOpaque, eTransparencyBorderlessGlass>
+{ };
+
+template<>
+struct ParamTraits<nsCursor>
+  : public ContiguousEnumSerializer<nsCursor, eCursor_standard, eCursorCount>
+{
 };
 
 } // namespace IPC

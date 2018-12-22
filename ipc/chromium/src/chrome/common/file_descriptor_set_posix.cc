@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -29,7 +31,7 @@ FileDescriptorSet::~FileDescriptorSet() {
   for (unsigned i = consumed_descriptor_highwater_;
        i < descriptors_.size(); ++i) {
     if (descriptors_[i].auto_close)
-      HANDLE_EINTR(close(descriptors_[i].fd));
+      IGNORE_EINTR(close(descriptors_[i].fd));
   }
 }
 
@@ -100,7 +102,7 @@ void FileDescriptorSet::CommitAll() {
   for (std::vector<base::FileDescriptor>::iterator
        i = descriptors_.begin(); i != descriptors_.end(); ++i) {
     if (i->auto_close)
-      HANDLE_EINTR(close(i->fd));
+      IGNORE_EINTR(close(i->fd));
   }
   descriptors_.clear();
   consumed_descriptor_highwater_ = 0;

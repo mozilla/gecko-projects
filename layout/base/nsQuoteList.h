@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -31,7 +32,7 @@ struct nsQuoteNode : public nsGenConNode {
     NS_ASSERTION(aContentIndex <= INT32_MAX, "out of range");
   }
 
-  virtual bool InitTextFrame(nsGenConList* aList, 
+  virtual bool InitTextFrame(nsGenConList* aList,
           nsIFrame* aPseudoFrame, nsIFrame* aTextFrame) override;
 
   // is this 'open-quote' or 'no-open-quote'?
@@ -70,7 +71,7 @@ struct nsQuoteNode : public nsGenConNode {
 
 class nsQuoteList : public nsGenConList {
 private:
-  nsQuoteNode* FirstNode() { return static_cast<nsQuoteNode*>(mFirstNode); }
+  nsQuoteNode* FirstNode() { return static_cast<nsQuoteNode*>(mList.getFirst()); }
 public:
   // assign the correct |mDepthBefore| value to a node that has been inserted
   // Should be called immediately after calling |Insert|.
@@ -82,7 +83,7 @@ public:
   nsQuoteNode* Prev(nsQuoteNode* aNode) {
     return static_cast<nsQuoteNode*>(nsGenConList::Prev(aNode));
   }
-  
+
   void RecalcAll();
 #ifdef DEBUG
   void PrintChain();

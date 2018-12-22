@@ -9,8 +9,12 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLMediaElement.h"
+#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
+
+class FrameStatistics;
+
 namespace dom {
 
 class WakeLock;
@@ -23,25 +27,27 @@ public:
 
   explicit HTMLVideoElement(already_AddRefed<NodeInfo>& aNodeInfo);
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLVideoElement, video)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLVideoElement, video)
 
   using HTMLMediaElement::GetPaused;
 
-  NS_IMETHOD_(bool) IsVideo() override {
+  virtual bool IsVideo() const override {
     return true;
   }
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
+                              nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
 
   static void Init();
 
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
-  virtual nsresult Clone(NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   // Set size with the current video frame's height and width.
   // If there is no video frame, returns NS_ERROR_FAILURE.
@@ -61,7 +67,7 @@ public:
 
   void SetWidth(uint32_t aValue, ErrorResult& aRv)
   {
-    SetHTMLIntAttr(nsGkAtoms::width, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::width, aValue, 0, aRv);
   }
 
   uint32_t Height() const
@@ -71,17 +77,36 @@ public:
 
   void SetHeight(uint32_t aValue, ErrorResult& aRv)
   {
-    SetHTMLIntAttr(nsGkAtoms::height, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::height, aValue, 0, aRv);
   }
 
   uint32_t VideoWidth() const
   {
-    return mMediaInfo.HasVideo() ? mMediaInfo.mVideo.mDisplay.width : 0;
+    if (mMediaInfo.HasVideo()) {
+      if (mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_90 ||
+          mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_270) {
+        return mMediaInfo.mVideo.mDisplay.height;
+      }
+      return mMediaInfo.mVideo.mDisplay.width;
+    }
+    return 0;
   }
 
   uint32_t VideoHeight() const
   {
-    return mMediaInfo.HasVideo() ? mMediaInfo.mVideo.mDisplay.height : 0;
+    if (mMediaInfo.HasVideo()) {
+      if (mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_90 ||
+          mMediaInfo.mVideo.mRotation == VideoInfo::Rotation::kDegree_270) {
+        return mMediaInfo.mVideo.mDisplay.width;
+      }
+      return mMediaInfo.mVideo.mDisplay.height;
+    }
+    return 0;
+  }
+
+  VideoInfo::Rotation RotationDegrees() const
+  {
+    return mMediaInfo.mVideo.mRotation;
   }
 
   void GetPoster(nsAString& aValue)
@@ -105,13 +130,26 @@ public:
 
   bool MozHasAudio() const;
 
-  bool MozUseScreenWakeLock() const;
-
-  void SetMozUseScreenWakeLock(bool aValue);
-
-  bool NotifyOwnerDocumentActivityChangedInternal() override;
+  // Gives access to the decoder's frame statistics, if present.
+  FrameStatistics* GetFrameStatistics();
 
   already_AddRefed<VideoPlaybackQuality> GetVideoPlaybackQuality();
+
+
+  bool MozOrientationLockEnabled() const
+  {
+    return StaticPrefs::MediaVideocontrolsLockVideoOrientation();
+  }
+
+  bool MozIsOrientationLocked() const
+  {
+    return mIsOrientationLocked;
+  }
+
+  void SetMozIsOrientationLocked(bool aLock)
+  {
+    mIsOrientationLocked = aLock;
+  }
 
 protected:
   virtual ~HTMLVideoElement();
@@ -122,12 +160,16 @@ protected:
   virtual void WakeLockRelease() override;
   void UpdateScreenWakeLock();
 
-  bool mUseScreenWakeLock;
   RefPtr<WakeLock> mScreenWakeLock;
+
+  bool mIsOrientationLocked;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
+                                    MappedDeclarations&);
+
+  static bool IsVideoStatsEnabled();
+  double TotalPlayTime() const;
 };
 
 } // namespace dom

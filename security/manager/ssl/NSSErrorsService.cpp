@@ -41,9 +41,9 @@ NSSErrorsService::Init()
 {
   nsresult rv;
   nsCOMPtr<nsIStringBundleService> bundleService(do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
-  if (NS_FAILED(rv) || !bundleService) 
+  if (NS_FAILED(rv) || !bundleService)
     return NS_ERROR_FAILURE;
-  
+
   bundleService->CreateBundle(PIPNSS_STRBUNDLE_URL,
                               getter_AddRefs(mPIPNSSBundle));
   if (!mPIPNSSBundle)
@@ -124,7 +124,7 @@ NSSErrorsService::GetErrorClass(nsresult aXPCOMErrorCode, uint32_t *aErrorClass)
       NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR) {
     return NS_ERROR_FAILURE;
   }
-  
+
   int32_t aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
 
   if (!mozilla::psm::IsNSSErrorCode(aNSPRCode)) {
@@ -146,10 +146,14 @@ ErrorIsOverridable(PRErrorCode code)
   switch (code)
   {
     // Overridable errors.
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_MITM_DETECTED:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA:
     case SEC_ERROR_CA_CERT_INVALID:
     case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
@@ -165,6 +169,23 @@ ErrorIsOverridable(PRErrorCode code)
   }
 }
 
+static const char*
+getOverrideErrorStringName(PRErrorCode aErrorCode)
+{
+  switch (aErrorCode) {
+    case SSL_ERROR_SSL_DISABLED:
+      return "PSMERR_SSL_Disabled";
+    case SSL_ERROR_SSL2_DISABLED:
+      return "PSMERR_SSL2_Disabled";
+    case SEC_ERROR_REUSED_ISSUER_AND_SERIAL:
+      return "PSMERR_HostReusedIssuerSerial";
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_MITM_DETECTED:
+      return "certErrorTrust_MitM";
+    default:
+      return nullptr;
+  }
+}
+
 NS_IMETHODIMP
 NSSErrorsService::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMessage)
 {
@@ -172,7 +193,7 @@ NSSErrorsService::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMes
       NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR) {
     return NS_ERROR_FAILURE;
   }
-  
+
   int32_t aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
 
   if (!mozilla::psm::IsNSSErrorCode(aNSPRCode)) {
@@ -180,21 +201,19 @@ NSSErrorsService::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMes
   }
 
   nsCOMPtr<nsIStringBundle> theBundle = mPIPNSSBundle;
-  const char *id_str = nsNSSErrors::getOverrideErrorStringName(aNSPRCode);
+  const char* idStr = getOverrideErrorStringName(aNSPRCode);
 
-  if (!id_str) {
-    id_str = nsNSSErrors::getDefaultErrorStringName(aNSPRCode);
+  if (!idStr) {
+    idStr = PR_ErrorToName(aNSPRCode);
     theBundle = mNSSErrorsBundle;
   }
 
-  if (!id_str || !theBundle) {
+  if (!idStr || !theBundle) {
     return NS_ERROR_FAILURE;
   }
 
   nsAutoString msg;
-  nsresult rv =
-    theBundle->GetStringFromName(NS_ConvertASCIItoUTF16(id_str).get(),
-                                 getter_Copies(msg));
+  nsresult rv = theBundle->GetStringFromName(idStr, msg);
   if (NS_SUCCEEDED(rv)) {
     aErrorMessage = msg;
   }

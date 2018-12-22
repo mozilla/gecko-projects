@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,11 +31,11 @@ int NS_GetBrightness(uint8_t aRed, uint8_t aGreen, uint8_t aBlue);
 // The range of return value is 0 to 255000.
 int32_t NS_GetLuminosity(nscolor aColor);
 
-// function to convert from RGBA color space to HSVA color space 
+// function to convert from RGBA color space to HSVA color space
 void NS_RGB2HSV(nscolor aColor, uint16_t &aHue, uint16_t &aSat,
                 uint16_t &aValue, uint8_t &aAlpha);
 
-// function to convert from HSVA color space to RGBA color space 
+// function to convert from HSVA color space to RGBA color space
 void NS_HSV2RGB(nscolor &aColor, uint16_t aHue, uint16_t aSat, uint16_t aValue,
                 uint8_t aAlpha);
 

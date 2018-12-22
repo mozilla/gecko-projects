@@ -12,11 +12,12 @@
 namespace mozilla {
 
 template <typename T>
-class AsyncEventRunner : public nsRunnable
+class AsyncEventRunner : public Runnable
 {
 public:
   AsyncEventRunner(T* aTarget, const char* aName)
-    : mTarget(aTarget)
+    : Runnable("AsyncEventRunner")
+    , mTarget(aTarget)
     , mName(aName)
   {}
 

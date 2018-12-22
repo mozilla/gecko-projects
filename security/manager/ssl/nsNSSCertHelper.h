@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _NSNSSCERTHELPER_H_
-#define _NSNSSCERTHELPER_H_
+#ifndef nsNSSCertHelper_h
+#define nsNSSCertHelper_h
 
 #ifndef INET6_ADDRSTRLEN
 #define INET6_ADDRSTRLEN 46
@@ -12,15 +12,26 @@
 #include "certt.h"
 #include "nsString.h"
 
-uint32_t
-getCertType(CERTCertificate *cert);
+extern const char* kRootModuleName;
+extern const size_t kRootModuleNameLen;
 
-CERTCertNicknames *
-getNSSCertNicknamesFromCertList(CERTCertList *certList);
+uint32_t
+getCertType(CERTCertificate* cert);
 
 nsresult
-GetCertFingerprintByOidTag(CERTCertificate* nsscert,
-                           SECOidTag aOidTag, 
-                           nsCString &fp);
+GetCertFingerprintByOidTag(CERTCertificate* nsscert, SECOidTag aOidTag,
+                           nsCString& fp);
 
-#endif
+void
+LossyUTF8ToUTF16(const char* str, uint32_t len, /*out*/ nsAString& result);
+
+// Must be used on the main thread only.
+nsresult
+GetPIPNSSBundleString(const char* stringName, nsAString& result);
+nsresult
+GetPIPNSSBundleString(const char* stringName, nsACString& result);
+nsresult
+PIPBundleFormatStringFromName(const char* stringName, const char16_t** params,
+                              uint32_t numParams, nsAString& result);
+
+#endif // nsNSSCertHelper_h

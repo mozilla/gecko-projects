@@ -7,13 +7,13 @@
 #ifndef MOZILLA_SVGANIMATEDPRESERVEASPECTRATIO_H__
 #define MOZILLA_SVGANIMATEDPRESERVEASPECTRATIO_H__
 
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
 #include "nsISMILAttr.h"
 #include "nsSVGElement.h"
 #include "SVGPreserveAspectRatio.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/UniquePtr.h"
 
 class nsSMILValue;
 
@@ -27,9 +27,10 @@ class SVGAnimatedPreserveAspectRatio final
 {
 public:
   void Init() {
-    mBaseVal.mAlign = SVG_PRESERVEASPECTRATIO_XMIDYMID;
-    mBaseVal.mMeetOrSlice = SVG_MEETORSLICE_MEET;
-    mBaseVal.mDefer = false;
+    mBaseVal.mAlign =
+      dom::SVGPreserveAspectRatio_Binding::SVG_PRESERVEASPECTRATIO_XMIDYMID;
+    mBaseVal.mMeetOrSlice =
+      dom::SVGPreserveAspectRatio_Binding::SVG_MEETORSLICE_MEET;
     mAnimVal = mBaseVal;
     mIsAnimated = false;
     mIsBaseSet = false;
@@ -46,9 +47,7 @@ public:
     if (aAlign < SVG_ALIGN_MIN_VALID || aAlign > SVG_ALIGN_MAX_VALID) {
       return NS_ERROR_FAILURE;
     }
-    SetBaseValue(SVGPreserveAspectRatio(
-                   static_cast<SVGAlign>(aAlign), mBaseVal.GetMeetOrSlice(),
-                   mBaseVal.GetDefer()),
+    SetBaseValue(SVGPreserveAspectRatio(aAlign, mBaseVal.GetMeetOrSlice()),
                  aSVGElement);
     return NS_OK;
   }
@@ -57,9 +56,7 @@ public:
         aMeetOrSlice > SVG_MEETORSLICE_MAX_VALID) {
       return NS_ERROR_FAILURE;
     }
-    SetBaseValue(SVGPreserveAspectRatio(
-                   mBaseVal.GetAlign(), static_cast<SVGMeetOrSlice>(aMeetOrSlice),
-                   mBaseVal.GetDefer()),
+    SetBaseValue(SVGPreserveAspectRatio(mBaseVal.GetAlign(), aMeetOrSlice),
                  aSVGElement);
     return NS_OK;
   }
@@ -76,8 +73,7 @@ public:
 
   already_AddRefed<mozilla::dom::DOMSVGAnimatedPreserveAspectRatio>
   ToDOMAnimatedPreserveAspectRatio(nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
+  UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
 

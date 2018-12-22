@@ -11,17 +11,21 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEventDispatcherListener.h"
-#include "nsAutoPtr.h"
 #include "nsITextInputProcessor.h"
 #include "nsITextInputProcessorCallback.h"
 #include "nsTArray.h"
 
 namespace mozilla {
 
+namespace dom {
+class KeyboardEvent;
+} // namespace dom
+
 class TextInputProcessor final : public nsITextInputProcessor
                                , public widget::TextEventDispatcherListener
 {
   typedef mozilla::widget::IMENotification IMENotification;
+  typedef mozilla::widget::IMENotificationRequests IMENotificationRequests;
   typedef mozilla::widget::TextEventDispatcher TextEventDispatcher;
 
 public:
@@ -33,6 +37,9 @@ public:
   // TextEventDispatcherListener
   NS_IMETHOD NotifyIME(TextEventDispatcher* aTextEventDispatcher,
                        const IMENotification& aNotification) override;
+
+  NS_IMETHOD_(IMENotificationRequests) GetIMENotificationRequests() override;
+
   NS_IMETHOD_(void)
     OnRemovedFrom(TextEventDispatcher* aTextEventDispatcher) override;
 
@@ -74,7 +81,7 @@ private:
   bool IsValidEventTypeForComposition(
          const WidgetKeyboardEvent& aKeyboardEvent) const;
   nsresult PrepareKeyboardEventForComposition(
-             nsIDOMKeyEvent* aDOMKeyEvent,
+             dom::KeyboardEvent* aDOMKeyEvent,
              uint32_t& aKeyFlags,
              uint8_t aOptionalArgc,
              WidgetKeyboardEvent*& aKeyboardEvent);

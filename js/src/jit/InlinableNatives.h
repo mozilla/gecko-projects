@@ -14,9 +14,7 @@
     _(ArrayPop)                     \
     _(ArrayShift)                   \
     _(ArrayPush)                    \
-    _(ArrayConcat)                  \
     _(ArraySlice)                   \
-    _(ArraySplice)                  \
                                     \
     _(AtomicsCompareExchange)       \
     _(AtomicsExchange)              \
@@ -28,6 +26,14 @@
     _(AtomicsOr)                    \
     _(AtomicsXor)                   \
     _(AtomicsIsLockFree)            \
+                                    \
+    _(Boolean)                      \
+                                    \
+    _(IntlGuardToCollator)          \
+    _(IntlGuardToDateTimeFormat)    \
+    _(IntlGuardToNumberFormat)      \
+    _(IntlGuardToPluralRules)       \
+    _(IntlGuardToRelativeTimeFormat) \
                                     \
     _(MathAbs)                      \
     _(MathFloor)                    \
@@ -65,23 +71,42 @@
     _(MathTrunc)                    \
     _(MathCbrt)                     \
                                     \
+    _(ReflectGetPrototypeOf)        \
+                                    \
     _(RegExpMatcher)                \
+    _(RegExpSearcher)               \
     _(RegExpTester)                 \
     _(IsRegExpObject)               \
+    _(RegExpPrototypeOptimizable)   \
+    _(RegExpInstanceOptimizable)    \
+    _(GetFirstDollarIndex)          \
                                     \
     _(String)                       \
-    _(StringSplit)                  \
     _(StringCharCodeAt)             \
     _(StringFromCharCode)           \
+    _(StringFromCodePoint)          \
     _(StringCharAt)                 \
-    _(StringReplace)                \
+    _(StringToLowerCase)            \
+    _(StringToUpperCase)            \
                                     \
+    _(IntrinsicStringReplaceString) \
+    _(IntrinsicStringSplitString)   \
+                                    \
+    _(Object)                       \
     _(ObjectCreate)                 \
+    _(ObjectIs)                     \
+    _(ObjectToString)               \
                                     \
     _(SimdInt32x4)                  \
     _(SimdUint32x4)                 \
+    _(SimdInt16x8)                  \
+    _(SimdUint16x8)                 \
+    _(SimdInt8x16)                  \
+    _(SimdUint8x16)                 \
     _(SimdFloat32x4)                \
     _(SimdBool32x4)                 \
+    _(SimdBool16x8)                 \
+    _(SimdBool8x16)                 \
                                     \
     _(TestBailout)                  \
     _(TestAssertFloat32)            \
@@ -95,21 +120,39 @@
     _(IntrinsicUnsafeGetBooleanFromReservedSlot) \
                                     \
     _(IntrinsicIsCallable)          \
+    _(IntrinsicIsConstructor)       \
     _(IntrinsicToObject)            \
     _(IntrinsicIsObject)            \
+    _(IntrinsicIsWrappedArrayConstructor) \
     _(IntrinsicToInteger)           \
     _(IntrinsicToString)            \
     _(IntrinsicIsConstructing)      \
     _(IntrinsicSubstringKernel)     \
-    _(IntrinsicDefineDataProperty)  \
+    _(IntrinsicObjectHasPrototype)  \
+    _(IntrinsicFinishBoundFunctionInit) \
+    _(IntrinsicIsPackedArray)       \
                                     \
-    _(IntrinsicIsArrayIterator)     \
-    _(IntrinsicIsMapIterator)       \
-    _(IntrinsicIsStringIterator)    \
-    _(IntrinsicIsListIterator)      \
+    _(IntrinsicGuardToArrayIterator) \
+    _(IntrinsicGuardToMapIterator)  \
+    _(IntrinsicGuardToSetIterator)  \
+    _(IntrinsicGuardToStringIterator) \
                                     \
+    _(IntrinsicGuardToMapObject)    \
     _(IntrinsicGetNextMapEntryForIterator) \
                                     \
+    _(IntrinsicGuardToSetObject)    \
+    _(IntrinsicGetNextSetEntryForIterator) \
+                                    \
+    _(IntrinsicNewArrayIterator)    \
+    _(IntrinsicNewStringIterator)   \
+                                    \
+    _(IntrinsicGuardToArrayBuffer)  \
+    _(IntrinsicArrayBufferByteLength) \
+    _(IntrinsicPossiblyWrappedArrayBufferByteLength) \
+                                    \
+    _(IntrinsicGuardToSharedArrayBuffer) \
+                                    \
+    _(TypedArrayConstructor)        \
     _(IntrinsicIsTypedArray)        \
     _(IntrinsicIsPossiblyWrappedTypedArray) \
     _(IntrinsicTypedArrayLength)    \
@@ -133,6 +176,7 @@ enum class InlinableNative : uint16_t {
 #define ADD_NATIVE(native) native,
     INLINABLE_NATIVE_LIST(ADD_NATIVE)
 #undef ADD_NATIVE
+    Limit
 };
 
 #define ADD_NATIVE(native) extern const JSJitInfo JitInfo_##native;

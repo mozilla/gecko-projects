@@ -22,6 +22,7 @@ from mozbuild.base import MachCommandConditions
 from mozbuild.frontend.emitter import TreeMetadataEmitter
 from mozbuild.frontend.reader import BuildReader
 from mozbuild.mozinfo import write_mozinfo
+from mozbuild.util import FileAvoidWrite
 from itertools import chain
 
 from mozbuild.backend import (
@@ -38,13 +39,10 @@ ANDROID_IDE_ADVERTISEMENT = '''
 ADVERTISEMENT
 
 You are building Firefox for Android. After your build completes, you can open
-the top source directory in IntelliJ or Android Studio directly and build using
-Gradle.  See the documentation at
+the top source directory in Android Studio directly and build using Gradle.
+See the documentation at
 
 https://developer.mozilla.org/en-US/docs/Simple_Firefox_for_Android_build
-
-PLEASE BE AWARE THAT GRADLE AND INTELLIJ/ANDROID STUDIO SUPPORT IS EXPERIMENTAL.
-You should verify any changes using |mach build|.
 =============
 '''.strip()
 
@@ -52,9 +50,8 @@ VISUAL_STUDIO_ADVERTISEMENT = '''
 ===============================
 Visual Studio Support Available
 
-You are building Firefox on Windows. Please help us test the experimental
-Visual Studio project files (yes, IntelliSense works) by running the
-following:
+You are building Firefox on Windows. You can generate Visual Studio
+files by running:
 
    mach build-backend --backend=VisualStudio
 
@@ -63,7 +60,8 @@ following:
 
 
 def config_status(topobjdir='.', topsrcdir='.', defines=None,
-                  non_global_defines=None, substs=None, source=None):
+                  non_global_defines=None, substs=None, source=None,
+                  mozconfig=None, args=sys.argv[1:]):
     '''Main function, providing config.status functionality.
 
     Contrary to config.status, it doesn't use CONFIG_FILES or CONFIG_HEADERS
@@ -73,9 +71,6 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
     the current directory as the top object directory, even when config.status
     is in a different directory. It will, however, treat the directory
     containing config.status as the top object directory with the -n option.
-
-    The --recheck option, like with the original config.status, runs configure
-    again, with the options given in the "ac_configure_args" subst.
 
     The options to this function are passed when creating the
     ConfigEnvironment. These lists, as well as the actual wrapper script
@@ -98,8 +93,6 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
     default_backends = (substs or {}).get('BUILD_BACKENDS', ['RecursiveMake'])
 
     parser = ArgumentParser()
-    parser.add_argument('--recheck', dest='recheck', action='store_true',
-                        help='update config.status by reconfiguring in the same conditions')
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
                         help='display verbose output')
     parser.add_argument('-n', dest='not_topobjdir', action='store_true',
@@ -112,19 +105,18 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
                         ' '.join(default_backends))
     parser.add_argument('--dry-run', action='store_true',
                         help='do everything except writing files out.')
-    options = parser.parse_args()
+    options = parser.parse_args(args)
 
     # Without -n, the current directory is meant to be the top object directory
     if not options.not_topobjdir:
         topobjdir = os.path.abspath('.')
 
     env = ConfigEnvironment(topsrcdir, topobjdir, defines=defines,
-            non_global_defines=non_global_defines, substs=substs, source=source)
+            non_global_defines=non_global_defines, substs=substs,
+            source=source, mozconfig=mozconfig)
 
-    # mozinfo.json only needs written if configure changes and configure always
-    # passes this environment variable.
-    if 'WRITE_MOZINFO' in os.environ:
-        write_mozinfo(os.path.join(topobjdir, 'mozinfo.json'), env, os.environ)
+    with FileAvoidWrite(os.path.join(topobjdir, 'mozinfo.json')) as f:
+        write_mozinfo(f, env, os.environ)
 
     cpu_start = time.clock()
     time_start = time.time()
@@ -142,11 +134,6 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
     # This won't actually do anything because of the magic of generators.
     definitions = emitter.emit(reader.read_topsrcdir())
 
-    if options.recheck:
-        # Execute configure from the top object directory
-        os.chdir(topobjdir)
-        os.execlp('sh', 'sh', '-c', ' '.join([os.path.join(topsrcdir, 'configure'), env.substs['ac_configure_args'], '--no-create', '--no-recursion']))
-
     log_level = logging.DEBUG if options.verbose else logging.INFO
     log_manager.add_terminal_logging(level=log_level)
     log_manager.enable_unstructured()
@@ -163,6 +150,9 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
         summary = obj.summary()
         print(summary, file=sys.stderr)
         execution_time += summary.execution_time
+        if hasattr(obj, 'gyp_summary'):
+            summary = obj.gyp_summary()
+            print(summary, file=sys.stderr)
 
     cpu_time = time.clock() - cpu_start
     wall_time = time.time() - time_start
@@ -185,17 +175,6 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
     if os.name == 'nt' and 'VisualStudio' not in options.backend:
         print(VISUAL_STUDIO_ADVERTISEMENT)
 
-    # Advertise Eclipse if it is appropriate.
+    # Advertise Android Studio if it is appropriate.
     if MachCommandConditions.is_android(env):
-        if 'AndroidEclipse' not in options.backend:
-            print(ANDROID_IDE_ADVERTISEMENT)
-
-    if env.substs.get('MOZ_ARTIFACT_BUILDS', False):
-        # Execute |mach artifact install| from the top source directory.
-        os.chdir(topsrcdir)
-        return subprocess.check_call([
-            sys.executable,
-            os.path.join(topsrcdir, 'mach'),
-            '--log-no-times',
-            'artifact',
-            'install'])
+        print(ANDROID_IDE_ADVERTISEMENT)

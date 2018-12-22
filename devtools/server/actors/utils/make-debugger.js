@@ -8,6 +8,7 @@
 
 const EventEmitter = require("devtools/shared/event-emitter");
 const Debugger = require("Debugger");
+const ReplayDebugger = require("../replay/debugger");
 
 const { reportException } = require("devtools/shared/DevToolsUtils");
 
@@ -63,7 +64,12 @@ const { reportException } = require("devtools/shared/DevToolsUtils");
  *              |findDebuggees|) to the |Debugger| instance.
  */
 module.exports = function makeDebugger({ findDebuggees, shouldAddNewGlobalAsDebuggee }) {
-  const dbg = new Debugger();
+  let dbg;
+  if (Debugger.recordReplayProcessKind() == "Middleman") {
+    dbg = new ReplayDebugger();
+  } else {
+    dbg = new Debugger();
+  }
   EventEmitter.decorate(dbg);
 
   dbg.allowUnobservedAsmJS = true;
@@ -76,7 +82,7 @@ module.exports = function makeDebugger({ findDebuggees, shouldAddNewGlobalAsDebu
   };
 
   dbg.addDebuggees = function() {
-    for (let global of findDebuggees(this)) {
+    for (const global of findDebuggees(this)) {
       safeAddDebuggee(this, global);
     }
   };
@@ -91,7 +97,7 @@ const reportDebuggerHookException = e => reportException("Debugger Hook", e);
  */
 function safeAddDebuggee(dbg, global) {
   try {
-    let wrappedGlobal = dbg.addDebuggee(global);
+    const wrappedGlobal = dbg.addDebuggee(global);
     if (wrappedGlobal) {
       dbg.emit("newGlobal", wrappedGlobal);
     }

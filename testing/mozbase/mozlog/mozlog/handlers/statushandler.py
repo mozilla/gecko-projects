@@ -2,18 +2,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 from collections import (
     defaultdict,
     namedtuple,
 )
 
-from mozlog.structuredlog import log_levels
 
 RunSummary = namedtuple("RunSummary",
                         ("unexpected_statuses",
                          "expected_statuses",
                          "log_level_counts",
                          "action_counts"))
+
 
 class StatusHandler(object):
     """A handler used to determine an overall status for a test run according
@@ -28,13 +30,16 @@ class StatusHandler(object):
         self.action_counts = defaultdict(int)
         # The count of messages logged at each log level
         self.log_level_counts = defaultdict(int)
-
+        # The count of "No tests run" error messages seen
+        self.no_tests_run_count = 0
 
     def __call__(self, data):
         action = data['action']
         self.action_counts[action] += 1
 
         if action == 'log':
+            if data['level'] == 'ERROR' and data['message'] == 'No tests ran':
+                self.no_tests_run_count += 1
             self.log_level_counts[data['level']] += 1
 
         if action in ('test_status', 'test_end'):
@@ -44,6 +49,15 @@ class StatusHandler(object):
             else:
                 self.expected_statuses[status] += 1
 
+        if action == "assertion_count":
+            if data["count"] < data["min_expected"]:
+                self.unexpected_statuses["PASS"] += 1
+            elif data["count"] > data["max_expected"]:
+                self.unexpected_statuses["FAIL"] += 1
+            elif data["count"]:
+                self.expected_statuses["FAIL"] += 1
+            else:
+                self.expected_statuses["PASS"] += 1
 
     def summarize(self):
         return RunSummary(

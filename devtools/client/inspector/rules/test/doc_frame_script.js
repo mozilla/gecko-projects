@@ -5,7 +5,7 @@
 
 "use strict";
 
-// A helper frame-script for brower/devtools/styleinspector tests.
+// A helper frame-script for browser/devtools/styleinspector tests.
 //
 // Most listeners in the script expect "Test:"-namespaced messages from chrome,
 // then execute code upon receiving, and immediately send back a message.
@@ -15,12 +15,6 @@
 // The response message should have the same name "Test:msgName"
 //
 // Some listeners do not send a response message back.
-
-var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
-var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var {CssLogic} = require("devtools/shared/inspector/css-logic");
-var promise = require("promise");
 
 /**
  * Get a value for a given property name in a css rule in a stylesheet, given
@@ -32,47 +26,21 @@ var promise = require("promise");
  * @return {String} The value, if found, null otherwise
  */
 addMessageListener("Test:GetRulePropertyValue", function(msg) {
-  let {name, styleSheetIndex, ruleIndex} = msg.data;
+  const {name, styleSheetIndex, ruleIndex} = msg.data;
   let value = null;
 
   dumpn("Getting the value for property name " + name + " in sheet " +
     styleSheetIndex + " and rule " + ruleIndex);
 
-  let sheet = content.document.styleSheets[styleSheetIndex];
+  const sheet = content.document.styleSheets[styleSheetIndex];
   if (sheet) {
-    let rule = sheet.cssRules[ruleIndex];
+    const rule = sheet.cssRules[ruleIndex];
     if (rule) {
       value = rule.style.getPropertyValue(name);
     }
   }
 
   sendAsyncMessage("Test:GetRulePropertyValue", value);
-});
-
-/**
- * Get information about all the stylesheets that contain rules that apply to
- * a given node. The information contains the sheet href and whether or not the
- * sheet is a content sheet or not
- * @param {Object} objects Expects a 'target' CPOW object
- * @return {Array} A list of stylesheet info objects
- */
-addMessageListener("Test:GetStyleSheetsInfoForNode", function(msg) {
-  let target = msg.objects.target;
-  let sheets = [];
-
-  let domUtils = Cc["@mozilla.org/inspector/dom-utils;1"]
-    .getService(Ci.inIDOMUtils);
-  let domRules = domUtils.getCSSStyleRules(target);
-
-  for (let i = 0, n = domRules.Count(); i < n; i++) {
-    let sheet = domRules.GetElementAt(i).parentStyleSheet;
-    sheets.push({
-      href: sheet.href,
-      isContentSheet: CssLogic.isContentStylesheet(sheet)
-    });
-  }
-
-  sendAsyncMessage("Test:GetStyleSheetsInfoForNode", sheets);
 });
 
 /**
@@ -84,9 +52,9 @@ addMessageListener("Test:GetStyleSheetsInfoForNode", function(msg) {
  * @return {String} The value, if found, null otherwise
  */
 addMessageListener("Test:GetComputedStylePropertyValue", function(msg) {
-  let {selector, pseudo, name} = msg.data;
-  let element = content.document.querySelector(selector);
-  let value = content.document.defaultView.getComputedStyle(element, pseudo)
+  const {selector, pseudo, name} = msg.data;
+  const element = content.document.querySelector(selector);
+  const value = content.document.defaultView.getComputedStyle(element, pseudo)
                                           .getPropertyValue(name);
   sendAsyncMessage("Test:GetComputedStylePropertyValue", value);
 });
@@ -101,10 +69,10 @@ addMessageListener("Test:GetComputedStylePropertyValue", function(msg) {
  * - {String} expected: the expected value for property
  */
 addMessageListener("Test:WaitForComputedStylePropertyValue", function(msg) {
-  let {selector, pseudo, name, expected} = msg.data;
-  let element = content.document.querySelector(selector);
+  const {selector, pseudo, name, expected} = msg.data;
+  const element = content.document.querySelector(selector);
   waitForSuccess(() => {
-    let value = content.document.defaultView.getComputedStyle(element, pseudo)
+    const value = content.document.defaultView.getComputedStyle(element, pseudo)
                                             .getPropertyValue(name);
 
     return value === expected;
@@ -125,16 +93,14 @@ var dumpn = msg => dump(msg + "\n");
  * if the timeout is reached
  */
 function waitForSuccess(validatorFn) {
-  let def = promise.defer();
-
-  function wait(fn) {
-    if (fn()) {
-      def.resolve();
-    } else {
-      setTimeout(() => wait(fn), 200);
+  return new Promise(resolve => {
+    function wait(fn) {
+      if (fn()) {
+        resolve();
+      } else {
+        setTimeout(() => wait(fn), 200);
+      }
     }
-  }
-  wait(validatorFn);
-
-  return def.promise;
+    wait(validatorFn);
+  });
 }

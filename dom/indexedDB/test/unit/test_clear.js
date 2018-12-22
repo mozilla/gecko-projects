@@ -5,7 +5,7 @@
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const name = this.window ? window.location.pathname : "Splendid Test";
   const entryCount = 1000;
@@ -48,7 +48,7 @@ function testSteps()
     else {
       continueToNextStep();
     }
-  }
+  };
   yield undefined;
 
   is(seenEntryCount, entryCount, "Correct entry count");
@@ -80,7 +80,7 @@ function testSteps()
       ok(false, "Shouldn't have any entries");
     }
     continueToNextStep();
-  }
+  };
   yield undefined;
 
   request = db.transaction("foo", "readwrite")
@@ -93,5 +93,4 @@ function testSteps()
   isnot(event.target.result, firstKey, "Got a different key");
 
   finishTest();
-  yield undefined;
 }

@@ -6,7 +6,6 @@
 // Implement shared vtbl methods.
 
 #include "xptcprivate.h"
-#include "xptiprivate.h"
 
 // The Linux/PPC ABI (aka PPC/SYSV ABI) passes the first 8 integral
 // parameters and the first 8 floating point parameters in registers
@@ -27,7 +26,7 @@
 // - 'args[]' contains the arguments passed on stack
 // - 'gprData[]' contains the arguments passed in integer registers
 // - 'fprData[]' contains the arguments passed in floating point registers
-// 
+//
 // The parameters are mapped into an array of type 'nsXPTCMiniVariant'
 // and then the method gets called.
 
@@ -76,7 +75,7 @@ PrepareAndDispatch(nsXPTCStubBase* self,
         const nsXPTParamInfo& param = info->GetParam(i);
         const nsXPTType& type = param.GetType();
         nsXPTCMiniVariant* dp = &dispatchParams[i];
-	
+
         if (!param.IsOut() && type == nsXPTType::T_DOUBLE) {
 #ifndef __NO_FPRS__
             if (fpr < FPR_COUNT)

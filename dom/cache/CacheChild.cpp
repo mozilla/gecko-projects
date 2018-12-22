@@ -6,11 +6,10 @@
 
 #include "mozilla/dom/cache/CacheChild.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/CacheOpChild.h"
-#include "mozilla/dom/cache/CachePushStreamChild.h"
 
 namespace mozilla {
 namespace dom {
@@ -43,25 +42,25 @@ CacheChild::~CacheChild()
 {
   MOZ_COUNT_DTOR(cache::CacheChild);
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  MOZ_ASSERT(!mListener);
-  MOZ_ASSERT(!mNumChildActors);
-  MOZ_ASSERT(!mLocked);
+  MOZ_DIAGNOSTIC_ASSERT(!mListener);
+  MOZ_DIAGNOSTIC_ASSERT(!mNumChildActors);
+  MOZ_DIAGNOSTIC_ASSERT(!mLocked);
 }
 
 void
 CacheChild::SetListener(Cache* aListener)
 {
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  MOZ_ASSERT(!mListener);
+  MOZ_DIAGNOSTIC_ASSERT(!mListener);
   mListener = aListener;
-  MOZ_ASSERT(mListener);
+  MOZ_DIAGNOSTIC_ASSERT(mListener);
 }
 
 void
 CacheChild::ClearListener()
 {
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  MOZ_ASSERT(mListener);
+  MOZ_DIAGNOSTIC_ASSERT(mListener);
   mListener = nullptr;
 }
 
@@ -71,17 +70,7 @@ CacheChild::ExecuteOp(nsIGlobalObject* aGlobal, Promise* aPromise,
 {
   mNumChildActors += 1;
   MOZ_ALWAYS_TRUE(SendPCacheOpConstructor(
-    new CacheOpChild(GetFeature(), aGlobal, aParent, aPromise), aArgs));
-}
-
-CachePushStreamChild*
-CacheChild::CreatePushStream(nsISupports* aParent, nsIAsyncInputStream* aStream)
-{
-  mNumChildActors += 1;
-  auto actor = SendPCachePushStreamConstructor(
-    new CachePushStreamChild(GetFeature(), aParent, aStream));
-  MOZ_ASSERT(actor);
-  return static_cast<CachePushStreamChild*>(actor);
+    new CacheOpChild(GetWorkerHolder(), aGlobal, aParent, aPromise), aArgs));
 }
 
 void
@@ -92,7 +81,7 @@ CacheChild::StartDestroyFromListener()
   // The listener should be held alive by any async operations, so if it
   // is going away then there must not be any child actors.  This in turn
   // ensures that StartDestroy() will not trigger the delayed path.
-  MOZ_ASSERT(!mNumChildActors);
+  MOZ_DIAGNOSTIC_ASSERT(!mNumChildActors);
 
   StartDestroy();
 }
@@ -114,7 +103,7 @@ CacheChild::StartDestroy()
 
   RefPtr<Cache> listener = mListener;
 
-  // StartDestroy() can get called from either Cache or the Feature.
+  // StartDestroy() can get called from either Cache or the WorkerHolder.
   // Theoretically we can get double called if the right race happens.  Handle
   // that by just ignoring the second StartDestroy() call.
   if (!listener) {
@@ -124,7 +113,7 @@ CacheChild::StartDestroy()
   listener->DestroyInternal(this);
 
   // Cache listener should call ClearListener() in DestroyInternal()
-  MOZ_ASSERT(!mListener);
+  MOZ_DIAGNOSTIC_ASSERT(!mListener);
 
   // Start actor destruction from parent process
   Unused << SendTeardown();
@@ -138,10 +127,10 @@ CacheChild::ActorDestroy(ActorDestroyReason aReason)
   if (listener) {
     listener->DestroyInternal(this);
     // Cache listener should call ClearListener() in DestroyInternal()
-    MOZ_ASSERT(!mListener);
+    MOZ_DIAGNOSTIC_ASSERT(!mListener);
   }
 
-  RemoveFeature();
+  RemoveWorkerHolder();
 }
 
 PCacheOpChild*
@@ -153,21 +142,6 @@ CacheChild::AllocPCacheOpChild(const CacheOpArgs& aOpArgs)
 
 bool
 CacheChild::DeallocPCacheOpChild(PCacheOpChild* aActor)
-{
-  delete aActor;
-  NoteDeletedActor();
-  return true;
-}
-
-PCachePushStreamChild*
-CacheChild::AllocPCachePushStreamChild()
-{
-  MOZ_CRASH("CachePushStreamChild should be manually constructed.");
-  return nullptr;
-}
-
-bool
-CacheChild::DeallocPCachePushStreamChild(PCachePushStreamChild* aActor)
 {
   delete aActor;
   NoteDeletedActor();
@@ -193,7 +167,7 @@ void
 CacheChild::Lock()
 {
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  MOZ_ASSERT(!mLocked);
+  MOZ_DIAGNOSTIC_ASSERT(!mLocked);
   mLocked = true;
 }
 
@@ -201,7 +175,7 @@ void
 CacheChild::Unlock()
 {
   NS_ASSERT_OWNINGTHREAD(CacheChild);
-  MOZ_ASSERT(mLocked);
+  MOZ_DIAGNOSTIC_ASSERT(mLocked);
   mLocked = false;
   MaybeFlushDelayedDestroy();
 }

@@ -14,6 +14,7 @@
 #include "nsCRT.h"
 #include "nsThreadUtils.h"
 #include <algorithm>
+#include "mozilla/IntegerPrintfMacros.h"
 
 #define kMinDecompressReadBufLen 1024
 #define kMinCompressWriteBufLen  1024
@@ -23,14 +24,15 @@
  * nsAsyncDoomEvent
  *****************************************************************************/
 
-class nsAsyncDoomEvent : public nsRunnable {
+class nsAsyncDoomEvent : public mozilla::Runnable {
 public:
     nsAsyncDoomEvent(nsCacheEntryDescriptor *descriptor,
                      nsICacheListener *listener)
+    : mozilla::Runnable("nsAsyncDoomEvent")
     {
         mDescriptor = descriptor;
         mListener = listener;
-        mThread = do_GetCurrentThread();
+        mEventTarget = GetCurrentThreadEventTarget();
         // We addref the listener here and release it in nsNotifyDoomListener
         // on the callers thread. If posting of nsNotifyDoomListener event fails
         // we leak the listener which is better than releasing it on a wrong
@@ -38,7 +40,7 @@ public:
         NS_IF_ADDREF(mListener);
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         nsresult status = NS_OK;
 
@@ -54,8 +56,8 @@ public:
         }
 
         if (mListener) {
-            mThread->Dispatch(new nsNotifyDoomListener(mListener, status),
-                              NS_DISPATCH_NORMAL);
+            mEventTarget->Dispatch(new nsNotifyDoomListener(mListener, status),
+                                   NS_DISPATCH_NORMAL);
             // posted event will release the reference on the correct thread
             mListener = nullptr;
         }
@@ -66,7 +68,7 @@ public:
 private:
     RefPtr<nsCacheEntryDescriptor> mDescriptor;
     nsICacheListener                *mListener;
-    nsCOMPtr<nsIThread>              mThread;
+    nsCOMPtr<nsIEventTarget>       mEventTarget;
 };
 
 
@@ -109,32 +111,29 @@ nsCacheEntryDescriptor::~nsCacheEntryDescriptor()
 
 
 NS_IMETHODIMP
-nsCacheEntryDescriptor::GetClientID(char ** result)
+nsCacheEntryDescriptor::GetClientID(nsACString& aClientID)
 {
-    NS_ENSURE_ARG_POINTER(result);
-
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_GETCLIENTID));
-    if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
+    if (!mCacheEntry) {
+        aClientID.Truncate();
+        return NS_ERROR_NOT_AVAILABLE;
+    }
 
-    return ClientIDFromCacheKey(*(mCacheEntry->Key()), result);
+    return ClientIDFromCacheKey(*(mCacheEntry->Key()), aClientID);
 }
 
 
 NS_IMETHODIMP
-nsCacheEntryDescriptor::GetDeviceID(char ** aDeviceID)
+nsCacheEntryDescriptor::GetDeviceID(nsACString& aDeviceID)
 {
-    NS_ENSURE_ARG_POINTER(aDeviceID);
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_GETDEVICEID));
-    if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
-
-    const char* deviceID = mCacheEntry->GetDeviceID();
-    if (!deviceID) {
-        *aDeviceID = nullptr;
-        return NS_OK;
+    if (!mCacheEntry) {
+        aDeviceID.Truncate();
+        return NS_ERROR_NOT_AVAILABLE;
     }
 
-    *aDeviceID = NS_strdup(deviceID);
-    return *aDeviceID ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    aDeviceID.Assign(mCacheEntry->GetDeviceID());
+    return NS_OK;
 }
 
 
@@ -305,7 +304,7 @@ nsCacheEntryDescriptor::SetDataSize(uint32_t dataSize)
     } else {
         NS_WARNING("failed SetDataSize() on memory cache object!");
     }
-    
+
     return rv;
 }
 
@@ -425,7 +424,7 @@ nsCacheEntryDescriptor::GetStoragePolicy(nsCacheStoragePolicy *result)
     NS_ENSURE_ARG_POINTER(result);
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_GETSTORAGEPOLICY));
     if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
-    
+
     *result = mCacheEntry->StoragePolicy();
     return NS_OK;
 }
@@ -437,7 +436,7 @@ nsCacheEntryDescriptor::SetStoragePolicy(nsCacheStoragePolicy policy)
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_SETSTORAGEPOLICY));
     if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
     // XXX validate policy against session?
-    
+
     bool        storageEnabled = false;
     storageEnabled = nsCacheService::IsStorageEnabledForPolicy_Locked(policy);
     if (!storageEnabled)    return NS_ERROR_FAILURE;
@@ -445,12 +444,12 @@ nsCacheEntryDescriptor::SetStoragePolicy(nsCacheStoragePolicy policy)
     // Don't change the storage policy of entries we can't write
     if (!(mAccessGranted & nsICache::ACCESS_WRITE))
         return NS_ERROR_NOT_AVAILABLE;
-    
+
     // Don't allow a cache entry to move from memory-only to anything else
     if (mCacheEntry->StoragePolicy() == nsICache::STORE_IN_MEMORY &&
         policy != nsICache::STORE_IN_MEMORY)
         return NS_ERROR_NOT_AVAILABLE;
-        
+
     mCacheEntry->SetStoragePolicy(policy);
     mCacheEntry->MarkEntryDirty();
     return NS_OK;
@@ -639,7 +638,7 @@ nsCacheEntryDescriptor::SetMetaDataElement(const char *key, const char *value)
 NS_IMETHODIMP
 nsCacheEntryDescriptor::VisitMetaData(nsICacheMetaDataVisitor * visitor)
 {
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_VISITMETADATA)); 
+    nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_VISITMETADATA));
     // XXX check callers, we're calling out of module
     NS_ENSURE_ARG_POINTER(visitor);
     if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
@@ -670,7 +669,7 @@ nsCacheEntryDescriptor::nsInputStreamWrapper::Release()
         nsCacheService::Lock(LOCK_TELEM(NSINPUTSTREAMWRAPPER_RELEASE));
 
     nsrefcnt count;
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
     count = --mRefCnt;
     NS_LOG_RELEASE(this, count, "nsCacheEntryDescriptor::nsInputStreamWrapper");
 
@@ -699,7 +698,7 @@ nsCacheEntryDescriptor::nsInputStreamWrapper::Release()
 NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsInputStreamWrapper)
   NS_INTERFACE_MAP_ENTRY(nsIInputStream)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
 nsresult nsCacheEntryDescriptor::
 nsInputStreamWrapper::LazyInit()
@@ -818,8 +817,8 @@ nsInputStreamWrapper::Read_Locked(char *buf, uint32_t count, uint32_t *countRead
         rv = mInput->Read(buf, count, countRead);
 
     CACHE_LOG_DEBUG(("nsInputStreamWrapper::Read "
-                      "[entry=%p, wrapper=%p, mInput=%p, rv=%d]",
-                      mDescriptor, this, mInput.get(), rv));
+                      "[entry=%p, wrapper=%p, mInput=%p, rv=%" PRId32 "]",
+                     mDescriptor, this, mInput.get(), static_cast<uint32_t>(rv)));
 
     return rv;
 }
@@ -863,7 +862,7 @@ nsCacheEntryDescriptor::nsDecompressInputStreamWrapper::Release()
                              NSDECOMPRESSINPUTSTREAMWRAPPER_RELEASE));
 
     nsrefcnt count;
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
     count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsDecompressInputStreamWrapper");
@@ -893,11 +892,11 @@ nsCacheEntryDescriptor::nsDecompressInputStreamWrapper::Release()
 NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper)
   NS_INTERFACE_MAP_ENTRY(nsIInputStream)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP nsCacheEntryDescriptor::
-nsDecompressInputStreamWrapper::Read(char *    buf, 
-                                     uint32_t  count, 
+nsDecompressInputStreamWrapper::Read(char *    buf,
+                                     uint32_t  count,
                                      uint32_t *countRead)
 {
     mozilla::MutexAutoLock lock(mLock);
@@ -938,7 +937,7 @@ nsDecompressInputStreamWrapper::Read(char *    buf,
     // read and inflate data until the output buffer is full, or
     // there is no more data to read
     while (NS_SUCCEEDED(rv) &&
-           zerr == Z_OK && 
+           zerr == Z_OK &&
            mZstream.avail_out > 0 &&
            count > 0) {
         if (mZstream.avail_in == 0) {
@@ -953,8 +952,8 @@ nsDecompressInputStreamWrapper::Read(char *    buf,
         zerr = inflate(&mZstream, Z_NO_FLUSH);
         if (zerr == Z_STREAM_END) {
             // The compressed data may have been stored in multiple
-            // chunks/streams. To allow for this case, re-initialize 
-            // the inflate stream and continue decompressing from 
+            // chunks/streams. To allow for this case, re-initialize
+            // the inflate stream and continue decompressing from
             // the next byte.
             Bytef * saveNextIn = mZstream.next_in;
             unsigned int saveAvailIn = mZstream.avail_in;
@@ -987,7 +986,7 @@ nsDecompressInputStreamWrapper::Close()
     EndZstream();
     if (mReadBuffer) {
         free(mReadBuffer);
-        mReadBuffer = 0;
+        mReadBuffer = nullptr;
         mReadBufferLen = 0;
     }
     return nsInputStreamWrapper::Close_Locked();
@@ -1052,7 +1051,7 @@ nsCacheEntryDescriptor::nsOutputStreamWrapper::Release()
         nsCacheService::Lock(LOCK_TELEM(NSOUTPUTSTREAMWRAPPER_RELEASE));
 
     nsrefcnt count;
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
     count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsOutputStreamWrapper");
@@ -1079,7 +1078,7 @@ nsCacheEntryDescriptor::nsOutputStreamWrapper::Release()
 NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsOutputStreamWrapper)
   NS_INTERFACE_MAP_ENTRY(nsIOutputStream)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
 nsresult nsCacheEntryDescriptor::
 nsOutputStreamWrapper::LazyInit()
@@ -1282,7 +1281,7 @@ nsCacheEntryDescriptor::nsCompressOutputStreamWrapper::Release()
         nsCacheService::Lock(LOCK_TELEM(NSCOMPRESSOUTPUTSTREAMWRAPPER_RELEASE));
 
     nsrefcnt count;
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
     count = --mRefCnt;
     NS_LOG_RELEASE(this, count,
                    "nsCacheEntryDescriptor::nsCompressOutputStreamWrapper");
@@ -1309,7 +1308,7 @@ nsCacheEntryDescriptor::nsCompressOutputStreamWrapper::Release()
 NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper)
   NS_INTERFACE_MAP_ENTRY(nsIOutputStream)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP nsCacheEntryDescriptor::
 nsCompressOutputStreamWrapper::Write(const char * buf,
@@ -1409,7 +1408,7 @@ nsCompressOutputStreamWrapper::Close()
                 mUncompressedCount += oldCount;
             }
         }
-        uncompressedLenStr.Adopt(0);
+        uncompressedLenStr.Adopt(nullptr);
         uncompressedLenStr.AppendInt(mUncompressedCount);
         rv = mDescriptor->SetMetaDataElement("uncompressed-len",
             uncompressedLenStr.get());
@@ -1419,7 +1418,7 @@ nsCompressOutputStreamWrapper::Close()
 
     if (mWriteBuffer) {
         free(mWriteBuffer);
-        mWriteBuffer = 0;
+        mWriteBuffer = nullptr;
         mWriteBufferLen = 0;
     }
 

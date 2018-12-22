@@ -22,7 +22,11 @@ function test() {
   return Task.spawn(function* () {
     yield pushPrefs(["devtools.debugger.workers", true]);
 
-    let [tab,, panel] = yield initDebugger(TAB_URL);
+    let options = {
+      source: TAB_URL,
+      line: 1
+    };
+    let [tab,, panel] = yield initDebugger(TAB_URL, options);
     let toolbox = yield selectWorker(panel, WORKER_URL);
     let workerPanel = toolbox.getCurrentPanel();
     yield waitForSourceShown(workerPanel, ".coffee");
@@ -43,7 +47,7 @@ function test() {
     yield threadClient.interrupt();
     let sourceForm = getSourceForm(Sources, COFFEE_URL);
     let source = threadClient.source(sourceForm);
-    let response = yield source.setBreakpoint({ line: 5 });
+    let [response] = yield source.setBreakpoint({ line: 5 });
 
     ok(!response.error,
       "Should be able to set a breakpoint in a coffee source file.");

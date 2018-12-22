@@ -5,6 +5,7 @@
 package org.mozilla.gecko.sync.stage;
 
 import android.content.Context;
+import android.os.SystemClock;
 
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.EngineSettings;
@@ -13,6 +14,8 @@ import org.mozilla.gecko.sync.HTTPFailureException;
 import org.mozilla.gecko.sync.MetaGlobalException;
 import org.mozilla.gecko.sync.NoCollectionKeysSetException;
 import org.mozilla.gecko.sync.NonObjectJSONException;
+import org.mozilla.gecko.sync.ReflowIsNecessaryException;
+import org.mozilla.gecko.sync.SyncException;
 import org.mozilla.gecko.sync.SynchronizerConfiguration;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
@@ -24,23 +27,23 @@ import org.mozilla.gecko.sync.net.SyncStorageRequest;
 import org.mozilla.gecko.sync.net.SyncStorageRequestDelegate;
 import org.mozilla.gecko.sync.net.SyncStorageResponse;
 import org.mozilla.gecko.sync.repositories.InactiveSessionException;
-import org.mozilla.gecko.sync.repositories.InvalidSessionTransitionException;
+import org.mozilla.gecko.sync.repositories.NonPersistentRepositoryStateProvider;
 import org.mozilla.gecko.sync.repositories.RecordFactory;
 import org.mozilla.gecko.sync.repositories.Repository;
 import org.mozilla.gecko.sync.repositories.RepositorySession;
 import org.mozilla.gecko.sync.repositories.RepositorySessionBundle;
-import org.mozilla.gecko.sync.repositories.Server11Repository;
-import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionBeginDelegate;
-import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionCreationDelegate;
+import org.mozilla.gecko.sync.repositories.RepositoryStateProvider;
+import org.mozilla.gecko.sync.repositories.Server15Repository;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionFinishDelegate;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionWipeDelegate;
-import org.mozilla.gecko.sync.synchronizer.ServerLocalSynchronizer;
 import org.mozilla.gecko.sync.synchronizer.Synchronizer;
 import org.mozilla.gecko.sync.synchronizer.SynchronizerDelegate;
 import org.mozilla.gecko.sync.synchronizer.SynchronizerSession;
+import org.mozilla.gecko.sync.telemetry.TelemetryCollector;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
@@ -55,8 +58,22 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
 
   protected static final String LOG_TAG = "ServerSyncStage";
 
-  protected long stageStartTimestamp = -1;
-  protected long stageCompleteTimestamp = -1;
+  private long stageStartTimestamp = -1;
+  private long stageCompleteTimestamp = -1;
+
+  /**
+   * Poor-man's boolean typing.
+   * These enums are used to configure {@link org.mozilla.gecko.sync.repositories.ConfigurableServer15Repository}.
+   */
+  public enum HighWaterMark {
+    Enabled,
+    Disabled
+  }
+
+  public enum MultipleBatches {
+    Enabled,
+    Disabled
+  }
 
   /**
    * Override these in your subclasses.
@@ -106,7 +123,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
    *           if engine sync state has been changed in Sync Settings, with new
    *           engine sync state.
    */
-  protected void checkAndUpdateUserSelectedEngines(boolean enabledInMetaGlobal) throws MetaGlobalException {
+  private void checkAndUpdateUserSelectedEngines(boolean enabledInMetaGlobal) throws MetaGlobalException {
     Map<String, Boolean> selectedEngines = session.config.userSelectedEngines;
     String thisEngine = this.getEngineName();
 
@@ -120,7 +137,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     }
   }
 
-  protected EngineSettings getEngineSettings() throws NonObjectJSONException, IOException {
+  private EngineSettings getEngineSettings() throws NonObjectJSONException, IOException {
     Integer version = getStorageVersion();
     if (version == null) {
       Logger.warn(LOG_TAG, "null storage version for " + this + "; using version 0.");
@@ -139,17 +156,48 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
   protected abstract Repository getLocalRepository();
   protected abstract RecordFactory getRecordFactory();
 
-  // Override this in subclasses.
-  protected Repository getRemoteRepository() throws URISyntaxException {
-    String collection = getCollection();
-    return new Server11Repository(collection,
-                                  session.config.storageURL(),
-                                  session.getAuthHeaderProvider(),
-                                  session.config.infoCollections);
+  /**
+   * Used to configure a {@link org.mozilla.gecko.sync.repositories.ConfigurableServer15Repository}.
+   * Override this if you need a persistent repository state provider.
+   *
+   * @return Non-persistent state provider.
+   */
+  protected RepositoryStateProvider getRepositoryStateProvider() {
+    return new NonPersistentRepositoryStateProvider();
   }
 
   /**
-   * Return a Crypto5Middleware-wrapped Server11Repository.
+   * Used to configure a {@link org.mozilla.gecko.sync.repositories.ConfigurableServer15Repository}.
+   * Override this if you want to restrict downloader to just a single batch.
+   */
+  protected MultipleBatches getAllowedMultipleBatches() {
+    return MultipleBatches.Enabled;
+  }
+
+  /**
+   * Used to configure a {@link org.mozilla.gecko.sync.repositories.ConfigurableServer15Repository}.
+   * Override this if you want to allow resuming record downloads from a high-water-mark.
+   * Ensure you're using a {@link org.mozilla.gecko.sync.repositories.PersistentRepositoryStateProvider}
+   * to persist high-water-mark across syncs.
+   */
+  protected HighWaterMark getAllowedToUseHighWaterMark() {
+    return HighWaterMark.Disabled;
+  }
+
+  // Override this in subclasses.
+  protected Repository getRemoteRepository() throws URISyntaxException {
+    String collection = getCollection();
+    return new Server15Repository(collection,
+                                  session.getSyncDeadline(),
+                                  session.config.storageURL(),
+                                  session.getAuthHeaderProvider(),
+                                  session.config.infoCollections,
+                                  session.config.infoConfiguration,
+                                  new NonPersistentRepositoryStateProvider());
+  }
+
+  /**
+   * Return a Crypto5Middleware-wrapped Server15Repository.
    *
    * @throws NoCollectionKeysSetException
    * @throws URISyntaxException
@@ -166,18 +214,22 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     return this.getCollection() + ".";
   }
 
+  /* package-private */ String statePreferencesPrefix() {
+    return this.getCollection() + ".state.";
+  }
+
   protected SynchronizerConfiguration getConfig() throws NonObjectJSONException, IOException {
     return new SynchronizerConfiguration(session.config.getBranch(bundlePrefix()));
   }
 
-  protected void persistConfig(SynchronizerConfiguration synchronizerConfiguration) {
+  private void persistConfig(SynchronizerConfiguration synchronizerConfiguration) {
     synchronizerConfiguration.persist(session.config.getBranch(bundlePrefix()));
   }
 
-  public Synchronizer getConfiguredSynchronizer(GlobalSession session) throws NoCollectionKeysSetException, URISyntaxException, NonObjectJSONException, IOException {
+  private Synchronizer getConfiguredSynchronizer() throws NoCollectionKeysSetException, URISyntaxException, NonObjectJSONException, IOException {
     Repository remote = wrappedServerRepo();
 
-    Synchronizer synchronizer = new ServerLocalSynchronizer();
+    Synchronizer synchronizer = getSynchronizer();
     synchronizer.repositoryA = remote;
     synchronizer.repositoryB = this.getLocalRepository();
     synchronizer.load(getConfig());
@@ -185,19 +237,33 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     return synchronizer;
   }
 
+  protected Synchronizer getSynchronizer() {
+    return new Synchronizer();
+  }
+
   /**
-   * Reset timestamps.
+   * Reset timestamps and any repository state.
    */
   @Override
   protected void resetLocal() {
     resetLocalWithSyncID(null);
+    if (!getRepositoryStateProvider().resetAndCommit()) {
+      // At the very least, we can log this.
+      // Failing to reset at this point means that we'll have lingering state for any stages using a
+      // persistent provider. In certain cases this might negatively affect first sync of this stage
+      // in the future.
+      // Our timestamp resetting code in `persistConfig` is affected by the same problem.
+      // A way to work around this is to further prefix our persisted SharedPreferences with
+      // clientID/syncID, ensuring a very defined scope for any persisted state. See Bug 1332431.
+      Logger.warn(LOG_TAG, "Failed to reset repository state");
+    }
   }
 
   /**
    * Reset timestamps and possibly set syncID.
    * @param syncID if non-null, new syncID to persist.
    */
-  protected void resetLocalWithSyncID(String syncID) {
+  private void resetLocalWithSyncID(String syncID) {
     // Clear both timestamps.
     SynchronizerConfiguration config;
     try {
@@ -218,9 +284,9 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
   }
 
   // Not thread-safe. Use with caution.
-  private class WipeWaiter {
-    public boolean sessionSucceeded = true;
-    public boolean wipeSucceeded = true;
+  private static final class WipeWaiter {
+    /* package-private */ boolean sessionSucceeded = true;
+    /* package-private */ boolean wipeSucceeded = true;
     public Exception error;
 
     public void notify(Exception e, boolean sessionSucceeded) {
@@ -249,81 +315,57 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     final Runnable doWipe = new Runnable() {
       @Override
       public void run() {
-        r.createSession(new RepositorySessionCreationDelegate() {
+        final RepositorySession localSession;
+        try {
+          localSession = r.createSession(context);
+        } catch (Exception e) {
+          synchronized (monitor) {
+            monitor.notify(e, false);
+          }
+          return;
+        }
 
+        try {
+          localSession.begin();
+        } catch (SyncException e) {
+          Logger.error(LOG_TAG, "Couldn't begin session", e);
+          localSession.abort();
+          synchronized (monitor) {
+            monitor.notify(e, true);
+          }
+          return;
+        }
+
+        localSession.wipe(new RepositorySessionWipeDelegate() {
           @Override
-          public void onSessionCreated(final RepositorySession session) {
+          public void onWipeSucceeded() {
             try {
-              session.begin(new RepositorySessionBeginDelegate() {
+              localSession.finish(new RepositorySessionFinishDelegate() {
 
                 @Override
-                public void onBeginSucceeded(final RepositorySession session) {
-                  session.wipe(new RepositorySessionWipeDelegate() {
-                    @Override
-                    public void onWipeSucceeded() {
-                      try {
-                        session.finish(new RepositorySessionFinishDelegate() {
-
-                          @Override
-                          public void onFinishSucceeded(RepositorySession session,
-                                                        RepositorySessionBundle bundle) {
-                            // Hurrah.
-                            synchronized (monitor) {
-                              monitor.notify();
-                            }
-                          }
-
-                          @Override
-                          public void onFinishFailed(Exception ex) {
-                            // Assume that no finish => no wipe.
-                            synchronized (monitor) {
-                              monitor.notify(ex, true);
-                            }
-                          }
-
-                          @Override
-                          public RepositorySessionFinishDelegate deferredFinishDelegate(ExecutorService executor) {
-                            return this;
-                          }
-                        });
-                      } catch (InactiveSessionException e) {
-                        // Cannot happen. Call for safety.
-                        synchronized (monitor) {
-                          monitor.notify(e, true);
-                        }
-                      }
-                    }
-
-                    @Override
-                    public void onWipeFailed(Exception ex) {
-                      session.abort();
-                      synchronized (monitor) {
-                        monitor.notify(ex, true);
-                      }
-                    }
-
-                    @Override
-                    public RepositorySessionWipeDelegate deferredWipeDelegate(ExecutorService executor) {
-                      return this;
-                    }
-                  });
+                public void onFinishSucceeded(RepositorySession session,
+                                              RepositorySessionBundle bundle) {
+                  // Hurrah.
+                  synchronized (monitor) {
+                    monitor.notify();
+                  }
                 }
 
                 @Override
-                public void onBeginFailed(Exception ex) {
-                  session.abort();
+                public void onFinishFailed(Exception ex) {
+                  // Assume that no finish => no wipe.
                   synchronized (monitor) {
                     monitor.notify(ex, true);
                   }
                 }
 
                 @Override
-                public RepositorySessionBeginDelegate deferredBeginDelegate(ExecutorService executor) {
+                public RepositorySessionFinishDelegate deferredFinishDelegate(ExecutorService executor) {
                   return this;
                 }
               });
-            } catch (InvalidSessionTransitionException e) {
-              session.abort();
+            } catch (InactiveSessionException e) {
+              // Cannot happen. Call for safety.
               synchronized (monitor) {
                 monitor.notify(e, true);
               }
@@ -331,17 +373,18 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
           }
 
           @Override
-          public void onSessionCreateFailed(Exception ex) {
+          public void onWipeFailed(Exception ex) {
+            localSession.abort();
             synchronized (monitor) {
-              monitor.notify(ex, false);
+              monitor.notify(ex, true);
             }
           }
 
           @Override
-          public RepositorySessionCreationDelegate deferredCreationDelegate() {
+          public RepositorySessionWipeDelegate deferredWipeDelegate(ExecutorService executor) {
             return this;
           }
-        }, context);
+        });
       }
     };
 
@@ -371,7 +414,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
   /**
    * Asynchronously wipe collection on server.
    */
-  protected void wipeServer(final AuthHeaderProvider authHeaderProvider, final WipeServerDelegate wipeDelegate) {
+  private void wipeServer(final AuthHeaderProvider authHeaderProvider, final WipeServerDelegate wipeDelegate) {
     SyncStorageRequest request;
 
     try {
@@ -425,7 +468,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
    * <p>
    * Logs and re-throws an exception on failure.
    */
-  public void wipeServer(final GlobalSession session) throws Exception {
+  private void wipeServer(final GlobalSession session) throws Exception {
     this.session = session;
 
     final WipeWaiter monitor = new WipeWaiter();
@@ -474,7 +517,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     final String name = getEngineName();
     Logger.debug(LOG_TAG, "Starting execute for " + name);
 
-    stageStartTimestamp = System.currentTimeMillis();
+    stageStartTimestamp = SystemClock.elapsedRealtime();
 
     try {
       if (!this.isEnabled()) {
@@ -541,7 +584,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
 
     Synchronizer synchronizer;
     try {
-      synchronizer = this.getConfiguredSynchronizer(session);
+      synchronizer = this.getConfiguredSynchronizer();
     } catch (NoCollectionKeysSetException e) {
       session.abort(e, "No CollectionKeys.");
       return;
@@ -563,7 +606,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
    *
    * @return formatted string.
    */
-  protected String getStageDurationString() {
+  private String getStageDurationString() {
     return Utils.formatDuration(stageStartTimestamp, stageCompleteTimestamp);
   }
 
@@ -574,7 +617,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
    */
   @Override
   public void onSynchronized(Synchronizer synchronizer) {
-    stageCompleteTimestamp = System.currentTimeMillis();
+    stageCompleteTimestamp = SystemClock.elapsedRealtime();
     Logger.debug(LOG_TAG, "onSynchronized.");
 
     SynchronizerConfiguration newConfig = synchronizer.save();
@@ -586,10 +629,27 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
 
     final SynchronizerSession synchronizerSession = synchronizer.getSynchronizerSession();
     int inboundCount = synchronizerSession.getInboundCount();
+    int inboundCountStored = synchronizerSession.getInboundCountStored();
+    int inboundCountFailed = synchronizerSession.getInboundCountFailed();
+    int inboundCountReconciled = synchronizerSession.getInboundCountReconciled();
     int outboundCount = synchronizerSession.getOutboundCount();
-    Logger.info(LOG_TAG, "Stage " + getEngineName() +
-        " received " + inboundCount + " and sent " + outboundCount +
-        " records in " + getStageDurationString() + ".");
+    int outboundCountStored = synchronizerSession.getOutboundCountStored();
+    int outboundCountFailed = synchronizerSession.getOutboundCountFailed();
+
+    telemetryStageCollector.outbound = synchronizerSession.getOutboundBatches();
+    telemetryStageCollector.finished = stageCompleteTimestamp;
+    telemetryStageCollector.inbound = inboundCount;
+    telemetryStageCollector.inboundStored = inboundCountStored;
+    telemetryStageCollector.inboundFailed = inboundCountFailed;
+    telemetryStageCollector.reconciled = inboundCountReconciled;
+
+    Logger.info(LOG_TAG, "Stage " + getEngineName()
+            + " received " + inboundCount
+            + "; stored " + inboundCountStored + ", reconciling " + inboundCountReconciled
+            + " and failed to store " + inboundCountFailed
+            + ". Sent " + outboundCount
+            + "; server accepted " + outboundCountStored + " and rejected " + outboundCountFailed
+            + ". Duration: " + getStageDurationString() + ".");
     Logger.info(LOG_TAG, "Advancing session.");
     session.advance();
   }
@@ -604,8 +664,18 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
   @Override
   public void onSynchronizeFailed(Synchronizer synchronizer,
                                   Exception lastException, String reason) {
-    stageCompleteTimestamp = System.currentTimeMillis();
+    stageCompleteTimestamp = SystemClock.elapsedRealtime();
     Logger.warn(LOG_TAG, "Synchronize failed: " + reason, lastException);
+
+    final SynchronizerSession synchronizerSession = synchronizer.getSynchronizerSession();
+
+    telemetryStageCollector.error = new TelemetryCollector.StageErrorBuilder()
+            .setLastException(lastException)
+            .setFetchException(synchronizerSession.getFetchFailedCauseException())
+            .setStoreException(synchronizerSession.getStoreFailedCauseException())
+            .build();
+
+    telemetryStageCollector.finished = stageCompleteTimestamp;
 
     // This failure could be due to a 503 or a 401 and it could have headers.
     // Interrogate the headers but only abort the global session if Retry-After header is set.
@@ -617,6 +687,12 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
       } else {
         session.interpretHTTPFailure(response.httpResponse()); // Does not call session.abort().
       }
+    }
+
+    // Let global session know that this stage is not complete (due to a 412 or hitting a deadline).
+    // This stage will be re-synced once current sync is complete.
+    if (lastException instanceof ReflowIsNecessaryException) {
+      session.handleIncompleteStage();
     }
 
     Logger.info(LOG_TAG, "Advancing session even though stage failed (took " + getStageDurationString() +

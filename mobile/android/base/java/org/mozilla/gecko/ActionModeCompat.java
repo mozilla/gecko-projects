@@ -4,52 +4,33 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.widget.GeckoPopupMenu;
-import org.mozilla.gecko.menu.GeckoMenuItem;
-
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v7.view.ActionMode;
 import android.view.Gravity;
-import android.view.Menu;
+import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Toast;
 
-class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
-                                  GeckoPopupMenu.OnMenuItemLongClickListener,
-                                  View.OnClickListener {
-    private final String LOGTAG = "GeckoActionModeCompat";
+import org.mozilla.gecko.menu.GeckoMenu;
+import org.mozilla.gecko.menu.GeckoMenuItem;
+import org.mozilla.gecko.widget.ActionModePresenter;
+import org.mozilla.gecko.widget.GeckoPopupMenu;
+
+class ActionModeCompat extends ActionMode implements GeckoPopupMenu.OnMenuItemClickListener,
+        GeckoPopupMenu.OnMenuItemLongClickListener,
+        View.OnClickListener {
+    private static final String LOGTAG = "GeckoActionModeCompat";
 
     private final Callback mCallback;
     private final ActionModeCompatView mView;
-    private final Presenter mPresenter;
+    private final ActionModePresenter mPresenter;
 
-    /* A set of callbacks to be called during this ActionMode's lifecycle. These will control the
-     * creation, interaction with, and destruction of menuitems for the view */
-    public static interface Callback {
-        /* Called when action mode is first created. Implementors should use this to inflate menu resources. */
-        public boolean onCreateActionMode(ActionModeCompat mode, Menu menu);
+    public ActionModeCompat(@NonNull ActionModePresenter presenter,
+                            @Nullable Callback callback,
+                            @NonNull ActionModeCompatView view) {
 
-        /* Called to refresh an action mode's action menu. Called whenever the mode is invalidated. Implementors
-         * should use this to enable/disable/show/hide menu items. */
-        public boolean onPrepareActionMode(ActionModeCompat mode, Menu menu);
-
-        /* Called to report a user click on an action button. */
-        public boolean onActionItemClicked(ActionModeCompat mode, MenuItem item);
-
-        /* Called when an action mode is about to be exited and destroyed. */
-        public void onDestroyActionMode(ActionModeCompat mode);
-    }
-
-    /* Presenters handle the actual showing/hiding of the action mode UI in the app. Its their responsibility
-     * to create an action mode, and assign it Callbacks and ActionModeCompatView's. */
-    public static interface Presenter {
-        /* Called when an action mode should be shown */
-        public void startActionModeCompat(final Callback callback);
-
-        /* Called when whatever action mode is showing should be hidden */
-        public void endActionModeCompat();
-    }
-
-    public ActionModeCompat(Presenter presenter, Callback callback, ActionModeCompatView view) {
         mPresenter = presenter;
         mCallback = callback;
 
@@ -59,7 +40,10 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
 
     public void finish() {
         // Clearing the menu will also clear the ActionItemBar
-        mView.getMenu().clear();
+        final GeckoMenu menu = mView.getMenu();
+        menu.clear();
+        menu.close();
+
         if (mCallback != null) {
             mCallback.onDestroyActionMode(this);
         }
@@ -67,6 +51,21 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
 
     public CharSequence getTitle() {
         return mView.getTitle();
+    }
+
+    @Override
+    public CharSequence getSubtitle() {
+        throw new UnsupportedOperationException("This method is not supported by this class");
+    }
+
+    @Override
+    public View getCustomView() {
+        return mView;
+    }
+
+    @Override
+    public MenuInflater getMenuInflater() {
+        throw new UnsupportedOperationException("This method is not supported by this class");
     }
 
     public void setTitle(CharSequence title) {
@@ -77,7 +76,23 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
         mView.setTitle(resId);
     }
 
-    public Menu getMenu() {
+    @Override
+    public void setSubtitle(CharSequence subtitle) {
+        throw new UnsupportedOperationException("This method is not supported by this class");
+    }
+
+    @Override
+    public void setSubtitle(int resId) {
+        throw new UnsupportedOperationException("This method is not supported by this class");
+    }
+
+    @Override
+    public void setCustomView(View view) {
+        // ActionModeCompatView is custom view for this class
+        throw new UnsupportedOperationException("This method is not supported by this class");
+    }
+
+    public GeckoMenu getMenu() {
         return mView.getMenu();
     }
 
@@ -86,6 +101,10 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
             mCallback.onPrepareActionMode(this, mView.getMenu());
         }
         mView.invalidate();
+    }
+
+    public void animateIn() {
+        mView.animateIn();
     }
 
     /* GeckoPopupMenu.OnMenuItemClickListener */
@@ -107,7 +126,7 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
     /* View.OnClickListener*/
     @Override
     public void onClick(View v) {
-        mPresenter.endActionModeCompat();
+        mPresenter.endActionMode();
     }
 
     private void showTooltip(GeckoMenuItem item) {
@@ -121,7 +140,7 @@ class ActionModeCompat implements GeckoPopupMenu.OnMenuItemClickListener,
         int yOffset = location[1] + view.getHeight() / 2;
 
         Toast toast = Toast.makeText(view.getContext(), item.getTitle(), Toast.LENGTH_SHORT);
-        toast.setGravity(Gravity.TOP|Gravity.LEFT, xOffset, yOffset);
+        toast.setGravity(Gravity.TOP | Gravity.LEFT, xOffset, yOffset);
         toast.show();
     }
 }

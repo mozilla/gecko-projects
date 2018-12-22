@@ -1,8 +1,11 @@
 # lint_ignore=E501
 config = {
+    "bouncer_prefix": "https://bouncer-bouncer-releng.stage.mozaws.net/",
+    "locales": ["en-US"],
     "products": {
         "installer": {
             "product-name": "Firefox-%(version)s",
+            "check_uptake": True,
             "alias": "firefox-beta-latest",
             "ssl-only": False,
             "add-locales": False,
@@ -31,6 +34,7 @@ config = {
         },
         "installer-ssl": {
             "product-name": "Firefox-%(version)s-SSL",
+            "check_uptake": True,
             "ssl-only": True,
             "add-locales": False,
             "paths": {
@@ -58,22 +62,24 @@ config = {
         },
         "stub-installer": {
             "product-name": "Firefox-%(version)s-stub",
+            "check_uptake": True,
             "alias": "firefox-beta-stub",
             "ssl-only": True,
             "add-locales": False,
             "paths": {
                 "win32": {
-                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Setup%%20Stub%%20%(version)s.exe",
+                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Installer.exe",
                     "bouncer-platform": "win",
                 },
                 "win64": {
-                    "path": "/firefox/releases/%(version)s/win64/:lang/Firefox%%20Setup%%20Stub%%20%(version)s.exe",
+                    "path": "/firefox/releases/%(version)s/win32/:lang/Firefox%%20Installer.exe",
                     "bouncer-platform": "win64",
                 },
             },
         },
         "complete-mar": {
             "product-name": "Firefox-%(version)s-Complete",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": False,
             "paths": {
@@ -103,6 +109,7 @@ config = {
     "partials": {
         "releases-dir": {
             "product-name": "Firefox-%(version)s-Partial-%(prev_version)s",
+            "check_uptake": True,
             "ssl-only": False,
             "add-locales": False,
             "paths": {

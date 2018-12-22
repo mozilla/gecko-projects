@@ -7,11 +7,11 @@
 
 #include "GLBlitHelper.h"
 #include "GLContextEGL.h"
+#include "GLContextProvider.h"
 #include "GLLibraryEGL.h"
 #include "GLReadTexImageHelper.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
 #include "SharedSurface.h"
-#include "TextureGarbageBin.h"
 
 namespace mozilla {
 namespace gl {
@@ -23,20 +23,20 @@ SharedSurface_EGLImage::Create(GLContext* prodGL,
                                bool hasAlpha,
                                EGLContext context)
 {
-    GLLibraryEGL* egl = &sEGLLibrary;
+    auto* egl = gl::GLLibraryEGL::Get();
     MOZ_ASSERT(egl);
     MOZ_ASSERT(context);
 
     UniquePtr<SharedSurface_EGLImage> ret;
 
     if (!HasExtensions(egl, prodGL)) {
-        return Move(ret);
+        return ret;
     }
 
     MOZ_ALWAYS_TRUE(prodGL->MakeCurrent());
     GLuint prodTex = CreateTextureForOffscreen(prodGL, formats, size);
     if (!prodTex) {
-        return Move(ret);
+        return ret;
     }
 
     EGLClientBuffer buffer = reinterpret_cast<EGLClientBuffer>(uintptr_t(prodTex));
@@ -45,12 +45,12 @@ SharedSurface_EGLImage::Create(GLContext* prodGL,
                                        nullptr);
     if (!image) {
         prodGL->fDeleteTextures(1, &prodTex);
-        return Move(ret);
+        return ret;
     }
 
     ret.reset( new SharedSurface_EGLImage(prodGL, egl, size, hasAlpha,
                                           formats, prodTex, image) );
-    return Move(ret);
+    return ret;
 }
 
 bool
@@ -58,7 +58,8 @@ SharedSurface_EGLImage::HasExtensions(GLLibraryEGL* egl, GLContext* gl)
 {
     return egl->HasKHRImageBase() &&
            egl->IsExtensionSupported(GLLibraryEGL::KHR_gl_texture_2D_image) &&
-           gl->IsExtensionSupported(GLContext::OES_EGL_image_external);
+           (gl->IsExtensionSupported(GLContext::OES_EGL_image_external) ||
+            gl->IsExtensionSupported(GLContext::OES_EGL_image));
 }
 
 SharedSurface_EGLImage::SharedSurface_EGLImage(GLContext* gl,
@@ -79,8 +80,6 @@ SharedSurface_EGLImage::SharedSurface_EGLImage(GLContext* gl,
     , mFormats(formats)
     , mProdTex(prodTex)
     , mImage(image)
-    , mCurConsGL(nullptr)
-    , mConsTex(0)
     , mSync(0)
 {}
 
@@ -88,28 +87,18 @@ SharedSurface_EGLImage::~SharedSurface_EGLImage()
 {
     mEGL->fDestroyImage(Display(), mImage);
 
-    mGL->MakeCurrent();
-    mGL->fDeleteTextures(1, &mProdTex);
-    mProdTex = 0;
-
-    if (mConsTex) {
-        MOZ_ASSERT(mGarbageBin);
-        mGarbageBin->Trash(mConsTex);
-        mConsTex = 0;
-    }
-
     if (mSync) {
         // We can't call this unless we have the ext, but we will always have
         // the ext if we have something to destroy.
         mEGL->fDestroySync(Display(), mSync);
         mSync = 0;
     }
-}
 
-layers::TextureFlags
-SharedSurface_EGLImage::GetTextureFlags() const
-{
-    return layers::TextureFlags::DEALLOCATE_CLIENT;
+    if (!mGL || !mGL->MakeCurrent())
+        return;
+
+    mGL->fDeleteTextures(1, &mProdTex);
+    mProdTex = 0;
 }
 
 void
@@ -122,7 +111,7 @@ SharedSurface_EGLImage::ProducerReleaseImpl()
         mGL->IsExtensionSupported(GLContext::OES_EGL_sync))
     {
         if (mSync) {
-            MOZ_RELEASE_ASSERT(false, "Non-recycleable should not Fence twice.");
+            MOZ_RELEASE_ASSERT(false, "GFX: Non-recycleable should not Fence twice.");
             MOZ_ALWAYS_TRUE( mEGL->fDestroySync(Display(), mSync) );
             mSync = 0;
         }
@@ -155,28 +144,6 @@ SharedSurface_EGLImage::Display() const
     return mEGL->Display();
 }
 
-void
-SharedSurface_EGLImage::AcquireConsumerTexture(GLContext* consGL, GLuint* out_texture, GLuint* out_target)
-{
-    MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(!mCurConsGL || consGL == mCurConsGL);
-
-    if (!mConsTex) {
-        consGL->fGenTextures(1, &mConsTex);
-        MOZ_ASSERT(mConsTex);
-
-        ScopedBindTexture autoTex(consGL, mConsTex, LOCAL_GL_TEXTURE_EXTERNAL);
-        consGL->fEGLImageTargetTexture2D(LOCAL_GL_TEXTURE_EXTERNAL, mImage);
-
-        mCurConsGL = consGL;
-        mGarbageBin = consGL->TexGarbageBin();
-    }
-
-    MOZ_ASSERT(consGL == mCurConsGL);
-    *out_texture = mConsTex;
-    *out_target = LOCAL_GL_TEXTURE_EXTERNAL;
-}
-
 bool
 SharedSurface_EGLImage::ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor)
 {
@@ -190,14 +157,15 @@ SharedSurface_EGLImage::ReadbackBySharedHandle(gfx::DataSourceSurface* out_surfa
 {
     MOZ_ASSERT(out_surface);
     MOZ_ASSERT(NS_IsMainThread());
-    return sEGLLibrary.ReadbackEGLImage(mImage, out_surface);
+    auto* egl = gl::GLLibraryEGL::Get();
+    return egl->ReadbackEGLImage(mImage, out_surface);
 }
 
 ////////////////////////////////////////////////////////////////////////
 
 /*static*/ UniquePtr<SurfaceFactory_EGLImage>
 SurfaceFactory_EGLImage::Create(GLContext* prodGL, const SurfaceCaps& caps,
-                                const RefPtr<layers::ClientIPCAllocator>& allocator,
+                                const RefPtr<layers::LayersIPCChannel>& allocator,
                                 const layers::TextureFlags& flags)
 {
     EGLContext context = GLContextEGL::Cast(prodGL)->mContext;
@@ -205,13 +173,150 @@ SurfaceFactory_EGLImage::Create(GLContext* prodGL, const SurfaceCaps& caps,
     typedef SurfaceFactory_EGLImage ptrT;
     UniquePtr<ptrT> ret;
 
-    GLLibraryEGL* egl = &sEGLLibrary;
+    auto* egl = gl::GLLibraryEGL::Get();
     if (SharedSurface_EGLImage::HasExtensions(egl, prodGL)) {
         ret.reset( new ptrT(prodGL, caps, allocator, flags, context) );
     }
 
-    return Move(ret);
+    return ret;
 }
+
+////////////////////////////////////////////////////////////////////////
+
+#ifdef MOZ_WIDGET_ANDROID
+
+/*static*/ UniquePtr<SharedSurface_SurfaceTexture>
+SharedSurface_SurfaceTexture::Create(GLContext* prodGL,
+                                     const GLFormats& formats,
+                                     const gfx::IntSize& size,
+                                     bool hasAlpha,
+                                     java::GeckoSurface::Param surface)
+{
+    MOZ_ASSERT(surface);
+
+    UniquePtr<SharedSurface_SurfaceTexture> ret;
+
+    AndroidNativeWindow window(surface);
+    GLContextEGL* egl = GLContextEGL::Cast(prodGL);
+    MOZ_ASSERT(egl);
+    EGLSurface eglSurface = egl->CreateCompatibleSurface(window.NativeWindow());
+    if (!eglSurface) {
+        return ret;
+    }
+
+    ret.reset(new SharedSurface_SurfaceTexture(prodGL, size, hasAlpha,
+                                               formats, surface, eglSurface));
+    return ret;
+}
+
+SharedSurface_SurfaceTexture::SharedSurface_SurfaceTexture(GLContext* gl,
+                                                           const gfx::IntSize& size,
+                                                           bool hasAlpha,
+                                                           const GLFormats& formats,
+                                                           java::GeckoSurface::Param surface,
+                                                           EGLSurface eglSurface)
+    : SharedSurface(SharedSurfaceType::AndroidSurfaceTexture,
+                    AttachmentType::Screen,
+                    gl,
+                    size,
+                    hasAlpha,
+                    true)
+    , mSurface(surface)
+    , mEglSurface(eglSurface)
+{
+}
+
+SharedSurface_SurfaceTexture::~SharedSurface_SurfaceTexture()
+{
+    GLContextProviderEGL::DestroyEGLSurface(mEglSurface);
+    java::SurfaceAllocator::DisposeSurface(mSurface);
+}
+
+void
+SharedSurface_SurfaceTexture::LockProdImpl()
+{
+    MOZ_RELEASE_ASSERT(mSurface->GetAvailable());
+
+    GLContextEGL *gl = GLContextEGL::Cast(mGL);
+    mOrigEglSurface = gl->GetEGLSurfaceOverride();
+    gl->SetEGLSurfaceOverride(mEglSurface);
+}
+
+void
+SharedSurface_SurfaceTexture::UnlockProdImpl()
+{
+    MOZ_RELEASE_ASSERT(mSurface->GetAvailable());
+
+    GLContextEGL *gl = GLContextEGL::Cast(mGL);
+    MOZ_ASSERT(gl->GetEGLSurfaceOverride() == mEglSurface);
+
+    gl->SetEGLSurfaceOverride(mOrigEglSurface);
+    mOrigEglSurface = nullptr;
+}
+
+void
+SharedSurface_SurfaceTexture::Commit()
+{
+    MOZ_RELEASE_ASSERT(mSurface->GetAvailable());
+
+    LockProdImpl();
+    mGL->SwapBuffers();
+    UnlockProdImpl();
+    mSurface->SetAvailable(false);
+}
+
+void
+SharedSurface_SurfaceTexture::WaitForBufferOwnership()
+{
+    MOZ_RELEASE_ASSERT(!mSurface->GetAvailable());
+    mSurface->SetAvailable(true);
+}
+
+bool
+SharedSurface_SurfaceTexture::ToSurfaceDescriptor(layers::SurfaceDescriptor* const out_descriptor)
+{
+    *out_descriptor =
+        layers::SurfaceTextureDescriptor(mSurface->GetHandle(),
+                                         mSize,
+                                         gfx::SurfaceFormat::R8G8B8A8,
+                                         false /* NOT continuous */,
+                                         false /* Do not ignore transform */);
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////
+
+/*static*/ UniquePtr<SurfaceFactory_SurfaceTexture>
+SurfaceFactory_SurfaceTexture::Create(GLContext* prodGL, const SurfaceCaps& caps,
+                                      const RefPtr<layers::LayersIPCChannel>& allocator,
+                                      const layers::TextureFlags& flags)
+{
+    UniquePtr<SurfaceFactory_SurfaceTexture> ret(
+        new SurfaceFactory_SurfaceTexture(prodGL, caps, allocator, flags));
+    return ret;
+}
+
+UniquePtr<SharedSurface>
+SurfaceFactory_SurfaceTexture::CreateShared(const gfx::IntSize& size)
+{
+    bool hasAlpha = mReadCaps.alpha;
+
+    jni::Object::LocalRef surface = java::SurfaceAllocator::AcquireSurface(size.width, size.height, true);
+    if (!surface) {
+        // Try multi-buffer mode
+        surface = java::SurfaceAllocator::AcquireSurface(size.width, size.height, false);
+        if (!surface) {
+            // Give up
+            NS_WARNING("Failed to allocate SurfaceTexture!");
+            return nullptr;
+        }
+    }
+
+    return SharedSurface_SurfaceTexture::Create(mGL, mFormats, size, hasAlpha,
+                                                java::GeckoSurface::Ref::From(surface));
+}
+
+#endif // MOZ_WIDGET_ANDROID
 
 } // namespace gl
 

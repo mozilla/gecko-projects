@@ -10,7 +10,7 @@
 #include "mozilla/Tuple.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include <stddef.h>
 #include <utility>
@@ -19,19 +19,12 @@ using mozilla::Get;
 using mozilla::IsSame;
 using mozilla::MakeTuple;
 using mozilla::MakeUnique;
-using mozilla::Move;
 using mozilla::Pair;
 using mozilla::Tie;
 using mozilla::Tuple;
 using mozilla::UniquePtr;
 using mozilla::Unused;
 using std::pair;
-
-#if (_MSC_VER == 1800)
-// Optimizations in VS2013 on Windows 10 cause an internal compiler error
-// with this file.
-#pragma optimize("", off)
-#endif
 
 #define CHECK(c) \
   do { \
@@ -83,7 +76,7 @@ TestConstruction()
 
   // Move construction
   Tuple<UniquePtr<int>> g{MakeUnique<int>(42)};
-  Tuple<UniquePtr<int>> h{Move(g)};
+  Tuple<UniquePtr<int>> h{std::move(g)};
   CHECK(Get<0>(g) == nullptr);
   CHECK(*Get<0>(h) == 42);
 }
@@ -142,7 +135,7 @@ TestAssignment()
   // Move assignment
   Tuple<UniquePtr<int>> e{MakeUnique<int>(0)};
   Tuple<UniquePtr<int>> f{MakeUnique<int>(42)};
-  e = Move(f);
+  e = std::move(f);
   CHECK(*Get<0>(e) == 42);
   CHECK(Get<0>(f) == nullptr);
 }
@@ -172,7 +165,7 @@ TestAssignmentFromMozPair()
                                           MakeUnique<int>(0)};
   Pair<UniquePtr<int>, UniquePtr<int>> f{MakeUnique<int>(42),
                                          MakeUnique<int>(42)};
-  e = Move(f);
+  e = std::move(f);
   CHECK(*Get<0>(e) == 42);
   CHECK(*Get<1>(e) == 42);
   CHECK(f.first() == nullptr);
@@ -206,7 +199,7 @@ TestAssignmentFromStdPair()
   f.first = MakeUnique<int>(42);
   f.second = MakeUnique<int>(42);
 
-  e = Move(f);
+  e = std::move(f);
   CHECK(*Get<0>(e) == 42);
   CHECK(*Get<1>(e) == 42);
   CHECK(f.first == nullptr);

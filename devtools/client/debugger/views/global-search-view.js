@@ -23,11 +23,11 @@ function GlobalSearchView(DebuggerController, DebuggerView) {
   this._onMatchClick = this._onMatchClick.bind(this);
 }
 
-GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
+GlobalSearchView.prototype = extend(WidgetMethods, {
   /**
    * Initialization function, called when the debugger is started.
    */
-  initialize: function() {
+  initialize: function () {
     dumpn("Initializing the GlobalSearchView");
 
     this.widget = new SimpleListWidget(document.getElementById("globalsearch"));
@@ -39,7 +39,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * Destruction function, called when the debugger is closed.
    */
-  destroy: function() {
+  destroy: function () {
     dumpn("Destroying the GlobalSearchView");
   },
 
@@ -64,7 +64,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * Hides and removes all items from this search container.
    */
-  clearView: function() {
+  clearView: function () {
     this.hidden = true;
     this.empty();
   },
@@ -73,7 +73,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * Selects the next found item in this container.
    * Does not change the currently focused node.
    */
-  selectNext: function() {
+  selectNext: function () {
     let totalLineResults = LineResults.size();
     if (!totalLineResults) {
       return;
@@ -90,7 +90,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * Selects the previously found item in this container.
    * Does not change the currently focused node.
    */
-  selectPrev: function() {
+  selectPrev: function () {
     let totalLineResults = LineResults.size();
     if (!totalLineResults) {
       return;
@@ -111,7 +111,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * @param number aWait
    *        The amount of milliseconds to wait until draining.
    */
-  scheduleSearch: function(aToken, aWait) {
+  scheduleSearch: function (aToken, aWait) {
     // The amount of time to wait for the requests to settle.
     let maxDelay = GLOBAL_SEARCH_ACTION_MAX_DELAY;
     let delay = aWait === undefined ? maxDelay / aToken.length : aWait;
@@ -134,7 +134,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * @param array aSources
    *        An array of [url, text] tuples for each source.
    */
-  _doSearch: function(aToken, aSources) {
+  _doSearch: function (aToken, aSources) {
     // Don't continue filtering if the searched token is an empty string.
     if (!aToken) {
       this.clearView();
@@ -225,7 +225,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * @param GlobalResults aGlobalResults
    *        An object containing all source results, grouped by source location.
    */
-  _createGlobalResultsUI: function(aGlobalResults) {
+  _createGlobalResultsUI: function (aGlobalResults) {
     let i = 0;
 
     for (let sourceResults of aGlobalResults) {
@@ -235,9 +235,9 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
         // Dispatch subsequent document manipulation operations, to avoid
         // blocking the main thread when a large number of search results
         // is found, thus giving the impression of faster searching.
-        Services.tm.currentThread.dispatch({ run:
+        Services.tm.dispatchToMainThread({ run:
           this._createSourceResultsUI.bind(this, sourceResults)
-        }, 0);
+        });
       }
     }
   },
@@ -248,7 +248,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
    * @param SourceResults aSourceResults
    *        An object containing all the matched lines for a specific source.
    */
-  _createSourceResultsUI: function(aSourceResults) {
+  _createSourceResultsUI: function (aSourceResults) {
     // Create the element node for the source results item.
     let container = document.createElement("hbox");
     aSourceResults.createView(container, {
@@ -269,7 +269,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * The click listener for a results header.
    */
-  _onHeaderClick: function(e) {
+  _onHeaderClick: function (e) {
     let sourceResultsItem = SourceResults.getItemForElement(e.target);
     sourceResultsItem.instance.toggle(e);
   },
@@ -277,7 +277,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * The click listener for a results line.
    */
-  _onLineClick: function(e) {
+  _onLineClick: function (e) {
     let lineResultsItem = LineResults.getItemForElement(e.target);
     this._onMatchClick({ target: lineResultsItem.firstMatch });
   },
@@ -285,7 +285,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * The click listener for a result match.
    */
-  _onMatchClick: function(e) {
+  _onMatchClick: function (e) {
     if (e instanceof Event) {
       e.preventDefault();
       e.stopPropagation();
@@ -318,27 +318,26 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * Scrolls a match into view if not already visible.
    *
-   * @param nsIDOMNode aMatch
+   * @param Node aMatch
    *        The match to scroll into view.
    */
-  _scrollMatchIntoViewIfNeeded: function(aMatch) {
+  _scrollMatchIntoViewIfNeeded: function (aMatch) {
     this.widget.ensureElementIsVisible(aMatch);
   },
 
   /**
    * Starts a bounce animation for a match.
    *
-   * @param nsIDOMNode aMatch
+   * @param Node aMatch
    *        The match to start a bounce animation for.
    */
-  _bounceMatch: function(aMatch) {
-    Services.tm.currentThread.dispatch({ run: () => {
-      aMatch.addEventListener("transitionend", function onEvent() {
-        aMatch.removeEventListener("transitionend", onEvent);
+  _bounceMatch: function (aMatch) {
+    Services.tm.dispatchToMainThread({ run: () => {
+      aMatch.addEventListener("transitionend", function () {
         aMatch.removeAttribute("focused");
-      });
+      }, {once: true});
       aMatch.setAttribute("focused", "");
-    }}, 0);
+    }});
     aMatch.setAttribute("focusing", "");
   },
 
@@ -366,7 +365,7 @@ GlobalResults.prototype = {
    * @param SourceResults aSourceResults
    *        An object containing search results for a specific source.
    */
-  add: function(aSourceResults) {
+  add: function (aSourceResults) {
     this._store.push(aSourceResults);
   },
 
@@ -402,7 +401,7 @@ SourceResults.prototype = {
    * @param LineResults aLineResults
    *        An object containing search results for a specific line.
    */
-  add: function(aLineResults) {
+  add: function (aLineResults) {
     this._store.push(aLineResults);
   },
 
@@ -416,7 +415,7 @@ SourceResults.prototype = {
   /**
    * Expands the element, showing all the added details.
    */
-  expand: function() {
+  expand: function () {
     this._resultsContainer.removeAttribute("hidden");
     this._arrow.setAttribute("open", "");
   },
@@ -424,7 +423,7 @@ SourceResults.prototype = {
   /**
    * Collapses the element, hiding all the added details.
    */
-  collapse: function() {
+  collapse: function () {
     this._resultsContainer.setAttribute("hidden", "true");
     this._arrow.removeAttribute("open");
   },
@@ -432,7 +431,7 @@ SourceResults.prototype = {
   /**
    * Toggles between the element collapse/expand state.
    */
-  toggle: function(e) {
+  toggle: function (e) {
     this.expanded ^= 1;
   },
 
@@ -455,7 +454,7 @@ SourceResults.prototype = {
 
   /**
    * Gets the element associated with this item.
-   * @return nsIDOMNode
+   * @return Node
    */
   get target() {
     return this._target;
@@ -464,14 +463,14 @@ SourceResults.prototype = {
   /**
    * Customization function for creating this item's UI.
    *
-   * @param nsIDOMNode aElementNode
+   * @param Node aElementNode
    *        The element associated with the displayed item.
    * @param object aCallbacks
    *        An object containing all the necessary callback functions:
    *          - onHeaderClick
    *          - onMatchClick
    */
-  createView: function(aElementNode, aCallbacks) {
+  createView: function (aElementNode, aCallbacks) {
     this._target = aElementNode;
 
     let arrow = this._arrow = document.createElement("box");
@@ -487,11 +486,11 @@ SourceResults.prototype = {
 
     let resultsHeader = this._resultsHeader = document.createElement("hbox");
     resultsHeader.className = "dbg-results-header";
-    resultsHeader.setAttribute("align", "center")
+    resultsHeader.setAttribute("align", "center");
     resultsHeader.appendChild(arrow);
     resultsHeader.appendChild(locationNode);
     resultsHeader.appendChild(matchCountNode);
-    resultsHeader.addEventListener("click", aCallbacks.onHeaderClick, false);
+    resultsHeader.addEventListener("click", aCallbacks.onHeaderClick);
 
     let resultsContainer = this._resultsContainer = document.createElement("vbox");
     resultsContainer.className = "dbg-results-container";
@@ -555,7 +554,7 @@ LineResults.prototype = {
    * @param boolean aMatchFlag
    *        True if the chunk is a matched string, false if just text content.
    */
-  add: function(aString, aRange, aMatchFlag) {
+  add: function (aString, aRange, aMatchFlag) {
     this._store.push({ string: aString, range: aRange, match: !!aMatchFlag });
     this._matchCount += aMatchFlag ? 1 : 0;
   },
@@ -569,7 +568,7 @@ LineResults.prototype = {
 
   /**
    * Gets the element associated with this item.
-   * @return nsIDOMNode
+   * @return Node
    */
   get target() {
     return this._target;
@@ -578,14 +577,14 @@ LineResults.prototype = {
   /**
    * Customization function for creating this item's UI.
    *
-   * @param nsIDOMNode aElementNode
+   * @param Node aElementNode
    *        The element associated with the displayed item.
    * @param object aCallbacks
    *        An object containing all the necessary callback functions:
    *          - onMatchClick
    *          - onLineClick
    */
-  createView: function(aElementNode, aCallbacks) {
+  createView: function (aElementNode, aCallbacks) {
     this._target = aElementNode;
 
     let lineNumberNode = document.createElement("label");
@@ -615,7 +614,7 @@ LineResults.prototype = {
 
       if (match) {
         this._entangleMatch(lineChunkNode, lineChunk);
-        lineChunkNode.addEventListener("click", aCallbacks.onMatchClick, false);
+        lineChunkNode.addEventListener("click", aCallbacks.onMatchClick);
         firstMatch = firstMatch || lineChunkNode;
       }
       if (lineLength >= GLOBAL_SEARCH_LINE_MAX_LENGTH) {
@@ -625,7 +624,7 @@ LineResults.prototype = {
     }
 
     this._entangleLine(lineContentsNode, firstMatch);
-    lineContentsNode.addEventListener("click", aCallbacks.onLineClick, false);
+    lineContentsNode.addEventListener("click", aCallbacks.onLineClick);
 
     let searchResult = document.createElement("hbox");
     searchResult.className = "dbg-search-result";
@@ -637,10 +636,10 @@ LineResults.prototype = {
 
   /**
    * Handles a match while creating the view.
-   * @param nsIDOMNode aNode
+   * @param Node aNode
    * @param object aMatchChunk
    */
-  _entangleMatch: function(aNode, aMatchChunk) {
+  _entangleMatch: function (aNode, aMatchChunk) {
     LineResults._itemsByElement.set(aNode, {
       instance: this,
       lineData: aMatchChunk
@@ -649,10 +648,10 @@ LineResults.prototype = {
 
   /**
    * Handles a line while creating the view.
-   * @param nsIDOMNode aNode
-   * @param nsIDOMNode aFirstMatch
+   * @param Node aNode
+   * @param Node aFirstMatch
    */
-  _entangleLine: function(aNode, aFirstMatch) {
+  _entangleLine: function (aNode, aFirstMatch) {
     LineResults._itemsByElement.set(aNode, {
       instance: this,
       firstMatch: aFirstMatch,
@@ -661,12 +660,12 @@ LineResults.prototype = {
   },
 
   /**
-   * An nsIDOMNode label with an ellipsis value.
+   * A Node label with an ellipsis value.
    */
-  _ellipsis: (function() {
+  _ellipsis: (function () {
     let label = document.createElement("label");
     label.className = "plain dbg-results-line-contents-string";
-    label.setAttribute("value", L10N.ellipsis);
+    label.setAttribute("value", ELLIPSIS);
     return label;
   })(),
 
@@ -681,20 +680,20 @@ LineResults.prototype = {
  */
 GlobalResults.prototype[Symbol.iterator] =
 SourceResults.prototype[Symbol.iterator] =
-LineResults.prototype[Symbol.iterator] = function*() {
+LineResults.prototype[Symbol.iterator] = function* () {
   yield* this._store;
 };
 
 /**
  * Gets the item associated with the specified element.
  *
- * @param nsIDOMNode aElement
+ * @param Node aElement
  *        The element used to identify the item.
  * @return object
  *         The matched item, or null if nothing is found.
  */
 SourceResults.getItemForElement =
-LineResults.getItemForElement = function(aElement) {
+LineResults.getItemForElement = function (aElement) {
   return WidgetMethods.getItemForElement.call(this, aElement, { noSiblings: true });
 };
 
@@ -703,11 +702,11 @@ LineResults.getItemForElement = function(aElement) {
  *
  * @param number aIndex
  *        The index used to identify the item.
- * @return nsIDOMNode
+ * @return Node
  *         The matched element, or null if nothing is found.
  */
 SourceResults.getElementAtIndex =
-LineResults.getElementAtIndex = function(aIndex) {
+LineResults.getElementAtIndex = function (aIndex) {
   for (let [element, item] of this._itemsByElement) {
     if (!item.ignored && !aIndex--) {
       return element;
@@ -719,13 +718,13 @@ LineResults.getElementAtIndex = function(aIndex) {
 /**
  * Gets the index of an item associated with the specified element.
  *
- * @param nsIDOMNode aElement
+ * @param Node aElement
  *        The element to get the index for.
  * @return number
  *         The index of the matched element, or -1 if nothing is found.
  */
 SourceResults.indexOfElement =
-LineResults.indexOfElement = function(aElement) {
+LineResults.indexOfElement = function (aElement) {
   let count = 0;
   for (let [element, item] of this._itemsByElement) {
     if (element == aElement) {
@@ -745,7 +744,7 @@ LineResults.indexOfElement = function(aElement) {
  *         The number of key/value pairs in the corresponding map.
  */
 SourceResults.size =
-LineResults.size = function() {
+LineResults.size = function () {
   let count = 0;
   for (let [, item] of this._itemsByElement) {
     if (!item.ignored) {

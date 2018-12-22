@@ -65,24 +65,24 @@ public:
   }
   virtual void GetBackendName(nsAString& aName) {}
   virtual LayersBackend GetBackendType() { return LayersBackend::LAYERS_BASIC; }
-  virtual void BeginTransaction() {}
+  virtual bool BeginTransaction() { return true; }
   virtual already_AddRefed<ImageLayer> CreateImageLayer() {
-    NS_RUNTIMEABORT("Not implemented.");
-    return nullptr;
+    MOZ_CRASH("Not implemented.");
   }
   virtual already_AddRefed<PaintedLayer> CreatePaintedLayer() {
     RefPtr<PaintedLayer> layer = new TestPaintedLayer(this);
     return layer.forget();
   }
   virtual already_AddRefed<ColorLayer> CreateColorLayer() {
-    NS_RUNTIMEABORT("Not implemented.");
-    return nullptr;
+    MOZ_CRASH("Not implemented.");
+  }
+  virtual already_AddRefed<BorderLayer> CreateBorderLayer() {
+    MOZ_CRASH("Not implemented.");
   }
   virtual void SetRoot(Layer* aLayer) {}
-  virtual void BeginTransactionWithTarget(gfxContext* aTarget) {}
+  virtual bool BeginTransactionWithTarget(gfxContext* aTarget) { return true; }
   virtual already_AddRefed<CanvasLayer> CreateCanvasLayer() {
-    NS_RUNTIMEABORT("Not implemented.");
-    return nullptr;
+    MOZ_CRASH("Not implemented.");
   }
   virtual void EndTransaction(DrawPaintedLayerCallback aCallback,
                               void* aCallbackData,
@@ -150,9 +150,9 @@ TEST(Layers, UserData) {
   layer.SetUserData(key3, data3);
 
   // Also checking that the user data is returned but not free'd
-  UniquePtr<LayerUserData> d1(layer.RemoveUserData(key1).forget());
-  UniquePtr<LayerUserData> d2(layer.RemoveUserData(key2).forget());
-  UniquePtr<LayerUserData> d3(layer.RemoveUserData(key3).forget());
+  UniquePtr<LayerUserData> d1(layer.RemoveUserData(key1));
+  UniquePtr<LayerUserData> d2(layer.RemoveUserData(key2));
+  UniquePtr<LayerUserData> d3(layer.RemoveUserData(key3));
   ASSERT_EQ(data1, d1.get());
   ASSERT_EQ(data2, d2.get());
   ASSERT_EQ(data3, d3.get());
@@ -238,7 +238,7 @@ already_AddRefed<Layer> CreateLayerTree(
   if (rootLayer) {
     rootLayer->ComputeEffectiveTransforms(Matrix4x4());
     manager->SetRoot(rootLayer);
-    if (rootLayer->AsLayerComposite()) {
+    if (rootLayer->AsHostLayer()) {
       // Only perform this for LayerManagerComposite
       CompositorBridgeParent::SetShadowProperties(rootLayer);
     }

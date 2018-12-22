@@ -2,17 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { Cu, Cc, Ci } = require("chrome");
+"use strict";
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
-const STRINGS_URI = "chrome://devtools/locale/memory.properties"
+const { Cc, Ci } = require("chrome");
+
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const STRINGS_URI = "devtools/client/locales/memory.properties";
 const L10N = exports.L10N = new LocalizationHelper(STRINGS_URI);
 
 const { OS } = require("resource://gre/modules/osfile.jsm");
 const { assert } = require("devtools/shared/DevToolsUtils");
 const { Preferences } = require("resource://gre/modules/Preferences.jsm");
 const CUSTOM_CENSUS_DISPLAY_PREF = "devtools.memory.custom-census-displays";
-const CUSTOM_DOMINATOR_TREE_DISPLAY_PREF = "devtools.memory.custom-dominator-tree-displays";
+const CUSTOM_LABEL_DISPLAY_PREF = "devtools.memory.custom-label-displays";
 const CUSTOM_TREE_MAP_DISPLAY_PREF = "devtools.memory.custom-tree-map-displays";
 const BYTES = 1024;
 const KILOBYTES = Math.pow(BYTES, 2);
@@ -23,9 +25,8 @@ const {
   diffingState,
   censusState,
   treeMapState,
-  censusDisplays,
-  dominatorTreeDisplays,
-  dominatorTreeState
+  dominatorTreeState,
+  individualsState,
 } = require("./constants");
 
 /**
@@ -35,7 +36,7 @@ const {
  * @param {Snapshot} snapshot
  * @return {String}
  */
-exports.getSnapshotTitle = function (snapshot) {
+exports.getSnapshotTitle = function(snapshot) {
   if (!snapshot.creationTime) {
     return L10N.getStr("snapshot-title.loading");
   }
@@ -45,7 +46,7 @@ exports.getSnapshotTitle = function (snapshot) {
     return OS.Path.basename(snapshot.path.replace(/\.fxsnapshot$/, ""));
   }
 
-  let date = new Date(snapshot.creationTime / 1000);
+  const date = new Date(snapshot.creationTime / 1000);
   return date.toLocaleTimeString(void 0, {
     year: "2-digit",
     month: "2-digit",
@@ -71,18 +72,18 @@ function getCustomDisplaysHelper(pref) {
  *
  * @return {Object}
  */
-exports.getCustomCensusDisplays = function () {
+exports.getCustomCensusDisplays = function() {
   return getCustomDisplaysHelper(CUSTOM_CENSUS_DISPLAY_PREF);
 };
 
 /**
  * Returns custom displays defined in
- * `devtools.memory.custom-dominator-tree-displays` pref.
+ * `devtools.memory.custom-label-displays` pref.
  *
  * @return {Object}
  */
-exports.getCustomDominatorTreeDisplays = function () {
-  return getCustomDisplaysHelper(CUSTOM_DOMINATOR_TREE_DISPLAY_PREF);
+exports.getCustomLabelDisplays = function() {
+  return getCustomDisplaysHelper(CUSTOM_LABEL_DISPLAY_PREF);
 };
 
 /**
@@ -91,7 +92,7 @@ exports.getCustomDominatorTreeDisplays = function () {
  *
  * @return {Object}
  */
-exports.getCustomTreeMapDisplays = function () {
+exports.getCustomTreeMapDisplays = function() {
   return getCustomDisplaysHelper(CUSTOM_TREE_MAP_DISPLAY_PREF);
 };
 
@@ -102,7 +103,7 @@ exports.getCustomTreeMapDisplays = function () {
  * @param {snapshotState | diffingState} state
  * @return {String}
  */
-exports.getStatusText = function (state) {
+exports.getStatusText = function(state) {
   assert(state, "Must have a state");
 
   switch (state) {
@@ -135,6 +136,7 @@ exports.getStatusText = function (state) {
       return L10N.getStr("diffing.state.selecting");
 
     case dominatorTreeState.COMPUTING:
+    case individualsState.COMPUTING_DOMINATOR_TREE:
       return L10N.getStr("dominatorTree.state.computing");
 
     case dominatorTreeState.COMPUTED:
@@ -147,6 +149,12 @@ exports.getStatusText = function (state) {
     case dominatorTreeState.ERROR:
       return L10N.getStr("dominatorTree.state.error");
 
+    case individualsState.ERROR:
+      return L10N.getStr("individuals.state.error");
+
+    case individualsState.FETCHING:
+      return L10N.getStr("individuals.state.fetching");
+
     // These states do not have any message to show as other content will be
     // displayed.
     case dominatorTreeState.LOADED:
@@ -154,6 +162,7 @@ exports.getStatusText = function (state) {
     case states.READ:
     case censusState.SAVED:
     case treeMapState.SAVED:
+    case individualsState.FETCHED:
       return "";
 
     default:
@@ -169,7 +178,7 @@ exports.getStatusText = function (state) {
  * @param {snapshotState | diffingState} state
  * @return {String}
  */
-exports.getStatusTextFull = function (state) {
+exports.getStatusTextFull = function(state) {
   assert(!!state, "Must have a state");
 
   switch (state) {
@@ -202,6 +211,7 @@ exports.getStatusTextFull = function (state) {
       return L10N.getStr("diffing.state.selecting.full");
 
     case dominatorTreeState.COMPUTING:
+    case individualsState.COMPUTING_DOMINATOR_TREE:
       return L10N.getStr("dominatorTree.state.computing.full");
 
     case dominatorTreeState.COMPUTED:
@@ -214,6 +224,12 @@ exports.getStatusTextFull = function (state) {
     case dominatorTreeState.ERROR:
       return L10N.getStr("dominatorTree.state.error.full");
 
+    case individualsState.ERROR:
+      return L10N.getStr("individuals.state.error.full");
+
+    case individualsState.FETCHING:
+      return L10N.getStr("individuals.state.fetching.full");
+
     // These states do not have any full message to show as other content will
     // be displayed.
     case dominatorTreeState.LOADED:
@@ -221,6 +237,7 @@ exports.getStatusTextFull = function (state) {
     case states.READ:
     case censusState.SAVED:
     case treeMapState.SAVED:
+    case individualsState.FETCHED:
       return "";
 
     default:
@@ -251,10 +268,20 @@ exports.snapshotIsDiffable = function snapshotIsDiffable(snapshot) {
  * @param {snapshotId} id
  * @return {snapshotModel|null}
  */
-exports.getSnapshot = function getSnapshot (state, id) {
+exports.getSnapshot = function getSnapshot(state, id) {
   const found = state.snapshots.find(s => s.id === id);
   assert(found, `No matching snapshot found with id = ${id}`);
   return found;
+};
+
+/**
+ * Get the ID of the selected snapshot, if one is selected, null otherwise.
+ *
+ * @returns {SnapshotId|null}
+ */
+exports.findSelectedSnapshot = function(state) {
+  const found = state.snapshots.find(s => s.selected);
+  return found ? found.id : null;
 };
 
 /**
@@ -266,7 +293,7 @@ exports.getSnapshot = function getSnapshot (state, id) {
 let ID_COUNTER = 0;
 exports.createSnapshot = function createSnapshot(state) {
   let dominatorTree = null;
-  if (state.view === dominatorTreeState.DOMINATOR_TREE) {
+  if (state.view.state === dominatorTreeState.DOMINATOR_TREE) {
     dominatorTree = Object.freeze({
       dominatorTreeId: null,
       root: null,
@@ -298,13 +325,12 @@ exports.createSnapshot = function createSnapshot(state) {
  *
  * @returns {Boolean}
  */
-exports.censusIsUpToDate = function (filter, display, census) {
+exports.censusIsUpToDate = function(filter, display, census) {
   return census
       // Filter could be null == undefined so use loose equality.
       && filter == census.filter
       && display === census.display;
 };
-
 
 /**
  * Check to see if the snapshot is in a state that it can take a census.
@@ -313,10 +339,10 @@ exports.censusIsUpToDate = function (filter, display, census) {
  * @param {Boolean} Assert that the snapshot must be in a ready state.
  * @returns {Boolean}
  */
-exports.canTakeCensus = function (snapshot) {
+exports.canTakeCensus = function(snapshot) {
   return snapshot.state === states.READ &&
-    (!snapshot.census || snapshot.census.state === censusState.SAVED) &&
-    (!snapshot.treeMap || snapshot.treeMap.state === treeMapState.SAVED);
+    ((!snapshot.census || snapshot.census.state === censusState.SAVED) ||
+     (!snapshot.treeMap || snapshot.treeMap.state === treeMapState.SAVED));
 };
 
 /**
@@ -326,7 +352,7 @@ exports.canTakeCensus = function (snapshot) {
  * @param {SnapshotModel} snapshot
  * @returns {Boolean}
  */
-exports.dominatorTreeIsComputed = function (snapshot) {
+exports.dominatorTreeIsComputed = function(snapshot) {
   return snapshot.dominatorTree &&
     (snapshot.dominatorTree.state === dominatorTreeState.COMPUTED ||
      snapshot.dominatorTree.state === dominatorTreeState.LOADED ||
@@ -340,7 +366,7 @@ exports.dominatorTreeIsComputed = function (snapshot) {
  * @param {SnapshotModel} snapshot
  * @returns {Object|null} Either the census, or null if one hasn't completed
  */
-exports.getSavedCensus = function (snapshot) {
+exports.getSavedCensus = function(snapshot) {
   if (snapshot.treeMap && snapshot.treeMap.state === treeMapState.SAVED) {
     return snapshot.treeMap;
   }
@@ -357,11 +383,11 @@ exports.getSavedCensus = function (snapshot) {
  * @param {CensusModel} census
  * @return {Object}
  */
-exports.getSnapshotTotals = function (census) {
+exports.getSnapshotTotals = function(census) {
   let bytes = 0;
   let count = 0;
 
-  let report = census.report;
+  const report = census.report;
   if (report) {
     bytes = report.totalBytes;
     count = report.totalCount;
@@ -384,21 +410,23 @@ exports.getSnapshotTotals = function (census) {
  *        The default name chosen by the file picker window.
  * @param {String} .mode
  *        The mode that this filepicker should open in. Can be "open" or "save".
- * @return {Promise<?nsILocalFile>}
+ * @return {Promise<?nsIFile>}
  *        The file selected by the user, or null, if cancelled.
  */
 exports.openFilePicker = function({ title, filters, defaultName, mode }) {
-  mode = mode === "save" ? Ci.nsIFilePicker.modeSave :
-         mode === "open" ? Ci.nsIFilePicker.modeOpen : null;
-
-  if (mode == void 0) {
+  let fpMode;
+  if (mode === "save") {
+    fpMode = Ci.nsIFilePicker.modeSave;
+  } else if (mode === "open") {
+    fpMode = Ci.nsIFilePicker.modeOpen;
+  } else {
     throw new Error("No valid mode specified for nsIFilePicker.");
   }
 
-  let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-  fp.init(window, title, mode);
+  const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+  fp.init(window, title, fpMode);
 
-  for (let filter of (filters || [])) {
+  for (const filter of (filters || [])) {
     fp.appendFilter(filter[0], filter[1]);
   }
   fp.defaultString = defaultName;
@@ -448,7 +476,7 @@ exports.formatNumber = function(number, showSign = false) {
  * @param {Boolean} showSign (defaults to false)
  */
 exports.formatPercent = function(percent, showSign = false) {
-  return exports.L10N.getFormatStr("tree-item.percent",
+  return exports.L10N.getFormatStr("tree-item.percent2",
                            exports.formatNumber(percent, showSign));
 };
 

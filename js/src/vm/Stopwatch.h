@@ -19,8 +19,6 @@
 
 namespace js {
 
-typedef mozilla::Vector<RefPtr<js::PerformanceGroup>> GroupVector;
-
 /**
  * A container for performance groups.
  *
@@ -30,8 +28,8 @@ typedef mozilla::Vector<RefPtr<js::PerformanceGroup>> GroupVector;
  * webpage and/or a frame and/or a module and/or an add-on and/or a
  * sandbox and/or a process etc.
  *
- * A PerformanceGroupHolder is owned y a JSCompartment and maps that
- * compartment to all the components to which it belongs.
+ * A PerformanceGroupHolder is owned by a JS::Realm and maps that realm
+ * to all the components to which it belongs.
  */
 struct PerformanceGroupHolder {
 
@@ -43,7 +41,7 @@ struct PerformanceGroupHolder {
      * May return `nullptr` if the embedding has not initialized
      * support for performance groups.
      */
-    const GroupVector* getGroups(JSContext*);
+    const PerformanceGroupVector* getGroups(JSContext*);
 
     explicit PerformanceGroupHolder(JSRuntime* runtime)
       : runtime_(runtime)
@@ -59,7 +57,7 @@ struct PerformanceGroupHolder {
 
     // The groups to which this compartment belongs. Filled if and only
     // if `initialized_` is `true`.
-    GroupVector groups_;
+    PerformanceGroupVector groups_;
 };
 
 /**
@@ -73,7 +71,7 @@ struct PerformanceMonitoring {
         return iteration_;
     }
 
-    explicit PerformanceMonitoring(JSRuntime* runtime)
+    explicit PerformanceMonitoring()
       : totalCPOWTime(0)
       , stopwatchStartCallback(nullptr)
       , stopwatchStartClosure(nullptr)
@@ -197,7 +195,7 @@ struct PerformanceMonitoring {
     }
 
     /**
-     * Callback called to associate a JSCompartment to the set of
+     * Callback called to associate a JS::Realm to the set of
      * `PerformanceGroup`s that represent the components to which
      * it belongs.
      */
@@ -292,7 +290,7 @@ struct PerformanceMonitoring {
     /**
      * Groups used in the current iteration.
      */
-    GroupVector recentGroups_;
+    PerformanceGroupVector recentGroups_;
 
     /**
      * The highest value of the timestamp counter encountered
@@ -301,11 +299,12 @@ struct PerformanceMonitoring {
     uint64_t highestTimestampCounter_;
 };
 
-#if WINVER >= 0x0600
+// Temporary disable untested code path.
+#if 0 // WINVER >= 0x0600
 struct cpuid_t {
-    WORD group_;
-    BYTE number_;
-    cpuid_t(WORD group, BYTE number)
+    uint16_t group_;
+    uint8_t number_;
+    cpuid_t(uint16_t group, uint8_t number)
         : group_(group),
           number_(number)
     { }
@@ -344,7 +343,7 @@ class AutoStopwatch final {
     // if `isMonitoringJank_` is `true`.
     cpuid_t cpuStart_;
 
-    mozilla::Vector<RefPtr<js::PerformanceGroup>> groups_;
+    PerformanceGroupVector groups_;
 
   public:
     // If the stopwatch is active, constructing an instance of

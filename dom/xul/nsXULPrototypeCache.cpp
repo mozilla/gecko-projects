@@ -11,8 +11,8 @@
 #include "nsIServiceManager.h"
 #include "nsIURI.h"
 
-#include "nsIChromeRegistry.h"
 #include "nsIFile.h"
+#include "nsIMemoryReporter.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIObserverService.h"
@@ -23,14 +23,16 @@
 
 #include "js/TracingAPI.h"
 
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
 #include "mozilla/scache/StartupCacheUtils.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/intl/LocaleService.h"
 
 using namespace mozilla;
 using namespace mozilla::scache;
+using mozilla::intl::LocaleService;
 
 static bool gDisableXULCache = false; // enabled by default
 static const char kDisableXULCachePref[] = "nglayout.debug.disable_xul_cache";
@@ -189,16 +191,19 @@ nsXULPrototypeCache::PutPrototype(nsXULPrototypeDocument* aDocument)
     return NS_OK;
 }
 
-nsresult
-nsXULPrototypeCache::PutStyleSheet(CSSStyleSheet* aStyleSheet)
+mozilla::StyleSheet*
+nsXULPrototypeCache::GetStyleSheet(nsIURI* aURI)
 {
-    nsIURI* uri = aStyleSheet->GetSheetURI();
-
-    mStyleSheetTable.Put(uri, aStyleSheet);
-
-    return NS_OK;
+    return mStyleSheetTable.GetWeak(aURI);
 }
 
+nsresult
+nsXULPrototypeCache::PutStyleSheet(StyleSheet* aStyleSheet)
+{
+    nsIURI* uri = aStyleSheet->GetSheetURI();
+    mStyleSheetTable.Put(uri, aStyleSheet);
+    return NS_OK;
+}
 
 JSScript*
 nsXULPrototypeCache::GetScript(nsIURI* aURI)
@@ -228,17 +233,21 @@ nsXULPrototypeCache::PutScript(nsIURI* aURI,
     return NS_OK;
 }
 
+nsXBLDocumentInfo*
+nsXULPrototypeCache::GetXBLDocumentInfo(nsIURI* aURL)
+{
+  return mXBLDocTable.GetWeak(aURL);
+}
+
 nsresult
 nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
 {
-    nsIURI* uri = aDocumentInfo->DocumentURI();
-
-    RefPtr<nsXBLDocumentInfo> info;
-    mXBLDocTable.Get(uri, getter_AddRefs(info));
-    if (!info) {
-        mXBLDocTable.Put(uri, aDocumentInfo);
-    }
-    return NS_OK;
+  nsIURI* uri = aDocumentInfo->DocumentURI();
+  nsXBLDocumentInfo* info = mXBLDocTable.GetWeak(uri);
+  if (!info) {
+    mXBLDocTable.Put(uri, aDocumentInfo);
+  }
+  return NS_OK;
 }
 
 void
@@ -247,7 +256,7 @@ nsXULPrototypeCache::FlushSkinFiles()
   // Flush out skin XBL files from the cache.
   for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
     nsAutoCString str;
-    iter.Key()->GetPath(str);
+    iter.Key()->GetPathQueryRef(str);
     if (strncmp(str.get(), "/skin", 5) == 0) {
       iter.Remove();
     }
@@ -256,7 +265,7 @@ nsXULPrototypeCache::FlushSkinFiles()
   // Now flush out our skin stylesheets from the cache.
   for (auto iter = mStyleSheetTable.Iter(); !iter.Done(); iter.Next()) {
     nsAutoCString str;
-    iter.Data()->GetSheetURI()->GetPath(str);
+    iter.Data()->GetSheetURI()->GetPathQueryRef(str);
     if (strncmp(str.get(), "/skin", 5) == 0) {
       iter.Remove();
     }
@@ -347,7 +356,7 @@ nsXULPrototypeCache::GetInputStream(nsIURI* uri, nsIObjectInputStream** stream)
     if (NS_FAILED(rv))
         return NS_ERROR_NOT_AVAILABLE;
 
-    rv = NewObjectInputStreamFromBuffer(Move(buf), len, getter_AddRefs(ois));
+    rv = NewObjectInputStreamFromBuffer(std::move(buf), len, getter_AddRefs(ois));
     NS_ENSURE_SUCCESS(rv, rv);
 
     mInputStreamTable.Put(uri, ois);
@@ -370,11 +379,15 @@ nsXULPrototypeCache::GetOutputStream(nsIURI* uri, nsIObjectOutputStream** stream
     nsCOMPtr<nsIStorageStream> storageStream;
     bool found = mOutputStreamTable.Get(uri, getter_AddRefs(storageStream));
     if (found) {
-        objectOutput = do_CreateInstance("mozilla.org/binaryoutputstream;1");
-        if (!objectOutput) return NS_ERROR_OUT_OF_MEMORY;
+        // Setting an output stream here causes crashes on Windows. The previous
+        // version of this code always returned NS_ERROR_OUT_OF_MEMORY here,
+        // because it used a mistyped contract ID to create its object stream.
+        return NS_ERROR_NOT_IMPLEMENTED;
+#if 0
         nsCOMPtr<nsIOutputStream> outputStream
             = do_QueryInterface(storageStream);
-        objectOutput->SetOutputStream(outputStream);
+        objectOutput = NS_NewObjectOutputStream(outputStream);
+#endif
     } else {
         rv = NewObjectOutputWrappedStorageStream(getter_AddRefs(objectOutput),
                                                  getter_AddRefs(storageStream),
@@ -412,7 +425,7 @@ nsXULPrototypeCache::FinishOutputStream(nsIURI* uri)
         rv = PathifyURI(uri, spec);
         if (NS_FAILED(rv))
             return NS_ERROR_NOT_AVAILABLE;
-        rv = sc->PutBuffer(spec.get(), buf.get(), len);
+        rv = sc->PutBuffer(spec.get(), std::move(buf), len);
         if (NS_SUCCEEDED(rv)) {
             mOutputStreamTable.Remove(uri);
             mStartupCacheURITable.PutEntry(uri);
@@ -456,7 +469,7 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
     nsresult rv, tmp;
 
     nsAutoCString path;
-    aURI->GetPath(path);
+    aURI->GetPathQueryRef(path);
     if (!StringEndsWith(path, NS_LITERAL_CSTRING(".xul")))
         return NS_ERROR_NOT_AVAILABLE;
 
@@ -474,7 +487,7 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
     if (NS_FAILED(rv))
         return rv;
     nsAutoCString chromePath;
-    rv = chromeDir->GetNativePath(chromePath);
+    rv = chromeDir->GetPersistentDescriptor(chromePath);
     if (NS_FAILED(rv))
         return rv;
 
@@ -484,12 +497,8 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
     rv = aURI->GetHost(package);
     if (NS_FAILED(rv))
         return rv;
-    nsCOMPtr<nsIXULChromeRegistry> chromeReg
-        = do_GetService(NS_CHROMEREGISTRY_CONTRACTID, &rv);
     nsAutoCString locale;
-    rv = chromeReg->GetSelectedLocale(package, locale);
-    if (NS_FAILED(rv))
-        return rv;
+    LocaleService::GetInstance()->GetAppLocaleAsLangTag(locale);
 
     nsAutoCString fileChromePath, fileLocale;
 
@@ -499,7 +508,7 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
 
     rv = startupCache->GetBuffer(kXULCacheInfoKey, &buf, &len);
     if (NS_SUCCEEDED(rv))
-        rv = NewObjectInputStreamFromBuffer(Move(buf), len,
+        rv = NewObjectInputStreamFromBuffer(std::move(buf), len,
                                             getter_AddRefs(objectInput));
 
     if (NS_SUCCEEDED(rv)) {
@@ -561,7 +570,7 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
             buf = MakeUnique<char[]>(len);
             rv = inputStream->Read(buf.get(), len, &amtRead);
             if (NS_SUCCEEDED(rv) && len == amtRead)
-              rv = startupCache->PutBuffer(kXULCacheInfoKey, buf.get(), len);
+              rv = startupCache->PutBuffer(kXULCacheInfoKey, std::move(buf), len);
             else {
                 rv = NS_ERROR_UNEXPECTED;
             }
@@ -596,4 +605,81 @@ nsXULPrototypeCache::MarkInGC(JSTracer* aTrc)
         JS::Heap<JSScript*>& script = iter.Data();
         JS::TraceEdge(aTrc, &script, "nsXULPrototypeCache script");
     }
+}
+
+MOZ_DEFINE_MALLOC_SIZE_OF(CacheMallocSizeOf)
+
+static void
+ReportSize(const nsCString& aPath, size_t aAmount,
+           const nsCString& aDescription,
+           nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+{
+  nsAutoCString path("explicit/xul-prototype-cache/");
+  path += aPath;
+  aHandleReport->Callback(EmptyCString(), path,
+                          nsIMemoryReporter::KIND_HEAP,
+                          nsIMemoryReporter::UNITS_BYTES,
+                          aAmount, aDescription, aData);
+}
+
+static void
+AppendURIForMemoryReport(nsIURI* aUri, nsACString& aOutput)
+{
+  nsCString spec = aUri->GetSpecOrDefault();
+  // A hack: replace forward slashes with '\\' so they aren't
+  // treated as path separators.  Users of the reporters
+  // (such as about:memory) have to undo this change.
+  spec.ReplaceChar('/', '\\');
+  aOutput += spec;
+}
+
+/* static */ void
+nsXULPrototypeCache::CollectMemoryReports(
+  nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+{
+  if (!sInstance) {
+    return;
+  }
+
+  MallocSizeOf mallocSizeOf = CacheMallocSizeOf;
+  size_t other = mallocSizeOf(sInstance);
+
+#define REPORT_SIZE(_path, _amount, _desc) \
+  ReportSize(_path, _amount, NS_LITERAL_CSTRING(_desc), aHandleReport, aData)
+
+  other += sInstance->
+    mPrototypeTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  // TODO Report content in mPrototypeTable?
+
+  other += sInstance->
+    mStyleSheetTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  // TODO Report content inside mStyleSheetTable?
+
+  other += sInstance->
+    mScriptTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  // TODO Report content inside mScriptTable?
+
+  other += sInstance->mXBLDocTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  for (auto iter = sInstance->mXBLDocTable.ConstIter();
+       !iter.Done(); iter.Next()) {
+    nsAutoCString path;
+    path += "xbl-docs/(";
+    AppendURIForMemoryReport(iter.Key(), path);
+    path += ")";
+    size_t size = iter.UserData()->SizeOfIncludingThis(mallocSizeOf);
+    REPORT_SIZE(path, size, "Memory used by this XBL document.");
+  }
+
+  other += sInstance->
+    mStartupCacheURITable.ShallowSizeOfExcludingThis(mallocSizeOf);
+
+  other += sInstance->
+    mOutputStreamTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+  other += sInstance->
+    mInputStreamTable.ShallowSizeOfExcludingThis(mallocSizeOf);
+
+  REPORT_SIZE(NS_LITERAL_CSTRING("other"), other, "Memory used by "
+              "the instance and tables of the XUL prototype cache.");
+
+#undef REPORT_SIZE
 }

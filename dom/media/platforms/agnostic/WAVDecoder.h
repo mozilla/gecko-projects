@@ -8,40 +8,35 @@
 #define WaveDecoder_h_
 
 #include "PlatformDecoderModule.h"
-#include "mp4_demuxer/ByteReader.h"
 
 namespace mozilla {
 
-class WaveDataDecoder : public MediaDataDecoder
+DDLoggedTypeDeclNameAndBase(WaveDataDecoder, MediaDataDecoder);
+
+class WaveDataDecoder
+  : public MediaDataDecoder
+  , public DecoderDoctorLifeLogger<WaveDataDecoder>
 {
 public:
-  WaveDataDecoder(const AudioInfo& aConfig,
-                  FlushableTaskQueue* aTaskQueue,
-                  MediaDataDecoderCallback* aCallback);
-
-  RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
-  const char* GetDescriptionName() const override
-  {
-    return "wave audio decoder";
-  }
+  explicit WaveDataDecoder(const CreateDecoderParams& aParams);
 
   // Return true if mimetype is Wave
   static bool IsWave(const nsACString& aMimeType);
 
+  RefPtr<InitPromise> Init() override;
+  RefPtr<DecodePromise> Decode(MediaRawData* aSample) override;
+  RefPtr<DecodePromise> Drain() override;
+  RefPtr<FlushPromise> Flush() override;
+  RefPtr<ShutdownPromise> Shutdown() override;
+  nsCString GetDescriptionName() const override
+  {
+    return NS_LITERAL_CSTRING("wave audio decoder");
+  }
+
 private:
-  void Decode (MediaRawData* aSample);
-  bool DoDecode (MediaRawData* aSample);
-  void DoDrain ();
-
+  RefPtr<DecodePromise> ProcessDecode(MediaRawData* aSample);
   const AudioInfo& mInfo;
-  RefPtr<FlushableTaskQueue> mTaskQueue;
-  MediaDataDecoderCallback* mCallback;
-
-  int64_t mFrames;
+  const RefPtr<TaskQueue> mTaskQueue;
 };
 
 } // namespace mozilla

@@ -15,19 +15,21 @@
 #include "mozilla/dom/OffscreenCanvas.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/NotNull.h"
 
 #define NS_ICANVASRENDERINGCONTEXTINTERNAL_IID \
 { 0xb84f2fed, 0x9d4b, 0x430b, \
   { 0xbd, 0xfb, 0x85, 0x57, 0x8a, 0xc2, 0xb4, 0x4b } }
 
-class gfxASurface;
 class nsDisplayListBuilder;
 
 namespace mozilla {
 namespace layers {
 class CanvasLayer;
+class CanvasRenderer;
 class Layer;
 class LayerManager;
+class WebRenderCanvasData;
 } // namespace layers
 namespace gfx {
 class SourceSurface;
@@ -40,8 +42,10 @@ class nsICanvasRenderingContextInternal :
 {
 public:
   typedef mozilla::layers::CanvasLayer CanvasLayer;
+  typedef mozilla::layers::CanvasRenderer CanvasRenderer;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
+  typedef mozilla::layers::WebRenderCanvasData WebRenderCanvasData;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICANVASRENDERINGCONTEXTINTERNAL_IID)
 
@@ -89,14 +93,17 @@ public:
   }
 
   // Dimensions of the canvas, in pixels.
-  virtual int32_t GetWidth() const = 0;
-  virtual int32_t GetHeight() const = 0;
+  virtual int32_t GetWidth() = 0;
+  virtual int32_t GetHeight() = 0;
 
   // Sets the dimensions of the canvas, in pixels.  Called
   // whenever the size of the element changes.
   NS_IMETHOD SetDimensions(int32_t width, int32_t height) = 0;
 
-  NS_IMETHOD InitializeWithSurface(nsIDocShell *docShell, gfxASurface *surface, int32_t width, int32_t height) = 0;
+  // Initializes with an nsIDocShell and DrawTarget. The size is taken from the
+  // DrawTarget.
+  NS_IMETHOD InitializeWithDrawTarget(nsIDocShell *aDocShell,
+                                      mozilla::NotNull<mozilla::gfx::DrawTarget*> aTarget) = 0;
 
   // Creates an image buffer. Returns null on failure.
   virtual mozilla::UniquePtr<uint8_t[]> GetImageBuffer(int32_t* format) = 0;
@@ -116,13 +123,19 @@ public:
   // If premultAlpha is provided, then it assumed the callee can handle
   // un-premultiplied surfaces, and *premultAlpha will be set to false
   // if one is returned.
-  virtual already_AddRefed<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(bool* premultAlpha = nullptr) = 0;
+  virtual already_AddRefed<mozilla::gfx::SourceSurface>
+  GetSurfaceSnapshot(gfxAlphaType* out_alphaType = nullptr) = 0;
 
-  // If this context is opaque, the backing store of the canvas should
+  // If this is called with true, the backing store of the canvas should
   // be created as opaque; all compositing operators should assume the
-  // dst alpha is always 1.0.  If this is never called, the context
-  // defaults to false (not opaque).
-  NS_IMETHOD SetIsOpaque(bool isOpaque) = 0;
+  // dst alpha is always 1.0.  If this is never called, the context's
+  // opaqueness is determined by the context attributes that it's initialized
+  // with.
+  virtual void SetOpaqueValueFromOpaqueAttr(bool aOpaqueAttrValue) = 0;
+
+  // Returns whether the context is opaque. This value can be based both on
+  // the value of the moz-opaque attribute and on the context's initialization
+  // attributes.
   virtual bool GetIsOpaque() = 0;
 
   // Invalidate this context and release any held resources, in preperation
@@ -134,6 +147,10 @@ public:
   virtual already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* builder,
                                                  Layer *oldLayer,
                                                  LayerManager *manager) = 0;
+  virtual bool UpdateWebRenderCanvasData(nsDisplayListBuilder* aBuilder,
+                                         WebRenderCanvasData* aCanvasData) { return false; }
+  virtual bool InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
+                                        CanvasRenderer* aRenderer) { return true; }
 
   // Return true if the canvas should be forced to be "inactive" to ensure
   // it can be drawn to the screen even if it's too large to be blitted by

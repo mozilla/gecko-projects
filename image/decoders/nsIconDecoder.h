@@ -37,7 +37,10 @@ class nsIconDecoder : public Decoder
 public:
   virtual ~nsIconDecoder();
 
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
+  DecoderType GetType() const override { return DecoderType::ICON; }
+
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
 
 private:
   friend class DecoderFactory;

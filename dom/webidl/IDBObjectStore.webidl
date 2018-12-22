@@ -14,7 +14,8 @@ dictionary IDBObjectStoreParameters {
 
 [Exposed=(Window,Worker,System)]
 interface IDBObjectStore {
-    readonly    attribute DOMString      name;
+    [SetterThrows]
+    attribute DOMString name;
 
     [Throws]
     readonly    attribute any            keyPath;
@@ -36,19 +37,16 @@ interface IDBObjectStore {
     IDBRequest get (any key);
 
     [Throws]
+    IDBRequest getKey (any key);
+
+    [Throws]
     IDBRequest clear ();
 
     [Throws]
     IDBRequest openCursor (optional any range, optional IDBCursorDirection direction = "next");
 
-    // Bug 899972
-    // IDBIndex   createIndex (DOMString name, (DOMString or sequence<DOMString>) keyPath, optional IDBIndexParameters optionalParameters);
-
     [Throws]
-    IDBIndex   createIndex (DOMString name, DOMString keyPath, optional IDBIndexParameters optionalParameters);
-
-    [Throws]
-    IDBIndex   createIndex (DOMString name, sequence<DOMString> keyPath, optional IDBIndexParameters optionalParameters);
+    IDBIndex   createIndex (DOMString name, (DOMString or sequence<DOMString>) keyPath, optional IDBIndexParameters optionalParameters);
 
     [Throws]
     IDBIndex   index (DOMString name);

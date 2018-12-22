@@ -4,12 +4,13 @@
 
 using namespace mozilla::ipc;
 typedef mozilla::ipc::MessageChannel::Message Message;
+typedef mozilla::ipc::MessageChannel::MessageInfo MessageInfo;
 
 namespace mozilla {
 namespace _ipdltest {
 
 static RacyInterruptPolicy
-MediateRace(const Message& parent, const Message& child)
+MediateRace(const MessageInfo& parent, const MessageInfo& child)
 {
     return (PTestRaceDeferral::Msg_Win__ID == parent.type()) ?
         RIPParentWins : RIPChildWins;
@@ -57,18 +58,18 @@ TestRaceDeferralParent::Test1()
         fail("didn't resolve Rpc vs. Lose 'race' correctly");
 }
 
-bool
+mozilla::ipc::IPCResult
 TestRaceDeferralParent::AnswerLose()
 {
     if (mProcessedLose)
         fail("processed Lose twice");
     mProcessedLose = true;
-    return true;
+    return IPC_OK();
 }
 
 RacyInterruptPolicy
-TestRaceDeferralParent::MediateInterruptRace(const Message& parent,
-                                       const Message& child)
+TestRaceDeferralParent::MediateInterruptRace(const MessageInfo& parent,
+                                             const MessageInfo& child)
 {
     return MediateRace(parent, child);
 }
@@ -86,29 +87,29 @@ TestRaceDeferralChild::~TestRaceDeferralChild()
     MOZ_COUNT_DTOR(TestRaceDeferralChild);
 }
 
-bool
+mozilla::ipc::IPCResult
 TestRaceDeferralChild::RecvStartRace()
 {
     if (!CallLose())
         fail("calling Lose");
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestRaceDeferralChild::AnswerWin()
 {
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestRaceDeferralChild::AnswerRpc()
 {
-    return true;
+    return IPC_OK();
 }
 
 RacyInterruptPolicy
-TestRaceDeferralChild::MediateInterruptRace(const Message& parent,
-                                      const Message& child)
+TestRaceDeferralChild::MediateInterruptRace(const MessageInfo& parent,
+                                            const MessageInfo& child)
 {
     return MediateRace(parent, child);
 }

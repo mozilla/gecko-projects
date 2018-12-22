@@ -8,7 +8,7 @@
 #ifndef SkFontMgr_android_parser_DEFINED
 #define SkFontMgr_android_parser_DEFINED
 
-#include "SkFixed.h"
+#include "SkFontMgr.h"
 #include "SkString.h"
 #include "SkTArray.h"
 #include "SkTDArray.h"
@@ -73,12 +73,7 @@ struct FontFileInfo {
     int fIndex;
     int fWeight;
     enum class Style { kAuto, kNormal, kItalic } fStyle;
-    struct Axis {
-        Axis() : fTag(SkSetFourByteTag('\0','\0','\0','\0')), fValue(0) { }
-        SkFourByteTag fTag;
-        SkFixed fValue;
-    };
-    SkTArray<Axis, true> fAxes;
+    SkTArray<SkFontArguments::VariationPosition::Coordinate, true> fVariationDesignPosition;
 };
 
 /**
@@ -98,7 +93,7 @@ struct FontFamily {
 
     SkTArray<SkString, true> fNames;
     SkTArray<FontFileInfo, true> fFonts;
-    SkLanguage fLanguage;
+    SkTArray<SkLanguage, true> fLanguages;
     FontVariant fVariant;
     int fOrder; // internal to the parser, not useful to users.
     bool fIsFallbackFont;

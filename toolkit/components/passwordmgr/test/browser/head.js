@@ -1,15 +1,24 @@
 const DIRECTORY_PATH = "/browser/toolkit/components/passwordmgr/test/browser/";
 
-Cu.import("resource://testing-common/LoginTestUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/LoginHelper.jsm", this);
+ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm", this);
+ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
-registerCleanupFunction(function* cleanup_removeAllLoginsAndResetRecipes() {
+add_task(async function common_initialize() {
+  await SpecialPowers.pushPrefEnv({"set": [["signon.rememberSignons", true]]});
+});
+
+registerCleanupFunction(async function cleanup_removeAllLoginsAndResetRecipes() {
+  await SpecialPowers.popPrefEnv();
+
   Services.logins.removeAllLogins();
+
   let recipeParent = LoginTestUtils.recipes.getRecipeParent();
   if (!recipeParent) {
     // No need to reset the recipes if the recipe module wasn't even loaded.
     return;
   }
-  yield recipeParent.then(recipeParent => recipeParent.reset());
+  await recipeParent.then(recipeParentResult => recipeParentResult.reset());
 });
 
 /**
@@ -18,17 +27,17 @@ registerCleanupFunction(function* cleanup_removeAllLoginsAndResetRecipes() {
  *
  * @param {String} aPageFile - test page file name which auto-submits to formsubmit.sjs
  * @param {Function} aTaskFn - task which can be run before the tab closes.
- * @param {String} [aOrigin="http://mochi.test:8888"] - origin of the server to
- *                                                      use to load `aPageFile`.
+ * @param {String} [aOrigin="http://example.com"] - origin of the server to use
+ *                                                  to load `aPageFile`.
  */
-function testSubmittingLoginForm(aPageFile, aTaskFn, aOrigin = "http://mochi.test:8888") {
+function testSubmittingLoginForm(aPageFile, aTaskFn, aOrigin = "http://example.com") {
   return BrowserTestUtils.withNewTab({
     gBrowser,
     url: aOrigin + DIRECTORY_PATH + aPageFile,
-  }, function*(browser) {
+  }, async function(browser) {
     ok(true, "loaded " + aPageFile);
-    let fieldValues = yield ContentTask.spawn(browser, undefined, function*() {
-      yield ContentTaskUtils.waitForCondition(() => {
+    let fieldValues = await ContentTask.spawn(browser, undefined, async function() {
+      await ContentTaskUtils.waitForCondition(() => {
         return content.location.pathname.endsWith("/formsubmit.sjs") &&
           content.document.readyState == "complete";
       }, "Wait for form submission load (formsubmit.sjs)");
@@ -41,7 +50,7 @@ function testSubmittingLoginForm(aPageFile, aTaskFn, aOrigin = "http://mochi.tes
     });
     ok(true, "form submission loaded");
     if (aTaskFn) {
-      yield* aTaskFn(fieldValues);
+      await aTaskFn(fieldValues);
     }
     return fieldValues;
   });
@@ -65,7 +74,7 @@ function checkOnlyLoginWasUsedTwice({ justChanged }) {
 // Begin popup notification (doorhanger) functions //
 
 const REMEMBER_BUTTON = 0;
-const NEVER_BUTTON = 1;
+const NEVER_BUTTON = 2;
 
 const CHANGE_BUTTON = 0;
 const DONT_CHANGE_BUTTON = 1;
@@ -75,17 +84,18 @@ const DONT_CHANGE_BUTTON = 1;
  * of the right type and with the right label.
  *
  * @param {String} aKind The desired `passwordNotificationType`
+ * @param {Object} [popupNotifications = PopupNotifications]
  * @return the found password popup notification.
  */
-function getCaptureDoorhanger(aKind) {
+function getCaptureDoorhanger(aKind, popupNotifications = PopupNotifications) {
   ok(true, "Looking for " + aKind + " popup notification");
-  let notification = PopupNotifications.getNotification("password");
+  let notification = popupNotifications.getNotification("password");
   if (notification) {
     is(notification.options.passwordNotificationType, aKind, "Notification type matches.");
     if (aKind == "password-change") {
       is(notification.mainAction.label, "Update", "Main action label matches update doorhanger.");
     } else if (aKind == "password-save") {
-      is(notification.mainAction.label, "Remember", "Main action label matches save doorhanger.");
+      is(notification.mainAction.label, "Save", "Main action label matches save doorhanger.");
     }
   }
   return notification;
@@ -109,10 +119,29 @@ function clickDoorhangerButton(aPopup, aButtonIndex) {
   if (aButtonIndex == 0) {
     ok(true, "Triggering main action");
     notification.button.doCommand();
+  } else if (aButtonIndex == 1) {
+    ok(true, "Triggering secondary action");
+    notification.secondaryButton.doCommand();
   } else if (aButtonIndex <= aPopup.secondaryActions.length) {
     ok(true, "Triggering secondary action " + aButtonIndex);
-    notification.childNodes[aButtonIndex].doCommand();
+    notification.childNodes[aButtonIndex - 1].doCommand();
   }
+}
+
+/**
+ * Checks the doorhanger's username and password.
+ *
+ * @param {String} username The username.
+ * @param {String} password The password.
+ */
+async function checkDoorhangerUsernamePassword(username, password) {
+  await BrowserTestUtils.waitForCondition(() => {
+    return document.getElementById("password-notification-username").value == username;
+  }, "Wait for nsLoginManagerPrompter writeDataToUI()");
+  is(document.getElementById("password-notification-username").value, username,
+     "Check doorhanger username");
+  is(document.getElementById("password-notification-password").value, password,
+     "Check doorhanger password");
 }
 
 // End popup notification (doorhanger) functions //

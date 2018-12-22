@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -147,36 +147,19 @@ include(include_path)
 # The order of the decorators matter: @imports needs to appear after other
 # decorators.
 option('--with-imports', nargs='?', help='Imports')
-@depends('--with-imports')
-@imports(_from='mozbuild.configure.options', _import='OptionValue')
-def with_imports(value):
-    if value:
-        return isinstance(value, OptionValue)
-
-set_config('IMPORTS', with_imports)
-
-# Trying to import manually will fail at runtime.
-@depends('--with-imports')
-def with_imports(value):
-    if len(value) and value[0] == 'break':
-        from mozbuild.configure.options import OptionValue
-        return isinstance(value, OptionValue)
-
-set_config('IMPORTS2', with_imports)
 
 # A limited set of functions from os.path are exposed by default.
 @depends('--with-imports')
 def with_imports(value):
     if len(value):
-        return os.path.isfile(value[0])
+        return hasattr(os.path, 'abspath')
 
-set_config('IS_FILE', with_imports)
+set_config('HAS_ABSPATH', with_imports)
 
 # It is still possible to import the full set from os.path.
 # It is also possible to cherry-pick builtins.
 @depends('--with-imports')
 @imports('os.path')
-@imports(_from='__builtin__', _import='hasattr')
 def with_imports(value):
     if len(value):
         return hasattr(os.path, 'getatime')
@@ -184,7 +167,6 @@ def with_imports(value):
 set_config('HAS_GETATIME', with_imports)
 
 @depends('--with-imports')
-@imports(_from='__builtin__', _import='hasattr')
 def with_imports(value):
     if len(value):
         return hasattr(os.path, 'getatime')

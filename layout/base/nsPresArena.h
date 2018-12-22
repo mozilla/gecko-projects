@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: set ts=2 sw=2 et tw=78:
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
@@ -10,8 +10,10 @@
 #ifndef nsPresArena_h___
 #define nsPresArena_h___
 
+#include "mozilla/ArenaAllocator.h"
 #include "mozilla/ArenaObjectID.h"
 #include "mozilla/ArenaRefPtr.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/MemoryChecking.h" // Note: Do not remove this, needed for MOZ_HAVE_MEM_CHECKS below
 #include "mozilla/MemoryReporting.h"
 #include <stdint.h>
@@ -20,28 +22,13 @@
 #include "nsHashKeys.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
-#include "plarena.h"
 
-struct nsArenaMemoryStats;
+class nsWindowSizes;
 
 class nsPresArena {
 public:
   nsPresArena();
   ~nsPresArena();
-
-  /**
-   * Pool allocation with recycler lists indexed by object size, aSize.
-   */
-  void* AllocateBySize(size_t aSize)
-  {
-    return Allocate(uint32_t(aSize) |
-                    uint32_t(mozilla::eArenaObjectID_NON_OBJECT_MARKER), aSize);
-  }
-  void FreeBySize(size_t aSize, void* aPtr)
-  {
-    Free(uint32_t(aSize) |
-         uint32_t(mozilla::eArenaObjectID_NON_OBJECT_MARKER), aPtr);
-  }
 
   /**
    * Pool allocation with recycler lists indexed by frame-type ID.
@@ -67,6 +54,15 @@ public:
   void FreeByObjectID(mozilla::ArenaObjectID aID, void* aPtr)
   {
     Free(aID, aPtr);
+  }
+
+  void* AllocateByCustomID(uint32_t aID, size_t aSize)
+  {
+    return Allocate(aID, aSize);
+  }
+  void FreeByCustomID(uint32_t aID, void* ptr)
+  {
+    Free(aID, ptr);
   }
 
   /**
@@ -102,18 +98,21 @@ public:
 
   /**
    * Clears all currently registered ArenaRefPtrs for the given ArenaObjectID.
-   * This is called when we reconstruct the rule tree so that style contexts
+   * This is called when we reconstruct the rule tree so that ComputedStyles
    * pointing into the old rule tree aren't released afterwards, triggering an
-   * assertion in ~nsStyleContext.
+   * assertion in ~ComputedStyle.
    */
   void ClearArenaRefPtrs(mozilla::ArenaObjectID aObjectID);
 
   /**
-   * Increment aArenaStats with sizes of interesting objects allocated in this
-   * arena and its mOther field with the size of everything else.
+   * Increment nsWindowSizes with sizes of interesting objects allocated in this
+   * arena.
    */
-  void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                              nsArenaMemoryStats* aArenaStats);
+  void AddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const;
+
+  void Check() {
+    mPool.Check();
+  }
 
 private:
   void* Allocate(uint32_t aCode, size_t aSize);
@@ -123,40 +122,24 @@ private:
       void* aPtr,
       mozilla::ArenaObjectID aObjectID);
 
-  // All keys to this hash table fit in 32 bits (see below) so we do not
-  // bother actually hashing them.
-  class FreeList : public PLDHashEntryHdr
+  class FreeList
   {
   public:
-    typedef uint32_t KeyType;
     nsTArray<void *> mEntries;
     size_t mEntrySize;
     size_t mEntriesEverAllocated;
 
-    typedef const void* KeyTypePointer;
-    KeyTypePointer mKey;
-
-    explicit FreeList(KeyTypePointer aKey)
-    : mEntrySize(0), mEntriesEverAllocated(0), mKey(aKey) {}
-    // Default copy constructor and destructor are ok.
-
-    bool KeyEquals(KeyTypePointer const aKey) const
-    { return mKey == aKey; }
-
-    static KeyTypePointer KeyToPointer(KeyType aKey)
-    { return NS_INT32_TO_PTR(aKey); }
-
-    static PLDHashNumber HashKey(KeyTypePointer aKey)
-    { return NS_PTR_TO_INT32(aKey); }
+    FreeList()
+      : mEntrySize(0)
+      , mEntriesEverAllocated(0)
+    {}
 
     size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     { return mEntries.ShallowSizeOfExcludingThis(aMallocSizeOf); }
-
-    enum { ALLOW_MEMMOVE = false };
   };
 
-  nsTHashtable<FreeList> mFreeLists;
-  PLArenaPool mPool;
+  FreeList mFreeLists[mozilla::eArenaObjectID_COUNT];
+  mozilla::ArenaAllocator<8192, 8> mPool;
   nsDataHashtable<nsPtrHashKey<void>, mozilla::ArenaObjectID> mArenaRefPtrs;
 };
 

@@ -9,95 +9,92 @@
  * view.
  */
 
-XPCOMUtils.defineLazyGetter(this, "osString", function() {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
+const osString = Services.appinfo.OS;
 
 const TEST_URI = URL_ROOT + "doc_copystyles.html";
 
-add_task(function*() {
-  yield addTab(TEST_URI);
-  let { inspector, view } = yield openRuleView();
-  let contextmenu = view._contextmenu;
-  yield selectNode("#testid", inspector);
+add_task(async function() {
+  await addTab(TEST_URI);
+  const { inspector, view } = await openRuleView();
+  await selectNode("#testid", inspector);
 
-  let ruleEditor = getRuleViewRuleEditor(view, 1);
+  const ruleEditor = getRuleViewRuleEditor(view, 1);
 
-  let data = [
+  const data = [
     {
       desc: "Test Copy Property Name",
       node: ruleEditor.rule.textProps[0].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyPropertyName,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyName",
       expectedPattern: "color",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Property Value",
       node: ruleEditor.rule.textProps[2].editor.valueSpan,
-      menuItem: contextmenu.menuitemCopyPropertyValue,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyValue",
       expectedPattern: "12px",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: true,
-        copyPropertyValue: false,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: false,
+        copyPropertyValue: true,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Property Value with Priority",
       node: ruleEditor.rule.textProps[3].editor.valueSpan,
-      menuItem: contextmenu.menuitemCopyPropertyValue,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyValue",
       expectedPattern: "#00F !important",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: true,
-        copyPropertyValue: false,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: false,
+        copyPropertyValue: true,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Property Declaration",
       node: ruleEditor.rule.textProps[2].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyPropertyDeclaration,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyDeclaration",
       expectedPattern: "font-size: 12px;",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Property Declaration with Priority",
       node: ruleEditor.rule.textProps[3].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyPropertyDeclaration,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyDeclaration",
       expectedPattern: "border-color: #00F !important;",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Rule",
       node: ruleEditor.rule.textProps[2].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyRule,
+      menuItemLabel: "styleinspector.contextmenu.copyRule",
       expectedPattern: "#testid {[\\r\\n]+" +
                        "\tcolor: #F00;[\\r\\n]+" +
                        "\tbackground-color: #00F;[\\r\\n]+" +
@@ -105,51 +102,51 @@ add_task(function*() {
                        "\tborder-color: #00F !important;[\\r\\n]+" +
                        "\t--var: \"\\*/\";[\\r\\n]+" +
                        "}",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Selector",
       node: ruleEditor.selectorText,
-      menuItem: contextmenu.menuitemCopySelector,
+      menuItemLabel: "styleinspector.contextmenu.copySelector",
       expectedPattern: "html, body, #testid",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: true,
-        copyPropertyName: true,
-        copyPropertyValue: true,
-        copySelector: false,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: false,
+        copyPropertyName: false,
+        copyPropertyValue: false,
+        copySelector: true,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Location",
       node: ruleEditor.source,
-      menuItem: contextmenu.menuitemCopyLocation,
+      menuItemLabel: "styleinspector.contextmenu.copyLocation",
       expectedPattern: "http://example.com/browser/devtools/client/" +
                        "inspector/rules/test/doc_copystyles.css",
-      hidden: {
-        copyLocation: false,
-        copyPropertyDeclaration: true,
-        copyPropertyName: true,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: true,
+        copyPropertyDeclaration: false,
+        copyPropertyName: false,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
-      setup: function*() {
-        yield disableProperty(view, 0);
+      setup: async function() {
+        await disableProperty(view, 0);
       },
       desc: "Test Copy Rule with Disabled Property",
       node: ruleEditor.rule.textProps[2].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyRule,
+      menuItemLabel: "styleinspector.contextmenu.copyRule",
       expectedPattern: "#testid {[\\r\\n]+" +
                        "\t\/\\* color: #F00; \\*\/[\\r\\n]+" +
                        "\tbackground-color: #00F;[\\r\\n]+" +
@@ -157,22 +154,22 @@ add_task(function*() {
                        "\tborder-color: #00F !important;[\\r\\n]+" +
                        "\t--var: \"\\*/\";[\\r\\n]+" +
                        "}",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
-      setup: function*() {
-        yield disableProperty(view, 4);
+      setup: async function() {
+        await disableProperty(view, 4);
       },
       desc: "Test Copy Rule with Disabled Property with Comment",
       node: ruleEditor.rule.textProps[2].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyRule,
+      menuItemLabel: "styleinspector.contextmenu.copyRule",
       expectedPattern: "#testid {[\\r\\n]+" +
                        "\t\/\\* color: #F00; \\*\/[\\r\\n]+" +
                        "\tbackground-color: #00F;[\\r\\n]+" +
@@ -180,107 +177,118 @@ add_task(function*() {
                        "\tborder-color: #00F !important;[\\r\\n]+" +
                        "\t/\\* --var: \"\\*\\\\\/\"; \\*\/[\\r\\n]+" +
                        "}",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
     {
       desc: "Test Copy Property Declaration with Disabled Property",
       node: ruleEditor.rule.textProps[0].editor.nameSpan,
-      menuItem: contextmenu.menuitemCopyPropertyDeclaration,
+      menuItemLabel: "styleinspector.contextmenu.copyPropertyDeclaration",
       expectedPattern: "\/\\* color: #F00; \\*\/",
-      hidden: {
-        copyLocation: true,
-        copyPropertyDeclaration: false,
-        copyPropertyName: false,
-        copyPropertyValue: true,
-        copySelector: true,
-        copyRule: false
+      visible: {
+        copyLocation: false,
+        copyPropertyDeclaration: true,
+        copyPropertyName: true,
+        copyPropertyValue: false,
+        copySelector: false,
+        copyRule: true
       }
     },
   ];
 
-  for (let { setup, desc, node, menuItem, expectedPattern, hidden } of data) {
+  for (const { setup, desc, node, menuItemLabel, expectedPattern, visible } of data) {
     if (setup) {
-      yield setup();
+      await setup();
     }
 
     info(desc);
-    yield checkCopyStyle(view, node, menuItem, expectedPattern, hidden);
+    await checkCopyStyle(view, node, menuItemLabel, expectedPattern, visible);
   }
 });
 
-function* checkCopyStyle(view, node, menuItem, expectedPattern, hidden) {
-  let onPopup = once(view._contextmenu._menupopup, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(node,
-    {button: 2, type: "contextmenu"}, view.styleWindow);
-  yield onPopup;
+async function checkCopyStyle(view, node, menuItemLabel, expectedPattern, visible) {
+  const allMenuItems = openStyleContextMenuAndGetAllItems(view, node);
+  const menuItem = allMenuItems.find(item =>
+    item.label === STYLE_INSPECTOR_L10N.getStr(menuItemLabel));
+  const menuitemCopy = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
+  const menuitemCopyLocation = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyLocation"));
+  const menuitemCopyPropertyDeclaration = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyPropertyDeclaration"));
+  const menuitemCopyPropertyName = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyPropertyName"));
+  const menuitemCopyPropertyValue = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyPropertyValue"));
+  const menuitemCopySelector = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copySelector"));
+  const menuitemCopyRule = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copyRule"));
 
-  ok(view._contextmenu.menuitemCopy.disabled,
+  ok(menuitemCopy.disabled,
     "Copy disabled is as expected: true");
-  ok(!view._contextmenu.menuitemCopy.hidden,
-    "Copy hidden is as expected: false");
+  ok(menuitemCopy.visible,
+    "Copy visible is as expected: true");
 
-  is(view._contextmenu.menuitemCopyLocation.hidden,
-     hidden.copyLocation,
-     "Copy Location hidden attribute is as expected: " +
-     hidden.copyLocation);
+  is(menuitemCopyLocation.visible,
+     visible.copyLocation,
+     "Copy Location visible attribute is as expected: " +
+     visible.copyLocation);
 
-  is(view._contextmenu.menuitemCopyPropertyDeclaration.hidden,
-     hidden.copyPropertyDeclaration,
-     "Copy Property Declaration hidden attribute is as expected: " +
-     hidden.copyPropertyDeclaration);
+  is(menuitemCopyPropertyDeclaration.visible,
+     visible.copyPropertyDeclaration,
+     "Copy Property Declaration visible attribute is as expected: " +
+     visible.copyPropertyDeclaration);
 
-  is(view._contextmenu.menuitemCopyPropertyName.hidden,
-     hidden.copyPropertyName,
-     "Copy Property Name hidden attribute is as expected: " +
-     hidden.copyPropertyName);
+  is(menuitemCopyPropertyName.visible,
+     visible.copyPropertyName,
+     "Copy Property Name visible attribute is as expected: " +
+     visible.copyPropertyName);
 
-  is(view._contextmenu.menuitemCopyPropertyValue.hidden,
-     hidden.copyPropertyValue,
-     "Copy Property Value hidden attribute is as expected: " +
-     hidden.copyPropertyValue);
+  is(menuitemCopyPropertyValue.visible,
+     visible.copyPropertyValue,
+     "Copy Property Value visible attribute is as expected: " +
+     visible.copyPropertyValue);
 
-  is(view._contextmenu.menuitemCopySelector.hidden,
-     hidden.copySelector,
-     "Copy Selector hidden attribute is as expected: " +
-     hidden.copySelector);
+  is(menuitemCopySelector.visible,
+     visible.copySelector,
+     "Copy Selector visible attribute is as expected: " +
+     visible.copySelector);
 
-  is(view._contextmenu.menuitemCopyRule.hidden,
-     hidden.copyRule,
-     "Copy Rule hidden attribute is as expected: " +
-     hidden.copyRule);
+  is(menuitemCopyRule.visible,
+     visible.copyRule,
+     "Copy Rule visible attribute is as expected: " +
+     visible.copyRule);
 
   try {
-    yield waitForClipboard(() => menuItem.click(),
+    await waitForClipboardPromise(() => menuItem.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
   }
-
-  view._contextmenu._menupopup.hidePopup();
 }
 
-function* disableProperty(view, index) {
-  let ruleEditor = getRuleViewRuleEditor(view, 1);
-  let textProp = ruleEditor.rule.textProps[index];
-  yield togglePropStatus(view, textProp);
+async function disableProperty(view, index) {
+  const ruleEditor = getRuleViewRuleEditor(view, 1);
+  const textProp = ruleEditor.rule.textProps[index];
+  await togglePropStatus(view, textProp);
 }
 
 function checkClipboardData(expectedPattern) {
-  let actual = SpecialPowers.getClipboardData("text/unicode");
-  let expectedRegExp = new RegExp(expectedPattern, "g");
+  const actual = SpecialPowers.getClipboardData("text/unicode");
+  const expectedRegExp = new RegExp(expectedPattern, "g");
   return expectedRegExp.test(actual);
 }
 
 function failedClipboard(expectedPattern) {
   // Format expected text for comparison
-  let terminator = osString == "WINNT" ? "\r\n" : "\n";
+  const terminator = osString == "WINNT" ? "\r\n" : "\n";
   expectedPattern = expectedPattern.replace(/\[\\r\\n\][+*]/g, terminator);
   expectedPattern = expectedPattern.replace(/\\\(/g, "(");
   expectedPattern = expectedPattern.replace(/\\\)/g, ")");

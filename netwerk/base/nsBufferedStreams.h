@@ -14,6 +14,10 @@
 #include "nsIStreamBufferAccess.h"
 #include "nsCOMPtr.h"
 #include "nsIIPCSerializableInputStream.h"
+#include "nsIAsyncInputStream.h"
+#include "nsICloneableInputStream.h"
+#include "nsIInputStreamLength.h"
+#include "mozilla/Mutex.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -31,6 +35,7 @@ protected:
     virtual ~nsBufferedStream();
 
     nsresult Init(nsISupports* stream, uint32_t bufferSize);
+    nsresult GetData(nsISupports **aResult);
     NS_IMETHOD Fill() = 0;
     NS_IMETHOD Flush() = 0;
 
@@ -58,10 +63,17 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class nsBufferedInputStream : public nsBufferedStream,
-                              public nsIBufferedInputStream,
-                              public nsIStreamBufferAccess,
-                              public nsIIPCSerializableInputStream
+class nsBufferedInputStream final
+    : public nsBufferedStream,
+      public nsIBufferedInputStream,
+      public nsIStreamBufferAccess,
+      public nsIIPCSerializableInputStream,
+      public nsIAsyncInputStream,
+      public nsIInputStreamCallback,
+      public nsICloneableInputStream,
+      public nsIInputStreamLength,
+      public nsIAsyncInputStreamLength,
+      public nsIInputStreamLengthCallback
 {
 public:
     NS_DECL_ISUPPORTS_INHERITED
@@ -69,29 +81,49 @@ public:
     NS_DECL_NSIBUFFEREDINPUTSTREAM
     NS_DECL_NSISTREAMBUFFERACCESS
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
+    NS_DECL_NSIASYNCINPUTSTREAM
+    NS_DECL_NSIINPUTSTREAMCALLBACK
+    NS_DECL_NSICLONEABLEINPUTSTREAM
+    NS_DECL_NSIINPUTSTREAMLENGTH
+    NS_DECL_NSIASYNCINPUTSTREAMLENGTH
+    NS_DECL_NSIINPUTSTREAMLENGTHCALLBACK
 
-    nsBufferedInputStream() : nsBufferedStream() {}
+    nsBufferedInputStream();
 
     static nsresult
     Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
 
-    nsIInputStream* Source() { 
+    nsIInputStream* Source() {
         return (nsIInputStream*)mStream;
     }
 
 protected:
-    virtual ~nsBufferedInputStream() {}
+    virtual ~nsBufferedInputStream() = default;
 
     NS_IMETHOD Fill() override;
     NS_IMETHOD Flush() override { return NS_OK; } // no-op for input streams
+
+    mozilla::Mutex mMutex;
+
+    // This value is protected by mutex.
+    nsCOMPtr<nsIInputStreamCallback> mAsyncWaitCallback;
+
+    // This value is protected by mutex.
+    nsCOMPtr<nsIInputStreamLengthCallback> mAsyncInputStreamLengthCallback;
+
+    bool mIsIPCSerializable;
+    bool mIsAsyncInputStream;
+    bool mIsCloneableInputStream;
+    bool mIsInputStreamLength;
+    bool mIsAsyncInputStreamLength;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class nsBufferedOutputStream final : public nsBufferedStream,
-                                     public nsISafeOutputStream,
-                                     public nsIBufferedOutputStream,
-                                     public nsIStreamBufferAccess
+class nsBufferedOutputStream  : public nsBufferedStream,
+                                public nsISafeOutputStream,
+                                public nsIBufferedOutputStream,
+                                public nsIStreamBufferAccess
 {
 public:
     NS_DECL_ISUPPORTS_INHERITED
@@ -105,7 +137,7 @@ public:
     static nsresult
     Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
 
-    nsIOutputStream* Sink() { 
+    nsIOutputStream* Sink() {
         return (nsIOutputStream*)mStream;
     }
 

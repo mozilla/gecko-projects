@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "AlignedTArray.h"
+#include "AlignmentUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeExternalInputStream.h"
 #include "AudioChannelFormat.h"
@@ -12,7 +14,9 @@ using namespace mozilla::dom;
 
 namespace mozilla {
 
-AudioNodeExternalInputStream::AudioNodeExternalInputStream(AudioNodeEngine* aEngine, TrackRate aSampleRate)
+AudioNodeExternalInputStream::AudioNodeExternalInputStream(
+  AudioNodeEngine* aEngine,
+  TrackRate aSampleRate)
   : AudioNodeStream(aEngine, NO_STREAM_FLAGS, aSampleRate)
 {
   MOZ_COUNT_CTOR(AudioNodeExternalInputStream);
@@ -90,9 +94,20 @@ static void ConvertSegmentToAudioBlock(AudioSegment* aSegment,
     NS_ASSERTION(!ci.IsEnded(), "Should be at least one chunk!");
     if (ci->GetDuration() == WEBAUDIO_BLOCK_SIZE &&
         (ci->IsNull() || ci->mBufferFormat == AUDIO_FORMAT_FLOAT32)) {
+
+      bool aligned = true;
+      for (size_t i = 0; i < ci->mChannelData.Length(); ++i) {
+        if (!IS_ALIGNED16(ci->mChannelData[i])) {
+            aligned = false;
+            break;
+        }
+      }
+
       // Return this chunk directly to avoid copying data.
-      *aBlock = *ci;
-      return;
+      if (aligned) {
+        *aBlock = *ci;
+        return;
+      }
     }
   }
 
@@ -139,10 +154,15 @@ AudioNodeExternalInputStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
   MediaStream* source = mInputs[0]->GetSource();
   AutoTArray<AudioSegment,1> audioSegments;
   uint32_t inputChannels = 0;
-  for (StreamBuffer::TrackIter tracks(source->mBuffer, MediaSegment::AUDIO);
+  for (StreamTracks::TrackIter tracks(source->mTracks);
        !tracks.IsEnded(); tracks.Next()) {
-    const StreamBuffer::Track& inputTrack = *tracks;
+    const StreamTracks::Track& inputTrack = *tracks;
     if (!mInputs[0]->PassTrackThrough(tracks->GetID())) {
+      continue;
+    }
+
+    if (inputTrack.GetSegment()->GetType() == MediaSegment::VIDEO) {
+      MOZ_ASSERT(false, "AudioNodeExternalInputStream shouldn't have video tracks");
       continue;
     }
 
@@ -192,7 +212,8 @@ AudioNodeExternalInputStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
 
   uint32_t accumulateIndex = 0;
   if (inputChannels) {
-    AutoTArray<float,GUESS_AUDIO_CHANNELS*WEBAUDIO_BLOCK_SIZE> downmixBuffer;
+    DownmixBufferType downmixBuffer;
+    ASSERT_ALIGNED16(downmixBuffer.Elements());
     for (uint32_t i = 0; i < audioSegments.Length(); ++i) {
       AudioBlock tmpChunk;
       ConvertSegmentToAudioBlock(&audioSegments[i], &tmpChunk, inputChannels);

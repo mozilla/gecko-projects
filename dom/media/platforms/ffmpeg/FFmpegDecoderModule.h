@@ -11,9 +11,9 @@
 #include "FFmpegLibWrapper.h"
 #include "FFmpegAudioDecoder.h"
 #include "FFmpegVideoDecoder.h"
+#include "mozilla/StaticPrefs.h"
 
-namespace mozilla
-{
+namespace mozilla {
 
 template <int V>
 class FFmpegDecoderModule : public PlatformDecoderModule
@@ -27,64 +27,69 @@ public:
     return pdm.forget();
   }
 
-  explicit FFmpegDecoderModule(FFmpegLibWrapper* aLib) : mLib(aLib) {}
-  virtual ~FFmpegDecoderModule() {}
+  explicit FFmpegDecoderModule(FFmpegLibWrapper* aLib) : mLib(aLib) { }
+  virtual ~FFmpegDecoderModule() { }
 
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override
   {
-    RefPtr<MediaDataDecoder> decoder =
-      new FFmpegVideoDecoder<V>(mLib, aVideoTaskQueue, aCallback, aConfig,
-                                aImageContainer);
+    // Temporary - forces use of VPXDecoder when alpha is present.
+    // Bug 1263836 will handle alpha scenario once implemented. It will shift
+    // the check for alpha to PDMFactory but not itself remove the need for a
+    // check.
+    if (aParams.VideoConfig().HasAlpha()) {
+      return nullptr;
+    }
+    if (aParams.mOptions.contains(
+          CreateDecoderParams::Option::LowLatency) &&
+        !StaticPrefs::MediaFfmpegLowLatencyEnabled()) {
+      return nullptr;
+    }
+    RefPtr<MediaDataDecoder> decoder = new FFmpegVideoDecoder<V>(
+      mLib,
+      aParams.mTaskQueue,
+      aParams.VideoConfig(),
+      aParams.mKnowsCompositor,
+      aParams.mImageContainer,
+      aParams.mOptions.contains(CreateDecoderParams::Option::LowLatency));
     return decoder.forget();
   }
 
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override
   {
-#ifdef USING_MOZFFVPX
-    return nullptr;
-#else
     RefPtr<MediaDataDecoder> decoder =
-      new FFmpegAudioDecoder<V>(mLib, aAudioTaskQueue, aCallback, aConfig);
+      new FFmpegAudioDecoder<V>(mLib,
+                                aParams.mTaskQueue,
+                                aParams.AudioConfig());
     return decoder.forget();
-#endif
   }
 
-  bool SupportsMimeType(const nsACString& aMimeType) const override
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override
   {
     AVCodecID videoCodec = FFmpegVideoDecoder<V>::GetCodecId(aMimeType);
-#ifdef USING_MOZFFVPX
-    if (videoCodec == AV_CODEC_ID_NONE) {
-        return false;
-    }
-    return !!FFmpegDataDecoder<V>::FindAVCodec(mLib, videoCodec);
-#else
     AVCodecID audioCodec = FFmpegAudioDecoder<V>::GetCodecId(aMimeType);
     if (audioCodec == AV_CODEC_ID_NONE && videoCodec == AV_CODEC_ID_NONE) {
       return false;
     }
     AVCodecID codec = audioCodec != AV_CODEC_ID_NONE ? audioCodec : videoCodec;
     return !!FFmpegDataDecoder<V>::FindAVCodec(mLib, codec);
-#endif
   }
 
-  ConversionRequired
-  DecoderNeedsConversion(const TrackInfo& aConfig) const override
+protected:
+  bool SupportsBitDepth(const uint8_t aBitDepth,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override
   {
-    if (aConfig.IsVideo() &&
-        (aConfig.mMimeType.EqualsLiteral("video/avc") ||
-         aConfig.mMimeType.EqualsLiteral("video/mp4"))) {
-      return PlatformDecoderModule::kNeedAVCC;
-    } else {
-      return kNeedNone;
-    }
+    // We don't support bitDepth > 8 when compositor backend is D3D11.
+    // But we don't have KnowsCompositor or any object
+    // that we can ask for the layersbackend type.
+    // We should remove this restriction until
+    // we solve the D3D11 compositor backend issue.
+#if defined(XP_LINUX) || defined(XP_MACOSX)
+    return true;
+#endif
+    return aBitDepth == 8;
   }
 
 private:

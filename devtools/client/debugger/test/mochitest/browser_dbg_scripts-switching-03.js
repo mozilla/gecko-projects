@@ -10,7 +10,11 @@
 const TAB_URL = EXAMPLE_URL + "doc_script-switching-01.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_script-switching-01.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     const gTab = aTab;
     const gPanel = aPanel;
     const gDebugger = gPanel.panelWin;
@@ -46,12 +50,11 @@ function test() {
     }
 
     function testDebuggerLoadingError() {
-      ok(gEditor.getText().includes(gL10N.getFormatStr("errorLoadingText2", "")),
+      ok(gEditor.getText().includes(gL10N.getFormatStr("errorLoadingText3", "")),
          "The valid error loading message is displayed.");
     }
 
-    Task.spawn(function*() {
-      yield waitForSourceShown(gPanel, "-01.js");
+    Task.spawn(function* () {
       showBogusSource();
       testDebuggerLoadingError();
       closeDebuggerAndFinish(gPanel);

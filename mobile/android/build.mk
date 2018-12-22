@@ -8,6 +8,8 @@ installer:
 	@$(MAKE) -C mobile/android/installer installer
 
 package:
+	# Setting MOZ_GECKOVIEW_JAR makes the installer generate a separate GeckoView JAR
+	@$(MAKE) MOZ_GECKOVIEW_JAR=1 -C mobile/android/installer stage-package
 	@$(MAKE) -C mobile/android/installer
 
 ifeq ($(OS_TARGET),Android)
@@ -18,19 +20,22 @@ ifneq ($(ANDROID_SERIAL),)
 export ANDROID_SERIAL
 else
 # Determine if there's more than one device connected
-android_devices=$(filter device,$(shell $(ADB) devices))
-ifeq ($(android_devices),)
-install::
+android_devices=$(words $(filter device,$(shell $(ADB) devices)))
+define no_device
 	@echo 'No devices are connected.  Connect a device or start an emulator.'
 	@exit 1
-else
-ifneq ($(android_devices),device)
-install::
+endef
+define multiple_devices
 	@echo 'Multiple devices are connected. Define ANDROID_SERIAL to specify the install target.'
 	$(ADB) devices
 	@exit 1
-endif
-endif
+endef
+
+install::
+	@# Use foreach to avoid running adb multiple times here
+	$(foreach val,$(android_devices),\
+		$(if $(filter 0,$(val)),$(no_device),\
+			$(if $(filter-out 1,$(val)),$(multiple_devices))))
 endif
 
 install::
@@ -46,11 +51,19 @@ deb: package
 upload::
 	@$(MAKE) -C mobile/android/installer upload
 
+wget-en-US:
+	@$(MAKE) -C mobile/android/locales $@
+
+# make -j1 because dependencies in l10n build targets don't work
+# with parallel builds
+merge-% installers-% langpack-% chrome-%:
+	$(MAKE) -j1 -C mobile/android/locales $@
+
 ifdef ENABLE_TESTS
 # Implemented in testing/testsuite-targets.mk
 
 mochitest-browser-chrome:
-	$(RUN_MOCHITEST) --browser-chrome
+	$(RUN_MOCHITEST) --flavor=browser
 	$(CHECK_TEST_ERROR)
 
 mochitest:: mochitest-browser-chrome

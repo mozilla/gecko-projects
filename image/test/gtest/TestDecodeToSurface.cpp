@@ -22,28 +22,21 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-TEST(ImageDecodeToSurface, ImageModuleAvailable)
-{
-  // We can run into problems if XPCOM modules get initialized in the wrong
-  // order. It's important that this test run first, both as a sanity check and
-  // to ensure we get the module initialization order we want.
-  nsCOMPtr<imgITools> imgTools =
-    do_CreateInstance("@mozilla.org/image/tools;1");
-  EXPECT_TRUE(imgTools != nullptr);
-}
-
-class DecodeToSurfaceRunnable : public nsRunnable
+class DecodeToSurfaceRunnable : public Runnable
 {
 public:
   DecodeToSurfaceRunnable(RefPtr<SourceSurface>& aSurface,
                           nsIInputStream* aInputStream,
+                          ImageOps::ImageBuffer* aImageBuffer,
                           const ImageTestCase& aTestCase)
-    : mSurface(aSurface)
+    : mozilla::Runnable("DecodeToSurfaceRunnable")
+    , mSurface(aSurface)
     , mInputStream(aInputStream)
+    , mImageBuffer(aImageBuffer)
     , mTestCase(aTestCase)
   { }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     Go();
     return NS_OK;
@@ -51,16 +44,35 @@ public:
 
   void Go()
   {
-    mSurface =
-      ImageOps::DecodeToSurface(mInputStream,
-                                nsAutoCString(mTestCase.mMimeType),
-                                imgIContainer::DECODE_FLAGS_DEFAULT);
+    Maybe<IntSize> outputSize;
+    if (mTestCase.mOutputSize != mTestCase.mSize) {
+      outputSize.emplace(mTestCase.mOutputSize);
+    }
+
+    if (mImageBuffer) {
+      mSurface =
+        ImageOps::DecodeToSurface(mImageBuffer,
+                                  nsDependentCString(mTestCase.mMimeType),
+                                  imgIContainer::DECODE_FLAGS_DEFAULT,
+                                  outputSize);
+    } else {
+      mSurface =
+        ImageOps::DecodeToSurface(mInputStream.forget(),
+                                  nsDependentCString(mTestCase.mMimeType),
+                                  imgIContainer::DECODE_FLAGS_DEFAULT,
+                                  outputSize);
+    }
     ASSERT_TRUE(mSurface != nullptr);
 
-    EXPECT_EQ(SurfaceType::DATA, mSurface->GetType());
+    EXPECT_TRUE(mSurface->IsDataSourceSurface());
     EXPECT_TRUE(mSurface->GetFormat() == SurfaceFormat::B8G8R8X8 ||
                 mSurface->GetFormat() == SurfaceFormat::B8G8R8A8);
-    EXPECT_EQ(mTestCase.mSize, mSurface->GetSize());
+
+    if (outputSize) {
+      EXPECT_EQ(*outputSize, mSurface->GetSize());
+    } else {
+      EXPECT_EQ(mTestCase.mSize, mSurface->GetSize());
+    }
 
     EXPECT_TRUE(IsSolidColor(mSurface, BGRAColor::Green(),
                              mTestCase.mFlags & TEST_CASE_IS_FUZZY ? 1 : 0));
@@ -69,24 +81,30 @@ public:
 private:
   RefPtr<SourceSurface>& mSurface;
   nsCOMPtr<nsIInputStream> mInputStream;
+  RefPtr<ImageOps::ImageBuffer> mImageBuffer;
   ImageTestCase mTestCase;
 };
 
 static void
-RunDecodeToSurface(const ImageTestCase& aTestCase)
+RunDecodeToSurface(const ImageTestCase& aTestCase,
+                   ImageOps::ImageBuffer* aImageBuffer = nullptr)
 {
-  nsCOMPtr<nsIInputStream> inputStream = LoadFile(aTestCase.mPath);
-  ASSERT_TRUE(inputStream != nullptr);
+  nsCOMPtr<nsIInputStream> inputStream;
+  if (!aImageBuffer) {
+    inputStream = LoadFile(aTestCase.mPath);
+    ASSERT_TRUE(inputStream != nullptr);
+  }
 
   nsCOMPtr<nsIThread> thread;
-  nsresult rv = NS_NewThread(getter_AddRefs(thread), nullptr);
+  nsresult rv =
+    NS_NewNamedThread("DecodeToSurface", getter_AddRefs(thread), nullptr);
   ASSERT_TRUE(NS_SUCCEEDED(rv));
 
   // We run the DecodeToSurface tests off-main-thread to ensure that
   // DecodeToSurface doesn't require any main-thread-only code.
   RefPtr<SourceSurface> surface;
   nsCOMPtr<nsIRunnable> runnable =
-    new DecodeToSurfaceRunnable(surface, inputStream, aTestCase);
+    new DecodeToSurfaceRunnable(surface, inputStream, aImageBuffer, aTestCase);
   thread->Dispatch(runnable, nsIThread::DISPATCH_SYNC);
 
   thread->Shutdown();
@@ -95,24 +113,30 @@ RunDecodeToSurface(const ImageTestCase& aTestCase)
   surface = nullptr;
 }
 
-TEST(ImageDecodeToSurface, PNG) { RunDecodeToSurface(GreenPNGTestCase()); }
-TEST(ImageDecodeToSurface, GIF) { RunDecodeToSurface(GreenGIFTestCase()); }
-TEST(ImageDecodeToSurface, JPG) { RunDecodeToSurface(GreenJPGTestCase()); }
-TEST(ImageDecodeToSurface, BMP) { RunDecodeToSurface(GreenBMPTestCase()); }
-TEST(ImageDecodeToSurface, ICO) { RunDecodeToSurface(GreenICOTestCase()); }
-TEST(ImageDecodeToSurface, Icon) { RunDecodeToSurface(GreenIconTestCase()); }
+class ImageDecodeToSurface : public ::testing::Test
+{
+protected:
+  AutoInitializeImageLib mInit;
+};
 
-TEST(ImageDecodeToSurface, AnimatedGIF)
+TEST_F(ImageDecodeToSurface, PNG) { RunDecodeToSurface(GreenPNGTestCase()); }
+TEST_F(ImageDecodeToSurface, GIF) { RunDecodeToSurface(GreenGIFTestCase()); }
+TEST_F(ImageDecodeToSurface, JPG) { RunDecodeToSurface(GreenJPGTestCase()); }
+TEST_F(ImageDecodeToSurface, BMP) { RunDecodeToSurface(GreenBMPTestCase()); }
+TEST_F(ImageDecodeToSurface, ICO) { RunDecodeToSurface(GreenICOTestCase()); }
+TEST_F(ImageDecodeToSurface, Icon) { RunDecodeToSurface(GreenIconTestCase()); }
+
+TEST_F(ImageDecodeToSurface, AnimatedGIF)
 {
   RunDecodeToSurface(GreenFirstFrameAnimatedGIFTestCase());
 }
 
-TEST(ImageDecodeToSurface, AnimatedPNG)
+TEST_F(ImageDecodeToSurface, AnimatedPNG)
 {
   RunDecodeToSurface(GreenFirstFrameAnimatedPNGTestCase());
 }
 
-TEST(ImageDecodeToSurface, Corrupt)
+TEST_F(ImageDecodeToSurface, Corrupt)
 {
   ImageTestCase testCase = CorruptTestCase();
 
@@ -120,8 +144,48 @@ TEST(ImageDecodeToSurface, Corrupt)
   ASSERT_TRUE(inputStream != nullptr);
 
   RefPtr<SourceSurface> surface =
-    ImageOps::DecodeToSurface(inputStream,
-                              nsAutoCString(testCase.mMimeType),
+    ImageOps::DecodeToSurface(inputStream.forget(),
+                              nsDependentCString(testCase.mMimeType),
                               imgIContainer::DECODE_FLAGS_DEFAULT);
   EXPECT_TRUE(surface == nullptr);
+}
+
+TEST_F(ImageDecodeToSurface, ICOMultipleSizes)
+{
+  ImageTestCase testCase = GreenMultipleSizesICOTestCase();
+
+  nsCOMPtr<nsIInputStream> inputStream = LoadFile(testCase.mPath);
+  ASSERT_TRUE(inputStream != nullptr);
+
+  RefPtr<ImageOps::ImageBuffer> buffer =
+    ImageOps::CreateImageBuffer(inputStream.forget());
+  ASSERT_TRUE(buffer != nullptr);
+
+  ImageMetadata metadata;
+  nsresult rv = ImageOps::DecodeMetadata(buffer,
+                                         nsDependentCString(testCase.mMimeType),
+                                         metadata);
+  EXPECT_TRUE(NS_SUCCEEDED(rv));
+  ASSERT_TRUE(metadata.HasSize());
+  EXPECT_EQ(testCase.mSize, metadata.GetSize());
+
+  const nsTArray<IntSize>& nativeSizes = metadata.GetNativeSizes();
+  ASSERT_EQ(6u, nativeSizes.Length());
+
+  IntSize expectedSizes[] = {
+    IntSize(16, 16),
+    IntSize(32, 32),
+    IntSize(64, 64),
+    IntSize(128, 128),
+    IntSize(256, 256),
+    IntSize(256, 128),
+  };
+
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(expectedSizes[i], nativeSizes[i]);
+
+    // Request decoding at native size
+    testCase.mOutputSize = nativeSizes[i];
+    RunDecodeToSurface(testCase, buffer);
+  }
 }

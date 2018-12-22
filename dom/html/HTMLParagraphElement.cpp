@@ -7,9 +7,9 @@
 #include "mozilla/dom/HTMLParagraphElement.h"
 #include "mozilla/dom/HTMLParagraphElementBinding.h"
 
+#include "mozilla/MappedDeclarations.h"
 #include "nsStyleConsts.h"
 #include "nsMappedAttributes.h"
-#include "nsRuleData.h"
 
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Paragraph)
@@ -21,17 +21,13 @@ HTMLParagraphElement::~HTMLParagraphElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLParagraphElement, nsGenericHTMLElement,
-                            nsIDOMHTMLParagraphElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLParagraphElement)
-
-NS_IMPL_STRING_ATTR(HTMLParagraphElement, Align, align)
 
 bool
 HTMLParagraphElement::ParseAttribute(int32_t aNamespaceID,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      const nsAString& aValue,
+                                     nsIPrincipal* aMaybeScriptedPrincipal,
                                      nsAttrValue& aResult)
 {
   if (aAttribute == nsGkAtoms::align && aNamespaceID == kNameSpaceID_None) {
@@ -39,19 +35,19 @@ HTMLParagraphElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLParagraphElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                            nsRuleData* aData)
+                                            MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLParagraphElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLParagraphElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry* const map[] = {
     sDivAlignAttributeMap,
@@ -71,7 +67,7 @@ HTMLParagraphElement::GetAttributeMappingFunction() const
 JSObject*
 HTMLParagraphElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLParagraphElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLParagraphElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

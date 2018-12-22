@@ -18,18 +18,22 @@ namespace mozilla { namespace net {
 class ASpdySession : public nsAHttpTransaction
 {
 public:
-  ASpdySession();
-  virtual ~ASpdySession();
+  ASpdySession() = default;
+  virtual ~ASpdySession() = default;
 
-  virtual bool AddStream(nsAHttpTransaction *, int32_t,
-                         bool, nsIInterfaceRequestor *) = 0;
+  virtual MOZ_MUST_USE bool
+  AddStream(nsAHttpTransaction *, int32_t, bool, nsIInterfaceRequestor *) = 0;
   virtual bool CanReuse() = 0;
   virtual bool RoomForMoreStreams() = 0;
   virtual PRIntervalTime IdleTime() = 0;
   virtual uint32_t ReadTimeoutTick(PRIntervalTime now) = 0;
   virtual void DontReuse() = 0;
+  virtual enum SpdyVersion SpdyVersion() = 0;
 
-  static ASpdySession *NewSpdySession(uint32_t version, nsISocketTransport *);
+  static ASpdySession *NewSpdySession(net::SpdyVersion version, nsISocketTransport *, bool);
+
+  virtual bool TestJoinConnection(const nsACString &hostname, int32_t port) = 0;
+  virtual bool JoinConnection(const nsACString &hostname, int32_t port) = 0;
 
   // MaybeReTunnel() is called by the connection manager when it cannot
   // dispatch a tunneled transaction. That might be because the tunnels it
@@ -42,7 +46,7 @@ public:
 
   virtual void PrintDiagnostics (nsCString &log) = 0;
 
-  bool ResponseTimeoutEnabled() const override final {
+  bool ResponseTimeoutEnabled() const final {
     return true;
   }
 
@@ -93,25 +97,24 @@ class SpdyInformation
 {
 public:
   SpdyInformation();
-  ~SpdyInformation() {}
+  ~SpdyInformation() = default;
 
-  static const uint32_t kCount = 2;
+  static const uint32_t kCount = 1;
 
   // determine the index (0..kCount-1) of the spdy information that
   // correlates to the npn string. NS_FAILED() if no match is found.
-  nsresult GetNPNIndex(const nsACString &npnString, uint32_t *result) const;
+  MOZ_MUST_USE nsresult GetNPNIndex(const nsACString &npnString, uint32_t *result) const;
 
   // determine if a version of the protocol is enabled for index < kCount
   bool ProtocolEnabled(uint32_t index) const;
 
-  uint8_t   Version[kCount]; // telemetry enum e.g. SPDY_VERSION_31
+  SpdyVersion Version[kCount]; // telemetry enum e.g. SPDY_VERSION_31
   nsCString VersionString[kCount]; // npn string e.g. "spdy/3.1"
 
   // the ALPNCallback function allows the protocol stack to decide whether or
   // not to offer a particular protocol based on the known TLS information
   // that we will offer in the client hello (such as version). There has
   // not been a Server Hello received yet, so not much else can be considered.
-  // Stacks without restrictions can just use SpdySessionTrue()
   ALPNCallback ALPNCallbacks[kCount];
 };
 

@@ -4,8 +4,7 @@
 
 #include "nsBase64Encoder.h"
 
-#include "plbase64.h"
-#include "prmem.h"
+#include "mozilla/Base64.h"
 
 NS_IMPL_ISUPPORTS(nsBase64Encoder, nsIOutputStream)
 
@@ -53,14 +52,13 @@ nsBase64Encoder::IsNonBlocking(bool* aNonBlocking)
 }
 
 nsresult
-nsBase64Encoder::Finish(nsCSubstring& result)
+nsBase64Encoder::Finish(nsACString& result)
 {
-  char* b64 = PL_Base64Encode(mData.get(), mData.Length(), nullptr);
-  if (!b64)
-    return NS_ERROR_OUT_OF_MEMORY;
+  nsresult rv = mozilla::Base64Encode(mData, result);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
-  result.Assign(b64);
-  PR_Free(b64);
   // Free unneeded memory and allow reusing the object
   mData.Truncate();
   return NS_OK;

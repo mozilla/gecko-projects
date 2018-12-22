@@ -9,6 +9,8 @@
 #include "nsIArrayBufferInputStream.h"
 #include "js/Value.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
+#include "nsISupportsImpl.h"
 
 #define NS_ARRAYBUFFERINPUTSTREAM_CONTRACTID "@mozilla.org/io/arraybuffer-input-stream;1"
 #define NS_ARRAYBUFFERINPUTSTREAM_CID                \
@@ -22,16 +24,16 @@
 class ArrayBufferInputStream : public nsIArrayBufferInputStream {
 public:
   ArrayBufferInputStream();
-  NS_DECL_ISUPPORTS
+
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIARRAYBUFFERINPUTSTREAM
   NS_DECL_NSIINPUTSTREAM
 
 private:
-  virtual ~ArrayBufferInputStream() {}
-  mozilla::Maybe<JS::PersistentRooted<JSObject*> > mArrayBuffer;
-  uint32_t mBufferLength; // length of slice
-  uint32_t mOffset; // permanent offset from start of actual buffer
-  uint32_t mPos; // offset from start of slice
+  virtual ~ArrayBufferInputStream() = default;
+  mozilla::UniquePtr<char[]> mArrayBuffer;
+  uint32_t mBufferLength;
+  uint32_t mPos;
   bool mClosed;
 };
 

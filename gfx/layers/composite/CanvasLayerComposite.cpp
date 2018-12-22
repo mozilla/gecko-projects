@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,7 +18,6 @@
 #include "mozilla/RefPtr.h"                   // for nsRefPtr
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsString.h"                   // for nsAutoCString
-#include "gfxVR.h"
 
 namespace mozilla {
 namespace layers {
@@ -60,26 +60,18 @@ CanvasLayerComposite::GetLayer()
 }
 
 void
-CanvasLayerComposite::SetLayerManager(LayerManagerComposite* aManager)
+CanvasLayerComposite::SetLayerManager(HostLayerManager* aManager)
 {
   LayerComposite::SetLayerManager(aManager);
   mManager = aManager;
   if (mCompositableHost && mCompositor) {
-    mCompositableHost->SetCompositor(mCompositor);
+    mCompositableHost->SetTextureSourceProvider(mCompositor);
   }
-}
-
-LayerRenderState
-CanvasLayerComposite::GetRenderState()
-{
-  if (mDestroyed || !mCompositableHost || !mCompositableHost->IsAttached()) {
-    return LayerRenderState();
-  }
-  return mCompositableHost->GetRenderState();
 }
 
 void
-CanvasLayerComposite::RenderLayer(const IntRect& aClipRect)
+CanvasLayerComposite::RenderLayer(const IntRect& aClipRect,
+                                  const Maybe<gfx::Polygon>& aGeometry)
 {
   if (!mCompositableHost || !mCompositableHost->IsAttached()) {
     return;
@@ -90,16 +82,18 @@ CanvasLayerComposite::RenderLayer(const IntRect& aClipRect)
 #ifdef MOZ_DUMP_PAINTING
   if (gfxEnv::DumpCompositorTextures()) {
     RefPtr<gfx::DataSourceSurface> surf = mCompositableHost->GetAsSurface();
-    WriteSnapshotToDumpFile(this, surf);
+    if (surf) {
+      WriteSnapshotToDumpFile(this, surf);
+    }
   }
 #endif
 
   RenderWithAllMasks(this, mCompositor, aClipRect,
-                     [&](EffectChain& effectChain, const Rect& clipRect) {
-    mCompositableHost->Composite(this, effectChain,
+                     [&](EffectChain& effectChain, const IntRect& clipRect) {
+    mCompositableHost->Composite(mCompositor, this, effectChain,
                           GetEffectiveOpacity(),
                           GetEffectiveTransform(),
-                          GetEffectFilter(),
+                          GetSamplingFilter(),
                           clipRect);
   });
 
@@ -125,10 +119,10 @@ CanvasLayerComposite::CleanupResources()
   mCompositableHost = nullptr;
 }
 
-gfx::Filter
-CanvasLayerComposite::GetEffectFilter()
+gfx::SamplingFilter
+CanvasLayerComposite::GetSamplingFilter()
 {
-  gfx::Filter filter = mFilter;
+  gfx::SamplingFilter filter = mSamplingFilter;
 #ifdef ANDROID
   // Bug 691354
   // Using the LINEAR filter we get unexplained artifacts.
@@ -136,7 +130,7 @@ CanvasLayerComposite::GetEffectFilter()
   Matrix matrix;
   bool is2D = GetEffectiveTransform().Is2D(&matrix);
   if (is2D && !ThebesMatrix(matrix).HasNonTranslationOrFlip()) {
-    filter = Filter::POINT;
+    filter = SamplingFilter::POINT;
   }
 #endif
   return filter;
@@ -146,7 +140,7 @@ void
 CanvasLayerComposite::GenEffectChain(EffectChain& aEffect)
 {
   aEffect.mLayerRef = this;
-  aEffect.mPrimaryEffect = mCompositableHost->GenEffect(GetEffectFilter());
+  aEffect.mPrimaryEffect = mCompositableHost->GenEffect(GetSamplingFilter());
 }
 
 void

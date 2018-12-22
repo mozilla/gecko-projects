@@ -3,43 +3,40 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-var { 'classes': Cc, 'interfaces': Ci, 'utils': Cu } = Components;
+// Tests using testGenerator are expected to define it themselves.
+/* global testGenerator */
+
+var { "classes": Cc, "interfaces": Ci, "utils": Cu } = Components;
+
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+Cu.importGlobalProperties(["Blob"]);
 
 if (!("self" in this)) {
   this.self = this;
 }
 
-const DOMException = Ci.nsIDOMDOMException;
-
 var bufferCache = [];
 
 function is(a, b, msg) {
-  do_check_eq(a, b, Components.stack.caller);
+  Assert.equal(a, b, msg);
 }
 
 function ok(cond, msg) {
-  do_check_true(!!cond, Components.stack.caller);
+  Assert.ok(!!cond, msg);
 }
 
 function isnot(a, b, msg) {
-  do_check_neq(a, b, Components.stack.caller);
-}
-
-function executeSoon(fun) {
-  do_execute_soon(fun);
+  Assert.notEqual(a, b, msg);
 }
 
 function todo(condition, name, diag) {
-  todo_check_true(condition, Components.stack.caller);
-}
-
-function info(name, message) {
-  do_print(name);
+  todo_check_true(condition);
 }
 
 function run_test() {
   runTest();
-};
+}
 
 if (!this.runTest) {
   this.runTest = function()
@@ -56,7 +53,7 @@ if (!this.runTest) {
 
     do_test_pending();
     testGenerator.next();
-  }
+  };
 }
 
 function finishTest()
@@ -71,20 +68,19 @@ function finishTest()
 
   SpecialPowers.removeFiles();
 
-  do_execute_soon(function(){
-    testGenerator.close();
+  executeSoon(function() {
     do_test_finished();
-  })
+  });
 }
 
 function grabEventAndContinueHandler(event)
 {
-  testGenerator.send(event);
+  testGenerator.next(event);
 }
 
 function continueToNextStep()
 {
-  do_execute_soon(function() {
+  executeSoon(function() {
     testGenerator.next();
   });
 }
@@ -93,39 +89,48 @@ function errorHandler(event)
 {
   try {
     dump("indexedDB error: " + event.target.error.name);
-  } catch(e) {
+  } catch (e) {
     dump("indexedDB error: " + e);
   }
-  do_check_true(false);
+  Assert.ok(false);
   finishTest();
 }
 
 function unexpectedSuccessHandler()
 {
-  do_check_true(false);
+  Assert.ok(false);
   finishTest();
 }
 
 function expectedErrorHandler(name)
 {
   return function(event) {
-    do_check_eq(event.type, "error");
-    do_check_eq(event.target.error.name, name);
+    Assert.equal(event.type, "error");
+    Assert.equal(event.target.error.name, name);
     event.preventDefault();
     grabEventAndContinueHandler(event);
   };
 }
 
-function ExpectError(name)
+function expectUncaughtException(expecting)
+{
+  // This is dummy for xpcshell test.
+}
+
+function ExpectError(name, preventDefault)
 {
   this._name = name;
+  this._preventDefault = preventDefault;
 }
 ExpectError.prototype = {
-  handleEvent: function(event)
+  handleEvent(event)
   {
-    do_check_eq(event.type, "error");
-    do_check_eq(this._name, event.target.error.name);
-    event.preventDefault();
+    Assert.equal(event.type, "error");
+    Assert.equal(this._name, event.target.error.name);
+    if (this._preventDefault) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     grabEventAndContinueHandler(event);
   }
 };
@@ -212,19 +217,19 @@ function gc()
 
 function scheduleGC()
 {
-  SpecialPowers.exactGC(null, continueToNextStep);
+  SpecialPowers.exactGC(continueToNextStep);
 }
 
 function setTimeout(fun, timeout) {
-  let timer = Components.classes["@mozilla.org/timer;1"]
-                        .createInstance(Components.interfaces.nsITimer);
+  let timer = Cc["@mozilla.org/timer;1"]
+                .createInstance(Ci.nsITimer);
   var event = {
-    notify: function (timer) {
+    notify(timer) {
       fun();
     }
   };
   timer.initWithCallback(event, timeout,
-                         Components.interfaces.nsITimer.TYPE_ONE_SHOT);
+                         Ci.nsITimer.TYPE_ONE_SHOT);
   return timer;
 }
 
@@ -233,13 +238,10 @@ function resetOrClearAllDatabases(callback, clear) {
     throw new Error("clearAllDatabases not implemented for child processes!");
   }
 
-  let quotaManagerService = Cc["@mozilla.org/dom/quota-manager-service;1"]
-                              .getService(Ci.nsIQuotaManagerService);
-
   const quotaPref = "dom.quotaManager.testing";
 
   let oldPrefValue;
-  if (SpecialPowers._getPrefs().prefHasUserValue(quotaPref)) {
+  if (Services.prefs.prefHasUserValue(quotaPref)) {
     oldPrefValue = SpecialPowers.getBoolPref(quotaPref);
   }
 
@@ -249,11 +251,11 @@ function resetOrClearAllDatabases(callback, clear) {
 
   try {
     if (clear) {
-      request = quotaManagerService.clear();
+      request = Services.qms.clear();
     } else {
-      request = quotaManagerService.reset();
+      request = Services.qms.reset();
     }
-  } catch(e) {
+  } catch (e) {
     if (oldPrefValue !== undefined) {
       SpecialPowers.setBoolPref(quotaPref, oldPrefValue);
     } else {
@@ -275,12 +277,9 @@ function clearAllDatabases(callback) {
 
 function installPackagedProfile(packageName)
 {
-  let directoryService = Cc["@mozilla.org/file/directory_service;1"]
-                         .getService(Ci.nsIProperties);
+  let profileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
 
-  let profileDir = directoryService.get("ProfD", Ci.nsIFile);
-
-  let currentDir = directoryService.get("CurWorkD", Ci.nsIFile);
+  let currentDir = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
 
   let packageFile = currentDir.clone();
   packageFile.append(packageName + ".zip");
@@ -304,7 +303,7 @@ function installPackagedProfile(packageName)
 
     let file = profileDir.clone();
     let split = entryName.split("/");
-    for(let i = 0; i < split.length; i++) {
+    for (let i = 0; i < split.length; i++) {
       file.append(split[i]);
     }
 
@@ -317,7 +316,7 @@ function installPackagedProfile(packageName)
                     .createInstance(Ci.nsIFileOutputStream);
       ostream.init(file, -1, parseInt("0644", 8), 0);
 
-      let bostream = Cc['@mozilla.org/network/buffered-output-stream;1']
+      let bostream = Cc["@mozilla.org/network/buffered-output-stream;1"]
                      .createInstance(Ci.nsIBufferedOutputStream);
       bostream.init(ostream, 32768);
 
@@ -329,6 +328,27 @@ function installPackagedProfile(packageName)
   }
 
   zipReader.close();
+}
+
+function getChromeFilesDir()
+{
+  let profileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
+
+  let idbDir = profileDir.clone();
+  idbDir.append("storage");
+  idbDir.append("permanent");
+  idbDir.append("chrome");
+  idbDir.append("idb");
+
+  let idbEntries = idbDir.directoryEntries;
+  while (idbEntries.hasMoreElements()) {
+    let file = idbEntries.nextFile;
+    if (file.isDirectory()) {
+      return file;
+    }
+  }
+
+  throw new Error("files directory doesn't exist!");
 }
 
 function getView(size)
@@ -343,7 +363,7 @@ function getRandomView(size)
 {
   let view = getView(size);
   for (let i = 0; i < size; i++) {
-    view[i] = parseInt(Math.random() * 255)
+    view[i] = parseInt(Math.random() * 255);
   }
   return view;
 }
@@ -355,7 +375,34 @@ function getBlob(str)
 
 function getFile(name, type, str)
 {
-  return new File([str], name, {type: type});
+  return new File([str], name, {type});
+}
+
+function isWasmSupported()
+{
+  let testingFunctions = Cu.getJSTestingFunctions();
+  return testingFunctions.wasmIsSupported();
+}
+
+function getWasmBinarySync(text)
+{
+  let testingFunctions = Cu.getJSTestingFunctions();
+  let binary = testingFunctions.wasmTextToBinary(text);
+  return binary;
+}
+
+function getWasmBinary(text)
+{
+  let binary = getWasmBinarySync(text);
+  executeSoon(function() {
+    testGenerator.next(binary);
+  });
+}
+
+function getWasmModule(binary)
+{
+  let module = new WebAssembly.Module(binary);
+  return module;
 }
 
 function compareBuffers(buffer1, buffer2)
@@ -363,8 +410,9 @@ function compareBuffers(buffer1, buffer2)
   if (buffer1.byteLength != buffer2.byteLength) {
     return false;
   }
-  let view1 = new Uint8Array(buffer1);
-  let view2 = new Uint8Array(buffer2);
+
+  let view1 = buffer1 instanceof Uint8Array ? buffer1 : new Uint8Array(buffer1);
+  let view2 = buffer2 instanceof Uint8Array ? buffer2 : new Uint8Array(buffer2);
   for (let i = 0; i < buffer1.byteLength; i++) {
     if (view1[i] != view2[i]) {
       return false;
@@ -375,12 +423,12 @@ function compareBuffers(buffer1, buffer2)
 
 function verifyBuffers(buffer1, buffer2)
 {
-  ok(compareBuffers(buffer1, buffer2), "Correct blob data");
+  ok(compareBuffers(buffer1, buffer2), "Correct buffer data");
 }
 
 function verifyBlob(blob1, blob2)
 {
-  is(blob1 instanceof Components.interfaces.nsIDOMBlob, true,
+  is(Blob.isInstance(blob1), true,
      "Instance of nsIDOMBlob");
   is(blob1 instanceof File, blob2 instanceof File,
      "Instance of DOM File");
@@ -410,7 +458,7 @@ function verifyBlob(blob1, blob2)
         verifyBuffers(buffer1, buffer2);
         testGenerator.next();
       }
-    }
+    };
   }
 
   let reader = new FileReader();
@@ -421,7 +469,7 @@ function verifyBlob(blob1, blob2)
       verifyBuffers(buffer1, buffer2);
       testGenerator.next();
     }
-  }
+  };
 }
 
 function verifyMutableFile(mutableFile1, file2)
@@ -430,9 +478,37 @@ function verifyMutableFile(mutableFile1, file2)
      "Instance of IDBMutableFile");
   is(mutableFile1.name, file2.name, "Correct name");
   is(mutableFile1.type, file2.type, "Correct type");
-  executeSoon(function() {
-    testGenerator.next();
-  });
+  continueToNextStep();
+}
+
+function verifyView(view1, view2)
+{
+  is(view1.byteLength, view2.byteLength, "Correct byteLength");
+  verifyBuffers(view1, view2);
+  continueToNextStep();
+}
+
+function verifyWasmModule(module1, module2)
+{
+  // We assume the given modules have no imports and export a single function
+  // named 'run'.
+  var instance1 = new WebAssembly.Instance(module1);
+  var instance2 = new WebAssembly.Instance(module2);
+  is(instance1.exports.run(), instance2.exports.run(), "same run() result");
+
+  continueToNextStep();
+}
+
+function grabFileUsageAndContinueHandler(request)
+{
+  testGenerator.next(request.result.fileUsage);
+}
+
+function getCurrentUsage(usageHandler)
+{
+  let principal = Cc["@mozilla.org/systemprincipal;1"]
+                    .createInstance(Ci.nsIPrincipal);
+  Services.qms.getUsageForPrincipal(principal, usageHandler);
 }
 
 function setTemporaryStorageLimit(limit)
@@ -447,52 +523,56 @@ function setTemporaryStorageLimit(limit)
   }
 }
 
+function setDataThreshold(threshold)
+{
+  info("Setting data threshold to " + threshold);
+  SpecialPowers.setIntPref("dom.indexedDB.dataThreshold", threshold);
+}
+
+function setMaxSerializedMsgSize(aSize)
+{
+  info("Setting maximal size of a serialized message to " + aSize);
+  SpecialPowers.setIntPref("dom.indexedDB.maxSerializedMsgSize", aSize);
+}
+
 function getPrincipal(url)
 {
-  let uri = Cc["@mozilla.org/network/io-service;1"]
-              .getService(Ci.nsIIOService)
-              .newURI(url, null, null);
-  let ssm = Cc["@mozilla.org/scriptsecuritymanager;1"]
-              .getService(Ci.nsIScriptSecurityManager);
-  return ssm.createCodebasePrincipal(uri, {});
+  let uri = Services.io.newURI(url);
+  return Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
 }
 
 var SpecialPowers = {
-  isMainProcess: function() {
-    return Components.classes["@mozilla.org/xre/app-info;1"]
-                     .getService(Components.interfaces.nsIXULRuntime)
-                     .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+  isMainProcess() {
+    return Services.appinfo.processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
   },
-  notifyObservers: function(subject, topic, data) {
-    var obsvc = Cc['@mozilla.org/observer-service;1']
-                   .getService(Ci.nsIObserverService);
-    obsvc.notifyObservers(subject, topic, data);
+  notifyObservers(subject, topic, data) {
+    Services.obs.notifyObservers(subject, topic, data);
   },
-  notifyObserversInParentProcess: function(subject, topic, data) {
+  notifyObserversInParentProcess(subject, topic, data) {
     if (subject) {
       throw new Error("Can't send subject to another process!");
     }
     return this.notifyObservers(subject, topic, data);
   },
-  getBoolPref: function(prefName) {
-    return this._getPrefs().getBoolPref(prefName);
+  getBoolPref(prefName) {
+    return Services.prefs.getBoolPref(prefName);
   },
-  setBoolPref: function(prefName, value) {
-    this._getPrefs().setBoolPref(prefName, value);
+  setBoolPref(prefName, value) {
+    Services.prefs.setBoolPref(prefName, value);
   },
-  setIntPref: function(prefName, value) {
-    this._getPrefs().setIntPref(prefName, value);
+  setIntPref(prefName, value) {
+    Services.prefs.setIntPref(prefName, value);
   },
-  clearUserPref: function(prefName) {
-    this._getPrefs().clearUserPref(prefName);
+  clearUserPref(prefName) {
+    Services.prefs.clearUserPref(prefName);
   },
   // Copied (and slightly adjusted) from specialpowersAPI.js
-  exactGC: function(win, callback) {
+  exactGC(callback) {
     let count = 0;
 
     function doPreciseGCandCC() {
       function scheduledGCCallback() {
-        Components.utils.forceCC();
+        Cu.forceCC();
 
         if (++count < 2) {
           doPreciseGCandCC();
@@ -501,16 +581,10 @@ var SpecialPowers = {
         }
       }
 
-      Components.utils.schedulePreciseGC(scheduledGCCallback);
+      Cu.schedulePreciseGC(scheduledGCCallback);
     }
 
     doPreciseGCandCC();
-  },
-
-  _getPrefs: function() {
-    var prefService =
-      Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefService);
-    return prefService.getBranch(null);
   },
 
   get Cc() {
@@ -526,40 +600,44 @@ var SpecialPowers = {
   },
 
   // Based on SpecialPowersObserver.prototype.receiveMessage
-  createFiles: function(requests, callback) {
-    let dirSvc = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
-    let filePaths = new Array;
+  createFiles(requests, callback) {
+    let filePaths = [];
     if (!this._createdFiles) {
-      this._createdFiles = new Array;
+      this._createdFiles = [];
     }
     let createdFiles = this._createdFiles;
+    let promises = [];
     requests.forEach(function(request) {
       const filePerms = 0o666;
-      let testFile = dirSvc.get("ProfD", Ci.nsIFile);
+      let testFile = Services.dirsvc.get("ProfD", Ci.nsIFile);
       if (request.name) {
         testFile.append(request.name);
       } else {
         testFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, filePerms);
       }
-        let outStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
-        outStream.init(testFile, 0x02 | 0x08 | 0x20, // PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
-                       filePerms, 0);
-        if (request.data) {
-          outStream.write(request.data, request.data.length);
-          outStream.close();
-        }
-        filePaths.push(new File(testFile.path, request.options));
-        createdFiles.push(testFile);
+      let outStream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
+      outStream.init(testFile, 0x02 | 0x08 | 0x20, // PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
+                     filePerms, 0);
+      if (request.data) {
+        outStream.write(request.data, request.data.length);
+        outStream.close();
+      }
+      promises.push(File.createFromFileName(testFile.path, request.options).then(function(file) {
+        filePaths.push(file);
+      }));
+      createdFiles.push(testFile);
     });
 
-    setTimeout(function () {
-      callback(filePaths);
-    }, 0);
+    Promise.all(promises).then(function() {
+      setTimeout(function() {
+        callback(filePaths);
+      }, 0);
+    });
   },
 
-  removeFiles: function() {
+  removeFiles() {
     if (this._createdFiles) {
-      this._createdFiles.forEach(function (testFile) {
+      this._createdFiles.forEach(function(testFile) {
         try {
           testFile.remove(false);
         } catch (e) {}
@@ -568,3 +646,7 @@ var SpecialPowers = {
     }
   },
 };
+
+// This can be removed soon when on by default.
+if (SpecialPowers.isMainProcess())
+  SpecialPowers.setBoolPref("javascript.options.wasm_baselinejit", true);

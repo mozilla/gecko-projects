@@ -10,6 +10,7 @@
 #include "nsComponentManagerUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIMutableArray.h"
+#include "nsXULAppAPI.h"
 #include "prlink.h"
 
 #include <gconf/gconf-client.h>
@@ -76,16 +77,20 @@ nsGConfService::Init()
   };
 #undef FUNC
 
+  if (NS_WARN_IF(XRE_IsContentProcess())) {
+    return NS_ERROR_SERVICE_NOT_AVAILABLE;
+  }
+
   if (!gconfLib) {
     gconfLib = PR_LoadLibrary("libgconf-2.so.4");
     if (!gconfLib)
       return NS_ERROR_FAILURE;
   }
 
-  for (uint32_t i = 0; i < ArrayLength(kGConfSymbols); i++) {
-    *kGConfSymbols[i].function =
-      PR_FindFunctionSymbol(gconfLib, kGConfSymbols[i].functionName);
-    if (!*kGConfSymbols[i].function) {
+  for (auto GConfSymbol : kGConfSymbols) {
+    *GConfSymbol.function =
+      PR_FindFunctionSymbol(gconfLib, GConfSymbol.functionName);
+    if (!*GConfSymbol.function) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -169,7 +174,7 @@ nsGConfService::GetStringList(const nsACString &aKey, nsIArray** aResult)
   nsCOMPtr<nsIMutableArray> items(do_CreateInstance(NS_ARRAY_CONTRACTID));
   if (!items)
     return NS_ERROR_OUT_OF_MEMORY;
-    
+
   GError* error = nullptr;
   GSList* list = gconf_client_get_list(mClient, PromiseFlatCString(aKey).get(),
                                        GCONF_VALUE_STRING, &error);
@@ -185,10 +190,10 @@ nsGConfService::GetStringList(const nsACString &aKey, nsIArray** aResult)
       return NS_ERROR_OUT_OF_MEMORY;
     }
     obj->SetData(NS_ConvertUTF8toUTF16((const char*)l->data));
-    items->AppendElement(obj, false);
+    items->AppendElement(obj);
     g_free(l->data);
   }
-  
+
   g_slist_free(list);
   items.forget(aResult);
   return NS_OK;
@@ -242,7 +247,7 @@ nsGConfService::GetAppForProtocol(const nsACString &aScheme, bool *aEnabled,
   GError *err = nullptr;
   gchar *command = gconf_client_get_string(mClient, key.get(), &err);
   if (!err && command) {
-    key.Replace(key.Length() - 7, 7, NS_LITERAL_CSTRING("enabled"));
+    key.ReplaceLiteral(key.Length() - 7, 7, "enabled");
     *aEnabled = gconf_client_get_bool(mClient, key.get(), &err);
   } else {
     *aEnabled = false;
@@ -289,13 +294,13 @@ nsGConfService::SetAppForProtocol(const nsACString &aScheme,
                                        PromiseFlatCString(aCommand).get(),
                                        nullptr);
   if (res) {
-    key.Replace(key.Length() - 7, 7, NS_LITERAL_CSTRING("enabled"));
+    key.ReplaceLiteral(key.Length() - 7, 7, "enabled");
     res = gconf_client_set_bool(mClient, key.get(), true, nullptr);
     if (res) {
-      key.Replace(key.Length() - 7, 7, NS_LITERAL_CSTRING("needs_terminal"));
+      key.ReplaceLiteral(key.Length() - 7, 7, "needs_terminal");
       res = gconf_client_set_bool(mClient, key.get(), false, nullptr);
       if (res) {
-        key.Replace(key.Length() - 14, 14, NS_LITERAL_CSTRING("command-id"));
+        key.ReplaceLiteral(key.Length() - 14, 14, "command-id");
         res = gconf_client_unset(mClient, key.get(), nullptr);
       }
     }

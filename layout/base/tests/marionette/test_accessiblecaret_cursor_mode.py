@@ -5,12 +5,13 @@
 
 import string
 
-from marionette.marionette_test import (
-    MarionetteTestCase, parameterized
-)
 from marionette_driver.by import By
 from marionette_driver.marionette import Actions
 from marionette_driver.selection import SelectionManager
+from marionette_harness.marionette_test import (
+    MarionetteTestCase,
+    parameterized,
+)
 
 
 class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
@@ -28,16 +29,16 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
     _contenteditable_id = 'contenteditable'
 
     # Test html files.
-    _cursor_html = 'test_carets_cursor.html'
+    _cursor_html = 'layout/test_carets_cursor.html'
 
     def setUp(self):
         # Code to execute before every test is running.
         super(AccessibleCaretCursorModeTestCase, self).setUp()
         self.caret_tested_pref = 'layout.accessiblecaret.enabled'
-        self.caret_timeout_ms_pref = 'layout.accessiblecaret.timeout_ms'
+        self.hide_carets_for_mouse = 'layout.accessiblecaret.hide_carets_for_mouse_input'
         self.prefs = {
             self.caret_tested_pref: True,
-            self.caret_timeout_ms_pref: 0,
+            self.hide_carets_for_mouse: False,
         }
         self.marionette.set_prefs(self.prefs)
         self.actions = Actions(self.marionette)
@@ -91,7 +92,7 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
 
         # Move first caret to the bottom-right corner of the element.
         src_x, src_y = sel.first_caret_location()
-        dest_x, dest_y = el.size['width'], el.size['height']
+        dest_x, dest_y = el.rect['width'], el.rect['height']
         self.actions.flick(el, src_x, src_y, dest_x, dest_y).perform()
 
         self.actions.key_down(content_to_add).key_up(content_to_add).perform()
@@ -127,46 +128,12 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
         self.actions.key_down(content_to_add).key_up(content_to_add).perform()
         self.assertEqual(target_content, sel.content)
 
-    @parameterized(_input_id, el_id=_input_id)
-    @parameterized(_textarea_id, el_id=_textarea_id)
-    @parameterized(_contenteditable_id, el_id=_contenteditable_id)
-    def test_dragging_caret_to_top_left_corner_after_timeout(self, el_id):
-        self.open_test_html(self._cursor_html)
-        el = self.marionette.find_element(By.ID, el_id)
-        sel = SelectionManager(el)
-        content_to_add = '!'
-        non_target_content = content_to_add + sel.content
-
-        # Set caret timeout to be 1 second.
-        timeout = 1
-        self.marionette.set_pref(self.caret_timeout_ms_pref, timeout * 1000)
-
-        # Set a 3x timeout margin to prevent intermittent test failures.
-        timeout *= 3
-
-        # Tap to make first caret appear. Note: it's strange that when the caret
-        # is at the end, the rect of the caret in <textarea> cannot be obtained.
-        # A bug perhaps.
-        el.tap()
-        sel.move_cursor_to_end()
-        sel.move_cursor_by_offset(1, backward=True)
-        el.tap(*sel.cursor_location())
-
-        # Wait until first caret disappears, then pretend to move it to the
-        # top-left corner of the input box.
-        src_x, src_y = sel.first_caret_location()
-        dest_x, dest_y = 0, 0
-        self.actions.wait(timeout).flick(el, src_x, src_y, dest_x, dest_y).perform()
-
-        self.actions.key_down(content_to_add).key_up(content_to_add).perform()
-        self.assertNotEqual(non_target_content, sel.content)
-
     def test_caret_not_appear_when_typing_in_scrollable_content(self):
         self.open_test_html(self._cursor_html)
         el = self.marionette.find_element(By.ID, self._input_id)
         sel = SelectionManager(el)
         content_to_add = '!'
-        target_content = sel.content + string.ascii_letters + content_to_add
+        non_target_content = content_to_add + sel.content + string.ascii_letters
 
         el.tap()
         sel.move_cursor_to_end()
@@ -182,10 +149,10 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
         dest_x, dest_y = 0, 0
         self.actions.flick(el, src_x, src_y, dest_x, dest_y).perform()
 
-        # The content should be inserted at the end of the <input>.
+        # The content should not be inserted at the front of the <input>.
         el.send_keys(content_to_add)
 
-        self.assertEqual(target_content, sel.content)
+        self.assertNotEqual(non_target_content, sel.content)
 
     @parameterized(_input_id, el_id=_input_id)
     @parameterized(_input_padding_id, el_id=_input_padding_id)
@@ -235,7 +202,7 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
         self.assertNotEqual(non_target_content, sel.content)
 
     def test_drag_caret_from_front_to_end_across_columns(self):
-        self.open_test_html('test_carets_columns.html')
+        self.open_test_html('layout/test_carets_columns.html')
         el = self.marionette.find_element(By.ID, 'columns-inner')
         sel = SelectionManager(el)
         content_to_add = '!'
@@ -252,7 +219,7 @@ class AccessibleCaretCursorModeTestCase(MarionetteTestCase):
         sel.move_cursor_to_front()
         el.tap(*sel.cursor_location())
         src_x, src_y = sel.first_caret_location()
-        dest_x, dest_y = el.size['width'], el.size['height']
+        dest_x, dest_y = el.rect['width'], el.rect['height']
 
         # Drag the first caret to the bottom-right corner of the element.
         self.actions.flick(el, src_x, src_y, dest_x, dest_y).perform()

@@ -13,6 +13,10 @@ final class UnusedResourcesUtil {
             R.dimen.wrap_content,
     };
 
+    public static final int[] USED_IN_BRANDING = {
+            R.drawable.large_icon
+    };
+
     public static final int[] USED_IN_COLOR_PALETTE = {
             R.color.private_browsing_purple, // This will be used eventually, then this item removed.
     };
@@ -40,22 +44,20 @@ final class UnusedResourcesUtil {
             R.drawable.casting_active,
             R.drawable.close,
             R.drawable.homepage_banner_firstrun,
+            R.drawable.ic_readermode,
+            R.drawable.ic_readermode_on,
             R.drawable.icon_openinapp,
             R.drawable.pause,
             R.drawable.phone,
             R.drawable.play,
-            R.drawable.reader,
-            R.drawable.reader_active,
             R.drawable.sync_promo,
             R.drawable.undo_button_icon,
     };
 
     public static final int[] USED_IN_MANIFEST = {
-            R.drawable.search_launcher,
             R.string.crash_reporter_title,
             R.xml.fxaccount_authenticator,
             R.xml.fxaccount_syncadapter,
-            R.xml.search_widget_info,
             R.xml.searchable,
     };
 
@@ -87,5 +89,20 @@ final class UnusedResourcesUtil {
             R.xml.preferences_home,
             R.xml.preferences_privacy,
             R.xml.preferences_privacy_clear_tablet,
+            R.xml.preferences_default_browser_tablet
+    };
+
+    // String resources that are used in the full-pane Activity Stream that are temporarily
+    // not needed while Activity Stream is part of the HomePager
+    public static final int[] TEMPORARY_UNUSED_ACTIVITY_STREAM = {
+            R.string.activity_stream_topsites
+    };
+
+    public static final int[] USED_IN_PAGE_ACTION = {
+            R.drawable.add_to_homescreen
+    };
+
+    public static final int[] USED_IN_LEANPLUM_EXPANDABLE_LIST_ACTIVITY = {
+            R.style.Widget_ExpandableListView,
     };
 }

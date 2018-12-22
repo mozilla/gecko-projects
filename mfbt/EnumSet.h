@@ -12,6 +12,8 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 
+#include <initializer_list>
+
 #include <stdint.h>
 
 namespace mozilla {
@@ -25,9 +27,12 @@ template<typename T>
 class EnumSet
 {
 public:
+  typedef uint32_t serializedType;
+
   EnumSet()
     : mBitField(0)
-  { }
+  {
+  }
 
   MOZ_IMPLICIT EnumSet(T aEnum)
     : mBitField(bitFor(aEnum))
@@ -36,30 +41,43 @@ public:
   EnumSet(T aEnum1, T aEnum2)
     : mBitField(bitFor(aEnum1) |
                 bitFor(aEnum2))
-  { }
+  {
+  }
 
   EnumSet(T aEnum1, T aEnum2, T aEnum3)
     : mBitField(bitFor(aEnum1) |
                 bitFor(aEnum2) |
                 bitFor(aEnum3))
-  { }
+  {
+  }
 
   EnumSet(T aEnum1, T aEnum2, T aEnum3, T aEnum4)
-   : mBitField(bitFor(aEnum1) |
-               bitFor(aEnum2) |
-               bitFor(aEnum3) |
-               bitFor(aEnum4))
-  { }
+    : mBitField(bitFor(aEnum1) |
+                bitFor(aEnum2) |
+                bitFor(aEnum3) |
+                bitFor(aEnum4))
+  {
+  }
+
+  MOZ_IMPLICIT EnumSet(std::initializer_list<T> list)
+    : mBitField(0)
+  {
+    for (auto value : list) {
+      (*this) += value;
+    }
+  }
 
   EnumSet(const EnumSet& aEnumSet)
-   : mBitField(aEnumSet.mBitField)
-  { }
+    : mBitField(aEnumSet.mBitField)
+  {
+  }
 
   /**
    * Add an element
    */
   void operator+=(T aEnum)
   {
+    incVersion();
     mBitField |= bitFor(aEnum);
   }
 
@@ -78,6 +96,7 @@ public:
    */
   void operator+=(const EnumSet<T> aEnumSet)
   {
+    incVersion();
     mBitField |= aEnumSet.mBitField;
   }
 
@@ -96,6 +115,7 @@ public:
    */
   void operator-=(T aEnum)
   {
+    incVersion();
     mBitField &= ~(bitFor(aEnum));
   }
 
@@ -114,6 +134,7 @@ public:
    */
   void operator-=(const EnumSet<T> aEnumSet)
   {
+    incVersion();
     mBitField &= ~(aEnumSet.mBitField);
   }
 
@@ -132,6 +153,7 @@ public:
    */
   void clear()
   {
+    incVersion();
     mBitField = 0;
   }
 
@@ -140,6 +162,7 @@ public:
    */
   void operator&=(const EnumSet<T> aEnumSet)
   {
+    incVersion();
     mBitField &= aEnumSet.mBitField;
   }
 
@@ -172,7 +195,7 @@ public:
   /**
    * Return the number of elements in the set.
    */
-  uint8_t size()
+  uint8_t size() const
   {
     uint8_t count = 0;
     for (uint32_t bitField = mBitField; bitField; bitField >>= 1) {
@@ -188,25 +211,122 @@ public:
     return mBitField == 0;
   }
 
-  uint32_t serialize() const
+  serializedType serialize() const
   {
     return mBitField;
   }
 
-  void deserialize(uint32_t aValue)
+  void deserialize(serializedType aValue)
   {
+    incVersion();
     mBitField = aValue;
+  }
+
+  class ConstIterator
+  {
+    const EnumSet<T>* mSet;
+    uint32_t mPos;
+#ifdef DEBUG
+    uint64_t mVersion;
+#endif
+
+    void checkVersion() const {
+      // Check that the set has not been modified while being iterated.
+      MOZ_ASSERT_IF(mSet, mSet->mVersion == mVersion);
+    }
+
+   public:
+    ConstIterator(const EnumSet<T>& aSet, uint32_t aPos)
+     : mSet(&aSet), mPos(aPos)
+    {
+#ifdef DEBUG
+      mVersion = mSet->mVersion;
+#endif
+      MOZ_ASSERT(aPos <= kMaxBits);
+      if (aPos != kMaxBits && !mSet->contains(T(mPos)))
+        ++*this;
+    }
+
+    ConstIterator(const ConstIterator& aOther)
+     : mSet(aOther.mSet), mPos(aOther.mPos)
+    {
+#ifdef DEBUG
+      mVersion = aOther.mVersion;
+      checkVersion();
+#endif
+    }
+
+    ConstIterator(ConstIterator&& aOther)
+     : mSet(aOther.mSet), mPos(aOther.mPos)
+    {
+#ifdef DEBUG
+      mVersion = aOther.mVersion;
+      checkVersion();
+#endif
+      aOther.mSet = nullptr;
+    }
+
+    ~ConstIterator() {
+      checkVersion();
+    }
+
+    bool operator==(const ConstIterator& other) const {
+      MOZ_ASSERT(mSet == other.mSet);
+      checkVersion();
+      return mPos == other.mPos;
+    }
+
+    bool operator!=(const ConstIterator& other) const {
+      return !(*this == other);
+    }
+
+    T operator*() const {
+      MOZ_ASSERT(mSet);
+      MOZ_ASSERT(mPos < kMaxBits);
+      MOZ_ASSERT(mSet->contains(T(mPos)));
+      checkVersion();
+      return T(mPos);
+    }
+
+    ConstIterator& operator++() {
+      MOZ_ASSERT(mSet);
+      MOZ_ASSERT(mPos < kMaxBits);
+      checkVersion();
+      do {
+        mPos++;
+      } while (mPos < kMaxBits && !mSet->contains(T(mPos)));
+      return *this;
+    }
+  };
+
+  ConstIterator begin() const {
+    return ConstIterator(*this, 0);
+  }
+
+  ConstIterator end() const {
+    return ConstIterator(*this, kMaxBits);
   }
 
 private:
   static uint32_t bitFor(T aEnum)
   {
     uint32_t bitNumber = (uint32_t)aEnum;
-    MOZ_ASSERT(bitNumber < 32);
+    MOZ_ASSERT(bitNumber < kMaxBits);
     return 1U << bitNumber;
   }
 
-  uint32_t mBitField;
+  void incVersion() {
+#ifdef DEBUG
+    mVersion++;
+#endif
+  }
+
+  static const size_t kMaxBits = 32;
+  serializedType mBitField;
+
+#ifdef DEBUG
+  uint64_t mVersion = 0;
+#endif
 };
 
 } // namespace mozilla

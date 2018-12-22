@@ -2,14 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "onSpellCheck",
 ];
 
 const SPELL_CHECK_ENDED_TOPIC = "inlineSpellChecker-spellCheck-ended";
 const SPELL_CHECK_STARTED_TOPIC = "inlineSpellChecker-spellCheck-started";
-
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 /**
  * Waits until spell checking has stopped on the given element.
@@ -31,7 +29,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 function onSpellCheck(editableElement, callback) {
   let editor = editableElement.editor;
   if (!editor) {
-    let win = editableElement.ownerDocument.defaultView;
+    let win = editableElement.ownerGlobal;
     editor = win.QueryInterface(Ci.nsIInterfaceRequestor).
                  getInterface(Ci.nsIWebNavigation).
                  QueryInterface(Ci.nsIInterfaceRequestor).
@@ -69,8 +67,8 @@ function onSpellCheck(editableElement, callback) {
 
   let os = Cc["@mozilla.org/observer-service;1"].
            getService(Ci.nsIObserverService);
-  os.addObserver(observe, SPELL_CHECK_STARTED_TOPIC, false);
-  os.addObserver(observe, SPELL_CHECK_ENDED_TOPIC, false);
+  os.addObserver(observe, SPELL_CHECK_STARTED_TOPIC);
+  os.addObserver(observe, SPELL_CHECK_ENDED_TOPIC);
 
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   timer.init(function tick() {

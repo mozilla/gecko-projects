@@ -7,10 +7,11 @@
 #ifndef jit_PcScriptCache_h
 #define jit_PcScriptCache_h
 
+#include "mozilla/Array.h"
+#include "js/TypeDecls.h"
+
 // Defines a fixed-size hash table solely for the purpose of caching jit::GetPcScript().
 // One cache is attached to each JSRuntime; it functions as if cleared on GC.
-
-struct JSRuntime;
 
 namespace js {
 namespace jit {
@@ -41,8 +42,8 @@ struct PcScriptCache
     }
 
     // Get a value from the cache. May perform lazy allocation.
-    bool get(JSRuntime* rt, uint32_t hash, uint8_t* addr,
-             JSScript** scriptRes, jsbytecode** pcRes)
+    MOZ_MUST_USE bool get(JSRuntime* rt, uint32_t hash, uint8_t* addr,
+                          JSScript** scriptRes, jsbytecode** pcRes)
     {
         // If a GC occurred, lazily clear the cache now.
         if (gcNumber != rt->gc.gcNumber()) {

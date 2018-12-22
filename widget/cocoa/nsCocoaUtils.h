@@ -25,28 +25,16 @@
 - (CGFloat)backingScaleFactor;
 @end
 
-// When building with a pre-10.7 SDK, NSEventPhase is not defined.
-#if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-enum {
-  NSEventPhaseNone        = 0,
-  NSEventPhaseBegan       = 0x1 << 0,
-  NSEventPhaseStationary  = 0x1 << 1,
-  NSEventPhaseChanged     = 0x1 << 2,
-  NSEventPhaseEnded       = 0x1 << 3,
-  NSEventPhaseCancelled   = 0x1 << 4,
-};
-typedef NSUInteger NSEventPhase;
-#endif // #if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
 #if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
 enum {
   NSEventPhaseMayBegin    = 0x1 << 5
 };
-#endif // #if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
+#endif
 
 class nsIWidget;
 
 namespace mozilla {
+class TimeStamp;
 namespace gfx {
 class SourceSurface;
 } // namespace gfx
@@ -98,11 +86,6 @@ private:
 // Send an event to the current Cocoa app-modal session.  Present in all
 // versions of OS X from (at least) 10.2.8 through 10.5.
 - (void)_modalSession:(NSModalSession)aSession sendEvent:(NSEvent *)theEvent;
-
-// Present (and documented) on OS X 10.6 and above.  Not present before 10.6.
-// This declaration needed to avoid compiler warnings when compiling on 10.5
-// and below (or using the 10.5 SDK and below).
-- (void)setHelpMenu:(NSMenu *)helpMenu;
 
 @end
 
@@ -161,6 +144,13 @@ public:
                                 NSToIntRound(aPt.y * aBackingScale));
   }
 
+  static LayoutDeviceIntPoint
+  CocoaPointsToDevPixelsRoundDown(const NSPoint& aPt, CGFloat aBackingScale)
+  {
+    return LayoutDeviceIntPoint(NSToIntFloor(aPt.x * aBackingScale),
+                                NSToIntFloor(aPt.y * aBackingScale));
+  }
+
   static LayoutDeviceIntRect
   CocoaPointsToDevPixels(const NSRect& aRect, CGFloat aBackingScale)
   {
@@ -184,14 +174,28 @@ public:
                        (CGFloat)aPt.y / aBackingScale);
   }
 
+  // Implements an NSPoint equivalent of -[NSWindow convertRectFromScreen:].
+  static NSPoint
+  ConvertPointFromScreen(NSWindow* aWindow, const NSPoint& aPt)
+  {
+    return [aWindow convertRectFromScreen:NSMakeRect(aPt.x, aPt.y, 0, 0)].origin;
+  }
+
+  // Implements an NSPoint equivalent of -[NSWindow convertRectToScreen:].
+  static NSPoint
+  ConvertPointToScreen(NSWindow* aWindow, const NSPoint& aPt)
+  {
+    return [aWindow convertRectToScreen:NSMakeRect(aPt.x, aPt.y, 0, 0)].origin;
+  }
+
   static NSRect
   DevPixelsToCocoaPoints(const LayoutDeviceIntRect& aRect,
                          CGFloat aBackingScale)
   {
-    return NSMakeRect((CGFloat)aRect.x / aBackingScale,
-                      (CGFloat)aRect.y / aBackingScale,
-                      (CGFloat)aRect.width / aBackingScale,
-                      (CGFloat)aRect.height / aBackingScale);
+    return NSMakeRect((CGFloat)aRect.X() / aBackingScale,
+                      (CGFloat)aRect.Y() / aBackingScale,
+                      (CGFloat)aRect.Width() / aBackingScale,
+                      (CGFloat)aRect.Height() / aBackingScale);
   }
 
   // Returns the given y coordinate, which must be in screen coordinates,
@@ -267,10 +271,14 @@ public:
       The caller owns the <code>CGImageRef</code>. 
       @param aFrame the frame to convert
       @param aResult the resulting CGImageRef
+      @param aIsEntirelyBlack an outparam that, if non-null, will be set to a
+                              bool that indicates whether the RGB values on all
+                              pixels are zero
       @return NS_OK if the conversion worked, NS_ERROR_FAILURE otherwise
    */
   static nsresult CreateCGImageFromSurface(SourceSurface* aSurface,
-                                           CGImageRef* aResult);
+                                           CGImageRef* aResult,
+                                           bool* aIsEntirelyBlack = nullptr);
   
   /** Creates a Cocoa <code>NSImage</code> from a <code>CGImageRef</code>.
       Copies the pixel data from the <code>CGImageRef</code> into a new <code>NSImage</code>.
@@ -324,6 +332,14 @@ public:
                                             NSEvent *aEvent);
 
   /**
+   * Makes a cocoa event from a widget keyboard event.
+   */
+  static NSEvent* MakeNewCococaEventFromWidgetEvent(
+                    const mozilla::WidgetKeyboardEvent& aKeyEvent,
+                    NSInteger aWindowNumber,
+                    NSGraphicsContext* aContext);
+
+  /**
    * Initializes aNPCocoaEvent.
    */
   static void InitNPCocoaEvent(NPCocoaEvent* aNPCocoaEvent);
@@ -372,6 +388,21 @@ public:
    * Unicode character.
    */
   static uint32_t ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode);
+
+  /**
+   * Convert string with font attribute to NSMutableAttributedString
+   */
+  static NSMutableAttributedString* GetNSMutableAttributedString(
+           const nsAString& aText,
+           const nsTArray<mozilla::FontRange>& aFontRanges,
+           const bool aIsVertical,
+           const CGFloat aBackingScaleFactor);
+
+  /**
+   * Compute TimeStamp from an event's timestamp.
+   * If aEventTime is 0, this returns current timestamp.
+   */
+  static mozilla::TimeStamp GetEventTimeStamp(NSTimeInterval aEventTime);
 };
 
 #endif // nsCocoaUtils_h_

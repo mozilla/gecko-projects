@@ -10,7 +10,13 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/MathAlgorithms.h"
 
+#include "jit/arm64/vixl/Instructions-vixl.h"
+#include "jit/shared/Architecture-shared.h"
+
 #include "js/Utility.h"
+
+#define JS_HAS_HIDDEN_SP
+static const uint32_t HiddenSPEncoding = vixl::kSPRegInternalCode;
 
 namespace js {
 namespace jit {
@@ -165,9 +171,6 @@ class Registers {
         (1 << Registers::lr) |
         (1 << Registers::sp);
 
-    // Registers that can be allocated without being saved, generally.
-    static const SetType TempMask = VolatileMask & ~NonAllocatableMask;
-
     static const SetType WrapperMask = VolatileMask;
 
     // Registers returned from a JS -> JS call.
@@ -269,22 +272,20 @@ class FloatRegisters
                 (1 << FloatRegisters::d30)) * SpreadCoefficient;
 
     static const SetType VolatileMask = AllMask & ~NonVolatileMask;
-    static const SetType AllDoubleMask = AllMask;
+    static const SetType AllDoubleMask = AllPhysMask << TotalPhys;
+    static const SetType AllSingleMask = AllPhysMask;
 
     static const SetType WrapperMask = VolatileMask;
 
     // d31 is the ScratchFloatReg.
     static const SetType NonAllocatableMask = (SetType(1) << FloatRegisters::d31) * SpreadCoefficient;
 
-    // Registers that can be allocated without being saved, generally.
-    static const SetType TempMask = VolatileMask & ~NonAllocatableMask;
-
     static const SetType AllocatableMask = AllMask & ~NonAllocatableMask;
     union RegisterContent {
         float s;
         double d;
     };
-    enum Kind {
+    enum Kind : uint8_t {
         Double,
         Single
     };
@@ -365,10 +366,10 @@ struct FloatRegister
     bool volatile_() const {
         return !!((SetType(1) << code()) & FloatRegisters::VolatileMask);
     }
-    bool operator!=(FloatRegister other) const {
+    constexpr bool operator!=(FloatRegister other) const {
         return other.code_ != code_ || other.k_ != k_;
     }
-    bool operator==(FloatRegister other) const {
+    constexpr bool operator==(FloatRegister other) const {
         return other.code_ == code_ && other.k_ == k_;
     }
     bool aliases(FloatRegister other) const {
@@ -382,11 +383,10 @@ struct FloatRegister
             return FloatRegisters::Single;
         return FloatRegisters::Double;
     }
-    void aliased(uint32_t aliasIdx, FloatRegister* ret) {
+    FloatRegister aliased(uint32_t aliasIdx) {
         if (aliasIdx == 0)
-            *ret = *this;
-        else
-            *ret = FloatRegister(code_, otherkind(k_));
+            return *this;
+        return FloatRegister(code_, otherkind(k_));
     }
     // This function mostly exists for the ARM backend.  It is to ensure that two
     // floating point registers' types are equivalent.  e.g. S0 is not equivalent
@@ -396,15 +396,15 @@ struct FloatRegister
     bool equiv(FloatRegister other) const {
         return k_ == other.k_;
     }
-    MOZ_CONSTEXPR uint32_t size() const {
+    constexpr uint32_t size() const {
         return k_ == FloatRegisters::Double ? sizeof(double) : sizeof(float);
     }
     uint32_t numAlignedAliased() {
         return numAliased();
     }
-    void alignedAliased(uint32_t aliasIdx, FloatRegister* ret) {
-        MOZ_ASSERT(aliasIdx == 0);
-        aliased(aliasIdx, ret);
+    FloatRegister alignedAliased(uint32_t aliasIdx) {
+        MOZ_ASSERT(aliasIdx < numAliased());
+        return aliased(aliasIdx);
     }
     SetType alignedOrDominatedAliasedSet() const {
         return Codes::SpreadCoefficient << code_;
@@ -420,6 +420,10 @@ struct FloatRegister
         return false;
     }
 
+    FloatRegister asSingle() const { return FloatRegister(code_, FloatRegisters::Single); }
+    FloatRegister asDouble() const { return FloatRegister(code_, FloatRegisters::Double); }
+    FloatRegister asSimd128() const { MOZ_CRASH(); }
+
     static uint32_t FirstBit(SetType x) {
         JS_STATIC_ASSERT(sizeof(SetType) == 8);
         return mozilla::CountTrailingZeroes64(x);
@@ -429,15 +433,46 @@ struct FloatRegister
         return 63 - mozilla::CountLeadingZeroes64(x);
     }
 
+    static constexpr RegTypeName DefaultType = RegTypeName::Float64;
+
+    template <RegTypeName Name = DefaultType>
+    static SetType LiveAsIndexableSet(SetType s) {
+        return SetType(0);
+    }
+
+    template <RegTypeName Name = DefaultType>
+    static SetType AllocatableAsIndexableSet(SetType s) {
+        static_assert(Name != RegTypeName::Any, "Allocatable set are not iterable");
+        return LiveAsIndexableSet<Name>(s);
+    }
+
     static TypedRegisterSet<FloatRegister> ReduceSetForPush(const TypedRegisterSet<FloatRegister>& s);
     static uint32_t GetSizeInBytes(const TypedRegisterSet<FloatRegister>& s);
     static uint32_t GetPushSizeInBytes(const TypedRegisterSet<FloatRegister>& s);
     uint32_t getRegisterDumpOffsetInBytes();
 
   public:
-    Code code_ : 8;
-    FloatRegisters::Kind k_ : 1;
+    Code code_;
+    FloatRegisters::Kind k_;
 };
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Float32>(SetType set)
+{
+    return set & FloatRegisters::AllSingleMask;
+}
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Float64>(SetType set)
+{
+    return set & FloatRegisters::AllDoubleMask;
+}
+
+template <> inline FloatRegister::SetType
+FloatRegister::LiveAsIndexableSet<RegTypeName::Any>(SetType set)
+{
+    return set;
+}
 
 // ARM/D32 has double registers that cannot be treated as float32.
 // Luckily, ARMv8 doesn't have the same misfortune.
@@ -455,8 +490,7 @@ hasMultiAlias()
     return false;
 }
 
-static const size_t WasmCheckedImmediateRange = 0;
-static const size_t WasmImmediateRange = 0;
+uint32_t GetARM64Flags();
 
 } // namespace jit
 } // namespace js

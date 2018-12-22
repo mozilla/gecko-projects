@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -37,10 +37,9 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     EXPORTS.cairo += [
         'cairo-win32.h',
     ]
-    if CONFIG['MOZ_ENABLE_DWRITE_FONT']:
-        SOURCES += [
-            'cairo-dwrite-font.cpp',
-        ]
+    SOURCES += [
+        'cairo-dwrite-font.cpp',
+    ]
     if CONFIG['MOZ_ENABLE_D2D_SURFACE']:
         SOURCES += [
             'cairo-d2d-surface.cpp',
@@ -80,13 +79,6 @@ elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     ]
     SOURCES += [
         'cairo-ps-surface.c',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    EXPORTS.cairo += [
-        'cairo-qt.h',
-    ]
-    SOURCES += [
-        'cairo-qt-surface.cpp',
     ]
 
 if CONFIG['MOZ_X11']:
@@ -187,7 +179,7 @@ UNIFIED_SOURCES += [
 ]
 
 # We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
+AllowCompilerWarnings()
 
 FINAL_LIBRARY = 'gkmedias'
 
@@ -201,7 +193,7 @@ for var in ('MOZ_TREE_CAIRO', 'MOZ_TREE_PIXMAN'):
     if CONFIG[var]:
         DEFINES[var] = True
 
-if CONFIG['GNU_CC']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     DEFINES['HAVE_CXX11_ATOMIC_PRIMITIVES'] = True
     # We would normally use autoconf to set these up, using AC_CHECK_SIZEOF.
     # But AC_CHECK_SIZEOF requires running programs to determine the sizes,
@@ -221,37 +213,60 @@ if CONFIG['MOZ_TREE_FREETYPE']:
     DEFINES['FT_LCD_FILTER_H'] = '%s/modules/freetype2/include/freetype/ftlcdfil.h' % TOPSRCDIR
 
 # Suppress warnings in third-party code.
-if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
+if CONFIG['CC_TYPE'] in ('clang', 'clang-cl', 'gcc'):
     CFLAGS += [
         '-Wno-enum-compare',
         '-Wno-int-to-pointer-cast',
+        '-Wno-int-conversion',
+        '-Wno-incompatible-pointer-types',
         '-Wno-sign-compare',
         '-Wno-type-limits',
         '-Wno-missing-field-initializers',
         '-Wno-conversion',
-    ]
-if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
-    CFLAGS += [
-        '-Wno-incompatible-pointer-types',
-        '-Wno-tautological-compare',
-        '-Wno-tautological-constant-out-of-range-compare',
+        '-Wno-narrowing',
+        '-Wno-switch',
+        '-Wno-unused',
+        '-Wno-unused-variable',
         '-Wno-error=uninitialized',
     ]
-if CONFIG['CLANG_CL']:
+    if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
+        CFLAGS += [
+            '-Wno-absolute-value',
+            '-Wno-deprecated-register',
+            '-Wno-incompatible-pointer-types',
+            '-Wno-macro-redefined',
+            '-Wno-shift-negative-value',
+            '-Wno-tautological-compare',
+            '-Wno-tautological-constant-out-of-range-compare',
+            '-Wno-unreachable-code',
+        ]
+    else:
+        CFLAGS += ['-Wno-unused-but-set-variable']
+
+if CONFIG['CC_TYPE'] == 'msvc':
     CFLAGS += [
-        '-Wno-deprecated-register',
-        '-Wno-macro-redefined',
-        '-Wno-unused-variable',
+        '-wd4005', # 'WIN32_LEAN_AND_MEAN' : macro redefinition
+        '-wd4018', # '>' : signed/unsigned mismatch
+        '-wd4047', # different levels of indirection
+        '-wd4101', # unreferenced local variable
+        '-wd4133', # 'function' : incompatible types
+        '-wd4146', # unary minus operator applied to unsigned type
+        '-wd4311', # 'variable' : pointer truncation from 'type' to 'type'
+        '-wd4477', # format string '%s' requires an argument of type 'type'
+        '-wd4996', # The compiler encountered a deprecated declaration.
+    ]
+    CXXFLAGS += [
+        '-wd4005', # 'WIN32_LEAN_AND_MEAN' : macro redefinition
+        '-wd4018', # '>' : signed/unsigned mismatch
+        '-wd4146', # unary minus operator applied to unsigned type
+        '-wd4828', # illegal in the current source character set
+        '-wd4838', # requires a narrowing conversion
     ]
 
 # See bug 386897.
-if CONFIG['GNU_CC'] and CONFIG['OS_TARGET'] == 'Android' and CONFIG['MOZ_OPTIMIZE']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc') and CONFIG['OS_TARGET'] == 'Android' and CONFIG['MOZ_OPTIMIZE']:
     CFLAGS += ['-O2']
     CXXFLAGS += ['-O2']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    CFLAGS += CONFIG['MOZ_QT_CFLAGS']
-    CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
 
 if CONFIG['MOZ_X11']:
     CFLAGS += CONFIG['XCFLAGS']

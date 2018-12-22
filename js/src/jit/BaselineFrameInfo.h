@@ -7,7 +7,9 @@
 #ifndef jit_BaselineFrameInfo_h
 #define jit_BaselineFrameInfo_h
 
-#include "mozilla/Alignment.h"
+#include "mozilla/Attributes.h"
+
+#include <new>
 
 #include "jit/BaselineFrame.h"
 #include "jit/FixedList.h"
@@ -63,24 +65,22 @@ class StackValue
     };
 
   private:
-    Kind kind_;
+    MOZ_INIT_OUTSIDE_CTOR Kind kind_;
 
-    union {
-        struct {
-            Value v;
-        } constant;
-        struct {
-            mozilla::AlignedStorage2<ValueOperand> reg;
-        } reg;
-        struct {
-            uint32_t slot;
-        } local;
-        struct {
-            uint32_t slot;
-        } arg;
+    MOZ_INIT_OUTSIDE_CTOR union Data {
+        JS::Value constant;
+        ValueOperand reg;
+        uint32_t localSlot;
+        uint32_t argSlot;
+
+        // |constant| has a non-trivial constructor and therefore MUST be
+        // placement-new'd into existence.
+        MOZ_PUSH_DISABLE_NONTRIVIAL_UNION_WARNINGS
+        Data() {}
+        MOZ_POP_DISABLE_NONTRIVIAL_UNION_WARNINGS
     } data;
 
-    JSValueType knownType_;
+    MOZ_INIT_OUTSIDE_CTOR JSValueType knownType_;
 
   public:
     StackValue() {
@@ -112,39 +112,39 @@ class StackValue
     }
     Value constant() const {
         MOZ_ASSERT(kind_ == Constant);
-        return data.constant.v;
+        return data.constant;
     }
     ValueOperand reg() const {
         MOZ_ASSERT(kind_ == Register);
-        return *data.reg.reg.addr();
+        return data.reg;
     }
     uint32_t localSlot() const {
         MOZ_ASSERT(kind_ == LocalSlot);
-        return data.local.slot;
+        return data.localSlot;
     }
     uint32_t argSlot() const {
         MOZ_ASSERT(kind_ == ArgSlot);
-        return data.arg.slot;
+        return data.argSlot;
     }
 
     void setConstant(const Value& v) {
         kind_ = Constant;
-        data.constant.v = v;
+        new (&data.constant) Value(v);
         knownType_ = v.isDouble() ? JSVAL_TYPE_DOUBLE : v.extractNonDoubleType();
     }
     void setRegister(const ValueOperand& val, JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
         kind_ = Register;
-        *data.reg.reg.addr() = val;
+        new (&data.reg) ValueOperand(val);
         knownType_ = knownType;
     }
     void setLocalSlot(uint32_t slot) {
         kind_ = LocalSlot;
-        data.local.slot = slot;
+        new (&data.localSlot) uint32_t(slot);
         knownType_ = JSVAL_TYPE_UNKNOWN;
     }
     void setArgSlot(uint32_t slot) {
         kind_ = ArgSlot;
-        data.arg.slot = slot;
+        new (&data.argSlot) uint32_t(slot);
         knownType_ = JSVAL_TYPE_UNKNOWN;
     }
     void setThis() {
@@ -179,19 +179,13 @@ class FrameInfo
         spIndex(0)
     { }
 
-    bool init(TempAllocator& alloc);
+    MOZ_MUST_USE bool init(TempAllocator& alloc);
 
     size_t nlocals() const {
         return script->nfixed();
     }
     size_t nargs() const {
         return script->functionNonDelazifying()->nargs();
-    }
-    size_t nvars() const {
-        return script->nfixedvars();
-    }
-    size_t nlexicals() const {
-        return script->fixedLexicalEnd() - script->fixedLexicalBegin();
     }
 
   private:
@@ -274,8 +268,8 @@ class FrameInfo
     Address addressOfCalleeToken() const {
         return Address(BaselineFrameReg, BaselineFrame::offsetOfCalleeToken());
     }
-    Address addressOfScopeChain() const {
-        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfScopeChain());
+    Address addressOfEnvironmentChain() const {
+        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfEnvironmentChain());
     }
     Address addressOfFlags() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFlags());

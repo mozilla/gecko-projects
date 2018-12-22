@@ -4,14 +4,16 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://dev.w3.org/2006/webapi/FileAPI/#blob
+ * https://w3c.github.io/FileAPI/#blob
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
-[Constructor,
- Constructor(sequence<(ArrayBuffer or ArrayBufferView or Blob or DOMString)> blobParts, optional BlobPropertyBag options),
+typedef (BufferSource or Blob or USVString) BlobPart;
+
+[Constructor(optional sequence<BlobPart> blobParts,
+             optional BlobPropertyBag options),
  Exposed=(Window,Worker)]
 interface Blob {
 
@@ -20,23 +22,17 @@ interface Blob {
 
   readonly attribute DOMString type;
 
-  // readonly attribute boolean isClosed; TODO bug 1048321
-
   //slice Blob into byte-ranged chunks
 
   [Throws]
   Blob slice([Clamp] optional long long start,
              [Clamp] optional long long end,
-             optional DOMString contentType = "");
-
-  // void close(); TODO bug 1048325
+             optional DOMString contentType);
 };
 
-enum EndingTypes{"transparent", "native"};
+enum EndingTypes { "transparent", "native" };
 
 dictionary BlobPropertyBag {
-
   DOMString type = "";
   EndingTypes endings = "transparent";
-
 };

@@ -3,22 +3,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+ChromeUtils.defineModuleGetter(this, "Blocklist",
+                               "resource://gre/modules/Blocklist.jsm");
+
 var gPluginHandler = {
   PREF_SESSION_PERSIST_MINUTES: "plugin.sessionPermissionNow.intervalInMinutes",
   PREF_PERSISTENT_DAYS: "plugin.persistentPermissionAlways.intervalInDays",
+  PREF_SHOW_INFOBAR: "plugins.show_infobar",
+  PREF_INFOBAR_DISMISSAL_PERMANENT: "plugins.remember_infobar_dismissal",
+
   MESSAGES: [
     "PluginContent:ShowClickToPlayNotification",
     "PluginContent:RemoveNotification",
     "PluginContent:UpdateHiddenPluginUI",
     "PluginContent:HideNotificationBar",
-    "PluginContent:ShowInstallNotification",
     "PluginContent:InstallSinglePlugin",
     "PluginContent:ShowPluginCrashedNotification",
     "PluginContent:SubmitReport",
     "PluginContent:LinkClickCallback",
   ],
 
-  init: function () {
+  init() {
     const mm = window.messageManager;
     for (let msg of this.MESSAGES) {
       mm.addMessageListener(msg, this);
@@ -26,7 +31,7 @@ var gPluginHandler = {
     window.addEventListener("unload", this);
   },
 
-  uninit: function () {
+  uninit() {
     const mm = window.messageManager;
     for (let msg of this.MESSAGES) {
       mm.removeMessageListener(msg, this);
@@ -34,13 +39,13 @@ var gPluginHandler = {
     window.removeEventListener("unload", this);
   },
 
-  handleEvent: function (event) {
+  handleEvent(event) {
     if (event.type == "unload") {
       this.uninit();
     }
   },
 
-  receiveMessage: function (msg) {
+  receiveMessage(msg) {
     switch (msg.name) {
       case "PluginContent:ShowClickToPlayNotification":
         this.showClickToPlayNotification(msg.target, msg.data.plugins, msg.data.showNow,
@@ -51,13 +56,12 @@ var gPluginHandler = {
         break;
       case "PluginContent:UpdateHiddenPluginUI":
         this.updateHiddenPluginUI(msg.target, msg.data.haveInsecure, msg.data.actions,
-                                  msg.principal, msg.data.location);
+                                  msg.principal, msg.data.location)
+          .catch(Cu.reportError);
         break;
       case "PluginContent:HideNotificationBar":
         this.hideNotificationBar(msg.target, msg.data.name);
         break;
-      case "PluginContent:ShowInstallNotification":
-        return this.showInstallNotification(msg.target, msg.data.pluginInfo);
       case "PluginContent:InstallSinglePlugin":
         this.installSinglePlugin(msg.data.pluginInfo);
         break;
@@ -75,7 +79,7 @@ var gPluginHandler = {
           case "managePlugins":
           case "openHelpPage":
           case "openPluginUpdatePage":
-            this[msg.data.name].apply(this);
+            this[msg.data.name](msg.data.pluginTag);
             break;
         }
         break;
@@ -86,14 +90,15 @@ var gPluginHandler = {
   },
 
   // Callback for user clicking on a disabled plugin
-  managePlugins: function () {
+  managePlugins() {
     BrowserOpenAddonsMgr("addons://list/plugin");
   },
 
   // Callback for user clicking on the link in a click-to-play plugin
   // (where the plugin has an update)
-  openPluginUpdatePage: function () {
-    openUILinkIn(Services.urlFormatter.formatURLPref("plugins.update.url"), "tab");
+  async openPluginUpdatePage(pluginTag) {
+    let url = await Blocklist.getPluginBlockURL(pluginTag);
+    openTrustedLinkIn(url, "tab");
   },
 
   submitReport: function submitReport(runID, keyVals, submitURLOptIn) {
@@ -105,12 +110,12 @@ var gPluginHandler = {
   },
 
   // Callback for user clicking a "reload page" link
-  reloadPage: function (browser) {
+  reloadPage(browser) {
     browser.reload();
   },
 
   // Callback for user clicking the help icon
-  openHelpPage: function () {
+  openHelpPage() {
     openHelpLink("plugin-crashed", false);
   },
 
@@ -125,8 +130,7 @@ var gPluginHandler = {
       }
       Services.telemetry.getHistogramById("PLUGINS_NOTIFICATION_PLUGIN_COUNT")
         .add(histogramCount);
-    }
-    else if (event == "dismissed") {
+    } else if (event == "dismissed") {
       // Once the popup is dismissed, clicking the icon should show the full
       // list again
       this.options.primaryPlugin = null;
@@ -138,12 +142,14 @@ var gPluginHandler = {
    * and activate plugins if necessary.
    * aNewState should be either "allownow" "allowalways" or "block"
    */
-  _updatePluginPermission: function (aNotification, aPluginInfo, aNewState) {
+  _updatePluginPermission(aBrowser, aPluginInfo, aNewState) {
     let permission;
     let expireType;
     let expireTime;
     let histogram =
-      Services.telemetry.getHistogramById("PLUGINS_NOTIFICATION_USER_ACTION");
+      Services.telemetry.getHistogramById("PLUGINS_NOTIFICATION_USER_ACTION_2");
+
+    let notification = PopupNotifications.getNotification("click-to-play-plugins", aBrowser);
 
     // Update the permission manager.
     // Also update the current state of pluginInfo.fallbackType so that
@@ -155,6 +161,7 @@ var gPluginHandler = {
         expireTime = Date.now() + Services.prefs.getIntPref(this.PREF_SESSION_PERSIST_MINUTES) * 60 * 1000;
         histogram.add(0);
         aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE;
+        notification.options.extraAttr = "active";
         break;
 
       case "allowalways":
@@ -164,6 +171,7 @@ var gPluginHandler = {
           Services.prefs.getIntPref(this.PREF_PERSISTENT_DAYS) * 24 * 60 * 60 * 1000;
         histogram.add(1);
         aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE;
+        notification.options.extraAttr = "active";
         break;
 
       case "block":
@@ -179,37 +187,55 @@ var gPluginHandler = {
             aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_VULNERABLE_NO_UPDATE;
             break;
           default:
-            aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY;
+            // PLUGIN_CLICK_TO_PLAY_QUIET will only last until they reload the page, at
+            // which point it will be PLUGIN_CLICK_TO_PLAY (the overlays will appear)
+            aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY_QUIET;
         }
+        notification.options.extraAttr = "inactive";
         break;
 
-      // In case a plugin has already been allowed in another tab, the "continue allowing" button
-      // shouldn't change any permissions but should run the plugin-enablement code below.
+      case "blockalways":
+        permission = Ci.nsIObjectLoadingContent.PLUGIN_PERMISSION_PROMPT_ACTION_QUIET;
+        expireType = Ci.nsIPermissionManager.EXPIRE_NEVER;
+        expireTime = 0;
+        histogram.add(3);
+        aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY_QUIET;
+        notification.options.extraAttr = "inactive";
+        break;
+
+      // In case a plugin has already been allowed/disallowed in another tab, the
+      // buttons matching the existing block state shouldn't change any permissions
+      // but should run the plugin-enablement code below.
       case "continue":
         aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE;
+        notification.options.extraAttr = "active";
         break;
+
+      case "continueblocking":
+        aPluginInfo.fallbackType = Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY_QUIET;
+        notification.options.extraAttr = "inactive";
+        break;
+
       default:
         Cu.reportError(Error("Unexpected plugin state: " + aNewState));
         return;
     }
 
-    let browser = aNotification.browser;
-    let contentWindow = browser.contentWindow;
-    if (aNewState != "continue") {
-      let principal = aNotification.options.principal;
+    if (aNewState != "continue" && aNewState != "continueblocking") {
+      let principal = notification.options.principal;
       Services.perms.addFromPrincipal(principal, aPluginInfo.permissionString,
                                       permission, expireType, expireTime);
       aPluginInfo.pluginPermissionType = expireType;
     }
 
-    browser.messageManager.sendAsyncMessage("BrowserPlugins:ActivatePlugins", {
+    aBrowser.messageManager.sendAsyncMessage("BrowserPlugins:ActivatePlugins", {
       pluginInfo: aPluginInfo,
       newState: aNewState,
     });
   },
 
-  showClickToPlayNotification: function (browser, plugins, showNow,
-                                         principal, location) {
+  showClickToPlayNotification(browser, plugins, showNow,
+                                        principal, location) {
     // It is possible that we've received a message from the frame script to show
     // a click to play notification for a principal that no longer matches the one
     // that the browser's content now has assigned (ie, the browser has browsed away
@@ -223,7 +249,7 @@ var gPluginHandler = {
     // page. That means that we also need to compare the actual locations to
     // ensure we aren't getting a message from a Data URI that we're no longer
     // looking at.
-    let receivedURI = BrowserUtils.makeURI(location);
+    let receivedURI = Services.io.newURI(location);
     if (!browser.documentURI.equalsExceptRef(receivedURI)) {
       return;
     }
@@ -238,30 +264,10 @@ var gPluginHandler = {
       pluginData = new Map();
     }
 
-    for (var pluginInfo of plugins) {
+    for (let pluginInfo of plugins) {
       if (pluginData.has(pluginInfo.permissionString)) {
         continue;
       }
-
-      // If a block contains an infoURL, we should always prefer that to the default
-      // URL that we construct in-product, even for other blocklist types.
-      let url = Services.blocklist.getPluginInfoURL(pluginInfo.pluginTag);
-
-      if (pluginInfo.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE) {
-        if (!url) {
-          url = Services.urlFormatter.formatURLPref("plugins.update.url");
-        }
-      }
-      else if (pluginInfo.blocklistState != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
-        if (!url) {
-          url = Services.blocklist.getPluginBlocklistURL(pluginInfo.pluginTag);
-        }
-      }
-      else {
-        url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "clicktoplay";
-      }
-      pluginInfo.detailsLink = url;
-
       pluginData.set(pluginInfo.permissionString, pluginInfo);
     }
 
@@ -281,35 +287,126 @@ var gPluginHandler = {
       return;
     }
 
-    let options = {
-      dismissed: !showNow,
-      eventCallback: this._clickToPlayNotificationEventCallback,
-      primaryPlugin: primaryPluginPermission,
-      pluginData: pluginData,
-      principal: principal,
-    };
-    PopupNotifications.show(browser, "click-to-play-plugins",
-                            "", "plugins-notification-icon",
-                            null, null, options);
-    browser.messageManager.sendAsyncMessage("BrowserPlugins:NotificationShown");
+    if (plugins.length == 1) {
+      let pluginInfo = plugins[0];
+      let chromeWin = window.QueryInterface(Ci.nsIDOMChromeWindow);
+      let isWindowPrivate = PrivateBrowsingUtils.isWindowPrivate(chromeWin);
+
+      let active = pluginInfo.fallbackType == Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE;
+
+      let options = {
+        dismissed: !showNow,
+        hideClose: !Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton"),
+        persistent: showNow,
+        eventCallback: this._clickToPlayNotificationEventCallback,
+        primaryPlugin: primaryPluginPermission,
+        popupIconClass: "plugin-icon",
+        extraAttr: active ? "active" : "inactive",
+        pluginData,
+        principal,
+      };
+
+      let description;
+      if (pluginInfo.fallbackType == Ci.nsIObjectLoadingContent.PLUGIN_VULNERABLE_UPDATABLE) {
+        description = gNavigatorBundle.getString("flashActivate.outdated.message");
+      } else {
+        description = gNavigatorBundle.getString("flashActivate.message");
+      }
+
+      let badge = document.getElementById("plugin-icon-badge");
+      badge.setAttribute("animate", "true");
+      badge.addEventListener("animationend", function animListener(event) {
+        if (event.animationName == "blink-badge" &&
+            badge.hasAttribute("animate")) {
+          badge.removeAttribute("animate");
+          badge.removeEventListener("animationend", animListener);
+        }
+      });
+
+      let weakBrowser = Cu.getWeakReference(browser);
+      let mainAction = {
+        callback: ({checkboxChecked}) => {
+          let browserRef = weakBrowser.get();
+          if (browserRef) {
+            if (checkboxChecked) {
+              this._updatePluginPermission(browserRef, pluginInfo, "allowalways");
+            } else if (pluginInfo.fallbackType == Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE) {
+              this._updatePluginPermission(browserRef, pluginInfo, "continue");
+            } else {
+              this._updatePluginPermission(browserRef, pluginInfo, "allownow");
+            }
+          }
+        },
+        label: gNavigatorBundle.getString("flashActivate.allow"),
+        accessKey: gNavigatorBundle.getString("flashActivate.allow.accesskey"),
+        dismiss: true,
+      };
+
+      let secondaryActions = null;
+      if (!isWindowPrivate) {
+        options.checkbox = {
+          label: gNavigatorBundle.getString("flashActivate.remember"),
+        };
+        secondaryActions = [{
+          callback: ({checkboxChecked}) => {
+            let browserRef = weakBrowser.get();
+            if (browserRef) {
+              if (checkboxChecked) {
+                this._updatePluginPermission(browserRef, pluginInfo, "blockalways");
+              } else if (pluginInfo.fallbackType == Ci.nsIObjectLoadingContent.PLUGIN_ACTIVE) {
+                this._updatePluginPermission(browserRef, pluginInfo, "block");
+              } else {
+                this._updatePluginPermission(browserRef, pluginInfo, "continueblocking");
+              }
+            }
+          },
+          label: gNavigatorBundle.getString("flashActivate.noAllow"),
+          accessKey: gNavigatorBundle.getString("flashActivate.noAllow.accesskey"),
+          dismiss: true,
+        }];
+      }
+
+      PopupNotifications.show(browser, "click-to-play-plugins",
+                                             description, "plugins-notification-icon",
+                                             mainAction, secondaryActions, options);
+      browser.messageManager.sendAsyncMessage("BrowserPlugins:NotificationShown");
+    } else {
+      this.removeNotification(browser, "click-to-play-plugins");
+    }
   },
 
-  removeNotification: function (browser, name) {
+  removeNotification(browser, name) {
     let notification = PopupNotifications.getNotification(name, browser);
     if (notification)
       PopupNotifications.remove(notification);
   },
 
-  hideNotificationBar: function (browser, name) {
+  hideNotificationBar(browser, name) {
     let notificationBox = gBrowser.getNotificationBox(browser);
     let notification = notificationBox.getNotificationWithValue(name);
     if (notification)
       notificationBox.removeNotification(notification, true);
   },
 
-  updateHiddenPluginUI: function (browser, haveInsecure, actions,
-                                  principal, location) {
+  infobarBlockedForURI(uri) {
+    return new Promise((resolve, reject) => {
+      let tableName = Services.prefs.getStringPref("urlclassifier.flashInfobarTable", "");
+      if (!tableName) {
+        resolve(false);
+      }
+      let classifier = Cc["@mozilla.org/url-classifier/dbservice;1"]
+        .getService(Ci.nsIURIClassifier);
+      classifier.asyncClassifyLocalWithTables(uri, tableName, (c, list) => {
+        resolve(list.length > 0);
+      });
+    });
+  },
+
+  async updateHiddenPluginUI(browser, haveInsecure, actions,
+                                 principal, location) {
     let origin = principal.originNoSuffix;
+
+    let shouldShowNotification = !(await this.infobarBlockedForURI(browser.documentURI));
 
     // It is possible that we've received a message from the frame script to show
     // the hidden plugin notification for a principal that no longer matches the one
@@ -324,7 +421,7 @@ var gPluginHandler = {
     // page. That means that we also need to compare the actual locations to
     // ensure we aren't getting a message from a Data URI that we're no longer
     // looking at.
-    let receivedURI = BrowserUtils.makeURI(location);
+    let receivedURI = Services.io.newURI(location);
     if (!browser.documentURI.equalsExceptRef(receivedURI)) {
       return;
     }
@@ -351,6 +448,10 @@ var gPluginHandler = {
     // 2b. Multiple types of plugins are hidden on the page, but none are
     //     vulnerable. Show the nonvulnerable multi-UI.
     function showNotification() {
+      if (!Services.prefs.getBoolPref(gPluginHandler.PREF_SHOW_INFOBAR, true)) {
+        return;
+      }
+
       let n = notificationBox.getNotificationWithValue("plugin-hidden");
       if (n) {
         // If something is already shown, just keep it
@@ -371,9 +472,10 @@ var gPluginHandler = {
 
         switch (pluginInfo.fallbackType) {
           case Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY:
+          case Ci.nsIObjectLoadingContent.PLUGIN_CLICK_TO_PLAY_QUIET:
             message = gNavigatorBundle.getFormattedString(
-              "pluginActivateNew.message",
-              [pluginName, origin]);
+              "pluginActivationWarning.message",
+              [brand]);
             break;
           case Ci.nsIObjectLoadingContent.PLUGIN_VULNERABLE_UPDATABLE:
             message = gNavigatorBundle.getFormattedString(
@@ -395,7 +497,7 @@ var gPluginHandler = {
         {
           label: gNavigatorBundle.getString("pluginContinueBlocking.label"),
           accessKey: gNavigatorBundle.getString("pluginContinueBlocking.accesskey"),
-          callback: function() {
+          callback() {
             Services.telemetry.getHistogramById("PLUGINS_INFOBAR_BLOCK").
               add(true);
 
@@ -407,7 +509,7 @@ var gPluginHandler = {
         {
           label: gNavigatorBundle.getString("pluginActivateTrigger.label"),
           accessKey: gNavigatorBundle.getString("pluginActivateTrigger.accesskey"),
-          callback: function() {
+          callback() {
             Services.telemetry.getHistogramById("PLUGINS_INFOBAR_ALLOW").
               add(true);
 
@@ -420,35 +522,49 @@ var gPluginHandler = {
           }
         }
       ];
+      function notificationCallback(type) {
+        if (type == "dismissed") {
+          Services.telemetry.getHistogramById("PLUGINS_INFOBAR_DISMISSED").
+            add(true);
+          if (Services.prefs.getBoolPref(gPluginHandler.PREF_INFOBAR_DISMISSAL_PERMANENT, false)) {
+            Services.perms.addFromPrincipal(principal,
+                                            "plugin-hidden-notification",
+                                            Services.perms.DENY_ACTION);
+          }
+        }
+      }
       n = notificationBox.
         appendNotification(message, "plugin-hidden", null,
-                           notificationBox.PRIORITY_INFO_HIGH, buttons);
+                           notificationBox.PRIORITY_INFO_HIGH, buttons,
+                           notificationCallback);
       if (haveInsecure) {
-        n.classList.add('pluginVulnerable');
+        n.classList.add("pluginVulnerable");
       }
     }
 
     if (actions.length == 0) {
-      hideNotification();
+      shouldShowNotification = false;
+    }
+    if (shouldShowNotification &&
+        Services.perms.testPermissionFromPrincipal(principal, "plugin-hidden-notification") ==
+        Ci.nsIPermissionManager.DENY_ACTION) {
+      shouldShowNotification = false;
+    }
+    if (shouldShowNotification) {
+      showNotification();
     } else {
-      let notificationPermission = Services.perms.testPermissionFromPrincipal(
-        principal, "plugin-hidden-notification");
-      if (notificationPermission == Ci.nsIPermissionManager.DENY_ACTION) {
-        hideNotification();
-      } else {
-        showNotification();
-      }
+      hideNotification();
     }
   },
 
-  contextMenuCommand: function (browser, plugin, command) {
+  contextMenuCommand(browser, plugin, command) {
     browser.messageManager.sendAsyncMessage("BrowserPlugins:ContextMenuCommand",
-      { command: command }, { plugin: plugin });
+      { command }, { plugin });
   },
 
   // Crashed-plugin observer. Notified once per plugin crash, before events
   // are dispatched to individual plugin instances.
-  NPAPIPluginCrashed : function(subject, topic, data) {
+  NPAPIPluginCrashed(subject, topic, data) {
     let propertyBag = subject;
     if (!(propertyBag instanceof Ci.nsIPropertyBag2) ||
         !(propertyBag instanceof Ci.nsIWritablePropertyBag2) ||
@@ -497,7 +613,7 @@ var gPluginHandler = {
    *        For a GMP, this is the pluginID. For NPAPI plugins (where "pluginID"
    *        means something different), this is the runID.
    */
-  showPluginCrashedNotification: function (browser, messageString, pluginID) {
+  showPluginCrashedNotification(browser, messageString, pluginID) {
     // If there's already an existing notification bar, don't do anything.
     let notificationBox = gBrowser.getNotificationBox(browser);
     let notification = notificationBox.getNotificationWithValue("plugin-crashed");
@@ -507,7 +623,7 @@ var gPluginHandler = {
 
     // Configure the notification bar
     let priority = notificationBox.PRIORITY_WARNING_MEDIUM;
-    let iconURL = "chrome://mozapps/skin/plugins/notifyPluginCrashed.png";
+    let iconURL = "chrome://mozapps/skin/plugins/pluginGeneric.svg";
     let reloadLabel = gNavigatorBundle.getString("crashedpluginsMessage.reloadButton.label");
     let reloadKey   = gNavigatorBundle.getString("crashedpluginsMessage.reloadButton.accesskey");
 
@@ -515,7 +631,7 @@ var gPluginHandler = {
       label: reloadLabel,
       accessKey: reloadKey,
       popup: null,
-      callback: function() { browser.reload(); },
+      callback() { browser.reload(); },
     }];
 
     if (AppConstants.MOZ_CRASHREPORTER &&

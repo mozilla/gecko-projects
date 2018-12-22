@@ -3,21 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "xpcprivate.h"
+#include "xpcpublic.h"
 #include "nsString.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIObjectInputStream.h"
 #include "nsJSPrincipals.h"
 #include "plstr.h"
-#include "nsXPIDLString.h"
 #include "nsCOMPtr.h"
 #include "nsIServiceManager.h"
 #include "nsMemory.h"
 #include "nsStringBuffer.h"
 
 #include "mozilla/dom/StructuredCloneTags.h"
-// for mozilla::dom::workers::kJSPrincipalsDebugToken
-#include "mozilla/dom/workers/Workers.h"
+// for mozilla::dom::workerinternals::kJSPrincipalsDebugToken
+#include "mozilla/dom/workerinternals/JSSettings.h"
+// for mozilla::dom::worklet::kJSPrincipalsDebugToken
+#include "mozilla/dom/WorkletPrincipal.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 
 using namespace mozilla;
@@ -27,7 +28,7 @@ NS_IMETHODIMP_(MozExternalRefCountType)
 nsJSPrincipals::AddRef()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
+  MOZ_ASSERT(int32_t(refcount) >= 0, "illegal refcnt");
   nsrefcnt count = ++refcount;
   NS_LOG_ADDREF(this, count, "nsJSPrincipals", sizeof(*this));
   return count;
@@ -37,7 +38,7 @@ NS_IMETHODIMP_(MozExternalRefCountType)
 nsJSPrincipals::Release()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_PRECONDITION(0 != refcount, "dup release");
+  MOZ_ASSERT(0 != refcount, "dup release");
   nsrefcnt count = --refcount;
   NS_LOG_RELEASE(this, count, "nsJSPrincipals");
   if (count == 0) {
@@ -88,10 +89,13 @@ JSPrincipals::dump()
 {
     if (debugToken == nsJSPrincipals::DEBUG_TOKEN) {
       nsAutoCString str;
-      static_cast<nsJSPrincipals *>(this)->GetScriptLocation(str);
-      fprintf(stderr, "nsIPrincipal (%p) = %s\n", static_cast<void*>(this), str.get());
-    } else if (debugToken == dom::workers::kJSPrincipalsDebugToken) {
+      nsresult rv = static_cast<nsJSPrincipals *>(this)->GetScriptLocation(str);
+      fprintf(stderr, "nsIPrincipal (%p) = %s\n", static_cast<void*>(this),
+              NS_SUCCEEDED(rv) ? str.get() : "(unknown)");
+    } else if (debugToken == dom::workerinternals::kJSPrincipalsDebugToken) {
         fprintf(stderr, "Web Worker principal singleton (%p)\n", this);
+    } else if (debugToken == mozilla::dom::WorkletPrincipal::kJSPrincipalsDebugToken) {
+        fprintf(stderr, "Web Worklet principal singleton (%p)\n", this);
     } else {
         fprintf(stderr,
                 "!!! JSPrincipals (%p) is not nsJSPrincipals instance - bad token: "
@@ -125,13 +129,70 @@ nsJSPrincipals::ReadPrincipals(JSContext* aCx, JSStructuredCloneReader* aReader,
 
 static bool
 ReadPrincipalInfo(JSStructuredCloneReader* aReader,
+                  OriginAttributes& aAttrs,
+                  nsACString& aSpec,
+                  nsACString& aOriginNoSuffix)
+{
+    uint32_t suffixLength, specLength;
+    if (!JS_ReadUint32Pair(aReader, &suffixLength, &specLength)) {
+        return false;
+    }
+
+    nsAutoCString suffix;
+    if (!suffix.SetLength(suffixLength, fallible)) {
+        return false;
+    }
+
+    if (!JS_ReadBytes(aReader, suffix.BeginWriting(), suffixLength)) {
+        return false;
+    }
+
+    if (!aAttrs.PopulateFromSuffix(suffix)) {
+        return false;
+    }
+
+    if (!aSpec.SetLength(specLength, fallible)) {
+        return false;
+    }
+
+    if (!JS_ReadBytes(aReader, aSpec.BeginWriting(), specLength)) {
+        return false;
+    }
+
+    uint32_t originNoSuffixLength, dummy;
+    if (!JS_ReadUint32Pair(aReader, &originNoSuffixLength, &dummy)) {
+        return false;
+    }
+
+    MOZ_ASSERT(dummy == 0);
+
+    if (!aOriginNoSuffix.SetLength(originNoSuffixLength, fallible)) {
+        return false;
+    }
+
+    if (!JS_ReadBytes(aReader, aOriginNoSuffix.BeginWriting(),
+                      originNoSuffixLength)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool
+ReadPrincipalInfo(JSStructuredCloneReader* aReader,
                   uint32_t aTag,
                   PrincipalInfo& aInfo)
 {
     if (aTag == SCTAG_DOM_SYSTEM_PRINCIPAL) {
         aInfo = SystemPrincipalInfo();
     } else if (aTag == SCTAG_DOM_NULL_PRINCIPAL) {
-        aInfo = NullPrincipalInfo();
+        OriginAttributes attrs;
+        nsAutoCString spec;
+        nsAutoCString originNoSuffix;
+        if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix)) {
+            return false;
+        }
+        aInfo = NullPrincipalInfo(attrs, spec);
     } else if (aTag == SCTAG_DOM_EXPANDED_PRINCIPAL) {
         uint32_t length, unused;
         if (!JS_ReadUint32Pair(aReader, &length, &unused)) {
@@ -155,28 +216,28 @@ ReadPrincipalInfo(JSStructuredCloneReader* aReader,
 
         aInfo = expanded;
     } else if (aTag == SCTAG_DOM_CONTENT_PRINCIPAL) {
-        uint32_t suffixLength, specLength;
-        if (!JS_ReadUint32Pair(aReader, &suffixLength, &specLength)) {
-            return false;
-        }
-
-        nsAutoCString suffix;
-        suffix.SetLength(suffixLength);
-        if (!JS_ReadBytes(aReader, suffix.BeginWriting(), suffixLength)) {
-            return false;
-        }
-
+        OriginAttributes attrs;
         nsAutoCString spec;
-        spec.SetLength(specLength);
-        if (!JS_ReadBytes(aReader, spec.BeginWriting(), specLength)) {
+        nsAutoCString originNoSuffix;
+        if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix)) {
             return false;
         }
 
-        PrincipalOriginAttributes attrs;
-        attrs.PopulateFromSuffix(suffix);
-        aInfo = ContentPrincipalInfo(attrs, spec);
+#ifdef FUZZING
+        if (originNoSuffix.IsEmpty()) {
+          return false;
+        }
+#endif
+
+        MOZ_DIAGNOSTIC_ASSERT(!originNoSuffix.IsEmpty());
+
+        aInfo = ContentPrincipalInfo(attrs, originNoSuffix, spec);
     } else {
+#ifdef FUZZING
+        return false;
+#else
         MOZ_CRASH("unexpected principal structured clone tag");
+#endif
     }
 
     return true;
@@ -215,10 +276,30 @@ nsJSPrincipals::ReadKnownPrincipalType(JSContext* aCx,
 }
 
 static bool
+WritePrincipalInfo(JSStructuredCloneWriter* aWriter,
+                   const OriginAttributes& aAttrs,
+                   const nsCString& aSpec,
+                   const nsCString& aOriginNoSuffix)
+{
+  nsAutoCString suffix;
+  aAttrs.CreateSuffix(suffix);
+
+  return JS_WriteUint32Pair(aWriter, suffix.Length(), aSpec.Length()) &&
+         JS_WriteBytes(aWriter, suffix.get(), suffix.Length()) &&
+         JS_WriteBytes(aWriter, aSpec.get(), aSpec.Length()) &&
+         JS_WriteUint32Pair(aWriter, aOriginNoSuffix.Length(), 0) &&
+         JS_WriteBytes(aWriter, aOriginNoSuffix.get(),
+                       aOriginNoSuffix.Length());
+}
+
+static bool
 WritePrincipalInfo(JSStructuredCloneWriter* aWriter, const PrincipalInfo& aInfo)
 {
     if (aInfo.type() == PrincipalInfo::TNullPrincipalInfo) {
-        return JS_WriteUint32Pair(aWriter, SCTAG_DOM_NULL_PRINCIPAL, 0);
+        const NullPrincipalInfo& nullInfo = aInfo;
+        return JS_WriteUint32Pair(aWriter, SCTAG_DOM_NULL_PRINCIPAL, 0) &&
+               WritePrincipalInfo(aWriter, nullInfo.attrs(), nullInfo.spec(),
+                                  EmptyCString());
     }
     if (aInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
         return JS_WriteUint32Pair(aWriter, SCTAG_DOM_SYSTEM_PRINCIPAL, 0);
@@ -240,12 +321,9 @@ WritePrincipalInfo(JSStructuredCloneWriter* aWriter, const PrincipalInfo& aInfo)
 
     MOZ_ASSERT(aInfo.type() == PrincipalInfo::TContentPrincipalInfo);
     const ContentPrincipalInfo& cInfo = aInfo;
-    nsAutoCString suffix;
-    cInfo.attrs().CreateSuffix(suffix);
     return JS_WriteUint32Pair(aWriter, SCTAG_DOM_CONTENT_PRINCIPAL, 0) &&
-           JS_WriteUint32Pair(aWriter, suffix.Length(), cInfo.spec().Length()) &&
-           JS_WriteBytes(aWriter, suffix.get(), suffix.Length()) &&
-           JS_WriteBytes(aWriter, cInfo.spec().get(), cInfo.spec().Length());
+           WritePrincipalInfo(aWriter, cInfo.attrs(), cInfo.spec(),
+                              cInfo.originNoSuffix());
 }
 
 bool

@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -10,11 +11,8 @@
 namespace mozilla {
 namespace layers {
 
-MacIOSurfaceTextureSourceBasic::MacIOSurfaceTextureSourceBasic(
-                                BasicCompositor* aCompositor,
-                                MacIOSurface* aSurface)
-  : mCompositor(aCompositor)
-  , mSurface(aSurface)
+MacIOSurfaceTextureSourceBasic::MacIOSurfaceTextureSourceBasic(MacIOSurface* aSurface)
+  : mSurface(aSurface)
 {
   MOZ_COUNT_CTOR(MacIOSurfaceTextureSourceBasic);
 }
@@ -59,32 +57,31 @@ MacIOSurfaceTextureSourceBasic::GetSurface(gfx::DrawTarget* aTarget)
   return mSourceSurface;
 }
 
-void
-MacIOSurfaceTextureSourceBasic::SetCompositor(Compositor* aCompositor)
-{
-  mCompositor = static_cast<BasicCompositor*>(aCompositor);
-}
-
 bool
 MacIOSurfaceTextureHostBasic::Lock()
 {
-  if (!mCompositor) {
+  if (!mProvider) {
     return false;
   }
 
   if (!mTextureSource) {
-    mTextureSource = new MacIOSurfaceTextureSourceBasic(mCompositor, mSurface);
+    mTextureSource = new MacIOSurfaceTextureSourceBasic(mSurface);
   }
   return true;
 }
 
 void
-MacIOSurfaceTextureHostBasic::SetCompositor(Compositor* aCompositor)
+MacIOSurfaceTextureHostBasic::SetTextureSourceProvider(TextureSourceProvider* aProvider)
 {
-  BasicCompositor* compositor = static_cast<BasicCompositor*>(aCompositor);
-  mCompositor = compositor;
+  if (!aProvider->AsCompositor() || !aProvider->AsCompositor()->AsBasicCompositor()) {
+    mTextureSource = nullptr;
+    return;
+  }
+
+  mProvider = aProvider;
+
   if (mTextureSource) {
-    mTextureSource->SetCompositor(compositor);
+    mTextureSource->SetTextureSourceProvider(aProvider);
   }
 }
 

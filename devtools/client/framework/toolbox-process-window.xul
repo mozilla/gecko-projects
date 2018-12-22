@@ -9,13 +9,15 @@
 
 <?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
 
+<!-- minwidth=50 is sum width of chevron and meatball menu button. -->
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         id="devtools-toolbox-window"
         macanimationtype="document"
         fullscreenbutton="true"
         windowtype="devtools:toolbox"
         width="900" height="600"
-        persist="screenX screenY width height sizemode">
+        persist="screenX screenY width height sizemode"
+        minwidth="50">
 
   <script type="text/javascript" src="chrome://global/content/globalOverlay.js"/>
   <script type="text/javascript" src="toolbox-process-window.js"/>
@@ -37,9 +39,11 @@
        for example when viewing network request details. -->
   <popupset id="mainPopupSet"></popupset>
 
-  <vbox id="error-message-container" hidden="true" flex="1">
-    <box>&browserToolboxErrorMessage;</box>
-    <textbox multiline="true" id="error-message" flex="1"></textbox>
+  <vbox id="status-message-container" hidden="true" flex="1">
+    <box>&browserToolboxStatusMessage;</box>
+    <textbox multiline="true" id="status-message" flex="1"></textbox>
   </vbox>
-  <iframe id="toolbox-iframe" flex="1"></iframe>
+
+  <tooltip id="aHTMLTooltip" page="true"/>
+  <iframe id="toolbox-iframe" flex="1" tooltip="aHTMLTooltip"></iframe>
 </window>

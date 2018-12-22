@@ -1,41 +1,26 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Components.utils.import("resource://gre/modules/Promise.jsm");
+ChromeUtils.import("resource://gre/modules/Promise.jsm", this);
 
 const kDefaultWait = 2000;
 
-function is_hidden(aElement) {
-  var style = aElement.ownerDocument.defaultView.getComputedStyle(aElement, "");
-  if (style.display == "none")
-    return true;
-  if (style.visibility != "visible")
-    return true;
-
-  // Hiding a parent element will hide all its children
-  if (aElement.parentNode != aElement.ownerDocument)
-    return is_hidden(aElement.parentNode);
-
-  return false;
-}
-
 function is_element_visible(aElement, aMsg) {
   isnot(aElement, null, "Element should not be null, when checking visibility");
-  ok(!is_hidden(aElement), aMsg);
+  ok(!BrowserTestUtils.is_hidden(aElement), aMsg);
 }
 
 function is_element_hidden(aElement, aMsg) {
   isnot(aElement, null, "Element should not be null, when checking visibility");
-  ok(is_hidden(aElement), aMsg);
+  ok(BrowserTestUtils.is_hidden(aElement), aMsg);
 }
 
 function open_preferences(aCallback) {
-  gBrowser.selectedTab = gBrowser.addTab("about:preferences");
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, "about:preferences");
   let newTabBrowser = gBrowser.getBrowserForTab(gBrowser.selectedTab);
-  newTabBrowser.addEventListener("Initialized", function () {
-    newTabBrowser.removeEventListener("Initialized", arguments.callee, true);
+  newTabBrowser.addEventListener("Initialized", function() {
     aCallback(gBrowser.contentWindow);
-  }, true);
+  }, { capture: true, once: true });
 }
 
 function openAndLoadSubDialog(aURL, aFeatures = null, aParams = null, aClosingCallback = null) {
@@ -46,20 +31,20 @@ function openAndLoadSubDialog(aURL, aFeatures = null, aParams = null, aClosingCa
 
 function promiseLoadSubDialog(aURL) {
   return new Promise((resolve, reject) => {
-    content.gSubDialog._frame.addEventListener("load", function load(aEvent) {
-      if (aEvent.target.contentWindow.location == "about:blank")
+    content.gSubDialog._dialogStack.addEventListener("dialogopen", function dialogopen(aEvent) {
+      if (aEvent.detail.dialog._frame.contentWindow.location == "about:blank")
         return;
-      content.gSubDialog._frame.removeEventListener("load", load);
+      content.gSubDialog._dialogStack.removeEventListener("dialogopen", dialogopen);
 
-      is(content.gSubDialog._frame.contentWindow.location.toString(), aURL,
-         "Check the proper URL is loaded");
+      is(aEvent.detail.dialog._frame.contentWindow.location.toString(), aURL,
+        "Check the proper URL is loaded");
 
       // Check visibility
-      is_element_visible(content.gSubDialog._overlay, "Overlay is visible");
+      is_element_visible(aEvent.detail.dialog._overlay, "Overlay is visible");
 
       // Check that stylesheets were injected
-      let expectedStyleSheetURLs = content.gSubDialog._injectedStyleSheets.slice(0);
-      for (let styleSheet of content.gSubDialog._frame.contentDocument.styleSheets) {
+      let expectedStyleSheetURLs = aEvent.detail.dialog._injectedStyleSheets.slice(0);
+      for (let styleSheet of aEvent.detail.dialog._frame.contentDocument.styleSheets) {
         let i = expectedStyleSheetURLs.indexOf(styleSheet.href);
         if (i >= 0) {
           info("found " + styleSheet.href);
@@ -68,7 +53,9 @@ function promiseLoadSubDialog(aURL) {
       }
       is(expectedStyleSheetURLs.length, 0, "All expectedStyleSheetURLs should have been found");
 
-      resolve(content.gSubDialog._frame.contentWindow);
+      // Wait for the next event tick to make sure the remaining part of the
+      // testcase runs after the dialog gets ready for input.
+      executeSoon(() => resolve(aEvent.detail.dialog._frame.contentWindow));
     });
   });
 }
@@ -102,9 +89,9 @@ function waitForEvent(aSubject, aEventName, aTimeoutMs, aTarget) {
     eventDeferred.reject(new Error(aEventName + " event timeout at " + stack));
   }, timeoutMs);
 
-  var listener = function (aEvent) {
+  var listener = function(aEvent) {
     if (aTarget && aTarget !== aEvent.target)
-        return;
+      return;
 
     // stop the timeout clock and resume
     clearTimeout(timerID);
@@ -116,50 +103,50 @@ function waitForEvent(aSubject, aEventName, aTimeoutMs, aTarget) {
     aSubject.removeEventListener(aEventName, listener);
     return aEventOrError;
   }
-  aSubject.addEventListener(aEventName, listener, false);
+  aSubject.addEventListener(aEventName, listener);
   return eventDeferred.promise.then(cleanup, cleanup);
 }
 
-function openPreferencesViaOpenPreferencesAPI(aPane, aAdvancedTab, aOptions) {
-  let deferred = Promise.defer();
-  gBrowser.selectedTab = gBrowser.addTab("about:blank");
-  openPreferences(aPane, aAdvancedTab ? {advancedTab: aAdvancedTab} : undefined);
-  let newTabBrowser = gBrowser.selectedBrowser;
+function openPreferencesViaOpenPreferencesAPI(aPane, aOptions) {
+  return new Promise(resolve => {
+    let finalPrefPaneLoaded = TestUtils.topicObserved("sync-pane-loaded", () => true);
+    gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, "about:blank");
+    openPreferences(aPane);
+    let newTabBrowser = gBrowser.selectedBrowser;
 
-  newTabBrowser.addEventListener("Initialized", function PrefInit() {
-    newTabBrowser.removeEventListener("Initialized", PrefInit, true);
-    newTabBrowser.contentWindow.addEventListener("load", function prefLoad() {
-      newTabBrowser.contentWindow.removeEventListener("load", prefLoad);
-      let win = gBrowser.contentWindow;
-      let selectedPane = win.history.state;
-      let doc = win.document;
-      let selectedAdvancedTab = aAdvancedTab && doc.getElementById("advancedPrefs").selectedTab.id;
-      if (!aOptions || !aOptions.leaveOpen)
-        gBrowser.removeCurrentTab();
-      deferred.resolve({selectedPane: selectedPane, selectedAdvancedTab: selectedAdvancedTab});
-    });
-  }, true);
+    newTabBrowser.addEventListener("Initialized", function() {
+      newTabBrowser.contentWindow.addEventListener("load", async function() {
+        let win = gBrowser.contentWindow;
+        let selectedPane = win.history.state;
+        await finalPrefPaneLoaded;
+        if (!aOptions || !aOptions.leaveOpen)
+          gBrowser.removeCurrentTab();
+        resolve({ selectedPane });
+      }, { once: true });
+    }, { capture: true, once: true });
 
-  return deferred.promise;
-}
-
-function waitForCondition(aConditionFn, aMaxTries=50, aCheckInterval=100) {
-  return new Promise((resolve, reject) => {
-    function tryNow() {
-      tries++;
-      let rv = aConditionFn();
-      if (rv) {
-        resolve(rv);
-      } else if (tries < aMaxTries) {
-        tryAgain();
-      } else {
-        reject("Condition timed out: " + aConditionFn.toSource());
-      }
-    }
-    function tryAgain() {
-      setTimeout(tryNow, aCheckInterval);
-    }
-    let tries = 0;
-    tryAgain();
   });
 }
+
+async function evaluateSearchResults(keyword, searchReults) {
+  searchReults = Array.isArray(searchReults) ? searchReults : [searchReults];
+  searchReults.push("header-searchResults");
+
+  let searchInput = gBrowser.contentDocument.getElementById("searchInput");
+  searchInput.focus();
+  let searchCompletedPromise = BrowserTestUtils.waitForEvent(
+    gBrowser.contentWindow, "PreferencesSearchCompleted", evt => evt.detail == keyword);
+  EventUtils.sendString(keyword);
+  await searchCompletedPromise;
+
+  let mainPrefTag = gBrowser.contentDocument.getElementById("mainPrefPane");
+  for (let i = 0; i < mainPrefTag.childElementCount; i++) {
+    let child = mainPrefTag.children[i];
+    if (searchReults.includes(child.id)) {
+      is_element_visible(child, "Should be in search results");
+    } else if (child.id) {
+      is_element_hidden(child, "Should not be in search results");
+    }
+  }
+}
+

@@ -7,22 +7,23 @@
 
 include LayersSurfaces;
 include LayersMessages;
-include protocol PCompositable;
 include protocol PCompositorBridge;
-include protocol PLayer;
 include protocol PRenderFrame;
 include protocol PTexture;
 
 include "mozilla/GfxMessageUtils.h";
+include "mozilla/layers/LayersMessageUtils.h";
 
 using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
-using mozilla::layers::TextureFlags from "mozilla/layers/CompositorTypes.h";
 using class mozilla::layers::APZTestData from "mozilla/layers/APZTestData.h";
 using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
-using mozilla::CSSPoint from "Units.h";
+using mozilla::layers::LayerHandle from "mozilla/layers/LayersTypes.h";
+using mozilla::layers::CompositableHandle from "mozilla/layers/LayersTypes.h";
+using mozilla::layers::TransactionId from "mozilla/layers/LayersTypes.h";
 
 /**
  * The layers protocol is spoken between thread contexts that manage
@@ -35,43 +36,36 @@ using mozilla::CSSPoint from "Units.h";
 namespace mozilla {
 namespace layers {
 
-union MaybeTransform {
-  Matrix4x4;
-  void_t;
-};
-
+/**
+ * The PLayerTransaction protocol manages the layer tree for a single "browser".
+ * The "browser" can be a top-level browser window, in which case the PLayer-
+ * TransactionChild exists in the UI process. The "browser" can also be a content
+ * tab, in which case the PLayerTransactionChild exists in the content process.
+ * In either case, the PLayerTransactionParent exists in the GPU process (if
+ * there is one) or the UI process otherwise.
+ */
 sync protocol PLayerTransaction {
   manager PCompositorBridge;
-  manages PLayer;
-  manages PCompositable;
-  manages PTexture;
-
-child:
-  async ParentAsyncMessages(AsyncParentMessageData[] aMessages);
 
 parent:
-  async PLayer();
-  async PCompositable(TextureInfo aTextureInfo);
-  async PTexture(SurfaceDescriptor aSharedData, LayersBackend aBackend, TextureFlags aTextureFlags);
-
   // The isFirstPaint flag can be used to indicate that this is the first update
   // for a particular document.
-  sync Update(Edit[] cset, OpDestroy[] toDestroy,
-              uint64_t id, TargetConfig targetConfig,
-              PluginWindowData[] plugins, bool isFirstPaint,
-              bool scheduleComposite, uint32_t paintSequenceNumber,
-              bool isRepeatTransaction, TimeStamp transactionStart,
-              int32_t paintSyncId)
-    returns (EditReply[] reply);
+  async Update(TransactionInfo txn);
 
-  // We don't need to send a sync transaction if
-  // no transaction operate require a swap.
-  async UpdateNoSwap(Edit[] cset, OpDestroy[] toDestroy,
-                     uint64_t id, TargetConfig targetConfig,
-                     PluginWindowData[] plugins, bool isFirstPaint,
-                     bool scheduleComposite, uint32_t paintSequenceNumber,
-                     bool isRepeatTransaction, TimeStamp transactionStart,
-                     int32_t paintSyncId);
+  async PaintTime(TransactionId id, TimeDuration paintTime);
+
+  async SetLayerObserverEpoch(uint64_t layerObserverEpoch);
+
+  // Create a new Compositable.
+  async NewCompositable(CompositableHandle handle, TextureInfo info);
+
+  // Release an object that is no longer in use.
+  async ReleaseLayer(LayerHandle layer);
+  async ReleaseCompositable(CompositableHandle compositable);
+
+  // Tell the compositor to notify APZ that a layer has been confirmed for an
+  // input event.
+  async SetConfirmedTargetAPZC(uint64_t aInputBlockId, ScrollableLayerGuid[] aTargets);
 
   // Testing APIs
 
@@ -81,18 +75,22 @@ parent:
   // Leave test mode and resume normal compositing
   sync LeaveTestMode();
 
-  sync GetOpacity(PLayer layer) returns (float opacity);
+  // Returns the value of the opacity applied to the layer by animation.
+  // |hasAnimationOpacity| is true if the layer has an opacity value
+  // specified by animation. If it's false, |opacity| value is indefinite.
+  sync GetAnimationOpacity(uint64_t aCompositorAnimationsId) returns (float opacity,
+                                                  bool hasAnimationOpacity);
 
   // Returns the value of the transform applied to the layer by animation after
   // factoring out translation components introduced to account for the offset
   // of the corresponding frame and transform origin and after converting to CSS
   // pixels. If the layer is not transformed by animation, the return value will
   // be void_t.
-  sync GetAnimationTransform(PLayer layer) returns (MaybeTransform transform);
+  sync GetAnimationTransform(uint64_t aCompositorAnimationId) returns (MaybeTransform transform);
 
-  // Updates the scroll offset and generation counter on the APZC for the
-  // given scroll id.
-  sync UpdateScrollOffset(ViewID id, uint32_t generation, CSSPoint offset);
+  // Returns the value of the transform applied to the layer by animation and
+  // APZC.
+  sync GetTransform(LayerHandle layer) returns (MaybeTransform transform);
 
   // The next time the layer tree is composited, add this async scroll offset in
   // CSS pixels for the given ViewID.
@@ -112,7 +110,7 @@ parent:
   async ClearCachedResources();
 
   // Schedule a composite if one isn't already scheduled.
-  async ForceComposite();
+  async ScheduleComposite();
 
   // Get a copy of the compositor-side APZ test data instance for this
   // layers id.
@@ -121,15 +119,14 @@ parent:
   // Query a named property from the last frame
   sync RequestProperty(nsString property) returns (float value);
 
-  // Tell the compositor to notify APZ that a layer has been confirmed for an
-  // input event.
-  async SetConfirmedTargetAPZC(uint64_t aInputBlockId, ScrollableLayerGuid[] aTargets);
+  // Return the TextureFactoryIdentifier for this compositor.
+  sync GetTextureFactoryIdentifier() returns (TextureFactoryIdentifier aIdentifier);
 
-  async ChildAsyncMessages(AsyncChildMessageData[] aMessages);
+  async RecordPaintTimes(PaintTiming timing);
 
   async Shutdown();
+  sync ShutdownSync();
 
-  sync SyncWithCompositor();
 child:
   async __delete__();
 };

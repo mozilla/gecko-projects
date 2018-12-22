@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,9 +14,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
     # Fix inline symbols and math defines for windows.
     DEFINES['_USE_MATH_DEFINES'] = True
     DEFINES['inline'] = "__inline"
-    if CONFIG['_MSC_VER'] and CONFIG['_MSC_VER'] < '1900':
-        # snprintf is prefixed with an underscore on MSVC 2013.
-        DEFINES['snprintf'] = "_snprintf"
     ASFLAGS += ['-Pconfig_win.asm']
     # 32-bit windows need to prefix symbols with an underscore.
     if CONFIG['CPU_ARCH'] == 'x86':
@@ -31,7 +28,7 @@ else:
 LOCAL_INCLUDES += ['/media/libav']
 
 # Suppress warnings in third-party code.
-if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
+if CONFIG['CC_TYPE'] in ('clang', 'clang-cl', 'gcc'):
     CFLAGS += [
         '-Wno-parentheses',
         '-Wno-pointer-sign',
@@ -39,12 +36,12 @@ if CONFIG['GNU_CC'] or CONFIG['CLANG_CL']:
         '-Wno-switch',
         '-Wno-type-limits',
     ]
-if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
+if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
     CFLAGS += [
         '-Wno-incompatible-pointer-types-discards-qualifiers',
         '-Wno-logical-op-parentheses',
     ]
-if CONFIG['_MSC_VER'] and not CONFIG['CLANG_CL']:
+if CONFIG['CC_TYPE'] == 'msvc':
     CFLAGS += [
         '-wd4090', # 'return' : different 'const' qualifiers
         '-wd4018', # '>' : signed/unsigned mismatch

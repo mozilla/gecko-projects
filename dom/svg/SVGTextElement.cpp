@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGTextElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGTextElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGTextElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -41,7 +41,7 @@ SVGTextElement::GetLengthInfo()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGTextElement)
@@ -51,7 +51,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGTextElement)
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGTextElement::IsAttributeMapped(const nsIAtom* name) const
+SVGTextElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sTextContentElementsMap,

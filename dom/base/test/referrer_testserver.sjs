@@ -7,26 +7,35 @@
 
 Components.utils.importGlobalProperties(["URLSearchParams"]);
 const SJS = "referrer_testserver.sjs?";
-const BASE_URL = "example.com/tests/dom/base/test/" + SJS;
+const SJS_PATH = "/tests/dom/base/test/";
+const BASE_ORIGIN = "example.com"
+const BASE_URL = BASE_ORIGIN + SJS_PATH + SJS;
 const SHARED_KEY = SJS;
-const SAME_ORIGIN = "mochi.test:8888/tests/dom/base/test/" + SJS;
-const CROSS_ORIGIN = "test1.example.com/tests/dom/base/test/" + SJS;
+const SAME_ORIGIN = "mochi.test:8888" + SJS_PATH + SJS;
+const CROSS_ORIGIN_URL = "test1.example.com" + SJS_PATH + SJS;
 
 const IMG_BYTES = atob(
   "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12" +
   "P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==");
 
-function createTestUrl(aPolicy, aAction, aName, aType) {
-  return "http://" + BASE_URL +
+function createTestUrl(aPolicy, aAction, aName, aType, aSchemeFrom, aSchemeTo, crossOrigin) {
+  var schemeTo = aSchemeTo || "http";
+  var schemeFrom = aSchemeFrom || "http";
+  var url = schemeTo + "://";
+  url += (crossOrigin ? CROSS_ORIGIN_URL : BASE_URL);
+  url +=
          "ACTION=" + aAction + "&" +
          "policy=" + aPolicy + "&" +
          "NAME=" + aName + "&" +
-         "type=" + aType;
-}
+         "type=" + aType + "&" +
+         "SCHEME_FROM=" + schemeFrom;
+  return url;
+  }
 
 // test page using iframe referrer attribute
 // if aParams are set this creates a test where the iframe url is a redirect
-function createIframeTestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aParams, aChangingMethod) {
+function createIframeTestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aParams,
+                                           aSchemeFrom, aSchemeTo, aChangingMethod) {
   var metaString = "";
   if (aMetaPolicy) {
     metaString = `<meta name="referrer" content="${aMetaPolicy}">`;
@@ -42,9 +51,9 @@ function createIframeTestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAt
   if (aParams) {
     aParams.delete("ACTION");
     aParams.append("ACTION", "redirectIframe");
-    iframeUrl = "http://" + CROSS_ORIGIN + aParams.toString();
+    iframeUrl = "http://" + CROSS_ORIGIN_URL + aParams.toString();
   } else {
-    iframeUrl = createTestUrl(aAttributePolicy, "test", aName, "iframe");
+    iframeUrl = createTestUrl(aAttributePolicy, "test", aName, "iframe", aSchemeFrom, aSchemeTo);
   }
 
   return `<!DOCTYPE HTML>
@@ -67,20 +76,20 @@ function createIframeTestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAt
            </html>`;
 }
 
-function buildAnchorString(aMetaPolicy, aReferrerPolicy, aName, aRelString){
+function buildAnchorString(aMetaPolicy, aReferrerPolicy, aName, aRelString, aSchemeFrom, aSchemeTo){
   if (aReferrerPolicy) {
-    return `<a href="${createTestUrl(aReferrerPolicy, 'test', aName, 'link')}" referrerpolicy="${aReferrerPolicy}" id="link" ${aRelString}>${aReferrerPolicy}</a>`;
+    return `<a href="${createTestUrl(aReferrerPolicy, 'test', aName, 'link', aSchemeFrom, aSchemeTo)}" referrerpolicy="${aReferrerPolicy}" id="link" ${aRelString}>${aReferrerPolicy}</a>`;
   }
-  return `<a href="${createTestUrl(aMetaPolicy, 'test', aName, 'link')}" id="link" ${aRelString}>link</a>`;
+  return `<a href="${createTestUrl(aMetaPolicy, 'test', aName, 'link', aSchemeFrom, aSchemeTo)}" id="link" ${aRelString}>link</a>`;
 }
 
-function buildAreaString(aMetaPolicy, aReferrerPolicy, aName, aRelString){
+function buildAreaString(aMetaPolicy, aReferrerPolicy, aName, aRelString, aSchemeFrom, aSchemeTo){
   var result = `<img src="file_mozfiledataurl_img.jpg" alt="image" usemap="#imageMap">`;
   result += `<map name="imageMap">`;
   if (aReferrerPolicy) {
-    result += `<area shape="circle" coords="1,1,1" href="${createTestUrl(aReferrerPolicy, 'test', aName, 'link')}" alt="theArea" referrerpolicy="${aReferrerPolicy}" id="link" ${aRelString}>`;
+    result += `<area shape="circle" coords="1,1,1" href="${createTestUrl(aReferrerPolicy, 'test', aName, 'link', aSchemeFrom, aSchemeTo)}" alt="theArea" referrerpolicy="${aReferrerPolicy}" id="link" ${aRelString}>`;
   } else {
-    result += `<area shape="circle" coords="1,1,1" href="${createTestUrl(aMetaPolicy, 'test', aName, 'link')}" alt="theArea" id="link" ${aRelString}>`;
+    result += `<area shape="circle" coords="1,1,1" href="${createTestUrl(aMetaPolicy, 'test', aName, 'link', aSchemeFrom, aSchemeTo)}" alt="theArea" id="link" ${aRelString}>`;
   }
   result += `</map>`;
 
@@ -88,7 +97,7 @@ function buildAreaString(aMetaPolicy, aReferrerPolicy, aName, aRelString){
 }
 
 // test page using anchor or area referrer attribute
-function createAETestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aRel, aStringBuilder, aChangingMethod) {
+function createAETestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aRel, aStringBuilder, aSchemeFrom, aSchemeTo, aChangingMethod) {
   var metaString = "";
   if (aMetaPolicy) {
     metaString = `<head><meta name="referrer" content="${aMetaPolicy}"></head>`;
@@ -103,7 +112,7 @@ function createAETestPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttrib
   if (aRel) {
     relString = `rel="noreferrer"`;
   }
-  var elementString = aStringBuilder(aMetaPolicy, aAttributePolicy, aName, relString);
+  var elementString = aStringBuilder(aMetaPolicy, aAttributePolicy, aName, relString, aSchemeFrom, aSchemeTo);
 
   return `<!DOCTYPE HTML>
            <html>
@@ -128,7 +137,7 @@ function createRedirectImgTestCase(aParams, aAttributePolicy) {
   }
   aParams.delete("ACTION");
   aParams.append("ACTION", "redirectImg");
-  var imgUrl = "http://" + CROSS_ORIGIN + aParams.toString();
+  var imgUrl = "http://" + CROSS_ORIGIN_URL + aParams.toString();
 
   return `<!DOCTYPE HTML>
           <html>
@@ -148,9 +157,94 @@ function createRedirectImgTestCase(aParams, aAttributePolicy) {
           </html>`;
 }
 
+// test page using link referrer attribute
+function createLinkPageUsingRefferer(aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aRel, aStringBuilder, aSchemeFrom, aSchemeTo, aTestType) {
+  var metaString = "";
+  if (aMetaPolicy) {
+    metaString = `<meta name="referrer" content="${aMetaPolicy}">`;
+  }
+
+  var changeString = "";
+  var policy = aAttributePolicy ? aAttributePolicy : aMetaPolicy;
+  var elementString = aStringBuilder(policy, aName, aRel, aSchemeFrom, aSchemeTo, aTestType);
+
+  if (aTestType === "setAttribute") {
+    changeString = `var link = document.getElementById("test_link");
+                    link.setAttribute("referrerpolicy", "${aNewAttributePolicy}");
+                    link.href = "${createTestUrl(policy, "test", aName, "link_element_" + aRel, aSchemeFrom, aSchemeTo)}";`;
+  } else if (aTestType === "property") {
+    changeString = `var link = document.getElementById("test_link");
+                    link.referrerPolicy = "${aNewAttributePolicy}";
+                    link.href = "${createTestUrl(policy, "test", aName, "link_element_" + aRel, aSchemeFrom, aSchemeTo)}";`;
+  }
+
+  return `<!DOCTYPE HTML>
+           <html>
+             <head>
+               ${metaString}
+             </head>
+             <body>
+                ${elementString}
+                <script>
+                  ${changeString}
+                </script>
+             </body>
+           </html>`;
+}
+
+function createFetchUserControlRPTestCase(aName, aSchemeFrom, aSchemeTo, crossOrigin) {
+  var srcUrl = createTestUrl("", "test", aName, "fetch", aSchemeFrom, aSchemeTo, crossOrigin);
+
+  return `<!DOCTYPE HTML>
+          <html>
+          <head>
+          <meta charset="utf-8">
+          <title>Test user control referrer policies</title>
+          </head>
+          <body>
+          <script>
+            fetch("${srcUrl}", {referrerPolicy: ""}).then(function (response) {
+              window.parent.postMessage("childLoadComplete", "http://mochi.test:8888");
+            });
+          </script>
+          </body>
+          </html>`;
+}
+
+function buildLinkString(aPolicy, aName, aRel, aSchemeFrom, aSchemeTo, aTestType) {
+  var href = '';
+  var onChildComplete = `window.parent.postMessage("childLoadComplete", "http://mochi.test:8888");`
+  var policy = '';
+  var asString = '';
+  var relString = '';
+
+  if (aRel) {
+    relString = `rel="${aRel}"`;
+  }
+
+  if (aPolicy) {
+    policy = `referrerpolicy=${aPolicy}`;
+  }
+
+  if (aRel == "preload") {
+    asString = 'as="image"';
+  }
+
+  if (!aTestType) {
+    href = `href=${createTestUrl(aPolicy, "test", aName, "link_element_" + aRel, aSchemeFrom, aSchemeTo)}`;
+  }
+
+  return `<link ${relString} ${href} ${policy} ${asString} id="test_link" onload='${onChildComplete}' onerror='${onChildComplete}'>`;
+}
+
 function handleRequest(request, response) {
   var params = new URLSearchParams(request.queryString);
   var action = params.get("ACTION");
+  var schemeFrom = params.get("SCHEME_FROM") || "http";
+  var schemeTo = params.get("SCHEME_TO") || "http";
+  var crossOrigin = params.get("CROSS_ORIGIN") || false;
+
+  response.setHeader("Access-Control-Allow-Origin", "*", false);
 
   if (action === "resetState") {
     setSharedState(SHARED_KEY, "{}");
@@ -174,7 +268,7 @@ function handleRequest(request, response) {
     params.append("type", "img");
     // 302 found, 301 Moved Permanently, 303 See Other, 307 Temporary Redirect
     response.setStatusLine("1.1", 302, "found");
-    response.setHeader("Location",  "http://" + CROSS_ORIGIN + params.toString(), false);
+    response.setHeader("Location",  "http://" + CROSS_ORIGIN_URL + params.toString(), false);
     return;
   }
   if (action === "redirectIframe"){
@@ -183,7 +277,7 @@ function handleRequest(request, response) {
     params.append("type", "iframe");
     // 302 found, 301 Moved Permanently, 303 See Other, 307 Temporary Redirect
     response.setStatusLine("1.1", 302, "found");
-    response.setHeader("Location",  "http://" + CROSS_ORIGIN + params.toString(), false);
+    response.setHeader("Location",  "http://" + CROSS_ORIGIN_URL + params.toString(), false);
     return;
   }
   if (action === "test") {
@@ -201,7 +295,7 @@ function handleRequest(request, response) {
       var referrer = request.getHeader("Referer");
       if (referrer.indexOf("referrer_testserver") > 0) {
         referrerLevel = "full";
-      } else if (referrer.indexOf("http://mochi.test:8888") == 0) {
+      } else if (referrer.indexOf(schemeFrom + "://example.com") == 0) {
         referrerLevel = "origin";
       } else {
         // this is never supposed to happen
@@ -218,7 +312,7 @@ function handleRequest(request, response) {
 
     setSharedState(SHARED_KEY, JSON.stringify(result));
 
-    if (type === "img") {
+    if (type === "img" || type == "link_element_preload") {
       // return image
       response.setHeader("Content-Type", "image/png");
       response.write(IMG_BYTES);
@@ -250,8 +344,8 @@ function handleRequest(request, response) {
 
   // anchor & area
   var _getPage = createAETestPageUsingRefferer.bind(null, metaPolicy, attributePolicy, newAttributePolicy, name, rel);
-  var _getAnchorPage = _getPage.bind(null, buildAnchorString);
-  var _getAreaPage = _getPage.bind(null, buildAreaString);
+  var _getAnchorPage = _getPage.bind(null, buildAnchorString, schemeFrom, schemeTo);
+  var _getAreaPage = _getPage.bind(null, buildAreaString, schemeFrom, schemeTo);
 
   // aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aChangingMethod, aStringBuilder
   if (action === "generate-anchor-policy-test") {
@@ -280,7 +374,8 @@ function handleRequest(request, response) {
   }
 
   // iframe
-  _getPage = createIframeTestPageUsingRefferer.bind(null, metaPolicy, attributePolicy, newAttributePolicy, name, "");
+  _getPage = createIframeTestPageUsingRefferer.bind(null, metaPolicy, attributePolicy, newAttributePolicy, name, "",
+                                                    schemeFrom, schemeTo);
 
   // aMetaPolicy, aAttributePolicy, aNewAttributePolicy, aName, aChangingMethod
   if (action === "generate-iframe-policy-test") {
@@ -302,7 +397,30 @@ function handleRequest(request, response) {
     return;
   }
   if (action === "generate-iframe-redirect-policy-test") {
-    response.write(createIframeTestPageUsingRefferer(metaPolicy, attributePolicy, newAttributePolicy, name, params));
+    response.write(createIframeTestPageUsingRefferer(metaPolicy, attributePolicy, newAttributePolicy, name, params,
+                                                     schemeFrom, schemeTo));
+    return;
+  }
+
+  var _getPage = createLinkPageUsingRefferer.bind(null, metaPolicy, attributePolicy, newAttributePolicy, name, rel);
+  var _getLinkPage = _getPage.bind(null, buildLinkString, schemeFrom, schemeTo);
+
+  // link
+  if (action === "generate-link-policy-test") {
+    response.write(_getLinkPage());
+    return;
+  }
+  if (action === "generate-link-policy-test-set-attribute") {
+    response.write(_getLinkPage("setAttribute"));
+    return;
+  }
+  if (action === "generate-link-policy-test-property") {
+    response.write(_getLinkPage("property"));
+    return;
+  }
+
+  if (action === "generate-fetch-user-control-policy-test") {
+    response.write(createFetchUserControlRPTestCase(name, schemeFrom, schemeTo, crossOrigin));
     return;
   }
 

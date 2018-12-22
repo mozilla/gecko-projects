@@ -15,19 +15,23 @@
 #include "nscore.h"
 #include "nsCoord.h"
 
-class nsRenderingContext;
-struct nsHTMLReflowState;
+class gfxContext;
+namespace mozilla {
+struct ReflowInput;
+} // namespace mozilla
 
 class nsITableLayoutStrategy
 {
 public:
+    using ReflowInput = mozilla::ReflowInput;
+
     virtual ~nsITableLayoutStrategy() {}
 
     /** Implement nsIFrame::GetMinISize for the table */
-    virtual nscoord GetMinISize(nsRenderingContext* aRenderingContext) = 0;
+    virtual nscoord GetMinISize(gfxContext* aRenderingContext) = 0;
 
     /** Implement nsIFrame::GetPrefISize for the table */
-    virtual nscoord GetPrefISize(nsRenderingContext* aRenderingContext,
+    virtual nscoord GetPrefISize(gfxContext* aRenderingContext,
                                  bool aComputingSize) = 0;
 
     /** Implement nsIFrame::MarkIntrinsicISizesDirty for the table */
@@ -37,7 +41,7 @@ public:
      * Compute final column isizes based on the intrinsic isize data and
      * the available isize.
      */
-    virtual void ComputeColumnISizes(const nsHTMLReflowState& aReflowState) = 0;
+    virtual void ComputeColumnISizes(const ReflowInput& aReflowInput) = 0;
 
     /**
      * Return the type of table layout strategy, without the cost of

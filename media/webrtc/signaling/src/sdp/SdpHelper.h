@@ -38,8 +38,11 @@ class SdpHelper {
                                  const SdpMediaSection& source,
                                  SdpMediaSection* dest);
     bool AreOldTransportParamsValid(const Sdp& oldAnswer,
+                                    const Sdp& offerersPreviousSdp,
                                     const Sdp& newOffer,
                                     size_t level);
+    bool IceCredentialsDiffer(const SdpMediaSection& msection1,
+                              const SdpMediaSection& msection2);
 
     bool MsectionIsDisabled(const SdpMediaSection& msection) const;
     static void DisableMsection(Sdp* sdp, SdpMediaSection* msection);
@@ -60,7 +63,7 @@ class SdpHelper {
                              std::string* mid);
     nsresult GetIdsFromMsid(const Sdp& sdp,
                             const SdpMediaSection& msection,
-                            std::string* streamId,
+                            std::vector<std::string>* streamId,
                             std::string* trackId);
     nsresult GetMsids(const SdpMediaSection& msection,
                       std::vector<SdpMsidAttributeList::Msid>* msids);
@@ -116,6 +119,8 @@ class SdpHelper {
         const SdpMediaSection& remoteMsection,
         const std::vector<SdpExtmapAttributeList::Extmap>& localExtensions,
         SdpMediaSection* localMsection);
+
+    bool SdpMatch(const Sdp& sdp1, const Sdp& sdp2);
 
   private:
     std::string& mLastError;

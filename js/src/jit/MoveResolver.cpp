@@ -6,6 +6,9 @@
 
 #include "jit/MoveResolver.h"
 
+#include "mozilla/Attributes.h"
+#include "mozilla/ScopeExit.h"
+
 #include "jit/MacroAssembler.h"
 #include "jit/RegisterSets.h"
 
@@ -13,6 +16,7 @@ using namespace js;
 using namespace js::jit;
 
 MoveOperand::MoveOperand(MacroAssembler& masm, const ABIArg& arg)
+  : disp_(0)
 {
     switch (arg.kind()) {
       case ABIArg::GPR:
@@ -33,9 +37,14 @@ MoveOperand::MoveOperand(MacroAssembler& masm, const ABIArg& arg)
         break;
       case ABIArg::Stack:
         kind_ = MEMORY;
-        code_ = masm.getStackPointer().code();
+        if (IsHiddenSP(masm.getStackPointer()))
+            MOZ_CRASH("Hidden SP cannot be represented as register code on this platform");
+        else
+            code_ = AsRegister(masm.getStackPointer()).code();
         disp_ = arg.offsetFromArgBase();
         break;
+      case ABIArg::Uninitialized:
+        MOZ_CRASH("Uninitialized ABIArg kind");
     }
 }
 
@@ -56,10 +65,9 @@ MoveResolver::addMove(const MoveOperand& from, const MoveOperand& to, MoveOp::Ty
 {
     // Assert that we're not doing no-op moves.
     MOZ_ASSERT(!(from == to));
-    PendingMove* pm = movePool_.allocate();
+    PendingMove* pm = movePool_.allocate(from, to, type);
     if (!pm)
         return false;
-    new (pm) PendingMove(from, to, type);
     pending_.pushBack(pm);
     return true;
 }
@@ -104,11 +112,116 @@ MoveResolver::findCycledMove(PendingMoveIterator* iter, PendingMoveIterator end,
     return nullptr;
 }
 
+#ifdef JS_CODEGEN_ARM
+static inline bool
+MoveIsDouble(const MoveOperand& move)
+{
+    if (!move.isFloatReg())
+        return false;
+    return move.floatReg().isDouble();
+}
+#endif
+
+#ifdef JS_CODEGEN_ARM
+static inline bool
+MoveIsSingle(const MoveOperand& move)
+{
+    if (!move.isFloatReg())
+        return false;
+    return move.floatReg().isSingle();
+}
+#endif
+
+#ifdef JS_CODEGEN_ARM
+bool
+MoveResolver::isDoubleAliasedAsSingle(const MoveOperand& move)
+{
+    if (!MoveIsDouble(move))
+        return false;
+
+    for (auto iter = pending_.begin(); iter != pending_.end(); ++iter) {
+        PendingMove* other = *iter;
+        if (other->from().aliases(move) && MoveIsSingle(other->from()))
+            return true;
+        if (other->to().aliases(move) && MoveIsSingle(other->to()))
+            return true;
+    }
+    return false;
+}
+#endif
+
+#ifdef JS_CODEGEN_ARM
+static MoveOperand
+SplitIntoLowerHalf(const MoveOperand& move)
+{
+    if (MoveIsDouble(move)) {
+        FloatRegister lowerSingle = move.floatReg().asSingle();
+        return MoveOperand(lowerSingle);
+    }
+
+    MOZ_ASSERT(move.isMemoryOrEffectiveAddress());
+    return move;
+}
+#endif
+
+#ifdef JS_CODEGEN_ARM
+static MoveOperand
+SplitIntoUpperHalf(const MoveOperand& move)
+{
+    if (MoveIsDouble(move)) {
+        FloatRegister lowerSingle = move.floatReg().asSingle();
+        FloatRegister upperSingle = VFPRegister(lowerSingle.code() + 1, VFPRegister::Single);
+        return MoveOperand(upperSingle);
+    }
+
+    MOZ_ASSERT(move.isMemoryOrEffectiveAddress());
+    return MoveOperand(move.base(), move.disp() + sizeof(float));
+}
+#endif
+
+// Resolves the pending_ list to a list in orderedMoves_.
 bool
 MoveResolver::resolve()
 {
     resetState();
     orderedMoves_.clear();
+
+    // Upon return from this function, the pending_ list must be cleared.
+    auto clearPending = mozilla::MakeScopeExit([this]() {
+        pending_.clear();
+    });
+
+#ifdef JS_CODEGEN_ARM
+    // Some of ARM's double registers alias two of its single registers,
+    // but the algorithm below assumes that every register can participate
+    // in at most one cycle. To satisfy the algorithm, any double registers
+    // that may conflict are split into their single-register halves.
+    //
+    // This logic is only applicable because ARM only uses registers d0-d15,
+    // all of which alias s0-s31. Double registers d16-d31 are unused.
+    // Therefore there is never a double move that cannot be split.
+    // If this changes in the future, the algorithm will have to be fixed.
+    for (auto iter = pending_.begin(); iter != pending_.end(); ++iter) {
+        PendingMove* pm = *iter;
+
+        if (isDoubleAliasedAsSingle(pm->from()) || isDoubleAliasedAsSingle(pm->to())) {
+            MoveOperand fromLower = SplitIntoLowerHalf(pm->from());
+            MoveOperand toLower = SplitIntoLowerHalf(pm->to());
+
+            PendingMove* lower = movePool_.allocate(fromLower, toLower, MoveOp::FLOAT32);
+            if (!lower)
+                return false;
+
+            // Insert the new node before the current position to not affect iteration.
+            pending_.insertBefore(pm, lower);
+
+            // Overwrite pm in place for the upper move. Iteration proceeds as normal.
+            MoveOperand fromUpper = SplitIntoUpperHalf(pm->from());
+            MoveOperand toUpper = SplitIntoUpperHalf(pm->to());
+            pm->overwrite(fromUpper, toUpper, MoveOp::FLOAT32);
+        }
+    }
+#endif
 
     InlineList<PendingMove> stack;
 

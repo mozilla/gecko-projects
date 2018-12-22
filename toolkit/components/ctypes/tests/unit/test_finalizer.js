@@ -1,7 +1,6 @@
 var TEST_SIZE = 100;
 
-function run_test()
-{
+function run_test() {
   let library = open_ctypes_test_lib();
 
   let start = library.declare("test_finalizer_start", ctypes.default_abi,
@@ -34,8 +33,8 @@ function run_test()
                                ctypes.bool,
                                ctypes.size_t,
                                ctypes.size_t),
-      status: status,
-      released: released
+      status,
+      released
   });
   samples.push(
     {
@@ -53,8 +52,8 @@ function run_test()
                                ctypes.bool,
                                ctypes.size_t,
                                ctypes.size_t),
-      status: status,
-      released: released
+      status,
+      released
   });
   samples.push(
     {
@@ -72,8 +71,8 @@ function run_test()
                                ctypes.bool,
                                ctypes.int32_t,
                                ctypes.int32_t),
-      status: status,
-      released: released
+      status,
+      released
     }
   );
   samples.push(
@@ -92,8 +91,8 @@ function run_test()
                                ctypes.bool,
                                ctypes.int64_t,
                                ctypes.int64_t),
-      status: status,
-      released: released
+      status,
+      released
     }
   );
   samples.push(
@@ -112,8 +111,8 @@ function run_test()
                                ctypes.bool,
                                ctypes.void_t.ptr,
                                ctypes.void_t.ptr),
-      status: status,
-      released: released
+      status,
+      released
     }
   );
   samples.push(
@@ -132,15 +131,15 @@ function run_test()
                                ctypes.bool,
                                ctypes.char.ptr,
                                ctypes.char.ptr),
-      status: status,
-      released: released
+      status,
+      released
     }
   );
   const rect_t = new ctypes.StructType("myRECT",
-                                       [{ top   : ctypes.int32_t },
-                                        { left  : ctypes.int32_t },
+                                       [{ top: ctypes.int32_t },
+                                        { left: ctypes.int32_t },
                                         { bottom: ctypes.int32_t },
-                                        { right : ctypes.int32_t }]);
+                                        { right: ctypes.int32_t }]);
   samples.push(
     {
       name: "struct",
@@ -157,8 +156,8 @@ function run_test()
                                ctypes.bool,
                                rect_t,
                                rect_t),
-      status: status,
-      released: released
+      status,
+      released
     }
   );
   samples.push(
@@ -177,7 +176,7 @@ function run_test()
                                ctypes.bool,
                                ctypes.size_t,
                                ctypes.size_t),
-      status: status,
+      status,
       released: function released_eq(i, witness) {
         return i == witness;
       }
@@ -199,7 +198,7 @@ function run_test()
                                ctypes.bool,
                                ctypes.size_t,
                                ctypes.size_t),
-      status: status,
+      status,
       released: function released_rect_eq(i, witness) {
         return witness.top == i
           && witness.bottom == i
@@ -228,7 +227,7 @@ function run_test()
                                ctypes.bool,
                                ctypes.void_t.ptr,
                                ctypes.void_t.ptr),
-      released: released
+      released
     }
   );
 
@@ -259,21 +258,21 @@ function run_test()
 // if we want to avoid tests overlapping.
 function test_cycles(size, tc) {
   // Now, restart this with unreferenced cycles
-  for (i = 0; i < size/2; ++i) {
+  for (let i = 0; i < size / 2; ++i) {
     let a = {
-      a: ctypes.CDataFinalizer(tc.acquire(i*2), tc.release),
+      a: ctypes.CDataFinalizer(tc.acquire(i * 2), tc.release),
       b: {
-        b: ctypes.CDataFinalizer(tc.acquire(i*2+1), tc.release)
+        b: ctypes.CDataFinalizer(tc.acquire(i * 2 + 1), tc.release)
       }
     };
     a.b.a = a;
   }
   do_test_pending();
 
-  Components.utils.schedulePreciseGC(
+  Cu.schedulePreciseGC(
     function after_gc() {
       // Check that _something_ has been finalized
-      do_check_true(count_finalized(size, tc) > 0);
+      Assert.ok(count_finalized(size, tc) > 0);
       do_test_finished();
     }
   );
@@ -297,8 +296,7 @@ function count_finalized(size, tc) {
  * - that (some) finalizers are executed;
  * - that no finalizer is executed twice (this is done on the C side).
  */
-function test_executing_finalizers(size, tc, cleanup)
-{
+function test_executing_finalizers(size, tc, cleanup) {
   dump("test_executing_finalizers " + tc.name + "\n");
   // Allocate |size| items without references
   for (let i = 0; i < size; ++i) {
@@ -307,7 +305,7 @@ function test_executing_finalizers(size, tc, cleanup)
   trigger_gc(); // This should trigger some finalizations, hopefully all
 
   // Check that _something_ has been finalized
-  do_check_true(count_finalized(size, tc) > 0);
+  Assert.ok(count_finalized(size, tc) > 0);
 }
 
 /**
@@ -323,18 +321,18 @@ function test_result_dispose(size, tc, cleanup) {
     cleanup.add(value);
     ref.push(value);
   }
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 
-  for (i = 0; i < size; ++i) {
+  for (let i = 0; i < size; ++i) {
     let witness = ref[i].dispose();
     ref[i] = null;
     if (!tc.released(i, witness)) {
-      do_print("test_result_dispose failure at index "+i);
-      do_check_true(false);
+      info("test_result_dispose failure at index " + i);
+      Assert.ok(false);
     }
   }
 
-  do_check_eq(count_finalized(size, tc), size);
+  Assert.equal(count_finalized(size, tc), size);
 }
 
 
@@ -343,8 +341,7 @@ function test_result_dispose(size, tc, cleanup) {
  * - |dispose| is executed properly
  * - finalizers are not executed after |dispose|
  */
-function test_executing_dispose(size, tc, cleanup)
-{
+function test_executing_dispose(size, tc, cleanup) {
   dump("test_executing_dispose " + tc.name + "\n");
   let ref = [];
   // Allocate |size| items with references
@@ -353,7 +350,7 @@ function test_executing_dispose(size, tc, cleanup)
     cleanup.add(value);
     ref.push(value);
   }
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 
   // Dispose of everything and make sure that everything has been cleaned up
   ref.forEach(
@@ -361,23 +358,23 @@ function test_executing_dispose(size, tc, cleanup)
       v.dispose();
     }
   );
-  do_check_eq(count_finalized(size, tc), size);
+  Assert.equal(count_finalized(size, tc), size);
 
   // Remove references
   ref = [];
 
   // Re-acquire data and make sure that everything has been reinialized
-  for (i = 0; i < size; ++i) {
+  for (let i = 0; i < size; ++i) {
     tc.acquire(i);
   }
 
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 
 
   // Attempt to trigger finalizations, ensure that they do not take place
   trigger_gc();
 
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 }
 
 
@@ -387,8 +384,7 @@ function test_executing_dispose(size, tc, cleanup)
  * - |forget| has the right content
  * - finalizers are not executed after |forget|
  */
-function test_executing_forget(size, tc, cleanup)
-{
+function test_executing_forget(size, tc, cleanup) {
   dump("test_executing_forget " + tc.name + "\n");
   let ref = [];
   // Allocate |size| items with references
@@ -397,14 +393,14 @@ function test_executing_forget(size, tc, cleanup)
     let finalizer = ctypes.CDataFinalizer(original, tc.release);
     ref.push(
       {
-        original: original,
-        finalizer: finalizer
+        original,
+        finalizer
       }
     );
     cleanup.add(finalizer);
-    do_check_true(tc.compare(original, finalizer));
+    Assert.ok(tc.compare(original, finalizer));
   }
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 
   // Forget everything, making sure that we recover the original info
   ref.forEach(
@@ -412,13 +408,13 @@ function test_executing_forget(size, tc, cleanup)
       let original  = v.original;
       let recovered = v.finalizer.forget();
       // Note: Cannot use do_check_eq on Uint64 et al.
-      do_check_true(tc.compare(original, recovered));
-      do_check_eq(original.constructor, recovered.constructor);
+      Assert.ok(tc.compare(original, recovered));
+      Assert.equal(original.constructor, recovered.constructor);
     }
   );
 
   // Also make sure that we have not performed any clean up
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 
   // Remove references
   ref = [];
@@ -426,15 +422,14 @@ function test_executing_forget(size, tc, cleanup)
   // Attempt to trigger finalizations, ensure that they have no effect
   trigger_gc();
 
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 }
 
 
 /**
  * Check that finalizers are not executed
  */
-function test_do_not_execute_finalizers_on_referenced_stuff(size, tc, cleanup)
-{
+function test_do_not_execute_finalizers_on_referenced_stuff(size, tc, cleanup) {
   dump("test_do_not_execute_finalizers_on_referenced_stuff " + tc.name + "\n");
 
   let ref = [];
@@ -447,6 +442,5 @@ function test_do_not_execute_finalizers_on_referenced_stuff(size, tc, cleanup)
   trigger_gc(); // This might trigger some finalizations, but it should not
 
   // Check that _nothing_ has been finalized
-  do_check_eq(count_finalized(size, tc), 0);
+  Assert.equal(count_finalized(size, tc), 0);
 }
-

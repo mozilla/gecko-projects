@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,19 +11,6 @@ using namespace mozilla;
 
 nsMathMLSelectedFrame::~nsMathMLSelectedFrame()
 {
-}
-
-void
-nsMathMLSelectedFrame::Init(nsIContent*       aContent,
-                            nsContainerFrame* aParent,
-                            nsIFrame*         aPrevInFlow)
-{
-  // Init our local attributes
-  mInvalidMarkup = false;
-  mSelectedFrame = nullptr;
-
-  // Let the base class do the rest
-  nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 
 NS_IMETHODIMP
@@ -71,14 +59,13 @@ nsMathMLSelectedFrame::SetInitialChildList(ChildListID     aListID,
 //  Only paint the selected child...
 void
 nsMathMLSelectedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                        const nsRect&           aDirtyRect,
                                         const nsDisplayListSet& aLists)
 {
   // Report an error if something wrong was found in this frame.
   // We can't call nsDisplayMathMLError from here,
   // so ask nsMathMLContainerFrame to do the work for us.
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags)) {
-    nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
+    nsMathMLContainerFrame::BuildDisplayList(aBuilder, aLists);
     return;
   }
 
@@ -89,7 +76,7 @@ nsMathMLSelectedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // Put the child's background directly onto the content list
     nsDisplayListSet set(aLists, aLists.Content());
     // The children should be in content order
-    BuildDisplayListForChild(aBuilder, childFrame, aDirtyRect, set);
+    BuildDisplayListForChild(aBuilder, childFrame, set);
   }
 
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
@@ -100,7 +87,7 @@ nsMathMLSelectedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 /* virtual */
 LogicalSize
-nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
+nsMathMLSelectedFrame::ComputeSize(gfxContext *aRenderingContext,
                                    WritingMode aWM,
                                    const LogicalSize& aCBSize,
                                    nscoord aAvailableISize,
@@ -117,7 +104,7 @@ nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
     nscoord availableISize = aAvailableISize - aBorder.ISize(aWM) -
         aPadding.ISize(aWM) - aMargin.ISize(aWM);
     LogicalSize cbSize = aCBSize - aBorder - aPadding - aMargin;
-    nsCSSOffsetState offsetState(childFrame, aRenderingContext, aWM,
+    SizeComputationInput offsetState(childFrame, aRenderingContext, aWM,
                                  availableISize);
     LogicalSize size =
         childFrame->ComputeSize(aRenderingContext, aWM, cbSize,
@@ -134,38 +121,39 @@ nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 // Only reflow the selected child ...
 void
 nsMathMLSelectedFrame::Reflow(nsPresContext*          aPresContext,
-                              nsHTMLReflowMetrics&     aDesiredSize,
-                              const nsHTMLReflowState& aReflowState,
+                              ReflowOutput&     aDesiredSize,
+                              const ReflowInput& aReflowInput,
                               nsReflowStatus&          aStatus)
 {
   MarkInReflow();
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
+
   mPresentationData.flags &= ~NS_MATHML_ERROR;
-  aStatus = NS_FRAME_COMPLETE;
   aDesiredSize.ClearSize();
   aDesiredSize.SetBlockStartAscent(0);
   mBoundingMetrics = nsBoundingMetrics();
   nsIFrame* childFrame = GetSelectedFrame();
   if (childFrame) {
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowState.ComputedSize(wm);
+    LogicalSize availSize = aReflowInput.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
+    ReflowInput childReflowInput(aPresContext, aReflowInput,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext, aDesiredSize,
-                childReflowState, aStatus);
+                childReflowInput, aStatus);
     SaveReflowAndBoundingMetricsFor(childFrame, aDesiredSize,
                                     aDesiredSize.mBoundingMetrics);
     mBoundingMetrics = aDesiredSize.mBoundingMetrics;
   }
-  FinalizeReflow(aReflowState.rendContext->GetDrawTarget(), aDesiredSize);
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  FinalizeReflow(aReflowInput.mRenderingContext->GetDrawTarget(), aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 // Only place the selected child ...
 /* virtual */ nsresult
 nsMathMLSelectedFrame::Place(DrawTarget*          aDrawTarget,
                              bool                 aPlaceOrigin,
-                             nsHTMLReflowMetrics& aDesiredSize)
+                             ReflowOutput& aDesiredSize)
 {
   nsIFrame* childFrame = GetSelectedFrame();
 

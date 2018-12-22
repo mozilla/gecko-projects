@@ -4,8 +4,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "PageActions",
-                                  "resource://gre/modules/PageActions.jsm");
+ChromeUtils.defineModuleGetter(this, "PageActions",
+                               "resource://gre/modules/PageActions.jsm");
 
 // Define service devices. We should consider moving these to their respective
 // JSM files, but we left them here to allow for better lazy JSM loading.
@@ -13,7 +13,7 @@ var rokuDevice = {
   id: "roku:ecp",
   target: "roku:ecp",
   factory: function(aService) {
-    Cu.import("resource://gre/modules/RokuApp.jsm");
+    ChromeUtils.import("resource://gre/modules/RokuApp.jsm");
     return new RokuApp(aService);
   },
   types: ["video/mp4"],
@@ -24,25 +24,27 @@ var mediaPlayerDevice = {
   id: "media:router",
   target: "media:router",
   factory: function(aService) {
-    Cu.import("resource://gre/modules/MediaPlayerApp.jsm");
+    ChromeUtils.import("resource://gre/modules/MediaPlayerApp.jsm");
     return new MediaPlayerApp(aService);
   },
   types: ["video/mp4", "video/webm", "application/x-mpegurl"],
   extensions: ["mp4", "webm", "m3u", "m3u8"],
   init: function() {
-    Services.obs.addObserver(this, "MediaPlayer:Added", false);
-    Services.obs.addObserver(this, "MediaPlayer:Changed", false);
-    Services.obs.addObserver(this, "MediaPlayer:Removed", false);
+    GlobalEventDispatcher.registerListener(this, [
+      "MediaPlayer:Added",
+      "MediaPlayer:Changed",
+      "MediaPlayer:Removed",
+    ]);
   },
-  observe: function(subject, topic, data) {
-    if (topic === "MediaPlayer:Added") {
-      let service = this.toService(JSON.parse(data));
+  onEvent: function(event, data, callback) {
+    if (event === "MediaPlayer:Added") {
+      let service = this.toService(data);
       SimpleServiceDiscovery.addService(service);
-    } else if (topic === "MediaPlayer:Changed") {
-      let service = this.toService(JSON.parse(data));
+    } else if (event === "MediaPlayer:Changed") {
+      let service = this.toService(data);
       SimpleServiceDiscovery.updateService(service);
-    } else if (topic === "MediaPlayer:Removed") {
-      SimpleServiceDiscovery.removeService(data);
+    } else if (event === "MediaPlayer:Removed") {
+      SimpleServiceDiscovery.removeService(data.id);
     }
   },
   toService: function(display) {
@@ -54,73 +56,12 @@ var mediaPlayerDevice = {
       uuid: display.uuid,
       manufacturer: display.manufacturer,
       modelName: display.modelName,
-      mirror: display.mirror
     };
   }
 };
 
-var fxOSTVDevice = {
-  id: "app://fling-player.gaiamobile.org",
-  target: "app://fling-player.gaiamobile.org/index.html",
-  factory: function(aService) {
-    Cu.import("resource://gre/modules/PresentationApp.jsm");
-    let request = new window.PresentationRequest(this.target);
-    return new PresentationApp(aService, request);
-  },
-  init: function() {
-    Services.obs.addObserver(this, "presentation-device-change", false);
-    SimpleServiceDiscovery.addExternalDiscovery(this);
-  },
-  observe: function(subject, topic, data) {
-    let device = subject.QueryInterface(Ci.nsIPresentationDevice);
-    let service = this.toService(device);
-    switch (data) {
-      case "add":
-        SimpleServiceDiscovery.addService(service);
-        break;
-      case "update":
-        SimpleServiceDiscovery.updateService(service);
-        break;
-      case "remove":
-        if(SimpleServiceDiscovery.findServiceForID(device.id)) {
-          SimpleServiceDiscovery.removeService(device.id);
-        }
-        break;
-    }
-  },
-  toService: function(device) {
-    return {
-      location: device.id,
-      target: fxOSTVDevice.target,
-      friendlyName: device.name,
-      uuid: device.id,
-      manufacturer: "Firefox OS TV",
-      modelName: "Firefox OS TV",
-    };
-  },
-  startDiscovery: function() {
-    window.navigator.mozPresentationDeviceInfo.forceDiscovery();
-
-    // need to update the lastPing time for known device.
-    window.navigator.mozPresentationDeviceInfo.getAll()
-    .then(function(devices) {
-      for (let device of devices) {
-        let service = fxOSTVDevice.toService(device);
-        SimpleServiceDiscovery.addService(service);
-      }
-    });
-  },
-  stopDiscovery: function() {
-    // do nothing
-  },
-  types: ["video/mp4", "video/webm"],
-  extensions: ["mp4", "webm"],
-};
-
 var CastingApps = {
   _castMenuId: -1,
-  mirrorStartMenuId: -1,
-  mirrorStopMenuId: -1,
   _blocked: null,
   _bound: null,
   _interval: 120 * 1000, // 120 seconds
@@ -137,10 +78,6 @@ var CastingApps = {
     mediaPlayerDevice.init();
     SimpleServiceDiscovery.registerDevice(mediaPlayerDevice);
 
-    // Presentation Device will notify us any time the available device list changes.
-    fxOSTVDevice.init();
-    SimpleServiceDiscovery.registerDevice(fxOSTVDevice);
-
     // Search for devices continuously
     SimpleServiceDiscovery.search(this._interval);
 
@@ -150,14 +87,16 @@ var CastingApps = {
       this.handleContextMenu.bind(this)
     );
 
-    Services.obs.addObserver(this, "Casting:Play", false);
-    Services.obs.addObserver(this, "Casting:Pause", false);
-    Services.obs.addObserver(this, "Casting:Stop", false);
-    Services.obs.addObserver(this, "Casting:Mirror", false);
-    Services.obs.addObserver(this, "ssdp-service-found", false);
-    Services.obs.addObserver(this, "ssdp-service-lost", false);
-    Services.obs.addObserver(this, "application-background", false);
-    Services.obs.addObserver(this, "application-foreground", false);
+    GlobalEventDispatcher.registerListener(this, [
+      "Casting:Play",
+      "Casting:Pause",
+      "Casting:Stop",
+    ]);
+
+    Services.obs.addObserver(this, "ssdp-service-found");
+    Services.obs.addObserver(this, "ssdp-service-lost");
+    Services.obs.addObserver(this, "application-background");
+    Services.obs.addObserver(this, "application-foreground");
 
     BrowserApp.deck.addEventListener("TabSelect", this, true);
     BrowserApp.deck.addEventListener("pageshow", this, true);
@@ -175,67 +114,17 @@ var CastingApps = {
   },
 
   serviceAdded: function(aService) {
-    if (this.isMirroringEnabled() && aService.mirror && this.mirrorStartMenuId == -1) {
-      this.mirrorStartMenuId = NativeWindow.menu.add({
-        name: Strings.browser.GetStringFromName("casting.mirrorTab"),
-        callback: function() {
-          let callbackFunc = function(aService) {
-            let app = SimpleServiceDiscovery.findAppForService(aService);
-            if (app) {
-              app.mirror(function() {}, window, BrowserApp.selectedTab.getViewport(), this._mirrorStarted.bind(this), window.BrowserApp.selectedBrowser.contentWindow);
-            }
-          }.bind(this);
-
-          this.prompt(callbackFunc, aService => aService.mirror);
-        }.bind(this),
-        parent: NativeWindow.menu.toolsMenuID
-      });
-
-      this.mirrorStopMenuId = NativeWindow.menu.add({
-        name: Strings.browser.GetStringFromName("casting.mirrorTabStop"),
-        callback: function() {
-          if (this.tabMirror) {
-            this.tabMirror.stop();
-            this.tabMirror = null;
-          } else if (this.stopMirrorCallback) {
-            this.stopMirrorCallback();
-            this.stopMirrorCallback = null;
-          }
-          NativeWindow.menu.update(this.mirrorStartMenuId, { visible: true });
-          NativeWindow.menu.update(this.mirrorStopMenuId, { visible: false });
-        }.bind(this),
-      });
-    }
-    if (this.mirrorStartMenuId != -1) {
-      NativeWindow.menu.update(this.mirrorStopMenuId, { visible: false });
-    }
   },
 
   serviceLost: function(aService) {
-    if (aService.mirror && this.mirrorStartMenuId != -1) {
-      let haveMirror = false;
-      SimpleServiceDiscovery.services.forEach(function(service) {
-        if (service.mirror) {
-          haveMirror = true;
-        }
-      });
-      if (!haveMirror) {
-        NativeWindow.menu.remove(this.mirrorStartMenuId);
-        this.mirrorStartMenuId = -1;
-      }
-    }
   },
 
   isCastingEnabled: function isCastingEnabled() {
     return Services.prefs.getBoolPref("browser.casting.enabled");
   },
 
-  isMirroringEnabled: function isMirroringEnabled() {
-    return Services.prefs.getBoolPref("browser.mirroring.enabled");
-  },
-
-  observe: function (aSubject, aTopic, aData) {
-    switch (aTopic) {
+  onEvent: function(event, message, callback) {
+    switch (event) {
       case "Casting:Play":
         if (this.session && this.session.remoteMedia.status == "paused") {
           this.session.remoteMedia.play();
@@ -251,14 +140,11 @@ var CastingApps = {
           this.closeExternal();
         }
         break;
-      case "Casting:Mirror":
-        {
-          Cu.import("resource://gre/modules/TabMirror.jsm");
-          this.tabMirror = new TabMirror(aData, window);
-          NativeWindow.menu.update(this.mirrorStartMenuId, { visible: false });
-          NativeWindow.menu.update(this.mirrorStopMenuId, { visible: true });
-        }
-        break;
+    }
+  },
+
+  observe: function(aSubject, aTopic, aData) {
+    switch (aTopic) {
       case "ssdp-service-found":
         this.serviceAdded(SimpleServiceDiscovery.findServiceForID(aData));
         break;
@@ -370,11 +256,11 @@ var CastingApps = {
   },
 
   allowableExtension: function(aURI, aExtensions) {
-    return (aURI instanceof Ci.nsIURL) && aExtensions.indexOf(aURI.fileExtension) != -1;
+    return (aURI instanceof Ci.nsIURL) && aExtensions.includes(aURI.fileExtension);
   },
 
   allowableMimeType: function(aType, aTypes) {
-    return aTypes.indexOf(aType) != -1;
+    return aTypes.includes(aType);
   },
 
   // This method will look at the aElement (or try to find a video at aX, aY) that has
@@ -408,7 +294,7 @@ var CastingApps = {
           return;
         }
       }
-    } catch(e) {}
+    } catch (e) {}
   },
 
   _getContentTypeForURI: function(aURI, aElement, aCallback) {
@@ -427,7 +313,7 @@ var CastingApps = {
         securityFlags: secFlags,
         contentPolicyType: Ci.nsIContentPolicy.TYPE_INTERNAL_VIDEO
       });
-    } catch(e) {
+    } catch (e) {
      aCallback(null);
      return;
     }
@@ -448,7 +334,7 @@ var CastingApps = {
             break;
         }
       },
-      onStopRequest: function(request, context, statusCode)  {},
+      onStopRequest: function(request, context, statusCode) {},
       onDataAvailable: function(request, context, stream, offset, count) {}
     };
 
@@ -530,17 +416,15 @@ var CastingApps = {
         if (this.allowableMimeType(aType, aTypes)) {
           // We found a supported mimetype.
           aCallback({ element: aElement, source: sourceURI.spec, poster: posterURL, sourceURI: sourceURI, type: aType });
-        } else {
+        } else if (aURIs.length > 0) {
           // This URI was not a supported mimetype, so let's try the next, if we have more.
-          if (aURIs.length > 0) {
-            _getContentTypeForURIs(aURIs);
-          } else {
-            // We were not able to find a supported mimetype.
-            aCallback(null);
-          }
+          _getContentTypeForURIs(aURIs);
+        } else {
+          // We were not able to find a supported mimetype.
+          aCallback(null);
         }
       });
-    }
+    };
 
     // If we didn't find a good URI directly, let's look using async methods.
     if (asyncURIs.length > 0) {
@@ -571,7 +455,7 @@ var CastingApps = {
           return element.mozAllowCasting;
         }
       }
-    } catch(e) {}
+    } catch (e) {}
 
     return false;
   },
@@ -661,7 +545,7 @@ var CastingApps = {
     }
 
     // We only show pageactions if the <video> is from the selected tab
-    if (BrowserApp.selectedTab != BrowserApp.getTabForWindow(aVideo.ownerDocument.defaultView.top)) {
+    if (BrowserApp.selectedTab != BrowserApp.getTabForWindow(aVideo.ownerGlobal.top)) {
       return;
     }
 
@@ -674,19 +558,21 @@ var CastingApps = {
         title: Strings.browser.GetStringFromName("contextmenu.sendToDevice"),
         icon: "drawable://casting_active",
         clickCallback: this.pageAction.click,
-        important: true
+        important: true,
+        useTint: false
       });
     } else if (aVideo.mozAllowCasting) {
       this.pageAction.id = PageActions.add({
         title: Strings.browser.GetStringFromName("contextmenu.sendToDevice"),
         icon: "drawable://casting",
         clickCallback: this.pageAction.click,
-        important: true
+        important: true,
+        useTint: true
       });
     }
   },
 
-  prompt: function(aCallback, aFilterFunc) {
+  prompt: function(aWindow, aCallback, aFilterFunc) {
     let items = [];
     let filteredServices = [];
     SimpleServiceDiscovery.services.forEach(function(aService) {
@@ -705,6 +591,7 @@ var CastingApps = {
     }
 
     let prompt = new Prompt({
+      window: aWindow,
       title: Strings.browser.GetStringFromName("casting.sendToDevice")
     }).setSingleChoiceItems(items).show(function(data) {
       let selected = data.button;
@@ -734,7 +621,7 @@ var CastingApps = {
       return this.allowableExtension(aVideo.sourceURI, aService.extensions) || this.allowableMimeType(aVideo.type, aService.types);
     }
 
-    this.prompt(function(aService) {
+    this.prompt(aVideo.element.ownerGlobal, aService => {
       if (!aService)
         return;
 
@@ -744,7 +631,7 @@ var CastingApps = {
         return;
 
       if (aVideo.element) {
-        aVideo.title = aVideo.element.ownerDocument.defaultView.top.document.title;
+        aVideo.title = aVideo.element.ownerGlobal.top.document.title;
 
         // If the video is currently playing on the device, pause it
         if (!aVideo.element.paused) {
@@ -752,14 +639,14 @@ var CastingApps = {
         }
       }
 
-      app.stop(function() {
-        app.start(function(aStarted) {
+      app.stop(() => {
+        app.start(aStarted => {
           if (!aStarted) {
             dump("CastingApps: Unable to start app");
             return;
           }
 
-          app.remoteMedia(function(aRemoteMedia) {
+          app.remoteMedia(aRemoteMedia => {
             if (!aRemoteMedia) {
               dump("CastingApps: Failed to create remotemedia");
               return;
@@ -776,10 +663,10 @@ var CastingApps = {
               },
               videoRef: Cu.getWeakReference(aVideo.element)
             };
-          }.bind(this), this);
-        }.bind(this));
-      }.bind(this));
-    }.bind(this), filterFunc.bind(this));
+          }, this);
+        });
+      });
+    }, filterFunc.bind(this));
   },
 
   closeExternal: function() {
@@ -813,7 +700,10 @@ var CastingApps = {
     }
 
     aRemoteMedia.load(this.session.data);
-    Messaging.sendRequest({ type: "Casting:Started", device: this.session.service.friendlyName });
+    GlobalEventDispatcher.sendRequest({
+        type: "Casting:Started",
+        device: this.session.service.friendlyName,
+    });
 
     let video = this.session.videoRef.get();
     if (video) {
@@ -823,7 +713,7 @@ var CastingApps = {
   },
 
   onRemoteMediaStop: function(aRemoteMedia) {
-    Messaging.sendRequest({ type: "Casting:Stopped" });
+    GlobalEventDispatcher.sendRequest({ type: "Casting:Stopped" });
     this._shutdown();
   },
 
@@ -835,10 +725,10 @@ var CastingApps = {
     let status = aRemoteMedia.status;
     switch (status) {
       case "started":
-        Messaging.sendRequest({ type: "Casting:Playing" });
+        GlobalEventDispatcher.sendRequest({ type: "Casting:Playing" });
         break;
       case "paused":
-        Messaging.sendRequest({ type: "Casting:Paused" });
+        GlobalEventDispatcher.sendRequest({ type: "Casting:Paused" });
         break;
       case "completed":
         this.closeExternal();

@@ -17,12 +17,11 @@
 #endif
 
 #include "base/base_export.h"
-#include "base/basictypes.h"
 
 namespace base {
 namespace strings {
 
-#if defined(_MSC_VER)
+#if defined(COMPILER_MSVC)
 // Define ssize_t inside of our namespace.
 #if defined(_WIN64)
 typedef __int64 ssize_t;

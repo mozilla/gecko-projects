@@ -16,7 +16,7 @@
 #include "js/UbiNodeDominatorTree.h"
 #include "js/UbiNodeShortestPaths.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/devtools/AutoMemMap.h"
 #include "mozilla/devtools/CoreDump.pb.h"
 #include "mozilla/devtools/DeserializedNode.h"
@@ -29,6 +29,7 @@
 #include "mozilla/dom/HeapSnapshotBinding.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Unused.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -61,11 +62,11 @@ using JS::ubi::ShortestPaths;
 MallocSizeOf
 GetCurrentThreadDebuggerMallocSizeOf()
 {
-  auto ccrt = CycleCollectedJSRuntime::Get();
-  MOZ_ASSERT(ccrt);
-  auto rt = ccrt->Runtime();
-  MOZ_ASSERT(rt);
-  auto mallocSizeOf = JS::dbg::GetDebuggerMallocSizeOf(rt);
+  auto ccjscx = CycleCollectedJSContext::Get();
+  MOZ_ASSERT(ccjscx);
+  auto cx = ccjscx->Context();
+  MOZ_ASSERT(cx);
+  auto mallocSizeOf = JS::dbg::GetDebuggerMallocSizeOf(cx);
   MOZ_ASSERT(mallocSizeOf);
   return mallocSizeOf;
 }
@@ -85,7 +86,7 @@ NS_INTERFACE_MAP_END
 /* virtual */ JSObject*
 HeapSnapshot::WrapObject(JSContext* aCx, HandleObject aGivenProto)
 {
-  return HeapSnapshotBinding::Wrap(aCx, this, aGivenProto);
+  return HeapSnapshot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /*** Reading Heap Snapshots ***********************************************************************/
@@ -137,8 +138,6 @@ parseMessage(ZeroCopyInputStream& stream, uint32_t sizeOfMessage, MessageType& m
 template<typename CharT, typename InternedStringSet>
 struct GetOrInternStringMatcher
 {
-  using ReturnType = const CharT*;
-
   InternedStringSet& internedStrings;
 
   explicit GetOrInternStringMatcher(InternedStringSet& strings) : internedStrings(strings) { }
@@ -148,8 +147,8 @@ struct GetOrInternStringMatcher
     size_t length = str->length() / sizeof(CharT);
     auto tempString = reinterpret_cast<const CharT*>(str->data());
 
-    UniquePtr<CharT[], NSFreePolicy> owned(NS_strndup(tempString, length));
-    if (!owned || !internedStrings.append(Move(owned)))
+    UniqueFreePtr<CharT[]> owned(NS_strndup(tempString, length));
+    if (!owned || !internedStrings.append(std::move(owned)))
       return nullptr;
 
     return internedStrings.back().get();
@@ -286,7 +285,7 @@ HeapSnapshot::saveNode(const protobuf::Node& node, NodeIdSet& edgeReferents)
   }
 
   if (NS_WARN_IF(!nodes.putNew(id, DeserializedNode(id, coarseType, typeName,
-                                                    size, Move(edges),
+                                                    size, std::move(edges),
                                                     allocationStack,
                                                     jsObjectClassName,
                                                     scriptFilename, *this))))
@@ -491,7 +490,7 @@ HeapSnapshot::TakeCensus(JSContext* cx, JS::HandleObject options,
   {
     JS::AutoCheckCannotGC nogc;
 
-    JS::ubi::CensusTraversal traversal(JS_GetRuntime(cx), handler, nogc);
+    JS::ubi::CensusTraversal traversal(cx, handler, nogc);
     if (NS_WARN_IF(!traversal.init())) {
       rv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -556,12 +555,12 @@ HeapSnapshot::ComputeDominatorTree(ErrorResult& rv)
 {
   Maybe<JS::ubi::DominatorTree> maybeTree;
   {
-    auto ccrt = CycleCollectedJSRuntime::Get();
-    MOZ_ASSERT(ccrt);
-    auto rt = ccrt->Runtime();
-    MOZ_ASSERT(rt);
-    JS::AutoCheckCannotGC nogc(rt);
-    maybeTree = JS::ubi::DominatorTree::Create(rt, nogc, getRoot());
+    auto ccjscx = CycleCollectedJSContext::Get();
+    MOZ_ASSERT(ccjscx);
+    auto cx = ccjscx->Context();
+    MOZ_ASSERT(cx);
+    JS::AutoCheckCannotGC nogc(cx);
+    maybeTree = JS::ubi::DominatorTree::Create(cx, nogc, getRoot());
   }
 
   if (NS_WARN_IF(maybeTree.isNothing())) {
@@ -569,7 +568,7 @@ HeapSnapshot::ComputeDominatorTree(ErrorResult& rv)
     return nullptr;
   }
 
-  return MakeAndAddRef<DominatorTree>(Move(*maybeTree), this, mParent);
+  return MakeAndAddRef<DominatorTree>(std::move(*maybeTree), this, mParent);
 }
 
 void
@@ -623,13 +622,9 @@ HeapSnapshot::ComputeShortestPaths(JSContext*cx, uint64_t start,
 
   Maybe<ShortestPaths> maybeShortestPaths;
   {
-    auto ccrt = CycleCollectedJSRuntime::Get();
-    MOZ_ASSERT(ccrt);
-    auto rt = ccrt->Runtime();
-    MOZ_ASSERT(rt);
-    JS::AutoCheckCannotGC nogc(rt);
-    maybeShortestPaths = ShortestPaths::Create(rt, nogc, maxNumPaths, *startNode,
-                                               Move(targetsSet));
+    JS::AutoCheckCannotGC nogc(cx);
+    maybeShortestPaths = ShortestPaths::Create(cx, nogc, maxNumPaths, *startNode,
+                                               std::move(targetsSet));
   }
 
   if (NS_WARN_IF(maybeShortestPaths.isNothing())) {
@@ -737,7 +732,7 @@ AddGlobalsAsRoots(AutoObjectVector& globals, ubi::RootList& roots)
   unsigned length = globals.length();
   for (unsigned i = 0; i < length; i++) {
     if (!roots.addRoot(ubi::Node(globals[i].get()),
-                       MOZ_UTF16("heap snapshot global")))
+                       u"heap snapshot global"))
     {
       return false;
     }
@@ -860,8 +855,6 @@ class TwoByteString : public Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName
 
   struct AsTwoByteStringMatcher
   {
-    using ReturnType = TwoByteString;
-
     TwoByteString match(JSAtom* atom) {
       return TwoByteString(atom);
     }
@@ -873,16 +866,12 @@ class TwoByteString : public Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName
 
   struct IsNonNullMatcher
   {
-    using ReturnType = bool;
-
     template<typename T>
     bool match(const T& t) { return t != nullptr; }
   };
 
   struct LengthMatcher
   {
-    using ReturnType = size_t;
-
     size_t match(JSAtom* atom) {
       MOZ_ASSERT(atom);
       JS::ubi::AtomOrTwoByteChars s(atom);
@@ -902,8 +891,6 @@ class TwoByteString : public Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName
 
   struct CopyToBufferMatcher
   {
-    using ReturnType = size_t;
-
     RangedPtr<char16_t> destination;
     size_t              maxLength;
 
@@ -931,13 +918,13 @@ class TwoByteString : public Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName
 
 public:
   template<typename T>
-  MOZ_IMPLICIT TwoByteString(T&& rhs) : Base(Forward<T>(rhs)) { }
+  MOZ_IMPLICIT TwoByteString(T&& rhs) : Base(std::forward<T>(rhs)) { }
 
   template<typename T>
   TwoByteString& operator=(T&& rhs) {
     MOZ_ASSERT(this != &rhs, "self-move disallowed");
     this->~TwoByteString();
-    new (this) TwoByteString(Forward<T>(rhs));
+    new (this) TwoByteString(std::forward<T>(rhs));
     return *this;
   }
 
@@ -985,8 +972,6 @@ struct TwoByteString::HashPolicy {
   using Lookup = TwoByteString;
 
   struct HashingMatcher {
-    using ReturnType  = js::HashNumber;
-
     js::HashNumber match(const JSAtom* atom) {
       return js::DefaultHasher<const JSAtom*>::hash(atom);
     }
@@ -1009,7 +994,6 @@ struct TwoByteString::HashPolicy {
   }
 
   struct EqualityMatcher {
-    using ReturnType = bool;
     const TwoByteString& rhs;
     explicit EqualityMatcher(const TwoByteString& rhs) : rhs(rhs) { }
 
@@ -1048,9 +1032,55 @@ struct TwoByteString::HashPolicy {
   }
 
   static void rekey(TwoByteString& k, TwoByteString&& newKey) {
-    k = Move(newKey);
+    k = std::move(newKey);
   }
 };
+
+// Returns whether `edge` should be included in a heap snapshot of
+// `compartments`. The optional `policy` out-param is set to INCLUDE_EDGES
+// if we want to include the referent's edges, or EXCLUDE_EDGES if we don't
+// want to include them.
+static bool
+ShouldIncludeEdge(JS::CompartmentSet* compartments,
+                  const ubi::Node& origin, const ubi::Edge& edge,
+                  CoreDumpWriter::EdgePolicy* policy = nullptr)
+{
+  if (policy) {
+    *policy = CoreDumpWriter::INCLUDE_EDGES;
+  }
+
+  if (!compartments) {
+    // We aren't targeting a particular set of compartments, so serialize all the
+    // things!
+    return true;
+  }
+
+  // We are targeting a particular set of compartments. If this node is in our target
+  // set, serialize it and all of its edges. If this node is _not_ in our
+  // target set, we also serialize under the assumption that it is a shared
+  // resource being used by something in our target compartments since we reached it
+  // by traversing the heap graph. However, we do not serialize its outgoing
+  // edges and we abandon further traversal from this node.
+  //
+  // If the node does not belong to any compartment, we also serialize its outgoing
+  // edges. This case is relevant for Shapes: they don't belong to a specific
+  // compartment and contain edges to parent/kids Shapes we want to include. Note
+  // that these Shapes may contain pointers into our target compartment (the
+  // Shape's getter/setter JSObjects). However, we do not serialize nodes in other
+  // compartments that are reachable from these non-compartment nodes.
+
+  JS::Compartment* compartment = edge.referent.compartment();
+
+  if (!compartment || compartments->has(compartment)) {
+    return true;
+  }
+
+  if (policy) {
+    *policy = CoreDumpWriter::EXCLUDE_EDGES;
+  }
+
+  return !!origin.compartment();
+}
 
 // A `CoreDumpWriter` that serializes nodes to protobufs and writes them to the
 // given `ZeroCopyOutputStream`.
@@ -1073,6 +1103,8 @@ class MOZ_STACK_CLASS StreamWriter : public CoreDumpWriter
   OneByteStringMap oneByteStringsAlreadySerialized;
 
   ::google::protobuf::io::ZeroCopyOutputStream& stream;
+
+  JS::CompartmentSet* compartments;
 
   bool writeMessage(const ::google::protobuf::MessageLite& message) {
     // We have to create a new CodedOutputStream when writing each message so
@@ -1105,7 +1137,7 @@ class MOZ_STACK_CLASS StreamWriter : public CoreDumpWriter
     string.copyToBuffer(RangedPtr<char16_t>(buf, length), length);
 
     uint64_t ref = twoByteStringsAlreadySerialized.count();
-    if (!twoByteStringsAlreadySerialized.add(ptr, Move(string), ref))
+    if (!twoByteStringsAlreadySerialized.add(ptr, std::move(string), ref))
       return false;
 
     setString(stringData.release());
@@ -1165,7 +1197,7 @@ class MOZ_STACK_CLASS StreamWriter : public CoreDumpWriter
     data->set_line(frame.line());
     data->set_column(frame.column());
     data->set_issystem(frame.isSystem());
-    data->set_isselfhosted(frame.isSelfHosted());
+    data->set_isselfhosted(frame.isSelfHosted(cx));
 
     auto dupeSource = TwoByteString::from(frame.source());
     if (!attachTwoByteString(dupeSource,
@@ -1204,13 +1236,15 @@ class MOZ_STACK_CLASS StreamWriter : public CoreDumpWriter
 public:
   StreamWriter(JSContext* cx,
                ::google::protobuf::io::ZeroCopyOutputStream& stream,
-               bool wantNames)
+               bool wantNames,
+               JS::CompartmentSet* compartments)
     : cx(cx)
     , wantNames(wantNames)
     , framesAlreadySerialized(cx)
     , twoByteStringsAlreadySerialized(cx)
     , oneByteStringsAlreadySerialized(cx)
     , stream(stream)
+    , compartments(compartments)
   { }
 
   bool init() {
@@ -1221,13 +1255,13 @@ public:
 
   ~StreamWriter() override { }
 
-  virtual bool writeMetadata(uint64_t timestamp) final {
+  bool writeMetadata(uint64_t timestamp) final {
     protobuf::Metadata metadata;
     metadata.set_timestamp(timestamp);
     return writeMessage(metadata);
   }
 
-  virtual bool writeNode(const JS::ubi::Node& ubiNode,
+  bool writeNode(const JS::ubi::Node& ubiNode,
                          EdgePolicy includeEdges) final {
     // NB: de-duplicated string properties must be written in the same order
     // here as they are read in `HeapSnapshot::saveNode` or else indices in
@@ -1246,18 +1280,20 @@ public:
       return false;
     }
 
-    JSRuntime* rt = JS_GetRuntime(cx);
-    mozilla::MallocSizeOf mallocSizeOf = dbg::GetDebuggerMallocSizeOf(rt);
+    mozilla::MallocSizeOf mallocSizeOf = dbg::GetDebuggerMallocSizeOf(cx);
     MOZ_ASSERT(mallocSizeOf);
     protobufNode.set_size(ubiNode.size(mallocSizeOf));
 
     if (includeEdges) {
-      auto edges = ubiNode.edges(JS_GetRuntime(cx), wantNames);
+      auto edges = ubiNode.edges(cx, wantNames);
       if (NS_WARN_IF(!edges))
         return false;
 
       for ( ; !edges->empty(); edges->popFront()) {
         ubi::Edge& ubiEdge = edges->front();
+        if (!ShouldIncludeEdge(compartments, ubiNode, ubiEdge)) {
+          continue;
+        }
 
         protobuf::Edge* protobufEdge = protobufNode.add_edges();
         if (NS_WARN_IF(!protobufEdge)) {
@@ -1267,7 +1303,7 @@ public:
         protobufEdge->set_referent(ubiEdge.referent.identifier());
 
         if (wantNames && ubiEdge.name) {
-          TwoByteString edgeName(Move(ubiEdge.name));
+          TwoByteString edgeName(std::move(ubiEdge.name));
           if (NS_WARN_IF(!attachTwoByteString(edgeName,
                                               [&] (std::string* name) { protobufEdge->set_allocated_name(name); },
                                               [&] (uint64_t ref) { protobufEdge->set_nameref(ref); })))
@@ -1323,7 +1359,9 @@ public:
   HeapSnapshotHandler(CoreDumpWriter& writer,
                       JS::CompartmentSet* compartments)
     : writer(writer),
-      compartments(compartments)
+      compartments(compartments),
+      nodeCount(0),
+      edgeCount(0)
   { }
 
   // JS::ubi::BreadthFirst handler interface.
@@ -1347,29 +1385,16 @@ public:
     if (!first)
       return true;
 
+    CoreDumpWriter::EdgePolicy policy;
+    if (!ShouldIncludeEdge(compartments, origin, edge, &policy))
+      return true;
+
     nodeCount++;
 
-    const JS::ubi::Node& referent = edge.referent;
+    if (policy == CoreDumpWriter::EXCLUDE_EDGES)
+      traversal.abandonReferent();
 
-    if (!compartments)
-      // We aren't targeting a particular set of compartments, so serialize all the
-      // things!
-      return writer.writeNode(referent, CoreDumpWriter::INCLUDE_EDGES);
-
-    // We are targeting a particular set of compartments. If this node is in our target
-    // set, serialize it and all of its edges. If this node is _not_ in our
-    // target set, we also serialize under the assumption that it is a shared
-    // resource being used by something in our target compartments since we reached it
-    // by traversing the heap graph. However, we do not serialize its outgoing
-    // edges and we abandon further traversal from this node.
-
-    JSCompartment* compartment = referent.compartment();
-
-    if (compartments->has(compartment))
-      return writer.writeNode(referent, CoreDumpWriter::INCLUDE_EDGES);
-
-    traversal.abandonReferent();
-    return writer.writeNode(referent, CoreDumpWriter::EXCLUDE_EDGES);
+    return writer.writeNode(edge.referent, policy);
   }
 };
 
@@ -1394,7 +1419,7 @@ WriteHeapGraph(JSContext* cx,
   // core dump.
 
   HeapSnapshotHandler handler(writer, compartments);
-  HeapSnapshotHandler::Traversal traversal(JS_GetRuntime(cx), handler, noGC);
+  HeapSnapshotHandler::Traversal traversal(cx, handler, noGC);
   if (!traversal.init())
     return false;
   traversal.wantNames = wantNames;
@@ -1413,18 +1438,23 @@ WriteHeapGraph(JSContext* cx,
 static unsigned long
 msSinceProcessCreation(const TimeStamp& now)
 {
-  bool ignored;
-  auto duration = now - TimeStamp::ProcessCreation(ignored);
+  auto duration = now - TimeStamp::ProcessCreation();
   return (unsigned long) duration.ToMilliseconds();
 }
 
 /* static */ already_AddRefed<nsIFile>
 HeapSnapshot::CreateUniqueCoreDumpFile(ErrorResult& rv,
                                        const TimeStamp& now,
-                                       nsAString& outFilePath)
+                                       nsAString& outFilePath,
+                                       nsAString& outSnapshotId)
 {
   nsCOMPtr<nsIFile> file;
   rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(file));
+  if (NS_WARN_IF(rv.Failed()))
+    return nullptr;
+
+  nsAutoString tempPath;
+  rv = file->GetPath(tempPath);
   if (NS_WARN_IF(rv.Failed()))
     return nullptr;
 
@@ -1439,7 +1469,12 @@ HeapSnapshot::CreateUniqueCoreDumpFile(ErrorResult& rv,
 
   rv = file->GetPath(outFilePath);
   if (NS_WARN_IF(rv.Failed()))
-    return nullptr;
+      return nullptr;
+
+  // The snapshot ID must be computed in the process that created the
+  // temp file, because TmpD may not be the same in all processes.
+  outSnapshotId.Assign(Substring(outFilePath, tempPath.Length() + 1,
+                                 outFilePath.Length() - tempPath.Length() - sizeof(".fxsnapshot")));
 
   return file.forget();
 }
@@ -1448,10 +1483,10 @@ HeapSnapshot::CreateUniqueCoreDumpFile(ErrorResult& rv,
 class DeleteHeapSnapshotTempFileHelperChild
 {
 public:
-  MOZ_CONSTEXPR DeleteHeapSnapshotTempFileHelperChild() { }
+  constexpr DeleteHeapSnapshotTempFileHelperChild() { }
 
   void operator()(PHeapSnapshotTempFileHelperChild* ptr) const {
-    NS_WARN_IF(!HeapSnapshotTempFileHelperChild::Send__delete__(ptr));
+    Unused << NS_WARN_IF(!HeapSnapshotTempFileHelperChild::Send__delete__(ptr));
   }
 };
 
@@ -1466,14 +1501,18 @@ using UniqueHeapSnapshotTempFileHelperChild = UniquePtr<PHeapSnapshotTempFileHel
 // the filesystem. Use IPDL to request a file descriptor from the parent
 // process.
 static already_AddRefed<nsIOutputStream>
-getCoreDumpOutputStream(ErrorResult& rv, TimeStamp& start, nsAString& outFilePath)
+getCoreDumpOutputStream(ErrorResult& rv,
+                        TimeStamp& start,
+                        nsAString& outFilePath,
+                        nsAString& outSnapshotId)
 {
   if (XRE_IsParentProcess()) {
     // Create the file and open the output stream directly.
 
     nsCOMPtr<nsIFile> file = HeapSnapshot::CreateUniqueCoreDumpFile(rv,
                                                                     start,
-                                                                    outFilePath);
+                                                                    outFilePath,
+                                                                    outSnapshotId);
     if (NS_WARN_IF(rv.Failed()))
       return nullptr;
 
@@ -1484,43 +1523,43 @@ getCoreDumpOutputStream(ErrorResult& rv, TimeStamp& start, nsAString& outFilePat
       return nullptr;
 
     return outputStream.forget();
-  } else {
-    // Request a file descriptor from the parent process over IPDL.
-
-    auto cc = ContentChild::GetSingleton();
-    if (!cc) {
-      rv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-
-    UniqueHeapSnapshotTempFileHelperChild helper(
-      cc->SendPHeapSnapshotTempFileHelperConstructor());
-    if (NS_WARN_IF(!helper)) {
-      rv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-
-    OpenHeapSnapshotTempFileResponse response;
-    if (!helper->SendOpenHeapSnapshotTempFile(&response)) {
-      rv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-    if (response.type() == OpenHeapSnapshotTempFileResponse::Tnsresult) {
-      rv.Throw(response.get_nsresult());
-      return nullptr;
-    }
-
-    auto opened = response.get_OpenedFile();
-    outFilePath = opened.path();
-    nsCOMPtr<nsIOutputStream> outputStream =
-      FileDescriptorOutputStream::Create(opened.descriptor());
-    if (NS_WARN_IF(!outputStream)) {
-      rv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-
-    return outputStream.forget();
   }
+  // Request a file descriptor from the parent process over IPDL.
+
+  auto cc = ContentChild::GetSingleton();
+  if (!cc) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  UniqueHeapSnapshotTempFileHelperChild helper(
+    cc->SendPHeapSnapshotTempFileHelperConstructor());
+  if (NS_WARN_IF(!helper)) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  OpenHeapSnapshotTempFileResponse response;
+  if (!helper->SendOpenHeapSnapshotTempFile(&response)) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+  if (response.type() == OpenHeapSnapshotTempFileResponse::Tnsresult) {
+    rv.Throw(response.get_nsresult());
+    return nullptr;
+  }
+
+  auto opened = response.get_OpenedFile();
+  outFilePath = opened.path();
+  outSnapshotId = opened.snapshotId();
+  nsCOMPtr<nsIOutputStream> outputStream =
+    FileDescriptorOutputStream::Create(opened.descriptor());
+  if (NS_WARN_IF(!outputStream)) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  return outputStream.forget();
 }
 
 } // namespace devtools
@@ -1531,10 +1570,11 @@ using namespace JS;
 using namespace devtools;
 
 /* static */ void
-ThreadSafeChromeUtils::SaveHeapSnapshot(GlobalObject& global,
-                                        const HeapSnapshotBoundaries& boundaries,
-                                        nsAString& outFilePath,
-                                        ErrorResult& rv)
+ChromeUtils::SaveHeapSnapshotShared(GlobalObject& global,
+                                    const HeapSnapshotBoundaries& boundaries,
+                                    nsAString& outFilePath,
+                                    nsAString& outSnapshotId,
+                                    ErrorResult& rv)
 {
   auto start = TimeStamp::Now();
 
@@ -1543,7 +1583,9 @@ ThreadSafeChromeUtils::SaveHeapSnapshot(GlobalObject& global,
   uint32_t nodeCount = 0;
   uint32_t edgeCount = 0;
 
-  nsCOMPtr<nsIOutputStream> outputStream = getCoreDumpOutputStream(rv, start, outFilePath);
+  nsCOMPtr<nsIOutputStream> outputStream = getCoreDumpOutputStream(rv, start,
+                                                                   outFilePath,
+                                                                   outSnapshotId);
   if (NS_WARN_IF(rv.Failed()))
     return;
 
@@ -1551,17 +1593,19 @@ ThreadSafeChromeUtils::SaveHeapSnapshot(GlobalObject& global,
   ::google::protobuf::io::GzipOutputStream gzipStream(&zeroCopyStream);
 
   JSContext* cx = global.Context();
-  StreamWriter writer(cx, gzipStream, wantNames);
-  if (NS_WARN_IF(!writer.init())) {
-    rv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
 
   {
     Maybe<AutoCheckCannotGC> maybeNoGC;
-    ubi::RootList rootList(JS_GetRuntime(cx), maybeNoGC, wantNames);
+    ubi::RootList rootList(cx, maybeNoGC, wantNames);
     if (!EstablishBoundaries(cx, rv, boundaries, rootList, compartments))
       return;
+
+    StreamWriter writer(cx, gzipStream, wantNames,
+                        compartments.initialized() ? &compartments : nullptr);
+    if (NS_WARN_IF(!writer.init())) {
+      rv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
 
     MOZ_ASSERT(maybeNoGC.isSome());
     ubi::Node roots(&rootList);
@@ -1594,10 +1638,30 @@ ThreadSafeChromeUtils::SaveHeapSnapshot(GlobalObject& global,
                         edgeCount);
 }
 
+/* static */ void
+ChromeUtils::SaveHeapSnapshot(GlobalObject& global,
+                              const HeapSnapshotBoundaries& boundaries,
+                              nsAString& outFilePath,
+                              ErrorResult& rv)
+{
+  nsAutoString snapshotId;
+  SaveHeapSnapshotShared(global, boundaries, outFilePath, snapshotId, rv);
+}
+
+/* static */ void
+ChromeUtils::SaveHeapSnapshotGetId(GlobalObject& global,
+                                   const HeapSnapshotBoundaries& boundaries,
+                                   nsAString& outSnapshotId,
+                                   ErrorResult& rv)
+{
+  nsAutoString filePath;
+  SaveHeapSnapshotShared(global, boundaries, filePath, outSnapshotId, rv);
+}
+
 /* static */ already_AddRefed<HeapSnapshot>
-ThreadSafeChromeUtils::ReadHeapSnapshot(GlobalObject& global,
-                                        const nsAString& filePath,
-                                        ErrorResult& rv)
+ChromeUtils::ReadHeapSnapshot(GlobalObject& global,
+                              const nsAString& filePath,
+                              ErrorResult& rv)
 {
   auto start = TimeStamp::Now();
 

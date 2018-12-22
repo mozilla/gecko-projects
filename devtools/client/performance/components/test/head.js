@@ -3,25 +3,24 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+/* global window, document, SimpleTest, requestAnimationFrame, is, ok */
+/* exported Cc, Ci, Cu, Cr, Assert, Task, TargetFactory, Toolbox, browserRequire,
+   forceRender, setProps, dumpn, checkOptimizationHeader, checkOptimizationTree */
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+let { Assert } = require("resource://testing-common/Assert.jsm");
+const { BrowserLoader } = ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
+const defer = require("devtools/shared/defer");
+const flags = require("devtools/shared/flags");
+let { TargetFactory } = require("devtools/client/framework/target");
+let { Toolbox } = require("devtools/client/framework/toolbox");
 
-Cu.import("resource://testing-common/Assert.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-var { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
-var { require } = Cu.import("resource://gre/modules/devtools/shared/Loader.jsm", {});
-var { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
-var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var { TargetFactory } = require("devtools/client/framework/target");
-var { Toolbox } = require("devtools/client/framework/toolbox");
-
-DevToolsUtils.testing = true;
-var { require: browserRequire } = BrowserLoader({
+let { require: browserRequire } = BrowserLoader({
   baseURI: "resource://devtools/client/performance/",
-  window: this
+  window
 });
 
-var $ = (selector, scope=document) => scope.querySelector(selector);
-var $$ = (selector, scope=document) => scope.querySelectorAll(selector);
+const $ = (selector, scope = document) => scope.querySelector(selector);
+const $$ = (selector, scope = document) => scope.querySelectorAll(selector);
 
 function forceRender(comp) {
   return setState(comp, {})
@@ -38,13 +37,13 @@ function onNextAnimationFrame(fn) {
 }
 
 function setState(component, newState) {
-  var deferred = promise.defer();
+  const deferred = defer();
   component.setState(newState, onNextAnimationFrame(deferred.resolve));
   return deferred.promise;
 }
 
 function setProps(component, newState) {
-  var deferred = promise.defer();
+  const deferred = defer();
   component.setProps(newState, onNextAnimationFrame(deferred.resolve));
   return deferred.promise;
 }
@@ -58,7 +57,7 @@ function dumpn(msg) {
  * and an IonType with an ObservedType, and a successful outcome.
  * Second site does not have a successful outcome.
  */
-let OPTS_DATA_GENERAL = [{
+const OPTS_DATA_GENERAL = [{
   id: 1,
   propertyName: "my property name",
   line: 100,
@@ -105,13 +104,14 @@ let OPTS_DATA_GENERAL = [{
       mirType: "Object",
       typeset: [
         { id: 2, keyedBy: "primitive" },
-        { id: 2, keyedBy: "constructor", name: "B", location: "http://mypage.com/file.js", line: "2" }, 
-        { id: 2, keyedBy: "constructor", name: "C", location: "http://mypage.com/file.js", line: "3" }, 
-        { id: 2, keyedBy: "constructor", name: "D", location: "http://mypage.com/file.js", line: "4" }, 
+        { id: 2, keyedBy: "constructor", name: "B", location: "http://mypage.com/file.js", line: "2" },
+        { id: 2, keyedBy: "constructor", name: "C", location: "http://mypage.com/file.js", line: "3" },
+        { id: 2, keyedBy: "constructor", name: "D", location: "http://mypage.com/file.js", line: "4" },
       ],
     }]
   }
 }];
+
 OPTS_DATA_GENERAL.forEach(site => {
   site.data.types.forEach(type => {
     if (type.typeset) {
@@ -122,22 +122,21 @@ OPTS_DATA_GENERAL.forEach(site => {
   site.data.types.id = site.id;
 });
 
-
-function checkOptimizationHeader (name, file, line) {
+function checkOptimizationHeader(name, file, line) {
   is($(".optimization-header .header-function-name").textContent, name,
     "correct optimization header function name");
   is($(".optimization-header .frame-link-filename").textContent, file,
     "correct optimization header file name");
-  is($(".optimization-header .frame-link-line").textContent, line,
+  is($(".optimization-header .frame-link-line").textContent, `:${line}`,
     "correct optimization header line");
 }
 
-function checkOptimizationTree (rowData) {
-  let rows = $$(".tree .tree-node");
+function checkOptimizationTree(rowData) {
+  const rows = $$(".tree .tree-node");
 
   for (let i = 0; i < rowData.length; i++) {
-    let row = rows[i];
-    let expected = rowData[i];
+    const row = rows[i];
+    const expected = rowData[i];
 
     switch (expected.type) {
       case "site":
@@ -175,10 +174,10 @@ function checkOptimizationTree (rowData) {
           `row ${i}th: correct attempt row, attempt item`);
         is($(".optimization-outcome", row).textContent, expected.outcome,
           `row ${i}th: correct attempt row, outcome item`);
-        ok($(".optimization-outcome", row).classList.contains(expected.success ? "success" : "failure"),
+        ok($(".optimization-outcome", row)
+          .classList.contains(expected.success ? "success" : "failure"),
           `row ${i}th: correct attempt row, failure/success status`);
         break;
     }
   }
 }
-

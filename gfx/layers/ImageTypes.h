@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -17,21 +18,10 @@ enum class ImageFormat {
   PLANAR_YCBCR,
 
   /**
-   * The GRALLOC_PLANAR_YCBCR format creates a GrallocImage, a subtype of
-   * PlanarYCbCrImage. It takes a PlanarYCbCrImage data or the raw gralloc
-   * data and can be used as a texture by Gonk backend directly.
+   * The NV_IMAGE format creates a NVImage. The PLANAR_YCBCR together with this
+   * complete the YUV format family.
    */
-  GRALLOC_PLANAR_YCBCR,
-
-  /**
-   * The GONK_CAMERA_IMAGE format creates a GonkCameraImage, which contains two
-   * parts. One is GrallocImage image for preview image. Another one is
-   * MediaBuffer from Gonk recording image. The preview image can be rendered in
-   * a layer for display. And the MediaBuffer will be used in component like OMX
-   * encoder. It is for GUM to support preview and recording image on Gonk
-   * camera.
-   */
-  GONK_CAMERA_IMAGE,
+  NV_IMAGE,
 
   /**
    * The SHARED_RGB format creates a SharedRGBImage, which stores RGB data in
@@ -67,11 +57,6 @@ enum class ImageFormat {
   SURFACE_TEXTURE,
 
   /**
-   * An EGL Image that can be shared across threads.
-   */
-  EGLIMAGE,
-
-  /**
    * The D3D9_RGB32_TEXTURE format creates a D3D9SurfaceImage, and wraps a
    * IDirect3DTexture9 in RGB32 layout.
    */
@@ -91,7 +76,18 @@ enum class ImageFormat {
   /**
    * A wrapper around a drawable TextureClient.
    */
-  TEXTURE_WRAPPER
+  TEXTURE_WRAPPER,
+
+  /**
+   * A D3D11 backed YUV image.
+   */
+  D3D11_YCBCR_IMAGE,
+
+  /**
+   * An opaque handle that refers to an Image stored in the GPU
+   * process.
+   */
+  GPU_VIDEO
 };
 
 enum class StereoMode {
@@ -99,7 +95,15 @@ enum class StereoMode {
   LEFT_RIGHT,
   RIGHT_LEFT,
   BOTTOM_TOP,
-  TOP_BOTTOM
+  TOP_BOTTOM,
+  MAX,
+};
+
+enum class YUVColorSpace {
+  BT601,
+  BT709,
+  // This represents the unknown format.
+  UNKNOWN,
 };
 
 } // namespace mozilla

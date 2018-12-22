@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,7 +17,6 @@
 #include "mozilla/TypedEnumBits.h"
 
 class nsContainerFrame;
-struct nsHTMLReflowState;
 class nsPresContext;
 
 /**
@@ -34,6 +34,8 @@ class nsPresContext;
  */
 class nsAbsoluteContainingBlock
 {
+  using ReflowInput = mozilla::ReflowInput;
+
 public:
   typedef nsIFrame::ChildListID ChildListID;
 
@@ -95,14 +97,16 @@ public:
    */
   void Reflow(nsContainerFrame*        aDelegatingFrame,
               nsPresContext*           aPresContext,
-              const nsHTMLReflowState& aReflowState,
+              const ReflowInput& aReflowInput,
               nsReflowStatus&          aReflowStatus,
               const nsRect&            aContainingBlock,
               AbsPosReflowFlags        aFlags,
               nsOverflowAreas*         aOverflowAreas);
 
+  using PostDestroyData = nsIFrame::PostDestroyData;
   void DestroyFrames(nsIFrame* aDelegatingFrame,
-                     nsIFrame* aDestructRoot);
+                     nsIFrame* aDestructRoot,
+                     PostDestroyData& aPostDestroyData);
 
   bool HasAbsoluteFrames() const { return mAbsoluteFrames.NotEmpty(); }
 
@@ -126,9 +130,25 @@ protected:
   bool FrameDependsOnContainer(nsIFrame* aFrame, bool aCBWidthChanged,
                                bool aCBHeightChanged);
 
+  /**
+   * After an abspos child's size is known, this method can be used to
+   * resolve size-dependent values in the ComputedLogicalOffsets on its
+   * reflow state. (This may involve resolving the inline dimension of
+   * aLogicalCBSize, too; hence, that variable is an in/outparam.)
+   *
+   * aKidSize, aMargin, aOffsets, and aLogicalCBSize are all expected to be
+   * represented in terms of the absolute containing block's writing-mode.
+   */
+  void ResolveSizeDependentOffsets(nsPresContext* aPresContext,
+                                   ReflowInput& aKidReflowInput,
+                                   const mozilla::LogicalSize& aKidSize,
+                                   const mozilla::LogicalMargin& aMargin,
+                                   mozilla::LogicalMargin* aOffsets,
+                                   mozilla::LogicalSize* aLogicalCBSize);
+
   void ReflowAbsoluteFrame(nsIFrame*                aDelegatingFrame,
                            nsPresContext*           aPresContext,
-                           const nsHTMLReflowState& aReflowState,
+                           const ReflowInput& aReflowInput,
                            const nsRect&            aContainingBlockRect,
                            AbsPosReflowFlags        aFlags,
                            nsIFrame*                aKidFrame,

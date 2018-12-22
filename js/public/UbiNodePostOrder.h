@@ -7,11 +7,11 @@
 #ifndef js_UbiNodePostOrder_h
 #define js_UbiNodePostOrder_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 
-#include "jsalloc.h"
-
+#include "js/AllocPolicy.h"
 #include "js/UbiNode.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
@@ -59,7 +59,7 @@ struct PostOrder {
 
         OriginAndEdges(const Node& node, EdgeVector&& edges)
           : origin(node)
-          , edges(mozilla::Move(edges))
+          , edges(std::move(edges))
         { }
 
         OriginAndEdges(const OriginAndEdges& rhs) = delete;
@@ -67,14 +67,14 @@ struct PostOrder {
 
         OriginAndEdges(OriginAndEdges&& rhs)
           : origin(rhs.origin)
-          , edges(mozilla::Move(rhs.edges))
+          , edges(std::move(rhs.edges))
         {
             MOZ_ASSERT(&rhs != this, "self-move disallowed");
         }
 
         OriginAndEdges& operator=(OriginAndEdges&& rhs) {
             this->~OriginAndEdges();
-            new (this) OriginAndEdges(mozilla::Move(rhs));
+            new (this) OriginAndEdges(std::move(rhs));
             return *this;
         }
     };
@@ -82,7 +82,7 @@ struct PostOrder {
     using Stack = js::Vector<OriginAndEdges, 256, js::SystemAllocPolicy>;
     using Set = js::HashSet<Node, js::DefaultHasher<Node>, js::SystemAllocPolicy>;
 
-    JSRuntime*               rt;
+    JSContext*               cx;
     Set                      seen;
     Stack                    stack;
 #ifdef DEBUG
@@ -90,21 +90,21 @@ struct PostOrder {
 #endif
 
   private:
-    bool fillEdgesFromRange(EdgeVector& edges, js::UniquePtr<EdgeRange>& range) {
+    MOZ_MUST_USE bool fillEdgesFromRange(EdgeVector& edges, js::UniquePtr<EdgeRange>& range) {
         MOZ_ASSERT(range);
         for ( ; !range->empty(); range->popFront()) {
-            if (!edges.append(mozilla::Move(range->front())))
+            if (!edges.append(std::move(range->front())))
                 return false;
         }
         return true;
     }
 
-    bool pushForTraversing(const Node& node) {
+    MOZ_MUST_USE bool pushForTraversing(const Node& node) {
         EdgeVector edges;
-        auto range = node.edges(rt, /* wantNames */ false);
+        auto range = node.edges(cx, /* wantNames */ false);
         return range &&
             fillEdgesFromRange(edges, range) &&
-            stack.append(OriginAndEdges(node, mozilla::Move(edges)));
+            stack.append(OriginAndEdges(node, std::move(edges)));
     }
 
 
@@ -114,8 +114,8 @@ struct PostOrder {
     // The traversal asserts that no GC happens in its runtime during its
     // lifetime via the `AutoCheckCannotGC&` parameter. We do nothing with it,
     // other than require it to exist with a lifetime that encloses our own.
-    PostOrder(JSRuntime* rt, AutoCheckCannotGC&)
-      : rt(rt)
+    PostOrder(JSContext* cx, AutoCheckCannotGC&)
+      : cx(cx)
       , seen()
       , stack()
 #ifdef DEBUG
@@ -124,11 +124,11 @@ struct PostOrder {
     { }
 
     // Initialize this traversal object. Return false on OOM.
-    bool init() { return seen.init(); }
+    MOZ_MUST_USE bool init() { return seen.init(); }
 
     // Add `node` as a starting point for the traversal. You may add
     // as many starting points as you like. Returns false on OOM.
-    bool addStart(const Node& node) {
+    MOZ_MUST_USE bool addStart(const Node& node) {
         if (!seen.put(node))
             return false;
         return pushForTraversing(node);
@@ -144,7 +144,7 @@ struct PostOrder {
     // Return false on OOM or error return from `onNode::operator()` or
     // `onEdge::operator()`.
     template<typename NodeVisitor, typename EdgeVisitor>
-    bool traverse(NodeVisitor onNode, EdgeVisitor onEdge) {
+    MOZ_MUST_USE bool traverse(NodeVisitor onNode, EdgeVisitor onEdge) {
 #ifdef DEBUG
         MOZ_ASSERT(!traversed, "Can only traverse() once!");
         traversed = true;
@@ -161,7 +161,7 @@ struct PostOrder {
                 continue;
             }
 
-            Edge edge = mozilla::Move(edges.back());
+            Edge edge = std::move(edges.back());
             edges.popBack();
 
             if (!onEdge(origin, edge))

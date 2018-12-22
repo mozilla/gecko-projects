@@ -23,8 +23,13 @@
 
 "use strict";
 
-const {Ci, Cu, Cc} = require("chrome");
 const Services = require("Services");
+const focusManager = Services.focus;
+const {KeyCodes} = require("devtools/client/shared/keycodes");
+const EventEmitter = require("devtools/shared/event-emitter");
+const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
+
+loader.lazyRequireGetter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm", true);
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const CONTENT_TYPES = {
@@ -33,18 +38,30 @@ const CONTENT_TYPES = {
   CSS_MIXED: 2,
   CSS_PROPERTY: 3,
 };
-const MAX_POPUP_ENTRIES = 10;
 
-const FOCUS_FORWARD = Ci.nsIFocusManager.MOVEFOCUS_FORWARD;
-const FOCUS_BACKWARD = Ci.nsIFocusManager.MOVEFOCUS_BACKWARD;
+// The limit of 500 autocomplete suggestions should not be reached but is kept
+// for safety.
+const MAX_POPUP_ENTRIES = 500;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/shared/event-emitter.js");
-const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
+const FOCUS_FORWARD = focusManager.MOVEFOCUS_FORWARD;
+const FOCUS_BACKWARD = focusManager.MOVEFOCUS_BACKWARD;
+
+const WORD_REGEXP = /\w/;
+const isWordChar = function(str) {
+  return str && WORD_REGEXP.test(str);
+};
+
+const GRID_PROPERTY_NAMES = ["grid-area", "grid-row", "grid-row-start",
+                             "grid-row-end", "grid-column", "grid-column-start",
+                             "grid-column-end"];
+const GRID_ROW_PROPERTY_NAMES = ["grid-area", "grid-row", "grid-row-start",
+                                 "grid-row-end"];
+const GRID_COL_PROPERTY_NAMES = ["grid-area", "grid-column", "grid-column-start",
+                                 "grid-column-end"];
 
 /**
  * Helper to check if the provided key matches one of the expected keys.
- * Keys will be prefixed with DOM_VK_ and should match a key in nsIDOMKeyEvent.
+ * Keys will be prefixed with DOM_VK_ and should match a key in KeyCodes.
  *
  * @param {String} key
  *        the key to check (can be a keyCode).
@@ -54,7 +71,7 @@ const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
  */
 function isKeyIn(key, ...keys) {
   return keys.some(expectedKey => {
-    return key === Ci.nsIDOMKeyEvent["DOM_VK_" + expectedKey];
+    return key === KeyCodes["DOM_VK_" + expectedKey];
   });
 }
 
@@ -80,11 +97,13 @@ function isKeyIn(key, ...keys) {
  *       Called when input is committed or blurred.  Called with
  *       current value, a boolean telling the caller whether to
  *       commit the change, and the direction of the next element to be
- *       selected. Direction may be one of nsIFocusManager.MOVEFOCUS_FORWARD,
- *       nsIFocusManager.MOVEFOCUS_BACKWARD, or null (no movement).
+ *       selected. Direction may be one of Services.focus.MOVEFOCUS_FORWARD,
+ *       Services.focus.MOVEFOCUS_BACKWARD, or null (no movement).
  *       This function is called before the editor has been torn down.
  *    {Function} destroy:
  *       Called when the editor is destroyed and has been torn down.
+ *    {Function} contextMenu:
+ *       Called when the user triggers a contextmenu event on the input.
  *    {Object} advanceChars:
  *       This can be either a string or a function.
  *       If it is a string, then if any characters in it are typed,
@@ -116,6 +135,13 @@ function isKeyIn(key, ...keys) {
  *    {Boolean} preserveTextStyles: If true, do not copy text-related styles
  *              from `element` to the new input.
  *      defaults to false
+ *    {Object} cssProperties: An instance of CSSProperties.
+ *    {Object} cssVariables: A Map object containing all CSS variables.
+ *    {Number} defaultIncrement: The value by which the input is incremented
+ *      or decremented by default (0.1 for properties like opacity and 1 by default)
+ *    {Function} getGridLineNames:
+ *       Will be called before offering autocomplete sugestions, if the property is
+ *       a member of GRID_PROPERTY_NAMES.
  */
 function editableField(options) {
   return editableItem(options, function(element, event) {
@@ -142,18 +168,18 @@ exports.editableField = editableField;
  * @return {Function} function which calls callback
  */
 function editableItem(options, callback) {
-  let trigger = options.trigger || "click";
-  let element = options.element;
+  const trigger = options.trigger || "click";
+  const element = options.element;
   element.addEventListener(trigger, function(evt) {
     if (evt.target.nodeName !== "a") {
-      let win = this.ownerDocument.defaultView;
-      let selection = win.getSelection();
+      const win = this.ownerDocument.defaultView;
+      const selection = win.getSelection();
       if (trigger != "click" || selection.isCollapsed) {
         callback(element, evt);
       }
       evt.stopPropagation();
     }
-  }, false);
+  });
 
   // If focused by means other than a click, start editing by
   // pressing enter or space.
@@ -169,16 +195,16 @@ function editableItem(options, callback) {
   // So hide the focus ring while the mouse is down.
   element.addEventListener("mousedown", function(evt) {
     if (evt.target.nodeName !== "a") {
-      let cleanup = function() {
+      const cleanup = function() {
         element.style.removeProperty("outline-style");
-        element.removeEventListener("mouseup", cleanup, false);
-        element.removeEventListener("mouseout", cleanup, false);
+        element.removeEventListener("mouseup", cleanup);
+        element.removeEventListener("mouseout", cleanup);
       };
       element.style.setProperty("outline-style", "none");
-      element.addEventListener("mouseup", cleanup, false);
-      element.addEventListener("mouseout", cleanup, false);
+      element.addEventListener("mouseup", cleanup);
+      element.addEventListener("mouseout", cleanup);
     }
-  }, false);
+  });
 
   // Mark the element editable field for tab
   // navigation while editing.
@@ -186,6 +212,9 @@ function editableItem(options, callback) {
 
   // Save the trigger type so we can dispatch this later
   element._trigger = trigger;
+
+  // Add button semantics to the element, to indicate that it can be activated.
+  element.setAttribute("role", "button");
 
   return function turnOnEditMode() {
     callback(element);
@@ -209,12 +238,15 @@ exports.getInplaceEditorForSpan = getInplaceEditorForSpan;
 
 function InplaceEditor(options, event) {
   this.elt = options.element;
-  let doc = this.elt.ownerDocument;
+  const doc = this.elt.ownerDocument;
   this.doc = doc;
   this.elt.inplaceEditor = this;
-
+  this.cssProperties = options.cssProperties;
+  this.cssVariables = options.cssVariables || new Map();
   this.change = options.change;
   this.done = options.done;
+  this.contextMenu = options.contextMenu;
+  this.defaultIncrement = options.defaultIncrement || 1;
   this.destroy = options.destroy;
   this.initial = options.initial ? options.initial : this.elt.textContent;
   this.multiline = options.multiline || false;
@@ -237,9 +269,12 @@ function InplaceEditor(options, event) {
                           : !!options.preserveTextStyles;
 
   this._onBlur = this._onBlur.bind(this);
+  this._onWindowBlur = this._onWindowBlur.bind(this);
   this._onKeyPress = this._onKeyPress.bind(this);
   this._onInput = this._onInput.bind(this);
   this._onKeyup = this._onKeyup.bind(this);
+  this._onAutocompletePopupClick = this._onAutocompletePopupClick.bind(this);
+  this._onContextMenu = this._onContextMenu.bind(this);
 
   this._createInput();
 
@@ -257,8 +292,8 @@ function InplaceEditor(options, event) {
   if (typeof options.advanceChars === "function") {
     this._advanceChars = options.advanceChars;
   } else {
-    let advanceCharcodes = {};
-    let advanceChars = options.advanceChars || "";
+    const advanceCharcodes = {};
+    const advanceChars = options.advanceChars || "";
     for (let i = 0; i < advanceChars.length; i++) {
       advanceCharcodes[advanceChars.charCodeAt(i)] = true;
     }
@@ -271,30 +306,30 @@ function InplaceEditor(options, event) {
     this.input.select();
   }
 
-  if (this.contentType == CONTENT_TYPES.CSS_VALUE && this.input.value == "") {
-    this._maybeSuggestCompletion(false);
-  }
-
-  this.input.addEventListener("blur", this._onBlur, false);
-  this.input.addEventListener("keypress", this._onKeyPress, false);
-  this.input.addEventListener("input", this._onInput, false);
-  this.input.addEventListener("dblclick", this._stopEventPropagation, false);
-  this.input.addEventListener("click", this._stopEventPropagation, false);
-  this.input.addEventListener("mousedown", this._stopEventPropagation, false);
+  this.input.addEventListener("blur", this._onBlur);
+  this.input.addEventListener("keypress", this._onKeyPress);
+  this.input.addEventListener("input", this._onInput);
+  this.input.addEventListener("dblclick", this._stopEventPropagation);
+  this.input.addEventListener("click", this._stopEventPropagation);
+  this.input.addEventListener("mousedown", this._stopEventPropagation);
+  this.input.addEventListener("contextmenu", this._onContextMenu);
+  this.doc.defaultView.addEventListener("blur", this._onWindowBlur);
 
   this.validate = options.validate;
 
   if (this.validate) {
-    this.input.addEventListener("keyup", this._onKeyup, false);
+    this.input.addEventListener("keyup", this._onKeyup);
   }
 
   this._updateSize();
+
+  EventEmitter.decorate(this);
 
   if (options.start) {
     options.start(this, event);
   }
 
-  EventEmitter.decorate(this);
+  this._getGridNamesBeforeCompletion(options.getGridLineNames);
 }
 
 exports.InplaceEditor = InplaceEditor;
@@ -304,7 +339,7 @@ InplaceEditor.CONTENT_TYPES = CONTENT_TYPES;
 InplaceEditor.prototype = {
 
   get currentInputValue() {
-    let val = this.trimOutput ? this.input.value.trim() : this.input.value;
+    const val = this.trimOutput ? this.input.value.trim() : this.input.value;
     return val;
   },
 
@@ -335,15 +370,15 @@ InplaceEditor.prototype = {
       return;
     }
 
-    this.input.removeEventListener("blur", this._onBlur, false);
-    this.input.removeEventListener("keypress", this._onKeyPress, false);
-    this.input.removeEventListener("keyup", this._onKeyup, false);
-    this.input.removeEventListener("input", this._onInput, false);
-    this.input.removeEventListener("dblclick", this._stopEventPropagation,
-      false);
-    this.input.removeEventListener("click", this._stopEventPropagation, false);
-    this.input.removeEventListener("mousedown", this._stopEventPropagation,
-      false);
+    this.input.removeEventListener("blur", this._onBlur);
+    this.input.removeEventListener("keypress", this._onKeyPress);
+    this.input.removeEventListener("keyup", this._onKeyup);
+    this.input.removeEventListener("input", this._onInput);
+    this.input.removeEventListener("dblclick", this._stopEventPropagation);
+    this.input.removeEventListener("click", this._stopEventPropagation);
+    this.input.removeEventListener("mousedown", this._stopEventPropagation);
+    this.input.removeEventListener("contextmenu", this._onContextMenu);
+    this.doc.defaultView.removeEventListener("blur", this._onWindowBlur);
 
     this._stopAutosize();
 
@@ -380,7 +415,7 @@ InplaceEditor.prototype = {
       this.doc.createElementNS(HTML_NS, this.multiline ? "pre" : "span");
     this._measurement.className = "autosizer";
     this.elt.parentNode.appendChild(this._measurement);
-    let style = this._measurement.style;
+    const style = this._measurement.style;
     style.visibility = "hidden";
     style.position = "absolute";
     style.top = "0";
@@ -420,7 +455,7 @@ InplaceEditor.prototype = {
     // the span's textContent will collapse spaces and the measurement
     // will be wrong.
     let content = this.input.value;
-    let unbreakableSpace = "\u00a0";
+    const unbreakableSpace = "\u00a0";
 
     // Make sure the content is not empty.
     if (content === "") {
@@ -445,7 +480,7 @@ InplaceEditor.prototype = {
       if (this.maxWidth) {
         width = Math.min(this.maxWidth, width);
       }
-      let height = this._measurement.getBoundingClientRect().height;
+      const height = this._measurement.getBoundingClientRect().height;
       this.input.style.height = height + "px";
     }
     this.input.style.width = width + "px";
@@ -459,8 +494,8 @@ InplaceEditor.prototype = {
     // Just make the text content to be 'x' to get the width and height of any
     // character in a monospace font.
     this._measurement.textContent = "x";
-    let width = this._measurement.clientWidth;
-    let height = this._measurement.clientHeight;
+    const width = this._measurement.clientWidth;
+    const height = this._measurement.clientHeight;
     return { width, height };
   },
 
@@ -472,11 +507,11 @@ InplaceEditor.prototype = {
    * @return {Boolean} true if value has been incremented.
    */
   _incrementValue: function(increment) {
-    let value = this.input.value;
-    let selectionStart = this.input.selectionStart;
-    let selectionEnd = this.input.selectionEnd;
+    const value = this.input.value;
+    const selectionStart = this.input.selectionStart;
+    const selectionEnd = this.input.selectionEnd;
 
-    let newValue = this._incrementCSSValue(value, increment, selectionStart,
+    const newValue = this._incrementCSSValue(value, increment, selectionStart,
                                            selectionEnd);
 
     if (!newValue) {
@@ -509,11 +544,11 @@ InplaceEditor.prototype = {
    * @return {Object} object with properties 'value', 'start', and 'end'.
    */
   _incrementCSSValue: function(value, increment, selStart, selEnd) {
-    let range = this._parseCSSValue(value, selStart);
-    let type = (range && range.type) || "";
-    let rawValue = range ? value.substring(range.start, range.end) : "";
-    let preRawValue = range ? value.substr(0, range.start) : "";
-    let postRawValue = range ? value.substr(range.end) : "";
+    const range = this._parseCSSValue(value, selStart);
+    const type = (range && range.type) || "";
+    const rawValue = range ? value.substring(range.start, range.end) : "";
+    const preRawValue = range ? value.substr(0, range.start) : "";
+    const postRawValue = range ? value.substr(range.end) : "";
     let info;
 
     let incrementedValue = null, selection;
@@ -523,15 +558,15 @@ InplaceEditor.prototype = {
         info.units = this._findCompatibleUnit(preRawValue, postRawValue);
       }
 
-      let newValue = this._incrementRawValue(rawValue, increment, info);
+      const newValue = this._incrementRawValue(rawValue, increment, info);
       if (newValue !== null) {
         incrementedValue = newValue;
         selection = [0, incrementedValue.length];
       }
     } else if (type === "hex") {
-      let exprOffset = selStart - range.start;
-      let exprOffsetEnd = selEnd - range.start;
-      let newValue = this._incHexColor(rawValue, increment, exprOffset,
+      const exprOffset = selStart - range.start;
+      const exprOffsetEnd = selEnd - range.start;
+      const newValue = this._incHexColor(rawValue, increment, exprOffset,
                                        exprOffsetEnd);
       if (newValue) {
         incrementedValue = newValue.value;
@@ -540,7 +575,7 @@ InplaceEditor.prototype = {
     } else {
       if (type === "rgb" || type === "hsl") {
         info = {};
-        let part = value.substring(range.start, selStart).split(",").length - 1;
+        const part = value.substring(range.start, selStart).split(",").length - 1;
         if (part === 3) {
           // alpha
           info.minValue = 0;
@@ -594,10 +629,15 @@ InplaceEditor.prototype = {
       return "";
     }
 
-    let units = ["px", "deg", "s"];
-    for (let unit of units) {
-      let value = beforeValue + "1" + unit + afterValue;
-      if (domUtils.cssPropertyIsValid(this.property.name, value)) {
+    // A DOM element is used to test the validity of various units. This is to
+    // avoid having to do an async call to the server to get this information.
+    const el = this.doc.createElement("div");
+    const units = ["px", "deg", "s"];
+    for (const unit of units) {
+      const value = beforeValue + "1" + unit + afterValue;
+      el.style.setProperty(this.property.name, "");
+      el.style.setProperty(this.property.name, value);
+      if (el.style.getPropertyValue(this.property.name) !== "") {
         return unit;
       }
     }
@@ -615,7 +655,9 @@ InplaceEditor.prototype = {
    *         'type'.
    */
   _parseCSSValue: function(value, offset) {
+    /* eslint-disable max-len */
     const reSplitCSS = /(url\("?[^"\)]+"?\)?)|(rgba?\([^)]*\)?)|(hsla?\([^)]*\)?)|(#[\dA-Fa-f]+)|(-?\d*\.?\d+(%|[a-z]{1,4})?)|"([^"]*)"?|'([^']*)'?|([^,\s\/!\(\)]+)|(!(.*)?)/;
+    /* eslint-enable */
     let start = 0;
     let m;
 
@@ -682,10 +724,10 @@ InplaceEditor.prototype = {
     } else {
       // Parse periods as belonging to the number only if we are in a known
       // number context. (This makes incrementing the 1 in 'image1.gif' work.)
-      let pattern = "[" + (info ? "0-9." : "0-9") + "]*";
-      let before = new RegExp(pattern + "$")
+      const pattern = "[" + (info ? "0-9." : "0-9") + "]*";
+      const before = new RegExp(pattern + "$")
         .exec(value.substr(0, offset))[0].length;
-      let after = new RegExp("^" + pattern)
+      const after = new RegExp("^" + pattern)
         .exec(value.substr(offset))[0].length;
 
       start = offset - before;
@@ -706,9 +748,9 @@ InplaceEditor.prototype = {
         ++end;
       }
 
-      let first = value.substr(0, start);
+      const first = value.substr(0, start);
       let mid = value.substring(start, end);
-      let last = value.substr(end);
+      const last = value.substr(end);
 
       mid = this._incrementRawValue(mid, increment, info);
 
@@ -720,6 +762,8 @@ InplaceEditor.prototype = {
         };
       }
     }
+
+    return null;
   },
 
   /**
@@ -734,13 +778,13 @@ InplaceEditor.prototype = {
    * @return {String} the incremented value.
    */
   _incrementRawValue: function(rawValue, increment, info) {
-    let num = parseFloat(rawValue);
+    const num = parseFloat(rawValue);
 
     if (isNaN(num)) {
       return null;
     }
 
-    let number = /\d+(\.\d+)?/.exec(rawValue);
+    const number = /\d+(\.\d+)?/.exec(rawValue);
 
     let units = rawValue.substr(number.index + number[0].length);
     if (info && "units" in info) {
@@ -802,7 +846,17 @@ InplaceEditor.prototype = {
       offsetEnd *= 2;
     }
 
-    if (rawValue.length !== 6) {
+    // Normalize #ABCD -> #AABBCCDD.
+    if (rawValue.length === 4) {
+      rawValue = rawValue.charAt(0) + rawValue.charAt(0) +
+                 rawValue.charAt(1) + rawValue.charAt(1) +
+                 rawValue.charAt(2) + rawValue.charAt(2) +
+                 rawValue.charAt(3) + rawValue.charAt(3);
+      offset *= 2;
+      offsetEnd *= 2;
+    }
+
+    if (rawValue.length !== 6 && rawValue.length !== 8) {
       return null;
     }
 
@@ -827,12 +881,12 @@ InplaceEditor.prototype = {
       increment = (increment < 0 ? -16 : 16);
     }
 
-    let isUpper = (rawValue.toUpperCase() === rawValue);
+    const isUpper = (rawValue.toUpperCase() === rawValue);
 
     for (let pos = offset; pos < offsetEnd; pos += 2) {
       // Increment the part in [pos, pos+2).
       let mid = rawValue.substr(pos, 2);
-      let value = parseInt(mid, 16);
+      const value = parseInt(mid, 16);
 
       if (isNaN(value)) {
         return null;
@@ -867,7 +921,7 @@ InplaceEditor.prototype = {
    */
   _cycleCSSSuggestion: function(reverse, noSelect) {
     // selectedItem can be null when nothing is selected in an empty editor.
-    let {label, preLabel} = this.popup.selectedItem ||
+    const {label, preLabel} = this.popup.selectedItem ||
                             {label: "", preLabel: ""};
     if (reverse) {
       this.popup.selectPreviousItem();
@@ -876,7 +930,7 @@ InplaceEditor.prototype = {
     }
 
     this._selectedIndex = this.popup.selectedIndex;
-    let input = this.input;
+    const input = this.input;
     let pre = "";
 
     if (input.selectionStart < input.selectionEnd) {
@@ -886,9 +940,9 @@ InplaceEditor.prototype = {
                               preLabel.length);
     }
 
-    let post = input.value.slice(input.selectionEnd, input.value.length);
-    let item = this.popup.selectedItem;
-    let toComplete = item.label.slice(item.preLabel.length);
+    const post = input.value.slice(input.selectionEnd, input.value.length);
+    const item = this.popup.selectedItem;
+    const toComplete = item.label.slice(item.preLabel.length);
     input.value = pre + toComplete + post;
 
     if (!noSelect) {
@@ -914,7 +968,7 @@ InplaceEditor.prototype = {
     this._applied = true;
 
     if (this.done) {
-      let val = this.cancelled ? this.initial : this.currentInputValue;
+      const val = this.cancelled ? this.initial : this.currentInputValue;
       return this.done(val, !this.cancelled, direction);
     }
 
@@ -922,59 +976,102 @@ InplaceEditor.prototype = {
   },
 
   /**
-   * Handle loss of focus by calling done if it hasn't been called yet.
+   * Hide the popup and cancel any pending popup opening.
+   */
+  _onWindowBlur: function() {
+    if (this.popup && this.popup.isOpen) {
+      this.popup.hidePopup();
+    }
+
+    if (this._openPopupTimeout) {
+      this.doc.defaultView.clearTimeout(this._openPopupTimeout);
+    }
+  },
+
+  /**
+   * Event handler called when the inplace-editor's input loses focus.
    */
   _onBlur: function(event) {
     if (event && this.popup && this.popup.isOpen &&
-        this.popup.selectedIndex >= 0) {
-      let label, preLabel;
+      this.popup.selectedIndex >= 0) {
+      this._acceptPopupSuggestion();
+    } else {
+      this._apply();
+      this._clear();
+    }
+  },
 
-      if (this._selectedIndex === undefined) {
-        ({label, preLabel} =
-          this.popup.getItemAtIndex(this.popup.selectedIndex));
-      } else {
-        ({label, preLabel} = this.popup.getItemAtIndex(this._selectedIndex));
-      }
-
-      let input = this.input;
-      let pre = "";
-
-      // CSS_MIXED needs special treatment here to make it so that
-      // multiple presses of tab will cycle through completions, but
-      // without selecting the completed text.  However, this same
-      // special treatment will do the wrong thing for other editing
-      // styles.
-      if (input.selectionStart < input.selectionEnd ||
-          this.contentType !== CONTENT_TYPES.CSS_MIXED) {
-        pre = input.value.slice(0, input.selectionStart);
-      } else {
-        pre = input.value.slice(0, input.selectionStart - label.length +
-                                preLabel.length);
-      }
-      let post = input.value.slice(input.selectionEnd, input.value.length);
-      let item = this.popup.selectedItem;
-      this._selectedIndex = this.popup.selectedIndex;
-      let toComplete = item.label.slice(item.preLabel.length);
-      input.value = pre + toComplete + post;
-      input.setSelectionRange(pre.length + toComplete.length,
-                              pre.length + toComplete.length);
-      this._updateSize();
-      // Wait for the popup to hide and then focus input async otherwise it does
-      // not work.
-      let onPopupHidden = () => {
-        this.popup._panel.removeEventListener("popuphidden", onPopupHidden);
-        this.doc.defaultView.setTimeout(()=> {
-          input.focus();
-          this.emit("after-suggest");
-        }, 0);
-      };
-      this.popup._panel.addEventListener("popuphidden", onPopupHidden);
-      this.popup.hidePopup();
-      return;
+  /**
+   * Before offering autocomplete, set this.gridLineNames as the line names
+   * of the current grid, if they exist.
+   *
+   * @param {Function} getGridLineNames
+   *        A function which gets the line names of the current grid.
+   */
+  _getGridNamesBeforeCompletion: async function(getGridLineNames) {
+    if (getGridLineNames && this.property &&
+        GRID_PROPERTY_NAMES.includes(this.property.name)) {
+      this.gridLineNames = await getGridLineNames();
     }
 
-    this._apply();
-    this._clear();
+    if (this.contentType == CONTENT_TYPES.CSS_VALUE && this.input &&
+        this.input.value == "") {
+      this._maybeSuggestCompletion(false);
+    }
+  },
+
+  /**
+   * Event handler called by the autocomplete popup when receiving a click
+   * event.
+   */
+  _onAutocompletePopupClick: function() {
+    this._acceptPopupSuggestion();
+  },
+
+  _acceptPopupSuggestion: function() {
+    let label, preLabel;
+
+    if (this._selectedIndex === undefined) {
+      ({label, preLabel} = this.popup.getItemAtIndex(this.popup.selectedIndex));
+    } else {
+      ({label, preLabel} = this.popup.getItemAtIndex(this._selectedIndex));
+    }
+
+    const input = this.input;
+
+    let pre = "";
+
+    // CSS_MIXED needs special treatment here to make it so that
+    // multiple presses of tab will cycle through completions, but
+    // without selecting the completed text.  However, this same
+    // special treatment will do the wrong thing for other editing
+    // styles.
+    if (input.selectionStart < input.selectionEnd ||
+        this.contentType !== CONTENT_TYPES.CSS_MIXED) {
+      pre = input.value.slice(0, input.selectionStart);
+    } else {
+      pre = input.value.slice(0, input.selectionStart - label.length +
+                              preLabel.length);
+    }
+    const post = input.value.slice(input.selectionEnd, input.value.length);
+    const item = this.popup.selectedItem;
+    this._selectedIndex = this.popup.selectedIndex;
+    const toComplete = item.label.slice(item.preLabel.length);
+    input.value = pre + toComplete + post;
+    input.setSelectionRange(pre.length + toComplete.length,
+                            pre.length + toComplete.length);
+    this._updateSize();
+    // Wait for the popup to hide and then focus input async otherwise it does
+    // not work.
+    const onPopupHidden = () => {
+      this.popup.off("popup-closed", onPopupHidden);
+      this.doc.defaultView.setTimeout(()=> {
+        input.focus();
+        this.emit("after-suggest");
+      }, 0);
+    };
+    this.popup.on("popup-closed", onPopupHidden);
+    this._hideAutocompletePopup();
   },
 
   /**
@@ -983,20 +1080,24 @@ InplaceEditor.prototype = {
   _onKeyPress: function(event) {
     let prevent = false;
 
-    let key = event.keyCode;
-    let input = this.input;
+    const key = event.keyCode;
+    const input = this.input;
 
-    let multilineNavigation = !this._isSingleLine() &&
+    // We want to autoclose some characters, remember the pressed key in order to process
+    // it later on in maybeSuggestionCompletion().
+    this._pressedKey = event.key;
+
+    const multilineNavigation = !this._isSingleLine() &&
       isKeyIn(key, "UP", "DOWN", "LEFT", "RIGHT");
-    let isPlainText = this.contentType == CONTENT_TYPES.PLAIN_TEXT;
-    let isPopupOpen = this.popup && this.popup.isOpen;
+    const isPlainText = this.contentType == CONTENT_TYPES.PLAIN_TEXT;
+    const isPopupOpen = this.popup && this.popup.isOpen;
 
     let increment = 0;
     if (!isPlainText && !multilineNavigation) {
       increment = this._getIncrement(event);
     }
 
-    if (isKeyIn(key, "HOME", "END", "PAGE_UP", "PAGE_DOWN")) {
+    if (isKeyIn(key, "PAGE_UP", "PAGE_DOWN")) {
       this._preventSuggestions = true;
     }
 
@@ -1014,9 +1115,9 @@ InplaceEditor.prototype = {
       this._doValidation();
     }
 
-    if (isKeyIn(key, "BACK_SPACE", "DELETE", "LEFT", "RIGHT")) {
+    if (isKeyIn(key, "BACK_SPACE", "DELETE", "LEFT", "RIGHT", "HOME", "END")) {
       if (isPopupOpen) {
-        this.popup.hidePopup();
+        this._hideAutocompletePopup();
       }
     } else if (!cycling && !multilineNavigation &&
       !event.metaKey && !event.altKey && !event.ctrlKey) {
@@ -1067,18 +1168,18 @@ InplaceEditor.prototype = {
 
       // Close the popup if open
       if (this.popup && this.popup.isOpen) {
-        this.popup.hidePopup();
+        this._hideAutocompletePopup();
       }
 
       if (direction !== null && focusManager.focusedElement === input) {
         // If the focused element wasn't changed by the done callback,
         // move the focus as requested.
-        let next = moveFocus(this.doc.defaultView, direction);
+        const next = moveFocus(this.doc.defaultView, direction);
 
         // If the next node to be focused has been tagged as an editable
         // node, trigger editing using the configured event
         if (next && next.ownerDocument === this.doc && next._editable) {
-          let e = this.doc.createEvent("Event");
+          const e = this.doc.createEvent("Event");
           e.initEvent(next._trigger, true, true);
           next.dispatchEvent(e);
         }
@@ -1091,7 +1192,7 @@ InplaceEditor.prototype = {
       this._preventSuggestions = true;
       // Close the popup if open
       if (this.popup && this.popup.isOpen) {
-        this.popup.hidePopup();
+        this._hideAutocompletePopup();
       }
       prevent = true;
       this.cancelled = true;
@@ -1110,30 +1211,66 @@ InplaceEditor.prototype = {
     }
   },
 
+  _onContextMenu: function(event) {
+    if (this.contextMenu) {
+      this.contextMenu(event);
+    }
+  },
+
+  /**
+   * Open the autocomplete popup, adding a custom click handler and classname.
+   *
+   * @param {Number} offset
+   *        X-offset relative to the input starting edge.
+   * @param {Number} selectedIndex
+   *        The index of the item that should be selected. Use -1 to have no
+   *        item selected.
+   */
+  _openAutocompletePopup: function(offset, selectedIndex) {
+    this.popup.on("popup-click", this._onAutocompletePopupClick);
+    this.popup.openPopup(this.input, offset, 0, selectedIndex);
+  },
+
+  /**
+   * Remove the custom classname and click handler and close the autocomplete
+   * popup.
+   */
+  _hideAutocompletePopup: function() {
+    this.popup.off("popup-click", this._onAutocompletePopupClick);
+    this.popup.hidePopup();
+  },
+
   /**
    * Get the increment/decrement step to use for the provided key event.
    */
   _getIncrement: function(event) {
+    const getSmallIncrementKey = (evt) => {
+      if (AppConstants.platform === "macosx") {
+        return evt.altKey;
+      }
+      return evt.ctrlKey;
+    };
+
     const largeIncrement = 100;
     const mediumIncrement = 10;
     const smallIncrement = 0.1;
 
     let increment = 0;
-    let key = event.keyCode;
+    const key = event.keyCode;
 
     if (isKeyIn(key, "UP", "PAGE_UP")) {
-      increment = 1;
+      increment = 1 * this.defaultIncrement;
     } else if (isKeyIn(key, "DOWN", "PAGE_DOWN")) {
-      increment = -1;
+      increment = -1 * this.defaultIncrement;
     }
 
-    if (event.shiftKey && !event.altKey) {
+    if (event.shiftKey && !getSmallIncrementKey(event)) {
       if (isKeyIn(key, "PAGE_UP", "PAGE_DOWN")) {
         increment *= largeIncrement;
       } else {
         increment *= mediumIncrement;
       }
-    } else if (event.altKey && !event.shiftKey) {
+    } else if (getSmallIncrementKey(event) && !event.shiftKey) {
       increment *= smallIncrement;
     }
 
@@ -1192,12 +1329,13 @@ InplaceEditor.prototype = {
     if (!this.input) {
       return;
     }
-    let preTimeoutQuery = this.input.value;
+
+    const preTimeoutQuery = this.input.value;
 
     // Since we are calling this method from a keypress event handler, the
     // |input.value| does not include currently typed character. Thus we perform
     // this method async.
-    this.doc.defaultView.setTimeout(() => {
+    this._openPopupTimeout = this.doc.defaultView.setTimeout(() => {
       if (this._preventSuggestions) {
         this._preventSuggestions = false;
         return;
@@ -1208,40 +1346,55 @@ InplaceEditor.prototype = {
       if (!this.input) {
         return;
       }
-      let input = this.input;
+      const input = this.input;
       // The length of input.value should be increased by 1
       if (input.value.length - preTimeoutQuery.length > 1) {
         return;
       }
-      let query = input.value.slice(0, input.selectionStart);
+      const query = input.value.slice(0, input.selectionStart);
       let startCheckQuery = query;
       if (query == null) {
         return;
       }
-      // If nothing is selected and there is a non-space character after the
-      // cursor, do not autocomplete.
+      // If nothing is selected and there is a word (\w) character after the cursor, do
+      // not autocomplete.
       if (input.selectionStart == input.selectionEnd &&
-          input.selectionStart < input.value.length &&
-          input.value.slice(input.selectionStart)[0] != " ") {
-        // This emit is mainly to make the test flow simpler.
-        this.emit("after-suggest", "nothing to autocomplete");
-        return;
+          input.selectionStart < input.value.length) {
+        const nextChar = input.value.slice(input.selectionStart)[0];
+        // Check if the next character is a valid word character, no suggestion should be
+        // provided when preceeding a word.
+        if (/[\w-]/.test(nextChar)) {
+          // This emit is mainly to make the test flow simpler.
+          this.emit("after-suggest", "nothing to autocomplete");
+          return;
+        }
       }
+
       let list = [];
+      let postLabelValues = [];
+
       if (this.contentType == CONTENT_TYPES.CSS_PROPERTY) {
-        list = CSSPropertyList;
+        list = this._getCSSPropertyList();
       } else if (this.contentType == CONTENT_TYPES.CSS_VALUE) {
         // Get the last query to be completed before the caret.
-        let match = /([^\s,.\/]+$)/.exec(query);
+        const match = /([^\s,.\/]+$)/.exec(query);
         if (match) {
           startCheckQuery = match[0];
         } else {
           startCheckQuery = "";
         }
 
-        list =
-          ["!important",
-           ...domUtils.getCSSValuesForProperty(this.property.name)];
+        // Check if the query to be completed is a CSS variable.
+        const varMatch = /^var\(([^\s]+$)/.exec(startCheckQuery);
+
+        if (varMatch && varMatch.length == 2) {
+          startCheckQuery = varMatch[1];
+          list = this._getCSSVariableNames();
+          postLabelValues = list.map(varName => this._getCSSVariableValue(varName));
+        } else {
+          list = ["!important",
+                  ...this._getCSSValuesForPropertyName(this.property.name)];
+        }
 
         if (query == "") {
           // Do not suggest '!important' without any manually typed character.
@@ -1250,7 +1403,7 @@ InplaceEditor.prototype = {
       } else if (this.contentType == CONTENT_TYPES.CSS_MIXED &&
                  /^\s*style\s*=/.test(query)) {
         // Check if the style attribute is closed before the selection.
-        let styleValue = query.replace(/^\s*style\s*=\s*/, "");
+        const styleValue = query.replace(/^\s*style\s*=\s*/, "");
         // Look for a quote matching the opening quote (single or double).
         if (/^("[^"]*"|'[^']*')/.test(styleValue)) {
           // This emit is mainly to make the test flow simpler.
@@ -1259,16 +1412,15 @@ InplaceEditor.prototype = {
         }
 
         // Detecting if cursor is at property or value;
-        let match = query.match(/([:;"'=]?)\s*([^"';:=]+)?$/);
+        const match = query.match(/([:;"'=]?)\s*([^"';:=]+)?$/);
         if (match && match.length >= 2) {
           if (match[1] == ":") {
             // We are in CSS value completion
-            let propertyName =
+            const propertyName =
               query.match(/[;"'=]\s*([^"';:= ]+)\s*:\s*[^"';:=]*$/)[1];
-            list =
-              ["!important;",
-               ...domUtils.getCSSValuesForProperty(propertyName)];
-            let matchLastQuery = /([^\s,.\/]+$)/.exec(match[2] || "");
+            list = ["!important;",
+                    ...this._getCSSValuesForPropertyName(propertyName)];
+            const matchLastQuery = /([^\s,.\/]+$)/.exec(match[2] || "");
             if (matchLastQuery) {
               startCheckQuery = matchLastQuery[0];
             } else {
@@ -1280,7 +1432,7 @@ InplaceEditor.prototype = {
             }
           } else if (match[1]) {
             // We are in CSS property name completion
-            list = CSSPropertyList;
+            list = this._getCSSPropertyList();
             startCheckQuery = match[2];
           }
           if (startCheckQuery == null) {
@@ -1297,14 +1449,15 @@ InplaceEditor.prototype = {
         return;
       }
 
-      let finalList = [];
-      let length = list.length;
+      const finalList = [];
+      const length = list.length;
       for (let i = 0, count = 0; i < length && count < MAX_POPUP_ENTRIES; i++) {
         if (startCheckQuery != null && list[i].startsWith(startCheckQuery)) {
           count++;
           finalList.push({
             preLabel: startCheckQuery,
-            label: list[i]
+            label: list[i],
+            postLabel: postLabelValues[i] ? postLabelValues[i] : ""
           });
         } else if (count > 0) {
           // Since count was incremented, we had already crossed the entries
@@ -1316,13 +1469,28 @@ InplaceEditor.prototype = {
         }
       }
 
-      // Pick the best first suggestion from the provided list of suggestions.
-      let cssValues = finalList.map(item => item.label);
-      let mostRelevantIndex = findMostRelevantCssPropertyIndex(cssValues);
+      // Sort items starting with [a-z0-9] first, to make sure vendor-prefixed
+      // values and "!important" are suggested only after standard values.
+      finalList.sort((item1, item2) => {
+        // Get the expected alphabetical comparison between the items.
+        let comparison = item1.label.localeCompare(item2.label);
+        if (/^\w/.test(item1.label) != /^\w/.test(item2.label)) {
+          // One starts with [a-z0-9], one does not: flip the comparison.
+          comparison = -1 * comparison;
+        }
+        return comparison;
+      });
+
+      let index = 0;
+      if (startCheckQuery) {
+        // Only select a "best" suggestion when the user started a query.
+        const cssValues = finalList.map(item => item.label);
+        index = findMostRelevantCssPropertyIndex(cssValues);
+      }
 
       // Insert the most relevant item from the final list as the input value.
-      if (autoInsert && finalList[mostRelevantIndex]) {
-        let item = finalList[mostRelevantIndex].label;
+      if (autoInsert && finalList[index]) {
+        const item = finalList[index].label;
         input.value = query + item.slice(startCheckQuery.length) +
                       input.value.slice(query.length);
         input.setSelectionRange(query.length, query.length + item.length -
@@ -1333,23 +1501,69 @@ InplaceEditor.prototype = {
       // Display the list of suggestions if there are more than one.
       if (finalList.length > 1) {
         // Calculate the popup horizontal offset.
-        let indent = this.input.selectionStart - query.length;
+        const indent = this.input.selectionStart - startCheckQuery.length;
         let offset = indent * this.inputCharDimensions.width;
         offset = this._isSingleLine() ? offset : 0;
 
         // Select the most relevantItem if autoInsert is allowed
-        let selectedIndex = autoInsert ? mostRelevantIndex : -1;
+        const selectedIndex = autoInsert ? index : -1;
 
         // Open the suggestions popup.
         this.popup.setItems(finalList);
-        this.popup.openPopup(this.input, offset, 0, selectedIndex);
+        this._openAutocompletePopup(offset, selectedIndex);
       } else {
-        this.popup.hidePopup();
+        this._hideAutocompletePopup();
       }
+
+      this._autocloseParenthesis();
+
       // This emit is mainly for the purpose of making the test flow simpler.
       this.emit("after-suggest");
       this._doValidation();
     }, 0);
+  },
+
+  /**
+   * Automatically add closing parenthesis and skip closing parenthesis when needed.
+   */
+  _autocloseParenthesis: function() {
+    // Split the current value at the cursor index to rebuild the string.
+    const parts = this._splitStringAt(this.input.value, this.input.selectionStart);
+
+    // Lookup the character following the caret to know if the string should be modified.
+    const nextChar = parts[1][0];
+
+    // Autocomplete closing parenthesis if the last key pressed was "(" and the next
+    // character is not a "word" character.
+    if (this._pressedKey == "(" && !isWordChar(nextChar)) {
+      this._updateValue(parts[0] + ")" + parts[1]);
+    }
+
+    // Skip inserting ")" if the next character is already a ")" (note that we actually
+    // insert and remove the extra ")" here, as the input has already been modified).
+    if (this._pressedKey == ")" && nextChar == ")") {
+      this._updateValue(parts[0] + parts[1].substring(1));
+    }
+
+    this._pressedKey = null;
+  },
+
+  /**
+   * Update the current value of the input while preserving the caret position.
+   */
+  _updateValue: function(str) {
+    const start = this.input.selectionStart;
+    this.input.value = str;
+    this.input.setSelectionRange(start, start);
+    this._updateSize();
+  },
+
+  /**
+   * Split the provided string at the provided index. Returns an array of two strings.
+   * _splitStringAt("1234567", 3) will return ["123", "4567"]
+   */
+  _splitStringAt: function(str, index) {
+    return [str.substring(0, index), str.substring(index, str.length)];
   },
 
   /**
@@ -1358,8 +1572,61 @@ InplaceEditor.prototype = {
    * @return {Boolean} true if the input has a single line of text
    */
   _isSingleLine: function() {
-    let inputRect = this.input.getBoundingClientRect();
+    const inputRect = this.input.getBoundingClientRect();
     return inputRect.height < 2 * this.inputCharDimensions.height;
+  },
+
+  /**
+   * Returns the list of CSS properties to use for the autocompletion. This
+   * method is overridden by tests in order to use mocked suggestion lists.
+   *
+   * @return {Array} array of CSS property names (Strings)
+   */
+  _getCSSPropertyList: function() {
+    return this.cssProperties.getNames().sort();
+  },
+
+  /**
+   * Returns a list of CSS values valid for a provided property name to use for
+   * the autocompletion. This method is overridden by tests in order to use
+   * mocked suggestion lists.
+   *
+   * @param {String} propertyName
+   * @return {Array} array of CSS property values (Strings)
+   */
+  _getCSSValuesForPropertyName: function(propertyName) {
+    const gridLineList = [];
+    if (this.gridLineNames) {
+      if (GRID_ROW_PROPERTY_NAMES.includes(this.property.name)) {
+        gridLineList.push(...this.gridLineNames.rows);
+      }
+      if (GRID_COL_PROPERTY_NAMES.includes(this.property.name)) {
+        gridLineList.push(...this.gridLineNames.cols);
+      }
+    }
+    // Must be alphabetically sorted before comparing the results with
+    // the user input, otherwise we will lose some results.
+    return gridLineList.concat(this.cssProperties.getValues(propertyName)).sort();
+  },
+
+  /**
+   * Returns the list of all CSS variables to use for the autocompletion.
+   *
+   * @return {Array} array of CSS variable names (Strings)
+   */
+  _getCSSVariableNames: function() {
+    return Array.from(this.cssVariables.keys()).sort();
+  },
+
+  /**
+  * Returns the variable's value for the given CSS variable name.
+  *
+  * @param {String} varName
+  *        The variable name to retrieve the value of
+  * @return {String} the variable value to the given CSS variable name
+  */
+  _getCSSVariableValue: function(varName) {
+    return this.cssVariables.get(varName);
   },
 };
 
@@ -1367,30 +1634,28 @@ InplaceEditor.prototype = {
  * Copy text-related styles from one element to another.
  */
 function copyTextStyles(from, to) {
-  let win = from.ownerDocument.defaultView;
-  let style = win.getComputedStyle(from);
-  let getCssText = name => style.getPropertyCSSValue(name).cssText;
+  const win = from.ownerDocument.defaultView;
+  const style = win.getComputedStyle(from);
 
-  to.style.fontFamily = getCssText("font-family");
-  to.style.fontSize = getCssText("font-size");
-  to.style.fontWeight = getCssText("font-weight");
-  to.style.fontStyle = getCssText("font-style");
+  to.style.fontFamily = style.fontFamily;
+  to.style.fontSize = style.fontSize;
+  to.style.fontWeight = style.fontWeight;
+  to.style.fontStyle = style.fontStyle;
 }
 
 /**
  * Copy all styles which could have an impact on the element size.
  */
 function copyAllStyles(from, to) {
-  let win = from.ownerDocument.defaultView;
-  let style = win.getComputedStyle(from);
-  let getCssText = name => style.getPropertyCSSValue(name).cssText;
+  const win = from.ownerDocument.defaultView;
+  const style = win.getComputedStyle(from);
 
   copyTextStyles(from, to);
-  to.style.lineHeight = getCssText("line-height");
+  to.style.lineHeight = style.lineHeight;
 
   // If box-sizing is set to border-box, box model styles also need to be
   // copied.
-  let boxSizing = getCssText("box-sizing");
+  const boxSizing = style.boxSizing;
   if (boxSizing === "border-box") {
     to.style.boxSizing = boxSizing;
     copyBoxModelStyles(from, to);
@@ -1407,27 +1672,29 @@ function copyAllStyles(from, to) {
  *        the element on which copied styles are applied
  */
 function copyBoxModelStyles(from, to) {
-  let win = from.ownerDocument.defaultView;
-  let style = win.getComputedStyle(from);
-  let getCssText = name => style.getPropertyCSSValue(name).cssText;
+  const properties = [
+    // Copy all paddings.
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    // Copy border styles.
+    "borderTopStyle",
+    "borderRightStyle",
+    "borderBottomStyle",
+    "borderLeftStyle",
+    // Copy border widths.
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth"
+  ];
 
-  // Copy all paddings.
-  to.style.paddingTop = getCssText("padding-top");
-  to.style.paddingRight = getCssText("padding-right");
-  to.style.paddingBottom = getCssText("padding-bottom");
-  to.style.paddingLeft = getCssText("padding-left");
-
-  // Copy border styles.
-  to.style.borderTopStyle = getCssText("border-top-style");
-  to.style.borderRightStyle = getCssText("border-right-style");
-  to.style.borderBottomStyle = getCssText("border-bottom-style");
-  to.style.borderLeftStyle = getCssText("border-left-style");
-
-  // Copy border widths.
-  to.style.borderTopWidth = getCssText("border-top-width");
-  to.style.borderRightWidth = getCssText("border-right-width");
-  to.style.borderBottomWidth = getCssText("border-bottom-width");
-  to.style.borderLeftWidth = getCssText("border-left-width");
+  const win = from.ownerDocument.defaultView;
+  const style = win.getComputedStyle(from);
+  for (const property of properties) {
+    to.style[property] = style[property];
+  }
 }
 
 /**
@@ -1436,15 +1703,3 @@ function copyBoxModelStyles(from, to) {
 function moveFocus(win, direction) {
   return focusManager.moveFocus(win, null, direction, 0);
 }
-
-XPCOMUtils.defineLazyGetter(this, "focusManager", function() {
-  return Services.focus;
-});
-
-XPCOMUtils.defineLazyGetter(this, "CSSPropertyList", function() {
-  return domUtils.getCSSPropertyNames(domUtils.INCLUDE_ALIASES).sort();
-});
-
-XPCOMUtils.defineLazyGetter(this, "domUtils", function() {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-});

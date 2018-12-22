@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_MediaKeySession_h
 #define mozilla_dom_MediaKeySession_h
 
+#include "DecoderDoctorLogger.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
@@ -24,13 +25,27 @@
 struct JSContext;
 
 namespace mozilla {
+
+namespace dom {
+class MediaKeySession;
+} // namespace dom
+DDLoggedTypeName(dom::MediaKeySession);
+
 namespace dom {
 
 class ArrayBufferViewOrArrayBuffer;
 class MediaKeyError;
 class MediaKeyStatusMap;
 
-class MediaKeySession final : public DOMEventTargetHelper
+nsCString
+ToCString(MediaKeySessionType aType);
+
+nsString
+ToString(MediaKeySessionType aType);
+
+class MediaKeySession final
+  : public DOMEventTargetHelper
+  , public DecoderDoctorLifeLogger<MediaKeySession>
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -41,8 +56,7 @@ public:
                   nsPIDOMWindowInner* aParent,
                   MediaKeys* aKeys,
                   const nsAString& aKeySystem,
-                  const nsAString& aCDMVersion,
-                  SessionType aSessionType,
+                  MediaKeySessionType aSessionType,
                   ErrorResult& aRv);
 
   void SetSessionId(const nsAString& aSessionId);
@@ -53,8 +67,6 @@ public:
   MediaKeyError* GetError() const;
 
   MediaKeyStatusMap* KeyStatuses() const;
-
-  void GetKeySystem(nsString& aRetval) const;
 
   void GetSessionId(nsString& aRetval) const;
 
@@ -94,6 +106,12 @@ public:
 
   void SetExpiration(double aExpiry);
 
+  mozilla::dom::EventHandlerNonNull* GetOnkeystatuseschange();
+  void SetOnkeystatuseschange(mozilla::dom::EventHandlerNonNull* aCallback);
+
+  mozilla::dom::EventHandlerNonNull* GetOnmessage();
+  void SetOnmessage(mozilla::dom::EventHandlerNonNull* aCallback);
+
   // Process-unique identifier.
   uint32_t Token() const;
 
@@ -117,9 +135,8 @@ private:
   RefPtr<MediaKeyError> mMediaKeyError;
   RefPtr<MediaKeys> mKeys;
   const nsString mKeySystem;
-  const nsString mCDMVersion;
   nsString mSessionId;
-  const SessionType mSessionType;
+  const MediaKeySessionType mSessionType;
   const uint32_t mToken;
   bool mIsClosed;
   bool mUninitialized;

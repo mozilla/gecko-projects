@@ -1,116 +1,106 @@
 {
-    "talos.zip": {
-        "url": "http://talos-bundles.pvt.build.mozilla.org/zips/talos.a6052c33d420.zip",
-        "path": ""
-    },
-    "extra_options": {
-        "android": [ "--apkPath=%(apk_path)s" ]
-    },
     "suites": {
-        "chromez": {
-            "tests": ["tresize", "tcanvasmark"],
-            "talos_options": ["--disable-e10s"]
+        "bcv-e10s": {
+            "tests": ["basic_compositor_video"]
         },
         "chromez-e10s": {
-            "tests": ["tresize", "tcanvasmark"]
-        },
-        "dromaeojs": {
-            "tests": ["dromaeo_css", "kraken"],
-            "talos_options": ["--disable-e10s"]
+            "tests": ["about_preferences_basic", "tresize"]
         },
         "dromaeojs-e10s": {
             "tests": ["dromaeo_css", "kraken"]
         },
-        "other": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"],
-            "talos_options": ["--disable-e10s"]
+        "flex-e10s": {
+            "tests": ["tart_flex", "ts_paint_flex"]
         },
         "other-e10s": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"]
-        },
-        "other_nol64": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"],
-            "talos_options": ["--disable-e10s"]
-        },
-        "other-e10s_nol64": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"]
-        },
-        "other_l64": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"],
-            "talos_options": ["--disable-e10s"]
-        },
-        "other-e10s_l64": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint"]
-        },
-        "g1": {
-            "tests": ["tp5o_scroll", "glterrain"],
-            "talos_options": ["--disable-e10s"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
+            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_many_windows", "sessionrestore_no_auto_restore", "tabpaint", "cpstartup"]
         },
         "g1-e10s": {
             "tests": ["tp5o_scroll", "glterrain"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
+            "pagesets_name": "tp5n.zip"
         },
-        "g2": {
-            "tests": ["damp", "tps"],
-            "talos_options": ["--disable-e10s"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
+        "damp-e10s": {
+            "tests": ["damp"],
+            "pagesets_name": "tp5n.zip"
         },
-        "g2-e10s": {
-            "tests": ["damp", "tps"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
-        },
-        "g3": {
-            "tests": ["dromaeo_dom"],
-            "talos_options": ["--disable-e10s"]
+        "tps-e10s": {
+            "tests": ["tps"],
+            "pagesets_name": "tp5n.zip"
         },
         "g3-e10s": {
             "tests": ["dromaeo_dom"]
         },
-        "svgr": {
-            "tests": ["tsvgx", "tsvgr_opacity", "tart", "tscrollx", "cart"],
-            "talos_options": ["--disable-e10s"]
+        "g4-e10s": {
+            "tests": ["glvideo", "displaylist_mutate", "rasterflood_svg", "rasterflood_gradient"]
+        },
+        "g5-e10s": {
+            "tests": ["ts_paint_webext", "tp5o_webext"],
+            "pagesets_name": "tp5n.zip"
+        },
+        "motionmark-e10s": {
+            "tests": ["motionmark_animometer", "motionmark_htmlsuite", "JetStream", "ARES6"],
+            "benchmark_zip": "jetstream.zip"
         },
         "svgr-e10s": {
-            "tests": ["tsvgx", "tsvgr_opacity", "tart", "tscrollx", "cart"]
+            "tests": ["tsvgx", "tsvgr_opacity", "tart", "tscrollx", "tsvg_static"]
         },
-        "tp5o": {
-            "tests": ["tp5o"],
-            "talos_options": ["--disable-e10s"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
+        "perf-reftest-e10s": {
+            "tests": ["perf_reftest"]
+        },
+        "perf-reftest-singletons-e10s": {
+            "tests": ["perf_reftest_singletons"]
+        },
+        "speedometer-e10s": {
+            "tests": ["speedometer", "stylebench"]
         },
         "tp5o-e10s": {
             "tests": ["tp5o"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip"
-        },
-        "xperf": {
-            "tests": ["tp5n"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip",
-            "talos_options": [
-                "--disable-e10s",
-                "--xperf_path",
-                "\"c:/Program Files/Microsoft Windows Performance Toolkit/xperf.exe\""
-            ]
+            "pagesets_name": "tp5n.zip"
         },
         "xperf-e10s": {
             "tests": ["tp5n"],
-            "pagesets_url": "http://talos-bundles.pvt.build.mozilla.org/zips/tp5n.zip",
+            "pagesets_name": "tp5n.zip",
             "talos_options": [
                 "--xperf_path",
                 "\"c:/Program Files/Microsoft Windows Performance Toolkit/xperf.exe\""
             ]
-        }
-    },
-    "mobile-suites": {
-        "remote-tsvgx": {
-            "tests": ["tsvgm"],
+        },
+        "tp6-e10s": {
+            "tests": ["tp6_google", "tp6_youtube", "tp6_amazon", "tp6_facebook"],
+            "mitmproxy_release_bin_osx": "mitmproxy-2.0.2-osx.tar.gz",
+            "mitmproxy_release_bin_linux64": "mitmproxy-2.0.2-linux.tar.gz",
+            "mitmproxy_recording_set": "mitmproxy-recording-set-win10.zip",
             "talos_options": [
-                "--noChrome",
-                "--tppagecycles", "7"
+                "--mitmproxy",
+                "mitmproxy-recording-google.mp mitmproxy-recording-youtube.mp mitmproxy-recording-amazon.mp mitmproxy-recording-facebook.mp",
+                "--firstNonBlankPaint"
             ]
         },
-        "remote-tp4m_nochrome": {
-            "tests": ["tp4m"]
+        "tp6-stylo-threads-e10s": {
+            "tests": ["tp6_google", "tp6_youtube", "tp6_amazon", "tp6_facebook"],
+            "mitmproxy_release_bin_osx": "mitmproxy-2.0.2-osx.tar.gz",
+            "mitmproxy_release_bin_linux64": "mitmproxy-2.0.2-linux.tar.gz",
+            "mitmproxy_recording_set": "mitmproxy-recording-set-win10.zip",
+            "talos_options": [
+                "--stylo-threads=1",
+                "--mitmproxy",
+                "mitmproxy-recording-google.mp mitmproxy-recording-youtube.mp mitmproxy-recording-amazon.mp mitmproxy-recording-facebook.mp",
+                "--firstNonBlankPaint"
+            ]
+        },
+        "h1-e10s": {
+            "tests": ["ts_paint_heavy"]
+        },
+        "h2-e10s": {
+            "tests": ["tp6_google_heavy", "tp6_youtube_heavy", "tp6_amazon_heavy", "tp6_facebook_heavy"],
+            "mitmproxy_release_bin_osx": "mitmproxy-2.0.2-osx.tar.gz",
+            "mitmproxy_release_bin_linux64": "mitmproxy-2.0.2-linux.tar.gz",
+            "mitmproxy_recording_set": "mitmproxy-recording-set-win10.zip",
+            "talos_options": [
+                "--mitmproxy",
+                "mitmproxy-recording-google.mp mitmproxy-recording-youtube.mp mitmproxy-recording-amazon.mp mitmproxy-recording-facebook.mp",
+                "--firstNonBlankPaint"
+            ]
         }
     }
 }

@@ -4,26 +4,23 @@
 
 /* eslint-env browser */
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 const ProjectList = require("devtools/client/webide/modules/project-list");
 
 var projectList = new ProjectList(window, window.parent);
 
-window.addEventListener("load", function onLoad() {
-  window.removeEventListener("load", onLoad, true);
+window.addEventListener("load", function() {
   document.getElementById("new-app").onclick = CreateNewApp;
   document.getElementById("hosted-app").onclick = ImportHostedApp;
   document.getElementById("packaged-app").onclick = ImportPackagedApp;
   document.getElementById("refresh-tabs").onclick = RefreshTabs;
   projectList.update();
   projectList.updateCommands();
-}, true);
+}, {capture: true, once: true});
 
-window.addEventListener("unload", function onUnload() {
-  window.removeEventListener("unload", onUnload);
+window.addEventListener("unload", function() {
   projectList.destroy();
-});
+}, {once: true});
 
 function RefreshTabs() {
   projectList.refreshTabs();

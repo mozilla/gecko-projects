@@ -1,52 +1,54 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Test that we can attach and detach to the PromisesActor under the correct
  * states.
  */
 
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 
-add_task(function*() {
-  let client = yield startTestDebuggerServer("promises-actor-test");
-  let chromeActors = yield getChromeActors(client);
+add_task(async function() {
+  const client = await startTestDebuggerServer("promises-actor-test");
+  const parentProcessActors = await getParentProcessActors(client);
 
-  // We have to attach the chrome TabActor before playing with the PromiseActor
-  yield attachTab(client, chromeActors);
-  yield testAttach(client, chromeActors);
+  // We have to attach the chrome target actor before playing with the PromiseActor
+  await attachTab(client, parentProcessActors);
+  await testAttach(client, parentProcessActors);
 
-  let response = yield listTabs(client);
-  let targetTab = findTab(response.tabs, "promises-actor-test");
+  const response = await listTabs(client);
+  const targetTab = findTab(response.tabs, "promises-actor-test");
   ok(targetTab, "Found our target tab.");
 
-  let [ tabResponse ] = yield attachTab(client, targetTab);
+  const [ tabResponse ] = await attachTab(client, targetTab);
 
-  yield testAttach(client, tabResponse);
+  await testAttach(client, tabResponse);
 
-  yield close(client);
+  await close(client);
 });
 
-function* testAttach(client, parent) {
-  let promises = PromisesFront(client, parent);
+async function testAttach(client, parent) {
+  const promises = PromisesFront(client, parent);
 
   try {
-    yield promises.detach();
-    ok(false, "Should not be able to detach when in a detached state.")
-  } catch(e) {
+    await promises.detach();
+    ok(false, "Should not be able to detach when in a detached state.");
+  } catch (e) {
     ok(true, "Expected detach to fail when already in a detached state.");
   }
 
-  yield promises.attach();
+  await promises.attach();
   ok(true, "Expected attach to succeed.");
 
   try {
-    yield promises.attach();
+    await promises.attach();
     ok(false, "Should not be able to attach when in an attached state.");
-  } catch(e) {
+  } catch (e) {
     ok(true, "Expected attach to fail when already in an attached state.");
   }
 
-  yield promises.detach();
+  await promises.detach();
   ok(true, "Expected detach to succeed.");
 }

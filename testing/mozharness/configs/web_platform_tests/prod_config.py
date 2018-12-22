@@ -3,8 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 # ***** END LICENSE BLOCK *****
-import os
-
 config = {
     "options": [
         "--prefs-root=%(test_path)s/prefs",
@@ -16,30 +14,11 @@ config = {
         "--certutil-binary=%(test_install_path)s/bin/certutil",
     ],
 
-    "exes": {
-        'python': '/tools/buildbot/bin/python',
-        'virtualenv': ['/tools/buildbot/bin/python', '/tools/misc-python/virtualenv.py'],
-        'tooltool.py': "/tools/tooltool.py",
-    },
-
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-
-    "pip_index": False,
-
-    "buildbot_json_path": "buildprops.json",
-
-    "default_blob_upload_servers": [
-         "https://blobupload.elasticbeanstalk.com",
-    ],
-
-    "blob_uploader_auth_file" : os.path.join(os.getcwd(), "oauth.txt"),
-
     "download_minidump_stackwalk": True,
 
-    "tooltool_cache": "/builds/tooltool_cache",
+    # this would normally be in "exes", but "exes" is clobbered by remove_executables
+    "geckodriver": "%(abs_test_bin_dir)s/geckodriver",
 
+    "per_test_category": "web-platform",
 }
 

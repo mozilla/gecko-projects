@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -33,14 +34,16 @@ template<typename T>
 class AtomicRefCountedWithFinalize
 {
 protected:
-    AtomicRefCountedWithFinalize()
+    explicit AtomicRefCountedWithFinalize(const char* aName)
       : mRecycleCallback(nullptr)
       , mRefCount(0)
-      , mMessageLoopToPostDestructionTo(nullptr)
 #ifdef DEBUG
       , mSpew(false)
       , mManualAddRefs(0)
       , mManualReleases(0)
+#endif
+#ifdef NS_BUILD_REFCNT_LOGGING
+      , mName(aName)
 #endif
     {}
 
@@ -50,16 +53,6 @@ protected:
       }
     }
 
-    void SetMessageLoopToPostDestructionTo(MessageLoop* l) {
-      MOZ_ASSERT(NS_IsMainThread());
-      mMessageLoopToPostDestructionTo = l;
-    }
-
-    static void DestroyToBeCalledOnMainThread(T* ptr) {
-      MOZ_ASSERT(NS_IsMainThread());
-      delete ptr;
-    }
-
 public:
     // Mark user classes that are considered flawless.
     template<class U>
@@ -67,9 +60,6 @@ public:
 
     template<class U>
     friend struct mozilla::RefPtrTraits;
-
-    template<class U>
-    friend struct ::RunnableMethodTraits;
 
     template<typename U>
     friend class ::mozilla::gl::RefSet;
@@ -112,7 +102,12 @@ public:
 private:
     void AddRef() {
       MOZ_ASSERT(mRefCount >= 0, "AddRef() during/after Finalize()/dtor.");
+#ifdef NS_BUILD_REFCNT_LOGGING
+      int currCount = ++mRefCount;
+      NS_LOG_ADDREF(this, currCount, mName, sizeof(*this));
+#else
       ++mRefCount;
+#endif
     }
 
     void Release() {
@@ -128,6 +123,9 @@ private:
         ++mRefCount;
         return;
       }
+#ifdef NS_BUILD_REFCNT_LOGGING
+      NS_LOG_RELEASE(this, currCount, mName);
+#endif
 
       if (0 == currCount) {
         mRefCount = detail::DEAD;
@@ -144,17 +142,7 @@ private:
 
         T* derived = static_cast<T*>(this);
         derived->Finalize();
-        if (MOZ_LIKELY(!mMessageLoopToPostDestructionTo)) {
-          delete derived;
-        } else {
-          if (MOZ_LIKELY(NS_IsMainThread())) {
-            delete derived;
-          } else {
-            mMessageLoopToPostDestructionTo->PostTask(
-              FROM_HERE,
-              NewRunnableFunction(&DestroyToBeCalledOnMainThread, derived));
-          }
-        }
+        delete derived;
       } else if (1 == currCount && recycleCallback) {
         // There is nothing enforcing this in the code, except how the callers
         // are being careful to never let the reference count go down if there
@@ -194,17 +182,24 @@ public:
       return mRefCount < 0;
     }
 
+    bool HasOneRef() const
+    {
+      return mRefCount == 1;
+    }
+
 private:
     RecycleCallback mRecycleCallback;
     void *mClosure;
     Atomic<int> mRefCount;
-    MessageLoop *mMessageLoopToPostDestructionTo;
 #ifdef DEBUG
 public:
     bool mSpew;
 private:
     Atomic<uint32_t> mManualAddRefs;
     Atomic<uint32_t> mManualReleases;
+#endif
+#ifdef NS_BUILD_REFCNT_LOGGING
+    const char* mName;
 #endif
 };
 

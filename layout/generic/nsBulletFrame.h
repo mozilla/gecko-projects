@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,22 +14,20 @@
 
 #include "imgIContainer.h"
 #include "imgINotificationObserver.h"
-#include "imgIOnloadBlocker.h"
 
 class imgIContainer;
 class imgRequestProxy;
 
 class nsBulletFrame;
+class BulletRenderer;
 
-class nsBulletListener final : public imgINotificationObserver,
-                               public imgIOnloadBlocker
+class nsBulletListener final : public imgINotificationObserver
 {
 public:
   nsBulletListener();
 
   NS_DECL_ISUPPORTS
   NS_DECL_IMGINOTIFICATIONOBSERVER
-  NS_DECL_IMGIONLOADBLOCKER
 
   void SetFrame(nsBulletFrame *frame) { mFrame = frame; }
 
@@ -43,46 +42,53 @@ private:
  * This class also supports the CSS list-style properties.
  */
 class nsBulletFrame final : public nsFrame {
-  typedef mozilla::image::DrawResult DrawResult;
+  typedef mozilla::image::ImgDrawResult ImgDrawResult;
 
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsBulletFrame)
 #ifdef DEBUG
-  NS_DECL_QUERYFRAME_TARGET(nsBulletFrame)
   NS_DECL_QUERYFRAME
 #endif
 
-  explicit nsBulletFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+  explicit nsBulletFrame(ComputedStyle* aStyle)
+    : nsFrame(aStyle, kClassID)
     , mPadding(GetWritingMode())
     , mIntrinsicSize(GetWritingMode())
+    , mOrdinal(0)
     , mRequestRegistered(false)
-    , mBlockingOnload(false)
-  { }
+  {}
+
   virtual ~nsBulletFrame();
 
   NS_IMETHOD Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData);
-  NS_IMETHOD BlockOnload(imgIRequest* aRequest);
-  NS_IMETHOD UnblockOnload(imgIRequest* aRequest);
 
   // nsIFrame
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
-  virtual nsIAtom* GetType() const override;
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
+  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
-  // nsIHTMLReflow
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aMetrics,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aMetrics,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
-  virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
-  virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
+  virtual nscoord GetMinISize(gfxContext *aRenderingContext) override;
+  virtual nscoord GetPrefISize(gfxContext *aRenderingContext) override;
+  void AddInlineMinISize(gfxContext* aRenderingContext,
+                         nsIFrame::InlineMinISizeData* aData) override;
+  void AddInlinePrefISize(gfxContext* aRenderingContext,
+                          nsIFrame::InlinePrefISizeData* aData) override;
+
+  virtual bool IsFrameOfType(uint32_t aFlags) const override
+  {
+    if (aFlags & eSupportsCSSTransforms) {
+      return false;
+    }
+    return nsFrame::IsFrameOfType(aFlags);
+  }
 
   // nsBulletFrame
   int32_t SetListItemOrdinal(int32_t aNextOrdinal, bool* aChanged,
@@ -92,10 +98,13 @@ public:
   void GetListItemText(nsAString& aResult);
 
   void GetSpokenText(nsAString& aText);
-                         
-  DrawResult PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
-                         const nsRect& aDirtyRect, uint32_t aFlags);
-  
+
+  Maybe<BulletRenderer>
+  CreateBulletRenderer(gfxContext& aRenderingContext, nsPoint aPt);
+  ImgDrawResult PaintBullet(gfxContext& aRenderingContext, nsPoint aPt,
+                         const nsRect& aDirtyRect, uint32_t aFlags,
+                         bool aDisableSubpixelAA);
+
   virtual bool IsEmpty() override;
   virtual bool IsSelfEmpty() override;
   virtual nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const override;
@@ -116,8 +125,8 @@ protected:
   void AppendSpacingToPadding(nsFontMetrics* aFontMetrics,
                               mozilla::LogicalMargin* aPadding);
   void GetDesiredSize(nsPresContext* aPresContext,
-                      nsRenderingContext *aRenderingContext,
-                      nsHTMLReflowMetrics& aMetrics,
+                      gfxContext *aRenderingContext,
+                      ReflowOutput& aMetrics,
                       float aFontSizeInflation,
                       mozilla::LogicalMargin* aPadding);
 
@@ -138,9 +147,6 @@ private:
   // This is a boolean flag indicating whether or not the current image request
   // has been registered with the refresh driver.
   bool mRequestRegistered : 1;
-
-  // Whether we're currently blocking onload.
-  bool mBlockingOnload : 1;
 };
 
 #endif /* nsBulletFrame_h___ */

@@ -3,11 +3,29 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 :root {
+  --markup-badge-active-background-color: var(--blue-50);
+  --markup-badge-background-color: var(--grey-20);
+  --markup-badge-border-color: #CACAD1;
+  --markup-badge-color: var(--grey-90);
+  --markup-badge-hover-background-color: #DFDFE8;
+  --markup-hidden-attr-name-color: #BA89B8;
+  --markup-hidden-attr-value-color: #5C6D87;
+  --markup-hidden-punctuation-color: #909090;
+  --markup-hidden-tag-color: #97A4B3;
   --markup-outline: var(--theme-splitter-color);
 }
 
 .theme-dark:root {
-  --markup-outline: var(--theme-highlight-pink);
+  --markup-badge-active-background-color: var(--blue-60);
+  --markup-badge-background-color: var(--grey-70);
+  --markup-badge-border-color: var(--grey-50);
+  --markup-badge-color: var(--grey-30);
+  --markup-badge-hover-background-color: var(--grey-80);
+  --markup-hidden-attr-name-color: #B07EB3;
+  --markup-hidden-attr-value-color: #9893A3;
+  --markup-hidden-punctuation-color: #909090;
+  --markup-hidden-tag-color: #AFB5BF;
+  --markup-outline: var(--theme-selection-background);
 }
 
 * {
@@ -34,6 +52,10 @@ body {
 /* Don't display a parent-child outline for the root elements */
 #root > ul > li > .children {
   background: none;
+}
+
+html.dragging {
+  overflow-x: hidden;
 }
 
 body.dragging .tag-line {
@@ -64,7 +86,7 @@ body.dragging .tag-line {
   flex: 1 1 auto;
 
   /* Keep the editor away from the markup view floating scrollbars */
-  -moz-margin-end: 12px;
+  margin-inline-end: 12px;
 }
 
 .html-editor iframe {
@@ -135,17 +157,24 @@ ul.children + .tag-line::before {
   padding-left: 2px;
 }
 
-.tag-line[selected] + .children {
+.tag-line[selected] + .children,
+.tag-line[selected] ~ .tag-line {
   background-image: linear-gradient(to top, var(--markup-outline), var(--markup-outline));
+  background-position-x: -6px;
   background-repeat: no-repeat;
-  /* Shorten the outline height by 4px to account for the 2px top padding and
-   * allow for a 2px bottom padding */
-  background-size: 1.5px calc(100% - 4px);
-  /* Align the outline to under the expander arrow and provide 2px top
-   * padding */
-  background-position: -6px 2px;
+  background-size: 1.5px 100%;
   border-left: 6px solid transparent;
   margin-left: -6px;
+}
+
+.tag-line[selected] + .children {
+  background-position-y: 2px;
+}
+
+.tag-line[selected] ~ .tag-line {
+  background-position-y: -2px;
+  /* Unset transition-property to prevent the markup outline from horizontal shifting */
+  transition-property: none;
 }
 
 .html-editor-container {
@@ -164,6 +193,11 @@ ul.children + .tag-line::before {
   z-index: 0;
 }
 
+.tag-line .tag-hover:not(.theme-selected) {
+  background: var(--theme-selection-background-hover);
+  z-index: -1;
+}
+
 .expander {
   display: inline-block;
   margin-left: -14px;
@@ -173,7 +207,7 @@ ul.children + .tag-line::before {
   z-index: 1;
 }
 
-.child.collapsed .child {
+.child.collapsed .child, .child.collapsed .children {
   display: none;
 }
 
@@ -193,16 +227,38 @@ ul.children + .tag-line::before {
   display: inline;
 }
 
+.expandable.collapsed .close::before {
+  /* Display an ellipsis character in collapsed nodes that can be expanded. */
+  content: "\2026";
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin: 0 2px;
+  line-height: 3px;
+  color: var(--theme-body-color-inactive);
+  border-radius: 3px;
+  border-style: solid;
+  border-width: 1px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Hide HTML void elements (img, hr, br, …) closing tag when the element is not
+ * expanded (it can be if it has pseudo-elements attached) */
+.child.collapsed > .tag-line .void-element .close {
+  display: none;
+}
+
 .closing-bracket {
   pointer-events: none;
 }
 
 .newattr {
-  display: inline-block;
-  width: 1em;
-  height: 1ex;
-  margin-right: -1em;
-  padding: 1px 0;
+  margin-right: -13px;
+}
+
+.newattr:before {
+  content: "\00a0\00a0";
 }
 
 .attr-value .link {
@@ -217,15 +273,14 @@ ul.children + .tag-line::before {
   transition: background .5s;
 }
 
-.markupview-events {
-  display: none;
-  cursor: pointer;
-}
-
 .editor {
   /* Make sure the editor still appears above the tag-state */
   position: relative;
   z-index: 1;
+}
+
+.editor.comment:not(.doctype) {
+  color: var(--theme-highlight-green);
 }
 
 .editor.text {
@@ -237,12 +292,57 @@ ul.children + .tag-line::before {
   font: inherit;
 }
 
+.theme-dark .editor.text pre {
+  color: var(--theme-content-color1);
+}
+
+/* Whitespace only text nodes are sometimes shown in the markup-view, and when they do
+   they get a greyed-out whitespace symbol so users know what they are */
+.editor.text .whitespace {
+  padding: 0 .5em;
+}
+
+.editor.text .whitespace::before {
+  /* black circle (full) character */
+  content: "\25cf";
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin: 0 2px;
+  line-height: 7px;
+  font-size: 0.6em;
+  color: var(--theme-body-color-inactive);
+  border-radius: 3px;
+  border-style: solid;
+  border-width: 1px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tag-line[selected] .editor.text .whitespace::before {
+  color: white;
+}
+
 .more-nodes {
   padding-left: 16px;
 }
 
 .styleinspector-propertyeditor {
   border: 1px solid #CCC;
+}
+
+.reveal-link {
+  margin-inline-start: 10px;
+  cursor: pointer;
+  display: none;
+}
+
+.reveal-link:hover {
+  text-decoration: underline
+}
+
+.tag-line:hover .reveal-link {
+  display: inline;
 }
 
 /* Draw a circle next to nodes that have a pseudo class lock.
@@ -259,38 +359,73 @@ ul.children + .tag-line::before {
   z-index: 1;
 }
 
+.not-displayed {
+  color: var(--markup-hidden-punctuation-color);
+}
+
+.not-displayed .attr-name {
+  color: var(--markup-hidden-attr-name-color);
+}
+
+.not-displayed .attr-value {
+  color: var(--markup-hidden-attr-value-color);
+}
+
+.not-displayed .tag {
+  color: var(--markup-hidden-tag-color);
+}
+
 /* Selected nodes in the tree should have light selected text.
    theme-selected doesn't work in this case since the text is a
    sibling of the class, not a child. */
 .theme-selected ~ .editor,
+.theme-selected ~ .editor.comment,
 .theme-selected ~ .editor .theme-fg-color1,
 .theme-selected ~ .editor .theme-fg-color2,
 .theme-selected ~ .editor .theme-fg-color3,
 .theme-selected ~ .editor .theme-fg-color4,
 .theme-selected ~ .editor .theme-fg-color5,
 .theme-selected ~ .editor .theme-fg-color6,
-.theme-selected ~ .editor .theme-fg-color7 {
+.theme-selected ~ .editor .theme-fg-color7,
+.theme-selected ~ .editor .close::before {
   color: var(--theme-selection-color);
 }
 
-/* In case a node isn't displayed in the page, we fade the syntax highlighting */
-.not-displayed .open,
-.not-displayed .close {
-  opacity: .7;
+/* Applicable to the DOCTYPE */
+.doctype {
+  font-style: italic;
 }
 
-/* Events */
-.markupview-events {
-  font-size: 8px;
-  font-weight: bold;
-  line-height: 10px;
+/* Markup Badges */
+.markup-badge {
+  display: none;
+  font-size: 9px;
+  font-weight: normal;
+  line-height: 11px;
+  vertical-align: 1px;
+  border: 1px solid var(--markup-badge-border-color);
   border-radius: 3px;
   padding: 0px 2px;
-  -moz-margin-start: 5px;
+  margin-inline-start: 5px;
   -moz-user-select: none;
+  background-color: var(--markup-badge-background-color);
+  color: var(--markup-badge-color);
 }
 
-.markupview-events {
-  background-color: var(--theme-body-color-alt);
-  color: var(--theme-body-background);
+.markup-badge.active {
+  background-color: var(--markup-badge-active-background-color);
+  border-color: var(--theme-selection-color);
+  color: var(--theme-selection-color);
+}
+
+.markup-badge[data-display="grid"],
+.markup-badge[data-event] {
+  cursor: pointer;
+}
+
+.markup-badge[data-display="grid"]:focus,
+.markup-badge[data-display="grid"]:hover,
+.markup-badge[data-event]:focus,
+.markup-badge[data-event]:hover {
+  background-color: var(--markup-badge-hover-background-color);
 }

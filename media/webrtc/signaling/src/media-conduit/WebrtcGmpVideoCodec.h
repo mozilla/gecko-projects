@@ -33,7 +33,6 @@
 #ifndef WEBRTCGMPVIDEOCODEC_H_
 #define WEBRTCGMPVIDEOCODEC_H_
 
-#include <iostream>
 #include <queue>
 #include <string>
 
@@ -45,7 +44,7 @@
 #include "MediaConduitInterface.h"
 #include "AudioConduit.h"
 #include "VideoConduit.h"
-#include "webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
+#include "webrtc/modules/video_coding/include/video_codec_interface.h"
 
 #include "gmp-video-host.h"
 #include "GMPVideoDecoderProxy.h"
@@ -76,16 +75,17 @@ class WebrtcGmpPCHandleSetter
     static std::string sCurrentHandle;
 };
 
-class GmpInitDoneRunnable : public nsRunnable
+class GmpInitDoneRunnable : public Runnable
 {
   public:
     explicit GmpInitDoneRunnable(const std::string& aPCHandle) :
+      Runnable("GmpInitDoneRunnable"),
       mResult(WEBRTC_VIDEO_CODEC_OK),
       mPCHandle(aPCHandle)
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       if (mResult == WEBRTC_VIDEO_CODEC_OK) {
         // Might be useful to notify the PeerConnection about successful init
@@ -125,6 +125,35 @@ class GmpInitDoneRunnable : public nsRunnable
     std::string mError;
 };
 
+// Hold a frame for later decode
+class GMPDecodeData
+{
+public:
+  GMPDecodeData(const webrtc::EncodedImage& aInputImage,
+                bool aMissingFrames,
+                int64_t aRenderTimeMs)
+    : mImage(aInputImage)
+    , mMissingFrames(aMissingFrames)
+    , mRenderTimeMs(aRenderTimeMs)
+  {
+    // We want to use this for queuing, and the calling code recycles the
+    // buffer on return from Decode()
+    mImage._length = aInputImage._length;
+    mImage._size = aInputImage._length +
+                   webrtc::EncodedImage::GetBufferPaddingBytes(webrtc::kVideoCodecH264);
+    mImage._buffer = new uint8_t[mImage._size];
+    memcpy(mImage._buffer, aInputImage._buffer, aInputImage._length);
+  }
+
+  ~GMPDecodeData() {
+    delete [] mImage._buffer;
+  }
+
+  webrtc::EncodedImage mImage;
+  bool mMissingFrames;
+  int64_t mRenderTimeMs;
+};
+
 class WebrtcGmpVideoEncoder : public GMPVideoEncoderCallbackProxy
 {
 public:
@@ -142,9 +171,9 @@ public:
                              int32_t aNumberOfCores,
                              uint32_t aMaxPayloadSize);
 
-  virtual int32_t Encode(const webrtc::I420VideoFrame& aInputImage,
+  virtual int32_t Encode(const webrtc::VideoFrame& aInputImage,
                          const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
-                         const std::vector<webrtc::VideoFrameType>* aFrameTypes);
+                         const std::vector<webrtc::FrameType>* aFrameTypes);
 
   virtual int32_t RegisterEncodeCompleteCallback(
     webrtc::EncodedImageCallback* aCallback);
@@ -220,9 +249,10 @@ private:
     uint32_t mMaxPayloadSize;
   };
 
-  int32_t Encode_g(const webrtc::I420VideoFrame* aInputImage,
-                   const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
-                   const std::vector<webrtc::VideoFrameType>* aFrameTypes);
+  static
+  void Encode_g(RefPtr<WebrtcGmpVideoEncoder>& aEncoder,
+                webrtc::VideoFrame aInputImage,
+                std::vector<webrtc::FrameType> aFrameTypes);
   void RegetEncoderForResolutionChange(
       uint32_t aWidth,
       uint32_t aHeight,
@@ -275,6 +305,7 @@ private:
   GMPVideoHost* mHost;
   GMPVideoCodec mCodecParams;
   uint32_t mMaxPayloadSize;
+  webrtc::CodecSpecificInfo mCodecSpecificInfo;
   // Protects mCallback
   Mutex mCallbackMutex;
   webrtc::EncodedImageCallback* mCallback;
@@ -315,9 +346,9 @@ class WebrtcVideoEncoderProxy : public WebrtcVideoEncoder
     }
 
     int32_t Encode(
-        const webrtc::I420VideoFrame& aInputImage,
+        const webrtc::VideoFrame& aInputImage,
         const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
-        const std::vector<webrtc::VideoFrameType>* aFrameTypes) override
+        const std::vector<webrtc::FrameType>* aFrameTypes) override
     {
       return mEncoderImpl->Encode(aInputImage,
                                   aCodecSpecificInfo,
@@ -375,8 +406,6 @@ public:
 
   virtual int32_t ReleaseGmp();
 
-  virtual int32_t Reset();
-
   // GMPVideoDecoderCallbackProxy
   virtual void Terminated() override;
 
@@ -420,14 +449,14 @@ private:
   class InitDoneCallback : public GetGMPVideoDecoderCallback
   {
   public:
-    explicit InitDoneCallback(WebrtcGmpVideoDecoder* aDecoder,
+    explicit InitDoneCallback(const RefPtr<WebrtcGmpVideoDecoder>& aDecoder,
                               const RefPtr<GmpInitDoneRunnable>& aInitDone)
       : mDecoder(aDecoder),
         mInitDone(aInitDone)
     {
     }
 
-    virtual void Done(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost)
+    virtual void Done(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost) override
     {
       std::string errorOut;
       int32_t result = mDecoder->GmpInitDone(aGMP, aHost, &errorOut);
@@ -436,21 +465,20 @@ private:
     }
 
   private:
-    WebrtcGmpVideoDecoder* mDecoder;
+    RefPtr<WebrtcGmpVideoDecoder> mDecoder;
     RefPtr<GmpInitDoneRunnable> mInitDone;
   };
 
-  virtual int32_t Decode_g(const webrtc::EncodedImage& aInputImage,
-                           bool aMissingFrames,
-                           const webrtc::RTPFragmentationHeader* aFragmentation,
-                           const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
-                           int64_t aRenderTimeMs);
+  static void Decode_g(const RefPtr<WebrtcGmpVideoDecoder>& aThis,
+                       nsAutoPtr<GMPDecodeData> aDecodeData);
 
   nsCOMPtr<mozIGeckoMediaPluginService> mMPS;
   nsCOMPtr<nsIThread> mGMPThread;
   GMPVideoDecoderProxy* mGMP; // Addref is held for us
   // Used to handle a race where Release() is called while init is in progress
   bool mInitting;
+  // Frames queued for decode while mInitting is true
+  nsTArray<UniquePtr<GMPDecodeData>> mQueuedFrames;
   GMPVideoHost* mHost;
   // Protects mCallback
   Mutex mCallbackMutex;
@@ -511,11 +539,6 @@ class WebrtcVideoDecoderProxy : public WebrtcVideoDecoder
     int32_t Release() override
     {
       return mDecoderImpl->ReleaseGmp();
-    }
-
-    int32_t Reset() override
-    {
-      return mDecoderImpl->Reset();
     }
 
   private:

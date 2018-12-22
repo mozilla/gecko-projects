@@ -9,8 +9,8 @@
 #include <map>
 #include <set>
 
-#include "GLTypes.h"
 #include "mozilla/UniquePtr.h"
+#include "WebGLTypes.h"
 
 namespace mozilla {
 namespace webgl {
@@ -119,6 +119,43 @@ enum class EffectiveFormat : EffectiveFormatValueT {
     COMPRESSED_RGBA_S3TC_DXT3_EXT,
     COMPRESSED_RGBA_S3TC_DXT5_EXT,
 
+    // EXT_texture_sRGB
+    COMPRESSED_SRGB_S3TC_DXT1_EXT,
+    COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT,
+    COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT,
+    COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT,
+
+    // KHR_texture_compression_astc_ldr
+    COMPRESSED_RGBA_ASTC_4x4_KHR,
+    COMPRESSED_RGBA_ASTC_5x4_KHR,
+    COMPRESSED_RGBA_ASTC_5x5_KHR,
+    COMPRESSED_RGBA_ASTC_6x5_KHR,
+    COMPRESSED_RGBA_ASTC_6x6_KHR,
+    COMPRESSED_RGBA_ASTC_8x5_KHR,
+    COMPRESSED_RGBA_ASTC_8x6_KHR,
+    COMPRESSED_RGBA_ASTC_8x8_KHR,
+    COMPRESSED_RGBA_ASTC_10x5_KHR,
+    COMPRESSED_RGBA_ASTC_10x6_KHR,
+    COMPRESSED_RGBA_ASTC_10x8_KHR,
+    COMPRESSED_RGBA_ASTC_10x10_KHR,
+    COMPRESSED_RGBA_ASTC_12x10_KHR,
+    COMPRESSED_RGBA_ASTC_12x12_KHR,
+
+    COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR,
+    COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR,
+
     // IMG_texture_compression_pvrtc
     COMPRESSED_RGB_PVRTC_4BPPV1,
     COMPRESSED_RGBA_PVRTC_4BPPV1,
@@ -158,7 +195,7 @@ enum class UnsizedFormat : uint8_t {
     A,
     D,
     S,
-    DS,
+    DEPTH_STENCIL, // `DS` is a macro on Solaris. (regset.h)
 };
 
 // GLES 3.0.4 p114 Table 3.4, p240
@@ -173,11 +210,12 @@ enum class ComponentType : uint8_t {
 };
 
 enum class CompressionFamily : uint8_t {
-    ETC1,
-    ES3, // ETC2 or EAC
+    ASTC,
     ATC,
-    S3TC,
+    ES3, // ETC2 or EAC
+    ETC1,
     PVRTC,
+    S3TC,
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -198,14 +236,31 @@ struct FormatInfo
     const GLenum sizedFormat;
     const UnsizedFormat unsizedFormat;
     const ComponentType componentType;
-    const uint8_t estimatedBytesPerPixel; // 0 iff `!!compression`. Only use this for
-    const bool isColorFormat;             // memory usage estimation. Use
-    const bool isSRGB;                    // BytesPerPixel(packingFormat, packingType) for
-    const bool hasAlpha;                  // calculating pack/unpack byte count.
-    const bool hasDepth;
-    const bool hasStencil;
+    const bool isSRGB;
 
     const CompressedFormatInfo* const compression;
+
+    const uint8_t estimatedBytesPerPixel; // 0 iff bool(compression).
+
+    // In bits. Iff bool(compression), active channels are 1.
+    const uint8_t r;
+    const uint8_t g;
+    const uint8_t b;
+    const uint8_t a;
+    const uint8_t d;
+    const uint8_t s;
+
+    //////
+
+    std::map<UnsizedFormat, const FormatInfo*> copyDecayFormats;
+
+    const FormatInfo* GetCopyDecayFormat(UnsizedFormat) const;
+
+    bool IsColorFormat() const {
+         // Alpha is a 'color format' since it's 'color-attachable'.
+        return bool(compression) ||
+               bool(r | g | b | a);
+    }
 };
 
 struct PackingInfo
@@ -219,6 +274,11 @@ struct PackingInfo
             return format < x.format;
 
         return type < x.type;
+    }
+
+    bool operator ==(const PackingInfo& x) const {
+        return (format == x.format &&
+                type == x.type);
     }
 };
 
@@ -237,6 +297,7 @@ struct DriverUnpackInfo
 
 const FormatInfo* GetFormat(EffectiveFormat format);
 uint8_t BytesPerPixel(const PackingInfo& packing);
+bool GetBytesPerPixel(const PackingInfo& packing, uint8_t* const out_bytes);
 /*
 GLint ComponentSize(const FormatInfo* format, GLenum component);
 GLenum ComponentType(const FormatInfo* format);
@@ -246,7 +307,9 @@ GLenum ComponentType(const FormatInfo* format);
 struct FormatUsageInfo
 {
     const FormatInfo* const format;
+private:
     bool isRenderable;
+public:
     bool isFilterable;
 
     std::map<PackingInfo, DriverUnpackInfo> validUnpacks;
@@ -270,6 +333,9 @@ struct FormatUsageInfo
         , maxSamplesKnown(false)
         , maxSamples(0)
     { }
+
+    bool IsRenderable() const { return isRenderable; }
+    void SetRenderable();
 
     bool IsUnpackValid(const PackingInfo& key,
                        const DriverUnpackInfo** const out_value) const;

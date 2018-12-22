@@ -7,11 +7,11 @@
 #ifndef js_UbiNodeShortestPaths_h
 #define js_UbiNodeShortestPaths_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 
-#include "jsalloc.h"
-
+#include "js/AllocPolicy.h"
 #include "js/UbiNodeBreadthFirst.h"
 #include "js/Vector.h"
 
@@ -32,12 +32,12 @@ struct JS_PUBLIC_API(BackEdge)
 
     BackEdge() : predecessor_(), name_(nullptr) { }
 
-    bool init(const Node& predecessor, Edge& edge) {
+    MOZ_MUST_USE bool init(const Node& predecessor, Edge& edge) {
         MOZ_ASSERT(!predecessor_);
         MOZ_ASSERT(!name_);
 
         predecessor_ = predecessor;
-        name_ = mozilla::Move(edge.name);
+        name_ = std::move(edge.name);
         return true;
     }
 
@@ -46,14 +46,14 @@ struct JS_PUBLIC_API(BackEdge)
 
     BackEdge(BackEdge&& rhs)
       : predecessor_(rhs.predecessor_)
-      , name_(mozilla::Move(rhs.name_))
+      , name_(std::move(rhs.name_))
     {
         MOZ_ASSERT(&rhs != this);
     }
 
     BackEdge& operator=(BackEdge&& rhs) {
         this->~BackEdge();
-        new(this) BackEdge(Move(rhs));
+        new(this) BackEdge(std::move(rhs));
         return *this;
     }
 
@@ -68,7 +68,7 @@ struct JS_PUBLIC_API(BackEdge)
 /**
  * A path is a series of back edges from which we discovered a target node.
  */
-using Path = mozilla::Vector<BackEdge*>;
+using Path = JS::ubi::Vector<BackEdge*>;
 
 /**
  * The `JS::ubi::ShortestPaths` type represents a collection of up to N shortest
@@ -80,7 +80,7 @@ struct JS_PUBLIC_API(ShortestPaths)
   private:
     // Types, type aliases, and data members.
 
-    using BackEdgeVector = mozilla::Vector<BackEdge::Ptr>;
+    using BackEdgeVector = JS::ubi::Vector<BackEdge::Ptr>;
     using NodeToBackEdgeVectorMap = js::HashMap<Node, BackEdgeVector, js::DefaultHasher<Node>,
                                                 js::SystemAllocPolicy>;
 
@@ -108,7 +108,7 @@ struct JS_PUBLIC_API(ShortestPaths)
         }
 
         bool
-        operator()(Traversal& traversal, JS::ubi::Node origin, JS::ubi::Edge& edge,
+        operator()(Traversal& traversal, const JS::ubi::Node& origin, JS::ubi::Edge& edge,
                    BackEdge* back, bool first)
         {
             MOZ_ASSERT(back);
@@ -135,8 +135,8 @@ struct JS_PUBLIC_API(ShortestPaths)
                 auto cloned = back->clone();
                 if (!cloned)
                     return false;
-                paths.infallibleAppend(mozilla::Move(cloned));
-                if (!shortestPaths.paths_.putNew(edge.referent, mozilla::Move(paths)))
+                paths.infallibleAppend(std::move(cloned));
+                if (!shortestPaths.paths_.putNew(edge.referent, std::move(paths)))
                     return false;
                 totalPathsRecorded++;
             } else {
@@ -150,7 +150,7 @@ struct JS_PUBLIC_API(ShortestPaths)
                     BackEdge::Ptr thisBackEdge(js_new<BackEdge>());
                     if (!thisBackEdge || !thisBackEdge->init(origin, edge))
                         return false;
-                    ptr->value().infallibleAppend(mozilla::Move(thisBackEdge));
+                    ptr->value().infallibleAppend(std::move(thisBackEdge));
                     totalPathsRecorded++;
                 }
             }
@@ -186,7 +186,7 @@ struct JS_PUBLIC_API(ShortestPaths)
     ShortestPaths(uint32_t maxNumPaths, const Node& root, NodeSet&& targets)
       : maxNumPaths_(maxNumPaths)
       , root_(root)
-      , targets_(mozilla::Move(targets))
+      , targets_(std::move(targets))
       , paths_()
       , backEdges_()
     {
@@ -207,16 +207,16 @@ struct JS_PUBLIC_API(ShortestPaths)
     ShortestPaths(ShortestPaths&& rhs)
       : maxNumPaths_(rhs.maxNumPaths_)
       , root_(rhs.root_)
-      , targets_(mozilla::Move(rhs.targets_))
-      , paths_(mozilla::Move(rhs.paths_))
-      , backEdges_(mozilla::Move(rhs.backEdges_))
+      , targets_(std::move(rhs.targets_))
+      , paths_(std::move(rhs.paths_))
+      , backEdges_(std::move(rhs.backEdges_))
     {
         MOZ_ASSERT(this != &rhs, "self-move is not allowed");
     }
 
     ShortestPaths& operator=(ShortestPaths&& rhs) {
         this->~ShortestPaths();
-        new (this) ShortestPaths(mozilla::Move(rhs));
+        new (this) ShortestPaths(std::move(rhs));
         return *this;
     }
 
@@ -244,17 +244,17 @@ struct JS_PUBLIC_API(ShortestPaths)
      * responsibility to handle and report the OOM.
      */
     static mozilla::Maybe<ShortestPaths>
-    Create(JSRuntime* rt, AutoCheckCannotGC& noGC, uint32_t maxNumPaths, const Node& root, NodeSet&& targets) {
+    Create(JSContext* cx, AutoCheckCannotGC& noGC, uint32_t maxNumPaths, const Node& root, NodeSet&& targets) {
         MOZ_ASSERT(targets.count() > 0);
         MOZ_ASSERT(maxNumPaths > 0);
 
         size_t count = targets.count();
-        ShortestPaths paths(maxNumPaths, root, mozilla::Move(targets));
+        ShortestPaths paths(maxNumPaths, root, std::move(targets));
         if (!paths.paths_.init(count))
             return mozilla::Nothing();
 
         Handler handler(paths);
-        Traversal traversal(rt, handler, noGC);
+        Traversal traversal(cx, handler, noGC);
         traversal.wantNames = true;
         if (!traversal.init() || !traversal.addStart(root) || !traversal.traverse())
             return mozilla::Nothing();
@@ -262,10 +262,10 @@ struct JS_PUBLIC_API(ShortestPaths)
         // Take ownership of the back edges we created while traversing the
         // graph so that we can follow them from `paths_` and don't
         // use-after-free.
-        paths.backEdges_ = mozilla::Move(traversal.visited);
+        paths.backEdges_ = std::move(traversal.visited);
 
         MOZ_ASSERT(paths.initialized());
-        return mozilla::Some(mozilla::Move(paths));
+        return mozilla::Some(std::move(paths));
     }
 
     /**
@@ -289,7 +289,7 @@ struct JS_PUBLIC_API(ShortestPaths)
      * the given target, in which case `func` will not be invoked.
      */
     template <class Func>
-    bool forEachPath(const Node& target, Func func) {
+    MOZ_MUST_USE bool forEachPath(const Node& target, Func func) {
         MOZ_ASSERT(initialized());
         MOZ_ASSERT(targets_.has(target));
 
@@ -329,6 +329,19 @@ struct JS_PUBLIC_API(ShortestPaths)
         return true;
     }
 };
+
+#ifdef DEBUG
+// A helper function to dump the first `maxNumPaths` shortest retaining paths to
+// `node` from the GC roots. Useful when GC things you expect to have been
+// reclaimed by the collector haven't been!
+//
+// Usage:
+//
+//     JSObject* foo = ...;
+//     JS::ubi::dumpPaths(rt, JS::ubi::Node(foo));
+JS_PUBLIC_API(void)
+dumpPaths(JSRuntime* rt, Node node, uint32_t maxNumPaths = 10);
+#endif
 
 } // namespace ubi
 } // namespace JS

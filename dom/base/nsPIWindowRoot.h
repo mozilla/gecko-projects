@@ -14,6 +14,7 @@
 class nsPIDOMWindowOuter;
 class nsIControllers;
 class nsIController;
+class nsINode;
 
 namespace mozilla {
 namespace dom {
@@ -33,12 +34,23 @@ public:
   virtual nsPIDOMWindowOuter* GetWindow()=0;
 
   // get and set the node that is the context of a popup menu
-  virtual nsIDOMNode* GetPopupNode() = 0;
-  virtual void SetPopupNode(nsIDOMNode* aNode) = 0;
+  virtual already_AddRefed<nsINode> GetPopupNode() = 0;
+  virtual void SetPopupNode(nsINode* aNode) = 0;
 
+  /**
+   * @param aForVisibleWindow   true if caller needs controller which is
+   *                            associated with visible window.
+   */
   virtual nsresult GetControllerForCommand(const char *aCommand,
+                                           bool aForVisibleWindow,
                                            nsIController** aResult) = 0;
-  virtual nsresult GetControllers(nsIControllers** aResult) = 0;
+
+  /**
+   * @param aForVisibleWindow   true if caller needs controllers which are
+   *                            associated with visible window.
+   */
+  virtual nsresult GetControllers(bool aForVisibleWindow,
+                                  nsIControllers** aResult) = 0;
 
   virtual void GetEnabledDisabledCommands(nsTArray<nsCString>& aEnabledCommands,
                                           nsTArray<nsCString>& aDisabledCommands) = 0;
@@ -54,6 +66,11 @@ public:
 
   // Enumerate all stored browsers that for which the weak reference is valid.
   virtual void EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg) = 0;
+
+  virtual bool ShowAccelerators() = 0;
+  virtual bool ShowFocusRings() = 0;
+  virtual void SetShowAccelerators(bool aEnable) = 0;
+  virtual void SetShowFocusRings(bool aEnable) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIWindowRoot, NS_IWINDOWROOT_IID)

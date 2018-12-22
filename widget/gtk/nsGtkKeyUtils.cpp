@@ -13,17 +13,16 @@
 #include <algorithm>
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
 #include <gdk/gdkkeysyms-compat.h>
 #endif
 #include <X11/XKBlib.h>
 #include "WidgetUtils.h"
 #include "keysym2ucs.h"
+#include "nsContentUtils.h"
 #include "nsGtkUtils.h"
 #include "nsIBidiKeyboard.h"
 #include "nsServiceManagerUtils.h"
-
-PRLogModuleInfo* gKeymapWrapperLog = nullptr;
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MouseEvents.h"
@@ -31,6 +30,8 @@ PRLogModuleInfo* gKeymapWrapperLog = nullptr;
 
 namespace mozilla {
 namespace widget {
+
+LazyLogModule gKeymapWrapperLog("KeymapWrapperWidgets");
 
 #define IS_ASCII_ALPHABETICAL(key) \
     ((('a' <= key) && (key <= 'z')) || (('A' <= key) && (key <= 'Z')))
@@ -41,7 +42,6 @@ KeymapWrapper* KeymapWrapper::sInstance = nullptr;
 guint KeymapWrapper::sLastRepeatableHardwareKeyCode = 0;
 KeymapWrapper::RepeatState KeymapWrapper::sRepeatState =
     KeymapWrapper::NOT_PRESSED;
-nsIBidiKeyboard* sBidiKeyboard = nullptr;
 
 static const char* GetBoolName(bool aBool)
 {
@@ -163,16 +163,15 @@ KeymapWrapper::KeymapWrapper() :
     mInitialized(false), mGdkKeymap(gdk_keymap_get_default()),
     mXKBBaseEventCode(0)
 {
-    if (!gKeymapWrapperLog) {
-        gKeymapWrapperLog = PR_NewLogModule("KeymapWrapperWidgets");
-    }
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): Constructor, mGdkKeymap=%p",
+        ("%p Constructor, mGdkKeymap=%p",
          this, mGdkKeymap));
 
     g_object_ref(mGdkKeymap);
     g_signal_connect(mGdkKeymap, "keys-changed",
                      (GCallback)OnKeysChanged, this);
+    g_signal_connect(mGdkKeymap, "direction-changed",
+                     (GCallback)OnDirectionChanged, this);
 
     if (GDK_IS_X11_DISPLAY(gdk_display_get_default()))
         InitXKBExtension();
@@ -189,19 +188,23 @@ KeymapWrapper::Init()
     mInitialized = true;
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): Init, mGdkKeymap=%p",
+        ("%p Init, mGdkKeymap=%p",
          this, mGdkKeymap));
 
     mModifierKeys.Clear();
     memset(mModifierMasks, 0, sizeof(mModifierMasks));
 
     if (GDK_IS_X11_DISPLAY(gdk_display_get_default()))
-        InitBySystemSettings();
+        InitBySystemSettingsX11();
+#ifdef MOZ_WAYLAND
+    else
+        InitBySystemSettingsWayland();
+#endif
 
     gdk_window_add_filter(nullptr, FilterEvents, this);
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): Init, CapsLock=0x%X, NumLock=0x%X, "
+        ("%p Init, CapsLock=0x%X, NumLock=0x%X, "
          "ScrollLock=0x%X, Level3=0x%X, Level5=0x%X, "
          "Shift=0x%X, Ctrl=0x%X, Alt=0x%X, Meta=0x%X, Super=0x%X, Hyper=0x%X",
          this,
@@ -222,8 +225,8 @@ KeymapWrapper::InitXKBExtension()
     int xkbMinorVer = XkbMinorVersion;
     if (!XkbLibraryVersion(&xkbMajorVer, &xkbMinorVer)) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-               ("KeymapWrapper(%p): InitXKBExtension failed due to failure of "
-                "XkbLibraryVersion()", this));
+            ("%p InitXKBExtension failed due to failure of "
+             "XkbLibraryVersion()", this));
         return;
     }
 
@@ -240,16 +243,16 @@ KeymapWrapper::InitXKBExtension()
     if (!XkbQueryExtension(display, &opcode, &mXKBBaseEventCode, &baseErrorCode,
                            &xkbMajorVer, &xkbMinorVer)) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-               ("KeymapWrapper(%p): InitXKBExtension failed due to failure of "
-                "XkbQueryExtension(), display=0x%p", this, display));
+            ("%p InitXKBExtension failed due to failure of "
+             "XkbQueryExtension(), display=0x%p", this, display));
         return;
     }
 
     if (!XkbSelectEventDetails(display, XkbUseCoreKbd, XkbStateNotify,
                                XkbModifierStateMask, XkbModifierStateMask)) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-               ("KeymapWrapper(%p): InitXKBExtension failed due to failure of "
-                "XkbSelectEventDetails() for XModifierStateMask, display=0x%p",
+            ("%p InitXKBExtension failed due to failure of "
+             "XkbSelectEventDetails() for XModifierStateMask, display=0x%p",
                 this, display));
         return;
     }
@@ -257,30 +260,30 @@ KeymapWrapper::InitXKBExtension()
     if (!XkbSelectEventDetails(display, XkbUseCoreKbd, XkbControlsNotify,
                                XkbPerKeyRepeatMask, XkbPerKeyRepeatMask)) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-               ("KeymapWrapper(%p): InitXKBExtension failed due to failure of "
-                "XkbSelectEventDetails() for XkbControlsNotify, display=0x%p",
-                this, display));
+            ("%p InitXKBExtension failed due to failure of "
+             "XkbSelectEventDetails() for XkbControlsNotify, display=0x%p",
+             this, display));
         return;
     }
 
     if (!XGetKeyboardControl(display, &mKeyboardState)) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-               ("KeymapWrapper(%p): InitXKBExtension failed due to failure of "
-                "XGetKeyboardControl(), display=0x%p",
-                this, display));
+            ("%p InitXKBExtension failed due to failure of "
+             "XGetKeyboardControl(), display=0x%p",
+             this, display));
         return;
     }
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-           ("KeymapWrapper(%p): InitXKBExtension, Succeeded", this));
+        ("%p InitXKBExtension, Succeeded", this));
 }
 
 void
-KeymapWrapper::InitBySystemSettings()
+KeymapWrapper::InitBySystemSettingsX11()
 {
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-      ("KeymapWrapper(%p): InitBySystemSettings, mGdkKeymap=%p",
-       this, mGdkKeymap));
+        ("%p InitBySystemSettingsX11, mGdkKeymap=%p",
+         this, mGdkKeymap));
 
     Display* display =
         gdk_x11_display_get_xdisplay(gdk_display_get_default());
@@ -295,7 +298,7 @@ KeymapWrapper::InitBySystemSettings()
                                           &keysyms_per_keycode);
     if (!xkeymap) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): InitBySystemSettings, "
+            ("%p InitBySystemSettings, "
              "Failed due to null xkeymap", this));
         return;
     }
@@ -303,13 +306,13 @@ KeymapWrapper::InitBySystemSettings()
     XModifierKeymap* xmodmap = XGetModifierMapping(display);
     if (!xmodmap) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): InitBySystemSettings, "
+            ("%p InitBySystemSettings, "
              "Failed due to null xmodmap", this));
         XFree(xkeymap);
         return;
     }
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): InitBySystemSettings, min_keycode=%d, "
+        ("%p InitBySystemSettings, min_keycode=%d, "
          "max_keycode=%d, keysyms_per_keycode=%d, max_keypermod=%d",
          this, min_keycode, max_keycode, keysyms_per_keycode,
          xmodmap->max_keypermod));
@@ -336,7 +339,7 @@ KeymapWrapper::InitBySystemSettings()
     for (uint32_t i = 0; i < map_size; i++) {
         KeyCode keycode = xmodmap->modifiermap[i];
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): InitBySystemSettings, "
+            ("%p InitBySystemSettings, "
              "  i=%d, keycode=0x%08X",
              this, i, keycode));
         if (!keycode || keycode < min_keycode || keycode > max_keycode) {
@@ -363,8 +366,8 @@ KeymapWrapper::InitBySystemSettings()
         for (int32_t j = 0; j < keysyms_per_keycode; j++) {
             Modifier modifier = GetModifierForGDKKeyval(syms[j]);
             MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-                ("KeymapWrapper(%p): InitBySystemSettings, "
-                 "    Mod%d, j=%d, syms[j]=%s(0x%X), modifier=%s",
+                ("%p InitBySystemSettings, "
+                 "    Mod%d, j=%d, syms[j]=%s(0x%lX), modifier=%s",
                  this, modIndex + 1, j, gdk_keyval_name(syms[j]), syms[j],
                  GetModifierName(modifier)));
 
@@ -440,15 +443,26 @@ KeymapWrapper::InitBySystemSettings()
     XFree(xkeymap);
 }
 
+#ifdef MOZ_WAYLAND
+void
+KeymapWrapper::InitBySystemSettingsWayland()
+{
+    // Not implemented yet, but at least Alt modifier should be handled to save
+    // popular usage.
+    mModifierMasks[INDEX_ALT] = 1 << 3;
+}
+#endif
+
 KeymapWrapper::~KeymapWrapper()
 {
     gdk_window_remove_filter(nullptr, FilterEvents, this);
     g_signal_handlers_disconnect_by_func(mGdkKeymap,
                                          FuncToGpointer(OnKeysChanged), this);
+    g_signal_handlers_disconnect_by_func(mGdkKeymap,
+                                         FuncToGpointer(OnDirectionChanged), this);
     g_object_unref(mGdkKeymap);
-    NS_IF_RELEASE(sBidiKeyboard);
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): Destructor", this));
+        ("%p Destructor", this));
 }
 
 /* static */ GdkFilterReturn
@@ -511,9 +525,9 @@ KeymapWrapper::FilterEvents(GdkXEvent* aXEvent,
             if (!XGetKeyboardControl(xkbEvent->any.display,
                                      &self->mKeyboardState)) {
                 MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-                       ("KeymapWrapper(%p): FilterEvents failed due to failure "
-                        "of XGetKeyboardControl(), display=0x%p",
-                        self, xkbEvent->any.display));
+                    ("%p FilterEvents failed due to failure "
+                     "of XGetKeyboardControl(), display=0x%p",
+                     self, xkbEvent->any.display));
             }
             break;
         }
@@ -522,12 +536,23 @@ KeymapWrapper::FilterEvents(GdkXEvent* aXEvent,
     return GDK_FILTER_CONTINUE;
 }
 
+static void
+ResetBidiKeyboard()
+{
+    // Reset the bidi keyboard settings for the new GdkKeymap
+    nsCOMPtr<nsIBidiKeyboard> bidiKeyboard = nsContentUtils::GetBidiKeyboard();
+    if (bidiKeyboard) {
+        bidiKeyboard->Reset();
+    }
+    WidgetUtils::SendBidiKeyboardInfoToContent();
+}
+
 /* static */ void
 KeymapWrapper::OnKeysChanged(GdkKeymap *aGdkKeymap,
                              KeymapWrapper* aKeymapWrapper)
 {
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper: OnKeysChanged, aGdkKeymap=%p, aKeymapWrapper=%p",
+        ("OnKeysChanged, aGdkKeymap=%p, aKeymapWrapper=%p",
          aGdkKeymap, aKeymapWrapper));
 
     MOZ_ASSERT(sInstance == aKeymapWrapper,
@@ -536,14 +561,27 @@ KeymapWrapper::OnKeysChanged(GdkKeymap *aGdkKeymap,
     // We cannot reintialize here becasue we don't have GdkWindow which is using
     // the GdkKeymap.  We'll reinitialize it when next GetInstance() is called.
     sInstance->mInitialized = false;
+    ResetBidiKeyboard();
+}
 
-    // Reset the bidi keyboard settings for the new GdkKeymap
-    if (!sBidiKeyboard) {
-        CallGetService("@mozilla.org/widget/bidikeyboard;1", &sBidiKeyboard);
-    }
-    if (sBidiKeyboard) {
-        sBidiKeyboard->Reset();
-    }
+// static
+void
+KeymapWrapper::OnDirectionChanged(GdkKeymap *aGdkKeymap,
+                                  KeymapWrapper* aKeymapWrapper)
+{
+    // XXX
+    // A lot of diretion-changed signal might be fired on switching bidi
+    // keyboard when using both ibus (with arabic layout) and fcitx (with IME).
+    // See https://github.com/fcitx/fcitx/issues/257
+    //
+    // Also, when using ibus, switching to IM might not cause this signal.
+    // See https://github.com/ibus/ibus/issues/1848
+
+    MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
+        ("OnDirectionChanged, aGdkKeymap=%p, aKeymapWrapper=%p",
+         aGdkKeymap, aKeymapWrapper));
+
+    ResetBidiKeyboard();
 }
 
 /* static */ guint
@@ -582,47 +620,62 @@ KeymapWrapper::AreModifiersActive(Modifiers aModifiers,
     return true;
 }
 
+/* static */ uint32_t
+KeymapWrapper::ComputeCurrentKeyModifiers()
+{
+    return ComputeKeyModifiers(GetCurrentModifierState());
+}
+
+/* static */ uint32_t
+KeymapWrapper::ComputeKeyModifiers(guint aModifierState)
+{
+    KeymapWrapper* keymapWrapper = GetInstance();
+
+    uint32_t keyModifiers = 0;
+    // DOM Meta key should be TRUE only on Mac.  We need to discuss this
+    // issue later.
+    if (keymapWrapper->AreModifiersActive(SHIFT, aModifierState)) {
+        keyModifiers |= MODIFIER_SHIFT;
+    }
+    if (keymapWrapper->AreModifiersActive(CTRL, aModifierState)) {
+        keyModifiers |= MODIFIER_CONTROL;
+    }
+    if (keymapWrapper->AreModifiersActive(ALT, aModifierState)) {
+        keyModifiers |= MODIFIER_ALT;
+    }
+    if (keymapWrapper->AreModifiersActive(META, aModifierState)) {
+        keyModifiers |= MODIFIER_META;
+    }
+    if (keymapWrapper->AreModifiersActive(SUPER, aModifierState) ||
+        keymapWrapper->AreModifiersActive(HYPER, aModifierState)) {
+        keyModifiers |= MODIFIER_OS;
+    }
+    if (keymapWrapper->AreModifiersActive(LEVEL3, aModifierState) ||
+        keymapWrapper->AreModifiersActive(LEVEL5, aModifierState)) {
+        keyModifiers |= MODIFIER_ALTGRAPH;
+    }
+    if (keymapWrapper->AreModifiersActive(CAPS_LOCK, aModifierState)) {
+        keyModifiers |= MODIFIER_CAPSLOCK;
+    }
+    if (keymapWrapper->AreModifiersActive(NUM_LOCK, aModifierState)) {
+        keyModifiers |= MODIFIER_NUMLOCK;
+    }
+    if (keymapWrapper->AreModifiersActive(SCROLL_LOCK, aModifierState)) {
+        keyModifiers |= MODIFIER_SCROLLLOCK;
+    }
+    return keyModifiers;
+}
+
 /* static */ void
 KeymapWrapper::InitInputEvent(WidgetInputEvent& aInputEvent,
                               guint aModifierState)
 {
     KeymapWrapper* keymapWrapper = GetInstance();
 
-    aInputEvent.mModifiers = 0;
-    // DOM Meta key should be TRUE only on Mac.  We need to discuss this
-    // issue later.
-    if (keymapWrapper->AreModifiersActive(SHIFT, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_SHIFT;
-    }
-    if (keymapWrapper->AreModifiersActive(CTRL, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_CONTROL;
-    }
-    if (keymapWrapper->AreModifiersActive(ALT, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_ALT;
-    }
-    if (keymapWrapper->AreModifiersActive(META, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_META;
-    }
-    if (keymapWrapper->AreModifiersActive(SUPER, aModifierState) ||
-        keymapWrapper->AreModifiersActive(HYPER, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_OS;
-    }
-    if (keymapWrapper->AreModifiersActive(LEVEL3, aModifierState) ||
-        keymapWrapper->AreModifiersActive(LEVEL5, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_ALTGRAPH;
-    }
-    if (keymapWrapper->AreModifiersActive(CAPS_LOCK, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_CAPSLOCK;
-    }
-    if (keymapWrapper->AreModifiersActive(NUM_LOCK, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_NUMLOCK;
-    }
-    if (keymapWrapper->AreModifiersActive(SCROLL_LOCK, aModifierState)) {
-        aInputEvent.mModifiers |= MODIFIER_SCROLLLOCK;
-    }
+    aInputEvent.mModifiers = ComputeKeyModifiers(aModifierState);
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Debug,
-        ("KeymapWrapper(%p): InitInputEvent, aModifierState=0x%08X, "
+        ("%p InitInputEvent, aModifierState=0x%08X, "
          "aInputEvent.mModifiers=0x%04X (Shift: %s, Control: %s, Alt: %s, "
          "Meta: %s, OS: %s, AltGr: %s, "
          "CapsLock: %s, NumLock: %s, ScrollLock: %s)",
@@ -661,7 +714,7 @@ KeymapWrapper::InitInputEvent(WidgetInputEvent& aInputEvent,
     }
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Debug,
-        ("KeymapWrapper(%p): InitInputEvent, aInputEvent has buttons, "
+        ("%p InitInputEvent, aInputEvent has buttons, "
          "aInputEvent.buttons=0x%04X (Left: %s, Right: %s, Middle: %s, "
          "4th (BACK): %s, 5th (FORWARD): %s)",
          keymapWrapper, mouseEvent.buttons,
@@ -756,7 +809,7 @@ KeymapWrapper::ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent)
 
     // If the unmodified character is not an ASCII character, that means we
     // couldn't find the hint. We should reset it.
-    if (unmodifiedChar > 0x7F) {
+    if (!IsPrintableASCIICharacter(unmodifiedChar)) {
         unmodifiedChar = 0;
     }
 
@@ -775,7 +828,7 @@ KeymapWrapper::ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent)
 
     // If the shifted unmodified character isn't an ASCII character, we should
     // discard it too.
-    if (shiftedChar > 0x7F) {
+    if (!IsPrintableASCIICharacter(shiftedChar)) {
         shiftedChar = 0;
     }
 
@@ -783,14 +836,12 @@ KeymapWrapper::ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent)
     // look for ASCII alphabet inputtable keyboard layout.  If the key
     // inputs an ASCII alphabet or an ASCII numeric, we should use it
     // for deciding our keyCode.
-    // Note that it's important not to use alternative keyboard layout for ASCII
-    // alphabet inputabble keyboard layout because the keycode for the key with
-    // alternative keyboard layout may conflict with another key on current
-    // keyboard layout.
+    uint32_t unmodCharLatin = 0;
+    uint32_t shiftedCharLatin = 0;
     if (!keymapWrapper->IsLatinGroup(aGdkKeyEvent->group)) {
         gint minGroup = keymapWrapper->GetFirstLatinGroup();
         if (minGroup >= 0) {
-            uint32_t unmodCharLatin =
+            unmodCharLatin =
                 keymapWrapper->GetCharCodeFor(aGdkKeyEvent, baseState,
                                               minGroup);
             if (IsBasicLatinLetterOrNumeral(unmodCharLatin)) {
@@ -798,7 +849,13 @@ KeymapWrapper::ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent)
                 // an ASCII numeric, we should use it for the keyCode.
                 return WidgetUtils::ComputeKeyCodeFromChar(unmodCharLatin);
             }
-            uint32_t shiftedCharLatin =
+            // If the unmodified character in the alternative ASCII capable
+            // keyboard layout isn't an ASCII character, that means we couldn't
+            // find the hint. We should reset it.
+            if (!IsPrintableASCIICharacter(unmodCharLatin)) {
+                unmodCharLatin = 0;
+            }
+            shiftedCharLatin =
                 keymapWrapper->GetCharCodeFor(aGdkKeyEvent, shiftState,
                                               minGroup);
             if (IsBasicLatinLetterOrNumeral(shiftedCharLatin)) {
@@ -806,16 +863,46 @@ KeymapWrapper::ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent)
                 // numeric, we should use it for the keyCode.
                 return WidgetUtils::ComputeKeyCodeFromChar(shiftedCharLatin);
             }
+            // If the shifted unmodified character in the alternative ASCII
+            // capable keyboard layout isn't an ASCII character, we should
+            // discard it too.
+            if (!IsPrintableASCIICharacter(shiftedCharLatin)) {
+                shiftedCharLatin = 0;
+            }
         }
     }
 
-    // If unmodified character is in ASCII range, use it.  Otherwise, use
-    // shifted character.
-    if (!unmodifiedChar && !shiftedChar) {
-        return 0;
+    // If the key itself or with Shift state on active keyboard layout produces
+    // an ASCII punctuation character, we should decide keyCode value with it.
+    if (unmodifiedChar || shiftedChar) {
+        return WidgetUtils::ComputeKeyCodeFromChar(
+                   unmodifiedChar ? unmodifiedChar : shiftedChar);
     }
-    return WidgetUtils::ComputeKeyCodeFromChar(
-                unmodifiedChar ? unmodifiedChar : shiftedChar);
+
+    // If the key itself or with Shift state on alternative ASCII capable
+    // keyboard layout produces an ASCII punctuation character, we should
+    // decide keyCode value with it.  Note that We've returned 0 for long
+    // time if keyCode isn't for an alphabet keys or a numeric key even in
+    // alternative ASCII capable keyboard layout because we decided that we
+    // should avoid setting same keyCode value to 2 or more keys since active
+    // keyboard layout may have a key to input the punctuation with different
+    // key.  However, setting keyCode to 0 makes some web applications which
+    // are aware of neither KeyboardEvent.key nor KeyboardEvent.code not work
+    // with Firefox when user selects non-ASCII capable keyboard layout such
+    // as Russian and Thai.  So, if alternative ASCII capable keyboard layout
+    // has keyCode value for the key, we should use it.  In other words, this
+    // behavior means that non-ASCII capable keyboard layout overrides some
+    // keys' keyCode value only if the key produces ASCII character by itself
+    // or with Shift key.
+    if (unmodCharLatin || shiftedCharLatin) {
+        return WidgetUtils::ComputeKeyCodeFromChar(
+                   unmodCharLatin ? unmodCharLatin : shiftedCharLatin);
+    }
+
+    // Otherwise, let's decide keyCode value from the hardware_keycode
+    // value on major keyboard layout.
+    CodeNameIndex code = ComputeDOMCodeNameIndex(aGdkKeyEvent);
+    return WidgetKeyboardEvent::GetFallbackKeyCodeOfPunctuationKey(code);
 }
 
 KeyNameIndex
@@ -858,14 +945,19 @@ KeymapWrapper::ComputeDOMCodeNameIndex(const GdkEventKey* aGdkKeyEvent)
 
 /* static */ void
 KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                            GdkEventKey* aGdkKeyEvent)
+                            GdkEventKey* aGdkKeyEvent,
+                            bool aIsProcessedByIME)
 {
+    MOZ_ASSERT(!aIsProcessedByIME || aKeyEvent.mMessage != eKeyPress,
+      "If the key event is handled by IME, keypress event shouldn't be fired");
+
     KeymapWrapper* keymapWrapper = GetInstance();
 
     aKeyEvent.mCodeNameIndex = ComputeDOMCodeNameIndex(aGdkKeyEvent);
     MOZ_ASSERT(aKeyEvent.mCodeNameIndex != CODE_NAME_INDEX_USE_STRING);
     aKeyEvent.mKeyNameIndex =
-        keymapWrapper->ComputeDOMKeyNameIndex(aGdkKeyEvent);
+        aIsProcessedByIME ? KEY_NAME_INDEX_Process :
+                            keymapWrapper->ComputeDOMKeyNameIndex(aGdkKeyEvent);
     if (aKeyEvent.mKeyNameIndex == KEY_NAME_INDEX_Unidentified) {
         uint32_t charCode = GetCharCodeFor(aGdkKeyEvent);
         if (!charCode) {
@@ -878,13 +970,14 @@ KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
             AppendUCS4ToUTF16(charCode, aKeyEvent.mKeyValue);
         }
     }
-    aKeyEvent.keyCode = ComputeDOMKeyCode(aGdkKeyEvent);
 
-    if (aKeyEvent.mKeyNameIndex != KEY_NAME_INDEX_USE_STRING ||
-        aKeyEvent.mMessage != eKeyPress) {
-        aKeyEvent.keyCode = ComputeDOMKeyCode(aGdkKeyEvent);
+    if (aIsProcessedByIME) {
+        aKeyEvent.mKeyCode = NS_VK_PROCESSKEY;
+    } else if (aKeyEvent.mKeyNameIndex != KEY_NAME_INDEX_USE_STRING ||
+               aKeyEvent.mMessage != eKeyPress) {
+        aKeyEvent.mKeyCode = ComputeDOMKeyCode(aGdkKeyEvent);
     } else {
-        aKeyEvent.keyCode = 0;
+        aKeyEvent.mKeyCode = 0;
     }
 
     // NOTE: The state of given key event indicates adjacent state of
@@ -922,7 +1015,7 @@ KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
         case GDK_Super_L:
         case GDK_Hyper_L:
         case GDK_Meta_L:
-            aKeyEvent.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
+            aKeyEvent.mLocation = eKeyLocationLeft;
             break;
 
         case GDK_Shift_R:
@@ -931,7 +1024,7 @@ KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
         case GDK_Super_R:
         case GDK_Hyper_R:
         case GDK_Meta_R:
-            aKeyEvent.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_RIGHT;
+            aKeyEvent.mLocation = eKeyLocationRight;
             break;
 
         case GDK_KP_0:
@@ -969,16 +1062,16 @@ KeymapWrapper::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
         case GDK_KP_Subtract:
         case GDK_KP_Decimal:
         case GDK_KP_Divide:
-            aKeyEvent.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
+            aKeyEvent.mLocation = eKeyLocationNumpad;
             break;
 
         default:
-            aKeyEvent.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
+            aKeyEvent.mLocation = eKeyLocationStandard;
             break;
     }
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): InitKeyEvent, modifierState=0x%08X "
+        ("%p InitKeyEvent, modifierState=0x%08X "
          "aGdkKeyEvent={ type=%s, keyval=%s(0x%X), state=0x%08X, "
          "hardware_keycode=0x%08X, is_modifier=%s } "
          "aKeyEvent={ message=%s, isShift=%s, isControl=%s, "
@@ -1332,27 +1425,35 @@ void
 KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
                                                  GdkEventKey* aGdkKeyEvent)
 {
-    uint32_t charCode = GetCharCodeFor(aGdkKeyEvent);
-    if (!charCode) {
-        MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): WillDispatchKeyboardEventInternal, "
-             "keyCode=0x%02X, charCode=0x%08X",
-             this, aKeyEvent.keyCode, aKeyEvent.charCode));
+    if (!aGdkKeyEvent) {
+        // If aGdkKeyEvent is nullptr, we're trying to dispatch a fake keyboard
+        // event in such case, we don't need to set alternative char codes.
+        // So, we don't need to do nothing here.  This case is typically we're
+        // dispatching eKeyDown or eKeyUp event during composition.
         return;
     }
 
-    // The charCode was set from mKeyValue. However, for example, when Ctrl key
+    uint32_t charCode = GetCharCodeFor(aGdkKeyEvent);
+    if (!charCode) {
+        MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
+            ("%p WillDispatchKeyboardEventInternal, "
+             "mKeyCode=0x%02X, charCode=0x%08X",
+             this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode));
+        return;
+    }
+
+    // The mCharCode was set from mKeyValue. However, for example, when Ctrl key
     // is pressed, its value should indicate an ASCII character for backward
     // compatibility rather than inputting character without the modifiers.
-    // Therefore, we need to modify charCode value here.
+    // Therefore, we need to modify mCharCode value here.
     aKeyEvent.SetCharCode(charCode);
 
     gint level = GetKeyLevel(aGdkKeyEvent);
     if (level != 0 && level != 1) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): WillDispatchKeyboardEventInternal, "
-             "keyCode=0x%02X, charCode=0x%08X, level=%d",
-             this, aKeyEvent.keyCode, aKeyEvent.charCode, level));
+            ("%p WillDispatchKeyboardEventInternal, "
+             "mKeyCode=0x%02X, mCharCode=0x%08X, level=%d",
+             this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode, level));
         return;
     }
 
@@ -1362,7 +1463,7 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
           GetModifierMask(SUPER) | GetModifierMask(HYPER));
 
     // We shold send both shifted char and unshifted char, all keyboard layout
-    // users can use all keys.  Don't change event.charCode. On some keyboard
+    // users can use all keys.  Don't change event.mCharCode. On some keyboard
     // layouts, Ctrl/Alt/Meta keys are used for inputting some characters.
     AlternativeCharCode altCharCodes(0, 0);
     // unshifted charcode of current keyboard layout.
@@ -1376,12 +1477,12 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
                        aGdkKeyEvent->group);
     isLatin = isLatin && (altCharCodes.mShiftedCharCode <= 0xFF);
     if (altCharCodes.mUnshiftedCharCode || altCharCodes.mShiftedCharCode) {
-        aKeyEvent.alternativeCharCodes.AppendElement(altCharCodes);
+        aKeyEvent.mAlternativeCharCodes.AppendElement(altCharCodes);
     }
 
     bool needLatinKeyCodes = !isLatin;
     if (!needLatinKeyCodes) {
-        needLatinKeyCodes = 
+        needLatinKeyCodes =
             (IS_ASCII_ALPHABETICAL(altCharCodes.mUnshiftedCharCode) !=
              IS_ASCII_ALPHABETICAL(altCharCodes.mShiftedCharCode));
     }
@@ -1390,10 +1491,10 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
     // more information.
     if (!needLatinKeyCodes) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): WillDispatchKeyboardEventInternal, "
-             "keyCode=0x%02X, charCode=0x%08X, level=%d, altCharCodes={ "
+            ("%p WillDispatchKeyboardEventInternal, "
+             "mKeyCode=0x%02X, mCharCode=0x%08X, level=%d, altCharCodes={ "
              "mUnshiftedCharCode=0x%08X, mShiftedCharCode=0x%08X }",
-             this, aKeyEvent.keyCode, aKeyEvent.charCode, level,
+             this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode, level,
              altCharCodes.mUnshiftedCharCode, altCharCodes.mShiftedCharCode));
         return;
     }
@@ -1402,12 +1503,12 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
     gint minGroup = GetFirstLatinGroup();
     if (minGroup < 0) {
         MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-            ("KeymapWrapper(%p): WillDispatchKeyboardEventInternal, "
+            ("%p WillDispatchKeyboardEventInternal, "
              "Latin keyboard layout isn't found: "
-             "keyCode=0x%02X, charCode=0x%08X, level=%d, "
+             "mKeyCode=0x%02X, mCharCode=0x%08X, level=%d, "
              "altCharCodes={ mUnshiftedCharCode=0x%08X, "
              "mShiftedCharCode=0x%08X }",
-             this, aKeyEvent.keyCode, aKeyEvent.charCode, level,
+             this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode, level,
              altCharCodes.mUnshiftedCharCode, altCharCodes.mShiftedCharCode));
         return;
     }
@@ -1429,10 +1530,10 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
         IsBasicLatinLetterOrNumeral(ch) ? ch : 0;
     if (altLatinCharCodes.mUnshiftedCharCode ||
         altLatinCharCodes.mShiftedCharCode) {
-        aKeyEvent.alternativeCharCodes.AppendElement(altLatinCharCodes);
+        aKeyEvent.mAlternativeCharCodes.AppendElement(altLatinCharCodes);
     }
-    // If the charCode is not Latin, and the level is 0 or 1, we should
-    // replace the charCode to Latin char if Alt and Meta keys are not
+    // If the mCharCode is not Latin, and the level is 0 or 1, we should
+    // replace the mCharCode to Latin char if Alt and Meta keys are not
     // pressed. (Alt should be sent the localized char for accesskey
     // like handling of Web Applications.)
     ch = aKeyEvent.IsShift() ? altLatinCharCodes.mShiftedCharCode :
@@ -1443,13 +1544,13 @@ KeymapWrapper::WillDispatchKeyboardEventInternal(WidgetKeyboardEvent& aKeyEvent,
     }
 
     MOZ_LOG(gKeymapWrapperLog, LogLevel::Info,
-        ("KeymapWrapper(%p): WillDispatchKeyboardEventInternal, "
-         "keyCode=0x%02X, charCode=0x%08X, level=%d, minGroup=%d, "
+        ("%p WillDispatchKeyboardEventInternal, "
+         "mKeyCode=0x%02X, mCharCode=0x%08X, level=%d, minGroup=%d, "
          "altCharCodes={ mUnshiftedCharCode=0x%08X, "
          "mShiftedCharCode=0x%08X } "
          "altLatinCharCodes={ mUnshiftedCharCode=0x%08X, "
          "mShiftedCharCode=0x%08X }",
-         this, aKeyEvent.keyCode, aKeyEvent.charCode, level, minGroup,
+         this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode, level, minGroup,
          altCharCodes.mUnshiftedCharCode, altCharCodes.mShiftedCharCode,
          altLatinCharCodes.mUnshiftedCharCode,
          altLatinCharCodes.mShiftedCharCode));

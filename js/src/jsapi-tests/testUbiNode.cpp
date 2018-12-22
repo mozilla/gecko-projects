@@ -8,7 +8,11 @@
 #include "js/UbiNodePostOrder.h"
 #include "js/UbiNodeShortestPaths.h"
 #include "jsapi-tests/tests.h"
+#include "util/Text.h"
+#include "vm/Realm.h"
 #include "vm/SavedFrame.h"
+
+#include "vm/JSObject-inl.h"
 
 using JS::RootedObject;
 using JS::RootedScript;
@@ -41,12 +45,16 @@ namespace JS {
 namespace ubi {
 
 template<>
-struct Concrete<FakeNode> : public Base
+class Concrete<FakeNode> : public Base
 {
-    static const char16_t concreteTypeName[];
-    const char16_t* typeName() const override { return concreteTypeName; }
+  protected:
+    explicit Concrete(FakeNode* ptr) : Base(ptr) { }
+    FakeNode& get() const { return *static_cast<FakeNode*>(ptr); }
 
-    UniquePtr<EdgeRange> edges(JSRuntime* rt, bool wantNames) const override {
+  public:
+    static void construct(void* storage, FakeNode* ptr) { new (storage) Concrete(ptr); }
+
+    UniquePtr<EdgeRange> edges(JSContext* cx, bool wantNames) const override {
         return UniquePtr<EdgeRange>(js_new<PreComputedEdgeRange>(get().edges));
     }
 
@@ -54,14 +62,11 @@ struct Concrete<FakeNode> : public Base
         return 1;
     }
 
-    static void construct(void* storage, FakeNode* ptr) { new (storage) Concrete(ptr); }
-
-  protected:
-    explicit Concrete(FakeNode* ptr) : Base(ptr) { }
-    FakeNode& get() const { return *static_cast<FakeNode*>(ptr); }
+    static const char16_t concreteTypeName[];
+    const char16_t* typeName() const override { return concreteTypeName; }
 };
 
-const char16_t Concrete<FakeNode>::concreteTypeName[] = MOZ_UTF16("FakeNode");
+const char16_t Concrete<FakeNode>::concreteTypeName[] = u"FakeNode";
 
 } // namespace ubi
 } // namespace JS
@@ -73,7 +78,7 @@ BEGIN_TEST(test_ubiNodeZone)
     CHECK(global1);
     CHECK(JS::ubi::Node(global1).zone() == cx->zone());
 
-    JS::CompartmentOptions globalOptions;
+    JS::RealmOptions globalOptions;
     RootedObject global2(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
                                                 JS::FireOnNewGlobalHook, globalOptions));
     CHECK(global2);
@@ -92,7 +97,7 @@ BEGIN_TEST(test_ubiNodeZone)
     {
         // ... and then enter global2's zone and create a string and script
         // there, too.
-        JSAutoCompartment ac(cx, global2);
+        JSAutoRealm ar(cx, global2);
 
         RootedString string2(cx, JS_NewStringCopyZ(cx, "A million household uses!"));
         CHECK(string2);
@@ -116,31 +121,45 @@ BEGIN_TEST(test_ubiNodeCompartment)
     RootedObject global1(cx, JS::CurrentGlobalOrNull(cx));
     CHECK(global1);
     CHECK(JS::ubi::Node(global1).compartment() == cx->compartment());
+    CHECK(JS::ubi::Node(global1).realm() == cx->realm());
 
-    JS::CompartmentOptions globalOptions;
+    JS::RealmOptions globalOptions;
     RootedObject global2(cx, JS_NewGlobalObject(cx, getGlobalClass(), nullptr,
                                                 JS::FireOnNewGlobalHook, globalOptions));
     CHECK(global2);
     CHECK(global1->compartment() != global2->compartment());
     CHECK(JS::ubi::Node(global2).compartment() == global2->compartment());
     CHECK(JS::ubi::Node(global2).compartment() != global1->compartment());
+    CHECK(JS::ubi::Node(global2).realm() == global2->nonCCWRealm());
+    CHECK(JS::ubi::Node(global2).realm() != global1->nonCCWRealm());
 
     JS::CompileOptions options(cx);
 
-    // Create a script in the original compartment...
+    // Create a script in the original realm...
     RootedScript script1(cx);
     CHECK(JS::Compile(cx, options, "", 0, &script1));
 
     {
-        // ... and then enter global2's compartment and create a script
+        // ... and then enter global2's realm and create a script
         // there, too.
-        JSAutoCompartment ac(cx, global2);
+        JSAutoRealm ar(cx, global2);
 
         RootedScript script2(cx);
         CHECK(JS::Compile(cx, options, "", 0, &script2));
 
         CHECK(JS::ubi::Node(script1).compartment() == global1->compartment());
         CHECK(JS::ubi::Node(script2).compartment() == global2->compartment());
+        CHECK(JS::ubi::Node(script1).realm() == global1->nonCCWRealm());
+        CHECK(JS::ubi::Node(script2).realm() == global2->nonCCWRealm());
+
+        // Now create a wrapper for global1 in global2's compartment.
+        RootedObject wrappedGlobal1(cx, global1);
+        CHECK(cx->compartment()->wrap(cx, &wrappedGlobal1));
+
+        // Cross-compartment wrappers have a compartment() but not a realm().
+        CHECK(JS::ubi::Node(wrappedGlobal1).zone() == cx->zone());
+        CHECK(JS::ubi::Node(wrappedGlobal1).compartment() == cx->compartment());
+        CHECK(JS::ubi::Node(wrappedGlobal1).realm() == nullptr);
     }
 
     return true;
@@ -156,7 +175,7 @@ BEGIN_TEST(test_ubiNodeJSObjectConstructorName)
     UniqueTwoByteChars ctorName;
     CHECK(JS::ubi::Node(&val.toObject()).jsObjectConstructorName(cx, ctorName));
     CHECK(ctorName);
-    CHECK(js_strcmp(ctorName.get(), MOZ_UTF16("Ctor")) == 0);
+    CHECK(EqualChars(ctorName.get(), u"Ctor", js_strlen(u"Ctor") + 1));
 
     return true;
 }
@@ -374,8 +393,8 @@ BEGIN_TEST(test_ubiPostOrder)
         // `expectedEdges` as we find them to ensure that we only find each edge
         // once.
 
-        JS::AutoCheckCannotGC nogc(rt);
-        JS::ubi::PostOrder traversal(rt, nogc);
+        JS::AutoCheckCannotGC nogc(cx);
+        JS::ubi::PostOrder traversal(cx, nogc);
         CHECK(traversal.init());
         CHECK(traversal.addStart(&r));
 
@@ -522,8 +541,8 @@ BEGIN_TEST(test_JS_ubi_DominatorTree)
 
     mozilla::Maybe<JS::ubi::DominatorTree> maybeTree;
     {
-        JS::AutoCheckCannotGC noGC(rt);
-        maybeTree = JS::ubi::DominatorTree::Create(rt, noGC, &r);
+        JS::AutoCheckCannotGC noGC(cx);
+        maybeTree = JS::ubi::DominatorTree::Create(cx, noGC, &r);
     }
 
     CHECK(maybeTree.isSome());
@@ -645,7 +664,7 @@ BEGIN_TEST(test_JS_ubi_Node_scriptFilename)
     CHECK(obj->is<JSFunction>());
     JS::RootedFunction func(cx, &obj->as<JSFunction>());
 
-    JS::RootedScript script(cx, func->getOrCreateScript(cx));
+    JS::RootedScript script(cx, JSFunction::getOrCreateScript(cx, func));
     CHECK(script);
     CHECK(script->filename());
 
@@ -692,14 +711,14 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_no_path)
 
     mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
     {
-        JS::AutoCheckCannotGC noGC(rt);
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         CHECK(targets.init());
         CHECK(targets.put(&b));
 
-        maybeShortestPaths = JS::ubi::ShortestPaths::Create(rt, noGC, 10, &a,
-                                                            mozilla::Move(targets));
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            std::move(targets));
     }
 
     CHECK(maybeShortestPaths);
@@ -734,14 +753,14 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_one_path)
 
     mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
     {
-        JS::AutoCheckCannotGC noGC(rt);
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         CHECK(targets.init());
         CHECK(targets.put(&b));
 
-        maybeShortestPaths = JS::ubi::ShortestPaths::Create(rt, noGC, 10, &a,
-                                                            mozilla::Move(targets));
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            std::move(targets));
     }
 
     CHECK(maybeShortestPaths);
@@ -801,14 +820,14 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_paths)
 
     mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
     {
-        JS::AutoCheckCannotGC noGC(rt);
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         CHECK(targets.init());
         CHECK(targets.put(&f));
 
-        maybeShortestPaths = JS::ubi::ShortestPaths::Create(rt, noGC, 10, &a,
-                                                            mozilla::Move(targets));
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            std::move(targets));
     }
 
     CHECK(maybeShortestPaths);
@@ -893,14 +912,14 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_more_paths_than_max)
 
     mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
     {
-        JS::AutoCheckCannotGC noGC(rt);
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         CHECK(targets.init());
         CHECK(targets.put(&f));
 
-        maybeShortestPaths = JS::ubi::ShortestPaths::Create(rt, noGC, 1, &a,
-                                                            mozilla::Move(targets));
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 1, &a,
+                                                            std::move(targets));
     }
 
     CHECK(maybeShortestPaths);
@@ -937,20 +956,20 @@ BEGIN_TEST(test_JS_ubi_ShortestPaths_multiple_edges_to_target)
     //                '---'
     FakeNode a('a');
     FakeNode b('b');
-    CHECK(a.addEdgeTo(b, MOZ_UTF16("x")));
-    CHECK(a.addEdgeTo(b, MOZ_UTF16("y")));
-    CHECK(a.addEdgeTo(b, MOZ_UTF16("z")));
+    CHECK(a.addEdgeTo(b, u"x"));
+    CHECK(a.addEdgeTo(b, u"y"));
+    CHECK(a.addEdgeTo(b, u"z"));
 
     mozilla::Maybe<JS::ubi::ShortestPaths> maybeShortestPaths;
     {
-        JS::AutoCheckCannotGC noGC(rt);
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         CHECK(targets.init());
         CHECK(targets.put(&b));
 
-        maybeShortestPaths = JS::ubi::ShortestPaths::Create(rt, noGC, 10, &a,
-                                                            mozilla::Move(targets));
+        maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, 10, &a,
+                                                            std::move(targets));
     }
 
     CHECK(maybeShortestPaths);

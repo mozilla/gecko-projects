@@ -20,8 +20,14 @@
 #include "nsIBufferedStreams.h"
 #include "nsNetCID.h"
 #include "nsServiceManagerUtils.h"
+#include "nsThreadUtils.h"
+#include "nsITransport.h"
+#include "nsIStreamTransportService.h"
+#include "NonBlockingAsyncInputStream.h"
 
 using namespace mozilla;
+
+static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 
 //-----------------------------------------------------------------------------
 
@@ -29,15 +35,17 @@ using namespace mozilla;
 // those can be shut down at any time, and in these cases, Cancel() is called
 // instead of Run().
 class nsInputStreamReadyEvent final
-  : public nsICancelableRunnable
+  : public CancelableRunnable
   , public nsIInputStreamCallback
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
 
-  nsInputStreamReadyEvent(nsIInputStreamCallback* aCallback,
-                          nsIEventTarget* aTarget)
-    : mCallback(aCallback)
+    nsInputStreamReadyEvent(const char* aName,
+                            nsIInputStreamCallback* aCallback,
+                            nsIEventTarget* aTarget)
+    : CancelableRunnable(aName)
+    , mCallback(aCallback)
     , mTarget(aTarget)
   {
   }
@@ -59,12 +67,12 @@ private:
     nsresult rv = mTarget->IsOnCurrentThread(&val);
     if (NS_FAILED(rv) || !val) {
       nsCOMPtr<nsIInputStreamCallback> event =
-        NS_NewInputStreamReadyEvent(mCallback, mTarget);
+        NS_NewInputStreamReadyEvent("~nsInputStreamReadyEvent", mCallback, mTarget);
       mCallback = nullptr;
       if (event) {
         rv = event->OnInputStreamReady(nullptr);
         if (NS_FAILED(rv)) {
-          NS_NOTREACHED("leaking stream event");
+          MOZ_ASSERT_UNREACHABLE("leaking stream event");
           nsISupports* sup = event;
           NS_ADDREF(sup);
         }
@@ -98,7 +106,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     mCallback = nullptr;
     return NS_OK;
@@ -110,8 +118,8 @@ private:
   nsCOMPtr<nsIEventTarget>         mTarget;
 };
 
-NS_IMPL_ISUPPORTS(nsInputStreamReadyEvent, nsICancelableRunnable,
-                  nsIRunnable, nsIInputStreamCallback)
+NS_IMPL_ISUPPORTS_INHERITED(nsInputStreamReadyEvent, CancelableRunnable,
+                            nsIInputStreamCallback)
 
 //-----------------------------------------------------------------------------
 
@@ -119,15 +127,16 @@ NS_IMPL_ISUPPORTS(nsInputStreamReadyEvent, nsICancelableRunnable,
 // those can be shut down at any time, and in these cases, Cancel() is called
 // instead of Run().
 class nsOutputStreamReadyEvent final
-  : public nsICancelableRunnable
+  : public CancelableRunnable
   , public nsIOutputStreamCallback
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
 
   nsOutputStreamReadyEvent(nsIOutputStreamCallback* aCallback,
                            nsIEventTarget* aTarget)
-    : mCallback(aCallback)
+    : CancelableRunnable("nsOutputStreamReadyEvent")
+    , mCallback(aCallback)
     , mTarget(aTarget)
   {
   }
@@ -154,7 +163,7 @@ private:
       if (event) {
         rv = event->OnOutputStreamReady(nullptr);
         if (NS_FAILED(rv)) {
-          NS_NOTREACHED("leaking stream event");
+          MOZ_ASSERT_UNREACHABLE("leaking stream event");
           nsISupports* sup = event;
           NS_ADDREF(sup);
         }
@@ -188,7 +197,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     mCallback = nullptr;
     return NS_OK;
@@ -200,19 +209,20 @@ private:
   nsCOMPtr<nsIEventTarget>          mTarget;
 };
 
-NS_IMPL_ISUPPORTS(nsOutputStreamReadyEvent, nsICancelableRunnable,
-                  nsIRunnable, nsIOutputStreamCallback)
+NS_IMPL_ISUPPORTS_INHERITED(nsOutputStreamReadyEvent, CancelableRunnable,
+                            nsIOutputStreamCallback)
 
 //-----------------------------------------------------------------------------
 
 already_AddRefed<nsIInputStreamCallback>
-NS_NewInputStreamReadyEvent(nsIInputStreamCallback* aCallback,
+NS_NewInputStreamReadyEvent(const char* aName,
+                            nsIInputStreamCallback* aCallback,
                             nsIEventTarget* aTarget)
 {
   NS_ASSERTION(aCallback, "null callback");
   NS_ASSERTION(aTarget, "null target");
   RefPtr<nsInputStreamReadyEvent> ev =
-    new nsInputStreamReadyEvent(aCallback, aTarget);
+    new nsInputStreamReadyEvent(aName, aCallback, aTarget);
   return ev.forget();
 }
 
@@ -234,13 +244,14 @@ NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback* aCallback,
 class nsAStreamCopier
   : public nsIInputStreamCallback
   , public nsIOutputStreamCallback
-  , public nsICancelableRunnable
+  , public CancelableRunnable
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
 
   nsAStreamCopier()
-    : mLock("nsAStreamCopier.mLock")
+    : CancelableRunnable("nsAStreamCopier")
+    , mLock("nsAStreamCopier.mLock")
     , mCallback(nullptr)
     , mProgressCallback(nullptr)
     , mClosure(nullptr)
@@ -451,7 +462,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD Cancel() MOZ_MUST_OVERRIDE override = 0;
+  nsresult Cancel() MOZ_MUST_OVERRIDE override = 0;
 
   nsresult PostContinuationEvent()
   {
@@ -506,11 +517,10 @@ protected:
   }
 };
 
-NS_IMPL_ISUPPORTS(nsAStreamCopier,
-                  nsIInputStreamCallback,
-                  nsIOutputStreamCallback,
-                  nsICancelableRunnable,
-                  nsIRunnable)
+NS_IMPL_ISUPPORTS_INHERITED(nsAStreamCopier,
+                            CancelableRunnable,
+                            nsIInputStreamCallback,
+                            nsIOutputStreamCallback)
 
 class nsStreamCopierIB final : public nsAStreamCopier
 {
@@ -529,12 +539,12 @@ public:
     nsresult         mSinkCondition;
   };
 
-  static NS_METHOD ConsumeInputBuffer(nsIInputStream* aInStr,
-                                      void* aClosure,
-                                      const char* aBuffer,
-                                      uint32_t aOffset,
-                                      uint32_t aCount,
-                                      uint32_t* aCountWritten)
+  static nsresult ConsumeInputBuffer(nsIInputStream* aInStr,
+                                     void* aClosure,
+                                     const char* aBuffer,
+                                     uint32_t aOffset,
+                                     uint32_t aCount,
+                                     uint32_t* aCountWritten)
   {
     ReadSegmentsState* state = (ReadSegmentsState*)aClosure;
 
@@ -562,7 +572,7 @@ public:
     return n;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     return NS_OK;
   }
@@ -585,12 +595,12 @@ public:
     nsresult        mSourceCondition;
   };
 
-  static NS_METHOD FillOutputBuffer(nsIOutputStream* aOutStr,
-                                    void* aClosure,
-                                    char* aBuffer,
-                                    uint32_t aOffset,
-                                    uint32_t aCount,
-                                    uint32_t* aCountRead)
+  static nsresult FillOutputBuffer(nsIOutputStream* aOutStr,
+                                   void* aClosure,
+                                   char* aBuffer,
+                                   uint32_t aOffset,
+                                   uint32_t aCount,
+                                   uint32_t* aCountRead)
   {
     WriteSegmentsState* state = (WriteSegmentsState*)aClosure;
 
@@ -618,7 +628,7 @@ public:
     return n;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     return NS_OK;
   }
@@ -729,7 +739,7 @@ NS_ConsumeStream(nsIInputStream* aStream, uint32_t aMaxCount,
 
 //-----------------------------------------------------------------------------
 
-static NS_METHOD
+static nsresult
 TestInputStream(nsIInputStream* aInStr,
                 void* aClosure,
                 const char* aBuffer,
@@ -739,7 +749,8 @@ TestInputStream(nsIInputStream* aInStr,
 {
   bool* result = static_cast<bool*>(aClosure);
   *result = true;
-  return NS_ERROR_ABORT;  // don't call me anymore
+  *aCountWritten = 0;
+  return NS_ERROR_ABORT; // don't call me anymore
 }
 
 bool
@@ -756,7 +767,7 @@ NS_InputStreamIsBuffered(nsIInputStream* aStream)
   return result || NS_SUCCEEDED(rv);
 }
 
-static NS_METHOD
+static nsresult
 TestOutputStream(nsIOutputStream* aOutStr,
                  void* aClosure,
                  char* aBuffer,
@@ -766,7 +777,8 @@ TestOutputStream(nsIOutputStream* aOutStr,
 {
   bool* result = static_cast<bool*>(aClosure);
   *result = true;
-  return NS_ERROR_ABORT;  // don't call me anymore
+  *aCountRead = 0;
+  return NS_ERROR_ABORT; // don't call me anymore
 }
 
 bool
@@ -785,7 +797,7 @@ NS_OutputStreamIsBuffered(nsIOutputStream* aStream)
 
 //-----------------------------------------------------------------------------
 
-NS_METHOD
+nsresult
 NS_CopySegmentToStream(nsIInputStream* aInStr,
                        void* aClosure,
                        const char* aBuffer,
@@ -808,7 +820,7 @@ NS_CopySegmentToStream(nsIInputStream* aInStr,
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 NS_CopySegmentToBuffer(nsIInputStream* aInStr,
                        void* aClosure,
                        const char* aBuffer,
@@ -822,7 +834,7 @@ NS_CopySegmentToBuffer(nsIInputStream* aInStr,
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 NS_CopySegmentToBuffer(nsIOutputStream* aOutStr,
                        void* aClosure,
                        char* aBuffer,
@@ -836,7 +848,7 @@ NS_CopySegmentToBuffer(nsIOutputStream* aOutStr,
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 NS_DiscardSegment(nsIInputStream* aInStr,
                   void* aClosure,
                   const char* aBuffer,
@@ -850,7 +862,7 @@ NS_DiscardSegment(nsIInputStream* aInStr,
 
 //-----------------------------------------------------------------------------
 
-NS_METHOD
+nsresult
 NS_WriteSegmentThunk(nsIInputStream* aInStr,
                      void* aClosure,
                      const char* aBuffer,
@@ -863,7 +875,7 @@ NS_WriteSegmentThunk(nsIInputStream* aInStr,
                      aCountWritten);
 }
 
-NS_METHOD
+nsresult
 NS_FillArray(FallibleTArray<char>& aDest, nsIInputStream* aInput,
              uint32_t aKeep, uint32_t* aNewBytes)
 {
@@ -953,5 +965,64 @@ NS_CloneInputStream(nsIInputStream* aSource, nsIInputStream** aCloneOut,
   readerClone.forget(aCloneOut);
   reader.forget(aReplacementOut);
 
+  return NS_OK;
+}
+
+nsresult
+NS_MakeAsyncNonBlockingInputStream(already_AddRefed<nsIInputStream> aSource,
+                                   nsIAsyncInputStream** aAsyncInputStream)
+{
+  nsCOMPtr<nsIInputStream> source = std::move(aSource);
+  if (NS_WARN_IF(!aAsyncInputStream)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  bool nonBlocking = false;
+  nsresult rv = source->IsNonBlocking(&nonBlocking);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIAsyncInputStream> asyncStream = do_QueryInterface(source);
+
+  if (nonBlocking && asyncStream) {
+    // This stream is perfect!
+    asyncStream.forget(aAsyncInputStream);
+    return NS_OK;
+  }
+
+  if (nonBlocking) {
+    // If the stream is non-blocking but not async, we wrap it.
+    return NonBlockingAsyncInputStream::Create(source.forget(),
+                                               aAsyncInputStream);
+  }
+
+  nsCOMPtr<nsIStreamTransportService> sts =
+    do_GetService(kStreamTransportServiceCID, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsITransport> transport;
+  rv = sts->CreateInputTransport(source,
+                                 /* aCloseWhenDone */ true,
+                                 getter_AddRefs(transport));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIInputStream> wrapper;
+  rv = transport->OpenInputStream(/* aFlags */ 0,
+                                  /* aSegmentSize */ 0,
+                                  /* aSegmentCount */ 0,
+                                  getter_AddRefs(wrapper));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  asyncStream = do_QueryInterface(wrapper);
+  MOZ_ASSERT(asyncStream);
+
+  asyncStream.forget(aAsyncInputStream);
   return NS_OK;
 }

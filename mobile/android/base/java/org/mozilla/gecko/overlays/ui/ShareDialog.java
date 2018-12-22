@@ -13,6 +13,7 @@ import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.LocalBrowserDB;
 import org.mozilla.gecko.db.RemoteClient;
 import org.mozilla.gecko.overlays.OverlayConstants;
@@ -20,7 +21,7 @@ import org.mozilla.gecko.overlays.service.OverlayActionService;
 import org.mozilla.gecko.overlays.service.sharemethods.SendTab;
 import org.mozilla.gecko.overlays.service.sharemethods.ShareMethod;
 import org.mozilla.gecko.sync.setup.activities.WebURLFinder;
-import org.mozilla.gecko.mozglue.ContextUtils;
+import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UIAsyncTask;
 
@@ -65,11 +66,11 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
     private State state;
 
     private SendTabList sendTabList;
-    private OverlayDialogButton readingListButton;
     private OverlayDialogButton bookmarkButton;
+    private OverlayDialogButton openBrowserButton;
 
-    // The reading list drawable set from XML - we need this to reset state.
-    private Drawable readingListButtonDrawable;
+    // The bookmark button drawable set from XML - we need this to reset state.
+    private Drawable bookmarkButtonDrawable;
 
     private String url;
     private String title;
@@ -129,7 +130,7 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
             // Note: a more thorough implementation would add this
             // (and other non-ListView buttons) into a custom ListView.
             if (remoteClientRecords == null || remoteClientRecords.length == 0) {
-                readingListButton.setBackgroundResource(
+                bookmarkButton.setBackgroundResource(
                         R.drawable.overlay_share_button_background_first);
             }
             return;
@@ -180,11 +181,6 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
         sendTabList.setAdapter(adapter);
         sendTabList.setSendTabTargetSelectedListener(this);
 
-        bookmarkButton = (OverlayDialogButton) findViewById(R.id.overlay_share_bookmark_btn);
-        readingListButton = (OverlayDialogButton) findViewById(R.id.overlay_share_reading_list_btn);
-
-        readingListButtonDrawable = readingListButton.getBackground();
-
         // Bookmark button
         bookmarkButton = (OverlayDialogButton) findViewById(R.id.overlay_share_bookmark_btn);
         bookmarkButton.setOnClickListener(new View.OnClickListener() {
@@ -193,13 +189,12 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
                 addBookmark();
             }
         });
-
-        // Reading List button
-        readingListButton = (OverlayDialogButton) findViewById(R.id.overlay_share_reading_list_btn);
-        readingListButton.setOnClickListener(new View.OnClickListener() {
+        bookmarkButtonDrawable = bookmarkButton.getBackground();
+        openBrowserButton = (OverlayDialogButton) findViewById(R.id.overlay_share_open_browser_btn);
+        openBrowserButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                addToReadingList();
+                launchBrowser();
             }
         });
     }
@@ -216,10 +211,10 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
         // If the Activity is being reused, we need to reset the state. Ideally, we create a
         // new instance for each call, but Android L breaks this (bug 1137928).
         sendTabList.switchState(SendTabList.State.LOADING);
-        readingListButton.setBackgroundDrawable(readingListButtonDrawable);
+        bookmarkButton.setBackgroundDrawable(bookmarkButtonDrawable);
 
         // The URL is usually hiding somewhere in the extra text. Extract it.
-        final String extraText = ContextUtils.getStringExtra(intent, Intent.EXTRA_TEXT);
+        final String extraText = IntentUtils.getStringExtraSafe(intent, Intent.EXTRA_TEXT);
         if (TextUtils.isEmpty(extraText)) {
             abortDueToNoURL();
             return;
@@ -271,26 +266,13 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
 
         if (state == State.DEVICES_ONLY) {
             bookmarkButton.setVisibility(View.GONE);
-            readingListButton.setVisibility(View.GONE);
 
-            titleView.setOnClickListener(null);
-            subtitleView.setOnClickListener(null);
+            openBrowserButton.setVisibility(View.GONE);
             return;
         }
 
         bookmarkButton.setVisibility(View.VISIBLE);
-        readingListButton.setVisibility(View.VISIBLE);
-
-        // Configure buttons.
-        final View.OnClickListener launchBrowser = new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                ShareDialog.this.launchBrowser();
-            }
-        };
-
-        titleView.setOnClickListener(launchBrowser);
-        subtitleView.setOnClickListener(launchBrowser);
+        openBrowserButton.setVisibility(View.VISIBLE);
 
         final LocalBrowserDB browserDB = new LocalBrowserDB(getCurrentProfile());
         setButtonState(url, browserDB);
@@ -312,14 +294,12 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
         new UIAsyncTask.WithoutParams<Void>(ThreadUtils.getBackgroundHandler()) {
             // Flags to hold the result
             boolean isBookmark;
-            boolean isReadingListItem;
 
             @Override
             protected Void doInBackground() {
                 final ContentResolver contentResolver = getApplicationContext().getContentResolver();
 
                 isBookmark = browserDB.isBookmark(contentResolver, pageURL);
-                isReadingListItem = browserDB.getReadingListAccessor().isReadingListItem(contentResolver, pageURL);
 
                 return null;
             }
@@ -327,7 +307,6 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
             @Override
             protected void onPostExecute(Void aVoid) {
                 findViewById(R.id.overlay_share_bookmark_btn).setEnabled(!isBookmark);
-                findViewById(R.id.overlay_share_reading_list_btn).setEnabled(!isReadingListItem);
             }
         }.execute();
     }
@@ -399,13 +378,6 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
         Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.SHARE_OVERLAY, "sendtab");
     }
 
-    public void addToReadingList() {
-        startService(getServiceIntent(ShareMethod.Type.ADD_TO_READING_LIST));
-        animateOut(true);
-
-        Telemetry.sendUIEvent(TelemetryContract.Event.SAVE, TelemetryContract.Method.SHARE_OVERLAY, "reading_list");
-    }
-
     public void addBookmark() {
         startService(getServiceIntent(ShareMethod.Type.ADD_BOOKMARK));
         animateOut(true);
@@ -417,7 +389,9 @@ public class ShareDialog extends Locales.LocaleAwareActivity implements SendTabT
         try {
             // This can launch in the guest profile. Sorry.
             final Intent i = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+            i.putExtra(BrowserContract.SKIP_TAB_QUEUE_FLAG, true);
             i.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+
             startActivity(i);
         } catch (URISyntaxException e) {
             // Nothing much we can do.

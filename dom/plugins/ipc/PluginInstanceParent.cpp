@@ -7,14 +7,14 @@
 #include "mozilla/DebugOnly.h"
 #include <stdint.h> // for intptr_t
 
+#include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/dom/Element.h"
 #include "PluginInstanceParent.h"
 #include "BrowserStreamParent.h"
-#include "PluginAsyncSurrogate.h"
 #include "PluginBackgroundDestroyer.h"
 #include "PluginModuleParent.h"
-#include "PluginStreamParent.h"
 #include "StreamNotifyParent.h"
 #include "npfunctions.h"
 #include "nsAutoPtr.h"
@@ -26,11 +26,9 @@
 #include "nsNPAPIPluginInstance.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsFocusManager.h"
-#include "nsIDOMElement.h"
 #ifdef MOZ_X11
 #include "gfxXlibSurface.h"
 #endif
-#include "gfxContext.h"
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "Layers.h"
@@ -44,6 +42,7 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #if defined(XP_WIN)
 # include "mozilla/layers/D3D11ShareHandleImage.h"
+# include "mozilla/gfx/DeviceManagerDx.h"
 # include "mozilla/layers/TextureD3D11.h"
 #endif
 
@@ -60,7 +59,6 @@
 #include "nsIWidget.h"
 #include "nsPluginNativeWindow.h"
 #include "PluginQuirks.h"
-#include "nsWindowsHelpers.h"
 extern const wchar_t* kFlashFullscreenClass;
 #elif defined(MOZ_WIDGET_GTK)
 #include "mozilla/dom/ContentChild.h"
@@ -73,25 +71,18 @@ using namespace mozilla::plugins;
 using namespace mozilla::layers;
 using namespace mozilla::gl;
 
-#if defined(XP_WIN)
-// Delays associated with attempting an e10s window capture for scrolling.
-const int kScrollCaptureDelayMs = 100;
-const int kInitScrollCaptureDelayMs = 1000;
-const uint32_t kScrollCaptureFillColor = 0xFFa0a0a0; // gray
-#endif
-
 void
 StreamNotifyParent::ActorDestroy(ActorDestroyReason aWhy)
 {
   // Implement me! Bug 1005162
 }
 
-bool
+mozilla::ipc::IPCResult
 StreamNotifyParent::RecvRedirectNotifyResponse(const bool& allow)
 {
   PluginInstanceParent* instance = static_cast<PluginInstanceParent*>(Manager());
   instance->mNPNIface->urlredirectresponse(instance->mNPP, this, static_cast<NPBool>(allow));
-  return true;
+  return IPC_OK();
 }
 
 #if defined(XP_WIN)
@@ -117,20 +108,11 @@ PluginInstanceParent::LookupPluginInstanceByID(uintptr_t aId)
 }
 #endif
 
-template<>
-struct RunnableMethodTraits<PluginInstanceParent>
-{
-    static void RetainCallee(PluginInstanceParent* obj) { }
-    static void ReleaseCallee(PluginInstanceParent* obj) { }
-};
-
 PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
                                            NPP npp,
                                            const nsCString& aMimeType,
                                            const NPNetscapeFuncs* npniface)
     : mParent(parent)
-    , mSurrogate(PluginAsyncSurrogate::Cast(npp))
-    , mUseSurrogate(true)
     , mNPP(npp)
     , mNPNIface(npniface)
     , mWindowType(NPWindowTypeWindow)
@@ -148,11 +130,6 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mShWidth(0)
     , mShHeight(0)
     , mShColorSpace(nullptr)
-#endif
-#if defined(XP_WIN)
-    , mCaptureRefreshTask(nullptr)
-    , mValidFirstCapture(false)
-    , mIsScrolling(false)
 #endif
 {
 #if defined(OS_WIN)
@@ -177,9 +154,6 @@ PluginInstanceParent::~PluginInstanceParent()
     }
     if (mShColorSpace)
         ::CGColorSpaceRelease(mShColorSpace);
-#endif
-#if defined(XP_WIN)
-    CancelScheduledScrollCapture();
 #endif
 }
 
@@ -227,12 +201,8 @@ NPError
 PluginInstanceParent::Destroy()
 {
     NPError retval;
-    {   // Scope for timer
-        Telemetry::AutoTimer<Telemetry::BLOCKED_ON_PLUGIN_INSTANCE_DESTROY_MS>
-            timer(Module()->GetHistogramKey());
-        if (!CallNPP_Destroy(&retval)) {
-            retval = NPERR_GENERIC_ERROR;
-        }
+    if (!CallNPP_Destroy(&retval)) {
+        retval = NPERR_GENERIC_ERROR;
     }
 
 #if defined(OS_WIN)
@@ -255,7 +225,7 @@ PluginInstanceParent::AllocPBrowserStreamParent(const nsCString& url,
                                                 PStreamNotifyParent* notifyData,
                                                 const nsCString& headers)
 {
-    NS_RUNTIMEABORT("Not reachable");
+    MOZ_CRASH("Not reachable");
     return nullptr;
 }
 
@@ -266,22 +236,8 @@ PluginInstanceParent::DeallocPBrowserStreamParent(PBrowserStreamParent* stream)
     return true;
 }
 
-PPluginStreamParent*
-PluginInstanceParent::AllocPPluginStreamParent(const nsCString& mimeType,
-                                               const nsCString& target,
-                                               NPError* result)
-{
-    return new PluginStreamParent(this, mimeType, target, result);
-}
 
-bool
-PluginInstanceParent::DeallocPPluginStreamParent(PPluginStreamParent* stream)
-{
-    delete stream;
-    return true;
-}
-
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_NPNVnetscapeWindow(NativeWindowHandle* value,
                                                             NPError* result)
 {
@@ -294,16 +250,13 @@ PluginInstanceParent::AnswerNPN_GetValue_NPNVnetscapeWindow(NativeWindowHandle* 
 #elif defined(ANDROID)
     // TODO: Need Android impl
     int id;
-#elif defined(MOZ_WIDGET_QT)
-    // TODO: Need Qt non X impl
-    int id;
 #else
 #warning Implement me
 #endif
 
     *result = mNPNIface->getvalue(mNPP, NPNVnetscapeWindow, &id);
     *value = id;
-    return true;
+    return IPC_OK();
 }
 
 bool
@@ -334,41 +287,47 @@ PluginInstanceParent::InternalGetValueForNPObject(
     return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_NPNVWindowNPObject(
                                          PPluginScriptableObjectParent** aValue,
                                          NPError* aResult)
 {
-    return InternalGetValueForNPObject(NPNVWindowNPObject, aValue, aResult);
+    if (!InternalGetValueForNPObject(NPNVWindowNPObject, aValue, aResult)) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_NPNVPluginElementNPObject(
                                          PPluginScriptableObjectParent** aValue,
                                          NPError* aResult)
 {
-    return InternalGetValueForNPObject(NPNVPluginElementNPObject, aValue,
-                                       aResult);
+    if (!InternalGetValueForNPObject(NPNVPluginElementNPObject, aValue,
+                                     aResult)) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_NPNVprivateModeBool(bool* value,
                                                              NPError* result)
 {
     NPBool v;
     *result = mNPNIface->getvalue(mNPP, NPNVprivateModeBool, &v);
     *value = v;
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_DrawingModelSupport(const NPNVariable& model, bool* value)
 {
     *value = false;
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_NPNVdocumentOrigin(nsCString* value,
                                                             NPError* result)
 {
@@ -377,7 +336,7 @@ PluginInstanceParent::AnswerNPN_GetValue_NPNVdocumentOrigin(nsCString* value,
     if (*result == NPERR_NO_ERROR && v) {
         value->Adopt(static_cast<char*>(v));
     }
-    return true;
+    return IPC_OK();
 }
 
 static inline bool
@@ -402,54 +361,54 @@ AllowDirectDXGISurfaceDrawing()
 #endif
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_SupportsAsyncBitmapSurface(bool* value)
 {
     *value = AllowDirectBitmapSurfaceDrawing();
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_SupportsAsyncDXGISurface(bool* value)
 {
     *value = AllowDirectDXGISurfaceDrawing();
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValue_PreferredDXGIAdapter(DxgiAdapterDesc* aOutDesc)
 {
     PodZero(aOutDesc);
 #ifdef XP_WIN
     if (!AllowDirectDXGISurfaceDrawing()) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
-    ID3D11Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
+    RefPtr<ID3D11Device> device = DeviceManagerDx::Get()->GetContentDevice();
     if (!device) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     RefPtr<IDXGIDevice> dxgi;
     if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), getter_AddRefs(dxgi))) || !dxgi) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     RefPtr<IDXGIAdapter> adapter;
     if (FAILED(dxgi->GetAdapter(getter_AddRefs(adapter))) || !adapter) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     DXGI_ADAPTER_DESC desc;
     if (FAILED(adapter->GetDesc(&desc))) {
-         return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     *aOutDesc = DxgiAdapterDesc::From(desc);
 #endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginWindow(
     const bool& windowed, NPError* result)
 {
@@ -458,34 +417,28 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginWindow(
     // non-pointer-sized integer.
     *result = mNPNIface->setvalue(mNPP, NPPVpluginWindowBool,
                                   (void*)(intptr_t)windowed);
-
-#if defined(XP_WIN)
-    if (windowed) {
-        ScheduleScrollCapture(kScrollCaptureDelayMs);
-    }
-#endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginTransparent(
     const bool& transparent, NPError* result)
 {
     *result = mNPNIface->setvalue(mNPP, NPPVpluginTransparentBool,
                                   (void*)(intptr_t)transparent);
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginUsesDOMForCursor(
     const bool& useDOMForCursor, NPError* result)
 {
     *result = mNPNIface->setvalue(mNPP, NPPVpluginUsesDOMForCursorBool,
                                   (void*)(intptr_t)useDOMForCursor);
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
     const int& drawingModel, NPError* result)
 {
@@ -521,7 +474,7 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
 
     if (!allowed) {
         *result = NPERR_GENERIC_ERROR;
-        return true;
+        return IPC_OK();
     }
 
     mDrawingModel = drawingModel;
@@ -541,33 +494,33 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
     *result = mNPNIface->setvalue(mNPP, NPPVpluginDrawingModel,
                                   (void*)(intptr_t)requestModel);
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginEventModel(
     const int& eventModel, NPError* result)
 {
 #ifdef XP_MACOSX
     *result = mNPNIface->setvalue(mNPP, NPPVpluginEventModel,
                                   (void*)(intptr_t)eventModel);
-    return true;
+    return IPC_OK();
 #else
     *result = NPERR_GENERIC_ERROR;
-    return true;
+    return IPC_OK();
 #endif
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginIsPlayingAudio(
     const bool& isAudioPlaying, NPError* result)
 {
     *result = mNPNIface->setvalue(mNPP, NPPVpluginIsPlayingAudio,
                                   (void*)(intptr_t)isAudioPlaying);
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetURL(const nsCString& url,
                                        const nsCString& target,
                                        NPError* result)
@@ -575,10 +528,10 @@ PluginInstanceParent::AnswerNPN_GetURL(const nsCString& url,
     *result = mNPNIface->geturl(mNPP,
                                 NullableStringGet(url),
                                 NullableStringGet(target));
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_PostURL(const nsCString& url,
                                         const nsCString& target,
                                         const nsCString& buffer,
@@ -587,7 +540,7 @@ PluginInstanceParent::AnswerNPN_PostURL(const nsCString& url,
 {
     *result = mNPNIface->posturl(mNPP, url.get(), NullableStringGet(target),
                                  buffer.Length(), buffer.get(), file);
-    return true;
+    return IPC_OK();
 }
 
 PStreamNotifyParent*
@@ -601,7 +554,7 @@ PluginInstanceParent::AllocPStreamNotifyParent(const nsCString& url,
     return new StreamNotifyParent();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerPStreamNotifyConstructor(PStreamNotifyParent* actor,
                                                      const nsCString& url,
                                                      const nsCString& target,
@@ -636,12 +589,16 @@ PluginInstanceParent::AnswerPStreamNotifyConstructor(PStreamNotifyParent* actor,
     }
     else {
         static_cast<StreamNotifyParent*>(actor)->ClearDestructionFlag();
-        if (*result != NPERR_NO_ERROR)
-            return PStreamNotifyParent::Send__delete__(actor,
-                                                       NPERR_GENERIC_ERROR);
+        if (*result != NPERR_NO_ERROR) {
+            if (!PStreamNotifyParent::Send__delete__(actor,
+                                                     NPERR_GENERIC_ERROR)) {
+              return IPC_FAIL_NO_REASON(this);
+            }
+            return IPC_OK();
+        }
     }
 
-    return true;
+    return IPC_OK();
 }
 
 bool
@@ -651,39 +608,28 @@ PluginInstanceParent::DeallocPStreamNotifyParent(PStreamNotifyParent* notifyData
     return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvNPN_InvalidateRect(const NPRect& rect)
 {
     mNPNIface->invalidaterect(mNPP, const_cast<NPRect*>(&rect));
-    return true;
+    return IPC_OK();
 }
 
-static inline NPRect
-IntRectToNPRect(const gfx::IntRect& rect)
-{
-    NPRect r;
-    r.left = rect.x;
-    r.top = rect.y;
-    r.right = rect.x + rect.width;
-    r.bottom = rect.y + rect.height;
-    return r;
-}
-
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvRevokeCurrentDirectSurface()
 {
     ImageContainer *container = GetImageContainer();
     if (!container) {
-        return true;
+        return IPC_OK();
     }
 
     container->ClearAllImages();
 
     PLUGIN_LOG_DEBUG(("   (RecvRevokeCurrentDirectSurface)"));
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
                                            const gfx::IntSize& size,
                                            WindowsHandle* outHandle,
@@ -695,26 +641,26 @@ PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
 #if defined(XP_WIN)
     if (format != SurfaceFormat::B8G8R8A8 && format != SurfaceFormat::B8G8R8X8) {
         *outError = NPERR_INVALID_PARAM;
-        return true;
+        return IPC_OK();
     }
     if (size.width <= 0 || size.height <= 0) {
         *outError = NPERR_INVALID_PARAM;
-        return true;
+        return IPC_OK();
     }
 
     ImageContainer *container = GetImageContainer();
     if (!container) {
-        return true;
+        return IPC_OK();
     }
 
-    ImageBridgeChild* forwarder = ImageBridgeChild::GetSingleton();
+    RefPtr<ImageBridgeChild> forwarder = ImageBridgeChild::GetSingleton();
     if (!forwarder) {
-        return true;
+        return IPC_OK();
     }
 
-    RefPtr<ID3D11Device> d3d11 = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
+    RefPtr<ID3D11Device> d3d11 = DeviceManagerDx::Get()->GetContentDevice();
     if (!d3d11) {
-        return true;
+        return IPC_OK();
     }
 
     // Create the texture we'll give to the plugin process.
@@ -725,15 +671,15 @@ PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
         desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         if (FAILED(d3d11->CreateTexture2D(&desc, nullptr, getter_AddRefs(back))) || !back) {
-            return true;
+            return IPC_OK();
         }
 
         RefPtr<IDXGIResource> resource;
         if (FAILED(back->QueryInterface(IID_IDXGIResource, getter_AddRefs(resource))) || !resource) {
-            return true;
+            return IPC_OK();
         }
         if (FAILED(resource->GetSharedHandle(&sharedHandle) || !sharedHandle)) {
-            return true;
+            return IPC_OK();
         }
     }
 
@@ -743,19 +689,19 @@ PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
     *outHandle = reinterpret_cast<uintptr_t>(sharedHandle);
     *outError = NPERR_NO_ERROR;
 #endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvFinalizeDXGISurface(const WindowsHandle& handle)
 {
 #if defined(XP_WIN)
     mD3D11Surfaces.Remove(reinterpret_cast<void*>(handle));
 #endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvShowDirectBitmap(Shmem&& buffer,
                                            const SurfaceFormat& format,
                                            const uint32_t& stride,
@@ -765,51 +711,51 @@ PluginInstanceParent::RecvShowDirectBitmap(Shmem&& buffer,
     // Validate format.
     if (format != SurfaceFormat::B8G8R8A8 && format != SurfaceFormat::B8G8R8X8) {
         MOZ_ASSERT_UNREACHABLE("bad format type");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     if (size.width <= 0 || size.height <= 0) {
         MOZ_ASSERT_UNREACHABLE("bad image size");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     if (mDrawingModel != NPDrawingModelAsyncBitmapSurface) {
         MOZ_ASSERT_UNREACHABLE("plugin did not set a bitmap drawing model");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     // Validate buffer and size.
     CheckedInt<uint32_t> nbytes = CheckedInt<uint32_t>(uint32_t(size.height)) * stride;
     if (!nbytes.isValid() || nbytes.value() != buffer.Size<uint8_t>()) {
         MOZ_ASSERT_UNREACHABLE("bad shmem size");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     ImageContainer* container = GetImageContainer();
     if (!container) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     RefPtr<gfx::DataSourceSurface> source =
         gfx::Factory::CreateWrappingDataSourceSurface(buffer.get<uint8_t>(), stride, size, format);
     if (!source) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     // Allocate a texture for the compositor.
-    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocator();
+    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocatorForDirectBitmap();
     RefPtr<TextureClient> texture = allocator->CreateOrRecycle(
         format, size, BackendSelector::Content,
         TextureFlags::NO_FLAGS,
-        ALLOC_FOR_OUT_OF_BAND_CONTENT);
+        TextureAllocationFlags(ALLOC_FOR_OUT_OF_BAND_CONTENT | ALLOC_UPDATE_FROM_SURFACE));
     if (!texture) {
         NS_WARNING("Could not allocate a TextureClient for plugin!");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     // Upload the plugin buffer.
     {
         TextureClientAutoLock autoLock(texture, OpenMode::OPEN_WRITE_ONLY);
         if (!autoLock.Succeeded()) {
-            return false;
+            return IPC_FAIL_NO_REASON(this);
         }
         texture->UpdateFromSurface(source);
     }
@@ -821,7 +767,7 @@ PluginInstanceParent::RecvShowDirectBitmap(Shmem&& buffer,
 
     PLUGIN_LOG_DEBUG(("   (RecvShowDirectBitmap received shmem=%p stride=%d size=%s dirty=%s)",
         buffer.get<unsigned char>(), stride, Stringify(size).c_str(), Stringify(dirty).c_str()));
-    return true;
+    return IPC_OK();
 }
 
 void
@@ -835,28 +781,33 @@ PluginInstanceParent::SetCurrentImage(Image* aImage)
     imageList.AppendElement(holder);
     mImageContainer->SetCurrentImages(imageList);
 
+    // Invalidate our area in the page so the image gets flushed.
+    gfx::IntRect rect = aImage->GetPictureRect();
+    NPRect nprect = {uint16_t(rect.x), uint16_t(rect.y), uint16_t(rect.width), uint16_t(rect.height)};
+    RecvNPN_InvalidateRect(nprect);
+
     RecordDrawingModel();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvShowDirectDXGISurface(const WindowsHandle& handle,
                                                  const gfx::IntRect& dirty)
 {
 #if defined(XP_WIN)
     RefPtr<D3D11SurfaceHolder> surface;
     if (!mD3D11Surfaces.Get(reinterpret_cast<void*>(handle), getter_AddRefs(surface))) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
     if (!surface->IsValid()) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     ImageContainer* container = GetImageContainer();
     if (!container) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
-    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocator();
+    RefPtr<TextureClientRecycleAllocator> allocator = mParent->EnsureTextureAllocatorForDXGISurface();
     RefPtr<TextureClient> texture = allocator->CreateOrRecycle(
         surface->GetFormat(), surface->GetSize(),
         BackendSelector::Content,
@@ -864,7 +815,7 @@ PluginInstanceParent::RecvShowDirectDXGISurface(const WindowsHandle& handle,
         ALLOC_FOR_OUT_OF_BAND_CONTENT);
     if (!texture) {
         NS_WARNING("Could not allocate a TextureClient for plugin!");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     surface->CopyToTextureClient(texture);
@@ -878,13 +829,13 @@ PluginInstanceParent::RecvShowDirectDXGISurface(const WindowsHandle& handle,
 
     PLUGIN_LOG_DEBUG(("   (RecvShowDirect3D10Surface received handle=%p rect=%s)",
         reinterpret_cast<void*>(handle), Stringify(dirty).c_str()));
-    return true;
+    return IPC_OK();
 #else
-    return false;
+    return IPC_FAIL_NO_REASON(this);
 #endif
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                                const SurfaceDescriptor& newSurface,
                                SurfaceDescriptor* prevSurface)
@@ -902,7 +853,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
     if (newSurface.type() == SurfaceDescriptor::TShmem) {
         if (!newSurface.get_Shmem().IsReadable()) {
             NS_WARNING("back surface not readable");
-            return false;
+            return IPC_FAIL_NO_REASON(this);
         }
         surface = gfxSharedImageSurface::Open(newSurface.get_Shmem());
     }
@@ -916,7 +867,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
 
         if (!newIOSurface) {
             NS_WARNING("Got bad IOSurfaceDescriptor in RecvShow");
-            return false;
+            return IPC_FAIL_NO_REASON(this);
         }
 
         if (mFrontIOSurface)
@@ -932,7 +883,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
         PLUGIN_LOG_DEBUG(("   (RecvShow invalidated for surface %p)",
                           mFrontSurface.get()));
 
-        return true;
+        return IPC_OK();
     }
 #endif
 #ifdef MOZ_X11
@@ -979,8 +930,9 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                    updatedRect.bottom - updatedRect.top);
         surface->MarkDirty(ur);
 
+        bool isPlugin = true;
         RefPtr<gfx::SourceSurface> sourceSurface =
-            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface);
+            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface, isPlugin);
         RefPtr<SourceSurfaceImage> image = new SourceSurfaceImage(surface->GetSize(), sourceSurface);
 
         AutoTArray<ImageContainer::NonOwningImage,1> imageList;
@@ -1001,7 +953,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                       mFrontSurface.get()));
 
     RecordDrawingModel();
-    return true;
+    return IPC_OK();
 }
 
 nsresult
@@ -1016,7 +968,7 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
     window.height = aWindow->height;
     window.clipRect = aWindow->clipRect;
     window.type = aWindow->type;
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double scaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
     window.contentsScaleFactor = scaleFactor;
@@ -1130,7 +1082,8 @@ PluginInstanceParent::IsRemoteDrawingCoreAnimation(bool *aDrawing)
                  NPDrawingModelInvalidatingCoreAnimation == (NPDrawingModel)mDrawingModel);
     return NS_OK;
 }
-
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
 nsresult
 PluginInstanceParent::ContentsScaleFactorChanged(double aContentsScaleFactor)
 {
@@ -1212,212 +1165,30 @@ PluginInstanceParent::EndUpdateBackground(const nsIntRect& aRect)
 }
 
 #if defined(XP_WIN)
-//#define CAPTURE_LOG(...) printf_stderr("CAPTURE [%X]: ", this);printf_stderr(__VA_ARGS__);printf_stderr("\n");
-#define CAPTURE_LOG(...)
-
-void
-PluginInstanceParent::ScheduleScrollCapture(int aTimeout)
+nsresult
+PluginInstanceParent::SetScrollCaptureId(uint64_t aScrollCaptureId)
 {
-    if (mCaptureRefreshTask) {
-        return;
-    }
-    CAPTURE_LOG("delayed scroll capture requested.");
-    mCaptureRefreshTask =
-        NewRunnableMethod(this, &PluginInstanceParent::ScheduledUpdateScrollCaptureCallback);
-    MessageLoop::current()->PostDelayedTask(FROM_HERE, mCaptureRefreshTask,
-                                            kScrollCaptureDelayMs);
-}
+  if (aScrollCaptureId == ImageContainer::sInvalidAsyncContainerId) {
+    return NS_ERROR_FAILURE;
+  }
 
-void
-PluginInstanceParent::ScheduledUpdateScrollCaptureCallback()
-{
-    CAPTURE_LOG("taking delayed scrollcapture.");
-    mCaptureRefreshTask = nullptr;
-    bool retrigger = false;
-    UpdateScrollCapture(retrigger);
-    if (retrigger) {
-        // reset the async request
-        ScheduleScrollCapture(kScrollCaptureDelayMs);
-    }
-}
-
-void
-PluginInstanceParent::CancelScheduledScrollCapture()
-{
-    CAPTURE_LOG("delayed scroll capture cancelled.");
-    if (mCaptureRefreshTask) {
-        mCaptureRefreshTask->Cancel();
-        mCaptureRefreshTask = nullptr;
-    }
-}
-
-bool
-PluginInstanceParent::UpdateScrollCapture(bool& aRequestNewCapture)
-{
-    aRequestNewCapture = false;
-    if (!::IsWindow(mChildPluginHWND)) {
-        CAPTURE_LOG("invalid window");
-        aRequestNewCapture = true;
-        return false;
-    }
-
-    nsAutoHDC windowDC(::GetDC(mChildPluginHWND));
-    if (!windowDC) {
-        CAPTURE_LOG("no windowdc");
-        aRequestNewCapture = true;
-        return false;
-    }
-
-    RECT bounds = {0};
-    ::GetWindowRect(mChildPluginHWND, &bounds);
-    if ((bounds.left == bounds.right && bounds.top == bounds.bottom) ||
-        mWindowSize.IsEmpty()) {
-        CAPTURE_LOG("empty bounds");
-        // Lots of null window plugins in content, don't capture.
-        return false;
-    }
-
-    // If we need to init mScrollCapture do so, also reset it if the size of the
-    // plugin window changes.
-    if (!mScrollCapture || mScrollCapture->GetSize() != mWindowSize) {
-        mValidFirstCapture = false;
-        mScrollCapture =
-            gfxPlatform::GetPlatform()->CreateOffscreenSurface(mWindowSize,
-                                                               SurfaceFormat::X8R8G8B8_UINT32);
-    }
-
-    // Check clipping, we don't want to capture windows that are clipped by
-    // the viewport.
-    RECT clip = {0};
-    int rgnType = ::GetWindowRgnBox(mPluginHWND, &clip);
-    bool clipCorrect = !clip.left && !clip.top &&
-                       clip.right == mWindowSize.width &&
-                       clip.bottom == mWindowSize.height;
-
-    bool isVisible = ::IsWindowVisible(mChildPluginHWND);
-
-    CAPTURE_LOG("validcap=%d visible=%d region=%d clip=%d:%dx%dx%dx%d",
-                mValidFirstCapture, isVisible, rgnType, clipCorrect,
-                clip.left, clip.top, clip.right, clip.bottom);
-
-    // We have a good capture and can't update so keep using the existing
-    // capture image. Otherwise fall through so we paint the fill color to
-    // the layer.
-    if (mValidFirstCapture && (!isVisible || !clipCorrect)) {
-        return true;
-    }
-
-    // On Windows we'll need a native bitmap for BitBlt.
-    RefPtr<gfxWindowsSurface> nativeScrollCapture;
-
-    // Copy the plugin window if it's visible and there's no clipping, otherwise
-    // use a default fill color.
-    if (isVisible && clipCorrect) {
-        CAPTURE_LOG("capturing window");
-        nativeScrollCapture =
-            new gfxWindowsSurface(mWindowSize, SurfaceFormat::X8R8G8B8_UINT32);
-        if (!::BitBlt(nativeScrollCapture->GetDC(), 0, 0, mWindowSize.width,
-                      mWindowSize.height, windowDC, 0, 0, SRCCOPY)) {
-            CAPTURE_LOG("blt failure??");
-            return false;
-        }
-        ::GdiFlush();
-        mValidFirstCapture = true;
-    }
-
-    IntSize targetSize = mScrollCapture->GetSize();
-
-    if (targetSize.IsEmpty()) {
-        return false;
-    }
-
-    RefPtr<gfx::DrawTarget> dt =
-        gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(mScrollCapture,
-                                                               targetSize);
-
-    if (nativeScrollCapture) {
-        // Copy the native capture image over to a remotable gfx surface.
-        RefPtr<gfx::SourceSurface> sourceSurface =
-            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr,
-                                                                   nativeScrollCapture);
-        dt->CopySurface(sourceSurface,
-                        IntRect(0, 0, targetSize.width, targetSize.height),
-                        IntPoint());
-    } else {
-        CAPTURE_LOG("using fill color");
-        dt->FillRect(gfx::Rect(0, 0, targetSize.width, targetSize.height),
-                     gfx::ColorPattern(gfx::Color::FromABGR(kScrollCaptureFillColor)),
-                     gfx::DrawOptions(1.f, CompositionOp::OP_SOURCE));
-        aRequestNewCapture = true;
-    }
-    dt->Flush();
-
-    // Get a source for mScrollCapture and load it into the image container.
-    RefPtr<gfx::SourceSurface> cachedSource =
-        gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(dt,
-                                                               mScrollCapture);
-    RefPtr<SourceSurfaceImage> image =
-        new SourceSurfaceImage(cachedSource->GetSize(), cachedSource);
-
-    ImageContainer::NonOwningImage holder(image);
-    holder.mFrameID = ++mFrameID;
-
-    AutoTArray<ImageContainer::NonOwningImage,1> imageList;
-    imageList.AppendElement(holder);
-
-    // inits mImageContainer
-    ImageContainer *container = GetImageContainer();
-    container->SetCurrentImages(imageList);
-
-    // Invalidate our area in the page so the image gets flushed.
-    NPRect nprect = {0, 0, targetSize.width, targetSize.height};
-    RecvNPN_InvalidateRect(nprect);
-
-    return true;
+  mImageContainer = new ImageContainer(CompositableHandle(aScrollCaptureId));
+  return NS_OK;
 }
 
 nsresult
 PluginInstanceParent::GetScrollCaptureContainer(ImageContainer** aContainer)
 {
-    if (!aContainer || !::IsWindow(mPluginHWND)) {
-        return NS_ERROR_FAILURE;
-    }
-
-    if (!mImageContainer) {
-        ScheduleScrollCapture(kInitScrollCaptureDelayMs);
-        return NS_ERROR_FAILURE;
-    }
-
-    ImageContainer *container = GetImageContainer();
-    NS_IF_ADDREF(container);
-    *aContainer = container;
-
-    return NS_OK;
-}
-
-nsresult
-PluginInstanceParent::UpdateScrollState(bool aIsScrolling)
-{
-  bool scrollStateChanged = (mIsScrolling != aIsScrolling);
-  mIsScrolling = aIsScrolling;
-  if (scrollStateChanged && !aIsScrolling) {
-      // At the end of a dom scroll operation capturing now will attempt to
-      // capture a window that is still hidden due to the current scroll
-      // operation. (The browser process will update visibility after layer
-      // updates get pushed over.) So we delay our attempt for a bit. This
-      // shouldn't hurt our chances of capturing with APZ scroll since the
-      // delay is short.
-      ScheduleScrollCapture(kScrollCaptureDelayMs);
+  if (!aContainer || !mImageContainer) {
+    return NS_ERROR_FAILURE;
   }
+
+  RefPtr<ImageContainer> container = GetImageContainer();
+  container.forget(aContainer);
+
   return NS_OK;
 }
 #endif // XP_WIN
-
-PluginAsyncSurrogate*
-PluginInstanceParent::GetAsyncSurrogate()
-{
-    return mSurrogate;
-}
 
 bool
 PluginInstanceParent::CreateBackground(const nsIntSize& aSize)
@@ -1507,7 +1278,7 @@ PluginInstanceParent::GetImageContainer()
 PPluginBackgroundDestroyerParent*
 PluginInstanceParent::AllocPPluginBackgroundDestroyerParent()
 {
-    NS_RUNTIMEABORT("'Power-user' ctor is used exclusively");
+    MOZ_CRASH("'Power-user' ctor is used exclusively");
     return nullptr;
 }
 
@@ -1536,12 +1307,6 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     } else {
         SubclassPluginWindow(reinterpret_cast<HWND>(aWindow->window));
 
-        // Skip SetWindow call for hidden QuickTime plugins.
-        if ((mParent->GetQuirks() & QUIRK_QUICKTIME_AVOID_SETWINDOW) &&
-            aWindow->width == 0 && aWindow->height == 0) {
-            return NPERR_NO_ERROR;
-        }
-
         window.window = reinterpret_cast<uint64_t>(aWindow->window);
         window.x = aWindow->x;
         window.y = aWindow->y;
@@ -1565,15 +1330,13 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     window.type = aWindow->type;
 #endif
 
-    mWindowSize.width = window.width;
-    mWindowSize.height = window.height;
-
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double floatScaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &floatScaleFactor);
-    int scaleFactor = ceil(floatScaleFactor);
     window.contentsScaleFactor = floatScaleFactor;
-
+#endif
+#if defined(XP_MACOSX)
+    int scaleFactor = ceil(floatScaleFactor);
     if (mShWidth != window.width * scaleFactor || mShHeight != window.height * scaleFactor) {
         if (mDrawingModel == NPDrawingModelCoreAnimation ||
             mDrawingModel == NPDrawingModelInvalidatingCoreAnimation) {
@@ -1612,12 +1375,6 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     }
 
     RecordDrawingModel();
-
-#if defined(XP_WIN)
-    if (!mCaptureRefreshTask) {
-        ScheduleScrollCapture(kScrollCaptureDelayMs);
-    }
-#endif
     return NPERR_NO_ERROR;
 }
 
@@ -1642,24 +1399,6 @@ PluginInstanceParent::NPP_GetValue(NPPVariable aVariable,
         (*(NPBool*)_retval) = wantsAllStreams;
         return NPERR_NO_ERROR;
     }
-
-#ifdef MOZ_X11
-    case NPPVpluginNeedsXEmbed: {
-        bool needsXEmbed;
-        NPError rv;
-
-        if (!CallNPP_GetValue_NPPVpluginNeedsXEmbed(&needsXEmbed, &rv)) {
-            return NPERR_GENERIC_ERROR;
-        }
-
-        if (NPERR_NO_ERROR != rv) {
-            return rv;
-        }
-
-        (*(NPBool*)_retval) = needsXEmbed;
-        return NPERR_NO_ERROR;
-    }
-#endif
 
     case NPPVpluginScriptableNPObject: {
         PPluginScriptableObjectParent* actor;
@@ -1774,7 +1513,7 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
 #endif
     NPRemoteEvent npremoteevent;
     npremoteevent.event = *npevent;
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
     double scaleFactor = 1.0;
     mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
     npremoteevent.contentsScaleFactor = scaleFactor;
@@ -1993,26 +1732,13 @@ PluginInstanceParent::NPP_NewStream(NPMIMEType type, NPStream* stream,
         return NPERR_GENERIC_ERROR;
     }
 
-    Telemetry::AutoTimer<Telemetry::BLOCKED_ON_PLUGIN_STREAM_INIT_MS>
-        timer(Module()->GetHistogramKey());
-
     NPError err = NPERR_NO_ERROR;
-    if (mParent->IsStartingAsync()) {
-        MOZ_ASSERT(mSurrogate);
-        mSurrogate->AsyncCallDeparting();
-        if (SendAsyncNPP_NewStream(bs, NullableString(type), seekable)) {
-            *stype = nsPluginStreamListenerPeer::STREAM_TYPE_UNKNOWN;
-        } else {
-            err = NPERR_GENERIC_ERROR;
-        }
-    } else {
-        bs->SetAlive();
-        if (!CallNPP_NewStream(bs, NullableString(type), seekable, &err, stype)) {
-            err = NPERR_GENERIC_ERROR;
-        }
-        if (NPERR_NO_ERROR != err) {
-            Unused << PBrowserStreamParent::Send__delete__(bs);
-        }
+    bs->SetAlive();
+    if (!CallNPP_NewStream(bs, NullableString(type), seekable, &err, stype)) {
+        err = NPERR_GENERIC_ERROR;
+    }
+    if (NPERR_NO_ERROR != err) {
+        Unused << PBrowserStreamParent::Send__delete__(bs);
     }
 
     return err;
@@ -2031,24 +1757,13 @@ PluginInstanceParent::NPP_DestroyStream(NPStream* stream, NPReason reason)
         // returns an error code.
         return NPERR_NO_ERROR;
     }
-    if (s->IsBrowserStream()) {
-        BrowserStreamParent* sp =
-            static_cast<BrowserStreamParent*>(s);
-        if (sp->mNPP != this)
-            NS_RUNTIMEABORT("Mismatched plugin data");
-
-        sp->NPP_DestroyStream(reason);
-        return NPERR_NO_ERROR;
-    }
-    else {
-        PluginStreamParent* sp =
-            static_cast<PluginStreamParent*>(s);
-        if (sp->mInstance != this)
-            NS_RUNTIMEABORT("Mismatched plugin data");
-
-        return PPluginStreamParent::Call__delete__(sp, reason, false) ?
-            NPERR_NO_ERROR : NPERR_GENERIC_ERROR;
-    }
+    MOZ_ASSERT(s->IsBrowserStream());
+    BrowserStreamParent* sp =
+        static_cast<BrowserStreamParent*>(s);
+    if (sp->mNPP != this)
+        MOZ_CRASH("Mismatched plugin data");
+    sp->NPP_DestroyStream(reason);
+    return NPERR_NO_ERROR;
 }
 
 void
@@ -2090,7 +1805,7 @@ PluginInstanceParent::DeallocPPluginScriptableObjectParent(
     return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvPPluginScriptableObjectConstructor(
                                           PPluginScriptableObjectParent* aActor)
 {
@@ -2104,7 +1819,7 @@ PluginInstanceParent::RecvPPluginScriptableObjectConstructor(
     actor->InitializeProxy();
     NS_ASSERTION(actor->GetObject(false), "Actor should have an object!");
 
-    return true;
+    return IPC_OK();
 }
 
 void
@@ -2189,21 +1904,21 @@ PluginInstanceParent::DeallocPPluginSurfaceParent(PPluginSurfaceParent* s)
 #endif
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_PushPopupsEnabledState(const bool& aState)
 {
     mNPNIface->pushpopupsenabledstate(mNPP, aState ? 1 : 0);
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_PopPopupsEnabledState()
 {
     mNPNIface->poppopupsenabledstate(mNPP);
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_GetValueForURL(const NPNURLVariable& variable,
                                                const nsCString& url,
                                                nsCString* value,
@@ -2217,10 +1932,10 @@ PluginInstanceParent::AnswerNPN_GetValueForURL(const NPNURLVariable& variable,
     if (NPERR_NO_ERROR == *result)
         value->Adopt(v, len);
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_SetValueForURL(const NPNURLVariable& variable,
                                                const nsCString& url,
                                                const nsCString& value,
@@ -2229,36 +1944,10 @@ PluginInstanceParent::AnswerNPN_SetValueForURL(const NPNURLVariable& variable,
     *result = mNPNIface->setvalueforurl(mNPP, (NPNURLVariable) variable,
                                         url.get(), value.get(),
                                         value.Length());
-    return true;
+    return IPC_OK();
 }
 
-bool
-PluginInstanceParent::AnswerNPN_GetAuthenticationInfo(const nsCString& protocol,
-                                                      const nsCString& host,
-                                                      const int32_t& port,
-                                                      const nsCString& scheme,
-                                                      const nsCString& realm,
-                                                      nsCString* username,
-                                                      nsCString* password,
-                                                      NPError* result)
-{
-    char* u;
-    uint32_t ulen;
-    char* p;
-    uint32_t plen;
-
-    *result = mNPNIface->getauthenticationinfo(mNPP, protocol.get(),
-                                               host.get(), port,
-                                               scheme.get(), realm.get(),
-                                               &u, &ulen, &p, &plen);
-    if (NPERR_NO_ERROR == *result) {
-        username->Adopt(u, ulen);
-        password->Adopt(p, plen);
-    }
-    return true;
-}
-
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerNPN_ConvertPoint(const double& sourceX,
                                              const bool&   ignoreDestX,
                                              const double& sourceY,
@@ -2274,30 +1963,19 @@ PluginInstanceParent::AnswerNPN_ConvertPoint(const double& sourceX,
                                       ignoreDestY ? nullptr : destY,
                                       destSpace);
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvRedrawPlugin()
 {
     nsNPAPIPluginInstance *inst = static_cast<nsNPAPIPluginInstance*>(mNPP->ndata);
     if (!inst) {
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
     inst->RedrawPlugin();
-    return true;
-}
-
-bool
-PluginInstanceParent::RecvNegotiatedCarbon()
-{
-    nsNPAPIPluginInstance *inst = static_cast<nsNPAPIPluginInstance*>(mNPP->ndata);
-    if (!inst) {
-        return false;
-    }
-    inst->CarbonNPAPIFailure();
-    return true;
+    return IPC_OK();
 }
 
 nsPluginInstanceOwner*
@@ -2310,43 +1988,7 @@ PluginInstanceParent::GetOwner()
     return inst->GetOwner();
 }
 
-bool
-PluginInstanceParent::RecvAsyncNPP_NewResult(const NPError& aResult)
-{
-    // NB: mUseSurrogate must be cleared before doing anything else, especially
-    //     calling NPP_SetWindow!
-    mUseSurrogate = false;
-
-    mSurrogate->AsyncCallArriving();
-    if (aResult == NPERR_NO_ERROR) {
-        mSurrogate->SetAcceptingCalls(true);
-    }
-
-    // It is possible for a plugin instance to outlive its owner (eg. When a
-    // PluginDestructionGuard was on the stack at the time the owner was being
-    // destroyed). We need to handle that case.
-    nsPluginInstanceOwner* owner = GetOwner();
-    if (!owner) {
-        // We can't do anything at this point, just return. Any pending browser
-        // streams will be cleaned up when the plugin instance is destroyed.
-        return true;
-    }
-
-    if (aResult != NPERR_NO_ERROR) {
-        mSurrogate->NotifyAsyncInitFailed();
-        return true;
-    }
-
-    // Now we need to do a bunch of exciting post-NPP_New housekeeping.
-    owner->NotifyHostCreateWidget();
-
-    MOZ_ASSERT(mSurrogate);
-    mSurrogate->OnInstanceCreated(this);
-
-    return true;
-}
-
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvSetNetscapeWindowAsParent(const NativeWindowHandle& childWindow)
 {
 #if defined(XP_WIN)
@@ -2355,10 +1997,10 @@ PluginInstanceParent::RecvSetNetscapeWindowAsParent(const NativeWindowHandle& ch
         NS_WARNING("Failed to set Netscape window as parent.");
     }
 
-    return true;
+    return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceParent::RecvSetNetscapeWindowAsParent not implemented!");
-    return false;
+    MOZ_ASSERT_UNREACHABLE("RecvSetNetscapeWindowAsParent not implemented!");
+    return IPC_FAIL_NO_REASON(this);
 #endif
 }
 
@@ -2391,7 +2033,7 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
     PluginInstanceParent* self = reinterpret_cast<PluginInstanceParent*>(
         ::GetPropW(hWnd, kPluginInstanceParentProperty));
     if (!self) {
-        NS_NOTREACHED("PluginInstanceParent::PluginWindowHookProc null this ptr!");
+        MOZ_ASSERT_UNREACHABLE("PluginInstanceParent::PluginWindowHookProc null this ptr!");
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
 
@@ -2409,7 +2051,7 @@ PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
     }
 
     if (self->mPluginWndProc == PluginWindowHookProc) {
-      NS_NOTREACHED(
+      MOZ_ASSERT_UNREACHABLE(
         "PluginWindowHookProc invoking mPluginWndProc w/"
         "mPluginWndProc == PluginWindowHookProc????");
         return DefWindowProc(hWnd, message, wParam, lParam);
@@ -2460,7 +2102,7 @@ PluginInstanceParent::UnsubclassPluginWindow()
             // Remove 'this' from the plugin list safely
             nsAutoPtr<PluginInstanceParent> tmp;
             MOZ_ASSERT(sPluginInstanceList);
-            sPluginInstanceList->RemoveAndForget((void*)mPluginHWND, tmp);
+            sPluginInstanceList->Remove((void*)mPluginHWND, &tmp);
             tmp.forget();
             if (!sPluginInstanceList->Count()) {
                 delete sPluginInstanceList;
@@ -2565,7 +2207,7 @@ PluginInstanceParent::MaybeCreateChildPopupSurrogate()
 
 #endif // defined(OS_WIN)
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::AnswerPluginFocusChange(const bool& gotFocus)
 {
     PLUGIN_LOG_DEBUG(("%s", FULLFUNCTION));
@@ -2579,46 +2221,39 @@ PluginInstanceParent::AnswerPluginFocusChange(const bool& gotFocus)
       nsPluginInstanceOwner* owner = GetOwner();
       if (owner) {
         nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-        nsCOMPtr<nsIDOMElement> element;
+        RefPtr<dom::Element> element;
         owner->GetDOMElement(getter_AddRefs(element));
         if (fm && element) {
           fm->SetFocus(element, 0);
         }
       }
     }
-    return true;
+    return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceParent::AnswerPluginFocusChange not implemented!");
-    return false;
+    MOZ_ASSERT_UNREACHABLE("AnswerPluginFocusChange not implemented!");
+    return IPC_FAIL_NO_REASON(this);
 #endif
 }
 
 PluginInstanceParent*
-PluginInstanceParent::Cast(NPP aInstance, PluginAsyncSurrogate** aSurrogate)
+PluginInstanceParent::Cast(NPP aInstance)
 {
-    PluginDataResolver* resolver =
-        static_cast<PluginDataResolver*>(aInstance->pdata);
+    auto ip = static_cast<PluginInstanceParent*>(aInstance->pdata);
 
     // If the plugin crashed and the PluginInstanceParent was deleted,
     // aInstance->pdata will be nullptr.
-    if (!resolver) {
+    if (!ip) {
         return nullptr;
     }
 
-    PluginInstanceParent* instancePtr = resolver->GetInstance();
-
-    if (instancePtr && aInstance != instancePtr->mNPP) {
-        NS_RUNTIMEABORT("Corrupted plugin data.");
+    if (aInstance != ip->mNPP) {
+        MOZ_CRASH("Corrupted plugin data.");
     }
 
-    if (aSurrogate) {
-        *aSurrogate = resolver->GetAsyncSurrogate();
-    }
-
-    return instancePtr;
+    return ip;
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvGetCompositionString(const uint32_t& aIndex,
                                                nsTArray<uint8_t>* aDist,
                                                int32_t* aLength)
@@ -2627,17 +2262,17 @@ PluginInstanceParent::RecvGetCompositionString(const uint32_t& aIndex,
     nsPluginInstanceOwner* owner = GetOwner();
     if (!owner) {
         *aLength = IMM_ERROR_GENERAL;
-        return true;
+        return IPC_OK();
     }
 
     if (!owner->GetCompositionString(aIndex, aDist, aLength)) {
         *aLength = IMM_ERROR_NODATA;
     }
 #endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvSetCandidateWindow(
     const mozilla::widget::CandidateWindowPosition& aPosition)
 {
@@ -2647,10 +2282,10 @@ PluginInstanceParent::RecvSetCandidateWindow(
         owner->SetCandidateWindow(aPosition);
     }
 #endif
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 PluginInstanceParent::RecvRequestCommitOrCancel(const bool& aCommitted)
 {
 #if defined(OS_WIN)
@@ -2659,7 +2294,48 @@ PluginInstanceParent::RecvRequestCommitOrCancel(const bool& aCommitted)
         owner->RequestCommitOrCancel(aCommitted);
     }
 #endif
-    return true;
+    return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+PluginInstanceParent::RecvEnableIME(const bool& aEnable)
+{
+#if defined(OS_WIN)
+    nsPluginInstanceOwner* owner = GetOwner();
+    if (owner) {
+        owner->EnableIME(aEnable);
+    }
+#else
+    MOZ_CRASH("Not reachable");
+#endif
+    return IPC_OK();
+}
+
+nsresult
+PluginInstanceParent::HandledWindowedPluginKeyEvent(
+                        const NativeEventData& aKeyEventData,
+                        bool aIsConsumed)
+{
+    if (NS_WARN_IF(!SendHandledWindowedPluginKeyEvent(aKeyEventData,
+                                                      aIsConsumed))) {
+        return NS_ERROR_FAILURE;
+    }
+    return NS_OK;
+}
+
+mozilla::ipc::IPCResult
+PluginInstanceParent::RecvOnWindowedPluginKeyEvent(
+                        const NativeEventData& aKeyEventData)
+{
+    nsPluginInstanceOwner* owner = GetOwner();
+    if (NS_WARN_IF(!owner)) {
+        // Notifies the plugin process of the key event being not consumed
+        // by us.
+        HandledWindowedPluginKeyEvent(aKeyEventData, false);
+        return IPC_OK();
+    }
+    owner->OnWindowedPluginKeyEvent(aKeyEventData);
+    return IPC_OK();
 }
 
 void

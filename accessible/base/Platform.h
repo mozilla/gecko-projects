@@ -4,9 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdint.h>
+#ifndef mozilla_a11y_Platform_h
+#define mozilla_a11y_Platform_h
 
-class nsString;
+#include <stdint.h>
+#include "nsStringFwd.h"
 
 namespace mozilla {
 namespace a11y {
@@ -41,6 +43,19 @@ void PreInit();
 bool ShouldA11yBeEnabled();
 #endif
 
+#if defined(XP_WIN)
+/*
+ * Do we have AccessibleHandler.dll registered.
+ */
+bool IsHandlerRegistered();
+
+/*
+ * Name of platform service that instantiated accessibility
+ */
+void SetInstantiator(const uint32_t aInstantiatorPid);
+bool GetInstantiator(nsIFile** aOutInstantiator);
+#endif
+
 /**
  * Called to initialize platform specific accessibility support.
  * Note this is called after internal accessibility support is initialized.
@@ -71,10 +86,34 @@ void ProxyDestroyed(ProxyAccessible*);
 void ProxyEvent(ProxyAccessible* aTarget, uint32_t aEventType);
 void ProxyStateChangeEvent(ProxyAccessible* aTarget, uint64_t aState,
                            bool aEnabled);
+
+#if defined(XP_WIN)
+void ProxyFocusEvent(ProxyAccessible* aTarget,
+                     const LayoutDeviceIntRect& aCaretRect);
+void ProxyCaretMoveEvent(ProxyAccessible* aTarget,
+                         const LayoutDeviceIntRect& aCaretRect);
+#else
 void ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset);
+#endif
 void ProxyTextChangeEvent(ProxyAccessible* aTarget, const nsString& aStr,
                           int32_t aStart, uint32_t aLen, bool aIsInsert,
                           bool aFromUser);
+void ProxyShowHideEvent(ProxyAccessible* aTarget, ProxyAccessible* aParent,
+                        bool aInsert, bool aFromUser);
+void ProxySelectionEvent(ProxyAccessible* aTarget, ProxyAccessible* aWidget,
+                         uint32_t aType);
+
+#if defined(ANDROID)
+void ProxyVirtualCursorChangeEvent(ProxyAccessible* aTarget,
+                                   ProxyAccessible* aOldPosition,
+                                   int32_t aOldStartOffset,
+                                   int32_t aOldEndOffset,
+                                   ProxyAccessible* aNewPosition,
+                                   int32_t aNewStartOffset,
+                                   int32_t aNewEndOffset,
+                                   uint16_t aReason, bool aFromUser);
+#endif
 } // namespace a11y
 } // namespace mozilla
 
+#endif // mozilla_a11y_Platform_h

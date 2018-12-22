@@ -18,7 +18,7 @@ interface DeviceRotationRate {
   readonly attribute double? gamma;
 };
 
-[Constructor(DOMString type, optional DeviceMotionEventInit eventInitDict)]
+[Pref="device.sensors.motion.enabled", Func="nsGlobalWindowInner::DeviceSensorsEnabled", Constructor(DOMString type, optional DeviceMotionEventInit eventInitDict)]
 interface DeviceMotionEvent : Event {
   readonly attribute DeviceAcceleration? acceleration;
   readonly attribute DeviceAcceleration? accelerationIncludingGravity;
@@ -48,10 +48,10 @@ dictionary DeviceMotionEventInit : EventInit {
 // Mozilla extensions.
 partial interface DeviceMotionEvent {
   void initDeviceMotionEvent(DOMString type,
-                             boolean canBubble,
-                             boolean cancelable,
-                             DeviceAccelerationInit acceleration,
-                             DeviceAccelerationInit accelerationIncludingGravity,
-                             DeviceRotationRateInit rotationRate,
-                             double? interval);
+                             optional boolean canBubble = false,
+                             optional boolean cancelable = false,
+                             optional DeviceAccelerationInit acceleration,
+                             optional DeviceAccelerationInit accelerationIncludingGravity,
+                             optional DeviceRotationRateInit rotationRate,
+                             optional double? interval = null);
 };

@@ -2,26 +2,23 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
     openScratchpad(runTests);
-  }, true);
+  });
 
-  content.location = "data:text/html,<title>foobarBug636725</title>" +
-    "<p>test inspect() in Scratchpad";
+  gBrowser.loadURI("data:text/html,<title>foobarBug636725</title>" +
+                   "<p>test inspect() in Scratchpad");
 }
 
-function runTests()
-{
-  let sp = gScratchpadWindow.Scratchpad;
-  let doc = gScratchpadWindow.document;
+function runTests() {
+  const sp = gScratchpadWindow.Scratchpad;
+  const doc = gScratchpadWindow.document;
 
-  let methodsAndItems = {
+  const methodsAndItems = {
     "sp-menu-newscratchpad": "openScratchpad",
     "sp-menu-open": "openFile",
     "sp-menu-save": "saveFile",
@@ -43,24 +40,23 @@ function runTests()
 
   let lastMethodCalled = null;
 
-  for (let id in methodsAndItems) {
+  for (const id in methodsAndItems) {
     lastMethodCalled = null;
 
-    let methodName = methodsAndItems[id];
-    let oldMethod = sp[methodName];
+    const methodName = methodsAndItems[id];
+    const oldMethod = sp[methodName];
     ok(oldMethod, "found method " + methodName + " in Scratchpad object");
 
     sp[methodName] = () => {
       lastMethodCalled = methodName;
-    }
+    };
 
-    let menu = doc.getElementById(id);
+    const menu = doc.getElementById(id);
     ok(menu, "found menuitem #" + id);
 
     try {
       menu.doCommand();
-    }
-    catch (ex) {
+    } catch (ex) {
       ok(false, "exception thrown while executing the command of menuitem #" + id);
     }
 

@@ -11,8 +11,6 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS_INHERITED(FocusEvent, UIEvent, nsIDOMFocusEvent)
-
 FocusEvent::FocusEvent(EventTarget* aOwner,
                        nsPresContext* aPresContext,
                        InternalFocusEvent* aEvent)
@@ -27,28 +25,23 @@ FocusEvent::FocusEvent(EventTarget* aOwner,
   }
 }
 
-NS_IMETHODIMP
-FocusEvent::GetRelatedTarget(nsIDOMEventTarget** aRelatedTarget)
-{
-  NS_ENSURE_ARG_POINTER(aRelatedTarget);
-  NS_IF_ADDREF(*aRelatedTarget = GetRelatedTarget());
-  return NS_OK;
-}
-
-EventTarget*
+already_AddRefed<EventTarget>
 FocusEvent::GetRelatedTarget()
 {
-  return mEvent->AsFocusEvent()->mRelatedTarget;
+  return
+    EnsureWebAccessibleRelatedTarget(mEvent->AsFocusEvent()->mRelatedTarget);
 }
 
 void
 FocusEvent::InitFocusEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsGlobalWindow* aView,
+                           nsGlobalWindowInner* aView,
                            int32_t aDetail,
                            EventTarget* aRelatedTarget)
 {
+  MOZ_ASSERT(!mEvent->mFlags.mIsBeingDispatched);
+
   UIEvent::InitUIEvent(aType, aCanBubble, aCancelable, aView, aDetail);
   mEvent->AsFocusEvent()->mRelatedTarget = aRelatedTarget;
 }
@@ -65,6 +58,7 @@ FocusEvent::Constructor(const GlobalObject& aGlobal,
   e->InitFocusEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
                     aParam.mDetail, aParam.mRelatedTarget);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 

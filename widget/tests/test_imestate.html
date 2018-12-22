@@ -5,7 +5,6 @@
           src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript"
           src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js"></script>
   <script type="text/javascript" src="utils.js"></script>
   <link rel="stylesheet" type="text/css"
           href="chrome://mochikit/content/tests/SimpleTest/test.css" />
@@ -129,10 +128,10 @@ function hitEventLoop(aFunc, aTimes)
 }
 
 var gUtils = window.
-      QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-      getInterface(Components.interfaces.nsIDOMWindowUtils);
-var gFM = Components.classes["@mozilla.org/focus-manager;1"].
-      getService(Components.interfaces.nsIFocusManager);
+      QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIDOMWindowUtils);
+var gFM = Cc["@mozilla.org/focus-manager;1"].
+      getService(Ci.nsIFocusManager);
 const kIMEEnabledSupported = navigator.platform.indexOf("Mac") == 0 ||
                              navigator.platform.indexOf("Win") == 0 ||
                              navigator.platform.indexOf("Linux") == 0;
@@ -164,8 +163,8 @@ function runBasicTest(aIsEditable, aInDesignMode, aDescription)
     return true;
   };
 
-  var TIP = Components.classes["@mozilla.org/text-input-processor;1"]
-              .createInstance(Components.interfaces.nsITextInputProcessor);
+  var TIP = Cc["@mozilla.org/text-input-processor;1"]
+              .createInstance(Ci.nsITextInputProcessor);
   if (!TIP.beginInputTransactionForTests(window, TIPCallback)) {
     ok(false, "runBasicTest(): failed to begin input transaction");
     return;
@@ -1033,11 +1032,11 @@ function runComplexContenteditableTests()
   is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
      description + "IME isn't enabled on HTML editor");
   const kReadonly =
-    Components.interfaces.nsIPlaintextEditor.eEditorReadonlyMask;
+    Ci.nsIPlaintextEditor.eEditorReadonlyMask;
   var editor =
-    window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-      getInterface(Components.interfaces.nsIWebNavigation).
-      QueryInterface(Components.interfaces.nsIDocShell).editor;
+    window.QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIWebNavigation).
+      QueryInterface(Ci.nsIDocShell).editor;
   var flags = editor.flags;
   editor.flags = flags | kReadonly;
   is(gFM.focusedElement, container,
@@ -1067,9 +1066,9 @@ function runComplexContenteditableTests()
   todo_is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
           description + "IME is still disabled on the button, the container is editable now");
   editor =
-    window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-      getInterface(Components.interfaces.nsIWebNavigation).
-      QueryInterface(Components.interfaces.nsIDocShell).editor;
+    window.QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIWebNavigation).
+      QueryInterface(Ci.nsIDocShell).editor;
   flags = editor.flags;
   editor.flags = flags | kReadonly;
   is(gFM.focusedElement, button,
@@ -1109,9 +1108,9 @@ function runComplexContenteditableTests()
        description + "IME becomes " + unexpectedStateDescription +
          " on the " + aEditorDescription + ", the container is editable now");
     editor =
-      window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-        getInterface(Components.interfaces.nsIWebNavigation).
-        QueryInterface(Components.interfaces.nsIDocShell).editor;
+      window.QueryInterface(Ci.nsIInterfaceRequestor).
+        getInterface(Ci.nsIWebNavigation).
+        QueryInterface(Ci.nsIDocShell).editor;
     flags = editor.flags;
     editor.flags = flags | kReadonly;
     is(gFM.focusedElement, aEditor,
@@ -1177,9 +1176,9 @@ function runComplexContenteditableTests()
          " on the " + aFocusNodeDescription +
          ", the HTML editor is editable now");
     editor =
-      window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-        getInterface(Components.interfaces.nsIWebNavigation).
-        QueryInterface(Components.interfaces.nsIDocShell).editor;
+      window.QueryInterface(Ci.nsIInterfaceRequestor).
+        getInterface(Ci.nsIWebNavigation).
+        QueryInterface(Ci.nsIDocShell).editor;
     flags = editor.flags;
     editor.flags = flags | kReadonly;
     is(gFM.focusedElement, aFocusNode,
@@ -1244,15 +1243,13 @@ function runEditorFlagChangeTests()
   is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
      description + "IME isn't enabled on HTML editor");
   const kIMEStateChangeFlags =
-    Components.interfaces.nsIPlaintextEditor.eEditorPasswordMask |
-    Components.interfaces.nsIPlaintextEditor.eEditorReadonlyMask |
-    Components.interfaces.nsIPlaintextEditor.eEditorDisabledMask;
+    Ci.nsIPlaintextEditor.eEditorPasswordMask |
+    Ci.nsIPlaintextEditor.eEditorReadonlyMask |
+    Ci.nsIPlaintextEditor.eEditorDisabledMask;
   var editor =
-    window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-      getInterface(Components.interfaces.nsIWebNavigation).
-      QueryInterface(Components.interfaces.nsIDocShell).editor;
-  var editorIMESupport =
-    editor.QueryInterface(Components.interfaces.nsIEditorIMESupport);
+    window.QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIWebNavigation).
+      QueryInterface(Ci.nsIDocShell).editor;
   var flags = editor.flags;
 
   // input characters
@@ -1268,19 +1265,19 @@ function runEditorFlagChangeTests()
     });
 
   editor.flags &= ~kIMEStateChangeFlags;
-  ok(editorIMESupport.composing,
+  ok(editor.composing,
      description + "#1 IME composition was committed unexpectedly");
   is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
      description + "#1 IME isn't enabled on HTML editor");
 
   editor.flags |= ~kIMEStateChangeFlags;
-  ok(editorIMESupport.composing,
+  ok(editor.composing,
      description + "#2 IME composition was committed unexpectedly");
   is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
      description + "#2 IME isn't enabled on HTML editor");
 
   editor.flags = flags;
-  ok(editorIMESupport.composing,
+  ok(editor.composing,
      description + "#3 IME composition was committed unexpectedly");
   is(gUtils.IMEStatus, gUtils.IME_STATUS_ENABLED,
      description + "#3 IME isn't enabled on HTML editor");
@@ -1311,16 +1308,16 @@ function runTestPasswordFieldOnDialog()
 
   function WindowObserver()
   {
-    Components.classes["@mozilla.org/observer-service;1"].
-               getService(Components.interfaces.nsIObserverService).
-               addObserver(this, "domwindowopened", false);
+    Cc["@mozilla.org/observer-service;1"].
+       getService(Ci.nsIObserverService).
+       addObserver(this, "domwindowopened");
   }
 
   WindowObserver.prototype = {
     QueryInterface: function (iid)
     {
-      if (iid.equals(Components.interfaces.nsIObserver) ||
-          iid.equals(Components.interfaces.nsISupports)) {
+      if (iid.equals(Ci.nsIObserver) ||
+          iid.equals(Ci.nsISupports)) {
         return this;
       }
     },
@@ -1329,41 +1326,41 @@ function runTestPasswordFieldOnDialog()
     {
       if (topic === "domwindowopened") {
         ok(true, "dialog window is created");
-        dialog = subject.QueryInterface(Components.interfaces.nsIDOMWindow);
-        dialog.addEventListener("load", onPasswordDialogLoad, false);
+        dialog = subject.QueryInterface(Ci.nsIDOMWindow);
+        dialog.addEventListener("load", onPasswordDialogLoad);
       }
     }
   };
 
   var observer = new WindowObserver();
   var arg1 = new Object(), arg2 = new Object();
-  Components.classes["@mozilla.org/embedcomp/prompt-service;1"].
-             getService(Components.interfaces.nsIPromptService).
-             promptPassword(window, "title", "text", arg1, "msg", arg2);
+  Cc["@mozilla.org/embedcomp/prompt-service;1"].
+     getService(Ci.nsIPromptService).
+     promptPassword(window, "title", "text", arg1, "msg", arg2);
 
   ok(true, "password dialog was closed");
 
-  Components.classes["@mozilla.org/observer-service;1"].
-             getService(Components.interfaces.nsIObserverService).
-             removeObserver(observer, "domwindowopened");
+  Cc["@mozilla.org/observer-service;1"].
+     getService(Ci.nsIObserverService).
+     removeObserver(observer, "domwindowopened");
 
   var passwordField;
 
   function onPasswordDialogLoad()
   {
     ok(true, "onPasswordDialogLoad is called");
-    dialog.removeEventListener("load", onPasswordDialogLoad, false);
+    dialog.removeEventListener("load", onPasswordDialogLoad);
     passwordField = dialog.document.getElementById("password1Textbox");
-    passwordField.addEventListener("focus", onPasswordFieldFocus, false);
+    passwordField.addEventListener("focus", onPasswordFieldFocus);
   }
 
   function onPasswordFieldFocus()
   {
     ok(true, "onPasswordFieldFocus is called");
-    passwordField.removeEventListener("focus", onPasswordFieldFocus, false);
+    passwordField.removeEventListener("focus", onPasswordFieldFocus);
     var utils = dialog.
-      QueryInterface(Components.interfaces.nsIInterfaceRequestor).
-      getInterface(Components.interfaces.nsIDOMWindowUtils);
+      QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIDOMWindowUtils);
     is(utils.IMEStatus, utils.IME_STATUS_PASSWORD,
        "IME isn't disabled on a password field of password dialog");
     synthesizeKey("VK_ESCAPE", { }, dialog);
@@ -1400,8 +1397,8 @@ function runEditorReframeTests(aCallback)
     return true;
   };
 
-  var TIP = Components.classes["@mozilla.org/text-input-processor;1"]
-              .createInstance(Components.interfaces.nsITextInputProcessor);
+  var TIP = Cc["@mozilla.org/text-input-processor;1"]
+              .createInstance(Ci.nsITextInputProcessor);
   if (!TIP.beginInputTransactionForTests(window, TIPCallback)) {
     ok(false, "runEditorReframeTests(): failed to begin input transaction");
     return;

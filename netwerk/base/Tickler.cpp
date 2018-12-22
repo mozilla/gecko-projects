@@ -7,6 +7,7 @@
 
 #ifdef MOZ_USE_WIFI_TICKLER
 #include "nsComponentManagerUtils.h"
+#include "nsINamed.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
 #include "nsServiceManagerUtils.h"
@@ -33,38 +34,16 @@ Tickler::Tickler()
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-class TicklerThreadDestructor  : public nsRunnable
-{
-public:
-  explicit TicklerThreadDestructor(nsIThread *aThread)
-    : mThread(aThread) { }
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (mThread)
-      mThread->Shutdown();
-    return NS_OK;
-  }
-
-private:
-  ~TicklerThreadDestructor() { }
-  nsCOMPtr<nsIThread> mThread;
-};
-
 Tickler::~Tickler()
 {
   // non main thread uses of the tickler should hold weak
   // references to it if they must hold a reference at all
   MOZ_ASSERT(NS_IsMainThread());
 
-  // Shutting down a thread can spin the event loop - which is a surprising
-  // thing to do from a dtor. Running it on its own event is safer.
-  nsCOMPtr<nsIRunnable> event = new TicklerThreadDestructor(mThread);
-  if (NS_FAILED(NS_DispatchToCurrentThread(event))) {
-    mThread->Shutdown();
+  if (mThread) {
+    mThread->AsyncShutdown();
+    mThread = nullptr;
   }
-  mThread = nullptr;
 
   if (mTimer)
     mTimer->Cancel();
@@ -82,7 +61,7 @@ Tickler::Init()
   MOZ_ASSERT(!mFD);
 
   if (jni::IsAvailable()) {
-      widget::GeckoAppShell::EnableNetworkNotifications();
+      java::GeckoAppShell::EnableNetworkNotifications();
   }
 
   mFD = PR_OpenUDPSocket(PR_AF_INET);
@@ -101,13 +80,9 @@ Tickler::Init()
   if (NS_FAILED(rv))
     return rv;
 
-  nsCOMPtr<nsITimer> tmpTimer(do_CreateInstance(NS_TIMER_CONTRACTID, &rv));
-  if (NS_FAILED(rv))
-    return rv;
-
-  rv = tmpTimer->SetTarget(mThread);
-  if (NS_FAILED(rv))
-    return rv;
+  nsCOMPtr<nsITimer> tmpTimer = NS_NewTimer(mThread);
+  if (!tmpTimer)
+    return NS_ERROR_OUT_OF_MEMORY;
 
   mTimer.swap(tmpTimer);
 
@@ -130,7 +105,8 @@ void Tickler::Tickle()
 void Tickler::PostCheckTickler()
 {
   mLock.AssertCurrentThreadOwns();
-  mThread->Dispatch(NS_NewRunnableMethod(this, &Tickler::CheckTickler),
+  mThread->Dispatch(NewRunnableMethod("net::Tickler::CheckTickler",
+                                      this, &Tickler::CheckTickler),
                     NS_DISPATCH_NORMAL);
   return;
 }
@@ -146,7 +122,8 @@ void Tickler::MaybeStartTickler()
   mLock.AssertCurrentThreadOwns();
   if (!NS_IsMainThread()) {
     NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &Tickler::MaybeStartTicklerUnlocked));
+      NewRunnableMethod("net::Tickler::MaybeStartTicklerUnlocked",
+                        this, &Tickler::MaybeStartTicklerUnlocked));
     return;
   }
 
@@ -216,14 +193,21 @@ void Tickler::StopTickler()
   mActive = false;
 }
 
-class TicklerTimer final : public nsITimerCallback
+class TicklerTimer final : public nsITimerCallback, public nsINamed
 {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
-  TicklerTimer(Tickler *aTickler)
+  explicit TicklerTimer(Tickler *aTickler)
   {
     mTickler = do_GetWeakReference(aTickler);
+  }
+
+  // nsINamed
+  NS_IMETHOD GetName(nsACString& aName) override
+  {
+    aName.AssignLiteral("TicklerTimer");
+    return NS_OK;
   }
 
 private:
@@ -257,7 +241,7 @@ void Tickler::SetIPV4Port(uint16_t port)
   mAddr.inet.port = port;
 }
 
-NS_IMPL_ISUPPORTS(TicklerTimer, nsITimerCallback)
+NS_IMPL_ISUPPORTS(TicklerTimer, nsITimerCallback, nsINamed)
 
 NS_IMETHODIMP TicklerTimer::Notify(nsITimer *timer)
 {

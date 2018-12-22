@@ -1,8 +1,8 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* This Source Code is subject to the terms of the Mozilla Public License
- * version 2.0 (the "License"). You can obtain a copy of the License at
- * http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* rendering object for CSS "display: ruby-text" */
 
@@ -11,24 +11,20 @@
 
 #include "nsRubyContentFrame.h"
 
-typedef nsRubyContentFrame nsRubyTextFrameSuper;
-
 /**
  * Factory function.
  * @return a newly allocated nsRubyTextFrame (infallible)
  */
 nsContainerFrame* NS_NewRubyTextFrame(nsIPresShell* aPresShell,
-                                      nsStyleContext* aContext);
+                                      mozilla::ComputedStyle* aStyle);
 
-class nsRubyTextFrame final : public nsRubyTextFrameSuper
+class nsRubyTextFrame final : public nsRubyContentFrame
 {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
-  NS_DECL_QUERYFRAME_TARGET(nsRubyTextFrame)
+  NS_DECL_FRAMEARENA_HELPERS(nsRubyTextFrame)
   NS_DECL_QUERYFRAME
 
   // nsIFrame overrides
-  virtual nsIAtom* GetType() const override;
   virtual bool CanContinueTextRun() const override;
 
 #ifdef DEBUG_FRAME_DUMP
@@ -36,12 +32,11 @@ public:
 #endif
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
   bool IsAutoHidden() const
@@ -51,9 +46,10 @@ public:
 
 protected:
   friend nsContainerFrame* NS_NewRubyTextFrame(nsIPresShell* aPresShell,
-                                               nsStyleContext* aContext);
-  explicit nsRubyTextFrame(nsStyleContext* aContext)
-    : nsRubyTextFrameSuper(aContext) {}
+                                               ComputedStyle* aStyle);
+  explicit nsRubyTextFrame(ComputedStyle* aStyle)
+    : nsRubyContentFrame(aStyle, kClassID)
+  {}
 };
 
 #endif /* nsRubyTextFrame_h___ */

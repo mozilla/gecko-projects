@@ -12,7 +12,6 @@
 #include "nsITransferable.h"
 #include "nsGfxCIID.h"
 #include "nsMemory.h"
-#include "prmem.h"
 #include "imgIEncoder.h"
 #include "nsLiteralString.h"
 #include "nsComponentManagerUtils.h"
@@ -166,7 +165,7 @@ nsImageToClipboard::CreateFromImage ( imgIContainer* inImage, HANDLE* outBitmap 
         break;
 #endif
     default:
-        NS_NOTREACHED("Unexpected surface format");
+        MOZ_ASSERT_UNREACHABLE("Unexpected surface format");
         return NS_ERROR_INVALID_ARG;  
     }
 

@@ -57,7 +57,8 @@ class GTests(object):
                 process_output = lambda line: stream_output(stack_fixer(line))
 
 
-        proc = mozprocess.ProcessHandler([prog, "-unittest"],
+        proc = mozprocess.ProcessHandler([prog, "-unittest",
+                                         "--gtest_death_test_style=threadsafe"],
                                          cwd=cwd,
                                          env=env,
                                          processOutputLine=process_output)
@@ -67,7 +68,12 @@ class GTests(object):
                  outputTimeout=GTests.TEST_PROC_NO_OUTPUT_TIMEOUT)
         proc.wait()
         if proc.timedOut:
-            log.testFail("gtest | timed out after %d seconds", GTests.TEST_PROC_TIMEOUT)
+            if proc.outputTimedOut:
+                log.testFail("gtest | timed out after %d seconds without output",
+                             GTests.TEST_PROC_NO_OUTPUT_TIMEOUT)
+            else:
+                log.testFail("gtest | timed out after %d seconds",
+                             GTests.TEST_PROC_TIMEOUT)
             return False
         if mozcrash.check_for_crashes(cwd, symbols_path, test_name="gtest"):
             # mozcrash will output the log failure line for us.
@@ -81,7 +87,6 @@ class GTests(object):
         """
         Add environment variables likely to be used across all platforms, including remote systems.
         """
-        env["MOZILLA_FIVE_HOME"] = self.xre_path
         env["MOZ_XRE_DIR"] = self.xre_path
         env["MOZ_GMP_PATH"] = os.pathsep.join(
             os.path.join(self.xre_path, p, "1.0")
@@ -112,9 +117,12 @@ class GTests(object):
             raise Exception("xre_path does not exist: %s", self.xre_path)
         env = dict(os.environ)
         env = self.build_core_environment(env)
+        env["PERFHERDER_ALERTING_ENABLED"] = "1"
         pathvar = ""
         if mozinfo.os == "linux":
             pathvar = "LD_LIBRARY_PATH"
+            # disable alerts for unstable tests (Bug 1369807)
+            del env["PERFHERDER_ALERTING_ENABLED"]
         elif mozinfo.os == "mac":
             pathvar = "DYLD_LIBRARY_PATH"
         elif mozinfo.os == "win":
@@ -128,7 +136,9 @@ class GTests(object):
         # ASan specific environment stuff
         if mozinfo.info["asan"]:
             # Symbolizer support
-            llvmsym = os.path.join(self.xre_path, "llvm-symbolizer")
+            llvmsym = os.path.join(
+                self.xre_path,
+                "llvm-symbolizer" + mozinfo.info["bin_suffix"].encode('ascii'))
             if os.path.isfile(llvmsym):
                 env["ASAN_SYMBOLIZER_PATH"] = llvmsym
                 log.info("gtest | ASan using symbolizer at %s", llvmsym)

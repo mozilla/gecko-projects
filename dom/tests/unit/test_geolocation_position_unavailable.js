@@ -1,16 +1,12 @@
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-var Cr = Components.results;
-
-
 function successCallback() {
-  do_check_true(false);
+  Assert.ok(false);
   do_test_finished();
 }
 
 function errorCallback(err) {
-  do_check_eq(Ci.nsIDOMGeoPositionError.POSITION_UNAVAILABLE, err.code);
+  // PositionError has no interface object, so we can't get constants off that.
+  Assert.equal(err.POSITION_UNAVAILABLE, err.code);
+  Assert.equal(2, err.code);
   do_test_finished();
 }
 

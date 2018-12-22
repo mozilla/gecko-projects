@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,39 +10,26 @@
 #define nsDOMCSSRect_h_
 
 #include "mozilla/Attributes.h"
-#include "nsIDOMRect.h"
-#include "nsAutoPtr.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsWrapperCache.h"
+#include "mozilla/RefPtr.h"
 
 class nsROCSSPrimitiveValue;
 
-class nsDOMCSSRect final : public nsIDOMRect,
-                           public nsWrapperCache
+class nsDOMCSSRect final : public mozilla::RefCounted<nsDOMCSSRect>
 {
 public:
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(nsDOMCSSRect);
+
   nsDOMCSSRect(nsROCSSPrimitiveValue* aTop,
                nsROCSSPrimitiveValue* aRight,
                nsROCSSPrimitiveValue* aBottom,
                nsROCSSPrimitiveValue* aLeft);
-
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_NSIDOMRECT
-
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMCSSRect)
 
   nsROCSSPrimitiveValue* Top() const { return mTop; }
   nsROCSSPrimitiveValue* Right() const { return mRight; }
   nsROCSSPrimitiveValue* Bottom() const { return mBottom; }
   nsROCSSPrimitiveValue* Left() const { return mLeft; }
 
-  nsISupports* GetParentObject() const { return nullptr; }
-
-  virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
-    override final;
-
-protected:
-  virtual ~nsDOMCSSRect(void);
+  ~nsDOMCSSRect();
 
 private:
   RefPtr<nsROCSSPrimitiveValue> mTop;

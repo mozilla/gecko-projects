@@ -8,18 +8,15 @@
 #include "WrapperFactory.h"
 #include "AccessCheck.h"
 #include "jsfriendapi.h"
-#include "jswrapper.h"
 #include "js/Proxy.h"
+#include "js/Wrapper.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/FileListBinding.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
-#ifdef MOZ_NFC
-#include "mozilla/dom/MozNDEFRecord.h"
-#endif
 #include "nsGlobalWindow.h"
 #include "nsJSUtils.h"
-#include "nsIDOMFileList.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -41,7 +38,6 @@ enum StackScopedCloneTags {
     SCTAG_REFLECTOR,
     SCTAG_BLOB,
     SCTAG_FUNCTION,
-    SCTAG_DOM_NFC_NDEF
 };
 
 // The HTML5 structured cloning algorithm includes a few DOM objects, notably
@@ -56,13 +52,7 @@ enum StackScopedCloneTags {
 // per scope.
 bool IsFileList(JSObject* obj)
 {
-    nsISupports* supports = UnwrapReflectorToISupports(obj);
-    if (!supports)
-        return false;
-    nsCOMPtr<nsIDOMFileList> fileList = do_QueryInterface(supports);
-    if (fileList)
-        return true;
-    return false;
+    return IS_INSTANCE_OF(FileList, obj);
 }
 
 class MOZ_STACK_CLASS StackScopedCloneData
@@ -83,7 +73,7 @@ public:
     JSObject* CustomReadHandler(JSContext* aCx,
                                 JSStructuredCloneReader* aReader,
                                 uint32_t aTag,
-                                uint32_t aData)
+                                uint32_t aData) override
     {
         if (aTag == SCTAG_REFLECTOR) {
             MOZ_ASSERT(!aData);
@@ -145,37 +135,18 @@ public:
             return val.toObjectOrNull();
         }
 
-        if (aTag == SCTAG_DOM_NFC_NDEF) {
-#ifdef MOZ_NFC
-          nsIGlobalObject* global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
-          if (!global) {
-            return nullptr;
-          }
-
-          // Prevent the return value from being trashed by a GC during ~nsRefPtr.
-          JS::Rooted<JSObject*> result(aCx);
-          {
-            RefPtr<MozNDEFRecord> ndefRecord = new MozNDEFRecord(global);
-            result = ndefRecord->ReadStructuredClone(aCx, aReader) ?
-                     ndefRecord->WrapObject(aCx, nullptr) : nullptr;
-          }
-          return result;
-#else
-          return nullptr;
-#endif
-        }
-
         MOZ_ASSERT_UNREACHABLE("Encountered garbage in the clone stream!");
         return nullptr;
     }
 
     bool CustomWriteHandler(JSContext* aCx,
                             JSStructuredCloneWriter* aWriter,
-                            JS::Handle<JSObject*> aObj)
+                            JS::Handle<JSObject*> aObj) override
     {
         {
+            JS::Rooted<JSObject*> obj(aCx, aObj);
             Blob* blob = nullptr;
-            if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, aObj, blob))) {
+            if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, &obj, blob))) {
                 BlobImpl* blobImpl = blob->Impl();
                 MOZ_ASSERT(blobImpl);
 
@@ -208,22 +179,12 @@ public:
                     return false;
                 return JS_WriteUint32Pair(aWriter, SCTAG_FUNCTION, mFunctions.length() - 1);
             } else {
-                JS_ReportError(aCx, "Permission denied to pass a Function via structured clone");
+                JS_ReportErrorASCII(aCx, "Permission denied to pass a Function via structured clone");
                 return false;
             }
         }
 
-#ifdef MOZ_NFC
-        {
-          MozNDEFRecord* ndefRecord;
-          if (NS_SUCCEEDED(UNWRAP_OBJECT(MozNDEFRecord, aObj, ndefRecord))) {
-            return JS_WriteUint32Pair(aWriter, SCTAG_DOM_NFC_NDEF, 0) &&
-                   ndefRecord->WriteStructuredClone(aCx, aWriter);
-          }
-        }
-#endif
-
-        JS_ReportError(aCx, "Encountered unsupported value type writing stack-scoped structured clone");
+        JS_ReportErrorASCII(aCx, "Encountered unsupported value type writing stack-scoped structured clone");
         return false;
     }
 
@@ -250,11 +211,11 @@ StackScopedClone(JSContext* cx, StackScopedCloneOptions& options,
 {
     StackScopedCloneData data(cx, &options);
     {
-        // For parsing val we have to enter its compartment.
+        // For parsing val we have to enter its realm.
         // (unless it's a primitive)
-        Maybe<JSAutoCompartment> ac;
+        Maybe<JSAutoRealm> ar;
         if (val.isObject()) {
-            ac.emplace(cx, &val.toObject());
+            ar.emplace(cx, &val.toObject());
         } else if (val.isString() && !JS_WrapValue(cx, val)) {
             return false;
         }
@@ -263,7 +224,7 @@ StackScopedClone(JSContext* cx, StackScopedCloneOptions& options,
             return false;
     }
 
-    // Now recreate the clones in the target compartment.
+    // Now recreate the clones in the target realm.
     if (!data.Read(cx, val))
         return false;
 
@@ -308,7 +269,7 @@ CheckSameOriginArg(JSContext* cx, FunctionForwarderOptions& options, HandleValue
         return true;
 
     // Badness.
-    JS_ReportError(cx, "Permission denied to pass object to exported function");
+    JS_ReportErrorASCII(cx, "Permission denied to pass object to exported function");
     return false;
 }
 
@@ -327,15 +288,20 @@ FunctionForwarder(JSContext* cx, unsigned argc, Value* vp)
     RootedValue v(cx, js::GetFunctionNativeReserved(&args.callee(), 0));
     RootedObject unwrappedFun(cx, js::UncheckedUnwrap(&v.toObject()));
 
-    RootedObject thisObj(cx, args.isConstructing() ? nullptr : JS_THIS_OBJECT(cx, vp));
+    RootedValue thisVal(cx, NullValue());
+    if (!args.isConstructing()) {
+        RootedObject thisObject(cx);
+        if (!args.computeThis(cx, &thisObject))
+            return false;
+        thisVal.setObject(*thisObject);
+    }
+
     {
         // We manually implement the contents of CrossCompartmentWrapper::call
         // here, because certain function wrappers (notably content->nsEP) are
         // not callable.
-        JSAutoCompartment ac(cx, unwrappedFun);
-
-        RootedValue thisVal(cx, ObjectOrNullValue(thisObj));
-        if (!CheckSameOriginArg(cx, options, thisVal) || !JS_WrapObject(cx, &thisObj))
+        JSAutoRealm ar(cx, unwrappedFun);
+        if (!CheckSameOriginArg(cx, options, thisVal) || !JS_WrapValue(cx, &thisVal))
             return false;
 
         for (size_t n = 0;  n < args.length(); ++n) {
@@ -350,7 +316,7 @@ FunctionForwarder(JSContext* cx, unsigned argc, Value* vp)
                 return false;
             args.rval().setObject(*obj);
         } else {
-            if (!JS_CallFunctionValue(cx, thisObj, fval, args, args.rval()))
+            if (!JS::Call(cx, thisVal, fval, args, args.rval()))
                 return false;
         }
     }
@@ -365,13 +331,22 @@ NewFunctionForwarder(JSContext* cx, HandleId idArg, HandleObject callable,
 {
     RootedId id(cx, idArg);
     if (id == JSID_VOIDHANDLE)
-        id = GetRTIdByIndex(cx, XPCJSRuntime::IDX_EMPTYSTRING);
+        id = GetJSIDByIndex(cx, XPCJSContext::IDX_EMPTYSTRING);
+
+    // If our callable is a (possibly wrapped) function, we can give
+    // the exported thing the right number of args.
+    unsigned nargs = 0;
+    RootedObject unwrapped(cx, js::UncheckedUnwrap(callable));
+    if (unwrapped) {
+        if (JSFunction* fun = JS_GetObjectFunction(unwrapped))
+            nargs = JS_GetFunctionArity(fun);
+    }
 
     // We have no way of knowing whether the underlying function wants to be a
     // constructor or not, so we just mark all forwarders as constructors, and
     // let the underlying function throw for construct calls if it wants.
     JSFunction* fun = js::NewFunctionByIdWithReserved(cx, FunctionForwarder,
-                                                      0, JSFUN_CONSTRUCTOR, id);
+                                                      nargs, JSFUN_CONSTRUCTOR, id);
     if (!fun)
         return false;
 
@@ -396,7 +371,7 @@ ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope, HandleV
 {
     bool hasOptions = !voptions.isUndefined();
     if (!vscope.isObject() || !vfunction.isObject() || (hasOptions && !voptions.isObject())) {
-        JS_ReportError(cx, "Invalid argument");
+        JS_ReportErrorASCII(cx, "Invalid argument");
         return false;
     }
 
@@ -413,24 +388,24 @@ ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope, HandleV
     targetScope = js::CheckedUnwrap(targetScope);
     funObj = js::CheckedUnwrap(funObj);
     if (!targetScope || !funObj) {
-        JS_ReportError(cx, "Permission denied to export function into scope");
+        JS_ReportErrorASCII(cx, "Permission denied to export function into scope");
         return false;
     }
 
     if (js::IsScriptedProxy(targetScope)) {
-        JS_ReportError(cx, "Defining property on proxy object is not allowed");
+        JS_ReportErrorASCII(cx, "Defining property on proxy object is not allowed");
         return false;
     }
 
     {
         // We need to operate in the target scope from here on, let's enter
-        // its compartment.
-        JSAutoCompartment ac(cx, targetScope);
+        // its realm.
+        JSAutoRealm ar(cx, targetScope);
 
         // Unwrapping to see if we have a callable.
         funObj = UncheckedUnwrap(funObj);
         if (!JS::IsCallable(funObj)) {
-            JS_ReportError(cx, "First argument must be a function");
+            JS_ReportErrorASCII(cx, "First argument must be a function");
             return false;
         }
 
@@ -442,9 +417,12 @@ ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope, HandleV
             RootedString funName(cx, JS_GetFunctionId(fun));
             if (!funName)
                 funName = JS_AtomizeAndPinString(cx, "");
+            JS_MarkCrossZoneIdValue(cx, StringValue(funName));
 
             if (!JS_StringToId(cx, funName, &id))
                 return false;
+        } else {
+            JS_MarkCrossZoneId(cx, id);
         }
         MOZ_ASSERT(JSID_IS_STRING(id));
 
@@ -459,7 +437,7 @@ ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope, HandleV
         FunctionForwarderOptions forwarderOptions;
         forwarderOptions.allowCrossOriginArguments = options.allowCrossOriginArguments;
         if (!NewFunctionForwarder(cx, id, funObj, forwarderOptions, rval)) {
-            JS_ReportError(cx, "Exporting function failed");
+            JS_ReportErrorASCII(cx, "Exporting function failed");
             return false;
         }
 
@@ -468,8 +446,7 @@ ExportFunction(JSContext* cx, HandleValue vfunction, HandleValue vscope, HandleV
         // the target.
         if (!JSID_IS_VOID(options.defineAs)) {
             if (!JS_DefinePropertyById(cx, targetScope, id, rval,
-                                       JSPROP_ENUMERATE,
-                                       JS_STUBGETTER, JS_STUBSETTER)) {
+                                       JSPROP_ENUMERATE)) {
                 return false;
             }
         }
@@ -487,34 +464,35 @@ CreateObjectIn(JSContext* cx, HandleValue vobj, CreateObjectInOptions& options,
                MutableHandleValue rval)
 {
     if (!vobj.isObject()) {
-        JS_ReportError(cx, "Expected an object as the target scope");
+        JS_ReportErrorASCII(cx, "Expected an object as the target scope");
         return false;
     }
 
     RootedObject scope(cx, js::CheckedUnwrap(&vobj.toObject()));
     if (!scope) {
-        JS_ReportError(cx, "Permission denied to create object in the target scope");
+        JS_ReportErrorASCII(cx, "Permission denied to create object in the target scope");
         return false;
     }
 
     bool define = !JSID_IS_VOID(options.defineAs);
 
     if (define && js::IsScriptedProxy(scope)) {
-        JS_ReportError(cx, "Defining property on proxy object is not allowed");
+        JS_ReportErrorASCII(cx, "Defining property on proxy object is not allowed");
         return false;
     }
 
     RootedObject obj(cx);
     {
-        JSAutoCompartment ac(cx, scope);
+        JSAutoRealm ar(cx, scope);
+        JS_MarkCrossZoneId(cx, options.defineAs);
+
         obj = JS_NewPlainObject(cx);
         if (!obj)
             return false;
 
         if (define) {
             if (!JS_DefinePropertyById(cx, scope, options.defineAs, obj,
-                                       JSPROP_ENUMERATE,
-                                       JS_STUBGETTER, JS_STUBSETTER))
+                                       JSPROP_ENUMERATE))
                 return false;
         }
     }

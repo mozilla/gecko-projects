@@ -3,19 +3,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PCache;
-include protocol PCachePushStream;
 include protocol PCacheStreamControl;
-include InputStreamParams;
+include protocol PChildToParentStream;
+include IPCStream;
 include ChannelInfo;
 include PBackgroundSharedTypes;
 
-using HeadersGuardEnum from "mozilla/dom/cache/IPCUtils.h";
-using ReferrerPolicy from "mozilla/dom/cache/IPCUtils.h";
-using RequestCredentials from "mozilla/dom/cache/IPCUtils.h";
-using RequestMode from "mozilla/dom/cache/IPCUtils.h";
-using RequestCache from "mozilla/dom/cache/IPCUtils.h";
-using RequestRedirect from "mozilla/dom/cache/IPCUtils.h";
-using ResponseType from "mozilla/dom/cache/IPCUtils.h";
+using HeadersGuardEnum from "mozilla/dom/FetchIPCTypes.h";
+using Namespace from "mozilla/dom/cache/IPCUtils.h";
+using OpenMode from "mozilla/dom/cache/IPCUtils.h";
+using ReferrerPolicy from "mozilla/dom/FetchIPCTypes.h";
+using RequestCredentials from "mozilla/dom/FetchIPCTypes.h";
+using RequestMode from "mozilla/dom/FetchIPCTypes.h";
+using RequestCache from "mozilla/dom/FetchIPCTypes.h";
+using RequestRedirect from "mozilla/dom/FetchIPCTypes.h";
+using ResponseType from "mozilla/dom/FetchIPCTypes.h";
 using mozilla::void_t from "ipc/IPCMessageUtils.h";
 using struct nsID from "nsID.h";
 
@@ -35,10 +37,8 @@ struct CacheQueryParams
 struct CacheReadStream
 {
   nsID id;
-  OptionalInputStreamParams params;
-  OptionalFileDescriptorSet fds;
   nullable PCacheStreamControl control;
-  nullable PCachePushStream pushStream;
+  OptionalIPCStream stream;
 };
 
 union CacheReadStreamOrVoid
@@ -52,12 +52,12 @@ struct HeadersEntry
   nsCString name;
   nsCString value;
 };
-
 struct CacheRequest
 {
   nsCString method;
   nsCString urlWithoutQuery;
   nsCString urlQuery;
+  nsCString urlFragment;
   HeadersEntry[] headers;
   HeadersGuardEnum headersGuard;
   nsString referrer;
@@ -68,6 +68,7 @@ struct CacheRequest
   uint32_t contentPolicyType;
   RequestCache requestCache;
   RequestRedirect requestRedirect;
+  nsString integrity;
 };
 
 union CacheRequestOrVoid
@@ -79,7 +80,7 @@ union CacheRequestOrVoid
 struct CacheResponse
 {
   ResponseType type;
-  nsCString url;
+  nsCString[] urlList;
   uint32_t status;
   nsCString statusText;
   HeadersEntry[] headers;
@@ -87,6 +88,8 @@ struct CacheResponse
   CacheReadStreamOrVoid body;
   IPCChannelInfo channelInfo;
   OptionalPrincipalInfo principalInfo;
+  uint32_t paddingInfo;
+  int64_t paddingSize;
 };
 
 union CacheResponseOrVoid
@@ -105,12 +108,14 @@ struct CacheMatchArgs
 {
   CacheRequest request;
   CacheQueryParams params;
+  OpenMode openMode;
 };
 
 struct CacheMatchAllArgs
 {
   CacheRequestOrVoid requestOrVoid;
   CacheQueryParams params;
+  OpenMode openMode;
 };
 
 struct CachePutAllArgs
@@ -128,12 +133,14 @@ struct CacheKeysArgs
 {
   CacheRequestOrVoid requestOrVoid;
   CacheQueryParams params;
+  OpenMode openMode;
 };
 
 struct StorageMatchArgs
 {
   CacheRequest request;
   CacheQueryParams params;
+  OpenMode openMode;
 };
 
 struct StorageHasArgs
@@ -206,6 +213,7 @@ struct StorageHasResult
 struct StorageOpenResult
 {
   nullable PCache actor;
+  Namespace ns;
 };
 
 struct StorageDeleteResult

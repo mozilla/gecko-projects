@@ -7,15 +7,14 @@
 #ifndef dom_plugins_PluginQuirks_h
 #define dom_plugins_PluginQuirks_h
 
+#include "nsString.h"
+
 namespace mozilla {
 namespace plugins {
 
 // Quirks mode support for various plugin mime types
 enum PluginQuirks {
   QUIRKS_NOT_INITIALIZED                          = 0,
-  // Silverlight assumes it is transparent in windowless mode. This quirk
-  // matches the logic in nsNPAPIPluginInstance::SetWindowless.
-  QUIRK_SILVERLIGHT_DEFAULT_TRANSPARENT           = 1 << 0,
   // Win32: Hook TrackPopupMenu api so that we can swap out parent
   // hwnds. The api will fail with parents not associated with our
   // child ui thread. See WinlessHandleEvent for details.
@@ -37,29 +36,23 @@ enum PluginQuirks {
   // Win: Addresses a flash bug with mouse capture and full screen
   // windows.
   QUIRK_FLASH_FIXUP_MOUSE_CAPTURE                 = 1 << 6,
-  // Win: QuickTime steals focus on SetWindow calls even if it's hidden.
-  // Avoid calling SetWindow in that case.
-  QUIRK_QUICKTIME_AVOID_SETWINDOW                 = 1 << 7,
-  // Win: Check to make sure the parent window has focus before calling
-  // set focus on the child. Addresses a full screen dialog prompt
-  // problem in Silverlight.
-  QUIRK_SILVERLIGHT_FOCUS_CHECK_PARENT            = 1 << 8,
   // Mac: Allow the plugin to use offline renderer mode.
   // Use this only if the plugin is certified the support the offline renderer.
   QUIRK_ALLOW_OFFLINE_RENDERER                    = 1 << 9,
-  // Mac: Work around a Flash bug that can cause plugin process crashes
-  // in CoreGraphics mode:  The Flash plugin sometimes accesses the
-  // CGContextRef we pass to it in NPP_HandleEvent(NPCocoaEventDrawRect)
-  // outside of that call.  See bug 804606.
-  QUIRK_FLASH_AVOID_CGMODE_CRASHES                = 1 << 10,
   // Work around a Flash bug where it fails to check the error code of a
   // NPN_GetValue(NPNVdocumentOrigin) call before trying to dereference
   // its char* output.
-  QUIRK_FLASH_RETURN_EMPTY_DOCUMENT_ORIGIN        = 1 << 11,
-  // Win: Addresses a Unity bug with mouse capture.
-  QUIRK_UNITY_FIXUP_MOUSE_CAPTURE                 = 1 << 12,
+  QUIRK_FLASH_RETURN_EMPTY_DOCUMENT_ORIGIN        = 1 << 10,
   // Win: Hook IMM32 API to handle IME event on windowless plugin
-  QUIRK_WINLESS_HOOK_IME                          = 1 << 13,
+  QUIRK_WINLESS_HOOK_IME                          = 1 << 12,
+  // Win: Hook GetKeyState to get keyboard state on sandbox process
+  QUIRK_FLASH_HOOK_GETKEYSTATE                    = 1 << 13,
+  // Win: Hook PrintDlgW to show print settings dialog on sandbox process
+  QUIRK_FLASH_HOOK_PRINTDLGW                      = 1 << 14,
+  // Win: Broker Win32 SSL operations
+  QUIRK_FLASH_HOOK_SSL                            = 1 << 15,
+  // Win: Hook CreateMutexW for brokering when using the camera
+  QUIRK_FLASH_HOOK_CREATEMUTEXW                   = 1 << 16,
 };
 
 int GetQuirksFromMimeTypeAndFilename(const nsCString& aMimeType,

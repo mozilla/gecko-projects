@@ -4,11 +4,11 @@
 
 try:
     from setuptools import setup
-except:
+except ImportError:
     from distutils.core import setup
 
 
-VERSION = '0.3'
+VERSION = '0.6'
 
 README = open('README.rst').read()
 
@@ -20,7 +20,7 @@ setup(
     author='Gregory Szorc',
     author_email='gregory.szorc@gmail.com',
     url='https://developer.mozilla.org/en-US/docs/Developer_Guide/mach',
-    packages=['mach'],
+    packages=['mach', 'mach.mixin'],
     version=VERSION,
     classifiers=[
         'Environment :: Console',
@@ -32,7 +32,7 @@ setup(
         'blessings',
         'mozfile',
         'mozprocess',
+        'six',
     ],
     tests_require=['mock'],
 )
-

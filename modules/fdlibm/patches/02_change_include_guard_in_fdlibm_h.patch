@@ -22,14 +22,14 @@ diff --git a/modules/fdlibm/src/fdlibm.h b/modules/fdlibm/src/fdlibm.h
  
  double	cosh(double);
  double	sinh(double);
-@@ -45,9 +45,9 @@ double	log1p(double);
- double	log2(double);
+@@ -53,9 +53,9 @@ double	scalbn(double, int);
  
- double	copysign(double, double);
- double	scalbn(double, int);
- double	trunc(double);
- 
+ float	ceilf(float);
  float	floorf(float);
+ 
+ float	nearbyintf(float);
+ float	rintf(float);
+ float	truncf(float);
  
 -#endif /* !_MATH_H_ */
 +#endif /* mozilla_imported_fdlibm_h */

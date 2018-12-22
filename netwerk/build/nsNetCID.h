@@ -11,7 +11,7 @@
  * netwerk/base/ classes
  */
 
-// service implementing nsIIOService and nsIIOService2.
+// service implementing nsIIOService
 #define NS_IOSERVICE_CONTRACTID \
     "@mozilla.org/network/io-service;1"
 #define NS_IOSERVICE_CID                             \
@@ -50,7 +50,7 @@
 
 // service implementing nsIProxyAutoConfig.
 #define NS_PROXYAUTOCONFIG_CONTRACTID \
-    "@mozilla.org/network/proxy-auto-config;1" 
+    "@mozilla.org/network/proxy-auto-config;1"
 #define NS_PROXYAUTOCONFIG_CID                       \
 { /* 63ac8c66-1dd2-11b2-b070-84d00d3eaece */         \
     0x63ac8c66,                                      \
@@ -71,14 +71,22 @@
 }
 
 // component implementing nsIURI, nsISerializable, and nsIClassInfo.
-#define NS_SIMPLEURI_CONTRACTID \
-    "@mozilla.org/network/simple-uri;1"
 #define NS_SIMPLEURI_CID                              \
 { /* e0da1d70-2f7b-11d3-8cd0-0060b0fc14a3 */          \
      0xe0da1d70,                                      \
      0x2f7b,                                          \
      0x11d3,                                          \
      {0x8c, 0xd0, 0x00, 0x60, 0xb0, 0xfc, 0x14, 0xa3} \
+}
+
+#define NS_SIMPLEURIMUTATOR_CONTRACTID \
+    "@mozilla.org/network/simple-uri-mutator;1"
+#define NS_SIMPLEURIMUTATOR_CID                       \
+{ /* 2be14592-28d4-4a83-8fe9-08e778849f6e */          \
+     0x2be14592,                                      \
+     0x28d4,                                          \
+     0x4a83,                                          \
+     {0x8f, 0xe9, 0x08, 0xe7, 0x78, 0x84, 0x9f, 0x6e} \
 }
 
 // component inheriting from the simple URI component and also
@@ -91,6 +99,14 @@
      { 0xa7, 0x85, 0x85, 0xc3, 0x94, 0x01, 0x25, 0x03 }  \
 }
 
+#define NS_SIMPLENESTEDURIMUTATOR_CID                    \
+{ /* 9c4e9d49-ce64-4ca3-acef-3075c5e5aba7 */             \
+     0x9c4e9d49,                                         \
+     0xce64,                                             \
+     0x4ca3,                                             \
+     { 0xac, 0xef, 0x30, 0x75, 0xc5, 0xe5, 0xab, 0xa7 }  \
+}
+
 // component inheriting from the nested simple URI component and also
 // carrying along its base URI
 #define NS_NESTEDABOUTURI_CID                            \
@@ -101,16 +117,32 @@
      { 0xb9, 0x36, 0x41, 0x32, 0x6b, 0xa4, 0x8a, 0xae }  \
 }
 
+#define NS_NESTEDABOUTURIMUTATOR_CID                     \
+{ /* b0054ef3-b096-483d-8242-4ee36b7b2115 */             \
+     0xb0054ef3,                                         \
+     0xb096,                                             \
+     0x483d,                                             \
+     { 0x82, 0x42, 0x4e, 0xe3, 0x6b, 0x7b, 0x21, 0x15 }  \
+}
+
 // component implementing nsIStandardURL, nsIURI, nsIURL, nsISerializable,
 // and nsIClassInfo.
-#define NS_STANDARDURL_CONTRACTID \
-    "@mozilla.org/network/standard-url;1"
 #define NS_STANDARDURL_CID                           \
 { /* de9472d0-8034-11d3-9399-00104ba0fd40 */         \
     0xde9472d0,                                      \
     0x8034,                                          \
     0x11d3,                                          \
     {0x93, 0x99, 0x00, 0x10, 0x4b, 0xa0, 0xfd, 0x40} \
+}
+
+#define NS_STANDARDURLMUTATOR_CONTRACTID \
+    "@mozilla.org/network/standard-url-mutator;1"
+#define NS_STANDARDURLMUTATOR_CID                    \
+{ /* ce7d7da0-fb28-44a3-8c7b-000c165918f4 */         \
+    0xce7d7da0,                                      \
+    0xfb28,                                          \
+    0x44a3,                                          \
+    {0x8c, 0x7b, 0x00, 0x0c, 0x16, 0x59, 0x18, 0xf4} \
 }
 
 // service implementing nsIURLParser that assumes the URL will NOT contain an
@@ -379,16 +411,6 @@
     {0x8c, 0xda, 0x00, 0x60, 0xb0, 0xfc, 0x14, 0xa3} \
 }
 
-#define NS_PARTIALLOCALFILEINPUTSTREAM_CONTRACTID \
-    "@mozilla.org/network/partial-file-input-stream;1"
-#define NS_PARTIALLOCALFILEINPUTSTREAM_CID           \
-{ /* 8738afd6-162a-418d-a99b-75b3a6b10a56 */         \
-    0x8738afd6,                                      \
-    0x162a,                                          \
-    0x418d,                                          \
-    {0xa9, 0x9b, 0x75, 0xb3, 0xa6, 0xb1, 0x0a, 0x56} \
-}
-
 #define NS_BUFFEREDINPUTSTREAM_CONTRACTID \
     "@mozilla.org/network/buffered-input-stream;1"
 #define NS_BUFFEREDINPUTSTREAM_CID                   \
@@ -481,10 +503,10 @@
   { 0x92, 0x05, 0xc3, 0x09, 0xce, 0xb2, 0xd6, 0x41 } \
 }
 
-// service implementing nsISchedulingContextService
-#define NS_SCHEDULINGCONTEXTSERVICE_CONTRACTID \
-    "@mozilla.org/network/scheduling-context-service;1"
-#define NS_SCHEDULINGCONTEXTSERVICE_CID \
+// service implementing nsIRequestContextService
+#define NS_REQUESTCONTEXTSERVICE_CONTRACTID \
+    "@mozilla.org/network/request-context-service;1"
+#define NS_REQUESTCONTEXTSERVICE_CID \
 { /* d5499fa7-7ba8-49ff-9e30-1858b99ace69 */ \
     0xd5499fa7, \
     0x7ba8, \
@@ -625,6 +647,28 @@
     {0x96, 0x1f, 0x65, 0x53, 0xcd, 0x60, 0xb1, 0xa2} \
 }
 
+#define NS_THROTTLEQUEUE_CONTRACTID \
+    "@mozilla.org/network/throttlequeue;1"
+#define NS_THROTTLEQUEUE_CID                            \
+{ /* 4c39159c-cd90-4dd3-97a7-06af5e6d84c4 */            \
+    0x4c39159c,                                         \
+    0xcd90,                                             \
+    0x4dd3,                                             \
+    {0x97, 0xa7, 0x06, 0xaf, 0x5e, 0x6d, 0x84, 0xc4}    \
+}
+
+// Background channel registrar used for pairing HttpChannelParent
+// and its background channel
+#define NS_BACKGROUNDCHANNELREGISTRAR_CONTRACTID \
+    "@mozilla.org/network/background-channel-registrar;1"
+#define NS_BACKGROUNDCHANNELREGISTRAR_CID \
+{ /* 6907788a-17cc-4c2a-a7c5-59ad2d9cc079 */          \
+    0x6907788a,                                       \
+    0x17cc,                                           \
+    0x4c2a,                                           \
+    { 0xa7, 0xc5, 0x59, 0xad, 0x2d, 0x9c, 0xc0, 0x79} \
+}
+
 /******************************************************************************
  * netwerk/protocol/ftp/ classes
  */
@@ -664,6 +708,13 @@
   { 0xbd, 0xe9, 0xcc, 0xef, 0x5d, 0x8a, 0xb4, 0x73 } \
 }
 
+#define NS_SUBSTITUTINGURLMUTATOR_CID                \
+{ 0xb3cfeb91,                                        \
+  0x332a,                                            \
+  0x46c9,                                            \
+  { 0xad, 0x97, 0x93, 0xff, 0x39, 0x84, 0x14, 0x94 } \
+}
+
 /******************************************************************************
  * netwerk/protocol/file/ classes
  */
@@ -677,18 +728,6 @@
 }
 
 /******************************************************************************
- * netwerk/protocol/app/ classes
- */
-
-#define NS_APPPROTOCOLHANDLER_CID                    \
-{ /* {B6ED3030-9999-11d3-A178-0050041CAF44} */       \
-    0xb6ed3030,                                      \
-    0x9999,                                          \
-    0x11d3,                                          \
-    {0xa1, 0x78, 0x00, 0x50, 0x04, 0x1c, 0xaf, 0x44} \
-}
-
-/******************************************************************************
  * netwerk/protocol/data/ classes
  */
 
@@ -698,17 +737,6 @@
     0x6183,                                          \
     0x11d3,                                          \
     {0xa1, 0x78, 0x00, 0x50, 0x04, 0x1c, 0xaf, 0x44} \
-}
-
-/******************************************************************************
- * netwerk/protocol/device classes
- */
-#define NS_DEVICEPROTOCOLHANDLER_CID                 \
-{ /* 6b0ffe9e-d114-486b-aeb7-da62e7273ed5 */         \
-    0x60ffe9e,                                       \
-    0xd114,                                          \
-    0x486b,                                          \
-    {0xae, 0xb7, 0xda, 0x62, 0xe7, 0x27, 0x3e, 0xd5} \
 }
 
 /******************************************************************************
@@ -754,18 +782,6 @@
   0xa5bb,                                            \
   0x4cbb,                                            \
   {0x82, 0xbb, 0x08, 0x5c, 0xce, 0x06, 0xc0, 0xbb}   \
-}
-
-/******************************************************************************
- * netwerk/protocol/rtsp / classes
- */
-
-#define NS_RTSPPROTOCOLHANDLER_CID                   \
-{ /* {5bb4b980-7b10-11e2-b92a-0800200c9a66} */       \
-  0x5bb4b980,                                        \
-  0x7b10,                                            \
-  0x11e2,                                            \
-  {0xb9, 0x2a, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66}   \
 }
 
 /******************************************************************************
@@ -828,7 +844,7 @@
  * netwerk/mime classes
  */
 
-// {1F4DBCF7-245C-4c8c-943D-8A1DA0495E8A} 
+// {1F4DBCF7-245C-4c8c-943D-8A1DA0495E8A}
 #define NS_MIMEHEADERPARAM_CID                         \
 {   0x1f4dbcf7,                                        \
     0x245c,                                            \
@@ -897,31 +913,23 @@
     { 0x85, 0x44, 0x5a, 0x8d, 0x1a, 0xb7, 0x95, 0x37 } \
 }
 
-#define NS_PACKAGEDAPPSERVICE_CONTRACTID \
-    "@mozilla.org/network/packaged-app-service;1"
-#define NS_PACKAGEDAPPSERVICE_CID                      \
-{   /* adef6762-41b9-4470-a06a-dc29cf8de381 */         \
-    0xadef6762,                                        \
-    0x41b9,                                            \
-    0x4470,                                            \
-  { 0xa0, 0x6a, 0xdc, 0x29, 0xcf, 0x8d, 0xe3, 0x81 }   \
+#ifdef XP_WIN
+#define NS_NAMEDPIPESERVICE_CONTRACTID \
+    "@mozilla.org/network/named-pipe-service;1"
+#define NS_NAMEDPIPESERVICE_CID                        \
+{                                                      \
+    0xae298cf9,                                        \
+    0x91f4,                                            \
+    0x4337,                                            \
+  { 0x95, 0x69, 0x61, 0x88, 0xb9, 0xd0, 0x21, 0x6e }   \
 }
-
-#define NS_PACKAGEDAPPVERIFIER_CONTRACTID \
-    "@mozilla.org/network/packaged-app-verifier;1"
-#define NS_PACKAGEDAPPVERIFIER_CID                      \
-{   /* 07242d20-4cae-11e5-b970-0800200c9a66 */         \
-    0x07242d20,                                        \
-    0x4cae,                                            \
-    0x11e5,                                            \
-  { 0xb9, 0x70, 0x08, 0x00, 0x20, 0x0c, 0x96, 0x66 }   \
-}
+#endif
 
 /******************************************************************************
  * netwerk/cookie classes
  */
 
-// service implementing nsICookieManager and nsICookieManager2.
+// service implementing nsICookieManager
 #define NS_COOKIEMANAGER_CONTRACTID \
     "@mozilla.org/cookiemanager;1"
 #define NS_COOKIEMANAGER_CID                           \

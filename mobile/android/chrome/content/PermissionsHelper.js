@@ -49,13 +49,15 @@ var PermissionsHelper = {
     }
   },
 
-  observe: function observe(aSubject, aTopic, aData) {
+  onEvent: function onEvent(event, data, callback) {
     let uri = BrowserApp.selectedBrowser.currentURI;
     let check = false;
 
-    switch (aTopic) {
+    switch (event) {
       case "Permissions:Check":
         check = true;
+        // fall-through
+
       case "Permissions:Get":
         let permissions = [];
         for (let i = 0; i < this._permissonTypes.length; i++) {
@@ -67,7 +69,7 @@ var PermissionsHelper = {
             continue;
 
           if (check) {
-            Messaging.sendRequest({
+            GlobalEventDispatcher.sendRequest({
               type: "Permissions:CheckResult",
               hasPermissions: true
             });
@@ -75,7 +77,7 @@ var PermissionsHelper = {
           }
           // Get the strings that correspond to the permission type
           let typeStrings = this._permissionStrings[type];
-          let label = Strings.browser.GetStringFromName(typeStrings["label"]);
+          let label = Strings.browser.GetStringFromName(typeStrings.label);
 
           // Get the key to look up the appropriate string entity
           let valueKey = value == Services.perms.ALLOW_ACTION ?
@@ -90,7 +92,7 @@ var PermissionsHelper = {
         }
 
         if (check) {
-          Messaging.sendRequest({
+          GlobalEventDispatcher.sendRequest({
             type: "Permissions:CheckResult",
             hasPermissions: false
           });
@@ -100,21 +102,21 @@ var PermissionsHelper = {
         // Keep track of permissions, so we know which ones to clear
         this._currentPermissions = permissions;
 
-        Messaging.sendRequest({
+        WindowEventDispatcher.sendRequest({
           type: "Permissions:Data",
           permissions: permissions
         });
         break;
- 
+
       case "Permissions:Clear":
         // An array of the indices of the permissions we want to clear
-        let permissionsToClear = JSON.parse(aData);
+        let permissionsToClear = data.permissions;
         let privacyContext = BrowserApp.selectedBrowser.docShell
                                .QueryInterface(Ci.nsILoadContext);
 
         for (let i = 0; i < permissionsToClear.length; i++) {
           let indexToClear = permissionsToClear[i];
-          let permissionType = this._currentPermissions[indexToClear]["type"];
+          let permissionType = this._currentPermissions[indexToClear].type;
           this.clearPermission(uri, permissionType, privacyContext);
         }
         break;
@@ -136,11 +138,11 @@ var PermissionsHelper = {
     if (aType == "password") {
       // By default, login saving is enabled, so if it is disabled, the
       // user selected the never remember option
-      if (!Services.logins.getLoginSavingEnabled(aURI.prePath))
+      if (!Services.logins.getLoginSavingEnabled(aURI.displayPrePath))
         return Services.perms.DENY_ACTION;
 
       // Check to see if the user ever actually saved a login
-      if (Services.logins.countLogins(aURI.prePath, "", ""))
+      if (Services.logins.countLogins(aURI.displayPrePath, "", ""))
         return Services.perms.ALLOW_ACTION;
 
       return Services.perms.UNKNOWN_ACTION;
@@ -165,12 +167,12 @@ var PermissionsHelper = {
     // it seperately.
     if (aType == "password") {
       // Get rid of exisiting stored logings
-      let logins = Services.logins.findLogins({}, aURI.prePath, "", "");
+      let logins = Services.logins.findLogins({}, aURI.displayPrePath, "", "");
       for (let i = 0; i < logins.length; i++) {
         Services.logins.removeLogin(logins[i]);
       }
       // Re-set login saving to enabled
-      Services.logins.setLoginSavingEnabled(aURI.prePath, true);
+      Services.logins.setLoginSavingEnabled(aURI.displayPrePath, true);
     } else {
       Services.perms.remove(aURI, aType);
       // Clear content prefs set in ContentPermissionPrompt.js

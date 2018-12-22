@@ -9,20 +9,25 @@
 
 const TEST_URI = "<div>Test Element</div>";
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
-  yield selectNode("div", inspector);
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
 
-  let ruleEditor = getRuleViewRuleEditor(view, 0);
+  // Turn off throttling, which can cause intermittents. Throttling is used by
+  // the TextPropertyEditor.
+  view.debounce = () => {};
+
+  await selectNode("div", inspector);
+
+  const ruleEditor = getRuleViewRuleEditor(view, 0);
   // Note that we wait for a markup mutation here because this new rule will end
   // up creating a style attribute on the node shown in the markup-view.
   // (we also wait for the rule-view to refresh).
   let onMutation = inspector.once("markupmutation");
   let onRuleViewChanged = view.once("ruleview-changed");
-  yield createNewRuleViewProperty(ruleEditor, "width: 100px; heig");
-  yield onMutation;
-  yield onRuleViewChanged;
+  await createNewRuleViewProperty(ruleEditor, "width: 100px; heig");
+  await onMutation;
+  await onRuleViewChanged;
 
   is(ruleEditor.rule.textProps.length, 2,
     "Should have created a new text property.");
@@ -32,12 +37,12 @@ add_task(function*() {
   // Value is focused, lets add multiple rules here and make sure they get added
   onMutation = inspector.once("markupmutation");
   onRuleViewChanged = view.once("ruleview-changed");
-  let valueEditor = ruleEditor.propertyList.children[1]
+  const valueEditor = ruleEditor.propertyList.children[1]
     .querySelector(".styleinspector-propertyeditor");
   valueEditor.value = "10px;background:orangered;color: black;";
   EventUtils.synthesizeKey("VK_RETURN", {}, view.styleWindow);
-  yield onMutation;
-  yield onRuleViewChanged;
+  await onMutation;
+  await onRuleViewChanged;
 
   is(ruleEditor.rule.textProps.length, 4,
     "Should have added the changed value.");

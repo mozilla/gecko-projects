@@ -22,7 +22,7 @@ class TabChild;
 # define NECKO_ERRORS_ARE_FATAL_DEFAULT true
 #else
 # define NECKO_ERRORS_ARE_FATAL_DEFAULT false
-#endif 
+#endif
 
 // TODO: Eventually remove NECKO_MAYBE_ABORT and DROP_DEAD (bug 575494).
 // Still useful for catching listener interfaces we don't yet support across
@@ -35,12 +35,12 @@ class TabChild;
     if (e)                                                                     \
       abort = (*e == '0') ? false : true;                                      \
     if (abort) {                                                               \
-      msg.Append(" (set NECKO_ERRORS_ARE_FATAL=0 in your environment to "      \
-                      "convert this error into a warning.)");                  \
-      NS_RUNTIMEABORT(msg.get());                                              \
+      msg.AppendLiteral(" (set NECKO_ERRORS_ARE_FATAL=0 in your environment "  \
+                        "to convert this error into a warning.)");             \
+      MOZ_CRASH_UNSAFE_OOL(msg.get());                                         \
     } else {                                                                   \
-      msg.Append(" (set NECKO_ERRORS_ARE_FATAL=1 in your environment to "      \
-                      "convert this warning into a fatal error.)");            \
+      msg.AppendLiteral(" (set NECKO_ERRORS_ARE_FATAL=1 in your environment "  \
+                        "to convert this warning into a fatal error.)");       \
       NS_WARNING(msg.get());                                                   \
     }                                                                          \
   } while (0)
@@ -83,15 +83,15 @@ class TabChild;
 namespace mozilla {
 namespace net {
 
-inline bool 
-IsNeckoChild() 
+inline bool
+IsNeckoChild()
 {
   static bool didCheck = false;
   static bool amChild = false;
 
   if (!didCheck) {
     didCheck = true;
-    amChild = (XRE_GetProcessType() == GeckoProcessType_Content);
+    amChild = (XRE_GetProcessType() == GeckoProcessType_Content) && !recordreplay::IsMiddleman();
   }
   return amChild;
 }
@@ -105,12 +105,6 @@ namespace NeckoCommonInternal {
 inline bool
 UsingNeckoIPCSecurity()
 {
-
-  if (!NeckoCommonInternal::gRegisteredBool) {
-    Preferences::AddBoolVarCache(&NeckoCommonInternal::gSecurityDisabled,
-                                 "network.disable.ipc.security");
-    NeckoCommonInternal::gRegisteredBool = true;
-  }
   return !NeckoCommonInternal::gSecurityDisabled;
 }
 
@@ -128,9 +122,7 @@ MissingRequiredTabChild(mozilla::dom::TabChild* tabChild,
   return false;
 }
 
-
 } // namespace net
 } // namespace mozilla
 
 #endif // mozilla_net_NeckoCommon_h
-

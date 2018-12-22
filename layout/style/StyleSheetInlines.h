@@ -7,32 +7,32 @@
 #ifndef mozilla_StyleSheetInlines_h
 #define mozilla_StyleSheetInlines_h
 
-#include "mozilla/ServoStyleSheet.h"
-#include "mozilla/CSSStyleSheet.h"
+#include "mozilla/StyleSheet.h"
+#include "nsINode.h"
 
 namespace mozilla {
 
-CSSStyleSheet&
-StyleSheet::AsGecko()
+void
+StyleSheet::SetURIs(nsIURI* aSheetURI,
+                    nsIURI* aOriginalSheetURI,
+                    nsIURI* aBaseURI)
 {
-  MOZ_ASSERT(IsGecko());
-  return *static_cast<CSSStyleSheet*>(this);
+  MOZ_ASSERT(aSheetURI && aBaseURI, "null ptr");
+  StyleSheetInfo& info = Inner();
+  MOZ_ASSERT(!HasRules() && !info.mComplete,
+             "Can't call SetURIs on sheets that are complete or have rules");
+  info.mSheetURI = aSheetURI;
+  info.mOriginalSheetURI = aOriginalSheetURI;
+  info.mBaseURI = aBaseURI;
 }
 
-ServoStyleSheet&
-StyleSheet::AsServo()
+dom::ParentObject
+StyleSheet::GetParentObject() const
 {
-  MOZ_ASSERT(IsServo());
-  return *static_cast<ServoStyleSheet*>(this);
-}
-
-StyleSheetHandle
-StyleSheet::AsHandle()
-{
-  if (IsServo()) {
-    return &AsServo();
+  if (mOwningNode) {
+    return dom::ParentObject(mOwningNode);
   }
-  return &AsGecko();
+  return dom::ParentObject(mParent);
 }
 
 }

@@ -6,6 +6,7 @@
 
 #include "GainNode.h"
 #include "mozilla/dom/GainNodeBinding.h"
+#include "AlignmentUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
@@ -17,7 +18,7 @@ namespace dom {
 NS_IMPL_CYCLE_COLLECTION_INHERITED(GainNode, AudioNode,
                                    mGain)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(GainNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(GainNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
 NS_IMPL_ADDREF_INHERITED(GainNode, AudioNode)
@@ -79,18 +80,20 @@ public:
 
       // Compute the gain values for the duration of the input AudioChunk
       StreamTime tick = mDestination->GraphTimeToStreamTime(aFrom);
-      float computedGain[WEBAUDIO_BLOCK_SIZE];
-      mGain.GetValuesAtTime(tick, computedGain, WEBAUDIO_BLOCK_SIZE);
+      float computedGain[WEBAUDIO_BLOCK_SIZE + 4];
+      float* alignedComputedGain = ALIGNED16(computedGain);
+      ASSERT_ALIGNED16(alignedComputedGain);
+      mGain.GetValuesAtTime(tick, alignedComputedGain, WEBAUDIO_BLOCK_SIZE);
 
       for (size_t counter = 0; counter < WEBAUDIO_BLOCK_SIZE; ++counter) {
-        computedGain[counter] *= aInput.mVolume;
+        alignedComputedGain[counter] *= aInput.mVolume;
       }
 
       // Apply the gain to the output buffer
       for (size_t channel = 0; channel < aOutput->ChannelCount(); ++channel) {
         const float* inputBuffer = static_cast<const float*> (aInput.mChannelData[channel]);
         float* buffer = aOutput->ChannelFloatsForWrite(channel);
-        AudioBlockCopyChannelWithScale(inputBuffer, computedGain, buffer);
+        AudioBlockCopyChannelWithScale(inputBuffer, alignedComputedGain, buffer);
       }
     }
   }
@@ -98,7 +101,7 @@ public:
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
     // Not owned:
-    // - mDestination (probably)
+    // - mDestination - MediaStreamGraphImpl::CollectSizesForMemoryReport() accounts for mDestination.
     // - mGain - Internal ref owned by AudioNode
     return AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -108,7 +111,7 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  AudioNodeStream* mDestination;
+  RefPtr<AudioNodeStream> mDestination;
   AudioParamTimeline mGain;
 };
 
@@ -117,15 +120,32 @@ GainNode::GainNode(AudioContext* aContext)
               2,
               ChannelCountMode::Max,
               ChannelInterpretation::Speakers)
-  , mGain(new AudioParam(this, GainNodeEngine::GAIN, 1.0f, "gain"))
+  , mGain(new AudioParam(this, GainNodeEngine::GAIN, "gain", 1.0f))
 {
   GainNodeEngine* engine = new GainNodeEngine(this, aContext->Destination());
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-GainNode::~GainNode()
+/* static */ already_AddRefed<GainNode>
+GainNode::Create(AudioContext& aAudioContext,
+                 const GainOptions& aOptions,
+                 ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<GainNode> audioNode = new GainNode(&aAudioContext);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  audioNode->Gain()->SetValue(aOptions.mGain);
+  return audioNode.forget();
 }
 
 size_t
@@ -145,7 +165,7 @@ GainNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 GainNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return GainNodeBinding::Wrap(aCx, this, aGivenProto);
+  return GainNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

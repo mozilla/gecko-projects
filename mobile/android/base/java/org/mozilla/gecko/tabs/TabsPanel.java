@@ -5,10 +5,10 @@
 
 package org.mozilla.gecko.tabs;
 
-import android.support.v4.content.ContextCompat;
-import org.mozilla.gecko.AppConstants.Versions;
+import org.mozilla.gecko.Experiments;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoApplication;
+import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
@@ -16,6 +16,8 @@ import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.lwt.LightweightTheme;
 import org.mozilla.gecko.lwt.LightweightThemeDrawable;
+import org.mozilla.gecko.mma.MmaDelegate;
+import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.restrictions.Restrictable;
 import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -23,9 +25,16 @@ import org.mozilla.gecko.widget.GeckoPopupMenu;
 import org.mozilla.gecko.widget.IconTabWidget;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.graphics.Color;
+import android.support.annotation.Nullable;
+import android.support.annotation.UiThread;
+import android.support.v4.content.ContextCompat;
+import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -36,12 +45,16 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
+
+import org.mozilla.gecko.switchboard.SwitchBoard;
+
 import org.mozilla.gecko.widget.themed.ThemedImageButton;
 
 public class TabsPanel extends LinearLayout
                        implements GeckoPopupMenu.OnMenuItemClickListener,
                                   LightweightTheme.OnChangeListener,
-                                  IconTabWidget.OnTabChangedListener {
+                                  IconTabWidget.OnTabChangedListener,
+                                  SharedPreferences.OnSharedPreferenceChangeListener {
     private static final String LOGTAG = "Gecko" + TabsPanel.class.getSimpleName();
 
     public enum Panel {
@@ -57,7 +70,7 @@ public class TabsPanel extends LinearLayout
     }
 
     public interface CloseAllPanelView extends PanelView {
-        void closeAll();
+        void onCloseAll();
     }
 
     public interface TabsLayout extends CloseAllPanelView {
@@ -68,13 +81,21 @@ public class TabsPanel extends LinearLayout
         void onTabsLayoutChange(int width, int height);
     }
 
-    public static View createTabsLayout(final Context context, final AttributeSet attrs) {
-        final boolean isLandscape = context.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+    private static boolean tabletOrLandscapeMode(Context context) {
+        return HardwareUtils.isTablet() ||
+                context.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+    }
 
-        if (HardwareUtils.isTablet() || isLandscape) {
-            return new TabsGridLayout(context, attrs);
+    public static View createTabsLayout(final Context context, final AttributeSet attrs) {
+        if (tabletOrLandscapeMode(context)) {
+            return new AutoFitTabsGridLayout(context, attrs);
         } else {
-            return new TabsListLayout(context, attrs);
+            // Phone in portrait mode.
+            if (GeckoSharedPrefs.forApp(context).getBoolean(GeckoPreferences.PREFS_COMPACT_TABS, true)) {
+                return new CompactTabsGridLayout(context, attrs);
+            } else {
+                return new TabsListLayout(context, attrs);
+            }
         }
     }
 
@@ -91,7 +112,11 @@ public class TabsPanel extends LinearLayout
     private IconTabWidget mTabWidget;
     private View mMenuButton;
     private ImageButton mAddTab;
-    private ImageButton mNavBackButton;
+
+    // Tab Tray
+    @Nullable private ThemedImageButton mNormalTabsPanel;
+    @Nullable private ThemedImageButton mPrivateTabsPanel;
+
 
     private Panel mCurrentPanel;
     private boolean mVisible;
@@ -139,10 +164,14 @@ public class TabsPanel extends LinearLayout
 
         mTabWidget = (IconTabWidget) findViewById(R.id.tab_widget);
 
-        mTabWidget.addTab(R.drawable.tabs_normal, R.string.tabs_normal);
-        final ThemedImageButton privateTabsPanel =
-                (ThemedImageButton) mTabWidget.addTab(R.drawable.tabs_private, R.string.tabs_private);
-        privateTabsPanel.setPrivateMode(true);
+        final View tabNormal = mTabWidget.addTab(R.drawable.tabs_normal, R.string.tabs_normal);
+        mNormalTabsPanel = tabNormal instanceof ThemedImageButton ? ((ThemedImageButton) tabNormal) : null;
+
+        final View tabPrivate = mTabWidget.addTab(R.drawable.tabs_private, R.string.tabs_private);
+        mPrivateTabsPanel = tabPrivate instanceof ThemedImageButton ? ((ThemedImageButton) tabPrivate) : null;
+        if (mPrivateTabsPanel != null) {
+            mPrivateTabsPanel.setPrivateMode(true);
+        }
 
         if (!Restrictions.isAllowed(mContext, Restrictable.PRIVATE_BROWSING)) {
             mTabWidget.setVisibility(View.GONE);
@@ -150,7 +179,7 @@ public class TabsPanel extends LinearLayout
 
         mTabWidget.setTabSelectionListener(this);
 
-        mMenuButton = findViewById(R.id.menu);
+        mMenuButton = findViewById(R.id.tabs_menu);
         mMenuButton.setOnClickListener(new Button.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -158,8 +187,8 @@ public class TabsPanel extends LinearLayout
             }
         });
 
-        mNavBackButton = (ImageButton) findViewById(R.id.nav_back);
-        mNavBackButton.setOnClickListener(new Button.OnClickListener() {
+        final ImageButton navBackButton = (ImageButton) findViewById(R.id.nav_back);
+        navBackButton.setOnClickListener(new Button.OnClickListener() {
             @Override
             public void onClick(View view) {
                 mActivity.onBackPressed();
@@ -169,6 +198,11 @@ public class TabsPanel extends LinearLayout
 
     public void showMenu() {
         final Menu menu = mPopupMenu.getMenu();
+        // Ensure we update the anchor here to absolutely guarantee there's an anchor
+        // We do set this during prepareToShow(), however only via a UI-thread callback. There are no
+        // guarantees that that callback will complete before a user clicks on the menu button, so
+        // we need to ensure we've set an anchor here.
+        mPopupMenu.setAnchor(mMenuButton);
 
         // Each panel has a "+" shortcut button, so don't show it for that panel.
         menu.findItem(R.id.new_tab).setVisible(mCurrentPanel != Panel.NORMAL_TABS);
@@ -213,7 +247,7 @@ public class TabsPanel extends LinearLayout
 
                 // Disable the menu button so that the menu won't interfere with the tab close animation.
                 mMenuButton.setEnabled(false);
-                ((CloseAllPanelView) mPanelNormal).closeAll();
+                ((CloseAllPanelView) mPanelNormal).onCloseAll();
             } else {
                 Log.e(LOGTAG, "Close all tabs menu item should only be visible for normal tabs panel");
             }
@@ -225,7 +259,7 @@ public class TabsPanel extends LinearLayout
                 // Mask private browsing
                 Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.MENU, "close_all_tabs");
 
-                ((CloseAllPanelView) mPanelPrivate).closeAll();
+                ((CloseAllPanelView) mPanelPrivate).onCloseAll();
             } else {
                 Log.e(LOGTAG, "Close private tabs menu item should only be visible for private tabs panel");
             }
@@ -239,25 +273,22 @@ public class TabsPanel extends LinearLayout
         return mActivity.onOptionsItemSelected(item);
     }
 
-    private static int getTabContainerHeight(FrameLayout tabsContainer) {
-        final Resources resources = tabsContainer.getContext().getResources();
-
-        final int screenHeight = resources.getDisplayMetrics().heightPixels;
-        final int actionBarHeight = resources.getDimensionPixelSize(R.dimen.browser_toolbar_height);
-
-        return screenHeight - actionBarHeight;
-    }
-
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
         mTheme.addListener(this);
+        if (!HardwareUtils.isTablet()) {
+            GeckoSharedPrefs.forApp(getContext()).registerOnSharedPreferenceChangeListener(this);
+        }
     }
 
     @Override
     public void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         mTheme.removeListener(this);
+        if (!HardwareUtils.isTablet()) {
+            GeckoSharedPrefs.forApp(getContext()).unregisterOnSharedPreferenceChangeListener(this);
+        }
     }
 
     @Override
@@ -331,8 +362,8 @@ public class TabsPanel extends LinearLayout
 
     public void show(Panel panelToShow) {
         prepareToShow(panelToShow);
-        int height = getVerticalPanelHeight();
-        dispatchLayoutChange(getWidth(), height);
+        final DisplayMetrics metrics = mContext.getResources().getDisplayMetrics();
+        dispatchLayoutChange(metrics.widthPixels, metrics.heightPixels);
         mHeaderVisible = true;
     }
 
@@ -351,13 +382,24 @@ public class TabsPanel extends LinearLayout
 
         int index = panelToShow.ordinal();
         mTabWidget.setCurrentTab(index);
-
         switch (panelToShow) {
             case NORMAL_TABS:
                 mPanel = mPanelNormal;
+                if (mNormalTabsPanel != null) {
+                    mNormalTabsPanel.setColorFilter(ContextCompat.getColor(getContext(), R.color.tab_item_normal_highlight_bg));
+                }
+                if (mPrivateTabsPanel != null) {
+                    mPrivateTabsPanel.setColorFilter(Color.WHITE);
+                }
                 break;
             case PRIVATE_TABS:
                 mPanel = mPanelPrivate;
+                if (mNormalTabsPanel != null) {
+                    mNormalTabsPanel.setColorFilter(Color.WHITE);
+                }
+                if (mPrivateTabsPanel != null) {
+                    mPrivateTabsPanel.setColorFilter(ContextCompat.getColor(getContext(), R.color.tab_item_private_highlight_bg));
+                }
                 break;
 
             default:
@@ -368,13 +410,19 @@ public class TabsPanel extends LinearLayout
         mAddTab.setVisibility(View.VISIBLE);
 
         mMenuButton.setEnabled(true);
-        mPopupMenu.setAnchor(mMenuButton);
-    }
-
-    public int getVerticalPanelHeight() {
-        final int actionBarHeight = mContext.getResources().getDimensionPixelSize(R.dimen.browser_toolbar_height);
-        final int height = actionBarHeight + getTabContainerHeight(mTabsContainer);
-        return height;
+        mMenuButton.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                       int oldLeft,
+                                       int oldTop, int oldRight, int oldBottom) {
+                // We also set the anchor in showMenu(), but we need to update it in case the menu
+                // is already showing.
+                // If mPopupMenu is visible then setAnchor redisplays the menu on its new anchor - but we
+                // may have just been inflated, so give mMenuButton a chance to get its true measurements
+                // before mPopupMenu.setAnchor reads them to determine its offset from the anchor.
+                mPopupMenu.setAnchor(mMenuButton);
+            }
+        });
     }
 
     public void hide() {
@@ -452,5 +500,15 @@ public class TabsPanel extends LinearLayout
     private void dispatchLayoutChange(int width, int height) {
         if (mLayoutChangeListener != null)
             mLayoutChangeListener.onTabsLayoutChange(width, height);
+    }
+
+    @UiThread // according to the docs.
+    @Override
+    public void onSharedPreferenceChanged(final SharedPreferences sharedPreferences, final String key) {
+        if (!TextUtils.equals(GeckoPreferences.PREFS_COMPACT_TABS, key)) {
+            return;
+        }
+
+        refresh();
     }
 }

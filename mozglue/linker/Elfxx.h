@@ -7,9 +7,9 @@
 
 /**
  * Android system headers have two different elf.h file. The one under linux/
- * is the most complete on older android API versions.
+ * is the most complete on older Android API versions without unified headers.
  */
-#if defined(ANDROID) && __ANDROID_API__ < 21
+#if defined(ANDROID) && __ANDROID_API__ < 21 && !defined(__ANDROID_API_L__)
 #include <linux/elf.h>
 #else
 #include <elf.h>
@@ -109,6 +109,18 @@
 #define UNSUPPORTED_RELOC(n) DT_RELA ## n
 #define STR_RELOC(n) "DT_REL" # n
 #define Reloc Rel
+
+#elif defined(__aarch64__)
+#define ELFMACHINE EM_AARCH64
+
+#define R_ABS R_AARCH64_ABS64
+#define R_GLOB_DAT R_AARCH64_GLOB_DAT
+#define R_JMP_SLOT R_AARCH64_JUMP_SLOT
+#define R_RELATIVE R_AARCH64_RELATIVE
+#define RELOC(n) DT_RELA ## n
+#define UNSUPPORTED_RELOC(n) DT_REL ## n
+#define STR_RELOC(n) "DT_RELA" # n
+#define Reloc Rela
 
 #else
 #error Unknown ELF machine type

@@ -9,8 +9,6 @@
 #include "Role.h"
 
 #include "mozilla/FloatingPoint.h"
-#include "nsIDOMHTMLFormElement.h"
-#include "nsIDOMXULElement.h"
 #include "nsIDOMXULControlElement.h"
 
 using namespace mozilla::a11y;
@@ -27,20 +25,20 @@ template class mozilla::a11y::ProgressMeterAccessible<100>;
 
 template<int Max>
 role
-ProgressMeterAccessible<Max>::NativeRole()
+ProgressMeterAccessible<Max>::NativeRole() const
 {
   return roles::PROGRESSBAR;
 }
 
 template<int Max>
 uint64_t
-ProgressMeterAccessible<Max>::NativeState()
+ProgressMeterAccessible<Max>::NativeState() const
 {
   uint64_t state = LeafAccessible::NativeState();
 
   // An undetermined progressbar (i.e. without a value) has a mixed state.
   nsAutoString attrValue;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
 
   if (attrValue.IsEmpty())
     state |= states::MIXED;
@@ -63,7 +61,7 @@ ProgressMeterAccessible<Max>::IsWidget() const
 
 template<int Max>
 void
-ProgressMeterAccessible<Max>::Value(nsString& aValue)
+ProgressMeterAccessible<Max>::Value(nsString& aValue) const
 {
   LeafAccessible::Value(aValue);
   if (!aValue.IsEmpty())
@@ -94,7 +92,7 @@ ProgressMeterAccessible<Max>::MaxValue() const
     return value;
 
   nsAutoString strValue;
-  if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::max, strValue)) {
+  if (mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::max, strValue)) {
     nsresult result = NS_OK;
     value = strValue.ToDouble(&result);
     if (NS_SUCCEEDED(result))
@@ -129,7 +127,7 @@ ProgressMeterAccessible<Max>::CurValue() const
     return value;
 
   nsAutoString attrValue;
-  if (!mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue))
+  if (!mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue))
     return UnspecifiedNaN<double>();
 
   nsresult error = NS_OK;
@@ -155,7 +153,7 @@ RadioButtonAccessible::
 }
 
 uint8_t
-RadioButtonAccessible::ActionCount()
+RadioButtonAccessible::ActionCount() const
 {
   return 1;
 }
@@ -168,7 +166,7 @@ RadioButtonAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-RadioButtonAccessible::DoAction(uint8_t aIndex)
+RadioButtonAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click)
     return false;
@@ -178,7 +176,7 @@ RadioButtonAccessible::DoAction(uint8_t aIndex)
 }
 
 role
-RadioButtonAccessible::NativeRole()
+RadioButtonAccessible::NativeRole() const
 {
   return roles::RADIOBUTTON;
 }

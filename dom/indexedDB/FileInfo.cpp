@@ -50,7 +50,7 @@ private:
 };
 
 class CleanupFileRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   RefPtr<FileManager> mFileManager;
   int64_t mFileId;
@@ -60,14 +60,15 @@ public:
   DoCleanup(FileManager* aFileManager, int64_t aFileId);
 
   CleanupFileRunnable(FileManager* aFileManager, int64_t aFileId)
-    : mFileManager(aFileManager)
+    : Runnable("dom::indexedDB::CleanupFileRunnable")
+    , mFileManager(aFileManager)
     , mFileId(aFileId)
   {
     MOZ_ASSERT(aFileManager);
     MOZ_ASSERT(aFileId > 0);
   }
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(CleanupFileRunnable, Runnable);
 
 private:
   ~CleanupFileRunnable()
@@ -243,8 +244,6 @@ CleanupFileRunnable::DoCleanup(FileManager* aFileManager, int64_t aFileId)
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(CleanupFileRunnable, nsRunnable)
-
 NS_IMETHODIMP
 CleanupFileRunnable::Run()
 {
@@ -253,6 +252,24 @@ CleanupFileRunnable::Run()
   DoCleanup(mFileManager, mFileId);
 
   return NS_OK;
+}
+
+/* static */ already_AddRefed<nsIFile>
+FileInfo::GetFileForFileInfo(FileInfo* aFileInfo)
+{
+  FileManager* fileManager = aFileInfo->Manager();
+  nsCOMPtr<nsIFile> directory = fileManager->GetDirectory();
+  if (NS_WARN_IF(!directory)) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIFile> file = FileManager::GetFileForId(directory,
+                                                     aFileInfo->Id());
+  if (NS_WARN_IF(!file)) {
+    return nullptr;
+  }
+
+  return file.forget();
 }
 
 } // namespace indexedDB

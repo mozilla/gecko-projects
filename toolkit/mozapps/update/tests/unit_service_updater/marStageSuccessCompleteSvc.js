@@ -5,143 +5,99 @@
 
 /* General Complete MAR File Staged Patch Apply Test */
 
+const STATE_AFTER_STAGE = IS_SERVICE_TEST ? STATE_APPLIED_SVC : STATE_APPLIED;
+
 function run_test() {
-  if (!shouldRunServiceTest()) {
+  if (!setupTestCommon()) {
     return;
   }
-
-  gStageUpdate = true;
-  setupTestCommon();
   gTestFiles = gTestFilesCompleteSuccess;
   gTestFiles[gTestFiles.length - 1].originalContents = null;
   gTestFiles[gTestFiles.length - 1].compareContents = "FromComplete\n";
   gTestFiles[gTestFiles.length - 1].comparePerms = 0o644;
   gTestDirs = gTestDirsCompleteSuccess;
-  setupUpdaterTest(FILE_COMPLETE_MAR);
-  if (IS_MACOSX) {
-    // Create files in the old distribution directory location to verify that
-    // the directory and its contents are removed when there is a distribution
-    // directory in the new location.
-    let testFile = getApplyDirFile(DIR_MACOS + "distribution/testFile", true);
-    writeFile(testFile, "test\n");
-    testFile = getApplyDirFile(DIR_MACOS + "distribution/test1/testFile", true);
-    writeFile(testFile, "test\n");
-  }
+  setupSymLinks();
+  setupUpdaterTest(FILE_COMPLETE_MAR, false);
+}
 
-  createUpdaterINI(false);
-  setAppBundleModTime();
+/**
+ * Called after the call to setupUpdaterTest finishes.
+ */
+function setupUpdaterTestFinished() {
+  stageUpdate(true);
+}
 
+/**
+ * Called after the call to stageUpdate finishes.
+ */
+function stageUpdateFinished() {
+  checkPostUpdateRunningFile(false);
+  checkFilesAfterUpdateSuccess(getStageDirFile, true);
+  checkUpdateLogContents(LOG_COMPLETE_SUCCESS, true);
+  // Switch the application to the staged application that was updated.
+  runUpdate(STATE_SUCCEEDED, true, 0, true);
+}
+
+/**
+ * Called after the call to runUpdate finishes.
+ */
+function runUpdateFinished() {
+  checkPostUpdateAppLog();
+}
+
+/**
+ * Called after the call to checkPostUpdateAppLog finishes.
+ */
+function checkPostUpdateAppLogFinished() {
+  checkAppBundleModTime();
+  checkSymLinks();
+  standardInit();
+  checkPostUpdateRunningFile(true);
+  checkFilesAfterUpdateSuccess(getApplyDirFile, false, true);
+  checkUpdateLogContents(LOG_REPLACE_SUCCESS, false, true);
+  executeSoon(waitForUpdateXMLFiles);
+}
+
+/**
+ * Called after the call to waitForUpdateXMLFiles finishes.
+ */
+function waitForUpdateXMLFilesFinished() {
+  checkUpdateManager(STATE_NONE, false, STATE_SUCCEEDED, 0, 1);
+  checkCallbackLog();
+}
+
+/**
+ * Setup symlinks for the test.
+ */
+function setupSymLinks() {
   // Don't test symlinks on Mac OS X in this test since it tends to timeout.
   // It is tested on Mac OS X in marAppInUseStageSuccessComplete_unix.js
-  // The tests don't support symlinks on gonk.
-  if (IS_UNIX && !IS_MACOSX && !IS_TOOLKIT_GONK) {
+  if (IS_UNIX && !IS_MACOSX) {
     removeSymlink();
     createSymlink();
-    do_register_cleanup(removeSymlink);
+    registerCleanupFunction(removeSymlink);
     gTestFiles.splice(gTestFiles.length - 3, 0,
-    {
-      description      : "Readable symlink",
-      fileName         : "link",
-      relPathDir       : DIR_RESOURCES,
-      originalContents : "test",
-      compareContents  : "test",
-      originalFile     : null,
-      compareFile      : null,
-      originalPerms    : 0o666,
-      comparePerms     : 0o666
-    });
-  }
-
-  setupAppFilesAsync();
-}
-
-function setupAppFilesFinished() {
-  runUpdateUsingService(STATE_PENDING_SVC, STATE_APPLIED);
-}
-
-function checkUpdateFinished() {
-  checkFilesAfterUpdateSuccess(getStageDirFile, true, false);
-  checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
-  checkPostUpdateRunningFile(false);
-
-  // Switch the application to the staged application that was updated.
-  gStageUpdate = false;
-  gSwitchApp = true;
-  do_timeout(TEST_CHECK_TIMEOUT, function() {
-    runUpdate(0, STATE_SUCCEEDED, checkUpdateApplied);
-  });
-}
-
-/**
- * Checks if the post update binary was properly launched for the platforms that
- * support launching post update process.
- */
-function checkUpdateApplied() {
-  if (IS_WIN || IS_MACOSX) {
-    gCheckFunc = finishCheckUpdateApplied;
-    checkPostUpdateAppLog();
-  } else {
-    finishCheckUpdateApplied();
+      {
+        description: "Readable symlink",
+        fileName: "link",
+        relPathDir: DIR_RESOURCES,
+        originalContents: "test",
+        compareContents: "test",
+        originalFile: null,
+        compareFile: null,
+        originalPerms: 0o666,
+        comparePerms: 0o666
+      });
   }
 }
 
 /**
- * Checks if the update has finished and if it has finished performs checks for
- * the test.
+ * Checks the state of the symlinks for the test.
  */
-function finishCheckUpdateApplied() {
-  checkPostUpdateRunningFile(true);
-
-  if (IS_MACOSX) {
-    let distributionDir = getApplyDirFile(DIR_MACOS + "distribution", true);
-    Assert.ok(!distributionDir.exists(), MSG_SHOULD_NOT_EXIST);
-    checkUpdateLogContains("removing old distribution directory");
-  }
-
-  // The tests don't support symlinks on gonk.
-  if (IS_UNIX && !IS_MACOSX && !IS_TOOLKIT_GONK) {
+function checkSymLinks() {
+  // Don't test symlinks on Mac OS X in this test since it tends to timeout.
+  // It is tested on Mac OS X in marAppInUseStageSuccessComplete_unix.js
+  if (IS_UNIX && !IS_MACOSX) {
     checkSymlink();
   }
-  checkAppBundleModTime();
-  checkFilesAfterUpdateSuccess(getApplyDirFile, false, false);
-  checkUpdateLogContents(LOG_COMPLETE_SUCCESS);
-  standardInit();
-  checkCallbackAppLog();
-}
-
-function runHelperProcess(args) {
-  let helperBin = getTestDirFile(FILE_HELPER_BIN);
-  let process = Cc["@mozilla.org/process/util;1"].
-                createInstance(Ci.nsIProcess);
-  process.init(helperBin);
-  debugDump("Running " + helperBin.path + " " + args.join(" "));
-  process.run(true, args, args.length);
-  Assert.equal(process.exitValue, 0,
-               "the helper process exit value should be 0");
-}
-
-function createSymlink() {
-  let args = ["setup-symlink", "moz-foo", "moz-bar", "target",
-              getApplyDirFile().path + "/" + DIR_RESOURCES + "link"];
-  runHelperProcess(args);
-  getApplyDirFile(DIR_RESOURCES + "link", false).permissions = 0o666;
-
-  args = ["setup-symlink", "moz-foo2", "moz-bar2", "target2",
-          getApplyDirFile().path + "/" + DIR_RESOURCES + "link2", "change-perm"];
-  runHelperProcess(args);
-}
-
-function removeSymlink() {
-  let args = ["remove-symlink", "moz-foo", "moz-bar", "target",
-              getApplyDirFile().path + "/" + DIR_RESOURCES + "link"];
-  runHelperProcess(args);
-  args = ["remove-symlink", "moz-foo2", "moz-bar2", "target2",
-          getApplyDirFile().path + "/" + DIR_RESOURCES + "link2"];
-  runHelperProcess(args);
-}
-
-function checkSymlink() {
-  let args = ["check-symlink",
-              getApplyDirFile().path + "/" + DIR_RESOURCES + "link"];
-  runHelperProcess(args);
 }

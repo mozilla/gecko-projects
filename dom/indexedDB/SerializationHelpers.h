@@ -17,6 +17,14 @@
 namespace IPC {
 
 template <>
+struct ParamTraits<mozilla::dom::indexedDB::StructuredCloneFile::FileType> :
+  public ContiguousEnumSerializer<
+                        mozilla::dom::indexedDB::StructuredCloneFile::FileType,
+                        mozilla::dom::indexedDB::StructuredCloneFile::eBlob,
+                        mozilla::dom::indexedDB::StructuredCloneFile::eEndGuard>
+{ };
+
+template <>
 struct ParamTraits<mozilla::dom::indexedDB::Key>
 {
   typedef mozilla::dom::indexedDB::Key paramType;
@@ -26,7 +34,7 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
     WriteParam(aMsg, aParam.mBuffer);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->mBuffer);
   }
@@ -55,7 +63,7 @@ struct ParamTraits<mozilla::dom::indexedDB::KeyPath>
     WriteParam(aMsg, aParam.mStrings);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->mType) &&
            ReadParam(aMsg, aIter, &aResult->mStrings);

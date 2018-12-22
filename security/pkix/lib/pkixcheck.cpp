@@ -117,10 +117,33 @@ CheckSignatureAlgorithm(TrustDomain& trustDomain,
       // for any curve that we support, the chances of us encountering a curve
       // during path building is too low to be worth bothering with.
       break;
-
+    case der::PublicKeyAlgorithm::Uninitialized:
+    {
+      assert(false);
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
     MOZILLA_PKIX_UNREACHABLE_DEFAULT_ENUM
   }
 
+  return Success;
+}
+
+// 4.1.2.4 Issuer
+
+Result
+CheckIssuer(Input encodedIssuer)
+{
+  // "The issuer field MUST contain a non-empty distinguished name (DN)."
+  Reader issuer(encodedIssuer);
+  Input encodedRDNs;
+  ExpectTagAndGetValue(issuer, der::SEQUENCE, encodedRDNs);
+  Reader rdns(encodedRDNs);
+  // Check that the issuer name contains at least one RDN
+  // (Note: this does not check related grammar rules, such as there being one
+  // or more AVAs in each RDN, or the values in AVAs not being empty strings)
+  if (rdns.AtEnd()) {
+    return Result::ERROR_EMPTY_ISSUER_NAME;
+  }
   return Success;
 }
 
@@ -177,8 +200,8 @@ CheckValidity(Time time, Time notBefore, Time notAfter)
 // 4.1.2.7 Subject Public Key Info
 
 Result
-CheckSubjectPublicKeyInfo(Reader& input, TrustDomain& trustDomain,
-                          EndEntityOrCA endEntityOrCA)
+CheckSubjectPublicKeyInfoContents(Reader& input, TrustDomain& trustDomain,
+                                  EndEntityOrCA endEntityOrCA)
 {
   // Here, we validate the syntax and do very basic semantic validation of the
   // public key of the certificate. The intention here is to filter out the
@@ -320,15 +343,16 @@ CheckSubjectPublicKeyInfo(Reader& input, TrustDomain& trustDomain,
                      [&trustDomain, endEntityOrCA](Reader& r) {
       Input modulus;
       Input::size_type modulusSignificantBytes;
-      Result rv = der::PositiveInteger(r, modulus, &modulusSignificantBytes);
-      if (rv != Success) {
-        return rv;
+      Result nestedRv =
+        der::PositiveInteger(r, modulus, &modulusSignificantBytes);
+      if (nestedRv != Success) {
+        return nestedRv;
       }
       // XXX: Should we do additional checks of the modulus?
-      rv = trustDomain.CheckRSAPublicKeyModulusSizeInBits(
-             endEntityOrCA, modulusSignificantBytes * 8u);
-      if (rv != Success) {
-        return rv;
+      nestedRv = trustDomain.CheckRSAPublicKeyModulusSizeInBits(
+        endEntityOrCA, modulusSignificantBytes * 8u);
+      if (nestedRv != Success) {
+        return nestedRv;
       }
 
       // XXX: We don't allow the TrustDomain to validate the exponent.
@@ -353,6 +377,20 @@ CheckSubjectPublicKeyInfo(Reader& input, TrustDomain& trustDomain,
   }
 
   return Success;
+}
+
+Result
+CheckSubjectPublicKeyInfo(Input subjectPublicKeyInfo, TrustDomain& trustDomain,
+                          EndEntityOrCA endEntityOrCA)
+{
+  Reader spkiReader(subjectPublicKeyInfo);
+  Result rv = der::Nested(spkiReader, der::SEQUENCE, [&](Reader& r) {
+    return CheckSubjectPublicKeyInfoContents(r, trustDomain, endEntityOrCA);
+  });
+  if (rv != Success) {
+    return rv;
+  }
+  return der::End(spkiReader);
 }
 
 // 4.2.1.3. Key Usage (id-ce-keyUsage)
@@ -499,6 +537,13 @@ CertPolicyId::IsAnyPolicy() const {
          std::equal(bytes, bytes + numBytes, ::mozilla::pkix::anyPolicy);
 }
 
+bool
+CertPolicyId::operator==(const CertPolicyId& other) const
+{
+  return numBytes == other.numBytes &&
+         std::equal(bytes, bytes + numBytes, other.bytes);
+}
+
 // certificatePolicies ::= SEQUENCE SIZE (1..MAX) OF PolicyInformation
 Result
 CheckCertificatePolicies(EndEntityOrCA endEntityOrCA,
@@ -612,9 +657,9 @@ CheckBasicConstraints(EndEntityOrCA endEntityOrCA,
     Reader input(*encodedBasicConstraints);
     Result rv = der::Nested(input, der::SEQUENCE,
                             [&isCA, &pathLenConstraint](Reader& r) {
-      Result rv = der::OptionalBoolean(r, isCA);
-      if (rv != Success) {
-        return rv;
+      Result nestedRv = der::OptionalBoolean(r, isCA);
+      if (nestedRv != Success) {
+        return nestedRv;
       }
       // TODO(bug 985025): If isCA is false, pathLenConstraint
       // MUST NOT be included (as per RFC 5280 section
@@ -684,7 +729,8 @@ CheckBasicConstraints(EndEntityOrCA endEntityOrCA,
 
 static Result
 MatchEKU(Reader& value, KeyPurposeId requiredEKU,
-         EndEntityOrCA endEntityOrCA, /*in/out*/ bool& found,
+         EndEntityOrCA endEntityOrCA, TrustDomain& trustDomain,
+         Time notBefore, /*in/out*/ bool& found,
          /*in/out*/ bool& foundOCSPSigning)
 {
   // See Section 5.9 of "A Layman's Guide to a Subset of ASN.1, BER, and DER"
@@ -715,15 +761,24 @@ MatchEKU(Reader& value, KeyPurposeId requiredEKU,
 
   if (!found) {
     switch (requiredEKU) {
-      case KeyPurposeId::id_kp_serverAuth:
-        // Treat CA certs with step-up OID as also having SSL server type.
-        // Comodo has issued certificates that require this behavior that don't
-        // expire until June 2020! TODO(bug 982932): Limit this exception to
-        // old certificates.
-        match = value.MatchRest(server) ||
-                (endEntityOrCA == EndEntityOrCA::MustBeCA &&
-                 value.MatchRest(serverStepUp));
+      case KeyPurposeId::id_kp_serverAuth: {
+        if (value.MatchRest(server)) {
+          match = true;
+          break;
+        }
+        // Potentially treat CA certs with step-up OID as also having SSL server
+        // type. Comodo has issued certificates that require this behavior that
+        // don't expire until June 2020!
+        if (endEntityOrCA == EndEntityOrCA::MustBeCA &&
+            value.MatchRest(serverStepUp)) {
+          Result rv = trustDomain.NetscapeStepUpMatchesServerAuth(notBefore,
+                                                                  match);
+          if (rv != Success) {
+            return rv;
+          }
+        }
         break;
+      }
 
       case KeyPurposeId::id_kp_clientAuth:
         match = value.MatchRest(client);
@@ -764,7 +819,8 @@ MatchEKU(Reader& value, KeyPurposeId requiredEKU,
 Result
 CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
                       const Input* encodedExtendedKeyUsage,
-                      KeyPurposeId requiredEKU)
+                      KeyPurposeId requiredEKU, TrustDomain& trustDomain,
+                      Time notBefore)
 {
   // XXX: We're using Result::ERROR_INADEQUATE_CERT_TYPE here so that callers
   // can distinguish EKU mismatch from KU mismatch from basic constraints
@@ -779,7 +835,8 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA,
     Reader input(*encodedExtendedKeyUsage);
     Result rv = der::NestedOf(input, der::SEQUENCE, der::OIDTag,
                               der::EmptyAllowed::No, [&](Reader& r) {
-      return MatchEKU(r, requiredEKU, endEntityOrCA, found, foundOCSPSigning);
+      return MatchEKU(r, requiredEKU, endEntityOrCA, trustDomain, notBefore,
+                      found, foundOCSPSigning);
     });
     if (rv != Success) {
       return Result::ERROR_INADEQUATE_CERT_TYPE;
@@ -956,14 +1013,14 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
   // Check the SPKI early, because it is one of the most selective properties
   // of the certificate due to SHA-1 deprecation and the deprecation of
   // certificates with keys weaker than RSA 2048.
-  Reader spki(cert.GetSubjectPublicKeyInfo());
-  rv = der::Nested(spki, der::SEQUENCE, [&](Reader& r) {
-    return CheckSubjectPublicKeyInfo(r, trustDomain, endEntityOrCA);
-  });
+  rv = CheckSubjectPublicKeyInfo(cert.GetSubjectPublicKeyInfo(), trustDomain,
+                                 endEntityOrCA);
   if (rv != Success) {
     return rv;
   }
-  rv = der::End(spki);
+
+  // 4.1.2.4. Issuer
+  rv = CheckIssuer(cert.GetIssuer());
   if (rv != Success) {
     return rv;
   }
@@ -1012,7 +1069,7 @@ CheckIssuerIndependentProperties(TrustDomain& trustDomain,
 
   // 4.2.1.12. Extended Key Usage
   rv = CheckExtendedKeyUsage(endEntityOrCA, cert.GetExtKeyUsage(),
-                             requiredEKUIfPresent);
+                             requiredEKUIfPresent, trustDomain, notBefore);
   if (rv != Success) {
     return rv;
   }

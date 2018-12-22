@@ -32,16 +32,16 @@ class FixedList
     { }
 
     // Dynamic memory allocation requires the ability to report failure.
-    MOZ_WARN_UNUSED_RESULT bool init(TempAllocator& alloc, size_t length) {
-        length_ = length;
+    MOZ_MUST_USE bool init(TempAllocator& alloc, size_t length) {
         if (length == 0)
             return true;
 
-        size_t bytes;
-        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(length, &bytes)))
+        list_ = alloc.allocateArray<T>(length);
+        if (!list_)
             return false;
-        list_ = (T*)alloc.allocate(bytes);
-        return list_ != nullptr;
+
+        length_ = length;
+        return true;
     }
 
     size_t empty() const {
@@ -57,7 +57,7 @@ class FixedList
         length_ -= num;
     }
 
-    MOZ_WARN_UNUSED_RESULT bool growBy(TempAllocator& alloc, size_t num) {
+    MOZ_MUST_USE bool growBy(TempAllocator& alloc, size_t num) {
         size_t newlength = length_ + num;
         if (newlength < length_)
             return false;
@@ -83,6 +83,10 @@ class FixedList
     const T& operator [](size_t index) const {
         MOZ_ASSERT(index < length_);
         return list_[index];
+    }
+
+    T* data() {
+        return list_;
     }
 
     T* begin() {

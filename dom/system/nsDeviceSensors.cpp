@@ -7,13 +7,11 @@
 #include "mozilla/Hal.h"
 #include "mozilla/HalSensor.h"
 
+#include "nsContentUtils.h"
 #include "nsDeviceSensors.h"
 
-#include "nsAutoPtr.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMDocument.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIServiceManager.h"
 #include "nsIServiceManager.h"
@@ -24,7 +22,9 @@
 #include "mozilla/dom/DeviceLightEvent.h"
 #include "mozilla/dom/DeviceOrientationEvent.h"
 #include "mozilla/dom/DeviceProximityEvent.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/UserProximityEvent.h"
+#include "mozilla/ErrorResult.h"
 
 #include <cmath>
 
@@ -35,6 +35,12 @@ using namespace hal;
 #undef near
 
 #define DEFAULT_SENSOR_POLL 100
+
+static bool gPrefSensorsEnabled = false;
+static bool gPrefMotionSensorEnabled = false;
+static bool gPrefOrientationSensorEnabled = false;
+static bool gPrefProximitySensorEnabled = false;
+static bool gPrefAmbientLightSensorEnabled = false;
 
 static const nsTArray<nsIDOMWindow*>::index_type NoIndex =
   nsTArray<nsIDOMWindow*>::NoIndex;
@@ -105,7 +111,21 @@ nsDeviceSensors::nsDeviceSensors()
 {
   mIsUserProximityNear = false;
   mLastDOMMotionEventTime = TimeStamp::Now();
-  mEnabled = Preferences::GetBool("device.sensors.enabled", true);
+  Preferences::AddBoolVarCache(&gPrefSensorsEnabled,
+                              "device.sensors.enabled",
+                              true);
+  Preferences::AddBoolVarCache(&gPrefMotionSensorEnabled,
+                              "device.sensors.motion.enabled",
+                              true);
+  Preferences::AddBoolVarCache(&gPrefOrientationSensorEnabled,
+                              "device.sensors.orientation.enabled",
+                              true);
+  Preferences::AddBoolVarCache(&gPrefProximitySensorEnabled,
+                              "device.sensors.proximity.enabled",
+                              false);
+  Preferences::AddBoolVarCache(&gPrefAmbientLightSensorEnabled,
+                              "device.sensors.ambientLight.enabled",
+                              false);
 
   for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
     nsTArray<nsIDOMWindow*> *windows = new nsTArray<nsIDOMWindow*>();
@@ -129,7 +149,7 @@ nsDeviceSensors::~nsDeviceSensors()
 
 NS_IMETHODIMP nsDeviceSensors::HasWindowListener(uint32_t aType, nsIDOMWindow *aWindow, bool *aRetVal)
 {
-  if (!mEnabled)
+  if (!IsSensorAllowedByPref(aType, aWindow))
     *aRetVal = false;
   else
     *aRetVal = mWindowListeners[aType]->IndexOf(aWindow) != NoIndex;
@@ -137,17 +157,17 @@ NS_IMETHODIMP nsDeviceSensors::HasWindowListener(uint32_t aType, nsIDOMWindow *a
   return NS_OK;
 }
 
-class DeviceSensorTestEvent : public nsRunnable
+class DeviceSensorTestEvent : public Runnable
 {
 public:
-  DeviceSensorTestEvent(nsDeviceSensors* aTarget,
-                        uint32_t aType)
-  : mTarget(aTarget)
-  , mType(aType)
+  DeviceSensorTestEvent(nsDeviceSensors* aTarget, uint32_t aType)
+    : mozilla::Runnable("DeviceSensorTestEvent")
+    , mTarget(aTarget)
+    , mType(aType)
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     SensorData sensorData;
     sensorData.sensor() = static_cast<SensorType>(mType);
@@ -156,7 +176,6 @@ public:
     sensorData.values().AppendElement(0.5f);
     sensorData.values().AppendElement(0.5f);
     sensorData.values().AppendElement(0.5f);
-    sensorData.accuracy() = SENSOR_ACCURACY_UNRELIABLE;
     mTarget->Notify(sensorData);
     return NS_OK;
   }
@@ -170,7 +189,7 @@ static bool sTestSensorEvents = false;
 
 NS_IMETHODIMP nsDeviceSensors::AddWindowListener(uint32_t aType, nsIDOMWindow *aWindow)
 {
-  if (!mEnabled)
+  if (!IsSensorAllowedByPref(aType, aWindow))
     return NS_OK;
 
   if (mWindowListeners[aType]->IndexOf(aWindow) != NoIndex)
@@ -222,42 +241,32 @@ NS_IMETHODIMP nsDeviceSensors::RemoveWindowAsListener(nsIDOMWindow *aWindow)
 static bool
 WindowCannotReceiveSensorEvent (nsPIDOMWindowInner* aWindow)
 {
-  // Check to see if this window is in the background.  If
-  // it is and it does not have the "background-sensors" permission,
-  // don't send any device motion events to it.
+  // Check to see if this window is in the background.
   if (!aWindow || !aWindow->IsCurrentInnerWindow()) {
     return true;
   }
 
   bool disabled = aWindow->GetOuterWindow()->IsBackground() ||
-                  !aWindow->IsTopLevelWindowActive();
-  if (!disabled) {
-    nsCOMPtr<nsPIDOMWindowOuter> top = aWindow->GetScriptableTop();
-    nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
-    nsCOMPtr<nsIScriptObjectPrincipal> topSop = do_QueryInterface(top);
-    if (!sop || !topSop) {
-      return true;
-    }
-
-    nsIPrincipal* principal = sop->GetPrincipal();
-    nsIPrincipal* topPrincipal = topSop->GetPrincipal();
-    if (!principal || !topPrincipal) {
-      return true;
-    }
-
-    disabled = !principal->Subsumes(topPrincipal);
-  }
-
+    !aWindow->IsTopLevelWindowActive();
   if (disabled) {
-    nsCOMPtr<nsIPermissionManager> permMgr =
-      services::GetPermissionManager();
-    NS_ENSURE_TRUE(permMgr, true);
-    uint32_t permission = nsIPermissionManager::DENY_ACTION;
-    permMgr->TestPermissionFromWindow(aWindow, "background-sensors", &permission);
-    return permission != nsIPermissionManager::ALLOW_ACTION;
+    return true;
   }
 
-  return false;
+  // Check to see if this window is a cross-origin iframe
+  nsCOMPtr<nsPIDOMWindowOuter> top = aWindow->GetScriptableTop();
+  nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
+  nsCOMPtr<nsIScriptObjectPrincipal> topSop = do_QueryInterface(top);
+  if (!sop || !topSop) {
+    return true;
+  }
+
+  nsIPrincipal* principal = sop->GetPrincipal();
+  nsIPrincipal* topPrincipal = topSop->GetPrincipal();
+  if (!principal || !topPrincipal) {
+    return true;
+  }
+
+  return !principal->Subsumes(topPrincipal);
 }
 
 // Holds the device orientation in Euler angle degrees (azimuth, pitch, roll).
@@ -283,39 +292,51 @@ struct Orientation
 };
 
 static Orientation
-RotationVectorToOrientation(double aX, double aY, double aZ, double aW)
-{
-  static const double kFuzzyOne = 1.0 - 1e-6;
-  static const double kCircleRad = 2.0 * M_PI;
+RotationVectorToOrientation(double aX, double aY, double aZ, double aW) {
+  double mat[9];
 
-  Orientation orient = { 2.0 * std::atan2(aY, aW),
-                         M_PI_2,
-                         0.0 };
+  mat[0] = 1 - 2*aY*aY - 2*aZ*aZ;
+  mat[1] = 2*aX*aY - 2*aZ*aW;
+  mat[2] = 2*aX*aZ + 2*aY*aW;
 
-  const double sqX = aX * aX;
-  const double sqY = aY * aY;
-  const double sqZ = aZ * aZ;
-  const double sqW = aW * aW;
-  const double unitLength = sqX + sqY + sqZ + sqW;
-  const double xwyz = 2.0 * (aX * aW + aY * aZ) / unitLength;
+  mat[3] = 2*aX*aY + 2*aZ*aW;
+  mat[4] = 1 - 2*aX*aX - 2*aZ*aZ;
+  mat[5] = 2*aY*aZ - 2*aX*aW;
 
-  if (xwyz < -kFuzzyOne) {
-    orient.alpha *= -1.0;
-    orient.beta *= -1.0;
-  } else if (xwyz <= kFuzzyOne) {
-    const double gammaX = -sqX - sqY + sqZ + sqW;
-    const double gammaY = 2.0 * (aY * aW - aX * aZ);
-    const double alphaX = -sqX + sqY - sqZ + sqW;
-    const double alphaY = 2.0 * (aZ * aW - aX * aY);
-    const double fac = gammaX > 0 ? 1.0 : -1.0;
+  mat[6] = 2*aX*aZ - 2*aY*aW;
+  mat[7] = 2*aY*aZ + 2*aX*aW;
+  mat[8] = 1 - 2*aX*aX - 2*aY*aY;
 
-    orient.alpha = std::fmod(kCircleRad + std::atan2(fac * alphaY, fac * alphaX),
-                             kCircleRad);
-    orient.beta = fac * std::asin(xwyz);
-    orient.gamma = std::atan2(fac * gammaY, fac * gammaX);
-    if (fac < 0.0) {
-      orient.beta = fmod(M_PI + orient.beta, M_PI);
+  Orientation orient;
+
+  if (mat[8] > 0) {
+    orient.alpha = atan2(-mat[1], mat[4]);
+    orient.beta = asin(mat[7]);
+    orient.gamma = atan2(-mat[6], mat[8]);
+  } else if (mat[8] < 0) {
+    orient.alpha = atan2(mat[1], -mat[4]);
+    orient.beta = -asin(mat[7]);
+    orient.beta += (orient.beta >= 0) ? -M_PI : M_PI;
+    orient.gamma = atan2(mat[6], -mat[8]);
+  } else {
+    if (mat[6] > 0) {
+      orient.alpha = atan2(-mat[1], mat[4]);
+      orient.beta = asin(mat[7]);
+      orient.gamma = -M_PI_2;
+    } else if (mat[6] < 0) {
+      orient.alpha = atan2(mat[1], -mat[4]);
+      orient.beta = -asin(mat[7]);
+      orient.beta += (orient.beta >= 0) ? -M_PI : M_PI;
+      orient.gamma = -M_PI_2;
+    } else {
+      orient.alpha = atan2(mat[3], mat[0]);
+      orient.beta = (mat[7] > 0) ? M_PI_2 : -M_PI_2;
+      orient.gamma = 0;
     }
+  }
+
+  if (orient.alpha < 0) {
+    orient.alpha += 2*M_PI;
   }
 
   return Orientation::RadToDeg(orient);
@@ -347,12 +368,12 @@ nsDeviceSensors::Notify(const mozilla::hal::SensorData& aSensorData)
         continue;
     }
 
-    if (nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(pwindow->GetDoc())) {
+    if (nsCOMPtr<nsIDocument> doc = pwindow->GetDoc()) {
       nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryInterface(windowListeners[i]);
       if (type == nsIDeviceSensorData::TYPE_ACCELERATION ||
         type == nsIDeviceSensorData::TYPE_LINEAR_ACCELERATION ||
         type == nsIDeviceSensorData::TYPE_GYROSCOPE) {
-        FireDOMMotionEvent(domDoc, target, type, timestamp, x, y, z);
+        FireDOMMotionEvent(doc, target, type, timestamp, x, y, z);
       } else if (type == nsIDeviceSensorData::TYPE_ORIENTATION) {
         FireDOMOrientationEvent(target, x, y, z, Orientation::kAbsolute);
       } else if (type == nsIDeviceSensorData::TYPE_ROTATION_VECTOR) {
@@ -379,14 +400,13 @@ nsDeviceSensors::FireDOMLightEvent(mozilla::dom::EventTarget* aTarget,
   DeviceLightEventInit init;
   init.mBubbles = true;
   init.mCancelable = false;
-  init.mValue = aValue;
+  init.mValue = round(aValue);
   RefPtr<DeviceLightEvent> event =
     DeviceLightEvent::Constructor(aTarget, NS_LITERAL_STRING("devicelight"), init);
 
   event->SetTrusted(true);
 
-  bool defaultActionEnabled;
-  aTarget->DispatchEvent(event, &defaultActionEnabled);
+  aTarget->DispatchEvent(*event);
 }
 
 void
@@ -407,8 +427,7 @@ nsDeviceSensors::FireDOMProximityEvent(mozilla::dom::EventTarget* aTarget,
                                       init);
   event->SetTrusted(true);
 
-  bool defaultActionEnabled;
-  aTarget->DispatchEvent(event, &defaultActionEnabled);
+  aTarget->DispatchEvent(*event);
 
   // Some proximity sensors only support a binary near or
   // far measurement. In this case, the sensor should report
@@ -437,8 +456,7 @@ nsDeviceSensors::FireDOMUserProximityEvent(mozilla::dom::EventTarget* aTarget,
 
   event->SetTrusted(true);
 
-  bool defaultActionEnabled;
-  aTarget->DispatchEvent(event, &defaultActionEnabled);
+  aTarget->DispatchEvent(*event);
 }
 
 void
@@ -461,8 +479,7 @@ nsDeviceSensors::FireDOMOrientationEvent(EventTarget* aTarget,
     RefPtr<DeviceOrientationEvent> event =
       DeviceOrientationEvent::Constructor(aEventTarget, aType, init);
     event->SetTrusted(true);
-    bool dummy;
-    aEventTarget->DispatchEvent(event, &dummy);
+    aEventTarget->DispatchEvent(*event);
   };
 
   Dispatch(aTarget, aIsAbsolute ? NS_LITERAL_STRING("absolutedeviceorientation") :
@@ -486,7 +503,7 @@ nsDeviceSensors::FireDOMOrientationEvent(EventTarget* aTarget,
 }
 
 void
-nsDeviceSensors::FireDOMMotionEvent(nsIDOMDocument *domdoc,
+nsDeviceSensors::FireDOMMotionEvent(nsIDocument *doc,
                                     EventTarget* target,
                                     uint32_t type,
                                     PRTime timestamp,
@@ -544,8 +561,12 @@ nsDeviceSensors::FireDOMMotionEvent(nsIDOMDocument *domdoc,
     return;
   }
 
-  nsCOMPtr<nsIDOMEvent> event;
-  domdoc->CreateEvent(NS_LITERAL_STRING("DeviceMotionEvent"), getter_AddRefs(event));
+  IgnoredErrorResult ignored;
+  RefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("DeviceMotionEvent"),
+                                         CallerType::System, ignored);
+  if (!event) {
+    return;
+  }
 
   DeviceMotionEvent* me = static_cast<DeviceMotionEvent*>(event.get());
 
@@ -560,11 +581,73 @@ nsDeviceSensors::FireDOMMotionEvent(nsIDOMDocument *domdoc,
 
   event->SetTrusted(true);
 
-  bool defaultActionEnabled = true;
-  target->DispatchEvent(event, &defaultActionEnabled);
+  target->DispatchEvent(*event);
 
   mLastRotationRate.reset();
   mLastAccelerationIncludingGravity.reset();
   mLastAcceleration.reset();
   mLastDOMMotionEventTime = TimeStamp::Now();
+}
+
+bool
+nsDeviceSensors::IsSensorAllowedByPref(uint32_t aType, nsIDOMWindow* aWindow)
+{
+  // checks "device.sensors.enabled" master pref
+  if (!gPrefSensorsEnabled) {
+    return false;
+  }
+
+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aWindow);
+  nsCOMPtr<nsIDocument> doc;
+  if (window) {
+    doc = window->GetExtantDoc();
+  }
+
+  switch (aType) {
+  case nsIDeviceSensorData::TYPE_LINEAR_ACCELERATION:
+  case nsIDeviceSensorData::TYPE_ACCELERATION:
+  case nsIDeviceSensorData::TYPE_GYROSCOPE:
+    // checks "device.sensors.motion.enabled" pref
+    if (!gPrefMotionSensorEnabled) {
+      return false;
+    } else if (doc) {
+      doc->WarnOnceAbout(nsIDocument::eMotionEvent);
+    }
+    break;
+  case nsIDeviceSensorData::TYPE_GAME_ROTATION_VECTOR:
+  case nsIDeviceSensorData::TYPE_ORIENTATION:
+  case nsIDeviceSensorData::TYPE_ROTATION_VECTOR:
+    // checks "device.sensors.orientation.enabled" pref
+    if (!gPrefOrientationSensorEnabled) {
+      return false;
+    } else if (doc) {
+      doc->WarnOnceAbout(nsIDocument::eOrientationEvent);
+    }
+    break;
+  case nsIDeviceSensorData::TYPE_PROXIMITY:
+    // checks "device.sensors.proximity.enabled" pref
+    if (!gPrefProximitySensorEnabled) {
+      return false;
+    } else if (doc) {
+      doc->WarnOnceAbout(nsIDocument::eProximityEvent, true);
+    }
+    break;
+  case nsIDeviceSensorData::TYPE_LIGHT:
+    // checks "device.sensors.ambientLight.enabled" pref
+    if (!gPrefAmbientLightSensorEnabled) {
+      return false;
+    } else if (doc) {
+      doc->WarnOnceAbout(nsIDocument::eAmbientLightEvent, true);
+    }
+    break;
+  default:
+    MOZ_ASSERT_UNREACHABLE("Device sensor type not recognised");
+    return false;
+  }
+
+  if (!window) {
+    return true;
+  }
+
+  return !nsContentUtils::ShouldResistFingerprinting(window->GetDocShell());
 }

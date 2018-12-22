@@ -1,13 +1,13 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+/* import-globals-from ../../../common/tests/unit/head_helpers.js */
 
-var gSyncProfile;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-gSyncProfile = do_get_profile();
+// Required to avoid failures.
+do_get_profile();
 
 // Init FormHistoryStartup and pretend we opened a profile.
 var fhs = Cc["@mozilla.org/satchel/form-history-startup;1"]
@@ -29,7 +29,7 @@ function getOS() {
   }
 }
 
-Cu.import("resource://testing-common/AppInfo.jsm", this);
+ChromeUtils.import("resource://testing-common/AppInfo.jsm", this);
 updateAppInfo({
   name: "XPCShell",
   ID: "xpcshell@tests.mozilla.org",
@@ -43,8 +43,7 @@ function addResourceAlias() {
   const resProt = Services.io.getProtocolHandler("resource")
                           .QueryInterface(Ci.nsIResProtocolHandler);
   for (let s of ["common", "sync", "crypto"]) {
-    let uri = Services.io.newURI("resource://gre/modules/services-" + s + "/", null,
-                                 null);
+    let uri = Services.io.newURI("resource://gre/modules/services-" + s + "/");
     resProt.setSubstitution("services-" + s, uri);
   }
 }

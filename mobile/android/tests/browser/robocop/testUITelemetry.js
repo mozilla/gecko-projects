@@ -3,9 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+/* eslint-disable mozilla/use-chromeutils-import */
 
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -17,8 +15,7 @@ const EVENT_TEST4 = "_test_event_4.1";
 const METHOD_TEST1 = "_test_method_1";
 const METHOD_TEST2 = "_test_method_2";
 
-// Method.NONE is converted to an empty string after a few JSON stringifications
-const METHOD_NONE = "";
+const METHOD_NONE = null;
 
 const REASON_TEST1 = "_test_reason_1";
 const REASON_TEST2 = "_test_reason_2";
@@ -59,9 +56,7 @@ function do_check_measurement_eq(m1, m2) {
 }
 
 function getObserver() {
-  let bridge = Cc["@mozilla.org/android/bridge;1"]
-                 .getService(Ci.nsIAndroidBridge);
-  let obsXPCOM = bridge.browserApp.getUITelemetryObserver();
+  let obsXPCOM = Services.androidBridge.browserApp.getUITelemetryObserver();
   do_check_true(!!obsXPCOM);
   return obsXPCOM.wrappedJSObject;
 }
@@ -93,7 +88,7 @@ add_test(function test_telemetry_events() {
   let obs = getObserver();
   let measurements = removeNonTestMeasurements(obs.getUIMeasurements(clearMeasurements));
 
-  measurements.forEach(function (m, i) {
+  measurements.forEach(function(m, i) {
     if (m.type === "event") {
       m.sessions = removeNonTestSessions(m.sessions);
       m.sessions.sort(); // Mutates.
@@ -102,7 +97,7 @@ add_test(function test_telemetry_events() {
     do_check_measurement_eq(expected[i], m);
   });
 
-  expected.forEach(function (m, i) {
+  expected.forEach(function(m, i) {
     do_check_measurement_eq(m, measurements[i]);
   });
 
@@ -114,7 +109,7 @@ add_test(function test_telemetry_events() {
  * for less typing when initializing the expected arrays.
  */
 function expectedArraysToObjs(expectedArrays) {
-  return expectedArrays.map(function (arr) {
+  return expectedArrays.map(function(arr) {
     let type = arr[0];
     if (type === "event") {
       return {
@@ -136,7 +131,7 @@ function expectedArraysToObjs(expectedArrays) {
 }
 
 function removeNonTestMeasurements(measurements) {
-  return measurements.filter(function (measurement) {
+  return measurements.filter(function(measurement) {
     if (measurement.type === "event") {
       return measurement.action.startsWith("_test_event_");
     } else if (measurement.type === "session") {
@@ -147,7 +142,7 @@ function removeNonTestMeasurements(measurements) {
 }
 
 function removeNonTestSessions(sessions) {
-  return sessions.filter(function (sessionName) {
+  return sessions.filter(function(sessionName) {
     return sessionName.startsWith("_test_session_");
   });
 }

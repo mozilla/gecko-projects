@@ -2,155 +2,11 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-function* runTests(options) {
-  function background(getTests) {
-    let tabs;
-    let tests;
+Services.scriptloader.loadSubScript(new URL("head_pageAction.js", gTestPath).href,
+                                    this);
 
-    // Gets the current details of the page action, and returns a
-    // promise that resolves to an object containing them.
-    function getDetails() {
-      return new Promise(resolve => {
-        return browser.tabs.query({active: true, currentWindow: true}, resolve);
-      }).then(([tab]) => {
-        let tabId = tab.id;
-        browser.test.log(`Get details: tab={id: ${tabId}, url: ${JSON.stringify(tab.url)}}`);
-        return Promise.all([
-          browser.pageAction.getTitle({tabId}),
-          browser.pageAction.getPopup({tabId})]);
-      }).then(details => {
-        return Promise.resolve({title: details[0],
-                                popup: details[1]});
-      });
-    }
-
-
-    // Runs the next test in the `tests` array, checks the results,
-    // and passes control back to the outer test scope.
-    function nextTest() {
-      let test = tests.shift();
-
-      test(expecting => {
-        function finish() {
-          // Check that the actual icon has the expected values, then
-          // run the next test.
-          browser.test.sendMessage("nextTest", expecting, tests.length);
-        }
-
-        if (expecting) {
-          // Check that the API returns the expected values, and then
-          // run the next test.
-          getDetails().then(details => {
-            browser.test.assertEq(expecting.title, details.title,
-                                  "expected value from getTitle");
-
-            browser.test.assertEq(expecting.popup, details.popup,
-                                  "expected value from getPopup");
-
-            finish();
-          });
-        } else {
-          finish();
-        }
-      });
-    }
-
-    function runTests() {
-      tabs = [];
-      tests = getTests(tabs);
-
-      browser.tabs.query({active: true, currentWindow: true}, resultTabs => {
-        tabs[0] = resultTabs[0].id;
-
-        nextTest();
-      });
-    }
-
-    browser.test.onMessage.addListener((msg) => {
-      if (msg == "runTests") {
-        runTests();
-      } else if (msg == "runNextTest") {
-        nextTest();
-      } else {
-        browser.test.fail(`Unexpected message: ${msg}`);
-      }
-    });
-
-    runTests();
-  }
-
-  let extension = ExtensionTestUtils.loadExtension({
-    manifest: options.manifest,
-
-    files: options.files || {},
-
-    background: `(${background})(${options.getTests})`,
-  });
-
-  let pageActionId = makeWidgetId(extension.id) + "-page-action";
-  let currentWindow = window;
-  let windows = [];
-
-  function checkDetails(details) {
-    let image = currentWindow.document.getElementById(pageActionId);
-    if (details == null) {
-      ok(image == null || image.hidden, "image is hidden");
-    } else {
-      ok(image, "image exists");
-
-      is(image.src, details.icon, "icon URL is correct");
-
-      let title = details.title || options.manifest.name;
-      is(image.getAttribute("tooltiptext"), title, "image title is correct");
-      is(image.getAttribute("aria-label"), title, "image aria-label is correct");
-      // TODO: Popup URL.
-    }
-  }
-
-  let testNewWindows = 1;
-
-  let awaitFinish = new Promise(resolve => {
-    extension.onMessage("nextTest", (expecting, testsRemaining) => {
-      checkDetails(expecting);
-
-      if (testsRemaining) {
-        extension.sendMessage("runNextTest");
-      } else if (testNewWindows) {
-        testNewWindows--;
-
-        BrowserTestUtils.openNewBrowserWindow().then(window => {
-          windows.push(window);
-          currentWindow = window;
-          return focusWindow(window);
-        }).then(() => {
-          extension.sendMessage("runTests");
-        });
-      } else {
-        resolve();
-      }
-    });
-  });
-
-  yield extension.startup();
-
-  yield awaitFinish;
-
-  yield extension.unload();
-
-  let node = document.getElementById(pageActionId);
-  is(node, null, "pageAction image removed from document");
-
-  currentWindow = null;
-  for (let win of windows.splice(0)) {
-    node = win.document.getElementById(pageActionId);
-    is(node, null, "pageAction image removed from second document");
-
-    yield BrowserTestUtils.closeWindow(win);
-  }
-}
-
-add_task(function* testTabSwitchContext() {
-  yield runTests({
+add_task(async function testTabSwitchContext() {
+  await runTests({
     manifest: {
       "name": "Foo Extension",
 
@@ -177,22 +33,39 @@ add_task(function* testTabSwitchContext() {
           "description": "Title",
         },
       },
+
+      "_locales/es_ES/messages.json": {
+        "popup": {
+          "message": "default.html",
+          "description": "Popup",
+        },
+
+        "title": {
+          "message": "T\u00edtulo",
+          "description": "Title",
+        },
+      },
+
+      "default.png": imageBuffer,
+      "1.png": imageBuffer,
+      "2.png": imageBuffer,
     },
 
-    getTests(tabs) {
+    getTests: function(tabs) {
+      let defaultIcon = "chrome://browser/content/extension.svg";
       let details = [
         {"icon": browser.runtime.getURL("default.png"),
          "popup": browser.runtime.getURL("default.html"),
-         "title": "Default Title \u263a"},
+         "title": "Default T\u00edtulo \u263a"},
         {"icon": browser.runtime.getURL("1.png"),
          "popup": browser.runtime.getURL("default.html"),
-         "title": "Default Title \u263a"},
+         "title": "Default T\u00edtulo \u263a"},
         {"icon": browser.runtime.getURL("2.png"),
          "popup": browser.runtime.getURL("2.html"),
          "title": "Title 2"},
-        {"icon": browser.runtime.getURL("2.png"),
-         "popup": browser.runtime.getURL("2.html"),
-         "title": "Default Title \u263a"},
+        {"icon": defaultIcon,
+         "popup": "",
+         "title": ""},
       ];
 
       let promiseTabLoad = details => {
@@ -205,16 +78,15 @@ add_task(function* testTabSwitchContext() {
           });
         });
       };
-      let tabLoadPromise;
 
       return [
         expect => {
           browser.test.log("Initial state. No icon visible.");
           expect(null);
         },
-        expect => {
+        async expect => {
           browser.test.log("Show the icon on the first tab, expect default properties.");
-          browser.pageAction.show(tabs[0]);
+          await browser.pageAction.show(tabs[0]);
           expect(details[0]);
         },
         expect => {
@@ -222,74 +94,104 @@ add_task(function* testTabSwitchContext() {
           browser.pageAction.setIcon({tabId: tabs[0], path: "1.png"});
           expect(details[1]);
         },
-        expect => {
+        async expect => {
           browser.test.log("Create a new tab. No icon visible.");
-          browser.tabs.create({active: true, url: "about:blank?0"}, tab => {
-            tabLoadPromise = promiseTabLoad({url: "about:blank?0", id: tab.id});
-            tabs.push(tab.id);
-            expect(null);
-          });
+          let tab = await browser.tabs.create({active: true, url: "about:blank?0"});
+          tabs.push(tab.id);
+          expect(null);
         },
-        expect => {
+        async expect => {
           browser.test.log("Await tab load. No icon visible.");
-          tabLoadPromise.then(() => {
-            expect(null);
-          });
+          let promise = promiseTabLoad({id: tabs[1], url: "about:blank?0"});
+          let {url} = await browser.tabs.get(tabs[1]);
+          if (url === "about:blank") {
+            await promise;
+          }
+          expect(null);
         },
-        expect => {
+        async expect => {
           browser.test.log("Change properties. Expect new properties.");
           let tabId = tabs[1];
-          browser.pageAction.show(tabId);
+          await browser.pageAction.show(tabId);
+
           browser.pageAction.setIcon({tabId, path: "2.png"});
           browser.pageAction.setPopup({tabId, popup: "2.html"});
           browser.pageAction.setTitle({tabId, title: "Title 2"});
 
           expect(details[2]);
         },
+        async expect => {
+          browser.test.log("Change the hash. Expect same properties.");
+
+          let promise = promiseTabLoad({id: tabs[1], url: "about:blank?0#ref"});
+          browser.tabs.update(tabs[1], {url: "about:blank?0#ref"});
+          await promise;
+
+          expect(details[2]);
+        },
         expect => {
-          browser.test.log("Clear the title. Expect default title.");
+          browser.test.log("Set empty string values. Expect empty strings but default icon.");
+          browser.pageAction.setIcon({tabId: tabs[1], path: ""});
+          browser.pageAction.setPopup({tabId: tabs[1], popup: ""});
           browser.pageAction.setTitle({tabId: tabs[1], title: ""});
 
           expect(details[3]);
         },
         expect => {
+          browser.test.log("Clear the values. Expect default ones.");
+          browser.pageAction.setIcon({tabId: tabs[1], path: null});
+          browser.pageAction.setPopup({tabId: tabs[1], popup: null});
+          browser.pageAction.setTitle({tabId: tabs[1], title: null});
+
+          expect(details[0]);
+        },
+        async expect => {
           browser.test.log("Navigate to a new page. Expect icon hidden.");
 
           // TODO: This listener should not be necessary, but the |tabs.update|
           // callback currently fires too early in e10s windows.
-          promiseTabLoad({id: tabs[1], url: "about:blank?1"}).then(() => {
-            expect(null);
-          });
+          let promise = promiseTabLoad({id: tabs[1], url: "about:blank?1"});
 
           browser.tabs.update(tabs[1], {url: "about:blank?1"});
+
+          await promise;
+          expect(null);
         },
-        expect => {
+        async expect => {
           browser.test.log("Show the icon. Expect default properties again.");
-          browser.pageAction.show(tabs[1]);
+
+          await browser.pageAction.show(tabs[1]);
           expect(details[0]);
         },
-        expect => {
+        async expect => {
           browser.test.log("Switch back to the first tab. Expect previously set properties.");
-          browser.tabs.update(tabs[0], {active: true}, () => {
-            expect(details[1]);
-          });
+          await browser.tabs.update(tabs[0], {active: true});
+          expect(details[1]);
         },
-        expect => {
+        async expect => {
           browser.test.log("Hide the icon on tab 2. Switch back, expect hidden.");
-          browser.pageAction.hide(tabs[1]);
-          browser.tabs.update(tabs[1], {active: true}, () => {
-            expect(null);
-          });
+          await browser.pageAction.hide(tabs[1]);
+
+          await browser.tabs.update(tabs[1], {active: true});
+          expect(null);
         },
-        expect => {
+        async expect => {
           browser.test.log("Switch back to tab 1. Expect previous results again.");
-          browser.tabs.remove(tabs[1], () => {
-            expect(details[1]);
-          });
+          await browser.tabs.remove(tabs[1]);
+          expect(details[1]);
         },
-        expect => {
+        async expect => {
           browser.test.log("Hide the icon. Expect hidden.");
-          browser.pageAction.hide(tabs[0]);
+
+          await browser.pageAction.hide(tabs[0]);
+          expect(null);
+        },
+        async expect => {
+          browser.test.assertRejects(
+            browser.pageAction.setPopup({tabId: tabs[0], popup: "about:addons"}),
+            /Access denied for URL about:addons/,
+            "unable to set popup to about:addons");
+
           expect(null);
         },
       ];
@@ -297,49 +199,169 @@ add_task(function* testTabSwitchContext() {
   });
 });
 
-add_task(function* testDefaultTitle() {
-  yield runTests({
+add_task(async function testMultipleWindows() {
+  await runTests({
     manifest: {
-      "name": "Foo Extension",
-
       "page_action": {
-        "default_icon": "icon.png",
+        "default_icon": "default.png",
+        "default_popup": "default.html",
+        "default_title": "Default Title",
       },
-
-      "permissions": ["tabs"],
     },
 
-    getTests(tabs) {
+    "files": {
+      "default.png": imageBuffer,
+      "tab.png": imageBuffer,
+    },
+
+    getTests: function(tabs, windows) {
       let details = [
-        {"title": "Foo Extension",
-         "popup": "",
-         "icon": browser.runtime.getURL("icon.png")},
-        {"title": "Foo Title",
-         "popup": "",
-         "icon": browser.runtime.getURL("icon.png")},
+        {"icon": browser.runtime.getURL("default.png"),
+         "popup": browser.runtime.getURL("default.html"),
+         "title": "Default Title"},
+        {"icon": browser.runtime.getURL("tab.png"),
+         "popup": browser.runtime.getURL("tab.html"),
+         "title": "tab"},
       ];
 
       return [
-        expect => {
-          browser.test.log("Initial state. No icon visible.");
+        async expect => {
+          browser.test.log("Create a new tab, expect hidden pageAction.");
+          let tab = await browser.tabs.create({active: true});
+          tabs.push(tab.id);
           expect(null);
         },
-        expect => {
-          browser.test.log("Show the icon on the first tab, expect extension title as default title.");
-          browser.pageAction.show(tabs[0]);
+        async expect => {
+          browser.test.log("Show the pageAction, expect default values.");
+          await browser.pageAction.show(tabs[1]);
           expect(details[0]);
         },
-        expect => {
-          browser.test.log("Change the title. Expect new title.");
-          browser.pageAction.setTitle({tabId: tabs[0], title: "Foo Title"});
+        async expect => {
+          browser.test.log("Set tab-specific values, expect them.");
+          await browser.pageAction.setIcon({tabId: tabs[1], path: "tab.png"});
+          await browser.pageAction.setPopup({tabId: tabs[1], popup: "tab.html"});
+          await browser.pageAction.setTitle({tabId: tabs[1], title: "tab"});
           expect(details[1]);
         },
-        expect => {
-          browser.test.log("Clear the title. Expect extension title.");
-          browser.pageAction.setTitle({tabId: tabs[0], title: ""});
-          expect(details[0]);
+        async expect => {
+          browser.test.log("Open a new window, expect hidden pageAction.");
+          let {id} = await browser.windows.create();
+          windows.push(id);
+          expect(null);
+        },
+        async expect => {
+          browser.test.log("Move tab from old window to the new one, expect old values.");
+          await browser.tabs.move(tabs[1], {windowId: windows[1], index: -1});
+          await browser.tabs.update(tabs[1], {active: true});
+          expect(details[1]);
+        },
+        async expect => {
+          browser.test.log("Close the initial tab of the new window.");
+          let [{id}] = await browser.tabs.query({windowId: windows[1], index: 0});
+          await browser.tabs.remove(id);
+          expect(details[1]);
+        },
+        async expect => {
+          browser.test.log("Move the previous tab to a 3rd window, the 2nd one will close.");
+          await browser.windows.create({tabId: tabs[1]});
+          expect(details[1]);
+        },
+        async expect => {
+          browser.test.log("Close the tab, go back to the 1st window.");
+          await browser.tabs.remove(tabs[1]);
+          expect(null);
         },
       ];
     },
   });
+});
+
+add_task(async function testNavigationClearsData() {
+  let url = "http://example.com/";
+  let default_title = "Default title";
+  let tab_title = "Tab title";
+
+  let {Management: {global: {tabTracker}}} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
+  let extension, tabs = [];
+  async function addTab(...args) {
+    let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, ...args);
+    tabs.push(tab);
+    return tab;
+  }
+  async function sendMessage(method, param, expect, msg) {
+    extension.sendMessage({method, param, expect, msg});
+    await extension.awaitMessage("done");
+  }
+  async function expectTabSpecificData(tab, msg) {
+    let tabId = tabTracker.getId(tab);
+    await sendMessage("isShown", {tabId}, true, msg);
+    await sendMessage("getTitle", {tabId}, tab_title, msg);
+  }
+  async function expectDefaultData(tab, msg) {
+    let tabId = tabTracker.getId(tab);
+    await sendMessage("isShown", {tabId}, false, msg);
+    await sendMessage("getTitle", {tabId}, default_title, msg);
+  }
+  async function setTabSpecificData(tab) {
+    let tabId = tabTracker.getId(tab);
+    await expectDefaultData(tab, "Expect default data before setting tab-specific data.");
+    await sendMessage("show", tabId);
+    await sendMessage("setTitle", {tabId, title: tab_title});
+    await expectTabSpecificData(tab, "Expect tab-specific data after setting it.");
+  }
+
+  info("Load a tab before installing the extension");
+  let tab1 = await addTab(url, true, true);
+
+  extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      page_action: {default_title},
+    },
+    background: function() {
+      browser.test.onMessage.addListener(async ({method, param, expect, msg}) => {
+        let result = await browser.pageAction[method](param);
+        if (expect !== undefined) {
+          browser.test.assertEq(expect, result, msg);
+        }
+        browser.test.sendMessage("done");
+      });
+    },
+  });
+  await extension.startup();
+
+  info("Set tab-specific data to the existing tab.");
+  await setTabSpecificData(tab1);
+
+  info("Add a hash. Does not cause navigation.");
+  await navigateTab(tab1, url + "#hash");
+  await expectTabSpecificData(tab1, "Adding a hash does not clear tab-specific data");
+
+  info("Remove the hash. Causes navigation.");
+  await navigateTab(tab1, url);
+  await expectDefaultData(tab1, "Removing hash clears tab-specific data");
+
+  info("Open a new tab, set tab-specific data to it.");
+  let tab2 = await addTab("about:newtab", false, false);
+  await setTabSpecificData(tab2);
+
+  info("Load a page in that tab.");
+  await navigateTab(tab2, url);
+  await expectDefaultData(tab2, "Loading a page clears tab-specific data.");
+
+  info("Set tab-specific data.");
+  await setTabSpecificData(tab2);
+
+  info("Push history state. Does not cause navigation.");
+  await historyPushState(tab2, url + "/path");
+  await expectTabSpecificData(tab2, "history.pushState() does not clear tab-specific data");
+
+  info("Navigate when the tab is not selected");
+  gBrowser.selectedTab = tab1;
+  await navigateTab(tab2, url);
+  await expectDefaultData(tab2, "Navigating clears tab-specific data, even when not selected.");
+
+  for (let tab of tabs) {
+    BrowserTestUtils.removeTab(tab);
+  }
+  await extension.unload();
 });

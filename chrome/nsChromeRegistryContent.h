@@ -33,9 +33,8 @@ class nsChromeRegistryContent : public nsChromeRegistry
   NS_IMETHOD IsLocaleRTL(const nsACString& package,
                          bool *aResult) override;
   NS_IMETHOD GetSelectedLocale(const nsACString& aPackage,
+                               bool aAsBCP47,
                                nsACString& aLocale) override;
-  NS_IMETHOD GetStyleOverlays(nsIURI *aChromeURL,
-                              nsISimpleEnumerator **aResult) override;
   NS_IMETHOD GetXULOverlays(nsIURI *aChromeURL,
                             nsISimpleEnumerator **aResult) override;
 
@@ -55,7 +54,6 @@ class nsChromeRegistryContent : public nsChromeRegistry
     uint32_t         flags;
   };
 
-  nsresult UpdateSelectedLocale() override;
   nsIURI* GetBaseURIFromPackage(const nsCString& aPackage,
                      const nsCString& aProvider,
                      const nsCString& aPath) override;
@@ -72,8 +70,6 @@ class nsChromeRegistryContent : public nsChromeRegistry
                             char *const * argv, int flags) override;
   virtual void ManifestOverlay(ManifestProcessingContext& cx, int lineno,
                                char *const * argv, int flags) override;
-  virtual void ManifestStyle(ManifestProcessingContext& cx, int lineno,
-                             char *const * argv, int flags) override;
   virtual void ManifestOverride(ManifestProcessingContext& cx, int lineno,
                                 char *const * argv, int flags) override;
   virtual void ManifestResource(ManifestProcessingContext& cx, int lineno,

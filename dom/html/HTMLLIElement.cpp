@@ -7,11 +7,11 @@
 #include "mozilla/dom/HTMLLIElement.h"
 #include "mozilla/dom/HTMLLIElementBinding.h"
 
+#include "mozilla/MappedDeclarations.h"
 #include "nsAttrValueInlines.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsMappedAttributes.h"
-#include "nsRuleData.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(LI)
 
@@ -22,13 +22,7 @@ HTMLLIElement::~HTMLLIElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLLIElement, nsGenericHTMLElement,
-                            nsIDOMHTMLLIElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLLIElement)
-
-NS_IMPL_STRING_ATTR(HTMLLIElement, Type, type)
-NS_IMPL_INT_ATTR(HTMLLIElement, Value, value)
 
 // values that are handled case-insensitively
 static const nsAttrValue::EnumTable kUnorderedListItemTypeTable[] = {
@@ -36,7 +30,7 @@ static const nsAttrValue::EnumTable kUnorderedListItemTypeTable[] = {
   { "circle", NS_STYLE_LIST_STYLE_CIRCLE },
   { "round", NS_STYLE_LIST_STYLE_CIRCLE },
   { "square", NS_STYLE_LIST_STYLE_SQUARE },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // values that are handled case-sensitively
@@ -46,13 +40,14 @@ static const nsAttrValue::EnumTable kOrderedListItemTypeTable[] = {
   { "I", NS_STYLE_LIST_STYLE_UPPER_ROMAN },
   { "i", NS_STYLE_LIST_STYLE_LOWER_ROMAN },
   { "1", NS_STYLE_LIST_STYLE_DECIMAL },
-  { 0 }
+  { nullptr, 0 }
 };
 
 bool
 HTMLLIElement::ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
+                              nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -67,28 +62,25 @@ HTMLLIElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLLIElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                     nsRuleData* aData)
+                                     MappedDeclarations& aDecls)
 {
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(List)) {
-    nsCSSValue* listStyleType = aData->ValueForListStyleType();
-    if (listStyleType->GetUnit() == eCSSUnit_Null) {
-      // type: enum
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
-      if (value && value->Type() == nsAttrValue::eEnum)
-        listStyleType->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
-    }
+  if (!aDecls.PropertyIsSet(eCSSProperty_list_style_type)) {
+    // type: enum
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
+    if (value && value->Type() == nsAttrValue::eEnum)
+      aDecls.SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
   }
 
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLLIElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLLIElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
     { &nsGkAtoms::type },
@@ -112,7 +104,7 @@ HTMLLIElement::GetAttributeMappingFunction() const
 JSObject*
 HTMLLIElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLLIElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLLIElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

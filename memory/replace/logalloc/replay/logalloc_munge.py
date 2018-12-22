@@ -25,6 +25,7 @@ from collections import (
     deque,
 )
 
+
 class IdMapping(object):
     """Class to map values to ids.
 
@@ -32,6 +33,7 @@ class IdMapping(object):
     When a value is removed, its id is recycled and will be reused for
     subsequent values.
     """
+
     def __init__(self):
         self.id = 1
         self._values = {}
@@ -56,13 +58,18 @@ class IdMapping(object):
         return value == 0 or value in self._values
 
 
-class Ignored(Exception): pass
+class Ignored(Exception):
+    pass
 
 
 def split_log_line(line):
     try:
+        # The format for each line is:
+        # <pid> [<tid>] <function>([<args>])[=<result>]
+        #
+        # The original format didn't include the tid, so we try to parse
+        # lines whether they have one or not.
         pid, func_call = line.split(' ', 1)
-        # func_call format is <function>([<args>])[=<result>]
         call, result = func_call.split(')')
         func, args = call.split('(')
         args = args.split(',') if args else []
@@ -70,8 +77,12 @@ def split_log_line(line):
             if result[0] != '=':
                 raise Ignored('Malformed input')
             result = result[1:]
-        return pid, func, args, result
-    except:
+        if ' ' in func:
+            tid, func = func.split(' ', 1)
+        else:
+            tid = pid
+        return pid, tid, func, args, result
+    except Exception:
         raise Ignored('Malformed input')
 
 
@@ -89,18 +100,22 @@ NUM_ARGUMENTS = {
 
 
 def main():
-    process_pointers = defaultdict(IdMapping)
     pids = IdMapping()
+    processes = defaultdict(lambda: {'pointers': IdMapping(),
+                                     'tids': IdMapping()})
     for line in sys.stdin:
         line = line.strip()
 
         try:
-            pid, func, args, result = split_log_line(line)
+            pid, tid, func, args, result = split_log_line(line)
 
             # Replace pid with an id.
             pid = pids[int(pid)]
 
-            pointers = process_pointers[pid]
+            process = processes[pid]
+            tid = process['tids'][int(tid)]
+
+            pointers = process['pointers']
 
             if func not in NUM_ARGUMENTS:
                 raise Ignored('Unknown function')
@@ -124,8 +139,8 @@ def main():
                     raise Ignored('Result is NULL')
                 result = "#%d" % pointers[result]
 
-            print('%d %s(%s)%s' % (pid, func, ','.join(args),
-                '=%s' % result if result else ''))
+            print('%d %d %s(%s)%s' % (pid, tid, func, ','.join(args),
+                                      '=%s' % result if result else ''))
 
         except Exception as e:
             print('Ignored "%s": %s' % (line, e.message), file=sys.stderr)

@@ -5,7 +5,7 @@
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const name = this.window ? window.location.pathname : "Splendid Test";
 
@@ -38,7 +38,7 @@ function testSteps()
       if (++addedCount == values.length) {
         executeSoon(function() { testGenerator.next(); });
       }
-    }
+    };
   }
   yield undefined;
   yield undefined;
@@ -191,5 +191,4 @@ function testSteps()
   }
 
   finishTest();
-  yield undefined;
 }

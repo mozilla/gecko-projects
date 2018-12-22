@@ -14,17 +14,16 @@
 
 #include <stdarg.h>
 
-#include "jscntxt.h"
-#include "jscompartment.h"
-
 #include "jit/CompileInfo.h"
 #include "jit/JitAllocPolicy.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/MIR.h"
 #ifdef JS_ION_PERF
 # include "jit/PerfSpewer.h"
 #endif
 #include "jit/RegisterSets.h"
+#include "vm/JSContext.h"
+#include "vm/Realm.h"
 
 namespace js {
 namespace jit {
@@ -35,17 +34,12 @@ class OptimizationInfo;
 class MIRGenerator
 {
   public:
-    MIRGenerator(CompileCompartment* compartment, const JitCompileOptions& options,
+    MIRGenerator(CompileRealm* realm, const JitCompileOptions& options,
                  TempAllocator* alloc, MIRGraph* graph,
                  const CompileInfo* info, const OptimizationInfo* optimizationInfo);
 
-    void initUsesSignalHandlersForAsmJSOOB(bool init) {
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-        usesSignalHandlersForAsmJSOOB_ = init;
-#endif
-    }
-    void initMinAsmJSHeapLength(uint32_t init) {
-        minAsmJSHeapLength_ = init;
+    void initMinWasmHeapLength(uint32_t init) {
+        minWasmHeapLength_ = init;
     }
 
     TempAllocator& alloc() {
@@ -54,17 +48,20 @@ class MIRGenerator
     MIRGraph& graph() {
         return *graph_;
     }
-    bool ensureBallast() {
+    MOZ_MUST_USE bool ensureBallast() {
         return alloc().ensureBallast();
     }
     const JitRuntime* jitRuntime() const {
-        return GetJitContext()->runtime->jitRuntime();
+        return runtime->jitRuntime();
     }
     const CompileInfo& info() const {
         return *info_;
     }
     const OptimizationInfo& optimizationInfo() const {
         return *optimizationInfo_;
+    }
+    bool hasProfilingScripts() const {
+        return runtime && runtime->profilingScripts();
     }
 
     template <typename T>
@@ -77,27 +74,42 @@ class MIRGenerator
 
     // Set an error state and prints a message. Returns false so errors can be
     // propagated up.
-    bool abort(const char* message, ...);
-    bool abortFmt(const char* message, va_list ap);
+    mozilla::GenericErrorResult<AbortReason> abort(AbortReason r);
+    mozilla::GenericErrorResult<AbortReason>
+    abort(AbortReason r, const char* message, ...) MOZ_FORMAT_PRINTF(3, 4);
 
-    bool errored() const {
-        return error_;
+    mozilla::GenericErrorResult<AbortReason>
+    abortFmt(AbortReason r, const char* message, va_list ap) MOZ_FORMAT_PRINTF(3, 0);
+
+    // Collect the evaluation result of phases after IonBuilder, such that
+    // off-thread compilation can report what error got encountered.
+    void setOffThreadStatus(AbortReasonOr<Ok> result) {
+        MOZ_ASSERT(offThreadStatus_.isOk());
+        offThreadStatus_ = result;
+    }
+    AbortReasonOr<Ok> getOffThreadStatus() const {
+        return offThreadStatus_;
     }
 
-    bool instrumentedProfiling() {
+    MOZ_MUST_USE bool instrumentedProfiling() {
         if (!instrumentedProfilingIsCached_) {
-            instrumentedProfiling_ = GetJitContext()->runtime->spsProfiler().enabled();
+            instrumentedProfiling_ = runtime->geckoProfiler().enabled();
             instrumentedProfilingIsCached_ = true;
         }
         return instrumentedProfiling_;
     }
 
     bool isProfilerInstrumentationEnabled() {
-        return !compilingAsmJS() && instrumentedProfiling();
+        return !compilingWasm() && instrumentedProfiling();
     }
 
     bool isOptimizationTrackingEnabled() {
-        return isProfilerInstrumentationEnabled() && !info().isAnalysis();
+        return isProfilerInstrumentationEnabled() && !info().isAnalysis() &&
+               !JitOptions.disableOptimizationTracking;
+    }
+
+    bool stringsCanBeInNursery() const {
+        return stringsCanBeInNursery_;
     }
 
     bool safeForMinorGC() const {
@@ -109,50 +121,43 @@ class MIRGenerator
 
     // Whether the main thread is trying to cancel this build.
     bool shouldCancel(const char* why) {
-        maybePause();
         return cancelBuild_;
     }
     void cancel() {
         cancelBuild_ = true;
     }
 
-    void maybePause() {
-        if (pauseBuild_ && *pauseBuild_)
-            PauseCurrentHelperThread();
-    }
-    void setPauseFlag(mozilla::Atomic<bool, mozilla::Relaxed>* pauseBuild) {
-        pauseBuild_ = pauseBuild;
-    }
-
-    void disable() {
-        abortReason_ = AbortReason_Disable;
-    }
-    AbortReason abortReason() {
-        return abortReason_;
-    }
-
-    bool compilingAsmJS() const {
-        return info_->compilingAsmJS();
+    bool compilingWasm() const {
+        return info_->compilingWasm();
     }
 
     uint32_t wasmMaxStackArgBytes() const {
-        MOZ_ASSERT(compilingAsmJS());
+        MOZ_ASSERT(compilingWasm());
         return wasmMaxStackArgBytes_;
     }
     void initWasmMaxStackArgBytes(uint32_t n) {
-        MOZ_ASSERT(compilingAsmJS());
+        MOZ_ASSERT(compilingWasm());
         MOZ_ASSERT(wasmMaxStackArgBytes_ == 0);
         wasmMaxStackArgBytes_ = n;
     }
-    uint32_t minAsmJSHeapLength() const {
-        return minAsmJSHeapLength_;
+    uint32_t minWasmHeapLength() const {
+        return minWasmHeapLength_;
     }
-    void setPerformsCall() {
-        performsCall_ = true;
+
+    void setNeedsOverrecursedCheck() {
+        needsOverrecursedCheck_ = true;
     }
-    bool performsCall() const {
-        return performsCall_;
+    bool needsOverrecursedCheck() const {
+        return needsOverrecursedCheck_;
     }
+
+    void setNeedsStaticStackAlignment() {
+        needsStaticStackAlignment_ = true;
+    }
+    bool needsStaticStackAlignment() const {
+        return needsOverrecursedCheck_;
+    }
+
     // Traverses the graph to find if there's any SIMD instruction. Costful but
     // the value is cached, so don't worry about calling it several times.
     bool usesSimd();
@@ -163,31 +168,31 @@ class MIRGenerator
 
     typedef Vector<ObjectGroup*, 0, JitAllocPolicy> ObjectGroupVector;
 
-    // When abortReason() == AbortReason_PreliminaryObjects, all groups with
+    // When aborting with AbortReason::PreliminaryObjects, all groups with
     // preliminary objects which haven't been analyzed yet.
     const ObjectGroupVector& abortedPreliminaryGroups() const {
         return abortedPreliminaryGroups_;
     }
 
   public:
-    CompileCompartment* compartment;
+    CompileRealm* realm;
+    CompileRuntime* runtime;
 
   protected:
     const CompileInfo* info_;
     const OptimizationInfo* optimizationInfo_;
     TempAllocator* alloc_;
     MIRGraph* graph_;
-    AbortReason abortReason_;
-    bool shouldForceAbort_; // Force AbortReason_Disable
+    AbortReasonOr<Ok> offThreadStatus_;
     ObjectGroupVector abortedPreliminaryGroups_;
-    bool error_;
-    mozilla::Atomic<bool, mozilla::Relaxed>* pauseBuild_;
-    mozilla::Atomic<bool, mozilla::Relaxed> cancelBuild_;
+    mozilla::Atomic<bool, mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> cancelBuild_;
 
     uint32_t wasmMaxStackArgBytes_;
-    bool performsCall_;
+    bool needsOverrecursedCheck_;
+    bool needsStaticStackAlignment_;
     bool usesSimd_;
-    bool usesSimdCached_;
+    bool cachedUsesSimd_;
 
     // Keep track of whether frame arguments are modified during execution.
     // RegAlloc needs to know this as spilling values back to their register
@@ -197,34 +202,21 @@ class MIRGenerator
     bool instrumentedProfiling_;
     bool instrumentedProfilingIsCached_;
     bool safeForMinorGC_;
+    bool stringsCanBeInNursery_;
 
     void addAbortedPreliminaryGroup(ObjectGroup* group);
 
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-    bool usesSignalHandlersForAsmJSOOB_;
-#endif
-    uint32_t minAsmJSHeapLength_;
-
-    void setForceAbort() {
-        shouldForceAbort_ = true;
-    }
-    bool shouldForceAbort() {
-        return shouldForceAbort_;
-    }
+    uint32_t minWasmHeapLength_;
 
 #if defined(JS_ION_PERF)
-    AsmJSPerfSpewer asmJSPerfSpewer_;
+    WasmPerfSpewer wasmPerfSpewer_;
 
   public:
-    AsmJSPerfSpewer& perfSpewer() { return asmJSPerfSpewer_; }
+    WasmPerfSpewer& perfSpewer() { return wasmPerfSpewer_; }
 #endif
 
   public:
     const JitCompileOptions options;
-
-    bool needsAsmJSBoundsCheckBranch(const MAsmJSHeapAccess* access) const;
-    size_t foldableOffsetRange(const MAsmJSHeapAccess* access) const;
-    size_t foldableOffsetRange(bool accessNeedsBoundsCheck, bool atomic) const;
 
   private:
     GraphSpewer gs_;

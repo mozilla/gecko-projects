@@ -26,8 +26,9 @@ public:
     /*
      * Determines whether this Pattern matches the given node.
      */
-    virtual bool matches(const txXPathNode& aNode,
-                          txIMatchContext* aContext) = 0;
+    virtual nsresult matches(const txXPathNode& aNode,
+                             txIMatchContext* aContext,
+                             bool& aMatched) = 0;
 
     /*
      * Returns the default priority of this Pattern.
@@ -86,7 +87,8 @@ public:
 };
 
 #define TX_DECL_PATTERN_BASE \
-    bool matches(const txXPathNode& aNode, txIMatchContext* aContext) override; \
+    nsresult matches(const txXPathNode& aNode, txIMatchContext* aContext, \
+                     bool& aMatched) override; \
     double getDefaultPriority() override; \
     virtual Expr* getSubExprAt(uint32_t aPos) override; \
     virtual void setSubExprAt(uint32_t aPos, Expr* aExpr) override; \
@@ -110,7 +112,7 @@ _class::getSubExprAt(uint32_t aPos)                           \
 void                                                          \
 _class::setSubExprAt(uint32_t aPos, Expr* aExpr)              \
 {                                                             \
-    NS_NOTREACHED("setting bad subexpression index");         \
+    MOZ_ASSERT_UNREACHABLE("setting bad subexpression index");\
 }
 
 #define TX_IMPL_PATTERN_STUBS_NO_SUB_PATTERN(_class)          \
@@ -122,7 +124,7 @@ _class::getSubPatternAt(uint32_t aPos)                        \
 void                                                          \
 _class::setSubPatternAt(uint32_t aPos, txPattern* aPattern)   \
 {                                                             \
-    NS_NOTREACHED("setting bad subexpression index");         \
+    MOZ_ASSERT_UNREACHABLE("setting bad subexpression index");\
 }
 
 class txUnionPattern : public txPattern
@@ -130,7 +132,7 @@ class txUnionPattern : public txPattern
 public:
     nsresult addPattern(txPattern* aPattern)
     {
-        return mLocPathPatterns.AppendElement(aPattern) ? 
+        return mLocPathPatterns.AppendElement(aPattern) ?
             NS_OK : NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -186,18 +188,18 @@ private:
 class txIdPattern : public txPattern
 {
 public:
-    explicit txIdPattern(const nsSubstring& aString);
+    explicit txIdPattern(const nsAString& aString);
 
     TX_DECL_PATTERN;
 
 private:
-    nsCOMArray<nsIAtom> mIds;
+    nsTArray<RefPtr<nsAtom>> mIds;
 };
 
 class txKeyPattern : public txPattern
 {
 public:
-    txKeyPattern(nsIAtom* aPrefix, nsIAtom* aLocalName,
+    txKeyPattern(nsAtom* aPrefix, nsAtom* aLocalName,
                  int32_t aNSID, const nsAString& aValue)
         : mName(aNSID, aLocalName),
 #ifdef TX_TO_STRING
@@ -212,7 +214,7 @@ public:
 private:
     txExpandedName mName;
 #ifdef TX_TO_STRING
-    nsCOMPtr<nsIAtom> mPrefix;
+    RefPtr<nsAtom> mPrefix;
 #endif
     nsString mValue;
 };

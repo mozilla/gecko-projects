@@ -10,21 +10,27 @@
 
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/SharedWorkerBinding.h"
+#include "mozilla/dom/WorkerBinding.h"
+#include "mozilla/Telemetry.h"
 #include "nsContentUtils.h"
 #include "nsIClassInfoImpl.h"
-#include "nsIDOMEvent.h"
 
 #include "RuntimeService.h"
 #include "WorkerPrivate.h"
+
+#ifdef XP_WIN
+#undef PostMessage
+#endif
 
 using mozilla::dom::Optional;
 using mozilla::dom::Sequence;
 using mozilla::dom::MessagePort;
 using namespace mozilla;
-
-USING_WORKERS_NAMESPACE
+using namespace mozilla::dom;
 
 SharedWorker::SharedWorker(nsPIDOMWindowInner* aWindow,
                            WorkerPrivate* aWorkerPrivate,
@@ -46,22 +52,26 @@ SharedWorker::~SharedWorker()
 
 // static
 already_AddRefed<SharedWorker>
-SharedWorker::Constructor(const GlobalObject& aGlobal, JSContext* aCx,
+SharedWorker::Constructor(const GlobalObject& aGlobal,
                           const nsAString& aScriptURL,
-                          const mozilla::dom::Optional<nsAString>& aName,
+                          const StringOrWorkerOptions& aOptions,
                           ErrorResult& aRv)
 {
   AssertIsOnMainThread();
 
-  RuntimeService* rts = RuntimeService::GetOrCreateService();
+  workerinternals::RuntimeService* rts =
+    workerinternals::RuntimeService::GetOrCreateService();
   if (!rts) {
     aRv = NS_ERROR_NOT_AVAILABLE;
     return nullptr;
   }
 
-  nsCString name;
-  if (aName.WasPassed()) {
-    name = NS_ConvertUTF16toUTF8(aName.Value());
+  nsAutoString name;
+  if (aOptions.IsString()) {
+    name = aOptions.GetAsString();
+  } else {
+    MOZ_ASSERT(aOptions.IsWorkerOptions());
+    name = aOptions.GetAsWorkerOptions().mName;
   }
 
   RefPtr<SharedWorker> sharedWorker;
@@ -100,28 +110,25 @@ SharedWorker::Thaw()
   mFrozen = false;
 
   if (!mFrozenEvents.IsEmpty()) {
-    nsTArray<nsCOMPtr<nsIDOMEvent>> events;
+    nsTArray<RefPtr<Event>> events;
     mFrozenEvents.SwapElements(events);
 
     for (uint32_t index = 0; index < events.Length(); index++) {
-      nsCOMPtr<nsIDOMEvent>& event = events[index];
+      RefPtr<Event>& event = events[index];
       MOZ_ASSERT(event);
 
-      nsCOMPtr<nsIDOMEventTarget> target;
-      if (NS_SUCCEEDED(event->GetTarget(getter_AddRefs(target)))) {
-        bool ignored;
-        if (NS_FAILED(target->DispatchEvent(event, &ignored))) {
-          NS_WARNING("Failed to dispatch event!");
-        }
-      } else {
-        NS_WARNING("Failed to get target!");
+      RefPtr<EventTarget> target = event->GetTarget();
+      ErrorResult rv;
+      target->DispatchEvent(*event, rv);
+      if (rv.Failed()) {
+        NS_WARNING("Failed to dispatch event!");
       }
     }
   }
 }
 
 void
-SharedWorker::QueueEvent(nsIDOMEvent* aEvent)
+SharedWorker::QueueEvent(Event* aEvent)
 {
   AssertIsOnMainThread();
   MOZ_ASSERT(aEvent);
@@ -142,7 +149,7 @@ SharedWorker::Close()
 
 void
 SharedWorker::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-                          const Optional<Sequence<JS::Value>>& aTransferable,
+                          const Sequence<JSObject*>& aTransferable,
                           ErrorResult& aRv)
 {
   AssertIsOnMainThread();
@@ -155,7 +162,7 @@ SharedWorker::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 NS_IMPL_ADDREF_INHERITED(SharedWorker, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(SharedWorker, DOMEventTargetHelper)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SharedWorker)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SharedWorker)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(SharedWorker)
@@ -177,23 +184,28 @@ SharedWorker::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   AssertIsOnMainThread();
 
-  return SharedWorkerBinding::Wrap(aCx, this, aGivenProto);
+  return SharedWorker_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsresult
-SharedWorker::PreHandleEvent(EventChainPreVisitor& aVisitor)
+void
+SharedWorker::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   AssertIsOnMainThread();
 
-  nsIDOMEvent*& event = aVisitor.mDOMEvent;
+  if (IsFrozen()) {
+    RefPtr<Event> event = aVisitor.mDOMEvent;
+    if (!event) {
+      event = EventDispatcher::CreateEvent(aVisitor.mEvent->mOriginalTarget,
+                                           aVisitor.mPresContext,
+                                           aVisitor.mEvent, EmptyString());
+    }
 
-  if (IsFrozen() && event) {
     QueueEvent(event);
 
     aVisitor.mCanHandle = false;
-    aVisitor.mParentTarget = nullptr;
-    return NS_OK;
+    aVisitor.SetParentTarget(nullptr, false);
+    return;
   }
 
-  return DOMEventTargetHelper::PreHandleEvent(aVisitor);
+  DOMEventTargetHelper::GetEventTargetParent(aVisitor);
 }

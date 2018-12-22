@@ -10,10 +10,11 @@
 %}
 
 interface xpcIJSWeakReference;
-interface nsIAddonInterposition;
 interface nsIClassInfo;
 interface nsIComponentManager;
 interface nsICycleCollectorListener;
+interface nsIFile;
+interface nsIURI;
 interface nsIJSCID;
 interface nsIJSIID;
 interface nsIPrincipal;
@@ -44,6 +45,8 @@ interface nsIXPCComponents_Interfaces : nsISupports
 [scriptable, uuid(978ff520-d26c-11d2-9842-006008962422)]
 interface nsIXPCComponents_Classes : nsISupports
 {
+  // Make it so that |cid| gets mapped to |idString|.
+  void initialize(in nsIJSCID cid, in string idString);
 };
 
 /**
@@ -121,6 +124,15 @@ interface ScheduledGCCallback : nsISupports
 };
 
 /**
+ * Interface for callback to be passed to Cu.blockThreadedExecution.
+ */
+[scriptable, function, uuid(c3b85a5c-c328-47d4-aaaf-384c4ff9d77d)]
+interface nsIBlockThreadedExecutionCallback : nsISupports
+{
+    void callback();
+};
+
+/**
 * interface of Components.utils
 */
 [scriptable, uuid(86003fe3-ee9a-4620-91dc-eef8b1e58815)]
@@ -136,8 +148,12 @@ interface nsIXPCComponents_Utils : nsISupports
      * It must be called with one param, usually an object which was caught by
      * an exception handler.  If it is not a JS error object, the parameter
      * is converted to a string and reported as a new error.
+     *
+     * If called with two parameters, and the first parameter is not an
+     * object, the second parameter is used as the stack for the error report.
      */
-    [implicit_jscontext] void reportError(in jsval error);
+    [implicit_jscontext]
+    void reportError(in jsval error, [optional] in jsval stack);
 
     readonly attribute nsIXPCComponents_utils_Sandbox Sandbox;
 
@@ -158,19 +174,6 @@ interface nsIXPCComponents_Utils : nsISupports
                         [optional] in jsval version,
                         [optional] in AUTF8String filename,
                         [optional] in long lineNo);
-
-    /*
-     * getSandboxAddonId is designed to be called from JavaScript only.
-     *
-     * getSandboxAddonId retrieves the add-on ID associated with
-     * a sandbox object. It will return undefined if there
-     * is no add-on ID attached to the sandbox.
-     *
-     * var s = C.u.Sandbox(..., { addonId: "123" });
-     * var id = C.u.getSandboxAddonId(s);
-     */
-    [implicit_jscontext]
-    jsval getSandboxAddonId(in jsval sandbox);
 
     /*
      * getSandboxMetadata is designed to be called from JavaScript only.
@@ -226,8 +229,6 @@ interface nsIXPCComponents_Utils : nsISupports
      * pointing to the same file will not cause the module to be re-evaluated,
      * but the symbols in EXPORTED_SYMBOLS will be exported into the
      * specified target object and the global object returned as above.
-     *
-     * (This comment is duplicated from xpcIJSModuleLoader.)
      */
     [implicit_jscontext,optional_argc]
     jsval import(in AUTF8String aResourceURI, [optional] in jsval targetObj);
@@ -483,22 +484,6 @@ interface nsIXPCComponents_Utils : nsISupports
     void forcePermissiveCOWs();
 
     /*
-     * Forces the usage of a privileged |Components| object for a potentially-
-     * unprivileged scope. This will crash if used outside of automation.
-     */
-    [implicit_jscontext]
-    void forcePrivilegedComponentsForScope(in jsval vscope);
-
-    /*
-     * This seemingly-paradoxical API allows privileged code to explicitly give
-     * unprivileged code a reference to its own Components object (whereas it's
-     * normally hidden away on a scope chain visible only to XBL methods). See
-     * also SpecialPowers.getComponents.
-     */
-    [implicit_jscontext]
-    jsval getComponentsForScope(in jsval vscope);
-
-    /*
      * Dispatches a runnable to the current/main thread. If |scope| is passed,
      * the runnable will be dispatch in the compartment of |scope|, which
      * affects which error reporter gets called.
@@ -528,6 +513,12 @@ interface nsIXPCComponents_Utils : nsISupports
 
     [implicit_jscontext]
     attribute boolean ion;
+
+    // Returns true if we're running in automation and certain security
+    // restrictions can be eased.
+    readonly attribute boolean isInAutomation;
+
+    void crashIfNotInAutomation();
 
     [implicit_jscontext]
     void setGCZeal(in long zeal);
@@ -612,7 +603,7 @@ interface nsIXPCComponents_Utils : nsISupports
       * watchdog-related event occured.
       *
       * Valid categories:
-      *   "RuntimeStateChange"      - Runtime switching between active and inactive states
+      *   "ContextStateChange"      - Context switching between active and inactive states
       *   "WatchdogWakeup"          - Watchdog waking up from sleeping
       *   "WatchdogHibernateStart"  - Watchdog begins hibernating
       *   "WatchdogHibernateStop"   - Watchdog stops hibernating
@@ -660,7 +651,7 @@ interface nsIXPCComponents_Utils : nsISupports
 
     /*
      * Gets the URI or identifier string associated with an object's
-     * compartment (the same one used by the memory reporter machinery).
+     * realm (the same one used by the memory reporter machinery).
      *
      * Unwraps cross-compartment wrappers first.
      *
@@ -668,29 +659,54 @@ interface nsIXPCComponents_Utils : nsISupports
      * this from addon code.
      */
     [implicit_jscontext]
-    ACString getCompartmentLocation(in jsval obj);
-
-    [implicit_jscontext]
-    void setAddonInterposition(in ACString addonId, in nsIAddonInterposition interposition);
-
-    /*
-     * Enables call interpositions from addon scopes to any functions in the scope of |target|.
-     */
-    [implicit_jscontext]
-    void setAddonCallInterposition(in jsval target);
+    ACString getRealmLocation(in jsval obj);
 
     /*
      * Return a fractional number of milliseconds from process
      * startup, measured with a monotonic clock.
      */
     double now();
+
+    /*
+     * Reads the given file and returns its contents. If called during early
+     * startup, the file will be pre-read on a background thread during profile
+     * startup so its contents will be available the next time they're read.
+     *
+     * The file must be a text file encoded in UTF-8. Otherwise the result is
+     * undefined.
+     */
+    AUTF8String readUTF8File(in nsIFile file);
+
+    /*
+     * Reads the given local file URL and returns its contents. This has the
+     * same semantics of readUTF8File.
+     */
+    AUTF8String readUTF8URI(in nsIURI url);
+
+    /**
+     * If the main thread is using any kind of fancy cooperative
+     * scheduling (e.g., Quantum DOM scheduling),
+     * blockThreadedExecution disables it temporarily. The
+     * aBlockedCallback is called when it has been completely disabled
+     * and events are back to running sequentially on a single main
+     * thread. Calling unblockThreadedExecution will re-enable thread
+     * scheduling of the main thread. Multiple calls to
+     * blockThreadedExecution will require the same number of calls to
+     * unblockThreadedExecution in order to resume cooperative
+     * scheduling.
+     */
+    void blockThreadedExecution(in nsIBlockThreadedExecutionCallback aBlockedCallback);
+    void unblockThreadedExecution();
+
+    /* Give a directive to the record/replay system. */
+    void recordReplayDirective(in long directive);
 };
 
 /**
 * Interface for the 'Components' object.
 *
 * The first interface contains things that are available to non-chrome XBL code
-* that runs in a scope with an nsExpandedPrincipal. The second interface
+* that runs in a scope with an ExpandedPrincipal. The second interface
 * includes members that are only exposed to chrome.
 */
 
@@ -720,12 +736,7 @@ interface nsIXPCComponents : nsIXPCComponentsBase
     readonly attribute nsIXPCComponents_Constructor     Constructor;
 
     [implicit_jscontext]
-    readonly attribute jsval                            lastResult;
-    [implicit_jscontext]
     // A javascript component can set |returnCode| to specify an nsresult to
     // be returned without throwing an exception.
     attribute jsval                                     returnCode;
-
-    /* @deprecated Use Components.utils.reportError instead. */
-    [deprecated, implicit_jscontext] void reportError(in jsval error);
 };

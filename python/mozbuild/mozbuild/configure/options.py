@@ -54,9 +54,26 @@ class OptionValue(tuple):
         return '%s=%s' % (option, ','.join(self))
 
     def __eq__(self, other):
-        if type(other) != type(self):
+        # This is to catch naive comparisons against strings and other
+        # types in moz.configure files, as it is really easy to write
+        # value == 'foo'. We only raise a TypeError for instances that
+        # have content, because value-less instances (like PositiveOptionValue
+        # and NegativeOptionValue) are common and it is trivial to
+        # compare these.
+        if not isinstance(other, tuple) and len(self):
+            raise TypeError('cannot compare a populated %s against an %s; '
+                            'OptionValue instances are tuples - did you mean to '
+                            'compare against member elements using [x]?' % (
+                                type(other).__name__, type(self).__name__))
+
+        # Allow explicit tuples to be compared.
+        if type(other) == tuple:
+            return tuple.__eq__(self, other)
+        # Else we're likely an OptionValue class.
+        elif type(other) != type(self):
             return False
-        return super(OptionValue, self).__eq__(other)
+        else:
+            return super(OptionValue, self).__eq__(other)
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -117,13 +134,16 @@ class Option(object):
       or '--without-', the implied default is a NegativeOptionValue.
     - `choices` restricts the set of values that can be given to the option.
     - `help` is the option description for use in the --help output.
+    - `possible_origins` is a tuple of strings that are origins accepted for
+      this option. Example origins are 'mozconfig', 'implied', and 'environment'.
     '''
     __slots__ = (
         'id', 'prefix', 'name', 'env', 'nargs', 'default', 'choices', 'help',
+        'possible_origins',
     )
 
     def __init__(self, name=None, env=None, nargs=None, default=None,
-                 choices=None, help=None):
+                 possible_origins=None, choices=None, help=None):
         if not name and not env:
             raise InvalidOptionError(
                 'At least an option name or an environment variable name must '
@@ -158,6 +178,10 @@ class Option(object):
                 'choices must be a tuple of strings')
         if not help:
             raise InvalidOptionError('A help string must be provided')
+        if possible_origins and not istupleofstrings(possible_origins):
+            raise InvalidOptionError(
+                'possible_origins must be a tuple of strings')
+        self.possible_origins = possible_origins
 
         if name:
             prefix, name, values = self.split_option(name)
@@ -205,12 +229,12 @@ class Option(object):
         self.nargs = nargs
         has_choices = choices is not None
         if isinstance(self.default, PositiveOptionValue):
-            if not self._validate_nargs(len(self.default)):
-                raise InvalidOptionError(
-                    "The given `default` doesn't satisfy `nargs`")
             if has_choices and len(self.default) == 0:
                 raise InvalidOptionError(
                     'A `default` must be given along with `choices`')
+            if not self._validate_nargs(len(self.default)):
+                raise InvalidOptionError(
+                    "The given `default` doesn't satisfy `nargs`")
             if has_choices and not all(d in choices for d in self.default):
                 raise InvalidOptionError(
                     'The `default` value must be one of %s' %
@@ -252,7 +276,7 @@ class Option(object):
                     'Option must start with two dashes instead of one')
             if name.islower():
                 raise InvalidOptionError(
-                    'Environment variable name must be all uppercase')
+                    'Environment variable name "%s" must be all uppercase' % name)
         return '', name, values
 
     @staticmethod
@@ -300,6 +324,11 @@ class Option(object):
         if not option:
             return self.default
 
+        if self.possible_origins and origin not in self.possible_origins:
+            raise InvalidOptionError(
+                '%s can not be set by %s. Values are accepted from: %s' %
+                (option, origin, ', '.join(self.possible_origins)))
+
         prefix, name, values = self.split_option(option)
         option = self._join_option(prefix, name)
 
@@ -331,13 +360,36 @@ class Option(object):
             ))
 
         if len(values) and self.choices:
+            relative_result = None
             for val in values:
+                if self.nargs in ('+', '*'):
+                    if val.startswith(('+', '-')):
+                        if relative_result is None:
+                            relative_result = list(self.default)
+                        sign = val[0]
+                        val = val[1:]
+                        if sign == '+':
+                            if val not in relative_result:
+                                relative_result.append(val)
+                        else:
+                            try:
+                                relative_result.remove(val)
+                            except ValueError:
+                                pass
+
                 if val not in self.choices:
                     raise InvalidOptionError(
                         "'%s' is not one of %s"
                         % (val, ', '.join("'%s'" % c for c in self.choices)))
 
+            if relative_result is not None:
+                values = PositiveOptionValue(relative_result, origin=origin)
+
         return values
+
+    def __repr__(self):
+        return '<%s.%s [%s]>' % (self.__class__.__module__,
+                                 self.__class__.__name__, self.option)
 
 
 class CommandLineHelper(object):
@@ -362,6 +414,7 @@ class CommandLineHelper(object):
         self._origins = {}
         self._last = 0
 
+        assert(argv and not argv[0].startswith('--'))
         for arg in argv[1:]:
             self.add(arg, 'command-line', self._args)
 
@@ -409,8 +462,7 @@ class CommandLineHelper(object):
                 arg = '%s=%s' % (option.env, env)
                 origin = 'environment'
 
-        if args is self._extra_args:
-            origin = self._origins.get(arg, origin)
+        origin = self._origins.get(arg, origin)
 
         for k in (option.name, option.env):
             try:

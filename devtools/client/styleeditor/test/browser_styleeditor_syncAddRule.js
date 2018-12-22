@@ -5,30 +5,27 @@
 
 // Test that adding a new rule is synced to the style editor.
 
-/* import-globals-from ../../inspector/shared/test/head.js */
-Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/inspector/shared/test/head.js", this);
-
 const TESTCASE_URI = TEST_BASE_HTTP + "sync.html";
 
 const expectedText = `
 #testid {
 }`;
 
-add_task(function*() {
-  yield addTab(TESTCASE_URI);
-  let { inspector, view } = yield openRuleView();
-  yield selectNode("#testid", inspector);
+add_task(async function() {
+  await addTab(TESTCASE_URI);
+  const { inspector, view } = await openRuleView();
+  await selectNode("#testid", inspector);
 
-  let onRuleViewChanged = once(view, "ruleview-changed");
+  const onRuleViewChanged = once(view, "ruleview-changed");
   view.addRuleButton.click();
-  yield onRuleViewChanged;
+  await onRuleViewChanged;
 
-  let { ui } = yield openStyleEditor();
+  const { ui } = await openStyleEditor();
 
   info("Selecting the second editor");
-  yield ui.selectStyleSheet(ui.editors[1].styleSheet);
+  await ui.selectStyleSheet(ui.editors[1].styleSheet);
 
-  let editor = ui.editors[1];
-  let text = editor.sourceEditor.getText();
+  const editor = ui.editors[1];
+  const text = editor.sourceEditor.getText();
   is(text, expectedText, "selector edits are synced");
 });

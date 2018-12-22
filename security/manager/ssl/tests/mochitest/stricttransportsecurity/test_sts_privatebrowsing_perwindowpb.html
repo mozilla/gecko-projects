@@ -15,12 +15,15 @@
 
   SimpleTest.waitForExplicitFinish();
 
-  const Cc = Components.classes;
-  const Ci = Components.interfaces;
-  const STSPATH = "/tests/security/manager/ssl/tests/mochitest/stricttransportsecurity";
+  const STSPATH =
+    "tests/security/manager/ssl/tests/mochitest/stricttransportsecurity";
   const NUM_TEST_FRAMES = 4;
   const CONTENT_PAGE =
     "http://mochi.test:8888/chrome/security/manager/ssl/tests/mochitest/stricttransportsecurity/page_blank.html";
+
+  ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
+  ChromeUtils.import("resource://testing-common/ContentTask.jsm");
+  ChromeUtils.import("resource://gre/modules/Services.jsm");
 
   // This is how many sub-tests (testframes) in each round.
   // When the round begins, this will be initialized.
@@ -35,26 +38,22 @@
   SpecialPowers.Services.prefs.setIntPref("browser.startup.page", 0);
 
   var testframes = {
-    'samedom':
-      {'url':     "http://example.com" + STSPATH + "/verify.sjs",
-        'expected': {'plain': 'SECURE',
-                     'subdom': 'SECURE',
-                     'nosts': 'INSECURE'}},
-    'subdom':
-      {'url':     "http://test1.example.com" + STSPATH + "/verify.sjs",
-        'expected': {'plain': 'INSECURE',
-                     'subdom': 'SECURE',
-                     'nosts': 'INSECURE'}},
-    'otherdom':
-      {'url':     "http://example.org" + STSPATH + "/verify.sjs",
-        'expected': {'plain': 'INSECURE',
-                     'subdom': 'INSECURE',
-                     'nosts': 'INSECURE'}},
-    'alreadysecure':
-      {'url':     "https://test2.example.com" + STSPATH + "/verify.sjs",
-        'expected': {'plain': 'SECURE',
-                     'subdom': 'SECURE',
-                     'nosts': 'SECURE'}},
+    samedom: {
+      url: `http://example.com/${STSPATH}/verify.sjs`,
+      expected: {plain: "SECURE", subdom: "SECURE", nosts: "INSECURE"}
+    },
+    subdom: {
+      url: `http://test1.example.com/${STSPATH}/verify.sjs`,
+      expected: {plain: "INSECURE", subdom: "SECURE", nosts: "INSECURE"}
+    },
+    otherdom: {
+      url: `http://example.org/${STSPATH}/verify.sjs`,
+      expected: {plain: "INSECURE", subdom: "INSECURE", nosts: "INSECURE"}
+    },
+    alreadysecure: {
+      url: `https://test2.example.com/${STSPATH}/verify.sjs`,
+      expected: {plain: "SECURE", subdom: "SECURE", nosts: "SECURE"}
+    },
   };
 
   function whenDelayedStartupFinished(aWindow, aCallback) {
@@ -63,73 +62,98 @@
         SpecialPowers.Services.obs.removeObserver(observer, aTopic);
         SimpleTest.executeSoon(aCallback);
       }
-    }, "browser-delayed-startup-finished", false);
+    }, "browser-delayed-startup-finished");
   }
 
   function testOnWindow(aIsPrivate, aCallback) {
-    var win = mainWindow.OpenBrowserWindow({private: aIsPrivate});
-    whenDelayedStartupFinished(win, function () {
-      win.gBrowser.addEventListener("DOMContentLoaded", function onInnerLoad() {
-        if (win.content.location.href != CONTENT_PAGE) {
-          win.gBrowser.loadURI(CONTENT_PAGE);
-          return;
-        }
-        win.gBrowser.removeEventListener("DOMContentLoaded", onInnerLoad, true);
-        SimpleTest.executeSoon(function() { aCallback(win); });
-      }, true);
-      win.gBrowser.loadURI(CONTENT_PAGE);
-    });
+    let win = mainWindow.OpenBrowserWindow({private: aIsPrivate});
+
+    (async function() {
+      await new Promise(resolve => whenDelayedStartupFinished(win, resolve));
+
+      let browser = win.gBrowser.selectedBrowser;
+      await BrowserTestUtils.loadURI(browser, CONTENT_PAGE);
+      await BrowserTestUtils.browserLoaded(browser);
+
+      aCallback(win);
+    })();
   }
 
   function startRound(win, isPrivate, round) {
     currentround = round;
     testsleftinround = NUM_TEST_FRAMES;
     SimpleTest.info("TESTS LEFT IN ROUND " + currentround + ": " + testsleftinround);
-    var frame = win.content.document.createElement("iframe");
-    frame.setAttribute('id', 'ifr_bootstrap');
-    frame.setAttribute('src', "https://example.com" + STSPATH + "/" + round + "_bootstrap.html");
-    frame.addEventListener("load", function() {
+
+    let browser = win.gBrowser.selectedBrowser;
+    let src = `https://example.com/${STSPATH}/${round}_bootstrap.html`;
+
+    ContentTask.spawn(browser, src, async function(contentSrc) {
+      let frame = content.document.createElement("iframe");
+      frame.setAttribute("id", "ifr_bootstrap");
+      frame.setAttribute("src", contentSrc);
+
+      return new Promise(resolve => {
+        frame.addEventListener("load", resolve);
+        content.document.body.appendChild(frame);
+      });
+    }).then(() => {
       onMessageReceived(win, isPrivate, "BOOTSTRAP " + round);
     });
-    win.content.document.body.appendChild(frame);
   }
 
   function loadVerifyFrames(win, isPrivate, round) {
-    loadVerifyFrame(win, isPrivate, testframes.samedom, 'samedom', function() {
-      loadVerifyFrame(win, isPrivate, testframes.subdom, 'subdom', function() {
-        loadVerifyFrame(win, isPrivate, testframes.otherdom, 'otherdom', function() {
-          loadVerifyFrame(win, isPrivate, testframes.alreadysecure, 'alreadysecure');
+    loadVerifyFrame(win, isPrivate, testframes.samedom, "samedom", function() {
+      loadVerifyFrame(win, isPrivate, testframes.subdom, "subdom", function() {
+        loadVerifyFrame(win, isPrivate, testframes.otherdom, "otherdom", function() {
+          loadVerifyFrame(win, isPrivate, testframes.alreadysecure, "alreadysecure");
         });
       });
     });
   }
 
   function loadVerifyFrame(win, isPrivate, test, testName, aCallback) {
-    var frame = win.content.document.createElement("iframe");
-    frame.setAttribute('id', 'ifr_' + testName);
-    frame.setAttribute('src', test.url + '?id=' + testName);
-    frame.addEventListener("load", function() {
-      if (frame.contentDocument.location.protocol === 'https:') {
+    let id = "ifr_" + testName;
+    let src = test.url + "?id=" + testName;
+    let browser = win.gBrowser.selectedBrowser;
+
+    ContentTask.spawn(browser, [id, src], async function([contentId, contentSrc]) {
+      let frame = content.document.createElement("iframe");
+      frame.setAttribute("id", contentId);
+      frame.setAttribute("src", contentSrc);
+
+      return new Promise(resolve => {
+        frame.addEventListener("load", () => {
+          resolve(frame.contentDocument.location.protocol);
+        });
+
+        content.document.body.appendChild(frame);
+      });
+    }).then(scheme => {
+      if (scheme == "https:") {
         onMessageReceived(win, isPrivate, "SECURE " + testName);
       } else {
         onMessageReceived(win, isPrivate, "INSECURE " + testName);
       }
+
       if (aCallback) {
         aCallback();
       }
     });
-    win.content.document.body.appendChild(frame);
   }
 
   /**
-   * Messages received are in this format:
-   *  (BOOTSTRAP|SECURE|INSECURE) testid
-   * For example: "BOOTSTRAP subdom"
-   *          or: "INSECURE otherdom"
+   * @param {DOMWindow} win
+   *        Test window.
+   * @param {Boolean} isPrivate
+   *        Whether the given window is in private browsing mode.
+   * @param {String} data
+   *        A message that is expected to be in this format:
+   *          (BOOTSTRAP|SECURE|INSECURE) testid
+   *        For example: "BOOTSTRAP subdom"
+   *                 or: "INSECURE otherdom"
    */
   function onMessageReceived(win, isPrivate, data) {
-    // otherwise, it's a test result
-    var result = data.split(/\s+/);
+    let result = data.split(/\s+/);
     if (result.length != 2) {
       SimpleTest.ok(false, data);
       return;
@@ -152,22 +176,26 @@
     if (testsleftinround < 1) {
       SimpleTest.info("DONE WITH ROUND " + currentround);
       // remove all the iframes in the document
-      win.content.document.body.removeChild(
-        win.content.document.getElementById('ifr_bootstrap'));
-      for (let test in testframes) {
-        win.content.document.body.removeChild(
-          win.content.document.getElementById('ifr_' + test));
-      }
-      currentround = "";
+      let browser = win.gBrowser.selectedBrowser;
+      ContentTask.spawn(browser, testframes, async function(contentTestFrames) {
+        content.document.body.removeChild(
+          content.document.getElementById("ifr_bootstrap"));
+        for (let test in contentTestFrames) {
+          content.document.body.removeChild(
+            content.document.getElementById("ifr_" + test));
+        }
+      }).then(() => {
+        currentround = "";
 
-      if (!isPrivate) {
-        clean_up_sts_state(isPrivate);
-      }
-      // Close test window.
-      win.close();
-      // And advance to the next test.
-      // Defer this so it doesn't muck with the stack too much.
-      SimpleTest.executeSoon(nextTest);
+        if (!isPrivate) {
+          clean_up_sts_state(isPrivate);
+        }
+        // Close test window.
+        win.close();
+        // And advance to the next test.
+        // Defer this so it doesn't muck with the stack too much.
+        SimpleTest.executeSoon(nextTest);
+      });
     }
   }
 
@@ -175,7 +203,7 @@
     testOnWindow(false, function(win) {
       SimpleTest.info("In public window");
       dump_STSState(false);
-      startRound(win, false, 'plain');
+      startRound(win, false, "plain");
     });
   }
 
@@ -183,7 +211,7 @@
     testOnWindow(true, function(win) {
       SimpleTest.info("In private window");
       dump_STSState(true);
-      startRound(win, true, 'subdom');
+      startRound(win, true, "subdom");
     });
   }
 
@@ -191,7 +219,7 @@
     testOnWindow(false, function(win) {
       SimpleTest.info("In a new public window");
       dump_STSState(false);
-      startRound(win, false, 'nosts');
+      startRound(win, false, "nosts");
     });
   }
 
@@ -204,11 +232,12 @@
   }
 
   function dump_STSState(isPrivate) {
-    var sss =
-      Cc["@mozilla.org/ssservice;1"].
-        getService(Ci.nsISiteSecurityService);
+    let sss = Cc["@mozilla.org/ssservice;1"]
+                .getService(Ci.nsISiteSecurityService);
     let flags = isPrivate ? Ci.nsISocketProvider.NO_PERMANENT_STORAGE : 0;
-    SimpleTest.info("State of example.com: " + sss.isSecureHost(Ci.nsISiteSecurityService.HEADER_HSTS, "example.com", flags));
+    SimpleTest.info("State of example.com: " +
+      sss.isSecureURI(Ci.nsISiteSecurityService.HEADER_HSTS,
+                      Services.io.newURI("https://example.com"), flags));
   }
 
   // These are executed in the order presented.
@@ -233,7 +262,7 @@
   function nextTest() {
     SimpleTest.executeSoon(tests.length ? tests.shift() : finish);
   }
-  window.addEventListener('load', nextTest, false);
+  window.addEventListener("load", nextTest);
   </script>
 </head>
 

@@ -27,9 +27,8 @@ static nsresult
 ParseIntegerOptionalInteger(const nsAString& aValue,
                             int32_t aValues[2])
 {
-  nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
-    tokenizer(aValue, ',',
-              nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
+  nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
+    tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
   if (tokenizer.whitespaceBeforeFirstToken()) {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
@@ -177,10 +176,10 @@ nsSVGIntegerPair::DOMAnimatedInteger::~DOMAnimatedInteger()
   }
 }
 
-nsISMILAttr*
+UniquePtr<nsISMILAttr>
 nsSVGIntegerPair::ToSMILAttr(nsSVGElement *aSVGElement)
 {
-  return new SMILIntegerPair(this, aSVGElement);
+  return MakeUnique<SMILIntegerPair>(this, aSVGElement);
 }
 
 nsresult

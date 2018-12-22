@@ -4,21 +4,27 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["LoginRecipesContent", "LoginRecipesParent"];
+var EXPORTED_SYMBOLS = ["LoginRecipesContent", "LoginRecipesParent"];
 
-const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 const REQUIRED_KEYS = ["hosts"];
-const OPTIONAL_KEYS = ["description", "passwordSelector", "pathRegex", "usernameSelector"];
+const OPTIONAL_KEYS = [
+  "description",
+  "notPasswordSelector",
+  "notUsernameSelector",
+  "passwordSelector",
+  "pathRegex",
+  "usernameSelector",
+];
 const SUPPORTED_KEYS = REQUIRED_KEYS.concat(OPTIONAL_KEYS);
 
-Cu.importGlobalProperties(["URL"]);
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
-XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
-                                  "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginHelper",
+                               "resource://gre/modules/LoginHelper.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "log", () => LoginHelper.createLogger("LoginRecipes"));
 
@@ -97,16 +103,16 @@ LoginRecipesParent.prototype = {
 
       try {
         this.initializationPromise = new Promise(function(resolve) {
-          NetUtil.asyncFetch(channel, function (stream, result) {
+          NetUtil.asyncFetch(channel, function(stream, result) {
             if (!Components.isSuccessCode(result)) {
               throw new Error("Error fetching recipe file:" + result);
-              return;
             }
             let count = stream.available();
             let data = NetUtil.readInputStreamToString(stream, count, { charset: "UTF-8" });
             resolve(JSON.parse(data));
           });
         }).then(recipes => {
+          Services.ppmm.broadcastAsyncMessage("clearRecipeCache");
           return this.load(recipes);
         }).then(resolve => {
           return this;
@@ -127,12 +133,12 @@ LoginRecipesParent.prototype = {
   add(recipe) {
     log.debug("Adding recipe:", recipe);
     let recipeKeys = Object.keys(recipe);
-    let unknownKeys = recipeKeys.filter(key => SUPPORTED_KEYS.indexOf(key) == -1);
+    let unknownKeys = recipeKeys.filter(key => !SUPPORTED_KEYS.includes(key));
     if (unknownKeys.length > 0) {
       throw new Error("The following recipe keys aren't supported: " + unknownKeys.join(", "));
     }
 
-    let missingRequiredKeys = REQUIRED_KEYS.filter(key => recipeKeys.indexOf(key) == -1);
+    let missingRequiredKeys = REQUIRED_KEYS.filter(key => !recipeKeys.includes(key));
     if (missingRequiredKeys.length > 0) {
       throw new Error("The following required recipe keys are missing: " + missingRequiredKeys.join(", "));
     }
@@ -183,6 +189,64 @@ LoginRecipesParent.prototype = {
 
 
 var LoginRecipesContent = {
+  _recipeCache: new WeakMap(),
+
+  _clearRecipeCache() {
+    this._recipeCache = new WeakMap();
+  },
+
+  /**
+   * Locally caches recipes for a given host.
+   *
+   * @param {String} aHost (e.g. example.com:8080 [non-default port] or sub.example.com)
+   * @param {Object} win - the window of the host
+   * @param {Set} recipes - recipes that apply to the host
+   */
+  cacheRecipes(aHost, win, recipes) {
+    log.debug("cacheRecipes: for:", aHost);
+    let recipeMap = this._recipeCache.get(win);
+
+    if (!recipeMap) {
+      recipeMap = new Map();
+      this._recipeCache.set(win, recipeMap);
+    }
+
+    recipeMap.set(aHost, recipes);
+  },
+
+  /**
+   * Tries to fetch recipes for a given host, using a local cache if possible.
+   * Otherwise, the recipes are cached for later use.
+   *
+   * @param {String} aHost (e.g. example.com:8080 [non-default port] or sub.example.com)
+   * @param {Object} win - the window of the host
+   * @return {Set} of recipes that apply to the host
+   */
+  getRecipes(aHost, win) {
+    let recipes;
+    let recipeMap = this._recipeCache.get(win);
+
+    if (recipeMap) {
+      recipes = recipeMap.get(aHost);
+
+      if (recipes) {
+        return recipes;
+      }
+    }
+
+    let mm = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                .getInterface(Ci.nsIWebNavigation)
+                .QueryInterface(Ci.nsIDocShell)
+                .QueryInterface(Ci.nsIInterfaceRequestor)
+                .getInterface(Ci.nsIContentFrameMessageManager);
+
+    log.warn("getRecipes: falling back to a synchronous message for:", aHost);
+    recipes = mm.sendSyncMessage("RemoteLogins:findRecipes", { formOrigin: aHost })[0];
+    this.cacheRecipes(aHost, win, recipes);
+
+    return recipes;
+  },
+
   /**
    * @param {Set} aRecipes - Possible recipes that could apply to the form
    * @param {FormLike} aForm - We use a form instead of just a URL so we can later apply
@@ -191,7 +255,6 @@ var LoginRecipesContent = {
    */
   _filterRecipesForForm(aRecipes, aForm) {
     let formDocURL = aForm.ownerDocument.location;
-    let host = formDocURL.host;
     let hostRecipes = aRecipes;
     let recipes = new Set();
     log.debug("_filterRecipesForForm", aRecipes);
@@ -227,7 +290,8 @@ var LoginRecipesContent = {
     let chosenRecipe = null;
     // Find the first (most-specific recipe that involves field overrides).
     for (let recipe of recipes) {
-      if (!recipe.usernameSelector && !recipe.passwordSelector) {
+      if (!recipe.usernameSelector && !recipe.passwordSelector &&
+          !recipe.notUsernameSelector && !recipe.notPasswordSelector) {
         continue;
       }
 
@@ -249,9 +313,11 @@ var LoginRecipesContent = {
     }
     let field = aParent.ownerDocument.querySelector(aSelector);
     if (!field) {
-      log.warn("Login field selector wasn't matched:", aSelector);
+      log.debug("Login field selector wasn't matched:", aSelector);
       return null;
     }
+    // ownerGlobal doesn't exist in content privileged windows.
+    // eslint-disable-next-line mozilla/use-ownerGlobal
     if (!(field instanceof aParent.ownerDocument.defaultView.HTMLInputElement)) {
       log.warn("Login field isn't an <input> so ignoring it:", aSelector);
       return null;

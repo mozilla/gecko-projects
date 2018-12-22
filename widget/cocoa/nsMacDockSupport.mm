@@ -14,10 +14,11 @@ NS_IMPL_ISUPPORTS(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
 nsMacDockSupport::nsMacDockSupport()
 : mAppIcon(nil)
 , mProgressBackground(nil)
+, mProgressBounds()
 , mProgressState(STATE_NO_PROGRESS)
 , mProgressFraction(0.0)
 {
-  mProgressTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+  mProgressTimer = NS_NewTimer();
 }
 
 nsMacDockSupport::~nsMacDockSupport()
@@ -39,20 +40,16 @@ nsMacDockSupport::~nsMacDockSupport()
 NS_IMETHODIMP
 nsMacDockSupport::GetDockMenu(nsIStandaloneNativeMenu ** aDockMenu)
 {
-  *aDockMenu = nullptr;
-
-  if (mDockMenu)
-    return mDockMenu->QueryInterface(NS_GET_IID(nsIStandaloneNativeMenu),
-                                     reinterpret_cast<void **>(aDockMenu));
+  nsCOMPtr<nsIStandaloneNativeMenu> dockMenu(mDockMenu);
+  dockMenu.forget(aDockMenu);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsMacDockSupport::SetDockMenu(nsIStandaloneNativeMenu * aDockMenu)
 {
-  nsresult rv;
-  mDockMenu = do_QueryInterface(aDockMenu, &rv);
-  return rv;
+  mDockMenu = aDockMenu;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -113,8 +110,9 @@ nsMacDockSupport::SetProgressState(nsTaskbarProgressState aState,
 
   if (mProgressState == STATE_NORMAL || mProgressState == STATE_INDETERMINATE) {
     int perSecond = 8; // Empirically determined, see bug 848792 
-    mProgressTimer->InitWithFuncCallback(RedrawIconCallback, this, 1000 / perSecond,
-      nsITimer::TYPE_REPEATING_SLACK);
+    mProgressTimer->InitWithNamedFuncCallback(RedrawIconCallback, this, 1000 / perSecond,
+                                              nsITimer::TYPE_REPEATING_SLACK,
+                                              "nsMacDockSupport::RedrawIconCallback");
     return NS_OK;
   } else {
     mProgressTimer->Cancel();
@@ -136,7 +134,7 @@ bool nsMacDockSupport::InitProgress()
   }
 
   if (!mAppIcon) {
-    mProgressTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+    mProgressTimer = NS_NewTimer();
     mAppIcon = [[NSImage imageNamed:@"NSApplicationIcon"] retain];
     mProgressBackground = [mAppIcon copyWithZone:nil];
     mTheme = new nsNativeThemeCocoa();
@@ -160,12 +158,16 @@ nsMacDockSupport::RedrawIcon()
   if (InitProgress()) {
     // TODO: - Implement ERROR and PAUSED states?
     NSImage *icon = [mProgressBackground copyWithZone:nil];
-    bool isIndeterminate = (mProgressState != STATE_NORMAL);
 
     [icon lockFocus];
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
-    mTheme->DrawProgress(ctx, mProgressBounds, isIndeterminate,
-      true, mProgressFraction, 1.0, NULL);
+    nsNativeThemeCocoa::ProgressParams params;
+    params.value = mProgressFraction;
+    params.max = 1.0;
+    params.insideActiveWindow = true;
+    params.indeterminate = (mProgressState != STATE_NORMAL);
+    params.horizontal = true;
+    mTheme->DrawProgress(ctx, mProgressBounds, params);
     [icon unlockFocus];
     [NSApp setApplicationIconImage:icon];
     [icon release];

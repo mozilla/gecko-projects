@@ -17,10 +17,7 @@ NS_IMPL_ISUPPORTS(MemoryDownloader,
 
 MemoryDownloader::MemoryDownloader(IObserver* aObserver)
 : mObserver(aObserver)
-{
-}
-
-MemoryDownloader::~MemoryDownloader()
+, mStatus(NS_ERROR_NOT_INITIALIZED)
 {
 }
 
@@ -45,11 +42,11 @@ MemoryDownloader::OnStopRequest(nsIRequest* aRequest,
   RefPtr<IObserver> observer;
   observer.swap(mObserver);
   observer->OnDownloadComplete(this, aRequest, aCtxt, aStatus,
-                               mozilla::Move(data));
+                               std::move(data));
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 MemoryDownloader::ConsumeData(nsIInputStream* aIn,
                               void* aClosure,
                               const char* aFromRawSegment,

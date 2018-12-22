@@ -7,7 +7,8 @@
 #ifndef mozilla_dom_indexeddb_scripterrorhelper_h__
 #define mozilla_dom_indexeddb_scripterrorhelper_h__
 
-class nsAString;
+#include <inttypes.h>
+#include "nsStringFwd.h"
 
 namespace mozilla {
 namespace dom {

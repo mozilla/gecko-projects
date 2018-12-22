@@ -7,8 +7,9 @@
 #include "DomainPolicy.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ipc/URIUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIMessageManager.h"
+#include "nsIURIMutator.h"
 #include "nsScriptSecurityManager.h"
 
 namespace mozilla {
@@ -139,10 +140,8 @@ CopyURIs(const InfallibleTArray<URIParams>& aDomains, nsIDomainSet* aSet)
 }
 
 void
-DomainPolicy::ApplyClone(DomainPolicyClone* aClone)
+DomainPolicy::ApplyClone(const DomainPolicyClone* aClone)
 {
-    nsCOMPtr<nsIDomainSet> list;
-
     CopyURIs(aClone->blacklist(), mBlacklist);
     CopyURIs(aClone->whitelist(), mWhitelist);
     CopyURIs(aClone->superBlacklist(), mSuperBlacklist);
@@ -153,11 +152,10 @@ static already_AddRefed<nsIURI>
 GetCanonicalClone(nsIURI* aURI)
 {
     nsCOMPtr<nsIURI> clone;
-    nsresult rv = aURI->Clone(getter_AddRefs(clone));
-    NS_ENSURE_SUCCESS(rv, nullptr);
-    rv = clone->SetUserPass(EmptyCString());
-    NS_ENSURE_SUCCESS(rv, nullptr);
-    rv = clone->SetPath(EmptyCString());
+    nsresult rv = NS_MutateURI(aURI)
+           .SetUserPass(EmptyCString())
+           .SetPathQueryRef(EmptyCString())
+           .Finalize(clone);
     NS_ENSURE_SUCCESS(rv, nullptr);
     return clone.forget();
 }
@@ -230,7 +228,9 @@ DomainSet::ContainsSuperDomain(nsIURI* aDomain, bool* aContains)
         if (index == kNotFound)
             break;
         domain.Assign(Substring(domain, index + 1));
-        rv = clone->SetHost(domain);
+        rv = NS_MutateURI(clone)
+               .SetHost(domain)
+               .Finalize(clone);
         NS_ENSURE_SUCCESS(rv, rv);
     }
 

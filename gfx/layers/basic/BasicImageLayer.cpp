@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -10,7 +11,6 @@
 #include "basic/BasicImplData.h"        // for BasicImplData
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "mozilla/mozalloc.h"           // for operator new
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxPattern::Release, etc
@@ -32,24 +32,24 @@ public:
     MOZ_COUNT_CTOR(BasicImageLayer);
   }
 protected:
-  virtual ~BasicImageLayer()
+  ~BasicImageLayer() override
   {
     MOZ_COUNT_DTOR(BasicImageLayer);
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
+  void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
     ImageLayer::SetVisibleRegion(aRegion);
   }
 
-  virtual void Paint(DrawTarget* aDT,
-                     const gfx::Point& aDeviceOffset,
-                     Layer* aMaskLayer) override;
+  void Paint(DrawTarget* aDT,
+             const gfx::Point& aDeviceOffset,
+             Layer* aMaskLayer) override;
 
-  virtual already_AddRefed<SourceSurface> GetAsSourceSurface() override;
+  already_AddRefed<SourceSurface> GetAsSourceSurface() override;
 
 protected:
   BasicLayerManager* BasicManager()
@@ -73,7 +73,7 @@ BasicImageLayer::Paint(DrawTarget* aDT,
   mContainer->SetImageFactory(mManager->IsCompositingCheap() ? nullptr : BasicManager()->GetImageFactory());
 
   AutoLockImage autoLock(mContainer);
-  Image *image = autoLock.GetImage();
+  Image *image = autoLock.GetImage(BasicManager()->GetCompositionTime());
   if (!image) {
     mContainer->SetImageFactory(originalIF);
     return;
@@ -86,7 +86,7 @@ BasicImageLayer::Paint(DrawTarget* aDT,
 
   gfx::IntSize size = mSize = surface->GetSize();
   FillRectWithMask(aDT, aDeviceOffset, Rect(0, 0, size.width, size.height),
-                   surface, mFilter,
+                   surface, mSamplingFilter,
                    DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
                    aMaskLayer);
 

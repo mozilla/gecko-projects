@@ -1,6 +1,8 @@
+// © 2016 and later: Unicode, Inc. and others.
+// License & terms of use: http://www.unicode.org/copyright.html
 /*
 ********************************************************************************
-*   Copyright (C) 2012-2015, International Business Machines
+*   Copyright (C) 2012-2016, International Business Machines
 *   Corporation and others.  All Rights Reserved.
 ********************************************************************************
 *
@@ -14,7 +16,7 @@
 #include "unicode/utypes.h"
 /**
  * \file
- * \brief C++ API: Formats decimal numbers in compact form.
+ * \brief C++ API: Compatibility APIs for compact decimal number formatting.
  */
 
 #if !UCONFIG_NO_FORMATTING
@@ -28,6 +30,11 @@ U_NAMESPACE_BEGIN
 class PluralRules;
 
 /**
+ * <p><strong>IMPORTANT:</strong> New users are strongly encouraged to see if
+ * numberformatter.h fits their use case.  Although not deprecated, this header
+ * is provided for backwards compatibility only.
+ * <hr/>
+ *
  * The CompactDecimalFormat produces abbreviated numbers, suitable for display in
  * environments will limited real estate. For example, 'Hits: 1.2B' instead of
  * 'Hits: 1,200,000,000'. The format will be appropriate for the given language,
@@ -54,6 +61,9 @@ public:
 
      /**
       * Returns a compact decimal instance for specified locale.
+     * <p>
+     * <strong>NOTE:</strong> New users are strongly encouraged to use
+     * {@link NumberFormatter} instead of NumberFormat.
       * @param inLocale the given locale.
       * @param style whether to use short or long style.
       * @param status error code returned  here.
@@ -166,7 +176,7 @@ public:
      * @param pos       On input: an alignment field, if desired.
      *                  On output: the offsets of the alignment field.
      * @return          Reference to 'appendTo' parameter.
-     * @draft ICU 56
+     * @stable ICU 56
      */
     virtual UnicodeString& format(int32_t number,
                                   UnicodeString& appendTo,
@@ -273,7 +283,7 @@ public:
      * @return          Reference to 'appendTo' parameter.
      * @internal
      */
-    virtual UnicodeString& format(const StringPiece &number,
+    virtual UnicodeString& format(StringPiece number,
                                   UnicodeString& appendTo,
                                   FieldPositionIterator* posIter,
                                   UErrorCode& status) const;
@@ -302,7 +312,7 @@ public:
      * Format a decimal number. Currently sets status to U_UNSUPPORTED_ERROR.
      * The number is a DigitList wrapper onto a floating point decimal number.
      * The default implementation in NumberFormat converts the decimal number
-     * to a double and formats that.  
+     * to a double and formats that.
      *
      * @param number    The number, a DigitList format Decimal Floating Point.
      * @param appendTo  Output parameter to receive result.
@@ -335,7 +345,7 @@ public:
      * CompactDecimalFormat does not support parsing. This implementation
      * sets status to U_UNSUPPORTED_ERROR
      *
-     * @param text      Unused. 
+     * @param text      Unused.
      * @param result    Does not change.
      * @param status    Always set to U_UNSUPPORTED_ERROR.
      * @stable ICU 51

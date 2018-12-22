@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "mozilla/EventForwards.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/TimeStamp.h"
 
 #include "nsRegionFwd.h"
@@ -97,9 +98,19 @@ public:
                              nsIWidget** aActualBelow);
 
   /**
+   * Called when the window will enter or leave the fullscreen state.
+   */
+  virtual void FullscreenWillChange(bool aInFullscreen);
+
+  /**
    * Called when the window entered or left the fullscreen state.
    */
   virtual void FullscreenChanged(bool aInFullscreen);
+
+  /**
+   * Called when the occlusion state is changed.
+   */
+  virtual void OcclusionStateChanged(bool aIsFullyOccluded);
 
   /**
    * Called when the window is activated and focused.
@@ -146,7 +157,8 @@ public:
    */
   virtual void DidPaintWindow();
 
-  virtual void DidCompositeWindow(const mozilla::TimeStamp& aCompositeStart,
+  virtual void DidCompositeWindow(mozilla::layers::TransactionId aTransactionId,
+                                  const mozilla::TimeStamp& aCompositeStart,
                                   const mozilla::TimeStamp& aCompositeEnd);
 
   /**

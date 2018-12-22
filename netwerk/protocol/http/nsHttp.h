@@ -13,25 +13,34 @@
 #include "nsString.h"
 #include "nsError.h"
 #include "nsTArray.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 
-// http version codes
-#define NS_HTTP_VERSION_UNKNOWN  0
-#define NS_HTTP_VERSION_0_9      9
-#define NS_HTTP_VERSION_1_0     10
-#define NS_HTTP_VERSION_1_1     11
-#define NS_HTTP_VERSION_2_0     20
+class nsICacheEntry;
 
 namespace mozilla {
 
 class Mutex;
 
 namespace net {
-    enum {
+    class nsHttpResponseHead;
+    class nsHttpRequestHead;
+    class CacheControlParser;
+
+    enum class HttpVersion {
+        UNKNOWN = 0,
+        v0_9 = 9,
+        v1_0 = 10,
+        v1_1 = 11,
+        v2_0 = 20
+    };
+
+    enum class SpdyVersion {
+        NONE = 0,
         // SPDY_VERSION_2 = 2, REMOVED
         // SPDY_VERSION_3 = 3, REMOVED
-        SPDY_VERSION_31 = 4,
-        HTTP_VERSION_2 = 5
+        // SPDY_VERSION_31 = 4, REMOVED
+        HTTP_2 = 5
 
         // leave room for official versions. telem goes to 48
         // 24 was a internal spdy/3.1
@@ -44,14 +53,12 @@ namespace net {
         // 31 was h2-16
     };
 
-typedef uint8_t nsHttpVersion;
-
 //-----------------------------------------------------------------------------
 // http connection capabilities
 //-----------------------------------------------------------------------------
 
 #define NS_HTTP_ALLOW_KEEPALIVE      (1<<0)
-#define NS_HTTP_ALLOW_PIPELINING     (1<<1)
+#define NS_HTTP_LARGE_KEEPALIVE      (1<<1)
 
 // a transaction with this caps flag will continue to own the connection,
 // preventing it from being reclaimed, even after the transaction completes.
@@ -84,6 +91,22 @@ typedef uint8_t nsHttpVersion;
 // This flag indicates the transaction should accept associated pushes
 #define NS_HTTP_ONPUSH_LISTENER      (1<<9)
 
+// Transactions with this flag should react to errors without side effects
+// First user is to prevent clearing of alt-svc cache on failed probe
+#define NS_HTTP_ERROR_SOFTLY         (1<<10)
+
+// This corresponds to nsIHttpChannelInternal.beConservative
+// it disables any cutting edge features that we are worried might result in
+// interop problems with critical infrastructure
+#define NS_HTTP_BE_CONSERVATIVE      (1<<11)
+
+// Transactions with this flag should be processed first.
+#define NS_HTTP_URGENT_START         (1<<12)
+
+// A sticky connection of the transaction is explicitly allowed to be restarted
+// on ERROR_NET_RESET.
+#define NS_HTTP_CONNECTION_RESTARTABLE  (1<<13)
+
 //-----------------------------------------------------------------------------
 // some default values
 //-----------------------------------------------------------------------------
@@ -109,42 +132,46 @@ struct nsHttpAtom
     const char *_val;
 };
 
-struct nsHttp
+namespace nsHttp
 {
-    static nsresult CreateAtomTable();
-    static void DestroyAtomTable();
+    MOZ_MUST_USE nsresult CreateAtomTable();
+    void DestroyAtomTable();
 
     // The mutex is valid any time the Atom Table is valid
     // This mutex is used in the unusual case that the network thread and
     // main thread might access the same data
-    static Mutex *GetLock();
+    Mutex *GetLock();
 
     // will dynamically add atoms to the table if they don't already exist
-    static nsHttpAtom ResolveAtom(const char *);
-    static nsHttpAtom ResolveAtom(const nsACString &s)
+    nsHttpAtom ResolveAtom(const char *);
+    inline nsHttpAtom ResolveAtom(const nsACString &s)
     {
         return ResolveAtom(PromiseFlatCString(s).get());
     }
 
     // returns true if the specified token [start,end) is valid per RFC 2616
     // section 2.2
-    static bool IsValidToken(const char *start, const char *end);
+    bool IsValidToken(const char *start, const char *end);
 
-    static inline bool IsValidToken(const nsACString &s) {
+    inline bool IsValidToken(const nsACString &s) {
         return IsValidToken(s.BeginReading(), s.EndReading());
     }
+
+    // Strip the leading or trailing HTTP whitespace per fetch spec section 2.2.
+    void TrimHTTPWhitespace(const nsACString& aSource,
+                                   nsACString& aDest);
 
     // Returns true if the specified value is reasonable given the defintion
     // in RFC 2616 section 4.2.  Full strict validation is not performed
     // currently as it would require full parsing of the value.
-    static bool IsReasonableHeaderValue(const nsACString &s);
+    bool IsReasonableHeaderValue(const nsACString &s);
 
     // find the first instance (case-insensitive comparison) of the given
     // |token| in the |input| string.  the |token| is bounded by elements of
     // |separators| and may appear at the beginning or end of the |input|
     // string.  null is returned if the |token| is not found.  |input| may be
     // null, in which case null is returned.
-    static const char *FindToken(const char *input, const char *token,
+    const char *FindToken(const char *input, const char *token,
                                  const char *separators);
 
     // This function parses a string containing a decimal-valued, non-negative
@@ -155,21 +182,50 @@ struct nsHttp
     //
     // TODO(darin): Replace this with something generic.
     //
-    static bool ParseInt64(const char *input, const char **next,
-                             int64_t *result);
+    MOZ_MUST_USE bool ParseInt64(const char *input, const char **next,
+                                        int64_t *result);
 
     // Variant on ParseInt64 that expects the input string to contain nothing
     // more than the value being parsed.
-    static inline bool ParseInt64(const char *input, int64_t *result) {
+    inline MOZ_MUST_USE bool ParseInt64(const char *input,
+                                               int64_t *result) {
         const char *next;
         return ParseInt64(input, &next, result) && *next == '\0';
     }
 
     // Return whether the HTTP status code represents a permanent redirect
-    static bool IsPermanentRedirect(uint32_t httpStatus);
+    bool IsPermanentRedirect(uint32_t httpStatus);
 
     // Returns the APLN token which represents the used protocol version.
-    static const char* GetProtocolVersion(uint32_t pv);
+    const char* GetProtocolVersion(HttpVersion pv);
+
+    bool ValidationRequired(bool isForcedValid, nsHttpResponseHead *cachedResponseHead,
+                   uint32_t loadFlags, bool allowStaleCacheContent,
+                   bool isImmutable, bool customConditionalRequest,
+                   nsHttpRequestHead &requestHead,
+                   nsICacheEntry *entry, CacheControlParser &cacheControlRequest,
+                   bool fromPreviousSession);
+
+    nsresult GetHttpResponseHeadFromCacheEntry(nsICacheEntry *entry,
+                                               nsHttpResponseHead *cachedResponseHead);
+
+    nsresult CheckPartial(nsICacheEntry* aEntry, int64_t *aSize,
+                          int64_t *aContentLength,
+                          nsHttpResponseHead *responseHead);
+
+    void DetermineFramingAndImmutability(nsICacheEntry *entry, nsHttpResponseHead *cachedResponseHead,
+                                         bool isHttps, bool *weaklyFramed,
+                                         bool *isImmutable);
+
+    // Called when an optimization feature affecting active vs background tab load
+    // took place.  Called only on the parent process and only updates
+    // mLastActiveTabLoadOptimizationHit timestamp to now.
+    void NotifyActiveTabLoadOptimization();
+    TimeStamp const GetLastActiveTabLoadOptimizationHit();
+    void SetLastActiveTabLoadOptimizationHit(TimeStamp const &when);
+    bool IsBeforeLastActiveTabLoadOptimization(TimeStamp const &when);
+
+    HttpVersion GetHttpVersionFromSpdy(SpdyVersion sv);
 
     // Declare all atoms
     //
@@ -177,10 +233,10 @@ struct nsHttp
     // to you by the magic of C preprocessing.  Add new atoms to nsHttpAtomList
     // and all support logic will be auto-generated.
     //
-#define HTTP_ATOM(_name, _value) static nsHttpAtom _name;
+#define HTTP_ATOM(_name, _value) extern nsHttpAtom _name;
 #include "nsHttpAtomList.h"
 #undef HTTP_ATOM
-};
+}
 
 //-----------------------------------------------------------------------------
 // utilities...
@@ -212,48 +268,55 @@ class ParsedHeaderPair
 {
 public:
     ParsedHeaderPair(const char *name, int32_t nameLen,
-                     const char *val, int32_t valLen)
-    {
-        if (nameLen > 0) {
-            mName.Rebind(name, name + nameLen);
-        }
-        if (valLen > 0) {
-            mValue.Rebind(val, val + valLen);
-        }
-    }
+                     const char *val, int32_t valLen, bool isQuotedValue);
 
     ParsedHeaderPair(ParsedHeaderPair const &copy)
         : mName(copy.mName)
         , mValue(copy.mValue)
+        , mUnquotedValue(copy.mUnquotedValue)
+        , mIsQuotedValue(copy.mIsQuotedValue)
     {
+        if (mIsQuotedValue) {
+            mValue.Rebind(mUnquotedValue.BeginReading(), mUnquotedValue.Length());
+        }
     }
 
     nsDependentCSubstring mName;
     nsDependentCSubstring mValue;
+
+private:
+    nsCString mUnquotedValue;
+    bool mIsQuotedValue;
+
+    void RemoveQuotedStringEscapes(const char *val, int32_t valLen);
 };
 
 class ParsedHeaderValueList
 {
 public:
-    ParsedHeaderValueList(char *t, uint32_t len);
+    ParsedHeaderValueList(const char *t, uint32_t len, bool allowInvalidValue);
     nsTArray<ParsedHeaderPair> mValues;
 
 private:
-    void ParsePair(char *t, uint32_t len);
-    void Tokenize(char *input, uint32_t inputLen, char **token,
-                  uint32_t *tokenLen, bool *foundEquals, char **next);
+    void ParseNameAndValue(const char *input, bool allowInvalidValue);
 };
 
 class ParsedHeaderValueListList
 {
 public:
-    explicit ParsedHeaderValueListList(const nsCString &txt);
+    // RFC 7231 section 3.2.6 defines the syntax of the header field values.
+    // |allowInvalidValue| indicates whether the rule will be used to check
+    // the input text.
+    // Note that ParsedHeaderValueListList is currently used to parse
+    // Alt-Svc and Server-Timing header. |allowInvalidValue| is set to true
+    // when parsing Alt-Svc for historical reasons.
+    explicit ParsedHeaderValueListList(const nsCString &txt,
+                                       bool allowInvalidValue = true);
     nsTArray<ParsedHeaderValueList> mValues;
 
 private:
     nsCString mFull;
 };
-
 
 } // namespace net
 } // namespace mozilla

@@ -283,7 +283,7 @@ function pageEventListener(event) {
   // doPageNavigation() to return.
   if ((typeof(gExpectedEvents) == "undefined") && event.type == "pageshow")
   {
-    setTimeout(function() { gFinalEvent = true; }, 0);
+    waitForNextPaint(function() { gFinalEvent = true; });
     return;
   }
   
@@ -332,7 +332,7 @@ function pageEventListener(event) {
 
   // If we're out of expected events, let doPageNavigation() return.
   if (gExpectedEvents.length == 0)
-    setTimeout(function() { gFinalEvent = true; }, 0);
+    waitForNextPaint(function() { gFinalEvent = true; });
 }
 
 /**
@@ -341,13 +341,13 @@ function pageEventListener(event) {
 function finish() {
   // Work around bug 467960.
   var history = TestWindow.getBrowser().webNavigation.sessionHistory;
-  history.PurgeHistory(history.count);
+  history.legacySHistory.PurgeHistory(history.count);
   
   // If the test changed the value of max_total_viewers via a call to
   // enableBFCache(), then restore it now.
   if (typeof(gOrigMaxTotalViewers) != "undefined") {
-    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                .getService(Components.interfaces.nsIPrefBranch);
+    var prefs = Cc["@mozilla.org/preferences-service;1"]
+                .getService(Ci.nsIPrefBranch);
     prefs.setIntPref("browser.sessionhistory.max_total_viewers",
       gOrigMaxTotalViewers);
   }
@@ -357,14 +357,12 @@ function finish() {
   let SimpleTest = opener.wrappedJSObject.SimpleTest;
 
   // Wait for the window to be closed before finishing the test
-  let ww = Components.classes["@mozilla.org/embedcomp/window-watcher;1"]
-	             .getService(Components.interfaces.nsIWindowWatcher);
+  let ww = Cc["@mozilla.org/embedcomp/window-watcher;1"]
+	             .getService(Ci.nsIWindowWatcher);
   ww.registerNotification(function(subject, topic, data) {
     if (topic == "domwindowclosed") {
       ww.unregisterNotification(arguments.callee);
-      SimpleTest.waitForFocus(function() {
-        SimpleTest.finish();
-      }, opener);
+      SimpleTest.waitForFocus(SimpleTest.finish, opener);
     }
   });
 
@@ -419,6 +417,10 @@ function waitForTrue(fn, onWaitComplete, timeout) {
       }, 20);
 }
 
+function waitForNextPaint(cb) {
+  requestAnimationFrame(_ => requestAnimationFrame(cb));
+}
+
 /**
  * Enable or disable the bfcache.
  *
@@ -428,8 +430,8 @@ function waitForTrue(fn, onWaitComplete, timeout) {
  *           to 0 (disabled), if a number, set it to that specific number
  */
 function enableBFCache(enable) {
-  var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-              .getService(Components.interfaces.nsIPrefBranch);
+  var prefs = Cc["@mozilla.org/preferences-service;1"]
+              .getService(Ci.nsIPrefBranch);
   
   // If this is the first time the test called enableBFCache(),
   // store the original value of max_total_viewers, so it can

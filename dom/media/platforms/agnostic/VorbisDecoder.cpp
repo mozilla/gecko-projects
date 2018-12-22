@@ -9,11 +9,11 @@
 #include "XiphExtradata.h"
 
 #include "mozilla/PodOperations.h"
-#include "nsAutoPtr.h"
+#include "mozilla/SyncRunnable.h"
+#include "VideoUtils.h"
 
 #undef LOG
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(type, msg) MOZ_LOG(GetPDMLog(), type, msg)
+#define LOG(type, msg) MOZ_LOG(sPDMLog, type, msg)
 
 namespace mozilla {
 
@@ -31,12 +31,9 @@ ogg_packet InitVorbisPacket(const unsigned char* aData, size_t aLength,
   return packet;
 }
 
-VorbisDataDecoder::VorbisDataDecoder(const AudioInfo& aConfig,
-                                     FlushableTaskQueue* aTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
-  : mInfo(aConfig)
-  , mTaskQueue(aTaskQueue)
-  , mCallback(aCallback)
+VorbisDataDecoder::VorbisDataDecoder(const CreateDecoderParams& aParams)
+  : mInfo(aParams.AudioConfig())
+  , mTaskQueue(aParams.mTaskQueue)
   , mPacketCount(0)
   , mFrames(0)
 {
@@ -56,11 +53,13 @@ VorbisDataDecoder::~VorbisDataDecoder()
   vorbis_comment_clear(&mVorbisComment);
 }
 
-nsresult
+RefPtr<ShutdownPromise>
 VorbisDataDecoder::Shutdown()
 {
-  //mReader = nullptr;
-  return NS_OK;
+  RefPtr<VorbisDataDecoder> self = this;
+  return InvokeAsync(mTaskQueue, __func__, [self]() {
+    return ShutdownPromise::CreateAndResolve(true, __func__);
+  });
 }
 
 RefPtr<MediaDataDecoder::InitPromise>
@@ -76,11 +75,17 @@ VorbisDataDecoder::Init()
   if (!XiphExtradataToHeaders(headers, headerLens,
                               mInfo.mCodecSpecificConfig->Elements(),
                               mInfo.mCodecSpecificConfig->Length())) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                  RESULT_DETAIL("Could not get vorbis header.")),
+      __func__);
   }
   for (size_t i = 0; i < headers.Length(); i++) {
     if (NS_FAILED(DecodeHeader(headers[i], headerLens[i]))) {
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(
+        MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                    RESULT_DETAIL("Could not decode vorbis header.")),
+        __func__);
     }
   }
 
@@ -88,12 +93,18 @@ VorbisDataDecoder::Init()
 
   int r = vorbis_synthesis_init(&mVorbisDsp, &mVorbisInfo);
   if (r) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                  RESULT_DETAIL("Systhesis init fail.")),
+      __func__);
   }
 
   r = vorbis_block_init(&mVorbisDsp, &mVorbisBlock);
   if (r) {
-    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+    return InitPromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                  RESULT_DETAIL("Block init fail.")),
+      __func__);
   }
 
   if (mInfo.mRate != (uint32_t)mVorbisDsp.vi->rate) {
@@ -105,6 +116,14 @@ VorbisDataDecoder::Init()
         ("Invalid Vorbis header: container and codec channels do not match!"));
   }
 
+  AudioConfig::ChannelLayout layout(mVorbisDsp.vi->channels);
+  if (!layout.IsValid()) {
+    return InitPromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                  RESULT_DETAIL("Invalid audio layout.")),
+      __func__);
+  }
+
   return InitPromise::CreateAndResolve(TrackInfo::kAudioTrack, __func__);
 }
 
@@ -112,7 +131,8 @@ nsresult
 VorbisDataDecoder::DecodeHeader(const unsigned char* aData, size_t aLength)
 {
   bool bos = mPacketCount == 0;
-  ogg_packet pkt = InitVorbisPacket(aData, aLength, bos, false, 0, mPacketCount++);
+  ogg_packet pkt =
+    InitVorbisPacket(aData, aLength, bos, false, 0, mPacketCount++);
   MOZ_ASSERT(mPacketCount <= 3);
 
   int r = vorbis_synthesis_headerin(&mVorbisInfo,
@@ -121,76 +141,66 @@ VorbisDataDecoder::DecodeHeader(const unsigned char* aData, size_t aLength)
   return r == 0 ? NS_OK : NS_ERROR_FAILURE;
 }
 
-nsresult
-VorbisDataDecoder::Input(MediaRawData* aSample)
-{
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
-      this, &VorbisDataDecoder::Decode,
-      RefPtr<MediaRawData>(aSample)));
-  mTaskQueue->Dispatch(runnable.forget());
-
-  return NS_OK;
-}
-
-void
+RefPtr<MediaDataDecoder::DecodePromise>
 VorbisDataDecoder::Decode(MediaRawData* aSample)
 {
-  if (DoDecode(aSample) == -1) {
-    mCallback->Error();
-  } else if (mTaskQueue->IsEmpty()) {
-    mCallback->InputExhausted();
-  }
+  return InvokeAsync<MediaRawData*>(mTaskQueue, this, __func__,
+                                    &VorbisDataDecoder::ProcessDecode, aSample);
 }
 
-int
-VorbisDataDecoder::DoDecode(MediaRawData* aSample)
+RefPtr<MediaDataDecoder::DecodePromise>
+VorbisDataDecoder::ProcessDecode(MediaRawData* aSample)
 {
+  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+
   const unsigned char* aData = aSample->Data();
   size_t aLength = aSample->Size();
   int64_t aOffset = aSample->mOffset;
-  uint64_t aTstampUsecs = aSample->mTime;
-  int64_t aTotalFrames = 0;
 
   MOZ_ASSERT(mPacketCount >= 3);
 
-  if (!mLastFrameTime || mLastFrameTime.ref() != aSample->mTime) {
+  if (!mLastFrameTime ||
+      mLastFrameTime.ref() != aSample->mTime.ToMicroseconds()) {
     // We are starting a new block.
     mFrames = 0;
-    mLastFrameTime = Some(aSample->mTime);
+    mLastFrameTime = Some(aSample->mTime.ToMicroseconds());
   }
 
-  ogg_packet pkt = InitVorbisPacket(aData, aLength, false, false, -1, mPacketCount++);
-  bool first_packet = mPacketCount == 4;
+  ogg_packet pkt = InitVorbisPacket(
+    aData, aLength, false, aSample->mEOS,
+    aSample->mTimecode.ToMicroseconds(), mPacketCount++);
 
-  if (vorbis_synthesis(&mVorbisBlock, &pkt) != 0) {
-    return -1;
+  int err = vorbis_synthesis(&mVorbisBlock, &pkt);
+  if (err) {
+    return DecodePromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                  RESULT_DETAIL("vorbis_synthesis:%d", err)),
+      __func__);
   }
 
-  if (vorbis_synthesis_blockin(&mVorbisDsp,
-                               &mVorbisBlock) != 0) {
-    return -1;
+  err = vorbis_synthesis_blockin(&mVorbisDsp, &mVorbisBlock);
+  if (err) {
+    return DecodePromise::CreateAndReject(
+      MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                  RESULT_DETAIL("vorbis_synthesis_blockin:%d", err)),
+      __func__);
   }
 
   VorbisPCMValue** pcm = 0;
   int32_t frames = vorbis_synthesis_pcmout(&mVorbisDsp, &pcm);
-  // If the first packet of audio in the media produces no data, we
-  // still need to produce an AudioData for it so that the correct media
-  // start time is calculated.  Otherwise we'd end up with a media start
-  // time derived from the timecode of the first packet that produced
-  // data.
-  if (frames == 0 && first_packet) {
-    mCallback->Output(new AudioData(aOffset,
-                                    aTstampUsecs,
-                                    0,
-                                    0,
-                                    nullptr,
-                                    mVorbisDsp.vi->channels,
-                                    mVorbisDsp.vi->rate));
+  if (frames == 0) {
+    return DecodePromise::CreateAndResolve(DecodedData(), __func__);
   }
+
+  DecodedData results;
   while (frames > 0) {
     uint32_t channels = mVorbisDsp.vi->channels;
-    auto buffer = MakeUnique<AudioDataValue[]>(frames*channels);
+    uint32_t rate = mVorbisDsp.vi->rate;
+    AlignedAudioBuffer buffer(frames*channels);
+    if (!buffer) {
+      return DecodePromise::CreateAndReject(
+        MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__), __func__);
+    }
     for (uint32_t j = 0; j < channels; ++j) {
       VorbisPCMValue* channel = pcm[j];
       for (uint32_t i = 0; i < uint32_t(frames); ++i) {
@@ -198,78 +208,176 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
       }
     }
 
-    CheckedInt64 duration = FramesToUsecs(frames, mVorbisDsp.vi->rate);
-    if (!duration.isValid()) {
-      NS_WARNING("Int overflow converting WebM audio duration");
-      return -1;
+    auto duration = FramesToTimeUnit(frames, rate);
+    if (!duration.IsValid()) {
+      return DecodePromise::CreateAndReject(
+        MediaResult(NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,
+                    RESULT_DETAIL("Overflow converting audio duration")),
+        __func__);
     }
-    CheckedInt64 total_duration = FramesToUsecs(mFrames,
-                                                mVorbisDsp.vi->rate);
-    if (!total_duration.isValid()) {
-      NS_WARNING("Int overflow converting WebM audio total_duration");
-      return -1;
+    auto total_duration = FramesToTimeUnit(mFrames, rate);
+    if (!total_duration.IsValid()) {
+      return DecodePromise::CreateAndReject(
+        MediaResult(NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,
+                    RESULT_DETAIL("Overflow converting audio total_duration")),
+        __func__);
     }
 
-    CheckedInt64 time = total_duration + aTstampUsecs;
-    if (!time.isValid()) {
-      NS_WARNING("Int overflow adding total_duration and aTstampUsecs");
-      return -1;
+    auto time = total_duration + aSample->mTime;
+    if (!time.IsValid()) {
+      return DecodePromise::CreateAndReject(
+        MediaResult(
+          NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,
+          RESULT_DETAIL("Overflow adding total_duration and aSample->mTime")),
+        __func__);
     };
 
-    aTotalFrames += frames;
-    mCallback->Output(new AudioData(aOffset,
-                                    time.value(),
-                                    duration.value(),
-                                    frames,
-                                    Move(buffer),
-                                    mVorbisDsp.vi->channels,
-                                    mVorbisDsp.vi->rate));
+    if (!mAudioConverter) {
+      const AudioConfig::ChannelLayout layout =
+        AudioConfig::ChannelLayout(channels, VorbisLayout(channels));
+      AudioConfig in(layout, channels, rate);
+      AudioConfig out(
+        AudioConfig::ChannelLayout::SMPTEDefault(layout), channels, rate);
+      mAudioConverter = MakeUnique<AudioConverter>(in, out);
+    }
+    MOZ_ASSERT(mAudioConverter->CanWorkInPlace());
+    AudioSampleBuffer data(std::move(buffer));
+    data = mAudioConverter->Process(std::move(data));
+
+    results.AppendElement(
+      new AudioData(aOffset,
+                    time,
+                    duration,
+                    frames,
+                    data.Forget(),
+                    channels,
+                    rate,
+                    mAudioConverter->OutputConfig().Layout().Map()));
     mFrames += frames;
-    if (vorbis_synthesis_read(&mVorbisDsp, frames) != 0) {
-      return -1;
+    err = vorbis_synthesis_read(&mVorbisDsp, frames);
+    if (err) {
+      return DecodePromise::CreateAndReject(
+        MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                    RESULT_DETAIL("vorbis_synthesis_read:%d", err)),
+        __func__);
     }
 
     frames = vorbis_synthesis_pcmout(&mVorbisDsp, &pcm);
   }
-
-  return aTotalFrames > 0 ? 1 : 0;
+  return DecodePromise::CreateAndResolve(std::move(results), __func__);
 }
 
-void
-VorbisDataDecoder::DoDrain()
-{
-  mCallback->DrainComplete();
-}
-
-nsresult
+RefPtr<MediaDataDecoder::DecodePromise>
 VorbisDataDecoder::Drain()
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethod(this, &VorbisDataDecoder::DoDrain));
-  mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
+  return InvokeAsync(mTaskQueue, __func__, [] {
+    return DecodePromise::CreateAndResolve(DecodedData(), __func__);
+  });
 }
 
-nsresult
+RefPtr<MediaDataDecoder::FlushPromise>
 VorbisDataDecoder::Flush()
 {
-  mTaskQueue->Flush();
-  // Ignore failed results from vorbis_synthesis_restart. They
-  // aren't fatal and it fails when ResetDecode is called at a
-  // time when no vorbis data has been read.
-  vorbis_synthesis_restart(&mVorbisDsp);
-  mLastFrameTime.reset();
-  return NS_OK;
+  RefPtr<VorbisDataDecoder> self = this;
+  return InvokeAsync(mTaskQueue, __func__, [self]() {
+    // Ignore failed results from vorbis_synthesis_restart. They
+    // aren't fatal and it fails when ResetDecode is called at a
+    // time when no vorbis data has been read.
+    vorbis_synthesis_restart(&self->mVorbisDsp);
+    self->mLastFrameTime.reset();
+    return FlushPromise::CreateAndResolve(true, __func__);
+  });
 }
 
 /* static */
 bool
 VorbisDataDecoder::IsVorbis(const nsACString& aMimeType)
 {
-  return aMimeType.EqualsLiteral("audio/webm; codecs=vorbis") ||
-         aMimeType.EqualsLiteral("audio/ogg; codecs=vorbis");
+  return aMimeType.EqualsLiteral("audio/vorbis");
 }
 
+/* static */ const AudioConfig::Channel*
+VorbisDataDecoder::VorbisLayout(uint32_t aChannels)
+{
+  // From https://www.xiph.org/vorbis/doc/Vorbis_I_spec.html
+  // Section 4.3.9.
+  typedef AudioConfig::Channel Channel;
+
+  switch (aChannels) {
+    case 1: // the stream is monophonic
+    {
+      static const Channel config[] = { AudioConfig::CHANNEL_FRONT_CENTER };
+      return config;
+    }
+    case 2: // the stream is stereo. channel order: left, right
+    {
+      static const Channel config[] = { AudioConfig::CHANNEL_FRONT_LEFT,
+                                        AudioConfig::CHANNEL_FRONT_RIGHT };
+      return config;
+    }
+    case 3: // the stream is a 1d-surround encoding. channel order: left,
+            // center, right
+    {
+      static const Channel config[] = { AudioConfig::CHANNEL_FRONT_LEFT,
+                                        AudioConfig::CHANNEL_FRONT_CENTER,
+                                        AudioConfig::CHANNEL_FRONT_RIGHT };
+      return config;
+    }
+    case 4: // the stream is quadraphonic surround. channel order: front left,
+            // front right, rear left, rear right
+    {
+      static const Channel config[] = { AudioConfig::CHANNEL_FRONT_LEFT,
+                                        AudioConfig::CHANNEL_FRONT_RIGHT,
+                                        AudioConfig::CHANNEL_BACK_LEFT,
+                                        AudioConfig::CHANNEL_BACK_RIGHT };
+      return config;
+    }
+    case 5: // the stream is five-channel surround. channel order: front left,
+            // center, front right, rear left, rear right
+    {
+      static const Channel config[] = { AudioConfig::CHANNEL_FRONT_LEFT,
+                                        AudioConfig::CHANNEL_FRONT_CENTER,
+                                        AudioConfig::CHANNEL_FRONT_RIGHT,
+                                        AudioConfig::CHANNEL_BACK_LEFT,
+                                        AudioConfig::CHANNEL_BACK_RIGHT };
+      return config;
+    }
+    case 6: // the stream is 5.1 surround. channel order: front left, center,
+            // front right, rear left, rear right, LFE
+    {
+      static const Channel config[] = {
+        AudioConfig::CHANNEL_FRONT_LEFT,  AudioConfig::CHANNEL_FRONT_CENTER,
+        AudioConfig::CHANNEL_FRONT_RIGHT, AudioConfig::CHANNEL_BACK_LEFT,
+        AudioConfig::CHANNEL_BACK_RIGHT,  AudioConfig::CHANNEL_LFE
+      };
+      return config;
+    }
+    case 7: // surround. channel order: front left, center, front right, side
+            // left, side right, rear center, LFE
+    {
+      static const Channel config[] = {
+        AudioConfig::CHANNEL_FRONT_LEFT,  AudioConfig::CHANNEL_FRONT_CENTER,
+        AudioConfig::CHANNEL_FRONT_RIGHT, AudioConfig::CHANNEL_SIDE_LEFT,
+        AudioConfig::CHANNEL_SIDE_RIGHT,  AudioConfig::CHANNEL_BACK_CENTER,
+        AudioConfig::CHANNEL_LFE
+      };
+      return config;
+    }
+    case 8: // the stream is 7.1 surround. channel order: front left, center,
+            // front right, side left, side right, rear left, rear right, LFE
+    {
+      static const Channel config[] = {
+        AudioConfig::CHANNEL_FRONT_LEFT,  AudioConfig::CHANNEL_FRONT_CENTER,
+        AudioConfig::CHANNEL_FRONT_RIGHT, AudioConfig::CHANNEL_SIDE_LEFT,
+        AudioConfig::CHANNEL_SIDE_RIGHT,  AudioConfig::CHANNEL_BACK_LEFT,
+        AudioConfig::CHANNEL_BACK_RIGHT,  AudioConfig::CHANNEL_LFE
+      };
+      return config;
+    }
+    default:
+      return nullptr;
+  }
+}
 
 } // namespace mozilla
 #undef LOG

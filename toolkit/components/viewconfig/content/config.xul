@@ -4,6 +4,7 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
 <?xml-stylesheet href="chrome://global/skin/in-content/info-pages.css" type="text/css"?>
 <?xml-stylesheet href="chrome://global/skin/config.css" type="text/css"?>
 
@@ -62,7 +63,7 @@
         <label id="warningText">&aboutWarningText.label;</label>
         <checkbox id="showWarningNextTime" label="&aboutWarningCheckbox.label;" checked="true"/>
         <hbox class="button-container">
-          <button id="warningButton" class="primary" oncommand="ShowPrefs();" label="&aboutWarningButton.label;"/>
+          <button id="warningButton" class="primary" oncommand="ShowPrefs();" label="&aboutWarningButton2.label;"/>
         </hbox>
       </vbox>
     </vbox>

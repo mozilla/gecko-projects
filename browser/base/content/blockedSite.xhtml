@@ -17,7 +17,7 @@
 
 <html xmlns="http://www.w3.org/1999/xhtml" class="blacklist">
   <head>
-    <link rel="stylesheet" href="chrome://global/skin/netError.css" type="text/css" media="all" />
+    <link rel="stylesheet" href="chrome://browser/skin/blockedSite.css" type="text/css" media="all" />
     <link rel="icon" type="image/png" id="favicon" href="chrome://global/skin/icons/blacklist_favicon.png"/>
 
     <script type="application/javascript"><![CDATA[
@@ -31,16 +31,14 @@
       // which is the URL displayed in the location bar, i.e.
       // the URI that the user attempted to load.
 
-      function getErrorCode()
-      {
+      function getErrorCode() {
         var url = document.documentURI;
         var error = url.search(/e\=/);
         var duffUrl = url.search(/\&u\=/);
         return decodeURIComponent(url.slice(error + 2, duffUrl));
       }
 
-      function getURL()
-      {
+      function getURL() {
         var url = document.documentURI;
         var match = url.match(/&u=([^&]+)&/);
 
@@ -58,11 +56,11 @@
       }
 
       /**
-       * Check whether this warning page should be overridable or whether
-       * the "ignore warning" button should be hidden.
+       * Check whether this warning page is overridable or not, in which case
+       * the "ignore the risk" suggestion in the error description
+       * should not be shown.
        */
-      function getOverride()
-      {
+      function getOverride() {
         var url = document.documentURI;
         var match = url.match(/&o=1&/);
         return !!match;
@@ -72,8 +70,7 @@
        * Attempt to get the hostname via document.location.  Fail back
        * to getURL so that we always return something meaningful.
        */
-      function getHostString()
-      {
+      function getHostString() {
         try {
           return document.location.hostname;
         } catch (e) {
@@ -81,8 +78,16 @@
         }
       }
 
-      function initPage()
-      {
+      function onClickSeeDetails() {
+        let details = document.getElementById("errorDescriptionContainer");
+        if (details.hidden) {
+          details.removeAttribute("hidden");
+        } else {
+          details.setAttribute("hidden", "true");
+        }
+      }
+
+      function initPage() {
         var error = "";
         switch (getErrorCode()) {
           case "malwareBlocked" :
@@ -94,8 +99,8 @@
           case "unwantedBlocked" :
             error = "unwanted";
             break;
-          case "forbiddenBlocked" :
-            error = "forbidden";
+          case "harmfulBlocked" :
+            error = "harmful";
             break;
           default:
             return;
@@ -105,134 +110,122 @@
 
         if (error !== "malware") {
           el = document.getElementById("errorTitleText_malware");
-          el.parentNode.removeChild(el);
+          el.remove();
           el = document.getElementById("errorShortDescText_malware");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("errorLongDescText_malware");
-          el.parentNode.removeChild(el);
+          el.remove();
+          el = document.getElementById("errorLongDesc_malware");
+          el.remove();
         }
 
         if (error !== "phishing") {
           el = document.getElementById("errorTitleText_phishing");
-          el.parentNode.removeChild(el);
+          el.remove();
           el = document.getElementById("errorShortDescText_phishing");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("errorLongDescText_phishing");
-          el.parentNode.removeChild(el);
+          el.remove();
+          el = document.getElementById("errorLongDesc_phishing");
+          el.remove();
         }
 
         if (error !== "unwanted") {
           el = document.getElementById("errorTitleText_unwanted");
-          el.parentNode.removeChild(el);
+          el.remove();
           el = document.getElementById("errorShortDescText_unwanted");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("errorLongDescText_unwanted");
-          el.parentNode.removeChild(el);
+          el.remove();
+          el = document.getElementById("errorLongDesc_unwanted");
+          el.remove();
         }
 
-        if (error !== "forbidden") {
-          el = document.getElementById("errorTitleText_forbidden");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("errorShortDescText_forbidden");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("whyForbiddenButton");
-          el.parentNode.removeChild(el);
+        if (error !== "harmful") {
+          el = document.getElementById("errorTitleText_harmful");
+          el.remove();
+          el = document.getElementById("errorShortDescText_harmful");
+          el.remove();
+          el = document.getElementById("errorLongDesc_harmful");
+          el.remove();
+        }
+
+        // Decide which version of the string should be visible in the error description.
+        if (getOverride()) {
+          document.getElementById(error + "_error_desc_no_override").remove();
         } else {
-          el = document.getElementById("ignoreWarningButton");
-          el.parentNode.removeChild(el);
-          el = document.getElementById("reportButton");
-          el.parentNode.removeChild(el);
-
-          // Remove red style: A "forbidden site" does not warrant the same level
-          // of anxiety as a security concern.
-          document.documentElement.className = "";
+          document.getElementById(error + "_error_desc_override").remove();
         }
 
-        // Set sitename
-        document.getElementById(error + "_sitename").textContent = getHostString();
-        document.title = document.getElementById("errorTitleText_" + error)
-                                 .innerHTML;
+        // Set sitename in error details.
+        let sitenameElem = document.getElementById(error + "_sitename");
+        sitenameElem.setAttribute("class", "sitename");
+        sitenameElem.textContent = getHostString();
 
-        if (!getOverride()) {
-          var btn = document.getElementById("ignoreWarningButton");
-          if (btn) {
-            btn.parentNode.removeChild(btn);
-          }
-        }
+        document.title = document.getElementById("errorTitleText_" + error).textContent;
 
-        // Inform the test harness that we're done loading the page
-        var event = new CustomEvent("AboutBlockedLoaded");
+        // Inform the test harness that we're done loading the page.
+        var event = new CustomEvent("AboutBlockedLoaded",
+          {
+            bubbles: true,
+            detail: {
+              url: this.getURL(),
+              err: error
+            }
+          });
         document.dispatchEvent(event);
       }
     ]]></script>
-    <style type="text/css">
-      /* Style warning button to look like a small text link in the
-         bottom right. This is preferable to just using a text link
-         since there is already a mechanism in browser.js for trapping
-         oncommand events from unprivileged chrome pages (BrowserOnCommand).*/
-      #ignoreWarningButton {
-        -moz-appearance: none;
-        background: transparent;
-        border: none;
-        color: white;  /* Hard coded because netError.css forces this page's background to dark red */
-        text-decoration: underline;
-        margin: 0;
-        padding: 0;
-        position: relative;
-        top: 23px;
-        left: 20px;
-        font-size: smaller;
-      }
-      
-      #ignoreWarningButton:-moz-dir(rtl) {
-        left: auto;
-        right: 20px;
-      }
-      
-      #ignoreWarning {
-        text-align: end;
-      }
-    </style>
   </head>
 
   <body dir="&locale.dir;">
-    <div id="errorPageContainer">
-    
+    <div id="errorPageContainer" class="container">
+
       <!-- Error Title -->
-      <div id="errorTitle">
-        <h1 id="errorTitleText_phishing">&safeb.blocked.phishingPage.title2;</h1>
-        <h1 id="errorTitleText_malware">&safeb.blocked.malwarePage.title;</h1>
-        <h1 id="errorTitleText_unwanted">&safeb.blocked.unwantedPage.title;</h1>
-        <h1 id="errorTitleText_forbidden">&safeb.blocked.forbiddenPage.title2;</h1>
+      <div id="errorTitle" class="title">
+        <h1 class="title-text" id="errorTitleText_phishing">&safeb.blocked.phishingPage.title3;</h1>
+        <h1 class="title-text" id="errorTitleText_malware">&safeb.blocked.malwarePage.title2;</h1>
+        <h1 class="title-text" id="errorTitleText_unwanted">&safeb.blocked.unwantedPage.title2;</h1>
+        <h1 class="title-text" id="errorTitleText_harmful">&safeb.blocked.harmfulPage.title;</h1>
       </div>
-      
+
       <div id="errorLongContent">
-      
+
         <!-- Short Description -->
         <div id="errorShortDesc">
-          <p id="errorShortDescText_phishing">&safeb.blocked.phishingPage.shortDesc2;</p>
-          <p id="errorShortDescText_malware">&safeb.blocked.malwarePage.shortDesc;</p>
-          <p id="errorShortDescText_unwanted">&safeb.blocked.unwantedPage.shortDesc;</p>
-          <p id="errorShortDescText_forbidden">&safeb.blocked.forbiddenPage.shortDesc2;</p>
+          <p id="errorShortDescText_phishing">&safeb.blocked.phishingPage.shortDesc3;</p>
+          <p id="errorShortDescText_malware">&safeb.blocked.malwarePage.shortDesc2;</p>
+          <p id="errorShortDescText_unwanted">&safeb.blocked.unwantedPage.shortDesc2;</p>
+          <p id="errorShortDescText_harmful">&safeb.blocked.harmfulPage.shortDesc2;</p>
         </div>
 
-        <!-- Long Description -->
-        <div id="errorLongDesc">
-          <p id="errorLongDescText_phishing">&safeb.blocked.phishingPage.longDesc2;</p>
-          <p id="errorLongDescText_malware">&safeb.blocked.malwarePage.longDesc;</p>
-          <p id="errorLongDescText_unwanted">&safeb.blocked.unwantedPage.longDesc;</p>
+        <!-- Advisory -->
+        <div id="advisoryDesc">
+          <p id="advisoryDescText">&safeb.palm.advisory.desc2;</p>
         </div>
-        
+
         <!-- Action buttons -->
-        <div id="buttons">
+        <div id="buttons" class="button-container">
           <!-- Commands handled in browser.js -->
-          <button id="getMeOutButton">&safeb.palm.accept.label;</button>
-          <button id="reportButton">&safeb.palm.reportPage.label;</button>
-          <button id="whyForbiddenButton">&safeb.palm.whyForbidden.label;</button>
+          <button id="goBackButton">&safeb.palm.accept.label2;</button>
+          <button id="seeDetailsButton" onclick="onClickSeeDetails();">&safeb.palm.seedetails.label;</button>
         </div>
       </div>
-      <div id="ignoreWarning">
-        <button id="ignoreWarningButton">&safeb.palm.decline.label;</button>
+      <div id="errorDescriptionContainer" hidden="true">
+        <div class="error-description" id="errorLongDesc_phishing">
+          <p id="phishing_error_desc_override">&safeb.blocked.phishingPage.errorDesc.override;</p>
+          <p id="phishing_error_desc_no_override">&safeb.blocked.phishingPage.errorDesc.noOverride;</p>
+          <p id="phishing_learn_more">&safeb.blocked.phishingPage.learnMore;</p>
+        </div>
+        <div class="error-description" id="errorLongDesc_malware">
+          <p id="malware_error_desc_override">&safeb.blocked.malwarePage.errorDesc.override;</p>
+          <p id="malware_error_desc_no_override">&safeb.blocked.malwarePage.errorDesc.noOverride;</p>
+          <p id="malware_learn_more">&safeb.blocked.malwarePage.learnMore;</p>
+        </div>
+        <div class="error-description" id="errorLongDesc_unwanted">
+          <p id="unwanted_error_desc_override">&safeb.blocked.unwantedPage.errorDesc.override;</p>
+          <p id="unwanted_error_desc_no_override">&safeb.blocked.unwantedPage.errorDesc.noOverride;</p>
+          <p id="unwanted_learn_more">&safeb.blocked.unwantedPage.learnMore;</p>
+        </div>
+        <div class="error-description" id="errorLongDesc_harmful">
+          <p id="harmful_error_desc_override">&safeb.blocked.harmfulPage.errorDesc.override;</p>
+          <p id="harmful_error_desc_no_override">&safeb.blocked.harmfulPage.errorDesc.noOverride;</p>
+          <p id="harmful_learn_more">&safeb.blocked.harmfulPage.learnMore;</p>
+        </div>
       </div>
     </div>
     <!--
@@ -240,6 +233,8 @@
     - an onload handler. This is because error pages are loaded as
     - LOAD_BACKGROUND, which means that onload handlers will not be executed.
     -->
-    <script type="application/javascript">initPage();</script>
+    <script type="application/javascript">
+      initPage();
+    </script>
   </body>
 </html>

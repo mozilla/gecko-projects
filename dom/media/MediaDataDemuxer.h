@@ -7,11 +7,13 @@
 #if !defined(MediaDataDemuxer_h)
 #define MediaDataDemuxer_h
 
+#include "DecoderDoctorLogger.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/UniquePtr.h"
 
 #include "MediaData.h"
 #include "MediaInfo.h"
+#include "MediaResult.h"
 #include "TimeUnits.h"
 #include "nsISupportsImpl.h"
 #include "mozilla/RefPtr.h"
@@ -22,26 +24,20 @@ namespace mozilla {
 class MediaTrackDemuxer;
 class TrackMetadataHolder;
 
-enum class DemuxerFailureReason : int8_t
-{
-  WAITING_FOR_DATA,
-  END_OF_STREAM,
-  DEMUXER_ERROR,
-  CANCELED,
-  SHUTDOWN,
-};
-
+DDLoggedTypeDeclName(MediaDataDemuxer);
+DDLoggedTypeName(MediaTrackDemuxer);
 
 // Allows reading the media data: to retrieve the metadata and demux samples.
 // MediaDataDemuxer isn't designed to be thread safe.
 // When used by the MediaFormatDecoder, care is taken to ensure that the demuxer
 // will never be called from more than one thread at once.
-class MediaDataDemuxer
+class MediaDataDemuxer : public DecoderDoctorLifeLogger<MediaDataDemuxer>
 {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDataDemuxer)
 
-  typedef MozPromise<nsresult, DemuxerFailureReason, /* IsExclusive = */ true> InitPromise;
+  typedef
+    MozPromise<MediaResult, MediaResult, /* IsExclusive = */ true> InitPromise;
 
   // Initializes the demuxer. Other methods cannot be called unless
   // initialization has completed and succeeded.
@@ -52,9 +48,6 @@ public:
   // otherwise.
   virtual RefPtr<InitPromise> Init() = 0;
 
-  // Returns true if a aType track type is available.
-  virtual bool HasTrackType(TrackInfo::TrackType aType) const = 0;
-
   // Returns the number of tracks of aType type available. A value of
   // 0 indicates that no such type is available.
   virtual uint32_t GetNumberTracks(TrackInfo::TrackType aType) const = 0;
@@ -64,8 +57,8 @@ public:
   // aTrackNumber must be constrained between  0 and  GetNumberTracks(aType) - 1
   // The actual Track ID is to be retrieved by calling
   // MediaTrackDemuxer::TrackInfo.
-  virtual already_AddRefed<MediaTrackDemuxer> GetTrackDemuxer(TrackInfo::TrackType aType,
-                                                              uint32_t aTrackNumber) = 0;
+  virtual already_AddRefed<MediaTrackDemuxer> GetTrackDemuxer(
+    TrackInfo::TrackType aType, uint32_t aTrackNumber) = 0;
 
   // Returns true if the underlying resource allows seeking.
   virtual bool IsSeekable() const = 0;
@@ -91,7 +84,7 @@ public:
   // since the demuxer was initialized.
   // The demuxer can use this mechanism to inform all track demuxers to update
   // its buffered range.
-  // This will be called should the demuxer be used with MediaSourceResource.
+  // This will be called should the demuxer be used with MediaSource.
   virtual void NotifyDataRemoved() { }
 
   // Indicate to MediaFormatReader if it should compute the start time
@@ -105,32 +98,38 @@ protected:
   }
 };
 
-class MediaTrackDemuxer
+class MediaTrackDemuxer : public DecoderDoctorLifeLogger<MediaTrackDemuxer>
 {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaTrackDemuxer)
 
-  class SamplesHolder {
+  class SamplesHolder
+  {
   public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SamplesHolder)
     nsTArray<RefPtr<MediaRawData>> mSamples;
   private:
-    ~SamplesHolder() {}
+    ~SamplesHolder() { }
   };
 
-  class SkipFailureHolder {
+  class SkipFailureHolder
+  {
   public:
-    SkipFailureHolder(DemuxerFailureReason aFailure, uint32_t aSkipped)
+    SkipFailureHolder(const MediaResult& aFailure, uint32_t aSkipped)
       : mFailure(aFailure)
       , mSkipped(aSkipped)
     {}
-    DemuxerFailureReason mFailure;
+    MediaResult mFailure;
     uint32_t mSkipped;
   };
 
-  typedef MozPromise<media::TimeUnit, DemuxerFailureReason, /* IsExclusive = */ true> SeekPromise;
-  typedef MozPromise<RefPtr<SamplesHolder>, DemuxerFailureReason, /* IsExclusive = */ true> SamplesPromise;
-  typedef MozPromise<uint32_t, SkipFailureHolder, /* IsExclusive = */ true> SkipAccessPointPromise;
+  typedef MozPromise<media::TimeUnit, MediaResult, /* IsExclusive = */ true>
+    SeekPromise;
+  typedef MozPromise<RefPtr<SamplesHolder>, MediaResult,
+                     /* IsExclusive = */ true>
+    SamplesPromise;
+  typedef MozPromise<uint32_t, SkipFailureHolder, /* IsExclusive = */ true>
+    SkipAccessPointPromise;
 
   // Returns the TrackInfo (a.k.a Track Description) for this track.
   // The TrackInfo returned will be:
@@ -141,7 +140,7 @@ public:
 
   // Seeks to aTime. Upon success, SeekPromise will be resolved with the
   // actual time seeked to. Typically the random access point time
-  virtual RefPtr<SeekPromise> Seek(media::TimeUnit aTime) = 0;
+  virtual RefPtr<SeekPromise> Seek(const media::TimeUnit& aTime) = 0;
 
   // Returns the next aNumSamples sample(s) available.
   // If only a lesser amount of samples is available, only those will be
@@ -185,7 +184,8 @@ public:
   // The first frame returned by the next call to GetSamples() will be the
   // first random access point found after aTimeThreshold.
   // Upon success, returns the number of frames skipped.
-  virtual RefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(media::TimeUnit aTimeThreshold) = 0;
+  virtual RefPtr<SkipAccessPointPromise>
+  SkipToNextRandomAccessPoint(const media::TimeUnit& aTimeThreshold) = 0;
 
   // Gets the resource's offset used for the last Seek() or GetSample().
   // A negative value indicates that this functionality isn't supported.
@@ -201,6 +201,13 @@ public:
 
   virtual media::TimeIntervals GetBuffered() = 0;
 
+  // By default, it is assumed that the entire resource can be evicted once
+  // all samples have been demuxed.
+  virtual int64_t GetEvictionOffset(const media::TimeUnit& aTime)
+  {
+    return INT64_MAX;
+  }
+
   // If the MediaTrackDemuxer and MediaDataDemuxer hold cross references.
   // BreakCycles must be overridden.
   virtual void BreakCycles()
@@ -208,7 +215,7 @@ public:
   }
 
 protected:
-  virtual ~MediaTrackDemuxer() {}
+  virtual ~MediaTrackDemuxer() { }
 };
 
 } // namespace mozilla

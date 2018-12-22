@@ -10,8 +10,8 @@ namespace mozilla {
 namespace _ipdltest {
 
 mozilla::ipc::RacyInterruptPolicy
-MediateRace(const mozilla::ipc::MessageChannel::Message& parent,
-            const mozilla::ipc::MessageChannel::Message& child);
+MediateRace(const mozilla::ipc::MessageChannel::MessageInfo& parent,
+            const mozilla::ipc::MessageChannel::MessageInfo& child);
 
 class TestInterruptRacesParent :
     public PTestInterruptRacesParent
@@ -29,26 +29,27 @@ public:
     void Main();
 
 protected:
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     RecvStartRace() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerRace(bool* hasRace) override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerStackFrame() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerStackFrame3() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerParent() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     RecvGetAnsweredParent(bool* answeredParent) override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) override
+    MediateInterruptRace(const MessageInfo& parent,
+                         const MessageInfo& child) override
     {
         return MediateRace(parent, child);
     }
@@ -83,29 +84,30 @@ public:
     virtual ~TestInterruptRacesChild() { }
 
 protected:
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     RecvStart() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerRace(bool* hasRace) override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerStackFrame() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerStackFrame3() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     RecvWakeup() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     RecvWakeup3() override;
 
-    virtual bool
+    virtual mozilla::ipc::IPCResult
     AnswerChild() override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) override
+    MediateInterruptRace(const MessageInfo& parent,
+                         const MessageInfo& child) override
     {
         return MediateRace(parent, child);
     }

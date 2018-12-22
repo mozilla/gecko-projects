@@ -62,24 +62,24 @@ XULLabelAccessible::Shutdown()
 }
 
 ENameValueFlag
-XULLabelAccessible::NativeName(nsString& aName)
+XULLabelAccessible::NativeName(nsString& aName) const
 {
   // if the value attr doesn't exist, the screen reader must get the accessible text
   // from the accessible text interface or from the children
   if (mValueTextLeaf)
     return mValueTextLeaf->Name(aName);
 
-  return eNameOK;
+  return Accessible::NativeName(aName);
 }
 
 role
-XULLabelAccessible::NativeRole()
+XULLabelAccessible::NativeRole() const
 {
   return roles::LABEL;
 }
 
 uint64_t
-XULLabelAccessible::NativeState()
+XULLabelAccessible::NativeState() const
 {
   // Labels and description have read only state
   // They are not focusable or selectable
@@ -87,7 +87,7 @@ XULLabelAccessible::NativeState()
 }
 
 Relation
-XULLabelAccessible::RelationByType(RelationType aType)
+XULLabelAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = HyperTextAccessibleWrap::RelationByType(aType);
   if (aType == RelationType::LABEL_FOR) {
@@ -127,13 +127,13 @@ XULLabelAccessible::UpdateLabelValue(const nsString& aValue)
 ////////////////////////////////////////////////////////////////////////////////
 
 role
-XULLabelTextLeafAccessible::NativeRole()
+XULLabelTextLeafAccessible::NativeRole() const
 {
   return roles::TEXT_LEAF;
 }
 
 uint64_t
-XULLabelTextLeafAccessible::NativeState()
+XULLabelTextLeafAccessible::NativeState() const
 {
   return TextLeafAccessibleWrap::NativeState() | states::READONLY;
 }
@@ -150,13 +150,13 @@ XULTooltipAccessible::
 }
 
 uint64_t
-XULTooltipAccessible::NativeState()
+XULTooltipAccessible::NativeState() const
 {
   return LeafAccessible::NativeState() | states::READONLY;
 }
 
 role
-XULTooltipAccessible::NativeRole()
+XULTooltipAccessible::NativeRole() const
 {
   return roles::TOOLTIP;
 }
@@ -180,17 +180,17 @@ XULLinkAccessible::~XULLinkAccessible()
 // XULLinkAccessible: Accessible
 
 void
-XULLinkAccessible::Value(nsString& aValue)
+XULLinkAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
 
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::href, aValue);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::href, aValue);
 }
 
 ENameValueFlag
-XULLinkAccessible::NativeName(nsString& aName)
+XULLinkAccessible::NativeName(nsString& aName) const
 {
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aName);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aName);
   if (!aName.IsEmpty())
     return eNameOK;
 
@@ -199,7 +199,7 @@ XULLinkAccessible::NativeName(nsString& aName)
 }
 
 role
-XULLinkAccessible::NativeRole()
+XULLinkAccessible::NativeRole() const
 {
   return roles::LINK;
 }
@@ -212,7 +212,7 @@ XULLinkAccessible::NativeLinkState() const
 }
 
 uint8_t
-XULLinkAccessible::ActionCount()
+XULLinkAccessible::ActionCount() const
 {
   return 1;
 }
@@ -227,7 +227,7 @@ XULLinkAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULLinkAccessible::DoAction(uint8_t aIndex)
+XULLinkAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Jump)
     return false;
@@ -240,7 +240,7 @@ XULLinkAccessible::DoAction(uint8_t aIndex)
 // XULLinkAccessible: HyperLinkAccessible
 
 bool
-XULLinkAccessible::IsLink()
+XULLinkAccessible::IsLink() const
 {
   // Expose HyperLinkAccessible unconditionally.
   return true;
@@ -268,20 +268,20 @@ XULLinkAccessible::EndOffset()
 }
 
 already_AddRefed<nsIURI>
-XULLinkAccessible::AnchorURIAt(uint32_t aAnchorIndex)
+XULLinkAccessible::AnchorURIAt(uint32_t aAnchorIndex) const
 {
   if (aAnchorIndex != 0)
     return nullptr;
 
   nsAutoString href;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
 
   nsCOMPtr<nsIURI> baseURI = mContent->GetBaseURI();
   nsIDocument* document = mContent->OwnerDoc();
 
   nsCOMPtr<nsIURI> anchorURI;
   NS_NewURI(getter_AddRefs(anchorURI), href,
-            document->GetDocumentCharacterSet().get(),
+            document->GetDocumentCharacterSet(),
             baseURI);
 
   return anchorURI.forget();

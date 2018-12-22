@@ -3,11 +3,13 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import absolute_import, print_function
 
 import os
-import sys
-import xtalos
 import subprocess
+import sys
+
+from . import xtalos
 
 
 def start(xperf_path, xperf_providers, xperf_stackwalk, xperf_user_providers,
@@ -26,7 +28,7 @@ def start(xperf_path, xperf_providers, xperf_stackwalk, xperf_user_providers,
                  '-f', '%s.user' % etl_filename
                  ]
     if debug:
-        print "executing '%s'" % subprocess.list2cmdline(xperf_cmd)
+        print("executing '%s'" % subprocess.list2cmdline(xperf_cmd))
     subprocess.call(xperf_cmd)
 
 
@@ -76,7 +78,7 @@ def main(args=sys.argv[1:]):
         start_from_config(config_file=args.configFile,
                           debug=args.debug_level >= xtalos.DEBUG_INFO,
                           **args.__dict__)
-    except xtalos.XTalosError, e:
+    except xtalos.XTalosError as e:
         parser.error(str(e))
 
 

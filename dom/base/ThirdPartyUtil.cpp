@@ -17,11 +17,12 @@
 #include "nsIURI.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
+#include "nsPIDOMWindow.h"
 
 NS_IMPL_ISUPPORTS(ThirdPartyUtil, mozIThirdPartyUtil)
 
 //
-// NSPR_LOG_MODULES=thirdPartyUtil:5
+// MOZ_LOG=thirdPartyUtil:5
 //
 static mozilla::LazyLogModule gThirdPartyLog("thirdPartyUtil");
 #undef LOG
@@ -121,7 +122,8 @@ ThirdPartyUtil::IsThirdPartyWindow(mozIDOMWindowProxy* aWindow,
   nsresult rv;
   nsCOMPtr<nsIURI> currentURI;
   rv = GetURIFromWindow(aWindow, getter_AddRefs(currentURI));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv))
+    return rv;
 
   nsCString bottomDomain;
   rv = GetBaseDomain(currentURI, bottomDomain);
@@ -144,7 +146,7 @@ ThirdPartyUtil::IsThirdPartyWindow(mozIDOMWindowProxy* aWindow,
   nsCOMPtr<nsIURI> parentURI;
   do {
     // We use GetScriptableParent rather than GetParent because we consider
-    // <iframe mozbrowser/mozapp> to be a top-level frame.
+    // <iframe mozbrowser> to be a top-level frame.
     parent = current->GetScriptableParent();
     if (SameCOMIdentity(parent, current)) {
       // We're at the topmost content window. We already know the answer.
@@ -168,14 +170,14 @@ ThirdPartyUtil::IsThirdPartyWindow(mozIDOMWindowProxy* aWindow,
     currentURI = parentURI;
   } while (1);
 
-  NS_NOTREACHED("should've returned");
+  MOZ_ASSERT_UNREACHABLE("should've returned");
   return NS_ERROR_UNEXPECTED;
 }
 
 // Determine if the URI associated with aChannel or any URI of the window
 // hierarchy associated with the channel is foreign with respect to aSecondURI.
 // See docs for mozIThirdPartyUtil.
-NS_IMETHODIMP 
+NS_IMETHODIMP
 ThirdPartyUtil::IsThirdPartyChannel(nsIChannel* aChannel,
                                     nsIURI* aURI,
                                     bool* aResult)

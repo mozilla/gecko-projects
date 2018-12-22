@@ -10,7 +10,6 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "nsIGlobalObject.h"
-#include "nsNSSShutDown.h"
 #include "pk11pub.h"
 #include "keyhi.h"
 #include "ScopedNSSTypes.h"
@@ -58,9 +57,8 @@ Thus, internally, a key has the following fields:
 
 struct JsonWebKey;
 
-class CryptoKey final : public nsISupports,
-                        public nsWrapperCache,
-                        public nsNSSShutDownObject
+class CryptoKey final : public nsISupports
+                      , public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -132,60 +130,43 @@ public:
   nsresult SetPublicKey(SECKEYPublicKey* aPublicKey);
 
   // Accessors for the keys themselves
-  // Note: GetPrivateKey and GetPublicKey return copies of the internal
-  // key handles, which the caller must free with SECKEY_DestroyPrivateKey
-  // or SECKEY_DestroyPublicKey.
   const CryptoBuffer& GetSymKey() const;
-  SECKEYPrivateKey* GetPrivateKey() const;
-  SECKEYPublicKey* GetPublicKey() const;
-
-  // For nsNSSShutDownObject
-  virtual void virtualDestroyNSSReference() override;
-  void destructorSafeDestroyNSSReference();
+  UniqueSECKEYPrivateKey GetPrivateKey() const;
+  UniqueSECKEYPublicKey GetPublicKey() const;
 
   // Serialization and deserialization convenience methods
   // Note:
   // 1. The inputs aKeyData are non-const only because the NSS import
   //    functions lack the const modifier.  They should not be modified.
   // 2. All of the NSS key objects returned need to be freed by the caller.
-  static SECKEYPrivateKey* PrivateKeyFromPkcs8(CryptoBuffer& aKeyData,
-                                               const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPrivateKey PrivateKeyFromPkcs8(CryptoBuffer& aKeyData);
   static nsresult PrivateKeyToPkcs8(SECKEYPrivateKey* aPrivKey,
-                                    CryptoBuffer& aRetVal,
-                                    const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                    CryptoBuffer& aRetVal);
 
-  static SECKEYPublicKey* PublicKeyFromSpki(CryptoBuffer& aKeyData,
-                                            const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPublicKey PublicKeyFromSpki(CryptoBuffer& aKeyData);
   static nsresult PublicKeyToSpki(SECKEYPublicKey* aPubKey,
-                                  CryptoBuffer& aRetVal,
-                                  const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                  CryptoBuffer& aRetVal);
 
-  static SECKEYPrivateKey* PrivateKeyFromJwk(const JsonWebKey& aJwk,
-                                             const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPrivateKey PrivateKeyFromJwk(const JsonWebKey& aJwk);
   static nsresult PrivateKeyToJwk(SECKEYPrivateKey* aPrivKey,
-                                  JsonWebKey& aRetVal,
-                                  const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                  JsonWebKey& aRetVal);
 
-  static SECKEYPublicKey* PublicKeyFromJwk(const JsonWebKey& aKeyData,
-                                           const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPublicKey PublicKeyFromJwk(const JsonWebKey& aKeyData);
   static nsresult PublicKeyToJwk(SECKEYPublicKey* aPubKey,
-                                 JsonWebKey& aRetVal,
-                                 const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                 JsonWebKey& aRetVal);
 
-  static SECKEYPublicKey* PublicDhKeyFromRaw(CryptoBuffer& aKeyData,
-                                             const CryptoBuffer& aPrime,
-                                             const CryptoBuffer& aGenerator,
-                                             const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPublicKey PublicDhKeyFromRaw(
+    CryptoBuffer& aKeyData,
+    const CryptoBuffer& aPrime,
+    const CryptoBuffer& aGenerator);
   static nsresult PublicDhKeyToRaw(SECKEYPublicKey* aPubKey,
-                                   CryptoBuffer& aRetVal,
-                                   const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                   CryptoBuffer& aRetVal);
 
-  static SECKEYPublicKey* PublicECKeyFromRaw(CryptoBuffer& aKeyData,
-                                             const nsString& aNamedCurve,
-                                             const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+  static UniqueSECKEYPublicKey PublicECKeyFromRaw(
+    CryptoBuffer& aKeyData,
+    const nsString& aNamedCurve);
   static nsresult PublicECKeyToRaw(SECKEYPublicKey* aPubKey,
-                                   CryptoBuffer& aRetVal,
-                                   const nsNSSShutDownPreventionLock& /*proofOfLock*/);
+                                   CryptoBuffer& aRetVal);
 
   static bool PublicKeyValid(SECKEYPublicKey* aPubKey);
 
@@ -194,7 +175,7 @@ public:
   bool ReadStructuredClone(JSStructuredCloneReader* aReader);
 
 private:
-  ~CryptoKey();
+  ~CryptoKey() {}
 
   RefPtr<nsIGlobalObject> mGlobal;
   uint32_t mAttributes; // see above
@@ -202,8 +183,8 @@ private:
 
   // Only one key handle should be set, according to the KeyType
   CryptoBuffer mSymKey;
-  ScopedSECKEYPrivateKey mPrivateKey;
-  ScopedSECKEYPublicKey mPublicKey;
+  UniqueSECKEYPrivateKey mPrivateKey;
+  UniqueSECKEYPublicKey mPublicKey;
 };
 
 } // namespace dom

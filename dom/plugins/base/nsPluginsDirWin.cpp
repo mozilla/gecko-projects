@@ -5,20 +5,19 @@
 
 /*
   nsPluginsDirWin.cpp
-  
+
   Windows implementation of the nsPluginsDir/nsPluginsFile classes.
-  
+
   by Alex Musil
  */
 
 #include "mozilla/ArrayUtils.h" // ArrayLength
 #include "mozilla/DebugOnly.h"
+#include "mozilla/Printf.h"
 
 #include "nsPluginsDir.h"
 #include "prlink.h"
 #include "plstr.h"
-#include "prmem.h"
-#include "prprf.h"
 
 #include "windows.h"
 #include "winbase.h"
@@ -26,41 +25,6 @@
 #include "nsString.h"
 #include "nsIFile.h"
 #include "nsUnicharUtils.h"
-
-#include <shlwapi.h>
-#define SHOCKWAVE_BASE_FILENAME L"np32dsw"
-/**
- * Determines whether or not SetDllDirectory should be called for this plugin.
- *
- * @param pluginFilePath The full path of the plugin file
- * @return true if SetDllDirectory can be called for the plugin
- */
-bool
-ShouldProtectPluginCurrentDirectory(char16ptr_t pluginFilePath)
-{
-  LPCWSTR passedInFilename = PathFindFileName(pluginFilePath);
-  if (!passedInFilename) {
-    return true;
-  }
-
-  // Somewhere in the middle of 11.6 version of Shockwave, naming of the DLL
-  // after its version number is introduced.
-  if (!wcsicmp(passedInFilename, SHOCKWAVE_BASE_FILENAME L".dll")) {
-    return false;
-  }
-
-  // Shockwave versions before 1202122 will break if you call SetDllDirectory
-  const uint64_t kFixedShockwaveVersion = 1202122;
-  uint64_t version;
-  int found = swscanf(passedInFilename, SHOCKWAVE_BASE_FILENAME L"_%llu.dll",
-                      &version);
-  if (found && version < kFixedShockwaveVersion) {
-    return false;
-  }
-
-  // We always want to call SetDllDirectory otherwise
-  return true;
-}
 
 using namespace mozilla;
 
@@ -78,7 +42,7 @@ static char* GetKeyValue(void* verbuf, const WCHAR* key,
   if (_snwprintf_s(keybuf, ArrayLength(keybuf), _TRUNCATE,
                    keyFormat, language, codepage, key) < 0)
   {
-    NS_NOTREACHED("plugin info key too long for buffer!");
+    MOZ_ASSERT_UNREACHABLE("plugin info key too long for buffer!");
     return nullptr;
   }
 
@@ -99,14 +63,28 @@ static char* GetVersion(void* verbuf)
   ::VerQueryValueW(verbuf, L"\\", (void **)&fileInfo, &fileInfoLen);
 
   if (fileInfo) {
-    return PR_smprintf("%ld.%ld.%ld.%ld",
-                       HIWORD(fileInfo->dwFileVersionMS),
-                       LOWORD(fileInfo->dwFileVersionMS),
-                       HIWORD(fileInfo->dwFileVersionLS),
-                       LOWORD(fileInfo->dwFileVersionLS));
+    return mozilla::Smprintf("%ld.%ld.%ld.%ld",
+                      HIWORD(fileInfo->dwFileVersionMS),
+                      LOWORD(fileInfo->dwFileVersionMS),
+                      HIWORD(fileInfo->dwFileVersionLS),
+                      LOWORD(fileInfo->dwFileVersionLS)).release();
   }
 
   return nullptr;
+}
+
+// Returns a boolean indicating if the key's value contains a string
+// entry equal to "1" or "0". No entry for the key returns false.
+static bool GetBooleanFlag(void* verbuf, const WCHAR* key,
+                           UINT language, UINT codepage)
+{
+  char* flagStr = GetKeyValue(verbuf, key, language, codepage);
+  if (!flagStr) {
+    return false;
+  }
+  bool result = (PL_strncmp("1", flagStr, 1) == 0);
+  PL_strfree(flagStr);
+  return result;
 }
 
 static uint32_t CalculateVariantCount(char* mimeTypes)
@@ -131,13 +109,13 @@ static char** MakeStringArray(uint32_t variants, char* data)
   // The number of variants has been calculated based on the mime
   // type array. Plugins are not explicitely required to match
   // this number in two other arrays: file extention array and mime
-  // description array, and some of them actually don't. 
+  // description array, and some of them actually don't.
   // We should handle such situations gracefully
 
   if ((variants <= 0) || !data)
     return nullptr;
 
-  char ** array = (char **)PR_Calloc(variants, sizeof(char *));
+  char** array = (char**) calloc(variants, sizeof(char *));
   if (!array)
     return nullptr;
 
@@ -151,7 +129,7 @@ static char** MakeStringArray(uint32_t variants, char* data)
     array[i] = PL_strdup(start);
 
     if (!p) {
-      // nothing more to look for, fill everything left 
+      // nothing more to look for, fill everything left
       // with empty strings and break
       while(++i < variants)
         array[i] = PL_strdup("");
@@ -175,7 +153,7 @@ static void FreeStringArray(uint32_t variants, char ** array)
       array[i] = nullptr;
     }
   }
-  PR_Free(array);
+  free(array);
 }
 
 static bool CanLoadPlugin(char16ptr_t aBinaryPath)
@@ -224,33 +202,25 @@ static bool CanLoadPlugin(char16ptr_t aBinaryPath)
 // The file name must be in the form "np*.dll"
 bool nsPluginsDir::IsPluginFile(nsIFile* file)
 {
-  nsAutoCString path;
-  if (NS_FAILED(file->GetNativePath(path)))
+  nsAutoString path;
+  if (NS_FAILED(file->GetPath(path)))
     return false;
 
-  const char *cPath = path.get();
-
   // this is most likely a path, so skip to the filename
-  const char* filename = PL_strrchr(cPath, '\\');
-  if (filename)
-    ++filename;
-  else
-    filename = cPath;
+  auto filename = Substring(path, path.RFindChar('\\') + 1);
+  // The file name must have at least one character between "np" and ".dll".
+  if (filename.Length() < 7) {
+    return false;
+  }
 
-  char* extension = PL_strrchr(filename, '.');
-  if (extension)
-    ++extension;
-
-  uint32_t fullLength = strlen(filename);
-  uint32_t extLength = extension ? strlen(extension) : 0;
-  if (fullLength >= 7 && extLength == 3) {
-    if (!PL_strncasecmp(filename, "np", 2) && !PL_strncasecmp(extension, "dll", 3)) {
-      // don't load OJI-based Java plugins
-      if (!PL_strncasecmp(filename, "npoji", 5) ||
-          !PL_strncasecmp(filename, "npjava", 6))
-        return false;
-      return true;
-    }
+  ToLowerCase(filename);
+  if (StringBeginsWith(filename, NS_LITERAL_STRING("np")) &&
+      StringEndsWith(filename, NS_LITERAL_STRING(".dll"))) {
+    // don't load OJI-based Java plugins
+    if (StringBeginsWith(filename, NS_LITERAL_STRING("npoji")) ||
+        StringBeginsWith(filename, NS_LITERAL_STRING("npjava")))
+      return false;
+    return true;
   }
 
   return false;
@@ -278,12 +248,8 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
   if (!mPlugin)
     return NS_ERROR_NULL_POINTER;
 
-  bool protectCurrentDirectory = true;
-
   nsAutoString pluginFilePath;
   mPlugin->GetPath(pluginFilePath);
-  protectCurrentDirectory =
-    ShouldProtectPluginCurrentDirectory(pluginFilePath.BeginReading());
 
   nsAutoString pluginFolderPath = pluginFilePath;
   int32_t idx = pluginFilePath.RFindChar('\\');
@@ -299,17 +265,14 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
     NS_ASSERTION(restoreOrigDir, "Error in Loading plugin");
   }
 
-  if (protectCurrentDirectory) {
-    SetDllDirectory(nullptr);
-  }
+  // Temporarily add the current directory back to the DLL load path.
+  SetDllDirectory(nullptr);
 
   nsresult rv = mPlugin->Load(outLibrary);
   if (NS_FAILED(rv))
       *outLibrary = nullptr;
 
-  if (protectCurrentDirectory) {
-    SetDllDirectory(L"");
-  }
+  SetDllDirectory(L"");
 
   if (restoreOrigDir) {
     DebugOnly<BOOL> bCheck = SetCurrentDirectoryW(aOrigDir);
@@ -349,18 +312,19 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
   versionsize = ::GetFileVersionInfoSizeW(lpFilepath, &zerome);
 
   if (versionsize > 0)
-    verbuf = PR_Malloc(versionsize);
+    verbuf = malloc(versionsize);
   if (!verbuf)
     return NS_ERROR_OUT_OF_MEMORY;
 
   if (::GetFileVersionInfoW(lpFilepath, 0, versionsize, verbuf))
   {
     // TODO: get appropriately-localized info from plugin file
-    UINT lang = 1033; // language = English
-    UINT cp = 1252;   // codepage = Western
+    UINT lang = 1033; // language = English, 0x409
+    UINT cp = 1252;   // codepage = Western, 0x4E4
     info.fName = GetKeyValue(verbuf, L"ProductName", lang, cp);
     info.fDescription = GetKeyValue(verbuf, L"FileDescription", lang, cp);
- 
+    info.fSupportsAsyncRender = GetBooleanFlag(verbuf, L"AsyncDrawingSupport", lang, cp);
+
     char *mimeType = GetKeyValue(verbuf, L"MIMEType", lang, cp);
     char *mimeDescription = GetKeyValue(verbuf, L"FileOpenName", lang, cp);
     char *extensions = GetKeyValue(verbuf, L"FileExtents", lang, cp);
@@ -381,7 +345,7 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
     rv = NS_ERROR_FAILURE;
   }
 
-  PR_Free(verbuf);
+  free(verbuf);
 
   return rv;
 }
@@ -410,7 +374,7 @@ nsresult nsPluginFile::FreePluginInfo(nsPluginInfo& info)
     PL_strfree(info.fFileName);
 
   if (info.fVersion)
-    PR_smprintf_free(info.fVersion);
+    free(info.fVersion);
 
   ZeroMemory((void *)&info, sizeof(info));
 

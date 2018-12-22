@@ -6,17 +6,17 @@
 
 // Tests that the CubicBezierPresetWidget generates markup.
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/cubic-bezier-frame.xhtml";
 const {CubicBezierPresetWidget} =
   require("devtools/client/shared/widgets/CubicBezierWidget");
 const {PRESETS} = require("devtools/client/shared/widgets/CubicBezierPresets");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = CHROME_URL_ROOT + "doc_cubic-bezier-01.html";
 
-  let container = doc.querySelector("#container");
-  let w = new CubicBezierPresetWidget(container);
+add_task(async function() {
+  const [host,, doc] = await createHost("bottom", TEST_URI);
+
+  const container = doc.querySelector("#cubic-bezier-container");
+  const w = new CubicBezierPresetWidget(container);
 
   info("Checking that the presets are created in the parent");
   ok(container.querySelector(".preset-pane"),
@@ -24,7 +24,7 @@ add_task(function*() {
 
   ok(container.querySelector("#preset-categories"),
      "The preset categories have been added");
-  let categories = container.querySelectorAll(".category");
+  const categories = container.querySelectorAll(".category");
   is(categories.length, Object.keys(PRESETS).length,
      "The preset categories have been added");
   Object.keys(PRESETS).forEach(category => {
@@ -36,7 +36,7 @@ add_task(function*() {
   info("Checking that each of the presets and its preview have been added");
   Object.keys(PRESETS).forEach(category => {
     Object.keys(PRESETS[category]).forEach(presetLabel => {
-      let preset = container.querySelector("#" + presetLabel);
+      const preset = container.querySelector("#" + presetLabel);
       ok(preset, `${presetLabel} has been added`);
       ok(preset.querySelector("canvas"),
          `${presetLabel}'s canvas preview has been added`);
@@ -47,5 +47,4 @@ add_task(function*() {
 
   w.destroy();
   host.destroy();
-  gBrowser.removeCurrentTab();
 });

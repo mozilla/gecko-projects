@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,105 +18,90 @@ class TabParent;
 
 namespace layers {
 
-class APZCTreeManager;
-
 /**
- * RemoteContentController uses the PAPZ protocol to implement a
- * GeckoContentController for a browser living in a remote process.
- * Most of the member functions can be called on any thread, exceptions are
- * annotated in comments. The PAPZ protocol runs on the main thread (so all the
- * Recv* member functions do too).
+ * RemoteContentController implements PAPZChild and is used to access a
+ * GeckoContentController that lives in a different process.
+ *
+ * RemoteContentController lives on the compositor thread. All methods can
+ * be called off the compositor thread and will get dispatched to the right
+ * thread, with the exception of RequestContentRepaint and NotifyFlushComplete,
+ * which must be called on the repaint thread, which in this case is the compositor
+ * thread.
  */
 class RemoteContentController : public GeckoContentController
                               , public PAPZParent
 {
+  using GeckoContentController::TapType;
   using GeckoContentController::APZStateChange;
 
 public:
-  explicit RemoteContentController(uint64_t aLayersId,
-                                   dom::TabParent* aBrowserParent);
+  RemoteContentController();
 
   virtual ~RemoteContentController();
 
-  // Needs to be called on the main thread.
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) override;
 
-  virtual void AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
-                                       const uint32_t& aScrollGeneration) override;
+  virtual void HandleTap(TapType aTapType,
+                         const LayoutDevicePoint& aPoint,
+                         Modifiers aModifiers,
+                         const ScrollableLayerGuid& aGuid,
+                         uint64_t aInputBlockId) override;
 
-  virtual void HandleDoubleTap(const CSSPoint& aPoint,
-                               Modifiers aModifiers,
-                               const ScrollableLayerGuid& aGuid) override;
+  virtual void NotifyPinchGesture(PinchGestureInput::PinchGestureType aType,
+                                  const ScrollableLayerGuid& aGuid,
+                                  LayoutDeviceCoord aSpanChange,
+                                  Modifiers aModifiers) override;
 
-  virtual void HandleSingleTap(const CSSPoint& aPoint,
-                               Modifiers aModifiers,
-                               const ScrollableLayerGuid& aGuid) override;
+  virtual void PostDelayedTask(already_AddRefed<Runnable> aTask, int aDelayMs) override;
 
-  virtual void HandleLongTap(const CSSPoint& aPoint,
-                             Modifiers aModifiers,
-                             const ScrollableLayerGuid& aGuid,
-                             uint64_t aInputBlockId) override;
+  virtual bool IsRepaintThread() override;
 
-  virtual void PostDelayedTask(Task* aTask, int aDelayMs) override;
-
-  virtual bool GetTouchSensitiveRegion(CSSRect* aOutRegion) override;
+  virtual void DispatchToRepaintThread(already_AddRefed<Runnable> aTask) override;
 
   virtual void NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
                                     APZStateChange aChange,
                                     int aArg) override;
 
+  virtual void UpdateOverscrollVelocity(float aX, float aY, bool aIsRootContent) override;
+
+  virtual void UpdateOverscrollOffset(float aX, float aY, bool aIsRootContent) override;
+
   virtual void NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId,
                                          const nsString& aEvent) override;
 
-  // Needs to be called on the main thread.
   virtual void NotifyFlushComplete() override;
 
-  virtual bool RecvUpdateHitRegion(const nsRegion& aRegion) override;
+  virtual void NotifyAsyncScrollbarDragRejected(const FrameMetrics::ViewID& aScrollId) override;
 
-  virtual bool RecvZoomToRect(const uint32_t& aPresShellId,
-                              const ViewID& aViewId,
-                              const CSSRect& aRect,
-                              const uint32_t& aFlags) override;
+  virtual void NotifyAsyncAutoscrollRejected(const FrameMetrics::ViewID& aScrollId) override;
 
-  virtual bool RecvContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
-                                             const uint64_t& aInputBlockId,
-                                             const bool& aPreventDefault) override;
-
-  virtual bool RecvStartScrollbarDrag(const AsyncDragMetrics& aDragMetrics) override;
-
-  virtual bool RecvSetTargetAPZC(const uint64_t& aInputBlockId,
-                                 nsTArray<ScrollableLayerGuid>&& aTargets) override;
-
-  virtual bool RecvSetAllowedTouchBehavior(const uint64_t& aInputBlockId,
-                                           nsTArray<TouchBehaviorFlags>&& aFlags) override;
-
-  virtual bool RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
-                                         const ViewID& aViewId,
-                                         const MaybeZoomConstraints& aConstraints) override;
+  virtual void CancelAutoscroll(const ScrollableLayerGuid& aScrollId) override;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
   virtual void Destroy() override;
 
-  virtual void ChildAdopted() override;
-
 private:
-  bool CanSend()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    return !!mBrowserParent;
-  }
-  already_AddRefed<APZCTreeManager> GetApzcTreeManager();
+  MessageLoop* mCompositorThread;
+  bool mCanSend;
 
-  MessageLoop* mUILoop;
-  uint64_t mLayersId;
-  RefPtr<dom::TabParent> mBrowserParent;
+  void HandleTapOnMainThread(TapType aType,
+                             LayoutDevicePoint aPoint,
+                             Modifiers aModifiers,
+                             ScrollableLayerGuid aGuid,
+                             uint64_t aInputBlockId);
+  void HandleTapOnCompositorThread(TapType aType,
+                                   LayoutDevicePoint aPoint,
+                                   Modifiers aModifiers,
+                                   ScrollableLayerGuid aGuid,
+                                   uint64_t aInputBlockId);
+  void NotifyPinchGestureOnCompositorThread(PinchGestureInput::PinchGestureType aType,
+                                            const ScrollableLayerGuid& aGuid,
+                                            LayoutDeviceCoord aSpanChange,
+                                            Modifiers aModifiers);
 
-  // Mutex protecting members below accessed from multiple threads.
-  mozilla::Mutex mMutex;
-
-  RefPtr<APZCTreeManager> mApzcTreeManager;
-  nsRegion mTouchSensitiveRegion;
+  void CancelAutoscrollInProcess(const ScrollableLayerGuid& aScrollId);
+  void CancelAutoscrollCrossProcess(const ScrollableLayerGuid& aScrollId);
 };
 
 } // namespace layers

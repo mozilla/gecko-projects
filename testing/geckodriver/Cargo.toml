@@ -1,0 +1,27 @@
+[package]
+name = "geckodriver"
+version = "0.21.0"
+description = "Proxy for using WebDriver clients to interact with Gecko-based browsers."
+keywords = ["webdriver", "w3c", "httpd", "mozilla", "firefox"]
+repository = "https://hg.mozilla.org/mozilla-central/file/tip/testing/geckodriver"
+readme = "README.md"
+license = "MPL-2.0"
+publish = false
+
+[dependencies]
+chrono = "^0.2"
+clap = { version = "^2.19", default-features = false, features = ["suggestions", "wrap_help"] }
+hyper = "0.10"
+lazy_static = "1.0"
+log = { version = "0.4", features = ["std"] }
+mozprofile = { path = "../mozbase/rust/mozprofile" }
+mozrunner = { path = "../mozbase/rust/mozrunner" }
+mozversion = { path = "../mozbase/rust/mozversion" }
+regex = "1.0"
+rustc-serialize = "0.3"
+uuid = "0.1.18"
+webdriver = { path = "../webdriver" }
+zip = "0.3"
+
+[[bin]]
+name = "geckodriver"

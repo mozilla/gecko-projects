@@ -45,16 +45,15 @@ public:
     return !mOldDesc ? NS_ERROR_NULL_POINTER :
                        mOldDesc->OpenOutputStream(offset, _retval);
   }
-  NS_IMETHOD GetPredictedDataSize(int64_t *aPredictedDataSize) override
+  NS_IMETHOD OpenAlternativeOutputStream(const nsACString & type, int64_t predictedSize, nsIOutputStream * *_retval) override
   {
-    return !mOldDesc ? NS_ERROR_NULL_POINTER :
-                       mOldDesc->GetPredictedDataSize(aPredictedDataSize);
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
-  NS_IMETHOD SetPredictedDataSize(int64_t aPredictedDataSize) override
+  NS_IMETHOD OpenAlternativeInputStream(const nsACString & type, nsIInputStream * *_retval) override
   {
-    return !mOldDesc ? NS_ERROR_NULL_POINTER :
-                       mOldDesc->SetPredictedDataSize(aPredictedDataSize);
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
+
   NS_IMETHOD GetSecurityInfo(nsISupports * *aSecurityInfo) override
   {
     return !mOldDesc ? NS_ERROR_NULL_POINTER :
@@ -96,10 +95,20 @@ public:
                        mOldDesc->SetMetaDataElement(key, value);
   }
 
+  NS_IMETHOD GetDiskStorageSizeInKB(uint32_t *aDiskStorageSize) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
   // nsICacheEntryInfo
   NS_IMETHOD GetKey(nsACString & aKey) override
   {
     return mOldInfo->GetKey(aKey);
+  }
+  NS_IMETHOD GetCacheEntryId(uint64_t *aCacheEntryId) override
+  {
+    *aCacheEntryId = mCacheEntryId;
+    return NS_OK;
   }
   NS_IMETHOD GetFetchCount(int32_t *aFetchCount) override
   {
@@ -121,6 +130,26 @@ public:
   {
     return mOldInfo->GetDataSize(aDataSize);
   }
+  NS_IMETHOD GetOnStartTime(uint64_t *aTime) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  NS_IMETHOD GetOnStopTime(uint64_t *aTime) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  NS_IMETHOD SetNetworkTimes(uint64_t aOnStartTime, uint64_t aOnStopTime) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  NS_IMETHOD GetLoadContextInfo(nsILoadContextInfo** aInfo) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  NS_IMETHOD Dismiss() override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
 
   NS_IMETHOD AsyncDoom(nsICacheEntryDoomCallback* listener) override;
   NS_IMETHOD GetPersistent(bool *aPersistToDisk) override;
@@ -130,8 +159,9 @@ public:
   NS_IMETHOD MetaDataReady() override { return NS_OK; }
   NS_IMETHOD Recreate(bool, nsICacheEntry**) override;
   NS_IMETHOD GetDataSize(int64_t *size) override;
+  NS_IMETHOD GetAltDataSize(int64_t *size) override;
   NS_IMETHOD OpenInputStream(int64_t offset, nsIInputStream * *_retval) override;
-  NS_IMETHOD OpenOutputStream(int64_t offset, nsIOutputStream * *_retval) override;
+  NS_IMETHOD OpenOutputStream(int64_t offset, int64_t predictedSize, nsIOutputStream * *_retval) override;
   NS_IMETHOD MaybeMarkValid() override;
   NS_IMETHOD HasWriteAccess(bool aWriteOnly, bool *aWriteAccess) override;
   NS_IMETHOD VisitMetaData(nsICacheEntryMetaDataVisitor*) override;
@@ -145,10 +175,12 @@ private:
   _OldCacheEntryWrapper() = delete;
   nsICacheEntryDescriptor* mOldDesc; // ref holded in mOldInfo
   nsCOMPtr<nsICacheEntryInfo> mOldInfo;
+
+  const uint64_t mCacheEntryId;
 };
 
 
-class _OldCacheLoad : public nsRunnable
+class _OldCacheLoad : public Runnable
                     , public nsICacheListener
 {
 public:
@@ -156,8 +188,8 @@ public:
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSICACHELISTENER
 
-  _OldCacheLoad(nsCSubstring const& aScheme,
-                nsCSubstring const& aCacheKey,
+  _OldCacheLoad(const nsACString& aScheme,
+                const nsACString& aCacheKey,
                 nsICacheEntryOpenCallback* aCallback,
                 nsIApplicationCache* aAppCache,
                 nsILoadContextInfo* aLoadInfo,
@@ -210,7 +242,7 @@ private:
   virtual ~_OldStorage();
   nsresult AssembleCacheKey(nsIURI *aURI, nsACString const & aIdExtension,
                             nsACString & aCacheKey, nsACString & aScheme);
-  nsresult ChooseApplicationCache(nsCSubstring const &cacheKey, nsIApplicationCache** aCache);
+  nsresult ChooseApplicationCache(const nsACString& cacheKey, nsIApplicationCache** aCache);
 
   nsCOMPtr<nsILoadContextInfo> mLoadInfo;
   nsCOMPtr<nsIApplicationCache> mAppCache;
@@ -234,7 +266,6 @@ class _OldVisitCallbackWrapper : public nsICacheVisitor
   , mLoadInfo(aInfo)
   , mHit(false)
   {
-    MOZ_COUNT_CTOR(_OldVisitCallbackWrapper);
   }
 
 private:
@@ -246,7 +277,7 @@ private:
   bool mHit; // set to true when the device was found
 };
 
-class _OldGetDiskConsumption : public nsRunnable,
+class _OldGetDiskConsumption : public Runnable,
                                public nsICacheVisitor
 {
 public:
@@ -254,7 +285,7 @@ public:
 
 private:
   explicit _OldGetDiskConsumption(nsICacheStorageConsumptionObserver* aCallback);
-  virtual ~_OldGetDiskConsumption() {}
+  virtual ~_OldGetDiskConsumption() = default;
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSICACHEVISITOR
   NS_DECL_NSIRUNNABLE

@@ -2,37 +2,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Note: this file is included in aboutDialog.xul if MOZ_UPDATER is defined.
+// Note: this file is included in aboutDialog.xul and preferences/advanced.xul
+// if MOZ_UPDATER is defined.
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/DownloadUtils.jsm");
-Components.utils.import("resource://gre/modules/AddonManager.jsm");
+/* import-globals-from aboutDialog.js */
 
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "UpdateUtils",
+                               "resource://gre/modules/UpdateUtils.jsm");
+
+const PREF_APP_UPDATE_CANCELATIONS_OSX = "app.update.cancelations.osx";
+const PREF_APP_UPDATE_ELEVATE_NEVER    = "app.update.elevate.never";
 
 var gAppUpdater;
 
 function onUnload(aEvent) {
   if (gAppUpdater.isChecking)
-    gAppUpdater.checker.stopChecking(Components.interfaces.nsIUpdateChecker.CURRENT_CHECK);
+    gAppUpdater.checker.stopChecking(Ci.nsIUpdateChecker.CURRENT_CHECK);
   // Safe to call even when there isn't a download in progress.
   gAppUpdater.removeDownloadListener();
   gAppUpdater = null;
 }
 
 
-function appUpdater()
-{
-  this.updateDeck = document.getElementById("updateDeck");
-
-  // Hide the update deck when there is already an update window open to avoid
-  // syncing issues between them.
-  if (Services.wm.getMostRecentWindow("Update:Wizard")) {
-    this.updateDeck.hidden = true;
-    return;
-  }
-
+function appUpdater(options = {}) {
   XPCOMUtils.defineLazyServiceGetter(this, "aus",
                                      "@mozilla.org/updates/update-service;1",
                                      "nsIApplicationUpdateService");
@@ -43,12 +38,25 @@ function appUpdater()
                                      "@mozilla.org/updates/update-manager;1",
                                      "nsIUpdateManager");
 
+  this.options = options;
+  this.updateDeck = document.getElementById("updateDeck");
+
+  // Hide the update deck when the update window is already open and it's not
+  // already applied, to avoid syncing issues between them. Applied updates
+  // don't have any information to sync between the windows as they both just
+  // show the "Restart to continue"-type button.
+  if (Services.wm.getMostRecentWindow("Update:Wizard") &&
+      !this.isApplied) {
+    this.updateDeck.hidden = true;
+    return;
+  }
+
   this.bundle = Services.strings.
                 createBundle("chrome://browser/locale/browser.properties");
 
   let manualURL = Services.urlFormatter.formatURLPref("app.update.url.manual");
   let manualLink = document.getElementById("manualLink");
-  manualLink.value = manualURL;
+  manualLink.textContent = manualURL;
   manualLink.href = manualURL;
   document.getElementById("failedLink").href = manualURL;
 
@@ -77,7 +85,8 @@ function appUpdater()
   // update checks, but also in the About dialog, by presenting a
   // "Check for updates" button.
   // If updates are found, the user is then asked if he wants to "Update to <version>".
-  if (!this.updateEnabled) {
+  if (!this.updateEnabled ||
+      Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ELEVATE_NEVER)) {
     this.selectPanel("checkForUpdates");
     return;
   }
@@ -99,11 +108,13 @@ appUpdater.prototype =
   get isPending() {
     if (this.update) {
       return this.update.state == "pending" ||
-             this.update.state == "pending-service";
+             this.update.state == "pending-service" ||
+             this.update.state == "pending-elevate";
     }
     return this.um.activeUpdate &&
            (this.um.activeUpdate.state == "pending" ||
-            this.um.activeUpdate.state == "pending-service");
+            this.um.activeUpdate.state == "pending-service" ||
+            this.um.activeUpdate.state == "pending-elevate");
   },
 
   // true when there is an update already installed in the background.
@@ -126,16 +137,17 @@ appUpdater.prototype =
 
   // true when updating is disabled by an administrator.
   get updateDisabledAndLocked() {
-    return !this.updateEnabled &&
-           Services.prefs.prefIsLocked("app.update.enabled");
+    return (!this.updateEnabled &&
+           Services.prefs.prefIsLocked("app.update.enabled")) ||
+           (Services.policies &&
+           !Services.policies.isAllowed("appUpdate"));
   },
 
   // true when updating is enabled.
   get updateEnabled() {
     try {
       return Services.prefs.getBoolPref("app.update.enabled");
-    }
-    catch (e) { }
+    } catch (e) { }
     return true; // Firefox default is true
   },
 
@@ -149,8 +161,7 @@ appUpdater.prototype =
   get updateAuto() {
     try {
       return Services.prefs.getBoolPref("app.update.auto");
-    }
-    catch (e) { }
+    } catch (e) { }
     return true; // Firefox default is true
   },
 
@@ -160,21 +171,30 @@ appUpdater.prototype =
    * @param  aChildID
    *         The id of the deck's child to select, e.g. "apply".
    */
-  selectPanel: function(aChildID) {
+  selectPanel(aChildID) {
     let panel = document.getElementById(aChildID);
 
     let button = panel.querySelector("button");
     if (button) {
       if (aChildID == "downloadAndInstall") {
         let updateVersion = gAppUpdater.update.displayVersion;
+        // Include the build ID if this is an "a#" (nightly or aurora) build
+        if (/a\d+$/.test(updateVersion)) {
+          let buildID = gAppUpdater.update.buildID;
+          let year = buildID.slice(0, 4);
+          let month = buildID.slice(4, 6);
+          let day = buildID.slice(6, 8);
+          updateVersion += ` (${year}-${month}-${day})`;
+        }
         button.label = this.bundle.formatStringFromName("update.downloadAndInstallButton.label", [updateVersion], 1);
         button.accessKey = this.bundle.GetStringFromName("update.downloadAndInstallButton.accesskey");
       }
       this.updateDeck.selectedPanel = panel;
-      if (!document.commandDispatcher.focusedElement || // don't steal the focus
-          document.commandDispatcher.focusedElement.localName == "button") // except from the other buttons
+      if (this.options.buttonAutoFocus &&
+          (!document.commandDispatcher.focusedElement || // don't steal the focus
+           document.commandDispatcher.focusedElement.localName == "button")) { // except from the other buttons
         button.focus();
-
+      }
     } else {
       this.updateDeck.selectedPanel = panel;
     }
@@ -183,7 +203,14 @@ appUpdater.prototype =
   /**
    * Check for updates
    */
-  checkForUpdates: function() {
+  checkForUpdates() {
+    // Clear prefs that could prevent a user from discovering available updates.
+    if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CANCELATIONS_OSX)) {
+      Services.prefs.clearUserPref(PREF_APP_UPDATE_CANCELATIONS_OSX);
+    }
+    if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ELEVATE_NEVER)) {
+      Services.prefs.clearUserPref(PREF_APP_UPDATE_ELEVATE_NEVER);
+    }
     this.selectPanel("checkingForUpdates");
     this.isChecking = true;
     this.checker.checkForUpdates(this.updateCheckListener, true);
@@ -191,63 +218,35 @@ appUpdater.prototype =
   },
 
   /**
-   * Check for addon compat, or start the download right away
-   */
-  doUpdate: function() {
-    // skip the compatibility check if the update doesn't provide appVersion,
-    // or the appVersion is unchanged, e.g. nightly update
-    if (!this.update.appVersion ||
-        Services.vc.compare(gAppUpdater.update.appVersion,
-                            Services.appinfo.version) == 0) {
-      this.startDownload();
-    } else {
-      this.checkAddonCompatibility();
-    }
-  },
-
-  /**
    * Handles oncommand for the "Restart to Update" button
    * which is presented after the download has been downloaded.
    */
-  buttonRestartAfterDownload: function() {
-    if (!this.isPending && !this.isApplied)
+  buttonRestartAfterDownload() {
+    if (!this.isPending && !this.isApplied) {
       return;
+    }
 
-      // Notify all windows that an application quit has been requested.
-      let cancelQuit = Components.classes["@mozilla.org/supports-PRBool;1"].
-                       createInstance(Components.interfaces.nsISupportsPRBool);
-      Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
+    gAppUpdater.selectPanel("restarting");
 
-      // Something aborted the quit process.
-      if (cancelQuit.data)
-        return;
+    // Notify all windows that an application quit has been requested.
+    let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"].
+                     createInstance(Ci.nsISupportsPRBool);
+    Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
 
-      let appStartup = Components.classes["@mozilla.org/toolkit/app-startup;1"].
-                       getService(Components.interfaces.nsIAppStartup);
+    // Something aborted the quit process.
+    if (cancelQuit.data) {
+      gAppUpdater.selectPanel("apply");
+      return;
+    }
 
-      // If already in safe mode restart in safe mode (bug 327119)
-      if (Services.appinfo.inSafeMode) {
-        appStartup.restartInSafeMode(Components.interfaces.nsIAppStartup.eAttemptQuit);
-        return;
-      }
+    // If already in safe mode restart in safe mode (bug 327119)
+    if (Services.appinfo.inSafeMode) {
+      Services.startup.restartInSafeMode(Ci.nsIAppStartup.eAttemptQuit);
+      return;
+    }
 
-      appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
-                      Components.interfaces.nsIAppStartup.eRestart);
-    },
-
-  /**
-   * Handles oncommand for the "Apply Update…" button
-   * which is presented if we need to show the billboard or license.
-   */
-  buttonApplyBillboard: function() {
-    const URI_UPDATE_PROMPT_DIALOG = "chrome://mozapps/content/update/updates.xul";
-    var ary = null;
-    ary = Components.classes["@mozilla.org/supports-array;1"].
-          createInstance(Components.interfaces.nsISupportsArray);
-    ary.AppendElement(this.update);
-    var openFeatures = "chrome,centerscreen,dialog=no,resizable=no,titlebar,toolbar=no";
-    Services.ww.openWindow(null, URI_UPDATE_PROMPT_DIALOG, "", openFeatures, ary);
-    window.close(); // close the "About" window; updates.xul takes over.
+    Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit |
+                          Ci.nsIAppStartup.eRestart);
   },
 
   /**
@@ -259,7 +258,7 @@ appUpdater.prototype =
     /**
      * See nsIUpdateService.idl
      */
-    onCheckComplete: function(aRequest, aUpdates, aUpdateCount) {
+    onCheckComplete(aRequest, aUpdates, aUpdateCount) {
       gAppUpdater.isChecking = false;
       gAppUpdater.update = gAppUpdater.aus.
                            selectUpdate(aUpdates, aUpdates.length);
@@ -282,15 +281,8 @@ appUpdater.prototype =
         return;
       }
 
-      // Firefox no longer displays a license for updates and the licenseURL
-      // check is just in case a distibution does.
-      if (gAppUpdater.update.billboardURL || gAppUpdater.update.licenseURL) {
-        gAppUpdater.selectPanel("applyBillboard");
-        return;
-      }
-
       if (gAppUpdater.updateAuto) // automatically download and install
-        gAppUpdater.doUpdate();
+        gAppUpdater.startDownload();
       else // ask
         gAppUpdater.selectPanel("downloadAndInstall");
     },
@@ -298,7 +290,7 @@ appUpdater.prototype =
     /**
      * See nsIUpdateService.idl
      */
-    onError: function(aRequest, aUpdate) {
+    onError(aRequest, aUpdate) {
       // Errors in the update check are treated as no updates found. If the
       // update check fails repeatedly without a success the user will be
       // notified with the normal app update user interface so this is safe.
@@ -309,133 +301,16 @@ appUpdater.prototype =
     /**
      * See nsISupports.idl
      */
-    QueryInterface: function(aIID) {
-      if (!aIID.equals(Components.interfaces.nsIUpdateCheckListener) &&
-          !aIID.equals(Components.interfaces.nsISupports))
-        throw Components.results.NS_ERROR_NO_INTERFACE;
-      return this;
-    }
-  },
-
-  /**
-   * Checks the compatibility of add-ons for the application update.
-   */
-  checkAddonCompatibility: function() {
-    try {
-      var hotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID);
-    }
-    catch (e) { }
-
-    var self = this;
-    AddonManager.getAllAddons(function(aAddons) {
-      self.addons = [];
-      self.addonsCheckedCount = 0;
-      aAddons.forEach(function(aAddon) {
-        // Protect against code that overrides the add-ons manager and doesn't
-        // implement the isCompatibleWith or the findUpdates method.
-        if (!("isCompatibleWith" in aAddon) || !("findUpdates" in aAddon)) {
-          let errMsg = "Add-on doesn't implement either the isCompatibleWith " +
-                       "or the findUpdates method!";
-          if (aAddon.id)
-            errMsg += " Add-on ID: " + aAddon.id;
-          Components.utils.reportError(errMsg);
-          return;
-        }
-
-        // If an add-on isn't appDisabled and isn't userDisabled then it is
-        // either active now or the user expects it to be active after the
-        // restart. If that is the case and the add-on is not installed by the
-        // application and is not compatible with the new application version
-        // then the user should be warned that the add-on will become
-        // incompatible. If an addon's type equals plugin it is skipped since
-        // checking plugins compatibility information isn't supported and
-        // getting the scope property of a plugin breaks in some environments
-        // (see bug 566787). The hotfix add-on is also ignored as it shouldn't
-        // block the user from upgrading.
-        try {
-          if (aAddon.type != "plugin" && aAddon.id != hotfixID &&
-              !aAddon.appDisabled && !aAddon.userDisabled &&
-              aAddon.scope != AddonManager.SCOPE_APPLICATION &&
-              aAddon.isCompatible &&
-              !aAddon.isCompatibleWith(self.update.appVersion,
-                                       self.update.platformVersion))
-            self.addons.push(aAddon);
-        }
-        catch (e) {
-          Components.utils.reportError(e);
-        }
-      });
-      self.addonsTotalCount = self.addons.length;
-      if (self.addonsTotalCount == 0) {
-        self.startDownload();
-        return;
-      }
-
-      self.checkAddonsForUpdates();
-    });
-  },
-
-  /**
-   * Checks if there are updates for add-ons that are incompatible with the
-   * application update.
-   */
-  checkAddonsForUpdates: function() {
-    this.addons.forEach(function(aAddon) {
-      aAddon.findUpdates(this, AddonManager.UPDATE_WHEN_NEW_APP_DETECTED,
-                         this.update.appVersion,
-                         this.update.platformVersion);
-    }, this);
-  },
-
-  /**
-   * See XPIProvider.jsm
-   */
-  onCompatibilityUpdateAvailable: function(aAddon) {
-    for (var i = 0; i < this.addons.length; ++i) {
-      if (this.addons[i].id == aAddon.id) {
-        this.addons.splice(i, 1);
-        break;
-      }
-    }
-  },
-
-  /**
-   * See XPIProvider.jsm
-   */
-  onUpdateAvailable: function(aAddon, aInstall) {
-    if (!Services.blocklist.isAddonBlocklisted(aAddon,
-                                               this.update.appVersion,
-                                               this.update.platformVersion)) {
-      // Compatibility or new version updates mean the same thing here.
-      this.onCompatibilityUpdateAvailable(aAddon);
-    }
-  },
-
-  /**
-   * See XPIProvider.jsm
-   */
-  onUpdateFinished: function(aAddon) {
-    ++this.addonsCheckedCount;
-
-    if (this.addonsCheckedCount < this.addonsTotalCount)
-      return;
-
-    if (this.addons.length == 0) {
-      // Compatibility updates or new version updates were found for all add-ons
-      this.startDownload();
-      return;
-    }
-
-    this.selectPanel("applyBillboard");
+    QueryInterface: ChromeUtils.generateQI(["nsIUpdateCheckListener"]),
   },
 
   /**
    * Starts the download of an update mar.
    */
-  startDownload: function() {
+  startDownload() {
     if (!this.update)
       this.update = this.um.activeUpdate;
-    this.update.QueryInterface(Components.interfaces.nsIWritablePropertyBag);
+    this.update.QueryInterface(Ci.nsIWritablePropertyBag);
     this.update.setProperty("foregroundDownload", "true");
 
     this.aus.pauseDownload();
@@ -451,15 +326,15 @@ appUpdater.prototype =
   /**
    * Switches to the UI responsible for tracking the download.
    */
-  setupDownloadingUI: function() {
+  setupDownloadingUI() {
     this.downloadStatus = document.getElementById("downloadStatus");
-    this.downloadStatus.value =
+    this.downloadStatus.textContent =
       DownloadUtils.getTransferTotal(0, this.update.selectedPatch.size);
     this.selectPanel("downloading");
     this.aus.addDownloadListener(this);
   },
 
-  removeDownloadListener: function() {
+  removeDownloadListener() {
     if (this.aus) {
       this.aus.removeDownloadListener(this);
     }
@@ -468,15 +343,15 @@ appUpdater.prototype =
   /**
    * See nsIRequestObserver.idl
    */
-  onStartRequest: function(aRequest, aContext) {
+  onStartRequest(aRequest, aContext) {
   },
 
   /**
    * See nsIRequestObserver.idl
    */
-  onStopRequest: function(aRequest, aContext, aStatusCode) {
+  onStopRequest(aRequest, aContext, aStatusCode) {
     switch (aStatusCode) {
-    case Components.results.NS_ERROR_UNEXPECTED:
+    case Cr.NS_ERROR_UNEXPECTED:
       if (this.update.selectedPatch.state == "download-failed" &&
           (this.update.isCompleteUpdate || this.update.patchCount != 2)) {
         // Verification error of complete patch, informational text is held in
@@ -488,20 +363,20 @@ appUpdater.prototype =
       // Verification failed for a partial patch, complete patch is now
       // downloading so return early and do NOT remove the download listener!
       break;
-    case Components.results.NS_BINDING_ABORTED:
+    case Cr.NS_BINDING_ABORTED:
       // Do not remove UI listener since the user may resume downloading again.
       break;
-    case Components.results.NS_OK:
+    case Cr.NS_OK:
       this.removeDownloadListener();
       if (this.backgroundUpdateEnabled) {
         this.selectPanel("applying");
-        let update = this.um.activeUpdate;
         let self = this;
-        Services.obs.addObserver(function (aSubject, aTopic, aData) {
+        Services.obs.addObserver(function observer(aSubject, aTopic, aData) {
           // Update the UI when the background updater is finished
           let status = aData;
           if (status == "applied" || status == "applied-service" ||
-              status == "pending" || status == "pending-service") {
+              status == "pending" || status == "pending-service" ||
+              status == "pending-elevate") {
             // If the update is successfully applied, or if the updater has
             // fallen back to non-staged updates, show the "Restart to Update"
             // button.
@@ -517,8 +392,8 @@ appUpdater.prototype =
             self.setupDownloadingUI();
             return;
           }
-          Services.obs.removeObserver(arguments.callee, "update-staged");
-        }, "update-staged", false);
+          Services.obs.removeObserver(observer, "update-staged");
+        }, "update-staged");
       } else {
         this.selectPanel("apply");
       }
@@ -533,25 +408,19 @@ appUpdater.prototype =
   /**
    * See nsIProgressEventSink.idl
    */
-  onStatus: function(aRequest, aContext, aStatus, aStatusArg) {
+  onStatus(aRequest, aContext, aStatus, aStatusArg) {
   },
 
   /**
    * See nsIProgressEventSink.idl
    */
-  onProgress: function(aRequest, aContext, aProgress, aProgressMax) {
-    this.downloadStatus.value =
+  onProgress(aRequest, aContext, aProgress, aProgressMax) {
+    this.downloadStatus.textContent =
       DownloadUtils.getTransferTotal(aProgress, aProgressMax);
   },
 
   /**
    * See nsISupports.idl
    */
-  QueryInterface: function(aIID) {
-    if (!aIID.equals(Components.interfaces.nsIProgressEventSink) &&
-        !aIID.equals(Components.interfaces.nsIRequestObserver) &&
-        !aIID.equals(Components.interfaces.nsISupports))
-      throw Components.results.NS_ERROR_NO_INTERFACE;
-    return this;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIProgressEventSink", "nsIRequestObserver"]),
 };

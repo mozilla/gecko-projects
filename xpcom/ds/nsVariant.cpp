@@ -9,11 +9,13 @@
 #include "prdtoa.h"
 #include <math.h>
 #include "nsCycleCollectionParticipant.h"
-#include "xpt_struct.h"
+#include "xptinfo.h"
 #include "nsReadableUtils.h"
 #include "nsMemory.h"
 #include "nsString.h"
 #include "nsCRTGlue.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Printf.h"
 
 /***************************************************************************/
 // Helpers for static convert functions...
@@ -249,8 +251,6 @@ CloneArray(uint16_t aInType, const nsIID* aInIID,
   NS_ASSERTION(aOutCount, "bad param");
   NS_ASSERTION(aOutValue, "bad param");
 
-  uint32_t allocatedValueCount = 0;
-  nsresult rv = NS_OK;
   uint32_t i;
 
   // First we figure out the size of the elements for the new u.array.
@@ -376,13 +376,10 @@ CloneArray(uint16_t aInType, const nsIID* aInIID,
       for (i = aInCount; i > 0; --i) {
         nsID* idp = *(inp++);
         if (idp) {
-          if (!(*(outp++) = (nsID*)nsMemory::Clone((char*)idp, sizeof(nsID)))) {
-            goto bad;
-          }
+          *(outp++) = idp->Clone();
         } else {
           *(outp++) = nullptr;
         }
-        allocatedValueCount++;
       }
       break;
     }
@@ -393,14 +390,10 @@ CloneArray(uint16_t aInType, const nsIID* aInIID,
       for (i = aInCount; i > 0; i--) {
         char* str = *(inp++);
         if (str) {
-          if (!(*(outp++) = (char*)nsMemory::Clone(
-                              str, (strlen(str) + 1) * sizeof(char)))) {
-            goto bad;
-          }
+          *(outp++) = moz_xstrdup(str);
         } else {
           *(outp++) = nullptr;
         }
-        allocatedValueCount++;
       }
       break;
     }
@@ -411,14 +404,10 @@ CloneArray(uint16_t aInType, const nsIID* aInIID,
       for (i = aInCount; i > 0; i--) {
         char16_t* str = *(inp++);
         if (str) {
-          if (!(*(outp++) = (char16_t*)nsMemory::Clone(
-                              str, (NS_strlen(str) + 1) * sizeof(char16_t)))) {
-            goto bad;
-          }
+          *(outp++) = NS_strdup(str);
         } else {
           *(outp++) = nullptr;
         }
-        allocatedValueCount++;
       }
       break;
     }
@@ -442,18 +431,6 @@ CloneArray(uint16_t aInType, const nsIID* aInIID,
   *aOutType = aInType;
   *aOutCount = aInCount;
   return NS_OK;
-
-bad:
-  if (*aOutValue) {
-    char** p = (char**)*aOutValue;
-    for (i = allocatedValueCount; i > 0; ++p, --i)
-      if (*p) {
-        free(*p);
-      }
-    free((char*)*aOutValue);
-    *aOutValue = nullptr;
-  }
-  return rv;
 }
 
 /***************************************************************************/
@@ -746,7 +723,7 @@ nsDiscriminatedUnion::ConvertToID(nsID* aResult) const
 nsresult
 nsDiscriminatedUnion::ToString(nsACString& aOutString) const
 {
-  char* ptr;
+  mozilla::SmprintfPointer pptr;
 
   switch (mType) {
     // all the stuff we don't handle...
@@ -766,7 +743,6 @@ nsDiscriminatedUnion::ToString(nsACString& aOutString) const
 
     case nsIDataType::VTYPE_VOID:
     case nsIDataType::VTYPE_EMPTY:
-      aOutString.Truncate();
       aOutString.SetIsVoid(true);
       return NS_OK;
 
@@ -779,16 +755,17 @@ nsDiscriminatedUnion::ToString(nsACString& aOutString) const
 
     // nsID has its own text formatter.
 
-    case nsIDataType::VTYPE_ID:
-      ptr = u.mIDValue.ToString();
+    case nsIDataType::VTYPE_ID: {
+      char* ptr = u.mIDValue.ToString();
       if (!ptr) {
         return NS_ERROR_OUT_OF_MEMORY;
       }
       aOutString.Assign(ptr);
       free(ptr);
       return NS_OK;
+    }
 
-    // Can't use PR_smprintf for floats, since it's locale-dependent
+    // Can't use Smprintf for floats, since it's locale-dependent
 #define CASE__APPENDFLOAT_NUMBER(type_, member_)                        \
     case nsIDataType::type_ :                                           \
     {                                                                   \
@@ -803,22 +780,24 @@ nsDiscriminatedUnion::ToString(nsACString& aOutString) const
 
 #undef CASE__APPENDFLOAT_NUMBER
 
-    // the rest can be PR_smprintf'd and use common code.
+    // the rest can be Smprintf'd and use common code.
 
 #define CASE__SMPRINTF_NUMBER(type_, format_, cast_, member_)          \
     case nsIDataType::type_:                                           \
-        ptr = PR_smprintf( format_ , (cast_) u.member_);               \
+        static_assert(sizeof(cast_) >= sizeof(u.member_),              \
+                      "size of type should be at least as big as member"); \
+        pptr = mozilla::Smprintf( format_ , (cast_) u.member_);        \
         break;
 
     CASE__SMPRINTF_NUMBER(VTYPE_INT8,   "%d",   int,      mInt8Value)
     CASE__SMPRINTF_NUMBER(VTYPE_INT16,  "%d",   int,      mInt16Value)
     CASE__SMPRINTF_NUMBER(VTYPE_INT32,  "%d",   int,      mInt32Value)
-    CASE__SMPRINTF_NUMBER(VTYPE_INT64,  "%lld", int64_t,  mInt64Value)
+    CASE__SMPRINTF_NUMBER(VTYPE_INT64,  "%" PRId64, int64_t,  mInt64Value)
 
     CASE__SMPRINTF_NUMBER(VTYPE_UINT8,  "%u",   unsigned, mUint8Value)
     CASE__SMPRINTF_NUMBER(VTYPE_UINT16, "%u",   unsigned, mUint16Value)
     CASE__SMPRINTF_NUMBER(VTYPE_UINT32, "%u",   unsigned, mUint32Value)
-    CASE__SMPRINTF_NUMBER(VTYPE_UINT64, "%llu", int64_t,  mUint64Value)
+    CASE__SMPRINTF_NUMBER(VTYPE_UINT64, "%" PRIu64, int64_t,  mUint64Value)
 
     // XXX Would we rather print "true" / "false" ?
     CASE__SMPRINTF_NUMBER(VTYPE_BOOL,   "%d",   int,      mBoolValue)
@@ -828,11 +807,10 @@ nsDiscriminatedUnion::ToString(nsACString& aOutString) const
 #undef CASE__SMPRINTF_NUMBER
   }
 
-  if (!ptr) {
+  if (!pptr) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-  aOutString.Assign(ptr);
-  PR_smprintf_free(ptr);
+  aOutString.Assign(pptr.get());
   return NS_OK;
 }
 
@@ -1165,10 +1143,7 @@ nsDiscriminatedUnion::ConvertToInterface(nsIID** aIID,
       return NS_ERROR_CANNOT_CONVERT_DATA;
   }
 
-  *aIID = (nsIID*)nsMemory::Clone(piid, sizeof(nsIID));
-  if (!*aIID) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  *aIID = piid->Clone();
 
   if (u.iface.mInterfaceValue) {
     return u.iface.mInterfaceValue->QueryInterface(*piid, aInterface);
@@ -1201,8 +1176,7 @@ nsDiscriminatedUnion::ConvertToArray(uint16_t* aType, nsIID* aIID,
     Cleanup()
 
 #define DATA_SETTER_EPILOGUE(type_)                                           \
-    mType = nsIDataType::type_;                                               \
-    return NS_OK
+    mType = nsIDataType::type_;
 
 #define DATA_SETTER(type_, member_, value_)                                   \
     DATA_SETTER_PROLOGUE;                                                     \
@@ -1341,13 +1315,16 @@ nsDiscriminatedUnion::SetFromVariant(nsIVariant* aValue)
       CASE__SET_FROM_VARIANT_VTYPE_EPILOGUE(VTYPE_ARRAY)
 
     case nsIDataType::VTYPE_VOID:
-      rv = SetToVoid();
+      SetToVoid();
+      rv = NS_OK;
       break;
     case nsIDataType::VTYPE_EMPTY_ARRAY:
-      rv = SetToEmptyArray();
+      SetToEmptyArray();
+      rv = NS_OK;
       break;
     case nsIDataType::VTYPE_EMPTY:
-      rv = SetToEmpty();
+      SetToEmpty();
+      rv = NS_OK;
       break;
     default:
       NS_ERROR("bad type in variant!");
@@ -1357,113 +1334,105 @@ nsDiscriminatedUnion::SetFromVariant(nsIVariant* aValue)
   return rv;
 }
 
-nsresult
+void
 nsDiscriminatedUnion::SetFromInt8(uint8_t aValue)
 {
   DATA_SETTER_WITH_CAST(VTYPE_INT8, mInt8Value, (uint8_t), aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromInt16(int16_t aValue)
 {
   DATA_SETTER(VTYPE_INT16, mInt16Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromInt32(int32_t aValue)
 {
   DATA_SETTER(VTYPE_INT32, mInt32Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromInt64(int64_t aValue)
 {
   DATA_SETTER(VTYPE_INT64, mInt64Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromUint8(uint8_t aValue)
 {
   DATA_SETTER(VTYPE_UINT8, mUint8Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromUint16(uint16_t aValue)
 {
   DATA_SETTER(VTYPE_UINT16, mUint16Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromUint32(uint32_t aValue)
 {
   DATA_SETTER(VTYPE_UINT32, mUint32Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromUint64(uint64_t aValue)
 {
   DATA_SETTER(VTYPE_UINT64, mUint64Value, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromFloat(float aValue)
 {
   DATA_SETTER(VTYPE_FLOAT, mFloatValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromDouble(double aValue)
 {
   DATA_SETTER(VTYPE_DOUBLE, mDoubleValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromBool(bool aValue)
 {
   DATA_SETTER(VTYPE_BOOL, mBoolValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromChar(char aValue)
 {
   DATA_SETTER(VTYPE_CHAR, mCharValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromWChar(char16_t aValue)
 {
   DATA_SETTER(VTYPE_WCHAR, mWCharValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromID(const nsID& aValue)
 {
   DATA_SETTER(VTYPE_ID, mIDValue, aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromAString(const nsAString& aValue)
 {
   DATA_SETTER_PROLOGUE;
-  if (!(u.mAStringValue = new nsString(aValue))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  u.mAStringValue = new nsString(aValue);
   DATA_SETTER_EPILOGUE(VTYPE_ASTRING);
 }
 
-nsresult
+void
 nsDiscriminatedUnion::SetFromDOMString(const nsAString& aValue)
 {
   DATA_SETTER_PROLOGUE;
-  if (!(u.mAStringValue = new nsString(aValue))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  u.mAStringValue = new nsString(aValue);
   DATA_SETTER_EPILOGUE(VTYPE_DOMSTRING);
 }
 
-nsresult
+void
 nsDiscriminatedUnion::SetFromACString(const nsACString& aValue)
 {
   DATA_SETTER_PROLOGUE;
-  if (!(u.mCStringValue = new nsCString(aValue))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  u.mCStringValue = new nsCString(aValue);
   DATA_SETTER_EPILOGUE(VTYPE_CSTRING);
 }
 
-nsresult
+void
 nsDiscriminatedUnion::SetFromAUTF8String(const nsAUTF8String& aValue)
 {
   DATA_SETTER_PROLOGUE;
-  if (!(u.mUTF8StringValue = new nsUTF8String(aValue))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  u.mUTF8StringValue = new nsUTF8String(aValue);
   DATA_SETTER_EPILOGUE(VTYPE_UTF8STRING);
 }
 
@@ -1485,12 +1454,12 @@ nsDiscriminatedUnion::SetFromWString(const char16_t* aValue)
   }
   return SetFromWStringWithSize(NS_strlen(aValue), aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromISupports(nsISupports* aValue)
 {
   return SetFromInterface(NS_GET_IID(nsISupports), aValue);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetFromInterface(const nsIID& aIID, nsISupports* aValue)
 {
   DATA_SETTER_PROLOGUE;
@@ -1517,6 +1486,7 @@ nsDiscriminatedUnion::SetFromArray(uint16_t aType, const nsIID* aIID,
     return rv;
   }
   DATA_SETTER_EPILOGUE(VTYPE_ARRAY);
+  return NS_OK;
 }
 nsresult
 nsDiscriminatedUnion::SetFromStringWithSize(uint32_t aSize,
@@ -1532,6 +1502,7 @@ nsDiscriminatedUnion::SetFromStringWithSize(uint32_t aSize,
   }
   u.str.mStringLength = aSize;
   DATA_SETTER_EPILOGUE(VTYPE_STRING_SIZE_IS);
+  return NS_OK;
 }
 nsresult
 nsDiscriminatedUnion::SetFromWStringWithSize(uint32_t aSize,
@@ -1547,32 +1518,30 @@ nsDiscriminatedUnion::SetFromWStringWithSize(uint32_t aSize,
   }
   u.wstr.mWStringLength = aSize;
   DATA_SETTER_EPILOGUE(VTYPE_WSTRING_SIZE_IS);
+  return NS_OK;
 }
-nsresult
+void
 nsDiscriminatedUnion::AllocateWStringWithSize(uint32_t aSize)
 {
   DATA_SETTER_PROLOGUE;
-  if (!(u.wstr.mWStringValue =
-        (char16_t*)moz_xmalloc((aSize + 1) * sizeof(char16_t)))) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  u.wstr.mWStringValue = (char16_t*)moz_xmalloc((aSize + 1) * sizeof(char16_t));
   u.wstr.mWStringValue[aSize] = '\0';
   u.wstr.mWStringLength = aSize;
   DATA_SETTER_EPILOGUE(VTYPE_WSTRING_SIZE_IS);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetToVoid()
 {
   DATA_SETTER_PROLOGUE;
   DATA_SETTER_EPILOGUE(VTYPE_VOID);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetToEmpty()
 {
   DATA_SETTER_PROLOGUE;
   DATA_SETTER_EPILOGUE(VTYPE_EMPTY);
 }
-nsresult
+void
 nsDiscriminatedUnion::SetToEmptyArray()
 {
   DATA_SETTER_PROLOGUE;
@@ -1676,7 +1645,7 @@ nsVariantBase::nsVariantBase()
 #ifdef DEBUG
   {
     // Assert that the nsIDataType consts match the values #defined in
-    // xpt_struct.h. Bad things happen somewhere if they don't.
+    // xptinfo.h. Bad things happen somewhere if they don't.
     struct THE_TYPES
     {
       uint16_t a;
@@ -1921,7 +1890,8 @@ nsVariantBase::SetAsInt8(uint8_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromInt8(aValue);
+  mData.SetFromInt8(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1930,7 +1900,8 @@ nsVariantBase::SetAsInt16(int16_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromInt16(aValue);
+  mData.SetFromInt16(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1939,7 +1910,8 @@ nsVariantBase::SetAsInt32(int32_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromInt32(aValue);
+  mData.SetFromInt32(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1948,7 +1920,8 @@ nsVariantBase::SetAsInt64(int64_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromInt64(aValue);
+  mData.SetFromInt64(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1957,7 +1930,8 @@ nsVariantBase::SetAsUint8(uint8_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromUint8(aValue);
+  mData.SetFromUint8(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1966,7 +1940,8 @@ nsVariantBase::SetAsUint16(uint16_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromUint16(aValue);
+  mData.SetFromUint16(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1975,7 +1950,8 @@ nsVariantBase::SetAsUint32(uint32_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromUint32(aValue);
+  mData.SetFromUint32(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1984,7 +1960,8 @@ nsVariantBase::SetAsUint64(uint64_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromUint64(aValue);
+  mData.SetFromUint64(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1993,7 +1970,8 @@ nsVariantBase::SetAsFloat(float aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromFloat(aValue);
+  mData.SetFromFloat(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2002,7 +1980,8 @@ nsVariantBase::SetAsDouble(double aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromDouble(aValue);
+  mData.SetFromDouble(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2011,7 +1990,8 @@ nsVariantBase::SetAsBool(bool aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromBool(aValue);
+  mData.SetFromBool(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2020,7 +2000,8 @@ nsVariantBase::SetAsChar(char aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromChar(aValue);
+  mData.SetFromChar(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2029,7 +2010,8 @@ nsVariantBase::SetAsWChar(char16_t aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromWChar(aValue);
+  mData.SetFromWChar(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2038,7 +2020,8 @@ nsVariantBase::SetAsID(const nsID& aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromID(aValue);
+  mData.SetFromID(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2047,7 +2030,8 @@ nsVariantBase::SetAsAString(const nsAString& aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromAString(aValue);
+  mData.SetFromAString(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2057,7 +2041,8 @@ nsVariantBase::SetAsDOMString(const nsAString& aValue)
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
 
-  return mData.SetFromDOMString(aValue);
+  mData.SetFromDOMString(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2066,7 +2051,8 @@ nsVariantBase::SetAsACString(const nsACString& aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromACString(aValue);
+  mData.SetFromACString(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2075,7 +2061,8 @@ nsVariantBase::SetAsAUTF8String(const nsAUTF8String& aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromAUTF8String(aValue);
+  mData.SetFromAUTF8String(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2102,7 +2089,8 @@ nsVariantBase::SetAsISupports(nsISupports* aValue)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromISupports(aValue);
+  mData.SetFromISupports(aValue);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2111,7 +2099,8 @@ nsVariantBase::SetAsInterface(const nsIID& aIID, void* aInterface)
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetFromInterface(aIID, (nsISupports*)aInterface);
+  mData.SetFromInterface(aIID, (nsISupports*)aInterface);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2148,7 +2137,8 @@ nsVariantBase::SetAsVoid()
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetToVoid();
+  mData.SetToVoid();
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2157,7 +2147,8 @@ nsVariantBase::SetAsEmpty()
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetToEmpty();
+  mData.SetToEmpty();
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2166,7 +2157,8 @@ nsVariantBase::SetAsEmptyArray()
   if (!mWritable) {
     return NS_ERROR_OBJECT_IS_IMMUTABLE;
   }
-  return mData.SetToEmptyArray();
+  mData.SetToEmptyArray();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

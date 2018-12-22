@@ -12,156 +12,22 @@
 
 "use strict";
 
-const Cc = Components.classes;
-const Cu = Components.utils;
-const Ci = Components.interfaces;
-const Cr = Components.results;
+/* globals WebExtensionPolicy */
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "NetUtil",
+                               "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "Services",
+                               "resource://gre/modules/Services.jsm");
 
-function RemoteTagServiceService()
-{
-}
-
-RemoteTagServiceService.prototype = {
-  classID: Components.ID("{dfd07380-6083-11e4-9803-0800200c9a66}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIRemoteTagService, Ci.nsISupportsWeakReference]),
-
-  /**
-   * CPOWs can have user data attached to them. This data originates
-   * in the local process from this function, getRemoteObjectTag. It's
-   * sent along with the CPOW to the remote process, where it can be
-   * fetched with Components.utils.getCrossProcessWrapperTag.
-   */
-  getRemoteObjectTag: function(target) {
-    if (target instanceof Ci.nsIDocShellTreeItem) {
-      return "ContentDocShellTreeItem";
-    }
-
-    if (target instanceof Ci.nsIDOMDocument) {
-      return "ContentDocument";
-    }
-
-    return "generic";
-  }
-};
-
-function AddonPolicyService()
-{
-  this.wrappedJSObject = this;
-  this.mayLoadURICallbacks = new Map();
-  this.localizeCallbacks = new Map();
-}
-
-AddonPolicyService.prototype = {
-  classID: Components.ID("{89560ed3-72e3-498d-a0e8-ffe50334d7c5}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAddonPolicyService]),
-
-  /*
-   * Invokes a callback (if any) associated with the addon to determine whether
-   * unprivileged code running within the addon is allowed to perform loads from
-   * the given URI.
-   *
-   * @see nsIAddonPolicyService.addonMayLoadURI
-   */
-  addonMayLoadURI(aAddonId, aURI) {
-    let cb = this.mayLoadURICallbacks.get(aAddonId);
-    return cb ? cb(aURI) : false;
-  },
-
-  /*
-   * Invokes a callback (if any) associated with the addon to loclaize a
-   * resource belonging to that add-on.
-   */
-  localizeAddonString(aAddonId, aString) {
-    let cb = this.localizeCallbacks.get(aAddonId);
-    return cb ? cb(aString) : aString;
-  },
-
-  /*
-   * Invokes a callback (if any) to determine if an extension URI should be
-   * web-accessible.
-   *
-   * @see nsIAddonPolicyService.extensionURILoadableByAnyone
-   */
-  extensionURILoadableByAnyone(aURI) {
-    if (aURI.scheme != "moz-extension") {
-      throw new TypeError("non-extension URI passed");
-    }
-
-    let cb = this.extensionURILoadCallback;
-    return cb ? cb(aURI) : false;
-  },
-
-  /*
-   * Maps an extension URI to an addon ID.
-   *
-   * @see nsIAddonPolicyService.extensionURIToAddonId
-   */
-  extensionURIToAddonId(aURI) {
-    if (aURI.scheme != "moz-extension") {
-      throw new TypeError("non-extension URI passed");
-    }
-
-    let cb = this.extensionURIToAddonIdCallback;
-    if (!cb) {
-      throw new Error("no callback set to map extension URIs to addon Ids");
-    }
-    return cb(aURI);
-  },
-
-  /*
-   * Sets the callbacks used in addonMayLoadURI above. Not accessible over
-   * XPCOM - callers should use .wrappedJSObject on the service to call it
-   * directly.
-   */
-  setAddonLoadURICallback(aAddonId, aCallback) {
-    if (aCallback) {
-      this.mayLoadURICallbacks.set(aAddonId, aCallback);
-    } else {
-      this.mayLoadURICallbacks.delete(aAddonId);
-    }
-  },
-
-  /*
-   * Sets the callbacks used by the stream converter service to localize
-   * add-on resources.
-   */
-  setAddonLocalizeCallback(aAddonId, aCallback) {
-    if (aCallback) {
-      this.localizeCallbacks.set(aAddonId, aCallback);
-    } else {
-      this.localizeCallbacks.delete(aAddonId);
-    }
-  },
-
-  /*
-   * Sets the callback used in extensionURILoadableByAnyone above. Not
-   * accessible over XPCOM - callers should use .wrappedJSObject on the
-   * service to call it directly.
-   */
-  setExtensionURILoadCallback(aCallback) {
-    var old = this.extensionURILoadCallback;
-    this.extensionURILoadCallback = aCallback;
-    return old;
-  },
-
-  /*
-   * Sets the callback used in extensionURIToAddonId above. Not accessible over
-   * XPCOM - callers should use .wrappedJSObject on the service to call it
-   * directly.
-   */
-  setExtensionURIToAddonIdCallback(aCallback) {
-    var old = this.extensionURIToAddonIdCallback;
-    this.extensionURIToAddonIdCallback = aCallback;
-    return old;
-  }
-};
+XPCOMUtils.defineLazyServiceGetter(this, "catMan", "@mozilla.org/categorymanager;1",
+                                   "nsICategoryManager");
+XPCOMUtils.defineLazyServiceGetter(this, "streamConv", "@mozilla.org/streamConverters;1",
+                                   "nsIStreamConverterService");
+const ArrayBufferInputStream = Components.Constructor(
+  "@mozilla.org/io/arraybuffer-input-stream;1",
+  "nsIArrayBufferInputStream", "setData");
 
 /*
  * This class provides a stream filter for locale messages in CSS files served
@@ -170,15 +36,12 @@ AddonPolicyService.prototype = {
  * See SubstituteChannel in netwerk/protocol/res/ExtensionProtocolHandler.cpp
  * for usage.
  */
-function AddonLocalizationConverter()
-{
-  this.aps = Cc["@mozilla.org/addons/policy-service;1"].getService(Ci.nsIAddonPolicyService)
-    .wrappedJSObject;
+function AddonLocalizationConverter() {
 }
 
 AddonLocalizationConverter.prototype = {
   classID: Components.ID("{ded150e3-c92e-4077-a396-0dba9953e39f}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIStreamConverter]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIStreamConverter]),
 
   FROM_TYPE: "application/vnd.mozilla.webext.unlocalized",
   TO_TYPE: "text/css",
@@ -195,56 +58,59 @@ AddonLocalizationConverter.prototype = {
   },
 
   // aContext must be a nsIURI object for a valid moz-extension: URL.
-  getAddonId(aContext) {
+  getAddon(aContext) {
     // In this case, we want the add-on ID even if the URL is web accessible,
     // so check the root rather than the exact path.
     let uri = Services.io.newURI("/", null, aContext);
 
-    let id = this.aps.extensionURIToAddonId(uri);
-    if (id == undefined) {
+    let addon = WebExtensionPolicy.getByURI(uri);
+    if (!addon) {
       throw new Components.Exception("Invalid context", Cr.NS_ERROR_INVALID_ARG);
     }
-    return id;
+    return addon;
   },
 
-  convertToStream(aAddonId, aString) {
-    let stream = Cc["@mozilla.org/io/string-input-stream;1"]
-      .createInstance(Ci.nsIStringInputStream);
-
-    stream.data = this.aps.localizeAddonString(aAddonId, aString);
-    return stream;
+  convertToStream(aAddon, aString) {
+    aString = aAddon.localize(aString);
+    let bytes = new TextEncoder().encode(aString).buffer;
+    return new ArrayBufferInputStream(bytes, 0, bytes.byteLength);
   },
 
   convert(aStream, aFromType, aToType, aContext) {
     this.checkTypes(aFromType, aToType);
-    let addonId = this.getAddonId(aContext);
+    let addon = this.getAddon(aContext);
 
-    let string = NetUtil.readInputStreamToString(aStream, aStream.available());
-    return this.convertToStream(addonId, string);
+    let count = aStream.available();
+    let string = count ?
+      new TextDecoder().decode(NetUtil.readInputStream(aStream, count)) : "";
+    return this.convertToStream(addon, string);
   },
 
   asyncConvertData(aFromType, aToType, aListener, aContext) {
     this.checkTypes(aFromType, aToType);
-    this.addonId = this.getAddonId(aContext);
+    this.addon = this.getAddon(aContext);
     this.listener = aListener;
   },
 
   onStartRequest(aRequest, aContext) {
     this.parts = [];
+    this.decoder = new TextDecoder();
   },
 
   onDataAvailable(aRequest, aContext, aInputStream, aOffset, aCount) {
-    this.parts.push(NetUtil.readInputStreamToString(aInputStream, aCount));
+    let bytes = NetUtil.readInputStream(aInputStream, aCount);
+    this.parts.push(this.decoder.decode(bytes, {stream: true}));
   },
 
   onStopRequest(aRequest, aContext, aStatusCode) {
     try {
       this.listener.onStartRequest(aRequest, null);
       if (Components.isSuccessCode(aStatusCode)) {
+        this.parts.push(this.decoder.decode());
         let string = this.parts.join("");
-        let stream = this.convertToStream(this.addonId, string);
+        let stream = this.convertToStream(this.addon, string);
 
-        this.listener.onDataAvailable(aRequest, null, stream, 0, stream.data.length);
+        this.listener.onDataAvailable(aRequest, null, stream, 0, stream.available());
       }
     } catch (e) {
       aStatusCode = e.result || Cr.NS_ERROR_FAILURE;
@@ -253,5 +119,32 @@ AddonLocalizationConverter.prototype = {
   },
 };
 
-this.NSGetFactory = XPCOMUtils.generateNSGetFactory([RemoteTagServiceService, AddonPolicyService,
-                                                     AddonLocalizationConverter]);
+function HttpIndexViewer() {
+}
+
+HttpIndexViewer.prototype = {
+  classID: Components.ID("{742ad274-34c5-43d1-a8b7-293eaf8962d6}"),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDocumentLoaderFactory]),
+
+  createInstance(aCommand, aChannel, aLoadGroup, aContentType, aContainer,
+                 aExtraInfo, aDocListenerResult) {
+    aChannel.contentType = "text/html";
+
+    let contract = catMan.getCategoryEntry("Gecko-Content-Viewers", "text/html");
+    let factory = Cc[contract].getService(Ci.nsIDocumentLoaderFactory);
+
+    let listener = {};
+    let res = factory.createInstance("view", aChannel, aLoadGroup,
+                                     "text/html", aContainer, aExtraInfo,
+                                     listener);
+
+    aDocListenerResult.value =
+      streamConv.asyncConvertData("application/http-index-format",
+                                  "text/html", listener.value, null);
+
+    return res;
+  },
+};
+
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AddonLocalizationConverter,
+                                                     HttpIndexViewer]);

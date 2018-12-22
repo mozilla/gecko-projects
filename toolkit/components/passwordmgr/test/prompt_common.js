@@ -1,3 +1,11 @@
+/**
+ * NOTE:
+ * This file is currently only being used for tests which haven't been
+ * fixed to work with e10s. Favor using the `prompt_common.js` file that
+ * is in `toolkit/components/prompts/test/` instead.
+ */
+/* eslint-disable mozilla/use-chromeutils-generateqi */
+
 var Ci = SpecialPowers.Ci;
 ok(Ci != null, "Access Ci");
 var Cc = SpecialPowers.Cc;
@@ -19,16 +27,16 @@ function startCallbackTimer() {
 
 
 var observer = SpecialPowers.wrapCallbackObject({
-    QueryInterface : function (iid) {
+    QueryInterface(iid) {
         const interfaces = [Ci.nsIObserver,
                             Ci.nsISupports, Ci.nsISupportsWeakReference];
 
-        if (!interfaces.some( function(v) { return iid.equals(v) } ))
+        if (!interfaces.some( function(v) { return iid.equals(v); } ))
             throw SpecialPowers.Components.results.NS_ERROR_NO_INTERFACE;
         return this;
     },
 
-    observe : function (subject, topic, data) {
+    observe(subject, topic, data) {
         var doc = getDialogDoc();
         if (doc)
             handleDialog(doc, testNum);
@@ -40,10 +48,8 @@ var observer = SpecialPowers.wrapCallbackObject({
 function getDialogDoc() {
   // Find the <browser> which contains notifyWindow, by looking
   // through all the open windows and all the <browsers> in each.
-  var wm = Cc["@mozilla.org/appshell/window-mediator;1"].
-           getService(Ci.nsIWindowMediator);
-  //var enumerator = wm.getEnumerator("navigator:browser");
-  var enumerator = wm.getXULWindowEnumerator(null);
+  // var enumerator = SpecialPowers.Services.wm.getEnumerator("navigator:browser");
+  var enumerator = SpecialPowers.Services.wm.getXULWindowEnumerator(null);
 
   while (enumerator.hasMoreElements()) {
     var win = enumerator.getNext();
@@ -62,7 +68,7 @@ function getDialogDoc() {
                                     .contentViewer
                                     .DOMDocument;
 
-        //ok(true, "Got window: " + childDoc.location.href);
+        // ok(true, "Got window: " + childDoc.location.href);
         if (childDoc.location.href == "chrome://global/content/commonDialog.xul")
           return childDoc;
     }

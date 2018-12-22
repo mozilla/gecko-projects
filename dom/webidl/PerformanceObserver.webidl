@@ -4,20 +4,23 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://w3c.github.io/performance-timeline/#the-performance-observer-interface
+ * https://w3c.github.io/performance-timeline/#the-performanceobserver-interface
  */
 
 dictionary PerformanceObserverInit {
   required sequence<DOMString> entryTypes;
+  boolean buffered = false;
 };
 
-callback PerformanceObserverCallback = void (PerformanceObserverEntryList entries, PerformanceObserver observer);
+callback PerformanceObserverCallback = void (PerformanceObserverEntryList entries,
+                                             PerformanceObserver observer);
 
-[Func="nsPerformance::IsObserverEnabled",
+[Func="mozilla::dom::DOMPrefs::PerformanceObserverEnabled",
  Constructor(PerformanceObserverCallback callback),
  Exposed=(Window,Worker)]
 interface PerformanceObserver {
-  [Throws]
-  void observe(PerformanceObserverInit options);
-  void disconnect();
+    [Throws]
+    void                 observe(PerformanceObserverInit options);
+    void                 disconnect();
+    PerformanceEntryList takeRecords();
 };

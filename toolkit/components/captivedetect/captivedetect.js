@@ -3,33 +3,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-'use strict';
+"use strict";
 
-const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import('resource://gre/modules/Services.jsm');
-
-XPCOMUtils.defineLazyServiceGetter(this, "gSysMsgr",
-                                   "@mozilla.org/system-message-internal;1",
-                                   "nsISystemMessagesInternal");
+XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest"]);
 
 const DEBUG = false; // set to true to show debug messages
 
-const kCAPTIVEPORTALDETECTOR_CONTRACTID = '@mozilla.org/toolkit/captive-detector;1';
-const kCAPTIVEPORTALDETECTOR_CID        = Components.ID('{d9cd00ba-aa4d-47b1-8792-b1fe0cd35060}');
+const kCAPTIVEPORTALDETECTOR_CONTRACTID = "@mozilla.org/toolkit/captive-detector;1";
+const kCAPTIVEPORTALDETECTOR_CID        = Components.ID("{d9cd00ba-aa4d-47b1-8792-b1fe0cd35060}");
 
-const kOpenCaptivePortalLoginEvent = 'captive-portal-login';
-const kAbortCaptivePortalLoginEvent = 'captive-portal-login-abort';
-const kCaptivePortalLoginSuccessEvent = 'captive-portal-login-success';
-
-const kCaptivePortalSystemMessage = 'captive-portal';
+const kOpenCaptivePortalLoginEvent = "captive-portal-login";
+const kAbortCaptivePortalLoginEvent = "captive-portal-login-abort";
+const kCaptivePortalLoginSuccessEvent = "captive-portal-login-success";
+const kCaptivePortalCheckComplete = "captive-portal-check-complete";
 
 function URLFetcher(url, timeout) {
   let self = this;
-  let xhr = Cc['@mozilla.org/xmlextras/xmlhttprequest;1']
-              .createInstance(Ci.nsIXMLHttpRequest);
-  xhr.open('GET', url, true);
+  let xhr = new XMLHttpRequest();
+  xhr.open("GET", url, true);
   // Prevent the request from reading from the cache.
   xhr.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
   // Prevent the request from writing to the cache.
@@ -45,8 +39,8 @@ function URLFetcher(url, timeout) {
   xhr.setRequestHeader("Pragma", "no-cache");
 
   xhr.timeout = timeout;
-  xhr.ontimeout = function () { self.ontimeout(); };
-  xhr.onerror = function () { self.onerror(); };
+  xhr.ontimeout = function() { self.ontimeout(); };
+  xhr.onerror = function() { self.onerror(); };
   xhr.onreadystatechange = function(oEvent) {
     if (xhr.readyState === 4) {
       if (self._isAborted) {
@@ -65,15 +59,15 @@ function URLFetcher(url, timeout) {
 
 URLFetcher.prototype = {
   _isAborted: false,
-  ontimeout: function() {},
-  onerror: function() {},
-  abort: function() {
+  ontimeout() {},
+  onerror() {},
+  abort() {
     if (!this._isAborted) {
       this._isAborted = true;
       this._xhr.abort();
     }
   },
-}
+};
 
 function LoginObserver(captivePortalDetector) {
   const LOGIN_OBSERVER_STATE_DETACHED = 0; /* Should not monitor network activity since no ongoing login procedure */
@@ -84,8 +78,8 @@ function LoginObserver(captivePortalDetector) {
 
   let state = LOGIN_OBSERVER_STATE_DETACHED;
 
-  let timer = Cc['@mozilla.org/timer;1'].createInstance(Ci.nsITimer);
-  let activityDistributor = Cc['@mozilla.org/network/http-activity-distributor;1']
+  let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+  let activityDistributor = Cc["@mozilla.org/network/http-activity-distributor;1"]
                               .getService(Ci.nsIHttpActivityDistributor);
   let urlFetcher = null;
 
@@ -108,7 +102,7 @@ function LoginObserver(captivePortalDetector) {
                                 captivePortalDetector._maxWaitingTime);
     urlFetcher.ontimeout = pageCheckingDone;
     urlFetcher.onerror = pageCheckingDone;
-    urlFetcher.onsuccess = function (content) {
+    urlFetcher.onsuccess = function(content) {
       if (captivePortalDetector.validateContent(content)) {
         urlFetcher = null;
         captivePortalDetector.executeCallback(true);
@@ -121,8 +115,8 @@ function LoginObserver(captivePortalDetector) {
 
   // Public interface of LoginObserver
   let observer = {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIHttpActivityObserver,
-                                           Ci.nsITimerCallback]),
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIHttpActivityObserver,
+                                            Ci.nsITimerCallback]),
 
     attach: function attach() {
       if (state === LOGIN_OBSERVER_STATE_DETACHED) {
@@ -131,7 +125,7 @@ function LoginObserver(captivePortalDetector) {
         timer.initWithCallback(this,
                                captivePortalDetector._pollingTime,
                                timer.TYPE_ONE_SHOT);
-        debug('attach HttpObserver for login activity');
+        debug("attach HttpObserver for login activity");
       }
     },
 
@@ -144,7 +138,7 @@ function LoginObserver(captivePortalDetector) {
         activityDistributor.removeObserver(this);
         timer.cancel();
         state = LOGIN_OBSERVER_STATE_DETACHED;
-        debug('detach HttpObserver for login activity');
+        debug("detach HttpObserver for login activity");
       }
     },
 
@@ -170,17 +164,14 @@ function LoginObserver(captivePortalDetector) {
     /*
      * Check if login activity is finished according to HTTP burst.
      */
-    notify : function notify() {
-      switch(state) {
+    notify: function notify() {
+      switch (state) {
         case LOGIN_OBSERVER_STATE_BURST:
           // Wait while network stays idle for a short period
           state = LOGIN_OBSERVER_STATE_VERIFY_NEEDED;
           // Fall though to start polling timer
         case LOGIN_OBSERVER_STATE_IDLE:
-          timer.initWithCallback(this,
-                                 captivePortalDetector._pollingTime,
-                                 timer.TYPE_ONE_SHOT);
-          break;
+          // Just fall through to perform a captive portal check.
         case LOGIN_OBSERVER_STATE_VERIFY_NEEDED:
           // Polling the canonical website since network stays idle for a while
           state = LOGIN_OBSERVER_STATE_VERIFYING;
@@ -203,22 +194,22 @@ function CaptivePortalDetector() {
 
   try {
     this._canonicalSiteURL =
-      Services.prefs.getCharPref('captivedetect.canonicalURL');
+      Services.prefs.getCharPref("captivedetect.canonicalURL");
     this._canonicalSiteExpectedContent =
-      Services.prefs.getCharPref('captivedetect.canonicalContent');
-  } catch(e) {
-    debug('canonicalURL or canonicalContent not set.')
+      Services.prefs.getCharPref("captivedetect.canonicalContent");
+  } catch (e) {
+    debug("canonicalURL or canonicalContent not set.");
   }
 
   this._maxWaitingTime =
-    Services.prefs.getIntPref('captivedetect.maxWaitingTime');
+    Services.prefs.getIntPref("captivedetect.maxWaitingTime");
   this._pollingTime =
-    Services.prefs.getIntPref('captivedetect.pollingTime');
+    Services.prefs.getIntPref("captivedetect.pollingTime");
   this._maxRetryCount =
-    Services.prefs.getIntPref('captivedetect.maxRetryCount');
-  debug('Load Prefs {site=' + this._canonicalSiteURL + ',content='
-        + this._canonicalSiteExpectedContent + ',time=' + this._maxWaitingTime
-        + "max-retry=" + this._maxRetryCount + '}');
+    Services.prefs.getIntPref("captivedetect.maxRetryCount");
+  debug("Load Prefs {site=" + this._canonicalSiteURL + ",content="
+        + this._canonicalSiteExpectedContent + ",time=" + this._maxWaitingTime
+        + "max-retry=" + this._maxRetryCount + "}");
 
   // Create HttpObserver for monitoring the login procedure
   this._loginObserver = LoginObserver(this);
@@ -228,39 +219,39 @@ function CaptivePortalDetector() {
   this._requestQueue = []; // Maintain a progress table, store callbacks and the ongoing XHR
   this._interfaceNames = {}; // Maintain names of the requested network interfaces
 
-  debug('CaptiveProtalDetector initiated, waiting for network connection established');
+  debug("CaptiveProtalDetector initiated, waiting for network connection established");
 }
 
 CaptivePortalDetector.prototype = {
   classID:   kCAPTIVEPORTALDETECTOR_CID,
   classInfo: XPCOMUtils.generateCI({classID: kCAPTIVEPORTALDETECTOR_CID,
                                     contractID: kCAPTIVEPORTALDETECTOR_CONTRACTID,
-                                    classDescription: 'Captive Portal Detector',
+                                    classDescription: "Captive Portal Detector",
                                     interfaces: [Ci.nsICaptivePortalDetector]}),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsICaptivePortalDetector]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsICaptivePortalDetector]),
 
   // nsICaptivePortalDetector
   checkCaptivePortal: function checkCaptivePortal(aInterfaceName, aCallback) {
     if (!this._canonicalSiteURL) {
-      throw Components.Exception('No canonical URL set up.');
+      throw Components.Exception("No canonical URL set up.");
     }
 
     // Prevent multiple requests on a single network interface
     if (this._interfaceNames[aInterfaceName]) {
-      throw Components.Exception('Do not allow multiple request on one interface: ' + aInterfaceName);
+      throw Components.Exception("Do not allow multiple request on one interface: " + aInterfaceName);
     }
 
     let request = {interfaceName: aInterfaceName};
     if (aCallback) {
       let callback = aCallback.QueryInterface(Ci.nsICaptivePortalCallback);
-      request['callback'] = callback;
-      request['retryCount'] = 0;
+      request.callback = callback;
+      request.retryCount = 0;
     }
     this._addRequest(request);
   },
 
   abort: function abort(aInterfaceName) {
-    debug('abort for ' + aInterfaceName);
+    debug("abort for " + aInterfaceName);
     this._removeRequest(aInterfaceName);
   },
 
@@ -268,9 +259,8 @@ CaptivePortalDetector.prototype = {
     debug('finish preparation phase for interface "' + aInterfaceName + '"');
     if (!this._runningRequest
         || this._runningRequest.interfaceName !== aInterfaceName) {
-      debug('invalid finishPreparation for ' + aInterfaceName);
-      throw Components.Exception('only first request is allowed to invoke |finishPreparation|');
-      return;
+      debug("invalid finishPreparation for " + aInterfaceName);
+      throw Components.Exception("only first request is allowed to invoke |finishPreparation|");
     }
 
     this._startDetection();
@@ -279,7 +269,7 @@ CaptivePortalDetector.prototype = {
   cancelLogin: function cancelLogin(eventId) {
     debug('login canceled by user for request "' + eventId + '"');
     // Captive portal login procedure is canceled by user
-    if (this._runningRequest && this._runningRequest.hasOwnProperty('eventId')) {
+    if (this._runningRequest && this._runningRequest.hasOwnProperty("eventId")) {
       let id = this._runningRequest.eventId;
       if (eventId === id) {
         this.executeCallback(false);
@@ -288,10 +278,10 @@ CaptivePortalDetector.prototype = {
   },
 
   _applyDetection: function _applyDetection() {
-    debug('enter applyDetection('+ this._runningRequest.interfaceName + ')');
+    debug("enter applyDetection(" + this._runningRequest.interfaceName + ")");
 
     // Execute network interface preparation
-    if (this._runningRequest.hasOwnProperty('callback')) {
+    if (this._runningRequest.hasOwnProperty("callback")) {
       this._runningRequest.callback.prepare();
     } else {
       this._startDetection();
@@ -299,8 +289,8 @@ CaptivePortalDetector.prototype = {
   },
 
   _startDetection: function _startDetection() {
-    debug('startDetection {site=' + this._canonicalSiteURL + ',content='
-          + this._canonicalSiteExpectedContent + ',time=' + this._maxWaitingTime + '}');
+    debug("startDetection {site=" + this._canonicalSiteURL + ",content="
+          + this._canonicalSiteExpectedContent + ",time=" + this._maxWaitingTime + "}");
     let self = this;
 
     let urlFetcher = new URLFetcher(this._canonicalSiteURL, this._maxWaitingTime);
@@ -309,7 +299,7 @@ CaptivePortalDetector.prototype = {
 
     urlFetcher.ontimeout = mayRetry;
     urlFetcher.onerror = mayRetry;
-    urlFetcher.onsuccess = function (content) {
+    urlFetcher.onsuccess = function(content) {
       if (self.validateContent(content)) {
         self.executeCallback(true);
       } else {
@@ -317,7 +307,7 @@ CaptivePortalDetector.prototype = {
         self._startLogin();
       }
     };
-    urlFetcher.onredirectorerror = function (status) {
+    urlFetcher.onredirectorerror = function(status) {
       if (status >= 300 && status <= 399) {
         // The canonical website has been redirected to an unknown location
         self._startLogin();
@@ -326,50 +316,49 @@ CaptivePortalDetector.prototype = {
       }
     };
 
-    this._runningRequest['urlFetcher'] = urlFetcher;
+    this._runningRequest.urlFetcher = urlFetcher;
   },
 
   _startLogin: function _startLogin() {
     let id = this._allocateRequestId();
     let details = {
       type: kOpenCaptivePortalLoginEvent,
-      id: id,
+      id,
       url: this._canonicalSiteURL,
     };
     this._loginObserver.attach();
-    this._runningRequest['eventId'] = id;
+    this._runningRequest.eventId = id;
     this._sendEvent(kOpenCaptivePortalLoginEvent, details);
-    gSysMsgr.broadcastMessage(kCaptivePortalSystemMessage, {});
   },
 
   _mayRetry: function _mayRetry() {
     if (this._runningRequest.retryCount++ < this._maxRetryCount) {
-      debug('retry-Detection: ' + this._runningRequest.retryCount + '/' + this._maxRetryCount);
+      debug("retry-Detection: " + this._runningRequest.retryCount + "/" + this._maxRetryCount);
       this._startDetection();
     } else {
-      this.executeCallback(true);
+      this.executeCallback(false);
     }
   },
 
   executeCallback: function executeCallback(success) {
     if (this._runningRequest) {
-      debug('callback executed');
-      if (this._runningRequest.hasOwnProperty('callback')) {
+      debug("callback executed");
+      if (this._runningRequest.hasOwnProperty("callback")) {
         this._runningRequest.callback.complete(success);
       }
 
       // Only when the request has a event id and |success| is true
       // do we need to notify the login-success event.
-      if (this._runningRequest.hasOwnProperty('eventId') && success) {
+      if (this._runningRequest.hasOwnProperty("eventId") && success) {
         let details = {
           type: kCaptivePortalLoginSuccessEvent,
-          id: this._runningRequest['eventId'],
+          id: this._runningRequest.eventId,
         };
         this._sendEvent(kCaptivePortalLoginSuccessEvent, details);
       }
 
       // Continue the following request
-      this._runningRequest['complete'] = true;
+      this._runningRequest.complete = true;
       this._removeRequest(this._runningRequest.interfaceName);
     }
   },
@@ -382,8 +371,12 @@ CaptivePortalDetector.prototype = {
   },
 
   validateContent: function validateContent(content) {
-    debug('received content: ' + content);
-    return (content === this._canonicalSiteExpectedContent);
+    debug("received content: " + content);
+    let valid = content === this._canonicalSiteExpectedContent;
+    // We need a way to indicate that a check has been performed, and if we are
+    // still in a captive portal.
+    this._sendEvent(kCaptivePortalCheckComplete, !valid);
+    return valid;
   },
 
   _allocateRequestId: function _allocateRequestId() {
@@ -420,7 +413,7 @@ CaptivePortalDetector.prototype = {
 
       if (!this._runningRequest.complete) {
         // Abort the user login procedure
-        if (this._runningRequest.hasOwnProperty('eventId')) {
+        if (this._runningRequest.hasOwnProperty("eventId")) {
           let details = {
             type: kAbortCaptivePortalLoginEvent,
             id: this._runningRequest.eventId
@@ -429,12 +422,12 @@ CaptivePortalDetector.prototype = {
         }
 
         // Abort the ongoing HTTP request
-        if (this._runningRequest.hasOwnProperty('urlFetcher')) {
+        if (this._runningRequest.hasOwnProperty("urlFetcher")) {
           this._runningRequest.urlFetcher.abort();
         }
       }
 
-      debug('remove running request');
+      debug("remove running request");
       this._runningRequest = null;
 
       // Continue next pending reqeust if the ongoing one has been aborted
@@ -447,7 +440,7 @@ CaptivePortalDetector.prototype = {
       if (this._requestQueue[i].interfaceName == aInterfaceName) {
         this._requestQueue.splice(i, 1);
 
-        debug('remove pending request #' + i + ', remaining ' + this._requestQueue.length);
+        debug("remove pending request #" + i + ", remaining " + this._requestQueue.length);
         break;
       }
     }
@@ -456,11 +449,11 @@ CaptivePortalDetector.prototype = {
 
 var debug;
 if (DEBUG) {
-  debug = function (s) {
-    dump('-*- CaptivePortalDetector component: ' + s + '\n');
+  debug = function(s) {
+    dump("-*- CaptivePortalDetector component: " + s + "\n");
   };
 } else {
-  debug = function (s) {};
+  debug = function(s) {};
 }
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([CaptivePortalDetector]);

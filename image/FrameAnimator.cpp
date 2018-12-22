@@ -7,12 +7,15 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
+#include "mozilla/CheckedInt.h"
 #include "imgIContainer.h"
 #include "LookupResult.h"
 #include "MainThreadUtils.h"
 #include "RasterImage.h"
+#include "gfxPrefs.h"
 
 #include "pixman.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -20,245 +23,139 @@ using namespace gfx;
 
 namespace image {
 
-int32_t
-FrameAnimator::GetSingleLoopTime() const
+///////////////////////////////////////////////////////////////////////////////
+// AnimationState implementation.
+///////////////////////////////////////////////////////////////////////////////
+
+const gfx::IntRect
+AnimationState::UpdateState(bool aAnimationFinished,
+                            RasterImage *aImage,
+                            const gfx::IntSize& aSize,
+                            bool aAllowInvalidation /* = true */)
 {
-  // If we aren't done decoding, we don't know the image's full play time.
-  if (!mDoneDecoding) {
-    return -1;
-  }
+  LookupResult result =
+    SurfaceCache::Lookup(ImageKey(aImage),
+                         RasterSurfaceKey(aSize,
+                                          DefaultSurfaceFlags(),
+                                          PlaybackType::eAnimated));
 
-  // If we're not looping, a single loop time has no meaning
-  if (mAnimationMode != imgIContainer::kNormalAnimMode) {
-    return -1;
-  }
-
-  int32_t looptime = 0;
-  for (uint32_t i = 0; i < mImage->GetNumFrames(); ++i) {
-    int32_t timeout = GetTimeoutForFrame(i);
-    if (timeout >= 0) {
-      looptime += static_cast<uint32_t>(timeout);
-    } else {
-      // If we have a frame that never times out, we're probably in an error
-      // case, but let's handle it more gracefully.
-      NS_WARNING("Negative frame timeout - how did this happen?");
-      return -1;
-    }
-  }
-
-  return looptime;
+  return UpdateStateInternal(result, aAnimationFinished, aSize, aAllowInvalidation);
 }
 
-TimeStamp
-FrameAnimator::GetCurrentImgFrameEndTime() const
+const gfx::IntRect
+AnimationState::UpdateStateInternal(LookupResult& aResult,
+                                    bool aAnimationFinished,
+                                    const gfx::IntSize& aSize,
+                                    bool aAllowInvalidation /* = true */)
 {
-  TimeStamp currentFrameTime = mCurrentAnimationFrameTime;
-  int32_t timeout =
-    GetTimeoutForFrame(mCurrentAnimationFrameIndex);
-
-  if (timeout < 0) {
-    // We need to return a sentinel value in this case, because our logic
-    // doesn't work correctly if we have a negative timeout value. We use
-    // one year in the future as the sentinel because it works with the loop
-    // in RequestRefresh() below.
-    // XXX(seth): It'd be preferable to make our logic work correctly with
-    // negative timeouts.
-    return TimeStamp::NowLoRes() +
-           TimeDuration::FromMilliseconds(31536000.0);
-  }
-
-  TimeDuration durationOfTimeout =
-    TimeDuration::FromMilliseconds(static_cast<double>(timeout));
-  TimeStamp currentFrameEndTime = currentFrameTime + durationOfTimeout;
-
-  return currentFrameEndTime;
-}
-
-FrameAnimator::RefreshResult
-FrameAnimator::AdvanceFrame(TimeStamp aTime)
-{
-  NS_ASSERTION(aTime <= TimeStamp::Now(),
-               "Given time appears to be in the future");
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::GRAPHICS);
-
-  RefreshResult ret;
-
-  // Determine what the next frame is, taking into account looping.
-  uint32_t currentFrameIndex = mCurrentAnimationFrameIndex;
-  uint32_t nextFrameIndex = currentFrameIndex + 1;
-
-  if (mImage->GetNumFrames() == nextFrameIndex) {
-    // We can only accurately determine if we are at the end of the loop if we are
-    // done decoding, otherwise we don't know how many frames there will be.
-    if (!mDoneDecoding) {
-      // We've already advanced to the last decoded frame, nothing more we can do.
-      // We're blocked by network/decoding from displaying the animation at the
-      // rate specified, so that means the frame we are displaying (the latest
-      // available) is the frame we want to be displaying at this time. So we
-      // update the current animation time. If we didn't update the current
-      // animation time then it could lag behind, which would indicate that we
-      // are behind in the animation and should try to catch up. When we are
-      // done decoding (and thus can loop around back to the start of the
-      // animation) we would then jump to a random point in the animation to
-      // try to catch up. But we were never behind in the animation.
-      mCurrentAnimationFrameTime = aTime;
-      return ret;
-    }
-
-    // End of an animation loop...
-
-    // If we are not looping forever, initialize the loop counter
-    if (mLoopRemainingCount < 0 && LoopCount() >= 0) {
-      mLoopRemainingCount = LoopCount();
-    }
-
-    // If animation mode is "loop once", or we're at end of loop counter,
-    // it's time to stop animating.
-    if (mAnimationMode == imgIContainer::kLoopOnceAnimMode ||
-        mLoopRemainingCount == 0) {
-      ret.animationFinished = true;
-    }
-
-    nextFrameIndex = 0;
-
-    if (mLoopRemainingCount > 0) {
-      mLoopRemainingCount--;
-    }
-
-    // If we're done, exit early.
-    if (ret.animationFinished) {
-      return ret;
-    }
-  }
-
-  // There can be frames in the surface cache with index >= mImage->GetNumFrames()
-  // that GetRawFrame can access because the decoding thread has decoded them, but
-  // RasterImage hasn't acknowledged those frames yet. We don't want to go past
-  // what RasterImage knows about so that we stay in sync with RasterImage. The code
-  // above should obey this, the MOZ_ASSERT records this invariant.
-  MOZ_ASSERT(nextFrameIndex < mImage->GetNumFrames());
-  RawAccessFrameRef nextFrame = GetRawFrame(nextFrameIndex);
-
-  // If we're done decoding, we know we've got everything we're going to get.
-  // If we aren't, we only display fully-downloaded frames; everything else
-  // gets delayed.
-  bool canDisplay = mDoneDecoding ||
-                    (nextFrame && nextFrame->IsFinished());
-
-  if (!canDisplay) {
-    // Uh oh, the frame we want to show is currently being decoded (partial)
-    // Wait until the next refresh driver tick and try again
-    return ret;
-  }
-
-  // Bad data
-  if (GetTimeoutForFrame(nextFrameIndex) < 0) {
-    ret.animationFinished = true;
-    ret.error = true;
-  }
-
-  if (nextFrameIndex == 0) {
-    ret.dirtyRect = mFirstFrameRefreshArea;
+  // Update mDiscarded and mIsCurrentlyDecoded.
+  if (aResult.Type() == MatchType::NOT_FOUND) {
+    // no frames, we've either been discarded, or never been decoded before.
+    mDiscarded = mHasBeenDecoded;
+    mIsCurrentlyDecoded = false;
+  } else if (aResult.Type() == MatchType::PENDING) {
+    // no frames yet, but a decoder is or will be working on it.
+    mDiscarded = false;
+    mIsCurrentlyDecoded = false;
+    mHasRequestedDecode = true;
   } else {
-    MOZ_ASSERT(nextFrameIndex == currentFrameIndex + 1);
+    MOZ_ASSERT(aResult.Type() == MatchType::EXACT);
+    mDiscarded = false;
+    mHasRequestedDecode = true;
 
-    // Change frame
-    if (!DoBlend(&ret.dirtyRect, currentFrameIndex, nextFrameIndex)) {
-      // something went wrong, move on to next
-      NS_WARNING("FrameAnimator::AdvanceFrame(): Compositing of frame failed");
-      nextFrame->SetCompositingFailed(true);
-      mCurrentAnimationFrameTime = GetCurrentImgFrameEndTime();
-      mCurrentAnimationFrameIndex = nextFrameIndex;
-
-      ret.error = true;
-      return ret;
-    }
-
-    nextFrame->SetCompositingFailed(false);
-  }
-
-  mCurrentAnimationFrameTime = GetCurrentImgFrameEndTime();
-
-  // If we can get closer to the current time by a multiple of the image's loop
-  // time, we should. We need to be done decoding in order to know the full loop
-  // time though!
-  int32_t loopTime = GetSingleLoopTime();
-  if (loopTime > 0) {
-    // We shouldn't be advancing by a whole loop unless we are decoded and know
-    // what a full loop actually is. GetSingleLoopTime should return -1 so this
-    // never happens.
-    MOZ_ASSERT(mDoneDecoding);
-    TimeDuration delay = aTime - mCurrentAnimationFrameTime;
-    if (delay.ToMilliseconds() > loopTime) {
-      // Explicitly use integer division to get the floor of the number of
-      // loops.
-      uint64_t loops = static_cast<uint64_t>(delay.ToMilliseconds()) / loopTime;
-      mCurrentAnimationFrameTime +=
-        TimeDuration::FromMilliseconds(loops * loopTime);
+    // If mHasBeenDecoded is true then we know the true total frame count and
+    // we can use it to determine if we have all the frames now so we know if
+    // we are currently fully decoded.
+    // If mHasBeenDecoded is false then we'll get another UpdateState call
+    // when the decode finishes.
+    if (mHasBeenDecoded) {
+      Maybe<uint32_t> frameCount = FrameCount();
+      MOZ_ASSERT(frameCount.isSome());
+      mIsCurrentlyDecoded = aResult.Surface().IsFullyDecoded();
     }
   }
 
-  // Set currentAnimationFrameIndex at the last possible moment
-  mCurrentAnimationFrameIndex = nextFrameIndex;
+  gfx::IntRect ret;
 
-  // If we're here, we successfully advanced the frame.
-  ret.frameAdvanced = true;
-
-  return ret;
-}
-
-FrameAnimator::RefreshResult
-FrameAnimator::RequestRefresh(const TimeStamp& aTime)
-{
-  // only advance the frame if the current time is greater than or
-  // equal to the current frame's end time.
-  TimeStamp currentFrameEndTime = GetCurrentImgFrameEndTime();
-
-  // By default, an empty RefreshResult.
-  RefreshResult ret;
-
-  while (currentFrameEndTime <= aTime) {
-    TimeStamp oldFrameEndTime = currentFrameEndTime;
-
-    RefreshResult frameRes = AdvanceFrame(aTime);
-
-    // Accumulate our result for returning to callers.
-    ret.Accumulate(frameRes);
-
-    currentFrameEndTime = GetCurrentImgFrameEndTime();
-
-    // if we didn't advance a frame, and our frame end time didn't change,
-    // then we need to break out of this loop & wait for the frame(s)
-    // to finish downloading
-    if (!frameRes.frameAdvanced && (currentFrameEndTime == oldFrameEndTime)) {
-      break;
+  if (aAllowInvalidation) {
+    // Update the value of mCompositedFrameInvalid.
+    if (mIsCurrentlyDecoded || aAnimationFinished) {
+      // Animated images that have finished their animation (ie because it is a
+      // finite length animation) don't have RequestRefresh called on them, and so
+      // mCompositedFrameInvalid would never get cleared. We clear it here (and
+      // also in RasterImage::Decode when we create a decoder for an image that
+      // has finished animated so it can display sooner than waiting until the
+      // decode completes). We also do it if we are fully decoded. This is safe
+      // to do for images that aren't finished animating because before we paint
+      // the refresh driver will call into us to advance to the correct frame,
+      // and that will succeed because we have all the frames.
+      if (mCompositedFrameInvalid) {
+        // Invalidate if we are marking the composited frame valid.
+        ret.SizeTo(aSize);
+      }
+      mCompositedFrameInvalid = false;
+    } else if (aResult.Type() == MatchType::NOT_FOUND ||
+               aResult.Type() == MatchType::PENDING) {
+      if (mHasRequestedDecode) {
+        MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
+        mCompositedFrameInvalid = true;
+      }
     }
+    // Otherwise don't change the value of mCompositedFrameInvalid, it will be
+    // updated by RequestRefresh.
   }
 
   return ret;
 }
 
 void
-FrameAnimator::ResetAnimation()
+AnimationState::NotifyDecodeComplete()
+{
+  mHasBeenDecoded = true;
+}
+
+void
+AnimationState::ResetAnimation()
 {
   mCurrentAnimationFrameIndex = 0;
-  mLastCompositedFrameIndex = -1;
 }
 
 void
-FrameAnimator::SetDoneDecoding(bool aDone)
-{
-  mDoneDecoding = aDone;
-}
-
-void
-FrameAnimator::SetAnimationMode(uint16_t aAnimationMode)
+AnimationState::SetAnimationMode(uint16_t aAnimationMode)
 {
   mAnimationMode = aAnimationMode;
 }
 
 void
-FrameAnimator::InitAnimationFrameTimeIfNecessary()
+AnimationState::UpdateKnownFrameCount(uint32_t aFrameCount)
+{
+  if (aFrameCount <= mFrameCount) {
+    // Nothing to do. Since we can redecode animated images, we may see the same
+    // sequence of updates replayed again, so seeing a smaller frame count than
+    // what we already know about doesn't indicate an error.
+    return;
+  }
+
+  MOZ_ASSERT(!mHasBeenDecoded, "Adding new frames after decoding is finished?");
+  MOZ_ASSERT(aFrameCount <= mFrameCount + 1, "Skipped a frame?");
+
+  mFrameCount = aFrameCount;
+}
+
+Maybe<uint32_t>
+AnimationState::FrameCount() const
+{
+  return mHasBeenDecoded ? Some(mFrameCount) : Nothing();
+}
+
+void
+AnimationState::SetFirstFrameRefreshArea(const IntRect& aRefreshArea)
+{
+  mFirstFrameRefreshArea = aRefreshArea;
+}
+
+void
+AnimationState::InitAnimationFrameTimeIfNecessary()
 {
   if (mCurrentAnimationFrameTime.IsNull()) {
     mCurrentAnimationFrameTime = TimeStamp::Now();
@@ -266,85 +163,386 @@ FrameAnimator::InitAnimationFrameTimeIfNecessary()
 }
 
 void
-FrameAnimator::SetAnimationFrameTime(const TimeStamp& aTime)
+AnimationState::SetAnimationFrameTime(const TimeStamp& aTime)
 {
   mCurrentAnimationFrameTime = aTime;
 }
 
-void
-FrameAnimator::UnionFirstFrameRefreshArea(const nsIntRect& aRect)
+bool
+AnimationState::MaybeAdvanceAnimationFrameTime(const TimeStamp& aTime)
 {
-  mFirstFrameRefreshArea.UnionRect(mFirstFrameRefreshArea, aRect);
+  if (!gfxPrefs::ImageAnimatedResumeFromLastDisplayed() ||
+      mCurrentAnimationFrameTime >= aTime) {
+    return false;
+  }
+
+  // We are configured to stop an animation when it is out of view, and restart
+  // it from the same point when it comes back into view. The same applies if it
+  // was discarded while out of view.
+  mCurrentAnimationFrameTime = aTime;
+  return true;
 }
 
 uint32_t
-FrameAnimator::GetCurrentAnimationFrameIndex() const
+AnimationState::GetCurrentAnimationFrameIndex() const
 {
   return mCurrentAnimationFrameIndex;
 }
 
-nsIntRect
-FrameAnimator::GetFirstFrameRefreshArea() const
+FrameTimeout
+AnimationState::LoopLength() const
 {
-  return mFirstFrameRefreshArea;
-}
-
-LookupResult
-FrameAnimator::GetCompositedFrame(uint32_t aFrameNum)
-{
-  MOZ_ASSERT(aFrameNum != 0, "First frame is never composited");
-
-  // If we have a composited version of this frame, return that.
-  if (mLastCompositedFrameIndex == int32_t(aFrameNum)) {
-    return LookupResult(mCompositingFrame->DrawableRef(), MatchType::EXACT);
+  // If we don't know the loop length yet, we have to treat it as infinite.
+  if (!mLoopLength) {
+    return FrameTimeout::Forever();
   }
 
-  // Otherwise return the raw frame. DoBlend is required to ensure that we only
-  // hit this case if the frame is not paletted and doesn't require compositing.
+  MOZ_ASSERT(mHasBeenDecoded, "We know the loop length but decoding isn't done?");
+
+  // If we're not looping, a single loop time has no meaning.
+  if (mAnimationMode != imgIContainer::kNormalAnimMode) {
+    return FrameTimeout::Forever();
+  }
+
+  return *mLoopLength;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// FrameAnimator implementation.
+///////////////////////////////////////////////////////////////////////////////
+
+TimeStamp
+FrameAnimator::GetCurrentImgFrameEndTime(AnimationState& aState,
+                                         FrameTimeout aCurrentTimeout) const
+{
+  if (aCurrentTimeout == FrameTimeout::Forever()) {
+    // We need to return a sentinel value in this case, because our logic
+    // doesn't work correctly if we have an infinitely long timeout. We use one
+    // year in the future as the sentinel because it works with the loop in
+    // RequestRefresh() below.
+    // XXX(seth): It'd be preferable to make our logic work correctly with
+    // infinitely long timeouts.
+    return TimeStamp::NowLoRes() +
+           TimeDuration::FromMilliseconds(31536000.0);
+  }
+
+  TimeDuration durationOfTimeout =
+    TimeDuration::FromMilliseconds(double(aCurrentTimeout.AsMilliseconds()));
+  return aState.mCurrentAnimationFrameTime + durationOfTimeout;
+}
+
+RefreshResult
+FrameAnimator::AdvanceFrame(AnimationState& aState,
+                            DrawableSurface& aFrames,
+                            RawAccessFrameRef& aCurrentFrame,
+                            TimeStamp aTime)
+{
+  NS_ASSERTION(aTime <= TimeStamp::Now(),
+               "Given time appears to be in the future");
+  AUTO_PROFILER_LABEL("FrameAnimator::AdvanceFrame", GRAPHICS);
+
+  RefreshResult ret;
+
+  // Determine what the next frame is, taking into account looping.
+  uint32_t currentFrameIndex = aState.mCurrentAnimationFrameIndex;
+  uint32_t nextFrameIndex = currentFrameIndex + 1;
+
+  // Check if we're at the end of the loop. (FrameCount() returns Nothing() if
+  // we don't know the total count yet.)
+  if (aState.FrameCount() == Some(nextFrameIndex)) {
+    // If we are not looping forever, initialize the loop counter
+    if (aState.mLoopRemainingCount < 0 && aState.LoopCount() >= 0) {
+      aState.mLoopRemainingCount = aState.LoopCount();
+    }
+
+    // If animation mode is "loop once", or we're at end of loop counter,
+    // it's time to stop animating.
+    if (aState.mAnimationMode == imgIContainer::kLoopOnceAnimMode ||
+        aState.mLoopRemainingCount == 0) {
+      ret.mAnimationFinished = true;
+    }
+
+    nextFrameIndex = 0;
+
+    if (aState.mLoopRemainingCount > 0) {
+      aState.mLoopRemainingCount--;
+    }
+
+    // If we're done, exit early.
+    if (ret.mAnimationFinished) {
+      return ret;
+    }
+  }
+
+  if (nextFrameIndex >= aState.KnownFrameCount()) {
+    // We've already advanced to the last decoded frame, nothing more we can do.
+    // We're blocked by network/decoding from displaying the animation at the
+    // rate specified, so that means the frame we are displaying (the latest
+    // available) is the frame we want to be displaying at this time. So we
+    // update the current animation time. If we didn't update the current
+    // animation time then it could lag behind, which would indicate that we are
+    // behind in the animation and should try to catch up. When we are done
+    // decoding (and thus can loop around back to the start of the animation) we
+    // would then jump to a random point in the animation to try to catch up.
+    // But we were never behind in the animation.
+    aState.mCurrentAnimationFrameTime = aTime;
+    return ret;
+  }
+
+  // There can be frames in the surface cache with index >= KnownFrameCount()
+  // which GetRawFrame() can access because an async decoder has decoded them,
+  // but which AnimationState doesn't know about yet because we haven't received
+  // the appropriate notification on the main thread. Make sure we stay in sync
+  // with AnimationState.
+  MOZ_ASSERT(nextFrameIndex < aState.KnownFrameCount());
+  RawAccessFrameRef nextFrame = aFrames.RawAccessRef(nextFrameIndex);
+
+  // We should always check to see if we have the next frame even if we have
+  // previously finished decoding. If we needed to redecode (e.g. due to a draw
+  // failure) we would have discarded all the old frames and may not yet have
+  // the new ones. DrawableSurface::RawAccessRef promises to only return
+  // finished frames.
+  if (!nextFrame) {
+    // Uh oh, the frame we want to show is currently being decoded (partial).
+    // Similar to the above case, we could be blocked by network or decoding,
+    // and so we should advance our current time rather than risk jumping
+    // through the animation. We will wait until the next refresh driver tick
+    // and try again.
+    aState.mCurrentAnimationFrameTime = aTime;
+    return ret;
+  }
+
+  if (nextFrame->GetTimeout() == FrameTimeout::Forever()) {
+    ret.mAnimationFinished = true;
+  }
+
+  if (nextFrameIndex == 0) {
+    ret.mDirtyRect = aState.FirstFrameRefreshArea();
+  } else {
+    MOZ_ASSERT(nextFrameIndex == currentFrameIndex + 1);
+
+    // Change frame
+    if (!DoBlend(aCurrentFrame, nextFrame, nextFrameIndex, &ret.mDirtyRect)) {
+      // something went wrong, move on to next
+      NS_WARNING("FrameAnimator::AdvanceFrame(): Compositing of frame failed");
+      nextFrame->SetCompositingFailed(true);
+      aState.mCurrentAnimationFrameTime =
+        GetCurrentImgFrameEndTime(aState, aCurrentFrame->GetTimeout());
+      aState.mCurrentAnimationFrameIndex = nextFrameIndex;
+      aState.mCompositedFrameRequested = false;
+      aCurrentFrame = std::move(nextFrame);
+      aFrames.Advance(nextFrameIndex);
+
+      return ret;
+    }
+
+    nextFrame->SetCompositingFailed(false);
+  }
+
+  aState.mCurrentAnimationFrameTime =
+    GetCurrentImgFrameEndTime(aState, aCurrentFrame->GetTimeout());
+
+  // If we can get closer to the current time by a multiple of the image's loop
+  // time, we should. We can only do this if we're done decoding; otherwise, we
+  // don't know the full loop length, and LoopLength() will have to return
+  // FrameTimeout::Forever(). We also skip this for images with a finite loop
+  // count if we have initialized mLoopRemainingCount (it only gets initialized
+  // after one full loop).
+  FrameTimeout loopTime = aState.LoopLength();
+  if (loopTime != FrameTimeout::Forever() &&
+      (aState.LoopCount() < 0 || aState.mLoopRemainingCount >= 0)) {
+    TimeDuration delay = aTime - aState.mCurrentAnimationFrameTime;
+    if (delay.ToMilliseconds() > loopTime.AsMilliseconds()) {
+      // Explicitly use integer division to get the floor of the number of
+      // loops.
+      uint64_t loops = static_cast<uint64_t>(delay.ToMilliseconds())
+                     / loopTime.AsMilliseconds();
+
+      // If we have a finite loop count limit the number of loops we advance.
+      if (aState.mLoopRemainingCount >= 0) {
+        MOZ_ASSERT(aState.LoopCount() >= 0);
+        loops = std::min(loops, CheckedUint64(aState.mLoopRemainingCount).value());
+      }
+
+      aState.mCurrentAnimationFrameTime +=
+        TimeDuration::FromMilliseconds(loops * loopTime.AsMilliseconds());
+
+      if (aState.mLoopRemainingCount >= 0) {
+        MOZ_ASSERT(loops <= CheckedUint64(aState.mLoopRemainingCount).value());
+        aState.mLoopRemainingCount -= CheckedInt32(loops).value();
+      }
+    }
+  }
+
+  // Set currentAnimationFrameIndex at the last possible moment
+  aState.mCurrentAnimationFrameIndex = nextFrameIndex;
+  aState.mCompositedFrameRequested = false;
+  aCurrentFrame = std::move(nextFrame);
+  aFrames.Advance(nextFrameIndex);
+
+  // If we're here, we successfully advanced the frame.
+  ret.mFrameAdvanced = true;
+
+  return ret;
+}
+
+void
+FrameAnimator::ResetAnimation(AnimationState& aState)
+{
+  aState.ResetAnimation();
+
+  // Our surface provider is synchronized to our state, so we need to reset its
+  // state as well, if we still have one.
   LookupResult result =
     SurfaceCache::Lookup(ImageKey(mImage),
                          RasterSurfaceKey(mSize,
                                           DefaultSurfaceFlags(),
-                                          aFrameNum));
-  MOZ_ASSERT(!result || !result.DrawableRef()->GetIsPaletted(),
-             "About to return a paletted frame");
-  return result;
+                                          PlaybackType::eAnimated));
+  if (!result) {
+    return;
+  }
+
+  result.Surface().Reset();
 }
 
-int32_t
-FrameAnimator::GetTimeoutForFrame(uint32_t aFrameNum) const
+RefreshResult
+FrameAnimator::RequestRefresh(AnimationState& aState,
+                              const TimeStamp& aTime,
+                              bool aAnimationFinished)
 {
-  int32_t rawTimeout = 0;
+  // By default, an empty RefreshResult.
+  RefreshResult ret;
 
-  RawAccessFrameRef frame = GetRawFrame(aFrameNum);
-  if (frame) {
-    AnimationData data = frame->GetAnimationData();
-    rawTimeout = data.mRawTimeout;
-  } else if (aFrameNum == 0) {
-    rawTimeout = mFirstFrameTimeout;
-  } else {
-    NS_WARNING("No frame; called GetTimeoutForFrame too early?");
-    return 100;
+  if (aState.IsDiscarded()) {
+    aState.MaybeAdvanceAnimationFrameTime(aTime);
+    return ret;
   }
 
-  // Ensure a minimal time between updates so we don't throttle the UI thread.
-  // consider 0 == unspecified and make it fast but not too fast.  Unless we
-  // have a single loop GIF. See bug 890743, bug 125137, bug 139677, and bug
-  // 207059. The behavior of recent IE and Opera versions seems to be:
-  // IE 6/Win:
-  //   10 - 50ms go 100ms
-  //   >50ms go correct speed
-  // Opera 7 final/Win:
-  //   10ms goes 100ms
-  //   >10ms go correct speed
-  // It seems that there are broken tools out there that set a 0ms or 10ms
-  // timeout when they really want a "default" one.  So munge values in that
-  // range.
-  if (rawTimeout >= 0 && rawTimeout <= 10) {
-    return 100;
+  // Get the animation frames once now, and pass them down to callees because
+  // the surface could be discarded at anytime on a different thread. This is
+  // must easier to reason about then trying to write code that is safe to
+  // having the surface disappear at anytime.
+  LookupResult result =
+    SurfaceCache::Lookup(ImageKey(mImage),
+                         RasterSurfaceKey(mSize,
+                                          DefaultSurfaceFlags(),
+                                          PlaybackType::eAnimated));
+
+  ret.mDirtyRect = aState.UpdateStateInternal(result, aAnimationFinished, mSize);
+  if (aState.IsDiscarded() || !result) {
+    aState.MaybeAdvanceAnimationFrameTime(aTime);
+    if (!ret.mDirtyRect.IsEmpty()) {
+      ret.mFrameAdvanced = true;
+    }
+    return ret;
   }
 
-  return rawTimeout;
+  RawAccessFrameRef currentFrame =
+    result.Surface().RawAccessRef(aState.mCurrentAnimationFrameIndex);
+
+  // only advance the frame if the current time is greater than or
+  // equal to the current frame's end time.
+  if (!currentFrame) {
+    MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
+    MOZ_ASSERT(aState.GetHasRequestedDecode() && !aState.GetIsCurrentlyDecoded());
+    MOZ_ASSERT(aState.mCompositedFrameInvalid);
+    // Nothing we can do but wait for our previous current frame to be decoded
+    // again so we can determine what to do next.
+    aState.MaybeAdvanceAnimationFrameTime(aTime);
+    return ret;
+  }
+
+  TimeStamp currentFrameEndTime =
+    GetCurrentImgFrameEndTime(aState, currentFrame->GetTimeout());
+
+  // If nothing has accessed the composited frame since the last time we
+  // advanced, then there is no point in continuing to advance the animation.
+  // This has the effect of freezing the animation while not in view.
+  if (!aState.mCompositedFrameRequested &&
+      aState.MaybeAdvanceAnimationFrameTime(aTime)) {
+    return ret;
+  }
+
+  while (currentFrameEndTime <= aTime) {
+    TimeStamp oldFrameEndTime = currentFrameEndTime;
+
+    RefreshResult frameRes = AdvanceFrame(aState, result.Surface(),
+                                          currentFrame, aTime);
+
+    // Accumulate our result for returning to callers.
+    ret.Accumulate(frameRes);
+
+    // currentFrame was updated by AdvanceFrame so it is still current.
+    currentFrameEndTime =
+      GetCurrentImgFrameEndTime(aState, currentFrame->GetTimeout());
+
+    // If we didn't advance a frame, and our frame end time didn't change,
+    // then we need to break out of this loop & wait for the frame(s)
+    // to finish downloading.
+    if (!frameRes.mFrameAdvanced && currentFrameEndTime == oldFrameEndTime) {
+      break;
+    }
+  }
+
+  // Advanced to the correct frame, the composited frame is now valid to be drawn.
+  if (currentFrameEndTime > aTime) {
+    aState.mCompositedFrameInvalid = false;
+    ret.mDirtyRect = IntRect(IntPoint(0,0), mSize);
+  }
+
+  MOZ_ASSERT(!aState.mIsCurrentlyDecoded || !aState.mCompositedFrameInvalid);
+
+  return ret;
+}
+
+LookupResult
+FrameAnimator::GetCompositedFrame(AnimationState& aState)
+{
+  aState.mCompositedFrameRequested = true;
+
+  // If we have a composited version of this frame, return that.
+  if (!aState.mCompositedFrameInvalid && mLastCompositedFrameIndex >= 0 &&
+      (uint32_t(mLastCompositedFrameIndex) == aState.mCurrentAnimationFrameIndex)) {
+    return LookupResult(DrawableSurface(mCompositingFrame->DrawableRef()),
+                        MatchType::EXACT);
+  }
+
+  LookupResult result =
+    SurfaceCache::Lookup(ImageKey(mImage),
+                         RasterSurfaceKey(mSize,
+                                          DefaultSurfaceFlags(),
+                                          PlaybackType::eAnimated));
+
+  if (aState.mCompositedFrameInvalid) {
+    MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
+    MOZ_ASSERT(aState.GetHasRequestedDecode());
+    MOZ_ASSERT(!aState.GetIsCurrentlyDecoded());
+    if (result.Type() == MatchType::NOT_FOUND) {
+      return result;
+    }
+    return LookupResult(MatchType::PENDING);
+  }
+
+  // Otherwise return the raw frame. DoBlend is required to ensure that we only
+  // hit this case if the frame is not paletted and doesn't require compositing.
+  if (!result) {
+    return result;
+  }
+
+  // Seek to the appropriate frame. If seeking fails, it means that we couldn't
+  // get the frame we're looking for; treat this as if the lookup failed.
+  if (NS_FAILED(result.Surface().Seek(aState.mCurrentAnimationFrameIndex))) {
+    if (result.Type() == MatchType::NOT_FOUND) {
+      return result;
+    }
+    return LookupResult(MatchType::PENDING);
+  }
+
+  MOZ_ASSERT(!result.Surface()->GetIsPaletted(),
+             "About to return a paletted frame");
+
+  return result;
 }
 
 static void
@@ -356,16 +554,19 @@ DoCollectSizeOfCompositingSurfaces(const RawAccessFrameRef& aSurface,
   // Concoct a SurfaceKey for this surface.
   SurfaceKey key = RasterSurfaceKey(aSurface->GetImageSize(),
                                     DefaultSurfaceFlags(),
-                                    /* aFrameNum = */ 0);
+                                    PlaybackType::eStatic);
 
   // Create a counter for this surface.
-  SurfaceMemoryCounter counter(key, /* aIsLocked = */ true, aType);
+  SurfaceMemoryCounter counter(key, /* aIsLocked = */ true,
+                               /* aCannotSubstitute */ false,
+                               /* aIsFactor2 */ false, aType);
 
   // Extract the surface's memory usage information.
-  size_t heap = 0, nonHeap = 0;
-  aSurface->AddSizeOfExcludingThis(aMallocSizeOf, heap, nonHeap);
+  size_t heap = 0, nonHeap = 0, handles = 0;
+  aSurface->AddSizeOfExcludingThis(aMallocSizeOf, heap, nonHeap, handles);
   counter.Values().SetDecodedHeap(heap);
   counter.Values().SetDecodedNonHeap(nonHeap);
+  counter.Values().SetExternalHandles(handles);
 
   // Record it.
   aCounters.AppendElement(counter);
@@ -391,59 +592,44 @@ FrameAnimator::CollectSizeOfCompositingSurfaces(
   }
 }
 
-RawAccessFrameRef
-FrameAnimator::GetRawFrame(uint32_t aFrameNum) const
-{
-  LookupResult result =
-    SurfaceCache::Lookup(ImageKey(mImage),
-                         RasterSurfaceKey(mSize,
-                                          DefaultSurfaceFlags(),
-                                          aFrameNum));
-  return result ? result.DrawableRef()->RawAccessRef()
-                : RawAccessFrameRef();
-}
-
 //******************************************************************************
 // DoBlend gets called when the timer for animation get fired and we have to
 // update the composited frame of the animation.
 bool
-FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
-                       uint32_t aPrevFrameIndex,
-                       uint32_t aNextFrameIndex)
+FrameAnimator::DoBlend(const RawAccessFrameRef& aPrevFrame,
+                       const RawAccessFrameRef& aNextFrame,
+                       uint32_t aNextFrameIndex,
+                       IntRect* aDirtyRect)
 {
-  RawAccessFrameRef prevFrame = GetRawFrame(aPrevFrameIndex);
-  RawAccessFrameRef nextFrame = GetRawFrame(aNextFrameIndex);
+  MOZ_ASSERT(aPrevFrame && aNextFrame, "Should have frames here");
 
-  MOZ_ASSERT(prevFrame && nextFrame, "Should have frames here");
-
-  AnimationData prevFrameData = prevFrame->GetAnimationData();
-  if (prevFrameData.mDisposalMethod == DisposalMethod::RESTORE_PREVIOUS &&
+  DisposalMethod prevDisposalMethod = aPrevFrame->GetDisposalMethod();
+  bool prevHasAlpha = aPrevFrame->FormatHasAlpha();
+  if (prevDisposalMethod == DisposalMethod::RESTORE_PREVIOUS &&
       !mCompositingPrevFrame) {
-    prevFrameData.mDisposalMethod = DisposalMethod::CLEAR;
+    prevDisposalMethod = DisposalMethod::CLEAR;
   }
 
-  bool isFullPrevFrame = prevFrameData.mRect.x == 0 &&
-                         prevFrameData.mRect.y == 0 &&
-                         prevFrameData.mRect.width == mSize.width &&
-                         prevFrameData.mRect.height == mSize.height;
+  IntRect prevRect = aPrevFrame->GetBoundedBlendRect();
+  bool isFullPrevFrame = prevRect.IsEqualRect(0, 0, mSize.width, mSize.height);
 
   // Optimization: DisposeClearAll if the previous frame is the same size as
   //               container and it's clearing itself
   if (isFullPrevFrame &&
-      (prevFrameData.mDisposalMethod == DisposalMethod::CLEAR)) {
-    prevFrameData.mDisposalMethod = DisposalMethod::CLEAR_ALL;
+      (prevDisposalMethod == DisposalMethod::CLEAR)) {
+    prevDisposalMethod = DisposalMethod::CLEAR_ALL;
   }
 
-  AnimationData nextFrameData = nextFrame->GetAnimationData();
-  bool isFullNextFrame = nextFrameData.mRect.x == 0 &&
-                         nextFrameData.mRect.y == 0 &&
-                         nextFrameData.mRect.width == mSize.width &&
-                         nextFrameData.mRect.height == mSize.height;
+  DisposalMethod nextDisposalMethod = aNextFrame->GetDisposalMethod();
+  bool nextHasAlpha = aNextFrame->FormatHasAlpha();
 
-  if (!nextFrame->GetIsPaletted()) {
+  IntRect nextRect = aNextFrame->GetBoundedBlendRect();
+  bool isFullNextFrame = nextRect.IsEqualRect(0, 0, mSize.width, mSize.height);
+
+  if (!aNextFrame->GetIsPaletted()) {
     // Optimization: Skip compositing if the previous frame wants to clear the
     //               whole image
-    if (prevFrameData.mDisposalMethod == DisposalMethod::CLEAR_ALL) {
+    if (prevDisposalMethod == DisposalMethod::CLEAR_ALL) {
       aDirtyRect->SetRect(0, 0, mSize.width, mSize.height);
       return true;
     }
@@ -451,20 +637,20 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
     // Optimization: Skip compositing if this frame is the same size as the
     //               container and it's fully drawing over prev frame (no alpha)
     if (isFullNextFrame &&
-        (nextFrameData.mDisposalMethod != DisposalMethod::RESTORE_PREVIOUS) &&
-        !nextFrameData.mHasAlpha) {
+        (nextDisposalMethod != DisposalMethod::RESTORE_PREVIOUS) &&
+        !nextHasAlpha) {
       aDirtyRect->SetRect(0, 0, mSize.width, mSize.height);
       return true;
     }
   }
 
   // Calculate area that needs updating
-  switch (prevFrameData.mDisposalMethod) {
+  switch (prevDisposalMethod) {
     default:
       MOZ_FALLTHROUGH_ASSERT("Unexpected DisposalMethod");
     case DisposalMethod::NOT_SPECIFIED:
     case DisposalMethod::KEEP:
-      *aDirtyRect = nextFrameData.mRect;
+      *aDirtyRect = nextRect;
       break;
 
     case DisposalMethod::CLEAR_ALL:
@@ -476,11 +662,11 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
       // Calc area that needs to be redrawn (the combination of previous and
       // this frame)
       // XXX - This could be done with multiple framechanged calls
-      //       Having prevFrame way at the top of the image, and nextFrame
+      //       Having aPrevFrame way at the top of the image, and aNextFrame
       //       way at the bottom, and both frames being small, we'd be
       //       telling framechanged to refresh the whole image when only two
       //       small areas are needed.
-      aDirtyRect->UnionRect(nextFrameData.mRect, prevFrameData.mRect);
+      aDirtyRect->UnionRect(nextRect, prevRect);
       break;
 
     case DisposalMethod::RESTORE_PREVIOUS:
@@ -503,8 +689,8 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
   // Create the Compositing Frame
   if (!mCompositingFrame) {
     RefPtr<imgFrame> newFrame = new imgFrame;
-    nsresult rv = newFrame->InitForDecoder(mSize,
-                                           SurfaceFormat::B8G8R8A8);
+    nsresult rv = newFrame->InitForAnimator(mSize,
+                                            SurfaceFormat::B8G8R8A8);
     if (NS_FAILED(rv)) {
       mCompositingFrame.reset();
       return false;
@@ -518,8 +704,6 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
     needToBlankComposite = true;
   }
 
-  AnimationData compositingFrameData = mCompositingFrame->GetAnimationData();
-
   // More optimizations possible when next frame is not transparent
   // But if the next frame has DisposalMethod::RESTORE_PREVIOUS,
   // this "no disposal" optimization is not possible,
@@ -527,8 +711,7 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
   // needs to be stored in compositingFrame, so it can be
   // copied into compositingPrevFrame later.
   bool doDisposal = true;
-  if (!nextFrameData.mHasAlpha &&
-      nextFrameData.mDisposalMethod != DisposalMethod::RESTORE_PREVIOUS) {
+  if (!nextHasAlpha && nextDisposalMethod != DisposalMethod::RESTORE_PREVIOUS) {
     if (isFullNextFrame) {
       // Optimization: No need to dispose prev.frame when
       // next frame is full frame and not transparent.
@@ -536,12 +719,9 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
       // No need to blank the composite frame
       needToBlankComposite = false;
     } else {
-      if ((prevFrameData.mRect.x >= nextFrameData.mRect.x) &&
-          (prevFrameData.mRect.y >= nextFrameData.mRect.y) &&
-          (prevFrameData.mRect.x + prevFrameData.mRect.width <=
-              nextFrameData.mRect.x + nextFrameData.mRect.width) &&
-          (prevFrameData.mRect.y + prevFrameData.mRect.height <=
-              nextFrameData.mRect.y + nextFrameData.mRect.height)) {
+      if ((prevRect.X() >= nextRect.X()) && (prevRect.Y() >= nextRect.Y()) &&
+          (prevRect.XMost() <= nextRect.XMost()) &&
+          (prevRect.YMost() <= nextRect.YMost())) {
         // Optimization: No need to dispose prev.frame when
         // next frame fully overlaps previous frame.
         doDisposal = false;
@@ -551,46 +731,42 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
 
   if (doDisposal) {
     // Dispose of previous: clear, restore, or keep (copy)
-    switch (prevFrameData.mDisposalMethod) {
+    switch (prevDisposalMethod) {
       case DisposalMethod::CLEAR:
         if (needToBlankComposite) {
           // If we just created the composite, it could have anything in its
           // buffer. Clear whole frame
-          ClearFrame(compositingFrameData.mRawData,
-                     compositingFrameData.mRect);
+          ClearFrame(mCompositingFrame.Data(),
+                     mCompositingFrame->GetRect());
         } else {
           // Only blank out previous frame area (both color & Mask/Alpha)
-          ClearFrame(compositingFrameData.mRawData,
-                     compositingFrameData.mRect,
-                     prevFrameData.mRect);
+          ClearFrame(mCompositingFrame.Data(),
+                     mCompositingFrame->GetRect(),
+                     prevRect);
         }
         break;
 
       case DisposalMethod::CLEAR_ALL:
-        ClearFrame(compositingFrameData.mRawData,
-                   compositingFrameData.mRect);
+        ClearFrame(mCompositingFrame.Data(),
+                   mCompositingFrame->GetRect());
         break;
 
       case DisposalMethod::RESTORE_PREVIOUS:
         // It would be better to copy only the area changed back to
         // compositingFrame.
         if (mCompositingPrevFrame) {
-          AnimationData compositingPrevFrameData =
-            mCompositingPrevFrame->GetAnimationData();
-
-          CopyFrameImage(compositingPrevFrameData.mRawData,
-                         compositingPrevFrameData.mRect,
-                         compositingFrameData.mRawData,
-                         compositingFrameData.mRect);
+          CopyFrameImage(mCompositingPrevFrame.Data(),
+                         mCompositingPrevFrame->GetRect(),
+                         mCompositingFrame.Data(),
+                         mCompositingFrame->GetRect());
 
           // destroy only if we don't need it for this frame's disposal
-          if (nextFrameData.mDisposalMethod !=
-              DisposalMethod::RESTORE_PREVIOUS) {
+          if (nextDisposalMethod != DisposalMethod::RESTORE_PREVIOUS) {
             mCompositingPrevFrame.reset();
           }
         } else {
-          ClearFrame(compositingFrameData.mRawData,
-                     compositingFrameData.mRect);
+          ClearFrame(mCompositingFrame.Data(),
+                     mCompositingFrame->GetRect());
         }
         break;
 
@@ -606,48 +782,49 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
         // Note: Frame 1 never gets into DoBlend(), so (aNextFrameIndex - 1)
         // will always be a valid frame number.
         if (mLastCompositedFrameIndex != int32_t(aNextFrameIndex - 1)) {
-          if (isFullPrevFrame && !prevFrame->GetIsPaletted()) {
+          if (isFullPrevFrame && !aPrevFrame->GetIsPaletted()) {
             // Just copy the bits
-            CopyFrameImage(prevFrameData.mRawData,
-                           prevFrameData.mRect,
-                           compositingFrameData.mRawData,
-                           compositingFrameData.mRect);
+            CopyFrameImage(aPrevFrame.Data(),
+                           prevRect,
+                           mCompositingFrame.Data(),
+                           mCompositingFrame->GetRect());
           } else {
             if (needToBlankComposite) {
               // Only blank composite when prev is transparent or not full.
-              if (prevFrameData.mHasAlpha || !isFullPrevFrame) {
-                ClearFrame(compositingFrameData.mRawData,
-                           compositingFrameData.mRect);
+              if (prevHasAlpha || !isFullPrevFrame) {
+                ClearFrame(mCompositingFrame.Data(),
+                           mCompositingFrame->GetRect());
               }
             }
-            DrawFrameTo(prevFrameData.mRawData, prevFrameData.mRect,
-                        prevFrameData.mPaletteDataLength,
-                        prevFrameData.mHasAlpha,
-                        compositingFrameData.mRawData,
-                        compositingFrameData.mRect,
-                        prevFrameData.mBlendMethod);
+            DrawFrameTo(aPrevFrame.Data(), aPrevFrame->GetRect(),
+                        aPrevFrame.PaletteDataLength(),
+                        prevHasAlpha,
+                        mCompositingFrame.Data(),
+                        mCompositingFrame->GetRect(),
+                        aPrevFrame->GetBlendMethod(),
+                        aPrevFrame->GetBlendRect());
           }
         }
     }
   } else if (needToBlankComposite) {
     // If we just created the composite, it could have anything in its
     // buffers. Clear them
-    ClearFrame(compositingFrameData.mRawData,
-               compositingFrameData.mRect);
+    ClearFrame(mCompositingFrame.Data(),
+               mCompositingFrame->GetRect());
   }
 
   // Check if the frame we are composing wants the previous image restored after
   // it is done. Don't store it (again) if last frame wanted its image restored
   // too
-  if ((nextFrameData.mDisposalMethod == DisposalMethod::RESTORE_PREVIOUS) &&
-      (prevFrameData.mDisposalMethod != DisposalMethod::RESTORE_PREVIOUS)) {
+  if ((nextDisposalMethod == DisposalMethod::RESTORE_PREVIOUS) &&
+      (prevDisposalMethod != DisposalMethod::RESTORE_PREVIOUS)) {
     // We are storing the whole image.
-    // It would be better if we just stored the area that nextFrame is going to
+    // It would be better if we just stored the area that aNextFrame is going to
     // overwrite.
     if (!mCompositingPrevFrame) {
       RefPtr<imgFrame> newFrame = new imgFrame;
-      nsresult rv = newFrame->InitForDecoder(mSize,
-                                             SurfaceFormat::B8G8R8A8);
+      nsresult rv = newFrame->InitForAnimator(mSize,
+                                              SurfaceFormat::B8G8R8A8);
       if (NS_FAILED(rv)) {
         mCompositingPrevFrame.reset();
         return false;
@@ -656,24 +833,22 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
       mCompositingPrevFrame = newFrame->RawAccessRef();
     }
 
-    AnimationData compositingPrevFrameData =
-      mCompositingPrevFrame->GetAnimationData();
-
-    CopyFrameImage(compositingFrameData.mRawData,
-                   compositingFrameData.mRect,
-                   compositingPrevFrameData.mRawData,
-                   compositingPrevFrameData.mRect);
+    CopyFrameImage(mCompositingFrame.Data(),
+                   mCompositingFrame->GetRect(),
+                   mCompositingPrevFrame.Data(),
+                   mCompositingPrevFrame->GetRect());
 
     mCompositingPrevFrame->Finish();
   }
 
   // blit next frame into it's correct spot
-  DrawFrameTo(nextFrameData.mRawData, nextFrameData.mRect,
-              nextFrameData.mPaletteDataLength,
-              nextFrameData.mHasAlpha,
-              compositingFrameData.mRawData,
-              compositingFrameData.mRect,
-              nextFrameData.mBlendMethod);
+  DrawFrameTo(aNextFrame.Data(), aNextFrame->GetRect(),
+              aNextFrame.PaletteDataLength(),
+              nextHasAlpha,
+              mCompositingFrame.Data(),
+              mCompositingFrame->GetRect(),
+              aNextFrame->GetBlendMethod(),
+              aNextFrame->GetBlendRect());
 
   // Tell the image that it is fully 'downloaded'.
   mCompositingFrame->Finish();
@@ -686,34 +861,34 @@ FrameAnimator::DoBlend(nsIntRect* aDirtyRect,
 //******************************************************************************
 // Fill aFrame with black. Does also clears the mask.
 void
-FrameAnimator::ClearFrame(uint8_t* aFrameData, const nsIntRect& aFrameRect)
+FrameAnimator::ClearFrame(uint8_t* aFrameData, const IntRect& aFrameRect)
 {
   if (!aFrameData) {
     return;
   }
 
-  memset(aFrameData, 0, aFrameRect.width * aFrameRect.height * 4);
+  memset(aFrameData, 0, aFrameRect.Width() * aFrameRect.Height() * 4);
 }
 
 //******************************************************************************
 void
-FrameAnimator::ClearFrame(uint8_t* aFrameData, const nsIntRect& aFrameRect,
-                          const nsIntRect& aRectToClear)
+FrameAnimator::ClearFrame(uint8_t* aFrameData, const IntRect& aFrameRect,
+                          const IntRect& aRectToClear)
 {
-  if (!aFrameData || aFrameRect.width <= 0 || aFrameRect.height <= 0 ||
-      aRectToClear.width <= 0 || aRectToClear.height <= 0) {
+  if (!aFrameData || aFrameRect.Width() <= 0 || aFrameRect.Height() <= 0 ||
+      aRectToClear.Width() <= 0 || aRectToClear.Height() <= 0) {
     return;
   }
 
-  nsIntRect toClear = aFrameRect.Intersect(aRectToClear);
+  IntRect toClear = aFrameRect.Intersect(aRectToClear);
   if (toClear.IsEmpty()) {
     return;
   }
 
-  uint32_t bytesPerRow = aFrameRect.width * 4;
-  for (int row = toClear.y; row < toClear.y + toClear.height; ++row) {
-    memset(aFrameData + toClear.x * 4 + row * bytesPerRow, 0,
-           toClear.width * 4);
+  uint32_t bytesPerRow = aFrameRect.Width() * 4;
+  for (int row = toClear.Y(); row < toClear.YMost(); ++row) {
+    memset(aFrameData + toClear.X() * 4 + row * bytesPerRow, 0,
+           toClear.Width() * 4);
   }
 }
 
@@ -722,12 +897,12 @@ FrameAnimator::ClearFrame(uint8_t* aFrameData, const nsIntRect& aFrameRect,
 // we can do about a failure, so there we don't return a nsresult
 bool
 FrameAnimator::CopyFrameImage(const uint8_t* aDataSrc,
-                              const nsIntRect& aRectSrc,
+                              const IntRect& aRectSrc,
                               uint8_t* aDataDest,
-                              const nsIntRect& aRectDest)
+                              const IntRect& aRectDest)
 {
-  uint32_t dataLengthSrc = aRectSrc.width * aRectSrc.height * 4;
-  uint32_t dataLengthDest = aRectDest.width * aRectDest.height * 4;
+  uint32_t dataLengthSrc = aRectSrc.Width() * aRectSrc.Height() * 4;
+  uint32_t dataLengthDest = aRectDest.Width() * aRectDest.Height() * 4;
 
   if (!aDataDest || !aDataSrc || dataLengthSrc != dataLengthDest) {
     return false;
@@ -739,37 +914,38 @@ FrameAnimator::CopyFrameImage(const uint8_t* aDataSrc,
 }
 
 nsresult
-FrameAnimator::DrawFrameTo(const uint8_t* aSrcData, const nsIntRect& aSrcRect,
+FrameAnimator::DrawFrameTo(const uint8_t* aSrcData, const IntRect& aSrcRect,
                            uint32_t aSrcPaletteLength, bool aSrcHasAlpha,
-                           uint8_t* aDstPixels, const nsIntRect& aDstRect,
-                           BlendMethod aBlendMethod)
+                           uint8_t* aDstPixels, const IntRect& aDstRect,
+                           BlendMethod aBlendMethod, const IntRect& aBlendRect)
 {
   NS_ENSURE_ARG_POINTER(aSrcData);
   NS_ENSURE_ARG_POINTER(aDstPixels);
 
   // According to both AGIF and APNG specs, offsets are unsigned
-  if (aSrcRect.x < 0 || aSrcRect.y < 0) {
+  if (aSrcRect.X() < 0 || aSrcRect.Y() < 0) {
     NS_WARNING("FrameAnimator::DrawFrameTo: negative offsets not allowed");
     return NS_ERROR_FAILURE;
   }
+
   // Outside the destination frame, skip it
-  if ((aSrcRect.x > aDstRect.width) || (aSrcRect.y > aDstRect.height)) {
+  if ((aSrcRect.X() > aDstRect.Width()) || (aSrcRect.Y() > aDstRect.Height())) {
     return NS_OK;
   }
 
   if (aSrcPaletteLength) {
     // Larger than the destination frame, clip it
-    int32_t width = std::min(aSrcRect.width, aDstRect.width - aSrcRect.x);
-    int32_t height = std::min(aSrcRect.height, aDstRect.height - aSrcRect.y);
+    int32_t width = std::min(aSrcRect.Width(), aDstRect.Width() - aSrcRect.X());
+    int32_t height = std::min(aSrcRect.Height(), aDstRect.Height() - aSrcRect.Y());
 
     // The clipped image must now fully fit within destination image frame
-    NS_ASSERTION((aSrcRect.x >= 0) && (aSrcRect.y >= 0) &&
-                 (aSrcRect.x + width <= aDstRect.width) &&
-                 (aSrcRect.y + height <= aDstRect.height),
+    NS_ASSERTION((aSrcRect.X() >= 0) && (aSrcRect.Y() >= 0) &&
+                 (aSrcRect.X() + width <= aDstRect.Width()) &&
+                 (aSrcRect.Y() + height <= aDstRect.Height()),
                 "FrameAnimator::DrawFrameTo: Invalid aSrcRect");
 
     // clipped image size may be smaller than source, but not larger
-    NS_ASSERTION((width <= aSrcRect.width) && (height <= aSrcRect.height),
+    NS_ASSERTION((width <= aSrcRect.Width()) && (height <= aSrcRect.Height()),
       "FrameAnimator::DrawFrameTo: source must be smaller than dest");
 
     // Get pointers to image data
@@ -778,15 +954,15 @@ FrameAnimator::DrawFrameTo(const uint8_t* aSrcData, const nsIntRect& aSrcRect,
     const uint32_t* colormap = reinterpret_cast<const uint32_t*>(aSrcData);
 
     // Skip to the right offset
-    dstPixels += aSrcRect.x + (aSrcRect.y * aDstRect.width);
+    dstPixels += aSrcRect.X() + (aSrcRect.Y() * aDstRect.Width());
     if (!aSrcHasAlpha) {
       for (int32_t r = height; r > 0; --r) {
         for (int32_t c = 0; c < width; c++) {
           dstPixels[c] = colormap[srcPixels[c]];
         }
         // Go to the next row in the source resp. destination image
-        srcPixels += aSrcRect.width;
-        dstPixels += aDstRect.width;
+        srcPixels += aSrcRect.Width();
+        dstPixels += aDstRect.Width();
       }
     } else {
       for (int32_t r = height; r > 0; --r) {
@@ -797,34 +973,78 @@ FrameAnimator::DrawFrameTo(const uint8_t* aSrcData, const nsIntRect& aSrcRect,
           }
         }
         // Go to the next row in the source resp. destination image
-        srcPixels += aSrcRect.width;
-        dstPixels += aDstRect.width;
+        srcPixels += aSrcRect.Width();
+        dstPixels += aDstRect.Width();
       }
     }
   } else {
     pixman_image_t* src =
       pixman_image_create_bits(
           aSrcHasAlpha ? PIXMAN_a8r8g8b8 : PIXMAN_x8r8g8b8,
-          aSrcRect.width, aSrcRect.height,
+          aSrcRect.Width(), aSrcRect.Height(),
           reinterpret_cast<uint32_t*>(const_cast<uint8_t*>(aSrcData)),
-          aSrcRect.width * 4);
+          aSrcRect.Width() * 4);
+    if (!src) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
     pixman_image_t* dst =
       pixman_image_create_bits(PIXMAN_a8r8g8b8,
-                               aDstRect.width,
-                               aDstRect.height,
+                               aDstRect.Width(),
+                               aDstRect.Height(),
                                reinterpret_cast<uint32_t*>(aDstPixels),
-                               aDstRect.width * 4);
+                               aDstRect.Width() * 4);
+    if (!dst) {
+      pixman_image_unref(src);
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
+    // XXX(seth): This is inefficient but we'll remove it quite soon when we
+    // move frame compositing into SurfacePipe. For now we need this because
+    // RemoveFrameRectFilter has transformed PNG frames with frame rects into
+    // imgFrame's with no frame rects, but with a region of 0 alpha where the
+    // frame rect should be. This works really nicely if we're using
+    // BlendMethod::OVER, but BlendMethod::SOURCE will result in that frame rect
+    // area overwriting the previous frame, which makes the animation look
+    // wrong. This quick hack fixes that by first compositing the whle new frame
+    // with BlendMethod::OVER, and then recopying the area that uses
+    // BlendMethod::SOURCE if needed. To make this work, the decoder has to
+    // provide a "blend rect" that tells us where to do this. This is just the
+    // frame rect, but hidden in a way that makes it invisible to most of the
+    // system, so we can keep eliminating dependencies on it.
     auto op = aBlendMethod == BlendMethod::SOURCE ? PIXMAN_OP_SRC
                                                   : PIXMAN_OP_OVER;
-    pixman_image_composite32(op,
-                             src,
-                             nullptr,
-                             dst,
-                             0, 0,
-                             0, 0,
-                             aSrcRect.x, aSrcRect.y,
-                             aSrcRect.width, aSrcRect.height);
+
+    if (aBlendMethod == BlendMethod::OVER ||
+        (aBlendMethod == BlendMethod::SOURCE && aSrcRect.IsEqualEdges(aBlendRect))) {
+      // We don't need to do anything clever. (Or, in the case where no blend
+      // rect was specified, we can't.)
+      pixman_image_composite32(op,
+                               src,
+                               nullptr,
+                               dst,
+                               0, 0,
+                               0, 0,
+                               aSrcRect.X(), aSrcRect.Y(),
+                               aSrcRect.Width(), aSrcRect.Height());
+    } else {
+      // We need to do the OVER followed by SOURCE trick above.
+      pixman_image_composite32(PIXMAN_OP_OVER,
+                               src,
+                               nullptr,
+                               dst,
+                               0, 0,
+                               0, 0,
+                               aSrcRect.X(), aSrcRect.Y(),
+                               aSrcRect.Width(), aSrcRect.Height());
+      pixman_image_composite32(PIXMAN_OP_SRC,
+                               src,
+                               nullptr,
+                               dst,
+                               aBlendRect.X(), aBlendRect.Y(),
+                               0, 0,
+                               aBlendRect.X(), aBlendRect.Y(),
+                               aBlendRect.Width(), aBlendRect.Height());
+    }
 
     pixman_image_unref(src);
     pixman_image_unref(dst);

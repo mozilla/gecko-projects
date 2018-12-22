@@ -424,7 +424,7 @@ for (var name of elementNames) {
   for (var func of functions) {
     // Clean-up.
     while (content.firstChild) {
-      content.removeChild(content.firstChild);
+      content.firstChild.remove();
     }
     for (form of forms) {
       content.appendChild(form);
@@ -452,15 +452,17 @@ for (var name of elementNames) {
           is(formsList[i].elements[j], elementsList[j],
              "The form should contain " + elementsList[j]);
         }
-        is(elementsList[j].form, formsList[i],
-           "The form owner should be the form associated to the list");
+        if (name != 'label') {
+          is(elementsList[j].form, formsList[i],
+             "The form owner should be the form associated to the list");
+        }
       }
     }
   }
 
   // Cleaning-up.
   for (e of elements) {
-    e.parentNode.removeChild(e);
+    e.remove();
     e = null;
   }
 }

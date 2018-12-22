@@ -5,7 +5,7 @@
 -->
 <html><head>
   <meta charset="utf-8">
-  <title>CSS Grid Test: flex min-sizing</title>
+  <title>Reference: flex/auto min-sizing</title>
   <link rel="author" title="Mats Palmgren" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1151212">
   <style type="text/css">
 body,html { color:black; background:white; font-family:monospace; font-size:16px; padding:0; margin:0; }
@@ -21,10 +21,11 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
 }
 
 .g1 {
- grid-template-columns: minmax(0,min-content)
+ grid-template-columns: 4px
                         minmax(0,0)
                         minmax(0,0)
                         1fr;
+ min-width:104px;
 }
 
 .g2 {
@@ -42,10 +43,11 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
 }
 
 .g4 {
- grid-template-columns: minmax(0,0)
-                        minmax(0,0)
-                        minmax(0,0)
+ grid-template-columns: minmax(2px,0)
+                        minmax(1px,0)
+                        minmax(1px,0)
                         1fr;
+ min-width:104px;
 }
 
 .g5 {
@@ -53,13 +55,15 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
                         minmax(0,0)
                         minmax(0,0)
                         1fr;
+ min-width:104px;
 }
 
 .g6 {
- grid-template-columns: minmax(0,0)
-                        minmax(0,0)
-                        minmax(0,0)
+ grid-template-columns: minmax(2px,0)
+                        minmax(1px,0)
+                        minmax(1px,0)
                         20px;
+ min-width:124px;
 }
 
 .g7 {
@@ -81,6 +85,7 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
                         30px
                         minmax(0,0)
                         10px;
+ min-width:114px;
 }
 
 .gA {
@@ -88,6 +93,7 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
                         minmax(min-content,40px)
                         minmax(0,0)
                         20px;
+ min-width:140px;
 }
 
 .gB {
@@ -99,9 +105,10 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
 
 .gC {
  grid-template-columns: minmax(0,20px)
-                        minmax(auto,40px)
+                        minmax(0,40px)
                         minmax(0,0)
                         20px;
+ min-width:124px;
 }
 
 .gD {
@@ -112,15 +119,16 @@ body,html { color:black; background:white; font-family:monospace; font-size:16px
 }
 
 .gE {
- grid-template-columns: minmax(auto,20px)
-                        minmax(auto,40px)
+ grid-template-columns: minmax(0,20px)
+                        minmax(0,40px)
                         minmax(0,20px)
                         auto;
+ min-width:104px;
 }
 
 .gF {
- grid-template-columns: minmax(auto,20px)
-                        minmax(min-content,max-content)
+ grid-template-columns: minmax(0,20px)
+                        44px
                         minmax(0,40px)
                         auto;
 }

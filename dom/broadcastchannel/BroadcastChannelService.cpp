@@ -7,7 +7,7 @@
 #include "BroadcastChannelService.h"
 #include "BroadcastChannelParent.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/ipc/BlobParent.h"
+#include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/ipc/BackgroundParent.h"
 
 #ifdef XP_WIN
@@ -58,57 +58,89 @@ BroadcastChannelService::GetOrCreate()
 }
 
 void
-BroadcastChannelService::RegisterActor(BroadcastChannelParent* aParent)
+BroadcastChannelService::RegisterActor(BroadcastChannelParent* aParent,
+                                       const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(!mAgents.Contains(aParent));
 
-  mAgents.PutEntry(aParent);
+  nsTArray<BroadcastChannelParent*>* parents =
+    mAgents.LookupForAdd(aOriginChannelKey).OrInsert(
+      [] () { return new nsTArray<BroadcastChannelParent*>(); });
+
+  MOZ_ASSERT(!parents->Contains(aParent));
+  parents->AppendElement(aParent);
 }
 
 void
-BroadcastChannelService::UnregisterActor(BroadcastChannelParent* aParent)
+BroadcastChannelService::UnregisterActor(BroadcastChannelParent* aParent,
+                                         const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(mAgents.Contains(aParent));
 
-  mAgents.RemoveEntry(aParent);
+  if (auto entry = mAgents.Lookup(aOriginChannelKey)) {
+    entry.Data()->RemoveElement(aParent);
+    // remove the entry if the array is now empty
+    if (entry.Data()->IsEmpty()) {
+      entry.Remove();
+    }
+  } else {
+    MOZ_CRASH("Invalid state");
+  }
 }
 
 void
 BroadcastChannelService::PostMessage(BroadcastChannelParent* aParent,
                                      const ClonedMessageData& aData,
-                                     const nsACString& aOrigin,
-                                     const nsAString& aChannel,
-                                     bool aPrivateBrowsing)
+                                     const nsAString& aOriginChannelKey)
 {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParent);
-  MOZ_ASSERT(mAgents.Contains(aParent));
+
+  nsTArray<BroadcastChannelParent*>* parents;
+  if (!mAgents.Get(aOriginChannelKey, &parents)) {
+    MOZ_CRASH("Invalid state");
+  }
 
   // We need to keep the array alive for the life-time of this operation.
-  nsTArray<RefPtr<BlobImpl>> blobs;
-  if (!aData.blobsParent().IsEmpty()) {
-    blobs.SetCapacity(aData.blobsParent().Length());
+  nsTArray<RefPtr<BlobImpl>> blobImpls;
+  if (!aData.blobs().IsEmpty()) {
+    blobImpls.SetCapacity(aData.blobs().Length());
 
-    for (uint32_t i = 0, len = aData.blobsParent().Length(); i < len; ++i) {
-      RefPtr<BlobImpl> impl =
-        static_cast<BlobParent*>(aData.blobsParent()[i])->GetBlobImpl();
-     MOZ_ASSERT(impl);
-     blobs.AppendElement(impl);
+    for (uint32_t i = 0, len = aData.blobs().Length(); i < len; ++i) {
+      RefPtr<BlobImpl> impl = IPCBlobUtils::Deserialize(aData.blobs()[i]);
+
+      MOZ_ASSERT(impl);
+      blobImpls.AppendElement(impl);
     }
   }
 
-  for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
-    BroadcastChannelParent* parent = iter.Get()->GetKey();
+  // For each parent actor, we notify the message.
+  for (uint32_t i = 0; i < parents->Length(); ++i) {
+    BroadcastChannelParent* parent = parents->ElementAt(i);
     MOZ_ASSERT(parent);
 
-    if (parent != aParent) {
-      parent->CheckAndDeliver(aData, PromiseFlatCString(aOrigin),
-                              PromiseFlatString(aChannel), aPrivateBrowsing);
+    if (parent == aParent) {
+      continue;
     }
+
+    // We need to have a copy of the data for this parent.
+    ClonedMessageData newData(aData);
+    MOZ_ASSERT(blobImpls.Length() == newData.blobs().Length());
+
+    if (!blobImpls.IsEmpty()) {
+      // Serialize Blob objects for this message.
+      for (uint32_t i = 0, len = blobImpls.Length(); i < len; ++i) {
+        nsresult rv = IPCBlobUtils::Serialize(blobImpls[i], parent->Manager(),
+                                              newData.blobs()[i]);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+      }
+    }
+
+    Unused << parent->SendNotify(newData);
   }
 }
 

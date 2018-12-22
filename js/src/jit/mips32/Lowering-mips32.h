@@ -19,7 +19,6 @@ class LIRGeneratorMIPS : public LIRGeneratorMIPSShared
       : LIRGeneratorMIPSShared(gen, graph, lirGraph)
     { }
 
-  protected:
     // Returns a box allocation with type set to reg1 and payload set to reg2.
     LBoxAllocation useBoxFixed(MDefinition* mir, Register reg1, Register reg2,
                                bool useAtStart = false);
@@ -31,14 +30,16 @@ class LIRGeneratorMIPS : public LIRGeneratorMIPSShared
     void lowerUntypedPhiInput(MPhi* phi, uint32_t inputPosition, LBlock* block, size_t lirIndex);
     void defineUntypedPhi(MPhi* phi, size_t lirIndex);
 
+    void lowerInt64PhiInput(MPhi* phi, uint32_t inputPosition, LBlock* block, size_t lirIndex);
+    void defineInt64Phi(MPhi* phi, size_t lirIndex);
+
     void lowerTruncateDToInt32(MTruncateToInt32* ins);
     void lowerTruncateFToInt32(MTruncateToInt32* ins);
 
-  public:
-    void visitBox(MBox* box);
-    void visitUnbox(MUnbox* unbox);
-    void visitReturn(MReturn* ret);
-    void visitRandom(MRandom* ins);
+    void lowerDivI64(MDiv* div);
+    void lowerModI64(MMod* mod);
+    void lowerUDivI64(MDiv* div);
+    void lowerUModI64(MMod* mod);
 };
 
 typedef LIRGeneratorMIPS LIRGeneratorSpecific;

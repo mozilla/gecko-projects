@@ -1292,169 +1292,6 @@
 !macroend
 
 /**
- * Writes common registry values for a handler that uses DDE using SHCTX.
- *
- * @param   _KEY
- *          The key name in relation to the HKCR root. SOFTWARE\Classes is
- *          prefixed to this value when using SHCTX.
- * @param   _VALOPEN
- *          The path and args to launch the application.
- * @param   _VALICON
- *          The path to the binary that contains the icon group for the default icon
- *          followed by a comma and either the icon group's resource index or the icon
- *          group's resource id prefixed with a minus sign
- * @param   _DISPNAME
- *          The display name for the handler. If emtpy no value will be set.
- * @param   _ISPROTOCOL
- *          Sets protocol handler specific registry values when "true".
- *          Deletes protocol handler specific registry values when "delete".
- *          Otherwise doesn't touch handler specific registry values.
- * @param   _DDE_APPNAME
- *          Sets DDE specific registry values when not an empty string.
- *
- * $R0 = storage for SOFTWARE\Classes
- * $R1 = string value of the current registry key path.
- * $R2 = _KEY
- * $R3 = _VALOPEN
- * $R4 = _VALICON
- * $R5 = _DISPNAME
- * $R6 = _ISPROTOCOL
- * $R7 = _DDE_APPNAME
- * $R8 = _DDE_DEFAULT
- * $R9 = _DDE_TOPIC
- */
-!macro AddDDEHandlerValues
-
-  !ifndef ${_MOZFUNC_UN}AddDDEHandlerValues
-    !verbose push
-    !verbose ${_MOZFUNC_VERBOSE}
-    !define ${_MOZFUNC_UN}AddDDEHandlerValues "!insertmacro ${_MOZFUNC_UN}AddDDEHandlerValuesCall"
-
-    Function ${_MOZFUNC_UN}AddDDEHandlerValues
-      Exch $R9
-      Exch 1
-      Exch $R8
-      Exch 2
-      Exch $R7
-      Exch 3
-      Exch $R6
-      Exch 4
-      Exch $R5
-      Exch 5
-      Exch $R4
-      Exch 6
-      Exch $R3
-      Exch 7
-      Exch $R2
-      Push $R1
-      Push $R0
-
-      StrCpy $R0 "SOFTWARE\Classes"
-      StrCmp "$R5" "" +6 +1
-      ReadRegStr $R1 SHCTX "$R2" "FriendlyTypeName"
-
-      StrCmp "$R1" "" +1 +3
-      WriteRegStr SHCTX "$R0\$R2" "" "$R5"
-      WriteRegStr SHCTX "$R0\$R2" "FriendlyTypeName" "$R5"
-
-      StrCmp "$R6" "true" +1 +2
-      WriteRegStr SHCTX "$R0\$R2" "URL Protocol" ""
-      StrCmp "$R6" "delete" +1 +2
-      DeleteRegValue SHCTX "$R0\$R2" "URL Protocol"
-      StrCpy $R1 ""
-      ReadRegDWord $R1 SHCTX "$R0\$R2" "EditFlags"
-      StrCmp $R1 "" +1 +3  ; Only add EditFlags if a value doesn't exist
-      DeleteRegValue SHCTX "$R0\$R2" "EditFlags"
-      WriteRegDWord SHCTX "$R0\$R2" "EditFlags" 0x00000002
-
-      StrCmp "$R4" "" +2 +1
-      WriteRegStr SHCTX "$R0\$R2\DefaultIcon" "" "$R4"
-
-      WriteRegStr SHCTX "$R0\$R2\shell" "" "open"
-      WriteRegStr SHCTX "$R0\$R2\shell\open\command" "" "$R3"
-
-      WriteRegStr SHCTX "$R0\$R2\shell\open\ddeexec" "" "$R8"
-      WriteRegStr SHCTX "$R0\$R2\shell\open\ddeexec" "NoActivateHandler" ""
-      WriteRegStr SHCTX "$R0\$R2\shell\open\ddeexec\Application" "" "$R7"
-      WriteRegStr SHCTX "$R0\$R2\shell\open\ddeexec\Topic" "" "$R9"
-
-      ; The ifexec key may have been added by another application so try to
-      ; delete it to prevent it from breaking this app's shell integration.
-      ; Also, IE 6 and below doesn't remove this key when it sets itself as the
-      ; default handler and if this key exists IE's shell integration breaks.
-      DeleteRegKey HKLM "$R0\$R2\shell\open\ddeexec\ifexec"
-      DeleteRegKey HKCU "$R0\$R2\shell\open\ddeexec\ifexec"
-      ClearErrors
-
-      Pop $R0
-      Pop $R1
-      Exch $R2
-      Exch 7
-      Exch $R3
-      Exch 6
-      Exch $R4
-      Exch 5
-      Exch $R5
-      Exch 4
-      Exch $R6
-      Exch 3
-      Exch $R7
-      Exch 2
-      Exch $R8
-      Exch 1
-      Exch $R9
-    FunctionEnd
-
-    !verbose pop
-  !endif
-!macroend
-
-!macro AddDDEHandlerValuesCall _KEY _VALOPEN _VALICON _DISPNAME _ISPROTOCOL _DDE_APPNAME _DDE_DEFAULT _DDE_TOPIC
-  !verbose push
-  !verbose ${_MOZFUNC_VERBOSE}
-  Push "${_KEY}"
-  Push "${_VALOPEN}"
-  Push "${_VALICON}"
-  Push "${_DISPNAME}"
-  Push "${_ISPROTOCOL}"
-  Push "${_DDE_APPNAME}"
-  Push "${_DDE_DEFAULT}"
-  Push "${_DDE_TOPIC}"
-  Call AddDDEHandlerValues
-  !verbose pop
-!macroend
-
-!macro un.AddDDEHandlerValuesCall _KEY _VALOPEN _VALICON _DISPNAME _ISPROTOCOL _DDE_APPNAME _DDE_DEFAULT _DDE_TOPIC
-  !verbose push
-  !verbose ${_MOZFUNC_VERBOSE}
-  Push "${_KEY}"
-  Push "${_VALOPEN}"
-  Push "${_VALICON}"
-  Push "${_DISPNAME}"
-  Push "${_ISPROTOCOL}"
-  Push "${_DDE_APPNAME}"
-  Push "${_DDE_DEFAULT}"
-  Push "${_DDE_TOPIC}"
-  Call un.AddDDEHandlerValues
-  !verbose pop
-!macroend
-
-!macro un.AddDDEHandlerValues
-  !ifndef un.AddDDEHandlerValues
-    !verbose push
-    !verbose ${_MOZFUNC_VERBOSE}
-    !undef _MOZFUNC_UN
-    !define _MOZFUNC_UN "un."
-
-    !insertmacro AddDDEHandlerValues
-
-    !undef _MOZFUNC_UN
-    !define _MOZFUNC_UN
-    !verbose pop
-  !endif
-!macroend
-
-/**
  * Writes common registry values for a handler that DOES NOT use DDE using SHCTX.
  *
  * @param   _KEY
@@ -1539,10 +1376,7 @@
       ; behaviors depending on the windows version. The following code attempts
       ; to address these differences.
       ;
-      ; On XP (no SP, SP1, SP2), Vista: An empty default string
-      ; must be set under ddeexec. Empty strings propagate to CR.
-      ;
-      ; Win7: IE does not configure ddeexec, so issues with left over ddeexec keys
+      ; IE does not configure ddeexec, so issues with left over ddeexec keys
       ; in LM are reduced. We configure an empty ddeexec key with an empty default
       ; string in CU to be sure.
       ;
@@ -1613,8 +1447,7 @@
 
 !macro RegisterDLL DLL
 
-  ; The x64 regsvr32.exe registers x86 DLL's properly on Windows Vista and above
-  ; (not on Windows XP http://support.microsoft.com/kb/282747) so just use it
+  ; The x64 regsvr32.exe registers x86 DLL's properly so just use it
   ; when installing on an x64 systems even when installing an x86 application.
   ${If} ${RunningX64}
     ${DisableX64FSRedirection}
@@ -1628,8 +1461,7 @@
 
 !macro UnregisterDLL DLL
 
-  ; The x64 regsvr32.exe registers x86 DLL's properly on Windows Vista and above
-  ; (not on Windows XP http://support.microsoft.com/kb/282747) so just use it
+  ; The x64 regsvr32.exe registers x86 DLL's properly so just use it
   ; when installing on an x64 systems even when installing an x86 application.
   ${If} ${RunningX64}
     ${DisableX64FSRedirection}
@@ -3424,7 +3256,11 @@
       ${${_MOZFUNC_UN}GetLongPath} "$INSTDIR" $R6
       StrLen $R4 "$R6"
 
+!ifdef HAVE_64BIT_BUILD
+      ${${_MOZFUNC_UN}GetLongPath} "$PROGRAMFILES64" $R5
+!else
       ${${_MOZFUNC_UN}GetLongPath} "$PROGRAMFILES" $R5
+!endif
       StrLen $R3 "$R5"
 
       ${If} $R7 != "" ; _OLD_REL_PATH was passed
@@ -3793,6 +3629,16 @@
             ${EndIf}
           ${EndIf}
         ${Loop}
+        ; There might also be a shortcut with a different name created by a
+        ; previous version of the installer.
+        ${If} ${FileExists} "$SMPROGRAMS\${BrandFullName}.lnk"
+          ShellLink::GetShortCutTarget "$SMPROGRAMS\${BrandFullName}.lnk"
+          Pop $R5
+          ${${_MOZFUNC_UN}GetLongPath} "$R5" $R5
+          ${If} "$INSTDIR\${FileMainEXE}" == "$R5"
+            Delete "$SMPROGRAMS\${BrandFullName}.lnk"
+          ${EndIf}
+        ${EndIf}
 
         ; Delete Quick Launch shortcuts for this application
         StrCpy $R4 -1
@@ -3813,6 +3659,16 @@
             ${EndIf}
           ${EndIf}
         ${Loop}
+        ; There might also be a shortcut with a different name created by a
+        ; previous version of the installer.
+        ${If} ${FileExists} "$QUICKLAUNCH\${BrandFullName}.lnk"
+          ShellLink::GetShortCutTarget "$QUICKLAUNCH\${BrandFullName}.lnk"
+          Pop $R5
+          ${${_MOZFUNC_UN}GetLongPath} "$R5" $R5
+          ${If} "$INSTDIR\${FileMainEXE}" == "$R5"
+            Delete "$QUICKLAUNCH\${BrandFullName}.lnk"
+          ${EndIf}
+        ${EndIf}
 
         ; Delete Desktop shortcuts for this application
         StrCpy $R4 -1
@@ -3833,6 +3689,16 @@
             ${EndIf}
           ${EndIf}
         ${Loop}
+        ; There might also be a shortcut with a different name created by a
+        ; previous version of the installer.
+        ${If} ${FileExists} "$DESKTOP\${BrandFullName}.lnk"
+          ShellLink::GetShortCutTarget "$DESKTOP\${BrandFullName}.lnk"
+          Pop $R5
+          ${${_MOZFUNC_UN}GetLongPath} "$R5" $R5
+          ${If} "$INSTDIR\${FileMainEXE}" == "$R5"
+            Delete "$DESKTOP\${BrandFullName}.lnk"
+          ${EndIf}
+        ${EndIf}
 
         ${${_MOZFUNC_UN}GetLongPath} "$SMPROGRAMS" $R6
 
@@ -5064,12 +4930,46 @@
 !macroend
 
 /**
+ * Reads a flag option from the command line and sets a variable with its state,
+ * if the option is present on the command line.
+ *
+ * @param   FULL_COMMAND_LINE
+ *          The entire installer command line, such as from ${GetParameters}
+ * @param   OPTION
+ *          Name of the option to look for
+ * @param   OUTPUT
+ *          Variable/register to write the output to. Will be set to "0" if the
+ *          option was present with the value "false", will be set to "1" if the
+ *          option was present with another value, and will be untouched if the
+ *          option was not on the command line at all.
+ */
+!macro InstallGetOption FULL_COMMAND_LINE OPTION OUTPUT
+  Push $0
+  ClearErrors
+  ${GetOptions} ${FULL_COMMAND_LINE} "/${OPTION}" $0
+  ${IfNot} ${Errors}
+    ; Any valid command-line option triggers a silent installation.
+    SetSilent silent
+
+    ${If} $0 == "=false"
+      StrCpy ${OUTPUT} "0"
+    ${Else}
+      StrCpy ${OUTPUT} "1"
+    ${EndIf}
+  ${EndIf}
+  Pop $0
+!macroend
+!define InstallGetOption "!insertmacro InstallGetOption"
+
+/**
  * Called from the installer's .onInit function not to be confused with the
  * uninstaller's .onInit or the uninstaller's un.onInit functions.
  *
  * @param   _WARN_UNSUPPORTED_MSG
  *          Message displayed when the Windows version is not supported.
  *
+ * $R4 = keeps track of whether a custom install path was specified on either
+ *       the command line or in an INI file
  * $R5 = return value from the GetSize macro
  * $R6 = general string values, return value from GetTempFileName, return
  *       value from the GetSize macro
@@ -5096,67 +4996,46 @@
       Push $R7
       Push $R6
       Push $R5
+      Push $R4
+
+      ; Don't install on systems that don't support SSE2. The parameter value of
+      ; 10 is for PF_XMMI64_INSTRUCTIONS_AVAILABLE which will check whether the
+      ; SSE2 instruction set is available.
+      System::Call "kernel32::IsProcessorFeaturePresent(i 10)i .R8"
+      ${If} "$R8" == "0"
+        MessageBox MB_OK|MB_ICONSTOP "$R9"
+        ; Nothing initialized so no need to call OnEndCommon
+        Quit
+      ${EndIf}
+
+      ; Windows NT 6.0 (Vista/Server 2008) and lower are not supported.
+      ${Unless} ${AtLeastWin7}
+        MessageBox MB_OK|MB_ICONSTOP "$R9"
+        ; Nothing initialized so no need to call OnEndCommon
+        Quit
+      ${EndUnless}
 
       !ifdef HAVE_64BIT_BUILD
-        ${Unless} ${RunningX64}
-        ${OrUnless} ${AtLeastWin7}
-          MessageBox MB_OK|MB_ICONSTOP "$R9" IDOK
-          ; Nothing initialized so no need to call OnEndCommon
-          Quit
-        ${EndUnless}
-
         SetRegView 64
-      !else
-        StrCpy $R8 "0"
-        ${If} ${AtMostWin2000}
-          StrCpy $R8 "1"
-        ${EndIf}
-
-        ${If} ${IsWinXP}
-        ${AndIf} ${AtMostServicePack} 1
-          StrCpy $R8 "1"
-        ${EndIf}
-
-        ${If} $R8 == "1"
-          ; XXX-rstrong - some systems failed the AtLeastWin2000 test that we
-          ; used to use for an unknown reason and likely fail the AtMostWin2000
-          ; and possibly the IsWinXP test as well. To work around this also
-          ; check if the Windows NT registry Key exists and if it does if the
-          ; first char in CurrentVersion is equal to 3 (Windows NT 3.5 and
-          ; 3.5.1), to 4 (Windows NT 4) or 5 (Windows 2000 and Windows XP).
-          StrCpy $R8 ""
-          ClearErrors
-          ReadRegStr $R8 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentVersion"
-          StrCpy $R8 "$R8" 1
-          ${If} ${Errors}
-          ${OrIf} "$R8" == "3"
-          ${OrIf} "$R8" == "4"
-          ${OrIf} "$R8" == "5"
-            MessageBox MB_OK|MB_ICONSTOP "$R9" IDOK
-            ; Nothing initialized so no need to call OnEndCommon
-            Quit
-          ${EndIf}
-        ${EndUnless}
       !endif
 
+      StrCpy $R4 0 ; will be set to 1 if a custom install path is set
+
       ${GetParameters} $R8
-
-      ; Require elevation if the user can elevate
-      ${ElevateUAC}
-
       ${If} $R8 != ""
         ; Default install type
         StrCpy $InstallType ${INSTALLTYPE_BASIC}
 
         ${Unless} ${Silent}
-          ; Manually check for /S in the command line due to Bug 506867
+          ; NSIS should check for /S for us, but we've had issues with it such
+          ; as bug 506867 in the past, so we'll check for it ourselves also.
           ClearErrors
           ${GetOptions} "$R8" "/S" $R7
           ${Unless} ${Errors}
             SetSilent silent
           ${Else}
-            ; Support for the deprecated -ms command line argument. The new command
-            ; line arguments are not supported when -ms is used.
+            ; NSIS dropped support for the deprecated -ms argument, but we don't
+            ; want to break backcompat, so we'll check for it here too.
             ClearErrors
             ${GetOptions} "$R8" "-ms" $R7
             ${Unless} ${Errors}
@@ -5171,9 +5050,12 @@
         ${Unless} ${Errors}
           ; The configuration file must also exist
           ${If} ${FileExists} "$R7"
+            ; Any valid command-line option triggers a silent installation.
             SetSilent silent
+
             ReadINIStr $R8 $R7 "Install" "InstallDirectoryName"
             ${If} $R8 != ""
+              StrCpy $R4 1
               !ifdef HAVE_64BIT_BUILD
                 StrCpy $INSTDIR "$PROGRAMFILES64\$R8"
               !else
@@ -5182,28 +5064,8 @@
             ${Else}
               ReadINIStr $R8 $R7 "Install" "InstallDirectoryPath"
               ${If} $R8 != ""
+                StrCpy $R4 1
                 StrCpy $INSTDIR "$R8"
-              ${EndIf}
-            ${EndIf}
-
-            ; Quit if we are unable to create the installation directory or we are
-            ; unable to write to a file in the installation directory.
-            ClearErrors
-            ${If} ${FileExists} "$INSTDIR"
-              GetTempFileName $R6 "$INSTDIR"
-              FileOpen $R5 "$R6" w
-              FileWrite $R5 "Write Access Test"
-              FileClose $R5
-              Delete $R6
-              ${If} ${Errors}
-                ; Nothing initialized so no need to call OnEndCommon
-                Quit
-              ${EndIf}
-            ${Else}
-              CreateDirectory "$INSTDIR"
-              ${If} ${Errors}
-                ; Nothing initialized so no need to call OnEndCommon
-                Quit
               ${EndIf}
             ${EndIf}
 
@@ -5228,6 +5090,15 @@
               StrCpy $AddStartMenuSC "1"
             ${EndIf}
 
+            ; We still accept the plural version for backwards compatibility,
+            ; but the singular version takes priority.
+            ReadINIStr $R8 $R7 "Install" "StartMenuShortcut"
+            ${If} $R8 == "false"
+              StrCpy $AddStartMenuSC "0"
+            ${Else}
+              StrCpy $AddStartMenuSC "1"
+            ${EndIf}
+
             ReadINIStr $R8 $R7 "Install" "TaskbarShortcut"
             ${If} $R8 == "false"
               StrCpy $AddTaskbarSC "0"
@@ -5238,7 +5109,18 @@
             ReadINIStr $R8 $R7 "Install" "MaintenanceService"
             ${If} $R8 == "false"
               StrCpy $InstallMaintenanceService "0"
+            ${Else}
+              StrCpy $InstallMaintenanceService "1"
             ${EndIf}
+
+            !ifdef MOZ_OPTIONAL_EXTENSIONS
+              ReadINIStr $R8 $R7 "Install" "OptionalExtensions"
+              ${If} $R8 == "false"
+                StrCpy $InstallOptionalExtensions "0"
+              ${Else}
+                StrCpy $InstallOptionalExtensions "1"
+              ${EndIf}
+            !endif
 
             !ifndef NO_STARTMENU_DIR
               ReadINIStr $R8 $R7 "Install" "StartMenuDirectoryName"
@@ -5248,9 +5130,91 @@
             !endif
           ${EndIf}
         ${EndUnless}
-      ${EndIf}
-      ClearErrors
 
+        ; Check for individual command line parameters after evaluating the INI
+        ; file, because these should override the INI entires.
+        ${GetParameters} $R8
+        ${GetOptions} $R8 "/InstallDirectoryName=" $R7
+        ${If} $R7 != ""
+          StrCpy $R4 1
+          !ifdef HAVE_64BIT_BUILD
+            StrCpy $INSTDIR "$PROGRAMFILES64\$R7"
+          !else
+            StrCpy $INSTDIR "$PROGRAMFILES32\$R7"
+          !endif
+        ${Else}
+          ${GetOptions} $R8 "/InstallDirectoryPath=" $R7
+          ${If} $R7 != ""
+            StrCpy $R4 1
+            StrCpy $INSTDIR "$R7"
+          ${EndIf}
+        ${EndIf}
+
+        ${InstallGetOption} $R8 "QuickLaunchShortcut" $AddQuickLaunchSC
+        ${InstallGetOption} $R8 "DesktopShortcut" $AddDesktopSC
+        ${InstallGetOption} $R8 "StartMenuShortcuts" $AddStartMenuSC
+        ; We still accept the plural version for backwards compatibility,
+        ; but the singular version takes priority.
+        ${InstallGetOption} $R8 "StartMenuShortcut" $AddStartMenuSC
+        ${InstallGetOption} $R8 "TaskbarShortcut" $AddTaskbarSC
+        ${InstallGetOption} $R8 "MaintenanceService" $InstallMaintenanceService
+        !ifdef MOZ_OPTIONAL_EXTENSIONS
+          ${InstallGetOption} $R8 "OptionalExtensions" $InstallOptionalExtensions
+        !endif
+
+        ; Installing the service always requires elevated privileges.
+        ${If} $InstallMaintenanceService == "1"
+          ${ElevateUAC}
+        ${EndIf}
+      ${EndIf}
+
+      ${If} $R4 == 1
+        ; Any valid command-line option triggers a silent installation.
+        SetSilent silent
+
+        ; Quit if we are unable to create the installation directory or we are
+        ; unable to write to a file in the installation directory.
+        ClearErrors
+        ${If} ${FileExists} "$INSTDIR"
+          GetTempFileName $R6 "$INSTDIR"
+          FileOpen $R5 "$R6" w
+          FileWrite $R5 "Write Access Test"
+          FileClose $R5
+          Delete $R6
+          ${If} ${Errors}
+            ; Attempt to elevate and then try again.
+            ${ElevateUAC}
+            GetTempFileName $R6 "$INSTDIR"
+            FileOpen $R5 "$R6" w
+            FileWrite $R5 "Write Access Test"
+            FileClose $R5
+            Delete $R6
+            ${If} ${Errors}
+              ; Nothing initialized so no need to call OnEndCommon
+              Quit
+            ${EndIf}
+          ${EndIf}
+        ${Else}
+          CreateDirectory "$INSTDIR"
+          ${If} ${Errors}
+            ; Attempt to elevate and then try again.
+            ${ElevateUAC}
+            CreateDirectory "$INSTDIR"
+            ${If} ${Errors}
+              ; Nothing initialized so no need to call OnEndCommon
+              Quit
+            ${EndIf}
+          ${EndIf}
+        ${EndIf}
+      ${Else}
+        ; If we weren't given a custom path parameter, then try to elevate now.
+        ; We'll check the user's permission level later on to determine the
+        ; default install path (which will be the real install path for /S).
+        ; If an INI file is used, we try to elevate down that path when needed.
+        ${ElevateUAC}
+      ${EndIf}
+
+      Pop $R4
       Pop $R5
       Pop $R6
       Pop $R7
@@ -5836,7 +5800,7 @@
 # UAC Related Macros
 
 /**
- * Provides UAC elevation support for Vista and above (requires the UAC plugin).
+ * Provides UAC elevation support (requires the UAC plugin).
  *
  * $0 = return values from calls to the UAC plugin (always uses $0)
  * $R9 = return values from GetParameters and GetOptions macros
@@ -5860,87 +5824,88 @@
       Push $0
 
 !ifndef NONADMIN_ELEVATE
-        ${If} ${AtLeastWinVista}
-          UAC::IsAdmin
-          ; If the user is not an admin already
-          ${If} "$0" != "1"
-            UAC::SupportsUAC
-            ; If the system supports UAC
-            ${If} "$0" == "1"
-              UAC::GetElevationType
-              ; If the user account has a split token
-              ${If} "$0" == "3"
-                UAC::RunElevated
-                UAC::Unload
-                ; Nothing besides UAC initialized so no need to call OnEndCommon
-                Quit
-              ${EndIf}
-            ${EndIf}
-          ${Else}
-            ${GetParameters} $R9
-            ${If} $R9 != ""
-              ClearErrors
-              ${GetOptions} "$R9" "/UAC:" $0
-              ; If the command line contains /UAC then we need to initialize
-              ; the UAC plugin to use UAC::ExecCodeSegment to execute code in
-              ; the non-elevated context.
-              ${Unless} ${Errors}
-                UAC::RunElevated
-              ${EndUnless}
-            ${EndIf}
+      UAC::IsAdmin
+      ; If the user is not an admin already
+      ${If} "$0" != "1"
+        UAC::SupportsUAC
+        ; If the system supports UAC
+        ${If} "$0" == "1"
+          UAC::GetElevationType
+          ; If the user account has a split token
+          ${If} "$0" == "3"
+            UAC::RunElevated
+            UAC::Unload
+            ; Nothing besides UAC initialized so no need to call OnEndCommon
+            Quit
           ${EndIf}
         ${EndIf}
-!else
-      ${If} ${AtLeastWinVista}
-        UAC::IsAdmin
-        ; If the user is not an admin already
-        ${If} "$0" != "1"
-          UAC::SupportsUAC
-          ; If the system supports UAC require that the user elevate
-          ${If} "$0" == "1"
-            UAC::GetElevationType
-            ; If the user account has a split token
-            ${If} "$0" == "3"
-              UAC::RunElevated
-              UAC::Unload
-              ; Nothing besides UAC initialized so no need to call OnEndCommon
-              Quit
-            ${EndIf}
-          ${Else}
-            ; Check if UAC is enabled. If the user has turned UAC on or off
-            ; without rebooting this value will be incorrect. This is an
-            ; edgecase that we have to live with when trying to allow
-            ; installing when the user doesn't have privileges such as a public
-            ; computer while trying to also achieve UAC elevation. When this
-            ; happens the user will be presented with the runas dialog if the
-            ; value is 1 and won't be presented with the UAC dialog when the
-            ; value is 0.
-            ReadRegDWord $R9 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" "EnableLUA"
-            ${If} "$R9" == "1"
-              ; This will display the UAC version of the runas dialog which
-              ; requires a password for an existing user account.
-              UAC::RunElevated
-              ${If} "$0" == "0" ; Was elevation successful
-                UAC::Unload
-                ; Nothing besides UAC initialized so no need to call OnEndCommon
-                Quit
-              ${EndIf}
-              ; Unload UAC since the elevation request was not successful and
-              ; install anyway.
-              UAC::Unload
-            ${EndIf}
-          ${EndIf}
-        ${Else}
+      ${Else}
+        ${GetParameters} $R9
+        ${If} $R9 != ""
           ClearErrors
-          ${${_MOZFUNC_UN}GetParameters} $R9
-          ${${_MOZFUNC_UN}GetOptions} "$R9" "/UAC:" $R9
-          ; If the command line contains /UAC then we need to initialize the UAC
-          ; plugin to use UAC::ExecCodeSegment to execute code in the
-          ; non-elevated context.
+          ${GetOptions} "$R9" "/UAC:" $0
+          ; If the command line contains /UAC then we need to initialize
+          ; the UAC plugin to use UAC::ExecCodeSegment to execute code in
+          ; the non-elevated context.
           ${Unless} ${Errors}
             UAC::RunElevated
           ${EndUnless}
         ${EndIf}
+      ${EndIf}
+!else
+      UAC::IsAdmin
+      ; If the user is not an admin already
+      ${If} "$0" != "1"
+        UAC::SupportsUAC
+        ; If the system supports UAC require that the user elevate
+        ${If} "$0" == "1"
+          UAC::GetElevationType
+          ; If the user account has a split token
+          ${If} "$0" == "3"
+            UAC::RunElevated
+            ${If} "$0" == "0" ; Was elevation successful
+              UAC::Unload
+              ; Nothing besides UAC initialized so no need to call OnEndCommon
+              Quit
+            ${EndIf}
+            ; Unload UAC since the elevation request was not successful and
+            ; install anyway.
+            UAC::Unload
+          ${EndIf}
+        ${Else}
+          ; Check if UAC is enabled. If the user has turned UAC on or off
+          ; without rebooting this value will be incorrect. This is an
+          ; edgecase that we have to live with when trying to allow
+          ; installing when the user doesn't have privileges such as a public
+          ; computer while trying to also achieve UAC elevation. When this
+          ; happens the user will be presented with the runas dialog if the
+          ; value is 1 and won't be presented with the UAC dialog when the
+          ; value is 0.
+          ReadRegDWord $R9 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" "EnableLUA"
+          ${If} "$R9" == "1"
+            ; This will display the UAC version of the runas dialog which
+            ; requires a password for an existing user account.
+            UAC::RunElevated
+            ${If} "$0" == "0" ; Was elevation successful
+              UAC::Unload
+              ; Nothing besides UAC initialized so no need to call OnEndCommon
+              Quit
+            ${EndIf}
+            ; Unload UAC since the elevation request was not successful and
+            ; install anyway.
+            UAC::Unload
+          ${EndIf}
+        ${EndIf}
+      ${Else}
+        ClearErrors
+        ${${_MOZFUNC_UN}GetParameters} $R9
+        ${${_MOZFUNC_UN}GetOptions} "$R9" "/UAC:" $R9
+        ; If the command line contains /UAC then we need to initialize the UAC
+        ; plugin to use UAC::ExecCodeSegment to execute code in the
+        ; non-elevated context.
+        ${Unless} ${Errors}
+          UAC::RunElevated
+        ${EndUnless}
       ${EndIf}
 !endif
 
@@ -6004,10 +5969,6 @@
     !define ${_MOZFUNC_UN}UnloadUAC "!insertmacro ${_MOZFUNC_UN}UnloadUACCall"
 
     Function ${_MOZFUNC_UN}UnloadUAC
-      ${Unless} ${AtLeastWinVista}
-        Return
-      ${EndUnless}
-
       Push $R9
 
       ClearErrors
@@ -6137,20 +6098,16 @@
       ${LogMsg} "App Version: $R8"
       ${LogMsg} "GRE Version: $R9"
 
-      ${If} ${IsWinXP}
-        ${LogMsg} "OS Name    : Windows XP"
-      ${ElseIf} ${IsWin2003}
-        ${LogMsg} "OS Name    : Windows 2003"
-      ${ElseIf} ${IsWinVista}
-        ${LogMsg} "OS Name    : Windows Vista"
-      ${ElseIf} ${IsWin7}
+      ${If} ${IsWin7}
         ${LogMsg} "OS Name    : Windows 7"
       ${ElseIf} ${IsWin8}
         ${LogMsg} "OS Name    : Windows 8"
       ${ElseIf} ${IsWin8.1}
         ${LogMsg} "OS Name    : Windows 8.1"
-      ${ElseIf} ${AtLeastWin8.1}
-        ${LogMsg} "OS Name    : Above Windows 8.1"
+      ${ElseIf} ${IsWin10}
+        ${LogMsg} "OS Name    : Windows 10"
+      ${ElseIf} ${AtLeastWin10}
+        ${LogMsg} "OS Name    : Above Windows 10"
       ${Else}
         ${LogMsg} "OS Name    : Unable to detect"
       ${EndIf}
@@ -6623,8 +6580,8 @@
 # Macros for managing specific Windows version features
 
 /**
- * Sets the permitted layered service provider (LSP) categories on Windows
- * Vista and above for the application. Consumers should call this after an
+ * Sets the permitted layered service provider (LSP) categories
+ * for the application. Consumers should call this after an
  * installation log section has completed since this macro will log the results
  * to the installation log along with a header.
  *
@@ -6657,10 +6614,6 @@
     !define ${_MOZFUNC_UN}SetAppLSPCategories "!insertmacro ${_MOZFUNC_UN}SetAppLSPCategoriesCall"
 
     Function ${_MOZFUNC_UN}SetAppLSPCategories
-      ${Unless} ${AtLeastWinVista}
-        Return
-      ${EndUnless}
-
       Exch $R9
       Push $R8
       Push $R7
@@ -7575,18 +7528,39 @@
 !endif
 
 /**
- * Modified version of the __NSD_SetStretchedImage macro from nsDialogs.nsh that
- * supports transparency. See nsDialogs documentation for additional info.
+ * Draws an image file (BMP, GIF, or JPG) onto a bitmap control, with scaling.
+ * Adapted from https://stackoverflow.com/a/13405711/1508094
+ *
+ * @param CONTROL bitmap control created by NSD_CreateBitmap
+ * @param IMAGE path to image file to draw to the bitmap
+ * @param HANDLE output bitmap handle which must be freed via NSD_FreeImage
+ *               after nsDialogs::Show has been called
  */
-!macro __SetStretchedTransparentImage CONTROL IMAGE HANDLE
-  Push $0
-  Push $1
-  Push $2
-  Push $R0
+!macro __SetStretchedImageOLE CONTROL IMAGE HANDLE
+  !ifndef IID_IPicture
+    !define IID_IPicture {7BF80980-BF32-101A-8BBB-00AA00300CAB}
+  !endif
+  !ifndef SRCCOPY
+    !define SRCCOPY 0xCC0020
+  !endif
+  !ifndef HALFTONE
+    !define HALFTONE 4
+  !endif
+
+  Push $0 ; HANDLE
+  Push $1 ; memory DC
+  Push $2 ; IPicture created from IMAGE
+  Push $3 ; HBITMAP obtained from $2
+  Push $4 ; BITMAPINFO obtained from $3
+  Push $5 ; width of IMAGE
+  Push $6 ; height of IMAGE
+  Push $7 ; width of CONTROL
+  Push $8 ; height of CONTROL
+  Push $R0 ; CONTROL
 
   StrCpy $R0 ${CONTROL} ; in case ${CONTROL} is $0
-  StrCpy $1 ""
-  StrCpy $2 ""
+  StrCpy $7 ""
+  StrCpy $8 ""
 
   System::Call '*(i, i, i, i) i.s'
   Pop $0
@@ -7595,25 +7569,140 @@
     System::Call 'user32::GetClientRect(i R0, i r0)'
     System::Call '*$0(i, i, i .s, i .s)'
     System::Free $0
-    Pop $1
-    Pop $2
+    Pop $7
+    Pop $8
   ${EndIf}
 
-  System::Call 'user32::LoadImageW(i 0, t s, i ${IMAGE_BITMAP}, i r1, i r2, \
-                                   i ${MOZ_LOADTRANSPARENT}) i .s' "${IMAGE}"
-  Pop $0
-  SendMessage $R0 ${STM_SETIMAGE} ${IMAGE_BITMAP} $0
-
-  SetCtlColors $R0 "" transparent
-  ${NSD_AddExStyle} $R0 ${WS_EX_TRANSPARENT}|${WS_EX_TOPMOST}
+  ${If} $7 > 0
+  ${AndIf} $8 > 0
+    System::Call 'oleaut32::OleLoadPicturePath(w"${IMAGE}",i0,i0,i0,g"${IID_IPicture}",*i.r2)i.r1'
+    ${If} $1 = 0
+      System::Call 'user32::GetDC(i0)i.s'
+      System::Call 'gdi32::CreateCompatibleDC(iss)i.r1'
+      System::Call 'gdi32::CreateCompatibleBitmap(iss,ir7,ir8)i.r0'
+      System::Call 'user32::ReleaseDC(i0,is)'
+      System::Call '$2->3(*i.r3)i.r4' ; IPicture->get_Handle
+      ${If} $4 = 0
+        System::Call 'gdi32::SetStretchBltMode(ir1,i${HALFTONE})'
+        System::Call '*(&i40,&i1024)i.r4' ; BITMAP / BITMAPINFO
+        System::Call 'gdi32::GetObject(ir3,i24,ir4)'
+        System::Call 'gdi32::SelectObject(ir1,ir0)i.s'
+        System::Call '*$4(i40,i.r5,i.r6,i0,i,i.s)' ; Grab size and bits-ptr AND init as BITMAPINFOHEADER
+        System::Call 'gdi32::GetDIBits(ir1,ir3,i0,i0,i0,ir4,i0)' ; init BITMAPINFOHEADER
+        System::Call 'gdi32::GetDIBits(ir1,ir3,i0,i0,i0,ir4,i0)' ; init BITMAPINFO
+        System::Call 'gdi32::StretchDIBits(ir1,i0,i0,ir7,ir8,i0,i0,ir5,ir6,is,ir4,i0,i${SRCCOPY})'
+        System::Call 'gdi32::SelectObject(ir1,is)'
+        System::Free $4
+        SendMessage $R0 ${STM_SETIMAGE} ${IMAGE_BITMAP} $0
+      ${EndIf}
+      System::Call 'gdi32::DeleteDC(ir1)'
+      System::Call '$2->2()' ; IPicture->release()
+    ${EndIf}
+  ${EndIf}
 
   Pop $R0
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
   Pop $2
   Pop $1
   Exch $0
   Pop ${HANDLE}
 !macroend
-!define SetStretchedTransparentImage "!insertmacro __SetStretchedTransparentImage"
+!define SetStretchedImageOLE "!insertmacro __SetStretchedImageOLE"
+
+/**
+ * Display a task dialog box with custom strings and button labels.
+ *
+ * The task dialog is highly customizable. The specific style being used here
+ * is similar to a MessageBox except that the button text is customizable.
+ * MessageBox-style buttons are used instead of command link buttons; this can
+ * be made configurable if command buttons are needed.
+ *
+ * See https://msdn.microsoft.com/en-us/library/windows/desktop/bb760544.aspx
+ * for the TaskDialogIndirect function's documentation, and links to definitions
+ * of the TASKDIALOGCONFIG and TASKDIALOG_BUTTON structures it uses.
+ *
+ * @param INSTRUCTION  Dialog header string; use empty string if unneeded
+ * @param CONTENT      Secondary message string; use empty string if unneeded
+ * @param BUTTON1      Text for the first button, the one selected by default
+ * @param BUTTON2      Text for the second button
+ *
+ * @return One of the following values will be left on the stack:
+ *         1001 if the first button was clicked
+ *         1002 if the second button was clicked
+ *         2 (IDCANCEL) if the dialog was closed
+ *         0 on error
+ */
+!macro _ShowTaskDialog INSTRUCTION CONTENT BUTTON1 BUTTON2
+  !ifndef SIZEOF_TASKDIALOGCONFIG_32BIT
+    !define SIZEOF_TASKDIALOGCONFIG_32BIT 96
+  !endif
+  !ifndef TDF_ALLOW_DIALOG_CANCELLATION
+    !define TDF_ALLOW_DIALOG_CANCELLATION 0x0008
+  !endif
+  !ifndef TDF_RTL_LAYOUT
+    !define TDF_RTL_LAYOUT 0x02000
+  !endif
+  !ifndef TD_WARNING_ICON
+    !define TD_WARNING_ICON 0x0FFFF
+  !endif
+
+  Push $0 ; return value
+  Push $1 ; TASKDIALOGCONFIG struct
+  Push $2 ; TASKDIALOG_BUTTON array
+  Push $3 ; dwFlags member of the TASKDIALOGCONFIG
+
+  StrCpy $3 ${TDF_ALLOW_DIALOG_CANCELLATION}
+  !ifdef ${AB_CD}_rtl
+    IntOp $3 $3 | ${TDF_RTL_LAYOUT}
+  !endif
+
+  ; Build an array of two TASKDIALOG_BUTTON structs
+  System::Call "*(i 1001, \
+                  w '${BUTTON1}', \
+                  i 1002, \
+                  w '${BUTTON2}' \
+                  ) p.r2"
+  ; Build a TASKDIALOGCONFIG struct
+  System::Call "*(i ${SIZEOF_TASKDIALOGCONFIG_32BIT}, \
+                  p $HWNDPARENT, \
+                  p 0, \
+                  i $3, \
+                  i 0, \
+                  w '$(INSTALLER_WIN_CAPTION)', \
+                  p ${TD_WARNING_ICON}, \
+                  w '${INSTRUCTION}', \
+                  w '${CONTENT}', \
+                  i 2, \
+                  p r2, \
+                  i 1001, \
+                  i 0, \
+                  p 0, \
+                  i 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  p 0, \
+                  i 0 \
+                  ) p.r1"
+  System::Call "comctl32::TaskDialogIndirect(p r1, *i 0 r0, p 0, p 0)"
+  System::Free $1
+  System::Free $2
+
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+!macroend
+!define ShowTaskDialog "!insertmacro _ShowTaskDialog"
 
 /**
  * Removes a single style from a control.
@@ -7779,6 +7868,46 @@
   Pop $2
   Pop $1
   Exch $0 ; pixels from the beginning of the dialog to the end of the control
+!macroend
+
+/**
+ * Gets the number of dialog units from the top of a dialog to the bottom of a
+ * control
+ *
+ * _DIALOG the handle of the dialog
+ * _CONTROL the handle of the control
+ * _RES_DU return value - dialog units from the top of the dialog to the bottom
+ *         of the control
+ */
+!macro GetDlgItemBottomDUCall _DIALOG _CONTROL _RES_DU
+  Push "${_DIALOG}"
+  Push "${_CONTROL}"
+  ${CallArtificialFunction} GetDlgItemBottomDU_
+  Pop ${_RES_DU}
+!macroend
+
+!define GetDlgItemBottomDU "!insertmacro GetDlgItemBottomDUCall"
+!define un.GetDlgItemBottomDU "!insertmacro GetDlgItemBottomDUCall"
+
+!macro GetDlgItemBottomDU_
+  Exch $0 ; handle of the control
+  Exch $1 ; handle of the dialog
+  Push $2
+  Push $3
+
+  ; #32770 is the dialog class
+  FindWindow $2 "#32770" "" $HWNDPARENT
+  System::Call '*(i, i, i, i) i .r3'
+  System::Call 'user32::GetWindowRect(i r0, i r3)'
+  System::Call 'user32::MapWindowPoints(i 0, i r2, i r3, i 2)'
+  System::Call 'user32::MapDialogRect(i r1, i r3)'
+  System::Call '*$3(i, i, i, i .r0)'
+  System::Free $3
+
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0 ; pixels from the top of the dialog to the bottom of the control
 !macroend
 
 /**
@@ -7986,3 +8115,48 @@
   Exch $0 ; return elapsed seconds
 !macroend
 
+/**
+ * Create a process to execute a command line. If it is successfully created,
+ * wait on it with WaitForInputIdle, to avoid exiting the current process too
+ * early (exiting early can cause the created process's windows to be opened in
+ * the background).
+ *
+ * CMDLINE Is the command line to execute, like the argument to Exec
+ */
+!define ExecAndWaitForInputIdle "!insertmacro ExecAndWaitForInputIdle_"
+!define CREATE_DEFAULT_ERROR_MODE 0x04000000
+!macro ExecAndWaitForInputIdle_ CMDLINE
+  ; derived from https://stackoverflow.com/a/13960786/3444805 by Anders Kjersem
+  Push $0
+  Push $1
+  Push $2
+
+  ; Command line
+  StrCpy $0 ${CMDLINE}
+
+  ; STARTUPINFO
+  System::Alloc 68
+  Pop $1
+  ; fill in STARTUPINFO.cb (first field) with sizeof(STARTUPINFO)
+  System::Call "*$1(i 68)"
+
+  ; PROCESS_INFORMATION
+  System::Call "*(i, i, i, i) i . r2"
+
+  ; CREATE_DEFAULT_ERROR_MODE follows NSIS myCreateProcess used in Exec
+  System::Call "kernel32::CreateProcessW(i 0, t r0, i 0, i 0, i 0, i ${CREATE_DEFAULT_ERROR_MODE}, i 0, i 0, i r1, i r2) i . r0"
+
+  System::Free $1
+  ${If} $0 <> 0
+    System::Call "*$2(i . r0, i . r1)"
+    ; $0: hProcess, $1: hThread
+    System::Call "user32::WaitForInputIdle(i $0, i 10000)"
+    System::Call "kernel32::CloseHandle(i $0)"
+    System::Call "kernel32::CloseHandle(i $1)"
+  ${EndIf}
+  System::Free $2
+
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend

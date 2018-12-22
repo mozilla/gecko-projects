@@ -1,0 +1,87 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include LayersSurfaces;
+include LayersMessages;
+include "mozilla/GfxMessageUtils.h";
+include "mozilla/layers/WebRenderMessageUtils.h";
+
+include WebRenderMessages;
+include protocol PCompositorBridge;
+include protocol PTexture;
+
+using mozilla::layers::APZTestData from "mozilla/layers/APZTestData.h";
+using mozilla::layers::ScrollUpdatesMap from "FrameMetrics.h";
+using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
+using mozilla::layers::CompositableHandle from "mozilla/layers/LayersTypes.h";
+using mozilla::wr::BuiltDisplayListDescriptor from "mozilla/webrender/webrender_ffi.h";
+using mozilla::wr::IdNamespace from "mozilla/webrender/WebRenderTypes.h";
+using mozilla::layers::WebRenderScrollData from "mozilla/layers/WebRenderScrollData.h";
+using mozilla::layers::FocusTarget from "mozilla/layers/FocusTarget.h";
+using mozilla::layers::TransactionId from "mozilla/layers/LayersTypes.h";
+
+namespace mozilla {
+namespace layers {
+
+sync protocol PWebRenderBridge
+{
+  manager PCompositorBridge;
+
+parent:
+  async NewCompositable(CompositableHandle handle, TextureInfo info);
+  async ReleaseCompositable(CompositableHandle compositable);
+
+  sync Create(IntSize aSize);
+  async DeleteCompositorAnimations(uint64_t[] aIds);
+  async SetDisplayList(IntSize aSize, WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, TransactionId transactionId,
+                       LayoutSize aContentSize, ByteBuf aDL, BuiltDisplayListDescriptor aDLDesc,
+                       WebRenderScrollData aScrollData,
+                       OpUpdateResource[] aResourceUpdates, RefCountedShmem[] aSmallShmems, Shmem[] aLargeShmems,
+                       IdNamespace aIdNamespace, TimeStamp txnStartTime, TimeStamp fwdTime);
+  async EmptyTransaction(FocusTarget focusTarget, ScrollUpdatesMap scrollUpdates, uint32_t aPaintSequenceNumber,
+                         WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, TransactionId transactionId,
+                         IdNamespace aIdNamespace, TimeStamp txnStartTime, TimeStamp fwdTime);
+  async SetFocusTarget(FocusTarget focusTarget);
+  async UpdateResources(OpUpdateResource[] aResourceUpdates, RefCountedShmem[] aSmallShmems, Shmem[] aLargeShmems);
+  async ParentCommands(WebRenderParentCommand[] commands);
+  sync GetSnapshot(PTexture texture);
+  async SetLayerObserverEpoch(uint64_t layerObserverEpoch);
+  async ClearCachedResources();
+  // Schedule a composite if one isn't already scheduled.
+  async ScheduleComposite();
+  // Save the frame capture to disk
+  async Capture();
+
+  // Replacement for PCompositorBridge::SyncWithCompositor, but for WR. We need
+  // it on PWebRenderBridge because it associated with a particular top-level
+  // window, and PCompositorBridge doesn't allow doing that in a secure manner.
+  sync SyncWithCompositor();
+
+  // These correspond exactly to the equivalent APIs in PLayerTransaction -
+  // see those for documentation.
+  async SetConfirmedTargetAPZC(uint64_t aInputBlockId, ScrollableLayerGuid[] aTargets);
+  // More copied from PLayerTransaction, but these are only used for testing.
+  sync SetTestSampleTime(TimeStamp sampleTime);
+  sync LeaveTestMode();
+  sync GetAnimationOpacity(uint64_t aCompositorAnimationsId) returns (float opacity,
+                                                  bool hasAnimationOpacity);
+  sync GetAnimationTransform(uint64_t aCompositorAnimationId) returns (MaybeTransform transform);
+  sync SetAsyncScrollOffset(ViewID scrollId, float x, float y);
+  sync SetAsyncZoom(ViewID scrollId, float zoom);
+  async FlushApzRepaints();
+  sync GetAPZTestData() returns (APZTestData data);
+
+  async Shutdown();
+  sync ShutdownSync();
+child:
+  async WrUpdated(IdNamespace aNewIdNamespace);
+  async __delete__();
+};
+
+} // layers
+} // mozilla

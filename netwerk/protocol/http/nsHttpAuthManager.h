@@ -20,10 +20,10 @@ public:
   NS_DECL_NSIHTTPAUTHMANAGER
 
   nsHttpAuthManager();
-  nsresult Init();
+  MOZ_MUST_USE nsresult Init();
 
 protected:
-  virtual ~nsHttpAuthManager();
+  virtual ~nsHttpAuthManager() = default;
 
   nsHttpAuthCache *mAuthCache;
   nsHttpAuthCache *mPrivateAuthCache;

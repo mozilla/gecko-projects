@@ -20,9 +20,9 @@ NS_NewXMLProcessingInstruction(nsNodeInfoManager *aNodeInfoManager,
   using mozilla::dom::ProcessingInstruction;
   using mozilla::dom::XMLStylesheetProcessingInstruction;
 
-  NS_PRECONDITION(aNodeInfoManager, "Missing nodeinfo manager");
+  MOZ_ASSERT(aNodeInfoManager, "Missing nodeinfo manager");
 
-  nsCOMPtr<nsIAtom> target = NS_Atomize(aTarget);
+  RefPtr<nsAtom> target = NS_Atomize(aTarget);
   MOZ_ASSERT(target);
 
   if (target == nsGkAtoms::xml_stylesheet) {
@@ -34,7 +34,7 @@ NS_NewXMLProcessingInstruction(nsNodeInfoManager *aNodeInfoManager,
   RefPtr<mozilla::dom::NodeInfo> ni;
   ni = aNodeInfoManager->GetNodeInfo(nsGkAtoms::processingInstructionTagName,
                                      nullptr, kNameSpaceID_None,
-                                     nsIDOMNode::PROCESSING_INSTRUCTION_NODE,
+                                     nsINode::PROCESSING_INSTRUCTION_NODE,
                                      target);
 
   RefPtr<ProcessingInstruction> instance =
@@ -48,9 +48,9 @@ namespace dom {
 
 ProcessingInstruction::ProcessingInstruction(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                                              const nsAString& aData)
-  : nsGenericDOMDataNode(Move(aNodeInfo))
+  : CharacterData(std::move(aNodeInfo))
 {
-  MOZ_ASSERT(mNodeInfo->NodeType() == nsIDOMNode::PROCESSING_INSTRUCTION_NODE,
+  MOZ_ASSERT(mNodeInfo->NodeType() == nsINode::PROCESSING_INSTRUCTION_NODE,
              "Bad NodeType in aNodeInfo");
 
   SetTextInternal(0, mText.GetLength(),
@@ -62,26 +62,18 @@ ProcessingInstruction::~ProcessingInstruction()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, nsGenericDOMDataNode,
-                            nsIDOMNode, nsIDOMCharacterData,
-                            nsIDOMProcessingInstruction)
+// If you add nsIStyleSheetLinkingElement here, make sure we actually
+// implement the nsStyleLinkElement methods.
+NS_IMPL_ISUPPORTS_INHERITED0(ProcessingInstruction, CharacterData)
 
 JSObject*
 ProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ProcessingInstructionBinding::Wrap(aCx, this, aGivenProto);
-}
-
-NS_IMETHODIMP
-ProcessingInstruction::GetTarget(nsAString& aTarget)
-{
-  aTarget = NodeName();
-
-  return NS_OK;
+  return ProcessingInstruction_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool
-ProcessingInstruction::GetAttrValue(nsIAtom *aName, nsAString& aValue)
+ProcessingInstruction::GetAttrValue(nsAtom *aName, nsAString& aValue)
 {
   nsAutoString data;
 
@@ -89,20 +81,24 @@ ProcessingInstruction::GetAttrValue(nsIAtom *aName, nsAString& aValue)
   return nsContentUtils::GetPseudoAttributeValue(data, aName, aValue);
 }
 
-bool
-ProcessingInstruction::IsNodeOfType(uint32_t aFlags) const
-{
-  return !(aFlags & ~(eCONTENT | ePROCESSING_INSTRUCTION | eDATA_NODE));
-}
-
-nsGenericDOMDataNode*
+already_AddRefed<CharacterData>
 ProcessingInstruction::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
                                      bool aCloneText) const
 {
   nsAutoString data;
-  nsGenericDOMDataNode::GetData(data);
+  GetData(data);
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
-  return new ProcessingInstruction(ni.forget(), data);
+  return do_AddRef(new ProcessingInstruction(ni.forget(), data));
+}
+
+Maybe<nsStyleLinkElement::SheetInfo>
+ProcessingInstruction::GetStyleSheetInfo()
+{
+  MOZ_ASSERT_UNREACHABLE("XMLStylesheetProcessingInstruction should override "
+                         "this and we don't try to do stylesheet stuff.  In "
+                         "particular, we do not implement "
+                         "nsIStyleSheetLinkingElement");
+  return Nothing();
 }
 
 #ifdef DEBUG

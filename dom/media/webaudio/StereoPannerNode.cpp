@@ -9,6 +9,7 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
+#include "AlignmentUtils.h"
 #include "WebAudioUtils.h"
 #include "PanningUtils.h"
 #include "AudioParamTimeline.h"
@@ -21,7 +22,7 @@ using namespace std;
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(StereoPannerNode, AudioNode, mPan)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(StereoPannerNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(StereoPannerNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
 NS_IMPL_ADDREF_INHERITED(StereoPannerNode, AudioNode)
@@ -137,24 +138,26 @@ public:
                            panning <= 0);
       }
     } else {
-      float computedGain[2][WEBAUDIO_BLOCK_SIZE];
+      float computedGain[2*WEBAUDIO_BLOCK_SIZE + 4];
       bool onLeft[WEBAUDIO_BLOCK_SIZE];
 
       float values[WEBAUDIO_BLOCK_SIZE];
       StreamTime tick = mDestination->GraphTimeToStreamTime(aFrom);
       mPan.GetValuesAtTime(tick, values, WEBAUDIO_BLOCK_SIZE);
 
+      float* alignedComputedGain = ALIGNED16(computedGain);
+      ASSERT_ALIGNED16(alignedComputedGain);
       for (size_t counter = 0; counter < WEBAUDIO_BLOCK_SIZE; ++counter) {
         float left, right;
         GetGainValuesForPanning(values[counter], monoToStereo, left, right);
 
-        computedGain[0][counter] = left * aInput.mVolume;
-        computedGain[1][counter] = right * aInput.mVolume;
+        alignedComputedGain[counter] = left * aInput.mVolume;
+        alignedComputedGain[WEBAUDIO_BLOCK_SIZE + counter] = right * aInput.mVolume;
         onLeft[counter] = values[counter] <= 0;
       }
 
       // Apply the gain to the output buffer
-      ApplyStereoPanning(aInput, aOutput, computedGain[0], computedGain[1], onLeft);
+      ApplyStereoPanning(aInput, aOutput, alignedComputedGain, &alignedComputedGain[WEBAUDIO_BLOCK_SIZE], onLeft);
     }
   }
 
@@ -163,7 +166,7 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  AudioNodeStream* mDestination;
+  RefPtr<AudioNodeStream> mDestination;
   AudioParamTimeline mPan;
 };
 
@@ -172,15 +175,32 @@ StereoPannerNode::StereoPannerNode(AudioContext* aContext)
               2,
               ChannelCountMode::Clamped_max,
               ChannelInterpretation::Speakers)
-  , mPan(new AudioParam(this, StereoPannerNodeEngine::PAN, 0.f, "pan"))
+  , mPan(new AudioParam(this, StereoPannerNodeEngine::PAN, "pan", 0.f, -1.f, 1.f))
 {
   StereoPannerNodeEngine* engine = new StereoPannerNodeEngine(this, aContext->Destination());
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-StereoPannerNode::~StereoPannerNode()
+/* static */ already_AddRefed<StereoPannerNode>
+StereoPannerNode::Create(AudioContext& aAudioContext,
+                         const StereoPannerOptions& aOptions,
+                         ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<StereoPannerNode> audioNode = new StereoPannerNode(&aAudioContext);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  audioNode->Pan()->SetValue(aOptions.mPan);
+  return audioNode.forget();
 }
 
 size_t
@@ -200,7 +220,7 @@ StereoPannerNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 StereoPannerNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return StereoPannerNodeBinding::Wrap(aCx, this, aGivenProto);
+  return StereoPannerNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

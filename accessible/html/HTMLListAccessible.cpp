@@ -21,17 +21,15 @@ using namespace mozilla::a11y;
 // HTMLListAccessible
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_ISUPPORTS_INHERITED0(HTMLListAccessible, HyperTextAccessible)
-
 role
-HTMLListAccessible::NativeRole()
+HTMLListAccessible::NativeRole() const
 {
   a11y::role r = GetAccService()->MarkupRole(mContent);
   return r != roles::NOTHING ? r : roles::LIST;
 }
 
 uint64_t
-HTMLListAccessible::NativeState()
+HTMLListAccessible::NativeState() const
 {
   return HyperTextAccessibleWrap::NativeState() | states::READONLY;
 }
@@ -55,8 +53,6 @@ HTMLLIAccessible::
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(HTMLLIAccessible, HyperTextAccessible)
-
 void
 HTMLLIAccessible::Shutdown()
 {
@@ -66,30 +62,41 @@ HTMLLIAccessible::Shutdown()
 }
 
 role
-HTMLLIAccessible::NativeRole()
+HTMLLIAccessible::NativeRole() const
 {
   a11y::role r = GetAccService()->MarkupRole(mContent);
   return r != roles::NOTHING ? r : roles::LISTITEM;
 }
 
 uint64_t
-HTMLLIAccessible::NativeState()
+HTMLLIAccessible::NativeState() const
 {
   return HyperTextAccessibleWrap::NativeState() | states::READONLY;
 }
 
-nsIntRect
-HTMLLIAccessible::Bounds() const
+nsRect
+HTMLLIAccessible::BoundsInAppUnits() const
 {
-  nsIntRect rect = AccessibleWrap::Bounds();
-  if (rect.IsEmpty() || !mBullet || mBullet->IsInside())
+  nsRect rect = AccessibleWrap::BoundsInAppUnits();
+  if (rect.IsEmpty() || !mBullet || mBullet->IsInside()) {
     return rect;
+  }
 
-  nsIntRect bulletRect = mBullet->Bounds();
-
-  rect.width += rect.x - bulletRect.x;
-  rect.x = bulletRect.x; // Move x coordinate of list item over to cover bullet as well
+  nsRect bulletRect = mBullet->BoundsInAppUnits();
+  // Move x coordinate of list item over to cover bullet as well
+  rect.SetLeftEdge(bulletRect.X());
   return rect;
+}
+
+bool
+HTMLLIAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
+{
+  // Adjust index if there's a bullet.
+  if (mBullet && aIndex == 0 && aChild != mBullet) {
+    return HyperTextAccessible::InsertChildAt(aIndex + 1, aChild);
+  }
+
+  return HyperTextAccessible::InsertChildAt(aIndex, aChild);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -99,35 +106,23 @@ void
 HTMLLIAccessible::UpdateBullet(bool aHasBullet)
 {
   if (aHasBullet == !!mBullet) {
-    NS_NOTREACHED("Bullet and accessible are in sync already!");
+    MOZ_ASSERT_UNREACHABLE("Bullet and accessible are in sync already!");
     return;
   }
 
-  RefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(this);
-  AutoTreeMutation mt(this);
-
-  DocAccessible* document = Document();
+  TreeMutation mt(this);
   if (aHasBullet) {
     mBullet = new HTMLListBulletAccessible(mContent, mDoc);
-    document->BindToDocument(mBullet, nullptr);
+    mDoc->BindToDocument(mBullet, nullptr);
     InsertChildAt(0, mBullet);
     mt.AfterInsertion(mBullet);
-
-    RefPtr<AccShowEvent> event = new AccShowEvent(mBullet);
-    mDoc->FireDelayedEvent(event);
-    reorderEvent->AddSubMutationEvent(event);
-  } else {
-    RefPtr<AccHideEvent> event = new AccHideEvent(mBullet, mBullet->GetContent());
-    mDoc->FireDelayedEvent(event);
-    reorderEvent->AddSubMutationEvent(event);
-
+  }
+  else {
     mt.BeforeRemoval(mBullet);
     RemoveChild(mBullet);
     mBullet = nullptr;
   }
   mt.Done();
-
-  mDoc->FireDelayedEvent(reorderEvent);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -137,6 +132,7 @@ HTMLListBulletAccessible::
   HTMLListBulletAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   LeafAccessible(aContent, aDoc)
 {
+  mGenericTypes |= eText;
   mStateFlags |= eSharedNode;
 }
 
@@ -151,7 +147,7 @@ HTMLListBulletAccessible::GetFrame() const
 }
 
 ENameValueFlag
-HTMLListBulletAccessible::Name(nsString &aName)
+HTMLListBulletAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -165,13 +161,13 @@ HTMLListBulletAccessible::Name(nsString &aName)
 }
 
 role
-HTMLListBulletAccessible::NativeRole()
+HTMLListBulletAccessible::NativeRole() const
 {
   return roles::STATICTEXT;
 }
 
 uint64_t
-HTMLListBulletAccessible::NativeState()
+HTMLListBulletAccessible::NativeState() const
 {
   return LeafAccessible::NativeState() | states::READONLY;
 }

@@ -5,11 +5,10 @@
 
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+var { InlineSpellChecker, SpellCheckHelper } =
+  ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm", {});
 
-var { SpellCheckHelper } = Cu.import("resource://gre/modules/InlineSpellChecker.jsm");
-
-this.EXPORTED_SYMBOLS = [ "InlineSpellCheckerContent" ]
+var EXPORTED_SYMBOLS = [ "InlineSpellCheckerContent" ];
 
 var InlineSpellCheckerContent = {
   _spellChecker: null,
@@ -21,7 +20,7 @@ var InlineSpellCheckerContent = {
     let spellChecker;
     if (!(editFlags & (SpellCheckHelper.TEXTAREA | SpellCheckHelper.INPUT))) {
       // Get the editor off the window.
-      let win = event.target.ownerDocument.defaultView;
+      let win = event.target.ownerGlobal;
       let editingSession = win.QueryInterface(Ci.nsIInterfaceRequestor)
                               .getInterface(Ci.nsIWebNavigation)
                               .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -31,10 +30,10 @@ var InlineSpellCheckerContent = {
     } else {
       // Use the element's editor.
       spellChecker = this._spellChecker =
-        new InlineSpellChecker(event.target.QueryInterface(Ci.nsIDOMNSEditableElement).editor);
+        new InlineSpellChecker(event.target.editor);
     }
 
-    this._spellChecker.initFromEvent(event.rangeParent, event.rangeOffset)
+    this._spellChecker.initFromEvent(event.rangeParent, event.rangeOffset);
 
     this._addMessageListeners();
 
@@ -48,6 +47,12 @@ var InlineSpellCheckerContent = {
       return { canSpellCheck: true,
                initialSpellCheckPending: spellChecker.initialSpellCheckPending,
                enableRealTimeSpell: false };
+    }
+
+    if (spellChecker.initialSpellCheckPending) {
+      return { canSpellCheck: true,
+               initialSpellCheckPending: true,
+               enableRealTimeSpell: true };
     }
 
     let dictionaryList = {};
@@ -68,7 +73,7 @@ var InlineSpellCheckerContent = {
              misspelling: spellChecker.mMisspelling,
              spellSuggestions: this._generateSpellSuggestions(),
              currentDictionary: spellChecker.mInlineSpellChecker.spellChecker.GetCurrentDictionary(),
-             dictionaryList: dictionaryList };
+             dictionaryList };
   },
 
   uninitContextMenu() {

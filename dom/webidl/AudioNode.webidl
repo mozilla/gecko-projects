@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
+ * https://webaudio.github.io/web-audio-api/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
@@ -21,6 +21,13 @@ enum ChannelInterpretation {
     "discrete"
 };
 
+dictionary AudioNodeOptions {
+             unsigned long         channelCount;
+             ChannelCountMode      channelCountMode;
+             ChannelInterpretation channelInterpretation;
+};
+
+[Pref="dom.webaudio.enabled"]
 interface AudioNode : EventTarget {
 
     [Throws]
@@ -28,9 +35,21 @@ interface AudioNode : EventTarget {
     [Throws]
     void connect(AudioParam destination, optional unsigned long output = 0);
     [Throws]
-    void disconnect(optional unsigned long output = 0);
+    void disconnect();
+    [Throws]
+    void disconnect(unsigned long output);
+    [Throws]
+    void disconnect(AudioNode destination);
+    [Throws]
+    void disconnect(AudioNode destination, unsigned long output);
+    [Throws]
+    void disconnect(AudioNode destination, unsigned long output, unsigned long input);
+    [Throws]
+    void disconnect(AudioParam destination);
+    [Throws]
+    void disconnect(AudioParam destination, unsigned long output);
 
-    readonly attribute AudioContext context;
+    readonly attribute BaseAudioContext context;
     readonly attribute unsigned long numberOfInputs;
     readonly attribute unsigned long numberOfOutputs;
 
@@ -39,6 +58,7 @@ interface AudioNode : EventTarget {
     attribute unsigned long channelCount;
     [SetterThrows]
     attribute ChannelCountMode channelCountMode;
+    [SetterThrows]
     attribute ChannelInterpretation channelInterpretation;
 
 };

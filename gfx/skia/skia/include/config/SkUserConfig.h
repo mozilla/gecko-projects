@@ -58,13 +58,6 @@
 //#define SK_DEBUG_GLYPH_CACHE
 //#define SK_DEBUG_PATH
 
-/*  If, in debugging mode, Skia needs to stop (presumably to invoke a debugger)
-    it will call SK_CRASH(). If this is not defined it, it is defined in
-    SkPostConfig.h to write to an illegal address
- */
-//#define SK_CRASH() *(int *)(uintptr_t)0 = 0
-
-
 /*  preconfig will have attempted to determine the endianness of the system,
     but you can change these mutually exclusive flags here.
  */
@@ -100,15 +93,6 @@
  */
 //#define SK_DEFAULT_IMAGE_CACHE_LIMIT (1024 * 1024)
 
-/*  Define this to allow PDF scalars above 32k.  The PDF/A spec doesn't allow
-    them, but modern PDF interpreters should handle them just fine.
- */
-//#define SK_ALLOW_LARGE_PDF_SCALARS
-
-/*  Define this to provide font subsetter in PDF generation.
- */
-//#define SK_SFNTLY_SUBSETTER "sfntly/subsetter/font_subsetter.h"
-
 /*  Define this to set the upper limit for text to support LCD. Values that
     are very large increase the cost in the font cache and draw slower, without
     improving readability. If this is undefined, Skia will use its default
@@ -143,15 +127,13 @@
  */
 //#define SK_SUPPORT_GPU 1
 
-
-/* The PDF generation code uses Path Ops to handle complex clipping paths,
- * but at this time, Path Ops is not release ready yet. So, the code is
- * hidden behind this #define guard. If you are feeling adventurous and
- * want the latest and greatest PDF generation code, uncomment the #define.
- * When Path Ops is release ready, the define guards and this user config
- * define should be removed entirely.
+/* Skia makes use of histogram logging macros to trace the frequency of
+ * events. By default, Skia provides no-op versions of these macros.
+ * Skia consumers can provide their own definitions of these macros to
+ * integrate with their histogram collection backend.
  */
-//#define SK_PDF_USE_PATHOPS_CLIPPING
+//#define SK_HISTOGRAM_BOOLEAN(name, value)
+//#define SK_HISTOGRAM_ENUMERATION(name, value, boundary_value)
 
 // On all platforms we have this byte order
 #define SK_A32_SHIFT 24
@@ -161,22 +143,32 @@
 
 #define SK_ALLOW_STATIC_GLOBAL_INITIALIZERS 0
 
-#define SK_SUPPORT_LEGACY_GETDEVICE
-#define SK_SUPPORT_LEGACY_GETTOPDEVICE
-
-#define SK_IGNORE_ETC1_SUPPORT
+// Don't use __stdcall with SkiaGLGlue - bug 1320644
+#define GR_GL_FUNCTION_TYPE
 
 #define SK_RASTERIZE_EVEN_ROUNDING
 
-#define GR_GL_PER_GL_FUNC_CALLBACK 1
+#define SK_DISABLE_SLOW_DEBUG_VALIDATION 1
 
-#define MOZ_SKIA 1
+#define SK_SUPPORT_DEPRECATED_CLIPOPS
+
+#define SK_DISABLE_EXPLICIT_GPU_RESOURCE_ALLOCATION
 
 #ifndef MOZ_IMPLICIT
 #  ifdef MOZ_CLANG_PLUGIN
 #    define MOZ_IMPLICIT __attribute__((annotate("moz_implicit")))
 #  else
 #    define MOZ_IMPLICIT
+#  endif
+#endif
+
+#define MOZ_SKIA
+
+#ifndef SK_SUPPORT_GPU
+#  ifdef USE_SKIA_GPU
+#    define SK_SUPPORT_GPU 1
+#  else
+#    define SK_SUPPORT_GPU 0
 #  endif
 #endif
 

@@ -3,102 +3,88 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-(function (exports) {
+(function(exports) {
+  const CC = Components.Constructor;
 
-var Cu = Components.utils;
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var CC = Components.Constructor;
+  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const { fetch } = require("devtools/shared/DevToolsUtils");
 
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
-var { fetch } = require("devtools/shared/DevToolsUtils");
-var promise = require("promise");
+  const TEST_URL_ROOT = "http://example.com/browser/devtools/client/shared/test/";
+  const ACTOR_URL = TEST_URL_ROOT + "test-actor.js";
 
-var TEST_URL_ROOT = "http://example.com/browser/devtools/client/shared/test/";
-var ACTOR_URL = TEST_URL_ROOT + "test-actor.js";
+  // Register a test actor that can operate on the remote document
+  exports.registerTestActor = async function(client) {
+    // First, instanciate ActorRegistryFront to be able to dynamically register an actor
+    const response = await client.listTabs();
+    const { ActorRegistryFront } = require("devtools/shared/fronts/actor-registry");
+    const registryFront = ActorRegistryFront(client, response);
 
-// Register a test actor that can operate on the remote document
-exports.registerTestActor = Task.async(function* (client) {
-  // First, instanciate ActorRegistryFront to be able to dynamically
-  // register an actor
-  let deferred = promise.defer();
-  client.listTabs(deferred.resolve);
-  let response = yield deferred.promise;
-  let { ActorRegistryFront } = require("devtools/server/actors/actor-registry");
-  let registryFront = ActorRegistryFront(client, response);
-
-  // Then ask to register our test-actor to retrieve its front
-  let options = {
-    type: { tab: true },
-    constructor: "TestActor",
-    prefix: "testActor"
+    // Then ask to register our test-actor to retrieve its front
+    const options = {
+      type: { target: true },
+      constructor: "TestActor",
+      prefix: "testActor"
+    };
+    const testActorFront = await registryFront.registerActor(ACTOR_URL, options);
+    return testActorFront;
   };
-  let testActorFront = yield registryFront.registerActor(ACTOR_URL, options);
-  return testActorFront;
-});
 
-// Load the test actor in a custom sandbox
-// as we can't use SDK module loader with URIs
-var loadFront = Task.async(function* () {
-  let sourceText = yield request(ACTOR_URL);
-  const principal = CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")();
-  const sandbox = Cu.Sandbox(principal);
-  const exports = sandbox.exports = {};
-  sandbox.require = require;
-  Cu.evalInSandbox(sourceText, sandbox, "1.8", ACTOR_URL, 1);
-  return sandbox.exports;
-});
+  // Load the test actor in a custom sandbox as we can't use SDK module loader with URIs
+  const loadFront = async function() {
+    const sourceText = await request(ACTOR_URL);
+    const principal = CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")();
+    const sandbox = Cu.Sandbox(principal);
+    sandbox.exports = {};
+    sandbox.require = require;
+    Cu.evalInSandbox(sourceText, sandbox, "1.8", ACTOR_URL, 1);
+    return sandbox.exports;
+  };
 
-// Ensure fetching a live TabActor form for the targeted app
-// (helps fetching the test actor registered dynamically)
-var getUpdatedForm = function (client, tab) {
-  return client.getTab({tab: tab})
-               .then(response => response.tab);
-};
+  // Ensure fetching a live target actor form
+  // (helps fetching the test actor registered dynamically)
+  const getUpdatedForm = function(client, tab) {
+    return client.getTab({tab: tab})
+                 .then(response => response.tab);
+  };
 
-// Spawn an instance of the test actor for the given toolbox
-exports.getTestActor = Task.async(function* (toolbox) {
-  let client = toolbox.target.client;
-  return getTestActor(client, toolbox.target.tab, toolbox);
-});
+  // Spawn an instance of the test actor for the given toolbox
+  exports.getTestActor = async function(toolbox) {
+    const client = toolbox.target.client;
+    return getTestActor(client, toolbox.target.tab, toolbox);
+  };
 
+  // Sometimes, we need the test actor before opening or without a toolbox then just
+  // create a front for the given `tab`
+  exports.getTestActorWithoutToolbox = async function(tab) {
+    const { DebuggerServer } = require("devtools/server/main");
+    const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 
-// Sometimes, we need the test actor before opening or without a toolbox
-// then just create a front for the given `tab`
-exports.getTestActorWithoutToolbox = Task.async(function* (tab) {
-  let { DebuggerServer } = require("devtools/server/main");
-  let { DebuggerClient } = require("devtools/shared/client/main");
-
-  // We need to spawn a client instance,
-  // but for that we have to first ensure a server is running
-  if (!DebuggerServer.initialized) {
+    // We need to spawn a client instance,
+    // but for that we have to first ensure a server is running
     DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
+    DebuggerServer.registerAllActors();
+    const client = new DebuggerClient(DebuggerServer.connectPipe());
 
-  yield client.connect();
+    await client.connect();
 
-  // We also need to make sure the test actor is registered on the server.
-  yield registerTestActor(client);
+    // We also need to make sure the test actor is registered on the server.
+    await exports.registerTestActor(client);
 
-  return getTestActor(client, tab);
-});
+    return getTestActor(client, tab);
+  };
 
-// Fetch the content of a URI
-var request = function (uri) {
-  return fetch(uri).then(({ content }) => content);
-}
+  // Fetch the content of a URI
+  const request = function(uri) {
+    return fetch(uri).then(({ content }) => content);
+  };
 
-var getTestActor = Task.async(function* (client, tab, toolbox) {
-  // We may have to update the form in order to get the dynamically registered
-  // test actor.
-  let form = yield getUpdatedForm(client, tab);
+  const getTestActor = async function(client, tab, toolbox) {
+    // We may have to update the form in order to get the dynamically registered
+    // test actor.
+    const form = await getUpdatedForm(client, tab);
 
-  let { TestActorFront } = yield loadFront();
+    const { TestActorFront } = await loadFront();
 
-  return new TestActorFront(client, form, toolbox);
-});
-
+    return new TestActorFront(client, form, toolbox);
+  };
 })(this);

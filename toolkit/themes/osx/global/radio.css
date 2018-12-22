@@ -16,12 +16,12 @@ radio {
 }
 
 .radio-label-box {
-  -moz-margin-start: 0px;
+  margin-inline-start: 0px;
   padding: 0px;
 }
 
 .radio-icon {
-  -moz-margin-end: 2px;
+  margin-inline-end: 2px;
 }
 
 .radio-label {
@@ -32,7 +32,7 @@ radio[disabled="true"] {
   color: GrayText !important;
 }
 
-.radio-check, .radio-check-box1 {
+.radio-check {
   -moz-appearance: radio;
   margin: 0 1px 1px;
   /* vertical-align tells native theming where to snap to. However, this doesn't

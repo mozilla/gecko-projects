@@ -1,11 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files('**'):
-    BUG_COMPONENT = ('Core', 'XP Toolkit/Widgets: XUL')
+    BUG_COMPONENT = ('Core', 'XUL')
 
 with Files('*Menu*'):
     BUG_COMPONENT = ('Core', 'XP Toolkit/Widgets: Menus')
@@ -17,12 +17,7 @@ if CONFIG['ENABLE_TESTS']:
 
 XPIDL_SOURCES += [
     'nsIBoxObject.idl',
-    'nsIBrowserBoxObject.idl',
-    'nsIContainerBoxObject.idl',
     'nsIListBoxObject.idl',
-    'nsIMenuBoxObject.idl',
-    'nsIScrollBoxObject.idl',
-    'nsISliderListener.idl',
 ]
 
 XPIDL_MODULE = 'layout_xul'
@@ -37,10 +32,8 @@ EXPORTS += [
 
 EXPORTS.mozilla.dom += [
     'BoxObject.h',
-    'ContainerBoxObject.h',
     'ListBoxObject.h',
     'MenuBoxObject.h',
-    'PopupBoxObject.h',
     'ScrollBoxObject.h',
 ]
 
@@ -55,7 +48,6 @@ UNIFIED_SOURCES += [
     'nsRootBoxFrame.cpp',
     'nsScrollbarButtonFrame.cpp',
     'nsScrollbarFrame.cpp',
-    'nsScrollBoxFrame.cpp',
     'nsSliderFrame.cpp',
     'nsSprocketLayout.cpp',
     'nsStackFrame.cpp',
@@ -65,7 +57,6 @@ UNIFIED_SOURCES += [
 
 if CONFIG['MOZ_XUL']:
     UNIFIED_SOURCES += [
-        'ContainerBoxObject.cpp',
         'ListBoxObject.cpp',
         'MenuBoxObject.cpp',
         'nsDeckFrame.cpp',
@@ -88,17 +79,23 @@ if CONFIG['MOZ_XUL']:
         'nsTitleBarFrame.cpp',
         'nsXULLabelFrame.cpp',
         'nsXULPopupManager.cpp',
-        'PopupBoxObject.cpp',
         'ScrollBoxObject.cpp',
     ]
 
 if CONFIG['MOZ_XUL']:
     DIRS += ['tree', 'grid']
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '../base',
     '../generic',
+    '../painting',
     '../style',
     '/dom/base',
+    '/dom/xul',
 ]
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

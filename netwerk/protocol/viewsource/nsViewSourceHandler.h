@@ -12,21 +12,26 @@
 
 class nsILoadInfo;
 
-class nsViewSourceHandler final : public nsIProtocolHandler
+namespace mozilla {
+namespace net {
+
+class nsViewSourceHandler final : public nsIProtocolHandlerWithDynamicFlags
+                                , public nsIProtocolHandler
 {
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIPROTOCOLHANDLER
+    NS_DECL_NSIPROTOCOLHANDLERWITHDYNAMICFLAGS
 
     nsViewSourceHandler();
 
     // Creates a new nsViewSourceChannel to view the source of an about:srcdoc
     // URI with contents specified by srcdoc.
-    nsresult NewSrcdocChannel(nsIURI *aURI,
-                              nsIURI *aBaseURI,
-                              const nsAString &aSrcdoc,
-                              nsILoadInfo *aLoadInfo,
-                              nsIChannel** outChannel);
+    MOZ_MUST_USE nsresult NewSrcdocChannel(nsIURI *aURI,
+                                           nsIURI *aBaseURI,
+                                           const nsAString &aSrcdoc,
+                                           nsILoadInfo *aLoadInfo,
+                                           nsIChannel** outChannel);
 
     static nsViewSourceHandler* GetInstance();
 
@@ -35,5 +40,8 @@ private:
 
     static nsViewSourceHandler* gInstance;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif /* !defined( nsViewSourceHandler_h___ ) */

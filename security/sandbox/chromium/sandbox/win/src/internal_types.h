@@ -5,13 +5,15 @@
 #ifndef SANDBOX_WIN_SRC_INTERNAL_TYPES_H_
 #define SANDBOX_WIN_SRC_INTERNAL_TYPES_H_
 
+#include <stdint.h>
+
 namespace sandbox {
 
 const wchar_t kNtdllName[] = L"ntdll.dll";
 const wchar_t kKerneldllName[] = L"kernel32.dll";
 const wchar_t kKernelBasedllName[] = L"kernelbase.dll";
 
-// Defines the supported C++ types encoding to numeric id. Like a poor's man
+// Defines the supported C++ types encoding to numeric id. Like a simplified
 // RTTI. Note that true C++ RTTI will not work because the types are not
 // polymorphic anyway.
 enum ArgType {
@@ -28,18 +30,16 @@ enum ArgType {
 // Encapsulates a pointer to a buffer and the size of the buffer.
 class CountedBuffer {
  public:
-  CountedBuffer(void* buffer, uint32 size) : size_(size), buffer_(buffer) {}
+  CountedBuffer(void* buffer, uint32_t size) : size_(size), buffer_(buffer) {}
 
-  uint32 Size() const {
-    return size_;
-  }
+  uint32_t Size() const { return size_; }
 
   void* Buffer() const {
     return buffer_;
   }
 
  private:
-  uint32 size_;
+  uint32_t size_;
   void* buffer_;
 };
 

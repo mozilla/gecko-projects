@@ -20,21 +20,26 @@ ABIArg
 ABIArgGenerator::next(MIRType type)
 {
     switch (type) {
-      case MIRType_Int32:
-      case MIRType_Pointer:
+      case MIRType::Int32:
+      case MIRType::Float32:
+      case MIRType::Pointer:
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint32_t);
         break;
-      case MIRType_Float32: // Float32 moves are actually double moves
-      case MIRType_Double:
+      case MIRType::Double:
+      case MIRType::Int64:
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint64_t);
         break;
-      case MIRType_Int32x4:
-      case MIRType_Float32x4:
-      case MIRType_Bool32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
+      case MIRType::Int32x4:
+      case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
         // SIMD values aren't passed in or out of C++, so we can make up
-        // whatever internal ABI we like. visitAsmJSPassArg assumes
+        // whatever internal ABI we like. visitWasmStackArg assumes
         // SimdMemoryAlignment.
         stackOffset_ = AlignBytes(stackOffset_, SimdMemoryAlignment);
         current_ = ABIArg(stackOffset_);
@@ -46,21 +51,12 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 }
 
-const Register ABIArgGenerator::NonArgReturnReg0 = ecx;
-const Register ABIArgGenerator::NonArgReturnReg1 = edx;
-const Register ABIArgGenerator::NonVolatileReg = ebx;
-const Register ABIArgGenerator::NonArg_VolatileReg = eax;
-const Register ABIArgGenerator::NonReturn_VolatileReg0 = ecx;
-
 void
-Assembler::executableCopy(uint8_t* buffer)
+Assembler::executableCopy(uint8_t* buffer, bool flushICache)
 {
     AssemblerX86Shared::executableCopy(buffer);
-
-    for (size_t i = 0; i < jumps_.length(); i++) {
-        RelativePatch& rp = jumps_[i];
+    for (RelativePatch& rp : jumps_)
         X86Encoding::SetRel32(buffer + rp.offset, rp.target);
-    }
 }
 
 class RelocationIterator
@@ -69,7 +65,7 @@ class RelocationIterator
     uint32_t offset_;
 
   public:
-    RelocationIterator(CompactBufferReader& reader)
+    explicit RelocationIterator(CompactBufferReader& reader)
       : reader_(reader)
     { }
 

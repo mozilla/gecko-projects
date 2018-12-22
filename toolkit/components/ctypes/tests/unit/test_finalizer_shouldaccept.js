@@ -1,8 +1,8 @@
 try {
   // We might be running without privileges, in which case it's up to the
   // harness to give us the 'ctypes' object.
-  Components.utils.import("resource://gre/modules/ctypes.jsm");
-} catch(e) {
+  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+} catch (e) {
 }
 
 var acquire, dispose, reset_errno, dispose_errno,
@@ -10,8 +10,7 @@ var acquire, dispose, reset_errno, dispose_errno,
   acquire_void_ptr, dispose_void_ptr,
   acquire_string, dispose_string;
 
-function run_test()
-{
+function run_test() {
   let library = open_ctypes_test_lib();
 
   let start = library.declare("test_finalizer_start", ctypes.default_abi,
@@ -63,49 +62,46 @@ function run_test()
 /**
  * Check that toString succeeds before/after forget/dispose.
  */
-function test_to_string()
-{
-  do_print("Starting test_to_string");
+function test_to_string() {
+  info("Starting test_to_string");
   let a = ctypes.CDataFinalizer(acquire(0), dispose);
-  do_check_eq(a.toString(), "0");
+  Assert.equal(a.toString(), "0");
 
   a.forget();
-  do_check_eq(a.toString(), "[CDataFinalizer - empty]");
+  Assert.equal(a.toString(), "[CDataFinalizer - empty]");
 
   a = ctypes.CDataFinalizer(acquire(0), dispose);
   a.dispose();
-  do_check_eq(a.toString(), "[CDataFinalizer - empty]");
+  Assert.equal(a.toString(), "[CDataFinalizer - empty]");
 }
 
 /**
  * Check that toSource succeeds before/after forget/dispose.
  */
-function test_to_source()
-{
-  do_print("Starting test_to_source");
+function test_to_source() {
+  info("Starting test_to_source");
   let value = acquire(0);
   let a = ctypes.CDataFinalizer(value, dispose);
-  do_check_eq(a.toSource(),
-              "ctypes.CDataFinalizer("
-              + ctypes.size_t(value).toSource()
-              +", "
-              +dispose.toSource()
-              +")");
+  Assert.equal(a.toSource(),
+               "ctypes.CDataFinalizer("
+               + ctypes.size_t(value).toSource()
+               + ", "
+               + dispose.toSource()
+               + ")");
   value = null;
 
   a.forget();
-  do_check_eq(a.toSource(), "ctypes.CDataFinalizer()");
+  Assert.equal(a.toSource(), "ctypes.CDataFinalizer()");
 
   a = ctypes.CDataFinalizer(acquire(0), dispose);
   a.dispose();
-  do_check_eq(a.toSource(), "ctypes.CDataFinalizer()");
+  Assert.equal(a.toSource(), "ctypes.CDataFinalizer()");
 }
 
 /**
  * Test conversion to int32
  */
-function test_to_int()
-{
+function test_to_int() {
   let value = 2;
   let wrapped, converted, finalizable;
   wrapped = ctypes.int32_t(value);
@@ -125,36 +121,34 @@ function test_to_int()
 /**
  * Test that dispose can change errno but finalization cannot
  */
-function test_errno(size, tc, cleanup)
-{
+function test_errno(size, tc, cleanup) {
   reset_errno();
-  do_check_eq(ctypes.errno, 0);
+  Assert.equal(ctypes.errno, 0);
 
   let finalizable = ctypes.CDataFinalizer(acquire(3), dispose_errno);
   finalizable.dispose();
-  do_check_eq(ctypes.errno, 10);
+  Assert.equal(ctypes.errno, 10);
   reset_errno();
 
-  do_check_eq(ctypes.errno, 0);
+  Assert.equal(ctypes.errno, 0);
   for (let i = 0; i < size; ++i) {
     finalizable = ctypes.CDataFinalizer(acquire(i), dispose_errno);
     cleanup.add(finalizable);
   }
 
   trigger_gc();
-  do_check_eq(ctypes.errno, 0);
+  Assert.equal(ctypes.errno, 0);
 }
 
 /**
  * Check that a finalizable of a pointer can be used as a pointer
  */
-function test_to_pointer()
-{
+function test_to_pointer() {
   let ptr = ctypes.int32_t(2).address();
   let finalizable = ctypes.CDataFinalizer(ptr, dispose_ptr);
   let unwrapped = ctypes.int32_t.ptr(finalizable);
 
-  do_check_eq(""+ptr, ""+unwrapped);
+  Assert.equal("" + ptr, "" + unwrapped);
 
   finalizable.forget(); // Do not dispose: This is not a real pointer.
 }
@@ -162,13 +156,12 @@ function test_to_pointer()
 /**
  * Test that readstring can be applied to a finalizer
  */
-function test_readstring(size)
-{
+function test_readstring(size) {
   for (let i = 0; i < size; ++i) {
     let acquired = acquire_string(i);
     let finalizable = ctypes.CDataFinalizer(acquired,
       dispose_string);
-    do_check_eq(finalizable.readString(), acquired.readString());
+    Assert.equal(finalizable.readString(), acquired.readString());
     finalizable.dispose();
   }
 }

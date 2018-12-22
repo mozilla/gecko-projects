@@ -5,13 +5,10 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["MediaPlayerApp"];
+var EXPORTED_SYMBOLS = ["MediaPlayerApp"];
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Messaging.jsm");
-var log = Cu.import("resource://gre/modules/AndroidLog.jsm", {}).AndroidLog.d.bind(null, "MediaPlayerApp");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 
 // Helper function for sending commands to Java.
 function send(type, data, callback) {
@@ -23,7 +20,7 @@ function send(type, data, callback) {
     msg[i] = data[i];
   }
 
-  Messaging.sendRequestForResult(msg)
+  EventDispatcher.instance.sendRequestForResult(msg)
     .then(result => callback(result, null),
           error => callback(null, error));
 }
@@ -59,14 +56,7 @@ MediaPlayerApp.prototype = {
     }
   },
 
-  mirror: function mirror(callback) {
-    send("MediaPlayer:Mirror", { id: this.id }, (result, err) => {
-      if (callback) {
-        callback(err == null);
-      }
-    });
-  }
-}
+};
 
 /* RemoteMedia provides a proxy to a native media player session.
  */
@@ -75,16 +65,18 @@ function RemoteMedia(id, listener) {
   this._listener = listener;
 
   if ("onRemoteMediaStart" in this._listener) {
-    Services.tm.mainThread.dispatch((function() {
+    Services.tm.dispatchToMainThread(() => {
       this._listener.onRemoteMediaStart(this);
-    }).bind(this), Ci.nsIThread.DISPATCH_NORMAL);
+    });
   }
 }
 
 RemoteMedia.prototype = {
   shutdown: function shutdown() {
-    Services.obs.removeObserver(this, "MediaPlayer:Playing");
-    Services.obs.removeObserver(this, "MediaPlayer:Paused");
+    EventDispatcher.instance.unregisterListener(this, [
+      "MediaPlayer:Playing",
+      "MediaPlayer:Paused",
+    ]);
 
     this._send("MediaPlayer:End", {}, (result, err) => {
       this._status = "shutdown";
@@ -126,18 +118,20 @@ RemoteMedia.prototype = {
         return;
       }
 
-      Services.obs.addObserver(this, "MediaPlayer:Playing", false);
-      Services.obs.addObserver(this, "MediaPlayer:Paused", false);
+      EventDispatcher.instance.registerListener(this, [
+        "MediaPlayer:Playing",
+        "MediaPlayer:Paused",
+      ]);
       this._status = "started";
-    })
+    });
   },
 
   get status() {
     return this._status;
   },
 
-  observe: function (aSubject, aTopic, aData) {
-    switch (aTopic) {
+  onEvent: function(event, message, callback) {
+    switch (event) {
       case "MediaPlayer:Playing":
         if (this._status !== "started") {
           this._status = "started";
@@ -154,8 +148,6 @@ RemoteMedia.prototype = {
           }
         }
         break;
-      default:
-        break;
     }
   },
 
@@ -163,4 +155,4 @@ RemoteMedia.prototype = {
     data.id = this._id;
     send(msg, data, callback);
   }
-}
+};

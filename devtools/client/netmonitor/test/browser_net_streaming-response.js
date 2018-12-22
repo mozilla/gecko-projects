@@ -1,65 +1,81 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if reponses from streaming content types (MPEG-DASH, HLS) are
  * displayed as XML or plain text
  */
 
-function test() {
-  Task.spawn(function*() {
-    let [tab, debuggee, monitor] = yield initNetMonitor(CUSTOM_GET_URL);
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(CUSTOM_GET_URL);
 
-    info("Starting test... ");
-    let { panelWin } = monitor;
-    let { document, Editor, NetMonitorView } = panelWin;
-    let { RequestsMenu } = NetMonitorView;
+  info("Starting test... ");
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  const {
+    getDisplayedRequests,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
 
-    const REQUESTS = [
-      [ "hls-m3u8", /^#EXTM3U/, Editor.modes.text ],
-      [ "mpeg-dash", /^<\?xml/, Editor.modes.html ]
-    ];
+  store.dispatch(Actions.batchEnable(false));
 
-    RequestsMenu.lazyUpdate = false;
+  const REQUESTS = [
+    [ "hls-m3u8", /^#EXTM3U/ ],
+    [ "mpeg-dash", /^<\?xml/ ]
+  ];
 
-    REQUESTS.forEach(([ fmt ]) => {
-      debuggee.performRequests(1, CONTENT_TYPE_SJS + "?fmt=" + fmt);
+  let wait = waitForNetworkEvents(monitor, REQUESTS.length);
+  for (const [fmt] of REQUESTS) {
+    const url = CONTENT_TYPE_SJS + "?fmt=" + fmt;
+    await ContentTask.spawn(tab.linkedBrowser, { url }, async function(args) {
+      content.wrappedJSObject.performRequests(1, args.url);
     });
+  }
+  await wait;
 
-    yield waitForNetworkEvents(monitor, REQUESTS.length);
+  const requestItems = document.querySelectorAll(".request-list-item");
+  for (const requestItem of requestItems) {
+    requestItem.scrollIntoView();
+    const requestsListStatus = requestItem.querySelector(".status-code");
+    EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
+    await waitUntil(() => requestsListStatus.title);
+  }
 
-    REQUESTS.forEach(([ fmt ], i) => {
-      verifyRequestItemTarget(RequestsMenu.getItemAtIndex(i),
-        "GET", CONTENT_TYPE_SJS + "?fmt=" + fmt, {
-          status: 200,
-          statusText: "OK"
-        });
-    });
-
-    EventUtils.sendMouseEvent({ type: "mousedown" },
-      document.getElementById("details-pane-toggle"));
-    EventUtils.sendMouseEvent({ type: "mousedown" },
-      document.querySelectorAll("#details-pane tab")[3]);
-
-    yield panelWin.once(panelWin.EVENTS.RESPONSE_BODY_DISPLAYED);
-    let editor = yield NetMonitorView.editor("#response-content-textarea");
-
-    testEditorContent(editor, REQUESTS[0]); // the hls-m3u8 part
-
-    RequestsMenu.selectedIndex = 1;
-    yield panelWin.once(panelWin.EVENTS.TAB_UPDATED);
-    yield panelWin.once(panelWin.EVENTS.RESPONSE_BODY_DISPLAYED);
-
-    testEditorContent(editor, REQUESTS[1]); // the mpeg-dash part
-
-    yield teardown(monitor);
-    finish();
+  REQUESTS.forEach(([ fmt ], i) => {
+    verifyRequestItemTarget(
+      document,
+      getDisplayedRequests(store.getState()),
+      getSortedRequests(store.getState()).get(i),
+      "GET",
+      CONTENT_TYPE_SJS + "?fmt=" + fmt,
+      {
+        status: 200,
+        statusText: "OK"
+      });
   });
 
-  function testEditorContent(editor, [ fmt, textRe, mode ]) {
-    ok(editor.getText().match(textRe),
-      "The text shown in the source editor for " + fmt + " is incorrect.");
-    is(editor.getMode(), mode,
-      "The mode active in the source editor for " + fmt + " is incorrect.");
+  wait = waitForDOM(document, "#response-panel");
+  store.dispatch(Actions.toggleNetworkDetails());
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector("#response-tab"));
+  await wait;
+
+  store.dispatch(Actions.selectRequest(null));
+
+  await selectIndexAndWaitForSourceEditor(monitor, 0);
+  // the hls-m3u8 part
+  testEditorContent(REQUESTS[0]);
+
+  await selectIndexAndWaitForSourceEditor(monitor, 1);
+  // the mpeg-dash part
+  testEditorContent(REQUESTS[1]);
+
+  return teardown(monitor);
+
+  function testEditorContent([ fmt, textRe ]) {
+    ok(document.querySelector(".CodeMirror-line").textContent.match(textRe),
+      "The text shown in the source editor for " + fmt + " is correct.");
   }
-}
+});

@@ -7,9 +7,11 @@
 #ifndef mozilla_dom_AnimationPerformanceWarning_h
 #define mozilla_dom_AnimationPerformanceWarning_h
 
-#include "mozilla/InitializerList.h"
+#include <initializer_list>
 
-class nsXPIDLString;
+#include "mozilla/Maybe.h"
+#include "nsStringFwd.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 
@@ -18,12 +20,15 @@ struct AnimationPerformanceWarning
 {
   enum class Type : uint8_t {
     ContentTooLarge,
+    ContentTooLargeArea,
     TransformBackfaceVisibilityHidden,
     TransformPreserve3D,
     TransformSVG,
     TransformWithGeometricProperties,
+    TransformWithSyncGeometricAnimations,
     TransformFrameInactive,
     OpacityFrameInactive,
+    HasRenderingObserver,
   };
 
   explicit AnimationPerformanceWarning(Type aType)
@@ -48,7 +53,7 @@ struct AnimationPerformanceWarning
   // this variable, please include this header file directly.
   // This value is the same as the limit of nsStringBundle::FormatString.
   // See the implementation of nsStringBundle::FormatString.
-  static MOZ_CONSTEXPR_VAR uint8_t kMaxParamsForLocalization = 10;
+  static constexpr uint8_t kMaxParamsForLocalization = 10;
 
   // Indicates why this property could not be animated on the compositor.
   Type mType;
@@ -56,7 +61,10 @@ struct AnimationPerformanceWarning
   // Optional parameters that may be used for localization.
   Maybe<nsTArray<int32_t>> mParams;
 
-  bool ToLocalizedString(nsXPIDLString& aLocalizedString) const;
+  bool ToLocalizedString(nsAString& aLocalizedString) const;
+  template<uint32_t N>
+  nsresult ToLocalizedStringWithIntParams(
+    const char* aKey, nsAString& aLocalizedString) const;
 
   bool operator==(const AnimationPerformanceWarning& aOther) const
   {

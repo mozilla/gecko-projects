@@ -25,19 +25,18 @@ public:
 
   // nsIFilePicker (less what's in nsBaseFilePicker)
   NS_IMETHOD Open(nsIFilePickerShownCallback *aCallback) override;
-  NS_IMETHODIMP AppendFilters(int32_t aFilterMask) override;
-  NS_IMETHODIMP AppendFilter(const nsAString& aTitle,
-                             const nsAString& aFilter) override;
-  NS_IMETHODIMP SetDefaultString(const nsAString& aString) override;
-  NS_IMETHODIMP GetDefaultString(nsAString& aString) override;
-  NS_IMETHODIMP SetDefaultExtension(const nsAString& aExtension) override;
-  NS_IMETHODIMP GetDefaultExtension(nsAString& aExtension) override;
-  NS_IMETHODIMP GetFilterIndex(int32_t *aFilterIndex) override;
-  NS_IMETHODIMP SetFilterIndex(int32_t aFilterIndex) override;
-  NS_IMETHODIMP GetFile(nsIFile **aFile) override;
-  NS_IMETHODIMP GetFileURL(nsIURI **aFileURL) override;
-  NS_IMETHODIMP GetFiles(nsISimpleEnumerator **aFiles) override;
-  NS_IMETHODIMP Show(int16_t *aReturn) override;
+  NS_IMETHOD AppendFilters(int32_t aFilterMask) override;
+  NS_IMETHOD AppendFilter(const nsAString& aTitle,
+                          const nsAString& aFilter) override;
+  NS_IMETHOD SetDefaultString(const nsAString& aString) override;
+  NS_IMETHOD GetDefaultString(nsAString& aString) override;
+  NS_IMETHOD SetDefaultExtension(const nsAString& aExtension) override;
+  NS_IMETHOD GetDefaultExtension(nsAString& aExtension) override;
+  NS_IMETHOD GetFilterIndex(int32_t *aFilterIndex) override;
+  NS_IMETHOD SetFilterIndex(int32_t aFilterIndex) override;
+  NS_IMETHOD GetFile(nsIFile **aFile) override;
+  NS_IMETHOD GetFileURL(nsIURI **aFileURL) override;
+  NS_IMETHOD GetFiles(nsISimpleEnumerator **aFiles) override;
 
   // nsBaseFilePicker
   virtual void InitNative(nsIWidget *aParent,
@@ -48,6 +47,7 @@ public:
 protected:
   virtual ~nsFilePicker();
 
+  nsresult Show(int16_t *aReturn) override;
   void ReadValuesFromFileChooser(GtkWidget *file_chooser);
 
   static void OnResponse(GtkWidget* dialog, gint response_id,
@@ -74,7 +74,7 @@ protected:
 private:
   static nsIFile *mPrevDisplayDirectory;
 
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
   GtkFileChooserWidget *mFileChooserDelegate;
 #endif
 };

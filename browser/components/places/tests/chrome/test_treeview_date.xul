@@ -10,7 +10,6 @@
 
 <?xml-stylesheet href="chrome://browser/content/places/places.css"?>
 <?xml-stylesheet href="chrome://browser/skin/places/places.css"?>
-<?xul-overlay href="chrome://browser/content/places/placesOverlay.xul"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         title="435322: Places tree view's formatting"
@@ -53,15 +52,12 @@
     function runTest() {
       SimpleTest.waitForExplicitFinish();
 
-      let ds = Cc["@mozilla.org/intl/scriptabledateformat;1"].
-               getService(Ci.nsIScriptableDateFormat);
-
       function uri(spec) {
-        return Services.io.newURI(spec, null, null);
+        return Services.io.newURI(spec);
       }
 
-      Task.spawn(function* () {
-        yield PlacesTestUtils.clearHistory();
+      (async function() {
+        await PlacesUtils.history.clear();
 
         let midnight = new Date();
         midnight.setHours(0);
@@ -71,7 +67,7 @@
 
         // Add a visit 1ms before midnight, a visit at midnight, and
         // a visit 1ms after midnight.
-        yield PlacesTestUtils.addVisits([
+        await PlacesTestUtils.addVisits([
           {uri: uri("http://before.midnight.com/"),
            visitDate: (midnight.getTime() - 1) * 1000,
            transition: PlacesUtils.history.TRANSITION_TYPED},
@@ -84,7 +80,7 @@
         ]);
 
         // add a bookmark to the midnight visit
-        let bm = yield PlacesUtils.bookmarks.insert({
+        let bm = await PlacesUtils.bookmarks.insert({
           parentGuid: PlacesUtils.bookmarks.toolbarGuid,
           index: PlacesUtils.bookmarks.DEFAULT_INDEX,
           url: "http://at.midnight.com/",
@@ -95,7 +91,7 @@
         // Make a history query.
         let query = PlacesUtils.history.getNewQuery();
         let opts = PlacesUtils.history.getNewQueryOptions();
-        let queryURI = PlacesUtils.history.queriesToQueryString([query], 1, opts);
+        let queryURI = PlacesUtils.history.queryToQueryString(query, opts);
 
         // Setup the places tree contents.
         let tree = document.getElementById("tree");
@@ -127,23 +123,21 @@
               case "date":
                 let timeObj = new Date(node.time / 1000);
                 // Default is short date format.
-                let dateFormat = Ci.nsIScriptableDateFormat.dateFormatShort;
+                let dtOptions = {
+                  dateStyle: "short",
+                  timeStyle: "short"
+                };
+
                 // For today's visits we don't show date portion.
                 if (node.uri == "http://at.midnight.com/" ||
-                    node.uri == "http://after.midnight.com/")
-                  dateFormat = Ci.nsIScriptableDateFormat.dateFormatNone;
-                else if (node.uri == "http://before.midnight.com/")
-                  dateFormat = Ci.nsIScriptableDateFormat.dateFormatShort;
-                else {
+                    node.uri == "http://after.midnight.com/") {
+                  dtOptions.dateStyle = undefined;
+                } else if (node.uri != "http://before.midnight.com/") {
                   // Avoid to test spurious uris, due to how the test works
                   // a redirecting uri could be put in the tree while we test.
                   break;
                 }
-                let timeStr = ds.FormatDateTime("", dateFormat,
-                      Ci.nsIScriptableDateFormat.timeFormatNoSeconds,
-                      timeObj.getFullYear(), timeObj.getMonth() + 1,
-                      timeObj.getDate(), timeObj.getHours(),
-                      timeObj.getMinutes(), timeObj.getSeconds())
+                let timeStr = new Services.intl.DateTimeFormat(undefined, dtOptions).format(timeObj);
 
                 is(text, timeStr, "Date format is correct");
                 break;
@@ -155,9 +149,9 @@
         }
 
         // Cleanup.
-        yield PlacesUtils.bookmarks.remove(bm.guid);
-        yield PlacesTestUtils.clearHistory();
-      }).then(SimpleTest.finish);
+        await PlacesUtils.bookmarks.remove(bm.guid);
+        await PlacesUtils.history.clear();
+      })().then(SimpleTest.finish);
     }
   ]]>
   </script>

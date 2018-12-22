@@ -3,61 +3,67 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 requestLongerTimeout(2);
 
 var {Toolbox} = require("devtools/client/framework/toolbox");
 
-add_task(function*() {
-  let tab = yield addTab("about:blank");
-  let target = TargetFactory.forTab(tab);
-  yield target.makeRemote();
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
-  let toolIDs = gDevTools.getToolDefinitionArray()
-                         .filter(def => def.isTargetSupported(target))
+add_task(async function() {
+  const tab = await addTab("about:blank");
+  const target = TargetFactory.forTab(tab);
+  await target.makeRemote();
+
+  const toolIDs = gDevTools.getToolDefinitionArray()
+                         .filter(
+                           def =>
+                             def.isTargetSupported(target) &&
+                             def.id !== "options"
+                         )
                          .map(def => def.id);
 
-  let toolbox = yield gDevTools.showToolbox(target, toolIDs[0],
-                                            Toolbox.HostType.BOTTOM);
-  let nextKey = toolbox.doc.getElementById("toolbox-next-tool-key")
-                           .getAttribute("key");
-  let prevKey = toolbox.doc.getElementById("toolbox-previous-tool-key")
-                           .getAttribute("key");
+  const toolbox = await gDevTools.showToolbox(target, toolIDs[0], Toolbox.HostType.BOTTOM);
+  const nextShortcut = L10N.getStr("toolbox.nextTool.key");
+  const prevShortcut = L10N.getStr("toolbox.previousTool.key");
 
   // Iterate over all tools, starting from options to netmonitor, in normal
   // order.
   for (let i = 1; i < toolIDs.length; i++) {
-    yield testShortcuts(toolbox, i, nextKey, toolIDs);
+    await testShortcuts(toolbox, i, nextShortcut, toolIDs);
   }
 
   // Iterate again, in the same order, starting from netmonitor (so next one is
   // 0: options).
   for (let i = 0; i < toolIDs.length; i++) {
-    yield testShortcuts(toolbox, i, nextKey, toolIDs);
+    await testShortcuts(toolbox, i, nextShortcut, toolIDs);
   }
 
   // Iterate over all tools in reverse order, starting from netmonitor to
   // options.
   for (let i = toolIDs.length - 2; i >= 0; i--) {
-    yield testShortcuts(toolbox, i, prevKey, toolIDs);
+    await testShortcuts(toolbox, i, prevShortcut, toolIDs);
   }
 
   // Iterate again, in reverse order again, starting from options (so next one
   // is length-1: netmonitor).
   for (let i = toolIDs.length - 1; i >= 0; i--) {
-    yield testShortcuts(toolbox, i, prevKey, toolIDs);
+    await testShortcuts(toolbox, i, prevShortcut, toolIDs);
   }
 
-  yield toolbox.destroy();
+  await toolbox.destroy();
   gBrowser.removeCurrentTab();
 });
 
-function* testShortcuts(toolbox, index, key, toolIDs) {
+async function testShortcuts(toolbox, index, shortcut, toolIDs) {
   info("Testing shortcut to switch to tool " + index + ":" + toolIDs[index] +
-       " using key " + key);
+       " using shortcut " + shortcut);
 
-  let onToolSelected = toolbox.once("select");
-  EventUtils.synthesizeKey(key, {accelKey: true}, toolbox.doc.defaultView);
-  let id = yield onToolSelected;
+  const onToolSelected = toolbox.once("select");
+  synthesizeKeyShortcut(shortcut);
+  const id = await onToolSelected;
 
   info("toolbox-select event from " + id);
 

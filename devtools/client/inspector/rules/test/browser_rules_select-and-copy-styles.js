@@ -6,9 +6,7 @@
 
 // Tests that properties can be selected and copied from the rule view
 
-XPCOMUtils.defineLazyGetter(this, "osString", function() {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
+const osString = Services.appinfo.OS;
 
 const TEST_URI = `
   <style type="text/css">
@@ -38,141 +36,123 @@ const TEST_URI = `
   </div>
 `;
 
-add_task(function*() {
-  yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {inspector, view} = yield openRuleView();
-  yield selectNode("div", inspector);
-  yield checkCopySelection(view);
-  yield checkSelectAll(view);
-  yield checkCopyEditorValue(view);
+add_task(async function() {
+  await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
+  const {inspector, view} = await openRuleView();
+  await selectNode("div", inspector);
+  await checkCopySelection(view);
+  await checkSelectAll(view);
+  await checkCopyEditorValue(view);
 });
 
-function* checkCopySelection(view) {
+async function checkCopySelection(view) {
   info("Testing selection copy");
 
-  let contentDoc = view.styleDocument;
-  let win = view.styleWindow;
-  let prop = contentDoc.querySelector(".ruleview-property");
-  let values = contentDoc.querySelectorAll(".ruleview-propertyvaluecontainer");
+  const contentDoc = view.styleDocument;
+  const win = view.styleWindow;
+  const prop = contentDoc.querySelector(".ruleview-property");
+  const values = contentDoc.querySelectorAll(".ruleview-propertyvaluecontainer");
 
-  let range = contentDoc.createRange();
+  const range = contentDoc.createRange();
   range.setStart(prop, 0);
   range.setEnd(values[4], 2);
   win.getSelection().addRange(range);
-
   info("Checking that _Copy() returns the correct clipboard value");
 
-  let expectedPattern = "    margin: 10em;[\\r\\n]+" +
+  const expectedPattern = "    margin: 10em;[\\r\\n]+" +
                         "    font-size: 14pt;[\\r\\n]+" +
-                        "    font-family: helvetica,sans-serif;[\\r\\n]+" +
-                        "    color: rgb\\(170, 170, 170\\);[\\r\\n]+" +
+                        "    font-family: helvetica, sans-serif;[\\r\\n]+" +
+                        "    color: #AAA;[\\r\\n]+" +
                         "}[\\r\\n]+" +
                         "html {[\\r\\n]+" +
                         "    color: #000000;[\\r\\n]*";
 
-  let onPopup = once(view._contextmenu._menupopup, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(prop,
-    {button: 2, type: "contextmenu"}, win);
-  yield onPopup;
+  const allMenuItems = openStyleContextMenuAndGetAllItems(view, prop);
+  const menuitemCopy = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
-  ok(!view._contextmenu.menuitemCopy.hidden,
+  ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => view._contextmenu.menuitemCopy.click(),
+    await waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
   }
-
-  view._contextmenu._menupopup.hidePopup();
 }
 
-function* checkSelectAll(view) {
+async function checkSelectAll(view) {
   info("Testing select-all copy");
 
-  let contentDoc = view.styleDocument;
-  let win = view.styleWindow;
-  let prop = contentDoc.querySelector(".ruleview-property");
+  const contentDoc = view.styleDocument;
+  const prop = contentDoc.querySelector(".ruleview-property");
 
   info("Checking that _SelectAll() then copy returns the correct " +
     "clipboard value");
-  view._contextmenu._onSelectAll();
-  let expectedPattern = "element {[\\r\\n]+" +
+  view.contextMenu._onSelectAll();
+  const expectedPattern = "element {[\\r\\n]+" +
                         "    margin: 10em;[\\r\\n]+" +
                         "    font-size: 14pt;[\\r\\n]+" +
-                        "    font-family: helvetica,sans-serif;[\\r\\n]+" +
-                        "    color: rgb\\(170, 170, 170\\);[\\r\\n]+" +
+                        "    font-family: helvetica, sans-serif;[\\r\\n]+" +
+                        "    color: #AAA;[\\r\\n]+" +
                         "}[\\r\\n]+" +
                         "html {[\\r\\n]+" +
                         "    color: #000000;[\\r\\n]+" +
                         "}[\\r\\n]*";
 
-  let onPopup = once(view._contextmenu._menupopup, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(prop,
-    {button: 2, type: "contextmenu"}, win);
-  yield onPopup;
+  const allMenuItems = openStyleContextMenuAndGetAllItems(view, prop);
+  const menuitemCopy = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
-  ok(!view._contextmenu.menuitemCopy.hidden,
+  ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => view._contextmenu.menuitemCopy.click(),
+    await waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
   }
-
-  view._contextmenu._menupopup.hidePopup();
 }
 
-function* checkCopyEditorValue(view) {
+async function checkCopyEditorValue(view) {
   info("Testing CSS property editor value copy");
 
-  let win = view.styleWindow;
-  let ruleEditor = getRuleViewRuleEditor(view, 0);
-  let propEditor = ruleEditor.rule.textProps[0].editor;
+  const ruleEditor = getRuleViewRuleEditor(view, 0);
+  const propEditor = ruleEditor.rule.textProps[0].editor;
 
-  let editor = yield focusEditableField(view, propEditor.valueSpan);
+  const editor = await focusEditableField(view, propEditor.valueSpan);
 
   info("Checking that copying a css property value editor returns the correct" +
     " clipboard value");
 
-  let expectedPattern = "10em";
+  const expectedPattern = "10em";
 
-  let onPopup = once(view._contextmenu._menupopup, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(editor.input,
-    {button: 2, type: "contextmenu"}, win);
-  yield onPopup;
+  const allMenuItems = openStyleContextMenuAndGetAllItems(view, editor.input);
+  const menuitemCopy = allMenuItems.find(item => item.label ===
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
-  ok(!view._contextmenu.menuitemCopy.hidden,
+  ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => view._contextmenu.menuitemCopy.click(),
+    await waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
   }
-
-  view._contextmenu._menupopup.hidePopup();
-
-  // The value field is still focused. Blur it now and wait for the
-  // ruleview-changed event to avoid pending requests.
-  let onRuleViewChanged = view.once("ruleview-changed");
-  EventUtils.synthesizeKey("VK_ESCAPE", {});
-  yield onRuleViewChanged;
 }
 
 function checkClipboardData(expectedPattern) {
-  let actual = SpecialPowers.getClipboardData("text/unicode");
-  let expectedRegExp = new RegExp(expectedPattern, "g");
+  const actual = SpecialPowers.getClipboardData("text/unicode");
+  const expectedRegExp = new RegExp(expectedPattern, "g");
   return expectedRegExp.test(actual);
 }
 
 function failedClipboard(expectedPattern) {
   // Format expected text for comparison
-  let terminator = osString == "WINNT" ? "\r\n" : "\n";
+  const terminator = osString == "WINNT" ? "\r\n" : "\n";
   expectedPattern = expectedPattern.replace(/\[\\r\\n\][+*]/g, terminator);
   expectedPattern = expectedPattern.replace(/\\\(/g, "(");
   expectedPattern = expectedPattern.replace(/\\\)/g, ")");

@@ -10,9 +10,10 @@
 <body>
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=424359">Mozilla Bug </a>
 <p id="display"></p>
+<!-- IMPORTANT: This iframe needs to actually be displayed, so the serializer
+     sees the relevant styles for <pre> elements. -->
+<iframe id="testframe" src="file_htmlserializer_1.html"></iframe>
 <div id="content" style="display: none">
-  <iframe id="testframe" src="file_htmlserializer_1.html">
-  </iframe>
 </div>
 <pre id="test">
 <script class="testbody" type="text/javascript">
@@ -23,9 +24,10 @@ function loadFileContent(aFile, aCharset) {
     if(aCharset == undefined)
         aCharset = 'UTF-8';
 
-    var baseUri = SpecialPowers.Cc['@mozilla.org/network/standard-url;1']
-                   .createInstance(SpecialPowers.Ci.nsIURI);
-    baseUri.spec = window.location.href;
+    var baseUri = SpecialPowers.Cc['@mozilla.org/network/standard-url-mutator;1']
+                                  .createInstance(SpecialPowers.Ci.nsIURIMutator)
+                                  .setSpec(window.location.href)
+                                  .finalize();
 
     var ios = SpecialPowers.Cc['@mozilla.org/network/io-service;1']
             .getService(SpecialPowers.Ci.nsIIOService);

@@ -5,24 +5,19 @@
 /*
  * Handles the validation callback from nsIFormFillController and
  * the display of the help panel on invalid elements.
+ *
+ * FormSubmitObserver implements the nsIFormSubmitObserver interface
+ * to get notifications about invalid forms. See HTMLFormElement
+ * for details.
  */
 
 "use strict";
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
-var Cu = Components.utils;
+var EXPORTED_SYMBOLS = [ "FormSubmitObserver" ];
 
-var HTMLInputElement = Ci.nsIDOMHTMLInputElement;
-var HTMLTextAreaElement = Ci.nsIDOMHTMLTextAreaElement;
-var HTMLSelectElement = Ci.nsIDOMHTMLSelectElement;
-var HTMLButtonElement = Ci.nsIDOMHTMLButtonElement;
-
-this.EXPORTED_SYMBOLS = [ "FormSubmitObserver" ];
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/BrowserUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/BrowserUtils.jsm");
 
 function FormSubmitObserver(aWindow, aTabChildGlobal) {
   this.init(aWindow, aTabChildGlobal);
@@ -38,8 +33,7 @@ FormSubmitObserver.prototype =
    * Public apis
    */
 
-  init: function(aWindow, aTabChildGlobal)
-  {
+  init(aWindow, aTabChildGlobal) {
     this._content = aWindow;
     this._tab = aTabChildGlobal;
     this._mm =
@@ -50,18 +44,13 @@ FormSubmitObserver.prototype =
                    .QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIContentFrameMessageManager);
 
-    // nsIFormSubmitObserver callback about invalid forms. See HTMLFormElement
-    // for details.
-    Services.obs.addObserver(this, "invalidformsubmit", false);
-    this._tab.addEventListener("pageshow", this, false);
-    this._tab.addEventListener("unload", this, false);
+    this._tab.addEventListener("pageshow", this);
+    this._tab.addEventListener("unload", this);
   },
 
-  uninit: function()
-  {
-    Services.obs.removeObserver(this, "invalidformsubmit");
-    this._content.removeEventListener("pageshow", this, false);
-    this._content.removeEventListener("unload", this, false);
+  uninit() {
+    this._content.removeEventListener("pageshow", this);
+    this._content.removeEventListener("unload", this);
     this._mm = null;
     this._element = null;
     this._content = null;
@@ -72,7 +61,7 @@ FormSubmitObserver.prototype =
    * Events
    */
 
-  handleEvent: function (aEvent) {
+  handleEvent(aEvent) {
     switch (aEvent.type) {
       case "pageshow":
         if (this._isRootDocumentEvent(aEvent)) {
@@ -95,8 +84,7 @@ FormSubmitObserver.prototype =
    * nsIFormSubmitObserver
    */
 
-  notifyInvalidSubmit : function (aFormElement, aInvalidElements)
-  {
+  notifyInvalidSubmit(aFormElement, aInvalidElements) {
     // We are going to handle invalid form submission attempt by focusing the
     // first invalid element and show the corresponding validation message in a
     // panel attached to the element.
@@ -104,40 +92,48 @@ FormSubmitObserver.prototype =
       return;
     }
 
-    // Insure that this is the FormSubmitObserver associated with the form
-    // element / window this notification is about.
-    if (this._content != aFormElement.ownerDocument.defaultView.top.document.defaultView) {
-      return;
-    }
+    // Show a validation message on the first focusable element.
+    for (let i = 0; i < aInvalidElements.length; i++) {
+      // Insure that this is the FormSubmitObserver associated with the
+      // element / window this notification is about.
+      let element = aInvalidElements.queryElementAt(i, Ci.nsISupports);
+      if (this._content != element.ownerGlobal.top.document.defaultView) {
+        return;
+      }
 
-    let element = aInvalidElements.queryElementAt(0, Ci.nsISupports);
-    if (!(element instanceof HTMLInputElement ||
-          element instanceof HTMLTextAreaElement ||
-          element instanceof HTMLSelectElement ||
-          element instanceof HTMLButtonElement)) {
-      return;
-    }
+      if (!(ChromeUtils.getClassName(element) === "HTMLInputElement" ||
+            ChromeUtils.getClassName(element) === "HTMLTextAreaElement" ||
+            ChromeUtils.getClassName(element) === "HTMLSelectElement" ||
+            ChromeUtils.getClassName(element) === "HTMLButtonElement")) {
+        continue;
+      }
 
-    // Update validation message before showing notification
-    this._validationMessage = element.validationMessage;
+      if (!Services.focus.elementIsFocusable(element, 0)) {
+        continue;
+      }
 
-    // Don't connect up to the same element more than once.
-    if (this._element == element) {
+      // Update validation message before showing notification
+      this._validationMessage = element.validationMessage;
+
+      // Don't connect up to the same element more than once.
+      if (this._element == element) {
+        this._showPopup(element);
+        break;
+      }
+      this._element = element;
+
+      element.focus();
+
+      // Watch for input changes which may change the validation message.
+      element.addEventListener("input", this);
+
+      // Watch for focus changes so we can disconnect our listeners and
+      // hide the popup.
+      element.addEventListener("blur", this);
+
       this._showPopup(element);
-      return;
+      break;
     }
-    this._element = element;
-
-    element.focus();
-
-    // Watch for input changes which may change the validation message.
-    element.addEventListener("input", this, false);
-
-    // Watch for focus changes so we can disconnect our listeners and
-    // hide the popup.
-    element.addEventListener("blur", this, false);
-
-    this._showPopup(element);
   },
 
   /*
@@ -149,7 +145,7 @@ FormSubmitObserver.prototype =
    * with. Updates the validation message or closes the popup if form data
    * becomes valid.
    */
-  _onInput: function (aEvent) {
+  _onInput(aEvent) {
     let element = aEvent.originalTarget;
 
     // If the form input is now valid, hide the popup.
@@ -170,9 +166,9 @@ FormSubmitObserver.prototype =
    * Blur event handler in which we disconnect from the form element and
    * hide the popup.
    */
-  _onBlur: function (aEvent) {
-    aEvent.originalTarget.removeEventListener("input", this, false);
-    aEvent.originalTarget.removeEventListener("blur", this, false);
+  _onBlur(aEvent) {
+    aEvent.originalTarget.removeEventListener("input", this);
+    aEvent.originalTarget.removeEventListener("blur", this);
     this._element = null;
     this._hidePopup();
   },
@@ -182,7 +178,7 @@ FormSubmitObserver.prototype =
    * information. Can be called repetitively to update the currently
    * displayed popup position and text.
    */
-  _showPopup: function (aElement) {
+  _showPopup(aElement) {
     // Collect positional information and show the popup
     let panelData = {};
 
@@ -190,20 +186,19 @@ FormSubmitObserver.prototype =
 
     // Note, this is relative to the browser and needs to be translated
     // in chrome.
-    panelData.contentRect = this._msgRect(aElement);
+    panelData.contentRect = BrowserUtils.getElementBoundingRect(aElement);
 
     // We want to show the popup at the middle of checkbox and radio buttons
     // and where the content begin for the other elements.
     let offset = 0;
-    let position = "";
 
-    if (aElement.tagName == 'INPUT' &&
-        (aElement.type == 'radio' || aElement.type == 'checkbox')) {
+    if (aElement.tagName == "INPUT" &&
+        (aElement.type == "radio" || aElement.type == "checkbox")) {
       panelData.position = "bottomcenter topleft";
     } else {
-      let win = aElement.ownerDocument.defaultView;
-      let style = win.getComputedStyle(aElement, null);
-      if (style.direction == 'rtl') {
+      let win = aElement.ownerGlobal;
+      let style = win.getComputedStyle(aElement);
+      if (style.direction == "rtl") {
         offset = parseInt(style.paddingRight) + parseInt(style.borderRightWidth);
       } else {
         offset = parseInt(style.paddingLeft) + parseInt(style.borderLeftWidth);
@@ -215,15 +210,15 @@ FormSubmitObserver.prototype =
     this._mm.sendAsyncMessage("FormValidation:ShowPopup", panelData);
   },
 
-  _hidePopup: function () {
+  _hidePopup() {
     this._mm.sendAsyncMessage("FormValidation:HidePopup", {});
   },
 
-  _getWindowUtils: function () {
+  _getWindowUtils() {
     return this._content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
   },
 
-  _isRootDocumentEvent: function (aEvent) {
+  _isRootDocumentEvent(aEvent) {
     if (this._content == null) {
       return true;
     }
@@ -232,21 +227,5 @@ FormSubmitObserver.prototype =
             (target.ownerDocument && target.ownerDocument == this._content.document));
   },
 
-  /*
-   * Return a message manager rect for the element's bounding client rect
-   * in top level browser coords.
-   */
-  _msgRect: function (aElement) {
-    let domRect = aElement.getBoundingClientRect();
-    let zoomFactor = this._getWindowUtils().fullZoom;
-    let { offsetX, offsetY } = BrowserUtils.offsetToTopLevelWindow(this._content, aElement);
-    return {
-      left: (domRect.left + offsetX) * zoomFactor,
-      top: (domRect.top + offsetY) * zoomFactor,
-      width: domRect.width * zoomFactor,
-      height: domRect.height * zoomFactor
-    };
-  },
-
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsIFormSubmitObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIFormSubmitObserver, Ci.nsISupportsWeakReference])
 };

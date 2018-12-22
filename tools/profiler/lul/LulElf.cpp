@@ -59,19 +59,24 @@
 #include <vector>
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Sprintf.h"
 
-#include "LulPlatformMacros.h"
+#include "PlatformMacros.h"
 #include "LulCommonExt.h"
 #include "LulDwarfExt.h"
 #include "LulElfInt.h"
 #include "LulMainInt.h"
 
 
-#if defined(LUL_PLAT_arm_android) && !defined(SHT_ARM_EXIDX)
+#if defined(GP_PLAT_arm_android) && !defined(SHT_ARM_EXIDX)
 // bionic and older glibsc don't define it
 # define SHT_ARM_EXIDX (SHT_LOPROC + 1)
 #endif
 
+// Old Linux header doesn't define EM_AARCH64
+#ifndef EM_AARCH64
+#define EM_AARCH64 183
+#endif
 
 // This namespace contains helper functions.
 namespace {
@@ -162,6 +167,12 @@ bool DwarfCFIRegisterNames(const typename ElfClass::Ehdr* elf_header,
       return true;
     case EM_X86_64:
       *num_dw_regnames = DwarfCFIToModule::RegisterNames::X86_64();
+      return true;
+    case EM_MIPS:
+      *num_dw_regnames = DwarfCFIToModule::RegisterNames::MIPS();
+      return true;
+    case EM_AARCH64:
+      *num_dw_regnames = DwarfCFIToModule::RegisterNames::ARM64();
       return true;
     default:
       MOZ_ASSERT(0);
@@ -359,7 +370,7 @@ bool LoadSymbols(const string& obj_file,
   typedef typename ElfClass::Shdr Shdr;
 
   char buf[500];
-  snprintf(buf, sizeof(buf), "LoadSymbols: BEGIN   %s\n", obj_file.c_str());
+  SprintfLiteral(buf, "LoadSymbols: BEGIN   %s\n", obj_file.c_str());
   buf[sizeof(buf)-1] = 0;
   log(buf);
 
@@ -369,7 +380,7 @@ bool LoadSymbols(const string& obj_file,
       GetOffset<ElfClass, Phdr>(elf_header, elf_header->e_phoff),
       elf_header->e_phnum);
   uintptr_t text_bias = ((uintptr_t)rx_avma) - loading_addr;
-  snprintf(buf, sizeof(buf),
+  SprintfLiteral(buf,
            "LoadSymbols:   rx_avma=%llx, text_bias=%llx",
            (unsigned long long int)(uintptr_t)rx_avma,
            (unsigned long long int)text_bias);
@@ -434,7 +445,7 @@ bool LoadSymbols(const string& obj_file,
       log("LoadSymbols:   read CFI from .eh_frame");
   }
 
-  snprintf(buf, sizeof(buf), "LoadSymbols: END     %s\n", obj_file.c_str());
+  SprintfLiteral(buf, "LoadSymbols: END     %s\n", obj_file.c_str());
   buf[sizeof(buf)-1] = 0;
   log(buf);
 
@@ -450,6 +461,7 @@ const char* ElfArchitecture(const typename ElfClass::Ehdr* elf_header) {
   switch (arch) {
     case EM_386:        return "x86";
     case EM_ARM:        return "arm";
+    case EM_AARCH64:    return "arm64";
     case EM_MIPS:       return "mips";
     case EM_PPC64:      return "ppc64";
     case EM_PPC:        return "ppc";

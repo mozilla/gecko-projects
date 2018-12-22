@@ -5,8 +5,6 @@ var gOldPref;
 var gDetectorList;
 var gTestIndex;
 var gLocalDir;
-var Cc = Components.classes;
-var Ci = Components.interfaces;
 
 function CharsetDetectionTests(aTestFile, aExpectedCharset, aDetectorList)
 {
@@ -64,11 +62,7 @@ function SetDetectorPref(aPrefValue)
 {
     var prefService = Cc["@mozilla.org/preferences-service;1"]
                       .getService(Ci.nsIPrefBranch);
-    var str = Cc["@mozilla.org/supports-string;1"]
-              .createInstance(Ci.nsISupportsString);
-    str.data = aPrefValue;
-    prefService.setComplexValue("intl.charset.detector",
-                                Ci.nsISupportsString, str);
+    prefService.setStringPref("intl.charset.detector", aPrefValue);
     gCurrentDetector = aPrefValue;
 }
 

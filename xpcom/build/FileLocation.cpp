@@ -10,13 +10,9 @@
 
 namespace mozilla {
 
-FileLocation::FileLocation()
-{
-}
+FileLocation::FileLocation() = default;
 
-FileLocation::~FileLocation()
-{
-}
+FileLocation::~FileLocation() = default;
 
 FileLocation::FileLocation(nsIFile* aFile)
 {
@@ -26,6 +22,26 @@ FileLocation::FileLocation(nsIFile* aFile)
 FileLocation::FileLocation(nsIFile* aFile, const char* aPath)
 {
   Init(aFile, aPath);
+}
+
+FileLocation::FileLocation(nsZipArchive* aZip, const char* aPath)
+{
+  Init(aZip, aPath);
+}
+
+FileLocation::FileLocation(const FileLocation& aOther)
+  : mBaseFile(aOther.mBaseFile)
+  , mBaseZip(aOther.mBaseZip)
+  , mPath(aOther.mPath)
+{
+}
+
+FileLocation::FileLocation(FileLocation&& aOther)
+  : mBaseFile(std::move(aOther.mBaseFile))
+  , mBaseZip(std::move(aOther.mBaseZip))
+  , mPath(std::move(aOther.mPath))
+{
+  aOther.mPath.Truncate();
 }
 
 FileLocation::FileLocation(const FileLocation& aFile, const char* aPath)
@@ -105,7 +121,7 @@ FileLocation::GetURIString(nsACString& aResult) const
     handler->mFile.GetURIString(aResult);
   }
   if (IsZip()) {
-    aResult.Insert("jar:", 0);
+    aResult.InsertLiteral("jar:", 0);
     aResult += "!/";
     aResult += mPath;
   }
@@ -186,7 +202,7 @@ FileLocation::Data::GetSize(uint32_t* aResult)
     *aResult = fileInfo.size;
     return NS_OK;
   }
-  else if (mItem) {
+  if (mItem) {
     *aResult = mItem->RealSize();
     return NS_OK;
   }
@@ -207,7 +223,7 @@ FileLocation::Data::Copy(char* aBuf, uint32_t aLen)
     }
     return NS_OK;
   }
-  else if (mItem) {
+  if (mItem) {
     nsZipCursor cursor(mItem, mZip, reinterpret_cast<uint8_t*>(aBuf),
                        aLen, true);
     uint32_t readLen;

@@ -39,7 +39,7 @@ var vectors = [
   },
   {
     "data": "<video poster=javascript:alert(1)//></video>",
-    "sanitized": "<html><head></head><body><video controls=\"controls\" poster=\"javascript:alert(1)//\"></video></body></html>"
+    "sanitized": "<html><head></head><body><video poster=\"javascript:alert(1)//\" controls=\"controls\"></video></body></html>"
   },
   {
     "data": "<svg xmlns=\"http://www.w3.org/2000/svg\"><g onload=\"javascript:alert(1)\"></g></svg>",
@@ -139,7 +139,7 @@ var vectors = [
   },
   {
     "data": "1<a href=#><line xmlns=urn:schemas-microsoft-com:vml style=behavior:url(#default#vml);position:absolute href=javascript:alert(1) strokecolor=white strokeweight=1000px from=0 to=1000 /></a>",
-    "sanitized": "<html><head></head><body>1<a></a></body></html>"
+    "sanitized": "<html><head></head><body>1<a href=\"#\"></a></body></html>"
   },
   {
     "data": "<a style=\"behavior:url(#default#AnchorClick);\" folder=\"javascript:alert(1)\">XXX</a>",
@@ -431,7 +431,7 @@ var vectors = [
   },
   {
     "data": "<!-- IE 5-8 standards mode -->\r\n<a href=http://foo.bar/#x=`y></a><img alt=\"`><img src=xx:x onerror=alert(1)></a>\">\r\n\r\n<!-- IE 5-9 standards mode -->\r\n<!a foo=x=`y><img alt=\"`><img src=xx:x onerror=alert(2)//\">\r\n<?a foo=x=`y><img alt=\"`><img src=xx:x onerror=alert(3)//\">",
-    "sanitized": "<html><head></head><body><a href=\"http://foo.bar/#x=%60y\"></a><img alt=\"`&gt;&lt;img src=xx:x onerror=alert(1)&gt;&lt;/a&gt;\">\n\n\n<img alt=\"`&gt;&lt;img src=xx:x onerror=alert(2)//\">\n<img alt=\"`&gt;&lt;img src=xx:x onerror=alert(3)//\"></body></html>"
+    "sanitized": "<html><head></head><body><a href=\"http://foo.bar/#x=`y\"></a><img alt=\"`&gt;&lt;img src=xx:x onerror=alert(1)&gt;&lt;/a&gt;\">\n\n\n<img alt=\"`&gt;&lt;img src=xx:x onerror=alert(2)//\">\n<img alt=\"`&gt;&lt;img src=xx:x onerror=alert(3)//\"></body></html>"
   },
   {
     "data": "<svg xmlns=\"http://www.w3.org/2000/svg\">\n<a id=\"x\"><rect fill=\"white\" width=\"1000\" height=\"1000\"/></a>\n<rect  fill=\"white\" style=\"clip-path:url(test3.svg#a);fill:url(#b);filter:url(#c);marker:url(#d);mask:url(#e);stroke:url(#f);\"/>\n</svg>",
@@ -479,7 +479,7 @@ var vectors = [
   },
   {
     "data": "<script>\nfunction makePopups(){\n\tfor (i=1;i<6;i++) {\n\t\twindow.open('popup.html','spam'+i,'width=50,height=50');\n\t}\n}\n</script>\n\n<body>\n<a href=\"#\" onclick=\"makePopups()\">Spam</a>",
-    "sanitized": "<html><head>\n\n</head><body>\n<a>Spam</a></body></html>"
+    "sanitized": "<html><head>\n\n</head><body>\n<a href=\"#\">Spam</a></body></html>"
   },
   {
     "data": "<html xmlns=\"http://www.w3.org/1999/xhtml\"\nxmlns:svg=\"http://www.w3.org/2000/svg\">\n<body style=\"background:gray\">\n<iframe src=\"http://example.com/\" style=\"width:800px; height:350px; border:none; mask: url(#maskForClickjacking);\"/>\n<svg:svg>\n<svg:mask id=\"maskForClickjacking\" maskUnits=\"objectBoundingBox\" maskContentUnits=\"objectBoundingBox\">\n\t<svg:rect x=\"0.0\" y=\"0.0\" width=\"0.373\" height=\"0.3\" fill=\"white\"/>\n\t<svg:circle cx=\"0.45\" cy=\"0.7\" r=\"0.075\" fill=\"white\"/>\n</svg:mask>\n</svg:svg>\n</body>\n</html>",

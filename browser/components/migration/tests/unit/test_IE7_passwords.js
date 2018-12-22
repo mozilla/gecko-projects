@@ -1,14 +1,13 @@
-Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+"use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "WindowsRegistry",
-                                  "resource://gre/modules/WindowsRegistry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OSCrypto",
-                                  "resource://gre/modules/OSCrypto.jsm");
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-const CRYPT_PROTECT_UI_FORBIDDEN = 1;
+ChromeUtils.defineModuleGetter(this, "OSCrypto",
+                               "resource://gre/modules/OSCrypto.jsm");
+
 const IE7_FORM_PASSWORDS_MIGRATOR_NAME = "IE7FormPasswords";
-const LOGINS_KEY =  "Software\\Microsoft\\Internet Explorer\\IntelliForms\\Storage2";
+const LOGINS_KEY = "Software\\Microsoft\\Internet Explorer\\IntelliForms\\Storage2";
 const EXTENSION = "-backup";
 const TESTED_WEBSITES = {
   twitter: {
@@ -48,8 +47,8 @@ const TESTED_WEBSITES = {
         timeLastUsed: 1439326966000,
         timePasswordChanged: 1439326966000,
         timesUsed: 1,
-     },
-     {
+      },
+      {
         username: "username1",
         password: "password1",
         hostname: "https://www.facebook.com",
@@ -107,7 +106,7 @@ const TESTED_WEBSITES = {
         timeLastUsed: 1439338767000,
         timePasswordChanged: 1439338767000,
         timesUsed: 1,
-       },
+      },
     ],
   },
   reddit: {
@@ -115,6 +114,17 @@ const TESTED_WEBSITES = {
     hash: "B644028D1C109A91EC2C4B9D1F145E55A1FAE42065",
     data: [12, 0, 0, 0, 152, 0, 0, 0, 212, 0, 0, 0, 87, 73, 67, 75, 24, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 8, 234, 114, 153, 212, 208, 1, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 97, 93, 131, 116, 153, 212, 208, 1, 3, 0, 0, 0, 14, 0, 0, 0, 97, 93, 131, 116, 153, 212, 208, 1, 16, 0, 0, 0, 48, 0, 0, 0, 88, 150, 78, 174, 153, 212, 208, 1, 4, 0, 0, 0, 58, 0, 0, 0, 88, 150, 78, 174, 153, 212, 208, 1, 29, 0, 0, 0, 118, 0, 0, 0, 79, 102, 137, 34, 154, 212, 208, 1, 15, 0, 0, 0, 150, 0, 0, 0, 79, 102, 137, 34, 154, 212, 208, 1, 30, 0, 0, 0, 97, 0, 0, 0, 0, 0, 252, 140, 173, 138, 146, 48, 0, 0, 66, 0, 105, 0, 116, 0, 116, 0, 101, 0, 32, 0, 98, 0, 101, 0, 115, 0, 116, 0, 228, 0, 116, 0, 105, 0, 103, 0, 101, 0, 110, 0, 0, 0, 205, 145, 110, 127, 198, 91, 1, 120, 0, 0, 31, 4, 48, 4, 64, 4, 62, 4, 59, 4, 76, 4, 32, 0, 67, 4, 65, 4, 63, 4, 53, 4, 72, 4, 61, 4, 62, 4, 32, 0, 65, 4, 49, 4, 64, 4, 62, 4, 72, 4, 53, 4, 61, 4, 46, 0, 32, 0, 18, 4, 62, 4, 57, 4, 66, 4, 56, 4, 0, 0, 40, 6, 51, 6, 69, 6, 32, 0, 39, 6, 68, 6, 68, 6, 71, 6, 32, 0, 39, 6, 68, 6, 49, 6, 45, 6, 69, 6, 70, 6, 0, 0, 118, 0, 101, 0, 117, 0, 105, 0, 108, 0, 108, 0, 101, 0, 122, 0, 32, 0, 108, 0, 101, 0, 32, 0, 118, 0, 233, 0, 114, 0, 105, 0, 102, 0, 105, 0, 101, 0, 114, 0, 32, 0, 224, 0, 32, 0, 110, 0, 111, 0, 117, 0, 118, 0, 101, 0, 97, 0, 117, 0, 0, 0],
     logins: [
+      // This login is present in the data, but should be stripped out
+      // by the validation rules of the importer:
+      // {
+      //   "username": "a",
+      //   "password": "",
+      //   "hostname": "http://www.reddit.com",
+      //   "formSubmitURL": "",
+      //   "httpRealm": null,
+      //   "usernameField": "",
+      //   "passwordField": ""
+      // },
       {
         username: "購読を",
         password: "Bitte bestätigen",
@@ -153,7 +163,7 @@ const TESTED_WEBSITES = {
         timeLastUsed: 1439341166000,
         timePasswordChanged: 1439341166000,
         timesUsed: 1,
-     },
+      },
     ],
   },
 };
@@ -255,7 +265,7 @@ function createRegistryPath(path) {
   let loginPath = path.split("\\");
   let parentKey = Cc["@mozilla.org/windows-registry-key;1"].
                   createInstance(nsIWindowsRegKey);
-  let currentPath =[];
+  let currentPath = [];
   for (let currentKey of loginPath) {
     parentKey.open(nsIWindowsRegKey.ROOT_KEY_CURRENT_USER, currentPath.join("\\"),
                    nsIWindowsRegKey.ACCESS_ALL);
@@ -282,12 +292,13 @@ function getFirstResourceOfType(type) {
 }
 
 function makeURI(aURL) {
-  return Services.io.newURI(aURL, null, null);
+  return Services.io.newURI(aURL);
 }
 
-add_task(function* setup() {
+add_task(async function setup() {
   if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2")) {
     Assert.throws(() => getFirstResourceOfType(MigrationUtils.resourceTypes.PASSWORDS),
+                  /failed to find/,
                   "The migrator doesn't exist for win8+");
     return;
   }
@@ -304,7 +315,7 @@ add_task(function* setup() {
   }
 });
 
-add_task(function* test_passwordsNotAvailable() {
+add_task(async function test_passwordsNotAvailable() {
   if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2")) {
     return;
   }
@@ -319,14 +330,14 @@ add_task(function* test_passwordsNotAvailable() {
     uris.push(makeURI(url));
      // in this test, there is no IE login data in the registry, so after the migration, the number
      // of logins in the store should be 0
-    migrator._migrateURIs(uris);
+    await migrator._migrateURIs(uris);
     logins = Services.logins.getAllLogins({});
     Assert.equal(logins.length, 0,
                  "There are no logins after doing the migration without adding values to the registry");
   }
 });
 
-add_task(function* test_passwordsAvailable() {
+add_task(async function test_passwordsAvailable() {
   if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2")) {
     return;
   }
@@ -334,11 +345,11 @@ add_task(function* test_passwordsAvailable() {
   let crypto = new OSCrypto();
   let hashes = []; // the hashes of all migrator websites, this is going to be used for the clean up
 
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     Services.logins.removeAllLogins();
     logins = Services.logins.getAllLogins({});
     Assert.equal(logins.length, 0, "There are no logins after the cleanup");
-    //remove all the values created in this test from the registry
+    // remove all the values created in this test from the registry
     removeAllValues(Storage2Key, hashes);
     // restore all backed up values
     restore(Storage2Key);
@@ -370,13 +381,22 @@ add_task(function* test_passwordsAvailable() {
     uris.push(website.uri);
     hashes.push(website.hash);
 
-    migrator._migrateURIs(uris);
+    await migrator._migrateURIs(uris);
     logins = Services.logins.getAllLogins({});
     // check that the number of logins in the password manager has increased as expected which means
     // that all the values for the current website were imported
     loginCount += website.logins.length;
     Assert.equal(logins.length, loginCount,
                  "The number of logins has increased after the migration");
+    // NB: because telemetry records any login data passed to the login manager, it
+    // also gets told about logins that are duplicates or invalid (for one reason
+    // or another) and so its counts might exceed those of the login manager itself.
+    Assert.greaterOrEqual(MigrationUtils._importQuantities.logins, loginCount,
+                          "Telemetry quantities equal or exceed the actual import.");
+    // Reset - this normally happens at the start of a new migration, but we're calling
+    // the migrator directly so can't rely on that:
+    MigrationUtils._importQuantities.logins = 0;
+
     let startIndex = loginCount - website.logins.length;
     // compares the imported password manager logins with their expected logins
     for (let i = 0; i < website.logins.length; i++) {

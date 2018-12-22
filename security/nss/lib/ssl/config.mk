@@ -7,16 +7,6 @@ ifdef NISCC_TEST
 DEFINES += -DNISCC_TEST
 endif
 
-ifdef NSS_NO_PKCS11_BYPASS
-DEFINES += -DNO_PKCS11_BYPASS
-else
-CRYPTOLIB=$(SOFTOKEN_LIB_DIR)/$(LIB_PREFIX)freebl.$(LIB_SUFFIX)
-
-EXTRA_LIBS += \
-	$(CRYPTOLIB) \
-	$(NULL)
-endif
-
 ifeq (,$(filter-out WIN%,$(OS_TARGET)))
 
 # don't want the 32 in the shared library name
@@ -67,8 +57,6 @@ endif
 
 endif
 
-ifdef NSS_SSL_ENABLE_ZLIB
-DEFINES += -DNSS_SSL_ENABLE_ZLIB
-include $(CORE_DEPTH)/coreconf/zlib.mk
+ifdef NSS_DISABLE_TLS_1_3
+DEFINES += -DNSS_DISABLE_TLS_1_3
 endif
-

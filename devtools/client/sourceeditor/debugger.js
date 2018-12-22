@@ -5,7 +5,6 @@
 "use strict";
 
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const promise = require("promise");
 const dbginfo = new WeakMap();
 
 // These functions implement search within the debugger. Since
@@ -33,8 +32,8 @@ function getSearchCursor(cm, query, pos) {
  * result.
  */
 function doSearch(ctx, rev, query) {
-  let { cm } = ctx;
-  let state = getSearchState(cm);
+  const { cm } = ctx;
+  const state = getSearchState(cm);
 
   if (state.query) {
     searchNext(ctx, rev);
@@ -56,9 +55,9 @@ function doSearch(ctx, rev, query) {
  * Selects the next result of a saved search.
  */
 function searchNext(ctx, rev) {
-  let { cm, ed } = ctx;
+  const { cm, ed } = ctx;
   cm.operation(function() {
-    let state = getSearchState(cm);
+    const state = getSearchState(cm);
     let cursor = getSearchCursor(cm, state.query,
                                  rev ? state.posFrom : state.posTo);
 
@@ -81,7 +80,7 @@ function searchNext(ctx, rev) {
  * Clears the currently saved search.
  */
 function clearSearch(cm) {
-  let state = getSearchState(cm);
+  const state = getSearchState(cm);
 
   if (!state.query) {
     return;
@@ -97,7 +96,7 @@ function clearSearch(cm) {
  * from this module. See Editor.extend for more info.
  */
 function initialize(ctx) {
-  let { ed } = ctx;
+  const { ed } = ctx;
 
   dbginfo.set(ed, {
     breakpoints: {},
@@ -110,13 +109,13 @@ function initialize(ctx) {
  * otherwise.
  */
 function hasBreakpoint(ctx, line) {
-  let { cm } = ctx;
+  const { ed } = ctx;
   // In some rare occasions CodeMirror might not be properly initialized yet, so
   // return an exceptional value in that case.
-  if (cm.lineInfo(line) === null) {
+  if (ed.lineInfo(line) === null) {
     return null;
   }
-  let markers = cm.lineInfo(line).wrapClass;
+  const markers = ed.lineInfo(line).wrapClass;
 
   return markers != null &&
          markers.includes("breakpoint");
@@ -130,47 +129,47 @@ function hasBreakpoint(ctx, line) {
  * emit a breakpointAdded event.
  */
 function addBreakpoint(ctx, line, cond) {
-  function _addBreakpoint(ctx, line, cond) {
-    let { ed, cm } = ctx;
-    let meta = dbginfo.get(ed);
-    let info = cm.lineInfo(line);
-
-    // The line does not exist in the editor. This is harmless, the
-    // architecture calling this assumes the editor will handle this
-    // gracefully, and make sure breakpoints exist when they need to.
-    if (!info) {
-      return;
-    }
-
-    ed.addLineClass(line, "breakpoint");
-    meta.breakpoints[line] = { condition: cond };
-
-    // TODO(jwl): why is `info` null when breaking on page reload?
-    info.handle.on("delete", function onDelete() {
-      info.handle.off("delete", onDelete);
-      meta.breakpoints[info.line] = null;
-    });
-
-    if (cond) {
-      setBreakpointCondition(ctx, line);
-    }
-    ed.emit("breakpointAdded", line);
-    deferred.resolve();
-  }
-
   if (hasBreakpoint(ctx, line)) {
     return null;
   }
 
-  let deferred = promise.defer();
-  // If lineInfo() returns null, wait a tick to give the editor a chance to
-  // initialize properly.
-  if (ctx.cm.lineInfo(line) === null) {
-    DevToolsUtils.executeSoon(() => _addBreakpoint(ctx, line, cond));
-  } else {
-    _addBreakpoint(ctx, line, cond);
-  }
-  return deferred.promise;
+  return new Promise(resolve => {
+    function _addBreakpoint() {
+      const { ed } = ctx;
+      const meta = dbginfo.get(ed);
+      const info = ed.lineInfo(line);
+
+      // The line does not exist in the editor. This is harmless, the
+      // architecture calling this assumes the editor will handle this
+      // gracefully, and make sure breakpoints exist when they need to.
+      if (!info) {
+        return;
+      }
+
+      ed.addLineClass(line, "breakpoint");
+      meta.breakpoints[line] = { condition: cond };
+
+      // TODO(jwl): why is `info` null when breaking on page reload?
+      info.handle.on("delete", function onDelete() {
+        info.handle.off("delete", onDelete);
+        meta.breakpoints[info.line] = null;
+      });
+
+      if (cond) {
+        setBreakpointCondition(ctx, line);
+      }
+      ed.emit("breakpointAdded", line);
+      resolve();
+    }
+
+    // If lineInfo() returns null, wait a tick to give the editor a chance to
+    // initialize properly.
+    if (ctx.ed.lineInfo(line) === null) {
+      DevToolsUtils.executeSoon(() => _addBreakpoint());
+    } else {
+      _addBreakpoint();
+    }
+  });
 }
 
 /**
@@ -183,14 +182,22 @@ function addBreakpoint(ctx, line, cond) {
  *
  */
 function removeBreakpoints(ctx) {
-  let { ed, cm } = ctx;
+  const { ed, cm } = ctx;
 
-  let meta = dbginfo.get(ed);
+  const meta = dbginfo.get(ed);
   if (meta.breakpoints != null) {
     meta.breakpoints = {};
   }
 
-  cm.doc.iter((line) => { removeBreakpoint(ctx, line) });
+  cm.doc.iter((line) => {
+    // The hasBreakpoint is a slow operation: checks the line type, whether cm
+    // is initialized and creates several new objects. Inlining the line's
+    // wrapClass property check directly.
+    if (line.wrapClass == null || !line.wrapClass.includes("breakpoint")) {
+      return;
+    }
+    removeBreakpoint(ctx, line);
+  });
 }
 
 /**
@@ -202,29 +209,27 @@ function removeBreakpoint(ctx, line) {
     return;
   }
 
-  let { ed, cm } = ctx;
-  let meta = dbginfo.get(ed);
-  let info = cm.lineInfo(line);
+  const { ed } = ctx;
+  const meta = dbginfo.get(ed);
+  const info = ed.lineInfo(line);
+  const lineOrOffset = ed.getLineOrOffset(info.line);
 
-  meta.breakpoints[info.line] = null;
-  ed.removeLineClass(info.line, "breakpoint");
-  ed.removeLineClass(info.line, "conditional");
+  meta.breakpoints[lineOrOffset] = null;
+  ed.removeLineClass(lineOrOffset, "breakpoint");
+  ed.removeLineClass(lineOrOffset, "conditional");
   ed.emit("breakpointRemoved", line);
 }
 
 function moveBreakpoint(ctx, fromLine, toLine) {
-  let { ed, cm } = ctx;
-
-  let fromTop = cm.cursorCoords({ line: fromLine }).top;
-  let toTop = cm.cursorCoords({ line: toLine }).top;
+  const { ed } = ctx;
 
   ed.removeBreakpoint(fromLine);
   ed.addBreakpoint(toLine);
 }
 
 function setBreakpointCondition(ctx, line) {
-  let { ed, cm } = ctx;
-  let info = cm.lineInfo(line);
+  const { ed } = ctx;
+  const info = ed.lineInfo(line);
 
   // The line does not exist in the editor. This is harmless, the
   // architecture calling this assumes the editor will handle this
@@ -237,7 +242,7 @@ function setBreakpointCondition(ctx, line) {
 }
 
 function removeBreakpointCondition(ctx, line) {
-  let { ed, cm } = ctx;
+  const { ed } = ctx;
 
   ed.removeLineClass(line, "conditional");
 }
@@ -246,8 +251,8 @@ function removeBreakpointCondition(ctx, line) {
  * Returns a list of all breakpoints in the current Editor.
  */
 function getBreakpoints(ctx) {
-  let { ed } = ctx;
-  let meta = dbginfo.get(ed);
+  const { ed } = ctx;
+  const meta = dbginfo.get(ed);
 
   return Object.keys(meta.breakpoints).reduce((acc, line) => {
     if (meta.breakpoints[line] != null) {
@@ -262,9 +267,10 @@ function getBreakpoints(ctx) {
  * the breakpoints gutter. This is used by the debugger UI to
  * display the line on which the Debugger is currently paused.
  */
-function setDebugLocation(ctx, line) {
-  let { ed } = ctx;
-  let meta = dbginfo.get(ed);
+function setDebugLocation(ctx, lineOrOffset) {
+  const { ed } = ctx;
+  const meta = dbginfo.get(ed);
+  const line = ed.getLineOrOffset(lineOrOffset);
 
   clearDebugLocation(ctx);
 
@@ -277,8 +283,8 @@ function setDebugLocation(ctx, line) {
  * location.
  */
 function getDebugLocation(ctx) {
-  let { ed } = ctx;
-  let meta = dbginfo.get(ed);
+  const { ed } = ctx;
+  const meta = dbginfo.get(ed);
 
   return meta.debugLocation;
 }
@@ -288,8 +294,8 @@ function getDebugLocation(ctx) {
  * also removes a visual anchor from the breakpoints gutter.
  */
 function clearDebugLocation(ctx) {
-  let { ed } = ctx;
-  let meta = dbginfo.get(ed);
+  const { ed } = ctx;
+  const meta = dbginfo.get(ed);
 
   if (meta.debugLocation != null) {
     ed.removeLineClass(meta.debugLocation, "debug-line");
@@ -326,4 +332,6 @@ function findPrev(ctx, query) {
   setBreakpointCondition, removeBreakpointCondition, getBreakpoints, removeBreakpoints,
   setDebugLocation, getDebugLocation, clearDebugLocation, find, findNext,
   findPrev
-].forEach(func => module.exports[func.name] = func);
+].forEach(func => {
+  module.exports[func.name] = func;
+});

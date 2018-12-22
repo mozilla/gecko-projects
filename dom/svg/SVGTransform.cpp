@@ -22,6 +22,8 @@ namespace {
 namespace mozilla {
 namespace dom {
 
+using namespace SVGTransform_Binding;
+
 static nsSVGAttrTearoffTable<SVGTransform, SVGMatrix>&
 SVGMatrixTearoffTable()
 {
@@ -51,7 +53,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
   SVGMatrix* matrix =
     SVGMatrixTearoffTable().GetTearoff(tmp);
   CycleCollectionNoteChild(cb, matrix, "matrix");
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(SVGTransform)
@@ -64,7 +65,7 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(SVGTransform, Release)
 JSObject*
 SVGTransform::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGTransformBinding::Wrap(aCx, this, aGivenProto);
+  return SVGTransform_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------

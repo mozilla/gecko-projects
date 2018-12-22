@@ -10,7 +10,7 @@
 #include <sys/types.h>                  // for int32_t
 #include "gfxTextRun.h"                 // for gfxFont, gfxFontGroup
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/RefPtr.h"             // for RefPtr
 #include "nsCOMPtr.h"                   // for nsCOMPtr
 #include "nsCoord.h"                    // for nscoord
 #include "nsError.h"                    // for nsresult
@@ -18,11 +18,11 @@
 #include "nsISupports.h"                // for NS_INLINE_DECL_REFCOUNTING
 #include "nscore.h"                     // for char16_t
 
+class gfxContext;
 class gfxUserFontSet;
 class gfxTextPerfMetrics;
 class nsDeviceContext;
-class nsIAtom;
-class nsRenderingContext;
+class nsAtom;
 struct nsBoundingMetrics;
 
 /**
@@ -49,9 +49,9 @@ public:
     typedef gfxTextRun::Range Range;
     typedef mozilla::gfx::DrawTarget DrawTarget;
 
-    struct Params
+    struct MOZ_STACK_CLASS Params
     {
-      nsIAtom* language = nullptr;
+      nsAtom* language = nullptr;
       bool explicitLanguage = false;
       gfxFont::Orientation orientation = gfxFont::eHorizontal;
       gfxUserFontSet* userFontSet = nullptr;
@@ -61,7 +61,8 @@ public:
     nsFontMetrics(const nsFont& aFont, const Params& aParams,
                   nsDeviceContext *aContext);
 
-    NS_INLINE_DECL_REFCOUNTING(nsFontMetrics)
+    // Used by stylo
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsFontMetrics)
 
     /**
      * Destroy this font metrics. This breaks the association between
@@ -73,6 +74,11 @@ public:
      * Return the font's x-height.
      */
     nscoord XHeight();
+
+    /**
+     * Return the font's cap-height.
+     */
+    nscoord CapHeight();
 
     /**
      * Return the font's superscript offset (the distance from the
@@ -174,7 +180,7 @@ public:
     /**
      * Returns the language associated with these metrics
      */
-    nsIAtom* Language() const { return mLanguage; }
+    nsAtom* Language() const { return mLanguage; }
 
     /**
      * Returns the orientation (horizontal/vertical) of these metrics.
@@ -194,10 +200,10 @@ public:
     // Draw a string using this font handle on the surface passed in.
     void DrawString(const char *aString, uint32_t aLength,
                     nscoord aX, nscoord aY,
-                    nsRenderingContext *aContext);
+                    gfxContext *aContext);
     void DrawString(const char16_t* aString, uint32_t aLength,
                     nscoord aX, nscoord aY,
-                    nsRenderingContext *aContext,
+                    gfxContext *aContext,
                     DrawTarget* aTextRunConstructionDrawTarget);
 
     nsBoundingMetrics GetBoundingMetrics(const char16_t *aString,
@@ -243,8 +249,10 @@ private:
 
     nsFont mFont;
     RefPtr<gfxFontGroup> mFontGroup;
-    nsCOMPtr<nsIAtom> mLanguage;
-    nsDeviceContext* mDeviceContext;
+    RefPtr<nsAtom> mLanguage;
+    // Pointer to the device context for which this fontMetrics object was
+    // created.
+    nsDeviceContext* MOZ_NON_OWNING_REF mDeviceContext;
     int32_t mP2A;
 
     // The font orientation (horizontal or vertical) for which these metrics

@@ -45,16 +45,16 @@ class CacheStorage;
 class CacheOutputCloseListener;
 class CacheEntryHandle;
 
-class CacheEntry final : public nsICacheEntry
-                       , public nsIRunnable
+class CacheEntry final : public nsIRunnable
                        , public CacheFileListener
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSICACHEENTRY
   NS_DECL_NSIRUNNABLE
 
-  CacheEntry(const nsACString& aStorageID, nsIURI* aURI, const nsACString& aEnhanceID,
+  static uint64_t GetNextId();
+
+  CacheEntry(const nsACString& aStorageID, const nsACString& aURI, const nsACString& aEnhanceID,
              bool aUseDisk, bool aSkipSizeCheck, bool aPin);
 
   void AsyncOpen(nsICacheEntryOpenCallback* aCallback, uint32_t aFlags);
@@ -64,11 +64,48 @@ public:
   // with a handle to detect writing consumer is gone.
   CacheEntryHandle* NewWriteHandle();
 
+  // Forwarded to from CacheEntryHandle : nsICacheEntry
+  nsresult GetKey(nsACString & aKey);
+  nsresult GetCacheEntryId(uint64_t *aCacheEntryId);
+  nsresult GetPersistent(bool *aPersistent);
+  nsresult GetFetchCount(int32_t *aFetchCount);
+  nsresult GetLastFetched(uint32_t *aLastFetched);
+  nsresult GetLastModified(uint32_t *aLastModified);
+  nsresult GetExpirationTime(uint32_t *aExpirationTime);
+  nsresult SetExpirationTime(uint32_t expirationTime);
+  nsresult GetOnStartTime(uint64_t *aOnStartTime);
+  nsresult GetOnStopTime(uint64_t *aOnStopTime);
+  nsresult SetNetworkTimes(uint64_t onStartTime, uint64_t onStopTime);
+  nsresult ForceValidFor(uint32_t aSecondsToTheFuture);
+  nsresult GetIsForcedValid(bool *aIsForcedValid);
+  nsresult OpenInputStream(int64_t offset, nsIInputStream * *_retval);
+  nsresult OpenOutputStream(int64_t offset, int64_t predictedSize, nsIOutputStream * *_retval);
+  nsresult GetSecurityInfo(nsISupports * *aSecurityInfo);
+  nsresult SetSecurityInfo(nsISupports *aSecurityInfo);
+  nsresult GetStorageDataSize(uint32_t *aStorageDataSize);
+  nsresult AsyncDoom(nsICacheEntryDoomCallback *listener);
+  nsresult GetMetaDataElement(const char * key, char * *_retval);
+  nsresult SetMetaDataElement(const char * key, const char * value);
+  nsresult VisitMetaData(nsICacheEntryMetaDataVisitor *visitor);
+  nsresult MetaDataReady(void);
+  nsresult SetValid(void);
+  nsresult GetDiskStorageSizeInKB(uint32_t *aDiskStorageSizeInKB);
+  nsresult Recreate(bool aMemoryOnly, nsICacheEntry * *_retval);
+  nsresult GetDataSize(int64_t *aDataSize);
+  nsresult GetAltDataSize(int64_t *aAltDataSize);
+  nsresult OpenAlternativeOutputStream(const nsACString & type, int64_t predictedSize, nsIOutputStream * *_retval);
+  nsresult OpenAlternativeInputStream(const nsACString & type, nsIInputStream * *_retval);
+  nsresult GetLoadContextInfo(nsILoadContextInfo * *aLoadContextInfo);
+  nsresult Close(void);
+  nsresult MarkValid(void);
+  nsresult MaybeMarkValid(void);
+  nsresult HasWriteAccess(bool aWriteAllowed, bool *_retval);
+
 public:
   uint32_t GetMetadataMemoryConsumption();
   nsCString const &GetStorageID() const { return mStorageID; }
   nsCString const &GetEnhanceID() const { return mEnhanceID; }
-  nsIURI* GetURI() const { return mURI; }
+  nsCString const &GetURI() const { return mURI; }
   // Accessible at any time
   bool IsUsingDisk() const { return mUseDisk; }
   bool IsReferenced() const;
@@ -104,14 +141,14 @@ public:
   nsresult HashingKeyWithStorage(nsACString &aResult) const;
   nsresult HashingKey(nsACString &aResult) const;
 
-  static nsresult HashingKey(nsCSubstring const& aStorageID,
-                             nsCSubstring const& aEnhanceID,
+  static nsresult HashingKey(const nsACString& aStorageID,
+                             const nsACString& aEnhanceID,
                              nsIURI* aURI,
                              nsACString &aResult);
 
-  static nsresult HashingKey(nsCSubstring const& aStorageID,
-                             nsCSubstring const& aEnhanceID,
-                             nsCSubstring const& aURISpec,
+  static nsresult HashingKey(const nsACString& aStorageID,
+                             const nsACString& aEnhanceID,
+                             const nsACString& aURISpec,
                              nsACString &aResult);
 
   // Accessed only on the service management thread
@@ -160,7 +197,7 @@ private:
     // it's pointer).
     RefPtr<CacheEntry> mEntry;
     nsCOMPtr<nsICacheEntryOpenCallback> mCallback;
-    nsCOMPtr<nsIThread> mTargetThread;
+    nsCOMPtr<nsIEventTarget> mTarget;
     bool mReadOnly : 1;
     bool mRevalidating : 1;
     bool mCheckOnAnyThread : 1;
@@ -181,17 +218,18 @@ private:
 
   // Since OnCacheEntryAvailable must be invoked on the main thread
   // we need a runnable for it...
-  class AvailableCallbackRunnable : public nsRunnable
+  class AvailableCallbackRunnable : public Runnable
   {
   public:
     AvailableCallbackRunnable(CacheEntry* aEntry,
                               Callback const &aCallback)
-      : mEntry(aEntry)
+      : Runnable("CacheEntry::AvailableCallbackRunnable")
+      , mEntry(aEntry)
       , mCallback(aCallback)
     {}
 
   private:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       mEntry->InvokeAvailableCallback(mCallback);
       return NS_OK;
@@ -203,14 +241,18 @@ private:
 
   // Since OnCacheEntryDoomed must be invoked on the main thread
   // we need a runnable for it...
-  class DoomCallbackRunnable : public nsRunnable
+  class DoomCallbackRunnable : public Runnable
   {
   public:
     DoomCallbackRunnable(CacheEntry* aEntry, nsresult aRv)
-      : mEntry(aEntry), mRv(aRv) {}
+      : Runnable("net::CacheEntry::DoomCallbackRunnable")
+      , mEntry(aEntry)
+      , mRv(aRv)
+    {
+    }
 
   private:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       nsCOMPtr<nsICacheEntryDoomCallback> callback;
       {
@@ -232,7 +274,6 @@ private:
   bool Open(Callback & aCallback, bool aTruncate, bool aPriority, bool aBypassIfBusy);
   // Loads from disk asynchronously
   bool Load(bool aTruncate, bool aPriority);
-  void OnLoaded();
 
   void RememberCallback(Callback & aCallback);
   void InvokeCallbacksLock();
@@ -240,8 +281,10 @@ private:
   bool InvokeCallbacks(bool aReadOnly);
   bool InvokeCallback(Callback & aCallback);
   void InvokeAvailableCallback(Callback const & aCallback);
+  void OnFetched(Callback const & aCallback);
 
   nsresult OpenOutputStreamInternal(int64_t offset, nsIOutputStream * *_retval);
+  nsresult OpenInputStreamInternal(int64_t offset, const char *aAltDataType, nsIInputStream * *_retval);
 
   void OnHandleClosed(CacheEntryHandle const* aHandle);
 
@@ -288,14 +331,20 @@ private:
   // When mFileStatus is read and found success it is ensured there is mFile and
   // that it is after a successful call to Init().
   ::mozilla::Atomic<nsresult, ::mozilla::ReleaseAcquire> mFileStatus;
-  nsCOMPtr<nsIURI> mURI;
+  nsCString mURI;
   nsCString mEnhanceID;
   nsCString mStorageID;
 
+  // mUseDisk, mSkipSizeCheck, mIsDoomed are plain "bool", not "bool:1",
+  // so as to avoid bitfield races with the byte containing
+  // mSecurityInfoLoaded et al.  See bug 1278524.
+  //
   // Whether it's allowed to persist the data to disk
-  bool const mUseDisk : 1;
+  bool const mUseDisk;
   // Whether it should skip max size check.
-  bool const mSkipSizeCheck : 1;
+  bool const mSkipSizeCheck;
+  // Set when entry is doomed with AsyncDoom() or DoomAlreadyRemoved().
+  bool mIsDoomed;
 
   // Following flags are all synchronized with the cache entry lock.
 
@@ -315,10 +364,6 @@ private:
   // Whether the pinning state of the entry is known (equals to the actual state
   // of the cache file)
   bool mPinningKnown : 1;
-
-  // Set when entry is doomed with AsyncDoom() or DoomAlreadyRemoved().
-  // Left as a standalone flag to not bother with locking (there is no need).
-  bool mIsDoomed;
 
   static char const * StateString(uint32_t aState);
 
@@ -372,28 +417,72 @@ private:
   } mBackgroundOperations;
 
   nsCOMPtr<nsISupports> mSecurityInfo;
-  int64_t mPredictedDataSize;
   mozilla::TimeStamp mLoadStart;
   uint32_t mUseCount;
-  nsCOMPtr<nsIThread> mReleaseThread;
+
+  const uint64_t mCacheEntryId;
 };
 
 
-class CacheEntryHandle : public nsICacheEntry
+class CacheEntryHandle final : public nsICacheEntry
 {
 public:
   explicit CacheEntryHandle(CacheEntry* aEntry);
   CacheEntry* Entry() const { return mEntry; }
 
   NS_DECL_THREADSAFE_ISUPPORTS
-  NS_FORWARD_NSICACHEENTRY(mEntry->)
+
+  // Default implementation is simply safely forwarded.
+  NS_IMETHOD GetKey(nsACString & aKey) override { return mEntry->GetKey(aKey); }
+  NS_IMETHOD GetCacheEntryId(uint64_t *aCacheEntryId) override { return mEntry->GetCacheEntryId(aCacheEntryId); }
+  NS_IMETHOD GetPersistent(bool *aPersistent) override { return mEntry->GetPersistent(aPersistent); }
+  NS_IMETHOD GetFetchCount(int32_t *aFetchCount) override { return mEntry->GetFetchCount(aFetchCount); }
+  NS_IMETHOD GetLastFetched(uint32_t *aLastFetched) override { return mEntry->GetLastFetched(aLastFetched); }
+  NS_IMETHOD GetLastModified(uint32_t *aLastModified) override { return mEntry->GetLastModified(aLastModified); }
+  NS_IMETHOD GetExpirationTime(uint32_t *aExpirationTime) override { return mEntry->GetExpirationTime(aExpirationTime); }
+  NS_IMETHOD SetExpirationTime(uint32_t expirationTime) override { return mEntry->SetExpirationTime(expirationTime); }
+  NS_IMETHOD GetOnStartTime(uint64_t *aOnStartTime) override { return mEntry->GetOnStartTime(aOnStartTime); }
+  NS_IMETHOD GetOnStopTime(uint64_t *aOnStopTime) override { return mEntry->GetOnStopTime(aOnStopTime); }
+  NS_IMETHOD SetNetworkTimes(uint64_t onStartTime, uint64_t onStopTime) override { return mEntry->SetNetworkTimes(onStartTime, onStopTime); }
+  NS_IMETHOD ForceValidFor(uint32_t aSecondsToTheFuture) override { return mEntry->ForceValidFor(aSecondsToTheFuture); }
+  NS_IMETHOD GetIsForcedValid(bool *aIsForcedValid) override { return mEntry->GetIsForcedValid(aIsForcedValid); }
+  NS_IMETHOD OpenInputStream(int64_t offset, nsIInputStream * *_retval) override { return mEntry->OpenInputStream(offset, _retval); }
+  NS_IMETHOD OpenOutputStream(int64_t offset, int64_t predictedSize, nsIOutputStream * *_retval) override { return mEntry->OpenOutputStream(offset, predictedSize, _retval); }
+  NS_IMETHOD GetSecurityInfo(nsISupports * *aSecurityInfo) override { return mEntry->GetSecurityInfo(aSecurityInfo); }
+  NS_IMETHOD SetSecurityInfo(nsISupports *aSecurityInfo) override { return mEntry->SetSecurityInfo(aSecurityInfo); }
+  NS_IMETHOD GetStorageDataSize(uint32_t *aStorageDataSize) override { return mEntry->GetStorageDataSize(aStorageDataSize); }
+  NS_IMETHOD AsyncDoom(nsICacheEntryDoomCallback *listener) override { return mEntry->AsyncDoom(listener); }
+  NS_IMETHOD GetMetaDataElement(const char * key, char * *_retval) override { return mEntry->GetMetaDataElement(key, _retval); }
+  NS_IMETHOD SetMetaDataElement(const char * key, const char * value) override { return mEntry->SetMetaDataElement(key, value); }
+  NS_IMETHOD VisitMetaData(nsICacheEntryMetaDataVisitor *visitor) override { return mEntry->VisitMetaData(visitor); }
+  NS_IMETHOD MetaDataReady(void) override { return mEntry->MetaDataReady(); }
+  NS_IMETHOD SetValid(void) override { return mEntry->SetValid(); }
+  NS_IMETHOD GetDiskStorageSizeInKB(uint32_t *aDiskStorageSizeInKB) override { return mEntry->GetDiskStorageSizeInKB(aDiskStorageSizeInKB); }
+  NS_IMETHOD Recreate(bool aMemoryOnly, nsICacheEntry * *_retval) override { return mEntry->Recreate(aMemoryOnly, _retval); }
+  NS_IMETHOD GetDataSize(int64_t *aDataSize) override { return mEntry->GetDataSize(aDataSize); }
+  NS_IMETHOD GetAltDataSize(int64_t *aAltDataSize) override { return mEntry->GetAltDataSize(aAltDataSize); }
+  NS_IMETHOD OpenAlternativeOutputStream(const nsACString & type, int64_t predictedSize, nsIOutputStream * *_retval) override { return mEntry->OpenAlternativeOutputStream(type, predictedSize, _retval); }
+  NS_IMETHOD OpenAlternativeInputStream(const nsACString & type, nsIInputStream * *_retval) override { return mEntry->OpenAlternativeInputStream(type, _retval); }
+  NS_IMETHOD GetLoadContextInfo(nsILoadContextInfo * *aLoadContextInfo) override { return mEntry->GetLoadContextInfo(aLoadContextInfo); }
+  NS_IMETHOD Close(void) override { return mEntry->Close(); }
+  NS_IMETHOD MarkValid(void) override { return mEntry->MarkValid(); }
+  NS_IMETHOD MaybeMarkValid(void) override { return mEntry->MaybeMarkValid(); }
+  NS_IMETHOD HasWriteAccess(bool aWriteAllowed, bool *_retval) override { return mEntry->HasWriteAccess(aWriteAllowed, _retval); }
+
+  // Specific implementation:
+  NS_IMETHOD Dismiss() override;
+
 private:
   virtual ~CacheEntryHandle();
   RefPtr<CacheEntry> mEntry;
+
+  // This is |false| until Dismiss() was called and prevents OnHandleClosed
+  // being called more than once.
+  Atomic<bool, ReleaseAcquire> mClosed;
 };
 
 
-class CacheOutputCloseListener final : public nsRunnable
+class CacheOutputCloseListener final : public Runnable
 {
 public:
   void OnOutputClosed();
@@ -401,7 +490,7 @@ public:
 private:
   friend class CacheEntry;
 
-  virtual ~CacheOutputCloseListener();
+  virtual ~CacheOutputCloseListener() = default;
 
   NS_DECL_NSIRUNNABLE
   explicit CacheOutputCloseListener(CacheEntry* aEntry);

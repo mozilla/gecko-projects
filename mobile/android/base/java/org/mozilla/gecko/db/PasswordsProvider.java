@@ -9,7 +9,6 @@ import java.util.HashMap;
 import org.mozilla.gecko.CrashHandler;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoMessageReceiver;
 import org.mozilla.gecko.NSSBridge;
 import org.mozilla.gecko.db.BrowserContract.DeletedPasswords;
@@ -49,7 +48,7 @@ public class PasswordsProvider extends SQLiteBridgeContentProvider {
     private static final HashMap<String, String> DISABLED_HOSTS_PROJECTION_MAP;
 
     // this should be kept in sync with the version in toolkit/components/passwordmgr/storage-mozStorage.js
-    private static final int DB_VERSION = 5;
+    private static final int DB_VERSION = 6;
     private static final String DB_FILENAME = "signons.sqlite";
     private static final String WHERE_GUID_IS_NULL = BrowserContract.DeletedPasswords.GUID + " IS NULL";
     private static final String WHERE_GUID_IS_VALUE = BrowserContract.DeletedPasswords.GUID + " = ?";
@@ -118,7 +117,7 @@ public class PasswordsProvider extends SQLiteBridgeContentProvider {
     }
 
     @Override
-    protected String getDBName(){
+    protected String getDBName() {
         return DB_FILENAME;
     }
 
@@ -128,7 +127,7 @@ public class PasswordsProvider extends SQLiteBridgeContentProvider {
     }
 
     @Override
-    protected int getDBVersion(){
+    protected int getDBVersion() {
         return DB_VERSION;
     }
 
@@ -324,10 +323,10 @@ public class PasswordsProvider extends SQLiteBridgeContentProvider {
 
         try {
             passwordIndex = cursor.getColumnIndexOrThrow(Passwords.ENCRYPTED_PASSWORD);
-        } catch(Exception ex) { }
+        } catch (Exception ex) { }
         try {
             usernameIndex = cursor.getColumnIndexOrThrow(Passwords.ENCRYPTED_USERNAME);
-        } catch(Exception ex) { }
+        } catch (Exception ex) { }
 
         if (passwordIndex > -1 || usernameIndex > -1) {
             MatrixBlobCursor m = (MatrixBlobCursor)cursor;
@@ -342,7 +341,7 @@ public class PasswordsProvider extends SQLiteBridgeContentProvider {
                         String decrypted = doCrypto(cursor.getString(usernameIndex), uri, false);
                         m.set(usernameIndex, decrypted);
                     }
-                } while(cursor.moveToNext());
+                } while (cursor.moveToNext());
             }
         }
     }

@@ -3,11 +3,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackground;
-include protocol PBlob; // FIXME: bug 792908
 include protocol PCacheOp;
-include protocol PCachePushStream;
 include protocol PCacheStreamControl;
 include protocol PFileDescriptorSet;
+include protocol PChildToParentStream;
+include protocol PParentToChildStream;
 
 include CacheTypes;
 
@@ -19,11 +19,9 @@ protocol PCache
 {
   manager PBackground;
   manages PCacheOp;
-  manages PCachePushStream;
 
 parent:
   async PCacheOp(CacheOpArgs aOpArgs);
-  async PCachePushStream();
   async Teardown();
 
 child:

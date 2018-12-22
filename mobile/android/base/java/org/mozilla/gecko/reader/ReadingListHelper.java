@@ -6,198 +6,59 @@ package org.mozilla.gecko.reader;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+
+import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
-import org.mozilla.gecko.annotation.RobocopTarget;
-import org.mozilla.gecko.db.BrowserContract.ReadingListItems;
 import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.db.ReadingListAccessor;
-import org.mozilla.gecko.favicons.Favicons;
+import org.mozilla.gecko.icons.IconRequest;
+import org.mozilla.gecko.icons.Icons;
+import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.NativeEventListener;
-import org.mozilla.gecko.util.NativeJSObject;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UIAsyncTask;
 
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
-import android.database.ContentObserver;
-import android.database.Cursor;
 import android.util.Log;
 
-public final class ReadingListHelper implements NativeEventListener {
+import java.util.concurrent.ExecutionException;
+
+public final class ReadingListHelper implements BundleEventListener {
     private static final String LOGTAG = "GeckoReadingListHelper";
-
-    public interface OnReadingListEventListener {
-        void onAddedToReadingList(String url);
-        void onRemovedFromReadingList(String url);
-        void onAlreadyInReadingList(String url);
-    }
-
-    private enum ReadingListEvent {
-        ADDED,
-        REMOVED,
-        ALREADY_EXISTS
-    }
 
     protected final Context context;
     private final BrowserDB db;
-    private final ReadingListAccessor readingListAccessor;
-    private final ContentObserver contentObserver;
-    private final OnReadingListEventListener onReadingListEventListener;
 
-    volatile boolean fetchInBackground = true;
-
-    public ReadingListHelper(Context context, GeckoProfile profile, OnReadingListEventListener listener) {
+    public ReadingListHelper(Context context, GeckoProfile profile) {
         this.context = context;
-        this.db = profile.getDB();
-        this.readingListAccessor = db.getReadingListAccessor();
+        this.db = BrowserDB.from(profile);
 
-        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener) this,
-            "Reader:AddToList", "Reader:UpdateList", "Reader:FaviconRequest");
-
-
-        contentObserver = new ContentObserver(null) {
-            @Override
-            public void onChange(boolean selfChange) {
-                if (fetchInBackground) {
-                    fetchContent();
-                }
-            }
-        };
-
-        this.readingListAccessor.registerContentObserver(context, contentObserver);
-
-        onReadingListEventListener = listener;
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+            "Reader:FaviconRequest", "Reader:AddedToCache");
     }
 
     public void uninit() {
-        EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener) this,
-            "Reader:AddToList", "Reader:UpdateList", "Reader:FaviconRequest");
-
-        context.getContentResolver().unregisterContentObserver(contentObserver);
+        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
+            "Reader:FaviconRequest", "Reader:AddedToCache");
     }
 
     @Override
-    public void handleMessage(final String event, final NativeJSObject message,
+    public void handleMessage(final String event, final GeckoBundle message,
                               final EventCallback callback) {
-        switch(event) {
-            // Added from web context menu.
-            case "Reader:AddToList": {
-                handleAddToList(callback, message);
-                break;
-            }
-            case "Reader:UpdateList": {
-                handleUpdateList(message);
-                break;
-            }
+        switch (event) {
             case "Reader:FaviconRequest": {
                 handleReaderModeFaviconRequest(callback, message.getString("url"));
                 break;
             }
-        }
-    }
-
-    /**
-     * A page can be added to the ReadingList by long-tap of the page-action
-     * icon, or by tapping the readinglist-add icon in the ReaderMode banner.
-     *
-     * This method will only add new items, not update existing items.
-     */
-    private void handleAddToList(final EventCallback callback, final NativeJSObject message) {
-        final ContentResolver cr = context.getContentResolver();
-        final String url = message.getString("url");
-
-        // We can't access a NativeJSObject from the background thread, so we need to get the
-        // values here, even if we may not use them to insert an item into the DB.
-        final ContentValues values = getContentValues(message);
-
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                if (readingListAccessor.isReadingListItem(cr, url)) {
-                    handleEvent(ReadingListEvent.ALREADY_EXISTS, url);
-                    callback.sendError("URL already in reading list: " + url);
-                } else {
-                    readingListAccessor.addReadingListItem(cr, values);
-                    handleEvent(ReadingListEvent.ADDED, url);
-                    callback.sendSuccess(url);
-                }
-            }
-        });
-    }
-
-    /**
-     * Updates a reading list item with new meta data.
-     */
-    private void handleUpdateList(final NativeJSObject message) {
-        final ContentResolver cr = context.getContentResolver();
-        final ContentValues values = getContentValues(message);
-
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                readingListAccessor.updateReadingListItem(cr, values);
-            }
-        });
-    }
-
-    /**
-     * Creates reading list item content values from JS message.
-     */
-    private ContentValues getContentValues(NativeJSObject message) {
-        final ContentValues values = new ContentValues();
-        if (message.has("id")) {
-            values.put(ReadingListItems._ID, message.getInt("id"));
-        }
-
-        // url is actually required...
-        String url = null;
-        if (message.has("url")) {
-            url = message.getString("url");
-            values.put(ReadingListItems.URL, url);
-        }
-
-        String title = null;
-        if (message.has("title")) {
-            title = message.getString("title");
-            values.put(ReadingListItems.TITLE, title);
-        }
-
-        // TODO: message actually has "length", but that's no use for us. See Bug 1127451.
-        if (message.has("word_count")) {
-            values.put(ReadingListItems.WORD_COUNT, message.getInt("word_count"));
-        }
-
-        if (message.has("excerpt")) {
-            values.put(ReadingListItems.EXCERPT, message.getString("excerpt"));
-        }
-
-        if (message.has("status")) {
-            final int status = message.getInt("status");
-            values.put(ReadingListItems.CONTENT_STATUS, status);
-            if (status == ReadingListItems.STATUS_FETCHED_ARTICLE) {
-                if (message.has("resolved_title")) {
-                    values.put(ReadingListItems.RESOLVED_TITLE, message.getString("resolved_title"));
-                } else {
-                    if (title != null) {
-                        values.put(ReadingListItems.RESOLVED_TITLE, title);
-                    }
-                }
-                if (message.has("resolved_url")) {
-                    values.put(ReadingListItems.RESOLVED_URL, message.getString("resolved_url"));
-                } else {
-                    if (url != null) {
-                        values.put(ReadingListItems.RESOLVED_URL, url);
-                    }
-                }
+            case "Reader:AddedToCache": {
+                // AddedToCache is a one way message: callback will be null, and we therefore shouldn't
+                // attempt to handle it.
+                handleAddedToCache(message.getString("url"), message.getString("path"), message.getInt("size"));
+                break;
             }
         }
-
-        return values;
     }
 
     /**
@@ -208,79 +69,85 @@ public final class ReadingListHelper implements NativeEventListener {
         (new UIAsyncTask.WithoutParams<String>(ThreadUtils.getBackgroundHandler()) {
             @Override
             public String doInBackground() {
-                return Favicons.getFaviconURLForPageURL(db, context.getContentResolver(), url);
+                // This is a bit ridiculous if you look at the bigger picture: Reader mode extracts
+                // the article content. We insert the content into a new document (about:reader).
+                // Some events are exchanged to lookup the icon URL for the actual website. This
+                // URL is then added to the markup which will then trigger our icon loading code in
+                // the Tab class.
+                //
+                // The Tab class could just lookup and load the icon itself. All it needs to do is
+                // to strip the about:reader URL and perform a normal icon load from cache.
+                //
+                // A more global solution (looking at desktop and iOS) would be to copy the <link>
+                // markup from the original page to the about:reader page and then rely on our normal
+                // icon loading code. This would work even if we do not have anything in the cache
+                // for some kind of reason.
+
+                final IconRequest request = Icons.with(context)
+                        .pageUrl(url)
+                        .prepareOnly()
+                        .build();
+
+                try {
+                    request.execute(null).get();
+                    if (request.getIconCount() > 0) {
+                        return request.getBestIcon().getUrl();
+                    }
+                } catch (InterruptedException | ExecutionException e) {
+                    // Ignore
+                }
+
+                return null;
             }
 
             @Override
-            public void onPostExecute(String faviconUrl) {
-                JSONObject args = new JSONObject();
+            public void onPostExecute(final String faviconUrl) {
+                final GeckoBundle args = new GeckoBundle(2);
                 if (faviconUrl != null) {
-                    try {
-                        args.put("url", url);
-                        args.put("faviconUrl", faviconUrl);
-                    } catch (JSONException e) {
-                        Log.w(LOGTAG, "Error building JSON favicon arguments.", e);
-                    }
+                    args.putString("url", url);
+                    args.putString("faviconUrl", faviconUrl);
                 }
-                callback.sendSuccess(args.toString());
+                callback.sendSuccess(args);
             }
         }).execute();
     }
 
-    /**
-     * Handle various reading list events (and display appropriate toasts).
-     */
-    private void handleEvent(final ReadingListEvent event, final String url) {
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override
-            public void run() {
-                switch(event) {
-                    case ADDED:
-                        onReadingListEventListener.onAddedToReadingList(url);
-                        break;
-                    case REMOVED:
-                        onReadingListEventListener.onRemovedFromReadingList(url);
-                        break;
-                    case ALREADY_EXISTS:
-                        onReadingListEventListener.onAlreadyInReadingList(url);
-                        break;
-                }
-            }
-        });
+    private void handleAddedToCache(final String url, final String path, final int size) {
+        final SavedReaderViewHelper rch = SavedReaderViewHelper.getSavedReaderViewHelper(context);
+
+        rch.put(url, path, size);
     }
 
-    private void fetchContent() {
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                final Cursor c = readingListAccessor.getReadingListUnfetched(context.getContentResolver());
-                if (c == null) {
-                    return;
-                }
-                try {
-                    while (c.moveToNext()) {
-                        JSONObject json = new JSONObject();
-                        try {
-                            json.put("id", c.getInt(c.getColumnIndexOrThrow(ReadingListItems._ID)));
-                            json.put("url", c.getString(c.getColumnIndexOrThrow(ReadingListItems.URL)));
-                            GeckoAppShell.notifyObservers("Reader:FetchContent", json.toString());
-                        } catch (JSONException e) {
-                            Log.e(LOGTAG, "Failed to fetch reading list content for item");
-                        }
-                    }
-                } finally {
-                    c.close();
-                }
-            }
-        });
+    public static void cacheReaderItem(final String url, final int tabID, Context context) {
+        if (AboutPages.isAboutReader(url)) {
+            throw new IllegalArgumentException("Page url must be original (not about:reader) url");
+        }
+
+        SavedReaderViewHelper rch = SavedReaderViewHelper.getSavedReaderViewHelper(context);
+
+        if (!rch.isURLCached(url)) {
+            final GeckoBundle data = new GeckoBundle(1);
+            data.putInt("tabID", tabID);
+            EventDispatcher.getInstance().dispatch("Reader:AddToCache", data);
+        }
     }
 
-    @RobocopTarget
-    /**
-     * Test code will want to disable background fetches to avoid upsetting
-     * the test harness. Call this by accessing the instance from BrowserApp.
-     */
-    public void disableBackgroundFetches() {
-        fetchInBackground = false;
+    public static void removeCachedReaderItem(final String url, Context context) {
+        if (AboutPages.isAboutReader(url)) {
+            throw new IllegalArgumentException("Page url must be original (not about:reader) url");
+        }
+
+        SavedReaderViewHelper rch = SavedReaderViewHelper.getSavedReaderViewHelper(context);
+
+        if (rch.isURLCached(url)) {
+            final GeckoBundle data = new GeckoBundle(1);
+            data.putString("url", url);
+            EventDispatcher.getInstance().dispatch("Reader:RemoveFromCache", data);
+        }
+
+        // When removing items from the cache we can probably spare ourselves the async callback
+        // that we use when adding cached items. We know the cached item will be gone, hence
+        // we no longer need to track it in the SavedReaderViewHelper
+        rch.remove(url);
     }
 }

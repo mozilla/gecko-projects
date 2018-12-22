@@ -1,24 +1,26 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 // Tests that graph widgets can correctly compare selections and cursors.
 
-var LineGraphWidget = require("devtools/client/shared/widgets/LineGraphWidget");
+const LineGraphWidget = require("devtools/client/shared/widgets/LineGraphWidget");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  yield performTest();
+add_task(async function() {
+  await addTab("about:blank");
+  await performTest();
   gBrowser.removeCurrentTab();
 });
 
-function* performTest() {
-  let [host, win, doc] = yield createHost();
-  let graph = new LineGraphWidget(doc.body, "fps");
-  yield graph.once("ready");
+async function performTest() {
+  const [host,, doc] = await createHost();
+  const graph = new LineGraphWidget(doc.body, "fps");
+  await graph.once("ready");
 
   testGraph(graph);
 
-  yield graph.destroy();
+  await graph.destroy();
   host.destroy();
 }
 

@@ -7,10 +7,14 @@
 
 #ifdef MOZ_ENABLE_DBUS
 
+#include "WakeLockListener.h"
+
 #include <dbus/dbus.h>
 #include <dbus/dbus-glib-lowlevel.h>
 
-#include "WakeLockListener.h"
+#if defined(MOZ_X11)
+#include "prlink.h"
+#endif
 
 #define FREEDESKTOP_SCREENSAVER_TARGET    "org.freedesktop.ScreenSaver"
 #define FREEDESKTOP_SCREENSAVER_OBJECT    "/ScreenSaver"
@@ -26,12 +30,15 @@ using namespace mozilla;
 
 NS_IMPL_ISUPPORTS(WakeLockListener, nsIDOMMozWakeLockListener)
 
-WakeLockListener* WakeLockListener::sSingleton = nullptr;
+StaticRefPtr<WakeLockListener> WakeLockListener::sSingleton;
 
 
 enum DesktopEnvironment {
   FreeDesktop,
   GNOME,
+#if defined(MOZ_X11)
+  XScreenSaver,
+#endif
   Unsupported,
 };
 
@@ -59,12 +66,17 @@ private:
   bool SendGNOMEInhibitMessage();
   bool SendMessage(DBusMessage* aMessage);
 
+#if defined(MOZ_X11)
+  static bool CheckXScreenSaverSupport();
+  static bool InhibitXScreenSaver(bool inhibit);
+#endif
+
   static void ReceiveInhibitReply(DBusPendingCall* aPending, void* aUserData);
   void InhibitFailed();
   void InhibitSucceeded(uint32_t aInhibitRequest);
 
   nsCString mTopic;
-  DBusConnection* mConnection;
+  RefPtr<DBusConnection> mConnection;
 
   DesktopEnvironment mDesktopEnvironment;
 
@@ -79,17 +91,15 @@ bool
 WakeLockTopic::SendMessage(DBusMessage* aMessage)
 {
   // send message and get a handle for a reply
-  DBusPendingCall* reply;
-  dbus_connection_send_with_reply(mConnection, aMessage, &reply,
+  RefPtr<DBusPendingCall> reply;
+  dbus_connection_send_with_reply(mConnection, aMessage,
+                                  reply.StartAssignment(),
                                   DBUS_TIMEOUT);
-  dbus_message_unref(aMessage);
-
   if (!reply) {
     return false;
   }
 
   dbus_pending_call_set_notify(reply, &ReceiveInhibitReply, this, NULL);
-  dbus_pending_call_unref(reply);
 
   return true;
 }
@@ -97,11 +107,11 @@ WakeLockTopic::SendMessage(DBusMessage* aMessage)
 bool
 WakeLockTopic::SendFreeDesktopInhibitMessage()
 {
-  DBusMessage* message =
+  RefPtr<DBusMessage> message = already_AddRefed<DBusMessage>(
     dbus_message_new_method_call(FREEDESKTOP_SCREENSAVER_TARGET,
                                  FREEDESKTOP_SCREENSAVER_OBJECT,
                                  FREEDESKTOP_SCREENSAVER_INTERFACE,
-                                 "Inhibit");
+                                 "Inhibit"));
 
   if (!message) {
     return false;
@@ -120,11 +130,11 @@ WakeLockTopic::SendFreeDesktopInhibitMessage()
 bool
 WakeLockTopic::SendGNOMEInhibitMessage()
 {
-  DBusMessage* message =
+  RefPtr<DBusMessage> message = already_AddRefed<DBusMessage>(
     dbus_message_new_method_call(SESSION_MANAGER_TARGET,
                                  SESSION_MANAGER_OBJECT,
                                  SESSION_MANAGER_INTERFACE,
-                                 "Inhibit");
+                                 "Inhibit"));
 
   if (!message) {
     return false;
@@ -145,6 +155,71 @@ WakeLockTopic::SendGNOMEInhibitMessage()
 }
 
 
+#if defined(MOZ_X11)
+
+typedef Bool (*_XScreenSaverQueryExtension_fn)(Display* dpy, int* event_base,
+                                               int* error_base);
+typedef Bool (*_XScreenSaverQueryVersion_fn)(Display* dpy, int* major,
+                                             int* minor);
+typedef void (*_XScreenSaverSuspend_fn)(Display* dpy, Bool suspend);
+
+static PRLibrary* sXssLib = nullptr;
+static _XScreenSaverQueryExtension_fn _XSSQueryExtension = nullptr;
+static _XScreenSaverQueryVersion_fn _XSSQueryVersion = nullptr;
+static _XScreenSaverSuspend_fn _XSSSuspend = nullptr;
+
+/* static */ bool
+WakeLockTopic::CheckXScreenSaverSupport()
+{
+  if (!sXssLib) {
+    sXssLib = PR_LoadLibrary("libXss.so.1");
+    if (!sXssLib) {
+      return false;
+    }
+  }
+
+  _XSSQueryExtension = (_XScreenSaverQueryExtension_fn)
+      PR_FindFunctionSymbol(sXssLib, "XScreenSaverQueryExtension");
+  _XSSQueryVersion = (_XScreenSaverQueryVersion_fn)
+      PR_FindFunctionSymbol(sXssLib, "XScreenSaverQueryVersion");
+  _XSSSuspend = (_XScreenSaverSuspend_fn)
+      PR_FindFunctionSymbol(sXssLib, "XScreenSaverSuspend");
+  if (!_XSSQueryExtension || !_XSSQueryVersion || !_XSSSuspend) {
+    return false;
+  }
+
+  GdkDisplay* gDisplay = gdk_display_get_default();
+  if (!GDK_IS_X11_DISPLAY(gDisplay)) return false;
+  Display* display = GDK_DISPLAY_XDISPLAY(gDisplay);
+
+  int throwaway;
+  if (!_XSSQueryExtension(display, &throwaway, &throwaway)) return false;
+
+  int major, minor;
+  if (!_XSSQueryVersion(display, &major, &minor)) return false;
+  // Needs to be compatible with version 1.1
+  if (major != 1) return false;
+  if (minor < 1) return false;
+
+  return true;
+}
+
+/* static */ bool
+WakeLockTopic::InhibitXScreenSaver(bool inhibit)
+{
+  // Should only be called if CheckXScreenSaverSupport returns true.
+  // There's a couple of safety checks here nonetheless.
+  if (!_XSSSuspend) return false;
+  GdkDisplay* gDisplay = gdk_display_get_default();
+  if (!GDK_IS_X11_DISPLAY(gDisplay)) return false;
+  Display* display = GDK_DISPLAY_XDISPLAY(gDisplay);
+  _XSSSuspend(display, inhibit);
+  return true;
+}
+
+#endif
+
+
 bool
 WakeLockTopic::SendInhibit()
 {
@@ -158,6 +233,10 @@ WakeLockTopic::SendInhibit()
   case GNOME:
     sendOk = SendGNOMEInhibitMessage();
     break;
+#if defined(MOZ_X11)
+  case XScreenSaver:
+    return InhibitXScreenSaver(true);
+#endif
   case Unsupported:
     return false;
   }
@@ -172,21 +251,26 @@ WakeLockTopic::SendInhibit()
 bool
 WakeLockTopic::SendUninhibit()
 {
-  DBusMessage* message = nullptr;
+  RefPtr<DBusMessage> message;
 
   if (mDesktopEnvironment == FreeDesktop) {
-    message =
+    message = already_AddRefed<DBusMessage>(
       dbus_message_new_method_call(FREEDESKTOP_SCREENSAVER_TARGET,
                                    FREEDESKTOP_SCREENSAVER_OBJECT,
                                    FREEDESKTOP_SCREENSAVER_INTERFACE,
-                                   "UnInhibit");
+                                   "UnInhibit"));
   } else if (mDesktopEnvironment == GNOME) {
-    message =
+    message = already_AddRefed<DBusMessage>(
       dbus_message_new_method_call(SESSION_MANAGER_TARGET,
                                    SESSION_MANAGER_OBJECT,
                                    SESSION_MANAGER_INTERFACE,
-                                   "Uninhibit");
+                                   "Uninhibit"));
   }
+#if defined(MOZ_X11)
+  else if (mDesktopEnvironment == XScreenSaver) {
+    return InhibitXScreenSaver(false);
+  }
+#endif
 
   if (!message) {
     return false;
@@ -198,7 +282,6 @@ WakeLockTopic::SendUninhibit()
 
   dbus_connection_send(mConnection, message, nullptr);
   dbus_connection_flush(mConnection);
-  dbus_message_unref(message);
 
   mInhibitRequest = 0;
 
@@ -252,8 +335,11 @@ WakeLockTopic::InhibitFailed()
 
   if (mDesktopEnvironment == FreeDesktop) {
     mDesktopEnvironment = GNOME;
+#if defined(MOZ_X11)
+  } else if (mDesktopEnvironment == GNOME && CheckXScreenSaverSupport()) {
+    mDesktopEnvironment = XScreenSaver;
+#endif
   } else {
-    NS_ASSERTION(mDesktopEnvironment == GNOME, "Unknown desktop environment");
     mDesktopEnvironment = Unsupported;
     mShouldInhibit = false;
   }
@@ -291,7 +377,8 @@ WakeLockTopic::ReceiveInhibitReply(DBusPendingCall* pending, void* user_data)
 
   WakeLockTopic* self = static_cast<WakeLockTopic*>(user_data);
 
-  DBusMessage* msg = dbus_pending_call_steal_reply(pending);
+  RefPtr<DBusMessage> msg = already_AddRefed<DBusMessage>(
+    dbus_pending_call_steal_reply(pending));
   if (!msg) {
     return;
   }
@@ -306,24 +393,16 @@ WakeLockTopic::ReceiveInhibitReply(DBusPendingCall* pending, void* user_data)
   } else {
     self->InhibitFailed();
   }
-
-  dbus_message_unref(msg);
 }
 
 
 WakeLockListener::WakeLockListener()
-  : mConnection(dbus_bus_get(DBUS_BUS_SESSION, nullptr))
+  : mConnection(already_AddRefed<DBusConnection>(
+    dbus_bus_get(DBUS_BUS_SESSION, nullptr)))
 {
   if (mConnection) {
     dbus_connection_set_exit_on_disconnect(mConnection, false);
     dbus_connection_setup_with_g_main(mConnection, nullptr);
-  }
-}
-
-WakeLockListener::~WakeLockListener()
-{
-  if (mConnection) {
-    dbus_connection_unref(mConnection);
   }
 }
 
@@ -332,7 +411,6 @@ WakeLockListener::GetSingleton(bool aCreate)
 {
   if (!sSingleton && aCreate) {
     sSingleton = new WakeLockListener();
-    sSingleton->AddRef();
   }
 
   return sSingleton;
@@ -341,7 +419,6 @@ WakeLockListener::GetSingleton(bool aCreate)
 /* static */ void
 WakeLockListener::Shutdown()
 {
-  sSingleton->Release();
   sSingleton = nullptr;
 }
 
@@ -352,7 +429,9 @@ WakeLockListener::Callback(const nsAString& topic, const nsAString& state)
     return NS_ERROR_FAILURE;
   }
 
-  if(!topic.Equals(NS_LITERAL_STRING("screen")))
+  if(!topic.Equals(NS_LITERAL_STRING("screen")) &&
+     !topic.Equals(NS_LITERAL_STRING("audio-playing")) &&
+     !topic.Equals(NS_LITERAL_STRING("video-playing")))
     return NS_OK;
 
   WakeLockTopic* topicLock = mTopics.Get(topic);

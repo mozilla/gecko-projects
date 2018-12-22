@@ -9,10 +9,8 @@
 
 var EXPORTED_SYMBOLS = ["Password", "DumpPasswords"];
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://tps/logger.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://tps/logger.jsm");
 
 var nsLoginInfo = new Components.Constructor(
                       "@mozilla.org/login-manager/loginInfo;1",
@@ -60,8 +58,7 @@ function Password(props) {
     for (var prop in props.changes)
       if (prop in this.updateProps)
         this.updateProps[prop] = props.changes[prop];
-  }
-  else {
+  } else {
     this.updateProps = null;
   }
 }
@@ -78,7 +75,7 @@ Password.prototype = {
    *
    * @return the new login guid
    */
-  Create: function() {
+  Create() {
     let login = new nsLoginInfo(this.props.hostname, this.props.submitURL,
                                 this.props.realm, this.props.username,
                                 this.props.password,
@@ -97,7 +94,7 @@ Password.prototype = {
    *
    * @return the guid of the password if found, otherwise -1
    */
-  Find: function() {
+  Find() {
     let logins = Services.logins.findLogins({},
                                             this.props.hostname,
                                             this.props.submitURL,
@@ -124,7 +121,7 @@ Password.prototype = {
    *
    * @return nothing
    */
-  Update: function() {
+  Update() {
     let oldlogin = new nsLoginInfo(this.props.hostname,
                                    this.props.submitURL,
                                    this.props.realm,
@@ -150,7 +147,7 @@ Password.prototype = {
    *
    * @return nothing
    */
-  Remove: function() {
+  Remove() {
     let login = new nsLoginInfo(this.props.hostname,
                                 this.props.submitURL,
                                 this.props.realm,

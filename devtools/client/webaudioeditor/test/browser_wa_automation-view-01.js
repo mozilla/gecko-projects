@@ -6,25 +6,26 @@
  * or params exist.
  */
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(AUTOMATION_URL);
-  let { panelWin } = panel;
-  let { gFront, $, $$, EVENTS } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(AUTOMATION_URL);
+  const { panelWin } = panel;
+  const { gFront, $, $$, EVENTS } = panelWin;
 
-  let started = once(gFront, "start-context");
+  const started = once(gFront, "start-context");
 
-  reload(target);
-
-  let [actors] = yield Promise.all([
+  const events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
-  let nodeIds = actors.map(actor => actor.actorID);
-  let $tabbox = $("#web-audio-editor-tabs");
+  reload(target);
+  const [actors] = await events;
+  const nodeIds = actors.map(actor => actor.actorID);
+
+  const $tabbox = $("#web-audio-editor-tabs");
 
   // Oscillator node
   click(panelWin, findGraphNode(panelWin, nodeIds[1]));
-  yield waitForInspectorRender(panelWin, EVENTS);
+  await waitForInspectorRender(panelWin, EVENTS);
   $tabbox.selectedIndex = 1;
 
   ok(isVisible($("#automation-graph-container")), "graph container should be visible");
@@ -34,7 +35,7 @@ add_task(function*() {
 
   // Gain node
   click(panelWin, findGraphNode(panelWin, nodeIds[2]));
-  yield waitForInspectorRender(panelWin, EVENTS);
+  await waitForInspectorRender(panelWin, EVENTS);
   $tabbox.selectedIndex = 1;
 
   ok(!isVisible($("#automation-graph-container")), "graph container should not be visible");
@@ -44,7 +45,7 @@ add_task(function*() {
 
   // destination node
   click(panelWin, findGraphNode(panelWin, nodeIds[0]));
-  yield waitForInspectorRender(panelWin, EVENTS);
+  await waitForInspectorRender(panelWin, EVENTS);
   $tabbox.selectedIndex = 1;
 
   ok(!isVisible($("#automation-graph-container")), "graph container should not be visible");
@@ -52,5 +53,5 @@ add_task(function*() {
   ok(!isVisible($("#automation-no-events")), "no-events panel should not be visible");
   ok(isVisible($("#automation-empty")), "empty panel should be visible");
 
-  yield teardown(target);
+  await teardown(target);
 });

@@ -30,9 +30,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
 
         SpecialPowers.pushPrefEnv({"set": [
           ["full-screen-api.enabled", true],
+          ["full-screen-api.unprefix.enabled", true],
           ["full-screen-api.allow-trusted-requests-only", false],
           ["full-screen-api.transition-duration.enter", "0 0"],
-          ["full-screen-api.transition-duration.leave", "0 0"]
+          ["full-screen-api.transition-duration.leave", "0 0"],
+          ["dom.webcomponents.shadowdom.enabled", true]
         ]}, nextTest);
 
         // Run the tests which go full-screen in new window, as Mochitests
@@ -48,6 +50,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
           "file_movementXY.html",
           "file_nestedFullScreen.html",
           "file_pointerlock-api.html",
+          "file_pointerlock-api-with-shadow.html",
           "file_pointerlockerror.html",
           "file_pointerLockPref.html",
           "file_removedFromDOM.html",
@@ -55,7 +58,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
           "file_suppressSomeMouseEvents.html",
           "file_targetOutOfFocus.html",
           "file_withoutDOM.html",
-          "file_allowPointerLockSandboxFlag.html"
+          "file_allowPointerLockSandboxFlag.html",
+          "file_changeLockElement.html",
         ];
 
         var gDisableList = [

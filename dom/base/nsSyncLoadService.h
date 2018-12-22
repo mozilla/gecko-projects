@@ -19,7 +19,7 @@ class nsILoadGroup;
 class nsIStreamListener;
 class nsIURI;
 class nsIPrincipal;
-class nsIDOMDocument;
+class nsIDocument;
 class nsIChannel;
 
 class nsSyncLoadService
@@ -46,18 +46,18 @@ public:
                                  nsILoadGroup *aLoadGroup,
                                  bool aForceToXML,
                                  mozilla::net::ReferrerPolicy aReferrerPolicy,
-                                 nsIDOMDocument** aResult);
+                                 nsIDocument** aResult);
 
     /**
      * Read input stream aIn in chunks and deliver synchronously to aListener.
      *
-     * @param aIn The stream to be read.
+     * @param aIn The stream to be read. The ownership of this stream is taken.
      * @param aListener The listener that will receive
      *                  OnStartRequest/OnDataAvailable/OnStopRequest
      *                  notifications.
      * @param aChannel The channel that aIn was opened from.
      */
-    static nsresult PushSyncStreamToListener(nsIInputStream* aIn,
+    static nsresult PushSyncStreamToListener(already_AddRefed<nsIInputStream> aIn,
                                              nsIStreamListener* aListener,
                                              nsIChannel* aChannel);
 };

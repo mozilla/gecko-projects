@@ -13,6 +13,7 @@
 #include "SVGPathSegUtils.h"
 
 using namespace mozilla;
+using namespace mozilla::dom::SVGPathSeg_Binding;
 using namespace mozilla::gfx;
 
 static inline char16_t ToUpper(char16_t aCh)
@@ -419,6 +420,8 @@ nsSVGArcConverter::nsSVGArcConverter(const Point& from,
                                      bool largeArcFlag,
                                      bool sweepFlag)
 {
+  MOZ_ASSERT(radii.x != 0.0f && radii.y != 0.0f, "Bad radii");
+
   const double radPerDeg = M_PI/180.0;
   mSegIndex = 0;
 
@@ -489,7 +492,7 @@ nsSVGArcConverter::GetNextSegment(Point* cp1, Point* cp2, Point* to)
   if (mSegIndex == mNumSegs) {
     return false;
   }
-  
+
   double cosTheta1 = cos(mTheta);
   double sinTheta1 = sin(mTheta);
   double theta2 = mTheta + mDelta;

@@ -121,11 +121,11 @@ SVGAnimatedNumberList::ClearAnimValue(nsSVGElement *aElement,
   aElement->DidAnimateNumberList(aAttrEnum);
 }
 
-nsISMILAttr*
+UniquePtr<nsISMILAttr>
 SVGAnimatedNumberList::ToSMILAttr(nsSVGElement *aSVGElement,
                                   uint8_t aAttrEnum)
 {
-  return new SMILAnimatedNumberList(this, aSVGElement, aAttrEnum);
+  return MakeUnique<SMILAnimatedNumberList>(this, aSVGElement, aAttrEnum);
 }
 
 nsresult
@@ -140,7 +140,7 @@ SVGAnimatedNumberList::
   nsresult rv = nlai->SetValueFromString(aStr);
   if (NS_SUCCEEDED(rv)) {
     nlai->SetInfo(mElement);
-    aValue = Move(val);
+    aValue = std::move(val);
   }
   aPreventCachingOfSandwich = false;
   return rv;

@@ -31,13 +31,14 @@ public:
                                     uint32_t aDataLength);
 
   /**
-   * Creates a unique key for the given font data.
+   * Creates a unique key for the given font data and variation settings.
    *
    * @param aFontData the SFNT data
    * @param aDataLength length
    * @return unique key to be used for caching
    */
-  static uint64_t GetUniqueKey(const uint8_t *aFontData, uint32_t aDataLength);
+  static uint64_t GetUniqueKey(const uint8_t *aFontData, uint32_t aDataLength,
+                               uint32_t aVarDataSize, const void* aVarData);
 
   ~SFNTData();
 
@@ -70,9 +71,11 @@ public:
    *
    * @param aU16FullName full name to find.
    * @param aIndex out param for the index if found.
+   * @param aTruncatedLen length to truncate the compared font name to.
    * @return true if the full name is successfully read.
    */
-  bool GetIndexForU16Name(const mozilla::u16string& aU16FullName, uint32_t* aIndex);
+  bool GetIndexForU16Name(const mozilla::u16string& aU16FullName, uint32_t* aIndex,
+                          size_t aTruncatedLen = 0);
 
 private:
 

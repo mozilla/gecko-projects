@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +9,7 @@
 #include "BackgroundParent.h"
 #include "BackgroundParentImpl.h"
 #include "gfxPlatform.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIThread.h"
 #include "nsThreadUtils.h"
 #include "VsyncSource.h"
@@ -50,9 +51,10 @@ VsyncParent::NotifyVsync(TimeStamp aTimeStamp)
   // Called on hardware vsync thread. We should post to current ipc thread.
   MOZ_ASSERT(!IsOnBackgroundThread());
   nsCOMPtr<nsIRunnable> vsyncEvent =
-    NS_NewRunnableMethodWithArg<TimeStamp>(this,
-                                           &VsyncParent::DispatchVsyncEvent,
-                                           aTimeStamp);
+    NewRunnableMethod<TimeStamp>("layout::VsyncParent::DispatchVsyncEvent",
+                                 this,
+                                 &VsyncParent::DispatchVsyncEvent,
+                                 aTimeStamp);
   MOZ_ALWAYS_SUCCEEDS(mBackgroundThread->Dispatch(vsyncEvent, NS_DISPATCH_NORMAL));
   return true;
 }
@@ -72,37 +74,37 @@ VsyncParent::DispatchVsyncEvent(TimeStamp aTimeStamp)
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 VsyncParent::RecvRequestVsyncRate()
 {
   AssertIsOnBackgroundThread();
   TimeDuration vsyncRate = gfxPlatform::GetPlatform()->GetHardwareVsync()->GetGlobalDisplay().GetVsyncRate();
   Unused << SendVsyncRate(vsyncRate.ToMilliseconds());
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 VsyncParent::RecvObserve()
 {
   AssertIsOnBackgroundThread();
   if (!mObservingVsync) {
     mVsyncDispatcher->AddChildRefreshTimer(this);
     mObservingVsync = true;
-    return true;
+    return IPC_OK();
   }
-  return false;
+  return IPC_FAIL_NO_REASON(this);
 }
 
-bool
+mozilla::ipc::IPCResult
 VsyncParent::RecvUnobserve()
 {
   AssertIsOnBackgroundThread();
   if (mObservingVsync) {
     mVsyncDispatcher->RemoveChildRefreshTimer(this);
     mObservingVsync = false;
-    return true;
+    return IPC_OK();
   }
-  return false;
+  return IPC_FAIL_NO_REASON(this);
 }
 
 void

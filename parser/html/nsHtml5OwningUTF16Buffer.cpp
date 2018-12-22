@@ -4,25 +4,26 @@
 
 #include "nsHtml5OwningUTF16Buffer.h"
 
+#include "mozilla/Span.h"
+
+using namespace mozilla;
+
 nsHtml5OwningUTF16Buffer::nsHtml5OwningUTF16Buffer(char16_t* aBuffer)
-  : nsHtml5UTF16Buffer(aBuffer, 0),
-    next(nullptr),
-    key(nullptr)
+  : nsHtml5UTF16Buffer(aBuffer, 0)
+  , next(nullptr)
+  , key(nullptr)
 {
-  MOZ_COUNT_CTOR(nsHtml5OwningUTF16Buffer);
 }
 
 nsHtml5OwningUTF16Buffer::nsHtml5OwningUTF16Buffer(void* aKey)
-  : nsHtml5UTF16Buffer(nullptr, 0),
-    next(nullptr),
-    key(aKey)
+  : nsHtml5UTF16Buffer(nullptr, 0)
+  , next(nullptr)
+  , key(aKey)
 {
-  MOZ_COUNT_CTOR(nsHtml5OwningUTF16Buffer);
 }
 
 nsHtml5OwningUTF16Buffer::~nsHtml5OwningUTF16Buffer()
 {
-  MOZ_COUNT_DTOR(nsHtml5OwningUTF16Buffer);
   DeleteBuffer();
 
   // This is to avoid dtor recursion on 'next', bug 706932.
@@ -58,6 +59,18 @@ nsHtml5OwningUTF16Buffer::Swap(nsHtml5OwningUTF16Buffer* aOther)
   nsHtml5UTF16Buffer::Swap(aOther);
 }
 
+Span<char16_t>
+nsHtml5OwningUTF16Buffer::TailAsSpan(int32_t aBufferSize)
+{
+  MOZ_ASSERT(aBufferSize >= getEnd());
+  return MakeSpan(getBuffer() + getEnd(), aBufferSize - getEnd());
+}
+
+void
+nsHtml5OwningUTF16Buffer::AdvanceEnd(int32_t aNumberOfCodeUnits)
+{
+  setEnd(getEnd() + aNumberOfCodeUnits);
+}
 
 // Not using macros for AddRef and Release in order to be able to refcount on
 // and create on different threads.
@@ -65,7 +78,7 @@ nsHtml5OwningUTF16Buffer::Swap(nsHtml5OwningUTF16Buffer* aOther)
 nsrefcnt
 nsHtml5OwningUTF16Buffer::AddRef()
 {
-  NS_PRECONDITION(int32_t(mRefCnt) >= 0, "Illegal refcount.");
+  MOZ_ASSERT(int32_t(mRefCnt) >= 0, "Illegal refcount.");
   ++mRefCnt;
   NS_LOG_ADDREF(this, mRefCnt, "nsHtml5OwningUTF16Buffer", sizeof(*this));
   return mRefCnt;
@@ -74,7 +87,7 @@ nsHtml5OwningUTF16Buffer::AddRef()
 nsrefcnt
 nsHtml5OwningUTF16Buffer::Release()
 {
-  NS_PRECONDITION(0 != mRefCnt, "Release without AddRef.");
+  MOZ_ASSERT(0 != mRefCnt, "Release without AddRef.");
   --mRefCnt;
   NS_LOG_RELEASE(this, mRefCnt, "nsHtml5OwningUTF16Buffer");
   if (mRefCnt == 0) {

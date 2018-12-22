@@ -7,16 +7,15 @@
 #include "GeckoProfiler.h"
 
 #undef LOG
-#ifdef MOZ_WIDGET_GONK
-#include <android/log.h>
-#define LOG(args...) __android_log_print(ANDROID_LOG_INFO, "MediaEncoder", ## args);
-#else
 #define LOG(args, ...)
-#endif
 
 namespace mozilla {
 
-OggWriter::OggWriter() : ContainerWriter()
+OggWriter::OggWriter()
+  : ContainerWriter()
+  , mOggStreamState()
+  , mOggPage()
+  , mPacket()
 {
   if (NS_FAILED(Init())) {
     LOG("ERROR! Fail to initialize the OggWriter.");
@@ -58,17 +57,19 @@ nsresult
 OggWriter::WriteEncodedTrack(const EncodedFrameContainer& aData,
                              uint32_t aFlags)
 {
-  PROFILER_LABEL("OggWriter", "WriteEncodedTrack",
-    js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("OggWriter::WriteEncodedTrack", OTHER);
 
-  for (uint32_t i = 0; i < aData.GetEncodedFrames().Length(); i++) {
+  uint32_t len = aData.GetEncodedFrames().Length();
+  for (uint32_t i = 0; i < len; i++) {
     if (aData.GetEncodedFrames()[i]->GetFrameType() != EncodedFrame::OPUS_AUDIO_FRAME) {
       LOG("[OggWriter] wrong encoded data type!");
       return NS_ERROR_FAILURE;
     }
 
+    // only pass END_OF_STREAM on the last frame!
     nsresult rv = WriteEncodedData(aData.GetEncodedFrames()[i]->GetFrameData(),
                                    aData.GetEncodedFrames()[i]->GetDuration(),
+                                   i < len-1 ? (aFlags & ~ContainerWriter::END_OF_STREAM) :
                                    aFlags);
     if (NS_FAILED(rv)) {
       LOG("%p Failed to WriteEncodedTrack!", this);
@@ -137,8 +138,7 @@ OggWriter::GetContainerData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
                             uint32_t aFlags)
 {
   int rc = -1;
-  PROFILER_LABEL("OggWriter", "GetContainerData",
-    js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("OggWriter::GetContainerData", OTHER);
   // Generate the oggOpus Header
   if (aFlags & ContainerWriter::GET_HEADER) {
     OpusMetadata* meta = static_cast<OpusMetadata*>(mMetadata.get());
@@ -187,8 +187,7 @@ OggWriter::SetMetadata(TrackMetadataBase* aMetadata)
 {
   MOZ_ASSERT(aMetadata);
 
-  PROFILER_LABEL("OggWriter", "SetMetadata",
-    js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("OggWriter::SetMetadata", OTHER);
 
   if (aMetadata->GetKind() != TrackMetadataBase::METADATA_OPUS) {
     LOG("wrong meta data type!");

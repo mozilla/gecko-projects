@@ -9,7 +9,6 @@
 #include "mozilla/dom/MessageChannelBinding.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/Navigator.h"
-#include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "nsContentUtils.h"
 #include "nsIDocument.h"
@@ -42,7 +41,7 @@ MessageChannel::~MessageChannel()
 JSObject*
 MessageChannel::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MessageChannelBinding::Wrap(aCx, this, aGivenProto);
+  return MessageChannel_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<MessageChannel>

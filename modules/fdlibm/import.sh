@@ -4,10 +4,12 @@ set -e
 
 BASE_URL=https://raw.githubusercontent.com/freebsd/freebsd/master/lib/msun/src
 
-function download_source() {
+download_source() {
     REMOTE_FILENAME=$1
     LOCAL_FILENAME=$2
-    curl -o "src/${LOCAL_FILENAME}" "${BASE_URL}/${REMOTE_FILENAME}"
+    while true; do
+        curl -o "src/${LOCAL_FILENAME}" "${BASE_URL}/${REMOTE_FILENAME}" && break
+    done
 }
 
 mkdir -p src
@@ -93,6 +95,7 @@ download_source s_tanh.c s_tanh.cpp
 
 # Math.trunc
 download_source s_trunc.c s_trunc.cpp
+download_source s_truncf.c s_truncf.cpp
 
 # dependencies
 download_source k_exp.c k_exp.cpp
@@ -103,3 +106,7 @@ download_source s_scalbn.c s_scalbn.cpp
 # These are not not used in Math.* functions, but used internally.
 download_source e_pow.c e_pow.cpp
 download_source e_sqrt.c e_sqrt.cpp
+
+download_source s_nearbyint.c s_nearbyint.cpp
+download_source s_rint.c s_rint.cpp
+download_source s_rintf.c s_rintf.cpp

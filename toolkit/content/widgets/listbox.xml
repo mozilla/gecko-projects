@@ -4,6 +4,9 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<!-- This files relies on these specific Chrome/XBL globals -->
+<!-- globals ChromeNodeList -->
+
 <bindings id="listboxBindings"
           xmlns="http://www.mozilla.org/xbl"
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
@@ -57,12 +60,6 @@
      * @param aValue - value of new item element */
     appendItem(aLabel, aValue)
 
-    /** Create item element and insert it to given position
-     * @param aIndex - insertion position
-     * @param aLabel - label of new item element
-     * @param aValue - value of new item element */
-    insertItemAt(aIndex, aLabel, aValue)
-
     /** Scroll up/down one page
      * @param aDirection - specifies scrolling direction, should be either -1 or 1
      * @return the number of elements the selection scrolled
@@ -72,7 +69,7 @@
     /** Fire "select" event */
     _fireOnSelect()
    -->
-   <binding id="listbox-base" role="xul:listbox"
+   <binding id="listbox-base"
             extends="chrome://global/content/bindings/general.xml#basecontrol">
 
     <implementation implements="nsIDOMXULMultiSelectControlElement">
@@ -100,7 +97,15 @@
         <setter>
         <![CDATA[
           if (val >= 0) {
-            this.selectItem(this.getItemAtIndex(val));
+            // This is a micro-optimization so that a call to getIndexOfItem or
+            // getItemAtIndex caused by _fireOnSelect (especially for derived
+            // widgets) won't loop the children.
+            this._selecting = {
+              item: this.getItemAtIndex(val),
+              index: val
+            };
+            this.selectItem(this._selecting.item);
+            delete this._selecting;
           } else {
             this.clearSelection();
             this.currentItem = null;
@@ -126,18 +131,6 @@
         ]]>
         </setter>
       </property>
-
-      <method name="removeItemAt">
-        <parameter name="index"/>
-        <body>
-        <![CDATA[
-          var remove = this.getItemAtIndex(index);
-          if (remove)
-            this.removeChild(remove);
-          return remove;
-        ]]>
-        </body>
-      </method>
 
     <!-- nsIDOMXULMultiSelectControlElement -->
       <property name="selType"
@@ -464,7 +457,7 @@
           while (aStartItem) {
             aStartItem = aStartItem.nextSibling;
             if (aStartItem && aStartItem instanceof
-                Components.interfaces.nsIDOMXULSelectControlItemElement &&
+                Ci.nsIDOMXULSelectControlItemElement &&
                 (!this._userSelecting || this._canUserSelect(aStartItem))) {
               --aDelta;
               if (aDelta == 0)
@@ -483,7 +476,7 @@
           while (aStartItem) {
             aStartItem = aStartItem.previousSibling;
             if (aStartItem && aStartItem instanceof
-                Components.interfaces.nsIDOMXULSelectControlItemElement &&
+                Ci.nsIDOMXULSelectControlItemElement &&
                 (!this._userSelecting || this._canUserSelect(aStartItem))) {
               --aDelta;
               if (aDelta == 0)
@@ -516,7 +509,7 @@
         <parameter name="aItem"/>
         <body>
         <![CDATA[
-          var style = document.defaultView.getComputedStyle(aItem, "");
+          var style = document.defaultView.getComputedStyle(aItem);
           return style.display != "none" && style.visibility == "visible";
         ]]>
         </body>
@@ -588,8 +581,7 @@
         if (this.getRowCount() > 0) {
           if (this.currentIndex == -1) {
             this.currentIndex = this.getIndexOfFirstVisibleRow();
-          }
-          else {
+          } else {
             this.currentItem._fireEvent("DOMMenuItemActive");
           }
         }
@@ -677,6 +669,8 @@
 
       <!-- ///////////////// private listbox members ///////////////// -->
 
+      <field name="_touchY">-1</field>
+
       <method name="_fireOnSelect">
         <body>
         <![CDATA[
@@ -717,26 +711,6 @@
         </body>
       </method>
 
-      <method name="insertItemAt">
-        <parameter name="aIndex"/>
-        <parameter name="aLabel"/>
-        <parameter name="aValue"/>
-        <body>
-          const XULNS =
-            "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-
-          var item = this.ownerDocument.createElementNS(XULNS, "listitem");
-          item.setAttribute("label", aLabel);
-          item.setAttribute("value", aValue);
-          var before = this.getItemAtIndex(aIndex);
-          if (before)
-            this.insertBefore(item, before);
-          else
-            this.appendChild(item);
-          return item;
-        </body>
-      </method>
-
       <property name="itemCount" readonly="true"
                 onget="return this.listBoxObject.getRowCount()"/>
 
@@ -744,13 +718,21 @@
       <method name="getIndexOfItem">
         <parameter name="item"/>
         <body>
-          return this.listBoxObject.getIndexOfItem(item);
+          <![CDATA[
+            if (this._selecting && this._selecting.item == item)
+              return this._selecting.index;
+            return this.listBoxObject.getIndexOfItem(item);
+          ]]>
         </body>
       </method>
       <method name="getItemAtIndex">
         <parameter name="index"/>
         <body>
-          return this.listBoxObject.getItemAtIndex(index);
+          <![CDATA[
+            if (this._selecting && this._selecting.index == index)
+              return this._selecting.item;
+            return this.listBoxObject.getItemAtIndex(index);
+          ]]>
         </body>
       </method>
       <method name="ensureIndexIsVisible">
@@ -822,11 +804,15 @@
       <handler event="keypress" key=" " phase="target">
         <![CDATA[
           if (this.currentItem) {
-            if (this.currentItem.getAttribute("type") != "checkbox")
+            if (this.currentItem.getAttribute("type") != "checkbox") {
               this.addItemToSelection(this.currentItem);
-            else if (!this.currentItem.disabled) {
+              // Prevent page from scrolling on the space key.
+              event.preventDefault();
+            } else if (!this.currentItem.disabled) {
               this.currentItem.checked = !this.currentItem.checked;
               this.currentItem.doCommand();
+              // Prevent page from scrolling on the space key.
+              event.preventDefault();
             }
           }
         ]]>
@@ -848,6 +834,42 @@
           }
         ]]>
       </handler>
+
+      <handler event="touchstart">
+        <![CDATA[
+          if (event.touches.length > 1) {
+            // Multiple touch points detected, abort. In particular this aborts
+            // the panning gesture when the user puts a second finger down after
+            // already panning with one finger. Aborting at this point prevents
+            // the pan gesture from being resumed until all fingers are lifted
+            // (as opposed to when the user is back down to one finger).
+            this._touchY = -1;
+          } else {
+            this._touchY = event.touches[0].screenY;
+          }
+        ]]>
+      </handler>
+      <handler event="touchmove">
+        <![CDATA[
+          if (event.touches.length == 1 &&
+              this._touchY >= 0) {
+            let deltaY = this._touchY - event.touches[0].screenY;
+            let lines = Math.trunc(deltaY / this.listBoxObject.getRowHeight());
+            if (Math.abs(lines) > 0) {
+              this.listBoxObject.scrollByLines(lines);
+              deltaY -= lines * this.listBoxObject.getRowHeight();
+              this._touchY = event.touches[0].screenY + deltaY;
+            }
+            event.preventDefault();
+          }
+        ]]>
+      </handler>
+      <handler event="touchend">
+        <![CDATA[
+          this._touchY = -1;
+        ]]>
+      </handler>
+
     </handlers>
   </binding>
 
@@ -888,7 +910,7 @@
     </handlers>
   </binding>
 
-  <binding id="listitem" role="xul:listitem"
+  <binding id="listitem"
            extends="chrome://global/content/bindings/general.xml#basetext">
     <resources>
       <stylesheet src="chrome://global/skin/listbox.css"/>
@@ -939,7 +961,7 @@
         <getter><![CDATA[
           var parent = this.parentNode;
           while (parent) {
-            if (parent instanceof Components.interfaces.nsIDOMXULSelectControlElement)
+            if (parent instanceof Ci.nsIDOMXULSelectControlElement)
               return parent;
             parent = parent.parentNode;
           }
@@ -966,9 +988,7 @@
         var control = this.control;
         if (!control || control.disabled)
           return;
-        let { AppConstants } =
-            Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
-        if ((!event.ctrlKey || (AppConstants.platform == "macosx" && event.button == 2)) &&
+        if ((!event.ctrlKey || (/Mac/.test(navigator.platform) && event.button == 2)) &&
             !event.shiftKey && !event.metaKey) {
           if (!this.selected) {
             control.selectItem(this);
@@ -988,16 +1008,13 @@
         control._userSelecting = true;
         if (control.selType != "multiple") {
           control.selectItem(this);
-        }
-        else if (event.ctrlKey || event.metaKey) {
+        } else if (event.ctrlKey || event.metaKey) {
           control.toggleItemSelection(this);
           control.currentItem = this;
-        }
-        else if (event.shiftKey) {
+        } else if (event.shiftKey) {
           control.selectItemRange(null, this);
           control.currentItem = this;
-        }
-        else {
+        } else {
           /* We want to deselect all the selected items except what was
             clicked, UNLESS it was a right-click.  We have to do this
             in click rather than mousedown so that you can drag a
@@ -1013,15 +1030,6 @@
     </handlers>
   </binding>
 
-  <binding id="listitem-iconic"
-           extends="chrome://global/content/bindings/listbox.xml#listitem">
-    <content>
-      <children>
-        <xul:listcell class="listcell-iconic" xbl:inherits="label,image,crop,disabled,flexlabel"/>
-      </children>
-    </content>
-  </binding>
-
   <binding id="listitem-checkbox"
            extends="chrome://global/content/bindings/listbox.xml#listitem">
     <content>
@@ -1035,11 +1043,11 @@
                 onget="return this.getAttribute('checked') == 'true';">
         <setter><![CDATA[
           if (val)
-            this.setAttribute('checked', 'true');
+            this.setAttribute("checked", "true");
           else
-            this.removeAttribute('checked');
-          var event = document.createEvent('Events');
-          event.initEvent('CheckboxStateChange', true, true);
+            this.removeAttribute("checked");
+          var event = document.createEvent("Events");
+          event.initEvent("CheckboxStateChange", true, true);
           this.dispatchEvent(event);
           return val;
         ]]></setter>
@@ -1058,16 +1066,7 @@
     </handlers>
   </binding>
 
-  <binding id="listitem-checkbox-iconic"
-           extends="chrome://global/content/bindings/listbox.xml#listitem-checkbox">
-    <content>
-      <children>
-        <xul:listcell type="checkbox" class="listcell-iconic" xbl:inherits="label,image,crop,checked,disabled,flexlabel"/>
-      </children>
-    </content>
-  </binding>
-
-  <binding id="listcell" role="xul:listcell"
+  <binding id="listcell"
            extends="chrome://global/content/bindings/general.xml#basecontrol">
 
     <resources>
@@ -1076,16 +1075,6 @@
 
     <content>
       <children>
-        <xul:label class="listcell-label" xbl:inherits="value=label,flex=flexlabel,crop,disabled" flex="1" crop="right"/>
-      </children>
-    </content>
-  </binding>
-
-  <binding id="listcell-iconic"
-           extends="chrome://global/content/bindings/listbox.xml#listcell">
-    <content>
-      <children>
-        <xul:image class="listcell-icon" xbl:inherits="src=image"/>
         <xul:label class="listcell-label" xbl:inherits="value=label,flex=flexlabel,crop,disabled" flex="1" crop="right"/>
       </children>
     </content>
@@ -1101,18 +1090,7 @@
     </content>
   </binding>
 
-  <binding id="listcell-checkbox-iconic"
-           extends="chrome://global/content/bindings/listbox.xml#listcell-checkbox">
-    <content>
-      <children>
-        <xul:image class="listcell-check" xbl:inherits="checked,disabled"/>
-        <xul:image class="listcell-icon" xbl:inherits="src=image"/>
-        <xul:label class="listcell-label" xbl:inherits="value=label,flex=flexlabel,crop,disabled" flex="1" crop="right"/>
-      </children>
-    </content>
-  </binding>
-
-  <binding id="listhead" role="xul:listhead">
+  <binding id="listhead">
 
     <resources>
       <stylesheet src="chrome://global/skin/listbox.css"/>
@@ -1125,7 +1103,7 @@
     </content>
   </binding>
 
-  <binding id="listheader" display="xul:button" role="xul:listheader">
+  <binding id="listheader" display="xul:button">
 
     <resources>
       <stylesheet src="chrome://global/skin/listbox.css"/>

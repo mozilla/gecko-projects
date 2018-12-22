@@ -32,17 +32,11 @@ private:
   virtual bool
   DeallocPCacheOpParent(PCacheOpParent* aActor) override;
 
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvPCacheOpConstructor(PCacheOpParent* actor,
                           const CacheOpArgs& aOpArgs) override;
 
-  virtual PCachePushStreamParent*
-  AllocPCachePushStreamParent() override;
-
-  virtual bool
-  DeallocPCachePushStreamParent(PCachePushStreamParent* aActor) override;
-
-  virtual bool
+  virtual mozilla::ipc::IPCResult
   RecvTeardown() override;
 
   RefPtr<cache::Manager> mManager;

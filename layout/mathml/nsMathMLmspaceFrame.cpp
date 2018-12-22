@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,9 +15,9 @@
 //
 
 nsIFrame*
-NS_NewMathMLmspaceFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMathMLmspaceFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMathMLmspaceFrame(aContext);
+  return new (aPresShell) nsMathMLmspaceFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmspaceFrame)
@@ -25,19 +26,13 @@ nsMathMLmspaceFrame::~nsMathMLmspaceFrame()
 {
 }
 
-bool
-nsMathMLmspaceFrame::IsLeaf() const
-{
-  return true;
-}
-
 void
 nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
 {
   nsAutoString value;
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
 
-  // width 
+  // width
   //
   // "Specifies the desired width of the space."
   //
@@ -46,15 +41,15 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   //
   // The default value is "0em", so unitless values can be ignored.
   // <mspace/> is listed among MathML elements allowing negative spacing and
-  // the MathML test suite contains "Presentation/TokenElements/mspace/mspace2" 
+  // the MathML test suite contains "Presentation/TokenElements/mspace/mspace2"
   // as an example. Hence we allow negative values.
   //
   mWidth = 0;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mWidth,
                       nsMathMLElement::PARSE_ALLOW_NEGATIVE,
-                      aPresContext, mStyleContext, fontSizeInflation);
+                      aPresContext, mComputedStyle, fontSizeInflation);
   }
 
   // height
@@ -68,10 +63,10 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   // We do not allow negative values. See bug 716349.
   //
   mHeight = 0;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mHeight, 0,
-                      aPresContext, mStyleContext, fontSizeInflation);
+                      aPresContext, mComputedStyle, fontSizeInflation);
   }
 
   // depth
@@ -85,20 +80,22 @@ nsMathMLmspaceFrame::ProcessAttributes(nsPresContext* aPresContext)
   // We do not allow negative values. See bug 716349.
   //
   mDepth = 0;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::depth_, value);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::depth_, value);
   if (!value.IsEmpty()) {
     ParseNumericValue(value, &mDepth, 0,
-                      aPresContext, mStyleContext, fontSizeInflation);
+                      aPresContext, mComputedStyle, fontSizeInflation);
   }
 }
 
 void
 nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
-                            nsHTMLReflowMetrics&     aDesiredSize,
-                            const nsHTMLReflowState& aReflowState,
+                            ReflowOutput&     aDesiredSize,
+                            const ReflowInput& aReflowInput,
                             nsReflowStatus&          aStatus)
 {
   MarkInReflow();
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
+
   mPresentationData.flags &= ~NS_MATHML_ERROR;
   ProcessAttributes(aPresContext);
 
@@ -115,13 +112,12 @@ nsMathMLmspaceFrame::Reflow(nsPresContext*          aPresContext,
   // Also return our bounding metrics
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
 
-  aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 /* virtual */ nsresult
 nsMathMLmspaceFrame::MeasureForWidth(DrawTarget* aDrawTarget,
-                                     nsHTMLReflowMetrics& aDesiredSize)
+                                     ReflowOutput& aDesiredSize)
 {
   ProcessAttributes(PresContext());
   mBoundingMetrics = nsBoundingMetrics();

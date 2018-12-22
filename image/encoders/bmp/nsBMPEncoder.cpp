@@ -4,13 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCRT.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "nsBMPEncoder.h"
-#include "prprf.h"
 #include "nsString.h"
 #include "nsStreamUtils.h"
 #include "nsTArray.h"
+#include "mozilla/CheckedInt.h"
 
 using namespace mozilla;
 using namespace mozilla::image;
@@ -19,15 +19,20 @@ using namespace mozilla::image::bmp;
 NS_IMPL_ISUPPORTS(nsBMPEncoder, imgIEncoder, nsIInputStream,
                   nsIAsyncInputStream)
 
-nsBMPEncoder::nsBMPEncoder() : mImageBufferStart(nullptr),
-                               mImageBufferCurr(0),
-                               mImageBufferSize(0),
-                               mImageBufferReadPoint(0),
-                               mFinished(false),
-                               mCallback(nullptr),
-                               mCallbackTarget(nullptr),
-                               mNotifyThreshold(0)
+nsBMPEncoder::nsBMPEncoder()
+  : mBMPInfoHeader{}
+  , mImageBufferStart(nullptr)
+  , mImageBufferCurr(0)
+  , mImageBufferSize(0)
+  , mImageBufferReadPoint(0)
+  , mFinished(false)
+  , mCallback(nullptr)
+  , mCallbackTarget(nullptr)
+  , mNotifyThreshold(0)
 {
+  this->mBMPFileHeader.filesize = 0;
+  this->mBMPFileHeader.reserved = 0;
+  this->mBMPFileHeader.dataoffset = 0;
 }
 
 nsBMPEncoder::~nsBMPEncoder()
@@ -59,6 +64,11 @@ nsBMPEncoder::InitFromData(const uint8_t* aData,
     return NS_ERROR_INVALID_ARG;
   }
 
+  CheckedInt32 check = CheckedInt32(aWidth) * 4;
+  if (MOZ_UNLIKELY(!check.isValid())) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
   // Stride is the padded width of each row, so it better be longer
   if ((aInputFormat == INPUT_FORMAT_RGB &&
        aStride < aWidth * 3) ||
@@ -87,19 +97,19 @@ nsBMPEncoder::InitFromData(const uint8_t* aData,
 
 // Just a helper method to make it explicit in calculations that we are dealing
 // with bytes and not bits
-static inline uint32_t
-BytesPerPixel(uint32_t aBPP)
+static inline uint16_t
+BytesPerPixel(uint16_t aBPP)
 {
   return aBPP / 8;
 }
 
 // Calculates the number of padding bytes that are needed per row of image data
 static inline uint32_t
-PaddingBytes(uint32_t aBPP, uint32_t aWidth)
+PaddingBytes(uint16_t aBPP, uint32_t aWidth)
 {
   uint32_t rowSize = aWidth * BytesPerPixel(aBPP);
   uint8_t paddingSize = 0;
-  if(rowSize % 4) {
+  if (rowSize % 4) {
     paddingSize = (4 - (rowSize % 4));
   }
   return paddingSize;
@@ -126,14 +136,21 @@ nsBMPEncoder::StartImageEncode(uint32_t aWidth,
 
   // parse and check any provided output options
   Version version;
-  uint32_t bpp;
-  nsresult rv = ParseOptions(aOutputOptions, &version, &bpp);
+  uint16_t bpp;
+  nsresult rv = ParseOptions(aOutputOptions, version, bpp);
   if (NS_FAILED(rv)) {
     return rv;
   }
+  MOZ_ASSERT(bpp <= 32);
 
-  InitFileHeader(version, bpp, aWidth, aHeight);
-  InitInfoHeader(version, bpp, aWidth, aHeight);
+  rv = InitFileHeader(version, bpp, aWidth, aHeight);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = InitInfoHeader(version, bpp, aWidth, aHeight);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
   mImageBufferSize = mBMPFileHeader.filesize;
   mImageBufferStart = static_cast<uint8_t*>(malloc(mImageBufferSize));
@@ -188,10 +205,24 @@ nsBMPEncoder::AddImageFrame(const uint8_t* aData,
     return NS_ERROR_INVALID_ARG;
   }
 
-  auto row = MakeUniqueFallible<uint8_t[]>(mBMPInfoHeader.width *
-                                           BytesPerPixel(mBMPInfoHeader.bpp));
+  if (mBMPInfoHeader.width < 0) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
+
+  CheckedUint32 size =
+    CheckedUint32(mBMPInfoHeader.width) * CheckedUint32(BytesPerPixel(mBMPInfoHeader.bpp));
+  if (MOZ_UNLIKELY(!size.isValid())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  auto row = MakeUniqueFallible<uint8_t[]>(size.value());
   if (!row) {
     return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  CheckedUint32 check = CheckedUint32(mBMPInfoHeader.height) * aStride;
+  if (MOZ_UNLIKELY(!check.isValid())) {
+    return NS_ERROR_FAILURE;
   }
 
   // write each row: if we add more input formats, we may want to
@@ -225,7 +256,7 @@ nsBMPEncoder::AddImageFrame(const uint8_t* aData,
       }
     }
   } else {
-    NS_NOTREACHED("Bad format type");
+    MOZ_ASSERT_UNREACHABLE("Bad format type");
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -256,15 +287,11 @@ nsBMPEncoder::EndImageEncode()
 // Parses the encoder options and sets the bits per pixel to use
 // See InitFromData for a description of the parse options
 nsresult
-nsBMPEncoder::ParseOptions(const nsAString& aOptions, Version* version,
-                           uint32_t* bpp)
+nsBMPEncoder::ParseOptions(const nsAString& aOptions, Version& aVersionOut,
+                           uint16_t& aBppOut)
 {
-  if (version) {
-    *version = VERSION_3;
-  }
-  if (bpp) {
-    *bpp = 24;
-  }
+  aVersionOut = VERSION_3;
+  aBppOut = 24;
 
   // Parse the input string into a set of name/value pairs.
   // From a format like: name=value;bpp=<bpp_value>;name=value
@@ -291,9 +318,9 @@ nsBMPEncoder::ParseOptions(const nsAString& aOptions, Version* version,
     if (nameValuePair[0].Equals("version",
                                 nsCaseInsensitiveCStringComparator())) {
       if (nameValuePair[1].EqualsLiteral("3")) {
-        *version = VERSION_3;
+        aVersionOut = VERSION_3;
       } else if (nameValuePair[1].EqualsLiteral("5")) {
-        *version = VERSION_5;
+        aVersionOut = VERSION_5;
       } else {
         return NS_ERROR_INVALID_ARG;
       }
@@ -302,9 +329,9 @@ nsBMPEncoder::ParseOptions(const nsAString& aOptions, Version* version,
     // Parse the bpp portion of the string name=value;bpp=<bpp_value>;name=value
     if (nameValuePair[0].Equals("bpp", nsCaseInsensitiveCStringComparator())) {
       if (nameValuePair[1].EqualsLiteral("24")) {
-        *bpp = 24;
+        aBppOut = 24;
       } else if (nameValuePair[1].EqualsLiteral("32")) {
-        *bpp = 32;
+        aBppOut = 32;
       } else {
         return NS_ERROR_INVALID_ARG;
       }
@@ -429,7 +456,7 @@ nsBMPEncoder::ConvertHostARGBRow(const uint8_t* aSrc,
                                  const UniquePtr<uint8_t[]>& aDest,
                                  uint32_t aPixelWidth)
 {
-  int bytes = BytesPerPixel(mBMPInfoHeader.bpp);
+  uint16_t bytes = BytesPerPixel(mBMPInfoHeader.bpp);
 
   if (mBMPInfoHeader.bpp == 32) {
     for (uint32_t x = 0; x < aPixelWidth; x++) {
@@ -461,7 +488,8 @@ nsBMPEncoder::NotifyListener()
        mNotifyThreshold || mFinished)) {
     nsCOMPtr<nsIInputStreamCallback> callback;
     if (mCallbackTarget) {
-      callback = NS_NewInputStreamReadyEvent(mCallback, mCallbackTarget);
+      callback = NS_NewInputStreamReadyEvent("nsBMPEncoder::NotifyListener",
+                                             mCallback, mCallbackTarget);
     } else {
       callback = mCallback;
     }
@@ -478,8 +506,8 @@ nsBMPEncoder::NotifyListener()
 }
 
 // Initializes the BMP file header mBMPFileHeader to the passed in values
-void
-nsBMPEncoder::InitFileHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
+nsresult
+nsBMPEncoder::InitFileHeader(Version aVersion, uint16_t aBPP, uint32_t aWidth,
                              uint32_t aHeight)
 {
   memset(&mBMPFileHeader, 0, sizeof(mBMPFileHeader));
@@ -496,13 +524,25 @@ nsBMPEncoder::InitFileHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
   if (aBPP <= 8) {
     uint32_t numColors = 1 << aBPP;
     mBMPFileHeader.dataoffset += 4 * numColors;
-    mBMPFileHeader.filesize = mBMPFileHeader.dataoffset + aWidth * aHeight;
+    CheckedUint32 filesize =
+      CheckedUint32(mBMPFileHeader.dataoffset) + CheckedUint32(aWidth) * aHeight;
+    if (MOZ_UNLIKELY(!filesize.isValid())) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    mBMPFileHeader.filesize = filesize.value();
   } else {
-    mBMPFileHeader.filesize = mBMPFileHeader.dataoffset +
-      (aWidth * BytesPerPixel(aBPP) + PaddingBytes(aBPP, aWidth)) * aHeight;
+    CheckedUint32 filesize =
+      CheckedUint32(mBMPFileHeader.dataoffset) +
+        (CheckedUint32(aWidth) * BytesPerPixel(aBPP) + PaddingBytes(aBPP, aWidth)) * aHeight;
+    if (MOZ_UNLIKELY(!filesize.isValid())) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    mBMPFileHeader.filesize = filesize.value();
   }
 
   mBMPFileHeader.reserved = 0;
+
+  return NS_OK;
 }
 
 #define ENCODE(pImageBufferCurr, value) \
@@ -510,8 +550,8 @@ nsBMPEncoder::InitFileHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
     *pImageBufferCurr += sizeof value;
 
 // Initializes the bitmap info header mBMPInfoHeader to the passed in values
-void
-nsBMPEncoder::InitInfoHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
+nsresult
+nsBMPEncoder::InitInfoHeader(Version aVersion, uint16_t aBPP, uint32_t aWidth,
                              uint32_t aHeight)
 {
   memset(&mBMPInfoHeader, 0, sizeof(mBMPInfoHeader));
@@ -521,18 +561,39 @@ nsBMPEncoder::InitInfoHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
     MOZ_ASSERT(aVersion == VERSION_5);
     mBMPInfoHeader.bihsize = InfoHeaderLength::WIN_V5;
   }
-  mBMPInfoHeader.width = aWidth;
-  mBMPInfoHeader.height = aHeight;
+
+  CheckedInt32 width(aWidth);
+  CheckedInt32 height(aHeight);
+  if (MOZ_UNLIKELY(!width.isValid() || !height.isValid())) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  mBMPInfoHeader.width = width.value();
+  mBMPInfoHeader.height = height.value();
+
   mBMPInfoHeader.planes = 1;
   mBMPInfoHeader.bpp = aBPP;
   mBMPInfoHeader.compression = 0;
   mBMPInfoHeader.colors = 0;
   mBMPInfoHeader.important_colors = 0;
+
+  CheckedUint32 check = CheckedUint32(aWidth) * BytesPerPixel(aBPP);
+  if (MOZ_UNLIKELY(!check.isValid())) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
   if (aBPP <= 8) {
-    mBMPInfoHeader.image_size = aWidth * aHeight;
+    CheckedUint32 imagesize = CheckedUint32(aWidth) * aHeight;
+    if (MOZ_UNLIKELY(!imagesize.isValid())) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    mBMPInfoHeader.image_size = imagesize.value();
   } else {
-    mBMPInfoHeader.image_size =
-      (aWidth * BytesPerPixel(aBPP) + PaddingBytes(aBPP, aWidth)) * aHeight;
+    CheckedUint32 imagesize =
+      (CheckedUint32(aWidth) * BytesPerPixel(aBPP) + PaddingBytes(aBPP, aWidth)) * CheckedUint32(aHeight);
+    if (MOZ_UNLIKELY(!imagesize.isValid())) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    mBMPInfoHeader.image_size = imagesize.value();
   }
   mBMPInfoHeader.xppm = 0;
   mBMPInfoHeader.yppm = 0;
@@ -559,6 +620,8 @@ nsBMPEncoder::InitInfoHeader(Version aVersion, uint32_t aBPP, uint32_t aWidth,
       mBMPInfoHeader.profile_size = 0;
       mBMPInfoHeader.reserved = 0;
   }
+
+  return NS_OK;
 }
 
 // Encodes the BMP file header mBMPFileHeader

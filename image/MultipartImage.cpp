@@ -8,6 +8,10 @@
 #include "imgINotificationObserver.h"
 
 namespace mozilla {
+
+using gfx::IntSize;
+using gfx::SourceSurface;
+
 namespace image {
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -89,11 +93,10 @@ public:
   }
 
   // Other notifications are ignored.
-  virtual void BlockOnload() override { }
-  virtual void UnblockOnload() override { }
   virtual void SetHasImage() override { }
   virtual bool NotificationsDeferred() const override { return false; }
-  virtual void SetNotificationsDeferred(bool) override { }
+  virtual void MarkPendingNotify() override { }
+  virtual void ClearPendingNotify() override { }
 
 private:
   virtual ~NextPartObserver() { }
@@ -120,7 +123,7 @@ private:
 
 MultipartImage::MultipartImage(Image* aFirstPart)
   : ImageWrapper(aFirstPart)
-  , mDeferNotifications(false)
+  , mPendingNotify(false)
 {
   mNextPartObserver = new NextPartObserver(this);
 }
@@ -171,7 +174,9 @@ FilterProgress(Progress aProgress)
 {
   // Filter out onload blocking notifications, since we don't want to block
   // onload for multipart images.
-  return aProgress & ~(FLAG_ONLOAD_BLOCKED | FLAG_ONLOAD_UNBLOCKED);
+  // Filter out errors, since we don't want errors in one part to error out
+  // the whole stream.
+  return aProgress & ~FLAG_HAS_ERROR;
 }
 
 void
@@ -306,7 +311,7 @@ MultipartImage::Notify(int32_t aType, const nsIntRect* aRect /* = nullptr*/)
   } else if (aType == imgINotificationObserver::HAS_TRANSPARENCY) {
     mTracker->SyncNotifyProgress(FLAG_HAS_TRANSPARENCY);
   } else {
-    NS_NOTREACHED("Notification list should be exhaustive");
+    MOZ_ASSERT_UNREACHABLE("Notification list should be exhaustive");
   }
 }
 
@@ -329,13 +334,19 @@ MultipartImage::SetHasImage()
 bool
 MultipartImage::NotificationsDeferred() const
 {
-  return mDeferNotifications;
+  return mPendingNotify;
 }
 
 void
-MultipartImage::SetNotificationsDeferred(bool aDeferNotifications)
+MultipartImage::MarkPendingNotify()
 {
-  mDeferNotifications = aDeferNotifications;
+  mPendingNotify = true;
+}
+
+void
+MultipartImage::ClearPendingNotify()
+{
+  mPendingNotify = false;
 }
 
 } // namespace image

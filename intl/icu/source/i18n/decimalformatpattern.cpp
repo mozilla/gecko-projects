@@ -1,3 +1,5 @@
+// © 2016 and later: Unicode, Inc. and others.
+// License & terms of use: http://www.unicode.org/copyright.html
 /*
 *******************************************************************************
 * Copyright (C) 1997-2015, International Business Machines Corporation and    *
@@ -48,10 +50,12 @@ static void syntaxError(const UnicodeString& pattern,
     parseError.preContext[stop-start] = 0;
 
     //for post-context
-    start = pos+1;
-    stop  = ((pos+U_PARSE_CONTEXT_LEN)<=pattern.length()) ? (pos+(U_PARSE_CONTEXT_LEN-1)) :
-        pattern.length();
-    pattern.extract(start,stop-start,parseError.postContext,0);
+    start = pattern.moveIndex32(pos, 1);
+    stop = pos + U_PARSE_CONTEXT_LEN - 1;
+    if (stop > pattern.length()) {
+        stop = pattern.length();
+    }
+    pattern.extract(start, stop - start, parseError.postContext, 0);
     //null terminate the buffer
     parseError.postContext[stop-start]= 0;
 }

@@ -4,12 +4,12 @@
 
 "use strict";
 
-this.ContentSearchUIController = (function () {
+this.ContentSearchUIController = (function() {
 
 const MAX_DISPLAYED_SUGGESTIONS = 6;
 const SUGGESTION_ID_PREFIX = "searchSuggestion";
 const ONE_OFF_ID_PREFIX = "oneOff";
-const CSS_URI = "chrome://browser/content/contentSearchUI.css";
+const DEFAULT_INPUT_ICON = "chrome://browser/skin/search-glass.svg";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -39,7 +39,7 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  *        string.
  */
 function ContentSearchUIController(inputElement, tableParent, healthReportKey,
-                                   searchPurpose, idPrefix="") {
+                                   searchPurpose, idPrefix = "") {
   this.input = inputElement;
   this._idPrefix = idPrefix;
   this._healthReportKey = healthReportKey;
@@ -51,7 +51,7 @@ function ContentSearchUIController(inputElement, tableParent, healthReportKey,
   this.input.setAttribute("aria-controls", tableID);
   tableParent.appendChild(this._makeTable(tableID));
 
-  this.input.addEventListener("keypress", this);
+  this.input.addEventListener("keydown", this);
   this.input.addEventListener("input", this);
   this.input.addEventListener("focus", this);
   this.input.addEventListener("blur", this);
@@ -66,10 +66,6 @@ function ContentSearchUIController(inputElement, tableParent, healthReportKey,
 
 ContentSearchUIController.prototype = {
 
-  // The timeout (ms) of the remote suggestions.  Corresponds to
-  // SearchSuggestionController.remoteTimeout.  Uses
-  // SearchSuggestionController's default timeout if falsey.
-  remoteTimeout: undefined,
   _oneOffButtons: [],
   // Setting up the one off buttons causes an uninterruptible reflow. If we
   // receive the list of engines while the newtab page is loading, this reflow
@@ -82,19 +78,21 @@ ContentSearchUIController.prototype = {
   },
 
   set defaultEngine(engine) {
+    if (this._defaultEngine && this._defaultEngine.icon) {
+      URL.revokeObjectURL(this._defaultEngine.icon);
+    }
     let icon;
     if (engine.iconBuffer) {
       icon = this._getFaviconURIFromBuffer(engine.iconBuffer);
-    }
-    else {
-      icon = this._getImageURIForCurrentResolution(
-        "chrome://mozapps/skin/places/defaultFavicon.png");
+    } else {
+      icon = "chrome://mozapps/skin/places/defaultFavicon.svg";
     }
     this._defaultEngine = {
       name: engine.name,
-      icon: icon,
+      icon,
     };
     this._updateDefaultEngineHeader();
+    this._updateDefaultEngineIcon();
 
     if (engine && document.activeElement == this.input) {
       this._speculativeConnect();
@@ -144,8 +142,7 @@ ContentSearchUIController.prototype = {
         elt.classList.add("selected");
         ariaSelectedElt.setAttribute("aria-selected", "true");
         this.input.setAttribute("aria-activedescendant", ariaSelectedElt.id);
-      }
-      else if (i != excludeIndex) {
+      } else if (i != excludeIndex) {
         elt.classList.remove("selected");
         ariaSelectedElt.setAttribute("aria-selected", "false");
       }
@@ -171,8 +168,7 @@ ContentSearchUIController.prototype = {
       if (i == idx) {
         elt.classList.add("selected");
         elt.setAttribute("aria-selected", "true");
-      }
-      else {
+      } else {
         elt.classList.remove("selected");
         elt.setAttribute("aria-selected", "false");
       }
@@ -191,7 +187,7 @@ ContentSearchUIController.prototype = {
     return this._suggestionsList.children.length;
   },
 
-  selectAndUpdateInput: function (idx) {
+  selectAndUpdateInput(idx) {
     this.selectedIndex = idx;
     let newValue = this.suggestionAtIndex(idx) || this._stickyInputValue;
     // Setting the input value when the value has not changed commits the current
@@ -202,12 +198,12 @@ ContentSearchUIController.prototype = {
     this._updateSearchWithHeader();
   },
 
-  suggestionAtIndex: function (idx) {
+  suggestionAtIndex(idx) {
     let row = this._suggestionsList.children[idx];
     return row ? row.textContent : null;
   },
 
-  deleteSuggestionAtIndex: function (idx) {
+  deleteSuggestionAtIndex(idx) {
     // Only form history suggestions can be deleted.
     if (this.isFormHistorySuggestionAtIndex(idx)) {
       let suggestionStr = this.suggestionAtIndex(idx);
@@ -217,20 +213,20 @@ ContentSearchUIController.prototype = {
     }
   },
 
-  isFormHistorySuggestionAtIndex: function (idx) {
+  isFormHistorySuggestionAtIndex(idx) {
     let row = this._suggestionsList.children[idx];
     return row && row.classList.contains("formHistory");
   },
 
-  addInputValueToFormHistory: function () {
+  addInputValueToFormHistory() {
     this._sendMsg("AddFormHistoryEntry", this.input.value);
   },
 
-  handleEvent: function (event) {
+  handleEvent(event) {
     this["_on" + event.type[0].toUpperCase() + event.type.substr(1)](event);
   },
 
-  _onCommand: function(aEvent) {
+  _onCommand(aEvent) {
     if (this.selectedButtonIndex == this._oneOffButtons.length) {
       // Settings button was selected.
       this._sendMsg("ManageEngines");
@@ -244,7 +240,7 @@ ContentSearchUIController.prototype = {
     }
   },
 
-  search: function (aEvent) {
+  search(aEvent) {
     if (!this.defaultEngine) {
       return; // Not initialized yet.
     }
@@ -252,11 +248,11 @@ ContentSearchUIController.prototype = {
     let searchText = this.input;
     let searchTerms;
     if (this._table.hidden ||
-        aEvent.originalTarget.id == "contentSearchDefaultEngineHeader" ||
+        (aEvent.originalTarget &&
+          aEvent.originalTarget.id == "contentSearchDefaultEngineHeader") ||
         aEvent instanceof KeyboardEvent) {
       searchTerms = searchText.value;
-    }
-    else {
+    } else {
       searchTerms = this.suggestionAtIndex(this.selectedIndex) || searchText.value;
     }
     // Send an event that will perform a search and Firefox Health Report will
@@ -271,9 +267,11 @@ ContentSearchUIController.prototype = {
         ctrlKey: aEvent.ctrlKey,
         metaKey: aEvent.metaKey,
         altKey: aEvent.altKey,
-        button: aEvent.button,
       },
     };
+    if ("button" in aEvent) {
+      eventData.originalEvent.button = aEvent.button;
+    }
 
     if (this.suggestionAtIndex(this.selectedIndex)) {
       eventData.selection = {
@@ -291,12 +289,11 @@ ContentSearchUIController.prototype = {
     this.addInputValueToFormHistory();
   },
 
-  _onInput: function () {
+  _onInput() {
     if (!this.input.value) {
       this._stickyInputValue = "";
       this._hideSuggestions();
-    }
-    else if (this.input.value != this._stickyInputValue) {
+    } else if (this.input.value != this._stickyInputValue) {
       // Only fetch new suggestions if the input value has changed.
       this._getSuggestions();
       this.selectAndUpdateInput(-1);
@@ -304,7 +301,7 @@ ContentSearchUIController.prototype = {
     this._updateSearchWithHeader();
   },
 
-  _onKeypress: function (event) {
+  _onKeydown(event) {
     let selectedIndexDelta = 0;
     let selectedSuggestionDelta = 0;
     let selectedOneOffDelta = 0;
@@ -409,33 +406,27 @@ ContentSearchUIController.prototype = {
         this.selectedButtonIndex = -1;
       }
       this.selectAndUpdateInput(newSelectedIndex);
-    }
-
-    else if (selectedSuggestionDelta) {
+    } else if (selectedSuggestionDelta) {
       let newSelectedIndex;
       if (currentIndex >= this.numSuggestions || currentIndex == -1) {
         // No suggestion already selected, select the first/last one appropriately.
         newSelectedIndex = selectedSuggestionDelta == 1 ?
                            0 : this.numSuggestions - 1;
-      }
-      else {
+      } else {
         newSelectedIndex = currentIndex + selectedSuggestionDelta;
       }
       if (newSelectedIndex >= this.numSuggestions) {
         newSelectedIndex = -1;
       }
       this.selectAndUpdateInput(newSelectedIndex);
-    }
-
-    else if (selectedOneOffDelta) {
+    } else if (selectedOneOffDelta) {
       let newSelectedIndex;
       let currentButton = this.selectedButtonIndex;
       if (currentButton == -1 || currentButton == this._oneOffButtons.length) {
         // No one-off already selected, select the first/last one appropriately.
         newSelectedIndex = selectedOneOffDelta == 1 ?
                            0 : this._oneOffButtons.length - 1;
-      }
-      else {
+      } else {
         newSelectedIndex = currentButton + selectedOneOffDelta;
       }
       // Allow selection of the settings button via the tab key.
@@ -451,7 +442,7 @@ ContentSearchUIController.prototype = {
   },
 
   _currentEngineIndex: -1,
-  _cycleCurrentEngine: function (aReverse) {
+  _cycleCurrentEngine(aReverse) {
     if ((this._currentEngineIndex == this._engines.length - 1 && !aReverse) ||
         (this._currentEngineIndex == 0 && aReverse)) {
       return;
@@ -461,7 +452,7 @@ ContentSearchUIController.prototype = {
     this._sendMsg("SetCurrentEngine", engineName);
   },
 
-  _onFocus: function () {
+  _onFocus() {
     if (this._mousedown) {
       return;
     }
@@ -474,7 +465,7 @@ ContentSearchUIController.prototype = {
     this._speculativeConnect();
   },
 
-  _onBlur: function () {
+  _onBlur() {
     if (this._mousedown) {
       // At this point, this.input has lost focus, but a new element has not yet
       // received it. If we re-focus this.input directly, the new element will
@@ -486,23 +477,25 @@ ContentSearchUIController.prototype = {
     this._hideSuggestions();
   },
 
-  _onMousemove: function (event) {
+  _onMousemove(event) {
     let idx = this._indexOfTableItem(event.target);
     if (idx >= this.numSuggestions) {
+      // Deselect any search suggestion that has been selected.
+      this.selectedIndex = -1;
       this.selectedButtonIndex = idx - this.numSuggestions;
       return;
     }
     this.selectedIndex = idx;
   },
 
-  _onMouseup: function (event) {
+  _onMouseup(event) {
     if (event.button == 2) {
       return;
     }
     this._onCommand(event);
   },
 
-  _onMouseout: function (event) {
+  _onMouseout(event) {
     // We only deselect one-off buttons and the settings button when they are
     // moused out.
     let idx = this._indexOfTableItem(event.originalTarget);
@@ -511,22 +504,27 @@ ContentSearchUIController.prototype = {
     }
   },
 
-  _onClick: function (event) {
+  _onClick(event) {
     this._onMouseup(event);
   },
 
-  _onContentSearchService: function (event) {
+  _onContentSearchService(event) {
     let methodName = "_onMsg" + event.detail.type;
     if (methodName in this) {
       this[methodName](event.detail.data);
     }
   },
 
-  _onMsgFocusInput: function (event) {
+  _onMsgFocusInput(event) {
     this.input.focus();
   },
 
-  _onMsgSuggestions: function (suggestions) {
+  _onMsgBlur(event) {
+    this.input.blur();
+    this._hideSuggestions();
+  },
+
+  _onMsgSuggestions(suggestions) {
     // Ignore the suggestions if their search string or engine doesn't match
     // ours.  Due to the async nature of message passing, this can easily happen
     // when the user types quickly.
@@ -550,13 +548,11 @@ ContentSearchUIController.prototype = {
       let type, idx;
       if (i < suggestions.formHistory.length) {
         [type, idx] = ["formHistory", i];
-      }
-      else {
+      } else {
         let j = i - suggestions.formHistory.length;
         if (j < suggestions.remote.length) {
           [type, idx] = ["remote", j];
-        }
-        else {
+        } else {
           break;
         }
       }
@@ -581,13 +577,13 @@ ContentSearchUIController.prototype = {
     }
   },
 
-  _onMsgSuggestionsCancelled: function () {
+  _onMsgSuggestionsCancelled() {
     if (!this._table.hidden) {
       this._hideSuggestions();
     }
   },
 
-  _onMsgState: function (state) {
+  _onMsgState(state) {
     this.engines = state.engines;
     // No point updating the default engine (and the header) if there's no change.
     if (this.defaultEngine &&
@@ -598,25 +594,32 @@ ContentSearchUIController.prototype = {
     this.defaultEngine = state.currentEngine;
   },
 
-  _onMsgCurrentState: function (state) {
+  _onMsgCurrentState(state) {
     this._onMsgState(state);
   },
 
-  _onMsgCurrentEngine: function (engine) {
+  _onMsgCurrentEngine(engine) {
     this.defaultEngine = engine;
     this._pendingOneOffRefresh = true;
   },
 
-  _onMsgStrings: function (strings) {
+  _onMsgStrings(strings) {
     this._strings = strings;
     this._updateDefaultEngineHeader();
     this._updateSearchWithHeader();
     document.getElementById("contentSearchSettingsButton").textContent =
       this._strings.searchSettings;
-    this.input.setAttribute("placeholder", this._strings.searchPlaceholder);
   },
 
-  _updateDefaultEngineHeader: function () {
+  _updateDefaultEngineIcon() {
+    let eng = this._engines.find(engine => engine.name === this.defaultEngine.name);
+    // We only show the engines icon for default engines, otherwise show
+    // a default; default engines have an identifier
+    let icon = eng.identifier ? this.defaultEngine.icon : DEFAULT_INPUT_ICON;
+    document.body.style.setProperty("--newtab-search-icon", "url(" + icon + ")");
+  },
+
+  _updateDefaultEngineHeader() {
     let header = document.getElementById("contentSearchDefaultEngineHeader");
     header.firstChild.setAttribute("src", this.defaultEngine.icon);
     if (!this._strings) {
@@ -629,26 +632,33 @@ ContentSearchUIController.prototype = {
       this._strings.searchHeader.replace("%S", this.defaultEngine.name)));
   },
 
-  _updateSearchWithHeader: function () {
+  _updateSearchWithHeader() {
     if (!this._strings) {
       return;
     }
     let searchWithHeader = document.getElementById("contentSearchSearchWithHeader");
+    let labels = searchWithHeader.querySelectorAll("label");
     if (this.input.value) {
-      searchWithHeader.innerHTML = this._strings.searchForSomethingWith;
-      searchWithHeader.querySelector('.contentSearchSearchWithHeaderSearchText').textContent = this.input.value;
+      let header = this._strings.searchForSomethingWith2;
+      // Translators can use both %S and %1$S.
+      header = header.replace("%1$S", "%S").split("%S");
+      labels[0].textContent = header[0];
+      labels[1].textContent = this.input.value;
+      labels[2].textContent = header[1];
     } else {
-      searchWithHeader.textContent = this._strings.searchWithHeader;
+      labels[0].textContent = this._strings.searchWithHeader;
+      labels[1].textContent = "";
+      labels[2].textContent = "";
     }
   },
 
-  _speculativeConnect: function () {
+  _speculativeConnect() {
     if (this.defaultEngine) {
       this._sendMsg("SpeculativeConnect", this.defaultEngine.name);
     }
   },
 
-  _makeTableRow: function (type, suggestionStr, currentRow, searchWords) {
+  _makeTableRow(type, suggestionStr, currentRow, searchWords) {
     let row = document.createElementNS(HTML_NS, "tr");
     row.dir = "auto";
     row.classList.add("contentSearchSuggestionRow");
@@ -685,45 +695,44 @@ ContentSearchUIController.prototype = {
   },
 
   // Converts favicon array buffer into a data URI.
-  _getFaviconURIFromBuffer: function (buffer) {
+  _getFaviconURIFromBuffer(buffer) {
     let blob = new Blob([buffer]);
     return URL.createObjectURL(blob);
   },
 
   // Adds "@2x" to the name of the given PNG url for "retina" screens.
-  _getImageURIForCurrentResolution: function (uri) {
+  _getImageURIForCurrentResolution(uri) {
     if (window.devicePixelRatio > 1) {
       return uri.replace(/\.png$/, "@2x.png");
     }
     return uri;
   },
 
-  _getSearchEngines: function () {
+  _getSearchEngines() {
     this._sendMsg("GetState");
   },
 
-  _getStrings: function () {
+  _getStrings() {
     this._sendMsg("GetStrings");
   },
 
-  _getSuggestions: function () {
+  _getSuggestions() {
     this._stickyInputValue = this.input.value;
     if (this.defaultEngine) {
       this._sendMsg("GetSuggestions", {
         engineName: this.defaultEngine.name,
         searchString: this.input.value,
-        remoteTimeout: this.remoteTimeout,
       });
     }
   },
 
-  _clearSuggestionRows: function() {
+  _clearSuggestionRows() {
     while (this._suggestionsList.firstElementChild) {
       this._suggestionsList.firstElementChild.remove();
     }
   },
 
-  _hideSuggestions: function () {
+  _hideSuggestions() {
     this.input.setAttribute("aria-expanded", "false");
     this.selectedIndex = -1;
     this.selectedButtonIndex = -1;
@@ -731,7 +740,7 @@ ContentSearchUIController.prototype = {
     this._table.hidden = true;
   },
 
-  _indexOfTableItem: function (elt) {
+  _indexOfTableItem(elt) {
     if (elt.classList.contains("contentSearchOneOffItem")) {
       return this.numSuggestions + this._oneOffButtons.indexOf(elt);
     }
@@ -747,7 +756,7 @@ ContentSearchUIController.prototype = {
     return elt.rowIndex;
   },
 
-  _makeTable: function (id) {
+  _makeTable(id) {
     this._table = document.createElementNS(HTML_NS, "table");
     this._table.id = id;
     this._table.hidden = true;
@@ -762,11 +771,6 @@ ContentSearchUIController.prototype = {
 
     // Deselect the selected element on mouseout if it wasn't a suggestion.
     this._table.addEventListener("mouseout", this);
-
-    // If a search is loaded in the same tab, ensure the suggestions dropdown
-    // is hidden immediately when the page starts loading and not when it first
-    // appears, in order to provide timely feedback to the user.
-    window.addEventListener("beforeunload", () => { this._hideSuggestions(); });
 
     let headerRow = document.createElementNS(HTML_NS, "tr");
     let header = document.createElementNS(HTML_NS, "td");
@@ -802,6 +806,13 @@ ContentSearchUIController.prototype = {
     header.setAttribute("class", "contentSearchHeader");
     headerRow.appendChild(header);
     header.id = "contentSearchSearchWithHeader";
+    let start = document.createElement("label");
+    let inputLabel = document.createElement("label");
+    inputLabel.setAttribute("class", "contentSearchSearchWithHeaderSearchText");
+    let end = document.createElement("label");
+    header.appendChild(start);
+    header.appendChild(inputLabel);
+    header.appendChild(end);
     this._oneOffsTable.appendChild(headerRow);
 
     let button = document.createElementNS(HTML_NS, "button");
@@ -816,7 +827,7 @@ ContentSearchUIController.prototype = {
     return this._table;
   },
 
-  _setUpOneOffButtons: function () {
+  _setUpOneOffButtons() {
     // Sometimes we receive a CurrentEngine message from the ContentSearch service
     // before we've received a State message - i.e. before we have our engines.
     if (!this._engines) {
@@ -862,12 +873,14 @@ ContentSearchUIController.prototype = {
       let uri;
       if (engine.iconBuffer) {
         uri = this._getFaviconURIFromBuffer(engine.iconBuffer);
-      }
-      else {
+      } else {
         uri = this._getImageURIForCurrentResolution(
           "chrome://browser/skin/search-engine-placeholder.png");
       }
       img.setAttribute("src", uri);
+      img.addEventListener("load", function() {
+        URL.revokeObjectURL(uri);
+      }, {once: true});
       button.appendChild(img);
       button.style.width = buttonWidth + "px";
       button.setAttribute("title", engine.name);
@@ -893,11 +906,11 @@ ContentSearchUIController.prototype = {
     this._oneOffsTable.hidden = false;
   },
 
-  _sendMsg: function (type, data=null) {
+  _sendMsg(type, data = null) {
     dispatchEvent(new CustomEvent("ContentSearchClient", {
       detail: {
-        type: type,
-        data: data,
+        type,
+        data,
       },
     }));
   },

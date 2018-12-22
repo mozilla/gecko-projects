@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,15 +8,14 @@
 #include "nsPresContext.h"
 #include "nsContentUtils.h"
 #include "nsTextFrame.h"
-#include "mozilla/RestyleManager.h"
 #include <algorithm>
 
 using namespace mozilla;
 
 nsIFrame*
-NS_NewMathMLTokenFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMathMLTokenFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMathMLTokenFrame(aContext);
+  return new (aPresShell) nsMathMLTokenFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLTokenFrame)
@@ -43,7 +43,7 @@ nsMathMLTokenFrame::GetMathMLFrameType()
 
   uint8_t mathVariant = StyleFont()->mMathVariant;
   if ((mathVariant == NS_MATHML_MATHVARIANT_NONE &&
-       (StyleFont()->mFont.style == NS_STYLE_FONT_STYLE_ITALIC ||
+       (StyleFont()->mFont.style == FontSlantStyle::Italic() ||
         HasAnyStateBits(NS_FRAME_IS_IN_SINGLE_CHAR_MI))) ||
       mathVariant == NS_MATHML_MATHVARIANT_ITALIC ||
       mathVariant == NS_MATHML_MATHVARIANT_BOLD_ITALIC ||
@@ -68,7 +68,7 @@ nsMathMLTokenFrame::MarkTextFramesAsTokenMathML()
        childFrame = childFrame->GetNextSibling()) {
     for (nsIFrame* childFrame2 = childFrame->PrincipalChildList().FirstChild();
          childFrame2; childFrame2 = childFrame2->GetNextSibling()) {
-      if (childFrame2->GetType() == nsGkAtoms::textFrame) {
+      if (childFrame2->IsTextFrame()) {
         childFrame2->AddStateBits(TEXT_IS_IN_TOKEN_MATHML);
         child = childFrame2;
         childCount++;
@@ -120,11 +120,13 @@ nsMathMLTokenFrame::InsertFrames(ChildListID aListID,
 
 void
 nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
-                           nsHTMLReflowMetrics&     aDesiredSize,
-                           const nsHTMLReflowState& aReflowState,
+                           ReflowOutput&     aDesiredSize,
+                           const ReflowInput& aReflowInput,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
+
   mPresentationData.flags &= ~NS_MATHML_ERROR;
 
   // initializations needed for empty markup like <mtag></mtag>
@@ -134,26 +136,24 @@ nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
 
   for (nsIFrame* childFrame : PrincipalChildList()) {
     // ask our children to compute their bounding metrics
-    nsHTMLReflowMetrics childDesiredSize(aReflowState.GetWritingMode(),
-                                         aDesiredSize.mFlags
-                                         | NS_REFLOW_CALC_BOUNDING_METRICS);
+    ReflowOutput childDesiredSize(aReflowInput.GetWritingMode());
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowState.ComputedSize(wm);
+    LogicalSize availSize = aReflowInput.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
+    ReflowInput childReflowInput(aPresContext, aReflowInput,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext, childDesiredSize,
-                childReflowState, aStatus);
-    //NS_ASSERTION(NS_FRAME_IS_COMPLETE(aStatus), "bad status");
+                childReflowInput, aStatus);
+    //NS_ASSERTION(aStatus.IsComplete(), "bad status");
     SaveReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                     childDesiredSize.mBoundingMetrics);
   }
 
   // place and size children
-  FinalizeReflow(aReflowState.rendContext->GetDrawTarget(), aDesiredSize);
+  FinalizeReflow(aReflowInput.mRenderingContext->GetDrawTarget(), aDesiredSize);
 
-  aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  aStatus.Reset(); // This type of frame can't be split.
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 // For token elements, mBoundingMetrics is computed at the ReflowToken
@@ -162,11 +162,11 @@ nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
 /* virtual */ nsresult
 nsMathMLTokenFrame::Place(DrawTarget*          aDrawTarget,
                           bool                 aPlaceOrigin,
-                          nsHTMLReflowMetrics& aDesiredSize)
+                          ReflowOutput& aDesiredSize)
 {
   mBoundingMetrics = nsBoundingMetrics();
   for (nsIFrame* childFrame :PrincipalChildList()) {
-    nsHTMLReflowMetrics childSize(aDesiredSize.GetWritingMode());
+    ReflowOutput childSize(aDesiredSize.GetWritingMode());
     GetReflowAndBoundingMetricsFor(childFrame, childSize,
                                    childSize.mBoundingMetrics, nullptr);
     // compute and cache the bounding metrics
@@ -187,7 +187,7 @@ nsMathMLTokenFrame::Place(DrawTarget*          aDrawTarget,
   if (aPlaceOrigin) {
     nscoord dy, dx = 0;
     for (nsIFrame* childFrame : PrincipalChildList()) {
-      nsHTMLReflowMetrics childSize(aDesiredSize.GetWritingMode());
+      ReflowOutput childSize(aDesiredSize.GetWritingMode());
       GetReflowAndBoundingMetricsFor(childFrame, childSize,
                                      childSize.mBoundingMetrics);
 

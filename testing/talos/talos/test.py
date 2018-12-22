@@ -1,5 +1,8 @@
+from __future__ import absolute_import
+
 import os
-from talos import filter, utils
+
+from talos import filter
 
 """
 test definitions for Talos
@@ -26,11 +29,14 @@ def test_dict():
 
 class Test(object):
     """abstract base class for a Talos test case"""
+    __test__ = False  # not pytest
+
     cycles = None  # number of cycles
     keys = []
     desktop = True
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     lower_is_better = True
+    alert_threshold = 2.0
 
     @classmethod
     def name(cls):
@@ -83,31 +89,33 @@ class TsBase(Test):
         'url_timestamp',
         'timeout',
         'cycles',
-        'shutdown',      # If True, collect data on shutdown (using the value
-                         # provided by __startTimestamp/__endTimestamp).
-                         # Otherwise, ignore shutdown data
-                         # (__startTimestamp/__endTimestamp is still
-                         # required but ignored).
         'profile_path',  # The path containing the template profile. This
                          # directory is copied to the temporary profile during
                          # initialization of the test. If some of the files may
                          # be overwritten by Firefox and need to be reinstalled
                          # before each pass, use key |reinstall|
-        'sps_profile',
-        'sps_profile_interval',
-        'sps_profile_entries',
-        'sps_profile_startup',
+        'gecko_profile',
+        'gecko_profile_interval',
+        'gecko_profile_entries',
+        'gecko_profile_startup',
         'preferences',
         'xperf_counters',
         'xperf_providers',
         'xperf_user_providers',
         'xperf_stackwalk',
         'tpmozafterpaint',
-        'test_name_extension',
+        'fnbpaint',
+        'tphero',
+        'profile',
+        'firstpaint',
+        'userready',
+        'testeventmap',
+        'base_vs_ref',
         'extensions',
         'filters',
         'setup',
         'cleanup',
+        'webextensions',
         'reinstall',     # A list of files from the profile directory that
                          # should be copied to the temporary profile prior to
                          # running each cycle, to avoid one cycle overwriting
@@ -127,18 +135,35 @@ class ts_paint(TsBase):
     """
     cycles = 20
     timeout = 150
-    sps_profile_startup = True
-    sps_profile_entries = 10000000
+    gecko_profile_startup = True
+    gecko_profile_entries = 10000000
     url = 'startup_test/tspaint_test.html'
-    shutdown = False
     xperf_counters = []
     win7_counters = []
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     tpmozafterpaint = True
-    rss = False
     mainthread = False
     responsiveness = False
     unit = 'ms'
+
+
+@register_test()
+class ts_paint_webext(ts_paint):
+    webextensions = '${talos}/webextensions/dummy/dummy.xpi'
+    preferences = {'xpinstall.signatures.required': False}
+
+
+@register_test()
+class ts_paint_heavy(ts_paint):
+    """
+    ts_paint test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
+class ts_paint_flex(ts_paint):
+    preferences = {'layout.css.emulate-moz-box-with-flex': True}
 
 
 @register_test()
@@ -150,17 +175,16 @@ class sessionrestore(TsBase):
     2. Launch Firefox.
     3. Measure the delta between firstPaint and sessionRestored.
     """
-    extensions = \
-        '${talos}/startup_test/sessionrestore/addon/sessionrestore-signed.xpi'
+    extensions = ['${talos}/pageloader', '${talos}/startup_test/sessionrestore/addon']
     cycles = 10
-    timeout = 1000000
-    sps_profile_startup = True
-    sps_profile_entries = 10000000
+    timeout = 900
+    gecko_profile_startup = True
+    gecko_profile_entries = 10000000
     profile_path = '${talos}/startup_test/sessionrestore/profile'
-    url = 'startup_test/sessionrestore/index.html'
-    shutdown = False
-    reinstall = ['sessionstore.js', 'sessionCheckpoints.json']
-    # Restore the session
+    reinstall = ['sessionstore.jsonlz4', 'sessionstore.js', 'sessionCheckpoints.json']
+    # Restore the session. We have to provide a URL, otherwise Talos
+    # asks for a manifest URL.
+    url = 'about:home'
     preferences = {'browser.startup.page': 3}
     unit = 'ms'
 
@@ -174,26 +198,19 @@ class sessionrestore_no_auto_restore(sessionrestore):
     2. Launch Firefox.
     3. Measure the delta between firstPaint and sessionRestored.
     """
-    # Restore about:home
     preferences = {'browser.startup.page': 1}
 
 
 @register_test()
-class tpaint(TsBase):
+class sessionrestore_many_windows(sessionrestore):
     """
-    Tests the amount of time it takes the open a new window. This test does
-    not include startup time. Multiple test windows are opened in succession,
-    results reported are the average amount of time required to create and
-    display a window in the running instance of the browser.
-    (Measures ctrl-n performance.)
+    A start up test measuring the time it takes to load a sessionstore.js file.
+
+    1. Set up Firefox to restore automatically from sessionstore.js file.
+    2. Launch Firefox.
+    3. Measure the delta between firstPaint and sessionRestored.
     """
-    url = 'file://${talos}/startup_test/tpaint.html?auto=1'
-    timeout = 300
-    sps_profile_interval = 1
-    sps_profile_entries = 2000000
-    tpmozafterpaint = True
-    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
-    unit = 'ms'
+    profile_path = '${talos}/startup_test/sessionrestore/profile-manywindows'
 
 
 @register_test()
@@ -201,12 +218,12 @@ class tresize(TsBase):
     """
     This test does some resize thing.
     """
-    extensions = '${talos}/startup_test/tresize/addon/tresize-signed.xpi'
+    extensions = ['${talos}/startup_test/tresize/addon']
     cycles = 20
     url = 'startup_test/tresize/addon/content/tresize-test.html'
     timeout = 150
-    sps_profile_interval = 2
-    sps_profile_entries = 1000000
+    gecko_profile_interval = 2
+    gecko_profile_entries = 1000000
     tpmozafterpaint = True
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
@@ -223,19 +240,79 @@ class tresize(TsBase):
 
 class PageloaderTest(Test):
     """abstract base class for a Talos Pageloader test"""
+    extensions = ['${talos}/pageloader']
     tpmanifest = None  # test manifest
     tpcycles = 1  # number of time to run each page
     cycles = None
     timeout = None
     keys = ['tpmanifest', 'tpcycles', 'tppagecycles', 'tprender', 'tpchrome',
-            'tpmozafterpaint', 'tploadnocache', 'rss', 'mainthread',
-            'resolution', 'cycles', 'sps_profile', 'sps_profile_interval',
-            'sps_profile_entries', 'tptimeout', 'win_counters', 'w7_counters',
-            'linux_counters', 'mac_counters', 'tpscrolltest', 'xperf_counters',
-            'timeout', 'shutdown', 'responsiveness', 'profile_path',
-            'xperf_providers', 'xperf_user_providers', 'xperf_stackwalk',
-            'filters', 'preferences', 'extensions', 'setup', 'cleanup',
-            'test_name_extension', 'lower_is_better', 'unit']
+            'tpmozafterpaint', 'fnbpaint', 'tphero', 'tploadnocache', 'firstpaint',
+            'userready', 'testeventmap', 'base_vs_ref', 'mainthread', 'resolution',
+            'cycles', 'gecko_profile', 'gecko_profile_interval', 'gecko_profile_entries',
+            'tptimeout', 'win_counters', 'w7_counters', 'linux_counters', 'mac_counters',
+            'tpscrolltest', 'xperf_counters', 'timeout', 'responsiveness',
+            'profile_path', 'xperf_providers', 'xperf_user_providers', 'xperf_stackwalk',
+            'format_pagename', 'filters', 'preferences', 'extensions', 'setup', 'cleanup',
+            'lower_is_better', 'alert_threshold', 'unit', 'webextensions', 'profile']
+
+
+class QuantumPageloadTest(PageloaderTest):
+    """
+    Base class for a Quantum Pageload test
+    """
+    tpcycles = 1
+    tppagecycles = 25
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+    lower_is_better = True
+    fnbpaint = True
+
+
+@register_test()
+class tpaint(PageloaderTest):
+    """
+    Tests the amount of time it takes the open a new window. This test does
+    not include startup time. Multiple test windows are opened in succession,
+    results reported are the average amount of time required to create and
+    display a window in the running instance of the browser.
+    (Measures ctrl-n performance.)
+    """
+    tpmanifest = '${talos}/tests/tpaint/tpaint.manifest'
+    tppagecycles = 20
+    timeout = 300
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    tpmozafterpaint = True
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+    preferences = {'security.data_uri.block_toplevel_data_uri_navigations': False}
+
+
+@register_test()
+class cpstartup(PageloaderTest):
+    """
+    Tests the amount of time it takes to start up a new content process and
+    initialize it to the point where it can start processing incoming URLs
+    to load.
+    """
+    extensions = ['${talos}/tests/cpstartup', '${talos}/pageloader']
+    tpmanifest = '${talos}/tests/cpstartup/cpstartup.manifest'
+    tppagecycles = 20
+    gecko_profile_entries = 1000000
+    tploadnocache = True
+    unit = 'ms'
+    preferences = {
+        'addon.test.cpstartup.webserver': '${webserver}',
+        # By default, Talos is configured to open links from
+        # content in new windows. We're overriding them so that
+        # they open in new tabs instead.
+        # See http://kb.mozillazine.org/Browser.link.open_newwindow
+        # and http://kb.mozillazine.org/Browser.link.open_newwindow.restriction
+        'browser.link.open_newwindow': 3,
+        'browser.link.open_newwindow.restriction': 2,
+    }
 
 
 @register_test()
@@ -244,10 +321,10 @@ class tabpaint(PageloaderTest):
     Tests the amount of time it takes to open new tabs, triggered from
     both the parent process and the content process.
     """
-    extensions = '${talos}/tests/tabpaint/tabpaint-signed.xpi'
+    extensions = ['${talos}/tests/tabpaint', '${talos}/pageloader']
     tpmanifest = '${talos}/tests/tabpaint/tabpaint.manifest'
     tppagecycles = 20
-    sps_profile_entries = 1000000
+    gecko_profile_entries = 1000000
     tploadnocache = True
     unit = 'ms'
     preferences = {
@@ -266,20 +343,17 @@ class tps(PageloaderTest):
     """
     Tests the amount of time it takes to switch between tabs
     """
-    extensions = '${talos}/tests/tabswitch/tabswitch-signed.xpi'
+    extensions = ['${talos}/tests/tabswitch', '${talos}/pageloader']
     tpmanifest = '${talos}/tests/tabswitch/tps.manifest'
     tppagecycles = 5
-    sps_profile_entries = 1000000
+    gecko_profile_entries = 5000000
     tploadnocache = True
     preferences = {
         'addon.test.tabswitch.urlfile': os.path.join('${talos}',
                                                      'tests',
                                                      'tp5o.html'),
         'addon.test.tabswitch.webserver': '${webserver}',
-        # limit the page set number for winxp as we have issues.
-        # see https://bugzilla.mozilla.org/show_bug.cgi?id=1195288
-        'addon.test.tabswitch.maxurls':
-            45 if utils.PLATFORM_TYPE == 'win_' else -1,
+        'addon.test.tabswitch.maxurls': -1,
     }
     unit = 'ms'
 
@@ -308,13 +382,13 @@ class tart(PageloaderTest):
       - all: average interval over all recorded intervals.
     """
     tpmanifest = '${talos}/tests/tart/tart.manifest'
-    extensions = '${talos}/tests/tart/addon/tart-signed.xpi'
+    extensions = ['${talos}/pageloader', '${talos}/tests/tart/addon']
     tpcycles = 1
     tppagecycles = 25
     tploadnocache = True
     tpmozafterpaint = False
-    sps_profile_interval = 10
-    sps_profile_entries = 1000000
+    gecko_profile_interval = 10
+    gecko_profile_entries = 1000000
     win_counters = w7_counters = linux_counters = mac_counters = None
     """
     ASAP mode
@@ -331,36 +405,8 @@ class tart(PageloaderTest):
 
 
 @register_test()
-class cart(PageloaderTest):
-    """
-    Customize Animation Regression Test
-    Tests Australis customize animations (default DPI scaling). Uses the
-    TART addon but with a different URL.
-    Reports the same animation values as TART (.half/.all/.error).
-    All comments for TART also apply here (e.g. for ASAP+OMTC, etc)
-    Subtests are:
-    1-customize-enter - from triggering customize mode until it's ready for
-    the user
-    2-customize-exit  - exiting customize
-    3-customize-enter-css - only the CSS animation part of entering customize
-    """
-    tpmanifest = '${talos}/tests/tart/cart.manifest'
-    extensions = '${talos}/tests/tart/addon/tart-signed.xpi'
-    tpcycles = 1
-    tppagecycles = 25
-    tploadnocache = True
-    tpmozafterpaint = False
-    sps_profile_interval = 1
-    sps_profile_entries = 10000000
-    win_counters = w7_counters = linux_counters = mac_counters = None
-    """
-    ASAP mode
-    """
-    preferences = {'layout.frame_rate': 0,
-                   'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
-    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
-    unit = 'ms'
+class tart_flex(tart):
+    preferences = {'layout.css.emulate-moz-box-with-flex': True}
 
 
 @register_test()
@@ -371,13 +417,14 @@ class damp(PageloaderTest):
     for each tool, across a very simple and very complicated page.
     """
     tpmanifest = '${talos}/tests/devtools/damp.manifest'
-    extensions = '${talos}/tests/devtools/addon/devtools-signed.xpi'
+    extensions = ['${talos}/pageloader', '${talos}/tests/devtools/addon']
+    cycles = 5
     tpcycles = 1
-    tppagecycles = 25
+    tppagecycles = 5
     tploadnocache = True
     tpmozafterpaint = False
-    sps_profile_interval = 10
-    sps_profile_entries = 1000000
+    gecko_profile_interval = 10
+    gecko_profile_entries = 1000000
     win_counters = w7_counters = linux_counters = mac_counters = None
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     preferences = {'devtools.memory.enabled': True,
@@ -400,8 +447,9 @@ class glterrain(PageloaderTest):
     tppagecycles = 25
     tploadnocache = True
     tpmozafterpaint = False
-    sps_profile_interval = 10
-    sps_profile_entries = 2000000
+    tpchrome = False
+    gecko_profile_interval = 10
+    gecko_profile_entries = 2000000
     win_counters = w7_counters = linux_counters = mac_counters = None
     """ ASAP mode """
     preferences = {'layout.frame_rate': 0,
@@ -409,6 +457,26 @@ class glterrain(PageloaderTest):
                    'dom.send_after_paint_to_content': False}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = 'frame interval'
+
+
+@register_test()
+class glvideo(PageloaderTest):
+    """
+    WebGL video texture update with 1080p video.
+    Measures mean tick time across 100 ticks.
+    (each tick is texImage2D(<video>)+setTimeout(0))
+    """
+    tpmanifest = '${talos}/tests/webgl/glvideo.manifest'
+    tpcycles = 1
+    tppagecycles = 5
+    tploadnocache = True
+    tpmozafterpaint = False
+    tpchrome = False
+    gecko_profile_interval = 2
+    gecko_profile_entries = 2000000
+    win_counters = w7_counters = linux_counters = mac_counters = None
+    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
+    unit = 'ms'
 
 
 @register_test()
@@ -422,14 +490,12 @@ class tp5n(PageloaderTest):
     of the site in question.
     """
     resolution = 20
-    shutdown = True
     tpmanifest = '${talos}/tests/tp5n/tp5n.manifest'
     tpcycles = 1
     tppagecycles = 1
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = True
     w7_counters = []
     win_counters = []
@@ -466,20 +532,24 @@ class tp5o(PageloaderTest):
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = False
     tpmanifest = '${talos}/tests/tp5n/tp5o.manifest'
-    win_counters = ['Main_RSS', 'Private Bytes', '% Processor Time']
-    w7_counters = ['Main_RSS', 'Private Bytes', '% Processor Time',
-                   'Modified Page List Bytes']
-    linux_counters = ['Private Bytes', 'XRes', 'Main_RSS']
-    mac_counters = ['Main_RSS']
+    win_counters = ['% Processor Time']
+    w7_counters = ['% Processor Time']
+    linux_counters = ['XRes']
+    mac_counters = []
     responsiveness = True
-    sps_profile_interval = 2
-    sps_profile_entries = 4000000
+    gecko_profile_interval = 2
+    gecko_profile_entries = 4000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     timeout = 1800
     unit = 'ms'
+
+
+@register_test()
+class tp5o_webext(tp5o):
+    webextensions = '${talos}/webextensions/dummy/dummy.xpi'
+    preferences = {'xpinstall.signatures.required': False}
 
 
 @register_test()
@@ -490,15 +560,16 @@ class tp5o_scroll(PageloaderTest):
     tpmanifest = '${talos}/tests/tp5n/tp5o.manifest'
     tpcycles = 1
     tppagecycles = 12
-    sps_profile_interval = 2
-    sps_profile_entries = 2000000
-
+    gecko_profile_interval = 2
+    gecko_profile_entries = 2000000
     tpscrolltest = True
     """ASAP mode"""
     tpmozafterpaint = False
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = '1/FPS'
 
@@ -513,8 +584,8 @@ class v8_7(PageloaderTest):
     selective branches and operating systems.
     """
     tpmanifest = '${talos}/tests/v8_7/v8.manifest'
-    sps_profile_interval = 1
-    sps_profile_entries = 1000000
+    gecko_profile_interval = 1
+    gecko_profile_entries = 1000000
     tpcycles = 1
     resolution = 20
     tpmozafterpaint = False
@@ -533,37 +604,45 @@ class kraken(PageloaderTest):
     tpmanifest = '${talos}/tests/kraken/kraken.manifest'
     tpcycles = 1
     tppagecycles = 1
-    sps_profile_interval = 0.1
-    sps_profile_entries = 1000000
+    gecko_profile_interval = 1
+    gecko_profile_entries = 5000000
     tpmozafterpaint = False
+    tpchrome = False
     preferences = {'dom.send_after_paint_to_content': False}
     filters = filter.mean.prepare()
     unit = 'score'
 
 
 @register_test()
-class tcanvasmark(PageloaderTest):
+class basic_compositor_video(PageloaderTest):
     """
-    CanvasMark benchmark v0.6
+    Video test
     """
-    tpmanifest = '${talos}/tests/canvasmark/canvasmark.manifest'
-    win_counters = w7_counters = linux_counters = mac_counters = None
-    tpcycles = 5
-    tppagecycles = 1
-    timeout = 900
-    sps_profile_interval = 10
-    sps_profile_entries = 2500000
-    tpmozafterpaint = False
-    preferences = {'dom.send_after_paint_to_content': False}
+    tpmanifest = '${talos}/tests/video/video.manifest'
+    tpcycles = 1
+    tppagecycles = 12
+    tpchrome = False
+    timeout = 10000
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    preferences = {'full-screen-api.allow-trusted-requests-only': False,
+                   'layers.acceleration.force-enabled': False,
+                   'layers.acceleration.disabled': True,
+                   'layout.frame_rate': 0,
+                   'docshell.event_starvation_delay_hint': 1,
+                   'full-screen-api.warning.timeout': 500,
+                   'media.ruin-av-sync.enabled': True}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
-    unit = 'score'
-    lower_is_better = False
+    unit = 'ms/frame'
+    lower_is_better = True
 
 
 class dromaeo(PageloaderTest):
     """abstract base class for dramaeo tests"""
     filters = filter.dromaeo.prepare()
     lower_is_better = False
+    alert_threshold = 5.0
+    tpchrome = False
 
 
 @register_test()
@@ -575,8 +654,8 @@ class dromaeo_css(dromaeo):
 
     Each page in the manifest is part of the dromaemo css benchmark.
     """
-    sps_profile_interval = 2
-    sps_profile_entries = 10000000
+    gecko_profile_interval = 2
+    gecko_profile_entries = 10000000
     tpmanifest = '${talos}/tests/dromaeo/css.manifest'
     unit = 'score'
 
@@ -590,24 +669,25 @@ class dromaeo_dom(dromaeo):
 
     Each page in the manifest is part of the dromaemo dom benchmark.
     """
-    sps_profile_interval = 2
-    sps_profile_entries = 10000000
+    gecko_profile_interval = 2
+    gecko_profile_entries = 10000000
     tpmanifest = '${talos}/tests/dromaeo/dom.manifest'
-    tpdisable_e10s = True
     unit = 'score'
 
 
 @register_test()
 class tsvgm(PageloaderTest):
     """
-    An svg-only number that measures SVG rendering performance.
+    An svg-only number that measures SVG rendering performance
+    for dynamic content only.
     """
     tpmanifest = '${talos}/tests/svgx/svgm.manifest'
     tpcycles = 1
     tppagecycles = 7
     tpmozafterpaint = False
-    sps_profile_interval = 10
-    sps_profile_entries = 1000000
+    tpchrome = False
+    gecko_profile_interval = 10
+    gecko_profile_entries = 1000000
     """ASAP mode"""
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
@@ -619,18 +699,37 @@ class tsvgm(PageloaderTest):
 @register_test()
 class tsvgx(PageloaderTest):
     """
-    An svg-only number that measures SVG rendering performance.
+    An svg-only number that measures SVG rendering performance
+    for dynamic content only.
     """
     tpmanifest = '${talos}/tests/svgx/svgx.manifest'
     tpcycles = 1
     tppagecycles = 25
     tpmozafterpaint = False
-    sps_profile_interval = 10
-    sps_profile_entries = 1000000
+    tpchrome = False
+    gecko_profile_interval = 10
+    gecko_profile_entries = 1000000
     """ASAP mode"""
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
                    'dom.send_after_paint_to_content': False}
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+
+
+@register_test()
+class tsvg_static(PageloaderTest):
+    """
+    An svg-only number that measures SVG rendering performance
+    for static content only.
+    """
+    tpmanifest = '${talos}/tests/svg_static/svg_static.manifest'
+    tpcycles = 1
+    tppagecycles = 25
+    tpmozafterpaint = True
+    tpchrome = False
+    gecko_profile_interval = 1
+    gecko_profile_entries = 10000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 
@@ -644,8 +743,9 @@ class tsvgr_opacity(PageloaderTest):
     tpcycles = 1
     tppagecycles = 25
     tpmozafterpaint = True
-    sps_profile_interval = 1
-    sps_profile_entries = 10000000
+    tpchrome = False
+    gecko_profile_interval = 1
+    gecko_profile_entries = 10000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 
@@ -659,12 +759,15 @@ class tscrollx(PageloaderTest):
     tpcycles = 1
     tppagecycles = 25
     tpmozafterpaint = False
-    sps_profile_interval = 1
-    sps_profile_entries = 1000000
+    tpchrome = False
+    gecko_profile_interval = 1
+    gecko_profile_entries = 1000000
     """ ASAP mode """
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 
@@ -679,5 +782,245 @@ class a11yr(PageloaderTest):
     tpcycles = 1
     tppagecycles = 25
     tpmozafterpaint = True
+    tpchrome = False
     preferences = {'dom.send_after_paint_to_content': False}
     unit = 'ms'
+    alert_threshold = 5.0
+
+
+class WebkitBenchmark(PageloaderTest):
+    tpcycles = 1
+    tppagecycles = 5
+    tpmozafterpaint = False
+    tpchrome = False
+    format_pagename = False
+    lower_is_better = False
+    unit = 'score'
+
+
+@register_test()
+class speedometer(WebkitBenchmark):
+    # Speedometer benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/speedometer/speedometer.manifest'
+
+
+@register_test()
+class stylebench(WebkitBenchmark):
+    # StyleBench benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/stylebench/stylebench.manifest'
+
+
+@register_test()
+class motionmark_animometer(WebkitBenchmark):
+    # MotionMark benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/motionmark/animometer.manifest'
+
+
+@register_test()
+class ARES6(WebkitBenchmark):
+    # ARES-6 benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/ares6/ares6.manifest'
+    tppagecycles = 1
+    lower_is_better = True
+
+
+@register_test()
+class motionmark_htmlsuite(WebkitBenchmark):
+    # MotionMark benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/motionmark/htmlsuite.manifest'
+
+
+@register_test()
+class JetStream(WebkitBenchmark):
+    # JetStream benchmark used by many browser vendors (from webkit)
+    tpmanifest = '${talos}/tests/jetstream/jetstream.manifest'
+    tppagecycles = 1
+
+
+@register_test()
+class perf_reftest(PageloaderTest):
+    """
+    Style perf-reftest a set of tests where the result is the difference of base vs ref pages
+    """
+    base_vs_ref = True  # compare the two test pages with eachother and report comparison
+    tpmanifest = '${talos}/tests/perf-reftest/perf_reftest.manifest'
+    tpcycles = 1
+    tppagecycles = 10
+    tptimeout = 30000
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+    lower_is_better = True
+    alert_threshold = 5.0
+
+
+@register_test()
+class perf_reftest_singletons(PageloaderTest):
+    """
+    Style perf-reftests run as individual tests
+    """
+    tpmanifest = '${talos}/tests/perf-reftest-singletons/perf_reftest_singletons.manifest'
+    tpcycles = 1
+    tppagecycles = 15
+    tptimeout = 30000
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+    lower_is_better = True
+    alert_threshold = 5.0
+
+
+@register_test()
+class tp6_google(QuantumPageloadTest):
+    """
+    Quantum Pageload Test - Google
+    """
+    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_google.manifest'
+    fnbpaint = False
+    tphero = True
+
+
+@register_test()
+class tp6_google_heavy(tp6_google):
+    """
+    tp6_google test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
+class tp6_youtube(QuantumPageloadTest):
+    """
+    Quantum Pageload Test - YouTube
+    """
+    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_youtube.manifest'
+
+
+@register_test()
+class tp6_youtube_heavy(tp6_youtube):
+    """
+    tp6_youtube test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
+class tp6_amazon(QuantumPageloadTest):
+    """
+    Quantum Pageload Test - Amazon
+    """
+    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_amazon.manifest'
+
+
+@register_test()
+class tp6_amazon_heavy(tp6_amazon):
+    """
+    tp6_amazon test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
+class tp6_facebook(QuantumPageloadTest):
+    """
+    Quantum Pageload Test - Facebook
+    """
+    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_facebook.manifest'
+
+
+@register_test()
+class tp6_facebook_heavy(tp6_facebook):
+    """
+    tp6_facebook test ran against a heavy-user profile
+    """
+    profile = 'simple'
+
+
+@register_test()
+class displaylist_mutate(PageloaderTest):
+    """
+    Test modifying single items in a large display list. Measure transaction speed
+    to the compositor.
+    """
+    tpmanifest = '${talos}/tests/layout/displaylist_mutate.manifest'
+    tpcycles = 1
+    tppagecycles = 5
+    tploadnocache = True
+    tpmozafterpaint = False
+    tpchrome = False
+    gecko_profile_interval = 2
+    gecko_profile_entries = 2000000
+    win_counters = w7_counters = linux_counters = mac_counters = None
+    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
+    """ASAP mode"""
+    preferences = {'layout.frame_rate': 0,
+                   'docshell.event_starvation_delay_hint': 1,
+                   'dom.send_after_paint_to_content': False}
+    unit = 'ms'
+
+
+@register_test()
+class rasterflood_svg(PageloaderTest):
+    """
+    Test modifying single items in a large display list. Measure transaction speed
+    to the compositor.
+    """
+    tpmanifest = '${talos}/tests/gfx/rasterflood_svg.manifest'
+    tpcycles = 1
+    tppagecycles = 10
+    tploadnocache = True
+    tpmozafterpaint = False
+    tpchrome = False
+    gecko_profile_interval = 2
+    gecko_profile_entries = 2000000
+    win_counters = w7_counters = linux_counters = mac_counters = None
+    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
+    """ASAP mode"""
+    preferences = {'layout.frame_rate': 0,
+                   'docshell.event_starvation_delay_hint': 1,
+                   'dom.send_after_paint_to_content': False}
+    unit = 'ms'
+
+
+@register_test()
+class rasterflood_gradient(PageloaderTest):
+    """
+    Test expensive rasterization while the main thread is busy.
+    """
+    tpmanifest = '${talos}/tests/gfx/rasterflood_gradient.manifest'
+    tpcycles = 1
+    tppagecycles = 10
+    tploadnocache = True
+    tpmozafterpaint = False
+    tpchrome = False
+    gecko_profile_interval = 2
+    gecko_profile_entries = 2000000
+    win_counters = w7_counters = linux_counters = mac_counters = None
+    filters = filter.ignore_first.prepare(1) + filter.median.prepare()
+    """ASAP mode"""
+    preferences = {'layout.frame_rate': 0,
+                   'docshell.event_starvation_delay_hint': 1,
+                   'dom.send_after_paint_to_content': False}
+    lower_is_better = False
+    unit = 'score'
+
+
+@register_test()
+class about_preferences_basic(PageloaderTest):
+    """
+    Base class for about_preferences test
+    """
+    tpmanifest = '${talos}/tests/about-preferences/about_preferences_basic.manifest'
+    # this test uses 'about:blank' as a dummy page (see manifest) so that the pages
+    # that just change url categories (i.e. about:preferences#search) will get a load event
+    # also any of the url category pages cannot have more than one tppagecycle
+    tpcycles = 25
+    tppagecycles = 1
+    gecko_profile_interval = 1
+    gecko_profile_entries = 2000000
+    filters = filter.ignore_first.prepare(5) + filter.median.prepare()
+    unit = 'ms'
+    lower_is_better = True
+    fnbpaint = True

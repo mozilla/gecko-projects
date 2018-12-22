@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsReadConfig.h"
+#include "nsJSConfigTriggers.h"
+
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsIAppStartup.h"
 #include "nsDirectoryServiceDefs.h"
@@ -17,9 +19,7 @@
 #include "nsIServiceManager.h"
 #include "nsIStringBundle.h"
 #include "nsToolkitCompsCID.h"
-#include "nsXPIDLString.h"
 #include "nsNetUtil.h"
-#include "prmem.h"
 #include "nsString.h"
 #include "nsCRT.h"
 #include "nspr.h"
@@ -28,44 +28,38 @@
 
 extern mozilla::LazyLogModule MCD;
 
-extern nsresult EvaluateAdminConfigScript(const char *js_buffer, size_t length,
-                                          const char *filename, 
-                                          bool bGlobalContext, 
-                                          bool bCallbacks, 
-                                          bool skipFirstLine);
-extern nsresult CentralizedAdminPrefManagerInit();
+extern nsresult CentralizedAdminPrefManagerInit(bool aSandboxEnabled);
 extern nsresult CentralizedAdminPrefManagerFinish();
 
-
-static void DisplayError(void)
+static nsresult DisplayError(void)
 {
     nsresult rv;
 
     nsCOMPtr<nsIPromptService> promptService = do_GetService("@mozilla.org/embedcomp/prompt-service;1");
     if (!promptService)
-        return;
+        return NS_ERROR_FAILURE;
 
     nsCOMPtr<nsIStringBundleService> bundleService = do_GetService(NS_STRINGBUNDLE_CONTRACTID);
     if (!bundleService)
-        return;
+        return NS_ERROR_FAILURE;
 
     nsCOMPtr<nsIStringBundle> bundle;
     bundleService->CreateBundle("chrome://autoconfig/locale/autoconfig.properties",
                                 getter_AddRefs(bundle));
     if (!bundle)
-        return;
+        return NS_ERROR_FAILURE;
 
-    nsXPIDLString title;
-    rv = bundle->GetStringFromName(MOZ_UTF16("readConfigTitle"), getter_Copies(title));
+    nsAutoString title;
+    rv = bundle->GetStringFromName("readConfigTitle", title);
     if (NS_FAILED(rv))
-        return;
+        return rv;
 
-    nsXPIDLString err;
-    rv = bundle->GetStringFromName(MOZ_UTF16("readConfigMsg"), getter_Copies(err));
+    nsAutoString err;
+    rv = bundle->GetStringFromName("readConfigMsg", err);
     if (NS_FAILED(rv))
-        return;
+        return rv;
 
-    promptService->Alert(nullptr, title.get(), err.get());
+    return promptService->Alert(nullptr, title.get(), err.get());
 }
 
 // nsISupports Implementation
@@ -80,8 +74,8 @@ nsReadConfig::nsReadConfig() :
 nsresult nsReadConfig::Init()
 {
     nsresult rv;
-    
-    nsCOMPtr<nsIObserverService> observerService = 
+
+    nsCOMPtr<nsIObserverService> observerService =
         do_GetService("@mozilla.org/observer-service;1", &rv);
 
     if (observerService) {
@@ -101,28 +95,36 @@ NS_IMETHODIMP nsReadConfig::Observe(nsISupports *aSubject, const char *aTopic, c
 
     if (!nsCRT::strcmp(aTopic, NS_PREFSERVICE_READ_TOPIC_ID)) {
         rv = readConfigFile();
-        if (NS_FAILED(rv)) {
-            DisplayError();
-
-            nsCOMPtr<nsIAppStartup> appStartup =
-                do_GetService(NS_APPSTARTUP_CONTRACTID);
-            if (appStartup)
-                appStartup->Quit(nsIAppStartup::eAttemptQuit);
+        // Don't show error alerts if the sandbox is enabled
+        if (NS_FAILED(rv) && !sandboxEnabled) {
+            rv = DisplayError();
+            if (NS_FAILED(rv)) {
+                nsCOMPtr<nsIAppStartup> appStartup =
+                    do_GetService(NS_APPSTARTUP_CONTRACTID);
+                if (appStartup)
+                    appStartup->Quit(nsIAppStartup::eAttemptQuit);
+            }
         }
     }
     return rv;
 }
 
+/**
+ * This is the blocklist for known bad autoconfig files.
+ */
+static const char *gBlockedConfigs[] = {
+  "dsengine.cfg"
+};
 
 nsresult nsReadConfig::readConfigFile()
 {
     nsresult rv = NS_OK;
-    nsXPIDLCString lockFileName;
-    nsXPIDLCString lockVendor;
+    nsAutoCString lockFileName;
+    nsAutoCString lockVendor;
     uint32_t fileNameLen = 0;
-    
+
     nsCOMPtr<nsIPrefBranch> defaultPrefBranch;
-    nsCOMPtr<nsIPrefService> prefService = 
+    nsCOMPtr<nsIPrefService> prefService =
         do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
     if (NS_FAILED(rv))
         return rv;
@@ -130,40 +132,51 @@ nsresult nsReadConfig::readConfigFile()
     rv = prefService->GetDefaultBranch(nullptr, getter_AddRefs(defaultPrefBranch));
     if (NS_FAILED(rv))
         return rv;
-        
-    // This preference is set in the all.js or all-ns.js (depending whether 
+
+    // This preference is set in the all.js or all-ns.js (depending whether
     // running mozilla or netscp6)
 
-    rv = defaultPrefBranch->GetCharPref("general.config.filename", 
-                                  getter_Copies(lockFileName));
+    bool sandboxEnabled = false;
+    rv = defaultPrefBranch->GetBoolPref("general.config.sandbox_enabled",
+                                        &sandboxEnabled);
 
+    rv = defaultPrefBranch->GetCharPref("general.config.filename",
+                                        lockFileName);
 
     MOZ_LOG(MCD, LogLevel::Debug, ("general.config.filename = %s\n", lockFileName.get()));
     if (NS_FAILED(rv))
         return rv;
 
+    for (size_t index = 0, len = mozilla::ArrayLength(gBlockedConfigs); index < len;
+         ++index) {
+      if (lockFileName == gBlockedConfigs[index]) {
+        // This is NS_OK because we don't want to show an error to the user
+        return rv;
+      }
+    }
+
     // This needs to be read only once.
     //
     if (!mRead) {
         // Initiate the new JS Context for Preference management
-        
-        rv = CentralizedAdminPrefManagerInit();
+
+        rv = CentralizedAdminPrefManagerInit(sandboxEnabled);
         if (NS_FAILED(rv))
             return rv;
-        
+
         // Open and evaluate function calls to set/lock/unlock prefs
         rv = openAndEvaluateJSFile("prefcalls.js", 0, false, false);
-        if (NS_FAILED(rv)) 
+        if (NS_FAILED(rv))
             return rv;
 
         mRead = true;
     }
     // If the lockFileName is nullptr return ok, because no lockFile will be used
-  
-  
-    // Once the config file is read, we should check that the vendor name 
-    // is consistent By checking for the vendor name after reading the config 
-    // file we allow for the preference to be set (and locked) by the creator 
+
+
+    // Once the config file is read, we should check that the vendor name
+    // is consistent By checking for the vendor name after reading the config
+    // file we allow for the preference to be set (and locked) by the creator
     // of the cfg file meaning the file can not be renamed (successfully).
 
     nsCOMPtr<nsIPrefBranch> prefBranch;
@@ -176,37 +189,35 @@ nsresult nsReadConfig::readConfigFile()
     rv = openAndEvaluateJSFile(lockFileName.get(), obscureValue, true, true);
     if (NS_FAILED(rv))
     {
-      MOZ_LOG(MCD, LogLevel::Debug, ("error evaluating .cfg file %s %x\n", lockFileName.get(), rv));
+      MOZ_LOG(MCD, LogLevel::Debug, ("error evaluating .cfg file %s %" PRIx32 "\n",
+                                     lockFileName.get(), static_cast<uint32_t>(rv)));
       return rv;
     }
-    
-    rv = prefBranch->GetCharPref("general.config.filename", 
-                                  getter_Copies(lockFileName));
+
+    rv = prefBranch->GetCharPref("general.config.filename", lockFileName);
     if (NS_FAILED(rv))
-        // There is NO REASON we should ever get here. This is POST reading 
+        // There is NO REASON we should ever get here. This is POST reading
         // of the config file.
         return NS_ERROR_FAILURE;
 
-  
-    rv = prefBranch->GetCharPref("general.config.vendor", 
-                                  getter_Copies(lockVendor));
+
+    rv = prefBranch->GetCharPref("general.config.vendor", lockVendor);
     // If vendor is not nullptr, do this check
     if (NS_SUCCEEDED(rv)) {
 
-        fileNameLen = strlen(lockFileName);
-    
-        // lockVendor and lockFileName should be the same with the addtion of 
-        // .cfg to the filename by checking this post reading of the cfg file 
+        fileNameLen = strlen(lockFileName.get());
+
+        // lockVendor and lockFileName should be the same with the addtion of
+        // .cfg to the filename by checking this post reading of the cfg file
         // this value can be set within the cfg file adding a level of security.
-    
-        if (PL_strncmp(lockFileName, lockVendor, fileNameLen - 4) != 0)
+
+        if (PL_strncmp(lockFileName.get(), lockVendor.get(), fileNameLen - 4) != 0)
             return NS_ERROR_FAILURE;
     }
-  
+
     // get the value of the autoconfig url
-    nsXPIDLCString urlName;
-    rv = prefBranch->GetCharPref("autoadmin.global_config_url",
-                                  getter_Copies(urlName));
+    nsAutoCString urlName;
+    rv = prefBranch->GetCharPref("autoadmin.global_config_url", urlName);
     if (NS_SUCCEEDED(rv) && !urlName.IsEmpty()) {
 
         // Instantiating nsAutoConfig object if the pref is present
@@ -214,12 +225,12 @@ nsresult nsReadConfig::readConfigFile()
         if (NS_FAILED(rv))
             return NS_ERROR_OUT_OF_MEMORY;
 
-        rv = mAutoConfig->SetConfigURL(urlName);
+        rv = mAutoConfig->SetConfigURL(urlName.get());
         if (NS_FAILED(rv))
             return NS_ERROR_FAILURE;
 
     }
-  
+
     return NS_OK;
 } // ReadConfigFile
 
@@ -235,15 +246,15 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
         nsCOMPtr<nsIFile> jsFile;
         rv = NS_GetSpecialDirectory(NS_GRE_DIR,
                                     getter_AddRefs(jsFile));
-        if (NS_FAILED(rv)) 
+        if (NS_FAILED(rv))
             return rv;
 
         rv = jsFile->AppendNative(nsDependentCString(aFileName));
-        if (NS_FAILED(rv)) 
+        if (NS_FAILED(rv))
             return rv;
 
         rv = NS_NewLocalFileInputStream(getter_AddRefs(inStr), jsFile);
-        if (NS_FAILED(rv)) 
+        if (NS_FAILED(rv))
             return rv;
 
     } else {
@@ -271,13 +282,13 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
     rv = inStr->Available(&fs64);
     if (NS_FAILED(rv))
         return rv;
-    // PR_Malloc dones't support over 4GB
+    // This used to use PR_Malloc(), which doesn't support over 4GB.
     if (fs64 > UINT32_MAX)
       return NS_ERROR_FILE_TOO_BIG;
     uint32_t fs = (uint32_t)fs64;
 
-    char *buf = (char *)PR_Malloc(fs * sizeof(char));
-    if (!buf) 
+    char* buf = (char*) malloc(fs * sizeof(char));
+    if (!buf)
         return NS_ERROR_OUT_OF_MEMORY;
 
     rv = inStr->Read(buf, (uint32_t)fs, &amt);
@@ -285,16 +296,17 @@ nsresult nsReadConfig::openAndEvaluateJSFile(const char *aFileName, int32_t obsc
     if (NS_SUCCEEDED(rv)) {
         if (obscureValue > 0) {
 
-            // Unobscure file by subtracting some value from every char. 
+            // Unobscure file by subtracting some value from every char.
             for (uint32_t i = 0; i < amt; i++)
                 buf[i] -= obscureValue;
         }
         rv = EvaluateAdminConfigScript(buf, amt, aFileName,
                                        false, true,
-                                       isEncoded ? true:false);
+                                       isEncoded,
+                                       !isBinDir);
     }
     inStr->Close();
-    PR_Free(buf);
-    
+    free(buf);
+
     return rv;
 }

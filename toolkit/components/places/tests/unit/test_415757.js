@@ -14,7 +14,7 @@
 function uri_in_db(aURI) {
   var options = PlacesUtils.history.getNewQueryOptions();
   options.maxResults = 1;
-  options.resultType = options.RESULTS_AS_URI
+  options.resultType = options.RESULTS_AS_URI;
   var query = PlacesUtils.history.getNewQuery();
   query.uri = aURI;
   var result = PlacesUtils.history.executeQuery(query, options);
@@ -28,25 +28,19 @@ function uri_in_db(aURI) {
 const TOTAL_SITES = 20;
 
 // main
-function run_test()
-{
-  run_next_test();
-}
-
-add_task(function* test_execute()
-{
+add_task(async function test_execute() {
   // add pages to global history
   for (let i = 0; i < TOTAL_SITES; i++) {
     let site = "http://www.test-" + i + ".com/";
     let testURI = uri(site);
     let when = Date.now() * 1000 + (i * TOTAL_SITES);
-    yield PlacesTestUtils.addVisits({ uri: testURI, visitDate: when });
+    await PlacesTestUtils.addVisits({ uri: testURI, visitDate: when });
   }
   for (let i = 0; i < TOTAL_SITES; i++) {
     let site = "http://www.test.com/" + i + "/";
     let testURI = uri(site);
     let when = Date.now() * 1000 + (i * TOTAL_SITES);
-    yield PlacesTestUtils.addVisits({ uri: testURI, visitDate: when });
+    await PlacesTestUtils.addVisits({ uri: testURI, visitDate: when });
   }
 
   // set a page annotation on one of the urls that will be removed
@@ -68,35 +62,35 @@ add_task(function* test_execute()
                                             PlacesUtils.annotations.EXPIRE_WITH_HISTORY);
 
   // remove pages from www.test.com
-  PlacesUtils.history.removePagesFromHost("www.test.com", false);
+  await PlacesUtils.history.removeByFilter({ host: "www.test.com" });
 
   // check that all pages in www.test.com have been removed
-  for (var i = 0; i < TOTAL_SITES; i++) {
+  for (let i = 0; i < TOTAL_SITES; i++) {
     let site = "http://www.test.com/" + i + "/";
     let testURI = uri(site);
-    do_check_false(uri_in_db(testURI));
+    Assert.ok(!uri_in_db(testURI));
   }
 
   // check that all pages in www.test-X.com have NOT been removed
   for (let i = 0; i < TOTAL_SITES; i++) {
     let site = "http://www.test-" + i + ".com/";
     let testURI = uri(site);
-    do_check_true(uri_in_db(testURI));
+    Assert.ok(uri_in_db(testURI));
   }
 
   // check that annotation on the removed item does not exists
   try {
-    PlacesUtils.annotations.getPageAnnotation(testAnnoDeletedURI, testAnnoName);
+    PlacesUtils.annotations.getPageAnnotation(testAnnoDeletedURI, testAnnoDeletedName);
     do_throw("fetching page-annotation that doesn't exist, should've thrown");
-  } catch(ex) {}
+  } catch (ex) {}
 
   // check that annotation on the NOT removed item still exists
   try {
     var annoVal = PlacesUtils.annotations.getPageAnnotation(testAnnoRetainedURI,
                                                             testAnnoRetainedName);
-  } catch(ex) {
+  } catch (ex) {
     do_throw("The annotation has been removed erroneously");
   }
-  do_check_eq(annoVal, testAnnoRetainedValue);
+  Assert.equal(annoVal, testAnnoRetainedValue);
 
 });

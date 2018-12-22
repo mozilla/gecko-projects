@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,13 +33,15 @@ ContentHostBase::~ContentHostBase()
 }
 
 void
-ContentHostTexture::Composite(LayerComposite* aLayer,
+ContentHostTexture::Composite(Compositor* aCompositor,
+                              LayerComposite* aLayer,
                               EffectChain& aEffectChain,
                               float aOpacity,
                               const gfx::Matrix4x4& aTransform,
-                              const Filter& aFilter,
-                              const Rect& aClipRect,
-                              const nsIntRegion* aVisibleRegion)
+                              const SamplingFilter aSamplingFilter,
+                              const IntRect& aClipRect,
+                              const nsIntRegion* aVisibleRegion,
+                              const Maybe<gfx::Polygon>& aGeometry)
 {
   NS_ASSERTION(aVisibleRegion, "Requires a visible region");
 
@@ -61,8 +64,7 @@ ContentHostTexture::Composite(LayerComposite* aLayer,
 
   RefPtr<TexturedEffect> effect = CreateTexturedEffect(mTextureSource.get(),
                                                        mTextureSourceOnWhite.get(),
-                                                       aFilter, true,
-                                                       GetRenderState());
+                                                       aSamplingFilter, true);
   if (!effect) {
     return;
   }
@@ -173,21 +175,24 @@ ContentHostTexture::Composite(LayerComposite* aLayer,
             tileRegionRect = regionRect.Intersect(currentTileRect);
             tileRegionRect.MoveBy(-currentTileRect.TopLeft());
           }
-          gfx::Rect rect(tileScreenRect.x, tileScreenRect.y,
-                         tileScreenRect.width, tileScreenRect.height);
+          gfx::Rect rect(tileScreenRect.X(), tileScreenRect.Y(),
+                         tileScreenRect.Width(), tileScreenRect.Height());
 
-          effect->mTextureCoords = Rect(Float(tileRegionRect.x) / texRect.width,
-                                        Float(tileRegionRect.y) / texRect.height,
-                                        Float(tileRegionRect.width) / texRect.width,
-                                        Float(tileRegionRect.height) / texRect.height);
-          GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain, aOpacity, aTransform);
+          effect->mTextureCoords = Rect(Float(tileRegionRect.X()) / texRect.Width(),
+                                        Float(tileRegionRect.Y()) / texRect.Height(),
+                                        Float(tileRegionRect.Width()) / texRect.Width(),
+                                        Float(tileRegionRect.Height()) / texRect.Height());
+
+          aCompositor->DrawGeometry(rect, aClipRect, aEffectChain,
+                                    aOpacity, aTransform, aGeometry);
+
           if (usingTiles) {
             DiagnosticFlags diagnostics = DiagnosticFlags::CONTENT | DiagnosticFlags::BIGIMAGE;
             if (iterOnWhite) {
               diagnostics |= DiagnosticFlags::COMPONENT_ALPHA;
             }
-            GetCompositor()->DrawDiagnostics(diagnostics, rect, aClipRect,
-                                             aTransform, mFlashCounter);
+            aCompositor->DrawDiagnostics(diagnostics, rect, aClipRect,
+                                         aTransform, mFlashCounter);
           }
         }
       }
@@ -209,8 +214,28 @@ ContentHostTexture::Composite(LayerComposite* aLayer,
   if (iterOnWhite) {
     diagnostics |= DiagnosticFlags::COMPONENT_ALPHA;
   }
-  GetCompositor()->DrawDiagnostics(diagnostics, nsIntRegion(mBufferRect), aClipRect,
-                                   aTransform, mFlashCounter);
+  aCompositor->DrawDiagnostics(diagnostics, nsIntRegion(mBufferRect), aClipRect,
+                               aTransform, mFlashCounter);
+}
+
+RefPtr<TextureSource>
+ContentHostTexture::AcquireTextureSource()
+{
+  if (!mTextureHost || !mTextureHost->AcquireTextureSource(mTextureSource)) {
+    return nullptr;
+  }
+  return mTextureSource.get();
+}
+
+RefPtr<TextureSource>
+ContentHostTexture::AcquireTextureSourceOnWhite()
+{
+  if (!mTextureHostOnWhite ||
+      !mTextureHostOnWhite->AcquireTextureSource(mTextureSourceOnWhite))
+  {
+    return nullptr;
+  }
+  return mTextureSourceOnWhite.get();
 }
 
 void
@@ -251,14 +276,14 @@ ContentHostTexture::UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
 }
 
 void
-ContentHostTexture::SetCompositor(Compositor* aCompositor)
+ContentHostTexture::SetTextureSourceProvider(TextureSourceProvider* aProvider)
 {
-  ContentHostBase::SetCompositor(aCompositor);
+  ContentHostBase::SetTextureSourceProvider(aProvider);
   if (mTextureHost) {
-    mTextureHost->SetCompositor(aCompositor);
+    mTextureHost->SetTextureSourceProvider(aProvider);
   }
   if (mTextureHostOnWhite) {
-    mTextureHostOnWhite->SetCompositor(aCompositor);
+    mTextureHostOnWhite->SetTextureSourceProvider(aProvider);
   }
 }
 
@@ -318,11 +343,8 @@ AddWrappedRegion(const nsIntRegion& aInput, nsIntRegion& aOutput,
 bool
 ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
                                         const nsIntRegion& aUpdated,
-                                        const nsIntRegion& aOldValidRegionBack,
-                                        nsIntRegion* aUpdatedRegionBack)
+                                        const nsIntRegion& aOldValidRegionBack)
 {
-  aUpdatedRegionBack->SetEmpty();
-
   if (!mTextureHost) {
     mInitialised = false;
     return true; // FIXME should we return false? Returning true for now
@@ -338,8 +360,8 @@ ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
   destRegion.MoveBy(-aData.rect().TopLeft());
 
   if (!aData.rect().Contains(aUpdated.GetBounds()) ||
-      aData.rotation().x > aData.rect().width ||
-      aData.rotation().y > aData.rect().height) {
+      aData.rotation().x > aData.rect().Width() ||
+      aData.rotation().y > aData.rect().Height()) {
     NS_ERROR("Invalid update data");
     return false;
   }
@@ -360,11 +382,11 @@ ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
 
   // For each of the overlap areas (right, bottom-right, bottom), select those
   // pixels and wrap them around to the opposite edge of the buffer rect.
-  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(aData.rect().width, 0));
-  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(aData.rect().width, aData.rect().height));
-  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(0, aData.rect().height));
+  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(aData.rect().Width(), 0));
+  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(aData.rect().Width(), aData.rect().Height()));
+  AddWrappedRegion(destRegion, finalRegion, bufferSize, nsIntPoint(0, aData.rect().Height()));
 
-  MOZ_ASSERT(IntRect(0, 0, aData.rect().width, aData.rect().height).Contains(finalRegion.GetBounds()));
+  MOZ_ASSERT(IntRect(0, 0, aData.rect().Width(), aData.rect().Height()).Contains(finalRegion.GetBounds()));
 
   mTextureHost->Updated(&finalRegion);
   if (mTextureHostOnWhite) {
@@ -381,13 +403,10 @@ ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
 bool
 ContentHostDoubleBuffered::UpdateThebes(const ThebesBufferData& aData,
                                         const nsIntRegion& aUpdated,
-                                        const nsIntRegion& aOldValidRegionBack,
-                                        nsIntRegion* aUpdatedRegionBack)
+                                        const nsIntRegion& aOldValidRegionBack)
 {
   if (!mTextureHost) {
     mInitialised = false;
-
-    *aUpdatedRegionBack = aUpdated;
     return true;
   }
 
@@ -402,8 +421,6 @@ ContentHostDoubleBuffered::UpdateThebes(const ThebesBufferData& aData,
 
   mBufferRect = aData.rect();
   mBufferRotation = aData.rotation();
-
-  *aUpdatedRegionBack = aUpdated;
 
   // Save the current valid region of our front buffer, because if
   // we're double buffering, it's going to be the valid region for the
@@ -439,24 +456,8 @@ ContentHostTexture::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 }
 
 
-LayerRenderState
-ContentHostTexture::GetRenderState()
-{
-  if (!mTextureHost) {
-    return LayerRenderState();
-  }
-
-  LayerRenderState result = mTextureHost->GetRenderState();
-
-  if (mBufferRotation != nsIntPoint()) {
-    result.mFlags |= LayerRenderStateFlags::BUFFER_ROTATION;
-  }
-  result.SetOffset(GetOriginOffset());
-  return result;
-}
-
 already_AddRefed<TexturedEffect>
-ContentHostTexture::GenEffect(const gfx::Filter& aFilter)
+ContentHostTexture::GenEffect(const gfx::SamplingFilter aSamplingFilter)
 {
   if (!mTextureHost) {
     return nullptr;
@@ -472,8 +473,7 @@ ContentHostTexture::GenEffect(const gfx::Filter& aFilter)
   }
   return CreateTexturedEffect(mTextureSource.get(),
                               mTextureSourceOnWhite.get(),
-                              aFilter, true,
-                              GetRenderState());
+                              aSamplingFilter, true);
 }
 
 already_AddRefed<gfx::DataSourceSurface>

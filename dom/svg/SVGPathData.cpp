@@ -15,14 +15,15 @@
 #include "nsError.h"
 #include "nsString.h"
 #include "nsSVGPathDataParser.h"
-#include "nsSVGPathGeometryElement.h" // for nsSVGMark
 #include <stdarg.h>
 #include "nsStyleConsts.h"
 #include "SVGContentUtils.h"
+#include "SVGGeometryElement.h" // for nsSVGMark
 #include "SVGPathSegUtils.h"
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::dom::SVGPathSeg_Binding;
 using namespace mozilla::gfx;
 
 static bool IsMoveto(uint16_t aSegType)
@@ -207,7 +208,7 @@ SVGPathData::GetPathSegAtLength(float aDistance) const
 
   MOZ_ASSERT(i == mData.Length(), "Very, very bad - mData corrupt");
 
-  return std::max(0U, segIndex - 1); // -1 because while loop takes us 1 too far
+  return std::max(1U, segIndex) - 1; // -1 because while loop takes us 1 too far
 }
 
 /**
@@ -233,7 +234,7 @@ SVGPathData::GetPathSegAtLength(float aDistance) const
  * making it a small percentage of the stroke width of the path. This should
  * hopefully allow us to make the line as long as possible (to avoid rounding
  * issues in the backend resulting in the backend seeing it as having zero
- * length) while still avoiding the small rectangle being noticably different
+ * length) while still avoiding the small rectangle being noticeably different
  * from a square.
  *
  * Note that this function inserts a subpath into the current gfx path that
@@ -485,7 +486,7 @@ SVGPathData::BuildPath(PathBuilder* builder,
       break;
 
     default:
-      NS_NOTREACHED("Bad path segment type");
+      MOZ_ASSERT_UNREACHABLE("Bad path segment type");
       return nullptr; // according to spec we'd use everything up to the bad seg anyway
     }
 

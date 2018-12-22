@@ -6,9 +6,6 @@
 // Test that changes in the style inspector are synchronized into the
 // style editor.
 
-/* import-globals-from ../../inspector/shared/test/head.js */
-Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/inspector/shared/test/head.js", this);
-
 const TESTCASE_URI = TEST_BASE_HTTP + "sync.html";
 
 const expectedText = `
@@ -22,21 +19,21 @@ const expectedText = `
   }
   `;
 
-add_task(function*() {
-  yield addTab(TESTCASE_URI);
-  let { inspector, view } = yield openRuleView();
-  yield selectNode("#testid", inspector);
-  let ruleEditor = getRuleViewRuleEditor(view, 1);
+add_task(async function() {
+  await addTab(TESTCASE_URI);
+  const { inspector, view } = await openRuleView();
+  await selectNode("#testid", inspector);
+  const ruleEditor = getRuleViewRuleEditor(view, 1);
 
-  let editor = yield focusEditableField(view, ruleEditor.selectorText);
+  let editor = await focusEditableField(view, ruleEditor.selectorText);
   editor.input.value = "#testid, span";
-  let onRuleViewChanged = once(view, "ruleview-changed");
-  EventUtils.synthesizeKey("VK_RETURN", {});
-  yield onRuleViewChanged;
+  const onRuleViewChanged = once(view, "ruleview-changed");
+  EventUtils.synthesizeKey("KEY_Enter");
+  await onRuleViewChanged;
 
-  let { ui } = yield openStyleEditor();
+  const { ui } = await openStyleEditor();
 
-  editor = yield ui.editors[0].getSourceEditor();
-  let text = editor.sourceEditor.getText();
+  editor = await ui.editors[0].getSourceEditor();
+  const text = editor.sourceEditor.getText();
   is(text, expectedText, "selector edits are synced");
 });

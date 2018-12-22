@@ -1,16 +1,18 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable max-nested-callbacks */
+
+"use strict";
 
 // Test getDisplayString.
 
-Cu.import("resource://testing-common/PromiseTestUtils.jsm", this);
+ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
 
 var gDebuggee;
 var gClient;
 var gThreadClient;
 
-function run_test()
-{
+function run_test() {
   initTestDebuggerServer();
   gDebuggee = addTestGlobal("test-grips");
   gDebuggee.eval(function stopMe(arg1) {
@@ -19,16 +21,16 @@ function run_test()
 
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_display_string();
-    });
+    attachTestTabAndResume(gClient, "test-grips",
+                           function(response, tabClient, threadClient) {
+                             gThreadClient = threadClient;
+                             test_display_string();
+                           });
   });
   do_test_pending();
 }
 
-function test_display_string()
-{
+function test_display_string() {
   const testCases = [
     {
       input: "new Boolean(true)",
@@ -120,7 +122,7 @@ function test_display_string()
     },
     {
       input: "new Proxy({}, {})",
-      output: "[object Object]"
+      output: "<proxy>"
     },
     {
       input: "Promise.resolve(5)",
@@ -139,13 +141,13 @@ function test_display_string()
 
   PromiseTestUtils.expectUncaughtRejection(/Error/);
 
-  gThreadClient.addOneTimeListener("paused", function(aEvent, aPacket) {
-    const args = aPacket.frame.arguments;
+  gThreadClient.addOneTimeListener("paused", function(event, packet) {
+    const args = packet.frame.arguments;
 
     (function loop() {
       const objClient = gThreadClient.pauseGrip(args.pop());
       objClient.getDisplayString(function({ displayString }) {
-        do_check_eq(displayString, testCases.pop().output);
+        Assert.equal(displayString, testCases.pop().output);
         if (args.length) {
           loop();
         } else {

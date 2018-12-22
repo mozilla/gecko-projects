@@ -4,8 +4,8 @@
 
 "use strict";
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/LoginManagerContextMenu.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/LoginManagerContextMenu.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "_stringBundle", function() {
   return Services.strings.
@@ -15,7 +15,7 @@ XPCOMUtils.defineLazyGetter(this, "_stringBundle", function() {
 /**
  * Prepare data for the following tests.
  */
-add_task(function* test_initialize() {
+add_task(async function test_initialize() {
   for (let login of loginList()) {
     Services.logins.addLogin(login);
   }
@@ -24,7 +24,7 @@ add_task(function* test_initialize() {
 /**
  * Tests if the LoginManagerContextMenu returns the correct login items.
  */
-add_task(function* test_contextMenuAddAndRemoveLogins() {
+add_task(async function test_contextMenuAddAndRemoveLogins() {
   const DOCUMENT_CONTENT = "<form><input id='pw' type=password></form>";
   const INPUT_QUERY = "input[type='password']";
 
@@ -36,7 +36,7 @@ add_task(function* test_contextMenuAddAndRemoveLogins() {
   ];
 
   for (let hostname of testHostnames) {
-    do_print("test for hostname: " + hostname);
+    info("test for hostname: " + hostname);
     // Get expected logins for this test.
     let logins = getExpectedLogins(hostname);
 
@@ -77,7 +77,7 @@ function createLoginsFragment(url, content, elementQuery) {
     ownerDocument: document
   };
 
-  let URI = Services.io.newURI(url, null, null);
+  let URI = Services.io.newURI(url);
   return {
     document,
     fragment: LoginManagerContextMenu.addLoginsToMenu(inputElement, browser, URI),
@@ -89,10 +89,10 @@ function createLoginsFragment(url, content, elementQuery) {
  * Duplicates and empty usernames have a date appended.
  */
 function checkLoginItems(logins, items) {
-  function findDuplicates(loginList) {
+  function findDuplicates(unfilteredLoginList) {
     var seen = new Set();
     var duplicates = new Set();
-    for (let login of loginList) {
+    for (let login of unfilteredLoginList) {
       if (seen.has(login.username)) {
         duplicates.add(login.username);
       }
@@ -102,8 +102,8 @@ function checkLoginItems(logins, items) {
   }
   let duplicates = findDuplicates(logins);
 
-  let dateAndTimeFormatter = new Intl.DateTimeFormat(undefined,
-                             { day: "numeric", month: "short", year: "numeric" });
+  let dateAndTimeFormatter = new Services.intl.DateTimeFormat(undefined,
+                             { dateStyle: "medium" });
   for (let login of logins) {
     if (login.username && !duplicates.has(login.username)) {
       // If login is not duplicate and we can't find an item for it, fail.
@@ -132,7 +132,7 @@ function checkLoginItems(logins, items) {
  * Gets the list of expected logins for a hostname.
  */
 function getExpectedLogins(hostname) {
-  return Services.logins.getAllLogins().filter(entry => entry["hostname"] === hostname);
+  return Services.logins.getAllLogins().filter(entry => entry.hostname === hostname);
 }
 
 function loginList() {

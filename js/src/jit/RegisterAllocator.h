@@ -37,13 +37,13 @@ struct AllocationIntegrityState
 
     // Record all virtual registers in the graph. This must be called before
     // register allocation, to pick up the original LUses.
-    bool record();
+    MOZ_MUST_USE bool record();
 
     // Perform the liveness analysis on the graph, and assert on an invalid
     // allocation. This must be called after register allocation, to pick up
     // all assigned physical values. If populateSafepoints is specified,
     // safepoints will be filled in with liveness information.
-    bool check(bool populateSafepoints);
+    MOZ_MUST_USE bool check(bool populateSafepoints);
 
   private:
 
@@ -122,11 +122,11 @@ struct AllocationIntegrityState
     typedef HashSet<IntegrityItem, IntegrityItem, SystemAllocPolicy> IntegrityItemSet;
     IntegrityItemSet seen;
 
-    bool checkIntegrity(LBlock* block, LInstruction* ins, uint32_t vreg, LAllocation alloc,
-                        bool populateSafepoints);
-    bool checkSafepointAllocation(LInstruction* ins, uint32_t vreg, LAllocation alloc,
-                                  bool populateSafepoints);
-    bool addPredecessor(LBlock* block, uint32_t vreg, LAllocation alloc);
+    MOZ_MUST_USE bool checkIntegrity(LBlock* block, LInstruction* ins, uint32_t vreg,
+                                     LAllocation alloc, bool populateSafepoints);
+    MOZ_MUST_USE bool checkSafepointAllocation(LInstruction* ins, uint32_t vreg, LAllocation alloc,
+                                               bool populateSafepoints);
+    MOZ_MUST_USE bool addPredecessor(LBlock* block, uint32_t vreg, LAllocation alloc);
 
     void dump();
 };
@@ -144,7 +144,7 @@ struct AllocationIntegrityState
 class CodePosition
 {
   private:
-    MOZ_CONSTEXPR explicit CodePosition(uint32_t bits)
+    constexpr explicit CodePosition(uint32_t bits)
       : bits_(bits)
     { }
 
@@ -163,7 +163,7 @@ class CodePosition
         OUTPUT
     };
 
-    MOZ_CONSTEXPR CodePosition() : bits_(0)
+    constexpr CodePosition() : bits_(0)
     { }
 
     CodePosition(uint32_t instruction, SubPosition where) {
@@ -233,7 +233,7 @@ class InstructionDataMap
       : insData_()
     { }
 
-    bool init(MIRGenerator* gen, uint32_t numInstructions) {
+    MOZ_MUST_USE bool init(MIRGenerator* gen, uint32_t numInstructions) {
         if (!insData_.init(gen->alloc(), numInstructions))
             return false;
         memset(&insData_[0], 0, sizeof(LNode*) * numInstructions);
@@ -280,24 +280,17 @@ class RegisterAllocator
         graph(graph),
         allRegisters_(RegisterSet::All())
     {
-        if (mir->compilingAsmJS()) {
-#if defined(JS_CODEGEN_X64)
-            allRegisters_.take(AnyRegister(HeapReg));
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-            allRegisters_.take(AnyRegister(HeapReg));
-            allRegisters_.take(AnyRegister(GlobalReg));
-#elif defined(JS_CODEGEN_ARM64)
-            allRegisters_.take(AnyRegister(HeapReg));
-            allRegisters_.take(AnyRegister(HeapLenReg));
-            allRegisters_.take(AnyRegister(GlobalReg));
-#endif
+        if (mir->compilingWasm()) {
+            takeWasmRegisters(allRegisters_);
         } else {
-            if (FramePointer != InvalidReg && mir->instrumentedProfiling())
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
+            if (mir->instrumentedProfiling())
                 allRegisters_.take(AnyRegister(FramePointer));
+#endif
         }
     }
 
-    bool init();
+    MOZ_MUST_USE bool init();
 
     TempAllocator& alloc() const {
         return mir->alloc();
@@ -340,6 +333,7 @@ class RegisterAllocator
     }
 
     LMoveGroup* getInputMoveGroup(LInstruction* ins);
+    LMoveGroup* getFixReuseMoveGroup(LInstruction* ins);
     LMoveGroup* getMoveGroupAfter(LInstruction* ins);
 
     CodePosition minimalDefEnd(LNode* ins) {
@@ -358,6 +352,16 @@ class RegisterAllocator
     }
 
     void dumpInstructions();
+
+  public:
+    template<typename TakeableSet>
+    static void takeWasmRegisters(TakeableSet& regs) {
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
+    defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+            regs.take(HeapReg);
+#endif
+            regs.take(FramePointer);
+    }
 };
 
 static inline AnyRegister

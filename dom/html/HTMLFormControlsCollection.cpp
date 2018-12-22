@@ -6,15 +6,13 @@
 
 #include "mozilla/dom/HTMLFormControlsCollection.h"
 
-#include "mozFlushType.h"
+#include "mozilla/FlushType.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLFormControlsCollectionBinding.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "nsGenericHTMLElement.h" // nsGenericHTMLFormElement
 #include "nsIDocument.h"
-#include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsIFormControl.h"
 #include "RadioNodeList.h"
 #include "jsfriendapi.h"
@@ -29,7 +27,7 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   // <input type=image> elements to the list of form controls in a
   // form.
 
-  switch (aFormControl->GetType()) {
+  switch (aFormControl->ControlType()) {
   case NS_FORM_BUTTON_BUTTON :
   case NS_FORM_BUTTON_RESET :
   case NS_FORM_BUTTON_SUBMIT :
@@ -51,6 +49,9 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   case NS_FORM_INPUT_RANGE :
   case NS_FORM_INPUT_DATE :
   case NS_FORM_INPUT_TIME :
+  case NS_FORM_INPUT_MONTH :
+  case NS_FORM_INPUT_WEEK :
+  case NS_FORM_INPUT_DATETIME_LOCAL :
   case NS_FORM_SELECT :
   case NS_FORM_TEXTAREA :
   case NS_FORM_FIELDSET :
@@ -63,7 +64,9 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   // form.elements array
   //
   // NS_FORM_INPUT_IMAGE
-  // NS_FORM_LABEL
+  //
+  // XXXbz maybe we should just check for that type here instead of the big
+  // switch?
 
   return false;
 }
@@ -95,12 +98,12 @@ HTMLFormControlsCollection::Clear()
 {
   // Null out childrens' pointer to me.  No refcounting here
   for (int32_t i = mElements.Length() - 1; i >= 0; i--) {
-    mElements[i]->ClearForm(false);
+    mElements[i]->ClearForm(false, false);
   }
   mElements.Clear();
 
   for (int32_t i = mNotInElements.Length() - 1; i >= 0; i--) {
-    mNotInElements[i]->ClearForm(false);
+    mNotInElements[i]->ClearForm(false, false);
   }
   mNotInElements.Clear();
 
@@ -113,7 +116,7 @@ HTMLFormControlsCollection::FlushPendingNotifications()
   if (mForm) {
     nsIDocument* doc = mForm->GetUncomposedDoc();
     if (doc) {
-      doc->FlushPendingNotifications(Flush_Content);
+      doc->FlushPendingNotifications(FlushType::Content);
     }
   }
 }
@@ -129,7 +132,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(HTMLFormControlsCollection)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(HTMLFormControlsCollection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNameLookupTable)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(HTMLFormControlsCollection)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
@@ -139,8 +141,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 NS_INTERFACE_TABLE_HEAD(HTMLFormControlsCollection)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
   NS_INTERFACE_TABLE(HTMLFormControlsCollection,
-                     nsIHTMLCollection,
-                     nsIDOMHTMLCollection)
+                     nsIHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(HTMLFormControlsCollection)
 NS_INTERFACE_MAP_END
 
@@ -149,64 +150,13 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(HTMLFormControlsCollection)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLFormControlsCollection)
 
 
-// nsIDOMHTMLCollection interface
+// nsIHTMLCollection interface
 
-NS_IMETHODIMP
-HTMLFormControlsCollection::GetLength(uint32_t* aLength)
+uint32_t
+HTMLFormControlsCollection::Length()
 {
   FlushPendingNotifications();
-  *aLength = mElements.Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HTMLFormControlsCollection::Item(uint32_t aIndex, nsIDOMNode** aReturn)
-{
-  nsISupports* item = GetElementAt(aIndex);
-  if (!item) {
-    *aReturn = nullptr;
-
-    return NS_OK;
-  }
-
-  return CallQueryInterface(item, aReturn);
-}
-
-NS_IMETHODIMP 
-HTMLFormControlsCollection::NamedItem(const nsAString& aName,
-                                      nsIDOMNode** aReturn)
-{
-  FlushPendingNotifications();
-
-  *aReturn = nullptr;
-
-  nsCOMPtr<nsISupports> supports;
-
-  if (!mNameLookupTable.Get(aName, getter_AddRefs(supports))) {
-    // key not found
-    return NS_OK;
-  }
-
-  if (!supports) {
-    return NS_OK;
-  }
-
-  // We found something, check if it's a node
-  CallQueryInterface(supports, aReturn);
-  if (*aReturn) {
-    return NS_OK;
-  }
-
-  // If not, we check if it's a node list.
-  nsCOMPtr<nsIDOMNodeList> nodeList = do_QueryInterface(supports);
-  NS_ASSERTION(nodeList, "Huh, what's going one here?");
-  if (!nodeList) {
-    return NS_OK;
-  }
-
-  // And since we're only asking for one node here, we return the first
-  // one from the list.
-  return nodeList->Item(0, aReturn);
+  return mElements.Length();
 }
 
 nsISupports*
@@ -236,7 +186,7 @@ HTMLFormControlsCollection::IndexOfControl(nsIFormControl* aControl,
                                            int32_t* aIndex)
 {
   // Note -- not a DOM method; callers should handle flushing themselves
-  
+
   NS_ENSURE_ARG_POINTER(aIndex);
 
   *aIndex = mElements.IndexOf(aControl);
@@ -257,7 +207,7 @@ HTMLFormControlsCollection::RemoveElementFromTable(
 
 nsresult
 HTMLFormControlsCollection::GetSortedControls(
-  nsTArray<nsGenericHTMLFormElement*>& aControls) const
+  nsTArray<RefPtr<nsGenericHTMLFormElement>>& aControls) const
 {
 #ifdef DEBUG
   HTMLFormElement::AssertDocumentOrder(mElements, mForm);
@@ -390,13 +340,8 @@ HTMLFormControlsCollection::NamedGetter(const nsAString& aName,
 }
 
 void
-HTMLFormControlsCollection::GetSupportedNames(unsigned aFlags,
-                                              nsTArray<nsString>& aNames)
+HTMLFormControlsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
 {
-  if (!(aFlags & JSITER_HIDDEN)) {
-    return;
-  }
-
   FlushPendingNotifications();
   // Just enumerate mNameLookupTable.  This won't guarantee order, but
   // that's OK, because the HTML5 spec doesn't define an order for
@@ -409,7 +354,7 @@ HTMLFormControlsCollection::GetSupportedNames(unsigned aFlags,
 /* virtual */ JSObject*
 HTMLFormControlsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFormControlsCollectionBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFormControlsCollection_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

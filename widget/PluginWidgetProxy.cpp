@@ -5,6 +5,7 @@
 #include "PluginWidgetProxy.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/plugins/PluginWidgetChild.h"
+#include "mozilla/plugins/PluginInstanceParent.h"
 #include "nsDebug.h"
 
 #define PWLOG(...)
@@ -22,6 +23,8 @@ nsIWidget::CreatePluginProxyWidget(TabChild* aTabChild,
 
 namespace mozilla {
 namespace widget {
+
+using mozilla::plugins::PluginInstanceParent;
 
 NS_IMPL_ISUPPORTS_INHERITED(PluginWidgetProxy, PuppetWidget, nsIWidget)
 
@@ -47,7 +50,7 @@ PluginWidgetProxy::~PluginWidgetProxy()
   PWLOG("PluginWidgetProxy::~PluginWidgetProxy()\n");
 }
 
-NS_IMETHODIMP
+nsresult
 PluginWidgetProxy::Create(nsIWidget* aParent,
                           nsNativeWidget aNativeParent,
                           const LayoutDeviceIntRect& aRect,
@@ -57,7 +60,9 @@ PluginWidgetProxy::Create(nsIWidget* aParent,
   PWLOG("PluginWidgetProxy::Create()\n");
 
   nsresult rv = NS_ERROR_UNEXPECTED;
-  mActor->SendCreate(&rv);
+  uint64_t scrollCaptureId;
+  uintptr_t pluginInstanceId;
+  mActor->SendCreate(&rv, &scrollCaptureId, &pluginInstanceId);
   if (NS_FAILED(rv)) {
     NS_WARNING("failed to create chrome widget, plugins won't paint.");
     return rv;
@@ -70,10 +75,16 @@ PluginWidgetProxy::Create(nsIWidget* aParent,
   mEnabled = true;
   mVisible = true;
 
+  PluginInstanceParent* instance =
+    PluginInstanceParent::LookupPluginInstanceByID(pluginInstanceId);
+  if (instance) {
+    Unused << NS_WARN_IF(NS_FAILED(instance->SetScrollCaptureId(scrollCaptureId)));
+  }
+
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 PluginWidgetProxy::SetParent(nsIWidget* aNewParent)
 {
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
@@ -85,7 +96,6 @@ PluginWidgetProxy::SetParent(nsIWidget* aNewParent)
     aNewParent->AddChild(this);
   }
   mParent = aNewParent;
-  return NS_OK;
 }
 
 nsIWidget*
@@ -94,7 +104,7 @@ PluginWidgetProxy::GetParent(void)
   return mParent.get();
 }
 
-NS_IMETHODIMP
+void
 PluginWidgetProxy::Destroy()
 {
   PWLOG("PluginWidgetProxy::Destroy()\n");
@@ -106,7 +116,7 @@ PluginWidgetProxy::Destroy()
     mActor = nullptr;
   }
 
-  return PuppetWidget::Destroy();
+  PuppetWidget::Destroy();
 }
 
 void
@@ -146,7 +156,6 @@ PluginWidgetProxy::GetNativeData(uint32_t aDataType)
   return (void*)mCachedPluginPort;
 }
 
-#if defined(XP_WIN)
 void
 PluginWidgetProxy::SetNativeData(uint32_t aDataType, uintptr_t aVal)
 {
@@ -167,9 +176,8 @@ PluginWidgetProxy::SetNativeData(uint32_t aDataType, uintptr_t aVal)
       NS_ERROR("SetNativeData called with unsupported data type.");
   }
 }
-#endif
 
-NS_IMETHODIMP
+nsresult
 PluginWidgetProxy::SetFocus(bool aRaise)
 {
   ENSURE_CHANNEL;

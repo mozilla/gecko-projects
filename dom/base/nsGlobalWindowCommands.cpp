@@ -8,7 +8,6 @@
 #include "nsGlobalWindowCommands.h"
 
 #include "nsIComponentManager.h"
-#include "nsIDOMElement.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsCRT.h"
@@ -29,81 +28,83 @@
 #include "nsFocusManager.h"
 #include "nsCopySupport.h"
 #include "nsIClipboard.h"
+#include "ContentEventHandler.h"
+#include "nsContentUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/TextEvents.h"
 #include "mozilla/dom/Selection.h"
-
-#include "nsIClipboardDragDropHooks.h"
-#include "nsIClipboardDragDropHookList.h"
+#include "mozilla/layers/KeyboardMap.h"
 
 using namespace mozilla;
+using namespace mozilla::layers;
 
-const char * const sSelectAllString = "cmd_selectAll";
-const char * const sSelectNoneString = "cmd_selectNone";
-const char * const sCopyImageLocationString = "cmd_copyImageLocation";
-const char * const sCopyImageContentsString = "cmd_copyImageContents";
-const char * const sCopyImageString = "cmd_copyImage";
+constexpr const char * sSelectAllString = "cmd_selectAll";
+constexpr const char * sSelectNoneString = "cmd_selectNone";
+constexpr const char * sCopyImageLocationString = "cmd_copyImageLocation";
+constexpr const char * sCopyImageContentsString = "cmd_copyImageContents";
+constexpr const char * sCopyImageString = "cmd_copyImage";
 
-const char * const sScrollTopString = "cmd_scrollTop";
-const char * const sScrollBottomString = "cmd_scrollBottom";
-const char * const sScrollPageUpString = "cmd_scrollPageUp";
-const char * const sScrollPageDownString = "cmd_scrollPageDown";
-const char * const sScrollLineUpString = "cmd_scrollLineUp";
-const char * const sScrollLineDownString = "cmd_scrollLineDown";
-const char * const sScrollLeftString = "cmd_scrollLeft";
-const char * const sScrollRightString = "cmd_scrollRight";
-const char * const sMoveTopString = "cmd_moveTop";
-const char * const sMoveBottomString = "cmd_moveBottom";
-const char * const sMovePageUpString = "cmd_movePageUp";
-const char * const sMovePageDownString = "cmd_movePageDown";
-const char * const sLinePreviousString = "cmd_linePrevious";
-const char * const sLineNextString = "cmd_lineNext";
-const char * const sCharPreviousString = "cmd_charPrevious";
-const char * const sCharNextString = "cmd_charNext";
+constexpr const char * sScrollTopString = "cmd_scrollTop";
+constexpr const char * sScrollBottomString = "cmd_scrollBottom";
+constexpr const char * sScrollPageUpString = "cmd_scrollPageUp";
+constexpr const char * sScrollPageDownString = "cmd_scrollPageDown";
+constexpr const char * sScrollLineUpString = "cmd_scrollLineUp";
+constexpr const char * sScrollLineDownString = "cmd_scrollLineDown";
+constexpr const char * sScrollLeftString = "cmd_scrollLeft";
+constexpr const char * sScrollRightString = "cmd_scrollRight";
+constexpr const char * sMoveTopString = "cmd_moveTop";
+constexpr const char * sMoveBottomString = "cmd_moveBottom";
+constexpr const char * sMovePageUpString = "cmd_movePageUp";
+constexpr const char * sMovePageDownString = "cmd_movePageDown";
+constexpr const char * sLinePreviousString = "cmd_linePrevious";
+constexpr const char * sLineNextString = "cmd_lineNext";
+constexpr const char * sCharPreviousString = "cmd_charPrevious";
+constexpr const char * sCharNextString = "cmd_charNext";
 
 // These are so the browser can use editor navigation key bindings
 // helps with accessibility (boolean pref accessibility.browsewithcaret)
 
-const char * const sSelectCharPreviousString = "cmd_selectCharPrevious";
-const char * const sSelectCharNextString = "cmd_selectCharNext";
+constexpr const char * sSelectCharPreviousString = "cmd_selectCharPrevious";
+constexpr const char * sSelectCharNextString = "cmd_selectCharNext";
 
-const char * const sWordPreviousString = "cmd_wordPrevious";
-const char * const sWordNextString = "cmd_wordNext";
-const char * const sSelectWordPreviousString = "cmd_selectWordPrevious";
-const char * const sSelectWordNextString = "cmd_selectWordNext";
+constexpr const char * sWordPreviousString = "cmd_wordPrevious";
+constexpr const char * sWordNextString = "cmd_wordNext";
+constexpr const char * sSelectWordPreviousString = "cmd_selectWordPrevious";
+constexpr const char * sSelectWordNextString = "cmd_selectWordNext";
 
-const char * const sBeginLineString = "cmd_beginLine";
-const char * const sEndLineString = "cmd_endLine";
-const char * const sSelectBeginLineString = "cmd_selectBeginLine";
-const char * const sSelectEndLineString = "cmd_selectEndLine";
+constexpr const char * sBeginLineString = "cmd_beginLine";
+constexpr const char * sEndLineString = "cmd_endLine";
+constexpr const char * sSelectBeginLineString = "cmd_selectBeginLine";
+constexpr const char * sSelectEndLineString = "cmd_selectEndLine";
 
-const char * const sSelectLinePreviousString = "cmd_selectLinePrevious";
-const char * const sSelectLineNextString = "cmd_selectLineNext";
+constexpr const char * sSelectLinePreviousString = "cmd_selectLinePrevious";
+constexpr const char * sSelectLineNextString = "cmd_selectLineNext";
 
-const char * const sSelectPageUpString = "cmd_selectPageUp";
-const char * const sSelectPageDownString = "cmd_selectPageDown";
+constexpr const char * sSelectPageUpString = "cmd_selectPageUp";
+constexpr const char * sSelectPageDownString = "cmd_selectPageDown";
 
-const char * const sSelectTopString = "cmd_selectTop";
-const char * const sSelectBottomString = "cmd_selectBottom";
+constexpr const char * sSelectTopString = "cmd_selectTop";
+constexpr const char * sSelectBottomString = "cmd_selectBottom";
 
 // Physical-direction movement and selection commands
-const char * const sMoveLeftString = "cmd_moveLeft";
-const char * const sMoveRightString = "cmd_moveRight";
-const char * const sMoveUpString = "cmd_moveUp";
-const char * const sMoveDownString = "cmd_moveDown";
-const char * const sMoveLeft2String = "cmd_moveLeft2";
-const char * const sMoveRight2String = "cmd_moveRight2";
-const char * const sMoveUp2String = "cmd_moveUp2";
-const char * const sMoveDown2String = "cmd_moveDown2";
+constexpr const char * sMoveLeftString = "cmd_moveLeft";
+constexpr const char * sMoveRightString = "cmd_moveRight";
+constexpr const char * sMoveUpString = "cmd_moveUp";
+constexpr const char * sMoveDownString = "cmd_moveDown";
+constexpr const char * sMoveLeft2String = "cmd_moveLeft2";
+constexpr const char * sMoveRight2String = "cmd_moveRight2";
+constexpr const char * sMoveUp2String = "cmd_moveUp2";
+constexpr const char * sMoveDown2String = "cmd_moveDown2";
 
-const char * const sSelectLeftString = "cmd_selectLeft";
-const char * const sSelectRightString = "cmd_selectRight";
-const char * const sSelectUpString = "cmd_selectUp";
-const char * const sSelectDownString = "cmd_selectDown";
-const char * const sSelectLeft2String = "cmd_selectLeft2";
-const char * const sSelectRight2String = "cmd_selectRight2";
-const char * const sSelectUp2String = "cmd_selectUp2";
-const char * const sSelectDown2String = "cmd_selectDown2";
+constexpr const char * sSelectLeftString = "cmd_selectLeft";
+constexpr const char * sSelectRightString = "cmd_selectRight";
+constexpr const char * sSelectUpString = "cmd_selectUp";
+constexpr const char * sSelectDownString = "cmd_selectDown";
+constexpr const char * sSelectLeft2String = "cmd_selectLeft2";
+constexpr const char * sSelectRight2String = "cmd_selectRight2";
+constexpr const char * sSelectUp2String = "cmd_selectUp2";
+constexpr const char * sSelectDown2String = "cmd_selectDown2";
 
 #if 0
 #pragma mark -
@@ -132,7 +133,7 @@ class nsSelectMoveScrollCommand : public nsSelectionCommandsBase
 {
 public:
 
-  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext);
+  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext) override;
 
   // no member variables, please, we're stateless!
 };
@@ -142,7 +143,7 @@ class nsPhysicalSelectMoveScrollCommand : public nsSelectionCommandsBase
 {
 public:
 
-  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext);
+  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext) override;
 
   // no member variables, please, we're stateless!
 };
@@ -152,7 +153,7 @@ class nsSelectCommand : public nsSelectionCommandsBase
 {
 public:
 
-  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext);
+  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext) override;
 
   // no member variables, please, we're stateless!
 };
@@ -162,7 +163,7 @@ class nsPhysicalSelectCommand : public nsSelectionCommandsBase
 {
 public:
 
-  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext);
+  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandContext) override;
 
   // no member variables, please, we're stateless!
 };
@@ -239,7 +240,7 @@ AdjustFocusAfterCaretMove(nsPIDOMWindowOuter* aWindow)
   // adjust the focus to the new caret position
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsCOMPtr<nsIDOMElement> result;
+    RefPtr<dom::Element> result;
     fm->MoveFocus(aWindow, nullptr, nsIFocusManager::MOVEFOCUS_CARET,
                   nsIFocusManager::FLAG_NOSCROLL, getter_AddRefs(result));
   }
@@ -265,35 +266,46 @@ IsCaretOnInWindow(nsPIDOMWindowOuter* aWindow, nsISelectionController* aSelCont)
   return caretOn;
 }
 
-static const struct BrowseCommand {
+static constexpr struct BrowseCommand {
   const char *reverse, *forward;
+  KeyboardScrollAction::KeyboardScrollActionType scrollAction;
   nsresult (NS_STDCALL nsISelectionController::*scroll)(bool);
   nsresult (NS_STDCALL nsISelectionController::*move)(bool, bool);
 } browseCommands[] = {
  { sScrollTopString, sScrollBottomString,
+   KeyboardScrollAction::eScrollComplete,
    &nsISelectionController::CompleteScroll },
  { sScrollPageUpString, sScrollPageDownString,
+   KeyboardScrollAction::eScrollPage,
    &nsISelectionController::ScrollPage },
  { sScrollLineUpString, sScrollLineDownString,
+   KeyboardScrollAction::eScrollLine,
    &nsISelectionController::ScrollLine },
  { sScrollLeftString, sScrollRightString,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter },
  { sMoveTopString, sMoveBottomString,
+   KeyboardScrollAction::eScrollComplete,
    &nsISelectionController::CompleteScroll,
    &nsISelectionController::CompleteMove },
  { sMovePageUpString, sMovePageDownString,
+   KeyboardScrollAction::eScrollPage,
    &nsISelectionController::ScrollPage,
    &nsISelectionController::PageMove },
  { sLinePreviousString, sLineNextString,
+   KeyboardScrollAction::eScrollLine,
    &nsISelectionController::ScrollLine,
    &nsISelectionController::LineMove },
  { sWordPreviousString, sWordNextString,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter,
    &nsISelectionController::WordMove },
  { sCharPreviousString, sCharNextString,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter,
    &nsISelectionController::CharacterMove },
  { sBeginLineString, sEndLineString,
+   KeyboardScrollAction::eScrollComplete,
    &nsISelectionController::CompleteScroll,
    &nsISelectionController::IntraLineMove }
 };
@@ -304,7 +316,7 @@ nsSelectMoveScrollCommand::DoCommand(const char *aCommandName, nsISupports *aCom
   nsCOMPtr<nsPIDOMWindowOuter> piWindow(do_QueryInterface(aCommandContext));
   nsCOMPtr<nsISelectionController> selCont;
   GetSelectionControllerFromWindow(piWindow, getter_AddRefs(selCont));
-  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);       
+  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);
 
   bool caretOn = IsCaretOnInWindow(piWindow, selCont);
 
@@ -330,23 +342,32 @@ nsSelectMoveScrollCommand::DoCommand(const char *aCommandName, nsISupports *aCom
 static const struct PhysicalBrowseCommand {
   const char *command;
   int16_t direction, amount;
+  KeyboardScrollAction::KeyboardScrollActionType scrollAction;
   nsresult (NS_STDCALL nsISelectionController::*scroll)(bool);
 } physicalBrowseCommands[] = {
  { sMoveLeftString, nsISelectionController::MOVE_LEFT, 0,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter },
  { sMoveRightString, nsISelectionController::MOVE_RIGHT, 0,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter },
  { sMoveUpString, nsISelectionController::MOVE_UP, 0,
+   KeyboardScrollAction::eScrollLine,
    &nsISelectionController::ScrollLine },
  { sMoveDownString, nsISelectionController::MOVE_DOWN, 0,
+   KeyboardScrollAction::eScrollLine,
    &nsISelectionController::ScrollLine },
  { sMoveLeft2String, nsISelectionController::MOVE_LEFT, 1,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter },
  { sMoveRight2String, nsISelectionController::MOVE_RIGHT, 1,
+   KeyboardScrollAction::eScrollCharacter,
    &nsISelectionController::ScrollCharacter },
  { sMoveUp2String, nsISelectionController::MOVE_UP, 1,
+   KeyboardScrollAction::eScrollComplete,
    &nsISelectionController::CompleteScroll },
  { sMoveDown2String, nsISelectionController::MOVE_DOWN, 1,
+   KeyboardScrollAction::eScrollComplete,
    &nsISelectionController::CompleteScroll },
 };
 
@@ -357,7 +378,7 @@ nsPhysicalSelectMoveScrollCommand::DoCommand(const char *aCommandName,
   nsCOMPtr<nsPIDOMWindowOuter> piWindow(do_QueryInterface(aCommandContext));
   nsCOMPtr<nsISelectionController> selCont;
   GetSelectionControllerFromWindow(piWindow, getter_AddRefs(selCont));
-  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);       
+  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);
 
   bool caretOn = IsCaretOnInWindow(piWindow, selCont);
 
@@ -409,7 +430,7 @@ nsSelectCommand::DoCommand(const char *aCommandName,
   nsCOMPtr<nsPIDOMWindowOuter> piWindow(do_QueryInterface(aCommandContext));
   nsCOMPtr<nsISelectionController> selCont;
   GetSelectionControllerFromWindow(piWindow, getter_AddRefs(selCont));
-  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);       
+  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);
 
   // These commands are so the browser can use caret navigation key bindings -
   // Helps with accessibility - aaronl@netscape.com
@@ -447,7 +468,7 @@ nsPhysicalSelectCommand::DoCommand(const char *aCommandName,
   nsCOMPtr<nsPIDOMWindowOuter> piWindow(do_QueryInterface(aCommandContext));
   nsCOMPtr<nsISelectionController> selCont;
   GetSelectionControllerFromWindow(piWindow, getter_AddRefs(selCont));
-  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);       
+  NS_ENSURE_TRUE(selCont, NS_ERROR_NOT_INITIALIZED);
 
   for (size_t i = 0; i < ArrayLength(physicalSelectCommands); i++) {
     if (!strcmp(aCommandName, physicalSelectCommands[i].command)) {
@@ -484,7 +505,8 @@ nsClipboardCommand::IsCommandEnabled(const char* aCommandName, nsISupports *aCon
 
   if (strcmp(aCommandName, "cmd_copy") &&
       strcmp(aCommandName, "cmd_copyAndCollapseToEnd") &&
-      strcmp(aCommandName, "cmd_cut"))
+      strcmp(aCommandName, "cmd_cut") &&
+      strcmp(aCommandName, "cmd_paste"))
     return NS_OK;
 
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aContext);
@@ -492,11 +514,13 @@ nsClipboardCommand::IsCommandEnabled(const char* aCommandName, nsISupports *aCon
 
   nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
   if (doc->IsHTMLOrXHTML()) {
-    // In HTML and XHTML documents, we always want cut and copy commands to be enabled.
+    // In HTML and XHTML documents, we always want the cut, copy and paste
+    // commands to be enabled.
     *outCmdEnabled = true;
   } else {
     // Cut isn't enabled in xul documents which use nsClipboardCommand
-    if (strcmp(aCommandName, "cmd_cut")) {
+    if (strcmp(aCommandName, "cmd_copy") == 0 ||
+        strcmp(aCommandName, "cmd_copyAndCollapseToEnd") == 0) {
       *outCmdEnabled = nsCopySupport::CanCopy(doc);
     }
   }
@@ -508,7 +532,8 @@ nsClipboardCommand::DoCommand(const char *aCommandName, nsISupports *aContext)
 {
   if (strcmp(aCommandName, "cmd_cut") &&
       strcmp(aCommandName, "cmd_copy") &&
-      strcmp(aCommandName, "cmd_copyAndCollapseToEnd"))
+      strcmp(aCommandName, "cmd_copyAndCollapseToEnd") &&
+      strcmp(aCommandName, "cmd_paste"))
     return NS_OK;
 
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aContext);
@@ -523,24 +548,24 @@ nsClipboardCommand::DoCommand(const char *aCommandName, nsISupports *aContext)
   EventMessage eventMessage = eCopy;
   if (strcmp(aCommandName, "cmd_cut") == 0) {
     eventMessage = eCut;
+  } else if (strcmp(aCommandName, "cmd_paste") == 0) {
+    eventMessage = ePaste;
   }
 
   bool actionTaken = false;
-  nsCopySupport::FireClipboardEvent(eventMessage,
-                                    nsIClipboard::kGlobalClipboard,
-                                    presShell, nullptr, &actionTaken);
+  bool notCancelled =
+    nsCopySupport::FireClipboardEvent(eventMessage,
+                                      nsIClipboard::kGlobalClipboard,
+                                      presShell, nullptr, &actionTaken);
 
-  if (!strcmp(aCommandName, "cmd_copyAndCollapseToEnd")) {
+  if (notCancelled && !strcmp(aCommandName, "cmd_copyAndCollapseToEnd")) {
     dom::Selection *sel =
-      presShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+      presShell->GetCurrentSelection(SelectionType::eNormal);
     NS_ENSURE_TRUE(sel, NS_ERROR_FAILURE);
-    sel->CollapseToEnd();
+    sel->CollapseToEnd(IgnoreErrors());
   }
 
-  if (actionTaken) {
-    return NS_OK;
-  }
-  return NS_ERROR_FAILURE;
+  return actionTaken ? NS_OK : NS_SUCCESS_DOM_NO_OPERATION;
 }
 
 NS_IMETHODIMP
@@ -571,9 +596,9 @@ protected:
 
   virtual nsresult    IsClipboardCommandEnabled(const char * aCommandName, nsIContentViewerEdit* aEdit, bool *outCmdEnabled) = 0;
   virtual nsresult    DoClipboardCommand(const char *aCommandName, nsIContentViewerEdit* aEdit, nsICommandParams* aParams) = 0;
-  
+
   static nsresult     GetContentViewerEditFromContext(nsISupports *aContext, nsIContentViewerEdit **aEditInterface);
-  
+
   // no member variables, please, we're stateless!
 };
 
@@ -665,9 +690,11 @@ class _cmd : public nsSelectionCommand                                          
 protected:                                                                                  \
                                                                                             \
   virtual nsresult    IsClipboardCommandEnabled(const char* aCommandName,                   \
-                                  nsIContentViewerEdit* aEdit, bool *outCmdEnabled);        \
+                                                nsIContentViewerEdit* aEdit,                \
+                                                bool *outCmdEnabled) override;              \
   virtual nsresult    DoClipboardCommand(const char* aCommandName,                          \
-                                  nsIContentViewerEdit* aEdit, nsICommandParams* aParams);  \
+                                         nsIContentViewerEdit* aEdit,                       \
+                                         nsICommandParams* aParams) override;               \
   /* no member variables, please, we're stateless! */                                       \
 };
 
@@ -705,7 +732,7 @@ nsClipboardImageCommands::DoClipboardCommand(const char *aCommandName, nsIConten
     return aEdit->CopyImage(nsIContentViewerEdit::COPY_IMAGE_TEXT);
   if (!nsCRT::strcmp(sCopyImageContentsString, aCommandName))
     return aEdit->CopyImage(nsIContentViewerEdit::COPY_IMAGE_DATA);
-  int32_t copyFlags = nsIContentViewerEdit::COPY_IMAGE_DATA | 
+  int32_t copyFlags = nsIContentViewerEdit::COPY_IMAGE_DATA |
                       nsIContentViewerEdit::COPY_IMAGE_HTML;
   if (aParams)
     aParams->GetLongValue("imageCopy", &copyFlags);
@@ -750,18 +777,18 @@ nsClipboardGetContentsCommand::DoClipboardCommand(const char *aCommandName, nsIC
 
   nsAutoCString mimeType("text/plain");
 
-  nsXPIDLCString format;    // nsICommandParams needs to use nsACString
+  nsCString format;    // nsICommandParams needs to use nsACString
   if (NS_SUCCEEDED(aParams->GetCStringValue("format", getter_Copies(format))))
     mimeType.Assign(format);
-  
+
   bool selectionOnly = false;
   aParams->GetBooleanValue("selection_only", &selectionOnly);
-  
+
   nsAutoString contents;
   nsresult rv = aEdit->GetContents(mimeType.get(), selectionOnly, contents);
   if (NS_FAILED(rv))
     return rv;
-    
+
   return aParams->SetStringValue("result", contents);
 }
 
@@ -778,9 +805,9 @@ protected:
 
   virtual nsresult    IsWebNavCommandEnabled(const char * aCommandName, nsIWebNavigation* aWebNavigation, bool *outCmdEnabled) = 0;
   virtual nsresult    DoWebNavCommand(const char *aCommandName, nsIWebNavigation* aWebNavigation) = 0;
-  
+
   static nsresult     GetWebNavigationFromContext(nsISupports *aContext, nsIWebNavigation **aWebNavigation);
-  
+
   // no member variables, please, we're stateless!
 };
 
@@ -821,7 +848,7 @@ nsWebNavigationBaseCommand::IsCommandEnabled(const char * aCommandName,
   nsCOMPtr<nsIWebNavigation> webNav;
   GetWebNavigationFromContext(aCommandContext, getter_AddRefs(webNav));
   NS_ENSURE_TRUE(webNav, NS_ERROR_INVALID_ARG);
-  
+
   return IsCommandEnabled(aCommandName, webNav, outCmdEnabled);
 }
 
@@ -840,7 +867,7 @@ nsWebNavigationBaseCommand::DoCommand(const char *aCommandName,
   nsCOMPtr<nsIWebNavigation> webNav;
   GetWebNavigationFromContext(aCommandContext, getter_AddRefs(webNav));
   NS_ENSURE_TRUE(webNav, NS_ERROR_INVALID_ARG);
-  
+
   return DoWebNavCommand(aCommandName, webNav);
 }
 
@@ -884,99 +911,161 @@ nsGoBackCommand::DoWebNavCommand(const char *aCommandName, nsIWebNavigation* aWe
 }
 #endif
 
-/*---------------------------------------------------------------------------
-
-  nsClipboardDragDropHookCommand
-      params        value type   possible values
-      "addhook"     isupports    nsIClipboardDragDropHooks as nsISupports
-      "removehook"  isupports    nsIClipboardDragDropHooks as nsISupports
-
-----------------------------------------------------------------------------*/
-
-class nsClipboardDragDropHookCommand final : public nsIControllerCommand
+class nsLookUpDictionaryCommand final : public nsIControllerCommand
 {
-  ~nsClipboardDragDropHookCommand() {}
-
 public:
-
   NS_DECL_ISUPPORTS
   NS_DECL_NSICONTROLLERCOMMAND
 
-protected:                                                                                   
-  // no member variables, please, we're stateless!
+private:
+  virtual ~nsLookUpDictionaryCommand()
+  {
+  }
 };
 
-
-NS_IMPL_ISUPPORTS(nsClipboardDragDropHookCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS(nsLookUpDictionaryCommand, nsIControllerCommand)
 
 NS_IMETHODIMP
-nsClipboardDragDropHookCommand::IsCommandEnabled(const char * aCommandName,
-                                                 nsISupports *aCommandContext,
-                                                 bool *outCmdEnabled)
+nsLookUpDictionaryCommand::IsCommandEnabled(
+                             const char* aCommandName,
+                             nsISupports* aCommandContext,
+                             bool* aRetval)
 {
-  *outCmdEnabled = true;
+  *aRetval = true;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsClipboardDragDropHookCommand::DoCommand(const char *aCommandName,
-                                          nsISupports *aCommandContext)
+nsLookUpDictionaryCommand::GetCommandStateParams(const char* aCommandName,
+                                                 nsICommandParams* aParams,
+                                                 nsISupports* aCommandContext)
 {
-  return NS_ERROR_FAILURE;
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-nsClipboardDragDropHookCommand::DoCommandParams(const char *aCommandName,
-                                                nsICommandParams *aParams,
-                                                nsISupports *aCommandContext)
+nsLookUpDictionaryCommand::DoCommand(const char* aCommandName,
+                                     nsISupports *aCommandContext)
 {
-  NS_ENSURE_ARG(aParams);
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsLookUpDictionaryCommand::DoCommandParams(const char* aCommandName,
+                                           nsICommandParams* aParams,
+                                           nsISupports* aCommandContext)
+{
+  if (NS_WARN_IF(!nsContentUtils::IsSafeToRunScript())) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  int32_t x;
+  int32_t y;
+
+  nsresult rv = aParams->GetLongValue("x", &x);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = aParams->GetLongValue("y", &y);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  LayoutDeviceIntPoint point(x, y);
 
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aCommandContext);
-  NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
-
-  nsIDocShell *docShell = window->GetDocShell();
-
-  nsCOMPtr<nsIClipboardDragDropHookList> obj = do_GetInterface(docShell);
-  if (!obj) return NS_ERROR_INVALID_ARG;
-
-  nsCOMPtr<nsISupports> isuppHook;
-
-  nsresult returnValue = NS_OK;
-  nsresult rv = aParams->GetISupportsValue("addhook", getter_AddRefs(isuppHook));
-  if (NS_SUCCEEDED(rv))
-  {
-    nsCOMPtr<nsIClipboardDragDropHooks> hook = do_QueryInterface(isuppHook);
-    if (hook)
-      returnValue = obj->AddClipboardDragDropHooks(hook);
-    else
-      returnValue = NS_ERROR_INVALID_ARG;
+  if (NS_WARN_IF(!window)) {
+    return NS_ERROR_FAILURE;
   }
 
-  rv = aParams->GetISupportsValue("removehook", getter_AddRefs(isuppHook));
-  if (NS_SUCCEEDED(rv))
-  {
-    nsCOMPtr<nsIClipboardDragDropHooks> hook = do_QueryInterface(isuppHook);
-    if (hook)
-    {
-      rv = obj->RemoveClipboardDragDropHooks(hook);
-      if (NS_FAILED(rv) && NS_SUCCEEDED(returnValue))
-        returnValue = rv;
-    }
-    else
-      returnValue = NS_ERROR_INVALID_ARG;
+  nsIDocShell* docShell = window->GetDocShell();
+  if (NS_WARN_IF(!docShell)) {
+    return NS_ERROR_FAILURE;
   }
 
-  return returnValue;
-}
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
+  if (NS_WARN_IF(!presShell)) {
+    return NS_ERROR_FAILURE;
+  }
 
-NS_IMETHODIMP
-nsClipboardDragDropHookCommand::GetCommandStateParams(const char *aCommandName,
-                                                      nsICommandParams *aParams,
-                                                      nsISupports *aCommandContext)
-{
-  NS_ENSURE_ARG_POINTER(aParams);
-  return aParams->SetBooleanValue("state_enabled", true);
+  nsPresContext* presContext = presShell->GetPresContext();
+  if (NS_WARN_IF(!presContext)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIWidget> widget = presContext->GetRootWidget();
+  if (NS_WARN_IF(!widget)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  WidgetQueryContentEvent charAt(true, eQueryCharacterAtPoint, widget);
+  charAt.mRefPoint.x = x;
+  charAt.mRefPoint.y = y;
+  ContentEventHandler handler(presContext);
+  handler.OnQueryCharacterAtPoint(&charAt);
+
+  if (NS_WARN_IF(!charAt.mSucceeded) ||
+      charAt.mReply.mOffset == WidgetQueryContentEvent::NOT_FOUND) {
+    return NS_ERROR_FAILURE;
+  }
+
+  WidgetQueryContentEvent textContent(true, eQueryTextContent, widget);
+  // OSX 10.7 queries 50 characters before/after current point.  So we fetch
+  // same length.
+  uint32_t offset = charAt.mReply.mOffset;
+  if (offset > 50) {
+    offset -= 50;
+  } else {
+    offset = 0;
+  }
+  textContent.InitForQueryTextContent(offset, 100);
+  handler.OnQueryTextContent(&textContent);
+  if (NS_WARN_IF(!textContent.mSucceeded ||
+                 textContent.mReply.mString.IsEmpty())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // XXX nsIWordBreaker doesn't use contextual breaker.
+  // If OS provides it, widget should use it if contextual breaker is needed.
+  RefPtr<mozilla::intl::WordBreaker> wordBreaker = nsContentUtils::WordBreaker();
+  if (NS_WARN_IF(!wordBreaker)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mozilla::intl::WordRange range =
+    wordBreaker->FindWord(textContent.mReply.mString.get(),
+                          textContent.mReply.mString.Length(),
+                          charAt.mReply.mOffset - offset);
+  if (range.mEnd == range.mBegin) {
+    return NS_ERROR_FAILURE;
+  }
+  range.mBegin += offset;
+  range.mEnd += offset;
+
+  WidgetQueryContentEvent lookUpContent(true, eQueryTextContent, widget);
+  lookUpContent.InitForQueryTextContent(range.mBegin,
+                                        range.mEnd - range.mBegin);
+  lookUpContent.RequestFontRanges();
+  handler.OnQueryTextContent(&lookUpContent);
+  if (NS_WARN_IF(!lookUpContent.mSucceeded ||
+                 lookUpContent.mReply.mString.IsEmpty())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  WidgetQueryContentEvent charRect(true, eQueryTextRect, widget);
+  charRect.InitForQueryTextRect(range.mBegin, range.mEnd - range.mBegin);
+  handler.OnQueryTextRect(&charRect);
+  if (NS_WARN_IF(!charRect.mSucceeded)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  widget->LookUpDictionary(lookUpContent.mReply.mString,
+                           lookUpContent.mReply.mFontRanges,
+                           charRect.mReply.mWritingMode.IsVertical(),
+                           charRect.mReply.mRect.TopLeft());
+
+  return NS_OK;
 }
 
 /*---------------------------------------------------------------------------
@@ -1016,7 +1105,7 @@ nsWindowCommandRegistration::RegisterWindowCommands(
   nsresult rv;
 
   // XXX rework the macros to use a loop is possible, reducing code size
-  
+
   // this set of commands is affected by the 'browse with caret' setting
   NS_REGISTER_FIRST_COMMAND(nsSelectMoveScrollCommand, sScrollTopString);
   NS_REGISTER_NEXT_COMMAND(nsSelectMoveScrollCommand, sScrollBottomString);
@@ -1088,7 +1177,40 @@ nsWindowCommandRegistration::RegisterWindowCommands(
   NS_REGISTER_ONE_COMMAND(nsGoForwardCommand, "cmd_browserForward");
 #endif
 
-  NS_REGISTER_ONE_COMMAND(nsClipboardDragDropHookCommand, "cmd_clipboardDragDropHook");
+  NS_REGISTER_ONE_COMMAND(nsLookUpDictionaryCommand, "cmd_lookUpDictionary");
 
   return rv;
+}
+
+/* static */ bool
+nsGlobalWindowCommands::FindScrollCommand(const char* aCommandName,
+                                          KeyboardScrollAction* aOutAction)
+{
+  // Search for a keyboard scroll action to do for this command in browseCommands
+  // and physicalBrowseCommands. Each command exists in only one of them, so the
+  // order we examine browseCommands and physicalBrowseCommands doesn't matter.
+
+  for (size_t i = 0; i < ArrayLength(browseCommands); i++) {
+    const BrowseCommand& cmd = browseCommands[i];
+    bool forward = !strcmp(aCommandName, cmd.forward);
+    bool reverse = !strcmp(aCommandName, cmd.reverse);
+    if (forward || reverse) {
+      *aOutAction = KeyboardScrollAction(cmd.scrollAction, forward);
+      return true;
+    }
+  }
+
+  for (size_t i = 0; i < ArrayLength(physicalBrowseCommands); i++) {
+    const PhysicalBrowseCommand& cmd = physicalBrowseCommands[i];
+    if (!strcmp(aCommandName, cmd.command)) {
+      int16_t dir = cmd.direction;
+      bool forward = (dir == nsISelectionController::MOVE_RIGHT ||
+                      dir == nsISelectionController::MOVE_DOWN);
+
+      *aOutAction = KeyboardScrollAction(cmd.scrollAction, forward);
+      return true;
+    }
+  }
+
+  return false;
 }

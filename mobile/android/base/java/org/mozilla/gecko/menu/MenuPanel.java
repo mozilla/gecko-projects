@@ -16,7 +16,7 @@ import android.widget.LinearLayout;
 
 /**
  * The outer container for the custom menu. On phones with h/w menu button,
- * this is given to Android which inflates it to the right panel. On phones 
+ * this is given to Android which inflates it to the right panel. On phones
  * with s/w menu button, this is added to a MenuPopup.
  */
 public class MenuPanel extends LinearLayout {
@@ -29,9 +29,7 @@ public class MenuPanel extends LinearLayout {
 
     @Override
     public boolean dispatchPopulateAccessibilityEvent (AccessibilityEvent event) {
-        if (Versions.feature14Plus) {
-            onPopulateAccessibilityEvent(event);
-        }
+        onPopulateAccessibilityEvent(event);
 
         return true;
     }

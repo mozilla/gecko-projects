@@ -18,19 +18,21 @@ class nsIRunnable;
 
 namespace mozilla {
 namespace dom {
-namespace workers {
 
-class RuntimeService;
+class WorkerRunnable;
 class WorkerPrivate;
 template <class> class WorkerPrivateParent;
-class WorkerRunnable;
+
+namespace workerinternals {
+class RuntimeService;
+}
 
 // This class lets us restrict the public methods that can be called on
 // WorkerThread to RuntimeService and WorkerPrivate without letting them gain
 // full access to private methods (as would happen if they were simply friends).
 class WorkerThreadFriendKey
 {
-  friend class RuntimeService;
+  friend class workerinternals::RuntimeService;
   friend class WorkerPrivate;
   friend class WorkerPrivateParent<WorkerPrivate>;
 
@@ -43,6 +45,7 @@ class WorkerThread final
 {
   class Observer;
 
+  Mutex mLock;
   CondVar mWorkerPrivateCondVar;
 
   // Protected by nsThread::mLock.
@@ -64,20 +67,24 @@ public:
   Create(const WorkerThreadFriendKey& aKey);
 
   void
-  SetWorker(const WorkerThreadFriendKey& aKey, WorkerPrivate* aWorkerPrivate);
+  SetWorker(const WorkerThreadFriendKey& aKey,
+            WorkerPrivate* aWorkerPrivate);
 
   nsresult
   DispatchPrimaryRunnable(const WorkerThreadFriendKey& aKey,
-                          already_AddRefed<nsIRunnable>&& aRunnable);
+                          already_AddRefed<nsIRunnable> aRunnable);
 
   nsresult
   DispatchAnyThread(const WorkerThreadFriendKey& aKey,
-           already_AddRefed<WorkerRunnable>&& aWorkerRunnable);
+           already_AddRefed<WorkerRunnable> aWorkerRunnable);
 
   uint32_t
   RecursionDepth(const WorkerThreadFriendKey& aKey) const;
 
-  NS_DECL_ISUPPORTS_INHERITED
+  PerformanceCounter*
+  GetPerformanceCounter(nsIRunnable* aEvent) override;
+
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(WorkerThread, nsThread)
 
 private:
   WorkerThread();
@@ -86,13 +93,18 @@ private:
   // This should only be called by consumers that have an
   // nsIEventTarget/nsIThread pointer.
   NS_IMETHOD
-  Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags) override;
+  Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags) override;
 
   NS_IMETHOD
   DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags) override;
+
+  NS_IMETHOD
+  DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t) override;
+
+  void
+  IncrementDispatchCounter();
 };
 
-} // namespace workers
 } // namespace dom
 } // namespace mozilla
 

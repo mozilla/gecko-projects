@@ -25,11 +25,12 @@ public:
     HyperTextAccessibleWrap(aContent, aDoc) { mGenericTypes |= eList; }
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLListAccessible,
+                                       HyperTextAccessibleWrap)
 
   // Accessible
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
 
 protected:
   virtual ~HTMLListAccessible() { }
@@ -45,13 +46,16 @@ public:
   HTMLLIAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLLIAccessible,
+                                       HyperTextAccessibleWrap)
 
   // Accessible
   virtual void Shutdown() override;
-  virtual nsIntRect Bounds() const override;
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual nsRect BoundsInAppUnits() const override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
+
+  virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override;
 
   // HTMLLIAccessible
   HTMLListBulletAccessible* Bullet() const { return mBullet; }
@@ -61,7 +65,7 @@ protected:
   virtual ~HTMLLIAccessible() { }
 
 private:
-  RefPtr<HTMLListBulletAccessible> mBullet;
+  HTMLListBulletAccessible* mBullet;
 };
 
 
@@ -76,9 +80,9 @@ public:
 
   // Accessible
   virtual nsIFrame* GetFrame() const override;
-  virtual ENameValueFlag Name(nsString& aName) override;
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual ENameValueFlag Name(nsString& aName) const override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual void AppendTextTo(nsAString& aText, uint32_t aStartOffset = 0,
                             uint32_t aLength = UINT32_MAX) override;
 

@@ -55,7 +55,7 @@ function hasArrayIndex(str) {
  *            }
  */
 function findCompletionBeginning(str) {
-  let bodyStack = [];
+  const bodyStack = [];
 
   let state = STATE_NORMAL;
   let start = 0;
@@ -74,14 +74,14 @@ function findCompletionBeginning(str) {
           start = i + 1;
         } else if (c == " ") {
           start = i + 1;
-        } else if (OPEN_BODY.indexOf(c) != -1) {
+        } else if (OPEN_BODY.includes(c)) {
           bodyStack.push({
             token: c,
             start: start
           });
           start = i + 1;
-        } else if (CLOSE_BODY.indexOf(c) != -1) {
-          let last = bodyStack.pop();
+        } else if (CLOSE_BODY.includes(c)) {
+          const last = bodyStack.pop();
           if (!last || OPEN_CLOSE_BODY[last.token] != c) {
             return {
               err: "syntax error"
@@ -165,7 +165,7 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
 
   // Analyse the inputValue and find the beginning of the last part that
   // should be completed.
-  let beginning = findCompletionBeginning(inputValue);
+  const beginning = findCompletionBeginning(inputValue);
 
   // There was an error analysing the string.
   if (beginning.err) {
@@ -178,8 +178,8 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
     return null;
   }
 
-  let completionPart = inputValue.substring(beginning.startPos);
-  let lastDot = completionPart.lastIndexOf(".");
+  const completionPart = inputValue.substring(beginning.startPos);
+  const lastDot = completionPart.lastIndexOf(".");
 
   // Don't complete on just an empty string.
   if (completionPart.trim() == "") {
@@ -191,17 +191,17 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
   // Don't run this is a worker, migrating to acorn should allow this
   // to run in a worker - Bug 1217198.
   if (!isWorker && lastDot > 0) {
-    let parser = new Parser();
+    const parser = new Parser();
     parser.logExceptions = false;
-    let syntaxTree = parser.get(completionPart.slice(0, lastDot));
-    let lastTree = syntaxTree.getLastSyntaxTree();
-    let lastBody = lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
+    const syntaxTree = parser.get(completionPart.slice(0, lastDot));
+    const lastTree = syntaxTree.getLastSyntaxTree();
+    const lastBody = lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
 
     // Finding the last expression since we've sliced up until the dot.
     // If there were parse errors this won't exist.
     if (lastBody) {
-      let expression = lastBody.expression;
-      let matchProp = completionPart.slice(lastDot + 1);
+      const expression = lastBody.expression;
+      const matchProp = completionPart.slice(lastDot + 1);
       if (expression.type === "ArrayExpression") {
         return getMatchedProps(Array.prototype, matchProp);
       } else if (expression.type === "Literal" &&
@@ -212,19 +212,19 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
   }
 
   // We are completing a variable / a property lookup.
-  let properties = completionPart.split(".");
-  let matchProp = properties.pop().trimLeft();
+  const properties = completionPart.split(".");
+  const matchProp = properties.pop().trimLeft();
   let obj = dbgObject;
 
   // The first property must be found in the environment of the paused debugger
   // or of the global lexical scope.
-  let env = anEnvironment || obj.asEnvironment();
+  const env = anEnvironment || obj.asEnvironment();
 
   if (properties.length === 0) {
     return getMatchedPropsInEnvironment(env, matchProp);
   }
 
-  let firstProp = properties.shift().trim();
+  const firstProp = properties.shift().trim();
   if (firstProp === "this") {
     // Special case for 'this' - try to get the Object from the Environment.
     // No problem if it throws, we will just not autocomplete.
@@ -246,7 +246,7 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
   // We get the rest of the properties recursively starting from the
   // Debugger.Object that wraps the first property
   for (let i = 0; i < properties.length; i++) {
-    let prop = properties[i].trim();
+    const prop = properties[i].trim();
     if (!prop) {
       return null;
     }
@@ -288,7 +288,7 @@ function JSPropertyProvider(dbgObject, anEnvironment, inputValue, cursor) {
  */
 function getArrayMemberProperty(obj, env, prop) {
   // First get the array.
-  let propWithoutIndices = prop.substr(0, prop.indexOf("["));
+  const propWithoutIndices = prop.substr(0, prop.indexOf("["));
 
   if (env) {
     obj = getVariableInEnvironment(env, propWithoutIndices);
@@ -302,11 +302,11 @@ function getArrayMemberProperty(obj, env, prop) {
 
   // Then traverse the list of indices to get the actual element.
   let result;
-  let arrayIndicesRegex = /\[[^\]]*\]/g;
+  const arrayIndicesRegex = /\[[^\]]*\]/g;
   while ((result = arrayIndicesRegex.exec(prop)) !== null) {
-    let indexWithBrackets = result[0];
-    let indexAsText = indexWithBrackets.substr(1, indexWithBrackets.length - 2);
-    let index = parseInt(indexAsText, 10);
+    const indexWithBrackets = result[0];
+    const indexAsText = indexWithBrackets.substr(1, indexWithBrackets.length - 2);
+    const index = parseInt(indexAsText, 10);
 
     if (isNaN(index)) {
       return null;
@@ -386,13 +386,16 @@ function getMatchedProps(obj, match) {
  *         Object that contains the matchProp and the list of names.
  */
 function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
-  let matches = new Set();
+  const matches = new Set();
   let numProps = 0;
 
   // We need to go up the prototype chain.
-  let iter = chainIterator(obj);
+  const iter = chainIterator(obj);
   for (obj of iter) {
-    let props = getProperties(obj);
+    const props = getProperties(obj);
+    if (!props) {
+      continue;
+    }
     numProps += props.length;
 
     // If there are too many properties to event attempt autocompletion,
@@ -404,7 +407,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
     }
 
     for (let i = 0; i < props.length; i++) {
-      let prop = props[i];
+      const prop = props[i];
       if (prop.indexOf(match) != 0) {
         continue;
       }
@@ -414,6 +417,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
       // If it is an array index, we can't take it.
       // This uses a trick: converting a string to a number yields NaN if
       // the operation failed, and NaN is not equal to itself.
+      // eslint-disable-next-line no-self-compare
       if (+prop != +prop) {
         matches.add(prop);
       }
@@ -444,9 +448,9 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
  */
 function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
   // We need to go up the prototype chain.
-  let iter = chainIterator(obj);
+  const iter = chainIterator(obj);
   for (obj of iter) {
-    let prop = getProperty(obj, name, obj);
+    const prop = getProperty(obj, name, obj);
     if (prop) {
       return prop.value;
     }
@@ -455,15 +459,25 @@ function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
 }
 
 var JSObjectSupport = {
-  chainIterator: function*(obj) {
+  chainIterator: function* (obj) {
     while (obj) {
       yield obj;
-      obj = Object.getPrototypeOf(obj);
+      try {
+        obj = Object.getPrototypeOf(obj);
+      } catch (error) {
+        // The above can throw e.g. for some proxy objects.
+        return;
+      }
     }
   },
 
   getProperties: function(obj) {
-    return Object.getOwnPropertyNames(obj);
+    try {
+      return Object.getOwnPropertyNames(obj);
+    } catch (error) {
+      // The above can throw e.g. for some proxy objects.
+      return null;
+    }
   },
 
   getProperty: function() {
@@ -473,15 +487,25 @@ var JSObjectSupport = {
 };
 
 var DebuggerObjectSupport = {
-  chainIterator: function*(obj) {
+  chainIterator: function* (obj) {
     while (obj) {
       yield obj;
-      obj = obj.proto;
+      try {
+        obj = obj.proto;
+      } catch (error) {
+        // The above can throw e.g. for some proxy objects.
+        return;
+      }
     }
   },
 
   getProperties: function(obj) {
-    return obj.getOwnPropertyNames();
+    try {
+      return obj.getOwnPropertyNames();
+    } catch (error) {
+      // The above can throw e.g. for some proxy objects.
+      return null;
+    }
   },
 
   getProperty: function(obj, name, rootObj) {
@@ -491,7 +515,7 @@ var DebuggerObjectSupport = {
 };
 
 var DebuggerEnvironmentSupport = {
-  chainIterator: function*(obj) {
+  chainIterator: function* (obj) {
     while (obj) {
       yield obj;
       obj = obj.parent;
@@ -499,7 +523,7 @@ var DebuggerEnvironmentSupport = {
   },
 
   getProperties: function(obj) {
-    let names = obj.names();
+    const names = obj.names();
 
     // Include 'this' in results (in sorted order)
     for (let i = 0; i < names.length; i++) {

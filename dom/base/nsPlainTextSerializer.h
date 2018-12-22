@@ -14,12 +14,12 @@
 #define nsPlainTextSerializer_h__
 
 #include "mozilla/Attributes.h"
-#include "nsAutoPtr.h"
+#include "mozilla/intl/LineBreaker.h"
 #include "nsCOMPtr.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsIContentSerializer.h"
 #include "nsIDocumentEncoder.h"
-#include "nsILineBreaker.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -29,6 +29,7 @@ class nsIContent;
 
 namespace mozilla {
 namespace dom {
+class DocumentType;
 class Element;
 } // namespace dom
 } // namespace mozilla
@@ -38,29 +39,40 @@ class nsPlainTextSerializer final : public nsIContentSerializer
 public:
   nsPlainTextSerializer();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(nsPlainTextSerializer)
 
   // nsIContentSerializer
-  NS_IMETHOD Init(uint32_t flags, uint32_t aWrapColumn,
-                  const char* aCharSet, bool aIsCopying,
-                  bool aIsWholeDocument) override;
+  NS_IMETHOD Init(uint32_t flags,
+                  uint32_t aWrapColumn,
+                  const mozilla::Encoding* aEncoding,
+                  bool aIsCopying,
+                  bool aIsWholeDocument,
+                  bool* aNeedsPreformatScanning) override;
 
   NS_IMETHOD AppendText(nsIContent* aText, int32_t aStartOffset,
                         int32_t aEndOffset, nsAString& aStr) override;
   NS_IMETHOD AppendCDATASection(nsIContent* aCDATASection,
                                 int32_t aStartOffset, int32_t aEndOffset,
                                 nsAString& aStr) override;
-  NS_IMETHOD AppendProcessingInstruction(nsIContent* aPI,
+  NS_IMETHOD AppendProcessingInstruction(mozilla::dom::ProcessingInstruction* aPI,
                                          int32_t aStartOffset,
                                          int32_t aEndOffset,
-                                         nsAString& aStr) override  { return NS_OK; }
-  NS_IMETHOD AppendComment(nsIContent* aComment, int32_t aStartOffset,
-                           int32_t aEndOffset, nsAString& aStr) override  { return NS_OK; }
-  NS_IMETHOD AppendDoctype(nsIContent *aDoctype,
+                                         nsAString& aStr) override
+  {
+    return NS_OK;
+  }
+  NS_IMETHOD AppendComment(mozilla::dom::Comment* aComment,
+                           int32_t aStartOffset,
+                           int32_t aEndOffset, nsAString& aStr) override
+  {
+    return NS_OK;
+  }
+  NS_IMETHOD AppendDoctype(mozilla::dom::DocumentType* aDoctype,
                            nsAString& aStr) override  { return NS_OK; }
   NS_IMETHOD AppendElementStart(mozilla::dom::Element* aElement,
                                 mozilla::dom::Element* aOriginalElement,
-                                nsAString& aStr) override; 
+                                nsAString& aStr) override;
   NS_IMETHOD AppendElementEnd(mozilla::dom::Element* aElement,
                               nsAString& aStr) override;
   NS_IMETHOD Flush(nsAString& aStr) override;
@@ -68,10 +80,13 @@ public:
   NS_IMETHOD AppendDocumentStart(nsIDocument *aDocument,
                                  nsAString& aStr) override;
 
+  NS_IMETHOD ScanElementForPreformat(mozilla::dom::Element* aElement) override;
+  NS_IMETHOD ForgetElementForPreformat(mozilla::dom::Element* aElement) override;
+
 private:
   ~nsPlainTextSerializer();
 
-  nsresult GetAttributeValue(nsIAtom* aName, nsString& aValueRet);
+  nsresult GetAttributeValue(nsAtom* aName, nsString& aValueRet);
   void AddToLine(const char16_t* aStringToAdd, int32_t aLength);
   void EndLine(bool softlinebreak, bool aBreakBySpace = false);
   void EnsureVerticalSpace(int32_t noOfRows);
@@ -88,10 +103,10 @@ private:
    * Returns the local name of the element as an atom if the element is an
    * HTML element and the atom is a static atom. Otherwise, nullptr is returned.
    */
-  static nsIAtom* GetIdForContent(nsIContent* aContent);
-  nsresult DoOpenContainer(nsIAtom* aTag);
-  nsresult DoCloseContainer(nsIAtom* aTag);
-  nsresult DoAddLeaf(nsIAtom* aTag);
+  static nsAtom* GetIdForContent(nsIContent* aContent);
+  nsresult DoOpenContainer(nsAtom* aTag);
+  nsresult DoCloseContainer(nsAtom* aTag);
+  nsresult DoAddLeaf(nsAtom* aTag);
   void DoAddText(bool aIsWhitespace, const nsAString& aText);
 
   // Inlined functions
@@ -111,14 +126,19 @@ private:
     return mHeadLevel == 0;
   }
 
+  inline bool IsQuotedLine(const nsAString& aLine)
+  {
+    return !aLine.IsEmpty() && aLine.First() == char16_t('>');
+  }
+
   // Stack handling functions
   bool GetLastBool(const nsTArray<bool>& aStack);
   void SetLastBool(nsTArray<bool>& aStack, bool aValue);
   void PushBool(nsTArray<bool>& aStack, bool aValue);
   bool PopBool(nsTArray<bool>& aStack);
 
-  bool ShouldReplaceContainerWithPlaceholder(nsIAtom* aTag);
-  bool IsIgnorableRubyAnnotation(nsIAtom* aTag);
+  bool ShouldReplaceContainerWithPlaceholder(nsAtom* aTag);
+  bool IsIgnorableRubyAnnotation(nsAtom* aTag);
 
   bool IsElementPreformatted(mozilla::dom::Element* aElement);
   bool IsElementBlock(mozilla::dom::Element* aElement);
@@ -148,8 +168,8 @@ private:
   // are wider than latin chars of more if the chars are more narrow.
   uint32_t         mWrapColumn;
 
-  // The width of the line as it will appear on the screen (approx.) 
-  uint32_t         mCurrentLineWidth; 
+  // The width of the line as it will appear on the screen (approx.)
+  uint32_t         mCurrentLineWidth;
 
   // Treat quoted text as though it's preformatted -- don't wrap it.
   // Having it on a pref is a temporary measure, See bug 69638.
@@ -191,7 +211,7 @@ private:
 
   // For handling table rows
   AutoTArray<bool, 8> mHasWrittenCellsForRow;
-  
+
   // Values gotten in OpenContainer that is (also) needed in CloseContainer
   AutoTArray<bool, 8> mIsInCiteBlockquote;
 
@@ -201,7 +221,7 @@ private:
   // The tag stack: the stack of tags we're operating on, so we can nest.
   // The stack only ever points to static atoms, so they don't need to be
   // refcounted.
-  nsIAtom**        mTagStack;
+  nsAtom**        mTagStack;
   uint32_t         mTagStackIndex;
 
   // The stack indicating whether the elements we've been operating on are
@@ -219,7 +239,7 @@ private:
   uint32_t         mULCount;
 
   nsString                     mLineBreak;
-  nsCOMPtr<nsILineBreaker>     mLineBreaker;
+  RefPtr<mozilla::intl::LineBreaker> mLineBreaker;
 
   // Conveniance constant. It would be nice to have it as a const static
   // variable, but that causes issues with OpenBSD and module unloading.

@@ -8,36 +8,28 @@
 
 #include "nsContentUtils.h"
 #include "BackstagePass.h"
-#include "nsDOMClassInfo.h"
 #include "nsIPrincipal.h"
 #include "mozilla/dom/BindingUtils.h"
 
-NS_INTERFACE_MAP_BEGIN(BackstagePass)
-  NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
-  NS_INTERFACE_MAP_ENTRY(nsIXPCScriptable)
-  NS_INTERFACE_MAP_ENTRY(nsIClassInfo)
-  NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIXPCScriptable)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_ADDREF(BackstagePass)
-NS_IMPL_RELEASE(BackstagePass)
+NS_IMPL_ISUPPORTS(BackstagePass,
+                  nsIXPCScriptable,
+                  nsIGlobalObject,
+                  nsIClassInfo,
+                  nsIScriptObjectPrincipal,
+                  nsISupportsWeakReference)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
-#define XPC_MAP_CLASSNAME           BackstagePass
-#define XPC_MAP_QUOTED_CLASSNAME   "BackstagePass"
-#define                             XPC_MAP_WANT_RESOLVE
-#define                             XPC_MAP_WANT_ENUMERATE
-#define                             XPC_MAP_WANT_FINALIZE
-#define                             XPC_MAP_WANT_PRECREATE
-
-#define XPC_MAP_FLAGS       nsIXPCScriptable::USE_JSSTUB_FOR_ADDPROPERTY   |  \
-                            nsIXPCScriptable::USE_JSSTUB_FOR_DELPROPERTY   |  \
-                            nsIXPCScriptable::USE_JSSTUB_FOR_SETPROPERTY   |  \
-                            nsIXPCScriptable::DONT_ENUM_QUERY_INTERFACE    |  \
-                            nsIXPCScriptable::IS_GLOBAL_OBJECT             |  \
-                            nsIXPCScriptable::DONT_REFLECT_INTERFACE_NAMES
+#define XPC_MAP_CLASSNAME         BackstagePass
+#define XPC_MAP_QUOTED_CLASSNAME "BackstagePass"
+#define XPC_MAP_FLAGS (XPC_SCRIPTABLE_WANT_RESOLVE | \
+                       XPC_SCRIPTABLE_WANT_ENUMERATE | \
+                       XPC_SCRIPTABLE_WANT_FINALIZE | \
+                       XPC_SCRIPTABLE_WANT_PRECREATE | \
+                       XPC_SCRIPTABLE_USE_JSSTUB_FOR_ADDPROPERTY |  \
+                       XPC_SCRIPTABLE_USE_JSSTUB_FOR_DELPROPERTY |  \
+                       XPC_SCRIPTABLE_DONT_ENUM_QUERY_INTERFACE |  \
+                       XPC_SCRIPTABLE_IS_GLOBAL_OBJECT |  \
+                       XPC_SCRIPTABLE_DONT_REFLECT_INTERFACE_NAMES)
 #include "xpc_map_end.h" /* This will #undef the above */
 
 
@@ -82,33 +74,13 @@ BackstagePass::Enumerate(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
 NS_IMETHODIMP
 BackstagePass::GetInterfaces(uint32_t* aCount, nsIID * **aArray)
 {
-    const uint32_t count = 2;
-    *aCount = count;
-    nsIID** array;
-    *aArray = array = static_cast<nsIID**>(moz_xmalloc(count * sizeof(nsIID*)));
-    if (!array)
-        return NS_ERROR_OUT_OF_MEMORY;
+    *aCount = 2;
+    nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
+    *aArray = array;
 
-    uint32_t index = 0;
-    nsIID* clone;
-#define PUSH_IID(id)                                                          \
-    clone = static_cast<nsIID*>(nsMemory::Clone(&NS_GET_IID( id ),           \
-                                                 sizeof(nsIID)));             \
-    if (!clone)                                                               \
-        goto oom;                                                             \
-    array[index++] = clone;
-
-    PUSH_IID(nsIXPCScriptable)
-    PUSH_IID(nsIScriptObjectPrincipal)
-#undef PUSH_IID
-
+    array[0] = NS_GET_IID(nsIXPCScriptable).Clone();
+    array[1] = NS_GET_IID(nsIScriptObjectPrincipal).Clone();
     return NS_OK;
-oom:
-    while (index)
-        free(array[--index]);
-    free(array);
-    *aArray = nullptr;
-    return NS_ERROR_OUT_OF_MEMORY;
 }
 
 NS_IMETHODIMP
@@ -120,18 +92,17 @@ BackstagePass::GetScriptableHelper(nsIXPCScriptable** retval)
 }
 
 NS_IMETHODIMP
-BackstagePass::GetContractID(char * *aContractID)
+BackstagePass::GetContractID(nsACString& aContractID)
 {
-    *aContractID = nullptr;
+    aContractID.SetIsVoid(true);
     return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
-BackstagePass::GetClassDescription(char * *aClassDescription)
+BackstagePass::GetClassDescription(nsACString& aClassDescription)
 {
-    static const char classDescription[] = "BackstagePass";
-    *aClassDescription = (char*)nsMemory::Clone(classDescription, sizeof(classDescription));
-    return *aClassDescription ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    aClassDescription.AssignLiteral("BackstagePass");
+    return NS_OK;
 }
 
 NS_IMETHODIMP

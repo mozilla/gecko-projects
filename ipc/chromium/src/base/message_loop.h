@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -14,8 +16,6 @@
 #include "base/lock.h"
 #include "base/message_pump.h"
 #include "base/observer_list.h"
-#include "base/task.h"
-#include "base/timer.h"
 
 #if defined(OS_WIN)
 // We need this to declare base::MessagePumpWin::Dispatcher, which we should
@@ -26,8 +26,12 @@
 #endif
 
 #include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
+#include "nsIRunnable.h"
+#include "nsThreadUtils.h"
 
-class nsIThread;
+class nsIEventTarget;
+class nsISerialEventTarget;
 
 namespace mozilla {
 namespace ipc {
@@ -108,18 +112,22 @@ public:
   // The MessageLoop takes ownership of the Task, and deletes it after it has
   // been Run().
   //
+  // New tasks should not be posted after the invocation of a MessageLoop's
+  // Run method. Otherwise, they may fail to actually run. Callers should check
+  // if the MessageLoop is processing tasks if necessary by calling
+  // IsAcceptingTasks().
+  //
   // NOTE: These methods may be called on any thread.  The Task will be invoked
   // on the thread that executes MessageLoop::Run().
 
-  B2G_ACL_EXPORT void PostTask(
-      const tracked_objects::Location& from_here, Task* task);
+  bool IsAcceptingTasks() const { return !shutting_down_; }
 
-  void PostDelayedTask(
-      const tracked_objects::Location& from_here, Task* task, int delay_ms);
+  void PostTask(already_AddRefed<nsIRunnable> task);
+
+  void PostDelayedTask(already_AddRefed<nsIRunnable> task, int delay_ms);
 
   // PostIdleTask is not thread safe and should be called on this thread
-  void PostIdleTask(
-      const tracked_objects::Location& from_here, Task* task);
+  void PostIdleTask(already_AddRefed<nsIRunnable> task);
 
   // Run the message loop.
   void Run();
@@ -137,12 +145,17 @@ public:
 
   // Invokes Quit on the current MessageLoop when run.  Useful to schedule an
   // arbitrary MessageLoop to Quit.
-  class QuitTask : public Task {
+  class QuitTask : public mozilla::Runnable {
    public:
-    virtual void Run() override {
+    QuitTask() : mozilla::Runnable("QuitTask") {}
+    NS_IMETHOD Run() override {
       MessageLoop::current()->Quit();
+      return NS_OK;
     }
   };
+
+  // Return an XPCOM-compatible event target for this thread.
+  nsISerialEventTarget* SerialEventTarget();
 
   // A MessageLoop has a particular type, which indicates the set of
   // asynchronous events it may process in addition to tasks and timers.
@@ -181,12 +194,13 @@ public:
     TYPE_MOZILLA_CHILD,
     TYPE_MOZILLA_PARENT,
     TYPE_MOZILLA_NONMAINTHREAD,
-    TYPE_MOZILLA_NONMAINUITHREAD
+    TYPE_MOZILLA_NONMAINUITHREAD,
+    TYPE_MOZILLA_ANDROID_UI
   };
 
   // Normally, it is not necessary to instantiate a MessageLoop.  Instead, it
   // is typical to make use of the current thread's MessageLoop instance.
-  explicit MessageLoop(Type type = TYPE_DEFAULT, nsIThread* aThread = nullptr);
+  explicit MessageLoop(Type type = TYPE_DEFAULT, nsIEventTarget* aEventTarget = nullptr);
   ~MessageLoop();
 
   // Returns the type passed to the constructor.
@@ -204,6 +218,8 @@ public:
 
   // Returns the MessageLoop object for the current thread, or null if none.
   static MessageLoop* current();
+
+  static void set_current(MessageLoop* loop);
 
   // Enables or disables the recursive task processing. This happens in the case
   // of recursive message loops. Some unwanted message loop may occurs when
@@ -282,13 +298,36 @@ public:
 
   // This structure is copied around by value.
   struct PendingTask {
-    Task* task;                        // The task to run.
+    nsCOMPtr<nsIRunnable> task;        // The task to run.
     base::TimeTicks delayed_run_time;  // The time when the task should be run.
     int sequence_num;                  // Secondary sort key for run time.
     bool nestable;                     // OK to dispatch from a nested loop.
 
-    PendingTask(Task* aTask, bool aNestable)
+    PendingTask(already_AddRefed<nsIRunnable> aTask, bool aNestable)
         : task(aTask), sequence_num(0), nestable(aNestable) {
+    }
+
+    PendingTask(PendingTask&& aOther)
+        : task(aOther.task.forget()),
+          delayed_run_time(aOther.delayed_run_time),
+          sequence_num(aOther.sequence_num),
+          nestable(aOther.nestable) {
+    }
+
+    // std::priority_queue<T>::top is dumb, so we have to have this.
+    PendingTask(const PendingTask& aOther)
+        : task(aOther.task),
+          delayed_run_time(aOther.delayed_run_time),
+          sequence_num(aOther.sequence_num),
+          nestable(aOther.nestable) {
+    }
+    PendingTask& operator=(const PendingTask& aOther)
+    {
+      task = aOther.task;
+      delayed_run_time = aOther.delayed_run_time;
+      sequence_num = aOther.sequence_num;
+      nestable = aOther.nestable;
+      return *this;
     }
 
     // Used to support sorting.
@@ -332,14 +371,14 @@ public:
   // appended to the list work_queue_.  Such re-entrancy generally happens when
   // an unrequested message pump (typical of a native dialog) is executing in
   // the context of a task.
-  bool QueueOrRunTask(Task* new_task);
+  bool QueueOrRunTask(already_AddRefed<nsIRunnable> new_task);
 
   // Runs the specified task and deletes it.
-  void RunTask(Task* task);
+  void RunTask(already_AddRefed<nsIRunnable> task);
 
   // Calls RunTask or queues the pending_task on the deferred task list if it
   // cannot be run right now.  Returns true if the task was run.
-  bool DeferOrRunPendingTask(const PendingTask& pending_task);
+  bool DeferOrRunPendingTask(PendingTask&& pending_task);
 
   // Adds the pending task to delayed_work_queue_.
   void AddToDelayedWorkQueue(const PendingTask& pending_task);
@@ -355,8 +394,7 @@ public:
   bool DeletePendingTasks();
 
   // Post a task to our incomming queue.
-  void PostTask_Helper(const tracked_objects::Location& from_here, Task* task,
-                       int delay_ms);
+  void PostTask_Helper(already_AddRefed<nsIRunnable> task, int delay_ms);
 
   // base::MessagePump::Delegate methods:
   virtual bool DoWork() override;
@@ -400,6 +438,7 @@ public:
 
   RunState* state_;
   int run_depth_base_;
+  bool shutting_down_;
 
 #if defined(OS_WIN)
   // Should be set to true before calling Windows APIs like TrackPopupMenu, etc
@@ -413,6 +452,9 @@ public:
 
   // The next sequence number to use for delayed tasks.
   int next_sequence_num_;
+
+  class EventTarget;
+  RefPtr<EventTarget> mEventTarget;
 
   DISALLOW_COPY_AND_ASSIGN(MessageLoop);
 };

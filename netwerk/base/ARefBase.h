@@ -19,11 +19,10 @@ namespace mozilla { namespace net {
 class ARefBase
 {
 public:
-  ARefBase() {}
-  virtual ~ARefBase() {}
+  ARefBase() = default;
+  virtual ~ARefBase() = default;
 
-  NS_IMETHOD_ (MozExternalRefCountType) AddRef() = 0;
-  NS_IMETHOD_ (MozExternalRefCountType) Release() = 0;
+  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
 };
 
 } // namespace net

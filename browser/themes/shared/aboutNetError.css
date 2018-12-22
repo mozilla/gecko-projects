@@ -2,76 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url("chrome://global/skin/in-content/common.css");
+@import url("chrome://browser/skin/error-pages.css");
 
-body {
-  display: flex;
-  box-sizing: border-box;
-  min-height: 100vh;
-  padding: 0 48px;
-  align-items: center;
-  justify-content: center;
+:root {
+  --exception-button-container-background: #F5F5F7;
 }
 
-ul, ol {
-  margin: 0;
-  padding: 0;
-  -moz-margin-start: 1em;
+body.captiveportal .title {
+  background-image: url("wifi.svg");
 }
 
-ul > li, ol > li {
-  margin-bottom: .5em;
-}
-
-ul {
-  list-style: disc;
-}
-
-#errorPageContainer {
-  position: relative;
-  min-width: 320px;
-  max-width: 512px;
-}
-
-#errorTitle {
-  background: url("chrome://global/skin/icons/info.svg") left 0 no-repeat;
-  background-size: 3em;
-  -moz-margin-start: -5em;
-  -moz-padding-start: 5em;
-}
-
-#errorTitleText {
-  border-bottom: 1px solid #C1C1C1;
-  padding-bottom: 0.4em;
-}
-
-#errorTitleText:-moz-dir(rtl) {
-  background-position: right 0;
-}
-
-#errorTitle[sslv3=true],
-#errorTitle[weakCrypto=true] {
+body.certerror .title {
   background-image: url("cert-error.svg");
 }
 
-#errorTryAgain {
-  margin-top: 1.2em;
-  min-width: 150px
+body.blocked .title {
+  background-image: url("chrome://global/skin/icons/blocked.svg");
 }
 
 #errorContainer {
   display: none;
-}
-
-@media (max-width: 675px) {
-  #errorTitle,
-  #errorTitle[sslv3=true],
-  #errorTitle[weakCrypto=true] {
-    padding-top: 0;
-    background-image: none;
-    -moz-padding-start: 0;
-    -moz-margin-start: 0;
-  }
 }
 
 /* Pressing the retry button will cause the cursor to flicker from a pointer to
@@ -81,79 +31,68 @@ button:disabled {
   cursor: pointer;
 }
 
+#prefChangeContainer {
+  display: none;
+}
+
 #learnMoreContainer {
   display: none;
 }
 
-#buttonContainer {
+#certErrorAndCaptivePortalButtonContainer {
   display: none;
-  flex-flow: row wrap;
 }
 
-#buttonSpacer {
-  flex: 1;
+body:not(.neterror) #certErrorAndCaptivePortalButtonContainer {
+  display: flex;
 }
 
-#returnButton {
-  background-color: var(--in-content-primary-button-background);
-  border: none;
-  color: var(--in-content-selected-text);
-  min-width: 250px;
-  margin-inline-start: 0;
+body:not(.neterror) #netErrorButtonContainer {
+  display: none;
 }
 
-#returnButton:hover {
-  background-color: var(--in-content-primary-button-background-hover) !important;
-}
-
-#returnButton:hover:active {
-  background-color: var(--in-content-primary-button-background-active) !important;
+#errorTryAgain {
+  margin-top: 1.2em;
 }
 
 #advancedButton {
   display: none;
-  min-width: 150px;
 }
 
-#certificateErrorReporting,
-#reportSentMessage {
+body.captiveportal #returnButton {
   display: none;
 }
 
-div#weakCryptoAdvanced {
+body:not(.captiveportal) #openPortalLoginPageButton {
   display: none;
-  float: right;
-  /* Align with the "Try Again" button */
-  margin-top: 24px;
-  -moz-margin-end: 24px;
 }
 
-div#weakCryptoAdvanced a {
-  text-decoration: none;
+#openPortalLoginPageButton {
+  margin-inline-start: 0;
 }
 
-div#weakCryptoAdvanced a:hover {
-  text-decoration: underline;
+body:not(.neterror) #advancedButton {
+  display: block;
 }
 
-span.downArrow {
-  display: inline-block;
-  vertical-align: middle;
-  font-size: 0.6em;
-  -moz-margin-start: 0.5em;
-  transform: scaleY(0.7);
+#certificateErrorReporting {
+  display: none;
 }
 
-div#weakCryptoAdvancedPanel {
+#advancedPanelContainer {
+  position: absolute;
+  width: 100%;
+  left: 0;
+}
+
+.advanced-panel {
   /* Hidden until the link is clicked */
   display: none;
   background-color: white;
   border: 1px lightgray solid;
-  /* Don't use top padding because the default p style has top padding, and it
-   * makes the overall div look uneven */
-  padding: 0 12px 12px 12px;
-  box-shadow: 0 0 4px #ddd;
-  font-size: 0.9em;
+  margin: 48px auto;
+  min-width: var(--in-content-container-min-width);
+  max-width: var(--in-content-container-max-width);
 }
 
 #overrideWeakCryptoPanel {
@@ -174,8 +113,109 @@ span#hostname {
   cursor: pointer;
 }
 
-#errorCode {
+#errorCode:not([href]) {
   color: var(--in-content-page-color);
   cursor: text;
   text-decoration: none;
+}
+
+#errorCode[href] {
+  white-space: nowrap;
+}
+
+#badCertTechnicalInfo {
+  margin: 3em;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+#certificateErrorReporting {
+  display: none;
+}
+
+#certificateErrorDebugInformation {
+  display: none;
+  background-color: var(--in-content-box-background-hover) !important;
+  border-top: 1px solid var(--in-content-border-color);
+  position: absolute;
+  width: 100%;
+  padding: 1em 17.5%;
+  box-sizing: border-box;
+}
+
+#certificateErrorText {
+  font-family: monospace;
+  white-space: pre-wrap;
+  padding: 1em 0;
+}
+
+#cert_domain_link:not([href]) {
+  color: var(--in-content-page-color);
+  text-decoration: none;
+}
+
+.exceptionDialogButtonContainer {
+  background-color: var(--exception-button-container-background);
+  display: flex;
+  justify-content: end;
+  padding: 10px;
+}
+
+.exceptionDialogButtonContainer[hidden] {
+  display: none;
+}
+
+.illustrated #errorPageContainer {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  background-position: left center;
+}
+
+.illustrated[dir="rtl"] #errorPageContainer {
+  background-position: right center;
+}
+
+.illustrated .title {
+  background: none;
+  padding-inline-start: 0;
+  margin-inline-start: 0;
+}
+
+.illustrated #text-container {
+  margin: auto;
+  padding-inline-start: 38%;
+}
+
+.illustrated #errorPageContainer {
+  background-repeat: no-repeat;
+  background-size: 38%;
+}
+
+.connectionFailure #errorPageContainer,
+.netInterrupt #errorPageContainer,
+.netTimeout #errorPageContainer,
+.netReset #errorPageContainer,
+.netOffline #errorPageContainer {
+  background-image: url("chrome://browser/content/illustrations/error-connection-failure.svg");
+}
+
+.dnsNotFound #errorPageContainer {
+  background-image: url("chrome://browser/content/illustrations/error-server-not-found.svg");
+}
+
+.malformedURI #errorPageContainer {
+  background-image: url("chrome://browser/content/illustrations/error-malformed-url.svg");
+}
+
+.malformedURI #errorTryAgain {
+  display: none;
+}
+
+#wrongSystemTimePanel {
+  display: none;
+}
+
+#wrongSystemTimeWithoutReferencePanel {
+  display: none;
 }

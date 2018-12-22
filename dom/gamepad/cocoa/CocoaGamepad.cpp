@@ -7,8 +7,10 @@
 // mostly derived from the Allegro source code at:
 // http://alleg.svn.sourceforge.net/viewvc/alleg/allegro/branches/4.9/src/macosx/hidjoy.m?revision=13760&view=markup
 
-#include "mozilla/dom/GamepadFunctions.h"
+#include "mozilla/dom/GamepadPlatformService.h"
 #include "mozilla/ArrayUtils.h"
+#include "nsITimer.h"
+#include "nsThreadUtils.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/hid/IOHIDBase.h>
 #include <IOKit/hid/IOHIDKeys.h>
@@ -20,8 +22,11 @@
 namespace {
 
 using namespace mozilla;
-using namespace mozilla::dom::GamepadFunctions;
+using namespace mozilla::dom;
 using std::vector;
+class DarwinGamepadService;
+
+DarwinGamepadService* gService = nullptr;
 
 struct Button {
   int id;
@@ -65,6 +70,9 @@ const unsigned kConsumerPage = 0x0C;
 const unsigned kHomeUsage = 0x223;
 const unsigned kBackUsage = 0x224;
 
+// We poll it periodically,
+// 50ms is arbitrarily chosen.
+const uint32_t kDarwinGamepadPollInterval = 50;
 
 class Gamepad {
  private:
@@ -195,10 +203,17 @@ void Gamepad::init(IOHIDDeviceRef device)
   }
 }
 
+// This service is created and destroyed in Background thread while
+// operates in a seperate thread(We call it Monitor thread here).
 class DarwinGamepadService {
  private:
   IOHIDManagerRef mManager;
   vector<Gamepad> mGamepads;
+
+  nsCOMPtr<nsIThread> mMonitorThread;
+  nsCOMPtr<nsIThread> mBackgroundThread;
+  nsCOMPtr<nsITimer> mPollingTimer;
+  bool mIsRunning;
 
   static void DeviceAddedCallback(void* data, IOReturn result,
                                   void* sender, IOHIDDeviceRef device);
@@ -206,21 +221,79 @@ class DarwinGamepadService {
                                     void* sender, IOHIDDeviceRef device);
   static void InputValueChangedCallback(void* data, IOReturn result,
                                         void* sender, IOHIDValueRef newValue);
+  static void EventLoopOnceCallback(nsITimer* aTimer, void* aClosure);
 
   void DeviceAdded(IOHIDDeviceRef device);
   void DeviceRemoved(IOHIDDeviceRef device);
   void InputValueChanged(IOHIDValueRef value);
+  void StartupInternal();
+  void RunEventLoopOnce();
 
  public:
   DarwinGamepadService();
   ~DarwinGamepadService();
   void Startup();
   void Shutdown();
+  friend class DarwinGamepadServiceStartupRunnable;
+  friend class DarwinGamepadServiceShutdownRunnable;
+};
+
+class DarwinGamepadServiceStartupRunnable final : public Runnable
+{
+ private:
+  ~DarwinGamepadServiceStartupRunnable() {}
+  // This Runnable schedules startup of DarwinGamepadService
+  // in a new thread, pointer to DarwinGamepadService is only
+  // used by this Runnable within its thread.
+  DarwinGamepadService MOZ_NON_OWNING_REF *mService;
+ public:
+  explicit DarwinGamepadServiceStartupRunnable(DarwinGamepadService *service)
+    : Runnable("DarwinGamepadServiceStartupRunnable"), mService(service) {}
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(mService);
+    mService->StartupInternal();
+    return NS_OK;
+  }
+};
+
+class DarwinGamepadServiceShutdownRunnable final : public Runnable
+{
+private:
+  ~DarwinGamepadServiceShutdownRunnable() {}
+public:
+  // This Runnable schedules shutdown of DarwinGamepadService
+  // in background thread.
+  explicit DarwinGamepadServiceShutdownRunnable()
+    : Runnable("DarwinGamepadServiceStartupRunnable") {}
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(gService);
+    MOZ_ASSERT(NS_GetCurrentThread() == gService->mBackgroundThread);
+
+    IOHIDManagerRef manager = (IOHIDManagerRef)gService->mManager;
+
+    if (manager) {
+      IOHIDManagerClose(manager, 0);
+      CFRelease(manager);
+      gService->mManager = nullptr;
+    }
+    gService->mMonitorThread->Shutdown();
+    delete gService;
+    gService = nullptr;
+    return NS_OK;
+  }
 };
 
 void
 DarwinGamepadService::DeviceAdded(IOHIDDeviceRef device)
 {
+  RefPtr<GamepadPlatformService> service =
+    GamepadPlatformService::GetParentService();
+  if (!service) {
+    return;
+  }
+
   size_t slot = size_t(-1);
   for (size_t i = 0; i < mGamepads.size(); i++) {
     if (mGamepads[i] == device)
@@ -250,18 +323,26 @@ DarwinGamepadService::DeviceAdded(IOHIDDeviceRef device)
                      sizeof(product_name), kCFStringEncodingASCII);
   char buffer[256];
   sprintf(buffer, "%x-%x-%s", vendorId, productId, product_name);
-  mGamepads[slot].mSuperIndex = AddGamepad(buffer,
-                                           mozilla::dom::GamepadMappingType::_empty,
-                                           (int)mGamepads[slot].numButtons(),
-                                           (int)mGamepads[slot].numAxes());
+  uint32_t index = service->AddGamepad(buffer,
+                                       mozilla::dom::GamepadMappingType::_empty,
+                                       mozilla::dom::GamepadHand::_empty,
+                                       (int)mGamepads[slot].numButtons(),
+                                       (int)mGamepads[slot].numAxes(),
+                                       0); // TODO: Bug 680289, implement gamepad haptics for cocoa
+  mGamepads[slot].mSuperIndex = index;
 }
 
 void
 DarwinGamepadService::DeviceRemoved(IOHIDDeviceRef device)
 {
+  RefPtr<GamepadPlatformService> service =
+    GamepadPlatformService::GetParentService();
+  if (!service) {
+    return;
+  }
   for (size_t i = 0; i < mGamepads.size(); i++) {
     if (mGamepads[i] == device) {
-      RemoveGamepad(mGamepads[i].mSuperIndex);
+      service->RemoveGamepad(mGamepads[i].mSuperIndex);
       mGamepads[i].clear();
       return;
     }
@@ -310,6 +391,12 @@ UnpackDpad(int dpad_value, int min, int max, dpad_buttons& buttons)
 void
 DarwinGamepadService::InputValueChanged(IOHIDValueRef value)
 {
+  RefPtr<GamepadPlatformService> service =
+    GamepadPlatformService::GetParentService();
+  if (!service) {
+    return;
+  }
+
   uint32_t value_length = IOHIDValueGetLength(value);
   if (value_length > 4) {
     // Workaround for bizarre issue with PS3 controllers that try to return
@@ -318,6 +405,7 @@ DarwinGamepadService::InputValueChanged(IOHIDValueRef value)
   }
   IOHIDElementRef element = IOHIDValueGetElement(value);
   IOHIDDeviceRef device = IOHIDElementGetDevice(element);
+
   for (unsigned i = 0; i < mGamepads.size(); i++) {
     Gamepad &gamepad = mGamepads[i];
     if (gamepad == device) {
@@ -331,7 +419,9 @@ DarwinGamepadService::InputValueChanged(IOHIDValueRef value)
         const int numButtons = gamepad.numButtons();
         for (unsigned b = 0; b < ArrayLength(newState); b++) {
           if (newState[b] != oldState[b]) {
-            NewButtonEvent(gamepad.mSuperIndex, numButtons - 4 + b, newState[b]);
+            service->NewButtonEvent(gamepad.mSuperIndex,
+                                    numButtons - 4 + b,
+                                    newState[b]);
           }
         }
         gamepad.setDpadState(newState);
@@ -339,7 +429,7 @@ DarwinGamepadService::InputValueChanged(IOHIDValueRef value)
         double d = IOHIDValueGetIntegerValue(value);
         double v = 2.0f * (d - axis->min) /
           (double)(axis->max - axis->min) - 1.0f;
-        NewAxisMoveEvent(gamepad.mSuperIndex, axis->id, v);
+        service->NewAxisMoveEvent(gamepad.mSuperIndex, axis->id, v);
       } else if (const Button* button = gamepad.lookupButton(element)) {
         int iv = IOHIDValueGetIntegerValue(value);
         bool pressed = iv != 0;
@@ -350,7 +440,7 @@ DarwinGamepadService::InputValueChanged(IOHIDValueRef value)
         } else {
           v = pressed ? 1.0 : 0.0;
         }
-        NewButtonEvent(gamepad.mSuperIndex, button->id, pressed, v);
+        service->NewButtonEvent(gamepad.mSuperIndex, button->id, pressed, v);
       }
       return;
     }
@@ -381,6 +471,13 @@ DarwinGamepadService::InputValueChangedCallback(void* data,
 {
   DarwinGamepadService* service = (DarwinGamepadService*)data;
   service->InputValueChanged(newValue);
+}
+
+void
+DarwinGamepadService::EventLoopOnceCallback(nsITimer* aTimer, void* aClosure)
+{
+  DarwinGamepadService* service = static_cast<DarwinGamepadService*>(aClosure);
+  service->RunEventLoopOnce();
 }
 
 static CFMutableDictionaryRef
@@ -414,15 +511,49 @@ MatchingDictionary(UInt32 inUsagePage, UInt32 inUsage)
   return dict;
 }
 
-DarwinGamepadService::DarwinGamepadService() : mManager(nullptr) {}
+DarwinGamepadService::DarwinGamepadService()
+  : mManager(nullptr), mIsRunning(false)
+{}
 
 DarwinGamepadService::~DarwinGamepadService()
 {
   if (mManager != nullptr)
     CFRelease(mManager);
+  mMonitorThread = nullptr;
+  mBackgroundThread = nullptr;
+  if (mPollingTimer) {
+    mPollingTimer->Cancel();
+    mPollingTimer = nullptr;
+  }
 }
 
-void DarwinGamepadService::Startup()
+void
+DarwinGamepadService::RunEventLoopOnce()
+{
+  MOZ_ASSERT(NS_GetCurrentThread() == mMonitorThread);
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, true);
+
+  // This timer must be created in monitor thread
+  if (!mPollingTimer) {
+    mPollingTimer = do_CreateInstance("@mozilla.org/timer;1");
+  }
+  mPollingTimer->Cancel();
+  if (mIsRunning) {
+    mPollingTimer->InitWithNamedFuncCallback(EventLoopOnceCallback,
+                                             this, kDarwinGamepadPollInterval,
+                                             nsITimer::TYPE_ONE_SHOT,
+                                             "EventLoopOnceCallback");
+  } else {
+    // We schedule a task shutdown and cleaning up resources to Background thread
+    // here to make sure no runloop is running to prevent potential
+    // race condition.
+    RefPtr<Runnable> shutdownTask =  new DarwinGamepadServiceShutdownRunnable();
+    mBackgroundThread->Dispatch(shutdownTask.forget(), NS_DISPATCH_NORMAL);
+  }
+}
+
+void
+DarwinGamepadService::StartupInternal()
 {
   if (mManager != nullptr)
     return;
@@ -479,16 +610,25 @@ void DarwinGamepadService::Startup()
   }
 
   mManager = manager;
+
+  mIsRunning = true;
+  RunEventLoopOnce();
+}
+
+void DarwinGamepadService::Startup()
+{
+  mBackgroundThread = NS_GetCurrentThread();
+  Unused << NS_NewNamedThread("Gamepad",
+                              getter_AddRefs(mMonitorThread),
+                              new DarwinGamepadServiceStartupRunnable(this));
 }
 
 void DarwinGamepadService::Shutdown()
 {
-  IOHIDManagerRef manager = (IOHIDManagerRef)mManager;
-  if (manager) {
-    IOHIDManagerClose(manager, 0);
-    CFRelease(manager);
-    mManager = nullptr;
-  }
+  // Flipping this flag will stop the eventloop in Monitor thread
+  // and dispatch a task destroying and cleaning up resources in
+  // Background thread
+  mIsRunning = false;
 }
 
 } // namespace
@@ -496,10 +636,9 @@ void DarwinGamepadService::Shutdown()
 namespace mozilla {
 namespace dom {
 
-DarwinGamepadService* gService = nullptr;
-
 void StartGamepadMonitoring()
 {
+  AssertIsOnBackgroundThread();
   if (gService) {
     return;
   }
@@ -510,13 +649,13 @@ void StartGamepadMonitoring()
 
 void StopGamepadMonitoring()
 {
+  AssertIsOnBackgroundThread();
   if (!gService) {
     return;
   }
 
+  // Calling Shutdown() will delete gService as well
   gService->Shutdown();
-  delete gService;
-  gService = nullptr;
 }
 
 } // namespace dom

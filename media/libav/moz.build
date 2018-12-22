@@ -1,8 +1,11 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files("**"):
+    BUG_COMPONENT = ("Core", "Web Audio")
 
 # Due to duplicate file names, we compile libavutil/x86/cpu.c in its own
 # moz.build file.
@@ -50,7 +53,7 @@ UNIFIED_SOURCES += [
 ]
 
 # Dummy functions are required for windows NoOpt/PGO builds.
-if CONFIG['_MSC_VER']:
+if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
     UNIFIED_SOURCES += [
         'avfft_dummy_funcs.c'
     ]
@@ -64,6 +67,13 @@ if CONFIG['OS_ARCH'] != 'WINNT':
     SOURCES['libavcodec/avfft.c'].flags += ['-include', 'avfft_perms.h']
 
 # We allow warnings for third-party code that can be updated from upstream.
-ALLOW_COMPILER_WARNINGS = True
+AllowCompilerWarnings()
+
+if CONFIG['MOZ_DEBUG']:
+    # Enable all assertions in debug builds.
+    DEFINES['ASSERT_LEVEL'] = 2
+elif not CONFIG['RELEASE_OR_BETA']:
+    # Enable fast assertions in opt builds of Nightly and Aurora.
+    DEFINES['ASSERT_LEVEL'] = 1
 
 include("libavcommon.mozbuild")

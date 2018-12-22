@@ -14,8 +14,8 @@
 #include "nsProxyRelease.h"
 #include "nsStandardURL.h"
 #include "LoadInfo.h"
-#include "nsIDOMNode.h"
 #include "mozilla/dom/ContentChild.h"
+#include "nsITransportProvider.h"
 
 using mozilla::dom::ContentChild;
 
@@ -37,8 +37,9 @@ BaseWebSocketChannel::BaseWebSocketChannel()
   : mWasOpened(0)
   , mClientSetPingInterval(0)
   , mClientSetPingTimeout(0)
-  , mEncrypted(0)
-  , mPingForced(0)
+  , mEncrypted(false)
+  , mPingForced(false)
+  , mIsServerSide(false)
   , mPingInterval(0)
   , mPingResponseTimeout(10000)
 {
@@ -213,15 +214,14 @@ BaseWebSocketChannel::SetPingTimeout(uint32_t aSeconds)
 }
 
 NS_IMETHODIMP
-BaseWebSocketChannel::InitLoadInfo(nsIDOMNode* aLoadingNode,
+BaseWebSocketChannel::InitLoadInfo(nsINode* aLoadingNode,
                                    nsIPrincipal* aLoadingPrincipal,
                                    nsIPrincipal* aTriggeringPrincipal,
                                    uint32_t aSecurityFlags,
                                    uint32_t aContentPolicyType)
 {
-  nsCOMPtr<nsINode> node = do_QueryInterface(aLoadingNode);
   mLoadInfo = new LoadInfo(aLoadingPrincipal, aTriggeringPrincipal,
-                           node, aSecurityFlags, aContentPolicyType);
+                           aLoadingNode, aSecurityFlags, aContentPolicyType);
   return NS_OK;
 }
 
@@ -240,6 +240,17 @@ NS_IMETHODIMP
 BaseWebSocketChannel::SetSerial(uint32_t aSerial)
 {
   mSerial = aSerial;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BaseWebSocketChannel::SetServerParameters(nsITransportProvider* aProvider,
+                                          const nsACString& aNegotiatedExtensions)
+{
+  MOZ_ASSERT(aProvider);
+  mServerTransportProvider = aProvider;
+  mNegotiatedExtensions = aNegotiatedExtensions;
+  mIsServerSide = true;
   return NS_OK;
 }
 
@@ -277,8 +288,11 @@ BaseWebSocketChannel::GetProtocolFlags(uint32_t *aProtocolFlags)
 {
   LOG(("BaseWebSocketChannel::GetProtocolFlags() %p\n", this));
 
-  *aProtocolFlags = URI_NORELATIVE | URI_NON_PERSISTABLE | ALLOWS_PROXY | 
+  *aProtocolFlags = URI_NORELATIVE | URI_NON_PERSISTABLE | ALLOWS_PROXY |
       ALLOWS_PROXY_HTTP | URI_DOES_NOT_RETURN_DATA | URI_DANGEROUS_TO_LOAD;
+  if (mEncrypted) {
+    *aProtocolFlags |= URI_IS_POTENTIALLY_TRUSTWORTHY;
+  }
   return NS_OK;
 }
 
@@ -293,13 +307,13 @@ BaseWebSocketChannel::NewURI(const nsACString & aSpec, const char *aOriginCharse
   if (NS_FAILED(rv))
     return rv;
 
-  RefPtr<nsStandardURL> url = new nsStandardURL();
-  rv = url->Init(nsIStandardURL::URLTYPE_AUTHORITY, port, aSpec,
-                aOriginCharset, aBaseURI);
-  if (NS_FAILED(rv))
-    return rv;
-  url.forget(_retval);
-  return NS_OK;
+  nsCOMPtr<nsIURI> base(aBaseURI);
+  return NS_MutateURI(new nsStandardURL::Mutator())
+    .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
+                            nsIStandardURL::URLTYPE_AUTHORITY,
+                            port, nsCString(aSpec), aOriginCharset,
+                            base, nullptr))
+    .Finalize(_retval);
 }
 
 NS_IMETHODIMP
@@ -346,6 +360,19 @@ BaseWebSocketChannel::RetargetDeliveryTo(nsIEventTarget* aTargetThread)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+BaseWebSocketChannel::GetDeliveryTarget(nsIEventTarget** aTargetThread)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIEventTarget> target = mTargetThread;
+  if (!target) {
+    target = GetCurrentThreadEventTarget();
+  }
+  target.forget(aTargetThread);
+  return NS_OK;
+}
+
 BaseWebSocketChannel::ListenerAndContextContainer::ListenerAndContextContainer(
                                                nsIWebSocketListener* aListener,
                                                nsISupports* aContext)
@@ -360,8 +387,12 @@ BaseWebSocketChannel::ListenerAndContextContainer::~ListenerAndContextContainer(
 {
   MOZ_ASSERT(mListener);
 
-  NS_ReleaseOnMainThread(mListener.forget());
-  NS_ReleaseOnMainThread(mContext.forget());
+  NS_ReleaseOnMainThreadSystemGroup(
+    "BaseWebSocketChannel::ListenerAndContextContainer::mListener",
+    mListener.forget());
+  NS_ReleaseOnMainThreadSystemGroup(
+    "BaseWebSocketChannel::ListenerAndContextContainer::mContext",
+    mContext.forget());
 }
 
 } // namespace net

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,60 +14,46 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsError.h"
 #include "nsChangeHint.h"
+#include "nsCOMPtr.h"
 
 class nsIFrame;
 class nsIContent;
 
-// XXX would all platforms support putting this inside the list?
-struct nsStyleChangeData {
-  nsIFrame*   mFrame;
-  nsIContent* mContent;
+struct nsStyleChangeData
+{
+  nsIFrame* mFrame; // weak
+  nsCOMPtr<nsIContent> mContent;
   nsChangeHint mHint;
 };
 
-static const uint32_t kStyleChangeBufferSize = 10;
-
-// Note:  nsStyleChangeList owns a reference to
-//  nsIContent pointers in its list.
-class nsStyleChangeList {
-public:
-  nsStyleChangeList();
-  ~nsStyleChangeList();
-
-  int32_t Count(void) const {
-    return mCount;
-  }
-
-  /**
-   * Fills in pointers without reference counting.  
-   */
-  nsresult ChangeAt(int32_t aIndex, nsIFrame*& aFrame, nsIContent*& aContent,
-                    nsChangeHint& aHint) const;
-
-  /**
-   * Fills in a pointer to the list entry storage (no reference counting
-   * involved).
-   */
-  nsresult ChangeAt(int32_t aIndex, const nsStyleChangeData** aChangeData) const;
-
-  nsresult AppendChange(nsIFrame* aFrame, nsIContent* aContent, nsChangeHint aHint);
-
-  void Clear(void);
-
-protected:
-  nsStyleChangeList&  operator=(const nsStyleChangeList& aCopy);
-  bool                operator==(const nsStyleChangeList& aOther) const;
-
-  nsStyleChangeData*  mArray;
-  int32_t             mArraySize;
-  int32_t             mCount;
-  nsStyleChangeData   mBuffer[kStyleChangeBufferSize];
-
-private:
+class nsStyleChangeList : private AutoTArray<nsStyleChangeData, 10>
+{
+  typedef AutoTArray<nsStyleChangeData, 10> base_type;
   nsStyleChangeList(const nsStyleChangeList&) = delete;
-};
 
+public:
+  using base_type::begin;
+  using base_type::end;
+  using base_type::IsEmpty;
+  using base_type::Clear;
+  using base_type::Length;
+  using base_type::operator[];
+
+  nsStyleChangeList() {
+    MOZ_COUNT_CTOR(nsStyleChangeList);
+  }
+  ~nsStyleChangeList() { MOZ_COUNT_DTOR(nsStyleChangeList); }
+  void AppendChange(nsIFrame* aFrame, nsIContent* aContent, nsChangeHint aHint);
+
+  // Starting from the end of the list, removes all changes until the list is
+  // empty or an element with |mContent != aContent| is found.
+  void PopChangesForContent(nsIContent* aContent)
+  {
+    while (!IsEmpty() && LastElement().mContent == aContent) {
+      RemoveLastElement();
+    }
+  }
+};
 
 #endif /* nsStyleChangeList_h___ */

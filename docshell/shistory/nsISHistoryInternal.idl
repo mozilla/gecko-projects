@@ -2,10 +2,11 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #include "nsISupports.idl"
 
 interface nsIBFCacheEntry;
+interface nsISHContainer;
 interface nsISHEntry;
 interface nsISHistoryListener;
 interface nsISHTransaction;
@@ -13,16 +14,10 @@ interface nsIDocShell;
 interface nsIURI;
 
 %{C++
-#define NS_SHISTORY_INTERNAL_CID \
-{ 0x3dfb2f54, 0x378d, 0x4d3c, \
-  { 0xa9, 0xf9, 0x95, 0xdd, 0x26, 0x73, 0x24, 0x8c } }
-
-#define NS_SHISTORY_INTERNAL_CONTRACTID "@mozilla.org/browser/shistory-internal;1"
-
 #include "nsTArrayForwardDeclare.h"
 %}
 
-[ref] native nsDocshellIDArray(nsTArray<uint64_t>);
+[ref] native nsDocshellIDArray(nsTArray<nsID>);
 
 [scriptable, uuid(3dfb2f54-378d-4d3c-a9f9-95dd2673248c)]
 interface nsISHistoryInternal: nsISupports
@@ -46,7 +41,7 @@ interface nsISHistoryInternal: nsISupports
    */
    void setRootDocShell(in nsIDocShell rootDocShell);
 
-  /** 
+  /**
    * Update the index maintained by sessionHistory
    */
    void updateIndex();
@@ -83,7 +78,7 @@ interface nsISHistoryInternal: nsISupports
     *   history was navigated to.
     */
    void evictOutOfRangeContentViewers(in long aIndex);
-   
+
    /**
     * Evict the content viewer associated with a bfcache entry
     * that has timed out.
@@ -96,9 +91,47 @@ interface nsISHistoryInternal: nsISupports
    void evictAllContentViewers();
 
    /**
+    * Add a BFCache entry to expiration tracker so it gets evicted on expiration.
+    */
+   void addToExpirationTracker(in nsIBFCacheEntry aEntry);
+
+   /**
+    * Remove a BFCache entry from expiration tracker.
+    */
+   void removeFromExpirationTracker(in nsIBFCacheEntry aEntry);
+
+   /**
+    * Remove dynamic entries found at given index.
+    *
+    * @param aIndex
+    *        Index to remove dynamic entries from. It will be passed to
+    *        RemoveEntries as aStartIndex.
+    * @param aContainer (optional)
+    *        The container to start looking for dynamic entries. Only the
+    *        dynamic descendants of the container will be removed. If not given,
+    *        all dynamic entries at the index will be removed.
+    */
+   [noscript, notxpcom] void RemoveDynEntries(in long aIndex,
+                                              in nsISHContainer aContainer);
+
+   /**
+    * Similar to RemoveDynEntries, but instead of specifying an index, use the
+    * given BFCacheEntry to find the index and remove dynamic entries from the
+    * index.
+    *
+    * The method takes no effect if the bfcache entry is not or no longer hold
+    * by the SHistory instance.
+    *
+    * @param aEntry
+    *        The bfcache entry to look up for index to remove dynamic entries
+    *        from.
+    */
+   [noscript, notxpcom] void RemoveDynEntriesForBFCacheEntry(in nsIBFCacheEntry aEntry);
+
+   /**
     * Removes entries from the history if their docshellID is in
     * aIDs array.
     */
-  [noscript, notxpcom] void RemoveEntries(in nsDocshellIDArray aIDs,
-                                          in long aStartIndex);
+   [noscript, notxpcom] void RemoveEntries(in nsDocshellIDArray aIDs,
+                                           in long aStartIndex);
 };

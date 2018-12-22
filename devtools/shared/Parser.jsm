@@ -5,14 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
-XPCOMUtils.defineLazyModuleGetter(this,
+ChromeUtils.defineModuleGetter(this,
   "Reflect", "resource://gre/modules/reflect.jsm");
 
 this.EXPORTED_SYMBOLS = ["Parser", "ParserHelpers", "SyntaxTreeVisitor"];
@@ -30,30 +27,30 @@ Parser.prototype = {
   /**
    * Gets a collection of parser methods for a specified source.
    *
-   * @param string aSource
+   * @param string source
    *        The source text content.
-   * @param string aUrl [optional]
+   * @param string url [optional]
    *        The source url. The AST nodes will be cached, so you can use this
    *        identifier to avoid parsing the whole source again.
    */
-  get: function(aSource, aUrl = "") {
+  get(source, url = "") {
     // Try to use the cached AST nodes, to avoid useless parsing operations.
-    if (this._cache.has(aUrl)) {
-      return this._cache.get(aUrl);
+    if (this._cache.has(url)) {
+      return this._cache.get(url);
     }
 
     // The source may not necessarily be JS, in which case we need to extract
     // all the scripts. Fastest/easiest way is with a regular expression.
     // Don't worry, the rules of using a <script> tag are really strict,
     // this will work.
-    let regexp = /<script[^>]*?(?:>([^]*?)<\/script\s*>|\/>)/gim;
-    let syntaxTrees = [];
-    let scriptMatches = [];
+    const regexp = /<script[^>]*?(?:>([^]*?)<\/script\s*>|\/>)/gim;
+    const syntaxTrees = [];
+    const scriptMatches = [];
     let scriptMatch;
 
-    if (aSource.match(/^\s*</)) {
+    if (source.match(/^\s*</)) {
       // First non whitespace character is &lt, so most definitely HTML.
-      while (scriptMatch = regexp.exec(aSource)) {
+      while ((scriptMatch = regexp.exec(source))) {
         // Contents are captured at index 1 or nothing: Self-closing scripts
         // won't capture code content
         scriptMatches.push(scriptMatch[1] || "");
@@ -65,41 +62,40 @@ Parser.prototype = {
     if (!scriptMatches.length) {
       // Reflect.parse throws when encounters a syntax error.
       try {
-        let nodes = Reflect.parse(aSource);
-        let length = aSource.length;
-        syntaxTrees.push(new SyntaxTree(nodes, aUrl, length));
+        const nodes = Reflect.parse(source);
+        const length = source.length;
+        syntaxTrees.push(new SyntaxTree(nodes, url, length));
       } catch (e) {
         this.errors.push(e);
         if (this.logExceptions) {
-          DevToolsUtils.reportException(aUrl, e);
+          DevToolsUtils.reportException(url, e);
         }
       }
-    }
-    // Generate the AST nodes for each script.
-    else {
-      for (let script of scriptMatches) {
+    } else {
+      // Generate the AST nodes for each script.
+      for (const script of scriptMatches) {
         // Reflect.parse throws when encounters a syntax error.
         try {
-          let nodes = Reflect.parse(script);
-          let offset = aSource.indexOf(script);
-          let length = script.length;
-          syntaxTrees.push(new SyntaxTree(nodes, aUrl, length, offset));
+          const nodes = Reflect.parse(script);
+          const offset = source.indexOf(script);
+          const length = script.length;
+          syntaxTrees.push(new SyntaxTree(nodes, url, length, offset));
         } catch (e) {
           this.errors.push(e);
           if (this.logExceptions) {
-            DevToolsUtils.reportException(aUrl, e);
+            DevToolsUtils.reportException(url, e);
           }
         }
       }
     }
 
-    let pool = new SyntaxTreesPool(syntaxTrees, aUrl);
+    const pool = new SyntaxTreesPool(syntaxTrees, url);
 
     // Cache the syntax trees pool by the specified url. This is entirely
     // optional, but it's strongly encouraged to cache ASTs because
     // generating them can be costly with big/complex sources.
-    if (aUrl) {
-      this._cache.set(aUrl, pool);
+    if (url) {
+      this._cache.set(url, pool);
     }
 
     return pool;
@@ -108,18 +104,18 @@ Parser.prototype = {
   /**
    * Clears all the parsed sources from cache.
    */
-  clearCache: function() {
+  clearCache() {
     this._cache.clear();
   },
 
   /**
    * Clears the AST for a particular source.
    *
-   * @param String aUrl
+   * @param String url
    *        The URL of the source that is being cleared.
    */
-  clearSource: function(aUrl) {
-    this._cache.delete(aUrl);
+  clearSource(url) {
+    this._cache.delete(url);
   },
 
   _cache: null,
@@ -129,14 +125,14 @@ Parser.prototype = {
 /**
  * A pool handling a collection of AST nodes generated by the reflection API.
  *
- * @param object aSyntaxTrees
+ * @param object syntaxTrees
  *        A collection of AST nodes generated for a source.
- * @param string aUrl [optional]
+ * @param string url [optional]
  *        The source url.
  */
-function SyntaxTreesPool(aSyntaxTrees, aUrl = "<unknown>") {
-  this._trees = aSyntaxTrees;
-  this._url = aUrl;
+function SyntaxTreesPool(syntaxTrees, url = "<unknown>") {
+  this._trees = syntaxTrees;
+  this._url = url;
   this._cache = new Map();
 }
 
@@ -144,22 +140,23 @@ SyntaxTreesPool.prototype = {
   /**
    * @see SyntaxTree.prototype.getIdentifierAt
    */
-  getIdentifierAt: function({ line, column, scriptIndex, ignoreLiterals }) {
-    return this._call("getIdentifierAt", scriptIndex, line, column, ignoreLiterals)[0];
+  getIdentifierAt({ line, column, scriptIndex, ignoreLiterals }) {
+    return this._call("getIdentifierAt",
+      scriptIndex, line, column, ignoreLiterals)[0];
   },
 
   /**
    * @see SyntaxTree.prototype.getNamedFunctionDefinitions
    */
-  getNamedFunctionDefinitions: function(aSubstring) {
-    return this._call("getNamedFunctionDefinitions", -1, aSubstring);
+  getNamedFunctionDefinitions(substring) {
+    return this._call("getNamedFunctionDefinitions", -1, substring);
   },
 
   /**
    * @return SyntaxTree
    *         The last tree in this._trees
    */
-  getLastSyntaxTree: function() {
+  getLastSyntaxTree() {
     return this._trees[this._trees.length - 1];
   },
 
@@ -175,17 +172,17 @@ SyntaxTreesPool.prototype = {
    * Finds the start and length of the script containing the specified offset
    * relative to its parent source.
    *
-   * @param number aOffset
+   * @param number atOffset
    *        The offset relative to the parent source.
    * @return object
    *         The offset and length relative to the enclosing script.
    */
-  getScriptInfo: function(aOffset) {
-    let info = { start: -1, length: -1, index: -1 };
+  getScriptInfo(atOffset) {
+    const info = { start: -1, length: -1, index: -1 };
 
-    for (let { offset, length } of this._trees) {
+    for (const { offset, length } of this._trees) {
       info.index++;
-      if (offset <= aOffset && offset + length >= aOffset) {
+      if (offset <= atOffset && offset + length >= atOffset) {
         info.start = offset;
         info.length = length;
         return info;
@@ -199,31 +196,31 @@ SyntaxTreesPool.prototype = {
   /**
    * Handles a request for a specific or all known syntax trees.
    *
-   * @param string aFunction
+   * @param string functionName
    *        The function name to call on the SyntaxTree instances.
-   * @param number aSyntaxTreeIndex
+   * @param number syntaxTreeIndex
    *        The syntax tree for which to handle the request. If the tree at
    *        the specified index isn't found, the accumulated results for all
    *        syntax trees are returned.
-   * @param any aParams
+   * @param any params
    *        Any kind params to pass to the request function.
    * @return array
    *         The results given by all known syntax trees.
    */
-  _call: function(aFunction, aSyntaxTreeIndex, ...aParams) {
-    let results = [];
-    let requestId = [aFunction, aSyntaxTreeIndex, aParams].toSource();
+  _call(functionName, syntaxTreeIndex, ...params) {
+    const results = [];
+    const requestId = [functionName, syntaxTreeIndex, params].toSource();
 
     if (this._cache.has(requestId)) {
       return this._cache.get(requestId);
     }
 
-    let requestedTree = this._trees[aSyntaxTreeIndex];
-    let targettedTrees = requestedTree ? [requestedTree] : this._trees;
+    const requestedTree = this._trees[syntaxTreeIndex];
+    const targettedTrees = requestedTree ? [requestedTree] : this._trees;
 
-    for (let syntaxTree of targettedTrees) {
+    for (const syntaxTree of targettedTrees) {
       try {
-        let parseResults = syntaxTree[aFunction].apply(syntaxTree, aParams);
+        const parseResults = syntaxTree[functionName].apply(syntaxTree, params);
         if (parseResults) {
           parseResults.sourceUrl = syntaxTree.url;
           parseResults.scriptLength = syntaxTree.length;
@@ -234,7 +231,8 @@ SyntaxTreesPool.prototype = {
         // Can't guarantee that the tree traversal logic is forever perfect :)
         // Language features may be added, in which case the recursive methods
         // need to be updated. If an exception is thrown here, file a bug.
-        DevToolsUtils.reportException("Syntax tree visitor for " + this._url, e);
+        DevToolsUtils.reportException(
+          `Syntax tree visitor for ${this._url}`, e);
       }
     }
     this._cache.set(requestId, results);
@@ -248,50 +246,50 @@ SyntaxTreesPool.prototype = {
 /**
  * A collection of AST nodes generated by the reflection API.
  *
- * @param object aNodes
+ * @param object nodes
  *        The AST nodes.
- * @param string aUrl
+ * @param string url
  *        The source url.
- * @param number aLength
+ * @param number length
  *        The total number of chars of the parsed script in the parent source.
- * @param number aOffset [optional]
+ * @param number offset [optional]
  *        The char offset of the parsed script in the parent source.
  */
-function SyntaxTree(aNodes, aUrl, aLength, aOffset = 0) {
-  this.AST = aNodes;
-  this.url = aUrl;
-  this.length = aLength;
-  this.offset = aOffset;
-};
+function SyntaxTree(nodes, url, length, offset = 0) {
+  this.AST = nodes;
+  this.url = url;
+  this.length = length;
+  this.offset = offset;
+}
 
 SyntaxTree.prototype = {
   /**
    * Gets the identifier at the specified location.
    *
-   * @param number aLine
+   * @param number line
    *        The line in the source.
-   * @param number aColumn
+   * @param number column
    *        The column in the source.
-   * @param boolean aIgnoreLiterals
+   * @param boolean ignoreLiterals
    *        Specifies if alone literals should be ignored.
    * @return object
    *         An object containing identifier information as { name, location,
    *         evalString } properties, or null if nothing is found.
    */
-  getIdentifierAt: function(aLine, aColumn, aIgnoreLiterals) {
+  getIdentifierAt(line, column, ignoreLiterals) {
     let info = null;
 
     SyntaxTreeVisitor.walk(this.AST, {
       /**
        * Callback invoked for each identifier node.
-       * @param Node aNode
+       * @param Node node
        */
-      onIdentifier: function(aNode) {
-        if (ParserHelpers.nodeContainsPoint(aNode, aLine, aColumn)) {
+      onIdentifier(node) {
+        if (ParserHelpers.nodeContainsPoint(node, line, column)) {
           info = {
-            name: aNode.name,
-            location: ParserHelpers.getNodeLocation(aNode),
-            evalString: ParserHelpers.getIdentifierEvalString(aNode)
+            name: node.name,
+            location: ParserHelpers.getNodeLocation(node),
+            evalString: ParserHelpers.getIdentifierEvalString(node)
           };
 
           // Abruptly halt walking the syntax tree.
@@ -301,20 +299,20 @@ SyntaxTree.prototype = {
 
       /**
        * Callback invoked for each literal node.
-       * @param Node aNode
+       * @param Node node
        */
-      onLiteral: function(aNode) {
-        if (!aIgnoreLiterals) {
-          this.onIdentifier(aNode);
+      onLiteral(node) {
+        if (!ignoreLiterals) {
+          this.onIdentifier(node);
         }
       },
 
       /**
        * Callback invoked for each 'this' node.
-       * @param Node aNode
+       * @param Node node
        */
-      onThisExpression: function(aNode) {
-        this.onIdentifier(aNode);
+      onThisExpression(node) {
+        this.onIdentifier(node);
       }
     });
 
@@ -325,54 +323,57 @@ SyntaxTree.prototype = {
    * Searches for all function definitions (declarations and expressions)
    * whose names (or inferred names) contain a string.
    *
-   * @param string aSubstring
+   * @param string substring
    *        The string to be contained in the function name (or inferred name).
    *        Can be an empty string to match all functions.
    * @return array
    *         All the matching function declarations and expressions, as
    *         { functionName, functionLocation ... } object hashes.
    */
-  getNamedFunctionDefinitions: function(aSubstring) {
-    let lowerCaseToken = aSubstring.toLowerCase();
-    let store = [];
+  getNamedFunctionDefinitions(substring) {
+    const lowerCaseToken = substring.toLowerCase();
+    const store = [];
+
+    function includesToken(name) {
+      return name && name.toLowerCase().includes(lowerCaseToken);
+    }
 
     SyntaxTreeVisitor.walk(this.AST, {
       /**
        * Callback invoked for each function declaration node.
-       * @param Node aNode
+       * @param Node node
        */
-      onFunctionDeclaration: function(aNode) {
-        let functionName = aNode.id.name;
-        if (functionName.toLowerCase().includes(lowerCaseToken)) {
+      onFunctionDeclaration(node) {
+        const functionName = node.id.name;
+        if (includesToken(functionName)) {
           store.push({
             functionName: functionName,
-            functionLocation: ParserHelpers.getNodeLocation(aNode)
+            functionLocation: ParserHelpers.getNodeLocation(node)
           });
         }
       },
 
       /**
        * Callback invoked for each function expression node.
-       * @param Node aNode
+       * @param Node node
        */
-      onFunctionExpression: function(aNode) {
+      onFunctionExpression(node) {
         // Function expressions don't necessarily have a name.
-        let functionName = aNode.id ? aNode.id.name : "";
-        let functionLocation = ParserHelpers.getNodeLocation(aNode);
+        const functionName = node.id ? node.id.name : "";
+        const functionLocation = ParserHelpers.getNodeLocation(node);
 
         // Infer the function's name from an enclosing syntax tree node.
-        let inferredInfo = ParserHelpers.inferFunctionExpressionInfo(aNode);
-        let inferredName = inferredInfo.name;
-        let inferredChain = inferredInfo.chain;
-        let inferredLocation = inferredInfo.loc;
+        const inferredInfo = ParserHelpers.inferFunctionExpressionInfo(node);
+        const inferredName = inferredInfo.name;
+        const inferredChain = inferredInfo.chain;
+        const inferredLocation = inferredInfo.loc;
 
         // Current node may be part of a larger assignment expression stack.
-        if (aNode._parent.type == "AssignmentExpression") {
-          this.onFunctionExpression(aNode._parent);
+        if (node._parent.type == "AssignmentExpression") {
+          this.onFunctionExpression(node._parent);
         }
 
-        if ((functionName && functionName.toLowerCase().includes(lowerCaseToken)) ||
-            (inferredName && inferredName.toLowerCase().includes(lowerCaseToken))) {
+        if (includesToken(functionName) || includesToken(inferredName)) {
           store.push({
             functionName: functionName,
             functionLocation: functionLocation,
@@ -385,21 +386,21 @@ SyntaxTree.prototype = {
 
       /**
        * Callback invoked for each arrow expression node.
-       * @param Node aNode
+       * @param Node node
        */
-      onArrowFunctionExpression: function(aNode) {
+      onArrowFunctionExpression(node) {
         // Infer the function's name from an enclosing syntax tree node.
-        let inferredInfo = ParserHelpers.inferFunctionExpressionInfo(aNode);
-        let inferredName = inferredInfo.name;
-        let inferredChain = inferredInfo.chain;
-        let inferredLocation = inferredInfo.loc;
+        const inferredInfo = ParserHelpers.inferFunctionExpressionInfo(node);
+        const inferredName = inferredInfo.name;
+        const inferredChain = inferredInfo.chain;
+        const inferredLocation = inferredInfo.loc;
 
         // Current node may be part of a larger assignment expression stack.
-        if (aNode._parent.type == "AssignmentExpression") {
-          this.onFunctionExpression(aNode._parent);
+        if (node._parent.type == "AssignmentExpression") {
+          this.onFunctionExpression(node._parent);
         }
 
-        if (inferredName && inferredName.toLowerCase().includes(lowerCaseToken)) {
+        if (includesToken(inferredName)) {
           store.push({
             inferredName: inferredName,
             inferredChain: inferredChain,
@@ -427,113 +428,111 @@ var ParserHelpers = {
    * location property directly attached, or the location information
    * is incorrect, in which cases it's accessible via the parent.
    *
-   * @param Node aNode
+   * @param Node node
    *        The node who's location needs to be retrieved.
    * @return object
    *         An object containing { line, column } information.
    */
-  getNodeLocation: function(aNode) {
-    if (aNode.type != "Identifier") {
-      return aNode.loc;
+  getNodeLocation(node) {
+    if (node.type != "Identifier") {
+      return node.loc;
     }
     // Work around the fact that some identifier nodes don't have the
     // correct location attached.
-    let { loc: parentLocation, type: parentType } = aNode._parent;
-    let { loc: nodeLocation } = aNode;
+    const { loc: parentLocation, type: parentType } = node._parent;
+    const { loc: nodeLocation } = node;
     if (!nodeLocation) {
       if (parentType == "FunctionDeclaration" ||
           parentType == "FunctionExpression") {
         // e.g. "function foo() {}" or "{ bar: function foo() {} }"
         // The location is unavailable for the identifier node "foo".
-        let loc = Cu.cloneInto(parentLocation, {});
+        const loc = Cu.cloneInto(parentLocation, {});
         loc.end.line = loc.start.line;
-        loc.end.column = loc.start.column + aNode.name.length;
+        loc.end.column = loc.start.column + node.name.length;
         return loc;
       }
       if (parentType == "MemberExpression") {
         // e.g. "foo.bar"
         // The location is unavailable for the identifier node "bar".
-        let loc = Cu.cloneInto(parentLocation, {});
+        const loc = Cu.cloneInto(parentLocation, {});
         loc.start.line = loc.end.line;
-        loc.start.column = loc.end.column - aNode.name.length;
+        loc.start.column = loc.end.column - node.name.length;
         return loc;
       }
       if (parentType == "LabeledStatement") {
         // e.g. label: ...
         // The location is unavailable for the identifier node "label".
-        let loc = Cu.cloneInto(parentLocation, {});
+        const loc = Cu.cloneInto(parentLocation, {});
         loc.end.line = loc.start.line;
-        loc.end.column = loc.start.column + aNode.name.length;
+        loc.end.column = loc.start.column + node.name.length;
         return loc;
       }
       if (parentType == "ContinueStatement" || parentType == "BreakStatement") {
         // e.g. continue label; or break label;
         // The location is unavailable for the identifier node "label".
-        let loc = Cu.cloneInto(parentLocation, {});
+        const loc = Cu.cloneInto(parentLocation, {});
         loc.start.line = loc.end.line;
-        loc.start.column = loc.end.column - aNode.name.length;
+        loc.start.column = loc.end.column - node.name.length;
         return loc;
       }
-    } else {
-      if (parentType == "VariableDeclarator") {
-        // e.g. "let foo = 42"
-        // The location incorrectly spans across the whole variable declaration,
-        // not just the identifier node "foo".
-        let loc = Cu.cloneInto(nodeLocation, {});
-        loc.end.line = loc.start.line;
-        loc.end.column = loc.start.column + aNode.name.length;
-        return loc;
-      }
+    } else if (parentType == "VariableDeclarator") {
+      // e.g. "let foo = 42"
+      // The location incorrectly spans across the whole variable declaration,
+      // not just the identifier node "foo".
+      const loc = Cu.cloneInto(nodeLocation, {});
+      loc.end.line = loc.start.line;
+      loc.end.column = loc.start.column + node.name.length;
+      return loc;
     }
-    return aNode.loc;
+    return node.loc;
   },
 
   /**
    * Checks if a node's bounds contains a specified line.
    *
-   * @param Node aNode
+   * @param Node node
    *        The node's bounds used as reference.
-   * @param number aLine
+   * @param number line
    *        The line number to check.
    * @return boolean
    *         True if the line and column is contained in the node's bounds.
    */
-  nodeContainsLine: function(aNode, aLine) {
-    let { start: s, end: e } = this.getNodeLocation(aNode);
-    return s.line <= aLine && e.line >= aLine;
+  nodeContainsLine(node, line) {
+    const { start: s, end: e } = this.getNodeLocation(node);
+    return s.line <= line && e.line >= line;
   },
 
   /**
    * Checks if a node's bounds contains a specified line and column.
    *
-   * @param Node aNode
+   * @param Node node
    *        The node's bounds used as reference.
-   * @param number aLine
+   * @param number line
    *        The line number to check.
-   * @param number aColumn
+   * @param number column
    *        The column number to check.
    * @return boolean
    *         True if the line and column is contained in the node's bounds.
    */
-  nodeContainsPoint: function(aNode, aLine, aColumn) {
-    let { start: s, end: e } = this.getNodeLocation(aNode);
-    return s.line == aLine && e.line == aLine &&
-           s.column <= aColumn && e.column >= aColumn;
+  nodeContainsPoint(node, line, column) {
+    const { start: s, end: e } = this.getNodeLocation(node);
+    return s.line == line && e.line == line &&
+           s.column <= column && e.column >= column;
   },
 
   /**
    * Try to infer a function expression's name & other details based on the
    * enclosing VariableDeclarator, AssignmentExpression or ObjectExpression.
    *
-   * @param Node aNode
+   * @param Node node
    *        The function expression node to get the name for.
    * @return object
    *         The inferred function name, or empty string can't infer the name,
    *         along with the chain (a generic "context", like a prototype chain)
    *         and location if available.
    */
-  inferFunctionExpressionInfo: function(aNode) {
-    let parent = aNode._parent;
+  inferFunctionExpressionInfo(node) {
+    const parent = node._parent;
 
     // A function expression may be defined in a variable declarator,
     // e.g. var foo = function(){}, in which case it is possible to infer
@@ -550,8 +549,8 @@ var ParserHelpers = {
     // e.g. foo = function(){} or foo.bar = function(){}, in which case it is
     // possible to infer the assignee name ("foo" and "bar" respectively).
     if (parent.type == "AssignmentExpression") {
-      let propertyChain = this._getMemberExpressionPropertyChain(parent.left);
-      let propertyLeaf = propertyChain.pop();
+      const propertyChain = this._getMemberExpressionPropertyChain(parent.left);
+      const propertyLeaf = propertyChain.pop();
       return {
         name: propertyLeaf,
         chain: propertyChain,
@@ -563,9 +562,9 @@ var ParserHelpers = {
     // e.g. { foo: function(){} }, then it is possible to infer the name
     // from the corresponding property.
     if (parent.type == "ObjectExpression") {
-      let propertyKey = this._getObjectExpressionPropertyKeyForValue(aNode);
-      let propertyChain = this._getObjectExpressionPropertyChain(parent);
-      let propertyLeaf = propertyKey.name;
+      const propertyKey = this._getObjectExpressionPropertyKeyForValue(node);
+      const propertyChain = this._getObjectExpressionPropertyChain(parent);
+      const propertyLeaf = propertyKey.name;
       return {
         name: propertyLeaf,
         chain: propertyChain,
@@ -588,24 +587,26 @@ var ParserHelpers = {
    * Used for inferring function expression information and retrieving
    * an identifier evaluation string.
    *
-   * For example, if aNode represents the "bar" identifier in a hypothetical
-   * "{ foo: bar }" object expression, the returned node is the "foo" identifier.
+   * For example, if "node" represents the "bar" identifier in a hypothetical
+   * "{ foo: bar }" object expression, the returned node is the "foo"
+   * identifier.
    *
-   * @param Node aNode
+   * @param Node node
    *        The value node in an object expression.
    * @return object
    *         The key identifier node in the object expression.
    */
-  _getObjectExpressionPropertyKeyForValue: function(aNode) {
-    let parent = aNode._parent;
+  _getObjectExpressionPropertyKeyForValue(node) {
+    const parent = node._parent;
     if (parent.type != "ObjectExpression") {
       return null;
     }
-    for (let property of parent.properties) {
-      if (property.value == aNode) {
+    for (const property of parent.properties) {
+      if (property.value == node) {
         return property.key;
       }
     }
+    return null;
   },
 
   /**
@@ -615,42 +616,42 @@ var ParserHelpers = {
    * Used for inferring function expression information and retrieving
    * an identifier evaluation string.
    *
-   * For example, if aNode represents the "baz: {}" object expression in a
+   * For example, if node represents the "baz: {}" object expression in a
    * hypothetical "foo = { bar: { baz: {} } }" assignment expression, the
    * returned chain is ["foo", "bar", "baz"].
    *
-   * @param Node aNode
+   * @param Node node
    *        The object expression node to begin the scan from.
    * @param array aStore [optional]
    *        The chain to store the nodes into.
    * @return array
    *         The chain to the parent variable declarator, as strings.
    */
-  _getObjectExpressionPropertyChain: function(aNode, aStore = []) {
-    switch (aNode.type) {
+  _getObjectExpressionPropertyChain(node, aStore = []) {
+    switch (node.type) {
       case "ObjectExpression":
-        this._getObjectExpressionPropertyChain(aNode._parent, aStore);
-        let propertyKey = this._getObjectExpressionPropertyKeyForValue(aNode);
+        this._getObjectExpressionPropertyChain(node._parent, aStore);
+        const propertyKey = this._getObjectExpressionPropertyKeyForValue(node);
         if (propertyKey) {
           aStore.push(propertyKey.name);
         }
         break;
       // Handle "var foo = { ... }" variable declarators.
       case "VariableDeclarator":
-        aStore.push(aNode.id.name);
+        aStore.push(node.id.name);
         break;
       // Handle "foo.bar = { ... }" assignment expressions, since they're
       // commonly used when defining an object's prototype methods; e.g:
       // "Foo.prototype = { ... }".
       case "AssignmentExpression":
-        this._getMemberExpressionPropertyChain(aNode.left, aStore);
+        this._getMemberExpressionPropertyChain(node.left, aStore);
         break;
       // Additionally handle stuff like "foo = bar.baz({ ... })", because it's
       // commonly used in prototype-based inheritance in many libraries; e.g:
       // "Foo = Bar.extend({ ... })".
       case "NewExpression":
       case "CallExpression":
-        this._getObjectExpressionPropertyChain(aNode._parent, aStore);
+        this._getObjectExpressionPropertyChain(node._parent, aStore);
         break;
     }
     return aStore;
@@ -662,70 +663,71 @@ var ParserHelpers = {
    * Used for inferring function expression information and retrieving
    * an identifier evaluation string.
    *
-   * For example, if aNode represents a hypothetical "foo.bar.baz"
+   * For example, if node represents a hypothetical "foo.bar.baz"
    * member expression, the returned chain ["foo", "bar", "baz"].
    *
    * More complex expressions like foo.bar().baz are intentionally not handled.
    *
-   * @param Node aNode
+   * @param Node node
    *        The member expression node to begin the scan from.
-   * @param array aStore [optional]
+   * @param array store [optional]
    *        The chain to store the nodes into.
    * @return array
    *         The full member chain, as strings.
    */
-  _getMemberExpressionPropertyChain: function(aNode, aStore = []) {
-    switch (aNode.type) {
+  _getMemberExpressionPropertyChain(node, store = []) {
+    switch (node.type) {
       case "MemberExpression":
-        this._getMemberExpressionPropertyChain(aNode.object, aStore);
-        this._getMemberExpressionPropertyChain(aNode.property, aStore);
+        this._getMemberExpressionPropertyChain(node.object, store);
+        this._getMemberExpressionPropertyChain(node.property, store);
         break;
       case "ThisExpression":
-        aStore.push("this");
+        store.push("this");
         break;
       case "Identifier":
-        aStore.push(aNode.name);
+        store.push(node.name);
         break;
     }
-    return aStore;
+    return store;
   },
 
   /**
    * Returns an evaluation string which can be used to obtain the
    * current value for the respective identifier.
    *
-   * @param Node aNode
+   * @param Node node
    *        The leaf node (e.g. Identifier, Literal) to begin the scan from.
    * @return string
    *         The corresponding evaluation string, or empty string if
    *         the specified leaf node can't be used.
    */
-  getIdentifierEvalString: function(aNode) {
-    switch (aNode._parent.type) {
+  getIdentifierEvalString(node) {
+    switch (node._parent.type) {
       case "ObjectExpression":
         // If the identifier is the actual property value, it can be used
         // directly as an evaluation string. Otherwise, construct the property
         // access chain, since the value might have changed.
-        if (!this._getObjectExpressionPropertyKeyForValue(aNode)) {
-          let propertyChain = this._getObjectExpressionPropertyChain(aNode._parent);
-          let propertyLeaf = aNode.name;
+        if (!this._getObjectExpressionPropertyKeyForValue(node)) {
+          const propertyChain =
+            this._getObjectExpressionPropertyChain(node._parent);
+          const propertyLeaf = node.name;
           return [...propertyChain, propertyLeaf].join(".");
         }
         break;
       case "MemberExpression":
         // Make sure this is a property identifier, not the parent object.
-        if (aNode._parent.property == aNode) {
-          return this._getMemberExpressionPropertyChain(aNode._parent).join(".");
+        if (node._parent.property == node) {
+          return this._getMemberExpressionPropertyChain(node._parent).join(".");
         }
         break;
     }
-    switch (aNode.type) {
+    switch (node.type) {
       case "ThisExpression":
         return "this";
       case "Identifier":
-        return aNode.name;
+        return node.name;
       case "Literal":
-        return uneval(aNode.value);
+        return uneval(node.value);
       default:
         return "";
     }
@@ -746,30 +748,36 @@ var SyntaxTreeVisitor = {
   /**
    * Walks a syntax tree.
    *
-   * @param object aTree
+   * @param object tree
    *        The AST nodes generated by the reflection API
-   * @param object aCallbacks
+   * @param object callbacks
    *        A map of all the callbacks to invoke when passing through certain
    *        types of noes (e.g: onFunctionDeclaration, onBlockStatement etc.).
    */
-  walk: function(aTree, aCallbacks) {
+  walk(tree, callbacks) {
     this.break = false;
-    this[aTree.type](aTree, aCallbacks);
+    this[tree.type](tree, callbacks);
   },
 
   /**
    * Filters all the nodes in this syntax tree based on a predicate.
    *
-   * @param object aTree
+   * @param object tree
    *        The AST nodes generated by the reflection API
-   * @param function aPredicate
+   * @param function predicate
    *        The predicate ran on each node.
    * @return array
    *         An array of nodes validating the predicate.
    */
-  filter: function(aTree, aPredicate) {
-    let store = [];
-    this.walk(aTree, { onNode: e => { if (aPredicate(e)) store.push(e); } });
+  filter(tree, predicate) {
+    const store = [];
+    this.walk(tree, {
+      onNode: e => {
+        if (predicate(e)) {
+          store.push(e);
+        }
+      }
+    });
     return store;
   },
 
@@ -787,12 +795,12 @@ var SyntaxTreeVisitor = {
    *   body: [ Statement ];
    * }
    */
-  Program: function(aNode, aCallbacks) {
-    if (aCallbacks.onProgram) {
-      aCallbacks.onProgram(aNode);
+  Program(node, callbacks) {
+    if (callbacks.onProgram) {
+      callbacks.onProgram(node);
     }
-    for (let statement of aNode.body) {
-      this[statement.type](statement, aNode, aCallbacks);
+    for (const statement of node.body) {
+      this[statement.type](statement, node, callbacks);
     }
   },
 
@@ -801,19 +809,19 @@ var SyntaxTreeVisitor = {
    *
    * interface Statement <: Node { }
    */
-  Statement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Statement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onStatement) {
-      aCallbacks.onStatement(aNode);
+    if (callbacks.onStatement) {
+      callbacks.onStatement(node);
     }
   },
 
@@ -824,19 +832,19 @@ var SyntaxTreeVisitor = {
    *   type: "EmptyStatement";
    * }
    */
-  EmptyStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  EmptyStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onEmptyStatement) {
-      aCallbacks.onEmptyStatement(aNode);
+    if (callbacks.onEmptyStatement) {
+      callbacks.onEmptyStatement(node);
     }
   },
 
@@ -848,48 +856,49 @@ var SyntaxTreeVisitor = {
    *   body: [ Statement ];
    * }
    */
-  BlockStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  BlockStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onBlockStatement) {
-      aCallbacks.onBlockStatement(aNode);
+    if (callbacks.onBlockStatement) {
+      callbacks.onBlockStatement(node);
     }
-    for (let statement of aNode.body) {
-      this[statement.type](statement, aNode, aCallbacks);
+    for (const statement of node.body) {
+      this[statement.type](statement, node, callbacks);
     }
   },
 
   /**
-   * An expression statement, i.e., a statement consisting of a single expression.
+   * An expression statement, i.e., a statement consisting of a single
+   * expression.
    *
    * interface ExpressionStatement <: Statement {
    *   type: "ExpressionStatement";
    *   expression: Expression;
    * }
    */
-  ExpressionStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ExpressionStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onExpressionStatement) {
-      aCallbacks.onExpressionStatement(aNode);
+    if (callbacks.onExpressionStatement) {
+      callbacks.onExpressionStatement(node);
     }
-    this[aNode.expression.type](aNode.expression, aNode, aCallbacks);
+    this[node.expression.type](node.expression, node, callbacks);
   },
 
   /**
@@ -902,24 +911,24 @@ var SyntaxTreeVisitor = {
    *   alternate: Statement | null;
    * }
    */
-  IfStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  IfStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onIfStatement) {
-      aCallbacks.onIfStatement(aNode);
+    if (callbacks.onIfStatement) {
+      callbacks.onIfStatement(node);
     }
-    this[aNode.test.type](aNode.test, aNode, aCallbacks);
-    this[aNode.consequent.type](aNode.consequent, aNode, aCallbacks);
-    if (aNode.alternate) {
-      this[aNode.alternate.type](aNode.alternate, aNode, aCallbacks);
+    this[node.test.type](node.test, node, callbacks);
+    this[node.consequent.type](node.consequent, node, callbacks);
+    if (node.alternate) {
+      this[node.alternate.type](node.alternate, node, callbacks);
     }
   },
 
@@ -932,22 +941,22 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  LabeledStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  LabeledStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onLabeledStatement) {
-      aCallbacks.onLabeledStatement(aNode);
+    if (callbacks.onLabeledStatement) {
+      callbacks.onLabeledStatement(node);
     }
-    this[aNode.label.type](aNode.label, aNode, aCallbacks);
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.label.type](node.label, node, callbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -958,22 +967,22 @@ var SyntaxTreeVisitor = {
    *   label: Identifier | null;
    * }
    */
-  BreakStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  BreakStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onBreakStatement) {
-      aCallbacks.onBreakStatement(aNode);
+    if (callbacks.onBreakStatement) {
+      callbacks.onBreakStatement(node);
     }
-    if (aNode.label) {
-      this[aNode.label.type](aNode.label, aNode, aCallbacks);
+    if (node.label) {
+      this[node.label.type](node.label, node, callbacks);
     }
   },
 
@@ -985,22 +994,22 @@ var SyntaxTreeVisitor = {
    *   label: Identifier | null;
    * }
    */
-  ContinueStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ContinueStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onContinueStatement) {
-      aCallbacks.onContinueStatement(aNode);
+    if (callbacks.onContinueStatement) {
+      callbacks.onContinueStatement(node);
     }
-    if (aNode.label) {
-      this[aNode.label.type](aNode.label, aNode, aCallbacks);
+    if (node.label) {
+      this[node.label.type](node.label, node, callbacks);
     }
   },
 
@@ -1013,22 +1022,22 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  WithStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  WithStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onWithStatement) {
-      aCallbacks.onWithStatement(aNode);
+    if (callbacks.onWithStatement) {
+      callbacks.onWithStatement(node);
     }
-    this[aNode.object.type](aNode.object, aNode, aCallbacks);
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.object.type](node.object, node, callbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1043,23 +1052,23 @@ var SyntaxTreeVisitor = {
    *   lexical: boolean;
    * }
    */
-  SwitchStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  SwitchStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onSwitchStatement) {
-      aCallbacks.onSwitchStatement(aNode);
+    if (callbacks.onSwitchStatement) {
+      callbacks.onSwitchStatement(node);
     }
-    this[aNode.discriminant.type](aNode.discriminant, aNode, aCallbacks);
-    for (let _case of aNode.cases) {
-      this[_case.type](_case, aNode, aCallbacks);
+    this[node.discriminant.type](node.discriminant, node, callbacks);
+    for (const _case of node.cases) {
+      this[_case.type](_case, node, callbacks);
     }
   },
 
@@ -1071,22 +1080,22 @@ var SyntaxTreeVisitor = {
    *   argument: Expression | null;
    * }
    */
-  ReturnStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ReturnStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onReturnStatement) {
-      aCallbacks.onReturnStatement(aNode);
+    if (callbacks.onReturnStatement) {
+      callbacks.onReturnStatement(node);
     }
-    if (aNode.argument) {
-      this[aNode.argument.type](aNode.argument, aNode, aCallbacks);
+    if (node.argument) {
+      this[node.argument.type](node.argument, node, callbacks);
     }
   },
 
@@ -1098,21 +1107,21 @@ var SyntaxTreeVisitor = {
    *   argument: Expression;
    * }
    */
-  ThrowStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ThrowStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onThrowStatement) {
-      aCallbacks.onThrowStatement(aNode);
+    if (callbacks.onThrowStatement) {
+      callbacks.onThrowStatement(node);
     }
-    this[aNode.argument.type](aNode.argument, aNode, aCallbacks);
+    this[node.argument.type](node.argument, node, callbacks);
   },
 
   /**
@@ -1122,33 +1131,29 @@ var SyntaxTreeVisitor = {
    *   type: "TryStatement";
    *   block: BlockStatement;
    *   handler: CatchClause | null;
-   *   guardedHandlers: [ CatchClause ];
    *   finalizer: BlockStatement | null;
    * }
    */
-  TryStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  TryStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onTryStatement) {
-      aCallbacks.onTryStatement(aNode);
+    if (callbacks.onTryStatement) {
+      callbacks.onTryStatement(node);
     }
-    this[aNode.block.type](aNode.block, aNode, aCallbacks);
-    if (aNode.handler) {
-      this[aNode.handler.type](aNode.handler, aNode, aCallbacks);
+    this[node.block.type](node.block, node, callbacks);
+    if (node.handler) {
+      this[node.handler.type](node.handler, node, callbacks);
     }
-    for (let guardedHandler of aNode.guardedHandlers) {
-      this[guardedHandler.type](guardedHandler, aNode, aCallbacks);
-    }
-    if (aNode.finalizer) {
-      this[aNode.finalizer.type](aNode.finalizer, aNode, aCallbacks);
+    if (node.finalizer) {
+      this[node.finalizer.type](node.finalizer, node, callbacks);
     }
   },
 
@@ -1161,22 +1166,22 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  WhileStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  WhileStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onWhileStatement) {
-      aCallbacks.onWhileStatement(aNode);
+    if (callbacks.onWhileStatement) {
+      callbacks.onWhileStatement(node);
     }
-    this[aNode.test.type](aNode.test, aNode, aCallbacks);
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.test.type](node.test, node, callbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1188,22 +1193,22 @@ var SyntaxTreeVisitor = {
    *   test: Expression;
    * }
    */
-  DoWhileStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  DoWhileStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onDoWhileStatement) {
-      aCallbacks.onDoWhileStatement(aNode);
+    if (callbacks.onDoWhileStatement) {
+      callbacks.onDoWhileStatement(node);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
-    this[aNode.test.type](aNode.test, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
+    this[node.test.type](node.test, node, callbacks);
   },
 
   /**
@@ -1217,30 +1222,30 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  ForStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ForStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onForStatement) {
-      aCallbacks.onForStatement(aNode);
+    if (callbacks.onForStatement) {
+      callbacks.onForStatement(node);
     }
-    if (aNode.init) {
-      this[aNode.init.type](aNode.init, aNode, aCallbacks);
+    if (node.init) {
+      this[node.init.type](node.init, node, callbacks);
     }
-    if (aNode.test) {
-      this[aNode.test.type](aNode.test, aNode, aCallbacks);
+    if (node.test) {
+      this[node.test.type](node.test, node, callbacks);
     }
-    if (aNode.update) {
-      this[aNode.update.type](aNode.update, aNode, aCallbacks);
+    if (node.update) {
+      this[node.update.type](node.update, node, callbacks);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1254,23 +1259,23 @@ var SyntaxTreeVisitor = {
    *   each: boolean;
    * }
    */
-  ForInStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ForInStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onForInStatement) {
-      aCallbacks.onForInStatement(aNode);
+    if (callbacks.onForInStatement) {
+      callbacks.onForInStatement(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1283,23 +1288,23 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  ForOfStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ForOfStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onForOfStatement) {
-      aCallbacks.onForOfStatement(aNode);
+    if (callbacks.onForOfStatement) {
+      callbacks.onForOfStatement(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1311,27 +1316,27 @@ var SyntaxTreeVisitor = {
    *   body: Statement;
    * }
    */
-  LetStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  LetStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onLetStatement) {
-      aCallbacks.onLetStatement(aNode);
+    if (callbacks.onLetStatement) {
+      callbacks.onLetStatement(node);
     }
-    for (let { id, init } of aNode.head) {
-      this[id.type](id, aNode, aCallbacks);
+    for (const { id, init } of node.head) {
+      this[id.type](id, node, callbacks);
       if (init) {
-        this[init.type](init, aNode, aCallbacks);
+        this[init.type](init, node, callbacks);
       }
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1341,19 +1346,19 @@ var SyntaxTreeVisitor = {
    *   type: "DebuggerStatement";
    * }
    */
-  DebuggerStatement: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  DebuggerStatement(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onDebuggerStatement) {
-      aCallbacks.onDebuggerStatement(aNode);
+    if (callbacks.onDebuggerStatement) {
+      callbacks.onDebuggerStatement(node);
     }
   },
 
@@ -1364,19 +1369,19 @@ var SyntaxTreeVisitor = {
    *
    * interface Declaration <: Statement { }
    */
-  Declaration: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Declaration(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onDeclaration) {
-      aCallbacks.onDeclaration(aNode);
+    if (callbacks.onDeclaration) {
+      callbacks.onDeclaration(node);
     }
   },
 
@@ -1394,31 +1399,33 @@ var SyntaxTreeVisitor = {
    *   expression: boolean;
    * }
    */
-  FunctionDeclaration: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  FunctionDeclaration(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onFunctionDeclaration) {
-      aCallbacks.onFunctionDeclaration(aNode);
+    if (callbacks.onFunctionDeclaration) {
+      callbacks.onFunctionDeclaration(node);
     }
-    this[aNode.id.type](aNode.id, aNode, aCallbacks);
-    for (let param of aNode.params) {
-      this[param.type](param, aNode, aCallbacks);
+    this[node.id.type](node.id, node, callbacks);
+    for (const param of node.params) {
+      this[param.type](param, node, callbacks);
     }
-    for (let _default of aNode.defaults) {
-      this[_default.type](_default, aNode, aCallbacks);
+    for (const _default of node.defaults) {
+      if (_default) {
+        this[_default.type](_default, node, callbacks);
+      }
     }
-    if (aNode.rest) {
-      this[aNode.rest.type](aNode.rest, aNode, aCallbacks);
+    if (node.rest) {
+      this[node.rest.type](node.rest, node, callbacks);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1430,22 +1437,22 @@ var SyntaxTreeVisitor = {
    *   kind: "var" | "let" | "const";
    * }
    */
-  VariableDeclaration: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  VariableDeclaration(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onVariableDeclaration) {
-      aCallbacks.onVariableDeclaration(aNode);
+    if (callbacks.onVariableDeclaration) {
+      callbacks.onVariableDeclaration(node);
     }
-    for (let declaration of aNode.declarations) {
-      this[declaration.type](declaration, aNode, aCallbacks);
+    for (const declaration of node.declarations) {
+      this[declaration.type](declaration, node, callbacks);
     }
   },
 
@@ -1458,23 +1465,23 @@ var SyntaxTreeVisitor = {
    *   init: Expression | null;
    * }
    */
-  VariableDeclarator: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  VariableDeclarator(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onVariableDeclarator) {
-      aCallbacks.onVariableDeclarator(aNode);
+    if (callbacks.onVariableDeclarator) {
+      callbacks.onVariableDeclarator(node);
     }
-    this[aNode.id.type](aNode.id, aNode, aCallbacks);
-    if (aNode.init) {
-      this[aNode.init.type](aNode.init, aNode, aCallbacks);
+    this[node.id.type](node.id, node, callbacks);
+    if (node.init) {
+      this[node.init.type](node.init, node, callbacks);
     }
   },
 
@@ -1484,19 +1491,19 @@ var SyntaxTreeVisitor = {
    *
    * interface Expression <: Node, Pattern { }
    */
-  Expression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Expression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onExpression) {
-      aCallbacks.onExpression(aNode);
+    if (callbacks.onExpression) {
+      callbacks.onExpression(node);
     }
   },
 
@@ -1507,19 +1514,19 @@ var SyntaxTreeVisitor = {
    *   type: "ThisExpression";
    * }
    */
-  ThisExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ThisExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onThisExpression) {
-      aCallbacks.onThisExpression(aNode);
+    if (callbacks.onThisExpression) {
+      callbacks.onThisExpression(node);
     }
   },
 
@@ -1531,27 +1538,50 @@ var SyntaxTreeVisitor = {
    *   elements: [ Expression | null ];
    * }
    */
-  ArrayExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ArrayExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onArrayExpression) {
-      aCallbacks.onArrayExpression(aNode);
+    if (callbacks.onArrayExpression) {
+      callbacks.onArrayExpression(node);
     }
-    for (let element of aNode.elements) {
-      // TODO: remove the typeof check when support for SpreadExpression is
-      // added (bug 890913).
-      if (element && typeof this[element.type] == "function") {
-        this[element.type](element, aNode, aCallbacks);
+    for (const element of node.elements) {
+      if (element) {
+        this[element.type](element, node, callbacks);
       }
     }
+  },
+
+  /**
+   * A spread expression.
+   *
+   * interface SpreadExpression <: Expression {
+   *   type: "SpreadExpression";
+   *   expression: Expression;
+   * }
+   */
+  SpreadExpression(node, parent, callbacks) {
+    node._parent = parent;
+
+    if (this.break) {
+      return;
+    }
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
+        return;
+      }
+    }
+    if (callbacks.onSpreadExpression) {
+      callbacks.onSpreadExpression(node);
+    }
+    this[node.expression.type](node.expression, node, callbacks);
   },
 
   /**
@@ -1562,29 +1592,54 @@ var SyntaxTreeVisitor = {
    *
    * interface ObjectExpression <: Expression {
    *   type: "ObjectExpression";
-   *   properties: [ { key: Literal | Identifier,
+   *   properties: [ { key: Literal | Identifier | ComputedName,
    *                   value: Expression,
    *                   kind: "init" | "get" | "set" } ];
    * }
    */
-  ObjectExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ObjectExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onObjectExpression) {
-      aCallbacks.onObjectExpression(aNode);
+    if (callbacks.onObjectExpression) {
+      callbacks.onObjectExpression(node);
     }
-    for (let { key, value } of aNode.properties) {
-      this[key.type](key, aNode, aCallbacks);
-      this[value.type](value, aNode, aCallbacks);
+    for (const { key, value } of node.properties) {
+      this[key.type](key, node, callbacks);
+      this[value.type](value, node, callbacks);
     }
+  },
+
+  /**
+   * A computed property name in object expression, like in { [a]: b }
+   *
+   * interface ComputedName <: Node {
+   *   type: "ComputedName";
+   *   name: Expression;
+   * }
+   */
+  ComputedName(node, parent, callbacks) {
+    node._parent = parent;
+
+    if (this.break) {
+      return;
+    }
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
+        return;
+      }
+    }
+    if (callbacks.onComputedName) {
+      callbacks.onComputedName(node);
+    }
+    this[node.name.type](node.name, node, callbacks);
   },
 
   /**
@@ -1601,33 +1656,35 @@ var SyntaxTreeVisitor = {
    *   expression: boolean;
    * }
    */
-  FunctionExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  FunctionExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onFunctionExpression) {
-      aCallbacks.onFunctionExpression(aNode);
+    if (callbacks.onFunctionExpression) {
+      callbacks.onFunctionExpression(node);
     }
-    if (aNode.id) {
-      this[aNode.id.type](aNode.id, aNode, aCallbacks);
+    if (node.id) {
+      this[node.id.type](node.id, node, callbacks);
     }
-    for (let param of aNode.params) {
-      this[param.type](param, aNode, aCallbacks);
+    for (const param of node.params) {
+      this[param.type](param, node, callbacks);
     }
-    for (let _default of aNode.defaults) {
-      this[_default.type](_default, aNode, aCallbacks);
+    for (const _default of node.defaults) {
+      if (_default) {
+        this[_default.type](_default, node, callbacks);
+      }
     }
-    if (aNode.rest) {
-      this[aNode.rest.type](aNode.rest, aNode, aCallbacks);
+    if (node.rest) {
+      this[node.rest.type](node.rest, node, callbacks);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1643,30 +1700,32 @@ var SyntaxTreeVisitor = {
    *   expression: boolean;
    * }
    */
-  ArrowFunctionExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ArrowFunctionExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onArrowFunctionExpression) {
-      aCallbacks.onArrowFunctionExpression(aNode);
+    if (callbacks.onArrowFunctionExpression) {
+      callbacks.onArrowFunctionExpression(node);
     }
-    for (let param of aNode.params) {
-      this[param.type](param, aNode, aCallbacks);
+    for (const param of node.params) {
+      this[param.type](param, node, callbacks);
     }
-    for (let _default of aNode.defaults) {
-      this[_default.type](_default, aNode, aCallbacks);
+    for (const _default of node.defaults) {
+      if (_default) {
+        this[_default.type](_default, node, callbacks);
+      }
     }
-    if (aNode.rest) {
-      this[aNode.rest.type](aNode.rest, aNode, aCallbacks);
+    if (node.rest) {
+      this[node.rest.type](node.rest, node, callbacks);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -1677,22 +1736,22 @@ var SyntaxTreeVisitor = {
    *   expressions: [ Expression ];
    * }
    */
-  SequenceExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  SequenceExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onSequenceExpression) {
-      aCallbacks.onSequenceExpression(aNode);
+    if (callbacks.onSequenceExpression) {
+      callbacks.onSequenceExpression(node);
     }
-    for (let expression of aNode.expressions) {
-      this[expression.type](expression, aNode, aCallbacks);
+    for (const expression of node.expressions) {
+      this[expression.type](expression, node, callbacks);
     }
   },
 
@@ -1706,21 +1765,21 @@ var SyntaxTreeVisitor = {
    *   argument: Expression;
    * }
    */
-  UnaryExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  UnaryExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onUnaryExpression) {
-      aCallbacks.onUnaryExpression(aNode);
+    if (callbacks.onUnaryExpression) {
+      callbacks.onUnaryExpression(node);
     }
-    this[aNode.argument.type](aNode.argument, aNode, aCallbacks);
+    this[node.argument.type](node.argument, node, callbacks);
   },
 
   /**
@@ -1733,22 +1792,22 @@ var SyntaxTreeVisitor = {
    *   right: Expression;
    * }
    */
-  BinaryExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  BinaryExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onBinaryExpression) {
-      aCallbacks.onBinaryExpression(aNode);
+    if (callbacks.onBinaryExpression) {
+      callbacks.onBinaryExpression(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
   },
 
   /**
@@ -1761,22 +1820,22 @@ var SyntaxTreeVisitor = {
    *   right: Expression;
    * }
    */
-  AssignmentExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  AssignmentExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onAssignmentExpression) {
-      aCallbacks.onAssignmentExpression(aNode);
+    if (callbacks.onAssignmentExpression) {
+      callbacks.onAssignmentExpression(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
   },
 
   /**
@@ -1789,21 +1848,21 @@ var SyntaxTreeVisitor = {
    *   prefix: boolean;
    * }
    */
-  UpdateExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  UpdateExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onUpdateExpression) {
-      aCallbacks.onUpdateExpression(aNode);
+    if (callbacks.onUpdateExpression) {
+      callbacks.onUpdateExpression(node);
     }
-    this[aNode.argument.type](aNode.argument, aNode, aCallbacks);
+    this[node.argument.type](node.argument, node, callbacks);
   },
 
   /**
@@ -1816,22 +1875,22 @@ var SyntaxTreeVisitor = {
    *   right: Expression;
    * }
    */
-  LogicalExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  LogicalExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onLogicalExpression) {
-      aCallbacks.onLogicalExpression(aNode);
+    if (callbacks.onLogicalExpression) {
+      callbacks.onLogicalExpression(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
   },
 
   /**
@@ -1844,23 +1903,23 @@ var SyntaxTreeVisitor = {
    *   consequent: Expression;
    * }
    */
-  ConditionalExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ConditionalExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onConditionalExpression) {
-      aCallbacks.onConditionalExpression(aNode);
+    if (callbacks.onConditionalExpression) {
+      callbacks.onConditionalExpression(node);
     }
-    this[aNode.test.type](aNode.test, aNode, aCallbacks);
-    this[aNode.alternate.type](aNode.alternate, aNode, aCallbacks);
-    this[aNode.consequent.type](aNode.consequent, aNode, aCallbacks);
+    this[node.test.type](node.test, node, callbacks);
+    this[node.alternate.type](node.alternate, node, callbacks);
+    this[node.consequent.type](node.consequent, node, callbacks);
   },
 
   /**
@@ -1872,24 +1931,24 @@ var SyntaxTreeVisitor = {
    *   arguments: [ Expression | null ];
    * }
    */
-  NewExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  NewExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onNewExpression) {
-      aCallbacks.onNewExpression(aNode);
+    if (callbacks.onNewExpression) {
+      callbacks.onNewExpression(node);
     }
-    this[aNode.callee.type](aNode.callee, aNode, aCallbacks);
-    for (let argument of aNode.arguments) {
+    this[node.callee.type](node.callee, node, callbacks);
+    for (const argument of node.arguments) {
       if (argument) {
-        this[argument.type](argument, aNode, aCallbacks);
+        this[argument.type](argument, node, callbacks);
       }
     }
   },
@@ -1903,24 +1962,27 @@ var SyntaxTreeVisitor = {
    *   arguments: [ Expression | null ];
    * }
    */
-  CallExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  CallExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onCallExpression) {
-      aCallbacks.onCallExpression(aNode);
+    if (callbacks.onCallExpression) {
+      callbacks.onCallExpression(node);
     }
-    this[aNode.callee.type](aNode.callee, aNode, aCallbacks);
-    for (let argument of aNode.arguments) {
+    this[node.callee.type](node.callee, node, callbacks);
+    for (const argument of node.arguments) {
       if (argument) {
-        this[argument.type](argument, aNode, aCallbacks);
+        if (!this[argument.type]) {
+          console.error("Unknown parser object:", argument.type);
+        }
+        this[argument.type](argument, node, callbacks);
       }
     }
   },
@@ -1938,22 +2000,22 @@ var SyntaxTreeVisitor = {
    *   computed: boolean;
    * }
    */
-  MemberExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  MemberExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onMemberExpression) {
-      aCallbacks.onMemberExpression(aNode);
+    if (callbacks.onMemberExpression) {
+      callbacks.onMemberExpression(node);
     }
-    this[aNode.object.type](aNode.object, aNode, aCallbacks);
-    this[aNode.property.type](aNode.property, aNode, aCallbacks);
+    this[node.object.type](node.object, node, callbacks);
+    this[node.property.type](node.property, node, callbacks);
   },
 
   /**
@@ -1963,22 +2025,22 @@ var SyntaxTreeVisitor = {
    *   argument: Expression | null;
    * }
    */
-  YieldExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  YieldExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onYieldExpression) {
-      aCallbacks.onYieldExpression(aNode);
+    if (callbacks.onYieldExpression) {
+      callbacks.onYieldExpression(node);
     }
-    if (aNode.argument) {
-      this[aNode.argument.type](aNode.argument, aNode, aCallbacks);
+    if (node.argument) {
+      this[node.argument.type](node.argument, node, callbacks);
     }
   },
 
@@ -1993,26 +2055,26 @@ var SyntaxTreeVisitor = {
    *   filter: Expression | null;
    * }
    */
-  ComprehensionExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ComprehensionExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onComprehensionExpression) {
-      aCallbacks.onComprehensionExpression(aNode);
+    if (callbacks.onComprehensionExpression) {
+      callbacks.onComprehensionExpression(node);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
-    for (let block of aNode.blocks) {
-      this[block.type](block, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
+    for (const block of node.blocks) {
+      this[block.type](block, node, callbacks);
     }
-    if (aNode.filter) {
-      this[aNode.filter.type](aNode.filter, aNode, aCallbacks);
+    if (node.filter) {
+      this[node.filter.type](node.filter, node, callbacks);
     }
   },
 
@@ -2027,26 +2089,26 @@ var SyntaxTreeVisitor = {
    *   filter: Expression | null;
    * }
    */
-  GeneratorExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  GeneratorExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onGeneratorExpression) {
-      aCallbacks.onGeneratorExpression(aNode);
+    if (callbacks.onGeneratorExpression) {
+      callbacks.onGeneratorExpression(node);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
-    for (let block of aNode.blocks) {
-      this[block.type](block, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
+    for (const block of node.blocks) {
+      this[block.type](block, node, callbacks);
     }
-    if (aNode.filter) {
-      this[aNode.filter.type](aNode.filter, aNode, aCallbacks);
+    if (node.filter) {
+      this[node.filter.type](node.filter, node, callbacks);
     }
   },
 
@@ -2058,21 +2120,21 @@ var SyntaxTreeVisitor = {
    *   expression: Literal;
    * }
    */
-  GraphExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  GraphExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onGraphExpression) {
-      aCallbacks.onGraphExpression(aNode);
+    if (callbacks.onGraphExpression) {
+      callbacks.onGraphExpression(node);
     }
-    this[aNode.expression.type](aNode.expression, aNode, aCallbacks);
+    this[node.expression.type](node.expression, node, callbacks);
   },
 
   /**
@@ -2082,19 +2144,19 @@ var SyntaxTreeVisitor = {
    *   index: uint32;
    * }
    */
-  GraphIndexExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  GraphIndexExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onGraphIndexExpression) {
-      aCallbacks.onGraphIndexExpression(aNode);
+    if (callbacks.onGraphIndexExpression) {
+      callbacks.onGraphIndexExpression(node);
     }
   },
 
@@ -2107,27 +2169,27 @@ var SyntaxTreeVisitor = {
    *   body: Expression;
    * }
    */
-  LetExpression: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  LetExpression(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onLetExpression) {
-      aCallbacks.onLetExpression(aNode);
+    if (callbacks.onLetExpression) {
+      callbacks.onLetExpression(node);
     }
-    for (let { id, init } of aNode.head) {
-      this[id.type](id, aNode, aCallbacks);
+    for (const { id, init } of node.head) {
+      this[id.type](id, node, callbacks);
       if (init) {
-        this[init.type](init, aNode, aCallbacks);
+        this[init.type](init, node, callbacks);
       }
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -2135,19 +2197,19 @@ var SyntaxTreeVisitor = {
    *
    * interface Pattern <: Node { }
    */
-  Pattern: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Pattern(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onPattern) {
-      aCallbacks.onPattern(aNode);
+    if (callbacks.onPattern) {
+      callbacks.onPattern(node);
     }
   },
 
@@ -2160,23 +2222,23 @@ var SyntaxTreeVisitor = {
    *   properties: [ { key: Literal | Identifier, value: Pattern } ];
    * }
    */
-  ObjectPattern: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ObjectPattern(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onObjectPattern) {
-      aCallbacks.onObjectPattern(aNode);
+    if (callbacks.onObjectPattern) {
+      callbacks.onObjectPattern(node);
     }
-    for (let { key, value } of aNode.properties) {
-      this[key.type](key, aNode, aCallbacks);
-      this[value.type](value, aNode, aCallbacks);
+    for (const { key, value } of node.properties) {
+      this[key.type](key, node, callbacks);
+      this[value.type](value, node, callbacks);
     }
   },
 
@@ -2188,23 +2250,23 @@ var SyntaxTreeVisitor = {
    *   elements: [ Pattern | null ];
    * }
    */
-  ArrayPattern: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ArrayPattern(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onArrayPattern) {
-      aCallbacks.onArrayPattern(aNode);
+    if (callbacks.onArrayPattern) {
+      callbacks.onArrayPattern(node);
     }
-    for (let element of aNode.elements) {
+    for (const element of node.elements) {
       if (element) {
-        this[element.type](element, aNode, aCallbacks);
+        this[element.type](element, node, callbacks);
       }
     }
   },
@@ -2219,25 +2281,25 @@ var SyntaxTreeVisitor = {
    *   consequent: [ Statement ];
    * }
    */
-  SwitchCase: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  SwitchCase(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onSwitchCase) {
-      aCallbacks.onSwitchCase(aNode);
+    if (callbacks.onSwitchCase) {
+      callbacks.onSwitchCase(node);
     }
-    if (aNode.test) {
-      this[aNode.test.type](aNode.test, aNode, aCallbacks);
+    if (node.test) {
+      this[node.test.type](node.test, node, callbacks);
     }
-    for (let consequent of aNode.consequent) {
-      this[consequent.type](consequent, aNode, aCallbacks);
+    for (const consequent of node.consequent) {
+      this[consequent.type](consequent, node, callbacks);
     }
   },
 
@@ -2252,25 +2314,25 @@ var SyntaxTreeVisitor = {
    *   body: BlockStatement;
    * }
    */
-  CatchClause: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  CatchClause(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onCatchClause) {
-      aCallbacks.onCatchClause(aNode);
+    if (callbacks.onCatchClause) {
+      callbacks.onCatchClause(node);
     }
-    this[aNode.param.type](aNode.param, aNode, aCallbacks);
-    if (aNode.guard) {
-      this[aNode.guard.type](aNode.guard, aNode, aCallbacks);
+    this[node.param.type](node.param, node, callbacks);
+    if (node.guard) {
+      this[node.guard.type](node.guard, node, callbacks);
     }
-    this[aNode.body.type](aNode.body, aNode, aCallbacks);
+    this[node.body.type](node.body, node, callbacks);
   },
 
   /**
@@ -2282,22 +2344,22 @@ var SyntaxTreeVisitor = {
    *   each: boolean;
    * }
    */
-  ComprehensionBlock: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  ComprehensionBlock(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onComprehensionBlock) {
-      aCallbacks.onComprehensionBlock(aNode);
+    if (callbacks.onComprehensionBlock) {
+      callbacks.onComprehensionBlock(node);
     }
-    this[aNode.left.type](aNode.left, aNode, aCallbacks);
-    this[aNode.right.type](aNode.right, aNode, aCallbacks);
+    this[node.left.type](node.left, node, callbacks);
+    this[node.right.type](node.right, node, callbacks);
   },
 
   /**
@@ -2309,19 +2371,19 @@ var SyntaxTreeVisitor = {
    *   name: string;
    * }
    */
-  Identifier: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Identifier(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onIdentifier) {
-      aCallbacks.onIdentifier(aNode);
+    if (callbacks.onIdentifier) {
+      callbacks.onIdentifier(node);
     }
   },
 
@@ -2333,19 +2395,48 @@ var SyntaxTreeVisitor = {
    *   value: string | boolean | null | number | RegExp;
    * }
    */
-  Literal: function(aNode, aParent, aCallbacks) {
-    aNode._parent = aParent;
+  Literal(node, parent, callbacks) {
+    node._parent = parent;
 
     if (this.break) {
       return;
     }
-    if (aCallbacks.onNode) {
-      if (aCallbacks.onNode(aNode, aParent) === false) {
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
         return;
       }
     }
-    if (aCallbacks.onLiteral) {
-      aCallbacks.onLiteral(aNode);
+    if (callbacks.onLiteral) {
+      callbacks.onLiteral(node);
+    }
+  },
+
+  /**
+   * A template string literal.
+   *
+   * interface TemplateLiteral <: Node {
+   *   type: "TemplateLiteral";
+   *   elements: [ Expression ];
+   * }
+   */
+  TemplateLiteral(node, parent, callbacks) {
+    node._parent = parent;
+
+    if (this.break) {
+      return;
+    }
+    if (callbacks.onNode) {
+      if (callbacks.onNode(node, parent) === false) {
+        return;
+      }
+    }
+    if (callbacks.onTemplateLiteral) {
+      callbacks.onTemplateLiteral(node);
+    }
+    for (const element of node.elements) {
+      if (element) {
+        this[element.type](element, node, callbacks);
+      }
     }
   }
 };

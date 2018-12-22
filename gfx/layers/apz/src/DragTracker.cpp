@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,7 +28,14 @@ DragTracker::StartsDrag(const MouseInput& aInput)
 /*static*/ bool
 DragTracker::EndsDrag(const MouseInput& aInput)
 {
-  return aInput.IsLeftButton() && aInput.mType == MouseInput::MOUSE_UP;
+  // On Windows, we don't receive a MOUSE_UP at the end of a drag if an
+  // actual drag session took place. As a backup, we detect the end of the
+  // drag using the MOUSE_DRAG_END event, which normally is routed directly
+  // to content, but we're specially routing to APZ for this purpose. Bug
+  // 1265105 tracks a solution to this at the Windows widget layer; once
+  // that is implemented, this workaround can be removed.
+  return (aInput.IsLeftButton() && aInput.mType == MouseInput::MOUSE_UP)
+      || aInput.mType == MouseInput::MOUSE_DRAG_END;
 }
 
 void

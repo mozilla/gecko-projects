@@ -1,7 +1,8 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef MOZILLA_GFX_BASICCOMPOSITOR_H
 #define MOZILLA_GFX_BASICCOMPOSITOR_H
@@ -9,7 +10,8 @@
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/gfx/2D.h"
-#include "nsAutoPtr.h"
+#include "mozilla/gfx/Triangle.h"
+#include "mozilla/gfx/Polygon.h"
 
 namespace mozilla {
 namespace layers {
@@ -42,15 +44,18 @@ public:
 class BasicCompositor : public Compositor
 {
 public:
-  explicit BasicCompositor(CompositorBridgeParent* aParent, nsIWidget *aWidget);
+  explicit BasicCompositor(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget);
 
 protected:
   virtual ~BasicCompositor();
 
 public:
-  virtual bool Initialize() override;
 
-  virtual void Destroy() override;
+  virtual BasicCompositor* AsBasicCompositor() override { return this; }
+
+  virtual bool Initialize(nsCString* const out_failureReason) override;
+
+  virtual void DetachWidget() override;
 
   virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override;
 
@@ -73,7 +78,12 @@ public:
   virtual already_AddRefed<DataTextureSource>
   CreateDataTextureSourceAround(gfx::DataSourceSurface* aSurface) override;
 
+  virtual already_AddRefed<DataTextureSource>
+  CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture) override;
+
   virtual bool SupportsEffect(EffectTypes aEffect) override;
+
+  bool SupportsLayerGeometry() const override;
 
   virtual void SetRenderTarget(CompositingRenderTarget *aSource) override
   {
@@ -86,7 +96,7 @@ public:
   }
 
   virtual void DrawQuad(const gfx::Rect& aRect,
-                        const gfx::Rect& aClipRect,
+                        const gfx::IntRect& aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
                         const gfx::Matrix4x4& aTransform,
@@ -95,19 +105,18 @@ public:
   virtual void ClearRect(const gfx::Rect& aRect) override;
 
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
-                          const gfx::Rect *aClipRectIn,
-                          const gfx::Rect& aRenderBounds,
+                          const gfx::IntRect *aClipRectIn,
+                          const gfx::IntRect& aRenderBounds,
                           const nsIntRegion& aOpaqueRegion,
-                          gfx::Rect *aClipRectOut = nullptr,
-                          gfx::Rect *aRenderBoundsOut = nullptr) override;
+                          gfx::IntRect *aClipRectOut = nullptr,
+                          gfx::IntRect *aRenderBoundsOut = nullptr) override;
   virtual void EndFrame() override;
-  virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) override;
 
   virtual bool SupportsPartialTextureUpdate() override { return true; }
   virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) override { return true; }
   virtual int32_t GetMaxTextureSize() const override;
   virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) override { }
-  
+
   virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) override {
   }
 
@@ -121,14 +130,38 @@ public:
     return LayersBackend::LAYERS_BASIC;
   }
 
-  virtual nsIWidget* GetWidget() const override { return mWidget; }
-
   gfx::DrawTarget *GetDrawTarget() { return mDrawTarget; }
+
+  virtual bool IsPendingComposite() override
+  {
+    return mIsPendingEndRemoteDrawing;
+  }
+
+  virtual void FinishPendingComposite() override;
 
 private:
 
-  // Widget associated with this compositor
-  nsIWidget *mWidget;
+  template<typename Geometry>
+  void DrawGeometry(const Geometry& aGeometry,
+                    const gfx::Rect& aRect,
+                    const gfx::IntRect& aClipRect,
+                    const EffectChain& aEffectChain,
+                    gfx::Float aOpacity,
+                    const gfx::Matrix4x4& aTransform,
+                    const gfx::Rect& aVisibleRect,
+                    const bool aEnableAA);
+
+  virtual void DrawPolygon(const gfx::Polygon& aPolygon,
+                           const gfx::Rect& aRect,
+                           const gfx::IntRect& aClipRect,
+                           const EffectChain& aEffectChain,
+                           gfx::Float aOpacity,
+                           const gfx::Matrix4x4& aTransform,
+                           const gfx::Rect& aVisibleRect) override;
+
+  void TryToEndRemoteDrawing(bool aForceToEnd = false);
+
+  bool NeedsToDeferEndRemoteDrawing();
 
   // The final destination surface
   RefPtr<gfx::DrawTarget> mDrawTarget;
@@ -137,10 +170,12 @@ private:
 
   LayoutDeviceIntRect mInvalidRect;
   LayoutDeviceIntRegion mInvalidRegion;
-  bool mDidExternalComposition;
 
   uint32_t mMaxTextureSize;
+  bool mIsPendingEndRemoteDrawing;
 };
+
+BasicCompositor* AssertBasicCompositor(Compositor* aCompositor);
 
 } // namespace layers
 } // namespace mozilla

@@ -18,20 +18,17 @@
 
     <link rel="icon" type="image/png" id="favicon"
           href="chrome://branding/content/icon32.png"/>
-    <link rel="stylesheet" href="chrome://global/skin/in-content/common.css"
-          type="text/css"/>
     <link rel="stylesheet" href="chrome://global/skin/aboutSupport.css"
           type="text/css"/>
 
-    <script type="application/javascript;version=1.7"
+    <script type="application/javascript"
             src="chrome://global/content/aboutSupport.js"/>
-    <script type="application/javascript;version=1.7"
-            src="chrome://global/content/resetProfile.js"/>
   </head>
 
-  <body dir="&locale.dir;">
+  <body dir="&locale.dir;" class="wide-container">
 
-    <div id="action-box">
+#ifndef ANDROID
+    <div id="action-box" class="notice-box">
       <div id="reset-box">
         <h3>&refreshProfile.title;</h3>
         <button id="reset-box-button">
@@ -44,8 +41,9 @@
           &aboutSupport.restartInSafeMode.label;
         </button>
       </div>
-
     </div>
+#endif
+
     <h1>
       &aboutSupport.pageTitle;
     </h1>
@@ -135,7 +133,7 @@
               &aboutSupport.appBasicsOS;
             </th>
 
-            <td id="osarch-box">
+            <td id="os-box">
             </td>
           </tr>
 
@@ -155,7 +153,7 @@
             <td>
               <button id="profile-dir-button">
 #ifdef XP_WIN
-                &aboutSupport.showWin.label;
+                &aboutSupport.showWin2.label;
 #else
 #ifdef XP_MACOSX
                 &aboutSupport.showMac.label;
@@ -164,6 +162,8 @@
 #endif
 #endif
                </button>
+               <span id="profile-dir-box">
+               </span>
             </td>
           </tr>
 
@@ -199,6 +199,16 @@
 
           <tr class="no-copy">
             <th class="column">
+              &aboutSupport.appBasicsPerformance;
+            </th>
+
+            <td>
+              <a href="about:performance">about:performance</a>
+            </td>
+          </tr>
+
+          <tr class="no-copy">
+            <th class="column">
               &aboutSupport.appBasicsServiceWorkers;
             </th>
 
@@ -216,6 +226,42 @@
             </td>
           </tr>
 
+          <tr id="contentprocesses-row">
+            <th class="column">
+              &aboutSupport.appBasicsProcessCount;
+            </th>
+
+            <td id="contentprocesses-box">
+            </td>
+          </tr>
+
+          <tr id="policies-status-row">
+            <th class="column">
+              &aboutSupport.enterprisePolicies;
+            </th>
+
+            <td id="policies-status">
+            </td>
+          </tr>
+
+          <tr>
+            <th class="column">
+              &aboutSupport.appBasicsKeyGoogle;
+            </th>
+
+            <td id="key-google-box">
+            </td>
+          </tr>
+
+          <tr>
+            <th class="column">
+              &aboutSupport.appBasicsKeyMozilla;
+            </th>
+
+            <td id="key-mozilla-box">
+            </td>
+          </tr>
+
           <tr>
             <th class="column">
               &aboutSupport.appBasicsSafeMode;
@@ -225,6 +271,7 @@
             </td>
           </tr>
 
+#ifndef ANDROID
           <tr class="no-copy">
             <th class="column">
               &aboutSupport.appBasicsProfiles;
@@ -234,6 +281,7 @@
               <a href="about:profiles">about:profiles</a>
             </td>
           </tr>
+#endif
 
         </tbody>
       </table>
@@ -268,6 +316,30 @@
       <!-- - - - - - - - - - - - - - - - - - - - - -->
 
       <h2 class="major-section">
+        &aboutSupport.featuresTitle;
+      </h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>
+              &aboutSupport.featureName;
+            </th>
+            <th>
+              &aboutSupport.featureVersion;
+            </th>
+            <th>
+              &aboutSupport.featureId;
+            </th>
+          </tr>
+        </thead>
+        <tbody id="features-tbody">
+        </tbody>
+      </table>
+
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+
+      <h2 class="major-section">
         &aboutSupport.extensionsTitle;
       </h2>
 
@@ -294,19 +366,209 @@
 
       <!-- - - - - - - - - - - - - - - - - - - - - -->
 
+      <h2 class="major-section" id="security-software-title">
+        &aboutSupport.securitySoftwareTitle;
+      </h2>
+
+      <table id="security-software-table">
+        <thead>
+          <tr>
+            <th>
+              &aboutSupport.securitySoftwareType;
+            </th>
+            <th>
+              &aboutSupport.securitySoftwareName;
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="column">
+              &aboutSupport.securitySoftwareAntivirus;
+            </th>
+
+            <td id="security-software-antivirus">
+            </td>
+          </tr>
+
+          <tr>
+            <th class="column">
+              &aboutSupport.securitySoftwareAntiSpyware;
+            </th>
+
+            <td id="security-software-antispyware">
+            </td>
+          </tr>
+
+          <tr>
+            <th class="column">
+              &aboutSupport.securitySoftwareFirewall;
+            </th>
+
+            <td id="security-software-firewall">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+
       <h2 class="major-section">
         &aboutSupport.graphicsTitle;
       </h2>
 
       <table>
+        <tbody id="graphics-features-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsFeaturesTitle;
+            </th>
+          </tr>
+        </tbody>
+
         <tbody id="graphics-tbody">
         </tbody>
 
-        <tbody id="graphics-info-properties">
+        <tbody id="graphics-gpu-1-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsGPU1Title;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="graphics-gpu-2-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsGPU2Title;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="graphics-diagnostics-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsDiagnosticsTitle;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="graphics-decisions-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsDecisionLogTitle;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="graphics-crashguards-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsCrashGuardsTitle;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="graphics-workarounds-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsWorkaroundsTitle;
+            </th>
+          </tr>
         </tbody>
 
         <tbody id="graphics-failures-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.graphicsFailureLogTitle;
+            </th>
+          </tr>
         </tbody>
+      </table>
+
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+
+      <h2 class="major-section">
+        &aboutSupport.mediaTitle;
+      </h2>
+      <table>
+        <tbody id="media-info-tbody">
+        </tbody>
+
+        <tbody id="media-output-devices-tbody">
+          <tr>
+            <th colspan="9" class="title-column">
+              &aboutSupport.mediaOutputDevicesTitle;
+            </th>
+          </tr>
+          <tr>
+            <th>
+              &aboutSupport.mediaDeviceName;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceGroup;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceVendor;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceState;
+            </th>
+            <th>
+              &aboutSupport.mediaDevicePreferred;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceFormat;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceChannels;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceRate;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceLatency;
+            </th>
+          </tr>
+        </tbody>
+
+        <tbody id="media-input-devices-tbody">
+          <tr>
+            <th colspan="9" class="title-column">
+              &aboutSupport.mediaInputDevicesTitle;
+            </th>
+          </tr>
+          <tr>
+            <th>
+              &aboutSupport.mediaDeviceName;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceGroup;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceVendor;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceState;
+            </th>
+            <th>
+              &aboutSupport.mediaDevicePreferred;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceFormat;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceChannels;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceRate;
+            </th>
+            <th>
+              &aboutSupport.mediaDeviceLatency;
+            </th>
+          </tr>
+        </tbody>
+
       </table>
 
       <!-- - - - - - - - - - - - - - - - - - - - - -->
@@ -356,6 +618,29 @@
         </tbody>
       </table>
 
+#ifndef ANDROID
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
+
+      <h2 class="major-section">
+        &aboutSupport.placeDatabaseTitle;
+      </h2>
+
+      <table>
+        <tr class="no-copy">
+          <th class="column">
+            &aboutSupport.placeDatabaseIntegrity;
+          </th>
+
+          <td>
+            <button id="verify-place-integrity-button">
+              &aboutSupport.placeDatabaseVerifyIntegrity;
+            </button>
+            <pre id="verify-place-result" class="hidden no-copy"></pre>
+          </td>
+        </tr>
+      </table>
+#endif
+
       <!-- - - - - - - - - - - - - - - - - - - - - -->
       <h2 class="major-section">
         &aboutSupport.jsTitle;
@@ -397,6 +682,25 @@
             <td id="a11y-force-disabled">
             </td>
           </tr>
+#if defined(XP_WIN)
+          <tr>
+            <th class="column">
+              &aboutSupport.a11yHandlerUsed;
+            </th>
+
+            <td id="a11y-handler-used">
+            </td>
+          </tr>
+
+          <tr>
+            <th class="column">
+              &aboutSupport.a11yInstantiator;
+            </th>
+
+            <td id="a11y-instantiator">
+            </td>
+          </tr>
+#endif
         </tbody>
       </table>
 
@@ -410,43 +714,9 @@
         </tbody>
       </table>
 
-
-      <h2 class="major-section">
-        &aboutSupport.experimentsTitle;
-      </h2>
-
-      <table>
-        <thead>
-          <tr>
-            <th>
-              &aboutSupport.experimentName;
-            </th>
-            <th>
-              &aboutSupport.experimentId;
-            </th>
-            <th>
-              &aboutSupport.experimentDescription;
-            </th>
-            <th>
-              &aboutSupport.experimentActive;
-            </th>
-            <th>
-              &aboutSupport.experimentEndDate;
-            </th>
-            <th>
-              &aboutSupport.experimentHomepage;
-            </th>
-            <th>
-              &aboutSupport.experimentBranch;
-            </th>
-          </tr>
-        </thead>
-        <tbody id="experiments-tbody">
-        </tbody>
-      </table>
       <!-- - - - - - - - - - - - - - - - - - - - - -->
 
-#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+#if defined(MOZ_SANDBOX)
       <h2 class="major-section" id="sandbox">
 	&aboutSupport.sandboxTitle;
       </h2>
@@ -455,7 +725,111 @@
 	<tbody id="sandbox-tbody">
 	</tbody>
       </table>
+
+#if defined(XP_LINUX)
+      <h4>&aboutSupport.sandboxSyscallLogTitle;</h4>
+      <table>
+	<thead>
+	  <tr>
+	    <th>
+	      &aboutSupport.sandboxSyscallIndex;
+	    </th>
+	    <th>
+	      &aboutSupport.sandboxSyscallAge;
+	    </th>
+	    <th>
+	      &aboutSupport.sandboxSyscallPID;
+	    </th>
+	    <th>
+	      &aboutSupport.sandboxSyscallTID;
+	    </th>
+	    <th>
+	      &aboutSupport.sandboxSyscallProcType;
+	    </th>
+	    <th>
+	      &aboutSupport.sandboxSyscallNumber;
+	    </th>
+	    <th id="sandbox-syscalls-argshead">
+	      &aboutSupport.sandboxSyscallArgs;
+	    </th>
+	    </tr>
+	</thead>
+	<tbody id="sandbox-syscalls-tbody">
+	</tbody>
+      </table>
 #endif
+#endif
+
+      <h2 class="major-section">
+        &aboutSupport.intlTitle;
+      </h2>
+
+      <table>
+        <tbody id="intl-localeservice-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.intlAppTitle;
+            </th>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlLocalesRequested;
+            </th>
+            <td id="intl-locale-requested">
+            </td>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlLocalesAvailable;
+            </th>
+            <td id="intl-locale-available">
+            </td>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlLocalesSupported;
+            </th>
+            <td id="intl-locale-supported">
+            </td>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlRegionalPrefs;
+            </th>
+            <td id="intl-locale-regionalprefs">
+            </td>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlLocalesDefault;
+            </th>
+            <td id="intl-locale-default">
+            </td>
+          </tr>
+        </tbody>
+        <tbody id="intl-ospreferences-tbody">
+          <tr>
+            <th colspan="2" class="title-column">
+              &aboutSupport.intlOSTitle;
+            </th>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlOSPrefsSystemLocales;
+            </th>
+            <td id="intl-osprefs-systemlocales">
+            </td>
+          </tr>
+          <tr>
+            <th class="column">
+              &aboutSupport.intlRegionalPrefs;
+            </th>
+            <td id="intl-osprefs-regionalprefs">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- - - - - - - - - - - - - - - - - - - - - -->
 
     </div>
 

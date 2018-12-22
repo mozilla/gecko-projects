@@ -22,7 +22,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AudioParam)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AudioParam)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(AudioParam)
@@ -35,13 +34,17 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(AudioParam, Release)
 
 AudioParam::AudioParam(AudioNode* aNode,
                        uint32_t aIndex,
+                       const char* aName,
                        float aDefaultValue,
-                       const char* aName)
+                       float aMinValue,
+                       float aMaxValue)
   : AudioParamTimeline(aDefaultValue)
   , mNode(aNode)
   , mName(aName)
   , mIndex(aIndex)
   , mDefaultValue(aDefaultValue)
+  , mMinValue(aMinValue)
+  , mMaxValue(aMaxValue)
 {
 }
 
@@ -53,7 +56,7 @@ AudioParam::~AudioParam()
 JSObject*
 AudioParam::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AudioParamBinding::Wrap(aCx, this, aGivenProto);
+  return AudioParam_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -91,7 +94,8 @@ AudioParam::Stream()
   AudioNodeEngine* engine = new AudioNodeEngine(nullptr);
   RefPtr<AudioNodeStream> stream =
     AudioNodeStream::Create(mNode->Context(), engine,
-                            AudioNodeStream::NO_STREAM_FLAGS);
+                            AudioNodeStream::NO_STREAM_FLAGS,
+                            mNode->Context()->Graph());
 
   // Force the input to have only one channel, and make it down-mix using
   // the speaker rules if needed.
@@ -161,6 +165,15 @@ AudioParam::SendEventToEngine(const AudioTimelineEvent& aEvent)
   if (stream) {
     stream->SendTimelineEvent(mIndex, aEvent);
   }
+}
+
+void
+AudioParam::CleanupOldEvents()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  double currentTime = mNode->Context()->CurrentTime();
+
+  CleanupEventsOlderThan(currentTime);
 }
 
 float

@@ -66,6 +66,7 @@ typedef struct nr_transport_addr_ {
   /* A string version.
      56 = 5 ("IP6:[") + 39 (ipv6 address) + 2 ("]:") + 5 (port) + 4 (/UDP) + 1 (null) */
   char as_string[56];
+  char tls_host[256];
 } nr_transport_addr;
 
 typedef struct nr_transport_addr_mask_ {
@@ -92,11 +93,15 @@ int nr_transport_addr_is_wildcard(nr_transport_addr *addr);
 int nr_transport_addr_is_loopback(nr_transport_addr *addr);
 int nr_transport_addr_get_private_addr_range(nr_transport_addr *addr);
 int nr_transport_addr_is_link_local(nr_transport_addr *addr);
+int nr_transport_addr_is_mac_based(nr_transport_addr *addr);
+int nr_transport_addr_is_teredo(nr_transport_addr *addr);
+int nr_transport_addr_check_compatibility(nr_transport_addr *addr1, nr_transport_addr *addr2);
 int nr_transport_addr_copy(nr_transport_addr *to, nr_transport_addr *from);
 int nr_transport_addr_copy_keep_ifname(nr_transport_addr *to, nr_transport_addr *from);
 int nr_transport_addr_fmt_addr_string(nr_transport_addr *addr);
 int nr_transport_addr_fmt_ifname_addr_string(const nr_transport_addr *addr, char *buf, int len);
 int nr_transport_addr_set_port(nr_transport_addr *addr, int port);
+int nr_transport_addr_is_reliable_transport(nr_transport_addr *addr);
 
 #endif
 

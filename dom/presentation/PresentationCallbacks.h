@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,26 +20,44 @@ class nsIWebProgress;
 namespace mozilla {
 namespace dom {
 
+class PresentationConnection;
 class PresentationRequest;
 class Promise;
 
-class PresentationRequesterCallback final : public nsIPresentationServiceCallback
+class PresentationRequesterCallback : public nsIPresentationServiceCallback
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPRESENTATIONSERVICECALLBACK
 
   PresentationRequesterCallback(PresentationRequest* aRequest,
-                                const nsAString& aUrl,
                                 const nsAString& aSessionId,
                                 Promise* aPromise);
 
-private:
-  ~PresentationRequesterCallback();
+protected:
+  virtual ~PresentationRequesterCallback();
 
   RefPtr<PresentationRequest> mRequest;
   nsString mSessionId;
   RefPtr<Promise> mPromise;
+};
+
+class PresentationReconnectCallback final : public PresentationRequesterCallback
+{
+public:
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(PresentationReconnectCallback,
+                                       PresentationRequesterCallback)
+  NS_DECL_NSIPRESENTATIONSERVICECALLBACK
+
+  PresentationReconnectCallback(PresentationRequest* aRequest,
+                                const nsAString& aSessionId,
+                                Promise* aPromise,
+                                PresentationConnection* aConnection);
+
+private:
+  virtual ~PresentationReconnectCallback();
+
+  RefPtr<PresentationConnection> mConnection;
 };
 
 class PresentationResponderLoadingCallback final : public nsIWebProgressListener
@@ -56,7 +74,7 @@ public:
 private:
   ~PresentationResponderLoadingCallback();
 
-  nsresult NotifyReceiverReady();
+  nsresult NotifyReceiverReady(bool aIsLoading);
 
   nsString mSessionId;
   nsCOMPtr<nsIWebProgress> mProgress;

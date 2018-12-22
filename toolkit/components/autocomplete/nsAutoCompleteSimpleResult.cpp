@@ -43,8 +43,7 @@ struct AutoCompleteSimpleResultMatch
 
 nsAutoCompleteSimpleResult::nsAutoCompleteSimpleResult() :
   mDefaultIndex(-1),
-  mSearchResult(RESULT_NOMATCH),
-  mTypeAheadResult(false)
+  mSearchResult(RESULT_NOMATCH)
 {
 }
 
@@ -65,12 +64,6 @@ nsAutoCompleteSimpleResult::AppendResult(nsIAutoCompleteResult* aResult)
   if (NS_SUCCEEDED(aResult->GetErrorDescription(errorDescription)) &&
       !errorDescription.IsEmpty()) {
     mErrorDescription = errorDescription;
-  }
-
-  bool typeAheadResult = false;
-  if (NS_SUCCEEDED(aResult->GetTypeAheadResult(&typeAheadResult)) &&
-      typeAheadResult) {
-    mTypeAheadResult = typeAheadResult;
   }
 
   int32_t defaultIndex = -1;
@@ -173,20 +166,6 @@ nsAutoCompleteSimpleResult::SetErrorDescription(
   return NS_OK;
 }
 
-// typeAheadResult
-NS_IMETHODIMP
-nsAutoCompleteSimpleResult::GetTypeAheadResult(bool *aTypeAheadResult)
-{
-  *aTypeAheadResult = mTypeAheadResult;
-  return NS_OK;
-}
-NS_IMETHODIMP
-nsAutoCompleteSimpleResult::SetTypeAheadResult(bool aTypeAheadResult)
-{
-  mTypeAheadResult = aTypeAheadResult;
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 nsAutoCompleteSimpleResult::InsertMatchAt(int32_t aIndex,
                                           const nsAString& aValue,
@@ -217,6 +196,15 @@ nsAutoCompleteSimpleResult::AppendMatch(const nsAString& aValue,
 {
   return InsertMatchAt(mMatches.Length(), aValue, aComment, aImage, aStyle,
                        aFinalCompleteValue, aLabel);
+}
+
+NS_IMETHODIMP
+nsAutoCompleteSimpleResult::RemoveMatchAt(int32_t aIndex)
+{
+  CHECK_MATCH_INDEX(aIndex, false);
+
+  mMatches.RemoveElementAt(aIndex);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

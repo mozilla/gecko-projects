@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/WheelEvent.h"
 #include "mozilla/MouseEvents.h"
 #include "prtime.h"
@@ -25,33 +26,27 @@ WheelEvent::WheelEvent(EventTarget* aOwner,
     // device pixels.  However, JS contents need the delta values in CSS pixels.
     // We should store the value of mAppUnitsPerDevPixel here because
     // it might be changed by changing zoom or something.
-    if (aWheelEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
+    if (aWheelEvent->mDeltaMode == WheelEvent_Binding::DOM_DELTA_PIXEL) {
       mAppUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
     }
   } else {
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
-    mEvent->AsWheelEvent()->inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
+    mEvent->AsWheelEvent()->inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
   }
 }
-
-NS_IMPL_ADDREF_INHERITED(WheelEvent, MouseEvent)
-NS_IMPL_RELEASE_INHERITED(WheelEvent, MouseEvent)
-
-NS_INTERFACE_MAP_BEGIN(WheelEvent)
-NS_INTERFACE_MAP_END_INHERITING(MouseEvent)
 
 void
 WheelEvent::InitWheelEvent(const nsAString& aType,
                            bool aCanBubble,
                            bool aCancelable,
-                           nsGlobalWindow* aView,
+                           nsGlobalWindowInner* aView,
                            int32_t aDetail,
                            int32_t aScreenX,
                            int32_t aScreenY,
                            int32_t aClientX,
-                           int32_t aClientY, 
+                           int32_t aClientY,
                            uint16_t aButton,
                            EventTarget* aRelatedTarget,
                            const nsAString& aModifiersList,
@@ -60,6 +55,8 @@ WheelEvent::InitWheelEvent(const nsAString& aType,
                            double aDeltaZ,
                            uint32_t aDeltaMode)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   MouseEvent::InitMouseEvent(aType, aCanBubble, aCancelable, aView, aDetail,
                              aScreenX, aScreenY, aClientX, aClientY, aButton,
                              aRelatedTarget, aModifiersList);
@@ -125,6 +122,7 @@ WheelEvent::Constructor(const GlobalObject& aGlobal,
                     aParam.mDeltaY, aParam.mDeltaZ, aParam.mDeltaMode);
   e->InitializeExtraMouseEventDictionaryMembers(aParam);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 

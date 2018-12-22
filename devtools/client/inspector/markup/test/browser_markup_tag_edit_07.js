@@ -16,7 +16,7 @@ const DATA_URL_INLINE_STYLE='color: red; background: url("data:image/png;base64,
 const DATA_URL_INLINE_STYLE_COLLAPSED='color: red; background: url("data:image/png;base64,iVBORw0KG\u2026NDDeNGe4Ug9C9zwz3gVLMDA/A6P9/AFGGFyjOXZtQAAAAAElFTkSuQmCC");';
 const DATA_URL_ATTRIBUTE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEUAAAD///+l2Z/dAAAAM0lEQVR4nGP4/5/h/1+G/58ZDrAz3D/McH8yw83NDDeNGe4Ug9C9zwz3gVLMDA/A6P9/AFGGFyjOXZtQAAAAAElFTkSuQmCC";
 const DATA_URL_ATTRIBUTE_COLLAPSED = "data:image/png;base64,iVBORw0K\u20269/AFGGFyjOXZtQAAAAAElFTkSuQmCC";
-/*eslint-enable */
+/* eslint-enable */
 
 var TEST_URL = "data:text/html,<div>markup-view attributes addition test</div>";
 var TEST_DATA = [{
@@ -49,8 +49,8 @@ var TEST_DATA = [{
     "style": DATA_URL_INLINE_STYLE
   },
   validate: (container, inspector) => {
-    let editor = container.editor;
-    let visibleAttrText = editor.attrElements.get("style")
+    const editor = container.editor;
+    const visibleAttrText = editor.attrElements.get("style")
                                              .querySelector(".attr-value")
                                              .textContent;
     is(visibleAttrText, DATA_URL_INLINE_STYLE_COLLAPSED);
@@ -63,8 +63,8 @@ var TEST_DATA = [{
     "data-long": LONG_ATTRIBUTE
   },
   validate: (container, inspector) => {
-    let editor = container.editor;
-    let visibleAttrText = editor.attrElements.get("data-long")
+    const editor = container.editor;
+    const visibleAttrText = editor.attrElements.get("data-long")
                                              .querySelector(".attr-value")
                                              .textContent;
     is(visibleAttrText, LONG_ATTRIBUTE_COLLAPSED);
@@ -77,8 +77,8 @@ var TEST_DATA = [{
     "src": DATA_URL_ATTRIBUTE
   },
   validate: (container, inspector) => {
-    let editor = container.editor;
-    let visibleAttrText = editor.attrElements.get("src")
+    const editor = container.editor;
+    const visibleAttrText = editor.attrElements.get("src")
                                 .querySelector(".attr-value").textContent;
     is(visibleAttrText, DATA_URL_ATTRIBUTE_COLLAPSED);
   }
@@ -93,8 +93,8 @@ var TEST_DATA = [{
     Services.prefs.setBoolPref("devtools.markup.collapseAttributes", false);
   },
   validate: (container, inspector) => {
-    let editor = container.editor;
-    let visibleAttrText = editor.attrElements
+    const editor = container.editor;
+    const visibleAttrText = editor.attrElements
       .get("data-long")
       .querySelector(".attr-value")
       .textContent;
@@ -113,11 +113,11 @@ var TEST_DATA = [{
     Services.prefs.setIntPref("devtools.markup.collapseAttributeLength", 2);
   },
   validate: (container, inspector) => {
-    let firstChar = LONG_ATTRIBUTE[0];
-    let lastChar = LONG_ATTRIBUTE[LONG_ATTRIBUTE.length - 1];
-    let collapsed = firstChar + "\u2026" + lastChar;
-    let editor = container.editor;
-    let visibleAttrText = editor.attrElements
+    const firstChar = LONG_ATTRIBUTE[0];
+    const lastChar = LONG_ATTRIBUTE[LONG_ATTRIBUTE.length - 1];
+    const collapsed = firstChar + "\u2026" + lastChar;
+    const editor = container.editor;
+    const visibleAttrText = editor.attrElements
       .get("data-long")
       .querySelector(".attr-value")
       .textContent;
@@ -128,8 +128,8 @@ var TEST_DATA = [{
   }
 }];
 
-add_task(function*() {
-  let {inspector, testActor} = yield openInspectorForURL(TEST_URL);
-  yield runAddAttributesTests(TEST_DATA, "div", inspector, testActor);
+add_task(async function() {
+  const {inspector, testActor} = await openInspectorForURL(TEST_URL);
+  await runAddAttributesTests(TEST_DATA, "div", inspector, testActor);
 });
 

@@ -62,12 +62,7 @@
       text-decoration: underline;
     }
   ]]></style>
-  <script type="application/javascript;version=1.7"><![CDATA[
-    if (Cc === undefined) {
-      var Cc = Components.classes;
-      var Ci = Components.interfaces;
-    }
-
+  <script type="application/javascript"><![CDATA[
     var gConfig;
 
     var gDumper = {
@@ -115,6 +110,7 @@
     function browserTest(aTestFile) {
       this.path = aTestFile['url'];
       this.expected = aTestFile['expected'];
+      this.usesUnsafeCPOWs = aTestFile['uses-unsafe-cpows'] || false;
       this.dumper = gDumper;
       this.results = [];
       this.scope = null;
@@ -131,6 +127,9 @@
       },
       get failCount() {
         return this.results.filter(t => !t.info && !t.pass).length;
+      },
+      get allowedFailureCount() {
+        return this.results.filter(t => t.allowedFailure).length;
       },
 
       addResult: function addResult(result) {
@@ -257,7 +256,7 @@
 
     function executeSoon(callback) {
       let tm = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
-      tm.mainThread.dispatch(callback, Ci.nsIThread.DISPATCH_NORMAL);
+      tm.dispatchToMainThread(callback);
     }
 
     function waitForFocus(callback, win) {

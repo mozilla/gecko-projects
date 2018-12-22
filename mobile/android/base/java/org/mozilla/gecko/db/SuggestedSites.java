@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,8 +42,11 @@ import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.restrictions.Restrictions;
+import org.mozilla.gecko.util.IOUtils;
 import org.mozilla.gecko.util.RawResource;
+import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.preferences.GeckoPreferences;
 
 /**
  * {@code SuggestedSites} provides API to get a list of locale-specific
@@ -68,10 +72,12 @@ public class SuggestedSites {
     private static final String LOGTAG = "GeckoSuggestedSites";
 
     // SharedPreference key for suggested sites that should be hidden.
-    public static final String PREF_SUGGESTED_SITES_HIDDEN = "suggestedSites.hidden";
+    public static final String PREF_SUGGESTED_SITES_HIDDEN = GeckoPreferences.NON_PREF_PREFIX + "suggestedSites.hidden";
+    public static final String PREF_SUGGESTED_SITES_HIDDEN_OLD = "suggestedSites.hidden";
 
     // Locale used to generate the current suggested sites.
-    public static final String PREF_SUGGESTED_SITES_LOCALE = "suggestedSites.locale";
+    public static final String PREF_SUGGESTED_SITES_LOCALE = GeckoPreferences.NON_PREF_PREFIX + "suggestedSites.locale";
+    public static final String PREF_SUGGESTED_SITES_LOCALE_OLD = "suggestedSites.locale";
 
     // File in profile dir with the list of suggested sites.
     private static final String FILENAME = "suggestedsites.json";
@@ -80,6 +86,7 @@ public class SuggestedSites {
         BrowserContract.SuggestedSites._ID,
         BrowserContract.SuggestedSites.URL,
         BrowserContract.SuggestedSites.TITLE,
+        BrowserContract.Combined.HISTORY_ID
     };
 
     private static final String JSON_KEY_URL = "url";
@@ -101,16 +108,6 @@ public class SuggestedSites {
             this.title = json.getString(JSON_KEY_TITLE);
             this.imageUrl = json.getString(JSON_KEY_IMAGE_URL);
             this.bgColor = json.getString(JSON_KEY_BG_COLOR);
-
-            validate();
-        }
-
-        public Site(String url, String title, String imageUrl, String bgColor) {
-            this.url = url;
-            this.title = title;
-            this.imageUrl = imageUrl;
-            this.bgColor = bgColor;
-            this.restricted = false;
 
             validate();
         }
@@ -155,6 +152,7 @@ public class SuggestedSites {
     final Distribution distribution;
     private File cachedFile;
     private Map<String, Site> cachedSites;
+    private Map<String, Site> cachedDistributionSites; // to be kept in sync with cachedSites.
     private Set<String> cachedBlacklist;
 
     public SuggestedSites(Context appContext) {
@@ -181,7 +179,16 @@ public class SuggestedSites {
     private static boolean isNewLocale(Context context, Locale requestedLocale) {
         final SharedPreferences prefs = GeckoSharedPrefs.forProfile(context);
 
-        String locale = prefs.getString(PREF_SUGGESTED_SITES_LOCALE, null);
+        String locale = prefs.getString(PREF_SUGGESTED_SITES_LOCALE_OLD, null);
+        if (locale != null) {
+          // Migrate the old pref and remove it
+          final Editor editor = prefs.edit();
+          editor.remove(PREF_SUGGESTED_SITES_LOCALE_OLD);
+          editor.putString(PREF_SUGGESTED_SITES_LOCALE, locale);
+          editor.apply();
+        } else {
+          locale = prefs.getString(PREF_SUGGESTED_SITES_LOCALE, null);
+        }
         if (locale == null) {
             // Initialize config with the current locale
             updateSuggestedSitesLocale(context);
@@ -255,7 +262,7 @@ public class SuggestedSites {
             return;
         }
 
-        OutputStreamWriter osw = null;
+        OutputStreamWriter outputStreamWriter = null;
 
         try {
             final JSONArray jsonSites = new JSONArray();
@@ -263,20 +270,14 @@ public class SuggestedSites {
                 jsonSites.put(site.toJSON());
             }
 
-            osw = new OutputStreamWriter(new FileOutputStream(f), "UTF-8");
+            outputStreamWriter = new OutputStreamWriter(new FileOutputStream(f), StringUtils.UTF_8);
 
             final String jsonString = jsonSites.toString();
-            osw.write(jsonString, 0, jsonString.length());
+            outputStreamWriter.write(jsonString, 0, jsonString.length());
         } catch (Exception e) {
             Log.e(LOGTAG, "Failed to save suggested sites", e);
         } finally {
-            if (osw != null) {
-                try {
-                    osw.close();
-                } catch (IOException e) {
-                    // Ignore.
-                }
-            }
+            IOUtils.safeStreamClose(outputStreamWriter);
         }
     }
 
@@ -380,6 +381,30 @@ public class SuggestedSites {
     private synchronized void setCachedSites(Map<String, Site> sites) {
         cachedSites = Collections.unmodifiableMap(sites);
         updateSuggestedSitesLocale(context);
+        cachedDistributionSites = getDistributionSites(cachedSites, loadFromResource());
+    }
+
+    /**
+     * Gets the list of distribution sites from the list of all suggested sites and those drawn from the resources.
+     *
+     * This isn't the most efficient way to get the distribution sites, especially since we currently call
+     * {@link #loadFromResource()} an additional time to get our list of sites in resources. However, I
+     * found this to be the simplest approach. One alternative was to store the is-from-distribution state in
+     * the saved-site JSON files but the same code that reads these files also reads the distribution files and
+     * the resource file so each of these would also need explicit `isFromDistribution` flags, which is annoying
+     * to write and would create a lot of churn. I found the addition of this method and a cached value to be much
+     * simpler to add (and perhaps later remove).
+     */
+    private static Map<String, Site> getDistributionSites(final Map<String, Site> allSuggestedSites,
+            final Map<String, Site> suggestedSitesFromResources) {
+        final Set<String> allSitesURLsCopy = new HashSet<>(allSuggestedSites.keySet());
+        allSitesURLsCopy.removeAll(suggestedSitesFromResources.keySet());
+
+        final Map<String, Site> distributionSites = new HashMap<>(allSitesURLsCopy.size());
+        for (final String distributionSiteURL : allSitesURLsCopy) {
+            distributionSites.put(distributionSiteURL, allSuggestedSites.get(distributionSiteURL));
+        }
+        return distributionSites;
     }
 
     /**
@@ -478,7 +503,15 @@ public class SuggestedSites {
         Log.d(LOGTAG, "Number of suggested sites: " + sitesCount);
 
         final int maxCount = Math.min(limit, sitesCount);
+        // History IDS: real history is positive, -1 is no history id in the combined table
+        // hence we can start at -2 for suggested sites
+        int id = -1;
         for (Site site : cachedSites.values()) {
+            // Decrement ID here: this ensure we have a consistent ID to URL mapping, even if items
+            // are removed. If we instead decremented at the point of insertion we'd end up with
+            // ID conflicts when a suggested site is removed. (note that cachedSites does not change
+            // while we're already showing topsites)
+            --id;
             if (cursor.getCount() == maxCount) {
                 break;
             }
@@ -491,9 +524,10 @@ public class SuggestedSites {
 
             if (restrictedProfile == site.restricted) {
                 final RowBuilder row = cursor.newRow();
-                row.add(-1);
+                row.add(id);
                 row.add(site.url);
                 row.add(site.title);
+                row.add(id);
             }
         }
 
@@ -505,6 +539,19 @@ public class SuggestedSites {
 
     public boolean contains(String url) {
         return (getSiteForUrl(url) != null);
+    }
+
+    /**
+     * Returns whether or not the url both represents a suggested site
+     * and was added to suggested sites by a distribution.
+     *
+     * We synchronize over our access to {@link #cachedDistributionSites},
+     * like we synchronize over all uses of {@link #cachedSites}.
+     */
+    public synchronized boolean containsSiteAndSiteIsFromDistribution(final String url) {
+        return cachedDistributionSites != null &&
+                contains(url) &&
+                cachedDistributionSites.containsKey(url);
     }
 
     public String getImageUrlForUrl(String url) {
@@ -521,8 +568,17 @@ public class SuggestedSites {
         Log.d(LOGTAG, "Loading blacklisted suggested sites from SharedPreferences.");
         final Set<String> blacklist = new HashSet<String>();
 
-        final SharedPreferences preferences = GeckoSharedPrefs.forProfile(context);
-        final String sitesString = preferences.getString(PREF_SUGGESTED_SITES_HIDDEN, null);
+        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(context);
+        String sitesString = prefs.getString(PREF_SUGGESTED_SITES_HIDDEN_OLD, null);
+        if (sitesString != null) {
+          // Migrate the old pref and remove it
+          final Editor editor = prefs.edit();
+          editor.remove(PREF_SUGGESTED_SITES_HIDDEN_OLD);
+          editor.putString(PREF_SUGGESTED_SITES_HIDDEN, sitesString);
+          editor.apply();
+        } else {
+          sitesString = prefs.getString(PREF_SUGGESTED_SITES_HIDDEN, null);
+        }
 
         if (sitesString != null) {
             for (String site : sitesString.trim().split(" ")) {

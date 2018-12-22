@@ -33,10 +33,14 @@ protected:
 protected:
   nsCOMPtr<nsIURI> mReferrer;
   nsCOMPtr<nsIURI> mOriginalURI;
-  nsCOMPtr<nsISupports> mOwner;
+  nsCOMPtr<nsIURI> mResultPrincipalURI;
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
+  bool mResultPrincipalURIIsSome;
   bool mLoadReplace;
-  bool mInheritOwner;
-  bool mOwnerIsExplicit;
+  bool mInheritPrincipal;
+  bool mPrincipalIsExplicit;
+  bool mForceAllowDataURI;
+  bool mOriginalFrameSrc;
   bool mSendReferrer;
   nsDocShellInfoReferrerPolicy mReferrerPolicy;
   nsDocShellInfoLoadType mLoadType;

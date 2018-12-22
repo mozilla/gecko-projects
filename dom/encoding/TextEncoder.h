@@ -10,7 +10,7 @@
 #include "mozilla/dom/NonRefcountedDOMObject.h"
 #include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/TypedArray.h"
-#include "nsIUnicodeEncoder.h"
+#include "mozilla/Encoding.h"
 
 namespace mozilla {
 class ErrorResult;
@@ -41,7 +41,7 @@ public:
 
   bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector)
   {
-    return TextEncoderBinding::Wrap(aCx, this, aGivenProto, aReflector);
+    return TextEncoder_Binding::Wrap(aCx, this, aGivenProto, aReflector);
   }
 
 protected:
@@ -70,8 +70,6 @@ public:
               const nsAString& aString,
               JS::MutableHandle<JSObject*> aRetval,
               ErrorResult& aRv);
-private:
-  nsCOMPtr<nsIUnicodeEncoder> mEncoder;
 };
 
 } // namespace dom

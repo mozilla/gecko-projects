@@ -11,11 +11,14 @@
 
 #include "nsISupports.h"
 #include "nsMemory.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "xpctest_attributes.h"
 #include "xpctest_params.h"
 #include "xpctest_returncode.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ModuleUtils.h"
+
+extern const mozilla::Module kXPCTestModule;
 
 class xpcTestObjectReadOnly final : public nsIXPCTestObjectReadOnly {
  public:

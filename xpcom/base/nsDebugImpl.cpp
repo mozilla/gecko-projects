@@ -8,12 +8,12 @@
 #include "base/process_util.h"
 
 #include "mozilla/Atomics.h"
+#include "mozilla/Printf.h"
 
+#include "MainThreadUtils.h"
 #include "nsDebugImpl.h"
 #include "nsDebug.h"
-#ifdef MOZ_CRASHREPORTER
-# include "nsExceptionHandler.h"
-#endif
+#include "nsExceptionHandler.h"
 #include "nsString.h"
 #include "nsXULAppAPI.h"
 #include "prprf.h"
@@ -147,6 +147,16 @@ nsDebugImpl::Abort(const char* aFile, int32_t aLine)
   return NS_OK;
 }
 
+// From toolkit/library/rust/lib.rs
+extern "C" void intentional_panic(const char* message);
+
+NS_IMETHODIMP
+nsDebugImpl::RustPanic(const char* aMessage)
+{
+  intentional_panic(aMessage);
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsDebugImpl::GetIsDebugBuild(bool* aResult)
 {
@@ -211,6 +221,12 @@ nsDebugImpl::SetMultiprocessMode(const char* aDesc)
   sMultiprocessDescription = aDesc;
 }
 
+/* static */ const char *
+nsDebugImpl::GetMultiprocessMode()
+{
+  return sMultiprocessDescription;
+}
+
 /**
  * Implementation of the nsDebug methods. Note that this code is
  * always compiled in, in case some other module that uses it is
@@ -264,48 +280,47 @@ GetAssertBehavior()
   return gAssertBehavior;
 }
 
-struct FixedBuffer
+struct FixedBuffer final : public mozilla::PrintfTarget
 {
   FixedBuffer() : curlen(0)
   {
     buffer[0] = '\0';
   }
 
-  char buffer[1000];
+  char buffer[500];
   uint32_t curlen;
+
+  bool append(const char* sp, size_t len) override;
 };
 
-static int
-StuffFixedBuffer(void* aClosure, const char* aBuf, uint32_t aLen)
+bool
+FixedBuffer::append(const char* aBuf, size_t aLen)
 {
   if (!aLen) {
-    return 0;
+    return true;
   }
 
-  FixedBuffer* fb = (FixedBuffer*)aClosure;
-
-  // strip the trailing null, we add it again later
-  if (aBuf[aLen - 1] == '\0') {
-    --aLen;
-  }
-
-  if (fb->curlen + aLen >= sizeof(fb->buffer)) {
-    aLen = sizeof(fb->buffer) - fb->curlen - 1;
+  if (curlen + aLen >= sizeof(buffer)) {
+    aLen = sizeof(buffer) - curlen - 1;
   }
 
   if (aLen) {
-    memcpy(fb->buffer + fb->curlen, aBuf, aLen);
-    fb->curlen += aLen;
-    fb->buffer[fb->curlen] = '\0';
+    memcpy(buffer + curlen, aBuf, aLen);
+    curlen += aLen;
+    buffer[curlen] = '\0';
   }
 
-  return aLen;
+  return true;
 }
 
 EXPORT_XPCOM_API(void)
 NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
               const char* aFile, int32_t aLine)
 {
+  // Allow messages to be printed during GC if we are recording or replaying.
+  recordreplay::AutoEnsurePassThroughThreadEvents pt;
+
+  FixedBuffer nonPIDBuf;
   FixedBuffer buf;
   const char* sevString = "WARNING";
 
@@ -326,32 +341,36 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       aSeverity = NS_DEBUG_WARNING;
   }
 
-#  define PrintToBuffer(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
-
-  // Print "[PID]" or "[Desc PID]" at the beginning of the message.
-  PrintToBuffer("[");
-  if (sMultiprocessDescription) {
-    PrintToBuffer("%s ", sMultiprocessDescription);
-  }
-
-  PrintToBuffer("%d] ", base::GetCurrentProcId());
-
-  PrintToBuffer("%s: ", sevString);
-
+  nonPIDBuf.print("%s: ", sevString);
   if (aStr) {
-    PrintToBuffer("%s: ", aStr);
+    nonPIDBuf.print("%s: ", aStr);
   }
   if (aExpr) {
-    PrintToBuffer("'%s', ", aExpr);
+    nonPIDBuf.print("'%s', ", aExpr);
   }
   if (aFile) {
-    PrintToBuffer("file %s, ", aFile);
+    nonPIDBuf.print("file %s, ", aFile);
   }
   if (aLine != -1) {
-    PrintToBuffer("line %d", aLine);
+    nonPIDBuf.print("line %d", aLine);
   }
 
-#  undef PrintToBuffer
+  // Print "[PID]" or "[Desc PID]" at the beginning of the message.
+  buf.print("[");
+  if (sMultiprocessDescription) {
+    buf.print("%s ", sMultiprocessDescription);
+  }
+
+  bool isMainthread = (NS_IsMainThreadTLSInitialized() && NS_IsMainThread());
+  PRThread *currentThread = PR_GetCurrentThread();
+  const char *currentThreadName = isMainthread
+    ? "Main Thread"
+    : PR_GetThreadName(currentThread);
+  if(currentThreadName) {
+    buf.print("%d, %s] %s", base::GetCurrentProcId(), currentThreadName , nonPIDBuf.buffer);
+  } else {
+    buf.print("%d, Unnamed thread %p] %s", base::GetCurrentProcId(), currentThread, nonPIDBuf.buffer);
+  }
 
   // errors on platforms without a debugdlg ring a bell on stderr
 #if !defined(XP_WIN)
@@ -380,19 +399,19 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       return;
 
     case NS_DEBUG_ABORT: {
-#if defined(MOZ_CRASHREPORTER)
       // Updating crash annotations in the child causes us to do IPC. This can
       // really cause trouble if we're asserting from within IPC code. So we
       // have to do without the annotations in that case.
       if (XRE_IsParentProcess()) {
+        // Don't include the PID in the crash report annotation to
+        // allow faceting on crash-stats.mozilla.org.
         nsCString note("xpcom_runtime_abort(");
-        note += buf.buffer;
+        note += nonPIDBuf.buffer;
         note += ")";
         CrashReporter::AppendAppNotesToCrashReport(note);
         CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AbortMessage"),
-                                           nsDependentCString(buf.buffer));
+                                           nsDependentCString(nonPIDBuf.buffer));
       }
-#endif  // MOZ_CRASHREPORTER
 
 #if defined(DEBUG) && defined(_WIN32)
       RealBreak();
@@ -467,6 +486,8 @@ RealBreak()
     ".object_arch armv4t\n"
 #endif
     "BKPT #0");
+#elif defined(__aarch64__)
+  asm("brk #0");
 #elif defined(SOLARIS)
 #if defined(__i386__) || defined(__i386) || defined(__x86_64__)
   asm("int $3");
@@ -545,7 +566,7 @@ Break(const char* aMsg)
   RealBreak();
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__i386) || defined(__x86_64__))
   RealBreak();
-#elif defined(__arm__)
+#elif defined(__arm__) || defined(__aarch64__)
   RealBreak();
 #elif defined(SOLARIS)
   RealBreak();
@@ -598,8 +619,6 @@ NS_ErrorAccordingToNSPR()
 void
 NS_ABORT_OOM(size_t aSize)
 {
-#if defined(MOZ_CRASHREPORTER)
   CrashReporter::AnnotateOOMAllocationSize(aSize);
-#endif
-  MOZ_CRASH();
+  MOZ_CRASH("OOM");
 }

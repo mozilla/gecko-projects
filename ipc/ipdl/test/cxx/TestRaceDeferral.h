@@ -24,15 +24,16 @@ public:
 protected:
     void Test1();
 
-    virtual bool AnswerLose() override;
+    virtual mozilla::ipc::IPCResult AnswerLose() override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) override;
+    MediateInterruptRace(const MessageInfo& parent,
+                         const MessageInfo& child) override;
 
     virtual void ActorDestroy(ActorDestroyReason why) override
     {
         if (NormalShutdown != why)
-            fail("unexpected destruction!");  
+            fail("unexpected destruction!");
         passed("ok");
         QuitParent();
     }
@@ -49,14 +50,15 @@ public:
     virtual ~TestRaceDeferralChild();
 
 protected:
-    virtual bool RecvStartRace() override;
+    virtual mozilla::ipc::IPCResult RecvStartRace() override;
 
-    virtual bool AnswerWin() override;
+    virtual mozilla::ipc::IPCResult AnswerWin() override;
 
-    virtual bool AnswerRpc() override;
+    virtual mozilla::ipc::IPCResult AnswerRpc() override;
 
     virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) override;
+    MediateInterruptRace(const MessageInfo& parent,
+                         const MessageInfo& child) override;
 
     virtual void ActorDestroy(ActorDestroyReason why) override
     {

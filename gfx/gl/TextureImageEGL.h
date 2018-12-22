@@ -26,17 +26,11 @@ public:
 
     virtual ~TextureImageEGL();
 
-    virtual void GetUpdateRegion(nsIntRegion& aForRegion);
+    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0)) override;
 
-    virtual gfx::DrawTarget* BeginUpdate(nsIntRegion& aRegion);
+    virtual void BindTexture(GLenum aTextureUnit) override;
 
-    virtual void EndUpdate();
-
-    virtual bool DirectUpdate(gfx::DataSourceSurface* aSurf, const nsIntRegion& aRegion, const gfx::IntPoint& aFrom = gfx::IntPoint(0,0));
-
-    virtual void BindTexture(GLenum aTextureUnit);
-
-    virtual GLuint GetTextureID()
+    virtual GLuint GetTextureID() override
     {
         // Ensure the texture is allocated before it is used.
         if (mTextureState == Created) {
@@ -45,9 +39,7 @@ public:
         return mTexture;
     };
 
-    virtual bool InUpdate() const { return !!mUpdateDrawTarget; }
-
-    virtual void Resize(const gfx::IntSize& aSize);
+    virtual void Resize(const gfx::IntSize& aSize) override;
 
     bool BindTexImage();
 
@@ -65,9 +57,7 @@ protected:
 
     GLContext* mGLContext;
 
-    gfx::IntRect mUpdateRect;
     gfx::SurfaceFormat mUpdateFormat;
-    RefPtr<gfx::DrawTarget> mUpdateDrawTarget;
     EGLImage mEGLImage;
     GLuint mTexture;
     EGLSurface mSurface;
@@ -78,7 +68,7 @@ protected:
 };
 
 already_AddRefed<TextureImage>
-CreateTextureImageEGL(GLContext *gl,
+CreateTextureImageEGL(GLContext* gl,
                       const gfx::IntSize& aSize,
                       TextureImage::ContentType aContentType,
                       GLenum aWrapMode,
@@ -86,7 +76,7 @@ CreateTextureImageEGL(GLContext *gl,
                       TextureImage::ImageFormat aImageFormat);
 
 already_AddRefed<TextureImage>
-TileGenFuncEGL(GLContext *gl,
+TileGenFuncEGL(GLContext* gl,
                const gfx::IntSize& aSize,
                TextureImage::ContentType aContentType,
                TextureImage::Flags aFlags,

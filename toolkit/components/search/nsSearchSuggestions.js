@@ -2,13 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/nsFormAutoCompleteResult.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SearchSuggestionController",
-                                  "resource://gre/modules/SearchSuggestionController.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/nsFormAutoCompleteResult.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "SearchSuggestionController",
+                               "resource://gre/modules/SearchSuggestionController.jsm");
 
 /**
  * SuggestAutoComplete is a base class that implements nsIAutoCompleteSearch
@@ -23,16 +21,9 @@ function SuggestAutoComplete() {
 }
 SuggestAutoComplete.prototype = {
 
-  _init: function() {
+  _init() {
     this._suggestionController = new SearchSuggestionController(obj => this.onResultsReturned(obj));
     this._suggestionController.maxLocalResults = this._historyLimit;
-  },
-
-  get _suggestionLabel() {
-    let bundle = Services.strings.createBundle("chrome://global/locale/search/search.properties");
-    let label = bundle.GetStringFromName("suggestion_label");
-    Object.defineProperty(SuggestAutoComplete.prototype, "_suggestionLabel", {value: label});
-    return label;
   },
 
   /**
@@ -54,7 +45,7 @@ SuggestAutoComplete.prototype = {
    * Callback for handling results from SearchSuggestionController.jsm
    * @private
    */
-  onResultsReturned: function(results) {
+  onResultsReturned(results) {
     let finalResults = [];
     let finalComments = [];
 
@@ -66,9 +57,8 @@ SuggestAutoComplete.prototype = {
 
     // If there are remote matches, add them.
     if (results.remote.length) {
-      // "comments" column values for suggestions starts as empty strings
-      let comments = new Array(results.remote.length).fill("", 1);
-      comments[0] = this._suggestionLabel;
+      // "comments" column values for suggestions are empty strings
+      let comments = new Array(results.remote.length).fill("");
       // now put the history results above the suggestions
       finalResults = finalResults.concat(results.remote);
       finalComments = finalComments.concat(comments);
@@ -85,7 +75,7 @@ SuggestAutoComplete.prototype = {
    * @param comments      an array of metadata corresponding to the results
    * @private
    */
-  onResultsReady: function(searchString, results, comments, formHistoryResult) {
+  onResultsReady(searchString, results, comments, formHistoryResult) {
     if (this._listener) {
       // Create a copy of the results array to use as labels, since
       // FormAutoCompleteResult doesn't like being passed the same array
@@ -122,7 +112,7 @@ SuggestAutoComplete.prototype = {
    * @param listener        object implementing nsIAutoCompleteObserver which
    *                        we notify when results are ready.
    */
-  startSearch: function(searchString, searchParam, previousResult, listener) {
+  startSearch(searchString, searchParam, previousResult, listener) {
     // Don't reuse a previous form history result when it no longer applies.
     if (!previousResult)
       this._formHistoryResult = null;
@@ -145,19 +135,19 @@ SuggestAutoComplete.prototype = {
       return;
     }
 
-    Services.search.init((function startSearch_cb(aResult) {
+    Services.search.init(aResult => {
       if (!Components.isSuccessCode(aResult)) {
         Cu.reportError("Could not initialize search service, bailing out: " + aResult);
         return;
       }
       this._triggerSearch(searchString, formHistorySearchParam, listener, privacyMode);
-    }).bind(this));
+    });
   },
 
   /**
    * Actual implementation of search.
    */
-  _triggerSearch: function(searchString, searchParam, listener, privacyMode) {
+  _triggerSearch(searchString, searchParam, listener, privacyMode) {
     this._listener = listener;
     this._suggestionController.fetch(searchString,
                                      privacyMode,
@@ -168,13 +158,13 @@ SuggestAutoComplete.prototype = {
    * Ends the search result gathering process. Part of nsIAutoCompleteSearch
    * implementation.
    */
-  stopSearch: function() {
+  stopSearch() {
     this._suggestionController.stop();
   },
 
   // nsISupports
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompleteSearch,
-                                         Ci.nsIAutoCompleteObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteSearch,
+                                          Ci.nsIAutoCompleteObserver])
 };
 
 /**

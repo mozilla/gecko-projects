@@ -9,7 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "nsIIPCBackgroundChildCreateCallback.h"
+#include "nsAutoPtr.h"
 #include "nsTArray.h"
 
 #ifdef XP_WIN
@@ -21,25 +21,18 @@ class nsIGlobalObject;
 namespace mozilla {
 namespace dom {
 
+class ClonedMessageData;
 class MessagePortChild;
 class MessagePortIdentifier;
-class MessagePortMessage;
 class PostMessageRunnable;
 class SharedMessagePortMessage;
-
-namespace workers {
-class WorkerFeature;
-} // namespace workers
+class StrongWorkerRef;
 
 class MessagePort final : public DOMEventTargetHelper
-                        , public nsIIPCBackgroundChildCreateCallback
-                        , public nsIObserver
 {
   friend class PostMessageRunnable;
 
 public:
-  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
-  NS_DECL_NSIOBSERVER
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MessagePort,
                                            DOMEventTargetHelper)
@@ -62,7 +55,7 @@ public:
 
   void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-              const Optional<Sequence<JS::Value>>& aTransferable,
+              const Sequence<JSObject*>& aTransferable,
               ErrorResult& aRv);
 
   void Start();
@@ -73,9 +66,16 @@ public:
 
   void SetOnmessage(EventHandlerNonNull* aCallback);
 
+  IMPL_EVENT_HANDLER(messageerror)
+
   // Non WebIDL methods
 
   void UnshippedEntangle(MessagePort* aEntangledPort);
+
+  bool CanBeCloned() const
+  {
+    return !mHasBeenTransferredOrClosed;
+  }
 
   void CloneAndDisentangle(MessagePortIdentifier& aIdentifier);
 
@@ -83,14 +83,16 @@ public:
 
   // These methods are useful for MessagePortChild
 
-  void Entangled(nsTArray<MessagePortMessage>& aMessages);
-  void MessagesReceived(nsTArray<MessagePortMessage>& aMessages);
+  void Entangled(nsTArray<ClonedMessageData>& aMessages);
+  void MessagesReceived(nsTArray<ClonedMessageData>& aMessages);
   void StopSendingDataConfirmed();
   void Closed();
 
 private:
   explicit MessagePort(nsIGlobalObject* aGlobal);
   ~MessagePort();
+
+  void DisconnectFromOwner() override;
 
   enum State {
     // When a port is created by a MessageChannel it is entangled with the
@@ -141,10 +143,12 @@ private:
                   uint32_t aSequenceID, bool mNeutered, State aState,
                   ErrorResult& aRv);
 
-  void ConnectToPBackground();
+  bool ConnectToPBackground();
 
   // Dispatch events from the Message Queue using a nsRunnable.
   void Dispatch();
+
+  void DispatchError();
 
   void StartDisentangling();
   void Disentangle();
@@ -163,7 +167,7 @@ private:
     return mIsKeptAlive;
   }
 
-  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
+  RefPtr<StrongWorkerRef> mWorkerRef;
 
   RefPtr<PostMessageRunnable> mPostMessageRunnable;
 
@@ -176,13 +180,17 @@ private:
 
   nsAutoPtr<MessagePortIdentifier> mIdentifier;
 
-  uint64_t mInnerID;
-
   State mState;
 
   bool mMessageQueueEnabled;
 
   bool mIsKeptAlive;
+
+  // mHasBeenTransferredOrClosed is used to know if this port has been manually
+  // closed or transferred via postMessage. Note that if the entangled port is
+  // closed, this port is closed as well (see mState) but, just because close()
+  // has not been called directly, by spec, this port can still be transferred.
+  bool mHasBeenTransferredOrClosed;
 };
 
 } // namespace dom

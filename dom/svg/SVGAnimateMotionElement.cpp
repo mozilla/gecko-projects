@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGAnimateMotionElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAnimateMotionElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGAnimateMotionElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -27,7 +27,7 @@ SVGAnimateMotionElement::SVGAnimateMotionElement(already_AddRefed<mozilla::dom::
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGAnimateMotionElement)
 
@@ -41,7 +41,7 @@ SVGAnimateMotionElement::AnimationFunction()
 
 bool
 SVGAnimateMotionElement::GetTargetAttributeName(int32_t *aNamespaceID,
-                                                nsIAtom **aLocalName) const
+                                                nsAtom **aLocalName) const
 {
   // <animateMotion> doesn't take an attributeName, since it doesn't target an
   // 'attribute' per se.  We'll use a unique dummy attribute-name so that our
@@ -49,15 +49,6 @@ SVGAnimateMotionElement::GetTargetAttributeName(int32_t *aNamespaceID,
   *aNamespaceID = kNameSpaceID_None;
   *aLocalName = nsGkAtoms::mozAnimateMotionDummyAttr;
   return true;
-}
-
-nsSMILTargetAttrType
-SVGAnimateMotionElement::GetTargetAttributeType() const
-{
-  // <animateMotion> doesn't take an attributeType, since it doesn't target an
-  // 'attribute' per se.  We'll just return 'XML' for simplicity.  (This just
-  // needs to match what we expect in nsSVGElement::GetAnimAttr.)
-  return eSMILTargetAttrType_XML;
 }
 
 } // namespace dom

@@ -8,6 +8,7 @@
 #define mozilla_dom_SourceBuffer_h_
 
 #include "mozilla/MozPromise.h"
+#include "MediaContainerType.h"
 #include "MediaSource.h"
 #include "js/RootingAPI.h"
 #include "mozilla/Assertions.h"
@@ -18,12 +19,10 @@
 #include "mozilla/dom/SourceBufferBinding.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/mozalloc.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupports.h"
-#include "nsString.h"
 #include "nscore.h"
 #include "TrackBuffersManager.h"
 #include "SourceBufferTask.h"
@@ -33,15 +32,20 @@ struct JSContext;
 
 namespace mozilla {
 
+class AbstractThread;
 class ErrorResult;
 class MediaByteBuffer;
 template <typename T> class AsyncEventRunner;
+
+DDLoggedTypeName(dom::SourceBuffer);
 
 namespace dom {
 
 class TimeRanges;
 
-class SourceBuffer final : public DOMEventTargetHelper
+class SourceBuffer final
+  : public DOMEventTargetHelper
+  , public DecoderDoctorLifeLogger<SourceBuffer>
 {
 public:
   /** WebIDL Methods. */
@@ -84,16 +88,34 @@ public:
   void AppendBuffer(const ArrayBuffer& aData, ErrorResult& aRv);
   void AppendBuffer(const ArrayBufferView& aData, ErrorResult& aRv);
 
+  already_AddRefed<Promise> AppendBufferAsync(const ArrayBuffer& aData,
+                                              ErrorResult& aRv);
+  already_AddRefed<Promise> AppendBufferAsync(const ArrayBufferView& aData,
+                                              ErrorResult& aRv);
+
   void Abort(ErrorResult& aRv);
   void AbortBufferAppend();
 
   void Remove(double aStart, double aEnd, ErrorResult& aRv);
+
+  already_AddRefed<Promise> RemoveAsync(double aStart,
+                                        double aEnd,
+                                        ErrorResult& aRv);
+
+  void ChangeType(const nsAString& aType, ErrorResult& aRv);
+
+  IMPL_EVENT_HANDLER(updatestart);
+  IMPL_EVENT_HANDLER(update);
+  IMPL_EVENT_HANDLER(updateend);
+  IMPL_EVENT_HANDLER(error);
+  IMPL_EVENT_HANDLER(abort);
+
   /** End WebIDL Methods. */
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBuffer, DOMEventTargetHelper)
 
-  SourceBuffer(MediaSource* aMediaSource, const nsACString& aType);
+  SourceBuffer(MediaSource* aMediaSource, const MediaContainerType& aType);
 
   MediaSource* GetParentObject() const;
 
@@ -111,6 +133,8 @@ public:
 
   double GetBufferedStart();
   double GetBufferedEnd();
+  double HighestStartTime();
+  double HighestEndTime();
 
   // Runs the range removal algorithm as defined by the MSE spec.
   void RangeRemoval(double aStart, double aEnd);
@@ -142,12 +166,16 @@ private:
 
   // Shared implementation of AppendBuffer overloads.
   void AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv);
+  // Shared implementation of AppendBufferAsync overloads.
+  already_AddRefed<Promise> AppendDataAsync(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv);
+
+  void PrepareRemove(double aStart, double aEnd, ErrorResult& aRv);
 
   // Implement the "Append Error Algorithm".
   // Will call endOfStream() with "decode" error if aDecodeError is true.
   // 3.5.3 Append Error Algorithm
   // http://w3c.github.io/media-source/#sourcebuffer-append-error
-  void AppendError(bool aDecoderError);
+  void AppendError(const MediaResult& aDecodeError);
 
   // Implements the "Prepare Append Algorithm". Returns MediaByteBuffer object
   // on success or nullptr (with aRv set) on error.
@@ -155,10 +183,11 @@ private:
                                                   uint32_t aLength,
                                                   ErrorResult& aRv);
 
-  void AppendDataCompletedWithSuccess(SourceBufferTask::AppendBufferResult aResult);
-  void AppendDataErrored(nsresult aError);
+  void AppendDataCompletedWithSuccess(const SourceBufferTask::AppendBufferResult& aResult);
+  void AppendDataErrored(const MediaResult& aError);
 
   RefPtr<MediaSource> mMediaSource;
+  const RefPtr<AbstractThread> mAbstractMainThread;
 
   RefPtr<TrackBuffersManager> mTrackBuffersManager;
   SourceBufferAttributes mCurrentAttributes;
@@ -168,9 +197,17 @@ private:
   mozilla::Atomic<bool> mActive;
 
   MozPromiseRequestHolder<SourceBufferTask::AppendPromise> mPendingAppend;
-  const nsCString mType;
+  MozPromiseRequestHolder<SourceBufferTask::RangeRemovalPromise> mPendingRemoval;
+  MediaContainerType mType;
 
   RefPtr<TimeRanges> mBuffered;
+
+  MozPromiseRequestHolder<MediaSource::ActiveCompletionPromise> mCompletionPromise;
+
+  // Only used if MSE v2 experimental mode is active.
+  // Contains the current Promise to be resolved following use of
+  // appendBufferAsync and removeAsync. Not set of no operation is pending.
+  RefPtr<Promise> mDOMPromise;
 };
 
 } // namespace dom

@@ -4,9 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/gfx/PrintTargetCG.h"
+#include "mozilla/Preferences.h"
 
 #include "nsPrintDialogX.h"
 #include "nsIPrintSettings.h"
+#include "nsIPrintSettingsService.h"
 #include "nsPrintSettingsX.h"
 #include "nsCOMPtr.h"
 #include "nsQueryObject.h"
@@ -20,6 +23,7 @@
 #include "nsObjCExceptions.h"
 
 using namespace mozilla;
+using mozilla::gfx::PrintTarget;
 
 NS_IMPL_ISUPPORTS(nsPrintDialogServiceX, nsIPrintDialogService)
 
@@ -43,19 +47,30 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  NS_PRECONDITION(aSettings, "aSettings must not be null");
+  MOZ_ASSERT(aSettings, "aSettings must not be null");
 
   RefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aSettings));
   if (!settingsX)
     return NS_ERROR_FAILURE;
+
+  nsCOMPtr<nsIPrintSettingsService> printSettingsSvc
+    = do_GetService("@mozilla.org/gfx/printsettings-service;1");
 
   // Set the print job title
   char16_t** docTitles;
   uint32_t titleCount;
   nsresult rv = aWebBrowserPrint->EnumerateDocumentNames(&titleCount, &docTitles);
   if (NS_SUCCEEDED(rv) && titleCount > 0) {
-    CFStringRef cfTitleString = CFStringCreateWithCharacters(NULL, reinterpret_cast<const UniChar*>(docTitles[0]),
-                                                             NS_strlen(docTitles[0]));
+    // Print Core of Application Service sent print job with names exceeding
+    // 255 bytes. This is a workaround until fix it.
+    // (https://openradar.appspot.com/34428043)
+    nsAutoString adjustedTitle;
+    PrintTarget::AdjustPrintJobNameForIPP(nsDependentString(docTitles[0]),
+                                          adjustedTitle);
+    CFStringRef cfTitleString =
+      CFStringCreateWithCharacters(NULL,
+                                   reinterpret_cast<const UniChar*>(adjustedTitle.BeginReading()),
+                                   adjustedTitle.Length());
     if (cfTitleString) {
       ::PMPrintSettingsSetJobName(settingsX->GetPMPrintSettings(), cfTitleString);
       CFRelease(cfTitleString);
@@ -68,6 +83,9 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
     titleCount = 0;
   }
 
+  // Read default print settings from prefs
+  printSettingsSvc->InitPrintSettingsFromPrefs(settingsX, true,
+    nsIPrintSettings::kInitSaveNativeData);
   NSPrintInfo* printInfo = settingsX->GetCocoaPrintInfo();
 
   // Put the print info into the current print operation, since that's where
@@ -97,17 +115,60 @@ nsPrintDialogServiceX::Show(nsPIDOMWindowOuter *aParent, nsIPrintSettings *aSett
   if (!copy) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-  settingsX->SetCocoaPrintInfo(copy);
-  [copy release];
 
   [NSPrintOperation setCurrentOperation:nil];
   [tmpView release];
 
-  if (button != NSOKButton)
+  if (button != NSFileHandlingPanelOKButton)
     return NS_ERROR_ABORT;
+
+  settingsX->SetCocoaPrintInfo(copy);
+  settingsX->InitUnwriteableMargin();
+
+  // Save settings unless saving is pref'd off
+  if (Preferences::GetBool("print.save_print_settings", false)) {
+    printSettingsSvc->SavePrintSettingsToPrefs(settingsX, true,
+      nsIPrintSettings::kInitSaveNativeData);
+  }
+
+  // Get coordinate space resolution for converting paper size units to inches
+  NSWindow *win = [[NSApplication sharedApplication] mainWindow];
+  if (win) {
+    NSDictionary *devDesc = [win deviceDescription];
+    if (devDesc) {
+      NSSize res = [[devDesc objectForKey: NSDeviceResolution] sizeValue];
+      float scale = [win backingScaleFactor];
+      if (scale > 0) {
+        settingsX->SetInchesScale(res.width / scale, res.height / scale);
+      }
+    }
+  }
 
   // Export settings.
   [viewController exportSettings];
+
+  // If "ignore scaling" is checked, overwrite scaling factor with 1.
+  bool isShrinkToFitChecked;
+  settingsX->GetShrinkToFit(&isShrinkToFitChecked);
+  if (isShrinkToFitChecked) {
+    NSMutableDictionary* dict = [copy dictionary];
+    if (dict) {
+      [dict setObject: [NSNumber numberWithFloat: 1]
+               forKey: NSPrintScalingFactor];
+    }
+    // Set the scaling factor to 100% in the NSPrintInfo
+    // object so that it will not affect the paper size
+    // retrieved from the PMPageFormat routines.
+    [copy setScalingFactor:1.0];
+  } else {
+    aSettings->SetScaling([copy scalingFactor]);
+  }
+
+  // Set the adjusted paper size now that we've updated
+  // the scaling factor.
+  settingsX->InitAdjustedPaperSize();
+
+  [copy release];
 
   int16_t pageRange;
   aSettings->GetPrintRange(&pageRange);
@@ -134,8 +195,10 @@ NS_IMETHODIMP
 nsPrintDialogServiceX::ShowPageSetup(nsPIDOMWindowOuter *aParent,
                                      nsIPrintSettings *aNSSettings)
 {
-  NS_PRECONDITION(aParent, "aParent must not be null");
-  NS_PRECONDITION(aNSSettings, "aSettings must not be null");
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  MOZ_ASSERT(aParent, "aParent must not be null");
+  MOZ_ASSERT(aNSSettings, "aSettings must not be null");
   NS_ENSURE_TRUE(aNSSettings, NS_ERROR_FAILURE);
 
   RefPtr<nsPrintSettingsX> settingsX(do_QueryObject(aNSSettings));
@@ -148,7 +211,9 @@ nsPrintDialogServiceX::ShowPageSetup(nsPIDOMWindowOuter *aParent,
   int button = [pageLayout runModalWithPrintInfo:printInfo];
   nsCocoaUtils::CleanUpAfterNativeAppModalDialog();
 
-  return button == NSOKButton ? NS_OK : NS_ERROR_ABORT;
+  return button == NSFileHandlingPanelOKButton ? NS_OK : NS_ERROR_ABORT;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
 // Accessory view
@@ -180,7 +245,7 @@ nsPrintDialogServiceX::ShowPageSetup(nsPIDOMWindowOuter *aParent,
 - (NSButton*)checkboxWithLabel:(const char*)aLabel andFrame:(NSRect)aRect;
 
 - (NSPopUpButton*)headerFooterItemListWithFrame:(NSRect)aRect
-                                   selectedItem:(const char16_t*)aCurrentString;
+                                   selectedItem:(const nsAString&)aCurrentString;
 
 - (void)addOptionsSection;
 
@@ -252,8 +317,8 @@ static const char sHeaderFooterTags[][4] =  {"", "&T", "&U", "&D", "&P", "&PT"};
   if (!mPrintBundle)
     return @"";
 
-  nsXPIDLString intlString;
-  mPrintBundle->GetStringFromName(NS_ConvertUTF8toUTF16(aKey).get(), getter_Copies(intlString));
+  nsAutoString intlString;
+  mPrintBundle->GetStringFromName(aKey, intlString);
   NSMutableString* s = [NSMutableString stringWithUTF8String:NS_ConvertUTF16toUTF8(intlString).get()];
 
   // Remove all underscores (they're used in the GTK dialog for accesskeys).
@@ -309,7 +374,7 @@ static const char sHeaderFooterTags[][4] =  {"", "&T", "&U", "&D", "&P", "&PT"};
 }
 
 - (NSPopUpButton*)headerFooterItemListWithFrame:(NSRect)aRect
-                                   selectedItem:(const char16_t*)aCurrentString
+                                   selectedItem:(const nsAString&)aCurrentString
 {
   NSPopUpButton* list = [[[NSPopUpButton alloc] initWithFrame:aRect pullsDown:NO] autorelease];
   [list setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
@@ -458,34 +523,34 @@ static const char sHeaderFooterTags[][4] =  {"", "&T", "&U", "&D", "&P", "&PT"};
   [self addCenteredLabel:"right" withFrame:NSMakeRect(356, 22, 100, 22)];
 
   // Lists
-  nsXPIDLString sel;
+  nsString sel;
 
-  mSettings->GetHeaderStrLeft(getter_Copies(sel));
+  mSettings->GetHeaderStrLeft(sel);
   mHeaderLeftList = [self headerFooterItemListWithFrame:NSMakeRect(156, 44, 100, 22)
                                            selectedItem:sel];
   [self addSubview:mHeaderLeftList];
 
-  mSettings->GetHeaderStrCenter(getter_Copies(sel));
+  mSettings->GetHeaderStrCenter(sel);
   mHeaderCenterList = [self headerFooterItemListWithFrame:NSMakeRect(256, 44, 100, 22)
                                              selectedItem:sel];
   [self addSubview:mHeaderCenterList];
 
-  mSettings->GetHeaderStrRight(getter_Copies(sel));
+  mSettings->GetHeaderStrRight(sel);
   mHeaderRightList = [self headerFooterItemListWithFrame:NSMakeRect(356, 44, 100, 22)
                                             selectedItem:sel];
   [self addSubview:mHeaderRightList];
 
-  mSettings->GetFooterStrLeft(getter_Copies(sel));
+  mSettings->GetFooterStrLeft(sel);
   mFooterLeftList = [self headerFooterItemListWithFrame:NSMakeRect(156, 0, 100, 22)
                                            selectedItem:sel];
   [self addSubview:mFooterLeftList];
 
-  mSettings->GetFooterStrCenter(getter_Copies(sel));
+  mSettings->GetFooterStrCenter(sel);
   mFooterCenterList = [self headerFooterItemListWithFrame:NSMakeRect(256, 0, 100, 22)
                                              selectedItem:sel];
   [self addSubview:mFooterCenterList];
 
-  mSettings->GetFooterStrRight(getter_Copies(sel));
+  mSettings->GetFooterStrRight(sel);
   mFooterRightList = [self headerFooterItemListWithFrame:NSMakeRect(356, 0, 100, 22)
                                             selectedItem:sel];
   [self addSubview:mFooterRightList];
@@ -515,22 +580,22 @@ static const char sHeaderFooterTags[][4] =  {"", "&T", "&U", "&D", "&P", "&PT"};
 {
   const char* headerFooterStr;
   headerFooterStr = [self headerFooterStringForList:mHeaderLeftList];
-  mSettings->SetHeaderStrLeft(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetHeaderStrLeft(NS_ConvertUTF8toUTF16(headerFooterStr));
 
   headerFooterStr = [self headerFooterStringForList:mHeaderCenterList];
-  mSettings->SetHeaderStrCenter(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetHeaderStrCenter(NS_ConvertUTF8toUTF16(headerFooterStr));
 
   headerFooterStr = [self headerFooterStringForList:mHeaderRightList];
-  mSettings->SetHeaderStrRight(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetHeaderStrRight(NS_ConvertUTF8toUTF16(headerFooterStr));
 
   headerFooterStr = [self headerFooterStringForList:mFooterLeftList];
-  mSettings->SetFooterStrLeft(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetFooterStrLeft(NS_ConvertUTF8toUTF16(headerFooterStr));
 
   headerFooterStr = [self headerFooterStringForList:mFooterCenterList];
-  mSettings->SetFooterStrCenter(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetFooterStrCenter(NS_ConvertUTF8toUTF16(headerFooterStr));
 
   headerFooterStr = [self headerFooterStringForList:mFooterRightList];
-  mSettings->SetFooterStrRight(NS_ConvertUTF8toUTF16(headerFooterStr).get());
+  mSettings->SetFooterStrRight(NS_ConvertUTF8toUTF16(headerFooterStr));
 }
 
 // Summary

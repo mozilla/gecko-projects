@@ -5,7 +5,6 @@
 
 #include "nsAboutBlank.h"
 #include "nsStringStream.h"
-#include "nsDOMString.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
 
@@ -25,7 +24,7 @@ nsAboutBlank::NewChannel(nsIURI* aURI,
     nsCOMPtr<nsIChannel> channel;
     rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
                                           aURI,
-                                          in,
+                                          in.forget(),
                                           NS_LITERAL_CSTRING("text/html"),
                                           NS_LITERAL_CSTRING("utf-8"),
                                           aLoadInfo);
@@ -40,15 +39,9 @@ nsAboutBlank::GetURIFlags(nsIURI *aURI, uint32_t *result)
 {
     *result = nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
               nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
+              nsIAboutModule::MAKE_LINKABLE |
               nsIAboutModule::HIDE_FROM_ABOUTABOUT;
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsAboutBlank::GetIndexedDBOriginPostfix(nsIURI *aURI, nsAString &result)
-{
-    SetDOMStringToNull(result);
-    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 nsresult

@@ -61,9 +61,13 @@
 
   function teardownMockPushSocket() {
     if (currentMockSocket) {
-      currentMockSocket._isActive = false;
-      chromeScript.sendSyncMessage("socket-teardown");
+      return new Promise(resolve => {
+        currentMockSocket._isActive = false;
+        chromeScript.addMessageListener("socket-server-teardown", resolve);
+        chromeScript.sendSyncMessage("socket-teardown");
+      });
     }
+    return Promise.resolve();
   }
 
   /**
@@ -102,7 +106,11 @@
     },
 
     onUnregister(request) {
-      // Do nothing.
+      this.serverSendMsg(JSON.stringify({
+        messageType: "unregister",
+        channelID: request.channelID,
+        status: 200,
+      }));
     },
 
     onAck(request) {
@@ -146,13 +154,11 @@
 
 // Remove permissions and prefs when the test finishes.
 SimpleTest.registerCleanupFunction(() => {
-  new Promise(resolve => {
-    SpecialPowers.flushPermissions(_ => {
-      SpecialPowers.flushPrefEnv(resolve);
-    });
-  }).then(_ => {
-    teardownMockPushSocket();
+  return new Promise(resolve =>
+    SpecialPowers.flushPermissions(resolve)
+  ).then(_ => SpecialPowers.flushPrefEnv()).then(_ => {
     restorePushService();
+    return teardownMockPushSocket();
   });
 });
 
@@ -165,15 +171,14 @@ function setPushPermission(allow) {
 }
 
 function setupPrefs() {
-  return new Promise(resolve => {
-    SpecialPowers.pushPrefEnv({"set": [
-      ["dom.push.enabled", true],
-      ["dom.push.connection.enabled", true],
-      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-      ["dom.serviceWorkers.enabled", true],
-      ["dom.serviceWorkers.testing.enabled", true]
-      ]}, resolve);
-  });
+  return SpecialPowers.pushPrefEnv({"set": [
+    ["dom.push.enabled", true],
+    ["dom.push.connection.enabled", true],
+    ["dom.push.maxRecentMessageIDsPerSubscription", 0],
+    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+    ["dom.serviceWorkers.enabled", true],
+    ["dom.serviceWorkers.testing.enabled", true]
+    ]});
 }
 
 function setupPrefsAndReplaceService(mockService) {
@@ -221,4 +226,48 @@ function sendRequestToWorker(request) {
       registration.active.postMessage(request, [channel.port2]);
     });
   });
+}
+
+function waitForActive(swr) {
+  let sw = swr.installing || swr.waiting || swr.active;
+  return new Promise(resolve => {
+    if (sw.state === 'activated') {
+      resolve(swr);
+      return;
+    }
+    sw.addEventListener('statechange', function onStateChange(evt) {
+      if (sw.state === 'activated') {
+        sw.removeEventListener('statechange', onStateChange);
+        resolve(swr);
+      }
+    });
+  });
+}
+
+function base64UrlDecode(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+
+  // Replace padding if it was stripped by the sender.
+  // See http://tools.ietf.org/html/rfc4648#section-4
+  switch (s.length % 4) {
+    case 0:
+      break; // No pad chars in this case
+    case 2:
+      s += '==';
+      break; // Two pad chars
+    case 3:
+      s += '=';
+      break; // One pad char
+    default:
+      throw new Error('Illegal base64url string!');
+  }
+
+  // With correct padding restored, apply the standard base64 decoder
+  var decoded = atob(s);
+
+  var array = new Uint8Array(new ArrayBuffer(decoded.length));
+  for (var i = 0; i < decoded.length; i++) {
+    array[i] = decoded.charCodeAt(i);
+  }
+  return array;
 }

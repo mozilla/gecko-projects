@@ -8,7 +8,7 @@
 
 #ifdef USE_SKIA_GPU
 
-#include "mozilla/gfx/RefPtrSkia.h"
+#include "skia/include/core/SkRefCnt.h"
 #include "mozilla/RefPtr.h"
 
 struct GrGLInterface;
@@ -22,7 +22,8 @@ class GLContext;
 class SkiaGLGlue : public GenericAtomicRefCounted
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SkiaGLGlue)
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SkiaGLGlue, override)
+
   explicit SkiaGLGlue(GLContext* context);
   GLContext* GetGLContext() const { return mGLContext.get(); }
   GrContext* GetGrContext() const { return mGrContext.get(); }
@@ -32,8 +33,8 @@ protected:
 
 private:
   RefPtr<GLContext> mGLContext;
-  gfx::RefPtrSkia<GrGLInterface> mGrGLInterface;
-  gfx::RefPtrSkia<GrContext> mGrContext;
+  sk_sp<GrGLInterface> mGrGLInterface;
+  sk_sp<GrContext> mGrContext;
 };
 
 } // namespace gl

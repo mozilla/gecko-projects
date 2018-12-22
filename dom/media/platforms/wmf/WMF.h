@@ -7,18 +7,6 @@
 #ifndef WMF_H_
 #define WMF_H_
 
-#if WINVER < _WIN32_WINNT_WIN7
-#error \
-You must include WMF.h before including mozilla headers, \
-otherwise mozconfig.h will be included \
-and that sets WINVER to WinXP, \
-which makes Windows Media Foundation unavailable.
-#endif
-
-#pragma push_macro("WINVER")
-#undef WINVER
-#define WINVER _WIN32_WINNT_WIN7
-
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -35,7 +23,7 @@ which makes Windows Media Foundation unavailable.
 #include <codecapi.h>
 
 // The Windows headers helpfully declare min and max macros, which don't
-// compile in the prescence of std::min and std::max and unified builds.
+// compile in the presence of std::min and std::max and unified builds.
 // So undef them here.
 #ifdef min
 #undef min
@@ -54,12 +42,17 @@ namespace mozilla {
 namespace wmf {
 
 // If successful, loads all required WMF DLLs and calls the WMF MFStartup()
-// function.
+// function. This delegates the WMF MFStartup() call to the MTA thread if
+// the current thread is not MTA. This is to ensure we always interact with
+// WMF from threads with the same COM compartment model.
 HRESULT MFStartup();
 
 // Calls the WMF MFShutdown() function. Call this once for every time
 // wmf::MFStartup() succeeds. Note: does not unload the WMF DLLs loaded by
 // MFStartup(); leaves them in memory to save I/O at next MFStartup() call.
+// This delegates the WMF MFShutdown() call to the MTA thread if the current
+// thread is not MTA. This is to ensure we always interact with
+// WMF from threads with the same COM compartment model.
 HRESULT MFShutdown();
 
 // All functions below are wrappers around the corresponding WMF function,
@@ -96,9 +89,5 @@ HRESULT MFCreateDXGISurfaceBuffer(REFIID riid,
 
 } // end namespace wmf
 } // end namespace mozilla
-
-
-
-#pragma pop_macro("WINVER")
 
 #endif

@@ -22,16 +22,30 @@ class SandboxPrivate : public nsIGlobalObject,
                        public nsWrapperCache
 {
 public:
-    SandboxPrivate(nsIPrincipal* principal, JSObject* global)
-        : mPrincipal(principal)
-    {
-        SetIsNotDOMBinding();
-        SetWrapper(global);
-    }
-
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(SandboxPrivate,
                                                            nsIGlobalObject)
+
+    static void Create(nsIPrincipal* principal, JS::Handle<JSObject*> global)
+    {
+        RefPtr<SandboxPrivate> sbp = new SandboxPrivate(principal);
+        sbp->SetWrapper(global);
+        sbp->PreserveWrapper(ToSupports(sbp.get()));
+
+        // Pass on ownership of sbp to |global|.
+        // The type used to cast to void needs to match the one in GetPrivate.
+        nsIScriptObjectPrincipal* sop =
+            static_cast<nsIScriptObjectPrincipal*>(sbp.forget().take());
+        mozilla::RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, sop);
+        JS_SetPrivate(global, sop);
+    }
+
+    static SandboxPrivate* GetPrivate(JSObject* obj)
+    {
+        // The type used to cast to void needs to match the one in Create.
+        return static_cast<SandboxPrivate*>(
+            static_cast<nsIScriptObjectPrincipal*>(JS_GetPrivate(obj)));
+    }
 
     nsIPrincipal* GetPrincipal() override
     {
@@ -43,9 +57,9 @@ public:
         return GetWrapper();
     }
 
-    void ForgetGlobalObject()
+    void ForgetGlobalObject(JSObject* obj)
     {
-        ClearWrapper();
+        ClearWrapper(obj);
     }
 
     virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override
@@ -53,13 +67,19 @@ public:
         MOZ_CRASH("SandboxPrivate doesn't use DOM bindings!");
     }
 
-    void ObjectMoved(JSObject* obj, const JSObject* old)
+    size_t ObjectMoved(JSObject* obj, JSObject* old)
     {
         UpdateWrapper(obj, old);
+        return 0;
     }
 
 private:
-    virtual ~SandboxPrivate() { }
+    explicit SandboxPrivate(nsIPrincipal* principal)
+        : mPrincipal(principal)
+    { }
+
+    virtual ~SandboxPrivate()
+    { }
 
     nsCOMPtr<nsIPrincipal> mPrincipal;
 };

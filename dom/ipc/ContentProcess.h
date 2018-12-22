@@ -11,6 +11,10 @@
 #include "mozilla/ipc/ScopedXREEmbed.h"
 #include "ContentChild.h"
 
+#if defined(XP_WIN)
+#include "mozilla/mscom/MainThreadRuntime.h"
+#endif
+
 namespace mozilla {
 namespace dom {
 
@@ -30,17 +34,25 @@ public:
   ~ContentProcess()
   { }
 
-  virtual bool Init() override;
+  virtual bool Init(int aArgc, char* aArgv[]) override;
   virtual void CleanUp() override;
-
-  void SetAppDir(const nsACString& aPath);
 
 private:
   ContentChild mContent;
   mozilla::ipc::ScopedXREEmbed mXREEmbed;
 
+#if defined(XP_WIN)
+  // This object initializes and configures COM.
+  mozilla::mscom::MainThreadRuntime mCOMRuntime;
+#endif
+
   DISALLOW_EVIL_CONSTRUCTORS(ContentProcess);
 };
+
+#ifdef ANDROID
+// Android doesn't use -prefsHandle, it gets that FD another way.
+void SetPrefsFd(int aFd);
+#endif
 
 } // namespace dom
 } // namespace mozilla

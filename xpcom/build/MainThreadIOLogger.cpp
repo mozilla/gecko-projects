@@ -13,6 +13,7 @@
 #include "mozilla/TimeStamp.h"
 #include "nsAutoPtr.h"
 #include "nsNativeCharsetUtils.h"
+#include "nsThreadUtils.h"
 
 /**
  * This code uses NSPR stuff and STL containers because it must be detached
@@ -28,19 +29,23 @@ namespace {
 
 struct ObservationWithStack
 {
-  ObservationWithStack(mozilla::IOInterposeObserver::Observation& aObs,
-                       ProfilerBacktrace* aStack)
+  explicit ObservationWithStack(mozilla::IOInterposeObserver::Observation& aObs
+#ifdef MOZ_GECKO_PROFILER
+                                , ProfilerBacktrace* aStack
+#endif
+                                )
     : mObservation(aObs)
+#ifdef MOZ_GECKO_PROFILER
     , mStack(aStack)
+#endif
   {
-    const char16_t* filename = aObs.Filename();
-    if (filename) {
-      mFilename = filename;
-    }
+    aObs.Filename(mFilename);
   }
 
   mozilla::IOInterposeObserver::Observation mObservation;
+#ifdef MOZ_GECKO_PROFILER
   ProfilerBacktrace*                        mStack;
+#endif
   nsString                                  mFilename;
 };
 
@@ -52,7 +57,7 @@ public:
 
   bool Init();
 
-  void Observe(Observation& aObservation);
+  void Observe(Observation& aObservation) override;
 
 private:
   static void sIOThreadFunc(void* aArg);
@@ -114,7 +119,9 @@ MainThreadIOLoggerImpl::Init()
 /* static */ void
 MainThreadIOLoggerImpl::sIOThreadFunc(void* aArg)
 {
-  PR_SetCurrentThreadName("MainThreadIOLogger");
+  AUTO_PROFILER_REGISTER_THREAD("MainThreadIOLogger");
+
+  NS_SetCurrentThreadName("MainThreadIOLogger");
   MainThreadIOLoggerImpl* obj = static_cast<MainThreadIOLoggerImpl*>(aArg);
   obj->IOThreadFunc();
 }
@@ -172,12 +179,10 @@ MainThreadIOLoggerImpl::IOThreadFunc()
                        (i->mObservation.Start() - mLogStartTime).ToMilliseconds(),
                        i->mObservation.ObservedOperationString(), durationMs,
                        i->mObservation.Reference(), nativeFilename.get()) > 0) {
-          ProfilerBacktrace* stack = i->mStack;
-          if (stack) {
-            // TODO: Write out the callstack
-            //       (This will be added in a later bug)
-            profiler_free_backtrace(stack);
-          }
+#ifdef MOZ_GECKO_PROFILER
+          // TODO: Write out the callstack
+          i->mStack = nullptr;
+#endif
         }
       }
     }
@@ -197,7 +202,11 @@ MainThreadIOLoggerImpl::Observe(Observation& aObservation)
     return;
   }
   // Passing nullptr as aStack parameter for now
-  mObservations.push_back(ObservationWithStack(aObservation, nullptr));
+  mObservations.push_back(ObservationWithStack(aObservation
+#ifdef MOZ_GECKO_PROFILER
+                                               , nullptr
+#endif
+                                               ));
   lock.Notify();
 }
 
@@ -222,4 +231,3 @@ Init()
 } // namespace MainThreadIOLogger
 
 } // namespace mozilla
-

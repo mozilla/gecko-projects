@@ -2,8 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Move.h"
+
 #include "js/HashTable.h"
 #include "js/Utility.h"
+
 #include "jsapi-tests/tests.h"
 
 //#define FUZZ
@@ -309,7 +312,7 @@ struct MoveOnlyType {
     MoveOnlyType& operator=(MoveOnlyType&& rhs) {
         MOZ_ASSERT(&rhs != this);
         this->~MoveOnlyType();
-        new(this) MoveOnlyType(mozilla::Move(rhs));
+        new(this) MoveOnlyType(std::move(rhs));
         return *this;
     }
 
@@ -339,7 +342,7 @@ BEGIN_TEST(testHashSetOfMoveOnlyType)
 
     MoveOnlyType a(1);
 
-    CHECK(set.put(mozilla::Move(a))); // This shouldn't generate a compiler error.
+    CHECK(set.put(std::move(a))); // This shouldn't generate a compiler error.
 
     return true;
 }
@@ -378,7 +381,7 @@ BEGIN_TEST(testHashMapLookupWithDefaultOOM)
 {
     uint32_t timeToFail;
     for (timeToFail = 1; timeToFail < 1000; timeToFail++) {
-        js::oom::SimulateOOMAfter(timeToFail, js::oom::THREAD_TYPE_MAIN, false);
+        js::oom::SimulateOOMAfter(timeToFail, js::THREAD_TYPE_MAIN, false);
         LookupWithDefaultUntilResize();
     }
 
@@ -388,3 +391,44 @@ BEGIN_TEST(testHashMapLookupWithDefaultOOM)
 
 END_TEST(testHashMapLookupWithDefaultOOM)
 #endif // defined(DEBUG)
+
+BEGIN_TEST(testHashTableMovableEnum)
+{
+    IntSet set;
+    CHECK(set.init());
+
+    // Exercise returning a hash table Enum object from a function.
+
+    CHECK(set.put(1));
+    for (auto e = enumerateSet(set); !e.empty(); e.popFront())
+        e.removeFront();
+    CHECK(set.count() == 0);
+
+    // Test moving an Enum object explicitly.
+
+    CHECK(set.put(1));
+    CHECK(set.put(2));
+    CHECK(set.put(3));
+    CHECK(set.count() == 3);
+    {
+        auto e1 = IntSet::Enum(set);
+        CHECK(!e1.empty());
+        e1.removeFront();
+        e1.popFront();
+
+        auto e2 = std::move(e1);
+        CHECK(!e2.empty());
+        e2.removeFront();
+        e2.popFront();
+    }
+
+    CHECK(set.count() == 1);
+    return true;
+}
+
+IntSet::Enum enumerateSet(IntSet& set)
+{
+    return IntSet::Enum(set);
+}
+
+END_TEST(testHashTableMovableEnum)

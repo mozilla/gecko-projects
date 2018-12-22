@@ -31,13 +31,6 @@
 
 using namespace mozilla;
 
-template<>
-struct RunnableMethodTraits<WebCore::ReverbConvolver>
-{
-  static void RetainCallee(WebCore::ReverbConvolver* obj) {}
-  static void ReleaseCallee(WebCore::ReverbConvolver* obj) {}
-};
-
 namespace WebCore {
 
 const int InputBufferSize = 8 * 16384;
@@ -125,19 +118,20 @@ ReverbConvolver::ReverbConvolver(const float* impulseResponseData,
 
         stageOffset += stageSize;
 
-        if (hasRealtimeConstraint && !isBackgroundStage
-            && fftSize > MaxRealtimeFFTSize) {
-            fftSize = MaxRealtimeFFTSize;
-            // Custom phase positions for all but the first of the realtime
-            // stages of largest size.  These spread out the work of the
-            // larger realtime stages.  None of the FFTs of size 1024, 2048 or
-            // 4096 are performed when processing the same block.  The first
-            // MaxRealtimeFFTSize = 4096 stage, at the end of the doubling,
-            // performs its FFT at block 7.  The FFTs of size 2048 are
-            // performed in blocks 3 + 8 * n and size 1024 at 1 + 4 * n.
-            const uint32_t phaseLookup[] = { 14, 0, 10, 4 };
-            stagePhase = WEBAUDIO_BLOCK_SIZE *
-                phaseLookup[m_stages.Length() % ArrayLength(phaseLookup)];
+        if (hasRealtimeConstraint && !isBackgroundStage &&
+            fftSize > MaxRealtimeFFTSize) {
+          fftSize = MaxRealtimeFFTSize;
+          // Custom phase positions for all but the first of the realtime
+          // stages of largest size.  These spread out the work of the
+          // larger realtime stages.  None of the FFTs of size 1024, 2048 or
+          // 4096 are performed when processing the same block.  The first
+          // MaxRealtimeFFTSize = 4096 stage, at the end of the doubling,
+          // performs its FFT at block 7.  The FFTs of size 2048 are
+          // performed in blocks 3 + 8 * n and size 1024 at 1 + 4 * n.
+          const uint32_t phaseLookup[] = { 14, 0, 10, 4 };
+          stagePhase =
+            WEBAUDIO_BLOCK_SIZE *
+            phaseLookup[m_stages.Length() % ArrayLength(phaseLookup)];
         } else if (fftSize > maxFFTSize) {
             fftSize = maxFFTSize;
             // A prime offset spreads out FFTs in a way that all
@@ -158,8 +152,10 @@ ReverbConvolver::ReverbConvolver(const float* impulseResponseData,
           NS_WARNING("Cannot start convolver thread.");
           return;
         }
-        CancelableTask* task = NewRunnableMethod(this, &ReverbConvolver::backgroundThreadEntry);
-        m_backgroundThread.message_loop()->PostTask(FROM_HERE, task);
+        m_backgroundThread.message_loop()->PostTask(NewNonOwningRunnableMethod(
+          "WebCore::ReverbConvolver::backgroundThreadEntry",
+          this,
+          &ReverbConvolver::backgroundThreadEntry));
     }
 }
 
@@ -223,7 +219,7 @@ void ReverbConvolver::backgroundThreadEntry()
         // Process all of the stages until their read indices reach the input buffer's write index
         int writeIndex = m_inputBuffer.writeIndex();
 
-        // Even though it doesn't seem like every stage needs to maintain its own version of readIndex 
+        // Even though it doesn't seem like every stage needs to maintain its own version of readIndex
         // we do this in case we want to run in more than one background thread.
         int readIndex;
 
@@ -260,7 +256,7 @@ void ReverbConvolver::process(const float* sourceChannelData,
     // Not using a MutexLocker looks strange, but we use a tryLock() instead because this is run on the real-time
     // thread where it is a disaster for the lock to be contended (causes audio glitching).  It's OK if we fail to
     // signal from time to time, since we'll get to it the next time we're called.  We're called repeatedly
-    // and frequently (around every 3ms).  The background thread is processing well into the future and has a considerable amount of 
+    // and frequently (around every 3ms).  The background thread is processing well into the future and has a considerable amount of
     // leeway here...
     if (m_backgroundThreadLock.Try()) {
         m_moreInputBuffered = true;

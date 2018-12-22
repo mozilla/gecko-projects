@@ -1,7 +1,8 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef MOZILLA_LAYERS_COMPOSITORTYPES_H
 #define MOZILLA_LAYERS_COMPOSITORTYPES_H
@@ -44,7 +45,9 @@ enum class TextureFlags : uint32_t {
   // Data in this texture has not been alpha-premultiplied.
   // XXX - Apparently only used with ImageClient/Host
   NON_PREMULTIPLIED  = 1 << 4,
-  // The texture should be recycled when no longer in used
+  // The TextureClient should be recycled with recycle callback when no longer
+  // in used. When the texture is used in host side, ref count of TextureClient
+  // is transparently added by ShadowLayerForwarder or ImageBridgeChild.
   RECYCLE            = 1 << 5,
   // If DEALLOCATE_CLIENT is set, the shared data is deallocated on the
   // client side and requires some extra synchronizaion to ensure race-free
@@ -66,9 +69,17 @@ enum class TextureFlags : uint32_t {
   // The texture is being allocated for a compositor that no longer exists.
   // This flag is only used in the parent process.
   INVALID_COMPOSITOR = 1 << 12,
+  // The texture was created by converting from YCBCR to RGB
+  RGB_FROM_YCBCR     = 1 << 13,
+  // The texture is used for snapshot.
+  SNAPSHOT           = 1 << 14,
+  // Enable a non blocking read lock.
+  NON_BLOCKING_READ_LOCK = 1 << 15,
+  // Enable a blocking read lock.
+  BLOCKING_READ_LOCK = 1 << 16,
 
   // OR union of all valid bits
-  ALL_BITS           = (1 << 13) - 1,
+  ALL_BITS           = (1 << 17) - 1,
   // the default flags
   DEFAULT = NO_FLAGS
 };
@@ -132,7 +143,6 @@ enum class EffectTypes : uint8_t {
   COMPONENT_ALPHA,
   SOLID_COLOR,
   RENDER_TARGET,
-  VR_DISTORTION,
   MAX  //sentinel for the count of all effect types
 };
 
@@ -163,25 +173,45 @@ typedef uintptr_t SyncHandle;
 struct TextureFactoryIdentifier
 {
   LayersBackend mParentBackend;
-  GeckoProcessType mParentProcessId;
+  GeckoProcessType mParentProcessType;
   int32_t mMaxTextureSize;
+  bool mCompositorUseANGLE;
   bool mSupportsTextureBlitting;
   bool mSupportsPartialUploads;
+  bool mSupportsComponentAlpha;
+  bool mUsingAdvancedLayers;
   SyncHandle mSyncHandle;
 
   explicit TextureFactoryIdentifier(LayersBackend aLayersBackend = LayersBackend::LAYERS_NONE,
-                                    GeckoProcessType aParentProcessId = GeckoProcessType_Default,
+                                    GeckoProcessType aParentProcessType = GeckoProcessType_Default,
                                     int32_t aMaxTextureSize = 4096,
+                                    bool aCompositorUseANGLE = false,
                                     bool aSupportsTextureBlitting = false,
                                     bool aSupportsPartialUploads = false,
+                                    bool aSupportsComponentAlpha = true,
                                     SyncHandle aSyncHandle = 0)
     : mParentBackend(aLayersBackend)
-    , mParentProcessId(aParentProcessId)
+    , mParentProcessType(aParentProcessType)
     , mMaxTextureSize(aMaxTextureSize)
+    , mCompositorUseANGLE(aCompositorUseANGLE)
     , mSupportsTextureBlitting(aSupportsTextureBlitting)
     , mSupportsPartialUploads(aSupportsPartialUploads)
+    , mSupportsComponentAlpha(aSupportsComponentAlpha)
+    , mUsingAdvancedLayers(false)
     , mSyncHandle(aSyncHandle)
   {}
+
+  bool operator==(const TextureFactoryIdentifier& aOther) const {
+    return
+      mParentBackend == aOther.mParentBackend &&
+      mParentProcessType == aOther.mParentProcessType &&
+      mMaxTextureSize == aOther.mMaxTextureSize &&
+      mCompositorUseANGLE == aOther.mCompositorUseANGLE &&
+      mSupportsTextureBlitting == aOther.mSupportsTextureBlitting &&
+      mSupportsPartialUploads == aOther.mSupportsPartialUploads &&
+      mSupportsComponentAlpha == aOther.mSupportsComponentAlpha &&
+      mSyncHandle == aOther.mSyncHandle;
+  }
 };
 
 /**
@@ -223,9 +253,16 @@ enum class OpenMode : uint8_t {
   OPEN_NONE        = 0,
   OPEN_READ        = 0x1,
   OPEN_WRITE       = 0x2,
+  // This is only used in conjunction with OMTP to indicate that the DrawTarget
+  // that is being borrowed will be painted asynchronously, and so will outlive
+  // the write lock.
+  OPEN_ASYNC = 0x04,
+
   OPEN_READ_WRITE  = OPEN_READ|OPEN_WRITE,
+  OPEN_READ_WRITE_ASYNC  = OPEN_READ|OPEN_WRITE|OPEN_ASYNC,
+  OPEN_READ_ASYNC   = OPEN_READ|OPEN_ASYNC,
   OPEN_READ_ONLY   = OPEN_READ,
-  OPEN_WRITE_ONLY  = OPEN_WRITE
+  OPEN_WRITE_ONLY  = OPEN_WRITE,
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(OpenMode)
 

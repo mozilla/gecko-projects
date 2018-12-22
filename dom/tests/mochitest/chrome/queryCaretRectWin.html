@@ -44,9 +44,8 @@
  }
 </style>
 
-<script type="application/javascript;version=1.8">
+<script type="application/javascript">
   var SimpleTest = window.opener.SimpleTest;
-  var Ci = Components.interfaces;
 
   function ok() { window.opener.ok.apply(window.opener, arguments); }
   function done() { window.opener.done.apply(window.opener, arguments); }
@@ -74,11 +73,8 @@
   }
 
   function getSelection(aElement) {
-    if (aElement instanceof Ci.nsIDOMNSEditableElement) {
-      return aElement.QueryInterface(Ci.nsIDOMNSEditableElement)
-                     .editor.selection;
-    }
-    return null;
+    // aElement is know to be a textarea.
+    return aElement.editor.selection;
   }
 
   function testCaretPosition(aDomWinUtils, aOffset, aRectDims) {

@@ -12,8 +12,6 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS_INHERITED0(ChannelSplitterNode, AudioNode)
-
 class ChannelSplitterNodeEngine final : public AudioNodeEngine
 {
 public:
@@ -55,26 +53,62 @@ public:
 ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
                                          uint16_t aOutputCount)
   : AudioNode(aContext,
-              2,
-              ChannelCountMode::Max,
-              ChannelInterpretation::Speakers)
+              aOutputCount,
+              ChannelCountMode::Explicit,
+              ChannelInterpretation::Discrete)
   , mOutputCount(aOutputCount)
 {
   mStream = AudioNodeStream::Create(aContext,
                                     new ChannelSplitterNodeEngine(this),
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-ChannelSplitterNode::~ChannelSplitterNode()
+/* static */ already_AddRefed<ChannelSplitterNode>
+ChannelSplitterNode::Create(AudioContext& aAudioContext,
+                            const ChannelSplitterOptions& aOptions,
+                            ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  if (aOptions.mNumberOfOutputs == 0 ||
+      aOptions.mNumberOfOutputs > WebAudioUtils::MaxChannelCount) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
+  }
+
+  RefPtr<ChannelSplitterNode> audioNode =
+    new ChannelSplitterNode(&aAudioContext, aOptions.mNumberOfOutputs);
+
+  // Manually check that the other options are valid, this node has channelCount,
+  // channelCountMode and channelInterpretation constraints: they cannot be
+  // changed from the default.
+  if (aOptions.mChannelCount.WasPassed() &&
+      aOptions.mChannelCount.Value() != audioNode->ChannelCount()) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+  if (aOptions.mChannelInterpretation.WasPassed() &&
+      aOptions.mChannelInterpretation.Value() != audioNode->ChannelInterpretationValue()) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+  if (aOptions.mChannelCountMode.WasPassed() &&
+      aOptions.mChannelCountMode.Value() != audioNode->ChannelCountModeValue()) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
+  return audioNode.forget();
 }
 
 JSObject*
 ChannelSplitterNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ChannelSplitterNodeBinding::Wrap(aCx, this, aGivenProto);
+  return ChannelSplitterNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
 } // namespace mozilla
-

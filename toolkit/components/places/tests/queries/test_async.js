@@ -9,12 +9,12 @@ var tests = [
     desc: "nsNavHistoryFolderResultNode: Basic test, asynchronously open and " +
           "close container with a single child",
 
-    loading: function (node, newState, oldState) {
+    loading(node, newState, oldState) {
       this.checkStateChanged("loading", 1);
       this.checkArgs("loading", node, oldState, node.STATE_CLOSED);
     },
 
-    opened: function (node, newState, oldState) {
+    opened(node, newState, oldState) {
       this.checkStateChanged("opened", 1);
       this.checkState("loading", 1);
       this.checkArgs("opened", node, oldState, node.STATE_LOADING);
@@ -26,7 +26,7 @@ var tests = [
       node.containerOpen = false;
     },
 
-    closed: function (node, newState, oldState) {
+    closed(node, newState, oldState) {
       this.checkStateChanged("closed", 1);
       this.checkState("opened", 1);
       this.checkArgs("closed", node, oldState, node.STATE_OPENED);
@@ -38,13 +38,13 @@ var tests = [
     desc: "nsNavHistoryFolderResultNode: After async open and no changes, " +
           "second open should be synchronous",
 
-    loading: function (node, newState, oldState) {
+    loading(node, newState, oldState) {
       this.checkStateChanged("loading", 1);
       this.checkState("closed", 0);
       this.checkArgs("loading", node, oldState, node.STATE_CLOSED);
     },
 
-    opened: function (node, newState, oldState) {
+    opened(node, newState, oldState) {
       let cnt = this.checkStateChanged("opened", 1, 2);
       let expectOldState = cnt === 1 ? node.STATE_LOADING : node.STATE_CLOSED;
       this.checkArgs("opened", node, oldState, expectOldState);
@@ -56,7 +56,7 @@ var tests = [
       node.containerOpen = false;
     },
 
-    closed: function (node, newState, oldState) {
+    closed(node, newState, oldState) {
       let cnt = this.checkStateChanged("closed", 1, 2);
       this.checkArgs("closed", node, oldState, node.STATE_OPENED);
 
@@ -75,18 +75,18 @@ var tests = [
     desc: "nsNavHistoryFolderResultNode: After closing container in " +
           "loading(), opened() should not be called",
 
-    loading: function (node, newState, oldState) {
+    loading(node, newState, oldState) {
       this.checkStateChanged("loading", 1);
       this.checkArgs("loading", node, oldState, node.STATE_CLOSED);
       print("Closing container");
       node.containerOpen = false;
     },
 
-    opened: function (node, newState, oldState) {
+    opened(node, newState, oldState) {
       do_throw("opened should not be called");
     },
 
-    closed: function (node, newState, oldState) {
+    closed(node, newState, oldState) {
       this.checkStateChanged("closed", 1);
       this.checkState("loading", 1);
       this.checkArgs("closed", node, oldState, node.STATE_LOADING);
@@ -105,7 +105,7 @@ function Test() {
   // This maps a state name to the number of times it's been observed.
   this.stateCounts = {};
   // Promise object resolved when the next test can be run.
-  this.deferNextTest = Promise.defer();
+  this.deferNextTest = PromiseUtils.defer();
 }
 
 Test.prototype = {
@@ -122,15 +122,15 @@ Test.prototype = {
    * @param aExpectOldState
    *        The expected old state.
    */
-  checkArgs: function (aNewState, aNode, aOldState, aExpectOldState) {
+  checkArgs(aNewState, aNode, aOldState, aExpectOldState) {
     print("Node passed on " + aNewState + " should be result.root");
-    do_check_eq(this.result.root, aNode);
+    Assert.equal(this.result.root, aNode);
     print("Old state passed on " + aNewState + " should be " + aExpectOldState);
 
     // aOldState comes from xpconnect and will therefore be defined.  It may be
     // zero, though, so use strict equality just to make sure aExpectOldState is
     // also defined.
-    do_check_true(aOldState === aExpectOldState);
+    Assert.ok(aOldState === aExpectOldState);
   },
 
   /**
@@ -141,7 +141,7 @@ Test.prototype = {
    * @return The number of times aState has been observed, including the new
    *         observation.
    */
-  checkStateChanged: function (aState, aExpectedMin, aExpectedMax) {
+  checkStateChanged(aState, aExpectedMin, aExpectedMax) {
     print(aState + " state change observed");
     if (!this.stateCounts.hasOwnProperty(aState))
       this.stateCounts[aState] = 0;
@@ -163,35 +163,34 @@ Test.prototype = {
    * @return The number of times aState has been observed, including the new
    *         observation.
    */
-  checkState: function (aState, aExpectedMin, aExpectedMax) {
+  checkState(aState, aExpectedMin, aExpectedMax) {
     let cnt = this.stateCounts[aState] || 0;
     if (aExpectedMax === undefined)
       aExpectedMax = aExpectedMin;
     if (aExpectedMin === aExpectedMax) {
       print(aState + " should be observed only " + aExpectedMin +
             " times (actual = " + cnt + ")");
-    }
-    else {
+    } else {
       print(aState + " should be observed at least " + aExpectedMin +
             " times and at most " + aExpectedMax + " times (actual = " +
             cnt + ")");
     }
-    do_check_true(cnt >= aExpectedMin && cnt <= aExpectedMax);
+    Assert.ok(cnt >= aExpectedMin && cnt <= aExpectedMax);
     return cnt;
   },
 
   /**
    * Asynchronously opens the root of the test's result.
    */
-  openContainer: function () {
+  openContainer() {
     // Set up the result observer.  It delegates to this object's callbacks and
     // wraps them in a try-catch so that errors don't get eaten.
     let self = this;
     this.observer = {
-      containerStateChanged: function (container, oldState, newState) {
+      containerStateChanged(container, oldState, newState) {
         print("New state passed to containerStateChanged() should equal the " +
               "container's current state");
-        do_check_eq(newState, container.state);
+        Assert.equal(newState, container.state);
 
         try {
           switch (newState) {
@@ -207,13 +206,12 @@ Test.prototype = {
           default:
             do_throw("Unexpected new state! " + newState);
           }
-        }
-        catch (err) {
+        } catch (err) {
           do_throw(err);
         }
       },
     };
-    this.result.addObserver(this.observer, false);
+    this.result.addObserver(this.observer);
 
     print("Opening container");
     this.result.root.containerOpen = true;
@@ -222,7 +220,7 @@ Test.prototype = {
   /**
    * Starts the test and returns a promise resolved when the test completes.
    */
-  run: function () {
+  run() {
     this.openContainer();
     return this.deferNextTest.promise;
   },
@@ -231,7 +229,7 @@ Test.prototype = {
    * This must be called before run().  It adds a bookmark and sets up the
    * test's result.  Override if need be.
    */
-  setup: function*() {
+  async setup() {
     // Populate the database with different types of bookmark items.
     this.data = DataHelper.makeDataArray([
       { type: "bookmark" },
@@ -239,11 +237,11 @@ Test.prototype = {
       { type: "folder" },
       { type: "bookmark", uri: "place:terms=foo" }
     ]);
-    yield task_populateDB(this.data);
+    await task_populateDB(this.data);
 
     // Make a query.
     this.query = PlacesUtils.history.getNewQuery();
-    this.query.setFolders([DataHelper.defaults.bookmark.parent], 1);
+    this.query.setParents([DataHelper.defaults.bookmark.parentGuid], 1);
     this.opts = PlacesUtils.history.getNewQueryOptions();
     this.opts.asyncEnabled = true;
     this.result = PlacesUtils.history.executeQuery(this.query, this.opts);
@@ -253,7 +251,7 @@ Test.prototype = {
    * Call this when the test has succeeded.  It cleans up resources and starts
    * the next test.
    */
-  success: function () {
+  success() {
     this.result.removeObserver(this.observer);
 
     // Resolve the promise object that indicates that the next test can be run.
@@ -267,20 +265,17 @@ Test.prototype = {
 var DataHelper = {
   defaults: {
     bookmark: {
-      parent: PlacesUtils.bookmarks.unfiledBookmarksFolder,
       parentGuid: PlacesUtils.bookmarks.unfiledGuid,
       uri: "http://example.com/",
       title: "test bookmark"
     },
 
     folder: {
-      parent: PlacesUtils.bookmarks.unfiledBookmarksFolder,
       parentGuid: PlacesUtils.bookmarks.unfiledGuid,
       title: "test folder"
     },
 
     separator: {
-      parent: PlacesUtils.bookmarks.unfiledBookmarksFolder,
       parentGuid: PlacesUtils.bookmarks.unfiledGuid
     }
   },
@@ -295,7 +290,7 @@ var DataHelper = {
    */
   makeDataArray: function DH_makeDataArray(aData) {
     let self = this;
-    return aData.map(function (dat) {
+    return aData.map(function(dat) {
       let type = dat.type;
       dat = self._makeDataWithDefaults(dat, self.defaults[type]);
       switch (type) {
@@ -325,6 +320,7 @@ var DataHelper = {
         };
       default:
         do_throw("Unknown data type when populating DB: " + type);
+        return undefined;
       }
     });
   },
@@ -341,30 +337,24 @@ var DataHelper = {
    */
   _makeDataWithDefaults: function DH__makeDataWithDefaults(aData, aDefaults) {
     let dat = {};
-    for (let [prop, val] in Iterator(aDefaults)) {
+    for (let [prop, val] of Object.entries(aDefaults)) {
       dat[prop] = aData.hasOwnProperty(prop) ? aData[prop] : val;
     }
     return dat;
   }
 };
 
-function run_test()
-{
-  run_next_test();
-}
-
-add_task(function* test_async()
-{
-  for (let [, test] in Iterator(tests)) {
-    yield PlacesUtils.bookmarks.eraseEverything();
+add_task(async function test_async() {
+  for (let test of tests) {
+    await PlacesUtils.bookmarks.eraseEverything();
 
     test.__proto__ = new Test();
-    yield test.setup();
+    await test.setup();
 
     print("------ Running test: " + test.desc);
-    yield test.run();
+    await test.run();
   }
 
-  yield PlacesUtils.bookmarks.eraseEverything();
+  await PlacesUtils.bookmarks.eraseEverything();
   print("All tests done, exiting");
 });

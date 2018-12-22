@@ -9,17 +9,14 @@
 
 const TEST_URI = URL_ROOT + "doc_media_queries.html";
 
-add_task(function*() {
-  yield addTab(TEST_URI);
-  let {inspector, view} = yield openRuleView();
-  yield selectNode("div", inspector);
+add_task(async function() {
+  await addTab(TEST_URI);
+  const {inspector, view} = await openRuleView();
+  await selectNode("div", inspector);
 
-  let elementStyle = view._elementStyle;
+  const elementStyle = view._elementStyle;
 
-  let _strings = Services.strings
-    .createBundle("chrome://devtools-shared/locale/styleinspector.properties");
-
-  let inline = _strings.GetStringFromName("rule.sourceInline");
+  const inline = STYLE_INSPECTOR_L10N.getStr("rule.sourceInline");
 
   is(elementStyle.rules.length, 3, "Should have 3 rules.");
   is(elementStyle.rules[0].title, inline, "check rule 0 title");

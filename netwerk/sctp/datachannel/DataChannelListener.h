@@ -17,7 +17,7 @@ namespace mozilla {
 // refs to embedded classes
 class DataChannelListener {
 public:
-  virtual ~DataChannelListener() {}
+  virtual ~DataChannelListener() = default;
 
   // Called when a DOMString message is received.
   virtual nsresult OnMessageAvailable(nsISupports *aContext,
@@ -35,6 +35,9 @@ public:
 
   // Called when the BufferedAmount drops below the BufferedAmountLowThreshold
   virtual nsresult OnBufferLow(nsISupports *aContext) = 0;
+
+  // Called when the BufferedAmount drops to 0
+  virtual nsresult NotBuffered(nsISupports *aContext) = 0;
 };
 
 }

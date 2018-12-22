@@ -22,6 +22,7 @@ nsGZFileWriter::nsGZFileWriter(Operation aMode)
   : mMode(aMode)
   , mInitialized(false)
   , mFinished(false)
+  , mGZFile(nullptr)
 {
 }
 
@@ -45,7 +46,6 @@ nsGZFileWriter::Init(nsIFile* aFile)
 
   FILE* file;
   nsresult rv = aFile->OpenANSIFileDesc(mMode == Create ? "wb" : "ab", &file);
-
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

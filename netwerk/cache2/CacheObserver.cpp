@@ -13,6 +13,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/TimeStamp.h"
 #include "nsServiceManagerUtils.h"
+#include "mozilla/net/NeckoCommon.h"
 #include "prsystem.h"
 #include <time.h>
 #include <math.h>
@@ -22,18 +23,7 @@ namespace net {
 
 CacheObserver* CacheObserver::sSelf = nullptr;
 
-static uint32_t const kDefaultUseNewCache = 1; // Use the new cache by default
-uint32_t CacheObserver::sUseNewCache = kDefaultUseNewCache;
-
-static bool sUseNewCacheTemp = false; // Temp trigger to not lose early adopters
-
-static int32_t const kAutoDeleteCacheVersion = -1; // Auto-delete off by default
-static int32_t sAutoDeleteCacheVersion = kAutoDeleteCacheVersion;
-
-static int32_t const kDefaultHalfLifeExperiment = -1; // Disabled
-int32_t CacheObserver::sHalfLifeExperiment = kDefaultHalfLifeExperiment;
-
-static float const kDefaultHalfLifeHours = 1.0F; // 1 hour
+static float const kDefaultHalfLifeHours = 24.0F; // 24 hours
 float CacheObserver::sHalfLifeHours = kDefaultHalfLifeHours;
 
 static bool const kDefaultUseDiskCache = true;
@@ -72,10 +62,10 @@ int32_t CacheObserver::sMaxMemoryEntrySize = kDefaultMaxMemoryEntrySize;
 static int32_t const kDefaultMaxDiskEntrySize = 50 * 1024; // 50 MB
 int32_t CacheObserver::sMaxDiskEntrySize = kDefaultMaxDiskEntrySize;
 
-static uint32_t const kDefaultMaxDiskChunksMemoryUsage = 10 * 1024; // 10MB
+static uint32_t const kDefaultMaxDiskChunksMemoryUsage = 40 * 1024; // 40MB
 uint32_t CacheObserver::sMaxDiskChunksMemoryUsage = kDefaultMaxDiskChunksMemoryUsage;
 
-static uint32_t const kDefaultMaxDiskPriorityChunksMemoryUsage = 10 * 1024; // 10MB
+static uint32_t const kDefaultMaxDiskPriorityChunksMemoryUsage = 40 * 1024; // 40MB
 uint32_t CacheObserver::sMaxDiskPriorityChunksMemoryUsage = kDefaultMaxDiskPriorityChunksMemoryUsage;
 
 static uint32_t const kDefaultCompressionLevel = 1;
@@ -93,8 +83,10 @@ bool CacheObserver::sCacheFSReported = kDefaultCacheFSReported;
 static bool kDefaultHashStatsReported = false;
 bool CacheObserver::sHashStatsReported = kDefaultHashStatsReported;
 
-static int32_t const kDefaultMaxShutdownIOLag = 2; // seconds
-int32_t CacheObserver::sMaxShutdownIOLag = kDefaultMaxShutdownIOLag;
+static uint32_t const kDefaultMaxShutdownIOLag = 2; // seconds
+Atomic<uint32_t, Relaxed> CacheObserver::sMaxShutdownIOLag(kDefaultMaxShutdownIOLag);
+
+Atomic<PRIntervalTime> CacheObserver::sShutdownDemandedTime(PR_INTERVAL_NO_TIMEOUT);
 
 NS_IMPL_ISUPPORTS(CacheObserver,
                   nsIObserver,
@@ -104,6 +96,10 @@ NS_IMPL_ISUPPORTS(CacheObserver,
 nsresult
 CacheObserver::Init()
 {
+  if (IsNeckoChild()) {
+    return NS_OK;
+  }
+
   if (sSelf) {
     return NS_OK;
   }
@@ -122,7 +118,7 @@ CacheObserver::Init()
   obs->AddObserver(sSelf, "profile-before-change", true);
   obs->AddObserver(sSelf, "xpcom-shutdown", true);
   obs->AddObserver(sSelf, "last-pb-context-exited", true);
-  obs->AddObserver(sSelf, "clear-origin-data", true);
+  obs->AddObserver(sSelf, "clear-origin-attributes-data", true);
   obs->AddObserver(sSelf, "memory-pressure", true);
 
   return NS_OK;
@@ -143,14 +139,6 @@ CacheObserver::Shutdown()
 void
 CacheObserver::AttachToPreferences()
 {
-  sAutoDeleteCacheVersion = mozilla::Preferences::GetInt(
-    "browser.cache.auto_delete_cache_version", kAutoDeleteCacheVersion);
-
-  mozilla::Preferences::AddUintVarCache(
-    &sUseNewCache, "browser.cache.use_new_backend", kDefaultUseNewCache);
-  mozilla::Preferences::AddBoolVarCache(
-    &sUseNewCacheTemp, "browser.cache.use_new_backend_temp", false);
-
   mozilla::Preferences::AddBoolVarCache(
     &sUseDiskCache, "browser.cache.disk.enable", kDefaultUseDiskCache);
   mozilla::Preferences::AddBoolVarCache(
@@ -192,58 +180,15 @@ CacheObserver::AttachToPreferences()
     "browser.cache.disk.parent_directory", NS_GET_IID(nsIFile),
     getter_AddRefs(mCacheParentDirectoryOverride));
 
-  // First check the default value.  If it is at -1, the experient
-  // is turned off.  If it is at 0, then use the user pref value
-  // instead.
-  sHalfLifeExperiment = mozilla::Preferences::GetDefaultInt(
-    "browser.cache.frecency_experiment", kDefaultHalfLifeExperiment);
-
-  if (sHalfLifeExperiment == 0) {
-    // Default preferences indicate we want to run the experiment,
-    // hence read the user value.
-    sHalfLifeExperiment = mozilla::Preferences::GetInt(
-      "browser.cache.frecency_experiment", sHalfLifeExperiment);
-  }
-
-  if (sHalfLifeExperiment == 0) {
-    // The experiment has not yet been initialized but is engaged, do
-    // the initialization now.
-    srand(time(NULL));
-    sHalfLifeExperiment = (rand() % 4) + 1;
-    // Store the experiemnt value, since we need it not to change between
-    // browser sessions.
-    mozilla::Preferences::SetInt(
-      "browser.cache.frecency_experiment", sHalfLifeExperiment);
-  }
-
-  switch (sHalfLifeExperiment) {
-  case 1: // The experiment is engaged
-    sHalfLifeHours = 0.083F; // ~5 mintues
-    break;
-  case 2:
-    sHalfLifeHours = 0.25F; // 15 mintues
-    break;
-  case 3:
-    sHalfLifeHours = 1.0F;
-    break;
-  case 4:
-    sHalfLifeHours = 6.0F;
-    break;
-
-  case -1:
-  default: // The experiment is off or broken
-    sHalfLifeExperiment = -1;
-    sHalfLifeHours = std::max(0.01F, std::min(1440.0F, mozilla::Preferences::GetFloat(
-      "browser.cache.frecency_half_life_hours", kDefaultHalfLifeHours)));
-    break;
-  }
+  sHalfLifeHours = std::max(0.01F, std::min(1440.0F, mozilla::Preferences::GetFloat(
+    "browser.cache.frecency_half_life_hours", kDefaultHalfLifeHours)));
 
   mozilla::Preferences::AddBoolVarCache(
     &sSanitizeOnShutdown, "privacy.sanitize.sanitizeOnShutdown", kDefaultSanitizeOnShutdown);
   mozilla::Preferences::AddBoolVarCache(
     &sClearCacheOnShutdown, "privacy.clearOnShutdown.cache", kDefaultClearCacheOnShutdown);
 
-  mozilla::Preferences::AddIntVarCache(
+  mozilla::Preferences::AddAtomicUintVarCache(
     &sMaxShutdownIOLag, "browser.cache.max_shutdown_io_lag", kDefaultMaxShutdownIOLag);
 }
 
@@ -286,25 +231,6 @@ uint32_t CacheObserver::MemoryCacheCapacity()
 }
 
 // static
-bool CacheObserver::UseNewCache()
-{
-  uint32_t useNewCache = sUseNewCache;
-
-  if (sUseNewCacheTemp)
-    useNewCache = 1;
-
-  switch (useNewCache) {
-    case 0: // use the old cache backend
-      return false;
-
-    case 1: // use the new cache backend
-      return true;
-  }
-
-  return true;
-}
-
-// static
 void
 CacheObserver::SetDiskCacheCapacity(uint32_t aCapacity)
 {
@@ -318,7 +244,9 @@ CacheObserver::SetDiskCacheCapacity(uint32_t aCapacity)
     sSelf->StoreDiskCacheCapacity();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreDiskCacheCapacity);
+      NewRunnableMethod("net::CacheObserver::StoreDiskCacheCapacity",
+                        sSelf,
+                        &CacheObserver::StoreDiskCacheCapacity);
     NS_DispatchToMainThread(event);
   }
 }
@@ -344,7 +272,9 @@ CacheObserver::SetCacheFSReported()
     sSelf->StoreCacheFSReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreCacheFSReported);
+      NewRunnableMethod("net::CacheObserver::StoreCacheFSReported",
+                        sSelf,
+                        &CacheObserver::StoreCacheFSReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -370,7 +300,9 @@ CacheObserver::SetHashStatsReported()
     sSelf->StoreHashStatsReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(sSelf, &CacheObserver::StoreHashStatsReported);
+      NewRunnableMethod("net::CacheObserver::StoreHashStatsReported",
+                        sSelf,
+                        &CacheObserver::StoreHashStatsReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -403,11 +335,12 @@ namespace CacheStorageEvictHelper {
 
 nsresult ClearStorage(bool const aPrivate,
                       bool const aAnonymous,
-                      NeckoOriginAttributes const &aOa)
+                      OriginAttributes &aOa)
 {
   nsresult rv;
 
-  RefPtr<LoadContextInfo> info = GetLoadContextInfo(aPrivate, aAnonymous, aOa);
+  aOa.SyncAttributesWithPrivateBrowsing(aPrivate);
+  RefPtr<LoadContextInfo> info = GetLoadContextInfo(aAnonymous, aOa);
 
   nsCOMPtr<nsICacheStorage> storage;
   RefPtr<CacheStorageService> service = CacheStorageService::Self();
@@ -428,7 +361,7 @@ nsresult ClearStorage(bool const aPrivate,
   return NS_OK;
 }
 
-nsresult Run(NeckoOriginAttributes const &aOa)
+nsresult Run(OriginAttributes &aOa)
 {
   nsresult rv;
 
@@ -475,10 +408,25 @@ bool CacheObserver::EntryIsTooBig(int64_t aSize, bool aUsingDisk)
 }
 
 // static
-TimeDuration const& CacheObserver::MaxShutdownIOLag()
+bool CacheObserver::IsPastShutdownIOLag()
 {
-  static TimeDuration period = TimeDuration::FromSeconds(sMaxShutdownIOLag);
-  return period;
+#ifdef DEBUG
+  return false;
+#endif
+
+  if (sShutdownDemandedTime == PR_INTERVAL_NO_TIMEOUT ||
+      sMaxShutdownIOLag == UINT32_MAX) {
+    return false;
+  }
+
+  static const PRIntervalTime kMaxShutdownIOLag =
+    PR_SecondsToInterval(sMaxShutdownIOLag);
+
+  if ((PR_IntervalNow() - sShutdownDemandedTime) > kMaxShutdownIOLag) {
+    return true;
+  }
+
+  return false;
 }
 
 NS_IMETHODIMP
@@ -499,14 +447,17 @@ CacheObserver::Observe(nsISupports* aSubject,
   }
 
   if (!strcmp(aTopic, "browser-delayed-startup-finished")) {
-    uint32_t activeVersion = UseNewCache() ? 1 : 0;
-    CacheStorageService::CleaupCacheDirectories(sAutoDeleteCacheVersion, activeVersion);
+    CacheStorageService::CleaupCacheDirectories();
     return NS_OK;
   }
 
   if (!strcmp(aTopic, "profile-change-net-teardown") ||
       !strcmp(aTopic, "profile-before-change") ||
       !strcmp(aTopic, "xpcom-shutdown")) {
+    if (sShutdownDemandedTime == PR_INTERVAL_NO_TIMEOUT) {
+      sShutdownDemandedTime = PR_IntervalNow();
+    }
+
     RefPtr<CacheStorageService> service = CacheStorageService::Self();
     if (service) {
       service->Shutdown();
@@ -525,10 +476,10 @@ CacheObserver::Observe(nsISupports* aSubject,
     return NS_OK;
   }
 
-  if (!strcmp(aTopic, "clear-origin-data")) {
-    NeckoOriginAttributes oa;
+  if (!strcmp(aTopic, "clear-origin-attributes-data")) {
+    OriginAttributes oa;
     if (!oa.Init(nsDependentString(aData))) {
-      NS_ERROR("Could not parse NeckoOriginAttributes JSON in clear-origin-data notification");
+      NS_ERROR("Could not parse OriginAttributes JSON in clear-origin-attributes-data notification");
       return NS_OK;
     }
 

@@ -19,7 +19,7 @@ class nsIFile;
 #if defined(XP_WIN)
 #include <windows.h>
   typedef HANDLE     ProcessType;
-#elif defined(XP_MACOSX)
+#elif defined(XP_UNIX)
   typedef pid_t      ProcessType;
 #else
 #include "prproces.h"
@@ -33,7 +33,7 @@ class nsIFile;
  * Two directories are passed to this function: greDir (where the actual
  * binary resides) and appDir (which contains application.ini for XULRunner
  * apps). If this is not a XULRunner app then appDir is identical to greDir.
- * 
+ *
  * The argc and argv passed to this function should be what is needed to
  * relaunch the current process.
  *
@@ -46,14 +46,9 @@ class nsIFile;
  *
  * This function does not modify appDir.
  */
-nsresult ProcessUpdates(nsIFile *greDir, nsIFile *appDir,
-                                    nsIFile *updRootDir,
-                                    int argc, char **argv,
-                                    const char *appVersion,
-                                    bool restart = true,
-                                    bool isOSUpdate = false,
-                                    nsIFile *osApplyToDir = nullptr,
-                                    ProcessType *pid = nullptr);
+nsresult ProcessUpdates(nsIFile *greDir, nsIFile *appDir, nsIFile *updRootDir,
+                        int argc, char **argv, const char *appVersion,
+                        bool restart = true, ProcessType *pid = nullptr);
 
 // The implementation of the update processor handles the task of loading the
 // updater application for staging an update.

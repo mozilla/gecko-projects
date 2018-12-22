@@ -2,11 +2,10 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-/* globals content */
-/* eslint-disable mozilla/no-cpows-in-tests */
-add_task(function* () {
-  let tab1 = yield BrowserTestUtils.openNewForegroundTab(gBrowser,
-    "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html");
+const PAGE = "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html";
+
+add_task(async function() {
+  let tab1 = await BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
 
   gBrowser.selectedTab = tab1;
 
@@ -16,6 +15,57 @@ add_task(function* () {
     },
 
     background: function() {
+      browser.contextMenus.create({
+        id: "clickme-image",
+        title: "Click me!",
+        contexts: ["image"],
+      });
+      browser.contextMenus.create({
+        id: "clickme-page",
+        title: "Click me!",
+        contexts: ["page"],
+      });
+      browser.contextMenus.onClicked.addListener(() => {});
+      browser.test.notifyPass();
+    },
+  });
+
+  await extension.startup();
+  await extension.awaitFinish();
+
+  let contentAreaContextMenu = await openContextMenu("#img1");
+  let item = contentAreaContextMenu.getElementsByAttribute("label", "Click me!");
+  is(item.length, 1, "contextMenu item for image was found");
+  await closeContextMenu();
+
+  contentAreaContextMenu = await openContextMenu("body");
+  item = contentAreaContextMenu.getElementsByAttribute("label", "Click me!");
+  is(item.length, 1, "contextMenu item for page was found");
+  await closeContextMenu();
+
+  await extension.unload();
+
+  BrowserTestUtils.removeTab(tab1);
+});
+
+add_task(async function() {
+  let tab1 = await BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
+
+  gBrowser.selectedTab = tab1;
+
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      "permissions": ["contextMenus"],
+    },
+
+    background: async function() {
+      browser.test.onMessage.addListener(msg => {
+        if (msg == "removeall") {
+          browser.contextMenus.removeAll();
+          browser.test.sendMessage("removed");
+        }
+      });
+
       // A generic onclick callback function.
       function genericOnClick(info, tab) {
         browser.test.sendMessage("onclick", {info, tab});
@@ -30,7 +80,7 @@ add_task(function* () {
         type: "separator",
       });
 
-      let contexts = ["page", "selection", "image"];
+      let contexts = ["page", "link", "selection", "image", "editable", "password"];
       for (let i = 0; i < contexts.length; i++) {
         let context = contexts[i];
         let title = context;
@@ -43,10 +93,7 @@ add_task(function* () {
         if (context == "selection") {
           browser.contextMenus.update("ext-selection", {
             title: "selection is: '%s'",
-            onclick: (info, tab) => {
-              browser.contextMenus.removeAll();
-              genericOnClick(info, tab);
-            },
+            onclick: genericOnClick,
           });
         }
       }
@@ -81,210 +128,192 @@ add_task(function* () {
       browser.contextMenus.remove(parentToDel);
 
       browser.contextMenus.create({
-        title: "radio-group-1",
-        type: "radio",
-        checked: true,
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
-        title: "Checkbox",
-        type: "checkbox",
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
-        title: "radio-group-2",
-        type: "radio",
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
-        title: "radio-group-2",
-        type: "radio",
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
-        type: "separator",
-      });
-
-      browser.contextMenus.create({
-        title: "Checkbox",
-        type: "checkbox",
-        checked: true,
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
-        title: "Checkbox",
-        type: "checkbox",
-        onclick: genericOnClick,
-      });
-
-      browser.contextMenus.create({
         title: "Without onclick property",
         id: "ext-without-onclick",
       });
 
-      browser.contextMenus.update(parent, {parentId: child2}).then(
-        () => {
-          browser.test.notifyFail();
-        },
-        () => {
-          browser.test.notifyPass();
-        }
-      );
+      await browser.test.assertRejects(
+        browser.contextMenus.update(parent, {parentId: child2}),
+        /cannot be an ancestor/,
+        "Should not be able to reparent an item as descendent of itself");
+
+      browser.test.notifyPass("contextmenus");
     },
   });
 
-  yield extension.startup();
-  yield extension.awaitFinish();
+  await extension.startup();
+  await extension.awaitFinish("contextmenus");
 
-  let contentAreaContextMenu;
+  let expectedClickInfo = {
+    menuItemId: "ext-image",
+    mediaType: "image",
+    srcUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/ctxmenu-image.png",
+    pageUrl: PAGE,
+    editable: false,
+  };
 
-  function getTop() {
-    contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
-    let items = contentAreaContextMenu.getElementsByAttribute("ext-type", "top-level-menu");
-    is(items.length, 1, "top level item was found (context=selection)");
-    let topItem = items[0];
-    return topItem.childNodes[0];
-  }
-
-  function* openExtensionMenu() {
-    contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
-    let popupShownPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popupshown");
-    yield BrowserTestUtils.synthesizeMouseAtCenter("#img1", {
-      type: "contextmenu",
-      button: 2,
-    }, gBrowser.selectedBrowser);
-    yield popupShownPromise;
-
-    popupShownPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popupshown");
-    EventUtils.synthesizeMouseAtCenter(getTop(), {});
-    yield popupShownPromise;
-  }
-
-  function* closeContextMenu(itemToSelect, expectedClickInfo, hasOnclickProperty = true) {
-    function checkClickInfo(info, tab) {
-      for (let i of Object.keys(expectedClickInfo)) {
-        is(info[i], expectedClickInfo[i],
-           "click info " + i + " expected to be: " + expectedClickInfo[i] + " but was: " + info[i]);
-      }
-      is(expectedClickInfo.pageSrc, tab.url);
+  function checkClickInfo(result) {
+    for (let i of Object.keys(expectedClickInfo)) {
+      is(result.info[i], expectedClickInfo[i],
+         "click info " + i + " expected to be: " + expectedClickInfo[i] + " but was: " + result.info[i]);
     }
-    let popupHiddenPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popuphidden");
-    EventUtils.synthesizeMouseAtCenter(itemToSelect, {});
-
-    if (hasOnclickProperty) {
-      let {info, tab} = yield extension.awaitMessage("onclick");
-      if (expectedClickInfo) {
-        checkClickInfo(info, tab);
-      }
-    }
-
-    let {info, tab} = yield extension.awaitMessage("browser.contextMenus.onClicked");
-    if (expectedClickInfo) {
-      checkClickInfo(info, tab);
-    }
-
-    yield popupHiddenPromise;
+    is(expectedClickInfo.pageSrc, result.tab.url, "click info page source is the right tab");
   }
 
-  function confirmRadioGroupStates(expectedStates) {
-    let top = getTop();
-
-    let radioItems = top.getElementsByAttribute("type", "radio");
-    let radioGroup1 = top.getElementsByAttribute("label", "radio-group-1");
-    let radioGroup2 = top.getElementsByAttribute("label", "radio-group-2");
-
-    is(radioItems.length, 3, "there should be 3 radio items in the context menu");
-    is(radioGroup1.length, 1, "the first radio group should only have 1 radio item");
-    is(radioGroup2.length, 2, "the second radio group should only have 2 radio items");
-
-    is(radioGroup1[0].hasAttribute("checked"), expectedStates[0], `radio item 1 has state (checked=${expectedStates[0]})`);
-    is(radioGroup2[0].hasAttribute("checked"), expectedStates[1], `radio item 2 has state (checked=${expectedStates[1]})`);
-    is(radioGroup2[1].hasAttribute("checked"), expectedStates[2], `radio item 3 has state (checked=${expectedStates[2]})`);
-  }
-
-  function confirmCheckboxStates(expectedStates) {
-    let checkboxItems = getTop().getElementsByAttribute("type", "checkbox");
-
-    is(checkboxItems.length, 3, "there should be 3 checkbox items in the context menu");
-
-    is(checkboxItems[0].hasAttribute("checked"), expectedStates[0], `checkbox item 1 has state (checked=${expectedStates[0]})`);
-    is(checkboxItems[1].hasAttribute("checked"), expectedStates[1], `checkbox item 2 has state (checked=${expectedStates[1]})`);
-    is(checkboxItems[2].hasAttribute("checked"), expectedStates[2], `checkbox item 3 has state (checked=${expectedStates[2]})`);
-  }
-
-  yield openExtensionMenu();
+  let extensionMenuRoot = await openExtensionContextMenu();
 
   // Check some menu items
-  let top = getTop();
-  let items = top.getElementsByAttribute("label", "image");
+  let items = extensionMenuRoot.getElementsByAttribute("label", "image");
   is(items.length, 1, "contextMenu item for image was found (context=image)");
   let image = items[0];
 
-  items = top.getElementsByAttribute("label", "selection-edited");
+  items = extensionMenuRoot.getElementsByAttribute("label", "selection-edited");
   is(items.length, 0, "contextMenu item for selection was not found (context=image)");
 
-  items = top.getElementsByAttribute("label", "parentToDel");
+  items = extensionMenuRoot.getElementsByAttribute("label", "parentToDel");
   is(items.length, 0, "contextMenu item for removed parent was not found (context=image)");
 
-  items = top.getElementsByAttribute("label", "parent");
+  items = extensionMenuRoot.getElementsByAttribute("label", "parent");
   is(items.length, 1, "contextMenu item for parent was found (context=image)");
 
   is(items[0].childNodes[0].childNodes.length, 2, "child items for parent were found (context=image)");
 
   // Click on ext-image item and check the click results
-  yield closeContextMenu(image, {
-    menuItemId: "ext-image",
-    mediaType: "image",
-    srcUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/ctxmenu-image.png",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
-  });
+  await closeExtensionContextMenu(image);
 
-  // Test radio groups
-  yield openExtensionMenu();
-  confirmRadioGroupStates([true, false, false]);
-  items = getTop().getElementsByAttribute("type", "radio");
-  yield closeContextMenu(items[1]);
+  let result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
 
-  yield openExtensionMenu();
-  confirmRadioGroupStates([true, true, false]);
-  items = getTop().getElementsByAttribute("type", "radio");
-  yield closeContextMenu(items[2]);
 
-  yield openExtensionMenu();
-  confirmRadioGroupStates([true, false, true]);
-  items = getTop().getElementsByAttribute("type", "radio");
-  yield closeContextMenu(items[0]);
+  // Test "link" context and OnClick data property.
+  extensionMenuRoot = await openExtensionContextMenu("[href=some-link]");
 
-  yield openExtensionMenu();
-  confirmRadioGroupStates([true, false, true]);
+  // Click on ext-link and check the click results
+  items = extensionMenuRoot.getElementsByAttribute("label", "link");
+  is(items.length, 1, "contextMenu item for parent was found (context=link)");
+  let link = items[0];
 
-  // Test checkboxes
-  items = getTop().getElementsByAttribute("type", "checkbox");
-  confirmCheckboxStates([false, true, false]);
-  yield closeContextMenu(items[0]);
+  expectedClickInfo = {
+    menuItemId: "ext-link",
+    linkUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/some-link",
+    linkText: "Some link",
+    pageUrl: PAGE,
+    editable: false,
+  };
 
-  yield openExtensionMenu();
-  confirmCheckboxStates([true, true, false]);
-  items = getTop().getElementsByAttribute("type", "checkbox");
-  yield closeContextMenu(items[2]);
+  await closeExtensionContextMenu(link);
 
-  yield openExtensionMenu();
-  confirmCheckboxStates([true, true, true]);
-  items = getTop().getElementsByAttribute("type", "checkbox");
-  yield closeContextMenu(items[0]);
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
 
-  yield openExtensionMenu();
-  confirmCheckboxStates([false, true, true]);
-  items = getTop().getElementsByAttribute("type", "checkbox");
-  yield closeContextMenu(items[2]);
+
+  // Test "editable" context and OnClick data property.
+  extensionMenuRoot = await openExtensionContextMenu("#edit-me");
+
+  // Check some menu items.
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 1, "contextMenu item for text input element was found (context=editable)");
+  let editable = items[0];
+
+  // Click on ext-editable item and check the click results.
+  await closeExtensionContextMenu(editable);
+
+  expectedClickInfo = {
+    menuItemId: "ext-editable",
+    pageUrl: PAGE,
+    editable: true,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+  extensionMenuRoot = await openExtensionContextMenu("#readonly-text");
+
+  // Check some menu items.
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 0, "contextMenu item for text input element was not found (context=editable fails for readonly items)");
+
+  // Hide the popup "manually" because there's nothing to click.
+  await closeContextMenu();
+
+  // Test "editable" context on type=tel and type=number items, and OnClick data property.
+  extensionMenuRoot = await openExtensionContextMenu("#call-me-maybe");
+
+  // Check some menu items.
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 1, "contextMenu item for text input element was found (context=editable)");
+  editable = items[0];
+
+  // Click on ext-editable item and check the click results.
+  await closeExtensionContextMenu(editable);
+
+  expectedClickInfo = {
+    menuItemId: "ext-editable",
+    pageUrl: PAGE,
+    editable: true,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+  extensionMenuRoot = await openExtensionContextMenu("#number-input");
+
+  // Check some menu items.
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 1, "contextMenu item for text input element was found (context=editable)");
+  editable = items[0];
+
+  // Click on ext-editable item and check the click results.
+  await closeExtensionContextMenu(editable);
+
+  expectedClickInfo = {
+    menuItemId: "ext-editable",
+    pageUrl: PAGE,
+    editable: true,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+  extensionMenuRoot = await openExtensionContextMenu("#password");
+  items = extensionMenuRoot.getElementsByAttribute("label", "password");
+  is(items.length, 1, "contextMenu item for password input element was found (context=password)");
+  let password = items[0];
+  await closeExtensionContextMenu(password);
+  expectedClickInfo = {
+    menuItemId: "ext-password",
+    pageUrl: PAGE,
+    editable: true,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+  extensionMenuRoot = await openExtensionContextMenu("#noneditablepassword");
+  items = extensionMenuRoot.getElementsByAttribute("label", "password");
+  is(items.length, 1, "contextMenu item for password input element was found (context=password)");
+  password = items[0];
+  await closeExtensionContextMenu(password);
+  expectedClickInfo.editable = false;
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
 
   // Select some text
-  yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, { }, async function(arg) {
     let doc = content.document;
     let range = doc.createRange();
     let selection = content.getSelection();
@@ -296,40 +325,269 @@ add_task(function* () {
   });
 
   // Bring up context menu again
-  yield openExtensionMenu();
+  extensionMenuRoot = await openExtensionContextMenu();
 
   // Check some menu items
-  top = getTop();
-  items = top.getElementsByAttribute("label", "Without onclick property");
+  items = extensionMenuRoot.getElementsByAttribute("label", "Without onclick property");
   is(items.length, 1, "contextMenu item was found (context=page)");
 
-  yield closeContextMenu(items[0], {
+  await closeExtensionContextMenu(items[0]);
+
+  expectedClickInfo = {
     menuItemId: "ext-without-onclick",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
-  }, false /* hasOnclickProperty */);
+    pageUrl: PAGE,
+  };
+
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
 
   // Bring up context menu again
-  yield openExtensionMenu();
+  extensionMenuRoot = await openExtensionContextMenu();
 
   // Check some menu items
-  top = getTop();
-  items = top.getElementsByAttribute("label", "selection is: 'just some text 123456789012345678901234567890...'");
+  items = extensionMenuRoot.getElementsByAttribute("label", "selection is: 'just some text 12345678901234567890123456789012\u2026'");
   is(items.length, 1, "contextMenu item for selection was found (context=selection)");
   let selectionItem = items[0];
 
-  items = top.getElementsByAttribute("label", "selection");
+  items = extensionMenuRoot.getElementsByAttribute("label", "selection");
   is(items.length, 0, "contextMenu item label update worked (context=selection)");
 
-  yield closeContextMenu(selectionItem, {
+  await closeExtensionContextMenu(selectionItem);
+
+  expectedClickInfo = {
     menuItemId: "ext-selection",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
-    selectionText: "just some text 1234567890123456789012345678901234567890123456789012345678901234567890123456789012",
+    pageUrl: PAGE,
+    selectionText: " just some text 1234567890123456789012345678901234567890123456789012345678901234567890123456789012",
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+  // Select a lot of text
+  await ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
+    let doc = content.document;
+    let range = doc.createRange();
+    let selection = content.getSelection();
+    selection.removeAllRanges();
+    let textNode = doc.getElementById("longtext").firstChild;
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, textNode.length);
+    selection.addRange(range);
   });
 
+  // Bring up context menu again
+  extensionMenuRoot = await openExtensionContextMenu("#longtext");
+
+  // Check some menu items
+  items = extensionMenuRoot.getElementsByAttribute("label", "selection is: 'Sed ut perspiciatis unde omnis iste natus error\u2026'");
+  is(items.length, 1, `contextMenu item for longtext selection was found (context=selection)`);
+  await closeExtensionContextMenu(items[0]);
+
+  expectedClickInfo = {
+    menuItemId: "ext-selection",
+    pageUrl: PAGE,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+  ok(result.info.selectionText.endsWith("quo voluptas nulla pariatur?"), "long text selection worked");
+
+
+  // Select a lot of text, excercise the editable element code path in
+  // the Browser:GetSelection handler.
+  await ContentTask.spawn(gBrowser.selectedBrowser, { }, function(arg) {
+    let doc = content.document;
+    let node = doc.getElementById("editabletext");
+    // content.js handleContentContextMenu fails intermittently without focus.
+    node.focus();
+    node.selectionStart = 0;
+    node.selectionEnd = 844;
+  });
+
+  // Bring up context menu again
+  extensionMenuRoot = await openExtensionContextMenu("#editabletext");
+
+  // Check some menu items
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 1, "contextMenu item for text input element was found (context=editable)");
+  await closeExtensionContextMenu(items[0]);
+
+  expectedClickInfo = {
+    menuItemId: "ext-editable",
+    editable: true,
+    pageUrl: PAGE,
+  };
+
+  result = await extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = await extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+  ok(result.info.selectionText.endsWith("perferendis doloribus asperiores repellat."), "long text selection worked");
+
+  extension.sendMessage("removeall");
+  await extension.awaitMessage("removed");
+
+  let contentAreaContextMenu = await openContextMenu("#img1");
   items = contentAreaContextMenu.getElementsByAttribute("ext-type", "top-level-menu");
   is(items.length, 0, "top level item was not found (after removeAll()");
+  await closeContextMenu();
 
-  yield extension.unload();
+  await extension.unload();
+  BrowserTestUtils.removeTab(tab1);
+});
 
-  yield BrowserTestUtils.removeTab(tab1);
+add_task(async function testRemoveAllWithTwoExtensions() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
+  const manifest = {permissions: ["contextMenus"]};
+
+  const first = ExtensionTestUtils.loadExtension({manifest, background() {
+    browser.contextMenus.create({title: "alpha", contexts: ["all"]});
+
+    browser.contextMenus.onClicked.addListener(() => {
+      browser.contextMenus.removeAll();
+    });
+    browser.test.onMessage.addListener(msg => {
+      if (msg == "ping") {
+        browser.test.sendMessage("pong-alpha");
+        return;
+      }
+      browser.contextMenus.create({title: "gamma", contexts: ["all"]});
+    });
+  }});
+
+  const second = ExtensionTestUtils.loadExtension({manifest, background() {
+    browser.contextMenus.create({title: "beta", contexts: ["all"]});
+
+    browser.contextMenus.onClicked.addListener(() => {
+      browser.contextMenus.removeAll();
+    });
+
+    browser.test.onMessage.addListener(() => {
+      browser.test.sendMessage("pong-beta");
+    });
+  }});
+
+  await first.startup();
+  await second.startup();
+
+  async function confirmMenuItems(...items) {
+    // Round-trip to extension to make sure that the context menu state has been
+    // updated by the async contextMenus.create / contextMenus.removeAll calls.
+    first.sendMessage("ping");
+    second.sendMessage("ping");
+    await first.awaitMessage("pong-alpha");
+    await second.awaitMessage("pong-beta");
+
+    const menu = await openContextMenu();
+    for (const id of ["alpha", "beta", "gamma"]) {
+      const expected = items.includes(id);
+      const found = menu.getElementsByAttribute("label", id);
+      is(found.length, expected, `menu item ${id} ${expected ? "" : "not "}found`);
+    }
+    // Return the first menu item, we need to click it.
+    return menu.getElementsByAttribute("label", items[0])[0];
+  }
+
+  // Confirm alpha, beta exist; click alpha to remove it.
+  const alpha = await confirmMenuItems("alpha", "beta");
+  await closeExtensionContextMenu(alpha);
+
+  // Confirm only beta exists.
+  await confirmMenuItems("beta");
+  await closeContextMenu();
+
+  // Create gamma, confirm, click.
+  first.sendMessage("create");
+  const beta = await confirmMenuItems("beta", "gamma");
+  await closeExtensionContextMenu(beta);
+
+  // Confirm only gamma is left.
+  await confirmMenuItems("gamma");
+  await closeContextMenu();
+
+  await first.unload();
+  await second.unload();
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_bookmark_contextmenu() {
+  const bookmarksToolbar = document.getElementById("PersonalToolbar");
+  setToolbarVisibility(bookmarksToolbar, true);
+
+  const extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      permissions: ["contextMenus", "bookmarks"],
+    },
+    async background() {
+      const url = "https://example.com/";
+      const title = "Example";
+      let newBookmark = await browser.bookmarks.create({
+        url,
+        title,
+        parentId: "toolbar_____",
+      });
+      await browser.contextMenus.create({
+        title: "Get bookmark",
+        contexts: ["bookmark"],
+      });
+      browser.test.sendMessage("bookmark-created");
+      browser.contextMenus.onClicked.addListener(async (info) => {
+        browser.test.assertEq(newBookmark.id, info.bookmarkId, "Bookmark ID matches");
+
+        let [bookmark] = await browser.bookmarks.get(info.bookmarkId);
+        browser.test.assertEq(title, bookmark.title, "Bookmark title matches");
+        browser.test.assertEq(url, bookmark.url, "Bookmark url matches");
+        browser.test.assertFalse(info.hasOwnProperty("pageUrl"), "Context menu does not expose pageUrl");
+        await browser.bookmarks.remove(info.bookmarkId);
+        browser.test.sendMessage("test-finish");
+      });
+    },
+  });
+  await extension.startup();
+  await extension.awaitMessage("bookmark-created");
+  let menu = await openChromeContextMenu(
+    "placesContext",
+    "#PersonalToolbar .bookmark-item:last-child");
+
+  let menuItem = menu.getElementsByAttribute("label", "Get bookmark")[0];
+  closeChromeContextMenu("placesContext", menuItem);
+
+  await extension.awaitMessage("test-finish");
+  await extension.unload();
+  setToolbarVisibility(bookmarksToolbar, false);
+});
+
+add_task(async function test_bookmark_context_requires_permission() {
+  const bookmarksToolbar = document.getElementById("PersonalToolbar");
+  setToolbarVisibility(bookmarksToolbar, true);
+
+  const extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      permissions: ["contextMenus"],
+    },
+    async background() {
+      await browser.contextMenus.create({
+        title: "Get bookmark",
+        contexts: ["bookmark"],
+      });
+      browser.test.sendMessage("bookmark-created");
+    },
+  });
+  await extension.startup();
+  await extension.awaitMessage("bookmark-created");
+  let menu = await openChromeContextMenu(
+    "placesContext",
+    "#PersonalToolbar .bookmark-item:last-child");
+
+  Assert.equal(menu.getElementsByAttribute("label", "Get bookmark").length, 0,
+               "bookmark context menu not created with `bookmarks` permission.");
+
+  closeChromeContextMenu("placesContext");
+
+  await extension.unload();
+  setToolbarVisibility(bookmarksToolbar, false);
 });

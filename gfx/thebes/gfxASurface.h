@@ -9,20 +9,16 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
+#include "gfxPoint.h"
+#include "gfxRect.h"
 #include "gfxTypes.h"
 #include "nscore.h"
 #include "nsSize.h"
 #include "mozilla/gfx/Rect.h"
 
-#ifdef MOZILLA_INTERNAL_API
 #include "nsStringFwd.h"
-#else
-#include "nsStringAPI.h"
-#endif
 
 class gfxImageSurface;
-struct gfxRect;
-struct gfxPoint;
 
 template <typename T>
 struct already_AddRefed;
@@ -36,10 +32,6 @@ public:
 #ifdef MOZILLA_INTERNAL_API
     nsrefcnt AddRef(void);
     nsrefcnt Release(void);
-
-    // These functions exist so that browsercomps can refcount a gfxASurface
-    virtual nsrefcnt AddRefExternal(void);
-    virtual nsrefcnt ReleaseExternal(void);
 #else
     virtual nsrefcnt AddRef(void);
     virtual nsrefcnt Release(void);
@@ -63,8 +55,6 @@ public:
 
     void SetDeviceOffset(const gfxPoint& offset);
     gfxPoint GetDeviceOffset() const;
-
-    virtual bool GetRotateForLandscape() { return false; }
 
     void Flush() const;
     void MarkDirty();
@@ -100,13 +90,6 @@ public:
     virtual already_AddRefed<gfxImageSurface> GetAsImageSurface();
 
     /**
-     * Returns a read-only ARGB32 image surface for this surface. If this is an
-     * optimized surface this may require a copy.
-     * Returns null on error.
-     */
-    virtual already_AddRefed<gfxImageSurface> GetAsReadableARGB32ImageSurface();
-
-    /**
      * Creates a new ARGB32 image surface with the same contents as this surface.
      * Returns null on error.
      */
@@ -114,21 +97,7 @@ public:
 
     int CairoStatus();
 
-    /* Make sure that the given dimensions don't overflow a 32-bit signed int
-     * using 4 bytes per pixel; optionally, make sure that either dimension
-     * doesn't exceed the given limit.
-     */
-    static bool CheckSurfaceSize(const mozilla::gfx::IntSize& sz, int32_t limit = 0);
-
-    /* Provide a stride value that will respect all alignment requirements of
-     * the accelerated image-rendering code.
-     */
-    static int32_t FormatStrideForWidth(gfxImageFormat format, int32_t width);
-
     static gfxContentType ContentFromFormat(gfxImageFormat format);
-
-    void SetSubpixelAntialiasingEnabled(bool aEnabled);
-    bool GetSubpixelAntialiasingEnabled();
 
     /**
      * Record number of bytes for given surface type.  Use positive bytes
@@ -173,12 +142,6 @@ public:
         return GetEmptyOpaqueRect();
     }
 
-    /**
-     * Mark the surface as being allowed/not allowed to be used as a source.
-     */
-    void SetAllowUseAsSource(bool aAllow) { mAllowUseAsSource = aAllow; }
-    bool GetAllowUseAsSource() { return mAllowUseAsSource; }
-
     static uint8_t BytesPerPixel(gfxImageFormat aImageFormat);
 
 protected:
@@ -209,7 +172,6 @@ private:
 
 protected:
     bool mSurfaceValid;
-    bool mAllowUseAsSource;
 };
 
 /**

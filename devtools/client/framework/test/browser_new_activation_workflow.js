@@ -7,13 +7,11 @@
 
 var toolbox, target;
 
-var tempScope = {};
-
 function test() {
   addTab("about:blank").then(function(aTab) {
     target = TargetFactory.forTab(gBrowser.selectedTab);
     loadWebConsole(aTab).then(function() {
-      console.log('loaded');
+      console.log("loaded");
     });
   });
 }
@@ -29,7 +27,7 @@ function loadWebConsole(aTab) {
 
 function checkToolLoading() {
   is(toolbox.currentToolId, "webconsole", "The web console is selected");
-  ok(toolbox.isReady, "toolbox is ready")
+  ok(toolbox.isReady, "toolbox is ready");
 
   selectAndCheckById("jsdebugger").then(function() {
     selectAndCheckById("styleeditor").then(function() {
@@ -39,11 +37,10 @@ function checkToolLoading() {
 }
 
 function selectAndCheckById(id) {
-  let doc = toolbox.frame.contentDocument;
-
   return toolbox.selectTool(id).then(function() {
-    let tab = doc.getElementById("toolbox-tab-" + id);
-    is(tab.hasAttribute("selected"), true, "The " + id + " tab is selected");
+    const tab = toolbox.doc.getElementById("toolbox-tab-" + id);
+    is(tab.classList.contains("selected"), true, "The " + id + " tab is selected");
+    is(tab.getAttribute("aria-pressed"), "true", "The " + id + " tab is pressed");
   });
 }
 

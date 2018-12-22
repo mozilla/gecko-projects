@@ -25,7 +25,7 @@ static const int32_t MAX_OCTAVES = 10;
 JSObject*
 SVGFETurbulenceElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFETurbulenceElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFETurbulenceElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFETurbulenceElement::sNumberInfo[1] =
@@ -77,7 +77,7 @@ nsSVGElement::StringInfo SVGFETurbulenceElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFETurbulenceElement)
 
@@ -132,22 +132,36 @@ SVGFETurbulenceElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   uint32_t type = mEnumAttributes[TYPE].GetAnimValue();
   uint16_t stitch = mEnumAttributes[STITCHTILES].GetAnimValue();
 
-  if (fX == 0 || fY == 0) {
-    return FilterPrimitiveDescription(PrimitiveType::Empty);
+  if (fX == 0 && fY == 0) {
+    // A base frequency of zero results in transparent black for
+    // type="turbulence" and in 50% alpha 50% gray for type="fractalNoise".
+    if (type == SVG_TURBULENCE_TYPE_TURBULENCE) {
+      return FilterPrimitiveDescription(PrimitiveType::Empty);
+    }
+    FilterPrimitiveDescription descr(PrimitiveType::Flood);
+    descr.Attributes().Set(eFloodColor, Color(0.5, 0.5, 0.5, 0.5));
+    return descr;
   }
 
   // We interpret the base frequency as relative to user space units. In other
   // words, we consider one turbulence base period to be 1 / fX user space
   // units wide and 1 / fY user space units high. We do not scale the frequency
   // depending on the filter primitive region.
-  gfxRect firstPeriodInUserSpace(0, 0, 1 / fX, 1 / fY);
+  // We now convert the frequency from user space to filter space.
+  // If a frequency in user space units is zero, then it will also be zero in
+  // filter space. During the conversion we use a dummy period length of 1
+  // for those frequencies but then ignore the converted length and use 0
+  // for the converted frequency. This avoids division by zero.
+  gfxRect firstPeriodInUserSpace(0, 0,
+                                 fX == 0 ? 1 : (1 / fX),
+                                 fY == 0 ? 1 : (1 / fY));
   gfxRect firstPeriodInFilterSpace = aInstance->UserSpaceToFilterSpace(firstPeriodInUserSpace);
-  Size frequencyInFilterSpace(1 / firstPeriodInFilterSpace.width,
-                              1 / firstPeriodInFilterSpace.height);
+  Size frequencyInFilterSpace(fX == 0 ? 0 : (1 / firstPeriodInFilterSpace.width),
+                              fY == 0 ? 0 : (1 / firstPeriodInFilterSpace.height));
   gfxPoint offset = firstPeriodInFilterSpace.TopLeft();
 
   FilterPrimitiveDescription descr(PrimitiveType::Turbulence);
-  descr.Attributes().Set(eTurbulenceOffset, IntPoint(offset.x, offset.y));
+  descr.Attributes().Set(eTurbulenceOffset, IntPoint::Truncate(offset.x, offset.y));
   descr.Attributes().Set(eTurbulenceBaseFrequency, frequencyInFilterSpace);
   descr.Attributes().Set(eTurbulenceSeed, seed);
   descr.Attributes().Set(eTurbulenceNumOctaves, octaves);
@@ -158,7 +172,7 @@ SVGFETurbulenceElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFETurbulenceElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                    nsIAtom* aAttribute) const
+                                                    nsAtom* aAttribute) const
 {
   return SVGFETurbulenceElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

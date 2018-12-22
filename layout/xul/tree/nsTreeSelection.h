@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 3; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -8,19 +8,19 @@
 #define nsTreeSelection_h__
 
 #include "nsITreeSelection.h"
-#include "nsITreeColumns.h"
 #include "nsITimer.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
 class nsITreeBoxObject;
+class nsTreeColumn;
 struct nsTreeRange;
 
 class nsTreeSelection final : public nsINativeTreeSelection
 {
 public:
   explicit nsTreeSelection(nsITreeBoxObject* aTree);
-   
+
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(nsTreeSelection)
   NS_DECL_NSITREESELECTION
@@ -37,12 +37,15 @@ protected:
   static void SelectCallback(nsITimer *aTimer, void *aClosure);
 
 protected:
+  // Helper function to get the content node associated with mTree.
+  already_AddRefed<nsIContent> GetContent();
+
   // Members
   nsCOMPtr<nsITreeBoxObject> mTree; // The tree will hold on to us through the view and let go when it dies.
 
   bool mSuppressed; // Whether or not we should be firing onselect events.
   int32_t mCurrentIndex; // The item to draw the rect around. The last one clicked, etc.
-  nsCOMPtr<nsITreeColumn> mCurrentColumn;
+  RefPtr<nsTreeColumn> mCurrentColumn;
   int32_t mShiftSelectPivot; // Used when multiple SHIFT+selects are performed to pivot on.
 
   nsTreeRange* mFirstRange; // Our list of ranges.

@@ -7,8 +7,8 @@
 using namespace mozilla;
 
 nsHtml5Speculation::nsHtml5Speculation(nsHtml5OwningUTF16Buffer* aBuffer,
-                                       int32_t aStart, 
-                                       int32_t aStartLineNumber, 
+                                       int32_t aStart,
+                                       int32_t aStartLineNumber,
                                        nsAHtml5TreeBuilderState* aSnapshot)
   : mBuffer(aBuffer)
   , mStart(aStart)
@@ -26,7 +26,7 @@ nsHtml5Speculation::~nsHtml5Speculation()
 void
 nsHtml5Speculation::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
 {
-  mOpQueue.AppendElements(Move(aOpQueue));
+  mOpQueue.AppendElements(std::move(aOpQueue));
 }
 
 void

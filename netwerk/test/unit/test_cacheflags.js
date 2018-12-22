@@ -1,5 +1,6 @@
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var httpserver = new HttpServer();
 httpserver.start(-1);
@@ -16,38 +17,23 @@ var nostorePath = "/nostore" + suffix;
 var test410Path = "/test410" + suffix;
 var test404Path = "/test404" + suffix;
 
-// We attach this to channel when we want to test Private Browsing mode
-function LoadContext(usePrivateBrowsing) {
-  this.usePrivateBrowsing = usePrivateBrowsing;
-}
-
-LoadContext.prototype = {
-  originAttributes: {},
-  usePrivateBrowsing: false,
-  // don't bother defining rest of nsILoadContext fields: don't need 'em
-
-  QueryInterface: function(iid) {
-    if (iid.equals(Ci.nsILoadContext))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-
-  getInterface: function(iid) {
-    if (iid.equals(Ci.nsILoadContext))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-
-  originAttributes: {}
-};
-
-PrivateBrowsingLoadContext = new LoadContext(true);
+var PrivateBrowsingLoadContext = Cc["@mozilla.org/privateloadcontext;1"].createInstance(Ci.nsILoadContext);
 
 function make_channel(url, flags, usePrivateBrowsing) {
-  var req = NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
+  var securityFlags = Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
+
+  var uri = Services.io.newURI(url);
+  var principal = Services.scriptSecurityManager.createCodebasePrincipal(uri,
+    { privateBrowsingId : usePrivateBrowsing ? 1 : 0 });
+
+  var req = NetUtil.newChannel({uri: uri,
+                                loadingPrincipal: principal,
+                                securityFlags: securityFlags,
+                                contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER});
+
   req.loadFlags = flags;
   if (usePrivateBrowsing) {
-    req.notificationCallbacks = PrivateBrowsingLoadContext;    
+    req.notificationCallbacks = PrivateBrowsingLoadContext;
   }
   return req;
 }
@@ -72,11 +58,11 @@ Test.prototype = {
   _isFromCache: false,
 
   QueryInterface: function(iid) {
-    if (iid.equals(Components.interfaces.nsIStreamListener) ||
-        iid.equals(Components.interfaces.nsIRequestObserver) ||
-        iid.equals(Components.interfaces.nsISupports))
+    if (iid.equals(Ci.nsIStreamListener) ||
+        iid.equals(Ci.nsIRequestObserver) ||
+        iid.equals(Ci.nsISupports))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   onStartRequest: function(request, context) {
@@ -89,9 +75,9 @@ Test.prototype = {
   },
 
   onStopRequest: function(request, context, status) {
-    do_check_eq(Components.isSuccessCode(status), this.expectSuccess);
-    do_check_eq(this._isFromCache, this.readFromCache);
-    do_check_eq(gHitServer, this.hitServer);
+    Assert.equal(Components.isSuccessCode(status), this.expectSuccess);
+    Assert.equal(this._isFromCache, this.readFromCache);
+    Assert.equal(gHitServer, this.hitServer);
 
     do_timeout(0, run_next_test);
   },

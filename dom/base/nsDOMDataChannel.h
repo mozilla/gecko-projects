@@ -9,10 +9,9 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/dom/DataChannelBinding.h"
+#include "mozilla/dom/RTCDataChannelBinding.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/net/DataChannelListener.h"
-#include "nsIDOMDataChannel.h"
 #include "nsIInputStream.h"
 
 
@@ -25,7 +24,6 @@ class DataChannel;
 };
 
 class nsDOMDataChannel final : public mozilla::DOMEventTargetHelper,
-                               public nsIDOMDataChannel,
                                public mozilla::DataChannelListener
 {
 public:
@@ -35,12 +33,16 @@ public:
   nsresult Init(nsPIDOMWindowInner* aDOMWindow);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMDATACHANNEL
-
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(mozilla::DOMEventTargetHelper)
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDataChannel,
                                            mozilla::DOMEventTargetHelper)
+
+  // EventTarget
+  using EventTarget::EventListenerAdded;
+  virtual void EventListenerAdded(nsAtom* aType) override;
+
+  using EventTarget::EventListenerRemoved;
+  virtual void EventListenerRemoved(nsAtom* aType) override;
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
     override;
@@ -50,8 +52,11 @@ public:
   }
 
   // WebIDL
-  // Uses XPIDL GetLabel.
+  void GetLabel(nsAString& aLabel);
+  void GetProtocol(nsAString& aProtocol);
   bool Reliable() const;
+  mozilla::dom::Nullable<uint16_t> GetMaxPacketLifeTime() const;
+  mozilla::dom::Nullable<uint16_t> GetMaxRetransmits() const;
   mozilla::dom::RTCDataChannelState ReadyState() const;
   uint32_t BufferedAmount() const;
   uint32_t BufferedAmountLowThreshold() const;
@@ -59,7 +64,7 @@ public:
   IMPL_EVENT_HANDLER(open)
   IMPL_EVENT_HANDLER(error)
   IMPL_EVENT_HANDLER(close)
-  // Uses XPIDL Close.
+  void Close();
   IMPL_EVENT_HANDLER(message)
   IMPL_EVENT_HANDLER(bufferedamountlow)
   mozilla::dom::RTCDataChannelType BinaryType() const
@@ -78,10 +83,8 @@ public:
   void Send(const mozilla::dom::ArrayBufferView& aData,
             mozilla::ErrorResult& aRv);
 
-  // Uses XPIDL GetProtocol.
   bool Ordered() const;
   uint16_t Id() const;
-  uint16_t Stream() const; // deprecated
 
   nsresult
   DoOnMessageAvailable(const nsACString& aMessage, bool aBinary);
@@ -103,16 +106,31 @@ public:
   virtual nsresult
   OnBufferLow(nsISupports* aContext) override;
 
+  virtual nsresult
+  NotBuffered(nsISupports* aContext) override;
+
   virtual void
   AppReady();
+
+  // if there are "strong event listeners" or outgoing not sent messages
+  // then this method keeps the object alive when js doesn't have strong
+  // references to it.
+  void UpdateMustKeepAlive();
+  // ATTENTION, when calling this method the object can be released
+  // (and possibly collected).
+  void DontKeepAliveAnyMore();
 
 protected:
   ~nsDOMDataChannel();
 
 private:
   void Send(nsIInputStream* aMsgStream, const nsACString& aMsgString,
-            uint32_t aMsgLength, bool aIsBinary, mozilla::ErrorResult& aRv);
+            bool aIsBinary, mozilla::ErrorResult& aRv);
 
+  void ReleaseSelf();
+
+  // to keep us alive while we have listeners
+  RefPtr<nsDOMDataChannel> mSelfRef;
   // Owning reference
   RefPtr<mozilla::DataChannel> mDataChannel;
   nsString  mOrigin;
@@ -121,6 +139,8 @@ private:
     DC_BINARY_TYPE_BLOB,
   };
   DataChannelBinaryType mBinaryType;
+  bool mCheckMustKeepAlive;
+  bool mSentClose;
 };
 
 #endif // nsDOMDataChannel_h

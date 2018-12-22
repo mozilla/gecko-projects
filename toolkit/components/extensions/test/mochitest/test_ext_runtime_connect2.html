@@ -3,7 +3,7 @@
 <head>
   <title>WebExtension test</title>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
+  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
@@ -29,6 +29,8 @@ function backgroundScript(token) {
     browser.test.assertEq(port.name, token, "token matches");
     port.postMessage(token + "-done");
   });
+
+  browser.test.sendMessage("background-ready");
 }
 
 function contentScript(token) {
@@ -76,23 +78,24 @@ function makeExtension() {
   return extensionData;
 }
 
-add_task(function* test_contentscript() {
+add_task(async function test_contentscript() {
   let extension1 = ExtensionTestUtils.loadExtension(makeExtension());
   let extension2 = ExtensionTestUtils.loadExtension(makeExtension());
-  yield Promise.all([extension1.startup(), extension2.startup()]);
-  info("extensions loaded");
+  await Promise.all([extension1.startup(), extension2.startup()]);
+
+  await extension1.awaitMessage("background-ready");
+  await extension2.awaitMessage("background-ready");
 
   let win = window.open("file_sample.html");
 
-  yield Promise.all([waitForLoad(win),
+  await Promise.all([waitForLoad(win),
                      extension1.awaitFinish("sendmessage_reply"),
                      extension2.awaitFinish("sendmessage_reply")]);
 
   win.close();
 
-  yield extension1.unload();
-  yield extension2.unload();
-  info("extensions unloaded");
+  await extension1.unload();
+  await extension2.unload();
 });
 </script>
 

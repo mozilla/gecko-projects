@@ -21,8 +21,6 @@ namespace jsipc {
 class WrapperAnswer : public virtual JavaScriptShared
 {
   public:
-    explicit WrapperAnswer(JSRuntime* rt) : JavaScriptShared(rt) {}
-
     bool RecvPreventExtensions(const ObjectId& objId, ReturnStatus* rs);
     bool RecvGetPropertyDescriptor(const ObjectId& objId, const JSIDVariant& id,
                                    ReturnStatus* rs,
@@ -56,6 +54,8 @@ class WrapperAnswer : public virtual JavaScriptShared
     bool RecvIsArray(const ObjectId& objId, ReturnStatus* rs, uint32_t* ans);
     bool RecvClassName(const ObjectId& objId, nsCString* result);
     bool RecvGetPrototype(const ObjectId& objId, ReturnStatus* rs, ObjectOrNullVariant* result);
+    bool RecvGetPrototypeIfOrdinary(const ObjectId& objId, ReturnStatus* rs, bool* isOrdinary,
+                                    ObjectOrNullVariant* result);
     bool RecvRegExpToShared(const ObjectId& objId, ReturnStatus* rs, nsString* source, uint32_t* flags);
 
     bool RecvGetPropertyKeys(const ObjectId& objId, const uint32_t& flags,
@@ -71,6 +71,7 @@ class WrapperAnswer : public virtual JavaScriptShared
     bool fail(dom::AutoJSAPI& jsapi, ReturnStatus* rs);
     bool ok(ReturnStatus* rs);
     bool ok(ReturnStatus* rs, const JS::ObjectOpResult& result);
+    bool deadCPOW(dom::AutoJSAPI& jsapi, ReturnStatus* rs);
 };
 
 } // namespace jsipc

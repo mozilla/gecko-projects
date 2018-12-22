@@ -10,11 +10,14 @@
   <!ENTITY % globalDTD
     SYSTEM "chrome://global/locale/global.dtd">
   %globalDTD;
+  <!ENTITY % syncBrandDTD
+    SYSTEM "chrome://browser/locale/syncBrand.dtd">
+  %syncBrandDTD;
 ]>
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <head>
-    <script src="chrome://browser/content/syncedtabs/sidebar.js" type="application/javascript;version=1.8"></script>
+    <script src="chrome://browser/content/syncedtabs/sidebar.js" type="application/javascript"></script>
     <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
 
     <link rel="stylesheet" type="text/css" media="all" href="chrome://browser/skin/syncedtabs/sidebar.css"/>
@@ -63,7 +66,7 @@
 
     <template id="tabs-container-template">
       <div class="tabs-container">
-        <div class="list" role="listbox" tabindex="1"></div>
+        <div class="list" role="listbox"></div>
       </div>
     </template>
 
@@ -73,16 +76,29 @@
           <!-- Show intentionally blank panel, see bug 1239845 -->
         </div>
         <div class="notAuthedInfo sync-state">
-          <p>&syncedTabs.sidebar.notsignedin.label;</p>
-          <p><a href="#" class="sync-prefs text-link">&fxaSignIn.label;</a></p>
+          <div class="syncIllustration"></div>
+          <p class="instructions">&syncedTabs.sidebar.notsignedin.label;</p>
+          <button class="button sync-prefs">&fxaSignIn.label;</button>
+        </div>
+        <div class="reauth sync-state">
+          <div class="syncIllustrationIssue"></div>
+          <p class="instructions">&syncedTabs.sidebar.notsignedin.label;</p>
+          <button class="button sync-prefs">&fxaSignIn.label;</button>
+        </div>
+        <div class="unverified sync-state">
+          <div class="syncIllustrationIssue"></div>
+          <p class="instructions">&syncedTabs.sidebar.unverified.label;</p>
+          <button class="button sync-prefs">&syncedTabs.sidebar.openprefs.label;</button>
         </div>
         <div class="singleDeviceInfo sync-state">
-          <p>&syncedTabs.sidebar.noclients.label;</p>
-          <p class="device-promo"></p>
+          <div class="syncIllustrationIssue"></div>
+          <p class="instructions">&syncedTabs.sidebar.noclients.subtitle;</p>
+          <button class="button connect-device">&syncedTabs.sidebar.connectAnotherDevice;</button>
         </div>
         <div class="tabs-disabled sync-state">
-          <p>&syncedTabs.sidebar.tabsnotsyncing.label;</p>
-          <p><a href="#" class="sync-prefs text-link">&syncedTabs.sidebar.openprefs.label;</a></p>
+          <div class="syncIllustrationIssue"></div>
+          <p class="instructions">&syncedTabs.sidebar.tabsnotsyncing.label;</p>
+          <button class="button sync-prefs">&syncedTabs.sidebar.openprefs.label;</button>
         </div>
       </div>
     </template>
@@ -91,19 +107,21 @@
       <!-- the non-scrollable header -->
       <div class="content-header">
         <div class="sidebar-search-container tabs-container sync-state">
-          <div class="search-box compact">
+          <div class="search-box">
             <div class="textbox-input-box">
-              <input type="text" class="tabsFilter textbox-input"/>
+              <input type="text"
+                     class="tabsFilter textbox-input"
+                     placeholder="&syncedTabs.sidebar.searchPlaceholder;"
+                     tabindex="1"/>
               <div class="textbox-search-icons">
                 <a class="textbox-search-clear"></a>
-                <a class="textbox-search-icon"></a>
               </div>
             </div>
           </div>
         </div>
       </div>
       <!-- the scrollable content area where our templates are inserted -->
-      <div id="template-container" class="content-scrollable">
+      <div id="template-container" class="content-scrollable" tabindex="-1">
       </div>
     </div>
   </body>

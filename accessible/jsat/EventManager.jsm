@@ -2,32 +2,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-'use strict';
+"use strict";
 
-const Ci = Components.interfaces;
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "Utils",
+  "resource://gre/modules/accessibility/Utils.jsm");
+ChromeUtils.defineModuleGetter(this, "Logger",
+  "resource://gre/modules/accessibility/Utils.jsm");
+ChromeUtils.defineModuleGetter(this, "Presentation",
+  "resource://gre/modules/accessibility/Presentation.jsm");
+ChromeUtils.defineModuleGetter(this, "Roles",
+  "resource://gre/modules/accessibility/Constants.jsm");
+ChromeUtils.defineModuleGetter(this, "Events",
+  "resource://gre/modules/accessibility/Constants.jsm");
+ChromeUtils.defineModuleGetter(this, "States",
+  "resource://gre/modules/accessibility/Constants.jsm");
+ChromeUtils.defineModuleGetter(this, "clearTimeout",
+  "resource://gre/modules/Timer.jsm");
+ChromeUtils.defineModuleGetter(this, "setTimeout",
+  "resource://gre/modules/Timer.jsm");
 
-const TEXT_NODE = 3;
+var EXPORTED_SYMBOLS = ["EventManager"];
 
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Services',
-  'resource://gre/modules/Services.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Utils',
-  'resource://gre/modules/accessibility/Utils.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Logger',
-  'resource://gre/modules/accessibility/Utils.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Presentation',
-  'resource://gre/modules/accessibility/Presentation.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Roles',
-  'resource://gre/modules/accessibility/Constants.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Events',
-  'resource://gre/modules/accessibility/Constants.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'States',
-  'resource://gre/modules/accessibility/Constants.jsm');
-
-this.EXPORTED_SYMBOLS = ['EventManager'];
-
-this.EventManager = function EventManager(aContentScope, aContentControl) {
+function EventManager(aContentScope, aContentControl) {
   this.contentScope = aContentScope;
   this.contentControl = aContentControl;
   this.addEventListener = this.contentScope.addEventListener.bind(
@@ -39,15 +38,13 @@ this.EventManager = function EventManager(aContentScope, aContentControl) {
   this.webProgress = this.contentScope.docShell.
     QueryInterface(Ci.nsIInterfaceRequestor).
     getInterface(Ci.nsIWebProgress);
-};
+}
 
 this.EventManager.prototype = {
-  editState: { editing: false },
-
   start: function start() {
     try {
       if (!this._started) {
-        Logger.debug('EventManager.start');
+        Logger.debug("EventManager.start");
 
         this._started = true;
 
@@ -56,15 +53,15 @@ this.EventManager.prototype = {
         this.webProgress.addProgressListener(this,
           (Ci.nsIWebProgress.NOTIFY_STATE_ALL |
            Ci.nsIWebProgress.NOTIFY_LOCATION));
-        this.addEventListener('wheel', this, true);
-        this.addEventListener('scroll', this, true);
-        this.addEventListener('resize', this, true);
+        this.addEventListener("wheel", this, true);
+        this.addEventListener("scroll", this, true);
+        this.addEventListener("resize", this, true);
         this._preDialogPosition = new WeakMap();
       }
-      this.present(Presentation.tabStateChanged(null, 'newtab'));
+      this.present(Presentation.tabStateChanged(null, "newtab"));
 
     } catch (x) {
-      Logger.logException(x, 'Failed to start EventManager');
+      Logger.logException(x, "Failed to start EventManager");
     }
   },
 
@@ -74,14 +71,14 @@ this.EventManager.prototype = {
     if (!this._started) {
       return;
     }
-    Logger.debug('EventManager.stop');
+    Logger.debug("EventManager.stop");
     AccessibilityEventObserver.removeListener(this);
     try {
       this._preDialogPosition = new WeakMap();
       this.webProgress.removeProgressListener(this);
-      this.removeEventListener('wheel', this, true);
-      this.removeEventListener('scroll', this, true);
-      this.removeEventListener('resize', this, true);
+      this.removeEventListener("wheel", this, true);
+      this.removeEventListener("scroll", this, true);
+      this.removeEventListener("resize", this, true);
     } catch (x) {
       // contentScope is dead.
     } finally {
@@ -91,55 +88,48 @@ this.EventManager.prototype = {
 
   handleEvent: function handleEvent(aEvent) {
     Logger.debug(() => {
-      return ['DOMEvent', aEvent.type];
+      return ["DOMEvent", aEvent.type];
     });
 
     try {
       switch (aEvent.type) {
-      case 'wheel':
+      case "wheel":
       {
-        let attempts = 0;
         let delta = aEvent.deltaX || aEvent.deltaY;
         this.contentControl.autoMove(
          null,
-         { moveMethod: delta > 0 ? 'moveNext' : 'movePrevious',
+         { moveMethod: delta > 0 ? "moveNext" : "movePrevious",
            onScreenOnly: true, noOpIfOnScreen: true, delay: 500 });
         break;
       }
-      case 'scroll':
-      case 'resize':
+      case "scroll":
+      case "resize":
       {
         // the target could be an element, document or window
-        let window = null;
-        if (aEvent.target instanceof Ci.nsIDOMWindow)
-          window = aEvent.target;
-        else if (aEvent.target instanceof Ci.nsIDOMDocument)
-          window = aEvent.target.defaultView;
-        else if (aEvent.target instanceof Ci.nsIDOMElement)
-          window = aEvent.target.ownerDocument.defaultView;
+        let window = aEvent.target.ownerGlobal;
         this.present(Presentation.viewportChanged(window));
         break;
       }
       }
     } catch (x) {
-      Logger.logException(x, 'Error handling DOM event');
+      Logger.logException(x, "Error handling DOM event");
     }
   },
 
   handleAccEvent: function handleAccEvent(aEvent) {
     Logger.debug(() => {
-      return ['A11yEvent', Logger.eventToString(aEvent),
+      return ["A11yEvent", Logger.eventToString(aEvent),
               Logger.accessibleToString(aEvent.accessible)];
     });
 
     // Don't bother with non-content events in firefox.
-    if (Utils.MozBuildApp == 'browser' &&
+    if (Utils.MozBuildApp == "browser" &&
         aEvent.eventType != Events.VIRTUALCURSOR_CHANGED &&
         // XXX Bug 442005 results in DocAccessible::getDocType returning
         // NS_ERROR_FAILURE. Checking for aEvent.accessibleDocument.docType ==
         // 'window' does not currently work.
         (aEvent.accessibleDocument.DOMDocument.doctype &&
-         aEvent.accessibleDocument.DOMDocument.doctype.name === 'window')) {
+         aEvent.accessibleDocument.DOMDocument.doctype.name === "window")) {
       return;
     }
 
@@ -156,8 +146,7 @@ this.EventManager.prototype = {
         let reason = event.reason;
         let oldAccessible = event.oldAccessible;
 
-        if (this.editState.editing &&
-            !Utils.getState(position).contains(States.FOCUSED)) {
+        if (!Utils.getState(position).contains(States.FOCUSED)) {
           aEvent.accessibleDocument.takeFocus();
         }
         this.present(
@@ -176,18 +165,18 @@ this.EventManager.prototype = {
             this.present(
               Presentation.
                 actionInvoked(aEvent.accessible,
-                              event.isEnabled ? 'on' : 'off'));
+                              event.isEnabled ? "on" : "off"));
           } else {
             this.present(
               Presentation.
                 actionInvoked(aEvent.accessible,
-                              event.isEnabled ? 'check' : 'uncheck'));
+                              event.isEnabled ? "check" : "uncheck"));
           }
         } else if (state.contains(States.SELECTED)) {
           this.present(
             Presentation.
               actionInvoked(aEvent.accessible,
-                            event.isEnabled ? 'select' : 'unselect'));
+                            event.isEnabled ? "select" : "unselect"));
         }
         break;
       }
@@ -198,7 +187,7 @@ this.EventManager.prototype = {
           this.present(Presentation.nameChanged(acc));
         } else {
           let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
-            ['text', 'all']);
+            ["text", "all"]);
           if (liveRegion) {
             this.present(Presentation.nameChanged(acc, isPolite));
           }
@@ -220,12 +209,9 @@ this.EventManager.prototype = {
         // it doesn't mean we are not on any editable accessible. just not
         // on this one..
         let state = Utils.getState(acc);
-        if (state.contains(States.FOCUSED)) {
-          this._setEditingMode(aEvent, caretOffset);
-          if (state.contains(States.EDITABLE)) {
-            this.present(Presentation.textSelectionChanged(acc.getText(0, -1),
-              caretOffset, caretOffset, 0, 0, aEvent.isFromUserInput));
-          }
+        if (state.contains(States.FOCUSED) && state.contains(States.EDITABLE)) {
+          this.present(Presentation.textSelectionChanged(acc.getText(0, -1),
+            caretOffset, caretOffset, 0, 0, aEvent.isFromUserInput));
         }
         break;
       }
@@ -233,14 +219,14 @@ this.EventManager.prototype = {
       {
         let evt = aEvent.QueryInterface(
           Ci.nsIAccessibleObjectAttributeChangedEvent);
-        if (evt.changedAttribute.toString() !== 'aria-hidden') {
+        if (evt.changedAttribute !== "aria-hidden") {
           // Only handle aria-hidden attribute change.
           break;
         }
         let hidden = Utils.isHidden(aEvent.accessible);
-        this[hidden ? '_handleHide' : '_handleShow'](evt);
+        this[hidden ? "_handleHide" : "_handleShow"](evt);
         if (this.inTest) {
-          this.sendMsgFunc("AccessFu:AriaHidden", { hidden: hidden });
+          this.sendMsgFunc("AccessFu:AriaHidden", { hidden });
         }
         break;
       }
@@ -259,7 +245,7 @@ this.EventManager.prototype = {
       case Events.TEXT_REMOVED:
       {
         let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
-          ['text', 'all']);
+          ["text", "all"]);
         if (aEvent.isFromUserInput || liveRegion) {
           // Handle all text mutations coming from the user or if they happen
           // on a live region.
@@ -271,13 +257,13 @@ this.EventManager.prototype = {
       {
         // Put vc where the focus is at
         let acc = aEvent.accessible;
-        let doc = aEvent.accessibleDocument;
-        this._setEditingMode(aEvent);
-        if ([Roles.CHROME_WINDOW,
+        if (![Roles.CHROME_WINDOW,
              Roles.DOCUMENT,
-             Roles.APPLICATION].indexOf(acc.role) < 0) {
+             Roles.APPLICATION].includes(acc.role)) {
           this.contentControl.autoMove(acc);
-       }
+        }
+
+        this.present(Presentation.focused(acc));
 
        if (this.inTest) {
         this.sendMsgFunc("AccessFu:Focused");
@@ -288,7 +274,7 @@ this.EventManager.prototype = {
       {
         let position = this.contentControl.vc.position;
         // Check if position is in the subtree of the DOCUMENT_LOAD_COMPLETE
-        // event's dialog accesible or accessible document
+        // event's dialog accessible or accessible document
         let subtreeRoot = aEvent.accessible.role === Roles.DIALOG ?
           aEvent.accessible : aEvent.accessibleDocument;
         if (aEvent.accessible === aEvent.accessibleDocument ||
@@ -301,8 +287,10 @@ this.EventManager.prototype = {
         this.contentControl.autoMove(aEvent.accessible, { delay: 500 });
         break;
       }
-      case Events.VALUE_CHANGE:
       case Events.TEXT_VALUE_CHANGE:
+        // We handle this events in TEXT_INSERTED/TEXT_REMOVED.
+        break;
+      case Events.VALUE_CHANGE:
       {
         let position = this.contentControl.vc.position;
         let target = aEvent.accessible;
@@ -311,7 +299,7 @@ this.EventManager.prototype = {
           this.present(Presentation.valueChanged(target));
         } else {
           let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
-            ['text', 'all']);
+            ["text", "all"]);
           if (liveRegion) {
             this.present(Presentation.valueChanged(target, isPolite));
           }
@@ -320,57 +308,9 @@ this.EventManager.prototype = {
     }
   },
 
-  _setEditingMode: function _setEditingMode(aEvent, aCaretOffset) {
-    let acc = aEvent.accessible;
-    let accText, characterCount;
-    let caretOffset = aCaretOffset;
-
-    try {
-      accText = acc.QueryInterface(Ci.nsIAccessibleText);
-    } catch (e) {
-      // No text interface on this accessible.
-    }
-
-    if (accText) {
-      characterCount = accText.characterCount;
-      if (caretOffset === undefined) {
-        caretOffset = accText.caretOffset;
-      }
-    }
-
-    // Update editing state, both for presenter and other things
-    let state = Utils.getState(acc);
-
-    let editState = {
-      editing: state.contains(States.EDITABLE) &&
-        state.contains(States.FOCUSED),
-      multiline: state.contains(States.MULTI_LINE),
-      atStart: caretOffset === 0,
-      atEnd: caretOffset === characterCount
-    };
-
-    // Not interesting
-    if (!editState.editing && editState.editing === this.editState.editing) {
-      return;
-    }
-
-    if (editState.editing !== this.editState.editing) {
-      this.present(Presentation.editingModeChanged(editState.editing));
-    }
-
-    if (editState.editing !== this.editState.editing ||
-        editState.multiline !== this.editState.multiline ||
-        editState.atEnd !== this.editState.atEnd ||
-        editState.atStart !== this.editState.atStart) {
-      this.sendMsgFunc("AccessFu:Input", editState);
-    }
-
-    this.editState = editState;
-  },
-
   _handleShow: function _handleShow(aEvent) {
     let {liveRegion, isPolite} = this._handleLiveRegion(aEvent,
-      ['additions', 'all']);
+      ["additions", "all"]);
     // Only handle show if it is a relevant live region.
     if (!liveRegion) {
       return;
@@ -385,7 +325,7 @@ this.EventManager.prototype = {
 
   _handleHide: function _handleHide(aEvent) {
     let {liveRegion, isPolite} = this._handleLiveRegion(
-      aEvent, ['removals', 'all']);
+      aEvent, ["removals", "all"]);
     let acc = aEvent.accessible;
     if (liveRegion) {
       // Hide for text is handled by the EVENT_TEXT_REMOVED handler.
@@ -419,7 +359,7 @@ this.EventManager.prototype = {
     let isInserted = event.isInserted;
     let txtIface = aEvent.accessible.QueryInterface(Ci.nsIAccessibleText);
 
-    let text = '';
+    let text = "";
     try {
       text = txtIface.getText(0, Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT);
     } catch (x) {
@@ -432,7 +372,7 @@ this.EventManager.prototype = {
     // If there are embedded objects in the text, ignore them.
     // Assuming changes to the descendants would already be handled by the
     // show/hide event.
-    let modifiedText = event.modifiedText.replace(/\uFFFC/g, '');
+    let modifiedText = event.modifiedText.replace(/\uFFFC/g, "");
     if (modifiedText != event.modifiedText && !modifiedText.trim()) {
       return;
     }
@@ -458,13 +398,13 @@ this.EventManager.prototype = {
     }
     let parseLiveAttrs = function parseLiveAttrs(aAccessible) {
       let attrs = Utils.getAttributes(aAccessible);
-      if (attrs['container-live']) {
+      if (attrs["container-live"]) {
         return {
-          live: attrs['container-live'],
-          relevant: attrs['container-relevant'] || 'additions text',
-          busy: attrs['container-busy'],
-          atomic: attrs['container-atomic'],
-          memberOf: attrs['member-of']
+          live: attrs["container-live"],
+          relevant: attrs["container-relevant"] || "additions text",
+          busy: attrs["container-busy"],
+          atomic: attrs["container-atomic"],
+          memberOf: attrs["member-of"]
         };
       }
       return null;
@@ -482,13 +422,13 @@ this.EventManager.prototype = {
         if (liveAttrs) {
           return liveAttrs;
         }
-        parent = parent.parent
+        parent = parent.parent;
       }
       return {};
     };
-    let {live, relevant, busy, atomic, memberOf} = getLiveAttributes(aEvent);
+    let {live, relevant, /* busy, atomic, memberOf */ } = getLiveAttributes(aEvent);
     // If container-live is not present or is set to |off| ignore the event.
-    if (!live || live === 'off') {
+    if (!live || live === "off") {
       return {};
     }
     // XXX: support busy and atomic.
@@ -501,7 +441,7 @@ this.EventManager.prototype = {
     }
     return {
       liveRegion: aEvent.accessible,
-      isPolite: live === 'polite'
+      isPolite: live === "polite"
     };
   },
 
@@ -511,10 +451,10 @@ this.EventManager.prototype = {
       let queue = this._liveEventQueue.get(domNode);
       let nextEvent = queue[0];
       if (nextEvent.eventType === aEventType) {
-        Utils.win.clearTimeout(nextEvent.timeoutID);
+        clearTimeout(nextEvent.timeoutID);
         queue.shift();
         if (queue.length === 0) {
-          this._liveEventQueue.delete(domNode)
+          this._liveEventQueue.delete(domNode);
         }
       }
     }
@@ -526,7 +466,7 @@ this.EventManager.prototype = {
     }
     let eventHandler = {
       eventType: aEventType,
-      timeoutID: Utils.win.setTimeout(this.present.bind(this),
+      timeoutID: setTimeout(this.present.bind(this),
         20, // Wait for a possible EVENT_SHOW or EVENT_TEXT_INSERTED event.
         Presentation.liveRegion(aLiveRegion, aIsPolite, true, aModifiedText))
     };
@@ -544,7 +484,7 @@ this.EventManager.prototype = {
   },
 
   onStateChange: function onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
-    let tabstate = '';
+    let tabstate = "";
 
     let loadingState = Ci.nsIWebProgressListener.STATE_TRANSFERRING |
       Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
@@ -552,33 +492,24 @@ this.EventManager.prototype = {
       Ci.nsIWebProgressListener.STATE_IS_NETWORK;
 
     if ((aStateFlags & loadingState) == loadingState) {
-      tabstate = 'loading';
+      tabstate = "loading";
     } else if ((aStateFlags & loadedState) == loadedState &&
                !aWebProgress.isLoadingDocument) {
-      tabstate = 'loaded';
+      tabstate = "loaded";
     }
 
     if (tabstate) {
-      let docAcc = Utils.AccRetrieval.getAccessibleFor(aWebProgress.DOMWindow.document);
+      let docAcc = Utils.AccService.getAccessibleFor(aWebProgress.DOMWindow.document);
       this.present(Presentation.tabStateChanged(docAcc, tabstate));
     }
   },
 
-  onProgressChange: function onProgressChange() {},
-
   onLocationChange: function onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-    let docAcc = Utils.AccRetrieval.getAccessibleFor(aWebProgress.DOMWindow.document);
-    this.present(Presentation.tabStateChanged(docAcc, 'newdoc'));
+    let docAcc = Utils.AccService.getAccessibleFor(aWebProgress.DOMWindow.document);
+    this.present(Presentation.tabStateChanged(docAcc, "newdoc"));
   },
 
-  onStatusChange: function onStatusChange() {},
-
-  onSecurityChange: function onSecurityChange() {},
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsISupportsWeakReference,
-                                         Ci.nsISupports,
-                                         Ci.nsIObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference, Ci.nsIObserver])
 };
 
 const AccessibilityEventObserver = {
@@ -605,7 +536,7 @@ const AccessibilityEventObserver = {
     if (this.started || this.listenerCount === 0) {
       return;
     }
-    Services.obs.addObserver(this, 'accessible-event', false);
+    Services.obs.addObserver(this, "accessible-event");
     this.started = true;
   },
 
@@ -616,7 +547,7 @@ const AccessibilityEventObserver = {
     if (!this.started) {
       return;
     }
-    Services.obs.removeObserver(this, 'accessible-event');
+    Services.obs.removeObserver(this, "accessible-event");
     // Clean up all registered event managers.
     this.eventManagers = new WeakMap();
     this.listenerCount = 0;
@@ -637,7 +568,7 @@ const AccessibilityEventObserver = {
     }
     this.eventManagers.set(content, aEventManager);
     // Since at least one EventManager was registered, start listening.
-    Logger.debug('AccessibilityEventObserver.addListener. Total:',
+    Logger.debug("AccessibilityEventObserver.addListener. Total:",
       this.listenerCount);
     this.start();
   },
@@ -655,7 +586,7 @@ const AccessibilityEventObserver = {
       return;
     }
     this.listenerCount--;
-    Logger.debug('AccessibilityEventObserver.removeListener. Total:',
+    Logger.debug("AccessibilityEventObserver.removeListener. Total:",
       this.listenerCount);
     if (this.listenerCount === 0) {
       // If there are no EventManagers registered at the moment, stop listening
@@ -687,13 +618,13 @@ const AccessibilityEventObserver = {
    * Handle the 'accessible-event' message.
    */
   observe: function observe(aSubject, aTopic, aData) {
-    if (aTopic !== 'accessible-event') {
+    if (aTopic !== "accessible-event") {
       return;
     }
     let event = aSubject.QueryInterface(Ci.nsIAccessibleEvent);
     if (!event.accessibleDocument) {
       Logger.warning(
-        'AccessibilityEventObserver.observe: no accessible document:',
+        "AccessibilityEventObserver.observe: no accessible document:",
         Logger.eventToString(event), "accessible:",
         Logger.accessibleToString(event.accessible));
       return;
@@ -702,10 +633,9 @@ const AccessibilityEventObserver = {
     // Match the content window to its EventManager.
     let eventManager = this.getListener(content);
     if (!eventManager || !eventManager._started) {
-      if (Utils.MozBuildApp === 'browser' &&
-          !(content instanceof Ci.nsIDOMChromeWindow)) {
+      if (Utils.MozBuildApp === "browser" && !content.isChromeWindow) {
         Logger.warning(
-          'AccessibilityEventObserver.observe: ignored event:',
+          "AccessibilityEventObserver.observe: ignored event:",
           Logger.eventToString(event), "accessible:",
           Logger.accessibleToString(event.accessible), "document:",
           Logger.accessibleToString(event.accessibleDocument));
@@ -715,7 +645,7 @@ const AccessibilityEventObserver = {
     try {
       eventManager.handleAccEvent(event);
     } catch (x) {
-      Logger.logException(x, 'Error handing accessible event');
+      Logger.logException(x, "Error handing accessible event");
     } finally {
       return;
     }

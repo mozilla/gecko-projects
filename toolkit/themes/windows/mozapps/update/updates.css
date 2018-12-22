@@ -21,36 +21,8 @@ wizardpage {
   padding: 10px;
 }
 
-.loadingBox {
-  padding: 3px 5px 3px 5px;
-}
-
-.remoteLoadingThrobber {
-  margin-top: 3px;
-}
-
-.remoteLoadingThrobber[state="loading"] {
-  list-style-image: url("chrome://global/skin/icons/loading.png");
-}
-
-@media (min-resolution: 1.1dppx) {
-  .remoteLoadingThrobber[state="loading"] {
-    width: 16px;
-    list-style-image: url("chrome://global/skin/icons/loading@2x.png");
-  }
-}
-
-.remoteLoadingThrobber[state="error"] {
-  list-style-image: url("chrome://global/skin/icons/information-16.png");
-}
-
 .wizard-buttons-separator {
   margin-top: 0 !important;
-}
-
-#licenseContent, #incompatibleListbox {
-  -moz-margin-start: 6px;
-  -moz-margin-end: 6px;
 }
 
 .inline-link {
@@ -64,24 +36,14 @@ wizardpage {
 
 /* Unsupported Page */
 #unsupportedLabel, #unsupportedLinkLabel {
-  -moz-margin-start: 0;
-  -moz-padding-start: 0;
+  margin-inline-start: 0;
+  padding-inline-start: 0;
 }
 
 /* Update Found Basic Page */
 #updateName, #updateFinishedName {
   font-weight: bold;
   font-size: larger;
-}
-
-/* License Page */
-#licenseContent {
-  -moz-appearance: listbox;
-}
-
-/* Incompatible List Page */
-#incompatibleListbox {
-  margin-bottom: 6px;
 }
 
 /* Downloading Page */
@@ -144,15 +106,17 @@ wizardpage {
 
 #verificationFailedIcon {
   margin-left: 5px;
-  list-style-image: url("chrome://global/skin/icons/notfound.png");
+  -moz-context-properties: fill;
+  fill: currentColor;
+  list-style-image: url(chrome://global/skin/icons/warning.svg);
 }
 
 /* Error Page */
 #errorReason {
   margin-top: 1px;
   margin-bottom: 2px;
-  -moz-margin-start: 6px !important;
-  -moz-margin-end: 5px;
+  margin-inline-start: 6px !important;
+  margin-inline-end: 5px;
   font-weight: bold;
 }
 

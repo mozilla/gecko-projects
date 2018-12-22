@@ -36,6 +36,9 @@ class Visitor:
     def visitTypeEnum(self, enum):
         pass
 
+    def visitTypeFunction(self, fn):
+        pass
+
     def visitTypeUnion(self, union):
         for t, name in union.components:
             t.accept(self)
@@ -168,6 +171,9 @@ class Visitor:
     def visitExprSizeof(self, es):
         self.visitExprCall(es)
 
+    def visitExprLambda(self, l):
+        self.visitBlock(l)
+
     def visitStmtBlock(self, sb):
         self.visitBlock(sb)
 
@@ -292,8 +298,12 @@ class Type(Node):
                  ptr=0, ptrconst=0, ptrptr=0, ptrconstptr=0,
                  ref=0,
                  hasimplicitcopyctor=True,
-                 T=None):
+                 T=None,
+                 inner=None):
         """
+Represents the type |name<T>::inner| with the ptr and const
+modifiers as specified.
+
 To avoid getting fancy with recursive types, we limit the kinds
 of pointer types that can be be constructed.
 
@@ -318,7 +328,8 @@ Any type, naked or pointer, can be const (const T) or ref (T&).
         self.ref = ref
         self.hasimplicitcopyctor = hasimplicitcopyctor
         self.T = T
-        # XXX could get serious here with recursive types, but shouldn't 
+        self.inner = inner
+        # XXX could get serious here with recursive types, but shouldn't
         # need that for this codegen
     def __deepcopy__(self, memo):
         return Type(self.name,
@@ -326,7 +337,8 @@ Any type, naked or pointer, can be const (const T) or ref (T&).
                     ptr=self.ptr, ptrconst=self.ptrconst,
                     ptrptr=self.ptrptr, ptrconstptr=self.ptrconstptr,
                     ref=self.ref,
-                    T=copy.deepcopy(self.T, memo))
+                    T=copy.deepcopy(self.T, memo),
+                    inner=copy.deepcopy(self.inner, memo))
 Type.BOOL = Type('bool')
 Type.INT = Type('int')
 Type.INT32 = Type('int32_t')
@@ -366,10 +378,16 @@ class TypeUnion(Node):
     def addComponent(self, type, name):
         self.components.append(Decl(type, name))
 
+class TypeFunction(Node):
+    def __init__(self, params=[ ], ret=Type('void')):
+        '''Anonymous function type std::function<>'''
+        self.params = params
+        self.ret = ret
+
 class Typedef(Node):
     def __init__(self, fromtype, totypename, templateargs=[]):
         assert isinstance(totypename, str)
-        
+
         Node.__init__(self)
         self.fromtype = fromtype
         self.totypename = totypename
@@ -449,40 +467,43 @@ class FriendClassDecl(Node):
         Node.__init__(self)
         self.friend = friend
 
+# Python2 polyfill for Python3's Enum() functional API.
+def make_enum(name, members_str):
+    members_list = members_str.split()
+    members_dict = {}
+    member_value = 1
+    for member in members_list:
+        members_dict[member] = member_value
+        member_value += 1
+    return type(name, (), members_dict)
+
+MethodSpec = make_enum('MethodSpec', 'NONE VIRTUAL PURE OVERRIDE STATIC')
+
 class MethodDecl(Node):
     def __init__(self, name, params=[ ], ret=Type('void'),
-                 virtual=0, const=0, pure=0, static=0, warn_unused=0,
-                 inline=0, force_inline=0, never_inline=0,
-                 typeop=None,
-                 T=None):
-        assert not (virtual and static)
-        assert not pure or virtual      # pure => virtual
-        assert not (static and typeop)
+                 methodspec=MethodSpec.NONE, const=0, warn_unused=0,
+                 force_inline=0, typeop=None, T=None, cls=None):
         assert not (name and typeop)
         assert name is None or isinstance(name, str)
         assert not isinstance(ret, list)
         for decl in params:  assert not isinstance(decl, str)
         assert not isinstance(T, int)
-        assert not (inline and never_inline)
-        assert not (force_inline and never_inline)
 
         if typeop is not None:
+            assert methodspec == MethodSpec.NONE
             ret = None
 
         Node.__init__(self)
         self.name = name
         self.params = params            # [ Param ]
         self.ret = ret                  # Type or None
-        self.virtual = virtual          # bool
+        self.methodspec = methodspec    # enum
         self.const = const              # bool
-        self.pure = pure                # bool
-        self.static = static            # bool
         self.warn_unused = warn_unused  # bool
         self.force_inline = (force_inline or T) # bool
-        self.inline = inline            # bool
-        self.never_inline = never_inline # bool
         self.typeop = typeop            # Type or None
         self.T = T                      # Type or None
+        self.cls = cls                  # Class or None
         self.only_for_definition = False
 
     def __deepcopy__(self, memo):
@@ -490,14 +511,10 @@ class MethodDecl(Node):
             self.name,
             params=copy.deepcopy(self.params, memo),
             ret=copy.deepcopy(self.ret, memo),
-            virtual=self.virtual,
+            methodspec=self.methodspec,
             const=self.const,
-            pure=self.pure,
-            static=self.static,
             warn_unused=self.warn_unused,
-            inline=self.inline,
             force_inline=self.force_inline,
-            never_inline=self.never_inline,
             typeop=copy.deepcopy(self.typeop, memo),
             T=copy.deepcopy(self.T, memo))
 
@@ -508,13 +525,12 @@ class MethodDefn(Block):
 
 class FunctionDecl(MethodDecl):
     def __init__(self, name, params=[ ], ret=Type('void'),
-                 static=0, warn_unused=0,
-                 inline=0, force_inline=0,
-                 T=None):
+                 methodspec=MethodSpec.NONE, warn_unused=0,
+                 force_inline=0, T=None):
+        assert methodspec == MethodSpec.NONE or methodspec == MethodSpec.STATIC
         MethodDecl.__init__(self, name, params=params, ret=ret,
-                            static=static, warn_unused=warn_unused,
-                            inline=inline, force_inline=force_inline,
-                            T=T)
+                            methodspec=methodspec, warn_unused=warn_unused,
+                            force_inline=force_inline, T=T)
 
 class FunctionDefn(MethodDefn):
     def __init__(self, decl):
@@ -537,18 +553,17 @@ class ConstructorDefn(MethodDefn):
         self.memberinits = memberinits
 
 class DestructorDecl(MethodDecl):
-    def __init__(self, name, virtual=0, force_inline=0, inline=0):
+    def __init__(self, name, methodspec=MethodSpec.NONE, force_inline=0):
+        # C++ allows pure or override destructors, but ipdl cgen does not.
+        assert methodspec == MethodSpec.NONE or methodspec == MethodSpec.VIRTUAL
         MethodDecl.__init__(self, name, params=[ ], ret=None,
-                            virtual=virtual,
-                            force_inline=force_inline, inline=inline)
+                            methodspec=methodspec, force_inline=force_inline)
 
     def __deepcopy__(self, memo):
         return DestructorDecl(self.name,
-                              virtual=self.virtual,
-                              force_inline=self.force_inline,
-                              inline=self.inline)
+                              methodspec=self.methodspec,
+                              force_inline=self.force_inline)
 
-        
 class DestructorDefn(MethodDefn):
     def __init__(self, decl):  MethodDefn.__init__(self, decl)
 
@@ -642,12 +657,15 @@ class ExprSelect(Node):
     def __init__(self, obj, op, field):
         assert obj and op and field
         assert not isinstance(obj, str)
-        assert isinstance(field, str)
+        assert isinstance(op, str)
         
         Node.__init__(self)
         self.obj = obj
         self.op = op
-        self.field = field
+        if isinstance(field, str):
+            self.field = ExprVar(field)
+        else:
+            self.field = field
 
 class ExprAssn(Node):
     def __init__(self, lhs, rhs, op='='):
@@ -668,7 +686,7 @@ class ExprCall(Node):
 
 class ExprMove(ExprCall):
     def __init__(self, arg):
-        ExprCall.__init__(self, ExprVar("mozilla::Move"), args=[arg])
+        ExprCall.__init__(self, ExprVar("std::move"), args=[arg])
 
 class ExprNew(Node):
     # XXX taking some poetic license ...
@@ -692,6 +710,15 @@ class ExprMemberInit(ExprCall):
 class ExprSizeof(ExprCall):
     def __init__(self, t):
         ExprCall.__init__(self, ExprVar('sizeof'), [ t ])
+
+class ExprLambda(Block):
+    def __init__(self, captures=[ ], params=[ ], ret=None):
+        Block.__init__(self)
+        assert isinstance(captures, list)
+        assert isinstance(params, list)
+        self.captures = captures
+        self.params = params
+        self.ret = ret
 
 ##------------------------------
 # statements etc.
@@ -756,6 +783,15 @@ class StmtFor(Block):
         self.init = init
         self.cond = cond
         self.update = update
+
+class StmtRangedFor(Block):
+    def __init__(self, var, iteree):
+        assert isinstance(var, ExprVar)
+        assert iteree
+
+        Block.__init__(self)
+        self.var = var
+        self.iteree = iteree
 
 class StmtSwitch(Block):
     def __init__(self, expr):

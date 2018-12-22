@@ -8,6 +8,7 @@
 #include "mozilla/widget/IMEData.h"
 #include "nsWindow.h"
 #include "WinIMEHandler.h"
+#include "WinTextEventDispatcherListener.h"
 
 namespace mozilla {
 namespace widget {
@@ -53,6 +54,12 @@ WinTextEventDispatcherListener::NotifyIME(
     return NS_ERROR_FAILURE;
   }
   return IMEHandler::NotifyIME(window, aNotification);
+}
+
+NS_IMETHODIMP_(IMENotificationRequests)
+WinTextEventDispatcherListener::GetIMENotificationRequests()
+{
+  return IMEHandler::GetIMENotificationRequests();
 }
 
 NS_IMETHODIMP_(void)

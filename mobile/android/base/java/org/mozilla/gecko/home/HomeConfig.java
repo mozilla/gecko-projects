@@ -18,9 +18,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.annotation.RobocopTarget;
-import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
@@ -31,7 +31,7 @@ import android.util.Pair;
 
 public final class HomeConfig {
     public static final String PREF_KEY_BOOKMARKS_PANEL_ENABLED = "bookmarksPanelEnabled";
-    public static final String PREF_KEY_HISTORY_PANEL_ENABLED = "historyPanelEnabled";
+    public static final String PREF_KEY_HISTORY_PANEL_ENABLED = "combinedHistoryPanelEnabled";
 
     /**
      * Used to determine what type of HomeFragment subclass to use when creating
@@ -43,12 +43,14 @@ public final class HomeConfig {
     public static enum PanelType implements Parcelable {
         TOP_SITES("top_sites", TopSitesPanel.class),
         BOOKMARKS("bookmarks", BookmarksPanel.class),
-        HISTORY("history", HistoryPanel.class),
         COMBINED_HISTORY("combined_history", CombinedHistoryPanel.class),
-        REMOTE_TABS("remote_tabs", RemoteTabsPanel.class),
-        READING_LIST("reading_list", ReadingListPanel.class),
-        RECENT_TABS("recent_tabs", RecentTabsPanel.class),
-        DYNAMIC("dynamic", DynamicPanel.class);
+        DYNAMIC("dynamic", DynamicPanel.class),
+        // Deprecated panels that should no longer exist but are kept around for
+        // migration code. Class references have been replaced with new version of the panel.
+        DEPRECATED_REMOTE_TABS("remote_tabs", CombinedHistoryPanel.class),
+        DEPRECATED_HISTORY("history", CombinedHistoryPanel.class),
+        DEPRECATED_READING_LIST("reading_list", BookmarksPanel.class),
+        DEPRECATED_RECENT_TABS("recent_tabs", CombinedHistoryPanel.class);
 
         private final String mId;
         private final Class<?> mPanelClass;
@@ -292,6 +294,10 @@ public final class HomeConfig {
 
         public ViewConfig getViewAt(int index) {
             return (mViews != null ? mViews.get(index) : null);
+        }
+
+        public EnumSet<Flags> getFlags() {
+            return mFlags.clone();
         }
 
         public boolean isDynamic() {
@@ -1118,6 +1124,7 @@ public final class HomeConfig {
         /**
          * Creates an {@code Editor} for this state.
          */
+        @RobocopTarget
         public Editor edit() {
             return new Editor(mHomeConfig, this);
         }
@@ -1146,9 +1153,9 @@ public final class HomeConfig {
         private final List<String> mConfigOrder;
         private final Thread mOriginalThread;
 
-        // Each Pair represents parameters to a GeckoAppShell.notifyObservers call;
-        // the first String is the observer topic and the second string is the notification data.
-        private List<Pair<String, String>> mNotificationQueue;
+        // Each Pair represents parameters to a EventDispatcher.dispatch call;
+        // the String is the event name and the GeckoBundle is the event data.
+        private List<Pair<String, GeckoBundle>> mNotificationQueue;
         private PanelConfig mDefaultPanel;
         private int mEnabledCount;
 
@@ -1267,6 +1274,7 @@ public final class HomeConfig {
         /**
          * Gets the ID of the current default panel.
          */
+        @RobocopTarget
         public String getDefaultPanelId() {
             ThreadUtils.assertOnThread(mOriginalThread);
 
@@ -1282,6 +1290,7 @@ public final class HomeConfig {
          *
          * @param panelId the ID of the new default panel.
          */
+        @RobocopTarget
         public void setDefault(String panelId) {
             ThreadUtils.assertOnThread(mOriginalThread);
 
@@ -1372,8 +1381,10 @@ public final class HomeConfig {
                 installed = true;
 
                 // Add an event to the queue if a new panel is successfully installed.
-                mNotificationQueue.add(new Pair<String, String>(
-                        "HomePanels:Installed", panelConfig.getId()));
+                final GeckoBundle data = new GeckoBundle(1);
+                data.putString("id", panelConfig.getId());
+                mNotificationQueue.add(new Pair<String, GeckoBundle>(
+                        "HomePanels:Installed", data));
             }
 
             mHasChanged = true;
@@ -1409,7 +1420,10 @@ public final class HomeConfig {
             }
 
             // Add an event to the queue if a panel is successfully uninstalled.
-            mNotificationQueue.add(new Pair<String, String>("HomePanels:Uninstalled", panelId));
+            final GeckoBundle data = new GeckoBundle(1);
+            data.putString("id", panelId);
+            mNotificationQueue.add(new Pair<String, GeckoBundle>(
+                    "HomePanels:Uninstalled", data));
 
             mHasChanged = true;
             return true;
@@ -1472,6 +1486,7 @@ public final class HomeConfig {
          *
          * @return the resulting {@code State} instance.
          */
+        @RobocopTarget
         public State apply() {
             ThreadUtils.assertOnThread(mOriginalThread);
 
@@ -1483,7 +1498,7 @@ public final class HomeConfig {
 
             // Copy the event queue to a new list, so that we only modify mNotificationQueue on
             // the original thread where it was created.
-            final List<Pair<String, String>> copiedQueue = mNotificationQueue;
+            final List<Pair<String, GeckoBundle>> copiedQueue = mNotificationQueue;
             mNotificationQueue = new ArrayList<>();
 
             ThreadUtils.getBackgroundHandler().post(new Runnable() {
@@ -1536,9 +1551,10 @@ public final class HomeConfig {
             return mConfigMap.isEmpty();
         }
 
-        private void sendNotificationsToGecko(List<Pair<String, String>> notifications) {
-            for (Pair<String, String> p : notifications) {
-                GeckoAppShell.notifyObservers(p.first, p.second);
+        private void sendNotificationsToGecko(List<Pair<String, GeckoBundle>> notifications) {
+            final EventDispatcher dispatcher = EventDispatcher.getInstance();
+            for (final Pair<String, GeckoBundle> p : notifications) {
+                dispatcher.dispatch(p.first, p.second);
             }
         }
 
@@ -1591,13 +1607,13 @@ public final class HomeConfig {
     // configuration. Because they don't consider the active configuration, it
     // is only sensible to do this for built-in panels (and not for dynamic
     // panels).
-    private static final String TOP_SITES_PANEL_ID = "4becc86b-41eb-429a-a042-88fe8b5a094e";
+    /* package-private */ static final String TOP_SITES_PANEL_ID = "4becc86b-41eb-429a-a042-88fe8b5a094e";
     private static final String BOOKMARKS_PANEL_ID = "7f6d419a-cd6c-4e34-b26f-f68b1b551907";
-    private static final String READING_LIST_PANEL_ID = "20f4549a-64ad-4c32-93e4-1dcef792733b";
     private static final String HISTORY_PANEL_ID = "f134bf20-11f7-4867-ab8b-e8e705d7fbe8";
     private static final String COMBINED_HISTORY_PANEL_ID = "4d716ce2-e063-486d-9e7c-b190d7b04dc6";
     private static final String RECENT_TABS_PANEL_ID = "5c2601a5-eedc-4477-b297-ce4cef52adf8";
     private static final String REMOTE_TABS_PANEL_ID = "72429afd-8d8b-43d8-9189-14b779c563d0";
+    private static final String DEPRECATED_READING_LIST_PANEL_ID = "20f4549a-64ad-4c32-93e4-1dcef792733b";
 
     private final HomeConfigBackend mBackend;
 
@@ -1605,6 +1621,7 @@ public final class HomeConfig {
         mBackend = backend;
     }
 
+    @RobocopTarget
     public State load() {
         final State configState = mBackend.load();
         configState.setHomeConfig(this);
@@ -1629,52 +1646,47 @@ public final class HomeConfig {
     }
 
     public static int getTitleResourceIdForBuiltinPanelType(PanelType panelType) {
-        switch(panelType) {
+        switch (panelType) {
         case TOP_SITES:
             return R.string.home_top_sites_title;
 
         case BOOKMARKS:
+        case DEPRECATED_READING_LIST:
             return R.string.bookmarks_title;
 
+        case DEPRECATED_HISTORY:
+        case DEPRECATED_REMOTE_TABS:
+        case DEPRECATED_RECENT_TABS:
         case COMBINED_HISTORY:
-        case HISTORY:
             return R.string.home_history_title;
-
-        case REMOTE_TABS:
-            return R.string.home_remote_tabs_title;
-
-        case READING_LIST:
-            return R.string.reading_list_title;
-
-        case RECENT_TABS:
-            return R.string.recent_tabs_title;
 
         default:
             throw new IllegalArgumentException("Only for built-in panel types: " + panelType);
         }
     }
 
+    @RobocopTarget
     public static String getIdForBuiltinPanelType(PanelType panelType) {
-        switch(panelType) {
+        switch (panelType) {
         case TOP_SITES:
             return TOP_SITES_PANEL_ID;
 
         case BOOKMARKS:
             return BOOKMARKS_PANEL_ID;
 
-        case HISTORY:
+        case DEPRECATED_HISTORY:
             return HISTORY_PANEL_ID;
 
         case COMBINED_HISTORY:
             return COMBINED_HISTORY_PANEL_ID;
 
-        case REMOTE_TABS:
+        case DEPRECATED_REMOTE_TABS:
             return REMOTE_TABS_PANEL_ID;
 
-        case READING_LIST:
-            return READING_LIST_PANEL_ID;
+        case DEPRECATED_READING_LIST:
+            return DEPRECATED_READING_LIST_PANEL_ID;
 
-        case RECENT_TABS:
+        case DEPRECATED_RECENT_TABS:
             return RECENT_TABS_PANEL_ID;
 
         default:
@@ -1689,6 +1701,7 @@ public final class HomeConfig {
         return new PanelConfig(panelType, context.getString(titleId), id, flags);
     }
 
+    @RobocopTarget
     public static HomeConfig getDefault(Context context) {
         return new HomeConfig(new HomeConfigPrefsBackend(context));
     }

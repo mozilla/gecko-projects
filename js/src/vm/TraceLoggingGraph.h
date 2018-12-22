@@ -7,10 +7,10 @@
 #ifndef TraceLoggingGraph_h
 #define TraceLoggingGraph_h
 
-#include "jslock.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "js/TypeDecls.h"
-#include "threading/Mutex.h"
+#include "vm/MutexIDs.h"
 #include "vm/TraceLoggingTypes.h"
 
 /*
@@ -63,11 +63,13 @@
 
 namespace js {
 void DestroyTraceLoggerGraphState();
+size_t SizeOfTraceLogGraphState(mozilla::MallocSizeOf mallocSizeOf);
 } // namespace js
 
 class TraceLoggerGraphState
 {
     uint32_t numLoggers;
+    uint32_t pid_;
 
     // File pointer to the "tl-data.json" file. (Explained above).
     FILE* out;
@@ -82,16 +84,24 @@ class TraceLoggerGraphState
   public:
     TraceLoggerGraphState()
       : numLoggers(0)
+      , pid_(0)
       , out(nullptr)
 #ifdef DEBUG
       , initialized(false)
 #endif
+      , lock(js::mutexid::TraceLoggerGraphState)
     {}
 
     bool init();
     ~TraceLoggerGraphState();
 
     uint32_t nextLoggerId();
+    uint32_t pid() { return pid_; }
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
+        return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
+    }
 };
 
 class TraceLoggerGraph
@@ -120,6 +130,10 @@ class TraceLoggerGraph
             nextId_ = nextId;
         }
         TreeEntry()
+          : start_(0),
+            stop_(0),
+            u{},
+            nextId_(0)
         { }
         uint64_t start() {
             return start_;
@@ -198,14 +212,7 @@ class TraceLoggerGraph
     };
 
   public:
-    TraceLoggerGraph()
-      : failed(false)
-      , enabled(false)
-#ifdef DEBUG
-      , nextTextId(0)
-#endif
-      , treeOffset(0)
-    { }
+    TraceLoggerGraph() {}
     ~TraceLoggerGraph();
 
     bool init(uint64_t timestamp);
@@ -221,20 +228,23 @@ class TraceLoggerGraph
         return 100 * 1024 * 1024 / sizeof(TreeEntry);
     }
 
-  private:
-    bool failed;
-    bool enabled;
-#ifdef DEBUG
-    uint32_t nextTextId;
-#endif
+    uint32_t nextTextId() { return nextTextId_; }
 
-    FILE* dictFile;
-    FILE* treeFile;
-    FILE* eventFile;
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+
+  private:
+    bool failed = false;
+    bool enabled = false;
+    uint32_t nextTextId_ = 0;
+
+    FILE* dictFile = nullptr;
+    FILE* treeFile = nullptr;
+    FILE* eventFile = nullptr;
 
     ContinuousSpace<TreeEntry> tree;
     ContinuousSpace<StackEntry> stack;
-    uint32_t treeOffset;
+    uint32_t treeOffset = 0;
 
     // Helper functions that convert a TreeEntry in different endianness
     // in place.

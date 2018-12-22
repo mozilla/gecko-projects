@@ -8,18 +8,11 @@
 #include "mozilla/dom/HTMLPictureElementBinding.h"
 #include "mozilla/dom/HTMLImageElement.h"
 
-#include "mozilla/Preferences.h"
-static const char *kPrefPictureEnabled = "dom.image.picture.enabled";
-
 // Expand NS_IMPL_NS_NEW_HTML_ELEMENT(Picture) to add pref check.
 nsGenericHTMLElement*
 NS_NewHTMLPictureElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                          mozilla::dom::FromParser aFromParser)
 {
-  if (!mozilla::dom::HTMLPictureElement::IsPictureEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
-  }
-
   return new mozilla::dom::HTMLPictureElement(aNodeInfo);
 }
 
@@ -35,44 +28,67 @@ HTMLPictureElement::~HTMLPictureElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLPictureElement, nsGenericHTMLElement,
-                            nsIDOMHTMLPictureElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLPictureElement)
 
 void
-HTMLPictureElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
+HTMLPictureElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
 {
-  // Find all img siblings after this <source> to notify them of its demise
-  nsCOMPtr<nsIContent> child = GetChildAt(aIndex);
-  nsCOMPtr<nsIContent> nextSibling;
-  if (child && child->IsHTMLElement(nsGkAtoms::source)) {
-    nextSibling = child->GetNextSibling();
+  if (aKid && aKid->IsHTMLElement(nsGkAtoms::img)) {
+    HTMLImageElement* img = HTMLImageElement::FromNode(aKid);
+    if (img) {
+      img->PictureSourceRemoved(aKid->AsContent());
+    }
+  } else if (aKid && aKid->IsHTMLElement(nsGkAtoms::source)) {
+    // Find all img siblings after this <source> to notify them of its demise
+    nsCOMPtr<nsIContent> nextSibling = aKid->GetNextSibling();
+    if (nextSibling && nextSibling->GetParentNode() == this) {
+      do {
+        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        if (img) {
+          img->PictureSourceRemoved(aKid->AsContent());
+        }
+      } while ( (nextSibling = nextSibling->GetNextSibling()) );
+    }
   }
 
-  nsGenericHTMLElement::RemoveChildAt(aIndex, aNotify);
-
-  if (nextSibling && nextSibling->GetParentNode() == this) {
-    do {
-      HTMLImageElement* img = HTMLImageElement::FromContent(nextSibling);
-      if (img) {
-        img->PictureSourceRemoved(child->AsContent());
-      }
-    } while ( (nextSibling = nextSibling->GetNextSibling()) );
-  }
+  nsGenericHTMLElement::RemoveChildNode(aKid, aNotify);
 }
 
-bool
-HTMLPictureElement::IsPictureEnabled()
+nsresult
+HTMLPictureElement::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                                      bool aNotify)
 {
-  return HTMLImageElement::IsSrcsetEnabled() &&
-         Preferences::GetBool(kPrefPictureEnabled, false);
+  nsresult rv =
+    nsGenericHTMLElement::InsertChildBefore(aKid, aBeforeThis, aNotify);
+
+  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_TRUE(aKid, rv);
+
+  if (aKid->IsHTMLElement(nsGkAtoms::img)) {
+    HTMLImageElement* img = HTMLImageElement::FromNode(aKid);
+    if (img) {
+      img->PictureSourceAdded(aKid->AsContent());
+    }
+  } else if (aKid->IsHTMLElement(nsGkAtoms::source)) {
+    // Find all img siblings after this <source> to notify them of its insertion
+    nsCOMPtr<nsIContent> nextSibling = aKid->GetNextSibling();
+    if (nextSibling && nextSibling->GetParentNode() == this) {
+      do {
+        HTMLImageElement* img = HTMLImageElement::FromNode(nextSibling);
+        if (img) {
+          img->PictureSourceAdded(aKid->AsContent());
+        }
+      } while ( (nextSibling = nextSibling->GetNextSibling()) );
+    }
+  }
+
+  return rv;
 }
 
 JSObject*
 HTMLPictureElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLPictureElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLPictureElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

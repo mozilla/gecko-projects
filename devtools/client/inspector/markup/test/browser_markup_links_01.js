@@ -102,17 +102,17 @@ const TEST_DATA = [{
 
 requestLongerTimeout(2);
 
-add_task(function*() {
-  let {inspector} = yield openInspectorForURL(TEST_URL);
+add_task(async function() {
+  const {inspector} = await openInspectorForURL(TEST_URL);
 
-  for (let {selector, attributes} of TEST_DATA) {
+  for (const {selector, attributes} of TEST_DATA) {
     info("Testing attributes on node " + selector);
-    yield selectNode(selector, inspector);
-    let {editor} = yield getContainerForSelector(selector, inspector);
+    await selectNode(selector, inspector);
+    const {editor} = await getContainerForSelector(selector, inspector);
 
-    for (let {attributeName, links} of attributes) {
+    for (const {attributeName, links} of attributes) {
       info("Testing attribute " + attributeName);
-      let linkEls = editor.attrElements.get(attributeName)
+      const linkEls = editor.attrElements.get(attributeName)
                                        .querySelectorAll(".link");
 
       is(linkEls.length, links.length, "The right number of links were found");

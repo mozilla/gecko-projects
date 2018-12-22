@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,26 +17,26 @@
 #include "nsSVGUtils.h"
 
 class gfxContext;
-class nsSVGPathGeometryFrame;
 
 namespace mozilla {
+class SVGGeometryFrame;
 namespace dom {
-class SVGSVGElement;
+class SVGViewportElement;
 } // namespace dom
 } // namespace mozilla
 
 struct nsSVGMark;
 
-typedef nsSVGContainerFrame nsSVGMarkerFrameBase;
-
-class nsSVGMarkerFrame : public nsSVGMarkerFrameBase
+class nsSVGMarkerFrame final : public nsSVGContainerFrame
 {
+  typedef mozilla::image::imgDrawingParams imgDrawingParams;
+
   friend class nsSVGMarkerAnonChildFrame;
   friend nsContainerFrame*
-  NS_NewSVGMarkerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  NS_NewSVGMarkerFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
 protected:
-  explicit nsSVGMarkerFrame(nsStyleContext* aContext)
-    : nsSVGMarkerFrameBase(aContext)
+  explicit nsSVGMarkerFrame(ComputedStyle* aStyle)
+    : nsSVGContainerFrame(aStyle, kClassID)
     , mMarkedFrame(nullptr)
     , mInUse(false)
     , mInUse2(false)
@@ -44,7 +45,7 @@ protected:
   }
 
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsSVGMarkerFrame)
 
   // nsIFrame interface:
 #ifdef DEBUG
@@ -54,18 +55,11 @@ public:
 #endif
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override {}
 
   virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
-                                    nsIAtom*        aAttribute,
+                                    nsAtom*        aAttribute,
                                     int32_t         aModType) override;
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgMarkerFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override
@@ -77,30 +71,32 @@ public:
   virtual nsContainerFrame* GetContentInsertionFrame() override {
     // Any children must be added to our single anonymous inner frame kid.
     MOZ_ASSERT(PrincipalChildList().FirstChild() &&
-               PrincipalChildList().FirstChild()->GetType() ==
-                 nsGkAtoms::svgMarkerAnonChildFrame,
+               PrincipalChildList().FirstChild()->IsSVGMarkerAnonChildFrame(),
                "Where is our anonymous child?");
     return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
   }
 
   // nsSVGMarkerFrame methods:
-  nsresult PaintMark(gfxContext& aContext,
-                     const gfxMatrix& aToMarkedFrameUserSpace,
-                     nsSVGPathGeometryFrame *aMarkedFrame,
-                     nsSVGMark *aMark,
-                     float aStrokeWidth);
+  void PaintMark(gfxContext& aContext,
+                 const gfxMatrix& aToMarkedFrameUserSpace,
+                 mozilla::SVGGeometryFrame* aMarkedFrame,
+                 const nsSVGMark& aMark,
+                 float aStrokeWidth,
+                 imgDrawingParams& aImgParams);
 
-  SVGBBox GetMarkBBoxContribution(const Matrix &aToBBoxUserspace,
+  SVGBBox GetMarkBBoxContribution(const Matrix& aToBBoxUserspace,
                                   uint32_t aFlags,
-                                  nsSVGPathGeometryFrame *aMarkedFrame,
-                                  const nsSVGMark *aMark,
+                                  mozilla::SVGGeometryFrame* aMarkedFrame,
+                                  const nsSVGMark& aMark,
                                   float aStrokeWidth);
+
+  // Return our anonymous box child.
+  void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
 
 private:
   // stuff needed for callback
-  nsSVGPathGeometryFrame *mMarkedFrame;
-  float mStrokeWidth, mX, mY, mAutoAngle;
-  bool mIsStart;  // whether the callback is for a marker-start marker
+  mozilla::SVGGeometryFrame *mMarkedFrame;
+  Matrix mMarkerTM;
 
   // nsSVGContainerFrame methods:
   virtual gfxMatrix GetCanvasTM() override;
@@ -114,7 +110,7 @@ private:
   {
   public:
     AutoMarkerReferencer(nsSVGMarkerFrame *aFrame,
-                         nsSVGPathGeometryFrame *aMarkedFrame
+                         mozilla::SVGGeometryFrame *aMarkedFrame
                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
     ~AutoMarkerReferencer();
   private:
@@ -123,7 +119,7 @@ private:
   };
 
   // nsSVGMarkerFrame methods:
-  void SetParentCoordCtxProvider(mozilla::dom::SVGSVGElement *aContext);
+  void SetParentCoordCtxProvider(mozilla::dom::SVGViewportElement *aContext);
 
   // recursion prevention flag
   bool mInUse;
@@ -135,23 +131,18 @@ private:
 ////////////////////////////////////////////////////////////////////////
 // nsMarkerAnonChildFrame class
 
-typedef nsSVGDisplayContainerFrame nsSVGMarkerAnonChildFrameBase;
-
-/**
- */
-class nsSVGMarkerAnonChildFrame
-  : public nsSVGMarkerAnonChildFrameBase
+class nsSVGMarkerAnonChildFrame final : public nsSVGDisplayContainerFrame
 {
   friend nsContainerFrame*
   NS_NewSVGMarkerAnonChildFrame(nsIPresShell* aPresShell,
-                                nsStyleContext* aContext);
+                                ComputedStyle* aStyle);
 
-  explicit nsSVGMarkerAnonChildFrame(nsStyleContext* aContext)
-    : nsSVGMarkerAnonChildFrameBase(aContext)
+  explicit nsSVGMarkerAnonChildFrame(ComputedStyle* aStyle)
+    : nsSVGDisplayContainerFrame(aStyle, kClassID)
   {}
 
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsSVGMarkerAnonChildFrame)
 
 #ifdef DEBUG
   virtual void Init(nsIContent*       aContent,
@@ -164,13 +155,6 @@ public:
     return MakeFrameName(NS_LITERAL_STRING("SVGMarkerAnonChild"), aResult);
   }
 #endif
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgMarkerAnonChildFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
   // nsSVGContainerFrame methods:
   virtual gfxMatrix GetCanvasTM() override

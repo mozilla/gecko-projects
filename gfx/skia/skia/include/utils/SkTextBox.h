@@ -60,14 +60,14 @@ public:
     int     countLines() const;
     SkScalar getTextHeight() const;
 
-    SkTextBlob* snapshotTextBlob(SkScalar* computedBottom) const;
+    sk_sp<SkTextBlob> snapshotTextBlob(SkScalar* computedBottom) const;
 
     class Visitor {
     public:
         virtual ~Visitor() {}
         virtual void operator()(const char*, size_t, SkScalar x, SkScalar y, const SkPaint&) = 0;
     };
-    
+
 private:
     SkRect      fBox;
     SkScalar    fSpacingMul, fSpacingAdd;

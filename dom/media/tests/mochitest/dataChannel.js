@@ -25,7 +25,6 @@ var commandsCreateDataChannel = [
   function PC_LOCAL_CREATE_DATA_CHANNEL(test) {
     var channel = test.pcLocal.createDataChannel({});
     is(channel.binaryType, "blob", channel + " is of binary type 'blob'");
-    is(channel.readyState, "connecting", channel + " is in state: 'connecting'");
 
     is(test.pcLocal.signalingState, STABLE,
        "Create datachannel does not change signaling state");
@@ -47,6 +46,7 @@ var commandsCheckDataChannel = [
   function SEND_MESSAGE(test) {
     var message = "Lorem ipsum dolor sit amet";
 
+    info("Sending message:" + message);
     return test.send(message).then(result => {
       is(result.data, message, "Message correctly transmitted from pcLocal to pcRemote.");
     });
@@ -56,6 +56,7 @@ var commandsCheckDataChannel = [
     var contents = "At vero eos et accusam et justo duo dolores et ea rebum.";
     var blob = new Blob([contents], { "type" : "text/plain" });
 
+    info("Sending blob");
     return test.send(blob).then(result => {
       ok(result.data instanceof Blob, "Received data is of instance Blob");
       is(result.data.size, blob.size, "Received data has the correct size.");
@@ -66,13 +67,8 @@ var commandsCheckDataChannel = [
   },
 
   function CREATE_SECOND_DATA_CHANNEL(test) {
-    return test.createDataChannel({ }).then(result => {
-      var sourceChannel = result.local;
-      var targetChannel = result.remote;
-      is(sourceChannel.readyState, "open", sourceChannel + " is in state: 'open'");
-      is(targetChannel.readyState, "open", targetChannel + " is in state: 'open'");
-
-      is(targetChannel.binaryType, "blob", targetChannel + " is of binary type 'blob'");
+    return test.createDataChannel({}).then(result => {
+      is(result.remote.binaryType, "blob", "remote data channel is of binary type 'blob'");
     });
   },
 
@@ -80,6 +76,7 @@ var commandsCheckDataChannel = [
     var channels = test.pcRemote.dataChannels;
     var message = "I am the Omega";
 
+    info("Sending message:" + message);
     return test.send(message).then(result => {
       is(channels.indexOf(result.channel), channels.length - 1, "Last channel used");
       is(result.data, message, "Received message has the correct content.");
@@ -94,6 +91,7 @@ var commandsCheckDataChannel = [
       targetChannel: test.pcRemote.dataChannels[0]
     };
 
+    info("Sending message:" + message);
     return test.send(message, options).then(result => {
       is(test.pcRemote.dataChannels.indexOf(result.channel), 0, "1st channel used");
       is(result.data, message, "Received message has the correct content.");
@@ -108,6 +106,7 @@ var commandsCheckDataChannel = [
       targetChannel: test.pcLocal.dataChannels[0]
     };
 
+    info("Sending message:" + message);
     return test.send(message, options).then(result => {
       is(test.pcLocal.dataChannels.indexOf(result.channel), 0, "1st channel used");
       is(result.data, message, "Return message has the correct content.");
@@ -125,8 +124,6 @@ var commandsCheckDataChannel = [
     return test.createDataChannel(options).then(result => {
       var sourceChannel2 = result.local;
       var targetChannel2 = result.remote;
-      is(sourceChannel2.readyState, "open", sourceChannel2 + " is in state: 'open'");
-      is(targetChannel2.readyState, "open", targetChannel2 + " is in state: 'open'");
 
       is(targetChannel2.binaryType, "blob", targetChannel2 + " is of binary type 'blob'");
 
@@ -161,6 +158,29 @@ var commandsCheckDataChannel = [
     var channels = test.pcRemote.dataChannels;
     var message = "I am the walrus; Goo goo g'joob";
 
+    info("Sending message:" + message);
+    return test.send(message).then(result => {
+      is(channels.indexOf(result.channel), channels.length - 1, "Last channel used");
+      is(result.data, message, "Received message has the correct content.");
+    });
+  },
+
+  function CREATE_NEGOTIATED_MAXPACKET_LIFE_DATA_CHANNEL(test) {
+    var options = {
+      ordered: false,
+      maxPacketLifeTime: 10
+    };
+    return test.createDataChannel(options).then(result => {
+      is(result.remote.binaryType, "blob", "remote data channel is of binary type 'blob'");
+
+    });
+  },
+
+  function SEND_MESSAGE_THROUGH_LAST_OPENED_CHANNEL3(test) {
+    var channels = test.pcRemote.dataChannels;
+    var message = "Nice to see you working maxPacketLifeTime";
+
+    info("Sending message:" + message);
     return test.send(message).then(result => {
       is(channels.indexOf(result.channel), channels.length - 1, "Last channel used");
       is(result.data, message, "Received message has the correct content.");
@@ -175,6 +195,7 @@ var commandsCheckLargeXfer = [
     // note: type received is always blob for binary data
     var options = {};
     options.bufferedAmountLowThreshold = 64*1024;
+    info("Sending arraybuffer");
     return test.send(buffer, options).then(result => {
       ok(result.data instanceof Blob, "Received data is of instance Blob");
       is(result.data.size, size, "Received data has the correct size.");
@@ -184,7 +205,7 @@ var commandsCheckLargeXfer = [
 
 function addInitialDataChannel(chain) {
   chain.insertBefore('PC_LOCAL_CREATE_OFFER', commandsCreateDataChannel);
-  chain.insertBefore('PC_LOCAL_CHECK_MEDIA_TRACKS', commandsWaitForDataChannel);
+  chain.insertBefore('PC_LOCAL_WAIT_FOR_MEDIA_FLOW', commandsWaitForDataChannel);
   chain.removeAfter('PC_REMOTE_CHECK_ICE_CONNECTIONS');
   chain.append(commandsCheckLargeXfer);
   chain.append(commandsCheckDataChannel);

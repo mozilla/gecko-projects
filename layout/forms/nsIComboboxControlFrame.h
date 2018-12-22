@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,7 +9,7 @@
 
 #include "nsQueryFrame.h"
 
-/** 
+/**
   * nsIComboboxControlFrame is the interface for comboboxes.
   */
 class nsIComboboxControlFrame : public nsQueryFrame
@@ -20,6 +21,11 @@ public:
    * Indicates whether the list is dropped down
    */
   virtual bool IsDroppedDown() = 0;
+
+  virtual bool IsOpenInParentProcess() = 0;
+  virtual void SetOpenInParentProcess(bool aVal) = 0;
+
+  bool IsDroppedDownOrHasParentPopup() { return IsDroppedDown() || IsOpenInParentProcess(); }
 
   /**
    * Shows or hides the drop down
@@ -57,21 +63,21 @@ public:
    * Notification that the content has been reset
    */
   virtual void OnContentReset() = 0;
-  
+
   /**
    * This returns the index of the item that is currently being displayed
    * in the display area. It may differ from what the currently Selected index
    * is in in the dropdown.
    *
-   * Detailed explanation: 
-   * When the dropdown is dropped down via a mouse click and the user moves the mouse 
-   * up and down without clicking, the currently selected item is being tracking inside 
+   * Detailed explanation:
+   * When the dropdown is dropped down via a mouse click and the user moves the mouse
+   * up and down without clicking, the currently selected item is being tracking inside
    * the dropdown, but the combobox is not being updated. When the user selects items
    * with the arrow keys, the combobox is being updated. So when the user clicks outside
-   * the dropdown and it needs to roll up it has to decide whether to keep the current 
+   * the dropdown and it needs to roll up it has to decide whether to keep the current
    * selection or not. This method is used to get the current index in the combobox to
    * compare it to the current index in the dropdown to see if the combox has been updated
-   * and that way it knows whether to "cancel" the current selection residing in the 
+   * and that way it knows whether to "cancel" the current selection residing in the
    * dropdown. Or whether to leave the selection alone.
    */
   virtual int32_t GetIndexOfDisplayArea() = 0;

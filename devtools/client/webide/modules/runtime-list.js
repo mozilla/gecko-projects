@@ -2,17 +2,12 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cu} = require("chrome");
+"use strict";
 
-const Services = require("Services");
 const {AppManager} = require("devtools/client/webide/modules/app-manager");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {RuntimeScanners, WiFiScanner} = require("devtools/client/webide/modules/runtimes");
-const {Devices} = Cu.import("resource://devtools/shared/apps/Devices.jsm");
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
-const utils = require("devtools/client/webide/modules/utils");
-
-const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.properties");
+const {Devices} = require("resource://devtools/shared/apps/Devices.jsm");
 
 var RuntimeList;
 
@@ -38,7 +33,7 @@ RuntimeList.prototype = {
     return this._doc;
   },
 
-  appManagerUpdate: function(event, what, details) {
+  appManagerUpdate: function(what, details) {
     // Got a message from app-manager.js
     // See AppManager.update() for descriptions of what these events mean.
     switch (what) {
@@ -49,10 +44,10 @@ RuntimeList.prototype = {
       case "runtime-global-actors":
         this.updateCommands();
         break;
-    };
+    }
   },
 
-  onWebIDEUpdate: function(event, what, details) {
+  onWebIDEUpdate: function(what, details) {
     if (what == "busy" || what == "unbusy") {
       this.updateCommands();
     }
@@ -64,10 +59,6 @@ RuntimeList.prototype = {
 
   showRuntimeDetails: function() {
     this._Cmds.showRuntimeDetails();
-  },
-
-  showPermissionsTable: function() {
-    this._Cmds.showPermissionsTable();
   },
 
   showDevicePreferences: function() {
@@ -91,32 +82,26 @@ RuntimeList.prototype = {
   },
 
   updateCommands: function() {
-    let doc = this._doc;
+    const doc = this._doc;
 
     // Runtime commands
-    let screenshotCmd = doc.querySelector("#runtime-screenshot");
-    let permissionsCmd = doc.querySelector("#runtime-permissions");
-    let detailsCmd = doc.querySelector("#runtime-details");
-    let disconnectCmd = doc.querySelector("#runtime-disconnect");
-    let devicePrefsCmd = doc.querySelector("#runtime-preferences");
-    let settingsCmd = doc.querySelector("#runtime-settings");
+    const screenshotCmd = doc.querySelector("#runtime-screenshot");
+    const detailsCmd = doc.querySelector("#runtime-details");
+    const disconnectCmd = doc.querySelector("#runtime-disconnect");
+    const devicePrefsCmd = doc.querySelector("#runtime-preferences");
+    const settingsCmd = doc.querySelector("#runtime-settings");
 
     if (AppManager.connected) {
       if (AppManager.deviceFront) {
         detailsCmd.removeAttribute("disabled");
-        permissionsCmd.removeAttribute("disabled");
         screenshotCmd.removeAttribute("disabled");
       }
       if (AppManager.preferenceFront) {
         devicePrefsCmd.removeAttribute("disabled");
       }
-      if (AppManager.settingsFront) {
-        settingsCmd.removeAttribute("disabled");
-      }
       disconnectCmd.removeAttribute("disabled");
     } else {
       detailsCmd.setAttribute("disabled", "true");
-      permissionsCmd.setAttribute("disabled", "true");
       screenshotCmd.setAttribute("disabled", "true");
       disconnectCmd.setAttribute("disabled", "true");
       devicePrefsCmd.setAttribute("disabled", "true");
@@ -125,8 +110,8 @@ RuntimeList.prototype = {
   },
 
   update: function() {
-    let doc = this._doc;
-    let wifiHeaderNode = doc.querySelector("#runtime-header-wifi");
+    const doc = this._doc;
+    const wifiHeaderNode = doc.querySelector("#runtime-header-wifi");
 
     if (WiFiScanner.allowed) {
       wifiHeaderNode.removeAttribute("hidden");
@@ -134,12 +119,11 @@ RuntimeList.prototype = {
       wifiHeaderNode.setAttribute("hidden", "true");
     }
 
-    let usbListNode = doc.querySelector("#runtime-panel-usb");
-    let wifiListNode = doc.querySelector("#runtime-panel-wifi");
-    let simulatorListNode = doc.querySelector("#runtime-panel-simulator");
-    let otherListNode = doc.querySelector("#runtime-panel-other");
-    let noHelperNode = doc.querySelector("#runtime-panel-noadbhelper");
-    let noUSBNode = doc.querySelector("#runtime-panel-nousbdevice");
+    const usbListNode = doc.querySelector("#runtime-panel-usb");
+    const wifiListNode = doc.querySelector("#runtime-panel-wifi");
+    const otherListNode = doc.querySelector("#runtime-panel-other");
+    const noHelperNode = doc.querySelector("#runtime-panel-noadbhelper");
+    const noUSBNode = doc.querySelector("#runtime-panel-nousbdevice");
 
     if (Devices.helperAddonInstalled) {
       noHelperNode.setAttribute("hidden", "true");
@@ -147,7 +131,7 @@ RuntimeList.prototype = {
       noHelperNode.removeAttribute("hidden");
     }
 
-    let runtimeList = AppManager.runtimeList;
+    const runtimeList = AppManager.runtimeList;
 
     if (!runtimeList) {
       return;
@@ -159,21 +143,20 @@ RuntimeList.prototype = {
       noUSBNode.setAttribute("hidden", "true");
     }
 
-    for (let [type, parent] of [
+    for (const [type, parent] of [
       ["usb", usbListNode],
       ["wifi", wifiListNode],
-      ["simulator", simulatorListNode],
       ["other", otherListNode],
     ]) {
       while (parent.hasChildNodes()) {
         parent.firstChild.remove();
       }
-      for (let runtime of runtimeList[type]) {
-        let r = runtime;
-        let panelItemNode = doc.createElement(this._panelBoxEl);
+      for (const runtime of runtimeList[type]) {
+        const r = runtime;
+        const panelItemNode = doc.createElement(this._panelBoxEl);
         panelItemNode.className = "panel-item-complex";
 
-        let connectButton = doc.createElement(this._panelNodeEl);
+        const connectButton = doc.createElement(this._panelNodeEl);
         connectButton.className = "panel-item runtime-panel-item-" + type;
         connectButton.textContent = r.name;
 
@@ -184,7 +167,7 @@ RuntimeList.prototype = {
         panelItemNode.appendChild(connectButton);
 
         if (r.configure) {
-          let configButton = doc.createElement(this._panelNodeEl);
+          const configButton = doc.createElement(this._panelNodeEl);
           configButton.className = "configure-button";
           configButton.addEventListener("click", r.configure.bind(r), true);
           panelItemNode.appendChild(configButton);

@@ -8,6 +8,7 @@
 #define mozilla_dom_ScreenOrientation_h
 
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/ScreenOrientationBinding.h"
 #include "mozilla/HalScreenConfiguration.h"
 
@@ -39,7 +40,6 @@ class ScreenOrientation final : public DOMEventTargetHelper,
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ScreenOrientation, mozilla::DOMEventTargetHelper)
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(mozilla::DOMEventTargetHelper)
 
   IMPL_EVENT_HANDLER(change)
 
@@ -51,13 +51,13 @@ public:
   void Unlock(ErrorResult& aRv);
 
   // DeviceType and DeviceAngle gets the current type and angle of the device.
-  OrientationType DeviceType() const;
-  uint16_t DeviceAngle() const;
+  OrientationType DeviceType(CallerType aCallerType) const;
+  uint16_t DeviceAngle(CallerType aCallerType) const;
 
   // GetType and GetAngle gets the type and angle of the responsible document
   // (as defined in specification).
-  OrientationType GetType(ErrorResult& aRv) const;
-  uint16_t GetAngle(ErrorResult& aRv) const;
+  OrientationType GetType(CallerType aCallerType, ErrorResult& aRv) const;
+  uint16_t GetAngle(CallerType aCallerType, ErrorResult& aRv) const;
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
@@ -101,6 +101,8 @@ private:
                                          ErrorResult& aRv);
 
   void DispatchChangeEvent();
+
+  bool ShouldResistFingerprinting() const;
 
   LockPermission GetLockOrientationPermission(bool aCheckSandbox) const;
 

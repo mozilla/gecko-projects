@@ -20,9 +20,9 @@
 #ifndef mozilla_SegmentedVector_h
 #define mozilla_SegmentedVector_h
 
-#include "mozilla/Alignment.h"
 #include "mozilla/AllocPolicy.h"
 #include "mozilla/Array.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
@@ -57,6 +57,17 @@ class SegmentedVector : private AllocPolicy
   struct SegmentImpl
     : public mozilla::LinkedListElement<SegmentImpl<SegmentCapacity>>
   {
+  private:
+    uint32_t mLength;
+    alignas(T) MOZ_INIT_OUTSIDE_CTOR unsigned char mData[sizeof(T) * SegmentCapacity];
+
+    // Some versions of GCC treat it as a -Wstrict-aliasing violation (ergo a
+    // -Werror compile error) to reinterpret_cast<> |mData| to |T*|, even
+    // through |void*|.  Placing the latter cast in these separate functions
+    // breaks the chain such that affected GCC versions no longer warn/error.
+    void* RawData() { return mData; }
+
+  public:
     SegmentImpl() : mLength(0) {}
 
     ~SegmentImpl()
@@ -68,7 +79,7 @@ class SegmentedVector : private AllocPolicy
 
     uint32_t Length() const { return mLength; }
 
-    T* Elems() { return reinterpret_cast<T*>(&mStorage.mBuf); }
+    T* Elems() { return reinterpret_cast<T*>(RawData()); }
 
     T& operator[](size_t aIndex)
     {
@@ -89,7 +100,7 @@ class SegmentedVector : private AllocPolicy
       // Pre-increment mLength so that the bounds-check in operator[] passes.
       mLength++;
       T* elem = &(*this)[mLength - 1];
-      new (elem) T(mozilla::Forward<U>(aU));
+      new (elem) T(std::forward<U>(aU));
     }
 
     void PopLast()
@@ -98,18 +109,6 @@ class SegmentedVector : private AllocPolicy
       (*this)[mLength - 1].~T();
       mLength--;
     }
-
-    uint32_t mLength;
-
-    // The union ensures that the elements are appropriately aligned.
-    union Storage
-    {
-      char mBuf[sizeof(T) * SegmentCapacity];
-      mozilla::AlignedElem<MOZ_ALIGNOF(T)> mAlign;
-    } mStorage;
-
-    static_assert(MOZ_ALIGNOF(T) == MOZ_ALIGNOF(Storage),
-                  "SegmentedVector provides incorrect alignment");
   };
 
   // See how many we elements we can fit in a segment of IdealSegmentSize. If
@@ -121,9 +120,9 @@ class SegmentedVector : private AllocPolicy
     ? (IdealSegmentSize - kSingleElementSegmentSize) / sizeof(T) + 1
     : 1;
 
+public:
   typedef SegmentImpl<kSegmentCapacity> Segment;
 
-public:
   // The |aIdealSegmentSize| is only for sanity checking. If it's specified, we
   // check that the actual segment size is as close as possible to it. This
   // serves as a sanity check for SegmentedVectorCapacity's capacity
@@ -137,6 +136,11 @@ public:
       aIdealSegmentSize != 0,
       (sizeof(Segment) > aIdealSegmentSize && kSegmentCapacity == 1) ||
       aIdealSegmentSize - sizeof(Segment) < sizeof(T));
+  }
+
+  SegmentedVector(SegmentedVector&& aOther)
+    : mSegments(std::move(aOther.mSegments))
+  {
   }
 
   ~SegmentedVector() { Clear(); }
@@ -159,7 +163,7 @@ public:
   // Returns false if the allocation failed. (If you are using an infallible
   // allocation policy, use InfallibleAppend() instead.)
   template<typename U>
-  MOZ_WARN_UNUSED_RESULT bool Append(U&& aU)
+  MOZ_MUST_USE bool Append(U&& aU)
   {
     Segment* last = mSegments.getLast();
     if (!last || last->Length() == kSegmentCapacity) {
@@ -170,7 +174,7 @@ public:
       new (last) Segment();
       mSegments.insertBack(last);
     }
-    last->Append(mozilla::Forward<U>(aU));
+    last->Append(std::forward<U>(aU));
     return true;
   }
 
@@ -179,7 +183,7 @@ public:
   template<typename U>
   void InfallibleAppend(U&& aU)
   {
-    bool ok = Append(mozilla::Forward<U>(aU));
+    bool ok = Append(std::forward<U>(aU));
     MOZ_RELEASE_ASSERT(ok);
   }
 
@@ -188,7 +192,7 @@ public:
     Segment* segment;
     while ((segment = mSegments.popFirst())) {
       segment->~Segment();
-      this->free_(segment);
+      this->template free_(segment, 1);
     }
   }
 
@@ -214,7 +218,7 @@ public:
     if (!last->Length()) {
       mSegments.popLast();
       last->~Segment();
-      this->free_(last);
+      this->template free_(last, 1);
     }
   }
 
@@ -247,7 +251,7 @@ public:
       // Destroying the segment destroys all elements contained therein.
       mSegments.popLast();
       last->~Segment();
-      this->free_(last);
+      this->template free_(last, 1);
 
       MOZ_ASSERT(aNumElements >= segmentLen);
       aNumElements -= segmentLen;
@@ -260,7 +264,6 @@ public:
     // than we want to pop.
     MOZ_ASSERT(last);
     MOZ_ASSERT(last == mSegments.getLast());
-    MOZ_ASSERT(aNumElements != 0);
     MOZ_ASSERT(aNumElements < last->Length());
     for (uint32_t i = 0; i < aNumElements; ++i) {
       last->PopLast();
@@ -275,6 +278,10 @@ public:
   //    f(elem);
   //  }
   //
+  // Note, adding new entries to the SegmentedVector while using iterators
+  // is supported, but removing is not!
+  // If an iterator has entered Done() state, adding more entries to the
+  // vector doesn't affect it.
   class IterImpl
   {
     friend class SegmentedVector;
@@ -282,10 +289,14 @@ public:
     Segment* mSegment;
     size_t mIndex;
 
-    explicit IterImpl(SegmentedVector* aVector)
-      : mSegment(aVector->mSegments.getFirst())
-      , mIndex(0)
-    {}
+    explicit IterImpl(SegmentedVector* aVector, bool aFromFirst)
+      : mSegment(aFromFirst ? aVector->mSegments.getFirst() :
+                              aVector->mSegments.getLast())
+      , mIndex(aFromFirst ? 0 :
+                            (mSegment ? mSegment->Length() - 1 : 0))
+    {
+      MOZ_ASSERT_IF(mSegment, mSegment->Length() > 0);
+    }
 
   public:
     bool Done() const { return !mSegment; }
@@ -311,9 +322,23 @@ public:
         mIndex = 0;
       }
     }
+
+    void Prev()
+    {
+      MOZ_ASSERT(!Done());
+      if (mIndex == 0) {
+        mSegment = mSegment->getPrevious();
+        if (mSegment) {
+          mIndex = mSegment->Length() - 1;
+        }
+      } else {
+        --mIndex;
+      }
+    }
   };
 
-  IterImpl Iter() { return IterImpl(this); }
+  IterImpl Iter() { return IterImpl(this, true); }
+  IterImpl IterFromLast() { return IterImpl(this, false); }
 
   // Measure the memory consumption of the vector excluding |this|. Note that
   // it only measures the vector itself. If the vector elements contain

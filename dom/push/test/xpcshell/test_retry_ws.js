@@ -17,11 +17,11 @@ function run_test() {
   run_next_test();
 }
 
-add_task(function* test_ws_retry() {
+add_task(async function test_ws_retry() {
   let db = PushServiceWebSocket.newPushDB();
-  do_register_cleanup(() => {return db.drop().then(_ => db.close());});
+  registerCleanupFunction(() => {return db.drop().then(_ => db.close());});
 
-  yield db.put({
+  await db.put({
     channelID: '61770ba9-2d57-4134-b949-d40404630d5b',
     pushEndpoint: 'https://example.org/push/1',
     scope: 'https://example.net/push/1',
@@ -47,7 +47,6 @@ add_task(function* test_ws_retry() {
   let handshakePromise = new Promise(resolve => handshakeDone = resolve);
   PushService.init({
     serverURI: "wss://push.example.org/",
-    networkInfo: new MockDesktopNetworkInfo(),
     makeWebSocket(uri) {
       return new MockWebSocket(uri, {
         onHello(request) {
@@ -66,5 +65,5 @@ add_task(function* test_ws_retry() {
     },
   });
 
-  yield handshakePromise;
+  await handshakePromise;
 });

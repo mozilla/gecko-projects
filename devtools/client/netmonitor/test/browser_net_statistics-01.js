@@ -1,72 +1,52 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
- * Tests if the statistics view is populated correctly.
+ * Tests if the statistics panel displays correctly.
  */
 
-function test() {
-  initNetMonitor(STATISTICS_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { monitor } = await initNetMonitor(STATISTICS_URL);
+  info("Starting test... ");
 
-    let panel = aMonitor.panelWin;
-    let { document, $, $all, EVENTS, NetMonitorView } = panel;
+  const panel = monitor.panelWin;
+  const { document, store, windowRequire, connector } = panel;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
 
-    is(NetMonitorView.currentFrontendMode, "network-inspector-view",
-      "The initial frontend mode is correct.");
+  ok(document.querySelector(".monitor-panel"),
+    "The current main panel is correct.");
 
-    is($("#primed-cache-chart").childNodes.length, 0,
-      "There should be no primed cache chart created yet.");
-    is($("#empty-cache-chart").childNodes.length, 0,
-      "There should be no empty cache chart created yet.");
+  info("Displaying statistics panel");
+  store.dispatch(Actions.openStatistics(connector, true));
 
-    waitFor(panel, EVENTS.PLACEHOLDER_CHARTS_DISPLAYED).then(() => {
-      is($("#primed-cache-chart").childNodes.length, 1,
-        "There should be a placeholder primed cache chart created now.");
-      is($("#empty-cache-chart").childNodes.length, 1,
-        "There should be a placeholder empty cache chart created now.");
+  ok(document.querySelector(".statistics-panel"),
+    "The current main panel is correct.");
 
-      is($all(".pie-chart-container[placeholder=true]").length, 2,
-        "Two placeholder pie chart appear to be rendered correctly.");
-      is($all(".table-chart-container[placeholder=true]").length, 2,
-        "Two placeholder table chart appear to be rendered correctly.");
+  info("Waiting for placeholder to display");
 
-      promise.all([
-        waitFor(panel, EVENTS.PRIMED_CACHE_CHART_DISPLAYED),
-        waitFor(panel, EVENTS.EMPTY_CACHE_CHART_DISPLAYED)
-      ]).then(() => {
-        is($("#primed-cache-chart").childNodes.length, 1,
-          "There should be a real primed cache chart created now.");
-        is($("#empty-cache-chart").childNodes.length, 1,
-          "There should be a real empty cache chart created now.");
+  await waitUntil(
+    () => document.querySelectorAll(".pie-chart-container[placeholder=true]")
+                  .length == 2);
+  ok(true, "Two placeholder pie charts appear to be rendered correctly.");
 
-        Task.spawn(function*() {
-          yield until(() => $all(".pie-chart-container:not([placeholder=true])").length == 2);
-          ok(true, "Two real pie charts appear to be rendered correctly.");
+  await waitUntil(
+    () => document.querySelectorAll(".table-chart-container[placeholder=true]")
+                  .length == 2);
+  ok(true, "Two placeholde table charts appear to be rendered correctly.");
 
-          yield until(() => $all(".table-chart-container:not([placeholder=true])").length == 2);
-          ok(true, "Two real table charts appear to be rendered correctly.")
+  info("Waiting for chart to display");
 
-          teardown(aMonitor).then(finish);
-        });
-      });
-    });
+  await waitUntil(
+    () => document.querySelectorAll(".pie-chart-container:not([placeholder=true])")
+                  .length == 2);
+  ok(true, "Two real pie charts appear to be rendered correctly.");
 
-    NetMonitorView.toggleFrontendMode();
+  await waitUntil(
+    () => document.querySelectorAll(".table-chart-container:not([placeholder=true])")
+                  .length == 2);
+  ok(true, "Two real table charts appear to be rendered correctly.");
 
-    is(NetMonitorView.currentFrontendMode, "network-statistics-view",
-      "The current frontend mode is correct.");
-  });
-}
-
-function waitForTick() {
-  let deferred = promise.defer();
-  executeSoon(deferred.resolve);
-  return deferred.promise;
-}
-
-function until(predicate) {
-  return Task.spawn(function*() {
-    while (!predicate()) yield waitForTick();
-  });
-}
+  await teardown(monitor);
+});

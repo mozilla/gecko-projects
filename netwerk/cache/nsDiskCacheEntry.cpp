@@ -32,7 +32,7 @@ nsDiskCacheEntry::CreateCacheEntry(nsCacheDevice *  device)
                                              device,
                                              &entry);
     if (NS_FAILED(rv) || !entry) return nullptr;
-    
+
     entry->SetFetchCount(mFetchCount);
     entry->SetLastFetched(mLastFetched);
     entry->SetLastModified(mLastModified);
@@ -40,7 +40,7 @@ nsDiskCacheEntry::CreateCacheEntry(nsCacheDevice *  device)
     entry->SetCacheDevice(device);
     // XXX why does nsCacheService have to fill out device in BindEntry()?
     entry->SetDataSize(mDataSize);
-    
+
     rv = entry->UnflattenMetaData(MetaData(), mMetaDataSize);
     if (NS_FAILED(rv)) {
         delete entry;
@@ -60,7 +60,7 @@ nsDiskCacheEntry::CreateCacheEntry(nsCacheDevice *  device)
         entry->SetSecurityInfo(infoObj);
     }
 
-    return entry;                      
+    return entry;
 }
 
 
@@ -70,18 +70,16 @@ nsDiskCacheEntry::CreateCacheEntry(nsCacheDevice *  device)
 
 NS_IMPL_ISUPPORTS(nsDiskCacheEntryInfo, nsICacheEntryInfo)
 
-NS_IMETHODIMP nsDiskCacheEntryInfo::GetClientID(char ** clientID)
+NS_IMETHODIMP nsDiskCacheEntryInfo::GetClientID(nsACString& aClientID)
 {
-    NS_ENSURE_ARG_POINTER(clientID);
-    return ClientIDFromCacheKey(nsDependentCString(mDiskEntry->Key()), clientID);
+    return ClientIDFromCacheKey(nsDependentCString(mDiskEntry->Key()), aClientID);
 }
 
 extern const char DISK_CACHE_DEVICE_ID[];
-NS_IMETHODIMP nsDiskCacheEntryInfo::GetDeviceID(char ** deviceID)
+NS_IMETHODIMP nsDiskCacheEntryInfo::GetDeviceID(nsACString& aDeviceID)
 {
-    NS_ENSURE_ARG_POINTER(deviceID);
-    *deviceID = NS_strdup(mDeviceID);
-    return *deviceID ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+    aDeviceID.Assign(mDeviceID);
+    return NS_OK;
 }
 
 

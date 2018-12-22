@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,11 +15,10 @@
 #include "base/time.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Mutex.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIThreadInternal.h"
 
-class nsIThread;
+class nsIEventTarget;
 class nsITimer;
 
 namespace mozilla {
@@ -30,7 +31,7 @@ class MessagePump : public base::MessagePumpDefault
   friend class DoWorkRunnable;
 
 public:
-  explicit MessagePump(nsIThread* aThread);
+  explicit MessagePump(nsIEventTarget* aEventTarget);
 
   // From base::MessagePump.
   virtual void
@@ -48,6 +49,9 @@ public:
   virtual void
   ScheduleDelayedWork(const base::TimeTicks& aDelayedWorkTime) override;
 
+  virtual nsIEventTarget*
+  GetXPCOMThread() override;
+
 protected:
   virtual ~MessagePump();
 
@@ -56,9 +60,9 @@ private:
   void DoDelayedWork(base::MessagePump::Delegate* aDelegate);
 
 protected:
-  nsIThread* mThread;
+  nsIEventTarget* mEventTarget;
 
-  // mDelayedWorkTimer and mThread are set in Run() by this class or its
+  // mDelayedWorkTimer and mEventTarget are set in Run() by this class or its
   // subclasses.
   nsCOMPtr<nsITimer> mDelayedWorkTimer;
 
@@ -87,8 +91,8 @@ private:
 class MessagePumpForNonMainThreads final : public MessagePump
 {
 public:
-  explicit MessagePumpForNonMainThreads(nsIThread* aThread)
-    : MessagePump(aThread)
+  explicit MessagePumpForNonMainThreads(nsIEventTarget* aEventTarget)
+    : MessagePump(aEventTarget)
   { }
 
   virtual void Run(base::MessagePump::Delegate* aDelegate) override;
@@ -119,7 +123,7 @@ public:
   NS_DECL_NSITHREADOBSERVER
 
 public:
-  explicit MessagePumpForNonMainUIThreads(nsIThread* aThread) :
+  explicit MessagePumpForNonMainUIThreads(nsIEventTarget* aEventTarget) :
     mInWait(false),
     mWaitLock("mInWait")
   {
@@ -127,6 +131,12 @@ public:
 
   // The main run loop for this thread.
   virtual void DoRunLoop() override;
+
+  virtual nsIEventTarget*
+  GetXPCOMThread() override
+  {
+    return nullptr; // not sure what to do with this one
+  }
 
 protected:
   void SetInWait() {
@@ -153,6 +163,43 @@ private:
   mozilla::Mutex mWaitLock;
 };
 #endif // defined(XP_WIN)
+
+#if defined(MOZ_WIDGET_ANDROID)
+/*`
+ * The MessagePumpForAndroidUI exists to enable IPDL in the Android UI thread. The Android
+ * UI thread event loop is controlled by Android. This prevents running an existing
+ * MessagePump implementation in the Android UI thread. In order to enable IPDL on the
+ * Android UI thread it is necessary to have a non-looping MessagePump. This class enables
+ * forwarding of nsIRunnables from MessageLoop::PostTask_Helper to the registered
+ * nsIEventTarget with out the need to control the event loop. The only member function
+ * that should be invoked is GetXPCOMThread. All other member functions will invoke MOZ_CRASH
+*/
+class MessagePumpForAndroidUI : public base::MessagePump {
+
+public:
+  explicit MessagePumpForAndroidUI(nsIEventTarget* aEventTarget)
+    : mEventTarget(aEventTarget)
+  { }
+
+  virtual void Run(Delegate* delegate);
+  virtual void Quit();
+  virtual void ScheduleWork();
+  virtual void ScheduleDelayedWork(const base::TimeTicks& delayed_work_time);
+  virtual nsIEventTarget* GetXPCOMThread()
+  {
+    return mEventTarget;
+  }
+
+private:
+  ~MessagePumpForAndroidUI()
+  { }
+  MessagePumpForAndroidUI()
+  { }
+
+  nsIEventTarget* mEventTarget;
+};
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 
 } /* namespace ipc */
 } /* namespace mozilla */

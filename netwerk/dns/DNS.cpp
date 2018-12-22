@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=4 sw=4 sts=4 et cin: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,6 +9,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/mozalloc.h"
 #include "mozilla/ArrayUtils.h"
+#include "nsString.h"
 #include <string.h>
 
 #ifdef XP_WIN
@@ -92,6 +95,11 @@ void NetAddrToPRNetAddr(const NetAddr *addr, PRNetAddr *prAddr)
     prAddr->local.family = PR_AF_LOCAL;
     memcpy(prAddr->local.path, addr->local.path, sizeof(addr->local.path));
   }
+#elif defined(XP_WIN)
+  else if (addr->raw.family == AF_LOCAL) {
+    prAddr->local.family = PR_AF_LOCAL;
+    memcpy(prAddr->local.path, addr->local.path, sizeof(addr->local.path));
+  }
 #endif
 }
 
@@ -105,7 +113,7 @@ bool NetAddrToString(const NetAddr *addr, char *buf, uint32_t bufSize)
     nativeAddr.s_addr = addr->inet.ip;
     return !!inet_ntop_internal(AF_INET, &nativeAddr, buf, bufSize);
   }
-  else if (addr->raw.family == AF_INET6) {
+  if (addr->raw.family == AF_INET6) {
     if (bufSize < INET6_ADDRSTRLEN) {
       return false;
     }
@@ -141,11 +149,12 @@ bool IsLoopBackAddress(const NetAddr *addr)
   if (addr->raw.family == AF_INET) {
     return (addr->inet.ip == htonl(INADDR_LOOPBACK));
   }
-  else if (addr->raw.family == AF_INET6) {
+  if (addr->raw.family == AF_INET6) {
     if (IPv6ADDR_IS_LOOPBACK(&addr->inet6.ip)) {
       return true;
-    } else if (IPv6ADDR_IS_V4MAPPED(&addr->inet6.ip) &&
-               IPv6ADDR_V4MAPPED_TO_IPADDR(&addr->inet6.ip) == htonl(INADDR_LOOPBACK)) {
+    }
+    if (IPv6ADDR_IS_V4MAPPED(&addr->inet6.ip) &&
+             IPv6ADDR_V4MAPPED_TO_IPADDR(&addr->inet6.ip) == htonl(INADDR_LOOPBACK)) {
       return true;
     }
   }
@@ -162,7 +171,8 @@ bool IsIPAddrAny(const NetAddr *addr)
   else if (addr->raw.family == AF_INET6) {
     if (IPv6ADDR_IS_UNSPECIFIED(&addr->inet6.ip)) {
       return true;
-    } else if (IPv6ADDR_IS_V4MAPPED(&addr->inet6.ip) &&
+    }
+    if (IPv6ADDR_IS_V4MAPPED(&addr->inet6.ip) &&
                IPv6ADDR_V4MAPPED_TO_IPADDR(&addr->inet6.ip) == htonl(INADDR_ANY)) {
       return true;
     }
@@ -225,17 +235,20 @@ NetAddr::operator == (const NetAddr& other) const
 {
   if (this->raw.family != other.raw.family) {
     return false;
-  } else if (this->raw.family == AF_INET) {
+  }
+  if (this->raw.family == AF_INET) {
     return (this->inet.port == other.inet.port) &&
            (this->inet.ip == other.inet.ip);
-  } else if (this->raw.family == AF_INET6) {
+  }
+  if (this->raw.family == AF_INET6) {
     return (this->inet6.port == other.inet6.port) &&
            (this->inet6.flowinfo == other.inet6.flowinfo) &&
            (memcmp(&this->inet6.ip, &other.inet6.ip,
                    sizeof(this->inet6.ip)) == 0) &&
            (this->inet6.scope_id == other.inet6.scope_id);
 #if defined(XP_UNIX)
-  } else if (this->raw.family == AF_LOCAL) {
+  }
+  if (this->raw.family == AF_LOCAL) {
     return PL_strncmp(this->local.path, other.local.path,
                       ArrayLength(this->local.path));
 #endif
@@ -243,10 +256,36 @@ NetAddr::operator == (const NetAddr& other) const
   return false;
 }
 
-
+bool
+NetAddr::operator < (const NetAddr& other) const
+{
+    if (this->raw.family != other.raw.family) {
+        return this->raw.family < other.raw.family;
+    }
+    if (this->raw.family == AF_INET) {
+        if (this->inet.ip == other.inet.ip) {
+            return this->inet.port < other.inet.port;
+        }
+        return this->inet.ip < other.inet.ip;
+    }
+    if (this->raw.family == AF_INET6) {
+        int cmpResult = memcmp(&this->inet6.ip, &other.inet6.ip,
+                               sizeof(this->inet6.ip));
+        if (cmpResult) {
+            return cmpResult < 0;
+        }
+        if (this->inet6.port != other.inet6.port) {
+            return this->inet6.port < other.inet6.port;
+        }
+        return this->inet6.flowinfo < other.inet6.flowinfo;
+    }
+    return false;
+}
 
 NetAddrElement::NetAddrElement(const PRNetAddr *prNetAddr)
 {
+  this->mAddress.raw.family = 0;
+  this->mAddress.inet = {};
   PRNetAddrToNetAddr(prNetAddr, &mAddress);
 }
 
@@ -255,20 +294,19 @@ NetAddrElement::NetAddrElement(const NetAddrElement& netAddr)
   mAddress = netAddr.mAddress;
 }
 
-NetAddrElement::~NetAddrElement()
-{
-}
+NetAddrElement::~NetAddrElement() = default;
 
-AddrInfo::AddrInfo(const char *host, const PRAddrInfo *prAddrInfo,
-                   bool disableIPv4, bool filterNameCollision, const char *cname)
-  : mHostName(nullptr)
-  , mCanonicalName(nullptr)
+AddrInfo::AddrInfo(const nsACString& host, const PRAddrInfo *prAddrInfo,
+                   bool disableIPv4, bool filterNameCollision,
+                   const nsACString& cname)
+  : mHostName(host)
+  , mCanonicalName(cname)
   , ttl(NO_TTL_DATA)
+  , mFromTRR(false)
 {
   MOZ_ASSERT(prAddrInfo, "Cannot construct AddrInfo with a null prAddrInfo pointer!");
   const uint32_t nameCollisionAddr = htonl(0x7f003535); // 127.0.53.53
 
-  Init(host, cname);
   PRNetAddr tmpAddr;
   void *iter = nullptr;
   do {
@@ -277,18 +315,40 @@ AddrInfo::AddrInfo(const char *host, const PRAddrInfo *prAddrInfo,
         (!disableIPv4 || tmpAddr.raw.family != PR_AF_INET) &&
         (!filterNameCollision || tmpAddr.raw.family != PR_AF_INET || (tmpAddr.inet.ip != nameCollisionAddr));
     if (addIt) {
-        NetAddrElement *addrElement = new NetAddrElement(&tmpAddr);
+        auto *addrElement = new NetAddrElement(&tmpAddr);
         mAddresses.insertBack(addrElement);
     }
   } while (iter);
 }
 
-AddrInfo::AddrInfo(const char *host, const char *cname)
-  : mHostName(nullptr)
-  , mCanonicalName(nullptr)
+AddrInfo::AddrInfo(const nsACString& host, const nsACString& cname, unsigned int aTRR)
+  : mHostName(host)
+  , mCanonicalName(cname)
   , ttl(NO_TTL_DATA)
+  , mFromTRR(aTRR)
 {
-  Init(host, cname);
+}
+
+AddrInfo::AddrInfo(const nsACString& host, unsigned int aTRR)
+  : mHostName(host)
+  , mCanonicalName(EmptyCString())
+  , ttl(NO_TTL_DATA)
+  , mFromTRR(aTRR)
+{
+}
+
+// deep copy constructor
+AddrInfo::AddrInfo(const AddrInfo *src)
+{
+  mHostName = src->mHostName;
+  mCanonicalName = src->mCanonicalName;
+  ttl = src->ttl;
+  mFromTRR = src->mFromTRR;
+
+  for (auto element = src->mAddresses.getFirst(); element;
+       element = element->getNext()) {
+    AddAddress(new NetAddrElement(*element));
+  }
 }
 
 AddrInfo::~AddrInfo()
@@ -296,27 +356,6 @@ AddrInfo::~AddrInfo()
   NetAddrElement *addrElement;
   while ((addrElement = mAddresses.popLast())) {
     delete addrElement;
-  }
-  free(mHostName);
-  free(mCanonicalName);
-}
-
-void
-AddrInfo::Init(const char *host, const char *cname)
-{
-  MOZ_ASSERT(host, "Cannot initialize AddrInfo with a null host pointer!");
-
-  ttl = NO_TTL_DATA;
-  size_t hostlen = strlen(host);
-  mHostName = static_cast<char*>(moz_xmalloc(hostlen + 1));
-  memcpy(mHostName, host, hostlen + 1);
-  if (cname) {
-    size_t cnameLen = strlen(cname);
-    mCanonicalName = static_cast<char*>(moz_xmalloc(cnameLen + 1));
-    memcpy(mCanonicalName, cname, cnameLen + 1);
-  }
-  else {
-    mCanonicalName = nullptr;
   }
 }
 
@@ -332,8 +371,8 @@ size_t
 AddrInfo::SizeOfIncludingThis(MallocSizeOf mallocSizeOf) const
 {
   size_t n = mallocSizeOf(this);
-  n += mallocSizeOf(mHostName);
-  n += mallocSizeOf(mCanonicalName);
+  n += mHostName.SizeOfExcludingThisIfUnshared(mallocSizeOf);
+  n += mCanonicalName.SizeOfExcludingThisIfUnshared(mallocSizeOf);
   n += mAddresses.sizeOfExcludingThis(mallocSizeOf);
   return n;
 }

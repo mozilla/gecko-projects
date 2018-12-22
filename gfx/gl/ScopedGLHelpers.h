@@ -122,7 +122,9 @@ protected:
 
 public:
     explicit ScopedTexture(GLContext* aGL);
-    GLuint Texture() { return mTexture; }
+
+    GLuint Texture() const { return mTexture; }
+    operator GLuint() const { return mTexture; }
 
 protected:
     void UnwrapImpl();
@@ -309,65 +311,59 @@ protected:
     void UnwrapImpl();
 };
 
-struct ScopedGLDrawState {
-    explicit ScopedGLDrawState(GLContext* gl);
-    ~ScopedGLDrawState();
-
-    GLuint boundProgram;
-    GLuint boundBuffer;
-
-    ScopedGLState blend;
-    ScopedGLState cullFace;
-    ScopedGLState depthTest;
-    ScopedGLState dither;
-    ScopedGLState polyOffsFill;
-    ScopedGLState sampleAToC;
-    ScopedGLState sampleCover;
-    ScopedGLState scissor;
-    ScopedGLState stencil;
-
-    GLuint maxAttrib;
-    UniquePtr<GLint[]> attrib_enabled;
-    GLint attrib0_size;
-    GLint attrib0_stride;
-    GLint attrib0_type;
-    GLint attrib0_normalized;
-    GLint attrib0_bufferBinding;
-    void* attrib0_pointer;
-
-    realGLboolean colorMask[4];
-    GLint viewport[4];
-    GLint scissorBox[4];
-    GLContext* const mGL;
-    GLuint packAlign;
-};
-
-struct ScopedPackAlignment
-    : public ScopedGLWrapper<ScopedPackAlignment>
+struct ScopedPackState
+    : public ScopedGLWrapper<ScopedPackState>
 {
-    friend struct ScopedGLWrapper<ScopedPackAlignment>;
+    friend struct ScopedGLWrapper<ScopedPackState>;
 
 protected:
-    GLint mOldVal;
+    GLint mAlignment;
+
+    GLuint mPixelBuffer;
+    GLint mRowLength;
+    GLint mSkipPixels;
+    GLint mSkipRows;
 
 public:
-    ScopedPackAlignment(GLContext* aGL, GLint scopedVal);
+    explicit ScopedPackState(GLContext* gl);
 
 protected:
     void UnwrapImpl();
 };
 
-
-struct ScopedUnpackAlignment
-    : public ScopedGLWrapper<ScopedUnpackAlignment>
+struct ResetUnpackState
+    : public ScopedGLWrapper<ResetUnpackState>
 {
-    friend struct ScopedGLWrapper<ScopedUnpackAlignment>;
+    friend struct ScopedGLWrapper<ResetUnpackState>;
 
 protected:
-    GLint mOldVal;
+    GLuint mAlignment;
+
+    GLuint mPBO;
+    GLuint mRowLength;
+    GLuint mImageHeight;
+    GLuint mSkipPixels;
+    GLuint mSkipRows;
+    GLuint mSkipImages;
 
 public:
-    ScopedUnpackAlignment(GLContext* gl, GLint scopedVal);
+    explicit ResetUnpackState(GLContext* gl);
+
+protected:
+    void UnwrapImpl();
+};
+
+struct ScopedBindPBO final
+    : public ScopedGLWrapper<ScopedBindPBO>
+{
+    friend struct ScopedGLWrapper<ScopedBindPBO>;
+
+protected:
+    const GLenum mTarget;
+    const GLuint mPBO;
+
+public:
+    ScopedBindPBO(GLContext* gl, GLenum target);
 
 protected:
     void UnwrapImpl();

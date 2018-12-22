@@ -3,13 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {Cu} = require("chrome");
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
-const {createNode} = require("devtools/client/animationinspector/utils");
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const EventEmitter = require("devtools/shared/event-emitter");
+const {createNode} = require("devtools/client/inspector/animation-old/utils");
+const { LocalizationHelper } = require("devtools/shared/l10n");
 
-const STRINGS_URI = "chrome://devtools/locale/inspector.properties";
+const STRINGS_URI = "devtools/client/locales/inspector.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
 /**
@@ -40,7 +38,7 @@ exports.DomNodePreview = DomNodePreview;
 
 DomNodePreview.prototype = {
   init: function(containerEl) {
-    let document = containerEl.ownerDocument;
+    const document = containerEl.ownerDocument;
 
     // Init the markup for displaying the target node.
     this.el = createNode({
@@ -197,7 +195,7 @@ DomNodePreview.prototype = {
   },
 
   destroy: function() {
-    HighlighterLock.unhighlight().catch(e => console.error(e));
+    HighlighterLock.unhighlight().catch(console.error);
 
     this.stopListeners();
 
@@ -219,7 +217,7 @@ DomNodePreview.prototype = {
       return;
     }
     this.highlighterUtils.highlightNodeFront(this.nodeFront)
-                         .catch(e => console.error(e));
+                         .catch(console.error);
   },
 
   onPreviewMouseOut: function() {
@@ -227,47 +225,47 @@ DomNodePreview.prototype = {
       return;
     }
     this.highlighterUtils.unhighlight()
-                         .catch(e => console.error(e));
+                         .catch(console.error);
   },
 
   onSelectElClick: function() {
     if (!this.nodeFront) {
       return;
     }
-    this.inspector.selection.setNodeFront(this.nodeFront, "dom-node-preview");
+    this.inspector.selection.setNodeFront(this.nodeFront, { reason: "dom-node-preview" });
   },
 
   onHighlightElClick: function(e) {
     e.stopPropagation();
 
-    let classList = this.highlightNodeEl.classList;
-    let isHighlighted = classList.contains("selected");
+    const classList = this.highlightNodeEl.classList;
+    const isHighlighted = classList.contains("selected");
 
     if (isHighlighted) {
       classList.remove("selected");
       HighlighterLock.unhighlight().then(() => {
         this.emit("target-highlighter-unlocked");
-      }, error => console.error(error));
+      }, console.error);
     } else {
       classList.add("selected");
       HighlighterLock.highlight(this).then(() => {
         this.emit("target-highlighter-locked");
-      }, error => console.error(error));
+      }, console.error);
     }
   },
 
-  onHighlighterLocked: function(e, domNodePreview) {
+  onHighlighterLocked: function(domNodePreview) {
     if (domNodePreview !== this) {
       this.highlightNodeEl.classList.remove("selected");
     }
   },
 
-  onMarkupMutations: function(e, mutations) {
+  onMarkupMutations: function(mutations) {
     if (!this.nodeFront) {
       return;
     }
 
-    for (let {target} of mutations) {
+    for (const {target} of mutations) {
       if (target === this.nodeFront) {
         // Re-render with the same nodeFront to update the output.
         this.render(this.nodeFront);
@@ -278,7 +276,7 @@ DomNodePreview.prototype = {
 
   render: function(nodeFront) {
     this.nodeFront = nodeFront;
-    let {tagName, attributes} = nodeFront;
+    const {displayName, attributes} = nodeFront;
 
     if (nodeFront.isPseudoElement) {
       this.pseudoEl.textContent = nodeFront.isBeforePseudoElement
@@ -287,12 +285,12 @@ DomNodePreview.prototype = {
       this.pseudoEl.style.display = "inline";
       this.tagNameEl.style.display = "none";
     } else {
-      this.tagNameEl.textContent = tagName.toLowerCase();
+      this.tagNameEl.textContent = displayName;
       this.pseudoEl.style.display = "none";
       this.tagNameEl.style.display = "inline";
     }
 
-    let idIndex = attributes.findIndex(({name}) => name === "id");
+    const idIndex = attributes.findIndex(({name}) => name === "id");
     if (idIndex > -1 && attributes[idIndex].value) {
       this.idEl.querySelector(".attribute-value").textContent =
         attributes[idIndex].value;
@@ -301,7 +299,7 @@ DomNodePreview.prototype = {
       this.idEl.style.display = "none";
     }
 
-    let classIndex = attributes.findIndex(({name}) => name === "class");
+    const classIndex = attributes.findIndex(({name}) => name === "class");
     if (classIndex > -1 && attributes[classIndex].value) {
       let value = attributes[classIndex].value;
       if (this.options.compact) {
@@ -328,26 +326,26 @@ var HighlighterLock = {
   highlighter: null,
   isShown: false,
 
-  highlight: Task.async(function*(animationTargetNode) {
+  async highlight(animationTargetNode) {
     if (!this.highlighter) {
-      let util = animationTargetNode.inspector.toolbox.highlighterUtils;
-      this.highlighter = yield util.getHighlighterByType("BoxModelHighlighter");
+      const util = animationTargetNode.inspector.toolbox.highlighterUtils;
+      this.highlighter = await util.getHighlighterByType("BoxModelHighlighter");
     }
 
-    yield this.highlighter.show(animationTargetNode.nodeFront);
+    await this.highlighter.show(animationTargetNode.nodeFront);
     this.isShown = true;
     this.emit("highlighted", animationTargetNode);
-  }),
+  },
 
-  unhighlight: Task.async(function*() {
+  async unhighlight() {
     if (!this.highlighter || !this.isShown) {
       return;
     }
 
-    yield this.highlighter.hide();
+    await this.highlighter.hide();
     this.isShown = false;
     this.emit("unhighlighted");
-  })
+  }
 };
 
 EventEmitter.decorate(HighlighterLock);

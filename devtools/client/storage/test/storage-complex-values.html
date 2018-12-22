@@ -1,4 +1,4 @@
-﻿<!DOCTYPE HTML>
+<!DOCTYPE HTML>
 <html>
 <!--
 Bug 970517 - Storage inspector front end - tests
@@ -8,7 +8,7 @@ Bug 970517 - Storage inspector front end - tests
   <title>Storage inspector test for correct values in the sidebar</title>
 </head>
 <body>
-<script type="application/javascript;version=1.7">
+<script type="application/javascript">
 "use strict";
 let partialHostname = location.hostname.match(/^[^.]+(\..*)$/)[1];
 let cookieExpiresTime = 2000000000000;
@@ -19,6 +19,9 @@ document.cookie = "c1=" + JSON.stringify([
   }]) + "; expires=" + new Date(cookieExpiresTime).toGMTString() +
   "; path=/browser";
 document.cookie = "cs2=sessionCookie; path=/; domain=" + partialHostname;
+// URLEncoded cookie
+document.cookie = "c_encoded=" + encodeURIComponent(JSON.stringify({foo: {foo1: "bar"}}));
+
 // ... and some local storage items ..
 const es6 = "for";
 localStorage.setItem("ls1", JSON.stringify({
@@ -32,14 +35,19 @@ localStorage.setItem("ls3", "http://foobar.com/baz.php");
 sessionStorage.setItem("ss1", "This#is#an#array");
 sessionStorage.setItem("ss2", "This~is~another~array");
 sessionStorage.setItem("ss3", "this#is~an#object~foo#bar");
+sessionStorage.setItem("ss4", "#array##with#empty#items");
+// long string that is almost an object and might trigger exponential
+// regexp backtracking
+let s = "a".repeat(1000);
+sessionStorage.setItem("ss5", `${s}=${s}=${s}=${s}&${s}=${s}&${s}`);
 console.log("added cookies and stuff from main page");
 
-let idbGenerator = function*() {
+let idbGenerator = async function () {
   let request = indexedDB.open("idb1", 1);
   request.onerror = function() {
     throw new Error("error opening db connection");
   };
-  let db = yield new Promise(done => {
+  let db = await new Promise(done => {
     request.onupgradeneeded = event => {
       let db = event.target.result;
       let store1 = db.createObjectStore("obj1", { keyPath: "id" });
@@ -53,7 +61,7 @@ let idbGenerator = function*() {
   });
 
   // Prevents AbortError
-  yield new Promise(done => {
+  await new Promise(done => {
     request.onsuccess = done;
   });
 
@@ -73,7 +81,7 @@ let idbGenerator = function*() {
   db.close();
 
   request = indexedDB.open("idb2", 1);
-  let db2 = yield new Promise(done => {
+  let db2 = await new Promise(done => {
     request.onupgradeneeded = event => {
       let db2 = event.target.result;
       let store3 = db2.createObjectStore("obj3", { keyPath: "id3" });
@@ -85,7 +93,7 @@ let idbGenerator = function*() {
   });
 
   // Prevents AbortError during close()
-  yield new Promise(done => {
+  await new Promise(done => {
     request.onsuccess = done;
   });
 
@@ -100,13 +108,13 @@ function deleteDB(dbName) {
   });
 }
 
-window.setup = function*() {
-  yield idbGenerator();
+window.setup = async function () {
+  await idbGenerator();
 };
 
-window.clear = function*() {
-  yield deleteDB("idb1");
-  yield deleteDB("idb2");
+window.clear = async function () {
+  await deleteDB("idb1");
+  await deleteDB("idb2");
 
   dump("removed indexedDB data from " + document.location + "\n");
 };

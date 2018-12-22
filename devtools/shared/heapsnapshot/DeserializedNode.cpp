@@ -20,7 +20,7 @@ DeserializedEdge& DeserializedEdge::operator=(DeserializedEdge&& rhs)
 {
   MOZ_ASSERT(&rhs != this);
   this->~DeserializedEdge();
-  new(this) DeserializedEdge(Move(rhs));
+  new(this) DeserializedEdge(std::move(rhs));
   return *this;
 }
 
@@ -59,7 +59,7 @@ namespace ubi {
 using mozilla::devtools::DeserializedEdge;
 
 const char16_t Concrete<DeserializedNode>::concreteTypeName[] =
-  MOZ_UTF16("mozilla::devtools::DeserializedNode");
+  u"mozilla::devtools::DeserializedNode";
 
 const char16_t*
 Concrete<DeserializedNode>::typeName() const
@@ -87,8 +87,8 @@ class DeserializedEdgeRange : public EdgeRange
 
     auto& edge = node->edges[i];
     auto referent = node->getEdgeReferent(edge);
-    currentEdge = mozilla::Move(Edge(edge.name ? NS_strdup(edge.name) : nullptr,
-                                     referent));
+    currentEdge = Edge(edge.name
+                ? NS_strdup(edge.name) : nullptr, referent);
     front_ = &currentEdge;
   }
 
@@ -121,7 +121,7 @@ Concrete<DeserializedNode>::allocationStack() const
 
 
 js::UniquePtr<EdgeRange>
-Concrete<DeserializedNode>::edges(JSRuntime* rt, bool) const
+Concrete<DeserializedNode>::edges(JSContext* cx, bool) const
 {
   js::UniquePtr<DeserializedEdgeRange> range(js_new<DeserializedEdgeRange>(get()));
 

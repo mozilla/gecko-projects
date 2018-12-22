@@ -8,60 +8,63 @@
 
     <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
     <script type="application/javascript" src="chrome://mochikit/content/chrome-harness.js"></script>
-    <script type="application/javascript;version=1.8" src="head.js"></script>
+    <script type="application/javascript" src="head.js"></script>
     <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   </head>
 
   <body>
 
-    <script type="application/javascript;version=1.8">
+    <script type="application/javascript">
       window.onload = function() {
         SimpleTest.waitForExplicitFinish();
 
-        Task.spawn(function* () {
-          const { DebuggerServer } = require("devtools/server/main");
+        (async function() {
+          DebuggerServer.init();
+          DebuggerServer.registerAllActors();
 
-          if (!DebuggerServer.initialized) {
-            DebuggerServer.init();
-            DebuggerServer.addBrowserActors();
-          }
-
-          let win = yield openWebIDE();
+          let win = await openWebIDE();
           let docRuntime = getRuntimeDocument(win);
-          let docProject = getProjectDocument(win);
+          const docProject = getProjectDocument(win);
 
           let panelNode = docRuntime.querySelector("#runtime-panel");
           let items = panelNode.querySelectorAll(".runtime-panel-item-other");
           is(items.length, 2, "Found 2 runtime buttons");
 
           // Connect to local runtime
+          let connectionsChanged = waitForConnectionChange("opened", 2);
           items[1].click();
 
-          yield waitForUpdate(win, "runtime-targets");
+          await waitForUpdate(win, "runtime-targets");
 
-          is(Object.keys(DebuggerServer._connections).length, 1, "Locally connected");
+          await connectionsChanged;
+          is(Object.keys(DebuggerServer._connections).length, 2, "Locally connected");
 
           ok(win.AppManager.isMainProcessDebuggable(), "Main process available");
 
           // Select main process
-          yield win.Cmds.showProjectPanel();
-          yield waitForUpdate(win, "runtime-targets");
+          await win.Cmds.showProjectPanel();
+          await waitForUpdate(win, "runtime-targets");
           SimpleTest.executeSoon(() => {
             docProject.querySelectorAll("#project-panel-runtimeapps .panel-item")[0].click();
           });
 
-          yield waitForUpdate(win, "project");
+          await waitForUpdate(win, "project");
 
-          let lastProject = Services.prefs.getCharPref("devtools.webide.lastSelectedProject");
+          const lastProject = Services.prefs.getCharPref("devtools.webide.lastSelectedProject");
           is(lastProject, "mainProcess:", "Last project is main process");
 
-          yield nextTick();
-          yield closeWebIDE(win);
+          connectionsChanged = waitForConnectionChange("closed", 2);
 
+          await nextTick();
+          await closeWebIDE(win);
+
+          await connectionsChanged;
           is(Object.keys(DebuggerServer._connections).length, 0, "Disconnected");
 
+          connectionsChanged = waitForConnectionChange("opened", 2);
+
           // Re-open, should reselect main process after connection
-          win = yield openWebIDE();
+          win = await openWebIDE();
 
           docRuntime = getRuntimeDocument(win);
 
@@ -72,33 +75,34 @@
           // Connect to local runtime
           items[1].click();
 
-          yield waitForUpdate(win, "runtime-targets");
+          await waitForUpdate(win, "runtime-targets");
 
-          is(Object.keys(DebuggerServer._connections).length, 1, "Locally connected");
+          await connectionsChanged;
+          is(Object.keys(DebuggerServer._connections).length, 2, "Locally connected");
           ok(win.AppManager.isMainProcessDebuggable(), "Main process available");
           is(win.AppManager.selectedProject.type, "mainProcess", "Main process reselected");
 
           // Wait for the toolbox to be fully loaded
-          yield win.UI.toolboxPromise;
+          await win.UI.toolboxPromise;
 
           // If we happen to pass a project object targeting the same context,
           // here, the main process, the `selectedProject` attribute shouldn't be updated
           // so that no `project` event would fire.
-          let oldProject = win.AppManager.selectedProject;
+          const oldProject = win.AppManager.selectedProject;
           win.AppManager.selectedProject = {
             type: "mainProcess"
           };
           is(win.AppManager.selectedProject, oldProject, "AppManager.selectedProject shouldn't be updated if we selected the same project");
 
-          yield win.Cmds.disconnectRuntime();
+          await win.Cmds.disconnectRuntime();
 
-          yield closeWebIDE(win);
+          await closeWebIDE(win);
 
           DebuggerServer.destroy();
 
           SimpleTest.finish();
-        });
-      }
+        })();
+      };
     </script>
   </body>
 </html>

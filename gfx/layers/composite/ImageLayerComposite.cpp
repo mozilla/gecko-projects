@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -15,6 +16,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/Effects.h"     // for EffectChain
+#include "mozilla/layers/ImageHost.h"   // for ImageHost
 #include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsAString.h"
@@ -50,7 +52,7 @@ ImageLayerComposite::SetCompositableHost(CompositableHost* aHost)
 {
   switch (aHost->GetType()) {
     case CompositableType::IMAGE:
-      mImageHost = aHost;
+      mImageHost = static_cast<ImageHost*>(aHost);
       return true;
     default:
       return false;
@@ -63,15 +65,6 @@ ImageLayerComposite::Disconnect()
   Destroy();
 }
 
-LayerRenderState
-ImageLayerComposite::GetRenderState()
-{
-  if (mImageHost && mImageHost->IsAttached()) {
-    return mImageHost->GetRenderState();
-  }
-  return LayerRenderState();
-}
-
 Layer*
 ImageLayerComposite::GetLayer()
 {
@@ -79,7 +72,18 @@ ImageLayerComposite::GetLayer()
 }
 
 void
-ImageLayerComposite::RenderLayer(const IntRect& aClipRect)
+ImageLayerComposite::SetLayerManager(HostLayerManager* aManager)
+{
+  LayerComposite::SetLayerManager(aManager);
+  mManager = aManager;
+  if (mImageHost) {
+    mImageHost->SetTextureSourceProvider(mCompositor);
+  }
+}
+
+void
+ImageLayerComposite::RenderLayer(const IntRect& aClipRect,
+                                 const Maybe<gfx::Polygon>& aGeometry)
 {
   if (!mImageHost || !mImageHost->IsAttached()) {
     return;
@@ -88,19 +92,21 @@ ImageLayerComposite::RenderLayer(const IntRect& aClipRect)
 #ifdef MOZ_DUMP_PAINTING
   if (gfxEnv::DumpCompositorTextures()) {
     RefPtr<gfx::DataSourceSurface> surf = mImageHost->GetAsSurface();
-    WriteSnapshotToDumpFile(this, surf);
+    if (surf) {
+      WriteSnapshotToDumpFile(this, surf);
+    }
   }
 #endif
 
   mCompositor->MakeCurrent();
 
   RenderWithAllMasks(this, mCompositor, aClipRect,
-                     [&](EffectChain& effectChain, const Rect& clipRect) {
-    mImageHost->SetCompositor(mCompositor);
-    mImageHost->Composite(this, effectChain,
+                     [&](EffectChain& effectChain, const IntRect& clipRect) {
+    mImageHost->SetTextureSourceProvider(mCompositor);
+    mImageHost->Composite(mCompositor, this, effectChain,
                           GetEffectiveOpacity(),
                           GetEffectiveTransformForBuffer(),
-                          GetEffectFilter(),
+                          GetSamplingFilter(),
                           clipRect);
   });
   mImageHost->BumpFlashCounter();
@@ -126,12 +132,11 @@ ImageLayerComposite::ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransform
       SnapTransform(local, sourceRect, nullptr) *
       SnapTransformTranslation(aTransformToSurface, nullptr);
 
-  if (mScaleMode != ScaleMode::SCALE_NONE &&
-      sourceRect.width != 0.0 && sourceRect.height != 0.0) {
+  if (mScaleMode != ScaleMode::SCALE_NONE && !sourceRect.IsZeroArea()) {
     NS_ASSERTION(mScaleMode == ScaleMode::STRETCH,
                  "No other scalemodes than stretch and none supported yet.");
-    local.PreScale(mScaleToSize.width / sourceRect.width,
-                   mScaleToSize.height / sourceRect.height, 1.0);
+    local.PreScale(mScaleToSize.width / sourceRect.Width(),
+                   mScaleToSize.height / sourceRect.Height(), 1.0);
 
     mEffectiveTransformForBuffer =
         SnapTransform(local, sourceRect, nullptr) *
@@ -141,6 +146,37 @@ ImageLayerComposite::ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransform
   }
 
   ComputeEffectiveTransformForMaskLayers(aTransformToSurface);
+}
+
+bool
+ImageLayerComposite::IsOpaque()
+{
+  if (!mImageHost ||
+      !mImageHost->IsAttached()) {
+    return false;
+  }
+
+  if (mScaleMode == ScaleMode::STRETCH) {
+    return mImageHost->IsOpaque();
+  }
+  return false;
+}
+
+nsIntRegion
+ImageLayerComposite::GetFullyRenderedRegion()
+{
+  if (!mImageHost ||
+      !mImageHost->IsAttached()) {
+    return GetShadowVisibleRegion().ToUnknownRegion();
+  }
+
+  if (mScaleMode == ScaleMode::STRETCH) {
+    nsIntRegion shadowVisibleRegion;
+    shadowVisibleRegion.And(GetShadowVisibleRegion().ToUnknownRegion(), nsIntRegion(gfx::IntRect(0, 0, mScaleToSize.width, mScaleToSize.height)));
+    return shadowVisibleRegion;
+  }
+
+  return GetShadowVisibleRegion().ToUnknownRegion();
 }
 
 CompositableHost*
@@ -163,17 +199,17 @@ ImageLayerComposite::CleanupResources()
   mImageHost = nullptr;
 }
 
-gfx::Filter
-ImageLayerComposite::GetEffectFilter()
+gfx::SamplingFilter
+ImageLayerComposite::GetSamplingFilter()
 {
-  return mFilter;
+  return mSamplingFilter;
 }
 
 void
 ImageLayerComposite::GenEffectChain(EffectChain& aEffect)
 {
   aEffect.mLayerRef = this;
-  aEffect.mPrimaryEffect = mImageHost->GenEffect(GetEffectFilter());
+  aEffect.mPrimaryEffect = mImageHost->GenEffect(GetSamplingFilter());
 }
 
 void

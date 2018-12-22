@@ -4,25 +4,25 @@
 /* import-globals-from head.js */
 "use strict";
 
-const TEST_URI = "data:text/html;charset=utf-8,browser_css_angle.js";
-var {angleUtils} = require("devtools/shared/css-angle");
+var {angleUtils} = require("devtools/client/shared/css-angle");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host] = yield createHost("bottom", TEST_URI);
+add_task(async function() {
+  await addTab("about:blank");
+  const [host] = await createHost("bottom");
 
   info("Starting the test");
   testAngleUtils();
+  testAngleValidity();
 
   host.destroy();
   gBrowser.removeCurrentTab();
 });
 
 function testAngleUtils() {
-  let data = getTestData();
+  const data = getTestData();
 
-  for (let {authored, deg, rad, grad, turn} of data) {
-    let angle = new angleUtils.CssAngle(authored);
+  for (const {authored, deg, rad, grad, turn} of data) {
+    const angle = new angleUtils.CssAngle(authored);
 
     // Check all values.
     info("Checking values for " + authored);
@@ -35,18 +35,68 @@ function testAngleUtils() {
   }
 }
 
+function testAngleValidity() {
+  const data = getAngleValidityData();
+
+  for (const {angle, result} of data) {
+    const testAngle = new angleUtils.CssAngle(angle);
+    const validString = testAngle.valid ? " a valid" : "an invalid";
+
+    is(testAngle.valid, result,
+       `Testing that "${angle}" is ${validString} angle`);
+  }
+}
+
 function testToString(angle, deg, rad, grad, turn) {
-  angle.angleUnit = angleUtils.CssAngle.ANGLEUNIT.deg;
+  const { ANGLEUNIT } = angleUtils.CssAngle.prototype;
+  angle.angleUnit = ANGLEUNIT.deg;
   is(angle.toString(), deg, "toString() with deg type");
 
-  angle.angleUnit = angleUtils.CssAngle.ANGLEUNIT.rad;
+  angle.angleUnit = ANGLEUNIT.rad;
   is(angle.toString(), rad, "toString() with rad type");
 
-  angle.angleUnit = angleUtils.CssAngle.ANGLEUNIT.grad;
+  angle.angleUnit = ANGLEUNIT.grad;
   is(angle.toString(), grad, "toString() with grad type");
 
-  angle.angleUnit = angleUtils.CssAngle.ANGLEUNIT.turn;
+  angle.angleUnit = ANGLEUNIT.turn;
   is(angle.toString(), turn, "toString() with turn type");
+}
+
+function getAngleValidityData() {
+  return [{
+    angle: "0.2turn",
+    result: true
+  }, {
+    angle: "-0.2turn",
+    result: true
+  }, {
+    angle: "-.2turn",
+    result: true
+  }, {
+    angle: "1e02turn",
+    result: true
+  }, {
+    angle: "-2e2turn",
+    result: true
+  }, {
+    angle: ".2turn",
+    result: true
+  }, {
+    angle: "0.2aaturn",
+    result: false
+  }, {
+    angle: "2dega",
+    result: false
+  }, {
+    angle: "0.deg",
+    result: false
+  }, {
+    angle: ".deg",
+    result: false
+  }, {
+    angle: "..2turn",
+    result: false
+  }];
 }
 
 function getTestData() {

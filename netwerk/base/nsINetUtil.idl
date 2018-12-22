@@ -75,21 +75,6 @@ interface nsINetUtil : nsISupports
    */
   boolean URIChainHasFlags(in nsIURI aURI, in unsigned long aFlags);
 
-  /**
-   * Take aURI and produce an immutable version of it for the caller.  If aURI
-   * is immutable this will be aURI itself; otherwise this will be a clone,
-   * marked immutable if possible.  Passing null to this method is allowed; in
-   * that case it will return null.
-   */
-  nsIURI toImmutableURI(in nsIURI aURI);
-
-  /**
-   * Create a simple nested URI using the result of
-   * toImmutableURI on the passed-in aURI which may not be null.
-   * Note: The return URI will not have had its spec set yet.
-   */
-  nsIURI newSimpleNestedURI(in nsIURI aURI);
-
   /** Escape every character with its %XX-escaped equivalent */
   const unsigned long ESCAPE_ALL = 0;
 
@@ -227,4 +212,11 @@ interface nsINetUtil : nsISupports
    *         ReferrerPolicy.h for details)
    */
   unsigned long parseAttributePolicyString(in AString aPolicyString);
+
+
+  /**
+   * This is a void method that is C++ implemented and always
+   * returns NS_ERROR_NOT_IMPLEMENTED. To be used for testing.
+   */
+  void notImplemented();
 };

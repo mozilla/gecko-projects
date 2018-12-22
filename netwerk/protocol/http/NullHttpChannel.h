@@ -14,11 +14,10 @@
 #include "nsString.h"
 #include "prtime.h"
 
-class nsProxyInfo;
-class nsHttpChannel;
-
 namespace mozilla {
 namespace net {
+
+class nsProxyInfo;
 
 class NullHttpChannel final
   : public nsINullChannel
@@ -39,11 +38,11 @@ class NullHttpChannel final
   explicit NullHttpChannel(nsIHttpChannel * chan);
 
   // Same signature as nsHttpChannel::Init
-  nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
-                        uint32_t aProxyResolveFlags,
-                        nsIURI *aProxyURI);
+  MOZ_MUST_USE nsresult Init(nsIURI *aURI, uint32_t aCaps,
+                             nsProxyInfo *aProxyInfo,
+                             uint32_t aProxyResolveFlags, nsIURI *aProxyURI);
 private:
-  ~NullHttpChannel() { }
+  ~NullHttpChannel() = default;
 
 protected:
   nsCOMPtr<nsIURI> mURI;

@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +10,7 @@
 #include <X11/extensions/Xrender.h>     // for XRenderPictFormat, etc
 #include <X11/extensions/render.h>      // for PictFormat
 #include "cairo-xlib.h"
+#include "X11UndefineNone.h"
 #include <stdint.h>                     // for uint32_t
 #include "GLDefs.h"                     // for GLenum
 #include "gfxPlatform.h"                // for gfxPlatform
@@ -26,7 +26,6 @@
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowLayerForwarder, etc
 #include "mozilla/mozalloc.h"           // for operator new
 #include "gfxEnv.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ERROR
 
@@ -66,7 +65,7 @@ SurfaceDescriptorX11::SurfaceDescriptorX11(gfxXlibSurface* aSurf,
                                            bool aForwardGLX)
   : mId(aSurf->XDrawable())
   , mSize(aSurf->GetSize())
-  , mGLXPixmap(None)
+  , mGLXPixmap(X11None)
 {
   const XRenderPictFormat *pictFormat = aSurf->XRenderFormat();
   if (pictFormat) {
@@ -75,11 +74,9 @@ SurfaceDescriptorX11::SurfaceDescriptorX11(gfxXlibSurface* aSurf,
     mFormat = cairo_xlib_surface_get_visual(aSurf->CairoSurface())->visualid;
   }
 
-#ifdef GL_PROVIDER_GLX
   if (aForwardGLX) {
     mGLXPixmap = aSurf->GetGLXPixmap();
   }
-#endif
 }
 
 SurfaceDescriptorX11::SurfaceDescriptorX11(Drawable aDrawable, XID aFormatID,
@@ -87,7 +84,7 @@ SurfaceDescriptorX11::SurfaceDescriptorX11(Drawable aDrawable, XID aFormatID,
   : mId(aDrawable)
   , mFormat(aFormatID)
   , mSize(aSize)
-  , mGLXPixmap(None)
+  , mGLXPixmap(X11None)
 { }
 
 already_AddRefed<gfxXlibSurface>
@@ -110,10 +107,8 @@ SurfaceDescriptorX11::OpenForeign() const
     surf = new gfxXlibSurface(display, mId, visual, mSize);
   }
 
-#ifdef GL_PROVIDER_GLX
   if (mGLXPixmap)
     surf->BindGLXPixmap(mGLXPixmap);
-#endif
 
   return surf->CairoStatus() ? nullptr : surf.forget();
 }

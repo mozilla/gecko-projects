@@ -14,7 +14,11 @@ var gTab, gPanel, gDebugger;
 var gEditor, gSources, gFrames;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: JS_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -22,11 +26,10 @@ function test() {
     gSources = gDebugger.DebuggerView.Sources;
     gFrames = gDebugger.DebuggerView.StackFrames;
 
-    waitForSourceShown(gPanel, JS_URL)
-      .then(checkInitialSource)
-      .then(testSetBreakpoint)
+    checkInitialSource()
+    testSetBreakpoint()
       .then(() => resumeDebuggerThenCloseAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -47,9 +50,7 @@ function testSetBreakpoint() {
   let sourceForm = getSourceForm(gSources, JS_URL);
   let source = gDebugger.gThreadClient.source(sourceForm);
 
-  source.setBreakpoint({ line: 30 }, aResponse => {
-    ok(!aResponse.error,
-      "Should be able to set a breakpoint in a js file.");
+  source.setBreakpoint({ line: 30 }).then(([aResponse]) => {
     ok(!aResponse.actualLocation,
       "Should be able to set a breakpoint on line 30.");
 
@@ -75,7 +76,7 @@ function testSetBreakpoint() {
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gTab = null;
   gPanel = null;
   gDebugger = null;

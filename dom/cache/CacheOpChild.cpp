@@ -12,68 +12,82 @@
 #include "mozilla/dom/cache/Cache.h"
 #include "mozilla/dom/cache/CacheChild.h"
 #include "mozilla/dom/cache/CacheStreamControlChild.h"
+#include "mozilla/dom/cache/CacheWorkerHolder.h"
 
 namespace mozilla {
 namespace dom {
 namespace cache {
 
+using mozilla::ipc::PBackgroundChild;
+
 namespace {
 
 void
-AddFeatureToStreamChild(const CacheReadStream& aReadStream, Feature* aFeature)
+AddWorkerHolderToStreamChild(const CacheReadStream& aReadStream,
+                             CacheWorkerHolder* aWorkerHolder)
 {
-  MOZ_ASSERT_IF(!NS_IsMainThread(), aFeature);
+  MOZ_ASSERT_IF(!NS_IsMainThread(), aWorkerHolder);
   CacheStreamControlChild* cacheControl =
     static_cast<CacheStreamControlChild*>(aReadStream.controlChild());
   if (cacheControl) {
-    cacheControl->SetFeature(aFeature);
+    cacheControl->SetWorkerHolder(aWorkerHolder);
   }
 }
 
 void
-AddFeatureToStreamChild(const CacheResponse& aResponse, Feature* aFeature)
+AddWorkerHolderToStreamChild(const CacheResponse& aResponse,
+                             CacheWorkerHolder* aWorkerHolder)
 {
-  MOZ_ASSERT_IF(!NS_IsMainThread(), aFeature);
+  MOZ_ASSERT_IF(!NS_IsMainThread(), aWorkerHolder);
 
   if (aResponse.body().type() == CacheReadStreamOrVoid::Tvoid_t) {
     return;
   }
 
-  AddFeatureToStreamChild(aResponse.body().get_CacheReadStream(), aFeature);
+  AddWorkerHolderToStreamChild(aResponse.body().get_CacheReadStream(),
+                               aWorkerHolder);
 }
 
 void
-AddFeatureToStreamChild(const CacheRequest& aRequest, Feature* aFeature)
+AddWorkerHolderToStreamChild(const CacheRequest& aRequest,
+                             CacheWorkerHolder* aWorkerHolder)
 {
-  MOZ_ASSERT_IF(!NS_IsMainThread(), aFeature);
+  MOZ_ASSERT_IF(!NS_IsMainThread(), aWorkerHolder);
 
   if (aRequest.body().type() == CacheReadStreamOrVoid::Tvoid_t) {
     return;
   }
 
-  AddFeatureToStreamChild(aRequest.body().get_CacheReadStream(), aFeature);
+  AddWorkerHolderToStreamChild(aRequest.body().get_CacheReadStream(),
+                               aWorkerHolder);
 }
 
 } // namespace
 
-CacheOpChild::CacheOpChild(Feature* aFeature, nsIGlobalObject* aGlobal,
+CacheOpChild::CacheOpChild(CacheWorkerHolder* aWorkerHolder,
+                           nsIGlobalObject* aGlobal,
                            nsISupports* aParent, Promise* aPromise)
   : mGlobal(aGlobal)
   , mParent(aParent)
   , mPromise(aPromise)
 {
-  MOZ_ASSERT(mGlobal);
-  MOZ_ASSERT(mParent);
-  MOZ_ASSERT(mPromise);
+  MOZ_DIAGNOSTIC_ASSERT(mGlobal);
+  MOZ_DIAGNOSTIC_ASSERT(mParent);
+  MOZ_DIAGNOSTIC_ASSERT(mPromise);
 
-  MOZ_ASSERT_IF(!NS_IsMainThread(), aFeature);
-  SetFeature(aFeature);
+  MOZ_ASSERT_IF(!NS_IsMainThread(), aWorkerHolder);
+
+  RefPtr<CacheWorkerHolder> workerHolder =
+    CacheWorkerHolder::PreferBehavior(aWorkerHolder,
+                                      CacheWorkerHolder::PreventIdleShutdownStart);
+
+  SetWorkerHolder(workerHolder);
 }
 
 CacheOpChild::~CacheOpChild()
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpChild);
-  MOZ_ASSERT(!mPromise);
+  MOZ_DIAGNOSTIC_ASSERT(!mPromise);
 }
 
 void
@@ -88,23 +102,23 @@ CacheOpChild::ActorDestroy(ActorDestroyReason aReason)
     mPromise = nullptr;
   }
 
-  RemoveFeature();
+  RemoveWorkerHolder();
 }
 
-bool
+mozilla::ipc::IPCResult
 CacheOpChild::Recv__delete__(const ErrorResult& aRv,
                              const CacheOpResult& aResult)
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpChild);
 
   if (NS_WARN_IF(aRv.Failed())) {
-    MOZ_ASSERT(aResult.type() == CacheOpResult::Tvoid_t);
+    MOZ_DIAGNOSTIC_ASSERT(aResult.type() == CacheOpResult::Tvoid_t);
     // TODO: Remove this const_cast (bug 1152078).
     // It is safe for now since this ErrorResult is handed off to us by IPDL
     // and is thrown into the trash afterwards.
     mPromise->MaybeReject(const_cast<ErrorResult&>(aRv));
     mPromise = nullptr;
-    return true;
+    return IPC_OK();
   }
 
   switch (aResult.type()) {
@@ -120,7 +134,7 @@ CacheOpChild::Recv__delete__(const ErrorResult& aRv,
     }
     case CacheOpResult::TCachePutAllResult:
     {
-      mPromise->MaybeResolve(JS::UndefinedHandleValue);
+      mPromise->MaybeResolveWithUndefined();
       break;
     }
     case CacheOpResult::TCacheDeleteResult:
@@ -145,10 +159,25 @@ CacheOpChild::Recv__delete__(const ErrorResult& aRv,
     }
     case CacheOpResult::TStorageOpenResult:
     {
-      auto actor = static_cast<CacheChild*>(
-        aResult.get_StorageOpenResult().actorChild());
-      actor->SetFeature(GetFeature());
-      RefPtr<Cache> cache = new Cache(mGlobal, actor);
+      auto result = aResult.get_StorageOpenResult();
+      auto actor = static_cast<CacheChild*>(result.actorChild());
+
+      // If we have a success status then we should have an actor.  Gracefully
+      // reject instead of crashing, though, if we get a nullptr here.
+      MOZ_DIAGNOSTIC_ASSERT(actor);
+      if (!actor) {
+        ErrorResult status;
+        status.ThrowTypeError<MSG_CACHE_OPEN_FAILED>();
+        mPromise->MaybeReject(status);
+        break;
+      }
+
+      RefPtr<CacheWorkerHolder> workerHolder =
+        CacheWorkerHolder::PreferBehavior(GetWorkerHolder(),
+                                          CacheWorkerHolder::AllowIdleShutdownStart);
+
+      actor->SetWorkerHolder(workerHolder);
+      RefPtr<Cache> cache = new Cache(mGlobal, actor, result.ns());
       mPromise->MaybeResolve(cache);
       break;
     }
@@ -168,7 +197,7 @@ CacheOpChild::Recv__delete__(const ErrorResult& aRv,
 
   mPromise = nullptr;
 
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -176,8 +205,8 @@ CacheOpChild::StartDestroy()
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpChild);
 
-  // Do not cancel on-going operations when Feature calls this.  Instead, keep
-  // the Worker alive until we are done.
+  // Do not cancel on-going operations when WorkerHolder calls this.  Instead,
+  // keep the Worker alive until we are done.
 }
 
 nsIGlobalObject*
@@ -194,23 +223,23 @@ CacheOpChild::AssertOwningThread() const
 }
 #endif
 
-CachePushStreamChild*
-CacheOpChild::CreatePushStream(nsIAsyncInputStream* aStream)
+PBackgroundChild*
+CacheOpChild::GetIPCManager()
 {
-  MOZ_CRASH("CacheOpChild should never create a push stream actor!");
+  MOZ_CRASH("CacheOpChild does not implement TypeUtils::GetIPCManager()");
 }
 
 void
 CacheOpChild::HandleResponse(const CacheResponseOrVoid& aResponseOrVoid)
 {
   if (aResponseOrVoid.type() == CacheResponseOrVoid::Tvoid_t) {
-    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise->MaybeResolveWithUndefined();
     return;
   }
 
   const CacheResponse& cacheResponse = aResponseOrVoid.get_CacheResponse();
 
-  AddFeatureToStreamChild(cacheResponse, GetFeature());
+  AddWorkerHolderToStreamChild(cacheResponse, GetWorkerHolder());
   RefPtr<Response> response = ToResponse(cacheResponse);
 
   mPromise->MaybeResolve(response);
@@ -223,7 +252,7 @@ CacheOpChild::HandleResponseList(const nsTArray<CacheResponse>& aResponseList)
   responses.SetCapacity(aResponseList.Length());
 
   for (uint32_t i = 0; i < aResponseList.Length(); ++i) {
-    AddFeatureToStreamChild(aResponseList[i], GetFeature());
+    AddWorkerHolderToStreamChild(aResponseList[i], GetWorkerHolder());
     responses.AppendElement(ToResponse(aResponseList[i]));
   }
 
@@ -237,7 +266,7 @@ CacheOpChild::HandleRequestList(const nsTArray<CacheRequest>& aRequestList)
   requests.SetCapacity(aRequestList.Length());
 
   for (uint32_t i = 0; i < aRequestList.Length(); ++i) {
-    AddFeatureToStreamChild(aRequestList[i], GetFeature());
+    AddWorkerHolderToStreamChild(aRequestList[i], GetWorkerHolder());
     requests.AppendElement(ToRequest(aRequestList[i]));
   }
 

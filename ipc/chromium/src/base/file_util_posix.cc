@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -223,7 +225,7 @@ int ReadFile(const FilePath& filename, char* data, int size) {
     return -1;
 
   int ret_value = HANDLE_EINTR(read(fd, data, size));
-  HANDLE_EINTR(close(fd));
+  IGNORE_EINTR(close(fd));
   return ret_value;
 }
 
@@ -239,13 +241,13 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
       HANDLE_EINTR(write(fd, data + bytes_written_total,
                          size - bytes_written_total));
     if (bytes_written_partial < 0) {
-      HANDLE_EINTR(close(fd));
+      IGNORE_EINTR(close(fd));
       return -1;
     }
     bytes_written_total += bytes_written_partial;
   } while (bytes_written_total < size);
 
-  HANDLE_EINTR(close(fd));
+  IGNORE_EINTR(close(fd));
   return bytes_written_total;
 }
 
@@ -323,9 +325,9 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
     } while (bytes_written_per_read < bytes_read);
   }
 
-  if (HANDLE_EINTR(close(infile)) < 0)
+  if (IGNORE_EINTR(close(infile)) < 0)
     result = false;
-  if (HANDLE_EINTR(close(outfile)) < 0)
+  if (IGNORE_EINTR(close(outfile)) < 0)
     result = false;
 
   return result;

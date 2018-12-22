@@ -8,11 +8,18 @@
 #include "nsSMILValue.h"
 #include "nsDebug.h"
 
+/*static*/ nsSMILNullType*
+nsSMILNullType::Singleton()
+{
+  static nsSMILNullType sSingleton;
+  return &sSingleton;
+}
+
 nsresult
 nsSMILNullType::Assign(nsSMILValue& aDest, const nsSMILValue& aSrc) const
 {
-  NS_PRECONDITION(aDest.mType == aSrc.mType, "Incompatible SMIL types");
-  NS_PRECONDITION(aSrc.mType == this, "Unexpected source type");
+  MOZ_ASSERT(aDest.mType == aSrc.mType, "Incompatible SMIL types");
+  MOZ_ASSERT(aSrc.mType == this, "Unexpected source type");
   aDest.mU    = aSrc.mU;
   aDest.mType = Singleton();
   return NS_OK;
@@ -22,8 +29,8 @@ bool
 nsSMILNullType::IsEqual(const nsSMILValue& aLeft,
                         const nsSMILValue& aRight) const
 {
-  NS_PRECONDITION(aLeft.mType == aRight.mType, "Incompatible SMIL types");
-  NS_PRECONDITION(aLeft.mType == this, "Unexpected type for SMIL value");
+  MOZ_ASSERT(aLeft.mType == aRight.mType, "Incompatible SMIL types");
+  MOZ_ASSERT(aLeft.mType == this, "Unexpected type for SMIL value");
 
   return true;  // All null-typed values are equivalent.
 }
@@ -32,7 +39,7 @@ nsresult
 nsSMILNullType::Add(nsSMILValue& aDest, const nsSMILValue& aValueToAdd,
                     uint32_t aCount) const
 {
-  NS_NOTREACHED("Adding NULL type");
+  MOZ_ASSERT_UNREACHABLE("Adding NULL type");
   return NS_ERROR_FAILURE;
 }
 
@@ -41,7 +48,7 @@ nsSMILNullType::ComputeDistance(const nsSMILValue& aFrom,
                                 const nsSMILValue& aTo,
                                 double& aDistance) const
 {
-  NS_NOTREACHED("Computing distance for NULL type");
+  MOZ_ASSERT_UNREACHABLE("Computing distance for NULL type");
   return NS_ERROR_FAILURE;
 }
 
@@ -51,6 +58,6 @@ nsSMILNullType::Interpolate(const nsSMILValue& aStartVal,
                             double aUnitDistance,
                             nsSMILValue& aResult) const
 {
-  NS_NOTREACHED("Interpolating NULL type");
+  MOZ_ASSERT_UNREACHABLE("Interpolating NULL type");
   return NS_ERROR_FAILURE;
 }

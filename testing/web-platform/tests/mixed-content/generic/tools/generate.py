@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 import os, sys, json
 from common_paths import *
 import spec_validator
@@ -89,7 +91,7 @@ def generate_selection(selection, spec, test_html_template_basename):
     opt_in_method = selection['opt_in_method']
     selection['meta_opt_in'] = ''
     if opt_in_method == 'meta-csp':
-        selection['meta_opt_in'] = '<meta http-equiv="Content-Security-Policy" ' + \
+        selection['meta_opt_in'] = '\n    <meta http-equiv="Content-Security-Policy" ' + \
                                    'content="block-all-mixed-content">'
     elif opt_in_method == 'http-csp':
         opt_in_headers = "Content-Security-Policy: block-all-mixed-content\n"
@@ -136,7 +138,7 @@ def generate_test_source_files(spec_json, target):
                                        spec,
                                        html_template)
                 else:
-                    print 'Excluding selection:', selection_path
+                    print('Excluding selection:', selection_path)
 
 
 def main(target, spec_filename):

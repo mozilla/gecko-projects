@@ -11,7 +11,6 @@
 #include "nsXBLPrototypeBinding.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptContext.h"
-#include "nsIDOMDocument.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "nsIURI.h"
@@ -23,6 +22,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsContentUtils.h"
 #include "nsDOMJSUtils.h"
+#include "nsWindowSizes.h"
 #include "mozilla/Services.h"
 #include "xpcpublic.h"
 #include "mozilla/scache/StartupCache.h"
@@ -52,7 +52,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLDocumentInfo)
   if (tmp->mDocument &&
       nsCCUncollectableMarker::InGeneration(cb, tmp->mDocument->GetMarkedCCGeneration())) {
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
     return NS_SUCCESS_INTERRUPTED_TRAVERSE;
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
@@ -62,7 +61,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLDocumentInfo)
       iter.UserData()->Traverse(cb);
     }
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsXBLDocumentInfo)
   if (tmp->mBindingTable) {
@@ -177,7 +175,7 @@ nsXBLDocumentInfo::RemovePrototypeBinding(const nsACString& aRef)
 {
   if (mBindingTable) {
     nsAutoPtr<nsXBLPrototypeBinding> bindingToRemove;
-    mBindingTable->RemoveAndForget(aRef, bindingToRemove);
+    mBindingTable->Remove(aRef, &bindingToRemove);
 
     // We do not want to destroy the binding, so just forget it.
     bindingToRemove.forget();
@@ -186,7 +184,8 @@ nsXBLDocumentInfo::RemovePrototypeBinding(const nsACString& aRef)
 
 // static
 nsresult
-nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocInfo)
+nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocInfo,
+                                         nsIDocument* aBoundDocument)
 {
   *aDocInfo = nullptr;
 
@@ -195,7 +194,9 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  NS_ENSURE_TRUE(startupCache, NS_ERROR_FAILURE);
+  if (!startupCache) {
+    return NS_ERROR_FAILURE;
+  }
 
   UniquePtr<char[]> buf;
   uint32_t len;
@@ -205,12 +206,12 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
     return rv;
 
   nsCOMPtr<nsIObjectInputStream> stream;
-  rv = NewObjectInputStreamFromBuffer(Move(buf), len, getter_AddRefs(stream));
+  rv = NewObjectInputStreamFromBuffer(std::move(buf), len, getter_AddRefs(stream));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // The file compatibility.ini stores the build id. This is checked in
   // nsAppRunner.cpp and will delete the cache if a different build is
-  // present. However, we check that the version matches here to be safe. 
+  // present. However, we check that the version matches here to be safe.
   uint32_t version;
   rv = stream->Read32(&version);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -225,12 +226,10 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
   nsContentUtils::GetSecurityManager()->
     GetSystemPrincipal(getter_AddRefs(principal));
 
-  nsCOMPtr<nsIDOMDocument> domdoc;
-  rv = NS_NewXBLDocument(getter_AddRefs(domdoc), aURI, nullptr, principal);
+  nsCOMPtr<nsIDocument> doc;
+  rv = NS_NewXBLDocument(getter_AddRefs(doc), aURI, nullptr, principal);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domdoc);
-  NS_ASSERTION(doc, "Must have a document!");
   RefPtr<nsXBLDocumentInfo> docInfo = new nsXBLDocumentInfo(doc);
 
   while (1) {
@@ -246,7 +245,7 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
     }
   }
 
-  docInfo.swap(*aDocInfo);
+  docInfo.forget(aDocInfo);
   return NS_OK;
 }
 
@@ -262,7 +261,9 @@ nsXBLDocumentInfo::WritePrototypeBindings()
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  NS_ENSURE_TRUE(startupCache, rv);
+  if (!startupCache) {
+    return rv;
+  }
 
   nsCOMPtr<nsIObjectOutputStream> stream;
   nsCOMPtr<nsIStorageStream> storageStream;
@@ -292,7 +293,7 @@ nsXBLDocumentInfo::WritePrototypeBindings()
   rv = NewBufferFromStorageStream(storageStream, &buf, &len);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return startupCache->PutBuffer(spec.get(), buf.get(), len);
+  return startupCache->PutBuffer(spec.get(), std::move(buf), len);
 }
 
 void
@@ -319,3 +320,23 @@ AssertInCompilationScope()
   MOZ_ASSERT(xpc::CompilationScope() == JS::CurrentGlobalOrNull(cx));
 }
 #endif
+
+size_t
+nsXBLDocumentInfo::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  size_t n = aMallocSizeOf(this);
+  if (mDocument) {
+    SizeOfState state(aMallocSizeOf);
+    nsWindowSizes windowSizes(state);
+    mDocument->DocAddSizeOfIncludingThis(windowSizes);
+    n += windowSizes.getTotalSize();
+  }
+  if (mBindingTable) {
+    n += mBindingTable->ShallowSizeOfIncludingThis(aMallocSizeOf);
+    for (auto iter = mBindingTable->Iter(); !iter.Done(); iter.Next()) {
+      nsXBLPrototypeBinding* binding = iter.UserData();
+      n += binding->SizeOfIncludingThis(aMallocSizeOf);
+    }
+  }
+  return n;
+}

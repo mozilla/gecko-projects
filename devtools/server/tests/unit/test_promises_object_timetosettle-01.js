@@ -8,55 +8,55 @@
 
 "use strict";
 
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 
-var events = require("sdk/event/core");
+var EventEmitter = require("devtools/shared/event-emitter");
 
-add_task(function*() {
-  let client = yield startTestDebuggerServer("test-promises-timetosettle");
-  let chromeActors = yield getChromeActors(client);
+add_task(async function() {
+  const client = await startTestDebuggerServer("test-promises-timetosettle");
+  const parentProcessActors = await getParentProcessActors(client);
 
-  ok(Promise.toString().contains("native code"), "Expect native DOM Promise.");
+  ok(Promise.toString().includes("native code"), "Expect native DOM Promise.");
 
-  // We have to attach the chrome TabActor before playing with the PromiseActor
-  yield attachTab(client, chromeActors);
-  yield testGetTimeToSettle(client, chromeActors, () => {
-    let p = new Promise(() => {});
+  // We have to attach the chrome target actor before playing with the PromiseActor
+  await attachTab(client, parentProcessActors);
+  await testGetTimeToSettle(client, parentProcessActors, () => {
+    const p = new Promise(() => {});
     p.name = "p";
-    let q = p.then();
+    const q = p.then();
     q.name = "q";
 
     return p;
   });
 
-  let response = yield listTabs(client);
-  let targetTab = findTab(response.tabs, "test-promises-timetosettle");
+  const response = await listTabs(client);
+  const targetTab = findTab(response.tabs, "test-promises-timetosettle");
   ok(targetTab, "Found our target tab.");
 
-  yield testGetTimeToSettle(client, targetTab, () => {
+  await testGetTimeToSettle(client, targetTab, () => {
     const debuggee =
       DebuggerServer.getTestGlobal("test-promises-timetosettle");
 
-    let p = new debuggee.Promise(() => {});
+    const p = new debuggee.Promise(() => {});
     p.name = "p";
-    let q = p.then();
+    const q = p.then();
     q.name = "q";
 
     return p;
   });
 
-  yield close(client);
+  await close(client);
 });
 
-function* testGetTimeToSettle(client, form, makePromises) {
-  let front = PromisesFront(client, form);
+async function testGetTimeToSettle(client, form, makePromises) {
+  const front = PromisesFront(client, form);
 
-  yield front.attach();
-  yield front.listPromises();
+  await front.attach();
+  await front.listPromises();
 
-  let onNewPromise = new Promise(resolve => {
-    events.on(front, "new-promises", promises => {
-      for (let p of promises) {
+  const onNewPromise = new Promise(resolve => {
+    EventEmitter.on(front, "new-promises", promises => {
+      for (const p of promises) {
         if (p.promiseState.state === "pending") {
           ok(!p.promiseState.timeToSettle,
             "Expect no time to settle for unsettled promise.");
@@ -71,10 +71,10 @@ function* testGetTimeToSettle(client, form, makePromises) {
     });
   });
 
-  let promise = makePromises();
+  const promise = makePromises();
 
-  yield onNewPromise;
-  yield front.detach();
+  await onNewPromise;
+  await front.detach();
   // Appease eslint
   void promise;
 }

@@ -16,13 +16,13 @@
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/TimeStamp.h"
 #include "nsCOMPtr.h"
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
 #include "ScopedNSSTypes.h"
 #include "m_cpp_utils.h"
 #include "dtlsidentity.h"
-#include "transportflow.h"
 #include "transportlayer.h"
 
 namespace mozilla {
@@ -36,7 +36,7 @@ class TransportLayerNSPRAdapter {
   input_(),
   enabled_(true) {}
 
-  void PacketReceived(const void *data, int32_t len);
+  void PacketReceived(MediaPacket& packet);
   int32_t Recv(void *buf, int32_t buflen);
   int32_t Write(const void *buf, int32_t length);
   void SetEnabled(bool enabled) { enabled_ = enabled; }
@@ -45,7 +45,7 @@ class TransportLayerNSPRAdapter {
   DISALLOW_COPY_ASSIGN(TransportLayerNSPRAdapter);
 
   TransportLayer *output_;
-  std::queue<Packet *> input_;
+  std::queue<MediaPacket *> input_;
   bool enabled_;
 };
 
@@ -91,24 +91,22 @@ class TransportLayerDtls final : public TransportLayer {
                                 unsigned char *out,
                                 unsigned int outlen);
 
-  const CERTCertificate *GetPeerCert() const {
-    return peer_cert_;
-  }
-
   // Transport layer overrides.
-  virtual nsresult InitInternal();
-  virtual void WasInserted();
-  virtual TransportResult SendPacket(const unsigned char *data, size_t len);
+  nsresult InitInternal() override;
+  void WasInserted() override;
+  TransportResult SendPacket(MediaPacket& packet) override;
 
   // Signals
   void StateChange(TransportLayer *layer, State state);
-  void PacketReceived(TransportLayer* layer, const unsigned char *data,
-                      size_t len);
+  void PacketReceived(TransportLayer* layer, MediaPacket& packet);
 
   // For testing use only.  Returns the fd.
-  PRFileDesc* internal_fd() { CheckThread(); return ssl_fd_.rwget(); }
+  PRFileDesc* internal_fd() { CheckThread(); return ssl_fd_.get(); }
 
   TRANSPORT_LAYER_ID("dtls")
+
+  protected:
+  void SetState(State state, const char *file, unsigned line) override;
 
   private:
   DISALLOW_COPY_ASSIGN(TransportLayerDtls);
@@ -138,8 +136,9 @@ class TransportLayerDtls final : public TransportLayer {
 
 
   bool Setup();
-  bool SetupCipherSuites(PRFileDesc* ssl_fd) const;
-  bool SetupAlpn(PRFileDesc* ssl_fd) const;
+  bool SetupCipherSuites(UniquePRFileDesc& ssl_fd) const;
+  bool SetupAlpn(UniquePRFileDesc& ssl_fd) const;
+  void GetDecryptedPackets();
   void Handshake();
 
   bool CheckAlpn();
@@ -159,7 +158,9 @@ class TransportLayerDtls final : public TransportLayer {
   static void TimerCallback(nsITimer *timer, void *arg);
 
   SECStatus CheckDigest(const RefPtr<VerificationDigest>& digest,
-                        CERTCertificate *cert);
+                        UniqueCERTCertificate& cert) const;
+
+  void RecordHandshakeCompletionTelemetry(TransportLayer::State endState);
 
   RefPtr<DtlsIdentity> identity_;
   // What ALPN identifiers are permitted.
@@ -178,12 +179,12 @@ class TransportLayerDtls final : public TransportLayer {
   // Must delete nspr_io_adapter after ssl_fd_ b/c ssl_fd_ causes an alert
   // (ssl_fd_ contains an un-owning pointer to nspr_io_adapter_)
   UniquePtr<TransportLayerNSPRAdapter> nspr_io_adapter_;
-  ScopedPRFileDesc ssl_fd_;
+  UniquePRFileDesc ssl_fd_;
 
-  ScopedCERTCertificate peer_cert_;
   nsCOMPtr<nsITimer> timer_;
   bool auth_hook_called_;
   bool cert_ok_;
+  TimeStamp handshake_started_;
 };
 
 

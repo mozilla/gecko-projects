@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -35,24 +36,16 @@ protected:
   virtual ~ImageLayerComposite();
 
 public:
-  virtual LayerRenderState GetRenderState() override;
-
   virtual void Disconnect() override;
 
   virtual bool SetCompositableHost(CompositableHost* aHost) override;
 
   virtual Layer* GetLayer() override;
 
-  virtual void SetLayerManager(LayerManagerComposite* aManager) override
-  {
-    LayerComposite::SetLayerManager(aManager);
-    mManager = aManager;
-    if (mImageHost) {
-      mImageHost->SetCompositor(mCompositor);
-    }
-  }
+  virtual void SetLayerManager(HostLayerManager* aManager) override;
 
-  virtual void RenderLayer(const gfx::IntRect& aClipRect) override;
+  virtual void RenderLayer(const gfx::IntRect& aClipRect,
+                           const Maybe<gfx::Polygon>& aGeometry) override;
 
   virtual void ComputeEffectiveTransforms(const mozilla::gfx::Matrix4x4& aTransformToSurface) override;
 
@@ -62,18 +55,22 @@ public:
 
   virtual void GenEffectChain(EffectChain& aEffect) override;
 
-  virtual LayerComposite* AsLayerComposite() override { return this; }
+  virtual HostLayer* AsHostLayer() override { return this; }
 
   virtual const char* Name() const override { return "ImageLayerComposite"; }
+
+  virtual bool IsOpaque() override;
+
+  virtual nsIntRegion GetFullyRenderedRegion() override;
 
 protected:
   virtual void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 
 private:
-  gfx::Filter GetEffectFilter();
+  gfx::SamplingFilter GetSamplingFilter();
 
 private:
-  RefPtr<CompositableHost> mImageHost;
+  RefPtr<ImageHost> mImageHost;
 };
 
 } // namespace layers

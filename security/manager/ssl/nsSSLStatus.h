@@ -7,13 +7,23 @@
 #ifndef _NSSSLSTATUS_H
 #define _NSSSLSTATUS_H
 
+#include "CertVerifier.h" // For CertificateTransparencyInfo
 #include "nsISSLStatus.h"
 #include "nsCOMPtr.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsIX509Cert.h"
+#include "nsIX509CertList.h"
 #include "nsISerializable.h"
 #include "nsIClassInfo.h"
-#include "nsNSSCertificate.h" // For EVStatus
+#include "nsNSSCertificate.h"
+#include "ScopedNSSTypes.h"
+
+class nsNSSCertificate;
+
+enum class EVStatus {
+  NotEV = 0,
+  EV = 1,
+};
 
 class nsSSLStatus final
   : public nsISSLStatus
@@ -21,7 +31,7 @@ class nsSSLStatus final
   , public nsIClassInfo
 {
 protected:
-  virtual ~nsSSLStatus();
+  virtual ~nsSSLStatus() {}
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISSLSTATUS
@@ -30,16 +40,24 @@ public:
 
   nsSSLStatus();
 
-  void SetServerCert(nsNSSCertificate* aServerCert,
-                     nsNSSCertificate::EVStatus aEVStatus);
+  void SetServerCert(nsNSSCertificate* aServerCert, EVStatus aEVStatus);
+
+  nsresult SetSucceededCertChain(mozilla::UniqueCERTCertList certList);
+  void SetFailedCertChain(nsIX509CertList* x509CertList);
 
   bool HasServerCert() {
     return mServerCert != nullptr;
   }
 
+  void SetCertificateTransparencyInfo(
+    const mozilla::psm::CertificateTransparencyInfo& info);
+
   /* public for initilization in this file */
   uint16_t mCipherSuite;
   uint16_t mProtocolVersion;
+  uint16_t mCertificateTransparencyStatus;
+  nsCString mKeaGroup;
+  nsCString mSignatureSchemeName;
 
   bool mIsDomainMismatch;
   bool mIsNotValidAtThisTime;
@@ -55,6 +73,8 @@ public:
 
 private:
   nsCOMPtr<nsIX509Cert> mServerCert;
+  nsCOMPtr<nsIX509CertList> mSucceededCertChain;
+  nsCOMPtr<nsIX509CertList> mFailedCertChain;
 };
 
 #define NS_SSLSTATUS_CID \

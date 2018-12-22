@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/SVGFEImageElement.h"
 
+#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/SVGFEImageElementBinding.h"
 #include "mozilla/dom/SVGFilterElement.h"
@@ -28,12 +29,13 @@ namespace dom {
 JSObject*
 SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEImageElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEImageElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
+nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[3] =
 {
   { &nsGkAtoms::result, kNameSpaceID_None, true },
+  { &nsGkAtoms::href, kNameSpaceID_None, true },
   { &nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
@@ -41,9 +43,7 @@ nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
 // nsISupports methods
 
 NS_IMPL_ISUPPORTS_INHERITED(SVGFEImageElement, SVGFEImageElementBase,
-                            nsIDOMNode, nsIDOMElement, nsIDOMSVGElement,
-                            imgINotificationObserver, nsIImageLoadingContent,
-                            imgIOnloadBlocker)
+                            imgINotificationObserver, nsIImageLoadingContent)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -69,7 +69,11 @@ SVGFEImageElement::LoadSVGImage(bool aForce, bool aNotify)
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
 
   nsAutoString href;
-  mStringAttributes[HREF].GetAnimValue(href, this);
+  if (mStringAttributes[HREF].IsExplicitlySet()) {
+    mStringAttributes[HREF].GetAnimValue(href, this);
+  } else {
+    mStringAttributes[XLINK_HREF].GetAnimValue(href, this);
+  }
   href.Trim(" \t\n\r");
 
   if (baseURI && !href.IsEmpty())
@@ -86,14 +90,26 @@ SVGFEImageElement::LoadSVGImage(bool aForce, bool aNotify)
     }
   }
 
+  // Mark channel as urgent-start before load image if the image load is
+  // initaiated by a user interaction.
+  mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
   return LoadImage(href, aForce, aNotify, eImageLoadType_Normal);
+}
+
+//----------------------------------------------------------------------
+// EventTarget methods:
+
+void
+SVGFEImageElement::AsyncEventRunning(AsyncEventDispatcher* aEvent)
+{
+  nsImageLoadingContent::AsyncEventRunning(aEvent);
 }
 
 //----------------------------------------------------------------------
 // nsIContent methods:
 
 NS_IMETHODIMP_(bool)
-SVGFEImageElement::IsAttributeMapped(const nsIAtom* name) const
+SVGFEImageElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sGraphicsMap
@@ -104,32 +120,34 @@ SVGFEImageElement::IsAttributeMapped(const nsIAtom* name) const
 }
 
 nsresult
-SVGFEImageElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify)
+SVGFEImageElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aSubjectPrincipal,
+                                bool aNotify)
 {
-  if (aNamespaceID == kNameSpaceID_XLink && aName == nsGkAtoms::href) {
+  if (aName == nsGkAtoms::href &&
+      (aNamespaceID == kNameSpaceID_XLink ||
+       aNamespaceID == kNameSpaceID_None)) {
 
-    // If there isn't a frame we still need to load the image in case
-    // the frame is created later e.g. by attaching to a document.
-    // If there is a frame then it should deal with loading as the image
-    // url may be animated.
-    if (!GetPrimaryFrame()) {
-      if (aValue) {
-        LoadSVGImage(true, aNotify);
-      } else {
-        CancelImageRequests(aNotify);
-      }
+    if (aValue) {
+      LoadSVGImage(true, aNotify);
+    } else {
+      CancelImageRequests(aNotify);
     }
   }
 
   return SVGFEImageElementBase::AfterSetAttr(aNamespaceID, aName,
-                                             aValue, aNotify);
+                                             aValue, aOldValue,
+                                             aSubjectPrincipal,
+                                             aNotify);
 }
 
 void
 SVGFEImageElement::MaybeLoadSVGImage()
 {
-  if (mStringAttributes[HREF].IsExplicitlySet() &&
+  if ((mStringAttributes[HREF].IsExplicitlySet() ||
+       mStringAttributes[XLINK_HREF].IsExplicitlySet() ) &&
       (NS_FAILED(LoadSVGImage(false, true)) ||
        !LoadingEnabled())) {
     CancelImageRequests(true);
@@ -149,13 +167,16 @@ SVGFEImageElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   nsImageLoadingContent::BindToTree(aDocument, aParent, aBindingParent,
                                     aCompileEventHandlers);
 
-  if (mStringAttributes[HREF].IsExplicitlySet()) {
+  if (mStringAttributes[HREF].IsExplicitlySet() ||
+      mStringAttributes[XLINK_HREF].IsExplicitlySet()) {
     // FIXME: Bug 660963 it would be nice if we could just have
     // ClearBrokenState update our state and do it fast...
     ClearBrokenState();
     RemoveStatesSilently(NS_EVENT_STATE_BROKEN);
     nsContentUtils::AddScriptRunner(
-      NS_NewRunnableMethod(this, &SVGFEImageElement::MaybeLoadSVGImage));
+      NewRunnableMethod("dom::SVGFEImageElement::MaybeLoadSVGImage",
+                        this,
+                        &SVGFEImageElement::MaybeLoadSVGImage));
   }
 
   return rv;
@@ -176,14 +197,16 @@ SVGFEImageElement::IntrinsicState() const
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEImageElement)
 
 already_AddRefed<SVGAnimatedString>
 SVGFEImageElement::Href()
 {
-  return mStringAttributes[HREF].ToDOMAnimatedString(this);
+  return mStringAttributes[HREF].IsExplicitlySet()
+         ? mStringAttributes[HREF].ToDOMAnimatedString(this)
+         : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
 }
 
 //----------------------------------------------------------------------
@@ -211,8 +234,8 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
   RefPtr<SourceSurface> image;
   if (imageContainer) {
-    image = imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
-                                     imgIContainer::FLAG_SYNC_DECODE);
+    uint32_t flags = imgIContainer::FLAG_SYNC_DECODE | imgIContainer::FLAG_ASYNC_NOTIFY;
+    image = imageContainer->GetFrame(imgIContainer::FRAME_CURRENT, flags);
   }
 
   if (!image) {
@@ -230,10 +253,10 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
   Matrix TM = viewBoxTM;
   TM.PostTranslate(aFilterSubregion.x, aFilterSubregion.y);
 
-  Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(frame);
+  SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(frame);
 
   FilterPrimitiveDescription descr(PrimitiveType::Image);
-  descr.Attributes().Set(eImageFilter, (uint32_t)filter);
+  descr.Attributes().Set(eImageFilter, (uint32_t)samplingFilter);
   descr.Attributes().Set(eImageTransform, TM);
 
   // Append the image to aInputImages and store its index in the description.
@@ -246,7 +269,7 @@ SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFEImageElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                             nsIAtom* aAttribute) const
+                                             nsAtom* aAttribute) const
 {
   // nsGkAtoms::href is deliberately omitted as the frame has special
   // handling to load the image
@@ -331,7 +354,7 @@ SVGFEImageElement::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect*
     nsCOMPtr<imgIContainer> container;
     aRequest->GetImage(getter_AddRefs(container));
     MOZ_ASSERT(container, "who sent the notification then?");
-    container->StartDecoding();
+    container->StartDecoding(imgIContainer::FLAG_NONE);
   }
 
   if (aType == imgINotificationObserver::LOAD_COMPLETE ||

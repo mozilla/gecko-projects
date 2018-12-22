@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFETileElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFETileElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFETileElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGFETileElement::sStringInfo[2] =
@@ -28,7 +28,7 @@ nsSVGElement::StringInfo SVGFETileElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFETileElement)
@@ -59,7 +59,7 @@ SVGFETileElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
 
 bool
 SVGFETileElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                            nsIAtom* aAttribute) const
+                                            nsAtom* aAttribute) const
 {
   return SVGFETileElementBase::AttributeAffectsRendering(aNameSpaceID,
                                                          aAttribute) ||

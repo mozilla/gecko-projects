@@ -158,7 +158,7 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
             masm.bind(&toUint);
             ScratchDoubleScope scratchDouble(masm);
             masm.convertUInt32ToDouble(ExtractTemp0, scratchDouble);
-            masm.boxDouble(scratchDouble, R0);
+            masm.boxDouble(scratchDouble, R0, scratchDouble);
         } else {
             masm.j(Assembler::Signed, &revertRegister);
             masm.boxValue(JSVAL_TYPE_INT32, ExtractTemp0, R0.valueReg());
@@ -199,34 +199,6 @@ ICBinaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
     masm.bind(&failure);
     EmitStubGuardFailure(masm);
 
-    return true;
-}
-
-bool
-ICUnaryArith_Int32::Compiler::generateStubCode(MacroAssembler& masm)
-{
-    Label failure;
-    masm.branchTestInt32(Assembler::NotEqual, R0, &failure);
-
-    switch (op) {
-      case JSOP_BITNOT:
-        masm.notl(R0.valueReg());
-        break;
-      case JSOP_NEG:
-        // Guard against 0 and MIN_INT, both result in a double.
-        masm.branchTest32(Assembler::Zero, R0.valueReg(), Imm32(0x7fffffff), &failure);
-        masm.negl(R0.valueReg());
-        break;
-      default:
-        MOZ_CRASH("Unexpected op");
-    }
-
-    masm.tagValue(JSVAL_TYPE_INT32, R0.valueReg(), R0);
-
-    EmitReturnFromIC(masm);
-
-    masm.bind(&failure);
-    EmitStubGuardFailure(masm);
     return true;
 }
 

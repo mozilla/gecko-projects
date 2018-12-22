@@ -6,24 +6,23 @@
  */
 
 #include "SkDashPathEffect.h"
-
+#include "SkDashImpl.h"
 #include "SkDashPathPriv.h"
 #include "SkReadBuffer.h"
 #include "SkWriteBuffer.h"
 #include "SkStrokeRec.h"
 
-SkDashPathEffect::SkDashPathEffect(const SkScalar intervals[], int count, SkScalar phase)
+SkDashImpl::SkDashImpl(const SkScalar intervals[], int count, SkScalar phase)
         : fPhase(0)
-        , fInitialDashLength(0)
+        , fInitialDashLength(-1)
         , fInitialDashIndex(0)
         , fIntervalLength(0) {
     SkASSERT(intervals);
-    SkASSERT(count > 1 && SkAlign2(count) == count);
+    SkASSERT(count > 1 && SkIsAlign2(count));
 
     fIntervals = (SkScalar*)sk_malloc_throw(sizeof(SkScalar) * count);
     fCount = count;
     for (int i = 0; i < count; i++) {
-        SkASSERT(intervals[i] >= 0);
         fIntervals[i] = intervals[i];
     }
 
@@ -32,13 +31,13 @@ SkDashPathEffect::SkDashPathEffect(const SkScalar intervals[], int count, SkScal
             &fInitialDashLength, &fInitialDashIndex, &fIntervalLength, &fPhase);
 }
 
-SkDashPathEffect::~SkDashPathEffect() {
+SkDashImpl::~SkDashImpl() {
     sk_free(fIntervals);
 }
 
-bool SkDashPathEffect::filterPath(SkPath* dst, const SkPath& src,
-                              SkStrokeRec* rec, const SkRect* cullRect) const {
-    return SkDashPath::FilterDashPath(dst, src, rec, cullRect, fIntervals, fCount,
+bool SkDashImpl::filterPath(SkPath* dst, const SkPath& src, SkStrokeRec* rec,
+                            const SkRect* cullRect) const {
+    return SkDashPath::InternalFilter(dst, src, rec, cullRect, fIntervals, fCount,
                                       fInitialDashLength, fInitialDashIndex, fIntervalLength);
 }
 
@@ -48,7 +47,7 @@ static void outset_for_stroke(SkRect* rect, const SkStrokeRec& rec) {
         radius = SK_Scalar1;    // hairlines
     }
     if (SkPaint::kMiter_Join == rec.getJoin()) {
-        radius = SkScalarMul(radius, rec.getMiter());
+        radius *= rec.getMiter();
     }
     rect->outset(radius, radius);
 }
@@ -156,13 +155,10 @@ static bool cull_line(SkPoint* pts, const SkStrokeRec& rec,
 // we need to:
 //      allow kRound_Cap capping (could allow rotations in the matrix with this)
 //      allow paths to be returned
-bool SkDashPathEffect::asPoints(PointData* results,
-                                const SkPath& src,
-                                const SkStrokeRec& rec,
-                                const SkMatrix& matrix,
-                                const SkRect* cullRect) const {
+bool SkDashImpl::asPoints(PointData* results, const SkPath& src, const SkStrokeRec& rec,
+                          const SkMatrix& matrix, const SkRect* cullRect) const {
     // width < 0 -> fill && width == 0 -> hairline so requiring width > 0 rules both out
-    if (fInitialDashLength < 0 || 0 >= rec.getWidth()) {
+    if (0 >= rec.getWidth()) {
         return false;
     }
 
@@ -249,7 +245,14 @@ bool SkDashPathEffect::asPoints(PointData* results,
                 len2 -= clampedInitialDashLength; // skip initial partial empty
             }
         }
-        int numMidPoints = SkScalarFloorToInt(len2 / fIntervalLength);
+        // Too many midpoints can cause results->fNumPoints to overflow or
+        // otherwise cause the results->fPoints allocation below to OOM.
+        // Cap it to a sane value.
+        SkScalar numIntervals = len2 / fIntervalLength;
+        if (!SkScalarIsFinite(numIntervals) || numIntervals > SkDashPath::kMaxDashCount) {
+            return false;
+        }
+        int numMidPoints = SkScalarFloorToInt(numIntervals);
         results->fNumPoints += numMidPoints;
         len2 -= numMidPoints * fIntervalLength;
         bool partialLast = false;
@@ -274,8 +277,8 @@ bool SkDashPathEffect::asPoints(PointData* results,
                 if (clampedInitialDashLength > 0) {
                     // partial first block
                     SkASSERT(SkPaint::kRound_Cap != rec.getCap()); // can't handle partial circles
-                    SkScalar x = pts[0].fX + SkScalarMul(tangent.fX, SkScalarHalf(clampedInitialDashLength));
-                    SkScalar y = pts[0].fY + SkScalarMul(tangent.fY, SkScalarHalf(clampedInitialDashLength));
+                    SkScalar x = pts[0].fX + tangent.fX * SkScalarHalf(clampedInitialDashLength);
+                    SkScalar y = pts[0].fY + tangent.fY * SkScalarHalf(clampedInitialDashLength);
                     SkScalar halfWidth, halfHeight;
                     if (isXAxis) {
                         halfWidth = SkScalarHalf(clampedInitialDashLength);
@@ -307,8 +310,8 @@ bool SkDashPathEffect::asPoints(PointData* results,
             distance += SkScalarHalf(fIntervals[0]);
 
             for (int i = 0; i < numMidPoints; ++i) {
-                SkScalar x = pts[0].fX + SkScalarMul(tangent.fX, distance);
-                SkScalar y = pts[0].fY + SkScalarMul(tangent.fY, distance);
+                SkScalar x = pts[0].fX + tangent.fX * distance;
+                SkScalar y = pts[0].fY + tangent.fY * distance;
 
                 SkASSERT(curPt < results->fNumPoints);
                 results->fPoints[curPt].set(x, y);
@@ -325,8 +328,8 @@ bool SkDashPathEffect::asPoints(PointData* results,
             SkASSERT(SkPaint::kRound_Cap != rec.getCap()); // can't handle partial circles
             SkScalar temp = length - distance;
             SkASSERT(temp < fIntervals[0]);
-            SkScalar x = pts[0].fX + SkScalarMul(tangent.fX, distance + SkScalarHalf(temp));
-            SkScalar y = pts[0].fY + SkScalarMul(tangent.fY, distance + SkScalarHalf(temp));
+            SkScalar x = pts[0].fX + tangent.fX * (distance + SkScalarHalf(temp));
+            SkScalar y = pts[0].fY + tangent.fY * (distance + SkScalarHalf(temp));
             SkScalar halfWidth, halfHeight;
             if (isXAxis) {
                 halfWidth = SkScalarHalf(temp);
@@ -345,7 +348,7 @@ bool SkDashPathEffect::asPoints(PointData* results,
     return true;
 }
 
-SkPathEffect::DashType SkDashPathEffect::asADash(DashInfo* info) const {
+SkPathEffect::DashType SkDashImpl::asADash(DashInfo* info) const {
     if (info) {
         if (info->fCount >= fCount && info->fIntervals) {
             memcpy(info->fIntervals, fIntervals, fCount * sizeof(SkScalar));
@@ -356,23 +359,23 @@ SkPathEffect::DashType SkDashPathEffect::asADash(DashInfo* info) const {
     return kDash_DashType;
 }
 
-void SkDashPathEffect::flatten(SkWriteBuffer& buffer) const {
+void SkDashImpl::flatten(SkWriteBuffer& buffer) const {
     buffer.writeScalar(fPhase);
     buffer.writeScalarArray(fIntervals, fCount);
 }
 
-SkFlattenable* SkDashPathEffect::CreateProc(SkReadBuffer& buffer) {
+sk_sp<SkFlattenable> SkDashImpl::CreateProc(SkReadBuffer& buffer) {
     const SkScalar phase = buffer.readScalar();
     uint32_t count = buffer.getArrayCount();
     SkAutoSTArray<32, SkScalar> intervals(count);
     if (buffer.readScalarArray(intervals.get(), count)) {
-        return Create(intervals.get(), SkToInt(count), phase);
+        return SkDashPathEffect::Make(intervals.get(), SkToInt(count), phase);
     }
     return nullptr;
 }
 
 #ifndef SK_IGNORE_TO_STRING
-void SkDashPathEffect::toString(SkString* str) const {
+void SkDashImpl::toString(SkString* str) const {
     str->appendf("SkDashPathEffect: (");
     str->appendf("count: %d phase %.2f intervals: (", fCount, fPhase);
     for (int i = 0; i < fCount; ++i) {
@@ -384,3 +387,12 @@ void SkDashPathEffect::toString(SkString* str) const {
     str->appendf("))");
 }
 #endif
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+sk_sp<SkPathEffect> SkDashPathEffect::Make(const SkScalar intervals[], int count, SkScalar phase) {
+    if (!SkDashPath::ValidDashPath(phase, intervals, count)) {
+        return nullptr;
+    }
+    return sk_sp<SkPathEffect>(new SkDashImpl(intervals, count, phase));
+}

@@ -7,6 +7,7 @@
 #define nsCoreUtils_h_
 
 #include "mozilla/EventForwards.h"
+#include "mozilla/dom/Element.h"
 #include "nsIAccessibleEvent.h"
 #include "nsIContent.h"
 #include "nsIDocument.h" // for GetShell()
@@ -16,10 +17,10 @@
 #include "nsTArray.h"
 
 class nsRange;
+class nsTreeColumn;
 class nsIBoxObject;
 class nsIFrame;
 class nsIDocShell;
-class nsITreeColumn;
 class nsITreeBoxObject;
 class nsIWidget;
 
@@ -50,7 +51,7 @@ public:
    *                       nsITreeBoxObject for available values
    */
   static void DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
-                                 int32_t aRowIndex, nsITreeColumn *aColumn,
+                                 int32_t aRowIndex, nsTreeColumn *aColumn,
                                  const nsAString& aPseudoElt = EmptyString());
 
   /**
@@ -220,7 +221,7 @@ public:
    * Convert attribute value of the given node to positive integer. If no
    * attribute or wrong value then false is returned.
    */
-  static bool GetUIntAttr(nsIContent *aContent, nsIAtom *aAttr,
+  static bool GetUIntAttr(nsIContent *aContent, nsAtom *aAttr,
                           int32_t* aUInt);
 
   /**
@@ -248,7 +249,7 @@ public:
   /**
    * Return first sensible column for the given tree box object.
    */
-  static already_AddRefed<nsITreeColumn>
+  static already_AddRefed<nsTreeColumn>
     GetFirstSensibleColumn(nsITreeBoxObject *aTree);
 
   /**
@@ -259,25 +260,25 @@ public:
   /**
    * Return sensible column at the given index for the given tree box object.
    */
-  static already_AddRefed<nsITreeColumn>
+  static already_AddRefed<nsTreeColumn>
     GetSensibleColumnAt(nsITreeBoxObject *aTree, uint32_t aIndex);
 
   /**
    * Return next sensible column for the given column.
    */
-  static already_AddRefed<nsITreeColumn>
-    GetNextSensibleColumn(nsITreeColumn *aColumn);
+  static already_AddRefed<nsTreeColumn>
+    GetNextSensibleColumn(nsTreeColumn *aColumn);
 
   /**
    * Return previous sensible column for the given column.
    */
-  static already_AddRefed<nsITreeColumn>
-    GetPreviousSensibleColumn(nsITreeColumn *aColumn);
+  static already_AddRefed<nsTreeColumn>
+    GetPreviousSensibleColumn(nsTreeColumn *aColumn);
 
   /**
    * Return true if the given column is hidden (i.e. not sensible).
    */
-  static bool IsColumnHidden(nsITreeColumn *aColumn);
+  static bool IsColumnHidden(nsTreeColumn *aColumn);
 
   /**
    * Scroll content into view.
@@ -291,7 +292,8 @@ public:
   static bool IsHTMLTableHeader(nsIContent *aContent)
   {
     return aContent->NodeInfo()->Equals(nsGkAtoms::th) ||
-      aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::scope);
+      (aContent->IsElement() &&
+       aContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::scope));
   }
 
   /**
@@ -299,7 +301,7 @@ public:
    * only. In contrast to nsWhitespaceTokenizer class it takes into account
    * non-breaking space (0xa0).
    */
-  static bool IsWhitespaceString(const nsSubstring& aString);
+  static bool IsWhitespaceString(const nsAString& aString);
 
   /**
    * Returns true if the given character is whitespace symbol.
@@ -319,11 +321,6 @@ public:
    * Notify accessible event observers of an event.
    */
   static void DispatchAccEvent(RefPtr<nsIAccessibleEvent> aEvent);
-
-  /**
-   * Return a role attribute on XBL bindings of the element.
-   */
-  static void XBLBindingRole(const nsIContent* aEl, nsAString& aRole);
 };
 
 #endif

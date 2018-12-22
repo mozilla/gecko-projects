@@ -38,22 +38,17 @@
 
 "use strict";
 
-const Cu = Components.utils;
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/Services.jsm", this);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
+ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-  "resource://gre/modules/Promise.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+ChromeUtils.defineModuleGetter(this, "PromiseUtils",
   "resource://gre/modules/PromiseUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
+ChromeUtils.defineModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "gDebug",
   "@mozilla.org/xpcom/debug;1", "nsIDebug2");
 Object.defineProperty(this, "gCrashReporter", {
-  get: function() {
+  get() {
     delete this.gCrashReporter;
     try {
       let reporter = Cc["@mozilla.org/xre/app-info;1"].
@@ -67,9 +62,10 @@ Object.defineProperty(this, "gCrashReporter", {
 });
 
 // `true` if this is a content process, `false` otherwise.
-// It would be nicer to go through `Services.appInfo`, but some tests need to be
+// It would be nicer to go through `Services.appinfo`, but some tests need to be
 // able to replace that field with a custom implementation before it is first
 // called.
+// eslint-disable-next-line mozilla/use-services
 const isContent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT;
 
 // Display timeout warnings after 10 seconds
@@ -79,15 +75,11 @@ const DELAY_WARNING_MS = 10 * 1000;
 // Crash the process if shutdown is really too long
 // (allowing for sleep).
 const PREF_DELAY_CRASH_MS = "toolkit.asyncshutdown.crash_timeout";
-var DELAY_CRASH_MS = 60 * 1000; // One minute
-try {
-  DELAY_CRASH_MS = Services.prefs.getIntPref(PREF_DELAY_CRASH_MS);
-} catch (ex) {
-  // Ignore errors
-}
+var DELAY_CRASH_MS = Services.prefs.getIntPref(PREF_DELAY_CRASH_MS,
+                                               60 * 1000); // One minute
 Services.prefs.addObserver(PREF_DELAY_CRASH_MS, function() {
   DELAY_CRASH_MS = Services.prefs.getIntPref(PREF_DELAY_CRASH_MS);
-}, false);
+});
 
 /**
  * A set of Promise that supports waiting.
@@ -116,7 +108,7 @@ PromiseSet.prototype = {
    * @return {Promise} Resolved once all Promise have been resolved or removed,
    * or rejected after at least one Promise has rejected.
    */
-  wait: function() {
+  wait() {
     // Pick an arbitrary element in the map, if any exists.
     let entry = this._indirections.entries().next();
     if (entry.done) {
@@ -139,7 +131,7 @@ PromiseSet.prototype = {
    * Calls to wait (including ongoing calls) will only return once
    * `key` has either resolved or been removed.
    */
-  add: function(key) {
+  add(key) {
     this._ensurePromise(key);
     let indirection = PromiseUtils.defer();
     key.then(
@@ -163,7 +155,7 @@ PromiseSet.prototype = {
    * Calls to wait (including ongoing calls) will ignore this promise,
    * unless it is added again.
    */
-  delete: function(key) {
+  delete(key) {
     this._ensurePromise(key);
     let value = this._indirections.get(key);
     if (!value) {
@@ -174,7 +166,7 @@ PromiseSet.prototype = {
     return true;
   },
 
-  _ensurePromise: function(key) {
+  _ensurePromise(key) {
     if (!key || typeof key != "object") {
       throw new Error("Expected an object");
     }
@@ -207,26 +199,21 @@ function log(msg, prefix = "", error = null) {
   }
 }
 const PREF_DEBUG_LOG = "toolkit.asyncshutdown.log";
-var DEBUG_LOG = false;
-try {
-  DEBUG_LOG = Services.prefs.getBoolPref(PREF_DEBUG_LOG);
-} catch (ex) {
-  // Ignore errors
-}
+var DEBUG_LOG = Services.prefs.getBoolPref(PREF_DEBUG_LOG, false);
 Services.prefs.addObserver(PREF_DEBUG_LOG, function() {
   DEBUG_LOG = Services.prefs.getBoolPref(PREF_DEBUG_LOG);
-}, false);
+});
 
-function debug(msg, error=null) {
+function debug(msg, error = null) {
   if (DEBUG_LOG) {
-    return log(msg, "DEBUG: ", error);
+    log(msg, "DEBUG: ", error);
   }
 }
 function warn(msg, error = null) {
-  return log(msg, "WARNING: ", error);
+  log(msg, "WARNING: ", error);
 }
 function fatalerr(msg, error = null) {
-  return log(msg, "FATAL ERROR: ", error);
+  log(msg, "FATAL ERROR: ", error);
 }
 
 // Utility function designed to get the current state of execution
@@ -284,7 +271,7 @@ function looseTimer(delay) {
   let DELAY_BEAT = 1000;
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   let beats = Math.ceil(delay / DELAY_BEAT);
-  let deferred = Promise.defer();
+  let deferred = PromiseUtils.defer();
   timer.initWithCallback(function() {
     if (beats <= 0) {
       deferred.resolve();
@@ -331,45 +318,54 @@ function getOrigin(topFrame, filename = null, lineNumber = null, stack = null) {
         frames.push(frame.filename + ":" + frame.name + ":" + frame.lineNumber);
         frame = frame.caller;
       }
-      stack = Task.Debugging.generateReadableStack(frames.join("\n")).split("\n");
+      stack = frames.join("\n");
+      // Avoid loading Task.jsm if there's no task on the stack.
+      if (stack.includes("/Task.jsm:")) {
+        stack = Task.Debugging.generateReadableStack(stack);
+      }
+      stack = stack.split("\n");
     }
 
     return {
-      filename: filename,
-      lineNumber: lineNumber,
-      stack: stack,
+      filename,
+      lineNumber,
+      stack,
     };
   } catch (ex) {
     return {
       filename: "<internal error: could not get origin>",
       lineNumber: -1,
       stack: "<internal error: could not get origin>",
-    }
+    };
   }
 }
 
-this.EXPORTED_SYMBOLS = ["AsyncShutdown"];
+var EXPORTED_SYMBOLS = ["AsyncShutdown"];
 
 /**
  * {string} topic -> phase
  */
 var gPhases = new Map();
 
-this.AsyncShutdown = {
+var AsyncShutdown = {
   /**
    * Access function getPhase. For testing purposes only.
    */
   get _getPhase() {
-    let accepted = false;
-    try {
-      accepted = Services.prefs.getBoolPref("toolkit.asyncshutdown.testing");
-    } catch (ex) {
-      // Ignore errors
-    }
+    let accepted = Services.prefs.getBoolPref("toolkit.asyncshutdown.testing", false);
     if (accepted) {
       return getPhase;
     }
     return undefined;
+  },
+
+  /**
+   * This constant is used as the amount of milliseconds to allow shutdown to be
+   * blocked until we crash the process forcibly and is read from the
+   * 'toolkit.asyncshutdown.crash_timeout' pref.
+   */
+  get DELAY_CRASH_MS() {
+    return DELAY_CRASH_MS;
   }
 };
 
@@ -436,7 +432,7 @@ function getPhase(topic) {
      *       // No specific guarantee about completion of profileBeforeChange
      * });
      */
-    addBlocker: function(name, condition, details = null) {
+    addBlocker(name, condition, details = null) {
       spinner.addBlocker(name, condition, details);
     },
     /**
@@ -451,7 +447,7 @@ function getPhase(topic) {
      * the blocker has never been installed or that the phase has
      * completed and the blocker has already been resolved.
      */
-    removeBlocker: function(condition) {
+    removeBlocker(condition) {
       return spinner.removeBlocker(condition);
     },
 
@@ -464,12 +460,7 @@ function getPhase(topic) {
      * notification. For testing purposes only.
      */
     get _trigger() {
-      let accepted = false;
-      try {
-        accepted = Services.prefs.getBoolPref("toolkit.asyncshutdown.testing");
-      } catch (ex) {
-        // Ignore errors
-      }
+      let accepted = Services.prefs.getBoolPref("toolkit.asyncshutdown.testing", false);
       if (accepted) {
         return () => spinner.observe();
       }
@@ -489,7 +480,7 @@ function getPhase(topic) {
 function Spinner(topic) {
   this._barrier = new Barrier(topic);
   this._topic = topic;
-  Services.obs.addObserver(this, topic, false);
+  Services.obs.addObserver(this, topic);
 }
 
 Spinner.prototype = {
@@ -499,7 +490,7 @@ Spinner.prototype = {
    * See the documentation of `addBlocker` in property `client`
    * of instances of `Barrier`.
    */
-  addBlocker: function(name, condition, details) {
+  addBlocker(name, condition, details) {
     this._barrier.client.addBlocker(name, condition, details);
   },
   /**
@@ -513,7 +504,7 @@ Spinner.prototype = {
    * the blocker has never been installed or that the phase has
    * completed and the blocker has already been resolved.
    */
-  removeBlocker: function(condition) {
+  removeBlocker(condition) {
     return this._barrier.client.removeBlocker(condition);
   },
 
@@ -522,10 +513,9 @@ Spinner.prototype = {
   },
 
   // nsIObserver.observe
-  observe: function() {
+  observe() {
     let topic = this._topic;
     debug(`Starting phase ${ topic }`);
-    let barrier = this._barrier;
     Services.obs.removeObserver(this, topic);
 
     let satisfied = false; // |true| once we have satisfied all conditions
@@ -721,7 +711,7 @@ function Barrier(name) {
             } catch (ex) {
               reject(ex);
             }
-          }
+          };
         });
       } else {
         // If `condition` is not a function, `trigger` is not particularly
@@ -731,7 +721,7 @@ function Barrier(name) {
       }
 
       // Make sure that `promise` never rejects.
-      promise = promise.then(null, error => {
+      promise = promise.catch(error => {
         let msg = `A blocker encountered an error while we were waiting.
           Blocker:  ${ name }
           Phase: ${ this._name }
@@ -752,10 +742,10 @@ function Barrier(name) {
       }
 
       let blocker = {
-        trigger: trigger,
-        promise: promise,
-        name: name,
-        fetchState: fetchState,
+        trigger,
+        promise,
+        name,
+        fetchState,
         getOrigin: () => getOrigin(topFrame, filename, lineNumber, stack),
       };
 
@@ -811,11 +801,11 @@ Barrier.prototype = Object.freeze({
       let {name, fetchState} = blocker;
       let {stack, filename, lineNumber} = blocker.getOrigin();
       frozen.push({
-        name: name,
+        name,
         state: safeGetState(fetchState),
-        filename: filename,
-        lineNumber: lineNumber,
-        stack: stack
+        filename,
+        lineNumber,
+        stack
       });
     }
     return frozen;
@@ -843,14 +833,14 @@ Barrier.prototype = Object.freeze({
    *
    * @return {Promise} A promise satisfied once all blockers are complete.
    */
-  wait: function(options = {}) {
+  wait(options = {}) {
     // This method only implements caching on top of _wait()
     if (this._promise) {
       return this._promise;
     }
     return this._promise = this._wait(options);
   },
-  _wait: function(options) {
+  _wait(options) {
 
     // Sanity checks
     if (this._isStarted) {
@@ -872,7 +862,7 @@ Barrier.prototype = Object.freeze({
     // Now, wait
     let promise = this._waitForMe.wait();
 
-    promise = promise.then(null, function onError(error) {
+    promise = promise.catch(function onError(error) {
       // I don't think that this can happen.
       // However, let's be overcautious with async/shutdown error reporting.
       let msg = "An uncaught error appeared while completing the phase." +
@@ -928,7 +918,7 @@ Barrier.prototype = Object.freeze({
       }
     }
 
-    if (crashAfterMS  > 0) {
+    if (crashAfterMS > 0) {
       let timeToCrash = null;
 
       // If after |crashAfterMS| milliseconds (adjusted to take into
@@ -939,7 +929,7 @@ Barrier.prototype = Object.freeze({
       // battery-sucking) situation is report the issue and crash.
       timeToCrash = looseTimer(crashAfterMS);
       timeToCrash.promise.then(
-        function onTimeout() {
+        () => {
           // Report the problem as best as we can, then crash.
           let state = this.state;
 
@@ -977,7 +967,7 @@ Barrier.prototype = Object.freeze({
             break;
           }
           gDebug.abort(filename, lineNumber);
-        }.bind(this),
+        },
         function onSatisfied() {
           // The promise has been rejected, which means that we have satisfied
           // all completion conditions.
@@ -991,7 +981,7 @@ Barrier.prototype = Object.freeze({
     return promise;
   },
 
-  _removeBlocker: function(condition) {
+  _removeBlocker(condition) {
     if (!this._waitForMe || !this._promiseToBlocker || !this._conditionToPromise) {
       // We have already cleaned up everything.
       return false;
@@ -1020,8 +1010,7 @@ Barrier.prototype = Object.freeze({
 if (!isContent) {
   this.AsyncShutdown.profileChangeTeardown = getPhase("profile-change-teardown");
   this.AsyncShutdown.profileBeforeChange = getPhase("profile-before-change");
-  this.AsyncShutdown.placesClosingInternalConnection = getPhase("places-will-close-connection");
-  this.AsyncShutdown.sendTelemetry = getPhase("profile-before-change2");
+  this.AsyncShutdown.sendTelemetry = getPhase("profile-before-change-telemetry");
 }
 
 // Notifications that fire in the parent and content process, but should
@@ -1030,14 +1019,12 @@ if (!isContent) {
   this.AsyncShutdown.quitApplicationGranted = getPhase("quit-application-granted");
 }
 
-// Content process
-if (isContent) {
-  this.AsyncShutdown.contentChildShutdown = getPhase("content-child-shutdown");
-}
+// Don't add a barrier for content-child-shutdown because this
+// makes it easier to cause shutdown hangs.
 
 // All processes
 this.AsyncShutdown.webWorkersShutdown = getPhase("web-workers-shutdown");
-this.AsyncShutdown.xpcomThreadsShutdown = getPhase("xpcom-threads-shutdown");
+this.AsyncShutdown.xpcomWillShutdown = getPhase("xpcom-will-shutdown");
 
 this.AsyncShutdown.Barrier = Barrier;
 

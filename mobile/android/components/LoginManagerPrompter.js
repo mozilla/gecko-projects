@@ -2,13 +2,12 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  DoorHanger: "resource://gre/modules/Prompt.jsm",
+  Services: "resource://gre/modules/Services.jsm",
+});
 
 /* Constants for password prompt telemetry.
 * Mirrored in nsLoginManagerPrompter.js */
@@ -33,37 +32,19 @@ function LoginManagerPrompter() {
 }
 
 LoginManagerPrompter.prototype = {
-  classID : Components.ID("97d12931-abe2-11df-94e2-0800200c9a66"),
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsILoginManagerPrompter]),
+  classID: Components.ID("97d12931-abe2-11df-94e2-0800200c9a66"),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsILoginManagerPrompter]),
 
-  _factory       : null,
-  _window       : null,
-  _debug         : false, // mirrors signon.debug
+  _factory: null,
+  _window: null,
+  _debug: false, // mirrors signon.debug
 
-  __pwmgr : null, // Password Manager service
-  get _pwmgr() {
-    if (!this.__pwmgr)
-      this.__pwmgr = Cc["@mozilla.org/login-manager;1"].
-                     getService(Ci.nsILoginManager);
-    return this.__pwmgr;
-  },
-
-  __promptService : null, // Prompt service for user interaction
-  get _promptService() {
-    if (!this.__promptService)
-      this.__promptService = Cc["@mozilla.org/embedcomp/prompt-service;1"].
-                             getService(Ci.nsIPromptService2);
-    return this.__promptService;
-  },
-
-  __strBundle : null, // String bundle for L10N
+  __strBundle: null, // String bundle for L10N
   get _strBundle() {
     if (!this.__strBundle) {
-      let bunService = Cc["@mozilla.org/intl/stringbundle;1"].
-                       getService(Ci.nsIStringBundleService);
       this.__strBundle = {
-        pwmgr : bunService.createBundle("chrome://passwordmgr/locale/passwordmgr.properties"),
-        brand : bunService.createBundle("chrome://branding/locale/brand.properties")
+        pwmgr: Services.strings.createBundle("chrome://browser/locale/passwordmgr.properties"),
+        brand: Services.strings.createBundle("chrome://branding/locale/brand.properties")
       };
 
       if (!this.__strBundle)
@@ -73,7 +54,7 @@ LoginManagerPrompter.prototype = {
     return this.__strBundle;
   },
 
-  __ellipsis : null,
+  __ellipsis: null,
   get _ellipsis() {
   if (!this.__ellipsis) {
     this.__ellipsis = "\u2026";
@@ -90,7 +71,7 @@ LoginManagerPrompter.prototype = {
    *
    * Internal function for logging debug messages to the Error Console window.
    */
-  log : function (message) {
+  log: function(message) {
     if (!this._debug)
       return;
 
@@ -104,26 +85,32 @@ LoginManagerPrompter.prototype = {
    * init
    *
    */
-  init : function (aWindow, aFactory) {
+  init: function(aWindow, aFactory) {
     this._window = aWindow;
     this._factory = aFactory || null;
+    this._browser = null;
 
     var prefBranch = Services.prefs.getBranch("signon.");
     this._debug = prefBranch.getBoolPref("debug");
     this.log("===== initialized =====");
   },
 
-  setE10sData : function (aBrowser, aOpener) {
-    throw new Error("This should be filled in when Android is multiprocess");
+  set browser(aBrowser) {
+    this._browser = aBrowser;
   },
+
+  // setting this attribute is ignored because Android does not consider
+  // opener windows when displaying login notifications
+  set opener(aOpener) { },
 
   /*
    * promptToSavePassword
    *
    */
-  promptToSavePassword : function (aLogin) {
+  promptToSavePassword: function(aLogin) {
     this._showSaveLoginNotification(aLogin);
       Services.telemetry.getHistogramById("PWMGR_PROMPT_REMEMBER_ACTION").add(PROMPT_DISPLAYED);
+    Services.obs.notifyObservers(aLogin, "passwordmgr-prompt-save");
   },
 
   /*
@@ -139,12 +126,7 @@ LoginManagerPrompter.prototype = {
    * @param aPassword
    *        Password string used in creating a doorhanger action
    */
-  _showLoginNotification : function (aBody, aButtons, aUsername, aPassword) {
-    let notifyWin = this._window.top;
-    let chromeWin = this._getChromeWindow(notifyWin).wrappedJSObject;
-    let browser = chromeWin.BrowserApp.getBrowserForWindow(notifyWin);
-    let tabID = chromeWin.BrowserApp.getTabForBrowser(browser).id;
-
+  _showLoginNotification: function(aBody, aButtons, aUsername, aPassword) {
     let actionText = {
       text: aUsername,
       type: "EDIT",
@@ -163,11 +145,10 @@ LoginManagerPrompter.prototype = {
       persistWhileVisible: true,
       timeout: Date.now() + 10000,
       actionText: actionText
-    }
+    };
 
-    var nativeWindow = this._getNativeWindow();
-    if (nativeWindow)
-      nativeWindow.doorhanger.show(aBody, "password", aButtons, tabID, options, "LOGIN");
+    let win = (this._browser && this._browser.contentWindow) || this._window;
+    DoorHanger.show(win, aBody, "password", aButtons, options, "LOGIN");
   },
 
   /*
@@ -178,16 +159,14 @@ LoginManagerPrompter.prototype = {
    * their login, and only save a login which they know worked.
    *
    */
-  _showSaveLoginNotification : function (aLogin) {
+  _showSaveLoginNotification: function(aLogin) {
     let brandShortName = this._strBundle.brand.GetStringFromName("brandShortName");
     let notificationText  = this._getLocalizedString("saveLogin", [brandShortName]);
 
-    let username = aLogin.username ? this._sanitizeUsername(aLogin.username) : "";
-
     // The callbacks in |buttons| have a closure to access the variables
-    // in scope here; set one to |this._pwmgr| so we can get back to pwmgr
+    // in scope here; set one to |Services.logins| so we can get back to pwmgr
     // without a getService() call.
-    var pwmgr = this._pwmgr;
+    var pwmgr = Services.logins;
     let promptHistogram = Services.telemetry.getHistogramById("PWMGR_PROMPT_REMEMBER_ACTION");
 
     var buttons = [
@@ -202,8 +181,8 @@ LoginManagerPrompter.prototype = {
         label: this._getLocalizedString("rememberButton"),
         callback: function(checked, response) {
           if (response) {
-            aLogin.username = response["username"] || aLogin.username;
-            aLogin.password = response["password"] || aLogin.password;
+            aLogin.username = response.username || aLogin.username;
+            aLogin.password = response.password || aLogin.password;
           }
           pwmgr.addLogin(aLogin);
           promptHistogram.add(PROMPT_ADD);
@@ -223,9 +202,11 @@ LoginManagerPrompter.prototype = {
    * fields.
    *
    */
-  promptToChangePassword : function (aOldLogin, aNewLogin) {
+  promptToChangePassword: function(aOldLogin, aNewLogin) {
     this._showChangeLoginNotification(aOldLogin, aNewLogin.password);
     Services.telemetry.getHistogramById("PWMGR_PROMPT_UPDATE_ACTION").add(PROMPT_DISPLAYED);
+    let oldGUID = aOldLogin.QueryInterface(Ci.nsILoginMetaInfo).guid;
+    Services.obs.notifyObservers(aNewLogin, "passwordmgr-prompt-change", oldGUID);
   },
 
   /*
@@ -234,7 +215,7 @@ LoginManagerPrompter.prototype = {
    * Shows the Change Password notification doorhanger.
    *
    */
-  _showChangeLoginNotification : function (aOldLogin, aNewPassword) {
+  _showChangeLoginNotification: function(aOldLogin, aNewPassword) {
     var notificationText;
     if (aOldLogin.username) {
       let displayUser = this._sanitizeUsername(aOldLogin.username);
@@ -243,9 +224,6 @@ LoginManagerPrompter.prototype = {
       notificationText  = this._getLocalizedString("updatePasswordNoUser");
     }
 
-    // The callbacks in |buttons| have a closure to access the variables
-    // in scope here; set one to |this._pwmgr| so we can get back to pwmgr
-    // without a getService() call.
     var self = this;
     let promptHistogram = Services.telemetry.getHistogramById("PWMGR_PROMPT_UPDATE_ACTION");
 
@@ -260,7 +238,7 @@ LoginManagerPrompter.prototype = {
       {
         label: this._getLocalizedString("updateButton"),
         callback:  function(checked, response) {
-          let password = response ? response["password"] : aNewPassword;
+          let password = response ? response.password : aNewPassword;
           self._updateLogin(aOldLogin, password);
 
           promptHistogram.add(PROMPT_UPDATE);
@@ -282,20 +260,18 @@ LoginManagerPrompter.prototype = {
    * Note: The caller doesn't know the username for aNewLogin, so this
    *       function fills in .username and .usernameField with the values
    *       from the login selected by the user.
-   * 
+   *
    * Note; XPCOM stupidity: |count| is just |logins.length|.
    */
-  promptToChangePasswordWithUsernames : function (logins, count, aNewLogin) {
-    const buttonFlags = Ci.nsIPrompt.STD_YES_NO_BUTTONS;
-
+  promptToChangePasswordWithUsernames: function(logins, count, aNewLogin) {
     var usernames = logins.map(l => l.username);
-    var dialogText  = this._getLocalizedString("userSelectText");
+    var dialogText  = this._getLocalizedString("userSelectText2");
     var dialogTitle = this._getLocalizedString("passwordChangeTitle");
     var selectedIndex = { value: null };
 
     // If user selects ok, outparam.value is set to the index
     // of the selected username.
-    var ok = this._promptService.select(null,
+    var ok = Services.prompt.select(null,
       dialogTitle, dialogText,
       usernames.length, usernames,
       selectedIndex);
@@ -312,7 +288,7 @@ LoginManagerPrompter.prototype = {
   /*
    * _updateLogin
    */
-  _updateLogin : function (login, newPassword) {
+  _updateLogin: function(login, newPassword) {
     var now = Date.now();
     var propBag = Cc["@mozilla.org/hash-property-bag;1"].
       createInstance(Ci.nsIWritablePropertyBag);
@@ -325,44 +301,7 @@ LoginManagerPrompter.prototype = {
     }
     propBag.setProperty("timeLastUsed", now);
     propBag.setProperty("timesUsedIncrement", 1);
-    this._pwmgr.modifyLogin(login, propBag);
-  },
-
-  /*
-   * _getChromeWindow
-   *
-   * Given a content DOM window, returns the chrome window it's in.
-   */
-  _getChromeWindow: function (aWindow) {
-    var chromeWin = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation)
-      .QueryInterface(Ci.nsIDocShell)
-      .chromeEventHandler.ownerDocument.defaultView;
-    return chromeWin;
-  },
-
-  /*
-   * _getNativeWindow
-   *
-   * Returns the NativeWindow to this prompter, or null if there isn't
-   * a NativeWindow available (w/ error sent to logcat).
-   */
-  _getNativeWindow : function () {
-    let nativeWindow = null;
-    try {
-      let notifyWin = this._window.top;
-      let chromeWin = this._getChromeWindow(notifyWin).wrappedJSObject;
-      if (chromeWin.NativeWindow) {
-        nativeWindow = chromeWin.NativeWindow;
-      } else {
-        Cu.reportError("NativeWindow not available on window");
-      }
-
-    } catch (e) {
-      // If any errors happen, just assume no native window helper.
-      Cu.reportError("No NativeWindow available: " + e);
-    }
-    return nativeWindow;
+    Services.logins.modifyLogin(login, propBag);
   },
 
   /*
@@ -377,13 +316,12 @@ LoginManagerPrompter.prototype = {
    * Returns the localized string for the specified key,
    * formatted if required.
    *
-   */ 
-  _getLocalizedString : function (key, formatArgs) {
+   */
+  _getLocalizedString: function(key, formatArgs) {
     if (formatArgs)
       return this._strBundle.pwmgr.formatStringFromName(
         key, formatArgs, formatArgs.length);
-    else
-      return this._strBundle.pwmgr.GetStringFromName(key);
+    return this._strBundle.pwmgr.GetStringFromName(key);
   },
 
   /*
@@ -393,7 +331,7 @@ LoginManagerPrompter.prototype = {
    * it's too long. This helps prevent an evil site from messing with the
    * "save password?" prompt too much.
    */
-  _sanitizeUsername : function (username) {
+  _sanitizeUsername: function(username) {
     if (username.length > 30) {
       username = username.substring(0, 30);
       username += this._ellipsis;

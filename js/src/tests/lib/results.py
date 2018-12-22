@@ -1,23 +1,29 @@
 from __future__ import print_function
 
-import re
-from progressbar import NullProgressBar, ProgressBar
 import pipes
+import re
+
+from progressbar import NullProgressBar, ProgressBar
+from structuredlog import TestLogger
 
 # subprocess.list2cmdline does not properly escape for sh-like shells
+
+
 def escape_cmdline(args):
     return ' '.join([pipes.quote(a) for a in args])
 
+
 class TestOutput:
     """Output from a test run."""
-    def __init__(self, test, cmd, out, err, rc, dt, timed_out):
+    def __init__(self, test, cmd, out, err, rc, dt, timed_out, extra=None):
         self.test = test   # Test
         self.cmd = cmd     # str:   command line of test
         self.out = out     # str:   stdout
         self.err = err     # str:   stderr
         self.rc = rc       # int:   return code
         self.dt = dt       # float: run time
-        self.timed_out = timed_out # bool: did the test time out
+        self.timed_out = timed_out  # bool: did the test time out
+        self.extra = extra  # includes the pid on some platforms
 
     def describe_failure(self):
         if self.timed_out:
@@ -29,8 +35,10 @@ class TestOutput:
                 return line
         return "Unknown"
 
+
 class NullTestOutput:
     """Variant of TestOutput that indicates a test was not run."""
+
     def __init__(self, test):
         self.test = test
         self.cmd = ''
@@ -40,12 +48,14 @@ class NullTestOutput:
         self.dt = 0.0
         self.timed_out = False
 
+
 class TestResult:
     PASS = 'PASS'
     FAIL = 'FAIL'
     CRASH = 'CRASH'
 
     """Classified result from a test run."""
+
     def __init__(self, test, result, results):
         self.test = test
         self.result = result
@@ -57,7 +67,7 @@ class TestResult:
         result = None          # str:      overall result, see class-level variables
         results = []           # (str,str) list: subtest results (pass/fail, message)
 
-        out, rc = output.out, output.rc
+        out, err, rc = output.out, output.err, output.rc
 
         failures = 0
         passes = 0
@@ -81,7 +91,13 @@ class TestResult:
                 if m:
                     expected_rcs.append(int(m.group(1)))
 
-        if rc and not rc in expected_rcs:
+        if test.error is not None:
+            expected_rcs.append(3)
+            if test.error not in err:
+                failures += 1
+                results.append((cls.FAIL, "Expected uncaught error: {}".format(test.error)))
+
+        if rc and rc not in expected_rcs:
             if rc == 3:
                 result = cls.FAIL
             else:
@@ -94,13 +110,25 @@ class TestResult:
 
         return cls(test, result, results)
 
+
+class TestDuration:
+    def __init__(self, test, duration):
+        self.test = test
+        self.duration = duration
+
+
 class ResultsSink:
-    def __init__(self, options, testcount):
+    def __init__(self, testsuite, options, testcount):
         self.options = options
         self.fp = options.output_fp
+        if self.options.format == 'automation':
+            self.slog = TestLogger(testsuite)
+            self.slog.suite_start()
 
         self.groups = {}
+        self.output_dict = {}
         self.counts = {'PASS': 0, 'FAIL': 0, 'TIMEOUT': 0, 'SKIP': 0}
+        self.slow_tests = []
         self.n = 0
 
         if options.hide_progress:
@@ -115,6 +143,8 @@ class ResultsSink:
             self.pb = ProgressBar(testcount, fmt)
 
     def push(self, output):
+        if self.options.show_slow and output.dt >= self.options.slow_test_threshold:
+            self.slow_tests.append(TestDuration(output.test, output.dt))
         if output.timed_out:
             self.counts['TIMEOUT'] += 1
         if isinstance(output, NullTestOutput):
@@ -128,24 +158,35 @@ class ResultsSink:
             result = TestResult.from_output(output)
             tup = (result.result, result.test.expect, result.test.random)
             dev_label = self.LABELS[tup][1]
+
+            if self.options.check_output:
+                if output.test.path in self.output_dict.keys():
+                    if self.output_dict[output.test.path] != output:
+                        self.counts['FAIL'] += 1
+                        self.print_automation_result(
+                            "TEST-UNEXPECTED-FAIL", result.test, time=output.dt,
+                            message="Same test with different flag producing different output")
+                else:
+                    self.output_dict[output.test.path] = output
+
             if output.timed_out:
                 dev_label = 'TIMEOUTS'
             self.groups.setdefault(dev_label, []).append(result)
 
             if dev_label == 'REGRESSIONS':
                 show_output = self.options.show_output \
-                              or not self.options.no_show_failed
+                    or not self.options.no_show_failed
             elif dev_label == 'TIMEOUTS':
                 show_output = self.options.show_output
             else:
                 show_output = self.options.show_output \
-                              and not self.options.failed_only
+                    and not self.options.failed_only
 
             if dev_label in ('REGRESSIONS', 'TIMEOUTS'):
                 show_cmd = self.options.show_cmd
             else:
                 show_cmd = self.options.show_cmd \
-                           and not self.options.failed_only
+                    and not self.options.failed_only
 
             if show_output or show_cmd:
                 self.pb.beginline()
@@ -181,8 +222,10 @@ class ResultsSink:
                             label, result.test, time=output.dt,
                             message=msg)
                 tup = (result.result, result.test.expect, result.test.random)
-                self.print_automation_result(
-                    self.LABELS[tup][0], result.test, time=output.dt)
+                self.print_automation_result(self.LABELS[tup][0],
+                                             result.test,
+                                             time=output.dt,
+                                             extra=getattr(output, 'extra', None))
                 return
 
             if dev_label:
@@ -195,7 +238,9 @@ class ResultsSink:
 
     def finish(self, completed):
         self.pb.finish(completed)
-        if not self.options.format == 'automation':
+        if self.options.format == 'automation':
+            self.slog.suite_end()
+        else:
             self.list(completed)
 
     # Conceptually, this maps (test result x test expection) to text labels.
@@ -216,7 +261,7 @@ class ResultsSink:
         (TestResult.PASS,  False, True):  ('TEST-PASS (EXPECTED RANDOM)',        ''),
         (TestResult.PASS,  True,  False): ('TEST-PASS',                          ''),
         (TestResult.PASS,  True,  True):  ('TEST-PASS (EXPECTED RANDOM)',        ''),
-        }
+    }
 
     def list(self, completed):
         for label, results in sorted(self.groups.items()):
@@ -245,11 +290,22 @@ class ResultsSink:
         else:
             print('FAIL' + suffix)
 
+        if self.options.show_slow:
+            min_duration = self.options.slow_test_threshold
+            print('Slow tests (duration > {}s)'.format(min_duration))
+            slow_tests = sorted(self.slow_tests, key=lambda x: x.duration, reverse=True)
+            any = False
+            for test in slow_tests:
+                print('{:>5} {}'.format(round(test.duration, 2), test.test))
+                any = True
+            if not any:
+                print('None')
+
     def all_passed(self):
         return 'REGRESSIONS' not in self.groups and 'TIMEOUTS' not in self.groups
 
     def print_automation_result(self, label, test, message=None, skip=False,
-                                time=None):
+                                time=None, extra=None):
         result = label
         result += " | " + test.path
         args = []
@@ -263,4 +319,15 @@ class ResultsSink:
             result += ' | (SKIP)'
         if time > self.options.timeout:
             result += ' | (TIMEOUT)'
+        result += ' [{:.1f} s]'.format(time)
         print(result)
+
+        details = {'extra': extra.copy() if extra else {}}
+        if self.options.shell_args:
+            details['extra']['shell_args'] = self.options.shell_args
+        details['extra']['jitflags'] = test.jitflags
+        if message:
+            details['message'] = message
+        status = 'FAIL' if 'TEST-UNEXPECTED' in label else 'PASS'
+
+        self.slog.test(test.path, status, time or 0, **details)

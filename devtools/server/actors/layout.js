@@ -4,547 +4,278 @@
 
 "use strict";
 
-/**
- * About the types of objects in this file:
- *
- * - ReflowActor: the actor class used for protocol purposes.
- *   Mostly empty, just gets an instance of LayoutChangesObserver and forwards
- *   its "reflows" events to clients.
- *
- * - LayoutChangesObserver: extends Observable and uses the ReflowObserver, to
- *   track reflows on the page.
- *   Used by the LayoutActor, but is also exported on the module, so can be used
- *   by any other actor that needs it.
- *
- * - Observable: A utility parent class, meant at being extended by classes that
- *   need a to observe something on the tabActor's windows.
- *
- * - Dedicated observers: There's only one of them for now: ReflowObserver which
- *   listens to reflow events via the docshell,
- *   These dedicated classes are used by the LayoutChangesObserver.
- */
+const { Cu } = require("chrome");
+const { Actor, ActorClassWithSpec } = require("devtools/shared/protocol");
+const { flexboxSpec, gridSpec, layoutSpec } = require("devtools/shared/specs/layout");
+const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
+const { getStringifiableFragments } =
+  require("devtools/server/actors/utils/css-grid-utils");
 
-const {Ci, Cu} = require("chrome");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-const protocol = require("devtools/server/protocol");
-const {method, Arg} = protocol;
-const events = require("sdk/event/core");
-const Heritage = require("sdk/core/heritage");
-const {setTimeout, clearTimeout} = require("sdk/timers");
-const EventEmitter = require("devtools/shared/event-emitter");
+loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants");
+loader.lazyRequireGetter(this, "CssLogic", "devtools/server/actors/inspector/css-logic", true);
 
 /**
- * The reflow actor tracks reflows and emits events about them.
- */
-var ReflowActor = exports.ReflowActor = protocol.ActorClass({
-  typeName: "reflow",
-
-  events: {
-    /**
-     * The reflows event is emitted when reflows have been detected. The event
-     * is sent with an array of reflows that occured. Each item has the
-     * following properties:
-     * - start {Number}
-     * - end {Number}
-     * - isInterruptible {Boolean}
-     */
-    "reflows": {
-      type: "reflows",
-      reflows: Arg(0, "array:json")
-    }
-  },
-
-  initialize: function(conn, tabActor) {
-    protocol.Actor.prototype.initialize.call(this, conn);
-
-    this.tabActor = tabActor;
-    this._onReflow = this._onReflow.bind(this);
-    this.observer = getLayoutChangesObserver(tabActor);
-    this._isStarted = false;
-  },
-
-  /**
-   * The reflow actor is the first (and last) in its hierarchy to use
-   * protocol.js so it doesn't have a parent protocol actor that takes care of
-   * its lifetime. So it needs a disconnect method to cleanup.
-   */
-  disconnect: function() {
-    this.destroy();
-  },
-
-  destroy: function() {
-    this.stop();
-    releaseLayoutChangesObserver(this.tabActor);
-    this.observer = null;
-    this.tabActor = null;
-
-    protocol.Actor.prototype.destroy.call(this);
-  },
-
-  /**
-   * Start tracking reflows and sending events to clients about them.
-   * This is a oneway method, do not expect a response and it won't return a
-   * promise.
-   */
-  start: method(function() {
-    if (!this._isStarted) {
-      this.observer.on("reflows", this._onReflow);
-      this._isStarted = true;
-    }
-  }, {oneway: true}),
-
-  /**
-   * Stop tracking reflows and sending events to clients about them.
-   * This is a oneway method, do not expect a response and it won't return a
-   * promise.
-   */
-  stop: method(function() {
-    if (this._isStarted) {
-      this.observer.off("reflows", this._onReflow);
-      this._isStarted = false;
-    }
-  }, {oneway: true}),
-
-  _onReflow: function(event, reflows) {
-    if (this._isStarted) {
-      events.emit(this, "reflows", reflows);
-    }
-  }
-});
-
-/**
- * Usage example of the reflow front:
+ * Set of actors the expose the CSS layout information to the devtools protocol clients.
  *
- * let front = ReflowFront(toolbox.target.client, toolbox.target.form);
- * front.on("reflows", this._onReflows);
- * front.start();
- * // now wait for events to come
+ * The |Layout| actor is the main entry point. It is used to get various CSS
+ * layout-related information from the document.
+ *
+ * The |Flexbox| actor provides the container node information to inspect the flexbox
+ * container.
+ *
+ * The |Grid| actor provides the grid fragment information to inspect the grid container.
  */
-exports.ReflowFront = protocol.FrontClass(ReflowActor, {
-  initialize: function(client, {reflowActor}) {
-    protocol.Front.prototype.initialize.call(this, client, {actor: reflowActor});
-    this.manage(this);
+
+const FlexboxActor = ActorClassWithSpec(flexboxSpec, {
+  /**
+   * @param  {LayoutActor} layoutActor
+   *         The LayoutActor instance.
+   * @param  {DOMNode} containerEl
+   *         The flex container element.
+   */
+  initialize(layoutActor, containerEl) {
+    Actor.prototype.initialize.call(this, layoutActor.conn);
+
+    this.containerEl = containerEl;
+    this.walker = layoutActor.walker;
   },
 
-  destroy: function() {
-    protocol.Front.prototype.destroy.call(this);
+  destroy() {
+    Actor.prototype.destroy.call(this);
+
+    this.containerEl = null;
+    this.walker = null;
+  },
+
+  form(detail) {
+    if (detail === "actorid") {
+      return this.actorID;
+    }
+
+    const form = {
+      actor: this.actorID,
+    };
+
+    // If the WalkerActor already knows the container element, then also return its
+    // ActorID so we avoid the client from doing another round trip to get it in many
+    // cases.
+    if (this.walker.hasNode(this.containerEl)) {
+      form.containerNodeActorID = this.walker.getNode(this.containerEl).actorID;
+    }
+
+    return form;
   },
 });
 
 /**
- * Base class for all sorts of observers that need to listen to events on the
- * tabActor's windows.
- * @param {TabActor} tabActor
- * @param {Function} callback Executed everytime the observer observes something
+ * The GridActor provides information about a given grid's fragment data.
  */
-function Observable(tabActor, callback) {
-  this.tabActor = tabActor;
-  this.callback = callback;
-
-  this._onWindowReady = this._onWindowReady.bind(this);
-  this._onWindowDestroyed = this._onWindowDestroyed.bind(this);
-
-  events.on(this.tabActor, "window-ready", this._onWindowReady);
-  events.on(this.tabActor, "window-destroyed", this._onWindowDestroyed);
-}
-
-Observable.prototype = {
+const GridActor = ActorClassWithSpec(gridSpec, {
   /**
-   * Is the observer currently observing
+   * @param  {LayoutActor} layoutActor
+   *         The LayoutActor instance.
+   * @param  {DOMNode} containerEl
+   *         The grid container element.
    */
-  isObserving: false,
+  initialize(layoutActor, containerEl) {
+    Actor.prototype.initialize.call(this, layoutActor.conn);
 
-  /**
-   * Stop observing and detroy this observer instance
-   */
-  destroy: function() {
-    if (this.isDestroyed) {
-      return;
+    this.containerEl = containerEl;
+    this.walker = layoutActor.walker;
+  },
+
+  destroy() {
+    Actor.prototype.destroy.call(this);
+
+    this.containerEl = null;
+    this.gridFragments = null;
+    this.walker = null;
+  },
+
+  form(detail) {
+    if (detail === "actorid") {
+      return this.actorID;
     }
-    this.isDestroyed = true;
 
-    this.stop();
+    // Seralize the grid fragment data into JSON so protocol.js knows how to write
+    // and read the data.
+    const gridFragments = this.containerEl.getGridFragments();
+    this.gridFragments = getStringifiableFragments(gridFragments);
 
-    events.off(this.tabActor, "window-ready", this._onWindowReady);
-    events.off(this.tabActor, "window-destroyed", this._onWindowDestroyed);
+    // Record writing mode and text direction for use by the grid outline.
+    const { direction, writingMode } = CssLogic.getComputedStyle(this.containerEl);
 
-    this.callback = null;
-    this.tabActor = null;
-  },
+    const form = {
+      actor: this.actorID,
+      direction,
+      gridFragments: this.gridFragments,
+      writingMode,
+    };
 
-  /**
-   * Start observing whatever it is this observer is supposed to observe
-   */
-  start: function() {
-    if (this.isObserving) {
-      return;
+    // If the WalkerActor already knows the container element, then also return its
+    // ActorID so we avoid the client from doing another round trip to get it in many
+    // cases.
+    if (this.walker.hasNode(this.containerEl)) {
+      form.containerNodeActorID = this.walker.getNode(this.containerEl).actorID;
     }
-    this.isObserving = true;
 
-    this._startListeners(this.tabActor.windows);
+    return form;
   },
-
-  /**
-   * Stop observing
-   */
-  stop: function() {
-    if (!this.isObserving) {
-      return;
-    }
-    this.isObserving = false;
-
-    if (this.tabActor.attached && this.tabActor.docShell) {
-      // It's only worth stopping if the tabActor is still attached
-      this._stopListeners(this.tabActor.windows);
-    }
-  },
-
-  _onWindowReady: function({window}) {
-    if (this.isObserving) {
-      this._startListeners([window]);
-    }
-  },
-
-  _onWindowDestroyed: function({window}) {
-    if (this.isObserving) {
-      this._stopListeners([window]);
-    }
-  },
-
-  _startListeners: function(windows) {
-    // To be implemented by sub-classes.
-  },
-
-  _stopListeners: function(windows) {
-    // To be implemented by sub-classes.
-  },
-
-  /**
-   * To be called by sub-classes when something has been observed
-   */
-  notifyCallback: function(...args) {
-    this.isObserving && this.callback && this.callback.apply(null, args);
-  }
-};
+});
 
 /**
- * The LayouChangesObserver will observe reflows as soon as it is started.
- * Some devtools actors may cause reflows and it may be wanted to "hide" these
- * reflows from the LayouChangesObserver consumers.
- * If this is the case, such actors should require this module and use this
- * global function to turn the ignore mode on and off temporarily.
- *
- * Note that if a node is provided, it will be used to force a sync reflow to
- * make sure all reflows which occurred before switching the mode on or off are
- * either observed or ignored depending on the current mode.
- *
- * @param {Boolean} ignore
- * @param {DOMNode} syncReflowNode The node to use to force a sync reflow
+ * The CSS layout actor provides layout information for the given document.
  */
-var gIgnoreLayoutChanges = false;
-exports.setIgnoreLayoutChanges = function(ignore, syncReflowNode) {
-  if (syncReflowNode) {
-    let forceSyncReflow = syncReflowNode.offsetWidth;
-  }
-  gIgnoreLayoutChanges = ignore;
-};
+const LayoutActor = ActorClassWithSpec(layoutSpec, {
+  initialize(conn, targetActor, walker) {
+    Actor.prototype.initialize.call(this, conn);
 
-/**
- * The LayoutChangesObserver class is instantiated only once per given tab
- * and is used to track reflows and dom and style changes in that tab.
- * The LayoutActor uses this class to send reflow events to its clients.
- *
- * This class isn't exported on the module because it shouldn't be instantiated
- * to avoid creating several instances per tabs.
- * Use `getLayoutChangesObserver(tabActor)`
- * and `releaseLayoutChangesObserver(tabActor)`
- * which are exported to get and release instances.
- *
- * The observer loops every EVENT_BATCHING_DELAY ms and checks if layout changes
- * have happened since the last loop iteration. If there are, it sends the
- * corresponding events:
- *
- * - "reflows", with an array of all the reflows that occured,
- * - "resizes", with an array of all the resizes that occured,
- *
- * @param {TabActor} tabActor
- */
-function LayoutChangesObserver(tabActor) {
-  this.tabActor = tabActor;
-
-  this._startEventLoop = this._startEventLoop.bind(this);
-  this._onReflow = this._onReflow.bind(this);
-  this._onResize = this._onResize.bind(this);
-
-  // Creating the various observers we're going to need
-  // For now, just the reflow observer, but later we can add markupMutation,
-  // styleSheetChanges and styleRuleChanges
-  this.reflowObserver = new ReflowObserver(this.tabActor, this._onReflow);
-  this.resizeObserver = new WindowResizeObserver(this.tabActor, this._onResize);
-
-  EventEmitter.decorate(this);
-}
-
-exports.LayoutChangesObserver = LayoutChangesObserver;
-
-LayoutChangesObserver.prototype = {
-  /**
-   * How long does this observer waits before emitting batched events.
-   * The lower the value, the more event packets will be sent to clients,
-   * potentially impacting performance.
-   * The higher the value, the more time we'll wait, this is better for
-   * performance but has an effect on how soon changes are shown in the toolbox.
-   */
-  EVENT_BATCHING_DELAY: 300,
-
-  /**
-   * Destroying this instance of LayoutChangesObserver will stop the batched
-   * events from being sent.
-   */
-  destroy: function() {
-    this.isObserving = false;
-
-    this.reflowObserver.destroy();
-    this.reflows = null;
-
-    this.resizeObserver.destroy();
-    this.hasResized = false;
-
-    this.tabActor = null;
+    this.targetActor = targetActor;
+    this.walker = walker;
   },
 
-  start: function() {
-    if (this.isObserving) {
-      return;
-    }
-    this.isObserving = true;
+  destroy() {
+    Actor.prototype.destroy.call(this);
 
-    this.reflows = [];
-    this.hasResized = false;
-
-    this._startEventLoop();
-
-    this.reflowObserver.start();
-    this.resizeObserver.start();
-  },
-
-  stop: function() {
-    if (!this.isObserving) {
-      return;
-    }
-    this.isObserving = false;
-
-    this._stopEventLoop();
-
-    this.reflows = [];
-    this.hasResized = false;
-
-    this.reflowObserver.stop();
-    this.resizeObserver.stop();
+    this.targetActor = null;
+    this.walker = null;
   },
 
   /**
-   * Start the event loop, which regularly checks if there are any observer
-   * events to be sent as batched events
-   * Calls itself in a loop.
+   * Helper function for getCurrentGrid and getCurrentFlexbox. Returns the grid or
+   * flex container (whichever is requested) found by iterating on the given selected
+   * node. The current node can be a grid/flex container or grid/flex item. If it is a
+   * grid/flex item, returns the parent grid/flex container. Otherwise, returns null
+   * if the current or parent node is not a grid/flex container.
+   *
+   * @param  {Node|NodeActor} node
+   *         The node to start iterating at.
+   * @param {String} type
+   *         Can be "grid" or "flex", the display type we are searching for.
+   * @return {GridActor|FlexboxActor|Null} The GridActor or FlexboxActor of the
+   * grid/flex container of the give node. Otherwise, returns null.
    */
-  _startEventLoop: function() {
-    // Avoid emitting events if the tabActor has been detached (may happen
-    // during shutdown)
-    if (!this.tabActor || !this.tabActor.attached) {
-      return;
+  getCurrentDisplay(node, type) {
+    if (isNodeDead(node)) {
+      return null;
     }
 
-    // Send any reflows we have
-    if (this.reflows && this.reflows.length) {
-      this.emit("reflows", this.reflows);
-      this.reflows = [];
+    // Given node can either be a Node or a NodeActor.
+    if (node.rawNode) {
+      node = node.rawNode;
     }
 
-    // Send any resizes we have
-    if (this.hasResized) {
-      this.emit("resize");
-      this.hasResized = false;
+    const treeWalker = this.walker.getDocumentWalker(node,
+      nodeFilterConstants.SHOW_ELEMENT);
+    let currentNode = treeWalker.currentNode;
+    let displayType = this.walker.getNode(currentNode).displayType;
+
+    if (!displayType) {
+      return null;
     }
 
-    this.eventLoopTimer = this._setTimeout(this._startEventLoop,
-      this.EVENT_BATCHING_DELAY);
-  },
-
-  _stopEventLoop: function() {
-    this._clearTimeout(this.eventLoopTimer);
-  },
-
-  // Exposing set/clearTimeout here to let tests override them if needed
-  _setTimeout: function(cb, ms) {
-    return setTimeout(cb, ms);
-  },
-  _clearTimeout: function(t) {
-    return clearTimeout(t);
-  },
-
-  /**
-   * Executed whenever a reflow is observed. Only stacks the reflow in the
-   * reflows array.
-   * The EVENT_BATCHING_DELAY loop will take care of it later.
-   * @param {Number} start When the reflow started
-   * @param {Number} end When the reflow ended
-   * @param {Boolean} isInterruptible
-   */
-  _onReflow: function(start, end, isInterruptible) {
-    if (gIgnoreLayoutChanges) {
-      return;
+    if (type == "flex" &&
+        (displayType == "inline-flex" || displayType == "flex")) {
+      return new FlexboxActor(this, currentNode);
+    } else if (type == "grid" &&
+               (displayType == "inline-grid" || displayType == "grid")) {
+      return new GridActor(this, currentNode);
     }
 
-    // XXX: when/if bug 997092 gets fixed, we will be able to know which
-    // elements have been reflowed, which would be a nice thing to add here.
-    this.reflows.push({
-      start: start,
-      end: end,
-      isInterruptible: isInterruptible
-    });
-  },
-
-  /**
-   * Executed whenever a resize is observed. Only store a flag saying that a
-   * resize occured.
-   * The EVENT_BATCHING_DELAY loop will take care of it later.
-   */
-  _onResize: function() {
-    if (gIgnoreLayoutChanges) {
-      return;
-    }
-
-    this.hasResized = true;
-  }
-};
-
-/**
- * Get a LayoutChangesObserver instance for a given window. This function makes
- * sure there is only one instance per window.
- * @param {TabActor} tabActor
- * @return {LayoutChangesObserver}
- */
-var observedWindows = new Map();
-function getLayoutChangesObserver(tabActor) {
-  let observerData = observedWindows.get(tabActor);
-  if (observerData) {
-    observerData.refCounting ++;
-    return observerData.observer;
-  }
-
-  let obs = new LayoutChangesObserver(tabActor);
-  observedWindows.set(tabActor, {
-    observer: obs,
-    // counting references allows to stop the observer when no tabActor owns an
-    // instance.
-    refCounting: 1
-  });
-  obs.start();
-  return obs;
-}
-exports.getLayoutChangesObserver = getLayoutChangesObserver;
-
-/**
- * Release a LayoutChangesObserver instance that was retrieved by
- * getLayoutChangesObserver. This is required to ensure the tabActor reference
- * is removed and the observer is eventually stopped and destroyed.
- * @param {TabActor} tabActor
- */
-function releaseLayoutChangesObserver(tabActor) {
-  let observerData = observedWindows.get(tabActor);
-  if (!observerData) {
-    return;
-  }
-
-  observerData.refCounting --;
-  if (!observerData.refCounting) {
-    observerData.observer.destroy();
-    observedWindows.delete(tabActor);
-  }
-}
-exports.releaseLayoutChangesObserver = releaseLayoutChangesObserver;
-
-/**
- * Reports any reflow that occurs in the tabActor's docshells.
- * @extends Observable
- * @param {TabActor} tabActor
- * @param {Function} callback Executed everytime a reflow occurs
- */
-function ReflowObserver(tabActor, callback) {
-  Observable.call(this, tabActor, callback);
-}
-
-ReflowObserver.prototype = Heritage.extend(Observable.prototype, {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIReflowObserver,
-    Ci.nsISupportsWeakReference]),
-
-  _startListeners: function(windows) {
-    for (let window of windows) {
-      let docshell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIWebNavigation)
-                     .QueryInterface(Ci.nsIDocShell);
-      docshell.addWeakReflowObserver(this);
-    }
-  },
-
-  _stopListeners: function(windows) {
-    for (let window of windows) {
-      try {
-        let docshell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                       .getInterface(Ci.nsIWebNavigation)
-                       .QueryInterface(Ci.nsIDocShell);
-        docshell.removeWeakReflowObserver(this);
-      } catch (e) {
-        // Corner cases where a global has already been freed may happen, in
-        // which case, no need to remove the observer.
+    // Otherwise, check if this is a flex item or the parent node is a flex container.
+    while ((currentNode = treeWalker.parentNode())) {
+      if (!currentNode) {
+        break;
       }
+
+      displayType = this.walker.getNode(currentNode).displayType;
+
+      if (type == "flex" &&
+          (displayType == "inline-flex" || displayType == "flex")) {
+        return new FlexboxActor(this, currentNode);
+      } else if (type == "grid" &&
+                 (displayType == "inline-grid" || displayType == "grid")) {
+        return new GridActor(this, currentNode);
+      } else if (displayType == "contents") {
+        // Continue walking up the tree since the parent node is a content element.
+        continue;
+      }
+
+      break;
     }
+
+    return null;
   },
 
-  reflow: function(start, end) {
-    this.notifyCallback(start, end, false);
+  /**
+   * Returns the grid container found by iterating on the given selected node. The current
+   * node can be a grid container or grid item. If it is a grid item, returns the parent
+   * grid container. Otherwise, return null if the current or parent node is not a grid
+   * container.
+   *
+   * @param  {Node|NodeActor} node
+   *         The node to start iterating at.
+   * @return {GridActor|Null} The GridActor of the grid container of the give node.
+   * Otherwise, returns null.
+   */
+  getCurrentGrid(node) {
+    return this.getCurrentDisplay(node, "grid");
   },
 
-  reflowInterruptible: function(start, end) {
-    this.notifyCallback(start, end, true);
-  }
+  /**
+   * Returns the flex container found by iterating on the given selected node. The current
+   * node can be a flex container or flex item. If it is a flex item, returns the parent
+   * flex container. Otherwise, return null if the current or parent node is not a flex
+   * container.
+   *
+   * @param  {Node|NodeActor} node
+   *         The node to start iterating at.
+   * @return {FlexboxActor|Null} The FlexboxActor of the flex container of the give node.
+   * Otherwise, returns null.
+   */
+  getCurrentFlexbox(node) {
+    return this.getCurrentDisplay(node, "flex");
+  },
+
+  /**
+   * Returns an array of GridActor objects for all the grid elements contained in the
+   * given root node.
+   *
+   * @param  {Node|NodeActor} node
+   *         The root node for grid elements
+   * @return {Array} An array of GridActor objects.
+   */
+  getGrids(node) {
+    if (isNodeDead(node)) {
+      return [];
+    }
+
+    // Root node can either be a Node or a NodeActor.
+    if (node.rawNode) {
+      node = node.rawNode;
+    }
+
+    // Root node can be a #document object, which does not support getElementsWithGrid.
+    if (node.nodeType === nodeConstants.DOCUMENT_NODE) {
+      node = node.documentElement;
+    }
+
+    const gridElements = node.getElementsWithGrid();
+    let gridActors = gridElements.map(n => new GridActor(this, n));
+
+    const frames = node.querySelectorAll("iframe, frame");
+    for (const frame of frames) {
+      gridActors = gridActors.concat(this.getGrids(frame.contentDocument));
+    }
+
+    return gridActors;
+  },
 });
 
-/**
- * Reports window resize events on the tabActor's windows.
- * @extends Observable
- * @param {TabActor} tabActor
- * @param {Function} callback Executed everytime a resize occurs
- */
-function WindowResizeObserver(tabActor, callback) {
-  Observable.call(this, tabActor, callback);
-  this.onResize = this.onResize.bind(this);
+function isNodeDead(node) {
+  return !node || (node.rawNode && Cu.isDeadWrapper(node.rawNode));
 }
 
-WindowResizeObserver.prototype = Heritage.extend(Observable.prototype, {
-  _startListeners: function() {
-    this.listenerTarget.addEventListener("resize", this.onResize);
-  },
-
-  _stopListeners: function() {
-    this.listenerTarget.removeEventListener("resize", this.onResize);
-  },
-
-  onResize: function() {
-    this.notifyCallback();
-  },
-
-  get listenerTarget() {
-    // For the rootActor, return its window.
-    if (this.tabActor.isRootActor) {
-      return this.tabActor.window;
-    }
-
-    // Otherwise, get the tabActor's chromeEventHandler.
-    return this.tabActor.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIWebNavigation)
-                               .QueryInterface(Ci.nsIDocShell)
-                               .chromeEventHandler;
-  }
-});
+exports.FlexboxActor = FlexboxActor;
+exports.GridActor = GridActor;
+exports.LayoutActor = LayoutActor;

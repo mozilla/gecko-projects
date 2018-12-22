@@ -4,25 +4,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var CC = Components.classes;
-const CI = Components.interfaces;
-const CR = Components.results;
-const CU = Components.utils;
-
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 const DEBUG_CONTRACTID = "@mozilla.org/xpcom/debug;1";
 const PRINTSETTINGS_CONTRACTID = "@mozilla.org/gfx/printsettings-service;1";
 const ENVIRONMENT_CONTRACTID = "@mozilla.org/process/environment;1";
 const NS_OBSERVER_SERVICE_CONTRACTID = "@mozilla.org/observer-service;1";
+const NS_GFXINFO_CONTRACTID = "@mozilla.org/gfx/info;1";
+const IO_SERVICE_CONTRACTID = "@mozilla.org/network/io-service;1"
 
 // "<!--CLEAR-->"
 const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
 
-CU.import("resource://gre/modules/Timer.jsm");
-CU.import("resource://gre/modules/AsyncSpellCheckTestHelper.jsm");
+Cu.import("resource://gre/modules/Timer.jsm");
+Cu.import("chrome://reftest/content/AsyncSpellCheckTestHelper.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 var gBrowserIsRemote;
+var gIsWebRenderEnabled;
 var gHaveCanvasSnapshot = false;
 // Plugin layers can be updated asynchronously, so to make sure that all
 // layer surfaces have the right content, we need to listen for explicit
@@ -34,6 +33,7 @@ var gHaveCanvasSnapshot = false;
 var gExplicitPendingPaintCount = 0;
 var gExplicitPendingPaintsCompleteHook;
 var gCurrentURL;
+var gCurrentURLTargetType;
 var gCurrentTestType;
 var gTimeoutHook = null;
 var gFailureTimeout = null;
@@ -49,18 +49,24 @@ var gClearingForAssertionCheck = false;
 const TYPE_LOAD = 'load';  // test without a reference (just test that it does
                            // not assert, crash, hang, or leak)
 const TYPE_SCRIPT = 'script'; // test contains individual test results
+const TYPE_PRINT = 'print'; // test and reference will be printed to PDF's and
+                            // compared structurally
+
+// keep this in sync with globals.jsm
+const URL_TARGET_TYPE_TEST = 0;      // first url
+const URL_TARGET_TYPE_REFERENCE = 1; // second url, if any
 
 function markupDocumentViewer() {
     return docShell.contentViewer;
 }
 
 function webNavigation() {
-    return docShell.QueryInterface(CI.nsIWebNavigation);
+    return docShell.QueryInterface(Ci.nsIWebNavigation);
 }
 
 function windowUtilsForWindow(w) {
-    return w.QueryInterface(CI.nsIInterfaceRequestor)
-            .getInterface(CI.nsIDOMWindowUtils);
+    return w.QueryInterface(Ci.nsIInterfaceRequestor)
+            .getInterface(Ci.nsIDOMWindowUtils);
 }
 
 function windowUtils() {
@@ -98,12 +104,10 @@ function PaintWaitFinishedListener(event)
 
 function OnInitialLoad()
 {
-#ifndef REFTEST_B2G
     removeEventListener("load", OnInitialLoad, true);
-#endif
 
-    gDebug = CC[DEBUG_CONTRACTID].getService(CI.nsIDebug2);
-    var env = CC[ENVIRONMENT_CONTRACTID].getService(CI.nsIEnvironment);
+    gDebug = Cc[DEBUG_CONTRACTID].getService(Ci.nsIDebug2);
+    var env = Cc[ENVIRONMENT_CONTRACTID].getService(Ci.nsIEnvironment);
     gVerbose = !!env.get("MOZ_REFTEST_VERBOSE");
 
     RegisterMessageListeners();
@@ -116,10 +120,10 @@ function OnInitialLoad()
     addEventListener("MozPaintWait", PaintWaitListener, true);
     addEventListener("MozPaintWaitFinished", PaintWaitFinishedListener, true);
 
-    LogWarning("Using browser remote="+ gBrowserIsRemote +"\n");
+    LogInfo("Using browser remote="+ gBrowserIsRemote +"\n");
 }
 
-function SetFailureTimeout(cb, timeout)
+function SetFailureTimeout(cb, timeout, uri)
 {
   var targetTime = Date.now() + timeout;
 
@@ -134,11 +138,21 @@ function SetFailureTimeout(cb, timeout)
     }
   }
 
+  // Once OnDocumentLoad is called to handle the 'load' event it will update
+  // this error message to reflect what stage of the processing it has reached
+  // as it advances to each stage in turn.
+  gFailureReason = "timed out after " + timeout +
+                   " ms waiting for 'load' event for " + uri;
   gFailureTimeout = setTimeout(wrapper, timeout);
 }
 
-function StartTestURI(type, uri, timeout)
+function StartTestURI(type, uri, uriTargetType, timeout)
 {
+    // The GC is only able to clean up compartments after the CC runs. Since
+    // the JS ref tests disable the normal browser chrome and do not otherwise
+    // create substatial DOM garbage, the CC tends not to run enough normally.
+    windowUtils().runNextCollectorTimer();
+
     // Reset gExplicitPendingPaintCount in case there was a timeout or
     // the count is out of sync for some other reason
     if (gExplicitPendingPaintCount != 0) {
@@ -149,12 +163,13 @@ function StartTestURI(type, uri, timeout)
 
     gCurrentTestType = type;
     gCurrentURL = uri;
+    gCurrentURLTargetType = uriTargetType;
 
     gCurrentTestStartTime = Date.now();
     if (gFailureTimeout != null) {
         SendException("program error managing timeouts\n");
     }
-    SetFailureTimeout(LoadFailed, timeout);
+    SetFailureTimeout(LoadFailed, timeout, uri);
 
     LoadURI(gCurrentURL);
 }
@@ -171,21 +186,21 @@ function resetZoom() {
 }
 
 function doPrintMode(contentRootElement) {
-#if REFTEST_B2G
-    // nsIPrintSettings not available in B2G
-    return false;
-#else
     // use getAttribute because className works differently in HTML and SVG
-    return contentRootElement &&
-           contentRootElement.hasAttribute('class') &&
-           contentRootElement.getAttribute('class').split(/\s+/)
-                             .indexOf("reftest-print") != -1;
-#endif
+    if (contentRootElement &&
+        contentRootElement.hasAttribute('class')) {
+        var classList = contentRootElement.getAttribute('class').split(/\s+/);
+        if (classList.includes("reftest-print")) {
+            SendException("reftest-print is obsolete, use reftest-paged instead");
+            return;
+        }
+        return classList.includes("reftest-paged");
+    }
 }
 
 function setupPrintMode() {
    var PSSVC =
-       CC[PRINTSETTINGS_CONTRACTID].getService(CI.nsIPrintSettingsService);
+       Cc[PRINTSETTINGS_CONTRACTID].getService(Ci.nsIPrintSettingsService);
    var ps = PSSVC.newPrintSettings;
    ps.paperWidth = 5;
    ps.paperHeight = 3;
@@ -203,6 +218,68 @@ function setupPrintMode() {
    ps.footerStrCenter = "";
    ps.footerStrRight = "";
    docShell.contentViewer.setPageMode(true, ps);
+}
+
+// Prints current page to a PDF file and calls callback when sucessfully
+// printed and written.
+function printToPdf(callback) {
+    let currentDoc = content.document;
+    let isPrintSelection = false;
+    let printRange = '';
+
+    if (currentDoc) {
+        let contentRootElement = currentDoc.documentElement;
+        printRange = contentRootElement.getAttribute("reftest-print-range") || '';
+    }
+
+    if (printRange) {
+        if (printRange === 'selection') {
+            isPrintSelection = true;
+        } else if (!/^[1-9]\d*-[1-9]\d*$/.test(printRange)) {
+            SendException("invalid value for reftest-print-range");
+            return;
+        }
+    }
+
+    let fileName = "reftest-print.pdf";
+    let file = Services.dirsvc.get("TmpD", Ci.nsIFile);
+    file.append(fileName);
+    file.createUnique(file.NORMAL_FILE_TYPE, 0o644);
+
+    let PSSVC = Cc[PRINTSETTINGS_CONTRACTID].getService(Ci.nsIPrintSettingsService);
+    let ps = PSSVC.newPrintSettings;
+    ps.printSilent = true;
+    ps.showPrintProgress = false;
+    ps.printBGImages = true;
+    ps.printBGColors = true;
+    ps.printToFile = true;
+    ps.toFileName = file.path;
+    ps.printFrameType = Ci.nsIPrintSettings.kFramesAsIs;
+    ps.outputFormat = Ci.nsIPrintSettings.kOutputFormatPDF;
+
+    if (isPrintSelection) {
+        ps.printRange = Ci.nsIPrintSettings.kRangeSelection;
+    } else if (printRange) {
+        ps.printRange = Ci.nsIPrintSettings.kRangeSpecifiedPageRange;
+        let range = printRange.split('-');
+        ps.startPageRange = +range[0] || 1;
+        ps.endPageRange = +range[1] || 1;
+    }
+
+    let webBrowserPrint = content.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsIWebBrowserPrint);
+    webBrowserPrint.print(ps, {
+        onStateChange: function(webProgress, request, stateFlags, status) {
+            if (stateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
+                stateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK) {
+                callback(status, file.path);
+            }
+        },
+        onProgressChange: function () {},
+        onLocationChange: function () {},
+        onStatusChange: function () {},
+        onSecurityChange: function () {},
+    });
 }
 
 function attrOrDefault(element, attr, def) {
@@ -354,7 +431,7 @@ function shouldWaitForReftestWaitRemoval(contentRootElement) {
     return contentRootElement &&
            contentRootElement.hasAttribute('class') &&
            contentRootElement.getAttribute('class').split(/\s+/)
-                             .indexOf("reftest-wait") != -1;
+                             .includes("reftest-wait");
 }
 
 function shouldSnapshotWholePage(contentRootElement) {
@@ -362,11 +439,17 @@ function shouldSnapshotWholePage(contentRootElement) {
     return contentRootElement &&
            contentRootElement.hasAttribute('class') &&
            contentRootElement.getAttribute('class').split(/\s+/)
-                             .indexOf("reftest-snapshot-all") != -1;
+                             .includes("reftest-snapshot-all");
 }
 
 function getNoPaintElements(contentRootElement) {
     return contentRootElement.getElementsByClassName('reftest-no-paint');
+}
+function getNoDisplayListElements(contentRootElement) {
+    return contentRootElement.getElementsByClassName('reftest-no-display-list');
+}
+function getDisplayListElements(contentRootElement) {
+    return contentRootElement.getElementsByClassName('reftest-display-list');
 }
 
 function getOpaqueLayerElements(contentRootElement) {
@@ -387,6 +470,11 @@ function getAssignedLayerMap(contentRootElement) {
     return layerNameToElementsMap;
 }
 
+const FlushMode = {
+  ALL: 0,
+  IGNORE_THROTTLED_ANIMATIONS: 1
+};
+
 // Initial state. When the document has loaded and all MozAfterPaint events and
 // all explicit paint waits are flushed, we can fire the MozReftestInvalidate
 // event and move to the next state.
@@ -405,19 +493,22 @@ const STATE_WAITING_FOR_APZ_FLUSH = 3;
 const STATE_WAITING_TO_FINISH = 4;
 const STATE_COMPLETED = 5;
 
-function FlushRendering() {
+function FlushRendering(aFlushMode) {
     var anyPendingPaintsGeneratedInDescendants = false;
 
     function flushWindow(win) {
-        var utils = win.QueryInterface(CI.nsIInterfaceRequestor)
-                    .getInterface(CI.nsIDOMWindowUtils);
+        var utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIDOMWindowUtils);
         var afterPaintWasPending = utils.isMozAfterPaintPending;
 
         var root = win.document.documentElement;
         if (root && !root.classList.contains("reftest-no-flush")) {
             try {
-                // Flush pending restyles and reflows for this window
-                root.getBoundingClientRect();
+                if (aFlushMode === FlushMode.IGNORE_THROTTLED_ANIMATIONS) {
+                    utils.flushLayoutWithoutThrottledAnimations();
+                } else {
+                    root.getBoundingClientRect();
+                }
             } catch (e) {
                 LogWarning("flushWindow failed: " + e + "\n");
             }
@@ -481,7 +572,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
         // OK, we can end the test now.
         removeEventListener("MozAfterPaint", AfterPaintListener, false);
         if (contentRootElement) {
-            contentRootElement.removeEventListener("DOMAttrModified", AttrModifiedListener, false);
+            contentRootElement.removeEventListener("DOMAttrModified", AttrModifiedListener);
         }
         gExplicitPendingPaintsCompleteHook = null;
         gTimeoutHook = null;
@@ -499,7 +590,21 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
             return;
         }
 
-        FlushRendering();
+        // We don't need to flush styles any more when we are in the state
+        // after reftest-wait has removed.
+        if (state != STATE_WAITING_TO_FINISH) {
+          // If we are waiting for the MozReftestInvalidate event we don't want
+          // to flush throttled animations. Flushing throttled animations can
+          // continue to cause new MozAfterPaint events even when all the
+          // rendering we're concerned about should have ceased. Since
+          // MozReftestInvalidate won't be sent until we finish waiting for all
+          // MozAfterPaint events, we should avoid flushing throttled animations
+          // here or else we'll never leave this state.
+          flushMode = (state === STATE_WAITING_TO_FIRE_INVALIDATE_EVENT)
+                    ? FlushMode.IGNORE_THROTTLED_ANIMATIONS
+                    : FlushMode.ALL;
+          FlushRendering(flushMode);
+        }
 
         switch (state) {
         case STATE_WAITING_TO_FIRE_INVALIDATE_EVENT: {
@@ -526,6 +631,14 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                 for (var i = 0; i < elements.length; ++i) {
                   windowUtils().checkAndClearPaintedState(elements[i]);
                 }
+                elements = getNoDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                  windowUtils().checkAndClearDisplayListState(elements[i]);
+                }
+                elements = getDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                  windowUtils().checkAndClearDisplayListState(elements[i]);
+                }
                 var notification = content.document.createEvent("Events");
                 notification.initEvent("MozReftestInvalidate", true, false);
                 contentRootElement.dispatchEvent(notification);
@@ -539,7 +652,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
             if (hasReftestWait && !shouldWaitForReftestWaitRemoval(contentRootElement)) {
                 // MozReftestInvalidate handler removed reftest-wait.
                 // We expect something to have been invalidated...
-                FlushRendering();
+                FlushRendering(FlushMode.ALL);
                 if (!shouldWaitForPendingPaints() && !shouldWaitForExplicitPaintWaiters()) {
                     LogWarning("MozInvalidateEvent didn't invalidate");
                 }
@@ -574,18 +687,22 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
             LogInfo("MakeProgress: STATE_WAITING_FOR_APZ_FLUSH");
             gFailureReason = "timed out waiting for APZ flush to complete";
 
-            var os = CC[NS_OBSERVER_SERVICE_CONTRACTID].getService(CI.nsIObserverService);
+            var os = Cc[NS_OBSERVER_SERVICE_CONTRACTID].getService(Ci.nsIObserverService);
             var flushWaiter = function(aSubject, aTopic, aData) {
                 if (aTopic) LogInfo("MakeProgress: apz-repaints-flushed fired");
                 os.removeObserver(flushWaiter, "apz-repaints-flushed");
                 state = STATE_WAITING_TO_FINISH;
                 MakeProgress();
             };
-            os.addObserver(flushWaiter, "apz-repaints-flushed", false);
+            os.addObserver(flushWaiter, "apz-repaints-flushed");
 
             var willSnapshot = (gCurrentTestType != TYPE_SCRIPT) &&
-                               (gCurrentTestType != TYPE_LOAD);
-            if (willSnapshot && windowUtils().flushApzRepaints()) {
+                               (gCurrentTestType != TYPE_LOAD) &&
+                               (gCurrentTestType != TYPE_PRINT);
+            var noFlush =
+                !(contentRootElement &&
+                  contentRootElement.classList.contains("reftest-no-flush"));
+            if (noFlush && willSnapshot && windowUtils().flushApzRepaints()) {
                 LogInfo("MakeProgress: done requesting APZ flush");
             } else {
                 LogInfo("MakeProgress: APZ flush not required");
@@ -621,6 +738,23 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                       SendFailedNoPaint();
                   }
               }
+              // We only support retained display lists in the content process
+              // right now, so don't fail reftest-no-display-list tests when
+              // we don't have e10s.
+              if (gBrowserIsRemote) {
+                elements = getNoDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                    if (windowUtils().checkAndClearDisplayListState(elements[i])) {
+                        SendFailedNoDisplayList();
+                    }
+                }
+                elements = getDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                    if (!windowUtils().checkAndClearDisplayListState(elements[i])) {
+                        SendFailedDisplayList();
+                    }
+                }
+              }
               CheckLayerAssertions(contentRootElement);
             }
             LogInfo("MakeProgress: Completed");
@@ -638,7 +772,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
     // If contentRootElement is null then shouldWaitForReftestWaitRemoval will
     // always return false so we don't need a listener anyway
     if (contentRootElement) {
-      contentRootElement.addEventListener("DOMAttrModified", AttrModifiedListener, false);
+      contentRootElement.addEventListener("DOMAttrModified", AttrModifiedListener);
     }
     gExplicitPendingPaintsCompleteHook = ExplicitPaintsCompleteListener;
     gTimeoutHook = RemoveListeners;
@@ -672,9 +806,17 @@ function OnDocumentLoad(event)
         // Ignore load events for subframes.
         return;
 
-    if (gClearingForAssertionCheck &&
-        currentDoc.location.href == BLANK_URL_FOR_CLEARING) {
-        DoAssertionCheck();
+    if (gClearingForAssertionCheck) {
+        if (currentDoc.location.href == BLANK_URL_FOR_CLEARING) {
+            DoAssertionCheck();
+            return;
+        }
+
+        // It's likely the previous test document reloads itself and causes the
+        // attempt of loading blank page fails. In this case we should retry
+        // loading the blank page.
+        LogInfo("Retry loading a blank page");
+        LoadURI(BLANK_URL_FOR_CLEARING);
         return;
     }
 
@@ -710,7 +852,7 @@ function OnDocumentLoad(event)
           content.document ? content.document.documentElement : null;
 
         // Flush the document in case it got modified in a load event handler.
-        FlushRendering();
+        FlushRendering(FlushMode.ALL);
 
         // Take a snapshot now. We need to do this before we check whether
         // we should wait, since this might trigger dispatching of
@@ -762,6 +904,11 @@ function OnDocumentLoad(event)
 function CheckLayerAssertions(contentRootElement)
 {
     if (!contentRootElement) {
+        return;
+    }
+    if (gIsWebRenderEnabled) {
+        // WebRender doesn't use layers, so let's not try checking layers
+        // assertions.
         return;
     }
 
@@ -816,7 +963,7 @@ function CheckForProcessCrashExpectation(contentRootElement)
     if (contentRootElement &&
         contentRootElement.hasAttribute('class') &&
         contentRootElement.getAttribute('class').split(/\s+/)
-                          .indexOf("reftest-expect-process-crash") != -1) {
+                          .includes("reftest-expect-process-crash")) {
         SendExpectProcessCrash();
     }
 }
@@ -830,7 +977,16 @@ function RecordResult()
     clearTimeout(gFailureTimeout);
     gFailureReason = null;
     gFailureTimeout = null;
+    gCurrentURL = null;
+    gCurrentURLTargetType = undefined;
 
+    if (gCurrentTestType == TYPE_PRINT) {
+        printToPdf(function (status, fileName) {
+            SendPrintResult(currentTestRunTime, status, fileName);
+            FinishTestItem();
+        });
+        return;
+    }
     if (gCurrentTestType == TYPE_SCRIPT) {
         var error = '';
         var testwindow = content;
@@ -945,14 +1101,17 @@ const SYNC_ALLOW_DISABLE = 0x1;
 function SynchronizeForSnapshot(flags)
 {
     if (gCurrentTestType == TYPE_SCRIPT ||
-        gCurrentTestType == TYPE_LOAD) {
-        // Script tests or load-only tests do not need any snapshotting
+        gCurrentTestType == TYPE_LOAD ||
+        gCurrentTestType == TYPE_PRINT) {
+        // Script, load-only, and PDF-print tests do not need any snapshotting.
         return;
     }
 
     if (flags & SYNC_ALLOW_DISABLE) {
         var docElt = content.document.documentElement;
-        if (docElt && docElt.hasAttribute("reftest-no-sync-layers")) {
+        if (docElt &&
+            (docElt.hasAttribute("reftest-no-sync-layers") ||
+             docElt.classList.contains("reftest-no-flush"))) {
             LogInfo("Test file chose to skip SynchronizeForSnapshot");
             return;
         }
@@ -977,8 +1136,14 @@ function RegisterMessageListeners()
         function (m) { RecvLoadScriptTest(m.json.uri, m.json.timeout); }
     );
     addMessageListener(
+        "reftest:LoadPrintTest",
+        function (m) { RecvLoadPrintTest(m.json.uri, m.json.timeout); }
+    );
+    addMessageListener(
         "reftest:LoadTest",
-        function (m) { RecvLoadTest(m.json.type, m.json.uri, m.json.timeout); }
+        function (m) { RecvLoadTest(m.json.type, m.json.uri,
+                                    m.json.uriTargetType,
+                                    m.json.timeout); }
     );
     addMessageListener(
         "reftest:ResetRenderingState",
@@ -992,14 +1157,19 @@ function RecvClear()
     LoadURI(BLANK_URL_FOR_CLEARING);
 }
 
-function RecvLoadTest(type, uri, timeout)
+function RecvLoadTest(type, uri, uriTargetType, timeout)
 {
-    StartTestURI(type, uri, timeout);
+    StartTestURI(type, uri, uriTargetType, timeout);
 }
 
 function RecvLoadScriptTest(uri, timeout)
 {
-    StartTestURI(TYPE_SCRIPT, uri, timeout);
+    StartTestURI(TYPE_SCRIPT, uri, URL_TARGET_TYPE_TEST, timeout);
+}
+
+function RecvLoadPrintTest(uri, timeout)
+{
+    StartTestURI(TYPE_PRINT, uri, URL_TARGET_TYPE_TEST, timeout);
 }
 
 function RecvResetRenderingState()
@@ -1015,7 +1185,26 @@ function SendAssertionCount(numAssertions)
 
 function SendContentReady()
 {
-    return sendSyncMessage("reftest:ContentReady")[0];
+    let gfxInfo = (NS_GFXINFO_CONTRACTID in Cc) && Cc[NS_GFXINFO_CONTRACTID].getService(Ci.nsIGfxInfo);
+    let info = gfxInfo.getInfo();
+
+    // The webrender check has to be separate from the d2d checks
+    // since the d2d checks will throw an exception on non-windows platforms.
+    try {
+        gIsWebRenderEnabled = gfxInfo.WebRenderEnabled;
+    } catch (e) {
+        gIsWebRenderEnabled = false;
+    }
+
+    try {
+        info.D2DEnabled = gfxInfo.D2DEnabled;
+        info.DWriteEnabled = gfxInfo.DWriteEnabled;
+    } catch (e) {
+        info.D2DEnabled = false;
+        info.DWriteEnabled = false;
+    }
+
+    return sendSyncMessage("reftest:ContentReady", { 'gfx': info })[0];
 }
 
 function SendException(what)
@@ -1031,6 +1220,16 @@ function SendFailedLoad(why)
 function SendFailedNoPaint()
 {
     sendAsyncMessage("reftest:FailedNoPaint");
+}
+
+function SendFailedNoDisplayList()
+{
+    sendAsyncMessage("reftest:FailedNoDisplayList");
+}
+
+function SendFailedDisplayList()
+{
+    sendAsyncMessage("reftest:FailedDisplayList");
 }
 
 function SendFailedOpaqueLayer(why)
@@ -1074,6 +1273,12 @@ function SendScriptResults(runtimeMs, error, results)
                      { runtimeMs: runtimeMs, error: error, results: results });
 }
 
+function SendPrintResult(runtimeMs, status, fileName)
+{
+    sendAsyncMessage("reftest:PrintResult",
+                     { runtimeMs: runtimeMs, status: status, fileName: fileName });
+}
+
 function SendExpectProcessCrash(runtimeMs)
 {
     sendAsyncMessage("reftest:ExpectProcessCrash");
@@ -1114,32 +1319,45 @@ function SendUpdateCanvasForEvent(event, contentRootElement)
       }
       return;
     }
-    
-    var rectList = event.clientRects;
-    LogInfo("SendUpdateCanvasForEvent with " + rectList.length + " rects");
-    for (var i = 0; i < rectList.length; ++i) {
-        var r = rectList[i];
-        // Set left/top/right/bottom to "device pixel" boundaries
-        var left = Math.floor(roundTo(r.left*scale, 0.001));
-        var top = Math.floor(roundTo(r.top*scale, 0.001));
-        var right = Math.ceil(roundTo(r.right*scale, 0.001));
-        var bottom = Math.ceil(roundTo(r.bottom*scale, 0.001));
-        LogInfo("Rect: " + left + " " + top + " " + right + " " + bottom);
 
-        rects.push({ left: left, top: top, right: right, bottom: bottom });
+    var message;
+    if (gIsWebRenderEnabled && !windowUtils().isMozAfterPaintPending) {
+        // Webrender doesn't have invalidation, so we just invalidate the whole
+        // screen once we don't have anymore paints pending. This will force
+        // the snapshot.
+
+        LogInfo("Webrender enabled, sending update whole canvas for invalidation");
+        message = "reftest:UpdateWholeCanvasForInvalidation";
+    } else {
+        var rectList = event.clientRects;
+        LogInfo("SendUpdateCanvasForEvent with " + rectList.length + " rects");
+        for (var i = 0; i < rectList.length; ++i) {
+            var r = rectList[i];
+            // Set left/top/right/bottom to "device pixel" boundaries
+            var left = Math.floor(roundTo(r.left * scale, 0.001));
+            var top = Math.floor(roundTo(r.top * scale, 0.001));
+            var right = Math.ceil(roundTo(r.right * scale, 0.001));
+            var bottom = Math.ceil(roundTo(r.bottom * scale, 0.001));
+            LogInfo("Rect: " + left + " " + top + " " + right + " " + bottom);
+
+            rects.push({ left: left, top: top, right: right, bottom: bottom });
+        }
+
+        message = "reftest:UpdateCanvasForInvalidation";
     }
 
     // See comments in SendInitCanvasWithSnapshot() re: the split
     // logic here.
     if (!gBrowserIsRemote) {
-        sendSyncMessage("reftest:UpdateCanvasForInvalidation", { rects: rects });
+        sendSyncMessage(message, { rects: rects });
     } else {
         SynchronizeForSnapshot(SYNC_ALLOW_DISABLE);
-        sendAsyncMessage("reftest:UpdateCanvasForInvalidation", { rects: rects });
+        sendAsyncMessage(message, { rects: rects });
     }
 }
-#if REFTEST_B2G
-OnInitialLoad();
-#else
-addEventListener("load", OnInitialLoad, true);
-#endif
+if (content.document.readyState == "complete") {
+  // load event has already fired for content, get started
+  OnInitialLoad();
+} else {
+  addEventListener("load", OnInitialLoad, true);
+}

@@ -7,13 +7,14 @@
 /* implementation of interface for managing user and user-agent style sheets */
 
 #include "nsStyleSheetService.h"
-#include "mozilla/CSSStyleSheet.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
-#include "mozilla/unused.h"
+#include "mozilla/PreloadedStyleSheet.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
+#include "mozilla/Unused.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
@@ -21,8 +22,10 @@
 #include "nsISupportsPrimitives.h"
 #include "nsISimpleEnumerator.h"
 #include "nsNetUtil.h"
+#include "nsIConsoleService.h"
 #include "nsIObserverService.h"
 #include "nsLayoutStatics.h"
+#include "nsLayoutUtils.h"
 
 using namespace mozilla;
 
@@ -30,7 +33,8 @@ nsStyleSheetService *nsStyleSheetService::gInstance = nullptr;
 
 nsStyleSheetService::nsStyleSheetService()
 {
-  PR_STATIC_ASSERT(0 == AGENT_SHEET && 1 == USER_SHEET && 2 == AUTHOR_SHEET);
+  static_assert(0 == AGENT_SHEET && 1 == USER_SHEET && 2 == AUTHOR_SHEET,
+                "Convention for Style Sheet");
   NS_ASSERTION(!gInstance, "Someone is using CreateInstance instead of GetService");
   gInstance = this;
   nsLayoutStatics::AddRef();
@@ -69,7 +73,7 @@ nsStyleSheetService::RegisterFromEnumerator(nsICategoryManager  *aManager,
     nsAutoCString name;
     icStr->GetData(name);
 
-    nsXPIDLCString spec;
+    nsCString spec;
     aManager->GetCategoryEntry(aCategory, name.get(), getter_Copies(spec));
 
     nsCOMPtr<nsIURI> uri;
@@ -79,16 +83,24 @@ nsStyleSheetService::RegisterFromEnumerator(nsICategoryManager  *aManager,
   }
 }
 
-int32_t
-nsStyleSheetService::FindSheetByURI(const nsTArray<StyleSheetHandle::RefPtr>& aSheets,
-                                    nsIURI* aSheetURI)
+static bool
+SheetHasURI(StyleSheet* aSheet, nsIURI* aSheetURI)
 {
-  for (int32_t i = aSheets.Length() - 1; i >= 0; i-- ) {
-    bool bEqual;
-    nsIURI* uri = aSheets[i]->GetSheetURI();
-    if (uri
-        && NS_SUCCEEDED(uri->Equals(aSheetURI, &bEqual))
-        && bEqual) {
+  MOZ_ASSERT(aSheetURI);
+
+  bool result;
+  nsIURI* uri = aSheet->GetSheetURI();
+  return uri &&
+         NS_SUCCEEDED(uri->Equals(aSheetURI, &result)) &&
+         result;
+}
+
+int32_t
+nsStyleSheetService::FindSheetByURI(uint32_t aSheetType, nsIURI* aSheetURI)
+{
+  SheetArray& sheets = mSheets[aSheetType];
+  for (int32_t i = sheets.Length() - 1; i >= 0; i-- ) {
+    if (SheetHasURI(sheets[i], aSheetURI)) {
       return i;
     }
   }
@@ -134,37 +146,33 @@ NS_IMETHODIMP
 nsStyleSheetService::LoadAndRegisterSheet(nsIURI *aSheetURI,
                                           uint32_t aSheetType)
 {
-  nsresult rv = LoadAndRegisterSheetInternal(aSheetURI, aSheetType);
-  if (NS_SUCCEEDED(rv)) {
-    const char* message;
-    switch (aSheetType) {
-      case AGENT_SHEET:
-        message = "agent-sheet-added";
-        break;
-      case USER_SHEET:
-        message = "user-sheet-added";
-        break;
-      case AUTHOR_SHEET:
-        message = "author-sheet-added";
-        break;
-      default:
-        return NS_ERROR_INVALID_ARG;
+  // Warn developers if their stylesheet URL has a #ref at the end.
+  // Stylesheet URIs don't benefit from having a #ref suffix -- and if the
+  // sheet is a data URI, someone might've created this #ref by accident (and
+  // truncated their data-URI stylesheet) by using an unescaped # character in
+  // a #RRGGBB color or #foo() ID-selector in their data-URI representation.
+  bool hasRef;
+  nsresult rv = aSheetURI->GetHasRef(&hasRef);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (aSheetURI && hasRef) {
+    nsCOMPtr<nsIConsoleService> consoleService =
+      do_GetService(NS_CONSOLESERVICE_CONTRACTID);
+    NS_WARNING_ASSERTION(consoleService, "Failed to get console service!");
+    if (consoleService) {
+      const char16_t* message = u"nsStyleSheetService::LoadAndRegisterSheet: "
+        u"URI contains unescaped hash character, which might be truncating "
+        u"the sheet, if it's a data URI.";
+      consoleService->LogStringMessage(message);
     }
-    nsCOMPtr<nsIObserverService> serv = services::GetObserverService();
-    if (serv) {
-      // We're guaranteed that the new sheet is the last sheet in
-      // mSheets[aSheetType]
+  }
 
-      // XXXheycam Once the nsStyleSheetService can hold ServoStyleSheets too,
-      // we'll need to include them in the notification.
-      StyleSheetHandle sheet = mSheets[aSheetType].LastElement();
-      if (sheet->IsGecko()) {
-        CSSStyleSheet* cssSheet = sheet->AsGecko();
-        serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, cssSheet),
-                              message, nullptr);
-      } else {
-        NS_ERROR("stylo: can't notify observers of ServoStyleSheets");
-      }
+  rv = LoadAndRegisterSheetInternal(aSheetURI, aSheetType);
+  if (NS_SUCCEEDED(rv)) {
+    // Hold on to a copy of the registered PresShells.
+    nsTArray<nsCOMPtr<nsIPresShell>> toNotify(mPresShells);
+    for (nsIPresShell* presShell : toNotify) {
+      StyleSheet* sheet = mSheets[aSheetType].LastElement();
+      presShell->NotifyStyleSheetServiceSheetAdded(sheet, aSheetType);
     }
 
     if (XRE_IsParentProcess()) {
@@ -184,6 +192,15 @@ nsStyleSheetService::LoadAndRegisterSheet(nsIURI *aSheetURI,
     }
   }
   return rv;
+}
+
+static nsresult
+LoadSheet(nsIURI* aURI,
+          css::SheetParsingMode aParsingMode,
+          RefPtr<StyleSheet>* aResult)
+{
+  RefPtr<css::Loader> loader = new css::Loader;
+  return loader->LoadSheetSync(aURI, aParsingMode, true, aResult);
 }
 
 nsresult
@@ -211,17 +228,14 @@ nsStyleSheetService::LoadAndRegisterSheetInternal(nsIURI *aSheetURI,
       return NS_ERROR_INVALID_ARG;
   }
 
-  // XXXheycam We'll need to load and register both a Gecko- and Servo-backed
-  // style sheet.
-  RefPtr<css::Loader> loader = new css::Loader(StyleBackendType::Gecko);
 
-  StyleSheetHandle::RefPtr sheet;
-  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true, &sheet);
+  RefPtr<StyleSheet> sheet;
+  nsresult rv = LoadSheet(aSheetURI, parsingMode, &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
-
+  MOZ_ASSERT(sheet);
   mSheets[aSheetType].AppendElement(sheet);
 
-  return rv;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -232,53 +246,90 @@ nsStyleSheetService::SheetRegistered(nsIURI *sheetURI,
                 aSheetType == USER_SHEET ||
                 aSheetType == AUTHOR_SHEET);
   NS_ENSURE_ARG_POINTER(sheetURI);
-  NS_PRECONDITION(_retval, "Null out param");
+  MOZ_ASSERT(_retval, "Null out param");
 
-  *_retval = (FindSheetByURI(mSheets[aSheetType], sheetURI) >= 0);
+  // Check to see if we have the sheet.
+  *_retval = (FindSheetByURI(aSheetType, sheetURI) >= 0);
 
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsStyleSheetService::PreloadSheet(nsIURI *aSheetURI, uint32_t aSheetType,
-                                  nsIDOMStyleSheet **aSheet)
+static nsresult
+GetParsingMode(uint32_t aSheetType, css::SheetParsingMode* aParsingMode)
 {
-  NS_PRECONDITION(aSheet, "Null out param");
-  NS_ENSURE_ARG_POINTER(aSheetURI);
-  css::SheetParsingMode parsingMode;
   switch (aSheetType) {
-    case AGENT_SHEET:
-      parsingMode = css::eAgentSheetFeatures;
-      break;
+    case nsStyleSheetService::AGENT_SHEET:
+      *aParsingMode = css::eAgentSheetFeatures;
+      return NS_OK;
 
-    case USER_SHEET:
-      parsingMode = css::eUserSheetFeatures;
-      break;
+    case nsStyleSheetService::USER_SHEET:
+      *aParsingMode = css::eUserSheetFeatures;
+      return NS_OK;
 
-    case AUTHOR_SHEET:
-      parsingMode = css::eAuthorSheetFeatures;
-      break;
+    case nsStyleSheetService::AUTHOR_SHEET:
+      *aParsingMode = css::eAuthorSheetFeatures;
+      return NS_OK;
 
     default:
       NS_WARNING("invalid sheet type argument");
       return NS_ERROR_INVALID_ARG;
   }
+}
 
-  // XXXheycam PreloadSheet can't support ServoStyleSheets until they implement
-  // nsIDOMStyleSheet.
+NS_IMETHODIMP
+nsStyleSheetService::PreloadSheet(nsIURI* aSheetURI, uint32_t aSheetType,
+                                  nsIPreloadedStyleSheet** aSheet)
+{
+  MOZ_ASSERT(aSheet, "Null out param");
+  NS_ENSURE_ARG_POINTER(aSheetURI);
 
-  RefPtr<css::Loader> loader = new css::Loader(StyleBackendType::Gecko);
-
-  StyleSheetHandle::RefPtr sheet;
-  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true, &sheet);
+  css::SheetParsingMode parsingMode;
+  nsresult rv = GetParsingMode(aSheetType, &parsingMode);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  MOZ_ASSERT(sheet->IsGecko(),
-             "stylo: didn't expect Loader to create a ServoStyleSheet");
+  RefPtr<PreloadedStyleSheet> sheet;
+  rv = PreloadedStyleSheet::Create(aSheetURI, parsingMode,
+                                   getter_AddRefs(sheet));
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<CSSStyleSheet> cssSheet = sheet->AsGecko();
-  cssSheet.forget(aSheet);
+  rv = sheet->Preload();
+  NS_ENSURE_SUCCESS(rv, rv);
 
+  sheet.forget(aSheet);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsStyleSheetService::PreloadSheetAsync(nsIURI* aSheetURI, uint32_t aSheetType,
+                                       JSContext* aCx,
+                                       JS::MutableHandleValue aRval)
+{
+  NS_ENSURE_ARG_POINTER(aSheetURI);
+
+  css::SheetParsingMode parsingMode;
+  nsresult rv = GetParsingMode(aSheetType, &parsingMode);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIGlobalObject> global =
+    xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
+  NS_ENSURE_TRUE(global, NS_ERROR_UNEXPECTED);
+
+  ErrorResult errv;
+  RefPtr<dom::Promise> promise = dom::Promise::Create(global, errv);
+  if (errv.Failed()) {
+    return errv.StealNSResult();
+  }
+
+  RefPtr<PreloadedStyleSheet> sheet;
+  rv = PreloadedStyleSheet::Create(aSheetURI, parsingMode,
+                                   getter_AddRefs(sheet));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  sheet->PreloadAsync(WrapNotNull(promise));
+
+  if (!ToJSValue(aCx, promise, aRval)) {
+    return NS_ERROR_FAILURE;
+  }
   return NS_OK;
 }
 
@@ -290,34 +341,20 @@ nsStyleSheetService::UnregisterSheet(nsIURI *aSheetURI, uint32_t aSheetType)
                 aSheetType == AUTHOR_SHEET);
   NS_ENSURE_ARG_POINTER(aSheetURI);
 
-  int32_t foundIndex = FindSheetByURI(mSheets[aSheetType], aSheetURI);
-  NS_ENSURE_TRUE(foundIndex >= 0, NS_ERROR_INVALID_ARG);
-  StyleSheetHandle::RefPtr sheet = mSheets[aSheetType][foundIndex];
-  mSheets[aSheetType].RemoveElementAt(foundIndex);
-
-  const char* message;
-  switch (aSheetType) {
-    case AGENT_SHEET:
-      message = "agent-sheet-removed";
-      break;
-    case USER_SHEET:
-      message = "user-sheet-removed";
-      break;
-    case AUTHOR_SHEET:
-      message = "author-sheet-removed";
-      break;
+  RefPtr<StyleSheet> sheet;
+  int32_t foundIndex = FindSheetByURI(aSheetType, aSheetURI);
+  if (foundIndex >= 0) {
+    sheet = mSheets[aSheetType][foundIndex];
+    mSheets[aSheetType].RemoveElementAt(foundIndex);
   }
 
-  nsCOMPtr<nsIObserverService> serv = services::GetObserverService();
-  if (serv) {
-    // XXXheycam Once the nsStyleSheetService can hold ServoStyleSheets too,
-    // we'll need to include them in the notification.
-    if (sheet->IsGecko()) {
-      CSSStyleSheet* cssSheet = sheet->AsGecko();
-      serv->NotifyObservers(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, cssSheet),
-                            message, nullptr);
-    } else {
-      NS_ERROR("stylo: can't notify observers of ServoStyleSheets");
+  // Hold on to a copy of the registered PresShells.
+  nsTArray<nsCOMPtr<nsIPresShell>> toNotify(mPresShells);
+  for (nsIPresShell* presShell : toNotify) {
+    if (presShell->StyleSet()) {
+      if (sheet) {
+        presShell->NotifyStyleSheetServiceSheetRemoved(sheet, aSheetType);
+      }
     }
   }
 
@@ -361,10 +398,12 @@ NS_IMETHODIMP
 nsStyleSheetService::CollectReports(nsIHandleReportCallback* aHandleReport,
                                     nsISupports* aData, bool aAnonymize)
 {
-  return MOZ_COLLECT_REPORT(
+  MOZ_COLLECT_REPORT(
     "explicit/layout/style-sheet-service", KIND_HEAP, UNITS_BYTES,
     SizeOfIncludingThis(StyleSheetServiceMallocSizeOf),
     "Memory used for style sheets held by the style sheet service.");
+
+  return NS_OK;
 }
 
 size_t
@@ -373,9 +412,25 @@ nsStyleSheetService::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) co
   size_t n = aMallocSizeOf(this);
   for (auto& sheetArray : mSheets) {
     n += sheetArray.ShallowSizeOfExcludingThis(aMallocSizeOf);
-    for (StyleSheetHandle sheet : sheetArray) {
-      n += sheet->SizeOfIncludingThis(aMallocSizeOf);
+    for (StyleSheet* sheet : sheetArray) {
+      if (sheet) {
+        n += sheet->SizeOfIncludingThis(aMallocSizeOf);
+      }
     }
   }
   return n;
+}
+
+void
+nsStyleSheetService::RegisterPresShell(nsIPresShell* aPresShell)
+{
+  MOZ_ASSERT(!mPresShells.Contains(aPresShell));
+  mPresShells.AppendElement(aPresShell);
+}
+
+void
+nsStyleSheetService::UnregisterPresShell(nsIPresShell* aPresShell)
+{
+  MOZ_ASSERT(mPresShells.Contains(aPresShell));
+  mPresShells.RemoveElement(aPresShell);
 }

@@ -4,30 +4,30 @@
 
 "use strict";
 
-const {StorageFront} = require("devtools/server/actors/storage");
-const beforeReload = {
-  cookies: ["test1.example.org", "sectest1.example.org"],
-  localStorage: ["http://test1.example.org", "http://sectest1.example.org"],
-  sessionStorage: ["http://test1.example.org", "http://sectest1.example.org"],
-};
+const {StorageFront} = require("devtools/shared/fronts/storage");
 
 const TESTS = [
   // index 0
   {
-    action: function(win) {
-      info('win.addCookie("c1", "foobar1")');
-      win.addCookie("c1", "foobar1");
+    action: async function(win) {
+      info('addCookie("c1", "foobar1")');
+      await addCookie("c1", "foobar1");
 
-      info('win.addCookie("c2", "foobar2")');
-      win.addCookie("c2", "foobar2");
+      info('addCookie("c2", "foobar2")');
+      await addCookie("c2", "foobar2");
 
-      info('win.localStorage.setItem("l1", "foobar1")');
-      win.localStorage.setItem("l1", "foobar1");
+      info('localStorageSetItem("l1", "foobar1")');
+      await localStorageSetItem("l1", "foobar1");
     },
     expected: {
       added: {
         cookies: {
-          "test1.example.org": ["c1", "c2"]
+          "http://test1.example.org": [
+            getCookieId("c1", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+            getCookieId("c2", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/")
+          ]
         },
         localStorage: {
           "http://test1.example.org": ["l1"]
@@ -38,17 +38,20 @@ const TESTS = [
 
   // index 1
   {
-    action: function(win) {
-      info('win.addCookie("c1", "new_foobar1")');
-      win.addCookie("c1", "new_foobar1");
+    action: async function() {
+      info('addCookie("c1", "new_foobar1")');
+      await addCookie("c1", "new_foobar1");
 
-      info('win.localStorage.setItem("l2", "foobar2")');
-      win.localStorage.setItem("l2", "foobar2");
+      info('localStorageSetItem("l2", "foobar2")');
+      await localStorageSetItem("l2", "foobar2");
     },
     expected: {
       changed: {
         cookies: {
-          "test1.example.org": ["c1"]
+          "http://test1.example.org": [
+            getCookieId("c1", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+          ]
         }
       },
       added: {
@@ -61,20 +64,23 @@ const TESTS = [
 
   // index 2
   {
-    action: function(win) {
-      info('win.removeCookie("c2")');
-      win.removeCookie("c2");
+    action: async function() {
+      info('removeCookie("c2")');
+      await removeCookie("c2");
 
-      info('win.localStorage.removeItem("l1")');
-      win.localStorage.removeItem("l1");
+      info('localStorageRemoveItem("l1")');
+      await localStorageRemoveItem("l1");
 
-      info('win.localStorage.setItem("l3", "foobar3")');
-      win.localStorage.setItem("l3", "foobar3");
+      info('localStorageSetItem("l3", "foobar3")');
+      await localStorageSetItem("l3", "foobar3");
     },
     expected: {
       deleted: {
         cookies: {
-          "test1.example.org": ["c2"]
+          "http://test1.example.org": [
+            getCookieId("c2", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+          ]
         },
         localStorage: {
           "http://test1.example.org": ["l1"]
@@ -90,29 +96,32 @@ const TESTS = [
 
   // index 3
   {
-    action: function(win) {
-      info('win.removeCookie("c1")');
-      win.removeCookie("c1");
+    action: async function() {
+      info('removeCookie("c1")');
+      await removeCookie("c1");
 
-      info('win.addCookie("c3", "foobar3")');
-      win.addCookie("c3", "foobar3");
+      info('addCookie("c3", "foobar3")');
+      await addCookie("c3", "foobar3");
 
-      info('win.localStorage.removeItem("l2")');
-      win.localStorage.removeItem("l2");
+      info('localStorageRemoveItem("l2")');
+      await localStorageRemoveItem("l2");
 
-      info('win.sessionStorage.setItem("s1", "foobar1")');
-      win.sessionStorage.setItem("s1", "foobar1");
+      info('sessionStorageSetItem("s1", "foobar1")');
+      await sessionStorageSetItem("s1", "foobar1");
 
-      info('win.sessionStorage.setItem("s2", "foobar2")');
-      win.sessionStorage.setItem("s2", "foobar2");
+      info('sessionStorageSetItem("s2", "foobar2")');
+      await sessionStorageSetItem("s2", "foobar2");
 
-      info('win.localStorage.setItem("l3", "new_foobar3")');
-      win.localStorage.setItem("l3", "new_foobar3");
+      info('localStorageSetItem("l3", "new_foobar3")');
+      await localStorageSetItem("l3", "new_foobar3");
     },
     expected: {
       added: {
         cookies: {
-          "test1.example.org": ["c3"]
+          "http://test1.example.org": [
+            getCookieId("c3", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+          ]
         },
         sessionStorage: {
           "http://test1.example.org": ["s1", "s2"]
@@ -125,7 +134,10 @@ const TESTS = [
       },
       deleted: {
         cookies: {
-          "test1.example.org": ["c1"]
+          "http://test1.example.org": [
+            getCookieId("c1", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+          ]
         },
         localStorage: {
           "http://test1.example.org": ["l2"]
@@ -136,9 +148,9 @@ const TESTS = [
 
   // index 4
   {
-    action: function(win) {
-      info('win.sessionStorage.removeItem("s1")');
-      win.sessionStorage.removeItem("s1");
+    action: async function() {
+      info('sessionStorageRemoveItem("s1")');
+      await sessionStorageRemoveItem("s1");
     },
     expected: {
       deleted: {
@@ -151,19 +163,42 @@ const TESTS = [
 
   // index 5
   {
-    action: function(win) {
-      info("win.clearCookies()");
-      win.clearCookies();
+    action: async function() {
+      info("clearCookies()");
+      await clearCookies();
     },
     expected: {
       deleted: {
         cookies: {
-          "test1.example.org": ["c3"]
+          "http://test1.example.org": [
+            getCookieId("c3", "test1.example.org",
+                        "/browser/devtools/server/tests/browser/"),
+          ]
         }
       }
     }
   }
 ];
+
+add_task(async function() {
+  await addTab(MAIN_DOMAIN + "storage-updates.html");
+
+  initDebuggerServer();
+
+  const client = new DebuggerClient(DebuggerServer.connectPipe());
+  const form = await connectDebuggerClient(client);
+  const front = StorageFront(client, form);
+
+  await front.listStores();
+
+  for (let i = 0; i < TESTS.length; i++) {
+    const test = TESTS[i];
+    await runTest(test, front, i);
+  }
+
+  await testClearLocalAndSessionStores(front);
+  await finishTests(client);
+});
 
 function markOutMatched(toBeEmptied, data) {
   if (!Object.keys(toBeEmptied).length) {
@@ -172,16 +207,16 @@ function markOutMatched(toBeEmptied, data) {
   }
   ok(Object.keys(data).length, "At least one storage type should be present");
 
-  for (let storageType in toBeEmptied) {
+  for (const storageType in toBeEmptied) {
     if (!data[storageType]) {
       continue;
     }
     info("Testing for " + storageType);
-    for (let host in data[storageType]) {
+    for (const host in data[storageType]) {
       ok(toBeEmptied[storageType][host], "Host " + host + " found");
 
-      for (let item of data[storageType][host]) {
-        let index = toBeEmptied[storageType][host].indexOf(item);
+      for (const item of data[storageType][host]) {
+        const index = toBeEmptied[storageType][host].indexOf(item);
         ok(index > -1, "Item found - " + item);
         if (index > -1) {
           toBeEmptied[storageType][host].splice(index, 1);
@@ -225,47 +260,46 @@ function onStoresUpdate(expected, {added, changed, deleted}, index) {
   }
 }
 
-function runTest({action, expected}, front, win, index) {
-  return new Promise(resolve => {
-    front.once("stores-update", function(addedChangedDeleted) {
-      onStoresUpdate(expected, addedChangedDeleted, index);
-      resolve();
-    });
+async function runTest({action, expected}, front, index) {
+  const update = front.once("stores-update");
 
-    info("Running test at index " + index);
-    action(win);
-  });
+  info("Running test at index " + index);
+  await action();
+
+  const addedChangedDeleted = await update;
+
+  onStoresUpdate(expected, addedChangedDeleted, index);
 }
 
-function* testClearLocalAndSessionStores(front, win) {
-  return new Promise(resolve => {
-    // We need to wait until we have received stores-cleared for both local and
-    // session storage.
-    let localStorage = false;
-    let sessionStorage = false;
+async function testClearLocalAndSessionStores(front) {
+  // We need to wait until we have received stores-cleared for both local and
+  // session storage.
+  let localStorage = false;
+  let sessionStorage = false;
 
-    front.on("stores-cleared", function onStoresCleared(data) {
-      storesCleared(data);
+  await clearLocalAndSessionStores();
 
-      if (data.localStorage) {
-        localStorage = true;
-      }
-      if (data.sessionStorage) {
-        sessionStorage = true;
-      }
-      if (localStorage && sessionStorage) {
-        front.off("stores-cleared", onStoresCleared);
-        resolve();
-      }
-    });
+  let data = await front.once("stores-cleared");
 
-    win.clearLocalAndSessionStores();
-  });
+  storesCleared(data);
+
+  if (data.localStorage) {
+    localStorage = true;
+  }
+
+  data = await front.once("stores-cleared");
+
+  if (data.sessionStorage) {
+    sessionStorage = true;
+  }
+
+  ok(localStorage, "localStorage was cleared");
+  ok(sessionStorage, "sessionStorage was cleared");
 }
 
 function storesCleared(data) {
   if (data.sessionStorage || data.localStorage) {
-    let hosts = data.sessionStorage || data.localStorage;
+    const hosts = data.sessionStorage || data.localStorage;
     info("Stores cleared required for session storage");
     is(hosts.length, 1, "number of hosts is 1");
     is(hosts[0], "http://test1.example.org",
@@ -275,30 +309,56 @@ function storesCleared(data) {
   }
 }
 
-function* finishTests(client) {
-  yield client.close();
+async function finishTests(client) {
+  await client.close();
   DebuggerServer.destroy();
   finish();
 }
 
-add_task(function*() {
-  let browser = yield addTab(MAIN_DOMAIN + "storage-updates.html");
-  let doc = browser.contentDocument;
+async function addCookie(name, value) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, [name, value], ([iName, iValue]) => {
+    content.wrappedJSObject.window.addCookie(iName, iValue);
+  });
+}
 
-  initDebuggerServer();
+async function removeCookie(name) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, name, iName => {
+    content.wrappedJSObject.window.removeCookie(iName);
+  });
+}
 
-  let client = new DebuggerClient(DebuggerServer.connectPipe());
-  let form = yield connectDebuggerClient(client);
-  let front = StorageFront(client, form);
-  let win = doc.defaultView.wrappedJSObject;
+async function localStorageSetItem(name, value) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, [name, value], ([iName, iValue]) => {
+    content.window.localStorage.setItem(iName, iValue);
+  });
+}
 
-  yield front.listStores();
+async function localStorageRemoveItem(name) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, name, iName => {
+    content.window.localStorage.removeItem(iName);
+  });
+}
 
-  for (let i = 0; i < TESTS.length; i++) {
-    let test = TESTS[i];
-    yield runTest(test, front, win, i);
-  }
+async function sessionStorageSetItem(name, value) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, [name, value], ([iName, iValue]) => {
+    content.window.sessionStorage.setItem(iName, iValue);
+  });
+}
 
-  yield testClearLocalAndSessionStores(front, win);
-  yield finishTests(client);
-});
+async function sessionStorageRemoveItem(name) {
+  await ContentTask.spawn(gBrowser.selectedBrowser, name, iName => {
+    content.window.sessionStorage.removeItem(iName);
+  });
+}
+
+async function clearCookies() {
+  await ContentTask.spawn(gBrowser.selectedBrowser, {}, () => {
+    content.wrappedJSObject.window.clearCookies();
+  });
+}
+
+async function clearLocalAndSessionStores() {
+  await ContentTask.spawn(gBrowser.selectedBrowser, {}, () => {
+    content.wrappedJSObject.window.clearLocalAndSessionStores();
+  });
+}

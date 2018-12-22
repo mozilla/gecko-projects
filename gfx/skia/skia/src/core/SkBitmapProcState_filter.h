@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2009 The Android Open Source Project
  *
@@ -7,7 +6,7 @@
  */
 
 
-#include "SkColorPriv.h"
+#include "SkColorData.h"
 
 /*
     Filter_32_opaque

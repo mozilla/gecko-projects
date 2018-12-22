@@ -13,23 +13,23 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIMIMEHEADERPARAM
 
-  nsMIMEHeaderParamImpl() {}
+  nsMIMEHeaderParamImpl() = default;
 private:
-  virtual ~nsMIMEHeaderParamImpl() {}
+  virtual ~nsMIMEHeaderParamImpl() = default;
   enum ParamDecoding {
     MIME_FIELD_ENCODING = 1,
     HTTP_FIELD_ENCODING
-  }; 
+  };
 
-  nsresult DoGetParameter(const nsACString& aHeaderVal, 
+  nsresult DoGetParameter(const nsACString& aHeaderVal,
                           const char *aParamName,
                           ParamDecoding aDecoding,
-                          const nsACString& aFallbackCharset, 
-                          bool aTryLocaleCharset, 
-                          char **aLang, 
+                          const nsACString& aFallbackCharset,
+                          bool aTryLocaleCharset,
+                          char **aLang,
                           nsAString& aResult);
 
-  nsresult DoParameterInternal(const char *aHeaderValue, 
+  nsresult DoParameterInternal(const char *aHeaderValue,
                                const char *aParamName,
                                ParamDecoding aDecoding,
                                char **aCharset,
@@ -38,5 +38,5 @@ private:
 
 };
 
-#endif 
+#endif
 

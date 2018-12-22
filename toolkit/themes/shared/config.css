@@ -6,12 +6,14 @@
   font-size: 15px;
   padding-top: 0;
   padding-bottom: 0;
-  -moz-padding-start: calc(48px + 4.6em);
-  -moz-padding-end: 48px;
+  padding-inline-start: calc(48px + 4.6em);
+  padding-inline-end: 48px;
 }
 
 .title {
   background-image: url("chrome://global/skin/icons/warning.svg");
+  -moz-context-properties: fill;
+  fill: #fcd100;
 }
 
 #warningTitle {
@@ -32,7 +34,7 @@
 
 #filterRow {
   margin-top: 4px;
-  -moz-margin-start: 4px;
+  margin-inline-start: 4px;
 }
 
 #configTree {

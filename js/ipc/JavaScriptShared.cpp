@@ -33,10 +33,12 @@ IdToObjectMap::init()
 }
 
 void
-IdToObjectMap::trace(JSTracer* trc)
+IdToObjectMap::trace(JSTracer* trc, uint64_t minimumId)
 {
-    for (Table::Range r(table_.all()); !r.empty(); r.popFront())
-        JS::TraceEdge(trc, &r.front().value(), "ipc-object");
+    for (Table::Range r(table_.all()); !r.empty(); r.popFront()) {
+        if (r.front().key().serialNumber() >= minimumId)
+            JS::TraceEdge(trc, &r.front().value(), "ipc-object");
+    }
 }
 
 void
@@ -57,6 +59,15 @@ IdToObjectMap::find(ObjectId id)
     if (!p)
         return nullptr;
     return p->value();
+}
+
+JSObject*
+IdToObjectMap::findPreserveColor(ObjectId id)
+{
+    Table::Ptr p = table_.lookup(id);
+    if (!p)
+        return nullptr;
+    return p->value().unbarrieredGet();
 }
 
 bool
@@ -83,15 +94,16 @@ IdToObjectMap::empty() const
     return table_.empty();
 }
 
-ObjectToIdMap::ObjectToIdMap(JSRuntime* rt)
-  : rt_(rt)
+#ifdef DEBUG
+bool
+IdToObjectMap::has(const ObjectId& id, const JSObject* obj) const
 {
+    auto p = table_.lookup(id);
+    if (!p)
+        return false;
+    return p->value() == obj;
 }
-
-ObjectToIdMap::~ObjectToIdMap()
-{
-    JS_ClearAllPostBarrierCallbacks(rt_);
-}
+#endif
 
 bool
 ObjectToIdMap::init()
@@ -142,12 +154,10 @@ bool JavaScriptShared::sLoggingInitialized;
 bool JavaScriptShared::sLoggingEnabled;
 bool JavaScriptShared::sStackLoggingEnabled;
 
-JavaScriptShared::JavaScriptShared(JSRuntime* rt)
-  : rt_(rt),
-    refcount_(1),
+JavaScriptShared::JavaScriptShared()
+  : refcount_(1),
     nextSerialNumber_(1),
-    unwaivedObjectIds_(rt),
-    waivedObjectIds_(rt)
+    nextCPOWNumber_(1)
 {
     if (!sLoggingInitialized) {
         sLoggingInitialized = true;
@@ -226,7 +236,7 @@ bool
 JavaScriptShared::toVariant(JSContext* cx, JS::HandleValue from, JSVariant* to)
 {
     switch (JS_TypeOfValue(cx, from)) {
-      case JSTYPE_VOID:
+      case JSTYPE_UNDEFINED:
         *to = UndefinedVariant();
         return true;
 
@@ -346,8 +356,7 @@ JavaScriptShared::fromVariant(JSContext* cx, const JSVariant& from, MutableHandl
           const JSIID& id = from.get_JSIID();
           ConvertID(id, &iid);
 
-          JSCompartment* compartment = GetContextCompartment(cx);
-          RootedObject global(cx, JS_GetGlobalForCompartmentOrNull(cx, compartment));
+          RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
           JSObject* obj = xpc_NewIDObject(cx, global, iid);
           if (!obj)
               return false;
@@ -429,12 +438,12 @@ JavaScriptShared::toSymbolVariant(JSContext* cx, JS::Symbol* symArg, SymbolVaria
         return true;
     }
 
-    JS_ReportError(cx, "unique symbol can't be used with CPOW");
+    JS_ReportErrorASCII(cx, "unique symbol can't be used with CPOW");
     return false;
 }
 
 JS::Symbol*
-JavaScriptShared::fromSymbolVariant(JSContext* cx, SymbolVariant symVar)
+JavaScriptShared::fromSymbolVariant(JSContext* cx, const SymbolVariant& symVar)
 {
     switch (symVar.type()) {
       case SymbolVariant::TWellKnownSymbol: {
@@ -491,11 +500,35 @@ JavaScriptShared::ConvertID(const JSIID& from, nsID* to)
 }
 
 JSObject*
+JavaScriptShared::findCPOWById(const ObjectId& objId)
+{
+    JSObject* obj = findCPOWByIdPreserveColor(objId);
+    if (obj)
+        JS::ExposeObjectToActiveJS(obj);
+    return obj;
+}
+
+JSObject*
+JavaScriptShared::findCPOWByIdPreserveColor(const ObjectId& objId)
+{
+    JSObject* obj = cpows_.findPreserveColor(objId);
+    if (!obj)
+        return nullptr;
+
+    if (js::gc::EdgeNeedsSweepUnbarriered(&obj)) {
+        cpows_.remove(objId);
+        return nullptr;
+    }
+
+    return obj;
+}
+
+JSObject*
 JavaScriptShared::findObjectById(JSContext* cx, const ObjectId& objId)
 {
     RootedObject obj(cx, objects_.find(objId));
     if (!obj) {
-        JS_ReportError(cx, "operation not possible on dead CPOW");
+        JS_ReportErrorASCII(cx, "operation not possible on dead CPOW");
         return nullptr;
     }
 
@@ -503,10 +536,10 @@ JavaScriptShared::findObjectById(JSContext* cx, const ObjectId& objId)
     // from the other process point to objects in this scope. From there, they
     // can access objects in other compartments using cross-compartment
     // wrappers.
-    JSAutoCompartment ac(cx, scopeForTargetObjects());
+    JSAutoRealm ar(cx, scopeForTargetObjects());
     if (objId.hasXrayWaiver()) {
         {
-            JSAutoCompartment ac2(cx, obj);
+            JSAutoRealm ar2(cx, obj);
             obj = js::ToWindowProxyIfWindow(obj);
             MOZ_ASSERT(obj);
         }
@@ -541,7 +574,6 @@ JavaScriptShared::fromDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc,
             return false;
         out->getter() = objVar;
     } else {
-        MOZ_ASSERT(desc.getter() != JS_PropertyStub);
         out->getter() = UnknownPropertyOp;
     }
 
@@ -554,7 +586,6 @@ JavaScriptShared::fromDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc,
             return false;
         out->setter() = objVar;
     } else {
-        MOZ_ASSERT(desc.setter() != JS_StrictPropertyStub);
         out->setter() = UnknownPropertyOp;
     }
 
@@ -564,15 +595,15 @@ JavaScriptShared::fromDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc,
 bool
 UnknownPropertyStub(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp)
 {
-    JS_ReportError(cx, "getter could not be wrapped via CPOWs");
+    JS_ReportErrorASCII(cx, "getter could not be wrapped via CPOWs");
     return false;
 }
 
 bool
-UnknownStrictPropertyStub(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue vp,
+UnknownStrictPropertyStub(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
                           ObjectOpResult& result)
 {
-    JS_ReportError(cx, "setter could not be wrapped via CPOWs");
+    JS_ReportErrorASCII(cx, "setter could not be wrapped via CPOWs");
     return false;
 }
 
@@ -629,7 +660,7 @@ JavaScriptShared::toObjectOrNullVariant(JSContext* cx, JSObject* obj, ObjectOrNu
 }
 
 JSObject*
-JavaScriptShared::fromObjectOrNullVariant(JSContext* cx, ObjectOrNullVariant objVar)
+JavaScriptShared::fromObjectOrNullVariant(JSContext* cx, const ObjectOrNullVariant& objVar)
 {
     if (objVar.type() == ObjectOrNullVariant::TNullVariant)
         return nullptr;
@@ -640,16 +671,43 @@ JavaScriptShared::fromObjectOrNullVariant(JSContext* cx, ObjectOrNullVariant obj
 CrossProcessCpowHolder::CrossProcessCpowHolder(dom::CPOWManagerGetter* managerGetter,
                                                const InfallibleTArray<CpowEntry>& cpows)
   : js_(nullptr),
-    cpows_(cpows)
+    cpows_(cpows),
+    unwrapped_(false)
 {
     // Only instantiate the CPOW manager if we might need it later.
     if (cpows.Length())
         js_ = managerGetter->GetCPOWManager();
 }
 
+CrossProcessCpowHolder::~CrossProcessCpowHolder()
+{
+    if (cpows_.Length() && !unwrapped_) {
+        // This should only happen if a message manager message
+        // containing CPOWs gets ignored for some reason. We need to
+        // unwrap every incoming CPOW in this process to ensure that
+        // the corresponding part of the CPOW in the other process
+        // will eventually be collected. The scope for this object
+        // doesn't really matter, because it immediately becomes
+        // garbage. Ignore this for middleman processes used when
+        // recording or replaying, as they do not have a CPOW manager
+        // and the message will also be received in the recording
+        // process.
+        if (recordreplay::IsMiddleman())
+            return;
+        AutoJSAPI jsapi;
+        if (!jsapi.Init(xpc::PrivilegedJunkScope()))
+            return;
+        JSContext* cx = jsapi.cx();
+        JS::Rooted<JSObject*> cpows(cx);
+        js_->Unwrap(cx, cpows_, &cpows);
+    }
+}
+
 bool
 CrossProcessCpowHolder::ToObject(JSContext* cx, JS::MutableHandleObject objp)
 {
+    unwrapped_ = true;
+
     if (!cpows_.Length())
         return true;
 

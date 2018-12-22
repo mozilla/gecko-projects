@@ -37,6 +37,17 @@ var _pacedTestLists =
                             comp2_3: "rgb(128, 100, 128)",
                             comp1:   "rgb(206, 150, 206)"
                           }),
+                          // Use the same RGB component values to make
+                          // premultication effect easier to compute.
+    new AnimTestcasePaced("rgba(20, 40, 60, 0.2); " +
+                          "rgba(20, 40, 60, 0.4); " +
+                          "rgba(20, 40, 60, 0.8)",
+                          { comp0: "rgba(20, 40, 60, 0.2)",
+                            comp1_6: "rgba(20, 40, 60, 0.3)",
+                            comp1_3: "rgba(20, 40, 60, 0.4)",
+                            comp2_3: "rgba(20, 40, 60, 0.6)",
+                            comp1:   "rgba(20, 40, 60, 0.8)"
+                          }),
   ],
   paintServer : [
     // Sanity check: These aren't interpolatable -- they should end up
@@ -76,22 +87,6 @@ var _pacedTestLists =
                             comp1:    "8px"
                           }),
   ],
-  lengthNoUnitsSVG : [
-    new AnimTestcasePaced("2; 0; 4",
-                          { comp0:   "2",
-                            comp1_6: "1",
-                            comp1_3: "0",
-                            comp2_3: "2",
-                            comp1:   "4"
-                          }),
-    new AnimTestcasePaced("10; 12; 8",
-                          { comp0:   "10",
-                            comp1_6: "11",
-                            comp1_3: "12",
-                            comp2_3: "10",
-                            comp1:   "8"
-                          }),
-  ],
   lengthPx : [
     new AnimTestcasePaced("0px; 2px; 6px",
                           { comp0:   "0px",
@@ -106,22 +101,6 @@ var _pacedTestLists =
                             comp1_3: "12px",
                             comp2_3: "10px",
                             comp1:   "8px"
-                          }),
-  ],
-  lengthPxSVG : [
-    new AnimTestcasePaced("0px; 2px; 6px",
-                          { comp0:   "0",
-                            comp1_6: "1",
-                            comp1_3: "2",
-                            comp2_3: "4",
-                            comp1:   "6"
-                          }),
-    new AnimTestcasePaced("10px; 12px; 8px",
-                          { comp0:   "10",
-                            comp1_6: "11",
-                            comp1_3: "12",
-                            comp2_3: "10",
-                            comp1:   "8"
                           }),
   ],
   lengthPctSVG : [
@@ -297,13 +276,13 @@ var gPacedBundles =
                           }),
   ])),
   new TestcaseBundle(gPropList.stroke_dashoffset,
-                     [].concat(_pacedTestLists.lengthNoUnitsSVG,
-                               _pacedTestLists.lengthPxSVG,
+                     [].concat(_pacedTestLists.lengthNoUnits,
+                               _pacedTestLists.lengthPx,
                                _pacedTestLists.lengthPctSVG,
                                _pacedTestLists.lengthPxPctSVG)),
   new TestcaseBundle(gPropList.stroke_width,
-                     [].concat(_pacedTestLists.lengthNoUnitsSVG,
-                               _pacedTestLists.lengthPxSVG,
+                     [].concat(_pacedTestLists.lengthNoUnits,
+                               _pacedTestLists.lengthPx,
                                _pacedTestLists.lengthPctSVG,
                                _pacedTestLists.lengthPxPctSVG)),
   // XXXdholbert TODO: test 'stroke-dasharray' once we support animating it

@@ -1,11 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://gre/modules/LoginManagerParent.jsm", this);
+ChromeUtils.import("resource://gre/modules/LoginManagerParent.jsm", this);
 
-function* registerConverter() {
-  Cu.import("resource://gre/modules/Services.jsm", this);
-  Cu.import("resource://gre/modules/NetUtil.jsm", this);
+function registerConverter() {
+  ChromeUtils.import("resource://gre/modules/Services.jsm", this);
+  ChromeUtils.import("resource://gre/modules/NetUtil.jsm", this);
 
   /**
    * Converts the "test/content" MIME type, served by the test over HTTP, to an
@@ -17,7 +17,7 @@ function* registerConverter() {
   TestStreamConverter.prototype = {
     classID: Components.ID("{5f01d6ef-c090-45a4-b3e5-940d64713eb7}"),
     contractID: "@mozilla.org/streamconv;1?from=test/content&to=*/*",
-    QueryInterface: XPCOMUtils.generateQI([
+    QueryInterface: ChromeUtils.generateQI([
       Ci.nsIRequestObserver,
       Ci.nsIStreamListener,
       Ci.nsIStreamConverter,
@@ -58,7 +58,7 @@ function* registerConverter() {
   let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
   registrar.registerFactory(TestStreamConverter.prototype.classID, "",
                             TestStreamConverter.prototype.contractID, factory);
-  this.cleanupFunction = function () {
+  this.cleanupFunction = function() {
     registrar.unregisterFactory(TestStreamConverter.prototype.classID, factory);
   };
 }
@@ -76,15 +76,16 @@ function waitForInsecureLoginFormsStateChange(browser, count) {
  * Checks that hasInsecureLoginForms is false for a viewer served internally
  * using a "resource:" URI.
  */
-add_task(function* test_streamConverter() {
-  let originalBrowser = gBrowser.selectedBrowser;
+add_task(async function test_streamConverter() {
+  let originalBrowser = gBrowser.selectedTab.linkedBrowser;
 
-  yield ContentTask.spawn(originalBrowser, null, registerConverter);
+  await ContentTask.spawn(originalBrowser, null, registerConverter);
 
-  let tab = gBrowser.addTab("http://example.com/browser/toolkit/components/" +
-                            "passwordmgr/test/browser/streamConverter_content.sjs");
+  let tab = BrowserTestUtils.addTab(gBrowser, "http://example.com/browser/toolkit/components/" +
+                                   "passwordmgr/test/browser/streamConverter_content.sjs",
+                                   { sameProcessAsFrameLoader: originalBrowser.frameLoader });
   let browser = tab.linkedBrowser;
-  yield Promise.all([
+  await Promise.all([
     BrowserTestUtils.switchTab(gBrowser, tab),
     BrowserTestUtils.browserLoaded(browser),
     // One event is triggered by pageshow and one by DOMFormHasPassword.
@@ -93,9 +94,9 @@ add_task(function* test_streamConverter() {
 
   Assert.ok(!LoginManagerParent.hasInsecureLoginForms(browser));
 
-  yield BrowserTestUtils.removeTab(tab);
+  BrowserTestUtils.removeTab(tab);
 
-  yield ContentTask.spawn(originalBrowser, null, function* () {
+  await ContentTask.spawn(originalBrowser, null, async function() {
     this.cleanupFunction();
   });
 });

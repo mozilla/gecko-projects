@@ -4,9 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ReaderMode"];
-
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+var EXPORTED_SYMBOLS = ["ReaderMode"];
 
 // Constants for telemetry.
 const DOWNLOAD_SUCCESS = 0;
@@ -18,25 +16,40 @@ const PARSE_ERROR_TOO_MANY_ELEMENTS = 1;
 const PARSE_ERROR_WORKER = 2;
 const PARSE_ERROR_NO_ARTICLE = 3;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+// Class names to preserve in the readerized output. We preserve these class
+// names so that rules in aboutReader.css can match them.
+const CLASSES_TO_PRESERVE = [
+  "caption",
+  "hidden",
+  "invisble",
+  "sr-only",
+  "visually-hidden",
+  "visuallyhidden",
+  "wp-caption",
+  "wp-caption-text",
+];
 
-Cu.importGlobalProperties(["XMLHttpRequest"]);
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils", "resource://services-common/utils.js");
-XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ReaderWorker", "resource://gre/modules/reader/ReaderWorker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ["XMLHttpRequest", "XMLSerializer"]);
+
+ChromeUtils.defineModuleGetter(this, "CommonUtils", "resource://services-common/utils.js");
+ChromeUtils.defineModuleGetter(this, "EventDispatcher", "resource://gre/modules/Messaging.jsm");
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(this, "ReaderWorker", "resource://gre/modules/reader/ReaderWorker.jsm");
+ChromeUtils.defineModuleGetter(this, "LanguageDetector", "resource:///modules/translation/LanguageDetector.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "Readability", function() {
   let scope = {};
   scope.dump = this.dump;
   Services.scriptloader.loadSubScript("resource://gre/modules/reader/Readability.js", scope);
-  return scope["Readability"];
+  return scope.Readability;
 });
 
-this.ReaderMode = {
+const gIsFirefoxDesktop = Services.appinfo.ID == "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
+
+var ReaderMode = {
   // Version of the cache schema.
   CACHE_VERSION: 1,
 
@@ -47,7 +60,7 @@ this.ReaderMode = {
   get maxElemsToParse() {
     delete this.parseNodeLimit;
 
-    Services.prefs.addObserver("reader.parse-node-limit", this, false);
+    Services.prefs.addObserver("reader.parse-node-limit", this);
     return this.parseNodeLimit = Services.prefs.getIntPref("reader.parse-node-limit");
   },
 
@@ -55,27 +68,19 @@ this.ReaderMode = {
     delete this.isEnabledForParseOnLoad;
 
     // Listen for future pref changes.
-    Services.prefs.addObserver("reader.parse-on-load.", this, false);
+    Services.prefs.addObserver("reader.parse-on-load.", this);
 
     return this.isEnabledForParseOnLoad = this._getStateForParseOnLoad();
   },
 
-  get isOnLowMemoryPlatform() {
-    let memory = Cc["@mozilla.org/xpcom/memory-service;1"].getService(Ci.nsIMemory);
-    delete this.isOnLowMemoryPlatform;
-    return this.isOnLowMemoryPlatform = memory.isLowMemoryPlatform();
-  },
-
-  _getStateForParseOnLoad: function () {
+  _getStateForParseOnLoad() {
     let isEnabled = Services.prefs.getBoolPref("reader.parse-on-load.enabled");
     let isForceEnabled = Services.prefs.getBoolPref("reader.parse-on-load.force-enabled");
-    // For low-memory devices, don't allow reader mode since it takes up a lot of memory.
-    // See https://bugzilla.mozilla.org/show_bug.cgi?id=792603 for details.
-    return isForceEnabled || (isEnabled && !this.isOnLowMemoryPlatform);
+    return isForceEnabled || isEnabled;
   },
 
-  observe: function(aMessage, aTopic, aData) {
-    switch(aTopic) {
+  observe(aMessage, aTopic, aData) {
+    switch (aTopic) {
       case "nsPref:changed":
         if (aData.startsWith("reader.parse-on-load.")) {
           this.isEnabledForParseOnLoad = this._getStateForParseOnLoad();
@@ -87,28 +92,113 @@ this.ReaderMode = {
   },
 
   /**
+   * Enter the reader mode by going forward one step in history if applicable,
+   * if not, append the about:reader page in the history instead.
+   */
+  enterReaderMode(docShell, win) {
+    Services.telemetry.recordEvent("savant", "readermode", "on", null,
+                                  { subcategory: "feature" });
+
+    let url = win.document.location.href;
+    let readerURL = "about:reader?url=" + encodeURIComponent(url);
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sh = webNav.sessionHistory;
+    if (webNav.canGoForward) {
+      let forwardEntry = sh.legacySHistory.getEntryAtIndex(sh.index + 1, false);
+      let forwardURL = forwardEntry.URI.spec;
+      if (forwardURL && (forwardURL == readerURL || !readerURL)) {
+        webNav.goForward();
+        return;
+      }
+    }
+
+    win.document.location = readerURL;
+  },
+
+  /**
+   * Exit the reader mode by going back one step in history if applicable,
+   * if not, append the original page in the history instead.
+   */
+  leaveReaderMode(docShell, win) {
+    Services.telemetry.recordEvent("savant", "readermode", "off", null,
+                                  { subcategory: "feature" });
+    let url = win.document.location.href;
+    let originalURL = this.getOriginalUrl(url);
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sh = webNav.sessionHistory;
+    if (webNav.canGoBack) {
+      let prevEntry = sh.legacySHistory.getEntryAtIndex(sh.index - 1, false);
+      let prevURL = prevEntry.URI.spec;
+      if (prevURL && (prevURL == originalURL || !originalURL)) {
+        webNav.goBack();
+        return;
+      }
+    }
+
+    let referrerURI, principal;
+    try {
+      referrerURI = Services.io.newURI(url);
+      principal = Services.scriptSecurityManager.createCodebasePrincipal(
+        referrerURI, win.document.nodePrincipal.originAttributes);
+    } catch (e) {
+      Cu.reportError(e);
+      return;
+    }
+    let flags =  webNav.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL |
+      webNav.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
+    webNav.loadURI(originalURL, flags, referrerURI, null, null, principal);
+  },
+
+  /**
    * Returns original URL from an about:reader URL.
    *
    * @param url An about:reader URL.
    * @return The original URL for the article, or null if we did not find
    *         a properly formatted about:reader URL.
    */
-  getOriginalUrl: function(url) {
+  getOriginalUrl(url) {
     if (!url.startsWith("about:reader?")) {
       return null;
     }
+
+    let outerHash = "";
+    try {
+      let uriObj = Services.io.newURI(url);
+      url = uriObj.specIgnoringRef;
+      outerHash = uriObj.ref;
+    } catch (ex) { /* ignore, use the raw string */ }
 
     let searchParams = new URLSearchParams(url.substring("about:reader?".length));
     if (!searchParams.has("url")) {
       return null;
     }
-    let encodedURL = searchParams.get("url");
-    try {
-      return decodeURIComponent(encodedURL);
-    } catch (e) {
-      Cu.reportError("Error decoding original URL: " + e);
-      return encodedURL;
+    let originalUrl = searchParams.get("url");
+    if (outerHash) {
+      try {
+        let uriObj = Services.io.newURI(originalUrl);
+        uriObj = Services.io.newURI("#" + outerHash, null, uriObj);
+        originalUrl = uriObj.spec;
+      } catch (ex) {}
     }
+    return originalUrl;
+  },
+
+  getOriginalUrlObjectForDisplay(url) {
+    let originalUrl = this.getOriginalUrl(url);
+    if (originalUrl) {
+      let uriObj;
+      try {
+        uriObj = Services.uriFixup.createFixupURI(originalUrl, Services.uriFixup.FIXUP_FLAG_NONE);
+      } catch (ex) {
+        return null;
+      }
+      try {
+        return Services.uriFixup.createExposableURI(uriObj);
+      } catch (ex) {
+        return null;
+      }
+    }
+    return null;
   },
 
   /**
@@ -117,13 +207,13 @@ this.ReaderMode = {
    * @param doc A document to parse.
    * @return boolean Whether or not we should show the reader mode button.
    */
-  isProbablyReaderable: function(doc) {
+  isProbablyReaderable(doc) {
     // Only care about 'real' HTML documents:
     if (doc.mozSyntheticDocument || !(doc instanceof doc.defaultView.HTMLDocument)) {
       return false;
     }
 
-    let uri = Services.io.newURI(doc.location.href, null, null);
+    let uri = Services.io.newURI(doc.location.href);
     if (!this._shouldCheckUri(uri)) {
       return false;
     }
@@ -132,15 +222,15 @@ this.ReaderMode = {
     // We pass in a helper function to determine if a node is visible, because
     // it uses gecko APIs that the engine-agnostic readability code can't rely
     // upon.
-    return new Readability(uri, doc).isProbablyReaderable(this.isNodeVisible.bind(this, utils));
+    return new Readability(doc).isProbablyReaderable(this.isNodeVisible.bind(this, utils));
   },
 
-  isNodeVisible: function(utils, node) {
+  isNodeVisible(utils, node) {
     let bounds = utils.getBoundsWithoutFlushing(node);
     return bounds.height > 0 && bounds.width > 0;
   },
 
-  getUtilsForWin: function(win) {
+  getUtilsForWin(win) {
     return win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
   },
 
@@ -152,15 +242,14 @@ this.ReaderMode = {
    * @return {Promise}
    * @resolves JS object representing the article, or null if no article is found.
    */
-  parseDocument: Task.async(function* (doc) {
-    let uri = Services.io.newURI(doc.documentURI, null, null);
-    if (!this._shouldCheckUri(uri)) {
+  parseDocument(doc) {
+    if (!this._shouldCheckUri(doc.documentURIObject) || !this._shouldCheckUri(doc.baseURIObject, true)) {
       this.log("Reader mode disabled for URI");
       return null;
     }
 
-    return yield this._readerParse(uri, doc);
-  }),
+    return this._readerParse(doc);
+  },
 
   /**
    * Downloads and parses a document from a URL.
@@ -169,18 +258,28 @@ this.ReaderMode = {
    * @return {Promise}
    * @resolves JS object representing the article, or null if no article is found.
    */
-  downloadAndParseDocument: Task.async(function* (url) {
-    let uri = Services.io.newURI(url, null, null);
-    TelemetryStopwatch.start("READER_MODE_DOWNLOAD_MS");
-    let doc = yield this._downloadDocument(url).catch(e => {
-      TelemetryStopwatch.finish("READER_MODE_DOWNLOAD_MS");
-      throw e;
-    });
-    TelemetryStopwatch.finish("READER_MODE_DOWNLOAD_MS");
-    return yield this._readerParse(uri, doc);
-  }),
+  async downloadAndParseDocument(url) {
+    let doc = await this._downloadDocument(url);
+    if (!doc) {
+      return null;
+    }
+    if (!this._shouldCheckUri(doc.documentURIObject) || !this._shouldCheckUri(doc.baseURIObject, true)) {
+      this.log("Reader mode disabled for URI");
+      return null;
+    }
 
-  _downloadDocument: function (url) {
+    return this._readerParse(doc);
+  },
+
+  _downloadDocument(url) {
+    try {
+      if (!this._shouldCheckUri(Services.io.newURI(url))) {
+        return null;
+      }
+    } catch (ex) {
+      Cu.reportError(new Error(`Couldn't create URI from ${url} to download: ${ex}`));
+      return null;
+    }
     let histogram = Services.telemetry.getHistogramById("READER_MODE_DOWNLOAD_RESULT");
     return new Promise((resolve, reject) => {
       let xhr = new XMLHttpRequest();
@@ -208,23 +307,27 @@ this.ReaderMode = {
           if (content) {
             let urlIndex = content.toUpperCase().indexOf("URL=");
             if (urlIndex > -1) {
-              let url = content.substring(urlIndex + 4);
+              let baseURI = Services.io.newURI(url);
+              let newURI = Services.io.newURI(content.substring(urlIndex + 4), null, baseURI);
+              let newURL = newURI.spec;
               let ssm = Services.scriptSecurityManager;
               let flags = ssm.LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |
                           ssm.DISALLOW_INHERIT_PRINCIPAL;
               try {
-                ssm.checkLoadURIStrWithPrincipal(doc.nodePrincipal, url, flags);
+                ssm.checkLoadURIStrWithPrincipal(doc.nodePrincipal, newURL, flags);
               } catch (ex) {
                 let errorMsg = "Reader mode disallowed meta refresh (reason: " + ex + ").";
 
                 if (Services.prefs.getBoolPref("reader.errors.includeURLs"))
-                  errorMsg += " Refresh target URI: '" + url + "'.";
+                  errorMsg += " Refresh target URI: '" + newURL + "'.";
                 reject(errorMsg);
                 return;
               }
               // Otherwise, pass an object indicating our new URL:
-              reject({newURL: url});
-              return;
+              if (!baseURI.equalsExceptRef(newURI)) {
+                reject({newURL});
+                return;
+              }
             }
           }
         }
@@ -233,10 +336,10 @@ this.ReaderMode = {
         // Convert these to real URIs to make sure the escaping (or lack
         // thereof) is identical:
         try {
-          responseURL = Services.io.newURI(responseURL, null, null).spec;
+          responseURL = Services.io.newURI(responseURL).specIgnoringRef;
         } catch (ex) { /* Ignore errors - we'll use what we had before */ }
         try {
-          givenURL = Services.io.newURI(givenURL, null, null).spec;
+          givenURL = Services.io.newURI(givenURL).specIgnoringRef;
         } catch (ex) { /* Ignore errors - we'll use what we had before */ }
 
         if (responseURL != givenURL) {
@@ -247,7 +350,7 @@ this.ReaderMode = {
         }
         resolve(doc);
         histogram.add(DOWNLOAD_SUCCESS);
-      }
+      };
       xhr.send();
     });
   },
@@ -261,17 +364,17 @@ this.ReaderMode = {
    * @resolves JS object representing the article, or null if no article is found.
    * @rejects OS.File.Error
    */
-  getArticleFromCache: Task.async(function* (url) {
+  async getArticleFromCache(url) {
     let path = this._toHashedPath(url);
     try {
-      let array = yield OS.File.read(path);
+      let array = await OS.File.read(path);
       return JSON.parse(new TextDecoder().decode(array));
     } catch (e) {
       if (!(e instanceof OS.File.Error) || !e.becauseNoSuchFile)
         throw e;
       return null;
     }
-  }),
+  },
 
   /**
    * Stores an article in the cache.
@@ -281,12 +384,22 @@ this.ReaderMode = {
    * @resolves When the article is stored.
    * @rejects OS.File.Error
    */
-  storeArticleInCache: Task.async(function* (article) {
+  async storeArticleInCache(article) {
     let array = new TextEncoder().encode(JSON.stringify(article));
     let path = this._toHashedPath(article.url);
-    yield this._ensureCacheDir();
-    yield OS.File.writeAtomic(path, array, { tmpPath: path + ".tmp" });
-  }),
+    await this._ensureCacheDir();
+    return OS.File.writeAtomic(path, array, { tmpPath: path + ".tmp" })
+      .then(success => {
+        OS.File.stat(path).then(info => {
+          return EventDispatcher.instance.sendRequest({
+            type: "Reader:AddedToCache",
+            url: article.url,
+            size: info.size,
+            path,
+          });
+        });
+      });
+  },
 
   /**
    * Removes an article from the cache given an article URI.
@@ -296,26 +409,27 @@ this.ReaderMode = {
    * @resolves When the article is removed.
    * @rejects OS.File.Error
    */
-  removeArticleFromCache: Task.async(function* (url) {
+  async removeArticleFromCache(url) {
     let path = this._toHashedPath(url);
-    yield OS.File.remove(path);
-  }),
+    await OS.File.remove(path);
+  },
 
-  log: function(msg) {
+  log(msg) {
     if (this.DEBUG)
       dump("Reader: " + msg);
   },
 
   _blockedHosts: [
-    "mail.google.com",
+    "amazon.com",
     "github.com",
+    "mail.google.com",
     "pinterest.com",
     "reddit.com",
     "twitter.com",
     "youtube.com",
   ],
 
-  _shouldCheckUri: function (uri) {
+  _shouldCheckUri(uri, isBaseUri = false) {
     if (!(uri.schemeIs("http") || uri.schemeIs("https"))) {
       this.log("Not parsing URI scheme: " + uri.scheme);
       return false;
@@ -329,11 +443,11 @@ this.ReaderMode = {
     }
     // Sadly, some high-profile pages have false positives, so bail early for those:
     let asciiHost = uri.asciiHost;
-    if (this._blockedHosts.some(blockedHost => asciiHost.endsWith(blockedHost))) {
+    if (!isBaseUri && this._blockedHosts.some(blockedHost => asciiHost.endsWith(blockedHost))) {
       return false;
     }
 
-    if (!uri.filePath || uri.filePath == "/") {
+    if (!isBaseUri && (!uri.filePath || uri.filePath == "/")) {
       this.log("Not parsing home page: " + uri.spec);
       return false;
     }
@@ -345,45 +459,51 @@ this.ReaderMode = {
    * Attempts to parse a document into an article. Heavy lifting happens
    * in readerWorker.js.
    *
-   * @param uri The article URI.
    * @param doc The document to parse.
    * @return {Promise}
    * @resolves JS object representing the article, or null if no article is found.
    */
-  _readerParse: Task.async(function* (uri, doc) {
+  async _readerParse(doc) {
     let histogram = Services.telemetry.getHistogramById("READER_MODE_PARSE_RESULT");
     if (this.parseNodeLimit) {
       let numTags = doc.getElementsByTagName("*").length;
       if (numTags > this.parseNodeLimit) {
-        this.log("Aborting parse for " + uri.spec + "; " + numTags + " elements found");
+        this.log("Aborting parse for " + doc.baseURIObject.spec + "; " + numTags + " elements found");
         histogram.add(PARSE_ERROR_TOO_MANY_ELEMENTS);
         return null;
       }
     }
 
+    // Fetch this here before we send `doc` off to the worker thread, as later on the
+    // document might be nuked but we will still want the URI.
+    let {documentURI} = doc;
+
     let uriParam = {
-      spec: uri.spec,
-      host: uri.host,
-      prePath: uri.prePath,
-      scheme: uri.scheme,
-      pathBase: Services.io.newURI(".", null, uri).spec
+      spec: doc.baseURIObject.spec,
+      host: doc.baseURIObject.host,
+      prePath: doc.baseURIObject.prePath,
+      scheme: doc.baseURIObject.scheme,
+      pathBase: Services.io.newURI(".", null, doc.baseURIObject).spec
     };
 
-    TelemetryStopwatch.start("READER_MODE_SERIALIZE_DOM_MS");
-    let serializer = Cc["@mozilla.org/xmlextras/xmlserializer;1"].
-                     createInstance(Ci.nsIDOMSerializer);
+    let serializer = new XMLSerializer();
     let serializedDoc = serializer.serializeToString(doc);
-    TelemetryStopwatch.finish("READER_MODE_SERIALIZE_DOM_MS");
 
-    TelemetryStopwatch.start("READER_MODE_WORKER_PARSE_MS");
+    let options = {
+      classesToPreserve: CLASSES_TO_PRESERVE,
+    };
+
     let article = null;
     try {
-      article = yield ReaderWorker.post("parseDocument", [uriParam, serializedDoc]);
+      article = await ReaderWorker.post("parseDocument", [uriParam, serializedDoc, options]);
     } catch (e) {
       Cu.reportError("Error in ReaderWorker: " + e);
       histogram.add(PARSE_ERROR_WORKER);
     }
-    TelemetryStopwatch.finish("READER_MODE_WORKER_PARSE_MS");
+
+    // Explicitly null out doc to make it clear it might not be available from this
+    // point on.
+    doc = null;
 
     if (!article) {
       this.log("Worker did not return an article");
@@ -391,17 +511,25 @@ this.ReaderMode = {
       return null;
     }
 
-    // Readability returns a URI object, but we only care about the URL.
-    article.url = article.uri.spec;
+    // Readability returns a URI object based on the baseURI, but we only care
+    // about the original document's URL from now on. This also avoids spoofing
+    // attempts where the baseURI doesn't match the domain of the documentURI
+    article.url = documentURI;
     delete article.uri;
 
     let flags = Ci.nsIDocumentEncoder.OutputSelectionOnly | Ci.nsIDocumentEncoder.OutputAbsoluteLinks;
     article.title = Cc["@mozilla.org/parserutils;1"].getService(Ci.nsIParserUtils)
                                                     .convertToPlainText(article.title, flags, 0);
+    if (gIsFirefoxDesktop) {
+      await this._assignLanguage(article);
+      this._maybeAssignTextDirection(article);
+    }
+
+    this._assignReadTime(article);
 
     histogram.add(PARSE_SUCCESS);
     return article;
-  }),
+  },
 
   get _cryptoHash() {
     delete this._cryptoHash;
@@ -422,7 +550,7 @@ this.ReaderMode = {
    * @param url The article URL. This should have referrers removed.
    * @return The file path to the cached article.
    */
-  _toHashedPath: function (url) {
+  _toHashedPath(url) {
     let value = this._unicodeConverter.convertToByteArray(url);
     this._cryptoHash.init(this._cryptoHash.MD5);
     this._cryptoHash.update(value, value.length);
@@ -439,12 +567,81 @@ this.ReaderMode = {
    * @resolves When the cache directory exists.
    * @rejects OS.File.Error
    */
-  _ensureCacheDir: function () {
+  _ensureCacheDir() {
     let dir = OS.Path.join(OS.Constants.Path.profileDir, "readercache");
     return OS.File.exists(dir).then(exists => {
       if (!exists) {
         return OS.File.makeDir(dir);
       }
+      return undefined;
     });
-  }
+  },
+
+  /**
+   * Sets a global language string value if the result is confident
+   *
+   * @return Promise
+   * @resolves when the language is detected
+   */
+  _assignLanguage(article) {
+    return LanguageDetector.detectLanguage(article.textContent).then(result => {
+      article.language = result.confident ? result.language : null;
+    });
+  },
+
+  _maybeAssignTextDirection(article) {
+    // TODO: Remove the hardcoded language codes below once bug 1320265 is resolved.
+    if (!article.dir && ["ar", "fa", "he", "ug", "ur"].includes(article.language)) {
+      article.dir = "rtl";
+    }
+  },
+
+  /**
+   * Assigns the estimated reading time range of the article to the article object.
+   *
+   * @param article the article object to assign the reading time estimate to.
+   */
+  _assignReadTime(article) {
+    let lang = article.language || "en";
+    const readingSpeed = this._getReadingSpeedForLanguage(lang);
+    const charactersPerMinuteLow = readingSpeed.cpm - readingSpeed.variance;
+    const charactersPerMinuteHigh = readingSpeed.cpm + readingSpeed.variance;
+    const length = article.length;
+
+    article.readingTimeMinsSlow = Math.ceil(length / charactersPerMinuteLow);
+    article.readingTimeMinsFast  = Math.ceil(length / charactersPerMinuteHigh);
+  },
+
+  /**
+   * Returns the reading speed of a selection of languages with likely variance.
+   *
+   * Reading speed estimated from a study done on reading speeds in various languages.
+   * study can be found here: http://iovs.arvojournals.org/article.aspx?articleid=2166061
+   *
+   * @return object with characters per minute and variance. Defaults to English
+   *         if no suitable language is found in the collection.
+   */
+  _getReadingSpeedForLanguage(lang) {
+    const readingSpeed = new Map([
+      [ "en", {cpm: 987,  variance: 118 } ],
+      [ "ar", {cpm: 612,  variance: 88 } ],
+      [ "de", {cpm: 920,  variance: 86 } ],
+      [ "es", {cpm: 1025, variance: 127 } ],
+      [ "fi", {cpm: 1078, variance: 121 } ],
+      [ "fr", {cpm: 998,  variance: 126 } ],
+      [ "he", {cpm: 833,  variance: 130 } ],
+      [ "it", {cpm: 950,  variance: 140 } ],
+      [ "jw", {cpm: 357,  variance: 56 } ],
+      [ "nl", {cpm: 978,  variance: 143 } ],
+      [ "pl", {cpm: 916,  variance: 126 } ],
+      [ "pt", {cpm: 913,  variance: 145 } ],
+      [ "ru", {cpm: 986,  variance: 175 } ],
+      [ "sk", {cpm: 885,  variance: 145 } ],
+      [ "sv", {cpm: 917,  variance: 156 } ],
+      [ "tr", {cpm: 1054, variance: 156 } ],
+      [ "zh", {cpm: 255,  variance: 29 } ],
+    ]);
+
+    return readingSpeed.get(lang) || readingSpeed.get("en");
+  },
 };

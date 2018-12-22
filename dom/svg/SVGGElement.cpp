@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGGElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGGElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -28,7 +28,7 @@ SVGGElement::SVGGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
 
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGGElement)
@@ -38,7 +38,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGGElement)
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGGElement::IsAttributeMapped(const nsIAtom* name) const
+SVGGElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sFEFloodMap,

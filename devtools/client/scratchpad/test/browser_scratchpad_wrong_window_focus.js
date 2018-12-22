@@ -3,9 +3,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 /* Bug 661762 */
 
-
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
   // To test for this bug we open a Scratchpad window, save its
@@ -20,35 +18,33 @@ function test()
   // on the location link. After that we check which Scratchpad window
   // is currently active (it should be the older one).
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
+    openScratchpad(function() {
+      const sw = gScratchpadWindow;
+      const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+      const {TargetFactory} = require("devtools/client/framework/target");
 
-    openScratchpad(function () {
-      let sw = gScratchpadWindow;
-      let {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-      let {TargetFactory} = require("devtools/client/framework/target");
-
-      openScratchpad(function () {
-        let target = TargetFactory.forTab(gBrowser.selectedTab);
+      openScratchpad(function() {
+        const target = TargetFactory.forTab(gBrowser.selectedTab);
         gDevTools.showToolbox(target, "webconsole").then((toolbox) => {
-          let hud = toolbox.getCurrentPanel().hud;
-          hud.jsterm.clearOutput(true);
+          const hud = toolbox.getCurrentPanel().hud;
+          hud.ui.clearOutput(true);
           testFocus(sw, hud);
         });
       });
     });
-  }, true);
+  });
 
-  content.location = "data:text/html;charset=utf8,<p>test window focus for Scratchpad.";
+  gBrowser.loadURI("data:text/html;charset=utf8,<p>test window focus for Scratchpad.");
 }
 
 function testFocus(sw, hud) {
-  let sp = sw.Scratchpad;
+  const sp = sw.Scratchpad;
 
-  function onMessage(event, messages) {
-    let msg = [...messages][0];
-    let node = msg.node;
+  function onMessage(messages) {
+    const msg = [...messages][0];
+    const node = msg.node;
 
     var loc = node.querySelector(".frame-link");
     ok(loc, "location element exists");
@@ -56,10 +52,8 @@ function testFocus(sw, hud) {
     is(loc.getAttribute("data-line"), "1", "line value is correct");
     is(loc.getAttribute("data-column"), "1", "column value is correct");
 
-    sw.addEventListener("focus", function onFocus() {
-      sw.removeEventListener("focus", onFocus, true);
-
-      let win = Services.wm.getMostRecentWindow("devtools:scratchpad");
+    sw.addEventListener("focus", function() {
+      const win = Services.wm.getMostRecentWindow("devtools:scratchpad");
 
       ok(win, "there are active Scratchpad windows");
       is(win.Scratchpad.uniqueName, sw.Scratchpad.uniqueName,
@@ -69,7 +63,7 @@ function testFocus(sw, hud) {
       // close the second window ourselves.
       sw.close();
       finish();
-    }, true);
+    }, {capture: true, once: true});
 
     // Simulate a click on the "Scratchpad/N:1" link.
     EventUtils.synthesizeMouse(loc, 2, 2, {}, hud.iframeWindow);
@@ -80,7 +74,7 @@ function testFocus(sw, hud) {
   hud.ui.once("new-messages", onMessage);
 
   sp.setText("console.log('foo');");
-  sp.run().then(function ([selection, error, result]) {
+  sp.run().then(function([selection, error, result]) {
     is(selection, "console.log('foo');", "selection is correct");
     is(error, undefined, "error is correct");
     is(result.type, "undefined", "result is correct");

@@ -15,6 +15,8 @@
 using namespace mozilla::dom;
 using namespace mozilla::hal;
 
+namespace java = mozilla::java;
+
 namespace mozilla {
 namespace hal_impl {
 
@@ -54,19 +56,19 @@ CancelVibrate(const WindowIdentifier &)
 {
   // Ignore WindowIdentifier parameter.
 
-  mozilla::widget::GeckoAppShell::CancelVibrate();
+  java::GeckoAppShell::CancelVibrate();
 }
 
 void
 EnableBatteryNotifications()
 {
-  mozilla::widget::GeckoAppShell::EnableBatteryNotifications();
+  java::GeckoAppShell::EnableBatteryNotifications();
 }
 
 void
 DisableBatteryNotifications()
 {
-  mozilla::widget::GeckoAppShell::DisableBatteryNotifications();
+  java::GeckoAppShell::DisableBatteryNotifications();
 }
 
 void
@@ -78,13 +80,13 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
 void
 EnableNetworkNotifications()
 {
-  mozilla::widget::GeckoAppShell::EnableNetworkNotifications();
+  java::GeckoAppShell::EnableNetworkNotifications();
 }
 
 void
 DisableNetworkNotifications()
 {
-  mozilla::widget::GeckoAppShell::DisableNetworkNotifications();
+  java::GeckoAppShell::DisableNetworkNotifications();
 }
 
 void
@@ -96,13 +98,13 @@ GetCurrentNetworkInformation(hal::NetworkInformation* aNetworkInfo)
 void
 EnableScreenConfigurationNotifications()
 {
-  mozilla::widget::GeckoAppShell::EnableScreenOrientationNotifications();
+  java::GeckoAppShell::EnableScreenOrientationNotifications();
 }
 
 void
 DisableScreenConfigurationNotifications()
 {
-  mozilla::widget::GeckoAppShell::DisableScreenOrientationNotifications();
+  java::GeckoAppShell::DisableScreenOrientationNotifications();
 }
 
 void
@@ -121,21 +123,24 @@ GetCurrentScreenConfiguration(ScreenConfiguration* aScreenConfiguration)
     return;
   }
 
-  nsIntRect rect;
   int32_t colorDepth, pixelDepth;
   int16_t angle;
   ScreenOrientationInternal orientation;
   nsCOMPtr<nsIScreen> screen;
 
+  int32_t rectX, rectY, rectWidth, rectHeight;
+
   screenMgr->GetPrimaryScreen(getter_AddRefs(screen));
-  screen->GetRect(&rect.x, &rect.y, &rect.width, &rect.height);
+  
+  screen->GetRect(&rectX, &rectY, &rectWidth, &rectHeight);
   screen->GetColorDepth(&colorDepth);
   screen->GetPixelDepth(&pixelDepth);
   orientation = static_cast<ScreenOrientationInternal>(bridge->GetScreenOrientation());
   angle = bridge->GetScreenAngle();
 
   *aScreenConfiguration =
-    hal::ScreenConfiguration(rect, orientation, angle, colorDepth, pixelDepth);
+    hal::ScreenConfiguration(nsIntRect(rectX, rectY, rectWidth, rectHeight),
+                             orientation, angle, colorDepth, pixelDepth);
 }
 
 bool
@@ -155,7 +160,7 @@ LockScreenOrientation(const ScreenOrientationInternal& aOrientation)
     case eScreenOrientation_LandscapeSecondary:
     case eScreenOrientation_LandscapePrimary | eScreenOrientation_LandscapeSecondary:
     case eScreenOrientation_Default:
-      mozilla::widget::GeckoAppShell::LockScreenOrientation(orientation);
+      java::GeckoAppShell::LockScreenOrientation(orientation);
       return true;
     default:
       return false;
@@ -165,7 +170,7 @@ LockScreenOrientation(const ScreenOrientationInternal& aOrientation)
 void
 UnlockScreenOrientation()
 {
-  mozilla::widget::GeckoAppShell::UnlockScreenOrientation();
+  java::GeckoAppShell::UnlockScreenOrientation();
 }
 
 } // hal_impl

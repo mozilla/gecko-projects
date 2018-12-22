@@ -15,7 +15,6 @@
 #include "nsIURL.h"
 #include "nsArrayEnumerator.h"
 #include "nsIStringBundle.h"
-#include "nsCocoaFeatures.h"
 #include "nsCocoaUtils.h"
 #include "mozilla/Preferences.h"
 
@@ -120,10 +119,9 @@ NSView* nsFilePicker::GetAccessoryView()
   nsCOMPtr<nsIStringBundle> bundle;
   nsresult rv = sbs->CreateBundle("chrome://global/locale/filepicker.properties", getter_AddRefs(bundle));
   if (NS_SUCCEEDED(rv)) {
-    nsXPIDLString locaLabel;
-    bundle->GetStringFromName(MOZ_UTF16("formatLabel"),
-			      getter_Copies(locaLabel));
-    if (locaLabel) {
+    nsAutoString locaLabel;
+    rv = bundle->GetStringFromName("formatLabel", locaLabel);
+    if (NS_SUCCEEDED(rv)) {
       label = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(locaLabel.get())
                                       length:locaLabel.Length()];
     }
@@ -191,7 +189,7 @@ NSView* nsFilePicker::GetAccessoryView()
 }
 
 // Display the file dialog
-NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
+nsresult nsFilePicker::Show(int16_t *retval)
 {
   NS_ENSURE_ARG_POINTER(retval);
 
@@ -460,6 +458,38 @@ nsFilePicker::PutLocalFile(const nsString& inTitle, const nsString& inDefaultNam
   // set up default file name
   NSString* defaultFilename = [NSString stringWithCharacters:(const unichar*)inDefaultName.get() length:inDefaultName.Length()];
 
+  // Set up the allowed type. This prevents the extension from being selected.
+  NSString* extension = defaultFilename.pathExtension;
+  if (extension.length != 0) {
+    thePanel.allowedFileTypes = @[extension];
+  }
+  // Allow users to change the extension.
+  thePanel.allowsOtherFileTypes = YES;
+
+  // If extensions are hidden and we’re saving a file with multiple extensions,
+  // only the last extension will be hidden in the panel (".tar.gz" will become
+  // ".tar"). If the remaining extension is known, the OS will think that we're
+  // trying to add a non-default extension. To avoid the confusion, we ensure
+  // that all extensions are shown in the panel if the remaining extension is
+  // known by the OS.
+  NSString* fileName =
+    [[defaultFilename lastPathComponent] stringByDeletingPathExtension];
+  NSString* otherExtension = fileName.pathExtension;
+  if (otherExtension.length != 0) {
+    // There's another extension here. Get the UTI.
+    CFStringRef type =
+      UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension,
+                                            (CFStringRef)otherExtension, NULL);
+    if (type) {
+      if (!CFStringHasPrefix(type, CFSTR("dyn."))) {
+        // We have a UTI, otherwise the type would have a "dyn." prefix. Ensure
+        // extensions are shown in the panel.
+        [thePanel setExtensionHidden:NO];
+      }
+      CFRelease(type);
+    }
+  }
+
   // set up default directory
   NSString *theDir = PanelDefaultDirectory();
   if (theDir) {
@@ -551,6 +581,10 @@ nsFilePicker::SetDialogTitle(const nsString& inTitle, id aPanel)
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   [aPanel setTitle:[NSString stringWithCharacters:(const unichar*)inTitle.get() length:inTitle.Length()]];
+
+  if (!mOkButtonLabel.IsEmpty()) {
+    [aPanel setPrompt:[NSString stringWithCharacters:(const unichar*)mOkButtonLabel.get() length:mOkButtonLabel.Length()]];
+  }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 } 

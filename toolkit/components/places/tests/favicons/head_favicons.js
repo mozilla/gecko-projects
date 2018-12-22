@@ -3,15 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
-var Cu = Components.utils;
-
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // Import common head.
 {
+  /* import-globals-from ../head_common.js */
   let commonFile = do_get_file("../head_common.js", false);
   let uri = Services.io.newFileURI(commonFile);
   Services.scriptloader.loadSubScript(uri.spec, this);
@@ -19,11 +15,12 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 // Put any other stuff relative to this test folder below.
 
+const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
 
 // This error icon must stay in sync with FAVICON_ERRORPAGE_URL in
 // nsIFaviconService.idl, aboutCertError.xhtml and netError.xhtml.
 const FAVICON_ERRORPAGE_URI =
-  NetUtil.newURI("chrome://global/skin/icons/warning-16.png");
+  Services.io.newURI("chrome://global/skin/icons/warning-16.png");
 
 /**
  * Waits for the first OnPageChanged notification for ATTRIBUTE_FAVICON, and
@@ -48,13 +45,13 @@ function waitForFaviconChanged(aExpectedPageURI, aExpectedFaviconURI,
       }
       PlacesUtils.history.removeObserver(this);
 
-      do_check_true(aURI.equals(aExpectedPageURI));
-      do_check_eq(aValue, aExpectedFaviconURI.spec);
+      Assert.ok(aURI.equals(aExpectedPageURI));
+      Assert.equal(aValue, aExpectedFaviconURI.spec);
       do_check_guid_for_uri(aURI, aGUID);
       aCallback();
     }
   };
-  PlacesUtils.history.addObserver(historyObserver, false);
+  PlacesUtils.history.addObserver(historyObserver);
 }
 
 /**
@@ -72,9 +69,9 @@ function waitForFaviconChanged(aExpectedPageURI, aExpectedFaviconURI,
 function checkFaviconDataForPage(aPageURI, aExpectedMimeType, aExpectedData,
                                  aCallback) {
   PlacesUtils.favicons.getFaviconDataForPage(aPageURI,
-    function (aURI, aDataLen, aData, aMimeType) {
-      do_check_eq(aExpectedMimeType, aMimeType);
-      do_check_true(compareArrays(aExpectedData, aData));
+    function(aURI, aDataLen, aData, aMimeType) {
+      Assert.equal(aExpectedMimeType, aMimeType);
+      Assert.ok(compareArrays(aExpectedData, aData));
       do_check_guid_for_uri(aPageURI);
       aCallback();
     });
@@ -90,8 +87,8 @@ function checkFaviconDataForPage(aPageURI, aExpectedMimeType, aExpectedData,
  */
 function checkFaviconMissingForPage(aPageURI, aCallback) {
   PlacesUtils.favicons.getFaviconURLForPage(aPageURI,
-    function (aURI, aDataLen, aData, aMimeType) {
-      do_check_true(aURI === null);
+    function(aURI, aDataLen, aData, aMimeType) {
+      Assert.ok(aURI === null);
       aCallback();
     });
 }

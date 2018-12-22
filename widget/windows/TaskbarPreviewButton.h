@@ -12,8 +12,8 @@
 #include <shobjidl.h>
 #undef LogSeverity // SetupAPI.h #defines this as DWORD
 
+#include "mozilla/RefPtr.h"
 #include <nsITaskbarPreviewButton.h>
-#include <nsAutoPtr.h>
 #include <nsString.h>
 #include <nsWeakReference.h>
 
@@ -25,7 +25,7 @@ class TaskbarPreviewButton : public nsITaskbarPreviewButton, public nsSupportsWe
 {
   virtual ~TaskbarPreviewButton();
 
-public: 
+public:
   TaskbarPreviewButton(TaskbarWindowPreview* preview, uint32_t index);
 
   NS_DECL_ISUPPORTS

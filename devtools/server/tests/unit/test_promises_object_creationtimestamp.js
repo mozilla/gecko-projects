@@ -7,44 +7,54 @@
 
 "use strict";
 
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 
-var events = require("sdk/event/core");
+var EventEmitter = require("devtools/shared/event-emitter");
 
-add_task(function*() {
-  let client = yield startTestDebuggerServer("promises-object-test");
-  let chromeActors = yield getChromeActors(client);
+ChromeUtils.defineModuleGetter(this, "Preferences",
+                               "resource://gre/modules/Preferences.jsm");
 
-  ok(Promise.toString().contains("native code"), "Expect native DOM Promise.");
+add_task(async function() {
+  const timerPrecision = Preferences.get("privacy.reduceTimerPrecision");
+  Preferences.set("privacy.reduceTimerPrecision", false);
 
-  // We have to attach the chrome TabActor before playing with the PromiseActor
-  yield attachTab(client, chromeActors);
-  yield testPromiseCreationTimestamp(client, chromeActors, v => {
+  registerCleanupFunction(function() {
+    Preferences.set("privacy.reduceTimerPrecision", timerPrecision);
+  });
+
+  const client = await startTestDebuggerServer("promises-object-test");
+  const parentProcessActors = await getParentProcessActors(client);
+
+  ok(Promise.toString().includes("native code"), "Expect native DOM Promise.");
+
+  // We have to attach the chrome target actor before playing with the PromiseActor
+  await attachTab(client, parentProcessActors);
+  await testPromiseCreationTimestamp(client, parentProcessActors, v => {
     return new Promise(resolve => resolve(v));
   });
 
-  let response = yield listTabs(client);
-  let targetTab = findTab(response.tabs, "promises-object-test");
+  const response = await listTabs(client);
+  const targetTab = findTab(response.tabs, "promises-object-test");
   ok(targetTab, "Found our target tab.");
 
-  yield testPromiseCreationTimestamp(client, targetTab, v => {
+  await testPromiseCreationTimestamp(client, targetTab, v => {
     const debuggee = DebuggerServer.getTestGlobal("promises-object-test");
     return debuggee.Promise.resolve(v);
   });
 
-  yield close(client);
+  await close(client);
 });
 
-function* testPromiseCreationTimestamp(client, form, makePromise) {
-  let front = PromisesFront(client, form);
-  let resolution = "MyLittleSecret" + Math.random();
+async function testPromiseCreationTimestamp(client, form, makePromise) {
+  const front = PromisesFront(client, form);
+  const resolution = "MyLittleSecret" + Math.random();
 
-  yield front.attach();
-  yield front.listPromises();
+  await front.attach();
+  await front.listPromises();
 
-  let onNewPromise = new Promise(resolve => {
-    events.on(front, "new-promises", promises => {
-      for (let p of promises) {
+  const onNewPromise = new Promise(resolve => {
+    EventEmitter.on(front, "new-promises", promises => {
+      for (const p of promises) {
         if (p.promiseState.state === "fulfilled" &&
             p.promiseState.value === resolution) {
           resolve(p);
@@ -53,19 +63,20 @@ function* testPromiseCreationTimestamp(client, form, makePromise) {
     });
   });
 
-  let start = Date.now();
-  let promise = makePromise(resolution);
-  let end = Date.now();
+  const start = Date.now();
+  const promise = makePromise(resolution);
+  const end = Date.now();
 
-  let grip = yield onNewPromise;
+  const grip = await onNewPromise;
   ok(grip, "Found our new promise.");
 
-  let creationTimestamp = grip.promiseState.creationTimestamp;
+  const creationTimestamp = grip.promiseState.creationTimestamp;
 
   ok(start - 1 <= creationTimestamp && creationTimestamp <= end + 1,
-    "Expect promise creation timestamp to be within elapsed time range.");
+    "Expect promise creation timestamp to be within elapsed time range: " +
+     (start - 1) + " <= " + creationTimestamp + " <= " + (end + 1));
 
-  yield front.detach();
+  await front.detach();
   // Appease eslint
   void promise;
 }

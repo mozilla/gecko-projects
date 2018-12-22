@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,8 +14,11 @@
 
 #include "APZTestCommon.h"
 #include "gfxPlatform.h"
+#include "gfxPrefs.h"
+#include "mozilla/layers/APZSampler.h"
+#include "mozilla/layers/APZUpdater.h"
 
-class APZCTreeManagerTester : public ::testing::Test {
+class APZCTreeManagerTester : public APZCTesterBase {
 protected:
   virtual void SetUp() {
     gfxPrefs::GetSingleton();
@@ -23,13 +26,15 @@ protected:
     APZThreadUtils::SetThreadAssertionsEnabled(false);
     APZThreadUtils::SetControllerThread(MessageLoop::current());
 
-    mcc = new NiceMock<MockContentControllerDelayed>();
     manager = new TestAPZCTreeManager(mcc);
+    updater = new APZUpdater(manager, false);
+    sampler = new APZSampler(manager, false);
   }
 
   virtual void TearDown() {
     while (mcc->RunThroughDelayedTasks());
     manager->ClearTree();
+    manager->ClearContentController();
   }
 
   /**
@@ -48,53 +53,78 @@ protected:
     }
   }
 
-  RefPtr<MockContentControllerDelayed> mcc;
-
   nsTArray<RefPtr<Layer> > layers;
   RefPtr<LayerManager> lm;
   RefPtr<Layer> root;
 
   RefPtr<TestAPZCTreeManager> manager;
+  RefPtr<APZSampler> sampler;
+  RefPtr<APZUpdater> updater;
 
 protected:
-  static void SetScrollableFrameMetrics(Layer* aLayer, FrameMetrics::ViewID aScrollId,
-                                        CSSRect aScrollableRect = CSSRect(-1, -1, -1, -1)) {
+  static ScrollMetadata BuildScrollMetadata(FrameMetrics::ViewID aScrollId,
+                                            const CSSRect& aScrollableRect,
+                                            const ParentLayerRect& aCompositionBounds)
+  {
     ScrollMetadata metadata;
     FrameMetrics& metrics = metadata.GetMetrics();
     metrics.SetScrollId(aScrollId);
     // By convention in this test file, START_SCROLL_ID is the root, so mark it as such.
     if (aScrollId == FrameMetrics::START_SCROLL_ID) {
-      metrics.SetIsLayersIdRoot(true);
+      metadata.SetIsLayersIdRoot(true);
     }
-    IntRect layerBound = aLayer->GetVisibleRegion().ToUnknownRegion().GetBounds();
-    metrics.SetCompositionBounds(ParentLayerRect(layerBound.x, layerBound.y,
-                                                 layerBound.width, layerBound.height));
+    metrics.SetCompositionBounds(aCompositionBounds);
     metrics.SetScrollableRect(aScrollableRect);
     metrics.SetScrollOffset(CSSPoint(0, 0));
-    metrics.SetPageScrollAmount(LayoutDeviceIntSize(50, 100));
-    metrics.SetAllowVerticalScrollWithWheel(true);
-    aLayer->SetScrollMetadata(metadata);
-    aLayer->SetClipRect(Some(ViewAs<ParentLayerPixel>(layerBound)));
-    if (!aScrollableRect.IsEqualEdges(CSSRect(-1, -1, -1, -1))) {
+    metadata.SetPageScrollAmount(LayoutDeviceIntSize(50, 100));
+    metadata.SetLineScrollAmount(LayoutDeviceIntSize(5, 10));
+    return metadata;
+  }
+
+  static void SetEventRegionsBasedOnBottommostMetrics(Layer* aLayer)
+  {
+    const FrameMetrics& metrics = aLayer->GetScrollMetadata(0).GetMetrics();
+    CSSRect scrollableRect = metrics.GetScrollableRect();
+    if (!scrollableRect.IsEqualEdges(CSSRect(-1, -1, -1, -1))) {
       // The purpose of this is to roughly mimic what layout would do in the
       // case of a scrollable frame with the event regions and clip. This lets
       // us exercise the hit-testing code in APZCTreeManager
       EventRegions er = aLayer->GetEventRegions();
-      IntRect scrollRect = RoundedToInt(aScrollableRect * metrics.LayersPixelsPerCSSPixel()).ToUnknownRect();
-      er.mHitRegion = nsIntRegion(IntRect(layerBound.TopLeft(), scrollRect.Size()));
+      IntRect scrollRect = RoundedToInt(
+          scrollableRect * metrics.LayersPixelsPerCSSPixel()).ToUnknownRect();
+      er.mHitRegion = nsIntRegion(IntRect(
+          RoundedToInt(metrics.GetCompositionBounds().TopLeft().ToUnknownPoint()),
+          scrollRect.Size()));
       aLayer->SetEventRegions(er);
     }
   }
 
+  static void SetScrollableFrameMetrics(Layer* aLayer, FrameMetrics::ViewID aScrollId,
+                                        CSSRect aScrollableRect = CSSRect(-1, -1, -1, -1)) {
+    ParentLayerIntRect compositionBounds =
+        RoundedToInt(aLayer->GetLocalTransformTyped().
+            TransformBounds(LayerRect(aLayer->GetVisibleRegion().GetBounds())));
+    ScrollMetadata metadata = BuildScrollMetadata(aScrollId, aScrollableRect,
+        ParentLayerRect(compositionBounds));
+    aLayer->SetScrollMetadata(metadata);
+    aLayer->SetClipRect(Some(compositionBounds));
+    SetEventRegionsBasedOnBottommostMetrics(aLayer);
+  }
+
   void SetScrollHandoff(Layer* aChild, Layer* aParent) {
     ScrollMetadata metadata = aChild->GetScrollMetadata(0);
-    metadata.GetMetrics().SetScrollParentId(aParent->GetFrameMetrics(0).GetScrollId());
+    metadata.SetScrollParentId(aParent->GetFrameMetrics(0).GetScrollId());
     aChild->SetScrollMetadata(metadata);
   }
 
   static TestAsyncPanZoomController* ApzcOf(Layer* aLayer) {
     EXPECT_EQ(1u, aLayer->GetScrollMetadataCount());
     return (TestAsyncPanZoomController*)aLayer->GetAsyncPanZoomController(0);
+  }
+
+  static TestAsyncPanZoomController* ApzcOf(Layer* aLayer, uint32_t aIndex) {
+    EXPECT_LT(aIndex, aLayer->GetScrollMetadataCount());
+    return (TestAsyncPanZoomController*)aLayer->GetAsyncPanZoomController(aIndex);
   }
 
   void CreateSimpleScrollingLayer() {
@@ -152,6 +182,7 @@ protected:
     root = CreateLayerTree(layerTreeSyntax, layerVisibleRegion, nullptr, lm, layers);
     SetScrollableFrameMetrics(layers[0], FrameMetrics::START_SCROLL_ID);
     SetScrollableFrameMetrics(layers[1], FrameMetrics::START_SCROLL_ID + 1);
+    SetScrollHandoff(layers[1], layers[0]);
 
     // Make layers[1] the root content
     ScrollMetadata childMetadata = layers[1]->GetScrollMetadata(0);

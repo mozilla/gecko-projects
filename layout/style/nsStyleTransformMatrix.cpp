@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,11 +12,12 @@
 #include "nsCSSValue.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
-#include "nsRuleNode.h"
 #include "nsSVGUtils.h"
 #include "nsCSSKeywords.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "gfxMatrix.h"
+#include "gfxQuaternion.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -57,14 +59,12 @@ TransformReferenceBox::EnsureDimensionsAreCached()
       mWidth = nsPresContext::CSSPixelsToAppUnits(contextSize.width);
       mHeight = nsPresContext::CSSPixelsToAppUnits(contextSize.height);
     } else
-    if (mFrame->StyleDisplay()->mTransformBox ==
-          NS_STYLE_TRANSFORM_BOX_FILL_BOX) {
+    if (mFrame->StyleDisplay()->mTransformBox == StyleGeometryBox::FillBox) {
       // Percentages in transforms resolve against the SVG bbox, and the
       // transform is relative to the top-left of the SVG bbox.
-      gfxRect bbox = nsSVGUtils::GetBBox(const_cast<nsIFrame*>(mFrame));
       nsRect bboxInAppUnits =
-        nsLayoutUtils::RoundGfxRectToAppRect(bbox,
-                                             mFrame->PresContext()->AppUnitsPerCSSPixel());
+        nsLayoutUtils::ComputeGeometryBox(const_cast<nsIFrame*>(mFrame),
+                                          StyleGeometryBox::FillBox);
       // The mRect of an SVG nsIFrame is its user space bounds *including*
       // stroke and markers, whereas bboxInAppUnits is its user space bounds
       // including fill only.  We need to note the offset of the reference box
@@ -76,9 +76,9 @@ TransformReferenceBox::EnsureDimensionsAreCached()
     } else {
       // The value 'border-box' is treated as 'view-box' for SVG content.
       MOZ_ASSERT(mFrame->StyleDisplay()->mTransformBox ==
-                   NS_STYLE_TRANSFORM_BOX_VIEW_BOX ||
+                   StyleGeometryBox::ViewBox ||
                  mFrame->StyleDisplay()->mTransformBox ==
-                   NS_STYLE_TRANSFORM_BOX_BORDER_BOX,
+                   StyleGeometryBox::BorderBox,
                  "Unexpected value for 'transform-box'");
       // Percentages in transforms resolve against the width/height of the
       // nearest viewport (or its viewBox if one is applied), and the
@@ -136,9 +136,6 @@ TransformReferenceBox::Init(const nsSize& aDimensions)
 
 float
 ProcessTranslatePart(const nsCSSValue& aValue,
-                     nsStyleContext* aContext,
-                     nsPresContext* aPresContext,
-                     RuleNodeCacheConditions& aConditions,
                      TransformReferenceBox* aRefBox,
                      TransformReferenceBox::DimensionGetter aDimensionGetter)
 {
@@ -150,7 +147,7 @@ ProcessTranslatePart(const nsCSSValue& aValue,
   } else if (aValue.GetUnit() == eCSSUnit_Pixel ||
              aValue.GetUnit() == eCSSUnit_Number) {
     // Handle this here (even though nsRuleNode::CalcLength handles it
-    // fine) so that callers are allowed to pass a null style context
+    // fine) so that callers are allowed to pass a null ComputedStyle
     // and pres context to SetToTransformFunction if they know (as
     // StyleAnimationValue does) that all lengths within the transform
     // function have already been computed to pixels and percents.
@@ -160,24 +157,29 @@ ProcessTranslatePart(const nsCSSValue& aValue,
     // Don't convert to aValue to AppUnits here to avoid precision issues.
     return aValue.GetFloatValue();
   } else if (aValue.IsCalcUnit()) {
-    nsRuleNode::ComputedCalc result =
-      nsRuleNode::SpecifiedCalcToComputedCalc(aValue, aContext, aPresContext,
-                                              aConditions);
-    percent = result.mPercent;
-    offset = result.mLength;
+    // Servo backend. We can retrieve the Calc value directly because it has
+    // been computed from Servo side and set by nsCSSValue::SetCalcValue().
+    // We don't use nsRuleNode::SpecifiedCalcToComputedCalc() because it
+    // asserts for null context and we always pass null context for Servo
+    // backend.
+    nsStyleCoord::CalcValue calc = aValue.GetCalcValue();
+    percent = calc.mPercent;
+    offset = calc.mLength;
   } else {
-    offset = nsRuleNode::CalcLength(aValue, aContext, aPresContext,
-                                    aConditions);
+    // Note: The unit of nsCSSValue passed from Servo side would be number,
+    //       pixel, percent, or eCSSUnit_Calc, so it is impossible to go into
+    //       this branch.
+    MOZ_CRASH("unexpected unit in ProcessTranslatePart");
   }
 
-  float translation = NSAppUnitsToFloatPixels(offset,
-                                              nsPresContext::AppUnitsPerCSSPixel());
+  float translation =
+    NSAppUnitsToFloatPixels(offset, nsPresContext::AppUnitsPerCSSPixel());
   // We want to avoid calling aDimensionGetter if there's no percentage to be
   // resolved (for performance reasons - see TransformReferenceBox).
-  if (percent != 0.0f && aRefBox) {
-    translation += percent *
-                     NSAppUnitsToFloatPixels((aRefBox->*aDimensionGetter)(),
-                                             nsPresContext::AppUnitsPerCSSPixel());
+  if (percent != 0.0f && aRefBox && !aRefBox->IsEmpty()) {
+    translation +=
+      percent * NSAppUnitsToFloatPixels((aRefBox->*aDimensionGetter)(),
+                                        nsPresContext::AppUnitsPerCSSPixel());
   }
   return translation;
 }
@@ -192,12 +194,9 @@ ProcessTranslatePart(const nsCSSValue& aValue,
 static void
 ProcessMatrix(Matrix4x4& aMatrix,
               const nsCSSValue::Array* aData,
-              nsStyleContext* aContext,
-              nsPresContext* aPresContext,
-              RuleNodeCacheConditions& aConditions,
               TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 7, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 7, "Invalid array!");
 
   gfxMatrix result;
 
@@ -213,24 +212,19 @@ ProcessMatrix(Matrix4x4& aMatrix,
    * and their percent parts stored in aX[0] and aY[1].
    */
   result._31 = ProcessTranslatePart(aData->Item(5),
-                                   aContext, aPresContext, aConditions,
-                                   &aRefBox, &TransformReferenceBox::Width);
+                                    &aRefBox, &TransformReferenceBox::Width);
   result._32 = ProcessTranslatePart(aData->Item(6),
-                                   aContext, aPresContext, aConditions,
-                                   &aRefBox, &TransformReferenceBox::Height);
+                                    &aRefBox, &TransformReferenceBox::Height);
 
   aMatrix = result * aMatrix;
 }
 
-static void 
+static void
 ProcessMatrix3D(Matrix4x4& aMatrix,
                 const nsCSSValue::Array* aData,
-                nsStyleContext* aContext,
-                nsPresContext* aPresContext,
-                RuleNodeCacheConditions& aConditions,
                 TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 17, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 17, "Invalid array!");
 
   Matrix4x4 temp;
 
@@ -249,67 +243,330 @@ ProcessMatrix3D(Matrix4x4& aMatrix,
   temp._44 = aData->Item(16).GetFloatValue();
 
   temp._41 = ProcessTranslatePart(aData->Item(13),
-                                  aContext, aPresContext, aConditions,
                                   &aRefBox, &TransformReferenceBox::Width);
   temp._42 = ProcessTranslatePart(aData->Item(14),
-                                  aContext, aPresContext, aConditions,
                                   &aRefBox, &TransformReferenceBox::Height);
-  temp._43 = ProcessTranslatePart(aData->Item(15),
-                                  aContext, aPresContext, aConditions,
-                                  nullptr);
+  temp._43 = ProcessTranslatePart(aData->Item(15), nullptr);
 
   aMatrix = temp * aMatrix;
+}
+
+// For accumulation for transform functions, |aOne| corresponds to |aB| and
+// |aTwo| corresponds to |aA| for StyleAnimationValue::Accumulate().
+class Accumulate {
+public:
+  template<typename T>
+  static T operate(const T& aOne, const T& aTwo, double aCoeff)
+  {
+    return aOne + aTwo * aCoeff;
+  }
+
+  static Point4D operateForPerspective(const Point4D& aOne,
+                                       const Point4D& aTwo,
+                                       double aCoeff)
+  {
+    return (aOne - Point4D(0, 0, 0, 1)) +
+           (aTwo - Point4D(0, 0, 0, 1)) * aCoeff +
+           Point4D(0, 0, 0, 1);
+  }
+  static Point3D operateForScale(const Point3D& aOne,
+                                 const Point3D& aTwo,
+                                 double aCoeff)
+  {
+    // For scale, the identify element is 1, see AddTransformScale in
+    // StyleAnimationValue.cpp.
+    return (aOne - Point3D(1, 1, 1)) +
+           (aTwo - Point3D(1, 1, 1)) * aCoeff +
+           Point3D(1, 1, 1);
+  }
+
+  static Matrix4x4 operateForRotate(const gfxQuaternion& aOne,
+                                    const gfxQuaternion& aTwo,
+                                    double aCoeff)
+  {
+    if (aCoeff == 0.0) {
+      return aOne.ToMatrix();
+    }
+
+    double theta = acos(mozilla::clamped(aTwo.w, -1.0, 1.0));
+    double scale = (theta != 0.0) ? 1.0 / sin(theta) : 0.0;
+    theta *= aCoeff;
+    scale *= sin(theta);
+
+    gfxQuaternion result = gfxQuaternion(scale * aTwo.x,
+                                         scale * aTwo.y,
+                                         scale * aTwo.z,
+                                         cos(theta)) * aOne;
+    return result.ToMatrix();
+  }
+
+  static Matrix4x4 operateForFallback(const Matrix4x4& aMatrix1,
+                                      const Matrix4x4& aMatrix2,
+                                      double aProgress)
+  {
+    return aMatrix1;
+  }
+
+  static Matrix4x4 operateByServo(const Matrix4x4& aMatrix1,
+                                  const Matrix4x4& aMatrix2,
+                                  double aCount)
+  {
+    Matrix4x4 result;
+    Servo_MatrixTransform_Operate(MatrixTransformOperator::Accumulate,
+                                  &aMatrix1.components,
+                                  &aMatrix2.components,
+                                  aCount,
+                                  &result.components);
+    return result;
+  }
+};
+
+class Interpolate {
+public:
+  template<typename T>
+  static T operate(const T& aOne, const T& aTwo, double aCoeff)
+  {
+    return aOne + (aTwo - aOne) * aCoeff;
+  }
+
+  static Point4D operateForPerspective(const Point4D& aOne,
+                                       const Point4D& aTwo,
+                                       double aCoeff)
+  {
+    return aOne + (aTwo - aOne) * aCoeff;
+  }
+
+  static Point3D operateForScale(const Point3D& aOne,
+                                 const Point3D& aTwo,
+                                 double aCoeff)
+  {
+    return aOne + (aTwo - aOne) * aCoeff;
+  }
+
+  static Matrix4x4 operateForRotate(const gfxQuaternion& aOne,
+                                    const gfxQuaternion& aTwo,
+                                    double aCoeff)
+  {
+    return aOne.Slerp(aTwo, aCoeff).ToMatrix();
+  }
+
+  static Matrix4x4 operateForFallback(const Matrix4x4& aMatrix1,
+                                      const Matrix4x4& aMatrix2,
+                                      double aProgress)
+  {
+    return aProgress < 0.5 ? aMatrix1 : aMatrix2;
+  }
+
+  static Matrix4x4 operateByServo(const Matrix4x4& aMatrix1,
+                                  const Matrix4x4& aMatrix2,
+                                  double aProgress)
+  {
+    Matrix4x4 result;
+    Servo_MatrixTransform_Operate(MatrixTransformOperator::Interpolate,
+                                  &aMatrix1.components,
+                                  &aMatrix2.components,
+                                  aProgress,
+                                  &result.components);
+    return result;
+  }
+};
+
+/**
+ * Calculate 2 matrices by decomposing them with Operator.
+ *
+ * @param aMatrix1   First matrix, using CSS pixel units.
+ * @param aMatrix2   Second matrix, using CSS pixel units.
+ * @param aProgress  Coefficient for the Operator.
+ */
+template <typename Operator>
+static Matrix4x4
+OperateTransformMatrix(const Matrix4x4 &aMatrix1,
+                       const Matrix4x4 &aMatrix2,
+                       double aProgress)
+{
+  // Decompose both matrices
+
+  Point3D scale1(1, 1, 1), translate1;
+  Point4D perspective1(0, 0, 0, 1);
+  gfxQuaternion rotate1;
+  nsStyleTransformMatrix::ShearArray shear1{0.0f, 0.0f, 0.0f};
+
+  Point3D scale2(1, 1, 1), translate2;
+  Point4D perspective2(0, 0, 0, 1);
+  gfxQuaternion rotate2;
+  nsStyleTransformMatrix::ShearArray shear2{0.0f, 0.0f, 0.0f};
+
+  // Check if both matrices are decomposable.
+  bool wasDecomposed;
+  Matrix matrix2d1, matrix2d2;
+  if (aMatrix1.Is2D(&matrix2d1) && aMatrix2.Is2D(&matrix2d2)) {
+    wasDecomposed =
+      Decompose2DMatrix(matrix2d1, scale1, shear1, rotate1, translate1) &&
+      Decompose2DMatrix(matrix2d2, scale2, shear2, rotate2, translate2);
+  } else {
+    wasDecomposed =
+      Decompose3DMatrix(aMatrix1, scale1, shear1,
+                        rotate1, translate1, perspective1) &&
+      Decompose3DMatrix(aMatrix2, scale2, shear2,
+                        rotate2, translate2, perspective2);
+  }
+
+  // Fallback to discrete operation if one of the matrices is not decomposable.
+  if (!wasDecomposed) {
+    return Operator::operateForFallback(aMatrix1, aMatrix2, aProgress);
+  }
+
+  Matrix4x4 result;
+
+  // Operate each of the pieces in response to |Operator|.
+  Point4D perspective =
+    Operator::operateForPerspective(perspective1, perspective2, aProgress);
+  result.SetTransposedVector(3, perspective);
+
+  Point3D translate =
+    Operator::operate(translate1, translate2, aProgress);
+  result.PreTranslate(translate.x, translate.y, translate.z);
+
+  Matrix4x4 rotate = Operator::operateForRotate(rotate1, rotate2, aProgress);
+  if (!rotate.IsIdentity()) {
+    result = rotate * result;
+  }
+
+  // TODO: Would it be better to operate these as angles?
+  //       How do we convert back to angles?
+  float yzshear =
+    Operator::operate(shear1[ShearType::YZSHEAR],
+                      shear2[ShearType::YZSHEAR],
+                      aProgress);
+  if (yzshear != 0.0) {
+    result.SkewYZ(yzshear);
+  }
+
+  float xzshear =
+    Operator::operate(shear1[ShearType::XZSHEAR],
+                      shear2[ShearType::XZSHEAR],
+                      aProgress);
+  if (xzshear != 0.0) {
+    result.SkewXZ(xzshear);
+  }
+
+  float xyshear =
+    Operator::operate(shear1[ShearType::XYSHEAR],
+                      shear2[ShearType::XYSHEAR],
+                      aProgress);
+  if (xyshear != 0.0) {
+    result.SkewXY(xyshear);
+  }
+
+  Point3D scale =
+    Operator::operateForScale(scale1, scale2, aProgress);
+  if (scale != Point3D(1.0, 1.0, 1.0)) {
+    result.PreScale(scale.x, scale.y, scale.z);
+  }
+
+  return result;
+}
+
+template <typename Operator>
+static Matrix4x4
+OperateTransformMatrixByServo(const Matrix4x4 &aMatrix1,
+                              const Matrix4x4 &aMatrix2,
+                              double aProgress)
+{
+  return Operator::operateByServo(aMatrix1, aMatrix2, aProgress);
+}
+
+template <typename Operator>
+static void
+ProcessMatrixOperator(Matrix4x4& aMatrix,
+                      const nsCSSValue::Array* aData,
+                      TransformReferenceBox& aRefBox,
+                      bool* aContains3dTransform)
+{
+  MOZ_ASSERT(aData->Count() == 4, "Invalid array!");
+
+  auto readTransform = [&](const nsCSSValue& aValue) -> Matrix4x4 {
+    const nsCSSValueList* list = nullptr;
+    switch (aValue.GetUnit()) {
+      case eCSSUnit_List:
+        // For Gecko style backend.
+        list = aValue.GetListValue();
+        break;
+      case eCSSUnit_SharedList:
+        // For Servo style backend. The transform lists of interpolatematrix
+        // are not created on the main thread (i.e. during parallel traversal),
+        // and nsCSSValueList_heap is not thread safe. Therefore, we use
+        // nsCSSValueSharedList as a workaround.
+        list = aValue.GetSharedListValue()->mHead;
+        break;
+      default:
+        list = nullptr;
+    }
+
+    Matrix4x4 matrix;
+    if (!list) {
+      return matrix;
+    }
+
+    float appUnitPerCSSPixel = nsPresContext::AppUnitsPerCSSPixel();
+    matrix = nsStyleTransformMatrix::ReadTransforms(list,
+                                                    aRefBox,
+                                                    appUnitPerCSSPixel,
+                                                    aContains3dTransform);
+    return matrix;
+  };
+
+  Matrix4x4 matrix1 = readTransform(aData->Item(1));
+  Matrix4x4 matrix2 = readTransform(aData->Item(2));
+  double progress = aData->Item(3).GetPercentValue();
+
+  // We cannot use GeckoComputedStyle to check if we use Servo backend because
+  // it could be null in Gecko. Instead, use the unit of the nsCSSValue because
+  // we use eCSSUnit_SharedList for Servo backend.
+  if (aData->Item(1).GetUnit() == eCSSUnit_SharedList) {
+    aMatrix =
+      OperateTransformMatrixByServo<Operator>(matrix1, matrix2, progress)
+        * aMatrix;
+    return;
+  }
+
+  aMatrix =
+    OperateTransformMatrix<Operator>(matrix1, matrix2, progress) * aMatrix;
 }
 
 /* Helper function to process two matrices that we need to interpolate between */
 void
 ProcessInterpolateMatrix(Matrix4x4& aMatrix,
                          const nsCSSValue::Array* aData,
-                         nsStyleContext* aContext,
-                         nsPresContext* aPresContext,
-                         RuleNodeCacheConditions& aConditions,
                          TransformReferenceBox& aRefBox,
                          bool* aContains3dTransform)
 {
-  NS_PRECONDITION(aData->Count() == 4, "Invalid array!");
+  ProcessMatrixOperator<Interpolate>(aMatrix, aData,
+                                     aRefBox,
+                                     aContains3dTransform);
+}
 
-  Matrix4x4 matrix1, matrix2;
-  if (aData->Item(1).GetUnit() == eCSSUnit_List) {
-    matrix1 = nsStyleTransformMatrix::ReadTransforms(aData->Item(1).GetListValue(),
-                             aContext, aPresContext,
-                             aConditions,
-                             aRefBox, nsPresContext::AppUnitsPerCSSPixel(),
-                             aContains3dTransform);
-  }
-  if (aData->Item(2).GetUnit() == eCSSUnit_List) {
-    matrix2 = ReadTransforms(aData->Item(2).GetListValue(),
-                             aContext, aPresContext,
-                             aConditions,
-                             aRefBox, nsPresContext::AppUnitsPerCSSPixel(),
-                             aContains3dTransform);
-  }
-  double progress = aData->Item(3).GetPercentValue();
-
-  aMatrix =
-    StyleAnimationValue::InterpolateTransformMatrix(matrix1, matrix2, progress)
-    * aMatrix;
+void
+ProcessAccumulateMatrix(Matrix4x4& aMatrix,
+                        const nsCSSValue::Array* aData,
+                        TransformReferenceBox& aRefBox,
+                        bool* aContains3dTransform)
+{
+  ProcessMatrixOperator<Accumulate>(aMatrix, aData, aRefBox,
+                                    aContains3dTransform);
 }
 
 /* Helper function to process a translatex function. */
 static void
 ProcessTranslateX(Matrix4x4& aMatrix,
                   const nsCSSValue::Array* aData,
-                  nsStyleContext* aContext,
-                  nsPresContext* aPresContext,
-                  RuleNodeCacheConditions& aConditions,
                   TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
 
   Point3D temp;
 
   temp.x = ProcessTranslatePart(aData->Item(1),
-                                aContext, aPresContext, aConditions,
                                 &aRefBox, &TransformReferenceBox::Width);
   aMatrix.PreTranslate(temp);
 }
@@ -318,35 +575,25 @@ ProcessTranslateX(Matrix4x4& aMatrix,
 static void
 ProcessTranslateY(Matrix4x4& aMatrix,
                   const nsCSSValue::Array* aData,
-                  nsStyleContext* aContext,
-                  nsPresContext* aPresContext,
-                  RuleNodeCacheConditions& aConditions,
                   TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
 
   Point3D temp;
 
   temp.y = ProcessTranslatePart(aData->Item(1),
-                                aContext, aPresContext, aConditions,
                                 &aRefBox, &TransformReferenceBox::Height);
   aMatrix.PreTranslate(temp);
 }
 
-static void 
-ProcessTranslateZ(Matrix4x4& aMatrix,
-                  const nsCSSValue::Array* aData,
-                  nsStyleContext* aContext,
-                  nsPresContext* aPresContext,
-                  RuleNodeCacheConditions& aConditions)
+static void
+ProcessTranslateZ(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
 
   Point3D temp;
 
-  temp.z = ProcessTranslatePart(aData->Item(1), aContext,
-                                aPresContext, aConditions,
-                                nullptr);
+  temp.z = ProcessTranslatePart(aData->Item(1), nullptr);
   aMatrix.PreTranslate(temp);
 }
 
@@ -354,23 +601,18 @@ ProcessTranslateZ(Matrix4x4& aMatrix,
 static void
 ProcessTranslate(Matrix4x4& aMatrix,
                  const nsCSSValue::Array* aData,
-                 nsStyleContext* aContext,
-                 nsPresContext* aPresContext,
-                 RuleNodeCacheConditions& aConditions,
                  TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 2 || aData->Count() == 3, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2 || aData->Count() == 3, "Invalid array!");
 
   Point3D temp;
 
   temp.x = ProcessTranslatePart(aData->Item(1),
-                                aContext, aPresContext, aConditions,
                                 &aRefBox, &TransformReferenceBox::Width);
 
   /* If we read in a Y component, set it appropriately */
   if (aData->Count() == 3) {
     temp.y = ProcessTranslatePart(aData->Item(2),
-                                  aContext, aPresContext, aConditions,
                                   &aRefBox, &TransformReferenceBox::Height);
   }
   aMatrix.PreTranslate(temp);
@@ -379,25 +621,19 @@ ProcessTranslate(Matrix4x4& aMatrix,
 static void
 ProcessTranslate3D(Matrix4x4& aMatrix,
                    const nsCSSValue::Array* aData,
-                   nsStyleContext* aContext,
-                   nsPresContext* aPresContext,
-                   RuleNodeCacheConditions& aConditions,
                    TransformReferenceBox& aRefBox)
 {
-  NS_PRECONDITION(aData->Count() == 4, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 4, "Invalid array!");
 
   Point3D temp;
 
   temp.x = ProcessTranslatePart(aData->Item(1),
-                                aContext, aPresContext, aConditions,
                                 &aRefBox, &TransformReferenceBox::Width);
 
   temp.y = ProcessTranslatePart(aData->Item(2),
-                                aContext, aPresContext, aConditions,
                                 &aRefBox, &TransformReferenceBox::Height);
 
   temp.z = ProcessTranslatePart(aData->Item(3),
-                                aContext, aPresContext, aConditions,
                                 nullptr);
 
   aMatrix.PreTranslate(temp);
@@ -406,8 +642,8 @@ ProcessTranslate3D(Matrix4x4& aMatrix,
 /* Helper function to set up a scale matrix. */
 static void
 ProcessScaleHelper(Matrix4x4& aMatrix,
-                   float aXScale, 
-                   float aYScale, 
+                   float aXScale,
+                   float aYScale,
                    float aZScale)
 {
   aMatrix.PreScale(aXScale, aYScale, aZScale);
@@ -417,7 +653,7 @@ ProcessScaleHelper(Matrix4x4& aMatrix,
 static void
 ProcessScaleX(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Bad array!");
+  MOZ_ASSERT(aData->Count() == 2, "Bad array!");
   ProcessScaleHelper(aMatrix, aData->Item(1).GetFloatValue(), 1.0f, 1.0f);
 }
 
@@ -425,21 +661,21 @@ ProcessScaleX(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessScaleY(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Bad array!");
+  MOZ_ASSERT(aData->Count() == 2, "Bad array!");
   ProcessScaleHelper(aMatrix, 1.0f, aData->Item(1).GetFloatValue(), 1.0f);
 }
 
 static void
 ProcessScaleZ(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Bad array!");
+  MOZ_ASSERT(aData->Count() == 2, "Bad array!");
   ProcessScaleHelper(aMatrix, 1.0f, 1.0f, aData->Item(1).GetFloatValue());
 }
 
 static void
 ProcessScale3D(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 4, "Bad array!");
+  MOZ_ASSERT(aData->Count() == 4, "Bad array!");
   ProcessScaleHelper(aMatrix,
                      aData->Item(1).GetFloatValue(),
                      aData->Item(2).GetFloatValue(),
@@ -450,7 +686,7 @@ ProcessScale3D(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessScale(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2 || aData->Count() == 3, "Bad array!");
+  MOZ_ASSERT(aData->Count() == 2 || aData->Count() == 3, "Bad array!");
   /* We either have one element or two.  If we have one, it's for both X and Y.
    * Otherwise it's one for each.
    */
@@ -458,7 +694,7 @@ ProcessScale(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
   const nsCSSValue& scaleY = (aData->Count() == 2 ? scaleX :
                               aData->Item(2));
 
-  ProcessScaleHelper(aMatrix, 
+  ProcessScaleHelper(aMatrix,
                      scaleX.GetFloatValue(),
                      scaleY.GetFloatValue(),
                      1.0f);
@@ -506,7 +742,7 @@ ProcessSkew(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessRotateZ(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
   double theta = aData->Item(1).GetAngleValueInRadians();
   aMatrix.RotateZ(theta);
 }
@@ -514,7 +750,7 @@ ProcessRotateZ(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessRotateX(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
   double theta = aData->Item(1).GetAngleValueInRadians();
   aMatrix.RotateX(theta);
 }
@@ -522,7 +758,7 @@ ProcessRotateX(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessRotateY(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
   double theta = aData->Item(1).GetAngleValueInRadians();
   aMatrix.RotateY(theta);
 }
@@ -530,7 +766,7 @@ ProcessRotateY(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 static void
 ProcessRotate3D(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 5, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 5, "Invalid array!");
 
   double theta = aData->Item(4).GetAngleValueInRadians();
   float x = aData->Item(1).GetFloatValue();
@@ -543,19 +779,13 @@ ProcessRotate3D(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
   aMatrix = temp * aMatrix;
 }
 
-static void 
-ProcessPerspective(Matrix4x4& aMatrix,
-                   const nsCSSValue::Array* aData,
-                   nsStyleContext *aContext,
-                   nsPresContext *aPresContext,
-                   RuleNodeCacheConditions& aConditions)
+static void
+ProcessPerspective(Matrix4x4& aMatrix, const nsCSSValue::Array* aData)
 {
-  NS_PRECONDITION(aData->Count() == 2, "Invalid array!");
+  MOZ_ASSERT(aData->Count() == 2, "Invalid array!");
 
-  float depth = ProcessTranslatePart(aData->Item(1), aContext,
-                                     aPresContext, aConditions,
-                                     nullptr);
-  aMatrix.Perspective(depth);
+  float depth = ProcessTranslatePart(aData->Item(1), nullptr);
+  ApplyPerspectiveToMatrix(aMatrix, depth);
 }
 
 
@@ -566,42 +796,30 @@ ProcessPerspective(Matrix4x4& aMatrix,
 static void
 MatrixForTransformFunction(Matrix4x4& aMatrix,
                            const nsCSSValue::Array * aData,
-                           nsStyleContext* aContext,
-                           nsPresContext* aPresContext,
-                           RuleNodeCacheConditions& aConditions,
                            TransformReferenceBox& aRefBox,
                            bool* aContains3dTransform)
 {
   MOZ_ASSERT(aContains3dTransform);
-  NS_PRECONDITION(aData, "Why did you want to get data from a null array?");
-  // It's OK if aContext and aPresContext are null if the caller already
-  // knows that all length units have been converted to pixels (as
-  // StyleAnimationValue does).
-
+  MOZ_ASSERT(aData, "Why did you want to get data from a null array?");
 
   /* Get the keyword for the transform. */
   switch (TransformFunctionOf(aData)) {
   case eCSSKeyword_translatex:
-    ProcessTranslateX(aMatrix, aData, aContext, aPresContext,
-                      aConditions, aRefBox);
+    ProcessTranslateX(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_translatey:
-    ProcessTranslateY(aMatrix, aData, aContext, aPresContext,
-                      aConditions, aRefBox);
+    ProcessTranslateY(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_translatez:
     *aContains3dTransform = true;
-    ProcessTranslateZ(aMatrix, aData, aContext, aPresContext,
-                      aConditions);
+    ProcessTranslateZ(aMatrix, aData);
     break;
   case eCSSKeyword_translate:
-    ProcessTranslate(aMatrix, aData, aContext, aPresContext,
-                     aConditions, aRefBox);
+    ProcessTranslate(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_translate3d:
     *aContains3dTransform = true;
-    ProcessTranslate3D(aMatrix, aData, aContext, aPresContext,
-                       aConditions, aRefBox);
+    ProcessTranslate3D(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_scalex:
     ProcessScaleX(aMatrix, aData);
@@ -648,26 +866,26 @@ MatrixForTransformFunction(Matrix4x4& aMatrix,
     ProcessRotate3D(aMatrix, aData);
     break;
   case eCSSKeyword_matrix:
-    ProcessMatrix(aMatrix, aData, aContext, aPresContext,
-                  aConditions, aRefBox);
+    ProcessMatrix(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_matrix3d:
     *aContains3dTransform = true;
-    ProcessMatrix3D(aMatrix, aData, aContext, aPresContext,
-                    aConditions, aRefBox);
+    ProcessMatrix3D(aMatrix, aData, aRefBox);
     break;
   case eCSSKeyword_interpolatematrix:
-    ProcessInterpolateMatrix(aMatrix, aData, aContext, aPresContext,
-                             aConditions, aRefBox,
-                             aContains3dTransform);
+    ProcessMatrixOperator<Interpolate>(aMatrix, aData, aRefBox,
+                                       aContains3dTransform);
+    break;
+  case eCSSKeyword_accumulatematrix:
+    ProcessMatrixOperator<Accumulate>(aMatrix, aData, aRefBox,
+                                      aContains3dTransform);
     break;
   case eCSSKeyword_perspective:
     *aContains3dTransform = true;
-    ProcessPerspective(aMatrix, aData, aContext, aPresContext, 
-                       aConditions);
+    ProcessPerspective(aMatrix, aData);
     break;
   default:
-    NS_NOTREACHED("Unknown transform function!");
+    MOZ_ASSERT_UNREACHABLE("Unknown transform function!");
   }
 }
 
@@ -682,11 +900,34 @@ TransformFunctionOf(const nsCSSValue::Array* aData)
   return aData->Item(0).GetKeywordValue();
 }
 
+void
+SetIdentityMatrix(nsCSSValue::Array* aMatrix)
+{
+  MOZ_ASSERT(aMatrix, "aMatrix should be non-null");
+
+  nsCSSKeyword tfunc = TransformFunctionOf(aMatrix);
+  MOZ_ASSERT(tfunc == eCSSKeyword_matrix ||
+             tfunc == eCSSKeyword_matrix3d,
+             "Only accept matrix and matrix3d");
+
+  if (tfunc == eCSSKeyword_matrix) {
+    MOZ_ASSERT(aMatrix->Count() == 7, "Invalid matrix");
+    Matrix m;
+    for (size_t i = 0; i < 6; ++i) {
+      aMatrix->Item(i + 1).SetFloatValue(m.components[i], eCSSUnit_Number);
+    }
+    return;
+  }
+
+  MOZ_ASSERT(aMatrix->Count() == 17, "Invalid matrix3d");
+  Matrix4x4 m;
+  for (size_t i = 0; i < 16; ++i) {
+    aMatrix->Item(i + 1).SetFloatValue(m.components[i], eCSSUnit_Number);
+  }
+}
+
 Matrix4x4
 ReadTransforms(const nsCSSValueList* aList,
-               nsStyleContext* aContext,
-               nsPresContext* aPresContext,
-               RuleNodeCacheConditions& aConditions,
                TransformReferenceBox& aRefBox,
                float aAppUnitsPerMatrixUnit,
                bool* aContains3dTransform)
@@ -706,8 +947,7 @@ ReadTransforms(const nsCSSValueList* aList,
                  "Incoming function is too short!");
 
     /* Read in a single transform matrix. */
-    MatrixForTransformFunction(result, currElem.GetArrayValue(), aContext,
-                               aPresContext, aConditions, aRefBox,
+    MatrixForTransformFunction(result, currElem.GetArrayValue(), aRefBox,
                                aContains3dTransform);
   }
 
@@ -716,6 +956,379 @@ ReadTransforms(const nsCSSValueList* aList,
   result.PostScale(scale, scale, scale);
 
   return result;
+}
+
+Point
+Convert2DPosition(nsStyleCoord const (&aValue)[2],
+                  TransformReferenceBox& aRefBox,
+                  int32_t aAppUnitsPerDevPixel)
+{
+  float position[2];
+  nsStyleTransformMatrix::TransformReferenceBox::DimensionGetter dimensionGetter[] =
+    { &nsStyleTransformMatrix::TransformReferenceBox::Width,
+      &nsStyleTransformMatrix::TransformReferenceBox::Height };
+  for (uint8_t index = 0; index < 2; ++index) {
+    const nsStyleCoord& value  = aValue[index];
+    if (value.GetUnit() == eStyleUnit_Calc) {
+      const nsStyleCoord::Calc *calc = value.GetCalcValue();
+      position[index] =
+        NSAppUnitsToFloatPixels((aRefBox.*dimensionGetter[index])(), aAppUnitsPerDevPixel) *
+          calc->mPercent +
+        NSAppUnitsToFloatPixels(calc->mLength, aAppUnitsPerDevPixel);
+    } else if (value.GetUnit() == eStyleUnit_Percent) {
+      position[index] =
+        NSAppUnitsToFloatPixels((aRefBox.*dimensionGetter[index])(), aAppUnitsPerDevPixel) *
+        value.GetPercentValue();
+    } else {
+      MOZ_ASSERT(value.GetUnit() == eStyleUnit_Coord,
+                "unexpected unit");
+      position[index] =
+        NSAppUnitsToFloatPixels(value.GetCoordValue(),
+                                aAppUnitsPerDevPixel);
+    }
+  }
+
+  return Point(position[0], position[1]);
+}
+
+/*
+ * The relevant section of the transitions specification:
+ * http://dev.w3.org/csswg/css3-transitions/#animation-of-property-types-
+ * defers all of the details to the 2-D and 3-D transforms specifications.
+ * For the 2-D transforms specification (all that's relevant for us, right
+ * now), the relevant section is:
+ * http://dev.w3.org/csswg/css3-2d-transforms/#animation
+ * This, in turn, refers to the unmatrix program in Graphics Gems,
+ * available from http://tog.acm.org/resources/GraphicsGems/ , and in
+ * particular as the file GraphicsGems/gemsii/unmatrix.c
+ * in http://tog.acm.org/resources/GraphicsGems/AllGems.tar.gz
+ *
+ * The unmatrix reference is for general 3-D transform matrices (any of the
+ * 16 components can have any value).
+ *
+ * For CSS 2-D transforms, we have a 2-D matrix with the bottom row constant:
+ *
+ * [ A C E ]
+ * [ B D F ]
+ * [ 0 0 1 ]
+ *
+ * For that case, I believe the algorithm in unmatrix reduces to:
+ *
+ *  (1) If A * D - B * C == 0, the matrix is singular.  Fail.
+ *
+ *  (2) Set translation components (Tx and Ty) to the translation parts of
+ *      the matrix (E and F) and then ignore them for the rest of the time.
+ *      (For us, E and F each actually consist of three constants:  a
+ *      length, a multiplier for the width, and a multiplier for the
+ *      height.  This actually requires its own decomposition, but I'll
+ *      keep that separate.)
+ *
+ *  (3) Let the X scale (Sx) be sqrt(A^2 + B^2).  Then divide both A and B
+ *      by it.
+ *
+ *  (4) Let the XY shear (K) be A * C + B * D.  From C, subtract A times
+ *      the XY shear.  From D, subtract B times the XY shear.
+ *
+ *  (5) Let the Y scale (Sy) be sqrt(C^2 + D^2).  Divide C, D, and the XY
+ *      shear (K) by it.
+ *
+ *  (6) At this point, A * D - B * C is either 1 or -1.  If it is -1,
+ *      negate the XY shear (K), the X scale (Sx), and A, B, C, and D.
+ *      (Alternatively, we could negate the XY shear (K) and the Y scale
+ *      (Sy).)
+ *
+ *  (7) Let the rotation be R = atan2(B, A).
+ *
+ * Then the resulting decomposed transformation is:
+ *
+ *   translate(Tx, Ty) rotate(R) skewX(atan(K)) scale(Sx, Sy)
+ *
+ * An interesting result of this is that all of the simple transform
+ * functions (i.e., all functions other than matrix()), in isolation,
+ * decompose back to themselves except for:
+ *   'skewY(φ)', which is 'matrix(1, tan(φ), 0, 1, 0, 0)', which decomposes
+ *   to 'rotate(φ) skewX(φ) scale(sec(φ), cos(φ))' since (ignoring the
+ *   alternate sign possibilities that would get fixed in step 6):
+ *     In step 3, the X scale factor is sqrt(1+tan²(φ)) = sqrt(sec²(φ)) = sec(φ).
+ *     Thus, after step 3, A = 1/sec(φ) = cos(φ) and B = tan(φ) / sec(φ) = sin(φ).
+ *     In step 4, the XY shear is sin(φ).
+ *     Thus, after step 4, C = -cos(φ)sin(φ) and D = 1 - sin²(φ) = cos²(φ).
+ *     Thus, in step 5, the Y scale is sqrt(cos²(φ)(sin²(φ) + cos²(φ)) = cos(φ).
+ *     Thus, after step 5, C = -sin(φ), D = cos(φ), and the XY shear is tan(φ).
+ *     Thus, in step 6, A * D - B * C = cos²(φ) + sin²(φ) = 1.
+ *     In step 7, the rotation is thus φ.
+ *
+ *   skew(θ, φ), which is matrix(1, tan(φ), tan(θ), 1, 0, 0), which decomposes
+ *   to 'rotate(φ) skewX(θ + φ) scale(sec(φ), cos(φ))' since (ignoring
+ *   the alternate sign possibilities that would get fixed in step 6):
+ *     In step 3, the X scale factor is sqrt(1+tan²(φ)) = sqrt(sec²(φ)) = sec(φ).
+ *     Thus, after step 3, A = 1/sec(φ) = cos(φ) and B = tan(φ) / sec(φ) = sin(φ).
+ *     In step 4, the XY shear is cos(φ)tan(θ) + sin(φ).
+ *     Thus, after step 4,
+ *     C = tan(θ) - cos(φ)(cos(φ)tan(θ) + sin(φ)) = tan(θ)sin²(φ) - cos(φ)sin(φ)
+ *     D = 1 - sin(φ)(cos(φ)tan(θ) + sin(φ)) = cos²(φ) - sin(φ)cos(φ)tan(θ)
+ *     Thus, in step 5, the Y scale is sqrt(C² + D²) =
+ *     sqrt(tan²(θ)(sin⁴(φ) + sin²(φ)cos²(φ)) -
+ *          2 tan(θ)(sin³(φ)cos(φ) + sin(φ)cos³(φ)) +
+ *          (sin²(φ)cos²(φ) + cos⁴(φ))) =
+ *     sqrt(tan²(θ)sin²(φ) - 2 tan(θ)sin(φ)cos(φ) + cos²(φ)) =
+ *     cos(φ) - tan(θ)sin(φ) (taking the negative of the obvious solution so
+ *     we avoid flipping in step 6).
+ *     After step 5, C = -sin(φ) and D = cos(φ), and the XY shear is
+ *     (cos(φ)tan(θ) + sin(φ)) / (cos(φ) - tan(θ)sin(φ)) =
+ *     (dividing both numerator and denominator by cos(φ))
+ *     (tan(θ) + tan(φ)) / (1 - tan(θ)tan(φ)) = tan(θ + φ).
+ *     (See http://en.wikipedia.org/wiki/List_of_trigonometric_identities .)
+ *     Thus, in step 6, A * D - B * C = cos²(φ) + sin²(φ) = 1.
+ *     In step 7, the rotation is thus φ.
+ *
+ *     To check this result, we can multiply things back together:
+ *
+ *     [ cos(φ) -sin(φ) ] [ 1 tan(θ + φ) ] [ sec(φ)    0   ]
+ *     [ sin(φ)  cos(φ) ] [ 0      1     ] [   0    cos(φ) ]
+ *
+ *     [ cos(φ)      cos(φ)tan(θ + φ) - sin(φ) ] [ sec(φ)    0   ]
+ *     [ sin(φ)      sin(φ)tan(θ + φ) + cos(φ) ] [   0    cos(φ) ]
+ *
+ *     but since tan(θ + φ) = (tan(θ) + tan(φ)) / (1 - tan(θ)tan(φ)),
+ *     cos(φ)tan(θ + φ) - sin(φ)
+ *      = cos(φ)(tan(θ) + tan(φ)) - sin(φ) + sin(φ)tan(θ)tan(φ)
+ *      = cos(φ)tan(θ) + sin(φ) - sin(φ) + sin(φ)tan(θ)tan(φ)
+ *      = cos(φ)tan(θ) + sin(φ)tan(θ)tan(φ)
+ *      = tan(θ) (cos(φ) + sin(φ)tan(φ))
+ *      = tan(θ) sec(φ) (cos²(φ) + sin²(φ))
+ *      = tan(θ) sec(φ)
+ *     and
+ *     sin(φ)tan(θ + φ) + cos(φ)
+ *      = sin(φ)(tan(θ) + tan(φ)) + cos(φ) - cos(φ)tan(θ)tan(φ)
+ *      = tan(θ) (sin(φ) - sin(φ)) + sin(φ)tan(φ) + cos(φ)
+ *      = sec(φ) (sin²(φ) + cos²(φ))
+ *      = sec(φ)
+ *     so the above is:
+ *     [ cos(φ)  tan(θ) sec(φ) ] [ sec(φ)    0   ]
+ *     [ sin(φ)     sec(φ)     ] [   0    cos(φ) ]
+ *
+ *     [    1   tan(θ) ]
+ *     [ tan(φ)    1   ]
+ */
+
+/*
+ * Decompose2DMatrix implements the above decomposition algorithm.
+ */
+
+bool
+Decompose2DMatrix(const Matrix& aMatrix,
+                  Point3D& aScale,
+                  ShearArray& aShear,
+                  gfxQuaternion& aRotate,
+                  Point3D& aTranslate)
+{
+  float A = aMatrix._11,
+        B = aMatrix._12,
+        C = aMatrix._21,
+        D = aMatrix._22;
+  if (A * D == B * C) {
+    // singular matrix
+    return false;
+  }
+
+  float scaleX = sqrt(A * A + B * B);
+  A /= scaleX;
+  B /= scaleX;
+
+  float XYshear = A * C + B * D;
+  C -= A * XYshear;
+  D -= B * XYshear;
+
+  float scaleY = sqrt(C * C + D * D);
+  C /= scaleY;
+  D /= scaleY;
+  XYshear /= scaleY;
+
+  float determinant = A * D - B * C;
+  // Determinant should now be 1 or -1.
+  if (0.99 > Abs(determinant) || Abs(determinant) > 1.01) {
+    return false;
+  }
+
+  if (determinant < 0) {
+    A = -A;
+    B = -B;
+    C = -C;
+    D = -D;
+    XYshear = -XYshear;
+    scaleX = -scaleX;
+  }
+
+  float rotate = atan2f(B, A);
+  aRotate = gfxQuaternion(0, 0, sin(rotate/2), cos(rotate/2));
+  aShear[ShearType::XYSHEAR] = XYshear;
+  aScale.x = scaleX;
+  aScale.y = scaleY;
+  aTranslate.x = aMatrix._31;
+  aTranslate.y = aMatrix._32;
+  return true;
+}
+
+/**
+ * Implementation of the unmatrix algorithm, specified by:
+ *
+ * http://dev.w3.org/csswg/css3-2d-transforms/#unmatrix
+ *
+ * This, in turn, refers to the unmatrix program in Graphics Gems,
+ * available from http://tog.acm.org/resources/GraphicsGems/ , and in
+ * particular as the file GraphicsGems/gemsii/unmatrix.c
+ * in http://tog.acm.org/resources/GraphicsGems/AllGems.tar.gz
+ */
+bool
+Decompose3DMatrix(const Matrix4x4& aMatrix,
+                  Point3D& aScale,
+                  ShearArray& aShear,
+                  gfxQuaternion& aRotate,
+                  Point3D& aTranslate,
+                  Point4D& aPerspective)
+{
+  Matrix4x4 local = aMatrix;
+
+  if (local[3][3] == 0) {
+    return false;
+  }
+  /* Normalize the matrix */
+  local.Normalize();
+
+  /**
+   * perspective is used to solve for perspective, but it also provides
+   * an easy way to test for singularity of the upper 3x3 component.
+   */
+  Matrix4x4 perspective = local;
+  Point4D empty(0, 0, 0, 1);
+  perspective.SetTransposedVector(3, empty);
+
+  if (perspective.Determinant() == 0.0) {
+    return false;
+  }
+
+  /* First, isolate perspective. */
+  if (local[0][3] != 0 || local[1][3] != 0 ||
+      local[2][3] != 0) {
+    /* aPerspective is the right hand side of the equation. */
+    aPerspective = local.TransposedVector(3);
+
+    /**
+     * Solve the equation by inverting perspective and multiplying
+     * aPerspective by the inverse.
+     */
+    perspective.Invert();
+    aPerspective = perspective.TransposeTransform4D(aPerspective);
+
+    /* Clear the perspective partition */
+    local.SetTransposedVector(3, empty);
+  } else {
+    aPerspective = Point4D(0, 0, 0, 1);
+  }
+
+  /* Next take care of translation */
+  for (int i = 0; i < 3; i++) {
+    aTranslate[i] = local[3][i];
+    local[3][i] = 0;
+  }
+
+  /* Now get scale and shear. */
+
+  /* Compute X scale factor and normalize first row. */
+  aScale.x = local[0].Length();
+  local[0] /= aScale.x;
+
+  /* Compute XY shear factor and make 2nd local orthogonal to 1st. */
+  aShear[ShearType::XYSHEAR] = local[0].DotProduct(local[1]);
+  local[1] -= local[0] * aShear[ShearType::XYSHEAR];
+
+  /* Now, compute Y scale and normalize 2nd local. */
+  aScale.y = local[1].Length();
+  local[1] /= aScale.y;
+  aShear[ShearType::XYSHEAR] /= aScale.y;
+
+  /* Compute XZ and YZ shears, make 3rd local orthogonal */
+  aShear[ShearType::XZSHEAR] = local[0].DotProduct(local[2]);
+  local[2] -= local[0] * aShear[ShearType::XZSHEAR];
+  aShear[ShearType::YZSHEAR] = local[1].DotProduct(local[2]);
+  local[2] -= local[1] * aShear[ShearType::YZSHEAR];
+
+  /* Next, get Z scale and normalize 3rd local. */
+  aScale.z = local[2].Length();
+  local[2] /= aScale.z;
+
+  aShear[ShearType::XZSHEAR] /= aScale.z;
+  aShear[ShearType::YZSHEAR] /= aScale.z;
+
+  /**
+   * At this point, the matrix (in locals) is orthonormal.
+   * Check for a coordinate system flip.  If the determinant
+   * is -1, then negate the matrix and the scaling factors.
+   */
+  if (local[0].DotProduct(local[1].CrossProduct(local[2])) < 0) {
+    aScale *= -1;
+    for (int i = 0; i < 3; i++) {
+      local[i] *= -1;
+    }
+  }
+
+  /* Now, get the rotations out */
+  aRotate = gfxQuaternion(local);
+
+  return true;
+}
+
+Matrix
+CSSValueArrayTo2DMatrix(nsCSSValue::Array* aArray)
+{
+  MOZ_ASSERT(aArray &&
+             TransformFunctionOf(aArray) == eCSSKeyword_matrix &&
+             aArray->Count() == 7);
+  Matrix m(aArray->Item(1).GetFloatValue(),
+           aArray->Item(2).GetFloatValue(),
+           aArray->Item(3).GetFloatValue(),
+           aArray->Item(4).GetFloatValue(),
+           aArray->Item(5).GetFloatValue(),
+           aArray->Item(6).GetFloatValue());
+  return m;
+}
+
+Matrix4x4
+CSSValueArrayTo3DMatrix(nsCSSValue::Array* aArray)
+{
+  MOZ_ASSERT(aArray &&
+             TransformFunctionOf(aArray) == eCSSKeyword_matrix3d &&
+             aArray->Count() == 17);
+  gfx::Float array[16];
+  for (size_t i = 0; i < 16; ++i) {
+    array[i] = aArray->Item(i+1).GetFloatValue();
+  }
+  Matrix4x4 m(array);
+  return m;
+}
+
+Size
+GetScaleValue(const nsCSSValueSharedList* aList,
+              const nsIFrame* aForFrame)
+{
+  MOZ_ASSERT(aList && aList->mHead);
+  MOZ_ASSERT(aForFrame);
+
+  bool dontCareBool;
+  TransformReferenceBox refBox(aForFrame);
+  Matrix4x4 transform = ReadTransforms(
+                          aList->mHead,
+                          refBox,
+                          aForFrame->PresContext()->AppUnitsPerDevPixel(),
+                          &dontCareBool);
+  Matrix transform2d;
+  bool canDraw2D = transform.CanDraw2D(&transform2d);
+  if (!canDraw2D) {
+    return Size();
+  }
+
+  return transform2d.ScaleFactors(true);
 }
 
 } // namespace nsStyleTransformMatrix

@@ -9,7 +9,15 @@
 
 #include "MediaPipelineFilter.h"
 
-#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/common_types.h"
+
+#include "CSFLog.h"
+
+static const char* mpfLogTag = "MediaPipelineFilter";
+#ifdef LOGTAG
+#undef LOGTAG
+#endif
+#define LOGTAG mpfLogTag
 
 namespace mozilla {
 
@@ -24,12 +32,23 @@ bool MediaPipelineFilter::Filter(const webrtc::RTPHeader& header,
     if (correlator == correlator_) {
       AddRemoteSSRC(header.ssrc);
       return true;
-    } else {
-      // Some other stream; it is possible that an SSRC has moved, so make sure
-      // we don't have that SSRC in our filter any more.
-      remote_ssrc_set_.erase(header.ssrc);
-      return false;
     }
+    // Some other stream; it is possible that an SSRC has moved, so make sure
+    // we don't have that SSRC in our filter any more.
+    remote_ssrc_set_.erase(header.ssrc);
+    return false;
+  }
+
+  if (!header.extension.rtpStreamId.empty() &&
+      !remote_rid_set_.empty() &&
+      remote_rid_set_.count(header.extension.rtpStreamId.data())) {
+    return true;
+  }
+  if (!header.extension.rtpStreamId.empty()) {
+    CSFLogDebug(LOGTAG,
+                "MediaPipelineFilter ignoring seq# %u ssrc: %u RID: %s",
+                header.sequenceNumber, header.ssrc,
+                header.extension.rtpStreamId.data());
   }
 
   if (remote_ssrc_set_.count(header.ssrc)) {
@@ -49,6 +68,10 @@ bool MediaPipelineFilter::Filter(const webrtc::RTPHeader& header,
 
 void MediaPipelineFilter::AddRemoteSSRC(uint32_t ssrc) {
   remote_ssrc_set_.insert(ssrc);
+}
+
+void MediaPipelineFilter::AddRemoteRtpStreamId(const std::string& rtp_strm_id) {
+  remote_rid_set_.insert(rtp_strm_id);
 }
 
 void MediaPipelineFilter::AddUniquePT(uint8_t payload_type) {
@@ -74,6 +97,11 @@ void MediaPipelineFilter::Update(const MediaPipelineFilter& filter_update) {
 bool
 MediaPipelineFilter::FilterSenderReport(const unsigned char* data,
                                         size_t len) const {
+
+  if (!data) {
+    return false;
+  }
+
   if (len < FIRST_SSRC_OFFSET + 4) {
     return false;
   }
@@ -81,7 +109,8 @@ MediaPipelineFilter::FilterSenderReport(const unsigned char* data,
   uint8_t payload_type = data[PT_OFFSET];
 
   if (payload_type != SENDER_REPORT_T) {
-    return false;
+    // Not a sender report, let it through
+    return true;
   }
 
   uint32_t ssrc = 0;

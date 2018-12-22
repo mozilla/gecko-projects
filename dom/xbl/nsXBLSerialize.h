@@ -16,19 +16,22 @@ typedef uint8_t XBLBindingSerializeDetails;
 
 // A version number to ensure we don't load cached data in a different
 // file format.
-#define XBLBinding_Serialize_Version 0x00000004
+#define XBLBinding_Serialize_Version 0x00000005
 
 // Set for the first binding in a document
-#define XBLBinding_Serialize_IsFirstBinding 1
+#define XBLBinding_Serialize_IsFirstBinding (1 << 0)
 
 // Set to indicate that nsXBLPrototypeBinding::mInheritStyle should be true
-#define XBLBinding_Serialize_InheritStyle 2
+#define XBLBinding_Serialize_InheritStyle (1 << 1)
 
 // Set to indicate that nsXBLPrototypeBinding::mChromeOnlyContent should be true
-#define XBLBinding_Serialize_ChromeOnlyContent 4
+#define XBLBinding_Serialize_ChromeOnlyContent (1 << 2)
 
 // Set to indicate that nsXBLPrototypeBinding::mBindToUntrustedContent should be true
-#define XBLBinding_Serialize_BindToUntrustedContent 8
+#define XBLBinding_Serialize_BindToUntrustedContent (1 << 3)
+
+// Set to indicate that nsXBLPrototypeBinding::mSimpleScopeChain should be true
+#define XBLBinding_Serialize_SimpleScopeChain (1 << 4)
 
 // Appears at the end of the serialized data to indicate that no more bindings
 // are present for this document.
@@ -54,18 +57,18 @@ typedef uint8_t XBLBindingSerializeDetails;
 #define XBLBinding_Serialize_ReadOnly 0x80
 
 // Appears at the end of the list of insertion points to indicate that there
-// are no more. 
+// are no more.
 #define XBLBinding_Serialize_NoMoreInsertionPoints 0xFFFFFFFF
 
 // When serializing content nodes, a single-byte namespace id is written out
 // first. The special values below can appear in place of a namespace id.
 
-// Indicates that this is not one of the built-in namespaces defined in 
+// Indicates that this is not one of the built-in namespaces defined in
 // nsNameSpaceManager.h. The string form will be serialized immediately
 // following.
 #define XBLBinding_Serialize_CustomNamespace 0xFE
 
-// Flags to indicate a non-element node. Otherwise, it is an element. 
+// Flags to indicate a non-element node. Otherwise, it is an element.
 #define XBLBinding_Serialize_TextNode 0xFB
 #define XBLBinding_Serialize_CDATANode 0xFC
 #define XBLBinding_Serialize_CommentNode 0xFD

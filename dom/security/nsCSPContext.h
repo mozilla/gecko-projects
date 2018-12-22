@@ -8,6 +8,7 @@
 #define nsCSPContext_h___
 
 #include "mozilla/dom/nsCSPUtils.h"
+#include "mozilla/dom/SecurityPolicyViolationEvent.h"
 #include "nsDataHashtable.h"
 #include "nsIChannel.h"
 #include "nsIChannelEventSink.h"
@@ -26,6 +27,7 @@
   { 0xbf, 0xe0, 0x27, 0xce, 0xb9, 0x23, 0xd9, 0xac } }
 
 class nsINetworkInterceptController;
+class nsIEventTarget;
 struct ConsoleMsgQueueElem;
 
 class nsCSPContext : public nsIContentSecurityPolicy
@@ -48,7 +50,7 @@ class nsCSPContext : public nsIContentSecurityPolicy
      */
     void flushConsoleMessages();
 
-    void logToConsole(const char16_t* aName,
+    void logToConsole(const char* aName,
                       const char16_t** aParams,
                       uint32_t aParamsLength,
                       const nsAString& aSourceName,
@@ -57,13 +59,42 @@ class nsCSPContext : public nsIContentSecurityPolicy
                       uint32_t aColumnNumber,
                       uint32_t aSeverityFlag);
 
-    nsresult SendReports(nsISupports* aBlockedContentSource,
-                         nsIURI* aOriginalURI,
-                         nsAString& aViolatedDirective,
-                         uint32_t aViolatedPolicyIndex,
-                         nsAString& aSourceFile,
-                         nsAString& aScriptSample,
-                         uint32_t aLineNum);
+
+
+    /**
+     * Construct SecurityPolicyViolationEventInit structure.
+     *
+     * @param aBlockedURI
+     *        A nsIURI: the source of the violation.
+     * @param aOriginalUri
+     *        The original URI if the blocked content is a redirect, else null
+     * @param aViolatedDirective
+     *        the directive that was violated (string).
+     * @param aSourceFile
+     *        name of the file containing the inline script violation
+     * @param aScriptSample
+     *        a sample of the violating inline script
+     * @param aLineNum
+     *        source line number of the violation (if available)
+     * @param aViolationEventInit
+     *        The output
+     */
+    nsresult GatherSecurityPolicyViolationEventData(
+      nsIURI* aBlockedURI,
+      nsIURI* aOriginalURI,
+      nsAString& aViolatedDirective,
+      uint32_t aViolatedPolicyIndex,
+      nsAString& aSourceFile,
+      nsAString& aScriptSample,
+      uint32_t aLineNum,
+      mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit);
+
+    nsresult SendReports(
+      const mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit,
+      uint32_t aViolatedPolicyIndex);
+
+    nsresult FireViolationEvent(
+      const mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit);
 
     nsresult AsyncReportViolation(nsISupports* aBlockedContentSource,
                                   nsIURI* aOriginalURI,
@@ -94,7 +125,8 @@ class nsCSPContext : public nsIContentSecurityPolicy
                          bool aIsPreload,
                          bool aSpecific,
                          bool aSendViolationReports,
-                         bool aSendContentLocationInViolationReports);
+                         bool aSendContentLocationInViolationReports,
+                         bool aParserCreated);
 
     // helper to report inline script/style violations
     void reportInlineViolation(nsContentPolicyType aContentType,
@@ -103,6 +135,15 @@ class nsCSPContext : public nsIContentSecurityPolicy
                                const nsAString& aViolatedDirective,
                                uint32_t aViolatedPolicyIndex,
                                uint32_t aLineNumber);
+
+    static int32_t sScriptSampleMaxLength;
+
+    static uint32_t ScriptSampleMaxLength()
+    {
+      return std::max(sScriptSampleMaxLength, 0);
+    }
+
+    static bool sViolationEventsEnabled;
 
     nsString                                   mReferrer;
     uint64_t                                   mInnerWindowID; // used for web console logging
@@ -120,6 +161,7 @@ class nsCSPContext : public nsIContentSecurityPolicy
     // the windowID becomes available. see flushConsoleMessages()
     nsTArray<ConsoleMsgQueueElem>              mConsoleMsgQueue;
     bool                                       mQueueUpMessages;
+    nsCOMPtr<nsIEventTarget>                   mEventTarget;
 };
 
 // Class that listens to violation report transmission and logs errors.

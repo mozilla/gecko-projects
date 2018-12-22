@@ -1,10 +1,11 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
- 
+
   Author:
   Eric D Vaughan
 
@@ -17,16 +18,21 @@
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 
-class nsRenderingContext;
-struct nsHTMLReflowState;
+class gfxContext;
+namespace mozilla {
+struct ReflowInput;
+} // namespace mozilla
+
 
 class MOZ_STACK_CLASS nsBoxLayoutState
 {
+  using ReflowInput = mozilla::ReflowInput;
+
 public:
   explicit nsBoxLayoutState(nsPresContext* aPresContext,
-                            nsRenderingContext* aRenderingContext = nullptr,
-                            // see OuterReflowState() below
-                            const nsHTMLReflowState* aOuterReflowState = nullptr,
+                            gfxContext* aRenderingContext = nullptr,
+                            // see OuterReflowInput() below
+                            const ReflowInput* aOuterReflowInput = nullptr,
                             uint16_t aReflowDepth = 0);
   nsBoxLayoutState(const nsBoxLayoutState& aState);
 
@@ -44,7 +50,7 @@ public:
   // nsBoxLayoutState and should be null-checked before it is used.
   // However, passing a null rendering context to the constructor when
   // doing box layout or intrinsic size calculation will cause bugs.
-  nsRenderingContext* GetRenderingContext() const { return mRenderingContext; }
+  gfxContext* GetRenderingContext() const { return mRenderingContext; }
 
   struct AutoReflowDepth {
     explicit AutoReflowDepth(nsBoxLayoutState& aState)
@@ -55,16 +61,16 @@ public:
 
   // The HTML reflow state that lives outside the box-block boundary.
   // May not be set reliably yet.
-  const nsHTMLReflowState* OuterReflowState() { return mOuterReflowState; }
+  const ReflowInput* OuterReflowInput() { return mOuterReflowInput; }
 
   uint16_t GetReflowDepth() { return mReflowDepth; }
-  
+
 private:
   RefPtr<nsPresContext> mPresContext;
-  nsRenderingContext *mRenderingContext;
-  const nsHTMLReflowState *mOuterReflowState;
+  gfxContext *mRenderingContext;
+  const ReflowInput *mOuterReflowInput;
   uint32_t mLayoutFlags;
-  uint16_t mReflowDepth; 
+  uint16_t mReflowDepth;
   bool mPaintingDisabled;
 };
 

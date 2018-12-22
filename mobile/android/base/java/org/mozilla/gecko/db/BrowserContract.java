@@ -8,6 +8,9 @@ package org.mozilla.gecko.db;
 import org.mozilla.gecko.AppConstants;
 
 import android.net.Uri;
+import android.support.annotation.IntDef;
+import android.support.annotation.NonNull;
+
 import org.mozilla.gecko.annotation.RobocopTarget;
 
 @RobocopTarget
@@ -43,30 +46,103 @@ public class BrowserContract {
     public static final String PARAM_PROFILE_PATH = "profilePath";
     public static final String PARAM_LIMIT = "limit";
     public static final String PARAM_SUGGESTEDSITES_LIMIT = "suggestedsites_limit";
+    public static final String PARAM_TOPSITES_EXCLUDE_REMOTE_ONLY = "topsites_exclude_remote_only";
     public static final String PARAM_IS_SYNC = "sync";
     public static final String PARAM_SHOW_DELETED = "show_deleted";
     public static final String PARAM_IS_TEST = "test";
+    public static final String PARAM_OLD_BOOKMARK_PARENT = "old_bookmark_parent";
     public static final String PARAM_INSERT_IF_NEEDED = "insert_if_needed";
     public static final String PARAM_INCREMENT_VISITS = "increment_visits";
+    public static final String PARAM_INCREMENT_REMOTE_AGGREGATES = "increment_remote_aggregates";
+    public static final String PARAM_INCREMENT_LOCAL_VERSION_FROM_SYNC = "increment_local_version_from_sync";
+    public static final String PARAM_RESET_VERSIONS_TO_SYNCED = "reset_versions_to_synced";
+    public static final String PARAM_RESET_VERSIONS_FOR_ALL_TYPES = "reset_versions_for_all_types";
+    public static final String PARAM_NON_POSITIONED_PINS = "non_positioned_pins";
     public static final String PARAM_EXPIRE_PRIORITY = "priority";
     public static final String PARAM_DATASET_ID = "dataset_id";
+    public static final String PARAM_GROUP_BY = "group_by";
+
+    public static final String METHOD_INSERT_HISTORY_WITH_VISITS_FROM_SYNC = "insertHistoryWithVisitsSync";
+    public static final String METHOD_UPDATE_SYNC_VERSIONS = "updateSyncVersions";
+    public static final String METHOD_RESET_RECORD_VERSIONS = "resetRecordVersions";
+    public static final String METHOD_REPLACE_REMOTE_CLIENTS = "replaceRemoteClients";
+    public static final String METHOD_UPDATE_BY_GUID_ASSERTING_LOCAL_VERSION = "updateByGuidAssertingLocalVersion";
+    public static final String METHOD_RESULT = "methodResult";
+    public static final String METHOD_PARAM_OBJECT = "object";
+    public static final String METHOD_PARAM_DATA = "data";
 
     static public enum ExpirePriority {
         NORMAL,
         AGGRESSIVE
     }
 
-    static public String getFrecencySortOrder(boolean includesBookmarks, boolean asc) {
-        final String age = "(" + Combined.DATE_LAST_VISITED + " - " + System.currentTimeMillis() + ") / 86400000";
-
-        StringBuilder order = new StringBuilder(Combined.VISITS + " * MAX(1, 100 * 225 / (" + age + "*" + age + " + 225)) ");
+    /**
+     * Produces a SQL expression used for sorting results of the "combined" view by frecency.
+     * Combines remote and local frecency calculations, weighting local visits much heavier.
+     *
+     * @param includesBookmarks When URL is bookmarked, should we give it bonus frecency points?
+     * @param ascending Indicates if sorting order ascending
+     * @return Combined frecency sorting expression
+     */
+    static public String getCombinedFrecencySortOrder(boolean includesBookmarks, boolean ascending) {
+        final long now = System.currentTimeMillis();
+        StringBuilder order = new StringBuilder(getRemoteFrecencySQL(now) + " + " + getLocalFrecencySQL(now));
 
         if (includesBookmarks) {
             order.insert(0, "(CASE WHEN " + Combined.BOOKMARK_ID + " > -1 THEN 100 ELSE 0 END) + ");
         }
 
-        order.append(asc ? " ASC" : " DESC");
+        order.append(ascending ? " ASC" : " DESC");
         return order.toString();
+    }
+
+    /**
+     * See Bug 1265525 for details (explanation + graphs) on how Remote frecency compares to Local frecency for different
+     * combinations of visits count and age.
+     *
+     * @param now Base time in milliseconds for age calculation
+     * @return remote frecency SQL calculation
+     */
+    static public String getRemoteFrecencySQL(final long now) {
+        return getFrecencyCalculation(now, 1, 110, Combined.REMOTE_VISITS_COUNT, Combined.REMOTE_DATE_LAST_VISITED);
+    }
+
+    /**
+     * Local frecency SQL calculation. Note higher scale factor and squared visit count which achieve
+     * visits generated locally being much preferred over remote visits.
+     * See Bug 1265525 for details (explanation + comparison graphs).
+     *
+     * @param now Base time in milliseconds for age calculation
+     * @return local frecency SQL calculation
+     */
+    static public String getLocalFrecencySQL(final long now) {
+        String visitCountExpr = "(" + Combined.LOCAL_VISITS_COUNT + " + 2)";
+        visitCountExpr = visitCountExpr + " * " + visitCountExpr;
+
+        return getFrecencyCalculation(now, 2, 225, visitCountExpr, Combined.LOCAL_DATE_LAST_VISITED);
+    }
+
+    /**
+     * Our version of frecency is computed by scaling the number of visits by a multiplier
+     * that approximates Gaussian decay, based on how long ago the entry was last visited.
+     * Since we're limited by the math we can do with sqlite, we're calculating this
+     * approximation using the Cauchy distribution: multiplier = scale_const / (age^2 + scale_const).
+     * For example, with 15 as our scale parameter, we get a scale constant 15^2 = 225. Then:
+     * frecencyScore = numVisits * max(1, 100 * 225 / (age*age + 225)). (See bug 704977)
+     *
+     * @param now Base time in milliseconds for age calculation
+     * @param minFrecency Minimum allowed frecency value
+     * @param multiplier Scale constant
+     * @param visitCountExpr Expression which will produce a visit count
+     * @param lastVisitExpr Expression which will produce "last-visited" timestamp
+     * @return Frecency SQL calculation
+     */
+    static public String getFrecencyCalculation(final long now, final int minFrecency, final int multiplier, @NonNull  final String visitCountExpr, @NonNull final String lastVisitExpr) {
+        final long nowInMicroseconds = now * 1000;
+        final long microsecondsPerDay = 86400000000L;
+        final String ageExpr = "(" + nowInMicroseconds + " - " + lastVisitExpr + ") / " + microsecondsPerDay;
+
+        return visitCountExpr + " * MAX(" + minFrecency + ", 100 * " + multiplier + " / (" + ageExpr + " * " + ageExpr + " + " + multiplier + "))";
     }
 
     @RobocopTarget
@@ -78,6 +154,16 @@ public class BrowserContract {
     public interface DateSyncColumns {
         public static final String DATE_CREATED = "created";
         public static final String DATE_MODIFIED = "modified";
+    }
+
+    @RobocopTarget
+    public interface VersionColumns {
+        String LOCAL_VERSION = "localVersion";
+        String SYNC_VERSION = "syncVersion";
+
+        // This is a flag used to indicate that records inserted from sync should start as modified.
+        // That is, their versions will start as (2,1), instead of (1,1).
+        String PARAM_INSERT_FROM_SYNC_AS_MODIFIED = "modifiedBySync";
     }
 
     @RobocopTarget
@@ -103,6 +189,28 @@ public class BrowserContract {
     public interface HistoryColumns {
         public static final String DATE_LAST_VISITED = "date";
         public static final String VISITS = "visits";
+        // Aggregates used to speed up top sites and search frecency-powered queries
+        public static final String LOCAL_VISITS = "visits_local";
+        public static final String REMOTE_VISITS = "visits_remote";
+        public static final String LOCAL_DATE_LAST_VISITED = "date_local";
+        public static final String REMOTE_DATE_LAST_VISITED = "date_remote";
+    }
+
+    @RobocopTarget
+    public interface VisitsColumns {
+        public static final String HISTORY_GUID = "history_guid";
+        public static final String VISIT_TYPE = "visit_type";
+        public static final String DATE_VISITED = "date";
+        // Used to distinguish between visits that were generated locally vs those that came in from Sync.
+        // Since we don't track "origin clientID" for visits, this is the best we can do for now.
+        public static final String IS_LOCAL = "is_local";
+    }
+
+    public interface PageMetadataColumns {
+        public static final String HISTORY_GUID = "history_guid";
+        public static final String DATE_CREATED = "created";
+        public static final String HAS_IMAGE = "has_image";
+        public static final String JSON = "json";
     }
 
     public interface DeletedColumns {
@@ -143,18 +251,31 @@ public class BrowserContract {
     }
 
     @RobocopTarget
-    public static final class Bookmarks implements CommonColumns, URLColumns, FaviconColumns, SyncColumns {
+    public static final class Bookmarks implements CommonColumns, URLColumns, FaviconColumns, SyncColumns, VersionColumns {
         private Bookmarks() {}
 
         public static final String TABLE_NAME = "bookmarks";
 
         public static final String VIEW_WITH_FAVICONS = "bookmarks_with_favicons";
 
+        public static final String VIEW_WITH_ANNOTATIONS = "bookmarks_with_annotations";
+
         public static final int FIXED_ROOT_ID = 0;
         public static final int FAKE_DESKTOP_FOLDER_ID = -1;
         public static final int FIXED_READING_LIST_ID = -2;
         public static final int FIXED_PINNED_LIST_ID = -3;
         public static final int FIXED_SCREENSHOT_FOLDER_ID = -4;
+        public static final int FAKE_READINGLIST_SMARTFOLDER_ID = -5;
+
+        // Fixed position used by Activity Stream pins. A-S displays pins in front of other top sites,
+        // so position is constant for all pins.
+        public static final int FIXED_AS_PIN_POSITION = -1;
+
+        /**
+         * This ID and the following negative IDs are reserved for bookmarks from Android's partner
+         * bookmark provider.
+         */
+        public static final long FAKE_PARTNER_BOOKMARKS_START = -1000;
 
         public static final String MOBILE_FOLDER_GUID = "mobile";
         public static final String PLACES_FOLDER_GUID = "places";
@@ -165,6 +286,7 @@ public class BrowserContract {
         public static final String FAKE_DESKTOP_FOLDER_GUID = "desktop";
         public static final String PINNED_FOLDER_GUID = "pinned";
         public static final String SCREENSHOT_FOLDER_GUID = "screenshots";
+        public static final String FAKE_READINGLIST_SMARTFOLDER_GUID = "readinglist";
 
         public static final int TYPE_FOLDER = 0;
         public static final int TYPE_BOOKMARK = 1;
@@ -186,6 +308,9 @@ public class BrowserContract {
         public static final String TAGS = "tags";
         public static final String DESCRIPTION = "description";
         public static final String KEYWORD = "keyword";
+
+        public static final String ANNOTATION_KEY = "annotation_key";
+        public static final String ANNOTATION_VALUE = "annotation_value";
     }
 
     @RobocopTarget
@@ -202,6 +327,18 @@ public class BrowserContract {
         public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/browser-history";
     }
 
+    @RobocopTarget
+    public static final class Visits implements CommonColumns, VisitsColumns {
+        private Visits() {}
+
+        public static final String TABLE_NAME = "visits";
+
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "visits");
+
+        public static final int VISIT_IS_LOCAL = 1;
+        public static final int VISIT_IS_REMOTE = 0;
+    }
+
     // Combined bookmarks and history
     @RobocopTarget
     public static final class Combined implements CommonColumns, URLColumns, HistoryColumns, FaviconColumns  {
@@ -215,6 +352,13 @@ public class BrowserContract {
 
         public static final String BOOKMARK_ID = "bookmark_id";
         public static final String HISTORY_ID = "history_id";
+        public static final String HISTORY_GUID = "history_guid"; // sync GUID to merge with the PageMetadata table.
+
+        public static final String REMOTE_VISITS_COUNT = "remoteVisitCount";
+        public static final String REMOTE_DATE_LAST_VISITED = "remoteDateLastVisited";
+
+        public static final String LOCAL_VISITS_COUNT = "localVisitCount";
+        public static final String LOCAL_DATE_LAST_VISITED = "localDateLastVisited";
     }
 
     public static final class Schema {
@@ -317,7 +461,7 @@ public class BrowserContract {
 
     public static final class Clients implements CommonColumns {
         private Clients() {}
-        public static final Uri CONTENT_RECENCY_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients_recency");
+        public static final Uri CONTENT_NO_STALE_SORTED_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients_no_stale_sorted");
         public static final Uri CONTENT_URI = Uri.withAppendedPath(TABS_AUTHORITY_URI, "clients");
         public static final String CONTENT_TYPE = "vnd.android.cursor.dir/client";
         public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/client";
@@ -333,6 +477,19 @@ public class BrowserContract {
         public static final String LAST_MODIFIED = "last_modified";
 
         public static final String DEVICE_TYPE = "device_type";
+    }
+
+    public static final class RemoteDevices implements CommonColumns, DateSyncColumns {
+        private RemoteDevices() {}
+        public static final String TABLE_NAME = "remote_devices";
+
+        public static final String GUID = "guid"; // FxA device ID
+        public static final String NAME = "name";
+        public static final String TYPE = "type";
+        public static final String IS_CURRENT_DEVICE = "is_current_device";
+        public static final String LAST_ACCESS_TIME = "last_access_time";
+
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "remote_devices");
     }
 
     // Data storage for dynamic panels on about:home
@@ -476,11 +633,31 @@ public class BrowserContract {
         public static final int TYPE_PINNED = 2;
         public static final int TYPE_SUGGESTED = 3;
 
+        @IntDef({TYPE_BLANK, TYPE_TOP, TYPE_PINNED, TYPE_SUGGESTED})
+        public @interface TopSiteType {}
+
         public static final String BOOKMARK_ID = "bookmark_id";
         public static final String HISTORY_ID = "history_id";
         public static final String TYPE = "type";
+        public static final String PAGE_METADATA_JSON = "page_metadata_json";
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "topsites");
+    }
+
+    public static class Highlights {
+        public static final String BOOKMARK_ID = "bookmark_id";
+        public static final String HISTORY_ID = "history_id";
+
+        public static final String TITLE = "title";
+        public static final String URL = "url";
+        public static final String POSITION = "position";
+        public static final String PARENT = "parent";
+        public static final String DATE = "date";
+        public static final String METADATA = "metadata";
+    }
+
+    public static final class HighlightCandidates extends Highlights {
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "highlight_candidates");
     }
 
     @RobocopTarget
@@ -500,6 +677,16 @@ public class BrowserContract {
         private SuggestedSites() {}
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "suggestedsites");
+    }
+
+    public static final class ActivityStreamBlocklist implements CommonColumns {
+        private ActivityStreamBlocklist() {}
+
+        public static final String TABLE_NAME = "activity_stream_blocklist";
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, TABLE_NAME);
+
+        public static final String URL = "url";
+        public static final String CREATED = "created";
     }
 
     @RobocopTarget
@@ -533,7 +720,24 @@ public class BrowserContract {
              * Key:   feed_subscription
              * Value: JSON object describing feed
              */
-            FEED_SUBSCRIPTION("feed_subscription");
+            FEED_SUBSCRIPTION("feed_subscription"),
+
+            /**
+             * Indicates that this URL (if stored as a bookmark) should be opened into reader view.
+             *
+             * Key:   reader_view
+             * Value: String "true" to indicate that we would like to open into reader view.
+             */
+            READER_VIEW("reader_view"),
+
+            /**
+             * Indicator that the user interacted with the URL in regards to home screen shortcuts.
+             *
+             * Key:   home_screen_shortcut
+             * Value: True: User created an home screen shortcut for this URL
+             *        False: User declined to create a shortcut for this URL
+             */
+            HOME_SCREEN_SHORTCUT("home_screen_shortcut");
 
             private final String dbValue;
 
@@ -555,6 +759,11 @@ public class BrowserContract {
 
             public int getDBValue() { return dbValue; }
         }
+
+        /**
+         * Value used to indicate that a reader view item is saved. We use the
+         */
+        public static final String READER_VIEW_SAVED_VALUE = "true";
     }
 
     public static final class Numbers {
@@ -614,6 +823,14 @@ public class BrowserContract {
         public static final String TABLE_DISABLED_HOSTS = "logins_disabled_hosts";
 
         public static final String HOSTNAME = "hostname";
+    }
+
+    @RobocopTarget
+    public static final class PageMetadata implements CommonColumns, PageMetadataColumns {
+        private PageMetadata() {}
+
+        public static final String TABLE_NAME = "page_metadata";
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "page_metadata");
     }
 
     // We refer to the service by name to decouple services from the rest of the code base.

@@ -14,8 +14,10 @@
 // it will connect to a specified port and issue a simple HTTP request.
 
 #include <stdint.h>
-#include "prio.h"
+
 #include "ScopedNSSTypes.h"
+#include "mozilla/Casting.h"
+#include "prio.h"
 #include "secerr.h"
 #include "ssl.h"
 
@@ -44,9 +46,9 @@ extern const char DEFAULT_CERT_NICKNAME[];
 // Pass DEFAULT_CERT_NICKNAME as certName unless you need a specific
 // certificate.
 SECStatus
-ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
-                                /*optional*/ ScopedCERTCertificate *cert,
-                                /*optional*/ SSLKEAType *kea);
+ConfigSecureServerWithNamedCert(PRFileDesc* fd, const char* certName,
+                                /*optional*/ UniqueCERTCertificate* cert,
+                                /*optional*/ SSLKEAType* kea);
 
 SECStatus
 InitializeNSS(const char* nssCertDBDir);
@@ -63,7 +65,7 @@ GetHostForSNI(const SECItem *aSrvNameArr, uint32_t aSrvNameArrSize,
   for (uint32_t i = 0; i < aSrvNameArrSize; i++) {
     for (const Host *host = hosts; host->mHostName; ++host) {
       SECItem hostName;
-      hostName.data = reinterpret_cast<uint8_t*>(const_cast<char*>(host->mHostName));
+      hostName.data = BitwiseCast<unsigned char*, const char*>(host->mHostName);
       hostName.len = strlen(host->mHostName);
       if (SECITEM_ItemsAreEqual(&hostName, &aSrvNameArr[i])) {
         if (gDebugLevel >= DEBUG_VERBOSE) {

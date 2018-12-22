@@ -2,33 +2,34 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginHelper",
+                               "resource://gre/modules/LoginHelper.jsm");
+
 
 function nsLoginInfo() {}
 
 nsLoginInfo.prototype = {
 
-  classID : Components.ID("{0f2f347c-1e4f-40cc-8efd-792dea70a85e}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsILoginInfo, Ci.nsILoginMetaInfo]),
+  classID: Components.ID("{0f2f347c-1e4f-40cc-8efd-792dea70a85e}"),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsILoginInfo, Ci.nsILoginMetaInfo]),
 
   //
   // nsILoginInfo interfaces...
   //
 
-  hostname      : null,
-  formSubmitURL : null,
-  httpRealm     : null,
-  username      : null,
-  password      : null,
-  usernameField : null,
-  passwordField : null,
+  hostname: null,
+  formSubmitURL: null,
+  httpRealm: null,
+  username: null,
+  password: null,
+  usernameField: null,
+  passwordField: null,
 
-  init : function (aHostname, aFormSubmitURL, aHttpRealm,
-                   aUsername,      aPassword,
-                   aUsernameField, aPasswordField) {
+  init(aHostname, aFormSubmitURL, aHttpRealm,
+                  aUsername, aPassword,
+                  aUsernameField, aPasswordField) {
     this.hostname      = aHostname;
     this.formSubmitURL = aFormSubmitURL;
     this.httpRealm     = aHttpRealm;
@@ -39,40 +40,17 @@ nsLoginInfo.prototype = {
   },
 
   matches(aLogin, ignorePassword) {
-    if (this.hostname      != aLogin.hostname      ||
-        this.httpRealm     != aLogin.httpRealm     ||
-        this.username      != aLogin.username)
-      return false;
-
-    if (!ignorePassword && this.password != aLogin.password)
-      return false;
-
-    // If either formSubmitURL is blank (but not null), then match.
-    if (this.formSubmitURL != "" && aLogin.formSubmitURL != "" &&
-        this.formSubmitURL != aLogin.formSubmitURL) {
-      // If we have the same formSubmitURL hostPort we should match (ignore scheme)
-      try {
-        let loginURI = Services.io.newURI(aLogin.formSubmitURL, null, null);
-        let matchURI = Services.io.newURI(this.formSubmitURL, null, null);
-        if (loginURI.hostPort != matchURI.hostPort) {
-          return false;
-        }
-      } catch (e) {
-        return false;
-      }
-    }
-
-    // The .usernameField and .passwordField values are ignored.
-
-    return true;
+    return LoginHelper.doLoginsMatch(this, aLogin, {
+      ignorePassword,
+    });
   },
 
-  equals : function (aLogin) {
-    if (this.hostname      != aLogin.hostname      ||
+  equals(aLogin) {
+    if (this.hostname != aLogin.hostname ||
         this.formSubmitURL != aLogin.formSubmitURL ||
-        this.httpRealm     != aLogin.httpRealm     ||
-        this.username      != aLogin.username      ||
-        this.password      != aLogin.password      ||
+        this.httpRealm != aLogin.httpRealm ||
+        this.username != aLogin.username ||
+        this.password != aLogin.password ||
         this.usernameField != aLogin.usernameField ||
         this.passwordField != aLogin.passwordField)
       return false;
@@ -80,7 +58,7 @@ nsLoginInfo.prototype = {
     return true;
   },
 
-  clone : function() {
+  clone() {
     let clone = Cc["@mozilla.org/login-manager/loginInfo;1"].
                 createInstance(Ci.nsILoginInfo);
     clone.init(this.hostname, this.formSubmitURL, this.httpRealm,
@@ -102,11 +80,11 @@ nsLoginInfo.prototype = {
   // nsILoginMetaInfo interfaces...
   //
 
-  guid : null,
-  timeCreated : null,
-  timeLastUsed : null,
-  timePasswordChanged : null,
-  timesUsed : null
+  guid: null,
+  timeCreated: null,
+  timeLastUsed: null,
+  timePasswordChanged: null,
+  timesUsed: null
 
 }; // end of nsLoginInfo implementation
 

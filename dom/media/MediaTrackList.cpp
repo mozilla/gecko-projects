@@ -9,6 +9,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/AudioTrack.h"
+#include "mozilla/dom/VideoStreamTrack.h"
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/TrackEvent.h"
 #include "nsThreadUtils.h"
@@ -34,7 +35,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaTrackList,
 
 NS_IMPL_ADDREF_INHERITED(MediaTrackList, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(MediaTrackList, DOMEventTargetHelper)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaTrackList)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaTrackList)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 MediaTrack*
@@ -67,16 +68,28 @@ MediaTrackList::GetTrackById(const nsAString& aId)
 void
 MediaTrackList::AddTrack(MediaTrack* aTrack)
 {
+  MOZ_ASSERT(aTrack->GetOwnerGlobal() == GetOwnerGlobal(),
+             "Where is this track from?");
   mTracks.AppendElement(aTrack);
-  aTrack->Init(GetOwner());
   aTrack->SetTrackList(this);
   CreateAndDispatchTrackEventRunner(aTrack, NS_LITERAL_STRING("addtrack"));
+
+  if ((!aTrack->AsAudioTrack() || !aTrack->AsAudioTrack()->Enabled()) &&
+      (!aTrack->AsVideoTrack() || !aTrack->AsVideoTrack()->Selected())) {
+    // Track not enabled, no need to notify media element.
+    return;
+  }
+
+  if (HTMLMediaElement* element = GetMediaElement()) {
+    element->NotifyMediaTrackEnabled(aTrack);
+  }
 }
 
 void
 MediaTrackList::RemoveTrack(const RefPtr<MediaTrack>& aTrack)
 {
   mTracks.RemoveElement(aTrack);
+  aTrack->SetEnabledInternal(false, MediaTrack::FIRE_NO_EVENTS);
   aTrack->SetTrackList(nullptr);
   CreateAndDispatchTrackEventRunner(aTrack, NS_LITERAL_STRING("removetrack"));
 }
@@ -91,24 +104,29 @@ MediaTrackList::RemoveTracks()
 }
 
 already_AddRefed<AudioTrack>
-MediaTrackList::CreateAudioTrack(const nsAString& aId,
+MediaTrackList::CreateAudioTrack(nsIGlobalObject* aOwnerGlobal,
+                                 const nsAString& aId,
                                  const nsAString& aKind,
                                  const nsAString& aLabel,
                                  const nsAString& aLanguage,
                                  bool aEnabled)
 {
-  RefPtr<AudioTrack> track = new AudioTrack(aId, aKind, aLabel, aLanguage,
-                                              aEnabled);
+  RefPtr<AudioTrack> track = new AudioTrack(aOwnerGlobal,
+                                            aId, aKind, aLabel, aLanguage,
+                                            aEnabled);
   return track.forget();
 }
 
 already_AddRefed<VideoTrack>
-MediaTrackList::CreateVideoTrack(const nsAString& aId,
+MediaTrackList::CreateVideoTrack(nsIGlobalObject* aOwnerGlobal,
+                                 const nsAString& aId,
                                  const nsAString& aKind,
                                  const nsAString& aLabel,
-                                 const nsAString& aLanguage)
+                                 const nsAString& aLanguage,
+                                 VideoStreamTrack* aVideoTrack)
 {
-  RefPtr<VideoTrack> track = new VideoTrack(aId, aKind, aLabel, aLanguage);
+  RefPtr<VideoTrack> track = new VideoTrack(aOwnerGlobal, aId, aKind, aLabel,
+                                            aLanguage, aVideoTrack);
   return track.forget();
 }
 
@@ -116,6 +134,7 @@ void
 MediaTrackList::EmptyTracks()
 {
   for (uint32_t i = 0; i < mTracks.Length(); ++i) {
+    mTracks[i]->SetEnabledInternal(false, MediaTrack::FIRE_NO_EVENTS);
     mTracks[i]->SetTrackList(nullptr);
   }
   mTracks.Clear();
@@ -125,7 +144,9 @@ void
 MediaTrackList::CreateAndDispatchChangeEvent()
 {
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, NS_LITERAL_STRING("change"), false);
+    new AsyncEventDispatcher(this,
+                             NS_LITERAL_STRING("change"),
+                             CanBubble::eNo);
   asyncDispatcher->PostDOMEvent();
 }
 

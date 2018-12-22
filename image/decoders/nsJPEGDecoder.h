@@ -52,17 +52,17 @@ class nsJPEGDecoder : public Decoder
 public:
   virtual ~nsJPEGDecoder();
 
-  virtual void SetSampleSize(int aSampleSize) override
-  {
-    mSampleSize = aSampleSize;
-  }
+  DecoderType GetType() const override { return DecoderType::JPEG; }
 
-  virtual void InitInternal() override;
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
-  virtual void FinishInternal() override;
-
-  virtual Telemetry::ID SpeedHistogram() override;
   void NotifyDone();
+
+protected:
+  nsresult InitInternal() override;
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
+  nsresult FinishInternal() override;
+
+  Maybe<Telemetry::HistogramID> SpeedHistogram() const override;
 
 protected:
   Orientation ReadOrientationFromEXIF();
@@ -73,6 +73,17 @@ private:
 
   // Decoders should only be instantiated via DecoderFactory.
   nsJPEGDecoder(RasterImage* aImage, Decoder::DecodeStyle aDecodeStyle);
+
+  enum class State
+  {
+    JPEG_DATA,
+    FINISHED_JPEG_DATA
+  };
+
+  LexerTransition<State> ReadJPEGData(const char* aData, size_t aLength);
+  LexerTransition<State> FinishedJPEGData();
+
+  StreamingLexer<State> mLexer;
 
 public:
   struct jpeg_decompress_struct mInfo;
@@ -101,8 +112,6 @@ public:
   const Decoder::DecodeStyle mDecodeStyle;
 
   uint32_t mCMSMode;
-
-  int mSampleSize;
 };
 
 } // namespace image

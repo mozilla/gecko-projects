@@ -7,29 +7,27 @@
 #include "SRICheck.h"
 
 #include "mozilla/Base64.h"
+#include "mozilla/LoadTainting.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/SRILogHelper.h"
+#include "mozilla/dom/SRIMetadata.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
-#include "nsIDocument.h"
+#include "nsIConsoleReportCollector.h"
 #include "nsIProtocolHandler.h"
 #include "nsIScriptError.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIIncrementalStreamLoader.h"
-#include "nsIUnicharStreamLoader.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsWhitespaceTokenizer.h"
 
-static mozilla::LogModule*
-GetSriLog()
-{
-  static mozilla::LazyLogModule gSriPRLog("SRI");
-  return gSriPRLog;
-}
-
-#define SRILOG(args) MOZ_LOG(GetSriLog(), mozilla::LogLevel::Debug, args)
-#define SRIERROR(args) MOZ_LOG(GetSriLog(), mozilla::LogLevel::Error, args)
+#define SRIVERBOSE(args)                                                       \
+  MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Verbose, args)
+#define SRILOG(args)                                                           \
+  MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug, args)
+#define SRIERROR(args)                                                         \
+  MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Error, args)
 
 namespace mozilla {
 namespace dom {
@@ -40,10 +38,11 @@ namespace dom {
  * sub-resource will be loaded.
  */
 static nsresult
-IsEligible(nsIChannel* aChannel, const CORSMode aCORSMode,
-           const nsIDocument* aDocument)
+IsEligible(nsIChannel* aChannel, mozilla::LoadTainting aTainting,
+           const nsACString& aSourceFileURI,
+           nsIConsoleReportCollector* aReporter)
 {
-  NS_ENSURE_ARG_POINTER(aDocument);
+  NS_ENSURE_ARG_POINTER(aReporter);
 
   if (!aChannel) {
     SRILOG(("SRICheck::IsEligible, null channel"));
@@ -51,7 +50,7 @@ IsEligible(nsIChannel* aChannel, const CORSMode aCORSMode,
   }
 
   // Was the sub-resource loaded via CORS?
-  if (aCORSMode != CORS_NONE) {
+  if (aTainting == LoadTainting::CORS) {
     SRILOG(("SRICheck::IsEligible, CORS mode"));
     return NS_OK;
   }
@@ -66,43 +65,39 @@ IsEligible(nsIChannel* aChannel, const CORSMode aCORSMode,
   rv = originalURI->GetSpec(requestSpec);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (MOZ_LOG_TEST(GetSriLog(), mozilla::LogLevel::Debug)) {
-    nsAutoCString documentSpec, finalSpec;
-    aDocument->GetDocumentURI()->GetAsciiSpec(documentSpec);
-    if (finalURI) {
-      finalURI->GetSpec(finalSpec);
-    }
-    SRILOG(("SRICheck::IsEligible, documentURI=%s; requestURI=%s; finalURI=%s",
-            documentSpec.get(), requestSpec.get(), finalSpec.get()));
+  if (MOZ_LOG_TEST(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug)) {
+    SRILOG(("SRICheck::IsEligible, requestURI=%s; finalURI=%s",
+            requestSpec.get(),
+            finalURI ? finalURI->GetSpecOrDefault().get() : ""));
   }
 
   // Is the sub-resource same-origin?
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  if (NS_SUCCEEDED(ssm->CheckSameOriginURI(aDocument->GetDocumentURI(),
-                                           finalURI, false))) {
+  if (aTainting == LoadTainting::Basic) {
     SRILOG(("SRICheck::IsEligible, same-origin"));
     return NS_OK;
   }
   SRILOG(("SRICheck::IsEligible, NOT same origin"));
 
   NS_ConvertUTF8toUTF16 requestSpecUTF16(requestSpec);
-  const char16_t* params[] = { requestSpecUTF16.get() };
-  nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                  NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                  aDocument,
-                                  nsContentUtils::eSECURITY_PROPERTIES,
-                                  "IneligibleResource",
-                                  params, ArrayLength(params));
+  nsTArray<nsString> params;
+  params.AppendElement(requestSpecUTF16);
+  aReporter->AddConsoleReport(nsIScriptError::errorFlag,
+                              NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                              nsContentUtils::eSECURITY_PROPERTIES,
+                              aSourceFileURI, 0, 0,
+                              NS_LITERAL_CSTRING("IneligibleResource"),
+                              const_cast<const nsTArray<nsString>&>(params));
   return NS_ERROR_SRI_NOT_ELIGIBLE;
 }
 
 /* static */ nsresult
 SRICheck::IntegrityMetadata(const nsAString& aMetadataList,
-                            const nsIDocument* aDocument,
+                            const nsACString& aSourceFileURI,
+                            nsIConsoleReportCollector* aReporter,
                             SRIMetadata* outMetadata)
 {
   NS_ENSURE_ARG_POINTER(outMetadata);
-  NS_ENSURE_ARG_POINTER(aDocument);
+  NS_ENSURE_ARG_POINTER(aReporter);
   MOZ_ASSERT(outMetadata->IsEmpty()); // caller must pass empty metadata
 
   if (!Preferences::GetBool("security.sri.enable", false)) {
@@ -111,10 +106,11 @@ SRICheck::IntegrityMetadata(const nsAString& aMetadataList,
   }
 
   // put a reasonable bound on the length of the metadata
-  NS_ConvertUTF16toUTF8 metadataList(aMetadataList);
+  NS_LossyConvertUTF16toASCII metadataList(aMetadataList);
   if (metadataList.Length() > SRICheck::MAX_METADATA_LENGTH) {
     metadataList.Truncate(SRICheck::MAX_METADATA_LENGTH);
   }
+  SRILOG(("SRICheck::IntegrityMetadata, metadataList=%s", metadataList.get()));
   MOZ_ASSERT(metadataList.Length() <= aMetadataList.Length());
 
   // the integrity attribute is a list of whitespace-separated hashes
@@ -129,28 +125,30 @@ SRICheck::IntegrityMetadata(const nsAString& aMetadataList,
     SRIMetadata metadata(token);
     if (metadata.IsMalformed()) {
       NS_ConvertUTF8toUTF16 tokenUTF16(token);
-      const char16_t* params[] = { tokenUTF16.get() };
-      nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                      NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                      aDocument,
-                                      nsContentUtils::eSECURITY_PROPERTIES,
-                                      "MalformedIntegrityHash",
-                                      params, ArrayLength(params));
+      nsTArray<nsString> params;
+      params.AppendElement(tokenUTF16);
+      aReporter->AddConsoleReport(nsIScriptError::warningFlag,
+                                  NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                                  nsContentUtils::eSECURITY_PROPERTIES,
+                                  aSourceFileURI, 0, 0,
+                                  NS_LITERAL_CSTRING("MalformedIntegrityHash"),
+                                  const_cast<const nsTArray<nsString>&>(params));
     } else if (!metadata.IsAlgorithmSupported()) {
       nsAutoCString alg;
       metadata.GetAlgorithm(&alg);
       NS_ConvertUTF8toUTF16 algUTF16(alg);
-      const char16_t* params[] = { algUTF16.get() };
-      nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                      NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                      aDocument,
-                                      nsContentUtils::eSECURITY_PROPERTIES,
-                                      "UnsupportedHashAlg",
-                                      params, ArrayLength(params));
+      nsTArray<nsString> params;
+      params.AppendElement(algUTF16);
+      aReporter->AddConsoleReport(nsIScriptError::warningFlag,
+                                  NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                                  nsContentUtils::eSECURITY_PROPERTIES,
+                                  aSourceFileURI, 0, 0,
+                                  NS_LITERAL_CSTRING("UnsupportedHashAlg"),
+                                  const_cast<const nsTArray<nsString>&>(params));
     }
 
     nsAutoCString alg1, alg2;
-    if (MOZ_LOG_TEST(GetSriLog(), mozilla::LogLevel::Debug)) {
+    if (MOZ_LOG_TEST(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug)) {
       outMetadata->GetAlgorithm(&alg1);
       metadata.GetAlgorithm(&alg2);
     }
@@ -165,7 +163,9 @@ SRICheck::IntegrityMetadata(const nsAString& aMetadataList,
     }
   }
 
-  if (MOZ_LOG_TEST(GetSriLog(), mozilla::LogLevel::Debug)) {
+  outMetadata->mIntegrityString = aMetadataList;
+
+  if (MOZ_LOG_TEST(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug)) {
     if (outMetadata->IsValid()) {
       nsAutoCString alg;
       outMetadata->GetAlgorithm(&alg);
@@ -179,66 +179,39 @@ SRICheck::IntegrityMetadata(const nsAString& aMetadataList,
   return NS_OK;
 }
 
-/* static */ nsresult
-SRICheck::VerifyIntegrity(const SRIMetadata& aMetadata,
-                          nsIUnicharStreamLoader* aLoader,
-                          const CORSMode aCORSMode,
-                          const nsAString& aString,
-                          const nsIDocument* aDocument)
-{
-  NS_ENSURE_ARG_POINTER(aLoader);
-
-  NS_ConvertUTF16toUTF8 utf8Hash(aString);
-  nsCOMPtr<nsIChannel> channel;
-  aLoader->GetChannel(getter_AddRefs(channel));
-
-  if (MOZ_LOG_TEST(GetSriLog(), mozilla::LogLevel::Debug)) {
-    nsAutoCString requestURL;
-    nsCOMPtr<nsIURI> originalURI;
-    if (channel &&
-        NS_SUCCEEDED(channel->GetOriginalURI(getter_AddRefs(originalURI))) &&
-        originalURI) {
-      originalURI->GetAsciiSpec(requestURL);
-    }
-    SRILOG(("SRICheck::VerifyIntegrity (unichar stream)"));
-  }
-
-  SRICheckDataVerifier verifier(aMetadata, aDocument);
-  nsresult rv;
-  rv = verifier.Update(utf8Hash.Length(), (uint8_t*)utf8Hash.get());
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return verifier.Verify(aMetadata, channel, aCORSMode, aDocument);
-}
-
 //////////////////////////////////////////////////////////////
 //
 //////////////////////////////////////////////////////////////
 SRICheckDataVerifier::SRICheckDataVerifier(const SRIMetadata& aMetadata,
-                                           const nsIDocument* aDocument)
-  : mCryptoHash(nullptr),
-    mBytesHashed(0),
-    mInvalidMetadata(false),
-    mComplete(false)
+                                           const nsACString& aSourceFileURI,
+                                           nsIConsoleReportCollector* aReporter)
+  : mCryptoHash(nullptr)
+  , mBytesHashed(0)
+  , mHashLength(0)
+  , mHashType('\0')
+  , mInvalidMetadata(false)
+  , mComplete(false)
 {
   MOZ_ASSERT(!aMetadata.IsEmpty()); // should be checked by caller
 
   // IntegrityMetadata() checks this and returns "no metadata" if
   // it's disabled so we should never make it this far
   MOZ_ASSERT(Preferences::GetBool("security.sri.enable", false));
+  MOZ_ASSERT(aReporter);
 
   if (!aMetadata.IsValid()) {
-    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                    aDocument,
-                                    nsContentUtils::eSECURITY_PROPERTIES,
-                                    "NoValidMetadata");
+    nsTArray<nsString> params;
+    aReporter->AddConsoleReport(nsIScriptError::warningFlag,
+                                NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                                nsContentUtils::eSECURITY_PROPERTIES,
+                                aSourceFileURI, 0, 0,
+                                NS_LITERAL_CSTRING("NoValidMetadata"),
+                                const_cast<const nsTArray<nsString>&>(params));
     mInvalidMetadata = true;
     return; // ignore invalid metadata for forward-compatibility
   }
 
-  uint32_t hashLength;
-  aMetadata.GetHashType(&mHashType, &hashLength);
+  aMetadata.GetHashType(&mHashType, &mHashLength);
 }
 
 nsresult
@@ -298,9 +271,10 @@ SRICheckDataVerifier::Finish()
 nsresult
 SRICheckDataVerifier::VerifyHash(const SRIMetadata& aMetadata,
                                  uint32_t aHashIndex,
-                                 const nsIDocument* aDocument)
+                                 const nsACString& aSourceFileURI,
+                                 nsIConsoleReportCollector* aReporter)
 {
-  NS_ENSURE_ARG_POINTER(aDocument);
+  NS_ENSURE_ARG_POINTER(aReporter);
 
   nsAutoCString base64Hash;
   aMetadata.GetHash(aHashIndex, &base64Hash);
@@ -308,11 +282,13 @@ SRICheckDataVerifier::VerifyHash(const SRIMetadata& aMetadata,
 
   nsAutoCString binaryHash;
   if (NS_WARN_IF(NS_FAILED(Base64Decode(base64Hash, binaryHash)))) {
-    nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                    NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                    aDocument,
-                                    nsContentUtils::eSECURITY_PROPERTIES,
-                                    "InvalidIntegrityBase64");
+    nsTArray<nsString> params;
+    aReporter->AddConsoleReport(nsIScriptError::errorFlag,
+                                NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                                nsContentUtils::eSECURITY_PROPERTIES,
+                                aSourceFileURI, 0, 0,
+                                NS_LITERAL_CSTRING("InvalidIntegrityBase64"),
+                                const_cast<const nsTArray<nsString>&>(params));
     return NS_ERROR_SRI_CORRUPT;
   }
 
@@ -320,12 +296,23 @@ SRICheckDataVerifier::VerifyHash(const SRIMetadata& aMetadata,
   int8_t hashType;
   aMetadata.GetHashType(&hashType, &hashLength);
   if (binaryHash.Length() != hashLength) {
-    nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                    NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                    aDocument,
-                                    nsContentUtils::eSECURITY_PROPERTIES,
-                                    "InvalidIntegrityLength");
+    nsTArray<nsString> params;
+    aReporter->AddConsoleReport(nsIScriptError::errorFlag,
+                                NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                                nsContentUtils::eSECURITY_PROPERTIES,
+                                aSourceFileURI, 0, 0,
+                                NS_LITERAL_CSTRING("InvalidIntegrityLength"),
+                                const_cast<const nsTArray<nsString>&>(params));
     return NS_ERROR_SRI_CORRUPT;
+  }
+
+  if (MOZ_LOG_TEST(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug)) {
+    nsAutoCString encodedHash;
+    nsresult rv = Base64Encode(mComputedHash, encodedHash);
+    if (NS_SUCCEEDED(rv)) {
+      SRILOG(("SRICheckDataVerifier::VerifyHash, mComputedHash=%s",
+              encodedHash.get()));
+    }
   }
 
   if (!binaryHash.Equals(mComputedHash)) {
@@ -340,24 +327,28 @@ SRICheckDataVerifier::VerifyHash(const SRIMetadata& aMetadata,
 nsresult
 SRICheckDataVerifier::Verify(const SRIMetadata& aMetadata,
                              nsIChannel* aChannel,
-                             const CORSMode aCORSMode,
-                             const nsIDocument* aDocument)
+                             const nsACString& aSourceFileURI,
+                             nsIConsoleReportCollector* aReporter)
 {
-  NS_ENSURE_ARG_POINTER(aDocument);
+  NS_ENSURE_ARG_POINTER(aReporter);
 
-  if (MOZ_LOG_TEST(GetSriLog(), mozilla::LogLevel::Debug)) {
+  if (MOZ_LOG_TEST(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug)) {
     nsAutoCString requestURL;
     nsCOMPtr<nsIRequest> request;
     request = do_QueryInterface(aChannel);
     request->GetName(requestURL);
-    SRILOG(("SRICheckDataVerifier::Verify, url=%s (length=%lu)",
+    SRILOG(("SRICheckDataVerifier::Verify, url=%s (length=%zu)",
             requestURL.get(), mBytesHashed));
   }
 
   nsresult rv = Finish();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (NS_FAILED(IsEligible(aChannel, aCORSMode, aDocument))) {
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+  NS_ENSURE_TRUE(loadInfo, NS_ERROR_FAILURE);
+  LoadTainting tainting = loadInfo->GetTainting();
+
+  if (NS_FAILED(IsEligible(aChannel, tainting, aSourceFileURI, aReporter))) {
     return NS_ERROR_SRI_NOT_ELIGIBLE;
   }
 
@@ -366,7 +357,7 @@ SRICheckDataVerifier::Verify(const SRIMetadata& aMetadata,
   }
 
   for (uint32_t i = 0; i < aMetadata.HashCount(); i++) {
-    if (NS_SUCCEEDED(VerifyHash(aMetadata, i, aDocument))) {
+    if (NS_SUCCEEDED(VerifyHash(aMetadata, i, aSourceFileURI, aReporter))) {
       return NS_OK; // stop at the first valid hash
     }
   }
@@ -374,14 +365,148 @@ SRICheckDataVerifier::Verify(const SRIMetadata& aMetadata,
   nsAutoCString alg;
   aMetadata.GetAlgorithm(&alg);
   NS_ConvertUTF8toUTF16 algUTF16(alg);
-  const char16_t* params[] = { algUTF16.get() };
-  nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                  NS_LITERAL_CSTRING("Sub-resource Integrity"),
-                                  aDocument,
-                                  nsContentUtils::eSECURITY_PROPERTIES,
-                                  "IntegrityMismatch",
-                                  params, ArrayLength(params));
+  nsTArray<nsString> params;
+  params.AppendElement(algUTF16);
+  aReporter->AddConsoleReport(nsIScriptError::errorFlag,
+                              NS_LITERAL_CSTRING("Sub-resource Integrity"),
+                              nsContentUtils::eSECURITY_PROPERTIES,
+                              aSourceFileURI, 0, 0,
+                              NS_LITERAL_CSTRING("IntegrityMismatch"),
+                              const_cast<const nsTArray<nsString>&>(params));
   return NS_ERROR_SRI_CORRUPT;
+}
+
+uint32_t
+SRICheckDataVerifier::DataSummaryLength()
+{
+  MOZ_ASSERT(!mInvalidMetadata);
+  return sizeof(mHashType) + sizeof(mHashLength) + mHashLength;
+}
+
+uint32_t
+SRICheckDataVerifier::EmptyDataSummaryLength()
+{
+  return sizeof(int8_t) + sizeof(uint32_t);
+}
+
+nsresult
+SRICheckDataVerifier::DataSummaryLength(uint32_t aDataLen, const uint8_t* aData, uint32_t* length)
+{
+  *length = 0;
+  NS_ENSURE_ARG_POINTER(aData);
+
+  // we expect to always encode an SRI, even if it is empty or incomplete
+  if (aDataLen < EmptyDataSummaryLength()) {
+    SRILOG(("SRICheckDataVerifier::DataSummaryLength, encoded length[%u] is too small", aDataLen));
+    return NS_ERROR_SRI_IMPORT;
+  }
+
+  // decode the content of the buffer
+  size_t offset = sizeof(mHashType);
+  decltype(mHashLength) len = 0;
+  memcpy(&len, &aData[offset], sizeof(mHashLength));
+  offset += sizeof(mHashLength);
+
+  SRIVERBOSE(("SRICheckDataVerifier::DataSummaryLength, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
+  if (offset + len > aDataLen) {
+    SRILOG(("SRICheckDataVerifier::DataSummaryLength, encoded length[%u] overflow the buffer size", aDataLen));
+    SRIVERBOSE(("SRICheckDataVerifier::DataSummaryLength, offset[%u], len[%u]",
+                uint32_t(offset), uint32_t(len)));
+    return NS_ERROR_SRI_IMPORT;
+  }
+  *length = uint32_t(offset + len);
+  return NS_OK;
+}
+
+nsresult
+SRICheckDataVerifier::ImportDataSummary(uint32_t aDataLen, const uint8_t* aData)
+{
+  MOZ_ASSERT(!mInvalidMetadata); // mHashType and mHashLength should be valid
+  MOZ_ASSERT(!mCryptoHash); // EnsureCryptoHash should not have been called
+  NS_ENSURE_ARG_POINTER(aData);
+  if (mInvalidMetadata) {
+    return NS_OK; // ignoring any data updates, see mInvalidMetadata usage
+  }
+
+  // we expect to always encode an SRI, even if it is empty or incomplete
+  if (aDataLen < DataSummaryLength()) {
+    SRILOG(("SRICheckDataVerifier::ImportDataSummary, encoded length[%u] is too small", aDataLen));
+    return NS_ERROR_SRI_IMPORT;
+  }
+
+  SRIVERBOSE(("SRICheckDataVerifier::ImportDataSummary, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
+  // decode the content of the buffer
+  size_t offset = 0;
+  decltype(mHashType) hashType;
+  memcpy(&hashType, &aData[offset], sizeof(mHashType));
+  if (hashType != mHashType) {
+    SRILOG(("SRICheckDataVerifier::ImportDataSummary, hash type[%d] does not match[%d]",
+            hashType, mHashType));
+    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
+  }
+  offset += sizeof(mHashType);
+
+  decltype(mHashLength) hashLength;
+  memcpy(&hashLength, &aData[offset], sizeof(mHashLength));
+  if (hashLength != mHashLength) {
+    SRILOG(("SRICheckDataVerifier::ImportDataSummary, hash length[%d] does not match[%d]",
+            hashLength, mHashLength));
+    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
+  }
+  offset += sizeof(mHashLength);
+
+  // copy the hash to mComputedHash, as-if we had finished streaming the bytes
+  mComputedHash.Assign(reinterpret_cast<const char*>(&aData[offset]), mHashLength);
+  mCryptoHash = nullptr;
+  mComplete = true;
+  return NS_OK;
+}
+
+nsresult
+SRICheckDataVerifier::ExportDataSummary(uint32_t aDataLen, uint8_t* aData)
+{
+  MOZ_ASSERT(!mInvalidMetadata); // mHashType and mHashLength should be valid
+  MOZ_ASSERT(mComplete); // finished streaming
+  NS_ENSURE_ARG_POINTER(aData);
+  NS_ENSURE_TRUE(aDataLen >= DataSummaryLength(), NS_ERROR_INVALID_ARG);
+
+  // serialize the hash in the buffer
+  size_t offset = 0;
+  memcpy(&aData[offset], &mHashType, sizeof(mHashType));
+  offset += sizeof(mHashType);
+  memcpy(&aData[offset], &mHashLength, sizeof(mHashLength));
+  offset += sizeof(mHashLength);
+
+  SRIVERBOSE(("SRICheckDataVerifier::ExportDataSummary, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
+  // copy the hash to mComputedHash, as-if we had finished streaming the bytes
+  nsCharTraits<char>::copy(reinterpret_cast<char*>(&aData[offset]),
+                           mComputedHash.get(), mHashLength);
+  return NS_OK;
+}
+
+nsresult
+SRICheckDataVerifier::ExportEmptyDataSummary(uint32_t aDataLen, uint8_t* aData)
+{
+  NS_ENSURE_ARG_POINTER(aData);
+  NS_ENSURE_TRUE(aDataLen >= EmptyDataSummaryLength(), NS_ERROR_INVALID_ARG);
+
+  // serialize an unknown hash in the buffer, to be able to skip it later
+  size_t offset = 0;
+  memset(&aData[offset], 0, sizeof(mHashType));
+  offset += sizeof(mHashType);
+  memset(&aData[offset], 0, sizeof(mHashLength));
+  offset += sizeof(mHashLength);
+
+  SRIVERBOSE(("SRICheckDataVerifier::ExportEmptyDataSummary, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
+  return NS_OK;
 }
 
 } // namespace dom

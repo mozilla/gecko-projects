@@ -7,14 +7,17 @@
 #define MOZSTORAGEHELPER_H
 
 #include "nsAutoPtr.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "mozilla/DebugOnly.h"
+#include "nsIConsoleService.h"
+#include "nsIScriptError.h"
 
 #include "mozIStorageAsyncConnection.h"
 #include "mozIStorageConnection.h"
 #include "mozIStorageStatement.h"
 #include "mozIStoragePendingStatement.h"
 #include "nsError.h"
+#include "nsIXPConnect.h"
 
 /**
  * This class wraps a transaction inside a given C++ scope, guaranteeing that
@@ -36,8 +39,8 @@
  *        Controls whether the transaction is committed or rolled back when
  *        this object goes out of scope.
  * @param aType [optional]
- *        The transaction type, as defined in mozIStorageConnection.  Defaults
- *        to TRANSACTION_DEFERRED.
+ *        The transaction type, as defined in mozIStorageConnection. Uses the
+ *        default transaction behavior for the connection if unspecified.
  * @param aAsyncCommit [optional]
  *        Whether commit should be executed asynchronously on the helper thread.
  *        This is a special option introduced as an interim solution to reduce
@@ -60,7 +63,7 @@ class mozStorageTransaction
 public:
   mozStorageTransaction(mozIStorageConnection* aConnection,
                         bool aCommitOnComplete,
-                        int32_t aType = mozIStorageConnection::TRANSACTION_DEFERRED,
+                        int32_t aType = mozIStorageConnection::TRANSACTION_DEFAULT,
                         bool aAsyncCommit = false)
     : mConnection(aConnection),
       mHasTransaction(false),
@@ -70,7 +73,11 @@ public:
   {
     if (mConnection) {
       nsAutoCString query("BEGIN");
-      switch(aType) {
+      int32_t type = aType;
+      if (type == mozIStorageConnection::TRANSACTION_DEFAULT) {
+        MOZ_ALWAYS_SUCCEEDS(mConnection->GetDefaultTransactionType(&type));
+      }
+      switch (type) {
         case mozIStorageConnection::TRANSACTION_IMMEDIATE:
           query.AppendLiteral(" IMMEDIATE");
           break;
@@ -94,13 +101,13 @@ public:
     if (mConnection && mHasTransaction && !mCompleted) {
       if (mCommitOnComplete) {
         mozilla::DebugOnly<nsresult> rv = Commit();
-        NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
-                         "A transaction didn't commit correctly");
+        NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                             "A transaction didn't commit correctly");
       }
       else {
         mozilla::DebugOnly<nsresult> rv = Rollback();
-        NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
-                         "A transaction didn't rollback correctly");
+        NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                             "A transaction didn't rollback correctly");
       }
     }
   }

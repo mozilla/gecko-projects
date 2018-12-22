@@ -4,23 +4,16 @@
 
 "use strict";
 
-const { Cc, Ci, Cu } = require("chrome");
+const { Ci } = require("chrome");
 
+const InspectorUtils = require("InspectorUtils");
 const Services = require("Services");
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const ChromeUtils = require("ChromeUtils");
 
-const events = require("sdk/event/core");
-const protocol = require("devtools/server/protocol");
-const { method, custom, RetVal, Arg } = protocol;
+const protocol = require("devtools/shared/protocol");
+const { cssUsageSpec } = require("devtools/shared/specs/csscoverage");
 
-loader.lazyGetter(this, "DOMUtils", () => {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils)
-});
-loader.lazyRequireGetter(this, "stylesheets", "devtools/server/actors/stylesheets");
-loader.lazyRequireGetter(this, "CssLogic", "devtools/shared/inspector/css-logic", true);
-loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
-
-const CSSRule = Ci.nsIDOMCSSRule;
+loader.lazyRequireGetter(this, "prettifyCSS", "devtools/shared/inspector/css-logic", true);
 
 const MAX_UNUSED_RULES = 10000;
 
@@ -68,31 +61,21 @@ const l10n = exports.l10n = {
  *       }, ...
  *     });
  */
-var CSSUsageActor = protocol.ActorClass({
-  typeName: "cssUsage",
-
-  events: {
-    "state-change" : {
-      type: "stateChange",
-      stateChange: Arg(0, "json")
-    }
-  },
-
-  initialize: function(conn, tabActor) {
+var CSSUsageActor = protocol.ActorClassWithSpec(cssUsageSpec, {
+  initialize: function(conn, targetActor) {
     protocol.Actor.prototype.initialize.call(this, conn);
 
-    this._tabActor = tabActor;
+    this._targetActor = targetActor;
     this._running = false;
 
     this._onTabLoad = this._onTabLoad.bind(this);
     this._onChange = this._onChange.bind(this);
 
-    this._notifyOn = Ci.nsIWebProgress.NOTIFY_STATUS |
-                     Ci.nsIWebProgress.NOTIFY_STATE_ALL
+    this._notifyOn = Ci.nsIWebProgress.NOTIFY_STATE_ALL;
   },
 
   destroy: function() {
-    this._tabActor = undefined;
+    this._targetActor = undefined;
 
     delete this._onTabLoad;
     delete this._onChange;
@@ -107,7 +90,7 @@ var CSSUsageActor = protocol.ActorClass({
    * why we don't want to do that (e.g. the page contains state that will be
    * lost across a reload)
    */
-  start: method(function(noreload) {
+  start: function(noreload) {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -119,47 +102,40 @@ var CSSUsageActor = protocol.ActorClass({
     this._tooManyUnused = false;
 
     this._progressListener = {
-      QueryInterface: XPCOMUtils.generateQI([ Ci.nsIWebProgressListener,
-                                              Ci.nsISupportsWeakReference ]),
+      QueryInterface: ChromeUtils.generateQI([ Ci.nsIWebProgressListener,
+                                               Ci.nsISupportsWeakReference ]),
 
       onStateChange: (progress, request, flags, status) => {
-        let isStop = flags & Ci.nsIWebProgressListener.STATE_STOP;
-        let isWindow = flags & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
+        const isStop = flags & Ci.nsIWebProgressListener.STATE_STOP;
+        const isWindow = flags & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
 
         if (isStop && isWindow) {
           this._onTabLoad(progress.DOMWindow.document);
         }
       },
 
-      onLocationChange: () => {},
-      onProgressChange: () => {},
-      onSecurityChange: () => {},
-      onStatusChange: () => {},
       destroy: () => {}
     };
 
-    this._progress = this._tabActor.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+    this._progress = this._targetActor.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                                             .getInterface(Ci.nsIWebProgress);
     this._progress.addProgressListener(this._progressListener, this._notifyOn);
 
     if (noreload) {
       // If we're not starting by reloading the page, then pretend that onload
       // has just happened.
-      this._onTabLoad(this._tabActor.window.document);
-    }
-    else {
-      this._tabActor.window.location.reload();
+      this._onTabLoad(this._targetActor.window.document);
+    } else {
+      this._targetActor.window.location.reload();
     }
 
-    events.emit(this, "state-change", { isRunning: true });
-  }, {
-    request: { url: Arg(0, "boolean") }
-  }),
+    this.emit("state-change", { isRunning: true });
+  },
 
   /**
    * Cease recording usage data
    */
-  stop: method(function() {
+  stop: function() {
     if (!this._running) {
       throw new Error(l10n.lookup("csscoverageNotRunningError"));
     }
@@ -168,21 +144,21 @@ var CSSUsageActor = protocol.ActorClass({
     this._progress = undefined;
 
     this._running = false;
-    events.emit(this, "state-change", { isRunning: false });
-  }),
+    this.emit("state-change", { isRunning: false });
+  },
 
   /**
    * Start/stop recording usage data depending on what we're currently doing.
    */
-  toggle: method(function() {
+  toggle: function() {
     return this._running ? this.stop() : this.start();
-  }),
+  },
 
   /**
    * Running start() quickly followed by stop() does a bunch of unnecessary
    * work, so this cuts all that out
    */
-  oneshot: method(function() {
+  oneshot: function() {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -191,9 +167,9 @@ var CSSUsageActor = protocol.ActorClass({
     this._visitedPages = new Set();
     this._knownRules = new Map();
 
-    this._populateKnownRules(this._tabActor.window.document);
-    this._updateUsage(this._tabActor.window.document, false);
-  }),
+    this._populateKnownRules(this._targetActor.window.document);
+    this._updateUsage(this._targetActor.window.document, false);
+  },
 
   /**
    * Called by the ProgressListener to simulate a "load" event
@@ -209,8 +185,8 @@ var CSSUsageActor = protocol.ActorClass({
    * Setup a MutationObserver on the current document
    */
   _observeMutations: function(document) {
-    let MutationObserver = document.defaultView.MutationObserver;
-    let observer = new MutationObserver(mutations => {
+    const MutationObserver = document.defaultView.MutationObserver;
+    const observer = new MutationObserver(mutations => {
       // It's possible that one of the mutations in this list adds a 'use' of
       // a CSS rule, and another takes it away. See Bug 1010189
       this._onChange(document);
@@ -241,22 +217,22 @@ var CSSUsageActor = protocol.ActorClass({
    * we can update the list of rules that we should be checking
    */
   _populateKnownRules: function(document) {
-    let url = getURL(document);
+    const url = getURL(document);
     this._visitedPages.add(url);
     // Go through all the rules in the current sheets adding them to knownRules
     // if needed and adding the current url to the list of pages they're on
-    for (let rule of getAllSelectorRules(document)) {
-      let ruleId = ruleToId(rule);
+    for (const rule of getAllSelectorRules(document)) {
+      const ruleId = ruleToId(rule);
       let ruleData = this._knownRules.get(ruleId);
       if (ruleData == null) {
         ruleData = {
-           selectorText: rule.selectorText,
-           cssText: rule.cssText,
-           test: getTestSelector(rule.selectorText),
-           isUsed: false,
-           presentOn: new Set(),
-           preLoadOn: new Set(),
-           isError: false
+          selectorText: rule.selectorText,
+          cssText: rule.cssText,
+          test: getTestSelector(rule.selectorText),
+          isUsed: false,
+          presentOn: new Set(),
+          preLoadOn: new Set(),
+          isError: false
         };
         this._knownRules.set(ruleId, ruleData);
       }
@@ -272,9 +248,9 @@ var CSSUsageActor = protocol.ActorClass({
     let qsaCount = 0;
 
     // Update this._data with matches to say 'used at load time' by sheet X
-    let url = getURL(document);
+    const url = getURL(document);
 
-    for (let [ , ruleData ] of this._knownRules) {
+    for (const [ , ruleData ] of this._knownRules) {
       // If it broke before, don't try again selectors don't change
       if (ruleData.isError) {
         continue;
@@ -299,15 +275,14 @@ var CSSUsageActor = protocol.ActorClass({
       }
 
       try {
-        let match = document.querySelector(ruleData.test);
+        const match = document.querySelector(ruleData.test);
         if (match != null) {
           ruleData.isUsed = true;
           if (isLoad) {
             ruleData.preLoadOn.add(url);
           }
         }
-      }
-      catch (ex) {
+      } catch (ex) {
         ruleData.isError = true;
       }
     }
@@ -326,19 +301,19 @@ var CSSUsageActor = protocol.ActorClass({
    *     ...
    *   ]
    */
-  createEditorReport: method(function(url) {
+  createEditorReport: function(url) {
     if (this._knownRules == null) {
       return { reports: [] };
     }
 
-    let reports = [];
-    for (let [ruleId, ruleData] of this._knownRules) {
-      let { url: ruleUrl, line, column } = deconstructRuleId(ruleId);
+    const reports = [];
+    for (const [ruleId, ruleData] of this._knownRules) {
+      const { url: ruleUrl, line, column } = deconstructRuleId(ruleId);
       if (ruleUrl !== url || ruleData.isUsed) {
         continue;
       }
 
-      let ruleReport = {
+      const ruleReport = {
         selectorText: ruleData.selectorText,
         start: { line: line, column: column }
       };
@@ -351,10 +326,19 @@ var CSSUsageActor = protocol.ActorClass({
     }
 
     return { reports: reports };
-  }, {
-    request: { url: Arg(0, "string") },
-    response: { reports: RetVal("array:json") }
-  }),
+  },
+
+  /**
+   * Compute the stylesheet URL and delegate the report creation to createEditorReport.
+   * See createEditorReport documentation.
+   *
+   * @param {StyleSheetActor} stylesheetActor
+   *        the stylesheet actor for which the coverage report should be generated.
+   */
+  createEditorReportForSheet: function(stylesheetActor) {
+    const url = sheetToUrl(stylesheetActor.rawSheet);
+    return this.createEditorReport(url);
+  },
 
   /**
    * Returns a JSONable structure designed for the page report which shows
@@ -391,7 +375,7 @@ var CSSUsageActor = protocol.ActorClass({
    *     ]
    *   }
    */
-  createPageReport: method(function() {
+  createPageReport: function() {
     if (this._running) {
       throw new Error(l10n.lookup("csscoverageRunningError"));
     }
@@ -411,32 +395,31 @@ var CSSUsageActor = protocol.ActorClass({
         shortUrl: rule.url.split("/").slice(-1)[0],
         start: { line: rule.line, column: rule.column },
         selectorText: ruleData.selectorText,
-        formattedCssText: CssLogic.prettifyCSS(ruleData.cssText)
+        formattedCssText: prettifyCSS(ruleData.cssText)
       };
-    }
+    };
 
     // A count of each type of rule for the bar chart
-    let summary = { used: 0, unused: 0, preload: 0 };
+    const summary = { used: 0, unused: 0, preload: 0 };
 
     // Create the set of the unused rules
-    let unusedMap = new Map();
-    for (let [ruleId, ruleData] of this._knownRules) {
-      let rule = deconstructRuleId(ruleId);
-      let rules = unusedMap.get(rule.url)
+    const unusedMap = new Map();
+    for (const [ruleId, ruleData] of this._knownRules) {
+      const rule = deconstructRuleId(ruleId);
+      let rules = unusedMap.get(rule.url);
       if (rules == null) {
         rules = [];
         unusedMap.set(rule.url, rules);
       }
       if (!ruleData.isUsed) {
-        let ruleReport = ruleToRuleReport(rule, ruleData);
+        const ruleReport = ruleToRuleReport(rule, ruleData);
         rules.push(ruleReport);
-      }
-      else {
+      } else {
         summary.unused++;
       }
     }
-    let unused = [];
-    for (let [url, rules] of unusedMap) {
+    const unused = [];
+    for (const [url, rules] of unusedMap) {
       unused.push({
         url: url,
         shortUrl: url.split("/").slice(-1),
@@ -445,22 +428,21 @@ var CSSUsageActor = protocol.ActorClass({
     }
 
     // Create the set of rules that could be pre-loaded
-    let preload = [];
-    for (let url of this._visitedPages) {
-      let page = {
+    const preload = [];
+    for (const url of this._visitedPages) {
+      const page = {
         url: url,
         shortUrl: url.split("/").slice(-1),
         rules: []
       };
 
-      for (let [ruleId, ruleData] of this._knownRules) {
+      for (const [ruleId, ruleData] of this._knownRules) {
         if (ruleData.preLoadOn.has(url)) {
-          let rule = deconstructRuleId(ruleId);
-          let ruleReport = ruleToRuleReport(rule, ruleData);
+          const rule = deconstructRuleId(ruleId);
+          const ruleReport = ruleToRuleReport(rule, ruleData);
           page.rules.push(ruleReport);
           summary.preload++;
-        }
-        else {
+        } else {
           summary.used++;
         }
       }
@@ -475,18 +457,14 @@ var CSSUsageActor = protocol.ActorClass({
       preload: preload,
       unused: unused
     };
-  }, {
-    response: RetVal("json")
-  }),
+  },
 
   /**
    * For testing only. What pages did we visit.
    */
-  _testOnly_visitedPages: method(function() {
+  _testOnlyVisitedPages: function() {
     return [...this._visitedPages];
-  }, {
-    response: { value: RetVal("array:string") }
-  }),
+  },
 });
 
 exports.CSSUsageActor = CSSUsageActor;
@@ -496,7 +474,7 @@ exports.CSSUsageActor = CSSUsageActor;
  * iterates over the CSSStyleRules
  */
 function* getAllSelectorRules(document) {
-  for (let rule of getAllRules(document)) {
+  for (const rule of getAllRules(document)) {
     if (rule.type === CSSRule.STYLE_RULE && rule.selectorText !== "") {
       yield rule;
     }
@@ -509,7 +487,7 @@ function* getAllSelectorRules(document) {
  */
 function* getAllRules(document) {
   // sheets is an array of the <link> and <style> element in this document
-  let sheets = getAllSheets(document);
+  const sheets = getAllSheets(document);
   for (let i = 0; i < sheets.length; i++) {
     for (let j = 0; j < sheets[i].cssRules.length; j++) {
       yield sheets[i].cssRules[j];
@@ -527,7 +505,7 @@ function getAllSheets(document) {
   let sheets = Array.slice(document.styleSheets);
   // Add @imported sheets
   for (let i = 0; i < sheets.length; i++) {
-    let subSheets = getImportedSheets(sheets[i]);
+    const subSheets = getImportedSheets(sheets[i]);
     sheets = sheets.concat(...subSheets);
   }
   return sheets;
@@ -541,11 +519,11 @@ function getAllSheets(document) {
 function getImportedSheets(stylesheet) {
   let sheets = [];
   for (let i = 0; i < stylesheet.cssRules.length; i++) {
-    let rule = stylesheet.cssRules[i];
+    const rule = stylesheet.cssRules[i];
     // rule.styleSheet == null with duplicate @imports for the same URL.
     if (rule.type === CSSRule.IMPORT_RULE && rule.styleSheet != null) {
       sheets.push(rule.styleSheet);
-      let subSheets = getImportedSheets(rule.styleSheet);
+      const subSheets = getImportedSheets(rule.styleSheet);
       sheets = sheets.concat(...subSheets);
     }
   }
@@ -558,8 +536,8 @@ function getImportedSheets(stylesheet) {
  * @see deconstructRuleId(ruleId)
  */
 function ruleToId(rule) {
-  let line = DOMUtils.getRelativeRuleLine(rule);
-  let column = DOMUtils.getRuleColumn(rule);
+  const line = InspectorUtils.getRelativeRuleLine(rule);
+  const column = InspectorUtils.getRuleColumn(rule);
   return sheetToUrl(rule.parentStyleSheet) + "|" + line + "|" + column;
 }
 
@@ -568,12 +546,12 @@ function ruleToId(rule) {
  * @see ruleToId(rule)
  */
 const deconstructRuleId = exports.deconstructRuleId = function(ruleId) {
-  let split = ruleId.split("|");
+  const split = ruleId.split("|");
   if (split.length > 3) {
-    let replace = split.slice(0, split.length - 3 + 1).join("|");
+    const replace = split.slice(0, split.length - 3 + 1).join("|");
     split.splice(0, split.length - 3 + 1, replace);
   }
-  let [ url, line, column ] = split;
+  const [ url, line, column ] = split;
   return {
     url: url,
     line: parseInt(line, 10),
@@ -588,8 +566,8 @@ const deconstructRuleId = exports.deconstructRuleId = function(ruleId) {
  * @param document
  */
 const getURL = exports.getURL = function(document) {
-  let url = new document.defaultView.URL(document.documentURI);
-  return url == 'about:blank' ? '' : '' + url.origin + url.pathname;
+  const url = new document.defaultView.URL(document.documentURI);
+  return url == "about:blank" ? "" : "" + url.origin + url.pathname;
 };
 
 /**
@@ -610,7 +588,7 @@ const getURL = exports.getURL = function(document) {
  */
 const SEL_EXTERNAL = [
   "active", "active-drop", "current", "dir", "focus", "future", "hover",
-  "invalid-drop",  "lang", "past", "placeholder-shown", "target", "valid-drop",
+  "invalid-drop", "lang", "past", "placeholder-shown", "target", "valid-drop",
   "visited"
 ];
 
@@ -684,7 +662,7 @@ const SEL_MEDIA = [ "blank", "first", "left", "right" ];
  */
 function getTestSelector(selector) {
   let replacement = selector;
-  let replaceSelector = pseudo => {
+  const replaceSelector = pseudo => {
     replacement = replacement.replace(" :" + pseudo, " *")
                              .replace("(:" + pseudo, "(*")
                              .replace(":" + pseudo, "");
@@ -711,12 +689,15 @@ function getTestSelector(selector) {
 exports.SEL_ALL = [
   SEL_EXTERNAL, SEL_FORM, SEL_ELEMENT, SEL_STRUCTURAL, SEL_SEMI,
   SEL_COMBINING, SEL_MEDIA
-].reduce(function(prev, curr) { return prev.concat(curr); }, []);
+].reduce(function(prev, curr) {
+  return prev.concat(curr);
+}, []);
 
 /**
  * Find a URL for a given stylesheet
+ * @param {StyleSheet} stylesheet raw stylesheet
  */
-const sheetToUrl = exports.sheetToUrl = function(stylesheet) {
+const sheetToUrl = function(stylesheet) {
   // For <link> elements
   if (stylesheet.href) {
     return stylesheet.href;
@@ -724,117 +705,11 @@ const sheetToUrl = exports.sheetToUrl = function(stylesheet) {
 
   // For <style> elements
   if (stylesheet.ownerNode) {
-    let document = stylesheet.ownerNode.ownerDocument;
-    let sheets = [...document.querySelectorAll("style")];
-    let index = sheets.indexOf(stylesheet.ownerNode);
-    return getURL(document) + ' → <style> index ' + index;
+    const document = stylesheet.ownerNode.ownerDocument;
+    const sheets = [...document.querySelectorAll("style")];
+    const index = sheets.indexOf(stylesheet.ownerNode);
+    return getURL(document) + " → <style> index " + index;
   }
 
   throw new Error("Unknown sheet source");
-}
-
-/**
- * Running more than one usage report at a time is probably bad for performance
- * and it isn't particularly useful, and it's confusing from a notification POV
- * so we only allow one.
- */
-var isRunning = false;
-var notification;
-var target;
-var chromeWindow;
-
-/**
- * Front for CSSUsageActor
- */
-const CSSUsageFront = protocol.FrontClass(CSSUsageActor, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
-    this.actorID = form.cssUsageActor;
-    this.manage(this);
-  },
-
-  _onStateChange: protocol.preEvent("state-change", function(ev) {
-    isRunning = ev.isRunning;
-    ev.target = target;
-
-    if (isRunning) {
-      let gnb = chromeWindow.document.getElementById("global-notificationbox");
-      notification = gnb.getNotificationWithValue("csscoverage-running");
-
-      if (notification == null) {
-        let notifyStop = reason => {
-          if (reason == "removed") {
-            this.stop();
-          }
-        };
-
-        let msg = l10n.lookup("csscoverageRunningReply");
-        notification = gnb.appendNotification(msg, "csscoverage-running",
-                                              "", // i.e. no image
-                                              gnb.PRIORITY_INFO_HIGH,
-                                              null, // i.e. no buttons
-                                              notifyStop);
-      }
-    }
-    else {
-      if (notification) {
-        notification.remove();
-        notification = undefined;
-      }
-
-      gDevTools.showToolbox(target, "styleeditor");
-      target = undefined;
-    }
-  }),
-
-  /**
-   * Server-side start is above. Client-side start adds a notification box
-   */
-  start: custom(function(newChromeWindow, newTarget, noreload=false) {
-    target = newTarget;
-    chromeWindow = newChromeWindow;
-
-    return this._start(noreload);
-  }, {
-    impl: "_start"
-  }),
-
-  /**
-   * Server-side start is above. Client-side start adds a notification box
-   */
-  toggle: custom(function(newChromeWindow, newTarget) {
-    target = newTarget;
-    chromeWindow = newChromeWindow;
-
-    return this._toggle();
-  }, {
-    impl: "_toggle"
-  }),
-
-  /**
-   * We count STARTING and STOPPING as 'running'
-   */
-  isRunning: function() {
-    return isRunning;
-  }
-});
-
-exports.CSSUsageFront = CSSUsageFront;
-
-const knownFronts = new WeakMap();
-
-/**
- * Create a CSSUsageFront only when needed (returns a promise)
- * For notes on target.makeRemote(), see
- * https://bugzilla.mozilla.org/show_bug.cgi?id=1016330#c7
- */
-const getUsage = exports.getUsage = function(target) {
-  return target.makeRemote().then(() => {
-    let front = knownFronts.get(target.client)
-    if (front == null && target.form.cssUsageActor != null) {
-      front = new CSSUsageFront(target.client, target.form);
-      knownFronts.set(target.client, front);
-    }
-    return front;
-  });
 };

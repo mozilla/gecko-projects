@@ -95,7 +95,7 @@ struct ReturnSuccess
 {
 };
 
-struct ReturnStopIteration
+struct ReturnDeadCPOW
 {
 };
 
@@ -112,7 +112,7 @@ struct ReturnObjectOpResult
 union ReturnStatus
 {
     ReturnSuccess;
-    ReturnStopIteration;
+    ReturnDeadCPOW;
     ReturnException;
     ReturnObjectOpResult;
 };

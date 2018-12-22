@@ -8,9 +8,11 @@
 #define mozilla_AsyncEventDispatcher_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/dom/Event.h"
 #include "nsCOMPtr.h"
 #include "nsIDocument.h"
-#include "nsIDOMEvent.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 
@@ -25,7 +27,7 @@ namespace mozilla {
  * the wrong time, in order to avoid resulting instability.
  */
 
-class AsyncEventDispatcher : public nsCancelableRunnable
+class AsyncEventDispatcher : public CancelableRunnable
 {
 public:
   /**
@@ -34,42 +36,96 @@ public:
    * the event is dispatched to it, otherwise the dispatch path starts
    * at the first chrome ancestor of that target.
    */
-  AsyncEventDispatcher(nsINode* aTarget, const nsAString& aEventType,
-                       bool aBubbles, bool aOnlyChromeDispatch)
-    : mTarget(aTarget)
+  AsyncEventDispatcher(nsINode* aTarget,
+                       const nsAString& aEventType,
+                       CanBubble aCanBubble,
+                       ChromeOnlyDispatch aOnlyChromeDispatch,
+                       Composed aComposed = Composed::eDefault)
+    : CancelableRunnable("AsyncEventDispatcher")
+    , mTarget(aTarget)
     , mEventType(aEventType)
-    , mBubbles(aBubbles)
+    , mEventMessage(eUnidentifiedEvent)
+    , mCanBubble(aCanBubble)
+    , mOnlyChromeDispatch(aOnlyChromeDispatch)
+    , mComposed(aComposed)
+  {
+  }
+
+  /**
+   * If aOnlyChromeDispatch is true, the event is dispatched to only
+   * chrome node. In that case, if aTarget is already a chrome node,
+   * the event is dispatched to it, otherwise the dispatch path starts
+   * at the first chrome ancestor of that target.
+   */
+  AsyncEventDispatcher(nsINode* aTarget,
+                       mozilla::EventMessage aEventMessage,
+                       CanBubble aCanBubble,
+                       ChromeOnlyDispatch aOnlyChromeDispatch)
+    : CancelableRunnable("AsyncEventDispatcher")
+    , mTarget(aTarget)
+    , mEventMessage(aEventMessage)
+    , mCanBubble(aCanBubble)
     , mOnlyChromeDispatch(aOnlyChromeDispatch)
   {
+    mEventType.SetIsVoid(true);
+    MOZ_ASSERT(mEventMessage != eUnidentifiedEvent);
   }
 
-  AsyncEventDispatcher(dom::EventTarget* aTarget, const nsAString& aEventType,
-                       bool aBubbles)
-    : mTarget(aTarget)
+  AsyncEventDispatcher(dom::EventTarget* aTarget,
+                       const nsAString& aEventType,
+                       CanBubble aCanBubble)
+    : CancelableRunnable("AsyncEventDispatcher")
+    , mTarget(aTarget)
     , mEventType(aEventType)
-    , mBubbles(aBubbles)
+    , mEventMessage(eUnidentifiedEvent)
+    , mCanBubble(aCanBubble)
   {
   }
 
-  AsyncEventDispatcher(dom::EventTarget* aTarget, nsIDOMEvent* aEvent)
-    : mTarget(aTarget)
+  AsyncEventDispatcher(dom::EventTarget* aTarget,
+                       mozilla::EventMessage aEventMessage,
+                       CanBubble aCanBubble)
+    : CancelableRunnable("AsyncEventDispatcher")
+    , mTarget(aTarget)
+    , mEventMessage(aEventMessage)
+    , mCanBubble(aCanBubble)
+  {
+    mEventType.SetIsVoid(true);
+    MOZ_ASSERT(mEventMessage != eUnidentifiedEvent);
+  }
+
+  AsyncEventDispatcher(dom::EventTarget* aTarget, dom::Event* aEvent)
+    : CancelableRunnable("AsyncEventDispatcher")
+    , mTarget(aTarget)
     , mEvent(aEvent)
+    , mEventMessage(eUnidentifiedEvent)
   {
   }
 
   AsyncEventDispatcher(dom::EventTarget* aTarget, WidgetEvent& aEvent);
 
   NS_IMETHOD Run() override;
-  NS_IMETHOD Cancel() override;
+  nsresult Cancel() override;
   nsresult PostDOMEvent();
   void RunDOMEventWhenSafe();
 
+  // Calling this causes the Run() method to check that
+  // mTarget->IsInComposedDoc(). mTarget must be an nsINode or else we'll
+  // assert.
+  void RequireNodeInDocument();
+
   nsCOMPtr<dom::EventTarget> mTarget;
-  nsCOMPtr<nsIDOMEvent> mEvent;
+  RefPtr<dom::Event> mEvent;
+  // If mEventType is set, mEventMessage will be eUnidentifiedEvent.
+  // If mEventMessage is set, mEventType will be void.
+  // They can never both be set at the same time.
   nsString              mEventType;
-  bool                  mBubbles = false;
-  bool                  mOnlyChromeDispatch = false;
+  EventMessage          mEventMessage;
+  CanBubble             mCanBubble = CanBubble::eNo;
+  ChromeOnlyDispatch    mOnlyChromeDispatch = ChromeOnlyDispatch::eNo;
+  Composed              mComposed = Composed::eDefault;
   bool                  mCanceled = false;
+  bool                  mCheckStillInDoc = false;
 };
 
 class LoadBlockingAsyncEventDispatcher final : public AsyncEventDispatcher
@@ -77,9 +133,12 @@ class LoadBlockingAsyncEventDispatcher final : public AsyncEventDispatcher
 public:
   LoadBlockingAsyncEventDispatcher(nsINode* aEventNode,
                                    const nsAString& aEventType,
-                                   bool aBubbles, bool aDispatchChromeOnly)
-    : AsyncEventDispatcher(aEventNode, aEventType,
-                           aBubbles, aDispatchChromeOnly)
+                                   CanBubble aBubbles,
+                                   ChromeOnlyDispatch aDispatchChromeOnly)
+    : AsyncEventDispatcher(aEventNode,
+                           aEventType,
+                           aBubbles,
+                           aDispatchChromeOnly)
     , mBlockedDoc(aEventNode->OwnerDoc())
   {
     if (mBlockedDoc) {
@@ -87,7 +146,7 @@ public:
     }
   }
 
-  LoadBlockingAsyncEventDispatcher(nsINode* aEventNode, nsIDOMEvent* aEvent)
+  LoadBlockingAsyncEventDispatcher(nsINode* aEventNode, dom::Event* aEvent)
     : AsyncEventDispatcher(aEventNode, aEvent)
     , mBlockedDoc(aEventNode->OwnerDoc())
   {

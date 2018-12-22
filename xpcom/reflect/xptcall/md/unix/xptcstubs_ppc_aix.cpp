@@ -6,13 +6,12 @@
 /* Implement shared vtbl methods. */
 
 #include "xptcprivate.h"
-#include "xptiprivate.h"
 
 #if defined(AIX)
 
 /*
-        For PPC (AIX & MAC), the first 8 integral and the first 13 f.p. parameters 
-        arrive in a separate chunk of data that has been loaded from the registers. 
+        For PPC (AIX & MAC), the first 8 integral and the first 13 f.p. parameters
+        arrive in a separate chunk of data that has been loaded from the registers.
         The args pointer has been set to the start of the parameters BEYOND the ones
         arriving in registers
 */
@@ -25,7 +24,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args, u
     } DU;               // stack slots are not guaranteed 16 byte aligned
 
 #define PARAM_BUFFER_COUNT     16
-#define PARAM_GPR_COUNT         7  
+#define PARAM_GPR_COUNT         7
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
     nsXPTCMiniVariant* dispatchParams = nullptr;

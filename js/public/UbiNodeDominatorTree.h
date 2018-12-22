@@ -7,13 +7,13 @@
 #ifndef js_UbiNodeDominatorTree_h
 #define js_UbiNodeDominatorTree_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
 #include "mozilla/UniquePtr.h"
 
-#include "jsalloc.h"
-
+#include "js/AllocPolicy.h"
 #include "js/UbiNode.h"
 #include "js/UbiNodePostOrder.h"
 #include "js/Utility.h"
@@ -93,10 +93,10 @@ class JS_PUBLIC_API(DominatorTree)
     {
         friend class DominatedSetRange;
 
-        const mozilla::Vector<Node>& postOrder;
+        const JS::ubi::Vector<Node>& postOrder;
         const uint32_t* ptr;
 
-        DominatedNodePtr(const mozilla::Vector<Node>& postOrder, const uint32_t* ptr)
+        DominatedNodePtr(const JS::ubi::Vector<Node>& postOrder, const uint32_t* ptr)
           : postOrder(postOrder)
           , ptr(ptr)
         { }
@@ -117,11 +117,11 @@ class JS_PUBLIC_API(DominatorTree)
     {
         friend class DominatedSets;
 
-        const mozilla::Vector<Node>& postOrder;
+        const JS::ubi::Vector<Node>& postOrder;
         const uint32_t* beginPtr;
         const uint32_t* endPtr;
 
-        DominatedSetRange(mozilla::Vector<Node>& postOrder, const uint32_t* begin, const uint32_t* end)
+        DominatedSetRange(JS::ubi::Vector<Node>& postOrder, const uint32_t* begin, const uint32_t* end)
           : postOrder(postOrder)
           , beginPtr(begin)
           , endPtr(end)
@@ -178,12 +178,12 @@ class JS_PUBLIC_API(DominatorTree)
      */
     class DominatedSets
     {
-        mozilla::Vector<uint32_t> dominated;
-        mozilla::Vector<uint32_t> indices;
+        JS::ubi::Vector<uint32_t> dominated;
+        JS::ubi::Vector<uint32_t> indices;
 
-        DominatedSets(mozilla::Vector<uint32_t>&& dominated, mozilla::Vector<uint32_t>&& indices)
-          : dominated(mozilla::Move(dominated))
-          , indices(mozilla::Move(indices))
+        DominatedSets(JS::ubi::Vector<uint32_t>&& dominated, JS::ubi::Vector<uint32_t>&& indices)
+          : dominated(std::move(dominated))
+          , indices(std::move(indices))
         { }
 
       public:
@@ -193,14 +193,14 @@ class JS_PUBLIC_API(DominatorTree)
 
         // DominatedSets is move-able.
         DominatedSets(DominatedSets&& rhs)
-          : dominated(mozilla::Move(rhs.dominated))
-          , indices(mozilla::Move(rhs.indices))
+          : dominated(std::move(rhs.dominated))
+          , indices(std::move(rhs.indices))
         {
             MOZ_ASSERT(this != &rhs, "self-move not allowed");
         }
         DominatedSets& operator=(DominatedSets&& rhs) {
             this->~DominatedSets();
-            new (this) DominatedSets(mozilla::Move(rhs));
+            new (this) DominatedSets(std::move(rhs));
             return *this;
         }
 
@@ -209,7 +209,7 @@ class JS_PUBLIC_API(DominatorTree)
          * immediate dominator. Returns `Some` on success, `Nothing` on OOM
          * failure.
          */
-        static mozilla::Maybe<DominatedSets> Create(const mozilla::Vector<uint32_t>& doms) {
+        static mozilla::Maybe<DominatedSets> Create(const JS::ubi::Vector<uint32_t>& doms) {
             auto length = doms.length();
             MOZ_ASSERT(length < UINT32_MAX);
 
@@ -234,8 +234,8 @@ class JS_PUBLIC_API(DominatorTree)
             //    filled in. After having filled in all of a bucket's entries,
             //    the index points to the start of the bucket.
 
-            mozilla::Vector<uint32_t> dominated;
-            mozilla::Vector<uint32_t> indices;
+            JS::ubi::Vector<uint32_t> dominated;
+            JS::ubi::Vector<uint32_t> indices;
             if (!dominated.growBy(length) || !indices.growBy(length))
                 return mozilla::Nothing();
 
@@ -270,14 +270,14 @@ class JS_PUBLIC_API(DominatorTree)
             }
 #endif
 
-            return mozilla::Some(DominatedSets(mozilla::Move(dominated), mozilla::Move(indices)));
+            return mozilla::Some(DominatedSets(std::move(dominated), std::move(indices)));
         }
 
         /**
          * Get the set of nodes immediately dominated by the node at
          * `postOrder[nodeIndex]`.
          */
-        DominatedSetRange dominatedSet(mozilla::Vector<Node>& postOrder, uint32_t nodeIndex) const {
+        DominatedSetRange dominatedSet(JS::ubi::Vector<Node>& postOrder, uint32_t nodeIndex) const {
             MOZ_ASSERT(postOrder.length() == indices.length());
             MOZ_ASSERT(nodeIndex < indices.length());
             auto end = nodeIndex == indices.length() - 1
@@ -289,11 +289,11 @@ class JS_PUBLIC_API(DominatorTree)
 
   private:
     // Data members.
-    mozilla::Vector<Node> postOrder;
+    JS::ubi::Vector<Node> postOrder;
     NodeToIndexMap nodeToPostOrderIndex;
-    mozilla::Vector<uint32_t> doms;
+    JS::ubi::Vector<uint32_t> doms;
     DominatedSets dominatedSets;
-    mozilla::Maybe<mozilla::Vector<JS::ubi::Node::Size>> retainedSizes;
+    mozilla::Maybe<JS::ubi::Vector<JS::ubi::Node::Size>> retainedSizes;
 
   private:
     // We use `UNDEFINED` as a sentinel value in the `doms` vector to signal
@@ -301,16 +301,16 @@ class JS_PUBLIC_API(DominatorTree)
     // index in `postOrder` yet.
     static const uint32_t UNDEFINED = UINT32_MAX;
 
-    DominatorTree(mozilla::Vector<Node>&& postOrder, NodeToIndexMap&& nodeToPostOrderIndex,
-                  mozilla::Vector<uint32_t>&& doms, DominatedSets&& dominatedSets)
-        : postOrder(mozilla::Move(postOrder))
-        , nodeToPostOrderIndex(mozilla::Move(nodeToPostOrderIndex))
-        , doms(mozilla::Move(doms))
-        , dominatedSets(mozilla::Move(dominatedSets))
+    DominatorTree(JS::ubi::Vector<Node>&& postOrder, NodeToIndexMap&& nodeToPostOrderIndex,
+                  JS::ubi::Vector<uint32_t>&& doms, DominatedSets&& dominatedSets)
+        : postOrder(std::move(postOrder))
+        , nodeToPostOrderIndex(std::move(nodeToPostOrderIndex))
+        , doms(std::move(doms))
+        , dominatedSets(std::move(dominatedSets))
         , retainedSizes(mozilla::Nothing())
     { }
 
-    static uint32_t intersect(mozilla::Vector<uint32_t>& doms, uint32_t finger1, uint32_t finger2) {
+    static uint32_t intersect(JS::ubi::Vector<uint32_t>& doms, uint32_t finger1, uint32_t finger2) {
         while (finger1 != finger2) {
             if (finger1 < finger2)
                 finger1 = doms[finger1];
@@ -322,8 +322,9 @@ class JS_PUBLIC_API(DominatorTree)
 
     // Do the post order traversal of the heap graph and populate our
     // predecessor sets.
-    static bool doTraversal(JSRuntime* rt, AutoCheckCannotGC& noGC, const Node& root,
-                            mozilla::Vector<Node>& postOrder, PredecessorSets& predecessorSets) {
+    static MOZ_MUST_USE bool doTraversal(JSContext* cx, AutoCheckCannotGC& noGC, const Node& root,
+                                         JS::ubi::Vector<Node>& postOrder,
+                                         PredecessorSets& predecessorSets) {
         uint32_t nodeCount = 0;
         auto onNode = [&](const Node& node) {
             nodeCount++;
@@ -338,7 +339,7 @@ class JS_PUBLIC_API(DominatorTree)
                 mozilla::UniquePtr<NodeSet, DeletePolicy<NodeSet>> set(js_new<NodeSet>());
                 if (!set ||
                     !set->init() ||
-                    !predecessorSets.add(p, edge.referent, mozilla::Move(set)))
+                    !predecessorSets.add(p, edge.referent, std::move(set)))
                 {
                     return false;
                 }
@@ -347,7 +348,7 @@ class JS_PUBLIC_API(DominatorTree)
             return p->value()->put(origin);
         };
 
-        PostOrder traversal(rt, noGC);
+        PostOrder traversal(cx, noGC);
         return traversal.init() &&
                traversal.addStart(root) &&
                traversal.traverse(onNode, onEdge);
@@ -355,7 +356,8 @@ class JS_PUBLIC_API(DominatorTree)
 
     // Populates the given `map` with an entry for each node to its index in
     // `postOrder`.
-    static bool mapNodesToTheirIndices(mozilla::Vector<Node>& postOrder, NodeToIndexMap& map) {
+    static MOZ_MUST_USE bool mapNodesToTheirIndices(JS::ubi::Vector<Node>& postOrder,
+                                                    NodeToIndexMap& map) {
         MOZ_ASSERT(!map.initialized());
         MOZ_ASSERT(postOrder.length() < UINT32_MAX);
         uint32_t length = postOrder.length();
@@ -368,12 +370,12 @@ class JS_PUBLIC_API(DominatorTree)
 
     // Convert the Node -> NodeSet predecessorSets to a index -> Vector<index>
     // form.
-    static bool convertPredecessorSetsToVectors(
+    static MOZ_MUST_USE bool convertPredecessorSetsToVectors(
         const Node& root,
-        mozilla::Vector<Node>& postOrder,
+        JS::ubi::Vector<Node>& postOrder,
         PredecessorSets& predecessorSets,
         NodeToIndexMap& nodeToPostOrderIndex,
-        mozilla::Vector<mozilla::Vector<uint32_t>>& predecessorVectors)
+        JS::ubi::Vector<JS::ubi::Vector<uint32_t>>& predecessorVectors)
     {
         MOZ_ASSERT(postOrder.length() < UINT32_MAX);
         uint32_t length = postOrder.length();
@@ -407,7 +409,8 @@ class JS_PUBLIC_API(DominatorTree)
 
     // Initialize `doms` such that the immediate dominator of the `root` is the
     // `root` itself and all others are `UNDEFINED`.
-    static bool initializeDominators(mozilla::Vector<uint32_t>& doms, uint32_t length) {
+    static MOZ_MUST_USE bool initializeDominators(JS::ubi::Vector<uint32_t>& doms,
+                                                  uint32_t length) {
         MOZ_ASSERT(doms.length() == 0);
         if (!doms.growByUninitialized(length))
             return false;
@@ -423,7 +426,7 @@ class JS_PUBLIC_API(DominatorTree)
         MOZ_ASSERT_IF(retainedSizes.isSome(), postOrder.length() == retainedSizes->length());
     }
 
-    bool computeRetainedSizes(mozilla::MallocSizeOf mallocSizeOf) {
+    MOZ_MUST_USE bool computeRetainedSizes(mozilla::MallocSizeOf mallocSizeOf) {
         MOZ_ASSERT(retainedSizes.isNothing());
         auto length = postOrder.length();
 
@@ -470,17 +473,17 @@ class JS_PUBLIC_API(DominatorTree)
 
     // DominatorTree is move-able.
     DominatorTree(DominatorTree&& rhs)
-      : postOrder(mozilla::Move(rhs.postOrder))
-      , nodeToPostOrderIndex(mozilla::Move(rhs.nodeToPostOrderIndex))
-      , doms(mozilla::Move(rhs.doms))
-      , dominatedSets(mozilla::Move(rhs.dominatedSets))
-      , retainedSizes(mozilla::Move(rhs.retainedSizes))
+      : postOrder(std::move(rhs.postOrder))
+      , nodeToPostOrderIndex(std::move(rhs.nodeToPostOrderIndex))
+      , doms(std::move(rhs.doms))
+      , dominatedSets(std::move(rhs.dominatedSets))
+      , retainedSizes(std::move(rhs.retainedSizes))
     {
         MOZ_ASSERT(this != &rhs, "self-move is not allowed");
     }
     DominatorTree& operator=(DominatorTree&& rhs) {
         this->~DominatorTree();
-        new (this) DominatorTree(mozilla::Move(rhs));
+        new (this) DominatorTree(std::move(rhs));
         return *this;
     }
 
@@ -509,10 +512,10 @@ class JS_PUBLIC_API(DominatorTree)
      * responsibility to handle and report the OOM.
      */
     static mozilla::Maybe<DominatorTree>
-    Create(JSRuntime* rt, AutoCheckCannotGC& noGC, const Node& root) {
-        mozilla::Vector<Node> postOrder;
+    Create(JSContext* cx, AutoCheckCannotGC& noGC, const Node& root) {
+        JS::ubi::Vector<Node> postOrder;
         PredecessorSets predecessorSets;
-        if (!predecessorSets.init() || !doTraversal(rt, noGC, root, postOrder, predecessorSets))
+        if (!predecessorSets.init() || !doTraversal(cx, noGC, root, postOrder, predecessorSets))
             return mozilla::Nothing();
 
         MOZ_ASSERT(postOrder.length() < UINT32_MAX);
@@ -529,12 +532,12 @@ class JS_PUBLIC_API(DominatorTree)
         if (!mapNodesToTheirIndices(postOrder, nodeToPostOrderIndex))
             return mozilla::Nothing();
 
-        mozilla::Vector<mozilla::Vector<uint32_t>> predecessorVectors;
+        JS::ubi::Vector<JS::ubi::Vector<uint32_t>> predecessorVectors;
         if (!convertPredecessorSetsToVectors(root, postOrder, predecessorSets, nodeToPostOrderIndex,
                                              predecessorVectors))
             return mozilla::Nothing();
 
-        mozilla::Vector<uint32_t> doms;
+        JS::ubi::Vector<uint32_t> doms;
         if (!initializeDominators(doms, length))
             return mozilla::Nothing();
 
@@ -587,10 +590,10 @@ class JS_PUBLIC_API(DominatorTree)
         if (maybeDominatedSets.isNothing())
             return mozilla::Nothing();
 
-        return mozilla::Some(DominatorTree(mozilla::Move(postOrder),
-                                           mozilla::Move(nodeToPostOrderIndex),
-                                           mozilla::Move(doms),
-                                           mozilla::Move(*maybeDominatedSets)));
+        return mozilla::Some(DominatorTree(std::move(postOrder),
+                                           std::move(nodeToPostOrderIndex),
+                                           std::move(doms),
+                                           std::move(*maybeDominatedSets)));
     }
 
     /**
@@ -648,8 +651,8 @@ class JS_PUBLIC_API(DominatorTree)
      * `outSize`, or 0 if `node` is not a member of the dominator tree. Returns
      * false on OOM failure, leaving `outSize` unchanged.
      */
-    bool getRetainedSize(const Node& node, mozilla::MallocSizeOf mallocSizeOf,
-                         Node::Size& outSize) {
+    MOZ_MUST_USE bool getRetainedSize(const Node& node, mozilla::MallocSizeOf mallocSizeOf,
+                                      Node::Size& outSize) {
         assertSanity();
         auto ptr = nodeToPostOrderIndex.lookup(node);
         if (!ptr) {

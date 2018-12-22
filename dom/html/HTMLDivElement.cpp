@@ -24,13 +24,14 @@ NS_IMPL_ELEMENT_CLONE(HTMLDivElement)
 JSObject*
 HTMLDivElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::HTMLDivElementBinding::Wrap(aCx, this, aGivenProto);
+  return dom::HTMLDivElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool
 HTMLDivElement::ParseAttribute(int32_t aNamespaceID,
-                               nsIAtom* aAttribute,
+                               nsAtom* aAttribute,
                                const nsAString& aValue,
+                               nsIPrincipal* aMaybeScriptedPrincipal,
                                nsAttrValue& aResult)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -55,28 +56,28 @@ HTMLDivElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLDivElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                      nsRuleData* aData)
+                                      MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapDivAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 static void
-MapMarqueeAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
+MapMarqueeAttributesIntoRule(const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
-  nsGenericHTMLElement::MapBGColorInto(aAttributes, aData);
+  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapBGColorInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLDivElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLDivElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   if (mNodeInfo->Equals(nsGkAtoms::div)) {
     static const MappedAttributeEntry* const map[] = {
@@ -85,7 +86,7 @@ HTMLDivElement::IsAttributeMapped(const nsIAtom* aAttribute) const
     };
     return FindAttributeDependence(aAttribute, map);
   }
-  if (mNodeInfo->Equals(nsGkAtoms::marquee)) {  
+  if (mNodeInfo->Equals(nsGkAtoms::marquee)) {
     static const MappedAttributeEntry* const map[] = {
       sImageMarginSizeAttributeMap,
       sBackgroundColorAttributeMap,
@@ -105,7 +106,7 @@ HTMLDivElement::GetAttributeMappingFunction() const
   }
   if (mNodeInfo->Equals(nsGkAtoms::marquee)) {
     return &MapMarqueeAttributesIntoRule;
-  }  
+  }
   return nsGenericHTMLElement::GetAttributeMappingFunction();
 }
 

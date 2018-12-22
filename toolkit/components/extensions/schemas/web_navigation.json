@@ -7,7 +7,7 @@
     "namespace": "manifest",
     "types": [
       {
-        "$extend": "Permission",
+        "$extend": "OptionalPermission",
         "choices": [{
           "type": "string",
           "enum": [
@@ -20,6 +20,7 @@
   {
     "namespace": "webNavigation",
     "description": "Use the <code>browser.webNavigation</code> API to receive notifications about the status of navigation requests in-flight.",
+    "permissions": ["webNavigation"],
     "types": [
       {
         "id": "TransitionType",
@@ -31,6 +32,17 @@
         "id": "TransitionQualifier",
         "type": "string",
         "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]
+      },
+      {
+        "id": "EventUrlFilters",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "events.UrlFilter" }
+          }
+        }
       }
     ],
     "functions": [
@@ -61,13 +73,21 @@
                 "description": "Information about the requested frame, null if the specified frame ID and/or tab ID are invalid.",
                 "properties": {
                   "errorOccurred": {
-                    "unsupported": true,
+                    "optional": true,
                     "type": "boolean",
                     "description": "True if the last navigation in this frame was interrupted by an error, i.e. the onErrorOccurred event fired."
                   },
                   "url": {
                     "type": "string",
                     "description": "The URL currently associated with this frame, if the frame identified by the frameId existed at one point in the given tab. The fact that an URL is associated with a given frameId does not imply that the corresponding frame still exists."
+                  },
+                  "tabId": {
+                    "type": "integer",
+                    "description": "The ID of the tab in which the frame is."
+                  },
+                  "frameId": {
+                    "type": "integer",
+                    "description": "The ID of the frame. 0 indicates that this is the main frame; a positive value indicates the ID of a subframe."
                   },
                   "parentFrameId": {
                     "type": "integer",
@@ -106,7 +126,7 @@
                   "type": "object",
                   "properties": {
                     "errorOccurred": {
-                      "unsupported": true,
+                      "optional": true,
                       "type": "boolean",
                       "description": "True if the last navigation in this frame was interrupted by an error, i.e. the onErrorOccurred event fired."
                     },
@@ -114,6 +134,10 @@
                       "unsupported": true,
                       "type": "integer",
                       "description": "The ID of the process runs the renderer for this tab."
+                    },
+                    "tabId": {
+                      "type": "integer",
+                      "description": "The ID of the tab in which the frame is."
                     },
                     "frameId": {
                       "type": "integer",
@@ -140,14 +164,6 @@
         "name": "onBeforeNavigate",
         "type": "function",
         "description": "Fired when a navigation is about to occur.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -161,20 +177,20 @@
               "timeStamp": {"type": "number", "description": "The time when the browser was about to start the navigation, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onCommitted",
         "type": "function",
         "description": "Fired when a navigation is committed. The document (and the resources it refers to, such as images and subframes) might still be downloading, but at least part of the document has been received from the server and the browser has decided to switch to the new document.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -189,20 +205,20 @@
               "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onDOMContentLoaded",
         "type": "function",
         "description": "Fired when the page's DOM is fully constructed, but the referenced resources may not finish loading.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -215,20 +231,20 @@
               "timeStamp": {"type": "number", "description": "The time when the page's DOM was fully constructed, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onCompleted",
         "type": "function",
         "description": "Fired when a document, including the resources it refers to, is completely loaded and initialized.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -241,20 +257,20 @@
               "timeStamp": {"type": "number", "description": "The time when the document finished loading, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onErrorOccurred",
         "type": "function",
         "description": "Fired when an error occurs and the navigation is aborted. This can happen if either a network error occurred, or the user aborted the navigation.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -268,21 +284,20 @@
               "timeStamp": {"type": "number", "description": "The time when the error occurred, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onCreatedNavigationTarget",
-        "unsupported": true,
         "type": "function",
         "description": "Fired when a new window, or a new tab in an existing window, is created to host a navigation.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -296,20 +311,20 @@
               "timeStamp": {"type": "number", "description": "The time when the browser was about to create a new view, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onReferenceFragmentUpdated",
         "type": "function",
         "description": "Fired when the reference fragment of a frame was updated. All future events for that frame will use the updated URL.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -324,11 +339,18 @@
               "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
             }
           }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
+          }
         ]
       },
       {
         "name": "onTabReplaced",
-        "unsupported": true,
         "type": "function",
         "description": "Fired when the contents of the tab is replaced by a different (usually previously pre-rendered) tab.",
         "parameters": [
@@ -347,14 +369,6 @@
         "name": "onHistoryStateUpdated",
         "type": "function",
         "description": "Fired when the frame's history was updated to a new URL. All future events for that frame will use the updated URL.",
-        "filters": [
-          {
-            "name": "url",
-            "type": "array",
-            "items": { "$ref": "events.UrlFilter" },
-            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
-          }
-        ],
         "parameters": [
           {
             "type": "object",
@@ -368,6 +382,14 @@
               "transitionQualifiers": {"unsupported": true, "type": "array", "description": "A list of transition qualifiers.", "items": {"$ref": "TransitionQualifier"}},
               "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
             }
+          }
+        ],
+        "extraParameters": [
+          {
+            "name": "filters",
+            "optional": true,
+            "$ref": "EventUrlFilters",
+            "description": "Conditions that the URL being navigated to must satisfy. The 'schemes' and 'ports' fields of UrlFilter are ignored for this event."
           }
         ]
       }

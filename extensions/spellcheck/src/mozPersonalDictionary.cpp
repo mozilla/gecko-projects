@@ -40,23 +40,22 @@
  * Implement the suggestion record.
  */
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(mozPersonalDictionary)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(mozPersonalDictionary)
+NS_IMPL_ADDREF(mozPersonalDictionary)
+NS_IMPL_RELEASE(mozPersonalDictionary)
 
 NS_INTERFACE_MAP_BEGIN(mozPersonalDictionary)
   NS_INTERFACE_MAP_ENTRY(mozIPersonalDictionary)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, mozIPersonalDictionary)
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(mozPersonalDictionary)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(mozPersonalDictionary, mEncoder)
-
-class mozPersonalDictionaryLoader final : public nsRunnable
+class mozPersonalDictionaryLoader final : public mozilla::Runnable
 {
 public:
-  explicit mozPersonalDictionaryLoader(mozPersonalDictionary *dict) : mDict(dict)
+  explicit mozPersonalDictionaryLoader(mozPersonalDictionary* dict)
+    : mozilla::Runnable("mozPersonalDictionaryLoader")
+    , mDict(dict)
   {
   }
 
@@ -65,7 +64,9 @@ public:
     mDict->SyncLoad();
 
     // Release the dictionary on the main thread
-    NS_ReleaseOnMainThread(mDict.forget());
+    NS_ReleaseOnMainThreadSystemGroup(
+      "mozPersonalDictionaryLoader::mDict",
+      mDict.forget().downcast<mozIPersonalDictionary>());
 
     return NS_OK;
   }
@@ -74,15 +75,16 @@ private:
   RefPtr<mozPersonalDictionary> mDict;
 };
 
-class mozPersonalDictionarySave final : public nsRunnable
+class mozPersonalDictionarySave final : public mozilla::Runnable
 {
 public:
-  explicit mozPersonalDictionarySave(mozPersonalDictionary *aDict,
+  explicit mozPersonalDictionarySave(mozPersonalDictionary* aDict,
                                      nsCOMPtr<nsIFile> aFile,
-                                     nsTArray<nsString> &&aDictWords)
-    : mDictWords(aDictWords),
-      mFile(aFile),
-      mDict(aDict)
+                                     nsTArray<nsString>&& aDictWords)
+    : mozilla::Runnable("mozPersonalDictionarySave")
+    , mDictWords(aDictWords)
+    , mFile(aFile)
+    , mDict(aDict)
   {
   }
 
@@ -103,7 +105,7 @@ public:
       // Get a buffered output stream 4096 bytes big, to optimize writes.
       nsCOMPtr<nsIOutputStream> bufferedOutputStream;
       res = NS_NewBufferedOutputStream(getter_AddRefs(bufferedOutputStream),
-                                       outStream, 4096);
+                                       outStream.forget(), 4096);
       if (NS_FAILED(res)) {
         return res;
       }
@@ -136,7 +138,9 @@ public:
     }
 
     // Release the dictionary on the main thread.
-    NS_ReleaseOnMainThread(mDict.forget());
+    NS_ReleaseOnMainThreadSystemGroup(
+      "mozPersonalDictionarySave::mDict",
+      mDict.forget().downcast<mozIPersonalDictionary>());
 
     return NS_OK;
   }
@@ -189,7 +193,7 @@ void mozPersonalDictionary::WaitForLoad()
   }
 
   // If the dictionary hasn't been loaded, we try to lock the same monitor
-  // that the thread uses that does the load. This way the main thread will 
+  // that the thread uses that does the load. This way the main thread will
   // be suspended until the monitor becomes available.
   mozilla::MonitorAutoLock mon(mMonitor);
 
@@ -303,7 +307,7 @@ void mozPersonalDictionary::SyncLoadInternal()
     while(!done && ((c == '\n') || (c == '\r'))){
       if( (NS_OK != convStream->Read(&c, 1, &nRead)) || (nRead != 1)) done = true;
     }
-    if (!done){ 
+    if (!done){
       nsAutoString word;
       while((c != '\n') && (c != '\r') && !done){
         word.Append(c);
@@ -365,7 +369,7 @@ NS_IMETHODIMP mozPersonalDictionary::Save()
   }
 
   nsCOMPtr<nsIRunnable> runnable =
-    new mozPersonalDictionarySave(this, theFile, mozilla::Move(array));
+    new mozPersonalDictionarySave(this, theFile, std::move(array));
   res = target->Dispatch(runnable, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(res))) {
     return res;
@@ -426,7 +430,7 @@ NS_IMETHODIMP mozPersonalDictionary::RemoveWord(const char16_t *aWord, const cha
 NS_IMETHODIMP mozPersonalDictionary::IgnoreWord(const char16_t *aWord)
 {
   // avoid adding duplicate words to the ignore list
-  if (aWord && !mIgnoreTable.GetEntry(aWord)) 
+  if (aWord && !mIgnoreTable.GetEntry(aWord))
     mIgnoreTable.PutEntry(aWord);
   return NS_OK;
 }

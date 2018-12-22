@@ -4,9 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["ScrollPosition"];
-
-const Ci = Components.interfaces;
+var EXPORTED_SYMBOLS = ["ScrollPosition"];
 
 /**
  * It provides methods to collect scroll positions from single frames and to
@@ -14,9 +12,13 @@ const Ci = Components.interfaces;
  *
  * This is a child process module.
  */
-this.ScrollPosition = Object.freeze({
+var ScrollPosition = Object.freeze({
   collect(frame) {
     return ScrollPositionInternal.collect(frame);
+  },
+
+  restore(frame, value) {
+    ScrollPositionInternal.restore(frame, value);
   },
 
   restoreTree(root, data) {
@@ -37,7 +39,7 @@ var ScrollPositionInternal = {
    *         Returns null when there is no scroll data we want to store for the
    *         given |frame|.
    */
-  collect: function (frame) {
+  collect(frame) {
     let ifreq = frame.QueryInterface(Ci.nsIInterfaceRequestor);
     let utils = ifreq.getInterface(Ci.nsIDOMWindowUtils);
     let scrollX = {}, scrollY = {};
@@ -56,7 +58,7 @@ var ScrollPositionInternal = {
    * @param frame (DOMWindow)
    * @param value (object, see collect())
    */
-  restore: function (frame, value) {
+  restore(frame, value) {
     let match;
 
     if (value && (match = /(\d+),(\d+)/.exec(value))) {
@@ -84,7 +86,7 @@ var ScrollPositionInternal = {
    *          ]
    *        }
    */
-  restoreTree: function (root, data) {
+  restoreTree(root, data) {
     if (data.hasOwnProperty("scroll")) {
       this.restore(root, data.scroll);
     }

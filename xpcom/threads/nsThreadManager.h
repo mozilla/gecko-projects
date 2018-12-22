@@ -20,11 +20,9 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSITHREADMANAGER
 
-  static nsThreadManager* get()
-  {
-    static nsThreadManager sInstance;
-    return &sInstance;
-  }
+  static nsThreadManager& get();
+
+  static void InitializeShutdownObserver();
 
   nsresult Init();
 
@@ -34,15 +32,28 @@ public:
 
   // Called by nsThread to inform the ThreadManager it exists.  This method
   // must be called when the given thread is the current thread.
-  void RegisterCurrentThread(nsThread* aThread);
+  void RegisterCurrentThread(nsThread& aThread);
 
   // Called by nsThread to inform the ThreadManager it is going away.  This
   // method must be called when the given thread is the current thread.
-  void UnregisterCurrentThread(nsThread* aThread);
+  void UnregisterCurrentThread(nsThread& aThread);
 
   // Returns the current thread.  Returns null if OOM or if ThreadManager isn't
-  // initialized.
+  // initialized.  Creates the nsThread if one does not exist yet.
   nsThread* GetCurrentThread();
+
+  // Returns true iff the currently running thread has an nsThread associated
+  // with it (ie; whether this is a thread that we can dispatch runnables to).
+  bool IsNSThread() const;
+
+  // CreateCurrentThread sets up an nsThread for the current thread. It uses the
+  // event queue and main thread flags passed in. It should only be called once
+  // for the current thread. After it returns, GetCurrentThread() will return
+  // the thread that was created. GetCurrentThread() will also create a thread
+  // (lazily), but it doesn't allow the queue or main-thread attributes to be
+  // specified.
+  nsThread* CreateCurrentThread(mozilla::SynchronizedEventQueue* aQueue,
+                                nsThread::MainThreadFlag aMainThread);
 
   // Returns the maximal number of threads that have been in existence
   // simultaneously during the execution of the thread manager.
@@ -53,6 +64,11 @@ public:
   ~nsThreadManager()
   {
   }
+
+  void EnableMainThreadEventPrioritization();
+  void FlushInputEventPrioritization();
+  void SuspendInputEventPrioritization();
+  void ResumeInputEventPrioritization();
 
 private:
   nsThreadManager()
@@ -65,12 +81,18 @@ private:
   {
   }
 
+  nsresult
+  SpinEventLoopUntilInternal(nsINestedEventLoopCondition* aCondition,
+                             bool aCheckingShutdown);
+
   nsRefPtrHashtable<nsPtrHashKey<PRThread>, nsThread> mThreadsByPRThread;
   unsigned            mCurThreadIndex;  // thread-local-storage index
   RefPtr<nsThread>  mMainThread;
-  PRThread*           mMainPRThread;
+  PRThread*         mMainPRThread;
   mozilla::OffTheBooksMutex mLock;  // protects tables
-  mozilla::Atomic<bool> mInitialized;
+  mozilla::Atomic<bool,
+                  mozilla::SequentiallyConsistent,
+                  mozilla::recordreplay::Behavior::DontPreserve> mInitialized;
 
   // The current number of threads
   uint32_t            mCurrentNumberOfThreads;

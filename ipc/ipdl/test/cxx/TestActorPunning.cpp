@@ -1,6 +1,7 @@
 #include "TestActorPunning.h"
 
 #include "IPDLUnitTests.h"      // fail etc.
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 namespace _ipdltest {
@@ -15,13 +16,33 @@ TestActorPunningParent::Main()
         fail("sending Start");
 }
 
-bool
+mozilla::ipc::IPCResult
 TestActorPunningParent::RecvPun(PTestActorPunningSubParent* a, const Bad& bad)
 {
     if (a->SendBad())
         fail("bad!");
     fail("shouldn't have received this message in the first place");
-    return true;
+    return IPC_OK();
+}
+
+// By default, fatal errors kill the parent process, but this makes it
+// hard to test, so instead we use the previous behavior and kill the
+// child process.
+void
+TestActorPunningParent::HandleFatalError(const char* aErrorMsg) const
+{
+  if (!!strcmp(aErrorMsg, "Error deserializing 'PTestActorPunningSubParent'")) {
+    fail("wrong fatal error");
+  }
+
+  ipc::ScopedProcessHandle otherProcessHandle;
+  if (!base::OpenProcessHandle(OtherPid(), &otherProcessHandle.rwget())) {
+    fail("couldn't open child process");
+  } else {
+    if (!base::KillProcess(otherProcessHandle, 0, false)) {
+      fail("terminating child process");
+    }
+  }
 }
 
 PTestActorPunningPunnedParent*
@@ -79,7 +100,7 @@ TestActorPunningChild::DeallocPTestActorPunningSubChild(PTestActorPunningSubChil
     return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 TestActorPunningChild::RecvStart()
 {
     SendPTestActorPunningSubConstructor();
@@ -88,14 +109,14 @@ TestActorPunningChild::RecvStart()
     // We can't assert whether this succeeds or fails, due to race
     // conditions.
     SendPun(a, Bad());
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestActorPunningSubChild::RecvBad()
 {
     fail("things are going really badly right now");
-    return true;
+    return IPC_OK();
 }
 
 
@@ -109,9 +130,8 @@ using namespace mozilla::ipc;
 /*static*/ void
 ParamTraits<Bad>::Write(Message* aMsg, const paramType& aParam)
 {
-    char* ptr = aMsg->BeginWriteData(4);
-    ptr -= intptr_t(sizeof(int));
-    ptr -= intptr_t(sizeof(ActorHandle));
+    // Skip past the sentinel for the actor as well as the actor.
+    int32_t* ptr = aMsg->GetInt32PtrForTest(2 * sizeof(int32_t));
     ActorHandle* ah = reinterpret_cast<ActorHandle*>(ptr);
     if (ah->mId != -3)
         fail("guessed wrong offset (value is %d, should be -3)", ah->mId);
@@ -119,11 +139,8 @@ ParamTraits<Bad>::Write(Message* aMsg, const paramType& aParam)
 }
 
 /*static*/ bool
-ParamTraits<Bad>::Read(const Message* aMsg, void** aIter, paramType* aResult)
+ParamTraits<Bad>::Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
 {
-    const char* ptr;
-    int len;
-    aMsg->ReadData(aIter, &ptr, &len);
     return true;
 }
 

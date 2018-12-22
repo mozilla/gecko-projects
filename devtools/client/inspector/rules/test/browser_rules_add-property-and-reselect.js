@@ -9,30 +9,34 @@
 
 const TEST_URI = URL_ROOT + "doc_content_stylesheet.html";
 
-add_task(function*() {
-  yield addTab(TEST_URI);
-  let {inspector, view} = yield openRuleView();
-  yield selectNode("#target", inspector);
+add_task(async function() {
+  await addTab(TEST_URI);
+  const {inspector, view} = await openRuleView();
+  await selectNode("#target", inspector);
 
   info("Setting a font-weight property on all rules");
-  setPropertyOnAllRules(view);
+  await setPropertyOnAllRules(view);
 
   info("Reselecting the element");
-  yield selectNode("body", inspector);
-  yield selectNode("#target", inspector);
+  await selectNode("body", inspector);
+  await selectNode("#target", inspector);
 
   checkPropertyOnAllRules(view);
 });
 
-function setPropertyOnAllRules(view) {
-  for (let rule of view._elementStyle.rules) {
-    rule.editor.addProperty("font-weight", "bold", "");
+async function setPropertyOnAllRules(view) {
+  // Wait for the properties to be properly created on the backend and for the
+  // view to be updated.
+  const onRefreshed = view.once("ruleview-refreshed");
+  for (const rule of view._elementStyle.rules) {
+    rule.editor.addProperty("font-weight", "bold", "", true);
   }
+  await onRefreshed;
 }
 
 function checkPropertyOnAllRules(view) {
-  for (let rule of view._elementStyle.rules) {
-    let lastRule = rule.textProps[rule.textProps.length - 1];
+  for (const rule of view._elementStyle.rules) {
+    const lastRule = rule.textProps[rule.textProps.length - 1];
 
     is(lastRule.name, "font-weight", "Last rule name is font-weight");
     is(lastRule.value, "bold", "Last rule value is bold");

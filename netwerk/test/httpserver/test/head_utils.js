@@ -11,7 +11,7 @@ load(_HTTPD_JS_PATH.path);
 // if these tests fail, we'll want the debug output
 DEBUG = true;
 
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 /**
  * Constructs a new nsHttpServer instance.  This function is intended to
@@ -51,7 +51,7 @@ function makeBIS(stream)
 /**
  * Returns the contents of the file as a string.
  *
- * @param file : nsILocalFile
+ * @param file : nsIFile
  *   the file whose contents are to be read
  * @returns string
  *   the contents of the file
@@ -77,7 +77,7 @@ function fileContents(file)
  *   an Iterator which returns each line from data in turn; note that this
  *   includes a final empty line if data ended with a CRLF
  */
-function LineIterator(data)
+function* LineIterator(data)
 {
   var start = 0, index = 0;
   do
@@ -107,7 +107,7 @@ function LineIterator(data)
 function expectLines(iter, expectedLines)
 {
   var index = 0;
-  for (var line in iter)
+  for (var line of iter)
   {
     if (expectedLines.length == index)
       throw "Error: got more than " + expectedLines.length + " expected lines!";
@@ -155,9 +155,9 @@ function writeDetails(request, response)
  */
 function skipHeaders(iter)
 {
-  var line = iter.next();
+  var line = iter.next().value;
   while (line !== "")
-    line = iter.next();
+    line = iter.next().value;
 }
 
 /**
@@ -302,7 +302,7 @@ function runHttpTests(testArray, done)
 
       onStartRequest: function(request, cx)
       {
-        do_check_true(request === this._channel);
+        Assert.ok(request === this._channel);
         var ch = request.QueryInterface(Ci.nsIHttpChannel)
                         .QueryInterface(Ci.nsIHttpChannelInternal);
 
@@ -501,7 +501,7 @@ function runRawTests(testArray, done)
     {
       onInputStreamReady: function(stream)
       {
-        do_check_true(stream === this.stream);
+        Assert.ok(stream === this.stream);
         try
         {
           var bis = new BinaryInputStream(stream);

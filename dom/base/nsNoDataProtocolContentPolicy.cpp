@@ -23,16 +23,14 @@
 NS_IMPL_ISUPPORTS(nsNoDataProtocolContentPolicy, nsIContentPolicy)
 
 NS_IMETHODIMP
-nsNoDataProtocolContentPolicy::ShouldLoad(uint32_t aContentType,
-                                          nsIURI *aContentLocation,
-                                          nsIURI *aRequestingLocation,
-                                          nsISupports *aRequestingContext,
+nsNoDataProtocolContentPolicy::ShouldLoad(nsIURI *aContentLocation,
+                                          nsILoadInfo *aLoadInfo,
                                           const nsACString &aMimeGuess,
-                                          nsISupports *aExtra,
-                                          nsIPrincipal *aRequestPrincipal,
                                           int16_t *aDecision)
 {
-  MOZ_ASSERT(aContentType == nsContentUtils::InternalContentPolicyTypeToExternal(aContentType),
+  uint32_t contentType = aLoadInfo->GetExternalContentPolicyType();
+
+  MOZ_ASSERT(contentType == nsContentUtils::InternalContentPolicyTypeToExternal(contentType),
              "We should only see external content policy types here.");
 
   *aDecision = nsIContentPolicy::ACCEPT;
@@ -41,10 +39,10 @@ nsNoDataProtocolContentPolicy::ShouldLoad(uint32_t aContentType,
   // plugin, so they don't necessarily open external apps
   // TYPE_WEBSOCKET loads can only go to ws:// or wss://, so we don't need to
   // concern ourselves with them.
-  if (aContentType != TYPE_DOCUMENT &&
-      aContentType != TYPE_SUBDOCUMENT &&
-      aContentType != TYPE_OBJECT &&
-      aContentType != TYPE_WEBSOCKET) {
+  if (contentType != TYPE_DOCUMENT &&
+      contentType != TYPE_SUBDOCUMENT &&
+      contentType != TYPE_OBJECT &&
+      contentType != TYPE_WEBSOCKET) {
 
     // The following are just quick-escapes for the most common cases
     // where we would allow the content to be loaded anyway.
@@ -71,16 +69,10 @@ nsNoDataProtocolContentPolicy::ShouldLoad(uint32_t aContentType,
 }
 
 NS_IMETHODIMP
-nsNoDataProtocolContentPolicy::ShouldProcess(uint32_t aContentType,
-                                             nsIURI *aContentLocation,
-                                             nsIURI *aRequestingLocation,
-                                             nsISupports *aRequestingContext,
+nsNoDataProtocolContentPolicy::ShouldProcess(nsIURI *aContentLocation,
+                                             nsILoadInfo* aLoadInfo,
                                              const nsACString &aMimeGuess,
-                                             nsISupports *aExtra,
-                                             nsIPrincipal *aRequestPrincipal,
                                              int16_t *aDecision)
 {
-  return ShouldLoad(aContentType, aContentLocation, aRequestingLocation,
-                    aRequestingContext, aMimeGuess, aExtra, aRequestPrincipal,
-                    aDecision);
+  return ShouldLoad(aContentLocation, aLoadInfo, aMimeGuess, aDecision);
 }

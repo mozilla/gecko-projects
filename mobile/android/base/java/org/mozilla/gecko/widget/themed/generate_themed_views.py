@@ -1,6 +1,6 @@
 #!/bin/python
 
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -59,6 +59,12 @@ views = [
          STYLE_CONSTRUCTOR=1),
     dict(VIEW_NAME_SUFFIX='View',
          BASE_TYPE='android.view.View',
+         STYLE_CONSTRUCTOR=1),
+    dict(VIEW_NAME_SUFFIX='ListView',
+         BASE_TYPE='android.widget.ListView',
+         STYLE_CONSTRUCTOR=1),
+    dict(VIEW_NAME_SUFFIX='ProgressBar',
+         BASE_TYPE='android.widget.ProgressBar',
          STYLE_CONSTRUCTOR=1),
 ]
 

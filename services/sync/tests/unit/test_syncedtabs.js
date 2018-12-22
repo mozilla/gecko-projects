@@ -3,9 +3,9 @@
 */
 "use strict";
 
-Cu.import("resource://services-sync/main.js");
-Cu.import("resource://services-sync/SyncedTabs.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
+ChromeUtils.import("resource://services-sync/main.js");
+ChromeUtils.import("resource://services-sync/SyncedTabs.jsm");
+ChromeUtils.import("resource://gre/modules/Log.jsm");
 
 const faviconService = Cc["@mozilla.org/browser/favicon-service;1"]
                        .getService(Ci.nsIFaviconService);
@@ -29,10 +29,14 @@ MockTabsEngine.prototype = {
   getOpenURLs() {
     return new Set();
   },
-}
+};
+
+let tabsEngine;
 
 // A clients engine that doesn't need to be a constructor.
 let MockClientsEngine = {
+  clientSettings: null, // Set in `configureClients`.
+
   isMobile(guid) {
     if (!guid.endsWith("desktop") && !guid.endsWith("mobile")) {
       throw new Error("this module expected guids to end with 'desktop' or 'mobile'");
@@ -40,46 +44,58 @@ let MockClientsEngine = {
     return guid.endsWith("mobile");
   },
   remoteClientExists(id) {
-    return !id.startsWith("guid_stale");
+    return this.clientSettings[id] !== false;
   },
-}
+  getClientName(id) {
+    if (this.clientSettings[id]) {
+      return this.clientSettings[id];
+    }
+    return tabsEngine.clients[id].clientName;
+  },
 
-// Configure Sync with our mock tabs engine and force it to become initialized.
-Services.prefs.setCharPref("services.sync.username", "someone@somewhere.com");
+  getClientType(id) {
+    return "desktop";
+  }
+};
 
-Weave.Service.engineManager.unregister("tabs");
-Weave.Service.engineManager.register(MockTabsEngine);
-Weave.Service.clientsEngine = MockClientsEngine;
-
-// Tell the Sync XPCOM service it is initialized.
-let weaveXPCService = Cc["@mozilla.org/weave/service;1"]
-                        .getService(Ci.nsISupports)
-                        .wrappedJSObject;
-weaveXPCService.ready = true;
-
-function configureClients(clients) {
-  // Configure the instance Sync created.
-  let engine = Weave.Service.engineManager.get("tabs");
+function configureClients(clients, clientSettings = {}) {
   // each client record is expected to have an id.
-  for (let [guid, client] in Iterator(clients)) {
+  for (let [guid, client] of Object.entries(clients)) {
     client.id = guid;
   }
-  engine.clients = clients;
+  tabsEngine.clients = clients;
+  // Apply clients collection overrides.
+  MockClientsEngine.clientSettings = clientSettings;
   // Send an observer that pretends the engine just finished a sync.
   Services.obs.notifyObservers(null, "weave:engine:sync:finish", "tabs");
 }
 
-// The tests.
-add_task(function* test_noClients() {
-  // no clients, can't be tabs.
-  yield configureClients({});
+add_task(async function setup() {
+  await Weave.Service.promiseInitialized;
+  // Configure Sync with our mock tabs engine and force it to become initialized.
+  await Weave.Service.engineManager.unregister("tabs");
+  await Weave.Service.engineManager.register(MockTabsEngine);
+  Weave.Service.clientsEngine = MockClientsEngine;
+  tabsEngine = Weave.Service.engineManager.get("tabs");
 
-  let tabs = yield SyncedTabs.getTabClients();
+  // Tell the Sync XPCOM service it is initialized.
+  let weaveXPCService = Cc["@mozilla.org/weave/service;1"]
+                          .getService(Ci.nsISupports)
+                          .wrappedJSObject;
+  weaveXPCService.ready = true;
+});
+
+// The tests.
+add_task(async function test_noClients() {
+  // no clients, can't be tabs.
+  await configureClients({});
+
+  let tabs = await SyncedTabs.getTabClients();
   equal(Object.keys(tabs).length, 0);
 });
 
-add_task(function* test_clientWithTabs() {
-  yield configureClients({
+add_task(async function test_clientWithTabs() {
+  await configureClients({
     guid_desktop: {
       clientName: "My Desktop",
       tabs: [
@@ -94,9 +110,9 @@ add_task(function* test_clientWithTabs() {
     }
   });
 
-  let clients = yield SyncedTabs.getTabClients();
+  let clients = await SyncedTabs.getTabClients();
   equal(clients.length, 2);
-  clients.sort((a, b) => { return a.name.localeCompare(b.name);});
+  clients.sort((a, b) => { return a.name.localeCompare(b.name); });
   equal(clients[0].tabs.length, 1);
   equal(clients[0].tabs[0].url, "http://foo.com/");
   equal(clients[0].tabs[0].icon, "http://foo.com/favicon");
@@ -104,8 +120,8 @@ add_task(function* test_clientWithTabs() {
   equal(clients[1].tabs.length, 0);
 });
 
-add_task(function* test_staleClientWithTabs() {
-  yield configureClients({
+add_task(async function test_staleClientWithTabs() {
+  await configureClients({
     guid_desktop: {
       clientName: "My Desktop",
       tabs: [
@@ -130,18 +146,37 @@ add_task(function* test_staleClientWithTabs() {
         icon: "https://bar.com/favicon",
       }],
     },
+    guid_stale_name_desktop: {
+      clientName: "My Generic Device",
+      tabs: [
+      {
+        urlHistory: ["https://example.edu/"],
+        icon: "https://example.edu/favicon",
+      }],
+    },
+  }, {
+    guid_stale_mobile: false,
+    guid_stale_desktop: false,
+    // We should always use the device name from the clients collection, instead
+    // of the possibly stale tabs collection.
+    guid_stale_name_desktop: "My Laptop",
   });
-  let clients = yield SyncedTabs.getTabClients();
-  clients.sort((a, b) => { return a.name.localeCompare(b.name);});
-  equal(clients.length, 2);
+  let clients = await SyncedTabs.getTabClients();
+  clients.sort((a, b) => { return a.name.localeCompare(b.name); });
+  equal(clients.length, 3);
+  equal(clients[0].name, "My Desktop");
   equal(clients[0].tabs.length, 1);
   equal(clients[0].tabs[0].url, "http://foo.com/");
-  equal(clients[1].tabs.length, 0);
+  equal(clients[1].name, "My Laptop");
+  equal(clients[1].tabs.length, 1);
+  equal(clients[1].tabs[0].url, "https://example.edu/");
+  equal(clients[2].name, "My Phone");
+  equal(clients[2].tabs.length, 0);
 });
 
-add_task(function* test_clientWithTabsIconsDisabled() {
+add_task(async function test_clientWithTabsIconsDisabled() {
   Services.prefs.setBoolPref("services.sync.syncedTabs.showRemoteIcons", false);
-  yield configureClients({
+  await configureClients({
     guid_desktop: {
       clientName: "My Desktop",
       tabs: [
@@ -152,19 +187,19 @@ add_task(function* test_clientWithTabsIconsDisabled() {
     },
   });
 
-  let clients = yield SyncedTabs.getTabClients();
+  let clients = await SyncedTabs.getTabClients();
   equal(clients.length, 1);
-  clients.sort((a, b) => { return a.name.localeCompare(b.name);});
+  clients.sort((a, b) => { return a.name.localeCompare(b.name); });
   equal(clients[0].tabs.length, 1);
   equal(clients[0].tabs[0].url, "http://foo.com/");
-  // expect the default favicon due to the pref being false.
-  equal(clients[0].tabs[0].icon, faviconService.defaultFavicon.spec);
+  // Expect the default favicon due to the pref being false.
+  equal(clients[0].tabs[0].icon, "page-icon:http://foo.com/");
   Services.prefs.clearUserPref("services.sync.syncedTabs.showRemoteIcons");
 });
 
-add_task(function* test_filter() {
+add_task(async function test_filter() {
   // Nothing matches.
-  yield configureClients({
+  await configureClients({
     guid_desktop: {
       clientName: "My Desktop",
       tabs: [
@@ -179,13 +214,42 @@ add_task(function* test_filter() {
     },
   });
 
-  let clients = yield SyncedTabs.getTabClients("foo");
+  let clients = await SyncedTabs.getTabClients("foo");
   equal(clients.length, 1);
   equal(clients[0].tabs.length, 1);
   equal(clients[0].tabs[0].url, "http://foo.com/");
   // check it matches the title.
-  clients = yield SyncedTabs.getTabClients("test");
+  clients = await SyncedTabs.getTabClients("test");
   equal(clients.length, 1);
   equal(clients[0].tabs.length, 1);
   equal(clients[0].tabs[0].url, "http://foo.com/");
+});
+
+add_task(async function test_duplicatesTabsAcrossClients() {
+
+  await configureClients({
+    guid_desktop: {
+      clientName: "My Desktop",
+      tabs: [
+      {
+        urlHistory: ["http://foo.com/"],
+        title: "A test page.",
+      }],
+    },
+    guid_mobile: {
+      clientName: "My Phone",
+      tabs: [
+      {
+          urlHistory: ["http://foo.com/"],
+          title: "A test page.",
+      }],
+    },
+  });
+
+  let clients = await SyncedTabs.getTabClients();
+  equal(clients.length, 2);
+  equal(clients[0].tabs.length, 1);
+  equal(clients[1].tabs.length, 1);
+  equal(clients[0].tabs[0].url, "http://foo.com/");
+  equal(clients[1].tabs[0].url, "http://foo.com/");
 });

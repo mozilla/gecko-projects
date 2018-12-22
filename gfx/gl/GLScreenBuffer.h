@@ -25,7 +25,8 @@
 
 namespace mozilla {
 namespace layers {
-class CompositableForwarder;
+class KnowsCompositor;
+class LayersIPCChannel;
 class SharedSurfaceTextureClient;
 } // namespace layers
 
@@ -137,7 +138,7 @@ public:
     static UniquePtr<SurfaceFactory>
     CreateFactory(GLContext* gl,
                   const SurfaceCaps& caps,
-                  const RefPtr<layers::CompositableForwarder>& forwarder,
+                  layers::KnowsCompositor* compositorConnection,
                   const layers::TextureFlags& flags);
 
 protected:
@@ -211,6 +212,8 @@ public:
         return mDraw->mSamples;
     }
 
+    uint32_t DepthBits() const;
+
     void DeletingFB(GLuint fb);
 
     const gfx::IntSize& Size() const {
@@ -232,9 +235,8 @@ public:
     void SetReadBuffer(GLenum userMode);
     void SetDrawBuffer(GLenum userMode);
 
-    GLenum GetReadBufferMode() const {
-        return mUserReadBufferMode;
-    }
+    GLenum GetReadBufferMode() const { return mUserReadBufferMode; }
+    GLenum GetDrawBufferMode() const { return mUserDrawBufferMode; }
 
     /**
      * Attempts to read pixels from the current bound framebuffer, if
@@ -244,7 +246,7 @@ public:
      * otherwise.
      */
     bool ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                    GLenum format, GLenum type, GLvoid *pixels);
+                    GLenum format, GLenum type, GLvoid* pixels);
 
     // Morph changes the factory used to create surfaces.
     void Morph(UniquePtr<SurfaceFactory> newFactory);

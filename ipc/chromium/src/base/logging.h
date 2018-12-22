@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -9,7 +11,9 @@
 #include <cstring>
 
 #include "base/basictypes.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Printf.h"
 
 #ifdef NO_CHROMIUM_LOGGING
 #include <sstream>
@@ -36,13 +40,12 @@ public:
     : mSeverity(severity)
     , mFile(file)
     , mLine(line)
-    , mMsg(NULL)
   { }
 
   ~Logger();
 
   // not private so that the operator<< overloads can get to it
-  void printf(const char* fmt, ...);
+  void printf(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3);
 
 private:
   static mozilla::LazyLogModule gChromiumPRLog;
@@ -51,7 +54,7 @@ private:
   LogSeverity mSeverity;
   const char* mFile;
   int mLine;
-  char* mMsg;
+  SmprintfPointer mMsg;
 
   DISALLOW_EVIL_CONSTRUCTORS(Logger);
 };
@@ -74,8 +77,6 @@ struct EmptyLog
 {
 };
 
-} // namespace mozilla
-
 mozilla::Logger& operator<<(mozilla::Logger& log, const char* s);
 mozilla::Logger& operator<<(mozilla::Logger& log, const std::string& s);
 mozilla::Logger& operator<<(mozilla::Logger& log, int i);
@@ -87,6 +88,8 @@ const mozilla::EmptyLog& operator <<(const mozilla::EmptyLog& log, const T&)
 {
   return log;
 }
+
+} // namespace mozilla
 
 #ifdef NO_CHROMIUM_LOGGING
 #define CHROMIUM_LOG(info) std::stringstream()
@@ -116,7 +119,11 @@ const mozilla::EmptyLog& operator <<(const mozilla::EmptyLog& log, const T&)
 #define NOTIMPLEMENTED() CHROMIUM_LOG(ERROR)
 
 #undef CHECK
+#ifdef FUZZING
+#define CHECK(condition) LOG_IF(WARNING, condition)
+#else
 #define CHECK(condition) LOG_IF(FATAL, condition)
+#endif
 
 #define DCHECK_EQ(v1, v2) DCHECK((v1) == (v2))
 #define DCHECK_NE(v1, v2) DCHECK((v1) != (v2))

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,7 +21,7 @@ class nsPIListBoxObject : public nsIListBoxObject {
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_PILISTBOXOBJECT_IID)
   /**
    * Get the list box body.  This will search for it as needed.
-   * If aFlush is false we don't Flush_Frames though.
+   * If aFlush is false we don't FlushType::Frames though.
    */
   virtual nsListBoxBodyFrame* GetListBoxBody(bool aFlush) = 0;
 };

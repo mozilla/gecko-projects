@@ -7,10 +7,11 @@
 #define mozilla_net_CookieServiceParent_h
 
 #include "mozilla/net/PCookieServiceParent.h"
-#include "SerializedLoadContext.h"
 
+class nsCookie;
+class nsICookie;
 class nsCookieService;
-namespace mozilla { class NeckoOriginAttributes; }
+namespace mozilla { class OriginAttributes; }
 
 namespace mozilla {
 namespace net {
@@ -19,36 +20,57 @@ class CookieServiceParent : public PCookieServiceParent
 {
 public:
   CookieServiceParent();
-  virtual ~CookieServiceParent();
+  virtual ~CookieServiceParent() = default;
 
+  void TrackCookieLoad(nsIChannel *aChannel);
+
+  void RemoveBatchDeletedCookies(nsIArray *aCookieList);
+
+  void RemoveAll();
+
+  void RemoveCookie(nsICookie *aCookie);
+
+  void AddCookie(nsICookie *aCookie);
+
+  // This will return true if the CookieServiceParent is currently processing
+  // an update from the content process. This is used in ContentParent to make
+  // sure that we are only forwarding those cookie updates to other content
+  // processes, not the one they originated from.
+  bool ProcessingCookie() { return mProcessingCookie; }
 protected:
-  MOZ_WARN_UNUSED_RESULT bool
-  GetOriginAttributesFromParams(const IPC::SerializedLoadContext &aLoadContext,
-                                NeckoOriginAttributes& aAttrs,
-                                bool& aIsPrivate);
-
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  virtual bool RecvGetCookieString(const URIParams& aHost,
-                                   const bool& aIsForeign,
-                                   const bool& aFromHttp,
-                                   const IPC::SerializedLoadContext&
-                                         loadContext,
-                                   nsCString* aResult) override;
+  virtual mozilla::ipc::IPCResult RecvGetCookieString(const URIParams& aHost,
+                                                      const bool& aIsForeign,
+                                                      const bool& aIsTrackingResource,
+                                                      const bool& aIsSafeTopLevelNav,
+                                                      const bool& aIsSameSiteForeign,
+                                                      const OriginAttributes& aAttrs,
+                                                      nsCString* aResult) override;
 
-  virtual bool RecvSetCookieString(const URIParams& aHost,
-                                   const bool& aIsForeign,
-                                   const nsCString& aCookieString,
-                                   const nsCString& aServerTime,
-                                   const bool& aFromHttp,
-                                   const IPC::SerializedLoadContext&
-                                         loadContext) override;
+  virtual mozilla::ipc::IPCResult RecvSetCookieString(const URIParams& aHost,
+                                                      const URIParams& aChannelURI,
+                                                      const bool& aIsForeign,
+                                                      const bool& aIsTrackingResource,
+                                                      const nsCString& aCookieString,
+                                                      const nsCString& aServerTime,
+                                                      const OriginAttributes& aAttrs,
+                                                      const bool& aFromHttp) override;
+  virtual
+  mozilla::ipc::IPCResult RecvPrepareCookieList(const URIParams &aHost,
+                                                const bool &aIsForeign,
+                                                const bool &aIsTackingResource,
+                                                const bool &aIsSafeTopLevelNav,
+                                                const bool &aIsSameSiteForeign,
+                                                const OriginAttributes &aAttrs) override;
 
-  virtual mozilla::ipc::IProtocol*
-  CloneProtocol(Channel* aChannel,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override;
+  void
+  SerialializeCookieList(const nsTArray<nsCookie*> &aFoundCookieList,
+                         nsTArray<CookieStruct> &aCookiesList,
+                         nsIURI *aHostURI);
 
   RefPtr<nsCookieService> mCookieService;
+  bool mProcessingCookie;
 };
 
 } // namespace net

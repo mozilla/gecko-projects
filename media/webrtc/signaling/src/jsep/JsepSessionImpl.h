@@ -10,9 +10,11 @@
 #include <vector>
 
 #include "signaling/src/jsep/JsepCodecDescription.h"
-#include "signaling/src/jsep/JsepTrack.h"
 #include "signaling/src/jsep/JsepSession.h"
 #include "signaling/src/jsep/JsepTrack.h"
+#include "signaling/src/jsep/JsepTransceiver.h"
+#include "signaling/src/jsep/SsrcGenerator.h"
+#include "signaling/src/sdp/RsdparsaSdpParser.h"
 #include "signaling/src/sdp/SipccSdpParser.h"
 #include "signaling/src/sdp/SdpHelper.h"
 #include "signaling/src/common/PtrVector.h"
@@ -34,31 +36,37 @@ public:
         mIsOfferer(false),
         mWasOffererLastTime(false),
         mIceControlling(false),
+        mLocalIceIsRestarting(false),
         mRemoteIsIceLite(false),
+        mRemoteIceIsRestarting(false),
         mBundlePolicy(kBundleBalanced),
         mSessionId(0),
         mSessionVersion(0),
-        mUuidGen(Move(uuidgen)),
-        mSdpHelper(&mLastError)
+        mUuidGen(std::move(uuidgen)),
+        mSdpHelper(&mLastError),
+        mRunRustParser(false)
   {
   }
 
   // Implement JsepSession methods.
   virtual nsresult Init() override;
 
-  virtual nsresult AddTrack(const RefPtr<JsepTrack>& track) override;
-
-  virtual nsresult RemoveTrack(const std::string& streamId,
-                               const std::string& trackId) override;
-
   virtual nsresult SetIceCredentials(const std::string& ufrag,
                                      const std::string& pwd) override;
+  virtual const std::string& GetUfrag() const override { return mIceUfrag; }
+  virtual const std::string& GetPwd() const override { return mIcePwd; }
   nsresult SetBundlePolicy(JsepBundlePolicy policy) override;
 
   virtual bool
   RemoteIsIceLite() const override
   {
     return mRemoteIsIceLite;
+  }
+
+  virtual bool
+  RemoteIceIsRestarting() const override
+  {
+    return mRemoteIceIsRestarting;
   }
 
   virtual std::vector<std::string>
@@ -70,11 +78,23 @@ public:
   virtual nsresult AddDtlsFingerprint(const std::string& algorithm,
                                       const std::vector<uint8_t>& value) override;
 
+  nsresult AddRtpExtension(JsepMediaType mediaType,
+                           const std::string& extensionName,
+                           SdpDirectionAttribute::Direction direction);
   virtual nsresult AddAudioRtpExtension(
-      const std::string& extensionName) override;
+      const std::string& extensionName,
+      SdpDirectionAttribute::Direction direction =
+      SdpDirectionAttribute::Direction::kSendrecv) override;
 
   virtual nsresult AddVideoRtpExtension(
-      const std::string& extensionName) override;
+      const std::string& extensionName,
+      SdpDirectionAttribute::Direction direction =
+      SdpDirectionAttribute::Direction::kSendrecv) override;
+
+  virtual nsresult AddAudioVideoRtpExtension(
+      const std::string& extensionName,
+      SdpDirectionAttribute::Direction direction =
+      SdpDirectionAttribute::Direction::kSendrecv) override;
 
   virtual std::vector<JsepCodecDescription*>&
   Codecs() override
@@ -82,40 +102,17 @@ public:
     return mSupportedCodecs.values;
   }
 
-  virtual nsresult ReplaceTrack(const std::string& oldStreamId,
-                                const std::string& oldTrackId,
-                                const std::string& newStreamId,
-                                const std::string& newTrackId) override;
-
-  virtual nsresult SetParameters(
-      const std::string& streamId,
-      const std::string& trackId,
-      const std::vector<JsepTrack::JsConstraints>& constraints) override;
-
-  virtual nsresult GetParameters(
-      const std::string& streamId,
-      const std::string& trackId,
-      std::vector<JsepTrack::JsConstraints>* outConstraints) override;
-
-  virtual std::vector<RefPtr<JsepTrack>> GetLocalTracks() const override;
-
-  virtual std::vector<RefPtr<JsepTrack>> GetRemoteTracks() const override;
-
-  virtual std::vector<RefPtr<JsepTrack>>
-    GetRemoteTracksAdded() const override;
-
-  virtual std::vector<RefPtr<JsepTrack>>
-    GetRemoteTracksRemoved() const override;
-
   virtual nsresult CreateOffer(const JsepOfferOptions& options,
                                std::string* offer) override;
 
   virtual nsresult CreateAnswer(const JsepAnswerOptions& options,
                                 std::string* answer) override;
 
-  virtual std::string GetLocalDescription() const override;
+  virtual std::string GetLocalDescription(JsepDescriptionPendingOrCurrent type)
+                                          const override;
 
-  virtual std::string GetRemoteDescription() const override;
+  virtual std::string GetRemoteDescription(JsepDescriptionPendingOrCurrent type)
+                                           const override;
 
   virtual nsresult SetLocalDescription(JsepSdpType type,
                                        const std::string& sdp) override;
@@ -152,25 +149,24 @@ public:
   }
 
   virtual bool
-  IsOfferer() const
+  IsOfferer() const override
   {
     return mIsOfferer;
   }
 
-  // Access transports.
-  virtual std::vector<RefPtr<JsepTransport>>
-  GetTransports() const override
-  {
-    return mTransports;
+  virtual const std::vector<RefPtr<JsepTransceiver>>&
+    GetTransceivers() const override {
+    return mTransceivers;
   }
 
-  virtual std::vector<JsepTrackPair>
-  GetNegotiatedTrackPairs() const override
-  {
-    return mNegotiatedTrackPairs;
+  virtual std::vector<RefPtr<JsepTransceiver>>&
+    GetTransceivers() override {
+    return mTransceivers;
   }
 
-  virtual bool AllLocalTracksAreAssigned() const override;
+  virtual nsresult AddTransceiver(RefPtr<JsepTransceiver> transceiver) override;
+
+  virtual bool CheckNegotiationNeeded() const override;
 
 private:
   struct JsepDtlsFingerprint {
@@ -178,27 +174,16 @@ private:
     std::vector<uint8_t> mValue;
   };
 
-  struct JsepSendingTrack {
-    RefPtr<JsepTrack> mTrack;
-    Maybe<size_t> mAssignedMLine;
-  };
-
-  struct JsepReceivingTrack {
-    RefPtr<JsepTrack> mTrack;
-    Maybe<size_t> mAssignedMLine;
-  };
-
   // Non-const so it can set mLastError
   nsresult CreateGenericSDP(UniquePtr<Sdp>* sdp);
-  void AddExtmap(SdpMediaSection* msection) const;
+  void AddExtmap(SdpMediaSection* msection);
   void AddMid(const std::string& mid, SdpMediaSection* msection) const;
-  const std::vector<SdpExtmapAttributeList::Extmap>* GetRtpExtensions(
-      SdpMediaSection::MediaType type) const;
+  std::vector<SdpExtmapAttributeList::Extmap> GetRtpExtensions(
+      const SdpMediaSection& msection);
 
   void AddCommonExtmaps(const SdpMediaSection& remoteMsection,
                         SdpMediaSection* msection);
   nsresult SetupIds();
-  nsresult CreateSsrc(uint32_t* ssrc);
   void SetupDefaultCodecs();
   void SetupDefaultRtpExtensions();
   void SetState(JsepSignalingState state);
@@ -210,69 +195,52 @@ private:
   nsresult SetRemoteDescriptionAnswer(JsepSdpType type, UniquePtr<Sdp> answer);
   nsresult ValidateLocalDescription(const Sdp& description);
   nsresult ValidateRemoteDescription(const Sdp& description);
+  nsresult ValidateOffer(const Sdp& offer);
   nsresult ValidateAnswer(const Sdp& offer, const Sdp& answer);
-  nsresult SetRemoteTracksFromDescription(const Sdp* remoteDescription);
-  // Non-const because we use our Uuid generator
-  nsresult CreateReceivingTrack(size_t mline,
-                                const Sdp& sdp,
-                                const SdpMediaSection& msection,
-                                RefPtr<JsepTrack>* track);
+  nsresult UpdateTransceiversFromRemoteDescription(const Sdp& remote);
+  bool WasMsectionDisabledLastNegotiation(size_t level) const;
+  JsepTransceiver* GetTransceiverForLevel(size_t level);
+  JsepTransceiver* GetTransceiverForLocal(size_t level);
+  JsepTransceiver* GetTransceiverForRemote(const SdpMediaSection& msection);
+  // The w3c and IETF specs have a lot of "magical" behavior that happens when
+  // addTrack is used. This was a deliberate design choice. Sadface.
+  JsepTransceiver* FindUnassociatedTransceiver(
+      SdpMediaSection::MediaType type, bool magic);
+  // Called for rollback of local description
+  void RollbackLocalOffer();
+  // Called for rollback of remote description
+  void RollbackRemoteOffer();
   nsresult HandleNegotiatedSession(const UniquePtr<Sdp>& local,
                                    const UniquePtr<Sdp>& remote);
   nsresult AddTransportAttributes(SdpMediaSection* msection,
                                   SdpSetupAttribute::Role dtlsRole);
   nsresult CopyPreviousTransportParams(const Sdp& oldAnswer,
+                                       const Sdp& offerersPreviousSdp,
                                        const Sdp& newOffer,
                                        Sdp* newLocal);
-  nsresult SetupOfferMSections(const JsepOfferOptions& options, Sdp* sdp);
-  // Non-const so it can assign m-line index to tracks
-  nsresult SetupOfferMSectionsByType(SdpMediaSection::MediaType type,
-                                     Maybe<size_t> offerToReceive,
-                                     Sdp* sdp);
-  nsresult BindLocalTracks(SdpMediaSection::MediaType mediatype,
-                           Sdp* sdp);
-  nsresult BindRemoteTracks(SdpMediaSection::MediaType mediatype,
-                            Sdp* sdp,
-                            size_t* offerToReceive);
-  nsresult SetRecvAsNeededOrDisable(SdpMediaSection::MediaType mediatype,
-                                    Sdp* sdp,
-                                    size_t* offerToRecv);
-  void SetupOfferToReceiveMsection(SdpMediaSection* offer);
-  nsresult AddRecvonlyMsections(SdpMediaSection::MediaType mediatype,
-                                size_t count,
-                                Sdp* sdp);
-  nsresult AddReofferMsections(const Sdp& oldLocalSdp,
-                               const Sdp& oldAnswer,
-                               Sdp* newSdp);
+  void CopyPreviousMsid(const Sdp& oldLocal, Sdp* newLocal);
+  void EnsureMsid(Sdp* remote);
   void SetupBundle(Sdp* sdp) const;
   nsresult GetRemoteIds(const Sdp& sdp,
                         const SdpMediaSection& msection,
-                        std::string* streamId,
+                        std::vector<std::string>* streamIds,
                         std::string* trackId);
-  nsresult CreateOfferMSection(SdpMediaSection::MediaType type,
-                               SdpMediaSection::Protocol proto,
-                               SdpDirectionAttribute::Direction direction,
-                               Sdp* sdp);
-  nsresult GetFreeMsectionForSend(SdpMediaSection::MediaType type,
-                                  Sdp* sdp,
-                                  SdpMediaSection** msection);
-  nsresult CreateAnswerMSection(const JsepAnswerOptions& options,
-                                size_t mlineIndex,
+  nsresult RemoveDuplicateTrackIds(Sdp* sdp);
+  nsresult CreateOfferMsection(const JsepOfferOptions& options,
+                               JsepTransceiver& transceiver,
+                               Sdp* local);
+  nsresult CreateAnswerMsection(const JsepAnswerOptions& options,
+                                JsepTransceiver& transceiver,
                                 const SdpMediaSection& remoteMsection,
                                 Sdp* sdp);
-  nsresult SetRecvonlySsrc(SdpMediaSection* msection);
-  nsresult BindMatchingLocalTrackToAnswer(SdpMediaSection* msection);
-  nsresult BindMatchingRemoteTrackToAnswer(SdpMediaSection* msection);
   nsresult DetermineAnswererSetupRole(const SdpMediaSection& remoteMsection,
                                       SdpSetupAttribute::Role* rolep);
-  nsresult MakeNegotiatedTrackPair(const SdpMediaSection& remote,
-                                   const SdpMediaSection& local,
-                                   const RefPtr<JsepTransport>& transport,
-                                   bool usingBundle,
-                                   size_t transportLevel,
-                                   JsepTrackPair* trackPairOut);
-  void UpdateTransport(const SdpMediaSection& msection,
-                       JsepTransport* transport);
+  nsresult MakeNegotiatedTransceiver(const SdpMediaSection& remote,
+                                     const SdpMediaSection& local,
+                                     bool usingBundle,
+                                     size_t transportLevel,
+                                     JsepTransceiver* transceiverOut);
+  void InitTransport(const SdpMediaSection& msection, JsepTransport* transport);
 
   nsresult FinalizeTransport(const SdpAttributeList& remote,
                              const SdpAttributeList& answer,
@@ -282,43 +250,38 @@ private:
 
   nsresult EnableOfferMsection(SdpMediaSection* msection);
 
-  mozilla::Sdp* GetParsedLocalDescription() const;
-  mozilla::Sdp* GetParsedRemoteDescription() const;
+  mozilla::Sdp* GetParsedLocalDescription(JsepDescriptionPendingOrCurrent type)
+                                          const;
+  mozilla::Sdp* GetParsedRemoteDescription(JsepDescriptionPendingOrCurrent type)
+                                           const;
   const Sdp* GetAnswer() const;
 
-  std::vector<JsepSendingTrack> mLocalTracks;
-  std::vector<JsepReceivingTrack> mRemoteTracks;
-  // By the most recent SetRemoteDescription
-  std::vector<JsepReceivingTrack> mRemoteTracksAdded;
-  std::vector<JsepReceivingTrack> mRemoteTracksRemoved;
-  std::vector<RefPtr<JsepTransport> > mTransports;
-  // So we can rollback
-  std::vector<RefPtr<JsepTransport> > mOldTransports;
-  std::vector<JsepTrackPair> mNegotiatedTrackPairs;
+  // !!!NOT INDEXED BY LEVEL!!! These are in the order they were created in. The
+  // level mapping is done with JsepTransceiver::mLevel.
+  std::vector<RefPtr<JsepTransceiver>> mTransceivers;
+  // So we can rollback. Not as simple as just going back to the old, though...
+  std::vector<RefPtr<JsepTransceiver>> mOldTransceivers;
 
   bool mIsOfferer;
   bool mWasOffererLastTime;
   bool mIceControlling;
   std::string mIceUfrag;
   std::string mIcePwd;
+  bool mLocalIceIsRestarting;
   bool mRemoteIsIceLite;
+  bool mRemoteIceIsRestarting;
   std::vector<std::string> mIceOptions;
   JsepBundlePolicy mBundlePolicy;
   std::vector<JsepDtlsFingerprint> mDtlsFingerprints;
   uint64_t mSessionId;
   uint64_t mSessionVersion;
-  std::vector<SdpExtmapAttributeList::Extmap> mAudioRtpExtensions;
-  std::vector<SdpExtmapAttributeList::Extmap> mVideoRtpExtensions;
+  std::vector<JsepExtmapMediaType> mRtpExtensions;
   UniquePtr<JsepUuidGenerator> mUuidGen;
   std::string mDefaultRemoteStreamId;
-  std::map<size_t, std::string> mDefaultRemoteTrackIdsByLevel;
   std::string mCNAME;
   // Used to prevent duplicate local SSRCs. Not used to prevent local/remote or
   // remote-only duplication, which will be important for EKT but not now.
   std::set<uint32_t> mSsrcs;
-  // When an m-section doesn't have a local track, it still needs an ssrc, which
-  // is stored here.
-  std::vector<uint32_t> mRecvonlySsrcs;
   UniquePtr<Sdp> mGeneratedLocalDescription; // Created but not set.
   UniquePtr<Sdp> mCurrentLocalDescription;
   UniquePtr<Sdp> mCurrentRemoteDescription;
@@ -326,8 +289,11 @@ private:
   UniquePtr<Sdp> mPendingRemoteDescription;
   PtrVector<JsepCodecDescription> mSupportedCodecs;
   std::string mLastError;
-  SipccSdpParser mParser;
+  SipccSdpParser mSipccParser;
   SdpHelper mSdpHelper;
+  SsrcGenerator mSsrcGenerator;
+  bool mRunRustParser;
+  RsdparsaSdpParser mRsdparsaParser;
 };
 
 } // namespace mozilla

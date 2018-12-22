@@ -6,13 +6,13 @@
 
 #include "mozilla/dom/cache/CacheOpParent.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/cache/AutoUtils.h"
-#include "mozilla/dom/cache/CachePushStreamParent.h"
 #include "mozilla/dom/cache/ReadStream.h"
 #include "mozilla/dom/cache/SavedTypes.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -28,7 +28,7 @@ CacheOpParent::CacheOpParent(PBackgroundParent* aIpcManager, CacheId aCacheId,
   , mNamespace(INVALID_NAMESPACE)
   , mOpArgs(aOpArgs)
 {
-  MOZ_ASSERT(mIpcManager);
+  MOZ_DIAGNOSTIC_ASSERT(mIpcManager);
 }
 
 CacheOpParent::CacheOpParent(PBackgroundParent* aIpcManager,
@@ -38,7 +38,7 @@ CacheOpParent::CacheOpParent(PBackgroundParent* aIpcManager,
   , mNamespace(aNamespace)
   , mOpArgs(aOpArgs)
 {
-  MOZ_ASSERT(mIpcManager);
+  MOZ_DIAGNOSTIC_ASSERT(mIpcManager);
 }
 
 CacheOpParent::~CacheOpParent()
@@ -50,13 +50,15 @@ void
 CacheOpParent::Execute(ManagerId* aManagerId)
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpParent);
-  MOZ_ASSERT(!mManager);
-  MOZ_ASSERT(!mVerifier);
+  MOZ_DIAGNOSTIC_ASSERT(!mManager);
+  MOZ_DIAGNOSTIC_ASSERT(!mVerifier);
 
-  RefPtr<Manager> manager;
-  nsresult rv = Manager::GetOrCreate(aManagerId, getter_AddRefs(manager));
+  RefPtr<cache::Manager> manager;
+  nsresult rv = cache::Manager::GetOrCreate(aManagerId, getter_AddRefs(manager));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    Unused << Send__delete__(this, ErrorResult(rv), void_t());
+    ErrorResult result(rv);
+    Unused << Send__delete__(this, result, void_t());
+    result.SuppressException();
     return;
   }
 
@@ -64,17 +66,17 @@ CacheOpParent::Execute(ManagerId* aManagerId)
 }
 
 void
-CacheOpParent::Execute(Manager* aManager)
+CacheOpParent::Execute(cache::Manager* aManager)
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpParent);
-  MOZ_ASSERT(!mManager);
-  MOZ_ASSERT(!mVerifier);
+  MOZ_DIAGNOSTIC_ASSERT(!mManager);
+  MOZ_DIAGNOSTIC_ASSERT(!mVerifier);
 
   mManager = aManager;
 
   // Handle put op
   if (mOpArgs.type() == CacheOpArgs::TCachePutAllArgs) {
-    MOZ_ASSERT(mCacheId != INVALID_CACHE_ID);
+    MOZ_DIAGNOSTIC_ASSERT(mCacheId != INVALID_CACHE_ID);
 
     const CachePutAllArgs& args = mOpArgs.get_CachePutAllArgs();
     const nsTArray<CacheRequestResponse>& list = args.requestResponseList();
@@ -96,13 +98,13 @@ CacheOpParent::Execute(Manager* aManager)
 
   // Handle all other cache ops
   if (mCacheId != INVALID_CACHE_ID) {
-    MOZ_ASSERT(mNamespace == INVALID_NAMESPACE);
+    MOZ_DIAGNOSTIC_ASSERT(mNamespace == INVALID_NAMESPACE);
     mManager->ExecuteCacheOp(this, mCacheId, mOpArgs);
     return;
   }
 
   // Handle all storage ops
-  MOZ_ASSERT(mNamespace != INVALID_NAMESPACE);
+  MOZ_DIAGNOSTIC_ASSERT(mNamespace != INVALID_NAMESPACE);
   mManager->ExecuteStorageOp(this, mNamespace, mOpArgs);
 }
 
@@ -110,8 +112,8 @@ void
 CacheOpParent::WaitForVerification(PrincipalVerifier* aVerifier)
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpParent);
-  MOZ_ASSERT(!mManager);
-  MOZ_ASSERT(!mVerifier);
+  MOZ_DIAGNOSTIC_ASSERT(!mManager);
+  MOZ_DIAGNOSTIC_ASSERT(!mVerifier);
 
   mVerifier = aVerifier;
   mVerifier->AddListener(this);
@@ -144,7 +146,9 @@ CacheOpParent::OnPrincipalVerified(nsresult aRv, ManagerId* aManagerId)
   mVerifier = nullptr;
 
   if (NS_WARN_IF(NS_FAILED(aRv))) {
-    Unused << Send__delete__(this, ErrorResult(aRv), void_t());
+    ErrorResult result(aRv);
+    Unused << Send__delete__(this, result, void_t());
+    result.SuppressException();
     return;
   }
 
@@ -159,8 +163,8 @@ CacheOpParent::OnOpComplete(ErrorResult&& aRv, const CacheOpResult& aResult,
                             StreamList* aStreamList)
 {
   NS_ASSERT_OWNINGTHREAD(CacheOpParent);
-  MOZ_ASSERT(mIpcManager);
-  MOZ_ASSERT(mManager);
+  MOZ_DIAGNOSTIC_ASSERT(mIpcManager);
+  MOZ_DIAGNOSTIC_ASSERT(mManager);
 
   // Never send an op-specific result if we have an error.  Instead, send
   // void_t() to ensure that we don't leak actors on the child side.
@@ -170,13 +174,17 @@ CacheOpParent::OnOpComplete(ErrorResult&& aRv, const CacheOpResult& aResult,
     return;
   }
 
+  uint32_t entryCount = std::max(1lu, static_cast<unsigned long>(
+                                      std::max(aSavedResponseList.Length(),
+                                               aSavedRequestList.Length())));
+
   // The result must contain the appropriate type at this point.  It may
   // or may not contain the additional result data yet.  For types that
   // do not need special processing, it should already be set.  If the
   // result requires actor-specific operations, then we do that below.
   // If the type and data types don't match, then we will trigger an
   // assertion in AutoParentOpResult::Add().
-  AutoParentOpResult result(mIpcManager, aResult);
+  AutoParentOpResult result(mIpcManager, aResult, entryCount);
 
   if (aOpenedCacheId != INVALID_CACHE_ID) {
     result.Add(aOpenedCacheId, mManager);
@@ -203,42 +211,17 @@ CacheOpParent::DeserializeCacheStream(const CacheReadStreamOrVoid& aStreamOrVoid
   nsCOMPtr<nsIInputStream> stream;
   const CacheReadStream& readStream = aStreamOrVoid.get_CacheReadStream();
 
-  // Option 1: A push stream actor was sent for nsPipe data
-  if (readStream.pushStreamParent()) {
-    MOZ_ASSERT(!readStream.controlParent());
-    CachePushStreamParent* pushStream =
-      static_cast<CachePushStreamParent*>(readStream.pushStreamParent());
-    stream = pushStream->TakeReader();
-    MOZ_ASSERT(stream);
-    return stream.forget();
-  }
-
-  // Option 2: One of our own ReadStreams was passed back to us with a stream
+  // Option 1: One of our own ReadStreams was passed back to us with a stream
   //           control actor.
   stream = ReadStream::Create(readStream);
   if (stream) {
     return stream.forget();
   }
 
-  // Option 3: A stream was serialized using normal methods.
-  AutoTArray<FileDescriptor, 4> fds;
-  if (readStream.fds().type() ==
-      OptionalFileDescriptorSet::TPFileDescriptorSetChild) {
-
-    FileDescriptorSetParent* fdSetActor =
-      static_cast<FileDescriptorSetParent*>(readStream.fds().get_PFileDescriptorSetParent());
-    MOZ_ASSERT(fdSetActor);
-
-    fdSetActor->ForgetFileDescriptors(fds);
-    MOZ_ASSERT(!fds.IsEmpty());
-
-    if (!fdSetActor->Send__delete__(fdSetActor)) {
-      // child process is gone, warn and allow actor to clean up normally
-      NS_WARNING("Cache failed to delete fd set actor.");
-    }
-  }
-
-  return DeserializeInputStream(readStream.params(), fds);
+  // Option 2: A stream was serialized using normal methods or passed
+  //           as a PChildToParentStream actor.  Use the standard method for
+  //           extracting the resulting stream.
+  return DeserializeIPCStream(readStream.stream());
 }
 
 } // namespace cache

@@ -2,18 +2,18 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict"
+"use strict";
 
-const { classes: Cc, interfaces: Ci, manager: Cm, utils: Cu, results: Cr } = Components;
+const Cm = Components.manager;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Prompt",
-                                  "resource://gre/modules/Prompt.jsm");
+ChromeUtils.defineModuleGetter(this, "Prompt",
+                               "resource://gre/modules/Prompt.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Messaging",
-                                  "resource://gre/modules/Messaging.jsm");
+ChromeUtils.defineModuleGetter(this, "EventDispatcher",
+                               "resource://gre/modules/Messaging.jsm");
 
 function TabSource() {
 }
@@ -22,32 +22,33 @@ TabSource.prototype = {
   classID: Components.ID("{5850c76e-b916-4218-b99a-31f004e0a7e7}"),
   classDescription: "Fennec Tab Source",
   contractID: "@mozilla.org/tab-source-service;1",
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsITabSource]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsITabSource]),
 
   getTabToStream: function() {
-    let app = Services.wm.getMostRecentWindow("navigator:browser").BrowserApp;
-    let tabs = app.tabs;
-    if (tabs == null || tabs.length == 0) {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let app = win && win.BrowserApp;
+    let tabs = app && app.tabs;
+    if (!tabs || tabs.length == 0) {
       Services.console.logStringMessage("ERROR: No tabs");
       return null;
     }
 
     let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-    let title = bundle.GetStringFromName("tabshare.title")
+    let title = bundle.GetStringFromName("tabshare.title");
 
     let prompt = new Prompt({
+      window: win,
       title: title,
-      window: null
     }).setSingleChoiceItems(tabs.map(function(tab) {
       let label;
       if (tab.browser.contentTitle)
         label = tab.browser.contentTitle;
       else if (tab.browser.contentURI)
-        label = tab.browser.contentURI.spec;
+        label = tab.browser.contentURI.displaySpec;
       else
-        label = tab.originalURI.spec;
+        label = tab.originalURI.displaySpec;
       return { label: label,
-               icon: "thumbnail:" + tab.id }
+               icon: "thumbnail:" + tab.id };
     }));
 
     let result = null;
@@ -56,10 +57,7 @@ TabSource.prototype = {
     });
 
     // Spin this thread while we wait for a result.
-    let thread = Services.tm.currentThread;
-    while (result == null) {
-      thread.processNextEvent(true);
-    }
+    Services.tm.spinEventLoopUntil(() => result != null);
 
     if (result == -1) {
       return null;
@@ -72,7 +70,11 @@ TabSource.prototype = {
     let tabs = app.tabs;
     for (var i in tabs) {
       if (tabs[i].browser.contentWindow == window) {
-        Messaging.sendRequest({ type: "Tab:StreamStart", tabID: tabs[i].id });
+        EventDispatcher.instance.sendRequest({
+          type: "Tab:RecordingChange",
+          recording: true,
+          tabID: tabs[i].id,
+        });
       }
     }
   },
@@ -82,7 +84,11 @@ TabSource.prototype = {
     let tabs = app.tabs;
     for (let i in tabs) {
       if (tabs[i].browser.contentWindow == window) {
-        Messaging.sendRequest({ type: "Tab:StreamStop", tabID: tabs[i].id });
+        EventDispatcher.instance.sendRequest({
+          type: "Tab:RecordingChange",
+          recording: false,
+          tabID: tabs[i].id,
+        });
       }
     }
   }

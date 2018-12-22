@@ -5,9 +5,9 @@
 
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+ChromeUtils.defineModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 
-/*globals MAX_URI_LENGTH, MAX_TITLE_LENGTH */
+/* globals MAX_URI_LENGTH, MAX_TITLE_LENGTH */
 
 var Reader = {
   // These values should match those defined in BrowserContract.java.
@@ -20,19 +20,6 @@ var Reader = {
   get _hasUsedToolbar() {
     delete this._hasUsedToolbar;
     return this._hasUsedToolbar = Services.prefs.getBoolPref("reader.has_used_toolbar");
-  },
-
-  get _buttonHistogram() {
-    delete this._buttonHistogram;
-    return this._buttonHistogram = Services.telemetry.getHistogramById("FENNEC_READER_VIEW_BUTTON");
-  },
-
-  // Values for "FENNEC_READER_VIEW_BUTTON" histogram.
-  _buttonHistogramValues: {
-    HIDDEN: 0,
-    SHOWN: 1,
-    TAP_ENTER: 2,
-    TAP_EXIT: 3
   },
 
   /**
@@ -68,16 +55,23 @@ var Reader = {
     return { handled: (listener ? listener() : false) };
   },
 
-  observe: function Reader_observe(aMessage, aTopic, aData) {
-    switch (aTopic) {
-      case "Reader:FetchContent": {
-        let data = JSON.parse(aData);
-        this._fetchContent(data.url, data.id);
+  onEvent: function Reader_onEvent(event, data, callback) {
+    switch (event) {
+      case "Reader:RemoveFromCache": {
+        ReaderMode.removeArticleFromCache(data.url).catch(e => Cu.reportError("Error removing article from cache: " + e));
         break;
       }
 
-      case "Reader:Removed": {
-        ReaderMode.removeArticleFromCache(aData).catch(e => Cu.reportError("Error removing article from cache: " + e));
+      case "Reader:AddToCache": {
+        let tab = BrowserApp.getTabForId(data.tabID);
+        if (!tab) {
+          throw new Error("No tab for tabID = " + data.tabID + " when trying to save reader view article");
+        }
+
+        // If the article is coming from reader mode, we must have fetched it already.
+        this._getArticleData(tab.browser).then((article) => {
+          ReaderMode.storeArticleInCache(article);
+        }).catch(e => Cu.reportError("Error storing article in cache: " + e));
         break;
       }
     }
@@ -122,20 +116,17 @@ var Reader = {
       }
 
       case "Reader:FaviconRequest": {
-        Messaging.sendRequestForResult({
+        GlobalEventDispatcher.sendRequestForResult({
           type: "Reader:FaviconRequest",
           url: message.data.url
         }).then(data => {
-          message.target.messageManager.sendAsyncMessage("Reader:FaviconReturn", JSON.parse(data));
+          message.target.messageManager.sendAsyncMessage("Reader:FaviconReturn", data);
         });
         break;
       }
 
       case "Reader:SystemUIVisibility":
-        Messaging.sendRequest({
-          type: "SystemUI:Visibility",
-          visible: message.data.visible
-        });
+        this._showSystemUI(message.data.visible);
         break;
 
       case "Reader:ToolbarHidden":
@@ -159,17 +150,11 @@ var Reader = {
     readerModeCallback: function(browser) {
       let url = browser.currentURI.spec;
       if (url.startsWith("about:reader")) {
-        let originalURL = ReaderMode.getOriginalUrl(url);
-        if (!originalURL) {
-          Cu.reportError("Error finding original URL for about:reader URL: " + url);
-        } else {
-          browser.loadURI(originalURL);
-        }
-        Reader._buttonHistogram.add(Reader._buttonHistogramValues.TAP_EXIT);
+        UITelemetry.addEvent("action.1", "button", null, "reader_exit");
       } else {
-        browser.messageManager.sendAsyncMessage("Reader:ParseDocument", { url: url });
-        Reader._buttonHistogram.add(Reader._buttonHistogramValues.TAP_ENTER);
+        UITelemetry.addEvent("action.1", "button", null, "reader_enter");
       }
+      browser.messageManager.sendAsyncMessage("Reader:ToggleReaderMode");
     },
   },
 
@@ -183,74 +168,52 @@ var Reader = {
       delete this.pageAction.id;
     }
 
-    let showPageAction = (icon, title) => {
+    let showPageAction = (icon, title, useTint) => {
       this.pageAction.id = PageActions.add({
         icon: icon,
         title: title,
         clickCallback: () => this.pageAction.readerModeCallback(browser),
-        important: true
+        important: true,
+        useTint: useTint
       });
     };
 
     let browser = tab.browser;
     if (browser.currentURI.spec.startsWith("about:reader")) {
-      showPageAction("drawable://reader_active", Strings.reader.GetStringFromName("readerView.close"));
+      showPageAction("drawable://ic_readermode_on", Strings.reader.GetStringFromName("readerView.close"), false);
       // Only start a reader session if the viewer is in the foreground. We do
       // not track background reader viewers.
       UITelemetry.startSession("reader.1", null);
       return;
     }
 
+    // not in ReaderMode, to make sure System UI is visible, not dimmed.
+    this._showSystemUI(true);
+
     // Only stop a reader session if the foreground viewer is not visible.
     UITelemetry.stopSession("reader.1", "", null);
 
     if (browser.isArticle) {
-      showPageAction("drawable://reader", Strings.reader.GetStringFromName("readerView.enter"));
-      this._buttonHistogram.add(this._buttonHistogramValues.SHOWN);
+      showPageAction("drawable://ic_readermode", Strings.reader.GetStringFromName("readerView.enter"), true);
+      UITelemetry.addEvent("show.1", "button", null, "reader_available");
+      this._sendMmaEvent("reader_available");
     } else {
-      this._buttonHistogram.add(this._buttonHistogramValues.HIDDEN);
+      UITelemetry.addEvent("show.1", "button", null, "reader_unavailable");
     }
   },
 
-  /**
-   * Downloads and caches content for a reading list item with a given URL and id.
-   */
-  _fetchContent: function(url, id) {
-    this._downloadAndCacheArticle(url).then(article => {
-      if (article == null) {
-        Messaging.sendRequest({
-          type: "Reader:UpdateList",
-          id: id,
-          status: this.STATUS_FETCH_FAILED_UNSUPPORTED_FORMAT,
-        });
-      } else {
-        Messaging.sendRequest({
-          type: "Reader:UpdateList",
-          id: id,
-          url: truncate(article.url, MAX_URI_LENGTH),
-          title: truncate(article.title, MAX_TITLE_LENGTH),
-          length: article.length,
-          excerpt: article.excerpt,
-          status: this.STATUS_FETCHED_ARTICLE,
-        });
-      }
-    }).catch(e => {
-      Cu.reportError("Error fetching content: " + e);
-      Messaging.sendRequest({
-        type: "Reader:UpdateList",
-        id: id,
-        status: this.STATUS_FETCH_FAILED_TEMPORARY,
+  _sendMmaEvent: function(event) {
+      WindowEventDispatcher.sendRequest({
+          type: "Mma:" + event,
       });
-    });
   },
 
-  _downloadAndCacheArticle: Task.async(function* (url) {
-    let article = yield ReaderMode.downloadAndParseDocument(url);
-    if (article != null) {
-      yield ReaderMode.storeArticleInCache(article);
-    }
-    return article;
-  }),
+  _showSystemUI: function(visibility) {
+      WindowEventDispatcher.sendRequest({
+          type: "SystemUI:Visibility",
+          visible: visibility
+      });
+  },
 
   /**
    * Gets an article for a given URL. This method will download and parse a document
@@ -278,6 +241,23 @@ var Reader = {
       return null;
     });
   }),
+
+  _getArticleData: function(browser) {
+    return new Promise((resolve, reject) => {
+      if (browser == null) {
+        reject("_getArticleData needs valid browser");
+      }
+
+      let mm = browser.messageManager;
+      let listener = (message) => {
+        mm.removeMessageListener("Reader:StoredArticleData", listener);
+        resolve(message.data.article);
+      };
+      mm.addMessageListener("Reader:StoredArticleData", listener);
+      mm.sendAsyncMessage("Reader:GetStoredArticleData");
+    });
+  },
+
 
   /**
    * Migrates old indexedDB reader mode cache to new JSON cache.

@@ -2,20 +2,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #include "nsXMLPrettyPrinter.h"
 #include "nsContentUtils.h"
 #include "nsICSSDeclaration.h"
-#include "nsIDOMDocumentXBL.h"
 #include "nsIObserver.h"
-#include "nsIXSLTProcessor.h"
 #include "nsSyncLoadService.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMElement.h"
 #include "nsIServiceManager.h"
 #include "nsNetUtil.h"
 #include "mozilla/dom/Element.h"
-#include "nsIDOMDocumentFragment.h"
 #include "nsBindingManager.h"
 #include "nsXBLService.h"
 #include "nsIScriptSecurityManager.h"
@@ -23,6 +19,10 @@
 #include "nsIDocument.h"
 #include "nsVariant.h"
 #include "mozilla/dom/CustomEvent.h"
+#include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/ToJSValue.h"
+#include "mozilla/dom/txMozillaXSLTProcessor.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -48,7 +48,8 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
     *aDidPrettyPrint = false;
 
     // Check for iframe with display:none. Such iframes don't have presshells
-    if (!aDocument->GetShell()) {
+    nsCOMPtr<nsIPresShell> shell = aDocument->GetShell();
+    if (!shell) {
         return NS_OK;
     }
 
@@ -101,78 +102,103 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
                    NS_LITERAL_CSTRING("chrome://global/content/xml/XMLPrettyPrint.xsl"));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIDOMDocument> xslDocument;
+    nsCOMPtr<nsIDocument> xslDocument;
     rv = nsSyncLoadService::LoadDocument(xslUri, nsIContentPolicy::TYPE_XSLT,
                                          nsContentUtils::GetSystemPrincipal(),
                                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-                                         nullptr, true, mozilla::net::RP_Default,
+                                         nullptr, true, mozilla::net::RP_Unset,
                                          getter_AddRefs(xslDocument));
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Transform the document
-    nsCOMPtr<nsIXSLTProcessor> transformer =
-        do_CreateInstance("@mozilla.org/document-transformer;1?type=xslt", &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+    RefPtr<txMozillaXSLTProcessor> transformer = new txMozillaXSLTProcessor();
+    ErrorResult err;
+    transformer->ImportStylesheet(*xslDocument, err);
+    if (NS_WARN_IF(err.Failed())) {
+        return err.StealNSResult();
+    }
 
-    rv = transformer->ImportStylesheet(xslDocument);
-    NS_ENSURE_SUCCESS(rv, rv);
+    RefPtr<DocumentFragment> resultFragment =
+        transformer->TransformToFragment(*aDocument, *aDocument, err);
+    if (NS_WARN_IF(err.Failed())) {
+        return err.StealNSResult();
+    }
 
-    nsCOMPtr<nsIDOMDocumentFragment> resultFragment;
-    nsCOMPtr<nsIDOMDocument> sourceDocument = do_QueryInterface(aDocument);
-    rv = transformer->TransformToFragment(sourceDocument, sourceDocument,
-                                          getter_AddRefs(resultFragment));
-    NS_ENSURE_SUCCESS(rv, rv);
+    // Find the root element
+    RefPtr<Element> rootElement = aDocument->GetRootElement();
+    NS_ENSURE_TRUE(rootElement, NS_ERROR_UNEXPECTED);
 
-    //
-    // Apply the prettprint XBL binding.
-    //
-    // We take some shortcuts here. In particular, we don't bother invoking the
-    // contstructor (since the binding has no constructor), and we don't bother
-    // calling LoadBindingDocument because it's a chrome:// URI and thus will get
-    // sync loaded no matter what.
-    //
+    if (nsContentUtils::IsShadowDOMEnabled()) {
+        // Attach a closed shadow root on it.
+        RefPtr<ShadowRoot> shadowRoot =
+            rootElement->AttachShadowWithoutNameChecks(ShadowRootMode::Closed);
 
-    // Grab the XBL service.
-    nsXBLService* xblService = nsXBLService::GetInstance();
-    NS_ENSURE_TRUE(xblService, NS_ERROR_NOT_AVAILABLE);
+        // Append the document fragment to the shadow dom.
+        shadowRoot->AppendChild(*resultFragment, err);
+        if (NS_WARN_IF(err.Failed())) {
+            return err.StealNSResult();
+        }
+    } else {
+        //
+        // Apply the prettprint XBL binding.
+        //
+        // We take some shortcuts here. In particular, we don't bother invoking the
+        // contstructor (since the binding has no constructor), and we don't bother
+        // calling LoadBindingDocument because it's a chrome:// URI and thus will get
+        // sync loaded no matter what.
+        //
 
-    // Compute the binding URI.
-    nsCOMPtr<nsIURI> bindingUri;
-    rv = NS_NewURI(getter_AddRefs(bindingUri),
-        NS_LITERAL_STRING("chrome://global/content/xml/XMLPrettyPrint.xml#prettyprint"));
-    NS_ENSURE_SUCCESS(rv, rv);
+        // Grab the XBL service.
+        nsXBLService* xblService = nsXBLService::GetInstance();
+        NS_ENSURE_TRUE(xblService, NS_ERROR_NOT_AVAILABLE);
 
-    // Compute the bound element.
-    nsCOMPtr<nsIContent> rootCont = aDocument->GetRootElement();
-    NS_ENSURE_TRUE(rootCont, NS_ERROR_UNEXPECTED);
+        // Compute the binding URI.
+        nsCOMPtr<nsIURI> bindingUri;
+        rv = NS_NewURI(getter_AddRefs(bindingUri),
+            NS_LITERAL_STRING("chrome://global/content/xml/XMLPrettyPrint.xml#prettyprint"));
+        NS_ENSURE_SUCCESS(rv, rv);
 
-    // Grab the system principal.
-    nsCOMPtr<nsIPrincipal> sysPrincipal;
-    nsContentUtils::GetSecurityManager()->
-        GetSystemPrincipal(getter_AddRefs(sysPrincipal));
+        // Grab the system principal.
+        nsCOMPtr<nsIPrincipal> sysPrincipal;
+        nsContentUtils::GetSecurityManager()->
+            GetSystemPrincipal(getter_AddRefs(sysPrincipal));
 
-    // Load the bindings.
-    RefPtr<nsXBLBinding> unused;
-    bool ignored;
-    rv = xblService->LoadBindings(rootCont, bindingUri, sysPrincipal,
-                                  getter_AddRefs(unused), &ignored);
-    NS_ENSURE_SUCCESS(rv, rv);
+        // Destroy any existing frames before we unbind anonymous content.
+        // Note that the shell might be Destroy'ed by now (see bug 1415541).
+        if (!shell->IsDestroying()) {
+            shell->DestroyFramesForAndRestyle(rootElement);
+        }
 
-    // Fire an event at the bound element to pass it |resultFragment|.
-    RefPtr<CustomEvent> event =
-      NS_NewDOMCustomEvent(rootCont, nullptr, nullptr);
-    MOZ_ASSERT(event);
-    nsCOMPtr<nsIWritableVariant> resultFragmentVariant = new nsVariant();
-    rv = resultFragmentVariant->SetAsISupports(resultFragment);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    rv = event->InitCustomEvent(NS_LITERAL_STRING("prettyprint-dom-created"),
-                                /* bubbles = */ false, /* cancelable = */ false,
-                                /* detail = */ resultFragmentVariant);
-    NS_ENSURE_SUCCESS(rv, rv);
-    event->SetTrusted(true);
-    bool dummy;
-    rv = rootCont->DispatchEvent(event, &dummy);
-    NS_ENSURE_SUCCESS(rv, rv);
+        // Load the bindings.
+        RefPtr<nsXBLBinding> unused;
+        bool ignored;
+        rv = xblService->LoadBindings(rootElement, bindingUri, sysPrincipal,
+                                      getter_AddRefs(unused), &ignored);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        // Fire an event at the bound element to pass it |resultFragment|.
+        RefPtr<CustomEvent> event =
+          NS_NewDOMCustomEvent(rootElement, nullptr, nullptr);
+        MOZ_ASSERT(event);
+        AutoJSAPI jsapi;
+        if (!jsapi.Init(event->GetParentObject())) {
+            return NS_ERROR_UNEXPECTED;
+        }
+        JSContext* cx = jsapi.cx();
+        JS::Rooted<JS::Value> detail(cx);
+        if (!ToJSValue(cx, resultFragment, &detail)) {
+            return NS_ERROR_UNEXPECTED;
+        }
+        event->InitCustomEvent(cx, NS_LITERAL_STRING("prettyprint-dom-created"),
+                               /* bubbles = */ false, /* cancelable = */ false,
+                               detail);
+
+        event->SetTrusted(true);
+        rootElement->DispatchEvent(*event, err);
+        if (NS_WARN_IF(err.Failed())) {
+            return err.StealNSResult();
+        }
+    }
 
     // Observe the document so we know when to switch to "normal" view
     aDocument->AddObserver(this);
@@ -186,15 +212,21 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
 void
 nsXMLPrettyPrinter::MaybeUnhook(nsIContent* aContent)
 {
-    // If there either aContent is null (the document-node was modified) or
-    // there isn't a binding parent we know it's non-anonymous content.
-    if ((!aContent || !aContent->GetBindingParent()) && !mUnhookPending) {
+    // If aContent is null, the document-node was modified.
+    // If it is not null but in the shadow tree, the <scrollbar> NACs,
+    // or the XBL binding, the change was in the generated content, and
+    // it should be ignored.
+    bool isGeneratedContent = !aContent ?
+        false :
+        aContent->GetBindingParent() || aContent->IsInShadowTree();
+
+    if (!isGeneratedContent && !mUnhookPending) {
         // Can't blindly to mUnhookPending after AddScriptRunner,
         // since AddScriptRunner _could_ in theory run us
         // synchronously
         mUnhookPending = true;
-        nsContentUtils::AddScriptRunner(
-          NS_NewRunnableMethod(this, &nsXMLPrettyPrinter::Unhook));
+        nsContentUtils::AddScriptRunner(NewRunnableMethod(
+          "nsXMLPrettyPrinter::Unhook", this, &nsXMLPrettyPrinter::Unhook));
     }
 }
 
@@ -205,6 +237,10 @@ nsXMLPrettyPrinter::Unhook()
     nsCOMPtr<Element> element = mDocument->GetDocumentElement();
 
     if (element) {
+        // Remove the shadow root
+        element->UnattachShadow();
+
+        // Remove the bound XBL binding
         mDocument->BindingManager()->ClearBinding(element);
     }
 
@@ -214,10 +250,9 @@ nsXMLPrettyPrinter::Unhook()
 }
 
 void
-nsXMLPrettyPrinter::AttributeChanged(nsIDocument* aDocument,
-                                     Element* aElement,
+nsXMLPrettyPrinter::AttributeChanged(Element* aElement,
                                      int32_t aNameSpaceID,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      int32_t aModType,
                                      const nsAttrValue* aOldValue)
 {
@@ -225,31 +260,22 @@ nsXMLPrettyPrinter::AttributeChanged(nsIDocument* aDocument,
 }
 
 void
-nsXMLPrettyPrinter::ContentAppended(nsIDocument* aDocument,
-                                    nsIContent* aContainer,
-                                    nsIContent* aFirstNewContent,
-                                    int32_t aNewIndexInContainer)
+nsXMLPrettyPrinter::ContentAppended(nsIContent* aFirstNewContent)
 {
-    MaybeUnhook(aContainer);
+    MaybeUnhook(aFirstNewContent->GetParent());
 }
 
 void
-nsXMLPrettyPrinter::ContentInserted(nsIDocument* aDocument,
-                                    nsIContent* aContainer,
-                                    nsIContent* aChild,
-                                    int32_t aIndexInContainer)
+nsXMLPrettyPrinter::ContentInserted(nsIContent* aChild)
 {
-    MaybeUnhook(aContainer);
+    MaybeUnhook(aChild->GetParent());
 }
 
 void
-nsXMLPrettyPrinter::ContentRemoved(nsIDocument* aDocument,
-                                   nsIContent* aContainer,
-                                   nsIContent* aChild,
-                                   int32_t aIndexInContainer,
+nsXMLPrettyPrinter::ContentRemoved(nsIContent* aChild,
                                    nsIContent* aPreviousSibling)
 {
-    MaybeUnhook(aContainer);
+    MaybeUnhook(aChild->GetParent());
 }
 
 void

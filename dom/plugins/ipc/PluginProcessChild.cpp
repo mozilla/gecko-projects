@@ -12,6 +12,12 @@
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "nsDebugImpl.h"
+#include "nsThreadManager.h"
+#include "ClearOnShutdown.h"
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+#include "mozilla/SandboxSettings.h"
+#endif
 
 #if defined(XP_MACOSX)
 #include "nsCocoaFeatures.h"
@@ -21,10 +27,7 @@ extern "C" CGError CGSSetDebugOptions(int options);
 #endif
 
 #ifdef XP_WIN
-#include <objbase.h>
-bool ShouldProtectPluginCurrentDirectory(char16ptr_t pluginFilePath);
 #if defined(MOZ_SANDBOX)
-#define TARGET_SANDBOX_EXPORTS
 #include "mozilla/sandboxTarget.h"
 #endif
 #endif
@@ -32,16 +35,14 @@ bool ShouldProtectPluginCurrentDirectory(char16ptr_t pluginFilePath);
 using mozilla::ipc::IOThreadChild;
 
 #ifdef OS_WIN
-#include "nsSetDllDirectory.h"
 #include <algorithm>
 #endif
 
 namespace mozilla {
 namespace plugins {
 
-
 bool
-PluginProcessChild::Init()
+PluginProcessChild::Init(int aArgc, char* aArgv[])
 {
     nsDebugImpl::SetMultiprocessMode("NPAPI");
 
@@ -81,12 +82,6 @@ PluginProcessChild::Init()
     }
 #endif
 
-#ifdef XP_WIN
-    // Drag-and-drop needs OleInitialize to be called, and Silverlight depends
-    // on the host calling CoInitialize (which is called by OleInitialize).
-    ::OleInitialize(nullptr);
-#endif
-
     // Certain plugins, such as flash, steal the unhandled exception filter
     // thus we never get crash reports when they fault. This call fixes it.
     message_loop()->set_exception_restoration(true);
@@ -102,17 +97,37 @@ PluginProcessChild::Init()
 
     pluginFilename = UnmungePluginDsoPath(values[1]);
 
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+    int level;
+    if (values.size() >= 4 && values[2] == "-flashSandboxLevel" &&
+        (level = std::stoi(values[3], nullptr)) > 0) {
+
+      level = ClampFlashSandboxLevel(level);
+      MOZ_ASSERT(level > 0);
+
+      bool enableLogging = false;
+      if (values.size() >= 5 && values[4] == "-flashSandboxLogging") {
+        enableLogging = true;
+      }
+
+      mPlugin.EnableFlashSandbox(level, enableLogging);
+    }
+#endif
+
 #elif defined(OS_WIN)
     std::vector<std::wstring> values =
         CommandLine::ForCurrentProcess()->GetLooseValues();
     MOZ_ASSERT(values.size() >= 1, "not enough loose args");
 
-    if (ShouldProtectPluginCurrentDirectory(values[0].c_str())) {
-        SanitizeEnvironmentVariables();
-        SetDllDirectory(L"");
-    }
-
     pluginFilename = WideToUTF8(values[0]);
+
+    // We don't initialize XPCOM but we need the thread manager and the
+    // logging framework for the FunctionBroker.
+    NS_SetMainThread();
+    mozilla::TimeStamp::Startup();
+    NS_LogInit();
+    mozilla::LogModule::Init(aArgc, aArgv);
+    nsThreadManager::get().Init();
 
 #if defined(MOZ_SANDBOX)
     // This is probably the earliest we would want to start the sandbox.
@@ -123,11 +138,6 @@ PluginProcessChild::Init()
 #else
 #  error Sorry
 #endif
-
-    if (NS_FAILED(nsRegion::InitStatic())) {
-      NS_ERROR("Could not initialize nsRegion");
-      return false;
-    }
 
     bool retval = mPlugin.InitForChrome(pluginFilename, ParentPid(),
                                         IOThreadChild::message_loop(),
@@ -149,10 +159,17 @@ PluginProcessChild::Init()
 void
 PluginProcessChild::CleanUp()
 {
-#ifdef XP_WIN
-    ::OleUninitialize();
+#if defined(OS_WIN)
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Shutdown components we started in Init.  Note that KillClearOnShutdown
+    // is an event that is regularly part of XPCOM shutdown.  We do not
+    // call XPCOM's shutdown but we need this event to be sent to avoid
+    // leaking objects labeled as ClearOnShutdown.
+    nsThreadManager::get().Shutdown();
+    mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownFinal);
+    NS_LogTerm();
 #endif
-    nsRegion::ShutdownStatic();
 }
 
 } // namespace plugins

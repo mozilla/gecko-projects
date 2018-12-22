@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -159,8 +161,6 @@ void MessagePumpForUI::PumpOutPendingPaintMessages() {
     if (state_->should_quit)  // Handle WM_QUIT.
       break;
   }
-  // Histogram what was really being used, to help to adjust kMaxPeekCount.
-  DHISTOGRAM_COUNTS("Loop.PumpOutPendingPaintMessages Peeks", peek_count);
 }
 
 //-----------------------------------------------------------------------------

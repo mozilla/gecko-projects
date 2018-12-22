@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,10 +21,10 @@ already_AddRefed<nsBoxLayout> NS_NewGridRowGroupLayout();
 
 nsIFrame*
 NS_NewGridRowGroupFrame(nsIPresShell* aPresShell,
-                        nsStyleContext* aContext)
+                        ComputedStyle* aStyle)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewGridRowGroupLayout();
-  return new (aPresShell) nsGridRowGroupFrame(aContext, layout);
+  return new (aPresShell) nsGridRowGroupFrame(aStyle, layout);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridRowGroupFrame)
@@ -34,7 +35,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsGridRowGroupFrame)
  * then their flex must be equal to the sum of their children's flexes.
  */
 nscoord
-nsGridRowGroupFrame::GetFlex()
+nsGridRowGroupFrame::GetXULFlex()
 {
   // if we are flexible out flexibility is determined by our columns.
   // so first get the our flex. If not 0 then our flex is the sum of
@@ -43,16 +44,16 @@ nsGridRowGroupFrame::GetFlex()
   if (!DoesNeedRecalc(mFlex))
      return mFlex;
 
-  if (nsBoxFrame::GetFlex() == 0)
+  if (nsBoxFrame::GetXULFlex() == 0)
     return 0;
 
   // ok we are flexible add up our children
   nscoord totalFlex = 0;
-  nsIFrame* child = nsBox::GetChildBox(this);
+  nsIFrame* child = nsBox::GetChildXULBox(this);
   while (child)
   {
-    totalFlex += child->GetFlex();
-    child = GetNextBox(child);
+    totalFlex += child->GetXULFlex();
+    child = GetNextXULBox(child);
   }
 
   mFlex = totalFlex;

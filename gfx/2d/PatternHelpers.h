@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -97,11 +98,11 @@ public:
   SurfacePattern* InitSurfacePattern(SourceSurface *aSourceSurface,
                                      ExtendMode aExtendMode,
                                      const Matrix &aMatrix = Matrix(),
-                                     Filter aFilter = Filter::GOOD,
+                                     SamplingFilter aSamplingFilter = SamplingFilter::GOOD,
                                      const IntRect &aSamplingRect = IntRect()) {
     MOZ_ASSERT(!mPattern);
     mPattern = new (mSurfacePattern.addr())
-      SurfacePattern(aSourceSurface, aExtendMode, aMatrix, aFilter, aSamplingRect);
+      SurfacePattern(aSourceSurface, aExtendMode, aMatrix, aSamplingFilter, aSamplingRect);
     return mSurfacePattern.addr();
   }
 
@@ -115,7 +116,7 @@ public:
 
   operator Pattern&() {
     if (!mPattern) {
-      MOZ_CRASH("GeneralPattern not initialized");
+      MOZ_CRASH("GFX: GeneralPattern not initialized");
     }
     return *mPattern;
   }

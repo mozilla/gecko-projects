@@ -23,11 +23,20 @@ namespace places {
 ////////////////////////////////////////////////////////////////////////////////
 //// Asynchronous Statement Callback Helper
 
-class AsyncStatementCallback : public mozIStorageStatementCallback
+class WeakAsyncStatementCallback : public mozIStorageStatementCallback
+{
+public:
+  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
+  WeakAsyncStatementCallback() {}
+
+protected:
+  virtual ~WeakAsyncStatementCallback() {}
+};
+
+class AsyncStatementCallback : public WeakAsyncStatementCallback
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
   AsyncStatementCallback() {}
 
 protected:
@@ -88,11 +97,11 @@ public:
  * This extracts the hostname from the URI and reverses it in the
  * form that we use (always ending with a "."). So
  * "http://microsoft.com/" becomes "moc.tfosorcim."
- * 
+ *
  * The idea behind this is that we can create an index over the items in
  * the reversed host name column, and then query for as much or as little
  * of the host name as we feel like.
- * 
+ *
  * For example, the query "host >= 'gro.allizom.' AND host < 'gro.allizom/'
  * Matches all host names ending in '.mozilla.org', including
  * 'developer.mozilla.org' and just 'mozilla.org' (since we define all
@@ -128,7 +137,7 @@ void ReverseString(const nsString& aInput, nsString& aReversed);
  *
  * @note This guid uses the characters a-z, A-Z, 0-9, '-', and '_'.
  */
-nsresult GenerateGUID(nsCString& _guid);
+nsresult GenerateGUID(nsACString& _guid);
 
 /**
  * Determines if the string is a valid guid or not.
@@ -165,11 +174,60 @@ PRTime RoundToMilliseconds(PRTime aTime);
  */
 PRTime RoundedPRNow();
 
+nsresult HashURL(const nsAString& aSpec, const nsACString& aMode,
+                 uint64_t *_hash);
+
+class QueryKeyValuePair final
+{
+public:
+
+  QueryKeyValuePair(const nsACString &aKey, const nsACString &aValue)
+  {
+    key = aKey;
+    value = aValue;
+  };
+
+  // QueryKeyValuePair
+  //
+  //                  01234567890
+  //    input : qwerty&key=value&qwerty
+  //                  ^   ^     ^
+  //          aKeyBegin   |     aPastEnd (may point to null terminator)
+  //                      aEquals
+  //
+  //    Special case: if aKeyBegin == aEquals, then there is only one string
+  //    and no equal sign, so we treat the entire thing as a key with no value
+
+  QueryKeyValuePair(const nsACString& aSource, int32_t aKeyBegin,
+                    int32_t aEquals, int32_t aPastEnd)
+  {
+    if (aEquals == aKeyBegin)
+      aEquals = aPastEnd;
+    key = Substring(aSource, aKeyBegin, aEquals - aKeyBegin);
+    if (aPastEnd - aEquals > 0)
+      value = Substring(aSource, aEquals + 1, aPastEnd - aEquals - 1);
+  }
+  nsCString key;
+  nsCString value;
+ };
+
+ /**
+  * Tokenizes a QueryString.
+  *
+  * @param aQuery The string to tokenize.
+  * @param aTokens The tokenized result.
+  */
+nsresult TokenizeQueryString(const nsACString& aQuery,
+                             nsTArray<QueryKeyValuePair>* aTokens);
+
+void TokensToQueryString(const nsTArray<QueryKeyValuePair> &aTokens,
+                         nsACString &aQuery);
+
 /**
  * Used to finalize a statementCache on a specified thread.
  */
 template<typename StatementType>
-class FinalizeStatementCacheProxy : public nsRunnable
+class FinalizeStatementCacheProxy : public Runnable
 {
 public:
   /**
@@ -184,19 +242,20 @@ public:
    */
   FinalizeStatementCacheProxy(
     mozilla::storage::StatementCache<StatementType>& aStatementCache,
-    nsISupports* aOwner
-  )
-  : mStatementCache(aStatementCache)
-  , mOwner(aOwner)
-  , mCallingThread(do_GetCurrentThread())
+    nsISupports* aOwner)
+    : Runnable("places::FinalizeStatementCacheProxy")
+    , mStatementCache(aStatementCache)
+    , mOwner(aOwner)
+    , mCallingThread(do_GetCurrentThread())
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mStatementCache.FinalizeStatements();
     // Release the owner back on the calling thread.
-    NS_ProxyRelease(mCallingThread, mOwner.forget());
+    NS_ProxyRelease("FinalizeStatementCacheProxy::mOwner",
+      mCallingThread, mOwner.forget());
     return NS_OK;
   }
 
@@ -205,14 +264,6 @@ protected:
   nsCOMPtr<nsISupports> mOwner;
   nsCOMPtr<nsIThread> mCallingThread;
 };
-
-/**
- * Forces a WAL checkpoint. This will cause all transactions stored in the
- * journal file to be committed to the main database.
- * 
- * @note The checkpoint will force a fsync/flush.
- */
-void ForceWALCheckpoint();
 
 /**
  * Determines if a visit should be marked as hidden given its transition type
@@ -228,23 +279,6 @@ bool GetHiddenState(bool aIsRedirect,
                     uint32_t aTransitionType);
 
 /**
- * Notifies a specified topic via the observer service.
- */
-class PlacesEvent : public nsRunnable
-{
-public:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIRUNNABLE
-
-  explicit PlacesEvent(const char* aTopic);
-protected:
-  ~PlacesEvent() {}
-  void Notify();
-
-  const char* const mTopic;
-};
-
-/**
  * Used to notify a topic to system observers on async execute completion.
  */
 class AsyncStatementCallbackNotifier : public AsyncStatementCallback
@@ -255,7 +289,7 @@ public:
   {
   }
 
-  NS_IMETHOD HandleCompletion(uint16_t aReason);
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override;
 
 private:
   const char* mTopic;
@@ -267,17 +301,17 @@ private:
 class AsyncStatementTelemetryTimer : public AsyncStatementCallback
 {
 public:
-  explicit AsyncStatementTelemetryTimer(Telemetry::ID aHistogramId,
+  explicit AsyncStatementTelemetryTimer(Telemetry::HistogramID aHistogramId,
                                         TimeStamp aStart = TimeStamp::Now())
     : mHistogramId(aHistogramId)
     , mStart(aStart)
   {
   }
 
-  NS_IMETHOD HandleCompletion(uint16_t aReason);
+  NS_IMETHOD HandleCompletion(uint16_t aReason) override;
 
 private:
-  const Telemetry::ID mHistogramId;
+  const Telemetry::HistogramID mHistogramId;
   const TimeStamp mStart;
 };
 

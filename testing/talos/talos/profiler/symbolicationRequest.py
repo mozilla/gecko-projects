@@ -1,12 +1,13 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import absolute_import
 
-from symLogging import LogTrace, LogError
-
-import re
 import json
+import re
 import urllib2
+
+from .symLogging import LogTrace, LogError
 
 # Precompiled regex for validating lib names
 # Empty lib name means client couldn't associate frame with any lib
@@ -15,6 +16,16 @@ gLibNameRE = re.compile("[0-9a-zA-Z_+\-\.]*$")
 # Maximum number of times a request can be forwarded to a different server
 # for symbolication. Also prevents loops.
 MAX_FORWARDED_REQUESTS = 3
+
+"""
+Symbolication is broken when using type 'str' in python 2.7, so we use 'basestring'.
+But for python 3.0 compatibility, 'basestring' isn't defined, but the 'str' type works.
+So we force 'basestring' to 'str'.
+"""
+try:
+    basestring
+except NameError:
+    basestring = str
 
 
 class ModuleV3:
@@ -72,7 +83,7 @@ class SymbolicationRequest:
                 return
 
             if "forwarded" in rawRequests:
-                if not isinstance(rawRequests["forwarded"], (int, long)):
+                if not isinstance(rawRequests["forwarded"], (int, int)):
                     LogTrace("Invalid 'forwards' field: %s"
                              % rawRequests["forwarded"])
                     return
@@ -90,7 +101,7 @@ class SymbolicationRequest:
                         else:
                             LogTrace("Unrecognized symbol source: " + source)
                             continue
-                except:
+                except Exception:
                     self.symbolSources = []
                     pass
 

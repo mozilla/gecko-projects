@@ -13,65 +13,55 @@
 const TEST_URI_HTML = TEST_URL_ROOT + "doc_content_stylesheet.html";
 const TEST_URI_AUTHOR = TEST_URL_ROOT + "doc_author-sheet.html";
 const TEST_URI_XUL = TEST_URL_ROOT + "doc_content_stylesheet.xul";
-const XUL_URI = Cc["@mozilla.org/network/io-service;1"]
-                .getService(Ci.nsIIOService)
-                .newURI(TEST_URI_XUL, null, null);
-var ssm = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                            .getService(Ci.nsIScriptSecurityManager);
-const XUL_PRINCIPAL = ssm.createCodebasePrincipal(XUL_URI, {});
+const XUL_URI = Services.io.newURI(TEST_URI_XUL);
+const XUL_PRINCIPAL = Services.scriptSecurityManager.createCodebasePrincipal(XUL_URI, {});
 
-add_task(function*() {
+add_task(async function() {
   requestLongerTimeout(2);
 
   info("Checking stylesheets on HTML document");
-  yield addTab(TEST_URI_HTML);
-  let target = getNode("#target");
+  await addTab(TEST_URI_HTML);
 
-  let {inspector} = yield openRuleView();
-  yield selectNode("#target", inspector);
+  let {inspector, testActor} = await openInspector();
+  await selectNode("#target", inspector);
 
   info("Checking stylesheets");
-  yield checkSheets(target);
+  await checkSheets("#target", testActor);
 
   info("Checking authored stylesheets");
-  yield addTab(TEST_URI_AUTHOR);
+  await addTab(TEST_URI_AUTHOR);
 
-  ({inspector} = yield openRuleView());
-  target = getNode("#target");
-  yield selectNode("#target", inspector);
-  yield checkSheets(target);
+  ({inspector} = await openInspector());
+  await selectNode("#target", inspector);
+  await checkSheets("#target", testActor);
 
   info("Checking stylesheets on XUL document");
   info("Allowing XUL content");
   allowXUL();
-  yield addTab(TEST_URI_XUL);
+  await addTab(TEST_URI_XUL);
 
-  ({inspector} = yield openRuleView());
-  target = getNode("#target");
-  yield selectNode("#target", inspector);
+  ({inspector} = await openInspector());
+  await selectNode("#target", inspector);
 
-  yield checkSheets(target);
+  await checkSheets("#target", testActor);
   info("Disallowing XUL content");
   disallowXUL();
 });
 
 function allowXUL() {
-  Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager)
-    .addFromPrincipal(XUL_PRINCIPAL, "allowXULXBL",
-      Ci.nsIPermissionManager.ALLOW_ACTION);
+  Services.perms.addFromPrincipal(XUL_PRINCIPAL, "allowXULXBL",
+    Ci.nsIPermissionManager.ALLOW_ACTION);
 }
 
 function disallowXUL() {
-  Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager)
-    .addFromPrincipal(XUL_PRINCIPAL, "allowXULXBL",
-      Ci.nsIPermissionManager.DENY_ACTION);
+  Services.perms.addFromPrincipal(XUL_PRINCIPAL, "allowXULXBL",
+    Ci.nsIPermissionManager.DENY_ACTION);
 }
 
-function* checkSheets(target) {
-  let sheets = yield executeInContent("Test:GetStyleSheetsInfoForNode", {},
-    {target});
+async function checkSheets(targetSelector, testActor) {
+  const sheets = await testActor.getStyleSheetsInfoForNode(targetSelector);
 
-  for (let sheet of sheets) {
+  for (const sheet of sheets) {
     if (!sheet.href ||
         /doc_content_stylesheet_/.test(sheet.href) ||
         // For the "authored" case.

@@ -1,9 +1,4 @@
 /**
- * Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/
- */
-
-/**
  * One-time observer callback.
  */
 function promiseObserve(name, checkFn) {
@@ -13,11 +8,11 @@ function promiseObserve(name, checkFn) {
         Services.obs.removeObserver(observer, name);
         resolve();
       }
-    }, name, false);
+    }, name);
   });
 }
 
-var conn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+var conn = PlacesUtils.history.DBConnection;
 
 /**
  * Gets a single column value from either the places or historyvisits table.
@@ -26,19 +21,19 @@ function getColumn(table, column, fromColumnName, fromColumnValue) {
   let sql = `SELECT ${column}
              FROM ${table}
              WHERE ${fromColumnName} = :val
+             ${fromColumnName == "url" ? "AND url_hash = hash(:val)" : ""}
              LIMIT 1`;
   let stmt = conn.createStatement(sql);
   try {
     stmt.params.val = fromColumnValue;
     ok(stmt.executeStep(), "Expect to get a row");
     return stmt.row[column];
-  }
-  finally {
+  } finally {
     stmt.reset();
   }
 }
 
-add_task(function* () {
+add_task(async function() {
   // Make sure places visit chains are saved correctly with a redirect
   // transitions.
 
@@ -62,8 +57,7 @@ add_task(function* () {
 
     if (currentIndex == 0) {
       is(fromVisitId, 0, "First visit has no from visit");
-    }
-    else {
+    } else {
       var lastVisitId = getColumn("moz_historyvisits", "place_id", "id", fromVisitId);
       var fromVisitUrl = getColumn("moz_places", "url", "id", lastVisitId);
       is(fromVisitUrl, expectedUrls[currentIndex - 1],
@@ -76,13 +70,13 @@ add_task(function* () {
   let visitUriPromise = promiseObserve("uri-visit-saved", checkObserver);
 
   const testUrl = "http://example.com/tests/toolkit/components/places/tests/browser/begin.html";
-  yield BrowserTestUtils.openNewForegroundTab(gBrowser, testUrl);
+  await BrowserTestUtils.openNewForegroundTab(gBrowser, testUrl);
 
   // Load begin page, click link on page to record visits.
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#clickme", { }, gBrowser.selectedBrowser);
-  yield visitUriPromise;
+  await BrowserTestUtils.synthesizeMouseAtCenter("#clickme", { }, gBrowser.selectedBrowser);
+  await visitUriPromise;
 
-  yield PlacesTestUtils.clearHistory();
+  await PlacesUtils.history.clear();
 
   gBrowser.removeCurrentTab();
 });

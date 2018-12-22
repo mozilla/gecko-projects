@@ -35,11 +35,9 @@
      each preference.
 */
 
-Cu.import("resource://gre/modules/Task.jsm");
 
 const kXULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const kContentDoc = "http://www.example.com/browser/dom/tests/browser/test_new_window_from_content_child.html";
-const kContentScript = "chrome://mochitests/content/browser/dom/tests/browser/test_new_window_from_content_child.js";
 const kNewWindowPrefKey = "browser.link.open_newwindow";
 const kNewWindowRestrictionPrefKey = "browser.link.open_newwindow.restriction";
 const kSameTab = "same tab";
@@ -107,32 +105,33 @@ registerCleanupFunction(function() {
  *         and cleaned up after.
  */
 function prepareForResult(aBrowser, aExpectation) {
+  let expectedSpec = kContentDoc.replace(/[^\/]*$/, "dummy.html");
   switch(aExpectation) {
     case kSameTab:
-      return Task.spawn(function*() {
-        yield BrowserTestUtils.browserLoaded(aBrowser);
-        is(aBrowser.currentURI.spec, "about:robots", "Should be at about:robots");
+      return (async function() {
+        await BrowserTestUtils.browserLoaded(aBrowser);
+        is(aBrowser.currentURI.spec, expectedSpec, "Should be at dummy.html");
         // Now put the browser back where it came from
-        yield BrowserTestUtils.loadURI(aBrowser, kContentDoc);
-        yield BrowserTestUtils.browserLoaded(aBrowser);
-      });
+        await BrowserTestUtils.loadURI(aBrowser, kContentDoc);
+        await BrowserTestUtils.browserLoaded(aBrowser);
+      })();
       break;
     case kNewWin:
-      return Task.spawn(function*() {
-        let newWin = yield BrowserTestUtils.waitForNewWindow();
+      return (async function() {
+        let newWin = await BrowserTestUtils.waitForNewWindow();
         let newBrowser = newWin.gBrowser.selectedBrowser;
-        yield BrowserTestUtils.browserLoaded(newBrowser);
-        is(newBrowser.currentURI.spec, "about:robots", "Should be at about:robots");
-        yield BrowserTestUtils.closeWindow(newWin);
-      });
+        await BrowserTestUtils.browserLoaded(newBrowser);
+        is(newBrowser.currentURI.spec, expectedSpec, "Should be at dummy.html");
+        await BrowserTestUtils.closeWindow(newWin);
+      })();
       break;
     case kNewTab:
-      return Task.spawn(function*() {
-        let newTab = yield BrowserTestUtils.waitForNewTab(gBrowser);
-        is(newTab.linkedBrowser.currentURI.spec, "about:robots",
-           "Should be at about:robots");
-        yield BrowserTestUtils.removeTab(newTab);
-      });
+      return (async function() {
+        let newTab = await BrowserTestUtils.waitForNewTab(gBrowser);
+        is(newTab.linkedBrowser.currentURI.spec, expectedSpec,
+           "Should be at dummy.html");
+        BrowserTestUtils.removeTab(newTab);
+      })();
       break;
     default:
       ok(false, "prepareForResult can't handle an expectation of " + aExpectation)
@@ -156,7 +155,7 @@ function testLinkWithMatrix(aLinkSelector, aMatrix) {
   return BrowserTestUtils.withNewTab({
     gBrowser,
     url: kContentDoc,
-  }, function*(browser) {
+  }, async function(browser) {
     // This nested for-loop is unravelling the matrix const
     // we set up, and gives us three things through each tick
     // of the inner loop:
@@ -178,25 +177,25 @@ function testLinkWithMatrix(aLinkSelector, aMatrix) {
         info("Expecting: " + expectation);
         let resultPromise = prepareForResult(browser, expectation);
         BrowserTestUtils.synthesizeMouseAtCenter(aLinkSelector, {}, browser);
-        yield resultPromise;
+        await resultPromise;
         info("Got expectation: " + expectation);
       }
     }
   });
 }
 
-add_task(function* test_window_open_with_defaults() {
-  yield testLinkWithMatrix("#winOpenDefault", kWinOpenDefault);
+add_task(async function test_window_open_with_defaults() {
+  await testLinkWithMatrix("#winOpenDefault", kWinOpenDefault);
 });
 
-add_task(function* test_window_open_with_non_defaults() {
-  yield testLinkWithMatrix("#winOpenNonDefault", kWinOpenNonDefault);
+add_task(async function test_window_open_with_non_defaults() {
+  await testLinkWithMatrix("#winOpenNonDefault", kWinOpenNonDefault);
 });
 
-add_task(function* test_window_open_dialog() {
-  yield testLinkWithMatrix("#winOpenDialog", kWinOpenNonDefault);
+add_task(async function test_window_open_dialog() {
+  await testLinkWithMatrix("#winOpenDialog", kWinOpenNonDefault);
 });
 
-add_task(function* test_target__blank() {
-  yield testLinkWithMatrix("#targetBlank", kTargetBlank);
+add_task(async function test_target__blank() {
+  await testLinkWithMatrix("#targetBlank", kTargetBlank);
 });

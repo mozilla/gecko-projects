@@ -23,12 +23,15 @@ import os
 import sys
 import weakref
 
-from mozbuild.util import ReadOnlyDict
+from mozbuild.util import (
+    exec_,
+    ReadOnlyDict,
+)
 from .context import Context
 from mozpack.files import FileFinder
 
 
-default_finder = FileFinder('/', find_executables=False)
+default_finder = FileFinder('/')
 
 
 def alphabetical_sorted(iterable, cmp=None, key=lambda x: x.lower(),
@@ -107,12 +110,14 @@ class Sandbox(dict):
         'True': True,
         'sorted': alphabetical_sorted,
         'int': int,
+        'set': set,
+        'tuple': tuple,
     })
 
-    def __init__(self, context, builtins=None, finder=default_finder):
+    def __init__(self, context, finder=default_finder):
         """Initialize a Sandbox ready for execution.
         """
-        self._builtins = builtins or self.BUILTINS
+        self._builtins = self.BUILTINS
         dict.__setitem__(self, '__builtins__', self._builtins)
 
         assert isinstance(self._builtins, ReadOnlyDict)
@@ -174,11 +179,7 @@ class Sandbox(dict):
             old_source = self._current_source
             self._current_source = source
             try:
-                # Ideally, we'd use exec(code, self), but that yield the
-                # following error:
-                # SyntaxError: unqualified exec is not allowed in function
-                # 'execute' it is a nested function.
-                exec code in self
+                exec_(code, self)
             finally:
                 self._current_source = old_source
 

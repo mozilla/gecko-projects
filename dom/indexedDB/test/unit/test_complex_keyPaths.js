@@ -5,7 +5,7 @@
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   // Test object stores
 
@@ -35,7 +35,7 @@ function testSteps()
     { keyPath: "foo.",    exception: true },
     { keyPath: "fo o",    exception: true },
     { keyPath: "foo ",    exception: true },
-    { keyPath: "foo[bar]",exception: true },
+    { keyPath: "foo[bar]", exception: true },
     { keyPath: "foo[1]",  exception: true },
     { keyPath: "$('id').stuff", exception: true },
     { keyPath: "foo.2.bar", exception: true },
@@ -85,6 +85,7 @@ function testSteps()
         ok(!("exception" in info), "shouldn't throw" + test);
         is(JSON.stringify(objectStore.keyPath), JSON.stringify(info.keyPath),
            "correct keyPath property" + test);
+        // eslint-disable-next-line no-self-compare
         ok(objectStore.keyPath === objectStore.keyPath,
            "object identity should be preserved");
         stores[indexName] = objectStore;
@@ -100,7 +101,7 @@ function testSteps()
     let store = stores[indexName];
 
     try {
-      request = store.add(info.value);
+      var request = store.add(info.value);
       ok("key" in info, "successfully created request to insert value" + test);
     } catch (e) {
       ok(!("key" in info), "threw when attempted to insert" + test);
@@ -139,10 +140,11 @@ function testSteps()
     let newValue = cursor.value;
     let destProp = Array.isArray(info.keyPath) ? info.keyPath[0] : info.keyPath;
     if (destProp) {
+      // eslint-disable-next-line no-eval
       eval("newValue." + destProp + " = 'newKeyValue'");
     }
     else {
-      newValue = 'newKeyValue';
+      newValue = "newKeyValue";
     }
     let didThrow;
     try {
@@ -173,6 +175,7 @@ function testSteps()
         ok(!("exception" in info), "shouldn't throw" + test);
         is(JSON.stringify(index.keyPath), JSON.stringify(info.keyPath),
            "index has correct keyPath property" + test);
+        // eslint-disable-next-line no-self-compare
         ok(index.keyPath === index.keyPath,
            "object identity should be preserved");
         indexes[indexName] = index;
@@ -184,18 +187,18 @@ function testSteps()
         continue;
       }
     }
-    
+
     let index = indexes[indexName];
 
     request = store.add(info.value, 1);
     if ("key" in info) {
       index.getKey(info.key).onsuccess = grabEventAndContinueHandler;
-      e = yield undefined;
+      let e = yield undefined;
       is(e.target.result, 1, "found value when reading" + test);
     }
     else {
       index.count().onsuccess = grabEventAndContinueHandler;
-      e = yield undefined;
+      let e = yield undefined;
       is(e.target.result, 0, "should be empty" + test);
     }
 
@@ -237,7 +240,7 @@ function testSteps()
         store.add(info.v);
         ok(false, "should throw" + test);
       }
-      catch(e) {
+      catch (e) {
         ok(true, "did throw" + test);
         ok(e instanceof DOMException, "Got a DOMException" + test);
         is(e.name, "DataError", "expect a DataError" + test);
@@ -262,5 +265,4 @@ function testSteps()
   yield undefined;
 
   finishTest();
-  yield undefined;
 }

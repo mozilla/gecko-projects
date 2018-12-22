@@ -30,17 +30,17 @@ protected:
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
 public:
-  // nsIDOMNode specializations
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  // nsINode specializations
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   // SVGAnimationElement
   virtual nsSMILAnimationFunction& AnimationFunction() override;
   virtual bool GetTargetAttributeName(int32_t *aNamespaceID,
-                                      nsIAtom **aLocalName) const override;
-  virtual nsSMILTargetAttrType GetTargetAttributeType() const override;
+                                      nsAtom **aLocalName) const override;
 
   // nsSVGElement
-  virtual nsIAtom* GetPathDataAttrName() const override {
+  virtual nsAtom* GetPathDataAttrName() const override {
     return nsGkAtoms::path;
   }
 

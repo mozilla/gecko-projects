@@ -17,7 +17,7 @@
 #import <ExceptionHandling/NSExceptionHandler.h>
 #endif
 
-#if defined(MOZ_CRASHREPORTER) && defined(__cplusplus)
+#if defined(__cplusplus)
 #include "nsICrashReporter.h"
 #include "nsCOMPtr.h"
 #include "nsServiceManagerUtils.h"
@@ -47,7 +47,7 @@ nsObjCExceptionLog(NSException* aException)
   NSLog(@"Mozilla has caught an Obj-C exception [%@: %@]",
         [aException name], [aException reason]);
 
-#if defined(MOZ_CRASHREPORTER) && defined(__cplusplus)
+#if defined(__cplusplus)
   // Attach exception info to the crash report.
   nsCOMPtr<nsICrashReporter> crashReporter =
     do_GetService("@mozilla.org/toolkit/crash-reporter;1");
@@ -226,16 +226,5 @@ NS_OBJC_TRY(_e, )
                                                   nsObjCExceptionLog(_exn);\
                                                 }                               \
                                                 return _rv;
-
-#define NS_OBJC_BEGIN_TRY_LOGONLY_BLOCK @try {
-#define NS_OBJC_END_TRY_LOGONLY_BLOCK   } @catch(NSException *_exn) {           \
-                                          nsObjCExceptionLog(_exn);             \
-                                        }
-
-#define NS_OBJC_BEGIN_TRY_LOGONLY_BLOCK_RETURN    @try {
-#define NS_OBJC_END_TRY_LOGONLY_BLOCK_RETURN(_rv) } @catch(NSException *_exn) { \
-                                                    nsObjCExceptionLog(_exn);   \
-                                                  }                             \
-                                                  return _rv;
 
 #endif // nsObjCExceptions_h_

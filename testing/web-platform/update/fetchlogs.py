@@ -6,6 +6,7 @@ import argparse
 import os
 import requests
 import urlparse
+from multiprocessing import Pool
 
 treeherder_base = "https://treeherder.mozilla.org/"
 
@@ -62,21 +63,17 @@ def fetch_json(url, params=None):
 
 
 def get_blobber_url(branch, job):
-    job_id = job["id"]
-    artifact_url = urlparse.urljoin(treeherder_base, "/api/project/%s/artifact/" % branch)
+    job_guid = job["job_guid"]
+    artifact_url = urlparse.urljoin(treeherder_base, "/api/jobdetail/")
     artifact_params = {
-        'job_id': job_id,
-        'name': 'Job Info',
+        'job_guid': job_guid,
     }
     job_data = fetch_json(artifact_url, params=artifact_params)
 
     if job_data:
-        assert len(job_data) == 1
-        job_data = job_data[0]
         try:
-            details = job_data["blob"]["job_details"]
-            for item in details:
-                if item["value"] == "wpt_raw.log":
+            for item in job_data["results"]:
+                if item["value"] == "wpt_raw.log" or item["value"] == "log_raw.log":
                     return item["url"]
         except:
             return None
@@ -98,14 +95,19 @@ def get_structured_logs(branch, commit, dest=None):
     }
     job_data = fetch_json(jobs_url, params=jobs_params)
 
+    tasks = []
+
     for result in job_data["results"]:
         job_type_name = result["job_type_name"]
-        if job_type_name.startswith("W3C Web Platform"):
+        if (job_type_name.startswith("W3C Web Platform") or
+            job_type_name.startswith("test-") and "-web-platform-tests-" in job_type_name):
             url = get_blobber_url(branch, result)
             if url:
                 prefix = result["platform"] # platform
-                download(url, prefix, None)
+                tasks.append((url, prefix, None))
 
+    for task in tasks:
+        download(*task)
 
 def main():
     parser = create_parser()

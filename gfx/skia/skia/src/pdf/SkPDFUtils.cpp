@@ -5,20 +5,21 @@
  * found in the LICENSE file.
  */
 
+#include "SkPDFUtils.h"
 
 #include "SkData.h"
+#include "SkFixed.h"
 #include "SkGeometry.h"
-#include "SkPaint.h"
-#include "SkPath.h"
+#include "SkImage_Base.h"
 #include "SkPDFResourceDict.h"
-#include "SkPDFUtils.h"
+#include "SkPDFTypes.h"
 #include "SkStream.h"
 #include "SkString.h"
-#include "SkPDFTypes.h"
 
-//static
-SkPDFArray* SkPDFUtils::RectToArray(const SkRect& rect) {
-    SkPDFArray* result = new SkPDFArray();
+#include <cmath>
+
+sk_sp<SkPDFArray> SkPDFUtils::RectToArray(const SkRect& rect) {
+    auto result = sk_make_sp<SkPDFArray>();
     result->reserve(4);
     result->appendScalar(rect.fLeft);
     result->appendScalar(rect.fTop);
@@ -27,14 +28,13 @@ SkPDFArray* SkPDFUtils::RectToArray(const SkRect& rect) {
     return result;
 }
 
-// static
-SkPDFArray* SkPDFUtils::MatrixToArray(const SkMatrix& matrix) {
+sk_sp<SkPDFArray> SkPDFUtils::MatrixToArray(const SkMatrix& matrix) {
     SkScalar values[6];
     if (!matrix.asAffine(values)) {
         SkMatrix::SetAffineIdentity(values);
     }
 
-    SkPDFArray* result = new SkPDFArray;
+    auto result = sk_make_sp<SkPDFArray>();
     result->reserve(6);
     for (size_t i = 0; i < SK_ARRAY_COUNT(values); i++) {
         result->appendScalar(values[i]);
@@ -118,11 +118,29 @@ void SkPDFUtils::AppendRectangle(const SkRect& rect, SkWStream* content) {
 
 // static
 void SkPDFUtils::EmitPath(const SkPath& path, SkPaint::Style paintStyle,
-                          bool doConsumeDegerates, SkWStream* content) {
+                          bool doConsumeDegerates, SkWStream* content,
+                          SkScalar tolerance) {
+    if (path.isEmpty() && SkPaint::kFill_Style == paintStyle) {
+        SkPDFUtils::AppendRectangle({0, 0, 0, 0}, content);
+        return;
+    }
     // Filling a path with no area results in a drawing in PDF renderers but
     // Chrome expects to be able to draw some such entities with no visible
     // result, so we detect those cases and discard the drawing for them.
     // Specifically: moveTo(X), lineTo(Y) and moveTo(X), lineTo(X), lineTo(Y).
+
+    SkRect rect;
+    bool isClosed; // Both closure and direction need to be checked.
+    SkPath::Direction direction;
+    if (path.isRect(&rect, &isClosed, &direction) &&
+        isClosed &&
+        (SkPath::kCW_Direction == direction ||
+         SkPath::kEvenOdd_FillType == path.getFillType()))
+    {
+        SkPDFUtils::AppendRectangle(rect, content);
+        return;
+    }
+
     enum SkipFillState {
         kEmpty_SkipFillState,
         kSingleLine_SkipFillState,
@@ -159,9 +177,8 @@ void SkPDFUtils::EmitPath(const SkPath& path, SkPaint::Style paintStyle,
                 fillState = kNonSingleLine_SkipFillState;
                 break;
             case SkPath::kConic_Verb: {
-                const SkScalar tol = SK_Scalar1 / 4;
                 SkAutoConicToQuads converter;
-                const SkPoint* quads = converter.computeQuads(args, iter.conicWeight(), tol);
+                const SkPoint* quads = converter.computeQuads(args, iter.conicWeight(), tolerance);
                 for (int i = 0; i < converter.countQuads(); ++i) {
                     append_quad(&quads[i * 2], &currentSegment);
                 }
@@ -173,9 +190,7 @@ void SkPDFUtils::EmitPath(const SkPath& path, SkPaint::Style paintStyle,
                 fillState = kNonSingleLine_SkipFillState;
                 break;
             case SkPath::kClose_Verb:
-
-                    ClosePath(&currentSegment);
-
+                ClosePath(&currentSegment);
                 currentSegment.writeToStream(content);
                 currentSegment.reset();
                 break;
@@ -253,94 +268,112 @@ void SkPDFUtils::ApplyPattern(int objectIndex, SkWStream* content) {
     content->writeText(" scn\n");
 }
 
-void SkPDFUtils::AppendScalar(SkScalar value, SkWStream* stream) {
-    // The range of reals in PDF/A is the same as SkFixed: +/- 32,767 and
-    // +/- 1/65,536 (though integers can range from 2^31 - 1 to -2^31).
-    // When using floats that are outside the whole value range, we can use
-    // integers instead.
-
-#if !defined(SK_ALLOW_LARGE_PDF_SCALARS)
-    if (value > 32767 || value < -32767) {
-        stream->writeDecAsText(SkScalarRoundToInt(value));
-        return;
+size_t SkPDFUtils::ColorToDecimal(uint8_t value, char result[5]) {
+    if (value == 255 || value == 0) {
+        result[0] = value ? '1' : '0';
+        result[1] = '\0';
+        return 1;
     }
-
-    char buffer[SkStrAppendScalar_MaxSize];
-    char* end = SkStrAppendFixed(buffer, SkScalarToFixed(value));
-    stream->write(buffer, end - buffer);
-    return;
-#endif  // !SK_ALLOW_LARGE_PDF_SCALARS
-
-#if defined(SK_ALLOW_LARGE_PDF_SCALARS)
-    // Floats have 24bits of significance, so anything outside that range is
-    // no more precise than an int. (Plus PDF doesn't support scientific
-    // notation, so this clamps to SK_Max/MinS32).
-    if (value > (1 << 24) || value < -(1 << 24)) {
-        stream->writeDecAsText(value);
-        return;
+    // int x = 0.5 + (1000.0 / 255.0) * value;
+    int x = SkFixedRoundToInt((SK_Fixed1 * 1000 / 255) * value);
+    result[0] = '.';
+    for (int i = 3; i > 0; --i) {
+        result[i] = '0' + x % 10;
+        x /= 10;
     }
-    // Continue to enforce the PDF limits for small floats.
-    if (value < 1.0f/65536 && value > -1.0f/65536) {
-        stream->writeDecAsText(0);
-        return;
+    int j;
+    for (j = 3; j > 1; --j) {
+        if (result[j] != '0') {
+            break;
+        }
     }
-    // SkStrAppendFloat might still use scientific notation, so use snprintf
-    // directly..
-    static const int kFloat_MaxSize = 19;
-    char buffer[kFloat_MaxSize];
-    int len = SNPRINTF(buffer, kFloat_MaxSize, "%#.8f", value);
-    // %f always prints trailing 0s, so strip them.
-    for (; buffer[len - 1] == '0' && len > 0; len--) {
-        buffer[len - 1] = '\0';
-    }
-    if (buffer[len - 1] == '.') {
-        buffer[len - 1] = '\0';
-    }
-    stream->writeText(buffer);
-    return;
-#endif  // SK_ALLOW_LARGE_PDF_SCALARS
+    result[j + 1] = '\0';
+    return j + 1;
 }
 
-SkString SkPDFUtils::FormatString(const char* cin, size_t len) {
+void SkPDFUtils::WriteString(SkWStream* wStream, const char* cin, size_t len) {
     SkDEBUGCODE(static const size_t kMaxLen = 65535;)
     SkASSERT(len <= kMaxLen);
 
-    // 7-bit clean is a heuristic to decide what string format to use;
-    // a 7-bit clean string should require little escaping.
-    bool sevenBitClean = true;
-    size_t characterCount = 2 + len;
+    size_t extraCharacterCount = 0;
     for (size_t i = 0; i < len; i++) {
         if (cin[i] > '~' || cin[i] < ' ') {
-            sevenBitClean = false;
-            break;
+            extraCharacterCount += 3;
         }
         if (cin[i] == '\\' || cin[i] == '(' || cin[i] == ')') {
-            ++characterCount;
+            ++extraCharacterCount;
         }
     }
-    SkString result;
-    if (sevenBitClean) {
-        result.resize(characterCount);
-        char* str = result.writable_str();
-        *str++ = '(';
+    if (extraCharacterCount <= len) {
+        wStream->writeText("(");
         for (size_t i = 0; i < len; i++) {
-            if (cin[i] == '\\' || cin[i] == '(' || cin[i] == ')') {
-                *str++ = '\\';
+            if (cin[i] > '~' || cin[i] < ' ') {
+                uint8_t c = static_cast<uint8_t>(cin[i]);
+                uint8_t octal[4];
+                octal[0] = '\\';
+                octal[1] = '0' + ( c >> 6        );
+                octal[2] = '0' + ((c >> 3) & 0x07);
+                octal[3] = '0' + ( c       & 0x07);
+                wStream->write(octal, 4);
+            } else {
+                if (cin[i] == '\\' || cin[i] == '(' || cin[i] == ')') {
+                    wStream->writeText("\\");
+                }
+                wStream->write(&cin[i], 1);
             }
-            *str++ = cin[i];
         }
-        *str++ = ')';
+        wStream->writeText(")");
     } else {
-        result.resize(2 * len + 2);
-        char* str = result.writable_str();
-        *str++ = '<';
+        wStream->writeText("<");
         for (size_t i = 0; i < len; i++) {
             uint8_t c = static_cast<uint8_t>(cin[i]);
-            static const char gHex[] = "0123456789ABCDEF";
-            *str++ = gHex[(c >> 4) & 0xF];
-            *str++ = gHex[(c     ) & 0xF];
+            char hexValue[2] = { SkHexadecimalDigits::gUpper[c >> 4],
+                                 SkHexadecimalDigits::gUpper[c & 0xF] };
+            wStream->write(hexValue, 2);
         }
-        *str++ = '>';
+        wStream->writeText(">");
     }
-    return result;
+}
+
+bool SkPDFUtils::InverseTransformBBox(const SkMatrix& matrix, SkRect* bbox) {
+    SkMatrix inverse;
+    if (!matrix.invert(&inverse)) {
+        return false;
+    }
+    inverse.mapRect(bbox);
+    return true;
+}
+
+void SkPDFUtils::PopulateTilingPatternDict(SkPDFDict* pattern,
+                                           SkRect& bbox,
+                                           sk_sp<SkPDFDict> resources,
+                                           const SkMatrix& matrix) {
+    const int kTiling_PatternType = 1;
+    const int kColoredTilingPattern_PaintType = 1;
+    const int kConstantSpacing_TilingType = 1;
+
+    pattern->insertName("Type", "Pattern");
+    pattern->insertInt("PatternType", kTiling_PatternType);
+    pattern->insertInt("PaintType", kColoredTilingPattern_PaintType);
+    pattern->insertInt("TilingType", kConstantSpacing_TilingType);
+    pattern->insertObject("BBox", SkPDFUtils::RectToArray(bbox));
+    pattern->insertScalar("XStep", bbox.width());
+    pattern->insertScalar("YStep", bbox.height());
+    pattern->insertObject("Resources", std::move(resources));
+    if (!matrix.isIdentity()) {
+        pattern->insertObject("Matrix", SkPDFUtils::MatrixToArray(matrix));
+    }
+}
+
+bool SkPDFUtils::ToBitmap(const SkImage* img, SkBitmap* dst) {
+    SkASSERT(img);
+    SkASSERT(dst);
+    SkBitmap bitmap;
+    if(as_IB(img)->getROPixels(&bitmap, nullptr)) {
+        SkASSERT(bitmap.dimensions() == img->dimensions());
+        SkASSERT(!bitmap.drawsNothing());
+        *dst = std::move(bitmap);
+        return true;
+    }
+    return false;
 }

@@ -10,7 +10,6 @@
 #include "AudioParamTimeline.h"
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsAutoPtr.h"
 #include "AudioNode.h"
 #include "mozilla/dom/TypedArray.h"
 #include "WebAudioUtils.h"
@@ -28,8 +27,10 @@ class AudioParam final : public nsWrapperCache,
 public:
   AudioParam(AudioNode* aNode,
              uint32_t aIndex,
+             const char* aName,
              float aDefaultValue,
-             const char* aName);
+             float aMinValue = -std::numeric_limits<float>::infinity(),
+             float aMaxValue = std::numeric_limits<float>::infinity());
 
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
   NS_IMETHOD_(MozExternalRefCountType) Release(void);
@@ -44,17 +45,22 @@ public:
 
   // We override SetValueCurveAtTime to convert the Float32Array to the wrapper
   // object.
-  void SetValueCurveAtTime(const Float32Array& aValues, double aStartTime, double aDuration, ErrorResult& aRv)
+  AudioParam* SetValueCurveAtTime(const Float32Array& aValues,
+                                  double aStartTime,
+                                  double aDuration,
+                                  ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aStartTime)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
     aValues.ComputeLengthAndData();
 
+    aStartTime = std::max(aStartTime, GetParentObject()->CurrentTime());
     EventInsertionHelper(aRv, AudioTimelineEvent::SetValueCurve,
                          aStartTime, 0.0f, 0.0f, aDuration, aValues.Data(),
                          aValues.Length());
+    return this;
   }
 
   void SetValue(float aValue)
@@ -73,54 +79,68 @@ public:
     SendEventToEngine(event);
   }
 
-  void SetValueAtTime(float aValue, double aStartTime, ErrorResult& aRv)
+  AudioParam* SetValueAtTime(float aValue, double aStartTime, ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aStartTime)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
+    aStartTime = std::max(aStartTime, GetParentObject()->CurrentTime());
     EventInsertionHelper(aRv, AudioTimelineEvent::SetValueAtTime,
                          aStartTime, aValue);
+
+    return this;
   }
 
-  void LinearRampToValueAtTime(float aValue, double aEndTime, ErrorResult& aRv)
+  AudioParam* LinearRampToValueAtTime(float aValue, double aEndTime,
+                                      ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aEndTime)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
+    aEndTime = std::max(aEndTime, GetParentObject()->CurrentTime());
     EventInsertionHelper(aRv, AudioTimelineEvent::LinearRamp, aEndTime, aValue);
+    return this;
   }
 
-  void ExponentialRampToValueAtTime(float aValue, double aEndTime, ErrorResult& aRv)
+  AudioParam* ExponentialRampToValueAtTime(float aValue, double aEndTime,
+                                           ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aEndTime)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
+    aEndTime = std::max(aEndTime, GetParentObject()->CurrentTime());
     EventInsertionHelper(aRv, AudioTimelineEvent::ExponentialRamp,
                          aEndTime, aValue);
+    return this;
   }
 
-  void SetTargetAtTime(float aTarget, double aStartTime,
-                       double aTimeConstant, ErrorResult& aRv)
+  AudioParam* SetTargetAtTime(float aTarget, double aStartTime,
+                              double aTimeConstant, ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aStartTime) ||
         !WebAudioUtils::IsTimeValid(aTimeConstant)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
+    aStartTime = std::max(aStartTime, GetParentObject()->CurrentTime());
     EventInsertionHelper(aRv, AudioTimelineEvent::SetTarget,
                          aStartTime, aTarget,
                          aTimeConstant);
+
+    return this;
   }
 
-  void CancelScheduledValues(double aStartTime, ErrorResult& aRv)
+  AudioParam* CancelScheduledValues(double aStartTime, ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aStartTime)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+      return this;
     }
+
+    aStartTime = std::max(aStartTime, GetParentObject()->CurrentTime());
 
     // Remove some events on the main thread copy.
     AudioEventTimeline::CancelScheduledValues(aStartTime);
@@ -128,6 +148,8 @@ public:
     AudioTimelineEvent event(AudioTimelineEvent::Cancel, aStartTime, 0.0f);
 
     SendEventToEngine(event);
+
+    return this;
   }
 
   uint32_t ParentNodeId()
@@ -143,6 +165,16 @@ public:
   float DefaultValue() const
   {
     return mDefaultValue;
+  }
+
+  float MinValue() const
+  {
+    return mMinValue;
+  }
+
+  float MaxValue() const
+  {
+    return mMaxValue;
   }
 
   const nsTArray<AudioNode::InputNode>& InputNodes() const
@@ -203,7 +235,11 @@ private:
     AudioEventTimeline::InsertEvent<double>(event);
 
     SendEventToEngine(event);
+
+    CleanupOldEvents();
   }
+
+  void CleanupOldEvents();
 
   void SendEventToEngine(const AudioTimelineEvent& aEvent);
 
@@ -220,6 +256,8 @@ private:
   RefPtr<MediaInputPort> mNodeStreamPort;
   const uint32_t mIndex;
   const float mDefaultValue;
+  const float mMinValue;
+  const float mMaxValue;
 };
 
 } // namespace dom

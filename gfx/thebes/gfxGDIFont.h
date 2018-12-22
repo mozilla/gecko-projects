@@ -21,39 +21,32 @@ class gfxGDIFont : public gfxFont
 public:
     gfxGDIFont(GDIFontEntry *aFontEntry,
                const gfxFontStyle *aFontStyle,
-               bool aNeedsBold,
                AntialiasOption anAAOption = kAntialiasDefault);
 
     virtual ~gfxGDIFont();
 
-    HFONT GetHFONT() { if (!mMetrics) Initialize(); return mFont; }
+    HFONT GetHFONT() { return mFont; }
 
-    virtual gfxFloat GetAdjustedSize()
-    {
-        if (!mMetrics) {
-            Initialize();
-        }
-        return mAdjustedSize;
-    }
-
-    cairo_font_face_t   *CairoFontFace() { return mFontFace; }
-    cairo_scaled_font_t *CairoScaledFont() { return mScaledFont; }
+    cairo_font_face_t* CairoFontFace() { return mFontFace; }
 
     /* overrides for the pure virtual methods in gfxFont */
     virtual uint32_t GetSpaceGlyph() override;
 
     virtual bool SetupCairoFont(DrawTarget* aDrawTarget) override;
 
+    virtual already_AddRefed<mozilla::gfx::ScaledFont>
+    GetScaledFont(DrawTarget *aTarget) override;
+
     /* override Measure to add padding for antialiasing */
-    virtual RunMetrics Measure(gfxTextRun *aTextRun,
+    virtual RunMetrics Measure(const gfxTextRun *aTextRun,
                                uint32_t aStart, uint32_t aEnd,
                                BoundingBoxType aBoundingBoxType,
                                DrawTarget *aDrawTargetForTightBoundingBox,
                                Spacing *aSpacing,
-                               uint16_t aOrientation) override;
+                               mozilla::gfx::ShapedTextFlags aOrientation) override;
 
     /* required for MathML to suppress effects of ClearType "padding" */
-    virtual gfxFont*
+    mozilla::UniquePtr<gfxFont>
     CopyWithAntialiasOption(AntialiasOption anAAOption) override;
 
     // If the font has a cmap table, we handle it purely with harfbuzz;
@@ -82,20 +75,22 @@ protected:
     virtual const Metrics& GetHorizontalMetrics() override;
 
     /* override to ensure the cairo font is set up properly */
-    virtual bool ShapeText(DrawTarget     *aDrawTarget,
-                           const char16_t *aText,
-                           uint32_t        aOffset,
-                           uint32_t        aLength,
-                           int32_t         aScript,
-                           bool            aVertical,
-                           gfxShapedText  *aShapedText) override;
+    bool ShapeText(DrawTarget     *aDrawTarget,
+                   const char16_t *aText,
+                   uint32_t        aOffset,
+                   uint32_t        aLength,
+                   Script          aScript,
+                   bool            aVertical,
+                   RoundingFlags   aRounding,
+                   gfxShapedText  *aShapedText) override;
 
     void Initialize(); // creates metrics and Cairo fonts
 
-    // Fill the given LOGFONT record according to our style, but don't adjust
-    // the lfItalic field if we're going to use a cairo transform for fake
-    // italics.
-    void FillLogFont(LOGFONTW& aLogFont, gfxFloat aSize, bool aUseGDIFakeItalic);
+    // Fill the given LOGFONT record according to our size.
+    // (Synthetic italic is *not* handled here, because GDI may not reliably
+    // use the face we expect if we tweak the lfItalic field, and because we
+    // have generic support for this in gfxFont::Draw instead.)
+    void FillLogFont(LOGFONTW& aLogFont, gfxFloat aSize);
 
     HFONT                 mFont;
     cairo_font_face_t    *mFontFace;
@@ -103,14 +98,14 @@ protected:
     Metrics              *mMetrics;
     uint32_t              mSpaceGlyph;
 
-    bool                  mNeedsBold;
+    bool                  mNeedsSyntheticBold;
 
     // cache of glyph IDs (used for non-sfnt fonts only)
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,uint32_t> > mGlyphIDs;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,uint32_t> > mGlyphIDs;
     SCRIPT_CACHE          mScriptCache;
 
     // cache of glyph widths in 16.16 fixed-point pixels
-    nsAutoPtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
+    mozilla::UniquePtr<nsDataHashtable<nsUint32HashKey,int32_t> > mGlyphWidths;
 };
 
 #endif /* GFX_GDIFONT_H */

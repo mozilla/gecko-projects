@@ -6,17 +6,22 @@
 
 "use strict";
 
-var { Ci, Cc, CC, Cr, Cu } = require("chrome");
+var { Ci, Cc, CC, Cr } = require("chrome");
 
 // Ensure PSM is initialized to support TLS sockets
 Cc["@mozilla.org/psm;1"].getService(Ci.nsISupports);
 
 var Services = require("Services");
 var promise = require("promise");
+var defer = require("devtools/shared/defer");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn, dumpv } = DevToolsUtils;
+loader.lazyRequireGetter(this, "WebSocketServer",
+  "devtools/server/socket/websocket-server");
 loader.lazyRequireGetter(this, "DebuggerTransport",
   "devtools/shared/transport/transport", true);
+loader.lazyRequireGetter(this, "WebSocketDebuggerTransport",
+  "devtools/shared/transport/websocket-transport");
 loader.lazyRequireGetter(this, "DebuggerServer",
   "devtools/server/main", true);
 loader.lazyRequireGetter(this, "discovery",
@@ -27,8 +32,6 @@ loader.lazyRequireGetter(this, "Authenticators",
   "devtools/shared/security/auth", true);
 loader.lazyRequireGetter(this, "AuthenticationResult",
   "devtools/shared/security/auth", true);
-loader.lazyRequireGetter(this, "setTimeout", "Timer", true);
-loader.lazyRequireGetter(this, "clearTimeout", "Timer", true);
 
 DevToolsUtils.defineLazyGetter(this, "nsFile", () => {
   return CC("@mozilla.org/file/local;1", "nsIFile", "initWithPath");
@@ -49,9 +52,6 @@ DevToolsUtils.defineLazyGetter(this, "nssErrorsService", () => {
          .getService(Ci.nsINSSErrorsService);
 });
 
-DevToolsUtils.defineLazyModuleGetter(this, "Task",
-  "resource://gre/modules/Task.jsm");
-
 var DebuggerSocket = {};
 
 /**
@@ -63,6 +63,8 @@ var DebuggerSocket = {};
  *        The port number of the debugger server.
  * @param encryption boolean (optional)
  *        Whether the server requires encryption.  Defaults to false.
+ * @param webSocket boolean (optional)
+ *        Whether to use WebSocket protocol to connect. Defaults to false.
  * @param authenticator Authenticator (optional)
  *        |Authenticator| instance matching the mode in use by the server.
  *        Defaults to a PROMPT instance if not supplied.
@@ -71,22 +73,37 @@ var DebuggerSocket = {};
  * @return promise
  *         Resolved to a DebuggerTransport instance.
  */
-DebuggerSocket.connect = Task.async(function*(settings) {
+DebuggerSocket.connect = async function(settings) {
   // Default to PROMPT |Authenticator| instance if not supplied
   if (!settings.authenticator) {
     settings.authenticator = new (Authenticators.get().Client)();
   }
-  let { host, port, encryption, authenticator, cert } = settings;
-  let transport = yield _getTransport(settings);
-  yield authenticator.authenticate({
+  _validateSettings(settings);
+  // eslint-disable-next-line no-shadow
+  const { host, port, encryption, authenticator, cert } = settings;
+  const transport = await _getTransport(settings);
+  await authenticator.authenticate({
     host,
     port,
     encryption,
     cert,
     transport
   });
+  transport.connectionSettings = settings;
   return transport;
-});
+};
+
+/**
+ * Validate that the connection settings have been set to a supported configuration.
+ */
+function _validateSettings(settings) {
+  const { encryption, webSocket, authenticator } = settings;
+
+  if (webSocket && encryption) {
+    throw new Error("Encryption not supported on WebSocket transport");
+  }
+  authenticator.validateSettings(settings);
+}
 
 /**
  * Try very hard to create a DevTools transport, potentially making several
@@ -98,6 +115,8 @@ DebuggerSocket.connect = Task.async(function*(settings) {
  *        The port number of the debugger server.
  * @param encryption boolean (optional)
  *        Whether the server requires encryption.  Defaults to false.
+ * @param webSocket boolean (optional)
+ *        Whether to use WebSocket protocol to connect to the server. Defaults to false.
  * @param authenticator Authenticator
  *        |Authenticator| instance matching the mode in use by the server.
  *        Defaults to a PROMPT instance if not supplied.
@@ -106,16 +125,25 @@ DebuggerSocket.connect = Task.async(function*(settings) {
  * @return transport DebuggerTransport
  *         A possible DevTools transport (if connection succeeded and streams
  *         are actually alive and working)
- * @return certError boolean
- *         Flag noting if cert trouble caused the streams to fail
- * @return s nsISocketTransport
- *         Underlying socket transport, in case more details are needed.
  */
-var _getTransport = Task.async(function*(settings) {
-  let { host, port, encryption } = settings;
-  let attempt = yield _attemptTransport(settings);
+var _getTransport = async function(settings) {
+  const { host, port, encryption, webSocket } = settings;
+
+  if (webSocket) {
+    // Establish a connection and wait until the WebSocket is ready to send and receive
+    const socket = await new Promise((resolve, reject) => {
+      const s = new WebSocket(`ws://${host}:${port}`);
+      s.onopen = () => resolve(s);
+      s.onerror = err => reject(err);
+    });
+
+    return new WebSocketDebuggerTransport(socket);
+  }
+
+  let attempt = await _attemptTransport(settings);
   if (attempt.transport) {
-    return attempt.transport; // Success
+    // Success
+    return attempt.transport;
   }
 
   // If the server cert failed validation, store a temporary override and make
@@ -126,13 +154,14 @@ var _getTransport = Task.async(function*(settings) {
     throw new Error("Connection failed");
   }
 
-  attempt = yield _attemptTransport(settings);
+  attempt = await _attemptTransport(settings);
   if (attempt.transport) {
-    return attempt.transport; // Success
+    // Success
+    return attempt.transport;
   }
 
   throw new Error("Connection failed even after cert override");
-});
+};
 
 /**
  * Make a single attempt to connect and create a DevTools transport.  This could
@@ -159,20 +188,20 @@ var _getTransport = Task.async(function*(settings) {
  * @return s nsISocketTransport
  *         Underlying socket transport, in case more details are needed.
  */
-var _attemptTransport = Task.async(function*(settings) {
-  let { authenticator } = settings;
+var _attemptTransport = async function(settings) {
+  const { authenticator } = settings;
   // _attemptConnect only opens the streams.  Any failures at that stage
   // aborts the connection process immedidately.
-  let { s, input, output } = yield _attemptConnect(settings);
+  const { s, input, output } = await _attemptConnect(settings);
 
   // Check if the input stream is alive.  If encryption is enabled, we need to
   // watch out for cert errors by testing the input stream.
   let alive, certError;
   try {
-    let results = yield _isInputAlive(input);
+    const results = await _isInputAlive(input);
     alive = results.alive;
     certError = results.certError;
-  } catch(e) {
+  } catch (e) {
     // For other unexpected errors, like NS_ERROR_CONNECTION_REFUSED, we reach
     // this block.
     input.close();
@@ -201,7 +230,7 @@ var _attemptTransport = Task.async(function*(settings) {
   }
 
   return { transport, certError, s };
-});
+};
 
 /**
  * Try to connect to a remote server socket.
@@ -217,7 +246,7 @@ var _attemptTransport = Task.async(function*(settings) {
  * @return output nsIAsyncOutputStream
  *         The socket's output stream.
  */
-var _attemptConnect = Task.async(function*({ host, port, encryption }) {
+var _attemptConnect = async function({ host, port, encryption }) {
   let s;
   if (encryption) {
     s = socketTransportService.createTransport(["ssl"], 1, host, port, null);
@@ -233,10 +262,10 @@ var _attemptConnect = Task.async(function*({ host, port, encryption }) {
   // right time.
   let clientCert;
   if (encryption) {
-    clientCert = yield cert.local.getOrCreate();
+    clientCert = await cert.local.getOrCreate();
   }
 
-  let deferred = promise.defer();
+  const deferred = defer();
   let input;
   let output;
   // Delay opening the input stream until the transport has fully connected.
@@ -252,13 +281,13 @@ var _attemptConnect = Task.async(function*({ host, port, encryption }) {
         return;
       }
       if (encryption) {
-        let sslSocketControl =
+        const sslSocketControl =
           transport.securityInfo.QueryInterface(Ci.nsISSLSocketControl);
         sslSocketControl.clientCert = clientCert;
       }
       try {
         input = s.openInputStream(0, 0, 0);
-      } catch(e) {
+      } catch (e) {
         deferred.reject(e);
       }
       deferred.resolve({ s, input, output });
@@ -270,7 +299,7 @@ var _attemptConnect = Task.async(function*({ host, port, encryption }) {
   // the call to this method.
   try {
     output = s.openOutputStream(0, 0, 0);
-  } catch(e) {
+  } catch (e) {
     deferred.reject(e);
   }
 
@@ -285,7 +314,7 @@ var _attemptConnect = Task.async(function*({ host, port, encryption }) {
   });
 
   return deferred.promise;
-});
+};
 
 /**
  * Check if the input stream is alive.  For an encrypted connection, it may not
@@ -293,7 +322,7 @@ var _attemptConnect = Task.async(function*({ host, port, encryption }) {
  * first connection to a new host because the cert is self-signed.
  */
 function _isInputAlive(input) {
-  let deferred = promise.defer();
+  const deferred = defer();
   input.asyncWait({
     onInputStreamReady(stream) {
       try {
@@ -302,7 +331,7 @@ function _isInputAlive(input) {
       } catch (e) {
         try {
           // getErrorClass may throw if you pass a non-NSS error
-          let errorClass = nssErrorsService.getErrorClass(e.result);
+          const errorClass = nssErrorsService.getErrorClass(e.result);
           if (errorClass === Ci.nsINSSErrorsService.ERROR_CLASS_BAD_CERT) {
             deferred.resolve({ certError: true });
           } else {
@@ -323,9 +352,10 @@ function _isInputAlive(input) {
  * these connections.
  */
 function _storeCertOverride(s, host, port) {
-  let cert = s.securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
+  // eslint-disable-next-line no-shadow
+  const cert = s.securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
               .SSLStatus.serverCert;
-  let overrideBits = Ci.nsICertOverrideService.ERROR_UNTRUSTED |
+  const overrideBits = Ci.nsICertOverrideService.ERROR_UNTRUSTED |
                      Ci.nsICertOverrideService.ERROR_MISMATCH;
   certOverrideService.rememberValidityOverride(host, port, cert, overrideBits,
                                                true /* temporary */);
@@ -380,6 +410,9 @@ SocketListener.prototype = {
     if (this.discoverable && !Number(this.portOrPath)) {
       throw new Error("Discovery only supported for TCP sockets.");
     }
+    if (this.encryption && this.webSocket) {
+      throw new Error("Encryption not supported on WebSocket transport");
+    }
     this.authenticator.validateOptions(this);
   },
 
@@ -396,24 +429,24 @@ SocketListener.prototype = {
       flags |= Ci.nsIServerSocket.LoopbackOnly;
     }
 
-    let self = this;
-    return Task.spawn(function*() {
-      let backlog = 4;
+    const self = this;
+    return (async function() {
+      const backlog = 4;
       self._socket = self._createSocketInstance();
       if (self.isPortBased) {
-        let port = Number(self.portOrPath);
+        const port = Number(self.portOrPath);
         self._socket.initSpecialConnection(port, flags, backlog);
       } else {
-        let file = nsFile(self.portOrPath);
+        const file = nsFile(self.portOrPath);
         if (file.exists()) {
           file.remove(false);
         }
         self._socket.initWithFilename(file, parseInt("666", 8), backlog);
       }
-      yield self._setAdditionalSocketOptions();
+      await self._setAdditionalSocketOptions();
       self._socket.asyncListen(self);
       dumpn("Socket listening on: " + (self.port || self.portOrPath));
-    }).then(() => {
+    })().then(() => {
       this._advertise();
     }).catch(e => {
       dumpn("Could not start debugging listener on '" + this.portOrPath +
@@ -427,7 +460,7 @@ SocketListener.prototype = {
       return;
     }
 
-    let advertisement = {
+    const advertisement = {
       port: this.port,
       encryption: this.encryption,
     };
@@ -446,16 +479,16 @@ SocketListener.prototype = {
            .createInstance(Ci.nsIServerSocket);
   },
 
-  _setAdditionalSocketOptions: Task.async(function*() {
+  async _setAdditionalSocketOptions() {
     if (this.encryption) {
-      this._socket.serverCert = yield cert.local.getOrCreate();
+      this._socket.serverCert = await cert.local.getOrCreate();
       this._socket.setSessionCache(false);
       this._socket.setSessionTickets(false);
-      let requestCert = Ci.nsITLSServerSocket.REQUEST_NEVER;
+      const requestCert = Ci.nsITLSServerSocket.REQUEST_NEVER;
       this._socket.setRequestClientCertificate(requestCert);
     }
     this.authenticator.augmentSocketOptions(this, this._socket);
-  }),
+  },
 
   /**
    * Closes the SocketListener.  Notifies the server to remove the listener from
@@ -567,7 +600,7 @@ ServerSocketConnection.prototype = {
   },
 
   get client() {
-    let client = {
+    const client = {
       host: this.host,
       port: this.port
     };
@@ -578,7 +611,7 @@ ServerSocketConnection.prototype = {
   },
 
   get server() {
-    let server = {
+    const server = {
       host: this._listener.host,
       port: this._listener.port
     };
@@ -595,23 +628,30 @@ ServerSocketConnection.prototype = {
    */
   _handle() {
     dumpn("Debugging connection starting authentication on " + this.address);
-    let self = this;
-    Task.spawn(function*() {
+    const self = this;
+    (async function() {
       self._listenForTLSHandshake();
-      self._createTransport();
-      yield self._awaitTLSHandshake();
-      yield self._authenticate();
-    }).then(() => this.allow()).catch(e => this.deny(e));
+      await self._createTransport();
+      await self._awaitTLSHandshake();
+      await self._authenticate();
+    })().then(() => this.allow()).catch(e => this.deny(e));
   },
 
   /**
    * We need to open the streams early on, as that is required in the case of
    * TLS sockets to keep the handshake moving.
    */
-  _createTransport() {
-    let input = this._socketTransport.openInputStream(0, 0, 0);
-    let output = this._socketTransport.openOutputStream(0, 0, 0);
-    this._transport = new DebuggerTransport(input, output);
+  async _createTransport() {
+    const input = this._socketTransport.openInputStream(0, 0, 0);
+    const output = this._socketTransport.openOutputStream(0, 0, 0);
+
+    if (this._listener.webSocket) {
+      const socket = await WebSocketServer.accept(this._socketTransport, input, output);
+      this._transport = new WebSocketDebuggerTransport(socket);
+    } else {
+      this._transport = new DebuggerTransport(input, output);
+    }
+
     // Start up the transport to observe the streams in case they are closed
     // early.  This allows us to clean up our state as well.
     this._transport.hooks = {
@@ -630,7 +670,7 @@ ServerSocketConnection.prototype = {
     if (!this._socketTransport || !this._socketTransport.securityInfo) {
       return;
     }
-    let connectionInfo = this._socketTransport.securityInfo
+    const connectionInfo = this._socketTransport.securityInfo
                          .QueryInterface(Ci.nsITLSServerConnectionInfo);
     connectionInfo.setSecurityObserver(observer);
   },
@@ -641,7 +681,7 @@ ServerSocketConnection.prototype = {
    * |onHandshakeDone|.
    */
   _listenForTLSHandshake() {
-    this._handshakeDeferred = promise.defer();
+    this._handshakeDeferred = defer();
     if (!this._listener.encryption) {
       this._handshakeDeferred.resolve();
       return;
@@ -677,7 +717,7 @@ ServerSocketConnection.prototype = {
      * cipher negotiation to work correctly.  The server already allows only
      * Gecko's normal set of cipher suites.
      */
-    if (clientStatus.tlsVersionUsed != Ci.nsITLSClientStatus.TLS_VERSION_1_2) {
+    if (clientStatus.tlsVersionUsed < Ci.nsITLSClientStatus.TLS_VERSION_1_2) {
       this._handshakeDeferred.reject(Cr.NS_ERROR_CONNECTION_REFUSED);
       return;
     }
@@ -685,8 +725,8 @@ ServerSocketConnection.prototype = {
     this._handshakeDeferred.resolve();
   },
 
-  _authenticate: Task.async(function*() {
-    let result = yield this._listener.authenticator.authenticate({
+  async _authenticate() {
+    const result = await this._listener.authenticator.authenticate({
       client: this.client,
       server: this.server,
       transport: this._transport
@@ -704,14 +744,14 @@ ServerSocketConnection.prototype = {
       default:
         return promise.reject(Cr.NS_ERROR_CONNECTION_REFUSED);
     }
-  }),
+  },
 
   deny(result) {
     if (this._destroyed) {
       return;
     }
     let errorName = result;
-    for (let name in Cr) {
+    for (const name in Cr) {
       if (Cr[name] === result) {
         errorName = name;
         break;
@@ -719,8 +759,10 @@ ServerSocketConnection.prototype = {
     }
     dumpn("Debugging connection denied on " + this.address +
           " (" + errorName + ")");
-    this._transport.hooks = null;
-    this._transport.close(result);
+    if (this._transport) {
+      this._transport.hooks = null;
+      this._transport.close(result);
+    }
     this._socketTransport.close(result);
     this.destroy();
   },

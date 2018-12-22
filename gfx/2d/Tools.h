@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -7,14 +8,12 @@
 #define MOZILLA_GFX_TOOLS_H_
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/MemoryReporting.h" // for MallocSizeOf
 #include "mozilla/Move.h"
 #include "mozilla/TypeTraits.h"
 #include "Types.h"
 #include "Point.h"
 #include <math.h>
-#if defined(_MSC_VER) && (_MSC_VER < 1600)
-#define hypotf _hypotf
-#endif
 
 namespace mozilla {
 namespace gfx {
@@ -74,6 +73,14 @@ NudgeToInteger(float *aVal, float aErr)
   }
 }
 
+static inline void
+NudgeToInteger(double *aVal)
+{
+  float f = float(*aVal);
+  NudgeToInteger(&f);
+  *aVal = f;
+}
+
 static inline Float
 Distance(Point aA, Point aB)
 {
@@ -87,9 +94,47 @@ BytesPerPixel(SurfaceFormat aFormat)
   case SurfaceFormat::A8:
     return 1;
   case SurfaceFormat::R5G6B5_UINT16:
+  case SurfaceFormat::A16:
     return 2;
+  case SurfaceFormat::R8G8B8:
+  case SurfaceFormat::B8G8R8:
+    return 3;
+  case SurfaceFormat::HSV:
+  case SurfaceFormat::Lab:
+    return 3 * sizeof(float);
+  case SurfaceFormat::Depth:
+    return sizeof(uint16_t);
   default:
     return 4;
+  }
+}
+
+static inline SurfaceFormat
+SurfaceFormatForAlphaBitDepth(uint32_t aBitDepth)
+{
+  if (aBitDepth == 8) {
+    return SurfaceFormat::A8;
+  } else if (aBitDepth == 10 ||
+             aBitDepth == 12) {
+    return SurfaceFormat::A16;
+  }
+  MOZ_ASSERT_UNREACHABLE("Unsupported alpha bit depth");
+  return SurfaceFormat::UNKNOWN;
+}
+
+static inline bool
+IsOpaqueFormat(SurfaceFormat aFormat) {
+  switch (aFormat) {
+    case SurfaceFormat::B8G8R8X8:
+    case SurfaceFormat::R8G8B8X8:
+    case SurfaceFormat::X8R8G8B8:
+    case SurfaceFormat::YUV:
+    case SurfaceFormat::NV12:
+    case SurfaceFormat::YUV422:
+    case SurfaceFormat::R5G6B5_UINT16:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -186,6 +231,12 @@ struct AlignedArray
     mozilla::Swap(mCount, aOther.mCount);
   }
 
+  size_t
+  HeapSizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    return aMallocSizeOf(mStorage);
+  }
+
   MOZ_ALWAYS_INLINE operator T*()
   {
     return mPtr;
@@ -199,20 +250,24 @@ private:
 };
 
 /**
- * Returns aStride increased, if necessary, so that it divides exactly into
- * |alignment|.
+ * Returns aWidth * aBytesPerPixel increased, if necessary, so that it divides
+ * exactly into |alignment|.
  *
  * Note that currently |alignment| must be a power-of-2. If for some reason we
  * want to support NPOT alignment we can revert back to this functions old
  * implementation.
  */
 template<int alignment>
-int32_t GetAlignedStride(int32_t aStride)
+int32_t GetAlignedStride(int32_t aWidth, int32_t aBytesPerPixel)
 {
   static_assert(alignment > 0 && (alignment & (alignment-1)) == 0,
                 "This implementation currently require power-of-two alignment");
   const int32_t mask = alignment - 1;
-  return (aStride + mask) & ~mask;
+  CheckedInt32 stride = CheckedInt32(aWidth) * CheckedInt32(aBytesPerPixel) + CheckedInt32(mask);
+  if (stride.isValid()) {
+    return stride.value() & ~mask;
+  }
+  return 0;
 }
 
 } // namespace gfx

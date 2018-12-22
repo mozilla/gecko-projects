@@ -28,8 +28,8 @@ var Modules = (function (modules) {
         getDOMParser: function () {
             if (typeof DOMParser === undefined) {
                 try {
-                    return Components.classes["@mozilla.org/xmlextras/domparser;1"]
-                        .createInstance(Components.interfaces.nsIDOMParser);
+                    Cu.importGlobalProperties(["DOMParser"]);
+                    return new DOMParser();
                 } catch (e) {
                     return undefined;
                 }
@@ -412,7 +412,7 @@ var Modules = (function (modules) {
          */
         removeChild: function(childNode){
             if (childNode.parentNode) {
-                return childNode.parentNode.removeChild(childNode);
+                return childNode.remove();
             }else{
                 return null;
             }

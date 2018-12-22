@@ -6,84 +6,77 @@
 
 "use strict";
 
-const HTML_NS = "http://www.w3.org/1999/xhtml";
-
 const {
   TAKE_SCREENSHOT_START,
   TAKE_SCREENSHOT_END,
 } = require("./index");
 
-const { getRect } = require("devtools/shared/layout/utils");
 const { getFormatStr } = require("../utils/l10n");
-const { getToplevelWindow } = require("sdk/window/utils");
-const { Task: { spawn, async } } = require("resource://gre/modules/Task.jsm");
+const { getToplevelWindow } = require("../utils/window");
+const e10s = require("../utils/e10s");
+const Services = require("Services");
 
-const BASE_URL = "resource://devtools/client/responsive.html";
-const audioCamera = new window.Audio(`${BASE_URL}/audio/camera-click.mp3`);
+const CAMERA_AUDIO_URL = "resource://devtools/client/themes/audio/shutter.wav";
+
+const animationFrame = () => new Promise(resolve => {
+  window.requestAnimationFrame(resolve);
+});
 
 function getFileName() {
-  let date = new Date();
-  let month = ("0" + (date.getMonth() + 1)).substr(-2);
-  let day = ("0" + date.getDate()).substr(-2);
-  let dateString = [date.getFullYear(), month, day].join("-");
-  let timeString = date.toTimeString().replace(/:/g, ".").split(" ")[0];
+  const date = new Date();
+  const month = ("0" + (date.getMonth() + 1)).substr(-2);
+  const day = ("0" + date.getDate()).substr(-2);
+  const dateString = [date.getFullYear(), month, day].join("-");
+  const timeString = date.toTimeString().replace(/:/g, ".").split(" ")[0];
 
   return getFormatStr("responsive.screenshotGeneratedFilename", dateString,
                       timeString);
 }
 
 function createScreenshotFor(node) {
-  let { top, left, width, height } = getRect(window, node, window);
+  const mm = node.frameLoader.messageManager;
 
-  const canvas = document.createElementNS(HTML_NS, "canvas");
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio;
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  ctx.scale(ratio, ratio);
-  ctx.drawWindow(window, left, top, width, height, "#fff");
-
-  return canvas.toDataURL("image/png", "");
+  return e10s.request(mm, "RequestScreenshot");
 }
 
 function saveToFile(data, filename) {
-  return spawn(function* () {
-    const chromeWindow = getToplevelWindow(window);
-    const chromeDocument = chromeWindow.document;
+  const chromeWindow = getToplevelWindow(window);
+  const chromeDocument = chromeWindow.document;
 
-    // append .png extension to filename if it doesn't exist
-    filename = filename.replace(/\.png$|$/i, ".png");
+  // append .png extension to filename if it doesn't exist
+  filename = filename.replace(/\.png$|$/i, ".png");
 
-    chromeWindow.saveURL(data, filename, null,
-                         true, true,
-                         chromeDocument.documentURIObject, chromeDocument);
-  });
+  chromeWindow.saveURL(data, filename, null,
+                        true, true,
+                        chromeDocument.documentURIObject, chromeDocument);
 }
 
 function simulateCameraEffects(node) {
-  audioCamera.play();
+  if (Services.prefs.getBoolPref("devtools.screenshot.audio.enabled")) {
+    const cameraAudio = new window.Audio(CAMERA_AUDIO_URL);
+    cameraAudio.play();
+  }
   node.animate({ opacity: [ 0, 1 ] }, 500);
 }
 
 module.exports = {
 
   takeScreenshot() {
-    return function* (dispatch, getState) {
-      yield dispatch({ type: TAKE_SCREENSHOT_START });
+    return async function(dispatch, getState) {
+      await dispatch({ type: TAKE_SCREENSHOT_START });
 
       // Waiting the next repaint, to ensure the react components
       // can be properly render after the action dispatched above
-      window.requestAnimationFrame(async(function* () {
-        let iframe = document.querySelector("iframe");
-        let data = createScreenshotFor(iframe);
+      await animationFrame();
 
-        simulateCameraEffects(iframe);
+      const iframe = document.querySelector("iframe");
+      const data = await createScreenshotFor(iframe);
 
-        yield saveToFile(data, getFileName());
+      simulateCameraEffects(iframe);
 
-        dispatch({ type: TAKE_SCREENSHOT_END });
-      }));
+      saveToFile(data, getFileName());
+
+      dispatch({ type: TAKE_SCREENSHOT_END });
     };
   }
-
 };

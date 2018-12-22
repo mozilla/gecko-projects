@@ -9,15 +9,11 @@
 var { Ci } = require("chrome");
 var Services = require("Services");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-loader.lazyRequireGetter(this, "DebuggerSocket",
-  "devtools/shared/security/socket", true);
 loader.lazyRequireGetter(this, "AuthenticationResult",
   "devtools/shared/security/auth", true);
 
-DevToolsUtils.defineLazyGetter(this, "bundle", () => {
-  const DBG_STRINGS_URI = "chrome://devtools-shared/locale/debugger.properties";
-  return Services.strings.createBundle(DBG_STRINGS_URI);
-});
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/shared/locales/debugger.properties");
 
 var Client = exports.Client = {};
 var Server = exports.Server = {};
@@ -51,35 +47,31 @@ Client.defaultSendOOB = ({ authResult, oob }) => {
   if (authResult != AuthenticationResult.PENDING) {
     throw new Error("Expected PENDING result, got " + authResult);
   }
-  let title = bundle.GetStringFromName("clientSendOOBTitle");
-  let header = bundle.GetStringFromName("clientSendOOBHeader");
-  let hashMsg = bundle.formatStringFromName("clientSendOOBHash",
-                                            [oob.sha256], 1);
-  let token = oob.sha256.replace(/:/g, "").toLowerCase() + oob.k;
-  let tokenMsg = bundle.formatStringFromName("clientSendOOBToken",
-                                             [token], 1);
-  let msg =`${header}\n\n${hashMsg}\n${tokenMsg}`;
-  let prompt = Services.prompt;
-  let flags = prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_CANCEL;
+  const title = L10N.getStr("clientSendOOBTitle");
+  const header = L10N.getStr("clientSendOOBHeader");
+  const hashMsg = L10N.getFormatStr("clientSendOOBHash", oob.sha256);
+  const token = oob.sha256.replace(/:/g, "").toLowerCase() + oob.k;
+  const tokenMsg = L10N.getFormatStr("clientSendOOBToken", token);
+  const msg = `${header}\n\n${hashMsg}\n${tokenMsg}`;
+  const prompt = Services.prompt;
+  const flags = prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_CANCEL;
 
   // Listen for the window our prompt opens, so we can close it programatically
   let promptWindow;
-  let windowListener = {
+  const windowListener = {
     onOpenWindow(xulWindow) {
-      let win = xulWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+      const win = xulWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindow);
-      win.addEventListener("load", function listener() {
-        win.removeEventListener("load", listener, false);
+      win.addEventListener("load", function() {
         if (win.document.documentElement.getAttribute("id") != "commonDialog") {
           return;
         }
         // Found the window
         promptWindow = win;
         Services.wm.removeListener(windowListener);
-      }, false);
+      }, {once: true});
     },
     onCloseWindow() {},
-    onWindowTitleChange() {}
   };
   Services.wm.addListener(windowListener);
 
@@ -125,25 +117,23 @@ Client.defaultSendOOB = ({ authResult, oob }) => {
  *         A promise that will be resolved to the above is also allowed.
  */
 Server.defaultAllowConnection = ({ client, server }) => {
-  let title = bundle.GetStringFromName("remoteIncomingPromptTitle");
-  let header = bundle.GetStringFromName("remoteIncomingPromptHeader");
-  let clientEndpoint = `${client.host}:${client.port}`;
-  let clientMsg =
-    bundle.formatStringFromName("remoteIncomingPromptClientEndpoint",
-                                [clientEndpoint], 1);
-  let serverEndpoint = `${server.host}:${server.port}`;
-  let serverMsg =
-    bundle.formatStringFromName("remoteIncomingPromptServerEndpoint",
-                                [serverEndpoint], 1);
-  let footer = bundle.GetStringFromName("remoteIncomingPromptFooter");
-  let msg =`${header}\n\n${clientMsg}\n${serverMsg}\n\n${footer}`;
-  let disableButton = bundle.GetStringFromName("remoteIncomingPromptDisable");
-  let prompt = Services.prompt;
-  let flags = prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_OK +
+  const title = L10N.getStr("remoteIncomingPromptTitle");
+  const header = L10N.getStr("remoteIncomingPromptHeader");
+  const clientEndpoint = `${client.host}:${client.port}`;
+  const clientMsg =
+    L10N.getFormatStr("remoteIncomingPromptClientEndpoint", clientEndpoint);
+  const serverEndpoint = `${server.host}:${server.port}`;
+  const serverMsg =
+    L10N.getFormatStr("remoteIncomingPromptServerEndpoint", serverEndpoint);
+  const footer = L10N.getStr("remoteIncomingPromptFooter");
+  const msg = `${header}\n\n${clientMsg}\n${serverMsg}\n\n${footer}`;
+  const disableButton = L10N.getStr("remoteIncomingPromptDisable");
+  const prompt = Services.prompt;
+  const flags = prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_OK +
               prompt.BUTTON_POS_1 * prompt.BUTTON_TITLE_CANCEL +
               prompt.BUTTON_POS_2 * prompt.BUTTON_TITLE_IS_STRING +
               prompt.BUTTON_POS_1_DEFAULT;
-  let result = prompt.confirmEx(null, title, msg, flags, null, null,
+  const result = prompt.confirmEx(null, title, msg, flags, null, null,
                                 disableButton, null, { value: false });
   if (result === 0) {
     return AuthenticationResult.ALLOW;
@@ -170,11 +160,11 @@ Server.defaultAllowConnection = ({ client, server }) => {
  *         A promise that will be resolved to the above is also allowed.
  */
 Server.defaultReceiveOOB = () => {
-  let title = bundle.GetStringFromName("serverReceiveOOBTitle");
-  let msg = bundle.GetStringFromName("serverReceiveOOBBody");
+  const title = L10N.getStr("serverReceiveOOBTitle");
+  const msg = L10N.getStr("serverReceiveOOBBody");
   let input = { value: null };
-  let prompt = Services.prompt;
-  let result = prompt.prompt(null, title, msg, input, null, { value: false });
+  const prompt = Services.prompt;
+  const result = prompt.prompt(null, title, msg, input, null, { value: false });
   if (!result) {
     return null;
   }
@@ -182,6 +172,6 @@ Server.defaultReceiveOOB = () => {
   input = input.value.trim();
   let sha256 = input.substring(0, 64);
   sha256 = sha256.replace(/\w{2}/g, "$&:").slice(0, -1).toUpperCase();
-  let k = input.substring(64);
+  const k = input.substring(64);
   return { sha256, k };
 };

@@ -10,18 +10,23 @@
 
 #include "nsDOMTokenList.h"
 #include "nsAttrValue.h"
-#include "nsContentUtils.h"
+#include "nsAttrValueInlines.h"
+#include "nsDataHashtable.h"
 #include "nsError.h"
+#include "nsHashKeys.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMTokenListBinding.h"
+#include "mozilla/BloomFilter.h"
 #include "mozilla/ErrorResult.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsDOMTokenList::nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom)
+nsDOMTokenList::nsDOMTokenList(Element* aElement, nsAtom* aAttrAtom,
+                               const DOMTokenListSupportedTokenArray aSupportedTokens)
   : mElement(aElement),
-    mAttrAtom(aAttrAtom)
+    mAttrAtom(aAttrAtom),
+    mSupportedTokens(aSupportedTokens)
 {
   // We don't add a reference to our element. If it goes away,
   // we'll be told to drop our reference
@@ -49,6 +54,44 @@ nsDOMTokenList::GetParsedAttr()
   return mElement->GetAttrInfo(kNameSpaceID_None, mAttrAtom).mValue;
 }
 
+void
+nsDOMTokenList::RemoveDuplicates(const nsAttrValue* aAttr)
+{
+  if (!aAttr || aAttr->Type() != nsAttrValue::eAtomArray) {
+    return;
+  }
+
+  BloomFilter<8, nsAtom> filter;
+  AtomArray* array = aAttr->GetAtomArrayValue();
+  for (uint32_t i = 0; i < array->Length(); i++) {
+    nsAtom* atom = array->ElementAt(i);
+    if (filter.mightContain(atom)) {
+      // Start again, with a hashtable
+      RemoveDuplicatesInternal(array, i);
+      return;
+    } else {
+      filter.add(atom);
+    }
+  }
+}
+
+void
+nsDOMTokenList::RemoveDuplicatesInternal(AtomArray* aArray, uint32_t aStart)
+{
+  nsDataHashtable<nsPtrHashKey<nsAtom>, bool> tokens;
+
+  for (uint32_t i = 0; i < aArray->Length(); i++) {
+    nsAtom* atom = aArray->ElementAt(i);
+    // No need to check the hashtable below aStart
+    if (i >= aStart && tokens.Get(atom)) {
+      aArray->RemoveElementAt(i);
+      i--;
+    } else {
+      tokens.Put(atom, true);
+    }
+  }
+}
+
 uint32_t
 nsDOMTokenList::Length()
 {
@@ -57,6 +100,7 @@ nsDOMTokenList::Length()
     return 0;
   }
 
+  RemoveDuplicates(attr);
   return attr->GetAtomCount();
 }
 
@@ -64,6 +108,13 @@ void
 nsDOMTokenList::IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aResult)
 {
   const nsAttrValue* attr = GetParsedAttr();
+
+  if (!attr || aIndex >= static_cast<uint32_t>(attr->GetAtomCount())) {
+    aFound = false;
+    return;
+  }
+
+  RemoveDuplicates(attr);
 
   if (attr && aIndex < static_cast<uint32_t>(attr->GetAtomCount())) {
     aFound = true;
@@ -74,7 +125,7 @@ nsDOMTokenList::IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aResult)
 }
 
 void
-nsDOMTokenList::SetValue(const nsAString& aValue, mozilla::ErrorResult& rv)
+nsDOMTokenList::SetValue(const nsAString& aValue, ErrorResult& rv)
 {
   if (!mElement) {
     return;
@@ -117,13 +168,8 @@ nsDOMTokenList::CheckTokens(const nsTArray<nsString>& aTokens)
 }
 
 bool
-nsDOMTokenList::Contains(const nsAString& aToken, ErrorResult& aError)
+nsDOMTokenList::Contains(const nsAString& aToken)
 {
-  aError = CheckToken(aToken);
-  if (aError.Failed()) {
-    return false;
-  }
-
   const nsAttrValue* attr = GetParsedAttr();
   return attr && attr->Contains(aToken);
 }
@@ -139,10 +185,15 @@ nsDOMTokenList::AddInternal(const nsAttrValue* aAttr,
   nsAutoString resultStr;
 
   if (aAttr) {
-    aAttr->ToString(resultStr);
+    RemoveDuplicates(aAttr);
+    for (uint32_t i = 0; i < aAttr->GetAtomCount(); i++) {
+      if (i != 0) {
+        resultStr.AppendLiteral(" ");
+      }
+      resultStr.Append(nsDependentAtomString(aAttr->AtomAt(i)));
+    }
   }
 
-  bool oneWasAdded = false;
   AutoTArray<nsString, 10> addedClasses;
 
   for (uint32_t i = 0, l = aTokens.Length(); i < l; ++i) {
@@ -153,16 +204,11 @@ nsDOMTokenList::AddInternal(const nsAttrValue* aAttr,
       continue;
     }
 
-    if (oneWasAdded ||
-        (!resultStr.IsEmpty() &&
-        !nsContentUtils::IsHTMLWhitespace(resultStr.Last()))) {
+    if (!resultStr.IsEmpty()) {
       resultStr.Append(' ');
-      resultStr.Append(aToken);
-    } else {
-      resultStr.Append(aToken);
     }
+    resultStr.Append(aToken);
 
-    oneWasAdded = true;
     addedClasses.AppendElement(aToken);
   }
 
@@ -182,7 +228,7 @@ nsDOMTokenList::Add(const nsTArray<nsString>& aTokens, ErrorResult& aError)
 }
 
 void
-nsDOMTokenList::Add(const nsAString& aToken, mozilla::ErrorResult& aError)
+nsDOMTokenList::Add(const nsAString& aToken, ErrorResult& aError)
 {
   AutoTArray<nsString, 1> tokens;
   tokens.AppendElement(aToken);
@@ -195,60 +241,20 @@ nsDOMTokenList::RemoveInternal(const nsAttrValue* aAttr,
 {
   MOZ_ASSERT(aAttr, "Need an attribute");
 
-  nsAutoString input;
-  aAttr->ToString(input);
+  RemoveDuplicates(aAttr);
 
-  nsAString::const_iterator copyStart, tokenStart, iter, end;
-  input.BeginReading(iter);
-  input.EndReading(end);
-  copyStart = iter;
-
-  nsAutoString output;
-  bool lastTokenRemoved = false;
-
-  while (iter != end) {
-    // skip whitespace.
-    while (iter != end && nsContentUtils::IsHTMLWhitespace(*iter)) {
-      ++iter;
+  nsAutoString resultStr;
+  for (uint32_t i = 0; i < aAttr->GetAtomCount(); i++) {
+    if (aTokens.Contains(nsDependentAtomString(aAttr->AtomAt(i)))) {
+      continue;
     }
-
-    if (iter == end) {
-      // At this point we're sure the last seen token (if any) wasn't to be
-      // removed. So the trailing spaces will need to be kept.
-      MOZ_ASSERT(!lastTokenRemoved, "How did this happen?");
-
-      output.Append(Substring(copyStart, end));
-      break;
+    if (!resultStr.IsEmpty()) {
+      resultStr.AppendLiteral(" ");
     }
-
-    tokenStart = iter;
-    do {
-      ++iter;
-    } while (iter != end && !nsContentUtils::IsHTMLWhitespace(*iter));
-
-    if (aTokens.Contains(Substring(tokenStart, iter))) {
-
-      // Skip whitespace after the token, it will be collapsed.
-      while (iter != end && nsContentUtils::IsHTMLWhitespace(*iter)) {
-        ++iter;
-      }
-      copyStart = iter;
-      lastTokenRemoved = true;
-
-    } else {
-
-      if (lastTokenRemoved && !output.IsEmpty()) {
-        MOZ_ASSERT(!nsContentUtils::IsHTMLWhitespace(output.Last()),
-                   "Invalid last output token");
-        output.Append(char16_t(' '));
-      }
-      lastTokenRemoved = false;
-      output.Append(Substring(copyStart, iter));
-      copyStart = iter;
-    }
+    resultStr.Append(nsDependentAtomString(aAttr->AtomAt(i)));
   }
 
-  mElement->SetAttr(kNameSpaceID_None, mAttrAtom, output, true);
+  mElement->SetAttr(kNameSpaceID_None, mAttrAtom, resultStr, true);
 }
 
 void
@@ -268,7 +274,7 @@ nsDOMTokenList::Remove(const nsTArray<nsString>& aTokens, ErrorResult& aError)
 }
 
 void
-nsDOMTokenList::Remove(const nsAString& aToken, mozilla::ErrorResult& aError)
+nsDOMTokenList::Remove(const nsAString& aToken, ErrorResult& aError)
 {
   AutoTArray<nsString, 1> tokens;
   tokens.AppendElement(aToken);
@@ -308,6 +314,107 @@ nsDOMTokenList::Toggle(const nsAString& aToken,
   return isPresent;
 }
 
+bool
+nsDOMTokenList::Replace(const nsAString& aToken,
+                        const nsAString& aNewToken,
+                        ErrorResult& aError)
+{
+  // Doing this here instead of using `CheckToken` because if aToken had invalid
+  // characters, and aNewToken is empty, the returned error should be a
+  // SyntaxError, not an InvalidCharacterError.
+  if (aNewToken.IsEmpty()) {
+    aError.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return false;
+  }
+
+  aError = CheckToken(aToken);
+  if (aError.Failed()) {
+    return false;
+  }
+
+  aError = CheckToken(aNewToken);
+  if (aError.Failed()) {
+    return false;
+  }
+
+  const nsAttrValue* attr = GetParsedAttr();
+  if (!attr) {
+    return false;
+  }
+
+  return ReplaceInternal(attr, aToken, aNewToken);
+}
+
+bool
+nsDOMTokenList::ReplaceInternal(const nsAttrValue* aAttr,
+                                const nsAString& aToken,
+                                const nsAString& aNewToken)
+{
+  RemoveDuplicates(aAttr);
+
+  // Trying to do a single pass here leads to really complicated code.  Just do
+  // the simple thing.
+  bool haveOld = false;
+  for (uint32_t i = 0; i < aAttr->GetAtomCount(); ++i) {
+    if (aAttr->AtomAt(i)->Equals(aToken)) {
+      haveOld = true;
+      break;
+    }
+  }
+  if (!haveOld) {
+    // Make sure to not touch the attribute value in this case.
+    return false;
+  }
+
+  bool sawIt = false;
+  nsAutoString resultStr;
+  for (uint32_t i = 0; i < aAttr->GetAtomCount(); i++) {
+    if (aAttr->AtomAt(i)->Equals(aToken) ||
+        aAttr->AtomAt(i)->Equals(aNewToken)) {
+      if (sawIt) {
+        // We keep only the first
+        continue;
+      }
+      sawIt = true;
+      if (!resultStr.IsEmpty()) {
+        resultStr.AppendLiteral(" ");
+      }
+      resultStr.Append(aNewToken);
+      continue;
+    }
+    if (!resultStr.IsEmpty()) {
+      resultStr.AppendLiteral(" ");
+    }
+    resultStr.Append(nsDependentAtomString(aAttr->AtomAt(i)));
+  }
+
+  MOZ_ASSERT(sawIt, "How could we not have found our token this time?");
+  mElement->SetAttr(kNameSpaceID_None, mAttrAtom, resultStr, true);
+  return true;
+}
+
+bool
+nsDOMTokenList::Supports(const nsAString& aToken,
+                         ErrorResult& aError)
+{
+  if (!mSupportedTokens) {
+    aError.ThrowTypeError<MSG_TOKENLIST_NO_SUPPORTED_TOKENS>(
+      mElement->LocalName(),
+      nsDependentAtomString(mAttrAtom));
+    return false;
+  }
+
+  for (DOMTokenListSupportedToken* supportedToken = mSupportedTokens;
+       *supportedToken;
+       ++supportedToken) {
+    if (aToken.LowerCaseEqualsASCII(*supportedToken)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void
 nsDOMTokenList::Stringify(nsAString& aResult)
 {
@@ -319,9 +426,15 @@ nsDOMTokenList::Stringify(nsAString& aResult)
   mElement->GetAttr(kNameSpaceID_None, mAttrAtom, aResult);
 }
 
+DocGroup*
+nsDOMTokenList::GetDocGroup() const
+{
+  return mElement ? mElement->OwnerDoc()->GetDocGroup() : nullptr;
+}
+
 JSObject*
 nsDOMTokenList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DOMTokenListBinding::Wrap(cx, this, aGivenProto);
+  return DOMTokenList_Binding::Wrap(cx, this, aGivenProto);
 }
 

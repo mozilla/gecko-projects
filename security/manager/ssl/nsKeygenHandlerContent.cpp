@@ -11,7 +11,8 @@
 #include "nsString.h"
 
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/unused.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/Unused.h"
 
 #include "keythi.h"
 #include "nss.h"
@@ -19,6 +20,7 @@
 #include "nsKeygenHandler.h"
 
 using mozilla::dom::ContentChild;
+using mozilla::dom::Element;
 using mozilla::Unused;
 
 NS_IMPL_ISUPPORTS(nsKeygenFormProcessorContent, nsIFormProcessor)
@@ -32,7 +34,7 @@ nsKeygenFormProcessorContent::~nsKeygenFormProcessorContent()
 }
 
 nsresult
-nsKeygenFormProcessorContent::ProcessValue(nsIDOMHTMLElement* aElement,
+nsKeygenFormProcessorContent::ProcessValue(Element* aElement,
                                            const nsAString& aName,
                                            nsAString& aValue)
 {

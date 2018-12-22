@@ -14,7 +14,7 @@ function run_test()
 {
   var ios = Cc["@mozilla.org/network/io-service;1"].createInstance(Ci.nsIIOService);
 
-  var baseURI = ios.newURI("http://example.com/", "UTF-8", null);
+  var baseURI = ios.newURI("http://example.com/", "UTF-8");
 
   // This depends on the redirector for about:license having the
   // nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT flag.
@@ -30,6 +30,6 @@ function run_test()
   var copy = input.readObject(true);
   copy.QueryInterface(Ci.nsIURI);
 
-  do_check_eq(copy.asciiSpec, aboutLicense.asciiSpec);
-  do_check_true(copy.equals(aboutLicense));
+  Assert.equal(copy.asciiSpec, aboutLicense.asciiSpec);
+  Assert.ok(copy.equals(aboutLicense));
 }

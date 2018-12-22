@@ -41,8 +41,6 @@ ia2AccessibleComponent::QueryInterface(REFIID iid, void** ppv)
 STDMETHODIMP
 ia2AccessibleComponent::get_locationInParent(long* aX, long* aY)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aX || !aY)
     return E_INVALIDARG;
 
@@ -64,26 +62,22 @@ ia2AccessibleComponent::get_locationInParent(long* aX, long* aY)
   // parent or relative to the screen on which this object is rendered if it
   // has no parent.
   if (!acc->Parent()) {
-    *aX = rect.x;
-    *aY = rect.y;
+    *aX = rect.X();
+    *aY = rect.Y();
     return S_OK;
   }
 
   // The coordinates of the bounding box are given relative to the parent's
   // coordinate system.
   nsIntRect parentRect = acc->Parent()->Bounds();
-  *aX = rect.x - parentRect.x;
-  *aY = rect.y - parentRect.y;
+  *aX = rect.X() - parentRect.X();
+  *aY = rect.Y() - parentRect.Y();
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 ia2AccessibleComponent::get_foreground(IA2Color* aForeground)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aForeground)
     return E_INVALIDARG;
 
@@ -98,15 +92,11 @@ ia2AccessibleComponent::get_foreground(IA2Color* aForeground)
     *aForeground = frame->StyleColor()->mColor;
 
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 
 STDMETHODIMP
 ia2AccessibleComponent::get_background(IA2Color* aBackground)
 {
-  A11Y_TRYBLOCK_BEGIN
-
   if (!aBackground)
     return E_INVALIDARG;
 
@@ -117,11 +107,10 @@ ia2AccessibleComponent::get_background(IA2Color* aBackground)
     return CO_E_OBJNOTCONNECTED;
 
   nsIFrame* frame = acc->GetFrame();
-  if (frame)
-    *aBackground = frame->StyleBackground()->mBackgroundColor;
+  if (frame) {
+    *aBackground = frame->StyleBackground()->BackgroundColor(frame);
+  }
 
   return S_OK;
-
-  A11Y_TRYBLOCK_END
 }
 

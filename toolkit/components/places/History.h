@@ -15,6 +15,7 @@
 #include "Database.h"
 
 #include "mozilla/dom/Link.h"
+#include "mozilla/ipc/URIParams.h"
 #include "nsTHashtable.h"
 #include "nsString.h"
 #include "nsURIHashKey.h"
@@ -33,8 +34,18 @@ class ConcurrentStatementsHolder;
 #define NS_HISTORYSERVICE_CID \
   {0x0937a705, 0x91a6, 0x417a, {0x82, 0x92, 0xb2, 0x2e, 0xb1, 0x0d, 0xa8, 0x6c}}
 
-// Max size of History::mRecentlyVisitedURIs
-#define RECENTLY_VISITED_URI_SIZE 8
+// Initial size of mRecentlyVisitedURIs.
+#define RECENTLY_VISITED_URIS_SIZE 64
+// Microseconds after which a visit can be expired from mRecentlyVisitedURIs.
+// When an URI is reloaded we only take into account the first visit to it, and
+// ignore any subsequent visits, if they happen before this time has elapsed.
+// A commonly found case is to reload a page every 5 minutes, so we pick a time
+// larger than that.
+#define RECENTLY_VISITED_URIS_MAX_AGE 6 * 60 * PR_USEC_PER_SEC
+// When notifying the main thread after inserting visits, we chunk the visits
+// into medium-sized groups so that we can amortize the cost of the runnable
+// without janking the main thread by expecting it to process hundreds at once.
+#define NOTIFY_VISITS_CHUNK_SIZE 100
 
 class History final : public IHistory
                     , public nsIDownloadHistory
@@ -62,8 +73,14 @@ public:
    *
    * @param aVisitData
    *        The visit data to use to populate a new row in moz_places.
+   * @param aShouldNotifyFrecencyChanged
+   *        Whether to dispatch OnFrecencyChanged notifications.
+   *        Defaults to true. Set to false if you (the caller) are
+   *        doing many inserts and will dispatch your own
+   *        OnManyFrecenciesChanged notification.
    */
-  nsresult InsertPlace(const VisitData& aVisitData);
+  nsresult InsertPlace(VisitData& aVisitData,
+                       bool aShouldNotifyFrecencyChanged = true);
 
   /**
    * Updates an entry in moz_places with the data in aVisitData.
@@ -95,16 +112,16 @@ public:
   static History* GetService();
 
   /**
-   * Obtains a pointer that has had AddRef called on it.  Used by the service
-   * manager only.
+   * Used by the service manager only.
    */
-  static History* GetSingleton();
+  static already_AddRefed<History> GetSingleton();
 
   template<int N>
   already_AddRefed<mozIStorageStatement>
   GetStatement(const char (&aQuery)[N])
   {
-    mozIStorageConnection* dbConn = GetDBConn();
+    // May be invoked on both threads.
+    const mozIStorageConnection* dbConn = GetConstDBConn();
     NS_ENSURE_TRUE(dbConn, nullptr);
     return mDB->GetStatement(aQuery);
   }
@@ -112,7 +129,8 @@ public:
   already_AddRefed<mozIStorageStatement>
   GetStatement(const nsACString& aQuery)
   {
-    mozIStorageConnection* dbConn = GetDBConn();
+    // May be invoked on both threads.
+    const mozIStorageConnection* dbConn = GetConstDBConn();
     NS_ENSURE_TRUE(dbConn, nullptr);
     return mDB->GetStatement(aQuery);
   }
@@ -130,15 +148,36 @@ public:
    */
   void AppendToRecentlyVisitedURIs(nsIURI* aURI);
 
+  void NotifyVisitedParent(const nsTArray<mozilla::ipc::URIParams>& aURIs);
 private:
   virtual ~History();
 
   void InitMemoryReporter();
 
   /**
-   * Obtains a read-write database connection.
+   * Obtains a read-write database connection, initializing the connection
+   * if needed. Must be invoked on the main thread.
    */
   mozIStorageConnection* GetDBConn();
+
+  /**
+   * Obtains a read-write database connection, but won't try to initialize it.
+   * May be invoked on both threads, but first one must invoke GetDBConn() on
+   * the main-thread at least once.
+   */
+  const mozIStorageConnection* GetConstDBConn();
+
+  /**
+   * Mark all links for the given URI in the given document as visited. Used
+   * within NotifyVisited.
+   */
+  void NotifyVisitedForDocument(nsIURI* aURI, nsIDocument* aDocument);
+
+  /**
+   * Dispatch a runnable for the document passed in which will call
+   * NotifyVisitedForDocument with the correct URI and Document.
+   */
+  void DispatchNotifyVisited(nsIURI* aURI, nsIDocument* aDocument);
 
   /**
    * The database handle.  This is initialized lazily by the first call to
@@ -177,26 +216,39 @@ private:
     KeyClass(const KeyClass& aOther)
     : nsURIHashKey(aOther)
     {
-      NS_NOTREACHED("Do not call me!");
+      MOZ_ASSERT_UNREACHABLE("Do not call me!");
     }
     size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     {
       return array.ShallowSizeOfExcludingThis(aMallocSizeOf);
     }
     ObserverArray array;
+    bool mVisited = false;
   };
 
   nsTHashtable<KeyClass> mObservers;
 
   /**
-   * mRecentlyVisitedURIs remembers URIs which are recently added to the DB,
-   * to avoid saving these locations repeatedly in a short period.
+   * mRecentlyVisitedURIs remembers URIs which have been recently added to
+   * history, to avoid saving these locations repeatedly in a short period.
    */
-  typedef AutoTArray<nsCOMPtr<nsIURI>, RECENTLY_VISITED_URI_SIZE>
-          RecentlyVisitedArray;
-  RecentlyVisitedArray mRecentlyVisitedURIs;
-  RecentlyVisitedArray::index_type mRecentlyVisitedURIsNextIndex;
-
+  class RecentURIKey : public nsURIHashKey
+  {
+  public:
+    explicit RecentURIKey(const nsIURI* aURI) : nsURIHashKey(aURI)
+    {
+    }
+    RecentURIKey(const RecentURIKey& aOther) : nsURIHashKey(aOther)
+    {
+      MOZ_ASSERT_UNREACHABLE("Do not call me!");
+    }
+    MOZ_INIT_OUTSIDE_CTOR PRTime time;
+  };
+  nsTHashtable<RecentURIKey> mRecentlyVisitedURIs;
+  /**
+   * Whether aURI has been visited "recently".
+   * See RECENTLY_VISITED_URIS_MAX_AGE.
+   */
   bool IsRecentlyVisitedURI(nsIURI* aURI);
 };
 

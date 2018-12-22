@@ -6,20 +6,18 @@
 upon that are in the same directory, followed by the library itself.
 '''
 
-from optparse import OptionParser
 import os
 import re
-import fnmatch
 import subprocess
 import sys
+import mozpack.path as mozpath
+from collections import OrderedDict
 from mozpack.executables import (
     get_type,
     ELF,
     MACHO,
 )
 from buildconfig import substs
-
-TOOLCHAIN_PREFIX = ''
 
 def dependentlibs_dumpbin(lib):
     '''Returns the list of dependencies declared in the given DLL'''
@@ -43,10 +41,14 @@ def dependentlibs_dumpbin(lib):
     return deps
 
 def dependentlibs_mingw_objdump(lib):
-    proc = subprocess.Popen(['objdump', '-x', lib], stdout = subprocess.PIPE)
+    try:
+        proc = subprocess.Popen(['objdump', '-x', lib], stdout = subprocess.PIPE)
+    except OSError:
+        # objdump is missing, try using llvm-objdump.
+        proc = subprocess.Popen(['llvm-objdump', '-private-headers', lib], stdout = subprocess.PIPE)
     deps = []
     for line in proc.stdout:
-        match = re.match('\tDLL Name: (\S+)', line)
+        match = re.match('\s+DLL Name: (\S+)', line)
         if match:
             deps.append(match.group(1))
     proc.wait()
@@ -54,16 +56,20 @@ def dependentlibs_mingw_objdump(lib):
 
 def dependentlibs_readelf(lib):
     '''Returns the list of dependencies declared in the given ELF .so'''
-    proc = subprocess.Popen([TOOLCHAIN_PREFIX + 'readelf', '-d', lib], stdout = subprocess.PIPE)
+    proc = subprocess.Popen([substs.get('TOOLCHAIN_PREFIX', '') + 'readelf', '-d', lib], stdout = subprocess.PIPE)
     deps = []
     for line in proc.stdout:
         # Each line has the following format:
         #  tag (TYPE)          value
+        # or with BSD readelf:
+        #  tag TYPE            value
         # Looking for NEEDED type entries
         tmp = line.split(' ', 3)
-        if len(tmp) > 3 and tmp[2] == '(NEEDED)':
+        if len(tmp) > 3 and 'NEEDED' in tmp[2]:
             # NEEDED lines look like:
             # 0x00000001 (NEEDED)             Shared library: [libname]
+            # or with BSD readelf:
+            # 0x00000001 NEEDED               Shared library: [libname]
             match = re.search('\[(.*)\]', tmp[3])
             if match:
                 deps.append(match.group(1))
@@ -96,32 +102,25 @@ def dependentlibs(lib, libpaths, func):
     be found in the given list of paths, followed by the library itself.'''
     assert(libpaths)
     assert(isinstance(libpaths, list))
-    deps = []
+    deps = OrderedDict()
     for dep in func(lib):
         if dep in deps or os.path.isabs(dep):
             continue
         for dir in libpaths:
             deppath = os.path.join(dir, dep)
             if os.path.exists(deppath):
-                deps.extend([d for d in dependentlibs(deppath, libpaths, func) if not d in deps])
+                deps.update(dependentlibs(deppath, libpaths, func))
                 # Black list the ICU data DLL because preloading it at startup
                 # leads to startup performance problems because of its excessive
                 # size (around 10MB).
                 if not dep.startswith("icu"):
-                    deps.append(dep)
+                    deps[dep] = deppath
                 break
 
     return deps
 
-def main():
-    parser = OptionParser()
-    parser.add_option("-L", dest="libpaths", action="append", metavar="PATH", help="Add the given path to the library search path")
-    parser.add_option("-p", dest="toolchain_prefix", metavar="PREFIX", help="Use the given prefix to readelf")
-    (options, args) = parser.parse_args()
-    if options.toolchain_prefix:
-        global TOOLCHAIN_PREFIX
-        TOOLCHAIN_PREFIX = options.toolchain_prefix
-    lib = args[0]
+def gen_list(output, lib):
+    libpaths = [os.path.join(substs['DIST'], 'bin')]
     binary_type = get_type(lib)
     if binary_type == ELF:
         func = dependentlibs_readelf
@@ -131,10 +130,21 @@ def main():
         ext = os.path.splitext(lib)[1]
         assert(ext == '.dll')
         func = dependentlibs_dumpbin
-    if not options.libpaths:
-        options.libpaths = [os.path.dirname(lib)]
 
-    print '\n'.join(dependentlibs(lib, options.libpaths, func) + [lib])
+    deps = dependentlibs(lib, libpaths, func)
+    base_lib = mozpath.basename(lib)
+    deps[base_lib] = mozpath.join(libpaths[0], base_lib)
+    output.write('\n'.join(deps.keys()) + '\n')
+
+    with open(output.name + ".gtest", 'w') as gtest_out:
+        libs = deps.keys()
+        libs[-1] = 'gtest/' + libs[-1]
+        gtest_out.write('\n'.join(libs) + '\n')
+
+    return set(deps.values())
+
+def main():
+    gen_list(sys.stdout, sys.argv[1])
 
 if __name__ == '__main__':
     main()

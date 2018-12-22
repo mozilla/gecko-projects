@@ -62,7 +62,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nsThreadUtils.h"
 
 #include "nsITCPSocketCallback.h"
-#include "databuffer.h"
+#include "mediapacket.h"
 #include "m_cpp_utils.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/RefPtr.h"
@@ -121,8 +121,7 @@ public:
   virtual int cancel(int how);
 
   // nsISupport reference counted interface
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void) = 0;
-  NS_IMETHOD_(MozExternalRefCountType) Release(void) = 0;
+  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
 
   uint32_t poll_flags() {
     return poll_flags_;
@@ -198,14 +197,14 @@ protected:
 };
 
 struct nr_udp_message {
-  nr_udp_message(const PRNetAddr &from, nsAutoPtr<DataBuffer> &data)
+  nr_udp_message(const PRNetAddr &from, nsAutoPtr<MediaPacket> &data)
       : from(from), data(data) {
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nr_udp_message);
 
   PRNetAddr from;
-  nsAutoPtr<DataBuffer> data;
+  nsAutoPtr<MediaPacket> data;
 
 private:
   ~nr_udp_message() {}
@@ -278,11 +277,11 @@ private:
   // Main or private thread executors of the NrSocketBase APIs
   void create_i(const nsACString &host, const uint16_t port);
   void connect_i(const nsACString &host, const uint16_t port);
-  void sendto_i(const net::NetAddr &addr, nsAutoPtr<DataBuffer> buf);
+  void sendto_i(const net::NetAddr &addr, nsAutoPtr<MediaPacket> buf);
   void close_i();
 #if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
-  static void release_child_i(nsIUDPSocketChild* aChild, nsCOMPtr<nsIEventTarget> ststhread);
-  static void release_use_s();
+  static void destroy_i(nsIUDPSocketChild* aChild,
+                        nsCOMPtr<nsIEventTarget>& aStsThread);
 #endif
   // STS thread executor
   void recv_callback_s(RefPtr<nr_udp_message> msg);
@@ -313,7 +312,7 @@ private:
 };
 
 struct nr_tcp_message {
-  explicit nr_tcp_message(nsAutoPtr<DataBuffer> &data)
+  explicit nr_tcp_message(nsAutoPtr<MediaPacket> &data)
     : read_bytes(0)
     , data(data) {
   }
@@ -334,7 +333,7 @@ private:
   ~nr_tcp_message() {}
   DISALLOW_COPY_ASSIGN(nr_tcp_message);
 
-  nsAutoPtr<DataBuffer> data;
+  nsAutoPtr<MediaPacket> data;
 };
 
 #if defined(MOZILLA_INTERNAL_API) && !defined(MOZILLA_XPCOMRT_API)
@@ -370,12 +369,13 @@ private:
   void connect_i(const nsACString &remote_addr,
                  uint16_t remote_port,
                  const nsACString &local_addr,
-                 uint16_t local_port);
+                 uint16_t local_port,
+                 const nsACString &tls_host);
   void write_i(nsAutoPtr<InfallibleTArray<uint8_t>> buf,
                uint32_t tracking_number);
   void close_i();
 
-  static void release_child_i(dom::TCPSocketChild* aChild, nsCOMPtr<nsIEventTarget> ststhread);
+  static void release_child_i(dom::TCPSocketChild* aChild);
 
   // STS thread executor
   void message_sent_s(uint32_t bufferedAmount, uint32_t tracking_number);

@@ -23,9 +23,8 @@ class GLContextEAGL : public GLContext
 
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextEAGL, override)
-    GLContextEAGL(const SurfaceCaps& caps, EAGLContext* context,
-                  GLContext* sharedContext,
-                  bool isOffscreen, ContextProfile profile);
+    GLContextEAGL(CreateContextFlags flags, const SurfaceCaps& caps, EAGLContext* context,
+                  GLContext* sharedContext, bool isOffscreen, ContextProfile profile);
 
     ~GLContextEAGL();
 
@@ -44,17 +43,17 @@ public:
 
     EAGLContext* GetEAGLContext() const { return mContext; }
 
-    virtual bool MakeCurrentImpl(bool aForce) override;
+    virtual bool MakeCurrentImpl() const override;
 
-    virtual bool IsCurrent() override;
+    virtual bool IsCurrentImpl() const override;
 
     virtual bool SetupLookupFunction() override;
 
     virtual bool IsDoubleBuffered() const override;
 
-    virtual bool SupportsRobustness() const override;
-
     virtual bool SwapBuffers() override;
+
+    virtual void GetWSIInfo(nsCString* const out) const override;
 
     virtual GLuint GetDefaultFramebuffer() override {
         return mBackbufferFB;

@@ -10,8 +10,8 @@ interface nsIInterfaceRequestor;
 interface nsIX509Cert;
 
 %{C++
-template<class T> class nsTArray;
-class nsCString;
+#include "nsStringFwd.h"
+#include "nsTArrayForwardDeclare.h"
 %}
 [ref] native nsCStringTArrayRef(nsTArray<nsCString>);
 
@@ -44,12 +44,36 @@ interface nsISSLSocketControl : nsISupports {
      */
     readonly attribute ACString negotiatedNPN;
 
+    /* For 0RTT we need to know the alpn protocol selected for the last tls
+     * session. This function will return a value if applicable or an error
+     * NS_ERROR_NOT_AVAILABLE.
+     */
+    ACString getAlpnEarlySelection();
+
+    /* If 0RTT handshake was applied and some data has been sent, as soon as
+     * the handshake finishes this attribute will be set to appropriate value.
+     */
+    readonly attribute bool earlyDataAccepted;
+
+    /* When 0RTT is performed, PR_Write will not drive the handshake forward.
+     * It must be forced by calling this function.
+     */
+    void driveHandshake();
+
     /* Determine if a potential SSL connection to hostname:port with
      * a desired NPN negotiated protocol of npnProtocol can use the socket
-     * associated with this object instead of making a new one.
+     * associated with this object instead of making a new one. And if so, combine
+     * them.
      */
     boolean joinConnection(
-      in ACString npnProtocol, /* e.g. "spdy/2" */
+      in ACString npnProtocol, /* e.g. "h2" */
+      in ACString hostname,
+      in long port);
+
+    /* just like JoinConnection() except do not mark a successful test as joined.
+     */
+    boolean testJoinConnection(
+      in ACString npnProtocol, /* e.g. "h2" */
       in ACString hostname,
       in long port);
 
@@ -78,11 +102,17 @@ interface nsISSLSocketControl : nsISupports {
      */
     readonly attribute uint32_t providerFlags;
 
+    /*
+     * The original TLS flags from the socket provider.
+     */
+    readonly attribute uint32_t providerTlsFlags;
+
     /* These values are defined by TLS. */
     const short SSL_VERSION_3   = 0x0300;
     const short TLS_VERSION_1   = 0x0301;
     const short TLS_VERSION_1_1 = 0x0302;
     const short TLS_VERSION_1_2 = 0x0303;
+    const short TLS_VERSION_1_3 = 0x0304;
     const short SSL_VERSION_UNKNOWN = -1;
 
     [infallible] readonly attribute short SSLVersionUsed;
@@ -101,11 +131,23 @@ interface nsISSLSocketControl : nsISupports {
     [infallible] readonly attribute short MACAlgorithmUsed;
 
     /**
+     * If set to true before the server requests a client cert
+     * no cert will be sent.
+     */
+    [noscript] attribute boolean denyClientCert;
+
+    /**
      * If set before the server requests a client cert (assuming it does so at
      * all), then this cert will be presented to the server, instead of asking
      * the user or searching the set of rememebered user cert decisions.
      */
     attribute nsIX509Cert clientCert;
+
+    /**
+     * True iff a client cert has been sent to the server - i.e. this
+     * socket has been client-cert authenticated.
+     */
+    [infallible] readonly attribute boolean clientCertSent;
 
     /**
      * bypassAuthentication is true if the server certificate checks are

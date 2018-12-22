@@ -4,17 +4,12 @@
 
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "console", () => {
-  let {ConsoleAPI} = Cu.import("resource://gre/modules/Console.jsm", {});
+  let {ConsoleAPI} = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
   return new ConsoleAPI({
     maxLogLevelPref: "dom.push.loglevel",
     prefix: "Push",
@@ -27,7 +22,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "PushService",
 const PUSH_CID = Components.ID("{cde1d019-fad8-4044-b141-65fb4fb7a245}");
 
 /**
- * The Push component runs in the child process and exposes the SimplePush API
+ * The Push component runs in the child process and exposes the Push API
  * to the web application. The PushService running in the parent process is the
  * one actually performing all operations.
  */
@@ -42,32 +37,32 @@ Push.prototype = {
 
   classID : PUSH_CID,
 
-  QueryInterface : XPCOMUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer,
-                                          Ci.nsISupportsWeakReference,
-                                          Ci.nsIObserver]),
+  QueryInterface : ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer,
+                                           Ci.nsISupportsWeakReference,
+                                           Ci.nsIObserver]),
 
-  init: function(aWindow) {
+  init: function(win) {
     console.debug("init()");
 
-    this._window = aWindow;
+    this._window = win;
 
-    this.initDOMRequestHelper(aWindow);
+    this.initDOMRequestHelper(win);
 
-    this._principal = aWindow.document.nodePrincipal;
+    this._principal = win.document.nodePrincipal;
   },
 
   __init: function(scope) {
     this._scope = scope;
   },
 
-  askPermission: function (aAllowCallback, aCancelCallback) {
+  askPermission: function () {
     console.debug("askPermission()");
 
     return this.createPromise((resolve, reject) => {
       let permissionDenied = () => {
         reject(new this._window.DOMException(
-          "User denied permission to use the Push API",
-          "PermissionDeniedError"
+          "User denied permission to use the Push API.",
+          "NotAllowedError"
         ));
       };
 
@@ -89,17 +84,50 @@ Push.prototype = {
     });
   },
 
-  subscribe: function() {
+  subscribe: function(options) {
     console.debug("subscribe()", this._scope);
 
-    let histogram = Services.telemetry.getHistogramById("PUSH_API_USED");
-    histogram.add(true);
     return this.askPermission().then(() =>
       this.createPromise((resolve, reject) => {
         let callback = new PushSubscriptionCallback(this, resolve, reject);
-        PushService.subscribe(this._scope, this._principal, callback);
+
+        if (!options || options.applicationServerKey === null) {
+          PushService.subscribe(this._scope, this._principal, callback);
+          return;
+        }
+
+        let keyView = this._normalizeAppServerKey(options.applicationServerKey);
+        if (keyView.byteLength === 0) {
+          callback._rejectWithError(Cr.NS_ERROR_DOM_PUSH_INVALID_KEY_ERR);
+          return;
+        }
+        PushService.subscribeWithKey(this._scope, this._principal,
+                                     keyView.byteLength, keyView,
+                                     callback);
       })
     );
+  },
+
+  _normalizeAppServerKey: function(appServerKey) {
+    let key;
+    if (typeof appServerKey == "string") {
+      try {
+        key = Cu.cloneInto(ChromeUtils.base64URLDecode(appServerKey, {
+          padding: "reject",
+        }), this._window);
+      } catch (e) {
+        throw new this._window.DOMException(
+          "String contains an invalid character",
+          "InvalidCharacterError"
+        );
+      }
+    } else if (this._window.ArrayBuffer.isView(appServerKey)) {
+      key = appServerKey.buffer;
+    } else {
+      // `appServerKey` is an array buffer.
+      key = appServerKey;
+    }
+    return new this._window.Uint8Array(key);
   },
 
   getSubscription: function() {
@@ -135,8 +163,17 @@ Push.prototype = {
   },
 
   _testPermission: function() {
-    return Services.perms.testExactPermissionFromPrincipal(
+    let permission = Services.perms.testExactPermissionFromPrincipal(
       this._principal, "desktop-notification");
+    if (permission == Ci.nsIPermissionManager.ALLOW_ACTION) {
+      return permission;
+    }
+    try {
+      if (Services.prefs.getBoolPref("dom.push.testing.ignorePermission")) {
+        permission = Ci.nsIPermissionManager.ALLOW_ACTION;
+      }
+    } catch (e) {}
+    return permission;
   },
 
   _requestPermission: function(allowCallback, cancelCallback) {
@@ -145,31 +182,21 @@ Push.prototype = {
       type: "desktop-notification",
       access: null,
       options: [],
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionType]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionType]),
     };
     let typeArray = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
-    typeArray.appendElement(type, false);
+    typeArray.appendElement(type);
 
     // create a nsIContentPermissionRequest
     let request = {
       types: typeArray,
       principal: this._principal,
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionRequest]),
-      allow: function() {
-        let histogram = Services.telemetry.getHistogramById("PUSH_API_PERMISSION_GRANTED");
-        histogram.add();
-        allowCallback();
-      },
-      cancel: function() {
-        let histogram = Services.telemetry.getHistogramById("PUSH_API_PERMISSION_DENIED");
-        histogram.add();
-        cancelCallback();
-      },
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionRequest]),
+      allow: allowCallback,
+      cancel: cancelCallback,
       window: this._window,
     };
 
-    let histogram = Services.telemetry.getHistogramById("PUSH_API_PERMISSION_REQUESTED");
-    histogram.add(1);
     // Using askPermission from nsIDOMWindowUtils that takes care of the
     // remoting if needed.
     let windowUtils = this._window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -185,15 +212,12 @@ function PushSubscriptionCallback(pushManager, resolve, reject) {
 }
 
 PushSubscriptionCallback.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPushSubscriptionCallback]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPushSubscriptionCallback]),
 
   onPushSubscription: function(ok, subscription) {
     let {pushManager} = this;
     if (!Components.isSuccessCode(ok)) {
-      this.reject(new pushManager._window.DOMException(
-        "Error retrieving push subscription",
-        "AbortError"
-      ));
+      this._rejectWithError(ok);
       return;
     }
 
@@ -202,25 +226,61 @@ PushSubscriptionCallback.prototype = {
       return;
     }
 
-    let publicKey = this._getKey(subscription, "p256dh");
+    let p256dhKey = this._getKey(subscription, "p256dh");
     let authSecret = this._getKey(subscription, "auth");
-    let sub = new pushManager._window.PushSubscription(subscription.endpoint,
-                                                       pushManager._scope,
-                                                       publicKey,
-                                                       authSecret);
+    let options = {
+      endpoint: subscription.endpoint,
+      scope: pushManager._scope,
+      p256dhKey: p256dhKey,
+      authSecret: authSecret,
+    };
+    let appServerKey = this._getKey(subscription, "appServer");
+    if (appServerKey) {
+      // Avoid passing null keys to work around bug 1256449.
+      options.appServerKey = appServerKey;
+    }
+    let sub = new pushManager._window.PushSubscription(options);
     this.resolve(sub);
   },
 
   _getKey: function(subscription, name) {
     let outKeyLen = {};
-    let rawKey = subscription.getKey(name, outKeyLen);
+    let rawKey = Cu.cloneInto(subscription.getKey(name, outKeyLen),
+                              this.pushManager._window);
     if (!outKeyLen.value) {
       return null;
     }
-    let key = new ArrayBuffer(outKeyLen.value);
-    let keyView = new Uint8Array(key);
+
+    let key = new this.pushManager._window.ArrayBuffer(outKeyLen.value);
+    let keyView = new this.pushManager._window.Uint8Array(key);
     keyView.set(rawKey);
     return key;
+  },
+
+  _rejectWithError: function(result) {
+    let error;
+    switch (result) {
+      case Cr.NS_ERROR_DOM_PUSH_INVALID_KEY_ERR:
+        error = new this.pushManager._window.DOMException(
+          "Invalid raw ECDSA P-256 public key.",
+          "InvalidAccessError"
+        );
+        break;
+
+      case Cr.NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR:
+        error = new this.pushManager._window.DOMException(
+          "A subscription with a different application server key already exists.",
+          "InvalidStateError"
+        );
+        break;
+
+      default:
+        error = new this.pushManager._window.DOMException(
+          "Error retrieving push subscription.",
+          "AbortError"
+        );
+    }
+    this.reject(error);
   },
 };
 

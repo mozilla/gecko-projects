@@ -18,11 +18,15 @@
 #include "nsIResumableChannel.h"
 #include "nsIChildChannel.h"
 #include "nsIDivertableChannel.h"
+#include "nsIEventTarget.h"
 
 #include "nsIStreamListener.h"
 #include "PrivateBrowsingChannel.h"
 
+class nsIEventTarget;
+
 namespace mozilla {
+
 namespace net {
 
 // This class inherits logic from nsBaseChannel that is not needed for an
@@ -76,21 +80,23 @@ public:
 protected:
   virtual ~FTPChannelChild();
 
-  bool RecvOnStartRequest(const nsresult& aChannelStatus,
-                          const int64_t& aContentLength,
-                          const nsCString& aContentType,
-                          const PRTime& aLastModified,
-                          const nsCString& aEntityID,
-                          const URIParams& aURI) override;
-  bool RecvOnDataAvailable(const nsresult& channelStatus,
-                           const nsCString& data,
-                           const uint64_t& offset,
-                           const uint32_t& count) override;
-  bool RecvOnStopRequest(const nsresult& channelStatus) override;
-  bool RecvFailedAsyncOpen(const nsresult& statusCode) override;
-  bool RecvFlushedForDiversion() override;
-  bool RecvDivertMessages() override;
-  bool RecvDeleteSelf() override;
+  mozilla::ipc::IPCResult RecvOnStartRequest(const nsresult& aChannelStatus,
+                                             const int64_t& aContentLength,
+                                             const nsCString& aContentType,
+                                             const PRTime& aLastModified,
+                                             const nsCString& aEntityID,
+                                             const URIParams& aURI) override;
+  mozilla::ipc::IPCResult RecvOnDataAvailable(const nsresult& channelStatus,
+                                              const nsCString& data,
+                                              const uint64_t& offset,
+                                              const uint32_t& count) override;
+  mozilla::ipc::IPCResult RecvOnStopRequest(const nsresult& channelStatus,
+                                            const nsCString &aErrorMsg,
+                                            const bool &aUseUTF8) override;
+  mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& statusCode) override;
+  mozilla::ipc::IPCResult RecvFlushedForDiversion() override;
+  mozilla::ipc::IPCResult RecvDivertMessages() override;
+  mozilla::ipc::IPCResult RecvDeleteSelf() override;
 
   void DoOnStartRequest(const nsresult& aChannelStatus,
                         const int64_t& aContentLength,
@@ -106,9 +112,13 @@ protected:
                          const uint64_t& offset,
                          const uint32_t& count);
   void MaybeDivertOnStop(const nsresult& statusCode);
-  void DoOnStopRequest(const nsresult& statusCode);
+  void DoOnStopRequest(const nsresult& statusCode,
+                       const nsCString &aErrorMsg,
+                       bool aUseUTF8);
   void DoFailedAsyncOpen(const nsresult& statusCode);
   void DoDeleteSelf();
+
+  void SetupNeckoTarget() override;
 
   friend class FTPStartRequestEvent;
   friend class FTPDataAvailableEvent;
@@ -116,7 +126,9 @@ protected:
   friend class FTPStopRequestEvent;
   friend class MaybeDivertOnStopFTPEvent;
   friend class FTPFailedAsyncOpenEvent;
+  friend class FTPFlushedForDiversionEvent;
   friend class FTPDeleteSelfEvent;
+  friend class NeckoTargetChannelEvent<FTPChannelChild>;
 
 private:
   nsCOMPtr<nsIInputStream> mUploadStream;
@@ -133,6 +145,10 @@ private:
   bool mCanceled;
   uint32_t mSuspendCount;
   bool mIsPending;
+
+  // This will only be true while DoOnStartRequest is in progress.
+  // It is used to enforce that DivertToParent is only called during that time.
+  bool mDuringOnStart = false;
 
   PRTime mLastModifiedTime;
   uint64_t mStartPos;

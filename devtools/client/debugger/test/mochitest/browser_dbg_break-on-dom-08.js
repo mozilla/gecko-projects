@@ -10,16 +10,19 @@
 const TAB_URL = EXAMPLE_URL + "doc_event-listeners-02.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: TAB_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     let gTab = aTab;
     let gDebugger = aPanel.panelWin;
     let gView = gDebugger.DebuggerView;
     let gEvents = gView.EventListeners;
     let gController = gDebugger.DebuggerController;
-    let constants = gDebugger.require('./content/constants');
+    let constants = gDebugger.require("./content/constants");
 
-    Task.spawn(function*() {
-      yield waitForSourceShown(aPanel, ".html");
+    Task.spawn(function* () {
       yield callInTab(gTab, "addBodyClickEventListener");
 
       let fetched = waitForDispatch(aPanel, constants.FETCH_EVENT_LISTENERS);
@@ -37,7 +40,7 @@ function test() {
       yield updated;
       yield ensureThreadClientState(aPanel, "attached");
 
-      let paused = waitForCaretAndScopes(aPanel, 48);
+      let paused = waitForCaretAndScopes(aPanel, 47);
       generateMouseClickInTab(gTab, "content.document.body");
       yield paused;
       yield ensureThreadClientState(aPanel, "paused");

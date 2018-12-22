@@ -38,31 +38,19 @@ public:
       mSupportedIfaces |= eHyperLink;
   }
 
-  xpcAccessibleGeneric(ProxyAccessible* aProxy, uint32_t aInterfaces) :
-    mIntl(aProxy), mSupportedIfaces(0)
-  {
-    if (aInterfaces & Interfaces::SELECTION) {
-      mSupportedIfaces |= eSelectable;
-    }
-      if (aInterfaces & Interfaces::VALUE) {
-        mSupportedIfaces |= eValue;
-      }
-      if (aInterfaces & Interfaces::HYPERLINK) {
-        mSupportedIfaces |= eHyperLink;
-      }
-    }
+  xpcAccessibleGeneric(ProxyAccessible* aProxy, uint8_t aInterfaces) :
+    mIntl(aProxy), mSupportedIfaces(aInterfaces) {}
 
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(xpcAccessibleGeneric, nsIAccessible)
+  NS_DECL_ISUPPORTS
 
   // nsIAccessible
-  virtual Accessible* ToInternalAccessible() const final override;
+  Accessible* ToInternalAccessible() const final;
 
   // xpcAccessibleGeneric
   virtual void Shutdown();
 
 protected:
-  virtual ~xpcAccessibleGeneric() {}
+  virtual ~xpcAccessibleGeneric();
 
   AccessibleOrProxy mIntl;
 
@@ -97,10 +85,10 @@ xpcAccessible::IntlGeneric()
   return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
-inline Accessible*
+inline AccessibleOrProxy
 xpcAccessibleHyperLink::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
+  return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 inline Accessible*
@@ -109,10 +97,10 @@ xpcAccessibleSelectable::Intl()
   return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
 }
 
-inline Accessible*
+inline AccessibleOrProxy
 xpcAccessibleValue::Intl()
 {
-  return static_cast<xpcAccessibleGeneric*>(this)->mIntl.AsAccessible();
+  return static_cast<xpcAccessibleGeneric*>(this)->mIntl;
 }
 
 } // namespace a11y

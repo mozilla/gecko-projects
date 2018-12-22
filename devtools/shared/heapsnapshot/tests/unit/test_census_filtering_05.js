@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 // Test that filtered and inverted allocation stack census trees are sorted
 // properly.
@@ -61,7 +62,7 @@ function run_test() {
   (function assertSortedBySelf(node) {
     if (node.children) {
       let lastSelfBytes = Infinity;
-      for (let child of node.children) {
+      for (const child of node.children) {
         ok(child.bytes <= lastSelfBytes, `${child.bytes} <= ${lastSelfBytes}`);
         lastSelfBytes = child.bytes;
         assertSortedBySelf(child);

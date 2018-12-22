@@ -8,6 +8,7 @@
 interface nsISHEntry;
 interface nsISHistoryListener;
 interface nsISimpleEnumerator;
+
 /**
  * An interface to the primary properties of the Session History
  * component. In an embedded browser environment, the nsIWebBrowser
@@ -18,18 +19,19 @@ interface nsISimpleEnumerator;
  * it in the nsIWebNavigation object.
  * This interface is accessible from javascript.
  */
- 
-
-%{C++
-#define NS_SHISTORY_CID \
-{0x7b807041, 0xe60a, 0x4384, {0x93, 0x5f, 0xaf, 0x30, 0x61, 0xd8, 0xb8, 0x15}}
-
-#define NS_SHISTORY_CONTRACTID "@mozilla.org/browser/shistory;1"
-%}
 
 [scriptable, uuid(7b807041-e60a-4384-935f-af3061d8b815)]
 interface nsISHistory: nsISupports
 {
+  /**
+   * The size of the window of SHEntries which can have alive viewers in the
+   * bfcache around the currently active SHEntry.
+   *
+   * We try to keep viewers for SHEntries between index - VIEWER_WINDOW and
+   * index + VIEWER_WINDOW alive.
+   */
+  const long VIEWER_WINDOW = 3;
+
   /**
    * A readonly property of the interface that returns 
    * the number of toplevel documents currently available
@@ -38,13 +40,13 @@ interface nsISHistory: nsISupports
    readonly attribute long count;
 
   /**
-   * A readonly property of the interface that returns 
+   * A readonly property of the interface that returns
    * the index of the current document in session history.
    */
    readonly attribute long index;
 
   /**
-   * A readonly property of the interface that returns 
+   * A readonly property of the interface that returns
    * the index of the last document that started to load and
    * didn't finished yet. When document finishes the loading
    * value -1 is returned.
@@ -75,6 +77,13 @@ interface nsISHistory: nsISupports
    */
    nsISHEntry getEntryAtIndex(in long index, in boolean modifyIndex);
 
+  /**
+   * Load the entry at given index to root docshell directly in order to
+   * restore to an entry in grouped session history navigation or session
+   * restore case. This function will not notify nsISHistoryListener, as it's
+   * not considered a normal history navigation.
+   */
+   void restoreToEntryAtIndex(in long index);
 
   /**
    * Called to purge older documents from history.
@@ -124,7 +133,7 @@ interface nsISHistory: nsISupports
    void removeSHistoryListener(in nsISHistoryListener aListener);
 
   /**
-   * Called to obtain a enumerator for all the  documents stored in 
+   * Called to obtain a enumerator for all the  documents stored in
    * session history. The enumerator object thus returned by this method
    * can be traversed using nsISimpleEnumerator. 
    *

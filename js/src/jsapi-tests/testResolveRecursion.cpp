@@ -13,15 +13,18 @@
  */
 BEGIN_TEST(testResolveRecursion)
 {
+    static const JSClassOps my_resolve_classOps = {
+        nullptr, // add
+        nullptr, // delete
+        nullptr, // enumerate
+        nullptr, // newEnumerate
+        my_resolve
+    };
+
     static const JSClass my_resolve_class = {
         "MyResolve",
         JSCLASS_HAS_PRIVATE,
-        nullptr, // add
-        nullptr, // delete
-        nullptr, // get
-        nullptr, // set
-        nullptr, // enumerate
-        my_resolve
+        &my_resolve_classOps
     };
 
     obj1.init(cx, JS_NewObject(cx, &my_resolve_class));
@@ -145,19 +148,16 @@ END_TEST(testResolveRecursion)
  */
 BEGIN_TEST(testResolveRecursion_InitStandardClasses)
 {
-    CHECK(JS_InitStandardClasses(cx, global));
+    CHECK(JS::InitRealmStandardClasses(cx));
     return true;
 }
 
 const JSClass* getGlobalClass() override {
-    static const JSClass myGlobalClass = {
-        "testResolveRecursion_InitStandardClasses_myGlobalClass",
-        JSCLASS_GLOBAL_FLAGS,
+    static const JSClassOps myGlobalClassOps = {
         nullptr, // add
         nullptr, // delete
-        nullptr, // get
-        nullptr, // set
         nullptr, // enumerate
+        nullptr, // newEnumerate
         my_resolve,
         nullptr, // mayResolve
         nullptr, // finalize
@@ -167,6 +167,12 @@ const JSClass* getGlobalClass() override {
         JS_GlobalObjectTraceHook
     };
 
+    static const JSClass myGlobalClass = {
+        "testResolveRecursion_InitStandardClasses_myGlobalClass",
+        JSCLASS_GLOBAL_FLAGS,
+        &myGlobalClassOps
+    };
+
     return &myGlobalClass;
 }
 
@@ -174,7 +180,7 @@ static bool
 my_resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp)
 {
     MOZ_ASSERT_UNREACHABLE("resolve hook should not be called from InitStandardClasses");
-    JS_ReportError(cx, "FAIL");
+    JS_ReportErrorASCII(cx, "FAIL");
     return false;
 }
 END_TEST(testResolveRecursion_InitStandardClasses)

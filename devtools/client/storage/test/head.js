@@ -5,95 +5,61 @@
 "use strict";
 
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
+/* import-globals-from ../../shared/test/shared-head.js */
 
-var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var { TargetFactory } = require("devtools/client/framework/target");
-var promise = require("promise");
-var DevToolsUtils = require("devtools/shared/DevToolsUtils");
+// shared-head.js handles imports, constants, and utility functions
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
+  this);
 
 const {TableWidget} = require("devtools/client/shared/widgets/TableWidget");
-const SPLIT_CONSOLE_PREF = "devtools.toolbox.splitconsoleEnabled";
 const STORAGE_PREF = "devtools.storage.enabled";
+const DOM_CACHE = "dom.caches.enabled";
 const DUMPEMIT_PREF = "devtools.dump.emit";
 const DEBUGGERLOG_PREF = "devtools.debugger.log";
 // Allows Cache API to be working on usage `http` test page
 const CACHES_ON_HTTP_PREF = "dom.caches.testing.enabled";
 const PATH = "browser/devtools/client/storage/test/";
 const MAIN_DOMAIN = "http://test1.example.org/" + PATH;
+const MAIN_DOMAIN_WITH_PORT = "http://test1.example.org:8000/" + PATH;
 const ALT_DOMAIN = "http://sectest1.example.org/" + PATH;
 const ALT_DOMAIN_SECURED = "https://sectest1.example.org:443/" + PATH;
 
-waitForExplicitFinish();
+// GUID to be used as a separator in compound keys. This must match the same
+// constant in devtools/server/actors/storage.js,
+// devtools/client/storage/ui.js and devtools/server/tests/browser/head.js
+const SEPARATOR_GUID = "{9d414cc5-8319-0a04-0586-c0a6ae01670a}";
 
-var gToolbox, gPanelWindow, gWindow, gUI;
+var gToolbox, gPanelWindow, gUI;
 
 // Services.prefs.setBoolPref(DUMPEMIT_PREF, true);
 // Services.prefs.setBoolPref(DEBUGGERLOG_PREF, true);
 
 Services.prefs.setBoolPref(STORAGE_PREF, true);
 Services.prefs.setBoolPref(CACHES_ON_HTTP_PREF, true);
-DevToolsUtils.testing = true;
 registerCleanupFunction(() => {
-  gToolbox = gPanelWindow = gWindow = gUI = null;
-  Services.prefs.clearUserPref(STORAGE_PREF);
-  Services.prefs.clearUserPref(SPLIT_CONSOLE_PREF);
-  Services.prefs.clearUserPref(DUMPEMIT_PREF);
-  Services.prefs.clearUserPref(DEBUGGERLOG_PREF);
+  gToolbox = gPanelWindow = gUI = null;
   Services.prefs.clearUserPref(CACHES_ON_HTTP_PREF);
-  DevToolsUtils.testing = false;
-  while (gBrowser.tabs.length > 1) {
-    gBrowser.removeCurrentTab();
-  }
+  Services.prefs.clearUserPref(DEBUGGERLOG_PREF);
+  Services.prefs.clearUserPref(DOM_CACHE);
+  Services.prefs.clearUserPref(DUMPEMIT_PREF);
+  Services.prefs.clearUserPref(STORAGE_PREF);
 });
 
 /**
- * Add a new test tab in the browser and load the given url.
- *
- * @param {String} url The url to be loaded in the new tab
- *
- * @return a promise that resolves to the content window when the url is loaded
- */
-function addTab(url) {
-  info("Adding a new tab with URL: '" + url + "'");
-  let def = promise.defer();
-
-  // Bug 921935 should bring waitForFocus() support to e10s, which would
-  // probably cover the case of the test losing focus when the page is loading.
-  // For now, we just make sure the window is focused.
-  window.focus();
-
-  let tab = window.gBrowser.selectedTab = window.gBrowser.addTab(url);
-  let linkedBrowser = tab.linkedBrowser;
-
-  linkedBrowser.addEventListener("load", function onload(event) {
-    if (event.originalTarget.location.href != url) {
-      return;
-    }
-    linkedBrowser.removeEventListener("load", onload, true);
-    info("URL '" + url + "' loading complete");
-    def.resolve(tab.linkedBrowser.contentWindow);
-  }, true);
-
-  return def.promise;
-}
-
-/**
  * This generator function opens the given url in a new tab, then sets up the
- * page by waiting for all cookies, indexedDB items etc. to be created; Then
- * opens the storage inspector and waits for the storage tree and table to be
- * populated.
+ * page by waiting for all cookies, indexedDB items etc.
  *
  * @param url {String} The url to be opened in the new tab
+ * @param options {Object} The tab options for the new tab
  *
- * @return {Promise} A promise that resolves after storage inspector is ready
+ * @return {Promise} A promise that resolves after the tab is ready
  */
-function* openTabAndSetupStorage(url) {
-  let content = yield addTab(url);
-
-  gWindow = content.wrappedJSObject;
+async function openTab(url, options = {}) {
+  const tab = await addTab(url, options);
 
   // Setup the async storages in main window and for all its iframes
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function*() {
+  await ContentTask.spawn(gBrowser.selectedBrowser, null, async function() {
     /**
      * Get all windows including frames recursively.
      *
@@ -104,9 +70,9 @@ function* openTabAndSetupStorage(url) {
      *         A set of windows.
      */
     function getAllWindows(baseWindow) {
-      let windows = new Set();
+      const windows = new Set();
 
-      let _getAllWindows = function(win) {
+      const _getAllWindows = function(win) {
         windows.add(win.wrappedJSObject);
 
         for (let i = 0; i < win.length; i++) {
@@ -118,16 +84,45 @@ function* openTabAndSetupStorage(url) {
       return windows;
     }
 
-    let windows = getAllWindows(content);
-    for (let win of windows) {
+    const windows = getAllWindows(content);
+    for (const win of windows) {
+      const readyState = win.document.readyState;
+      info(`Found a window: ${readyState}`);
+      if (readyState != "complete") {
+        await new Promise(resolve => {
+          const onLoad = () => {
+            win.removeEventListener("load", onLoad);
+            resolve();
+          };
+          win.addEventListener("load", onLoad);
+        });
+      }
       if (win.setup) {
-        yield win.setup();
+        await win.setup();
       }
     }
   });
 
+  return tab;
+}
+
+/**
+ * This generator function opens the given url in a new tab, then sets up the
+ * page by waiting for all cookies, indexedDB items etc. to be created; Then
+ * opens the storage inspector and waits for the storage tree and table to be
+ * populated.
+ *
+ * @param url {String} The url to be opened in the new tab
+ * @param options {Object} The tab options for the new tab
+ *
+ * @return {Promise} A promise that resolves after storage inspector is ready
+ */
+async function openTabAndSetupStorage(url, options = {}) {
+  // open tab
+  await openTab(url, options);
+
   // open storage inspector
-  return yield openStoragePanel();
+  return openStoragePanel();
 }
 
 /**
@@ -138,9 +133,9 @@ function* openTabAndSetupStorage(url) {
  *
  * @return {Promise} a promise that resolves when the storage inspector is ready
  */
-var openStoragePanel = Task.async(function*(cb) {
+var openStoragePanel = async function(cb) {
   info("Opening the storage inspector");
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  const target = TargetFactory.forTab(gBrowser.selectedTab);
 
   let storage, toolbox;
 
@@ -167,7 +162,7 @@ var openStoragePanel = Task.async(function*(cb) {
   }
 
   info("Opening the toolbox");
-  toolbox = yield gDevTools.showToolbox(target, "storage");
+  toolbox = await gDevTools.showToolbox(target, "storage");
   storage = toolbox.getPanel("storage");
   gPanelWindow = storage.panelWindow;
   gUI = storage.UI;
@@ -178,9 +173,9 @@ var openStoragePanel = Task.async(function*(cb) {
   gUI.animationsEnabled = false;
 
   info("Waiting for the stores to update");
-  yield gUI.once("store-objects-updated");
+  await gUI.once("store-objects-updated");
 
-  yield waitForToolboxFrameFocus(toolbox);
+  await waitForToolboxFrameFocus(toolbox);
 
   if (cb) {
     return cb(storage, toolbox);
@@ -190,7 +185,7 @@ var openStoragePanel = Task.async(function*(cb) {
     toolbox: toolbox,
     storage: storage
   };
-});
+};
 
 /**
  * Wait for the toolbox frame to receive focus after it loads
@@ -201,10 +196,10 @@ var openStoragePanel = Task.async(function*(cb) {
  */
 function waitForToolboxFrameFocus(toolbox) {
   info("Making sure that the toolbox's frame is focused");
-  let def = promise.defer();
-  let win = toolbox.frame.contentWindow;
-  waitForFocus(def.resolve, win);
-  return def.promise;
+
+  return new Promise(resolve => {
+    waitForFocus(resolve, toolbox.win);
+  });
 }
 
 /**
@@ -220,44 +215,51 @@ function forceCollections() {
 /**
  * Cleans up and finishes the test
  */
-function* finishTests() {
-  // Bug 1233497 makes it so that we can no longer yield CPOWs from Tasks.
-  // We work around this by calling clear() via a ContentTask instead.
-  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function*() {
-    /**
-     * Get all windows including frames recursively.
-     *
-     * @param {Window} [baseWindow]
-     *        The base window at which to start looking for child windows
-     *        (optional).
-     * @return {Set}
-     *         A set of windows.
-     */
-    function getAllWindows(baseWindow) {
-      let windows = new Set();
+async function finishTests() {
+  while (gBrowser.tabs.length > 1) {
+    await ContentTask.spawn(gBrowser.selectedBrowser, null, async function() {
+      /**
+       * Get all windows including frames recursively.
+       *
+       * @param {Window} [baseWindow]
+       *        The base window at which to start looking for child windows
+       *        (optional).
+       * @return {Set}
+       *         A set of windows.
+       */
+      function getAllWindows(baseWindow) {
+        const windows = new Set();
 
-      let _getAllWindows = function(win) {
-        windows.add(win.wrappedJSObject);
+        const _getAllWindows = function(win) {
+          windows.add(win.wrappedJSObject);
 
-        for (let i = 0; i < win.length; i++) {
-          _getAllWindows(win[i]);
-        }
-      };
-      _getAllWindows(baseWindow);
+          for (let i = 0; i < win.length; i++) {
+            _getAllWindows(win[i]);
+          }
+        };
+        _getAllWindows(baseWindow);
 
-      return windows;
-    }
-
-    let windows = getAllWindows(content);
-    for (let win of windows) {
-      win.localStorage.clear();
-      win.sessionStorage.clear();
-
-      if (win.clear) {
-        yield win.clear();
+        return windows;
       }
-    }
-  });
+
+      const windows = getAllWindows(content);
+      for (const win of windows) {
+        // Some windows (e.g., about: URLs) don't have storage available
+        try {
+          win.localStorage.clear();
+          win.sessionStorage.clear();
+        } catch (ex) {
+          // ignore
+        }
+
+        if (win.clear) {
+          await win.clear();
+        }
+      }
+    });
+
+    await closeTabAndToolbox(gBrowser.selectedTab);
+  }
 
   Services.cookies.removeAll();
   forceCollections();
@@ -265,19 +267,17 @@ function* finishTests() {
 }
 
 // Sends a click event on the passed DOM node in an async manner
-function* click(node) {
-  let def = promise.defer();
-
+function click(node) {
   node.scrollIntoView();
 
-  // We need setTimeout here to allow any scrolling to complete before clicking
-  // the node.
-  setTimeout(() => {
-    node.click();
-    def.resolve();
-  }, 200);
-
-  return def;
+  return new Promise(resolve => {
+    // We need setTimeout here to allow any scrolling to complete before clicking
+    // the node.
+    setTimeout(() => {
+      node.click();
+      resolve();
+    }, 200);
+  });
 }
 
 /**
@@ -296,37 +296,36 @@ function* click(node) {
  *         always the last property that was found.
  */
 function variablesViewExpandTo(options) {
-  let root = options.rootVariable;
-  let expandTo = options.expandTo.split(".");
-  let lastDeferred = promise.defer();
+  const root = options.rootVariable;
+  const expandTo = options.expandTo.split(".");
 
-  function getNext(prop) {
-    let name = expandTo.shift();
-    let newProp = prop.get(name);
+  return new Promise((resolve, reject) => {
+    function getNext(prop) {
+      const name = expandTo.shift();
+      const newProp = prop.get(name);
 
-    if (expandTo.length > 0) {
-      ok(newProp, "found property " + name);
-      if (newProp && newProp.expand) {
-        newProp.expand();
-        getNext(newProp);
+      if (expandTo.length > 0) {
+        ok(newProp, "found property " + name);
+        if (newProp && newProp.expand) {
+          newProp.expand();
+          getNext(newProp);
+        } else {
+          reject(prop);
+        }
+      } else if (newProp) {
+        resolve(newProp);
       } else {
-        lastDeferred.reject(prop);
+        reject(prop);
       }
-    } else if (newProp) {
-      lastDeferred.resolve(newProp);
-    } else {
-      lastDeferred.reject(prop);
     }
-  }
 
-  if (root && root.expand) {
-    root.expand();
-    getNext(root);
-  } else {
-    lastDeferred.resolve(root);
-  }
-
-  return lastDeferred.promise;
+    if (root && root.expand) {
+      root.expand();
+      getNext(root);
+    } else {
+      resolve(root);
+    }
+  });
 }
 
 /**
@@ -361,8 +360,8 @@ function findVariableViewProperties(ruleArray, parsed) {
     }
     // Separate out the rules that require expanding properties throughout the
     // view.
-    let expandRules = [];
-    let rules = ruleArray.filter(rule => {
+    const expandRules = [];
+    const rules = ruleArray.filter(rule => {
       if (typeof rule.name == "string" && rule.name.indexOf(".") > -1) {
         expandRules.push(rule);
         return false;
@@ -373,15 +372,15 @@ function findVariableViewProperties(ruleArray, parsed) {
     // Search through the view those rules that do not require any properties to
     // be expanded. Build the array of matchers, outstanding promises to be
     // resolved.
-    let outstanding = [];
+    const outstanding = [];
 
     finder(rules, gUI.view, outstanding);
 
     // Process the rules that need to expand properties.
-    let lastStep = processExpandRules.bind(null, expandRules);
+    const lastStep = processExpandRules.bind(null, expandRules);
 
     // Return the results - a promise resolved to hold the updated ruleArray.
-    let returnResults = onAllRulesMatched.bind(null, ruleArray);
+    const returnResults = onAllRulesMatched.bind(null, ruleArray);
 
     return promise.all(outstanding).then(lastStep).then(returnResults);
   }
@@ -393,10 +392,10 @@ function findVariableViewProperties(ruleArray, parsed) {
   }
 
   function finder(rules, view, promises) {
-    for (let scope of view) {
-      for (let [, prop] of scope) {
-        for (let rule of rules) {
-          let matcher = matchVariablesViewProperty(prop, rule);
+    for (const scope of view) {
+      for (const [, prop] of scope) {
+        for (const rule of rules) {
+          const matcher = matchVariablesViewProperty(prop, rule);
           promises.push(matcher.then(onMatch.bind(null, prop, rule)));
         }
       }
@@ -404,38 +403,37 @@ function findVariableViewProperties(ruleArray, parsed) {
   }
 
   function processExpandRules(rules) {
-    let rule = rules.shift();
-    if (!rule) {
-      return promise.resolve(null);
-    }
+    return new Promise(resolve => {
+      const rule = rules.shift();
+      if (!rule) {
+        resolve(null);
+      }
 
-    let deferred = promise.defer();
-    let expandOptions = {
-      rootVariable: gUI.view.getScopeAtIndex(parsed ? 1 : 0),
-      expandTo: rule.name
-    };
+      const expandOptions = {
+        rootVariable: gUI.view.getScopeAtIndex(parsed ? 1 : 0),
+        expandTo: rule.name
+      };
 
-    variablesViewExpandTo(expandOptions).then(function onSuccess(prop) {
-      let name = rule.name;
-      let lastName = name.split(".").pop();
-      rule.name = lastName;
+      variablesViewExpandTo(expandOptions).then(function onSuccess(prop) {
+        const name = rule.name;
+        const lastName = name.split(".").pop();
+        rule.name = lastName;
 
-      let matched = matchVariablesViewProperty(prop, rule);
-      return matched.then(onMatch.bind(null, prop, rule)).then(function() {
-        rule.name = name;
+        const matched = matchVariablesViewProperty(prop, rule);
+        return matched.then(onMatch.bind(null, prop, rule)).then(function() {
+          rule.name = name;
+        });
+      }, function onFailure() {
+        resolve(null);
+      }).then(processExpandRules.bind(null, rules)).then(function() {
+        resolve(null);
       });
-    }, function onFailure() {
-      return promise.resolve(null);
-    }).then(processExpandRules.bind(null, rules)).then(function() {
-      deferred.resolve(null);
     });
-
-    return deferred.promise;
   }
 
   function onAllRulesMatched(rules) {
-    for (let rule of rules) {
-      let matched = rule.matchedProp;
+    for (const rule of rules) {
+      const matched = rule.matchedProp;
       if (matched && !rule.dontMatch) {
         ok(true, "rule " + rule.name + " matched for property " + matched.name);
       } else if (matched && rule.dontMatch) {
@@ -475,7 +473,7 @@ function matchVariablesViewProperty(prop, rule) {
   }
 
   if (rule.name) {
-    let match = rule.name instanceof RegExp ?
+    const match = rule.name instanceof RegExp ?
                 rule.name.test(prop.name) :
                 prop.name == rule.name;
     if (!match) {
@@ -489,7 +487,7 @@ function matchVariablesViewProperty(prop, rule) {
       displayValue = displayValue.substring(1, displayValue.length - 1);
     }
 
-    let match = rule.value instanceof RegExp ?
+    const match = rule.value instanceof RegExp ?
                 rule.value.test(displayValue) :
                 displayValue == rule.value;
     if (!match) {
@@ -508,19 +506,21 @@ function matchVariablesViewProperty(prop, rule) {
  * @param {[String]} ids
  *        The array id of the item in the tree
  */
-function* selectTreeItem(ids) {
-  // Expand tree as some/all items could be collapsed leading to click on an
-  // incorrect tree item
-  gUI.tree.expandAll();
+async function selectTreeItem(ids) {
+  if (gUI.tree.isSelected(ids)) {
+    info(`"${ids}" is already selected, returning.`);
+    return;
+  }
+  if (!gUI.tree.exists(ids)) {
+    info(`"${ids}" does not exist, returning.`);
+    return;
+  }
 
-  let selector = "[data-id='" + JSON.stringify(ids) + "'] > .tree-widget-item";
-  let target = gPanelWindow.document.querySelector(selector);
-  ok(target, "tree item found with ids " + JSON.stringify(ids));
-
-  let updated = gUI.once("store-objects-updated");
-
-  yield click(target);
-  yield updated;
+  // The item exists but is not selected... select it.
+  info(`Selecting "${ids}".`);
+  const updated = gUI.once("store-objects-updated");
+  gUI.tree.selectedItem = ids;
+  await updated;
 }
 
 /**
@@ -529,13 +529,22 @@ function* selectTreeItem(ids) {
  * @param {String} id
  *        The id of the row in the table widget
  */
-function* selectTableItem(id) {
-  let selector = ".table-widget-cell[data-id='" + id + "']";
-  let target = gPanelWindow.document.querySelector(selector);
+async function selectTableItem(id) {
+  const table = gUI.table;
+  const selector = ".table-widget-column#" + table.uniqueId +
+                 " .table-widget-cell[value='" + id + "']";
+  const target = gPanelWindow.document.querySelector(selector);
+
   ok(target, "table item found with ids " + id);
 
-  yield click(target);
-  yield gUI.once("sidebar-updated");
+  if (!target) {
+    showAvailableIds();
+  }
+
+  const updated = gUI.once("sidebar-updated");
+
+  await click(target);
+  await updated;
 }
 
 /**
@@ -543,29 +552,28 @@ function* selectTableItem(id) {
  * @param {Object} target An observable object that either supports on/off or
  * addEventListener/removeEventListener
  * @param {String} eventName
- * @param {Boolean} [useCapture] for addEventListener/removeEventListener
+ * @param {Boolean} useCapture Optional, for addEventListener/removeEventListener
  * @return A promise that resolves when the event has been handled
  */
 function once(target, eventName, useCapture = false) {
   info("Waiting for event: '" + eventName + "' on " + target + ".");
 
-  let deferred = promise.defer();
-
-  for (let [add, remove] of [
-    ["addEventListener", "removeEventListener"],
-    ["addListener", "removeListener"],
-    ["on", "off"]
-  ]) {
-    if ((add in target) && (remove in target)) {
-      target[add](eventName, function onEvent(...aArgs) {
-        target[remove](eventName, onEvent, useCapture);
-        deferred.resolve.apply(deferred, aArgs);
-      }, useCapture);
-      break;
+  return new Promise(resolve => {
+    for (const [add, remove] of [
+      ["addEventListener", "removeEventListener"],
+      ["addListener", "removeListener"],
+      ["on", "off"]
+    ]) {
+      if ((add in target) && (remove in target)) {
+        target[add](eventName, function onEvent(...aArgs) {
+          info("Got event: '" + eventName + "' on " + target + ".");
+          target[remove](eventName, onEvent, useCapture);
+          resolve(...aArgs);
+        }, useCapture);
+        break;
+      }
     }
-  }
-
-  return deferred.promise;
+  });
 }
 
 /**
@@ -580,11 +588,11 @@ function once(target, eventName, useCapture = false) {
  *         An object of column names to values for the given row.
  */
 function getRowValues(id, includeHidden = false) {
-  let cells = getRowCells(id, includeHidden);
-  let values = {};
+  const cells = getRowCells(id, includeHidden);
+  const values = {};
 
-  for (let name in cells) {
-    let cell = cells[name];
+  for (const name in cells) {
+    const cell = cells[name];
 
     values[name] = cell.value;
   }
@@ -604,26 +612,62 @@ function getRowValues(id, includeHidden = false) {
  *         An object of column names to cells for the given row.
  */
 function getRowCells(id, includeHidden = false) {
-  let doc = gPanelWindow.document;
-  let table = gUI.table;
-  let item = doc.querySelector(".table-widget-column#" + table.uniqueId +
+  const doc = gPanelWindow.document;
+  const table = gUI.table;
+  const item = doc.querySelector(".table-widget-column#" + table.uniqueId +
                                " .table-widget-cell[value='" + id + "']");
 
   if (!item) {
-    ok(false, "Row id '" + id + "' exists");
+    ok(false, `The row id '${id}' that was passed to getRowCells() does not ` +
+              `exist. ${getAvailableIds()}`);
   }
 
-  let index = table.columns.get(table.uniqueId).visibleCellNodes.indexOf(item);
-  let cells = {};
+  const index = table.columns.get(table.uniqueId).cellNodes.indexOf(item);
+  const cells = {};
 
-  for (let [name, column] of [...table.columns]) {
+  for (const [name, column] of [...table.columns]) {
     if (!includeHidden && column.column.parentNode.hidden) {
       continue;
     }
-    cells[name] = column.visibleCellNodes[index];
+    cells[name] = column.cellNodes[index];
   }
 
   return cells;
+}
+
+/**
+ * Check for an empty table.
+ */
+function isTableEmpty() {
+  const doc = gPanelWindow.document;
+  const table = gUI.table;
+  const cells = doc.querySelectorAll(".table-widget-column#" + table.uniqueId +
+                                   " .table-widget-cell");
+  return cells.length === 0;
+}
+
+/**
+ * Get available ids... useful for error reporting.
+ */
+function getAvailableIds() {
+  const doc = gPanelWindow.document;
+  const table = gUI.table;
+
+  let out = "Available ids:\n";
+  const cells = doc.querySelectorAll(".table-widget-column#" + table.uniqueId +
+                                   " .table-widget-cell");
+  for (const cell of cells) {
+    out += `  - ${cell.getAttribute("value")}\n`;
+  }
+
+  return out;
+}
+
+/**
+ * Show available ids.
+ */
+function showAvailableIds() {
+  info(getAvailableIds());
 }
 
 /**
@@ -638,7 +682,20 @@ function getRowCells(id, includeHidden = false) {
  *        The cell value.
  */
 function getCellValue(id, column) {
-  let row = getRowValues(id, true);
+  const row = getRowValues(id, true);
+
+  if (typeof row[column] === "undefined") {
+    let out = "";
+    for (const key in row) {
+      const value = row[key];
+
+      out += `  - ${key} = ${value}\n`;
+    }
+
+    ok(false, `The column name '${column}' that was passed to ` +
+              `getCellValue() does not exist. Current column names and row ` +
+              `values are:\n${out}`);
+  }
 
   return row[column];
 }
@@ -658,13 +715,13 @@ function getCellValue(id, column) {
  * @yield {String}
  *        The uniqueId of the changed row.
  */
-function* editCell(id, column, newValue, validate = true) {
-  let row = getRowCells(id, true);
-  let editableFieldsEngine = gUI.table._editableFieldsEngine;
+async function editCell(id, column, newValue, validate = true) {
+  const row = getRowCells(id, true);
+  const editableFieldsEngine = gUI.table._editableFieldsEngine;
 
   editableFieldsEngine.edit(row[column]);
 
-  return yield typeWithTerminator(newValue, "VK_RETURN", validate);
+  await typeWithTerminator(newValue, "KEY_Enter", validate);
 }
 
 /**
@@ -677,10 +734,10 @@ function* editCell(id, column, newValue, validate = true) {
  * @param {Boolean} selectText
  *        Select text? Default true.
  */
-function* startCellEdit(id, column, selectText = true) {
-  let row = getRowCells(id, true);
-  let editableFieldsEngine = gUI.table._editableFieldsEngine;
-  let cell = row[column];
+function startCellEdit(id, column, selectText = true) {
+  const row = getRowCells(id, true);
+  const editableFieldsEngine = gUI.table._editableFieldsEngine;
+  const cell = row[column];
 
   info("Selecting row " + id);
   gUI.table.selectedRow = id;
@@ -689,7 +746,7 @@ function* startCellEdit(id, column, selectText = true) {
   editableFieldsEngine.edit(cell);
 
   if (!selectText) {
-    let textbox = gUI.table._editableFieldsEngine.textbox;
+    const textbox = gUI.table._editableFieldsEngine.textbox;
     textbox.selectionEnd = textbox.selectionStart;
   }
 }
@@ -718,8 +775,8 @@ function checkCell(id, column, expected) {
  *         true = show, false = hide
  */
 function showColumn(id, state) {
-  let columns = gUI.table.columns;
-  let column = columns.get(id);
+  const columns = gUI.table.columns;
+  const column = columns.get(id);
 
   if (state) {
     column.wrapper.removeAttribute("hidden");
@@ -729,15 +786,29 @@ function showColumn(id, state) {
 }
 
 /**
+ * Toggle sort direction on a column by clicking on the column header.
+ *
+ * @param  {String} id
+ *         The uniqueId of the given column.
+ */
+function clickColumnHeader(id) {
+  const columns = gUI.table.columns;
+  const column = columns.get(id);
+  const header = column.header;
+
+  header.click();
+}
+
+/**
  * Show or hide all columns.
  *
  * @param  {Boolean} state
  *         true = show, false = hide
  */
 function showAllColumns(state) {
-  let columns = gUI.table.columns;
+  const columns = gUI.table.columns;
 
-  for (let [id] of columns) {
+  for (const [id] of columns) {
     showColumn(id, state);
   }
 }
@@ -749,16 +820,16 @@ function showAllColumns(state) {
  * @param  {String} str
  *         The string to type.
  * @param  {String} terminator
- *         The terminating key e.g. VK_RETURN or VK_TAB
+ *         The terminating key e.g. KEY_Enter or KEY_Tab
  * @param  {Boolean} validate
  *         Validate result? Default true.
  */
-function* typeWithTerminator(str, terminator, validate = true) {
-  let editableFieldsEngine = gUI.table._editableFieldsEngine;
-  let textbox = editableFieldsEngine.textbox;
-  let colName = textbox.closest(".table-widget-column").id;
+async function typeWithTerminator(str, terminator, validate = true) {
+  const editableFieldsEngine = gUI.table._editableFieldsEngine;
+  const textbox = editableFieldsEngine.textbox;
+  const colName = textbox.closest(".table-widget-column").id;
 
-  let changeExpected = str !== textbox.value;
+  const changeExpected = str !== textbox.value;
 
   if (!changeExpected) {
     return editableFieldsEngine.currentTarget.getAttribute("data-id");
@@ -768,22 +839,22 @@ function* typeWithTerminator(str, terminator, validate = true) {
   EventUtils.sendString(str);
 
   info("Pressing " + terminator);
-  EventUtils.synthesizeKey(terminator, {});
+  EventUtils.synthesizeKey(terminator);
 
   if (validate) {
     info("Validating results... waiting for ROW_EDIT event.");
-    let uniqueId = yield gUI.table.once(TableWidget.EVENTS.ROW_EDIT);
+    const uniqueId = await gUI.table.once(TableWidget.EVENTS.ROW_EDIT);
 
     checkCell(uniqueId, colName, str);
     return uniqueId;
   }
 
-  return yield gUI.table.once(TableWidget.EVENTS.ROW_EDIT);
+  return gUI.table.once(TableWidget.EVENTS.ROW_EDIT);
 }
 
 function getCurrentEditorValue() {
-  let editableFieldsEngine = gUI.table._editableFieldsEngine;
-  let textbox = editableFieldsEngine.textbox;
+  const editableFieldsEngine = gUI.table._editableFieldsEngine;
+  const textbox = editableFieldsEngine.textbox;
 
   return textbox.value;
 }
@@ -805,48 +876,130 @@ function PressKeyXTimes(key, x, modifiers = {}) {
 }
 
 /**
- * Wait for a context menu popup to open.
+ * Verify the storage inspector state: check that given type/host exists
+ * in the tree, and that the table contains rows with specified names.
  *
- * @param nsIDOMElement popup
- *        The XUL popup you expect to open.
- * @param nsIDOMElement button
- *        The button/element that receives the contextmenu event. This is
- *        expected to open the popup.
- * @param function onShown
- *        Function to invoke on popupshown event.
- * @param function onHidden
- *        Function to invoke on popuphidden event.
- * @return object
- *         A Promise object that is resolved after the popuphidden event
- *         callback is invoked.
+ * @param {Array} state Array of state specifications. For example,
+ *        [["cookies", "example.com"], ["c1", "c2"]] means to select the
+ *        "example.com" host in cookies and then verify there are "c1" and "c2"
+ *        cookies (and no other ones).
  */
-function waitForContextMenu(popup, button, onShown, onHidden) {
-  let deferred = promise.defer();
+async function checkState(state) {
+  for (const [store, names] of state) {
+    const storeName = store.join(" > ");
+    info(`Selecting tree item ${storeName}`);
+    await selectTreeItem(store);
 
-  function onPopupShown() {
-    info("onPopupShown");
-    popup.removeEventListener("popupshown", onPopupShown);
+    const items = gUI.table.items;
 
-    onShown && onShown();
+    is(items.size, names.length,
+      `There is correct number of rows in ${storeName}`);
 
-    // Use executeSoon() to get out of the popupshown event.
-    popup.addEventListener("popuphidden", onPopupHidden);
-    executeSoon(() => popup.hidePopup());
+    if (names.length === 0) {
+      showAvailableIds();
+    }
+
+    for (const name of names) {
+      ok(items.has(name),
+        `There is item with name '${name}' in ${storeName}`);
+
+      if (!items.has(name)) {
+        showAvailableIds();
+      }
+    }
   }
-  function onPopupHidden() {
-    info("onPopupHidden");
-    popup.removeEventListener("popuphidden", onPopupHidden);
+}
 
-    onHidden && onHidden();
+/**
+ * Checks if document's active element is within the given element.
+ * @param  {HTMLDocument}  doc document with active element in question
+ * @param  {DOMNode}       container element tested on focus containment
+ * @return {Boolean}
+ */
+function containsFocus(doc, container) {
+  let elm = doc.activeElement;
+  while (elm) {
+    if (elm === container) {
+      return true;
+    }
+    elm = elm.parentNode;
+  }
+  return false;
+}
 
-    deferred.resolve(popup);
+var focusSearchBoxUsingShortcut = async function(panelWin, callback) {
+  info("Focusing search box");
+  const searchBox = panelWin.document.getElementById("storage-searchbox");
+  const focused = once(searchBox, "focus");
+
+  panelWin.focus();
+  const strings = Services.strings.createBundle(
+    "chrome://devtools/locale/storage.properties");
+  synthesizeKeyShortcut(strings.GetStringFromName("storage.filter.key"));
+
+  await focused;
+
+  if (callback) {
+    callback();
+  }
+};
+
+function getCookieId(name, domain, path) {
+  return `${name}${SEPARATOR_GUID}${domain}${SEPARATOR_GUID}${path}`;
+}
+
+function setPermission(url, permission) {
+  const nsIPermissionManager = Ci.nsIPermissionManager;
+
+  const uri = Services.io.newURI(url);
+  const principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
+
+  Cc["@mozilla.org/permissionmanager;1"]
+    .getService(nsIPermissionManager)
+    .addFromPrincipal(principal, permission,
+                      nsIPermissionManager.ALLOW_ACTION);
+}
+
+function toggleSidebar() {
+  gUI.sidebarToggleBtn.click();
+}
+
+function sidebarToggleVisible() {
+  return !gUI.sidebarToggleBtn.hidden;
+}
+
+/**
+ * Add an item.
+ * @param  {Array} store
+ *         An array containing the path to the store to which we wish to add an
+ *         item.
+ */
+async function performAdd(store) {
+  const storeName = store.join(" > ");
+  const toolbar = gPanelWindow.document.getElementById("storage-toolbar");
+  const type = store[0];
+
+  await selectTreeItem(store);
+
+  const menuAdd = toolbar.querySelector(
+    "#add-button");
+
+  if (menuAdd.hidden) {
+    is(menuAdd.hidden, false,
+       `performAdd called for ${storeName} but it is not supported`);
+    return;
   }
 
-  popup.addEventListener("popupshown", onPopupShown);
+  const eventEdit = gUI.table.once("row-edit");
+  const eventWait = gUI.once("store-objects-edit");
 
-  info("wait for the context menu to open");
-  let eventDetails = {type: "contextmenu", button: 2};
-  EventUtils.synthesizeMouse(button, 2, 2, eventDetails,
-                             button.ownerDocument.defaultView);
-  return deferred.promise;
+  menuAdd.click();
+
+  const rowId = await eventEdit;
+  await eventWait;
+
+  const key = type === "cookies" ? "uniqueKey" : "name";
+  const value = getCellValue(rowId, key);
+
+  is(rowId, value, `Row '${rowId}' was successfully added.`);
 }

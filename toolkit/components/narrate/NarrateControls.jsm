@@ -4,20 +4,22 @@
 
 "use strict";
 
-const Cu = Components.utils;
+ChromeUtils.import("resource://gre/modules/narrate/VoiceSelect.jsm");
+ChromeUtils.import("resource://gre/modules/narrate/Narrator.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/AsyncPrefs.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm");
 
-Cu.import("resource://gre/modules/narrate/VoiceSelect.jsm");
-Cu.import("resource://gre/modules/narrate/Narrator.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/AsyncPrefs.jsm");
-
-this.EXPORTED_SYMBOLS = ["NarrateControls"];
+var EXPORTED_SYMBOLS = ["NarrateControls"];
 
 var gStrings = Services.strings.createBundle("chrome://global/locale/narrate.properties");
 
-function NarrateControls(mm, win) {
+function NarrateControls(mm, win, languagePromise) {
   this._mm = mm;
   this._winRef = Cu.getWeakReference(win);
+  this._languagePromise = languagePromise;
+
+  win.addEventListener("unload", this);
 
   // Append content style sheet in document head
   let style = win.document.createElement("link");
@@ -25,178 +27,204 @@ function NarrateControls(mm, win) {
   style.href = "chrome://global/skin/narrate.css";
   win.document.head.appendChild(style);
 
-  function localize(pieces, ...substitutions) {
-    let result = pieces[0];
-    for (let i = 0; i < substitutions.length; ++i) {
-      result += gStrings.GetStringFromName(substitutions[i]) + pieces[i + 1];
-    }
-    return result;
-  }
+  let elemL10nMap = {
+    ".narrate-toggle": "narrate",
+    ".narrate-skip-previous": "back",
+    ".narrate-start-stop": "start",
+    ".narrate-skip-next": "forward",
+    ".narrate-rate-input": "speed",
+  };
 
   let dropdown = win.document.createElement("ul");
-  dropdown.className = "dropdown";
-  dropdown.id = "narrate-dropdown";
+  dropdown.className = "dropdown narrate-dropdown";
   dropdown.innerHTML =
-    localize`<style scoped>
-      @import url("chrome://global/skin/narrateControls.css");
-    </style>
-    <li>
-       <button class="dropdown-toggle button"
-               id="narrate-toggle" title="${"narrate"}"></button>
+    `<li>
+       <button class="dropdown-toggle button narrate-toggle" hidden></button>
     </li>
     <li class="dropdown-popup">
-      <div id="narrate-control" class="narrate-row">
-        <button disabled id="narrate-skip-previous"
-                title="${"back"}"></button>
-        <button id="narrate-start-stop" title="${"start"}"></button>
-        <button disabled id="narrate-skip-next"
-                title="${"forward"}"></button>
+      <div class="narrate-row narrate-control">
+        <button disabled class="narrate-skip-previous"></button>
+        <button class="narrate-start-stop"></button>
+        <button disabled class="narrate-skip-next"></button>
       </div>
-      <div id="narrate-rate" class="narrate-row">
-        <input id="narrate-rate-input" value="0" title="${"speed"}"
-               step="25" max="100" min="-100" type="range">
+      <div class="narrate-row narrate-rate">
+        <input class="narrate-rate-input" value="0"
+               step="5" max="100" min="-100" type="range">
       </div>
-      <div id="narrate-voices" class="narrate-row"></div>
+      <div class="narrate-row narrate-voices"></div>
       <div class="dropdown-arrow"></div>
     </li>`;
 
-  this.narrator = new Narrator(win);
+  for (let [selector, stringID] of Object.entries(elemL10nMap)) {
+    dropdown.querySelector(selector).setAttribute("title",
+      gStrings.GetStringFromName(stringID));
+  }
+
+  this.narrator = new Narrator(win, languagePromise);
 
   let branch = Services.prefs.getBranch("narrate.");
   let selectLabel = gStrings.GetStringFromName("selectvoicelabel");
   this.voiceSelect = new VoiceSelect(win, selectLabel);
-  this.voiceSelect.addOptions(this._getVoiceOptions(),
-    branch.getCharPref("voice"));
   this.voiceSelect.element.addEventListener("change", this);
-  this.voiceSelect.element.id = "voice-select";
+  this.voiceSelect.element.classList.add("voice-select");
   win.speechSynthesis.addEventListener("voiceschanged", this);
-  dropdown.querySelector("#narrate-voices").appendChild(
+  dropdown.querySelector(".narrate-voices").appendChild(
     this.voiceSelect.element);
 
   dropdown.addEventListener("click", this, true);
 
-  let rateRange = dropdown.querySelector("#narrate-rate > input");
-  rateRange.addEventListener("input", this);
-  rateRange.addEventListener("mousedown", this);
-  rateRange.addEventListener("mouseup", this);
+  let rateRange = dropdown.querySelector(".narrate-rate > input");
+  rateRange.addEventListener("change", this);
 
   // The rate is stored as an integer.
   rateRange.value = branch.getIntPref("rate");
 
-  let tb = win.document.getElementById("reader-toolbar");
+  this._setupVoices();
+
+  let tb = win.document.querySelector(".reader-toolbar");
   tb.appendChild(dropdown);
 }
 
 NarrateControls.prototype = {
-  handleEvent: function(evt) {
+  handleEvent(evt) {
     switch (evt.type) {
-      case "mousedown":
-        this._rateMousedown = true;
-        break;
-      case "mouseup":
-        this._rateMousedown = false;
-        break;
-      case "input":
-        this._onRateInput(evt);
-        break;
       case "change":
-        this._onVoiceChange();
+        if (evt.target.classList.contains("narrate-rate-input")) {
+          this._onRateInput(evt);
+        } else {
+          this._onVoiceChange();
+        }
         break;
       case "click":
         this._onButtonClick(evt);
         break;
       case "voiceschanged":
-        this.voiceSelect.clear();
-        this.voiceSelect.addOptions(this._getVoiceOptions(),
-          Services.prefs.getCharPref("narrate.voice"));
+        this._setupVoices();
+        break;
+      case "unload":
+        this.narrator.stop();
         break;
     }
   },
 
-  _getVoiceOptions: function() {
-    let win = this._win;
-    let comparer = win.Intl ?
-      (new Intl.Collator()).compare : (a, b) => a.localeCompare(b);
-    let options = win.speechSynthesis.getVoices().map(v => {
-      return {
-        label: this._createVoiceLabel(v),
-        value: v.voiceURI
-      };
-    }).sort((a, b) => comparer(a.label, b.label));
-    options.unshift({
-      label: gStrings.GetStringFromName("defaultvoice"),
-      value: "automatic"
+  /**
+   * Returns true if synth voices are available.
+   */
+  _setupVoices() {
+    return this._languagePromise.then(language => {
+      this.voiceSelect.clear();
+      let win = this._win;
+      let voicePrefs = this._getVoicePref();
+      let selectedVoice = voicePrefs[language || "default"];
+      let comparer = (new Services.intl.Collator()).compare;
+      let filter = !Services.prefs.getBoolPref("narrate.filter-voices");
+      let options = win.speechSynthesis.getVoices().filter(v => {
+        return filter || !language || v.lang.split("-")[0] == language;
+      }).map(v => {
+        return {
+          label: this._createVoiceLabel(v),
+          value: v.voiceURI,
+          selected: selectedVoice == v.voiceURI
+        };
+      }).sort((a, b) => comparer(a.label, b.label));
+
+      if (options.length) {
+        options.unshift({
+          label: gStrings.GetStringFromName("defaultvoice"),
+          value: "automatic",
+          selected: selectedVoice == "automatic"
+        });
+        this.voiceSelect.addOptions(options);
+      }
+
+      let narrateToggle = win.document.querySelector(".narrate-toggle");
+      let histogram = Services.telemetry.getKeyedHistogramById(
+        "NARRATE_CONTENT_BY_LANGUAGE_2");
+      let initial = !this._voicesInitialized;
+      this._voicesInitialized = true;
+
+      if (initial) {
+        histogram.add(language, 0);
+      }
+
+      if (options.length && narrateToggle.hidden) {
+        // About to show for the first time..
+        histogram.add(language, 1);
+      }
+
+      // We disable this entire feature if there are no available voices.
+      narrateToggle.hidden = !options.length;
     });
-
-    return options;
   },
 
-  _onRateInput: function(evt) {
-    if (!this._rateMousedown) {
-      AsyncPrefs.set("narrate.rate", parseInt(evt.target.value, 10));
-      this.narrator.setRate(this._convertRate(evt.target.value));
+  _getVoicePref() {
+    let voicePref = Services.prefs.getCharPref("narrate.voice");
+    try {
+      return JSON.parse(voicePref);
+    } catch (e) {
+      return { default: voicePref };
     }
   },
 
-  _onVoiceChange: function() {
+  _onRateInput(evt) {
+    AsyncPrefs.set("narrate.rate", parseInt(evt.target.value, 10));
+    this.narrator.setRate(this._convertRate(evt.target.value));
+  },
+
+  _onVoiceChange() {
     let voice = this.voice;
-    AsyncPrefs.set("narrate.voice", voice);
     this.narrator.setVoice(voice);
+    this._languagePromise.then(language => {
+      if (language) {
+        let voicePref = this._getVoicePref();
+        voicePref[language || "default"] = voice;
+        AsyncPrefs.set("narrate.voice", JSON.stringify(voicePref));
+      }
+    });
   },
 
-  _onButtonClick: function(evt) {
-    switch (evt.target.id) {
-      case "narrate-skip-previous":
-        this.narrator.skipPrevious();
-        break;
-      case "narrate-skip-next":
-        this.narrator.skipNext();
-        break;
-      case "narrate-start-stop":
-        if (this.narrator.speaking) {
-          this.narrator.stop();
-        } else {
-          this._updateSpeechControls(true);
-          let options = { rate: this.rate, voice: this.voice };
-          this.narrator.start(options).then(() => {
-            this._updateSpeechControls(false);
-          }, err => {
-            Cu.reportError(`Narrate failed: ${err}.`);
-            this._updateSpeechControls(false);
-          });
-        }
-        break;
-      case "narrate-toggle":
-        let dropdown = this._doc.getElementById("narrate-dropdown");
-        if (dropdown.classList.contains("open")) {
-          if (this.narrator.speaking) {
-            this.narrator.stop();
-          }
-
-          // We need to remove "keep-open" class here so that AboutReader
-          // closes this dropdown properly. This class is eventually removed in
-          // _updateSpeechControls which gets called after narration stops,
-          // but that happend asynchronously and is too late.
-          dropdown.classList.remove("keep-open");
-        }
-        break;
+  _onButtonClick(evt) {
+    let classList = evt.target.classList;
+    if (classList.contains("narrate-skip-previous")) {
+      this.narrator.skipPrevious();
+    } else if (classList.contains("narrate-skip-next")) {
+      this.narrator.skipNext();
+    } else if (classList.contains("narrate-start-stop")) {
+      if (this.narrator.speaking) {
+        this.narrator.stop();
+      } else {
+        this._updateSpeechControls(true);
+        TelemetryStopwatch.start("NARRATE_CONTENT_SPEAKTIME_MS", this);
+        let options = { rate: this.rate, voice: this.voice };
+        this.narrator.start(options).catch(err => {
+          Cu.reportError(`Narrate failed: ${err}.`);
+        }).then(() => {
+          this._updateSpeechControls(false);
+          TelemetryStopwatch.finish("NARRATE_CONTENT_SPEAKTIME_MS", this);
+        });
+      }
     }
   },
 
-  _updateSpeechControls: function(speaking) {
-    let dropdown = this._doc.getElementById("narrate-dropdown");
+  _updateSpeechControls(speaking) {
+    let dropdown = this._doc.querySelector(".narrate-dropdown");
+    if (!dropdown) {
+      // Elements got destroyed, but window lingers on for a bit.
+      return;
+    }
+
     dropdown.classList.toggle("keep-open", speaking);
+    dropdown.classList.toggle("speaking", speaking);
 
-    let startStopButton = this._doc.getElementById("narrate-start-stop");
-    startStopButton.classList.toggle("speaking", speaking);
+    let startStopButton = this._doc.querySelector(".narrate-start-stop");
     startStopButton.title =
-      gStrings.GetStringFromName(speaking ? "start" : "stop");
+      gStrings.GetStringFromName(speaking ? "stop" : "start");
 
-    this._doc.getElementById("narrate-skip-previous").disabled = !speaking;
-    this._doc.getElementById("narrate-skip-next").disabled = !speaking;
+    this._doc.querySelector(".narrate-skip-previous").disabled = !speaking;
+    this._doc.querySelector(".narrate-skip-next").disabled = !speaking;
   },
 
-  _createVoiceLabel: function(voice) {
+  _createVoiceLabel(voice) {
     // This is a highly imperfect method of making human-readable labels
     // for system voices. Because each platform has a different naming scheme
     // for voices, we use a different method for each platform.
@@ -219,21 +247,19 @@ NarrateControls.prototype = {
     }
   },
 
-  _getLanguageName: function(lang) {
-    if (!this._langStrings) {
-      this._langStrings = Services.strings.createBundle(
-        "chrome://global/locale/languageNames.properties ");
-    }
-
+  _getLanguageName(lang) {
     try {
-      // language tags will be lower case ascii between 2 and 3 characters long.
-      return this._langStrings.GetStringFromName(lang.match(/^[a-z]{2,3}/)[0]);
+      // This may throw if the lang doesn't match.
+      // XXX: Replace with Intl.Locale once bug 1433303 lands.
+      let langCode = lang.match(/^[a-z]{2,3}/)[0];
+
+      return Services.intl.getLanguageDisplayNames(undefined, [langCode]);
     } catch (e) {
       return "";
     }
   },
 
-  _convertRate: function(rate) {
+  _convertRate(rate) {
     // We need to convert a relative percentage value to a fraction rate value.
     // eg. -100 is half the speed, 100 is twice the speed in percentage,
     // 0.5 is half the speed and 2 is twice the speed in fractions.
@@ -250,7 +276,7 @@ NarrateControls.prototype = {
 
   get rate() {
     return this._convertRate(
-      this._doc.getElementById("narrate-rate-input").value);
+      this._doc.querySelector(".narrate-rate-input").value);
   },
 
   get voice() {

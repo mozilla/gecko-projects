@@ -11,19 +11,15 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
-#include "mozilla/dom/workers/bindings/WorkerFeature.h"
+#include "mozilla/dom/WorkerRunnable.h"
 #include "nsProxyRelease.h"
-
-#include "WorkerRunnable.h"
 
 namespace mozilla {
 namespace dom {
 
 class Promise;
-
-namespace workers {
+class ThreadSafeWorkerRef;
 class WorkerPrivate;
-} // namespace workers
 
 // A proxy to (eventually) mirror a resolved/rejected Promise's result from the
 // main thread to a Promise on the worker thread.
@@ -110,7 +106,6 @@ class WorkerPrivate;
 // references to it are dropped.
 
 class PromiseWorkerProxy : public PromiseNativeHandler
-                         , public workers::WorkerFeature
                          , public StructuredCloneHolderBase
 {
   friend class PromiseWorkerProxyRunnable;
@@ -135,20 +130,18 @@ public:
   };
 
   static already_AddRefed<PromiseWorkerProxy>
-  Create(workers::WorkerPrivate* aWorkerPrivate,
+  Create(WorkerPrivate* aWorkerPrivate,
          Promise* aWorkerPromise,
          const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks = nullptr);
 
   // Main thread callers must hold Lock() and check CleanUp() before calling this.
   // Worker thread callers, this will assert that the proxy has not been cleaned
   // up.
-  workers::WorkerPrivate* GetWorkerPrivate() const;
+  WorkerPrivate* GetWorkerPrivate() const;
 
   // This should only be used within WorkerRunnable::WorkerRun() running on the
   // worker thread! Do not call this after calling CleanUp().
   Promise* WorkerPromise() const;
-
-  void StoreISupports(nsISupports* aSupports);
 
   // Worker thread only. Calling this invalidates several assumptions, so be
   // sure this is the last thing you do.
@@ -185,16 +178,11 @@ protected:
   virtual void RejectedCallback(JSContext* aCx,
                                 JS::Handle<JS::Value> aValue) override;
 
-  virtual bool Notify(workers::Status aStatus) override;
-
 private:
-  PromiseWorkerProxy(workers::WorkerPrivate* aWorkerPrivate,
-                     Promise* aWorkerPromise,
-                     const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks = nullptr);
+  explicit PromiseWorkerProxy(Promise* aWorkerPromise,
+                              const PromiseWorkerProxyStructuredCloneCallbacks* aCallbacks = nullptr);
 
   virtual ~PromiseWorkerProxy();
-
-  bool AddRefObject();
 
   // If not called from Create(), be sure to hold Lock().
   void CleanProperties();
@@ -208,7 +196,7 @@ private:
                    RunCallbackFunc aFunc);
 
   // Any thread with appropriate checks.
-  workers::WorkerPrivate* mWorkerPrivate;
+  RefPtr<ThreadSafeWorkerRef> mWorkerRef;
 
   // Worker thread only.
   RefPtr<Promise> mWorkerPromise;
@@ -220,17 +208,8 @@ private:
 
   const PromiseWorkerProxyStructuredCloneCallbacks* mCallbacks;
 
-  // Aimed to keep objects alive when doing the structured-clone read/write,
-  // which can be added by calling StoreISupports() on the main thread.
-  nsTArray<nsMainThreadPtrHandle<nsISupports>> mSupportsArray;
-
   // Ensure the worker and the main thread won't race to access |mCleanedUp|.
   Mutex mCleanUpLock;
-
-#ifdef DEBUG
-  // Maybe get rid of this entirely and rely on mCleanedUp
-  bool mFeatureAdded;
-#endif
 };
 } // namespace dom
 } // namespace mozilla

@@ -12,26 +12,24 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
-#include "nsIDOMHTMLLabelElement.h"
 
 namespace mozilla {
 class EventChainPostVisitor;
 namespace dom {
 
-class HTMLLabelElement final : public nsGenericHTMLFormElement,
-                               public nsIDOMHTMLLabelElement
+class HTMLLabelElement final : public nsGenericHTMLElement
 {
 public:
   explicit HTMLLabelElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
-    : nsGenericHTMLFormElement(aNodeInfo),
+    : nsGenericHTMLElement(aNodeInfo),
       mHandlingEvent(false)
   {
   }
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLLabelElement, label)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLLabelElement, label)
 
   // nsISupports
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLLabelElement, nsGenericHTMLElement)
 
   // Element
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override
@@ -39,17 +37,14 @@ public:
     return true;
   }
 
-  // nsIDOMHTMLLabelElement
-  NS_DECL_NSIDOMHTMLLABELELEMENT
-
-  using nsGenericHTMLFormElement::GetForm;
+  HTMLFormElement* GetForm() const;
   void GetHtmlFor(nsString& aHtmlFor)
   {
     GetHTMLAttr(nsGkAtoms::_for, aHtmlFor);
   }
-  void SetHtmlFor(const nsAString& aHtmlFor, ErrorResult& aError)
+  void SetHtmlFor(const nsAString& aHtmlFor)
   {
-    SetHTMLAttr(nsGkAtoms::_for, aHtmlFor, aError);
+    SetHTMLAttr(nsGkAtoms::_for, aHtmlFor);
   }
   nsGenericHTMLElement* GetControl() const
   {
@@ -59,19 +54,13 @@ public:
   using nsGenericHTMLElement::Focus;
   virtual void Focus(mozilla::ErrorResult& aError) override;
 
-  // nsIFormControl
-  NS_IMETHOD_(uint32_t) GetType() const override { return NS_FORM_LABEL; }
-  NS_IMETHOD Reset() override;
-  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
-
-  virtual bool IsDisabled() const override { return false; }
-
   // nsIContent
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) override;
   virtual bool PerformAccesskey(bool aKeyCausesActivation,
                                 bool aIsTrustedEvent) override;
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
   nsGenericHTMLElement* GetLabeledElement() const;
 protected:

@@ -19,21 +19,15 @@ namespace dom {
 
 OSFileSystem::OSFileSystem(const nsAString& aRootDir)
 {
-  mLocalOrDeviceStorageRootPath = aRootDir;
-
-  // Non-mobile devices don't have the concept of separate permissions to
-  // access different parts of devices storage like Pictures, or Videos, etc.
-  mRequiresPermissionChecks = false;
-
-#ifdef DEBUG
-  mPermission.AssignLiteral("never-used");
-#endif
+  mLocalRootPath = aRootDir;
 }
 
 already_AddRefed<FileSystemBase>
 OSFileSystem::Clone()
 {
-  RefPtr<OSFileSystem> fs = new OSFileSystem(mLocalOrDeviceStorageRootPath);
+  AssertIsOnOwningThread();
+
+  RefPtr<OSFileSystem> fs = new OSFileSystem(mLocalRootPath);
   if (mParent) {
     fs->Init(mParent);
   }
@@ -44,9 +38,10 @@ OSFileSystem::Clone()
 void
 OSFileSystem::Init(nsISupports* aParent)
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
+  AssertIsOnOwningThread();
   MOZ_ASSERT(!mParent, "No duple Init() calls");
   MOZ_ASSERT(aParent);
+
   mParent = aParent;
 
 #ifdef DEBUG
@@ -58,14 +53,8 @@ OSFileSystem::Init(nsISupports* aParent)
 nsISupports*
 OSFileSystem::GetParentObject() const
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Only call on main thread!");
+  AssertIsOnOwningThread();
   return mParent;
-}
-
-void
-OSFileSystem::GetRootName(nsAString& aRetval) const
-{
-  aRetval.AssignLiteral(FILESYSTEM_DOM_PATH_SEPARATOR_LITERAL);
 }
 
 bool
@@ -91,12 +80,15 @@ OSFileSystem::IsSafeDirectory(Directory* aDir) const
 void
 OSFileSystem::Unlink()
 {
+  AssertIsOnOwningThread();
   mParent = nullptr;
 }
 
 void
 OSFileSystem::Traverse(nsCycleCollectionTraversalCallback &cb)
 {
+  AssertIsOnOwningThread();
+
   OSFileSystem* tmp = this;
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent);
 }
@@ -104,7 +96,17 @@ OSFileSystem::Traverse(nsCycleCollectionTraversalCallback &cb)
 void
 OSFileSystem::SerializeDOMPath(nsAString& aOutput) const
 {
-  aOutput = mLocalOrDeviceStorageRootPath;
+  AssertIsOnOwningThread();
+  aOutput = mLocalRootPath;
+}
+
+/**
+ * OSFileSystemParent
+ */
+
+OSFileSystemParent::OSFileSystemParent(const nsAString& aRootDir)
+{
+  mLocalRootPath = aRootDir;
 }
 
 } // namespace dom

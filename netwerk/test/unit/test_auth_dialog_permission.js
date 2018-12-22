@@ -6,10 +6,16 @@
 //       but don't allow it for cross-origin sub-resources
 //   2 - allow the cross-origin authentication as well.
 
-Cu.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var prefs = Cc["@mozilla.org/preferences-service;1"].
               getService(Ci.nsIPrefBranch);
+
+// Since this test creates a TYPE_DOCUMENT channel via javascript, it will
+// end up using the wrong LoadInfo constructor. Setting this pref will disable
+// the ContentPolicyType assertion in the constructor.
+prefs.setBoolPref("network.loadinfo.skip_type_assertion", true);
 
 function authHandler(metadata, response) {
   // btoa("guest:guest"), but that function is not available here
@@ -55,10 +61,10 @@ AuthPrompt.prototype = {
   pass: "guest",
 
   QueryInterface: function authprompt_qi(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIAuthPrompt))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIAuthPrompt))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   prompt: function(title, text, realm, save, defaultText, result) {
@@ -66,8 +72,8 @@ AuthPrompt.prototype = {
   },
 
   promptUsernameAndPassword: function(title, text, realm, savePW, user, pw) {
-    do_check_true(this.promptExpected,
-                  "Not expected the authentication prompt.");
+    Assert.ok(this.promptExpected,
+              "Not expected the authentication prompt.");
 
     user.value = this.user;
     pw.value = this.pass;
@@ -86,19 +92,19 @@ function Requestor(promptExpected) {
 
 Requestor.prototype = {
   QueryInterface: function(iid) {
-    if (iid.equals(Components.interfaces.nsISupports) ||
-        iid.equals(Components.interfaces.nsIInterfaceRequestor))
+    if (iid.equals(Ci.nsISupports) ||
+        iid.equals(Ci.nsIInterfaceRequestor))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   getInterface: function(iid) {
-    if (iid.equals(Components.interfaces.nsIAuthPrompt)) {
+    if (iid.equals(Ci.nsIAuthPrompt)) {
       this.prompter = new AuthPrompt(this.promptExpected);
       return this.prompter;
     }
 
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   prompter: null
@@ -107,7 +113,7 @@ Requestor.prototype = {
 function make_uri(url) {
   var ios = Cc["@mozilla.org/network/io-service;1"].
               getService(Ci.nsIIOService);
-  return ios.newURI(url, null, null);
+  return ios.newURI(url);
 }
 
 function makeChan(loadingUrl, url, contentPolicy) {
@@ -115,19 +121,13 @@ function makeChan(loadingUrl, url, contentPolicy) {
               .getService(Ci.nsIScriptSecurityManager);
   var uri = make_uri(loadingUrl);
   var principal = ssm.createCodebasePrincipal(uri, {});
-  var ios = Components.classes["@mozilla.org/network/io-service;1"]
-                      .getService(Components.interfaces.nsIIOService);
-  var chan = ios.newChannel2(url,
-                             null,
-                             null,
-                             null,
-                             principal,
-                             null,
-                             Ci.nsILoadInfo.SEC_NORMAL,
-                             contentPolicy)
-                .QueryInterface(Components.interfaces.nsIHttpChannel);
 
-  return chan;
+  return NetUtil.newChannel({
+    uri: url,
+    loadingPrincipal: principal,
+    securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
+    contentPolicyType: contentPolicy
+  }).QueryInterface(Ci.nsIHttpChannel);
 }
 
 function Test(subresource_http_auth_allow_pref, loadingUri, uri, contentPolicy,
@@ -152,19 +152,19 @@ Test.prototype = {
         do_throw("Channel should have a success code!");
       }
 
-      if (!(request instanceof Components.interfaces.nsIHttpChannel)) {
+      if (!(request instanceof Ci.nsIHttpChannel)) {
         do_throw("Expecting an HTTP channel");
       }
 
-      do_check_eq(request.responseStatus, this._expectedCode);
+      Assert.equal(request.responseStatus, this._expectedCode);
       // The request should be succeeded iff we expect 200
-      do_check_eq(request.requestSucceeded, this._expectedCode == 200);
+      Assert.equal(request.requestSucceeded, this._expectedCode == 200);
 
     } catch (e) {
       do_throw("Unexpected exception: " + e);
     }
 
-    throw Components.results.NS_ERROR_ABORT;
+    throw Cr.NS_ERROR_ABORT;
   },
 
   onDataAvailable: function(request, context, stream, offset, count) {
@@ -172,12 +172,12 @@ Test.prototype = {
   },
 
   onStopRequest: function(request, ctx, status) {
-    do_check_eq(status, Components.results.NS_ERROR_ABORT);
+    Assert.equal(status, Cr.NS_ERROR_ABORT);
 
     // Clear the auth cache.
-    Components.classes["@mozilla.org/network/http-auth-manager;1"]
-              .getService(Components.interfaces.nsIHttpAuthManager)
-              .clearAll();
+    Cc["@mozilla.org/network/http-auth-manager;1"]
+      .getService(Ci.nsIHttpAuthManager)
+      .clearAll();
 
     do_timeout(0, run_next_test);
   },
@@ -193,7 +193,7 @@ Test.prototype = {
                      this._subresource_http_auth_allow_pref);
     let chan = makeChan(this._loadingUri, this._uri, this._contentPolicy);
     chan.notificationCallbacks = new Requestor(this._expectedCode == 200);
-    chan.asyncOpen(this, null);
+    chan.asyncOpen2(this);
   }
 };
 
@@ -202,7 +202,7 @@ var tests = [
   // authentication as well.
 
   // A cross-origin request.
-  new Test(2, "https://example.com", URL + "/auth",
+  new Test(2, "http://example.com", URL + "/auth",
            Ci.nsIContentPolicy.TYPE_OTHER, 200),
   // A non cross-origin sub-resource request.
   new Test(2, URL + "/", URL + "/auth",
@@ -216,7 +216,7 @@ var tests = [
   // cross-origin sub-resources
 
   // A cross-origin request.
-  new Test(1, "https://example.com", URL + "/auth",
+  new Test(1, "http://example.com", URL + "/auth",
            Ci.nsIContentPolicy.TYPE_OTHER, 401),
   // A non cross-origin sub-resource request.
   new Test(1, URL + "/", URL + "/auth",
@@ -229,7 +229,7 @@ var tests = [
   // to open HTTP authentication credentials dialogs.
 
   // A cross-origin request.
-  new Test(0, "https://example.com", URL + "/auth",
+  new Test(0, "http://example.com", URL + "/auth",
            Ci.nsIContentPolicy.TYPE_OTHER, 401),
   // A sub-resource request.
   new Test(0, URL + "/", URL + "/auth",

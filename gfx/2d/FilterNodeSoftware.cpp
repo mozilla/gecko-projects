@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -28,21 +29,28 @@ namespace {
 
 /**
  * This class provides a way to get a pow() results in constant-time. It works
- * by caching 256 values for bases between 0 and 1 and a fixed exponent.
+ * by caching 129 ((1 << sCacheIndexPrecisionBits) + 1) values for bases between
+ * 0 and 1 and a fixed exponent.
  **/
 class PowCache
 {
 public:
   PowCache()
+    : mNumPowTablePreSquares(-1)
   {
-    CacheForExponent(0.0f);
   }
 
   void CacheForExponent(Float aExponent)
   {
-    mExponent = aExponent;
+    // Since we are in the world where we only care about
+    // input and results in [0,1], there is no point in
+    // dealing with non-positive exponents.
+    if (aExponent <= 0) {
+      mNumPowTablePreSquares = -1;
+      return;
+    }
     int numPreSquares = 0;
-    while (numPreSquares < 5 && mExponent > (1 << (numPreSquares + 2))) {
+    while (numPreSquares < 5 && aExponent > (1 << (numPreSquares + 2))) {
       numPreSquares++;
     }
     mNumPowTablePreSquares = numPreSquares;
@@ -55,18 +63,21 @@ public:
       for (int j = 0; j < mNumPowTablePreSquares; j++) {
         a = sqrt(a);
       }
-      uint32_t cachedInt = pow(a, mExponent) * (1 << sOutputIntPrecisionBits);
+      uint32_t cachedInt = pow(a, aExponent) * (1 << sOutputIntPrecisionBits);
       MOZ_ASSERT(cachedInt < (1 << (sizeof(mPowTable[i]) * 8)), "mPowCache integer type too small");
 
       mPowTable[i] = cachedInt;
     }
   }
 
+  // Only call Pow() if HasPowerTable() would return true, to avoid complicating
+  // this code and having it just return (1 << sOutputIntPrecisionBits))
   uint16_t Pow(uint16_t aBase)
   {
+    MOZ_ASSERT(HasPowerTable());
     // Results should be similar to what the following code would produce:
     // Float x = Float(aBase) / (1 << sInputIntPrecisionBits);
-    // return uint16_t(pow(x, mExponent) * (1 << sOutputIntPrecisionBits));
+    // return uint16_t(pow(x, aExponent) * (1 << sOutputIntPrecisionBits));
 
     MOZ_ASSERT(aBase <= (1 << sInputIntPrecisionBits), "aBase needs to be between 0 and 1!");
 
@@ -83,10 +94,14 @@ public:
   static const int sOutputIntPrecisionBits = 15;
   static const int sCacheIndexPrecisionBits = 7;
 
+  inline bool HasPowerTable() const
+  {
+    return mNumPowTablePreSquares >= 0;
+  }
+
 private:
   static const size_t sCacheSize = (1 << sCacheIndexPrecisionBits) + 1;
 
-  Float mExponent;
   int mNumPowTablePreSquares;
   uint16_t mPowTable[sCacheSize];
 };
@@ -204,17 +219,17 @@ FillRectWithPixel(DataSourceSurface *aSurface, const IntRect &aFillRect, IntPoin
   // Fill the first row by hand.
   if (bpp == 4) {
     uint32_t sourcePixel = *(uint32_t*)sourcePixelData;
-    for (int32_t x = 0; x < aFillRect.width; x++) {
+    for (int32_t x = 0; x < aFillRect.Width(); x++) {
       *((uint32_t*)data + x) = sourcePixel;
     }
   } else if (BytesPerPixel(aSurface->GetFormat()) == 1) {
     uint8_t sourcePixel = *sourcePixelData;
-    memset(data, sourcePixel, aFillRect.width);
+    memset(data, sourcePixel, aFillRect.Width());
   }
 
   // Copy the first row into the other rows.
-  for (int32_t y = 1; y < aFillRect.height; y++) {
-    PodCopy(data + y * surfMap.GetStride(), data, aFillRect.width * bpp);
+  for (int32_t y = 1; y < aFillRect.Height(); y++) {
+    PodCopy(data + y * surfMap.GetStride(), data, aFillRect.Width() * bpp);
   }
 }
 
@@ -238,13 +253,13 @@ FillRectWithVerticallyRepeatingHorizontalStrip(DataSourceSurface *aSurface,
   uint8_t* sampleData = DataAtOffset(aSurface, surfMap.GetMappedSurface(), aSampleRect.TopLeft());
   uint8_t* data = DataAtOffset(aSurface, surfMap.GetMappedSurface(), aFillRect.TopLeft());
   if (BytesPerPixel(aSurface->GetFormat()) == 4) {
-    for (int32_t y = 0; y < aFillRect.height; y++) {
-      PodCopy((uint32_t*)data, (uint32_t*)sampleData, aFillRect.width);
+    for (int32_t y = 0; y < aFillRect.Height(); y++) {
+      PodCopy((uint32_t*)data, (uint32_t*)sampleData, aFillRect.Width());
       data += surfMap.GetStride();
     }
   } else if (BytesPerPixel(aSurface->GetFormat()) == 1) {
-    for (int32_t y = 0; y < aFillRect.height; y++) {
-      PodCopy(data, sampleData, aFillRect.width);
+    for (int32_t y = 0; y < aFillRect.Height(); y++) {
+      PodCopy(data, sampleData, aFillRect.Width());
       data += surfMap.GetStride();
     }
   }
@@ -270,18 +285,18 @@ FillRectWithHorizontallyRepeatingVerticalStrip(DataSourceSurface *aSurface,
   uint8_t* sampleData = DataAtOffset(aSurface, surfMap.GetMappedSurface(), aSampleRect.TopLeft());
   uint8_t* data = DataAtOffset(aSurface, surfMap.GetMappedSurface(), aFillRect.TopLeft());
   if (BytesPerPixel(aSurface->GetFormat()) == 4) {
-    for (int32_t y = 0; y < aFillRect.height; y++) {
+    for (int32_t y = 0; y < aFillRect.Height(); y++) {
       int32_t sampleColor = *((uint32_t*)sampleData);
-      for (int32_t x = 0; x < aFillRect.width; x++) {
+      for (int32_t x = 0; x < aFillRect.Width(); x++) {
         *((uint32_t*)data + x) = sampleColor;
       }
       data += surfMap.GetStride();
       sampleData += surfMap.GetStride();
     }
   } else if (BytesPerPixel(aSurface->GetFormat()) == 1) {
-    for (int32_t y = 0; y < aFillRect.height; y++) {
+    for (int32_t y = 0; y < aFillRect.Height(); y++) {
       uint8_t sampleColor = *sampleData;
-      memset(data, sampleColor, aFillRect.width);
+      memset(data, sampleColor, aFillRect.Width());
       data += surfMap.GetStride();
       sampleData += surfMap.GetStride();
     }
@@ -301,50 +316,40 @@ DuplicateEdges(DataSourceSurface* aSurface, const IntRect &aFromRect)
   for (int32_t ix = 0; ix < 3; ix++) {
     switch (ix) {
       case 0:
-        fill.x = 0;
-        fill.width = aFromRect.x;
-        sampleRect.x = fill.XMost();
-        sampleRect.width = 1;
+        fill.SetRectX(0, aFromRect.X());
+        sampleRect.SetRectX(fill.XMost(), 1);
         break;
       case 1:
-        fill.x = aFromRect.x;
-        fill.width = aFromRect.width;
-        sampleRect.x = fill.x;
-        sampleRect.width = fill.width;
+        fill.SetRectX(aFromRect.X(), aFromRect.Width());
+        sampleRect.SetRectX(fill.X(), fill.Width());
         break;
       case 2:
-        fill.x = aFromRect.XMost();
-        fill.width = size.width - fill.x;
-        sampleRect.x = fill.x - 1;
-        sampleRect.width = 1;
+        fill.MoveToX(aFromRect.XMost());
+        fill.SetRightEdge(size.width);
+        sampleRect.SetRectX(fill.X() - 1, 1);
         break;
     }
-    if (fill.width <= 0) {
+    if (fill.Width() <= 0) {
       continue;
     }
     bool xIsMiddle = (ix == 1);
     for (int32_t iy = 0; iy < 3; iy++) {
       switch (iy) {
         case 0:
-          fill.y = 0;
-          fill.height = aFromRect.y;
-          sampleRect.y = fill.YMost();
-          sampleRect.height = 1;
+          fill.SetRectY(0, aFromRect.Y());
+          sampleRect.SetRectY(fill.YMost(), 1);
           break;
         case 1:
-          fill.y = aFromRect.y;
-          fill.height = aFromRect.height;
-          sampleRect.y = fill.y;
-          sampleRect.height = fill.height;
+          fill.SetRectY(aFromRect.Y(), aFromRect.Height());
+          sampleRect.SetRectY(fill.Y(), fill.Height());
           break;
         case 2:
-          fill.y = aFromRect.YMost();
-          fill.height = size.height - fill.y;
-          sampleRect.y = fill.y - 1;
-          sampleRect.height = 1;
+          fill.MoveToY(aFromRect.YMost());
+          fill.SetBottomEdge(size.height);
+          sampleRect.SetRectY(fill.Y() - 1, 1);
           break;
       }
-      if (fill.height <= 0) {
+      if (fill.Height() <= 0) {
         continue;
       }
       bool yIsMiddle = (iy == 1);
@@ -367,8 +372,8 @@ DuplicateEdges(DataSourceSurface* aSurface, const IntRect &aFromRect)
 static IntPoint
 TileIndex(const IntRect &aFirstTileRect, const IntPoint &aPoint)
 {
-  return IntPoint(int32_t(floor(double(aPoint.x - aFirstTileRect.x) / aFirstTileRect.width)),
-                  int32_t(floor(double(aPoint.y - aFirstTileRect.y) / aFirstTileRect.height)));
+  return IntPoint(int32_t(floor(double(aPoint.x - aFirstTileRect.X()) / aFirstTileRect.Width())),
+                  int32_t(floor(double(aPoint.y - aFirstTileRect.Y()) / aFirstTileRect.Height())));
 }
 
 static void
@@ -381,8 +386,8 @@ TileSurface(DataSourceSurface* aSource, DataSourceSurface* aTarget, const IntPoi
 
   for (int32_t ix = startIndex.x; ix <= endIndex.x; ix++) {
     for (int32_t iy = startIndex.y; iy <= endIndex.y; iy++) {
-      IntPoint destPoint(sourceRect.x + ix * sourceRect.width,
-                         sourceRect.y + iy * sourceRect.height);
+      IntPoint destPoint(sourceRect.X() + ix * sourceRect.Width(),
+                         sourceRect.Y() + iy * sourceRect.Height());
       IntRect destRect(destPoint, sourceRect.Size());
       destRect = destRect.Intersect(targetRect);
       IntRect srcRect = destRect - destPoint;
@@ -608,20 +613,45 @@ FilterNodeSoftware::GetOutput(const IntRect &aRect)
     return nullptr;
   }
 
-  if (!mCachedRect.Contains(aRect)) {
-    RequestRect(aRect);
-    mCachedOutput = Render(mRequestedRect);
+  IntRect cachedRect;
+  IntRect requestedRect;
+  RefPtr<DataSourceSurface> cachedOutput;
+
+  // Lock the cache and retrieve a cached surface if we have one and it can
+  // satisfy this request, or else request a rect we will compute and cache
+  {
+    MutexAutoLock lock(mCacheMutex);
+
+    if (!mCachedRect.Contains(aRect)) {
+      RequestRect(aRect);
+      requestedRect = mRequestedRect;
+    } else {
+      MOZ_ASSERT(mCachedOutput, "cached rect but no cached output?");
+      cachedRect = mCachedRect;
+      cachedOutput = mCachedOutput;
+    }
+  }
+
+  if (!cachedOutput) {
+    // Compute the output
+    cachedOutput = Render(requestedRect);
+
+    // Update the cache for future requests
+    MutexAutoLock lock(mCacheMutex);
+
+    mCachedOutput = cachedOutput;
     if (!mCachedOutput) {
       mCachedRect = IntRect();
       mRequestedRect = IntRect();
       return nullptr;
     }
-    mCachedRect = mRequestedRect;
+    mCachedRect = requestedRect;
     mRequestedRect = IntRect();
-  } else {
-    MOZ_ASSERT(mCachedOutput, "cached rect but no cached output?");
+
+    cachedRect = mCachedRect;
   }
-  return GetDataSurfaceInRect(mCachedOutput, mCachedRect, aRect, EDGE_MODE_NONE);
+
+  return GetDataSurfaceInRect(cachedOutput, cachedRect, aRect, EDGE_MODE_NONE);
 }
 
 void
@@ -680,7 +710,7 @@ FilterNodeSoftware::GetInputDataSourceSurface(uint32_t aInputEnumIndex,
 
 #ifdef DEBUG_DUMP_SURFACES
   printf("<section><h1>GetInputDataSourceSurface with aRect: %d, %d, %d, %d</h1>\n",
-         aRect.x, aRect.y, aRect.width, aRect.height);
+         aRect.x, aRect.y, aRect.Width(), aRect.Height());
 #endif
   int32_t inputIndex = InputIndex(aInputEnumIndex);
   if (inputIndex < 0 || (uint32_t)inputIndex >= NumberOfSetInputs()) {
@@ -752,7 +782,7 @@ FilterNodeSoftware::GetInputDataSourceSurface(uint32_t aInputEnumIndex,
        // to use the Map API yet. We can still read the stride/data
        // values as long as we don't try to dereference them.
       result->Unmap();
-      if (map.mStride != GetAlignedStride<16>(map.mStride) ||
+      if (map.mStride != GetAlignedStride<16>(map.mStride, 1) ||
           reinterpret_cast<uintptr_t>(map.mData) % 16 != 0) {
         // Align unaligned surface.
         result = CloneAligned(result);
@@ -838,12 +868,18 @@ FilterNodeSoftware::FilterInvalidated(FilterNodeSoftware* aFilter)
 void
 FilterNodeSoftware::Invalidate()
 {
+  MutexAutoLock lock(mCacheMutex);
   mCachedOutput = nullptr;
   mCachedRect = IntRect();
   for (std::vector<FilterInvalidationListener*>::iterator it = mInvalidationListeners.begin();
        it != mInvalidationListeners.end(); it++) {
     (*it)->FilterInvalidated(this);
   }
+}
+
+FilterNodeSoftware::FilterNodeSoftware()
+  : mCacheMutex("FilterNodeSoftware::mCacheMutex")
+{
 }
 
 FilterNodeSoftware::~FilterNodeSoftware()
@@ -1042,7 +1078,7 @@ FilterNodeBlendSoftware::GetOutputRectInRect(const IntRect& aRect)
 }
 
 FilterNodeTransformSoftware::FilterNodeTransformSoftware()
- : mFilter(Filter::GOOD)
+  : mSamplingFilter(SamplingFilter::GOOD)
 {}
 
 int32_t
@@ -1058,7 +1094,7 @@ void
 FilterNodeTransformSoftware::SetAttribute(uint32_t aIndex, uint32_t aFilter)
 {
   MOZ_ASSERT(aIndex == ATT_TRANSFORM_FILTER);
-  mFilter = static_cast<Filter>(aFilter);
+  mSamplingFilter = static_cast<SamplingFilter>(aFilter);
   Invalidate();
 }
 
@@ -1103,8 +1139,8 @@ FilterNodeTransformSoftware::Render(const IntRect& aRect)
     return nullptr;
   }
 
-  Matrix transform = Matrix::Translation(srcRect.x, srcRect.y) * mMatrix *
-                     Matrix::Translation(-aRect.x, -aRect.y);
+  Matrix transform = Matrix::Translation(srcRect.X(), srcRect.Y()) * mMatrix *
+                     Matrix::Translation(-aRect.X(), -aRect.Y());
   if (transform.IsIdentity() && srcRect.Size() == aRect.Size()) {
     return input.forget();
   }
@@ -1133,9 +1169,9 @@ FilterNodeTransformSoftware::Render(const IntRect& aRect)
     return nullptr;
   }
 
-  Rect r(0, 0, srcRect.width, srcRect.height);
+  Rect r(0, 0, srcRect.Width(), srcRect.Height());
   dt->SetTransform(transform);
-  dt->DrawSurface(input, r, r, DrawSurfaceOptions(mFilter));
+  dt->DrawSurface(input, r, r, DrawSurfaceOptions(mSamplingFilter));
 
   dt->Flush();
   surf->Unmap();
@@ -1204,7 +1240,7 @@ ApplyMorphology(const IntRect& aSourceRect, DataSourceSurface* aInput,
 {
   IntRect srcRect = aSourceRect - aDestRect.TopLeft();
   IntRect destRect = aDestRect - aDestRect.TopLeft();
-  IntRect tmpRect(destRect.x, srcRect.y, destRect.width, srcRect.height);
+  IntRect tmpRect(destRect.X(), srcRect.Y(), destRect.Width(), srcRect.Height());
 #ifdef DEBUG
   IntMargin margin = srcRect - destRect;
   MOZ_ASSERT(margin.top >= ry && margin.right >= rx &&
@@ -1485,18 +1521,20 @@ FilterNodeFloodSoftware::Render(const IntRect& aRect)
 
   if (format == SurfaceFormat::B8G8R8A8) {
     uint32_t color = ColorToBGRA(mColor);
-    for (int32_t y = 0; y < aRect.height; y++) {
-      for (int32_t x = 0; x < aRect.width; x++) {
+    for (int32_t y = 0; y < aRect.Height(); y++) {
+      for (int32_t x = 0; x < aRect.Width(); x++) {
         *((uint32_t*)targetData + x) = color;
       }
+      PodZero(&targetData[aRect.Width() * 4], stride - aRect.Width() * 4);
       targetData += stride;
     }
   } else if (format == SurfaceFormat::A8) {
     uint8_t alpha = NS_lround(mColor.a * 255.0f);
-    for (int32_t y = 0; y < aRect.height; y++) {
-      for (int32_t x = 0; x < aRect.width; x++) {
+    for (int32_t y = 0; y < aRect.Height(); y++) {
+      for (int32_t x = 0; x < aRect.Width(); x++) {
         targetData[x] = alpha;
       }
+      PodZero(&targetData[aRect.Width()], stride - aRect.Width());
       targetData += stride;
     }
   } else {
@@ -1538,8 +1576,8 @@ FilterNodeTileSoftware::SetAttribute(uint32_t aIndex,
                                      const IntRect &aSourceRect)
 {
   MOZ_ASSERT(aIndex == ATT_TILE_SOURCE_RECT);
-  mSourceRect = IntRect(int32_t(aSourceRect.x), int32_t(aSourceRect.y),
-                        int32_t(aSourceRect.width), int32_t(aSourceRect.height));
+  mSourceRect.SetRect(int32_t(aSourceRect.X()), int32_t(aSourceRect.Y()),
+                      int32_t(aSourceRect.Width()), int32_t(aSourceRect.Height()));
   Invalidate();
 }
 
@@ -1548,16 +1586,16 @@ struct CompareIntRects
 {
   bool operator()(const IntRect& a, const IntRect& b) const
   {
-    if (a.x != b.x) {
-      return a.x < b.x;
+    if (a.X() != b.X()) {
+      return a.X() < b.X();
     }
-    if (a.y != b.y) {
-      return a.y < b.y;
+    if (a.Y() != b.Y()) {
+      return a.Y() < b.Y();
     }
-    if (a.width != b.width) {
-      return a.width < b.width;
+    if (a.Width() != b.Width()) {
+      return a.Width() < b.Width();
     }
-    return a.height < b.height;
+    return a.Height() < b.Height();
   }
 };
 
@@ -1583,8 +1621,8 @@ FilterNodeTileSoftware::Render(const IntRect& aRect)
   IntPoint endIndex = TileIndex(mSourceRect, aRect.BottomRight());
   for (int32_t ix = startIndex.x; ix <= endIndex.x; ix++) {
     for (int32_t iy = startIndex.y; iy <= endIndex.y; iy++) {
-      IntPoint sourceToDestOffset(ix * mSourceRect.width,
-                                  iy * mSourceRect.height);
+      IntPoint sourceToDestOffset(ix * mSourceRect.Width(),
+                                  iy * mSourceRect.Height());
       IntRect destRect = aRect.Intersect(mSourceRect + sourceToDestOffset);
       IntRect srcRect = destRect - sourceToDestOffset;
       if (srcRect.IsEmpty()) {
@@ -1713,6 +1751,8 @@ static void TransferComponents(DataSourceSurface* aInput,
   uint8_t* targetData = targetMap.GetData();
   int32_t targetStride = targetMap.GetStride();
 
+  MOZ_ASSERT(sourceStride <= targetStride, "target smaller than source");
+
   for (int32_t y = 0; y < size.height; y++) {
     for (int32_t x = 0; x < size.width; x++) {
       uint32_t sourceIndex = y * sourceStride + x * BytesPerPixel;
@@ -1721,6 +1761,10 @@ static void TransferComponents(DataSourceSurface* aInput,
         targetData[targetIndex + i] = aLookupTables[i][sourceData[sourceIndex + i]];
       }
     }
+
+    // Zero padding to keep valgrind happy.
+    PodZero(&targetData[y * targetStride + size.width * BytesPerPixel],
+            targetStride - size.width * BytesPerPixel);
   }
 }
 
@@ -2231,57 +2275,34 @@ FilterNodeConvolveMatrixSoftware::SetAttribute(uint32_t aIndex,
 }
 
 #ifdef DEBUG
-static bool sColorSamplingAccessControlEnabled = false;
-static uint8_t* sColorSamplingAccessControlStart = nullptr;
-static uint8_t* sColorSamplingAccessControlEnd = nullptr;
-
-struct DebugOnlyAutoColorSamplingAccessControl
-{
-  explicit DebugOnlyAutoColorSamplingAccessControl(DataSourceSurface* aSurface)
-  {
-    sColorSamplingAccessControlStart = aSurface->GetData();
-    sColorSamplingAccessControlEnd = sColorSamplingAccessControlStart +
-      aSurface->Stride() * aSurface->GetSize().height;
-    sColorSamplingAccessControlEnabled = true;
-  }
-
-  ~DebugOnlyAutoColorSamplingAccessControl()
-  {
-    sColorSamplingAccessControlEnabled = false;
-  }
-};
-
 static inline void
-DebugOnlyCheckColorSamplingAccess(const uint8_t* aSampleAddress)
+DebugOnlyCheckColorSamplingAccess(const uint8_t* aSampleAddress, const uint8_t* aBoundsBegin, const uint8_t* aBoundsEnd)
 {
-  if (sColorSamplingAccessControlEnabled) {
-    MOZ_ASSERT(aSampleAddress >= sColorSamplingAccessControlStart, "accessing before start");
-    MOZ_ASSERT(aSampleAddress < sColorSamplingAccessControlEnd, "accessing after end");
-  }
+  MOZ_ASSERT(aSampleAddress >= aBoundsBegin, "accessing before start");
+  MOZ_ASSERT(aSampleAddress < aBoundsEnd, "accessing after end");
 }
 #else
-typedef DebugOnly<DataSourceSurface*> DebugOnlyAutoColorSamplingAccessControl;
-#define DebugOnlyCheckColorSamplingAccess(address)
+#define DebugOnlyCheckColorSamplingAccess(address, boundsBegin, boundsEnd)
 #endif
 
 static inline uint8_t
-ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, int32_t x, int32_t y, size_t bpp, ptrdiff_t c)
+ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, const uint8_t *aBoundsBegin, const uint8_t *aBoundsEnd, int32_t x, int32_t y, size_t bpp, ptrdiff_t c)
 {
-  DebugOnlyCheckColorSamplingAccess(&aData[y * aStride + bpp * x + c]);
+  DebugOnlyCheckColorSamplingAccess(&aData[y * aStride + bpp * x + c], aBoundsBegin, aBoundsEnd);
   return aData[y * aStride + bpp * x + c];
 }
 
 static inline int32_t
-ColorAtPoint(const uint8_t *aData, int32_t aStride, int32_t x, int32_t y)
+ColorAtPoint(const uint8_t *aData, int32_t aStride, const uint8_t *aBoundsBegin, const uint8_t *aBoundsEnd, int32_t x, int32_t y)
 {
-  DebugOnlyCheckColorSamplingAccess(aData + y * aStride + 4 * x);
+  DebugOnlyCheckColorSamplingAccess(aData + y * aStride + 4 * x, aBoundsBegin, aBoundsEnd);
   return *(uint32_t*)(aData + y * aStride + 4 * x);
 }
 
 // Accepts fractional x & y and does bilinear interpolation.
 // Only call this if the pixel (floor(x)+1, floor(y)+1) is accessible.
 static inline uint8_t
-ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, Float x, Float y, size_t bpp, ptrdiff_t c)
+ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, const uint8_t *aBoundsBegin, const uint8_t *aBoundsEnd, Float x, Float y, size_t bpp, ptrdiff_t c)
 {
   const uint32_t f = 256;
   const int32_t lx = floor(x);
@@ -2290,10 +2311,10 @@ ColorComponentAtPoint(const uint8_t *aData, int32_t aStride, Float x, Float y, s
   const int32_t tlx = f - tux;
   const int32_t tuy = uint32_t((y - ly) * f);
   const int32_t tly = f - tuy;
-  const uint8_t &cll = ColorComponentAtPoint(aData, aStride, lx,     ly,     bpp, c);
-  const uint8_t &cul = ColorComponentAtPoint(aData, aStride, lx + 1, ly,     bpp, c);
-  const uint8_t &clu = ColorComponentAtPoint(aData, aStride, lx,     ly + 1, bpp, c);
-  const uint8_t &cuu = ColorComponentAtPoint(aData, aStride, lx + 1, ly + 1, bpp, c);
+  const uint8_t &cll = ColorComponentAtPoint(aData, aStride, aBoundsBegin, aBoundsEnd, lx,     ly,     bpp, c);
+  const uint8_t &cul = ColorComponentAtPoint(aData, aStride, aBoundsBegin, aBoundsEnd, lx + 1, ly,     bpp, c);
+  const uint8_t &clu = ColorComponentAtPoint(aData, aStride, aBoundsBegin, aBoundsEnd, lx,     ly + 1, bpp, c);
+  const uint8_t &cuu = ColorComponentAtPoint(aData, aStride, aBoundsBegin, aBoundsEnd, lx + 1, ly + 1, bpp, c);
   return ((cll * tlx + cul * tux) * tly +
           (clu * tlx + cuu * tux) * tuy + f * f / 2) / (f * f);
 }
@@ -2310,6 +2331,7 @@ ConvolvePixel(const uint8_t *aSourceData,
               uint8_t *aTargetData,
               int32_t aWidth, int32_t aHeight,
               int32_t aSourceStride, int32_t aTargetStride,
+              const uint8_t* aSourceBegin, const uint8_t* aSourceEnd,
               int32_t aX, int32_t aY,
               const int32_t *aKernel,
               int32_t aBias, int32_t shiftL, int32_t shiftR,
@@ -2333,7 +2355,7 @@ ConvolvePixel(const uint8_t *aSourceData,
       CoordType sampleX = aX + (x - aTargetX) * aKernelUnitLengthX;
       for (int32_t i = 0; i < channels; i++) {
         sum[i] += aKernel[aOrderX * y + x] *
-          ColorComponentAtPoint(aSourceData, aSourceStride,
+          ColorComponentAtPoint(aSourceData, aSourceStride, aSourceBegin, aSourceEnd,
                                 sampleX, sampleY, 4, offsets[i]);
       }
     }
@@ -2425,7 +2447,7 @@ FilterNodeConvolveMatrixSoftware::DoRender(const IntRect& aRect,
       mKernelMatrix.size() != uint32_t(mKernelSize.width * mKernelSize.height) ||
       !IntRect(IntPoint(0, 0), mKernelSize).Contains(mTarget) ||
       mDivisor == 0) {
-    return Factory::CreateDataSourceSurface(aRect.Size(), SurfaceFormat::B8G8R8A8);
+    return Factory::CreateDataSourceSurface(aRect.Size(), SurfaceFormat::B8G8R8A8, true);
   }
 
   IntRect srcRect = InflatedSourceRect(aRect);
@@ -2440,8 +2462,6 @@ FilterNodeConvolveMatrixSoftware::DoRender(const IntRect& aRect,
   if (!input) {
     return nullptr;
   }
-
-  DebugOnlyAutoColorSamplingAccessControl accessControl(input);
 
   RefPtr<DataSourceSurface> target =
     Factory::CreateDataSourceSurface(aRect.Size(), SurfaceFormat::B8G8R8A8, true);
@@ -2459,6 +2479,8 @@ FilterNodeConvolveMatrixSoftware::DoRender(const IntRect& aRect,
 
   uint8_t* sourceData = DataAtOffset(input, sourceMap.GetMappedSurface(), offset);
   int32_t sourceStride = sourceMap.GetStride();
+  uint8_t* sourceBegin = sourceMap.GetData();
+  uint8_t* sourceEnd = sourceBegin + sourceStride * input->GetSize().height;
   uint8_t* targetData = targetMap.GetData();
   int32_t targetStride = targetMap.GetStride();
 
@@ -2482,10 +2504,10 @@ FilterNodeConvolveMatrixSoftware::DoRender(const IntRect& aRect,
   }
   int32_t bias = NS_lround(mBias * 255 * factorFromShifts);
 
-  for (int32_t y = 0; y < aRect.height; y++) {
-    for (int32_t x = 0; x < aRect.width; x++) {
+  for (int32_t y = 0; y < aRect.Height(); y++) {
+    for (int32_t x = 0; x < aRect.Width(); x++) {
       ConvolvePixel(sourceData, targetData,
-                    aRect.width, aRect.height, sourceStride, targetStride,
+                    aRect.Width(), aRect.Height(), sourceStride, targetStride, sourceBegin, sourceEnd,
                     x, y, intKernel, bias, shiftL, shiftR, mPreserveAlpha,
                     mKernelSize.width, mKernelSize.height, mTarget.x, mTarget.y,
                     aKernelUnitLengthX, aKernelUnitLengthY);
@@ -2612,6 +2634,8 @@ FilterNodeDisplacementMapSoftware::Render(const IntRect& aRect)
 
   uint8_t* sourceData = DataAtOffset(input, inputMap.GetMappedSurface(), offset);
   int32_t sourceStride = inputMap.GetStride();
+  uint8_t* sourceBegin = inputMap.GetData();
+  uint8_t* sourceEnd = sourceBegin + sourceStride * input->GetSize().height;
   uint8_t* mapData = mapMap.GetData();
   int32_t mapStride = mapMap.GetStride();
   uint8_t* targetData = targetMap.GetData();
@@ -2628,8 +2652,8 @@ FilterNodeDisplacementMapSoftware::Render(const IntRect& aRect)
   float scaleOver255 = mScale / 255.0f;
   float scaleAdjustment = -0.5f * mScale;
 
-  for (int32_t y = 0; y < aRect.height; y++) {
-    for (int32_t x = 0; x < aRect.width; x++) {
+  for (int32_t y = 0; y < aRect.Height(); y++) {
+    for (int32_t x = 0; x < aRect.Width(); x++) {
       uint32_t mapIndex = y * mapStride + 4 * x;
       uint32_t targIndex = y * targetStride + 4 * x;
       int32_t sourceX = x +
@@ -2637,8 +2661,11 @@ FilterNodeDisplacementMapSoftware::Render(const IntRect& aRect)
       int32_t sourceY = y +
         scaleOver255 * mapData[mapIndex + yChannel] + scaleAdjustment;
       *(uint32_t*)(targetData + targIndex) =
-        ColorAtPoint(sourceData, sourceStride, sourceX, sourceY);
+        ColorAtPoint(sourceData, sourceStride, sourceBegin, sourceEnd, sourceX, sourceY);
     }
+
+    // Keep valgrind happy.
+    PodZero(&targetData[y * targetStride + 4 * aRect.Width()], targetStride - 4 * aRect.Width());
   }
 
   return target.forget();
@@ -2771,7 +2798,7 @@ FilterNodeArithmeticCombineSoftware::SetAttribute(uint32_t aIndex,
                                                   uint32_t aSize)
 {
   MOZ_ASSERT(aIndex == ATT_ARITHMETIC_COMBINE_COEFFICIENTS);
-  MOZ_ASSERT(aSize == 4);
+  MOZ_RELEASE_ASSERT(aSize == 4);
 
   mK1 = aFloat[0];
   mK2 = aFloat[1];
@@ -2949,7 +2976,7 @@ FilterNodeBlurXYSoftware::Render(const IntRect& aRect)
   }
 
   RefPtr<DataSourceSurface> target;
-  Rect r(0, 0, srcRect.width, srcRect.height);
+  Rect r(0, 0, srcRect.Width(), srcRect.Height());
 
   if (input->GetFormat() == SurfaceFormat::A8) {
     target = Factory::CreateDataSourceSurface(srcRect.Size(), SurfaceFormat::A8);
@@ -3267,7 +3294,8 @@ static inline Point3D Normalized(const Point3D &vec) {
 
 template<typename LightType, typename LightingType>
 FilterNodeLightingSoftware<LightType, LightingType>::FilterNodeLightingSoftware(const char* aTypeName)
- : mSurfaceScale(0)
+ : mLock("FilterNodeLightingSoftware")
+ , mSurfaceScale(0)
 #if defined(MOZILLA_INTERNAL_API) && (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
  , mTypeName(aTypeName)
 #endif
@@ -3305,7 +3333,7 @@ FilterNodeLightingSoftware<LightType, LightingType>::SetAttribute(uint32_t aInde
   }
   switch (aIndex) {
     case ATT_LIGHTING_SURFACE_SCALE:
-      mSurfaceScale = aValue;
+      mSurfaceScale = std::fpclassify(aValue) == FP_SUBNORMAL ? 0.0 : aValue;
       break;
     default:
       MOZ_CRASH("GFX: FilterNodeLightingSoftware::SetAttribute float");
@@ -3376,14 +3404,23 @@ SpotLightSoftware::GetColor(uint32_t aLightColor, const Point3D &aVectorToLight)
     uint32_t color;
     uint8_t colorC[4];
   };
-  color = aLightColor;
+
   Float dot = -aVectorToLight.DotProduct(mVectorFromFocusPointToLight);
-  uint16_t doti = dot * (dot >= 0) * (1 << PowCache::sInputIntPrecisionBits);
-  uint32_t tmp = mPowCache.Pow(doti) * (dot >= mLimitingConeCos);
-  MOZ_ASSERT(tmp <= (1 << PowCache::sOutputIntPrecisionBits), "pow() result must not exceed 1.0");
-  colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_R] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_R] * tmp) >> PowCache::sOutputIntPrecisionBits);
-  colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_G] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_G] * tmp) >> PowCache::sOutputIntPrecisionBits);
-  colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_B] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_B] * tmp) >> PowCache::sOutputIntPrecisionBits);
+  if (!mPowCache.HasPowerTable()) {
+    dot *= (dot >= mLimitingConeCos);
+    color = aLightColor;
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_R] *= dot;
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_G] *= dot;
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_B] *= dot;
+  } else {
+    color = aLightColor;
+    uint16_t doti = dot * (dot >= 0) * (1 << PowCache::sInputIntPrecisionBits);
+    uint32_t tmp = mPowCache.Pow(doti) * (dot >= mLimitingConeCos);
+    MOZ_ASSERT(tmp <= (1 << PowCache::sOutputIntPrecisionBits), "pow() result must not exceed 1.0");
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_R] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_R] * tmp) >> PowCache::sOutputIntPrecisionBits);
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_G] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_G] * tmp) >> PowCache::sOutputIntPrecisionBits);
+    colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_B] = uint8_t((colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_B] * tmp) >> PowCache::sOutputIntPrecisionBits);
+  }
   colorC[B8G8R8A8_COMPONENT_BYTEOFFSET_A] = 255;
   return color;
 }
@@ -3411,7 +3448,7 @@ DistantLightSoftware::GetColor(uint32_t aLightColor, const Point3D &aVectorToLig
 
 template<typename CoordType>
 static Point3D
-GenerateNormal(const uint8_t *data, int32_t stride,
+GenerateNormal(const uint8_t *data, int32_t stride, uint8_t* boundsBegin, uint8_t* boundsEnd,
                int32_t x, int32_t y, float surfaceScale,
                CoordType dx, CoordType dy)
 {
@@ -3422,20 +3459,20 @@ GenerateNormal(const uint8_t *data, int32_t stride,
   // See this for source of constants:
   //   http://www.w3.org/TR/SVG11/filters.html#feDiffuseLightingElement
   int16_t normalX =
-    -1 * ColorComponentAtPoint(index, stride, -dx, -dy, 1, 0) +
-     1 * ColorComponentAtPoint(index, stride, dx, -dy, 1, 0) +
-    -2 * ColorComponentAtPoint(index, stride, -dx, zero, 1, 0) +
-     2 * ColorComponentAtPoint(index, stride, dx, zero, 1, 0) +
-    -1 * ColorComponentAtPoint(index, stride, -dx, dy, 1, 0) +
-     1 * ColorComponentAtPoint(index, stride, dx, dy, 1, 0);
+    -1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, -dx, -dy, 1, 0) +
+     1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, dx, -dy, 1, 0) +
+    -2 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, -dx, zero, 1, 0) +
+     2 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, dx, zero, 1, 0) +
+    -1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, -dx, dy, 1, 0) +
+     1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, dx, dy, 1, 0);
 
   int16_t normalY =
-    -1 * ColorComponentAtPoint(index, stride, -dx, -dy, 1, 0) +
-    -2 * ColorComponentAtPoint(index, stride, zero, -dy, 1, 0) +
-    -1 * ColorComponentAtPoint(index, stride, dx, -dy, 1, 0) +
-     1 * ColorComponentAtPoint(index, stride, -dx, dy, 1, 0) +
-     2 * ColorComponentAtPoint(index, stride, zero, dy, 1, 0) +
-     1 * ColorComponentAtPoint(index, stride, dx, dy, 1, 0);
+    -1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, -dx, -dy, 1, 0) +
+    -2 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, zero, -dy, 1, 0) +
+    -1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, dx, -dy, 1, 0) +
+     1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, -dx, dy, 1, 0) +
+     2 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, zero, dy, 1, 0) +
+     1 * ColorComponentAtPoint(index, stride, boundsBegin, boundsEnd, dx, dy, 1, 0);
 
   Point3D normal;
   normal.x = -surfaceScale * normalX / 4.0f;
@@ -3471,6 +3508,9 @@ FilterNodeLightingSoftware<LightType, LightingType>::DoRender(const IntRect& aRe
                                                               CoordType aKernelUnitLengthX,
                                                               CoordType aKernelUnitLengthY)
 {
+  MOZ_ASSERT(aKernelUnitLengthX > 0, "aKernelUnitLengthX can be a negative or zero value");
+  MOZ_ASSERT(aKernelUnitLengthY > 0, "aKernelUnitLengthY can be a negative or zero value");
+
   IntRect srcRect = aRect;
   IntSize size = aRect.Size();
   srcRect.Inflate(ceil(float(aKernelUnitLengthX)),
@@ -3492,8 +3532,6 @@ FilterNodeLightingSoftware<LightType, LightingType>::DoRender(const IntRect& aRe
     input = FilterProcessing::ExtractAlpha(input);
   }
 
-  DebugOnlyAutoColorSamplingAccessControl accessControl(input);
-
   RefPtr<DataSourceSurface> target =
     Factory::CreateDataSourceSurface(size, SurfaceFormat::B8G8R8A8);
   if (MOZ2D_WARN_IF(!target)) {
@@ -3511,8 +3549,12 @@ FilterNodeLightingSoftware<LightType, LightingType>::DoRender(const IntRect& aRe
 
   uint8_t* sourceData = DataAtOffset(input, sourceMap.GetMappedSurface(), offset);
   int32_t sourceStride = sourceMap.GetStride();
+  uint8_t* sourceBegin = sourceMap.GetData();
+  uint8_t* sourceEnd = sourceBegin + sourceStride * input->GetSize().height;
   uint8_t* targetData = targetMap.GetData();
   int32_t targetStride = targetMap.GetStride();
+
+  MutexAutoLock lock(mLock);
 
   uint32_t lightColor = ColorToBGRA(mColor);
   mLight.Prepare();
@@ -3523,11 +3565,11 @@ FilterNodeLightingSoftware<LightType, LightingType>::DoRender(const IntRect& aRe
       int32_t sourceIndex = y * sourceStride + x;
       int32_t targetIndex = y * targetStride + 4 * x;
 
-      Point3D normal = GenerateNormal(sourceData, sourceStride,
+      Point3D normal = GenerateNormal(sourceData, sourceStride, sourceBegin, sourceEnd,
                                       x, y, mSurfaceScale,
                                       aKernelUnitLengthX, aKernelUnitLengthY);
 
-      IntPoint pointInFilterSpace(aRect.x + x, aRect.y + y);
+      IntPoint pointInFilterSpace(aRect.X() + x, aRect.Y() + y);
       Float Z = mSurfaceScale * sourceData[sourceIndex] / 255.0f;
       Point3D pt(pointInFilterSpace.x, pointInFilterSpace.y, Z);
       Point3D rayDir = mLight.GetVectorToLight(pt);
@@ -3535,6 +3577,9 @@ FilterNodeLightingSoftware<LightType, LightingType>::DoRender(const IntRect& aRe
 
       *(uint32_t*)(targetData + targetIndex) = mLighting.LightPixel(normal, rayDir, color);
     }
+
+    // Zero padding to keep valgrind happy.
+    PodZero(&targetData[y * targetStride + 4 * size.width], targetStride - 4 * size.width);
   }
 
   return target.forget();
@@ -3583,6 +3628,7 @@ DiffuseLightingSoftware::LightPixel(const Point3D &aNormal,
 SpecularLightingSoftware::SpecularLightingSoftware()
  : mSpecularConstant(0)
  , mSpecularExponent(0)
+ , mSpecularConstantInt(0)
 {
 }
 
@@ -3618,6 +3664,9 @@ SpecularLightingSoftware::LightPixel(const Point3D &aNormal,
   Point3D halfwayVector = Normalized(aVectorToLight + vectorToEye);
   Float dotNH = aNormal.DotProduct(halfwayVector);
   uint16_t dotNHi = uint16_t(dotNH * (dotNH >= 0) * (1 << PowCache::sInputIntPrecisionBits));
+  // The exponent for specular is in [1,128] range, so we don't need to check and
+  // optimize for the "default power table" scenario here.
+  MOZ_ASSERT(mPowCache.HasPowerTable());
   uint32_t specularNHi = uint32_t(mSpecularConstantInt) * mPowCache.Pow(dotNHi) >> 8;
 
   union {

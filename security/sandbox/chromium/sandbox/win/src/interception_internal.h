@@ -9,13 +9,14 @@
 #ifndef SANDBOX_SRC_INTERCEPTION_INTERNAL_H_
 #define SANDBOX_SRC_INTERCEPTION_INTERNAL_H_
 
+#include <stddef.h>
+
+#include "sandbox/win/src/interceptors.h"
 #include "sandbox/win/src/sandbox_types.h"
 
 namespace sandbox {
 
 const int kMaxThunkDataBytes = 64;
-
-enum InterceptorId;
 
 // The following structures contain variable size fields at the end, and will be
 // used to transfer information between two processes. In order to guarantee

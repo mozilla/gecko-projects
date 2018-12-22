@@ -5,28 +5,42 @@
  * found in the LICENSE file.
  */
 
+#include "SkArenaAlloc.h"
+#include "SkBlendModePriv.h"
 #include "SkBlitRow.h"
 #include "SkColorFilter.h"
-#include "SkColorPriv.h"
+#include "SkColorData.h"
+#include "SkColorSpaceXformer.h"
 #include "SkModeColorFilter.h"
+#include "SkPM4f.h"
+#include "SkPM4fPriv.h"
+#include "SkRandom.h"
+#include "SkRasterPipeline.h"
 #include "SkReadBuffer.h"
-#include "SkWriteBuffer.h"
-#include "SkUtils.h"
 #include "SkString.h"
+#include "SkUtils.h"
 #include "SkValidationUtils.h"
+#include "SkWriteBuffer.h"
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
+
+SkModeColorFilter::SkModeColorFilter(SkColor color, SkBlendMode mode) {
+    fColor = color;
+    fMode = mode;
+    // cache
+    fPMColor = SkPreMultiplyColor(fColor);
+}
 
 #ifndef SK_IGNORE_TO_STRING
 void SkModeColorFilter::toString(SkString* str) const {
     str->append("SkModeColorFilter: color: 0x");
     str->appendHex(fColor);
     str->append(" mode: ");
-    str->append(SkXfermode::ModeName(fMode));
+    str->append(SkBlendMode_Name(fMode));
 }
 #endif
 
-bool SkModeColorFilter::asColorMode(SkColor* color, SkXfermode::Mode* mode) const {
+bool SkModeColorFilter::asColorMode(SkColor* color, SkBlendMode* mode) const {
     if (color) {
         *color = fColor;
     }
@@ -37,71 +51,69 @@ bool SkModeColorFilter::asColorMode(SkColor* color, SkXfermode::Mode* mode) cons
 }
 
 uint32_t SkModeColorFilter::getFlags() const {
+    uint32_t flags = 0;
     switch (fMode) {
-        case SkXfermode::kDst_Mode:      //!< [Da, Dc]
-        case SkXfermode::kSrcATop_Mode:  //!< [Da, Sc * Da + (1 - Sa) * Dc]
-            return kAlphaUnchanged_Flag;
+        case SkBlendMode::kDst:      //!< [Da, Dc]
+        case SkBlendMode::kSrcATop:  //!< [Da, Sc * Da + (1 - Sa) * Dc]
+            flags |= kAlphaUnchanged_Flag;
         default:
             break;
     }
-    return 0;
-}
-
-void SkModeColorFilter::filterSpan(const SkPMColor shader[], int count, SkPMColor result[]) const {
-    SkPMColor       color = fPMColor;
-    SkXfermodeProc  proc = fProc;
-
-    for (int i = 0; i < count; i++) {
-        result[i] = proc(color, shader[i]);
-    }
+    return flags;
 }
 
 void SkModeColorFilter::flatten(SkWriteBuffer& buffer) const {
     buffer.writeColor(fColor);
-    buffer.writeUInt(fMode);
+    buffer.writeUInt((int)fMode);
 }
 
-void SkModeColorFilter::updateCache() {
-    fPMColor = SkPreMultiplyColor(fColor);
-    fProc = SkXfermode::GetProc(fMode);
-}
-
-SkFlattenable* SkModeColorFilter::CreateProc(SkReadBuffer& buffer) {
+sk_sp<SkFlattenable> SkModeColorFilter::CreateProc(SkReadBuffer& buffer) {
     SkColor color = buffer.readColor();
-    SkXfermode::Mode mode = (SkXfermode::Mode)buffer.readUInt();
-    return SkColorFilter::CreateModeFilter(color, mode);
+    SkBlendMode mode = (SkBlendMode)buffer.readUInt();
+    return SkColorFilter::MakeModeFilter(color, mode);
+}
+
+void SkModeColorFilter::onAppendStages(SkRasterPipeline* p,
+                                       SkColorSpace* dst,
+                                       SkArenaAlloc* scratch,
+                                       bool shaderIsOpaque) const {
+    p->append(SkRasterPipeline::move_src_dst);
+    p->append_constant_color(scratch, SkPM4f_from_SkColor(fColor, dst));
+    SkBlendMode_AppendStages(fMode, p);
+}
+
+sk_sp<SkColorFilter> SkModeColorFilter::onMakeColorSpace(SkColorSpaceXformer* xformer) const {
+    SkColor color = xformer->apply(fColor);
+    if (color != fColor) {
+        return SkColorFilter::MakeModeFilter(color, fMode);
+    }
+    return this->INHERITED::onMakeColorSpace(xformer);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 #if SK_SUPPORT_GPU
 #include "GrBlend.h"
-#include "GrInvariantOutput.h"
 #include "effects/GrXfermodeFragmentProcessor.h"
 #include "effects/GrConstColorProcessor.h"
 #include "SkGr.h"
 
-const GrFragmentProcessor* SkModeColorFilter::asFragmentProcessor(GrContext*) const {
-    if (SkXfermode::kDst_Mode == fMode) {
+std::unique_ptr<GrFragmentProcessor> SkModeColorFilter::asFragmentProcessor(
+        GrContext*, const GrColorSpaceInfo& dstColorSpaceInfo) const {
+    if (SkBlendMode::kDst == fMode) {
         return nullptr;
     }
 
-    SkAutoTUnref<const GrFragmentProcessor> constFP(
-        GrConstColorProcessor::Create(SkColorToPremulGrColor(fColor),
-                                        GrConstColorProcessor::kIgnore_InputMode));
-    const GrFragmentProcessor* fp =
-        GrXfermodeFragmentProcessor::CreateFromSrcProcessor(constFP, fMode);
+    auto constFP = GrConstColorProcessor::Make(SkColorToPremulGrColor4f(fColor, dstColorSpaceInfo),
+                                               GrConstColorProcessor::InputMode::kIgnore);
+    auto fp = GrXfermodeFragmentProcessor::MakeFromSrcProcessor(std::move(constFP), fMode);
     if (!fp) {
         return nullptr;
     }
 #ifdef SK_DEBUG
     // With a solid color input this should always be able to compute the blended color
     // (at least for coeff modes)
-    if (fMode <= SkXfermode::kLastCoeffMode) {
-        static SkRandom gRand;
-        GrInvariantOutput io(GrPremulColor(gRand.nextU()), kRGBA_GrColorComponentFlags,
-                                false);
-        fp->computeInvariantOutput(&io);
-        SkASSERT(io.validFlags() == kRGBA_GrColorComponentFlags);
+    if ((unsigned)fMode <= (unsigned)SkBlendMode::kLastCoeffMode) {
+        SkASSERT(fp->hasConstantOutputForConstantInput());
     }
 #endif
     return fp;
@@ -111,33 +123,7 @@ const GrFragmentProcessor* SkModeColorFilter::asFragmentProcessor(GrContext*) co
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class Src_SkModeColorFilter final : public SkModeColorFilter {
-public:
-    Src_SkModeColorFilter(SkColor color) : INHERITED(color, SkXfermode::kSrc_Mode) {}
-
-    void filterSpan(const SkPMColor shader[], int count, SkPMColor result[]) const override {
-        sk_memset32(result, this->getPMColor(), count);
-    }
-
-private:
-    typedef SkModeColorFilter INHERITED;
-};
-
-class SrcOver_SkModeColorFilter final : public SkModeColorFilter {
-public:
-    SrcOver_SkModeColorFilter(SkColor color) : INHERITED(color, SkXfermode::kSrcOver_Mode) { }
-
-    void filterSpan(const SkPMColor shader[], int count, SkPMColor result[]) const override {
-        SkBlitRow::Color32(result, shader, count, this->getPMColor());
-    }
-
-private:
-    typedef SkModeColorFilter INHERITED;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
-SkColorFilter* SkColorFilter::CreateModeFilter(SkColor color, SkXfermode::Mode mode) {
+sk_sp<SkColorFilter> SkColorFilter::MakeModeFilter(SkColor color, SkBlendMode mode) {
     if (!SkIsValidMode(mode)) {
         return nullptr;
     }
@@ -146,36 +132,29 @@ SkColorFilter* SkColorFilter::CreateModeFilter(SkColor color, SkXfermode::Mode m
 
     // first collaps some modes if possible
 
-    if (SkXfermode::kClear_Mode == mode) {
+    if (SkBlendMode::kClear == mode) {
         color = 0;
-        mode = SkXfermode::kSrc_Mode;
-    } else if (SkXfermode::kSrcOver_Mode == mode) {
+        mode = SkBlendMode::kSrc;
+    } else if (SkBlendMode::kSrcOver == mode) {
         if (0 == alpha) {
-            mode = SkXfermode::kDst_Mode;
+            mode = SkBlendMode::kDst;
         } else if (255 == alpha) {
-            mode = SkXfermode::kSrc_Mode;
+            mode = SkBlendMode::kSrc;
         }
         // else just stay srcover
     }
 
     // weed out combinations that are noops, and just return null
-    if (SkXfermode::kDst_Mode == mode ||
-        (0 == alpha && (SkXfermode::kSrcOver_Mode == mode ||
-                        SkXfermode::kDstOver_Mode == mode ||
-                        SkXfermode::kDstOut_Mode == mode ||
-                        SkXfermode::kSrcATop_Mode == mode ||
-                        SkXfermode::kXor_Mode == mode ||
-                        SkXfermode::kDarken_Mode == mode)) ||
-            (0xFF == alpha && SkXfermode::kDstIn_Mode == mode)) {
+    if (SkBlendMode::kDst == mode ||
+        (0 == alpha && (SkBlendMode::kSrcOver == mode ||
+                        SkBlendMode::kDstOver == mode ||
+                        SkBlendMode::kDstOut == mode ||
+                        SkBlendMode::kSrcATop == mode ||
+                        SkBlendMode::kXor == mode ||
+                        SkBlendMode::kDarken == mode)) ||
+            (0xFF == alpha && SkBlendMode::kDstIn == mode)) {
         return nullptr;
     }
 
-    switch (mode) {
-        case SkXfermode::kSrc_Mode:
-            return new Src_SkModeColorFilter(color);
-        case SkXfermode::kSrcOver_Mode:
-            return new SrcOver_SkModeColorFilter(color);
-        default:
-            return SkModeColorFilter::Create(color, mode);
-    }
+    return SkModeColorFilter::Make(color, mode);
 }

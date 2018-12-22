@@ -16,23 +16,20 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=536567
 <script type="application/javascript">
 /** Test for Bug 536567 **/
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
 const Cm = Components.manager;
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var MockFilePicker = SpecialPowers.MockFilePicker;
 MockFilePicker.init(window);
 
-var tmpDir = Services.dirsvc.get("TmpD", Ci.nsILocalFile);
-var homeDir = Services.dirsvc.get("Desk", Ci.nsILocalFile);
+var tmpDir = Services.dirsvc.get("TmpD", Ci.nsIFile);
+var homeDir = Services.dirsvc.get("Desk", Ci.nsIFile);
 
 function newDir() {
   var dir = tmpDir.clone();
   dir.append("testdir" + Math.floor(Math.random() * 10000));
-  dir.QueryInterface(Ci.nsILocalFile);
+  dir.QueryInterface(Ci.nsIFile);
   dir.createUnique(Ci.nsIFile.DIRECTORY_TYPE, 0700);
   return dir;
 }
@@ -110,13 +107,13 @@ function runTest() {
     testIndex++;
     runTest();
   } else if (test == "clear history") {
-    Services.obs.notifyObservers(null, "browser:purge-session-history", "");
+    Services.obs.notifyObservers(null, "browser:purge-session-history");
     testIndex++;
     runTest();
   } else {
     var file = dirs[test[2]].clone();
     file.append("file.file");
-    MockFilePicker.returnFiles = [file];
+    MockFilePicker.setFiles([file]);
     content.setAttribute('src', domains[test[0]] + '/chrome/layout/forms/test/bug536567_subframe.html');
   }
 }
@@ -145,7 +142,7 @@ function whenDelayedStartupFinished(aWindow, aCallback) {
       Services.obs.removeObserver(observer, aTopic);
       setTimeout(aCallback, 0);
     }
-  }, "browser-delayed-startup-finished", false);
+  }, "browser-delayed-startup-finished");
 }
 
 function testOnWindow(aIsPrivate, aCallback) {
@@ -170,7 +167,10 @@ MockFilePicker.showCallback = function(filepicker) {
   var test = tests[testIndex];
   var returned = -1;
   for (var i = 0; i < dirs.length; i++) {
-    if (dirs[i].path == MockFilePicker.displayDirectory.path) {
+     var dir = MockFilePicker.displayDirectory
+                 ? MockFilePicker.displayDirectory
+                 : Services.dirsvc.get(MockFilePicker.displaySpecialDirectory, Ci.nsIFile);
+    if (dirs[i].path == dir.path) {
       returned = i;
       break;
     }

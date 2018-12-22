@@ -6,18 +6,18 @@
 
 // Tests that the CubicBezierPresetWidget cycles menus
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/cubic-bezier-frame.xhtml";
 const {CubicBezierPresetWidget} =
   require("devtools/client/shared/widgets/CubicBezierWidget");
 const {PREDEFINED, PRESETS, DEFAULT_PRESET_CATEGORY} =
   require("devtools/client/shared/widgets/CubicBezierPresets");
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = CHROME_URL_ROOT + "doc_cubic-bezier-01.html";
 
-  let container = doc.querySelector("#container");
-  let w = new CubicBezierPresetWidget(container);
+add_task(async function() {
+  const [host,, doc] = await createHost("bottom", TEST_URI);
+
+  const container = doc.querySelector("#cubic-bezier-container");
+  const w = new CubicBezierPresetWidget(container);
 
   info("Checking that preset is selected if coordinates are known");
 
@@ -26,7 +26,7 @@ add_task(function*() {
     "The default category is selected");
   is(w._activePreset, null, "There is no selected category");
 
-  w.refreshMenu(PREDEFINED["linear"]);
+  w.refreshMenu(PREDEFINED.linear);
   is(w.activeCategory, container.querySelector("#ease-in-out"),
      "The ease-in-out category is active");
   is(w._activePreset, container.querySelector("#ease-in-out-linear"),
@@ -45,5 +45,4 @@ add_task(function*() {
 
   w.destroy();
   host.destroy();
-  gBrowser.removeCurrentTab();
 });

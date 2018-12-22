@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 // Test that Debugger.Memory.prototype.takeCensus and
 // HeapSnapshot.prototype.takeCensus return the same data for the same heap
@@ -14,7 +15,7 @@ function doLiveAndOfflineCensus(g, dbg, opts) {
              this.markers.push(allocationMarker()); // 4
            }                                        // 5
          }());                                      // 6
-         `);                                        // 7
+         `);
   dbg.memory.trackingAllocationSites = false;
 
   return {
@@ -24,10 +25,10 @@ function doLiveAndOfflineCensus(g, dbg, opts) {
 }
 
 function run_test() {
-  var g = newGlobal();
-  var dbg = new Debugger(g);
+  const g = newGlobal();
+  const dbg = new Debugger(g);
 
-  g.eval('this.markers = []');
+  g.eval("this.markers = []");
   const markerSize = byteSize(allocationMarker());
 
   // First, test that we get the same counts and sizes as we allocate and retain
@@ -36,10 +37,10 @@ function run_test() {
   let prevCount = 0;
   let prevBytes = 0;
 
-  for (var i = 0; i < 10; i++) {
+  for (let i = 0; i < 10; i++) {
     const { live, offline } = doLiveAndOfflineCensus(g, dbg, {
-      breakdown: { by: 'objectClass',
-                   then: { by: 'count'} }
+      breakdown: { by: "objectClass",
+                   then: { by: "count"} }
     });
 
     equal(live.AllocationMarker.count, offline.AllocationMarker.count);
@@ -55,8 +56,8 @@ function run_test() {
   // those allocation stacks match up.
 
   const { live, offline } = doLiveAndOfflineCensus(g, dbg, {
-    breakdown: { by: 'objectClass',
-                 then: { by: 'allocationStack'} }
+    breakdown: { by: "objectClass",
+                 then: { by: "allocationStack"} }
   });
 
   equal(live.AllocationMarker.size, offline.AllocationMarker.size);
@@ -74,7 +75,7 @@ function run_test() {
     dumpn("Allocation stack:");
     k.toString().split(/\n/g).forEach(s => dumpn(s));
 
-    equal(k.functionDisplayName, 'unsafeAtAnySpeed');
+    equal(k.functionDisplayName, "unsafeAtAnySpeed");
     equal(k.line, 4);
 
     liveEntries.push([k.toString(), v]);
@@ -85,7 +86,7 @@ function run_test() {
     dumpn("Allocation stack:");
     k.toString().split(/\n/g).forEach(s => dumpn(s));
 
-    equal(k.functionDisplayName, 'unsafeAtAnySpeed');
+    equal(k.functionDisplayName, "unsafeAtAnySpeed");
     equal(k.line, 4);
 
     offlineEntries.push([k.toString(), v]);
@@ -96,9 +97,8 @@ function run_test() {
       return -1;
     } else if (a[0] > b[0]) {
       return 1;
-    } else {
-      return 0;
     }
+    return 0;
   };
   liveEntries.sort(sortEntries);
   offlineEntries.sort(sortEntries);

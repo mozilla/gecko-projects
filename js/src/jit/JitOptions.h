@@ -47,6 +47,7 @@ struct DefaultJitOptions
 #endif
     bool checkRangeAnalysis;
     bool runExtraChecks;
+    bool disableInlineBacktracking;
     bool disableAma;
     bool disableEaa;
     bool disableEagerSimdUnbox;
@@ -55,17 +56,24 @@ struct DefaultJitOptions
     bool disableInlining;
     bool disableLicm;
     bool disableLoopUnrolling;
+    bool disableOptimizationTracking;
     bool disablePgo;
     bool disableInstructionReordering;
     bool disableRangeAnalysis;
+    bool disableRecoverIns;
     bool disableScalarReplacement;
+    bool disableCacheIR;
     bool disableSharedStubs;
     bool disableSincos;
     bool disableSink;
     bool eagerCompilation;
     bool forceInlineCaches;
+    bool fullDebugChecks;
     bool limitScriptSize;
     bool osr;
+    bool asmJSAtomicsEnable;
+    bool wasmFoldOffsets;
+    bool wasmDelayTier2;
     uint32_t baselineWarmUpThreshold;
     uint32_t exceptionBailoutThreshold;
     uint32_t frequentBailoutThreshold;
@@ -73,8 +81,26 @@ struct DefaultJitOptions
     uint32_t osrPcMismatchesBeforeRecompile;
     uint32_t smallFunctionMaxBytecodeLength_;
     uint32_t jumpThreshold;
+    uint32_t branchPruningHitCountFactor;
+    uint32_t branchPruningInstFactor;
+    uint32_t branchPruningBlockSpanFactor;
+    uint32_t branchPruningEffectfulInstFactor;
+    uint32_t branchPruningThreshold;
+    uint32_t wasmBatchIonThreshold;
+    uint32_t wasmBatchBaselineThreshold;
     mozilla::Maybe<uint32_t> forcedDefaultIonWarmUpThreshold;
+    mozilla::Maybe<uint32_t> forcedDefaultIonSmallFunctionWarmUpThreshold;
     mozilla::Maybe<IonRegisterAllocator> forcedRegisterAllocator;
+
+    // Spectre mitigation flags. Each mitigation has its own flag in order to
+    // measure the effectiveness of each mitigation with various proof of
+    // concept.
+    bool spectreIndexMasking;
+    bool spectreObjectMitigationsBarriers;
+    bool spectreObjectMitigationsMisc;
+    bool spectreStringMitigations;
+    bool spectreValueMasking;
+    bool spectreJitToCxxCalls;
 
     // The options below affect the rest of the VM, and not just the JIT.
     bool disableUnboxedObjects;

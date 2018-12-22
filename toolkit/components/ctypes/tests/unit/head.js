@@ -1,12 +1,15 @@
+/* global ChromeUtils */
+
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+
 try {
   // We might be running without privileges, in which case it's up to the
   // harness to give us the 'ctypes' object.
-  Components.utils.import("resource://gre/modules/ctypes.jsm");
-} catch(e) {
+  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+} catch (e) {
 }
 
-function open_ctypes_test_lib()
-{
+function open_ctypes_test_lib() {
   return ctypes.open(do_get_file(ctypes.libraryName("jsctypes-test")).path);
 }
 
@@ -23,8 +26,8 @@ ResourceCleaner.prototype = {
     return v;
   },
   cleanup: function ResourceCleaner_cleanup() {
-    let keys = ThreadSafeChromeUtils.nondeterministicGetWeakMapKeys(this._map);
-    keys.forEach((function cleaner(k) {
+    let keys = ChromeUtils.nondeterministicGetWeakMapKeys(this._map);
+    keys.forEach(k => {
       try {
         k.dispose();
       } catch (x) {
@@ -32,7 +35,7 @@ ResourceCleaner.prototype = {
         // during the test. This is normal.
       }
       this._map.delete(k);
-    }).bind(this));
+    });
   }
 };
 
@@ -44,7 +47,7 @@ function ResourceTester(start, stop) {
   this._stop  = stop;
 }
 ResourceTester.prototype = {
-  launch: function(size, test, args) {
+  launch(size, test, args) {
     trigger_gc();
     let cleaner = new ResourceCleaner();
     this._start(size);
@@ -74,7 +77,8 @@ function structural_check_eq(a, b) {
   } catch (x) {
   }
   if (finished) {
-    return do_check_eq(asource, bsource);
+    Assert.equal(asource, bsource);
+    return;
   }
 
   // 2. Otherwise, perform slower comparison
@@ -86,7 +90,7 @@ function structural_check_eq(a, b) {
     dump(x);
     result = false;
   }
-  do_check_true(result);
+  Assert.ok(result);
 }
 function structural_check_eq_aux(a, b) {
   let ak;
@@ -94,7 +98,7 @@ function structural_check_eq_aux(a, b) {
     ak = Object.keys(a);
   } catch (x) {
     if (a != b) {
-      throw new Error("Distinct values "+a, b);
+      throw new Error("Distinct values " + a, b);
     }
     return;
   }
@@ -109,19 +113,22 @@ function structural_check_eq_aux(a, b) {
 
 function trigger_gc() {
   dump("Triggering garbage-collection");
-  Components.utils.forceGC();
+  Cu.forceGC();
 }
 
-function must_throw(f) {
+function must_throw(f, expected) {
   let has_thrown = false;
   try {
     f();
   } catch (x) {
+    if (expected) {
+      Assert.equal(x.toString(), expected);
+    }
     has_thrown = true;
   }
-  do_check_true(has_thrown);
+  Assert.ok(has_thrown);
 }
 
 function get_os() {
-  return Components.classes["@mozilla.org/xre/app-info;1"].getService(Components.interfaces.nsIXULRuntime).OS;
+  return Services.appinfo.OS;
 }

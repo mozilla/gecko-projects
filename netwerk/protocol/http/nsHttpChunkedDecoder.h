@@ -6,6 +6,7 @@
 #ifndef nsHttpChunkedDecoder_h__
 #define nsHttpChunkedDecoder_h__
 
+#include "nsAutoPtr.h"
 #include "nsError.h"
 #include "nsString.h"
 #include "nsHttpHeaderArray.h"
@@ -24,30 +25,28 @@ public:
     bool ReachedEOF() { return mReachedEOF; }
 
     // called by the transaction to handle chunked content.
-    nsresult HandleChunkedContent(char *buf,
-                                  uint32_t count,
-                                  uint32_t *contentRead,
-                                  uint32_t *contentRemaining);
+    MOZ_MUST_USE nsresult HandleChunkedContent(char *buf,
+                                               uint32_t count,
+                                               uint32_t *contentRead,
+                                               uint32_t *contentRemaining);
 
-    nsHttpHeaderArray *Trailers() { return mTrailers; }
+    nsHttpHeaderArray *Trailers() { return mTrailers.get(); }
 
-    nsHttpHeaderArray *TakeTrailers() { nsHttpHeaderArray *h = mTrailers;
-                                        mTrailers = nullptr;
-                                        return h; }
+    nsHttpHeaderArray *TakeTrailers() { return mTrailers.forget(); }
 
     uint32_t GetChunkRemaining() { return mChunkRemaining; }
 
 private:
-    nsresult ParseChunkRemaining(char *buf,
-                                 uint32_t count,
-                                 uint32_t *countRead);
+    MOZ_MUST_USE nsresult ParseChunkRemaining(char *buf,
+                                              uint32_t count,
+                                              uint32_t *countRead);
 
 private:
-    nsHttpHeaderArray *mTrailers;
-    uint32_t           mChunkRemaining;
-    nsCString          mLineBuf; // may hold a partial line
-    bool               mReachedEOF;
-    bool               mWaitEOF;
+    nsAutoPtr<nsHttpHeaderArray>  mTrailers;
+    uint32_t                      mChunkRemaining;
+    nsCString                     mLineBuf; // may hold a partial line
+    bool                          mReachedEOF;
+    bool                          mWaitEOF;
 };
 
 } // namespace net

@@ -1,50 +1,182 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
-XPCSHELL_TESTS_MANIFESTS += [
-    'test/unit/social/xpcshell.ini',
-    'test/xpcshell/xpcshell.ini',
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
+with Files("test/browser/*Telemetry*"):
+    BUG_COMPONENT = ("Toolkit", "Telemetry")
+
+with Files("test/browser/*ContentSearch*"):
+    BUG_COMPONENT = ("Firefox", "Search")
+
+with Files("test/browser/*PermissionUI*"):
+    BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("test/browser/*SitePermissions*"):
+    BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("test/browser/browser_UnsubmittedCrashHandler.js"):
+    BUG_COMPONENT = ("Toolkit", "Crash Reporting")
+
+with Files("test/browser/browser_taskbar_preview.js"):
+    BUG_COMPONENT = ("Firefox", "Shell Integration")
+
+with Files("test/browser/browser_urlBar_zoom.js"):
+    BUG_COMPONENT = ("Firefox", "General")
+
+with Files("test/unit/test_AttributionCode.js"):
+    BUG_COMPONENT = ("Toolkit", "Telemetry")
+
+with Files("test/unit/test_E10SUtils_nested_URIs.js"):
+    BUG_COMPONENT = ("Core", "Security: Process Sandboxing")
+
+with Files("test/unit/test_LaterRun.js"):
+    BUG_COMPONENT = ("Firefox", "Tours")
+
+with Files("test/unit/test_SitePermissions.js"):
+    BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("AboutNewTab.jsm"):
+    BUG_COMPONENT = ("Firefox", "New Tab Page")
+
+with Files('AsyncTabSwitcher.jsm'):
+    BUG_COMPONENT = ('Firefox', 'Tabbed Browser')
+
+with Files("AttributionCode.jsm"):
+    BUG_COMPONENT = ("Toolkit", "Telemetry")
+
+with Files("BrowserWindowTracker.jsm"):
+    BUG_COMPONENT = ("Core", "Networking")
+
+with Files("*Telemetry.jsm"):
+    BUG_COMPONENT = ("Toolkit", "Telemetry")
+
+with Files("ContentCrashHandlers.jsm"):
+    BUG_COMPONENT = ("Toolkit", "Crash Reporting")
+
+with Files("ContentSearch.jsm"):
+    BUG_COMPONENT = ("Firefox", "Search")
+
+with Files("ContentWebRTC.jsm"):
+    BUG_COMPONENT = ("Firefox", "Device Permissions")
+
+with Files("ExtensionsUI.jsm"):
+    BUG_COMPONENT = ("WebExtensions", "General")
+
+with Files("LaterRun.jsm"):
+    BUG_COMPONENT = ("Firefox", "Tours")
+
+with Files("LightWeightThemeWebInstallListener.jsm"):
+    BUG_COMPONENT = ("Firefox", "Theme")
+
+with Files("OpenInTabsUtils.jsm"):
+    BUG_COMPONENT = ("Firefox", "Tabbed Browser")
+
+with Files("PageInfoListener.jsm"):
+    BUG_COMPONENT = ("Firefox", "Page Info Window")
+
+with Files("PageStyleHandler.jsm"):
+    BUG_COMPONENT = ("Firefox", "Menus")
+
+with Files("PermissionUI.jsm"):
+   BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("PluginContent.jsm"):
+    BUG_COMPONENT = ("Core", "Plug-ins")
+
+with Files("ProcessHangMonitor.jsm"):
+    BUG_COMPONENT = ("Core", "DOM: Content Processes")
+
+with Files("ReaderParent.jsm"):
+    BUG_COMPONENT = ("Toolkit", "Reader Mode")
+
+with Files("Sanitizer.jsm"):
+    BUG_COMPONENT = ("Firefox", "Preferences")
+
+with Files("SiteDataManager.jsm"):
+    BUG_COMPONENT = ("Firefox", "Preferences")
+
+with Files("SitePermissions.jsm"):
+    BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("TabsList.jsm"):
+    BUG_COMPONENT = ("Firefox", "Tabbed Browser")
+
+with Files("ThemeVariableMap.jsm"):
+    BUG_COMPONENT = ("WebExtensions", "Themes")
+
+with Files("TransientPrefs.jsm"):
+    BUG_COMPONENT = ("Firefox", "Preferences")
+
+with Files("Windows8WindowFrameColor.jsm"):
+    BUG_COMPONENT = ("Firefox", "Theme")
+
+with Files("WindowsJumpLists.jsm"):
+    BUG_COMPONENT = ("Firefox", "Shell Integration")
+
+with Files("WindowsPreviewPerTab.jsm"):
+    BUG_COMPONENT = ("Core", "Widget: Win32")
+
+with Files("webrtcUI.jsm"):
+    BUG_COMPONENT = ("Firefox", "Device Permissions")
+
+with Files("ZoomUI.jsm"):
+    BUG_COMPONENT = ("Firefox", "Toolbars and Customization")
+
+
+BROWSER_CHROME_MANIFESTS += [
+    'test/browser/browser.ini',
+    'test/browser/formValidation/browser.ini',
 ]
+XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 
 EXTRA_JS_MODULES += [
-    'AboutHome.jsm',
     'AboutNewTab.jsm',
-    'BrowserUITelemetry.jsm',
-    'CastingApps.jsm',
-    'Chat.jsm',
+    'AsyncTabSwitcher.jsm',
+    'AttributionCode.jsm',
+    'BlockedSiteContent.jsm',
+    'BrowserErrorReporter.jsm',
+    'BrowserUsageTelemetry.jsm',
+    'BrowserWindowTracker.jsm',
     'ContentClick.jsm',
     'ContentCrashHandlers.jsm',
     'ContentLinkHandler.jsm',
-    'ContentObservers.jsm',
+    'ContentMetaHandler.jsm',
+    'ContentObservers.js',
     'ContentSearch.jsm',
     'ContentWebRTC.jsm',
-    'DirectoryLinksProvider.jsm',
-    'E10SUtils.jsm',
+    'ContextMenu.jsm',
+    'ExtensionsUI.jsm',
     'Feeds.jsm',
     'FormSubmitObserver.jsm',
     'FormValidationHandler.jsm',
-    'HiddenFrame.jsm',
     'LaterRun.jsm',
-    'NetworkPrioritizer.jsm',
-    'offlineAppCache.jsm',
-    'PanelFrame.jsm',
+    'LightWeightThemeWebInstallListener.jsm',
+    'NetErrorContent.jsm',
+    'OpenInTabsUtils.jsm',
+    'PageActions.jsm',
+    'PageInfoListener.jsm',
+    'PageStyleHandler.jsm',
+    'PermissionUI.jsm',
+    'PingCentre.jsm',
     'PluginContent.jsm',
     'ProcessHangMonitor.jsm',
     'ReaderParent.jsm',
-    'RecentWindow.jsm',
     'RemotePrompt.jsm',
     'Sanitizer.jsm',
-    'SelfSupportBackend.jsm',
+    'SavantShieldStudy.jsm',
+    'SchedulePressure.jsm',
+    'SiteDataManager.jsm',
     'SitePermissions.jsm',
-    'Social.jsm',
-    'TabGroupsMigrator.jsm',
+    'TabsList.jsm',
+    'ThemeVariableMap.jsm',
     'TransientPrefs.jsm',
-    'UserContextUI.jsm',
     'webrtcUI.jsm',
+    'ZoomUI.jsm',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':

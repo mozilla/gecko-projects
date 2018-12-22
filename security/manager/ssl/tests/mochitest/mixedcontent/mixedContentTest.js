@@ -49,7 +49,7 @@ window.onload = function onLoad() {
       finish();
     }
   } else {
-    window.addEventListener("message", onMessageReceived, false);
+    window.addEventListener("message", onMessageReceived);
 
     let secureTestLocation = loadAsInsecure ? "http://example.com"
                                             : "https://example.com";
@@ -78,8 +78,7 @@ window.onload = function onLoad() {
   }
 };
 
-function onMessageReceived(event)
-{
+function onMessageReceived(event) {
   switch (event.data) {
     // Indication of all test parts finish (from any of the frames)
     case "done":
@@ -102,13 +101,11 @@ function onMessageReceived(event)
   }
 }
 
-function postMsg(message)
-{
+function postMsg(message) {
   opener.postMessage(message, "http://mochi.test:8888");
 }
 
-function finish()
-{
+function finish() {
   if (history.length == 1 && !bypassNavigationTest) {
     window.setTimeout(() => {
       window.location.assign(navigateToInsecure ?
@@ -121,8 +118,7 @@ function finish()
   }
 }
 
-function ok(a, message)
-{
+function ok(a, message) {
   if (!a) {
     postMsg("FAILURE: " + message);
   } else {
@@ -130,8 +126,7 @@ function ok(a, message)
   }
 }
 
-function is(a, b, message)
-{
+function is(a, b, message) {
   if (a != b) {
     postMsg(`FAILURE: ${message}, expected ${b} got ${a}`);
   } else {
@@ -139,38 +134,34 @@ function is(a, b, message)
   }
 }
 
-function isSecurityState(expectedState, message, test)
-{
+function isSecurityState(expectedState, message, test) {
   if (!test) {
     test = ok;
   }
 
-  // Quit nasty but working :)
-  var ui = SpecialPowers.wrap(window)
+  let ui = SpecialPowers.wrap(window)
     .QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
     .getInterface(SpecialPowers.Ci.nsIWebNavigation)
     .QueryInterface(SpecialPowers.Ci.nsIDocShell)
     .securityUI;
 
-  var isInsecure = !ui ||
+  let isInsecure = !ui ||
     (ui.state & SpecialPowers.Ci.nsIWebProgressListener.STATE_IS_INSECURE);
-  var isBroken = ui &&
+  let isBroken = ui &&
     (ui.state & SpecialPowers.Ci.nsIWebProgressListener.STATE_IS_BROKEN);
-  var isEV = ui &&
+  let isEV = ui &&
     (ui.state & SpecialPowers.Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL);
 
-  var gotState;
+  let gotState = "secure";
   if (isInsecure) {
     gotState = "insecure";
   } else if (isBroken) {
     gotState = "broken";
   } else if (isEV) {
     gotState = "EV";
-  } else {
-    gotState = "secure";
   }
 
-  test(gotState == expectedState, (message || "") + ", " + "expected " + expectedState + " got " + gotState);
+  test(gotState == expectedState, (message || "") + ", expected " + expectedState + " got " + gotState);
 
   switch (expectedState) {
     case "insecure":
@@ -190,11 +181,9 @@ function isSecurityState(expectedState, message, test)
   }
 }
 
-function waitForSecurityState(expectedState, callback)
-{
-  var roundsLeft = 200; // Wait for 20 seconds (=200*100ms)
-  var interval =
-  window.setInterval(function() {
+function waitForSecurityState(expectedState, callback) {
+  let roundsLeft = 200; // Wait for 20 seconds (=200*100ms)
+  let interval = window.setInterval(() => {
     isSecurityState(expectedState, "", isok => {
       if (isok) {
         roundsLeft = 0;

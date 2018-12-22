@@ -154,6 +154,13 @@ checkGetOffsetsCoverage(function () { //FN:$,top-level
   f();              //DA:$,1
 });
 
+checkGetOffsetsCoverage(function () { ','.split(','); //FN:$,top-level //DA:$,1
+});
+
+checkGetOffsetsCoverage(function () { function f() { ','.split(','); } //FN:$,top-level //FN:$,f //DA:$,1
+  f(); //DA:$,1
+});
+
 checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
   var l = ",".split(','); //DA:$,1
   if (l.length == 3)      //DA:$,1
@@ -338,6 +345,156 @@ checkGetOffsetsCoverage(function () { //FN:$,top-level
       l.push('5');        //DA:$,0
   }
   l.pop();                //DA:$,1
+});
+
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,1 //BRDA:$,0,2,0 //BRDA:$,0,3,0
+    case 0:
+    case 1:
+      l.push('0');        //DA:$,0
+      l.push('1');        //DA:$,0
+    case 2:
+      l.push('2');        //DA:$,1
+    case 3:
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:7
+  //LH:5
+  //BRF:4
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,0 //BRDA:$,0,2,1 //BRDA:$,0,3,0
+    case 0:
+      l.push('0');        //DA:$,0
+    case 1:
+      l.push('1');        //DA:$,0
+    case 2:
+    case 3:
+      l.push('2');        //DA:$,1
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:7
+  //LH:5
+  //BRF:4
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,0 //BRDA:$,0,2,1 //BRDA:$,0,3,0
+    case 0:
+      l.push('0');        //DA:$,0
+    case 1:
+    default:
+      l.push('1');        //DA:$,0
+    case 2:
+      l.push('2');        //DA:$,1
+    case 3:
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:7
+  //LH:5
+  //BRF:4
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,0 //BRDA:$,0,2,1 //BRDA:$,0,3,0
+    case 0:
+      l.push('0');        //DA:$,0
+    case 1:
+      l.push('1');        //DA:$,0
+    default:
+    case 2:
+      l.push('2');        //DA:$,1
+    case 3:
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:7
+  //LH:5
+  //BRF:4
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,0 //BRDA:$,0,2,1 //BRDA:$,0,3,0 //BRDA:$,0,4,0
+    case 0:
+      l.push('0');        //DA:$,0
+    case 1:
+      l.push('1');        //DA:$,0
+    default:
+      l.push('default');  //DA:$,0
+    case 2:
+      l.push('2');        //DA:$,1
+    case 3:
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:8
+  //LH:5
+  //BRF:5
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ",".split(','); //DA:$,1
+  switch (l.length) {     //DA:$,1 //BRDA:$,0,0,0 //BRDA:$,0,1,0 //BRDA:$,0,2,0 //BRDA:$,0,3,1
+    case 0:
+      l.push('0');        //DA:$,0
+    case 1:
+      l.push('1');        //DA:$,0
+    default:
+      l.push('2');        //DA:$,1
+    case 3:
+      l.push('3');        //DA:$,1
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:7
+  //LH:5
+  //BRF:4
+  //BRH:1
+});
+
+checkGetOffsetsCoverage(function () { //FN:$,top-level //FNDA:1,%
+  var l = ','.split(','); //DA:$,1
+  if (l.length === 45) {  //DA:$,1 //BRDA:$,0,0,1 //BRDA:$,0,1,0
+    switch (l[0]) {       //DA:$,0 //BRDA:$,1,0,- //BRDA:$,1,1,-
+      case ',':
+        l.push('0');      //DA:$,0
+      default:
+        l.push('1');      //DA:$,0
+    }
+  }
+  l.pop();                //DA:$,1
+  //FNF:1
+  //FNH:1
+  //LF:6
+  //LH:3
+  //BRF:4
+  //BRH:1
 });
 
 // If you add a test case here, do the same in

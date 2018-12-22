@@ -20,37 +20,22 @@ namespace jit {
     _(BinaryArith_BooleanWithInt32)              \
     _(BinaryArith_DoubleWithInt32)               \
                                                  \
-    _(UnaryArith_Fallback)                       \
-    _(UnaryArith_Int32)                          \
-    _(UnaryArith_Double)                         \
-                                                 \
     _(Compare_Fallback)                          \
     _(Compare_Int32)                             \
     _(Compare_Double)                            \
     _(Compare_NumberWithUndefined)               \
     _(Compare_String)                            \
+    _(Compare_Symbol)                            \
     _(Compare_Boolean)                           \
     _(Compare_Object)                            \
     _(Compare_ObjectWithUndefined)               \
     _(Compare_Int32WithBoolean)                  \
                                                  \
     _(GetProp_Fallback)                          \
-    _(GetProp_Primitive)                         \
-    _(GetProp_StringLength)                      \
-    _(GetProp_Unboxed)                           \
-    _(GetProp_TypedObject)                       \
-    _(GetProp_CallScripted)                      \
-    _(GetProp_CallNative)                        \
-    _(GetProp_CallNativeGlobal)                  \
-    _(GetProp_CallDOMProxyNative)                \
-    _(GetProp_CallDOMProxyWithGenerationNative)  \
-    _(GetProp_DOMProxyShadowed)                  \
-    _(GetProp_ArgumentsLength)                   \
-    _(GetProp_ArgumentsCallee)                   \
-    _(GetProp_ModuleNamespace)                   \
-    _(GetProp_Generic)                           \
                                                  \
+    _(CacheIR_Regular)                           \
     _(CacheIR_Monitored)                         \
+    _(CacheIR_Updated)                           \
                                                  \
 
 } // namespace jit

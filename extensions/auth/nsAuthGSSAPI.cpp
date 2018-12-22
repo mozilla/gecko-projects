@@ -15,13 +15,15 @@
 //
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/IntegerPrintfMacros.h"
 
-#include "prlink.h"
 #include "nsCOMPtr.h"
 #include "nsIPrefService.h"
-#include "nsIPrefBranch.h"
 #include "nsIServiceManager.h"
+#include "nsMemory.h"
 #include "nsNativeCharsetUtils.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/SharedLibrary.h"
 #include "mozilla/Telemetry.h"
 
 #include "nsAuthGSSAPI.h"
@@ -54,12 +56,12 @@ using namespace mozilla;
 // by by a different name depending on the implementation of gss but always
 // has the same value
 
-static gss_OID_desc gss_c_nt_hostbased_service = 
+static gss_OID_desc gss_c_nt_hostbased_service =
     { 10, (void *) "\x2a\x86\x48\x86\xf7\x12\x01\x02\x01\x04" };
 
 static const char kNegotiateAuthGssLib[] =
     "network.negotiate-auth.gsslib";
-static const char kNegotiateAuthNativeImp[] = 
+static const char kNegotiateAuthNativeImp[] =
    "network.negotiate-auth.using-native-gsslib";
 
 static struct GSSFunction {
@@ -101,27 +103,36 @@ static PRFuncPtr KLCacheHasValidTicketsPtr;
 static nsresult
 gssInit()
 {
-    nsXPIDLCString libPath;
-    nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
-    if (prefs) {
-        prefs->GetCharPref(kNegotiateAuthGssLib, getter_Copies(libPath)); 
-        prefs->GetBoolPref(kNegotiateAuthNativeImp, &gssNativeImp); 
-    }
+#ifdef XP_WIN
+    nsAutoString libPathU;
+    Preferences::GetString(kNegotiateAuthGssLib, libPathU);
+    NS_ConvertUTF16toUTF8 libPath(libPathU);
+#else
+    nsAutoCString libPath;
+    Preferences::GetCString(kNegotiateAuthGssLib, libPath);
+#endif
+    gssNativeImp = Preferences::GetBool(kNegotiateAuthNativeImp);
 
     PRLibrary *lib = nullptr;
 
     if (!libPath.IsEmpty()) {
         LOG(("Attempting to load user specified library [%s]\n", libPath.get()));
         gssNativeImp = false;
-        lib = PR_LoadLibrary(libPath.get());
+#ifdef XP_WIN
+        lib = LoadLibraryWithFlags(libPathU.get());
+#else
+        lib = LoadLibraryWithFlags(libPath.get());
+#endif
     }
     else {
 #ifdef XP_WIN
-        char *libName = PR_GetLibraryName(nullptr, "gssapi32");
-        if (libName) {
-            lib = PR_LoadLibrary("gssapi32");
-            PR_FreeLibraryName(libName);
-        }
+        #ifdef _WIN64
+        NS_NAMED_LITERAL_STRING(kLibName, "gssapi64.dll");
+        #else
+        NS_NAMED_LITERAL_STRING(kLibName, "gssapi32.dll");
+        #endif
+
+        lib = LoadLibraryWithFlags(kLibName.get());
 #elif defined(__OpenBSD__)
         /* OpenBSD doesn't register inter-library dependencies in basesystem
          * libs therefor we need to load all the libraries gssapi depends on,
@@ -147,13 +158,13 @@ gssInit()
         }
 
 #else
-        
+
         const char *const libNames[] = {
             "gss",
             "gssapi_krb5",
             "gssapi"
         };
-        
+
         const char *const verLibNames[] = {
             "libgssapi_krb5.so.2", /* MIT - FC, Suse10, Debian */
             "libgssapi.so.4",      /* Heimdal - Suse10, MDK */
@@ -162,7 +173,7 @@ gssInit()
 
         for (size_t i = 0; i < ArrayLength(verLibNames) && !lib; ++i) {
             lib = PR_LoadLibrary(verLibNames[i]);
- 
+
             /* The CITI libgssapi library calls exit() during
              * initialization if it's not correctly configured. Try to
              * ensure that we never use this library for our GSSAPI
@@ -170,7 +181,7 @@ gssInit()
              * See Bugzilla #325433
              */
             if (lib &&
-                PR_FindFunctionSymbol(lib, 
+                PR_FindFunctionSymbol(lib,
                                       "internal_krb5_gss_initialize") &&
                 PR_FindFunctionSymbol(lib, "gssd_pname_to_uid")) {
                 LOG(("CITI libgssapi found, which calls exit(). Skipping\n"));
@@ -186,18 +197,18 @@ gssInit()
                 PR_FreeLibraryName(libName);
 
                 if (lib &&
-                    PR_FindFunctionSymbol(lib, 
+                    PR_FindFunctionSymbol(lib,
                                           "internal_krb5_gss_initialize") &&
                     PR_FindFunctionSymbol(lib, "gssd_pname_to_uid")) {
                     LOG(("CITI libgssapi found, which calls exit(). Skipping\n"));
                     PR_UnloadLibrary(lib);
                     lib = nullptr;
-                } 
+                }
             }
         }
 #endif
     }
-    
+
     if (!lib) {
         LOG(("Fail to load gssapi library\n"));
         return NS_ERROR_FAILURE;
@@ -299,7 +310,7 @@ nsAuthGSSAPI::nsAuthGSSAPI(pType package)
     mMechOID = &gss_krb5_mech_oid_desc;
 
     // if the type is kerberos we accept it as default
-    // and exit 
+    // and exit
 
     if (package == PACKAGE_TYPE_KERBEROS)
         return;
@@ -313,14 +324,14 @@ nsAuthGSSAPI::nsAuthGSSAPI(pType package)
     // Using Kerberos directly (instead of negotiating
     // with SPNEGO) may work in some cases depending
     // on how smart the server side is.
-    
+
     majstat = gss_indicate_mechs_ptr(&minstat, &mech_set);
     if (GSS_ERROR(majstat))
         return;
 
     if (mech_set) {
         for (i=0; i<mech_set->count; i++) {
-            item = &mech_set->elements[i];    
+            item = &mech_set->elements[i];
             if (item->length == gss_spnego_mech_oid_desc.length &&
                 !memcmp(item->elements, gss_spnego_mech_oid_desc.elements,
                 item->length)) {
@@ -413,7 +424,7 @@ nsAuthGSSAPI::GetNextToken(const void *inToken,
     // If they've called us again after we're complete, reset to start afresh.
     if (mComplete)
         Reset();
-    
+
     if (mServiceFlags & REQ_DELEGATE)
         req_flags |= GSS_C_DELEG_FLAG;
 
@@ -449,19 +460,19 @@ nsAuthGSSAPI::GetNextToken(const void *inToken,
         // first sequence failed.  We need to bail or else we might end up in
         // an infinite loop.
         LOG(("Cannot restart authentication sequence!"));
-        return NS_ERROR_UNEXPECTED; 
+        return NS_ERROR_UNEXPECTED;
     }
 
 #if defined(XP_MACOSX)
     // Suppress Kerberos prompts to get credentials.  See bug 240643.
-    // We can only use Mac OS X specific kerb functions if we are using 
+    // We can only use Mac OS X specific kerb functions if we are using
     // the native lib
-    KLBoolean found;    
+    KLBoolean found;
     bool doingMailTask = mServiceName.Find("imap@") ||
                            mServiceName.Find("pop@") ||
                            mServiceName.Find("smtp@") ||
                            mServiceName.Find("ldap@");
-    
+
     if (!doingMailTask && (gssNativeImp &&
          (KLCacheHasValidTickets_ptr(nullptr, kerberosVersion_V5, &found, nullptr, nullptr) != klNoErr || !found)))
     {
@@ -501,14 +512,14 @@ nsAuthGSSAPI::GetNextToken(const void *inToken,
         // context here because it will be needed on the
         // next call.
         //
-    } 
-    
+    }
+
     *outTokenLen = output_token.length;
     if (output_token.length != 0)
         *outToken = nsMemory::Clone(output_token.value, output_token.length);
     else
         *outToken = nullptr;
-    
+
     gss_release_buffer_ptr(&minor_status, &output_token);
 
     if (major_status == GSS_S_COMPLETE)
@@ -519,7 +530,8 @@ nsAuthGSSAPI::GetNextToken(const void *inToken,
 end:
     gss_release_name_ptr(&minor_status, &server);
 
-    LOG(("  leaving nsAuthGSSAPI::GetNextToken [rv=%x]", rv));
+    LOG(("  leaving nsAuthGSSAPI::GetNextToken [rv=%" PRIx32 "]",
+         static_cast<uint32_t>(rv)));
     return rv;
 }
 
@@ -561,7 +573,7 @@ nsAuthGSSAPI::Unwrap(const void *inToken,
 
     return NS_OK;
 }
- 
+
 NS_IMETHODIMP
 nsAuthGSSAPI::Wrap(const void *inToken,
                    uint32_t    inTokenLen,
@@ -584,7 +596,7 @@ nsAuthGSSAPI::Wrap(const void *inToken,
                                 &input_token,
                                 nullptr,
                                 &output_token);
-    
+
     if (GSS_ERROR(major_status)) {
         LogGssError(major_status, minor_status, "gss_wrap() failed");
         Reset();

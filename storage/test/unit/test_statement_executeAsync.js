@@ -7,6 +7,9 @@
  * for both mozIStorageStatement and mozIStorageAsyncStatement.
  */
 
+// This file uses the internal _quit from testing/xpcshell/head.js */
+/* global _quit */
+
 const INTEGER = 1;
 const TEXT = "this is test text";
 const REAL = 3.23;
@@ -42,8 +45,7 @@ const BLOB = [1, 2];
  *        result row at that ordinal position and takes the result tuple and
  *        the call stack for the original call.
  */
-function execAsync(aStmt, aOptions, aResults)
-{
+function execAsync(aStmt, aOptions, aResults) {
   let caller = Components.stack.caller;
   if (aOptions == null)
     aOptions = {};
@@ -52,16 +54,13 @@ function execAsync(aStmt, aOptions, aResults)
   let resultsChecker;
   if (aResults == null) {
     resultsExpected = 0;
-  }
-  else if (typeof aResults == "number") {
+  } else if (typeof aResults == "number") {
     resultsExpected = aResults;
-  }
-  else if (typeof aResults == "function") {
+  } else if (typeof aResults == "function") {
     resultsChecker = aResults;
-  }
-  else { // array
+  } else { // array
     resultsExpected = aResults.length;
-    resultsChecker = function (aResultNum, aTup, aCaller) {
+    resultsChecker = function(aResultNum, aTup, aCaller) {
       aResults[aResultNum](aTup, aCaller);
     };
   }
@@ -83,8 +82,7 @@ function execAsync(aStmt, aOptions, aResults)
   let completed = false;
 
   let listener = {
-    handleResult(aResultSet)
-    {
+    handleResult(aResultSet) {
       let row, resultsSeenThisCall = 0;
       while ((row = aResultSet.getNextRow()) != null) {
         if (resultsChecker)
@@ -96,14 +94,12 @@ function execAsync(aStmt, aOptions, aResults)
       if (!resultsSeenThisCall)
         do_throw("handleResult invoked with 0 result rows!");
     },
-    handleError(aError)
-    {
-      if (errorCodeSeen != false)
+    handleError(aError) {
+      if (errorCodeSeen)
         do_throw("handleError called when we already had an error!");
       errorCodeSeen = aError.result;
     },
-    handleCompletion(aReason)
-    {
+    handleCompletion(aReason) {
       if (completed) // paranoia check
         do_throw("Received a second handleCompletion notification!", caller);
 
@@ -111,7 +107,7 @@ function execAsync(aStmt, aOptions, aResults)
         do_throw("Expected " + resultsExpected + " rows of results but " +
                  "got " + resultsSeen + " rows!", caller);
 
-      if (errorCodeExpected == true && errorCodeSeen == false)
+      if (errorCodeExpected && !errorCodeSeen)
         do_throw("Expected an error, but did not see one.", caller);
       else if (errorCodeExpected != errorCodeSeen)
         do_throw("Expected error code " + errorCodeExpected + " but got " +
@@ -132,18 +128,14 @@ function execAsync(aStmt, aOptions, aResults)
   if (("cancel" in aOptions && aOptions.cancel) ||
       ("returnPending" in aOptions && aOptions.returnPending)) {
     pending = aStmt.executeAsync(listener);
-  }
-  else {
+  } else {
     aStmt.executeAsync(listener);
   }
 
   if ("cancel" in aOptions && aOptions.cancel)
     pending.cancel();
 
-  let curThread = Components.classes["@mozilla.org/thread-manager;1"]
-                            .getService().currentThread;
-  while (!completed && !_quit)
-    curThread.processNextEvent(true);
+  Services.tm.spinEventLoopUntil(() => completed || _quit);
 
   return pending;
 }
@@ -153,8 +145,7 @@ function execAsync(aStmt, aOptions, aResults)
  * result in any crashes.  Async-only since the synchronous case generates the
  * error synchronously (and is tested elsewhere).
  */
-function test_illegal_sql_async_deferred()
-{
+function test_illegal_sql_async_deferred() {
   // gibberish
   let stmt = makeTestStatement("I AM A ROBOT. DO AS I SAY.");
   execAsync(stmt, {error: Ci.mozIStorageError.ERROR});
@@ -169,10 +160,9 @@ function test_illegal_sql_async_deferred()
 }
 test_illegal_sql_async_deferred.asyncOnly = true;
 
-function test_create_table()
-{
+function test_create_table() {
   // Ensure our table doesn't exist
-  do_check_false(getOpenedDatabase().tableExists("test"));
+  Assert.ok(!getOpenedDatabase().tableExists("test"));
 
   var stmt = makeTestStatement(
     "CREATE TABLE test (" +
@@ -187,7 +177,7 @@ function test_create_table()
   stmt.finalize();
 
   // Check that the table has been created
-  do_check_true(getOpenedDatabase().tableExists("test"));
+  Assert.ok(getOpenedDatabase().tableExists("test"));
 
   // Verify that it's created correctly (this will throw if it wasn't)
   let checkStmt = getOpenedDatabase().createStatement(
@@ -197,8 +187,7 @@ function test_create_table()
   run_next_test();
 }
 
-function test_add_data()
-{
+function test_add_data() {
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
     "VALUES (?, ?, ?, ?, ?)"
@@ -219,71 +208,69 @@ function test_add_data()
   run_next_test();
 }
 
-function test_get_data()
-{
+function test_get_data() {
   var stmt = makeTestStatement(
     "SELECT string, number, nuller, blober, id FROM test WHERE id = ?"
   );
   stmt.bindByIndex(0, INTEGER);
   execAsync(stmt, {}, [
-    function (tuple) {
-      do_check_neq(null, tuple);
+    function(tuple) {
+      Assert.notEqual(null, tuple);
 
       // Check that it's what we expect
-      do_check_false(tuple.getIsNull(0));
-      do_check_eq(tuple.getResultByName("string"), tuple.getResultByIndex(0));
-      do_check_eq(TEXT, tuple.getResultByName("string"));
-      do_check_eq(Ci.mozIStorageValueArray.VALUE_TYPE_TEXT,
-                  tuple.getTypeOfIndex(0));
+      Assert.ok(!tuple.getIsNull(0));
+      Assert.equal(tuple.getResultByName("string"), tuple.getResultByIndex(0));
+      Assert.equal(TEXT, tuple.getResultByName("string"));
+      Assert.equal(Ci.mozIStorageValueArray.VALUE_TYPE_TEXT,
+                   tuple.getTypeOfIndex(0));
 
-      do_check_false(tuple.getIsNull(1));
-      do_check_eq(tuple.getResultByName("number"), tuple.getResultByIndex(1));
-      do_check_eq(REAL, tuple.getResultByName("number"));
-      do_check_eq(Ci.mozIStorageValueArray.VALUE_TYPE_FLOAT,
-                  tuple.getTypeOfIndex(1));
+      Assert.ok(!tuple.getIsNull(1));
+      Assert.equal(tuple.getResultByName("number"), tuple.getResultByIndex(1));
+      Assert.equal(REAL, tuple.getResultByName("number"));
+      Assert.equal(Ci.mozIStorageValueArray.VALUE_TYPE_FLOAT,
+                   tuple.getTypeOfIndex(1));
 
-      do_check_true(tuple.getIsNull(2));
-      do_check_eq(tuple.getResultByName("nuller"), tuple.getResultByIndex(2));
-      do_check_eq(null, tuple.getResultByName("nuller"));
-      do_check_eq(Ci.mozIStorageValueArray.VALUE_TYPE_NULL,
-                  tuple.getTypeOfIndex(2));
+      Assert.ok(tuple.getIsNull(2));
+      Assert.equal(tuple.getResultByName("nuller"), tuple.getResultByIndex(2));
+      Assert.equal(null, tuple.getResultByName("nuller"));
+      Assert.equal(Ci.mozIStorageValueArray.VALUE_TYPE_NULL,
+                   tuple.getTypeOfIndex(2));
 
-      do_check_false(tuple.getIsNull(3));
+      Assert.ok(!tuple.getIsNull(3));
       var blobByName = tuple.getResultByName("blober");
-      do_check_eq(BLOB.length, blobByName.length);
+      Assert.equal(BLOB.length, blobByName.length);
       var blobByIndex = tuple.getResultByIndex(3);
-      do_check_eq(BLOB.length, blobByIndex.length);
+      Assert.equal(BLOB.length, blobByIndex.length);
       for (let i = 0; i < BLOB.length; i++) {
-        do_check_eq(BLOB[i], blobByName[i]);
-        do_check_eq(BLOB[i], blobByIndex[i]);
+        Assert.equal(BLOB[i], blobByName[i]);
+        Assert.equal(BLOB[i], blobByIndex[i]);
       }
       var count = { value: 0 };
       var blob = { value: null };
       tuple.getBlob(3, count, blob);
-      do_check_eq(BLOB.length, count.value);
+      Assert.equal(BLOB.length, count.value);
       for (let i = 0; i < BLOB.length; i++)
-        do_check_eq(BLOB[i], blob.value[i]);
-      do_check_eq(Ci.mozIStorageValueArray.VALUE_TYPE_BLOB,
-                  tuple.getTypeOfIndex(3));
+        Assert.equal(BLOB[i], blob.value[i]);
+      Assert.equal(Ci.mozIStorageValueArray.VALUE_TYPE_BLOB,
+                   tuple.getTypeOfIndex(3));
 
-      do_check_false(tuple.getIsNull(4));
-      do_check_eq(tuple.getResultByName("id"), tuple.getResultByIndex(4));
-      do_check_eq(INTEGER, tuple.getResultByName("id"));
-      do_check_eq(Ci.mozIStorageValueArray.VALUE_TYPE_INTEGER,
-                  tuple.getTypeOfIndex(4));
+      Assert.ok(!tuple.getIsNull(4));
+      Assert.equal(tuple.getResultByName("id"), tuple.getResultByIndex(4));
+      Assert.equal(INTEGER, tuple.getResultByName("id"));
+      Assert.equal(Ci.mozIStorageValueArray.VALUE_TYPE_INTEGER,
+                   tuple.getTypeOfIndex(4));
     }]);
   stmt.finalize();
   run_next_test();
 }
 
-function test_tuple_out_of_bounds()
-{
+function test_tuple_out_of_bounds() {
   var stmt = makeTestStatement(
     "SELECT string FROM test"
   );
   execAsync(stmt, {}, [
-    function (tuple) {
-      do_check_neq(null, tuple);
+    function(tuple) {
+      Assert.notEqual(null, tuple);
 
       // Check all out of bounds - should throw
       var methods = [
@@ -299,9 +286,8 @@ function test_tuple_out_of_bounds()
         try {
           tuple[methods[i]](tuple.numEntries);
           do_throw("did not throw :(");
-        }
-        catch (e) {
-          do_check_eq(Cr.NS_ERROR_ILLEGAL_VALUE, e.result);
+        } catch (e) {
+          Assert.equal(Cr.NS_ERROR_ILLEGAL_VALUE, e.result);
         }
       }
 
@@ -311,17 +297,15 @@ function test_tuple_out_of_bounds()
         var size = { value: 0 };
         tuple.getBlob(tuple.numEntries, blob, size);
         do_throw("did not throw :(");
-      }
-      catch (e) {
-        do_check_eq(Cr.NS_ERROR_ILLEGAL_VALUE, e.result);
+      } catch (e) {
+        Assert.equal(Cr.NS_ERROR_ILLEGAL_VALUE, e.result);
       }
     }]);
   stmt.finalize();
   run_next_test();
 }
 
-function test_no_listener_works_on_success()
-{
+function test_no_listener_works_on_success() {
   var stmt = makeTestStatement(
     "DELETE FROM test WHERE id = ?"
   );
@@ -333,8 +317,7 @@ function test_no_listener_works_on_success()
   run_next_test();
 }
 
-function test_no_listener_works_on_results()
-{
+function test_no_listener_works_on_results() {
   var stmt = makeTestStatement(
     "SELECT ?"
   );
@@ -346,8 +329,7 @@ function test_no_listener_works_on_results()
   run_next_test();
 }
 
-function test_no_listener_works_on_error()
-{
+function test_no_listener_works_on_error() {
   // commit without a transaction will trigger an error
   var stmt = makeTestStatement(
     "COMMIT"
@@ -359,8 +341,7 @@ function test_no_listener_works_on_error()
   run_next_test();
 }
 
-function test_partial_listener_works()
-{
+function test_partial_listener_works() {
   var stmt = makeTestStatement(
     "DELETE FROM test WHERE id = ?"
   );
@@ -386,8 +367,7 @@ function test_partial_listener_works()
  * up.  test_AsyncCancellation in test_true_async.cpp is our test that canceling
  * actually works correctly.
  */
-function test_immediate_cancellation()
-{
+function test_immediate_cancellation() {
   var stmt = makeTestStatement(
     "DELETE FROM test WHERE id = ?"
   );
@@ -400,8 +380,7 @@ function test_immediate_cancellation()
 /**
  * Test that calling cancel twice throws the second time.
  */
-function test_double_cancellation()
-{
+function test_double_cancellation() {
   var stmt = makeTestStatement(
     "DELETE FROM test WHERE id = ?"
   );
@@ -419,8 +398,7 @@ function test_double_cancellation()
  * Verify that nothing untoward happens if we try and cancel something after it
  * has fully run to completion.
  */
-function test_cancellation_after_execution()
-{
+function test_cancellation_after_execution() {
   var stmt = makeTestStatement(
     "DELETE FROM test WHERE id = ?"
   );
@@ -440,8 +418,7 @@ function test_cancellation_after_execution()
  * incorrectly interleaved, but that part was brittle (it's totally fine for
  * handleResult to get called multiple times) and not comprehensive.
  */
-function test_double_execute()
-{
+function test_double_execute() {
   var stmt = makeTestStatement(
     "SELECT 1"
   );
@@ -451,8 +428,7 @@ function test_double_execute()
   run_next_test();
 }
 
-function test_finalized_statement_does_not_crash()
-{
+function test_finalized_statement_does_not_crash() {
   var stmt = makeTestStatement(
     "SELECT * FROM TEST"
   );
@@ -471,8 +447,7 @@ function test_finalized_statement_does_not_crash()
 /**
  * Bind by mozIStorageBindingParams on the mozIStorageBaseStatement by index.
  */
-function test_bind_direct_binding_params_by_index()
-{
+function test_bind_direct_binding_params_by_index() {
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
     "VALUES (?, ?, ?, ?, ?)"
@@ -494,8 +469,7 @@ function test_bind_direct_binding_params_by_index()
 /**
  * Bind by mozIStorageBindingParams on the mozIStorageBaseStatement by name.
  */
-function test_bind_direct_binding_params_by_name()
-{
+function test_bind_direct_binding_params_by_name() {
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
     "VALUES (:int, :text, :real, :null, :blob)"
@@ -514,8 +488,7 @@ function test_bind_direct_binding_params_by_name()
   run_next_test();
 }
 
-function test_bind_js_params_helper_by_index()
-{
+function test_bind_js_params_helper_by_index() {
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
     "VALUES (?, ?, ?, ?, NULL)"
@@ -533,8 +506,7 @@ function test_bind_js_params_helper_by_index()
   run_next_test();
 }
 
-function test_bind_js_params_helper_by_name()
-{
+function test_bind_js_params_helper_by_name() {
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
     "VALUES (:int, :text, :real, :null, NULL)"
@@ -552,8 +524,7 @@ function test_bind_js_params_helper_by_name()
   run_next_test();
 }
 
-function test_bind_multiple_rows_by_index()
-{
+function test_bind_multiple_rows_by_index() {
   const AMOUNT_TO_ADD = 5;
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
@@ -568,19 +539,18 @@ function test_bind_multiple_rows_by_index()
     bp.bindByIndex(3, null);
     bp.bindBlobByIndex(4, BLOB, BLOB.length);
     array.addParams(bp);
-    do_check_eq(array.length, i + 1);
+    Assert.equal(array.length, i + 1);
   }
   stmt.bindParameters(array);
 
   let rowCount = getTableRowCount("test");
   execAsync(stmt);
-  do_check_eq(rowCount + AMOUNT_TO_ADD, getTableRowCount("test"));
+  Assert.equal(rowCount + AMOUNT_TO_ADD, getTableRowCount("test"));
   stmt.finalize();
   run_next_test();
 }
 
-function test_bind_multiple_rows_by_name()
-{
+function test_bind_multiple_rows_by_name() {
   const AMOUNT_TO_ADD = 5;
   var stmt = makeTestStatement(
     "INSERT INTO test (id, string, number, nuller, blober) " +
@@ -595,13 +565,13 @@ function test_bind_multiple_rows_by_name()
     bp.bindByName("null", null);
     bp.bindBlobByName("blob", BLOB, BLOB.length);
     array.addParams(bp);
-    do_check_eq(array.length, i + 1);
+    Assert.equal(array.length, i + 1);
   }
   stmt.bindParameters(array);
 
   let rowCount = getTableRowCount("test");
   execAsync(stmt);
-  do_check_eq(rowCount + AMOUNT_TO_ADD, getTableRowCount("test"));
+  Assert.equal(rowCount + AMOUNT_TO_ADD, getTableRowCount("test"));
   stmt.finalize();
   run_next_test();
 }
@@ -610,8 +580,7 @@ function test_bind_multiple_rows_by_name()
  * Verify that a mozIStorageStatement instance throws immediately when we
  * try and bind to an illegal index.
  */
-function test_bind_out_of_bounds_sync_immediate()
-{
+function test_bind_out_of_bounds_sync_immediate() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (?)"
@@ -636,8 +605,7 @@ test_bind_out_of_bounds_sync_immediate.syncOnly = true;
  * Verify that a mozIStorageAsyncStatement reports an error asynchronously when
  * we bind to an illegal index.
  */
-function test_bind_out_of_bounds_async_deferred()
-{
+function test_bind_out_of_bounds_async_deferred() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (?)"
@@ -657,8 +625,7 @@ function test_bind_out_of_bounds_async_deferred()
 }
 test_bind_out_of_bounds_async_deferred.asyncOnly = true;
 
-function test_bind_no_such_name_sync_immediate()
-{
+function test_bind_no_such_name_sync_immediate() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:foo)"
@@ -679,8 +646,7 @@ function test_bind_no_such_name_sync_immediate()
 }
 test_bind_no_such_name_sync_immediate.syncOnly = true;
 
-function test_bind_no_such_name_async_deferred()
-{
+function test_bind_no_such_name_async_deferred() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:foo)"
@@ -699,8 +665,7 @@ function test_bind_no_such_name_async_deferred()
 }
 test_bind_no_such_name_async_deferred.asyncOnly = true;
 
-function test_bind_bogus_type_by_index()
-{
+function test_bind_bogus_type_by_index() {
   // We try to bind a JS Object here that should fail to bind.
   let stmt = makeTestStatement(
     "INSERT INTO test (blober) " +
@@ -715,8 +680,7 @@ function test_bind_bogus_type_by_index()
   run_next_test();
 }
 
-function test_bind_bogus_type_by_name()
-{
+function test_bind_bogus_type_by_name() {
   // We try to bind a JS Object here that should fail to bind.
   let stmt = makeTestStatement(
     "INSERT INTO test (blober) " +
@@ -731,8 +695,7 @@ function test_bind_bogus_type_by_name()
   run_next_test();
 }
 
-function test_bind_params_already_locked()
-{
+function test_bind_params_already_locked() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -751,8 +714,7 @@ function test_bind_params_already_locked()
   run_next_test();
 }
 
-function test_bind_params_array_already_locked()
-{
+function test_bind_params_array_already_locked() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -774,8 +736,7 @@ function test_bind_params_array_already_locked()
   run_next_test();
 }
 
-function test_no_binding_params_from_locked_array()
-{
+function test_no_binding_params_from_locked_array() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -796,8 +757,7 @@ function test_no_binding_params_from_locked_array()
   run_next_test();
 }
 
-function test_not_right_owning_array()
-{
+function test_not_right_owning_array() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -816,8 +776,7 @@ function test_not_right_owning_array()
   run_next_test();
 }
 
-function test_not_right_owning_statement()
-{
+function test_not_right_owning_statement() {
   let stmt1 = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -828,7 +787,7 @@ function test_not_right_owning_statement()
   );
 
   let array1 = stmt1.newBindingParamsArray();
-  let array2 = stmt2.newBindingParamsArray();
+  stmt2.newBindingParamsArray();
   let bp = array1.newBindingParams();
   bp.bindByName("int", INTEGER);
   array1.addParams(bp);
@@ -842,8 +801,7 @@ function test_not_right_owning_statement()
   run_next_test();
 }
 
-function test_bind_empty_array()
-{
+function test_bind_empty_array() {
   let stmt = makeTestStatement(
     "INSERT INTO test (id) " +
     "VALUES (:int)"
@@ -860,11 +818,10 @@ function test_bind_empty_array()
   run_next_test();
 }
 
-function test_multiple_results()
-{
+function test_multiple_results() {
   let expectedResults = getTableRowCount("test");
   // Sanity check - we should have more than one result, but let's be sure.
-  do_check_true(expectedResults > 1);
+  Assert.ok(expectedResults > 1);
 
   // Now check that we get back two rows of data from our async query.
   let stmt = makeTestStatement("SELECT * FROM test");
@@ -874,9 +831,7 @@ function test_multiple_results()
   run_next_test();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// Test Runner
-
+// Test Runner
 
 const TEST_PASS_SYNC = 0;
 const TEST_PASS_ASYNC = 1;
@@ -945,8 +900,7 @@ var index = 0;
 const STARTING_UNIQUE_ID = 2;
 var nextUniqueId = STARTING_UNIQUE_ID;
 
-function run_next_test()
-{
+function run_next_test() {
   function _run_next_test() {
     // use a loop so we can skip tests...
     while (index < tests.length) {
@@ -961,8 +915,7 @@ function run_next_test()
         print("****** Running the next test: " + test.name);
         test();
         return;
-      }
-      catch (e) {
+      } catch (e) {
         do_throw(e);
       }
     }
@@ -987,12 +940,11 @@ function run_next_test()
   // Don't actually schedule another test if we're quitting.
   if (!_quit) {
     // For saner stacks, we execute this code RSN.
-    do_execute_soon(_run_next_test);
+    executeSoon(_run_next_test);
   }
 }
 
-function run_test()
-{
+function run_test() {
   cleanup();
 
   do_test_pending();

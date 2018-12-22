@@ -9,7 +9,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
-#include "nsIDOMHTMLButtonElement.h"
 #include "nsIConstraintValidation.h"
 
 namespace mozilla {
@@ -18,7 +17,6 @@ class EventChainPreVisitor;
 namespace dom {
 
 class HTMLButtonElement final : public nsGenericHTMLFormElementWithState,
-                                public nsIDOMHTMLButtonElement,
                                 public nsIConstraintValidation
 {
 public:
@@ -35,7 +33,7 @@ public:
 
   virtual int32_t TabIndexDefault() override;
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLButtonElement, button)
+  NS_IMPL_FROMNODE_HTML_WITH_TAG(HTMLButtonElement, button)
 
   // Element
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override
@@ -43,26 +41,23 @@ public:
     return true;
   }
 
-  // nsIDOMHTMLButtonElement
-  NS_DECL_NSIDOMHTMLBUTTONELEMENT
-
   // overriden nsIFormControl methods
-  NS_IMETHOD_(uint32_t) GetType() const override { return mType; }
   NS_IMETHOD Reset() override;
-  NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission) override;
+  NS_IMETHOD SubmitNamesValues(HTMLFormSubmission* aFormSubmission) override;
   NS_IMETHOD SaveState() override;
-  bool RestoreState(nsPresState* aState) override;
+  bool RestoreState(PresState* aState) override;
   virtual bool IsDisabledForEvents(EventMessage aMessage) override;
 
   virtual void FieldSetDisabledChanged(bool aNotify) override;
 
-  // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) override;
+  // EventTarget
+  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
   virtual nsresult PostHandleEvent(
                      EventChainPostVisitor& aVisitor) override;
 
   // nsINode
-  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
+                         bool aPreallocateChildren) const override;
   virtual JSObject* WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // nsIContent
@@ -79,17 +74,21 @@ public:
   /**
    * Called when an attribute is about to be changed
    */
-  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                 nsAttrValueOrString* aValue,
+  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                                 const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
   /**
    * Called when an attribute has just been changed
    */
-  nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                        const nsAttrValue* aValue, bool aNotify) override;
+  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aSubjectPrincipal,
+                                bool aNotify) override;
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
+                              nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
 
   // nsGenericHTMLElement
@@ -116,17 +115,17 @@ public:
   }
   // nsGenericHTMLFormElement::GetForm is fine.
   using nsGenericHTMLFormElement::GetForm;
-  // XPCOM GetFormAction is fine.
+  // GetFormAction implemented in superclass
   void SetFormAction(const nsAString& aFormAction, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::formaction, aFormAction, aRv);
   }
-  // XPCOM GetFormEnctype is fine.
+  void GetFormEnctype(nsAString& aFormEncType);
   void SetFormEnctype(const nsAString& aFormEnctype, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::formenctype, aFormEnctype, aRv);
   }
-  // XPCOM GetFormMethod is fine.
+  void GetFormMethod(nsAString& aFormMethod);
   void SetFormMethod(const nsAString& aFormMethod, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::formmethod, aFormMethod, aRv);
@@ -139,38 +138,43 @@ public:
   {
     SetHTMLBoolAttr(nsGkAtoms::formnovalidate, aFormNoValidate, aError);
   }
-  // XPCOM GetFormTarget is fine.
+  void GetFormTarget(DOMString& aFormTarget)
+  {
+    GetHTMLAttr(nsGkAtoms::formtarget, aFormTarget);
+  }
   void SetFormTarget(const nsAString& aFormTarget, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::formtarget, aFormTarget, aRv);
   }
-  // XPCOM GetName is fine.
+  void GetName(DOMString& aName)
+  {
+    GetHTMLAttr(nsGkAtoms::name, aName);
+  }
   void SetName(const nsAString& aName, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::name, aName, aRv);
   }
-  // XPCOM GetType is fine.
+  void GetType(nsAString& aType);
   void SetType(const nsAString& aType, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::type, aType, aRv);
   }
-  // XPCOM GetValue is fine.
+  void GetValue(DOMString& aValue)
+  {
+    GetHTMLAttr(nsGkAtoms::value, aValue);
+  }
   void SetValue(const nsAString& aValue, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::value, aValue, aRv);
   }
 
-  // nsIConstraintValidation::WillValidate is fine.
-  // nsIConstraintValidation::Validity() is fine.
-  // nsIConstraintValidation::GetValidationMessage() is fine.
-  // nsIConstraintValidation::CheckValidity() is fine.
-  using nsIConstraintValidation::CheckValidity;
-  // nsIConstraintValidation::SetCustomValidity() is fine.
+  // Override SetCustomValidity so we update our state properly when it's called
+  // via bindings.
+  void SetCustomValidity(const nsAString& aError);
 
 protected:
   virtual ~HTMLButtonElement();
 
-  uint8_t mType;
   bool mDisabledChanged;
   bool mInInternalActivate;
   bool mInhibitStateRestoration;

@@ -4,24 +4,12 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
-/* ::::: Variables ::::: */
-.panel-arrowcontent {
-  --panel-arrowcontent-padding: 10px;
-  --panel-arrowcontent-background: -moz-field;
-  --panel-arrowcontent-color: -moz-FieldText;
-  --panel-arrowcontent-border: 1px solid ThreeDShadow;
-}
-
 /* ::::: menupopup ::::: */
 
 menupopup,
 panel {
-  border: 3px solid transparent;
-  -moz-border-top-colors   : ThreeDLightShadow ThreeDHighlight ThreeDFace;
-  -moz-border-left-colors  : ThreeDLightShadow ThreeDHighlight ThreeDFace;
-  -moz-border-right-colors : ThreeDDarkShadow  ThreeDShadow    ThreeDFace;
-  -moz-border-bottom-colors: ThreeDDarkShadow  ThreeDShadow    ThreeDFace;
-  padding: 0px;
+  border: 1px solid ThreeDShadow;
+  padding: 0;
   min-width: 1px;
   background: Menu;
   color: MenuText;
@@ -33,7 +21,7 @@ menupopup {
 
 menupopup > menu > menupopup {
  /* align submenus */
-  -moz-margin-start: -3px;
+  margin-inline-start: -3px;
   margin-top: -3px;
 }
 
@@ -56,18 +44,17 @@ panel[type="arrow"][side="right"] {
 }
 
 .panel-arrowcontent {
-  padding: var(--panel-arrowcontent-padding);
-  color: var(--panel-arrowcontent-color);
-  background: var(--panel-arrowcontent-background);
+  padding: var(--arrowpanel-padding);
+  color: var(--arrowpanel-color);
+  background: var(--arrowpanel-background);
   background-clip: padding-box;
-  border: var(--panel-arrowcontent-border);
+  border: 1px solid var(--arrowpanel-border-color);
+  box-shadow: 0 0 4px hsla(0,0%,0%,.2);
   margin: 4px;
 }
 
 %ifdef XP_WIN
-@media (-moz-os-version: windows-xp),
-       (-moz-os-version: windows-vista),
-       (-moz-os-version: windows-win7) {
+@media (-moz-os-version: windows-win7) {
 %endif
 .panel-arrowcontent {
   border-radius: 4px;
@@ -76,9 +63,15 @@ panel[type="arrow"][side="right"] {
 }
 %endif
 
+.panel-arrow {
+  -moz-context-properties: fill, stroke;
+  fill: var(--arrowpanel-background);
+  stroke: var(--arrowpanel-border-color);
+}
+
 .panel-arrow[side="top"],
 .panel-arrow[side="bottom"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical-themed.svg");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
   position: relative;
   margin-left: 10px;
   margin-right: 10px;
@@ -95,7 +88,7 @@ panel[type="arrow"][side="right"] {
 
 .panel-arrow[side="left"],
 .panel-arrow[side="right"] {
-  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal-themed.svg");
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.svg");
   position: relative;
   margin-top: 10px;
   margin-bottom: 10px;
@@ -113,18 +106,7 @@ panel[type="arrow"][side="right"] {
 %ifdef XP_WIN
 @media (-moz-windows-default-theme) {
   .panel-arrowcontent {
-    --panel-arrowcontent-border: 1px solid hsla(210,4%,10%,.2);
     box-shadow: 0 0 4px hsla(210,4%,10%,.2);
-  }
-
-  .panel-arrow[side="top"],
-  .panel-arrow[side="bottom"] {
-    list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
-  }
-
-  .panel-arrow[side="left"],
-  .panel-arrow[side="right"] {
-    list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.svg");
   }
 }
 %endif
@@ -153,12 +135,6 @@ tooltip[titletip="true"] {
 
 menulist > menupopup {
   -moz-appearance: none;
-  border-width: 1px;
-  -moz-border-top-colors: -moz-FieldText;
-  -moz-border-right-colors: -moz-FieldText;
-  -moz-border-bottom-colors: -moz-FieldText;
-  -moz-border-left-colors: -moz-FieldText;
-  padding: 0px;
-  min-width: 0px;
+  min-width: 0;
   background-color: -moz-Field;
 }

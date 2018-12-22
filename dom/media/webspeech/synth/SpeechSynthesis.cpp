@@ -13,8 +13,10 @@
 
 #include "mozilla/dom/SpeechSynthesisBinding.h"
 #include "SpeechSynthesis.h"
+#include "nsContentUtils.h"
 #include "nsSynthVoiceRegistry.h"
 #include "nsIDocument.h"
+#include "nsIDocShell.h"
 
 #undef LOG
 mozilla::LogModule*
@@ -46,7 +48,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SpeechSynthesis, DOMEventTarge
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SpeechSynthesis)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SpeechSynthesis)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
@@ -59,7 +61,6 @@ SpeechSynthesis::SpeechSynthesis(nsPIDOMWindowInner* aParent)
   , mHoldQueue(false)
   , mInnerID(aParent->WindowID())
 {
-  MOZ_ASSERT(aParent->IsInnerWindow());
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -77,7 +78,7 @@ SpeechSynthesis::~SpeechSynthesis()
 JSObject*
 SpeechSynthesis::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SpeechSynthesisBinding::Wrap(aCx, this, aGivenProto);
+  return SpeechSynthesis_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool
@@ -136,6 +137,10 @@ bool SpeechSynthesis::HasVoices() const
 void
 SpeechSynthesis::Speak(SpeechSynthesisUtterance& aUtterance)
 {
+  if (!mInnerID) {
+    return;
+  }
+
   if (aUtterance.mState != SpeechSynthesisUtterance::STATE_NONE) {
     // XXX: Should probably raise an error
     return;
@@ -155,7 +160,7 @@ void
 SpeechSynthesis::AdvanceQueue()
 {
   LOG(LogLevel::Debug,
-      ("SpeechSynthesis::AdvanceQueue length=%d", mSpeechQueue.Length()));
+      ("SpeechSynthesis::AdvanceQueue length=%zu", mSpeechQueue.Length()));
 
   if (mSpeechQueue.IsEmpty()) {
     return;
@@ -181,8 +186,6 @@ SpeechSynthesis::AdvanceQueue()
   if (mCurrentTask) {
     mCurrentTask->SetSpeechSynthesis(this);
   }
-
-  return;
 }
 
 void
@@ -210,7 +213,7 @@ SpeechSynthesis::Pause()
   }
 
   if (mCurrentTask && !mSpeechQueue.IsEmpty() &&
-      mSpeechQueue.ElementAt(0)->GetState() != SpeechSynthesisUtterance::STATE_ENDED) {
+      mSpeechQueue.ElementAt(0)->GetState() == SpeechSynthesisUtterance::STATE_SPEAKING) {
     mCurrentTask->Pause();
   } else {
     mHoldQueue = true;
@@ -224,10 +227,11 @@ SpeechSynthesis::Resume()
     return;
   }
 
+  mHoldQueue = false;
+
   if (mCurrentTask) {
     mCurrentTask->Resume();
   } else {
-    mHoldQueue = false;
     AdvanceQueue();
   }
 }
@@ -250,6 +254,13 @@ SpeechSynthesis::GetVoices(nsTArray< RefPtr<SpeechSynthesisVoice> >& aResult)
 {
   aResult.Clear();
   uint32_t voiceCount = 0;
+  nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
+  nsCOMPtr<nsIDocShell> docShell = window ? window->GetDocShell() : nullptr;
+
+
+  if (nsContentUtils::ShouldResistFingerprinting(docShell)) {
+    return;
+  }
 
   nsresult rv = nsSynthVoiceRegistry::GetInstance()->GetVoiceCount(&voiceCount);
   if(NS_WARN_IF(NS_FAILED(rv))) {
@@ -310,6 +321,7 @@ SpeechSynthesis::Observe(nsISupports* aSubject, const char* aTopic,
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (innerID == mInnerID) {
+      mInnerID = 0;
       Cancel();
 
       nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -319,10 +331,15 @@ SpeechSynthesis::Observe(nsISupports* aSubject, const char* aTopic,
     }
   } else if (strcmp(aTopic, "synth-voices-changed") == 0) {
     LOG(LogLevel::Debug, ("SpeechSynthesis::onvoiceschanged"));
-    DispatchTrustedEvent(NS_LITERAL_STRING("voiceschanged"));
-    // If we have a pending item, and voices become available, speak it.
-    if (!mCurrentTask && !mHoldQueue && HasVoices()) {
-      AdvanceQueue();
+    nsCOMPtr<nsPIDOMWindowInner> window = GetOwner();
+    nsCOMPtr<nsIDocShell> docShell = window ? window->GetDocShell() : nullptr;
+
+    if (!nsContentUtils::ShouldResistFingerprinting(docShell)) {
+      DispatchTrustedEvent(NS_LITERAL_STRING("voiceschanged"));
+      // If we have a pending item, and voices become available, speak it.
+      if (!mCurrentTask && !mHoldQueue && HasVoices()) {
+        AdvanceQueue();
+      }
     }
   }
 

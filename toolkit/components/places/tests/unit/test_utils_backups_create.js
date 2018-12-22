@@ -10,11 +10,7 @@
 
 const NUMBER_OF_BACKUPS = 10;
 
-function run_test() {
-  run_next_test();
-}
-
-add_task(function* () {
+add_task(async function() {
   // Generate random dates.
   let dateObj = new Date();
   let dates = [];
@@ -30,7 +26,7 @@ add_task(function* () {
   dates.sort();
 
   // Get and cleanup the backups folder.
-  let backupFolderPath = yield PlacesBackups.getBackupFolder();
+  let backupFolderPath = await PlacesBackups.getBackupFolder();
   let bookmarksBackupDir = new FileUtils.File(backupFolderPath);
 
   // Fake backups are created backwards to ensure we won't consider file
@@ -41,12 +37,12 @@ add_task(function* () {
     let backupFile = bookmarksBackupDir.clone();
     backupFile.append(backupFilename);
     backupFile.create(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("0666", 8));
-    do_print("Creating fake backup " + backupFile.leafName);
+    info("Creating fake backup " + backupFile.leafName);
     if (!backupFile.exists())
       do_throw("Unable to create fake backup " + backupFile.leafName);
   }
 
-  yield PlacesBackups.create(NUMBER_OF_BACKUPS);
+  await PlacesBackups.create(NUMBER_OF_BACKUPS);
   // Add today's backup.
   dates.push(dateObj.getTime());
 
@@ -59,7 +55,7 @@ add_task(function* () {
     if (i > 0) {
       let files = bookmarksBackupDir.directoryEntries;
       while (files.hasMoreElements()) {
-        let entry = files.getNext().QueryInterface(Ci.nsIFile);
+        let entry = files.nextFile;
         if (PlacesBackups.filenamesRegex.test(entry.leafName)) {
           backupFilename = entry.leafName;
           backupFile = entry;
@@ -67,8 +63,7 @@ add_task(function* () {
         }
       }
       shouldExist = true;
-    }
-    else {
+    } else {
       backupFilename = PlacesBackups.getFilenameForDate(new Date(dates[i]));
       backupFile = bookmarksBackupDir.clone();
       backupFile.append(backupFilename);
@@ -83,8 +78,8 @@ add_task(function* () {
   // on WIN XP.
   let files = bookmarksBackupDir.directoryEntries;
   while (files.hasMoreElements()) {
-    let entry = files.getNext().QueryInterface(Ci.nsIFile);
+    let entry = files.nextFile;
     entry.remove(false);
   }
-  do_check_false(bookmarksBackupDir.directoryEntries.hasMoreElements());
+  Assert.ok(!bookmarksBackupDir.directoryEntries.hasMoreElements());
 });

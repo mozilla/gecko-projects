@@ -4,20 +4,28 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
+ * https://webaudio.github.io/web-audio-api/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
-callback OfflineRenderSuccessCallback = void (AudioBuffer renderedData);
+dictionary OfflineAudioContextOptions {
+             unsigned long numberOfChannels = 1;
+    required unsigned long length;
+    required float         sampleRate;
+};
 
-[Constructor(unsigned long numberOfChannels, unsigned long length, float sampleRate)]
-interface OfflineAudioContext : AudioContext {
+[Constructor (OfflineAudioContextOptions contextOptions),
+Constructor(unsigned long numberOfChannels, unsigned long length, float sampleRate),
+Pref="dom.webaudio.enabled"]
+interface OfflineAudioContext : BaseAudioContext {
 
     [Throws]
     Promise<AudioBuffer> startRendering();
 
-    attribute EventHandler oncomplete;
+    // TODO: Promise<void>        suspend (double suspendTime);
 
+    readonly        attribute unsigned long length;
+                    attribute EventHandler  oncomplete;
 };

@@ -9,13 +9,14 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import org.mozilla.gecko.switchboard.SwitchBoard;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.dlc.catalog.DownloadContent;
 import org.mozilla.gecko.dlc.catalog.DownloadContentBuilder;
 import org.mozilla.gecko.dlc.catalog.DownloadContentCatalog;
-import org.mozilla.gecko.util.Experiments;
+import org.mozilla.gecko.Experiments;
 import org.mozilla.gecko.util.IOUtils;
 
 import java.io.BufferedInputStream;
@@ -33,6 +34,8 @@ public class SyncAction extends BaseAction {
     private static final String KINTO_KEY_ID = "id";
     private static final String KINTO_KEY_DELETED = "deleted";
     private static final String KINTO_KEY_DATA = "data";
+    private static final String KINTO_KEY_ATTACHMENT = "attachment";
+    private static final String KINTO_KEY_ORIGINAL = "original";
 
     private static final String KINTO_PARAMETER_SINCE = "_since";
     private static final String KINTO_PARAMETER_FIELDS = "_fields";
@@ -44,7 +47,7 @@ public class SyncAction extends BaseAction {
      * Dev instance:
      * https://kinto-ota.dev.mozaws.net/v1/buckets/dlc/collections/catalog/records
      */
-    private static final String CATALOG_ENDPOINT = "https://firefox.settings.services.mozilla.com/v1/buckets/fennec-dlc/collections/catalog/records";
+    private static final String CATALOG_ENDPOINT = "https://firefox.settings.services.mozilla.com/v1/buckets/fennec/collections/catalog/records";
 
     @Override
     public void perform(Context context, DownloadContentCatalog catalog) {
@@ -72,6 +75,12 @@ public class SyncAction extends BaseAction {
 
                 final boolean isDeleted = object.optBoolean(KINTO_KEY_DELETED, false);
 
+                if (!isDeleted) {
+                    JSONObject attachment = object.getJSONObject(KINTO_KEY_ATTACHMENT);
+                    if (attachment.isNull(KINTO_KEY_ORIGINAL))
+                        throw new JSONException(String.format("Old Attachment Format"));
+                }
+
                 DownloadContent existingContent = catalog.getContentById(id);
 
                 if (isDeleted) {
@@ -82,10 +91,16 @@ public class SyncAction extends BaseAction {
                     studyRequired |= createContent(catalog, object);
                 }
             }
+
+            DownloadContentTelemetry.eventSyncSuccess(rawCatalog.length() > 0, cleanupRequired || studyRequired);
         } catch (UnrecoverableDownloadContentException e) {
             Log.e(LOGTAG, "UnrecoverableDownloadContentException", e);
+
+            DownloadContentTelemetry.eventSyncFailure(DownloadContentTelemetry.ERROR_UNRECOVERABLE);
         } catch (RecoverableDownloadContentException e) {
             Log.e(LOGTAG, "RecoverableDownloadContentException");
+
+            DownloadContentTelemetry.eventSyncFailure(e);
         } catch (JSONException e) {
             Log.e(LOGTAG, "JSONException", e);
         }
@@ -121,7 +136,7 @@ public class SyncAction extends BaseAction {
             }
             // Only select the fields we are actually going to read.
             builder.appendQueryParameter(KINTO_PARAMETER_FIELDS,
-                    "attachment.location,original.filename,original.hash,attachment.hash,type,kind,original.size,match");
+                    "type,kind,attachment.location,attachment.hash,attachment.original.size,attachment.original.filename,attachment.original.hash,match");
 
             // We want to process items in the order they have been modified. This is to ensure that
             // our last_modified values are correct if we processing is interrupted and not all items
@@ -234,7 +249,7 @@ public class SyncAction extends BaseAction {
 
     protected boolean isSyncEnabledForClient(Context context) {
         // Sync action is behind a switchboard flag for staged rollout.
-        return Experiments.isInExperimentLocal(context, Experiments.DOWNLOAD_CONTENT_CATALOG_SYNC);
+        return SwitchBoard.isInExperiment(context, Experiments.DOWNLOAD_CONTENT_CATALOG_SYNC);
     }
 
     private void logErrorResponse(HttpURLConnection connection) {

@@ -14,11 +14,11 @@ const KEY_STATES = [
   [".", "div."],
   ["VK_UP", "div.c1"],
   ["VK_DOWN", "div.l1"],
-  ["VK_DOWN", "div.l1"],
   ["VK_BACK_SPACE", "div.l"],
   ["VK_TAB", "div.l1"],
   [" ", "div.l1 "],
   ["VK_UP", "div.l1 div"],
+  ["VK_UP", "div.l1 span"],
   ["VK_UP", "div.l1 div"],
   [".", "div.l1 div."],
   ["VK_TAB", "div.l1 div.c1"],
@@ -33,13 +33,13 @@ const KEY_STATES = [
   ["VK_BACK_SPACE", "div.l1 d"],
   ["VK_BACK_SPACE", "div.l1 "],
   ["VK_UP", "div.l1 div"],
+  ["VK_UP", "div.l1 span"],
   ["VK_UP", "div.l1 div"],
   ["VK_TAB", "div.l1 div"],
   ["VK_BACK_SPACE", "div.l1 di"],
   ["VK_BACK_SPACE", "div.l1 d"],
   ["VK_BACK_SPACE", "div.l1 "],
   ["VK_DOWN", "div.l1 div"],
-  ["VK_DOWN", "div.l1 span"],
   ["VK_DOWN", "div.l1 span"],
   ["VK_BACK_SPACE", "div.l1 spa"],
   ["VK_BACK_SPACE", "div.l1 sp"],
@@ -57,17 +57,20 @@ const KEY_STATES = [
 const TEST_URL = URL_ROOT +
   "doc_inspector_search-suggestions.html";
 
-add_task(function* () {
-  let { inspector } = yield openInspectorForURL(TEST_URL);
-  yield focusSearchBoxUsingShortcut(inspector.panelWin);
+add_task(async function() {
+  const { inspector } = await openInspectorForURL(TEST_URL);
+  await focusSearchBoxUsingShortcut(inspector.panelWin);
 
-  for (let [key, query] of KEY_STATES) {
+  for (const [key, query] of KEY_STATES) {
     info("Pressing key " + key + " to get searchbox value as " + query);
 
-    let done = inspector.searchSuggestions.once("processing-done");
+    const done = inspector.searchSuggestions.once("processing-done");
     EventUtils.synthesizeKey(key, {}, inspector.panelWin);
-    yield done;
+    await done;
 
-    is(inspector.searchBox.value, query, "The searchbox value is correct.");
+    info("Waiting for search query to complete");
+    await inspector.searchSuggestions._lastQuery;
+
+    is(inspector.searchBox.value, query, "The searchbox value is correct");
   }
 });

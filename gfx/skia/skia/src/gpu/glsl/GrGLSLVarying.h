@@ -10,60 +10,48 @@
 
 #include "GrAllocator.h"
 #include "GrGeometryProcessor.h"
+#include "GrShaderVar.h"
 #include "GrTypesPriv.h"
 #include "glsl/GrGLSLProgramDataManager.h"
-#include "glsl/GrGLSLShaderVar.h"
 
 class GrGLSLProgramBuilder;
 
 class GrGLSLVarying {
 public:
-    bool vsVarying() const { return kVertToFrag_Varying == fVarying ||
-                                    kVertToGeo_Varying == fVarying; }
-    bool fsVarying() const { return kVertToFrag_Varying == fVarying ||
-                                    kGeoToFrag_Varying == fVarying; }
-    const char* vsOut() const { return fVsOut; }
-    const char* gsIn() const { return fGsIn; }
-    const char* gsOut() const { return fGsOut; }
-    const char* fsIn() const { return fFsIn; }
-    GrSLType type() const { return fType; }
-
-protected:
-    enum Varying {
-        kVertToFrag_Varying,
-        kVertToGeo_Varying,
-        kGeoToFrag_Varying,
+    enum class Scope {
+        kVertToFrag,
+        kVertToGeo,
+        kGeoToFrag
     };
 
-    GrGLSLVarying(GrSLType type, Varying varying)
-        : fVarying(varying), fType(type), fVsOut(nullptr), fGsIn(nullptr), fGsOut(nullptr),
-          fFsIn(nullptr) {}
+    GrGLSLVarying() = default;
+    GrGLSLVarying(GrSLType type, Scope scope = Scope::kVertToFrag) : fType(type), fScope(scope) {}
 
-    Varying fVarying;
+    void reset(GrSLType type, Scope scope = Scope::kVertToFrag) {
+        *this = GrGLSLVarying();
+        fType = type;
+        fScope = scope;
+    }
+
+    GrSLType type() const { return fType; }
+    Scope scope() const { return fScope; }
+    bool isInVertexShader() const { return Scope::kGeoToFrag != fScope; }
+    bool isInFragmentShader() const { return Scope::kVertToGeo != fScope; }
+
+    const char* vsOut() const { SkASSERT(this->isInVertexShader()); return fVsOut; }
+    const char* gsIn() const { return fGsIn; }
+    const char* gsOut() const { return fGsOut; }
+    const char* fsIn() const { SkASSERT(this->isInFragmentShader()); return fFsIn; }
 
 private:
-    GrSLType fType;
-    const char* fVsOut;
-    const char* fGsIn;
-    const char* fGsOut;
-    const char* fFsIn;
+    GrSLType fType = kVoid_GrSLType;
+    Scope fScope = Scope::kVertToFrag;
+    const char* fVsOut = nullptr;
+    const char* fGsIn = nullptr;
+    const char* fGsOut = nullptr;
+    const char* fFsIn = nullptr;
 
     friend class GrGLSLVaryingHandler;
-};
-
-struct GrGLSLVertToFrag : public GrGLSLVarying {
-    GrGLSLVertToFrag(GrSLType type)
-        : GrGLSLVarying(type, kVertToFrag_Varying) {}
-};
-
-struct GrGLSLVertToGeo : public GrGLSLVarying {
-    GrGLSLVertToGeo(GrSLType type)
-        : GrGLSLVarying(type, kVertToGeo_Varying) {}
-};
-
-struct GrGLSLGeoToFrag : public GrGLSLVarying {
-    GrGLSLGeoToFrag(GrSLType type)
-        : GrGLSLVarying(type, kGeoToFrag_Varying) {}
 };
 
 static const int kVaryingsPerBlock = 8;
@@ -71,64 +59,97 @@ static const int kVaryingsPerBlock = 8;
 class GrGLSLVaryingHandler {
 public:
     explicit GrGLSLVaryingHandler(GrGLSLProgramBuilder* program)
-        : fVertexInputs(kVaryingsPerBlock)
+        : fVaryings(kVaryingsPerBlock)
+        , fVertexInputs(kVaryingsPerBlock)
         , fVertexOutputs(kVaryingsPerBlock)
         , fGeomInputs(kVaryingsPerBlock)
         , fGeomOutputs(kVaryingsPerBlock)
         , fFragInputs(kVaryingsPerBlock)
         , fFragOutputs(kVaryingsPerBlock)
-        , fProgramBuilder(program) {}
+        , fProgramBuilder(program)
+        , fDefaultInterpolationModifier(nullptr) {}
 
-    typedef GrTAllocator<GrGLSLShaderVar> VarArray;
-    typedef GrGLSLProgramDataManager::VaryingHandle VaryingHandle;
+    virtual ~GrGLSLVaryingHandler() {}
+
+    /*
+     * Notifies the varying handler that this shader will never emit geometry in perspective and
+     * therefore does not require perspective-correct interpolation. When supported, this allows
+     * varyings to use the "noperspective" keyword, which means the GPU can use cheaper math for
+     * interpolation.
+     */
+    void setNoPerspective();
+
+    enum class Interpolation {
+        kInterpolated,
+        kCanBeFlat, // Use "flat" if it will be faster.
+        kMustBeFlat // Use "flat" even if it is known to be slow.
+    };
 
     /*
      * addVarying allows fine grained control for setting up varyings between stages. Calling this
-     * functions will make sure all necessary decls are setup for the client. The client however is
+     * function will make sure all necessary decls are setup for the client. The client however is
      * responsible for setting up all shader code (e.g "vOut = vIn;") If you just need to take an
      * attribute and pass it through to an output value in a fragment shader, use
      * addPassThroughAttribute.
      * TODO convert most uses of addVarying to addPassThroughAttribute
      */
-    void addVarying(const char* name,
-                    GrGLSLVarying*,
-                    GrSLPrecision precision = kDefault_GrSLPrecision);
+    void addVarying(const char* name, GrGLSLVarying* varying,
+                    Interpolation = Interpolation::kInterpolated);
 
     /*
-     * This call can be used by GP to pass an attribute through all shaders directly to 'output' in
-     * the fragment shader.  Though this call effects both the vertex shader and fragment shader,
-     * it expects 'output' to be defined in the fragment shader before this call is made. If there
+     * The GP can use these calls to pass an attribute through all shaders directly to 'output' in
+     * the fragment shader.  Though these calls affect both the vertex shader and fragment shader,
+     * they expect 'output' to be defined in the fragment shader before the call is made. If there
      * is a geometry shader, we will simply take the value of the varying from the first vertex and
      * that will be set as the output varying for all emitted vertices.
-     * TODO it might be nicer behavior to have a flag to declare output inside this call
+     * TODO it might be nicer behavior to have a flag to declare output inside these calls
      */
-    void addPassThroughAttribute(const GrGeometryProcessor::Attribute*, const char* output);
+    void addPassThroughAttribute(const GrGeometryProcessor::Attribute*, const char* output,
+                                 Interpolation = Interpolation::kInterpolated);
 
     void emitAttributes(const GrGeometryProcessor& gp);
+
+    // This should be called once all attributes and varyings have been added to the
+    // GrGLSLVaryingHanlder and before getting/adding any of the declarations to the shaders.
+    void finalize();
 
     void getVertexDecls(SkString* inputDecls, SkString* outputDecls) const;
     void getGeomDecls(SkString* inputDecls, SkString* outputDecls) const;
     void getFragDecls(SkString* inputDecls, SkString* outputDecls) const;
+
 protected:
-    VarArray fVertexInputs;
-    VarArray fVertexOutputs;
-    VarArray fGeomInputs;
-    VarArray fGeomOutputs;
-    VarArray fFragInputs;
-    VarArray fFragOutputs;
+    struct VaryingInfo {
+        GrSLType         fType;
+        bool             fIsFlat;
+        SkString         fVsOut;
+        SkString         fGsOut;
+        GrShaderFlags    fVisibility;
+    };
+
+    typedef GrTAllocator<VaryingInfo> VaryingList;
+    typedef GrTAllocator<GrShaderVar> VarArray;
+    typedef GrGLSLProgramDataManager::VaryingHandle VaryingHandle;
+
+    VaryingList    fVaryings;
+    VarArray       fVertexInputs;
+    VarArray       fVertexOutputs;
+    VarArray       fGeomInputs;
+    VarArray       fGeomOutputs;
+    VarArray       fFragInputs;
+    VarArray       fFragOutputs;
 
     // This is not owned by the class
     GrGLSLProgramBuilder* fProgramBuilder;
 
 private:
-    void addVertexVarying(const char* name, GrSLPrecision precision, GrGLSLVarying* v);
-    void addGeomVarying(const char* name, GrSLPrecision precision, GrGLSLVarying* v);
-    void addFragVarying(GrSLPrecision precision, GrGLSLVarying* v);
-
     void addAttribute(const GrShaderVar& var);
+
+    virtual void onFinalize() = 0;
 
     // helper function for get*Decls
     void appendDecls(const VarArray& vars, SkString* out) const;
+
+    const char* fDefaultInterpolationModifier;
 
     friend class GrGLSLProgramBuilder;
 };

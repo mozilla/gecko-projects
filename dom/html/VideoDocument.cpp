@@ -25,15 +25,24 @@ public:
                                      nsISupports*        aContainer,
                                      nsIStreamListener** aDocListener,
                                      bool                aReset = true,
-                                     nsIContentSink*     aSink = nullptr);
-  virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject);
+                                     nsIContentSink*     aSink = nullptr) override;
+  virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject) override;
+
+  virtual void Destroy() override
+  {
+    if (mStreamListener) {
+      mStreamListener->DropDocumentRef();
+    }
+    MediaDocument::Destroy();
+  }
 
 protected:
 
   // Sets document <title> to reflect the file name and description.
   void UpdateTitle(nsIChannel* aChannel);
 
-  nsresult CreateSyntheticVideoDocument();
+  nsresult CreateSyntheticVideoDocument(nsIChannel* aChannel,
+                                        nsIStreamListener** aListener);
 
   RefPtr<MediaDocumentStreamListener> mStreamListener;
 };
@@ -53,6 +62,12 @@ VideoDocument::StartDocumentLoad(const char*         aCommand,
   NS_ENSURE_SUCCESS(rv, rv);
 
   mStreamListener = new MediaDocumentStreamListener(this);
+
+  // Create synthetic document
+  rv = CreateSyntheticVideoDocument(aChannel,
+      getter_AddRefs(mStreamListener->mNextStream));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   NS_ADDREF(*aDocListener = mStreamListener);
   return rv;
 }
@@ -64,28 +79,19 @@ VideoDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
   // anything that might require it....
   MediaDocument::SetScriptGlobalObject(aScriptGlobalObject);
 
-  if (aScriptGlobalObject) {
-    if (!GetRootElement()) {
-      // Create synthetic document
-#ifdef DEBUG
-      nsresult rv =
-#endif
-        CreateSyntheticVideoDocument();
-      NS_ASSERTION(NS_SUCCEEDED(rv), "failed to create synthetic video document");
-    }
-
-    if (!nsContentUtils::IsChildOfSameType(this) &&
-        GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
-      LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelVideoDocument.css"));
+  if (aScriptGlobalObject && !InitialSetupHasBeenDone()) {
+    if (!nsContentUtils::IsChildOfSameType(this)) {
+      LinkStylesheet(NS_LITERAL_STRING("resource://content-accessible/TopLevelVideoDocument.css"));
       LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelVideoDocument.css"));
       LinkScript(NS_LITERAL_STRING("chrome://global/content/TopLevelVideoDocument.js"));
     }
-    BecomeInteractive();
+    InitialSetupDone();
   }
 }
 
 nsresult
-VideoDocument::CreateSyntheticVideoDocument()
+VideoDocument::CreateSyntheticVideoDocument(nsIChannel* aChannel,
+                                            nsIStreamListener** aListener)
 {
   // make our generic document
   nsresult rv = MediaDocument::CreateSyntheticDocument();
@@ -101,18 +107,17 @@ VideoDocument::CreateSyntheticVideoDocument()
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::video, nullptr,
                                            kNameSpaceID_XHTML,
-                                           nsIDOMNode::ELEMENT_NODE);
+                                           nsINode::ELEMENT_NODE);
 
   RefPtr<HTMLMediaElement> element =
     static_cast<HTMLMediaElement*>(NS_NewHTMLVideoElement(nodeInfo.forget(),
                                                           NOT_FROM_PARSER));
   if (!element)
     return NS_ERROR_OUT_OF_MEMORY;
-  element->SetAutoplay(true);
-  element->SetControls(true);
-  element->LoadWithChannel(mChannel,
-                           getter_AddRefs(mStreamListener->mNextStream));
-  UpdateTitle(mChannel);
+  element->SetAutoplay(true, IgnoreErrors());
+  element->SetControls(true, IgnoreErrors());
+  element->LoadWithChannel(aChannel, aListener);
+  UpdateTitle(aChannel);
 
   if (nsContentUtils::IsChildOfSameType(this)) {
     // Video documents that aren't toplevel should fill their frames and
@@ -133,7 +138,8 @@ VideoDocument::UpdateTitle(nsIChannel* aChannel)
 
   nsAutoString fileName;
   GetFileName(fileName, aChannel);
-  SetTitle(fileName);
+  IgnoredErrorResult ignored;
+  SetTitle(fileName, ignored);
 }
 
 } // namespace dom

@@ -1,5 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable no-shadow, max-nested-callbacks */
+
+"use strict";
 
 /**
  * Check basic step-in functionality.
@@ -7,77 +10,72 @@
 
 var gDebuggee;
 var gClient;
-var gThreadClient;
 var gCallback;
 
-function run_test()
-{
-  run_test_with_server(DebuggerServer, function () {
-    run_test_with_server(WorkerDebuggerServer, do_test_finished);
-  });
+function run_test() {
   do_test_pending();
-};
-
-function run_test_with_server(aServer, aCallback)
-{
-  gCallback = aCallback;
-  initTestDebuggerServer(aServer);
-  gDebuggee = addTestGlobal("test-stack", aServer);
-  gClient = new DebuggerClient(aServer.connectPipe());
-  gClient.connect().then(function () {
-    attachTestTabAndResume(gClient, "test-stack", function (aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_simple_stepping();
-    });
+  run_test_with_server(DebuggerServer, function() {
+    run_test_with_server(WorkerDebuggerServer, do_test_finished);
   });
 }
 
-function test_simple_stepping()
-{
-  gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-      // Check the return value.
-      do_check_eq(aPacket.type, "paused");
-      do_check_eq(aPacket.frame.where.line, gDebuggee.line0 + 2);
-      do_check_eq(aPacket.why.type, "resumeLimit");
-      // Check that stepping worked.
-      do_check_eq(gDebuggee.a, undefined);
-      do_check_eq(gDebuggee.b, undefined);
+function run_test_with_server(server, callback) {
+  gCallback = callback;
+  initTestDebuggerServer(server);
+  gDebuggee = addTestGlobal("test-stepping", server);
+  gClient = new DebuggerClient(server.connectPipe());
+  gClient.connect(test_simple_stepping);
+}
 
-      gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-        // Check the return value.
-        do_check_eq(aPacket.type, "paused");
-        do_check_eq(aPacket.frame.where.line, gDebuggee.line0 + 3);
-        do_check_eq(aPacket.why.type, "resumeLimit");
-        // Check that stepping worked.
-        do_check_eq(gDebuggee.a, 1);
-        do_check_eq(gDebuggee.b, undefined);
+async function test_simple_stepping() {
+  const [attachResponse,, threadClient] = await attachTestTabAndResume(
+    gClient,
+    "test-stepping"
+  );
 
-        gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-          // Check the return value.
-          do_check_eq(aPacket.type, "paused");
-          // When leaving a stack frame the line number doesn't change.
-          do_check_eq(aPacket.frame.where.line, gDebuggee.line0 + 3);
-          do_check_eq(aPacket.why.type, "resumeLimit");
-          // Check that stepping worked.
-          do_check_eq(gDebuggee.a, 1);
-          do_check_eq(gDebuggee.b, 2);
+  ok(!attachResponse.error, "Should not get an error attaching");
 
-          gThreadClient.resume(function () {
-            gClient.close(gCallback);
-          });
-        });
-        gThreadClient.stepIn();
-      });
-      gThreadClient.stepIn();
+  dumpn("Evaluating test code and waiting for first debugger statement");
+  const dbgStmt = await executeOnNextTickAndWaitForPause(evaluateTestCode, gClient);
+  equal(dbgStmt.frame.where.line, 2, "Should be at debugger statement on line 2");
+  equal(gDebuggee.a, undefined);
+  equal(gDebuggee.b, undefined);
 
-    });
-    gThreadClient.stepIn();
+  const step1 = await stepIn(gClient, threadClient);
+  equal(step1.type, "paused");
+  equal(step1.why.type, "resumeLimit");
+  equal(step1.frame.where.line, 3);
+  equal(gDebuggee.a, undefined);
+  equal(gDebuggee.b, undefined);
 
-  });
+  const step3 = await stepIn(gClient, threadClient);
+  equal(step3.type, "paused");
+  equal(step3.why.type, "resumeLimit");
+  equal(step3.frame.where.line, 4);
+  equal(gDebuggee.a, 1);
+  equal(gDebuggee.b, undefined);
 
-  gDebuggee.eval("var line0 = Error().lineNumber;\n" +
-                 "debugger;\n" +   // line0 + 1
-                 "var a = 1;\n" +  // line0 + 2
-                 "var b = 2;\n");  // line0 + 3
+  const step4 = await stepIn(gClient, threadClient);
+  equal(step4.type, "paused");
+  equal(step4.why.type, "resumeLimit");
+  equal(step4.frame.where.line, 4);
+  equal(gDebuggee.a, 1);
+  equal(gDebuggee.b, 2);
+
+  finishClient(gClient, gCallback);
+}
+
+function evaluateTestCode() {
+  /* eslint-disable */
+  Cu.evalInSandbox(
+    `                                   // 1
+    debugger;                           // 2
+    var a = 1;                          // 3
+    var b = 2;`,                        // 4
+    gDebuggee,
+    "1.8",
+    "test_stepping-01-test-code.js",
+    1
+  );
+  /* eslint-disable */
 }

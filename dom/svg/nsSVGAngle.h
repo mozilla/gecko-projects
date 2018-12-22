@@ -11,19 +11,14 @@
 #include "nsError.h"
 #include "nsISMILAttr.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/SVGAngleBinding.h"
+#include "mozilla/UniquePtr.h"
 
 class nsISupports;
 class nsSMILValue;
 class nsSVGElement;
 
 namespace mozilla {
-
-// Angle Unit Types
-static const unsigned short SVG_ANGLETYPE_UNKNOWN     = 0;
-static const unsigned short SVG_ANGLETYPE_UNSPECIFIED = 1;
-static const unsigned short SVG_ANGLETYPE_DEG         = 2;
-static const unsigned short SVG_ANGLETYPE_RAD         = 3;
-static const unsigned short SVG_ANGLETYPE_GRAD        = 4;
 
 namespace dom {
 class nsSVGOrientType;
@@ -41,7 +36,8 @@ class nsSVGAngle
 public:
   void Init(uint8_t aAttrEnum = 0xff,
             float aValue = 0,
-            uint8_t aUnitType = mozilla::SVG_ANGLETYPE_UNSPECIFIED) {
+            uint8_t aUnitType =
+              mozilla::dom::SVGAngle_Binding::SVG_ANGLETYPE_UNSPECIFIED) {
     mAnimVal = mBaseVal = aValue;
     mAnimValUnit = mBaseValUnit = aUnitType;
     mAttrEnum = aAttrEnum;
@@ -70,9 +66,11 @@ public:
   static nsresult ToDOMSVGAngle(nsISupports **aResult);
   already_AddRefed<mozilla::dom::SVGAnimatedAngle>
     ToDOMAnimatedAngle(nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
-  nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
+  mozilla::UniquePtr<nsISMILAttr> ToSMILAttr(nsSVGElement* aSVGElement);
 
+  static bool GetValueFromString(const nsAString& aString,
+                                 float& aValue,
+                                 uint16_t* aUnitType);
   static float GetDegreesPerUnit(uint8_t aUnit);
 
 private:

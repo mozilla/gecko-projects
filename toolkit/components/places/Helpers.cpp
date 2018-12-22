@@ -5,14 +5,22 @@
 
 #include "Helpers.h"
 #include "mozIStorageError.h"
-#include "plbase64.h"
 #include "prio.h"
 #include "nsString.h"
 #include "nsNavHistory.h"
+#include "mozilla/Base64.h"
+#include "mozilla/HashFunctions.h"
+#include <algorithm>
 #include "mozilla/Services.h"
 
 // The length of guids that are used by history and bookmarks.
 #define GUID_LENGTH 12
+
+// Maximum number of chars to use for calculating hashes. This value has been
+// picked to ensure low hash collisions on a real world common places.sqlite.
+// While collisions are not a big deal for functionality, a low ratio allows
+// for slightly more efficient SELECTs.
+#define MAX_CHARS_TO_HASH 1500U
 
 namespace mozilla {
 namespace places {
@@ -26,20 +34,20 @@ NS_IMPL_ISUPPORTS(
 )
 
 NS_IMETHODIMP
-AsyncStatementCallback::HandleResult(mozIStorageResultSet *aResultSet)
+WeakAsyncStatementCallback::HandleResult(mozIStorageResultSet *aResultSet)
 {
   MOZ_ASSERT(false, "Was not expecting a resultset, but got it.");
   return NS_OK;
 }
 
 NS_IMETHODIMP
-AsyncStatementCallback::HandleCompletion(uint16_t aReason)
+WeakAsyncStatementCallback::HandleCompletion(uint16_t aReason)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
-AsyncStatementCallback::HandleError(mozIStorageError *aError)
+WeakAsyncStatementCallback::HandleError(mozIStorageError *aError)
 {
 #ifdef DEBUG
   int32_t result;
@@ -203,55 +211,16 @@ ReverseString(const nsString& aInput, nsString& aReversed)
 
 static
 nsresult
-Base64urlEncode(const uint8_t* aBytes,
-                uint32_t aNumBytes,
-                nsCString& _result)
-{
-  // SetLength does not set aside space for null termination.  PL_Base64Encode
-  // will not null terminate, however, nsCStrings must be null terminated.  As a
-  // result, we set the capacity to be one greater than what we need, and the
-  // length to our desired length.
-  uint32_t length = (aNumBytes + 2) / 3 * 4; // +2 due to integer math.
-  NS_ENSURE_TRUE(_result.SetCapacity(length + 1, fallible),
-                 NS_ERROR_OUT_OF_MEMORY);
-  _result.SetLength(length);
-  (void)PL_Base64Encode(reinterpret_cast<const char*>(aBytes), aNumBytes,
-                        _result.BeginWriting());
-
-  // base64url encoding is defined in RFC 4648.  It replaces the last two
-  // alphabet characters of base64 encoding with '-' and '_' respectively.
-  _result.ReplaceChar('+', '-');
-  _result.ReplaceChar('/', '_');
-  return NS_OK;
-}
-
-#ifdef XP_WIN
-} // namespace places
-} // namespace mozilla
-
-// Included here because windows.h conflicts with the use of mozIStorageError
-// above, but make sure that these are not included inside mozilla::places.
-#include <windows.h>
-#include <wincrypt.h>
-
-namespace mozilla {
-namespace places {
-#endif
-
-static
-nsresult
 GenerateRandomBytes(uint32_t aSize,
                     uint8_t* _buffer)
 {
   // On Windows, we'll use its built-in cryptographic API.
 #if defined(XP_WIN)
+  const nsNavHistory* history = nsNavHistory::GetConstHistoryService();
   HCRYPTPROV cryptoProvider;
-  BOOL rc = CryptAcquireContext(&cryptoProvider, 0, 0, PROV_RSA_FULL,
-                                CRYPT_VERIFYCONTEXT | CRYPT_SILENT);
-  if (rc) {
-    rc = CryptGenRandom(cryptoProvider, aSize, _buffer);
-    (void)CryptReleaseContext(cryptoProvider, 0);
-  }
+  nsresult rv = history->GetCryptoProvider(cryptoProvider);
+  NS_ENSURE_SUCCESS(rv, rv);
+  BOOL rc = CryptGenRandom(cryptoProvider, aSize, _buffer);
   return rc ? NS_OK : NS_ERROR_FAILURE;
 
   // On Unix, we'll just read in from /dev/urandom.
@@ -271,7 +240,7 @@ GenerateRandomBytes(uint32_t aSize,
 }
 
 nsresult
-GenerateGUID(nsCString& _guid)
+GenerateGUID(nsACString& _guid)
 {
   _guid.Truncate();
 
@@ -284,7 +253,8 @@ GenerateGUID(nsCString& _guid)
   nsresult rv = GenerateRandomBytes(kRequiredBytesLength, buffer);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = Base64urlEncode(buffer, kRequiredBytesLength, _guid);
+  rv = Base64URLEncode(kRequiredBytesLength, buffer,
+                       Base64URLEncodePaddingPolicy::Omit, _guid);
   NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ASSERTION(_guid.Length() == GUID_LENGTH, "GUID is not the right size!");
@@ -315,6 +285,9 @@ IsValidGUID(const nsACString& aGUID)
 void
 TruncateTitle(const nsACString& aTitle, nsACString& aTrimmed)
 {
+  if (aTitle.IsVoid()) {
+    return;
+  }
   aTrimmed = aTitle;
   if (aTitle.Length() > TITLE_LENGTH_MAX) {
     aTrimmed = StringHead(aTitle, TITLE_LENGTH_MAX);
@@ -331,19 +304,51 @@ RoundedPRNow() {
   return RoundToMilliseconds(PR_Now());
 }
 
-void
-ForceWALCheckpoint()
+nsresult
+HashURL(const nsACString& aSpec, const nsACString& aMode, uint64_t *_hash)
 {
-  RefPtr<Database> DB = Database::GetDatabase();
-  if (DB) {
-    nsCOMPtr<mozIStorageAsyncStatement> stmt = DB->GetAsyncStatement(
-      "pragma wal_checkpoint "
-    );
-    if (stmt) {
-      nsCOMPtr<mozIStoragePendingStatement> handle;
-      (void)stmt->ExecuteAsync(nullptr, getter_AddRefs(handle));
+  NS_ENSURE_ARG_POINTER(_hash);
+
+  // HashString doesn't stop at the string boundaries if a length is passed to
+  // it, so ensure to pass a proper value.
+  const uint32_t maxLenToHash = std::min(static_cast<uint32_t>(aSpec.Length()),
+                                         MAX_CHARS_TO_HASH);
+
+  if (aMode.IsEmpty()) {
+    // URI-like strings (having a prefix before a colon), are handled specially,
+    // as a 48 bit hash, where first 16 bits are the prefix hash, while the
+    // other 32 are the string hash.
+    // The 16 bits have been decided based on the fact hashing all of the IANA
+    // known schemes, plus "places", does not generate collisions.
+    // Since we only care about schemes, we just search in the first 50 chars.
+    // The longest known IANA scheme, at this time, is 30 chars.
+    const nsDependentCSubstring& strHead = StringHead(aSpec, 50);
+    nsACString::const_iterator start, tip, end;
+    strHead.BeginReading(tip);
+    start = tip;
+    strHead.EndReading(end);
+    uint32_t strHash = HashString(aSpec.BeginReading(), maxLenToHash);
+    if (FindCharInReadable(':', tip, end)) {
+      const nsDependentCSubstring& prefix = Substring(start, tip);
+      uint64_t prefixHash = static_cast<uint64_t>(HashString(prefix) & 0x0000FFFF);
+      // The second half of the url is more likely to be unique, so we add it.
+      *_hash = (prefixHash << 32) + strHash;
+    } else {
+      *_hash = strHash;
     }
+  } else if (aMode.EqualsLiteral("prefix_lo")) {
+    // Keep only 16 bits.
+    *_hash = static_cast<uint64_t>(HashString(aSpec.BeginReading(), maxLenToHash) & 0x0000FFFF) << 32;
+  } else if (aMode.EqualsLiteral("prefix_hi")) {
+    // Keep only 16 bits.
+    *_hash = static_cast<uint64_t>(HashString(aSpec.BeginReading(), maxLenToHash) & 0x0000FFFF) << 32;
+    // Make this a prefix upper bound by filling the lowest 32 bits.
+    *_hash +=  0xFFFFFFFF;
+  } else {
+    return NS_ERROR_FAILURE;
   }
+
+  return NS_OK;
 }
 
 bool
@@ -355,35 +360,58 @@ GetHiddenState(bool aIsRedirect,
          aIsRedirect;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//// PlacesEvent
-
-PlacesEvent::PlacesEvent(const char* aTopic)
-: mTopic(aTopic)
+nsresult
+TokenizeQueryString(const nsACString& aQuery,
+                    nsTArray<QueryKeyValuePair>* aTokens)
 {
-}
+  // Strip off the "place:" prefix
+  const uint32_t prefixlen = 6; // = strlen("place:");
+  nsCString query;
+  if (aQuery.Length() >= prefixlen &&
+      Substring(aQuery, 0, prefixlen).EqualsLiteral("place:"))
+    query = Substring(aQuery, prefixlen);
+  else
+    query = aQuery;
 
-NS_IMETHODIMP
-PlacesEvent::Run()
-{
-  Notify();
+  int32_t keyFirstIndex = 0;
+  int32_t equalsIndex = 0;
+  for (uint32_t i = 0; i < query.Length(); i ++) {
+    if (query[i] == '&') {
+      // new clause, save last one
+      if (i - keyFirstIndex > 1) {
+        if (! aTokens->AppendElement(QueryKeyValuePair(query, keyFirstIndex,
+                                                       equalsIndex, i)))
+          return NS_ERROR_OUT_OF_MEMORY;
+      }
+      keyFirstIndex = equalsIndex = i + 1;
+    } else if (query[i] == '=') {
+      equalsIndex = i;
+    }
+  }
+
+  // handle last pair, if any
+  if (query.Length() - keyFirstIndex > 1) {
+    if (! aTokens->AppendElement(QueryKeyValuePair(query, keyFirstIndex,
+                                                   equalsIndex, query.Length())))
+      return NS_ERROR_OUT_OF_MEMORY;
+  }
   return NS_OK;
 }
 
 void
-PlacesEvent::Notify()
+TokensToQueryString(const nsTArray<QueryKeyValuePair> &aTokens,
+                    nsACString &aQuery)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Must only be used on the main thread!");
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  if (obs) {
-    (void)obs->NotifyObservers(nullptr, mTopic, nullptr);
+  aQuery = NS_LITERAL_CSTRING("place:");
+  for (uint32_t i = 0; i < aTokens.Length(); i++) {
+    if (i > 0) {
+      aQuery.Append("&");
+    }
+    aQuery.Append(aTokens[i].key);
+    aQuery.AppendLiteral("=");
+    aQuery.Append(aTokens[i].value);
   }
 }
-
-NS_IMPL_ISUPPORTS_INHERITED0(
-  PlacesEvent
-, nsRunnable
-)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// AsyncStatementCallbackNotifier

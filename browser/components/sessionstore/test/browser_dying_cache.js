@@ -6,20 +6,20 @@
  * read data after closing - writing should fail.
  */
 
-add_task(function* test() {
+add_task(async function test() {
   // Open a new window.
-  let win = yield promiseNewWindowLoaded();
+  let win = await promiseNewWindowLoaded();
 
   // Load some URL in the current tab.
   let flags = Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
-  win.gBrowser.selectedBrowser.loadURIWithFlags("about:robots", flags);
-  yield promiseBrowserLoaded(win.gBrowser.selectedBrowser);
+  win.gBrowser.selectedBrowser.loadURI("about:robots", { flags });
+  await promiseBrowserLoaded(win.gBrowser.selectedBrowser);
 
   // Open a second tab and close the first one.
   let tab = win.gBrowser.addTab("about:mozilla");
-  yield promiseBrowserLoaded(tab.linkedBrowser);
-  yield TabStateFlusher.flush(tab.linkedBrowser);
-  yield promiseRemoveTab(win.gBrowser.tabs[0]);
+  await promiseBrowserLoaded(tab.linkedBrowser);
+  await TabStateFlusher.flush(tab.linkedBrowser);
+  await promiseRemoveTabAndSessionState(win.gBrowser.tabs[0]);
 
   // Make sure our window is still tracked by sessionstore
   // and the window state is as expected.
@@ -27,11 +27,8 @@ add_task(function* test() {
   ss.setWindowValue(win, "foo", "bar");
   checkWindowState(win);
 
-  let state = ss.getWindowState(win);
-  let closedTabData = ss.getClosedTabData(win);
-
   // Close our window.
-  yield BrowserTestUtils.closeWindow(win);
+  await BrowserTestUtils.closeWindow(win);
 
   // SessionStore should no longer track our window
   // but it should still report the same state.
@@ -40,8 +37,10 @@ add_task(function* test() {
 
   // Make sure we're not allowed to modify state data.
   Assert.throws(() => ss.setWindowState(win, {}),
+    /Window is not tracked/,
     "we're not allowed to modify state data anymore");
   Assert.throws(() => ss.setWindowValue(win, "foo", "baz"),
+    /Window is not tracked/,
     "we're not allowed to modify state data anymore");
 });
 
@@ -63,4 +62,5 @@ function shouldThrow(f) {
   } catch (e) {
     return true;
   }
+  return null;
 }

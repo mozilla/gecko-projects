@@ -8,12 +8,13 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsMenuBaseX.h"
 #include "nsMenuBarX.h"
 #include "nsMenuGroupOwnerX.h"
 #include "nsCOMPtr.h"
 #include "nsChangeObserver.h"
-#include "nsAutoPtr.h"
 
 class nsMenuX;
 class nsMenuItemIconX;
@@ -22,11 +23,7 @@ class nsIWidget;
 
 // MenuDelegate is used to receive Cocoa notifications for setting
 // up carbon events. Protocol is defined as of 10.6 SDK.
-#if defined(MAC_OS_X_VERSION_10_6) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_6)
 @interface MenuDelegate : NSObject < NSMenuDelegate >
-#else
-@interface MenuDelegate : NSObject
-#endif
 {
   nsMenuX* mGeckoMenu; // weak ref
 }
@@ -77,12 +74,12 @@ protected:
   bool           OnOpen();
   bool           OnClose();
   nsresult       AddMenuItem(nsMenuItemX* aMenuItem);
-  nsresult       AddMenu(nsMenuX* aMenu);
-  void           LoadMenuItem(nsIContent* inMenuItemContent);  
+  nsMenuX*       AddMenu(mozilla::UniquePtr<nsMenuX> aMenu);
+  void           LoadMenuItem(nsIContent* inMenuItemContent);
   void           LoadSubMenu(nsIContent* inMenuContent);
   GeckoNSMenu*   CreateMenuWithGeckoString(nsString& menuTitle);
 
-  nsTArray< nsAutoPtr<nsMenuObjectX> > mMenuObjectsArray;
+  nsTArray<mozilla::UniquePtr<nsMenuObjectX>> mMenuObjectsArray;
   nsString                  mLabel;
   uint32_t                  mVisibleItemsCount; // cache
   nsMenuObjectX*            mParent; // [weak]

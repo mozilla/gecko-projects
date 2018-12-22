@@ -16,6 +16,7 @@
 #include "mozilla/Types.h"
 
 #include <stdint.h>
+#include <string.h>
 
 MOZ_BEGIN_EXTERN_C
 
@@ -39,11 +40,10 @@ inline void mozWritePoison(void* aPtr, size_t aSize)
 {
   const uintptr_t POISON = mozPoisonValue();
   char* p = (char*)aPtr;
-  char* limit = p + aSize;
-  MOZ_ASSERT((uintptr_t)aPtr % sizeof(uintptr_t) == 0, "bad alignment");
+  char* limit = p + (aSize & ~(sizeof(uintptr_t) - 1));
   MOZ_ASSERT(aSize >= sizeof(uintptr_t), "poisoning this object has no effect");
   for (; p < limit; p += sizeof(uintptr_t)) {
-    *((uintptr_t*)p) = POISON;
+    memcpy(p, &POISON, sizeof(POISON));
   }
 }
 
@@ -58,5 +58,67 @@ extern MFBT_DATA uintptr_t gMozillaPoisonBase;
 extern MFBT_DATA uintptr_t gMozillaPoisonSize;
 
 MOZ_END_EXTERN_C
+
+#if defined(__cplusplus)
+
+namespace mozilla {
+
+/**
+ * A version of CorruptionCanary that is suitable as a member of objects that
+ * are statically allocated.
+ */
+class CorruptionCanaryForStatics {
+public:
+  constexpr CorruptionCanaryForStatics()
+    : mValue(kCanarySet)
+  {
+  }
+
+  // This is required to avoid static constructor bloat.
+  ~CorruptionCanaryForStatics() = default;
+
+  void Check() const {
+    if (mValue != kCanarySet) {
+      MOZ_CRASH("Canary check failed, check lifetime");
+    }
+  }
+
+protected:
+  uintptr_t mValue;
+
+private:
+  static const uintptr_t kCanarySet = 0x0f0b0f0b;
+};
+
+
+/**
+ * This class is designed to cause crashes when various kinds of memory
+ * corruption are observed. For instance, let's say we have a class C where we
+ * suspect out-of-bounds writes to some members.  We can insert a member of type
+ * Poison near the members we suspect are being corrupted by out-of-bounds
+ * writes.  Or perhaps we have a class K we suspect is subject to use-after-free
+ * violations, in which case it doesn't particularly matter where in the class
+ * we add the member of type Poison.
+ *
+ * In either case, we then insert calls to Check() throughout the code.  Doing
+ * so enables us to narrow down the location where the corruption is occurring.
+ * A pleasant side-effect of these additional Check() calls is that crash
+ * signatures may become more regular, as crashes will ideally occur
+ * consolidated at the point of a Check(), rather than scattered about at
+ * various uses of the corrupted memory.
+ */
+class CorruptionCanary : public CorruptionCanaryForStatics {
+public:
+  constexpr CorruptionCanary() = default;
+
+  ~CorruptionCanary() {
+    Check();
+    mValue = mozPoisonValue();
+  }
+};
+
+} // mozilla
+
+#endif
 
 #endif /* mozilla_Poison_h */

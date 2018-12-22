@@ -9,7 +9,7 @@
   href="https://bugzilla.mozilla.org/show_bug.cgi?id=557885">Mozilla Bug
   474742</a>
 <p id="display"></p>
-<div id="content" style="display: none">
+<div id="content">
 <svg id="svg" xmlns="http://www.w3.org/2000/svg" width="120px" height="120px">
   <circle cx="-100" cy="20" r="15" fill="blue" id="circle"/>
 </svg>
@@ -133,7 +133,7 @@ function main()
       checkSample(anim, curSample[1], curSample[0], i);
     }
 
-    anim.parentNode.removeChild(anim);
+    anim.remove();
   }
 
   SimpleTest.finish();
@@ -163,7 +163,7 @@ function checkSample(anim, expectedValue, sampleTime, caseNum)
   is(anim.targetElement.className.animVal, expectedValue, msg);
 }
 
-window.addEventListener("load", main, false);
+window.addEventListener("load", main);
 ]]>
 </script>
 </pre>

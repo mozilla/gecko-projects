@@ -16,29 +16,50 @@ class WebGLTransformFeedback final
     : public nsWrapperCache
     , public WebGLRefCountedObject<WebGLTransformFeedback>
     , public LinkedListElement<WebGLTransformFeedback>
-    , public WebGLContextBoundObject
 {
+    friend class ScopedDrawHelper;
+    friend class ScopedDrawWithTransformFeedback;
     friend class WebGLContext;
     friend class WebGL2Context;
+    friend class WebGLProgram;
 
 public:
-    explicit WebGLTransformFeedback(WebGLContext* webgl, GLuint tf);
-
-    void Delete();
-    WebGLContext* GetParentObject() const;
-    virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto) override;
-
     const GLuint mGLName;
+private:
+    // GLES 3.0.4 p267, Table 6.24 "Transform Feedback State"
+    // It's not yet in the ES3 spec, but the generic TF buffer bind point has been moved
+    // to context state, instead of TFO state.
+    std::vector<IndexedBufferBinding> mIndexedBindings;
+    bool mIsPaused;
+    bool mIsActive;
+    // Not in state tables:
+    WebGLRefPtr<WebGLProgram> mActive_Program;
+    MOZ_INIT_OUTSIDE_CTOR GLenum mActive_PrimMode;
+    MOZ_INIT_OUTSIDE_CTOR size_t mActive_VertPosition;
+    MOZ_INIT_OUTSIDE_CTOR size_t mActive_VertCapacity;
 
-    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLTransformFeedback)
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLTransformFeedback)
-
+public:
+    WebGLTransformFeedback(WebGLContext* webgl, GLuint tf);
 private:
     ~WebGLTransformFeedback();
 
-    GLenum mMode;
-    bool mIsActive;
-    bool mIsPaused;
+public:
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLTransformFeedback)
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLTransformFeedback)
+
+    void Delete();
+    WebGLContext* GetParentObject() const { return mContext; }
+    virtual JSObject* WrapObject(JSContext*, JS::Handle<JSObject*>) override;
+
+    bool IsActiveAndNotPaused() const { return mIsActive && !mIsPaused; }
+
+    void AddBufferBindCounts(int8_t addVal) const;
+
+    // GL Funcs
+    void BeginTransformFeedback(GLenum primMode);
+    void EndTransformFeedback();
+    void PauseTransformFeedback();
+    void ResumeTransformFeedback();
 };
 
 } // namespace mozilla

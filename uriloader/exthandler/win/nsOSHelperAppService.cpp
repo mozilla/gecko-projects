@@ -8,27 +8,26 @@
 #include "nsOSHelperAppService.h"
 #include "nsISupports.h"
 #include "nsString.h"
-#include "nsXPIDLString.h"
 #include "nsIURL.h"
 #include "nsIMIMEInfo.h"
 #include "nsMIMEInfoWin.h"
 #include "nsMimeTypes.h"
-#include "nsILocalFileWin.h"
 #include "nsIProcess.h"
 #include "plstr.h"
 #include "nsAutoPtr.h"
 #include "nsNativeCharsetUtils.h"
+#include "nsLocalFile.h"
 #include "nsIWindowsRegKey.h"
 #include "mozilla/UniquePtrExtensions.h"
+#include "mozilla/WindowsVersion.h"
 
 // shellapi.h is needed to build with WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
+#include <shlwapi.h>
 
 #define LOG(args) MOZ_LOG(mLog, mozilla::LogLevel::Debug, args)
 
 // helper methods: forward declarations...
-static nsresult GetExtensionFrom4xRegistryInfo(const nsACString& aMimeType, 
-                                               nsString& aFileExtension);
 static nsresult GetExtensionFromWindowsMimeDatabase(const nsACString& aMimeType,
                                                     nsString& aFileExtension);
 
@@ -75,79 +74,22 @@ static nsresult GetExtensionFromWindowsMimeDatabase(const nsACString& aMimeType,
   return NS_OK;
 }
 
-// We have a serious problem!! I have this content type and the windows registry only gives me
-// helper apps based on extension. Right now, we really don't have a good place to go for 
-// trying to figure out the extension for a particular mime type....One short term hack is to look
-// this information in 4.x (it's stored in the windows regsitry). 
-static nsresult GetExtensionFrom4xRegistryInfo(const nsACString& aMimeType,
-                                               nsString& aFileExtension)
-{
-  nsCOMPtr<nsIWindowsRegKey> regKey = 
-    do_CreateInstance("@mozilla.org/windows-registry-key;1");
-  if (!regKey) 
-    return NS_ERROR_NOT_AVAILABLE;
-
-  nsresult rv = regKey->
-    Open(nsIWindowsRegKey::ROOT_KEY_CURRENT_USER,
-         NS_LITERAL_STRING("Software\\Netscape\\Netscape Navigator\\Suffixes"),
-         nsIWindowsRegKey::ACCESS_QUERY_VALUE);
-  if (NS_FAILED(rv))
-    return NS_ERROR_NOT_AVAILABLE;
-   
-  rv = regKey->ReadStringValue(NS_ConvertASCIItoUTF16(aMimeType),
-                               aFileExtension);
-  if (NS_FAILED(rv))
-    return NS_OK;
-
-  aFileExtension.Insert(char16_t('.'), 0);
-      
-  // this may be a comma separated list of extensions...just take the 
-  // first one for now...
-
-  int32_t pos = aFileExtension.FindChar(char16_t(','));
-  if (pos > 0) {
-    // we have a comma separated list of types...
-    // truncate everything after the first comma (including the comma)
-    aFileExtension.Truncate(pos); 
-  }
-   
-  return NS_OK;
-}
-
 nsresult nsOSHelperAppService::OSProtocolHandlerExists(const char * aProtocolScheme, bool * aHandlerExists)
 {
   // look up the protocol scheme in the windows registry....if we find a match then we have a handler for it...
   *aHandlerExists = false;
   if (aProtocolScheme && *aProtocolScheme)
   {
-    // Vista: use new application association interface
-    if (mAppAssoc) {
-      wchar_t * pResult = nullptr;
-      NS_ConvertASCIItoUTF16 scheme(aProtocolScheme);
-      // We are responsible for freeing returned strings.
-      HRESULT hr = mAppAssoc->QueryCurrentDefault(scheme.get(),
-                                                  AT_URLPROTOCOL, AL_EFFECTIVE,
-                                                  &pResult);
-      if (SUCCEEDED(hr)) {
-        CoTaskMemFree(pResult);
-        *aHandlerExists = true;
-      }
-      return NS_OK;
-    }
-
-    HKEY hKey;
-    LONG err = ::RegOpenKeyExW(HKEY_CLASSES_ROOT,
-                               NS_ConvertASCIItoUTF16(aProtocolScheme).get(),
-                               0,
-                               KEY_QUERY_VALUE,
-                               &hKey);
-    if (err == ERROR_SUCCESS)
-    {
-      err = ::RegQueryValueExW(hKey, L"URL Protocol",
-                               nullptr, nullptr, nullptr, nullptr);
-      *aHandlerExists = (err == ERROR_SUCCESS);
-      // close the key
-      ::RegCloseKey(hKey);
+    NS_ENSURE_TRUE(mAppAssoc, NS_ERROR_NOT_AVAILABLE);
+    wchar_t * pResult = nullptr;
+    NS_ConvertASCIItoUTF16 scheme(aProtocolScheme);
+    // We are responsible for freeing returned strings.
+    HRESULT hr = mAppAssoc->QueryCurrentDefault(scheme.get(),
+      AT_URLPROTOCOL, AL_EFFECTIVE,
+      &pResult);
+    if (SUCCEEDED(hr)) {
+      CoTaskMemFree(pResult);
+      *aHandlerExists = true;
     }
   }
 
@@ -163,40 +105,35 @@ NS_IMETHODIMP nsOSHelperAppService::GetApplicationDescription(const nsACString& 
 
   NS_ConvertASCIItoUTF16 buf(aScheme);
 
-  // Vista: use new application association interface
-  if (mAppAssoc) {
-    wchar_t * pResult = nullptr;
-    // We are responsible for freeing returned strings.
-    HRESULT hr = mAppAssoc->QueryCurrentDefault(buf.get(),
-                                                AT_URLPROTOCOL, AL_EFFECTIVE,
-                                                &pResult);
+  if (mozilla::IsWin8OrLater()) {
+    wchar_t result[1024];
+    DWORD resultSize = 1024;
+    HRESULT hr = AssocQueryString(0x1000 /* ASSOCF_IS_PROTOCOL */,
+                                  ASSOCSTR_FRIENDLYAPPNAME,
+                                  buf.get(),
+                                  NULL,
+                                  result,
+                                  &resultSize);
     if (SUCCEEDED(hr)) {
-      nsCOMPtr<nsIFile> app;
-      nsAutoString appInfo(pResult);
-      CoTaskMemFree(pResult);
-      if (NS_SUCCEEDED(GetDefaultAppInfo(appInfo, _retval, getter_AddRefs(app))))
-        return NS_OK;
+      _retval = result;
+      return NS_OK;
     }
-    return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsCOMPtr<nsIFile> app;
-  GetDefaultAppInfo(buf, _retval, getter_AddRefs(app));
-
-  if (!_retval.Equals(buf))
-    return NS_OK;
-
-  // Fall back to full path
-  buf.AppendLiteral("\\shell\\open\\command");
-  nsresult rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT,
-                             buf,
-                             nsIWindowsRegKey::ACCESS_QUERY_VALUE);
-  if (NS_FAILED(rv))
-    return NS_ERROR_NOT_AVAILABLE;   
-   
-  rv = regKey->ReadStringValue(EmptyString(), _retval); 
-
-  return NS_SUCCEEDED(rv) ? NS_OK : NS_ERROR_NOT_AVAILABLE;
+  NS_ENSURE_TRUE(mAppAssoc, NS_ERROR_NOT_AVAILABLE);
+  wchar_t * pResult = nullptr;
+  // We are responsible for freeing returned strings.
+  HRESULT hr = mAppAssoc->QueryCurrentDefault(buf.get(),
+                                              AT_URLPROTOCOL, AL_EFFECTIVE,
+                                              &pResult);
+  if (SUCCEEDED(hr)) {
+    nsCOMPtr<nsIFile> app;
+    nsAutoString appInfo(pResult);
+    CoTaskMemFree(pResult);
+    if (NS_SUCCEEDED(GetDefaultAppInfo(appInfo, _retval, getter_AddRefs(app))))
+      return NS_OK;
+  }
+  return NS_ERROR_NOT_AVAILABLE;
 }
 
 // GetMIMEInfoFromRegistry: This function obtains the values of some of the nsIMIMEInfo
@@ -208,7 +145,7 @@ NS_IMETHODIMP nsOSHelperAppService::GetApplicationDescription(const nsACString& 
 //
 // This function sets only the Description attribute of the input nsIMIMEInfo.
 /* static */
-nsresult nsOSHelperAppService::GetMIMEInfoFromRegistry(const nsAFlatString& fileType, nsIMIMEInfo *pInfo)
+nsresult nsOSHelperAppService::GetMIMEInfoFromRegistry(const nsString& fileType, nsIMIMEInfo *pInfo)
 {
   nsresult rv = NS_OK;
 
@@ -267,114 +204,6 @@ nsOSHelperAppService::typeFromExtEquals(const char16_t* aExt, const char *aType)
      eq = type.EqualsASCII(aType);
 
   return eq;
-}
-
-// Strip a handler command string of its quotes and parameters.
-static void CleanupHandlerPath(nsString& aPath)
-{
-  // Example command strings passed into this routine:
-
-  // 1) C:\Program Files\Company\some.exe -foo -bar
-  // 2) C:\Program Files\Company\some.dll
-  // 3) C:\Windows\some.dll,-foo -bar
-  // 4) C:\Windows\some.cpl,-foo -bar
-
-  int32_t lastCommaPos = aPath.RFindChar(',');
-  if (lastCommaPos != kNotFound)
-    aPath.Truncate(lastCommaPos);
-
-  aPath.Append(' ');
-
-  // case insensitive
-  uint32_t index = aPath.Find(".exe ", true);
-  if (index == kNotFound)
-    index = aPath.Find(".dll ", true);
-  if (index == kNotFound)
-    index = aPath.Find(".cpl ", true);
-
-  if (index != kNotFound)
-    aPath.Truncate(index + 4);
-  aPath.Trim(" ", true, true);
-}
-
-// Strip the windows host process bootstrap executable rundll32.exe
-// from a handler's command string if it exists.
-static void StripRundll32(nsString& aCommandString)
-{
-  // Example rundll formats:
-  // C:\Windows\System32\rundll32.exe "path to dll"
-  // rundll32.exe "path to dll"
-  // C:\Windows\System32\rundll32.exe "path to dll", var var
-  // rundll32.exe "path to dll", var var
-
-  NS_NAMED_LITERAL_STRING(rundllSegment, "rundll32.exe ");
-  NS_NAMED_LITERAL_STRING(rundllSegmentShort, "rundll32 ");
-
-  // case insensitive
-  int32_t strLen = rundllSegment.Length();
-  int32_t index = aCommandString.Find(rundllSegment, true);
-  if (index == kNotFound) {
-    strLen = rundllSegmentShort.Length();
-    index = aCommandString.Find(rundllSegmentShort, true);
-  }
-
-  if (index != kNotFound) {
-    uint32_t rundllSegmentLength = index + strLen;
-    aCommandString.Cut(0, rundllSegmentLength);
-  }
-}
-
-// Returns the fully qualified path to an application handler based on
-// a parameterized command string. Note this routine should not be used
-// to launch the associated application as it strips parameters and
-// rundll.exe from the string. Designed for retrieving display information
-// on a particular handler.   
-/* static */ bool nsOSHelperAppService::CleanupCmdHandlerPath(nsAString& aCommandHandler)
-{
-  nsAutoString handlerCommand(aCommandHandler);
-
-  // Straight command path:
-  //
-  // %SystemRoot%\system32\NOTEPAD.EXE var
-  // "C:\Program Files\iTunes\iTunes.exe" var var
-  // C:\Program Files\iTunes\iTunes.exe var var
-  //
-  // Example rundll handlers:
-  //
-  // rundll32.exe "%ProgramFiles%\Win...ery\PhotoViewer.dll", var var
-  // rundll32.exe "%ProgramFiles%\Windows Photo Gallery\PhotoViewer.dll"
-  // C:\Windows\System32\rundll32.exe "path to dll", var var
-  // %SystemRoot%\System32\rundll32.exe "%ProgramFiles%\Win...ery\Photo
-  //    Viewer.dll", var var
-
-  // Expand environment variables so we have full path strings.
-  uint32_t bufLength = ::ExpandEnvironmentStringsW(handlerCommand.get(),
-                                                   L"", 0);
-  if (bufLength == 0) // Error
-    return false;
-
-  auto destination = mozilla::MakeUniqueFallible<wchar_t[]>(bufLength);
-  if (!destination)
-    return false;
-  if (!::ExpandEnvironmentStringsW(handlerCommand.get(), destination.get(),
-                                   bufLength))
-    return false;
-
-  handlerCommand.Assign(destination.get());
-
-  // Remove quotes around paths
-  handlerCommand.StripChars("\"");
-
-  // Strip windows host process bootstrap so we can get to the actual
-  // handler.
-  StripRundll32(handlerCommand);
-
-  // Trim any command parameters so that we have a native path we can
-  // initialize a local file with.
-  CleanupHandlerPath(handlerCommand);
-
-  aCommandHandler.Assign(handlerCommand);
-  return true;
 }
 
 // The "real" name of a given helper app (as specified by the path to the 
@@ -465,74 +294,46 @@ nsOSHelperAppService::GetDefaultAppInfo(const nsAString& aAppInfo,
     }
   }
 
-  if (!CleanupCmdHandlerPath(handlerCommand))
-    return NS_ERROR_FAILURE;
-
   // XXX FIXME: If this fails, the UI will display the full command
   // string.
   // There are some rare cases this can happen - ["url.dll" -foo]
   // for example won't resolve correctly to the system dir. The 
   // subsequent launch of the helper app will work though.
-  nsCOMPtr<nsIFile> lf;
-  NS_NewLocalFile(handlerCommand, true, getter_AddRefs(lf));
-  if (!lf)
-    return NS_ERROR_FILE_NOT_FOUND;
+  nsCOMPtr<nsILocalFileWin> lf = new nsLocalFile();
+  rv = lf->InitWithCommandLine(handlerCommand);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  nsILocalFileWin* lfw = nullptr;
-  CallQueryInterface(lf, &lfw);
-
-  if (lfw) {
-    // The "FileDescription" field contains the actual name of the application.
-    lfw->GetVersionInfoField("FileDescription", aDefaultDescription);
-    // QI addref'ed for us.
-    *aDefaultApplication = lfw;
-  }
+  // The "FileDescription" field contains the actual name of the application.
+  lf->GetVersionInfoField("FileDescription", aDefaultDescription);
+  lf.forget(aDefaultApplication);
 
   return NS_OK;
 }
 
-already_AddRefed<nsMIMEInfoWin> nsOSHelperAppService::GetByExtension(const nsAFlatString& aFileExt, const char *aTypeHint)
+already_AddRefed<nsMIMEInfoWin> nsOSHelperAppService::GetByExtension(const nsString& aFileExt, const char *aTypeHint)
 {
   if (aFileExt.IsEmpty())
     return nullptr;
 
-  // windows registry assumes your file extension is going to include the '.'.
-  // so make sure it's there...
+  // Determine the mime type.
+  nsAutoCString typeToUse;
+  if (aTypeHint && *aTypeHint) {
+    typeToUse.Assign(aTypeHint);
+  } else if (!GetMIMETypeFromOSForExtension(NS_ConvertUTF16toUTF8(aFileExt), typeToUse)) {
+    return nullptr;
+  }
+
+  RefPtr<nsMIMEInfoWin> mimeInfo = new nsMIMEInfoWin(typeToUse);
+
+  // windows registry assumes your file extension is going to include the '.',
+  // but our APIs expect it to not be there, so make sure we normalize that bit.
   nsAutoString fileExtToUse;
   if (aFileExt.First() != char16_t('.'))
     fileExtToUse = char16_t('.');
 
   fileExtToUse.Append(aFileExt);
 
-  // Try to get an entry from the windows registry.
-  nsCOMPtr<nsIWindowsRegKey> regKey = 
-    do_CreateInstance("@mozilla.org/windows-registry-key;1");
-  if (!regKey) 
-    return nullptr; 
-
-  nsresult rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT,
-                             fileExtToUse,
-                             nsIWindowsRegKey::ACCESS_QUERY_VALUE);
-  if (NS_FAILED(rv))
-    return nullptr; 
-
-  nsAutoCString typeToUse;
-  if (aTypeHint && *aTypeHint) {
-    typeToUse.Assign(aTypeHint);
-  }
-  else {
-    nsAutoString temp;
-    if (NS_FAILED(regKey->ReadStringValue(NS_LITERAL_STRING("Content Type"),
-                  temp)) || temp.IsEmpty()) {
-      return nullptr; 
-    }
-    // Content-Type is always in ASCII
-    LossyAppendUTF16toASCII(temp, typeToUse);
-  }
-
-  RefPtr<nsMIMEInfoWin> mimeInfo = new nsMIMEInfoWin(typeToUse);
-
-  // don't append the '.'
+  // don't append the '.' for our APIs.
   mimeInfo->AppendExtension(NS_ConvertUTF16toUTF8(Substring(fileExtToUse, 1)));
   mimeInfo->SetPreferredAction(nsIMIMEInfo::useSystemDefault);
 
@@ -540,27 +341,19 @@ already_AddRefed<nsMIMEInfoWin> nsOSHelperAppService::GetByExtension(const nsAFl
   bool found;
 
   // Retrieve the default application for this extension
-  if (mAppAssoc) {
-    // Vista: use the new application association COM interfaces
-    // for resolving helpers.
-    nsString assocType(fileExtToUse);
-    wchar_t * pResult = nullptr;
-    HRESULT hr = mAppAssoc->QueryCurrentDefault(assocType.get(),
-                                                AT_FILEEXTENSION, AL_EFFECTIVE,
-                                                &pResult);
-    if (SUCCEEDED(hr)) {
-      found = true;
-      appInfo.Assign(pResult);
-      CoTaskMemFree(pResult);
-    } 
-    else {
-      found = false;
-    }
+  NS_ENSURE_TRUE(mAppAssoc, nullptr);
+  nsString assocType(fileExtToUse);
+  wchar_t * pResult = nullptr;
+  HRESULT hr = mAppAssoc->QueryCurrentDefault(assocType.get(),
+                                              AT_FILEEXTENSION, AL_EFFECTIVE,
+                                              &pResult);
+  if (SUCCEEDED(hr)) {
+    found = true;
+    appInfo.Assign(pResult);
+    CoTaskMemFree(pResult);
   } 
-  else
-  {
-    found = NS_SUCCEEDED(regKey->ReadStringValue(EmptyString(), 
-                                                 appInfo));
+  else {
+    found = false;
   }
 
   // Bug 358297 - ignore the default handler, force the user to choose app
@@ -605,15 +398,11 @@ already_AddRefed<nsIMIMEInfo> nsOSHelperAppService::GetMIMEInfoFromOS(const nsAC
    * useless....
    * We'll do extension-based lookup for this type later in this function.
    */
-  if (!aMIMEType.LowerCaseEqualsLiteral(APPLICATION_OCTET_STREAM)) {
-    // (1) try to use the windows mime database to see if there is a mapping to a file extension
-    // (2) try to see if we have some left over 4.x registry info we can peek at...
+  if (!aMIMEType.IsEmpty() &&
+      !aMIMEType.LowerCaseEqualsLiteral(APPLICATION_OCTET_STREAM)) {
+    // try to use the windows mime database to see if there is a mapping to a file extension
     GetExtensionFromWindowsMimeDatabase(aMIMEType, fileExtension);
     LOG(("Windows mime database: extension '%s'\n", fileExtension.get()));
-    if (fileExtension.IsEmpty()) {
-      GetExtensionFrom4xRegistryInfo(aMIMEType, fileExtension);
-      LOG(("4.x Registry: extension '%s'\n", fileExtension.get()));
-    }
   }
   // If we found an extension for the type, do the lookup
   RefPtr<nsMIMEInfoWin> mi;
@@ -697,3 +486,40 @@ nsOSHelperAppService::GetProtocolHandlerInfoFromOS(const nsACString &aScheme,
   return NS_OK;
 }
 
+bool
+nsOSHelperAppService::GetMIMETypeFromOSForExtension(const nsACString& aExtension,
+                                                    nsACString& aMIMEType)
+{
+  if (aExtension.IsEmpty())
+    return false;
+
+  // windows registry assumes your file extension is going to include the '.'.
+  // so make sure it's there...
+  nsAutoString fileExtToUse;
+  if (aExtension.First() != '.')
+    fileExtToUse = char16_t('.');
+
+  AppendUTF8toUTF16(aExtension, fileExtToUse);
+
+  // Try to get an entry from the windows registry.
+  nsCOMPtr<nsIWindowsRegKey> regKey =
+    do_CreateInstance("@mozilla.org/windows-registry-key;1");
+  if (!regKey)
+    return false;
+
+  nsresult rv = regKey->Open(nsIWindowsRegKey::ROOT_KEY_CLASSES_ROOT,
+                             fileExtToUse,
+                             nsIWindowsRegKey::ACCESS_QUERY_VALUE);
+  if (NS_FAILED(rv))
+    return false;
+
+  nsAutoString mimeType;
+  if (NS_FAILED(regKey->ReadStringValue(NS_LITERAL_STRING("Content Type"),
+                mimeType)) || mimeType.IsEmpty()) {
+    return false;
+  }
+  // Content-Type is always in ASCII
+  aMIMEType.Truncate();
+  LossyAppendUTF16toASCII(mimeType, aMIMEType);
+  return true;
+}

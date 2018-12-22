@@ -6,6 +6,7 @@
 
 #include "nsUrlClassifierPrefixSet.h"
 #include "nsIUrlClassifierPrefixSet.h"
+#include "crc32c.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsPrintfCString.h"
@@ -23,12 +24,12 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Logging.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include <algorithm>
 
 using namespace mozilla;
 
-// NSPR_LOG_MODULES=UrlClassifierPrefixSet:5
+// MOZ_LOG=UrlClassifierPrefixSet:5
 static LazyLogModule gUrlClassifierPrefixSetLog("UrlClassifierPrefixSet");
 #define LOG(args) MOZ_LOG(gUrlClassifierPrefixSetLog, mozilla::LogLevel::Debug, args)
 #define LOG_ENABLED() MOZ_LOG_TEST(gUrlClassifierPrefixSetLog, mozilla::LogLevel::Debug)
@@ -41,6 +42,7 @@ const uint32_t nsUrlClassifierPrefixSet::MAX_BUFFER_SIZE;
 
 nsUrlClassifierPrefixSet::nsUrlClassifierPrefixSet()
   : mLock("nsUrlClassifierPrefixSet.mLock")
+  , mIndexDeltasChecksum(~0)
   , mTotalPrefixes(0)
   , mMemoryReportPath()
 {
@@ -49,6 +51,7 @@ nsUrlClassifierPrefixSet::nsUrlClassifierPrefixSet()
 NS_IMETHODIMP
 nsUrlClassifierPrefixSet::Init(const nsACString& aName)
 {
+  mName = aName;
   mMemoryReportPath =
     nsPrintfCString(
       "explicit/storage/prefix-set/%s",
@@ -65,6 +68,15 @@ nsUrlClassifierPrefixSet::~nsUrlClassifierPrefixSet()
   UnregisterWeakMemoryReporter(this);
 }
 
+void
+nsUrlClassifierPrefixSet::Clear()
+{
+  LOG(("[%s] Clearing PrefixSet", mName.get()));
+  mIndexDeltas.Clear();
+  mIndexPrefixes.Clear();
+  mTotalPrefixes = 0;
+}
+
 NS_IMETHODIMP
 nsUrlClassifierPrefixSet::SetPrefixes(const uint32_t* aArray, uint32_t aLength)
 {
@@ -74,12 +86,10 @@ nsUrlClassifierPrefixSet::SetPrefixes(const uint32_t* aArray, uint32_t aLength)
 
   if (aLength <= 0) {
     if (mIndexPrefixes.Length() > 0) {
-      LOG(("Clearing PrefixSet"));
-      mIndexDeltas.Clear();
-      mIndexPrefixes.Clear();
-      mTotalPrefixes = 0;
+      Clear();
     }
   } else {
+    MOZ_ASSERT(aArray);
     rv = MakePrefixSet(aArray, aLength);
   }
 
@@ -101,8 +111,7 @@ nsUrlClassifierPrefixSet::MakePrefixSet(const uint32_t* aPrefixes, uint32_t aLen
   }
 #endif
 
-  mIndexPrefixes.Clear();
-  mIndexDeltas.Clear();
+  Clear();
   mTotalPrefixes = aLength;
 
   mIndexPrefixes.AppendElement(aPrefixes[0]);
@@ -117,13 +126,21 @@ nsUrlClassifierPrefixSet::MakePrefixSet(const uint32_t* aPrefixes, uint32_t aLen
       // Compact the previous element.
       // Note there is always at least one element when we get here,
       // because we created the first element before the loop.
-      mIndexDeltas.LastElement().Compact();
-      mIndexDeltas.AppendElement();
-      mIndexPrefixes.AppendElement(aPrefixes[i]);
+      if (!mIndexDeltas.AppendElement(fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+
+      if (!mIndexPrefixes.AppendElement(aPrefixes[i], fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+
       numOfDeltas = 0;
     } else {
       uint16_t delta = aPrefixes[i] - previousItem;
-      mIndexDeltas.LastElement().AppendElement(delta);
+      if (!mIndexDeltas.LastElement().AppendElement(delta, fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+
       numOfDeltas++;
       totalDeltas++;
     }
@@ -131,12 +148,17 @@ nsUrlClassifierPrefixSet::MakePrefixSet(const uint32_t* aPrefixes, uint32_t aLen
   }
 
   mIndexDeltas.LastElement().Compact();
+
+  // The hdr pointer of the last element of nsTArray may change after calling
+  // mIndexDeltas.LastElement().Compact(), so calculate checksum after the call.
+  CalculateTArrayChecksum(mIndexDeltas, &mIndexDeltasChecksum);
+
   mIndexDeltas.Compact();
   mIndexPrefixes.Compact();
 
-  LOG(("Total number of indices: %d", aLength));
+  LOG(("Total number of indices: %d (crc=%u)", aLength, mIndexDeltasChecksum));
   LOG(("Total number of deltas: %d", totalDeltas));
-  LOG(("Total number of delta chunks: %d", mIndexDeltas.Length()));
+  LOG(("Total number of delta chunks: %zu", mIndexDeltas.Length()));
 
   return NS_OK;
 }
@@ -156,9 +178,16 @@ nsUrlClassifierPrefixSet::GetPrefixesNative(FallibleTArray<uint32_t>& outArray)
   for (uint32_t i = 0; i < prefixIdxLength; i++) {
     uint32_t prefix = mIndexPrefixes[i];
 
+    if (prefixCnt >= mTotalPrefixes) {
+      return NS_ERROR_FAILURE;
+    }
     outArray[prefixCnt++] = prefix;
+
     for (uint32_t j = 0; j < mIndexDeltas[i].Length(); j++) {
       prefix += mIndexDeltas[i][j];
+      if (prefixCnt >= mTotalPrefixes) {
+        return NS_ERROR_FAILURE;
+      }
       outArray[prefixCnt++] = prefix;
     }
   }
@@ -277,12 +306,13 @@ nsUrlClassifierPrefixSet::CollectReports(nsIHandleReportCallback* aHandleReport,
   // No need to get mLock here because this function does not directly touch
   // the class's data members. (SizeOfIncludingThis() will get mLock, however.)
 
-  size_t amount = SizeOfIncludingThis(UrlClassifierMallocSizeOf);
-
-  return aHandleReport->Callback(
-    EmptyCString(), mMemoryReportPath, KIND_HEAP, UNITS_BYTES, amount,
+  aHandleReport->Callback(
+    EmptyCString(), mMemoryReportPath, KIND_HEAP, UNITS_BYTES,
+    SizeOfIncludingThis(UrlClassifierMallocSizeOf),
     NS_LITERAL_CSTRING("Memory used by the prefix set for a URL classifier."),
     aData);
+
+  return NS_OK;
 }
 
 size_t
@@ -335,12 +365,64 @@ nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
                                            MAX_BUFFER_SIZE);
 
   // Convert to buffered stream
-  nsCOMPtr<nsIInputStream> in = NS_BufferInputStream(localInFile, bufferSize);
+  nsCOMPtr<nsIInputStream> in;
+  rv = NS_NewBufferedInputStream(getter_AddRefs(in), localInFile.forget(),
+                                 bufferSize);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = LoadPrefixes(in);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsUrlClassifierPrefixSet::StoreToFile(nsIFile* aFile)
+{
+  MutexAutoLock lock(mLock);
+
+  nsCOMPtr<nsIOutputStream> localOutFile;
+  nsresult rv = NS_NewLocalFileOutputStream(getter_AddRefs(localOutFile), aFile,
+                                            PR_WRONLY | PR_TRUNCATE | PR_CREATE_FILE);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  uint32_t fileSize;
+
+  // Preallocate the file storage
+  {
+    nsCOMPtr<nsIFileOutputStream> fos(do_QueryInterface(localOutFile));
+    Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_FALLOCATE_TIME> timer;
+
+    fileSize = CalculatePreallocateSize();
+
+    // Ignore failure, the preallocation is a hint and we write out the entire
+    // file later on
+    Unused << fos->Preallocate(fileSize);
+  }
+
+  // Convert to buffered stream
+  nsCOMPtr<nsIOutputStream> out;
+  rv = NS_NewBufferedOutputStream(getter_AddRefs(out), localOutFile.forget(),
+                                  std::min(fileSize, MAX_BUFFER_SIZE));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = WritePrefixes(out);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  LOG(("[%s] Storing PrefixSet successful", mName.get()));
+
+  return NS_OK;
+}
+
+nsresult
+nsUrlClassifierPrefixSet::LoadPrefixes(nsIInputStream* in)
+{
+  mCanary.Check();
 
   uint32_t magic;
   uint32_t read;
 
-  rv = in->Read(reinterpret_cast<char*>(&magic), sizeof(uint32_t), &read);
+  nsresult rv = in->Read(reinterpret_cast<char*>(&magic), sizeof(uint32_t), &read);
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(read == sizeof(uint32_t), NS_ERROR_FAILURE);
 
@@ -357,7 +439,7 @@ nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
     NS_ENSURE_TRUE(read == sizeof(uint32_t), NS_ERROR_FAILURE);
 
     if (indexSize == 0) {
-      LOG(("stored PrefixSet is empty!"));
+      LOG(("[%s] Stored PrefixSet is empty!", mName.get()));
       return NS_OK;
     }
 
@@ -366,9 +448,11 @@ nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
     }
 
     nsTArray<uint32_t> indexStarts;
-    indexStarts.SetLength(indexSize);
-    mIndexPrefixes.SetLength(indexSize);
-    mIndexDeltas.SetLength(indexSize);
+    if (!indexStarts.SetLength(indexSize, fallible) ||
+        !mIndexPrefixes.SetLength(indexSize, fallible) ||
+        !mIndexDeltas.SetLength(indexSize, fallible)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     mTotalPrefixes = indexSize;
 
@@ -391,7 +475,9 @@ nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
         return NS_ERROR_FILE_CORRUPTED;
       }
       if (numInDelta > 0) {
-        mIndexDeltas[i].SetLength(numInDelta);
+        if (!mIndexDeltas[i].SetLength(numInDelta, fallible)) {
+          return NS_ERROR_OUT_OF_MEMORY;
+        }
         mTotalPrefixes += numInDelta;
         toRead = numInDelta * sizeof(uint16_t);
         rv = in->Read(reinterpret_cast<char*>(mIndexDeltas[i].Elements()), toRead, &read);
@@ -400,50 +486,47 @@ nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
       }
     }
   } else {
-    LOG(("Version magic mismatch, not loading"));
+    LOG(("[%s] Version magic mismatch, not loading", mName.get()));
     return NS_ERROR_FILE_CORRUPTED;
   }
 
   MOZ_ASSERT(mIndexPrefixes.Length() == mIndexDeltas.Length());
-  LOG(("Loading PrefixSet successful"));
+  LOG(("[%s] Loading PrefixSet successful", mName.get()));
 
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsUrlClassifierPrefixSet::StoreToFile(nsIFile* aFile)
+uint32_t
+nsUrlClassifierPrefixSet::CalculatePreallocateSize()
 {
-  MutexAutoLock lock(mLock);
+  uint32_t fileSize = 4 * sizeof(uint32_t);
+  uint32_t deltas = mTotalPrefixes - mIndexPrefixes.Length();
+  fileSize += 2 * mIndexPrefixes.Length() * sizeof(uint32_t);
+  fileSize += deltas * sizeof(uint16_t);
+  return fileSize;
+}
 
-  nsCOMPtr<nsIOutputStream> localOutFile;
-  nsresult rv = NS_NewLocalFileOutputStream(getter_AddRefs(localOutFile), aFile,
-                                            PR_WRONLY | PR_TRUNCATE | PR_CREATE_FILE);
-  NS_ENSURE_SUCCESS(rv, rv);
+nsresult
+nsUrlClassifierPrefixSet::WritePrefixes(nsIOutputStream* out)
+{
+  mCanary.Check();
 
-  uint32_t fileSize;
-
-  // Preallocate the file storage
-  {
-    nsCOMPtr<nsIFileOutputStream> fos(do_QueryInterface(localOutFile));
-    Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_FALLOCATE_TIME> timer;
-    fileSize = 4 * sizeof(uint32_t);
-    uint32_t deltas = mTotalPrefixes - mIndexPrefixes.Length();
-    fileSize += 2 * mIndexPrefixes.Length() * sizeof(uint32_t);
-    fileSize += deltas * sizeof(uint16_t);
-
-    // Ignore failure, the preallocation is a hint and we write out the entire
-    // file later on
-    Unused << fos->Preallocate(fileSize);
+  // In Bug 1362761, crashes happened while reading mIndexDeltas[i].
+  // We suspect that this is due to memory corruption so to test this
+  // hypothesis, we will crash the browser. Once we have established
+  // memory corruption as the root cause, we can attempt to gracefully
+  // handle this.
+  uint32_t checksum;
+  CalculateTArrayChecksum(mIndexDeltas, &checksum);
+  if (checksum != mIndexDeltasChecksum) {
+    LOG(("[%s] The contents of mIndexDeltas doesn't match the checksum!", mName.get()));
+    MOZ_CRASH("Memory corruption detected in mIndexDeltas.");
   }
-
-  // Convert to buffered stream
-  nsCOMPtr<nsIOutputStream> out =
-    NS_BufferOutputStream(localOutFile, std::min(fileSize, MAX_BUFFER_SIZE));
 
   uint32_t written;
   uint32_t writelen = sizeof(uint32_t);
   uint32_t magic = PREFIXSET_VERSION_MAGIC;
-  rv = out->Write(reinterpret_cast<char*>(&magic), writelen, &written);
+  nsresult rv = out->Write(reinterpret_cast<char*>(&magic), writelen, &written);
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(written == writelen, NS_ERROR_FAILURE);
 
@@ -462,7 +545,9 @@ nsUrlClassifierPrefixSet::StoreToFile(nsIFile* aFile)
   for (uint32_t i = 0; i < indexDeltaSize; i++) {
     uint32_t deltaLength = mIndexDeltas[i].Length();
     totalDeltas += deltaLength;
-    indexStarts.AppendElement(totalDeltas);
+    if (!indexStarts.AppendElement(totalDeltas, fallible)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
   }
 
   rv = out->Write(reinterpret_cast<char*>(&indexSize), writelen, &written);
@@ -491,7 +576,23 @@ nsUrlClassifierPrefixSet::StoreToFile(nsIFile* aFile)
     }
   }
 
-  LOG(("Saving PrefixSet successful\n"));
+  LOG(("[%s] Writing PrefixSet successful", mName.get()));
 
   return NS_OK;
+}
+
+template<typename T>
+void
+nsUrlClassifierPrefixSet::CalculateTArrayChecksum(nsTArray<T>& aArray,
+                                                  uint32_t* outChecksum)
+{
+  *outChecksum = ~0;
+
+  for (size_t i = 0; i < aArray.Length(); i++) {
+    const T& element = aArray[i];
+    const void* pointer = &element;
+    *outChecksum = ComputeCrc32c(*outChecksum,
+                                 reinterpret_cast<const uint8_t*>(pointer),
+                                 sizeof(void*));
+  }
 }

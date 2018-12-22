@@ -6,13 +6,14 @@
 
 "use strict";
 
-const {Cu} = require("chrome");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const Services = require("Services");
-Cu.import("resource://devtools/client/shared/DOMHelpers.jsm");
+const {DOMHelpers} = require("resource://devtools/client/shared/DOMHelpers.jsm");
 
-loader.lazyRequireGetter(this, "system", "devtools/shared/system");
+loader.lazyRequireGetter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm", true);
+loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 
 /* A host should always allow this much space for the page to be displayed.
  * There is also a min-height on the browser, but we still don't want to set
@@ -28,13 +29,6 @@ const MIN_PAGE_SIZE = 25;
  * create() - create the UI and emit a 'ready' event when the UI is ready to use
  * destroy() - destroy the host's UI
  */
-
-exports.Hosts = {
-  "bottom": BottomHost,
-  "side": SidebarHost,
-  "window": WindowHost,
-  "custom": CustomHost
-};
 
 /**
  * Host object for the dock on the bottom of the browser
@@ -53,17 +47,20 @@ BottomHost.prototype = {
   /**
    * Create a box at the bottom of the host tab.
    */
-  create: function() {
-    let deferred = promise.defer();
+  create: async function() {
+    await gDevToolsBrowser.loadBrowserStyleSheet(this.hostTab.ownerGlobal);
 
-    let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
-    let ownerDocument = gBrowser.ownerDocument;
+    const gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
+    const ownerDocument = gBrowser.ownerDocument;
     this._nbox = gBrowser.getNotificationBox(this.hostTab.linkedBrowser);
 
     this._splitter = ownerDocument.createElement("splitter");
     this._splitter.setAttribute("class", "devtools-horizontal-splitter");
+    // Avoid resizing notification containers
+    this._splitter.setAttribute("resizebefore", "flex");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.flex = 1; // Required to be able to shrink when the window shrinks
     this.frame.className = "devtools-toolbox-bottom-iframe";
     this.frame.height = Math.min(
       Services.prefs.getIntPref(this.heightPref),
@@ -73,22 +70,22 @@ BottomHost.prototype = {
     this._nbox.appendChild(this._splitter);
     this._nbox.appendChild(this.frame);
 
-    let frameLoad = () => {
-      this.emit("ready", this.frame);
-      deferred.resolve(this.frame);
-    };
-
     this.frame.tooltip = "aHTMLTooltip";
 
     // we have to load something so we can switch documents if we have to
     this.frame.setAttribute("src", "about:blank");
 
-    let domHelper = new DOMHelpers(this.frame.contentWindow);
-    domHelper.onceDOMReady(frameLoad);
+    const frame = await new Promise(resolve => {
+      const domHelper = new DOMHelpers(this.frame.contentWindow);
+      const frameLoad = () => {
+        this.emit("ready", this.frame);
+        resolve(this.frame);
+      };
+      domHelper.onceDOMReady(frameLoad);
+      focusTab(this.hostTab);
+    });
 
-    focusTab(this.hostTab);
-
-    return deferred.promise;
+    return frame;
   },
 
   /**
@@ -96,63 +93,6 @@ BottomHost.prototype = {
    */
   raise: function() {
     focusTab(this.hostTab);
-  },
-
-  /**
-   * Minimize this host so that only the toolbox tabbar remains visible.
-   * @param {Number} height The height to minimize to. Defaults to 0, which
-   * means that the toolbox won't be visible at all once minimized.
-   */
-  minimize: function(height=0) {
-    if (this.isMinimized) {
-      return;
-    }
-    this.isMinimized = true;
-
-    let onTransitionEnd = event => {
-      if (event.propertyName !== "margin-bottom") {
-        // Ignore transitionend on unrelated properties.
-        return;
-      }
-
-      this.frame.removeEventListener("transitionend", onTransitionEnd);
-      this.emit("minimized");
-    };
-    this.frame.addEventListener("transitionend", onTransitionEnd);
-    this.frame.style.marginBottom = -this.frame.height + height + "px";
-    this._splitter.classList.add("disabled");
-  },
-
-  /**
-   * If the host was minimized before, maximize it again (the host will be
-   * maximized to the height it previously had).
-   */
-  maximize: function() {
-    if (!this.isMinimized) {
-      return;
-    }
-    this.isMinimized = false;
-
-    let onTransitionEnd = event => {
-      if (event.propertyName !== "margin-bottom") {
-        // Ignore transitionend on unrelated properties.
-        return;
-      }
-
-      this.frame.removeEventListener("transitionend", onTransitionEnd);
-      this.emit("maximized");
-    };
-    this.frame.addEventListener("transitionend", onTransitionEnd);
-    this.frame.style.marginBottom = "0";
-    this._splitter.classList.remove("disabled");
-  },
-
-  /**
-   * Toggle the minimize mode.
-   * @param {Number} minHeight The height to minimize to.
-   */
-  toggleMinimizeMode: function(minHeight) {
-    this.isMinimized ? this.maximize() : this.minimize(minHeight);
   },
 
   /**
@@ -171,6 +111,9 @@ BottomHost.prototype = {
       Services.prefs.setIntPref(this.heightPref, this.frame.height);
       this._nbox.removeChild(this._splitter);
       this._nbox.removeChild(this.frame);
+      this.frame = null;
+      this._nbox = null;
+      this._splitter = null;
     }
 
     return promise.resolve(null);
@@ -178,33 +121,32 @@ BottomHost.prototype = {
 };
 
 /**
- * Host object for the in-browser sidebar
+ * Base Host object for the in-browser sidebar
  */
-function SidebarHost(hostTab) {
-  this.hostTab = hostTab;
+class SidebarHost {
+  constructor(hostTab, type) {
+    this.hostTab = hostTab;
+    this.type = type;
+    this.widthPref = "devtools.toolbox.sidebar.width";
 
-  EventEmitter.decorate(this);
-}
-
-SidebarHost.prototype = {
-  type: "side",
-
-  widthPref: "devtools.toolbox.sidebar.width",
+    EventEmitter.decorate(this);
+  }
 
   /**
    * Create a box in the sidebar of the host tab.
    */
-  create: function() {
-    let deferred = promise.defer();
-
-    let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
-    let ownerDocument = gBrowser.ownerDocument;
+  async create() {
+    await gDevToolsBrowser.loadBrowserStyleSheet(this.hostTab.ownerGlobal);
+    const gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
+    const ownerDocument = gBrowser.ownerDocument;
+    this._browser = gBrowser.getBrowserContainer(this.hostTab.linkedBrowser);
     this._sidebar = gBrowser.getSidebarContainer(this.hostTab.linkedBrowser);
 
     this._splitter = ownerDocument.createElement("splitter");
     this._splitter.setAttribute("class", "devtools-side-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.flex = 1; // Required to be able to shrink when the window shrinks
     this.frame.className = "devtools-toolbox-side-iframe";
 
     this.frame.width = Math.min(
@@ -212,42 +154,47 @@ SidebarHost.prototype = {
       this._sidebar.clientWidth - MIN_PAGE_SIZE
     );
 
-    this._sidebar.appendChild(this._splitter);
-    this._sidebar.appendChild(this.frame);
-
-    let frameLoad = () => {
-      this.emit("ready", this.frame);
-      deferred.resolve(this.frame);
-    };
+    if (this.type == "right") {
+      this._sidebar.appendChild(this._splitter);
+      this._sidebar.appendChild(this.frame);
+    } else {
+      this._sidebar.insertBefore(this.frame, this._browser);
+      this._sidebar.insertBefore(this._splitter, this._browser);
+    }
 
     this.frame.tooltip = "aHTMLTooltip";
     this.frame.setAttribute("src", "about:blank");
 
-    let domHelper = new DOMHelpers(this.frame.contentWindow);
-    domHelper.onceDOMReady(frameLoad);
+    const frame = await new Promise(resolve => {
+      const domHelper = new DOMHelpers(this.frame.contentWindow);
+      const frameLoad = () => {
+        this.emit("ready", this.frame);
+        resolve(this.frame);
+      };
+      domHelper.onceDOMReady(frameLoad);
+      focusTab(this.hostTab);
+    });
 
-    focusTab(this.hostTab);
-
-    return deferred.promise;
-  },
+    return frame;
+  }
 
   /**
    * Raise the host.
    */
-  raise: function() {
+  raise() {
     focusTab(this.hostTab);
-  },
+  }
 
   /**
    * Set the toolbox title.
    * Nothing to do for this host type.
    */
-  setTitle: function() {},
+  setTitle() {}
 
   /**
    * Destroy the sidebar.
    */
-  destroy: function() {
+  destroy() {
     if (!this._destroyed) {
       this._destroyed = true;
 
@@ -258,7 +205,25 @@ SidebarHost.prototype = {
 
     return promise.resolve(null);
   }
-};
+}
+
+/**
+ * Host object for the in-browser left sidebar
+ */
+class LeftHost extends SidebarHost {
+  constructor(hostTab) {
+    super(hostTab, "left");
+  }
+}
+
+/**
+ * Host object for the in-browser right sidebar
+ */
+class RightHost extends SidebarHost {
+  constructor(hostTab) {
+    super(hostTab, "right");
+  }
+}
 
 /**
  * Host object for the toolbox in a separate window
@@ -278,18 +243,18 @@ WindowHost.prototype = {
    * Create a new xul window to contain the toolbox.
    */
   create: function() {
-    let deferred = promise.defer();
+    const deferred = defer();
 
-    let flags = "chrome,centerscreen,resizable,dialog=no";
-    let win = Services.ww.openWindow(null, this.WINDOW_URL, "_blank",
+    const flags = "chrome,centerscreen,resizable,dialog=no";
+    const win = Services.ww.openWindow(null, this.WINDOW_URL, "_blank",
                                      flags, null);
 
-    let frameLoad = () => {
+    const frameLoad = () => {
       win.removeEventListener("load", frameLoad, true);
       win.focus();
 
       let key;
-      if (system.constants.platform === "macosx") {
+      if (AppConstants.platform === "macosx") {
         key = win.document.getElementById("toolbox-key-toggle-osx");
       } else {
         key = win.document.getElementById("toolbox-key-toggle");
@@ -366,15 +331,16 @@ CustomHost.prototype = {
   _sendMessageToTopWindow: function(msg, data) {
     // It's up to the custom frame owner (parent window) to honor
     // "close" or "raise" instructions.
-    let topWindow = this.frame.ownerDocument.defaultView;
+    const topWindow = this.frame.ownerDocument.defaultView;
     if (!topWindow) {
       return;
     }
-    let json = {name: "toolbox-" + msg, uid: this.uid};
-    if (data) {
-      json.data = data;
-    }
-    topWindow.postMessage(JSON.stringify(json), "*");
+    const message = {
+      name: "toolbox-" + msg,
+      uid: this.uid,
+      data,
+    };
+    topWindow.postMessage(message, "*");
   },
 
   /**
@@ -414,7 +380,16 @@ CustomHost.prototype = {
  *  Switch to the given tab in a browser and focus the browser window
  */
 function focusTab(tab) {
-  let browserWindow = tab.ownerDocument.defaultView;
+  const browserWindow = tab.ownerDocument.defaultView;
   browserWindow.focus();
   browserWindow.gBrowser.selectedTab = tab;
 }
+
+exports.Hosts = {
+  "bottom": BottomHost,
+  "left": LeftHost,
+  "right": RightHost,
+  "window": WindowHost,
+  "custom": CustomHost
+};
+

@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -15,14 +15,21 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'composer'
 
 UNIFIED_SOURCES += [
-    'nsComposerCommands.cpp',
-    'nsComposerCommandsUpdater.cpp',
-    'nsComposerController.cpp',
-    'nsComposerDocumentCommands.cpp',
+    'ComposerCommandsUpdater.cpp',
     'nsComposerRegistration.cpp',
-    'nsComposeTxtSrvFilter.cpp',
     'nsEditingSession.cpp',
-    'nsEditorSpellCheck.cpp',
+]
+
+EXPORTS.mozilla += [
+    'ComposerCommandsUpdater.h',
+]
+
+# Needed because we include HTMLEditor.h which indirectly includes nsDocument.h
+LOCAL_INCLUDES += [
+    '/dom/base',
+    '/dom/html',  # For nsHTMLDocument
+    '/editor/spellchecker', # nsComposeTxtSrvFilter.h
+    '/layout/style', # For things nsHTMLDocument includes.
 ]
 
 FINAL_LIBRARY = 'xul'
@@ -48,3 +55,6 @@ RESOURCE_FILES += [
     'res/table-remove-row-hover.gif',
     'res/table-remove-row.gif',
 ]
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

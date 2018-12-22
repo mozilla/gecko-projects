@@ -8,13 +8,11 @@
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLWindowKeyHandler.h"
 #include "nsIContent.h"
-#include "nsIAtom.h"
-#include "nsIDOMKeyEvent.h"
+#include "nsAtom.h"
 #include "nsXBLService.h"
 #include "nsIServiceManager.h"
 #include "nsGkAtoms.h"
 #include "nsXBLDocumentInfo.h"
-#include "nsIDOMElement.h"
 #include "nsFocusManager.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
@@ -22,26 +20,29 @@
 #include "nsXBLPrototypeBinding.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
+#include "nsISelectionController.h"
 #include "nsIPresShell.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
-#include "nsISelectionController.h"
+#include "mozilla/HTMLEditor.h"
+#include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
-#include "nsIEditor.h"
-#include "nsIHTMLEditor.h"
-#include "nsIDOMDocument.h"
+#include "mozilla/dom/EventBinding.h"
+#include "mozilla/dom/KeyboardEvent.h"
+#include "mozilla/layers/KeyboardMap.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::layers;
 
 class nsXBLSpecialDocInfo : public nsIObserver
 {
 public:
   RefPtr<nsXBLDocumentInfo> mHTMLBindings;
-  RefPtr<nsXBLDocumentInfo> mUserHTMLBindings;
 
   static const char sHTMLBindingStr[];
   static const char sUserHTMLBindingStr[];
@@ -53,12 +54,8 @@ public:
   NS_DECL_NSIOBSERVER
 
   void LoadDocInfo();
-  void GetAllHandlers(const char* aType,
-                      nsXBLPrototypeHandler** handler,
-                      nsXBLPrototypeHandler** userHandler);
-  void GetHandlers(nsXBLDocumentInfo* aInfo,
-                   const nsACString& aRef,
-                   nsXBLPrototypeHandler** aResult);
+  void GetHandlers(const nsACString& aRef,
+                   nsXBLPrototypeHandler** handler);
 
   nsXBLSpecialDocInfo() : mInitialized(false) {}
 
@@ -81,7 +78,6 @@ nsXBLSpecialDocInfo::Observe(nsISupports* aSubject,
 
   // On shutdown, clear our fields to avoid an extra cycle collection.
   mHTMLBindings = nullptr;
-  mUserHTMLBindings = nullptr;
   mInitialized = false;
   nsContentUtils::UnregisterShutdownObserver(this);
 
@@ -108,67 +104,46 @@ void nsXBLSpecialDocInfo::LoadDocInfo()
   xblService->LoadBindingDocumentInfo(nullptr, nullptr,
                                       bindingURI,
                                       nullptr,
-                                      true, 
+                                      true,
                                       getter_AddRefs(mHTMLBindings));
-
-  const nsAdoptingCString& userHTMLBindingStr =
-    Preferences::GetCString("dom.userHTMLBindings.uri");
-  if (!userHTMLBindingStr.IsEmpty()) {
-    NS_NewURI(getter_AddRefs(bindingURI), userHTMLBindingStr);
-    if (!bindingURI) {
-      return;
-    }
-
-    xblService->LoadBindingDocumentInfo(nullptr, nullptr,
-                                        bindingURI,
-                                        nullptr,
-                                        true, 
-                                        getter_AddRefs(mUserHTMLBindings));
-  }
 }
 
 //
 // GetHandlers
 //
-// 
+//
 void
-nsXBLSpecialDocInfo::GetHandlers(nsXBLDocumentInfo* aInfo,
-                                 const nsACString& aRef,
-                                 nsXBLPrototypeHandler** aResult)
+nsXBLSpecialDocInfo::GetHandlers(const nsACString& aRef,
+                                 nsXBLPrototypeHandler** aHandler)
 {
-  nsXBLPrototypeBinding* binding = aInfo->GetPrototypeBinding(aRef);
-  
-  NS_ASSERTION(binding, "No binding found for the XBL window key handler.");
-  if (!binding)
-    return;
-
-  *aResult = binding->GetPrototypeHandlers();
-}
-
-void
-nsXBLSpecialDocInfo::GetAllHandlers(const char* aType,
-                                    nsXBLPrototypeHandler** aHandler,
-                                    nsXBLPrototypeHandler** aUserHandler)
-{
-  if (mUserHTMLBindings) {
-    nsAutoCString type(aType);
-    type.AppendLiteral("User");
-    GetHandlers(mUserHTMLBindings, type, aUserHandler);
-  }
   if (mHTMLBindings) {
-    GetHandlers(mHTMLBindings, nsDependentCString(aType), aHandler);
+    nsXBLPrototypeBinding* binding = mHTMLBindings->GetPrototypeBinding(aRef);
+
+    NS_ASSERTION(binding, "No binding found for the XBL window key handler.");
+    if (!binding)
+      return;
+
+    *aHandler = binding->GetPrototypeHandlers();
   }
 }
 
 // Init statics
-nsXBLSpecialDocInfo* nsXBLWindowKeyHandler::sXBLSpecialDocInfo = nullptr;
+static StaticRefPtr<nsXBLSpecialDocInfo> sXBLSpecialDocInfo;
 uint32_t nsXBLWindowKeyHandler::sRefCnt = 0;
 
-nsXBLWindowKeyHandler::nsXBLWindowKeyHandler(nsIDOMElement* aElement,
+/* static */ void
+nsXBLWindowKeyHandler::EnsureSpecialDocInfo()
+{
+  if (!sXBLSpecialDocInfo) {
+    sXBLSpecialDocInfo = new nsXBLSpecialDocInfo();
+  }
+  sXBLSpecialDocInfo->LoadDocInfo();
+}
+
+nsXBLWindowKeyHandler::nsXBLWindowKeyHandler(Element* aElement,
                                              EventTarget* aTarget)
   : mTarget(aTarget),
-    mHandler(nullptr),
-    mUserHandler(nullptr)
+    mHandler(nullptr)
 {
   mWeakPtrForElement = do_GetWeakReference(aElement);
   ++sRefCnt;
@@ -182,7 +157,7 @@ nsXBLWindowKeyHandler::~nsXBLWindowKeyHandler()
 
   --sRefCnt;
   if (!sRefCnt) {
-    NS_IF_RELEASE(sXBLSpecialDocInfo);
+    sXBLSpecialDocInfo = nullptr;
   }
 }
 
@@ -200,31 +175,46 @@ BuildHandlerChain(nsIContent* aContent, nsXBLPrototypeHandler** aResult)
   for (nsIContent* key = aContent->GetLastChild();
        key;
        key = key->GetPreviousSibling()) {
-
-    if (key->NodeInfo()->Equals(nsGkAtoms::key, kNameSpaceID_XUL)) {
-      // Check whether the key element has empty value at key/char attribute.
-      // Such element is used by localizers for alternative shortcut key
-      // definition on the locale. See bug 426501.
-      nsAutoString valKey, valCharCode, valKeyCode;
-      bool attrExists =
-        key->GetAttr(kNameSpaceID_None, nsGkAtoms::key, valKey) ||
-        key->GetAttr(kNameSpaceID_None, nsGkAtoms::charcode, valCharCode) ||
-        key->GetAttr(kNameSpaceID_None, nsGkAtoms::keycode, valKeyCode);
-      if (attrExists &&
-          valKey.IsEmpty() && valCharCode.IsEmpty() && valKeyCode.IsEmpty())
-        continue;
-
-      nsXBLPrototypeHandler* handler = new nsXBLPrototypeHandler(key);
-
-      handler->SetNextHandler(*aResult);
-      *aResult = handler;
+    if (!key->NodeInfo()->Equals(nsGkAtoms::key, kNameSpaceID_XUL)) {
+      continue;
     }
+
+    Element* keyElement = key->AsElement();
+    // Check whether the key element has empty value at key/char attribute.
+    // Such element is used by localizers for alternative shortcut key
+    // definition on the locale. See bug 426501.
+    nsAutoString valKey, valCharCode, valKeyCode;
+    // Hopefully at least one of the attributes is set:
+    keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::key, valKey) ||
+      keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::charcode, valCharCode) ||
+      keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::keycode, valKeyCode);
+    // If not, ignore this key element.
+    if (valKey.IsEmpty() && valCharCode.IsEmpty() && valKeyCode.IsEmpty()) {
+      continue;
+    }
+
+    // reserved="pref" is the default for <key> elements.
+    XBLReservedKey reserved = XBLReservedKey_Unset;
+    if (keyElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::reserved,
+                                nsGkAtoms::_true, eCaseMatters)) {
+      reserved = XBLReservedKey_True;
+    } else if (keyElement->AttrValueIs(kNameSpaceID_None,
+                                       nsGkAtoms::reserved,
+                                       nsGkAtoms::_false, eCaseMatters)) {
+      reserved = XBLReservedKey_False;
+    }
+
+    nsXBLPrototypeHandler* handler =
+      new nsXBLPrototypeHandler(keyElement, reserved);
+
+    handler->SetNextHandler(*aResult);
+    *aResult = handler;
   }
 }
 
 //
 // EnsureHandlers
-//    
+//
 // Lazily load the XBL handlers. Overridden to handle being attached
 // to a particular element rather than the document
 //
@@ -241,18 +231,14 @@ nsXBLWindowKeyHandler::EnsureHandlers()
     nsCOMPtr<nsIContent> content(do_QueryInterface(el));
     BuildHandlerChain(content, &mHandler);
   } else { // We are an XBL file of handlers.
-    if (!sXBLSpecialDocInfo) {
-      sXBLSpecialDocInfo = new nsXBLSpecialDocInfo();
-      NS_ADDREF(sXBLSpecialDocInfo);
-    }
-    sXBLSpecialDocInfo->LoadDocInfo();
+    EnsureSpecialDocInfo();
 
     // Now determine which handlers we should be using.
     if (IsHTMLEditableFieldFocused()) {
-      sXBLSpecialDocInfo->GetAllHandlers("editor", &mHandler, &mUserHandler);
+      sXBLSpecialDocInfo->GetHandlers(NS_LITERAL_CSTRING("editor"), &mHandler);
     }
     else {
-      sXBLSpecialDocInfo->GetAllHandlers("browser", &mHandler, &mUserHandler);
+      sXBLSpecialDocInfo->GetHandlers(NS_LITERAL_CSTRING("browser"), &mHandler);
     }
   }
 
@@ -260,40 +246,29 @@ nsXBLWindowKeyHandler::EnsureHandlers()
 }
 
 nsresult
-nsXBLWindowKeyHandler::WalkHandlers(nsIDOMKeyEvent* aKeyEvent, nsIAtom* aEventType)
+nsXBLWindowKeyHandler::WalkHandlers(KeyboardEvent* aKeyEvent, nsAtom* aEventType)
 {
-  bool prevent;
-  aKeyEvent->AsEvent()->GetDefaultPrevented(&prevent);
-  if (prevent)
+  if (aKeyEvent->DefaultPrevented()) {
     return NS_OK;
+  }
 
-  bool trustedEvent = false;
   // Don't process the event if it was not dispatched from a trusted source
-  aKeyEvent->AsEvent()->GetIsTrusted(&trustedEvent);
-
-  if (!trustedEvent)
+  if (!aKeyEvent->IsTrusted()) {
     return NS_OK;
+  }
 
   nsresult rv = EnsureHandlers();
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool isDisabled;
   nsCOMPtr<Element> el = GetElement(&isDisabled);
-  if (!el) {
-    if (mUserHandler) {
-      WalkHandlersInternal(aKeyEvent, aEventType, mUserHandler, true);
-      aKeyEvent->AsEvent()->GetDefaultPrevented(&prevent);
-      if (prevent)
-        return NS_OK; // Handled by the user bindings. Our work here is done.
-    }
-  }
 
   // skip keysets that are disabled
   if (el && isDisabled) {
     return NS_OK;
   }
 
-  WalkHandlersInternal(aKeyEvent, aEventType, mHandler, true);
+  WalkHandlersInternal(aKeyEvent, aEventType, true);
 
   return NS_OK;
 }
@@ -314,6 +289,12 @@ nsXBLWindowKeyHandler::InstallKeyboardEventListenersTo(
   aEventListenerManager->AddEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
                            TrustedEventsAtCapture());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtCapture());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
+                           TrustedEventsAtCapture());
 
   // For reducing the IPC cost, preventing to dispatch reserved keyboard
   // events into the content process.
@@ -326,6 +307,12 @@ nsXBLWindowKeyHandler::InstallKeyboardEventListenersTo(
   aEventListenerManager->AddEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
                            TrustedEventsAtSystemGroupCapture());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtSystemGroupCapture());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
+                           TrustedEventsAtSystemGroupCapture());
 
   // Handle keyboard events in bubbling phase of the system event group.
   aEventListenerManager->AddEventListenerByType(
@@ -336,6 +323,18 @@ nsXBLWindowKeyHandler::InstallKeyboardEventListenersTo(
                            TrustedEventsAtSystemGroupBubble());
   aEventListenerManager->AddEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
+                           TrustedEventsAtSystemGroupBubble());
+  // mozaccesskeynotfound event is fired when modifiers of keypress event
+  // matches with modifier of content access key but it's not consumed by
+  // remote content.
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozaccesskeynotfound"),
+                           TrustedEventsAtSystemGroupBubble());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtSystemGroupBubble());
+  aEventListenerManager->AddEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
                            TrustedEventsAtSystemGroupBubble());
 }
 
@@ -352,6 +351,12 @@ nsXBLWindowKeyHandler::RemoveKeyboardEventListenersFrom(
   aEventListenerManager->RemoveEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
                            TrustedEventsAtCapture());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtCapture());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
+                           TrustedEventsAtCapture());
 
   aEventListenerManager->RemoveEventListenerByType(
                            this, NS_LITERAL_STRING("keydown"),
@@ -362,6 +367,12 @@ nsXBLWindowKeyHandler::RemoveKeyboardEventListenersFrom(
   aEventListenerManager->RemoveEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
                            TrustedEventsAtSystemGroupCapture());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtSystemGroupCapture());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
+                           TrustedEventsAtSystemGroupCapture());
 
   aEventListenerManager->RemoveEventListenerByType(
                            this, NS_LITERAL_STRING("keydown"),
@@ -371,18 +382,77 @@ nsXBLWindowKeyHandler::RemoveKeyboardEventListenersFrom(
                            TrustedEventsAtSystemGroupBubble());
   aEventListenerManager->RemoveEventListenerByType(
                            this, NS_LITERAL_STRING("keypress"),
+                           TrustedEventsAtSystemGroupBubble());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozaccesskeynotfound"),
+                           TrustedEventsAtSystemGroupBubble());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeydownonplugin"),
+                           TrustedEventsAtSystemGroupBubble());
+  aEventListenerManager->RemoveEventListenerByType(
+                           this, NS_LITERAL_STRING("mozkeyuponplugin"),
                            TrustedEventsAtSystemGroupBubble());
 }
 
-NS_IMETHODIMP
-nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
+/* static */ KeyboardMap
+nsXBLWindowKeyHandler::CollectKeyboardShortcuts()
 {
-  nsCOMPtr<nsIDOMKeyEvent> keyEvent(do_QueryInterface(aEvent));
+  // Load the XBL handlers
+  EnsureSpecialDocInfo();
+
+  nsXBLPrototypeHandler* handlers = nullptr;
+  sXBLSpecialDocInfo->GetHandlers(NS_LITERAL_CSTRING("browser"), &handlers);
+
+  // Convert the handlers into keyboard shortcuts, using an AutoTArray with
+  // the maximum amount of shortcuts used on any platform to minimize allocations
+  AutoTArray<KeyboardShortcut, 48> shortcuts;
+
+  // Append keyboard shortcuts for hardcoded actions like tab
+  KeyboardShortcut::AppendHardcodedShortcuts(shortcuts);
+
+  for (nsXBLPrototypeHandler* handler = handlers;
+       handler;
+       handler = handler->GetNextHandler()) {
+    KeyboardShortcut shortcut;
+    if (handler->TryConvertToKeyboardShortcut(&shortcut)) {
+      shortcuts.AppendElement(shortcut);
+    }
+  }
+
+  return KeyboardMap(std::move(shortcuts));
+}
+
+nsAtom*
+nsXBLWindowKeyHandler::ConvertEventToDOMEventType(
+                         const WidgetKeyboardEvent& aWidgetKeyboardEvent) const
+{
+  if (aWidgetKeyboardEvent.IsKeyDownOrKeyDownOnPlugin()) {
+    return nsGkAtoms::keydown;
+  }
+  if (aWidgetKeyboardEvent.IsKeyUpOrKeyUpOnPlugin()) {
+    return nsGkAtoms::keyup;
+  }
+  // eAccessKeyNotFound event is always created from eKeyPress event and
+  // the original eKeyPress event has stopped its propagation before dispatched
+  // into the DOM tree in this process and not matched with remote content's
+  // access keys.  So, we should treat it as an eKeyPress event and execute
+  // a command if it's registered as a shortcut key.
+  if (aWidgetKeyboardEvent.mMessage == eKeyPress ||
+      aWidgetKeyboardEvent.mMessage == eAccessKeyNotFound) {
+    return nsGkAtoms::keypress;
+  }
+  MOZ_ASSERT_UNREACHABLE(
+    "All event messages which this instance listens to should be handled");
+  return nullptr;
+}
+
+NS_IMETHODIMP
+nsXBLWindowKeyHandler::HandleEvent(Event* aEvent)
+{
+  RefPtr<KeyboardEvent> keyEvent = aEvent->AsKeyboardEvent();
   NS_ENSURE_TRUE(keyEvent, NS_ERROR_INVALID_ARG);
 
-  uint16_t eventPhase;
-  aEvent->GetEventPhase(&eventPhase);
-  if (eventPhase == nsIDOMEvent::CAPTURING_PHASE) {
+  if (aEvent->EventPhase() == Event_Binding::CAPTURING_PHASE) {
     if (aEvent->WidgetEventPtr()->mFlags.mInSystemGroup) {
       HandleEventOnCaptureInSystemEventGroup(keyEvent);
     } else {
@@ -391,56 +461,74 @@ nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
     return NS_OK;
   }
 
-  nsAutoString eventType;
-  aEvent->GetType(eventType);
-  nsCOMPtr<nsIAtom> eventTypeAtom = NS_Atomize(eventType);
-  NS_ENSURE_TRUE(eventTypeAtom, NS_ERROR_OUT_OF_MEMORY);
+  WidgetKeyboardEvent* widgetKeyboardEvent =
+    aEvent->WidgetEventPtr()->AsKeyboardEvent();
+  if (widgetKeyboardEvent->IsKeyEventOnPlugin()) {
+    // key events on plugin shouldn't execute shortcut key handlers which are
+    // not reserved.
+    if (!widgetKeyboardEvent->IsReservedByChrome()) {
+      return NS_OK;
+    }
 
+    // If the event is untrusted event or was already consumed, do nothing.
+    if (!widgetKeyboardEvent->IsTrusted() ||
+        widgetKeyboardEvent->DefaultPrevented()) {
+      return NS_OK;
+    }
+
+    // XXX Don't check isReserved here because even if the handler in this
+    //     instance isn't reserved but another instance reserves the key
+    //     combination, it will be executed when the event is normal keyboard
+    //     events...
+    bool isReserved = false;
+    if (!HasHandlerForEvent(keyEvent, &isReserved)) {
+      return NS_OK;
+    }
+  }
+
+  // If this event was handled by APZ then don't do the default action, and
+  // preventDefault to prevent any other listeners from handling the event.
+  if (widgetKeyboardEvent->mFlags.mHandledByAPZ) {
+    aEvent->PreventDefault();
+    return NS_OK;
+  }
+
+  RefPtr<nsAtom> eventTypeAtom =
+    ConvertEventToDOMEventType(*widgetKeyboardEvent);
   return WalkHandlers(keyEvent, eventTypeAtom);
 }
 
 void
 nsXBLWindowKeyHandler::HandleEventOnCaptureInDefaultEventGroup(
-                         nsIDOMKeyEvent* aEvent)
+                         KeyboardEvent* aEvent)
 {
   WidgetKeyboardEvent* widgetKeyboardEvent =
-    aEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
+    aEvent->WidgetEventPtr()->AsKeyboardEvent();
 
-  if (widgetKeyboardEvent->mFlags.mOnlySystemGroupDispatchInContent) {
-    MOZ_RELEASE_ASSERT(
-      widgetKeyboardEvent->mFlags.mNoCrossProcessBoundaryForwarding);
+  if (widgetKeyboardEvent->IsReservedByChrome()) {
     return;
   }
 
   bool isReserved = false;
   if (HasHandlerForEvent(aEvent, &isReserved) && isReserved) {
-    // For reserved commands (such as Open New Tab), we don't to wait for
-    // the content to answer (so mWantReplyFromContentProcess remains false),
-    // neither to give a chance for content to override its behavior.
-    widgetKeyboardEvent->StopCrossProcessForwarding();
-    // If the key combination is reserved by chrome, we shouldn't expose the
-    // keyboard event to web contents because such keyboard events shouldn't be
-    // cancelable.  So, it's not good behavior to fire keyboard events but
-    // to ignore the defaultPrevented attribute value in chrome.
-    widgetKeyboardEvent->mFlags.mOnlySystemGroupDispatchInContent = true;
+    widgetKeyboardEvent->MarkAsReservedByChrome();
   }
 }
 
 void
 nsXBLWindowKeyHandler::HandleEventOnCaptureInSystemEventGroup(
-                         nsIDOMKeyEvent* aEvent)
+                         KeyboardEvent* aEvent)
 {
   WidgetKeyboardEvent* widgetEvent =
-    aEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
+    aEvent->WidgetEventPtr()->AsKeyboardEvent();
 
-  if (widgetEvent->mFlags.mNoCrossProcessBoundaryForwarding ||
-      widgetEvent->mFlags.mOnlySystemGroupDispatchInContent) {
-    return;
-  }
-
-  nsCOMPtr<mozilla::dom::Element> originalTarget =
-    do_QueryInterface(aEvent->AsEvent()->WidgetEventPtr()->originalTarget);
-  if (!EventStateManager::IsRemoteTarget(originalTarget)) {
+  // If the event won't be sent to remote process, this listener needs to do
+  // nothing.  Note that even if mOnlySystemGroupDispatchInContent is true,
+  // we need to send the event to remote process and check reply event
+  // before matching it with registered shortcut keys because event listeners
+  // in the system event group may want to handle the event before registered
+  // shortcut key handlers.
+  if (!widgetEvent->WillBeSentToRemoteProcess()) {
     return;
   }
 
@@ -448,21 +536,21 @@ nsXBLWindowKeyHandler::HandleEventOnCaptureInSystemEventGroup(
     return;
   }
 
-  // Inform the child process that this is a event that we want a reply
-  // from.
-  widgetEvent->mFlags.mWantReplyFromContentProcess = true;
-  // If this event hadn't been marked as mNoCrossProcessBoundaryForwarding
+  // If this event wasn't marked as IsCrossProcessForwardingStopped,
   // yet, it means it wasn't processed by content. We'll not call any
-  // of the handlers at this moment, and will wait for the event to be
-  // redispatched with mNoCrossProcessBoundaryForwarding = 1 to process it.
-  // XXX Why not StopImmediatePropagation()?
-  aEvent->AsEvent()->StopPropagation();
+  // of the handlers at this moment, and will wait the reply event.
+  // So, stop immediate propagation in this event first, then, mark it as
+  // waiting reply from remote process.  Finally, when this process receives
+  // a reply from the remote process, it should be dispatched into this
+  // DOM tree again.
+  widgetEvent->StopImmediatePropagation();
+  widgetEvent->MarkAsWaitingReplyFromRemoteProcess();
 }
 
 bool
 nsXBLWindowKeyHandler::IsHTMLEditableFieldFocused()
 {
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (!fm)
     return false;
 
@@ -477,25 +565,19 @@ nsXBLWindowKeyHandler::IsHTMLEditableFieldFocused()
     return false;
   }
 
-  nsCOMPtr<nsIEditor> editor;
-  docShell->GetEditor(getter_AddRefs(editor));
-  nsCOMPtr<nsIHTMLEditor> htmlEditor = do_QueryInterface(editor);
+  RefPtr<HTMLEditor> htmlEditor = docShell->GetHTMLEditor();
   if (!htmlEditor) {
     return false;
   }
 
-  nsCOMPtr<nsIDOMDocument> domDocument;
-  editor->GetDocument(getter_AddRefs(domDocument));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDocument);
+  nsCOMPtr<nsIDocument> doc = htmlEditor->GetDocument();
   if (doc->HasFlag(NODE_IS_EDITABLE)) {
     // Don't need to perform any checks in designMode documents.
     return true;
   }
 
-  nsCOMPtr<nsIDOMElement> focusedElement;
-  fm->GetFocusedElement(getter_AddRefs(focusedElement));
-  nsCOMPtr<nsINode> focusedNode = do_QueryInterface(focusedElement);
-  if (focusedNode) {
+  nsINode* focusedNode = fm->GetFocusedElement();
+  if (focusedNode && focusedNode->IsElement()) {
     // If there is a focused element, make sure it's in the active editing host.
     // Note that GetActiveEditingHost finds the current editing host based on
     // the document's selection.  Even though the document selection is usually
@@ -520,21 +602,20 @@ nsXBLWindowKeyHandler::IsHTMLEditableFieldFocused()
 // for that event was found.
 //
 bool
-nsXBLWindowKeyHandler::WalkHandlersInternal(nsIDOMKeyEvent* aKeyEvent,
-                                            nsIAtom* aEventType, 
-                                            nsXBLPrototypeHandler* aHandler,
+nsXBLWindowKeyHandler::WalkHandlersInternal(KeyboardEvent* aKeyEvent,
+                                            nsAtom* aEventType,
                                             bool aExecute,
                                             bool* aOutReservedForChrome)
 {
   WidgetKeyboardEvent* nativeKeyboardEvent =
-    aKeyEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
+    aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
   MOZ_ASSERT(nativeKeyboardEvent);
 
   AutoShortcutKeyCandidateArray shortcutKeys;
   nativeKeyboardEvent->GetShortcutKeyCandidates(shortcutKeys);
 
   if (shortcutKeys.IsEmpty()) {
-    return WalkHandlersAndExecute(aKeyEvent, aEventType, aHandler,
+    return WalkHandlersAndExecute(aKeyEvent, aEventType,
                                   0, IgnoreModifierState(),
                                   aExecute, aOutReservedForChrome);
   }
@@ -543,7 +624,7 @@ nsXBLWindowKeyHandler::WalkHandlersInternal(nsIDOMKeyEvent* aKeyEvent,
     ShortcutKeyCandidate& key = shortcutKeys[i];
     IgnoreModifierState ignoreModifierState;
     ignoreModifierState.mShift = key.mIgnoreShift;
-    if (WalkHandlersAndExecute(aKeyEvent, aEventType, aHandler,
+    if (WalkHandlersAndExecute(aKeyEvent, aEventType,
                                key.mCharCode, ignoreModifierState,
                                aExecute, aOutReservedForChrome)) {
       return true;
@@ -554,28 +635,45 @@ nsXBLWindowKeyHandler::WalkHandlersInternal(nsIDOMKeyEvent* aKeyEvent,
 
 bool
 nsXBLWindowKeyHandler::WalkHandlersAndExecute(
-                         nsIDOMKeyEvent* aKeyEvent,
-                         nsIAtom* aEventType,
-                         nsXBLPrototypeHandler* aFirstHandler,
+                         KeyboardEvent* aKeyEvent,
+                         nsAtom* aEventType,
                          uint32_t aCharCode,
                          const IgnoreModifierState& aIgnoreModifierState,
                          bool aExecute,
                          bool* aOutReservedForChrome)
 {
+  if (aOutReservedForChrome) {
+    *aOutReservedForChrome = false;
+  }
+
+  WidgetKeyboardEvent* widgetKeyboardEvent =
+    aKeyEvent->WidgetEventPtr()->AsKeyboardEvent();
+  if (NS_WARN_IF(!widgetKeyboardEvent)) {
+    return false;
+  }
+
   // Try all of the handlers until we find one that matches the event.
-  for (nsXBLPrototypeHandler* handler = aFirstHandler;
+  for (nsXBLPrototypeHandler* handler = mHandler;
        handler;
        handler = handler->GetNextHandler()) {
-    bool stopped = aKeyEvent->AsEvent()->IsDispatchStopped();
+    bool stopped = aKeyEvent->IsDispatchStopped();
     if (stopped) {
       // The event is finished, don't execute any more handlers
       return false;
     }
 
     if (aExecute) {
-      // If it's executing matched handlers, the event type should exactly be
-      // matched.
-      if (!handler->EventTypeEquals(aEventType)) {
+      // If the event is eKeyDownOnPlugin, it should execute either keydown
+      // handler or keypress handler because eKeyDownOnPlugin events are
+      // never followed by keypress events.
+      if (widgetKeyboardEvent->mMessage == eKeyDownOnPlugin) {
+        if (!handler->EventTypeEquals(nsGkAtoms::keydown) &&
+            !handler->EventTypeEquals(nsGkAtoms::keypress)) {
+          continue;
+        }
+      // The other event types should exactly be matched with the handler's
+      // event type.
+      } else if (!handler->EventTypeEquals(aEventType)) {
         continue;
       }
     } else {
@@ -609,34 +707,46 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(
       continue;
     }
 
-    bool isReserved = false;
     if (commandElement) {
-      if (!IsExecutableElement(commandElement)) {
+      if (aExecute && !IsExecutableElement(commandElement)) {
         continue;
-      }
-
-      isReserved =
-        commandElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::reserved,
-                                    nsGkAtoms::_true, eCaseMatters);
-      if (aOutReservedForChrome) {
-        *aOutReservedForChrome = isReserved;
       }
     }
 
     if (!aExecute) {
       if (handler->EventTypeEquals(aEventType)) {
+        if (aOutReservedForChrome) {
+          *aOutReservedForChrome = IsReservedKey(widgetKeyboardEvent, handler);
+        }
+
         return true;
       }
+
       // If the command is reserved and the event is keydown, check also if
       // the handler is for keypress because if following keypress event is
       // reserved, we shouldn't dispatch the event into web contents.
-      if (isReserved &&
-          aEventType == nsGkAtoms::keydown &&
+      if (aEventType == nsGkAtoms::keydown &&
           handler->EventTypeEquals(nsGkAtoms::keypress)) {
-        return true;
+        if (IsReservedKey(widgetKeyboardEvent, handler)) {
+          if (aOutReservedForChrome) {
+            *aOutReservedForChrome = true;
+          }
+
+          return true;
+        }
       }
       // Otherwise, we've not found a handler for the event yet.
       continue;
+    }
+
+    // This should only be assigned when aExecute is false.
+    MOZ_ASSERT(!aOutReservedForChrome);
+
+    // If it's not reserved and the event is a key event on a plugin,
+    // the handler shouldn't be executed.
+    if (widgetKeyboardEvent->IsKeyEventOnPlugin() &&
+        !IsReservedKey(widgetKeyboardEvent, handler)) {
+      return false;
     }
 
     nsCOMPtr<EventTarget> target;
@@ -650,7 +760,7 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(
 
     // XXX Do we execute only one handler even if the handler neither stops
     //     propagation nor prevents default of the event?
-    nsresult rv = handler->ExecuteHandler(target, aKeyEvent->AsEvent());
+    nsresult rv = handler->ExecuteHandler(target, aKeyEvent);
     if (NS_SUCCEEDED(rv)) {
       return true;
     }
@@ -661,15 +771,11 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(
   // shortcut keys even if the key is pressed.  Therefore, if there is no
   // shortcut key which exactly matches current modifier state, we should
   // retry to look for a shortcut key without the Windows-Logo key press.
-  if (!aIgnoreModifierState.mOS) {
-    WidgetKeyboardEvent* keyEvent =
-      aKeyEvent->AsEvent()->WidgetEventPtr()->AsKeyboardEvent();
-    if (keyEvent && keyEvent->IsOS()) {
-      IgnoreModifierState ignoreModifierState(aIgnoreModifierState);
-      ignoreModifierState.mOS = true;
-      return WalkHandlersAndExecute(aKeyEvent, aEventType, aFirstHandler,
-                                    aCharCode, ignoreModifierState, aExecute);
-    }
+  if (!aIgnoreModifierState.mOS && widgetKeyboardEvent->IsOS()) {
+    IgnoreModifierState ignoreModifierState(aIgnoreModifierState);
+    ignoreModifierState.mOS = true;
+    return WalkHandlersAndExecute(aKeyEvent, aEventType,
+                                  aCharCode, ignoreModifierState, aExecute);
   }
 #endif
 
@@ -677,10 +783,31 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(
 }
 
 bool
-nsXBLWindowKeyHandler::HasHandlerForEvent(nsIDOMKeyEvent* aEvent,
+nsXBLWindowKeyHandler::IsReservedKey(WidgetKeyboardEvent* aKeyEvent,
+                                     nsXBLPrototypeHandler* aHandler)
+{
+  XBLReservedKey reserved = aHandler->GetIsReserved();
+  // reserved="true" means that the key is always reserved. reserved="false"
+  // means that the key is never reserved. Otherwise, we check site-specific
+  // permissions.
+  if (reserved == XBLReservedKey_False) {
+    return false;
+  }
+
+  if (reserved == XBLReservedKey_True) {
+    return true;
+  }
+
+  return nsContentUtils::ShouldBlockReservedKeys(aKeyEvent);
+}
+
+bool
+nsXBLWindowKeyHandler::HasHandlerForEvent(KeyboardEvent* aEvent,
                                           bool* aOutReservedForChrome)
 {
-  if (!aEvent->AsEvent()->InternalDOMEvent()->IsTrusted()) {
+  WidgetKeyboardEvent* widgetKeyboardEvent =
+    aEvent->WidgetEventPtr()->AsKeyboardEvent();
+  if (NS_WARN_IF(!widgetKeyboardEvent) || !widgetKeyboardEvent->IsTrusted()) {
     return false;
   }
 
@@ -693,12 +820,9 @@ nsXBLWindowKeyHandler::HasHandlerForEvent(nsIDOMKeyEvent* aEvent,
     return false;
   }
 
-  nsAutoString eventType;
-  aEvent->AsEvent()->GetType(eventType);
-  nsCOMPtr<nsIAtom> eventTypeAtom = NS_Atomize(eventType);
-  NS_ENSURE_TRUE(eventTypeAtom, false);
-
-  return WalkHandlersInternal(aEvent, eventTypeAtom, mHandler, false,
+  RefPtr<nsAtom> eventTypeAtom =
+    ConvertEventToDOMEventType(*widgetKeyboardEvent);
+  return WalkHandlersInternal(aEvent, eventTypeAtom, false,
                               aOutReservedForChrome);
 }
 
@@ -720,14 +844,14 @@ nsXBLWindowKeyHandler::GetElementForHandler(nsXBLPrototypeHandler* aHandler,
   MOZ_ASSERT(aElementForHandler);
   *aElementForHandler = nullptr;
 
-  nsCOMPtr<nsIContent> keyContent = aHandler->GetHandlerElement();
+  RefPtr<Element> keyContent = aHandler->GetHandlerElement();
   if (!keyContent) {
     return true; // XXX Even though no key element?
   }
 
   nsCOMPtr<Element> chromeHandlerElement = GetElement();
   if (!chromeHandlerElement) {
-    NS_WARN_IF(!keyContent->IsInDoc());
+    NS_WARNING_ASSERTION(keyContent->IsInUncomposedDoc(), "uncomposed");
     nsCOMPtr<Element> keyElement = do_QueryInterface(keyContent);
     keyElement.swap(*aElementForHandler);
     return true;
@@ -738,14 +862,14 @@ nsXBLWindowKeyHandler::GetElementForHandler(nsXBLPrototypeHandler* aHandler,
   keyContent->GetAttr(kNameSpaceID_None, nsGkAtoms::command, command);
   if (command.IsEmpty()) {
     // There is no command element associated with the key element.
-    NS_WARN_IF(!keyContent->IsInDoc());
+    NS_WARNING_ASSERTION(keyContent->IsInUncomposedDoc(), "uncomposed");
     nsCOMPtr<Element> keyElement = do_QueryInterface(keyContent);
     keyElement.swap(*aElementForHandler);
     return true;
   }
 
   // XXX Shouldn't we check this earlier?
-  nsIDocument* doc = keyContent->GetCurrentDoc();
+  nsIDocument* doc = keyContent->GetUncomposedDoc();
   if (NS_WARN_IF(!doc)) {
     return false;
   }
@@ -786,7 +910,7 @@ nsXBLWindowKeyHandler::IsExecutableElement(Element* aElement) const
 ///////////////////////////////////////////////////////////////////////////////////
 
 already_AddRefed<nsXBLWindowKeyHandler>
-NS_NewXBLWindowKeyHandler(nsIDOMElement* aElement, EventTarget* aTarget)
+NS_NewXBLWindowKeyHandler(Element* aElement, EventTarget* aTarget)
 {
   RefPtr<nsXBLWindowKeyHandler> result =
     new nsXBLWindowKeyHandler(aElement, aTarget);

@@ -6,6 +6,7 @@
 
 #include "OffscreenCanvas.h"
 
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/OffscreenCanvasBinding.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
@@ -51,7 +52,6 @@ OffscreenCanvas::OffscreenCanvas(nsIGlobalObject* aGlobal,
   , mWidth(aWidth)
   , mHeight(aHeight)
   , mCompositorBackendType(aCompositorBackend)
-  , mCanvasClient(nullptr)
   , mCanvasRenderer(aRenderer)
 {}
 
@@ -64,7 +64,7 @@ JSObject*
 OffscreenCanvas::WrapObject(JSContext* aCx,
                             JS::Handle<JSObject*> aGivenProto)
 {
-  return OffscreenCanvasBinding::Wrap(aCx, this, aGivenProto);
+  return OffscreenCanvas_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<OffscreenCanvas>
@@ -85,20 +85,20 @@ OffscreenCanvas::ClearResources()
 {
   if (mCanvasClient) {
     mCanvasClient->Clear();
-    ImageBridgeChild::DispatchReleaseCanvasClient(mCanvasClient);
-    mCanvasClient = nullptr;
 
     if (mCanvasRenderer) {
-      nsCOMPtr<nsIThread> activeThread = mCanvasRenderer->GetActiveThread();
-      MOZ_RELEASE_ASSERT(activeThread);
+      nsCOMPtr<nsISerialEventTarget> activeTarget = mCanvasRenderer->GetActiveEventTarget();
+      MOZ_RELEASE_ASSERT(activeTarget, "GFX: failed to get active event target.");
       bool current;
-      activeThread->IsOnCurrentThread(&current);
-      MOZ_RELEASE_ASSERT(current);
+      activeTarget->IsOnCurrentThread(&current);
+      MOZ_RELEASE_ASSERT(current, "GFX: active thread is not current thread.");
       mCanvasRenderer->SetCanvasClient(nullptr);
       mCanvasRenderer->mContext = nullptr;
       mCanvasRenderer->mGLContext = nullptr;
-      mCanvasRenderer->ResetActiveThread();
+      mCanvasRenderer->ResetActiveEventTarget();
     }
+
+    mCanvasClient = nullptr;
   }
 }
 
@@ -144,14 +144,13 @@ OffscreenCanvas::GetContext(JSContext* aCx,
       WebGLContext* webGL = static_cast<WebGLContext*>(mCurrentContext.get());
       gl::GLContext* gl = webGL->GL();
       mCanvasRenderer->mContext = mCurrentContext;
-      mCanvasRenderer->SetActiveThread();
+      mCanvasRenderer->SetActiveEventTarget();
       mCanvasRenderer->mGLContext = gl;
       mCanvasRenderer->SetIsAlphaPremultiplied(webGL->IsPremultAlpha() || !gl->Caps().alpha);
 
-      if (ImageBridgeChild::IsCreated()) {
+      if (RefPtr<ImageBridgeChild> imageBridge = ImageBridgeChild::GetSingleton()) {
         TextureFlags flags = TextureFlags::ORIGIN_BOTTOM_LEFT;
-        mCanvasClient = ImageBridgeChild::GetSingleton()->
-          CreateCanvasClient(CanvasClient::CanvasClientTypeShSurf, flags).take();
+        mCanvasClient = imageBridge->CreateCanvasClient(CanvasClient::CanvasClientTypeShSurf, flags);
         mCanvasRenderer->SetCanvasClient(mCanvasClient);
 
         gl::GLScreenBuffer* screen = gl->Screen();
@@ -162,7 +161,7 @@ OffscreenCanvas::GetContext(JSContext* aCx,
           gl::GLScreenBuffer::CreateFactory(gl, caps, forwarder, flags);
 
         if (factory)
-          screen->Morph(Move(factory));
+          screen->Morph(std::move(factory));
       }
     }
   }
@@ -219,19 +218,15 @@ OffscreenCanvas::ToCloneData()
 }
 
 already_AddRefed<ImageBitmap>
-OffscreenCanvas::TransferToImageBitmap()
+OffscreenCanvas::TransferToImageBitmap(ErrorResult& aRv)
 {
-  ErrorResult rv;
-  RefPtr<ImageBitmap> result = ImageBitmap::CreateFromOffscreenCanvas(GetGlobalObject(), *this, rv);
-
-  // Clear the content.
-  if ((mCurrentContextType == CanvasContextType::WebGL1 ||
-       mCurrentContextType == CanvasContextType::WebGL2))
-  {
-    WebGLContext* webGL = static_cast<WebGLContext*>(mCurrentContext.get());
-    webGL->ClearScreen();
+  nsCOMPtr<nsIGlobalObject> globalObject = GetGlobalObject();
+  RefPtr<ImageBitmap> result = ImageBitmap::CreateFromOffscreenCanvas(globalObject, *this, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
   }
 
+  // TODO: Clear the content?
   return result.forget();
 }
 
@@ -263,20 +258,9 @@ OffscreenCanvas::ToBlob(JSContext* aCx,
       , mPromise(aPromise) {}
 
     // This is called on main thread.
-    nsresult ReceiveBlob(already_AddRefed<Blob> aBlob)
+    nsresult ReceiveBlob(already_AddRefed<Blob> aBlob) override
     {
       RefPtr<Blob> blob = aBlob;
-
-      ErrorResult rv;
-      uint64_t size = blob->GetSize(rv);
-      if (rv.Failed()) {
-        rv.SuppressException();
-      } else {
-        AutoJSAPI jsapi;
-        if (jsapi.Init(mGlobal)) {
-          JS_updateMallocCounter(jsapi.cx(), size);
-        }
-      }
 
       if (mPromise) {
         RefPtr<Blob> newBlob = Blob::Create(mGlobal, blob->Impl());
@@ -286,7 +270,7 @@ OffscreenCanvas::ToBlob(JSContext* aCx,
       mGlobal = nullptr;
       mPromise = nullptr;
 
-      return rv.StealNSResult();
+      return NS_OK;
     }
 
     nsCOMPtr<nsIGlobalObject> mGlobal;
@@ -296,20 +280,25 @@ OffscreenCanvas::ToBlob(JSContext* aCx,
   RefPtr<EncodeCompleteCallback> callback =
     new EncodeCallback(global, promise);
 
-  CanvasRenderingContextHelper::ToBlob(aCx, global,
-                                       callback, aType, aParams, aRv);
+  // TODO: Can we obtain the context and document here somehow
+  // so that we can decide when usePlaceholder should be true/false?
+  // See https://trac.torproject.org/18599
+  // For now, we always return a placeholder if fingerprinting resistance is on.
+  bool usePlaceholder = nsContentUtils::ShouldResistFingerprinting();
+  CanvasRenderingContextHelper::ToBlob(aCx, global, callback, aType, aParams,
+                                       usePlaceholder, aRv);
 
   return promise.forget();
 }
 
 already_AddRefed<gfx::SourceSurface>
-OffscreenCanvas::GetSurfaceSnapshot(bool* aPremultAlpha)
+OffscreenCanvas::GetSurfaceSnapshot(gfxAlphaType* const aOutAlphaType)
 {
   if (!mCurrentContext) {
     return nullptr;
   }
 
-  return mCurrentContext->GetSurfaceSnapshot(aPremultAlpha);
+  return mCurrentContext->GetSurfaceSnapshot(aOutAlphaType);
 }
 
 nsCOMPtr<nsIGlobalObject>
@@ -319,8 +308,7 @@ OffscreenCanvas::GetGlobalObject()
     return GetParentObject();
   }
 
-  dom::workers::WorkerPrivate* workerPrivate =
-    dom::workers::GetCurrentThreadWorkerPrivate();
+  dom::WorkerPrivate* workerPrivate = dom::GetCurrentThreadWorkerPrivate();
   return workerPrivate->GlobalScope();
 }
 
@@ -338,25 +326,13 @@ OffscreenCanvas::CreateFromCloneData(nsIGlobalObject* aGlobal, OffscreenCanvasCl
 }
 
 /* static */ bool
-OffscreenCanvas::PrefEnabled(JSContext* aCx, JSObject* aObj)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("gfx.offscreencanvas.enabled");
-  } else {
-    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-    MOZ_ASSERT(workerPrivate);
-    return workerPrivate->OffscreenCanvasEnabled();
-  }
-}
-
-/* static */ bool
 OffscreenCanvas::PrefEnabledOnWorkerThread(JSContext* aCx, JSObject* aObj)
 {
   if (NS_IsMainThread()) {
     return true;
   }
 
-  return PrefEnabled(aCx, aObj);
+  return DOMPrefs::OffscreenCanvasEnabled(aCx, aObj);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(OffscreenCanvas, DOMEventTargetHelper, mCurrentContext)
@@ -364,7 +340,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(OffscreenCanvas, DOMEventTargetHelper, mCurre
 NS_IMPL_ADDREF_INHERITED(OffscreenCanvas, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(OffscreenCanvas, DOMEventTargetHelper)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(OffscreenCanvas)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(OffscreenCanvas)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 

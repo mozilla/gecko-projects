@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,9 +10,13 @@
 // Keep others in (case-insensitive) order:
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
-#include "nsISVGChildFrame.h"
+#include "nsSVGDisplayableFrame.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
+#include "mozilla/dom/IDTracker.h"
+#include "mozilla/dom/SVGLengthBinding.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "mozilla/dom/SVGFilterElement.h"
-#include "nsReferencedElement.h"
+#include "SVGObserverUtils.h"
 #include "nsSVGFilterFrame.h"
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
@@ -20,25 +25,25 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::dom::SVGUnitTypes_Binding;
 using namespace mozilla::gfx;
 
 nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
+                                         nsIFrame* aTargetFrame,
                                          nsIContent* aTargetContent,
                                          const UserSpaceMetrics& aMetrics,
                                          const gfxRect& aTargetBBox,
-                                         const gfxSize& aUserSpaceToFilterSpaceScale,
-                                         const gfxSize& aFilterSpaceToUserSpaceScale) :
+                                         const gfxSize& aUserSpaceToFilterSpaceScale) :
   mFilter(aFilter),
   mTargetContent(aTargetContent),
   mMetrics(aMetrics),
   mTargetBBox(aTargetBBox),
   mUserSpaceToFilterSpaceScale(aUserSpaceToFilterSpaceScale),
-  mFilterSpaceToUserSpaceScale(aFilterSpaceToUserSpaceScale),
   mSourceAlphaAvailable(false),
   mInitialized(false) {
 
   // Get the filter frame.
-  mFilterFrame = GetFilterFrame();
+  mFilterFrame = GetFilterFrame(aTargetFrame);
   if (!mFilterFrame) {
     return;
   }
@@ -46,22 +51,21 @@ nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
   // Get the filter element.
   mFilterElement = mFilterFrame->GetFilterContent();
   if (!mFilterElement) {
-    NS_NOTREACHED("filter frame should have a related element");
+    MOZ_ASSERT_UNREACHABLE("filter frame should have a related element");
     return;
   }
 
   mPrimitiveUnits =
     mFilterFrame->GetEnumValue(SVGFilterElement::PRIMITIVEUNITS);
 
-  nsresult rv = ComputeBounds();
-  if (NS_FAILED(rv)) {
+  if (!ComputeBounds()) {
     return;
   }
 
   mInitialized = true;
 }
 
-nsresult
+bool
 nsSVGFilterInstance::ComputeBounds()
 {
   // XXX if filterUnits is set (or has defaulted) to objectBoundingBox, we
@@ -79,49 +83,41 @@ nsSVGFilterInstance::ComputeBounds()
   static_assert(sizeof(mFilterElement->mLengthAttributes) == sizeof(XYWH),
                 "XYWH size incorrect");
   memcpy(XYWH, mFilterElement->mLengthAttributes,
-    sizeof(mFilterElement->mLengthAttributes));
+         sizeof(mFilterElement->mLengthAttributes));
   XYWH[0] = *mFilterFrame->GetLengthValue(SVGFilterElement::ATTR_X);
   XYWH[1] = *mFilterFrame->GetLengthValue(SVGFilterElement::ATTR_Y);
   XYWH[2] = *mFilterFrame->GetLengthValue(SVGFilterElement::ATTR_WIDTH);
   XYWH[3] = *mFilterFrame->GetLengthValue(SVGFilterElement::ATTR_HEIGHT);
   uint16_t filterUnits =
     mFilterFrame->GetEnumValue(SVGFilterElement::FILTERUNITS);
-  gfxRect userSpaceBounds = nsSVGUtils::GetRelativeRect(filterUnits,
-    XYWH, mTargetBBox, mMetrics);
+  gfxRect userSpaceBounds =
+    nsSVGUtils::GetRelativeRect(filterUnits, XYWH, mTargetBBox, mMetrics);
 
   // Transform the user space bounds to filter space, so we
-  // can align them with the pixel boundries of the offscreen surface.
+  // can align them with the pixel boundaries of the offscreen surface.
   // The offscreen surface has the same scale as filter space.
   gfxRect filterSpaceBounds = UserSpaceToFilterSpace(userSpaceBounds);
   filterSpaceBounds.RoundOut();
   if (filterSpaceBounds.width <= 0 || filterSpaceBounds.height <= 0) {
     // 0 disables rendering, < 0 is error. dispatch error console warning
     // or error as appropriate.
-    return NS_ERROR_FAILURE;
+    return false;
   }
 
   // Set the filter space bounds.
   if (!gfxUtils::GfxRectToIntRect(filterSpaceBounds, &mFilterSpaceBounds)) {
     // The filter region is way too big if there is float -> int overflow.
-    return NS_ERROR_FAILURE;
+    return false;
   }
 
-  mUserSpaceBounds = FilterSpaceToUserSpace(filterSpaceBounds);
-
-  return NS_OK;
+  return true;
 }
 
 nsSVGFilterFrame*
-nsSVGFilterInstance::GetFilterFrame()
+nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
 {
   if (mFilter.GetType() != NS_STYLE_FILTER_URL) {
     // The filter is not an SVG reference filter.
-    return nullptr;
-  }
-
-  nsIURI* url = mFilter.GetURL();
-  if (!url) {
-    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
     return nullptr;
   }
 
@@ -131,8 +127,19 @@ nsSVGFilterInstance::GetFilterFrame()
     return nullptr;
   }
 
+  // aTargetFrame can be null if this filter belongs to a
+  // CanvasRenderingContext2D.
+  nsCOMPtr<nsIURI> url = aTargetFrame
+    ? SVGObserverUtils::GetFilterURI(aTargetFrame, mFilter)
+    : mFilter.GetURL()->ResolveLocalRef(mTargetContent);
+
+  if (!url) {
+    MOZ_ASSERT_UNREACHABLE("an nsStyleFilter of type URL should have a non-null URL");
+    return nullptr;
+  }
+
   // Look up the filter element by URL.
-  nsReferencedElement filterElement;
+  IDTracker filterElement;
   bool watch = false;
   filterElement.Reset(mTargetContent, url, watch);
   Element* element = filterElement.get();
@@ -143,7 +150,7 @@ nsSVGFilterInstance::GetFilterFrame()
 
   // Get the frame of the filter element.
   nsIFrame* frame = element->GetPrimaryFrame();
-  if (!frame || frame->GetType() != nsGkAtoms::svgFilterFrame) {
+  if (!frame || !frame->IsSVGFilterFrame()) {
     // The URL points to an element that's not an SVG filter element, or to an
     // element that hasn't had its frame constructed yet.
     return nullptr;
@@ -157,7 +164,7 @@ nsSVGFilterInstance::GetPrimitiveNumber(uint8_t aCtxType, float aValue) const
 {
   nsSVGLength2 val;
   val.Init(aCtxType, 0xff, aValue,
-           nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER);
+           SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
 
   float value;
   if (mPrimitiveUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
@@ -184,14 +191,14 @@ nsSVGFilterInstance::ConvertLocation(const Point3D& aPoint) const
 {
   nsSVGLength2 val[4];
   val[0].Init(SVGContentUtils::X, 0xff, aPoint.x,
-              nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   val[1].Init(SVGContentUtils::Y, 0xff, aPoint.y,
-              nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   // Dummy width/height values
   val[2].Init(SVGContentUtils::X, 0xff, 0,
-              nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   val[3].Init(SVGContentUtils::Y, 0xff, 0,
-              nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER);
+              SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
 
   gfxRect feArea = nsSVGUtils::GetRelativeRect(mPrimitiveUnits,
     val, mTargetBBox, mMetrics);
@@ -206,15 +213,6 @@ nsSVGFilterInstance::UserSpaceToFilterSpace(const gfxRect& aUserSpaceRect) const
   filterSpaceRect.Scale(mUserSpaceToFilterSpaceScale.width,
                         mUserSpaceToFilterSpaceScale.height);
   return filterSpaceRect;
-}
-
-gfxRect
-nsSVGFilterInstance::FilterSpaceToUserSpace(const gfxRect& aFilterSpaceRect) const
-{
-  gfxRect userSpaceRect = aFilterSpaceRect;
-  userSpaceRect.Scale(mFilterSpaceToUserSpaceScale.width,
-                      mFilterSpaceToUserSpaceScale.height);
-  return userSpaceRect;
 }
 
 IntRect
@@ -262,13 +260,13 @@ nsSVGFilterInstance::ComputeFilterPrimitiveSubregion(nsSVGFE* aFilterElement,
 void
 nsSVGFilterInstance::GetInputsAreTainted(const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
                                          const nsTArray<int32_t>& aInputIndices,
+                                         bool aFilterInputIsTainted,
                                          nsTArray<bool>& aOutInputsAreTainted)
 {
   for (uint32_t i = 0; i < aInputIndices.Length(); i++) {
     int32_t inputIndex = aInputIndices[i];
     if (inputIndex < 0) {
-      // SourceGraphic, SourceAlpha, FillPaint and StrokePaint are tainted.
-      aOutInputsAreTainted.AppendElement(true);
+      aOutInputsAreTainted.AppendElement(aFilterInputIsTainted);
     } else {
       aOutInputsAreTainted.AppendElement(aPrimitiveDescrs[inputIndex].IsTainted());
     }
@@ -361,7 +359,8 @@ nsSVGFilterInstance::GetSourceIndices(nsSVGFE* aPrimitiveElement,
 
 nsresult
 nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
-                                     nsTArray<RefPtr<SourceSurface>>& aInputImages)
+                                     nsTArray<RefPtr<SourceSurface>>& aInputImages,
+                                     bool aInputIsTainted)
 {
   mSourceGraphicIndex = GetLastResultIndex(aPrimitiveDescrs);
 
@@ -404,7 +403,7 @@ nsSVGFilterInstance::BuildPrimitives(nsTArray<FilterPrimitiveDescription>& aPrim
       ComputeFilterPrimitiveSubregion(filter, aPrimitiveDescrs, sourceIndices);
 
     nsTArray<bool> sourcesAreTainted;
-    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, sourcesAreTainted);
+    GetInputsAreTainted(aPrimitiveDescrs, sourceIndices, aInputIsTainted, sourcesAreTainted);
 
     FilterPrimitiveDescription descr =
       filter->GetPrimitiveDescription(this, primitiveSubregion, sourcesAreTainted, aInputImages);

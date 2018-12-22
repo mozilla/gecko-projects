@@ -42,26 +42,24 @@
         }
 
         input.addEventListener("focus", function() {
-          div.mozRequestPointerLock();
-        }, false);
+          div.requestPointerLock();
+        }, { once: true });
 
-        document.addEventListener("mozpointerlockchange", function (e) {
-          if (document.mozPointerLockElement === div) {
+        document.addEventListener("pointerlockchange", function (e) {
+          if (document.pointerLockElement === div) {
             divPointerLock = true;
+            addFullscreenChangeContinuation("exit", function() {
+              runTests();
+              SimpleTest.finish();
+            });
             document.exitFullscreen();
           }
-        }, false);
-
-        document.addEventListener("fullscreenchange", function() {
-          if (document.fullscreenElement === div) {
-            input.focus();
-          } else {
-            runTests();
-            SimpleTest.finish();
-          }
-        }, false);
+        });
 
         function start() {
+          addFullscreenChangeContinuation("enter", function() {
+            input.focus();
+          });
           div.requestFullscreen();
         }
       </script>

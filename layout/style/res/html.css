@@ -7,18 +7,18 @@
 
 /* bidi */
 
-[dir] {
-  unicode-bidi: -moz-isolate;
+:-moz-has-dir-attr {
+  unicode-bidi: isolate;
 }
-[dir="rtl"] {
+:-moz-dir-attr-rtl {
   direction: rtl;
 }
-[dir="ltr"] {
+:-moz-dir-attr-ltr {
   direction: ltr;
 }
 
-bdi:-moz-dir(ltr), [dir="auto"]:-moz-dir(ltr) { direction: ltr; }
-bdi:-moz-dir(rtl), [dir="auto"]:-moz-dir(rtl) { direction: rtl; }
+:-moz-dir-attr-like-auto:dir(ltr) { direction: ltr; }
+:-moz-dir-attr-like-auto:dir(rtl) { direction: rtl; }
 
 /* To ensure http://www.w3.org/TR/REC-html40/struct/dirlang.html#style-bidi:
  *
@@ -83,19 +83,21 @@ thead,
 tr,
 ul,
 xmp {
-  unicode-bidi: -moz-isolate;
+  unicode-bidi: isolate;
 }
 
 bdi, output {
-  unicode-bidi: -moz-isolate;
+  unicode-bidi: isolate;
 }
-bdo, bdo[dir] {
-  unicode-bidi: bidi-override;
+/* We need the "bdo:-moz-has-dir-attr" bit because "bdo" has lower
+   specificity than the ":-moz-has-dir-attr" selector above. */
+bdo, bdo:-moz-has-dir-attr {
+  unicode-bidi: isolate-override;
 }
-bdo[dir="auto"] {
-  unicode-bidi: -moz-isolate-override;
+textarea:-moz-dir-attr-like-auto,
+pre:-moz-dir-attr-like-auto {
+    unicode-bidi: plaintext;
 }
-textarea[dir="auto"], pre[dir="auto"] { unicode-bidi: -moz-plaintext; }
 
 /* blocks */
 
@@ -130,15 +132,15 @@ p, dl, multicol {
 
 dd {
   display: block;
-  -moz-margin-start: 40px;
+  margin-inline-start: 40px;
 }
 
 blockquote, figure {
   display: block;
   margin-block-start: 1em;
   margin-block-end: 1em;
-  -moz-margin-start: 40px;
-  -moz-margin-end: 40px;
+  margin-inline-start: 40px;
+  margin-inline-end: 40px;
 }
 
 address {
@@ -155,10 +157,10 @@ blockquote[type=cite] {
   display: block;
   margin-block-start: 1em;
   margin-block-end: 1em;
-  -moz-margin-start: 0;
-  -moz-margin-end: 0;
-  -moz-padding-start: 1em;
-  -moz-border-start: solid;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  padding-inline-start: 1em;
+  border-inline-start: solid;
   border-color: blue;
   border-width: thin;
 }
@@ -386,17 +388,17 @@ table[rules][rules="cols"] > tr > td,
 table[rules][rules="cols"] > * > tr > td,
 table[rules][rules="cols"] > tr > th,
 table[rules][rules="cols"] > * > tr > th {
-  -moz-border-start-width: thin;
-  -moz-border-end-width: thin;
-  -moz-border-start-style: solid;
-  -moz-border-end-style: solid;
+  border-inline-start-width: thin;
+  border-inline-end-width: thin;
+  border-inline-start-style: solid;
+  border-inline-end-style: solid;
 }
 
 table[rules][rules="groups"] > colgroup {
-  -moz-border-start-width: thin;
-  -moz-border-end-width: thin;
-  -moz-border-start-style: solid;
-  -moz-border-end-style: solid;
+  border-inline-start-width: thin;
+  border-inline-end-width: thin;
+  border-inline-start-style: solid;
+  border-inline-end-style: solid;
 }
 table[rules][rules="groups"] > tfoot,
 table[rules][rules="groups"] > thead,
@@ -415,22 +417,22 @@ caption {
 }
 
 table[align="center"] > caption {
-  -moz-margin-start: auto;
-  -moz-margin-end: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
 }
 
-table[align="center"] > caption[align="left"]:-moz-dir(ltr) {
-  -moz-margin-end: 0;
+table[align="center"] > caption[align="left"]:dir(ltr) {
+  margin-inline-end: 0;
 }
-table[align="center"] > caption[align="left"]:-moz-dir(rtl) {
-  -moz-margin-start: 0;
+table[align="center"] > caption[align="left"]:dir(rtl) {
+  margin-inline-start: 0;
 }
 
-table[align="center"] > caption[align="right"]:-moz-dir(ltr) {
-  -moz-margin-start: 0;
+table[align="center"] > caption[align="right"]:dir(ltr) {
+  margin-inline-start: 0;
 }
-table[align="center"] > caption[align="right"]:-moz-dir(rtl) {
-  -moz-margin-end: 0;
+table[align="center"] > caption[align="right"]:dir(rtl) {
+  margin-inline-end: 0;
 }
 
 tr {
@@ -572,7 +574,7 @@ ul, menu, dir {
   list-style-type: disc;
   margin-block-start: 1em;
   margin-block-end: 1em;
-  -moz-padding-start: 40px;
+  padding-inline-start: 40px;
 }
 
 menu[type="context"] {
@@ -584,7 +586,7 @@ ol {
   list-style-type: decimal;
   margin-block-start: 1em;
   margin-block-end: 1em;
-  -moz-padding-start: 40px;
+  padding-inline-start: 40px;
 }
 
 li {
@@ -627,11 +629,11 @@ hr {
   border: 1px inset;
   margin-block-start: 0.5em;
   margin-block-end: 0.5em;
-  -moz-margin-start: auto;
-  -moz-margin-end: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
   color: gray;
   -moz-float-edge: margin-box;
-  box-sizing: border-box;
+  box-sizing: content-box;
 }
 
 hr[size="1"] {
@@ -640,14 +642,12 @@ hr[size="1"] {
 
 img:-moz-broken::before, input:-moz-broken::before,
 img:-moz-user-disabled::before, input:-moz-user-disabled::before,
-img:-moz-loading::before, input:-moz-loading::before,
-applet:-moz-empty-except-children-with-localname(param):-moz-broken::before,
-applet:-moz-empty-except-children-with-localname(param):-moz-user-disabled::before {
+img:-moz-loading::before, input:-moz-loading::before {
   content: -moz-alt-content !important;
-  unicode-bidi: -moz-isolate;
+  unicode-bidi: isolate;
 }
 
-:-moz-any(object,applet):-moz-any(:-moz-broken,:-moz-user-disabled) > *|* {
+object:-moz-any(:-moz-broken,:-moz-user-disabled) > *|* {
   /*
     Inherit in the object's alignment so that if we aren't aligned explicitly
     we'll end up in the right place vertically.  See bug 36997.  Note that this
@@ -657,7 +657,7 @@ applet:-moz-empty-except-children-with-localname(param):-moz-user-disabled::befo
 }
 
 img:-moz-suppressed, input:-moz-suppressed, object:-moz-suppressed,
-embed:-moz-suppressed, applet:-moz-suppressed {
+embed:-moz-suppressed {
   /*
     Set visibility too in case the page changes display.  Note that we _may_
     want to just set visibility and not display, in general, if we find that
@@ -759,6 +759,13 @@ audio:not([controls]) {
   display: none;
 }
 
+audio[controls] {
+  /* This ensures that intrinsic sizing can reliably shrinkwrap our
+      controls (which are also always horizontal) and produce a
+      reasonable intrinsic size from them. */
+  writing-mode: horizontal-tb !important;
+}
+
 *|*::-moz-html-canvas-content {
   display: block !important;
   /* we want to be an absolute and fixed container */
@@ -766,20 +773,67 @@ audio:not([controls]) {
 }
 
 video > .caption-box {
+  width: 100%;
+  height: 100%;
   position: relative;
-  overflow: hidden;
+}
+
+/* ::cue default settings */
+::cue {
+  color: rgba(255, 255, 255, 1);
+  white-space: pre-line;
+  background-color: rgba(0, 0, 0, 0.8);
+  font: var(--cue-font-size) sans-serif;
+}
+
+/* datetime elements */
+
+input[type="time"] > xul|datetimebox {
+  display: flex;
+  -moz-binding: url("chrome://global/content/bindings/datetimebox.xml#time-input");
+}
+
+input[type="date"] > xul|datetimebox {
+  display: flex;
+  -moz-binding: url("chrome://global/content/bindings/datetimebox.xml#date-input");
 }
 
 /* details & summary */
-/* Need to revert Bug 1259889 Part 2 when removing details preference. */
-@supports -moz-bool-pref("dom.details_element.enabled") {
-  details > summary::-moz-list-bullet {
-    list-style-type: disclosure-closed;
-  }
+details > summary:first-of-type,
+details > summary:-moz-native-anonymous {
+  display: list-item;
+  list-style: disclosure-closed inside;
+}
 
-  details[open] > summary::-moz-list-bullet {
-    list-style-type: disclosure-open;
-  }
+details[open] > summary:first-of-type,
+details[open] > summary:-moz-native-anonymous {
+  list-style-type: disclosure-open;
+}
+
+details > summary:first-of-type > *|* {
+  /* Cancel "list-style-position: inside" inherited from summary. */
+  list-style-position: initial;
+}
+
+/* <dialog> element styles */
+
+dialog {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+  color: black;
+  margin: auto;
+  border-width: initial;
+  border-style: solid;
+  border-color: initial;
+  border-image: initial;
+  padding: 1em;
+  background: white;
+  width: -moz-fit-content;
+}
+
+dialog:not([open]) {
+  display: none;
 }
 
 /* emulation of non-standard HTML <marquee> tag */
@@ -847,5 +901,11 @@ rtc > rt {
   font-size: inherit;
 }
 ruby, rb, rt, rtc {
-  unicode-bidi: -moz-isolate;
+  unicode-bidi: isolate;
+}
+
+/* Shadow DOM v1
+ * https://drafts.csswg.org/css-scoping/#slots-in-shadow-tree */
+slot {
+  display: contents;
 }

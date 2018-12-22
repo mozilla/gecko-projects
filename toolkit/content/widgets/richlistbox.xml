@@ -60,8 +60,8 @@
             // remember the current item and all selected items with IDs
             var state = this.currentItem ? this.currentItem.id : "";
             if (this.selType == "multiple" && this.selectedCount) {
-              let getId = function getId(aItem) { return aItem.id; }
-              state += " " + [... this.selectedItems].filter(getId).map(getId).join(" ");
+              let getId = function getId(aItem) { return aItem.id; };
+              state += " " + [...this.selectedItems].filter(getId).map(getId).join(" ");
             }
             if (state)
               this.setAttribute("last-selected", state);
@@ -95,7 +95,7 @@
           while (aStartItem) {
             aStartItem = aStartItem[prop];
             if (aStartItem && aStartItem instanceof
-                Components.interfaces.nsIDOMXULSelectControlItemElement &&
+                Ci.nsIDOMXULSelectControlItemElement &&
                 (!this._userSelecting || this._canUserSelect(aStartItem))) {
               --aDelta;
               if (aDelta == 0)
@@ -117,7 +117,7 @@
           while (aStartItem) {
             aStartItem = aStartItem[prop];
             if (aStartItem && aStartItem instanceof
-                Components.interfaces.nsIDOMXULSelectControlItemElement &&
+                Ci.nsIDOMXULSelectControlItemElement &&
                 (!this._userSelecting || this._canUserSelect(aStartItem))) {
               --aDelta;
               if (aDelta == 0)
@@ -130,15 +130,6 @@
       </method>
 
       <method name="appendItem">
-        <parameter name="aLabel"/>
-        <parameter name="aValue"/>
-        <body>
-          return this.insertItemAt(-1, aLabel, aValue);
-        </body>
-      </method>
-
-      <method name="insertItemAt">
-        <parameter name="aIndex"/>
         <parameter name="aLabel"/>
         <parameter name="aValue"/>
         <body>
@@ -155,11 +146,7 @@
           label.setAttribute("crop", "end");
           item.appendChild(label);
 
-          var before = this.getItemAtIndex(aIndex);
-          if (!before)
-            this.appendChild(item);
-          else
-            this.insertBefore(item, before);
+          this.appendChild(item);
 
           return item;
         </body>
@@ -175,7 +162,8 @@
             // don't search the children, if we're looking for none of them
             if (aItem == null)
               return -1;
-
+            if (this._selecting && this._selecting.item == aItem)
+              return this._selecting.index;
             return this.children.indexOf(aItem);
           ]]>
         </body>
@@ -184,7 +172,11 @@
       <method name="getItemAtIndex">
         <parameter name="aIndex"/>
         <body>
-          return this.children[aIndex] || null;
+          <![CDATA[
+            if (this._selecting && this._selecting.index == aIndex)
+              return this._selecting.item;
+            return this.children[aIndex] || null;
+          ]]>
         </body>
       </method>
 
@@ -315,16 +307,13 @@
       <property name="children" readonly="true">
         <getter>
           <![CDATA[
-            var childNodes = [];
-            var isReverse = this.dir == "reverse" && this._mayReverse;
-            var child = isReverse ? this.lastChild : this.firstChild;
-            var prop = isReverse ? "previousSibling" : "nextSibling";
-            while (child) {
-              if (child instanceof Components.interfaces.nsIDOMXULSelectControlItemElement)
-                childNodes.push(child);
-              child = child[prop];
+            let iface = Ci.nsIDOMXULSelectControlItemElement;
+            let children = Array.from(this.childNodes)
+                                .filter(node => node instanceof iface);
+            if (this.dir == "reverse" && this._mayReverse) {
+              children.reverse();
             }
-            return childNodes;
+            return children;
           ]]>
         </getter>
       </property>
@@ -334,8 +323,8 @@
           ({
             mOuter: this,
             item: null,
-            willRebuild: function(builder) { },
-            didRebuild: function(builder) {
+            willRebuild(builder) { },
+            didRebuild(builder) {
               this.mOuter._refreshSelection();
             }
           });
@@ -374,8 +363,7 @@
 
                 if (this.scrollBoxObject.height) {
                   this.ensureElementIsVisible(currentItem);
-                }
-                else {
+                } else {
                   // XXX hack around a bug in ensureElementIsVisible as it will
                   // scroll beyond the last element, bug 493645.
                   var previousElement = this.dir == "reverse" ? currentItem.nextSibling :
@@ -533,6 +521,8 @@
     </resources>
 
     <implementation>
+      <field name="selectedByMouseOver">false</field>
+
       <destructor>
         <![CDATA[
           var control = this.control;

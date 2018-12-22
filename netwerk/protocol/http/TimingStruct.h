@@ -7,6 +7,7 @@
 #define TimingStruct_h_
 
 #include "mozilla/TimeStamp.h"
+#include "nsString.h"
 
 namespace mozilla { namespace net {
 
@@ -14,6 +15,8 @@ struct TimingStruct {
   TimeStamp domainLookupStart;
   TimeStamp domainLookupEnd;
   TimeStamp connectStart;
+  TimeStamp tcpConnectEnd;
+  TimeStamp secureConnectionStart;
   TimeStamp connectEnd;
   TimeStamp requestStart;
   TimeStamp responseStart;

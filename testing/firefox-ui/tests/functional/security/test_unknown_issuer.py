@@ -6,14 +6,13 @@ import time
 
 from marionette_driver import By
 from marionette_driver.errors import MarionetteException
+from marionette_harness import MarionetteTestCase
 
-from firefox_ui_harness.testcases import FirefoxTestCase
 
-
-class TestUnknownIssuer(FirefoxTestCase):
+class TestUnknownIssuer(MarionetteTestCase):
 
     def setUp(self):
-        FirefoxTestCase.setUp(self)
+        super(TestUnknownIssuer, self).setUp()
 
         self.url = 'https://ssl-unknownissuer.mozqa.com'
 
@@ -25,15 +24,11 @@ class TestUnknownIssuer(FirefoxTestCase):
             # Wait for the DOM to receive events
             time.sleep(1)
 
-            # Check the link in cert_domain_link
-            link = self.marionette.find_element(By.ID, 'cert_domain_link')
-            self.assertEquals(link.get_attribute('textContent'),
-                              'ssl-selfsigned-unknownissuer.mozqa.com')
+            # Check for the correct error code
+            error = self.marionette.find_element(By.ID, 'errorCode')
+            self.assertEquals(error.get_property('textContent'),
+                              'SEC_ERROR_UNKNOWN_ISSUER')
 
             # Verify the "Go Back" and "Advanced" buttons appear
             self.assertIsNotNone(self.marionette.find_element(By.ID, 'returnButton'))
             self.assertIsNotNone(self.marionette.find_element(By.ID, 'advancedButton'))
-
-            # Verify the error code is correct
-            text = self.marionette.find_element(By.ID, 'technicalContentText')
-            self.assertIn('SEC_ERROR_UNKNOWN_ISSUER', text.get_attribute('textContent'))

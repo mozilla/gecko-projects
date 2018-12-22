@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Check that we source map frame locations returned by "frames" requests.
  */
@@ -16,20 +18,22 @@ function run_test() {
   gDebuggee = addTestGlobal("test-source-map");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-source-map", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      promise.resolve(define_code())
-        .then(run_code)
-        .then(test_frames)
-        .then(null, error => {
-          dump(error + "\n");
-          dump(error.stack);
-          do_check_true(false);
-        })
-        .then(() => {
-          finishClient(gClient);
-        });
-    });
+    attachTestTabAndResume(
+      gClient, "test-source-map",
+      function(response, tabClient, threadClient) {
+        gThreadClient = threadClient;
+        Promise.resolve(define_code())
+          .then(run_code)
+          .then(test_frames)
+          .catch(error => {
+            dump(error + "\n");
+            dump(error.stack);
+            Assert.ok(false);
+          })
+          .then(() => {
+            finishClient(gClient);
+          });
+      });
   });
   do_test_pending();
 }
@@ -52,32 +56,32 @@ function define_code() {
 
   code += "//# sourceMappingURL=data:text/json," + map.toString();
 
-  Components.utils.evalInSandbox(code, gDebuggee, "1.8",
-                                 "http://example.com/www/js/abc.js", 1);
+  Cu.evalInSandbox(code, gDebuggee, "1.8",
+                   "http://example.com/www/js/abc.js", 1);
 }
 
 function run_code() {
-  const d = promise.defer();
-  gClient.addOneTimeListener("paused", function () {
-    gThreadClient.getFrames(0, 3, function (aResponse) {
-      d.resolve(aResponse);
+  const d = defer();
+  gClient.addOneTimeListener("paused", function() {
+    gThreadClient.getFrames(0, 3, function(response) {
+      d.resolve(response);
       gThreadClient.resume();
-    })
+    });
   });
   gDebuggee.a();
   return d.promise;
 }
 
 function test_frames({ error, frames }) {
-  do_check_true(!error);
-  do_check_eq(frames.length, 3);
+  Assert.ok(!error);
+  Assert.equal(frames.length, 3);
   check_frame(frames[0], "http://example.com/www/js/c.js");
   check_frame(frames[1], "http://example.com/www/js/b.js");
   check_frame(frames[2], "http://example.com/www/js/a.js");
 }
 
-function check_frame({ where: { source, line, column } }, aExpectedUrl) {
-  do_check_eq(source.url, aExpectedUrl);
-  do_check_eq(line, 2);
-  do_check_eq(column, 0);
+function check_frame({ where: { source, line, column } }, expectedUrl) {
+  Assert.equal(source.url, expectedUrl);
+  Assert.equal(line, 2);
+  Assert.equal(column, 0);
 }

@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "txExpr.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "txNodeSet.h"
 #include "nsGkAtoms.h"
 #include "txIXPathContext.h"
@@ -16,13 +16,13 @@
 /**
  * Creates a VariableRefExpr with the given variable name
 **/
-VariableRefExpr::VariableRefExpr(nsIAtom* aPrefix, nsIAtom* aLocalName,
+VariableRefExpr::VariableRefExpr(nsAtom* aPrefix, nsAtom* aLocalName,
                                  int32_t aNSID)
     : mPrefix(aPrefix), mLocalName(aLocalName), mNamespace(aNSID)
 {
     NS_ASSERTION(mLocalName, "VariableRefExpr without local name?");
     if (mPrefix == nsGkAtoms::_empty)
-        mPrefix = 0;
+        mPrefix = nullptr;
 }
 
 /**

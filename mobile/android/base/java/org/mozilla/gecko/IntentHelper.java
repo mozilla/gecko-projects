@@ -5,76 +5,74 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.util.ActivityResultHandler;
+import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.GeckoEventListener;
-import org.mozilla.gecko.util.JSONUtils;
-import org.mozilla.gecko.util.NativeEventListener;
-import org.mozilla.gecko.util.NativeJSObject;
-import org.mozilla.gecko.util.WebActivityMapper;
+import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.widget.ExternalIntentDuringPrivateBrowsingPromptFragment;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
 import android.annotation.TargetApi;
+import android.app.Activity;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.provider.Browser;
+import android.provider.MediaStore;
 import android.support.annotation.Nullable;
 import android.support.v4.app.FragmentActivity;
+import android.support.v4.content.FileProvider;
 import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 
-import java.io.UnsupportedEncodingException;
+import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URLEncoder;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
-public final class IntentHelper implements GeckoEventListener,
-                                           NativeEventListener {
+import static org.mozilla.gecko.Tabs.INTENT_EXTRA_SESSION_UUID;
+import static org.mozilla.gecko.Tabs.INTENT_EXTRA_TAB_ID;
+
+public final class IntentHelper implements BundleEventListener {
 
     private static final String LOGTAG = "GeckoIntentHelper";
-    private static final String[] EVENTS = {
+    private static final String[] GECKO_EVENTS = {
+        // Need to be on Gecko thread for synchronous callback.
         "Intent:GetHandlers",
+    };
+    private static final String[] UI_EVENTS = {
         "Intent:Open",
         "Intent:OpenForResult",
-        "WebActivity:Open"
-    };
-
-    private static final String[] NATIVE_EVENTS = {
         "Intent:OpenNoHandler",
     };
 
     // via http://developer.android.com/distribute/tools/promote/linking.html
-    private static String MARKET_INTENT_URI_PACKAGE_PREFIX = "market://details?id=";
-    private static String EXTRA_BROWSER_FALLBACK_URL = "browser_fallback_url";
+    private static final String MARKET_INTENT_URI_PACKAGE_PREFIX = "market://details?id=";
+    private static final String EXTRA_BROWSER_FALLBACK_URL = "browser_fallback_url";
 
-    /** A partial URI to an error page - the encoded error URI should be appended before loading. */
-    private static String UNKNOWN_PROTOCOL_URI_PREFIX = "about:neterror?e=unknownProtocolFound&u=";
+    // In theory we can send up to 1 MB via an intent, which with UTF-16 strings would mean around
+    // 500k chars. In practice those 1 MB need to be shared with anything else we're doing that uses
+    // Binder transactions at the same time, plus sending a share intent can incur considerable
+    // overhead - for ACTION_SEND intents for example the whole EXTRA_TEXT will be duplicated into
+    // the intent's ClipData.
+    private static final int MAX_INTENT_STRING_DATA_LENGTH = 80000;
 
     private static IntentHelper instance;
 
-    private final FragmentActivity activity;
-
-    private IntentHelper(final FragmentActivity activity) {
-        this.activity = activity;
-        EventDispatcher.getInstance().registerGeckoThreadListener((GeckoEventListener) this, EVENTS);
-        EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener) this, NATIVE_EVENTS);
+    private IntentHelper() {
+        EventDispatcher.getInstance().registerGeckoThreadListener(this, GECKO_EVENTS);
+        EventDispatcher.getInstance().registerUiThreadListener(this, UI_EVENTS);
     }
 
-    public static IntentHelper init(final FragmentActivity activity) {
+    public static IntentHelper init() {
         if (instance == null) {
-            instance = new IntentHelper(activity);
+            instance = new IntentHelper();
         } else {
             Log.w(LOGTAG, "IntentHelper.init() called twice, ignoring.");
         }
@@ -82,12 +80,17 @@ public final class IntentHelper implements GeckoEventListener,
         return instance;
     }
 
-    public static void destroy() {
-        if (instance != null) {
-            EventDispatcher.getInstance().unregisterGeckoThreadListener((GeckoEventListener) instance, EVENTS);
-            EventDispatcher.getInstance().unregisterGeckoThreadListener((NativeEventListener) instance, NATIVE_EVENTS);
-            instance = null;
+    private static FragmentActivity getActivity() {
+        final Activity activity = GeckoActivityMonitor.getInstance().getCurrentActivity();
+        if (activity instanceof FragmentActivity) {
+            return (FragmentActivity) activity;
         }
+        return null;
+    }
+
+    private static Context getContext() {
+        final Activity activity = GeckoActivityMonitor.getInstance().getCurrentActivity();
+        return (activity != null) ? activity : GeckoAppShell.getApplicationContext();
     }
 
     /**
@@ -117,9 +120,7 @@ public final class IntentHelper implements GeckoEventListener,
                                           String action,
                                           String title,
                                           final boolean showPromptInPrivateBrowsing) {
-        final GeckoAppShell.GeckoInterface gi = GeckoAppShell.getGeckoInterface();
-        final Context activityContext = gi != null ? gi.getActivity() : null;
-        final Context context = activityContext != null ? activityContext : GeckoAppShell.getApplicationContext();
+        final Context context = getContext();
         final Intent intent = getOpenURIIntent(context, targetURI,
                                                mimeType, action, title);
 
@@ -136,8 +137,9 @@ public final class IntentHelper implements GeckoEventListener,
             }
         }
 
-        if (!showPromptInPrivateBrowsing || activityContext == null) {
-            if (activityContext == null) {
+        final FragmentActivity activity = getActivity();
+        if (!showPromptInPrivateBrowsing || activity == null) {
+            if (activity == null) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             }
             return ActivityHandlerHelper.startIntentAndCatch(LOGTAG, context, intent);
@@ -145,9 +147,8 @@ public final class IntentHelper implements GeckoEventListener,
             // Ideally we retrieve the Activity from the calling args, rather than
             // statically, but since this method is called from Gecko and I'm
             // unfamiliar with that code, this is a simpler solution.
-            final FragmentActivity fragmentActivity = (FragmentActivity) activityContext;
             return ExternalIntentDuringPrivateBrowsingPromptFragment.showDialogOrAndroidChooser(
-                    context, fragmentActivity.getSupportFragmentManager(), intent);
+                    context, activity.getSupportFragmentManager(), intent);
         }
     }
 
@@ -205,9 +206,14 @@ public final class IntentHelper implements GeckoEventListener,
      *         produced.
      */
     public static Intent getShareIntent(final Context context,
-                                        final String targetURI,
+                                        String targetURI,
                                         final String mimeType,
                                         final String title) {
+        if (!TextUtils.isEmpty(targetURI) && targetURI.length() > MAX_INTENT_STRING_DATA_LENGTH) {
+            final String ellipsis = context.getString(R.string.ellipsis);
+            targetURI = targetURI.substring(0, MAX_INTENT_STRING_DATA_LENGTH) + ellipsis;
+        }
+
         Intent shareIntent = getIntentForActionString(Intent.ACTION_SEND);
         shareIntent.putExtra(Intent.EXTRA_TEXT, targetURI);
         shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);
@@ -223,6 +229,42 @@ public final class IntentHelper implements GeckoEventListener,
         }
 
         return shareIntent;
+    }
+
+    public static Intent getTabSwitchIntent(final Tab tab) {
+        final Intent intent = new Intent(GeckoApp.ACTION_SWITCH_TAB);
+        intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra(BrowserContract.SKIP_TAB_QUEUE_FLAG, true);
+        intent.putExtra(INTENT_EXTRA_TAB_ID, tab.getId());
+        intent.putExtra(INTENT_EXTRA_SESSION_UUID, GeckoApplication.getSessionUUID());
+        return intent;
+    }
+
+    public static Intent getAudioCaptureIntent() {
+        return new Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION);
+    }
+
+    public static Intent getImageCaptureIntent(final Context context, final File destinationFile) {
+        final Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        Uri destination = FileProvider.getUriForFile(context,
+                AppConstants.MOZ_FILE_PROVIDER_AUTHORITY, destinationFile);
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, destination);
+
+        if (AppConstants.Versions.preLollipop) {
+            // As per https://github.com/commonsguy/cw-omnibus/blob/master/Camera/FileProvider/
+            // app/src/main/java/com/commonsware/android/camcon/MainActivity.java - at least we
+            // don't have to support anything below Jelly Bean.
+            ClipData clip =
+                    ClipData.newUri(context.getContentResolver(), null, destination);
+            intent.setClipData(clip);
+        }
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        return intent;
+    }
+
+    public static Intent getVideoCaptureIntent() {
+        return new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
     }
 
     /**
@@ -286,6 +328,12 @@ public final class IntentHelper implements GeckoEventListener,
                 intent = Intent.parseUri(targetURI, 0);
             } catch (final URISyntaxException e) {
                 Log.e(LOGTAG, "Unable to parse URI - " + e);
+                return null;
+            }
+
+            final Uri data = intent.getData();
+            if (data != null && "file".equals(normalizeUriScheme(data).getScheme())) {
+                Log.w(LOGTAG, "Blocked intent with \"file://\" data scheme.");
                 return null;
             }
 
@@ -374,10 +422,6 @@ public final class IntentHelper implements GeckoEventListener,
     // We create a separate method to better encapsulate the @TargetApi use.
     @TargetApi(15)
     private static void nullIntentSelector(final Intent intent) {
-        if (!AppConstants.Versions.feature15Plus) {
-            return;
-        }
-
         intent.setSelector(null);
     }
 
@@ -400,62 +444,57 @@ public final class IntentHelper implements GeckoEventListener,
         return u.buildUpon().scheme(lower).build();
     }
 
-    @Override
-    public void handleMessage(final String event, final NativeJSObject message, final EventCallback callback) {
-        if (event.equals("Intent:OpenNoHandler")) {
+    @Override // BundleEventHandler
+    public void handleMessage(final String event, final GeckoBundle message,
+                              final EventCallback callback) {
+        if ("Intent:OpenNoHandler".equals(event)) {
             openNoHandler(message, callback);
+
+        } else if ("Intent:GetHandlers".equals(event)) {
+            getHandlers(message, callback);
+
+        } else if ("Intent:Open".equals(event)) {
+            open(message);
+
+        } else if ("Intent:OpenForResult".equals(event)) {
+            openForResult(message, callback);
         }
     }
 
-    @Override
-    public void handleMessage(String event, JSONObject message) {
-        try {
-            if (event.equals("Intent:GetHandlers")) {
-                getHandlers(message);
-            } else if (event.equals("Intent:Open")) {
-                open(message);
-            } else if (event.equals("Intent:OpenForResult")) {
-                openForResult(message);
-            } else if (event.equals("WebActivity:Open")) {
-                openWebActivity(message);
-            }
-        } catch (JSONException e) {
-            Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
-        }
+    private void getHandlers(final GeckoBundle message, final EventCallback callback) {
+        final Intent intent = getOpenURIIntent(getContext(),
+                                               message.getString("url", ""),
+                                               message.getString("mime", ""),
+                                               message.getString("action", ""),
+                                               message.getString("title", ""));
+        callback.sendSuccess(getHandlersForIntent(intent));
     }
 
-    private void getHandlers(JSONObject message) throws JSONException {
-        final Intent intent = getOpenURIIntent(activity,
-                                                             message.optString("url"),
-                                                             message.optString("mime"),
-                                                             message.optString("action"),
-                                                             message.optString("title"));
-        final List<String> appList = Arrays.asList(getHandlersForIntent(intent));
-
-        final JSONObject response = new JSONObject();
-        response.put("apps", new JSONArray(appList));
-        EventDispatcher.sendResponse(message, response);
+    private void open(final GeckoBundle message) {
+        openUriExternal(message.getString("url", ""),
+                        message.getString("mime", ""),
+                        message.getString("packageName", ""),
+                        message.getString("className", ""),
+                        message.getString("action", ""),
+                        message.getString("title", ""), false);
     }
 
-    private void open(JSONObject message) throws JSONException {
-        openUriExternal(message.optString("url"),
-                                      message.optString("mime"),
-                                      message.optString("packageName"),
-                                      message.optString("className"),
-                                      message.optString("action"),
-                                      message.optString("title"), false);
-    }
-
-    private void openForResult(final JSONObject message) throws JSONException {
-        Intent intent = getOpenURIIntent(activity,
-                                                       message.optString("url"),
-                                                       message.optString("mime"),
-                                                       message.optString("action"),
-                                                       message.optString("title"));
-        intent.setClassName(message.optString("packageName"), message.optString("className"));
+    private void openForResult(final GeckoBundle message, final EventCallback callback) {
+        Intent intent = getOpenURIIntent(getContext(),
+                                         message.getString("url", ""),
+                                         message.getString("mime", ""),
+                                         message.getString("action", ""),
+                                         message.getString("title", ""));
+        intent.setClassName(message.getString("packageName", ""),
+                            message.getString("className", ""));
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
-        final ResultHandler handler = new ResultHandler(message);
+        final FragmentActivity activity = getActivity();
+        if (activity == null) {
+            callback.sendError(null);
+            return;
+        }
+        final ResultHandler handler = new ResultHandler(callback);
         try {
             ActivityHandlerHelper.startIntentForActivity(activity, intent, handler);
         } catch (SecurityException e) {
@@ -473,12 +512,14 @@ public final class IntentHelper implements GeckoEventListener,
      * @param callback A callback that will be called with success & no params if Java loads a page, or with error and
      *                 the uri to load if Java does not load a page
      */
-    private void openNoHandler(final NativeJSObject msg, final EventCallback callback) {
+    private void openNoHandler(final GeckoBundle msg, final EventCallback callback) {
         final String uri = msg.getString("uri");
+        final GeckoBundle errorResponse = new GeckoBundle();
 
         if (TextUtils.isEmpty(uri)) {
             Log.w(LOGTAG, "Received empty URL - loading about:neterror");
-            callback.sendError(getUnknownProtocolErrorPageUri(""));
+            errorResponse.putBoolean("isFallback", false);
+            callback.sendError(errorResponse);
             return;
         }
 
@@ -487,16 +528,10 @@ public final class IntentHelper implements GeckoEventListener,
             // TODO (bug 1173626): This will not handle android-app uris on non 5.1 devices.
             intent = Intent.parseUri(uri, 0);
         } catch (final URISyntaxException e) {
-            String errorUri;
-            try {
-                errorUri = getUnknownProtocolErrorPageUri(URLEncoder.encode(uri, "UTF-8"));
-            } catch (final UnsupportedEncodingException encodingE) {
-                errorUri = getUnknownProtocolErrorPageUri("");
-            }
-
             // Don't log the exception to prevent leaking URIs.
             Log.w(LOGTAG, "Unable to parse Intent URI - loading about:neterror");
-            callback.sendError(errorUri);
+            errorResponse.putBoolean("isFallback", false);
+            callback.sendError(errorResponse);
             return;
         }
 
@@ -504,9 +539,10 @@ public final class IntentHelper implements GeckoEventListener,
         //   https://developer.chrome.com/multidevice/android/intents
         final String fallbackUrl = intent.getStringExtra(EXTRA_BROWSER_FALLBACK_URL);
         if (isFallbackUrlValid(fallbackUrl)) {
+            errorResponse.putString("uri", fallbackUrl);
+            errorResponse.putBoolean("isFallback", true);
             // Opens the page in JS.
-            callback.sendError(fallbackUrl);
-
+            callback.sendError(errorResponse);
         } else if (intent.getPackage() != null) {
             // Note on alternative flows: we could get the intent package from a component, however, for
             // security reasons, components are ignored when opening URIs (bug 1168998) so we should
@@ -523,22 +559,28 @@ public final class IntentHelper implements GeckoEventListener,
 
             // (Bug 1192436) We don't know if marketIntent matches any Activities (e.g. non-Play
             // Store devices). If it doesn't, clicking the link will cause no action to occur.
+            final FragmentActivity activity = getActivity();
+            if (activity == null) {
+                callback.sendError(null);
+                return;
+            }
             ExternalIntentDuringPrivateBrowsingPromptFragment.showDialogOrAndroidChooser(
                     activity, activity.getSupportFragmentManager(), marketIntent);
             callback.sendSuccess(null);
 
         }  else {
-            // We originally loaded about:neterror when we failed to match the Intent. However, many
-            // websites worked around Chrome's implementation, which does nothing in this case. For
-            // example, the site might set a timeout and load a play store url for their app if the
-            // intent link fails to load, i.e. the app is not installed. These work-arounds would often
-            // end with our users seeing about:neterror instead of the intended experience. While I
-            // feel showing about:neterror is a better solution for users (when not hacked around),
+            // We return the error page here, but it will only be shown if we think the load did
+            // not come from clicking a link. Chrome does not show error pages in that case, and
+            // many websites have catered to this behavior. For example, the site might set a timeout and load a play
+            // store url for their app if the intent link fails to load, i.e. the app is not installed.
+            // These work-arounds would often end with our users seeing about:neterror instead of the intended experience.
+            // While I feel showing about:neterror is a better solution for users (when not hacked around),
             // we should match the status quo for the good of our users.
             //
             // Don't log the URI to prevent leaking it.
-            Log.w(LOGTAG, "Unable to open URI - ignoring click");
-            callback.sendSuccess(null); // pretend we opened the page.
+            Log.w(LOGTAG, "Unable to open URI, maybe showing neterror");
+            errorResponse.putBoolean("isFallback", false);
+            callback.sendError(errorResponse);
         }
     }
 
@@ -562,44 +604,26 @@ public final class IntentHelper implements GeckoEventListener,
         return false;
     }
 
-    /**
-     * Returns an about:neterror uri with the unknownProtocolFound text as a parameter.
-     * @param encodedUri The encoded uri. While the page does not open correctly without specifying
-     *                   a uri parameter, it happily accepts the empty String so this argument may
-     *                   be the empty String.
-     */
-    private String getUnknownProtocolErrorPageUri(final String encodedUri) {
-        return UNKNOWN_PROTOCOL_URI_PREFIX + encodedUri;
-    }
-
-    private void openWebActivity(JSONObject message) throws JSONException {
-        final Intent intent = WebActivityMapper.getIntentForWebActivity(message.getJSONObject("activity"));
-        ActivityHandlerHelper.startIntentForActivity(activity, intent, new ResultHandler(message));
-    }
-
     private static class ResultHandler implements ActivityResultHandler {
-        private final JSONObject message;
+        private final EventCallback callback;
 
-        public ResultHandler(JSONObject message) {
-            this.message = message;
+        public ResultHandler(final EventCallback callback) {
+            this.callback = callback;
         }
 
         @Override
         public void onActivityResult(int resultCode, Intent data) {
-            JSONObject response = new JSONObject();
-
-            try {
-                if (data != null) {
-                    response.put("extras", JSONUtils.bundleToJSON(data.getExtras()));
-                    response.put("uri", data.getData().toString());
+            final GeckoBundle response = new GeckoBundle(3);
+            if (data != null) {
+                if (data.getExtras() != null) {
+                    response.putBundle("extras", GeckoBundle.fromBundle(data.getExtras()));
                 }
-
-                response.put("resultCode", resultCode);
-            } catch (JSONException e) {
-                Log.w(LOGTAG, "Error building JSON response.", e);
+                if (data.getData() != null) {
+                    response.putString("uri", data.getData().toString());
+                }
             }
-
-            EventDispatcher.sendResponse(message, response);
+            response.putInt("resultCode", resultCode);
+            callback.sendSuccess(response);
         }
     }
 }

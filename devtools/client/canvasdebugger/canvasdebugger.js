@@ -3,34 +3,31 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-Cu.import("resource://gre/modules/Console.jsm");
-
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const promise = require("promise");
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const { SideMenuWidget } = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
-const { CallWatcherFront } = require("devtools/server/actors/call-watcher");
-const { CanvasFront } = require("devtools/server/actors/canvas");
+const { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
+const { CanvasFront } = require("devtools/shared/fronts/canvas");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const { extend } = require("devtools/shared/extend");
+const flags = require("devtools/shared/flags");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const { PluralForm } = require("devtools/shared/plural-form");
+const { WidgetMethods, setNamedTimeout, clearNamedTimeout,
+        setConditionalTimeout } = require("devtools/client/shared/widgets/view-helpers");
 
-const CANVAS_ACTOR_RECORDING_ATTEMPT = DevToolsUtils.testing ? 500 : 5000;
+// Use privileged promise in panel documents to prevent having them to freeze
+// during toolbox destruction. See bug 1402779.
+const Promise = require("Promise");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
-  "resource://gre/modules/Task.jsm");
+const CANVAS_ACTOR_RECORDING_ATTEMPT = flags.testing ? 500 : 5000;
 
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-  "resource://gre/modules/PluralForm.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+ChromeUtils.defineModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+ChromeUtils.defineModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "NetworkHelper", function() {
@@ -78,8 +75,8 @@ const EVENTS = {
 XPCOMUtils.defineConstant(this, "EVENTS", EVENTS);
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-const STRINGS_URI = "chrome://devtools/locale/canvasdebugger.properties";
-const SHARED_STRINGS_URI = "chrome://devtools/locale/shared.properties";
+const STRINGS_URI = "devtools/client/locales/canvasdebugger.properties";
+const SHARED_STRINGS_URI = "devtools/client/locales/shared.properties";
 
 const SNAPSHOT_START_RECORDING_DELAY = 10; // ms
 const SNAPSHOT_DATA_EXPORT_MAX_BLOCK = 1000; // ms
@@ -104,7 +101,7 @@ var gToolbox, gTarget, gFront;
  * Initializes the canvas debugger controller and views.
  */
 function startupCanvasDebugger() {
-  return promise.all([
+  return Promise.all([
     EventsHandler.initialize(),
     SnapshotsListView.initialize(),
     CallsListView.initialize()
@@ -115,7 +112,7 @@ function startupCanvasDebugger() {
  * Destroys the canvas debugger controller and views.
  */
 function shutdownCanvasDebugger() {
-  return promise.all([
+  return Promise.all([
     EventsHandler.destroy(),
     SnapshotsListView.destroy(),
     CallsListView.destroy()
@@ -130,29 +127,27 @@ var EventsHandler = {
    * Listen for events emitted by the current tab target.
    */
   initialize: function() {
-    this._onTabNavigated = this._onTabNavigated.bind(this);
-    gTarget.on("will-navigate", this._onTabNavigated);
-    gTarget.on("navigate", this._onTabNavigated);
+    // Make sure the backend is prepared to handle <canvas> contexts.
+    // Since actors are created lazily on the first request to them, we need to send an
+    // early request to ensure the CallWatcherActor is running and watching for new window
+    // globals.
+    gFront.setup({ reload: false });
+
+    this._onTabWillNavigate = this._onTabWillNavigate.bind(this);
+    gTarget.on("will-navigate", this._onTabWillNavigate);
   },
 
   /**
    * Remove events emitted by the current tab target.
    */
   destroy: function() {
-    gTarget.off("will-navigate", this._onTabNavigated);
-    gTarget.off("navigate", this._onTabNavigated);
+    gTarget.off("will-navigate", this._onTabWillNavigate);
   },
 
   /**
    * Called for each location change in the debugged tab.
    */
-  _onTabNavigated: function(event) {
-    if (event != "will-navigate") {
-      return;
-    }
-    // Make sure the backend is prepared to handle <canvas> contexts.
-    gFront.setup({ reload: false });
-
+  _onTabWillNavigate: function() {
     // Reset UI.
     SnapshotsListView.empty();
     CallsListView.empty();
@@ -195,7 +190,7 @@ var $all = (selector, target = document) => target.querySelectorAll(selector);
  */
 function getFileName(url) {
   try {
-    let { fileName } = NetworkHelper.nsIURL(url);
+    const { fileName } = NetworkHelper.nsIURL(url);
     return fileName || "/";
   } catch (e) {
     // This doesn't look like a url, or nsIURL can't handle it.
@@ -218,7 +213,7 @@ function getFileName(url) {
  *         The requested image data buffer.
  */
 function getImageDataStorage(ctx, w, h) {
-  let storage = getImageDataStorage.cache;
+  const storage = getImageDataStorage.cache;
   if (storage && storage.width == w && storage.height == h) {
     return storage;
   }
@@ -249,7 +244,7 @@ getImageDataStorage.cache = null;
  *                      supplied pixels don't completely cover the canvas.
  */
 function drawImage(canvas, width, height, pixels, options = {}) {
-  let ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d");
 
   // FrameSnapshot actors return "snapshot-image" type instances with just an
   // empty pixel array if the source image is completely transparent.
@@ -258,12 +253,12 @@ function drawImage(canvas, width, height, pixels, options = {}) {
     return;
   }
 
-  let imageData = getImageDataStorage(ctx, width, height);
+  const imageData = getImageDataStorage(ctx, width, height);
   imageData.data.set(pixels);
 
   if (options.centered) {
-    let left = (canvas.width - width) / 2;
-    let top = (canvas.height - height) / 2;
+    const left = (canvas.width - width) / 2;
+    const top = (canvas.height - height) / 2;
     ctx.putImageData(imageData, left, top);
   } else {
     ctx.putImageData(imageData, 0, 0);
@@ -284,7 +279,7 @@ function drawImage(canvas, width, height, pixels, options = {}) {
  *        An array buffer view of the image data.
  */
 function drawBackground(id, width, height, pixels) {
-  let canvas = document.createElementNS(HTML_NS, "canvas");
+  const canvas = document.createElementNS(HTML_NS, "canvas");
   canvas.width = width;
   canvas.height = height;
 
@@ -302,8 +297,8 @@ function drawBackground(id, width, height, pixels) {
  */
 function getNextDrawCall(calls, call) {
   for (let i = calls.indexOf(call) + 1, len = calls.length; i < len; i++) {
-    let nextCall = calls[i];
-    let name = nextCall.attachment.actor.name;
+    const nextCall = calls[i];
+    const name = nextCall.attachment.actor.name;
     if (CanvasFront.DRAW_CALLS.has(name)) {
       return nextCall;
     }
@@ -317,8 +312,8 @@ function getNextDrawCall(calls, call) {
  */
 function getScreenshotFromCallLoadedFromDisk(calls, call) {
   for (let i = calls.indexOf(call); i >= 0; i--) {
-    let prevCall = calls[i];
-    let screenshot = prevCall.screenshot;
+    const prevCall = calls[i];
+    const screenshot = prevCall.screenshot;
     if (screenshot) {
       return screenshot;
     }
@@ -331,7 +326,7 @@ function getScreenshotFromCallLoadedFromDisk(calls, call) {
  */
 function getThumbnailForCall(thumbnails, index) {
   for (let i = thumbnails.length - 1; i >= 0; i--) {
-    let thumbnail = thumbnails[i];
+    const thumbnail = thumbnails[i];
     if (thumbnail.index <= index) {
       return thumbnail;
     }

@@ -169,15 +169,10 @@ void
 DelayBuffer::Read(double aDelayTicks, AudioBlock* aOutputChunk,
                   ChannelInterpretation aChannelInterpretation)
 {
-  const bool firstTime = mCurrentDelay < 0.0;
-  double currentDelay = firstTime ? aDelayTicks : mCurrentDelay;
-
   double computedDelay[WEBAUDIO_BLOCK_SIZE];
 
   for (unsigned i = 0; i < WEBAUDIO_BLOCK_SIZE; ++i) {
-    // If the value has changed, smoothly approach it
-    currentDelay += (aDelayTicks - currentDelay) * mSmoothingRate;
-    computedDelay[i] = currentDelay;
+    computedDelay[i] = aDelayTicks;
   }
 
   Read(computedDelay, aOutputChunk, aChannelInterpretation);
@@ -238,8 +233,8 @@ DelayBuffer::UpdateUpmixChannels(int aNewReadChunk, uint32_t aChannelCount,
     return;
   }
 
-  NS_WARN_IF_FALSE(mHaveWrittenBlock || aNewReadChunk != mCurrentChunk,
-                   "Smoothing is making feedback delay too small.");
+  NS_WARNING_ASSERTION(mHaveWrittenBlock || aNewReadChunk != mCurrentChunk,
+                       "Smoothing is making feedback delay too small.");
 
   mLastReadChunk = aNewReadChunk;
   mUpmixChannels = mChunks[aNewReadChunk].ChannelData<float>();

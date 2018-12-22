@@ -8,18 +8,15 @@
 #include "GLContextProvider.h"
 #include "nsUnicharUtils.h"
 #include "prenv.h"
-#include "prprf.h"
+#include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
+#include "nsICrashReporter.h"
 #include "nsVersionComparator.h"
 #include "AndroidBridge.h"
 #include "nsIWindowWatcher.h"
 #include "nsServiceManagerUtils.h"
 
-#if defined(MOZ_CRASHREPORTER)
-#include "nsExceptionHandler.h"
-#include "nsICrashReporter.h"
 #define NS_CRASHREPORTER_CONTRACTID "@mozilla.org/toolkit/crash-reporter;1"
-#endif
 
 namespace mozilla {
 namespace widget {
@@ -75,7 +72,9 @@ public:
     }
 
     RefPtr<gl::GLContext> gl;
-    gl = gl::GLContextProvider::CreateHeadless(gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE);
+    nsCString discardFailureId;
+    gl = gl::GLContextProvider::CreateHeadless(gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE,
+                                               &discardFailureId);
 
     if (!gl) {
       // Setting mReady to true here means that we won't retry. Everything will
@@ -349,7 +348,6 @@ GfxInfo::GetIsGPU2Active(bool* aIsGPU2Active)
 void
 GfxInfo::AddCrashReportAnnotations()
 {
-#if defined(MOZ_CRASHREPORTER)
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AdapterVendorID"),
                                      mGLStrings->Vendor());
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AdapterDeviceID"),
@@ -363,27 +361,28 @@ GfxInfo::AddCrashReportAnnotations()
   note.AppendPrintf("AdapterDescription: '%s'\n", mAdapterDescription.get());
 
   CrashReporter::AppendAppNotesToCrashReport(note);
-#endif
 }
 
 const nsTArray<GfxDriverInfo>&
 GfxInfo::GetGfxDriverInfo()
 {
-  if (mDriverInfo->IsEmpty()) {
-    APPEND_TO_DRIVER_BLOCKLIST2( DRIVER_OS_ALL,
+  if (sDriverInfo->IsEmpty()) {
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Android,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAll), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
-      DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions );
+      DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions,
+      "FEATURE_OK_FORCE_OPENGL" );
   }
 
-  return *mDriverInfo;
+  return *sDriverInfo;
 }
 
 nsresult
 GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
                               int32_t *aStatus,
-                              nsAString & aSuggestedDriverVersion,
+                              nsAString &aSuggestedDriverVersion,
                               const nsTArray<GfxDriverInfo>& aDriverInfo,
+                              nsACString &aFailureId,
                               OperatingSystem* aOS /* = nullptr */)
 {
   NS_ENSURE_ARG_POINTER(aStatus);
@@ -392,6 +391,10 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   OperatingSystem os = mOS;
   if (aOS)
     *aOS = os;
+
+  if (sShutdownOccurred) {
+    return NS_OK;
+  }
 
   // OpenGL layers are never blacklisted on Android.
   // This early return is so we avoid potentially slow
@@ -411,8 +414,17 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   // Don't evaluate special cases when evaluating the downloaded blocklist.
   if (aDriverInfo.IsEmpty()) {
     if (aFeature == nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION) {
-      // It's slower than software due to not having a compositing fast path
-      *aStatus = (mSDKVersion >= 11) ? nsIGfxInfo::FEATURE_STATUS_OK : nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
+      if (mSDKVersion < 11) {
+        // It's slower than software due to not having a compositing fast path
+        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
+        aFailureId = "FEATURE_FAILURE_CANVAS_2D_SDK";
+      } else if (mGLStrings->Renderer().Find("Vivante GC1000") != -1) {
+        // Blocklist Vivante GC1000. See bug 1248183.
+        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILED_CANVAS_2D_HW";
+      } else {
+        *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
+      }
       return NS_OK;
     }
 
@@ -421,11 +433,13 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
           mGLStrings->Renderer().Find("Adreno 205") != -1)
       {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_ADRENO_20x";
         return NS_OK;
       }
 
       if (mHardware.EqualsLiteral("ville")) {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_VILLE";
         return NS_OK;
       }
     }
@@ -443,83 +457,11 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
           cHardware.EqualsLiteral("rk30board"))
       {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_STAGE_HW";
         return NS_OK;
       }
 
-      if (CompareVersions(mOSVersion.get(), "2.2.0") >= 0 &&
-          CompareVersions(mOSVersion.get(), "2.3.0") < 0)
-      {
-        // Froyo LG devices are whitelisted.
-        // All other Froyo
-        bool isWhitelisted =
-          cManufacturer.Equals("lge", nsCaseInsensitiveCStringComparator());
-
-        if (!isWhitelisted) {
-          *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
-          return NS_OK;
-        }
-      }
-      else if (CompareVersions(mOSVersion.get(), "2.3.0") >= 0 &&
-          CompareVersions(mOSVersion.get(), "2.4.0") < 0)
-      {
-        // Gingerbread HTC devices are whitelisted.
-        // Gingerbread Samsung devices are whitelisted except for:
-        //   Samsung devices identified in Bug 847837
-        // Gingerbread Sony devices are whitelisted.
-        // All other Gingerbread devices are blacklisted.
-        bool isWhitelisted =
-          cManufacturer.Equals("htc", nsCaseInsensitiveCStringComparator()) ||
-          (cManufacturer.Find("sony", true) != -1) ||
-          cManufacturer.Equals("samsung", nsCaseInsensitiveCStringComparator());
-
-        if (cModel.Equals("GT-I8160", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-I8160L", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-I8530", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-I9070", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-I9070P", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-I8160P", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-S7500", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-S7500T", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-S7500L", nsCaseInsensitiveCStringComparator()) ||
-            cModel.Equals("GT-S6500T", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("smdkc110", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("smdkc210", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("herring", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("shw-m110s", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("shw-m180s", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("n1", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("latona", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("aalto", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("atlas", nsCaseInsensitiveCStringComparator()) ||
-            cHardware.Equals("qcom", nsCaseInsensitiveCStringComparator()))
-        {
-          isWhitelisted = false;
-        }
-
-        if (!isWhitelisted) {
-          *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
-          return NS_OK;
-        }
-      }
-      else if (CompareVersions(mOSVersion.get(), "3.0.0") >= 0 &&
-          CompareVersions(mOSVersion.get(), "4.0.0") < 0)
-      {
-        // Honeycomb Samsung devices are whitelisted.
-        // All other Honeycomb devices are blacklisted.
-        bool isWhitelisted =
-          cManufacturer.Equals("samsung", nsCaseInsensitiveCStringComparator());
-
-        if (!isWhitelisted) {
-          *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
-          return NS_OK;
-        }
-      }
-      else if (CompareVersions(mOSVersion.get(), "4.0.0") < 0)
-      {
-        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
-        return NS_OK;
-      }
-      else if (CompareVersions(mOSVersion.get(), "4.1.0") < 0)
+      if (CompareVersions(mOSVersion.get(), "4.1.0") < 0)
       {
         // Whitelist:
         //   All Samsung ICS devices, except for:
@@ -542,6 +484,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
 
         if (!isWhitelisted) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+          aFailureId = "FEATURE_FAILURE_4_1_HW";
           return NS_OK;
         }
       }
@@ -563,6 +506,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
 
         if (isBlocklisted) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+          aFailureId = "FEATURE_FAILURE_4_2_HW";
           return NS_OK;
         }
       }
@@ -571,6 +515,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         // Blocklist all Sony devices
         if (cManufacturer.Find("Sony", true) != -1) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+          aFailureId = "FEATURE_FAILURE_4_3_SONY";
           return NS_OK;
         }
       }
@@ -579,12 +524,14 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
     if (aFeature == FEATURE_WEBRTC_HW_ACCELERATION_ENCODE) {
       if (mozilla::AndroidBridge::Bridge()) {
         *aStatus = mozilla::AndroidBridge::Bridge()->GetHWEncoderCapability() ? nsIGfxInfo::FEATURE_STATUS_OK : nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_WEBRTC_ENCODE";
         return NS_OK;
       }
     }
     if (aFeature == FEATURE_WEBRTC_HW_ACCELERATION_DECODE) {
       if (mozilla::AndroidBridge::Bridge()) {
         *aStatus = mozilla::AndroidBridge::Bridge()->GetHWDecoderCapability() ? nsIGfxInfo::FEATURE_STATUS_OK : nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_WEBRTC_DECODE";
         return NS_OK;
       }
     }
@@ -595,13 +542,17 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         // GIFV crash, see bug 1232911.
         model.Equals("GT-N8013", nsCaseInsensitiveCStringComparator());
 
-      *aStatus = isBlocked ? nsIGfxInfo::FEATURE_BLOCKED_DEVICE
-                           : nsIGfxInfo::FEATURE_STATUS_OK;
+      if (isBlocked) {
+        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+        aFailureId = "FEATURE_FAILURE_VPx";
+      } else {
+        *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
+      }
       return NS_OK;
     }
   }
 
-  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, &os);
+  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId, &os);
 }
 
 #ifdef DEBUG

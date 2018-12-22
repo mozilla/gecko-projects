@@ -9,28 +9,32 @@
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/SVGAnimatedTransformList.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGPatternElement.h"
 #include "mozilla/dom/SVGPatternElementBinding.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Pattern)
 
 namespace mozilla {
 namespace dom {
 
+using namespace SVGUnitTypes_Binding;
+
 JSObject*
 SVGPatternElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGPatternElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGPatternElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //--------------------- Patterns ------------------------
 
 nsSVGElement::LengthInfo SVGPatternElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
 
 nsSVGElement::EnumInfo SVGPatternElement::sEnumInfo[2] =
@@ -45,8 +49,9 @@ nsSVGElement::EnumInfo SVGPatternElement::sEnumInfo[2] =
   }
 };
 
-nsSVGElement::StringInfo SVGPatternElement::sStringInfo[1] =
+nsSVGElement::StringInfo SVGPatternElement::sStringInfo[2] =
 {
+  { &nsGkAtoms::href, kNameSpaceID_None, true },
   { &nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
@@ -59,7 +64,7 @@ SVGPatternElement::SVGPatternElement(already_AddRefed<mozilla::dom::NodeInfo>& a
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode method
+// nsINode method
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPatternElement)
 
@@ -127,14 +132,16 @@ SVGPatternElement::Height()
 already_AddRefed<SVGAnimatedString>
 SVGPatternElement::Href()
 {
-  return mStringAttributes[HREF].ToDOMAnimatedString(this);
+  return mStringAttributes[HREF].IsExplicitlySet()
+         ? mStringAttributes[HREF].ToDOMAnimatedString(this)
+         : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
 }
 
 //----------------------------------------------------------------------
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGPatternElement::IsAttributeMapped(const nsIAtom* name) const
+SVGPatternElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sColorMap,

@@ -1,15 +1,8 @@
 #include "TestInterruptShutdownRace.h"
 
+#include "base/task.h"
 #include "IPDLUnitTests.h"      // fail etc.
 #include "IPDLUnitTestSubprocess.h"
-
-template<>
-struct RunnableMethodTraits<mozilla::_ipdltest::TestInterruptShutdownRaceParent>
-{
-    static void RetainCallee(mozilla::_ipdltest::TestInterruptShutdownRaceParent* obj) { }
-    static void ReleaseCallee(mozilla::_ipdltest::TestInterruptShutdownRaceParent* obj) { }
-};
-
 
 namespace mozilla {
 namespace _ipdltest {
@@ -53,16 +46,16 @@ TestInterruptShutdownRaceParent::Main()
         fail("sending Start");
 }
 
-bool
+mozilla::ipc::IPCResult
 TestInterruptShutdownRaceParent::RecvStartDeath()
 {
     // this will be ordered before the OnMaybeDequeueOne event of
     // Orphan in the queue
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(this,
-                          &TestInterruptShutdownRaceParent::StartShuttingDown));
-    return true;
+    MessageLoop::current()->PostTask(NewNonOwningRunnableMethod(
+      "_ipdltest::TestInterruptShutdownRaceParent::StartShuttingDown",
+      this,
+      &TestInterruptShutdownRaceParent::StartShuttingDown));
+    return IPC_OK();
 }
 
 void
@@ -82,24 +75,22 @@ TestInterruptShutdownRaceParent::StartShuttingDown()
     delete static_cast<TestInterruptShutdownRaceParent*>(gParentActor);
     gParentActor = nullptr;
 
-    XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                     NewRunnableFunction(DeleteSubprocess));
+    XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction(DeleteSubprocess));
 
     // this is ordered after the OnMaybeDequeueOne event in the queue
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     NewRunnableFunction(Done));
+    MessageLoop::current()->PostTask(NewRunnableFunction(Done));
 
     // |this| has been deleted, be mindful
 }
 
-bool
+mozilla::ipc::IPCResult
 TestInterruptShutdownRaceParent::RecvOrphan()
 {
     // it would be nice to fail() here, but we'll process this message
     // while waiting for the reply CallExit().  The OnMaybeDequeueOne
     // task will still be in the queue, it just wouldn't have had any
     // work to do, if we hadn't deleted ourself
-    return true;
+    return IPC_OK();
 }
 
 //-----------------------------------------------------------------------------
@@ -115,7 +106,7 @@ TestInterruptShutdownRaceChild::~TestInterruptShutdownRaceChild()
     MOZ_COUNT_DTOR(TestInterruptShutdownRaceChild);
 }
 
-bool
+mozilla::ipc::IPCResult
 TestInterruptShutdownRaceChild::RecvStart()
 {
     if (!SendStartDeath())
@@ -128,17 +119,15 @@ TestInterruptShutdownRaceChild::RecvStart()
     if (!SendOrphan())
         fail("sending Orphan");
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TestInterruptShutdownRaceChild::AnswerExit()
 {
     _exit(0);
-    NS_RUNTIMEABORT("unreached");
-    return false;
+    MOZ_CRASH("unreached");
 }
-
 
 } // namespace _ipdltest
 } // namespace mozilla

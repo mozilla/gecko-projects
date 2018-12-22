@@ -11,12 +11,12 @@
 #define ZIP_TABSIZE   256
 #define ZIP_BUFLEN    (4*1024)      /* Used as output buffer when deflating items to a file */
 
-#include "plarena.h"
 #include "zlib.h"
 #include "zipstruct.h"
 #include "nsAutoPtr.h"
 #include "nsIFile.h"
 #include "nsISupportsImpl.h" // For mozilla::ThreadSafeAutoRefCnt
+#include "mozilla/ArenaAllocator.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/FileLocation.h"
 #include "mozilla/UniquePtr.h"
@@ -37,6 +37,9 @@
 
 class nsZipFind;
 struct PRFileDesc;
+#ifdef MOZ_JAR_BROTLI
+struct BrotliDecoderStateStruct;
+#endif
 
 /**
  * This file defines some of the basic structures used by libjar to
@@ -49,7 +52,7 @@ struct PRFileDesc;
  * nsZipFind      represents the metadata involved in doing a search,
  *                and current state of the iteration of found objects.
  * 'MT''safe' reading from the zipfile is performed through JARInputStream,
- * which maintains its own file descriptor, allowing for multiple reads 
+ * which maintains its own file descriptor, allowing for multiple reads
  * concurrently from the same zip file.
  */
 
@@ -78,10 +81,6 @@ public:
   const uint8_t* GetExtraField(uint16_t aTag, uint16_t *aBlockSize);
   PRTime   LastModTime();
 
-#ifdef XP_UNIX
-  bool     IsSymlink();
-#endif
-
   nsZipItem*         next;
   const ZipCentral*  central;
   uint16_t           nameLength;
@@ -90,7 +89,7 @@ public:
 
 class nsZipHandle;
 
-/** 
+/**
  * nsZipArchive -- a class for reading the PKZIP file format.
  *
  */
@@ -107,12 +106,12 @@ public:
   /** constructing does not open the archive. See OpenArchive() */
   nsZipArchive();
 
-  /** 
-   * OpenArchive 
-   * 
+  /**
+   * OpenArchive
+   *
    * It's an error to call this more than once on the same nsZipArchive
-   * object. If we were allowed to use exceptions this would have been 
-   * part of the constructor 
+   * object. If we were allowed to use exceptions this would have been
+   * part of the constructor
    *
    * @param   aZipHandle  The nsZipHandle used to access the zip
    * @param   aFd         Optional PRFileDesc for Windows readahead optimization
@@ -120,9 +119,9 @@ public:
    */
   nsresult OpenArchive(nsZipHandle *aZipHandle, PRFileDesc *aFd = nullptr);
 
-  /** 
-   * OpenArchive 
-   * 
+  /**
+   * OpenArchive
+   *
    * Convenience function that generates nsZipHandle
    *
    * @param   aFile         The file used to access the zip
@@ -132,12 +131,12 @@ public:
 
   /**
    * Test the integrity of items in this archive by running
-   * a CRC check after extracting each item into a memory 
-   * buffer.  If an entry name is supplied only the 
+   * a CRC check after extracting each item into a memory
+   * buffer.  If an entry name is supplied only the
    * specified item is tested.  Else, if null is supplied
    * then all the items in the archive are tested.
    *
-   * @return  status code       
+   * @return  status code
    */
   nsresult Test(const char *aEntryName);
 
@@ -146,14 +145,14 @@ public:
    */
   nsresult CloseArchive();
 
-  /** 
+  /**
    * GetItem
    * @param   aEntryName Name of file in the archive
    * @return  pointer to nsZipItem
-   */  
+   */
   nsZipItem* GetItem(const char * aEntryName);
-  
-  /** 
+
+  /**
    * ExtractFile
    *
    * @param   zipEntry   Name of file in archive to extract
@@ -161,7 +160,7 @@ public:
    * @param   outname    Name of file to write to
    * @return  status code
    */
-  nsresult ExtractFile(nsZipItem * zipEntry, const char *outname, PRFileDesc * outFD);
+  nsresult ExtractFile(nsZipItem * zipEntry, nsIFile* outFile, PRFileDesc * outFD);
 
   /**
    * FindInit
@@ -217,7 +216,7 @@ private:
   NS_DECL_OWNINGTHREAD
 
   nsZipItem*    mFiles[ZIP_TABSIZE];
-  PLArenaPool   mArena;
+  mozilla::ArenaAllocator<1024, sizeof(void*)> mArena;
 
   const char*   mCommentPtr;
   uint16_t      mCommentLen;
@@ -241,8 +240,8 @@ private:
   nsZipArchive(const nsZipArchive& rhs) = delete;
 };
 
-/** 
- * nsZipFind 
+/**
+ * nsZipFind
  *
  * a helper class for nsZipArchive, representing a search
  */
@@ -265,7 +264,7 @@ private:
   nsZipFind(const nsZipFind& rhs) = delete;
 };
 
-/** 
+/**
  * nsZipCursor -- a low-level class for reading the individual items in a zip.
  */
 class nsZipCursor final
@@ -310,10 +309,13 @@ private:
   /* Actual implementation for both Read and Copy above */
   uint8_t* ReadOrCopy(uint32_t *aBytesRead, bool aCopy);
 
-  nsZipItem *mItem; 
-  uint8_t  *mBuf; 
-  uint32_t  mBufSize; 
+  nsZipItem *mItem;
+  uint8_t  *mBuf;
+  uint32_t  mBufSize;
   z_stream  mZs;
+#ifdef MOZ_JAR_BROTLI
+  BrotliDecoderStateStruct* mBrotliState;
+#endif
   uint32_t mCRC;
   bool mDoCRC;
 };
@@ -408,19 +410,27 @@ public:
   nsresult GetNSPRFileDesc(PRFileDesc** aNSPRFileDesc);
 
 protected:
-  const uint8_t * mFileData; /* pointer to mmaped file */
-  uint32_t        mLen;      /* length of file and memory mapped area */
+  const uint8_t * mFileData; /* pointer to zip data */
+  uint32_t        mLen;      /* length of zip data */
   mozilla::FileLocation mFile; /* source file if any, for logging */
 
 private:
   nsZipHandle();
   ~nsZipHandle();
 
+  nsresult findDataStart();
+
   PRFileMap *                       mMap;    /* nspr datastructure for mmap */
   mozilla::AutoFDClose              mNSPRFileDesc;
   nsAutoPtr<nsZipItemPtr<uint8_t> > mBuf;
   mozilla::ThreadSafeAutoRefCnt     mRefCnt; /* ref count */
   NS_DECL_OWNINGTHREAD
+
+  const uint8_t * mFileStart; /* pointer to mmaped file */
+  uint32_t        mTotalLen;  /* total length of the mmaped file */
+
+  /* Magic number for CRX type expressed in Big Endian since it is a literal */
+  static const uint32_t kCRXMagic = 0x34327243;
 };
 
 nsresult gZlibInit(z_stream *zs);

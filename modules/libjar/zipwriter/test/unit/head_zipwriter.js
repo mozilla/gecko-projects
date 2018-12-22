@@ -3,8 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
 const NS_ERROR_IN_PROGRESS = 2152398863;
 
 const PR_RDONLY      = 0x01
@@ -44,3 +42,13 @@ if (tmpFile.exists())
   tmpFile.remove(true);
 
 var zipW = new ZipWriter();
+
+registerCleanupFunction(function() {
+  try {
+    zipW.close();
+  } catch (e) {
+    // Just ignore a failure here and attempt to delete the file anyway.
+  }
+  if (tmpFile.exists())
+    tmpFile.remove(true);
+});

@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -134,7 +135,7 @@ SkPathContainsPoint(const SkPath& aPath, const Point& aPoint, const Matrix& aTra
     return false;
   }
 
-  SkPoint point = PointToSkPoint(inverse * aPoint);
+  SkPoint point = PointToSkPoint(inverse.TransformPoint(aPoint));
   return aPath.contains(point.fX, point.fY);
 }
 
@@ -175,7 +176,7 @@ PathSkia::GetBounds(const Matrix &aTransform) const
     return Rect();
   }
 
-  Rect bounds = SkRectToRect(mPath.getBounds());
+  Rect bounds = SkRectToRect(mPath.computeTightBounds());
   return aTransform.TransformBounds(bounds);
 }
 
@@ -195,7 +196,7 @@ PathSkia::GetStrokedBounds(const StrokeOptions &aStrokeOptions,
   SkPath result;
   paint.getFillPath(mPath, &result);
 
-  Rect bounds = SkRectToRect(result.getBounds());
+  Rect bounds = SkRectToRect(result.computeTightBounds());
   return aTransform.TransformBounds(bounds);
 }
 

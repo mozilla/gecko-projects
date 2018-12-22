@@ -47,8 +47,7 @@ class MozharnessRunner(MozbuildObject):
 
         self.config = {
             "__defaults__": {
-                "config": ["--no-read-buildbot-config",
-                           "--download-symbols", "ondemand",
+                "config": ["--download-symbols", "ondemand",
                            "--installer-url", self.installer_url,
                            "--test-packages-url", self.test_packages_url]
             },
@@ -78,11 +77,6 @@ class MozharnessRunner(MozbuildObject):
                 "config": desktop_unittest_config + [
                     "--mochitest-suite", "mochitest-devtools-chrome"]
             },
-            "reftest": {
-                "script": "desktop_unittest.py",
-                "config": desktop_unittest_config + [
-                    "--reftest-suite", "reftest"]
-            },
             "crashtest": {
                 "script": "desktop_unittest.py",
                 "config": desktop_unittest_config + [
@@ -93,20 +87,15 @@ class MozharnessRunner(MozbuildObject):
                 "config": desktop_unittest_config + [
                     "--reftest-suite", "jsreftest"]
             },
-            "reftest-ipc": {
+            "reftest": {
                 "script": "desktop_unittest.py",
                 "config": desktop_unittest_config + [
-                    "--reftest-suite", "reftest-ipc"]
+                    "--reftest-suite", "reftest"]
             },
             "reftest-no-accel": {
                 "script": "desktop_unittest.py",
                 "config": desktop_unittest_config + [
                     "--reftest-suite", "reftest-no-accel"]
-            },
-            "crashtest-ipc": {
-                "script": "desktop_unittest.py",
-                "config": desktop_unittest_config + [
-                    "--reftest-suite", "crashtest-ipc"]
             },
             "cppunittest": {
                 "script": "desktop_unittest.py",

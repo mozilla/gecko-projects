@@ -31,116 +31,40 @@ want to export this environment variable from your shell's init scripts.
 Press ENTER/RETURN to continue or CTRL+c to abort.
 '''.lstrip()
 
-NO_MERCURIAL_SETUP = '''
-*** MERCURIAL NOT CONFIGURED ***
-
-mach has detected that you have never run `{mach} mercurial-setup`.
-
-Running this command will ensure your Mercurial version control tool is up
-to date and optimally configured for a better, more productive experience
-when working on Mozilla projects.
-
-Please run `{mach} mercurial-setup` now.
-
-Note: `{mach} mercurial-setup` does not make any changes without prompting
-you first.
-
-You can disable this check by setting NO_MERCURIAL_SETUP_CHECK=1 in your
-environment.
-'''.strip()
-
-MERCURIAL_SETUP_FATAL_INTERVAL = 31 * 24 * 60 * 60
-
-
-# TODO Bug 794506 Integrate with the in-tree virtualenv configuration.
-SEARCH_PATHS = [
-    'python/mach',
-    'python/mozboot',
-    'python/mozbuild',
-    'python/mozversioncontrol',
-    'python/blessings',
-    'python/compare-locales',
-    'python/configobj',
-    'python/futures',
-    'python/jsmin',
-    'python/psutil',
-    'python/which',
-    'python/pystache',
-    'python/pyyaml/lib',
-    'python/requests',
-    'python/slugid',
-    'build',
-    'config',
-    'dom/bindings',
-    'dom/bindings/parser',
-    'dom/media/test/external',
-    'layout/tools/reftest',
-    'other-licenses/ply',
-    'testing',
-    'testing/firefox-ui/harness',
-    'testing/firefox-ui/tests',
-    'testing/luciddream',
-    'testing/marionette/harness',
-    'testing/marionette/harness/marionette/runner/mixins/browsermob-proxy-py',
-    'testing/marionette/client',
-    'testing/mozbase/mozcrash',
-    'testing/mozbase/mozdebug',
-    'testing/mozbase/mozdevice',
-    'testing/mozbase/mozfile',
-    'testing/mozbase/mozhttpd',
-    'testing/mozbase/mozinfo',
-    'testing/mozbase/mozinstall',
-    'testing/mozbase/mozleak',
-    'testing/mozbase/mozlog',
-    'testing/mozbase/moznetwork',
-    'testing/mozbase/mozprocess',
-    'testing/mozbase/mozprofile',
-    'testing/mozbase/mozrunner',
-    'testing/mozbase/mozsystemmonitor',
-    'testing/mozbase/mozscreenshot',
-    'testing/mozbase/moztest',
-    'testing/mozbase/mozversion',
-    'testing/mozbase/manifestparser',
-    'testing/puppeteer/firefox',
-    'testing/taskcluster',
-    'testing/tools/autotry',
-    'testing/web-platform',
-    'testing/web-platform/harness',
-    'testing/web-platform/tests/tools/wptserve',
-    'testing/xpcshell',
-    'xpcom/idl-parser',
-]
 
 # Individual files providing mach commands.
 MACH_MODULES = [
-    'addon-sdk/mach_commands.py',
     'build/valgrind/mach_commands.py',
+    'devtools/shared/css/generated/mach_commands.py',
     'dom/bindings/mach_commands.py',
-    'dom/media/test/external/mach_commands.py',
     'layout/tools/reftest/mach_commands.py',
     'python/mach_commands.py',
     'python/mach/mach/commands/commandinfo.py',
-    'python/compare-locales/mach_commands.py',
+    'python/mach/mach/commands/settings.py',
     'python/mozboot/mozboot/mach_commands.py',
     'python/mozbuild/mozbuild/mach_commands.py',
     'python/mozbuild/mozbuild/backend/mach_commands.py',
     'python/mozbuild/mozbuild/compilation/codecomplete.py',
     'python/mozbuild/mozbuild/frontend/mach_commands.py',
-    'services/common/tests/mach_commands.py',
+    'taskcluster/mach_commands.py',
+    'testing/awsy/mach_commands.py',
     'testing/firefox-ui/mach_commands.py',
-    'testing/luciddream/mach_commands.py',
+    'testing/geckodriver/mach_commands.py',
     'testing/mach_commands.py',
     'testing/marionette/mach_commands.py',
     'testing/mochitest/mach_commands.py',
     'testing/mozharness/mach_commands.py',
+    'testing/raptor/mach_commands.py',
+    'testing/tps/mach_commands.py',
     'testing/talos/mach_commands.py',
-    'testing/taskcluster/mach_commands.py',
     'testing/web-platform/mach_commands.py',
     'testing/xpcshell/mach_commands.py',
+    'tools/compare-locales/mach_commands.py',
     'tools/docs/mach_commands.py',
-    'tools/mercurial/mach_commands.py',
+    'tools/lint/mach_commands.py',
     'tools/mach_commands.py',
     'tools/power/mach_commands.py',
+    'tools/tryselect/mach_commands.py',
     'mobile/android/mach_commands.py',
 ]
 
@@ -183,7 +107,9 @@ CATEGORIES = {
     },
     'disabled': {
         'short': 'Disabled',
-        'long': 'The disabled commands are hidden by default. Use -v to display them. These commands are unavailable for your current context, run "mach <command>" to see why.',
+        'long': 'The disabled commands are hidden by default. Use -v to display them. '
+        'These commands are unavailable for your current context, '
+        'run "mach <command>" to see why.',
         'priority': 0,
     }
 }
@@ -193,19 +119,30 @@ CATEGORIES = {
 TELEMETRY_SUBMISSION_FREQUENCY = 10
 
 
-def get_state_dir():
-    """Obtain the path to a directory to hold state.
+def search_path(mozilla_dir, packages_txt):
+    with open(os.path.join(mozilla_dir, packages_txt)) as f:
+        packages = [line.rstrip().split(':') for line in f]
 
-    Returns a tuple of the path and a bool indicating whether the value came
-    from an environment variable.
-    """
-    state_user_dir = os.path.expanduser('~/.mozbuild')
-    state_env_dir = os.environ.get('MOZBUILD_STATE_PATH', None)
+    def handle_package(package):
+        if package[0] == 'optional':
+            try:
+                for path in handle_package(package[1:]):
+                    yield path
+            except Exception:
+                pass
 
-    if state_env_dir:
-        return state_env_dir, True
-    else:
-        return state_user_dir, False
+        if package[0] == 'packages.txt':
+            assert len(package) == 2
+            for p in search_path(mozilla_dir, package[1]):
+                yield os.path.join(mozilla_dir, p)
+
+        if package[0].endswith('.pth'):
+            assert len(package) == 2
+            yield os.path.join(mozilla_dir, package[1])
+
+    for package in packages:
+        for path in handle_package(package):
+            yield path
 
 
 def bootstrap(topsrcdir, mozilla_dir=None):
@@ -228,11 +165,27 @@ def bootstrap(topsrcdir, mozilla_dir=None):
     # case. For default behavior, we educate users and give them an opportunity
     # to react. We always exit after creating the directory because users don't
     # like surprises.
-    try:
-        import mach.main
-    except ImportError:
-        sys.path[0:0] = [os.path.join(mozilla_dir, path) for path in SEARCH_PATHS]
-        import mach.main
+    sys.path[0:0] = [os.path.join(mozilla_dir, path)
+                     for path in search_path(mozilla_dir,
+                                             'build/virtualenv_packages.txt')]
+    import mach.base
+    import mach.main
+    from mozboot.util import get_state_dir
+
+    from mozbuild.util import patch_main
+    patch_main()
+
+    def resolve_repository():
+        import mozversioncontrol
+
+        try:
+            # This API doesn't respect the vcs binary choices from configure.
+            # If we ever need to use the VCS binary here, consider something
+            # more robust.
+            return mozversioncontrol.get_repository_object(path=mozilla_dir)
+        except (mozversioncontrol.InvalidRepoPath,
+                mozversioncontrol.MissingVCSTool):
+            return None
 
     def telemetry_handler(context, data):
         # We have not opted-in to telemetry
@@ -267,7 +220,7 @@ def bootstrap(topsrcdir, mozilla_dir=None):
             dist = list(platform.linux_distribution())
             data['system']['linux_distribution'] = dist
         elif platform.system() == 'Windows':
-            win32_ver=list((platform.win32_ver())),
+            win32_ver = list((platform.win32_ver())),
             data['system']['win32_ver'] = win32_ver
         elif platform.system() == 'Darwin':
             # mac version is a special Cupertino snowflake
@@ -292,43 +245,6 @@ def bootstrap(topsrcdir, mozilla_dir=None):
             return True
 
         return False
-
-    def pre_dispatch_handler(context, handler, args):
-        """Perform global checks before command dispatch.
-
-        Currently, our goal is to ensure developers periodically run
-        `mach mercurial-setup` (when applicable) to ensure their Mercurial
-        tools are up to date.
-        """
-        # Don't do anything when...
-        if should_skip_dispatch(context, handler):
-            return
-
-        # User has disabled first run check.
-        if 'I_PREFER_A_SUBOPTIMAL_MERCURIAL_EXPERIENCE' in os.environ:
-            return
-        if 'NO_MERCURIAL_SETUP_CHECK' in os.environ:
-            return
-
-        # Mercurial isn't managing this source checkout.
-        if not os.path.exists(os.path.join(topsrcdir, '.hg')):
-            return
-
-        state_dir = get_state_dir()[0]
-        last_check_path = os.path.join(state_dir, 'mercurial',
-                                       'setup.lastcheck')
-
-        mtime = None
-        try:
-            mtime = os.path.getmtime(last_check_path)
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
-
-        # No last run file means mercurial-setup has never completed.
-        if mtime is None:
-            print(NO_MERCURIAL_SETUP.format(mach=sys.argv[0]), file=sys.stderr)
-            sys.exit(2)
 
     def post_dispatch_handler(context, handler, args):
         """Perform global operations after command dispatch.
@@ -358,7 +274,7 @@ def bootstrap(topsrcdir, mozilla_dir=None):
                               os.path.join(topsrcdir, 'build',
                                            'submit_telemetry_data.py'),
                               get_state_dir()[0]],
-                              stdout=devnull, stderr=devnull)
+                             stdout=devnull, stderr=devnull)
 
     def populate_context(context, key=None):
         if key is None:
@@ -372,11 +288,12 @@ def bootstrap(topsrcdir, mozilla_dir=None):
                     os.makedirs(state_dir, mode=0o770)
             else:
                 if not os.path.exists(state_dir):
-                    print(STATE_DIR_FIRST_RUN.format(userdir=state_dir))
-                    try:
-                        sys.stdin.readline()
-                    except KeyboardInterrupt:
-                        sys.exit(1)
+                    if not os.environ.get('MOZ_AUTOMATION'):
+                        print(STATE_DIR_FIRST_RUN.format(userdir=state_dir))
+                        try:
+                            sys.stdin.readline()
+                        except KeyboardInterrupt:
+                            sys.exit(1)
 
                     print('\nCreating default state directory: %s' % state_dir)
                     os.makedirs(state_dir, mode=0o770)
@@ -386,28 +303,42 @@ def bootstrap(topsrcdir, mozilla_dir=None):
         if key == 'topdir':
             return topsrcdir
 
-        if key == 'pre_dispatch_handler':
-            return pre_dispatch_handler
-
         if key == 'telemetry_handler':
             return telemetry_handler
 
         if key == 'post_dispatch_handler':
             return post_dispatch_handler
 
+        if key == 'repository':
+            return resolve_repository()
+
         raise AttributeError(key)
 
-    mach = mach.main.Mach(os.getcwd())
-    mach.populate_context_handler = populate_context
+    driver = mach.main.Mach(os.getcwd())
+    driver.populate_context_handler = populate_context
+
+    if not driver.settings_paths:
+        # default global machrc location
+        driver.settings_paths.append(get_state_dir()[0])
+    # always load local repository configuration
+    driver.settings_paths.append(mozilla_dir)
 
     for category, meta in CATEGORIES.items():
-        mach.define_category(category, meta['short'], meta['long'],
-            meta['priority'])
+        driver.define_category(category, meta['short'], meta['long'],
+                               meta['priority'])
+
+    repo = resolve_repository()
 
     for path in MACH_MODULES:
-        mach.load_commands_from_file(os.path.join(mozilla_dir, path))
+        # Sparse checkouts may not have all mach_commands.py files. Ignore
+        # errors from missing files.
+        try:
+            driver.load_commands_from_file(os.path.join(mozilla_dir, path))
+        except mach.base.MissingFileError:
+            if not repo or not repo.sparse_checkout_present():
+                raise
 
-    return mach
+    return driver
 
 
 # Hook import such that .pyc/.pyo files without a corresponding .py file in
@@ -466,7 +397,8 @@ class ImportHook(object):
         # python modules under our source directory (either because it
         # doesn't happen or because it doesn't matter).
         if not os.path.exists(module.__file__[:-1]):
-            os.remove(module.__file__)
+            if os.path.exists(module.__file__):
+                os.remove(module.__file__)
             del sys.modules[module.__name__]
             module = self(name, globals, locals, fromlist, level)
 

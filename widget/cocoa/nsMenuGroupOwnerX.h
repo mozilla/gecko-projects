@@ -12,9 +12,7 @@
 #include "nsIMutationObserver.h"
 #include "nsHashKeys.h"
 #include "nsDataHashtable.h"
-#include "nsAutoPtr.h"
 #include "nsString.h"
-
 
 class nsMenuItemX;
 class nsChangeObserver;
@@ -26,7 +24,7 @@ class nsMenuGroupOwnerX : public nsMenuObjectX, public nsIMutationObserver
 public:
   nsMenuGroupOwnerX();
 
-  nsresult Create(nsIContent * aContent);
+  nsresult Create(mozilla::dom::Element* aContent);
 
   void RegisterForContentChanges(nsIContent* aContent,
                                  nsChangeObserver* aMenuObject);

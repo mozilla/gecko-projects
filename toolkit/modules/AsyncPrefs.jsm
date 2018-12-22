@@ -4,11 +4,9 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["AsyncPrefs"];
+var EXPORTED_SYMBOLS = ["AsyncPrefs"];
 
-const {interfaces: Ci, utils: Cu, classes: Cc} = Components;
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const kInChildProcess = Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT;
 
@@ -22,9 +20,13 @@ const kAllowedPrefs = new Set([
   "narrate.rate",
   "narrate.voice",
 
+  "privacy.trackingprotection.pbmode.enabled",
+
   "reader.font_size",
   "reader.font_type",
   "reader.color_scheme",
+  "reader.content_width",
+  "reader.line_height",
 ]);
 
 const kPrefTypeMap = new Map([
@@ -63,7 +65,7 @@ if (kInChildProcess) {
   let gMsgMap = new Map();
 
   AsyncPrefs = {
-    set: Task.async(function(pref, value) {
+    set(pref, value) {
       let error = maybeReturnErrorForSet(pref, value);
       if (error) {
         return Promise.reject(error);
@@ -74,9 +76,9 @@ if (kInChildProcess) {
         gMsgMap.set(msgId, {resolve, reject});
         Services.cpmm.sendAsyncMessage("AsyncPrefs:SetPref", {pref, value, msgId});
       });
-    }),
+    },
 
-    reset: Task.async(function(pref) {
+    reset(pref) {
       let error = maybeReturnErrorForReset(pref);
       if (error) {
         return Promise.reject(error);
@@ -87,7 +89,7 @@ if (kInChildProcess) {
         gMsgMap.set(msgId, {resolve, reject});
         Services.cpmm.sendAsyncMessage("AsyncPrefs:ResetPref", {pref, msgId});
       });
-    }),
+    },
 
     receiveMessage(msg) {
       let promiseRef = gMsgMap.get(msg.data.msgId);
@@ -100,12 +102,10 @@ if (kInChildProcess) {
         }
       }
     },
-
-    init() {
-      Services.cpmm.addMessageListener("AsyncPrefs:PrefSetFinished", this);
-      Services.cpmm.addMessageListener("AsyncPrefs:PrefResetFinished", this);
-    },
   };
+
+  Services.cpmm.addMessageListener("AsyncPrefs:PrefSetFinished", AsyncPrefs);
+  Services.cpmm.addMessageListener("AsyncPrefs:PrefResetFinished", AsyncPrefs);
 } else {
   AsyncPrefs = {
     methodForType: {
@@ -114,7 +114,7 @@ if (kInChildProcess) {
       string: "setCharPref",
     },
 
-    set: Task.async(function(pref, value) {
+    set(pref, value) {
       let error = maybeReturnErrorForSet(pref, value);
       if (error) {
         return Promise.reject(error);
@@ -127,9 +127,9 @@ if (kInChildProcess) {
         Cu.reportError(ex);
         return Promise.reject(ex.message);
       }
-    }),
+    },
 
-    reset: Task.async(function(pref) {
+    reset(pref) {
       let error = maybeReturnErrorForReset(pref);
       if (error) {
         return Promise.reject(error);
@@ -142,7 +142,7 @@ if (kInChildProcess) {
         Cu.reportError(ex);
         return Promise.reject(ex.message);
       }
-    }),
+    },
 
     receiveMessage(msg) {
       if (msg.name == "AsyncPrefs:SetPref") {
@@ -171,11 +171,10 @@ if (kInChildProcess) {
     },
 
     init() {
+      // PLEASE KEEP THIS LIST IN SYNC WITH THE LISTENERS ADDED IN nsBrowserGlue
       Services.ppmm.addMessageListener("AsyncPrefs:SetPref", this);
       Services.ppmm.addMessageListener("AsyncPrefs:ResetPref", this);
+      // PLEASE KEEP THIS LIST IN SYNC WITH THE LISTENERS ADDED IN nsBrowserGlue
     }
   };
 }
-
-AsyncPrefs.init();
-

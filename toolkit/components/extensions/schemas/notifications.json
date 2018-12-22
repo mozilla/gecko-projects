@@ -5,6 +5,7 @@
 [
   {
     "namespace": "notifications",
+    "permissions": ["notifications"],
     "types": [
       {
         "id": "TemplateType",
@@ -81,6 +82,24 @@
             "description": "A timestamp associated with the notification, in milliseconds past the epoch.",
             "type": "number"
           },
+          "buttons": {
+            "unsupported": true,
+            "optional": true,
+            "description": "Text and icons for up to two notification action buttons.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "iconUrl": {
+                  "optional": true,
+                  "type": "string"
+                }
+              }
+            }
+          },
           "imageUrl": {
             "optional": true,
             "description": "A URL to the image thumbnail for image-type notifications.",
@@ -152,6 +171,24 @@
             "description": "A timestamp associated with the notification, in milliseconds past the epoch.",
             "type": "number"
           },
+          "buttons": {
+            "unsupported": true,
+            "optional": true,
+            "description": "Text and icons for up to two notification action buttons.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "iconUrl": {
+                  "optional": true,
+                  "type": "string"
+                }
+              }
+            }
+          },
           "imageUrl": {
             "optional": true,
             "description": "A URL to the image thumbnail for image-type notifications.",
@@ -186,6 +223,7 @@
         "async": "callback",
         "parameters": [
           {
+            "optional": true,
             "type": "string",
             "name": "notificationId",
             "description": "Identifier of the notification. If it is empty, this method generates an id. If it matches an existing notification, this method first clears that notification before proceeding with the create operation."
@@ -278,6 +316,7 @@
               {
                 "name": "notifications",
                 "type": "object",
+                "additionalProperties": {"$ref": "CreateNotificationOptions"},
                 "description": "The set of notifications currently in the system."
               }
             ]
@@ -371,6 +410,18 @@
         "type": "function",
         "description": "Fired when the user clicked on a link for the app's notification settings.",
         "parameters": [
+        ]
+      },
+      {
+        "name": "onShown",
+        "type": "function",
+        "description": "Fired when the notification is shown.",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "notificationId",
+            "description": "The notificationId of the shown notification."
+          }
         ]
       }
     ]

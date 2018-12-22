@@ -4,22 +4,23 @@
 
 "use strict";
 
-const {utils: Cu} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 this.EXPORTED_SYMBOLS = ["modal"];
 
-const isFirefox = () => Services.appinfo.name == "Firefox";
+const COMMON_DIALOG = "chrome://global/content/commonDialog.xul";
 
-this.modal = {};
-modal = {
+const isFirefox = () =>
+    Services.appinfo.ID == "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
+
+/** @namespace */
+this.modal = {
   COMMON_DIALOG_LOADED: "common-dialog-loaded",
   TABMODAL_DIALOG_LOADED: "tabmodal-dialog-loaded",
   handlers: {
     "common-dialog-loaded": new Set(),
-    "tabmodal-dialog-loaded": new Set()
-  }
+    "tabmodal-dialog-loaded": new Set(),
+  },
 };
 
 /**
@@ -44,8 +45,51 @@ modal.addHandler = function(handler) {
 
   Object.keys(this.handlers).map(topic => {
     this.handlers[topic].add(handler);
-    Services.obs.addObserver(handler, topic, false);
+    Services.obs.addObserver(handler, topic);
   });
+};
+
+/**
+ * Check for already existing modal or tab modal dialogs
+ *
+ * @param {browser.Context} context
+ *     Reference to the browser context to check for existent dialogs.
+ *
+ * @return {modal.Dialog}
+ *     Returns instance of the Dialog class, or `null` if no modal dialog
+ *     is present.
+ */
+modal.findModalDialogs = function(context) {
+  // First check if there is a modal dialog already present for the
+  // current browser window.
+  let winEn = Services.wm.getEnumerator(null);
+  while (winEn.hasMoreElements()) {
+    let win = winEn.getNext();
+
+    // Modal dialogs which do not have an opener set, we cannot detect
+    // as long as GetZOrderDOMWindowEnumerator doesn't work on Linux
+    // (Bug 156333).
+    if (win.document.documentURI === COMMON_DIALOG &&
+        win.opener && win.opener === context.window) {
+      return new modal.Dialog(() => context, Cu.getWeakReference(win));
+    }
+  }
+
+  // If no modal dialog has been found, also check if there is an open
+  // tab modal dialog present for the current tab.
+  // TODO: Find an adequate implementation for Fennec.
+  if (context.tab && context.tabBrowser.getTabModalPromptBox) {
+    let contentBrowser = context.contentBrowser;
+    let promptManager =
+        context.tabBrowser.getTabModalPromptBox(contentBrowser);
+    let prompts = promptManager.listPrompts();
+
+    if (prompts.length) {
+      return new modal.Dialog(() => context, null);
+    }
+  }
+
+  return null;
 };
 
 /**
@@ -76,8 +120,8 @@ modal.removeHandler = function(toRemove) {
 /**
  * Represents the current modal dialogue.
  *
- * @param {function(): BrowserObj} curBrowserFn
- *     Function that returns the current |BrowserObj|.
+ * @param {function(): browser.Context} curBrowserFn
+ *     Function that returns the current |browser.Context|.
  * @param {nsIWeakReference=} winRef
  *     A weak reference to the current |ChromeWindow|.
  */

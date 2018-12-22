@@ -31,7 +31,7 @@ struct NPRemoteEvent {
 // Luckily, as of xorg 1.6.0 / X protocol 11 rev 0, the only pointer
 // field contained in any of these specific X*Event structs is a
 // |Display*|.  So to simplify serializing these XEvents, we make the
-// 
+//
 // ********** XXX ASSUMPTION XXX **********
 //
 // that the process to which the event is forwarded shares the same
@@ -55,15 +55,11 @@ struct ParamTraits<mozilla::plugins::NPRemoteEvent>     // synonym for XEvent
         aMsg->WriteBytes(&aParam, sizeof(paramType));
     }
 
-    static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+    static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
     {
-        const char* bytes = 0;
-
-        if (!aMsg->ReadBytes(aIter, &bytes, sizeof(paramType))) {
+        if (!aMsg->ReadBytesInto(aIter, aResult, sizeof(paramType))) {
             return false;
         }
-
-        memcpy(aResult, bytes, sizeof(paramType));
 
 #ifdef MOZ_X11
         SetXDisplay(aResult->event);

@@ -6,47 +6,52 @@
 
 "use strict";
 
-const { utils: Cu } = Components;
 const { BrowserLoader } =
-  Cu.import("resource://devtools/client/shared/browser-loader.js", {});
+  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
 const { require } = BrowserLoader({
   baseURI: "resource://devtools/client/responsive.html/",
-  window: this
+  window
 });
-const { GetDevices } = require("devtools/client/shared/devices");
 const Telemetry = require("devtools/client/shared/telemetry");
+const { loadAgentSheet } = require("./utils/css");
 
 const { createFactory, createElement } =
   require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
+const message = require("./utils/message");
 const App = createFactory(require("./app"));
 const Store = require("./store");
-const { addDevice, addDeviceType } = require("./actions/devices");
+const { loadDevices } = require("./actions/devices");
+const { changeDisplayPixelRatio } = require("./actions/display-pixel-ratio");
 const { changeLocation } = require("./actions/location");
-const { addViewport } = require("./actions/viewports");
-const { loadSheet } = require("sdk/stylesheet/utils");
+const { loadReloadConditions } = require("./actions/reload-conditions");
+const { addViewport, resizeViewport } = require("./actions/viewports");
 
-let bootstrap = {
+// Exposed for use by tests
+window.require = require;
+
+const bootstrap = {
 
   telemetry: new Telemetry(),
 
   store: null,
 
-  init() {
+  async init() {
     // Load a special UA stylesheet to reset certain styles such as dropdown
     // lists.
-    loadSheet(window,
-              "resource://devtools/client/responsive.html/responsive-ua.css",
-              "agent");
-    this.telemetry.toolOpened("responsive");
-    let store = this.store = Store();
-    let provider = createElement(Provider, { store }, App());
+    loadAgentSheet(
+      window,
+      "resource://devtools/client/responsive.html/responsive-ua.css"
+    );
 
+    this.telemetry.toolOpened("responsive");
+
+    const store = this.store = Store();
+    const provider = createElement(Provider, { store }, App());
     ReactDOM.render(provider, document.querySelector("#root"));
-    this.initDevices();
-    window.postMessage({ type: "init" }, "*");
+    message.post(window, "init:done");
   },
 
   destroy() {
@@ -70,30 +75,21 @@ let bootstrap = {
     this.store.dispatch(action);
   },
 
-  initDevices() {
-    GetDevices().then(devices => {
-      for (let type of devices.TYPES) {
-        this.dispatch(addDeviceType(type));
-        for (let device of devices[type]) {
-          if (device.os != "fxos") {
-            this.dispatch(addDevice(device, type));
-          }
-        }
-      }
-    });
-  },
-
 };
 
-window.addEventListener("load", function onLoad() {
-  window.removeEventListener("load", onLoad);
-  bootstrap.init();
+// manager.js sends a message to signal init
+message.wait(window, "init").then(() => bootstrap.init());
+
+// manager.js sends a message to signal init is done, which can be used for delayed
+// startup work that shouldn't block initial load
+message.wait(window, "post-init").then(() => {
+  bootstrap.dispatch(loadDevices());
+  bootstrap.dispatch(loadReloadConditions());
 });
 
-window.addEventListener("unload", function onUnload() {
-  window.removeEventListener("unload", onUnload);
+window.addEventListener("unload", function() {
   bootstrap.destroy();
-});
+}, {once: true});
 
 // Allows quick testing of actions from the console
 window.dispatch = action => bootstrap.dispatch(action);
@@ -104,14 +100,74 @@ Object.defineProperty(window, "store", {
   enumerable: true,
 });
 
+// Dispatch a `changeDisplayPixelRatio` action when the browser's pixel ratio is changing.
+// This is usually triggered when the user changes the monitor resolution, or when the
+// browser's window is dragged to a different display with a different pixel ratio.
+// TODO: It would be better to move this watching into the actor, so that it can be
+// better synchronized with any overrides that might be applied.  Also, reading a single
+// value like this makes less sense with multiple viewports.
+function onDevicePixelRatioChange() {
+  const dpr = window.devicePixelRatio;
+  const mql = window.matchMedia(`(resolution: ${dpr}dppx)`);
+
+  function listener() {
+    bootstrap.dispatch(changeDisplayPixelRatio(window.devicePixelRatio));
+    mql.removeListener(listener);
+    onDevicePixelRatioChange();
+  }
+
+  mql.addListener(listener);
+}
+
 /**
  * Called by manager.js to add the initial viewport based on the original page.
  */
-window.addInitialViewport = contentURI => {
+window.addInitialViewport = ({ uri, userContextId }) => {
   try {
-    bootstrap.dispatch(changeLocation(contentURI));
-    bootstrap.dispatch(addViewport());
+    onDevicePixelRatioChange();
+    bootstrap.dispatch(changeLocation(uri));
+    bootstrap.dispatch(changeDisplayPixelRatio(window.devicePixelRatio));
+    bootstrap.dispatch(addViewport(userContextId));
   } catch (e) {
     console.error(e);
   }
+};
+
+/**
+ * Called by manager.js when tests want to check the viewport size.
+ */
+window.getViewportSize = () => {
+  const { width, height } = bootstrap.store.getState().viewports[0];
+  return { width, height };
+};
+
+/**
+ * Called by manager.js to set viewport size from tests, GCLI, etc.
+ */
+window.setViewportSize = ({ width, height }) => {
+  try {
+    bootstrap.dispatch(resizeViewport(0, width, height));
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+/**
+ * Called by manager.js to access the viewport's browser, either for testing
+ * purposes or to reload it when touch simulation is enabled.
+ * A messageManager getter is added on the object to provide an easy access
+ * to the message manager without pulling the frame loader.
+ */
+window.getViewportBrowser = () => {
+  const browser = document.querySelector("iframe.browser");
+  if (!browser.messageManager) {
+    Object.defineProperty(browser, "messageManager", {
+      get() {
+        return this.frameLoader.messageManager;
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  return browser;
 };

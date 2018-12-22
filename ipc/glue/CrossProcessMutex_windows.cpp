@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -23,7 +24,7 @@ CrossProcessMutex::CrossProcessMutex(const char*)
   // given.
   mMutex = ::CreateMutexA(nullptr, FALSE, nullptr);
   if (!mMutex) {
-    NS_RUNTIMEABORT("This shouldn't happen - failed to create mutex!");
+    MOZ_CRASH("This shouldn't happen - failed to create mutex!");
   }
   MOZ_COUNT_CTOR(CrossProcessMutex);
 }
@@ -32,7 +33,7 @@ CrossProcessMutex::CrossProcessMutex(CrossProcessMutexHandle aHandle)
 {
   DWORD flags;
   if (!::GetHandleInformation(aHandle, &flags)) {
-    NS_RUNTIMEABORT("Attempt to construct a mutex from an invalid handle!");
+    MOZ_CRASH("Attempt to construct a mutex from an invalid handle!");
   }
   mMutex = aHandle;
   MOZ_COUNT_CTOR(CrossProcessMutex);

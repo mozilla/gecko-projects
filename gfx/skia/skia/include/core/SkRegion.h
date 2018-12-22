@@ -20,7 +20,7 @@ namespace android {
 }
 
 #define SkRegion_gEmptyRunHeadPtr   ((SkRegion::RunHead*)-1)
-#define SkRegion_gRectRunHeadPtr    0
+#define SkRegion_gRectRunHeadPtr    nullptr
 
 /** \class SkRegion
 
@@ -117,7 +117,9 @@ public:
      *  If left < right and top < bottom, set this region to that rectangle and
      *  return true, otherwise set this region to empty and return false.
      */
-    bool setRect(int32_t left, int32_t top, int32_t right, int32_t bottom);
+    bool setRect(int32_t left, int32_t top, int32_t right, int32_t bottom) {
+        return this->setRect({ left, top, right, bottom });
+    }
 
     /**
      *  Set this region to the union of an array of rects. This is generally
@@ -255,7 +257,15 @@ public:
      *  specified rectangle: this = (this op rect).
      *  Return true if the resulting region is non-empty.
      */
-    bool op(const SkIRect& rect, Op op) { return this->op(*this, rect, op); }
+    bool op(const SkIRect& rect, Op op) {
+        if (this->isRect() && kIntersect_Op == op) {
+            if (!fBounds.intersect(rect)) {
+                return this->setEmpty();
+            }
+            return true;
+        }
+        return this->op(*this, rect, op);
+    }
 
     /**
      *  Set this region to the result of applying the Op to this region and the
@@ -308,7 +318,7 @@ public:
      */
     class SK_API Iterator {
     public:
-        Iterator() : fRgn(NULL), fDone(true) {}
+        Iterator() : fRgn(nullptr), fDone(true) {}
         Iterator(const SkRegion&);
         // if we have a region, reset to it and return true, else return false
         bool rewind();
@@ -428,6 +438,8 @@ private:
 
     int count_runtype_values(int* itop, int* ibot) const;
 
+    bool isValid() const;
+
     static void BuildRectRuns(const SkIRect& bounds,
                               RunType runs[kRectRegionRuns]);
 
@@ -445,6 +457,7 @@ private:
     friend struct RunHead;
     friend class Iterator;
     friend class Spanerator;
+    friend class SkRegionPriv;
     friend class SkRgnBuilder;
     friend class SkFlatRegion;
 };

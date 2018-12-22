@@ -45,13 +45,15 @@ class FilePickerParent : public PFilePickerParent
 
   void SendFilesOrDirectories(const nsTArray<BlobImplOrString>& aData);
 
-  virtual bool RecvOpen(const int16_t& aSelectedType,
-                        const bool& aAddToRecentDocs,
-                        const nsString& aDefaultFile,
-                        const nsString& aDefaultExtension,
-                        InfallibleTArray<nsString>&& aFilters,
-                        InfallibleTArray<nsString>&& aFilterNames,
-                        const nsString& aDisplayDirectory) override;
+  virtual mozilla::ipc::IPCResult RecvOpen(const int16_t& aSelectedType,
+                                           const bool& aAddToRecentDocs,
+                                           const nsString& aDefaultFile,
+                                           const nsString& aDefaultExtension,
+                                           InfallibleTArray<nsString>&& aFilters,
+                                           InfallibleTArray<nsString>&& aFilterNames,
+                                           const nsString& aDisplayDirectory,
+                                           const nsString& aDisplaySpecialDirectory,
+                                           const nsString& aOkButtonLabel) override;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -76,7 +78,7 @@ class FilePickerParent : public PFilePickerParent
   bool CreateFilePicker();
 
   // This runnable is used to do some I/O operation on a separate thread.
-  class IORunnable : public nsRunnable
+  class IORunnable : public Runnable
   {
     FilePickerParent* mFilePickerParent;
     nsTArray<nsCOMPtr<nsIFile>> mFiles;
@@ -90,7 +92,7 @@ class FilePickerParent : public PFilePickerParent
                bool aIsDirectory);
 
     bool Dispatch();
-    NS_IMETHOD Run();
+    NS_IMETHOD Run() override;
     void Destroy();
   };
 

@@ -12,8 +12,9 @@
 #define mozilla_image_LookupResult_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/gfx/Point.h"  // for IntSize
 #include "mozilla/Move.h"
-#include "imgFrame.h"
+#include "ISurfaceProvider.h"
 
 namespace mozilla {
 namespace image {
@@ -24,8 +25,15 @@ enum class MatchType : uint8_t
   PENDING,    // Found a matching placeholder, but no surface.
   EXACT,      // Found a surface that matches exactly.
   SUBSTITUTE_BECAUSE_NOT_FOUND,  // No exact match, but found a similar one.
-  SUBSTITUTE_BECAUSE_PENDING     // Found a similar surface and a placeholder
+  SUBSTITUTE_BECAUSE_PENDING,    // Found a similar surface and a placeholder
                                  // for an exact match.
+
+  /* No exact match, but this should be considered an exact match for purposes
+   * of deciding whether or not to request a new decode. This is because the
+   * cache has determined that callers require too many size variants of this
+   * image. It determines the set of sizes which best represent the image, and
+   * will only suggest decoding of unavailable sizes from that set. */
+  SUBSTITUTE_BECAUSE_BEST
 };
 
 /**
@@ -44,44 +52,66 @@ public:
   }
 
   LookupResult(LookupResult&& aOther)
-    : mDrawableRef(Move(aOther.mDrawableRef))
+    : mSurface(std::move(aOther.mSurface))
     , mMatchType(aOther.mMatchType)
+    , mSuggestedSize(aOther.mSuggestedSize)
   { }
 
-  LookupResult(DrawableFrameRef&& aDrawableRef, MatchType aMatchType)
-    : mDrawableRef(Move(aDrawableRef))
+  LookupResult(DrawableSurface&& aSurface, MatchType aMatchType)
+    : mSurface(std::move(aSurface))
     , mMatchType(aMatchType)
   {
-    MOZ_ASSERT(!mDrawableRef || !(mMatchType == MatchType::NOT_FOUND ||
-                                  mMatchType == MatchType::PENDING),
+    MOZ_ASSERT(!mSurface || !(mMatchType == MatchType::NOT_FOUND ||
+                              mMatchType == MatchType::PENDING),
                "Only NOT_FOUND or PENDING make sense with no surface");
-    MOZ_ASSERT(mDrawableRef || mMatchType == MatchType::NOT_FOUND ||
-                               mMatchType == MatchType::PENDING,
+    MOZ_ASSERT(mSurface || mMatchType == MatchType::NOT_FOUND ||
+                           mMatchType == MatchType::PENDING,
+               "NOT_FOUND or PENDING do not make sense with a surface");
+  }
+
+  LookupResult(DrawableSurface&& aSurface, MatchType aMatchType,
+               const gfx::IntSize& aSuggestedSize)
+    : mSurface(std::move(aSurface))
+    , mMatchType(aMatchType)
+    , mSuggestedSize(aSuggestedSize)
+  {
+    MOZ_ASSERT(!mSurface || !(mMatchType == MatchType::NOT_FOUND ||
+                              mMatchType == MatchType::PENDING),
+               "Only NOT_FOUND or PENDING make sense with no surface");
+    MOZ_ASSERT(mSurface || mMatchType == MatchType::NOT_FOUND ||
+                           mMatchType == MatchType::PENDING,
                "NOT_FOUND or PENDING do not make sense with a surface");
   }
 
   LookupResult& operator=(LookupResult&& aOther)
   {
     MOZ_ASSERT(&aOther != this, "Self-move-assignment is not supported");
-    mDrawableRef = Move(aOther.mDrawableRef);
+    mSurface = std::move(aOther.mSurface);
     mMatchType = aOther.mMatchType;
+    mSuggestedSize = aOther.mSuggestedSize;
     return *this;
   }
 
-  DrawableFrameRef& DrawableRef() { return mDrawableRef; }
-  const DrawableFrameRef& DrawableRef() const { return mDrawableRef; }
+  DrawableSurface& Surface() { return mSurface; }
+  const DrawableSurface& Surface() const { return mSurface; }
+  const gfx::IntSize& SuggestedSize() const { return mSuggestedSize; }
 
   /// @return true if this LookupResult contains a surface.
-  explicit operator bool() const { return bool(mDrawableRef); }
+  explicit operator bool() const { return bool(mSurface); }
 
   /// @return what kind of match this is (exact, substitute, etc.)
   MatchType Type() const { return mMatchType; }
 
 private:
   LookupResult(const LookupResult&) = delete;
+  LookupResult& operator=(const LookupResult& aOther) = delete;
 
-  DrawableFrameRef mDrawableRef;
+  DrawableSurface mSurface;
   MatchType mMatchType;
+
+  /// If given, the size the caller should request a decode at. This may or may
+  /// not match the size the caller requested from the cache.
+  gfx::IntSize mSuggestedSize;
 };
 
 } // namespace image

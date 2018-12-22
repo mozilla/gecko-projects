@@ -6,7 +6,7 @@
 // Tests that NetworkHelper.formatSecurityProtocol returns correct
 // protocol version strings.
 
-const { require } = Components.utils.import("resource://devtools/shared/Loader.jsm", {});
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 
 Object.defineProperty(this, "NetworkHelper", {
   get: function() {
@@ -17,7 +17,6 @@ Object.defineProperty(this, "NetworkHelper", {
   enumerable: true
 });
 
-var Ci = Components.interfaces;
 const TEST_CASES = [
   {
     description: "TLS_VERSION_1",
@@ -32,6 +31,10 @@ const TEST_CASES = [
     input: 3,
     expected: "TLSv1.2"
   }, {
+    description: "TLS_VERSION_1.3",
+    input: 4,
+    expected: "TLSv1.3"
+  }, {
     description: "invalid version",
     input: -1,
     expected: "Unknown"
@@ -39,10 +42,10 @@ const TEST_CASES = [
 ];
 
 function run_test() {
-  do_print("Testing NetworkHelper.formatSecurityProtocol.");
+  info("Testing NetworkHelper.formatSecurityProtocol.");
 
-  for (let {description, input, expected} of TEST_CASES) {
-    do_print("Testing " + description);
+  for (const {description, input, expected} of TEST_CASES) {
+    info("Testing " + description);
 
     equal(NetworkHelper.formatSecurityProtocol(input), expected,
       "Got the expected protocol string.");

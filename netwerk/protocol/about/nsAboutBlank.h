@@ -8,20 +8,20 @@
 
 #include "nsIAboutModule.h"
 
-class nsAboutBlank : public nsIAboutModule 
+class nsAboutBlank : public nsIAboutModule
 {
 public:
     NS_DECL_ISUPPORTS
 
     NS_DECL_NSIABOUTMODULE
 
-    nsAboutBlank() {}
+    nsAboutBlank() = default;
 
     static nsresult
     Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
 
 private:
-    virtual ~nsAboutBlank() {}
+    virtual ~nsAboutBlank() = default;
 };
 
 #define NS_ABOUT_BLANK_MODULE_CID                    \

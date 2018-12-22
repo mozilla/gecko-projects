@@ -7,7 +7,7 @@
 #include "nsISupports.idl"
 
 %{C++
-#include "DrawResult.h"
+#include "ImgDrawResult.h"
 #include "gfxContext.h"
 #include "gfxMatrix.h"
 #include "gfxRect.h"
@@ -45,12 +45,12 @@ struct Orientation;
 
 %}
 
-native DrawResult(mozilla::image::DrawResult);
+native ImgDrawResult(mozilla::image::ImgDrawResult);
 [ptr] native gfxContext(gfxContext);
 [ref] native gfxMatrix(gfxMatrix);
 [ref] native gfxRect(gfxRect);
 [ref] native gfxSize(gfxSize);
-native Filter(mozilla::gfx::Filter);
+native SamplingFilter(mozilla::gfx::SamplingFilter);
 [ref] native nsIntRect(nsIntRect);
 native nsIntRectByVal(nsIntRect);
 [ref] native nsIntSize(nsIntSize);
@@ -116,12 +116,12 @@ interface imgIContainer : nsISupports
    * @param aDest The size of the destination rect into which this image will be
    *              drawn, in device pixels.
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aFilter The filter to be used if we're scaling the image.
+   * @param aSamplingFilter The filter to be used if we're scaling the image.
    * @param aFlags Flags of the FLAG_* variety
    */
   [notxpcom, nostdcall] nsIntSizeByVal
   optimalImageSizeForDest([const] in gfxSize aDest, in uint32_t aWhichFrame,
-                          in Filter aFilter, in uint32_t aFlags);
+                          in SamplingFilter aSamplingFilter, in uint32_t aFlags);
 
   /**
     * Enumerated values for the 'type' attribute (below).
@@ -195,6 +195,15 @@ interface imgIContainer : nsISupports
    * the given image non-uniformly if necessary such that the image's
    * viewBox (if specified or implied by height/width attributes) exactly
    * matches the viewport rectangle.
+   *
+   * FLAG_FORCE_UNIFORM_SCALING: Signal to ClippedImage::OptimalSizeForDest that
+   * its returned size can only scale the image's size *uniformly* (by the same
+   * factor in each dimension). We need this flag when painting border-image
+   * section with SVG image source-data, if the SVG image has no viewBox and no
+   * intrinsic size. In such a case, we synthesize a viewport for the SVG image
+   * (a "window into SVG space") based on the border image area, and we need to
+   * be sure we don't subsequently scale that viewport in a way that distorts
+   * its contents by stretching them more in one dimension than the other.
    */
   const unsigned long FLAG_NONE                            = 0x0;
   const unsigned long FLAG_SYNC_DECODE                     = 0x1;
@@ -207,6 +216,7 @@ interface imgIContainer : nsISupports
   const unsigned long FLAG_WANT_DATA_SURFACE               = 0x80;
   const unsigned long FLAG_BYPASS_SURFACE_CACHE            = 0x100;
   const unsigned long FLAG_FORCE_PRESERVEASPECTRATIO_NONE  = 0x200;
+  const unsigned long FLAG_FORCE_UNIFORM_SCALING           = 0x400;
 
   /**
    * A constant specifying the default set of decode flags (i.e., the default
@@ -254,9 +264,12 @@ interface imgIContainer : nsISupports
                                                            in uint32_t aFlags);
 
   /**
-   * Whether this image is opaque (i.e., needs a background painted behind it).
+   * Returns true if this image will draw opaquely right now if asked to draw
+   * with FLAG_HIGH_QUALITY_SCALING and otherwise default flags. If this image
+   * (when decoded) is opaque but no decoded frames are available then
+   * willDrawOpaqueNow will return false.
    */
-  [notxpcom] boolean isOpaque();
+  [noscript, notxpcom] boolean willDrawOpaqueNow();
 
   /**
    * @return true if getImageContainer() is expected to return a valid
@@ -267,7 +280,7 @@ interface imgIContainer : nsISupports
                                                          in uint32_t aFlags);
   /**
    * Attempts to create an ImageContainer (and Image) containing the current
-   * frame.
+   * frame at its native size.
    *
    * Avoid calling this unless you're actually going to layerize this image.
    *
@@ -281,6 +294,41 @@ interface imgIContainer : nsISupports
    */
   [noscript, notxpcom] TempRefImageContainer getImageContainer(in LayerManager aManager,
                                                                in uint32_t aFlags);
+
+  /**
+   * @return true if getImageContainer() is expected to return a valid
+   *         ImageContainer when passed the given @Manager, @Size and @Flags
+   *         parameters.
+   */
+  [noscript, notxpcom] boolean isImageContainerAvailableAtSize(in LayerManager aManager,
+                                                               [const] in nsIntSize aSize,
+                                                               in uint32_t aFlags);
+
+  /**
+   * Attempts to create an ImageContainer (and Image) containing the current
+   * frame at the given size. Match the requested size is best effort; it's
+   * not guaranteed that the surface you get will be a perfect match. (Some
+   * reasons you may get a surface of a different size include: if you
+   * requested upscaling, or if downscale-during-decode is disabled.)
+   *
+   * Avoid calling this unless you're actually going to layerize this image.
+   *
+   * @param aManager The LayerManager which will be used to create the
+   *                 ImageContainer.
+   * @param aSVGContext If specified, SVG-related rendering context, such as
+   *                    overridden attributes on the image document's root <svg>
+   *                    node, and the size of the viewport that the full image
+   *                    would occupy. Ignored for raster images.
+   * @param aFlags Decoding / drawing flags (in other words, FLAG_* flags).
+   *               Currently only FLAG_SYNC_DECODE and FLAG_SYNC_DECODE_IF_FAST
+   *               are supported.
+   * @return An ImageContainer for the current frame, or nullptr if one could
+   *         not be created.
+   */
+  [noscript, notxpcom] TempRefImageContainer getImageContainerAtSize(in LayerManager aManager,
+                                                                     [const] in nsIntSize aSize,
+                                                                     [const] in MaybeSVGImageContext aSVGContext,
+                                                                     in uint32_t aFlags);
 
   /**
    * Draw the requested frame of this image onto the context specified.
@@ -378,31 +426,44 @@ interface imgIContainer : nsISupports
    *                is only of use to callers which need to draw with pixel
    *                snapping.
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aFilter The filter to be used if we're scaling the image.
+   * @param aSamplingFilter The filter to be used if we're scaling the image.
    * @param aSVGContext If specified, SVG-related rendering context, such as
    *                    overridden attributes on the image document's root <svg>
    *                    node, and the size of the viewport that the full image
    *                    would occupy. Ignored for raster images.
    * @param aFlags Flags of the FLAG_* variety
-   * @return A DrawResult value indicating whether and to what degree the
+   * @return A ImgDrawResult value indicating whether and to what degree the
    *         drawing operation was successful.
    */
-  [noscript, notxpcom] DrawResult
+  [noscript, notxpcom] ImgDrawResult
   draw(in gfxContext aContext,
        [const] in nsIntSize aSize,
        [const] in ImageRegion aRegion,
        in uint32_t aWhichFrame,
-       in Filter aFilter,
+       in SamplingFilter aSamplingFilter,
        [const] in MaybeSVGImageContext aSVGContext,
-       in uint32_t aFlags);
+       in uint32_t aFlags,
+       in float aOpacity);
 
   /*
    * Ensures that an image is decoding. Calling this function guarantees that
    * the image will at some point fire off decode notifications. Images that
    * can be decoded "quickly" according to some heuristic will be decoded
    * synchronously.
+   *
+   * @param aFlags Flags of the FLAG_* variety. Only FLAG_ASYNC_NOTIFY
+   *               is accepted; all others are ignored.
    */
-  [noscript] void startDecoding();
+  [noscript] void startDecoding(in uint32_t aFlags);
+
+  /*
+   * Exactly like startDecoding above except returns whether the current frame
+   * of the image is complete or not.
+   *
+   * @param aFlags Flags of the FLAG_* variety. Only FLAG_ASYNC_NOTIFY
+   *               is accepted; all others are ignored.
+   */
+  [noscript, notxpcom] boolean startDecodingWithResult(in uint32_t aFlags);
 
   /*
    * This method triggers decoding for an image, but unlike startDecoding() it
@@ -533,4 +594,13 @@ interface imgIContainer : nsISupports
    * document.
    */
   [noscript, notxpcom] void propagateUseCounters(in nsIDocument aDocument);
+
+  %{C++
+  /*
+   * Get the set of sizes the image can decode to natively.
+   */
+  virtual nsresult GetNativeSizes(nsTArray<nsIntSize>& aNativeSizes) const = 0;
+
+  virtual size_t GetNativeSizesLength() const = 0;
+  %}
 };

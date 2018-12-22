@@ -2,7 +2,22 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-Components.utils.import("resource://testing-common/MockRegistrar.jsm");
+const WindowWatcher = {
+  openWindow(aParent, aUrl, aName, aFeatures, aArgs) {
+    check_showUpdateAvailable();
+  },
+
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowWatcher])
+};
+
+const WindowMediator = {
+  getMostRecentWindow(aWindowType) {
+    executeSoon(check_status);
+    return { getInterface: ChromeUtils.generateQI([Ci.nsIDOMWindow]) };
+  },
+
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowMediator])
+};
 
 function run_test() {
   setupTestCommon();
@@ -15,9 +30,8 @@ function run_test() {
   Services.prefs.setBoolPref(PREF_APP_UPDATE_AUTO, false);
   Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, false);
 
-  setUpdateURLOverride();
-  // The mock XMLHttpRequest is MUCH faster
-  overrideXHR(callHandleEvent);
+  start_httpserver();
+  setUpdateURL(gURLData + gHTTPHandlerPath);
   standardInit();
 
   let windowWatcherCID =
@@ -26,14 +40,13 @@ function run_test() {
   let windowMediatorCID =
     MockRegistrar.register("@mozilla.org/appshell/window-mediator;1",
                            WindowMediator);
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     MockRegistrar.unregister(windowWatcherCID);
     MockRegistrar.unregister(windowMediatorCID);
   });
 
-  gCheckFunc = check_showUpdateAvailable;
-  let patches = getRemotePatchString("complete");
-  let updates = getRemoteUpdateString(patches, "minor", null, null, "1.0");
+  let patches = getRemotePatchString({});
+  let updates = getRemoteUpdateString({}, patches);
   gResponseBody = getRemoteUpdatesXMLString(updates);
   gAUS.notify(null);
 }
@@ -51,41 +64,9 @@ function check_status() {
   writeUpdatesToXMLFile(getLocalUpdatesXMLString(""), false);
   reloadUpdateManagerData();
 
-  do_execute_soon(doTestFinish);
-}
-
-// Callback function used by the custom XMLHttpRequest implementation to
-// call the nsIDOMEventListener's handleEvent method for onload.
-function callHandleEvent(aXHR) {
-  aXHR.status = 400;
-  aXHR.responseText = gResponseBody;
-  try {
-    let parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                 createInstance(Ci.nsIDOMParser);
-    aXHR.responseXML = parser.parseFromString(gResponseBody, "application/xml");
-  } catch (e) {
-  }
-  let e = { target: aXHR };
-  aXHR.onload(e);
+  executeSoon(doTestFinish);
 }
 
 function check_showUpdateAvailable() {
   do_throw("showUpdateAvailable should not have called openWindow!");
 }
-
-const WindowWatcher = {
-  openWindow: function(aParent, aUrl, aName, aFeatures, aArgs) {
-    gCheckFunc();
-  },
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWindowWatcher])
-};
-
-const WindowMediator = {
-  getMostRecentWindow: function(aWindowType) {
-    do_execute_soon(check_status);
-    return { getInterface: XPCOMUtils.generateQI([Ci.nsIDOMWindow]) };
-  },
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWindowMediator])
-};

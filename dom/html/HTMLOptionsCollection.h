@@ -8,7 +8,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsIHTMLCollection.h"
-#include "nsIDOMHTMLOptionsCollection.h"
 #include "nsWrapperCache.h"
 
 #include "mozilla/dom/HTMLOptionElement.h"
@@ -18,11 +17,10 @@
 #include "nsGenericHTMLElement.h"
 #include "nsTArray.h"
 
-class nsIDOMHTMLOptionElement;
-
 namespace mozilla {
 namespace dom {
 
+class DocGroup;
 class HTMLElementOrLong;
 class HTMLOptionElementOrHTMLOptGroupElement;
 class HTMLSelectElement;
@@ -32,7 +30,6 @@ class HTMLSelectElement;
  * select.options in DOM)
  */
 class HTMLOptionsCollection final : public nsIHTMLCollection
-                                  , public nsIDOMHTMLOptionsCollection
                                   , public nsWrapperCache
 {
   typedef HTMLOptionElementOrHTMLOptGroupElement HTMLOptionOrOptGroupElement;
@@ -44,6 +41,7 @@ public:
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
   using nsWrapperCache::GetWrapper;
+  using nsWrapperCache::PreserveWrapper;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 protected:
   virtual ~HTMLOptionsCollection();
@@ -52,16 +50,16 @@ protected:
   {
     return nsWrapperCache::GetWrapperPreserveColor();
   }
+  virtual void PreserveWrapperInternal(nsISupports* aScriptObjectHolder) override
+  {
+    nsWrapperCache::PreserveWrapper(aScriptObjectHolder);
+  }
 public:
 
-  // nsIDOMHTMLOptionsCollection interface
-  NS_DECL_NSIDOMHTMLOPTIONSCOLLECTION
-
-  // nsIDOMHTMLCollection interface, all its methods are defined in
-  // nsIDOMHTMLOptionsCollection
-
+  virtual uint32_t Length() override;
   virtual Element* GetElementAt(uint32_t aIndex) override;
   virtual nsINode* GetParentObject() override;
+  DocGroup* GetDocGroup() const;
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(HTMLOptionsCollection,
                                                          nsIHTMLCollection)
@@ -142,20 +140,16 @@ public:
   {
     return NamedGetter(aName, aFound);
   }
-
   void Add(const HTMLOptionOrOptGroupElement& aElement,
            const Nullable<HTMLElementOrLong>& aBefore,
            ErrorResult& aError);
   void Remove(int32_t aIndex, ErrorResult& aError);
   int32_t GetSelectedIndex(ErrorResult& aError);
   void SetSelectedIndex(int32_t aSelectedIndex, ErrorResult& aError);
-  void IndexedSetter(uint32_t aIndex, nsIDOMHTMLOptionElement* aOption,
-                     ErrorResult& aError)
-  {
-    aError = SetOption(aIndex, aOption);
-  }
-  virtual void GetSupportedNames(unsigned aFlags,
-                                 nsTArray<nsString>& aNames) override;
+  void IndexedSetter(uint32_t aIndex, HTMLOptionElement* aOption,
+                     ErrorResult& aError);
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) override;
+  void SetLength(uint32_t aLength, ErrorResult& aError);
 
 private:
   /** The list of options (holds strong references).  This is infallible, so

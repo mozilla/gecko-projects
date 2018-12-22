@@ -34,7 +34,7 @@ DebuggerPanel.prototype = {
    * @return object
    *         A promise that is resolved when the Debugger completes opening.
    */
-  open: function() {
+  open: function () {
     let targetPromise;
 
     // Local debugging needs to make the target remote.
@@ -42,7 +42,7 @@ DebuggerPanel.prototype = {
       targetPromise = this.target.makeRemote();
       // Listen for tab switching events to manage focus when the content window
       // is paused and events suppressed.
-      this.target.tab.addEventListener('TabSelect', this);
+      this.target.tab.addEventListener("TabSelect", this);
     } else {
       targetPromise = promise.resolve(this.target);
     }
@@ -54,20 +54,58 @@ DebuggerPanel.prototype = {
         this._toolbox.on("host-changed", this.handleHostChanged);
         // Add keys from this document's keyset to the toolbox, so they
         // can work when the split console is focused.
-        let keysToClone = ["resumeKey", "resumeKey2", "stepOverKey",
-                          "stepOverKey2", "stepInKey", "stepInKey2",
-                          "stepOutKey", "stepOutKey2"];
+        let keysToClone = ["resumeKey", "stepOverKey", "stepInKey", "stepOutKey"];
         for (let key of keysToClone) {
           let elm = this.panelWin.document.getElementById(key);
-          this._toolbox.useKeyWithSplitConsole(elm, "jsdebugger");
+          let keycode = elm.getAttribute("keycode");
+          let modifiers = elm.getAttribute("modifiers");
+          let command = elm.getAttribute("command");
+          let handler = this._view.Toolbar.getCommandHandler(command);
+
+          let keyShortcut = this.translateToKeyShortcut(keycode, modifiers);
+          this._toolbox.useKeyWithSplitConsole(keyShortcut, handler, "jsdebugger");
         }
         this.isReady = true;
         this.emit("ready");
         return this;
       })
-      .then(null, function onError(aReason) {
+      .catch(function onError(aReason) {
         DevToolsUtils.reportException("DebuggerPanel.prototype.open", aReason);
       });
+  },
+
+  /**
+   * Translate a VK_ keycode, with modifiers, to a key shortcut that can be used with
+   * shared/key-shortcut.
+   *
+   * @param {String} keycode
+   *        The VK_* keycode to translate
+   * @param {String} modifiers
+   *        The list (blank-space separated) of modifiers applying to this keycode.
+   * @return {String} a key shortcut ready to be used with shared/key-shortcut.js
+   */
+  translateToKeyShortcut: function (keycode, modifiers) {
+    // Remove the VK_ prefix.
+    keycode = keycode.replace("VK_", "");
+
+    // Translate modifiers
+    if (modifiers.includes("shift")) {
+      keycode = "Shift+" + keycode;
+    }
+    if (modifiers.includes("alt")) {
+      keycode = "Alt+" + keycode;
+    }
+    if (modifiers.includes("control")) {
+      keycode = "Ctrl+" + keycode;
+    }
+    if (modifiers.includes("meta")) {
+      keycode = "Cmd+" + keycode;
+    }
+    if (modifiers.includes("accel")) {
+      keycode = "CmdOrCtrl+" + keycode;
+    }
+
+    return keycode;
   },
 
   // DevToolPanel API
@@ -76,14 +114,14 @@ DebuggerPanel.prototype = {
     return this._toolbox.target;
   },
 
-  destroy: function() {
+  destroy: function () {
     // Make sure this panel is not already destroyed.
     if (this._destroyer) {
       return this._destroyer;
     }
 
     if (!this.target.isRemote) {
-      this.target.tab.removeEventListener('TabSelect', this);
+      this.target.tab.removeEventListener("TabSelect", this);
     }
 
     return this._destroyer = this._controller.shutdownDebugger().then(() => {
@@ -93,33 +131,58 @@ DebuggerPanel.prototype = {
 
   // DebuggerPanel API
 
-  addBreakpoint: function(location) {
+  getMappedExpression(expression) {
+    // No-op implementation since this feature doesn't exist in the older
+    // debugger implementation.
+    return expression;
+  },
+
+  isPaused() {
+    let framesController = this.panelWin.DebuggerController.StackFrames;
+    let thread = framesController.activeThread;
+    return thread && thread.paused;
+  },
+
+  getFrames() {
+    let framesController = this.panelWin.DebuggerController.StackFrames;
+    let thread = framesController.activeThread;
+    if (this.isPaused()) {
+      return {
+        frames: thread.cachedFrames,
+        selected: framesController.currentFrameDepth,
+      };
+    }
+
+    return null;
+  },
+
+  addBreakpoint: function (location) {
     const { actions } = this.panelWin;
-    const { dispatch } =  this._controller;
+    const { dispatch } = this._controller;
 
     return dispatch(actions.addBreakpoint(location));
   },
 
-  removeBreakpoint: function(location) {
+  removeBreakpoint: function (location) {
     const { actions } = this.panelWin;
-    const { dispatch } =  this._controller;
+    const { dispatch } = this._controller;
 
     return dispatch(actions.removeBreakpoint(location));
   },
 
-  blackbox: function(source, flag) {
+  blackbox: function (source, flag) {
     const { actions } = this.panelWin;
-    const { dispatch } =  this._controller;
-    return dispatch(actions.blackbox(source, flag))
+    const { dispatch } = this._controller;
+    return dispatch(actions.blackbox(source, flag));
   },
 
-  handleHostChanged: function() {
+  handleHostChanged: function () {
     this._view.handleHostChanged(this._toolbox.hostType);
   },
 
   // nsIDOMEventListener API
 
-  handleEvent: function(aEvent) {
+  handleEvent: function (aEvent) {
     if (aEvent.target == this.target.tab &&
         this._controller.activeThread.state == "paused") {
       // Wait a tick for the content focus event to be delivered.

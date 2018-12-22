@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -23,6 +25,11 @@ struct FileDescriptor {
   FileDescriptor(int ifd, bool iauto_close)
       : fd(ifd),
         auto_close(iauto_close) { }
+
+  bool operator==(const FileDescriptor& aOther) const
+  {
+    return fd == aOther.fd && auto_close == aOther.auto_close;
+  }
 
   int fd;
   // If true, this file descriptor should be closed after it has been used. For

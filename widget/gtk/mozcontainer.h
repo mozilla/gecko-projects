@@ -10,17 +10,16 @@
 
 #include <gtk/gtk.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif /* __cplusplus */
-
 /*
  * MozContainer
  *
- * This class serves two purposes in the nsIWidget implementation.
+ * This class serves three purposes in the nsIWidget implementation.
  *
  *   - It provides objects to receive signals from GTK for events on native
  *     windows.
+ *
+ *   - It provides GdkWindow to draw content on Wayland or when Gtk+ renders
+ *     client side decorations to mShell.
  *
  *   - It provides a container parent for GtkWidgets.  The only GtkWidgets
  *     that need this in Mozilla are the GtkSockets for windowed plugins (Xt
@@ -44,21 +43,38 @@ extern "C" {
  * gtk_widget_set_parent_window should be called on the child GtkWidget before
  * it is realized.
  */
- 
+
 #define MOZ_CONTAINER_TYPE            (moz_container_get_type())
 #define MOZ_CONTAINER(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), MOZ_CONTAINER_TYPE, MozContainer))
 #define MOZ_CONTAINER_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), MOZ_CONTAINER_TYPE, MozContainerClass))
 #define IS_MOZ_CONTAINER(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), MOZ_CONTAINER_TYPE))
 #define IS_MOZ_CONTAINER_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), MOZ_CONTAINER_TYPE))
-#define MOZ_CONAINTER_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), MOZ_CONTAINER_TYPE, MozContainerClass))
+#define MOZ_CONTAINER_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), MOZ_CONTAINER_TYPE, MozContainerClass))
 
 typedef struct _MozContainer      MozContainer;
 typedef struct _MozContainerClass MozContainerClass;
+
+/* Workaround for bug at wayland-util.h,
+ * present in wayland-devel < 1.12
+ */
+#ifdef MOZ_WAYLAND
+struct wl_subcompositor;
+struct wl_surface;
+struct wl_subsurface;
+#endif
 
 struct _MozContainer
 {
     GtkContainer   container;
     GList         *children;
+
+#ifdef MOZ_WAYLAND
+    struct wl_subcompositor *subcompositor;
+    struct wl_surface       *surface;
+    struct wl_subsurface    *subsurface;
+    struct wl_egl_window    *eglwindow;
+    gboolean                 committed;
+#endif
 };
 
 struct _MozContainerClass
@@ -79,8 +95,10 @@ void       moz_container_move          (MozContainer *container,
                                         gint          width,
                                         gint          height);
 
-#ifdef __cplusplus
-}
-#endif /* __cplusplus */
+#ifdef MOZ_WAYLAND
+struct wl_surface* moz_container_get_wl_surface(MozContainer *container);
+struct wl_egl_window* moz_container_get_wl_egl_window(MozContainer *container);
+gboolean moz_container_has_wl_egl_window(MozContainer *container);
+#endif
 
 #endif /* __MOZ_CONTAINER_H__ */

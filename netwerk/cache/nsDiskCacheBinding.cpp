@@ -88,12 +88,12 @@ nsDiskCacheBinding::~nsDiskCacheBinding()
     // Grab the cache lock since the binding is stored in nsCacheEntry::mData
     // and it is released using nsCacheService::ReleaseObject_Locked() which
     // releases the object outside the cache lock.
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSDISKCACHEBINDING_DESTRUCTOR));
+    nsCacheServiceAutoLock lock;
 
     NS_ASSERTION(PR_CLIST_IS_EMPTY(this), "binding deleted while still on list");
     if (!PR_CLIST_IS_EMPTY(this))
         PR_REMOVE_LINK(this);       // XXX why are we still on a list?
-    
+
     // sever streamIO/binding link
     if (mStreamIO) {
         if (NS_FAILED(mStreamIO->ClearBinding()))
@@ -170,13 +170,13 @@ nsDiskCacheBindery::CreateBinding(nsCacheEntry *       entry,
         NS_ERROR("cache entry already has bind data");
         return nullptr;
     }
-    
+
     nsDiskCacheBinding * binding = new nsDiskCacheBinding(entry, record);
     if (!binding)  return nullptr;
-        
+
     // give ownership of the binding to the entry
     entry->SetData(binding);
-    
+
     // add binding to collision detection system
     nsresult rv = AddBinding(binding);
     if (NS_FAILED(rv)) {
@@ -232,22 +232,22 @@ nsDiskCacheBindery::AddBinding(nsDiskCacheBinding * binding)
         (table.Add((void*)(uintptr_t)binding->mRecord.HashNumber(), fallible));
     if (!hashEntry)
         return NS_ERROR_OUT_OF_MEMORY;
-    
+
     if (hashEntry->mBinding == nullptr) {
         hashEntry->mBinding = binding;
         if (binding->mGeneration == 0)
             binding->mGeneration = 1;   // if generation uninitialized, set it to 1
-            
+
         return NS_OK;
     }
-    
-    
+
+
     // insert binding in generation order
     nsDiskCacheBinding * p  = hashEntry->mBinding;
     bool     calcGeneration = (binding->mGeneration == 0);  // do we need to calculate generation?
     if (calcGeneration)  binding->mGeneration = 1;          // initialize to 1 if uninitialized
-    while (1) {
-    
+    while (true) {
+
         if (binding->mGeneration < p->mGeneration) {
             // here we are
             PR_INSERT_BEFORE(binding, p);
@@ -255,7 +255,7 @@ nsDiskCacheBindery::AddBinding(nsDiskCacheBinding * binding)
                 hashEntry->mBinding = binding;
             break;
         }
-        
+
         if (binding->mGeneration == p->mGeneration) {
             if (calcGeneration)  ++binding->mGeneration;    // try the next generation
             else {
@@ -288,7 +288,7 @@ nsDiskCacheBindery::RemoveBinding(nsDiskCacheBinding * binding)
 {
     NS_ASSERTION(initialized, "nsDiskCacheBindery not initialized");
     if (!initialized)   return;
-    
+
     void* key = (void *)(uintptr_t)binding->mRecord.HashNumber();
     auto hashEntry =
         static_cast<HashTableEntry*>(table.Search((void*)(uintptr_t) key));
@@ -296,17 +296,16 @@ nsDiskCacheBindery::RemoveBinding(nsDiskCacheBinding * binding)
         NS_WARNING("### disk cache: binding not in hashtable!");
         return;
     }
-    
+
     if (binding == hashEntry->mBinding) {
         if (PR_CLIST_IS_EMPTY(binding)) {
             // remove this hash entry
             table.Remove((void*)(uintptr_t) binding->mRecord.HashNumber());
             return;
-            
-        } else {
-            // promote next binding to head, and unlink this binding
-            hashEntry->mBinding = (nsDiskCacheBinding *)PR_NEXT_LINK(binding);
+
         }
+        // promote next binding to head, and unlink this binding
+        hashEntry->mBinding = (nsDiskCacheBinding *)PR_NEXT_LINK(binding);
     }
     PR_REMOVE_AND_INIT_LINK(binding);
 }

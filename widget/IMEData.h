@@ -8,7 +8,9 @@
 
 #include "nsPoint.h"
 #include "nsRect.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
+#include "nsXULAppAPI.h"
+#include "Units.h"
 
 class nsIWidget;
 
@@ -16,7 +18,7 @@ namespace mozilla {
 
 class WritingMode;
 
-} // namespace mozilla
+namespace widget {
 
 /**
  * Preference for receiving IME updates
@@ -32,14 +34,13 @@ class WritingMode;
  * If the IME implementation needs notifications even while our process is
  * deactive, it should also set NOTIFY_DURING_DEACTIVE.
  */
-struct nsIMEUpdatePreference final
+struct IMENotificationRequests final
 {
   typedef uint8_t Notifications;
 
   enum : Notifications
   {
     NOTIFY_NOTHING                       = 0,
-    NOTIFY_SELECTION_CHANGE              = 1 << 0,
     NOTIFY_TEXT_CHANGE                   = 1 << 1,
     NOTIFY_POSITION_CHANGE               = 1 << 2,
     // NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR is used when mouse button is pressed
@@ -48,42 +49,37 @@ struct nsIMEUpdatePreference final
     // returns NS_SUCCESS_EVENT_CONSUMED.  Otherwise, it returns NS_OK if it's
     // handled without any error.
     NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR    = 1 << 3,
-    // Following values indicate when widget needs or doesn't need notification.
-    NOTIFY_CHANGES_CAUSED_BY_COMPOSITION = 1 << 6,
     // NOTE: NOTIFY_DURING_DEACTIVE isn't supported in environments where two
     //       or more compositions are possible.  E.g., Mac and Linux (GTK).
     NOTIFY_DURING_DEACTIVE               = 1 << 7,
-    // Changes are notified in following conditions if the instance is
-    // just constructed.  If some platforms don't need change notifications
-    // in some of following conditions, the platform should remove following
-    // flags before returing the instance from nsIWidget::GetUpdatePreference().
-    DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES =
-      NOTIFY_CHANGES_CAUSED_BY_COMPOSITION
+
+    NOTIFY_ALL = NOTIFY_TEXT_CHANGE |
+                 NOTIFY_POSITION_CHANGE |
+                 NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR,
   };
 
-  nsIMEUpdatePreference()
-    : mWantUpdates(DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES)
+  IMENotificationRequests()
+    : mWantUpdates(NOTIFY_NOTHING)
   {
   }
 
-  explicit nsIMEUpdatePreference(Notifications aWantUpdates)
-    : mWantUpdates(aWantUpdates | DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES)
+  explicit IMENotificationRequests(Notifications aWantUpdates)
+    : mWantUpdates(aWantUpdates)
   {
   }
 
-  nsIMEUpdatePreference operator|(const nsIMEUpdatePreference& aOther) const
+  IMENotificationRequests operator|(const IMENotificationRequests& aOther) const
   {
-    return nsIMEUpdatePreference(aOther.mWantUpdates | mWantUpdates);
+    return IMENotificationRequests(aOther.mWantUpdates | mWantUpdates);
   }
-
-  void DontNotifyChangesCausedByComposition()
+  IMENotificationRequests& operator|=(const IMENotificationRequests& aOther)
   {
-    mWantUpdates &= ~DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES;
+    mWantUpdates |= aOther.mWantUpdates;
+    return *this;
   }
-
-  bool WantSelectionChange() const
+  bool operator==(const IMENotificationRequests& aOther) const
   {
-    return !!(mWantUpdates & NOTIFY_SELECTION_CHANGE);
+    return mWantUpdates == aOther.mWantUpdates;
   }
 
   bool WantTextChange() const
@@ -98,18 +94,12 @@ struct nsIMEUpdatePreference final
 
   bool WantChanges() const
   {
-    return WantSelectionChange() || WantTextChange();
+    return WantTextChange();
   }
 
   bool WantMouseButtonEventOnChar() const
   {
     return !!(mWantUpdates & NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR);
-  }
-
-  bool WantChangesCausedByComposition() const
-  {
-    return WantChanges() &&
-             !!(mWantUpdates & NOTIFY_CHANGES_CAUSED_BY_COMPOSITION);
   }
 
   bool WantDuringDeactive() const
@@ -121,12 +111,9 @@ struct nsIMEUpdatePreference final
 };
 
 /**
- * Contains IMEStatus plus information about the current 
+ * Contains IMEStatus plus information about the current
  * input context that the IME can use as hints if desired.
  */
-
-namespace mozilla {
-namespace widget {
 
 struct IMEState final
 {
@@ -163,7 +150,12 @@ struct IMEState final
      * directly. Because we don't process some native events, but they may
      * be needed by the plug-in.
      */
-    PLUGIN
+    PLUGIN,
+    /**
+     * 'Unknown' is useful when you cache this enum.  So, this shouldn't be
+     * used with nsIWidget::SetInputContext().
+     */
+    UNKNOWN
   };
   Enabled mEnabled;
 
@@ -245,11 +237,15 @@ struct NativeIMEContext final
   uint64_t mOriginProcessID;
 
   NativeIMEContext()
+    : mRawNativeIMEContext(0)
+    , mOriginProcessID(0)
   {
     Init(nullptr);
   }
 
   explicit NativeIMEContext(nsIWidget* aWidget)
+    : mRawNativeIMEContext(0)
+    , mOriginProcessID(0)
   {
     Init(aWidget);
   }
@@ -283,7 +279,21 @@ struct InputContext final
   InputContext()
     : mOrigin(XRE_IsParentProcess() ? ORIGIN_MAIN : ORIGIN_CONTENT)
     , mMayBeIMEUnaware(false)
+    , mHasHandledUserInput(false)
+    , mInPrivateBrowsing(false)
   {
+  }
+
+  // If InputContext instance is a static variable, any heap allocated stuff
+  // of its members need to be deleted at XPCOM shutdown.  Otherwise, it's
+  // detected as memory leak.
+  void ShutDown()
+  {
+    // The buffer for nsString will be released with a call of SetCapacity(0).
+    // Truncate() isn't enough because it just sets length to 0.
+    mHTMLInputType.SetCapacity(0);
+    mHTMLInputInputmode.SetCapacity(0);
+    mActionHint.SetCapacity(0);
   }
 
   bool IsPasswordEditor() const
@@ -320,6 +330,15 @@ struct InputContext final
    * compatibility with webapps relying on key listeners. */
   bool mMayBeIMEUnaware;
 
+  /**
+   * True if the document has ever received user input
+   */
+  bool mHasHandledUserInput;
+
+  /* Whether the owning document of the input element has been loaded
+   * in private browsing mode. */
+  bool mInPrivateBrowsing;
+
   bool IsOriginMainProcess() const
   {
     return mOrigin == ORIGIN_MAIN;
@@ -338,6 +357,9 @@ struct InputContext final
     return IsOriginContentProcess();
   }
 };
+
+// FYI: Implemented in nsBaseWidget.cpp
+const char* ToChar(InputContext::Origin aOrigin);
 
 struct InputContextAction final
 {
@@ -358,7 +380,12 @@ struct InputContextAction final
     // The cause is user's mouse operation.
     CAUSE_MOUSE,
     // The cause is user's touch operation (implies mouse)
-    CAUSE_TOUCH
+    CAUSE_TOUCH,
+    // The cause is unknown but it occurs during user input except keyboard
+    // input.  E.g., an event handler of a user input event moves focus.
+    CAUSE_UNKNOWN_DURING_NON_KEYBOARD_INPUT,
+    // The cause is unknown but it occurs during keyboard input.
+    CAUSE_UNKNOWN_DURING_KEYBOARD_INPUT,
   };
   Cause mCause;
 
@@ -377,7 +404,11 @@ struct InputContextAction final
     MENU_GOT_PSEUDO_FOCUS,
     // Menu lost pseudo focus that means focused content will handle keyboard
     // events.
-    MENU_LOST_PSEUDO_FOCUS
+    MENU_LOST_PSEUDO_FOCUS,
+    // The widget is created.  When a widget is crated, it may need to notify
+    // IME module to initialize its native IME context.  In such case, this is
+    // used.  I.e., this isn't used by IMEStateManager.
+    WIDGET_CREATED
   };
   FocusChange mFocusChange;
 
@@ -389,20 +420,49 @@ struct InputContextAction final
 
   bool UserMightRequestOpenVKB() const
   {
-    return (mFocusChange == FOCUS_NOT_CHANGED &&
-            (mCause == CAUSE_MOUSE || mCause == CAUSE_TOUCH));
+    // If focus is changed, user must not request to open VKB.
+    if (mFocusChange != FOCUS_NOT_CHANGED) {
+      return false;
+    }
+    switch (mCause) {
+      // If user clicks or touches focused editor, user must request to open
+      // VKB.
+      case CAUSE_MOUSE:
+      case CAUSE_TOUCH:
+      // If script does something during a user input and that causes changing
+      // input context, user might request to open VKB.  E.g., user clicks
+      // dummy editor and JS moves focus to an actual editable node.  However,
+      // this should return false if the user input is a keyboard event since
+      // physical keyboard operation shouldn't cause opening VKB.
+      case CAUSE_UNKNOWN_DURING_NON_KEYBOARD_INPUT:
+        return true;
+      default:
+        return false;
+    }
   }
 
-  static bool IsUserAction(Cause aCause)
+  /**
+   * IsHandlingUserInput() returns true if it's caused by a user action directly
+   * or it's caused by script or something but it occurred while we're handling
+   * a user action.  E.g., when it's caused by Element.focus() in an event
+   * handler of a user input, this returns true.
+   */
+  static bool IsHandlingUserInput(Cause aCause)
   {
     switch (aCause) {
       case CAUSE_KEY:
       case CAUSE_MOUSE:
       case CAUSE_TOUCH:
+      case CAUSE_UNKNOWN_DURING_NON_KEYBOARD_INPUT:
+      case CAUSE_UNKNOWN_DURING_KEYBOARD_INPUT:
         return true;
       default:
         return false;
     }
+  }
+
+  bool IsHandlingUserInput() const {
+    return IsHandlingUserInput(mCause);
   }
 
   InputContextAction()
@@ -436,8 +496,18 @@ enum IMEMessage : IMEMessageType
   NOTIFY_IME_OF_SELECTION_CHANGE,
   // Text in the focused editable content is changed
   NOTIFY_IME_OF_TEXT_CHANGE,
-  // Composition string has been updated
-  NOTIFY_IME_OF_COMPOSITION_UPDATE,
+  // Notified when a dispatched composition event is handled by the
+  // contents.  This must be notified after the other notifications.
+  // Note that if a remote process has focus, this is notified only once when
+  // all dispatched events are handled completely.  So, the receiver shouldn't
+  // count number of received this notification for comparing with the number
+  // of dispatched events.
+  // NOTE: If a composition event causes moving focus from the focused editor,
+  //       this notification may not be notified as usual.  Even in such case,
+  //       NOTIFY_IME_OF_BLUR is always sent.  So, notification listeners
+  //       should tread the blur notification as including this if there is
+  //       pending composition events.
+  NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED,
   // Position or size of focused element may be changed.
   NOTIFY_IME_OF_POSITION_CHANGE,
   // Mouse button event is fired on a character in focused editor
@@ -450,10 +520,14 @@ enum IMEMessage : IMEMessageType
   REQUEST_TO_CANCEL_COMPOSITION
 };
 
+// FYI: Implemented in nsBaseWidget.cpp
+const char* ToChar(IMEMessage aIMEMessage);
+
 struct IMENotification final
 {
   IMENotification()
     : mMessage(NOTIFY_IME_OF_NOTHING)
+    , mSelectionChangeData()
   {
   }
 
@@ -470,6 +544,7 @@ struct IMENotification final
 
   MOZ_IMPLICIT IMENotification(IMEMessage aMessage)
     : mMessage(aMessage)
+    , mSelectionChangeData()
   {
     switch (aMessage) {
       case NOTIFY_IME_OF_SELECTION_CHANGE:
@@ -555,7 +630,7 @@ struct IMENotification final
         mTextChangeData += aNotification.mTextChangeData;
         break;
       case NOTIFY_IME_OF_POSITION_CHANGE:
-      case NOTIFY_IME_OF_COMPOSITION_UPDATE:
+      case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
         MOZ_ASSERT(aNotification.mMessage == mMessage);
         break;
       default:
@@ -591,10 +666,7 @@ struct IMENotification final
 
     void Set(const nsIntRect& aRect)
     {
-      mX = aRect.x;
-      mY = aRect.y;
-      mWidth = aRect.width;
-      mHeight = aRect.height;
+      aRect.GetRect(&mX, &mY, &mWidth, &mHeight);
     }
     nsIntRect AsIntRect() const
     {
@@ -764,7 +836,7 @@ struct IMENotification final
     }
 
     // Positive if text is added. Negative if text is removed.
-    int64_t Difference() const 
+    int64_t Difference() const
     {
       return mAddedEndOffset - mRemovedEndOffset;
     }

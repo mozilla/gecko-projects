@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,12 +12,12 @@
 #include "LayersLogging.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/Event.h"
 #include "nsDocument.h"
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsPoint.h"
-#include "nsPresShell.h"
 #include "nsView.h"
 #include "nsViewportInfo.h"
 #include "Units.h"
@@ -27,10 +28,11 @@
 
 NS_IMPL_ISUPPORTS(ZoomConstraintsClient, nsIDOMEventListener, nsIObserver)
 
-static const nsLiteralString DOM_META_ADDED = NS_LITERAL_STRING("DOMMetaAdded");
-static const nsLiteralString DOM_META_CHANGED = NS_LITERAL_STRING("DOMMetaChanged");
-static const nsLiteralCString BEFORE_FIRST_PAINT = NS_LITERAL_CSTRING("before-first-paint");
-static const nsLiteralCString NS_PREF_CHANGED = NS_LITERAL_CSTRING("nsPref:changed");
+#define DOM_META_ADDED NS_LITERAL_STRING("DOMMetaAdded")
+#define DOM_META_CHANGED NS_LITERAL_STRING("DOMMetaChanged")
+#define FULLSCREEN_CHANGED NS_LITERAL_STRING("fullscreenchange")
+#define BEFORE_FIRST_PAINT NS_LITERAL_CSTRING("before-first-paint")
+#define NS_PREF_CHANGED NS_LITERAL_CSTRING("nsPref:changed")
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -75,6 +77,7 @@ ZoomConstraintsClient::Destroy()
   if (mEventTarget) {
     mEventTarget->RemoveEventListener(DOM_META_ADDED, this, false);
     mEventTarget->RemoveEventListener(DOM_META_CHANGED, this, false);
+    mEventTarget->RemoveSystemEventListener(FULLSCREEN_CHANGED, this, false);
     mEventTarget = nullptr;
   }
 
@@ -109,11 +112,12 @@ ZoomConstraintsClient::Init(nsIPresShell* aPresShell, nsIDocument* aDocument)
   mDocument = aDocument;
 
   if (nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow()) {
-    mEventTarget = window->GetChromeEventHandler();
+    mEventTarget = window->GetParentTarget();
   }
   if (mEventTarget) {
     mEventTarget->AddEventListener(DOM_META_ADDED, this, false);
     mEventTarget->AddEventListener(DOM_META_CHANGED, this, false);
+    mEventTarget->AddSystemEventListener(FULLSCREEN_CHANGED, this, false);
   }
 
   nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
@@ -125,7 +129,7 @@ ZoomConstraintsClient::Init(nsIPresShell* aPresShell, nsIDocument* aDocument)
 }
 
 NS_IMETHODIMP
-ZoomConstraintsClient::HandleEvent(nsIDOMEvent* event)
+ZoomConstraintsClient::HandleEvent(dom::Event* event)
 {
   nsAutoString type;
   event->GetType(type);
@@ -135,6 +139,9 @@ ZoomConstraintsClient::HandleEvent(nsIDOMEvent* event)
     RefreshZoomConstraints();
   } else if (type.Equals(DOM_META_CHANGED)) {
     ZCC_LOG("Got a dom-meta-changed event in %p\n", this);
+    RefreshZoomConstraints();
+  } else if (type.Equals(FULLSCREEN_CHANGED)) {
+    ZCC_LOG("Got a fullscreen-change event in %p\n", this);
     RefreshZoomConstraints();
   }
 
@@ -152,8 +159,12 @@ ZoomConstraintsClient::Observe(nsISupports* aSubject, const char* aTopic, const 
     // We need to run this later because all the pref change listeners need
     // to execute before we can be guaranteed that gfxPrefs::ForceUserScalable()
     // returns the updated value.
-    NS_DispatchToMainThread(NS_NewRunnableMethod(
-      this, &ZoomConstraintsClient::RefreshZoomConstraints));
+
+    RefPtr<nsRunnableMethod<ZoomConstraintsClient>> event =
+      NewRunnableMethod("ZoomConstraintsClient::RefreshZoomConstraints",
+                        this,
+                        &ZoomConstraintsClient::RefreshZoomConstraints);
+    mDocument->Dispatch(TaskCategory::Other, event.forget());
   }
   return NS_OK;
 }
@@ -165,7 +176,7 @@ ZoomConstraintsClient::ScreenSizeChanged()
   RefreshZoomConstraints();
 }
 
-mozilla::layers::ZoomConstraints
+static mozilla::layers::ZoomConstraints
 ComputeZoomConstraintsFromViewportInfo(const nsViewportInfo& aViewportInfo)
 {
   mozilla::layers::ZoomConstraints constraints;
@@ -209,6 +220,12 @@ ZoomConstraintsClient::RefreshZoomConstraints()
   mozilla::layers::ZoomConstraints zoomConstraints =
     ComputeZoomConstraintsFromViewportInfo(viewportInfo);
 
+  if (mDocument->Fullscreen()) {
+    ZCC_LOG("%p is in fullscreen, disallowing zooming\n", this);
+    zoomConstraints.mAllowZoom = false;
+    zoomConstraints.mAllowDoubleTapZoom = false;
+  }
+
   if (zoomConstraints.mAllowDoubleTapZoom) {
     // If the CSS viewport is narrower than the screen (i.e. width <= device-width)
     // then we disable double-tap-to-zoom behaviour.
@@ -227,7 +244,7 @@ ZoomConstraintsClient::RefreshZoomConstraints()
     rcdrsf->SetZoomableByAPZ(zoomConstraints.mAllowZoom);
   }
 
-  ScrollableLayerGuid newGuid(0, presShellId, viewId);
+  ScrollableLayerGuid newGuid(LayersId{0}, presShellId, viewId);
   if (mGuid && mGuid.value() != newGuid) {
     ZCC_LOG("Clearing old constraints in %p for { %u, %" PRIu64 " }\n",
       this, mGuid->mPresShellId, mGuid->mScrollId);

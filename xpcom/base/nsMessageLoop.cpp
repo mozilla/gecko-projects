@@ -8,6 +8,7 @@
 #include "mozilla/WeakPtr.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+#include "nsINamed.h"
 #include "nsIRunnable.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
@@ -28,13 +29,13 @@ namespace {
  * Run().  Tread lightly.
  */
 class MessageLoopIdleTask
-  : public Task
+  : public Runnable
   , public SupportsWeakPtr<MessageLoopIdleTask>
 {
 public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MessageLoopIdleTask)
   MessageLoopIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS);
-  virtual void Run();
+  NS_IMETHOD Run() override;
 
 private:
   nsresult Init(uint32_t aEnsureRunsAfterMS);
@@ -56,13 +57,19 @@ private:
  * saves us from worrying about an edge case somehow messing us up here.
  */
 class MessageLoopTimerCallback
-  : public nsITimerCallback
+  : public nsITimerCallback, public nsINamed
 {
 public:
   explicit MessageLoopTimerCallback(MessageLoopIdleTask* aTask);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
+
+  NS_IMETHOD GetName(nsACString& aName) override
+  {
+    aName.AssignLiteral("MessageLoopTimerCallback");
+    return NS_OK;
+  }
 
 private:
   WeakPtr<MessageLoopIdleTask> mTask;
@@ -72,7 +79,8 @@ private:
 
 MessageLoopIdleTask::MessageLoopIdleTask(nsIRunnable* aTask,
                                          uint32_t aEnsureRunsAfterMS)
-  : mTask(aTask)
+  : mozilla::Runnable("MessageLoopIdleTask")
+  , mTask(aTask)
 {
   // Init() really shouldn't fail, but if it does, we schedule our runnable
   // immediately, because it's more important to guarantee that we run the task
@@ -90,19 +98,14 @@ MessageLoopIdleTask::MessageLoopIdleTask(nsIRunnable* aTask,
 nsresult
 MessageLoopIdleTask::Init(uint32_t aEnsureRunsAfterMS)
 {
-  mTimer = do_CreateInstance("@mozilla.org/timer;1");
-  if (NS_WARN_IF(!mTimer)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
   RefPtr<MessageLoopTimerCallback> callback =
     new MessageLoopTimerCallback(this);
-
-  return mTimer->InitWithCallback(callback, aEnsureRunsAfterMS,
-                                  nsITimer::TYPE_ONE_SHOT);
+  return NS_NewTimerWithCallback(getter_AddRefs(mTimer),
+                                 callback, aEnsureRunsAfterMS,
+                                 nsITimer::TYPE_ONE_SHOT);
 }
 
-/* virtual */ void
+NS_IMETHODIMP
 MessageLoopIdleTask::Run()
 {
   // Null out our pointers because if Run() was called by the timer, this
@@ -118,6 +121,8 @@ MessageLoopIdleTask::Run()
     mTask->Run();
     mTask = nullptr;
   }
+
+  return NS_OK;
 }
 
 MessageLoopTimerCallback::MessageLoopTimerCallback(MessageLoopIdleTask* aTask)
@@ -131,7 +136,7 @@ MessageLoopTimerCallback::Notify(nsITimer* aTimer)
   // We don't expect to hit the case when the timer fires but mTask has been
   // deleted, because mTask should cancel the timer before the mTask is
   // deleted.  But you never know...
-  NS_WARN_IF_FALSE(mTask, "This timer shouldn't have fired.");
+  NS_WARNING_ASSERTION(mTask, "This timer shouldn't have fired.");
 
   if (mTask) {
     mTask->Run();
@@ -139,7 +144,7 @@ MessageLoopTimerCallback::Notify(nsITimer* aTimer)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(MessageLoopTimerCallback, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MessageLoopTimerCallback, nsITimerCallback, nsINamed)
 
 } // namespace
 
@@ -150,8 +155,10 @@ nsMessageLoop::PostIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS)
 {
   // The message loop owns MessageLoopIdleTask and deletes it after calling
   // Run().  Be careful...
-  MessageLoop::current()->PostIdleTask(FROM_HERE,
-    new MessageLoopIdleTask(aTask, aEnsureRunsAfterMS));
+  RefPtr<MessageLoopIdleTask> idle =
+    new MessageLoopIdleTask(aTask, aEnsureRunsAfterMS);
+  MessageLoop::current()->PostIdleTask(idle.forget());
+
   return NS_OK;
 }
 

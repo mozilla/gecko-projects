@@ -3,19 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cc = Components.classes;
-var Cr = Components.results;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function loadUtilsScript() {
-  var loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
-               getService(Ci.mozIJSSubScriptLoader);
-  loader.loadSubScript("chrome://global/content/contentAreaUtils.js");
+  /* import-globals-from ../../contentAreaUtils.js */
+  Services.scriptloader.loadSubScript("chrome://global/content/contentAreaUtils.js");
 }
 
 function test_urlSecurityCheck() {
-  var nullPrincipal = Cc["@mozilla.org/nullprincipal;1"].
-                      createInstance(Ci.nsIPrincipal);
+  var nullPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
 
   const HTTP_URI = "http://www.mozilla.org/";
   const CHROME_URI = "chrome://browser/content/browser.xul";
@@ -25,8 +21,7 @@ function test_urlSecurityCheck() {
   try {
     urlSecurityCheck(makeURI(HTTP_URI), nullPrincipal,
                      DISALLOW_INHERIT_PRINCIPAL);
-  }
-  catch(ex) {
+  } catch (ex) {
     do_throw("urlSecurityCheck should not throw when linking to a http uri with a null principal");
   }
 
@@ -34,8 +29,7 @@ function test_urlSecurityCheck() {
   try {
     urlSecurityCheck(HTTP_URI, nullPrincipal,
                      DISALLOW_INHERIT_PRINCIPAL);
-  }
-  catch(ex) {
+  } catch (ex) {
     do_throw("urlSecurityCheck failed to handle the http URI as a string (uri spec)");
   }
 
@@ -43,8 +37,7 @@ function test_urlSecurityCheck() {
   try {
     urlSecurityCheck(CHROME_URI, nullPrincipal,
                      DISALLOW_INHERIT_PRINCIPAL);
-  }
-  catch(ex) {
+  } catch (ex) {
     shouldThrow = false;
   }
   if (shouldThrow)
@@ -62,7 +55,7 @@ function test_stringBundle() {
     "SaveLinkTitle",
   ];
 
-  for (let [, filePickerTitleKey] in Iterator(validFilePickerTitleKeys)) {
+  for (let filePickerTitleKey of validFilePickerTitleKeys) {
     // Just check that the string exists
     try {
       ContentAreaUtils.stringBundle.GetStringFromName(filePickerTitleKey);
@@ -72,8 +65,7 @@ function test_stringBundle() {
   }
 }
 
-function run_test()
-{
+function run_test() {
   loadUtilsScript();
   test_urlSecurityCheck();
   test_stringBundle();

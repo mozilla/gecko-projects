@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-//  * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "mozilla/layers/TextureClientX11.h"
@@ -34,7 +35,7 @@ X11TextureData::X11TextureData(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
 }
 
 bool
-X11TextureData::Lock(OpenMode aMode, FenceHandle*)
+X11TextureData::Lock(OpenMode aMode)
 {
   return true;
 }
@@ -47,6 +48,16 @@ X11TextureData::Unlock()
   }
 }
 
+void
+X11TextureData::FillInfo(TextureData::Info& aInfo) const
+{
+  aInfo.size = mSize;
+  aInfo.format = mFormat;
+  aInfo.supportsMoz2D = true;
+  aInfo.hasIntermediateBuffer = false;
+  aInfo.hasSynchronization = false;
+  aInfo.canExposeMappedData = false;
+}
 
 bool
 X11TextureData::Serialize(SurfaceDescriptor& aOutDescriptor)
@@ -96,13 +107,14 @@ X11TextureData::UpdateFromSurface(gfx::SourceSurface* aSurface)
 }
 
 void
-X11TextureData::Deallocate(ClientIPCAllocator*)
+X11TextureData::Deallocate(LayersIPCChannel*)
 {
   mSurface = nullptr;
 }
 
 TextureData*
-X11TextureData::CreateSimilar(ClientIPCAllocator* aAllocator,
+X11TextureData::CreateSimilar(LayersIPCChannel* aAllocator,
+                              LayersBackend aLayersBackend,
                               TextureFlags aFlags,
                               TextureAllocationFlags aAllocFlags) const
 {
@@ -111,7 +123,7 @@ X11TextureData::CreateSimilar(ClientIPCAllocator* aAllocator,
 
 X11TextureData*
 X11TextureData::Create(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
-                       TextureFlags aFlags, ClientIPCAllocator* aAllocator)
+                       TextureFlags aFlags, LayersIPCChannel* aAllocator)
 {
   MOZ_ASSERT(aSize.width >= 0 && aSize.height >= 0);
   if (aSize.width <= 0 || aSize.height <= 0 ||

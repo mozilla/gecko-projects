@@ -8,10 +8,10 @@
 namespace mozilla {
 
 using namespace gfx;
+using layers::ImageContainer;
+using layers::LayerManager;
 
 namespace image {
-
-NS_IMPL_ISUPPORTS_INHERITED0(FrozenImage, ImageWrapper)
 
 void
 FrozenImage::IncrementAnimationConsumers()
@@ -69,17 +69,40 @@ FrozenImage::GetImageContainer(layers::LayerManager* aManager, uint32_t aFlags)
   return nullptr;
 }
 
-NS_IMETHODIMP_(DrawResult)
+NS_IMETHODIMP_(bool)
+FrozenImage::IsImageContainerAvailableAtSize(LayerManager* aManager,
+                                             const IntSize& aSize,
+                                             uint32_t aFlags)
+{
+  return false;
+}
+
+NS_IMETHODIMP_(already_AddRefed<ImageContainer>)
+FrozenImage::GetImageContainerAtSize(layers::LayerManager* aManager,
+                                     const IntSize& aSize,
+                                     const Maybe<SVGImageContext>& aSVGContext,
+                                     uint32_t aFlags)
+{
+  // XXX(seth): GetImageContainer does not currently support anything but the
+  // current frame. We work around this by always returning null, but if it ever
+  // turns out that FrozenImage is widely used on codepaths that can actually
+  // benefit from GetImageContainer, it would be a good idea to fix that method
+  // for performance reasons.
+  return nullptr;
+}
+
+NS_IMETHODIMP_(ImgDrawResult)
 FrozenImage::Draw(gfxContext* aContext,
                   const nsIntSize& aSize,
                   const ImageRegion& aRegion,
                   uint32_t /* aWhichFrame - ignored */,
-                  Filter aFilter,
+                  SamplingFilter aSamplingFilter,
                   const Maybe<SVGImageContext>& aSVGContext,
-                  uint32_t aFlags)
+                  uint32_t aFlags,
+                  float aOpacity)
 {
   return InnerImage()->Draw(aContext, aSize, aRegion, FRAME_FIRST,
-                            aFilter, aSVGContext, aFlags);
+                            aSamplingFilter, aSVGContext, aFlags, aOpacity);
 }
 
 NS_IMETHODIMP_(void)

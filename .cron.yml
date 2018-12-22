@@ -1,0 +1,151 @@
+# Definitions for jobs that run periodically.  For details on the format, see
+# `taskcluster/taskgraph/cron/schema.py`.  For documentation, see
+# `taskcluster/docs/cron.rst`.
+
+---
+
+jobs:
+    - name: nightly-desktop
+      job:
+          type: decision-task
+          treeherder-symbol: Nd
+          target-tasks-method: nightly_desktop
+      run-on-projects:
+          - mozilla-central
+      when:
+          by-project:
+              # Match buildbot starts for now
+              mozilla-central: [{hour: 10, minute: 0}, {hour: 22, minute: 0}]
+              # No default
+
+    - name: nightly-desktop-linux
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-Ln
+          target-tasks-method: nightly_linux
+      run-on-projects:
+          - mozilla-central
+      when: []  # never (hook only)
+
+    - name: nightly-desktop-osx
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-OSX
+          target-tasks-method: nightly_macosx
+      run-on-projects:
+          - mozilla-central
+      when: []  # never (hook only)
+
+    - name: nightly-desktop-win32
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-win32
+          target-tasks-method: nightly_win32
+      run-on-projects:
+          - mozilla-central
+      when: []  # never (hook only)
+
+    - name: nightly-desktop-win64
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-win64
+          target-tasks-method: nightly_win64
+      run-on-projects:
+          - mozilla-central
+      when: []  # never (hook only)
+
+    - name: nightly-android
+      job:
+          type: decision-task
+          treeherder-symbol: Na
+          target-tasks-method: nightly_fennec
+      run-on-projects:
+          - mozilla-central
+      when:
+          by-project:
+              # Match buildbot starts for now
+              mozilla-central: [{hour: 10, minute: 0}]
+              # No default
+
+    - name: nightly-mochitest-valgrind
+      job:
+          type: decision-task
+          treeherder-symbol: Vg
+          target-tasks-method: mochitest_valgrind
+      run-on-projects:
+          - mozilla-central
+      when:
+          - {hour: 16, minute: 0}
+          - {hour: 4, minute: 0}
+
+    - name: nightly-dmd
+      job:
+          type: decision-task
+          treeherder-symbol: Ndmd
+          target-tasks-method: nightly_dmd
+      run-on-projects:
+          - mozilla-central
+      when:
+          by-project:
+              mozilla-central: [{hour: 10, minute: 0}]
+              # No default
+
+    - name: searchfox-index
+      job:
+          type: decision-task
+          treeherder-symbol: Searchfox
+          target-tasks-method: searchfox_index
+      run-on-projects:
+          - mozilla-central
+      when:
+          by-project:
+              mozilla-central: [{hour: 10, minute: 30}]
+              # No default
+
+    - name: bouncer-check
+      job:
+          type: decision-task
+          treeherder-symbol: Rel
+          target-tasks-method: bouncer_check
+      run-on-projects:
+          - mozilla-beta
+          - mozilla-release
+          - mozilla-esr60
+      when:
+          by-project:
+              # No default branch
+              mozilla-beta:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+              mozilla-release:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+              mozilla-esr60:
+                  - {hour: 7, minute: 0}
+                  - {hour: 19, minute: 0}
+
+    - name: periodic-update
+      job:
+          type: decision-task
+          treeherder-symbol: Nfile
+          target-tasks-method: file_update
+      run-on-projects:
+          - mozilla-central
+          - mozilla-beta
+          - mozilla-release
+          - mozilla-esr60
+      when:
+          by-project:
+              # No default branch
+              mozilla-central:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-beta:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-release:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}
+              mozilla-esr60:
+                  - {weekday: 'Monday', hour: 10, minute: 0}
+                  - {weekday: 'Thursday', hour: 10, minute: 0}

@@ -5,13 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
 const ENSURE_SELECTION_VISIBLE_DELAY = 50; // ms
 
-Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
-Cu.import("resource://devtools/shared/event-emitter.js");
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { ViewHelpers, setNamedTimeout } = require("devtools/client/shared/widgets/view-helpers");
+const EventEmitter = require("devtools/shared/event-emitter");
 
 this.EXPORTED_SYMBOLS = ["BreadcrumbsWidget"];
 
@@ -19,14 +17,14 @@ this.EXPORTED_SYMBOLS = ["BreadcrumbsWidget"];
  * A breadcrumb-like list of items.
  *
  * Note: this widget should be used in tandem with the WidgetMethods in
- * ViewHelpers.jsm.
+ * view-helpers.js.
  *
- * @param nsIDOMNode aNode
+ * @param Node aNode
  *        The element associated with the widget.
  * @param Object aOptions
  *        - smoothScroll: specifies if smooth scrolling on selection is enabled.
  */
-this.BreadcrumbsWidget = function BreadcrumbsWidget(aNode, aOptions={}) {
+this.BreadcrumbsWidget = function BreadcrumbsWidget(aNode, aOptions = {}) {
   this.document = aNode.ownerDocument;
   this.window = this.document.defaultView;
   this._parent = aNode;
@@ -38,26 +36,16 @@ this.BreadcrumbsWidget = function BreadcrumbsWidget(aNode, aOptions={}) {
   this._list.setAttribute("orient", "horizontal");
   this._list.setAttribute("clicktoscroll", "true");
   this._list.setAttribute("smoothscroll", !!aOptions.smoothScroll);
-  this._list.addEventListener("keypress", e => this.emit("keyPress", e), false);
-  this._list.addEventListener("mousedown", e => this.emit("mousePress", e), false);
+  this._list.addEventListener("keydown", e => this.emit("keyDown", e));
+  this._list.addEventListener("mousedown", e => this.emit("mousePress", e));
   this._parent.appendChild(this._list);
 
   // By default, hide the arrows. We let the arrowscrollbox show them
   // in case of overflow.
   this._list._scrollButtonUp.collapsed = true;
   this._list._scrollButtonDown.collapsed = true;
-  this._list.addEventListener("underflow", this._onUnderflow.bind(this), false);
-  this._list.addEventListener("overflow", this._onOverflow.bind(this), false);
-
-  // These separators are used for CSS purposes only, and are positioned
-  // off screen, but displayed with -moz-element.
-  this._separators = this.document.createElement("box");
-  this._separators.className = "breadcrumb-separator-container";
-  this._separators.innerHTML =
-                    "<box id='breadcrumb-separator-before'></box>" +
-                    "<box id='breadcrumb-separator-after'></box>" +
-                    "<box id='breadcrumb-separator-normal'></box>";
-  this._parent.appendChild(this._separators);
+  this._list.addEventListener("underflow", this._onUnderflow.bind(this));
+  this._list.addEventListener("overflow", this._onOverflow.bind(this));
 
   // This widget emits events that can be handled in a MenuContainer.
   EventEmitter.decorate(this);
@@ -74,14 +62,14 @@ BreadcrumbsWidget.prototype = {
    *
    * @param number aIndex
    *        The position in the container intended for this item.
-   * @param nsIDOMNode aContents
+   * @param Node aContents
    *        The node displayed in the container.
-   * @return nsIDOMNode
+   * @return Node
    *         The element associated with the displayed item.
    */
   insertItemAt: function(aIndex, aContents) {
-    let list = this._list;
-    let breadcrumb = new Breadcrumb(this, aContents);
+    const list = this._list;
+    const breadcrumb = new Breadcrumb(this, aContents);
     return list.insertBefore(breadcrumb._target, list.childNodes[aIndex]);
   },
 
@@ -90,7 +78,7 @@ BreadcrumbsWidget.prototype = {
    *
    * @param number aIndex
    *        The position in the container intended for this item.
-   * @return nsIDOMNode
+   * @return Node
    *         The element associated with the displayed item.
    */
   getItemAtIndex: function(aIndex) {
@@ -100,7 +88,7 @@ BreadcrumbsWidget.prototype = {
   /**
    * Removes the specified child node from this container.
    *
-   * @param nsIDOMNode aChild
+   * @param Node aChild
    *        The element associated with the displayed item.
    */
   removeChild: function(aChild) {
@@ -115,7 +103,7 @@ BreadcrumbsWidget.prototype = {
    * Removes all of the child nodes from this container.
    */
   removeAllItems: function() {
-    let list = this._list;
+    const list = this._list;
 
     while (list.hasChildNodes()) {
       list.firstChild.remove();
@@ -126,7 +114,7 @@ BreadcrumbsWidget.prototype = {
 
   /**
    * Gets the currently selected child node in this container.
-   * @return nsIDOMNode
+   * @return Node
    */
   get selectedItem() {
     return this._selectedItem;
@@ -134,15 +122,15 @@ BreadcrumbsWidget.prototype = {
 
   /**
    * Sets the currently selected child node in this container.
-   * @param nsIDOMNode aChild
+   * @param Node aChild
    */
   set selectedItem(aChild) {
-    let childNodes = this._list.childNodes;
+    const childNodes = this._list.childNodes;
 
     if (!aChild) {
       this._selectedItem = null;
     }
-    for (let node of childNodes) {
+    for (const node of childNodes) {
       if (node == aChild) {
         node.setAttribute("checked", "");
         this._selectedItem = node;
@@ -161,15 +149,19 @@ BreadcrumbsWidget.prototype = {
    *         The current attribute value.
    */
   getAttribute: function(aName) {
-    if (aName == "scrollPosition") return this._list.scrollPosition;
-    if (aName == "scrollWidth") return this._list.scrollWidth;
+    if (aName == "scrollPosition") {
+      return this._list.scrollPosition;
+    }
+    if (aName == "scrollWidth") {
+      return this._list.scrollWidth;
+    }
     return this._parent.getAttribute(aName);
   },
 
   /**
    * Ensures the specified element is visible.
    *
-   * @param nsIDOMNode aElement
+   * @param Node aElement
    *        The element to make visible.
    */
   ensureElementIsVisible: function(aElement) {
@@ -222,7 +214,7 @@ BreadcrumbsWidget.prototype = {
  *
  * @param BreadcrumbsWidget aWidget
  *        The widget to contain this breadcrumb.
- * @param nsIDOMNode aContents
+ * @param Node aContents
  *        The node displayed in the container.
  */
 function Breadcrumb(aWidget, aContents) {
@@ -240,7 +232,7 @@ Breadcrumb.prototype = {
   /**
    * Sets the contents displayed in this item's view.
    *
-   * @param string | nsIDOMNode aContents
+   * @param string | Node aContents
    *        The string or node displayed in the container.
    */
   set contents(aContents) {

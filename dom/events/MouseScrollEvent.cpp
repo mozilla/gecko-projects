@@ -5,9 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/MouseScrollEvent.h"
+#include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/MouseEvents.h"
 #include "prtime.h"
-#include "nsIDOMMouseScrollEvent.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,25 +24,19 @@ MouseScrollEvent::MouseScrollEvent(EventTarget* aOwner,
   } else {
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
-    mEvent->refPoint.x = mEvent->refPoint.y = 0;
+    mEvent->mRefPoint = LayoutDeviceIntPoint(0, 0);
     static_cast<WidgetMouseEventBase*>(mEvent)->inputSource =
-      nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+      MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
   }
 
-  mDetail = mEvent->AsMouseScrollEvent()->delta;
+  mDetail = mEvent->AsMouseScrollEvent()->mDelta;
 }
-
-NS_IMPL_ADDREF_INHERITED(MouseScrollEvent, MouseEvent)
-NS_IMPL_RELEASE_INHERITED(MouseScrollEvent, MouseEvent)
-
-NS_INTERFACE_MAP_BEGIN(MouseScrollEvent)
-NS_INTERFACE_MAP_END_INHERITING(MouseEvent)
 
 void
 MouseScrollEvent::InitMouseScrollEvent(const nsAString& aType,
                                        bool aCanBubble,
                                        bool aCancelable,
-                                       nsGlobalWindow* aView,
+                                       nsGlobalWindowInner* aView,
                                        int32_t aDetail,
                                        int32_t aScreenX,
                                        int32_t aScreenY,
@@ -56,20 +50,22 @@ MouseScrollEvent::InitMouseScrollEvent(const nsAString& aType,
                                        EventTarget* aRelatedTarget,
                                        int32_t aAxis)
 {
+  NS_ENSURE_TRUE_VOID(!mEvent->mFlags.mIsBeingDispatched);
+
   MouseEvent::InitMouseEvent(aType, aCanBubble, aCancelable, aView, aDetail,
                              aScreenX, aScreenY, aClientX, aClientY,
                              aCtrlKey, aAltKey, aShiftKey, aMetaKey, aButton,
                              aRelatedTarget);
-  mEvent->AsMouseScrollEvent()->isHorizontal =
-    (aAxis == nsIDOMMouseScrollEvent::HORIZONTAL_AXIS);
+  mEvent->AsMouseScrollEvent()->mIsHorizontal =
+    (aAxis == MouseScrollEvent_Binding::HORIZONTAL_AXIS);
 }
 
 int32_t
 MouseScrollEvent::Axis()
 {
-  return mEvent->AsMouseScrollEvent()->isHorizontal ?
-          static_cast<int32_t>(nsIDOMMouseScrollEvent::HORIZONTAL_AXIS) :
-          static_cast<int32_t>(nsIDOMMouseScrollEvent::VERTICAL_AXIS);
+  return mEvent->AsMouseScrollEvent()->mIsHorizontal ?
+    MouseScrollEvent_Binding::HORIZONTAL_AXIS :
+    MouseScrollEvent_Binding::VERTICAL_AXIS;
 }
 
 } // namespace dom

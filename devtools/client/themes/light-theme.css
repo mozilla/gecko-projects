@@ -3,9 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url(variables.css);
-@import url(common.css);
-@import url(toolbars.css);
+@import url(resource://devtools/client/themes/variables.css);
+@import url(resource://devtools/client/themes/common.css);
+@import url(chrome://devtools/skin/toolbars.css);
+@import url(chrome://devtools/skin/tooltips.css);
 
 body {
   margin: 0;
@@ -26,10 +27,6 @@ body {
   color: var(--theme-selection-color);
 }
 
-.theme-bg-darker {
-  background: var(--theme-selection-background-semitransparent);
-}
-
 .theme-selected,
 .CodeMirror-hint-active {
   background-color: var(--theme-selection-background);
@@ -44,7 +41,7 @@ body {
 .theme-link,
 .cm-s-mozilla .cm-link,
 .CodeMirror-Tern-type {
-  color: var(--theme-highlight-blue);
+  color: var(--theme-comment);
 }
 
 /*
@@ -66,16 +63,6 @@ body {
   color: var(--theme-comment);
 }
 
-.theme-gutter {
-  background-color: var(--theme-tab-toolbar-background);
-  color: var(--theme-content-color3);
-  border-color: var(--theme-splitter-color);
-}
-
-.theme-separator { /* grey */
-  border-color: #cddae5;
-}
-
 .cm-s-mozilla .cm-unused-line {
   text-decoration: line-through;
   text-decoration-color: var(--theme-highlight-bluegrey);
@@ -85,26 +72,37 @@ body {
   background-color: #fcfffc;
 }
 
-.theme-fg-color1,
 .cm-s-mozilla .cm-number,
 .variable-or-property .token-number,
 .variable-or-property[return] > .title > .name,
 .variable-or-property[scope] > .title > .name {
-  color: var(--theme-highlight-green);
+  color: var(--theme-highlight-purple);
 }
 
 .CodeMirror-Tern-completion-number:before {
   background-color: hsl(72,100%,27%);
 }
 
+.theme-fg-color1,
 .theme-fg-color2,
 .cm-s-mozilla .cm-attribute,
 .cm-s-mozilla .cm-builtin,
-.cm-s-mozilla .cm-def,
-.cm-s-mozilla .cm-property,
-.cm-s-mozilla .cm-qualifier,
+.cm-s-mozilla .cm-keyword,
 .variables-view-variable > .title > .name {
-  color: var(--theme-highlight-blue);
+  color: var(--theme-highlight-red);
+}
+
+.cm-s-mozilla .cm-def,
+.cm-s-mozilla .cm-variable-2 {
+  color: var(--blue-55);
+}
+
+.cm-s-mozilla .cm-variable {
+  color: var(--purple-60);
+}
+
+.cm-s-mozilla .cm-property {
+  color: var(--theme-highlight-green);
 }
 
 .CodeMirror-Tern-completion-object:before {
@@ -112,12 +110,13 @@ body {
 }
 
 .theme-fg-color3,
-.cm-s-mozilla .cm-variable,
+.theme-fg-color5,
 .cm-s-mozilla .cm-tag,
 .cm-s-mozilla .cm-header,
 .cm-s-mozilla .cm-bracket,
+.cm-s-mozilla .cm-qualifier,
 .variables-view-property > .title > .name {
-  color: var(--theme-highlight-bluegrey);
+  color: var(--theme-highlight-blue);
 }
 
 .CodeMirror-Tern-completion-array:before {
@@ -128,17 +127,12 @@ body {
   color: var(--theme-highlight-orange);
 }
 
-.theme-fg-color5,
-.cm-s-mozilla .cm-keyword {
-  color: var(--theme-highlight-lightorange);
-}
-
 .theme-fg-color6,
 .cm-s-mozilla .cm-string,
 .cm-s-mozilla .cm-string-2,
 .variable-or-property .token-string,
 .CodeMirror-Tern-farg {
-  color: var(--theme-highlight-orange);
+  color: var(--theme-highlight-purple);
 }
 
 .CodeMirror-Tern-completion-string:before,
@@ -179,7 +173,7 @@ body {
 }
 
 .ruleview-swatch,
-.computedview-colorswatch {
+.computed-colorswatch {
   box-shadow: 0 0 0 1px #c4c4c4;
 }
 
@@ -194,7 +188,6 @@ body {
 }
 
 .CodeMirror.cm-s-mozilla  pre,
-.cm-s-mozilla .cm-variable-2,
 .cm-s-mozilla .cm-variable-3,
 .cm-s-mozilla .cm-operator,
 .cm-s-mozilla .cm-special {
@@ -231,8 +224,8 @@ div.CodeMirror div.error-line {
 div.CodeMirror span.marked-text {
   background: rgba(255,255,0,0.2);
   border: 1px dashed rgba(192,192,0,0.6);
-  -moz-margin-start: -1px;
-  -moz-margin-end: -1px;
+  margin-inline-start: -1px;
+  margin-inline-end: -1px;
 }
 
 /* Highlight for evaluating current statement. */
@@ -254,61 +247,7 @@ div.CodeMirror span.eval-text {
   min-height: 1.4em;
 }
 
-/* Twisty and checkbox controls */
-
-.theme-twisty, .theme-checkbox {
-  width: 14px;
-  height: 14px;
-  background-repeat: no-repeat;
-  background-image: url("chrome://devtools/skin/images/controls.png");
-  background-size: 56px 28px;
-}
-
-.theme-twisty {
-  cursor: pointer;
-  background-position: 0 -14px;
-}
-
-.theme-twisty:-moz-focusring {
-  outline-style: none;
-}
-
-.theme-twisty[open], .theme-twisty.open {
-  background-position: -14px -14px;
-}
-
-.theme-twisty[invisible] {
-  visibility: hidden;
-}
-
-/* Use white twisty when next to a selected item in markup view */
-.theme-selected ~ .theme-twisty {
-  background-position: -28px -14px;
-}
-
-.theme-selected ~ .theme-twisty[open] {
-  background-position: -42px -14px;
-}
-
-.theme-checkbox {
-  display: inline-block;
-  border: 0;
-  padding: 0;
-  outline: none;
-  background-position: 0 0;
-}
-
-.theme-checkbox[checked] {
-  background-position: -14px 0;
-}
-
-@media (min-resolution: 1.1dppx) {
-  .theme-twisty, .theme-checkbox {
-    background-image: url("chrome://devtools/skin/images/controls@2x.png");
-  }
-}
-
-/* XUL panel styling (see devtools/client/shared/widgets/Tooltip.js) */
+/* XUL panel styling (see devtools/client/shared/widgets/tooltip/Tooltip.js) */
 
 .theme-tooltip-panel .panel-arrowcontent {
   padding: 4px;

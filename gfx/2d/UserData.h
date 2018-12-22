@@ -1,5 +1,6 @@
-/* -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -45,7 +46,7 @@ public:
     entries = static_cast<Entry*>(realloc(entries, sizeof(Entry)*(count+1)));
 
     if (!entries) {
-      MOZ_CRASH();
+      MOZ_CRASH("GFX: UserData::Add");
     }
 
     entries[count].key      = key;
@@ -70,6 +71,21 @@ public:
       }
     }
     return nullptr;
+  }
+
+  /* Remove and destroy a given key */
+  void RemoveAndDestroy(UserDataKey *key)
+  {
+    for (int i=0; i<count; i++) {
+      if (key == entries[i].key) {
+        entries[i].destroy(entries[i].userData);
+        // decrement before looping so entries[i+1] doesn't read past the end:
+        --count;
+        for (;i<count; i++) {
+          entries[i] = entries[i+1];
+        }
+      }
+    }
   }
 
   /* Retrives the userData for the associated key */

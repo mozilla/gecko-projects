@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +11,7 @@
 #include "mozilla/gfx/Matrix.h"         // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for IntSize
 #include "mozilla/layers/Compositor.h"  // for Compositor
+//#include "mozilla/layers/CompositorBridgeParent.h"  // for CompositorBridgeParent
 #include "mozilla/layers/Effects.h"     // for TexturedEffect, Effect, etc
 #include "mozilla/layers/LayerMetricsWrapper.h" // for LayerMetricsWrapper
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
@@ -18,15 +20,53 @@
 #include "nsPoint.h"                    // for IntPoint
 #include "nsPrintfCString.h"            // for nsPrintfCString
 #include "nsRect.h"                     // for IntRect
-#include "mozilla/layers/TiledContentClient.h"
-
-class gfxReusableSurfaceWrapper;
+#include "mozilla/layers/TextureClient.h"
 
 namespace mozilla {
 using namespace gfx;
 namespace layers {
 
 class Layer;
+
+float
+TileHost::GetFadeInOpacity(float aOpacity)
+{
+  TimeStamp now = TimeStamp::Now();
+  if (!gfxPrefs::LayerTileFadeInEnabled() ||
+      mFadeStart.IsNull() ||
+      now < mFadeStart)
+  {
+    return aOpacity;
+  }
+
+  float duration = gfxPrefs::LayerTileFadeInDuration();
+  float elapsed = (now - mFadeStart).ToMilliseconds();
+  if (elapsed > duration) {
+    mFadeStart = TimeStamp();
+    return aOpacity;
+  }
+  return aOpacity * (elapsed / duration);
+}
+
+RefPtr<TextureSource>
+TileHost::AcquireTextureSource() const
+{
+  if (!mTextureHost || !mTextureHost->AcquireTextureSource(mTextureSource)) {
+    return nullptr;
+  }
+  return mTextureSource.get();
+}
+
+RefPtr<TextureSource>
+TileHost::AcquireTextureSourceOnWhite() const
+{
+  if (!mTextureHostOnWhite ||
+      !mTextureHostOnWhite->AcquireTextureSource(mTextureSourceOnWhite))
+  {
+    return nullptr;
+  }
+  return mTextureSourceOnWhite.get();
+}
 
 TiledLayerBufferComposite::TiledLayerBufferComposite()
   : mFrameResolution()
@@ -38,14 +78,29 @@ TiledLayerBufferComposite::~TiledLayerBufferComposite()
 }
 
 void
-TiledLayerBufferComposite::SetCompositor(Compositor* aCompositor)
+TiledLayerBufferComposite::SetTextureSourceProvider(TextureSourceProvider* aProvider)
 {
-  MOZ_ASSERT(aCompositor);
+  MOZ_ASSERT(aProvider);
   for (TileHost& tile : mRetainedTiles) {
     if (tile.IsPlaceholderTile()) continue;
-    tile.mTextureHost->SetCompositor(aCompositor);
+    tile.mTextureHost->SetTextureSourceProvider(aProvider);
     if (tile.mTextureHostOnWhite) {
-      tile.mTextureHostOnWhite->SetCompositor(aCompositor);
+      tile.mTextureHostOnWhite->SetTextureSourceProvider(aProvider);
+    }
+  }
+}
+
+void
+TiledLayerBufferComposite::AddAnimationInvalidation(nsIntRegion& aRegion)
+{
+  // We need to invalidate rects where we have a tile that is in the
+  // process of fading in.
+  for (size_t i = 0; i < mRetainedTiles.Length(); i++) {
+    if (!mRetainedTiles[i].mFadeStart.IsNull()) {
+      TileCoordIntPoint coord = mTiles.TileCoord(i);
+      IntPoint offset = GetTileOffset(coord);
+      nsIntRegion tileRegion = IntRect(offset, GetScaledTileSize());
+      aRegion.OrWith(tileRegion);
     }
   }
 }
@@ -64,11 +119,8 @@ TiledContentHost::~TiledContentHost()
 }
 
 already_AddRefed<TexturedEffect>
-TiledContentHost::GenEffect(const gfx::Filter& aFilter)
+TiledContentHost::GenEffect(const gfx::SamplingFilter aSamplingFilter)
 {
-  // If we can use hwc for this TiledContentHost, it implies that we have exactly
-  // one high precision tile. Please check TiledContentHost::GetRenderState() for
-  // all condition.
   MOZ_ASSERT(mTiledBuffer.GetTileCount() == 1 && mLowPrecisionTiledBuffer.GetTileCount() == 0);
   MOZ_ASSERT(mTiledBuffer.GetTile(0).mTextureHost);
 
@@ -79,17 +131,16 @@ TiledContentHost::GenEffect(const gfx::Filter& aFilter)
 
   return CreateTexturedEffect(tile.mTextureSource,
                               nullptr,
-                              aFilter,
-                              true,
-                              tile.mTextureHost->GetRenderState());
+                              aSamplingFilter,
+                              true);
 }
 
 void
 TiledContentHost::Attach(Layer* aLayer,
-                         Compositor* aCompositor,
+                         TextureSourceProvider* aProvider,
                          AttachFlags aFlags /* = NO_FLAGS */)
 {
-  CompositableHost::Attach(aLayer, aCompositor, aFlags);
+  CompositableHost::Attach(aLayer, aProvider, aFlags);
 }
 
 void
@@ -109,12 +160,17 @@ bool
 TiledContentHost::UseTiledLayerBuffer(ISurfaceAllocator* aAllocator,
                                       const SurfaceDescriptorTiles& aTiledDescriptor)
 {
+  HostLayerManager* lm = GetLayerManager();
+  if (!lm) {
+    return false;
+  }
+
   if (aTiledDescriptor.resolution() < 1) {
-    if (!mLowPrecisionTiledBuffer.UseTiles(aTiledDescriptor, mCompositor, aAllocator)) {
+    if (!mLowPrecisionTiledBuffer.UseTiles(aTiledDescriptor, lm, aAllocator)) {
       return false;
     }
   } else {
-    if (!mTiledBuffer.UseTiles(aTiledDescriptor, mCompositor, aAllocator)) {
+    if (!mTiledBuffer.UseTiles(aTiledDescriptor, lm, aAllocator)) {
       return false;
     }
   }
@@ -125,79 +181,31 @@ void
 UseTileTexture(CompositableTextureHostRef& aTexture,
                CompositableTextureSourceRef& aTextureSource,
                const IntRect& aUpdateRect,
-               Compositor* aCompositor)
+               TextureSourceProvider* aProvider)
 {
   MOZ_ASSERT(aTexture);
   if (!aTexture) {
     return;
   }
 
-  if (aCompositor) {
-    aTexture->SetCompositor(aCompositor);
+  if (aProvider) {
+    aTexture->SetTextureSourceProvider(aProvider);
   }
 
   if (!aUpdateRect.IsEmpty()) {
-#ifdef MOZ_GFX_OPTIMIZE_MOBILE
-    aTexture->Updated(nullptr);
-#else
-    // We possibly upload the entire texture contents here. This is a purposeful
-    // decision, as sub-image upload can often be slow and/or unreliable, but
-    // we may want to reevaluate this in the future.
     // For !HasIntermediateBuffer() textures, this is likely a no-op.
     nsIntRegion region = aUpdateRect;
     aTexture->Updated(&region);
-#endif
   }
 
   aTexture->PrepareTextureSource(aTextureSource);
-}
-
-bool
-GetCopyOnWriteLock(const TileLock& ipcLock, TileHost& aTile, ISurfaceAllocator* aAllocator) {
-  MOZ_ASSERT(aAllocator);
-
-  RefPtr<gfxSharedReadLock> sharedLock;
-  if (ipcLock.type() == TileLock::TShmemSection) {
-    sharedLock = gfxShmSharedReadLock::Open(aAllocator, ipcLock.get_ShmemSection());
-  } else {
-    if (!aAllocator->IsSameProcess()) {
-      // Trying to use a memory based lock instead of a shmem based one in
-      // the cross-process case is a bad security violation.
-      NS_ERROR("A client process may be trying to peek at the host's address space!");
-      return false;
-    }
-    sharedLock = reinterpret_cast<gfxMemorySharedReadLock*>(ipcLock.get_uintptr_t());
-    if (sharedLock) {
-      // The corresponding AddRef is in TiledClient::GetTileDescriptor
-      sharedLock.get()->Release();
-    }
-  }
-  aTile.mSharedLock = sharedLock;
-  return true;
-}
-
-void
-TiledLayerBufferComposite::MarkTilesForUnlock()
-{
-  // Tiles without an internal buffer will have internal locks
-  // held by the gpu driver until the previous draw operation has finished.
-  // We don't know when that will be exactly, so wait until we start the
-  // next composite before unlocking.
-  for (TileHost& tile : mRetainedTiles) {
-    // Tile with an internal buffer get unlocked as soon as we've uploaded,
-    // so won't have a lock at this point.
-    if (tile.mTextureHost && tile.mSharedLock) {
-      mDelayedUnlocks.AppendElement(tile.mSharedLock);
-      tile.mSharedLock = nullptr;
-    }
-  }
 }
 
 class TextureSourceRecycler
 {
 public:
   explicit TextureSourceRecycler(nsTArray<TileHost>&& aTileSet)
-    : mTiles(Move(aTileSet))
+    : mTiles(std::move(aTileSet))
     , mFirstPossibility(0)
   {}
 
@@ -217,9 +225,9 @@ public:
       // If this tile matches, then copy across the retained texture source (if
       // any).
       if (aTile.mTextureHost == mTiles[i].mTextureHost) {
-        aTile.mTextureSource = Move(mTiles[i].mTextureSource);
+        aTile.mTextureSource = std::move(mTiles[i].mTextureSource);
         if (aTile.mTextureHostOnWhite) {
-          aTile.mTextureSourceOnWhite = Move(mTiles[i].mTextureSourceOnWhite);
+          aTile.mTextureSourceOnWhite = std::move(mTiles[i].mTextureSourceOnWhite);
         }
         break;
       }
@@ -239,11 +247,19 @@ public:
 
       if (mTiles[i].mTextureSource &&
           mTiles[i].mTextureHost->GetFormat() == aTile.mTextureHost->GetFormat()) {
-        aTile.mTextureSource = Move(mTiles[i].mTextureSource);
+        aTile.mTextureSource = std::move(mTiles[i].mTextureSource);
         if (aTile.mTextureHostOnWhite) {
-          aTile.mTextureSourceOnWhite = Move(mTiles[i].mTextureSourceOnWhite);
+          aTile.mTextureSourceOnWhite = std::move(mTiles[i].mTextureSourceOnWhite);
         }
         break;
+      }
+    }
+  }
+
+  void RecycleTileFading(TileHost& aTile) {
+    for (size_t i = 0; i < mTiles.Length(); i++) {
+      if (mTiles[i].mTextureHost == aTile.mTextureHost) {
+        aTile.mFadeStart = mTiles[i].mFadeStart;
       }
     }
   }
@@ -255,7 +271,7 @@ protected:
 
 bool
 TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
-                                    Compositor* aCompositor,
+                                    HostLayerManager* aLayerManager,
                                     ISurfaceAllocator* aAllocator)
 {
   if (mResolution != aTiles.resolution() ||
@@ -263,8 +279,8 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     Clear();
   }
   MOZ_ASSERT(aAllocator);
-  MOZ_ASSERT(aCompositor);
-  if (!aAllocator || !aCompositor) {
+  MOZ_ASSERT(aLayerManager);
+  if (!aAllocator || !aLayerManager) {
     return false;
   }
 
@@ -279,15 +295,10 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
 
   const InfallibleTArray<TileDescriptor>& tileDescriptors = aTiles.tiles();
 
-  // Step 1, unlock all the old tiles that haven't been unlocked yet. Any tiles that
-  // exist in both the old and new sets will have been locked again by content, so this
-  // doesn't result in the surface being writeable again.
-  MarkTilesForUnlock();
-
-  TextureSourceRecycler oldRetainedTiles(Move(mRetainedTiles));
+  TextureSourceRecycler oldRetainedTiles(std::move(mRetainedTiles));
   mRetainedTiles.SetLength(tileDescriptors.Length());
 
-  // Step 2, deserialize the incoming set of tiles into mRetainedTiles, and attempt
+  // Step 1, deserialize the incoming set of tiles into mRetainedTiles, and attempt
   // to recycle the TextureSource for any repeated tiles.
   //
   // Since we don't have any retained 'tile' object, we have to search for instances
@@ -300,34 +311,50 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     TileHost& tile = mRetainedTiles[i];
 
     if (tileDesc.type() != TileDescriptor::TTexturedTileDescriptor) {
-      NS_WARN_IF_FALSE(tileDesc.type() == TileDescriptor::TPlaceholderTileDescriptor,
-                       "Unrecognised tile descriptor type");
+      NS_WARNING_ASSERTION(
+        tileDesc.type() == TileDescriptor::TPlaceholderTileDescriptor,
+        "Unrecognised tile descriptor type");
       continue;
     }
 
     const TexturedTileDescriptor& texturedDesc = tileDesc.get_TexturedTileDescriptor();
 
-    const TileLock& ipcLock = texturedDesc.sharedLock();
-    if (!GetCopyOnWriteLock(ipcLock, tile, aAllocator)) {
-      return false;
-    }
-
     tile.mTextureHost = TextureHost::AsTextureHost(texturedDesc.textureParent());
-    tile.mTextureHost->SetCompositor(aCompositor);
+    if (texturedDesc.readLocked()) {
+      tile.mTextureHost->SetReadLocked();
+    }
 
     if (texturedDesc.textureOnWhite().type() == MaybeTexture::TPTextureParent) {
-      tile.mTextureHostOnWhite =
-        TextureHost::AsTextureHost(texturedDesc.textureOnWhite().get_PTextureParent());
+      tile.mTextureHostOnWhite = TextureHost::AsTextureHost(
+        texturedDesc.textureOnWhite().get_PTextureParent()
+      );
+      if (texturedDesc.readLockedOnWhite()) {
+        tile.mTextureHostOnWhite->SetReadLocked();
+      }
     }
 
-    tile.mTilePosition = newTiles.TilePosition(i);
+    tile.mTileCoord = newTiles.TileCoord(i);
 
     // If this same tile texture existed in the old tile set then this will move the texture
     // source into our new tile.
     oldRetainedTiles.RecycleTextureSourceForTile(tile);
+
+    // If this tile is in the process of fading, we need to keep that going
+    oldRetainedTiles.RecycleTileFading(tile);
+
+    if (aTiles.isProgressive() &&
+        texturedDesc.wasPlaceholder())
+    {
+      // This is a progressive paint, and the tile used to be a placeholder.
+      // We need to begin fading it in (if enabled via layers.tiles.fade-in.enabled)
+      tile.mFadeStart = TimeStamp::Now();
+
+      aLayerManager->CompositeUntil(
+        tile.mFadeStart + TimeDuration::FromMilliseconds(gfxPrefs::LayerTileFadeInDuration()));
+    }
   }
 
-  // Step 3, attempt to recycle unused texture sources from the old tile set into new tiles.
+  // Step 2, attempt to recycle unused texture sources from the old tile set into new tiles.
   //
   // For gralloc, binding a new TextureHost to the existing TextureSource is the fastest way
   // to ensure that any implicit locking on the old gralloc image is released.
@@ -338,7 +365,7 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     oldRetainedTiles.RecycleTextureSource(tile);
   }
 
-  // Step 4, handle the texture uploads, texture source binding and release the
+  // Step 3, handle the texture uploads, texture source binding and release the
   // copy-on-write locks for textures with an internal buffer.
   for (size_t i = 0; i < mRetainedTiles.Length(); i++) {
     TileHost& tile = mRetainedTiles[i];
@@ -352,19 +379,13 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     UseTileTexture(tile.mTextureHost,
                    tile.mTextureSource,
                    texturedDesc.updateRect(),
-                   aCompositor);
+                   aLayerManager->GetTextureSourceProvider());
 
     if (tile.mTextureHostOnWhite) {
       UseTileTexture(tile.mTextureHostOnWhite,
                      tile.mTextureSourceOnWhite,
                      texturedDesc.updateRect(),
-                     aCompositor);
-    }
-
-    if (tile.mTextureHost->HasIntermediateBuffer()) {
-      // Now that we did the texture upload (in UseTileTexture), we can release
-      // the lock.
-      tile.ReadUnlock();
+                     aLayerManager->GetTextureSourceProvider());
     }
   }
 
@@ -380,38 +401,26 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
 }
 
 void
-TiledLayerBufferComposite::ProcessDelayedUnlocks()
-{
-  for (gfxSharedReadLock* lock : mDelayedUnlocks) {
-    lock->ReadUnlock();
-  }
-  mDelayedUnlocks.Clear();
-}
-
-void
 TiledLayerBufferComposite::Clear()
 {
-  for (TileHost& tile : mRetainedTiles) {
-    tile.ReadUnlock();
-  }
   mRetainedTiles.Clear();
-  ProcessDelayedUnlocks();
-  mTiles.mFirst = TileIntPoint();
-  mTiles.mSize = TileIntSize();
+  mTiles.mFirst = TileCoordIntPoint();
+  mTiles.mSize = TileCoordIntSize();
   mValidRegion = nsIntRegion();
   mResolution = 1.0;
 }
 
 void
-TiledContentHost::Composite(LayerComposite* aLayer,
+TiledContentHost::Composite(Compositor* aCompositor,
+                            LayerComposite* aLayer,
                             EffectChain& aEffectChain,
                             float aOpacity,
                             const gfx::Matrix4x4& aTransform,
-                            const gfx::Filter& aFilter,
-                            const gfx::Rect& aClipRect,
-                            const nsIntRegion* aVisibleRegion /* = nullptr */)
+                            const gfx::SamplingFilter aSamplingFilter,
+                            const gfx::IntRect& aClipRect,
+                            const nsIntRegion* aVisibleRegion /* = nullptr */,
+                            const Maybe<gfx::Polygon>& aGeometry)
 {
-  MOZ_ASSERT(mCompositor);
   // Reduce the opacity of the low-precision buffer to make it a
   // little more subtle and less jarring. In particular, text
   // rendered at low-resolution and scaled tends to look pretty
@@ -429,7 +438,7 @@ TiledContentHost::Composite(LayerComposite* aLayer,
     // the one from the nearest scrollable ancestor layer.
     for (LayerMetricsWrapper ancestor(GetLayer(), LayerMetricsWrapper::StartAt::BOTTOM); ancestor; ancestor = ancestor.GetParent()) {
       if (ancestor.Metrics().IsScrollable()) {
-        backgroundColor = ancestor.Metrics().GetBackgroundColor();
+        backgroundColor = ancestor.Metadata().GetBackgroundColor();
         break;
       }
     }
@@ -451,28 +460,29 @@ TiledContentHost::Composite(LayerComposite* aLayer,
 #endif
 
   // Render the low and high precision buffers.
-  RenderLayerBuffer(mLowPrecisionTiledBuffer,
+  RenderLayerBuffer(mLowPrecisionTiledBuffer, aCompositor,
                     lowPrecisionOpacityReduction < 1.0f ? &backgroundColor : nullptr,
                     aEffectChain, lowPrecisionOpacityReduction * aOpacity,
-                    aFilter, aClipRect, *renderRegion, aTransform);
-  RenderLayerBuffer(mTiledBuffer, nullptr, aEffectChain, aOpacity, aFilter,
-                    aClipRect, *renderRegion, aTransform);
-  mLowPrecisionTiledBuffer.ProcessDelayedUnlocks();
-  mTiledBuffer.ProcessDelayedUnlocks();
+                    aSamplingFilter, aClipRect, *renderRegion, aTransform, aGeometry);
+
+  RenderLayerBuffer(mTiledBuffer, aCompositor, nullptr, aEffectChain, aOpacity, aSamplingFilter,
+                    aClipRect, *renderRegion, aTransform, aGeometry);
 }
 
 
 void
 TiledContentHost::RenderTile(TileHost& aTile,
+                             Compositor* aCompositor,
                              EffectChain& aEffectChain,
                              float aOpacity,
                              const gfx::Matrix4x4& aTransform,
-                             const gfx::Filter& aFilter,
-                             const gfx::Rect& aClipRect,
+                             const gfx::SamplingFilter aSamplingFilter,
+                             const gfx::IntRect& aClipRect,
                              const nsIntRegion& aScreenRegion,
                              const IntPoint& aTextureOffset,
                              const IntSize& aTextureBounds,
-                             const gfx::Rect& aVisibleRect)
+                             const gfx::Rect& aVisibleRect,
+                             const Maybe<gfx::Polygon>& aGeometry)
 {
   MOZ_ASSERT(!aTile.IsPlaceholderTile());
 
@@ -495,49 +505,50 @@ TiledContentHost::RenderTile(TileHost& aTile,
   RefPtr<TexturedEffect> effect =
     CreateTexturedEffect(aTile.mTextureSource,
                          aTile.mTextureSourceOnWhite,
-                         aFilter,
-                         true,
-                         aTile.mTextureHost->GetRenderState());
+                         aSamplingFilter,
+                         true);
   if (!effect) {
     return;
   }
 
+  float opacity = aTile.GetFadeInOpacity(aOpacity);
   aEffectChain.mPrimaryEffect = effect;
 
   for (auto iter = aScreenRegion.RectIter(); !iter.Done(); iter.Next()) {
     const IntRect& rect = iter.Get();
-    Rect graphicsRect(rect.x, rect.y, rect.width, rect.height);
-    Rect textureRect(rect.x - aTextureOffset.x, rect.y - aTextureOffset.y,
-                     rect.width, rect.height);
+    Rect graphicsRect(rect.X(), rect.Y(), rect.Width(), rect.Height());
+    Rect textureRect(rect.X() - aTextureOffset.x, rect.Y() - aTextureOffset.y,
+                     rect.Width(), rect.Height());
 
-    effect->mTextureCoords = Rect(textureRect.x / aTextureBounds.width,
-                                  textureRect.y / aTextureBounds.height,
-                                  textureRect.width / aTextureBounds.width,
-                                  textureRect.height / aTextureBounds.height);
-    mCompositor->DrawQuad(graphicsRect, aClipRect, aEffectChain, aOpacity, aTransform, aVisibleRect);
+    effect->mTextureCoords.SetRect(textureRect.X() / aTextureBounds.width,
+                                   textureRect.Y() / aTextureBounds.height,
+                                   textureRect.Width() / aTextureBounds.width,
+                                   textureRect.Height() / aTextureBounds.height);
+
+    aCompositor->DrawGeometry(graphicsRect, aClipRect, aEffectChain, opacity,
+                              aTransform, aVisibleRect, aGeometry);
   }
+
   DiagnosticFlags flags = DiagnosticFlags::CONTENT | DiagnosticFlags::TILE;
   if (aTile.mTextureHostOnWhite) {
     flags |= DiagnosticFlags::COMPONENT_ALPHA;
   }
-  mCompositor->DrawDiagnostics(flags,
+  aCompositor->DrawDiagnostics(flags,
                                aScreenRegion, aClipRect, aTransform, mFlashCounter);
 }
 
 void
 TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
+                                    Compositor* aCompositor,
                                     const Color* aBackgroundColor,
                                     EffectChain& aEffectChain,
                                     float aOpacity,
-                                    const gfx::Filter& aFilter,
-                                    const gfx::Rect& aClipRect,
+                                    const gfx::SamplingFilter aSamplingFilter,
+                                    const gfx::IntRect& aClipRect,
                                     nsIntRegion aVisibleRegion,
-                                    gfx::Matrix4x4 aTransform)
+                                    gfx::Matrix4x4 aTransform,
+                                    const Maybe<Polygon>& aGeometry)
 {
-  if (!mCompositor) {
-    NS_WARNING("Can't render tiled content host - no compositor");
-    return;
-  }
   float resolution = aLayerBuffer.GetResolution();
   gfx::Size layerScale(1, 1);
 
@@ -587,8 +598,9 @@ TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
     effect.mPrimaryEffect = new EffectSolidColor(*aBackgroundColor);
     for (auto iter = backgroundRegion.RectIter(); !iter.Done(); iter.Next()) {
       const IntRect& rect = iter.Get();
-      Rect graphicsRect(rect.x, rect.y, rect.width, rect.height);
-      mCompositor->DrawQuad(graphicsRect, aClipRect, effect, 1.0, aTransform);
+      Rect graphicsRect(rect.X(), rect.Y(), rect.Width(), rect.Height());
+      aCompositor->DrawGeometry(graphicsRect, aClipRect, effect,
+                                1.0, aTransform, aGeometry);
     }
   }
 
@@ -598,11 +610,11 @@ TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
       continue;
     }
 
-    TileIntPoint tilePosition = aLayerBuffer.GetPlacement().TilePosition(i);
+    TileCoordIntPoint tileCoord = aLayerBuffer.GetPlacement().TileCoord(i);
     // A sanity check that catches a lot of mistakes.
-    MOZ_ASSERT(tilePosition.x == tile.mTilePosition.x && tilePosition.y == tile.mTilePosition.y);
+    MOZ_ASSERT(tileCoord.x == tile.mTileCoord.x && tileCoord.y == tile.mTileCoord.y);
 
-    IntPoint tileOffset = aLayerBuffer.GetTileOffset(tilePosition);
+    IntPoint tileOffset = aLayerBuffer.GetTileOffset(tileCoord);
     nsIntRegion tileDrawRegion = IntRect(tileOffset, aLayerBuffer.GetScaledTileSize());
     tileDrawRegion.AndWith(compositeRegion);
 
@@ -611,20 +623,22 @@ TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
     }
 
     tileDrawRegion.ScaleRoundOut(resolution, resolution);
-    RenderTile(tile, aEffectChain, aOpacity,
-               aTransform, aFilter, aClipRect, tileDrawRegion,
+    RenderTile(tile, aCompositor, aEffectChain, aOpacity,
+               aTransform, aSamplingFilter, aClipRect, tileDrawRegion,
                tileOffset * resolution, aLayerBuffer.GetTileSize(),
-               gfx::Rect(visibleRect.x, visibleRect.y,
-                         visibleRect.width, visibleRect.height));
+               gfx::Rect(visibleRect.X(), visibleRect.Y(),
+                         visibleRect.Width(), visibleRect.Height()),
+               aGeometry);
+
     if (tile.mTextureHostOnWhite) {
       componentAlphaDiagnostic = DiagnosticFlags::COMPONENT_ALPHA;
     }
   }
 
-  gfx::Rect rect(visibleRect.x, visibleRect.y,
-                 visibleRect.width, visibleRect.height);
-  GetCompositor()->DrawDiagnostics(DiagnosticFlags::CONTENT | componentAlphaDiagnostic,
-                                   rect, aClipRect, aTransform, mFlashCounter);
+  gfx::Rect rect(visibleRect.X(), visibleRect.Y(),
+                 visibleRect.Width(), visibleRect.Height());
+  aCompositor->DrawDiagnostics(DiagnosticFlags::CONTENT | componentAlphaDiagnostic,
+                               rect, aClipRect, aTransform, mFlashCounter);
 }
 
 void
@@ -633,12 +647,14 @@ TiledContentHost::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   aStream << aPrefix;
   aStream << nsPrintfCString("TiledContentHost (0x%p)", this).get();
 
-  if (gfxPrefs::LayersDumpTexture() || profiler_feature_active("layersdump")) {
+#if defined(MOZ_DUMP_PAINTING)
+  if (gfxPrefs::LayersDumpTexture()) {
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
 
     Dump(aStream, pfx.get(), false);
   }
+#endif
 }
 
 void
@@ -649,6 +665,13 @@ TiledContentHost::Dump(std::stringstream& aStream,
   mTiledBuffer.Dump(aStream, aPrefix, aDumpHtml,
       TextureDumpMode::DoNotCompress /* compression not supported on host side */);
 }
+
+void
+TiledContentHost::AddAnimationInvalidation(nsIntRegion& aRegion)
+{
+  return mTiledBuffer.AddAnimationInvalidation(aRegion);
+}
+
 
 } // namespace layers
 } // namespace mozilla

@@ -15,13 +15,12 @@
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
 
+#include "DOMMediaStream.h"
 #include "nsIDOMNavigatorUserMedia.h"
 #include "nsITimer.h"
-#include "MediaEngine.h"
 #include "MediaStreamGraph.h"
 #include "AudioSegment.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/Preferences.h"
 
 #include "SpeechGrammarList.h"
 #include "SpeechRecognitionResultList.h"
@@ -29,17 +28,15 @@
 #include "nsISpeechRecognitionService.h"
 #include "endpointer.h"
 
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/SpeechRecognitionError.h"
 
 namespace mozilla {
 
+class DOMMediaStream;
+
 namespace dom {
 
-#define TEST_PREFERENCE_ENABLE "media.webspeech.test.enable"
-#define TEST_PREFERENCE_FAKE_FSM_EVENTS "media.webspeech.test.fake_fsm_events"
-#define TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE "media.webspeech.test.fake_recognition_service"
-#define TEST_PREFERENCE_RECOGNITION_ENABLE "media.webspeech.recognition.enable"
-#define TEST_PREFERENCE_RECOGNITION_FORCE_ENABLE "media.webspeech.recognition.force_enable"
 #define SPEECH_RECOGNITION_TEST_EVENT_REQUEST_TOPIC "SpeechRecognitionTest:RequestEvent"
 #define SPEECH_RECOGNITION_TEST_END_TOPIC "SpeechRecognitionTest:End"
 
@@ -95,7 +92,8 @@ public:
 
   void SetServiceURI(const nsAString& aArg, ErrorResult& aRv);
 
-  void Start(const Optional<NonNull<DOMMediaStream>>& aStream, ErrorResult& aRv);
+  void Start(const Optional<NonNull<DOMMediaStream>>& aStream,
+             CallerType aCallerType, ErrorResult& aRv);
 
   void Stop();
 
@@ -130,33 +128,6 @@ public:
   uint32_t SplitSamplesBuffer(const int16_t* aSamplesBuffer, uint32_t aSampleCount, nsTArray<RefPtr<SharedBuffer>>& aResult);
   AudioSegment* CreateAudioSegment(nsTArray<RefPtr<SharedBuffer>>& aChunks);
   void FeedAudioData(already_AddRefed<SharedBuffer> aSamples, uint32_t aDuration, MediaStreamListener* aProvider, TrackRate aTrackRate);
-
-  static struct TestConfig
-  {
-  public:
-    bool mEnableTests;
-    bool mFakeFSMEvents;
-    bool mFakeRecognitionService;
-
-    void Init()
-    {
-      if (mInitialized) {
-        return;
-      }
-
-      Preferences::AddBoolVarCache(&mEnableTests, TEST_PREFERENCE_ENABLE);
-
-      if (mEnableTests) {
-        Preferences::AddBoolVarCache(&mFakeFSMEvents, TEST_PREFERENCE_FAKE_FSM_EVENTS);
-        Preferences::AddBoolVarCache(&mFakeRecognitionService, TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE);
-      }
-
-      mInitialized = true;
-    }
-  private:
-    bool mInitialized;
-  } mTestConfig;
-
 
   friend class SpeechEvent;
 private:
@@ -283,16 +254,18 @@ private:
   const char* GetName(SpeechEvent* aId);
 };
 
-class SpeechEvent : public nsRunnable
+class SpeechEvent : public Runnable
 {
 public:
-  SpeechEvent(SpeechRecognition* aRecognition, SpeechRecognition::EventType aType)
-  : mAudioSegment(0)
-  , mRecognitionResultList(0)
-  , mError(0)
-  , mRecognition(aRecognition)
-  , mType(aType)
-  , mTrackRate(0)
+  SpeechEvent(SpeechRecognition* aRecognition,
+              SpeechRecognition::EventType aType)
+    : Runnable("dom::SpeechEvent")
+    , mAudioSegment(0)
+    , mRecognitionResultList(nullptr)
+    , mError(nullptr)
+    , mRecognition(aRecognition)
+    , mType(aType)
+    , mTrackRate(0)
   {
   }
 

@@ -4,21 +4,21 @@
 
 "use strict";
 
-var Ci = Components.interfaces, Cc = Components.classes, Cu = Components.utils;
+var EXPORTED_SYMBOLS = [ "AboutReader" ];
 
-this.EXPORTED_SYMBOLS = [ "AboutReader" ];
+ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/ReaderMode.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/ReaderMode.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NarrateControls", "resource://gre/modules/narrate/NarrateControls.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Rect", "resource://gre/modules/Geometry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry", "resource://gre/modules/UITelemetry.jsm");
+ChromeUtils.defineModuleGetter(this, "AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm");
+ChromeUtils.defineModuleGetter(this, "NarrateControls", "resource://gre/modules/narrate/NarrateControls.jsm");
+ChromeUtils.defineModuleGetter(this, "UITelemetry", "resource://gre/modules/UITelemetry.jsm");
+ChromeUtils.defineModuleGetter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 
 var gStrings = Services.strings.createBundle("chrome://global/locale/aboutReader.properties");
+
+const gIsFirefoxDesktop = Services.appinfo.ID == "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
 
 var AboutReader = function(mm, win, articlePromise) {
   let url = this._getOriginalUrl(win);
@@ -37,38 +37,47 @@ var AboutReader = function(mm, win, articlePromise) {
   this._mm.addMessageListener("Reader:CloseDropdown", this);
   this._mm.addMessageListener("Reader:AddButton", this);
   this._mm.addMessageListener("Reader:RemoveButton", this);
+  this._mm.addMessageListener("Reader:GetStoredArticleData", this);
 
   this._docRef = Cu.getWeakReference(doc);
   this._winRef = Cu.getWeakReference(win);
+  this._innerWindowId = win.QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
 
   this._article = null;
+  this._languagePromise = new Promise(resolve => {
+    this._foundLanguage = resolve;
+  });
 
   if (articlePromise) {
     this._articlePromise = articlePromise;
   }
 
-  this._headerElementRef = Cu.getWeakReference(doc.getElementById("reader-header"));
-  this._domainElementRef = Cu.getWeakReference(doc.getElementById("reader-domain"));
-  this._titleElementRef = Cu.getWeakReference(doc.getElementById("reader-title"));
-  this._creditsElementRef = Cu.getWeakReference(doc.getElementById("reader-credits"));
-  this._contentElementRef = Cu.getWeakReference(doc.getElementById("moz-reader-content"));
-  this._toolbarElementRef = Cu.getWeakReference(doc.getElementById("reader-toolbar"));
-  this._messageElementRef = Cu.getWeakReference(doc.getElementById("reader-message"));
+  this._headerElementRef = Cu.getWeakReference(doc.querySelector(".reader-header"));
+  this._domainElementRef = Cu.getWeakReference(doc.querySelector(".reader-domain"));
+  this._titleElementRef = Cu.getWeakReference(doc.querySelector(".reader-title"));
+  this._readTimeElementRef = Cu.getWeakReference(doc.querySelector(".reader-estimated-time"));
+  this._creditsElementRef = Cu.getWeakReference(doc.querySelector(".reader-credits"));
+  this._contentElementRef = Cu.getWeakReference(doc.querySelector(".moz-reader-content"));
+  this._toolbarElementRef = Cu.getWeakReference(doc.querySelector(".reader-toolbar"));
+  this._messageElementRef = Cu.getWeakReference(doc.querySelector(".reader-message"));
+  this._containerElementRef = Cu.getWeakReference(doc.querySelector(".container"));
 
   this._scrollOffset = win.pageYOffset;
 
-  doc.addEventListener("click", this, false);
+  doc.addEventListener("click", this);
 
-  win.addEventListener("unload", this, false);
-  win.addEventListener("scroll", this, false);
-  win.addEventListener("resize", this, false);
+  win.addEventListener("pagehide", this);
+  win.addEventListener("scroll", this);
+  win.addEventListener("resize", this);
 
-  doc.addEventListener("visibilitychange", this, false);
+  Services.obs.addObserver(this, "inner-window-destroyed");
+
+  doc.addEventListener("visibilitychange", this);
 
   this._setupStyleDropdown();
   this._setupButton("close-button", this._onReaderClose.bind(this), "aboutReader.toolbar.close");
 
-  const gIsFirefoxDesktop = Services.appinfo.ID == "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
   if (gIsFirefoxDesktop) {
     // we're ready for any external setup, send a signal for that.
     this._mm.sendAsyncMessage("Reader:OnSetup");
@@ -76,9 +85,11 @@ var AboutReader = function(mm, win, articlePromise) {
 
   let colorSchemeValues = JSON.parse(Services.prefs.getCharPref("reader.color_scheme.values"));
   let colorSchemeOptions = colorSchemeValues.map((value) => {
-    return { name: gStrings.GetStringFromName("aboutReader.colorScheme." + value),
-             value: value,
-             itemClass: value + "-button" };
+    return {
+      name: gStrings.GetStringFromName("aboutReader.colorScheme." + value),
+      value,
+      itemClass: value + "-button"
+    };
   });
 
   let colorScheme = Services.prefs.getCharPref("reader.color_scheme");
@@ -104,18 +115,24 @@ var AboutReader = function(mm, win, articlePromise) {
 
   this._setupFontSizeButtons();
 
+  this._setupContentWidthButtons();
+
+  this._setupLineHeightButtons();
+
   if (win.speechSynthesis && Services.prefs.getBoolPref("narrate.enabled")) {
-    new NarrateControls(mm, win);
+    new NarrateControls(mm, win, this._languagePromise);
   }
 
   this._loadArticle();
-}
+};
 
 AboutReader.prototype = {
   _BLOCK_IMAGES_SELECTOR: ".content p > img:only-child, " +
                           ".content p > a:only-child > img:only-child, " +
                           ".content .wp-caption img, " +
                           ".content figure img",
+
+  PLATFORM_HAS_CACHE: AppConstants.platform == "android",
 
   get _doc() {
     return this._docRef.get();
@@ -137,6 +154,10 @@ AboutReader.prototype = {
     return this._titleElementRef.get();
   },
 
+  get _readTimeElement() {
+    return this._readTimeElementRef.get();
+  },
+
   get _creditsElement() {
     return this._creditsElementRef.get();
   },
@@ -151,6 +172,10 @@ AboutReader.prototype = {
 
   get _messageElement() {
     return this._messageElementRef.get();
+  },
+
+  get _containerElement() {
+    return this._containerElementRef.get();
   },
 
   get _isToolbarVertical() {
@@ -169,7 +194,7 @@ AboutReader.prototype = {
     return _viewId;
   },
 
-  receiveMessage: function (message) {
+  receiveMessage(message) {
     switch (message.name) {
       // Triggered by Android user pressing BACK while the banner font-dropdown is open.
       case "Reader:CloseDropdown": {
@@ -180,58 +205,64 @@ AboutReader.prototype = {
 
       case "Reader:AddButton": {
         if (message.data.id && message.data.image &&
-            !this._doc.getElementById(message.data.id)) {
+            !this._doc.getElementsByClassName(message.data.id)[0]) {
           let btn = this._doc.createElement("button");
-          btn.setAttribute("class", "button");
-          btn.setAttribute("style", "background-image: url('" + message.data.image + "')");
-          btn.setAttribute("id", message.data.id);
+          btn.dataset.buttonid = message.data.id;
+          btn.className = "button " + message.data.id;
+          btn.style.backgroundImage = "url('" + message.data.image + "')";
           if (message.data.title)
-            btn.setAttribute("title", message.data.title);
+            btn.title = message.data.title;
           if (message.data.text)
             btn.textContent = message.data.text;
-          let tb = this._doc.getElementById("reader-toolbar");
+          let tb = this._toolbarElement;
           tb.appendChild(btn);
           this._setupButton(message.data.id, button => {
-            this._mm.sendAsyncMessage("Reader:Clicked-" + button.getAttribute("id"), { article: this._article });
+            this._mm.sendAsyncMessage("Reader:Clicked-" + button.dataset.buttonid, { article: this._article });
           });
         }
         break;
       }
       case "Reader:RemoveButton": {
         if (message.data.id) {
-          let btn = this._doc.getElementById(message.data.id);
+          let btn = this._doc.getElementsByClassName(message.data.id)[0];
           if (btn)
             btn.remove();
         }
         break;
       }
+      case "Reader:GetStoredArticleData": {
+        this._mm.sendAsyncMessage("Reader:StoredArticleData", { article: this._article });
+      }
     }
   },
 
-  handleEvent: function(aEvent) {
+  handleEvent(aEvent) {
     if (!aEvent.isTrusted)
       return;
 
     switch (aEvent.type) {
       case "click":
         let target = aEvent.target;
-        if (target.classList.contains('dropdown-toggle')) {
+        if (target.classList.contains("dropdown-toggle")) {
           this._toggleDropdownClicked(aEvent);
-        } else if (!target.closest('.dropdown-popup')) {
+        } else if (!target.closest(".dropdown-popup")) {
           this._closeDropdowns();
         }
         break;
       case "scroll":
-        this._closeDropdowns();
-        let isScrollingUp = this._scrollOffset > aEvent.pageY;
-        this._setSystemUIVisibility(isScrollingUp);
+        this._closeDropdowns(true);
+        if (!gIsFirefoxDesktop && this._scrollOffset != aEvent.pageY) {
+          let isScrollingUp = this._scrollOffset > aEvent.pageY;
+          this._setSystemUIVisibility(isScrollingUp);
+          this._setToolbarVisibility(isScrollingUp);
+        }
         this._scrollOffset = aEvent.pageY;
         break;
       case "resize":
         this._updateImageMargins();
         if (this._isToolbarVertical) {
           this._win.setTimeout(() => {
-            for (let dropdown of this._doc.querySelectorAll('.dropdown.open')) {
+            for (let dropdown of this._doc.querySelectorAll(".dropdown.open")) {
               this._updatePopupPosition(dropdown);
             }
           }, 0);
@@ -246,24 +277,38 @@ AboutReader.prototype = {
         this._handleVisibilityChange();
         break;
 
-      case "unload":
+      case "pagehide":
         // Close the Banners Font-dropdown, cleanup Android BackPressListener.
         this._closeDropdowns();
 
         this._mm.removeMessageListener("Reader:CloseDropdown", this);
         this._mm.removeMessageListener("Reader:AddButton", this);
         this._mm.removeMessageListener("Reader:RemoveButton", this);
+        this._mm.removeMessageListener("Reader:GetStoredArticleData", this);
         this._windowUnloaded = true;
         break;
     }
   },
 
-  _onReaderClose: function() {
-    this._win.location.href = this._getOriginalUrl();
+  observe(subject, topic, data) {
+    if (subject.QueryInterface(Ci.nsISupportsPRUint64).data != this._innerWindowId) {
+      return;
+    }
+
+    Services.obs.removeObserver(this, "inner-window-destroyed");
+
+    this._mm.removeMessageListener("Reader:CloseDropdown", this);
+    this._mm.removeMessageListener("Reader:AddButton", this);
+    this._mm.removeMessageListener("Reader:RemoveButton", this);
+    this._windowUnloaded = true;
   },
 
-  _setFontSize: function(newFontSize) {
-    let containerClasses = this._doc.getElementById("container").classList;
+  _onReaderClose() {
+    ReaderMode.leaveReaderMode(this._mm.docShell, this._win);
+  },
+
+  _setFontSize(newFontSize) {
+    let containerClasses = this._containerElement.classList;
 
     if (this._fontSize > 0)
       containerClasses.remove("font-size" + this._fontSize);
@@ -273,19 +318,19 @@ AboutReader.prototype = {
     return AsyncPrefs.set("reader.font_size", this._fontSize);
   },
 
-  _setupFontSizeButtons: function() {
+  _setupFontSizeButtons() {
     const FONT_SIZE_MIN = 1;
     const FONT_SIZE_MAX = 9;
 
     // Sample text shown in Android UI.
-    let sampleText = this._doc.getElementById("font-size-sample");
+    let sampleText = this._doc.querySelector(".font-size-sample");
     sampleText.textContent = gStrings.GetStringFromName("aboutReader.fontTypeSample");
 
     let currentSize = Services.prefs.getIntPref("reader.font_size");
     currentSize = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, currentSize));
 
-    let plusButton = this._doc.getElementById("font-size-plus");
-    let minusButton = this._doc.getElementById("font-size-minus");
+    let plusButton = this._doc.querySelector(".plus-button");
+    let minusButton = this._doc.querySelector(".minus-button");
 
     function updateControls() {
       if (currentSize === FONT_SIZE_MIN) {
@@ -334,7 +379,143 @@ AboutReader.prototype = {
     }, true);
   },
 
-  _handleDeviceLight: function(newLux) {
+  _setContentWidth(newContentWidth) {
+    let containerClasses = this._containerElement.classList;
+
+    if (this._contentWidth > 0)
+      containerClasses.remove("content-width" + this._contentWidth);
+
+    this._contentWidth = newContentWidth;
+    containerClasses.add("content-width" + this._contentWidth);
+    return AsyncPrefs.set("reader.content_width", this._contentWidth);
+  },
+
+  _setupContentWidthButtons() {
+    const CONTENT_WIDTH_MIN = 1;
+    const CONTENT_WIDTH_MAX = 9;
+
+    let currentContentWidth = Services.prefs.getIntPref("reader.content_width");
+    currentContentWidth = Math.max(CONTENT_WIDTH_MIN, Math.min(CONTENT_WIDTH_MAX, currentContentWidth));
+
+    let plusButton = this._doc.querySelector(".content-width-plus-button");
+    let minusButton = this._doc.querySelector(".content-width-minus-button");
+
+    function updateControls() {
+      if (currentContentWidth === CONTENT_WIDTH_MIN) {
+        minusButton.setAttribute("disabled", true);
+      } else {
+        minusButton.removeAttribute("disabled");
+      }
+      if (currentContentWidth === CONTENT_WIDTH_MAX) {
+        plusButton.setAttribute("disabled", true);
+      } else {
+        plusButton.removeAttribute("disabled");
+      }
+    }
+
+    updateControls();
+    this._setContentWidth(currentContentWidth);
+
+    plusButton.addEventListener("click", (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
+      event.stopPropagation();
+
+      if (currentContentWidth >= CONTENT_WIDTH_MAX) {
+        return;
+      }
+
+      currentContentWidth++;
+      updateControls();
+      this._setContentWidth(currentContentWidth);
+    }, true);
+
+    minusButton.addEventListener("click", (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
+      event.stopPropagation();
+
+      if (currentContentWidth <= CONTENT_WIDTH_MIN) {
+        return;
+      }
+
+      currentContentWidth--;
+      updateControls();
+      this._setContentWidth(currentContentWidth);
+    }, true);
+  },
+
+  _setLineHeight(newLineHeight) {
+    let contentClasses = this._contentElement.classList;
+
+    if (this._lineHeight > 0)
+      contentClasses.remove("line-height" + this._lineHeight);
+
+    this._lineHeight = newLineHeight;
+    contentClasses.add("line-height" + this._lineHeight);
+    return AsyncPrefs.set("reader.line_height", this._lineHeight);
+  },
+
+  _setupLineHeightButtons() {
+    const LINE_HEIGHT_MIN = 1;
+    const LINE_HEIGHT_MAX = 9;
+
+    let currentLineHeight = Services.prefs.getIntPref("reader.line_height");
+    currentLineHeight = Math.max(LINE_HEIGHT_MIN, Math.min(LINE_HEIGHT_MAX, currentLineHeight));
+
+    let plusButton = this._doc.querySelector(".line-height-plus-button");
+    let minusButton = this._doc.querySelector(".line-height-minus-button");
+
+    function updateControls() {
+      if (currentLineHeight === LINE_HEIGHT_MIN) {
+        minusButton.setAttribute("disabled", true);
+      } else {
+        minusButton.removeAttribute("disabled");
+      }
+      if (currentLineHeight === LINE_HEIGHT_MAX) {
+        plusButton.setAttribute("disabled", true);
+      } else {
+        plusButton.removeAttribute("disabled");
+      }
+    }
+
+    updateControls();
+    this._setLineHeight(currentLineHeight);
+
+    plusButton.addEventListener("click", (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
+      event.stopPropagation();
+
+      if (currentLineHeight >= LINE_HEIGHT_MAX) {
+        return;
+      }
+
+      currentLineHeight++;
+      updateControls();
+      this._setLineHeight(currentLineHeight);
+    }, true);
+
+    minusButton.addEventListener("click", (event) => {
+      if (!event.isTrusted) {
+        return;
+      }
+      event.stopPropagation();
+
+      if (currentLineHeight <= LINE_HEIGHT_MIN) {
+        return;
+      }
+
+      currentLineHeight--;
+      updateControls();
+      this._setLineHeight(currentLineHeight);
+    }, true);
+  },
+
+  _handleDeviceLight(newLux) {
     // Desired size of the this._luxValues array.
     let luxValuesSize = 10;
     // Add new lux value at the front of the array.
@@ -351,7 +532,7 @@ AboutReader.prototype = {
       return;
     }
     // Holds the average of the lux values collected in this._luxValues.
-    let averageLuxValue = this._totalLux/luxValuesSize;
+    let averageLuxValue = this._totalLux / luxValuesSize;
 
     this._updateColorScheme(averageLuxValue);
     // Pop the oldest value off the array.
@@ -360,7 +541,7 @@ AboutReader.prototype = {
     this._totalLux -= oldLux;
   },
 
-  _handleVisibilityChange: function() {
+  _handleVisibilityChange() {
     let colorScheme = Services.prefs.getCharPref("reader.color_scheme");
     if (colorScheme != "auto") {
       return;
@@ -371,19 +552,19 @@ AboutReader.prototype = {
   },
 
   // Setup or teardown the ambient light tracking system.
-  _enableAmbientLighting: function(enable) {
+  _enableAmbientLighting(enable) {
     if (enable) {
-      this._win.addEventListener("devicelight", this, false);
+      this._win.addEventListener("devicelight", this);
       this._luxValues = [];
       this._totalLux = 0;
     } else {
-      this._win.removeEventListener("devicelight", this, false);
+      this._win.removeEventListener("devicelight", this);
       delete this._luxValues;
       delete this._totalLux;
     }
   },
 
-  _updateColorScheme: function(luxValue) {
+  _updateColorScheme(luxValue) {
     // Upper bound value for "dark" color scheme beyond which it changes to "light".
     let upperBoundDark = 50;
     // Lower bound value for "light" color scheme beyond which it changes to "dark".
@@ -402,7 +583,7 @@ AboutReader.prototype = {
       this._setColorScheme("light");
   },
 
-  _setColorScheme: function(newColorScheme) {
+  _setColorScheme(newColorScheme) {
     // "auto" is not a real color scheme
     if (this._colorScheme === newColorScheme || newColorScheme === "auto")
       return;
@@ -418,14 +599,14 @@ AboutReader.prototype = {
 
   // Pref values include "dark", "light", and "auto", which automatically switches
   // between light and dark color schemes based on the ambient light level.
-  _setColorSchemePref: function(colorSchemePref) {
+  _setColorSchemePref(colorSchemePref) {
     this._enableAmbientLighting(colorSchemePref === "auto");
     this._setColorScheme(colorSchemePref);
 
     AsyncPrefs.set("reader.color_scheme", colorSchemePref);
   },
 
-  _setFontType: function(newFontType) {
+  _setFontType(newFontType) {
     if (this._fontType === newFontType)
       return;
 
@@ -440,72 +621,107 @@ AboutReader.prototype = {
     AsyncPrefs.set("reader.font_type", this._fontType);
   },
 
-  _setSystemUIVisibility: function(visible) {
-    this._mm.sendAsyncMessage("Reader:SystemUIVisibility", { visible: visible });
+  _setSystemUIVisibility(visible) {
+    this._mm.sendAsyncMessage("Reader:SystemUIVisibility", { visible });
   },
 
-  _loadArticle: Task.async(function* () {
+  _setToolbarVisibility(visible) {
+    let tb = this._toolbarElement;
+
+    if (visible) {
+      if (tb.style.opacity != "1") {
+        tb.removeAttribute("hidden");
+        tb.style.opacity = "1";
+      }
+    } else if (tb.style.opacity != "0") {
+      tb.addEventListener("transitionend", evt => {
+        if (tb.style.opacity == "0") {
+          tb.setAttribute("hidden", "");
+        }
+      }, { once: true });
+      tb.style.opacity = "0";
+    }
+  },
+
+  async _loadArticle() {
     let url = this._getOriginalUrl();
     this._showProgressDelayed();
 
     let article;
     if (this._articlePromise) {
-      article = yield this._articlePromise;
+      article = await this._articlePromise;
     } else {
-      article = yield this._getArticle(url);
+      try {
+        article = await this._getArticle(url);
+      } catch (e) {
+        if (e && e.newURL) {
+          let readerURL = "about:reader?url=" + encodeURIComponent(e.newURL);
+          this._win.location.replace(readerURL);
+          return;
+        }
+      }
     }
 
     if (this._windowUnloaded) {
       return;
     }
 
-    if (article) {
-      this._showContent(article);
-    } else if (this._articlePromise) {
-      // If we were promised an article, show an error message if there's a failure.
+    // Replace the loading message with an error message if there's a failure.
+    // Users are supposed to navigate away by themselves (because we cannot
+    // remove ourselves from session history.)
+    if (!article) {
       this._showError();
-    } else {
-      // Otherwise, just load the original URL. We can encounter this case when
-      // loading an about:reader URL directly (e.g. opening a reading list item).
-      this._win.location.href = url;
+      return;
     }
-  }),
 
-  _getArticle: function(url) {
-    return new Promise((resolve, reject) => {
-      let listener = (message) => {
-        this._mm.removeMessageListener("Reader:ArticleData", listener);
-        resolve(message.data.article);
-      };
-      this._mm.addMessageListener("Reader:ArticleData", listener);
-      this._mm.sendAsyncMessage("Reader:ArticleGet", { url: url });
-    });
+    this._showContent(article);
   },
 
-  _requestFavicon: function() {
+  _getArticle(url) {
+    if (this.PLATFORM_HAS_CACHE) {
+      return new Promise((resolve, reject) => {
+        let listener = (message) => {
+          this._mm.removeMessageListener("Reader:ArticleData", listener);
+          if (message.data.newURL) {
+            reject({ newURL: message.data.newURL });
+            return;
+          }
+          resolve(message.data.article);
+        };
+        this._mm.addMessageListener("Reader:ArticleData", listener);
+        this._mm.sendAsyncMessage("Reader:ArticleGet", { url });
+      });
+    }
+    return ReaderMode.downloadAndParseDocument(url);
+  },
+
+  _requestFavicon() {
     let handleFaviconReturn = (message) => {
       this._mm.removeMessageListener("Reader:FaviconReturn", handleFaviconReturn);
       this._loadFavicon(message.data.url, message.data.faviconUrl);
     };
 
     this._mm.addMessageListener("Reader:FaviconReturn", handleFaviconReturn);
-    this._mm.sendAsyncMessage("Reader:FaviconRequest", { url: this._article.url });
+    this._mm.sendAsyncMessage("Reader:FaviconRequest", {
+      url: this._article.url,
+      preferredWidth: 16 * this._win.devicePixelRatio
+    });
   },
 
-  _loadFavicon: function(url, faviconUrl) {
+  _loadFavicon(url, faviconUrl) {
     if (this._article.url !== url)
       return;
 
     let doc = this._doc;
 
-    let link = doc.createElement('link');
-    link.rel = 'shortcut icon';
+    let link = doc.createElement("link");
+    link.rel = "shortcut icon";
     link.href = faviconUrl;
 
-    doc.getElementsByTagName('head')[0].appendChild(link);
+    doc.getElementsByTagName("head")[0].appendChild(link);
   },
 
-  _updateImageMargins: function() {
+  _updateImageMargins() {
     let windowWidth = this._win.innerWidth;
     let bodyWidth = this._doc.body.clientWidth;
 
@@ -518,12 +734,12 @@ AboutReader.prototype = {
       }
 
       // If the image is at least half as wide as the body, center it on desktop.
-      if (img.naturalWidth >= bodyWidth/2) {
+      if (img.naturalWidth >= bodyWidth / 2) {
         img.setAttribute("moz-reader-center", true);
       } else {
         img.removeAttribute("moz-reader-center");
       }
-    }
+    };
 
     let imgs = this._doc.querySelectorAll(this._BLOCK_IMAGES_SELECTOR);
     for (let i = imgs.length; --i >= 0;) {
@@ -534,21 +750,38 @@ AboutReader.prototype = {
       } else {
         img.onload = function() {
           setImageMargins(img);
-        }
+        };
       }
     }
   },
 
-  _maybeSetTextDirection: function Read_maybeSetTextDirection(article){
-    if(!article.dir)
-      return;
+  _maybeSetTextDirection: function Read_maybeSetTextDirection(article) {
+    if (article.dir) {
+      // Set "dir" attribute on content
+      this._contentElement.setAttribute("dir", article.dir);
+      this._headerElement.setAttribute("dir", article.dir);
 
-    //Set "dir" attribute on content
-    this._contentElement.setAttribute("dir", article.dir);
-    this._headerElement.setAttribute("dir", article.dir);
+      // The native locale could be set differently than the article's text direction.
+      var localeDirection = Services.locale.isAppLocaleRTL ? "rtl" : "ltr";
+      this._readTimeElement.setAttribute("dir", localeDirection);
+      this._readTimeElement.style.textAlign = article.dir == "rtl" ? "right" : "left";
+    }
   },
 
-  _showError: function() {
+  _formatReadTime(slowEstimate, fastEstimate) {
+    let displayStringKey = "aboutReader.estimatedReadTimeRange1";
+
+    // only show one reading estimate when they are the same value
+    if (slowEstimate == fastEstimate) {
+      displayStringKey = "aboutReader.estimatedReadTimeValue1";
+    }
+
+    return PluralForm.get(slowEstimate, gStrings.GetStringFromName(displayStringKey))
+      .replace("#1", fastEstimate)
+      .replace("#2", slowEstimate);
+  },
+
+  _showError() {
     this._headerElement.style.display = "none";
     this._contentElement.style.display = "none";
 
@@ -558,11 +791,16 @@ AboutReader.prototype = {
 
     this._doc.title = errorMessage;
 
+    this._doc.documentElement.dataset.isError = true;
+
     this._error = true;
+
+    this._doc.dispatchEvent(
+      new this._win.CustomEvent("AboutReaderContentError", { bubbles: true, cancelable: false }));
   },
 
   // This function is the JS version of Java's StringUtils.stripCommonSubdomains.
-  _stripHost: function(host) {
+  _stripHost(host) {
     if (!host)
       return host;
 
@@ -578,17 +816,18 @@ AboutReader.prototype = {
     return host.substring(start);
   },
 
-  _showContent: function(article) {
+  _showContent(article) {
     this._messageElement.style.display = "none";
 
     this._article = article;
 
     this._domainElement.href = article.url;
-    let articleUri = Services.io.newURI(article.url, null, null);
+    let articleUri = Services.io.newURI(article.url);
     this._domainElement.textContent = this._stripHost(articleUri.host);
     this._creditsElement.textContent = article.byline;
 
     this._titleElement.textContent = article.title;
+    this._readTimeElement.textContent = this._formatReadTime(article.readingTimeMinsSlow, article.readingTimeMinsFast);
     this._doc.title = article.title;
 
     this._headerElement.style.display = "block";
@@ -600,6 +839,7 @@ AboutReader.prototype = {
     this._contentElement.innerHTML = "";
     this._contentElement.appendChild(contentFragment);
     this._maybeSetTextDirection(article);
+    this._foundLanguage(article.language);
 
     this._contentElement.style.display = "block";
     this._updateImageMargins();
@@ -607,16 +847,21 @@ AboutReader.prototype = {
     this._requestFavicon();
     this._doc.body.classList.add("loaded");
 
-    Services.obs.notifyObservers(this._win, "AboutReader:Ready", "");
+    this._goToReference(articleUri.ref);
+
+    Services.obs.notifyObservers(this._win, "AboutReader:Ready");
+
+    this._doc.dispatchEvent(
+      new this._win.CustomEvent("AboutReaderContentReady", { bubbles: true, cancelable: false }));
   },
 
-  _hideContent: function() {
+  _hideContent() {
     this._headerElement.style.display = "none";
     this._contentElement.style.display = "none";
   },
 
-  _showProgressDelayed: function() {
-    this._win.setTimeout(function() {
+  _showProgressDelayed() {
+    this._win.setTimeout(() => {
       // No need to show progress if the article has been loaded,
       // if the window has been unloaded, or if there was an error
       // trying to load the article.
@@ -629,20 +874,20 @@ AboutReader.prototype = {
 
       this._messageElement.textContent = gStrings.GetStringFromName("aboutReader.loading2");
       this._messageElement.style.display = "block";
-    }.bind(this), 300);
+    }, 300);
   },
 
   /**
    * Returns the original article URL for this about:reader view.
    */
-  _getOriginalUrl: function(win) {
+  _getOriginalUrl(win) {
     let url = win ? win.location.href : this._win.location.href;
     return ReaderMode.getOriginalUrl(url) || url;
   },
 
-  _setupSegmentedButton: function(id, options, initialValue, callback) {
+  _setupSegmentedButton(id, options, initialValue, callback) {
     let doc = this._doc;
-    let segmentedButton = doc.getElementById(id);
+    let segmentedButton = doc.getElementsByClassName(id)[0];
 
     for (let i = 0; i < options.length; i++) {
       let option = options[i];
@@ -684,19 +929,19 @@ AboutReader.prototype = {
 
         item.classList.add("selected");
         callback(option.value);
-      }.bind(this), true);
+      }, true);
 
       if (option.value === initialValue)
         item.classList.add("selected");
     }
   },
 
-  _setupButton: function(id, callback, titleEntity, textEntity) {
+  _setupButton(id, callback, titleEntity, textEntity) {
     if (titleEntity) {
       this._setButtonTip(id, titleEntity);
     }
 
-    let button = this._doc.getElementById(id);
+    let button = this._doc.getElementsByClassName(id)[0];
     if (textEntity) {
       button.textContent = gStrings.GetStringFromName(textEntity);
     }
@@ -716,17 +961,17 @@ AboutReader.prototype = {
    * and dynamically as button state changes.
    * @param   Localizable string providing UI element usage tip.
    */
-  _setButtonTip: function(id, titleEntity) {
-    let button = this._doc.getElementById(id);
+  _setButtonTip(id, titleEntity) {
+    let button = this._doc.getElementsByClassName(id)[0];
     button.setAttribute("title", gStrings.GetStringFromName(titleEntity));
   },
 
-  _setupStyleDropdown: function() {
-    let dropdownToggle = this._doc.querySelector("#style-dropdown .dropdown-toggle");
+  _setupStyleDropdown() {
+    let dropdownToggle = this._doc.querySelector(".style-dropdown .dropdown-toggle");
     dropdownToggle.setAttribute("title", gStrings.GetStringFromName("aboutReader.toolbar.typeControls"));
   },
 
-  _updatePopupPosition: function(dropdown) {
+  _updatePopupPosition(dropdown) {
     let dropdownToggle = dropdown.querySelector(".dropdown-toggle");
     let dropdownPopup = dropdown.querySelector(".dropdown-popup");
 
@@ -737,8 +982,8 @@ AboutReader.prototype = {
     dropdownPopup.style.top = popupTop + "px";
   },
 
-  _toggleDropdownClicked: function(event) {
-    let dropdown = event.target.closest('.dropdown');
+  _toggleDropdownClicked(event) {
+    let dropdown = event.target.closest(".dropdown");
 
     if (!dropdown)
       return;
@@ -758,7 +1003,7 @@ AboutReader.prototype = {
   /*
    * If the ReaderView banner font-dropdown is closed, open it.
    */
-  _openDropdown: function(dropdown) {
+  _openDropdown(dropdown) {
     if (dropdown.classList.contains("open")) {
       return;
     }
@@ -771,10 +1016,17 @@ AboutReader.prototype = {
   },
 
   /*
-   * If the ReaderView has open dropdowns, close them.
+   * If the ReaderView has open dropdowns, close them. If we are closing the
+   * dropdowns because the page is scrolling, allow popups to stay open with
+   * the keep-open class.
    */
-  _closeDropdowns: function() {
-    let openDropdowns = this._doc.querySelectorAll(".dropdown.open:not(.keep-open)");
+  _closeDropdowns(scrolling) {
+    let selector = ".dropdown.open";
+    if (scrolling) {
+      selector += ":not(.keep-open)";
+    }
+
+    let openDropdowns = this._doc.querySelectorAll(selector);
     for (let dropdown of openDropdowns) {
       dropdown.classList.remove("open");
     }
@@ -782,6 +1034,15 @@ AboutReader.prototype = {
     // Trigger BackPressListener cleanup in Android.
     if (openDropdowns.length) {
       this._mm.sendAsyncMessage("Reader:DropdownClosed", this.viewId);
+    }
+  },
+
+  /*
+   * Scroll reader view to a reference
+   */
+  _goToReference(ref) {
+    if (ref) {
+      this._win.location.hash = ref;
     }
   }
 };

@@ -11,7 +11,7 @@
 #include "nsIServiceManager.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsXPIDLString.h"
+#include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsMimeTypes.h"
 #include "nsMemory.h"
@@ -28,11 +28,7 @@
 #include "nsProxyRelease.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
-
-#ifdef _WIN32_WINNT
-#undef _WIN32_WINNT
-#endif
-#define _WIN32_WINNT 0x0600
+#include "nsNetUtil.h"
 
 // we need windows.h to read out registry information...
 #include <windows.h>
@@ -76,7 +72,8 @@ nsIconChannel::nsIconChannel()
 nsIconChannel::~nsIconChannel()
 {
   if (mLoadInfo) {
-    NS_ReleaseOnMainThread(mLoadInfo.forget());
+    NS_ReleaseOnMainThreadSystemGroup(
+      "nsIconChannel::mLoadInfo", mLoadInfo.forget());
   }
 }
 
@@ -162,6 +159,12 @@ nsIconChannel::SetLoadFlags(uint32_t aLoadAttributes)
   return mPump->SetLoadFlags(aLoadAttributes);
 }
 
+NS_IMETHODIMP
+nsIconChannel::GetIsDocument(bool *aIsDocument)
+{
+  return NS_GetIsDocumentChannel(this, aIsDocument);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsIChannel methods:
 
@@ -245,12 +248,17 @@ nsIconChannel::AsyncOpen(nsIStreamListener* aListener,
   nsCOMPtr<nsIInputStream> inStream;
   nsresult rv = MakeInputStream(getter_AddRefs(inStream), true);
   if (NS_FAILED(rv)) {
+    mCallbacks = nullptr;
     return rv;
   }
 
   // Init our streampump
-  rv = mPump->Init(inStream, int64_t(-1), int64_t(-1), 0, 0, false);
+  nsCOMPtr<nsIEventTarget> target =
+    nsContentUtils::GetEventTargetByLoadInfo(mLoadInfo,
+                                             mozilla::TaskCategory::Other);
+  rv = mPump->Init(inStream, 0, 0, false, target);
   if (NS_FAILED(rv)) {
+    mCallbacks = nullptr;
     return rv;
   }
 
@@ -262,7 +270,10 @@ nsIconChannel::AsyncOpen(nsIStreamListener* aListener,
     if (mLoadGroup) {
       mLoadGroup->AddRequest(this, nullptr);
     }
+  } else {
+    mCallbacks = nullptr;
   }
+
   return rv;
 }
 
@@ -271,7 +282,10 @@ nsIconChannel::AsyncOpen2(nsIStreamListener* aListener)
 {
   nsCOMPtr<nsIStreamListener> listener = aListener;
   nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    mCallbacks = nullptr;
+    return rv;
+  }
   return AsyncOpen(listener, nullptr);
 }
 
@@ -320,7 +334,7 @@ GetSizeInfoFlag(uint32_t aDesiredImageSize)
 nsresult
 nsIconChannel::GetHIconFromFile(HICON* hIcon)
 {
-  nsXPIDLCString contentType;
+  nsCString contentType;
   nsCString fileExt;
   nsCOMPtr<nsIFile> localFile; // file we want an icon for
   uint32_t desiredImageSize;
@@ -416,41 +430,27 @@ nsIconChannel::GetStockHIcon(nsIMozIconURI* aIconURI,
 {
   nsresult rv = NS_OK;
 
-  // We can only do this on Vista or above
-  HMODULE hShellDLL = ::LoadLibraryW(L"shell32.dll");
-  decltype(SHGetStockIconInfo)* pSHGetStockIconInfo =
-    (decltype(SHGetStockIconInfo)*) ::GetProcAddress(hShellDLL,
-                                                    "SHGetStockIconInfo");
+  uint32_t desiredImageSize;
+  aIconURI->GetImageSize(&desiredImageSize);
+  nsAutoCString stockIcon;
+  aIconURI->GetStockIcon(stockIcon);
 
-  if (pSHGetStockIconInfo) {
-    uint32_t desiredImageSize;
-    aIconURI->GetImageSize(&desiredImageSize);
-    nsAutoCString stockIcon;
-    aIconURI->GetStockIcon(stockIcon);
-
-    SHSTOCKICONID stockIconID = GetStockIconIDForName(stockIcon);
-    if (stockIconID == SIID_INVALID) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-
-    UINT infoFlags = SHGSI_ICON;
-    infoFlags |= GetSizeInfoFlag(desiredImageSize);
-
-    SHSTOCKICONINFO sii = {0};
-    sii.cbSize = sizeof(sii);
-    HRESULT hr = pSHGetStockIconInfo(stockIconID, infoFlags, &sii);
-
-    if (SUCCEEDED(hr)) {
-      *hIcon = sii.hIcon;
-    } else {
-      rv = NS_ERROR_FAILURE;
-    }
-  } else {
-    rv = NS_ERROR_NOT_AVAILABLE;
+  SHSTOCKICONID stockIconID = GetStockIconIDForName(stockIcon);
+  if (stockIconID == SIID_INVALID) {
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
-  if (hShellDLL) {
-    ::FreeLibrary(hShellDLL);
+  UINT infoFlags = SHGSI_ICON;
+  infoFlags |= GetSizeInfoFlag(desiredImageSize);
+
+  SHSTOCKICONINFO sii = {0};
+  sii.cbSize = sizeof(sii);
+  HRESULT hr = SHGetStockIconInfo(stockIconID, infoFlags, &sii);
+
+  if (SUCCEEDED(hr)) {
+    *hIcon = sii.hIcon;
+  } else {
+    rv = NS_ERROR_FAILURE;
   }
 
   return rv;
@@ -738,7 +738,7 @@ nsIconChannel::GetContentLength(int64_t* aContentLength)
 NS_IMETHODIMP
 nsIconChannel::SetContentLength(int64_t aContentLength)
 {
-  NS_NOTREACHED("nsIconChannel::SetContentLength");
+  MOZ_ASSERT_UNREACHABLE("nsIconChannel::SetContentLength");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

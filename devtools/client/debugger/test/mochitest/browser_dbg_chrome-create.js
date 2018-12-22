@@ -7,11 +7,18 @@
  * Tests that a chrome debugger can be created in a new process.
  */
 
+// There are shutdown issues for which multiple rejections are left uncaught.
+// See bug 1018184 for resolving these issues.
+const { PromiseTestUtils } = scopedCuImport("resource://testing-common/PromiseTestUtils.jsm");
+PromiseTestUtils.whitelistRejectionsGlobally(/File closed/);
+PromiseTestUtils.whitelistRejectionsGlobally(/NS_ERROR_FAILURE/);
+
 var gProcess;
 
 function test() {
   // Windows XP and 8.1 test slaves are terribly slow at this test.
   requestLongerTimeout(5);
+  Services.prefs.setBoolPref("devtools.chrome.enabled", true);
   Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
   initChromeDebugger(aOnClose).then(aProcess => {
@@ -25,7 +32,7 @@ function test() {
 function performTest() {
   ok(gProcess._dbgProcess,
     "The remote debugger process wasn't created properly!");
-  ok(gProcess._dbgProcess.isRunning,
+  ok(gProcess._dbgProcess.exitCode == null,
     "The remote debugger process isn't running!");
   is(typeof gProcess._dbgProcess.pid, "number",
     "The remote debugger process doesn't have a pid (?!)");
@@ -46,9 +53,7 @@ function performTest() {
 }
 
 function aOnClose() {
-  ok(!gProcess._dbgProcess.isRunning,
-    "The remote debugger process isn't closed as it should be!");
-  is(gProcess._dbgProcess.exitValue, (Services.appinfo.OS == "WINNT" ? 0 : 256),
+  is(gProcess._dbgProcess.exitCode, (Services.appinfo.OS == "WINNT" ? -9 : -15),
     "The remote debugger process didn't die cleanly.");
 
   info("process exit value: " + gProcess._dbgProcess.exitValue);
@@ -58,7 +63,8 @@ function aOnClose() {
   finish();
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
+  Services.prefs.clearUserPref("devtools.chrome.enabled");
   Services.prefs.clearUserPref("devtools.debugger.remote-enabled");
   gProcess = null;
 });

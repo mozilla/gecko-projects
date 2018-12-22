@@ -16,10 +16,13 @@
   text-overflow: inherit;
   overflow: inherit;
   overflow-clip-box: inherit;
+  /* Need to inherit border-radius too, so when the fieldset has rounded
+     borders we don't leak out the corners for hit-testing purposes. */
+  border-radius: inherit;
   padding: inherit;
   block-size: 100%; /* Need this so percentage block-sizes of kids work right */
   /* Please keep the Multicol/Flex/Grid/Align sections below in sync with
-     ::-moz-scrolled-content in ua.css */
+     ::-moz-scrolled-content in ua.css and ::-moz-button-content below. */
   /* Multicol container */
   -moz-column-count: inherit;
   -moz-column-width: inherit;
@@ -29,6 +32,11 @@
   /* Flex container */
   flex-direction: inherit;
   flex-wrap: inherit;
+  /* -webkit-box container (aliased from -webkit versions to -moz versions) */
+  -moz-box-orient: inherit;
+  -moz-box-direction: inherit;
+  -moz-box-pack: inherit;
+  -moz-box-align: inherit;
   /* Grid container */
   grid-auto-columns: inherit;
   grid-auto-rows: inherit;
@@ -48,8 +56,8 @@
 /* miscellaneous form elements */
 
 fieldset > legend {
-  -moz-padding-start: 2px;
-  -moz-padding-end: 2px;
+  padding-inline-start: 2px;
+  padding-inline-end: 2px;
   inline-size: -moz-fit-content;
 }
 
@@ -59,13 +67,14 @@ legend {
 
 fieldset {
   display: block;
-  -moz-margin-start: 2px;
-  -moz-margin-end: 2px;
+  margin-inline-start: 2px;
+  margin-inline-end: 2px;
   padding-block-start: 0.35em;
   padding-block-end: 0.75em;
-  -moz-padding-start: 0.625em;
-  -moz-padding-end: 0.625em;
+  padding-inline-start: 0.625em;
+  padding-inline-end: 0.625em;
   border: 2px groove ThreeDLightShadow;
+  min-width: -moz-min-content;
 }
 
 label {
@@ -98,28 +107,14 @@ input {
   text-indent: 0;
   -moz-user-select: text;
   text-shadow: none;
-  overflow-clip-box: content-box;
+  overflow-clip-box: padding-box content-box;
 }
 
 input > .anonymous-div,
-input::-moz-placeholder {
+input::placeholder {
   word-wrap: normal !important;
   /* Make the line-height equal to the available height */
   line-height: -moz-block-height;
-}
-
-@-moz-document url-prefix(chrome://) {
-  input.uri-element-right-align:-moz-locale-dir(rtl) {
-    direction: ltr !important;
-    text-align: right !important;
-  }
-
-  /* Make sure that the location bar's alignment in RTL mode changes according
-     to the input box direction if the user switches the text direction using
-     cmd_switchTextDirection (which applies a dir attribute to the <input>). */
-  input.uri-element-right-align[dir=ltr]:-moz-locale-dir(rtl) {
-    text-align: left !important;
-  }
 }
 
 textarea {
@@ -127,8 +122,8 @@ textarea {
   margin-block-end: 1px;
   border: 2px inset ThreeDLightShadow;
   /* The 1px inline padding is for parity with Win/IE */
-  -moz-padding-start: 1px;
-  -moz-padding-end: 1px;
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
   background-color: -moz-Field;
   color: -moz-FieldText;
   font: medium -moz-fixed;
@@ -156,15 +151,15 @@ textarea > scrollbar {
 
 textarea > .anonymous-div,
 input > .anonymous-div,
-input::-moz-placeholder,
-textarea::-moz-placeholder {
+input::placeholder,
+textarea::placeholder,
+input > .preview-div
+textarea > .preview-div {
   overflow: auto;
   border: 0px !important;
   padding: inherit !important;
   margin: 0px;
   text-decoration: inherit;
-  text-decoration-color: inherit;
-  text-decoration-style: inherit;
   display: inline-block;
   ime-mode: inherit;
   resize: inherit;
@@ -173,20 +168,23 @@ textarea::-moz-placeholder {
 }
 
 input > .anonymous-div,
-input::-moz-placeholder {
+input::placeholder,
+input > .preview-div {
   white-space: pre;
 }
 
-input > .anonymous-div.wrap {
-  white-space: pre-wrap;
-}
-textarea > .anonymous-div.inherit-overflow,
-input > .anonymous-div.inherit-overflow {
+textarea > .anonymous-div.inherit-overflow {
   overflow: inherit;
 }
+textarea > .anonymous-div.inherit-scroll-behavior {
+  scroll-behavior: inherit;
+  overscroll-behavior: inherit;
+}
 
-input::-moz-placeholder,
-textarea::-moz-placeholder {
+input::placeholder,
+textarea::placeholder,
+input > .preview-div,
+textarea > .preview-div {
   /*
    * Changing display to inline can leads to broken behaviour and will assert.
    */
@@ -200,15 +198,19 @@ textarea::-moz-placeholder {
   overflow: hidden !important;
 
   /*
-   * The placeholder should be ignored by pointer otherwise, we might have some
+   * The placeholder or preview should be ignored by pointer otherwise, we might have some
    * unexpected behavior like the resize handle not being selectable.
    */
   pointer-events: none !important;
+}
 
+input::placeholder,
+textarea::placeholder {
   opacity: 0.54;
 }
 
-textarea::-moz-placeholder {
+textarea::placeholder,
+textarea > .preview-div {
   white-space: pre-wrap !important;
 }
 
@@ -260,8 +262,8 @@ select[size][multiple] {
   vertical-align: text-bottom;
   padding-block-start: 1px;
   padding-block-end: 1px;
-  -moz-padding-start: 0;
-  -moz-padding-end: 0;
+  padding-inline-start: 0;
+  padding-inline-end: 0;
   -moz-appearance: listbox;
 }
 
@@ -326,8 +328,8 @@ select:empty {
      add up to the block-start/end borderpadding of text inputs and buttons */
   padding-block-start: 1px;
   padding-block-end: 1px;
-  -moz-padding-start: 4px;
-  -moz-padding-end: 0;
+  padding-inline-start: 4px;
+  padding-inline-end: 0;
   color: inherit;
   white-space: nowrap;
   text-align: inherit;
@@ -354,8 +356,8 @@ option {
 select > option {
   padding-block-start : 0;
   padding-block-end: 0;
-  -moz-padding-start: 3px;
-  -moz-padding-end: 5px;
+  padding-inline-start: 3px;
+  padding-inline-end: 5px;
 }
 
 option:checked {
@@ -385,7 +387,7 @@ optgroup {
 }
 
 optgroup > option {
-  -moz-padding-start: 20px;
+  padding-inline-start: 20px;
   font-style: normal;
   font-weight: normal;
 }
@@ -410,7 +412,14 @@ optgroup:before {
    * with the dropmarker.  So set our inline-start border to 2px.
    */
   border: 1px outset black !important;
-  -moz-border-start-width: 2px ! important;
+  border-inline-start-width: 2px ! important;
+}
+
+@supports -moz-bool-pref("dom.select_popup_in_content.enabled") {
+  *|*::-moz-dropdown-list {
+    -moz-top-layer: top !important;
+    position: absolute !important;
+  }
 }
 
 input:disabled,
@@ -420,7 +429,6 @@ optgroup:disabled,
 select:disabled:disabled /* Need the pseudo-class twice to have the specificity
                             be at least the same as select[size][multiple] above */
 {
-  -moz-user-input: disabled;
   color: GrayText;
   background-color: ThreeDLightShadow;
   cursor: inherit;
@@ -488,7 +496,7 @@ input[type="file"] {
 
 input[type="file"] > xul|label {
   min-inline-size: 12em;
-  -moz-padding-start: 5px;
+  padding-inline-start: 5px;
   text-align: match-parent;
 
   color: inherit;
@@ -511,13 +519,13 @@ input[type="file"] > button[type="button"] {
 }
 
 /* colored part of the color selector button */
-input[type="color"]:-moz-system-metric(color-picker-available)::-moz-color-swatch {
+input[type="color"]::-moz-color-swatch {
   width: 100%;
   height: 100%;
   min-width: 3px;
   min-height: 3px;
-  -moz-margin-start: auto;
-  -moz-margin-end: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
   box-sizing: border-box;
   border: 1px solid grey;
   display: block;
@@ -526,50 +534,43 @@ input[type="color"]:-moz-system-metric(color-picker-available)::-moz-color-swatc
 /* Try to make RTL <input type='file'> look nicer. */
 /* TODO: find a better solution than forcing direction: ltr on all file
    input labels and remove this override -- bug 1161482 */
-input[type="file"]:-moz-dir(rtl) > xul|label {
-  -moz-padding-start: 0px;
-  -moz-padding-end: 5px;
+input[type="file"]:dir(rtl) > xul|label {
+  padding-inline-start: 0px;
+  padding-inline-end: 5px;
 }
 
 /* radio buttons */
 input[type="radio"] {
+  display: inline-block;
   -moz-appearance: radio;
   margin-block-start: 3px;
   margin-block-end: 0px;
-  -moz-margin-start: 5px;
-  -moz-margin-end: 3px;
-  border-radius: 100% !important;
+  margin-inline-start: 5px;
+  margin-inline-end: 3px;
 }
 
 /* check boxes */
 input[type="checkbox"] {
+  display: inline-block;
   -moz-appearance: checkbox;
   margin-block-start: 3px;
   margin-block-end: 3px;
-  -moz-margin-start: 4px;
-  -moz-margin-end: 3px;
-  border-radius: 0 !important;
+  margin-inline-start: 4px;
+  margin-inline-end: 3px;
 }
 
 /* common features of radio buttons and check boxes */
 
-/* NOTE: The width, height, border-width, and padding here must all
-   add up the way nsFormControlFrame::GetIntrinsic(Width|Height)
-   expects them to, or they will not come out with total width equal
-   to total height on sites that set their 'width' or 'height' to 'auto'.
-   (Should we maybe set !important on width and height, then?)  */
 input[type="radio"],
 input[type="checkbox"] {
   box-sizing: border-box;
-  inline-size: 13px;
-  block-size: 13px;
   cursor: default;
-  padding: 0 !important;
-  -moz-binding: none;
-  /* same colors as |input| rule, but |!important| this time. */
-  background-color: -moz-Field ! important;
-  color: -moz-FieldText ! important;
-  border: 2px inset ThreeDLightShadow ! important;
+  /* unset some values from the general 'input' rule above: */
+  padding: unset;
+  -moz-binding: unset;
+  border: unset;
+  background-color: unset;
+  color: unset;
 }
 
 input[type="radio"]:disabled,
@@ -580,24 +581,18 @@ input[type="checkbox"]:disabled,
 input[type="checkbox"]:disabled:active,
 input[type="checkbox"]:disabled:hover,
 input[type="checkbox"]:disabled:hover:active {
-  padding: 1px;
-  border: 1px inset ThreeDShadow ! important;
-  /* same as above, but !important */
-  color: GrayText ! important;
-  background-color: ThreeDFace ! important;
   cursor: inherit;
 }
 
+% On Mac, the native theme takes care of this.
+% See nsNativeThemeCocoa::ThemeDrawsFocusForWidget.
+%ifndef XP_MACOSX
 input[type="checkbox"]:-moz-focusring,
 input[type="radio"]:-moz-focusring {
-  border-style: groove !important;
+  /* Don't specify the outline-color, we should always use initial value. */
+  outline: 1px dotted;
 }
-
-input[type="checkbox"]:hover:active,
-input[type="radio"]:hover:active {
-  background-color: ThreeDFace ! important;
-  border-style: inset !important;
-}
+%endif
 
 input[type="search"] {
   box-sizing: border-box;
@@ -611,18 +606,18 @@ input[type="search"] {
 /* Non text-related properties for buttons: these ones are shared with
    input[type="color"] */
 button,
-input[type="color"]:-moz-system-metric(color-picker-available),
+input[type="color"],
 input[type="reset"],
 input[type="button"],
 input[type="submit"] {
   -moz-appearance: button;
   /* The sum of border and padding on block-start and block-end
-     must be the same here, for text inputs, and for <select>.  For
-     buttons, make sure to include the -moz-focus-inner border/padding. */
+     must be the same here, for text inputs, and for <select>.
+     Note -moz-focus-inner padding does not affect button size. */
   padding-block-start: 0px;
-  -moz-padding-end: 6px;
+  padding-inline-end: 8px;
   padding-block-end: 0px;
-  -moz-padding-start: 6px;
+  padding-inline-start: 8px;
   border: 2px outset ThreeDLightShadow;
   background-color: ButtonFace;
   cursor: default;
@@ -646,7 +641,7 @@ input[type="submit"] {
   overflow-clip-box: padding-box;
 }
 
-input[type="color"]:-moz-system-metric(color-picker-available) {
+input[type="color"] {
   inline-size: 64px;
   block-size: 23px;
 }
@@ -661,10 +656,40 @@ button {
 
 *|*::-moz-button-content {
   display: block;
+  /* Please keep the Multicol/Flex/Grid/Align sections below in sync with
+     ::-moz-scrolled-content in ua.css and ::-moz-fieldset-content above. */
+  /* Multicol container */
+  -moz-column-count: inherit;
+  -moz-column-width: inherit;
+  -moz-column-gap: inherit;
+  -moz-column-rule: inherit;
+  -moz-column-fill: inherit;
+  /* Flex container */
+  flex-direction: inherit;
+  flex-wrap: inherit;
+  /* -webkit-box container (aliased from -webkit versions to -moz versions) */
+  -moz-box-orient: inherit;
+  -moz-box-direction: inherit;
+  -moz-box-pack: inherit;
+  -moz-box-align: inherit;
+  /* Grid container */
+  grid-auto-columns: inherit;
+  grid-auto-rows: inherit;
+  grid-auto-flow: inherit;
+  grid-column-gap: inherit;
+  grid-row-gap: inherit;
+  grid-template-areas: inherit;
+  grid-template-columns: inherit;
+  grid-template-rows: inherit;
+  /* CSS Align */
+  align-content: inherit;
+  align-items: inherit;
+  justify-content: inherit;
+  justify-items: inherit;
 }
 
 button:hover,
-input[type="color"]:-moz-system-metric(color-picker-available):hover,
+input[type="color"]:hover,
 input[type="reset"]:hover,
 input[type="button"]:hover,
 input[type="submit"]:hover {
@@ -679,15 +704,15 @@ input[type="submit"]:hover {
 }
 
 button:active:hover,
-input[type="color"]:-moz-system-metric(color-picker-available):active:hover,
+input[type="color"]:active:hover,
 input[type="reset"]:active:hover,
 input[type="button"]:active:hover,
 input[type="submit"]:active:hover {
 %ifndef XP_MACOSX
   padding-block-start: 0px;
-  -moz-padding-end: 5px;
+  padding-inline-end: 7px;
   padding-block-end: 0px;
-  -moz-padding-start: 7px;
+  padding-inline-start: 9px;
 %endif
   border-style: inset;
   background-color: ButtonFace;
@@ -701,20 +726,21 @@ input[type="submit"]:active:hover {
 }
 
 button::-moz-focus-inner,
-input[type="color"]:-moz-system-metric(color-picker-available)::-moz-focus-inner,
+input[type="color"]::-moz-focus-inner,
 input[type="reset"]::-moz-focus-inner,
 input[type="button"]::-moz-focus-inner,
 input[type="submit"]::-moz-focus-inner,
 input[type="file"] > button[type="button"]::-moz-focus-inner {
+  /* Note this padding only affects the -moz-focus-inner ring, not the button itself */
   padding-block-start: 0px;
-  -moz-padding-end: 2px;
+  padding-inline-end: 2px;
   padding-block-end: 0px;
-  -moz-padding-start: 2px;
+  padding-inline-start: 2px;
   border: 1px dotted transparent;
 }
 
 button:-moz-focusring::-moz-focus-inner,
-input[type="color"]:-moz-system-metric(color-picker-available):-moz-focusring::-moz-focus-inner,
+input[type="color"]:-moz-focusring::-moz-focus-inner,
 input[type="reset"]:-moz-focusring::-moz-focus-inner,
 input[type="button"]:-moz-focusring::-moz-focus-inner,
 input[type="submit"]:-moz-focusring::-moz-focus-inner,
@@ -723,8 +749,8 @@ input[type="file"] > button[type="button"]:-moz-focusring::-moz-focus-inner {
 }
 
 button:disabled:active, button:disabled,
-input[type="color"]:-moz-system-metric(color-picker-available):disabled:active,
-input[type="color"]:-moz-system-metric(color-picker-available):disabled,
+input[type="color"]:disabled:active,
+input[type="color"]:disabled,
 input[type="reset"]:disabled:active,
 input[type="reset"]:disabled,
 input[type="button"]:disabled:active,
@@ -736,9 +762,9 @@ input[type="submit"]:disabled {
   /* The sum of border and padding on block-start and block-end
      must be the same here and for text inputs */
   padding-block-start: 0px;
-  -moz-padding-end: 6px;
+  padding-inline-end: 8px;
   padding-block-end: 0px;
-  -moz-padding-start: 6px;
+  padding-inline-start: 8px;
   border: 2px outset ThreeDLightShadow;
   cursor: inherit;
 }
@@ -775,8 +801,8 @@ input[type="submit"]:disabled {
   */
 textarea > .anonymous-div,
 input > .anonymous-div,
-input::-moz-placeholder,
-textarea::-moz-placeholder,
+input::placeholder,
+textarea::placeholder,
 *|*::-moz-button-content,
 *|*::-moz-display-comboboxcontrol-frame,
 optgroup:before {
@@ -813,12 +839,10 @@ progress {
   vertical-align: -0.2em;
 
   /* Default style in case of there is -moz-appearance: none; */
-  border: 2px solid;
+  border: 1px solid ThreeDShadow;
+  border-right-color: ThreeDHighlight;
+  border-bottom-color: ThreeDHighlight;
   /* #e6e6e6 is a light gray. */
-  -moz-border-top-colors: ThreeDShadow #e6e6e6;
-  -moz-border-right-colors: ThreeDHighlight #e6e6e6;
-  -moz-border-bottom-colors: ThreeDHighlight #e6e6e6;
-  -moz-border-left-colors: ThreeDShadow #e6e6e6;
   background-color: #e6e6e6;
 }
 
@@ -876,8 +900,8 @@ input[type=range] {
   display: inline-block;
   inline-size: 12em;
   block-size: 1.3em;
-  -moz-margin-start: 0.7em;
-  -moz-margin-end: 0.7em;
+  margin-inline-start: 0.7em;
+  margin-inline-end: 0.7em;
   margin-block-start: 0;
   margin-block-end: 0;
   /* Override some rules that apply on all input types: */
@@ -892,8 +916,8 @@ input[type=range] {
 input[type=range][orient=block] {
   inline-size: 1.3em;
   block-size: 12em;
-  -moz-margin-start: 0;
-  -moz-margin-end: 0;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
   margin-block-start: 0.7em;
   margin-block-end: 0.7em;
 }
@@ -1003,9 +1027,14 @@ input[type=range]::-moz-range-thumb {
   -moz-user-select: none ! important;
 }
 
-/* As a temporary workaround until bug 677302 the rule for input[type=number]
- * has moved to number-control.css
- */
+input[type="number"] {
+  -moz-appearance: number-input;
+  /* Has to revert some properties applied by the generic input rule. */
+  -moz-binding: none;
+  inline-size: 20ch; /* It'd be nice if this matched the default inline-size
+                        of <input type=text>, but that's not easy to achieve
+                        due to platform differences. */
+}
 
 input[type=number]::-moz-number-wrapper {
   /* Prevent styling that would change the type of frame we construct. */
@@ -1029,6 +1058,8 @@ input[type=number]::-moz-number-text {
    * ancestor, not have that general CSS rule reset it.
    */
   text-align: inherit;
+  text-decoration: inherit;
+  ime-mode: inherit;
   flex: 1;
   min-inline-size: 0;
   padding: 0;
@@ -1060,6 +1091,7 @@ input[type=number]::-moz-number-spin-box {
 }
 
 input[type=number]::-moz-number-spin-up {
+  writing-mode: horizontal-tb;
   -moz-appearance: spinner-upbutton;
   display: block; /* bug 926670 */
   flex: none;
@@ -1077,6 +1109,7 @@ input[type=number]::-moz-number-spin-up {
 }
 
 input[type=number]::-moz-number-spin-down {
+  writing-mode: horizontal-tb;
   -moz-appearance: spinner-downbutton;
   display: block; /* bug 926670 */
   flex: none;
@@ -1094,4 +1127,17 @@ input[type=number]::-moz-number-spin-down {
 input[type="number"] > div > div > div:hover {
   /* give some indication of hover state for the up/down buttons */
   background-color: lightblue;
+}
+
+input[type="date"],
+input[type="time"] {
+  overflow: hidden !important;
+  font-family: -moz-fixed;
+}
+
+:-moz-autofill, :-moz-autofill-preview {
+  filter: grayscale(21%) brightness(88%) contrast(161%) invert(10%) sepia(40%) saturate(206%);
+}
+:-moz-autofill-preview {
+  color: GrayText;
 }

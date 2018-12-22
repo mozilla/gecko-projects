@@ -15,10 +15,8 @@ HTMLCanvasAccessible::
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(HTMLCanvasAccessible, HyperTextAccessible)
-
 role
-HTMLCanvasAccessible::NativeRole()
+HTMLCanvasAccessible::NativeRole() const
 {
   return roles::CANVAS;
 }

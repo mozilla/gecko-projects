@@ -219,7 +219,6 @@ class WebGLImageConverter
         }
 
         mSuccess = true;
-        return;
     }
 
     template<WebGLTexelFormat SrcFormat,
@@ -349,8 +348,11 @@ ConvertImage(size_t width, size_t height,
              const void* srcBegin, size_t srcStride, gl::OriginPos srcOrigin,
              WebGLTexelFormat srcFormat, bool srcPremultiplied,
              void* dstBegin, size_t dstStride, gl::OriginPos dstOrigin,
-             WebGLTexelFormat dstFormat, bool dstPremultiplied)
+             WebGLTexelFormat dstFormat, bool dstPremultiplied,
+             bool* const out_wasTrivial)
 {
+    *out_wasTrivial = true;
+
     if (srcFormat == WebGLTexelFormat::FormatNotSupportingAnyConversion ||
         dstFormat == WebGLTexelFormat::FormatNotSupportingAnyConversion)
     {
@@ -396,7 +398,11 @@ ConvertImage(size_t width, size_t height,
         // needed, we still might have to flip vertically and/or to adjust to a different
         // stride.
 
-        MOZ_ASSERT(shouldYFlip || srcStride != dstStride,
+        // We ignore canSkipPremult for this perf trap, since it's an avoidable perf cliff
+        // under the WebGL API user's control.
+        MOZ_ASSERT((srcPremultiplied != dstPremultiplied ||
+                    shouldYFlip ||
+                    srcStride != dstStride),
                    "Performance trap -- should handle this case earlier to avoid memcpy");
 
         const auto bytesPerPixel = TexelBytesForFormat(srcFormat);
@@ -410,6 +416,8 @@ ConvertImage(size_t width, size_t height,
         return true;
     }
 
+    *out_wasTrivial = false;
+
     WebGLImageConverter converter(width, height, srcItr, dstItr, srcStride, dstItrStride);
     converter.run(srcFormat, dstFormat, premultOp);
 
@@ -417,7 +425,7 @@ ConvertImage(size_t width, size_t height,
         // the dst image may be left uninitialized, so we better not try to
         // continue even in release builds. This should never happen anyway,
         // and would be a bug in our code.
-        NS_RUNTIMEABORT("programming mistake in WebGL texture conversions");
+        MOZ_CRASH("programming mistake in WebGL texture conversions");
     }
 
     return true;

@@ -19,26 +19,36 @@
  */
 template <typename T> class SkTLazy {
 public:
-    SkTLazy() : fPtr(NULL) {}
+    SkTLazy() : fPtr(nullptr) {}
 
-    explicit SkTLazy(const T* src) : fPtr(NULL) {
-        if (src) {
-            fPtr = new (fStorage.get()) T(*src);
-        }
-    }
+    explicit SkTLazy(const T* src)
+        : fPtr(src ? new (fStorage.get()) T(*src) : nullptr) {}
 
-    SkTLazy(const SkTLazy<T>& src) : fPtr(NULL) {
-        if (src.isValid()) {
-            fPtr = new (fStorage.get()) T(*src->get());
-        } else {
-            fPtr = NULL;
-        }
-    }
+    SkTLazy(const SkTLazy& that) : fPtr(nullptr) { *this = that; }
+    SkTLazy(SkTLazy&& that) : fPtr(nullptr) { *this = std::move(that); }
 
     ~SkTLazy() {
         if (this->isValid()) {
             fPtr->~T();
         }
+    }
+
+    SkTLazy& operator=(const SkTLazy& that) {
+        if (that.isValid()) {
+            this->set(*that.get());
+        } else {
+            this->reset();
+        }
+        return *this;
+    }
+
+    SkTLazy& operator=(SkTLazy&& that) {
+        if (that.isValid()) {
+            this->set(std::move(*that.get()));
+        } else {
+            this->reset();
+        }
+        return *this;
     }
 
     /**
@@ -70,13 +80,22 @@ public:
         return fPtr;
     }
 
+    T* set(T&& src) {
+        if (this->isValid()) {
+            *fPtr = std::move(src);
+        } else {
+            fPtr = new (SkTCast<T*>(fStorage.get())) T(std::move(src));
+        }
+        return fPtr;
+    }
+
     /**
      * Destroy the lazy object (if it was created via init() or set())
      */
     void reset() {
         if (this->isValid()) {
             fPtr->~T();
-            fPtr = NULL;
+            fPtr = nullptr;
         }
     }
 
@@ -94,13 +113,13 @@ public:
 
     /**
      * Like above but doesn't assert if object isn't initialized (in which case
-     * NULL is returned).
+     * nullptr is returned).
      */
     T* getMaybeNull() const { return fPtr; }
 
 private:
-    T* fPtr; // NULL or fStorage
     SkAlignedSTStorage<1, T> fStorage;
+    T*                       fPtr; // nullptr or fStorage
 };
 
 /**
@@ -134,11 +153,11 @@ public:
     SkTCopyOnFirstWrite(const T* initial) : fObj(initial) {}
 
     // Constructor for delayed initialization.
-    SkTCopyOnFirstWrite() : fObj(NULL) {}
+    SkTCopyOnFirstWrite() : fObj(nullptr) {}
 
     // Should only be called once, and only if the default constructor was used.
     void init(const T& initial) {
-        SkASSERT(NULL == fObj);
+        SkASSERT(nullptr == fObj);
         SkASSERT(!fLazy.isValid());
         fObj = &initial;
     }

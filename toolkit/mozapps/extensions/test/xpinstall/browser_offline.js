@@ -13,7 +13,7 @@ function test() {
   var triggers = encodeURIComponent(JSON.stringify({
     "Unsigned XPI": TESTROOT + "amosigned.xpi"
   }));
-  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   gBrowser.loadURI(TESTROOT + "installtrigger.html?" + triggers);
 }
 
@@ -34,10 +34,10 @@ function finish_test(count) {
     info("Checking if the browser is still offline...");
 
     let tab = gBrowser.selectedTab;
-    ContentTask.spawn(tab.linkedBrowser, null, () => {
-      return ContentTaskUtils.waitForEvent(this, "DOMContentLoaded", true);
-    }).then(() => {
-      let url = tab.linkedBrowser.contentDocument.documentURI;
+    ContentTask.spawn(tab.linkedBrowser, null, async function() {
+      await ContentTaskUtils.waitForEvent(this, "DOMContentLoaded", true);
+      return content.document.documentURI;
+    }).then(url => {
       info("loaded: " + url);
       if (/^about:neterror\?e=netOffline/.test(url)) {
         wait_for_online();

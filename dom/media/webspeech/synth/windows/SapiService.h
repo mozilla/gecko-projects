@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_SapiService_h
 #define mozilla_dom_SapiService_h
 
-#include "nsAutoPtr.h"
 #include "nsISpeechService.h"
 #include "nsIObserver.h"
 #include "nsRefPtrHashtable.h"
@@ -43,11 +42,11 @@ public:
 private:
   virtual ~SapiService();
 
+  already_AddRefed<ISpVoice> InitSapiInstance();
   bool RegisterVoices();
 
   nsRefPtrHashtable<nsStringHashKey, ISpObjectToken> mVoices;
   nsTArray<RefPtr<SapiCallback>> mCallbacks;
-  RefPtr<ISpVoice> mSapiClient;
 
   bool mInitialized;
 

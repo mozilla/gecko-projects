@@ -49,8 +49,7 @@ public:
 
     { // scope lock
       MonitorAutoLock lock(mVsyncMonitor);
-      PRIntervalTime timeout = PR_MillisecondsToInterval(kVsyncTimeoutMS);
-      lock.Wait(timeout);
+      lock.Wait(TimeDuration::FromMilliseconds(kVsyncTimeoutMS));
     }
   }
 
@@ -80,7 +79,7 @@ protected:
     gfxPlatform::GetPlatform();
     gfxPrefs::GetSingleton();
     mVsyncSource = gfxPlatform::GetPlatform()->GetHardwareVsync();
-    MOZ_RELEASE_ASSERT(mVsyncSource);
+    MOZ_RELEASE_ASSERT(mVsyncSource, "GFX: Vsync source not found.");
   }
 
   virtual ~VsyncTester()
@@ -125,8 +124,6 @@ TEST_F(VsyncTester, EnableVsync)
 // Test that if we have vsync enabled, the display should get vsync notifications
 TEST_F(VsyncTester, CompositorGetVsyncNotifications)
 {
-  CompositorVsyncDispatcher::SetThreadAssertionsEnabled(false);
-
   VsyncSource::Display& globalDisplay = mVsyncSource->GetGlobalDisplay();
   globalDisplay.DisableVsync();
   ASSERT_FALSE(globalDisplay.IsVsyncEnabled());

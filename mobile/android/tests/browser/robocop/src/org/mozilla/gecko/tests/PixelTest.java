@@ -7,7 +7,7 @@ package org.mozilla.gecko.tests;
 import org.mozilla.gecko.Actions;
 import org.mozilla.gecko.PaintedSurface;
 
-abstract class PixelTest extends BaseTest {
+abstract class PixelTest extends OldBaseTest {
     private static final long PAINT_CLEAR_DELAY = 10000; // milliseconds
 
     protected final PaintedSurface loadAndGetPainted(String url) {
@@ -49,24 +49,6 @@ abstract class PixelTest extends BaseTest {
     protected final void reloadAndPaint() {
         PaintedSurface painted = reloadAndGetPainted();
         painted.close();
-    }
-
-    public void addTab(String url, String title, boolean isPrivate) {
-        Actions.EventExpecter tabEventExpecter = mActions.expectGeckoEvent("Tab:Added");
-        Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
-
-        if (isPrivate) {
-            selectMenuItem(mStringHelper.NEW_PRIVATE_TAB_LABEL);
-        } else {
-            selectMenuItem(mStringHelper.NEW_TAB_LABEL);
-        }
-        tabEventExpecter.blockForEvent();
-        contentEventExpecter.blockForEvent();
-
-        waitForText(mStringHelper.TITLE_PLACE_HOLDER);
-        loadAndPaint(url);
-        tabEventExpecter.unregisterListener();
-        contentEventExpecter.unregisterListener();
     }
 
     protected final PaintedSurface waitForPaint(Actions.RepeatedEventExpecter expecter) {

@@ -5,16 +5,18 @@
 
 // Tests that the Filter Editor Widget renders filters correctly
 
-const TEST_URI = "chrome://devtools/content/shared/widgets/filter-frame.xhtml";
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
+const {getClientCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
-const STRINGS_URI = "chrome://devtools/locale/filterwidget.properties";
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const STRINGS_URI = "devtools/client/locales/filterwidget.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-add_task(function*() {
-  yield addTab("about:blank");
-  let [host, win, doc] = yield createHost("bottom", TEST_URI);
+const TEST_URI = CHROME_URL_ROOT + "doc_filter-editor-01.html";
+
+add_task(async function() {
+  const [,, doc] = await createHost("bottom", TEST_URI);
+  const cssIsValid = getClientCssProperties().getValidityChecker(doc);
 
   const TEST_DATA = [
     {
@@ -68,13 +70,12 @@ add_task(function*() {
     }
   ];
 
-  const container = doc.querySelector("#container");
-  let widget = new CSSFilterEditorWidget(container, "none");
+  const container = doc.querySelector("#filter-container");
+  const widget = new CSSFilterEditorWidget(container, "none", cssIsValid);
 
   info("Test rendering of different types");
 
-
-  for (let {cssValue, expected} of TEST_DATA) {
+  for (const {cssValue, expected} of TEST_DATA) {
     widget.setCssValue(cssValue);
 
     if (cssValue === "none") {
@@ -90,12 +91,11 @@ add_task(function*() {
   }
 });
 
-
 function testRenderedFilters(filters, expected) {
-  for (let [index, filter] of [...filters].entries()) {
-    let [name, value] = filter.children,
-        label = name.children[1],
-        [input, unit] = value.children;
+  for (const [index, filter] of [...filters].entries()) {
+    const [name, value] = filter.children,
+      label = name.children[1],
+      [input, unit] = value.children;
 
     const eq = expected[index];
     is(label.textContent, eq.label, "Label should match");

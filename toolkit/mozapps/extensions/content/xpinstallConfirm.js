@@ -6,9 +6,9 @@
 
 var XPInstallConfirm = {};
 
-XPInstallConfirm.init = function()
-{
-  Components.utils.import("resource://gre/modules/AddonManager.jsm");
+XPInstallConfirm.init = function() {
+  ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+  ChromeUtils.import("resource://gre/modules/Services.jsm");
 
   var _installCountdown;
   var _installCountdownInterval;
@@ -31,9 +31,7 @@ XPInstallConfirm.init = function()
 
   var _installCountdownLength = 5;
   try {
-    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                          .getService(Components.interfaces.nsIPrefBranch);
-    var delay_in_milliseconds = prefs.getIntPref("security.dialog_enable_delay");
+    var delay_in_milliseconds = Services.prefs.getIntPref("security.dialog_enable_delay");
     _installCountdownLength = Math.round(delay_in_milliseconds / 500);
   } catch (ex) { }
 
@@ -41,7 +39,7 @@ XPInstallConfirm.init = function()
 
   let installMap = new WeakMap();
   let installListener = {
-    onDownloadCancelled: function(install) {
+    onDownloadCancelled(install) {
       itemList.removeChild(installMap.get(install));
       if (--numItemsToInstall == 0)
         window.close();
@@ -61,15 +59,8 @@ XPInstallConfirm.init = function()
     var type = install.type;
     if (type)
       installItem.type = type;
-    if (install.certName) {
-      installItem.cert = bundle.getFormattedString("signed", [install.certName]);
-    }
-    else {
-      installItem.cert = bundle.getString("unverified");
-    }
-    installItem.signed = install.certName ? "true" : "false";
 
-    installMap.set(install, installItem);
+    installMap.set(install.wrapped, installItem);
     install.addListener(installListener);
   }
 
@@ -79,7 +70,7 @@ XPInstallConfirm.init = function()
   var textNode = document.createTextNode(introString);
   var introNode = document.getElementById("itemWarningIntro");
   while (introNode.hasChildNodes())
-    introNode.removeChild(introNode.firstChild);
+    introNode.firstChild.remove();
   introNode.appendChild(textNode);
 
   var okButton = document.documentElement.getButton("accept");
@@ -92,8 +83,7 @@ XPInstallConfirm.init = function()
       okButton.label = bundle.getString("installButtonLabel");
       okButton.disabled = false;
       clearInterval(_installCountdownInterval);
-    }
-    else
+    } else
       okButton.label = bundle.getFormattedString("installButtonDisabledLabel", [_installCountdown]);
   }
 
@@ -145,7 +135,7 @@ XPInstallConfirm.init = function()
       document.removeEventListener("focus", myfocus, true);
       document.removeEventListener("blur", myblur, true);
     }
-    window.removeEventListener("unload", myUnload, false);
+    window.removeEventListener("unload", myUnload);
 
     for (let install of args.installs)
       install.removeListener(installListener);
@@ -155,8 +145,7 @@ XPInstallConfirm.init = function()
     if (XPInstallConfirm._installOK) {
       for (let install of args.installs)
         install.install();
-    }
-    else {
+    } else {
       for (let install of args.installs) {
         if (install.state != AddonManager.STATE_CANCELLED)
           install.cancel();
@@ -164,7 +153,7 @@ XPInstallConfirm.init = function()
     }
   }
 
-  window.addEventListener("unload", myUnload, false);
+  window.addEventListener("unload", myUnload);
 
   if (_installCountdownLength > 0) {
     document.addEventListener("focus", myfocus, true);
@@ -172,25 +161,20 @@ XPInstallConfirm.init = function()
 
     okButton.disabled = true;
     setWidgetsAfterFocus();
-  }
-  else
+  } else
     okButton.label = bundle.getString("installButtonLabel");
-}
+};
 
-XPInstallConfirm.onOK = function()
-{
-  Components.classes["@mozilla.org/base/telemetry;1"].
-    getService(Components.interfaces.nsITelemetry).
-    getHistogramById("SECURITY_UI").
-    add(Components.interfaces.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL_CLICK_THROUGH);
+XPInstallConfirm.onOK = function() {
+  Services.telemetry.getHistogramById("SECURITY_UI")
+    .add(Ci.nsISecurityUITelemetry.WARNING_CONFIRM_ADDON_INSTALL_CLICK_THROUGH);
   // Perform the install or cancel after the window has unloaded
   XPInstallConfirm._installOK = true;
   return true;
-}
+};
 
-XPInstallConfirm.onCancel = function()
-{
+XPInstallConfirm.onCancel = function() {
   // Perform the install or cancel after the window has unloaded
   XPInstallConfirm._installOK = false;
   return true;
-}
+};

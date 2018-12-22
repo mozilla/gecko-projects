@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,10 +6,11 @@
 
 UNIFIED_SOURCES += [
     'gfxSurfaceRefCountTest.cpp',
-    # Disabled on suspicion of causing bug 904227
-    #'gfxWordCacheTest.cpp',
+    'MockWidget.cpp',
+    'PolygonTestUtils.cpp',
     'TestArena.cpp',
     'TestArrayView.cpp',
+    'TestBSPTree.cpp',
     'TestBufferRotation.cpp',
     'TestColorNames.cpp',
     'TestCompositor.cpp',
@@ -18,18 +19,15 @@ UNIFIED_SOURCES += [
     'TestJobScheduler.cpp',
     'TestLayers.cpp',
     'TestMoz2D.cpp',
+    'TestPolygon.cpp',
     'TestQcms.cpp',
     'TestRect.cpp',
     'TestRegion.cpp',
     'TestSkipChars.cpp',
-    # Hangs on linux in ApplyGdkScreenFontOptions
-    #'gfxFontSelectionTest.cpp',
+    'TestSwizzle.cpp',
+    'TestTextureCompatibility.cpp',
     'TestTextures.cpp',
     'TestTreeTraversal.cpp',
-    # Test works but it doesn't assert anything
-    #'gfxTextRunPerfTest.cpp',
-    # Bug 1179287 - PGO bustage on Linux
-    #'TestTiledLayerBuffer.cpp',
     'TestVsync.cpp',
 ]
 
@@ -41,15 +39,30 @@ UNIFIED_SOURCES += [ '/gfx/2d/unittest/%s' % p for p in [
     'TestScaling.cpp',
 ]]
 
+# not UNIFIED_SOURCES because layout_common_table_test.cc has classes
+# in an anonymous namespace which result in a GCC error when used in
+# tests (e g. "error: 'ScriptListTableTest_TestSuccess_Test' has a field
+# 'ScriptListTableTest_TestSuccess_Test::<anonymous>' whose type uses
+# the anonymous namespace").
+SOURCES += [ '/gfx/ots/tests/%s' % p for p in [
+    'cff_type2_charstring_test.cc',
+    'layout_common_table_test.cc',
+]]
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 LOCAL_INCLUDES += [
     '/gfx/2d',
     '/gfx/2d/unittest',
+    '/gfx/config',
     '/gfx/layers',
+    '/gfx/ots/src',
     '/gfx/qcms',
 ]
 
 FINAL_LIBRARY = 'xul-gtest'
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

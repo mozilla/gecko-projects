@@ -7,7 +7,6 @@
 #ifndef nsGeoPosition_h
 #define nsGeoPosition_h
 
-#include "nsAutoPtr.h"
 #include "nsIDOMGeoPositionCoords.h"
 #include "nsIDOMGeoPosition.h"
 #include "nsString.h"
@@ -29,7 +28,7 @@ class nsGeoPositionCoords final : public nsIDOMGeoPositionCoords
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIDOMGEOPOSITIONCOORDS
-  
+
   nsGeoPositionCoords(double aLat, double aLong,
                       double aAlt, double aHError,
                       double aVError, double aHeading,
@@ -49,22 +48,18 @@ class nsGeoPosition final : public nsIDOMGeoPosition
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIDOMGEOPOSITION
-  
+
   nsGeoPosition(double aLat, double aLong,
                 double aAlt, double aHError,
                 double aVError, double aHeading,
-                double aSpeed, long long aTimestamp);
-  
-
-  nsGeoPosition(nsIDOMGeoPositionCoords *aCoords,
-                long long aTimestamp);
+                double aSpeed, DOMTimeStamp aTimestamp);
 
   nsGeoPosition(nsIDOMGeoPositionCoords *aCoords,
                 DOMTimeStamp aTimestamp);
 
 private:
   ~nsGeoPosition();
-  long long mTimestamp;
+  DOMTimeStamp mTimestamp;
   RefPtr<nsIDOMGeoPositionCoords> mCoords;
 };
 

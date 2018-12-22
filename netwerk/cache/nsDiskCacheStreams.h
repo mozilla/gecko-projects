@@ -23,7 +23,7 @@ class nsDiskCacheDevice;
 class nsDiskCacheStreamIO : public nsIOutputStream {
 public:
     explicit nsDiskCacheStreamIO(nsDiskCacheBinding *   binding);
-    
+
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOUTPUTSTREAM
 
@@ -31,7 +31,7 @@ public:
     nsresult    GetOutputStream(uint32_t offset, nsIOutputStream ** outputStream);
 
     nsresult    ClearBinding();
-    
+
     void        IncrementInputStreamCount() { mInStreamCount++; }
     void        DecrementInputStreamCount()
                 {
@@ -43,7 +43,17 @@ public:
 
     // GCC 2.95.2 requires this to be defined, although we never call it.
     // and OS/2 requires that it not be private
-    nsDiskCacheStreamIO() { NS_NOTREACHED("oops"); }
+    nsDiskCacheStreamIO()
+        : mBinding(nullptr),
+          mDevice(nullptr),
+          mFD(nullptr),
+          mStreamEnd(0),
+          mBufSize(0),
+          mBuffer(nullptr),
+          mOutputStreamIsOpen(false)
+    {
+        MOZ_ASSERT_UNREACHABLE("oops");
+    }
 
 private:
     virtual ~nsDiskCacheStreamIO();

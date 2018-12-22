@@ -12,10 +12,8 @@ const TAB_URL = EXAMPLE_URL + "doc_event-listeners-01.html";
 var gClient, gThreadClient, gInput, gButton;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -31,9 +29,9 @@ function test() {
       .then(testBreakOnDisabled)
       .then(testBreakOnNone)
       .then(testBreakOnClick)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -184,12 +182,6 @@ function testBreakOnClick() {
   return deferred.promise;
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
 function unexpectedListener() {
   gClient.removeListener("paused", unexpectedListener);
   ok(false, "An unexpected hidden breakpoint was hit.");
@@ -223,7 +215,7 @@ function triggerInputChange() {
   gInput.blur();
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
   gThreadClient = null;
   gInput = null;

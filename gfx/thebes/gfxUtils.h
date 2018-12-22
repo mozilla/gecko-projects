@@ -7,6 +7,7 @@
 #define GFX_UTILS_H
 
 #include "gfxTypes.h"
+#include "ImageTypes.h"
 #include "imgIContainer.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/RefPtr.h"
@@ -16,20 +17,28 @@
 #include "nsRegionFwd.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/webrender/WebRenderTypes.h"
 
 class gfxASurface;
 class gfxDrawable;
+struct gfxQuad;
 class nsIInputStream;
 class nsIGfxInfo;
 class nsIPresShell;
 
 namespace mozilla {
 namespace layers {
+class WebRenderBridgeChild;
+class GlyphArray;
 struct PlanarYCbCrData;
+class WebRenderCommand;
 } // namespace layers
 namespace image {
 class ImageRegion;
 } // namespace image
+namespace wr {
+class DisplayListBuilder;
+} // namespace wr
 } // namespace mozilla
 
 class gfxUtils {
@@ -82,9 +91,10 @@ public:
                                  const gfxSize&     aImageSize,
                                  const ImageRegion& aRegion,
                                  const mozilla::gfx::SurfaceFormat aFormat,
-                                 mozilla::gfx::Filter aFilter,
+                                 mozilla::gfx::SamplingFilter aSamplingFilter,
                                  uint32_t           aImageFlags = imgIContainer::FLAG_NONE,
-                                 gfxFloat           aOpacity = 1.0);
+                                 gfxFloat           aOpacity = 1.0,
+                                 bool               aUseOptimalFillOp = true);
 
     /**
      * Clip aContext to the region aRegion.
@@ -123,42 +133,33 @@ public:
     */
     static bool GfxRectToIntRect(const gfxRect& aIn, mozilla::gfx::IntRect* aOut);
 
+    /* Conditions this border to Cairo's max coordinate space.
+     * The caller can check IsEmpty() after Condition() -- if it's TRUE,
+     * the caller can possibly avoid doing any extra rendering.
+     */
+    static void ConditionRect(gfxRect& aRect);
+
+    /*
+     * Transform this rectangle with aMatrix, resulting in a gfxQuad.
+     */
+    static gfxQuad TransformToQuad(const gfxRect& aRect,
+                                   const mozilla::gfx::Matrix4x4& aMatrix);
+
     /**
      * Return the smallest power of kScaleResolution (2) greater than or equal to
-     * aVal.
+     * aVal. If aRoundDown is specified, the power of 2 will rather be less than
+     * or equal to aVal.
      */
-    static gfxFloat ClampToScaleFactor(gfxFloat aVal);
-
-    /**
-     * Helper function for ConvertYCbCrToRGB that finds the
-     * RGB buffer size and format for given YCbCrImage.
-     * @param aSuggestedFormat will be set to SurfaceFormat::X8R8G8B8_UINT32
-     *   if the desired format is not supported.
-     * @param aSuggestedSize will be set to the picture size from aData
-     *   if either the suggested size was {0,0}
-     *   or simultaneous scaling and conversion is not supported.
-     */
-    static void
-    GetYCbCrToRGBDestFormatAndSize(const mozilla::layers::PlanarYCbCrData& aData,
-                                   gfxImageFormat& aSuggestedFormat,
-                                   mozilla::gfx::IntSize& aSuggestedSize);
-
-    /**
-     * Convert YCbCrImage into RGB aDestBuffer
-     * Format and Size parameters must have
-     *   been passed to GetYCbCrToRGBDestFormatAndSize
-     */
-    static void
-    ConvertYCbCrToRGB(const mozilla::layers::PlanarYCbCrData& aData,
-                      const gfxImageFormat& aDestFormat,
-                      const mozilla::gfx::IntSize& aDestSize,
-                      unsigned char* aDestBuffer,
-                      int32_t aStride);
+    static float ClampToScaleFactor(float aVal, bool aRoundDown = false);
 
     /**
      * Clears surface to aColor (which defaults to transparent black).
      */
     static void ClearThebesSurface(gfxASurface* aSurface);
+
+    static const float* YuvToRgbMatrix4x3RowMajor(mozilla::YUVColorSpace aYUVColorSpace);
+    static const float* YuvToRgbMatrix3x3ColumnMajor(mozilla::YUVColorSpace aYUVColorSpace);
+    static const float* YuvToRgbMatrix4x4ColumnMajor(mozilla::YUVColorSpace aYUVColorSpace);
 
     /**
      * Creates a copy of aSurface, but having the SurfaceFormat aFormat.
@@ -205,9 +206,6 @@ public:
     CopySurfaceToDataSourceSurfaceWithFormat(SourceSurface* aSurface,
                                              SurfaceFormat aFormat);
 
-    static const uint8_t sUnpremultiplyTable[256*256];
-    static const uint8_t sPremultiplyTable[256*256];
-
     /**
      * Return a color that can be used to identify a frame with a given frame number.
      * The colors will cycle after sNumFrameColors.  You can query colors 0 .. sNumFrameColors-1
@@ -224,6 +222,8 @@ public:
 
     /**
      * Encodes the given surface to PNG/JPEG/BMP/etc. using imgIEncoder.
+     * If both aFile and aString are null, the encoded data is copied to the
+     * clipboard.
      *
      * @param aMimeType The MIME-type of the image type that the surface is to
      *   be encoded to. Used to create an appropriate imgIEncoder instance to
@@ -238,8 +238,9 @@ public:
      *   to the requested binary image format, or if the binary image is
      *   further converted to base-64 and written out as a 'data:' URI.
      *
-     * @aFile If specified, the encoded data is written out to aFile, otherwise
-     *   it is copied to the clipboard.
+     * @aFile If specified, the encoded data is written out to aFile.
+     *
+     * @aString If specified, the encoded data is written out to aString.
      *
      * TODO: Copying to the clipboard as a binary file is not currently
      * supported.
@@ -249,7 +250,8 @@ public:
                         const nsACString& aMimeType,
                         const nsAString& aOutputOptions,
                         BinaryOrData aBinaryOrData,
-                        FILE* aFile);
+                        FILE* aFile,
+                        nsACString* aString = nullptr);
 
     /**
      * Write as a PNG file to the path aFile.
@@ -291,7 +293,10 @@ public:
 
     static nsresult ThreadSafeGetFeatureStatus(const nsCOMPtr<nsIGfxInfo>& gfxInfo,
                                                int32_t feature,
+                                               nsACString& failureId,
                                                int32_t* status);
+
+    static void RemoveShaderCacheFromDiskIfNecessary();
 
     /**
      * Copy to the clipboard as a PNG encoded Data URL.
@@ -316,39 +321,6 @@ namespace gfx {
  */
 Color ToDeviceColor(Color aColor);
 Color ToDeviceColor(nscolor aColor);
-
-/* These techniques are suggested by "Bit Twiddling Hacks"
- */
-
-/**
- * Returns true if |aNumber| is a power of two
- * 0 is incorreclty considered a power of two
- */
-static inline bool
-IsPowerOfTwo(int aNumber)
-{
-    return (aNumber & (aNumber - 1)) == 0;
-}
-
-/**
- * Returns the first integer greater than or equal to |aNumber| which is a
- * power of two. Undefined for |aNumber| < 0.
- */
-static inline int
-NextPowerOfTwo(int aNumber)
-{
-#if defined(__arm__)
-    return 1 << (32 - __builtin_clz(aNumber - 1));
-#else
-    --aNumber;
-    aNumber |= aNumber >> 1;
-    aNumber |= aNumber >> 2;
-    aNumber |= aNumber >> 4;
-    aNumber |= aNumber >> 8;
-    aNumber |= aNumber >> 16;
-    return ++aNumber;
-#endif
-}
 
 /**
  * Performs a checked multiply of the given width, height, and bytes-per-pixel

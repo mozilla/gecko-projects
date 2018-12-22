@@ -9,6 +9,7 @@
 #include "mozilla/dom/SVGAnimationElement.h"
 #include "mozilla/Move.h"
 #include "nsISMILAttr.h"
+#include "nsSMILCSSValueType.h"
 #include "nsSMILParserUtils.h"
 #include "nsSMILNullType.h"
 #include "nsSMILTimedElement.h"
@@ -17,7 +18,6 @@
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsIContent.h"
-#include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsReadableUtils.h"
 #include "nsString.h"
@@ -80,7 +80,7 @@ nsSMILAnimationFunction::SetAnimationElement(
 }
 
 bool
-nsSMILAnimationFunction::SetAttr(nsIAtom* aAttribute, const nsAString& aValue,
+nsSMILAnimationFunction::SetAttr(nsAtom* aAttribute, const nsAString& aValue,
                                  nsAttrValue& aResult, nsresult* aParseResult)
 {
   bool foundMatch = true;
@@ -120,7 +120,7 @@ nsSMILAnimationFunction::SetAttr(nsIAtom* aAttribute, const nsAString& aValue,
 }
 
 bool
-nsSMILAnimationFunction::UnsetAttr(nsIAtom* aAttribute)
+nsSMILAnimationFunction::UnsetAttr(nsAtom* aAttribute)
 {
   bool foundMatch = true;
 
@@ -269,7 +269,7 @@ nsSMILAnimationFunction::ComposeResult(const nsISMILAttr& aSMILAttr,
 
   // If additive animation isn't required or isn't supported, set the value.
   if (!isAdditive || NS_FAILED(aResult.SandwichAdd(result))) {
-    aResult = Move(result);
+    aResult = std::move(result);
   }
 }
 
@@ -384,6 +384,15 @@ nsSMILAnimationFunction::InterpolateResult(const nsSMILValueArray& aValues,
 
   nsresult rv = NS_OK;
   nsSMILCalcMode calcMode = GetCalcMode();
+
+  // Force discrete calcMode for visibility since StyleAnimationValue will
+  // try to interpolate it using the special clamping behavior defined for
+  // CSS.
+  if (nsSMILCSSValueType::PropertyFromValue(aValues[0])
+        == eCSSProperty_visibility) {
+    calcMode = CALC_DISCRETE;
+  }
+
   if (calcMode != CALC_DISCRETE) {
     // Get the normalised progress between adjacent values
     const nsSMILValue* from = nullptr;
@@ -461,6 +470,30 @@ nsSMILAnimationFunction::InterpolateResult(const nsSMILValueArray& aValues,
     } else {
       uint32_t index = (uint32_t)floor(scaledSimpleProgress * aValues.Length());
       aResult = aValues[index];
+
+      // For animation of CSS properties, normally when interpolating we perform
+      // a zero-value fixup which means that empty values (values with type
+      // nsSMILCSSValueType but a null pointer value) are converted into
+      // a suitable zero value based on whatever they're being interpolated
+      // with. For discrete animation, however, since we don't interpolate,
+      // that never happens. In some rare cases, such as discrete non-additive
+      // by-animation, we can arrive here with |aResult| being such an empty
+      // value so we need to manually perform the fixup.
+      //
+      // We could define a generic method for this on nsSMILValue but its faster
+      // and simpler to just special case nsSMILCSSValueType.
+      if (aResult.mType == &nsSMILCSSValueType::sSingleton) {
+        // We have currently only ever encountered this case for the first
+        // value of a by-animation (which has two values) and since we have no
+        // way of testing other cases we just skip them (but assert if we
+        // ever do encounter them so that we can add code to handle them).
+        if (index + 1 >= aValues.Length()) {
+          MOZ_ASSERT(aResult.mU.mPtr, "The last value should not be empty");
+        } else {
+          // Base the type of the zero value on the next element in the series.
+          nsSMILCSSValueType::FinalizeValue(aResult, aValues[index + 1]);
+        }
+      }
     }
     rv = NS_OK;
   }
@@ -577,8 +610,8 @@ nsSMILAnimationFunction::ComputePacedPosition(const nsSMILValueArray& aValues,
     }
   }
 
-  NS_NOTREACHED("shouldn't complete loop & get here -- if we do, "
-                "then aSimpleProgress was probably out of bounds");
+  MOZ_ASSERT_UNREACHABLE("shouldn't complete loop & get here -- if we do, "
+                         "then aSimpleProgress was probably out of bounds");
   return NS_ERROR_FAILURE;
 }
 
@@ -672,21 +705,21 @@ nsSMILAnimationFunction::ScaleIntervalProgress(double aProgress,
 }
 
 bool
-nsSMILAnimationFunction::HasAttr(nsIAtom* aAttName) const
+nsSMILAnimationFunction::HasAttr(nsAtom* aAttName) const
 {
-  return mAnimationElement->HasAnimAttr(aAttName);
+  return mAnimationElement->HasAttr(aAttName);
 }
 
 const nsAttrValue*
-nsSMILAnimationFunction::GetAttr(nsIAtom* aAttName) const
+nsSMILAnimationFunction::GetAttr(nsAtom* aAttName) const
 {
-  return mAnimationElement->GetAnimAttr(aAttName);
+  return mAnimationElement->GetParsedAttr(aAttName);
 }
 
 bool
-nsSMILAnimationFunction::GetAttr(nsIAtom* aAttName, nsAString& aResult) const
+nsSMILAnimationFunction::GetAttr(nsAtom* aAttName, nsAString& aResult) const
 {
-  return mAnimationElement->GetAnimAttr(aAttName, aResult);
+  return mAnimationElement->GetAttr(aAttName, aResult);
 }
 
 /*
@@ -706,7 +739,7 @@ nsSMILAnimationFunction::GetAttr(nsIAtom* aAttName, nsAString& aResult) const
  * Returns false if a parse error occurred, otherwise returns true.
  */
 bool
-nsSMILAnimationFunction::ParseAttr(nsIAtom* aAttName,
+nsSMILAnimationFunction::ParseAttr(nsAtom* aAttName,
                                    const nsISMILAttr& aSMILAttr,
                                    nsSMILValue& aResult,
                                    bool& aPreventCachingOfSandwich) const

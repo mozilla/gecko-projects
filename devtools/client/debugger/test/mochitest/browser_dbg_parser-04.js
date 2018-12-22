@@ -8,20 +8,20 @@
  */
 
 function test() {
-  let { Parser } = Cu.import("resource://devtools/shared/Parser.jsm", {});
+  let { Parser } = ChromeUtils.import("resource://devtools/shared/Parser.jsm", {});
 
   let source = [
     "<!doctype html>",
     "<head>",
-      "<SCRIPT>",
-        "let a + 42;",
-      "</SCRIPT>",
-      "<script type='text/javascript'>",
-        "let b = 42;",
-      "</SCRIPT>",
-      "<script type='text/javascript;version=1.8'>",
-        "let c + 42;",
-      "</SCRIPT>",
+    "<SCRIPT>",
+    "let a + 42;",
+    "</SCRIPT>",
+    "<script type='text/javascript'>",
+    "let b = 42;",
+    "</SCRIPT>",
+    "<script type='text/javascript'>",
+    "let c + 42;",
+    "</SCRIPT>",
     "</head>"
   ].join("\n");
   let parser = new Parser();
@@ -36,12 +36,12 @@ function test() {
 
   is(parser.errors[0].name, "SyntaxError",
     "The correct first exception was caught.");
-  is(parser.errors[0].message, "missing ; before statement",
+  is(parser.errors[0].message, "unexpected token: \'+\'",
     "The correct first exception was caught.");
 
   is(parser.errors[1].name, "SyntaxError",
     "The correct second exception was caught.");
-  is(parser.errors[1].message, "missing ; before statement",
+  is(parser.errors[1].message, "unexpected token: \'+\'",
     "The correct second exception was caught.");
 
   is(parsed.scriptCount, 1,

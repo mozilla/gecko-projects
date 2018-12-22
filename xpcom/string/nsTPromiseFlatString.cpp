@@ -4,15 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+template <typename T>
 void
-nsTPromiseFlatString_CharT::Init(const substring_type& str)
+nsTPromiseFlatString<T>::Init(const substring_type& str)
 {
   if (str.IsTerminated()) {
-    mData = const_cast<char_type*>(static_cast<const char_type*>(str.Data()));
-    mLength = str.Length();
-    mFlags = str.mFlags & (F_TERMINATED | F_LITERAL);
-    // does not promote F_VOIDED
+    char_type* newData =
+      const_cast<char_type*>(static_cast<const char_type*>(str.Data()));
+    size_type newLength = str.Length();
+    DataFlags newDataFlags =
+      str.GetDataFlags() & (DataFlags::TERMINATED | DataFlags::LITERAL);
+    // does not promote DataFlags::VOIDED
+
+    this->SetData(newData, newLength, newDataFlags);
   } else {
-    Assign(str);
+    this->Assign(str);
   }
 }

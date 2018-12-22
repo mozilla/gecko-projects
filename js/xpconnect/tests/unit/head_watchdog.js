@@ -6,11 +6,7 @@
 // Pref management.
 //
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-Cu.import("resource://testing-common/PromiseTestUtils.jsm");
+ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm");
 
 ///////////////////
 //
@@ -56,7 +52,7 @@ function do_log_info(aMessage)
 // from the operation callback.
 function executeSoon(fn) {
   var tm = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
-  tm.mainThread.dispatch({run: fn}, Ci.nsIThread.DISPATCH_NORMAL);
+  tm.dispatchToMainThread({run: fn});
 }
 
 //
@@ -79,7 +75,7 @@ function checkWatchdog(expectInterrupt, continuation) {
     if (lastWatchdogWakeup == Cu.getWatchdogTimestamp("WatchdogWakeup")) {
       return true;
     }
-    do_check_true(expectInterrupt);
+    Assert.ok(expectInterrupt);
     setInterruptCallback(undefined);
     setScriptTimeout(oldTimeout);
     // Schedule our continuation before we kill this script.
@@ -88,16 +84,11 @@ function checkWatchdog(expectInterrupt, continuation) {
   });
   executeSoon(function() {
     busyWait(3000);
-    do_check_true(!expectInterrupt);
+    Assert.ok(!expectInterrupt);
     setInterruptCallback(undefined);
     setScriptTimeout(oldTimeout);
     continuation();
   });
-}
-
-var gGenerator;
-function continueTest() {
-  gGenerator.next();
 }
 
 function run_test() {
@@ -105,8 +96,9 @@ function run_test() {
   // Run async.
   do_test_pending();
 
-  // Instantiate the generator and kick it off.
-  gGenerator = testBody();
-  gGenerator.next();
+  // Run the async function.
+  testBody().then(() => {
+    do_test_finished();
+  });
 }
 

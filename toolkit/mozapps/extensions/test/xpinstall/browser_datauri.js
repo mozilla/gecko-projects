@@ -13,6 +13,13 @@ function setup_redirect(aSettings) {
 }
 
 function test() {
+  waitForExplicitFinish();
+  SpecialPowers.pushPrefEnv({
+    "set": [["security.data_uri.block_toplevel_data_uri_navigations", false]]
+  }, runTest);
+}
+
+function runTest() {
   Harness.installOriginBlockedCallback = install_blocked;
   Harness.installsCompletedCallback = finish_test;
   Harness.setup();
@@ -21,7 +28,7 @@ function test() {
     "Location": "data:text/html,<script>window.location.href='" + TESTROOT + "amosigned.xpi'</script>"
   });
 
-  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   gBrowser.loadURI(TESTROOT + "redirect.sjs?mode=redirect");
 }
 
@@ -34,4 +41,5 @@ function finish_test(count) {
 
   gBrowser.removeCurrentTab();
   Harness.finish();
+  finish();
 }

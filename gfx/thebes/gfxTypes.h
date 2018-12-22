@@ -24,7 +24,7 @@ typedef double gfxFloat;
  *
  * eNoBreak       The line has no break opportunities
  * eWordWrapBreak The line has a break opportunity only within a word. With
- *                word-wrap: break-word we will break at this point only if
+ *                overflow-wrap|word-wrap: break-word we will break at this point only if
  *                there are no other break opportunities in the line.
  * eNormalBreak   The line has a break opportunity determined by the standard
  *                line-breaking algorithm.
@@ -77,6 +77,12 @@ enum class gfxContentType {
   ALPHA       = 0x2000,
   COLOR_ALPHA = 0x3000,
   SENTINEL    = 0xffff
+};
+
+enum class gfxAlphaType {
+  Opaque,
+  Premult,
+  NonPremult,
 };
 
 #endif /* GFX_TYPES_H */

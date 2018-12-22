@@ -8,7 +8,10 @@
 
 #include "MediaStreamGraph.h"
 #include "mozilla/dom/AudioNodeBinding.h"
+#include "nsAutoPtr.h"
+#include "AlignedTArray.h"
 #include "AudioBlock.h"
+#include "AudioSegment.h"
 
 namespace mozilla {
 
@@ -18,8 +21,11 @@ struct AudioTimelineEvent;
 class AudioContext;
 } // namespace dom
 
+class AbstractThread;
 class ThreadSharedFloatArrayBufferList;
 class AudioNodeEngine;
+
+typedef AlignedAutoTArray<float, GUESS_AUDIO_CHANNELS*WEBAUDIO_BLOCK_SIZE, 16> DownmixBufferType;
 
 /**
  * An AudioNodeStream produces one audio track with ID AUDIO_TRACK.
@@ -57,13 +63,12 @@ public:
   /**
    * Create a stream that will process audio for an AudioNode.
    * Takes ownership of aEngine.
-   * If aGraph is non-null, use that as the MediaStreamGraph, otherwise use
-   * aCtx's graph. aGraph is only non-null when called for AudioDestinationNode
-   * since the context's graph hasn't been set up in that case.
+   * aGraph is required and equals the graph of aCtx in most cases. An exception
+   * is AudioDestinationNode where the context's graph hasn't been set up yet.
    */
   static already_AddRefed<AudioNodeStream>
   Create(AudioContext* aCtx, AudioNodeEngine* aEngine, Flags aKind,
-         MediaStreamGraph* aGraph = nullptr);
+         MediaStreamGraph* aGraph);
 
 protected:
   /**
@@ -86,7 +91,7 @@ public:
   void SetDoubleParameter(uint32_t aIndex, double aValue);
   void SetInt32Parameter(uint32_t aIndex, int32_t aValue);
   void SetThreeDPointParameter(uint32_t aIndex, const dom::ThreeDPoint& aValue);
-  void SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList>&& aBuffer);
+  void SetBuffer(AudioChunk&& aBuffer);
   // This sends a single event to the timeline on the MSG thread side.
   void SendTimelineEvent(uint32_t aIndex, const dom::AudioTimelineEvent& aEvent);
   // This consumes the contents of aData.  aData will be emptied after this returns.
@@ -190,10 +195,10 @@ protected:
   void FinishOutput();
   void AccumulateInputChunk(uint32_t aInputIndex, const AudioBlock& aChunk,
                             AudioBlock* aBlock,
-                            nsTArray<float>* aDownmixBuffer);
+                            DownmixBufferType* aDownmixBuffer);
   void UpMixDownMixChunk(const AudioBlock* aChunk, uint32_t aOutputChannelCount,
                          nsTArray<const float*>& aOutputChannels,
-                         nsTArray<float>& aDownmixBuffer);
+                         DownmixBufferType& aDownmixBuffer);
 
   uint32_t ComputedNumberOfChannels(uint32_t aInputChannelCount);
   void ObtainInputBlock(AudioBlock& aTmpChunk, uint32_t aPortIndex);

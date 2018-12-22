@@ -1,5 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+"use strict";
 
 /**
  * Tests that JITOptimizations track optimization sites and create
@@ -7,14 +8,10 @@
  * FrameNode, and the returning of that data is as expected.
  */
 
-function run_test() {
-  run_next_test();
-}
-
 add_task(function test() {
-  let { JITOptimizations } = require("devtools/client/performance/modules/logic/jit");
+  const { JITOptimizations } = require("devtools/client/performance/modules/logic/jit");
 
-  let rawSites = [];
+  const rawSites = [];
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite1);
@@ -22,10 +19,10 @@ add_task(function test() {
   rawSites.push(gRawSite2);
   rawSites.push(gRawSite3);
 
-  let jit = new JITOptimizations(rawSites, gStringTable.stringTable);
-  let sites = jit.optimizationSites;
+  const jit = new JITOptimizations(rawSites, gStringTable.stringTable);
+  const sites = jit.optimizationSites;
 
-  let [first, second, third] = sites;
+  const [first, second, third] = sites;
 
   equal(first.id, 0, "site id is array index");
   equal(first.samples, 3, "first OptimizationSiteProfile has correct sample count");

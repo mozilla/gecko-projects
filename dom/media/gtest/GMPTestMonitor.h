@@ -20,23 +20,24 @@ public:
   void AwaitFinished()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    while (!mFinished) {
-      NS_ProcessNextEvent(nullptr, true);
-    }
+    mozilla::SpinEventLoopUntil([&]() { return mFinished; });
     mFinished = false;
   }
 
 private:
   void MarkFinished()
   {
+    MOZ_ASSERT(NS_IsMainThread());
     mFinished = true;
   }
 
 public:
   void SetFinished()
   {
-    NS_DispatchToMainThread(NS_NewNonOwningRunnableMethod(this,
-                                                          &GMPTestMonitor::MarkFinished));
+    mozilla::SystemGroup::Dispatch(
+      mozilla::TaskCategory::Other,
+      mozilla::NewNonOwningRunnableMethod(
+        "GMPTestMonitor::MarkFinished", this, &GMPTestMonitor::MarkFinished));
   }
 
 private:

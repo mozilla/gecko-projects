@@ -10,6 +10,8 @@
 #include "nsCOMPtr.h"
 #include "mozilla/dom/SVGFilterElement.h"
 #include "mozilla/dom/SVGFilterElementBinding.h"
+#include "mozilla/dom/SVGLengthBinding.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "nsSVGUtils.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Filter)
@@ -17,18 +19,20 @@ NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Filter)
 namespace mozilla {
 namespace dom {
 
+using namespace SVGUnitTypes_Binding;
+
 JSObject*
 SVGFilterElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFilterElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFilterElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::LengthInfo SVGFilterElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, -10, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, -10, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 120, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 120, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
 
 nsSVGElement::EnumInfo SVGFilterElement::sEnumInfo[2] =
@@ -43,8 +47,9 @@ nsSVGElement::EnumInfo SVGFilterElement::sEnumInfo[2] =
   }
 };
 
-nsSVGElement::StringInfo SVGFilterElement::sStringInfo[1] =
+nsSVGElement::StringInfo SVGFilterElement::sStringInfo[2] =
 {
+  { &nsGkAtoms::href, kNameSpaceID_None, true },
   { &nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
@@ -57,7 +62,7 @@ SVGFilterElement::SVGFilterElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFilterElement)
@@ -104,16 +109,19 @@ SVGFilterElement::PrimitiveUnits()
 already_AddRefed<SVGAnimatedString>
 SVGFilterElement::Href()
 {
-  return mStringAttributes[HREF].ToDOMAnimatedString(this);
+  return mStringAttributes[HREF].IsExplicitlySet()
+         ? mStringAttributes[HREF].ToDOMAnimatedString(this)
+         : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
 }
 
 //----------------------------------------------------------------------
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGFilterElement::IsAttributeMapped(const nsIAtom* name) const
+SVGFilterElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
+    sColorMap,
     sFEFloodMap,
     sFiltersMap,
     sFontSpecificationMap,
@@ -130,10 +138,10 @@ SVGFilterElement::IsAttributeMapped(const nsIAtom* name) const
 void
 SVGFilterElement::Invalidate()
 {
-  nsTObserverArray<nsIMutationObserver*> *observers = GetMutationObservers();
+  nsAutoTObserverArray<nsIMutationObserver*, 1> *observers = GetMutationObservers();
 
   if (observers && !observers->IsEmpty()) {
-    nsTObserverArray<nsIMutationObserver*>::ForwardIterator iter(*observers);
+    nsAutoTObserverArray<nsIMutationObserver*, 1>::ForwardIterator iter(*observers);
     while (iter.HasMore()) {
       nsCOMPtr<nsIMutationObserver> obs(iter.GetNext());
       nsCOMPtr<nsISVGFilterReference> filter = do_QueryInterface(obs);

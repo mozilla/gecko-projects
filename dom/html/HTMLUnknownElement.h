@@ -7,6 +7,7 @@
 #define mozilla_dom_HTMLUnknownElement_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventStates.h"
 #include "nsGenericHTMLElement.h"
 
 namespace mozilla {
@@ -26,12 +27,10 @@ public:
   explicit HTMLUnknownElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
-    if (NodeInfo()->Equals(nsGkAtoms::bdi)) {
-      SetHasDirAuto();
-    }
   }
 
-  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const override;
+  virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                         bool aPreallocateChildren) const override;
 
 protected:
   virtual ~HTMLUnknownElement() {}

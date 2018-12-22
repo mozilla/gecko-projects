@@ -1,5 +1,5 @@
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 const sentCookieVal     = "foo=bar";
 const responseBody      = "response body";
@@ -74,7 +74,7 @@ function run_test()
   // Set a cookie on one of the URIs.  It doesn't matter which one, since
   // they're both from the same host, which is enough for the cookie service
   // to send the cookie with both requests.
-  var postRedirectURI = ioService.newURI(postRedirectURL, "", null);
+  var postRedirectURI = ioService.newURI(postRedirectURL);
   Cc["@mozilla.org/cookieService;1"].getService(Ci.nsICookieService).
     setCookieString(postRedirectURI, null, sentCookieVal, chan);
 
@@ -85,6 +85,6 @@ function run_test()
 
 function finish_test(event)
 {
-  do_check_eq(receivedCookieVal, sentCookieVal);
+  Assert.equal(receivedCookieVal, sentCookieVal);
   httpServer.stop(do_test_finished);
 }

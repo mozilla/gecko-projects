@@ -76,16 +76,17 @@ const TEST_DATA_INNER = [
   ["e", "style", 5, 5, false],
   ["=", "style=", 6, 6, false],
   ["\"", "style=\"", 7, 7, false],
-  ["b", "style=\"background", 8, 17, true],
+  ["b", "style=\"border", 8, 13, true],
+  ["a", "style=\"background", 9, 17, true],
   ["VK_RIGHT", "style=\"background", 17, 17, false],
-  [":", "style=\"background:-moz-element", 18, 30, true],
+  [":", "style=\"background:aliceblue", 18, 27, true],
   ["u", "style=\"background:unset", 19, 23, true],
   ["r", "style=\"background:url", 20, 21, false],
   ["l", "style=\"background:url", 21, 21, false],
-  ["(", "style=\"background:url(", 22, 22, false],
-  ["'", "style=\"background:url('", 23, 23, false],
-  ["1", "style=\"background:url('1", 24, 24, false],
-  ["'", "style=\"background:url('1'", 25, 25, false],
+  ["(", "style=\"background:url()", 22, 22, false],
+  ["'", "style=\"background:url(')", 23, 23, false],
+  ["1", "style=\"background:url('1)", 24, 24, false],
+  ["'", "style=\"background:url('1')", 25, 25, false],
   [")", "style=\"background:url('1')", 26, 26, false],
   [";", "style=\"background:url('1');", 27, 27, false],
   [" ", "style=\"background:url('1'); ", 28, 28, false],
@@ -96,11 +97,10 @@ const TEST_DATA_INNER = [
   ["VK_RETURN", "style=\"background:url('1'); color:beige\"", -1, -1, false]
 ];
 
-add_task(function*() {
-  info("Opening the inspector on the test URL");
-  let {inspector} = yield openInspectorForURL(TEST_URL);
+add_task(async function() {
+  const {inspector} = await openInspectorForURL(TEST_URL);
 
-  yield runStyleAttributeAutocompleteTests(inspector, TEST_DATA_DOUBLE);
-  yield runStyleAttributeAutocompleteTests(inspector, TEST_DATA_SINGLE);
-  yield runStyleAttributeAutocompleteTests(inspector, TEST_DATA_INNER);
+  await runStyleAttributeAutocompleteTests(inspector, TEST_DATA_DOUBLE);
+  await runStyleAttributeAutocompleteTests(inspector, TEST_DATA_SINGLE);
+  await runStyleAttributeAutocompleteTests(inspector, TEST_DATA_INNER);
 });

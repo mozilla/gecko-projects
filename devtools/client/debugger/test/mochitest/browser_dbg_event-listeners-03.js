@@ -14,10 +14,8 @@ var gClient;
 var gTab;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -28,13 +26,13 @@ function test() {
     addTab(TAB_URL)
       .then((aTab) => {
         gTab = aTab;
-        return attachThreadActorForUrl(gClient, TAB_URL)
+        return attachThreadActorForUrl(gClient, TAB_URL);
       })
       .then(pauseDebuggee)
       .then(testEventListeners)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -68,21 +66,16 @@ function testEventListeners(aThreadClient) {
       return;
     }
 
-    // There are 4 event listeners in the page: button.onclick, window.onload
-    // and two more from the video element controls.
-    is(aPacket.listeners.length, 4, "Found all event listeners.");
+    // There are 2 event listeners in the page: button.onclick, window.onload.
+    // The video element controls listeners are skipped — they cannot be
+    // unwrapped but they shouldn't cause us to throw either.
+    is(aPacket.listeners.length, 2, "Found all event listeners.");
     aThreadClient.resume(deferred.resolve);
   });
 
   return deferred.promise;
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

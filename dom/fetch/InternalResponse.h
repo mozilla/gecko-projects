@@ -8,8 +8,11 @@
 #define mozilla_dom_InternalResponse_h
 
 #include "nsIInputStream.h"
+#include "nsICacheInfoChannel.h"
 #include "nsISupportsImpl.h"
+#include "nsProxyRelease.h"
 
+#include "mozilla/dom/InternalHeaders.h"
 #include "mozilla/dom/ResponseBinding.h"
 #include "mozilla/dom/ChannelInfo.h"
 #include "mozilla/UniquePtr.h"
@@ -17,11 +20,13 @@
 namespace mozilla {
 namespace ipc {
 class PrincipalInfo;
+class AutoIPCStream;
 } // namespace ipc
 
 namespace dom {
 
 class InternalHeaders;
+class IPCInternalResponse;
 
 class InternalResponse final
 {
@@ -32,16 +37,33 @@ public:
 
   InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
 
-  already_AddRefed<InternalResponse> Clone();
+  static already_AddRefed<InternalResponse>
+  FromIPC(const IPCInternalResponse& aIPCResponse);
+
+  template<typename M>
+  void
+  ToIPC(IPCInternalResponse* aIPCResponse,
+        M* aManager,
+        UniquePtr<mozilla::ipc::AutoIPCStream>& aAutoStream);
+
+  enum CloneType
+  {
+    eCloneInputStream,
+    eDontCloneInputStream,
+  };
+
+  already_AddRefed<InternalResponse> Clone(CloneType eCloneType);
 
   static already_AddRefed<InternalResponse>
-  NetworkError()
+  NetworkError(nsresult aRv)
   {
+    MOZ_DIAGNOSTIC_ASSERT(NS_FAILED(aRv));
     RefPtr<InternalResponse> response = new InternalResponse(0, EmptyCString());
     ErrorResult result;
     response->Headers()->SetGuard(HeadersGuardEnum::Immutable, result);
     MOZ_ASSERT(!result.Failed());
     response->mType = ResponseType::Error;
+    response->mErrorCode = aRv;
     return response.forget();
   }
 
@@ -74,29 +96,50 @@ public:
   {
     return Type() == ResponseType::Error;
   }
-
-  // FIXME(nsm): Return with exclude fragment.
-  void
-  GetUrl(nsCString& aURL) const
+  // GetUrl should return last fetch URL in response's url list and null if
+  // response's url list is the empty list.
+  const nsCString&
+  GetURL() const
   {
-    aURL.Assign(mURL);
+    // Empty urlList when response is a synthetic response.
+    if (mURLList.IsEmpty()) {
+      return EmptyCString();
+    }
+    return mURLList.LastElement();
   }
-
   void
-  GetUnfilteredUrl(nsCString& aURL) const
+  GetURLList(nsTArray<nsCString>& aURLList) const
+  {
+    aURLList.Assign(mURLList);
+  }
+  const nsCString&
+  GetUnfilteredURL() const
   {
     if (mWrappedResponse) {
-      return mWrappedResponse->GetUrl(aURL);
+      return mWrappedResponse->GetURL();
+    }
+    return GetURL();
+  }
+  void
+  GetUnfilteredURLList(nsTArray<nsCString>& aURLList) const
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->GetURLList(aURLList);
     }
 
-    return GetUrl(aURL);
+    return GetURLList(aURLList);
   }
 
-  // SetUrl should only be called when the fragment has alredy been stripped
   void
-  SetUrl(const nsACString& aURL)
+  SetURLList(const nsTArray<nsCString>& aURLList)
   {
-    mURL.Assign(aURL);
+    mURLList.Assign(aURLList);
+
+#ifdef DEBUG
+    for(uint32_t i = 0; i < mURLList.Length(); ++i) {
+      MOZ_ASSERT(mURLList[i].Find(NS_LITERAL_CSTRING("#")) == kNotFound);
+    }
+#endif
   }
 
   uint16_t
@@ -148,37 +191,113 @@ public:
   }
 
   void
-  GetUnfilteredBody(nsIInputStream** aStream)
+  GetUnfilteredBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
     if (mWrappedResponse) {
       MOZ_ASSERT(!mBody);
-      return mWrappedResponse->GetBody(aStream);
+      return mWrappedResponse->GetBody(aStream, aBodySize);
     }
     nsCOMPtr<nsIInputStream> stream = mBody;
     stream.forget(aStream);
+    if (aBodySize) {
+      *aBodySize = mBodySize;
+    }
   }
 
   void
-  GetBody(nsIInputStream** aStream)
+  GetBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
     if (Type() == ResponseType::Opaque ||
         Type() == ResponseType::Opaqueredirect) {
       *aStream = nullptr;
+      if (aBodySize) {
+        *aBodySize = UNKNOWN_BODY_SIZE;
+      }
       return;
     }
 
-    return GetUnfilteredBody(aStream);
+    GetUnfilteredBody(aStream, aBodySize);
   }
 
   void
-  SetBody(nsIInputStream* aBody)
+  SetBody(nsIInputStream* aBody, int64_t aBodySize)
   {
     if (mWrappedResponse) {
-      return mWrappedResponse->SetBody(aBody);
+      return mWrappedResponse->SetBody(aBody, aBodySize);
     }
     // A request's body may not be reset once set.
     MOZ_ASSERT(!mBody);
+    MOZ_ASSERT(mBodySize == UNKNOWN_BODY_SIZE);
+    // Check arguments.
+    MOZ_ASSERT(aBodySize == UNKNOWN_BODY_SIZE || aBodySize >= 0);
+    // If body is not given, then size must be unknown.
+    MOZ_ASSERT_IF(!aBody, aBodySize == UNKNOWN_BODY_SIZE);
+
     mBody = aBody;
+    mBodySize = aBodySize;
+  }
+
+  uint32_t
+  GetPaddingInfo();
+
+  nsresult
+  GeneratePaddingInfo();
+
+  int64_t
+  GetPaddingSize();
+
+  void
+  SetPaddingSize(int64_t aPaddingSize);
+
+  void
+  SetAlternativeBody(nsIInputStream* aAlternativeBody)
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->SetAlternativeBody(aAlternativeBody);
+    }
+    // A request's body may not be reset once set.
+    MOZ_DIAGNOSTIC_ASSERT(!mAlternativeBody);
+
+    mAlternativeBody = aAlternativeBody;
+  }
+
+  already_AddRefed<nsIInputStream>
+  TakeAlternativeBody()
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->TakeAlternativeBody();
+    }
+
+    if (!mAlternativeBody) {
+      return nullptr;
+    }
+
+    // cleanup the non-alternative body here.
+    // Once alternative data is used, the real body is no need anymore.
+    mBody = nullptr;
+    mBodySize = UNKNOWN_BODY_SIZE;
+    return mAlternativeBody.forget();
+  }
+
+  void
+  SetCacheInfoChannel(const nsMainThreadPtrHandle<nsICacheInfoChannel>& aCacheInfoChannel)
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->SetCacheInfoChannel(aCacheInfoChannel);
+    }
+    MOZ_ASSERT(!mCacheInfoChannel);
+    mCacheInfoChannel = aCacheInfoChannel;
+  }
+
+  nsMainThreadPtrHandle<nsICacheInfoChannel>
+  TakeCacheInfoChannel()
+  {
+    if (mWrappedResponse) {
+      return mWrappedResponse->TakeCacheInfoChannel();
+    }
+    nsMainThreadPtrHandle<nsICacheInfoChannel> rtn = mCacheInfoChannel;
+    mCacheInfoChannel = nullptr;
+    return rtn;
   }
 
   void
@@ -211,12 +330,21 @@ public:
     return mPrincipalInfo;
   }
 
+  bool
+  IsRedirected() const
+  {
+    return mURLList.Length() > 1;
+  }
+
+  nsresult
+  GetErrorCode() const
+  {
+    return mErrorCode;
+  }
+
   // Takes ownership of the principal info.
   void
   SetPrincipalInfo(UniquePtr<mozilla::ipc::PrincipalInfo> aPrincipalInfo);
-
-  nsresult
-  StripFragmentAndSetUrl(const nsACString& aUrl);
 
   LoadTainting
   GetTainting() const;
@@ -237,11 +365,29 @@ private:
 
   ResponseType mType;
   nsCString mTerminationReason;
-  nsCString mURL;
+  // A response has an associated url list (a list of zero or more fetch URLs).
+  // Unless stated otherwise, it is the empty list. The current url is the last
+  // element in mURLlist
+  nsTArray<nsCString> mURLList;
   const uint16_t mStatus;
   const nsCString mStatusText;
   RefPtr<InternalHeaders> mHeaders;
   nsCOMPtr<nsIInputStream> mBody;
+  int64_t mBodySize;
+  // It's used to passed to the CacheResponse to generate padding size. Once, we
+  // generate the padding size for resposne, we don't need it anymore.
+  Maybe<uint32_t> mPaddingInfo;
+  int64_t mPaddingSize;
+  nsresult mErrorCode;
+
+  // For alternative data such as JS Bytecode cached in the HTTP cache.
+  nsCOMPtr<nsIInputStream> mAlternativeBody;
+  nsMainThreadPtrHandle<nsICacheInfoChannel> mCacheInfoChannel;
+
+public:
+  static const int64_t UNKNOWN_BODY_SIZE = -1;
+  static const int64_t UNKNOWN_PADDING_SIZE = -1;
+private:
   ChannelInfo mChannelInfo;
   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
 

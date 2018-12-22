@@ -24,15 +24,15 @@ document.addEventListener("keypress", ev => {
       return;
     }
 
-    // If we're not in broser fullscreen mode, prevent entering into that,
+    // If we're not in browser fullscreen mode, prevent entering into that,
     // so we don't end up there after pressing Esc.
     ev.preventDefault();
     ev.stopPropagation();
 
-    if (!document.fullscreenElement) {
-      videoElement.requestFullscreen();
+    if (!document.mozFullScreenElement) {
+      videoElement.mozRequestFullScreen();
     } else {
-      document.exitFullscreen();
+      document.mozCancelFullScreen();
     }
     return;
   }

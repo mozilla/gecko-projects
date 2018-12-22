@@ -10,11 +10,15 @@
   function paintListener(event) {
     if (event.target != window)
       return;
-    var eventRect =
-      [ event.boundingClientRect.left,
-        event.boundingClientRect.top,
-        event.boundingClientRect.right,
-        event.boundingClientRect.bottom ];
+    var clientRect = event.boundingClientRect;
+    var eventRect;
+    if (clientRect) {
+      eventRect =
+        [ clientRect.left, clientRect.top,
+          clientRect.right, clientRect.bottom ];
+    } else {
+      eventRect = [ 0, 0, 0, 0 ];
+    }
     if (debug) {
       dump("got MozAfterPaint: " + eventRect.join(",") + "\n");
     }
@@ -28,7 +32,7 @@
       window.setTimeout(onpaint.pop(), 0);
     }
   }
-  window.addEventListener("MozAfterPaint", paintListener, false);
+  window.addEventListener("MozAfterPaint", paintListener);
 
   function waitForPaints(callback, subdoc, flushMode) {
     // Wait until paint suppression has ended
@@ -80,4 +84,13 @@
   window.waitForAllPaints = function(callback) {
     waitForPaints(callback, null, FlushModes.NOFLUSH);
   };
+
+  window.promiseAllPaintsDone = function(subdoc = null, flush = false) {
+    var flushmode = flush ? FlushModes.FLUSH : FlushModes.NOFLUSH;
+    return new Promise(function (resolve, reject) {
+      // The callback is given the components of the rect, but resolve() can
+      // only be given one arg, so we turn it back into an array.
+      waitForPaints((l, r, t, b) => resolve([l, r, t, b]), subdoc, flushmode);
+    });
+  }
 })();

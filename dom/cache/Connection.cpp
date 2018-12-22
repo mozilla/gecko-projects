@@ -22,7 +22,7 @@ Connection::Connection(mozIStorageConnection* aBase)
   : mBase(aBase)
   , mClosed(false)
 {
-  MOZ_ASSERT(mBase);
+  MOZ_DIAGNOSTIC_ASSERT(mBase);
 }
 
 Connection::~Connection()
@@ -59,6 +59,13 @@ NS_IMETHODIMP
 Connection::AsyncClose(mozIStorageCompletionCallback*)
 {
   // async methods are not supported
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+Connection::SpinningSynchronousClose()
+{
+  // not supported
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -154,6 +161,12 @@ Connection::Clone(bool aReadOnly, mozIStorageConnection** aConnectionOut)
 }
 
 NS_IMETHODIMP
+Connection::Interrupt()
+{
+  return mBase->Interrupt();
+}
+
+NS_IMETHODIMP
 Connection::GetDefaultPageSize(int32_t* aSizeOut)
 {
   return mBase->GetDefaultPageSize(aSizeOut);
@@ -233,15 +246,21 @@ Connection::GetTransactionInProgress(bool* aResultOut)
 }
 
 NS_IMETHODIMP
-Connection::BeginTransaction()
+Connection::GetDefaultTransactionType(int32_t* aResultOut)
 {
-  return mBase->BeginTransaction();
+  return mBase->GetDefaultTransactionType(aResultOut);
 }
 
 NS_IMETHODIMP
-Connection::BeginTransactionAs(int32_t aType)
+Connection::SetDefaultTransactionType(int32_t aType)
 {
-  return mBase->BeginTransactionAs(aType);
+  return mBase->SetDefaultTransactionType(aType);
+}
+
+NS_IMETHODIMP
+Connection::BeginTransaction()
+{
+  return mBase->BeginTransaction();
 }
 
 NS_IMETHODIMP

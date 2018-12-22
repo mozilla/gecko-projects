@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,13 +18,14 @@ namespace dom {
 
 class BlobImpl;
 class ContentParent;
-class PBlobParent;
 
 } // namespace dom
 
 namespace ipc {
 
 class PBackgroundParent;
+
+template<class PFooSide> class Endpoint;
 
 // This class is not designed for public consumption beyond the few static
 // member functions.
@@ -54,10 +57,6 @@ public:
   static already_AddRefed<ContentParent>
   GetContentParent(PBackgroundParent* aBackgroundActor);
 
-  static mozilla::dom::PBlobParent*
-  GetOrCreateActorForBlobImpl(PBackgroundParent* aBackgroundActor,
-                              BlobImpl* aBlobImpl);
-
   // Get a value that represents the ContentParent associated with the parent
   // actor for comparison. The value is not guaranteed to uniquely identify the
   // ContentParent after the ContentParent has died. This function may only be
@@ -65,12 +64,18 @@ public:
   static intptr_t
   GetRawContentParentForComparison(PBackgroundParent* aBackgroundActor);
 
+  static uint64_t
+  GetChildID(PBackgroundParent* aBackgroundActor);
+
+  static bool
+  GetLiveActorArray(PBackgroundParent* aBackgroundActor,
+                    nsTArray<PBackgroundParent*>& aLiveActorArray);
+
 private:
   // Only called by ContentParent for cross-process actors.
-  static PBackgroundParent*
+  static bool
   Alloc(ContentParent* aContent,
-        Transport* aTransport,
-        ProcessId aOtherProcess);
+        Endpoint<PBackgroundParent>&& aEndpoint);
 };
 
 // Implemented in BackgroundImpl.cpp.

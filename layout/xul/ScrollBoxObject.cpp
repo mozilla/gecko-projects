@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,7 +11,6 @@
 #include "nsCOMPtr.h"
 #include "nsIPresShell.h"
 #include "nsIContent.h"
-#include "nsIDOMElement.h"
 #include "nsPresContext.h"
 #include "nsBox.h"
 #include "nsIScrollableFrame.h"
@@ -28,7 +28,7 @@ ScrollBoxObject::~ScrollBoxObject()
 
 JSObject* ScrollBoxObject::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ScrollBoxObjectBinding::Wrap(aCx, this, aGivenProto);
+  return ScrollBoxObject_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsIScrollableFrame* ScrollBoxObject::GetScrollFrame()
@@ -92,7 +92,7 @@ static nsIFrame* GetScrolledBox(BoxObject* aScrollBox) {
   nsIFrame* scrolledFrame = scrollFrame->GetScrolledFrame();
   if (!scrolledFrame)
     return nullptr;
-  return nsBox::GetChildBox(scrolledFrame);
+  return nsBox::GetChildXULBox(scrolledFrame);
 }
 
 void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
@@ -112,13 +112,13 @@ void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
     nsRect rect;
 
     // now get the scrolled boxes first child.
-    nsIFrame* child = nsBox::GetChildBox(scrolledBox);
+    nsIFrame* child = nsBox::GetChildXULBox(scrolledBox);
 
-    bool horiz = scrolledBox->IsHorizontal();
+    bool horiz = scrolledBox->IsXULHorizontal();
     nsPoint cp = sf->GetScrollPosition();
     nscoord diff = 0;
     int32_t curIndex = 0;
-    bool isLTR = scrolledBox->IsNormalDirection();
+    bool isLTR = scrolledBox->IsXULNormalDirection();
 
     int32_t frameWidth = 0;
     if (!isLTR && horiz) {
@@ -152,7 +152,7 @@ void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
           break;
         }
       }
-      child = nsBox::GetNextBox(child);
+      child = nsBox::GetNextXULBox(child);
       curIndex++;
     }
 
@@ -163,7 +163,7 @@ void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
 
     if (dindexes > 0) {
       while(child) {
-        child = nsBox::GetNextBox(child);
+        child = nsBox::GetNextXULBox(child);
         if (child) {
           rect = child->GetRect();
         }
@@ -174,7 +174,7 @@ void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
       }
 
    } else if (dindexes < 0) {
-      child = nsBox::GetChildBox(scrolledBox);
+      child = nsBox::GetChildXULBox(scrolledBox);
       while(child) {
         rect = child->GetRect();
         if (count >= curIndex + dindexes) {
@@ -182,7 +182,7 @@ void ScrollBoxObject::ScrollByIndex(int32_t dindexes, ErrorResult& aRv)
         }
 
         count++;
-        child = nsBox::GetNextBox(child);
+        child = nsBox::GetNextXULBox(child);
 
       }
    }

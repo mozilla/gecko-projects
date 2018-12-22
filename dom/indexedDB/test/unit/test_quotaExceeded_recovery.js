@@ -7,19 +7,26 @@ var disableWorkerTest = "Need a way to set temporary prefs from a worker";
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   const spec = "http://foo.com";
   const name =
     this.window ? window.location.pathname : "test_quotaExceeded_recovery";
   const objectStoreName = "foo";
 
-  // We want 32 MB database file, but there's the group limit so we need to
-  // multiply by 5.
-  const tempStorageLimitKB = 32 * 1024 * 5;
+  const android = mozinfo.os == "android";
 
-  // Store in 1 MB chunks.
-  const dataSize = 1024 * 1024;
+  // We want 512 KB database on Android and 4 MB database on other platforms.
+  const groupLimitKB = android ? 512 : 4096;
+
+  // The group limit is calculated as 20% of the global temporary storage limit.
+  const tempStorageLimitKB = groupLimitKB * 5;
+
+  // We want 64 KB chunks on Android and 512 KB chunks on other platforms.
+  const dataSizeKB = android ? 64 : 512;
+  const dataSize = dataSizeKB * 1024;
+
+  const maxIter = 5;
 
   for (let blobs of [false, true]) {
     setTemporaryStorageLimit(tempStorageLimitKB);
@@ -31,7 +38,7 @@ function testSteps()
 
     let request = indexedDB.openForPrincipal(getPrincipal(spec), name);
     request.onerror = errorHandler;
-    request.onupgradeneeded = grabEventAndContinueHandler;;
+    request.onupgradeneeded = grabEventAndContinueHandler;
     request.onsuccess = unexpectedSuccessHandler;
 
     yield undefined;
@@ -42,7 +49,7 @@ function testSteps()
 
     info("Creating objectStore");
 
-    request.result.createObjectStore(objectStoreName);
+    request.result.createObjectStore(objectStoreName, { autoIncrement: true });
 
     yield undefined;
 
@@ -50,16 +57,17 @@ function testSteps()
     let db = request.result;
     db.onerror = errorHandler;
 
-    ok(true, "Adding data until quota is reached");
+    ok(true, "Filling database");
 
     let obj = {
       name: "foo"
-    }
+    };
 
     if (!blobs) {
       obj.data = getRandomView(dataSize);
     }
 
+    let iter = 1;
     let i = 1;
     let j = 1;
     while (true) {
@@ -68,84 +76,64 @@ function testSteps()
       }
 
       let trans = db.transaction(objectStoreName, "readwrite");
-      request = trans.objectStore(objectStoreName).add(obj, i);
+      request = trans.objectStore(objectStoreName).add(obj);
       request.onerror = function(event)
       {
         event.stopPropagation();
-      }
+      };
 
       trans.oncomplete = function(event) {
-        i++;
+        if (iter == 1) {
+          i++;
+        }
         j++;
-        testGenerator.send(true);
-      }
+        testGenerator.next(true);
+      };
       trans.onabort = function(event) {
         is(trans.error.name, "QuotaExceededError", "Reached quota limit");
-        testGenerator.send(false);
-      }
+        testGenerator.next(false);
+      };
 
-      let shouldContinue = yield undefined;
-      if (shouldContinue) {
+      let completeFired = yield undefined;
+      if (completeFired) {
         ok(true, "Got complete event");
-      } else {
-        ok(true, "Got abort event");
-
-        if (j==1) {
-          break;
-        } else {
-          j = 1;
-
-          trans = db.transaction(objectStoreName, "cleanup");
-          trans.onabort = unexpectedSuccessHandler;;
-          trans.oncomplete = grabEventAndContinueHandler;
-
-          yield undefined;
-        }
+        continue;
       }
+
+      ok(true, "Got abort event");
+
+      if (iter++ == maxIter) {
+        break;
+      }
+
+      if (iter > 1) {
+        ok(i == j, "Recycled entire database");
+        j = 1;
+      }
+
+      trans = db.transaction(objectStoreName, "readwrite");
+
+      // Don't use a cursor for deleting stored blobs (Cursors prolong live
+      // of stored files since each record must be fetched from the database
+      // first which creates a memory reference to the stored blob.)
+      if (blobs) {
+        request = trans.objectStore(objectStoreName).clear();
+      } else {
+        request = trans.objectStore(objectStoreName).openCursor();
+        request.onsuccess = function(event) {
+          let cursor = event.target.result;
+          if (cursor) {
+            cursor.delete();
+            cursor.continue();
+          }
+        };
+      }
+
+      trans.onabort = unexpectedSuccessHandler;
+      trans.oncomplete = grabEventAndContinueHandler;
+
+      yield undefined;
     }
-
-    info("Reopening database");
-
-    db.close();
-
-    request = indexedDB.openForPrincipal(getPrincipal(spec), name);
-    request.onerror = errorHandler;
-    request.onsuccess = grabEventAndContinueHandler;
-
-    yield undefined;
-
-    db = request.result;
-    db.onerror = errorHandler;
-
-    info("Deleting some data")
-
-    let trans = db.transaction(objectStoreName, "cleanup");
-    trans.objectStore(objectStoreName).delete(1);
-
-    trans.onabort = unexpectedSuccessHandler;;
-    trans.oncomplete = grabEventAndContinueHandler;
-
-    yield undefined;
-
-    info("Adding data again")
-
-    trans = db.transaction(objectStoreName, "readwrite");
-    trans.objectStore(objectStoreName).add(obj, 1);
-
-    trans.onabort = unexpectedSuccessHandler;
-    trans.oncomplete = grabEventAndContinueHandler;
-
-    yield undefined;
-
-    info("Deleting database");
-
-    db.close();
-
-    request = indexedDB.deleteForPrincipal(getPrincipal(spec), name);
-    request.onerror = errorHandler;
-    request.onsuccess = grabEventAndContinueHandler;
-
-    yield undefined;
   }
 
   finishTest();

@@ -1,4 +1,5 @@
-/* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,25 +7,19 @@
 #ifndef mozilla_css_AnimationCommon_h
 #define mozilla_css_AnimationCommon_h
 
-#include <algorithm> // For <std::stable_sort>
 #include "mozilla/AnimationCollection.h"
-#include "mozilla/AnimationComparator.h"
-#include "mozilla/EventDispatcher.h"
 #include "mozilla/LinkedList.h"
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/StyleAnimationValue.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/Attributes.h" // For MOZ_NON_OWNING_REF
 #include "mozilla/Assertions.h"
+#include "mozilla/TimingParams.h"
+#include "mozilla/dom/Nullable.h"
 #include "nsContentUtils.h"
-#include "nsCSSProperty.h"
-#include "nsCSSPseudoElements.h"
-#include "nsCycleCollectionParticipant.h"
 
-class nsIFrame;
 class nsPresContext;
 
 namespace mozilla {
+enum class CSSPseudoElementType : uint8_t;
 
 namespace dom {
 class Element;
@@ -52,10 +47,25 @@ public:
     mPresContext = nullptr;
   }
 
-  static bool ExtractComputedValueForTransition(
-                  nsCSSProperty aProperty,
-                  nsStyleContext* aStyleContext,
-                  StyleAnimationValue& aComputedValue);
+  /**
+   * Stop animations on the element. This method takes the real element
+   * rather than the element for the generated content for animations on
+   * ::before and ::after.
+   */
+  void StopAnimationsForElement(dom::Element* aElement,
+                                CSSPseudoElementType aPseudoType)
+  {
+    MOZ_ASSERT(aElement);
+    AnimationCollection<AnimationType>* collection =
+      AnimationCollection<AnimationType>::GetAnimationCollection(aElement,
+                                                                 aPseudoType);
+    if (!collection) {
+      return;
+    }
+
+    nsAutoAnimationMutationBatch mb(aElement->OwnerDoc());
+    collection->Destroy();
+  }
 
 protected:
   virtual ~CommonAnimationManager()
@@ -79,26 +89,6 @@ protected:
   nsPresContext *mPresContext; // weak (non-null from ctor to Disconnect)
 };
 
-template <class AnimationType>
-/* static */ bool
-CommonAnimationManager<AnimationType>::ExtractComputedValueForTransition(
-  nsCSSProperty aProperty,
-  nsStyleContext* aStyleContext,
-  StyleAnimationValue& aComputedValue)
-{
-  bool result = StyleAnimationValue::ExtractComputedValue(aProperty,
-                                                          aStyleContext,
-                                                          aComputedValue);
-  if (aProperty == eCSSProperty_visibility) {
-    MOZ_ASSERT(aComputedValue.GetUnit() ==
-                 StyleAnimationValue::eUnit_Enumerated,
-               "unexpected unit");
-    aComputedValue.SetIntValue(aComputedValue.GetIntValue(),
-                               StyleAnimationValue::eUnit_Visibility);
-  }
-  return result;
-}
-
 /**
  * Utility class for referencing the element that created a CSS animation or
  * transition. It is non-owning (i.e. it uses a raw pointer) since it is only
@@ -116,166 +106,100 @@ CommonAnimationManager<AnimationType>::ExtractComputedValueForTransition(
 class OwningElementRef final
 {
 public:
-  OwningElementRef()
-    : mElement(nullptr)
-    , mPseudoType(CSSPseudoElementType::NotPseudo)
+  OwningElementRef() = default;
+
+  explicit OwningElementRef(const NonOwningAnimationTarget& aTarget)
+    : mTarget(aTarget)
   { }
 
   OwningElementRef(dom::Element& aElement,
                    CSSPseudoElementType aPseudoType)
-    : mElement(&aElement)
-    , mPseudoType(aPseudoType)
+    : mTarget(&aElement, aPseudoType)
   { }
 
   bool Equals(const OwningElementRef& aOther) const
   {
-    return mElement == aOther.mElement &&
-           mPseudoType == aOther.mPseudoType;
+    return mTarget == aOther.mTarget;
   }
 
   bool LessThan(const OwningElementRef& aOther) const
   {
-    MOZ_ASSERT(mElement && aOther.mElement,
+    MOZ_ASSERT(mTarget.mElement && aOther.mTarget.mElement,
                "Elements to compare should not be null");
 
-    if (mElement != aOther.mElement) {
-      return nsContentUtils::PositionIsBefore(mElement, aOther.mElement);
+    if (mTarget.mElement != aOther.mTarget.mElement) {
+      return nsContentUtils::PositionIsBefore(mTarget.mElement,
+                                              aOther.mTarget.mElement);
     }
 
-    return mPseudoType == CSSPseudoElementType::NotPseudo ||
-          (mPseudoType == CSSPseudoElementType::before &&
-           aOther.mPseudoType == CSSPseudoElementType::after);
+    return mTarget.mPseudoType == CSSPseudoElementType::NotPseudo ||
+          (mTarget.mPseudoType == CSSPseudoElementType::before &&
+           aOther.mTarget.mPseudoType == CSSPseudoElementType::after);
   }
 
-  bool IsSet() const { return !!mElement; }
+  bool IsSet() const { return !!mTarget.mElement; }
 
   void GetElement(dom::Element*& aElement,
-                  CSSPseudoElementType& aPseudoType) const {
-    aElement = mElement;
-    aPseudoType = mPseudoType;
+                  CSSPseudoElementType& aPseudoType) const
+  {
+    aElement = mTarget.mElement;
+    aPseudoType = mTarget.mPseudoType;
   }
 
-  nsPresContext* GetRenderedPresContext() const;
+  const NonOwningAnimationTarget& Target() const { return mTarget; }
+
+  nsPresContext* GetPresContext() const
+  {
+    return nsContentUtils::GetContextForContent(mTarget.mElement);
+  }
 
 private:
-  dom::Element* MOZ_NON_OWNING_REF mElement;
-  CSSPseudoElementType             mPseudoType;
+  NonOwningAnimationTarget mTarget;
 };
 
-template <class EventInfo>
-class DelayedEventDispatcher
+// Return the TransitionPhase or AnimationPhase to use when the animation
+// doesn't have a target effect.
+template <typename PhaseType>
+PhaseType GetAnimationPhaseWithoutEffect(const dom::Animation& aAnimation)
 {
-public:
-  DelayedEventDispatcher() : mIsSorted(true) { }
+  MOZ_ASSERT(!aAnimation.GetEffect(),
+             "Should only be called when we do not have an effect");
 
-  void QueueEvent(EventInfo&& aEventInfo)
-  {
-    mPendingEvents.AppendElement(Forward<EventInfo>(aEventInfo));
-    mIsSorted = false;
+// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
+// GetTickCount().
+#ifdef GetCurrentTime
+#undef GetCurrentTime
+#endif
+
+  dom::Nullable<TimeDuration> currentTime = aAnimation.GetCurrentTime();
+  if (currentTime.IsNull()) {
+    return PhaseType::Idle;
   }
 
-  // This is exposed as a separate method so that when we are dispatching
-  // *both* transition events and animation events we can sort both lists
-  // once using the current state of the document before beginning any
-  // dispatch.
-  void SortEvents()
-  {
-    if (mIsSorted) {
-      return;
-    }
+  // If we don't have a target effect, the duration will be zero so the phase is
+  // 'before' if the current time is less than zero.
+  return currentTime.Value() < TimeDuration()
+         ? PhaseType::Before
+         : PhaseType::After;
+};
 
-    // FIXME: Replace with mPendingEvents.StableSort when bug 1147091 is
-    // fixed.
-    std::stable_sort(mPendingEvents.begin(), mPendingEvents.end(),
-                     EventInfoLessThan());
-    mIsSorted = true;
-  }
+inline TimingParams
+TimingParamsFromCSSParams(float aDuration, float aDelay,
+                          float aIterationCount,
+                          dom::PlaybackDirection aDirection,
+                          dom::FillMode aFillMode)
+{
+  MOZ_ASSERT(aIterationCount >= 0.0 && !IsNaN(aIterationCount),
+             "aIterations should be nonnegative & finite, as ensured by "
+             "CSSParser");
 
-  // Takes a reference to the owning manager's pres context so it can
-  // detect if the pres context is destroyed while dispatching one of
-  // the events.
-  //
-  // This will call SortEvents automatically if it has not already been
-  // called.
-  void DispatchEvents(nsPresContext* const & aPresContext)
-  {
-    if (!aPresContext || mPendingEvents.IsEmpty()) {
-      return;
-    }
-
-    SortEvents();
-
-    EventArray events;
-    mPendingEvents.SwapElements(events);
-    // mIsSorted will be set to true by SortEvents above, and we leave it
-    // that way since mPendingEvents is now empty
-    for (EventInfo& info : events) {
-      EventDispatcher::Dispatch(info.mElement, aPresContext, &info.mEvent);
-
-      if (!aPresContext) {
-        break;
-      }
-    }
-  }
-
-  void ClearEventQueue()
-  {
-    mPendingEvents.Clear();
-    mIsSorted = true;
-  }
-  bool HasQueuedEvents() const { return !mPendingEvents.IsEmpty(); }
-
-  // Methods for supporting cycle-collection
-  void Traverse(nsCycleCollectionTraversalCallback* aCallback,
-                const char* aName)
-  {
-    for (EventInfo& info : mPendingEvents) {
-      ImplCycleCollectionTraverse(*aCallback, info.mElement, aName);
-      ImplCycleCollectionTraverse(*aCallback, info.mAnimation, aName);
-    }
-  }
-  void Unlink() { ClearEventQueue(); }
-
-protected:
-  class EventInfoLessThan
-  {
-  public:
-    bool operator()(const EventInfo& a, const EventInfo& b) const
-    {
-      if (a.mTimeStamp != b.mTimeStamp) {
-        // Null timestamps sort first
-        if (a.mTimeStamp.IsNull() || b.mTimeStamp.IsNull()) {
-          return a.mTimeStamp.IsNull();
-        } else {
-          return a.mTimeStamp < b.mTimeStamp;
-        }
-      }
-
-      AnimationPtrComparator<RefPtr<dom::Animation>> comparator;
-      return comparator.LessThan(a.mAnimation, b.mAnimation);
-    }
+  return TimingParams {
+    aDuration,
+    aDelay,
+    aIterationCount,
+    aDirection,
+    aFillMode
   };
-
-  typedef nsTArray<EventInfo> EventArray;
-  EventArray mPendingEvents;
-  bool mIsSorted;
-};
-
-template <class EventInfo>
-inline void
-ImplCycleCollectionUnlink(DelayedEventDispatcher<EventInfo>& aField)
-{
-  aField.Unlink();
-}
-
-template <class EventInfo>
-inline void
-ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
-                            DelayedEventDispatcher<EventInfo>& aField,
-                            const char* aName,
-                            uint32_t aFlags = 0)
-{
-  aField.Traverse(&aCallback, aName);
 }
 
 } // namespace mozilla

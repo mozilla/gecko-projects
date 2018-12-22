@@ -8,7 +8,6 @@
 #define mozilla_dom_SpeechDispatcherService_h
 
 #include "mozilla/StaticPtr.h"
-#include "nsAutoPtr.h"
 #include "nsIObserver.h"
 #include "nsISpeechService.h"
 #include "nsIThread.h"
@@ -42,8 +41,6 @@ public:
 
   static SpeechDispatcherService* GetInstance(bool create = true);
   static already_AddRefed<SpeechDispatcherService> GetInstanceForService();
-
-  static void Shutdown();
 
   static StaticRefPtr<SpeechDispatcherService> sSingleton;
 

@@ -3,11 +3,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-// Whitelisting this test.
-// As part of bug 1077403, the leaking uncaught rejections should be fixed.
-thisTestLeaksUncaughtRejectionsAndShouldBeFixed(
-  "Error: Assertion failure: Should have an event loop.");
-
 /**
  * Tests the behavior of the debugger statement.
  */
@@ -18,10 +13,8 @@ var gClient;
 var gTab;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -32,13 +25,13 @@ function test() {
     addTab(TAB_URL)
       .then((aTab) => {
         gTab = aTab;
-        return attachTabActorForUrl(gClient, TAB_URL)
+        return attachTargetActorForUrl(gClient, TAB_URL);
       })
       .then(testEarlyDebuggerStatement)
       .then(testDebuggerStatement)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -47,7 +40,7 @@ function test() {
 function testEarlyDebuggerStatement([aGrip, aResponse]) {
   let deferred = promise.defer();
 
-  let onPaused = function(aEvent, aPacket) {
+  let onPaused = function (aEvent, aPacket) {
     ok(false, "Pause shouldn't be called before we've attached!");
     deferred.reject();
   };
@@ -83,14 +76,10 @@ function testDebuggerStatement([aGrip, aResponse]) {
 
   // Reach around the debugging protocol and execute the debugger statement.
   callInTab(gTab, "runDebuggerStatement");
-}
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

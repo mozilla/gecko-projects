@@ -3,8 +3,8 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
-
-<?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
+<?xml-stylesheet href="chrome://devtools/skin/toolbox.css" type="text/css"?>
+<?xml-stylesheet href="resource://devtools/client/shared/components/NotificationBox.css" type="text/css"?>
 
 <!DOCTYPE window [
 <!ENTITY % toolboxDTD SYSTEM "chrome://devtools/locale/toolbox.dtd" >
@@ -15,137 +15,53 @@
 %globalKeysDTD;
 ]>
 
-<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml">
 
-  <script type="application/javascript;version=1.8"
+  <script type="application/javascript"
           src="chrome://devtools/content/shared/theme-switching.js"/>
   <script type="application/javascript"
           src="chrome://global/content/viewSourceUtils.js"/>
 
   <script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
-  <script type="application/javascript;version=1.8"
+  <script type="application/javascript"
           src="chrome://devtools/content/framework/toolbox-init.js"/>
 
-  <commandset id="editMenuCommands"/>
-  <keyset id="editMenuKeys"/>
-  <keyset id="toolbox-keyset">
-    <key id="toolbox-options-key"
-         key="&toolboxOptionsButton.key;"
-         oncommand="void(0);"
-         modifiers="shift, accel"/>
-    <key id="toolbox-options-key2"
-         keycode="&openHelp.commandkey;"
-         oncommand="void(0);"/>
-    <key id="toolbox-next-tool-key"
-         key="&toolboxNextTool.key;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-previous-tool-key"
-         key="&toolboxPreviousTool.key;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-in-key"
-         key="&fullZoomEnlargeCmd.commandkey;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-in-key2"
-         key="&fullZoomEnlargeCmd.commandkey2;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-in-key3"
-         key="&fullZoomEnlargeCmd.commandkey3;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-out-key"
-         key="&fullZoomReduceCmd.commandkey;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-out-key2"
-         key="&fullZoomReduceCmd.commandkey2;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-reset-key"
-         key="&fullZoomResetCmd.commandkey;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-zoom-reset-key2"
-         key="&fullZoomResetCmd.commandkey2;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-reload-key"
-         key="&toolboxReload.key;"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-force-reload-key"
-         key="&toolboxReload.key;"
-         oncommand="void(0);"
-         modifiers="accel shift"/>
-    <key id="toolbox-reload-key2"
-         keycode="VK_F5"
-         oncommand="void(0);"
-         modifiers=""/>
-    <key id="toolbox-force-reload-key2"
-         keycode="VK_F5"
-         oncommand="void(0);"
-         modifiers="accel"/>
-    <key id="toolbox-minimize-key"
-         key="&toolboxToggleMinimize.key;"
-         oncommand="void(0);"
-         modifiers="shift, accel"/>
-    <key id="toolbox-toggle-host-key"
-         key="&toolboxToggle.key;"
-         oncommand="void(0);"
-         modifiers="accel shift"/>
-  </keyset>
+#include ../../../toolkit/content/editMenuCommands.inc.xul
+#include ../../../toolkit/content/editMenuKeys.inc.xul
 
   <popupset>
     <menupopup id="toolbox-textbox-context-popup">
-      <menuitem id="cMenu_undo"/>
+      <menuitem id="cMenu_undo" label="&undoCmd.label;"
+                accesskey="&undoCmd.accesskey;" command="cmd_undo"/>
       <menuseparator/>
-      <menuitem id="cMenu_cut"/>
-      <menuitem id="cMenu_copy"/>
-      <menuitem id="cMenu_paste"/>
-      <menuitem id="cMenu_delete"/>
+      <menuitem id="cMenu_cut" label="&cutCmd.label;"
+                accesskey="&cutCmd.accesskey;" command="cmd_cut"/>
+      <menuitem id="cMenu_copy" label="&copyCmd.label;"
+                accesskey="&copyCmd.accesskey;" command="cmd_copy"/>
+      <menuitem id="cMenu_paste" label="&pasteCmd.label;"
+                accesskey="&pasteCmd.accesskey;" command="cmd_paste"/>
+      <menuitem id="cMenu_delete" label="&deleteCmd.label;"
+                accesskey="&deleteCmd.accesskey;" command="cmd_delete"/>
       <menuseparator/>
-      <menuitem id="cMenu_selectAll"/>
+      <menuitem id="cMenu_selectAll" label="&selectAllCmd.label;"
+                accesskey="&selectAllCmd.accesskey;" command="cmd_selectAll"/>
     </menupopup>
   </popupset>
 
-  <notificationbox id="toolbox-notificationbox" flex="1">
-    <toolbar class="devtools-tabbar">
-      <hbox id="toolbox-picker-container" />
-      <hbox id="toolbox-tabs" flex="1" role="tablist" />
-      <hbox id="toolbox-buttons" pack="end">
-        <toolbarbutton id="command-button-frames"
-                       class="command-button command-button-invertable devtools-toolbarbutton"
-                       tooltiptext="&toolboxFramesTooltip;"
-                       type="menu"
-                       hidden="true">
-          <menupopup position="bottomright topright"></menupopup>
-        </toolbarbutton>
-        <toolbarbutton id="command-button-noautohide"
-                       class="command-button command-button-invertable"
-                       tooltiptext="&toolboxNoAutoHideTooltip;"
-                       hidden="true" />
-      </hbox>
-      <vbox id="toolbox-controls-separator" class="devtools-separator"/>
-      <hbox id="toolbox-option-container"/>
-      <hbox id="toolbox-controls">
-        <hbox id="toolbox-dock-buttons"/>
-        <toolbarbutton id="toolbox-close"
-                       class="devtools-closebutton"
-                       tooltiptext="&toolboxCloseButton.tooltip;"/>
-      </hbox>
-    </toolbar>
+  <vbox id="toolbox-container" flex="1">
+    <div xmlns="http://www.w3.org/1999/xhtml" id="toolbox-notificationbox"/>
+    <div xmlns="http://www.w3.org/1999/xhtml" id="toolbox-toolbar-mount"
+         role="toolbar" />
     <vbox flex="1" class="theme-body">
       <!-- Set large flex to allow the toolbox-panel-webconsole to have a
            height set to a small value without flexing to fill up extra
            space. There must be a flex on both to ensure that the console
            panel itself is sized properly -->
-      <deck id="toolbox-deck" flex="1000" minheight="75" />
+      <box id="toolbox-deck" flex="10000" minheight="75" />
       <splitter id="toolbox-console-splitter" class="devtools-horizontal-splitter" hidden="true" />
       <box minheight="75" flex="1" id="toolbox-panel-webconsole" collapsed="true" />
     </vbox>
     <tooltip id="aHTMLTooltip" page="true" />
-  </notificationbox>
+  </vbox>
 </window>

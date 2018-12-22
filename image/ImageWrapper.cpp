@@ -13,7 +13,8 @@
 namespace mozilla {
 
 using gfx::DataSourceSurface;
-using gfx::Filter;
+using gfx::IntSize;
+using gfx::SamplingFilter;
 using gfx::SourceSurface;
 using layers::LayerManager;
 using layers::ImageContainer;
@@ -29,9 +30,9 @@ ImageWrapper::GetProgressTracker()
 }
 
 size_t
-ImageWrapper::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
+ImageWrapper::SizeOfSourceWithComputedFallback(SizeOfState& aState) const
 {
-  return mInnerImage->SizeOfSourceWithComputedFallback(aMallocSizeOf);
+  return mInnerImage->SizeOfSourceWithComputedFallback(aState);
 }
 
 void
@@ -87,9 +88,9 @@ ImageWrapper::OnImageDataComplete(nsIRequest* aRequest,
 }
 
 void
-ImageWrapper::OnSurfaceDiscarded()
+ImageWrapper::OnSurfaceDiscarded(const SurfaceKey& aSurfaceKey)
 {
-  return mInnerImage->OnSurfaceDiscarded();
+  return mInnerImage->OnSurfaceDiscarded(aSurfaceKey);
 }
 
 void
@@ -116,8 +117,8 @@ ImageWrapper::SetHasError()
   mInnerImage->SetHasError();
 }
 
-ImageURL*
-ImageWrapper::GetURI()
+nsIURI*
+ImageWrapper::GetURI() const
 {
   return mInnerImage->GetURI();
 }
@@ -136,6 +137,18 @@ NS_IMETHODIMP
 ImageWrapper::GetHeight(int32_t* aHeight)
 {
   return mInnerImage->GetHeight(aHeight);
+}
+
+nsresult
+ImageWrapper::GetNativeSizes(nsTArray<IntSize>& aNativeSizes) const
+{
+  return mInnerImage->GetNativeSizes(aNativeSizes);
+}
+
+size_t
+ImageWrapper::GetNativeSizesLength() const
+{
+  return mInnerImage->GetNativeSizesLength();
 }
 
 NS_IMETHODIMP
@@ -184,9 +197,9 @@ ImageWrapper::GetFrameAtSize(const IntSize& aSize,
 }
 
 NS_IMETHODIMP_(bool)
-ImageWrapper::IsOpaque()
+ImageWrapper::WillDrawOpaqueNow()
 {
-  return mInnerImage->IsOpaque();
+  return mInnerImage->WillDrawOpaqueNow();
 }
 
 NS_IMETHODIMP_(bool)
@@ -201,23 +214,48 @@ ImageWrapper::GetImageContainer(LayerManager* aManager, uint32_t aFlags)
   return mInnerImage->GetImageContainer(aManager, aFlags);
 }
 
-NS_IMETHODIMP_(DrawResult)
+NS_IMETHODIMP_(bool)
+ImageWrapper::IsImageContainerAvailableAtSize(LayerManager* aManager,
+                                              const IntSize& aSize,
+                                              uint32_t aFlags)
+{
+  return mInnerImage->IsImageContainerAvailableAtSize(aManager, aSize, aFlags);
+}
+
+NS_IMETHODIMP_(already_AddRefed<ImageContainer>)
+ImageWrapper::GetImageContainerAtSize(LayerManager* aManager,
+                                      const IntSize& aSize,
+                                      const Maybe<SVGImageContext>& aSVGContext,
+                                      uint32_t aFlags)
+{
+  return mInnerImage->GetImageContainerAtSize(aManager, aSize,
+                                              aSVGContext, aFlags);
+}
+
+NS_IMETHODIMP_(ImgDrawResult)
 ImageWrapper::Draw(gfxContext* aContext,
                    const nsIntSize& aSize,
                    const ImageRegion& aRegion,
                    uint32_t aWhichFrame,
-                   Filter aFilter,
+                   SamplingFilter aSamplingFilter,
                    const Maybe<SVGImageContext>& aSVGContext,
-                   uint32_t aFlags)
+                   uint32_t aFlags,
+                   float aOpacity)
 {
   return mInnerImage->Draw(aContext, aSize, aRegion, aWhichFrame,
-                           aFilter, aSVGContext, aFlags);
+                           aSamplingFilter, aSVGContext, aFlags, aOpacity);
 }
 
 NS_IMETHODIMP
-ImageWrapper::StartDecoding()
+ImageWrapper::StartDecoding(uint32_t aFlags)
 {
-  return mInnerImage->StartDecoding();
+  return mInnerImage->StartDecoding(aFlags);
+}
+
+bool
+ImageWrapper::StartDecodingWithResult(uint32_t aFlags)
+{
+  return mInnerImage->StartDecodingWithResult(aFlags);
 }
 
 NS_IMETHODIMP
@@ -299,10 +337,11 @@ ImageWrapper::PropagateUseCounters(nsIDocument* aParentDocument)
 nsIntSize
 ImageWrapper::OptimalImageSizeForDest(const gfxSize& aDest,
                                       uint32_t aWhichFrame,
-                                      Filter aFilter, uint32_t aFlags)
+                                      SamplingFilter aSamplingFilter,
+                                      uint32_t aFlags)
 {
-  return mInnerImage->OptimalImageSizeForDest(aDest, aWhichFrame, aFilter,
-                                              aFlags);
+  return mInnerImage->OptimalImageSizeForDest(aDest, aWhichFrame,
+                                              aSamplingFilter, aFlags);
 }
 
 NS_IMETHODIMP_(nsIntRect)

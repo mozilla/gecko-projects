@@ -7,7 +7,6 @@
 #ifndef MOZILLA_DOMSVGPATHSEGLIST_H__
 #define MOZILLA_DOMSVGPATHSEGLIST_H__
 
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
@@ -202,7 +201,7 @@ private:
   SVGAnimatedPathSegList& InternalAList() const;
 
   /// Creates an instance of the appropriate DOMSVGPathSeg sub-class for
-  // aIndex, if it doesn't already exist, and then returs it.
+  // aIndex, if it doesn't already exist, and then returns it.
   already_AddRefed<DOMSVGPathSeg> GetItemAt(uint32_t aIndex);
 
   void MaybeInsertNullInAnimValListAt(uint32_t aIndex,
@@ -231,7 +230,10 @@ private:
    * want to create the DOMSVGPathSeg items lazily on demand.
    */
   struct ItemProxy {
-    ItemProxy(){}
+    ItemProxy()
+      : mItem(nullptr)
+      , mInternalDataIndex(0)
+    {}
     ItemProxy(DOMSVGPathSeg *aItem, uint32_t aInternalDataIndex)
       : mItem(aItem)
       , mInternalDataIndex(aInternalDataIndex)

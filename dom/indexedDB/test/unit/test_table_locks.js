@@ -17,7 +17,7 @@ const loopCount = 100;
 
 var testGenerator = testSteps();
 
-function testSteps()
+function* testSteps()
 {
   let req = indexedDB.open(dbName, dbVersion);
   req.onerror = errorHandler;
@@ -57,7 +57,6 @@ function testSteps()
   yield undefined;
 
   finishTest();
-  yield undefined;
 }
 
 function doReadOnlyTransaction(db, key, remaining)
@@ -83,7 +82,7 @@ function doReadOnlyTransaction(db, key, remaining)
         key = 0;
       }
       doReadOnlyTransaction(db, key, remaining - 1);
-    }
+    };
   };
 }
 
@@ -111,6 +110,6 @@ function doReadWriteTransaction(db, key, remaining)
         key = 0;
       }
       doReadWriteTransaction(db, key, remaining - 1);
-    }
+    };
   };
 }

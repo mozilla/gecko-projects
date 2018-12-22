@@ -12,6 +12,7 @@
 #include "nsIInputStream.h"
 #include "nsTArray.h"
 
+class nsIAsyncInputStream;
 class nsIOutputStream;
 class nsIInputStreamCallback;
 class nsIOutputStreamCallback;
@@ -28,7 +29,8 @@ class nsIEventTarget;
  * aTarget parameter is non-null.
  */
 extern already_AddRefed<nsIInputStreamCallback>
-NS_NewInputStreamReadyEvent(nsIInputStreamCallback* aNotify,
+NS_NewInputStreamReadyEvent(const char* aName,
+                            nsIInputStreamCallback* aNotify,
                             nsIEventTarget* aTarget);
 
 /**
@@ -182,7 +184,7 @@ NS_OutputStreamIsBuffered(nsIOutputStream* aOutputStream);
  *
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
-extern NS_METHOD
+extern nsresult
 NS_CopySegmentToStream(nsIInputStream* aInputStream, void* aClosure,
                        const char* aFromSegment, uint32_t aToOffset,
                        uint32_t aCount, uint32_t* aWriteCount);
@@ -195,7 +197,7 @@ NS_CopySegmentToStream(nsIInputStream* aInputStream, void* aClosure,
  *
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
-extern NS_METHOD
+extern nsresult
 NS_CopySegmentToBuffer(nsIInputStream* aInputStream, void* aClosure,
                        const char* aFromSegment, uint32_t aToOffset,
                        uint32_t aCount, uint32_t* aWriteCount);
@@ -207,7 +209,7 @@ NS_CopySegmentToBuffer(nsIInputStream* aInputStream, void* aClosure,
  *
  * @see nsIOutputStream.idl for a description of this function's parameters.
  */
-extern NS_METHOD
+extern nsresult
 NS_CopySegmentToBuffer(nsIOutputStream* aOutputStream, void* aClosure,
                        char* aToSegment, uint32_t aFromOffset,
                        uint32_t aCount, uint32_t* aReadCount);
@@ -219,7 +221,7 @@ NS_CopySegmentToBuffer(nsIOutputStream* aOutputStream, void* aClosure,
  *
  * @see nsIInputStream.idl for a description of this function's parameters.
  */
-extern NS_METHOD
+extern nsresult
 NS_DiscardSegment(nsIInputStream* aInputStream, void* aClosure,
                   const char* aFromSegment, uint32_t aToOffset,
                   uint32_t aCount, uint32_t* aWriteCount);
@@ -235,7 +237,7 @@ NS_DiscardSegment(nsIInputStream* aInputStream, void* aClosure,
  * This function comes in handy when implementing ReadSegments in terms of an
  * inner stream's ReadSegments.
  */
-extern NS_METHOD
+extern nsresult
 NS_WriteSegmentThunk(nsIInputStream* aInputStream, void* aClosure,
                      const char* aFromSegment, uint32_t aToOffset,
                      uint32_t aCount, uint32_t* aWriteCount);
@@ -260,7 +262,7 @@ struct MOZ_STACK_CLASS nsWriteSegmentThunk
  *        failed
  * @return the result from aInput->Read(...)
  */
-extern NS_METHOD
+extern nsresult
 NS_FillArray(FallibleTArray<char>& aDest, nsIInputStream* aInput,
              uint32_t aKeep, uint32_t* aNewBytes);
 
@@ -291,5 +293,26 @@ NS_InputStreamIsCloneable(nsIInputStream* aSource);
 extern nsresult
 NS_CloneInputStream(nsIInputStream* aSource, nsIInputStream** aCloneOut,
                     nsIInputStream** aReplacementOut = nullptr);
+
+/*
+ * This function returns a non-blocking nsIAsyncInputStream. Internally,
+ * different approaches are used based on what |aSource| is and what it
+ * implements.
+ *
+ * Note that this component takes the owninship of aSource.
+ *
+ * If the |aSource| is already a non-blocking and async stream,
+ * |aAsyncInputStream| will be equal to |aSource|.
+ *
+ * Otherwise, if |aSource| is just non-blocking, NonBlockingAsyncInputStream
+ * class is used in order to make it async.
+ *
+ * The last step is to use nsIStreamTransportService and create a pipe in order
+ * to expose a non-blocking async inputStream and read |aSource| data from
+ * a separate thread.
+ */
+extern nsresult
+NS_MakeAsyncNonBlockingInputStream(already_AddRefed<nsIInputStream> aSource,
+                                   nsIAsyncInputStream** aAsyncInputStream);
 
 #endif // !nsStreamUtils_h__

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,6 +10,7 @@
 #include "nsIGfxInfo.h"
 #include "nsIFile.h"
 #include "nsString.h"
+#include <functional>
 #include <string>
 
 namespace mozilla {
@@ -40,6 +42,10 @@ enum class CrashGuardType : uint32_t
   D3D9Video,
   GLContext,
   D3D11Video,
+  // Add new entries above this line, update the name array in
+  // DriverCrashGuard.cpp, and make sure to add an entry in
+  // ContentParent.cpp.
+
   NUM_TYPES
 };
 
@@ -77,6 +83,10 @@ public:
     // Acting as a proxy between the parent and child process.
     Proxy
   };
+
+  typedef std::function<void(const char* aName, const char* aPrefName)>
+    CrashGuardCallback;
+  static void ForEachActiveCrashGuard(const CrashGuardCallback& aCallback);
 
 protected:
   virtual void Initialize();

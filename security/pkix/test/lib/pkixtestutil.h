@@ -22,8 +22,8 @@
  * limitations under the License.
  */
 
-#ifndef mozilla_pkix_test_pkixtestutils_h
-#define mozilla_pkix_test_pkixtestutils_h
+#ifndef mozilla_pkix_test_pkixtestutil_h
+#define mozilla_pkix_test_pkixtestutil_h
 
 #include <ctime>
 #include <stdint.h> // Some Mozilla-supported compilers lack <cstdint>
@@ -87,8 +87,8 @@ enum class TestDigestAlgorithmID
 
 struct TestPublicKeyAlgorithm
 {
-  explicit TestPublicKeyAlgorithm(const ByteString& algorithmIdentifier)
-    : algorithmIdentifier(algorithmIdentifier) { }
+  explicit TestPublicKeyAlgorithm(const ByteString& aAlgorithmIdentifier)
+    : algorithmIdentifier(aAlgorithmIdentifier) { }
   bool operator==(const TestPublicKeyAlgorithm& other) const
   {
     return algorithmIdentifier == other.algorithmIdentifier;
@@ -364,7 +364,7 @@ ByteString CreateEncodedSerialNumber(long value);
 enum class Critical { No = 0, Yes = 1 };
 
 ByteString CreateEncodedBasicConstraints(bool isCA,
-                                         /*optional*/ long* pathLenConstraint,
+                                         /*optional in*/ const long* pathLenConstraint,
                                          Critical critical);
 
 // Creates a DER-encoded extKeyUsage extension with one EKU OID.
@@ -376,6 +376,8 @@ ByteString CreateEncodedEKUExtension(Input eku, Critical critical);
 class OCSPResponseExtension final
 {
 public:
+  OCSPResponseExtension();
+
   ByteString id;
   bool critical;
   ByteString value;
@@ -412,7 +414,10 @@ public:
 
   std::time_t producedAt;
 
-  OCSPResponseExtension* extensions;
+  // SingleResponse extensions (for the certID given in the constructor).
+  OCSPResponseExtension* singleExtensions;
+  // ResponseData extensions.
+  OCSPResponseExtension* responseExtensions;
   bool includeEmptyExtensions; // If true, include the extension wrapper
                                // regardless of if there are any actual
                                // extensions.
@@ -440,4 +445,4 @@ ByteString CreateEncodedOCSPResponse(OCSPResponseContext& context);
 
 } } } // namespace mozilla::pkix::test
 
-#endif // mozilla_pkix_test_pkixtestutils_h
+#endif // mozilla_pkix_test_pkixtestutil_h

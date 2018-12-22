@@ -8,17 +8,13 @@
 #define nsPKCS11Slot_h
 
 #include "ScopedNSSTypes.h"
-#include "nsICryptoFIPSInfo.h"
 #include "nsIPKCS11Module.h"
-#include "nsIPKCS11ModuleDB.h"
 #include "nsIPKCS11Slot.h"
 #include "nsISupports.h"
-#include "nsNSSShutDown.h"
 #include "nsString.h"
 #include "pk11func.h"
 
-class nsPKCS11Slot : public nsIPKCS11Slot,
-                     public nsNSSShutDownObject
+class nsPKCS11Slot : public nsIPKCS11Slot
 {
 public:
   NS_DECL_ISUPPORTS
@@ -27,20 +23,26 @@ public:
   explicit nsPKCS11Slot(PK11SlotInfo* slot);
 
 protected:
-  virtual ~nsPKCS11Slot();
+  virtual ~nsPKCS11Slot() {}
 
 private:
   mozilla::UniquePK11SlotInfo mSlot;
-  nsString mSlotDesc, mSlotManID, mSlotHWVersion, mSlotFWVersion;
+  // True if this is the "PKCS#11 slot" that provides cryptographic functions.
+  bool mIsInternalCryptoSlot;
+  // True if this is the "PKCS#11 slot" where private keys are stored.
+  bool mIsInternalKeySlot;
+  nsCString mSlotDesc;
+  nsCString mSlotManufacturerID;
+  nsCString mSlotHWVersion;
+  nsCString mSlotFWVersion;
   int mSeries;
 
-  virtual void virtualDestroyNSSReference() override;
-  void destructorSafeDestroyNSSReference();
-  nsresult refreshSlotInfo(const nsNSSShutDownPreventionLock& proofOfLock);
+  nsresult refreshSlotInfo();
+  nsresult GetAttributeHelper(const nsACString& attribute,
+                      /*out*/ nsACString& xpcomOutParam);
 };
 
-class nsPKCS11Module : public nsIPKCS11Module,
-                       public nsNSSShutDownObject
+class nsPKCS11Module : public nsIPKCS11Module
 {
 public:
   NS_DECL_ISUPPORTS
@@ -49,54 +51,10 @@ public:
   explicit nsPKCS11Module(SECMODModule* module);
 
 protected:
-  virtual ~nsPKCS11Module();
+  virtual ~nsPKCS11Module() {}
 
 private:
   mozilla::UniqueSECMODModule mModule;
-
-  virtual void virtualDestroyNSSReference() override;
-  void destructorSafeDestroyNSSReference();
-};
-
-class nsPKCS11ModuleDB : public nsIPKCS11ModuleDB
-                       , public nsICryptoFIPSInfo
-                       , public nsNSSShutDownObject
-{
-public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIPKCS11MODULEDB
-  NS_DECL_NSICRYPTOFIPSINFO
-
-  nsPKCS11ModuleDB();
-
-protected:
-  virtual ~nsPKCS11ModuleDB();
-
-  // Nothing to release.
-  virtual void virtualDestroyNSSReference() override {}
-};
-
-#define NS_PKCS11MODULEDB_CID \
-{ 0xff9fbcd7, 0x9517, 0x4334, \
-  { 0xb9, 0x7a, 0xce, 0xed, 0x78, 0x90, 0x99, 0x74 }}
-
-class MOZ_RAII AutoSECMODListReadLock final
-{
-public:
-  AutoSECMODListReadLock()
-    : mLock(SECMOD_GetDefaultModuleListLock())
-  {
-    MOZ_ASSERT(mLock, "Should have the default SECMOD lock");
-    SECMOD_GetReadLock(mLock);
-  }
-
-  ~AutoSECMODListReadLock()
-  {
-    SECMOD_ReleaseReadLock(mLock);
-  }
-
-private:
-  SECMODListLock* mLock;
 };
 
 #endif // nsPKCS11Slot_h

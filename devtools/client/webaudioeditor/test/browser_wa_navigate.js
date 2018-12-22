@@ -6,28 +6,28 @@
  * the audio graph if both pages have an AudioContext.
  */
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
-  let { panelWin } = panel;
-  let { gFront, $ } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(SIMPLE_CONTEXT_URL);
+  const { panelWin } = panel;
+  const { gFront, $ } = panelWin;
 
-  reload(target);
-
-  var [actors] = yield Promise.all([
+  let events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
+  reload(target);
+  await events;
 
   var { nodes, edges } = countGraphObjects(panelWin);
   is(nodes, 3, "should only be 3 nodes.");
   is(edges, 2, "should only be 2 edges.");
 
-  navigate(target, SIMPLE_NODES_URL);
-
-  var [actors] = yield Promise.all([
+  events = Promise.all([
     getN(gFront, "create-node", 15),
     waitForGraphRendered(panelWin, 15, 0)
   ]);
+  navigate(target, SIMPLE_NODES_URL);
+  await events;
 
   is($("#reload-notice").hidden, true,
     "The 'reload this page' notice should be hidden after context found after navigation.");
@@ -40,5 +40,5 @@ add_task(function*() {
   is(nodes, 15, "after navigation, should have 15 nodes");
   is(edges, 0, "after navigation, should have 0 edges.");
 
-  yield teardown(target);
+  await teardown(target);
 });

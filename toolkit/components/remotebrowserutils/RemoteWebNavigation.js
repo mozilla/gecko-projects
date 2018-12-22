@@ -3,27 +3,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-const { interfaces: Ci, classes: Cc, utils: Cu, results: Cr } = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
+ChromeUtils.defineModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+ChromeUtils.defineModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(this, "Utils",
+  "resource://gre/modules/sessionstore/Utils.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-function makeURI(url)
-{
-  return Services.io.newURI(url, null, null);
+function makeURI(url) {
+  return Services.io.newURI(url);
 }
 
-function readInputStreamToString(aStream)
-{
-  return NetUtil.readInputStreamToString(aStream, aStream.available());
-}
-
-function RemoteWebNavigation()
-{
+function RemoteWebNavigation() {
   this.wrappedJSObject = this;
 }
 
@@ -32,9 +27,9 @@ RemoteWebNavigation.prototype = {
   classID: Components.ID("{4b56964e-cdf3-4bb8-830c-0e2dad3f4ebd}"),
   contractID: "@mozilla.org/remote-web-navigation;1",
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebNavigation, Ci.nsISupports]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebNavigation]),
 
-  swapBrowser: function(aBrowser) {
+  swapBrowser(aBrowser) {
     this._browser = aBrowser;
   },
 
@@ -61,36 +56,68 @@ RemoteWebNavigation.prototype = {
 
   canGoBack: false,
   canGoForward: false,
-  goBack: function() {
+  goBack() {
     this._sendMessage("WebNavigation:GoBack", {});
   },
-  goForward: function() {
+  goForward() {
     this._sendMessage("WebNavigation:GoForward", {});
   },
-  gotoIndex: function(aIndex) {
+  gotoIndex(aIndex) {
     this._sendMessage("WebNavigation:GotoIndex", {index: aIndex});
   },
-  loadURI: function(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
+  loadURI(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
     this.loadURIWithOptions(aURI, aLoadFlags, aReferrer,
-                            Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT,
+                            Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
                             aPostData, aHeaders, null);
   },
-  loadURIWithOptions: function(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
-                               aPostData, aHeaders, aBaseURI) {
+  loadURIWithOptions(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
+                     aPostData, aHeaders, aBaseURI, aTriggeringPrincipal) {
+    // We know the url is going to be loaded, let's start requesting network
+    // connection before the content process asks.
+    // Note that we might have already setup the speculative connection in some
+    // cases, especially when the url is from location bar or its popup menu.
+    if (aURI.startsWith("http:") || aURI.startsWith("https:")) {
+      try {
+        let uri = makeURI(aURI);
+        let principal = aTriggeringPrincipal;
+        // We usually have a aTriggeringPrincipal assigned, but in case we don't
+        // have one, create it with OA inferred from the current context.
+        if (!principal) {
+          let attrs = {
+            userContextId: this._browser.getAttribute("usercontextid") || 0,
+            privateBrowsingId: PrivateBrowsingUtils.isBrowserPrivate(this._browser) ? 1 : 0
+          };
+          principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, attrs);
+        }
+        Services.io.speculativeConnect2(uri, principal, null);
+      } catch (ex) {
+        // Can't setup speculative connection for this uri string for some
+        // reason (such as failing to parse the URI), just ignore it.
+      }
+    }
     this._sendMessage("WebNavigation:LoadURI", {
       uri: aURI,
       flags: aLoadFlags,
       referrer: aReferrer ? aReferrer.spec : null,
       referrerPolicy: aReferrerPolicy,
-      postData: aPostData ? readInputStreamToString(aPostData) : null,
-      headers: aHeaders ? readInputStreamToString(aHeaders) : null,
+      postData: aPostData ? Utils.serializeInputStream(aPostData) : null,
+      headers: aHeaders ? Utils.serializeInputStream(aHeaders) : null,
       baseURI: aBaseURI ? aBaseURI.spec : null,
+      triggeringPrincipal: aTriggeringPrincipal
+                           ? Utils.serializePrincipal(aTriggeringPrincipal)
+                           : null,
+      requestTime: Services.telemetry.msSystemNow(),
     });
   },
-  reload: function(aReloadFlags) {
+  setOriginAttributesBeforeLoading(aOriginAttributes) {
+    this._sendMessage("WebNavigation:SetOriginAttributes", {
+      originAttributes: aOriginAttributes,
+    });
+  },
+  reload(aReloadFlags) {
     this._sendMessage("WebNavigation:Reload", {flags: aReloadFlags});
   },
-  stop: function(aStopFlags) {
+  stop(aStopFlags) {
     this._sendMessage("WebNavigation:Stop", {flags: aStopFlags});
   },
 
@@ -121,11 +148,10 @@ RemoteWebNavigation.prototype = {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
 
-  _sendMessage: function(aMessage, aData) {
+  _sendMessage(aMessage, aData) {
     try {
       this._browser.messageManager.sendAsyncMessage(aMessage, aData);
-    }
-    catch (e) {
+    } catch (e) {
       Cu.reportError(e);
     }
   },

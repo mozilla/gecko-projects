@@ -29,6 +29,9 @@
  *    mozilla::supports_sse4a
  *    mozilla::supports_sse4_1
  *    mozilla::supports_sse4_2
+ *    mozilla::supports_avx
+ *    mozilla::supports_avx2
+ *    mozilla::supports_aes
  *
  * If you're writing code using inline assembly, you should guard it with a
  * call to one of these functions.  For instance:
@@ -126,6 +129,20 @@
   // It's ok to use SSE4.2 instructions based on the -march option.
   #define MOZILLA_PRESUME_SSE4_2 1
 #endif
+#ifdef __AVX__
+  // It's ok to use AVX instructions based on the -march option.
+  #define MOZILLA_PRESUME_AVX 1
+#endif
+#ifdef __AVX2__
+  // It's ok to use AVX instructions based on the -march option.
+  #define MOZILLA_PRESUME_AVX2 1
+#endif
+#ifdef __AES__
+  // It's ok to use AES instructions based on the -march option.
+  #define MOZILLA_PRESUME_AES 1
+#endif
+
+
 
 #ifdef HAVE_CPUID_H
   #define MOZILLA_SSE_HAVE_CPUID_DETECTION
@@ -199,6 +216,17 @@ namespace mozilla {
 #if !defined(MOZILLA_PRESUME_SSE4_2)
     extern bool MFBT_DATA sse4_2_enabled;
 #endif
+#if !defined(MOZILLA_PRESUME_AVX)
+    extern bool MFBT_DATA avx_enabled;
+#endif
+#if !defined(MOZILLA_PRESUME_AVX2)
+    extern bool MFBT_DATA avx2_enabled;
+#endif
+#if !defined(MOZILLA_PRESUME_AES)
+    extern bool MFBT_DATA aes_enabled;
+#endif
+
+
 #endif
   } // namespace sse_private
 
@@ -285,6 +313,37 @@ namespace mozilla {
 #else
   inline bool supports_sse4_2() { return false; }
 #endif
+
+#if defined(MOZILLA_PRESUME_AVX)
+#define MOZILLA_MAY_SUPPORT_AVX 1
+  inline bool supports_avx() { return true; }
+#elif defined(MOZILLA_SSE_HAVE_CPUID_DETECTION)
+#define MOZILLA_MAY_SUPPORT_AVX 1
+  inline bool supports_avx() { return sse_private::avx_enabled; }
+#else
+  inline bool supports_avx() { return false; }
+#endif
+
+#if defined(MOZILLA_PRESUME_AVX2)
+#define MOZILLA_MAY_SUPPORT_AVX2 1
+  inline bool supports_avx2() { return true; }
+#elif defined(MOZILLA_SSE_HAVE_CPUID_DETECTION)
+#define MOZILLA_MAY_SUPPORT_AVX2 1
+  inline bool supports_avx2() { return sse_private::avx2_enabled; }
+#else
+  inline bool supports_avx2() { return false; }
+#endif
+
+#if defined(MOZILLA_PRESUME_AES)
+#define MOZILLA_MAY_SUPPORT_AES 1
+  inline bool supports_aes() { return true; }
+#elif defined(MOZILLA_SSE_HAVE_CPUID_DETECTION)
+#define MOZILLA_MAY_SUPPORT_AES 1
+  inline bool supports_aes() { return sse_private::aes_enabled; }
+#else
+  inline bool supports_aes() { return false; }
+#endif
+
 
 } // namespace mozilla
 

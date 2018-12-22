@@ -3,35 +3,64 @@
  */
 
 // This verifies that bootstrap.js has the expected globals defined
-Components.utils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
 
+const ADDONS = {
+  bootstrap_globals: {
+    "install.rdf": {
+      "id": "bootstrap_globals@tests.mozilla.org",
+    },
+    "bootstrap.js": String.raw`ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+var seenGlobals = new Set();
+var scope = this;
+function checkGlobal(name, type) {
+  if (scope[name] && typeof(scope[name]) == type)
+    seenGlobals.add(name);
+}
+
+var wrapped = {};
+Services.obs.notifyObservers({ wrappedJSObject: wrapped }, "bootstrap-request-globals");
+for (let [name, type] of wrapped.expectedGlobals) {
+  checkGlobal(name, type);
+}
+
+function startup(data, reason) {
+  Services.obs.notifyObservers({ wrappedJSObject: seenGlobals }, "bootstrap-seen-globals");
+}
+
+function install(data, reason) {}
+function shutdown(data, reason) {}
+function uninstall(data, reason) {}
+`,
+  },
+};
+
+
 const EXPECTED_GLOBALS = [
-  ["Worker", "function"],
-  ["ChromeWorker", "function"],
   ["console", "object"]
 ];
 
-function run_test() {
+async function run_test() {
   do_test_pending();
-  startupManager();
+  await promiseStartupManager();
   let sawGlobals = false;
 
   Services.obs.addObserver(function(subject) {
     subject.wrappedJSObject.expectedGlobals = EXPECTED_GLOBALS;
-  }, "bootstrap-request-globals", false);
+  }, "bootstrap-request-globals");
 
   Services.obs.addObserver(function({ wrappedJSObject: seenGlobals }) {
-    for (let [name,] of EXPECTED_GLOBALS)
-      do_check_true(seenGlobals.has(name));
+    for (let [name, ] of EXPECTED_GLOBALS)
+      Assert.ok(seenGlobals.has(name));
 
     sawGlobals = true;
-  }, "bootstrap-seen-globals", false);
+  }, "bootstrap-seen-globals");
 
-  installAllFiles([do_get_addon("bootstrap_globals")], function() {
-    do_check_true(sawGlobals);
-    shutdownManager();
-    do_test_finished();
-  });
+  await AddonTestUtils.promiseInstallXPI(ADDONS.bootstrap_globals);
+  Assert.ok(sawGlobals);
+  await promiseShutdownManager();
+  do_test_finished();
 }

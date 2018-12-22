@@ -14,14 +14,19 @@
 #if defined(XP_UNIX)
 #include "unistd.h"
 #include "dirent.h"
+#include "poll.h"
 #include "sys/stat.h"
-#if defined(ANDROID)
+#if defined(XP_LINUX)
 #include <sys/vfs.h>
 #define statvfs statfs
+#define f_frsize f_bsize
 #else
 #include "sys/statvfs.h"
+#endif // defined(XP_LINUX)
+#if !defined(ANDROID)
+#include "sys/wait.h"
 #include <spawn.h>
-#endif // defined(ANDROID)
+#endif // !defined(ANDROID)
 #endif // defined(XP_UNIX)
 
 #if defined(XP_LINUX)
@@ -36,7 +41,9 @@
 #include <windows.h>
 #include <accctrl.h>
 
-#define PATH_MAX MAX_PATH
+#ifndef PATH_MAX
+#  define PATH_MAX MAX_PATH
+#endif
 
 #endif // defined(XP_WIN)
 
@@ -55,11 +62,15 @@
 #include "nsXPCOMCIDInternal.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
+#include "nsSystemInfo.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsXULAppAPI.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "mozJSComponentLoader.h"
+
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #include "OSFileConstants.h"
 #include "nsIOSFileConstantsService.h"
@@ -78,15 +89,15 @@
 
 namespace mozilla {
 
-// Use an anonymous namespace to hide the symbols and avoid any collision
-// with, for instance, |extern bool gInitialized;|
 namespace {
-/**
- * |true| if this module has been initialized, |false| otherwise
- */
-bool gInitialized = false;
 
-struct Paths {
+StaticRefPtr<OSFileConstantsService> gInstance;
+
+} // anonymous namespace
+
+struct
+OSFileConstantsService::Paths
+{
   /**
    * The name of the directory holding all the libraries (libxpcom, libnss, etc.)
    */
@@ -98,11 +109,6 @@ struct Paths {
    * The user's home directory
    */
   nsString homeDir;
-  /**
-   * The user's desktop directory, if there is one. Otherwise this is
-   * the same as homeDir.
-   */
-  nsString desktopDir;
   /**
    * The user's 'application data' directory.
    * Windows:
@@ -119,31 +125,11 @@ struct Paths {
    */
   nsString userApplicationDataDir;
 
-#if defined(XP_WIN)
-  /**
-   * The user's application data directory.
-   */
-  nsString winAppDataDir;
-  /**
-   * The programs subdirectory in the user's start menu directory.
-   */
-  nsString winStartMenuProgsDir;
-#endif // defined(XP_WIN)
-
 #if defined(XP_MACOSX)
   /**
    * The user's Library directory.
    */
   nsString macUserLibDir;
-  /**
-   * The Application directory, that stores applications installed in the
-   * system.
-   */
-  nsString macLocalApplicationsDir;
-  /**
-   * The user's trash directory.
-   */
-  nsString macTrashDir;
 #endif // defined(XP_MACOSX)
 
   Paths()
@@ -153,34 +139,13 @@ struct Paths {
     profileDir.SetIsVoid(true);
     localProfileDir.SetIsVoid(true);
     homeDir.SetIsVoid(true);
-    desktopDir.SetIsVoid(true);
     userApplicationDataDir.SetIsVoid(true);
-
-#if defined(XP_WIN)
-    winAppDataDir.SetIsVoid(true);
-    winStartMenuProgsDir.SetIsVoid(true);
-#endif // defined(XP_WIN)
 
 #if defined(XP_MACOSX)
     macUserLibDir.SetIsVoid(true);
-    macLocalApplicationsDir.SetIsVoid(true);
-    macTrashDir.SetIsVoid(true);
 #endif // defined(XP_MACOSX)
   }
 };
-
-/**
- * System directories.
- */
-Paths* gPaths = nullptr;
-
-/**
- * (Unix) the umask, which goes in OS.Constants.Sys but
- * can only be looked up (via the system-info service)
- * on the main thread.
- */
-uint32_t gUserUmask = 0;
-} // namespace
 
 /**
  * Return the path to one of the special directories.
@@ -207,34 +172,25 @@ nsresult GetPathToSpecialDir(const char *aKey, nsString& aOutPath)
  * to ensure that this does not break existing code, so that future
  * workers spawned after the profile is setup have these constants.
  *
- * For this purpose, we register an observer to set |gPaths->profileDir|
- * and |gPaths->localProfileDir| once the profile is setup.
+ * For this purpose, we register an observer to set |mPaths->profileDir|
+ * and |mPaths->localProfileDir| once the profile is setup.
  */
-class DelayedPathSetter final: public nsIObserver
-{
-  ~DelayedPathSetter() {}
-
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIOBSERVER
-
-  DelayedPathSetter() {}
-};
-
-NS_IMPL_ISUPPORTS(DelayedPathSetter, nsIObserver)
-
 NS_IMETHODIMP
-DelayedPathSetter::Observe(nsISupports*, const char * aTopic, const char16_t*)
+OSFileConstantsService::Observe(nsISupports*,
+                                const char* aTopic,
+                                const char16_t*)
 {
-  if (gPaths == nullptr) {
-    // Initialization of gPaths has not taken place, something is wrong,
+  if (!mInitialized) {
+    // Initialization has not taken place, something is wrong,
     // don't make things worse.
     return NS_OK;
   }
-  nsresult rv = GetPathToSpecialDir(NS_APP_USER_PROFILE_50_DIR, gPaths->profileDir);
+
+  nsresult rv = GetPathToSpecialDir(NS_APP_USER_PROFILE_50_DIR, mPaths->profileDir);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = GetPathToSpecialDir(NS_APP_USER_PROFILE_LOCAL_50_DIR, gPaths->localProfileDir);
+  rv = GetPathToSpecialDir(NS_APP_USER_PROFILE_LOCAL_50_DIR, mPaths->localProfileDir);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -246,16 +202,15 @@ DelayedPathSetter::Observe(nsISupports*, const char * aTopic, const char16_t*)
  * Perform the part of initialization that can only be
  * executed on the main thread.
  */
-nsresult InitOSFileConstants()
+nsresult
+OSFileConstantsService::InitOSFileConstants()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (gInitialized) {
+  if (mInitialized) {
     return NS_OK;
   }
 
-  gInitialized = true;
-
-  nsAutoPtr<Paths> paths(new Paths);
+  UniquePtr<Paths> paths(new Paths);
 
   // Initialize paths->libDir
   nsCOMPtr<nsIFile> file;
@@ -290,8 +245,7 @@ nsresult InitOSFileConstants()
     if (NS_FAILED(rv)) {
       return rv;
     }
-    RefPtr<DelayedPathSetter> pathSetter = new DelayedPathSetter();
-    rv = obsService->AddObserver(pathSetter, "profile-do-change", false);
+    rv = obsService->AddObserver(this, "profile-do-change", false);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -302,51 +256,24 @@ nsresult InitOSFileConstants()
 
   GetPathToSpecialDir(NS_OS_TEMP_DIR, paths->tmpDir);
   GetPathToSpecialDir(NS_OS_HOME_DIR, paths->homeDir);
-  GetPathToSpecialDir(NS_OS_DESKTOP_DIR, paths->desktopDir);
   GetPathToSpecialDir(XRE_USER_APP_DATA_DIR, paths->userApplicationDataDir);
-
-#if defined(XP_WIN)
-  GetPathToSpecialDir(NS_WIN_APPDATA_DIR, paths->winAppDataDir);
-  GetPathToSpecialDir(NS_WIN_PROGRAMS_DIR, paths->winStartMenuProgsDir);
-#endif // defined(XP_WIN)
 
 #if defined(XP_MACOSX)
   GetPathToSpecialDir(NS_MAC_USER_LIB_DIR, paths->macUserLibDir);
-  GetPathToSpecialDir(NS_OSX_LOCAL_APPLICATIONS_DIR, paths->macLocalApplicationsDir);
-  GetPathToSpecialDir(NS_MAC_TRASH_DIR, paths->macTrashDir);
 #endif // defined(XP_MACOSX)
 
-  gPaths = paths.forget();
+  mPaths = std::move(paths);
 
   // Get the umask from the system-info service.
   // The property will always be present, but it will be zero on
   // non-Unix systems.
-  nsCOMPtr<nsIPropertyBag2> infoService =
-    do_GetService("@mozilla.org/system-info;1");
-  MOZ_ASSERT(infoService, "Could not access the system information service");
-  rv = infoService->GetPropertyAsUint32(NS_LITERAL_STRING("umask"),
-                                        &gUserUmask);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  // nsSystemInfo::gUserUmask is initialized by NS_InitXPCOM2 so we don't need
+  // to initialize the service.
+  mUserUmask = nsSystemInfo::gUserUmask;
 
+  mInitialized = true;
   return NS_OK;
 }
-
-/**
- * Perform the cleaning up that can only be executed on the main thread.
- */
-void CleanupOSFileConstants()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!gInitialized) {
-    return;
-  }
-
-  gInitialized = false;
-  delete gPaths;
-}
-
 
 /**
  * Define a simple read-only property holding an integer.
@@ -404,6 +331,9 @@ static const dom::ConstantSpec gLibcProperties[] =
 {
   // Arguments for open
   INT_CONSTANT(O_APPEND),
+#if defined(O_CLOEXEC)
+  INT_CONSTANT(O_CLOEXEC),
+#endif // defined(O_CLOEXEC)
   INT_CONSTANT(O_CREAT),
 #if defined(O_DIRECTORY)
   INT_CONSTANT(O_DIRECTORY),
@@ -440,6 +370,10 @@ static const dom::ConstantSpec gLibcProperties[] =
 #endif // defined(O_SYNC)
   INT_CONSTANT(O_TRUNC),
   INT_CONSTANT(O_WRONLY),
+
+#if defined(FD_CLOEXEC)
+  INT_CONSTANT(FD_CLOEXEC),
+#endif // defined(FD_CLOEXEC)
 
 #if defined(AT_EACCESS)
   INT_CONSTANT(AT_EACCESS),
@@ -482,16 +416,44 @@ static const dom::ConstantSpec gLibcProperties[] =
   INT_CONSTANT(SEEK_END),
   INT_CONSTANT(SEEK_SET),
 
- // fcntl command values
 #if defined(XP_UNIX)
+  // poll
+  INT_CONSTANT(POLLERR),
+  INT_CONSTANT(POLLHUP),
+  INT_CONSTANT(POLLIN),
+  INT_CONSTANT(POLLNVAL),
+  INT_CONSTANT(POLLOUT),
+
+  // wait
+#if defined(WNOHANG)
+  INT_CONSTANT(WNOHANG),
+#endif // defined(WNOHANG)
+
+  // fcntl command values
   INT_CONSTANT(F_GETLK),
+  INT_CONSTANT(F_SETFD),
+  INT_CONSTANT(F_SETFL),
   INT_CONSTANT(F_SETLK),
   INT_CONSTANT(F_SETLKW),
 
- // flock type values
+  // flock type values
   INT_CONSTANT(F_RDLCK),
   INT_CONSTANT(F_WRLCK),
   INT_CONSTANT(F_UNLCK),
+
+  // splice
+#if defined(SPLICE_F_MOVE)
+  INT_CONSTANT(SPLICE_F_MOVE),
+#endif // defined(SPLICE_F_MOVE)
+#if defined(SPLICE_F_NONBLOCK)
+  INT_CONSTANT(SPLICE_F_NONBLOCK),
+#endif // defined(SPLICE_F_NONBLOCK)
+#if defined(SPLICE_F_MORE)
+  INT_CONSTANT(SPLICE_F_MORE),
+#endif // defined(SPLICE_F_MORE)
+#if defined(SPLICE_F_GIFT)
+  INT_CONSTANT(SPLICE_F_GIFT),
+#endif // defined(SPLICE_F_GIFT)
 #endif // defined(XP_UNIX)
   // copyfile
 #if defined(COPYFILE_DATA)
@@ -511,6 +473,7 @@ static const dom::ConstantSpec gLibcProperties[] =
   INT_CONSTANT(EFAULT),
   INT_CONSTANT(EFBIG),
   INT_CONSTANT(EINVAL),
+  INT_CONSTANT(EINTR),
   INT_CONSTANT(EIO),
   INT_CONSTANT(EISDIR),
 #if defined(ELOOP) // not defined with VC9
@@ -662,7 +625,7 @@ static const dom::ConstantSpec gLibcProperties[] =
 
   { "OSFILE_SIZEOF_STATVFS", JS::Int32Value(sizeof (struct statvfs)) },
 
-  { "OSFILE_OFFSETOF_STATVFS_F_BSIZE", JS::Int32Value(offsetof (struct statvfs, f_bsize)) },
+  { "OSFILE_OFFSETOF_STATVFS_F_FRSIZE", JS::Int32Value(offsetof (struct statvfs, f_frsize)) },
   { "OSFILE_OFFSETOF_STATVFS_F_BAVAIL", JS::Int32Value(offsetof (struct statvfs, f_bavail)) },
 
 #endif // defined(XP_UNIX)
@@ -804,8 +767,9 @@ JSObject *GetOrCreateObjectProperty(JSContext *cx, JS::Handle<JSObject*> aObject
       return &val.toObject();
     }
 
-    JS_ReportErrorNumber(cx, js::GetErrorMessage, nullptr,
-      JSMSG_UNEXPECTED_TYPE, aProperty, "not an object");
+    JS_ReportErrorNumberASCII(cx, js::GetErrorMessage, nullptr,
+                              JSMSG_UNEXPECTED_TYPE,
+                              aProperty, "not an object");
     return nullptr;
   }
   return JS_DefineObject(cx, aObject, aProperty, nullptr, JSPROP_ENUMERATE);
@@ -834,111 +798,97 @@ bool SetStringProperty(JSContext *cx, JS::Handle<JSObject*> aObject, const char 
  * This function creates or uses JS object |OS.Constants| to store
  * all its constants.
  */
-bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
+bool
+OSFileConstantsService::DefineOSFileConstants(JSContext* aCx,
+                                              JS::Handle<JSObject*> aGlobal)
 {
-  MOZ_ASSERT(gInitialized);
-
-  if (gPaths == nullptr) {
-    // If an initialization error was ignored, we may end up with
-    // |gInitialized == true| but |gPaths == nullptr|. We cannot
-    // |MOZ_ASSERT| this, as this would kill precompile_cache.js,
-    // so we simply return an error.
-    JS_ReportErrorNumber(cx, js::GetErrorMessage, nullptr,
-      JSMSG_CANT_OPEN, "OSFileConstants", "initialization has failed");
+  if (!mInitialized) {
+    JS_ReportErrorNumberASCII(aCx, js::GetErrorMessage, nullptr,
+                              JSMSG_CANT_OPEN,
+                              "OSFileConstants", "initialization has failed");
     return false;
   }
 
-  JS::Rooted<JSObject*> objOS(cx);
-  if (!(objOS = GetOrCreateObjectProperty(cx, global, "OS"))) {
+  JS::Rooted<JSObject*> objOS(aCx);
+  if (!(objOS = GetOrCreateObjectProperty(aCx, aGlobal, "OS"))) {
     return false;
   }
-  JS::Rooted<JSObject*> objConstants(cx);
-  if (!(objConstants = GetOrCreateObjectProperty(cx, objOS, "Constants"))) {
+  JS::Rooted<JSObject*> objConstants(aCx);
+  if (!(objConstants = GetOrCreateObjectProperty(aCx, objOS, "Constants"))) {
     return false;
   }
 
   // Build OS.Constants.libc
 
-  JS::Rooted<JSObject*> objLibc(cx);
-  if (!(objLibc = GetOrCreateObjectProperty(cx, objConstants, "libc"))) {
+  JS::Rooted<JSObject*> objLibc(aCx);
+  if (!(objLibc = GetOrCreateObjectProperty(aCx, objConstants, "libc"))) {
     return false;
   }
-  if (!dom::DefineConstants(cx, objLibc, gLibcProperties)) {
+  if (!dom::DefineConstants(aCx, objLibc, gLibcProperties)) {
     return false;
   }
 
 #if defined(XP_WIN)
   // Build OS.Constants.Win
 
-  JS::Rooted<JSObject*> objWin(cx);
-  if (!(objWin = GetOrCreateObjectProperty(cx, objConstants, "Win"))) {
+  JS::Rooted<JSObject*> objWin(aCx);
+  if (!(objWin = GetOrCreateObjectProperty(aCx, objConstants, "Win"))) {
     return false;
   }
-  if (!dom::DefineConstants(cx, objWin, gWinProperties)) {
+  if (!dom::DefineConstants(aCx, objWin, gWinProperties)) {
     return false;
   }
 #endif // defined(XP_WIN)
 
   // Build OS.Constants.Sys
 
-  JS::Rooted<JSObject*> objSys(cx);
-  if (!(objSys = GetOrCreateObjectProperty(cx, objConstants, "Sys"))) {
+  JS::Rooted<JSObject*> objSys(aCx);
+  if (!(objSys = GetOrCreateObjectProperty(aCx, objConstants, "Sys"))) {
     return false;
   }
 
-#if defined(MOZ_WIDGET_GONK)
-    JSString* strVersion = JS_NewStringCopyZ(cx, "Gonk");
-    if (!strVersion){
-      return false;
-    }
-    JS::Rooted<JS::Value> valVersion(cx, JS::StringValue(strVersion));
-    if (!JS_SetProperty(cx, objSys, "Name", valVersion)) {
-      return false;
-  }
-#else
   nsCOMPtr<nsIXULRuntime> runtime = do_GetService(XULRUNTIME_SERVICE_CONTRACTID);
   if (runtime) {
     nsAutoCString os;
     DebugOnly<nsresult> rv = runtime->GetOS(os);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-    JSString* strVersion = JS_NewStringCopyZ(cx, os.get());
+    JSString* strVersion = JS_NewStringCopyZ(aCx, os.get());
     if (!strVersion) {
       return false;
     }
 
-    JS::Rooted<JS::Value> valVersion(cx, JS::StringValue(strVersion));
-    if (!JS_SetProperty(cx, objSys, "Name", valVersion)) {
+    JS::Rooted<JS::Value> valVersion(aCx, JS::StringValue(strVersion));
+    if (!JS_SetProperty(aCx, objSys, "Name", valVersion)) {
       return false;
     }
   }
-#endif // defined(MOZ_WIDGET_GONK)
 
 #if defined(DEBUG)
-  JS::Rooted<JS::Value> valDebug(cx, JS::TrueValue());
-  if (!JS_SetProperty(cx, objSys, "DEBUG", valDebug)) {
+  JS::Rooted<JS::Value> valDebug(aCx, JS::TrueValue());
+  if (!JS_SetProperty(aCx, objSys, "DEBUG", valDebug)) {
     return false;
   }
 #endif
 
 #if defined(HAVE_64BIT_BUILD)
-  JS::Rooted<JS::Value> valBits(cx, JS::Int32Value(64));
+  JS::Rooted<JS::Value> valBits(aCx, JS::Int32Value(64));
 #else
-  JS::Rooted<JS::Value> valBits(cx, JS::Int32Value(32));
+  JS::Rooted<JS::Value> valBits(aCx, JS::Int32Value(32));
 #endif //defined (HAVE_64BIT_BUILD)
-  if (!JS_SetProperty(cx, objSys, "bits", valBits)) {
+  if (!JS_SetProperty(aCx, objSys, "bits", valBits)) {
     return false;
   }
 
-  if (!JS_DefineProperty(cx, objSys, "umask", gUserUmask,
+  if (!JS_DefineProperty(aCx, objSys, "umask", mUserUmask,
                          JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)) {
       return false;
   }
 
   // Build OS.Constants.Path
 
-  JS::Rooted<JSObject*> objPath(cx);
-  if (!(objPath = GetOrCreateObjectProperty(cx, objConstants, "Path"))) {
+  JS::Rooted<JSObject*> objPath(aCx);
+  if (!(objPath = GetOrCreateObjectProperty(aCx, objConstants, "Path"))) {
     return false;
   }
 
@@ -950,7 +900,7 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   // Under MacOS X, for some reason, libxul is called simply "XUL",
   // and we need to provide the full path.
   nsAutoString libxul;
-  libxul.Append(gPaths->libDir);
+  libxul.Append(mPaths->libDir);
   libxul.AppendLiteral("/XUL");
 #else
   // On other platforms, libxul is a library "xul" with regular
@@ -961,62 +911,40 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   libxul.AppendLiteral(DLL_SUFFIX);
 #endif // defined(XP_MACOSX)
 
-  if (!SetStringProperty(cx, objPath, "libxul", libxul)) {
+  if (!SetStringProperty(aCx, objPath, "libxul", libxul)) {
     return false;
   }
 
-  if (!SetStringProperty(cx, objPath, "libDir", gPaths->libDir)) {
+  if (!SetStringProperty(aCx, objPath, "libDir", mPaths->libDir)) {
     return false;
   }
 
-  if (!SetStringProperty(cx, objPath, "tmpDir", gPaths->tmpDir)) {
+  if (!SetStringProperty(aCx, objPath, "tmpDir", mPaths->tmpDir)) {
     return false;
   }
 
   // Configure profileDir only if it is available at this stage
-  if (!gPaths->profileDir.IsVoid()
-    && !SetStringProperty(cx, objPath, "profileDir", gPaths->profileDir)) {
+  if (!mPaths->profileDir.IsVoid()
+    && !SetStringProperty(aCx, objPath, "profileDir", mPaths->profileDir)) {
     return false;
   }
 
   // Configure localProfileDir only if it is available at this stage
-  if (!gPaths->localProfileDir.IsVoid()
-    && !SetStringProperty(cx, objPath, "localProfileDir", gPaths->localProfileDir)) {
+  if (!mPaths->localProfileDir.IsVoid()
+    && !SetStringProperty(aCx, objPath, "localProfileDir", mPaths->localProfileDir)) {
     return false;
   }
 
-  if (!SetStringProperty(cx, objPath, "homeDir", gPaths->homeDir)) {
+  if (!SetStringProperty(aCx, objPath, "homeDir", mPaths->homeDir)) {
     return false;
   }
 
-  if (!SetStringProperty(cx, objPath, "desktopDir", gPaths->desktopDir)) {
+  if (!SetStringProperty(aCx, objPath, "userApplicationDataDir", mPaths->userApplicationDataDir)) {
     return false;
   }
-
-  if (!SetStringProperty(cx, objPath, "userApplicationDataDir", gPaths->userApplicationDataDir)) {
-    return false;
-  }
-
-#if defined(XP_WIN)
-  if (!SetStringProperty(cx, objPath, "winAppDataDir", gPaths->winAppDataDir)) {
-    return false;
-  }
-
-  if (!SetStringProperty(cx, objPath, "winStartMenuProgsDir", gPaths->winStartMenuProgsDir)) {
-    return false;
-  }
-#endif // defined(XP_WIN)
 
 #if defined(XP_MACOSX)
-  if (!SetStringProperty(cx, objPath, "macUserLibDir", gPaths->macUserLibDir)) {
-    return false;
-  }
-
-  if (!SetStringProperty(cx, objPath, "macLocalApplicationsDir", gPaths->macLocalApplicationsDir)) {
-    return false;
-  }
-
-  if (!SetStringProperty(cx, objPath, "macTrashDir", gPaths->macTrashDir)) {
+  if (!SetStringProperty(aCx, objPath, "macUserLibDir", mPaths->macUserLibDir)) {
     return false;
   }
 #endif // defined(XP_MACOSX)
@@ -1038,40 +966,63 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
   libsqlite3 = libxul;
 #endif // defined(ANDROID) || defined(XP_WIN)
 
-  if (!SetStringProperty(cx, objPath, "libsqlite3", libsqlite3)) {
+  if (!SetStringProperty(aCx, objPath, "libsqlite3", libsqlite3)) {
     return false;
   }
 
   return true;
 }
 
-NS_IMPL_ISUPPORTS(OSFileConstantsService, nsIOSFileConstantsService)
+NS_IMPL_ISUPPORTS(OSFileConstantsService, nsIOSFileConstantsService,
+                  nsIObserver)
+
+/* static */ already_AddRefed<OSFileConstantsService>
+OSFileConstantsService::GetOrCreate()
+{
+  if (!gInstance) {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    RefPtr<OSFileConstantsService> service = new OSFileConstantsService();
+    nsresult rv = service->InitOSFileConstants();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+
+    gInstance = service.forget();
+    ClearOnShutdown(&gInstance);
+  }
+
+  RefPtr<OSFileConstantsService> copy = gInstance;
+  return copy.forget();
+}
 
 OSFileConstantsService::OSFileConstantsService()
+  : mInitialized(false)
+  , mUserUmask(0)
 {
   MOZ_ASSERT(NS_IsMainThread());
 }
 
 OSFileConstantsService::~OSFileConstantsService()
 {
-  mozilla::CleanupOSFileConstants();
+  MOZ_ASSERT(NS_IsMainThread());
 }
-
 
 NS_IMETHODIMP
 OSFileConstantsService::Init(JSContext *aCx)
 {
-  nsresult rv = mozilla::InitOSFileConstants();
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv = InitOSFileConstants();
   if (NS_FAILED(rv)) {
     return rv;
   }
 
   mozJSComponentLoader* loader = mozJSComponentLoader::Get();
   JS::Rooted<JSObject*> targetObj(aCx);
-  rv = loader->FindTargetObject(aCx, &targetObj);
-  NS_ENSURE_SUCCESS(rv, rv);
+  loader->FindTargetObject(aCx, &targetObj);
 
-  if (!mozilla::DefineOSFileConstants(aCx, targetObj)) {
+  if (!DefineOSFileConstants(aCx, targetObj)) {
     return NS_ERROR_FAILURE;
   }
 

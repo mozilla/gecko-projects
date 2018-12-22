@@ -9,31 +9,28 @@
 const TEST_URI = "data:text/html;charset=UTF-8," +
   "<p>Switch to inspector on pick</p>";
 
-add_task(function* () {
-  let tab = yield addTab(TEST_URI);
-  let toolbox = yield openToolbox(tab);
+add_task(async function() {
+  const tab = await addTab(TEST_URI);
+  const toolbox = await openToolbox(tab);
 
-  yield startPickerAndAssertSwitchToInspector(toolbox);
+  await startPickerAndAssertSwitchToInspector(toolbox);
 
   info("Stoppping element picker.");
-  yield toolbox.highlighterUtils.stopPicker();
+  await toolbox.highlighterUtils.stopPicker();
 });
 
 function openToolbox(tab) {
   info("Opening webconsole.");
-  let target = TargetFactory.forTab(tab);
+  const target = TargetFactory.forTab(tab);
   return gDevTools.showToolbox(target, "webconsole");
 }
 
-function* startPickerAndAssertSwitchToInspector(toolbox) {
+async function startPickerAndAssertSwitchToInspector(toolbox) {
   info("Clicking element picker button.");
-  let pickButton = toolbox.doc.querySelector("#command-button-pick");
+  const pickButton = toolbox.doc.querySelector("#command-button-pick");
   pickButton.click();
 
   info("Waiting for inspector to be selected.");
-  yield toolbox.once("inspector-selected");
+  await toolbox.once("inspector-selected");
   is(toolbox.currentToolId, "inspector", "Switched to the inspector");
-
-  info("Waiting for inspector to update.");
-  yield toolbox.getCurrentPanel().once("inspector-updated");
 }

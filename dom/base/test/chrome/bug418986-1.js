@@ -22,6 +22,8 @@ var test = function (isContent) {
     ["screen.availTop", 0],
     ["screen.width", "innerWidth"],
     ["screen.height", "innerHeight"],
+    ["screen.orientation.type", "'landscape-primary'"],
+    ["screen.orientation.angle", 0],
     ["screen.mozOrientation", "'landscape-primary'"],
     ["devicePixelRatio", 1]
   ];
@@ -32,7 +34,7 @@ var test = function (isContent) {
   };
 
   // Returns generator object that iterates through pref values.
-  let prefVals = (for (prefVal of [false, true]) prefVal);
+  let prefVals = (function*() { yield false; yield true; })();
 
   // The main test function, runs until all pref values are exhausted.
   let nextTest = function () {

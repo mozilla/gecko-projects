@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/TextTrackRegion.h"
-#include "mozilla/dom/VTTRegionBinding.h"
 
 namespace mozilla {
 namespace dom {
@@ -21,7 +20,7 @@ NS_INTERFACE_MAP_END
 JSObject*
 TextTrackRegion::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return VTTRegionBinding::Wrap(aCx, this, aGivenProto);
+  return VTTRegion_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<TextTrackRegion>
@@ -45,12 +44,14 @@ TextTrackRegion::TextTrackRegion(nsISupports* aGlobal)
   , mRegionAnchorY(100)
   , mViewportAnchorX(0)
   , mViewportAnchorY(100)
+  , mScroll(ScrollSetting::_empty)
 {
 }
 
 void
 TextTrackRegion::CopyValues(TextTrackRegion& aRegion)
 {
+  mId = aRegion.Id();
   mWidth = aRegion.Width();
   mLines = aRegion.Lines();
   mRegionAnchorX = aRegion.RegionAnchorX();

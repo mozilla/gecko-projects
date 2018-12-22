@@ -6,16 +6,14 @@ var EXPORTED_SYMBOLS = [
   "AsyncRunner",
 ];
 
-const { interfaces: Ci, classes: Cc } = Components;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function AsyncRunner(callbacks) {
   this._callbacks = callbacks;
   this._iteratorQueue = [];
 
   // This catches errors reported to the console, e.g., via Cu.reportError.
-  Cc["@mozilla.org/consoleservice;1"].
-    getService(Ci.nsIConsoleService).
-    registerListener(this);
+  Services.console.registerListener(this);
 }
 
 AsyncRunner.prototype = {
@@ -38,8 +36,7 @@ AsyncRunner.prototype = {
         this.next();
         return;
       }
-    }
-    catch (err) {
+    } catch (err) {
       this._callbacks.error(err);
     }
 
@@ -53,16 +50,13 @@ AsyncRunner.prototype = {
   },
 
   destroy: function AR_destroy() {
-    Cc["@mozilla.org/consoleservice;1"].
-      getService(Ci.nsIConsoleService).
-      unregisterListener(this);
+    Services.console.unregisterListener(this);
     this.destroy = function AR_alreadyDestroyed() {};
   },
 
   observe: function AR_consoleServiceListener(msg) {
     if (msg instanceof Ci.nsIScriptError &&
-        !(msg.flags & Ci.nsIScriptError.warningFlag))
-    {
+        !(msg.flags & Ci.nsIScriptError.warningFlag)) {
       this._callbacks.consoleError(msg);
     }
   },

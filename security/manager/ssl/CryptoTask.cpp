@@ -9,16 +9,6 @@
 
 namespace mozilla {
 
-CryptoTask::~CryptoTask()
-{
-  MOZ_ASSERT(mReleasedNSSResources);
-
-  nsNSSShutDownPreventionLock lock;
-  if (!isAlreadyShutDown()) {
-    shutdown(calledFromObject);
-  }
-}
-
 nsresult
 CryptoTask::Dispatch(const nsACString& taskThreadName)
 {
@@ -31,13 +21,13 @@ CryptoTask::Dispatch(const nsACString& taskThreadName)
   }
 
   // Can't add 'this' as the event to run, since mThread may not be set yet
-  nsresult rv = NS_NewThread(getter_AddRefs(mThread), nullptr,
-                             nsIThreadManager::DEFAULT_STACK_SIZE);
+  nsresult rv = NS_NewNamedThread(taskThreadName, getter_AddRefs(mThread),
+                                  nullptr,
+                                  nsIThreadManager::DEFAULT_STACK_SIZE);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  NS_SetThreadName(mThread, taskThreadName);
   // Note: event must not null out mThread!
   return mThread->Dispatch(this, NS_DISPATCH_NORMAL);
 }
@@ -46,23 +36,10 @@ NS_IMETHODIMP
 CryptoTask::Run()
 {
   if (!NS_IsMainThread()) {
-    nsNSSShutDownPreventionLock locker;
-    if (isAlreadyShutDown()) {
-      mRv = NS_ERROR_NOT_AVAILABLE;
-    } else {
-      mRv = CalculateResult();
-    }
+    mRv = CalculateResult();
     NS_DispatchToMainThread(this);
   } else {
     // back on the main thread
-
-    // call ReleaseNSSResources now, before calling CallCallback, so that
-    // CryptoTasks have consistent behavior regardless of whether NSS is shut
-    // down between CalculateResult being called and CallCallback being called.
-    if (!mReleasedNSSResources) {
-      mReleasedNSSResources = true;
-      ReleaseNSSResources();
-    }
 
     CallCallback(mRv);
 
@@ -79,17 +56,6 @@ CryptoTask::Run()
   }
 
   return NS_OK;
-}
-
-void
-CryptoTask::virtualDestroyNSSReference()
-{
-  MOZ_ASSERT(NS_IsMainThread(),
-             "virtualDestroyNSSReference called off the main thread");
-  if (!mReleasedNSSResources) {
-    mReleasedNSSResources = true;
-    ReleaseNSSResources();
-  }
 }
 
 } // namespace mozilla

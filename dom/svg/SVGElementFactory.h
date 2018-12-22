@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SVGElementFactory_h
 #define mozilla_dom_SVGElementFactory_h
 
-class nsIAtom;
+class nsAtom;
 
 namespace mozilla {
 namespace dom {
@@ -16,11 +16,34 @@ class SVGElementFactory {
 public:
   static void Init();
   static void Shutdown();
-
-  static bool Exists(nsIAtom *aTag);
 };
+
+typedef nsresult (*SVGContentCreatorFunction)(
+  nsIContent** aResult,
+  already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
+  mozilla::dom::FromParser aFromParser);
 
 } // namespace dom
 } // namespace mozilla
+
+#define SVG_TAG(_tag, _classname)                                              \
+  nsresult NS_NewSVG##_classname##Element(                                     \
+    nsIContent** aResult,                                                      \
+    already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,                      \
+    mozilla::dom::FromParser aFromParser);
+
+#define SVG_FROM_PARSER_TAG(_tag, _classname)                                  \
+  nsresult NS_NewSVG##_classname##Element(                                     \
+    nsIContent** aResult,                                                      \
+    already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,                      \
+    mozilla::dom::FromParser aFromParser);
+#include "SVGTagList.h"
+#undef SVG_TAG
+#undef SVG_FROM_PARSER_TAG
+
+nsresult
+NS_NewSVGUnknownElement(nsIContent** aResult,
+                        already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
+                        mozilla::dom::FromParser aFromParser);
 
 #endif /* mozilla_dom_SVGElementFactory_h */

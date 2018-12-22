@@ -7,25 +7,13 @@
 const DEBUG = false;
 function debug(s) { dump("-*- NotificationStorage.js: " + s + "\n"); }
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const NOTIFICATIONSTORAGE_CID = "{37f819b0-0b5c-11e3-8ffd-0800200c9a66}";
 const NOTIFICATIONSTORAGE_CONTRACTID = "@mozilla.org/notificationStorage;1";
 
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageSender");
-
-XPCOMUtils.defineLazyServiceGetter(this, "appsService",
-                                   "@mozilla.org/AppsService;1",
-                                   "nsIAppsService");
+ChromeUtils.defineModuleGetter(this, "Services",
+                               "resource://gre/modules/Services.jsm");
 
 const kMessageNotificationGetAllOk = "Notification:GetAll:Return:OK";
 const kMessageNotificationGetAllKo = "Notification:GetAll:Return:KO";
@@ -48,7 +36,7 @@ function NotificationStorage() {
   this._requests = {};
   this._requestCount = 0;
 
-  Services.obs.addObserver(this, "xpcom-shutdown", false);
+  Services.obs.addObserver(this, "xpcom-shutdown");
 
   // Register for message listeners.
   this.registerListeners();
@@ -58,13 +46,13 @@ NotificationStorage.prototype = {
 
   registerListeners: function() {
     for (let message of kMessages) {
-      cpmm.addMessageListener(message, this);
+      Services.cpmm.addMessageListener(message, this);
     }
   },
 
   unregisterListeners: function() {
     for (let message of kMessages) {
-      cpmm.removeMessageListener(message, this);
+      Services.cpmm.removeMessageListener(message, this);
     }
   },
 
@@ -76,15 +64,8 @@ NotificationStorage.prototype = {
     }
   },
 
-  canPut: function(aOrigin) {
-    if (DEBUG) debug("Querying appService for: " + aOrigin);
-    let rv = !!appsService.getAppByManifestURL(aOrigin);
-    if (DEBUG) debug("appService returned: " + rv);
-    return rv;
-  },
-
   put: function(origin, id, title, dir, lang, body, tag, icon, alertName,
-                data, behavior, serviceWorkerRegistrationID) {
+                data, behavior, serviceWorkerRegistrationScope) {
     if (DEBUG) { debug("PUT: " + origin + " " + id + ": " + title); }
     var notification = {
       id: id,
@@ -99,7 +80,7 @@ NotificationStorage.prototype = {
       origin: origin,
       data: data,
       mozbehavior: behavior,
-      serviceWorkerRegistrationID: serviceWorkerRegistrationID,
+      serviceWorkerRegistrationScope: serviceWorkerRegistrationScope,
     };
 
     this._notifications[id] = notification;
@@ -118,8 +99,8 @@ NotificationStorage.prototype = {
       this._byTag[origin][tag] = notification;
     };
 
-    if (this.canPut(origin)) {
-      cpmm.sendAsyncMessage("Notification:Save", {
+    if (serviceWorkerRegistrationScope) {
+      Services.cpmm.sendAsyncMessage("Notification:Save", {
         origin: origin,
         notification: notification
       });
@@ -141,9 +122,9 @@ NotificationStorage.prototype = {
       this.searchID = id;
       this.originalCallback = originalCallback;
       var self = this;
-      this.handle = function(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationID) {
+      this.handle = function(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationScope) {
         if (id == this.searchID) {
-          self.originalCallback.handle(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationID);
+          self.originalCallback.handle(id, title, dir, lang, body, tag, icon, data, behavior, serviceWorkerRegistrationScope);
         }
       };
       this.done = function() {
@@ -164,7 +145,7 @@ NotificationStorage.prototype = {
       delete this._notifications[id];
     }
 
-    cpmm.sendAsyncMessage("Notification:Delete", {
+    Services.cpmm.sendAsyncMessage("Notification:Delete", {
       origin: origin,
       id: id
     });
@@ -209,7 +190,7 @@ NotificationStorage.prototype = {
     };
     var requestID = this._requestCount++;
     this._requests[requestID] = request;
-    cpmm.sendAsyncMessage("Notification:GetAll", {
+    Services.cpmm.sendAsyncMessage("Notification:GetAll", {
       origin: origin,
       requestID: requestID
     });
@@ -235,7 +216,7 @@ NotificationStorage.prototype = {
     // fetching from the database.
     notifications.forEach(function(notification) {
       try {
-        Services.tm.currentThread.dispatch(
+        Services.tm.dispatchToMainThread(
           callback.handle.bind(callback,
                                notification.id,
                                notification.title,
@@ -246,22 +227,20 @@ NotificationStorage.prototype = {
                                notification.icon,
                                notification.data,
                                notification.mozbehavior,
-                               notification.serviceWorkerRegistrationID),
-          Ci.nsIThread.DISPATCH_NORMAL);
+                               notification.serviceWorkerRegistrationScope));
       } catch (e) {
         if (DEBUG) { debug("Error calling callback handle: " + e); }
       }
     });
     try {
-      Services.tm.currentThread.dispatch(callback.done,
-                                         Ci.nsIThread.DISPATCH_NORMAL);
+      Services.tm.dispatchToMainThread(callback.done);
     } catch (e) {
       if (DEBUG) { debug("Error calling callback done: " + e); }
     }
   },
 
   _populateCache: function(notifications) {
-    notifications.forEach(function(notification) {
+    notifications.forEach(notification => {
       this._notifications[notification.id] = notification;
       if (notification.tag && notification.origin) {
         let tag = notification.tag;
@@ -271,14 +250,13 @@ NotificationStorage.prototype = {
         }
         this._byTag[origin][tag] = notification;
       }
-    }.bind(this));
+    });
     this._cached = true;
   },
 
   classID : Components.ID(NOTIFICATIONSTORAGE_CID),
   contractID : NOTIFICATIONSTORAGE_CONTRACTID,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsINotificationStorage,
-                                         Ci.nsIMessageListener]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsINotificationStorage]),
 };
 
 

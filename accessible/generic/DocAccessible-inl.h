@@ -91,19 +91,6 @@ DocAccessible::UpdateText(nsIContent* aTextNode)
 }
 
 inline void
-DocAccessible::UpdateRootElIfNeeded()
-{
-  dom::Element* rootEl = mDocumentNode->GetBodyElement();
-  if (!rootEl) {
-    rootEl = mDocumentNode->GetRootElement();
-  }
-  if (rootEl != mContent) {
-    mContent = rootEl;
-    SetRoleMapEntry(aria::GetRoleMap(rootEl));
-  }
-}
-
-inline void
 DocAccessible::AddScrollListener()
 {
   // Delay scroll initializing until the document has a root frame.
@@ -148,8 +135,7 @@ DocAccessible::NotifyOfLoad(uint32_t aLoadEventType)
 inline void
 DocAccessible::MaybeNotifyOfValueChange(Accessible* aAccessible)
 {
-  a11y::role role = aAccessible->Role();
-  if (role == roles::ENTRY || role == roles::COMBOBOX)
+  if (aAccessible->IsCombobox() || aAccessible->Role() == roles::ENTRY)
     FireDelayedEvent(nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE, aAccessible);
 }
 
@@ -158,6 +144,42 @@ DocAccessible::GetAccessibleEvenIfNotInMapOrContainer(nsINode* aNode) const
 {
   Accessible* acc = GetAccessibleEvenIfNotInMap(aNode);
   return acc ? acc : GetContainerAccessible(aNode);
+}
+
+inline void
+DocAccessible::CreateSubtree(Accessible* aChild)
+{
+  // If a focused node has been shown then it could mean its frame was recreated
+  // while the node stays focused and we need to fire focus event on
+  // the accessible we just created. If the queue contains a focus event for
+  // this node already then it will be suppressed by this one.
+  Accessible* focusedAcc = nullptr;
+  CacheChildrenInSubtree(aChild, &focusedAcc);
+
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eVerbose)) {
+    logging::Tree("TREE", "Created subtree", aChild);
+  }
+#endif
+
+  // Fire events for ARIA elements.
+  if (aChild->HasARIARole()) {
+    roles::Role role = aChild->ARIARole();
+    if (role == roles::MENUPOPUP) {
+      FireDelayedEvent(nsIAccessibleEvent::EVENT_MENUPOPUP_START, aChild);
+    }
+    else if (role == roles::ALERT) {
+      FireDelayedEvent(nsIAccessibleEvent::EVENT_ALERT, aChild);
+    }
+  }
+
+  // XXX: do we really want to send focus to focused DOM node not taking into
+  // account active item?
+  if (focusedAcc) {
+    FocusMgr()->DispatchFocusEvent(this, focusedAcc);
+    SelectionMgr()->
+      SetControlSelectionListener(focusedAcc->GetNode()->AsElement());
+  }
 }
 
 } // namespace a11y

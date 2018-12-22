@@ -45,12 +45,12 @@ public:
     : mStart(T())
     , mEnd(T())
     , mFuzz(T())
-  {}
+  { }
 
   template<typename StartArg, typename EndArg>
   Interval(StartArg&& aStart, EndArg&& aEnd)
-    : mStart(Forward<StartArg>(aStart))
-    , mEnd(Forward<EndArg>(aEnd))
+    : mStart(std::forward<StartArg>(aStart))
+    , mEnd(std::forward<EndArg>(aEnd))
     , mFuzz()
   {
     MOZ_ASSERT(aStart <= aEnd);
@@ -58,9 +58,9 @@ public:
 
   template<typename StartArg, typename EndArg, typename FuzzArg>
   Interval(StartArg&& aStart, EndArg&& aEnd, FuzzArg&& aFuzz)
-    : mStart(Forward<StartArg>(aStart))
-    , mEnd(Forward<EndArg>(aEnd))
-    , mFuzz(Forward<FuzzArg>(aFuzz))
+    : mStart(std::forward<StartArg>(aStart))
+    , mEnd(std::forward<EndArg>(aEnd))
+    , mFuzz(std::forward<FuzzArg>(aFuzz))
   {
     MOZ_ASSERT(aStart <= aEnd);
   }
@@ -69,12 +69,12 @@ public:
     : mStart(aOther.mStart)
     , mEnd(aOther.mEnd)
     , mFuzz(aOther.mFuzz)
-  {}
+  { }
 
   Interval(SelfType&& aOther)
-    : mStart(Move(aOther.mStart))
-    , mEnd(Move(aOther.mEnd))
-    , mFuzz(Move(aOther.mFuzz))
+    : mStart(std::move(aOther.mStart))
+    , mEnd(std::move(aOther.mEnd))
+    , mFuzz(std::move(aOther.mFuzz))
   { }
 
   SelfType& operator= (const SelfType& aOther)
@@ -89,7 +89,7 @@ public:
   {
     MOZ_ASSERT(&aOther != this, "self-moves are prohibited");
     this->~Interval();
-    new(this) Interval(Move(aOther));
+    new(this) Interval(std::move(aOther));
     return *this;
   }
 
@@ -101,12 +101,22 @@ public:
                     mFuzz + aOther.mFuzz);
   }
 
+  SelfType operator+ (const T& aVal) const
+  {
+    return SelfType(mStart + aVal, mEnd + aVal, mFuzz);
+  }
+
   // Basic interval arithmetic operator definition.
   SelfType operator- (const SelfType& aOther) const
   {
     return SelfType(mStart - aOther.mEnd,
                     mEnd - aOther.mStart,
                     mFuzz + aOther.mFuzz);
+  }
+
+  SelfType operator- (const T& aVal) const
+  {
+    return SelfType(mStart - aVal, mEnd - aVal, mFuzz);
   }
 
   bool operator== (const SelfType& aOther) const
@@ -137,7 +147,7 @@ public:
   bool Contains(const SelfType& aOther) const
   {
     return (mStart - mFuzz <= aOther.mStart + aOther.mFuzz) &&
-      (aOther.mEnd - aOther.mFuzz <= mEnd + mFuzz);
+           (aOther.mEnd - aOther.mFuzz <= mEnd + mFuzz);
   }
 
   bool ContainsStrict(const SelfType& aOther) const
@@ -148,13 +158,13 @@ public:
   bool ContainsWithStrictEnd(const SelfType& aOther) const
   {
     return (mStart - mFuzz <= aOther.mStart + aOther.mFuzz) &&
-      aOther.mEnd <= mEnd;
+           aOther.mEnd <= mEnd;
   }
 
   bool Intersects(const SelfType& aOther) const
   {
     return (mStart - mFuzz < aOther.mEnd + aOther.mFuzz) &&
-      (aOther.mStart - aOther.mFuzz < mEnd + mFuzz);
+           (aOther.mStart - aOther.mFuzz < mEnd + mFuzz);
   }
 
   bool IntersectsStrict(const SelfType& aOther) const
@@ -166,7 +176,7 @@ public:
   bool Touches(const SelfType& aOther) const
   {
     return (mStart - mFuzz <= aOther.mEnd + aOther.mFuzz) &&
-      (aOther.mStart - aOther.mFuzz <= mEnd + mFuzz);
+           (aOther.mStart - aOther.mFuzz <= mEnd + mFuzz);
   }
 
   // Returns true if aOther is strictly to the right of this and contiguous.
@@ -235,9 +245,9 @@ public:
   // of aOther
   bool TouchesOnRight(const SelfType& aOther) const
   {
-    return aOther.mStart <= mStart  &&
-      (mStart - mFuzz <= aOther.mEnd + aOther.mFuzz) &&
-      (aOther.mStart - aOther.mFuzz <= mEnd + mFuzz);
+    return aOther.mStart <= mStart &&
+           (mStart - mFuzz <= aOther.mEnd + aOther.mFuzz) &&
+           (aOther.mStart - aOther.mFuzz <= mEnd + mFuzz);
   }
 
   T mStart;
@@ -272,7 +282,7 @@ public:
 
   IntervalSet(SelfType&& aOther)
   {
-    mIntervals.AppendElements(Move(aOther.mIntervals));
+    mIntervals.AppendElements(std::move(aOther.mIntervals));
   }
 
   explicit IntervalSet(const ElemType& aOther)
@@ -285,7 +295,7 @@ public:
   explicit IntervalSet(ElemType&& aOther)
   {
     if (!aOther.IsEmpty()) {
-      mIntervals.AppendElement(Move(aOther));
+      mIntervals.AppendElement(std::move(aOther));
     }
   }
 
@@ -309,7 +319,7 @@ public:
   {
     MOZ_ASSERT(&aOther != this, "self-moves are prohibited");
     this->~IntervalSet();
-    new(this) IntervalSet(Move(aOther));
+    new(this) IntervalSet(std::move(aOther));
     return *this;
   }
 
@@ -326,7 +336,7 @@ public:
   {
     mIntervals.Clear();
     if (!aInterval.IsEmpty()) {
-      mIntervals.AppendElement(Move(aInterval));
+      mIntervals.AppendElement(std::move(aInterval));
     }
     return *this;
   }
@@ -369,15 +379,15 @@ public:
       } else if (current.LeftOf(interval)) {
         break;
       } else {
-        normalized.AppendElement(Move(interval));
+        normalized.AppendElement(std::move(interval));
       }
     }
-    normalized.AppendElement(Move(current));
+    normalized.AppendElement(std::move(current));
     for (; i < mIntervals.Length(); i++) {
-      normalized.AppendElement(Move(mIntervals[i]));
+      normalized.AppendElement(std::move(mIntervals[i]));
     }
     mIntervals.Clear();
-    mIntervals.AppendElements(Move(normalized));
+    mIntervals.AppendElements(std::move(normalized));
 
     return *this;
   }
@@ -429,8 +439,8 @@ public:
     T secondStart = std::min(mIntervals.LastElement().mEnd, aInterval.mEnd);
     ElemType startInterval(mIntervals[0].mStart, firstEnd);
     ElemType endInterval(secondStart, mIntervals.LastElement().mEnd);
-    SelfType intervals(Move(startInterval));
-    intervals += Move(endInterval);
+    SelfType intervals(std::move(startInterval));
+    intervals += std::move(endInterval);
     return Intersection(intervals);
   }
 
@@ -487,7 +497,7 @@ public:
       }
     }
     mIntervals.Clear();
-    mIntervals.AppendElements(Move(intersection));
+    mIntervals.AppendElements(std::move(intersection));
     return *this;
   }
 
@@ -572,12 +582,9 @@ public:
     }
   }
 
-  bool Contains(const ElemType& aInterval) const {
+  bool Contains(const ElemType& aInterval) const
+  {
     for (const auto& interval : mIntervals) {
-      if (aInterval.LeftOf(interval)) {
-        // Will never succeed.
-        return false;
-      }
       if (interval.Contains(aInterval)) {
         return true;
       }
@@ -585,8 +592,20 @@ public:
     return false;
   }
 
-  bool Contains(const T& aX) const {
+  bool ContainsStrict(const ElemType& aInterval) const
+  {
     for (const auto& interval : mIntervals) {
+      if (interval.ContainsStrict(aInterval)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool Contains(const T& aX) const
+  {
+    for (const auto& interval : mIntervals)
+    {
       if (interval.Contains(aX)) {
         return true;
       }
@@ -594,7 +613,8 @@ public:
     return false;
   }
 
-  bool ContainsStrict(const T& aX) const {
+  bool ContainsStrict(const T& aX) const
+  {
     for (const auto& interval : mIntervals) {
       if (interval.ContainsStrict(aX)) {
         return true;
@@ -603,9 +623,20 @@ public:
     return false;
   }
 
-  bool ContainsWithStrictEnd(const T& aX) const {
+  bool ContainsWithStrictEnd(const T& aX) const
+  {
     for (const auto& interval : mIntervals) {
       if (interval.ContainsWithStrictEnd(aX)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool ContainsWithStrictEnd(const ElemType& aInterval) const
+  {
+    for (const auto& interval : mIntervals) {
+      if (interval.ContainsWithStrictEnd(aInterval)) {
         return true;
       }
     }
@@ -622,7 +653,8 @@ public:
     return *this;
   }
 
-  void SetFuzz(const T& aFuzz) {
+  void SetFuzz(const T& aFuzz)
+  {
     for (auto& interval : mIntervals) {
       interval.SetFuzz(aFuzz);
     }
@@ -697,14 +729,14 @@ private:
         if (current.Touches(interval)) {
           current = current.Span(interval);
         } else {
-          normalized.AppendElement(Move(current));
-          current = Move(interval);
+          normalized.AppendElement(std::move(current));
+          current = std::move(interval);
         }
       }
-      normalized.AppendElement(Move(current));
+      normalized.AppendElement(std::move(current));
 
       mIntervals.Clear();
-      mIntervals.AppendElements(Move(normalized));
+      mIntervals.AppendElements(std::move(normalized));
     }
   }
 

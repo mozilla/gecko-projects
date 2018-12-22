@@ -67,7 +67,7 @@ WebGLContext::WebGLObjectAsJSValue(JSContext* cx, const WebGLObjectType* object,
     MOZ_ASSERT(this == object->mContext);
     JS::Rooted<JS::Value> v(cx);
     JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
-    JSAutoCompartment ac(cx, wrapper);
+    JSAutoRealm ar(cx, wrapper);
     if (!dom::GetOrCreateDOMReflector(cx, const_cast<WebGLObjectType*>(object), &v)) {
         rv.Throw(NS_ERROR_FAILURE);
         return JS::NullValue();
@@ -93,6 +93,8 @@ WebGLContext::WebGLObjectAsJSObject(JSContext* cx,
  * source for validation.
  */
 const char* InfoFrom(WebGLTexImageFunc func, WebGLTexDimensions dims);
+
+JS::Value StringValue(JSContext* cx, const nsAString& str, ErrorResult& er);
 
 } // namespace mozilla
 

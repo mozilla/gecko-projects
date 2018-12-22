@@ -6,14 +6,17 @@
  */
 
 #include "SkPictureRecord.h"
-#include "SkDevice.h"
+#include "SkCanvasPriv.h"
+#include "SkDrawShadowInfo.h"
 #include "SkImage_Base.h"
+#include "SkMatrixPriv.h"
 #include "SkPatchUtils.h"
 #include "SkPixelRef.h"
 #include "SkRRect.h"
 #include "SkRSXform.h"
 #include "SkTextBlob.h"
 #include "SkTSearch.h"
+#include "SkClipOpPriv.h"
 
 #define HEAP_BLOCK_SIZE 4096
 
@@ -34,10 +37,18 @@ SkPictureRecord::SkPictureRecord(const SkISize& dimensions, uint32_t flags)
 SkPictureRecord::~SkPictureRecord() {
     fImageRefs.unrefAll();
     fPictureRefs.unrefAll();
+    fDrawableRefs.unrefAll();
     fTextBlobRefs.unrefAll();
+    fVerticesRefs.unrefAll();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+void SkPictureRecord::onFlush() {
+    size_t size = sizeof(kUInt32Size);
+    size_t initialOffset = this->addDraw(FLUSH, &size);
+    this->validate(initialOffset, size);
+}
 
 void SkPictureRecord::willSave() {
     // record the offset to us, making it non-positive to distinguish a save
@@ -49,8 +60,6 @@ void SkPictureRecord::willSave() {
 }
 
 void SkPictureRecord::recordSave() {
-    fContentInfo.onSave();
-
     // op only
     size_t size = sizeof(kUInt32Size);
     size_t initialOffset = this->addDraw(SAVE, &size);
@@ -74,8 +83,6 @@ SkCanvas::SaveLayerStrategy SkPictureRecord::getSaveLayerStrategy(const SaveLaye
 }
 
 void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
-    fContentInfo.onSaveLayer();
-
     // op + flatflags
     size_t size = 2 * kUInt32Size;
     uint32_t flatFlags = 0;
@@ -96,6 +103,14 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
         flatFlags |= SAVELAYERREC_HAS_FLAGS;
         size += sizeof(uint32_t);
     }
+    if (rec.fClipMask) {
+        flatFlags |= SAVELAYERREC_HAS_CLIPMASK;
+        size += sizeof(uint32_t); // clip image index
+    }
+    if (rec.fClipMatrix) {
+        flatFlags |= SAVELAYERREC_HAS_CLIPMATRIX;
+        size += SkMatrixPriv::WriteToMemory(*rec.fClipMatrix, nullptr);
+    }
 
     const size_t initialOffset = this->addDraw(SAVE_LAYER_SAVELAYERREC, &size);
     this->addInt(flatFlags);
@@ -108,11 +123,17 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
     if (flatFlags & SAVELAYERREC_HAS_BACKDROP) {
         // overkill, but we didn't already track single flattenables, so using a paint for that
         SkPaint paint;
-        paint.setImageFilter(const_cast<SkImageFilter*>(rec.fBackdrop));
+        paint.setImageFilter(sk_ref_sp(const_cast<SkImageFilter*>(rec.fBackdrop)));
         this->addPaint(paint);
     }
     if (flatFlags & SAVELAYERREC_HAS_FLAGS) {
         this->addInt(rec.fSaveLayerFlags);
+    }
+    if (flatFlags & SAVELAYERREC_HAS_CLIPMASK) {
+        this->addImage(rec.fClipMask);
+    }
+    if (flatFlags & SAVELAYERREC_HAS_CLIPMATRIX) {
+        this->addMatrix(*rec.fClipMatrix);
     }
     this->validate(initialOffset, size);
 }
@@ -152,8 +173,6 @@ void SkPictureRecord::willRestore() {
 }
 
 void SkPictureRecord::recordRestore(bool fillInSkips) {
-    fContentInfo.onRestore();
-
     if (fillInSkips) {
         this->fillRestoreOffsetPlaceholdersForCurrentStackLevel((uint32_t)fWriter.bytesWritten());
     }
@@ -202,7 +221,7 @@ void SkPictureRecord::didConcat(const SkMatrix& matrix) {
 void SkPictureRecord::recordConcat(const SkMatrix& matrix) {
     this->validate(fWriter.bytesWritten(), 0);
     // op + matrix
-    size_t size = kUInt32Size + matrix.writeToMemory(nullptr);
+    size_t size = kUInt32Size + SkMatrixPriv::WriteToMemory(matrix, nullptr);
     size_t initialOffset = this->addDraw(CONCAT, &size);
     this->addMatrix(matrix);
     this->validate(initialOffset, size);
@@ -211,25 +230,25 @@ void SkPictureRecord::recordConcat(const SkMatrix& matrix) {
 void SkPictureRecord::didSetMatrix(const SkMatrix& matrix) {
     this->validate(fWriter.bytesWritten(), 0);
     // op + matrix
-    size_t size = kUInt32Size + matrix.writeToMemory(nullptr);
+    size_t size = kUInt32Size + SkMatrixPriv::WriteToMemory(matrix, nullptr);
     size_t initialOffset = this->addDraw(SET_MATRIX, &size);
     this->addMatrix(matrix);
     this->validate(initialOffset, size);
     this->INHERITED::didSetMatrix(matrix);
 }
 
-static bool regionOpExpands(SkRegion::Op op) {
+static bool clipOpExpands(SkClipOp op) {
     switch (op) {
-        case SkRegion::kUnion_Op:
-        case SkRegion::kXOR_Op:
-        case SkRegion::kReverseDifference_Op:
-        case SkRegion::kReplace_Op:
+        case kUnion_SkClipOp:
+        case kXOR_SkClipOp:
+        case kReverseDifference_SkClipOp:
+        case kReplace_SkClipOp:
             return true;
-        case SkRegion::kIntersect_Op:
-        case SkRegion::kDifference_Op:
+        case kIntersect_SkClipOp:
+        case kDifference_SkClipOp:
             return false;
         default:
-            SkDEBUGFAIL("unknown region op");
+            SkDEBUGFAIL("unknown clipop");
             return false;
     }
 }
@@ -248,8 +267,6 @@ void SkPictureRecord::fillRestoreOffsetPlaceholdersForCurrentStackLevel(uint32_t
         // assert that the final offset value points to a save verb
         uint32_t opSize;
         DrawType drawOp = peek_op_and_size(&fWriter, -offset, &opSize);
-        SkASSERT(SAVE_LAYER_SAVEFLAGS_DEPRECATED != drawOp);
-        SkASSERT(SAVE_LAYER_SAVELAYERFLAGS_DEPRECATED_JAN_2016 != drawOp);
         SkASSERT(SAVE == drawOp || SAVE_LAYER_SAVELAYERREC == drawOp);
     }
 #endif
@@ -267,7 +284,7 @@ void SkPictureRecord::endRecording() {
     this->restoreToCount(fInitialSaveCount);
 }
 
-size_t SkPictureRecord::recordRestoreOffsetPlaceholder(SkRegion::Op op) {
+size_t SkPictureRecord::recordRestoreOffsetPlaceholder(SkClipOp op) {
     if (fRestoreOffsetStack.isEmpty()) {
         return -1;
     }
@@ -279,7 +296,7 @@ size_t SkPictureRecord::recordRestoreOffsetPlaceholder(SkRegion::Op op) {
     // restore command is recorded.
     int32_t prevOffset = fRestoreOffsetStack.top();
 
-    if (regionOpExpands(op)) {
+    if (clipOpExpands(op)) {
         // Run back through any previous clip ops, and mark their offset to
         // be 0, disabling their ability to trigger a jump-to-restore, otherwise
         // they could hide this clips ability to expand the clip (i.e. go from
@@ -297,12 +314,12 @@ size_t SkPictureRecord::recordRestoreOffsetPlaceholder(SkRegion::Op op) {
     return offset;
 }
 
-void SkPictureRecord::onClipRect(const SkRect& rect, SkRegion::Op op, ClipEdgeStyle edgeStyle) {
+void SkPictureRecord::onClipRect(const SkRect& rect, SkClipOp op, ClipEdgeStyle edgeStyle) {
     this->recordClipRect(rect, op, kSoft_ClipEdgeStyle == edgeStyle);
     this->INHERITED::onClipRect(rect, op, edgeStyle);
 }
 
-size_t SkPictureRecord::recordClipRect(const SkRect& rect, SkRegion::Op op, bool doAA) {
+size_t SkPictureRecord::recordClipRect(const SkRect& rect, SkClipOp op, bool doAA) {
     // id + rect + clip params
     size_t size = 1 * kUInt32Size + sizeof(rect) + 1 * kUInt32Size;
     // recordRestoreOffsetPlaceholder doesn't always write an offset
@@ -319,12 +336,12 @@ size_t SkPictureRecord::recordClipRect(const SkRect& rect, SkRegion::Op op, bool
     return offset;
 }
 
-void SkPictureRecord::onClipRRect(const SkRRect& rrect, SkRegion::Op op, ClipEdgeStyle edgeStyle) {
+void SkPictureRecord::onClipRRect(const SkRRect& rrect, SkClipOp op, ClipEdgeStyle edgeStyle) {
     this->recordClipRRect(rrect, op, kSoft_ClipEdgeStyle == edgeStyle);
     this->INHERITED::onClipRRect(rrect, op, edgeStyle);
 }
 
-size_t SkPictureRecord::recordClipRRect(const SkRRect& rrect, SkRegion::Op op, bool doAA) {
+size_t SkPictureRecord::recordClipRRect(const SkRRect& rrect, SkClipOp op, bool doAA) {
     // op + rrect + clip params
     size_t size = 1 * kUInt32Size + SkRRect::kSizeInMemory + 1 * kUInt32Size;
     // recordRestoreOffsetPlaceholder doesn't always write an offset
@@ -340,13 +357,13 @@ size_t SkPictureRecord::recordClipRRect(const SkRRect& rrect, SkRegion::Op op, b
     return offset;
 }
 
-void SkPictureRecord::onClipPath(const SkPath& path, SkRegion::Op op, ClipEdgeStyle edgeStyle) {
+void SkPictureRecord::onClipPath(const SkPath& path, SkClipOp op, ClipEdgeStyle edgeStyle) {
     int pathID = this->addPathToHeap(path);
     this->recordClipPath(pathID, op, kSoft_ClipEdgeStyle == edgeStyle);
     this->INHERITED::onClipPath(path, op, edgeStyle);
 }
 
-size_t SkPictureRecord::recordClipPath(int pathID, SkRegion::Op op, bool doAA) {
+size_t SkPictureRecord::recordClipPath(int pathID, SkClipOp op, bool doAA) {
     // op + path index + clip params
     size_t size = 3 * kUInt32Size;
     // recordRestoreOffsetPlaceholder doesn't always write an offset
@@ -362,12 +379,12 @@ size_t SkPictureRecord::recordClipPath(int pathID, SkRegion::Op op, bool doAA) {
     return offset;
 }
 
-void SkPictureRecord::onClipRegion(const SkRegion& region, SkRegion::Op op) {
+void SkPictureRecord::onClipRegion(const SkRegion& region, SkClipOp op) {
     this->recordClipRegion(region, op);
     this->INHERITED::onClipRegion(region, op);
 }
 
-size_t SkPictureRecord::recordClipRegion(const SkRegion& region, SkRegion::Op op) {
+size_t SkPictureRecord::recordClipRegion(const SkRegion& region, SkClipOp op) {
     // op + clip params + region
     size_t size = 2 * kUInt32Size + region.writeToMemory(nullptr);
     // recordRestoreOffsetPlaceholder doesn't always write an offset
@@ -394,8 +411,6 @@ void SkPictureRecord::onDrawPaint(const SkPaint& paint) {
 
 void SkPictureRecord::onDrawPoints(PointMode mode, size_t count, const SkPoint pts[],
                                    const SkPaint& paint) {
-    fContentInfo.onDrawPoints(count, paint);
-
     // op + paint index + mode + count + point data
     size_t size = 4 * kUInt32Size + count * sizeof(SkPoint);
     size_t initialOffset = this->addDraw(DRAW_POINTS, &size);
@@ -416,12 +431,36 @@ void SkPictureRecord::onDrawOval(const SkRect& oval, const SkPaint& paint) {
     this->validate(initialOffset, size);
 }
 
+void SkPictureRecord::onDrawArc(const SkRect& oval, SkScalar startAngle, SkScalar sweepAngle,
+                                bool useCenter, const SkPaint& paint) {
+    // op + paint index + rect + start + sweep + bool (as int)
+    size_t size = 2 * kUInt32Size + sizeof(oval) + sizeof(startAngle) + sizeof(sweepAngle) +
+                  sizeof(int);
+    size_t initialOffset = this->addDraw(DRAW_ARC, &size);
+    this->addPaint(paint);
+    this->addRect(oval);
+    this->addScalar(startAngle);
+    this->addScalar(sweepAngle);
+    this->addInt(useCenter);
+    this->validate(initialOffset, size);
+}
+
 void SkPictureRecord::onDrawRect(const SkRect& rect, const SkPaint& paint) {
     // op + paint index + rect
     size_t size = 2 * kUInt32Size + sizeof(rect);
     size_t initialOffset = this->addDraw(DRAW_RECT, &size);
     this->addPaint(paint);
     this->addRect(rect);
+    this->validate(initialOffset, size);
+}
+
+void SkPictureRecord::onDrawRegion(const SkRegion& region, const SkPaint& paint) {
+    // op + paint index + region
+    size_t regionBytes = region.writeToMemory(nullptr);
+    size_t size = 2 * kUInt32Size + regionBytes;
+    size_t initialOffset = this->addDraw(DRAW_REGION, &size);
+    this->addPaint(paint);
+    fWriter.writeRegion(region);
     this->validate(initialOffset, size);
 }
 
@@ -446,43 +485,11 @@ void SkPictureRecord::onDrawDRRect(const SkRRect& outer, const SkRRect& inner,
 }
 
 void SkPictureRecord::onDrawPath(const SkPath& path, const SkPaint& paint) {
-    fContentInfo.onDrawPath(path, paint);
-
     // op + paint index + path index
     size_t size = 3 * kUInt32Size;
     size_t initialOffset = this->addDraw(DRAW_PATH, &size);
     this->addPaint(paint);
     this->addPath(path);
-    this->validate(initialOffset, size);
-}
-
-void SkPictureRecord::onDrawBitmap(const SkBitmap& bitmap, SkScalar left, SkScalar top,
-                                   const SkPaint* paint) {
-    // op + paint index + bitmap index + left + top
-    size_t size = 3 * kUInt32Size + 2 * sizeof(SkScalar);
-    size_t initialOffset = this->addDraw(DRAW_BITMAP, &size);
-    this->addPaintPtr(paint);
-    this->addBitmap(bitmap);
-    this->addScalar(left);
-    this->addScalar(top);
-    this->validate(initialOffset, size);
-}
-
-void SkPictureRecord::onDrawBitmapRect(const SkBitmap& bitmap, const SkRect* src, const SkRect& dst,
-                                       const SkPaint* paint, SrcRectConstraint constraint) {
-    // id + paint index + bitmap index + bool for 'src' + flags
-    size_t size = 5 * kUInt32Size;
-    if (src) {
-        size += sizeof(*src);   // + rect
-    }
-    size += sizeof(dst);        // + rect
-
-    size_t initialOffset = this->addDraw(DRAW_BITMAP_RECT, &size);
-    this->addPaintPtr(paint);
-    this->addBitmap(bitmap);
-    this->addRectPtr(src);  // may be null
-    this->addRect(dst);
-    this->addInt(constraint);
     this->validate(initialOffset, size);
 }
 
@@ -529,14 +536,15 @@ void SkPictureRecord::onDrawImageNine(const SkImage* img, const SkIRect& center,
     this->validate(initialOffset, size);
 }
 
-void SkPictureRecord::onDrawBitmapNine(const SkBitmap& bitmap, const SkIRect& center,
-                                       const SkRect& dst, const SkPaint* paint) {
-    // op + paint index + bitmap id + center + dst rect
-    size_t size = 3 * kUInt32Size + sizeof(center) + sizeof(dst);
-    size_t initialOffset = this->addDraw(DRAW_BITMAP_NINE, &size);
+void SkPictureRecord::onDrawImageLattice(const SkImage* image, const Lattice& lattice,
+                                         const SkRect& dst, const SkPaint* paint) {
+    size_t latticeSize = SkCanvasPriv::WriteLattice(nullptr, lattice);
+    // op + paint index + image index + lattice + dst rect
+    size_t size = 3 * kUInt32Size + latticeSize + sizeof(dst);
+    size_t initialOffset = this->addDraw(DRAW_IMAGE_LATTICE, &size);
     this->addPaintPtr(paint);
-    this->addBitmap(bitmap);
-    this->addIRect(center);
+    this->addImage(image);
+    (void)SkCanvasPriv::WriteLattice(fWriter.reservePad(latticeSize), lattice);
     this->addRect(dst);
     this->validate(initialOffset, size);
 }
@@ -594,12 +602,37 @@ void SkPictureRecord::onDrawTextOnPath(const void* text, size_t byteLength, cons
                                        const SkMatrix* matrix, const SkPaint& paint) {
     // op + paint index + length + 'length' worth of data + path index + matrix
     const SkMatrix& m = matrix ? *matrix : SkMatrix::I();
-    size_t size = 3 * kUInt32Size + SkAlign4(byteLength) + kUInt32Size + m.writeToMemory(nullptr);
+    size_t size = 3 * kUInt32Size + SkAlign4(byteLength) + kUInt32Size +
+        SkMatrixPriv::WriteToMemory(m, nullptr);
     size_t initialOffset = this->addDraw(DRAW_TEXT_ON_PATH, &size);
     this->addPaint(paint);
     this->addText(text, byteLength);
     this->addPath(path);
     this->addMatrix(m);
+    this->validate(initialOffset, size);
+}
+
+void SkPictureRecord::onDrawTextRSXform(const void* text, size_t byteLength,
+                                        const SkRSXform xform[], const SkRect* cull,
+                                        const SkPaint& paint) {
+    const int count = paint.countText(text, byteLength);
+    // [op + paint-index + count + flags + length] + [text] + [xform] + cull
+    size_t size = 5 * kUInt32Size + SkAlign4(byteLength) + count * sizeof(SkRSXform);
+    uint32_t flags = 0;
+    if (cull) {
+        flags |= DRAW_TEXT_RSXFORM_HAS_CULL;
+        size += sizeof(SkRect);
+    }
+
+    size_t initialOffset = this->addDraw(DRAW_TEXT_RSXFORM, &size);
+    this->addPaint(paint);
+    this->addInt(count);
+    this->addInt(flags);
+    this->addText(text, byteLength);
+    fWriter.write(xform, count * sizeof(SkRSXform));
+    if (cull) {
+        fWriter.write(cull, sizeof(SkRect));
+    }
     this->validate(initialOffset, size);
 }
 
@@ -629,7 +662,7 @@ void SkPictureRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* ma
         this->addPicture(picture);
     } else {
         const SkMatrix& m = matrix ? *matrix : SkMatrix::I();
-        size += m.writeToMemory(nullptr) + kUInt32Size;    // matrix + paint
+        size += SkMatrixPriv::WriteToMemory(m, nullptr) + kUInt32Size;    // matrix + paint
         initialOffset = this->addDraw(DRAW_PICTURE_MATRIX_PAINT, &size);
         this->addPaintPtr(paint);
         this->addMatrix(m);
@@ -638,70 +671,38 @@ void SkPictureRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* ma
     this->validate(initialOffset, size);
 }
 
-void SkPictureRecord::onDrawVertices(VertexMode vmode, int vertexCount,
-                                     const SkPoint vertices[], const SkPoint texs[],
-                                     const SkColor colors[], SkXfermode* xfer,
-                                     const uint16_t indices[], int indexCount,
-                                     const SkPaint& paint) {
-    uint32_t flags = 0;
-    if (texs) {
-        flags |= DRAW_VERTICES_HAS_TEXS;
-    }
-    if (colors) {
-        flags |= DRAW_VERTICES_HAS_COLORS;
-    }
-    if (indexCount > 0) {
-        flags |= DRAW_VERTICES_HAS_INDICES;
-    }
-    if (xfer) {
-        SkXfermode::Mode mode;
-        if (xfer->asMode(&mode) && SkXfermode::kModulate_Mode != mode) {
-            flags |= DRAW_VERTICES_HAS_XFER;
-        }
-    }
+void SkPictureRecord::onDrawDrawable(SkDrawable* drawable, const SkMatrix* matrix) {
+    // op + drawable index
+    size_t size = 2 * kUInt32Size;
+    size_t initialOffset;
 
-    // op + paint index + flags + vmode + vCount + vertices
-    size_t size = 5 * kUInt32Size + vertexCount * sizeof(SkPoint);
-    if (flags & DRAW_VERTICES_HAS_TEXS) {
-        size += vertexCount * sizeof(SkPoint);  // + uvs
-    }
-    if (flags & DRAW_VERTICES_HAS_COLORS) {
-        size += vertexCount * sizeof(SkColor);  // + vert colors
-    }
-    if (flags & DRAW_VERTICES_HAS_INDICES) {
-        // + num indices + indices
-        size += 1 * kUInt32Size + SkAlign4(indexCount * sizeof(uint16_t));
-    }
-    if (flags & DRAW_VERTICES_HAS_XFER) {
-        size += kUInt32Size;    // mode enum
-    }
-
-    size_t initialOffset = this->addDraw(DRAW_VERTICES, &size);
-    this->addPaint(paint);
-    this->addInt(flags);
-    this->addInt(vmode);
-    this->addInt(vertexCount);
-    this->addPoints(vertices, vertexCount);
-    if (flags & DRAW_VERTICES_HAS_TEXS) {
-        this->addPoints(texs, vertexCount);
-    }
-    if (flags & DRAW_VERTICES_HAS_COLORS) {
-        fWriter.writeMul4(colors, vertexCount * sizeof(SkColor));
-    }
-    if (flags & DRAW_VERTICES_HAS_INDICES) {
-        this->addInt(indexCount);
-        fWriter.writePad(indices, indexCount * sizeof(uint16_t));
-    }
-    if (flags & DRAW_VERTICES_HAS_XFER) {
-        SkXfermode::Mode mode = SkXfermode::kModulate_Mode;
-        (void)xfer->asMode(&mode);
-        this->addInt(mode);
+    if (nullptr == matrix) {
+        initialOffset = this->addDraw(DRAW_DRAWABLE, &size);
+        this->addDrawable(drawable);
+    } else {
+        size += SkMatrixPriv::WriteToMemory(*matrix, nullptr);    // matrix
+        initialOffset = this->addDraw(DRAW_DRAWABLE_MATRIX, &size);
+        this->addMatrix(*matrix);
+        this->addDrawable(drawable);
     }
     this->validate(initialOffset, size);
 }
 
+void SkPictureRecord::onDrawVerticesObject(const SkVertices* vertices, SkBlendMode mode,
+                                           const SkPaint& paint) {
+    // op + paint index + vertices index + mode
+    size_t size = 4 * kUInt32Size;
+    size_t initialOffset = this->addDraw(DRAW_VERTICES_OBJECT, &size);
+
+    this->addPaint(paint);
+    this->addVertices(vertices);
+    this->addInt(static_cast<uint32_t>(mode));
+
+    this->validate(initialOffset, size);
+}
+
 void SkPictureRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
-                                  const SkPoint texCoords[4], SkXfermode* xmode,
+                                  const SkPoint texCoords[4], SkBlendMode bmode,
                                   const SkPaint& paint) {
     // op + paint index + patch 12 control points + flag + patch 4 colors + 4 texture coordinates
     size_t size = 2 * kUInt32Size + SkPatchUtils::kNumCtrlPts * sizeof(SkPoint) + kUInt32Size;
@@ -714,12 +715,9 @@ void SkPictureRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors
         flag |= DRAW_VERTICES_HAS_TEXS;
         size += SkPatchUtils::kNumCorners * sizeof(SkPoint);
     }
-    if (xmode) {
-        SkXfermode::Mode mode;
-        if (xmode->asMode(&mode) && SkXfermode::kModulate_Mode != mode) {
-            flag |= DRAW_VERTICES_HAS_XFER;
-            size += kUInt32Size;
-        }
+    if (SkBlendMode::kModulate != bmode) {
+        flag |= DRAW_VERTICES_HAS_XFER;
+        size += kUInt32Size;
     }
 
     size_t initialOffset = this->addDraw(DRAW_PATCH, &size);
@@ -735,15 +733,13 @@ void SkPictureRecord::onDrawPatch(const SkPoint cubics[12], const SkColor colors
         fWriter.write(texCoords, SkPatchUtils::kNumCorners * sizeof(SkPoint));
     }
     if (flag & DRAW_VERTICES_HAS_XFER) {
-        SkXfermode::Mode mode = SkXfermode::kModulate_Mode;
-        xmode->asMode(&mode);
-        this->addInt(mode);
+        this->addInt((int)bmode);
     }
     this->validate(initialOffset, size);
 }
 
 void SkPictureRecord::onDrawAtlas(const SkImage* atlas, const SkRSXform xform[], const SkRect tex[],
-                                  const SkColor colors[], int count, SkXfermode::Mode mode,
+                                  const SkColor colors[], int count, SkBlendMode mode,
                                   const SkRect* cull, const SkPaint* paint) {
     // [op + paint-index + atlas-index + flags + count] + [xform] + [tex] + [*colors + mode] + cull
     size_t size = 5 * kUInt32Size + count * sizeof(SkRSXform) + count * sizeof(SkRect);
@@ -769,7 +765,7 @@ void SkPictureRecord::onDrawAtlas(const SkImage* atlas, const SkRSXform xform[],
     // write optional parameters
     if (colors) {
         fWriter.write(colors, count * sizeof(SkColor));
-        this->addInt(mode);
+        this->addInt((int)mode);
     }
     if (cull) {
         fWriter.write(cull, sizeof(SkRect));
@@ -777,91 +773,55 @@ void SkPictureRecord::onDrawAtlas(const SkImage* atlas, const SkRSXform xform[],
     this->validate(initialOffset, size);
 }
 
+void SkPictureRecord::onDrawShadowRec(const SkPath& path, const SkDrawShadowRec& rec) {
+    // op + path index + zParams + lightPos + lightRadius + spot/ambient alphas + color + flags
+    size_t size = 2 * kUInt32Size + 2 * sizeof(SkPoint3) + 1 * sizeof(SkScalar) + 3 * kUInt32Size;
+    size_t initialOffset = this->addDraw(DRAW_SHADOW_REC, &size);
+
+    this->addPath(path);
+
+    fWriter.writePoint3(rec.fZPlaneParams);
+    fWriter.writePoint3(rec.fLightPos);
+    fWriter.writeScalar(rec.fLightRadius);
+    fWriter.write32(rec.fAmbientColor);
+    fWriter.write32(rec.fSpotColor);
+    fWriter.write32(rec.fFlags);
+
+    this->validate(initialOffset, size);
+}
+
+void SkPictureRecord::onDrawAnnotation(const SkRect& rect, const char key[], SkData* value) {
+    size_t keyLen = fWriter.WriteStringSize(key);
+    size_t valueLen = fWriter.WriteDataSize(value);
+    size_t size = 4 + sizeof(SkRect) + keyLen + valueLen;
+
+    size_t initialOffset = this->addDraw(DRAW_ANNOTATION, &size);
+    this->addRect(rect);
+    fWriter.writeString(key);
+    fWriter.writeData(value);
+    this->validate(initialOffset, size);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-SkSurface* SkPictureRecord::onNewSurface(const SkImageInfo& info, const SkSurfaceProps&) {
+template <typename T> int find_or_append_uniqueID(SkTDArray<const T*>& array, const T* obj) {
+    int index = array.select([&](const T* elem) {
+        return elem->uniqueID() == obj->uniqueID();
+    });
+    if (index < 0) {
+        index = array.count();
+        *array.append() = SkRef(obj);
+    }
+    return index;
+}
+
+sk_sp<SkSurface> SkPictureRecord::onNewSurface(const SkImageInfo& info, const SkSurfaceProps&) {
     return nullptr;
 }
 
-// If we already have a stored, can we reuse it instead of also storing b?
-static bool equivalent(const SkBitmap& a, const SkBitmap& b) {
-    if (a.info() != b.info() || a.pixelRefOrigin() != b.pixelRefOrigin()) {
-        // Requiring a.info() == b.info() may be overkill in some cases (alphatype mismatch),
-        // but it sure makes things easier to reason about below.
-        return false;
-    }
-    if (a.pixelRef() == b.pixelRef()) {
-        return true;  // Same shape and same pixels -> same bitmap.
-    }
-
-    // From here down we're going to have to look at the bitmap data, so we require pixelRefs().
-    if (!a.pixelRef() || !b.pixelRef()) {
-        return false;
-    }
-
-    // If the bitmaps have encoded data, check first before locking pixels so they don't decode.
-    SkAutoTUnref<SkData> encA(a.pixelRef()->refEncodedData()),
-                         encB(b.pixelRef()->refEncodedData());
-    if (encA && encB) {
-        return encA->equals(encB);
-    } else if (encA || encB) {
-        return false;   // One has encoded data but the other does not.
-    }
-
-    // As a last resort, we have to look at the pixels.  This will read back textures.
-    SkAutoLockPixels al(a), bl(b);
-    const char* ap = (const char*)a.getPixels();
-    const char* bp = (const char*)b.getPixels();
-    if (ap && bp) {
-        // We check row by row; row bytes might differ.
-        SkASSERT(a.info() == b.info());          // We checked this above.
-        SkASSERT(a.info().bytesPerPixel() > 0);  // If we have pixelRefs, this better be true.
-        const SkImageInfo info = a.info();
-        const size_t bytesToCompare = info.width() * info.bytesPerPixel();
-        for (int row = 0; row < info.height(); row++) {
-            if (0 != memcmp(ap, bp, bytesToCompare)) {
-                return false;
-            }
-            ap += a.rowBytes();
-            bp += b.rowBytes();
-        }
-        return true;
-    }
-    return false;  // Couldn't get pixels for both bitmaps.
-}
-
-void SkPictureRecord::addBitmap(const SkBitmap& bitmap) {
-    // First see if we already have this bitmap.  This deduplication should really
-    // only be important for our tests, where bitmaps tend not to be tagged immutable.
-    // In Chrome (and hopefully Android?) they're typically immutable.
-    for (int i = 0; i < fBitmaps.count(); i++) {
-        if (equivalent(fBitmaps[i], bitmap)) {
-            this->addInt(i);  // Unlike the rest, bitmap indices are 0-based.
-            return;
-        }
-    }
-    // Don't have it.  We'll add it to our list, making sure it's tagged as immutable.
-    if (bitmap.isImmutable()) {
-        // Shallow copies of bitmaps are cheap, so immutable == fast.
-        fBitmaps.push_back(bitmap);
-    } else {
-        // If you see this block on a memory profile, it's a good opportunity to reduce RAM usage.
-        SkBitmap copy;
-        bitmap.copyTo(&copy);
-        copy.setImmutable();
-        fBitmaps.push_back(copy);
-    }
-    this->addInt(fBitmaps.count()-1);  // Remember, 0-based.
-}
-
 void SkPictureRecord::addImage(const SkImage* image) {
-    int index = fImageRefs.find(image);
-    if (index >= 0) {
-        this->addInt(index);
-    } else {
-        *fImageRefs.append() = SkRef(image);
-        this->addInt(fImageRefs.count()-1);
-    }
+    // convention for images is 0-based index
+    this->addInt(find_or_append_uniqueID(fImageRefs, image));
 }
 
 void SkPictureRecord::addMatrix(const SkMatrix& matrix) {
@@ -869,8 +829,6 @@ void SkPictureRecord::addMatrix(const SkMatrix& matrix) {
 }
 
 void SkPictureRecord::addPaintPtr(const SkPaint* paint) {
-    fContentInfo.onAddPaintPtr(paint);
-
     if (paint) {
         fPaints.push_back(*paint);
         this->addInt(fPaints.count());
@@ -897,11 +855,16 @@ void SkPictureRecord::addPatch(const SkPoint cubics[12]) {
 }
 
 void SkPictureRecord::addPicture(const SkPicture* picture) {
-    int index = fPictureRefs.find(picture);
+    // follow the convention of recording a 1-based index
+    this->addInt(find_or_append_uniqueID(fPictureRefs, picture) + 1);
+}
+
+void SkPictureRecord::addDrawable(SkDrawable* drawable) {
+    int index = fDrawableRefs.find(drawable);
     if (index < 0) {    // not found
-        index = fPictureRefs.count();
-        *fPictureRefs.append() = picture;
-        picture->ref();
+        index = fDrawableRefs.count();
+        *fDrawableRefs.append() = drawable;
+        drawable->ref();
     }
     // follow the convention of recording a 1-based index
     this->addInt(index + 1);
@@ -949,18 +912,18 @@ void SkPictureRecord::addRegion(const SkRegion& region) {
 }
 
 void SkPictureRecord::addText(const void* text, size_t byteLength) {
-    fContentInfo.onDrawText();
     addInt(SkToInt(byteLength));
     fWriter.writePad(text, byteLength);
 }
 
-void SkPictureRecord::addTextBlob(const SkTextBlob *blob) {
-    int index = fTextBlobRefs.count();
-    *fTextBlobRefs.append() = blob;
-    blob->ref();
+void SkPictureRecord::addTextBlob(const SkTextBlob* blob) {
     // follow the convention of recording a 1-based index
-    this->addInt(index + 1);
+    this->addInt(find_or_append_uniqueID(fTextBlobRefs, blob) + 1);
+}
+
+void SkPictureRecord::addVertices(const SkVertices* vertices) {
+    // follow the convention of recording a 1-based index
+    this->addInt(find_or_append_uniqueID(fVerticesRefs, vertices) + 1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-

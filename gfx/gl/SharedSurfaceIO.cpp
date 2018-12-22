@@ -22,11 +22,11 @@ SharedSurface_IOSurface::Create(const RefPtr<MacIOSurface>& ioSurf,
     MOZ_ASSERT(ioSurf);
     MOZ_ASSERT(gl);
 
-    gfx::IntSize size(ioSurf->GetWidth(), ioSurf->GetHeight());
+    auto size = gfx::IntSize::Truncate(ioSurf->GetWidth(), ioSurf->GetHeight());
 
     typedef SharedSurface_IOSurface ptrT;
     UniquePtr<ptrT> ret( new ptrT(ioSurf, gl, size, hasAlpha) );
-    return Move(ret);
+    return ret;
 }
 
 void
@@ -142,7 +142,7 @@ BackTextureWithIOSurf(GLContext* gl, GLuint tex, MacIOSurface* ioSurf)
     CGLContextObj cgl = GLContextCGL::Cast(gl)->GetCGLContext();
     MOZ_ASSERT(cgl);
 
-    ioSurf->CGLTexImageIOSurface2D(cgl);
+    ioSurf->CGLTexImageIOSurface2D(gl, cgl, 0);
 }
 
 SharedSurface_IOSurface::SharedSurface_IOSurface(const RefPtr<MacIOSurface>& ioSurf,
@@ -165,11 +165,10 @@ SharedSurface_IOSurface::SharedSurface_IOSurface(const RefPtr<MacIOSurface>& ioS
 
 SharedSurface_IOSurface::~SharedSurface_IOSurface()
 {
-    if (mProdTex) {
-        DebugOnly<bool> success = mGL->MakeCurrent();
-        MOZ_ASSERT(success);
-        mGL->fDeleteTextures(1, &mProdTex);
-    }
+    if (!mGL || !mGL->MakeCurrent())
+        return;
+
+    mGL->fDeleteTextures(1, &mProdTex);
 }
 
 bool
@@ -212,15 +211,15 @@ SharedSurface_IOSurface::ReadbackBySharedHandle(gfx::DataSourceSurface* out_surf
 
 /*static*/ UniquePtr<SurfaceFactory_IOSurface>
 SurfaceFactory_IOSurface::Create(GLContext* gl, const SurfaceCaps& caps,
-                                 const RefPtr<layers::ClientIPCAllocator>& allocator,
+                                 const RefPtr<layers::LayersIPCChannel>& allocator,
                                  const layers::TextureFlags& flags)
 {
-    gfx::IntSize maxDims(MacIOSurface::GetMaxWidth(),
-                         MacIOSurface::GetMaxHeight());
+    auto maxDims = gfx::IntSize::Truncate(MacIOSurface::GetMaxWidth(),
+                                          MacIOSurface::GetMaxHeight());
 
     typedef SurfaceFactory_IOSurface ptrT;
     UniquePtr<ptrT> ret( new ptrT(gl, caps, allocator, flags, maxDims) );
-    return Move(ret);
+    return ret;
 }
 
 UniquePtr<SharedSurface>

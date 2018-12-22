@@ -21,13 +21,13 @@ class nsReadingIterator
 public:
   typedef nsReadingIterator<CharT>    self_type;
   typedef ptrdiff_t                   difference_type;
+  typedef size_t                      size_type;
   typedef CharT                       value_type;
   typedef const CharT*                pointer;
   typedef const CharT&                reference;
 
 private:
-  friend class nsAString;
-  friend class nsACString;
+  friend class mozilla::detail::nsTStringRepr<CharT>;
 
   // unfortunately, the API for nsReadingIterator requires that the
   // iterator know its start and end positions.  this was needed when
@@ -40,27 +40,13 @@ private:
 
 public:
   nsReadingIterator()
+    : mStart(nullptr)
+    , mEnd(nullptr)
+    , mPosition(nullptr)
   {
   }
   // nsReadingIterator( const nsReadingIterator<CharT>& );                    // auto-generated copy-constructor OK
   // nsReadingIterator<CharT>& operator=( const nsReadingIterator<CharT>& );  // auto-generated copy-assignment operator OK
-
-  inline void normalize_forward()
-  {
-  }
-  inline void normalize_backward()
-  {
-  }
-
-  pointer start() const
-  {
-    return mStart;
-  }
-
-  pointer end() const
-  {
-    return mEnd;
-  }
 
   pointer get() const
   {
@@ -71,15 +57,6 @@ public:
   {
     return *get();
   }
-
-#if 0
-  // An iterator really deserves this, but some compilers (notably IBM VisualAge for OS/2)
-  //  don't like this when |CharT| is a type without members.
-  pointer operator->() const
-  {
-    return get();
-  }
-#endif
 
   self_type& operator++()
   {
@@ -107,27 +84,17 @@ public:
     return result;
   }
 
-  difference_type size_forward() const
-  {
-    return mEnd - mPosition;
-  }
-
-  difference_type size_backward() const
-  {
-    return mPosition - mStart;
-  }
-
   self_type& advance(difference_type aN)
   {
     if (aN > 0) {
-      difference_type step = XPCOM_MIN(aN, size_forward());
+      difference_type step = XPCOM_MIN(aN, mEnd - mPosition);
 
       NS_ASSERTION(step > 0,
                    "can't advance a reading iterator beyond the end of a string");
 
       mPosition += step;
     } else if (aN < 0) {
-      difference_type step = XPCOM_MAX(aN, -size_backward());
+      difference_type step = XPCOM_MAX(aN, -(mPosition - mStart));
 
       NS_ASSERTION(step < 0,
                    "can't advance (backward) a reading iterator beyond the end of a string");
@@ -135,6 +102,17 @@ public:
       mPosition += step;
     }
     return *this;
+  }
+
+  // We return an unsigned type here (with corresponding assert) rather than
+  // the more usual difference_type because we want to make this class go
+  // away in favor of mozilla::RangedPtr.  Since RangedPtr has the same
+  // requirement we are enforcing here, the transition ought to be much
+  // smoother.
+  size_type operator-(const self_type& aOther) const
+  {
+    MOZ_ASSERT(mPosition >= aOther.mPosition);
+    return mPosition - aOther.mPosition;
   }
 };
 
@@ -148,13 +126,13 @@ class nsWritingIterator
 public:
   typedef nsWritingIterator<CharT>   self_type;
   typedef ptrdiff_t                  difference_type;
+  typedef size_t                     size_type;
   typedef CharT                      value_type;
   typedef CharT*                     pointer;
   typedef CharT&                     reference;
 
 private:
-  friend class nsAString;
-  friend class nsACString;
+  friend class nsTSubstring<CharT>;
 
   // unfortunately, the API for nsWritingIterator requires that the
   // iterator know its start and end positions.  this was needed when
@@ -167,27 +145,13 @@ private:
 
 public:
   nsWritingIterator()
+    : mStart(nullptr)
+    , mEnd(nullptr)
+    , mPosition(nullptr)
   {
   }
   // nsWritingIterator( const nsWritingIterator<CharT>& );                    // auto-generated copy-constructor OK
   // nsWritingIterator<CharT>& operator=( const nsWritingIterator<CharT>& );  // auto-generated copy-assignment operator OK
-
-  inline void normalize_forward()
-  {
-  }
-  inline void normalize_backward()
-  {
-  }
-
-  pointer start() const
-  {
-    return mStart;
-  }
-
-  pointer end() const
-  {
-    return mEnd;
-  }
 
   pointer get() const
   {
@@ -198,16 +162,6 @@ public:
   {
     return *get();
   }
-
-#if 0
-  // An iterator really deserves this, but some compilers (notably IBM VisualAge for OS/2)
-  //  don't like this when |CharT| is a type without members.
-  pointer
-  operator->() const
-  {
-    return get();
-  }
-#endif
 
   self_type& operator++()
   {
@@ -235,27 +189,17 @@ public:
     return result;
   }
 
-  difference_type size_forward() const
-  {
-    return mEnd - mPosition;
-  }
-
-  difference_type size_backward() const
-  {
-    return mPosition - mStart;
-  }
-
   self_type& advance(difference_type aN)
   {
     if (aN > 0) {
-      difference_type step = XPCOM_MIN(aN, size_forward());
+      difference_type step = XPCOM_MIN(aN, mEnd - mPosition);
 
       NS_ASSERTION(step > 0,
                    "can't advance a writing iterator beyond the end of a string");
 
       mPosition += step;
     } else if (aN < 0) {
-      difference_type step = XPCOM_MAX(aN, -size_backward());
+      difference_type step = XPCOM_MAX(aN, -(mPosition - mStart));
 
       NS_ASSERTION(step < 0,
                    "can't advance (backward) a writing iterator beyond the end of a string");
@@ -265,13 +209,26 @@ public:
     return *this;
   }
 
-  void write(const value_type* aS, uint32_t aN)
+  // We return an unsigned type here (with corresponding assert) rather than
+  // the more usual difference_type because we want to make this class go
+  // away in favor of mozilla::RangedPtr.  Since RangedPtr has the same
+  // requirement we are enforcing here, the transition ought to be much
+  // smoother.
+  size_type operator-(const self_type& aOther) const
   {
-    NS_ASSERTION(size_forward() > 0,
-                 "You can't |write| into an |nsWritingIterator| with no space!");
+    MOZ_ASSERT(mPosition >= aOther.mPosition);
+    return mPosition - aOther.mPosition;
+  }
+};
 
-    nsCharTraits<value_type>::move(mPosition, aS, aN);
-    advance(difference_type(aN));
+template <class CharT>
+struct nsCharSinkTraits<nsWritingIterator<CharT>>
+{
+  static void
+  write(nsWritingIterator<CharT>& aIter, const CharT* aStr, uint32_t aN)
+  {
+    nsCharTraits<CharT>::move(aIter.get(), aStr, aN);
+    aIter.advance(aN);
   }
 };
 

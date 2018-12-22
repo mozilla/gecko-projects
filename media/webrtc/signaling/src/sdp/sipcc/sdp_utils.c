@@ -47,6 +47,7 @@ sdp_mca_t *sdp_alloc_mca (uint32_t line) {
     mca_p->bw.bw_data_count   = 0;
     mca_p->bw.bw_data_list    = NULL;
     mca_p->line_number        = line;
+    mca_p->sctp_fmt           = SDP_SCTP_MEDIA_FMT_UNKNOWN;
 
     return (mca_p);
 }
@@ -62,13 +63,16 @@ sdp_mca_t *sdp_alloc_mca (uint32_t line) {
 static sdp_result_e next_token(const char **string_of_tokens, char *token, unsigned token_max_len, const char *delim)
 {
   int flag2moveon = 0;
-  const char *str = *string_of_tokens;
-  const char *token_end = token + token_max_len - 1;
+  const char *str;
+  const char *token_end;
   const char *next_delim;
 
   if (!string_of_tokens || !*string_of_tokens || !token || !delim) {
     return SDP_FAILURE;
   }
+
+  str = *string_of_tokens;
+  token_end = token + token_max_len - 1;
 
   /* Locate front of token, skipping any delimiters */
   for ( ; ((*str != '\0') && (*str != '\n') && (*str != '\r')); str++) {
@@ -350,7 +354,9 @@ uint32_t sdp_getnextnumtok_or_null (const char *str, const char **str_end,
   char *strtoul_end;
   unsigned long numval;
 
-  *null_ind = FALSE;
+  if (null_ind) {
+    *null_ind = FALSE;
+  }
 
   if (!str || !str_end || !delim || !null_ind || !result) {
     if (result) {
@@ -425,69 +431,6 @@ uint32_t sdp_getnextnumtok (const char *str, const char **str_end,
   return (uint32_t) numval;
 }
 
-
-/* See if the next token in a string is the choose character.  The delim
- * characters are passed in as a param.  The check also will not go past
- * a new line char or the end of the string.  Skip any delimiters before
- * the token.
- */
-tinybool sdp_getchoosetok (const char *str, const char **str_end,
-                           const char *delim, sdp_result_e *result)
-{
-    const char *b;
-    int   flag2moveon;
-
-    if ((str == NULL)  || (str_end == NULL)) {
-        *result = SDP_FAILURE;
-        return(FALSE);
-    }
-
-    /* Locate front of token, skipping any delimiters */
-    for ( ; ((*str != '\0') && (*str != '\n') && (*str != '\r')); str++) {
-        flag2moveon = 1;  /* Default to move on unless we find a delimiter */
-        for (b=delim; *b; b++) {
-            if (*str == *b) {
-                flag2moveon = 0;
-                break;
-            }
-        }
-        if( flag2moveon ) {
-            break;  /* We're at the beginning of the token */
-        }
-    }
-
-    /* Make sure there's really a token present. */
-    if ((*str == '\0') || (*str == '\n') || (*str == '\r')) {
-        *result = SDP_FAILURE;
-        *str_end = (char *)str;
-        return(FALSE);
-    }
-
-    /* See if the token is '$' followed by a delimiter char or end of str. */
-    if (*str == '$') {
-        str++;
-        if ((*str == '\0') || (*str == '\n') || (*str == '\r')) {
-            *result = SDP_SUCCESS;
-            /* skip the choose char in the string. */
-            *str_end = (char *)(str+1);
-            return(TRUE);
-        }
-        for (b=delim; *b; b++) {
-            if (*str == *b) {
-                *result = SDP_SUCCESS;
-                /* skip the choose char in the string. */
-                *str_end = (char *)(str+1);
-                return(TRUE);
-            }
-        }
-    }
-
-    /* If the token was not '$' followed by a delim, token is not choose */
-    *result = SDP_SUCCESS;
-    *str_end = (char *)str;
-    return(FALSE);
-
-}
 
 /*
  * SDP Crypto Utility Functions.

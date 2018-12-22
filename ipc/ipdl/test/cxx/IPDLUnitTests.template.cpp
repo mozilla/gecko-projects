@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "base/thread.h"
 
 #include "nsRegion.h"
@@ -33,7 +34,7 @@ IPDLUnitTestSubprocess* gSubprocess;
 void* gChildActor;
 
 // Note: in threaded mode, this will be non-null (for both parent and
-// child, since they share one set of globals).  
+// child, since they share one set of globals).
 Thread* gChildThread;
 MessageLoop *gParentMessageLoop;
 bool gParentDone;
@@ -47,7 +48,7 @@ DeleteChildActor();
 
 char* gIPDLUnitTestName = nullptr;
 
-const char* const
+const char*
 IPDLUnitTestName()
 {
     if (!gIPDLUnitTestName) {
@@ -77,7 +78,7 @@ enum IPDLUnitTestType {
 //-----------------------------------------------------------------------------
 //===== TEMPLATED =====
 ${ENUM_VALUES}
-    
+
     LastTest = ${LAST_ENUM}
 //-----------------------------------------------------------------------------
 };
@@ -94,21 +95,6 @@ ${STRING_TO_ENUMS}
 //-----------------------------------------------------------------------------
     else
         return static_cast<IPDLUnitTestType>(0);
-}
-
-
-const char* const
-IPDLUnitTestToString(IPDLUnitTestType aTest)
-{
-    switch (aTest) {
-//-----------------------------------------------------------------------------
-//===== TEMPLATED =====
-${ENUM_TO_STRINGS}
-//-----------------------------------------------------------------------------
-
-    default:
-        return nullptr;
-    }
 }
 
 
@@ -152,7 +138,7 @@ IPDLUnitTestMain(void* aData)
         // use this instead of |fail()| because we don't know what the test is
         fprintf(stderr, MOZ_IPDL_TESTFAIL_LABEL "| %s | unknown unit test %s\n",
                 "<--->", testString);
-        NS_RUNTIMEABORT("can't continue");
+        MOZ_CRASH("can't continue");
     }
     gIPDLUnitTestName = testString;
 
@@ -203,7 +189,7 @@ IPDLUnitTestThreadMain(char *testString)
         // use this instead of |fail()| because we don't know what the test is
         fprintf(stderr, MOZ_IPDL_TESTFAIL_LABEL "| %s | unknown unit test %s\n",
                 "<--->", testString);
-        NS_RUNTIMEABORT("can't continue");
+        MOZ_CRASH("can't continue");
     }
     gIPDLUnitTestName = testString;
 
@@ -273,7 +259,7 @@ DeleteSubprocess(MessageLoop* uiLoop)
 {
   // pong to QuitXPCOM
   delete gSubprocess;
-  uiLoop->PostTask(FROM_HERE, NewRunnableFunction(QuitXPCOM));
+  uiLoop->PostTask(NewRunnableFunction(QuitXPCOM));
 }
 
 void
@@ -281,15 +267,14 @@ DeferredParentShutdown()
 {
     // ping to DeleteSubprocess
     XRE_GetIOMessageLoop()->PostTask(
-        FROM_HERE,
         NewRunnableFunction(DeleteSubprocess, MessageLoop::current()));
 }
 
-void 
+void
 TryThreadedShutdown()
 {
-    // Stop if either: 
-    // - the child has not finished, 
+    // Stop if either:
+    // - the child has not finished,
     // - the parent has not finished,
     // - or this code has already executed.
     // Remember: this TryThreadedShutdown() task is enqueued
@@ -302,7 +287,7 @@ TryThreadedShutdown()
     DeferredParentShutdown();
 }
 
-void 
+void
 ChildCompleted()
 {
     // Executes on the parent message loop once child has completed.
@@ -316,12 +301,12 @@ QuitParent()
     if (gChildThread) {
         gParentDone = true;
         MessageLoop::current()->PostTask(
-            FROM_HERE, NewRunnableFunction(TryThreadedShutdown));
+            NewRunnableFunction(TryThreadedShutdown));
     } else {
         // defer "real" shutdown to avoid *Channel::Close() racing with the
         // deletion of the subprocess
         MessageLoop::current()->PostTask(
-            FROM_HERE, NewRunnableFunction(DeferredParentShutdown));
+            NewRunnableFunction(DeferredParentShutdown));
     }
 }
 
@@ -337,10 +322,10 @@ QuitChild()
 {
     if (gChildThread) { // Threaded-mode test
         gParentMessageLoop->PostTask(
-            FROM_HERE, NewRunnableFunction(ChildCompleted));
+            NewRunnableFunction(ChildCompleted));
     } else { // Process-mode test
         MessageLoop::current()->PostTask(
-            FROM_HERE, NewRunnableFunction(ChildDie));
+            NewRunnableFunction(ChildDie));
     }
 }
 

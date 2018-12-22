@@ -4,25 +4,16 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [];
+var EXPORTED_SYMBOLS = [];
 
 const DEBUG = false;
 function debug(s) { dump("-*- NotificationDB component: " + s + "\n"); }
 
-const Cu = Components.utils;
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
-                                   "@mozilla.org/parentprocessmessagemanager;1",
-                                   "nsIMessageListenerManager");
+ChromeUtils.defineModuleGetter(this, "Services",
+                               "resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "notificationStorage",
                                    "@mozilla.org/notificationStorage;1",
@@ -35,8 +26,7 @@ const NOTIFICATION_STORE_PATH =
 const kMessages = [
   "Notification:Save",
   "Notification:Delete",
-  "Notification:GetAll",
-  "Notification:GetAllCrossOrigin"
+  "Notification:GetAll"
 ];
 
 var NotificationDB = {
@@ -56,19 +46,19 @@ var NotificationDB = {
     this.tasks = []; // read/write operation queue
     this.runningTask = null;
 
-    Services.obs.addObserver(this, "xpcom-shutdown", false);
+    Services.obs.addObserver(this, "xpcom-shutdown");
     this.registerListeners();
   },
 
   registerListeners: function() {
     for (let message of kMessages) {
-      ppmm.addMessageListener(message, this);
+      Services.ppmm.addMessageListener(message, this);
     }
   },
 
   unregisterListeners: function() {
     for (let message of kMessages) {
-      ppmm.removeMessageListener(message, this);
+      Services.ppmm.removeMessageListener(message, this);
     }
   },
 
@@ -82,14 +72,21 @@ var NotificationDB = {
   },
 
   filterNonAppNotifications: function(notifications) {
-    let origins = Object.keys(notifications);
-    for (let origin of origins) {
-      let canPut = notificationStorage.canPut(origin);
-      if (!canPut) {
+    for (let origin in notifications) {
+      let persistentNotificationCount = 0;
+      for (let id in notifications[origin]) {
+        if (notifications[origin][id].serviceWorkerRegistrationScope) {
+          persistentNotificationCount++;
+        } else {
+          delete notifications[origin][id];
+        }
+      }
+      if (persistentNotificationCount == 0) {
         if (DEBUG) debug("Origin " + origin + " is not linked to an app manifest, deleting.");
-	delete notifications[origin];
+        delete notifications[origin];
       }
     }
+
     return notifications;
   },
 
@@ -97,11 +94,11 @@ var NotificationDB = {
   load: function() {
     var promise = OS.File.read(NOTIFICATION_STORE_PATH, { encoding: "utf-8"});
     return promise.then(
-      function onSuccess(data) {
+      data => {
         if (data.length > 0) {
-	  // Preprocessing phase intends to cleanly separate any migration-related
+          // Preprocessing phase intends to cleanly separate any migration-related
           // tasks.
-	  this.notifications = this.filterNonAppNotifications(JSON.parse(data));
+          this.notifications = this.filterNonAppNotifications(JSON.parse(data));
         }
 
         // populate the list of notifications by tag
@@ -118,13 +115,13 @@ var NotificationDB = {
         }
 
         this.loaded = true;
-      }.bind(this),
+      },
 
       // If read failed, we assume we have no notifications to load.
-      function onFailure(reason) {
+      reason => {
         this.loaded = true;
         return this.createStore();
-      }.bind(this)
+      }
     );
   },
 
@@ -186,19 +183,6 @@ var NotificationDB = {
             errorMsg: error
           });
         });
-        break;
-
-      case "Notification:GetAllCrossOrigin":
-        this.queueTask("getallaccrossorigin", message.data).then(
-          function(notifications) {
-            returnMessage("Notification:GetAllCrossOrigin:Return:OK", {
-              notifications: notifications
-            });
-          }).catch(function(error) {
-            returnMessage("Notification:GetAllCrossOrigin:Return:KO", {
-              errorMsg: error
-            });
-          });
         break;
 
       case "Notification:Save":
@@ -269,16 +253,12 @@ var NotificationDB = {
 
     // Always make sure we are loaded before performing any read/write tasks.
     this.ensureLoaded()
-    .then(function() {
+    .then(() => {
       var task = this.runningTask;
 
       switch (task.operation) {
         case "getall":
           return this.taskGetAll(task.data);
-          break;
-
-        case "getallaccrossorigin":
-          return this.taskGetAllCrossOrigin();
           break;
 
         case "save":
@@ -290,22 +270,22 @@ var NotificationDB = {
           break;
       }
 
-    }.bind(this))
-    .then(function(payload) {
+    })
+    .then(payload => {
       if (DEBUG) {
         debug("Finishing task: " + this.runningTask.operation);
       }
       this.runningTask.defer.resolve(payload);
-    }.bind(this))
-    .catch(function(err) {
+    })
+    .catch(err => {
       if (DEBUG) {
         debug("Error while running " + this.runningTask.operation + ": " + err);
       }
       this.runningTask.defer.reject(new String(err));
-    }.bind(this))
-    .then(function() {
+    })
+    .then(() => {
       this.runNextTask();
-    }.bind(this));
+    });
   },
 
   taskGetAll: function(data) {
@@ -316,31 +296,6 @@ var NotificationDB = {
     if (this.notifications[origin]) {
       for (var i in this.notifications[origin]) {
         notifications.push(this.notifications[origin][i]);
-      }
-    }
-    return Promise.resolve(notifications);
-  },
-
-  taskGetAllCrossOrigin: function() {
-    if (DEBUG) { debug("Task, getting all whatever origin"); }
-    var notifications = [];
-    for (var origin in this.notifications) {
-      if (!this.notifications[origin]) {
-        continue;
-      }
-
-      for (var i in this.notifications[origin]) {
-        var notification = this.notifications[origin][i];
-
-        // Notifications without the alertName field cannot be resent by
-        // mozResendAllNotifications, so we just skip them. They will
-        // still be available to applications via Notification.get()
-        if (!('alertName' in notification)) {
-          continue;
-        }
-
-        notification.origin = origin;
-        notifications.push(notification);
       }
     }
     return Promise.resolve(notifications);

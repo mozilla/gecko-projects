@@ -18,7 +18,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIDocShell.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMNode.h"
 #include "nsIFrame.h"
 #include "prtime.h"
 
@@ -44,7 +43,7 @@ UIEvent::UIEvent(EventTarget* aOwner,
     mEventIsInternal = true;
     mEvent->mTime = PR_Now();
   }
-  
+
   // Fill mDetail and mView according to the mEvent (widget-generated
   // event) we've got
   switch(mEvent->mClass) {
@@ -90,6 +89,7 @@ UIEvent::Constructor(const GlobalObject& aGlobal,
   e->InitUIEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
                  aParam.mDetail);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 
@@ -99,8 +99,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(UIEvent, Event,
 NS_IMPL_ADDREF_INHERITED(UIEvent, Event)
 NS_IMPL_RELEASE_INHERITED(UIEvent, Event)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(UIEvent)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMUIEvent)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UIEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
 
 static nsIntPoint
@@ -114,113 +113,72 @@ DevPixelsToCSSPixels(const LayoutDeviceIntPoint& aPoint,
 nsIntPoint
 UIEvent::GetMovementPoint()
 {
+  if (mEvent->mFlags.mIsPositionless) {
+    return nsIntPoint(0, 0);
+  }
+
   if (mPrivateDataDuplicated || mEventIsInternal) {
     return mMovementPoint;
   }
 
-  if (!mEvent ||
-      (mEvent->mClass != eMouseEventClass &&
-       mEvent->mClass != eMouseScrollEventClass &&
-       mEvent->mClass != eWheelEventClass &&
-       mEvent->mClass != eDragEventClass &&
-       mEvent->mClass != ePointerEventClass &&
-       mEvent->mClass != eSimpleGestureEventClass) ||
-       !mEvent->AsGUIEvent()->widget) {
+  if (!mEvent || !mEvent->AsGUIEvent()->mWidget ||
+      (mEvent->mMessage != eMouseMove && mEvent->mMessage != ePointerMove)) {
+    // Pointer Lock spec defines that movementX/Y must be zero for all mouse
+    // events except mousemove.
     return nsIntPoint(0, 0);
   }
 
   // Calculate the delta between the last screen point and the current one.
-  nsIntPoint current = DevPixelsToCSSPixels(mEvent->refPoint, mPresContext);
-  nsIntPoint last = DevPixelsToCSSPixels(mEvent->lastRefPoint, mPresContext);
+  nsIntPoint current = DevPixelsToCSSPixels(mEvent->mRefPoint, mPresContext);
+  nsIntPoint last = DevPixelsToCSSPixels(mEvent->mLastRefPoint, mPresContext);
   return current - last;
-}
-
-NS_IMETHODIMP
-UIEvent::GetView(mozIDOMWindowProxy** aView)
-{
-  *aView = mView;
-  NS_IF_ADDREF(*aView);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::GetDetail(int32_t* aDetail)
-{
-  *aDetail = mDetail;
-  return NS_OK;
 }
 
 void
 UIEvent::InitUIEvent(const nsAString& typeArg,
                      bool canBubbleArg,
                      bool cancelableArg,
-                     nsGlobalWindow* viewArg,
+                     nsGlobalWindowInner* viewArg,
                      int32_t detailArg)
 {
-  auto* view = viewArg ? viewArg->AsInner() : nullptr;
-  InitUIEvent(typeArg, canBubbleArg, cancelableArg, view, detailArg);
-}
+  if (NS_WARN_IF(mEvent->mFlags.mIsBeingDispatched)) {
+    return;
+  }
 
-NS_IMETHODIMP
-UIEvent::InitUIEvent(const nsAString& typeArg,
-                     bool canBubbleArg,
-                     bool cancelableArg,
-                     mozIDOMWindow* viewArg,
-                     int32_t detailArg)
-{
   Event::InitEvent(typeArg, canBubbleArg, cancelableArg);
 
   mDetail = detailArg;
-  mView = viewArg ? nsPIDOMWindowInner::From(viewArg)->GetOuterWindow() :
-                    nullptr;
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::GetPageX(int32_t* aPageX)
-{
-  NS_ENSURE_ARG_POINTER(aPageX);
-  *aPageX = PageX();
-  return NS_OK;
+  mView = viewArg ? viewArg->GetOuterWindow() : nullptr;
 }
 
 int32_t
 UIEvent::PageX() const
 {
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
+
   if (mPrivateDataDuplicated) {
     return mPagePoint.x;
   }
 
-  return Event::GetPageCoords(mPresContext, mEvent, mEvent->refPoint,
+  return Event::GetPageCoords(mPresContext, mEvent, mEvent->mRefPoint,
                               mClientPoint).x;
-}
-
-NS_IMETHODIMP
-UIEvent::GetPageY(int32_t* aPageY)
-{
-  NS_ENSURE_ARG_POINTER(aPageY);
-  *aPageY = PageY();
-  return NS_OK;
 }
 
 int32_t
 UIEvent::PageY() const
 {
+  if (mEvent->mFlags.mIsPositionless) {
+    return 0;
+  }
+
   if (mPrivateDataDuplicated) {
     return mPagePoint.y;
   }
 
-  return Event::GetPageCoords(mPresContext, mEvent, mEvent->refPoint,
+  return Event::GetPageCoords(mPresContext, mEvent, mEvent->mRefPoint,
                               mClientPoint).y;
-}
-
-NS_IMETHODIMP
-UIEvent::GetWhich(uint32_t* aWhich)
-{
-  NS_ENSURE_ARG_POINTER(aWhich);
-  *aWhich = Which();
-  return NS_OK;
 }
 
 already_AddRefed<nsINode>
@@ -229,7 +187,11 @@ UIEvent::GetRangeParent()
   nsIFrame* targetFrame = nullptr;
 
   if (mPresContext) {
-    targetFrame = mPresContext->EventStateManager()->GetEventTarget();
+    nsCOMPtr<nsIPresShell> shell = mPresContext->GetPresShell();
+    if (shell) {
+      shell->FlushPendingNotifications(FlushType::Layout);
+      targetFrame = mPresContext->EventStateManager()->GetEventTarget();
+    }
   }
 
   if (targetFrame) {
@@ -248,32 +210,19 @@ UIEvent::GetRangeParent()
   return nullptr;
 }
 
-NS_IMETHODIMP
-UIEvent::GetRangeParent(nsIDOMNode** aRangeParent)
-{
-  NS_ENSURE_ARG_POINTER(aRangeParent);
-  *aRangeParent = nullptr;
-  nsCOMPtr<nsINode> n = GetRangeParent();
-  if (n) {
-    CallQueryInterface(n, aRangeParent);
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::GetRangeOffset(int32_t* aRangeOffset)
-{
-  NS_ENSURE_ARG_POINTER(aRangeOffset);
-  *aRangeOffset = RangeOffset();
-  return NS_OK;
-}
-
 int32_t
 UIEvent::RangeOffset() const
 {
   if (!mPresContext) {
     return 0;
   }
+
+  nsCOMPtr<nsIPresShell> shell = mPresContext->GetPresShell();
+  if (!shell) {
+    return 0;
+  }
+
+  shell->FlushPendingNotifications(FlushType::Layout);
 
   nsIFrame* targetFrame = mPresContext->EventStateManager()->GetEventTarget();
   if (!targetFrame) {
@@ -285,24 +234,13 @@ UIEvent::RangeOffset() const
   return targetFrame->GetContentOffsetsFromPoint(pt).offset;
 }
 
-NS_IMETHODIMP
-UIEvent::GetCancelBubble(bool* aCancelBubble)
-{
-  NS_ENSURE_ARG_POINTER(aCancelBubble);
-  *aCancelBubble = CancelBubble();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::SetCancelBubble(bool aCancelBubble)
-{
-  mEvent->mFlags.mPropagationStopped = aCancelBubble;
-  return NS_OK;
-}
-
 nsIntPoint
 UIEvent::GetLayerPoint() const
 {
+  if (mEvent->mFlags.mIsPositionless) {
+    return nsIntPoint(0, 0);
+  }
+
   if (!mEvent ||
       (mEvent->mClass != eMouseEventClass &&
        mEvent->mClass != eMouseScrollEventClass &&
@@ -325,65 +263,28 @@ UIEvent::GetLayerPoint() const
                     nsPresContext::AppUnitsToIntCSSPixels(pt.y));
 }
 
-NS_IMETHODIMP
-UIEvent::GetLayerX(int32_t* aLayerX)
-{
-  NS_ENSURE_ARG_POINTER(aLayerX);
-  *aLayerX = GetLayerPoint().x;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::GetLayerY(int32_t* aLayerY)
-{
-  NS_ENSURE_ARG_POINTER(aLayerY);
-  *aLayerY = GetLayerPoint().y;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UIEvent::GetIsChar(bool* aIsChar)
-{
-  *aIsChar = IsChar();
-  return NS_OK;
-}
-
-bool
-UIEvent::IsChar() const
-{
-  WidgetKeyboardEvent* keyEvent = mEvent->AsKeyboardEvent();
-  return keyEvent ? keyEvent->isChar : false;
-}
-
-mozilla::dom::Event*
-UIEvent::AsEvent(void)
-{
-  return this;
-}
-
-NS_IMETHODIMP
+void
 UIEvent::DuplicatePrivateData()
 {
   mClientPoint =
-    Event::GetClientCoords(mPresContext, mEvent, mEvent->refPoint,
+    Event::GetClientCoords(mPresContext, mEvent, mEvent->mRefPoint,
                            mClientPoint);
   mMovementPoint = GetMovementPoint();
   mLayerPoint = GetLayerPoint();
   mPagePoint =
-    Event::GetPageCoords(mPresContext, mEvent, mEvent->refPoint, mClientPoint);
-  // GetScreenPoint converts mEvent->refPoint to right coordinates.
+    Event::GetPageCoords(mPresContext, mEvent, mEvent->mRefPoint, mClientPoint);
+  // GetScreenPoint converts mEvent->mRefPoint to right coordinates.
   CSSIntPoint screenPoint =
-    Event::GetScreenCoords(mPresContext, mEvent, mEvent->refPoint);
-  nsresult rv = Event::DuplicatePrivateData();
-  if (NS_SUCCEEDED(rv)) {
-    CSSToLayoutDeviceScale scale = mPresContext ? mPresContext->CSSToDevPixelScale()
-                                                : CSSToLayoutDeviceScale(1);
-    mEvent->refPoint = RoundedToInt(screenPoint * scale);
-  }
-  return rv;
+    Event::GetScreenCoords(mPresContext, mEvent, mEvent->mRefPoint);
+
+  Event::DuplicatePrivateData();
+
+  CSSToLayoutDeviceScale scale = mPresContext ? mPresContext->CSSToDevPixelScale()
+                                              : CSSToLayoutDeviceScale(1);
+  mEvent->mRefPoint = RoundedToInt(screenPoint * scale);
 }
 
-NS_IMETHODIMP_(void)
+void
 UIEvent::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
 {
   if (aSerializeInterfaceType) {
@@ -392,13 +293,11 @@ UIEvent::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
 
   Event::Serialize(aMsg, false);
 
-  int32_t detail = 0;
-  GetDetail(&detail);
-  IPC::WriteParam(aMsg, detail);
+  IPC::WriteParam(aMsg, Detail());
 }
 
-NS_IMETHODIMP_(bool)
-UIEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
+bool
+UIEvent::Deserialize(const IPC::Message* aMsg, PickleIterator* aIter)
 {
   NS_ENSURE_TRUE(Event::Deserialize(aMsg, aIter), false);
   NS_ENSURE_TRUE(IPC::ReadParam(aMsg, aIter, &mDetail), false);
@@ -517,7 +416,7 @@ using namespace mozilla::dom;
 already_AddRefed<UIEvent>
 NS_NewDOMUIEvent(EventTarget* aOwner,
                  nsPresContext* aPresContext,
-                 WidgetGUIEvent* aEvent) 
+                 WidgetGUIEvent* aEvent)
 {
   RefPtr<UIEvent> it = new UIEvent(aOwner, aPresContext, aEvent);
   return it.forget();

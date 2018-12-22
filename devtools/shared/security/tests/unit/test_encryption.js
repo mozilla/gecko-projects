@@ -13,52 +13,48 @@ function run_test() {
 }
 
 function connectClient(client) {
-  let deferred = promise.defer();
-  client.connect(() => {
-    client.listTabs(deferred.resolve);
-  });
-  return deferred.promise;
+  return client.connect(() => client.listTabs());
 }
 
-add_task(function*() {
+add_task(async function() {
   initTestDebuggerServer();
 });
 
 // Client w/ encryption connects successfully to server w/ encryption
-add_task(function*() {
+add_task(async function() {
   equal(DebuggerServer.listeningSockets, 0, "0 listening sockets");
 
-  let AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
-  let authenticator = new AuthenticatorType.Server();
+  const AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
+  const authenticator = new AuthenticatorType.Server();
   authenticator.allowConnection = () => {
     return DebuggerServer.AuthenticationResult.ALLOW;
   };
 
-  let listener = DebuggerServer.createListener();
+  const listener = DebuggerServer.createListener();
   ok(listener, "Socket listener created");
-  listener.portOrPath = -1 /* any available port */;
+  listener.portOrPath = -1;
   listener.authenticator = authenticator;
   listener.encryption = true;
-  yield listener.open();
+  await listener.open();
   equal(DebuggerServer.listeningSockets, 1, "1 listening socket");
 
-  let transport = yield DebuggerClient.socketConnect({
+  const transport = await DebuggerClient.socketConnect({
     host: "127.0.0.1",
     port: listener.port,
     encryption: true
   });
   ok(transport, "Client transport created");
 
-  let client = new DebuggerClient(transport);
-  let onUnexpectedClose = () => {
+  const client = new DebuggerClient(transport);
+  const onUnexpectedClose = () => {
     do_throw("Closed unexpectedly");
   };
   client.addListener("closed", onUnexpectedClose);
-  yield connectClient(client);
+  await connectClient(client);
 
   // Send a message the server will echo back
-  let message = "secrets";
-  let reply = yield client.request({
+  const message = "secrets";
+  const reply = await client.request({
     to: "root",
     type: "echo",
     message
@@ -72,30 +68,30 @@ add_task(function*() {
 });
 
 // Client w/o encryption fails to connect to server w/ encryption
-add_task(function*() {
+add_task(async function() {
   equal(DebuggerServer.listeningSockets, 0, "0 listening sockets");
 
-  let AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
-  let authenticator = new AuthenticatorType.Server();
+  const AuthenticatorType = DebuggerServer.Authenticators.get("PROMPT");
+  const authenticator = new AuthenticatorType.Server();
   authenticator.allowConnection = () => {
     return DebuggerServer.AuthenticationResult.ALLOW;
   };
 
-  let listener = DebuggerServer.createListener();
+  const listener = DebuggerServer.createListener();
   ok(listener, "Socket listener created");
-  listener.portOrPath = -1 /* any available port */;
+  listener.portOrPath = -1;
   listener.authenticator = authenticator;
   listener.encryption = true;
-  yield listener.open();
+  await listener.open();
   equal(DebuggerServer.listeningSockets, 1, "1 listening socket");
 
   try {
-    yield DebuggerClient.socketConnect({
+    await DebuggerClient.socketConnect({
       host: "127.0.0.1",
       port: listener.port
       // encryption: false is the default
     });
-  } catch(e) {
+  } catch (e) {
     ok(true, "Client failed to connect as expected");
     listener.close();
     equal(DebuggerServer.listeningSockets, 0, "0 listening sockets");
@@ -105,6 +101,6 @@ add_task(function*() {
   do_throw("Connection unexpectedly succeeded");
 });
 
-add_task(function*() {
+add_task(async function() {
   DebuggerServer.destroy();
 });

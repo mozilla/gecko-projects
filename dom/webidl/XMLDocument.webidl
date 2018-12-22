@@ -13,11 +13,12 @@ interface XMLDocument : Document {};
 
 // http://www.whatwg.org/specs/web-apps/current-work/#xmldocument
 partial interface XMLDocument {
-  [Throws]
+  [Throws, NeedsCallerType]
   boolean load(DOMString url);
 };
 
 // Gecko extensions?
 partial interface XMLDocument {
+  [UseCounter]
   attribute boolean async;
 };

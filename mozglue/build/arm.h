@@ -69,34 +69,17 @@
 #    endif
 #  endif
 
-  // When using -mfpu=neon, gcc generates neon instructions.
-
-#  if defined(__ARM_NEON__)
-#    define MOZILLA_PRESUME_NEON 1
-#  endif
-
   // Currently we only have CPU detection for Linux via /proc/cpuinfo
 #  if defined(__linux__) || defined(ANDROID)
 #    define MOZILLA_ARM_HAVE_CPUID_DETECTION 1
 #  endif
 
-#elif defined(_MSC_VER) && defined(_M_ARM)
+#endif
 
-#  define MOZILLA_ARM_HAVE_CPUID_DETECTION 1
-  // _M_ARM on MSVC has current cpu architecture.
-#  define MOZILLA_ARM_ARCH _M_ARM
-
-  // MSVC only allows external asm for ARM, so we don't have to rely on
-  // compiler support.
-#  define MOZILLA_MAY_SUPPORT_EDSP 1
-#  if defined(HAVE_ARM_SIMD)
-#    define MOZILLA_MAY_SUPPORT_ARMV6 1
-#    define MOZILLA_MAY_SUPPORT_ARMV7 1
-#  endif
-#  if defined(HAVE_ARM_NEON)
-#    define MOZILLA_MAY_SUPPORT_NEON 1
-#  endif
-
+// When using -mfpu=neon on arm gcc, or using default on aarch64,
+// the compiler generates neon instructions.
+#if defined(__ARM_NEON)
+#  define MOZILLA_PRESUME_NEON 1
 #endif
 
 namespace mozilla {

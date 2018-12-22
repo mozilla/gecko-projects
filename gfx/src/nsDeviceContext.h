@@ -1,4 +1,4 @@
-/* -*- Mode: C++; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,7 +11,7 @@
 #include "gfxTypes.h"                   // for gfxFloat
 #include "gfxFont.h"                    // for gfxFont::Orientation
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
-#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "mozilla/RefPtr.h"             // for RefPtr
 #include "nsCOMPtr.h"                   // for nsCOMPtr
 #include "nsCoord.h"                    // for nscoord
 #include "nsError.h"                    // for nsresult
@@ -20,14 +20,14 @@
 #include "nscore.h"                     // for char16_t, nsAString
 #include "mozilla/AppUnits.h"           // for AppUnits
 #include "nsFontMetrics.h"              // for nsFontMetrics::Params
+#include "mozilla/gfx/PrintTarget.h"    // for PrintTarget::PageDoneCallback
 
-class gfxASurface;
 class gfxContext;
 class gfxTextPerfMetrics;
 class gfxUserFontSet;
 struct nsFont;
 class nsFontCache;
-class nsIAtom;
+class nsAtom;
 class nsIDeviceContextSpec;
 class nsIScreen;
 class nsIScreenManager;
@@ -37,6 +37,8 @@ struct nsRect;
 class nsDeviceContext final
 {
 public:
+    typedef mozilla::gfx::PrintTarget PrintTarget;
+
     nsDeviceContext();
 
     NS_INLINE_DECL_REFCOUNTING(nsDeviceContext)
@@ -47,6 +49,14 @@ public:
      * @return error status
      */
     nsresult Init(nsIWidget *aWidget);
+
+    /*
+     * Initialize the font cache if it hasn't been initialized yet.
+     * (Needed for stylo)
+     */
+    void InitFontCache();
+
+    void UpdateFontCacheUserFonts(gfxUserFontSet* aUserFontSet);
 
     /**
      * Initialize the device context from a device context spec
@@ -62,6 +72,14 @@ public:
      * @return the new rendering context (guaranteed to be non-null)
      */
     already_AddRefed<gfxContext> CreateRenderingContext();
+
+    /**
+     * Create a reference rendering context and initialize it.  Only call this
+     * method on device contexts that were initialized for printing.
+     *
+     * @return the new rendering context.
+     */
+    already_AddRefed<gfxContext> CreateReferenceRenderingContext();
 
     /**
      * Gets the number of app units in one CSS pixel; this number is global,
@@ -169,6 +187,12 @@ public:
     nsresult GetClientRect(nsRect& aRect);
 
     /**
+     * Returns true if we're currently between BeginDocument() and
+     * EndDocument() calls.
+     */
+    bool IsCurrentlyPrintingDocument() const { return mIsCurrentlyPrintingDoc; }
+
+    /**
      * Inform the output device that output of a document is beginning
      * Used for print related device contexts. Must be matched 1:1 with
      * EndDocument() or AbortDocument().
@@ -219,12 +243,18 @@ public:
     nsresult EndPage();
 
     /**
-     * Check to see if the DPI has changed
+     * Check to see if the DPI has changed, or impose a new DPI scale value.
+     * @param  aScale - If non-null, the default (unzoomed) CSS to device pixel
+     *                  scale factor will be returned here; and if it is > 0.0
+     *                  on input, the given value will be used instead of
+     *                  getting it from the widget (if any). This is used to
+     *                  allow subdocument contexts to inherit the resolution
+     *                  setting of their parent.
      * @return whether there was actually a change in the DPI (whether
      *         AppUnitsPerDevPixel() or AppUnitsPerPhysicalInch()
      *         changed)
      */
-    bool CheckDPIChange();
+    bool CheckDPIChange(double* aScale = nullptr);
 
     /**
      * Set the full zoom factor: all lengths are multiplied by this factor
@@ -241,15 +271,25 @@ public:
     /**
      * True if this device context was created for printing.
      */
-    bool IsPrinterSurface();
+    bool IsPrinterContext();
 
     mozilla::DesktopToLayoutDeviceScale GetDesktopToDeviceScale();
 
+    bool IsSyncPagePrinting() const;
+    void RegisterPageDoneCallback(PrintTarget::PageDoneCallback&& aCallback);
+    void UnregisterPageDoneCallback();
 private:
     // Private destructor, to discourage deletion outside of Release():
     ~nsDeviceContext();
 
-    void SetDPI();
+    /**
+     * Implementation shared by CreateRenderingContext and
+     * CreateReferenceRenderingContext.
+     */
+    already_AddRefed<gfxContext>
+    CreateRenderingContextCommon(bool aWantReferenceContext);
+
+    void SetDPI(double* aScale = nullptr);
     void ComputeClientRectUsingScreen(nsRect *outRect);
     void ComputeFullAreaUsingScreen(nsRect *outRect);
     void FindScreen(nsIScreen **outScreen);
@@ -260,20 +300,21 @@ private:
 
     nscoord  mWidth;
     nscoord  mHeight;
-    uint32_t mDepth;
     int32_t  mAppUnitsPerDevPixel;
     int32_t  mAppUnitsPerDevPixelAtUnitFullZoom;
     int32_t  mAppUnitsPerPhysicalInch;
     float    mFullZoom;
     float    mPrintingScale;
+    gfxPoint  mPrintingTranslate;
 
     RefPtr<nsFontCache>            mFontCache;
     nsCOMPtr<nsIWidget>            mWidget;
     nsCOMPtr<nsIScreenManager>     mScreenManager;
     nsCOMPtr<nsIDeviceContextSpec> mDeviceContextSpec;
-    RefPtr<gfxASurface>          mPrintingSurface;
-#ifdef XP_MACOSX
-    RefPtr<gfxASurface>          mCachedPrintingSurface;
+    RefPtr<PrintTarget>            mPrintTarget;
+    bool                           mIsCurrentlyPrintingDoc;
+#ifdef DEBUG
+    bool mIsInitialized;
 #endif
 };
 

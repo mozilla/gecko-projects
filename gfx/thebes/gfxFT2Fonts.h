@@ -19,19 +19,29 @@ class FT2FontEntry;
 
 class gfxFT2Font : public gfxFT2FontBase {
 public: // new functions
-    gfxFT2Font(cairo_scaled_font_t *aCairoFont,
+    gfxFT2Font(const RefPtr<mozilla::gfx::UnscaledFontFreeType>& aUnscaledFont,
+               cairo_scaled_font_t *aCairoFont,
+               FT_Face aFTFace,
                FT2FontEntry *aFontEntry,
-               const gfxFontStyle *aFontStyle,
-               bool aNeedsBold);
+               const gfxFontStyle *aFontStyle);
     virtual ~gfxFT2Font ();
 
     FT2FontEntry *GetFontEntry();
 
+    virtual already_AddRefed<mozilla::gfx::ScaledFont>
+    GetScaledFont(DrawTarget *aTarget) override;
+
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const override;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const override;
+
+protected:
     struct CachedGlyphData {
         CachedGlyphData()
             : glyphIndex(0xffffffffU) { }
 
-        CachedGlyphData(uint32_t gid)
+        explicit CachedGlyphData(uint32_t gid)
             : glyphIndex(gid) { }
 
         uint32_t glyphIndex;
@@ -40,7 +50,7 @@ public: // new functions
         int32_t xAdvance;
     };
 
-    const CachedGlyphData* GetGlyphDataForChar(uint32_t ch) {
+    const CachedGlyphData* GetGlyphDataForChar(FT_Face aFace, uint32_t ch) {
         CharGlyphMapEntryType *entry = mCharGlyphCache.PutEntry(ch);
 
         if (!entry)
@@ -48,32 +58,22 @@ public: // new functions
 
         if (entry->mData.glyphIndex == 0xffffffffU) {
             // this is a new entry, fill it
-            FillGlyphDataForChar(ch, &entry->mData);
+            FillGlyphDataForChar(aFace, ch, &entry->mData);
         }
 
         return &entry->mData;
     }
 
-    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontCacheSizes* aSizes) const;
-    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontCacheSizes* aSizes) const;
+    bool ShapeText(DrawTarget      *aDrawTarget,
+                   const char16_t  *aText,
+                   uint32_t         aOffset,
+                   uint32_t         aLength,
+                   Script           aScript,
+                   bool             aVertical,
+                   RoundingFlags    aRounding,
+                   gfxShapedText   *aShapedText) override;
 
-#ifdef USE_SKIA
-    virtual already_AddRefed<mozilla::gfx::GlyphRenderingOptions>
-        GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams = nullptr) override;
-#endif
-
-protected:
-    virtual bool ShapeText(DrawTarget      *aDrawTarget,
-                           const char16_t *aText,
-                           uint32_t         aOffset,
-                           uint32_t         aLength,
-                           int32_t          aScript,
-                           bool             aVertical,
-                           gfxShapedText   *aShapedText);
-
-    void FillGlyphDataForChar(uint32_t ch, CachedGlyphData *gd);
+    void FillGlyphDataForChar(FT_Face face, uint32_t ch, CachedGlyphData *gd);
 
     void AddRange(const char16_t *aText,
                   uint32_t         aOffset,
@@ -83,6 +83,7 @@ protected:
     typedef nsBaseHashtableET<nsUint32HashKey, CachedGlyphData> CharGlyphMapEntryType;
     typedef nsTHashtable<CharGlyphMapEntryType> CharGlyphMap;
     CharGlyphMap mCharGlyphCache;
+    FT_Face mFTFace;
 };
 
 #endif /* GFX_FT2FONTS_H */

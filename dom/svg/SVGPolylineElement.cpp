@@ -19,7 +19,7 @@ namespace dom {
 JSObject*
 SVGPolylineElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGPolylineElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGPolylineElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -31,12 +31,12 @@ SVGPolylineElement::SVGPolylineElement(already_AddRefed<mozilla::dom::NodeInfo>&
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPolylineElement)
 
 //----------------------------------------------------------------------
-// nsSVGPathGeometryElement methods
+// SVGGeometryElement methods
 
 already_AddRefed<Path>
 SVGPolylineElement::BuildPath(PathBuilder* aBuilder)

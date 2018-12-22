@@ -8,30 +8,27 @@
 
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
-                                  "resource://gre/modules/LoginHelper.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LoginImport",
-                                  "resource://gre/modules/LoginImport.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LoginStore",
-                                  "resource://gre/modules/LoginStore.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginHelper",
+                               "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginImport",
+                               "resource://gre/modules/LoginImport.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginStore",
+                               "resource://gre/modules/LoginStore.jsm");
+ChromeUtils.defineModuleGetter(this, "OS",
+                               "resource://gre/modules/osfile.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
-this.LoginManagerStorage_json = function () {};
+this.LoginManagerStorage_json = function() {};
 
 this.LoginManagerStorage_json.prototype = {
   classID: Components.ID("{c00c432d-a0c9-46d7-bef6-9c45b4d07341}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsILoginManagerStorage]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsILoginManagerStorage]),
 
   __crypto: null,  // nsILoginManagerCrypto service
   get _crypto() {
@@ -52,10 +49,10 @@ this.LoginManagerStorage_json.prototype = {
                                   "logins.json");
       this._store = new LoginStore(jsonPath);
 
-      return Task.spawn(function* () {
+      return (async () => {
         // Load the data asynchronously.
         this.log("Opening database at", this._store.path);
-        yield this._store.load();
+        await this._store.load();
 
         // The import from previous versions operates the first time
         // that this built-in storage back-end is used.  This may be
@@ -72,19 +69,19 @@ this.LoginManagerStorage_json.prototype = {
         // Import only happens asynchronously.
         let sqlitePath = OS.Path.join(OS.Constants.Path.profileDir,
                                       "signons.sqlite");
-        if (yield OS.File.exists(sqlitePath)) {
+        if (await OS.File.exists(sqlitePath)) {
           let loginImport = new LoginImport(this._store, sqlitePath);
           // Failures during import, for example due to a corrupt
           // file or a schema version that is too old, will not
           // prevent us from marking the operation as completed.
           // At the next startup, we will not try the import again.
-          yield loginImport.import().catch(Cu.reportError);
+          await loginImport.import().catch(Cu.reportError);
           this._store.saveSoon();
         }
 
         // We won't attempt import again on next startup.
         Services.prefs.setBoolPref("signon.importedFromSqlite", true);
-      }.bind(this)).catch(Cu.reportError);
+      })().catch(Cu.reportError);
     } catch (e) {
       this.log("Initialization failed:", e);
       throw new Error("Initialization failed");
@@ -97,16 +94,18 @@ this.LoginManagerStorage_json.prototype = {
    */
   terminate() {
     this._store._saver.disarm();
-    return this._store.save();
+    return this._store._save();
   },
 
-  addLogin(login) {
+  addLogin(login, preEncrypted = false) {
     this._store.ensureDataReady();
 
     // Throws if there are bogus values.
     LoginHelper.checkLoginValues(login);
 
-    let [encUsername, encPassword, encType] = this._encryptLogin(login);
+    let [encUsername, encPassword, encType] = preEncrypted ?
+      [login.username, login.password, this._crypto.defaultEncType] :
+      this._encryptLogin(login);
 
     // Clone the login, so we don't modify the caller's object.
     let loginClone = login.clone();
@@ -114,8 +113,23 @@ this.LoginManagerStorage_json.prototype = {
     // Initialize the nsILoginMetaInfo fields, unless the caller gave us values
     loginClone.QueryInterface(Ci.nsILoginMetaInfo);
     if (loginClone.guid) {
-      if (!this._isGuidUnique(loginClone.guid))
-        throw new Error("specified GUID already exists");
+      let guid = loginClone.guid;
+      if (!this._isGuidUnique(guid)) {
+        // We have an existing GUID, but it's possible that entry is unable
+        // to be decrypted - if that's the case we remove the existing one
+        // and allow this one to be added.
+        let existing = this._searchLogins({guid})[0];
+        if (this._decryptLogins(existing).length) {
+          // Existing item is good, so it's an error to try and re-add it.
+          throw new Error("specified GUID already exists");
+        }
+        // find and remove the existing bad entry.
+        let foundIndex = this._store.data.logins.findIndex(l => l.guid == guid);
+        if (foundIndex == -1) {
+          throw new Error("can't find a matching GUID to remove");
+        }
+        this._store.data.logins.splice(foundIndex, 1);
+      }
     } else {
       loginClone.guid = gUUIDGenerator.generateUUID().toString();
     }
@@ -141,7 +155,7 @@ this.LoginManagerStorage_json.prototype = {
       encryptedUsername:   encUsername,
       encryptedPassword:   encPassword,
       guid:                loginClone.guid,
-      encType:             encType,
+      encType,
       timeCreated:         loginClone.timeCreated,
       timeLastUsed:        loginClone.timeLastUsed,
       timePasswordChanged: loginClone.timePasswordChanged,
@@ -150,7 +164,8 @@ this.LoginManagerStorage_json.prototype = {
     this._store.saveSoon();
 
     // Send a notification that a login was added.
-    this._sendNotification("addLogin", loginClone);
+    LoginHelper.notifyStorageChanged("addLogin", loginClone);
+    return loginClone;
   },
 
   removeLogin(login) {
@@ -166,7 +181,7 @@ this.LoginManagerStorage_json.prototype = {
       this._store.saveSoon();
     }
 
-    this._sendNotification("removeLogin", storedLogin);
+    LoginHelper.notifyStorageChanged("removeLogin", storedLogin);
   },
 
   modifyLogin(oldLogin, newLoginData) {
@@ -180,8 +195,7 @@ this.LoginManagerStorage_json.prototype = {
 
     // Check if the new GUID is duplicate.
     if (newLogin.guid != oldStoredLogin.guid &&
-        !this._isGuidUnique(newLogin.guid))
-    {
+        !this._isGuidUnique(newLogin.guid)) {
       throw new Error("specified GUID already exists");
     }
 
@@ -218,7 +232,7 @@ this.LoginManagerStorage_json.prototype = {
       }
     }
 
-    this._sendNotification("modifyLogin", [oldStoredLogin, newLogin]);
+    LoginHelper.notifyStorageChanged("modifyLogin", [oldStoredLogin, newLogin]);
   },
 
   /**
@@ -244,14 +258,25 @@ this.LoginManagerStorage_json.prototype = {
    */
   searchLogins(count, matchData) {
     let realMatchData = {};
+    let options = {};
     // Convert nsIPropertyBag to normal JS object
     let propEnum = matchData.enumerator;
     while (propEnum.hasMoreElements()) {
       let prop = propEnum.getNext().QueryInterface(Ci.nsIProperty);
-      realMatchData[prop.name] = prop.value;
+      switch (prop.name) {
+        // Some property names aren't field names but are special options to affect the search.
+        case "schemeUpgrades": {
+          options[prop.name] = prop.value;
+          break;
+        }
+        default: {
+          realMatchData[prop.name] = prop.value;
+          break;
+        }
+      }
     }
 
-    let [logins, ids] = this._searchLogins(realMatchData);
+    let [logins, ids] = this._searchLogins(realMatchData, options);
 
     // Decrypt entries found for the caller.
     logins = this._decryptLogins(logins);
@@ -268,51 +293,36 @@ this.LoginManagerStorage_json.prototype = {
    * is an array of encrypted nsLoginInfo and ids is an array of associated
    * ids in the database.
    */
-  _searchLogins(matchData) {
+  _searchLogins(matchData, aOptions = {
+    schemeUpgrades: false,
+  }) {
     this._store.ensureDataReady();
 
-    let conditions = [];
-
     function match(aLogin) {
-      let returnValue = {
-        match: false,
-        strictMatch: true
-      };
-
       for (let field in matchData) {
-        let value = matchData[field];
+        let wantedValue = matchData[field];
         switch (field) {
-          // Historical compatibility requires this special case
           case "formSubmitURL":
-            if (value != null) {
-              if (aLogin.formSubmitURL != "" && aLogin.formSubmitURL != value) {
-                // Check for cases that don't have fallback matches.
-                if (value == "" || value == "javascript:" ||
-                    aLogin.formSubmitURL == "javascript:" ||
-                    aLogin.formSubmitURL == null) {
-                  return returnValue;
-                }
-
-                // Check if it matches with a different scheme.
-                let loginURI = Services.io.newURI(aLogin.formSubmitURL, null, null);
-                let matchURI = Services.io.newURI(value, null, null);
-
-                if (loginURI.hostPort != matchURI.hostPort) {
-                  return returnValue; // not a match at all
-                }
-
-                if ((loginURI.scheme != "http" && loginURI.scheme != "https") ||
-                    (matchURI.scheme != "http" && matchURI.scheme != "https")) {
-                  // Not a match at all since we only fallback HTTP <=> HTTPS.
-                  return returnValue;
-                }
-
-                returnValue.strictMatch = false; // not a strict match
+            if (wantedValue != null) {
+              // Historical compatibility requires this special case
+              if (aLogin.formSubmitURL == "") {
+                break;
+              }
+              if (!LoginHelper.isOriginMatching(aLogin[field], wantedValue, aOptions)) {
+                return false;
               }
               break;
             }
-          // Normal cases.
+            // fall through
           case "hostname":
+            if (wantedValue != null) { // needed for formSubmitURL fall through
+              if (!LoginHelper.isOriginMatching(aLogin[field], wantedValue, aOptions)) {
+                return false;
+              }
+              break;
+            }
+            // fall through
+          // Normal cases.
           case "httpRealm":
           case "id":
           case "usernameField":
@@ -325,10 +335,10 @@ this.LoginManagerStorage_json.prototype = {
           case "timeLastUsed":
           case "timePasswordChanged":
           case "timesUsed":
-            if (value == null && aLogin[field]) {
-              return returnValue;
-            } else if (aLogin[field] != value) {
-              return returnValue;
+            if (wantedValue == null && aLogin[field]) {
+              return false;
+            } else if (aLogin[field] != wantedValue) {
+              return false;
             }
             break;
           // Fail if caller requests an unknown property.
@@ -336,14 +346,12 @@ this.LoginManagerStorage_json.prototype = {
             throw new Error("Unexpected field: " + field);
         }
       }
-      returnValue.match = true;
-      return returnValue;
+      return true;
     }
 
-    let foundLogins = [], foundIds = [], fallbackLogins = [], fallbackIds = [];
+    let foundLogins = [], foundIds = [];
     for (let loginItem of this._store.data.logins) {
-      let result = match(loginItem);
-      if (result.match) {
+      if (match(loginItem)) {
         // Create the new nsLoginInfo object, push to array
         let login = Cc["@mozilla.org/login-manager/loginInfo;1"].
                     createInstance(Ci.nsILoginInfo);
@@ -358,29 +366,18 @@ this.LoginManagerStorage_json.prototype = {
         login.timeLastUsed = loginItem.timeLastUsed;
         login.timePasswordChanged = loginItem.timePasswordChanged;
         login.timesUsed = loginItem.timesUsed;
-        // If protocol does not match, use as a fallback login
-        if (result.strictMatch) {
-          foundLogins.push(login);
-          foundIds.push(loginItem.id);
-        } else {
-          fallbackLogins.push(login);
-          fallbackIds.push(loginItem.id);
-        }
+        foundLogins.push(login);
+        foundIds.push(loginItem.id);
       }
     }
 
-    if (!foundLogins.length && fallbackLogins.length) {
-      this.log("_searchLogins: returning", fallbackLogins.length, "fallback logins");
-      return [fallbackLogins, fallbackIds];
-    }
-    this.log("_searchLogins: returning", foundLogins.length, "logins");
+    this.log("_searchLogins: returning", foundLogins.length, "logins for", matchData,
+             "with options", aOptions);
     return [foundLogins, foundIds];
   },
 
   /**
    * Removes all logins from storage.
-   *
-   * Disabled hosts are kept, as one presumably doesn't want to erase those.
    */
   removeAllLogins() {
     this._store.ensureDataReady();
@@ -389,59 +386,18 @@ this.LoginManagerStorage_json.prototype = {
     this._store.data.logins = [];
     this._store.saveSoon();
 
-    this._sendNotification("removeAllLogins", null);
-  },
-
-  getAllDisabledHosts(count) {
-    this._store.ensureDataReady();
-
-    let disabledHosts = this._store.data.disabledHosts.slice(0);
-
-    this.log("_getAllDisabledHosts: returning", disabledHosts.length, "disabled hosts.");
-    if (count)
-      count.value = disabledHosts.length; // needed for XPCOM
-    return disabledHosts;
-  },
-
-  getLoginSavingEnabled(hostname) {
-    this._store.ensureDataReady();
-
-    this.log("Getting login saving is enabled for", hostname);
-    return this._store.data.disabledHosts.indexOf(hostname) == -1;
-  },
-
-  setLoginSavingEnabled(hostname, enabled) {
-    this._store.ensureDataReady();
-
-    // Throws if there are bogus values.
-    LoginHelper.checkHostnameValue(hostname);
-
-    this.log("Setting login saving enabled for", hostname, "to", enabled);
-    let foundIndex = this._store.data.disabledHosts.indexOf(hostname);
-    if (enabled) {
-      if (foundIndex != -1) {
-        this._store.data.disabledHosts.splice(foundIndex, 1);
-        this._store.saveSoon();
-      }
-    } else {
-      if (foundIndex == -1) {
-        this._store.data.disabledHosts.push(hostname);
-        this._store.saveSoon();
-      }
-    }
-
-    this._sendNotification(enabled ? "hostSavingEnabled" : "hostSavingDisabled", hostname);
+    LoginHelper.notifyStorageChanged("removeAllLogins", null);
   },
 
   findLogins(count, hostname, formSubmitURL, httpRealm) {
     let loginData = {
-      hostname: hostname,
-      formSubmitURL: formSubmitURL,
-      httpRealm: httpRealm
+      hostname,
+      formSubmitURL,
+      httpRealm
     };
     let matchData = { };
     for (let field of ["hostname", "formSubmitURL", "httpRealm"])
-      if (loginData[field] != '')
+      if (loginData[field] != "")
         matchData[field] = loginData[field];
     let [logins, ids] = this._searchLogins(matchData);
 
@@ -454,15 +410,14 @@ this.LoginManagerStorage_json.prototype = {
   },
 
   countLogins(hostname, formSubmitURL, httpRealm) {
-    let count = {};
     let loginData = {
-      hostname: hostname,
-      formSubmitURL: formSubmitURL,
-      httpRealm: httpRealm
+      hostname,
+      formSubmitURL,
+      httpRealm
     };
     let matchData = { };
     for (let field of ["hostname", "formSubmitURL", "httpRealm"])
-      if (loginData[field] != '')
+      if (loginData[field] != "")
         matchData[field] = loginData[field];
     let [logins, ids] = this._searchLogins(matchData);
 
@@ -479,25 +434,6 @@ this.LoginManagerStorage_json.prototype = {
   },
 
   /**
-   * Send a notification when stored data is changed.
-   */
-  _sendNotification(changeType, data) {
-    let dataObject = data;
-    // Can't pass a raw JS string or array though notifyObservers(). :-(
-    if (data instanceof Array) {
-      dataObject = Cc["@mozilla.org/array;1"].
-                   createInstance(Ci.nsIMutableArray);
-      for (let i = 0; i < data.length; i++)
-        dataObject.appendElement(data[i], false);
-    } else if (typeof(data) == "string") {
-      dataObject = Cc["@mozilla.org/supports-string;1"].
-                   createInstance(Ci.nsISupportsString);
-      dataObject.data = data;
-    }
-    Services.obs.notifyObservers(dataObject, "passwordmgr-storage-changed", changeType);
-  },
-
-  /**
    * Returns an array with two items: [id, login]. If the login was not
    * found, both items will be null. The returned login contains the actual
    * stored login (useful for looking at the actual nsILoginMetaInfo values).
@@ -505,7 +441,7 @@ this.LoginManagerStorage_json.prototype = {
   _getIdForLogin(login) {
     let matchData = { };
     for (let field of ["hostname", "formSubmitURL", "httpRealm"])
-      if (login[field] != '')
+      if (login[field] != "")
         matchData[field] = login[field];
     let [logins, ids] = this._searchLogins(matchData);
 

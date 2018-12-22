@@ -7,25 +7,20 @@
 #include "WMFMediaDataDecoder.h"
 #include "VideoUtils.h"
 #include "WMFUtils.h"
-#include "nsTArray.h"
 #include "mozilla/Telemetry.h"
+#include "nsTArray.h"
 
 #include "mozilla/Logging.h"
+#include "mozilla/SyncRunnable.h"
 
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 
 WMFMediaDataDecoder::WMFMediaDataDecoder(MFTManager* aMFTManager,
-                                         FlushableTaskQueue* aTaskQueue,
-                                         MediaDataDecoderCallback* aCallback)
+                                         TaskQueue* aTaskQueue)
   : mTaskQueue(aTaskQueue)
-  , mCallback(aCallback)
   , mMFTManager(aMFTManager)
-  , mMonitor("WMFMediaDataDecoder")
-  , mIsFlushing(false)
-  , mIsShutDown(false)
 {
 }
 
@@ -67,29 +62,29 @@ SendTelemetry(unsigned long hr)
   }
 
   nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
+    "SendTelemetry",
     [sample] {
       Telemetry::Accumulate(Telemetry::MEDIA_WMF_DECODE_ERROR, sample);
     });
-  NS_DispatchToMainThread(runnable);
+
+  SystemGroup::Dispatch(TaskCategory::Other, runnable.forget());
 }
 
-nsresult
+RefPtr<ShutdownPromise>
 WMFMediaDataDecoder::Shutdown()
 {
   MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
 
-  if (mTaskQueue) {
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &WMFMediaDataDecoder::ProcessShutdown);
-    mTaskQueue->Dispatch(runnable.forget());
-  } else {
-    ProcessShutdown();
-  }
   mIsShutDown = true;
-  return NS_OK;
+
+  if (mTaskQueue) {
+    return InvokeAsync(mTaskQueue, this, __func__,
+                       &WMFMediaDataDecoder::ProcessShutdown);
+  }
+  return ProcessShutdown();
 }
 
-void
+RefPtr<ShutdownPromise>
 WMFMediaDataDecoder::ProcessShutdown()
 {
   if (mMFTManager) {
@@ -99,130 +94,132 @@ WMFMediaDataDecoder::ProcessShutdown()
       SendTelemetry(S_OK);
     }
   }
+  return ShutdownPromise::CreateAndResolve(true, __func__);
 }
 
 // Inserts data into the decoder's pipeline.
-nsresult
-WMFMediaDataDecoder::Input(MediaRawData* aSample)
+RefPtr<MediaDataDecoder::DecodePromise>
+WMFMediaDataDecoder::Decode(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
   MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
 
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
-      this,
-      &WMFMediaDataDecoder::ProcessDecode,
-      RefPtr<MediaRawData>(aSample));
-  mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
+  return InvokeAsync<MediaRawData*>(mTaskQueue, this, __func__,
+                                    &WMFMediaDataDecoder::ProcessDecode,
+                                    aSample);
 }
 
-void
+RefPtr<MediaDataDecoder::DecodePromise>
+WMFMediaDataDecoder::ProcessError(HRESULT aError, const char* aReason)
+{
+  if (!mRecordedError) {
+    SendTelemetry(aError);
+    mRecordedError = true;
+  }
+
+  //TODO: For the error DXGI_ERROR_DEVICE_RESET, we could return
+  // NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER to get the latest device. Maybe retry
+  // up to 3 times.
+  return DecodePromise::CreateAndReject(
+    MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                RESULT_DETAIL("%s:%x", aReason, aError)),
+    __func__);
+}
+
+RefPtr<MediaDataDecoder::DecodePromise>
 WMFMediaDataDecoder::ProcessDecode(MediaRawData* aSample)
 {
-  {
-    MonitorAutoLock mon(mMonitor);
-    if (mIsFlushing) {
-      // Skip sample, to be released by runnable.
-      return;
+  DecodedData results;
+  HRESULT hr = mMFTManager->Input(aSample);
+  if (hr == MF_E_NOTACCEPTING) {
+    hr = ProcessOutput(results);
+    if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
+      return ProcessError(hr, "MFTManager::Output(1)");
     }
+    hr = mMFTManager->Input(aSample);
   }
 
-  HRESULT hr = mMFTManager->Input(aSample);
   if (FAILED(hr)) {
     NS_WARNING("MFTManager rejected sample");
-    mCallback->Error();
-    if (!mRecordedError) {
-      SendTelemetry(hr);
-      mRecordedError = true;
-    }
-    return;
+    return ProcessError(hr, "MFTManager::Input");
   }
 
+  mDrainStatus = DrainStatus::DRAINABLE;
   mLastStreamOffset = aSample->mOffset;
 
-  ProcessOutput();
+  hr = ProcessOutput(results);
+  if (SUCCEEDED(hr) || hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+    return DecodePromise::CreateAndResolve(std::move(results), __func__);
+  }
+  return ProcessError(hr, "MFTManager::Output(2)");
 }
 
-void
-WMFMediaDataDecoder::ProcessOutput()
+HRESULT
+WMFMediaDataDecoder::ProcessOutput(DecodedData& aResults)
 {
   RefPtr<MediaData> output;
   HRESULT hr = S_OK;
-  while (SUCCEEDED(hr = mMFTManager->Output(mLastStreamOffset, output)) &&
-         output) {
+  while (SUCCEEDED(hr = mMFTManager->Output(mLastStreamOffset, output))) {
+    MOZ_ASSERT(output.get(), "Upon success, we must receive an output");
     mHasSuccessfulOutput = true;
-    mCallback->Output(output);
-  }
-  if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
-    if (mTaskQueue->IsEmpty()) {
-      mCallback->InputExhausted();
-    }
-  } else if (FAILED(hr)) {
-    NS_WARNING("WMFMediaDataDecoder failed to output data");
-    mCallback->Error();
-    if (!mRecordedError) {
-      SendTelemetry(hr);
-      mRecordedError = true;
+    aResults.AppendElement(std::move(output));
+    if (mDrainStatus == DrainStatus::DRAINING) {
+      break;
     }
   }
+  return hr;
 }
 
-void
+RefPtr<MediaDataDecoder::FlushPromise>
 WMFMediaDataDecoder::ProcessFlush()
 {
   if (mMFTManager) {
     mMFTManager->Flush();
   }
-  MonitorAutoLock mon(mMonitor);
-  mIsFlushing = false;
-  mon.NotifyAll();
+  mDrainStatus = DrainStatus::DRAINED;
+  return FlushPromise::CreateAndResolve(true, __func__);
 }
 
-nsresult
+RefPtr<MediaDataDecoder::FlushPromise>
 WMFMediaDataDecoder::Flush()
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
   MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
 
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &WMFMediaDataDecoder::ProcessFlush);
-  MonitorAutoLock mon(mMonitor);
-  mIsFlushing = true;
-  mTaskQueue->Dispatch(runnable.forget());
-  while (mIsFlushing) {
-    mon.Wait();
-  }
-  return NS_OK;
+  return InvokeAsync(mTaskQueue, this, __func__,
+                     &WMFMediaDataDecoder::ProcessFlush);
 }
 
-void
+RefPtr<MediaDataDecoder::DecodePromise>
 WMFMediaDataDecoder::ProcessDrain()
 {
-  bool isFlushing;
-  {
-    MonitorAutoLock mon(mMonitor);
-    isFlushing = mIsFlushing;
+  if (!mMFTManager || mDrainStatus == DrainStatus::DRAINED) {
+    return DecodePromise::CreateAndResolve(DecodedData(), __func__);
   }
-  if (!isFlushing && mMFTManager) {
+
+  if (mDrainStatus != DrainStatus::DRAINING) {
     // Order the decoder to drain...
     mMFTManager->Drain();
-    // Then extract all available output.
-    ProcessOutput();
+    mDrainStatus = DrainStatus::DRAINING;
   }
-  mCallback->DrainComplete();
+
+  // Then extract all available output.
+  DecodedData results;
+  HRESULT hr = ProcessOutput(results);
+  if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+    mDrainStatus = DrainStatus::DRAINED;
+  }
+  if (SUCCEEDED(hr) || hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+    return DecodePromise::CreateAndResolve(std::move(results), __func__);
+  }
+  return ProcessError(hr, "MFTManager::Output");
 }
 
-nsresult
+RefPtr<MediaDataDecoder::DecodePromise>
 WMFMediaDataDecoder::Drain()
 {
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
   MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
 
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &WMFMediaDataDecoder::ProcessDrain);
-  mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
+  return InvokeAsync(mTaskQueue, this, __func__,
+                     &WMFMediaDataDecoder::ProcessDrain);
 }
 
 bool
@@ -232,27 +229,21 @@ WMFMediaDataDecoder::IsHardwareAccelerated(nsACString& aFailureReason) const {
   return mMFTManager && mMFTManager->IsHardwareAccelerated(aFailureReason);
 }
 
-nsresult
-WMFMediaDataDecoder::ConfigurationChanged(const TrackInfo& aConfig)
-{
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg<UniquePtr<TrackInfo>&&>(
-    this,
-    &WMFMediaDataDecoder::ProcessConfigurationChanged,
-    aConfig.Clone());
-  mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
-
-}
-
 void
-WMFMediaDataDecoder::ProcessConfigurationChanged(UniquePtr<TrackInfo>&& aConfig)
+WMFMediaDataDecoder::SetSeekThreshold(const media::TimeUnit& aTime)
 {
-  if (mMFTManager) {
-    mMFTManager->ConfigurationChanged(*aConfig);
-  }
+  MOZ_DIAGNOSTIC_ASSERT(!mIsShutDown);
+
+  RefPtr<WMFMediaDataDecoder> self = this;
+  nsCOMPtr<nsIRunnable> runnable =
+    NS_NewRunnableFunction("WMFMediaDataDecoder::SetSeekThreshold",
+                           [self, aTime]() {
+    media::TimeUnit threshold = aTime;
+    self->mMFTManager->SetSeekThreshold(threshold);
+  });
+  nsresult rv = mTaskQueue->Dispatch(runnable.forget());
+  MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+  Unused << rv;
 }
 
 } // namespace mozilla

@@ -9,7 +9,6 @@
 
 #include "DOMSVGPointList.h"
 #include "mozilla/gfx/2D.h"
-#include "nsAutoPtr.h"
 #include "nsDebug.h"
 #include "nsISVGPoint.h"
 #include "SVGPoint.h"
@@ -83,7 +82,7 @@ public:
   {
     mPt.mX = aPt.x;
     mPt.mY = aPt.y;
-    NS_ASSERTION(IsFinite(mPt.mX) && IsFinite(mPt.mX),
+    NS_ASSERTION(IsFinite(mPt.mX) && IsFinite(mPt.mY),
                  "DOMSVGPoint coords are not finite");
   }
 

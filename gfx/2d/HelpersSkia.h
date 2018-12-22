@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -10,12 +11,9 @@
 #include "skia/include/core/SkCanvas.h"
 #include "skia/include/effects/SkDashPathEffect.h"
 #include "skia/include/core/SkShader.h"
-#ifdef USE_SKIA_GPU
-#include "skia/include/gpu/GrTypes.h"
-#endif
 #include "mozilla/Assertions.h"
 #include <vector>
-#include "RefPtrSkia.h"
+#include "nsDebug.h"
 
 namespace mozilla {
 namespace gfx {
@@ -77,27 +75,6 @@ MakeSkiaImageInfo(const IntSize& aSize, SurfaceFormat aFormat)
                            GfxFormatToSkiaAlphaType(aFormat));
 }
 
-#ifdef USE_SKIA_GPU
-static inline GrPixelConfig
-GfxFormatToGrConfig(SurfaceFormat format)
-{
-  switch (format)
-  {
-    case SurfaceFormat::B8G8R8A8:
-      return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::B8G8R8X8:
-      // We probably need to do something here.
-      return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::R5G6B5_UINT16:
-      return kRGB_565_GrPixelConfig;
-    case SurfaceFormat::A8:
-      return kAlpha_8_GrPixelConfig;
-    default:
-      return kRGBA_8888_GrPixelConfig;
-  }
-
-}
-#endif
 static inline void
 GfxMatrixToSkiaMatrix(const Matrix& mat, SkMatrix& retval)
 {
@@ -176,75 +153,75 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
       pattern[i] = SkFloatToScalar(aOptions.mDashPattern[i % aOptions.mDashLength]);
     }
 
-    SkPathEffect* dash = SkDashPathEffect::Create(&pattern.front(),
-                                                  dashCount,
-                                                  SkFloatToScalar(aOptions.mDashOffset));
-    SkSafeUnref(aPaint.setPathEffect(dash));
+    sk_sp<SkPathEffect> dash = SkDashPathEffect::Make(&pattern.front(),
+                                                      dashCount,
+                                                      SkFloatToScalar(aOptions.mDashOffset));
+    aPaint.setPathEffect(dash);
   }
 
   aPaint.setStyle(SkPaint::kStroke_Style);
   return true;
 }
 
-static inline SkXfermode::Mode
+static inline SkBlendMode
 GfxOpToSkiaOp(CompositionOp op)
 {
   switch (op)
   {
     case CompositionOp::OP_OVER:
-      return SkXfermode::kSrcOver_Mode;
+      return SkBlendMode::kSrcOver;
     case CompositionOp::OP_ADD:
-      return SkXfermode::kPlus_Mode;
+      return SkBlendMode::kPlus;
     case CompositionOp::OP_ATOP:
-      return SkXfermode::kSrcATop_Mode;
+      return SkBlendMode::kSrcATop;
     case CompositionOp::OP_OUT:
-      return SkXfermode::kSrcOut_Mode;
+      return SkBlendMode::kSrcOut;
     case CompositionOp::OP_IN:
-      return SkXfermode::kSrcIn_Mode;
+      return SkBlendMode::kSrcIn;
     case CompositionOp::OP_SOURCE:
-      return SkXfermode::kSrc_Mode;
+      return SkBlendMode::kSrc;
     case CompositionOp::OP_DEST_IN:
-      return SkXfermode::kDstIn_Mode;
+      return SkBlendMode::kDstIn;
     case CompositionOp::OP_DEST_OUT:
-      return SkXfermode::kDstOut_Mode;
+      return SkBlendMode::kDstOut;
     case CompositionOp::OP_DEST_OVER:
-      return SkXfermode::kDstOver_Mode;
+      return SkBlendMode::kDstOver;
     case CompositionOp::OP_DEST_ATOP:
-      return SkXfermode::kDstATop_Mode;
+      return SkBlendMode::kDstATop;
     case CompositionOp::OP_XOR:
-      return SkXfermode::kXor_Mode;
+      return SkBlendMode::kXor;
     case CompositionOp::OP_MULTIPLY:
-      return SkXfermode::kMultiply_Mode;
+      return SkBlendMode::kMultiply;
     case CompositionOp::OP_SCREEN:
-      return SkXfermode::kScreen_Mode;
+      return SkBlendMode::kScreen;
     case CompositionOp::OP_OVERLAY:
-      return SkXfermode::kOverlay_Mode;
+      return SkBlendMode::kOverlay;
     case CompositionOp::OP_DARKEN:
-      return SkXfermode::kDarken_Mode;
+      return SkBlendMode::kDarken;
     case CompositionOp::OP_LIGHTEN:
-      return SkXfermode::kLighten_Mode;
+      return SkBlendMode::kLighten;
     case CompositionOp::OP_COLOR_DODGE:
-      return SkXfermode::kColorDodge_Mode;
+      return SkBlendMode::kColorDodge;
     case CompositionOp::OP_COLOR_BURN:
-      return SkXfermode::kColorBurn_Mode;
+      return SkBlendMode::kColorBurn;
     case CompositionOp::OP_HARD_LIGHT:
-      return SkXfermode::kHardLight_Mode;
+      return SkBlendMode::kHardLight;
     case CompositionOp::OP_SOFT_LIGHT:
-      return SkXfermode::kSoftLight_Mode;
+      return SkBlendMode::kSoftLight;
     case CompositionOp::OP_DIFFERENCE:
-      return SkXfermode::kDifference_Mode;
+      return SkBlendMode::kDifference;
     case CompositionOp::OP_EXCLUSION:
-      return SkXfermode::kExclusion_Mode;
+      return SkBlendMode::kExclusion;
     case CompositionOp::OP_HUE:
-      return SkXfermode::kHue_Mode;
+      return SkBlendMode::kHue;
     case CompositionOp::OP_SATURATION:
-      return SkXfermode::kSaturation_Mode;
+      return SkBlendMode::kSaturation;
     case CompositionOp::OP_COLOR:
-      return SkXfermode::kColor_Mode;
+      return SkBlendMode::kColor;
     case CompositionOp::OP_LUMINOSITY:
-      return SkXfermode::kLuminosity_Mode;
+      return SkBlendMode::kLuminosity;
     default:
-      return SkXfermode::kSrcOver_Mode;
+      return SkBlendMode::kSrcOver;
   }
 }
 
@@ -273,28 +250,34 @@ PointToSkPoint(const Point &aPoint)
 static inline SkRect
 RectToSkRect(const Rect& aRect)
 {
-  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y),
-                          SkFloatToScalar(aRect.width), SkFloatToScalar(aRect.height));
+  return SkRect::MakeXYWH(SkFloatToScalar(aRect.X()), SkFloatToScalar(aRect.Y()),
+                          SkFloatToScalar(aRect.Width()), SkFloatToScalar(aRect.Height()));
 }
 
 static inline SkRect
 IntRectToSkRect(const IntRect& aRect)
 {
-  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y),
-                          SkIntToScalar(aRect.width), SkIntToScalar(aRect.height));
+  return SkRect::MakeXYWH(SkIntToScalar(aRect.X()), SkIntToScalar(aRect.Y()),
+                          SkIntToScalar(aRect.Width()), SkIntToScalar(aRect.Height()));
 }
 
 static inline SkIRect
 RectToSkIRect(const Rect& aRect)
 {
-  return SkIRect::MakeXYWH(int32_t(aRect.x), int32_t(aRect.y),
-                           int32_t(aRect.width), int32_t(aRect.height));
+  return SkIRect::MakeXYWH(int32_t(aRect.X()), int32_t(aRect.Y()),
+                           int32_t(aRect.Width()), int32_t(aRect.Height()));
 }
 
 static inline SkIRect
 IntRectToSkIRect(const IntRect& aRect)
 {
-  return SkIRect::MakeXYWH(aRect.x, aRect.y, aRect.width, aRect.height);
+  return SkIRect::MakeXYWH(aRect.X(), aRect.Y(), aRect.Width(), aRect.Height());
+}
+
+static inline IntRect
+SkIRectToIntRect(const SkIRect& aRect)
+{
+  return IntRect(aRect.x(), aRect.y(), aRect.width(), aRect.height());
 }
 
 static inline Point
@@ -351,6 +334,43 @@ GfxHintingToSkiaHinting(FontHinting aHinting)
       return SkPaint::kFull_Hinting;
   }
   return SkPaint::kNormal_Hinting;
+}
+
+static inline FillRule GetFillRule(SkPath::FillType aFillType)
+{
+  switch (aFillType)
+  {
+  case SkPath::kWinding_FillType:
+    return FillRule::FILL_WINDING;
+  case SkPath::kEvenOdd_FillType:
+    return FillRule::FILL_EVEN_ODD;
+  case SkPath::kInverseWinding_FillType:
+  case SkPath::kInverseEvenOdd_FillType:
+  default:
+    NS_WARNING("Unsupported fill type\n");
+    break;
+  }
+
+  return FillRule::FILL_EVEN_ODD;
+}
+
+/**
+ * Returns true if the canvas is backed by pixels.  Returns false if the canvas
+ * wraps an SkPDFDocument, for example.
+ *
+ * Note: It is not clear whether the test used to implement this function may
+ * result in it returning false in some circumstances even when the canvas
+ * _is_ pixel backed.  In other words maybe it is possible for such a canvas to
+ * have kUnknown_SkPixelGeometry?
+ */
+static inline bool IsBackedByPixels(const SkCanvas* aCanvas)
+{
+  SkSurfaceProps props(0, kUnknown_SkPixelGeometry);
+  if (!aCanvas->getProps(&props) ||
+      props.pixelGeometry() == kUnknown_SkPixelGeometry) {
+    return false;
+  }
+  return true;
 }
 
 } // namespace gfx

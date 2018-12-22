@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,16 +9,16 @@
 #include "nsCOMPtr.h"
 #include "nsIContent.h"
 #include "nsPresContext.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsBoxLayoutState.h"
 #include "nsIScrollableFrame.h"
 #include "nsIRootBox.h"
 #include "nsMenuPopupFrame.h"
 
 nsIFrame*
-NS_NewPopupSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewPopupSetFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsPopupSetFrame(aContext);
+  return new (aPresShell) nsPopupSetFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPopupSetFrame)
@@ -35,12 +36,6 @@ nsPopupSetFrame::Init(nsIContent*       aContent,
   if (rootBox) {
     rootBox->SetPopupSetFrame(this);
   }
-}
-
-nsIAtom*
-nsPopupSetFrame::GetType() const
-{
-  return nsGkAtoms::popupSetFrame;
 }
 
 void
@@ -107,9 +102,9 @@ nsPopupSetFrame::GetChildLists(nsTArray<ChildList>* aLists) const
 }
 
 void
-nsPopupSetFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsPopupSetFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
-  mPopupList.DestroyFramesFrom(aDestructRoot);
+  mPopupList.DestroyFramesFrom(aDestructRoot, aPostDestroyData);
 
   // Normally the root box is our grandparent, but in case of wrapping
   // it can be our great-grandparent.
@@ -118,14 +113,14 @@ nsPopupSetFrame::DestroyFrom(nsIFrame* aDestructRoot)
     rootBox->SetPopupSetFrame(nullptr);
   }
 
-  nsBoxFrame::DestroyFrom(aDestructRoot);
+  nsBoxFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 NS_IMETHODIMP
-nsPopupSetFrame::DoLayout(nsBoxLayoutState& aState)
+nsPopupSetFrame::DoXULLayout(nsBoxLayoutState& aState)
 {
   // lay us out
-  nsresult rv = nsBoxFrame::DoLayout(aState);
+  nsresult rv = nsBoxFrame::DoXULLayout(aState);
 
   // lay out all of our currently open popups.
   for (nsFrameList::Enumerator e(mPopupList); !e.AtEnd(); e.Next()) {
@@ -139,9 +134,9 @@ nsPopupSetFrame::DoLayout(nsBoxLayoutState& aState)
 void
 nsPopupSetFrame::RemovePopupFrame(nsIFrame* aPopup)
 {
-  NS_PRECONDITION((aPopup->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
-                  aPopup->GetType() == nsGkAtoms::menuPopupFrame,
-                  "removing wrong type of frame in popupset's ::popupList");
+  MOZ_ASSERT((aPopup->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
+             aPopup->IsMenuPopupFrame(),
+             "removing wrong type of frame in popupset's ::popupList");
 
   mPopupList.DestroyFrame(aPopup);
 }
@@ -152,7 +147,7 @@ nsPopupSetFrame::AddPopupFrameList(nsFrameList& aPopupFrameList)
 #ifdef DEBUG
   for (nsFrameList::Enumerator e(aPopupFrameList); !e.AtEnd(); e.Next()) {
     NS_ASSERTION((e.get()->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
-                 e.get()->GetType() == nsGkAtoms::menuPopupFrame,
+                 e.get()->IsMenuPopupFrame(),
                  "adding wrong type of frame in popupset's ::popupList");
   }
 #endif

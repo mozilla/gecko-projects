@@ -14,7 +14,7 @@ nsresult
 txExpandedName::init(const nsAString& aQName, txNamespaceMap* aResolver,
                      bool aUseDefault)
 {
-    const nsAFlatString& qName = PromiseFlatString(aQName);
+    const nsString& qName = PromiseFlatString(aQName);
     const char16_t* colon;
     bool valid = XMLUtils::isValidQName(qName, &colon);
     if (!valid) {
@@ -22,7 +22,7 @@ txExpandedName::init(const nsAString& aQName, txNamespaceMap* aResolver,
     }
 
     if (colon) {
-        nsCOMPtr<nsIAtom> prefix = NS_Atomize(Substring(qName.get(), colon));
+        RefPtr<nsAtom> prefix = NS_Atomize(Substring(qName.get(), colon));
         int32_t namespaceID = aResolver->lookupNamespace(prefix);
         if (namespaceID == kNameSpaceID_Unknown)
             return NS_ERROR_FAILURE;

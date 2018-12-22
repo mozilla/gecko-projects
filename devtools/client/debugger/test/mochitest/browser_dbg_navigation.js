@@ -13,10 +13,8 @@ const TAB2_URL = EXAMPLE_URL + "doc_empty-tab-02.html";
 var gClient;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -25,11 +23,11 @@ function test() {
       "Root actor should identify itself as a browser.");
 
     addTab(TAB1_URL)
-      .then(() => attachTabActorForUrl(gClient, TAB1_URL))
+      .then(() => attachTargetActorForUrl(gClient, TAB1_URL))
       .then(testNavigate)
       .then(testDetach)
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -63,13 +61,13 @@ function testDetach(aActor) {
   gClient.addOneTimeListener("tabDetached", (aType, aPacket) => {
     ok(true, "Got a tab detach notification.");
     is(aPacket.from, aActor, "tab detach message comes from the expected actor");
-    gClient.close(deferred.resolve);
+    deferred.resolve(gClient.close());
   });
 
   removeTab(gBrowser.selectedTab);
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

@@ -10,7 +10,7 @@ namespace net {
 union NetAddr;
 }
 }
-template<class T> class nsTArray;
+#include "nsTArrayForwardDeclare.h"
 %}
 native NetAddr(mozilla::net::NetAddr);
 [ref] native nsNetAddrTArrayRef(nsTArray<mozilla::net::NetAddr>);
@@ -97,4 +97,9 @@ interface nsIDNSRecord : nsISupports
      *        It may be zero if not applicable.
      */
     void reportUnusable(in uint16_t aPort);
+
+    /**
+     * Record retreived with TRR.
+     */
+    bool IsTRR();
 };

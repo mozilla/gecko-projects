@@ -30,13 +30,13 @@
 
 #include "irregexp/RegExpStack.h"
 
-#include "vm/Runtime.h"
+#include "vm/JSContext.h"
 
 using namespace js;
 using namespace js::irregexp;
 
-RegExpStackScope::RegExpStackScope(JSRuntime* rt)
-  : regexp_stack(&rt->regexpStack)
+RegExpStackScope::RegExpStackScope(JSContext* cx)
+  : regexp_stack(&cx->regexpStack.ref())
 {}
 
 RegExpStackScope::~RegExpStackScope()
@@ -44,10 +44,11 @@ RegExpStackScope::~RegExpStackScope()
     regexp_stack->reset();
 }
 
-int
+bool
 irregexp::GrowBacktrackStack(JSRuntime* rt)
 {
-    return rt->regexpStack.grow();
+    AutoUnsafeCallWithABI unsafe;
+    return rt->mainContextFromOwnThread()->regexpStack.ref().grow();
 }
 
 RegExpStack::RegExpStack()
@@ -77,7 +78,11 @@ RegExpStack::reset()
     MOZ_ASSERT(size >= kMinimumStackSize);
 
     if (size != kMinimumStackSize) {
-        base_ = js_realloc(base_, kMinimumStackSize);
+        void* newBase = js_realloc(base_, kMinimumStackSize);
+        if (!newBase)
+            return;
+
+        base_ = newBase;
         size = kMinimumStackSize;
         updateLimit();
     }

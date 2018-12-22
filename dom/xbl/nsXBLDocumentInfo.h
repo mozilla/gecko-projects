@@ -8,6 +8,7 @@
 #define nsXBLDocumentInfo_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsWeakReference.h"
@@ -23,8 +24,7 @@ public:
 
   explicit nsXBLDocumentInfo(nsIDocument* aDocument);
 
-  already_AddRefed<nsIDocument> GetDocument()
-    { nsCOMPtr<nsIDocument> copy = mDocument; return copy.forget(); }
+  nsIDocument* GetDocument() const { return mDocument; }
 
   bool GetScriptAccess() const { return mScriptAccess; }
 
@@ -47,7 +47,10 @@ public:
 
   void MarkInCCGeneration(uint32_t aGeneration);
 
-  static nsresult ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocInfo);
+  static nsresult ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocInfo,
+                                        nsIDocument* aBoundDocument);
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsXBLDocumentInfo)
 

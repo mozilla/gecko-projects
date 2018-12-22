@@ -7,25 +7,30 @@
 #if !defined(WMFVideoMFTManager_h_)
 #define WMFVideoMFTManager_h_
 
-#include "WMF.h"
 #include "MFTDecoder.h"
-#include "nsRect.h"
+#include "MediaResult.h"
+#include "WMF.h"
 #include "WMFMediaDataDecoder.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/RefPtr.h"
+#include "nsAutoPtr.h"
+#include "mozilla/gfx/Rect.h"
 
 namespace mozilla {
 
 class DXVA2Manager;
 
-class WMFVideoMFTManager : public MFTManager {
+class WMFVideoMFTManager : public MFTManager
+{
 public:
   WMFVideoMFTManager(const VideoInfo& aConfig,
-                     mozilla::layers::LayersBackend aLayersBackend,
-                     mozilla::layers::ImageContainer* aImageContainer,
+                     layers::KnowsCompositor* aKnowsCompositor,
+                     layers::ImageContainer* aImageContainer,
+                     float aFramerate,
                      bool aDXVAEnabled);
   ~WMFVideoMFTManager();
 
-  bool Init();
+  MediaResult Init();
 
   HRESULT Input(MediaRawData* aSample) override;
 
@@ -35,21 +40,36 @@ public:
 
   bool IsHardwareAccelerated(nsACString& aFailureReason) const override;
 
-  TrackInfo::TrackType GetType() override {
-    return TrackInfo::kVideoTrack;
+  TrackInfo::TrackType GetType() override { return TrackInfo::kVideoTrack; }
+
+  nsCString GetDescriptionName() const override;
+
+  void Flush() override
+  {
+    MFTManager::Flush();
+    mDraining = false;
+    mSamplesCount = 0;
   }
 
-  void ConfigurationChanged(const TrackInfo& aConfig) override;
+  void Drain() override
+  {
+    MFTManager::Drain();
+    mDraining = true;
+  }
 
-  const char* GetDescriptionName() const override;
+  MediaDataDecoder::ConversionRequired NeedsConversion() const override
+  {
+    return mStreamType == H264
+           ? MediaDataDecoder::ConversionRequired::kNeedAnnexB
+           : MediaDataDecoder::ConversionRequired::kNeedNone;
+  }
 
 private:
+  MediaResult ValidateVideoInfo();
 
-  bool InitializeDXVA(bool aForceD3D9);
+  bool InitializeDXVA();
 
-  bool InitInternal(bool aForceD3D9);
-
-  HRESULT ConfigureVideoFrameGeometry();
+  MediaResult InitInternal();
 
   HRESULT CreateBasicVideoFrame(IMFSample* aSample,
                                 int64_t aStreamOffset,
@@ -61,25 +81,31 @@ private:
 
   HRESULT SetDecoderMediaTypes();
 
-  bool CanUseDXVA(IMFMediaType* aType);
+  bool CanUseDXVA(IMFMediaType* aType, float aFramerate);
 
   // Video frame geometry.
-  VideoInfo mVideoInfo;
+  const VideoInfo mVideoInfo;
+  const gfx::IntSize mImageSize;
+  gfx::IntSize mDecodedImageSize;
   uint32_t mVideoStride;
+  YUVColorSpace mYUVColorSpace;
 
   RefPtr<layers::ImageContainer> mImageContainer;
+  RefPtr<layers::KnowsCompositor> mKnowsCompositor;
   nsAutoPtr<DXVA2Manager> mDXVA2Manager;
 
-  RefPtr<IMFSample> mLastInput;
-  float mLastDuration;
+  media::TimeUnit mLastDuration;
+  media::TimeUnit mLastTime;
+  bool mDraining = false;
+  int64_t mSamplesCount = 0;
 
   bool mDXVAEnabled;
-  const layers::LayersBackend mLayersBackend;
   bool mUseHwAccel;
 
   nsCString mDXVAFailureReason;
 
-  enum StreamType {
+  enum StreamType
+  {
     Unknown,
     H264,
     VP8,
@@ -91,9 +117,12 @@ private:
   const GUID& GetMFTGUID();
   const GUID& GetMediaSubtypeGUID();
 
-  uint32_t mNullOutputCount;
-  bool mGotValidOutputAfterNullOutput;
-  bool mGotExcessiveNullOutput;
+  uint32_t mNullOutputCount = 0;
+  bool mGotValidOutputAfterNullOutput = false;
+  bool mGotExcessiveNullOutput = false;
+  bool mIsValid = true;
+  bool mIMFUsable = false;
+  const float mFramerate;
 };
 
 } // namespace mozilla

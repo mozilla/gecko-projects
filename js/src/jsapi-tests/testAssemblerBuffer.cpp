@@ -4,11 +4,9 @@
 
 #include <stdlib.h>
 
-#include "jsatom.h"
-
 #include "jit/shared/IonAssemblerBufferWithConstantPools.h"
-
 #include "jsapi-tests/tests.h"
+#include "vm/JSAtom.h"
 
 // Tests for classes in:
 //
@@ -520,8 +518,8 @@ BEGIN_TEST(testAssemblerBuffer_ARM64)
     js::LifoAlloc lifo(4096);
     TempAllocator alloc(&lifo);
     JitContext jc(cx, &alloc);
-    rt->getJitRuntime(cx);
-    MacroAssembler masm;
+    cx->runtime()->getJitRuntime(cx);
+    StackMacroAssembler masm;
 
     // Branches to an unbound label.
     Label lab1;

@@ -16,6 +16,7 @@ namespace mozilla {
 namespace dom {
 
 class Element;
+class UnrestrictedDoubleOrAnonymousKeyframeAnimationOptions;
 
 class AnonymousContent final
 {
@@ -25,7 +26,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(AnonymousContent)
 
   explicit AnonymousContent(Element* aContentNode);
-  nsCOMPtr<Element> GetContentNode();
+  Element* GetContentNode();
+  Element* GetElementById(const nsAString& aElementId);
   void SetContentNode(Element* aContentNode);
   bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto, JS::MutableHandle<JSObject*> aReflector);
 
@@ -41,6 +43,7 @@ public:
   void SetAttributeForElement(const nsAString& aElementId,
                               const nsAString& aName,
                               const nsAString& aValue,
+                              nsIPrincipal* aSubjectPrincipal,
                               ErrorResult& aRv);
 
   void GetAttributeForElement(const nsAString& aElementId,
@@ -56,9 +59,23 @@ public:
                                                  const nsAString& aContextId,
                                                  ErrorResult& aRv);
 
+  already_AddRefed<Animation> SetAnimationForElement(JSContext* aContext,
+                                                     const nsAString& aElementId,
+                                                     JS::Handle<JSObject*> aKeyframes,
+                                                     const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
+                                                     ErrorResult& aError);
+
+  void SetCutoutRectsForElement(const nsAString& aElementId,
+                                const Sequence<OwningNonNull<DOMRect>>& aRects,
+                                ErrorResult& aError);
+
+  void GetComputedStylePropertyValue(const nsAString& aElementId,
+                                     const nsAString& aPropertyName,
+                                     DOMString& aResult,
+                                     ErrorResult& aRv);
+
 private:
   ~AnonymousContent();
-  Element* GetElementById(const nsAString& aElementId);
   nsCOMPtr<Element> mContentNode;
 };
 

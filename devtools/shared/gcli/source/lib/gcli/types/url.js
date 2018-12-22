@@ -48,8 +48,8 @@ exports.items = [
         var status = Status.ERROR;
 
         // Maybe the URL was missing a scheme?
-        if (arg.text.indexOf('://') === -1) {
-          [ 'http', 'https' ].forEach(function(scheme) {
+        if (!arg.text.includes('://')) {
+          [ 'http', 'https' ].forEach(scheme => {
             try {
               var http = host.createUrl(scheme + '://' + arg.text);
               predictions.push({ name: http.href, value: http });
@@ -57,7 +57,7 @@ exports.items = [
             catch (ex) {
               // Ignore
             }
-          }.bind(this));
+          });
 
           // Try to create a URL with the current page as a base ref
           if ('window' in context.environment) {

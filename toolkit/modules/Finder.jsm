@@ -3,18 +3,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-this.EXPORTED_SYMBOLS = ["Finder","GetClipboardSearchString"];
+var EXPORTED_SYMBOLS = ["Finder", "GetClipboardSearchString"];
 
-const { interfaces: Ci, classes: Cc, utils: Cu } = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Geometry.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Geometry.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
+ChromeUtils.defineModuleGetter(this, "BrowserUtils",
+  "resource://gre/modules/BrowserUtils.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "TextToSubURIService",
-                                         "@mozilla.org/intl/texttosuburi;1",
-                                         "nsITextToSubURI");
 XPCOMUtils.defineLazyServiceGetter(this, "Clipboard",
                                          "@mozilla.org/widget/clipboard;1",
                                          "nsIClipboard");
@@ -22,39 +19,72 @@ XPCOMUtils.defineLazyServiceGetter(this, "ClipboardHelper",
                                          "@mozilla.org/widget/clipboardhelper;1",
                                          "nsIClipboardHelper");
 
-const kHighlightIterationSizeMax = 100;
 const kSelectionMaxLen = 150;
+const kMatchesCountLimitPref = "accessibility.typeaheadfind.matchesCountLimit";
 
 function Finder(docShell) {
   this._fastFind = Cc["@mozilla.org/typeaheadfind;1"].createInstance(Ci.nsITypeAheadFind);
   this._fastFind.init(docShell);
 
+  this._currentFoundRange = null;
   this._docShell = docShell;
   this._listeners = [];
   this._previousLink = null;
   this._searchString = null;
+  this._highlighter = null;
 
   docShell.QueryInterface(Ci.nsIInterfaceRequestor)
           .getInterface(Ci.nsIWebProgress)
           .addProgressListener(this, Ci.nsIWebProgress.NOTIFY_LOCATION);
+  BrowserUtils.getRootWindow(this._docShell).addEventListener("unload",
+    this.onLocationChange.bind(this, { isTopLevel: true }));
 }
 
 Finder.prototype = {
-  addResultListener: function (aListener) {
-    if (this._listeners.indexOf(aListener) === -1)
+  get iterator() {
+    if (this._iterator)
+      return this._iterator;
+    this._iterator = ChromeUtils.import("resource://gre/modules/FinderIterator.jsm", null).FinderIterator;
+    return this._iterator;
+  },
+
+  destroy() {
+    if (this._iterator)
+      this._iterator.reset();
+    let window = this._getWindow();
+    if (this._highlighter && window) {
+      // if we clear all the references before we hide the highlights (in both
+      // highlighting modes), we simply can't use them to find the ranges we
+      // need to clear from the selection.
+      this._highlighter.hide(window);
+      this._highlighter.clear(window);
+    }
+    this.listeners = [];
+    this._docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIWebProgress)
+      .removeProgressListener(this, Ci.nsIWebProgress.NOTIFY_LOCATION);
+    this._listeners = [];
+    this._currentFoundRange = this._fastFind = this._docShell = this._previousLink =
+      this._highlighter = null;
+  },
+
+  addResultListener(aListener) {
+    if (!this._listeners.includes(aListener))
       this._listeners.push(aListener);
   },
 
-  removeResultListener: function (aListener) {
+  removeResultListener(aListener) {
     this._listeners = this._listeners.filter(l => l != aListener);
   },
 
-  _notify: function (aSearchString, aResult, aFindBackwards, aDrawOutline, aStoreResult = true) {
-    if (aStoreResult) {
-      this._searchString = aSearchString;
-      this.clipboardSearchString = aSearchString
+  _notify(options) {
+    if (typeof options.storeResult != "boolean")
+      options.storeResult = true;
+
+    if (options.storeResult) {
+      this._searchString = options.searchString;
+      this.clipboardSearchString = options.searchString;
     }
-    this._outlineLink(aDrawOutline);
 
     let foundLink = this._fastFind.foundLink;
     let linkURL = null;
@@ -64,21 +94,30 @@ Finder.prototype = {
       if (ownerDoc)
         docCharset = ownerDoc.characterSet;
 
-      linkURL = TextToSubURIService.unEscapeURIForUI(docCharset, foundLink.href);
+      linkURL = Services.textToSubURI.unEscapeURIForUI(docCharset, foundLink.href);
     }
 
-    let data = {
-      result: aResult,
-      findBackwards: aFindBackwards,
-      linkURL: linkURL,
-      rect: this._getResultRect(),
-      searchString: this._searchString,
-      storeResult: aStoreResult
-    };
+    options.linkURL = linkURL;
+    options.rect = this._getResultRect();
+    options.searchString = this._searchString;
+
+    if (!this.iterator.continueRunning({
+      caseSensitive: this._fastFind.caseSensitive,
+      entireWord: this._fastFind.entireWord,
+      linksOnly: options.linksOnly,
+      word: options.searchString
+    })) {
+      this.iterator.stop();
+    }
+
+    this.highlighter.update(options);
+    this.requestMatchesCount(options.searchString, options.linksOnly);
+
+    this._outlineLink(options.drawOutline);
 
     for (let l of this._listeners) {
       try {
-        l.onFindResult(data);
+        l.onFindResult(options);
       } catch (ex) {}
     }
   },
@@ -105,7 +144,33 @@ Finder.prototype = {
   },
 
   set caseSensitive(aSensitive) {
+    if (this._fastFind.caseSensitive === aSensitive)
+      return;
     this._fastFind.caseSensitive = aSensitive;
+    this.iterator.reset();
+  },
+
+  set entireWord(aEntireWord) {
+    if (this._fastFind.entireWord === aEntireWord)
+      return;
+    this._fastFind.entireWord = aEntireWord;
+    this.iterator.reset();
+  },
+
+  get highlighter() {
+    if (this._highlighter)
+      return this._highlighter;
+
+    const {FinderHighlighter} = ChromeUtils.import("resource://gre/modules/FinderHighlighter.jsm", {});
+    return this._highlighter = new FinderHighlighter(this);
+  },
+
+  get matchesCountLimit() {
+    if (typeof this._matchesCountLimit == "number")
+      return this._matchesCountLimit;
+
+    this._matchesCountLimit = Services.prefs.getIntPref(kMatchesCountLimitPref) || 0;
+    return this._matchesCountLimit;
   },
 
   _lastFindResult: null,
@@ -117,10 +182,17 @@ Finder.prototype = {
    * @param aLinksOnly Only consider nodes that are links for the search.
    * @param aDrawOutline Puts an outline around matched links.
    */
-  fastFind: function (aSearchString, aLinksOnly, aDrawOutline) {
+  fastFind(aSearchString, aLinksOnly, aDrawOutline) {
     this._lastFindResult = this._fastFind.find(aSearchString, aLinksOnly);
     let searchString = this._fastFind.searchString;
-    this._notify(searchString, this._lastFindResult, false, aDrawOutline);
+    this._notify({
+      searchString,
+      result: this._lastFindResult,
+      findBackwards: false,
+      findAgain: false,
+      drawOutline: aDrawOutline,
+      linksOnly: aLinksOnly
+    });
   },
 
   /**
@@ -132,17 +204,24 @@ Finder.prototype = {
    * @param aLinksOnly Only consider nodes that are links for the search.
    * @param aDrawOutline Puts an outline around matched links.
    */
-  findAgain: function (aFindBackwards, aLinksOnly, aDrawOutline) {
+  findAgain(aFindBackwards, aLinksOnly, aDrawOutline) {
     this._lastFindResult = this._fastFind.findAgain(aFindBackwards, aLinksOnly);
     let searchString = this._fastFind.searchString;
-    this._notify(searchString, this._lastFindResult, aFindBackwards, aDrawOutline);
+    this._notify({
+      searchString,
+      result: this._lastFindResult,
+      findBackwards: aFindBackwards,
+      findAgain: true,
+      drawOutline: aDrawOutline,
+      linksOnly: aLinksOnly
+    });
   },
 
   /**
    * Forcibly set the search string of the find clipboard to the currently
    * selected text in the window, on supported platforms (i.e. OSX).
    */
-  setSearchStringToSelection: function() {
+  setSearchStringToSelection() {
     let searchString = this.getActiveSelectionText();
 
     // Empty strings are rather useless to search for.
@@ -153,29 +232,11 @@ Finder.prototype = {
     return searchString;
   },
 
-  _notifyHighlightFinished: function(aHighlight) {
-    for (let l of this._listeners) {
-      try {
-        l.onHighlightFinished(aHighlight);
-      } catch (ex) {}
-    }
+  async highlight(aHighlight, aWord, aLinksOnly) {
+    await this.highlighter.highlight(aHighlight, aWord, aLinksOnly);
   },
 
-  highlight: Task.async(function* (aHighlight, aWord) {
-    if (this._abortHighlight) {
-      this._abortHighlight();
-    }
-
-    let found = yield this._highlight(aHighlight, aWord, null);
-    this._notifyHighlightFinished(aHighlight);
-    if (aHighlight) {
-      let result = found ? Ci.nsITypeAheadFind.FIND_FOUND
-                         : Ci.nsITypeAheadFind.FIND_NOTFOUND;
-      this._notify(aWord, result, false, false, false);
-    }
-  }),
-
-  getInitialSelection: function() {
+  getInitialSelection() {
     this._getWindow().setTimeout(() => {
       let initialSelection = this.getActiveSelectionText();
       for (let l of this._listeners) {
@@ -186,7 +247,7 @@ Finder.prototype = {
     }, 0);
   },
 
-  getActiveSelectionText: function() {
+  getActiveSelectionText() {
     let focusedWindow = {};
     let focusedElement =
       Services.focus.getFocusedElementForWindow(this._getWindow(), true,
@@ -195,8 +256,7 @@ Finder.prototype = {
 
     let selText;
 
-    if (focusedElement instanceof Ci.nsIDOMNSEditableElement &&
-        focusedElement.editor) {
+    if (focusedElement && focusedElement.editor) {
       // The user may have a selection in an input or textarea.
       selText = focusedElement.editor.selectionController
         .getSelection(Ci.nsISelectionController.SELECTION_NORMAL)
@@ -210,20 +270,30 @@ Finder.prototype = {
       return "";
 
     // Process our text to get rid of unwanted characters.
-    return selText.trim().replace(/\s+/g, " ").substr(0, kSelectionMaxLen);
+    selText = selText.trim().replace(/\s+/g, " ");
+    let truncLength = kSelectionMaxLen;
+    if (selText.length > truncLength) {
+      let truncChar = selText.charAt(truncLength).charCodeAt(0);
+      if (truncChar >= 0xDC00 && truncChar <= 0xDFFF)
+        truncLength++;
+      selText = selText.substr(0, truncLength);
+    }
+
+    return selText;
   },
 
-  enableSelection: function() {
+  enableSelection() {
     this._fastFind.setSelectionModeAndRepaint(Ci.nsISelectionController.SELECTION_ON);
     this._restoreOriginalOutline();
   },
 
-  removeSelection: function() {
+  removeSelection() {
     this._fastFind.collapseSelection();
     this.enableSelection();
+    this.highlighter.clear(this._getWindow());
   },
 
-  focusContent: function() {
+  focusContent() {
     // Allow Finder listeners to cancel focusing the content.
     for (let l of this._listeners) {
       try {
@@ -236,31 +306,53 @@ Finder.prototype = {
     }
 
     let fastFind = this._fastFind;
-    const fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
     try {
       // Try to find the best possible match that should receive focus and
       // block scrolling on focus since find already scrolls. Further
       // scrolling is due to user action, so don't override this.
       if (fastFind.foundLink) {
-        fm.setFocus(fastFind.foundLink, fm.FLAG_NOSCROLL);
+        Services.focus.setFocus(fastFind.foundLink, Services.focus.FLAG_NOSCROLL);
       } else if (fastFind.foundEditable) {
-        fm.setFocus(fastFind.foundEditable, fm.FLAG_NOSCROLL);
+        Services.focus.setFocus(fastFind.foundEditable, Services.focus.FLAG_NOSCROLL);
         fastFind.collapseSelection();
       } else {
-        this._getWindow().focus()
+        this._getWindow().focus();
       }
     } catch (e) {}
   },
 
-  keyPress: function (aEvent) {
+  onFindbarClose() {
+    this.enableSelection();
+    this.highlighter.highlight(false);
+    this.iterator.reset();
+    BrowserUtils.trackToolbarVisibility(this._docShell, "findbar", false);
+  },
+
+  onFindbarOpen() {
+    BrowserUtils.trackToolbarVisibility(this._docShell, "findbar", true);
+  },
+
+  onModalHighlightChange(useModalHighlight) {
+    if (this._highlighter)
+      this._highlighter.onModalHighlightChange(useModalHighlight);
+  },
+
+  onHighlightAllChange(highlightAll) {
+    if (this._highlighter)
+      this._highlighter.onHighlightAllChange(highlightAll);
+    if (this._iterator)
+      this._iterator.reset();
+  },
+
+  keyPress(aEvent) {
     let controller = this._getSelectionController(this._getWindow());
 
     switch (aEvent.keyCode) {
-      case Ci.nsIDOMKeyEvent.DOM_VK_RETURN:
+      case aEvent.DOM_VK_RETURN:
         if (this._fastFind.foundLink) {
-          let view = this._fastFind.foundLink.ownerDocument.defaultView;
+          let view = this._fastFind.foundLink.ownerGlobal;
           this._fastFind.foundLink.dispatchEvent(new view.MouseEvent("click", {
-            view: view,
+            view,
             cancelable: true,
             bubbles: true,
             ctrlKey: aEvent.ctrlKey,
@@ -270,234 +362,114 @@ Finder.prototype = {
           }));
         }
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_TAB:
+      case aEvent.DOM_VK_TAB:
         let direction = Services.focus.MOVEFOCUS_FORWARD;
         if (aEvent.shiftKey) {
           direction = Services.focus.MOVEFOCUS_BACKWARD;
         }
         Services.focus.moveFocus(this._getWindow(), null, direction, 0);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_PAGE_UP:
+      case aEvent.DOM_VK_PAGE_UP:
         controller.scrollPage(false);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_PAGE_DOWN:
+      case aEvent.DOM_VK_PAGE_DOWN:
         controller.scrollPage(true);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_UP:
+      case aEvent.DOM_VK_UP:
         controller.scrollLine(false);
         break;
-      case Ci.nsIDOMKeyEvent.DOM_VK_DOWN:
+      case aEvent.DOM_VK_DOWN:
         controller.scrollLine(true);
         break;
     }
   },
 
-  _notifyMatchesCount: function(result) {
+  _notifyMatchesCount(result = this._currentMatchesCountResult) {
+    // The `_currentFound` property is only used for internal bookkeeping.
+    delete result._currentFound;
+    result.limit = this.matchesCountLimit;
+    if (result.total == result.limit)
+      result.total = -1;
+
     for (let l of this._listeners) {
       try {
         l.onMatchesCountResult(result);
       } catch (ex) {}
     }
+
+    this._currentMatchesCountResult = null;
   },
 
-  requestMatchesCount: function(aWord, aMatchLimit, aLinksOnly) {
+  requestMatchesCount(aWord, aLinksOnly) {
     if (this._lastFindResult == Ci.nsITypeAheadFind.FIND_NOTFOUND ||
-        this.searchString == "") {
-      return this._notifyMatchesCount({
+        this.searchString == "" || !aWord || !this.matchesCountLimit) {
+      this._notifyMatchesCount({
         total: 0,
         current: 0
       });
-    }
-    let window = this._getWindow();
-    let result = this._countMatchesInWindow(aWord, aMatchLimit, aLinksOnly, window);
-
-    // Count matches in (i)frames AFTER searching through the main window.
-    for (let frame of result._framesToCount) {
-      // We've reached our limit; no need to do more work.
-      if (result.total == -1 || result.total == aMatchLimit)
-        break;
-      this._countMatchesInWindow(aWord, aMatchLimit, aLinksOnly, frame, result);
-    }
-
-    // The `_currentFound` and `_framesToCount` properties are only used for
-    // internal bookkeeping between recursive calls.
-    delete result._currentFound;
-    delete result._framesToCount;
-
-    this._notifyMatchesCount(result);
-  },
-
-  /**
-   * Counts the number of matches for the searched word in the passed window's
-   * content.
-   * @param aWord
-   *        the word to search for.
-   * @param aMatchLimit
-   *        the maximum number of matches shown (for speed reasons).
-   * @param aLinksOnly
-   *        whether we should only search through links.
-   * @param aWindow
-   *        the window to search in. Passing undefined will search the
-   *        current content window. Optional.
-   * @param aStats
-   *        the Object that is returned by this function. It may be passed as an
-   *        argument here in the case of a recursive call.
-   * @returns an object stating the number of matches and a vector for the current match.
-   */
-  _countMatchesInWindow: function(aWord, aMatchLimit, aLinksOnly, aWindow = null, aStats = null) {
-    aWindow = aWindow || this._getWindow();
-    aStats = aStats || {
-      total: 0,
-      current: 0,
-      _framesToCount: new Set(),
-      _currentFound: false
-    };
-
-    // If we already reached our max, there's no need to do more work!
-    if (aStats.total == -1 || aStats.total == aMatchLimit) {
-      aStats.total = -1;
-      return aStats;
-    }
-
-    this._collectFrames(aWindow, aStats);
-
-    let foundRange = this._fastFind.getFoundRange();
-
-    for(let range of this._findIterator(aWord, aWindow)) {
-      if (!aLinksOnly || this._rangeStartsInLink(range)) {
-        ++aStats.total;
-        if (!aStats._currentFound) {
-          ++aStats.current;
-          aStats._currentFound = (foundRange &&
-            range.startContainer == foundRange.startContainer &&
-            range.startOffset == foundRange.startOffset &&
-            range.endContainer == foundRange.endContainer &&
-            range.endOffset == foundRange.endOffset);
-        }
-      }
-      if (aStats.total == aMatchLimit) {
-        aStats.total = -1;
-        break;
-      }
-    }
-
-    return aStats;
-  },
-
-  /**
-   * Basic wrapper around nsIFind that provides a generator yielding
-   * a range each time an occurence of `aWord` string is found.
-   *
-   * @param aWord
-   *        the word to search for.
-   * @param aWindow
-   *        the window to search in.
-   */
-  _findIterator: function* (aWord, aWindow) {
-    let doc = aWindow.document;
-    let body = (doc instanceof Ci.nsIDOMHTMLDocument && doc.body) ?
-               doc.body : doc.documentElement;
-
-    if (!body)
       return;
-
-    let searchRange = doc.createRange();
-    searchRange.selectNodeContents(body);
-
-    let startPt = searchRange.cloneRange();
-    startPt.collapse(true);
-
-    let endPt = searchRange.cloneRange();
-    endPt.collapse(false);
-
-    let retRange = null;
-
-    let finder = Cc["@mozilla.org/embedcomp/rangefind;1"]
-                   .createInstance()
-                   .QueryInterface(Ci.nsIFind);
-    finder.caseSensitive = this._fastFind.caseSensitive;
-
-    while ((retRange = finder.Find(aWord, searchRange, startPt, endPt))) {
-      yield retRange;
-      startPt = retRange.cloneRange();
-      startPt.collapse(false);
     }
-  },
 
-  _highlightIterator: Task.async(function* (aWord, aWindow, aOnFind) {
-    let count = 0;
-    for (let range of this._findIterator(aWord, aWindow)) {
-      aOnFind(range);
-      if (++count >= kHighlightIterationSizeMax) {
-          count = 0;
-          yield this._highlightSleep(0);
-      }
-    }
-  }),
+    this._currentFoundRange = this._fastFind.getFoundRange();
 
-  _abortHighlight: null,
-  _highlightSleep: function(delay) {
-    return new Promise((resolve, reject) => {
-      this._abortHighlight = () => {
-        this._abortHighlight = null;
-        reject();
-      };
-      this._getWindow().setTimeout(resolve, delay);
+    let params = {
+      caseSensitive: this._fastFind.caseSensitive,
+      entireWord: this._fastFind.entireWord,
+      linksOnly: aLinksOnly,
+      word: aWord
+    };
+    if (!this.iterator.continueRunning(params))
+      this.iterator.stop();
+
+    this.iterator.start(Object.assign(params, {
+      finder: this,
+      limit: this.matchesCountLimit,
+      listener: this,
+      useCache: true,
+    })).then(() => {
+      // Without a valid result, there's nothing to notify about. This happens
+      // when the iterator was started before and won the race.
+      if (!this._currentMatchesCountResult || !this._currentMatchesCountResult.total)
+        return;
+      this._notifyMatchesCount();
     });
   },
 
-  /**
-   * Helper method for `_countMatchesInWindow` that recursively collects all
-   * visible (i)frames inside a window.
-   *
-   * @param aWindow
-   *        the window to extract the (i)frames from.
-   * @param aStats
-   *        Object that contains a Set called '_framesToCount'
-   */
-  _collectFrames: function(aWindow, aStats) {
-    if (!aWindow.frames || !aWindow.frames.length)
+  // FinderIterator listener implementation
+
+  onIteratorRangeFound(range) {
+    let result = this._currentMatchesCountResult;
+    if (!result)
       return;
-    // Casting `aWindow.frames` to an Iterator doesn't work, so we're stuck with
-    // a plain, old for-loop.
-    for (let i = 0, l = aWindow.frames.length; i < l; ++i) {
-      let frame = aWindow.frames[i];
-      // Don't count matches in hidden frames.
-      let frameEl = frame && frame.frameElement;
-      if (!frameEl)
-        continue;
-      // Construct a range around the frame element to check its visiblity.
-      let range = aWindow.document.createRange();
-      range.setStart(frameEl, 0);
-      range.setEnd(frameEl, 0);
-      if (!this._fastFind.isRangeVisible(range, this._getDocShell(range), true))
-        continue;
-      // All good, so add it to the set to count later.
-      if (!aStats._framesToCount.has(frame))
-        aStats._framesToCount.add(frame);
-      this._collectFrames(frame, aStats);
+
+    ++result.total;
+    if (!result._currentFound) {
+      ++result.current;
+      result._currentFound = (this._currentFoundRange &&
+        range.startContainer == this._currentFoundRange.startContainer &&
+        range.startOffset == this._currentFoundRange.startOffset &&
+        range.endContainer == this._currentFoundRange.endContainer &&
+        range.endOffset == this._currentFoundRange.endOffset);
     }
   },
 
-  /**
-   * Helper method to extract the docShell reference from a Window or Range object.
-   *
-   * @param aWindowOrRange
-   *        Window object to query. May also be a Range, from which the owner
-   *        window will be queried.
-   * @returns nsIDocShell
-   */
-  _getDocShell: function(aWindowOrRange) {
-    let window = aWindowOrRange;
-    // Ranges may also be passed in, so fetch its window.
-    if (aWindowOrRange instanceof Ci.nsIDOMRange)
-      window = aWindowOrRange.startContainer.ownerDocument.defaultView;
-    return window.QueryInterface(Ci.nsIInterfaceRequestor)
-                 .getInterface(Ci.nsIWebNavigation)
-                 .QueryInterface(Ci.nsIDocShell);
+  onIteratorReset() {},
+
+  onIteratorRestart({ word, linksOnly }) {
+    this.requestMatchesCount(word, linksOnly);
   },
 
-  _getWindow: function () {
+  onIteratorStart() {
+    this._currentMatchesCountResult = {
+      total: 0,
+      current: 0,
+      _currentFound: false
+    };
+  },
+
+  _getWindow() {
+    if (!this._docShell)
+      return null;
     return this._docShell.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
   },
 
@@ -505,7 +477,7 @@ Finder.prototype = {
    * Get the bounding selection rect in CSS px relative to the origin of the
    * top-level content document.
    */
-  _getResultRect: function () {
+  _getResultRect() {
     let topWin = this._getWindow();
     let win = this._fastFind.currentWindow;
     if (!win)
@@ -516,7 +488,7 @@ Finder.prototype = {
       // The selection can be into an input or a textarea element.
       let nodes = win.document.querySelectorAll("input, textarea");
       for (let node of nodes) {
-        if (node instanceof Ci.nsIDOMNSEditableElement && node.editor) {
+        if (node.editor) {
           try {
             let sc = node.editor.selectionController;
             selection = sc.getSelection(Ci.nsISelectionController.SELECTION_NORMAL);
@@ -543,8 +515,8 @@ Finder.prototype = {
 
     for (let frame = win; frame != topWin; frame = frame.parent) {
       let rect = frame.frameElement.getBoundingClientRect();
-      let left = frame.getComputedStyle(frame.frameElement, "").borderLeftWidth;
-      let top = frame.getComputedStyle(frame.frameElement, "").borderTopWidth;
+      let left = frame.getComputedStyle(frame.frameElement).borderLeftWidth;
+      let top = frame.getComputedStyle(frame.frameElement).borderTopWidth;
       scrollX.value += rect.left + parseInt(left, 10);
       scrollY.value += rect.top + parseInt(top, 10);
     }
@@ -552,7 +524,7 @@ Finder.prototype = {
     return rect.translate(scrollX.value, scrollY.value);
   },
 
-  _outlineLink: function (aDrawOutline) {
+  _outlineLink(aDrawOutline) {
     let foundLink = this._fastFind.foundLink;
 
     // Optimization: We are drawing outlines and we matched
@@ -579,7 +551,7 @@ Finder.prototype = {
     }
   },
 
-  _restoreOriginalOutline: function () {
+  _restoreOriginalOutline() {
     // Removes the outline around the last found link.
     if (this._previousLink) {
       this._previousLink.style.outline = this._tmpOutline;
@@ -588,85 +560,7 @@ Finder.prototype = {
     }
   },
 
-  _highlight: Task.async(function* (aHighlight, aWord, aWindow) {
-    let win = aWindow || this._getWindow();
-
-    let found = false;
-    for (let i = 0; win.frames && i < win.frames.length; i++) {
-      if (yield this._highlight(aHighlight, aWord, win.frames[i]))
-        found = true;
-    }
-
-    let controller = this._getSelectionController(win);
-    let doc = win.document;
-    if (!controller || !doc || !doc.documentElement) {
-      // Without the selection controller,
-      // we are unable to (un)highlight any matches
-      return found;
-    }
-
-    if (aHighlight) {
-      yield this._highlightIterator(aWord, win, aRange => {
-        this._highlightRange(aRange, controller);
-        found = true;
-      });
-    } else {
-      // First, attempt to remove highlighting from main document
-      let sel = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-      sel.removeAllRanges();
-
-      // Next, check our editor cache, for editors belonging to this
-      // document
-      if (this._editors) {
-        for (let x = this._editors.length - 1; x >= 0; --x) {
-          if (this._editors[x].document == doc) {
-            sel = this._editors[x].selectionController
-                                  .getSelection(Ci.nsISelectionController.SELECTION_FIND);
-            sel.removeAllRanges();
-            // We don't need to listen to this editor any more
-            this._unhookListenersAtIndex(x);
-          }
-        }
-      }
-
-      // Removing the highlighting always succeeds, so return true.
-      found = true;
-    }
-
-    return found;
-  }),
-
-  _highlightRange: function(aRange, aController) {
-    let node = aRange.startContainer;
-    let controller = aController;
-
-    let editableNode = this._getEditableNode(node);
-    if (editableNode)
-      controller = editableNode.editor.selectionController;
-
-    let findSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-    findSelection.addRange(aRange);
-
-    if (editableNode) {
-      // Highlighting added, so cache this editor, and hook up listeners
-      // to ensure we deal properly with edits within the highlighting
-      if (!this._editors) {
-        this._editors = [];
-        this._stateListeners = [];
-      }
-
-      let existingIndex = this._editors.indexOf(editableNode.editor);
-      if (existingIndex == -1) {
-        let x = this._editors.length;
-        this._editors[x] = editableNode.editor;
-        this._stateListeners[x] = this._createStateListener();
-        this._editors[x].addEditActionListener(this);
-        this._editors[x].addDocumentStateListener(this._stateListeners[x]);
-      }
-    }
-  },
-
-  _getSelectionController: function(aWindow) {
+  _getSelectionController(aWindow) {
     // display: none iframes don't have a selection controller, see bug 493658
     try {
       if (!aWindow.innerWidth || !aWindow.innerHeight)
@@ -688,347 +582,23 @@ Finder.prototype = {
     return controller;
   },
 
-  /*
-   * For a given node returns its editable parent or null if there is none.
-   * It's enough to check if aNode is a text node and its parent's parent is
-   * instance of nsIDOMNSEditableElement.
-   *
-   * @param aNode the node we want to check
-   * @returns the first node in the parent chain that is editable,
-   *          null if there is no such node
-   */
-  _getEditableNode: function (aNode) {
-    if (aNode.nodeType === aNode.TEXT_NODE && aNode.parentNode && aNode.parentNode.parentNode &&
-        aNode.parentNode.parentNode instanceof Ci.nsIDOMNSEditableElement) {
-      return aNode.parentNode.parentNode;
-    }
-    return null;
-  },
-
-  /*
-   * Helper method to unhook listeners, remove cached editors
-   * and keep the relevant arrays in sync
-   *
-   * @param aIndex the index into the array of editors/state listeners
-   *        we wish to remove
-   */
-  _unhookListenersAtIndex: function (aIndex) {
-    this._editors[aIndex].removeEditActionListener(this);
-    this._editors[aIndex]
-        .removeDocumentStateListener(this._stateListeners[aIndex]);
-    this._editors.splice(aIndex, 1);
-    this._stateListeners.splice(aIndex, 1);
-    if (!this._editors.length) {
-      delete this._editors;
-      delete this._stateListeners;
-    }
-  },
-
-  /*
-   * Remove ourselves as an nsIEditActionListener and
-   * nsIDocumentStateListener from a given cached editor
-   *
-   * @param aEditor the editor we no longer wish to listen to
-   */
-  _removeEditorListeners: function (aEditor) {
-    // aEditor is an editor that we listen to, so therefore must be
-    // cached. Find the index of this editor
-    let idx = this._editors.indexOf(aEditor);
-    if (idx == -1)
-      return;
-    // Now unhook ourselves, and remove our cached copy
-    this._unhookListenersAtIndex(idx);
-  },
-
-  /*
-   * nsIEditActionListener logic follows
-   *
-   * We implement this interface to allow us to catch the case where
-   * the findbar found a match in a HTML <input> or <textarea>. If the
-   * user adjusts the text in some way, it will no longer match, so we
-   * want to remove the highlight, rather than have it expand/contract
-   * when letters are added or removed.
-   */
-
-  /*
-   * Helper method used to check whether a selection intersects with
-   * some highlighting
-   *
-   * @param aSelectionRange the range from the selection to check
-   * @param aFindRange the highlighted range to check against
-   * @returns true if they intersect, false otherwise
-   */
-  _checkOverlap: function (aSelectionRange, aFindRange) {
-    // The ranges overlap if one of the following is true:
-    // 1) At least one of the endpoints of the deleted selection
-    //    is in the find selection
-    // 2) At least one of the endpoints of the find selection
-    //    is in the deleted selection
-    if (aFindRange.isPointInRange(aSelectionRange.startContainer,
-                                  aSelectionRange.startOffset))
-      return true;
-    if (aFindRange.isPointInRange(aSelectionRange.endContainer,
-                                  aSelectionRange.endOffset))
-      return true;
-    if (aSelectionRange.isPointInRange(aFindRange.startContainer,
-                                       aFindRange.startOffset))
-      return true;
-    if (aSelectionRange.isPointInRange(aFindRange.endContainer,
-                                       aFindRange.endOffset))
-      return true;
-
-    return false;
-  },
-
-  /*
-   * Helper method to determine if an edit occurred within a highlight
-   *
-   * @param aSelection the selection we wish to check
-   * @param aNode the node we want to check is contained in aSelection
-   * @param aOffset the offset into aNode that we want to check
-   * @returns the range containing (aNode, aOffset) or null if no ranges
-   *          in the selection contain it
-   */
-  _findRange: function (aSelection, aNode, aOffset) {
-    let rangeCount = aSelection.rangeCount;
-    let rangeidx = 0;
-    let foundContainingRange = false;
-    let range = null;
-
-    // Check to see if this node is inside one of the selection's ranges
-    while (!foundContainingRange && rangeidx < rangeCount) {
-      range = aSelection.getRangeAt(rangeidx);
-      if (range.isPointInRange(aNode, aOffset)) {
-        foundContainingRange = true;
-        break;
-      }
-      rangeidx++;
-    }
-
-    if (foundContainingRange)
-      return range;
-
-    return null;
-  },
-
-  /**
-   * Determines whether a range is inside a link.
-   * @param aRange
-   *        the range to check
-   * @returns true if the range starts in a link
-   */
-  _rangeStartsInLink: function(aRange) {
-    let isInsideLink = false;
-    let node = aRange.startContainer;
-
-    if (node.nodeType == node.ELEMENT_NODE) {
-      if (node.hasChildNodes) {
-        let childNode = node.item(aRange.startOffset);
-        if (childNode)
-          node = childNode;
-      }
-    }
-
-    const XLink_NS = "http://www.w3.org/1999/xlink";
-    const HTMLAnchorElement = (node.ownerDocument || node).defaultView.HTMLAnchorElement;
-    do {
-      if (node instanceof HTMLAnchorElement) {
-        isInsideLink = node.hasAttribute("href");
-        break;
-      } else if (typeof node.hasAttributeNS == "function" &&
-                 node.hasAttributeNS(XLink_NS, "href")) {
-        isInsideLink = (node.getAttributeNS(XLink_NS, "type") == "simple");
-        break;
-      }
-
-      node = node.parentNode;
-    } while (node);
-
-    return isInsideLink;
-  },
-
   // Start of nsIWebProgressListener implementation.
 
-  onLocationChange: function(aWebProgress, aRequest, aLocation, aFlags) {
+  onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
     if (!aWebProgress.isTopLevel)
+      return;
+    // Ignore events that don't change the document.
+    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)
       return;
 
     // Avoid leaking if we change the page.
-    this._previousLink = null;
+    this._lastFindResult = this._previousLink = this._currentFoundRange = null;
+    this.highlighter.onLocationChange();
+    this.iterator.reset();
   },
 
-  // Start of nsIEditActionListener implementations
-
-  WillDeleteText: function (aTextNode, aOffset, aLength) {
-    let editor = this._getEditableNode(aTextNode).editor;
-    let controller = editor.selectionController;
-    let fSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-    let range = this._findRange(fSelection, aTextNode, aOffset);
-
-    if (range) {
-      // Don't remove the highlighting if the deleted text is at the
-      // end of the range
-      if (aTextNode != range.endContainer ||
-          aOffset != range.endOffset) {
-        // Text within the highlight is being removed - the text can
-        // no longer be a match, so remove the highlighting
-        fSelection.removeRange(range);
-        if (fSelection.rangeCount == 0)
-          this._removeEditorListeners(editor);
-      }
-    }
-  },
-
-  DidInsertText: function (aTextNode, aOffset, aString) {
-    let editor = this._getEditableNode(aTextNode).editor;
-    let controller = editor.selectionController;
-    let fSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-    let range = this._findRange(fSelection, aTextNode, aOffset);
-
-    if (range) {
-      // If the text was inserted before the highlight
-      // adjust the highlight's bounds accordingly
-      if (aTextNode == range.startContainer &&
-          aOffset == range.startOffset) {
-        range.setStart(range.startContainer,
-                       range.startOffset+aString.length);
-      } else if (aTextNode != range.endContainer ||
-                 aOffset != range.endOffset) {
-        // The edit occurred within the highlight - any addition of text
-        // will result in the text no longer being a match,
-        // so remove the highlighting
-        fSelection.removeRange(range);
-        if (fSelection.rangeCount == 0)
-          this._removeEditorListeners(editor);
-      }
-    }
-  },
-
-  WillDeleteSelection: function (aSelection) {
-    let editor = this._getEditableNode(aSelection.getRangeAt(0)
-                                                 .startContainer).editor;
-    let controller = editor.selectionController;
-    let fSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-
-    let selectionIndex = 0;
-    let findSelectionIndex = 0;
-    let shouldDelete = {};
-    let numberOfDeletedSelections = 0;
-    let numberOfMatches = fSelection.rangeCount;
-
-    // We need to test if any ranges in the deleted selection (aSelection)
-    // are in any of the ranges of the find selection
-    // Usually both selections will only contain one range, however
-    // either may contain more than one.
-
-    for (let fIndex = 0; fIndex < numberOfMatches; fIndex++) {
-      shouldDelete[fIndex] = false;
-      let fRange = fSelection.getRangeAt(fIndex);
-
-      for (let index = 0; index < aSelection.rangeCount; index++) {
-        if (shouldDelete[fIndex])
-          continue;
-
-        let selRange = aSelection.getRangeAt(index);
-        let doesOverlap = this._checkOverlap(selRange, fRange);
-        if (doesOverlap) {
-          shouldDelete[fIndex] = true;
-          numberOfDeletedSelections++;
-        }
-      }
-    }
-
-    // OK, so now we know what matches (if any) are in the selection
-    // that is being deleted. Time to remove them.
-    if (numberOfDeletedSelections == 0)
-      return;
-
-    for (let i = numberOfMatches - 1; i >= 0; i--) {
-      if (shouldDelete[i])
-        fSelection.removeRange(fSelection.getRangeAt(i));
-    }
-
-    // Remove listeners if no more highlights left
-    if (fSelection.rangeCount == 0)
-      this._removeEditorListeners(editor);
-  },
-
-  /*
-   * nsIDocumentStateListener logic follows
-   *
-   * When attaching nsIEditActionListeners, there are no guarantees
-   * as to whether the findbar or the documents in the browser will get
-   * destructed first. This leads to the potential to either leak, or to
-   * hold on to a reference an editable element's editor for too long,
-   * preventing it from being destructed.
-   *
-   * However, when an editor's owning node is being destroyed, the editor
-   * sends out a DocumentWillBeDestroyed notification. We can use this to
-   * clean up our references to the object, to allow it to be destroyed in a
-   * timely fashion.
-   */
-
-  /*
-   * Unhook ourselves when one of our state listeners has been called.
-   * This can happen in 4 cases:
-   *  1) The document the editor belongs to is navigated away from, and
-   *     the document is not being cached
-   *
-   *  2) The document the editor belongs to is expired from the cache
-   *
-   *  3) The tab containing the owning document is closed
-   *
-   *  4) The <input> or <textarea> that owns the editor is explicitly
-   *     removed from the DOM
-   *
-   * @param the listener that was invoked
-   */
-  _onEditorDestruction: function (aListener) {
-    // First find the index of the editor the given listener listens to.
-    // The listeners and editors arrays must always be in sync.
-    // The listener will be in our array of cached listeners, as this
-    // method could not have been called otherwise.
-    let idx = 0;
-    while (this._stateListeners[idx] != aListener)
-      idx++;
-
-    // Unhook both listeners
-    this._unhookListenersAtIndex(idx);
-  },
-
-  /*
-   * Creates a unique document state listener for an editor.
-   *
-   * It is not possible to simply have the findbar implement the
-   * listener interface itself, as it wouldn't have sufficient information
-   * to work out which editor was being destroyed. Therefore, we create new
-   * listeners on the fly, and cache them in sync with the editors they
-   * listen to.
-   */
-  _createStateListener: function () {
-    return {
-      findbar: this,
-
-      QueryInterface: function(aIID) {
-        if (aIID.equals(Ci.nsIDocumentStateListener) ||
-            aIID.equals(Ci.nsISupports))
-          return this;
-
-        throw Components.results.NS_ERROR_NO_INTERFACE;
-      },
-
-      NotifyDocumentWillBeDestroyed: function() {
-        this.findbar._onEditorDestruction(this);
-      },
-
-      // Unimplemented
-      notifyDocumentCreated: function() {},
-      notifyDocumentStateChanged: function(aDirty) {}
-    };
-  },
-
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsISupportsWeakReference])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
+                                          Ci.nsISupportsWeakReference])
 };
 
 function GetClipboardSearchString(aLoadContext) {
@@ -1056,5 +626,3 @@ function GetClipboardSearchString(aLoadContext) {
   return searchString;
 }
 
-this.Finder = Finder;
-this.GetClipboardSearchString = GetClipboardSearchString;

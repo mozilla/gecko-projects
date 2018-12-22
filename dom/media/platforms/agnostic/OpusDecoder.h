@@ -6,45 +6,55 @@
 #if !defined(OpusDecoder_h_)
 #define OpusDecoder_h_
 
-#include "OpusParser.h"
 #include "PlatformDecoderModule.h"
 
 #include "mozilla/Maybe.h"
 #include "nsAutoPtr.h"
+#include "nsTArray.h"
+
+struct OpusMSDecoder;
 
 namespace mozilla {
 
-class OpusDataDecoder : public MediaDataDecoder
+class OpusParser;
+
+DDLoggedTypeDeclNameAndBase(OpusDataDecoder, MediaDataDecoder);
+
+class OpusDataDecoder
+  : public MediaDataDecoder
+  , public DecoderDoctorLifeLogger<OpusDataDecoder>
 {
 public:
-  OpusDataDecoder(const AudioInfo& aConfig,
-                  FlushableTaskQueue* aTaskQueue,
-                  MediaDataDecoderCallback* aCallback);
+  explicit OpusDataDecoder(const CreateDecoderParams& aParams);
   ~OpusDataDecoder();
 
   RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
-  const char* GetDescriptionName() const override
+  RefPtr<DecodePromise> Decode(MediaRawData* aSample) override;
+  RefPtr<DecodePromise> Drain() override;
+  RefPtr<FlushPromise> Flush() override;
+  RefPtr<ShutdownPromise> Shutdown() override;
+  nsCString GetDescriptionName() const override
   {
-    return "opus audio decoder";
+    return NS_LITERAL_CSTRING("opus audio decoder");
   }
 
   // Return true if mimetype is Opus
   static bool IsOpus(const nsACString& aMimeType);
 
+  // Pack pre-skip/CodecDelay, given in microseconds, into a
+  // MediaByteBuffer. The decoder expects this value to come
+  // from the container (if any) and to precede the OpusHead
+  // block in the CodecSpecificConfig buffer to verify the
+  // values match.
+  static void AppendCodecDelay(MediaByteBuffer* config, uint64_t codecDelayUS);
+
 private:
   nsresult DecodeHeader(const unsigned char* aData, size_t aLength);
 
-  void Decode (MediaRawData* aSample);
-  int DoDecode (MediaRawData* aSample);
-  void DoDrain ();
+  RefPtr<DecodePromise> ProcessDecode(MediaRawData* aSample);
 
   const AudioInfo& mInfo;
-  RefPtr<FlushableTaskQueue> mTaskQueue;
-  MediaDataDecoderCallback* mCallback;
+  const RefPtr<TaskQueue> mTaskQueue;
 
   // Opus decoder state
   nsAutoPtr<OpusParser> mOpusParser;
@@ -59,6 +69,8 @@ private:
   bool mPaddingDiscarded;
   int64_t mFrames;
   Maybe<int64_t> mLastFrameTime;
+  AutoTArray<uint8_t, 8> mMappingTable;
+  AudioConfig::ChannelLayout::ChannelMap mChannelMap;
 };
 
 } // namespace mozilla

@@ -10,8 +10,8 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
-#include "nsAutoPtr.h"
 #include "nsPIDOMWindow.h"
+#include "mozilla/dom/BindingDeclarations.h"
 
 class nsMimeType;
 class nsPluginElement;
@@ -31,13 +31,16 @@ public:
   void Refresh();
 
   // MimeTypeArray WebIDL methods
-  nsMimeType* Item(uint32_t index);
-  nsMimeType* NamedItem(const nsAString& name);
-  nsMimeType* IndexedGetter(uint32_t index, bool &found);
-  nsMimeType* NamedGetter(const nsAString& name, bool &found);
-  bool NameIsEnumerable(const nsAString& name);
-  uint32_t Length();
-  void GetSupportedNames(unsigned, nsTArray< nsString >& retval);
+  nsMimeType* Item(uint32_t index, mozilla::dom::CallerType aCallerType);
+  nsMimeType* NamedItem(const nsAString& name,
+                        mozilla::dom::CallerType aCallerType);
+  nsMimeType* IndexedGetter(uint32_t index, bool &found,
+                            mozilla::dom::CallerType aCallerType);
+  nsMimeType* NamedGetter(const nsAString& name, bool &found,
+                          mozilla::dom::CallerType aCallerType);
+  uint32_t Length(mozilla::dom::CallerType aCallerType);
+  void GetSupportedNames(nsTArray<nsString>& retval,
+                         mozilla::dom::CallerType aCallerType);
 
 protected:
   virtual ~nsMimeTypeArray();
@@ -50,6 +53,7 @@ protected:
   // mMimeTypes contains MIME types handled by plugins or by an OS
   // PreferredApplicationHandler.
   nsTArray<RefPtr<nsMimeType> > mMimeTypes;
+  nsTArray<RefPtr<nsMimeType> > mCTPMimeTypes;
 };
 
 class nsMimeType final : public nsWrapperCache

@@ -1,10 +1,15 @@
 #include "gdb-tests.h"
 #include "jsapi.h"
 
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
+
 FRAGMENT(jsval, simple) {
   using namespace JS;
 
   RootedValue fortytwo(cx, Int32Value(42));
+  RootedValue fortytwoD(cx, DoubleValue(42));
   RootedValue negone(cx, Int32Value(-1));
   RootedValue undefined(cx, UndefinedValue());
   RootedValue null(cx, NullValue());
@@ -17,6 +22,9 @@ FRAGMENT(jsval, simple) {
   RootedString hello(cx, JS_NewStringCopyZ(cx, "Hello!"));
   RootedValue friendly_string(cx, StringValue(hello));
   RootedValue symbol(cx, SymbolValue(GetSymbolFor(cx, hello)));
+#ifdef ENABLE_BIGINT
+  RootedValue bi(cx, BigIntValue(BigInt::create(cx)));
+#endif
 
   RootedValue global(cx);
   global.setObject(*CurrentGlobalOrNull(cx));
@@ -26,15 +34,19 @@ FRAGMENT(jsval, simple) {
 
   breakpoint();
 
-  (void) fortytwo;
-  (void) negone;
-  (void) undefined;
-  (void) js_true;
-  (void) js_false;
-  (void) null;
-  (void) elements_hole;
-  (void) empty_string;
-  (void) friendly_string;
-  (void) symbol;
-  (void) global;
+  use(fortytwo);
+  use(fortytwoD);
+  use(negone);
+  use(undefined);
+  use(js_true);
+  use(js_false);
+  use(null);
+  use(elements_hole);
+  use(empty_string);
+  use(friendly_string);
+  use(symbol);
+#ifdef ENABLE_BIGINT
+  use(bi);
+#endif
+  use(global);
 }

@@ -8,16 +8,16 @@ Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
 var testserver = createHttpServer();
 gPort = testserver.identity.primaryPort;
 
-const uuidGenerator = AM_Cc["@mozilla.org/uuid-generator;1"].getService(AM_Ci.nsIUUIDGenerator);
+const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
 const extensionsDir = gProfD.clone();
 extensionsDir.append("extensions");
 
 const addonsDir = gTmpD.clone();
 addonsDir.append("addons");
-addonsDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, 0o755);
+addonsDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
 
-do_register_cleanup(() => addonsDir.remove(true));
+registerCleanupFunction(() => addonsDir.remove(true));
 
 testserver.registerDirectory("/addons/", addonsDir);
 
@@ -36,17 +36,15 @@ function serveManifest(request, response) {
   response.write(manifest.data);
 }
 
-
-function promiseInstallWebExtension(aData) {
+async function promiseInstallWebExtension(aData) {
   let addonFile = createTempWebExtensionFile(aData);
 
-  return promiseInstallAllFiles([addonFile]).then(() => {
-    Services.obs.notifyObservers(addonFile, "flush-cache-entry", null);
-    return promiseAddonByID(aData.id);
-  });
+  let {addon} = await promiseInstallFile(addonFile);
+  Services.obs.notifyObservers(addonFile, "flush-cache-entry");
+  return addon;
 }
 
-var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WHEN_PERIODIC_UPDATE) {
+var checkUpdates = async function(aData, aReason = AddonManager.UPDATE_WHEN_PERIODIC_UPDATE) {
   function provide(obj, path, value) {
     path = path.split(".");
     let prop = path.pop();
@@ -61,11 +59,12 @@ var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WH
       obj[prop] = value;
   }
 
-  provide(aData, "addon.id", uuidGenerator.generateUUID().number);
-  let id = aData.addon.id;
+  let id = uuidGenerator.generateUUID().number;
+  provide(aData, "addon.id", id);
+  provide(aData, "addon.manifest.applications.gecko.id", id);
 
   let updatePath = `/updates/${id}.json`.replace(/[{}]/g, "");
-  let updateUrl = `http://localhost:${gPort}${updatePath}`
+  let updateUrl = `http://localhost:${gPort}${updatePath}`;
 
   let addonData = { updates: [] };
   let manifestJSON = {
@@ -82,6 +81,7 @@ var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WH
     update.version = version;
 
     provide(update, "addon.id", id);
+    provide(update, "addon.manifest.applications.gecko.id", id);
     let addon = update.addon;
 
     delete update.addon;
@@ -110,28 +110,26 @@ var checkUpdates = Task.async(function* (aData, aReason = AddonManager.UPDATE_WH
                             contentType: "application/json" });
 
 
-  let addon = yield awaitInstall;
+  let addon = await awaitInstall;
 
-  let updates = yield promiseFindAddonUpdates(addon, aReason);
+  let updates = await promiseFindAddonUpdates(addon, aReason);
   updates.addon = addon;
 
   return updates;
+};
+
+
+add_task(async function setup() {
+  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "42.0", "42.0");
+
+  await promiseStartupManager();
+  registerCleanupFunction(promiseShutdownManager);
 });
 
 
-function run_test() {
-  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "42.0", "42.0");
-
-  startupManager();
-  do_register_cleanup(promiseShutdownManager);
-
-  run_next_test();
-}
-
-
 // Check that compatibility updates are applied.
-add_task(function* checkUpdateMetadata() {
-  let update = yield checkUpdates({
+add_task(async function checkUpdateMetadata() {
+  let update = await checkUpdates({
     addon: {
       manifest: {
         version: "1.0",
@@ -153,13 +151,13 @@ add_task(function* checkUpdateMetadata() {
   ok(update.addon.isCompatibleWith("48", "48"), "compatible max");
   ok(!update.addon.isCompatibleWith("49", "49"), "not compatible max");
 
-  update.addon.uninstall();
+  await update.addon.uninstall();
 });
 
 
 // Check that updates from web extensions to web extensions succeed.
-add_task(function* checkUpdateToWebExt() {
-  let update = yield checkUpdates({
+add_task(async function checkUpdateToWebExt() {
+  let update = await checkUpdates({
     addon: { manifest: { version: "1.0" } },
     updates: {
       "1.1": { },
@@ -173,21 +171,21 @@ add_task(function* checkUpdateToWebExt() {
 
   equal(update.addon.version, "1.0", "add-on version");
 
-  yield promiseCompleteAllInstalls([update.updateAvailable]);
+  await update.updateAvailable.install();
 
-  let addon = yield promiseAddonByID(update.addon.id);
+  let addon = await promiseAddonByID(update.addon.id);
   equal(addon.version, "1.2", "new add-on version");
 
-  addon.uninstall();
+  await addon.uninstall();
 });
 
 
 // Check that updates from web extensions to XUL extensions fail.
-add_task(function* checkUpdateToRDF() {
-  let update = yield checkUpdates({
+add_task(async function checkUpdateToRDF() {
+  let update = await checkUpdates({
     addon: { manifest: { version: "1.0" } },
     updates: {
-      "1.1": { addon: { rdf: true } },
+      "1.1": { addon: { rdf: true, bootstrap: true } },
     }
   });
 
@@ -196,7 +194,7 @@ add_task(function* checkUpdateToRDF() {
 
   equal(update.addon.version, "1.0", "add-on version");
 
-  let result = yield new Promise((resolve, reject) => {
+  let result = await new Promise((resolve, reject) => {
     update.updateAvailable.addListener({
       onDownloadFailed: resolve,
       onDownloadEnded: reject,
@@ -209,34 +207,31 @@ add_task(function* checkUpdateToRDF() {
 
   equal(result.error, AddonManager.ERROR_UNEXPECTED_ADDON_TYPE, "error: unexpected add-on type");
 
-  let addon = yield promiseAddonByID(update.addon.id);
+  let addon = await promiseAddonByID(update.addon.id);
   equal(addon.version, "1.0", "new add-on version");
 
-  addon.uninstall();
+  await addon.uninstall();
 });
 
 
 // Check that illegal update URLs are rejected.
-add_task(function* checkIllegalUpdateURL() {
+add_task(async function checkIllegalUpdateURL() {
   const URLS = ["chrome://browser/content/",
                 "data:text/json,...",
                 "javascript:;",
                 "/"];
 
   for (let url of URLS) {
-    let { messages } = yield promiseConsoleOutput(() => {
-      return new Promise((resolve, reject) => {
-        let addonFile = createTempWebExtensionFile({
-          manifest: { applications: { gecko: { update_url: url } } },
-        });
+    let { messages } = await promiseConsoleOutput(() => {
+      let addonFile = createTempWebExtensionFile({
+        manifest: { applications: { gecko: { update_url: url } } },
+      });
 
-        AddonManager.getInstallForFile(addonFile, install => {
-          Services.obs.notifyObservers(addonFile, "flush-cache-entry", null);
+      return AddonManager.getInstallForFile(addonFile).then(install => {
+        Services.obs.notifyObservers(addonFile, "flush-cache-entry");
 
-          if (install && install.state == AddonManager.STATE_DOWNLOAD_FAILED)
-            resolve();
-          reject(new Error("Unexpected state: " + (install && install.state)))
-        });
+        if (!install || install.state != AddonManager.STATE_DOWNLOAD_FAILED)
+          throw new Error("Unexpected state: " + (install && install.state));
       });
     });
 

@@ -7,7 +7,6 @@ dnl ICU library, as well as a few other things.
 
 AC_DEFUN([MOZ_CONFIG_ICU], [
 
-ICU_LIB_NAMES=
 MOZ_SYSTEM_ICU=
 MOZ_ARG_WITH_BOOL(system-icu,
 [  --with-system-icu
@@ -15,12 +14,11 @@ MOZ_ARG_WITH_BOOL(system-icu,
     MOZ_SYSTEM_ICU=1)
 
 if test -n "$MOZ_SYSTEM_ICU"; then
-    PKG_CHECK_MODULES(MOZ_ICU, icu-i18n >= 50.1)
-else
-    MOZ_ICU_INCLUDES="/intl/icu/source/common /intl/icu/source/i18n"
+    PKG_CHECK_MODULES(MOZ_ICU, icu-i18n >= 59.1)
+    CFLAGS="$CFLAGS $MOZ_ICU_CFLAGS"
+    CXXFLAGS="$CXXFLAGS $MOZ_ICU_CFLAGS"
 fi
 
-AC_SUBST_LIST(MOZ_ICU_INCLUDES)
 AC_SUBST(MOZ_SYSTEM_ICU)
 
 MOZ_ARG_WITH_STRING(intl-api,
@@ -70,7 +68,7 @@ if test -n "$USE_ICU"; then
         fi
     fi
 
-    version=`sed -n 's/^[[:space:]]*#[[:space:]]*define[[:space:]][[:space:]]*U_ICU_VERSION_MAJOR_NUM[[:space:]][[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$icudir/common/unicode/uvernum.h"`
+    version=`sed -n 's/^[[[:space:]]]*#[[:space:]]*define[[:space:]][[:space:]]*U_ICU_VERSION_MAJOR_NUM[[:space:]][[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$icudir/common/unicode/uvernum.h"`
     if test x"$version" = x; then
        AC_MSG_ERROR([cannot determine icu version number from uvernum.h header file $lineno])
     fi
@@ -80,30 +78,24 @@ if test -n "$USE_ICU"; then
     # We could make this set as 'l' or 'b' for little or big, respectively,
     # but we'd need to check in a big-endian version of the file.
     ICU_DATA_FILE="icudt${version}l.dat"
-
-    dnl We won't build ICU data as a separate file when building
-    dnl JS standalone so that embedders don't have to deal with it.
-    if test -z "$JS_STANDALONE" -a -z "$MOZ_SYSTEM_ICU"; then
-        MOZ_ICU_DATA_ARCHIVE=1
-    else
-        MOZ_ICU_DATA_ARCHIVE=
-    fi
 fi
 
 AC_SUBST(MOZ_ICU_VERSION)
 AC_SUBST(ENABLE_INTL_API)
 AC_SUBST(USE_ICU)
 AC_SUBST(ICU_DATA_FILE)
-AC_SUBST(MOZ_ICU_DATA_ARCHIVE)
 
-if test -n "$USE_ICU" -a -z "$MOZ_SYSTEM_ICU"; then
-    if test -z "$YASM" -a -z "$GNU_AS" -a "$COMPILE_ENVIRONMENT"; then
-      AC_MSG_ERROR([Building ICU requires either yasm or a GNU assembler. If you do not have either of those available for this platform you must use --without-intl-api])
-    fi
-    dnl We build ICU as a static library.
-    AC_DEFINE(U_STATIC_IMPLEMENTATION)
+if test -n "$USE_ICU"; then
     dnl Source files that use ICU should have control over which parts of the ICU
     dnl namespace they want to use.
     AC_DEFINE(U_USING_ICU_NAMESPACE,0)
+
+    if test -z "$MOZ_SYSTEM_ICU"; then
+        if test -z "$YASM" -a -z "$GNU_AS" -a "$COMPILE_ENVIRONMENT"; then
+            AC_MSG_ERROR([Building ICU requires either yasm or a GNU assembler. If you do not have either of those available for this platform you must use --without-intl-api])
+        fi
+        dnl We build ICU as a static library.
+        AC_DEFINE(U_STATIC_IMPLEMENTATION)
+    fi
 fi
 ])

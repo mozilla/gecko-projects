@@ -1,0 +1,113 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+job-defaults:
+    worker:
+        docker-image: {in-tree: toolchain-build}
+    run-on-projects:
+        - trunk
+        - try
+
+macosx64-clang:
+    description: "Clang toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TM(clang)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux-large
+    worker:
+        max-run-time: 3600
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
+    run:
+        using: toolchain-script
+        script: build-clang-macosx.sh
+        tooltool-downloads: internal
+        resources:
+            - 'build/build-clang/build-clang.py'
+            - 'build/build-clang/clang-6-macosx64.json'
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/clang.tar.xz
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang-6
+        - linux64-gcc-4.9
+
+macosx64-clang-tidy:
+    description: "Clang-tidy build"
+    index:
+        product: static-analysis
+        job-name: macosx64-clang-tidy
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TM(clang-tidy)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux-large
+    worker:
+        max-run-time: 3600
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
+    run:
+        using: toolchain-script
+        script: build-clang-tidy-macosx.sh
+        tooltool-downloads: internal
+        resources:
+            - 'build/clang-plugin/**'
+            - 'build/build-clang/build-clang.py'
+            - 'build/build-clang/clang-tidy-macosx64.json'
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/clang-tidy.tar.xz
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang-6
+        - linux64-gcc-4.9
+
+macosx64-cctools-port:
+    description: "cctools-port toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TM(cctools)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        max-run-time: 1800
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
+    run:
+        using: toolchain-script
+        script: build-cctools-port-macosx.sh
+        tooltool-downloads: internal
+        resources:
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/cctools.tar.bz2
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang-6
+
+macosx64-gn:
+    description: "gn toolchain build"
+    treeherder:
+        kind: build
+        platform: toolchains/opt
+        symbol: TM(gn)
+        tier: 1
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        max-run-time: 1800
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
+    run:
+        using: toolchain-script
+        script: build-gn-macosx.sh
+        tooltool-downloads: internal
+        resources:
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+            - 'taskcluster/scripts/misc/build-gn-common.sh'
+        toolchain-artifact: public/build/gn.tar.xz
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang-6

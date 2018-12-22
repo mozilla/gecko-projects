@@ -19,12 +19,16 @@
 
 using namespace mozilla;
 
-class nsBlockOnBackgroundThreadEvent : public nsRunnable {
+class nsBlockOnBackgroundThreadEvent : public Runnable {
 public:
-  nsBlockOnBackgroundThreadEvent() {}
-  NS_IMETHOD Run()
+  nsBlockOnBackgroundThreadEvent()
+    : mozilla::Runnable("nsBlockOnBackgroundThreadEvent")
+  {
+  }
+  NS_IMETHOD Run() override
   {
     MutexAutoLock lock(nsDeleteDir::gInstance->mLock);
+    nsDeleteDir::gInstance->mNotified = true;
     nsDeleteDir::gInstance->mCondVar.Notify();
     return NS_OK;
   }
@@ -36,6 +40,7 @@ nsDeleteDir * nsDeleteDir::gInstance = nullptr;
 nsDeleteDir::nsDeleteDir()
   : mLock("nsDeleteDir.mLock"),
     mCondVar(mLock, "nsDeleteDir.mCondVar"),
+    mNotified(false),
     mShutdownPending(false),
     mStopDeleting(false)
 {
@@ -78,10 +83,10 @@ nsDeleteDir::Shutdown(bool finishDeleting)
     for (int32_t i = gInstance->mTimers.Count(); i > 0; i--) {
       nsCOMPtr<nsITimer> timer = gInstance->mTimers[i-1];
       gInstance->mTimers.RemoveObjectAt(i-1);
-      timer->Cancel();
 
       nsCOMArray<nsIFile> *arg;
       timer->GetClosure((reinterpret_cast<void**>(&arg)));
+      timer->Cancel();
 
       if (finishDeleting)
         dirsToRemove.AppendObjects(*arg);
@@ -101,7 +106,10 @@ nsDeleteDir::Shutdown(bool finishDeleting)
         return NS_ERROR_UNEXPECTED;
       }
 
-      rv = gInstance->mCondVar.Wait();
+      gInstance->mNotified = false;
+      while (!gInstance->mNotified) {
+        gInstance->mCondVar.Wait();
+      }
       nsShutdownThread::BlockingShutdown(thread);
     }
   }
@@ -324,24 +332,15 @@ nsDeleteDir::RemoveOldTrashes(nsIFile *cacheDir)
   if (NS_FAILED(rv))
     return rv;
 
-  nsCOMPtr<nsISimpleEnumerator> iter;
+  nsCOMPtr<nsIDirectoryEnumerator> iter;
   rv = parent->GetDirectoryEntries(getter_AddRefs(iter));
   if (NS_FAILED(rv))
     return rv;
 
-  bool more;
-  nsCOMPtr<nsISupports> elem;
   nsAutoPtr<nsCOMArray<nsIFile> > dirList;
 
-  while (NS_SUCCEEDED(iter->HasMoreElements(&more)) && more) {
-    rv = iter->GetNext(getter_AddRefs(elem));
-    if (NS_FAILED(rv))
-      continue;
-
-    nsCOMPtr<nsIFile> file = do_QueryInterface(elem);
-    if (!file)
-      continue;
-
+  nsCOMPtr<nsIFile> file;
+  while (NS_SUCCEEDED(iter->GetNextFile(getter_AddRefs(file))) && file) {
     nsAutoString leafName;
     rv = file->GetLeafName(leafName);
     if (NS_FAILED(rv))
@@ -371,22 +370,20 @@ nsDeleteDir::PostTimer(void *arg, uint32_t delay)
 {
   nsresult rv;
 
-  nsCOMPtr<nsITimer> timer = do_CreateInstance("@mozilla.org/timer;1", &rv);
-  if (NS_FAILED(rv))
-    return NS_ERROR_UNEXPECTED;
-
   MutexAutoLock lock(mLock);
 
   rv = InitThread();
   if (NS_FAILED(rv))
     return rv;
 
-  rv = timer->SetTarget(mThread);
-  if (NS_FAILED(rv))
-    return rv;
-
-  rv = timer->InitWithFuncCallback(TimerCallback, arg, delay,
-                                   nsITimer::TYPE_ONE_SHOT);
+  nsCOMPtr<nsITimer> timer;
+  rv = NS_NewTimerWithFuncCallback(getter_AddRefs(timer),
+                                   TimerCallback,
+                                   arg,
+                                   delay,
+                                   nsITimer::TYPE_ONE_SHOT,
+                                   "nsDeleteDir::PostTimer",
+                                   mThread);
   if (NS_FAILED(rv))
     return rv;
 
@@ -410,26 +407,13 @@ nsDeleteDir::RemoveDir(nsIFile *file, bool *stopDeleting)
     return rv;
 
   if (isDir) {
-    nsCOMPtr<nsISimpleEnumerator> iter;
+    nsCOMPtr<nsIDirectoryEnumerator> iter;
     rv = file->GetDirectoryEntries(getter_AddRefs(iter));
     if (NS_FAILED(rv))
       return rv;
 
-    bool more;
-    nsCOMPtr<nsISupports> elem;
-    while (NS_SUCCEEDED(iter->HasMoreElements(&more)) && more) {
-      rv = iter->GetNext(getter_AddRefs(elem));
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Unexpected failure in nsDeleteDir::RemoveDir");
-        continue;
-      }
-
-      nsCOMPtr<nsIFile> file2 = do_QueryInterface(elem);
-      if (!file2) {
-        NS_WARNING("Unexpected failure in nsDeleteDir::RemoveDir");
-        continue;
-      }
-
+    nsCOMPtr<nsIFile> file2;
+    while (NS_SUCCEEDED(iter->GetNextFile(getter_AddRefs(file2))) && file2) {
       RemoveDir(file2, stopDeleting);
       // No check for errors to remove as much as possible
 

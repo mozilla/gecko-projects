@@ -69,6 +69,18 @@ interface nsITLSServerSocket : nsIServerSocket
    */
   void setCipherSuites([array, size_is(aLength)] in unsigned short aCipherSuites,
                        in unsigned long aLength);
+
+  /**
+   * setVersionRange
+   *
+   * The server's TLS versions that is used by the TLS handshake.
+   * This is required to be set before calling |asyncListen|.
+   *
+   * aMinVersion and aMaxVersion is a TLS version value from
+   * |nsITLSClientStatus| constants.
+   */
+  void setVersionRange(in unsigned short aMinVersion,
+                       in unsigned short aMaxVersion);
 };
 
 /**
@@ -100,6 +112,7 @@ interface nsITLSClientStatus : nsISupports
   const short TLS_VERSION_1   = 0x0301;
   const short TLS_VERSION_1_1 = 0x0302;
   const short TLS_VERSION_1_2 = 0x0303;
+  const short TLS_VERSION_1_3 = 0x0304;
   const short TLS_VERSION_UNKNOWN = -1;
 
   /**

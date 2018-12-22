@@ -4,36 +4,58 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "txExpr.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "txIXPathContext.h"
 #include "txXPathTreeWalker.h"
 
-bool txNodeTypeTest::matches(const txXPathNode& aNode,
-                               txIMatchContext* aContext)
+nsresult
+txNodeTypeTest::matches(const txXPathNode& aNode, txIMatchContext* aContext,
+                        bool& aMatched)
 {
     switch (mNodeType) {
         case COMMENT_TYPE:
         {
-            return txXPathNodeUtils::isComment(aNode);
+            aMatched = txXPathNodeUtils::isComment(aNode);
+            return NS_OK;
         }
         case TEXT_TYPE:
         {
-            return txXPathNodeUtils::isText(aNode) &&
-                   !aContext->isStripSpaceAllowed(aNode);
+            aMatched = txXPathNodeUtils::isText(aNode);
+            if (aMatched) {
+                bool allowed;
+                nsresult rv = aContext->isStripSpaceAllowed(aNode, allowed);
+                NS_ENSURE_SUCCESS(rv, rv);
+
+                aMatched = !allowed;
+            }
+            return NS_OK;
         }
         case PI_TYPE:
         {
-            return txXPathNodeUtils::isProcessingInstruction(aNode) &&
-                   (!mNodeName ||
-                    txXPathNodeUtils::localNameEquals(aNode, mNodeName));
+            aMatched = txXPathNodeUtils::isProcessingInstruction(aNode) &&
+                       (!mNodeName ||
+                        txXPathNodeUtils::localNameEquals(aNode, mNodeName));
+            return NS_OK;
         }
         case NODE_TYPE:
         {
-            return !txXPathNodeUtils::isText(aNode) ||
-                   !aContext->isStripSpaceAllowed(aNode);
+            if (txXPathNodeUtils::isText(aNode)) {
+                bool allowed;
+                nsresult rv = aContext->isStripSpaceAllowed(aNode, allowed);
+                NS_ENSURE_SUCCESS(rv, rv);
+
+                aMatched = !allowed;
+            } else {
+                aMatched = true;
+            }
+            return NS_OK;
         }
     }
-    return true;
+
+    MOZ_ASSERT_UNREACHABLE("Didn't deal with all values of the NodeType enum!");
+
+    aMatched = false;
+    return NS_OK;
 }
 
 txNodeTest::NodeTestType

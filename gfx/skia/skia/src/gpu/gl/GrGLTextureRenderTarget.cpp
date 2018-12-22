@@ -7,7 +7,33 @@
 
 #include "GrGLTextureRenderTarget.h"
 
+#include "GrContext.h"
+#include "GrGLGpu.h"
+#include "GrTexturePriv.h"
 #include "SkTraceMemoryDump.h"
+
+GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
+                                                 SkBudgeted budgeted,
+                                                 const GrSurfaceDesc& desc,
+                                                 const GrGLTexture::IDDesc& texIDDesc,
+                                                 const GrGLRenderTarget::IDDesc& rtIDDesc,
+                                                 GrMipMapsStatus mipMapsStatus)
+        : GrSurface(gpu, desc)
+        , GrGLTexture(gpu, desc, texIDDesc, mipMapsStatus)
+        , GrGLRenderTarget(gpu, desc, rtIDDesc) {
+    this->registerWithCache(budgeted);
+}
+
+GrGLTextureRenderTarget::GrGLTextureRenderTarget(GrGLGpu* gpu,
+                                                 const GrSurfaceDesc& desc,
+                                                 const GrGLTexture::IDDesc& texIDDesc,
+                                                 const GrGLRenderTarget::IDDesc& rtIDDesc,
+                                                 GrMipMapsStatus mipMapsStatus)
+        : GrSurface(gpu, desc)
+        , GrGLTexture(gpu, desc, texIDDesc, mipMapsStatus)
+        , GrGLRenderTarget(gpu, desc, rtIDDesc) {
+    this->registerWithCacheWrapped();
+}
 
 // GrGLTextureRenderTarget must dump both of its superclasses.
 void GrGLTextureRenderTarget::dumpMemoryStatistics(
@@ -18,7 +44,7 @@ void GrGLTextureRenderTarget::dumpMemoryStatistics(
   // texture and a
   // renderbuffer component, dump as skia/gpu_resources/resource_#/texture
   SkString dumpName("skia/gpu_resources/resource_");
-  dumpName.appendS32(this->getUniqueID());
+  dumpName.appendU32(this->uniqueID().asUInt());
   dumpName.append("/texture");
 
   // Use the texture's gpuMemorySize, not our own, which includes the
@@ -36,4 +62,24 @@ void GrGLTextureRenderTarget::dumpMemoryStatistics(
   texture_id.appendU32(this->textureID());
   traceMemoryDump->setMemoryBacking(dumpName.c_str(), "gl_texture",
                                     texture_id.c_str());
+}
+
+bool GrGLTextureRenderTarget::canAttemptStencilAttachment() const {
+    // The RT FBO of GrGLTextureRenderTarget is never created from a
+    // wrapped FBO, so we only care about the flag.
+    return !this->getGpu()->getContext()->caps()->avoidStencilBuffers();
+}
+
+sk_sp<GrGLTextureRenderTarget> GrGLTextureRenderTarget::MakeWrapped(
+    GrGLGpu* gpu, const GrSurfaceDesc& desc, const GrGLTexture::IDDesc& texIDDesc,
+    const GrGLRenderTarget::IDDesc& rtIDDesc, GrMipMapsStatus mipMapsStatus)
+{
+    return sk_sp<GrGLTextureRenderTarget>(
+        new GrGLTextureRenderTarget(gpu, desc, texIDDesc, rtIDDesc, mipMapsStatus));
+}
+
+size_t GrGLTextureRenderTarget::onGpuMemorySize() const {
+    return GrSurface::ComputeSize(this->config(), this->width(), this->height(),
+                                    this->numSamplesOwnedPerPixel(),
+                                    this->texturePriv().mipMapped());
 }

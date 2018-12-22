@@ -92,6 +92,8 @@ if (typeof(repr) == 'undefined') {
                 ostring = (1 / o > 0) ? "+0" : "-0";
             } else if (typeof o === "string") {
                 ostring = JSON.stringify(o);
+            } else if (Array.isArray(o)) {
+                ostring = "[" + o.map(val => repr(val)).join(", ") + "]";
             } else {
                 ostring = (o + "");
             }
@@ -202,7 +204,7 @@ if (typeof(computedStyle) == 'undefined') {
         if (typeof(document.defaultView) == 'undefined' || document === null) {
             return undefined;
         }
-        var style = document.defaultView.getComputedStyle(elem, null);
+        var style = document.defaultView.getComputedStyle(elem);
         if (typeof(style) == 'undefined' || style === null) {
             return undefined;
         }
@@ -218,13 +220,46 @@ SimpleTest._tests = [];
 SimpleTest._stopOnLoad = true;
 SimpleTest._cleanupFunctions = [];
 SimpleTest._timeoutFunctions = [];
+SimpleTest._inChaosMode = false;
+// When using failure pattern file to filter unexpected issues,
+// SimpleTest.expected would be an array of [pattern, expected count],
+// and SimpleTest.num_failed would be an array of actual counts which
+// has the same length as SimpleTest.expected.
 SimpleTest.expected = 'pass';
 SimpleTest.num_failed = 0;
-SimpleTest._inChaosMode = false;
+
+function usesFailurePatterns() {
+  return Array.isArray(SimpleTest.expected);
+}
+
+/**
+ * Checks whether there is any failure pattern matches the given error
+ * message, and if found, bumps the counter of the failure pattern.
+ * Returns whether a matched failure pattern is found.
+ */
+function recordIfMatchesFailurePattern(name, diag) {
+  let index = SimpleTest.expected.findIndex(([pat, count]) => {
+    return pat == null ||
+      (typeof name == "string" && name.includes(pat)) ||
+      (typeof diag == "string" && diag.includes(pat));
+  });
+  if (index >= 0) {
+    SimpleTest.num_failed[index]++;
+    return true;
+  }
+  return false;
+}
 
 SimpleTest.setExpected = function () {
   if (parent.TestRunner) {
-    SimpleTest.expected = parent.TestRunner.expected;
+    if (!Array.isArray(parent.TestRunner.expected)) {
+      SimpleTest.expected = parent.TestRunner.expected;
+    } else {
+      // Assertions are checked by the runner.
+      SimpleTest.expected = parent.TestRunner.expected.filter(([pat]) => pat != "ASSERTION");
+      SimpleTest.num_failed = new Array(SimpleTest.expected.length);
+      SimpleTest.num_failed.fill(0);
+    }
   }
 }
 SimpleTest.setExpected();
@@ -232,7 +267,7 @@ SimpleTest.setExpected();
 /**
  * Something like assert.
 **/
-SimpleTest.ok = function (condition, name, diag) {
+SimpleTest.ok = function (condition, name, diag, stack = null) {
 
     var test = {'result': !!condition, 'name': name, 'diag': diag};
     if (SimpleTest.expected == 'fail') {
@@ -242,13 +277,22 @@ SimpleTest.ok = function (condition, name, diag) {
       }
       var successInfo = {status:"FAIL", expected:"FAIL", message:"TEST-KNOWN-FAIL"};
       var failureInfo = {status:"PASS", expected:"FAIL", message:"TEST-UNEXPECTED-PASS"};
+    } else if (!test.result && usesFailurePatterns()) {
+      if (recordIfMatchesFailurePattern(name, diag)) {
+        test.result = true;
+        // Add a mark for unexpected failures suppressed by failure pattern.
+        name = '[suppressed] ' + name;
+      }
+      var successInfo = {status:"FAIL", expected:"FAIL", message:"TEST-KNOWN-FAIL"};
+      var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};
     } else {
       var successInfo = {status:"PASS", expected:"PASS", message:"TEST-PASS"};
       var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};
     }
 
-    var stack = null;
-    if (!condition) {
+    if (condition) {
+        stack = null;
+    } else if (!stack) {
       stack = (new Error).stack.replace(/^(.*@)http:\/\/mochi.test:8888\/tests\//gm, '    $1').split('\n');
       stack.splice(0, 1);
       stack = stack.join('\n');
@@ -295,6 +339,16 @@ SimpleTest.doesThrow = function(fn, name) {
 
 SimpleTest.todo = function(condition, name, diag) {
     var test = {'result': !!condition, 'name': name, 'diag': diag, todo: true};
+    if (test.result && usesFailurePatterns() &&
+        recordIfMatchesFailurePattern(name, diag)) {
+      // Flipping the result to false so we don't get unexpected result. There
+      // is no perfect way here. A known failure can trigger unexpected pass,
+      // in which case, tagging it as KNOWN-FAIL probably makes more sense than
+      // marking it PASS.
+      test.result = false;
+      // Add a mark for unexpected failures suppressed by failure pattern.
+      name = '[suppressed] ' + name;
+    }
     var successInfo = {status:"PASS", expected:"FAIL", message:"TEST-UNEXPECTED-PASS"};
     var failureInfo = {status:"FAIL", expected:"FAIL", message:"TEST-KNOWN-FAIL"};
     SimpleTest._logResult(test, successInfo, failureInfo);
@@ -305,7 +359,7 @@ SimpleTest.todo = function(condition, name, diag) {
  * Returns the absolute URL to a test data file from where tests
  * are served. i.e. the file doesn't necessarely exists where tests
  * are executed.
- * (For b2g and android, mochitest are executed on the device, while
+ * (For android, mochitest are executed on the device, while
  * all mochitest html (and others) files are served from the test runner
  * slave)
  */
@@ -651,7 +705,7 @@ SimpleTest._pendingWaitForFocusCount = 0;
  * cannot be resolved with CPOWs). If you require the focused window,
  * you should use waitForFocus instead.
  */
-SimpleTest.promiseFocus = function *(targetWindow, expectBlankPage)
+SimpleTest.promiseFocus = function (targetWindow, expectBlankPage)
 {
     return new Promise(function (resolve, reject) {
         SimpleTest.waitForFocus(win => {
@@ -703,8 +757,8 @@ SimpleTest.waitForFocus = function (callback, targetWindow, expectBlankPage) {
 
       function focusedWindow() {
           if (isChildProcess) {
-              return Components.classes["@mozilla.org/focus-manager;1"].
-                      getService(Components.interfaces.nsIFocusManager).focusedWindow;
+              return Cc["@mozilla.org/focus-manager;1"].
+                      getService(Ci.nsIFocusManager).focusedWindow;
           }
           return SpecialPowers.focusedWindow();
       }
@@ -766,8 +820,8 @@ SimpleTest.waitForFocus = function (callback, targetWindow, expectBlankPage) {
 
           var childDesiredWindow = { };
           if (isChildProcess) {
-              var fm = Components.classes["@mozilla.org/focus-manager;1"].
-                         getService(Components.interfaces.nsIFocusManager);
+              var fm = Cc["@mozilla.org/focus-manager;1"].
+                         getService(Ci.nsIFocusManager);
               fm.getFocusedElementForWindow(desiredWindow, true, childDesiredWindow);
               childDesiredWindow = childDesiredWindow.value;
           } else {
@@ -811,10 +865,20 @@ SimpleTest.waitForFocus = function (callback, targetWindow, expectBlankPage) {
 
     // If this is a request to focus a remote child window, the request must
     // be forwarded to the child process.
-    // XXXndeakin now sure what this issue with Components.utils is about, but
-    // browser tests require the former and plain tests require the latter.
-    var Cu = Components.utils || SpecialPowers.Cu;
-    var Ci = Components.interfaces || SpecialPowers.Ci;
+    //
+    // Even if the real |Components| doesn't exist, we might shim in a simple JS
+    // placebo for compat. An easy way to differentiate this from the real thing
+    // is whether the property is read-only or not.  The real |Components|
+    // property is read-only.
+    var c = Object.getOwnPropertyDescriptor(window, 'Components');
+    var Cu, Ci;
+    if (c && c.value && !c.writable) {
+        Cu = Components.utils;
+        Ci = Components.interfaces;
+    } else {
+        Cu = SpecialPowers.Cu;
+        Ci = SpecialPowers.Ci;
+    }
 
     var browser = null;
     if (typeof(XULElement) != "undefined" &&
@@ -829,7 +893,7 @@ SimpleTest.waitForFocus = function (callback, targetWindow, expectBlankPage) {
         if (isWrapper) {
             // Look for a tabbrowser and see if targetWindow corresponds to one
             // within that tabbrowser. If not, just return.
-            var tabBrowser = document.getElementsByTagName("tabbrowser")[0] || null;
+            var tabBrowser = window.gBrowser || null;
             browser = tabBrowser ? tabBrowser.getBrowserForContentWindow(targetWindow.top) : null;
             if (!browser) {
                 SimpleTest.info("child process window cannot be focused");
@@ -872,8 +936,6 @@ SimpleTest.waitForFocus = function (callback, targetWindow, expectBlankPage) {
     }
 };
 
-SimpleTest.waitForClipboard_polls = 0;
-
 /*
  * Polls the clipboard waiting for the expected value. A known value different than
  * the expected value is put on the clipboard first (and also polled for) so we
@@ -883,7 +945,7 @@ SimpleTest.waitForClipboard_polls = 0;
  *
  * @param aExpectedStringOrValidatorFn
  *        The string value that is expected to be on the clipboard or a
- *        validator function getting cripboard data and returning a bool.
+ *        validator function getting expected clipboard data and returning a bool.
  * @param aSetupFn
  *        A function responsible for setting the clipboard to the expected value,
  *        called after the known value setting succeeds.
@@ -902,19 +964,25 @@ SimpleTest.waitForClipboard_polls = 0;
  *        aExpectedStringOrValidatorFn must be null, as it won't be used.
  *        Defaults to false.
  */
-SimpleTest.__waitForClipboardMonotonicCounter = 0;
-SimpleTest.__defineGetter__("_waitForClipboardMonotonicCounter", function () {
-  return SimpleTest.__waitForClipboardMonotonicCounter++;
-});
 SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
                                        aSuccessFn, aFailureFn, aFlavor, aTimeout, aExpectFailure) {
-    var requestedFlavor = aFlavor || "text/unicode";
+    let promise = SimpleTest.promiseClipboardChange(aExpectedStringOrValidatorFn, aSetupFn,
+                                                    aFlavor, aTimeout, aExpectFailure);
+    promise.then(aSuccessFn).catch(aFailureFn);
+}
+
+/**
+ * Promise-oriented version of waitForClipboard.
+ */
+SimpleTest.promiseClipboardChange = async function(aExpectedStringOrValidatorFn, aSetupFn,
+                                                   aFlavor, aTimeout, aExpectFailure) {
+    let requestedFlavor = aFlavor || "text/unicode";
 
     // The known value we put on the clipboard before running aSetupFn
-    var initialVal = SimpleTest._waitForClipboardMonotonicCounter +
-                     "-waitForClipboard-known-value";
+    let initialVal = "waitForClipboard-known-value-" + Math.random();
+    let preExpectedVal = initialVal;
 
-    var inputValidatorFn;
+    let inputValidatorFn;
     if (aExpectFailure) {
         // If we expect failure, the aExpectedStringOrValidatorFn should be null
         if (aExpectedStringOrValidatorFn !== null) {
@@ -931,47 +999,82 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
             : aExpectedStringOrValidatorFn;
     }
 
-    var maxPolls = aTimeout ? aTimeout / 100 : 50;
+    let maxPolls = aTimeout ? aTimeout / 100 : 50;
 
-    // reset for the next use
-    function reset() {
-        SimpleTest.waitForClipboard_polls = 0;
-    }
+    async function putAndVerify(operationFn, validatorFn, flavor) {
+        operationFn();
 
-    function wait(validatorFn, successFn, failureFn, flavor) {
-        if (++SimpleTest.waitForClipboard_polls > maxPolls) {
-            // Log the failure.
-            SimpleTest.ok(aExpectFailure, "Timed out while polling clipboard for pasted data");
-            reset();
-            failureFn();
-            return;
+        let data;
+        for (let i = 0; i < maxPolls; i++) {
+            data = SpecialPowers.getClipboardData(flavor);
+            if (validatorFn(data)) {
+                // Don't show the success message when waiting for preExpectedVal
+                if (preExpectedVal) {
+                    preExpectedVal = null;
+                } else {
+                    SimpleTest.ok(!aExpectFailure, "Clipboard has the given value: '" + data + "'");
+                }
+
+                return data;
+            }
+
+            // Wait 100ms and check again.
+            await new Promise(resolve => { SimpleTest._originalSetTimeout.apply(window, [resolve, 100]); });
         }
 
-        var data = SpecialPowers.getClipboardData(flavor);
-
-        if (validatorFn(data)) {
-            // Don't show the success message when waiting for preExpectedVal
-            if (preExpectedVal)
-                preExpectedVal = null;
-            else
-                SimpleTest.ok(!aExpectFailure, "Clipboard has the given value");
-            reset();
-            successFn();
-        } else {
-            SimpleTest._originalSetTimeout.apply(window, [function() { return wait(validatorFn, successFn, failureFn, flavor); }, 100]);
+        SimpleTest.ok(aExpectFailure, "Timed out while polling clipboard for pasted data, got: " + data);
+        if (!aExpectFailure) {
+          throw "failed";
         }
     }
 
     // First we wait for a known value different from the expected one.
-    var preExpectedVal = initialVal;
-    SpecialPowers.clipboardCopyString(preExpectedVal);
-    wait(function(aData) { return aData  == preExpectedVal; },
-         function() {
-           // Call the original setup fn
-           aSetupFn();
-           wait(inputValidatorFn, aSuccessFn, aFailureFn, requestedFlavor);
-         }, aFailureFn, "text/unicode");
+    await putAndVerify(function() { SpecialPowers.clipboardCopyString(preExpectedVal); },
+                       function(aData) { return aData  == preExpectedVal; },
+                       "text/unicode");
+
+    return await putAndVerify(aSetupFn, inputValidatorFn, requestedFlavor);
 }
+
+
+/**
+ * Wait for a condition for a while (actually up to 3s here).
+ *
+ * @param aCond
+ *        A function returns the result of the condition
+ * @param aCallback
+ *        A function called after the condition is passed or timeout.
+ * @param aErrorMsg
+ *        The message displayed when the condition failed to pass
+ *        before timeout.
+ */
+SimpleTest.waitForCondition = function (aCond, aCallback, aErrorMsg) {
+  var tries = 0;
+  var interval = setInterval(() => {
+    if (tries >= 30) {
+      ok(false, aErrorMsg);
+      moveOn();
+      return;
+    }
+    var conditionPassed;
+    try {
+      conditionPassed = aCond();
+    } catch (e) {
+      ok(false, `${e}\n${e.stack}`);
+      conditionPassed = false;
+    }
+    if (conditionPassed) {
+      moveOn();
+    }
+    tries++;
+  }, 100);
+  var moveOn = () => { clearInterval(interval); aCallback(); };
+};
+SimpleTest.promiseWaitForCondition = function (aCond, aErrorMsg) {
+  return new Promise(resolve => {
+    this.waitForCondition(aCond, resolve, aErrorMsg);
+  });
+};
 
 /**
  * Executes a function shortly after the call, but lets the caller continue
@@ -982,7 +1085,7 @@ SimpleTest.executeSoon = function(aFunc) {
         return SpecialPowers.executeSoon(aFunc, window);
     }
     setTimeout(aFunc, 0);
-    return null;		// Avoid warning.
+    return null;   // Avoid warning.
 };
 
 SimpleTest.registerCleanupFunction = function(aFunc) {
@@ -1031,6 +1134,24 @@ SimpleTest.finish = function() {
 
         SimpleTest._logResult(test, successInfo, failureInfo);
         SimpleTest._tests.push(test);
+    } else if (usesFailurePatterns()) {
+        SimpleTest.expected.forEach(([pat, expected_count], i) => {
+            let count = SimpleTest.num_failed[i];
+            let diag;
+            if (expected_count === null && count == 0) {
+                diag = "expected some failures but got none";
+            } else if (expected_count !== null && expected_count != count) {
+                diag = `expected ${expected_count} failures but got ${count}`;
+            } else {
+                return;
+            }
+            var name = pat ? `failure pattern \`${pat}\` in this test` : "failures in this test";
+            var test = {'result': false, name, diag};
+            var successInfo = {status:"PASS", expected:"PASS", message:"TEST-PASS"};
+            var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};
+            SimpleTest._logResult(test, successInfo, failureInfo);
+            SimpleTest._tests.push(test);
+        });
     }
 
     SimpleTest._timeoutFunctions = [];
@@ -1332,38 +1453,22 @@ if (isPrimaryTestWindow) {
 
 SimpleTest.DNE = {dne: 'Does not exist'};
 SimpleTest.LF = "\r\n";
-SimpleTest._isRef = function (object) {
-    var type = typeof(object);
-    return type == 'object' || type == 'function';
-};
 
 
 SimpleTest._deepCheck = function (e1, e2, stack, seen) {
     var ok = false;
-    // Either they're both references or both not.
-    var sameRef = !(!SimpleTest._isRef(e1) ^ !SimpleTest._isRef(e2));
-    if (e1 == null && e2 == null) {
+    if (Object.is(e1, e2)) {
+        // Handles identical primitives and references.
         ok = true;
-    } else if (e1 != null ^ e2 != null) {
+    } else if (typeof e1 != "object" || typeof e2 != "object" || e1 === null || e2 === null) {
+        // If either argument is a primitive or function, don't consider the arguments the same.
         ok = false;
-    } else if (e1 == SimpleTest.DNE ^ e2 == SimpleTest.DNE) {
+    } else if (e1 == SimpleTest.DNE || e2 == SimpleTest.DNE) {
         ok = false;
-    } else if (sameRef && e1 == e2) {
-        // Handles primitives and any variables that reference the same
-        // object, including functions.
-        ok = true;
     } else if (SimpleTest.isa(e1, 'Array') && SimpleTest.isa(e2, 'Array')) {
         ok = SimpleTest._eqArray(e1, e2, stack, seen);
-    } else if (typeof e1 == "object" && typeof e2 == "object") {
-        ok = SimpleTest._eqAssoc(e1, e2, stack, seen);
-    } else if (typeof e1 == "number" && typeof e2 == "number"
-               && isNaN(e1) && isNaN(e2)) {
-        ok = true;
     } else {
-        // If we get here, they're not the same (function references must
-        // always simply reference the same function).
-        stack.push({ vals: [e1, e2] });
-        ok = false;
+        ok = SimpleTest._eqAssoc(e1, e2, stack, seen);
     }
     return ok;
 };
@@ -1391,11 +1496,11 @@ SimpleTest._eqArray = function (a1, a2, stack, seen) {
     var ok = true;
     // Only examines enumerable attributes. Only works for numeric arrays!
     // Associative arrays return 0. So call _eqAssoc() for them, instead.
-    var max = a1.length > a2.length ? a1.length : a2.length;
+    var max = Math.max(a1.length, a2.length);
     if (max == 0) return SimpleTest._eqAssoc(a1, a2, stack, seen);
     for (var i = 0; i < max; i++) {
-        var e1 = i > a1.length - 1 ? SimpleTest.DNE : a1[i];
-        var e2 = i > a2.length - 1 ? SimpleTest.DNE : a2[i];
+        var e1 = i < a1.length ? a1[i] : SimpleTest.DNE;
+        var e2 = i < a2.length ? a2[i] : SimpleTest.DNE;
         stack.push({ type: 'Array', idx: i, vals: [e1, e2] });
         ok = SimpleTest._deepCheck(e1, e2, stack, seen);
         if (ok) {
@@ -1436,8 +1541,8 @@ SimpleTest._eqAssoc = function (o1, o2, stack, seen) {
     var o2Size = 0; for (var i in o2) o2Size++;
     var bigger = o1Size > o2Size ? o1 : o2;
     for (var i in bigger) {
-        var e1 = o1[i] == undefined ? SimpleTest.DNE : o1[i];
-        var e2 = o2[i] == undefined ? SimpleTest.DNE : o2[i];
+        var e1 = i in o1 ? o1[i] : SimpleTest.DNE;
+        var e2 = i in o2 ? o2[i] : SimpleTest.DNE;
         stack.push({ type: 'Object', idx: i, vals: [e1, e2] });
         ok = SimpleTest._deepCheck(e1, e2, stack, seen)
         if (ok) {
@@ -1456,7 +1561,7 @@ SimpleTest._formatStack = function (stack) {
         var type = entry['type'];
         var idx = entry['idx'];
         if (idx != null) {
-            if (/^\d+$/.test(idx)) {
+            if (type == 'Array') {
                 // Numeric array index.
                 variable += '[' + idx + ']';
             } else {
@@ -1476,39 +1581,26 @@ SimpleTest._formatStack = function (stack) {
     var out = "Structures begin differing at:" + SimpleTest.LF;
     for (var i = 0; i < vals.length; i++) {
         var val = vals[i];
-        if (val == null) {
-            val = 'undefined';
+        if (val === SimpleTest.DNE) {
+            val = "Does not exist";
         } else {
-            val == SimpleTest.DNE ? "Does not exist" : "'" + val + "'";
+            val = repr(val);
         }
+        out += vars[i] + ' = ' + val + SimpleTest.LF;
     }
-
-    out += vars[0] + ' = ' + vals[0] + SimpleTest.LF;
-    out += vars[1] + ' = ' + vals[1] + SimpleTest.LF;
 
     return '    ' + out;
 };
 
 
 SimpleTest.isDeeply = function (it, as, name) {
-    var ok;
-    // ^ is the XOR operator.
-    if (SimpleTest._isRef(it) ^ SimpleTest._isRef(as)) {
-        // One's a reference, one isn't.
-        ok = false;
-    } else if (!SimpleTest._isRef(it) && !SimpleTest._isRef(as)) {
-        // Neither is an object.
-        ok = SimpleTest.is(it, as, name);
+    var stack = [{ vals: [it, as] }];
+    var seen = [];
+    if ( SimpleTest._deepCheck(it, as, stack, seen)) {
+        SimpleTest.ok(true, name);
     } else {
-        // We have two objects. Do a deep comparison.
-        var stack = [], seen = [];
-        if ( SimpleTest._deepCheck(it, as, stack, seen)) {
-            ok = SimpleTest.ok(true, name);
-        } else {
-            ok = SimpleTest.ok(false, name, SimpleTest._formatStack(stack));
-        }
+        SimpleTest.ok(false, name, SimpleTest._formatStack(stack));
     }
-    return ok;
 };
 
 SimpleTest.typeOf = function (object) {
@@ -1587,3 +1679,39 @@ window.onerror = function simpletestOnerror(errorMsg, url, lineNumber,
         SimpleTest.executeSoon(SimpleTest.finish);
     }
 };
+
+// Lifted from dom/media/test/manifest.js
+// Make sure to not touch navigator in here, since we want to push prefs that
+// will affect the APIs it exposes, but the set of exposed APIs is determined
+// when Navigator.prototype is created.  So if we touch navigator before pushing
+// the prefs, the APIs it exposes will not take those prefs into account.  We
+// work around this by using a navigator object from a different global for our
+// UA string testing.
+var gAndroidSdk = null;
+function getAndroidSdk() {
+    if (gAndroidSdk === null) {
+        var iframe = document.documentElement.appendChild(document.createElement("iframe"));
+        iframe.style.display = "none";
+        var nav = iframe.contentWindow.navigator;
+        if (!nav.userAgent.includes("Mobile") &&
+            !nav.userAgent.includes("Tablet")) {
+            gAndroidSdk = -1;
+        } else {
+            // See nsSystemInfo.cpp, the getProperty('version') returns different value
+            // on each platforms, so we need to distinguish the android platform.
+            var versionString = nav.userAgent.includes("Android") ?
+                                'version' : 'sdk_version';
+            gAndroidSdk = SpecialPowers.Cc['@mozilla.org/system-info;1']
+                                       .getService(SpecialPowers.Ci.nsIPropertyBag2)
+                                       .getProperty(versionString);
+        }
+        document.documentElement.removeChild(iframe);
+    }
+    return gAndroidSdk;
+}
+
+// Request complete log when using failure patterns so that failure info
+// from infra can be useful.
+if (usesFailurePatterns()) {
+  SimpleTest.requestCompleteLog();
+}

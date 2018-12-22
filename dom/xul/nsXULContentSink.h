@@ -9,7 +9,6 @@
 #include "mozilla/Attributes.h"
 #include "nsIExpatSink.h"
 #include "nsIXMLContentSink.h"
-#include "nsAutoPtr.h"
 #include "nsNodeInfoManager.h"
 #include "nsWeakPtr.h"
 #include "nsXULElement.h"
@@ -41,8 +40,8 @@ public:
     NS_IMETHOD WillInterrupt(void) override;
     NS_IMETHOD WillResume(void) override;
     NS_IMETHOD SetParser(nsParserBase* aParser) override;
-    virtual void FlushPendingNotifications(mozFlushType aType) override { }
-    NS_IMETHOD SetDocumentCharset(nsACString& aCharset) override;
+    virtual void FlushPendingNotifications(mozilla::FlushType aType) override { }
+    virtual void SetDocumentCharset(NotNull<const Encoding*> aEncoding) override;
     virtual nsISupports *GetTarget() override;
 
     /**
@@ -113,7 +112,12 @@ protected:
             nsPrototypeArray    mChildren;
             State               mState;
             Entry*              mNext;
-            Entry() : mChildren(8) {}
+            Entry(nsXULPrototypeNode* aNode, State aState, Entry* aNext)
+                : mNode(aNode)
+                , mChildren(8)
+                , mState(aState)
+                , mNext(aNext)
+            {}
         };
 
         Entry* mTop;

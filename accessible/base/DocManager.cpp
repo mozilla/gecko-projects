@@ -21,11 +21,11 @@
 #endif
 
 #include "mozilla/EventListenerManager.h"
-#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
+#include "mozilla/dom/Event.h" // for Event
+#include "nsContentUtils.h"
 #include "nsCURILoader.h"
 #include "nsDocShellLoadTypes.h"
 #include "nsIChannel.h"
-#include "nsIDOMDocument.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIWebNavigation.h"
 #include "nsServiceManagerUtils.h"
@@ -86,27 +86,55 @@ DocManager::FindAccessibleInCache(nsINode* aNode) const
 }
 
 void
-DocManager::NotifyOfDocumentShutdown(DocAccessible* aDocument,
-                                     nsIDocument* aDOMDocument)
+DocManager::RemoveFromXPCDocumentCache(DocAccessible* aDocument)
 {
   xpcAccessibleDocument* xpcDoc = mXPCDocumentCache.GetWeak(aDocument);
   if (xpcDoc) {
     xpcDoc->Shutdown();
     mXPCDocumentCache.Remove(aDocument);
-  }
 
-  mDocAccessibleCache.Remove(aDOMDocument);
-  RemoveListeners(aDOMDocument);
+    if (!HasXPCDocuments()) {
+      MaybeShutdownAccService(nsAccessibilityService::eXPCOM);
+    }
+  }
 }
 
 void
-DocManager::NotifyOfRemoteDocShutdown(DocAccessibleParent* aDoc)
+DocManager::NotifyOfDocumentShutdown(DocAccessible* aDocument,
+                                     nsIDocument* aDOMDocument)
+{
+  // We need to remove listeners in both cases, when document is being shutdown
+  // or when accessibility service is being shut down as well.
+  RemoveListeners(aDOMDocument);
+
+  // Document will already be removed when accessibility service is shutting
+  // down so we do not need to remove it twice.
+  if (nsAccessibilityService::IsShutdown()) {
+    return;
+  }
+
+  RemoveFromXPCDocumentCache(aDocument);
+  mDocAccessibleCache.Remove(aDOMDocument);
+}
+
+void
+DocManager::RemoveFromRemoteXPCDocumentCache(DocAccessibleParent* aDoc)
 {
   xpcAccessibleDocument* doc = GetCachedXPCDocument(aDoc);
   if (doc) {
     doc->Shutdown();
     sRemoteXPCDocumentCache->Remove(aDoc);
   }
+
+  if (sRemoteXPCDocumentCache && sRemoteXPCDocumentCache->Count() == 0) {
+    MaybeShutdownAccService(nsAccessibilityService::eXPCOM);
+  }
+}
+
+void
+DocManager::NotifyOfRemoteDocShutdown(DocAccessibleParent* aDoc)
+{
+  RemoveFromRemoteXPCDocumentCache(aDoc);
 }
 
 xpcAccessibleDocument*
@@ -291,7 +319,7 @@ DocManager::OnProgressChange(nsIWebProgress* aWebProgress,
                              int32_t aCurTotalProgress,
                              int32_t aMaxTotalProgress)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -300,7 +328,7 @@ DocManager::OnLocationChange(nsIWebProgress* aWebProgress,
                              nsIRequest* aRequest, nsIURI* aLocation,
                              uint32_t aFlags)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -309,7 +337,7 @@ DocManager::OnStatusChange(nsIWebProgress* aWebProgress,
                            nsIRequest* aRequest, nsresult aStatus,
                            const char16_t* aMessage)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -318,7 +346,7 @@ DocManager::OnSecurityChange(nsIWebProgress* aWebProgress,
                              nsIRequest* aRequest,
                              uint32_t aState)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -326,13 +354,12 @@ DocManager::OnSecurityChange(nsIWebProgress* aWebProgress,
 // nsIDOMEventListener
 
 NS_IMETHODIMP
-DocManager::HandleEvent(nsIDOMEvent* aEvent)
+DocManager::HandleEvent(Event* aEvent)
 {
   nsAutoString type;
   aEvent->GetType(type);
 
-  nsCOMPtr<nsIDocument> document =
-    do_QueryInterface(aEvent->InternalDOMEvent()->GetTarget());
+  nsCOMPtr<nsIDocument> document = do_QueryInterface(aEvent->GetTarget());
   NS_ASSERTION(document, "pagehide or DOMContentLoaded for non document!");
   if (!document)
     return NS_OK;
@@ -442,10 +469,23 @@ DocManager::RemoveListeners(nsIDocument* aDocument)
 DocAccessible*
 DocManager::CreateDocOrRootAccessible(nsIDocument* aDocument)
 {
-  // Ignore hiding, resource documents and documents without docshell.
+  // Ignore hidden documents, resource documents, static clone
+  // (printing) documents and documents without a docshell.
   if (!aDocument->IsVisibleConsideringAncestors() ||
-      aDocument->IsResourceDoc() || !aDocument->IsActive())
+      aDocument->IsResourceDoc() || aDocument->IsStaticDocument() ||
+      !aDocument->IsActive()) {
     return nullptr;
+  }
+
+  nsIDocShell* docShell = aDocument->GetDocShell();
+  if (!docShell || docShell->IsInvisible()) {
+    return nullptr;
+  }
+
+  nsIWidget* widget = nsContentUtils::WidgetForDocument(aDocument);
+  if (!widget || widget->WindowType() == eWindowType_invisible) {
+    return nullptr;
+  }
 
   // Ignore documents without presshell and not having root frame.
   nsIPresShell* presShell = aDocument->GetShell();
@@ -493,22 +533,6 @@ DocManager::CreateDocOrRootAccessible(nsIDocument* aDocument)
     docAcc->FireDelayedEvent(nsIAccessibleEvent::EVENT_REORDER,
                              ApplicationAcc());
 
-    if (IPCAccessibilityActive()) {
-      nsIDocShell* docShell = aDocument->GetDocShell();
-      if (docShell) {
-        nsCOMPtr<nsITabChild> tabChild = docShell->GetTabChild();
-
-        // XXX We may need to handle the case that we don't have a tab child
-        // differently.  It may be that this will cause us to fail to notify
-        // the parent process about important accessible documents.
-        if (tabChild) {
-          DocAccessibleChild* ipcDoc = new DocAccessibleChild(docAcc);
-          docAcc->SetIPCDoc(ipcDoc);
-          static_cast<TabChild*>(tabChild.get())->
-            SendPDocAccessibleConstructor(ipcDoc, nullptr, 0);
-        }
-      }
-    }
   } else {
     parentDocAcc->BindChildDocument(docAcc);
   }
@@ -530,9 +554,6 @@ DocManager::CreateDocOrRootAccessible(nsIDocument* aDocument)
 void
 DocManager::ClearDocCache()
 {
-  // This unusual do-one-element-per-iterator approach is required because each
-  // DocAccessible is removed elsewhere upon its Shutdown() method being
-  // called, which invalidates the existing iterator.
   while (mDocAccessibleCache.Count() > 0) {
     auto iter = mDocAccessibleCache.Iter();
     MOZ_ASSERT(!iter.Done());
@@ -542,7 +563,23 @@ DocManager::ClearDocCache()
     if (docAcc) {
       docAcc->Shutdown();
     }
+
+    iter.Remove();
   }
+
+  // Ensure that all xpcom accessible documents are shut down as well.
+  while (mXPCDocumentCache.Count() > 0) {
+    auto iter = mXPCDocumentCache.Iter();
+    MOZ_ASSERT(!iter.Done());
+    xpcAccessibleDocument* xpcDoc = iter.UserData();
+    NS_ASSERTION(xpcDoc, "No xpc doc for the object in xpc doc cache!");
+
+    if (xpcDoc) {
+      xpcDoc->Shutdown();
+    }
+
+    iter.Remove();
+   }
 }
 
 void

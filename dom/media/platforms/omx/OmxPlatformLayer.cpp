@@ -8,18 +8,17 @@
 
 #include "OMX_VideoExt.h" // For VP8.
 
-#if defined(MOZ_WIDGET_GONK) && (ANDROID_VERSION == 20 || ANDROID_VERSION == 19)
-#define OMX_PLATFORM_GONK
-#include "GonkOmxPlatformLayer.h"
+#ifdef MOZ_OMX
+#include "PureOmxPlatformLayer.h"
 #endif
 
-extern mozilla::LogModule* GetPDMLog();
+#include "VPXDecoder.h"
 
 #ifdef LOG
 #undef LOG
 #endif
 
-#define LOG(arg, ...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, ("OmxPlatformLayer -- %s: " arg, __func__, ##__VA_ARGS__))
+#define LOG(arg, ...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, ("OmxPlatformLayer -- %s: " arg, __func__, ##__VA_ARGS__))
 
 #define RETURN_IF_ERR(err)     \
   if (err != OMX_ErrorNone) {  \
@@ -50,12 +49,10 @@ UniquePtr<ConfigType> ConfigForMime(const nsACString&);
 static OMX_ERRORTYPE
 ConfigAudioOutputPort(OmxPlatformLayer& aOmx, const AudioInfo& aInfo)
 {
-  OMX_ERRORTYPE err;
-
   OMX_PARAM_PORTDEFINITIONTYPE def;
   InitOmxParameter(&def);
   def.nPortIndex = aOmx.OutputPortIndex();
-  err = aOmx.GetParameter(OMX_IndexParamPortDefinition, &def, sizeof(def));
+  OMX_ERRORTYPE err = aOmx.GetParameter(OMX_IndexParamPortDefinition, &def, sizeof(def));
   RETURN_IF_ERR(err);
 
   def.format.audio.eEncoding = OMX_AUDIO_CodingPCM;
@@ -77,7 +74,7 @@ ConfigAudioOutputPort(OmxPlatformLayer& aOmx, const AudioInfo& aInfo)
   err = aOmx.SetParameter(OMX_IndexParamAudioPcm, &pcmParams, sizeof(pcmParams));
   RETURN_IF_ERR(err);
 
-  LOG("Config OMX_IndexParamAudioPcm, channel %d, sample rate %d",
+  LOG("Config OMX_IndexParamAudioPcm, channel %lu, sample rate %lu",
       pcmParams.nChannels, pcmParams.nSamplingRate);
 
   return OMX_ErrorNone;
@@ -88,12 +85,10 @@ class OmxAacConfig : public OmxAudioConfig
 public:
   OMX_ERRORTYPE Apply(OmxPlatformLayer& aOmx, const AudioInfo& aInfo) override
   {
-    OMX_ERRORTYPE err;
-
     OMX_AUDIO_PARAM_AACPROFILETYPE aacProfile;
     InitOmxParameter(&aacProfile);
     aacProfile.nPortIndex = aOmx.InputPortIndex();
-    err = aOmx.GetParameter(OMX_IndexParamAudioAac, &aacProfile, sizeof(aacProfile));
+    OMX_ERRORTYPE err = aOmx.GetParameter(OMX_IndexParamAudioAac, &aacProfile, sizeof(aacProfile));
     RETURN_IF_ERR(err);
 
     aacProfile.nChannels = aInfo.mChannels;
@@ -102,7 +97,7 @@ public:
     err = aOmx.SetParameter(OMX_IndexParamAudioAac, &aacProfile, sizeof(aacProfile));
     RETURN_IF_ERR(err);
 
-    LOG("Config OMX_IndexParamAudioAac, channel %d, sample rate %d, profile %d",
+    LOG("Config OMX_IndexParamAudioAac, channel %lu, sample rate %lu, profile %d",
         aacProfile.nChannels, aacProfile.nSampleRate, aacProfile.eAACProfile);
 
     return ConfigAudioOutputPort(aOmx, aInfo);
@@ -114,12 +109,10 @@ class OmxMp3Config : public OmxAudioConfig
 public:
   OMX_ERRORTYPE Apply(OmxPlatformLayer& aOmx, const AudioInfo& aInfo) override
   {
-    OMX_ERRORTYPE err;
-
     OMX_AUDIO_PARAM_MP3TYPE mp3Param;
     InitOmxParameter(&mp3Param);
     mp3Param.nPortIndex = aOmx.InputPortIndex();
-    err = aOmx.GetParameter(OMX_IndexParamAudioMp3, &mp3Param, sizeof(mp3Param));
+    OMX_ERRORTYPE err = aOmx.GetParameter(OMX_IndexParamAudioMp3, &mp3Param, sizeof(mp3Param));
     RETURN_IF_ERR(err);
 
     mp3Param.nChannels = aInfo.mChannels;
@@ -127,7 +120,7 @@ public:
     err = aOmx.SetParameter(OMX_IndexParamAudioMp3, &mp3Param, sizeof(mp3Param));
     RETURN_IF_ERR(err);
 
-    LOG("Config OMX_IndexParamAudioMp3, channel %d, sample rate %d",
+    LOG("Config OMX_IndexParamAudioMp3, channel %lu, sample rate %lu",
         mp3Param.nChannels, mp3Param.nSampleRate);
 
     return ConfigAudioOutputPort(aOmx, aInfo);
@@ -145,12 +138,10 @@ class OmxAmrConfig : public OmxAudioConfig
 public:
   OMX_ERRORTYPE Apply(OmxPlatformLayer& aOmx, const AudioInfo& aInfo) override
   {
-    OMX_ERRORTYPE err;
-
     OMX_AUDIO_PARAM_AMRTYPE def;
     InitOmxParameter(&def);
     def.nPortIndex = aOmx.InputPortIndex();
-    err = aOmx.GetParameter(OMX_IndexParamAudioAmr, &def, sizeof(def));
+    OMX_ERRORTYPE err = aOmx.GetParameter(OMX_IndexParamAudioAmr, &def, sizeof(def));
     RETURN_IF_ERR(err);
 
     def.eAMRFrameFormat = OMX_AUDIO_AMRFrameFormatFSF;
@@ -182,7 +173,7 @@ ConfigForMime(const nsACString& aMimeType)
       conf.reset(new OmxAmrConfig<OmxAmrSampleRate::kWideBand>());
     }
   }
-  return Move(conf);
+  return conf;
 }
 
 // There should be a better way to calculate it.
@@ -197,7 +188,7 @@ public:
 
   OMX_ERRORTYPE Apply(OmxPlatformLayer& aOmx, const VideoInfo& aInfo) override
   {
-    OMX_ERRORTYPE err;
+    OMX_ERRORTYPE err = OMX_ErrorNone;
     OMX_PARAM_PORTDEFINITIONTYPE def;
 
     // Set up in/out port definition.
@@ -219,7 +210,7 @@ public:
         def.format.video.eColorFormat = OMX_COLOR_FormatUnused;
         if (def.nBufferSize < MIN_VIDEO_INPUT_BUFFER_SIZE) {
           def.nBufferSize = aInfo.mImage.width * aInfo.mImage.height;
-          LOG("Change input buffer size to %d", def.nBufferSize);
+          LOG("Change input buffer size to %lu", def.nBufferSize);
         }
       } else {
         def.format.video.eCompressionFormat = OMX_VIDEO_CodingUnused;
@@ -240,7 +231,7 @@ ConfigForMime(const nsACString& aMimeType)
   if (OmxPlatformLayer::SupportsMimeType(aMimeType)) {
     conf.reset(new OmxCommonVideoConfig());
   }
-  return Move(conf);
+  return conf;
 }
 
 OMX_ERRORTYPE
@@ -279,7 +270,7 @@ OmxPlatformLayer::CompressionFormat()
     return OMX_VIDEO_CodingMPEG4;
   } else if (mInfo->mMimeType.EqualsLiteral("video/3gpp")) {
     return OMX_VIDEO_CodingH263;
-  } else if (mInfo->mMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+  } else if (VPXDecoder::IsVP8(mInfo->mMimeType)) {
     return static_cast<OMX_VIDEO_CODINGTYPE>(OMX_VIDEO_CodingVP8);
   } else {
     MOZ_ASSERT_UNREACHABLE("Unsupported compression format");
@@ -288,12 +279,12 @@ OmxPlatformLayer::CompressionFormat()
 }
 
 // Implementations for different platforms will be defined in their own files.
-#ifdef OMX_PLATFORM_GONK
+#if defined(MOZ_OMX)
 
 bool
 OmxPlatformLayer::SupportsMimeType(const nsACString& aMimeType)
 {
-  return GonkOmxPlatformLayer::FindComponents(aMimeType);
+  return PureOmxPlatformLayer::SupportsMimeType(aMimeType);
 }
 
 OmxPlatformLayer*
@@ -302,7 +293,8 @@ OmxPlatformLayer::Create(OmxDataDecoder* aDataDecoder,
                          TaskQueue* aTaskQueue,
                          layers::ImageContainer* aImageContainer)
 {
-  return new GonkOmxPlatformLayer(aDataDecoder, aPromiseLayer, aTaskQueue, aImageContainer);
+  return new PureOmxPlatformLayer(aDataDecoder, aPromiseLayer,
+                                  aTaskQueue, aImageContainer);
 }
 
 #else // For platforms without OMX IL support.
@@ -323,5 +315,4 @@ OmxPlatformLayer::Create(OmxDataDecoder* aDataDecoder,
 }
 
 #endif
-
 }

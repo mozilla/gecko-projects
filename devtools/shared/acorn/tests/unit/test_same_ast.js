@@ -6,7 +6,7 @@
  */
 
 const acorn = require("acorn/acorn");
-Cu.import("resource://gre/modules/reflect.jsm");
+const { Reflect } = require("resource://gre/modules/reflect.jsm");
 
 const testCode = "" + function main () {
   function makeAcc(n) {
@@ -28,10 +28,10 @@ function run_test() {
   const reflectAST = Reflect.parse(testCode);
   const acornAST = acorn.parse(testCode);
 
-  do_print("Reflect AST:");
-  do_print(JSON.stringify(reflectAST, null, 2));
-  do_print("acorn AST:");
-  do_print(JSON.stringify(acornAST, null, 2));
+  info("Reflect AST:");
+  info(JSON.stringify(reflectAST, null, 2));
+  info("acorn AST:");
+  info(JSON.stringify(acornAST, null, 2));
 
   checkEquivalentASTs(reflectAST, acornAST);
 }

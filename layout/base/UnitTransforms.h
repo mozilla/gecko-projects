@@ -52,9 +52,16 @@ enum class PixelCastJustification : uint8_t {
   // Used to treat the product of AsyncTransformComponentMatrix objects
   // as an AsyncTransformMatrix. See the definitions of these matrices in
   // LayersTypes.h for details.
-  MultipleAsyncTransforms
+  MultipleAsyncTransforms,
+  // We have reason to believe a layer doesn't have a local transform.
+  // Should only be used if we've already checked or asserted this.
+  NoTransformOnLayer
 };
 
+template <class TargetUnits, class SourceUnits>
+gfx::CoordTyped<TargetUnits> ViewAs(const gfx::CoordTyped<SourceUnits>& aCoord, PixelCastJustification) {
+  return gfx::CoordTyped<TargetUnits>(aCoord.value);
+}
 template <class TargetUnits, class SourceUnits>
 gfx::SizeTyped<TargetUnits> ViewAs(const gfx::SizeTyped<SourceUnits>& aSize, PixelCastJustification) {
   return gfx::SizeTyped<TargetUnits>(aSize.width, aSize.height);
@@ -73,11 +80,11 @@ gfx::IntPointTyped<TargetUnits> ViewAs(const gfx::IntPointTyped<SourceUnits>& aP
 }
 template <class TargetUnits, class SourceUnits>
 gfx::RectTyped<TargetUnits> ViewAs(const gfx::RectTyped<SourceUnits>& aRect, PixelCastJustification) {
-  return gfx::RectTyped<TargetUnits>(aRect.x, aRect.y, aRect.width, aRect.height);
+  return gfx::RectTyped<TargetUnits>(aRect.x, aRect.y, aRect.Width(), aRect.Height());
 }
 template <class TargetUnits, class SourceUnits>
 gfx::IntRectTyped<TargetUnits> ViewAs(const gfx::IntRectTyped<SourceUnits>& aRect, PixelCastJustification) {
-  return gfx::IntRectTyped<TargetUnits>(aRect.x, aRect.y, aRect.width, aRect.height);
+  return gfx::IntRectTyped<TargetUnits>(aRect.x, aRect.y, aRect.Width(), aRect.Height());
 }
 template <class TargetUnits, class SourceUnits>
 gfx::MarginTyped<TargetUnits> ViewAs(const gfx::MarginTyped<SourceUnits>& aMargin, PixelCastJustification) {
@@ -96,6 +103,13 @@ gfx::ScaleFactor<SourceUnits, NewTargetUnits> ViewTargetAs(
     const gfx::ScaleFactor<SourceUnits, OldTargetUnits>& aScaleFactor,
     PixelCastJustification) {
   return gfx::ScaleFactor<SourceUnits, NewTargetUnits>(aScaleFactor.scale);
+}
+template <class TargetUnits, class SourceUnits>
+Maybe<gfx::IntRectTyped<TargetUnits>> ViewAs(const Maybe<gfx::IntRectTyped<SourceUnits>>& aRect, PixelCastJustification aJustification) {
+  if (aRect.isSome()) {
+    return Some(ViewAs<TargetUnits>(aRect.value(), aJustification));
+  }
+  return Nothing();
 }
 // Unlike the other functions in this category, this function takes the
 // target matrix type, rather than its source and target unit types, as
@@ -124,7 +138,7 @@ gfx::PointTyped<TargetUnits> ViewAs(const gfx::Point& aPoint) {
 }
 template <class TargetUnits>
 gfx::RectTyped<TargetUnits> ViewAs(const gfx::Rect& aRect) {
-  return gfx::RectTyped<TargetUnits>(aRect.x, aRect.y, aRect.width, aRect.height);
+  return gfx::RectTyped<TargetUnits>(aRect.x, aRect.y, aRect.Width(), aRect.Height());
 }
 template <class TargetUnits>
 gfx::IntSizeTyped<TargetUnits> ViewAs(const nsIntSize& aSize) {
@@ -136,7 +150,7 @@ gfx::IntPointTyped<TargetUnits> ViewAs(const nsIntPoint& aPoint) {
 }
 template <class TargetUnits>
 gfx::IntRectTyped<TargetUnits> ViewAs(const nsIntRect& aRect) {
-  return gfx::IntRectTyped<TargetUnits>(aRect.x, aRect.y, aRect.width, aRect.height);
+  return gfx::IntRectTyped<TargetUnits>(aRect.x, aRect.y, aRect.Width(), aRect.Height());
 }
 template <class TargetUnits>
 gfx::IntRegionTyped<TargetUnits> ViewAs(const nsIntRegion& aRegion) {
@@ -161,7 +175,7 @@ static gfx::PointTyped<TargetUnits>
 TransformBy(const gfx::Matrix4x4Typed<SourceUnits, TargetUnits>& aTransform,
             const gfx::PointTyped<SourceUnits>& aPoint)
 {
-  return aTransform * aPoint;
+  return aTransform.TransformPoint(aPoint);
 }
 template <typename TargetUnits, typename SourceUnits>
 static gfx::IntPointTyped<TargetUnits>

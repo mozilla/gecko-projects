@@ -5,55 +5,27 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 */
 
-/* Global Styles */
-#BrowserPreferences radio[pane] {
-  list-style-image: url("chrome://browser/skin/preferences/Options.png"); 
-  padding: 5px 3px 1px;
+/* Pref Window & Pane */
+.prefwindow {
+  padding: 0px;
 }
 
-radio[pane=paneMain] {
-  -moz-image-region: rect(0, 32px,  32px, 0);
+.prefwindow[type="child"] {
+  padding-top: 8px;
+  padding-bottom: 10px;
+  padding-inline-start: 8px;
+  padding-inline-end: 10px;
 }
 
-radio[pane=paneTabs] {
-  -moz-image-region: rect(0, 64px, 32px, 32px);
+.prefpane {
+  padding-top: 8px;
+  padding-bottom: 10px;
+  padding-inline-start: 8px;
+  padding-inline-end: 10px;
 }
 
-#BrowserPreferences radio[pane=paneSearch] {
-  list-style-image: url("chrome://browser/skin/search-pref.png");
-}
-
-radio[pane=paneContent] {
-  -moz-image-region: rect(0, 96px,  32px, 64px);
-}
-
-radio[pane=paneApplications] {
-  -moz-image-region: rect(0, 128px,  32px, 96px);
-}
-
-radio[pane=panePrivacy] {
-  -moz-image-region: rect(0, 160px,  32px, 128px);
-}
-
-radio[pane=paneSecurity] {
-  -moz-image-region: rect(0, 192px,  32px, 160px);
-}
-
-radio[pane=paneAdvanced] {
-  -moz-image-region: rect(0, 224px, 32px, 192px);
-}
-
-radio[pane=paneSync] {
-  list-style-image: url("chrome://browser/skin/preferences/Options-sync.png") !important;
-}
-
-/* These lines should be removed as part of fixing bug 1140495 */
-label.small {
-  font-size: smaller;
-}
-
-#tabPrefsBox {
-  margin: 6px;
+.prefwindow[type="child"] > .prefpane {
+  padding: 0px;
 }
 
 /* General Pane */
@@ -73,30 +45,8 @@ label.small {
   cursor: pointer;
 }
 
-/* Applications Pane */
-#BrowserPreferences[animated="true"] #handlersView {
-  height: 25em;
-}
-
-#BrowserPreferences[animated="false"] #handlersView {
-  -moz-box-flex: 1;
-}
-
-/* Privacy Pane */
-
-/* styles for the link elements copied from .text-link in global.css */
-.inline-link {
-  color: -moz-nativehyperlinktext;
-  text-decoration: none;
-}
-
-.inline-link:hover {
-  text-decoration: underline;
-}
-
 /* Modeless Window Dialogs */
-.windowDialog,
-.windowDialog prefpane {
+.windowDialog {
   padding: 0;
 }
 
@@ -108,37 +58,7 @@ label.small {
   margin: 0 3px 6px !important;
 }
 
-/* Cookies Manager */
-#cookiesChildren::-moz-tree-image(domainCol) {
-  width: 16px;
-  height: 16px;
-  margin: 0 2px;
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png") !important;
-}
-
-#cookiesChildren::-moz-tree-image(domainCol, container) {
-  list-style-image: url("chrome://global/skin/icons/folder-item.png") !important;
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#cookiesChildren::-moz-tree-image(domainCol, container, open) {
-  -moz-image-region: rect(16px, 32px, 32px, 16px);
-}
-
-#cookieInfoBox {
-  border: 1px solid ThreeDShadow;
-  border-radius: 0;
-  margin: 4px;
-  padding: 0;
-}
-
 /* Advanced Pane */
-
-/* Adding padding-bottom prevents the bottom of the tabpanel from being cutoff
-   when browser.preferences.animateFadeIn = true */
-#advancedPrefs {
-  padding-bottom: 8px;
-}
 
 /* bottom-most box containing a groupbox in a prefpane. Prevents the bottom
    of the groupbox from being cutoff */
@@ -148,25 +68,7 @@ label.small {
 
 /* Sync Pane */
 
-#syncDesc {
-  padding: 0 8em;
-}
-
-.syncGroupBox {
-  padding: 10px;
-}
-
-#accountCaptionImage {
-  list-style-image: url("chrome://mozapps/skin/profile/profileicon.png");
-}
-
-#syncAddDeviceLabel {
-  margin-top: 1em;
-  margin-bottom: 1em;
-}
-
 #noFxaAccount {
-  margin: 6px;
   line-height: 1.2em;
 }
 

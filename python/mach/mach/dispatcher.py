@@ -6,16 +6,28 @@ from __future__ import absolute_import, unicode_literals
 
 import argparse
 import difflib
+import shlex
 import sys
 
 from operator import itemgetter
 
 from .base import (
-    MachError,
     NoCommandError,
     UnknownCommandError,
     UnrecognizedArgumentError,
 )
+from .decorators import SettingsProvider
+
+
+@SettingsProvider
+class DispatchSettings():
+    config_settings = [
+        ('alias.*', 'string', """
+Create a command alias of the form `<alias>=<command> <args>`.
+Aliases can also be used to set default arguments:
+<command>=<command> <args>
+""".strip()),
+    ]
 
 
 class CommandFormatter(argparse.HelpFormatter):
@@ -56,7 +68,7 @@ class CommandAction(argparse.Action):
     For more, read the docs in __call__.
     """
     def __init__(self, option_strings, dest, required=True, default=None,
-        registrar=None, context=None):
+                 registrar=None, context=None):
         # A proper API would have **kwargs here. However, since we are a little
         # hacky, we intentionally omit it as a way of detecting potentially
         # breaking changes with argparse's implementation.
@@ -64,7 +76,7 @@ class CommandAction(argparse.Action):
         # In a similar vein, default is passed in but is not needed, so we drop
         # it.
         argparse.Action.__init__(self, option_strings, dest, required=required,
-            help=argparse.SUPPRESS, nargs=argparse.REMAINDER)
+                                 help=argparse.SUPPRESS, nargs=argparse.REMAINDER)
 
         self._mach_registrar = registrar
         self._context = context
@@ -95,7 +107,7 @@ class CommandAction(argparse.Action):
             if command == 'help':
                 if args and args[0] not in ['-h', '--help']:
                     # Make sure args[0] is indeed a command.
-                    self._handle_command_help(parser, args[0])
+                    self._handle_command_help(parser, args[0], args)
                 else:
                     self._handle_main_help(parser, namespace.verbose)
                 sys.exit(0)
@@ -105,32 +117,24 @@ class CommandAction(argparse.Action):
                     # -- is in command arguments
                     if '-h' in args[:args.index('--')] or '--help' in args[:args.index('--')]:
                         # Honor -h or --help only if it appears before --
-                        self._handle_command_help(parser, command)
+                        self._handle_command_help(parser, command, args)
                         sys.exit(0)
                 else:
-                    self._handle_command_help(parser, command)
+                    self._handle_command_help(parser, command, args)
                     sys.exit(0)
-
-
         else:
             raise NoCommandError()
 
-        # Command suggestion
+        # First see if the this is a user-defined alias
+        if command in self._context.settings.alias:
+            alias = self._context.settings.alias[command]
+            defaults = shlex.split(alias)
+            command = defaults.pop(0)
+            args = defaults + args
+
         if command not in self._mach_registrar.command_handlers:
-            # Make sure we don't suggest any deprecated commands.
-            names = [h.name for h in self._mach_registrar.command_handlers.values()
-                        if h.cls.__name__ != 'DeprecatedCommands']
-            # We first try to look for a valid command that is very similar to the given command.
-            suggested_commands = difflib.get_close_matches(command, names, cutoff=0.8)
-            # If we find more than one matching command, or no command at all, we give command suggestions instead
-            # (with a lower matching threshold). All commands that start with the given command (for instance: 'mochitest-plain',
-            # 'mochitest-chrome', etc. for 'mochitest-') are also included.
-            if len(suggested_commands) != 1:
-                suggested_commands = set(difflib.get_close_matches(command, names, cutoff=0.5))
-                suggested_commands |= {cmd for cmd in names if cmd.startswith(command)}
-                raise UnknownCommandError(command, 'run', suggested_commands)
-            sys.stderr.write("We're assuming the '%s' command is '%s' and we're executing it for you.\n\n" % (command, suggested_commands[0]))
-            command = suggested_commands[0]
+            # Try to find similar commands, may raise UnknownCommandError.
+            command = self._suggest_command(command)
 
         handler = self._mach_registrar.command_handlers.get(command)
 
@@ -140,20 +144,12 @@ class CommandAction(argparse.Action):
         subcommand = None
 
         # If there are sub-commands, parse the intent out immediately.
-        if handler.subcommand_handlers:
-            if not args:
-                self._handle_subcommand_main_help(parser, handler)
-                sys.exit(0)
-            elif len(args) == 1 and args[0] in ('help', '--help'):
-                self._handle_subcommand_main_help(parser, handler)
-                sys.exit(0)
+        if handler.subcommand_handlers and args:
             # mach <command> help <subcommand>
-            elif len(args) == 2 and args[0] == 'help':
-                subcommand = args[1]
-                subhandler = handler.subcommand_handlers[subcommand]
-                self._handle_subcommand_help(parser, command, subcommand, subhandler)
+            if set(args).intersection(('help', '--help')):
+                self._handle_subcommand_help(parser, handler, args)
                 sys.exit(0)
-            # We are running a sub command.
+            # mach <command> <subcommand> ...
             elif args[0] in handler.subcommand_handlers:
                 subcommand = args[0]
                 handler = handler.subcommand_handlers[subcommand]
@@ -280,12 +276,12 @@ class CommandAction(argparse.Action):
 
                 description = handler.description
                 group.add_argument(command, help=description,
-                    action='store_true')
+                                   action='store_true')
 
         if disabled_commands and 'disabled' in r.categories:
             title, description, _priority = r.categories['disabled']
             group = parser.add_argument_group(title, description)
-            if verbose == True:
+            if verbose:
                 for c in disabled_commands:
                     group.add_argument(c['command'], help=c['description'],
                                        action='store_true')
@@ -307,14 +303,14 @@ class CommandAction(argparse.Action):
                 group = extra_groups[group_name]
             group.add_argument(*arg[0], **arg[1])
 
-    def _handle_command_help(self, parser, command):
+    def _handle_command_help(self, parser, command, args):
         handler = self._mach_registrar.command_handlers.get(command)
 
         if not handler:
             raise UnknownCommandError(command, 'query')
 
         if handler.subcommand_handlers:
-            self._handle_subcommand_main_help(parser, handler)
+            self._handle_subcommand_help(parser, handler, args)
             return
 
         # This code is worth explaining. Because we are doing funky things with
@@ -380,7 +376,7 @@ class CommandAction(argparse.Action):
 
         for subcommand, subhandler in sorted(handler.subcommand_handlers.iteritems()):
             group.add_argument(subcommand, help=subhandler.description,
-                action='store_true')
+                               action='store_true')
 
         if handler.docstring:
             parser.description = format_docstring(handler.docstring)
@@ -389,23 +385,49 @@ class CommandAction(argparse.Action):
 
         parser.print_help()
 
-    def _handle_subcommand_help(self, parser, command, subcommand, handler):
-        parser.usage = '%(prog)s [global arguments] ' + command + \
-            ' ' + subcommand + ' [command arguments]'
+    def _handle_subcommand_help(self, parser, handler, args):
+        subcommand = set(args).intersection(handler.subcommand_handlers.keys())
+        if not subcommand:
+            return self._handle_subcommand_main_help(parser, handler)
 
-        c_parser = argparse.ArgumentParser(add_help=False,
-            formatter_class=CommandFormatter)
+        subcommand = subcommand.pop()
+        subhandler = handler.subcommand_handlers[subcommand]
+
+        c_parser = subhandler.parser or argparse.ArgumentParser(add_help=False)
+        c_parser.formatter_class = CommandFormatter
+
         group = c_parser.add_argument_group('Sub Command Arguments')
-        self._populate_command_group(c_parser, handler, group)
+        self._populate_command_group(c_parser, subhandler, group)
 
-        if handler.docstring:
-            parser.description = format_docstring(handler.docstring)
+        if subhandler.docstring:
+            parser.description = format_docstring(subhandler.docstring)
 
         parser.formatter_class = argparse.RawDescriptionHelpFormatter
+        parser.usage = '%(prog)s [global arguments] ' + handler.name + \
+            ' ' + subcommand + ' [command arguments]'
 
         parser.print_help()
         print('')
         c_parser.print_help()
+
+    def _suggest_command(self, command):
+        # Make sure we don't suggest any deprecated commands.
+        names = [h.name for h in self._mach_registrar.command_handlers.values()
+                 if h.cls.__name__ != 'DeprecatedCommands']
+        # We first try to look for a valid command that is very similar to the given command.
+        suggested_commands = difflib.get_close_matches(command, names, cutoff=0.8)
+        # If we find more than one matching command, or no command at all,
+        # we give command suggestions instead (with a lower matching threshold).
+        # All commands that start with the given command (for instance:
+        # 'mochitest-plain', 'mochitest-chrome', etc. for 'mochitest-')
+        # are also included.
+        if len(suggested_commands) != 1:
+            suggested_commands = set(difflib.get_close_matches(command, names, cutoff=0.5))
+            suggested_commands |= {cmd for cmd in names if cmd.startswith(command)}
+            raise UnknownCommandError(command, 'run', suggested_commands)
+        sys.stderr.write("We're assuming the '%s' command is '%s' and we're "
+                         "executing it for you.\n\n" % (command, suggested_commands[0]))
+        return suggested_commands[0]
 
 
 class NoUsageFormatter(argparse.HelpFormatter):

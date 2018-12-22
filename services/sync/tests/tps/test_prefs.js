@@ -19,7 +19,7 @@ var prefs1 = [
   { name: "browser.urlbar.maxRichResults",
     value: 20
   },
-  { name: "security.OCSP.require",
+  { name: "privacy.clearOnShutdown.siteSettings",
     value: true
   }
 ];
@@ -31,18 +31,18 @@ var prefs2 = [
   { name: "browser.urlbar.maxRichResults",
     value: 18
   },
-  { name: "security.OCSP.require",
+  { name: "privacy.clearOnShutdown.siteSettings",
     value: false
   }
 ];
 
-Phase('phase1', [
+Phase("phase1", [
   [Prefs.modify, prefs1],
   [Prefs.verify, prefs1],
   [Sync],
 ]);
 
-Phase('phase2', [
+Phase("phase2", [
   [Sync],
   [Prefs.verify, prefs1],
   [Prefs.modify, prefs2],
@@ -50,7 +50,7 @@ Phase('phase2', [
   [Sync]
 ]);
 
-Phase('phase3', [
+Phase("phase3", [
   [Sync],
   [Prefs.verify, prefs2]
 ]);

@@ -18,21 +18,23 @@
 #define DECL_STRUCT(c) typedef struct c c
 #endif
 
-DECL_CLASS(nsAString);
-DECL_CLASS(nsACString);
-
 DECL_CLASS(nsISupports);
 DECL_CLASS(nsIModule);
 DECL_CLASS(nsIComponentManager);
 DECL_CLASS(nsIComponentRegistrar);
 DECL_CLASS(nsIServiceManager);
 DECL_CLASS(nsIFile);
-DECL_CLASS(nsILocalFile);
 DECL_CLASS(nsIDirectoryServiceProvider);
 DECL_CLASS(nsIMemory);
 DECL_CLASS(nsIDebug2);
 
 #ifdef __cplusplus
+extern bool gXPCOMShuttingDown;
+extern bool gXPCOMThreadsShutDown;
+#endif
+
+#ifdef __cplusplus
+#include "nsStringFwd.h"
 namespace mozilla {
 struct Module;
 } // namespace mozilla
@@ -74,6 +76,13 @@ XPCOM_API(nsresult)
 NS_InitXPCOM2(nsIServiceManager** aResult,
               nsIFile* aBinDirectory,
               nsIDirectoryServiceProvider* aAppFileLocationProvider);
+
+/**
+ * Initialize only minimal components of XPCOM. This ensures nsThreadManager,
+ * logging, and timers will work.
+ */
+XPCOM_API(nsresult)
+NS_InitMinimalXPCOM();
 
 /**
  * Shutdown XPCOM. You must call this method after you are finished
@@ -160,54 +169,14 @@ XPCOM_API(nsresult) NS_NewNativeLocalFile(const nsACString& aPath,
                                           bool aFollowLinks,
                                           nsIFile** aResult);
 
-#endif
+// Use NS_NewLocalFile if you already have a UTF-16 string.
+// Otherwise non-ASCII paths will break on some platforms
+// including Windows.
+class NS_ConvertUTF16toUTF8;
+nsresult NS_NewNativeLocalFile(const NS_ConvertUTF16toUTF8& aPath,
+                               bool aFollowLinks,
+                               nsIFile** aResult) = delete;
 
-/**
- * Allocator functions for the standalone glue.
- * Do not use outside the xpcom glue code.
- * Use moz_xmalloc/moz_xrealloc/free, or new/delete instead.
- */
-#ifdef XPCOM_GLUE
-/**
- * Allocates a block of memory of a particular size. If the memory cannot
- * be allocated (because of an out-of-memory condition), the process aborts.
- *
- * @param aSize  The size of the block to allocate
- * @result       The block of memory
- * @note         This function is thread-safe.
- */
-XPCOM_API(void*) NS_Alloc(size_t aSize);
-
-/**
- * Reallocates a block of memory to a new size.
- *
- * @param aPtr    The block of memory to reallocate. This block must originally
-                  have been allocated by NS_Alloc or NS_Realloc
- * @param aSize   The new size. If 0, frees the block like NS_Free
- * @result        The reallocated block of memory
- * @note          This function is thread-safe.
- *
- * If aPtr is null, this function behaves like NS_Alloc.
- * If s is the size of the block to which aPtr points, the first min(s, size)
- * bytes of aPtr's block are copied to the new block. If the allocation
- * succeeds, aPtr is freed and a pointer to the new block is returned. If the
- * allocation fails, the process aborts.
- */
-XPCOM_API(void*) NS_Realloc(void* aPtr, size_t aSize);
-
-/**
- * Frees a block of memory. Null is a permissible value, in which case no
- * action is taken.
- *
- * @param aPtr  The block of memory to free. This block must originally have
- *              been allocated by NS_Alloc or NS_Realloc
- * @note        This function is thread-safe.
- */
-XPCOM_API(void) NS_Free(void* aPtr);
-#else
-#define NS_Alloc moz_xmalloc
-#define NS_Realloc moz_xrealloc
-#define NS_Free free
 #endif
 
 /**
@@ -260,6 +229,27 @@ XPCOM_API(void) NS_DebugBreak(uint32_t aSeverity,
 XPCOM_API(void) NS_LogInit();
 
 XPCOM_API(void) NS_LogTerm();
+
+#ifdef __cplusplus
+/**
+ * A helper class that calls NS_LogInit in its constructor and
+ * NS_LogTerm in its destructor.
+ */
+
+class ScopedLogging
+{
+public:
+    ScopedLogging()
+    {
+        NS_LogInit();
+    }
+
+    ~ScopedLogging()
+    {
+        NS_LogTerm();
+    }
+};
+#endif
 
 /**
  * Log construction and destruction of objects. Processing tools can use the
@@ -322,6 +312,12 @@ XPCOM_API(void) NS_CycleCollectorSuspect3(void* aPtr,
                                           nsCycleCollectionParticipant* aCp,
                                           nsCycleCollectingAutoRefCnt* aRefCnt,
                                           bool* aShouldDelete);
+
+XPCOM_API(void)
+NS_CycleCollectorSuspectUsingNursery(void* aPtr,
+                                     nsCycleCollectionParticipant* aCp,
+                                     nsCycleCollectingAutoRefCnt* aRefCnt,
+                                     bool* aShouldDelete);
 
 #endif
 

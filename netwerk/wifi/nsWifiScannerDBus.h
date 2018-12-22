@@ -23,9 +23,10 @@ public:
   nsresult Scan();
 
 private:
-  nsresult SendMessage(const char* aInterface,
-                       const char* aPath,
-                       const char* aFuncCall);
+  nsresult SendGetDevices();
+  nsresult SendGetDeviceType(const char* aPath);
+  nsresult SendGetAccessPoints(const char* aPath);
+  nsresult SendGetAPProperties(const char* aPath);
   nsresult IdentifyDevices(DBusMessage* aMsg);
   nsresult IdentifyDeviceType(DBusMessage* aMsg, const char* aDevicePath);
   nsresult IdentifyAccessPoints(DBusMessage* aMsg);
@@ -34,7 +35,7 @@ private:
   nsresult SetMac(DBusMessageIter* aVariant, nsWifiAccessPoint* aAp);
   nsresult GetDBusIterator(DBusMessage* aMsg, DBusMessageIter* aIterArray);
 
-  DBusConnection* mConnection;
+  RefPtr<DBusConnection> mConnection;
   nsCOMArray<nsWifiAccessPoint>* mAccessPoints;
 };
 

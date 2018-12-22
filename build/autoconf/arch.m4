@@ -31,7 +31,7 @@ if test -z "$MOZ_ARCH"; then
     arm-Android)
         MOZ_THUMB=yes
         MOZ_ARCH=armv7-a
-        MOZ_FPU=vfp
+        MOZ_FPU=neon
         MOZ_FLOAT_ABI=softfp
         MOZ_ALIGN=no
         ;;
@@ -42,8 +42,7 @@ if test -z "$MOZ_ARCH"; then
 fi
 
 if test "$MOZ_ARCH" = "armv6" -a "$OS_TARGET" = "Android"; then
-   MOZ_FPU=vfp
-   MOZ_FLOAT_ABI=softfp
+    AC_MSG_ERROR([Android/armv6 is not supported])
 fi
 
 MOZ_ARG_WITH_STRING(thumb,
@@ -202,6 +201,7 @@ fi
 AC_SUBST(MOZ_THUMB2)
 
 if test "$CPU_ARCH" = "arm"; then
+  NEON_FLAGS="-mfpu=neon"
   AC_MSG_CHECKING(for ARM SIMD support in compiler)
   # We try to link so that this also fails when
   # building with LTO.
@@ -242,20 +242,30 @@ if test "$CPU_ARCH" = "arm"; then
       fi
   fi
 
+  dnl Building with -mfpu=neon requires either the "softfp" or the
+  dnl "hardfp" ABI. Depending on the compiler's default target, and the
+  dnl CFLAGS, the default ABI might be neither, in which case it is the
+  dnl "softfloat" ABI.
+  dnl The "softfloat" ABI is binary-compatible with the "softfp" ABI, so
+  dnl we can safely mix code built with both ABIs. So, if we detect
+  dnl that compiling uses the "softfloat" ABI, force the use of the
+  dnl "softfp" ABI instead.
+  dnl Confusingly, the __SOFTFP__ preprocessor variable indicates the
+  dnl "softfloat" ABI, not the "softfp" ABI.
+  dnl Note: VPX_ASFLAGS is also used in CFLAGS.
+  AC_TRY_COMPILE([],
+    [#ifndef __SOFTFP__
+     #error "compiler target supports -mfpu=neon, so we don't have to add extra flags"
+     #endif],
+     NEON_FLAGS="$NEON_FLAGS -mfloat-abi=softfp"
+  )
+
 fi # CPU_ARCH = arm
 
 AC_SUBST(HAVE_ARM_SIMD)
 AC_SUBST(HAVE_ARM_NEON)
 AC_SUBST(BUILD_ARM_NEON)
 AC_SUBST(ARM_ARCH)
-
-if test -n "$MOZ_ARCH"; then
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-arch=$MOZ_ARCH"
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-thumb=$MOZ_THUMB"
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-thumb-interwork=$MOZ_THUMB_INTERWORK"
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-fpu=$MOZ_FPU"
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-float-abi=$MOZ_FLOAT_ABI"
-  NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-soft-float=$MOZ_SOFT_FLOAT"
-fi
+AC_SUBST_LIST(NEON_FLAGS)
 
 ])

@@ -35,6 +35,7 @@ public:
     eFloat = 0x10,
     eDate = 0x20,
     eString = 0x30,
+    eBinary = 0x40,
     eArray = 0x50,
     eMaxType = eArray
   };
@@ -145,6 +146,12 @@ public:
   }
 
   bool
+  IsBinary() const
+  {
+    return !IsUnset() && *BufferStart() == eBinary;
+  }
+
+  bool
   IsArray() const
   {
     return !IsUnset() && *BufferStart() >= eArray;
@@ -207,10 +214,8 @@ public:
   nsresult
   AppendItem(JSContext* aCx, bool aFirstOfArray, JS::Handle<JS::Value> aVal);
 
-#ifdef ENABLE_INTL_API
   nsresult
   ToLocaleBasedKey(Key& aTarget, const nsCString& aLocale) const;
-#endif
 
   void
   FinishArray()
@@ -280,21 +285,26 @@ private:
   nsresult
   EncodeJSVal(JSContext* aCx, JS::Handle<JS::Value> aVal, uint8_t aTypeOffset);
 
-  void
+  nsresult
   EncodeString(const nsAString& aString, uint8_t aTypeOffset);
 
   template <typename T>
-  void
+  nsresult
   EncodeString(const T* aStart, const T* aEnd, uint8_t aTypeOffset);
 
-#ifdef ENABLE_INTL_API
+  template <typename T>
+  nsresult
+  EncodeAsString(const T* aStart, const T* aEnd, uint8_t aType);
+
   nsresult
   EncodeLocaleString(const nsDependentString& aString, uint8_t aTypeOffset,
                      const nsCString& aLocale);
-#endif
 
   void
   EncodeNumber(double aFloat, uint8_t aType);
+
+  nsresult
+  EncodeBinary(JSObject* aObject, bool aIsViewObject, uint8_t aTypeOffset);
 
   // Decoding functions. aPos points into mBuffer and is adjusted to point
   // past the consumed value.
@@ -311,6 +321,11 @@ private:
 
   static double
   DecodeNumber(const unsigned char*& aPos, const unsigned char* aEnd);
+
+  static JSObject*
+  DecodeBinary(const unsigned char*& aPos,
+               const unsigned char* aEnd,
+               JSContext* aCx);
 
   nsresult
   EncodeJSValInternal(JSContext* aCx,

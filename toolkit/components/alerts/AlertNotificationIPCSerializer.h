@@ -15,16 +15,12 @@
 
 #include "mozilla/dom/PermissionMessageUtils.h"
 
-typedef nsIAlertNotification* AlertNotificationType;
-
 namespace IPC {
 
 template <>
-struct ParamTraits<AlertNotificationType>
+struct ParamTraits<nsIAlertNotification>
 {
-  typedef AlertNotificationType paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam)
+  static void Write(Message* aMsg, nsIAlertNotification* aParam)
   {
     bool isNull = !aParam;
     if (isNull) {
@@ -33,7 +29,7 @@ struct ParamTraits<AlertNotificationType>
     }
 
     nsString name, imageURL, title, text, cookie, dir, lang, data;
-    bool textClickable, inPrivateBrowsing;
+    bool textClickable, inPrivateBrowsing, requireInteraction;
     nsCOMPtr<nsIPrincipal> principal;
 
     if (NS_WARN_IF(NS_FAILED(aParam->GetName(name))) ||
@@ -46,7 +42,8 @@ struct ParamTraits<AlertNotificationType>
         NS_WARN_IF(NS_FAILED(aParam->GetLang(lang))) ||
         NS_WARN_IF(NS_FAILED(aParam->GetData(data))) ||
         NS_WARN_IF(NS_FAILED(aParam->GetPrincipal(getter_AddRefs(principal)))) ||
-        NS_WARN_IF(NS_FAILED(aParam->GetInPrivateBrowsing(&inPrivateBrowsing)))) {
+        NS_WARN_IF(NS_FAILED(aParam->GetInPrivateBrowsing(&inPrivateBrowsing))) ||
+        NS_WARN_IF(NS_FAILED(aParam->GetRequireInteraction(&requireInteraction)))) {
 
       // Write a `null` object if any getter returns an error. Otherwise, the
       // receiver will try to deserialize an incomplete object and crash.
@@ -66,9 +63,10 @@ struct ParamTraits<AlertNotificationType>
     WriteParam(aMsg, data);
     WriteParam(aMsg, IPC::Principal(principal));
     WriteParam(aMsg, inPrivateBrowsing);
+    WriteParam(aMsg, requireInteraction);
   }
 
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  static bool Read(const Message* aMsg, PickleIterator* aIter, RefPtr<nsIAlertNotification>* aResult)
   {
     bool isNull;
     NS_ENSURE_TRUE(ReadParam(aMsg, aIter, &isNull), false);
@@ -78,7 +76,7 @@ struct ParamTraits<AlertNotificationType>
     }
 
     nsString name, imageURL, title, text, cookie, dir, lang, data;
-    bool textClickable, inPrivateBrowsing;
+    bool textClickable, inPrivateBrowsing, requireInteraction;
     IPC::Principal principal;
 
     if (!ReadParam(aMsg, aIter, &name) ||
@@ -91,7 +89,8 @@ struct ParamTraits<AlertNotificationType>
         !ReadParam(aMsg, aIter, &lang) ||
         !ReadParam(aMsg, aIter, &data) ||
         !ReadParam(aMsg, aIter, &principal) ||
-        !ReadParam(aMsg, aIter, &inPrivateBrowsing)) {
+        !ReadParam(aMsg, aIter, &inPrivateBrowsing) ||
+        !ReadParam(aMsg, aIter, &requireInteraction)) {
 
       return false;
     }
@@ -104,12 +103,12 @@ struct ParamTraits<AlertNotificationType>
     }
     nsresult rv = alert->Init(name, imageURL, title, text, textClickable,
                               cookie, dir, lang, data, principal,
-                              inPrivateBrowsing);
+                              inPrivateBrowsing, requireInteraction);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       *aResult = nullptr;
       return true;
     }
-    alert.forget(aResult);
+    *aResult = alert.forget();
     return true;
   }
 };

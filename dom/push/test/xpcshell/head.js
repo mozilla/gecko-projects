@@ -3,26 +3,26 @@
 
 'use strict';
 
-var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+ChromeUtils.import('resource://gre/modules/XPCOMUtils.jsm');
+ChromeUtils.import('resource://gre/modules/Services.jsm');
+ChromeUtils.import('resource://gre/modules/Timer.jsm');
+ChromeUtils.import('resource://gre/modules/Preferences.jsm');
+ChromeUtils.import('resource://gre/modules/PlacesUtils.jsm');
+ChromeUtils.import('resource://gre/modules/ObjectUtils.jsm');
 
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource://gre/modules/Task.jsm');
-Cu.import('resource://gre/modules/Timer.jsm');
-Cu.import('resource://gre/modules/Promise.jsm');
-Cu.import('resource://gre/modules/Preferences.jsm');
-Cu.import('resource://gre/modules/PlacesUtils.jsm');
-Cu.import('resource://gre/modules/ObjectUtils.jsm');
-
-XPCOMUtils.defineLazyModuleGetter(this, 'PlacesTestUtils',
-                                  'resource://testing-common/PlacesTestUtils.jsm');
+ChromeUtils.defineModuleGetter(this, 'PlacesTestUtils',
+                               'resource://testing-common/PlacesTestUtils.jsm');
+ChromeUtils.defineModuleGetter(this, 'pushBroadcastService',
+                               'resource://gre/modules/PushBroadcastService.jsm', {});
 XPCOMUtils.defineLazyServiceGetter(this, 'PushServiceComponent',
                                    '@mozilla.org/push/Service;1', 'nsIPushService');
 
-const serviceExports = Cu.import('resource://gre/modules/PushService.jsm', {});
+const serviceExports = ChromeUtils.import('resource://gre/modules/PushService.jsm', {});
 const servicePrefs = new Preferences('dom.push.');
 
 const WEBSOCKET_CLOSE_GOING_AWAY = 1001;
+
+const MS_IN_ONE_DAY = 24 * 60 * 60 * 1000;
 
 var isParent = Cc['@mozilla.org/xre/runtime;1']
                  .getService(Ci.nsIXULRuntime).processType ==
@@ -30,7 +30,7 @@ var isParent = Cc['@mozilla.org/xre/runtime;1']
 
 // Stop and clean up after the PushService.
 Services.obs.addObserver(function observe(subject, topic, data) {
-  Services.obs.removeObserver(observe, topic, false);
+  Services.obs.removeObserver(observe, topic);
   serviceExports.PushService.uninit();
   // Occasionally, `profile-change-teardown` and `xpcom-shutdown` will fire
   // before the PushService and AlarmService finish writing to IndexedDB. This
@@ -46,7 +46,7 @@ Services.obs.addObserver(function observe(subject, topic, data) {
       Cu.reportError(e);
     }
   }
-}, 'profile-change-net-teardown', false);
+}, 'profile-change-net-teardown');
 
 /**
  * Gates a function so that it is called only after the wrapper is called a
@@ -90,9 +90,9 @@ function promiseObserverNotification(topic, matchFunc) {
       if (!matches) {
         return;
       }
-      Services.obs.removeObserver(observe, topic, false);
+      Services.obs.removeObserver(observe, topic);
       resolve({subject, data});
-    }, topic, false);
+    }, topic);
   });
 }
 
@@ -140,31 +140,17 @@ function setPrefs(prefs = {}) {
     'connection.enabled': true,
     userAgentID: '',
     enabled: true,
-    // Disable adaptive pings and UDP wake-up by default; these are
-    // tested separately.
-    'adaptive.enabled': false,
-    'udp.wakeupEnabled': false,
-    // Defaults taken from /b2g/app/b2g.js.
+    // Defaults taken from /modules/libpref/init/all.js.
     requestTimeout: 10000,
     retryBaseInterval: 5000,
     pingInterval: 30 * 60 * 1000,
-    'pingInterval.default': 3 * 60 * 1000,
-    'pingInterval.mobile': 3 * 60 * 1000,
-    'pingInterval.wifi': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval.mobile': 3 * 60 * 1000,
-    'adaptive.lastGoodPingInterval.wifi': 3 * 60 * 1000,
-    'adaptive.gap': 60000,
-    'adaptive.upperLimit': 29 * 60 * 1000,
     // Misc. defaults.
-    'adaptive.mobile': '',
     'http2.maxRetries': 2,
     'http2.retryInterval': 500,
     'http2.reset_retry_count_after_ms': 60000,
     maxQuotaPerSubscription: 16,
     quotaUpdateDelay: 3000,
     'testing.notifyWorkers': false,
-    'testing.notifyAllObservers': true,
   }, prefs);
   for (let pref in defaultPrefs) {
     servicePrefs.set(pref, defaultPrefs[pref]);
@@ -201,6 +187,7 @@ function MockWebSocket(originalURI, handlers = {}) {
   this._onUnregister = handlers.onUnregister;
   this._onACK = handlers.onACK;
   this._onPing = handlers.onPing;
+  this._onBroadcastSubscribe = handlers.onBroadcastSubscribe;
 }
 
 MockWebSocket.prototype = {
@@ -214,10 +201,7 @@ MockWebSocket.prototype = {
   _listener: null,
   _context: null,
 
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsISupports,
-    Ci.nsIWebSocketChannel
-  ]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebSocketChannel]),
 
   get originalURI() {
     return this._originalURI;
@@ -276,6 +260,13 @@ MockWebSocket.prototype = {
       }
       break;
 
+    case 'broadcast_subscribe':
+      if (typeof this._onBroadcastSubscribe != 'function') {
+        throw new Error('Unexpected broadcast_subscribe');
+      }
+      this._onBroadcastSubscribe(request);
+      break;
+
     default:
       throw new Error('Unexpected message: ' + messageType);
     }
@@ -308,8 +299,7 @@ MockWebSocket.prototype = {
 
   /**
    * Closes the server end of the connection, calling onServerClose()
-   * followed by onStop(). Used to test abrupt connection termination
-   * and UDP wake-up.
+   * followed by onStop(). Used to test abrupt connection termination.
    *
    * @param {Number} [statusCode] The WebSocket connection close code.
    * @param {String} [reason] The connection close reason.
@@ -329,59 +319,7 @@ MockWebSocket.prototype = {
   },
 };
 
-/**
- * Creates an object that exposes the same interface as NetworkInfo, used
- * to simulate network status changes on Desktop. All methods returns empty
- * carrier data.
- */
-function MockDesktopNetworkInfo() {}
-
-MockDesktopNetworkInfo.prototype = {
-  getNetworkInformation() {
-    return {mcc: '', mnc: '', ip: ''};
-  },
-
-  getNetworkState(callback) {
-    callback({mcc: '', mnc: '', ip: '', netid: ''});
-  },
-
-  getNetworkStateChangeEventName() {
-    return 'network:offline-status-changed';
-  }
-};
-
-/**
- * Creates an object that exposes the same interface as NetworkInfo, used
- * to simulate network status changes on B2G.
- *
- * @param {String} [info.mcc] The mobile country code.
- * @param {String} [info.mnc] The mobile network code.
- * @param {String} [info.ip] The carrier IP address.
- * @param {String} [info.netid] The resolved network ID for UDP wake-up.
- */
-function MockMobileNetworkInfo(info = {}) {
-  this._info = info;
-}
-
-MockMobileNetworkInfo.prototype = {
-  _info: null,
-
-  getNetworkInformation() {
-    let {mcc, mnc, ip} = this._info;
-    return {mcc, mnc, ip};
-  },
-
-  getNetworkState(callback) {
-    let {mcc, mnc, ip, netid} = this._info;
-    callback({mcc, mnc, ip, netid});
-  },
-
-  getNetworkStateChangeEventName() {
-    return 'network-active-changed';
-  }
-};
-
-var setUpServiceInParent = Task.async(function* (service, db) {
+var setUpServiceInParent = async function(service, db) {
   if (!isParent) {
     return;
   }
@@ -391,7 +329,7 @@ var setUpServiceInParent = Task.async(function* (service, db) {
     userAgentID: userAgentID,
   });
 
-  yield db.put({
+  await db.put({
     channelID: '6e2814e1-5f84-489e-b542-855cc1311f09',
     pushEndpoint: 'https://example.org/push/get',
     scope: 'https://example.com/get/ok',
@@ -401,7 +339,7 @@ var setUpServiceInParent = Task.async(function* (service, db) {
     lastPush: 1438360548322,
     quota: 16,
   });
-  yield db.put({
+  await db.put({
     channelID: '3a414737-2fd0-44c0-af05-7efc172475fc',
     pushEndpoint: 'https://example.org/push/unsub',
     scope: 'https://example.com/unsub/ok',
@@ -411,7 +349,7 @@ var setUpServiceInParent = Task.async(function* (service, db) {
     lastPush: 1438360848322,
     quota: 4,
   });
-  yield db.put({
+  await db.put({
     channelID: 'ca3054e8-b59b-4ea0-9c23-4a3c518f3161',
     pushEndpoint: 'https://example.org/push/stale',
     scope: 'https://example.com/unsub/fail',
@@ -424,7 +362,6 @@ var setUpServiceInParent = Task.async(function* (service, db) {
 
   service.init({
     serverURI: 'wss://push.example.org/',
-    networkInfo: new MockDesktopNetworkInfo(),
     db: makeStub(db, {
       put(prev, record) {
         if (record.scope == 'https://example.com/sub/fail') {
@@ -455,6 +392,15 @@ var setUpServiceInParent = Task.async(function* (service, db) {
           }));
         },
         onRegister(request) {
+          if (request.key) {
+            let appServerKey = new Uint8Array(
+              ChromeUtils.base64URLDecode(request.key, {
+                padding: "require",
+              })
+            );
+            equal(appServerKey.length, 65, 'Wrong app server key length');
+            equal(appServerKey[0], 4, 'Wrong app server key format');
+          }
           this.serverSendMsg(JSON.stringify({
             messageType: 'register',
             uaid: userAgentID,
@@ -463,31 +409,50 @@ var setUpServiceInParent = Task.async(function* (service, db) {
             pushEndpoint: 'https://example.org/push/' + request.channelID,
           }));
         },
+        onUnregister(request) {
+          this.serverSendMsg(JSON.stringify({
+            messageType: 'unregister',
+            channelID: request.channelID,
+            status: 200,
+          }));
+        },
       });
     },
   });
-});
+};
 
-var tearDownServiceInParent = Task.async(function* (db) {
+var tearDownServiceInParent = async function(db) {
   if (!isParent) {
     return;
   }
 
-  let record = yield db.getByIdentifiers({
+  let record = await db.getByIdentifiers({
     scope: 'https://example.com/sub/ok',
     originAttributes: '',
   });
   ok(record.pushEndpoint.startsWith('https://example.org/push'),
     'Wrong push endpoint in subscription record');
 
-  record = yield db.getByIdentifiers({
-    scope: 'https://example.net/scope/1',
-    originAttributes: ChromeUtils.originAttributesToSuffix(
-      { appId: 1, inIsolatedMozBrowser: true }),
-  });
-  ok(record.pushEndpoint.startsWith('https://example.org/push'),
-    'Wrong push endpoint in app record');
-
-  record = yield db.getByKeyID('3a414737-2fd0-44c0-af05-7efc172475fc');
+  record = await db.getByKeyID('3a414737-2fd0-44c0-af05-7efc172475fc');
   ok(!record, 'Unsubscribed record should not exist');
-});
+};
+
+function putTestRecord(db, keyID, scope, quota) {
+  return db.put({
+    channelID: keyID,
+    pushEndpoint: 'https://example.org/push/' + keyID,
+    scope: scope,
+    pushCount: 0,
+    lastPush: 0,
+    version: null,
+    originAttributes: '',
+    quota: quota,
+    systemRecord: quota == Infinity,
+  });
+}
+
+function getAllKeyIDs(db) {
+  return db.getAllKeyIDs().then(records =>
+    records.map(record => record.keyID).sort(compareAscending)
+  );
+}

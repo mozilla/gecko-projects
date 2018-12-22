@@ -19,9 +19,14 @@ interface nsIAboutNewTabService : nsISupports
   attribute ACString newTabURL;
 
   /**
-   * Returns the default URL (remote or local depending on pref)
+   * Returns the default URL (local or activity stream depending on pref)
    */
   attribute ACString defaultURL;
+
+  /**
+   * Returns true if opening the New Tab page will notify the user of a change.
+   */
+  attribute bool willNotifyUser;
 
   /**
    * Returns true if the default resource got overridden.
@@ -29,31 +34,25 @@ interface nsIAboutNewTabService : nsISupports
   readonly attribute bool overridden;
 
   /**
-   * Returns true if the default resource is remotely hosted and isn't
+   * Returns true if the default resource is activity stream and isn't
    * overridden
    */
-  readonly attribute bool remoteEnabled;
-
-
-  /**
-  * Returns the version of the remote newtab page expected
-  */
-  readonly attribute ACString remoteVersion;
+  readonly attribute bool activityStreamEnabled;
 
   /**
-   * Returns the expected channel for the remote the newtab page
+   * Returns true if the the prerendering pref for activity stream is true
    */
-  readonly attribute ACString remoteReleaseName;
+  readonly attribute bool activityStreamPrerender;
 
   /**
-   * Generates and returns the remote newtab page url
+   * Returns true if the the debug pref for activity stream is true
    */
-  ACString generateRemoteURL();
+  readonly attribute bool activityStreamDebug;
 
   /**
-   * Returns a remote new tab release name given an update channel name
+   * Returns the locale of the activity stream interface
    */
-  ACString releaseFromUpdateChannel(in ACString channelName);
+  readonly attribute ACString activityStreamLocale;
 
   /**
    * Resets to the default resource and also resets the

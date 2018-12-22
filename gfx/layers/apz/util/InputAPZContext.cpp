@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +12,7 @@ namespace layers {
 ScrollableLayerGuid InputAPZContext::sGuid;
 uint64_t InputAPZContext::sBlockId = 0;
 nsEventStatus InputAPZContext::sApzResponse = nsEventStatus_eIgnore;
+bool InputAPZContext::sPendingLayerization = false;
 bool InputAPZContext::sRoutedToChildProcess = false;
 
 /*static*/ ScrollableLayerGuid
@@ -31,23 +33,32 @@ InputAPZContext::GetApzResponse()
   return sApzResponse;
 }
 
-/*static*/ void
-InputAPZContext::SetRoutedToChildProcess()
+/*static*/ bool
+InputAPZContext::HavePendingLayerization()
 {
-  sRoutedToChildProcess = true;
+  return sPendingLayerization;
+}
+
+/*static*/ bool
+InputAPZContext::WasRoutedToChildProcess()
+{
+  return sRoutedToChildProcess;
 }
 
 InputAPZContext::InputAPZContext(const ScrollableLayerGuid& aGuid,
                                  const uint64_t& aBlockId,
-                                 const nsEventStatus& aApzResponse)
+                                 const nsEventStatus& aApzResponse,
+                                 bool aPendingLayerization)
   : mOldGuid(sGuid)
   , mOldBlockId(sBlockId)
   , mOldApzResponse(sApzResponse)
+  , mOldPendingLayerization(sPendingLayerization)
   , mOldRoutedToChildProcess(sRoutedToChildProcess)
 {
   sGuid = aGuid;
   sBlockId = aBlockId;
   sApzResponse = aApzResponse;
+  sPendingLayerization = aPendingLayerization;
   sRoutedToChildProcess = false;
 }
 
@@ -56,13 +67,14 @@ InputAPZContext::~InputAPZContext()
   sGuid = mOldGuid;
   sBlockId = mOldBlockId;
   sApzResponse = mOldApzResponse;
+  sPendingLayerization = mOldPendingLayerization;
   sRoutedToChildProcess = mOldRoutedToChildProcess;
 }
 
-bool
-InputAPZContext::WasRoutedToChildProcess()
+/*static*/ void
+InputAPZContext::SetRoutedToChildProcess()
 {
-  return sRoutedToChildProcess;
+  sRoutedToChildProcess = true;
 }
 
 } // namespace layers

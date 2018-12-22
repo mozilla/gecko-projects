@@ -9,9 +9,22 @@
 
 enum AutoKeyword { "auto" };
 
+enum LineAlignSetting {
+  "start",
+  "center",
+  "end"
+};
+
+enum PositionAlignSetting {
+  "line-left",
+  "center",
+  "line-right",
+  "auto"
+};
+
 enum AlignSetting {
   "start",
-  "middle",
+  "center",
   "end",
   "left",
   "right"
@@ -23,22 +36,21 @@ enum DirectionSetting {
   "lr"
 };
 
-[Constructor(double startTime, double endTime, DOMString text),
- Pref="media.webvtt.enabled"]
+[Constructor(double startTime, double endTime, DOMString text)]
 interface VTTCue : TextTrackCue {
   [Pref="media.webvtt.regions.enabled"]
   attribute VTTRegion? region;
   attribute DirectionSetting vertical;
   attribute boolean snapToLines;
-  attribute (long or AutoKeyword) line;
+  attribute (double or AutoKeyword) line;
   [SetterThrows]
-  attribute AlignSetting lineAlign;
+  attribute LineAlignSetting lineAlign;
   [SetterThrows]
-  attribute long position;
+  attribute (double or AutoKeyword) position;
   [SetterThrows]
-  attribute AlignSetting positionAlign;
+  attribute PositionAlignSetting positionAlign;
   [SetterThrows]
-  attribute long size;
+  attribute double size;
   attribute AlignSetting align;
   attribute DOMString text;
   DocumentFragment getCueAsHTML();
@@ -50,4 +62,12 @@ partial interface VTTCue {
   attribute HTMLDivElement? displayState;
   [ChromeOnly]
   readonly attribute boolean hasBeenReset;
+  [ChromeOnly]
+  readonly attribute double computedLine;
+  [ChromeOnly]
+  readonly attribute double computedPosition;
+  [ChromeOnly]
+  readonly attribute PositionAlignSetting computedPositionAlign;
+  [ChromeOnly]
+  readonly attribute boolean getActive;
 };

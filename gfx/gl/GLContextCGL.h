@@ -24,12 +24,12 @@ class GLContextCGL : public GLContext
 {
     friend class GLContextProviderCGL;
 
-    NSOpenGLContext *mContext;
+    NSOpenGLContext* mContext;
 
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextCGL, override)
-    GLContextCGL(const SurfaceCaps& caps, NSOpenGLContext* context,
-                 bool isOffscreen, ContextProfile profile);
+    GLContextCGL(CreateContextFlags flags, const SurfaceCaps& caps,
+                 NSOpenGLContext* context, bool isOffscreen);
 
     ~GLContextCGL();
 
@@ -45,9 +45,9 @@ public:
     NSOpenGLContext* GetNSOpenGLContext() const { return mContext; }
     CGLContextObj GetCGLContext() const;
 
-    virtual bool MakeCurrentImpl(bool aForce) override;
+    virtual bool MakeCurrentImpl() const override;
 
-    virtual bool IsCurrent() override;
+    virtual bool IsCurrentImpl() const override;
 
     virtual GLenum GetPreferredARGB32Format() const override;
 
@@ -55,9 +55,9 @@ public:
 
     virtual bool IsDoubleBuffered() const override;
 
-    virtual bool SupportsRobustness() const override;
-
     virtual bool SwapBuffers() override;
+
+    virtual void GetWSIInfo(nsCString* const out) const override;
 };
 
 } // namespace gl

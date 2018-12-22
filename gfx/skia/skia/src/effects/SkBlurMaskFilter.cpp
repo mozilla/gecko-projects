@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -9,27 +8,33 @@
 #include "SkBlurMaskFilter.h"
 #include "SkBlurMask.h"
 #include "SkGpuBlurUtils.h"
+#include "SkMaskFilterBase.h"
 #include "SkReadBuffer.h"
+#include "SkRRectPriv.h"
 #include "SkWriteBuffer.h"
 #include "SkMaskFilter.h"
 #include "SkRRect.h"
-#include "SkRTConf.h"
 #include "SkStringUtils.h"
 #include "SkStrokeRec.h"
+#include "SkVertices.h"
 
 #if SK_SUPPORT_GPU
 #include "GrCircleBlurFragmentProcessor.h"
+#include "GrClip.h"
 #include "GrContext.h"
-#include "GrDrawContext.h"
-#include "GrTexture.h"
 #include "GrFragmentProcessor.h"
-#include "GrInvariantOutput.h"
-#include "SkDraw.h"
+#include "GrRenderTargetContext.h"
+#include "GrResourceProvider.h"
+#include "GrShaderCaps.h"
+#include "GrStyle.h"
+#include "GrTextureProxy.h"
+#include "effects/GrRectBlurEffect.h"
+#include "effects/GrRRectBlurEffect.h"
 #include "effects/GrSimpleTextureEffect.h"
+#include "effects/GrTextureDomain.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #include "glsl/GrGLSLProgramDataManager.h"
-#include "glsl/GrGLSLTextureSampler.h"
 #include "glsl/GrGLSLUniformHandler.h"
 #endif
 
@@ -37,9 +42,9 @@ SkScalar SkBlurMaskFilter::ConvertRadiusToSigma(SkScalar radius) {
     return SkBlurMask::ConvertRadiusToSigma(radius);
 }
 
-class SkBlurMaskFilterImpl : public SkMaskFilter {
+class SkBlurMaskFilterImpl : public SkMaskFilterBase {
 public:
-    SkBlurMaskFilterImpl(SkScalar sigma, SkBlurStyle, uint32_t flags);
+    SkBlurMaskFilterImpl(SkScalar sigma, SkBlurStyle, const SkRect& occluder, uint32_t flags);
 
     // overrides from SkMaskFilter
     SkMask::Format getFormat() const override;
@@ -51,25 +56,25 @@ public:
                           const SkIRect& clipBounds,
                           const SkMatrix& ctm,
                           SkRect* maskRect) const override;
-    bool directFilterMaskGPU(GrTextureProvider* texProvider,
-                             GrDrawContext* drawContext,
-                             GrPaint* grp,
+    bool directFilterMaskGPU(GrContext*,
+                             GrRenderTargetContext* renderTargetContext,
+                             GrPaint&&,
                              const GrClip&,
                              const SkMatrix& viewMatrix,
                              const SkStrokeRec& strokeRec,
                              const SkPath& path) const override;
-    bool directFilterRRectMaskGPU(GrTextureProvider* texProvider,
-                                  GrDrawContext* drawContext,
-                                  GrPaint* grp,
+    bool directFilterRRectMaskGPU(GrContext*,
+                                  GrRenderTargetContext* renderTargetContext,
+                                  GrPaint&&,
                                   const GrClip&,
                                   const SkMatrix& viewMatrix,
                                   const SkStrokeRec& strokeRec,
-                                  const SkRRect& rrect) const override;
-    bool filterMaskGPU(GrTexture* src,
-                       const SkMatrix& ctm,
-                       const SkRect& maskRect,
-                       GrTexture** result,
-                       bool canOverwriteSrc) const override;
+                                  const SkRRect& rrect,
+                                  const SkRRect& devRRect) const override;
+    sk_sp<GrTextureProxy> filterMaskGPU(GrContext*,
+                                        sk_sp<GrTextureProxy> srcProxy,
+                                        const SkMatrix& ctm,
+                                        const SkIRect& maskRect) const override;
 #endif
 
     void computeFastBounds(const SkRect&, SkRect*) const override;
@@ -92,6 +97,10 @@ protected:
     bool filterRRectMask(SkMask* dstM, const SkRRect& r, const SkMatrix& matrix,
                         SkIPoint* margin, SkMask::CreateMode createMode) const;
 
+    bool ignoreXform() const {
+        return SkToBool(fBlurFlags & SkBlurMaskFilter::kIgnoreTransform_BlurFlag);
+    }
+
 private:
     // To avoid unseemly allocation requests (esp. for finite platforms like
     // handset) we limit the radius so something manageable. (as opposed to
@@ -100,6 +109,7 @@ private:
 
     SkScalar    fSigma;
     SkBlurStyle fBlurStyle;
+    SkRect      fOccluder;
     uint32_t    fBlurFlags;
 
     SkBlurQuality getQuality() const {
@@ -111,9 +121,7 @@ private:
     void flatten(SkWriteBuffer&) const override;
 
     SkScalar computeXformedSigma(const SkMatrix& ctm) const {
-        bool ignoreTransform = SkToBool(fBlurFlags & SkBlurMaskFilter::kIgnoreTransform_BlurFlag);
-
-        SkScalar xformedSigma = ignoreTransform ? fSigma : ctm.mapRadius(fSigma);
+        SkScalar xformedSigma = this->ignoreXform() ? fSigma : ctm.mapRadius(fSigma);
         return SkMinScalar(xformedSigma, kMAX_BLUR_SIGMA);
     }
 
@@ -124,24 +132,168 @@ private:
 
 const SkScalar SkBlurMaskFilterImpl::kMAX_BLUR_SIGMA = SkIntToScalar(128);
 
-SkMaskFilter* SkBlurMaskFilter::Create(SkBlurStyle style, SkScalar sigma, uint32_t flags) {
+sk_sp<SkMaskFilter> SkBlurMaskFilter::Make(SkBlurStyle style, SkScalar sigma,
+                                           const SkRect& occluder, uint32_t flags) {
+    SkASSERT(!(flags & ~SkBlurMaskFilter::kAll_BlurFlag));
+    SkASSERT(style <= kLastEnum_SkBlurStyle);
+
     if (!SkScalarIsFinite(sigma) || sigma <= 0) {
         return nullptr;
     }
-    if ((unsigned)style > (unsigned)kLastEnum_SkBlurStyle) {
-        return nullptr;
+
+    return sk_sp<SkMaskFilter>(new SkBlurMaskFilterImpl(sigma, style, occluder, flags));
+}
+
+// linearly interpolate between y1 & y3 to match x2's position between x1 & x3
+static SkScalar interp(SkScalar x1, SkScalar x2, SkScalar x3, SkScalar y1, SkScalar y3) {
+    SkASSERT(x1 <= x2 && x2 <= x3);
+    SkASSERT(y1 <= y3);
+
+    SkScalar t = (x2 - x1) / (x3 - x1);
+    return y1 + t * (y3 - y1);
+}
+
+// Insert 'lower' and 'higher' into 'array1' and insert a new value at each matching insertion
+// point in 'array2' that linearly interpolates between the existing values.
+// Return a bit mask which contains a copy of 'inputMask' for all the cells between the two
+// insertion points.
+static uint32_t insert_into_arrays(SkScalar* array1, SkScalar* array2,
+                                   SkScalar lower, SkScalar higher,
+                                   int* num, uint32_t inputMask, int maskSize) {
+    SkASSERT(lower < higher);
+    SkASSERT(lower >= array1[0] && higher <= array1[*num-1]);
+
+    int32_t skipMask = 0x0;
+    int i;
+    for (i = 0; i < *num; ++i) {
+        if (lower >= array1[i] && lower < array1[i+1]) {
+            if (!SkScalarNearlyEqual(lower, array1[i])) {
+                memmove(&array1[i+2], &array1[i+1], (*num-i-1)*sizeof(SkScalar));
+                array1[i+1] = lower;
+                memmove(&array2[i+2], &array2[i+1], (*num-i-1)*sizeof(SkScalar));
+                array2[i+1] = interp(array1[i], lower, array1[i+2], array2[i], array2[i+2]);
+                i++;
+                (*num)++;
+            }
+            break;
+        }
     }
-    if (flags > SkBlurMaskFilter::kAll_BlurFlag) {
-        return nullptr;
+    for ( ; i < *num; ++i) {
+        skipMask |= inputMask << (i*maskSize);
+        if (higher > array1[i] && higher <= array1[i+1]) {
+            if (!SkScalarNearlyEqual(higher, array1[i+1])) {
+                memmove(&array1[i+2], &array1[i+1], (*num-i-1)*sizeof(SkScalar));
+                array1[i+1] = higher;
+                memmove(&array2[i+2], &array2[i+1], (*num-i-1)*sizeof(SkScalar));
+                array2[i+1] = interp(array1[i], higher, array1[i+2], array2[i], array2[i+2]);
+                (*num)++;
+            }
+            break;
+        }
     }
-    return new SkBlurMaskFilterImpl(sigma, style, flags);
+
+    return skipMask;
+}
+
+bool SkBlurMaskFilter::ComputeBlurredRRectParams(const SkRRect& srcRRect, const SkRRect& devRRect,
+                                                 const SkRect& occluder,
+                                                 SkScalar sigma, SkScalar xformedSigma,
+                                                 SkRRect* rrectToDraw,
+                                                 SkISize* widthHeight,
+                                                 SkScalar rectXs[kMaxDivisions],
+                                                 SkScalar rectYs[kMaxDivisions],
+                                                 SkScalar texXs[kMaxDivisions],
+                                                 SkScalar texYs[kMaxDivisions],
+                                                 int* numXs, int* numYs, uint32_t* skipMask) {
+    unsigned int devBlurRadius = 3*SkScalarCeilToInt(xformedSigma-1/6.0f);
+    SkScalar srcBlurRadius = 3.0f * sigma;
+
+    const SkRect& devOrig = devRRect.getBounds();
+    const SkVector& devRadiiUL = devRRect.radii(SkRRect::kUpperLeft_Corner);
+    const SkVector& devRadiiUR = devRRect.radii(SkRRect::kUpperRight_Corner);
+    const SkVector& devRadiiLR = devRRect.radii(SkRRect::kLowerRight_Corner);
+    const SkVector& devRadiiLL = devRRect.radii(SkRRect::kLowerLeft_Corner);
+
+    const int devLeft  = SkScalarCeilToInt(SkTMax<SkScalar>(devRadiiUL.fX, devRadiiLL.fX));
+    const int devTop   = SkScalarCeilToInt(SkTMax<SkScalar>(devRadiiUL.fY, devRadiiUR.fY));
+    const int devRight = SkScalarCeilToInt(SkTMax<SkScalar>(devRadiiUR.fX, devRadiiLR.fX));
+    const int devBot   = SkScalarCeilToInt(SkTMax<SkScalar>(devRadiiLL.fY, devRadiiLR.fY));
+
+    // This is a conservative check for nine-patchability
+    if (devOrig.fLeft + devLeft + devBlurRadius >= devOrig.fRight  - devRight - devBlurRadius ||
+        devOrig.fTop  + devTop  + devBlurRadius >= devOrig.fBottom - devBot   - devBlurRadius) {
+        return false;
+    }
+
+    const SkVector& srcRadiiUL = srcRRect.radii(SkRRect::kUpperLeft_Corner);
+    const SkVector& srcRadiiUR = srcRRect.radii(SkRRect::kUpperRight_Corner);
+    const SkVector& srcRadiiLR = srcRRect.radii(SkRRect::kLowerRight_Corner);
+    const SkVector& srcRadiiLL = srcRRect.radii(SkRRect::kLowerLeft_Corner);
+
+    const SkScalar srcLeft  = SkTMax<SkScalar>(srcRadiiUL.fX, srcRadiiLL.fX);
+    const SkScalar srcTop   = SkTMax<SkScalar>(srcRadiiUL.fY, srcRadiiUR.fY);
+    const SkScalar srcRight = SkTMax<SkScalar>(srcRadiiUR.fX, srcRadiiLR.fX);
+    const SkScalar srcBot   = SkTMax<SkScalar>(srcRadiiLL.fY, srcRadiiLR.fY);
+
+    int newRRWidth = 2*devBlurRadius + devLeft + devRight + 1;
+    int newRRHeight = 2*devBlurRadius + devTop + devBot + 1;
+    widthHeight->fWidth = newRRWidth + 2 * devBlurRadius;
+    widthHeight->fHeight = newRRHeight + 2 * devBlurRadius;
+
+    const SkRect srcProxyRect = srcRRect.getBounds().makeOutset(srcBlurRadius, srcBlurRadius);
+
+    rectXs[0] = srcProxyRect.fLeft;
+    rectXs[1] = srcProxyRect.fLeft + 2*srcBlurRadius + srcLeft;
+    rectXs[2] = srcProxyRect.fRight - 2*srcBlurRadius - srcRight;
+    rectXs[3] = srcProxyRect.fRight;
+
+    rectYs[0] = srcProxyRect.fTop;
+    rectYs[1] = srcProxyRect.fTop + 2*srcBlurRadius + srcTop;
+    rectYs[2] = srcProxyRect.fBottom - 2*srcBlurRadius - srcBot;
+    rectYs[3] = srcProxyRect.fBottom;
+
+    texXs[0] = 0.0f;
+    texXs[1] = 2.0f*devBlurRadius + devLeft;
+    texXs[2] = 2.0f*devBlurRadius + devLeft + 1;
+    texXs[3] = SkIntToScalar(widthHeight->fWidth);
+
+    texYs[0] = 0.0f;
+    texYs[1] = 2.0f*devBlurRadius + devTop;
+    texYs[2] = 2.0f*devBlurRadius + devTop + 1;
+    texYs[3] = SkIntToScalar(widthHeight->fHeight);
+
+    SkRect temp = occluder;
+
+    *numXs = 4;
+    *numYs = 4;
+    *skipMask = 0;
+    if (!temp.isEmpty() && (srcProxyRect.contains(temp) || temp.intersect(srcProxyRect))) {
+        *skipMask = insert_into_arrays(rectXs, texXs, temp.fLeft, temp.fRight, numXs, 0x1, 1);
+        *skipMask = insert_into_arrays(rectYs, texYs, temp.fTop, temp.fBottom,
+                                       numYs, *skipMask, *numXs-1);
+    }
+
+    const SkRect newRect = SkRect::MakeXYWH(SkIntToScalar(devBlurRadius),
+                                            SkIntToScalar(devBlurRadius),
+                                            SkIntToScalar(newRRWidth),
+                                            SkIntToScalar(newRRHeight));
+    SkVector newRadii[4];
+    newRadii[0] = { SkScalarCeilToScalar(devRadiiUL.fX), SkScalarCeilToScalar(devRadiiUL.fY) };
+    newRadii[1] = { SkScalarCeilToScalar(devRadiiUR.fX), SkScalarCeilToScalar(devRadiiUR.fY) };
+    newRadii[2] = { SkScalarCeilToScalar(devRadiiLR.fX), SkScalarCeilToScalar(devRadiiLR.fY) };
+    newRadii[3] = { SkScalarCeilToScalar(devRadiiLL.fX), SkScalarCeilToScalar(devRadiiLL.fY) };
+
+    rrectToDraw->setRectRadii(newRect, newRadii);
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-SkBlurMaskFilterImpl::SkBlurMaskFilterImpl(SkScalar sigma, SkBlurStyle style, uint32_t flags)
+SkBlurMaskFilterImpl::SkBlurMaskFilterImpl(SkScalar sigma, SkBlurStyle style,
+                                           const SkRect& occluder, uint32_t flags)
     : fSigma(sigma)
     , fBlurStyle(style)
+    , fOccluder(occluder)
     , fBlurFlags(flags) {
     SkASSERT(fSigma > 0);
     SkASSERT((unsigned)style <= kLastEnum_SkBlurStyle);
@@ -153,7 +305,7 @@ SkMask::Format SkBlurMaskFilterImpl::getFormat() const {
 }
 
 bool SkBlurMaskFilterImpl::asABlur(BlurRec* rec) const {
-    if (fBlurFlags & SkBlurMaskFilter::kIgnoreTransform_BlurFlag) {
+    if (this->ignoreXform()) {
         return false;
     }
 
@@ -197,13 +349,10 @@ static bool prepare_to_draw_into_mask(const SkRect& bounds, SkMask* mask) {
     mask->fRowBytes = SkAlign4(mask->fBounds.width());
     mask->fFormat = SkMask::kA8_Format;
     const size_t size = mask->computeImageSize();
-    mask->fImage = SkMask::AllocImage(size);
+    mask->fImage = SkMask::AllocImage(size, SkMask::kZeroInit_Alloc);
     if (nullptr == mask->fImage) {
         return false;
     }
-
-    // FIXME: use sk_calloc in AllocImage?
-    sk_bzero(mask->fImage, size);
     return true;
 }
 
@@ -306,12 +455,13 @@ static SkCachedData* add_cached_rects(SkMask* mask, SkScalar sigma, SkBlurStyle 
 }
 
 #ifdef SK_IGNORE_FAST_RRECT_BLUR
-SK_CONF_DECLARE(bool, c_analyticBlurRRect, "mask.filter.blur.analyticblurrrect", false, "Use the faster analytic blur approach for ninepatch rects");
+  // Use the faster analytic blur approach for ninepatch round rects
+  static const bool c_analyticBlurRRect{false};
 #else
-SK_CONF_DECLARE(bool, c_analyticBlurRRect, "mask.filter.blur.analyticblurrrect", true, "Use the faster analytic blur approach for ninepatch round rects");
+  static const bool c_analyticBlurRRect{true};
 #endif
 
-SkMaskFilter::FilterReturn
+SkMaskFilterBase::FilterReturn
 SkBlurMaskFilterImpl::filterRRectToNine(const SkRRect& rrect, const SkMatrix& matrix,
                                         const SkIRect& clipBounds,
                                         NinePatch* patch) const {
@@ -445,9 +595,10 @@ SkBlurMaskFilterImpl::filterRRectToNine(const SkRRect& rrect, const SkMatrix& ma
     return kTrue_FilterReturn;
 }
 
-SK_CONF_DECLARE(bool, c_analyticBlurNinepatch, "mask.filter.analyticNinePatch", true, "Use the faster analytic blur approach for ninepatch rects");
+// Use the faster analytic blur approach for ninepatch rects
+static const bool c_analyticBlurNinepatch{true};
 
-SkMaskFilter::FilterReturn
+SkMaskFilterBase::FilterReturn
 SkBlurMaskFilterImpl::filterRectsToNine(const SkRect rects[], int count,
                                         const SkMatrix& matrix,
                                         const SkIRect& clipBounds,
@@ -582,274 +733,35 @@ void SkBlurMaskFilterImpl::computeFastBounds(const SkRect& src,
              src.fRight + pad, src.fBottom + pad);
 }
 
-SkFlattenable* SkBlurMaskFilterImpl::CreateProc(SkReadBuffer& buffer) {
+sk_sp<SkFlattenable> SkBlurMaskFilterImpl::CreateProc(SkReadBuffer& buffer) {
     const SkScalar sigma = buffer.readScalar();
-    const unsigned style = buffer.readUInt();
-    const unsigned flags = buffer.readUInt();
-    if (style <= kLastEnum_SkBlurStyle) {
-        return SkBlurMaskFilter::Create((SkBlurStyle)style, sigma, flags);
-    }
-    return nullptr;
+    SkBlurStyle style = buffer.read32LE(kLastEnum_SkBlurStyle);
+    unsigned flags = buffer.read32LE(SkBlurMaskFilter::kAll_BlurFlag);
+
+    SkRect occluder;
+    buffer.readRect(&occluder);
+
+    return SkBlurMaskFilter::Make((SkBlurStyle)style, sigma, occluder, flags);
 }
 
 void SkBlurMaskFilterImpl::flatten(SkWriteBuffer& buffer) const {
     buffer.writeScalar(fSigma);
     buffer.writeUInt(fBlurStyle);
     buffer.writeUInt(fBlurFlags);
+    buffer.writeRect(fOccluder);
 }
+
 
 #if SK_SUPPORT_GPU
 
-class GrGLRectBlurEffect;
-
-class GrRectBlurEffect : public GrFragmentProcessor {
-public:
-    ~GrRectBlurEffect() override { }
-
-    const char* name() const override { return "RectBlur"; }
-
-    static GrFragmentProcessor* Create(GrTextureProvider *textureProvider,
-                                       const SkRect& rect, float sigma) {
-        int doubleProfileSize = SkScalarCeilToInt(12*sigma);
-
-        if (doubleProfileSize >= rect.width() || doubleProfileSize >= rect.height()) {
-            // if the blur sigma is too large so the gaussian overlaps the whole
-            // rect in either direction, fall back to CPU path for now.
-            return nullptr;
-        }
-
-        SkAutoTUnref<GrTexture> blurProfile(CreateBlurProfileTexture(textureProvider, sigma));
-        if (!blurProfile) {
-           return nullptr;
-        }
-        // in OpenGL ES, mediump floats have a minimum range of 2^14. If we have coordinates bigger
-        // than that, the shader math will end up with infinities and result in the blur effect not
-        // working correctly. To avoid this, we switch into highp when the coordinates are too big.
-        // As 2^14 is the minimum range but the actual range can be bigger, we might end up 
-        // switching to highp sooner than strictly necessary, but most devices that have a bigger 
-        // range for mediump also have mediump being exactly the same as highp (e.g. all non-OpenGL
-        // ES devices), and thus incur no additional penalty for the switch.
-        static const SkScalar kMAX_BLUR_COORD = SkIntToScalar(16000);
-        GrSLPrecision precision;
-        if (SkScalarAbs(rect.top()) > kMAX_BLUR_COORD ||
-            SkScalarAbs(rect.left()) > kMAX_BLUR_COORD ||
-            SkScalarAbs(rect.bottom()) > kMAX_BLUR_COORD ||
-            SkScalarAbs(rect.right()) > kMAX_BLUR_COORD ||
-            SkScalarAbs(rect.width()) > kMAX_BLUR_COORD ||
-            SkScalarAbs(rect.height()) > kMAX_BLUR_COORD) {
-            precision = kHigh_GrSLPrecision;
-        }
-        else {
-            precision = kDefault_GrSLPrecision;
-        }
-        return new GrRectBlurEffect(rect, sigma, blurProfile, precision);
-    }
-
-    const SkRect& getRect() const { return fRect; }
-    float getSigma() const { return fSigma; }
-
-private:
-    GrRectBlurEffect(const SkRect& rect, float sigma, GrTexture *blurProfile,
-                     GrSLPrecision fPrecision);
-
-    GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
-
-    void onGetGLSLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override;
-
-    bool onIsEqual(const GrFragmentProcessor&) const override;
-
-    void onComputeInvariantOutput(GrInvariantOutput* inout) const override;
-
-    static GrTexture* CreateBlurProfileTexture(GrTextureProvider*, float sigma);
-
-    SkRect          fRect;
-    float           fSigma;
-    GrTextureAccess fBlurProfileAccess;
-    GrSLPrecision   fPrecision;
-
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
-
-    typedef GrFragmentProcessor INHERITED;
-};
-
-class GrGLRectBlurEffect : public GrGLSLFragmentProcessor {
-public:
-    GrGLRectBlurEffect(const GrProcessor&, GrSLPrecision precision) 
-    : fPrecision(precision) {
-    }
-    void emitCode(EmitArgs&) override;
-
-    static void GenKey(GrSLPrecision precision, GrProcessorKeyBuilder* b);
-
-protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
-
-private:
-    typedef GrGLSLProgramDataManager::UniformHandle UniformHandle;
-
-    UniformHandle       fProxyRectUniform;
-    UniformHandle       fProfileSizeUniform;
-    GrSLPrecision       fPrecision;
-
-    typedef GrGLSLFragmentProcessor INHERITED;
-};
-
-void OutputRectBlurProfileLookup(GrGLSLFragmentBuilder* fragBuilder,
-                                 const GrGLSLTextureSampler& sampler,
-                                 const char *output,
-                                 const char *profileSize, const char *loc,
-                                 const char *blurred_width,
-                                 const char *sharp_width) {
-    fragBuilder->codeAppendf("float %s;", output);
-    fragBuilder->codeAppendf("{");
-    fragBuilder->codeAppendf("float coord = ((abs(%s - 0.5 * %s) - 0.5 * %s)) / %s;",
-                           loc, blurred_width, sharp_width, profileSize);
-    fragBuilder->codeAppendf("%s = ", output);
-    fragBuilder->appendTextureLookup(sampler, "vec2(coord,0.5)");
-    fragBuilder->codeAppend(".a;");
-    fragBuilder->codeAppendf("}");
-}
-
-
-void GrGLRectBlurEffect::GenKey(GrSLPrecision precision, GrProcessorKeyBuilder* b) {
-    b->add32(precision);
-}
-
-
-void GrGLRectBlurEffect::emitCode(EmitArgs& args) {
-    GrGLSLUniformHandler* uniformHandler = args.fUniformHandler;
-
-    const char *rectName;
-    const char *profileSizeName;
-
-    const char* precisionString = GrGLSLShaderVar::PrecisionString(args.fGLSLCaps, fPrecision);
-    fProxyRectUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                                   kVec4f_GrSLType,
-                                                   fPrecision,
-                                                   "proxyRect",
-                                                   &rectName);
-    fProfileSizeUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                                     kFloat_GrSLType,
-                                                     kDefault_GrSLPrecision,
-                                                     "profileSize",
-                                                     &profileSizeName);
-
-    GrGLSLFragmentBuilder* fragBuilder = args.fFragBuilder;
-    const char *fragmentPos = fragBuilder->fragmentPosition();
-
-    if (args.fInputColor) {
-        fragBuilder->codeAppendf("vec4 src=%s;", args.fInputColor);
-    } else {
-        fragBuilder->codeAppendf("vec4 src=vec4(1);");
-    }
-
-    fragBuilder->codeAppendf("%s vec2 translatedPos = %s.xy - %s.xy;", precisionString, fragmentPos, 
-                             rectName);
-    fragBuilder->codeAppendf("%s float width = %s.z - %s.x;", precisionString, rectName, rectName);
-    fragBuilder->codeAppendf("%s float height = %s.w - %s.y;", precisionString, rectName, rectName);
-
-    fragBuilder->codeAppendf("%s vec2 smallDims = vec2(width - %s, height - %s);", precisionString, 
-                             profileSizeName, profileSizeName);
-    fragBuilder->codeAppendf("%s float center = 2.0 * floor(%s/2.0 + .25) - 1.0;", precisionString,
-                             profileSizeName);
-    fragBuilder->codeAppendf("%s vec2 wh = smallDims - vec2(center,center);", precisionString);
-
-    OutputRectBlurProfileLookup(fragBuilder, args.fSamplers[0], "horiz_lookup", profileSizeName,
-                                "translatedPos.x", "width", "wh.x");
-    OutputRectBlurProfileLookup(fragBuilder, args.fSamplers[0], "vert_lookup", profileSizeName, 
-                                "translatedPos.y", "height", "wh.y");
-
-    fragBuilder->codeAppendf("float final = horiz_lookup * vert_lookup;");
-    fragBuilder->codeAppendf("%s = src * final;", args.fOutputColor);
-}
-
-void GrGLRectBlurEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                   const GrProcessor& proc) {
-    const GrRectBlurEffect& rbe = proc.cast<GrRectBlurEffect>();
-    SkRect rect = rbe.getRect();
-
-    pdman.set4f(fProxyRectUniform, rect.fLeft, rect.fTop, rect.fRight, rect.fBottom);
-    pdman.set1f(fProfileSizeUniform, SkScalarCeilToScalar(6*rbe.getSigma()));
-}
-
-GrTexture* GrRectBlurEffect::CreateBlurProfileTexture(GrTextureProvider* textureProvider,
-                                                      float sigma) {
-    GrSurfaceDesc texDesc;
-
-    unsigned int profileSize = SkScalarCeilToInt(6*sigma);
-
-    texDesc.fWidth = profileSize;
-    texDesc.fHeight = 1;
-    texDesc.fConfig = kAlpha_8_GrPixelConfig;
-
-    static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
-    GrUniqueKey key;
-    GrUniqueKey::Builder builder(&key, kDomain, 1);
-    builder[0] = profileSize;
-    builder.finish();
-
-    GrTexture *blurProfile = textureProvider->findAndRefTextureByUniqueKey(key);
-
-    if (!blurProfile) {
-        SkAutoTDeleteArray<uint8_t> profile(SkBlurMask::ComputeBlurProfile(sigma));
-
-        blurProfile = textureProvider->createTexture(texDesc, true, profile.get(), 0);
-        if (blurProfile) {
-            textureProvider->assignUniqueKeyToTexture(key, blurProfile);
-        }
-    }
-
-    return blurProfile;
-}
-
-GrRectBlurEffect::GrRectBlurEffect(const SkRect& rect, float sigma, GrTexture *blurProfile,
-                                   GrSLPrecision precision)
-    : fRect(rect)
-    , fSigma(sigma)
-    , fBlurProfileAccess(blurProfile)
-    , fPrecision(precision) {
-    this->initClassID<GrRectBlurEffect>();
-    this->addTextureAccess(&fBlurProfileAccess);
-    this->setWillReadFragmentPosition();
-}
-
-void GrRectBlurEffect::onGetGLSLProcessorKey(const GrGLSLCaps& caps,
-                                             GrProcessorKeyBuilder* b) const {
-    GrGLRectBlurEffect::GenKey(fPrecision, b);
-}
-
-GrGLSLFragmentProcessor* GrRectBlurEffect::onCreateGLSLInstance() const {
-    return new GrGLRectBlurEffect(*this, fPrecision);
-}
-
-bool GrRectBlurEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
-    const GrRectBlurEffect& s = sBase.cast<GrRectBlurEffect>();
-    return this->getSigma() == s.getSigma() && this->getRect() == s.getRect();
-}
-
-void GrRectBlurEffect::onComputeInvariantOutput(GrInvariantOutput* inout) const {
-    inout->mulByUnknownSingleComponent();
-}
-
-GR_DEFINE_FRAGMENT_PROCESSOR_TEST(GrRectBlurEffect);
-
-const GrFragmentProcessor* GrRectBlurEffect::TestCreate(GrProcessorTestData* d) {
-    float sigma = d->fRandom->nextRangeF(3,8);
-    float width = d->fRandom->nextRangeF(200,300);
-    float height = d->fRandom->nextRangeF(200,300);
-    return GrRectBlurEffect::Create(d->fContext->textureProvider(), SkRect::MakeWH(width, height),
-                                    sigma);
-}
-
-
-bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrTextureProvider* texProvider,
-                                               GrDrawContext* drawContext,
-                                               GrPaint* grp,
+bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrContext* context,
+                                               GrRenderTargetContext* renderTargetContext,
+                                               GrPaint&& paint,
                                                const GrClip& clip,
                                                const SkMatrix& viewMatrix,
                                                const SkStrokeRec& strokeRec,
                                                const SkPath& path) const {
-    SkASSERT(drawContext);
+    SkASSERT(renderTargetContext);
 
     if (fBlurStyle != kNormal_SkBlurStyle) {
         return false;
@@ -862,16 +774,17 @@ bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrTextureProvider* texProvider,
 
     SkScalar xformedSigma = this->computeXformedSigma(viewMatrix);
 
-    SkAutoTUnref<const GrFragmentProcessor> fp;
+    GrProxyProvider* proxyProvider = context->contextPriv().proxyProvider();
+    std::unique_ptr<GrFragmentProcessor> fp;
 
     SkRect rect;
     if (path.isRect(&rect)) {
-        int pad = SkScalarCeilToInt(6*xformedSigma)/2;
-        rect.outset(SkIntToScalar(pad), SkIntToScalar(pad));
+        SkScalar pad = 3.0f * xformedSigma;
+        rect.outset(pad, pad);
 
-        fp.reset(GrRectBlurEffect::Create(texProvider, rect, xformedSigma));
+        fp = GrRectBlurEffect::Make(proxyProvider, rect, xformedSigma);
     } else if (path.isOval(&rect) && SkScalarNearlyEqual(rect.width(), rect.height())) {
-        fp.reset(GrCircleBlurFragmentProcessor::Create(texProvider, rect, xformedSigma));
+        fp = GrCircleBlurFragmentProcessor::Make(proxyProvider, rect, xformedSigma);
 
         // expand the rect for the coverage geometry
         int pad = SkScalarCeilToInt(6*xformedSigma)/2;
@@ -884,272 +797,26 @@ bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrTextureProvider* texProvider,
         return false;
     }
 
-    grp->addCoverageFragmentProcessor(fp);
-
     SkMatrix inverse;
     if (!viewMatrix.invert(&inverse)) {
         return false;
     }
 
-    drawContext->fillRectWithLocalMatrix(clip, *grp, SkMatrix::I(), rect, inverse);
+    paint.addCoverageFragmentProcessor(std::move(fp));
+    renderTargetContext->fillRectWithLocalMatrix(clip, std::move(paint), GrAA::kNo, SkMatrix::I(),
+                                                 rect, inverse);
     return true;
 }
 
-//////////////////////////////////////////////////////////////////////////////
-
-class GrRRectBlurEffect : public GrFragmentProcessor {
-public:
-
-    static const GrFragmentProcessor* Create(GrTextureProvider*, float sigma, const SkRRect&);
-
-    virtual ~GrRRectBlurEffect() {};
-    const char* name() const override { return "GrRRectBlur"; }
-
-    const SkRRect& getRRect() const { return fRRect; }
-    float getSigma() const { return fSigma; }
-
-private:
-    GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
-
-    GrRRectBlurEffect(float sigma, const SkRRect&, GrTexture* profileTexture);
-
-    virtual void onGetGLSLProcessorKey(const GrGLSLCaps& caps,
-                                       GrProcessorKeyBuilder* b) const override;
-
-    bool onIsEqual(const GrFragmentProcessor& other) const override;
-
-    void onComputeInvariantOutput(GrInvariantOutput* inout) const override;
-
-    SkRRect             fRRect;
-    float               fSigma;
-    GrTextureAccess     fNinePatchAccess;
-
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
-
-    typedef GrFragmentProcessor INHERITED;
-};
-
-
-const GrFragmentProcessor* GrRRectBlurEffect::Create(GrTextureProvider* texProvider, float sigma,
-                                                     const SkRRect& rrect) {
-    if (rrect.isCircle()) {
-        return GrCircleBlurFragmentProcessor::Create(texProvider, rrect.rect(), sigma);
-    }
-
-    if (!rrect.isSimpleCircular()) {
-        return nullptr;
-    }
-
-    // Make sure we can successfully ninepatch this rrect -- the blur sigma has to be
-    // sufficiently small relative to both the size of the corner radius and the
-    // width (and height) of the rrect.
-
-    unsigned int blurRadius = 3*SkScalarCeilToInt(sigma-1/6.0f);
-    unsigned int cornerRadius = SkScalarCeilToInt(rrect.getSimpleRadii().x());
-    if (cornerRadius + blurRadius > rrect.width()/2 ||
-        cornerRadius + blurRadius > rrect.height()/2) {
-        return nullptr;
-    }
-
-    static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
-    GrUniqueKey key;
-    GrUniqueKey::Builder builder(&key, kDomain, 2);
-    builder[0] = blurRadius;
-    builder[1] = cornerRadius;
-    builder.finish();
-
-    SkAutoTUnref<GrTexture> blurNinePatchTexture(texProvider->findAndRefTextureByUniqueKey(key));
-
-    if (!blurNinePatchTexture) {
-        SkMask mask;
-
-        unsigned int smallRectSide = 2*(blurRadius + cornerRadius) + 1;
-
-        mask.fBounds = SkIRect::MakeWH(smallRectSide, smallRectSide);
-        mask.fFormat = SkMask::kA8_Format;
-        mask.fRowBytes = mask.fBounds.width();
-        mask.fImage = SkMask::AllocImage(mask.computeTotalImageSize());
-        SkAutoMaskFreeImage amfi(mask.fImage);
-
-        memset(mask.fImage, 0, mask.computeTotalImageSize());
-
-        SkRect smallRect;
-        smallRect.setWH(SkIntToScalar(smallRectSide), SkIntToScalar(smallRectSide));
-
-        SkRRect smallRRect;
-        smallRRect.setRectXY(smallRect, SkIntToScalar(cornerRadius), SkIntToScalar(cornerRadius));
-
-        SkPath path;
-        path.addRRect(smallRRect);
-
-        SkDraw::DrawToMask(path, &mask.fBounds, nullptr, nullptr, &mask,
-                           SkMask::kJustRenderImage_CreateMode, SkPaint::kFill_Style);
-
-        SkMask blurredMask;
-        if (!SkBlurMask::BoxBlur(&blurredMask, mask, sigma, kNormal_SkBlurStyle,
-                                 kHigh_SkBlurQuality, nullptr, true)) {
-            return nullptr;
-        }
-
-        unsigned int texSide = smallRectSide + 2*blurRadius;
-        GrSurfaceDesc texDesc;
-        texDesc.fWidth = texSide;
-        texDesc.fHeight = texSide;
-        texDesc.fConfig = kAlpha_8_GrPixelConfig;
-
-        blurNinePatchTexture.reset(
-            texProvider->createTexture(texDesc, true, blurredMask.fImage, 0));
-        SkMask::FreeImage(blurredMask.fImage);
-        if (!blurNinePatchTexture) {
-            return nullptr;
-        }
-        texProvider->assignUniqueKeyToTexture(key, blurNinePatchTexture);
-    }
-    return new GrRRectBlurEffect(sigma, rrect, blurNinePatchTexture);
-}
-
-void GrRRectBlurEffect::onComputeInvariantOutput(GrInvariantOutput* inout) const {
-    inout->mulByUnknownSingleComponent();
-}
-
-GrRRectBlurEffect::GrRRectBlurEffect(float sigma, const SkRRect& rrect, GrTexture *ninePatchTexture)
-    : fRRect(rrect),
-      fSigma(sigma),
-      fNinePatchAccess(ninePatchTexture) {
-    this->initClassID<GrRRectBlurEffect>();
-    this->addTextureAccess(&fNinePatchAccess);
-    this->setWillReadFragmentPosition();
-}
-
-bool GrRRectBlurEffect::onIsEqual(const GrFragmentProcessor& other) const {
-    const GrRRectBlurEffect& rrbe = other.cast<GrRRectBlurEffect>();
-    return fRRect.getSimpleRadii().fX == rrbe.fRRect.getSimpleRadii().fX && fSigma == rrbe.fSigma;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-
-GR_DEFINE_FRAGMENT_PROCESSOR_TEST(GrRRectBlurEffect);
-
-const GrFragmentProcessor* GrRRectBlurEffect::TestCreate(GrProcessorTestData* d) {
-    SkScalar w = d->fRandom->nextRangeScalar(100.f, 1000.f);
-    SkScalar h = d->fRandom->nextRangeScalar(100.f, 1000.f);
-    SkScalar r = d->fRandom->nextRangeF(1.f, 9.f);
-    SkScalar sigma = d->fRandom->nextRangeF(1.f,10.f);
-    SkRRect rrect;
-    rrect.setRectXY(SkRect::MakeWH(w, h), r, r);
-    return GrRRectBlurEffect::Create(d->fContext->textureProvider(), sigma, rrect);
-}
-
-//////////////////////////////////////////////////////////////////////////////
-
-class GrGLRRectBlurEffect : public GrGLSLFragmentProcessor {
-public:
-    GrGLRRectBlurEffect(const GrProcessor&) {}
-
-    virtual void emitCode(EmitArgs&) override;
-
-protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
-
-private:
-    GrGLSLProgramDataManager::UniformHandle fProxyRectUniform;
-    GrGLSLProgramDataManager::UniformHandle fCornerRadiusUniform;
-    GrGLSLProgramDataManager::UniformHandle fBlurRadiusUniform;
-    typedef GrGLSLFragmentProcessor INHERITED;
-};
-
-void GrGLRRectBlurEffect::emitCode(EmitArgs& args) {
-    const char *rectName;
-    const char *cornerRadiusName;
-    const char *blurRadiusName;
-
-    GrGLSLUniformHandler* uniformHandler = args.fUniformHandler;
-    // The proxy rect has left, top, right, and bottom edges correspond to
-    // components x, y, z, and w, respectively.
-
-    fProxyRectUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                                   kVec4f_GrSLType,
-                                                   kDefault_GrSLPrecision,
-                                                   "proxyRect",
-                                                   &rectName);
-    fCornerRadiusUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                                      kFloat_GrSLType,
-                                                      kDefault_GrSLPrecision,
-                                                      "cornerRadius",
-                                                      &cornerRadiusName);
-    fBlurRadiusUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                                    kFloat_GrSLType,
-                                                    kDefault_GrSLPrecision,
-                                                    "blurRadius",
-                                                    &blurRadiusName);
-
-    GrGLSLFragmentBuilder* fragBuilder = args.fFragBuilder;
-    const char* fragmentPos = fragBuilder->fragmentPosition();
-
-    // warp the fragment position to the appropriate part of the 9patch blur texture
-
-    fragBuilder->codeAppendf("vec2 rectCenter = (%s.xy + %s.zw)/2.0;", rectName, rectName);
-    fragBuilder->codeAppendf("vec2 translatedFragPos = %s.xy - %s.xy;", fragmentPos, rectName);
-    fragBuilder->codeAppendf("float threshold = %s + 2.0*%s;", cornerRadiusName, blurRadiusName);
-    fragBuilder->codeAppendf("vec2 middle = %s.zw - %s.xy - 2.0*threshold;", rectName, rectName);
-
-    fragBuilder->codeAppendf(
-           "if (translatedFragPos.x >= threshold && translatedFragPos.x < (middle.x+threshold)) {");
-    fragBuilder->codeAppendf("translatedFragPos.x = threshold;\n");
-    fragBuilder->codeAppendf("} else if (translatedFragPos.x >= (middle.x + threshold)) {");
-    fragBuilder->codeAppendf("translatedFragPos.x -= middle.x - 1.0;");
-    fragBuilder->codeAppendf("}");
-
-    fragBuilder->codeAppendf(
-            "if (translatedFragPos.y > threshold && translatedFragPos.y < (middle.y+threshold)) {");
-    fragBuilder->codeAppendf("translatedFragPos.y = threshold;");
-    fragBuilder->codeAppendf("} else if (translatedFragPos.y >= (middle.y + threshold)) {");
-    fragBuilder->codeAppendf("translatedFragPos.y -= middle.y - 1.0;");
-    fragBuilder->codeAppendf("}");
-
-    fragBuilder->codeAppendf("vec2 proxyDims = vec2(2.0*threshold+1.0);");
-    fragBuilder->codeAppendf("vec2 texCoord = translatedFragPos / proxyDims;");
-
-    fragBuilder->codeAppendf("%s = ", args.fOutputColor);
-    fragBuilder->appendTextureLookupAndModulate(args.fInputColor, args.fSamplers[0], "texCoord");
-    fragBuilder->codeAppend(";");
-}
-
-void GrGLRRectBlurEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                    const GrProcessor& proc) {
-    const GrRRectBlurEffect& brre = proc.cast<GrRRectBlurEffect>();
-    SkRRect rrect = brre.getRRect();
-
-    float blurRadius = 3.f*SkScalarCeilToScalar(brre.getSigma()-1/6.0f);
-    pdman.set1f(fBlurRadiusUniform, blurRadius);
-
-    SkRect rect = rrect.getBounds();
-    rect.outset(blurRadius, blurRadius);
-    pdman.set4f(fProxyRectUniform, rect.fLeft, rect.fTop, rect.fRight, rect.fBottom);
-
-    SkScalar radius = 0;
-    SkASSERT(rrect.isSimpleCircular() || rrect.isRect());
-    radius = rrect.getSimpleRadii().fX;
-    pdman.set1f(fCornerRadiusUniform, radius);
-}
-
-void GrRRectBlurEffect::onGetGLSLProcessorKey(const GrGLSLCaps& caps,
-                                              GrProcessorKeyBuilder* b) const {
-    GrGLRRectBlurEffect::GenKey(*this, caps, b);
-}
-
-GrGLSLFragmentProcessor* GrRRectBlurEffect::onCreateGLSLInstance() const {
-    return new GrGLRRectBlurEffect(*this);
-}
-
-bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrTextureProvider* texProvider,
-                                                    GrDrawContext* drawContext,
-                                                    GrPaint* grp,
+bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrContext* context,
+                                                    GrRenderTargetContext* renderTargetContext,
+                                                    GrPaint&& paint,
                                                     const GrClip& clip,
                                                     const SkMatrix& viewMatrix,
                                                     const SkStrokeRec& strokeRec,
-                                                    const SkRRect& rrect) const {
-    SkASSERT(drawContext);
+                                                    const SkRRect& srcRRect,
+                                                    const SkRRect& devRRect) const {
+    SkASSERT(renderTargetContext);
 
     if (fBlurStyle != kNormal_SkBlurStyle) {
         return false;
@@ -1159,26 +826,92 @@ bool SkBlurMaskFilterImpl::directFilterRRectMaskGPU(GrTextureProvider* texProvid
         return false;
     }
 
+    GrProxyProvider* proxyProvider = context->contextPriv().proxyProvider();
     SkScalar xformedSigma = this->computeXformedSigma(viewMatrix);
-    float extra=3.f*SkScalarCeilToScalar(xformedSigma-1/6.0f);
 
-    SkRect proxyRect = rrect.rect();
-    proxyRect.outset(extra, extra);
+    if (devRRect.isRect() || SkRRectPriv::IsCircle(devRRect)) {
+        std::unique_ptr<GrFragmentProcessor> fp;
+        if (devRRect.isRect()) {
+            SkScalar pad = 3.0f * xformedSigma;
+            const SkRect dstCoverageRect = devRRect.rect().makeOutset(pad, pad);
 
-    SkAutoTUnref<const GrFragmentProcessor> fp(GrRRectBlurEffect::Create(texProvider, 
-                                                                         xformedSigma, rrect));
+            fp = GrRectBlurEffect::Make(proxyProvider, dstCoverageRect, xformedSigma);
+        } else {
+            fp = GrCircleBlurFragmentProcessor::Make(proxyProvider,
+                                                     devRRect.rect(), xformedSigma);
+        }
+
+        if (!fp) {
+            return false;
+        }
+        paint.addCoverageFragmentProcessor(std::move(fp));
+
+        SkRect srcProxyRect = srcRRect.rect();
+        SkScalar outsetX = 3.0f*fSigma;
+        SkScalar outsetY = 3.0f*fSigma;
+        if (this->ignoreXform()) {
+            // When we're ignoring the CTM the padding added to the source rect also needs to ignore
+            // the CTM. The matrix passed in here is guaranteed to be just scale and translate so we
+            // can just grab the X and Y scales off the matrix and pre-undo the scale.
+            outsetX /= viewMatrix.getScaleX();
+            outsetY /= viewMatrix.getScaleY();
+        }
+        srcProxyRect.outset(outsetX, outsetY);
+
+        renderTargetContext->drawRect(clip, std::move(paint), GrAA::kNo, viewMatrix, srcProxyRect);
+        return true;
+    }
+
+    auto fp = GrRRectBlurEffect::Make(context, fSigma, xformedSigma, srcRRect, devRRect);
     if (!fp) {
         return false;
     }
 
-    grp->addCoverageFragmentProcessor(fp);
+    if (!this->ignoreXform()) {
+        SkRect srcProxyRect = srcRRect.rect();
+        srcProxyRect.outset(3.0f*fSigma, 3.0f*fSigma);
 
-    SkMatrix inverse;
-    if (!viewMatrix.invert(&inverse)) {
-        return false;
+        sk_sp<SkVertices> vertices = nullptr;
+        SkRect temp = fOccluder;
+
+        if (!temp.isEmpty() && (srcProxyRect.contains(temp) || temp.intersect(srcProxyRect))) {
+            SkVertices::Builder builder(SkVertices::kTriangles_VertexMode, 8, 24, 0);
+            srcProxyRect.toQuad(builder.positions());
+            temp.toQuad(builder.positions() + 4);
+
+            static const uint16_t ringI[24] = { 0, 1, 5, 5, 4, 0,
+                                                1, 2, 6, 6, 5, 1,
+                                                2, 3, 7, 7, 6, 2,
+                                                3, 0, 4, 4, 7, 3 };
+            memcpy(builder.indices(), ringI, sizeof(ringI));
+            vertices = builder.detach();
+        } else {
+            // full rect case
+            SkVertices::Builder builder(SkVertices::kTriangles_VertexMode, 4, 6, 0);
+            srcProxyRect.toQuad(builder.positions());
+
+            static const uint16_t fullI[6] = { 0, 1, 2, 0, 2, 3 };
+            memcpy(builder.indices(), fullI, sizeof(fullI));
+            vertices = builder.detach();
+        }
+
+        paint.addCoverageFragmentProcessor(std::move(fp));
+        renderTargetContext->drawVertices(clip, std::move(paint), viewMatrix, std::move(vertices));
+    } else {
+        SkMatrix inverse;
+        if (!viewMatrix.invert(&inverse)) {
+            return false;
+        }
+
+        float extra=3.f*SkScalarCeilToScalar(xformedSigma-1/6.0f);
+        SkRect proxyRect = devRRect.rect();
+        proxyRect.outset(extra, extra);
+
+        paint.addCoverageFragmentProcessor(std::move(fp));
+        renderTargetContext->fillRectWithLocalMatrix(clip, std::move(paint), GrAA::kNo,
+                                                     SkMatrix::I(), proxyRect, inverse);
     }
 
-    drawContext->fillRectWithLocalMatrix(clip, *grp, SkMatrix::I(), proxyRect, inverse);
     return true;
 }
 
@@ -1191,8 +924,8 @@ bool SkBlurMaskFilterImpl::canFilterMaskGPU(const SkRRect& devRRect,
         return false;
     }
 
-    // We always do circles on the GPU
-    if (!devRRect.isCircle()) {
+    // We always do circles and simple circular rrects on the GPU
+    if (!SkRRectPriv::IsCircle(devRRect) && !SkRRectPriv::IsSimpleCircular(devRRect)) {
         static const SkScalar kMIN_GPU_BLUR_SIZE  = SkIntToScalar(64);
         static const SkScalar kMIN_GPU_BLUR_SIGMA = SkIntToScalar(32);
 
@@ -1224,14 +957,12 @@ bool SkBlurMaskFilterImpl::canFilterMaskGPU(const SkRRect& devRRect,
     return true;
 }
 
-bool SkBlurMaskFilterImpl::filterMaskGPU(GrTexture* src,
-                                         const SkMatrix& ctm,
-                                         const SkRect& maskRect,
-                                         GrTexture** result,
-                                         bool canOverwriteSrc) const {
-    SkRect clipRect = SkRect::MakeWH(maskRect.width(), maskRect.height());
-
-    GrContext* context = src->getContext();
+sk_sp<GrTextureProxy> SkBlurMaskFilterImpl::filterMaskGPU(GrContext* context,
+                                                          sk_sp<GrTextureProxy> srcProxy,
+                                                          const SkMatrix& ctm,
+                                                          const SkIRect& maskRect) const {
+    // 'maskRect' isn't snapped to the UL corner but the mask in 'src' is.
+    const SkIRect clipRect = SkIRect::MakeWH(maskRect.width(), maskRect.height());
 
     SkScalar xformedSigma = this->computeXformedSigma(ctm);
     SkASSERT(xformedSigma > 0);
@@ -1239,18 +970,24 @@ bool SkBlurMaskFilterImpl::filterMaskGPU(GrTexture* src,
     // If we're doing a normal blur, we can clobber the pathTexture in the
     // gaussianBlur.  Otherwise, we need to save it for later compositing.
     bool isNormalBlur = (kNormal_SkBlurStyle == fBlurStyle);
-    *result = SkGpuBlurUtils::GaussianBlur(context, src, isNormalBlur && canOverwriteSrc,
-                                           clipRect, nullptr, xformedSigma, xformedSigma);
-    if (nullptr == *result) {
-        return false;
+    sk_sp<GrRenderTargetContext> renderTargetContext(
+              SkGpuBlurUtils::GaussianBlur(context,
+                                           srcProxy,
+                                           nullptr,
+                                           clipRect,
+                                           SkIRect::EmptyIRect(),
+                                           xformedSigma,
+                                           xformedSigma,
+                                           GrTextureDomain::kIgnore_Mode));
+    if (!renderTargetContext) {
+        return nullptr;
     }
 
     if (!isNormalBlur) {
         GrPaint paint;
-        SkMatrix matrix;
-        matrix.setIDiv(src->width(), src->height());
         // Blend pathTexture over blurTexture.
-        paint.addCoverageFragmentProcessor(GrSimpleTextureEffect::Create(src, matrix))->unref();
+        paint.addCoverageFragmentProcessor(GrSimpleTextureEffect::Make(std::move(srcProxy),
+                                                                       SkMatrix::I()));
         if (kInner_SkBlurStyle == fBlurStyle) {
             // inner:  dst = dst * src
             paint.setCoverageSetOpXPFactory(SkRegion::kIntersect_Op);
@@ -1266,15 +1003,11 @@ bool SkBlurMaskFilterImpl::filterMaskGPU(GrTexture* src,
             paint.setCoverageSetOpXPFactory(SkRegion::kReplace_Op);
         }
 
-        SkAutoTUnref<GrDrawContext> drawContext(context->drawContext((*result)->asRenderTarget()));
-        if (!drawContext) {
-            return false;
-        }
-
-        drawContext->drawRect(GrClip::WideOpen(), paint, SkMatrix::I(), clipRect);
+        renderTargetContext->drawRect(GrNoClip(), std::move(paint), GrAA::kNo, SkMatrix::I(),
+                                      SkRect::Make(clipRect));
     }
 
-    return true;
+    return renderTargetContext->asTextureProxyRef();
 }
 
 #endif // SK_SUPPORT_GPU
@@ -1296,9 +1029,7 @@ void SkBlurMaskFilterImpl::toString(SkString* str) const {
     str->append("flags: (");
     if (fBlurFlags) {
         bool needSeparator = false;
-        SkAddFlagToString(str,
-                          SkToBool(fBlurFlags & SkBlurMaskFilter::kIgnoreTransform_BlurFlag),
-                          "IgnoreXform", &needSeparator);
+        SkAddFlagToString(str, this->ignoreXform(), "IgnoreXform", &needSeparator);
         SkAddFlagToString(str,
                           SkToBool(fBlurFlags & SkBlurMaskFilter::kHighQuality_BlurFlag),
                           "HighQuality", &needSeparator);

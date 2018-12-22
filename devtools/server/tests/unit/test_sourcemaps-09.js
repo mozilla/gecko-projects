@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Check that source maps and breakpoints work with minified javascript.
  */
@@ -9,51 +11,43 @@ var gDebuggee;
 var gClient;
 var gThreadClient;
 
-function run_test()
-{
+function run_test() {
   initTestDebuggerServer();
   gDebuggee = addTestGlobal("test-source-map");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-source-map", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_minified();
-    });
+    attachTestTabAndResume(gClient, "test-source-map",
+                           function(response, tabClient, threadClient) {
+                             gThreadClient = threadClient;
+                             test_minified();
+                           });
   });
   do_test_pending();
 }
 
-function test_minified()
-{
-  let newSourceFired = false;
+function test_minified() {
+  gThreadClient.addOneTimeListener("newSource", function _onNewSource(event, packet) {
+    Assert.equal(event, "newSource");
+    Assert.equal(packet.type, "newSource");
+    Assert.ok(!!packet.source);
 
-  gThreadClient.addOneTimeListener("newSource", function _onNewSource(aEvent, aPacket) {
-    do_check_eq(aEvent, "newSource");
-    do_check_eq(aPacket.type, "newSource");
-    do_check_true(!!aPacket.source);
-
-    do_check_eq(aPacket.source.url, "http://example.com/foo.js",
-                "The new source should be foo.js");
-    do_check_eq(aPacket.source.url.indexOf("foo.min.js"), -1,
-                "The new source should not be the minified file");
-
-    newSourceFired = true;
+    Assert.equal(packet.source.url, "http://example.com/foo.js",
+                 "The new source should be foo.js");
+    Assert.equal(packet.source.url.indexOf("foo.min.js"), -1,
+                 "The new source should not be the minified file");
   });
 
-  gThreadClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-    do_check_eq(aEvent, "paused");
-    do_check_eq(aPacket.why.type, "debuggerStatement");
+  gThreadClient.addOneTimeListener("paused", function(event, packet) {
+    Assert.equal(event, "paused");
+    Assert.equal(packet.why.type, "debuggerStatement");
 
-    let location = {
+    const location = {
       line: 5
     };
 
     getSource(gThreadClient, "http://example.com/foo.js").then(source => {
-      source.setBreakpoint(location, function (aResponse, bpClient) {
-        do_check_true(!aResponse.error);
-        testHitBreakpoint();
-      });
-    })
+      source.setBreakpoint(location).then(() => testHitBreakpoint());
+    });
   });
 
   // This is the original foo.js, which was then minified with uglifyjs version
@@ -71,18 +65,19 @@ function test_minified()
   //   }
   // }());
 
-  let code = '(function(){debugger;function r(r){var n=r+r;var u=null;return n}for(var n=0;n<10;n++){r(n)}})();\n//# sourceMappingURL=data:text/json,{"file":"foo.min.js","version":3,"sources":["foo.js"],"names":["foo","n","bar","unused","i"],"mappings":"CAAC,WACC,QACA,SAASA,GAAIC,GACX,GAAIC,GAAMD,EAAIA,CACd,IAAIE,GAAS,IACb,OAAOD,GAET,IAAK,GAAIE,GAAI,EAAGA,EAAI,GAAIA,IAAK,CAC3BJ,EAAII"}';
+  // eslint-disable-next-line max-len
+  const code = '(function(){debugger;function r(r){var n=r+r;var u=null;return n}for(var n=0;n<10;n++){r(n)}})();\n//# sourceMappingURL=data:text/json,{"file":"foo.min.js","version":3,"sources":["foo.js"],"names":["foo","n","bar","unused","i"],"mappings":"CAAC,WACC,QACA,SAASA,GAAIC,GACX,GAAIC,GAAMD,EAAIA,CACd,IAAIE,GAAS,IACb,OAAOD,GAET,IAAK,GAAIE,GAAI,EAAGA,EAAI,GAAIA,IAAK,CAC3BJ,EAAII"}';
 
-  Components.utils.evalInSandbox(code, gDebuggee, "1.8",
-                                 "http://example.com/foo.min.js", 1);
+  Cu.evalInSandbox(code, gDebuggee, "1.8",
+                   "http://example.com/foo.min.js", 1);
 }
 
-function testHitBreakpoint(timesHit=0) {
-  gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
+function testHitBreakpoint(timesHit = 0) {
+  gClient.addOneTimeListener("paused", function(event, packet) {
     ++timesHit;
 
-    do_check_eq(aEvent, "paused");
-    do_check_eq(aPacket.why.type, "breakpoint");
+    Assert.equal(event, "paused");
+    Assert.equal(packet.why.type, "breakpoint");
 
     if (timesHit === 10) {
       gThreadClient.resume(() => finishClient(gClient));

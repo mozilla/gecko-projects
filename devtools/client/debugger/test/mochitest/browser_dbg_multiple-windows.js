@@ -15,10 +15,8 @@ var gNewTab, gNewWindow;
 var gClient;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -33,9 +31,9 @@ function test() {
       .then(testNewWindow)
       .then(testFocusFirst)
       .then(testRemoveTab)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -47,10 +45,10 @@ function testFirstTab(aTab) {
   gNewTab = aTab;
   ok(!!gNewTab, "Second tab created.");
 
-  gClient.listTabs(aResponse => {
-    let tabActor = aResponse.tabs.filter(aGrip => aGrip.url == TAB1_URL).pop();
-    ok(tabActor,
-      "Should find a tab actor for the first tab.");
+  gClient.listTabs().then(aResponse => {
+    let targetActor = aResponse.tabs.filter(aGrip => aGrip.url == TAB1_URL).pop();
+    ok(targetActor,
+      "Should find a target actor for the first tab.");
 
     is(aResponse.selected, 1,
       "The first tab is selected.");
@@ -77,7 +75,7 @@ function testNewWindow(aWindow) {
   let isLoaded = promise.defer();
 
   promise.all([isActive.promise, isLoaded.promise]).then(() => {
-    gClient.listTabs(aResponse => {
+    gClient.listTabs().then(aResponse => {
       is(aResponse.selected, 2,
         "The second tab is selected.");
 
@@ -117,7 +115,7 @@ function testFocusFirst() {
   let deferred = promise.defer();
 
   once(window.content, "focus").then(() => {
-    gClient.listTabs(aResponse => {
+    gClient.listTabs().then(aResponse => {
       is(aResponse.selected, 1,
         "The first tab is selected after focusing on it.");
 
@@ -136,7 +134,7 @@ function testRemoveTab() {
   gNewWindow.close();
 
   // give it time to close
-  executeSoon(function() { continue_remove_tab(deferred) });
+  executeSoon(function () { continue_remove_tab(deferred); });
   return deferred.promise;
 }
 
@@ -144,7 +142,7 @@ function continue_remove_tab(deferred)
 {
   removeTab(gNewTab);
 
-  gClient.listTabs(aResponse => {
+  gClient.listTabs().then(aResponse => {
     // Verify that tabs are no longer included in listTabs.
     let foundTab1 = aResponse.tabs.some(aGrip => aGrip.url == TAB1_URL);
     let foundTab2 = aResponse.tabs.some(aGrip => aGrip.url == TAB2_URL);
@@ -158,13 +156,7 @@ function continue_remove_tab(deferred)
   });
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gNewTab = null;
   gNewWindow = null;
   gClient = null;

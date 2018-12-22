@@ -9,9 +9,10 @@
 
 #include "nsISupports.h"
 #include "nsCOMPtr.h"
+#include "mozilla/RangeBoundary.h"
 
 class nsINode;
-class nsIDOMRange;
+class nsRange;
 
 #define NS_ICONTENTITERATOR_IID \
 { 0x2550078e, 0xae87, 0x4914, \
@@ -29,7 +30,22 @@ public:
   /* Initializes an iterator for the subtree defined by the range aRange
      Subclasses should make sure they implement both of these!
    */
-  virtual nsresult Init(nsIDOMRange* aRange) = 0;
+  virtual nsresult Init(nsRange* aRange) = 0;
+
+  /* Initializes an iterator for the subtree between
+     aStartContainer/aStartOffset and aEndContainer/aEndOffset
+     Callers should guarantee that the start point and end point are in
+     document order.
+   */
+  virtual nsresult Init(nsINode* aStartContainer, uint32_t aStartOffset,
+                        nsINode* aEndContainer, uint32_t aEndOffset) = 0;
+
+  /* Initializes an iterator for the subtree between aStart and aEnd.
+     Callers should guarantee that the start point and end point are in
+     document order.
+   */
+  virtual nsresult Init(const mozilla::RawRangeBoundary& aStart,
+                        const mozilla::RawRangeBoundary& aEnd) = 0;
 
   /** First will reset the list.
    */

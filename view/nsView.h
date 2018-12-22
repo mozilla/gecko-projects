@@ -23,7 +23,7 @@ class nsIFrame;
 
 // Enumerated type to indicate the visibility of a layer.
 // hide - the layer is not shown.
-// show - the layer is shown irrespective of the visibility of 
+// show - the layer is shown irrespective of the visibility of
 //        the layer's parent.
 enum nsViewVisibility {
   nsViewVisibility_kHide = 0,
@@ -61,7 +61,9 @@ public:
   typedef mozilla::LayoutDeviceIntRect LayoutDeviceIntRect;
   typedef mozilla::LayoutDeviceIntRegion LayoutDeviceIntRegion;
 
-  NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
+  void operator delete(void* ptr) {
+    ::operator delete(ptr);
+  }
 
   /**
    * Get the view manager which "owns" the view.
@@ -134,7 +136,7 @@ public:
    *
    * If aOther is null, this will return the offset of |this| from the
    * root of the viewmanager tree.
-   * 
+   *
    * This function is fastest when aOther is an ancestor of |this|.
    *
    * NOTE: this actually returns the offset from aOther to |this|, but
@@ -297,9 +299,9 @@ public:
    * Returns true if the view has a widget associated with it.
    */
   bool HasWidget() const { return mWindow != nullptr; }
-  
-  void SetForcedRepaint(bool aForceRepaint) { 
-    mForcedRepaint = aForceRepaint; 
+
+  void SetForcedRepaint(bool aForceRepaint) {
+    mForcedRepaint = aForceRepaint;
   }
 
   void SetNeedsWindowPropertiesSync();
@@ -386,7 +388,8 @@ public:
   virtual bool PaintWindow(nsIWidget* aWidget,
                            LayoutDeviceIntRegion aRegion) override;
   virtual void DidPaintWindow() override;
-  virtual void DidCompositeWindow(const mozilla::TimeStamp& aCompositeStart,
+  virtual void DidCompositeWindow(mozilla::layers::TransactionId aTransactionId,
+                                  const mozilla::TimeStamp& aCompositeStart,
                                   const mozilla::TimeStamp& aCompositeEnd) override;
   virtual void RequestRepaint() override;
   virtual nsEventStatus HandleEvent(mozilla::WidgetGUIEvent* aEvent,
@@ -457,11 +460,8 @@ private:
 
   void NotifyEffectiveVisibilityChanged(bool aEffectivelyVisible);
 
-  // Update the cached RootViewManager for all view manager descendents,
-  // If the hierarchy is being removed, aViewManagerParent points to the view
-  // manager for the hierarchy's old parent, and will have its mouse grab
-  // released if it points to any view in this view hierarchy.
-  void InvalidateHierarchy(nsViewManager *aViewManagerParent);
+  // Update the cached RootViewManager for all view manager descendents.
+  void InvalidateHierarchy();
 
   nsViewManager    *mViewManager;
   nsView           *mParent;

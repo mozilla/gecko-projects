@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -22,16 +22,23 @@ LOCAL_INCLUDES += [
     '/netwerk/dns',
     '/netwerk/mime',
     '/netwerk/protocol/about',
-    '/netwerk/protocol/app',
+    '/netwerk/protocol/data',
+    '/netwerk/protocol/file',
+    '/netwerk/protocol/ftp',
+    '/netwerk/protocol/http',
+    '/netwerk/protocol/res',
+    '/netwerk/protocol/viewsource',
+    '/netwerk/protocol/websocket',
+    '/netwerk/protocol/wyciwyg',
     '/netwerk/socket',
     '/netwerk/streamconv',
     '/netwerk/streamconv/converters',
 ]
 
-protocols = CONFIG['NECKO_PROTOCOLS']
-LOCAL_INCLUDES += sorted([
-    '/netwerk/protocol/%s' % d for d in protocols if d != 'about'
-])
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+    LOCAL_INCLUDES += [
+        '/netwerk/protocol/gio',
+    ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     LOCAL_INCLUDES += [
@@ -41,11 +48,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     LOCAL_INCLUDES += [
         '/netwerk/system/mac',
-    ]
-
-if CONFIG['MOZ_ENABLE_QTNETWORK']:
-    LOCAL_INCLUDES += [
-        '/netwerk/system/qt',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
@@ -68,11 +70,7 @@ if CONFIG['NECKO_WIFI']:
         '/netwerk/wifi',
     ]
 
-if CONFIG['MOZ_RTSP']:
-    LOCAL_INCLUDES += [
-        '/netwerk/protocol/rtsp',
-    ]
-
 LOCAL_INCLUDES += [
     '!/netwerk/dns',
+    '/modules/brotli/dec',
 ]

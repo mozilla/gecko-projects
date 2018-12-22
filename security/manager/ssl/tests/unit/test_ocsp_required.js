@@ -20,7 +20,7 @@ function run_test() {
   // get a TLS connection.
   add_tls_server_setup("OCSPStaplingServer", "ocsp_certs");
 
-  let args = [["bad-signature", "default-ee", "unused"]];
+  let args = [["bad-signature", "default-ee", "unused", 0]];
   let ocspResponses = generateOCSPResponses(args, "ocsp_certs");
   let ocspResponseBadSignature = ocspResponses[0];
 
@@ -40,8 +40,7 @@ function run_test() {
   run_next_test();
 }
 
-function add_tests()
-{
+function add_tests() {
   add_connection_test("ocsp-stapling-none.example.com",
                       SEC_ERROR_OCSP_BAD_SIGNATURE);
   add_connection_test("ocsp-stapling-none.example.com",

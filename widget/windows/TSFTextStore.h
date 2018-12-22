@@ -6,13 +6,16 @@
 #ifndef TSFTextStore_h_
 #define TSFTextStore_h_
 
-#include "nsAutoPtr.h"
-#include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsIWidget.h"
+#include "nsString.h"
 #include "nsWindowBase.h"
+
 #include "WinUtils.h"
+#include "WritingModes.h"
+
 #include "mozilla/Attributes.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextRange.h"
@@ -43,6 +46,7 @@ class nsWindow;
 namespace mozilla {
 namespace widget {
 
+class TSFStaticSink;
 struct MSGResult;
 
 /*
@@ -53,6 +57,13 @@ class TSFTextStore final : public ITextStoreACP
                          , public ITfContextOwnerCompositionSink
                          , public ITfMouseTrackerACP
 {
+  friend class TSFStaticSink;
+private:
+  typedef IMENotification::SelectionChangeDataBase SelectionChangeDataBase;
+  typedef IMENotification::SelectionChangeData SelectionChangeData;
+  typedef IMENotification::TextChangeDataBase TextChangeDataBase;
+  typedef IMENotification::TextChangeData TextChangeData;
+
 public: /*IUnknown*/
   STDMETHODIMP          QueryInterface(REFIID, void**);
 
@@ -109,16 +120,17 @@ public:
                                  WPARAM& aWParam, LPARAM& aLParam,
                                  MSGResult& aResult);
 
-
   static void     SetIMEOpenState(bool);
   static bool     GetIMEOpenState(void);
 
   static void     CommitComposition(bool aDiscard)
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    if (sEnabledTextStore) {
-      sEnabledTextStore->CommitCompositionInternal(aDiscard);
+    if (!sEnabledTextStore) {
+      return;
     }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    textStore->CommitCompositionInternal(aDiscard);
   }
 
   static void SetInputContext(nsWindowBase* aWidget,
@@ -131,39 +143,54 @@ public:
   static nsresult OnTextChange(const IMENotification& aIMENotification)
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    return sEnabledTextStore ?
-      sEnabledTextStore->OnTextChangeInternal(aIMENotification) : NS_OK;
+    if (!sEnabledTextStore) {
+      return NS_OK;
+    }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    return textStore->OnTextChangeInternal(aIMENotification);
   }
 
   static nsresult OnSelectionChange(const IMENotification& aIMENotification)
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    return sEnabledTextStore ?
-      sEnabledTextStore->OnSelectionChangeInternal(aIMENotification) : NS_OK;
+    if (!sEnabledTextStore) {
+      return NS_OK;
+    }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    return textStore->OnSelectionChangeInternal(aIMENotification);
   }
 
   static nsresult OnLayoutChange()
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    return sEnabledTextStore ?
-      sEnabledTextStore->OnLayoutChangeInternal() : NS_OK;
+    if (!sEnabledTextStore) {
+      return NS_OK;
+    }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    return textStore->OnLayoutChangeInternal();
   }
 
   static nsresult OnUpdateComposition()
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    return sEnabledTextStore ?
-      sEnabledTextStore->OnUpdateCompositionInternal() : NS_OK;
+    if (!sEnabledTextStore) {
+      return NS_OK;
+    }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    return textStore->OnUpdateCompositionInternal();
   }
 
   static nsresult OnMouseButtonEvent(const IMENotification& aIMENotification)
   {
     NS_ASSERTION(IsInTSFMode(), "Not in TSF mode, shouldn't be called");
-    return sEnabledTextStore ?
-      sEnabledTextStore->OnMouseButtonEventInternal(aIMENotification) : NS_OK;
+    if (!sEnabledTextStore) {
+      return NS_OK;
+    }
+    RefPtr<TSFTextStore> textStore(sEnabledTextStore);
+    return textStore->OnMouseButtonEventInternal(aIMENotification);
   }
 
-  static nsIMEUpdatePreference GetIMEUpdatePreference();
+  static IMENotificationRequests GetIMENotificationRequests();
 
   // Returns the address of the pointer so that the TSF automatic test can
   // replace the system object with a custom implementation for testing.
@@ -181,11 +208,6 @@ public:
       default:
         return nullptr;
     }
-  }
-
-  static ITfMessagePump* GetMessagePump()
-  {
-    return sMessagePump;
   }
 
   static void* GetThreadManager()
@@ -213,7 +235,39 @@ public:
     return (IsComposing() && sEnabledTextStore->mWidget == aWidget);
   }
 
-  static bool IsIMM_IME();
+  static nsWindowBase* GetEnabledWindowBase()
+  {
+    return sEnabledTextStore ? sEnabledTextStore->mWidget.get() : nullptr;
+  }
+
+  /**
+   * Returns true if active keyboard layout is a legacy IMM-IME.
+   */
+  static bool IsIMM_IMEActive();
+
+  /**
+   * Returns true if active TIP is MS-IME for Japanese.
+   */
+  static bool IsMSJapaneseIMEActive();
+
+  /**
+   * Returns true if active TIP is Google Japanese Input.
+   * Note that if Google Japanese Input is installed as an IMM-IME,
+   * this return false even if Google Japanese Input is active.
+   * So, you may need to check IMMHandler::IsGoogleJapaneseInputActive() too.
+   */
+  static bool IsGoogleJapaneseInputActive();
+
+  /**
+   * Returns true if active TIP or IME is a black listed one and we should
+   * set input scope of URL bar to IS_DEFAULT rather than IS_URL.
+   */
+  static bool ShouldSetInputScopeOfURLBarToDefault();
+
+  /**
+   * Returns true if TSF may crash if GetSelection() returns E_FAIL.
+   */
+  static bool DoNotReturnErrorFromGetSelection();
 
 #ifdef DEBUG
   // Returns true when keyboard layout has IME (TIP).
@@ -226,11 +280,14 @@ protected:
 
   static bool CreateAndSetFocus(nsWindowBase* aFocusedWidget,
                                 const InputContext& aContext);
+  static void EnsureToDestroyAndReleaseEnabledTextStoreIf(
+                RefPtr<TSFTextStore>& aTextStore);
   static void MarkContextAsKeyboardDisabled(ITfContext* aContext);
   static void MarkContextAsEmpty(ITfContext* aContext);
 
-  bool     Init(nsWindowBase* aWidget);
-  bool     Destroy();
+  bool     Init(nsWindowBase* aWidget, const InputContext& aContext);
+  void     Destroy();
+  void     ReleaseTSFObjects();
 
   bool     IsReadLock(DWORD aLock) const
   {
@@ -258,9 +315,6 @@ protected:
   bool     InsertTextAtSelectionInternal(const nsAString& aInsertStr,
                                          TS_TEXTCHANGE* aTextChange);
   void     CommitCompositionInternal(bool);
-  nsresult OnTextChangeInternal(const IMENotification& aIMENotification);
-  nsresult OnSelectionChangeInternal(const IMENotification& aIMENotification);
-  nsresult OnMouseButtonEventInternal(const IMENotification& aIMENotification);
   HRESULT  GetDisplayAttribute(ITfProperty* aProperty,
                                ITfRange* aRange,
                                TF_DISPLAYATTRIBUTE* aResult);
@@ -292,10 +346,23 @@ protected:
   // MaybeFlushPendingNotifications() performs pending notifications to TSF.
   void     MaybeFlushPendingNotifications();
 
+  nsresult OnTextChangeInternal(const IMENotification& aIMENotification);
+  nsresult OnSelectionChangeInternal(const IMENotification& aIMENotification);
+  nsresult OnMouseButtonEventInternal(const IMENotification& aIMENotification);
   nsresult OnLayoutChangeInternal();
   nsresult OnUpdateCompositionInternal();
 
-  void     NotifyTSFOfTextChange(const TS_TEXTCHANGE& aTextChange);
+  // mPendingSelectionChangeData stores selection change data until notifying
+  // TSF of selection change.  If two or more selection changes occur, this
+  // stores the latest selection change data because only it is necessary.
+  SelectionChangeData mPendingSelectionChangeData;
+
+  // mPendingTextChangeData stores one or more text change data until notifying
+  // TSF of text change.  If two or more text changes occur, this merges
+  // every text change data.
+  TextChangeData mPendingTextChangeData;
+
+  void     NotifyTSFOfTextChange();
   void     NotifyTSFOfSelectionChange();
   bool     NotifyTSFOfLayoutChange();
   void     NotifyTSFOfLayoutChangeAgain();
@@ -330,6 +397,58 @@ protected:
   DWORD                        mLock;
   // 0 if no lock is queued, otherwise TS_LF_* indicating the queue lock
   DWORD                        mLockQueued;
+
+  uint32_t mHandlingKeyMessage;
+  void OnStartToHandleKeyMessage()
+  {
+    // If we're starting to handle another key message during handling a
+    // key message, let's assume that the handling key message is handled by
+    // TIP and it sends another key message for hacking something.
+    // Let's try to dispatch a keyboard event now.
+    // FYI: All callers of this method grab this instance with local variable.
+    //      So, even after calling MaybeDispatchKeyboardEventAsProcessedByIME(),
+    //      we're safe to access any members.
+    if (!mDestroyed && sHandlingKeyMsg && !sIsKeyboardEventDispatched) {
+      MaybeDispatchKeyboardEventAsProcessedByIME();
+    }
+    ++mHandlingKeyMessage;
+  }
+  void OnEndHandlingKeyMessage(bool aIsProcessedByTSF)
+  {
+    // If sHandlingKeyMsg has been handled by TSF or TIP and we're still
+    // alive, but we haven't dispatch keyboard event for it, let's fire it now.
+    // FYI: All callers of this method grab this instance with local variable.
+    //      So, even after calling MaybeDispatchKeyboardEventAsProcessedByIME(),
+    //      we're safe to access any members.
+    if (!mDestroyed && sHandlingKeyMsg &&
+        aIsProcessedByTSF && !sIsKeyboardEventDispatched) {
+      MaybeDispatchKeyboardEventAsProcessedByIME();
+    }
+    MOZ_ASSERT(mHandlingKeyMessage);
+    if (--mHandlingKeyMessage) {
+      return;
+    }
+    // If TSFTextStore instance is destroyed during handling key message(s),
+    // release all TSF objects when all nested key messages have been handled.
+    if (mDestroyed) {
+      ReleaseTSFObjects();
+    }
+  }
+
+  /**
+   * MaybeDispatchKeyboardEventAsProcessedByIME() tries to dispatch eKeyDown
+   * event or eKeyUp event for sHandlingKeyMsg and marking the dispatching
+   * event as "processed by IME".  Note that if the document is locked, this
+   * just adds a pending action into the queue and sets
+   * sIsKeyboardEventDispatched to true.
+   */
+  void MaybeDispatchKeyboardEventAsProcessedByIME();
+
+  /**
+   * DispatchKeyboardEventAsProcessedByIME() dispatches an eKeyDown or
+   * eKeyUp event with NativeKey class and aMsg.
+   */
+  void DispatchKeyboardEventAsProcessedByIME(const MSG& aMsg);
 
   class Composition final
   {
@@ -374,6 +493,15 @@ protected:
   // information.
   Composition mComposition;
 
+  /**
+   * IsHandlingComposition() returns true if there is a composition in the
+   * focused editor.
+   */
+  bool IsHandlingComposition() const
+  {
+    return mDispatcher && mDispatcher->IsHandlingComposition();
+  }
+
   class Selection
   {
   public:
@@ -401,17 +529,23 @@ protected:
       mACP.style.fInterimChar = FALSE;
     }
 
-    void SetSelection(uint32_t aStart,
+    bool SetSelection(uint32_t aStart,
                       uint32_t aLength,
                       bool aReversed,
                       WritingMode aWritingMode)
     {
+      bool changed = mDirty ||
+                     mACP.acpStart != static_cast<LONG>(aStart) ||
+                     mACP.acpEnd != static_cast<LONG>(aStart + aLength);
+
       mDirty = false;
       mACP.acpStart = static_cast<LONG>(aStart);
       mACP.acpEnd = static_cast<LONG>(aStart + aLength);
       mACP.style.ase = aReversed ? TS_AE_START : TS_AE_END;
       mACP.style.fInterimChar = FALSE;
       mWritingMode = aWritingMode;
+
+      return changed;
     }
 
     bool IsCollapsed() const
@@ -492,45 +626,94 @@ protected:
       return mWritingMode;
     }
 
+    bool EqualsExceptDirection(const TS_SELECTION_ACP& aACP) const
+    {
+      if (mACP.style.ase == aACP.style.ase) {
+        return mACP.acpStart == aACP.acpStart &&
+               mACP.acpEnd == aACP.acpEnd;
+      }
+      return mACP.acpStart == aACP.acpEnd &&
+             mACP.acpEnd == aACP.acpStart;
+    }
+
+    bool EqualsExceptDirection(
+           const SelectionChangeDataBase& aChangedSelection) const
+    {
+      MOZ_ASSERT(!mDirty);
+      MOZ_ASSERT(aChangedSelection.IsValid());
+      return aChangedSelection.Length() == static_cast<uint32_t>(Length()) &&
+             aChangedSelection.mOffset == static_cast<uint32_t>(StartOffset());
+    }
+
   private:
     TS_SELECTION_ACP mACP;
     WritingMode mWritingMode;
     bool mDirty;
   };
   // Don't access mSelection directly except at calling MarkDirty().
-  // Use CurrentSelection() instead.  This is marked as dirty when the
-  // selection or content is changed without document lock.
-  Selection mSelection;
+  // Use SelectionForTSFRef() instead.  This is modified immediately when
+  // TSF requests to set selection and not updated by selection change in
+  // content until mContentForTSF is cleared.
+  Selection mSelectionForTSF;
 
-  // Get "current selection".  If the document is locked, this initializes
-  // mSelection with the selection at the first call during a lock and returns
-  // it.  However, mSelection is NOT modified immediately.  When pending
-  // changes are flushed at unlocking the document, cached mSelection is
-  // modified.  Note that this is also called by LockedContent().
-  Selection& CurrentSelection();
+  /**
+   * Get the selection expected by TSF.  If mSelectionForTSF is already valid,
+   * this just return the reference to it.  Otherwise, this initializes it
+   * with eQuerySelectedText.  Please check if the result is valid before
+   * actually using it.
+   * Note that this is also called by ContentForTSFRef().
+   */
+  Selection& SelectionForTSFRef();
+
+  class MOZ_STACK_CLASS AutoSetTemporarySelection final
+  {
+  public:
+    explicit AutoSetTemporarySelection(Selection& aSelection)
+      : mSelection(aSelection)
+    {
+      mDirty = mSelection.IsDirty();
+      if (mDirty) {
+        mSelection.CollapseAt(0);
+      }
+    }
+
+    ~AutoSetTemporarySelection()
+    {
+      if (mDirty) {
+        mSelection.MarkDirty();
+      }
+    }
+
+ private:
+    Selection& mSelection;
+    bool mDirty;
+  };
 
   struct PendingAction final
   {
-    enum ActionType : uint8_t
+    enum class Type : uint8_t
     {
-      COMPOSITION_START,
-      COMPOSITION_UPDATE,
-      COMPOSITION_END,
-      SET_SELECTION
+      eCompositionStart,
+      eCompositionUpdate,
+      eCompositionEnd,
+      eSetSelection,
+      eKeyboardEvent,
     };
-    ActionType mType;
-    // For compositionstart and selectionset
+    Type mType;
+    // For eCompositionStart and eSetSelection
     LONG mSelectionStart;
     LONG mSelectionLength;
-    // For compositionstart, compositionupdate and compositionend
+    // For eCompositionStart, eCompositionUpdate and eCompositionEnd
     nsString mData;
-    // For compositionupdate
+    // For eCompositionUpdate
     RefPtr<TextRangeArray> mRanges;
-    // For selectionset
+    // For eKeyboardEvent
+    const MSG* mKeyMsg;
+    // For eSetSelection
     bool mSelectionReversed;
-    // For compositionupdate
+    // For eCompositionUpdate
     bool mIncomplete;
-    // For compositionstart
+    // For eCompositionStart
     bool mAdjustSelection;
   };
   // Items of mPendingActions are appended when TSF tells us to need to dispatch
@@ -543,12 +726,12 @@ protected:
   {
     if (!mPendingActions.IsEmpty()) {
       PendingAction& lastAction = mPendingActions.LastElement();
-      if (lastAction.mType == PendingAction::COMPOSITION_UPDATE) {
+      if (lastAction.mType == PendingAction::Type::eCompositionUpdate) {
         return &lastAction;
       }
     }
     PendingAction* newAction = mPendingActions.AppendElement();
-    newAction->mType = PendingAction::COMPOSITION_UPDATE;
+    newAction->mType = PendingAction::Type::eCompositionUpdate;
     newAction->mRanges = new TextRangeArray();
     newAction->mIncomplete = true;
     return newAction;
@@ -561,7 +744,7 @@ protected:
    * @param aStart              The inserted offset you expected.
    * @param aLength             The inserted text length you expected.
    * @return                    true if the last pending actions are
-   *                            COMPOSITION_START and COMPOSITION_END and
+   *                            eCompositionStart and eCompositionEnd and
    *                            aStart and aLength match their information.
    */
   bool WasTextInsertedWithoutCompositionAt(LONG aStart, LONG aLength) const
@@ -570,13 +753,14 @@ protected:
       return false;
     }
     const PendingAction& pendingLastAction = mPendingActions.LastElement();
-    if (pendingLastAction.mType != PendingAction::COMPOSITION_END ||
-        pendingLastAction.mData.Length() != aLength) {
+    if (pendingLastAction.mType != PendingAction::Type::eCompositionEnd ||
+        pendingLastAction.mData.Length() != ULONG(aLength)) {
       return false;
     }
     const PendingAction& pendingPreLastAction =
       mPendingActions[mPendingActions.Length() - 2];
-    return pendingPreLastAction.mType == PendingAction::COMPOSITION_START &&
+    return pendingPreLastAction.mType ==
+             PendingAction::Type::eCompositionStart &&
            pendingPreLastAction.mSelectionStart == aStart;
   }
 
@@ -586,7 +770,7 @@ protected:
       return false;
     }
     const PendingAction& lastAction = mPendingActions.LastElement();
-    return lastAction.mType == PendingAction::COMPOSITION_UPDATE &&
+    return lastAction.mType == PendingAction::Type::eCompositionUpdate &&
            lastAction.mIncomplete;
   }
 
@@ -598,13 +782,24 @@ protected:
     RecordCompositionUpdateAction();
   }
 
+  void RemoveLastCompositionUpdateActions()
+  {
+    while (!mPendingActions.IsEmpty()) {
+      const PendingAction& lastAction = mPendingActions.LastElement();
+      if (lastAction.mType != PendingAction::Type::eCompositionUpdate) {
+        break;
+      }
+      mPendingActions.RemoveLastElement();
+    }
+  }
+
   // When On*Composition() is called without document lock, we need to flush
   // the recorded actions at quitting the method.
-  // AutoPendingActionAndContentFlusher class is usedful for it.  
+  // AutoPendingActionAndContentFlusher class is usedful for it.
   class MOZ_STACK_CLASS AutoPendingActionAndContentFlusher final
   {
   public:
-    AutoPendingActionAndContentFlusher(TSFTextStore* aTextStore)
+    explicit AutoPendingActionAndContentFlusher(TSFTextStore* aTextStore)
       : mTextStore(aTextStore)
     {
       MOZ_ASSERT(!mTextStore->mIsRecordingActionsWithoutLock);
@@ -642,6 +837,7 @@ protected:
     {
       mText.Truncate();
       mLastCompositionString.Truncate();
+      mLastCompositionStart = -1;
       mInitialized = false;
     }
 
@@ -652,16 +848,36 @@ protected:
       mText = aText;
       if (mComposition.IsComposing()) {
         mLastCompositionString = mComposition.mString;
+        mLastCompositionStart = mComposition.mStart;
       } else {
         mLastCompositionString.Truncate();
+        mLastCompositionStart = -1;
       }
       mMinTextModifiedOffset = NOT_MODIFIED;
+      mLatestCompositionStartOffset = mLatestCompositionEndOffset = LONG_MAX;
       mInitialized = true;
     }
 
     void OnLayoutChanged()
     {
       mMinTextModifiedOffset = NOT_MODIFIED;
+    }
+
+    // OnCompositionEventsHandled() is called when all pending composition
+    // events are handled in the focused content which may be in a remote
+    // process.
+    void OnCompositionEventsHandled()
+    {
+      if (!mInitialized) {
+        return;
+      }
+      if (mComposition.IsComposing()) {
+        mLastCompositionString = mComposition.mString;
+        mLastCompositionStart = mComposition.mStart;
+      } else {
+        mLastCompositionString.Truncate();
+        mLastCompositionStart = -1;
+      }
     }
 
     const nsDependentSubstring GetSelectedText() const;
@@ -702,17 +918,40 @@ protected:
       MOZ_ASSERT(mInitialized);
       return mLastCompositionString;
     }
+    LONG LastCompositionStringEndOffset() const
+    {
+      MOZ_ASSERT(mInitialized);
+      MOZ_ASSERT(WasLastComposition());
+      return mLastCompositionStart + mLastCompositionString.Length();
+    }
+    bool WasLastComposition() const
+    {
+      MOZ_ASSERT(mInitialized);
+      return mLastCompositionStart >= 0;
+    }
     uint32_t MinTextModifiedOffset() const
     {
       MOZ_ASSERT(mInitialized);
       return mMinTextModifiedOffset;
     }
+    LONG LatestCompositionStartOffset() const
+    {
+      MOZ_ASSERT(mInitialized);
+      MOZ_ASSERT(HasOrHadComposition());
+      return mLatestCompositionStartOffset;
+    }
+    LONG LatestCompositionEndOffset() const
+    {
+      MOZ_ASSERT(mInitialized);
+      MOZ_ASSERT(HasOrHadComposition());
+      return mLatestCompositionEndOffset;
+    }
 
     // Returns true if layout of the character at the aOffset has not been
     // calculated.
-    bool IsLayoutChangedAfter(uint32_t aOffset) const
+    bool IsLayoutChangedAt(uint32_t aOffset) const
     {
-      return mInitialized && (mMinTextModifiedOffset < aOffset);
+      return IsLayoutChanged() && (mMinTextModifiedOffset <= aOffset);
     }
     // Returns true if layout of the content has been changed, i.e., the new
     // layout has not been calculated.
@@ -726,6 +965,13 @@ protected:
       return mInitialized ? mMinTextModifiedOffset : NOT_MODIFIED;
     }
 
+    bool HasOrHadComposition() const
+    {
+      return mInitialized &&
+             mLatestCompositionStartOffset != LONG_MAX &&
+             mLatestCompositionEndOffset != LONG_MAX;
+    }
+
     TSFTextStore::Composition& Composition() { return mComposition; }
     TSFTextStore::Selection& Selection() { return mSelection; }
 
@@ -737,6 +983,15 @@ protected:
     TSFTextStore::Composition& mComposition;
     TSFTextStore::Selection& mSelection;
 
+    // mLastCompositionStart stores the start offset of composition when
+    // mLastCompositionString is set.
+    LONG mLastCompositionStart;
+
+    // The latest composition's start and end offset.  If composition hasn't
+    // been started since this instance is initialized, they are LONG_MAX.
+    LONG mLatestCompositionStartOffset;
+    LONG mLatestCompositionEndOffset;
+
     // The minimum offset of modified part of the text.
     enum : uint32_t
     {
@@ -746,18 +1001,30 @@ protected:
 
     bool mInitialized;
   };
-  // mLockedContent starts to cache content of the document at first query of
-  // the content during a document lock.  This is abandoned after document is
-  // unlocked and dispatched events are handled.  This is initialized by
-  // LockedContent() automatically.  So, don't access this member directly
-  // except at calling Clear(), IsInitialized(), IsLayoutChangedAfter() or
-  // IsLayoutChanged().
-  Content mLockedContent;
+  // mContentForTSF is cache of content.  The information is expected by TSF
+  // and TIP.  Therefore, this is useful for answering the query from TSF or
+  // TIP.
+  // This is initialized by ContentForTSFRef() automatically (therefore, don't
+  // access this member directly except at calling Clear(), IsInitialized(),
+  // IsLayoutChangeAfter() or IsLayoutChanged()).
+  // This is cleared when:
+  //  - When there is no composition, the document is unlocked.
+  //  - When there is a composition, all dispatched events are handled by
+  //    the focused editor which may be in a remote process.
+  // So, if two compositions are created very quickly, this cache may not be
+  // cleared between eCompositionCommit(AsIs) and eCompositionStart.
+  Content mContentForTSF;
 
-  Content& LockedContent();
+  Content& ContentForTSFRef();
 
-  // While the documet is locked, this returns the text stored by
-  // mLockedContent.  Otherwise, return the current text content.
+  // CanAccessActualContentDirectly() returns true when TSF/TIP can access
+  // actual content directly.  In other words, mContentForTSF and/or
+  // mSelectionForTSF doesn't cache content or they matches with actual
+  // contents due to no pending text/selection change notifications.
+  bool CanAccessActualContentDirectly() const;
+
+  // While mContentForTSF is valid, this returns the text stored by it.
+  // Otherwise, return the current text content retrieved by eQueryTextContent.
   bool GetCurrentText(nsAString& aTextContent);
 
   class MouseTracker final
@@ -785,7 +1052,7 @@ protected:
     DWORD Cookie() const { return mCookie; }
     bool OnMouseButtonEvent(ULONG aEdge, ULONG aQuadrant, DWORD aButtonStatus);
     LONG RangeStart() const { return mStart; }
-  
+
   private:
     RefPtr<ITfMouseSink> mSink;
     LONG mStart;
@@ -824,14 +1091,6 @@ protected:
   // If edit actions are being recorded without document lock, this is true.
   // Otherwise, false.
   bool                         mIsRecordingActionsWithoutLock;
-  // During recording actions, we shouldn't call mSink->OnSelectionChange()
-  // because it may cause TSF request new lock.  This is a problem if the
-  // selection change is caused by a call of On*Composition() without document
-  // lock since RequestLock() tries to flush the pending actions again (which
-  // are flushing).  Therefore, OnSelectionChangeInternal() sets this true
-  // during recoding actions and then, RequestLock() will call
-  // mSink->OnSelectionChange() after mLock becomes 0.
-  bool                         mPendingOnSelectionChange;
   // If GetTextExt() or GetACPFromPoint() is called and the layout hasn't been
   // calculated yet, these methods return TS_E_NOLAYOUT.  At that time,
   // mHasReturnedNoLayoutError is set to true.
@@ -845,8 +1104,8 @@ protected:
   // If this is true, the instance will be destroyed after unlocked.
   bool                         mPendingDestroy;
   // If this is false, MaybeFlushPendingNotifications() will clear the
-  // mLockedContent.
-  bool                         mDeferClearingLockedContent;
+  // mContentForTSF.
+  bool                         mDeferClearingContentForTSF;
   // While there is native caret, this is true.  Otherwise, false.
   bool                         mNativeCaretIsCreated;
   // While the instance is dispatching events, the event may not be handled
@@ -865,18 +1124,31 @@ protected:
   // Immediately after a call of Destroy(), mDestroyed becomes true.  If this
   // is true, the instance shouldn't grant any requests from the TIP anymore.
   bool                         mDestroyed;
+  // While the instance is being destroyed, this is set to true for avoiding
+  // recursive Destroy() calls.
+  bool                         mBeingDestroyed;
 
 
   // TSF thread manager object for the current application
   static StaticRefPtr<ITfThreadMgr> sThreadMgr;
+  static already_AddRefed<ITfThreadMgr> GetThreadMgr();
   // sMessagePump is QI'ed from sThreadMgr
   static StaticRefPtr<ITfMessagePump> sMessagePump;
+public:
+  // Expose GetMessagePump() for WinUtils.
+  static already_AddRefed<ITfMessagePump> GetMessagePump();
+private:
   // sKeystrokeMgr is QI'ed from sThreadMgr
   static StaticRefPtr<ITfKeystrokeMgr> sKeystrokeMgr;
   // TSF display attribute manager
   static StaticRefPtr<ITfDisplayAttributeMgr> sDisplayAttrMgr;
+  static already_AddRefed<ITfDisplayAttributeMgr> GetDisplayAttributeMgr();
   // TSF category manager
   static StaticRefPtr<ITfCategoryMgr> sCategoryMgr;
+  static already_AddRefed<ITfCategoryMgr> GetCategoryMgr();
+  // Compartment for (Get|Set)IMEOpenState()
+  static StaticRefPtr<ITfCompartment> sCompartmentForOpenClose;
+  static already_AddRefed<ITfCompartment> GetCompartmentForOpenClose();
 
   // Current text store which is managing a keyboard enabled editor (i.e.,
   // editable editor).  Currently only ONE TSFTextStore instance is ever used,
@@ -889,20 +1161,18 @@ protected:
   static StaticRefPtr<ITfContext> sDisabledContext;
 
   static StaticRefPtr<ITfInputProcessorProfiles> sInputProcessorProfiles;
+  static already_AddRefed<ITfInputProcessorProfiles>
+           GetInputProcessorProfiles();
+
+  // Handling key message.
+  static const MSG* sHandlingKeyMsg;
 
   // TSF client ID for the current application
   static DWORD sClientId;
 
-  // Enables/Disables hack for specific TIP.
-  static bool sCreateNativeCaretForATOK;
-  static bool sDoNotReturnNoLayoutErrorToMSSimplifiedTIP;
-  static bool sDoNotReturnNoLayoutErrorToMSTraditionalTIP;
-  static bool sDoNotReturnNoLayoutErrorToFreeChangJie;
-  static bool sDoNotReturnNoLayoutErrorToEasyChangjei;
-  static bool sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar;
-  static bool sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret;
-  static bool sHackQueryInsertForMSSimplifiedTIP;
-  static bool sHackQueryInsertForMSTraditionalTIP;
+  // true if an eKeyDown or eKeyUp event for sHandlingKeyMsg has already
+  // been dispatched.
+  static bool sIsKeyboardEventDispatched;
 };
 
 } // namespace widget

@@ -7,6 +7,7 @@
 #include "ScriptErrorHelper.h"
 
 #include "MainThreadUtils.h"
+#include "mozilla/SystemGroup.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsIConsoleService.h"
@@ -16,7 +17,7 @@
 
 namespace {
 
-class ScriptErrorRunnable final : public nsRunnable
+class ScriptErrorRunnable final : public mozilla::Runnable
 {
   nsString mMessage;
   nsCString mMessageName;
@@ -35,7 +36,8 @@ public:
                       uint32_t aSeverityFlag,
                       bool aIsChrome,
                       uint64_t aInnerWindowID)
-    : mMessage(aMessage)
+    : mozilla::Runnable("ScriptErrorRunnable")
+    , mMessage(aMessage)
     , mFilename(aFilename)
     , mLineNumber(aLineNumber)
     , mColumnNumber(aColumnNumber)
@@ -54,7 +56,8 @@ public:
                       uint32_t aSeverityFlag,
                       bool aIsChrome,
                       uint64_t aInnerWindowID)
-    : mMessageName(aMessageName)
+    : mozilla::Runnable("ScriptErrorRunnable")
+    , mMessageName(aMessageName)
     , mFilename(aFilename)
     , mLineNumber(aLineNumber)
     , mColumnNumber(aColumnNumber)
@@ -78,7 +81,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!aMessageName.IsEmpty());
 
-    nsXPIDLString localizedMessage;
+    nsAutoString localizedMessage;
     if (NS_WARN_IF(NS_FAILED(
       nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
                                          aMessageName.BeginReading(),
@@ -140,7 +143,8 @@ public:
                           aLineNumber,
                           aColumnNumber,
                           aSeverityFlag,
-                          category.get()));
+                          category.get(),
+                          /* IDB doesn't run on Private browsing mode */ false));
     }
 
     MOZ_ALWAYS_SUCCEEDS(consoleService->LogMessage(scriptError));
@@ -210,7 +214,8 @@ ScriptErrorHelper::Dump(const nsAString& aMessage,
                               aSeverityFlag,
                               aIsChrome,
                               aInnerWindowID);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+    MOZ_ALWAYS_SUCCEEDS(
+      SystemGroup::Dispatch(TaskCategory::Other, runnable.forget()));
   }
 }
 
@@ -240,7 +245,8 @@ ScriptErrorHelper::DumpLocalizedMessage(const nsACString& aMessageName,
                               aSeverityFlag,
                               aIsChrome,
                               aInnerWindowID);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+    MOZ_ALWAYS_SUCCEEDS(
+      SystemGroup::Dispatch(TaskCategory::Other, runnable.forget()));
   }
 }
 

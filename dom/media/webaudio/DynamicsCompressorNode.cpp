@@ -6,6 +6,7 @@
 
 #include "DynamicsCompressorNode.h"
 #include "mozilla/dom/DynamicsCompressorNodeBinding.h"
+#include "nsAutoPtr.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
@@ -24,7 +25,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode, AudioNode,
                                    mAttack,
                                    mRelease)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DynamicsCompressorNode)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DynamicsCompressorNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 
 NS_IMPL_ADDREF_INHERITED(DynamicsCompressorNode, AudioNode)
@@ -143,11 +144,12 @@ private:
   {
     MOZ_ASSERT(!NS_IsMainThread());
 
-    class Command final : public nsRunnable
+    class Command final : public Runnable
     {
     public:
       Command(AudioNodeStream* aStream, float aReduction)
-        : mStream(aStream)
+        : mozilla::Runnable("Command")
+        , mStream(aStream)
         , mReduction(aReduction)
       {
       }
@@ -168,11 +170,11 @@ private:
       float mReduction;
     };
 
-    NS_DispatchToMainThread(new Command(aStream, aReduction));
+    mAbstractMainThread->Dispatch(do_AddRef(new Command(aStream, aReduction)));
   }
 
 private:
-  AudioNodeStream* mDestination;
+  RefPtr<AudioNodeStream> mDestination;
   AudioParamTimeline mThreshold;
   AudioParamTimeline mKnee;
   AudioParamTimeline mRatio;
@@ -187,24 +189,47 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
               ChannelCountMode::Explicit,
               ChannelInterpretation::Speakers)
   , mThreshold(new AudioParam(this, DynamicsCompressorNodeEngine::THRESHOLD,
-                              -24.f, "threshold"))
+                              "threshold", -24.f, -100.f, 0.f))
   , mKnee(new AudioParam(this, DynamicsCompressorNodeEngine::KNEE,
-                         30.f, "knee"))
+                         "knee", 30.f, 0.f, 40.f))
   , mRatio(new AudioParam(this, DynamicsCompressorNodeEngine::RATIO,
-                          12.f, "ratio"))
+                          "ratio", 12.f, 1.f, 20.f))
   , mReduction(0)
   , mAttack(new AudioParam(this, DynamicsCompressorNodeEngine::ATTACK,
-                           0.003f, "attack"))
+                           "attack", 0.003f, 0.f, 1.f))
   , mRelease(new AudioParam(this, DynamicsCompressorNodeEngine::RELEASE,
-                            0.25f, "release"))
+                            "release", 0.25f, 0.f, 1.f))
 {
   DynamicsCompressorNodeEngine* engine = new DynamicsCompressorNodeEngine(this, aContext->Destination());
   mStream = AudioNodeStream::Create(aContext, engine,
-                                    AudioNodeStream::NO_STREAM_FLAGS);
+                                    AudioNodeStream::NO_STREAM_FLAGS,
+                                    aContext->Graph());
 }
 
-DynamicsCompressorNode::~DynamicsCompressorNode()
+/* static */ already_AddRefed<DynamicsCompressorNode>
+DynamicsCompressorNode::Create(AudioContext& aAudioContext,
+                               const DynamicsCompressorOptions& aOptions,
+                               ErrorResult& aRv)
 {
+  if (aAudioContext.CheckClosed(aRv)) {
+    return nullptr;
+  }
+
+  RefPtr<DynamicsCompressorNode> audioNode =
+    new DynamicsCompressorNode(&aAudioContext);
+
+  audioNode->Initialize(aOptions, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+
+  audioNode->Attack()->SetValue(aOptions.mAttack);
+  audioNode->Knee()->SetValue(aOptions.mKnee);
+  audioNode->Ratio()->SetValue(aOptions.mRatio);
+  audioNode->GetRelease()->SetValue(aOptions.mRelease);
+  audioNode->Threshold()->SetValue(aOptions.mThreshold);
+
+  return audioNode.forget();
 }
 
 size_t
@@ -228,7 +253,7 @@ DynamicsCompressorNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 DynamicsCompressorNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DynamicsCompressorNodeBinding::Wrap(aCx, this, aGivenProto);
+  return DynamicsCompressorNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

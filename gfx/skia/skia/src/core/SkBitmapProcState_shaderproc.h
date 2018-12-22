@@ -19,7 +19,7 @@ void SCALE_FILTER_NAME(const void* sIn, int x, int y, SkPMColor* SK_RESTRICT col
                              SkMatrix::kScale_Mask)) == 0);
     SkASSERT(s.fInvKy == 0);
     SkASSERT(count > 0 && colors != nullptr);
-    SkASSERT(s.fFilterLevel != kNone_SkFilterQuality);
+    SkASSERT(s.fFilterQuality != kNone_SkFilterQuality);
     SkDEBUGCODE(CHECKSTATE(s);)
 
     const unsigned maxX = s.fPixmap.width() - 1;
@@ -31,13 +31,11 @@ void SCALE_FILTER_NAME(const void* sIn, int x, int y, SkPMColor* SK_RESTRICT col
     unsigned subY;
 
     {
-        SkPoint pt;
-        s.fInvProc(s.fInvMatrix, SkIntToScalar(x) + SK_ScalarHalf,
-                   SkIntToScalar(y) + SK_ScalarHalf, &pt);
-        SkFixed fy = SkScalarToFixed(pt.fY) - (s.fFilterOneY >> 1);
+        const SkBitmapProcStateAutoMapper mapper(s, x, y);
+        SkFixed fy = mapper.fixedY();
         const unsigned maxY = s.fPixmap.height() - 1;
         // compute our two Y values up front
-        subY = TILEY_LOW_BITS(fy, maxY);
+        subY = EXTRACT_LOW_BITS(fy, maxY);
         int y0 = TILEY_PROCF(fy, maxY);
         int y1 = TILEY_PROCF((fy + s.fFilterOneY), maxY);
 
@@ -46,7 +44,7 @@ void SCALE_FILTER_NAME(const void* sIn, int x, int y, SkPMColor* SK_RESTRICT col
         row0 = (const SRCTYPE*)(srcAddr + y0 * rb);
         row1 = (const SRCTYPE*)(srcAddr + y1 * rb);
         // now initialize fx
-        fx = SkScalarToFixed(pt.fX) - (oneX >> 1);
+        fx = mapper.fixedX();
     }
 
 #ifdef PREAMBLE
@@ -54,7 +52,7 @@ void SCALE_FILTER_NAME(const void* sIn, int x, int y, SkPMColor* SK_RESTRICT col
 #endif
 
     do {
-        unsigned subX = TILEX_LOW_BITS(fx, maxX);
+        unsigned subX = EXTRACT_LOW_BITS(fx, maxX);
         unsigned x0 = TILEX_PROCF(fx, maxX);
         unsigned x1 = TILEX_PROCF((fx + oneX), maxX);
 
@@ -78,8 +76,7 @@ void SCALE_FILTER_NAME(const void* sIn, int x, int y, SkPMColor* SK_RESTRICT col
 
 #undef TILEX_PROCF
 #undef TILEY_PROCF
-#undef TILEX_LOW_BITS
-#undef TILEY_LOW_BITS
+#undef EXTRACT_LOW_BITS
 #undef MAKENAME
 #undef SRCTYPE
 #undef CHECKSTATE

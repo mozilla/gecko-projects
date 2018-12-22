@@ -13,6 +13,7 @@
 #include "nsIOutputStream.h"
 #include "nsStreamUtils.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
 
 namespace testing {
 
@@ -129,5 +130,101 @@ InputStreamCallback::OnInputStreamReady(nsIAsyncInputStream* aStream)
   mCalled = true;
   return NS_OK;
 }
+
+AsyncStringStream::AsyncStringStream(const nsACString& aBuffer)
+{
+  NS_NewCStringInputStream(getter_AddRefs(mStream), aBuffer);
+}
+
+NS_IMETHODIMP
+AsyncStringStream::Available(uint64_t* aLength)
+{
+  return mStream->Available(aLength);
+}
+
+NS_IMETHODIMP
+AsyncStringStream::Read(char* aBuffer, uint32_t aCount, uint32_t* aReadCount)
+{
+  return mStream->Read(aBuffer, aCount, aReadCount);
+}
+
+NS_IMETHODIMP
+AsyncStringStream::ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
+                                uint32_t aCount, uint32_t *aResult)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+AsyncStringStream::Close()
+{
+  nsresult rv = mStream->Close();
+  if (NS_SUCCEEDED(rv)) {
+    MaybeExecCallback(mCallback, mCallbackEventTarget);
+  }
+  return rv;
+}
+
+NS_IMETHODIMP
+AsyncStringStream::IsNonBlocking(bool* aNonBlocking)
+{
+  return mStream->IsNonBlocking(aNonBlocking);
+}
+
+NS_IMETHODIMP
+AsyncStringStream::CloseWithStatus(nsresult aStatus)
+{
+  return Close();
+}
+
+NS_IMETHODIMP
+AsyncStringStream::AsyncWait(nsIInputStreamCallback* aCallback,
+                             uint32_t aFlags, uint32_t aRequestedCount,
+                             nsIEventTarget* aEventTarget)
+{
+  if (aFlags & nsIAsyncInputStream::WAIT_CLOSURE_ONLY) {
+    mCallback = aCallback;
+    mCallbackEventTarget = aEventTarget;
+    return NS_OK;
+  }
+
+  MaybeExecCallback(aCallback, aEventTarget);
+  return NS_OK;
+}
+
+void
+AsyncStringStream::MaybeExecCallback(nsIInputStreamCallback* aCallback,
+                                     nsIEventTarget* aEventTarget)
+{
+  if (!aCallback) {
+    return;
+  }
+
+  nsCOMPtr<nsIInputStreamCallback> callback = aCallback;
+  nsCOMPtr<nsIAsyncInputStream> self = this;
+
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+    "AsyncWait", [callback, self]() { callback->OnInputStreamReady(self); });
+
+  if (aEventTarget) {
+    aEventTarget->Dispatch(r.forget());
+  } else {
+    r->Run();
+  }
+}
+
+NS_IMPL_ISUPPORTS(AsyncStringStream, nsIAsyncInputStream, nsIInputStream)
+
+NS_IMPL_ADDREF(LengthInputStream);
+NS_IMPL_RELEASE(LengthInputStream);
+
+NS_INTERFACE_MAP_BEGIN(LengthInputStream)
+  NS_INTERFACE_MAP_ENTRY(nsIInputStream)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIInputStreamLength, mIsInputStreamLength)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIAsyncInputStreamLength, mIsAsyncInputStreamLength)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInputStream)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_ISUPPORTS(LengthCallback, nsIInputStreamLengthCallback)
 
 } // namespace testing

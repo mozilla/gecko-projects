@@ -15,7 +15,7 @@
 js::Debugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc, bool ok)
 {
     MOZ_ASSERT_IF(frame.isInterpreterFrame(), frame.asInterpreterFrame() == cx->interpreterFrame());
-    MOZ_ASSERT_IF(frame.script()->isDebuggee(), frame.isDebuggee());
+    MOZ_ASSERT_IF(frame.hasScript() && frame.script()->isDebuggee(), frame.isDebuggee());
     /* Traps must be cleared from eval frames, see slowPathOnLeaveFrame. */
     mozilla::DebugOnly<bool> evalTraps = frame.isEvalFrame() &&
                                          frame.script()->hasAnyBreakpointsOrStepMode();
@@ -29,51 +29,97 @@ js::Debugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
 /* static */ inline js::Debugger*
 js::Debugger::fromJSObject(const JSObject* obj)
 {
-    MOZ_ASSERT(js::GetObjectClass(obj) == &jsclass);
+    MOZ_ASSERT(obj->getClass() == &class_);
     return (Debugger*) obj->as<NativeObject>().getPrivate();
 }
 
 /* static */ inline bool
 js::Debugger::checkNoExecute(JSContext* cx, HandleScript script)
 {
-    if (!cx->compartment()->isDebuggee() || !cx->runtime()->noExecuteDebuggerTop)
+    if (!cx->realm()->isDebuggee() || !cx->noExecuteDebuggerTop)
         return true;
     return slowPathCheckNoExecute(cx, script);
 }
 
-/* static */ JSTrapStatus
+/* static */ js::ResumeMode
 js::Debugger::onEnterFrame(JSContext* cx, AbstractFramePtr frame)
 {
-    MOZ_ASSERT_IF(frame.script()->isDebuggee(), frame.isDebuggee());
+    MOZ_ASSERT_IF(frame.hasScript() && frame.script()->isDebuggee(), frame.isDebuggee());
     if (!frame.isDebuggee())
-        return JSTRAP_CONTINUE;
+        return ResumeMode::Continue;
     return slowPathOnEnterFrame(cx, frame);
 }
 
-/* static */ JSTrapStatus
+/* static */ js::ResumeMode
 js::Debugger::onDebuggerStatement(JSContext* cx, AbstractFramePtr frame)
 {
-    if (!cx->compartment()->isDebuggee())
-        return JSTRAP_CONTINUE;
+    if (!cx->realm()->isDebuggee())
+        return ResumeMode::Continue;
     return slowPathOnDebuggerStatement(cx, frame);
 }
 
-/* static */ JSTrapStatus
+/* static */ js::ResumeMode
 js::Debugger::onExceptionUnwind(JSContext* cx, AbstractFramePtr frame)
 {
-    if (!cx->compartment()->isDebuggee())
-        return JSTRAP_CONTINUE;
+    if (!cx->realm()->isDebuggee())
+        return ResumeMode::Continue;
     return slowPathOnExceptionUnwind(cx, frame);
 }
 
 /* static */ void
-js::Debugger::onNewWasmModule(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+js::Debugger::onNewWasmInstance(JSContext* cx, Handle<WasmInstanceObject*> wasmInstance)
 {
-    // Insert the wasm::Module into a compartment-wide list for discovery
-    // later without a heap walk.
-    cx->compartment()->wasmModuleWeakList.insertBack(&wasmModule->module());
-    if (cx->compartment()->isDebuggee())
-        slowPathOnNewWasmModule(cx, wasmModule);
+    if (cx->realm()->isDebuggee())
+        slowPathOnNewWasmInstance(cx, wasmInstance);
+}
+
+/* static */ void
+js::Debugger::onNewPromise(JSContext* cx, Handle<PromiseObject*> promise)
+{
+    if (MOZ_UNLIKELY(cx->realm()->isDebuggee()))
+        slowPathPromiseHook(cx, Debugger::OnNewPromise, promise);
+}
+
+/* static */ void
+js::Debugger::onPromiseSettled(JSContext* cx, Handle<PromiseObject*> promise)
+{
+    if (MOZ_UNLIKELY(cx->realm()->isDebuggee()))
+        slowPathPromiseHook(cx, Debugger::OnPromiseSettled, promise);
+}
+
+inline js::Debugger*
+js::DebuggerEnvironment::owner() const
+{
+    JSObject* dbgobj = &getReservedSlot(OWNER_SLOT).toObject();
+    return Debugger::fromJSObject(dbgobj);
+}
+
+inline js::Debugger*
+js::DebuggerFrame::owner() const
+{
+    JSObject* dbgobj = &getReservedSlot(OWNER_SLOT).toObject();
+    return Debugger::fromJSObject(dbgobj);
+}
+
+inline js::Debugger*
+js::DebuggerObject::owner() const
+{
+    JSObject* dbgobj = &getReservedSlot(OWNER_SLOT).toObject();
+    return Debugger::fromJSObject(dbgobj);
+}
+
+inline js::PromiseObject*
+js::DebuggerObject::promise() const
+{
+    MOZ_ASSERT(isPromise());
+
+    JSObject* referent = this->referent();
+    if (IsCrossCompartmentWrapper(referent)) {
+        referent = CheckedUnwrap(referent);
+        MOZ_ASSERT(referent);
+    }
+
+    return &referent->as<PromiseObject>();
 }
 
 #endif /* vm_Debugger_inl_h */

@@ -47,6 +47,11 @@ public:
         SetURI(uri);
     }
 
+    void UpdateURI(nsIURI *aURI) {
+        MOZ_DIAGNOSTIC_ASSERT(NS_IsMainThread(), "Not thread-safe.");
+        mURI = aURI;
+    }
+
     nsIProxyInfo *ProxyInfo() {
         return mProxyInfo;
     }
@@ -72,16 +77,16 @@ public:
     const nsCString &EntityID() {
         return mEntityID;
     }
-    void SetEntityID(const nsCSubstring &entityID) {
+    void SetEntityID(const nsACString& entityID) {
         mEntityID = entityID;
     }
 
-    NS_IMETHODIMP GetLastModifiedTime(PRTime* lastModifiedTime) override {
+    NS_IMETHOD GetLastModifiedTime(PRTime* lastModifiedTime) override {
         *lastModifiedTime = mLastModifiedTime;
         return NS_OK;
     }
 
-    NS_IMETHODIMP SetLastModifiedTime(PRTime lastModifiedTime) override {
+    NS_IMETHOD SetLastModifiedTime(PRTime lastModifiedTime) override {
         mLastModifiedTime = lastModifiedTime;
         return NS_OK;
     }
@@ -101,7 +106,7 @@ public:
     NS_IMETHOD ForcePending(bool aForcePending) override;
 
 protected:
-    virtual ~nsFtpChannel() {}
+    virtual ~nsFtpChannel() = default;
     virtual nsresult OpenContentStream(bool async, nsIInputStream **result,
                                        nsIChannel** channel) override;
     virtual bool GetStatusArg(nsresult status, nsString &statusArg) override;
@@ -117,6 +122,9 @@ private:
     PRTime                           mLastModifiedTime;
     bool                             mForcePending;
     RefPtr<ADivertableParentChannel> mParentChannel;
+
+    // Current suspension depth for this channel object
+    uint32_t                          mSuspendCount;
 };
 
 #endif /* nsFTPChannel_h___ */

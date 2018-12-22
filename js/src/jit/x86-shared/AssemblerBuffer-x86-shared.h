@@ -67,26 +67,58 @@ namespace js {
 
 namespace jit {
 
-    class AssemblerBuffer {
-    public:
-        AssemblerBuffer()
-            : m_oom(false)
-        {
+    // AllocPolicy for AssemblerBuffer. OOMs when trying to allocate more than
+    // MaxCodeBytesPerProcess bytes. Use private inheritance to make sure we
+    // explicitly have to expose SystemAllocPolicy methods.
+    class AssemblerBufferAllocPolicy : private SystemAllocPolicy
+    {
+      public:
+        using SystemAllocPolicy::checkSimulatedOOM;
+        using SystemAllocPolicy::reportAllocOverflow;
+        using SystemAllocPolicy::free_;
+
+        template <typename T> T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
+            static_assert(sizeof(T) == 1,
+                          "AssemblerBufferAllocPolicy should only be used with byte vectors");
+            MOZ_ASSERT(oldSize <= MaxCodeBytesPerProcess);
+            if (MOZ_UNLIKELY(newSize > MaxCodeBytesPerProcess))
+                return nullptr;
+            return SystemAllocPolicy::pod_realloc<T>(p, oldSize, newSize);
         }
+        template <typename T> T* pod_malloc(size_t numElems) {
+            static_assert(sizeof(T) == 1,
+                          "AssemblerBufferAllocPolicy should only be used with byte vectors");
+            if (MOZ_UNLIKELY(numElems > MaxCodeBytesPerProcess))
+                return nullptr;
+            return SystemAllocPolicy::pod_malloc<T>(numElems);
+        }
+    };
+
+    class AssemblerBuffer
+    {
+        template<size_t size, typename T>
+        MOZ_ALWAYS_INLINE void sizedAppendUnchecked(T value)
+        {
+            m_buffer.infallibleAppend(reinterpret_cast<unsigned char*>(&value), size);
+        }
+
+        template<size_t size, typename T>
+        MOZ_ALWAYS_INLINE void sizedAppend(T value)
+        {
+            if (MOZ_UNLIKELY(!m_buffer.append(reinterpret_cast<unsigned char*>(&value), size)))
+                oomDetected();
+        }
+
+    public:
+        AssemblerBuffer() : m_oom(false) {}
 
         void ensureSpace(size_t space)
         {
+            // This should only be called with small |space| values to ensure
+            // we don't overflow below.
+            MOZ_ASSERT(space <= 16);
             if (MOZ_UNLIKELY(!m_buffer.reserve(m_buffer.length() + space)))
                 oomDetected();
-        }
-
-        bool growByUninitialized(size_t space)
-        {
-            if (MOZ_UNLIKELY(!m_buffer.growByUninitialized(space))) {
-                oomDetected();
-                return false;
-            }
-            return true;
         }
 
         bool isAligned(size_t alignment) const
@@ -94,56 +126,23 @@ namespace jit {
             return !(m_buffer.length() & (alignment - 1));
         }
 
-        void putByteUnchecked(int value)
-        {
-            m_buffer.infallibleAppend(char(value));
-        }
+        MOZ_ALWAYS_INLINE void putByteUnchecked(int value) { sizedAppendUnchecked<1>(value); }
+        MOZ_ALWAYS_INLINE void putShortUnchecked(int value) { sizedAppendUnchecked<2>(value); }
+        MOZ_ALWAYS_INLINE void putIntUnchecked(int value) { sizedAppendUnchecked<4>(value); }
+        MOZ_ALWAYS_INLINE void putInt64Unchecked(int64_t value) { sizedAppendUnchecked<8>(value); }
 
-        void putByte(int value)
+        MOZ_ALWAYS_INLINE void putByte(int value) { sizedAppend<1>(value); }
+        MOZ_ALWAYS_INLINE void putShort(int value) { sizedAppend<2>(value); }
+        MOZ_ALWAYS_INLINE void putInt(int value) { sizedAppend<4>(value); }
+        MOZ_ALWAYS_INLINE void putInt64(int64_t value) { sizedAppend<8>(value); }
+
+        MOZ_MUST_USE bool append(const unsigned char* values, size_t size)
         {
-            if (MOZ_UNLIKELY(!m_buffer.append(char(value))))
+            if (MOZ_UNLIKELY(!m_buffer.append(values, size))) {
                 oomDetected();
-        }
-
-        void putShortUnchecked(int value)
-        {
-            m_buffer.infallibleGrowByUninitialized(2);
-            memcpy(m_buffer.end() - 2, &value, 2);
-        }
-
-        void putShort(int value)
-        {
-            if (MOZ_UNLIKELY(!m_buffer.growByUninitialized(2))) {
-                oomDetected();
-                return;
+                return false;
             }
-            memcpy(m_buffer.end() - 2, &value, 2);
-        }
-
-        void putIntUnchecked(int value)
-        {
-            m_buffer.infallibleGrowByUninitialized(4);
-            memcpy(m_buffer.end() - 4, &value, 4);
-        }
-
-        void putInt64Unchecked(int64_t value)
-        {
-            m_buffer.infallibleGrowByUninitialized(8);
-            memcpy(m_buffer.end() - 8, &value, 8);
-        }
-
-        void putInt(int value)
-        {
-            if (MOZ_UNLIKELY(!m_buffer.growByUninitialized(4))) {
-                oomDetected();
-                return;
-            }
-            memcpy(m_buffer.end() - 4, &value, 4);
-        }
-
-        unsigned char* data()
-        {
-            return m_buffer.begin();
+            return true;
         }
 
         size_t size() const
@@ -156,8 +155,21 @@ namespace jit {
             return m_oom;
         }
 
-        const unsigned char* buffer() const {
-            MOZ_ASSERT(!m_oom);
+        bool reserve(size_t size)
+        {
+            return !m_oom && m_buffer.reserve(size);
+        }
+
+        bool swap(Vector<uint8_t, 0, SystemAllocPolicy>& bytes);
+
+        const unsigned char* buffer() const
+        {
+            MOZ_RELEASE_ASSERT(!m_oom);
+            return m_buffer.begin();
+        }
+
+        unsigned char* data()
+        {
             return m_buffer.begin();
         }
 
@@ -176,33 +188,38 @@ namespace jit {
          *
          * See also the |buffer| method.
          */
-        void oomDetected() {
+        void oomDetected()
+        {
             m_oom = true;
             m_buffer.clear();
         }
 
-        mozilla::Vector<unsigned char, 256, SystemAllocPolicy> m_buffer;
+        mozilla::Vector<unsigned char, 256, AssemblerBufferAllocPolicy> m_buffer;
         bool m_oom;
     };
 
     class GenericAssembler
     {
+#ifdef JS_JITSPEW
         Sprinter* printer;
-
+#endif
       public:
 
         GenericAssembler()
-          : printer(NULL)
+#ifdef JS_JITSPEW
+          : printer(nullptr)
+#endif
         {}
 
-        void setPrinter(Sprinter* sp) {
+        void setPrinter(Sprinter* sp)
+        {
+#ifdef JS_JITSPEW
             printer = sp;
+#endif
         }
 
-        void spew(const char* fmt, ...)
-#ifdef __GNUC__
-            __attribute__ ((format (printf, 2, 3)))
-#endif
+#ifdef JS_JITSPEW
+        inline void spew(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3)
         {
             if (MOZ_UNLIKELY(printer || JitSpewEnabled(JitSpew_Codegen))) {
                 va_list va;
@@ -211,8 +228,14 @@ namespace jit {
                 va_end(va);
             }
         }
+#else
+        MOZ_ALWAYS_INLINE void spew(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3)
+        { }
+#endif
 
-        MOZ_COLD void spew(const char* fmt, va_list va);
+#ifdef JS_JITSPEW
+        MOZ_COLD void spew(const char* fmt, va_list va) MOZ_FORMAT_PRINTF(2, 0);
+#endif
     };
 
 } // namespace jit

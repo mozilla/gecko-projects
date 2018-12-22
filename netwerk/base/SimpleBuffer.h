@@ -37,7 +37,7 @@ class SimpleBuffer
 {
 public:
   SimpleBuffer();
-  ~SimpleBuffer() {}
+  ~SimpleBuffer() = default;
 
   nsresult Write(char *stc, size_t len); // return OK or OUT_OF_MEMORY
   size_t Read(char *dest, size_t maxLen); // return bytes read
@@ -45,7 +45,8 @@ public:
   void Clear();
 
 private:
-  PRThread *mOwningThread;
+  NS_DECL_OWNINGTHREAD
+
   nsresult mStatus;
   AutoCleanLinkedList<SimpleBufferPage> mBufferList;
   size_t mAvailable;

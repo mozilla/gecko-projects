@@ -2,10 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 from threading import Lock
 import codecs
 
-from ..structuredlog import log_levels
+from mozlog.structuredlog import log_levels
+import six
 
 
 class BaseHandler(object):
@@ -51,6 +54,7 @@ class LogLevelFilter(BaseHandler):
     :param inner: Handler to use for messages that pass this filter
     :param level: Minimum log level to process
     """
+
     def __init__(self, inner, level):
         BaseHandler.__init__(self, inner)
         self.inner = inner
@@ -58,7 +62,7 @@ class LogLevelFilter(BaseHandler):
 
     def __call__(self, item):
         if (item["action"] != "log" or
-            log_levels[item["level"].upper()] <= self.level):
+                log_levels[item["level"].upper()] <= self.level):
             return self.inner(item)
 
 
@@ -94,7 +98,7 @@ class StreamHandler(BaseHandler):
         if not formatted:
             return
         with self._lock:
-            if isinstance(formatted, unicode):
+            if isinstance(formatted, six.text_type):
                 self.stream.write(formatted.encode("utf-8", "replace"))
             elif isinstance(formatted, str):
                 self.stream.write(formatted)

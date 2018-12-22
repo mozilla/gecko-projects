@@ -1,11 +1,9 @@
-const {utils: Cu} = Components;
-Cu.import("resource://gre/modules/TelemetryArchive.jsm");
-Cu.import("resource://testing-common/Assert.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/TelemetryController.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
+ChromeUtils.import("resource://testing-common/Assert.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "TelemetryArchiveTesting",
 ];
 
@@ -33,7 +31,7 @@ function checkForProperties(ping, expected) {
 function Checker() {
 }
 Checker.prototype = {
-  promiseInit: function() {
+  promiseInit() {
     this._pingMap = new Map();
     return TelemetryArchive.promiseArchivedPingList().then((plist) => {
       for (let ping of plist) {
@@ -54,9 +52,9 @@ Checker.prototype = {
    * ]
    * @returns a matching ping if found, or null
    */
-  promiseFindPing: Task.async(function*(type, expected) {
+  async promiseFindPing(type, expected) {
     let candidates = [];
-    let plist = yield TelemetryArchive.promiseArchivedPingList();
+    let plist = await TelemetryArchive.promiseArchivedPingList();
     for (let ping of plist) {
       if (this._pingMap.has(ping.id)) {
         continue;
@@ -67,20 +65,20 @@ Checker.prototype = {
     }
 
     for (let candidate of candidates) {
-      let ping = yield TelemetryArchive.promiseArchivedPingById(candidate.id);
+      let ping = await TelemetryArchive.promiseArchivedPingById(candidate.id);
       if (checkForProperties(ping, expected)) {
         return ping;
       }
     }
     return null;
-  }),
+  },
 };
 
 const TelemetryArchiveTesting = {
-  setup: function() {
+  setup() {
     Services.prefs.setCharPref("toolkit.telemetry.log.level", "Trace");
     Services.prefs.setBoolPref("toolkit.telemetry.archive.enabled", true);
   },
 
-  Checker: Checker,
+  Checker,
 };

@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#define UNUSED_ERROR(x) ER3(SSL_ERROR_UNUSED_##x, (SSL_ERROR_BASE + x), \
+                            "Unrecognized SSL error_code.")
+
 /* SSL-specific security error codes  */
 /* caller must include "sslerr.h" */
 
@@ -20,8 +23,7 @@ ER3(SSL_ERROR_NO_CERTIFICATE, SSL_ERROR_BASE + 3,
 ER3(SSL_ERROR_BAD_CERTIFICATE, SSL_ERROR_BASE + 4,
     "Unable to communicate securely with peer: peers's certificate was rejected.")
 
-ER3(SSL_ERROR_UNUSED_5, SSL_ERROR_BASE + 5,
-    "Unrecognized SSL error code.")
+UNUSED_ERROR(5)
 
 ER3(SSL_ERROR_BAD_CLIENT, SSL_ERROR_BASE + 6,
     "The server has encountered bad data from the client.")
@@ -35,8 +37,7 @@ ER3(SSL_ERROR_UNSUPPORTED_CERTIFICATE_TYPE, SSL_ERROR_BASE + 8,
 ER3(SSL_ERROR_UNSUPPORTED_VERSION, SSL_ERROR_BASE + 9,
     "Peer using unsupported version of security protocol.")
 
-ER3(SSL_ERROR_UNUSED_10, SSL_ERROR_BASE + 10,
-    "Unrecognized SSL error code.")
+UNUSED_ERROR(10)
 
 ER3(SSL_ERROR_WRONG_CERTIFICATE, SSL_ERROR_BASE + 11,
     "Client authentication failed: private key in key database does not match public key in certificate database.")
@@ -289,7 +290,7 @@ ER3(SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE, (SSL_ERROR_BASE + 87),
     "Received incorrect handshakes hash values from peer.")
 
 ER3(SSL_ERROR_CERT_KEA_MISMATCH, (SSL_ERROR_BASE + 88),
-    "The certificate provided cannot be used with the selected key exchange algorithm.")
+    "The certificate provided cannot be used with the selected authentication type.")
 
 ER3(SSL_ERROR_NO_TRUSTED_SSL_CLIENT_CA, (SSL_ERROR_BASE + 89),
     "No certificate authority is trusted for SSL client authentication.")
@@ -373,7 +374,7 @@ ER3(SSL_ERROR_WEAK_SERVER_EPHEMERAL_DH_KEY, (SSL_ERROR_BASE + 115),
     "SSL received a weak ephemeral Diffie-Hellman key in Server Key Exchange handshake message.")
 
 ER3(SSL_ERROR_NEXT_PROTOCOL_DATA_INVALID, (SSL_ERROR_BASE + 116),
-    "SSL received invalid NPN extension data.")
+    "SSL received invalid ALPN extension data.")
 
 ER3(SSL_ERROR_FEATURE_NOT_SUPPORTED_FOR_SSL2, (SSL_ERROR_BASE + 117),
     "SSL feature not supported for SSL 2.0 connections.")
@@ -455,7 +456,7 @@ ER3(SSL_ERROR_RX_UNEXPECTED_ENCRYPTED_EXTENSIONS, (SSL_ERROR_BASE + 142),
     "SSL received an unexpected Encrypted Extensions handshake message.")
 
 ER3(SSL_ERROR_MISSING_EXTENSION_ALERT, (SSL_ERROR_BASE + 143),
-    "SSL received a missing_extenson alert.")
+    "SSL received a missing_extension alert.")
 
 ER3(SSL_ERROR_KEY_EXCHANGE_FAILURE, (SSL_ERROR_BASE + 144),
     "SSL had an error performing key exchange.")
@@ -465,3 +466,89 @@ ER3(SSL_ERROR_EXTENSION_DISALLOWED_FOR_VERSION, (SSL_ERROR_BASE + 145),
 
 ER3(SSL_ERROR_RX_MALFORMED_ENCRYPTED_EXTENSIONS, (SSL_ERROR_BASE + 146),
     "SSL received a malformed Encrypted Extensions handshake message.")
+
+ER3(SSL_ERROR_RX_MALFORMED_PRE_SHARED_KEY, (SSL_ERROR_BASE + 147),
+    "SSL received an invalid PreSharedKey extension.")
+
+ER3(SSL_ERROR_RX_MALFORMED_EARLY_DATA, (SSL_ERROR_BASE + 148),
+    "SSL received an invalid EarlyData extension.")
+
+UNUSED_ERROR(149)
+
+ER3(SSL_ERROR_MISSING_ALPN_EXTENSION, (SSL_ERROR_BASE + 150),
+    "SSL didn't receive an expected ALPN extension.")
+
+ER3(SSL_ERROR_RX_UNEXPECTED_EXTENSION, (SSL_ERROR_BASE + 151),
+    "SSL received an unexpected extension.")
+
+ER3(SSL_ERROR_MISSING_SUPPORTED_GROUPS, (SSL_ERROR_BASE + 152),
+    "SSL expected a supported groups extension.")
+
+ER3(SSL_ERROR_TOO_MANY_RECORDS, (SSL_ERROR_BASE + 153),
+    "SSL sent or received too many records with the same symmetric key.")
+
+ER3(SSL_ERROR_RX_UNEXPECTED_HELLO_RETRY_REQUEST, (SSL_ERROR_BASE + 154),
+    "SSL received an unexpected Hello Retry Request handshake message.")
+
+ER3(SSL_ERROR_RX_MALFORMED_HELLO_RETRY_REQUEST, (SSL_ERROR_BASE + 155),
+    "SSL received a malformed Hello Retry Request handshake message.")
+
+ER3(SSL_ERROR_BAD_2ND_CLIENT_HELLO, (SSL_ERROR_BASE + 156),
+    "SSL received a second Client Hello message without a usable key share.")
+
+ER3(SSL_ERROR_MISSING_SIGNATURE_ALGORITHMS_EXTENSION, (SSL_ERROR_BASE + 157),
+    "SSL expected a signature algorithms extension.")
+
+ER3(SSL_ERROR_MALFORMED_PSK_KEY_EXCHANGE_MODES, (SSL_ERROR_BASE + 158),
+    "SSL received a malformed PSK key exchange modes extension.")
+
+ER3(SSL_ERROR_MISSING_PSK_KEY_EXCHANGE_MODES, (SSL_ERROR_BASE + 159),
+    "SSL expected a PSK key exchange modes extension.")
+
+ER3(SSL_ERROR_DOWNGRADE_WITH_EARLY_DATA, (SSL_ERROR_BASE + 160),
+    "SSL got a pre-TLS 1.3 version even though we sent early data.")
+
+ER3(SSL_ERROR_TOO_MUCH_EARLY_DATA, (SSL_ERROR_BASE + 161),
+    "SSL received more early data than permitted.")
+
+ER3(SSL_ERROR_RX_UNEXPECTED_END_OF_EARLY_DATA, (SSL_ERROR_BASE + 162),
+    "SSL received an unexpected End of Early Data message.")
+
+ER3(SSL_ERROR_RX_MALFORMED_END_OF_EARLY_DATA, (SSL_ERROR_BASE + 163),
+    "SSL received a malformed End of Early Data message.")
+
+ER3(SSL_ERROR_UNSUPPORTED_EXPERIMENTAL_API, (SSL_ERROR_BASE + 164),
+    "An experimental API was called, but not supported.")
+
+ER3(SSL_ERROR_APPLICATION_ABORT, (SSL_ERROR_BASE + 165),
+    "SSL handshake aborted by the application.")
+
+ER3(SSL_ERROR_APP_CALLBACK_ERROR, (SSL_ERROR_BASE + 166),
+    "An application callback produced an invalid response.")
+
+ER3(SSL_ERROR_NO_TIMERS_ERROR, (SSL_ERROR_BASE + 167),
+    "No timers are currently running.")
+
+ER3(SSL_ERROR_MISSING_COOKIE_EXTENSION, (SSL_ERROR_BASE + 168),
+    "A second ClientHello was received without a cookie extension.")
+
+ER3(SSL_ERROR_RX_UNEXPECTED_KEY_UPDATE, (SSL_ERROR_BASE + 169),
+    "SSL received an unexpected key update message.")
+
+ER3(SSL_ERROR_RX_MALFORMED_KEY_UPDATE, (SSL_ERROR_BASE + 170),
+    "SSL received a malformed key update message.")
+
+ER3(SSL_ERROR_TOO_MANY_KEY_UPDATES, (SSL_ERROR_BASE + 171),
+    "SSL attempted too many key updates.")
+
+ER3(SSL_ERROR_HANDSHAKE_FAILED, (SSL_ERROR_BASE + 172),
+    "SSL handshake has already failed. No more operations possible.")
+
+ER3(SSL_ERROR_BAD_RESUMPTION_TOKEN_ERROR, (SSL_ERROR_BASE + 173),
+    "SSL received an invalid resumption token.")
+
+ER3(SSL_ERROR_RX_MALFORMED_DTLS_ACK, (SSL_ERROR_BASE + 174),
+    "SSL received a malformed DTLS ACK")
+
+ER3(SSL_ERROR_DH_KEY_TOO_LONG, (SSL_ERROR_BASE + 175),
+    "SSL received a DH key share that's too long (>8192 bit).")

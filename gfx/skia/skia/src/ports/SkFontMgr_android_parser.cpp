@@ -7,14 +7,17 @@
 
 // Despite the name and location, this is portable code.
 
+#include "SkFixed.h"
+#include "SkFontMgr.h"
 #include "SkFontMgr_android_parser.h"
+#include "SkMalloc.h"
+#include "SkOSFile.h"
 #include "SkStream.h"
 #include "SkTDArray.h"
 #include "SkTSearch.h"
 #include "SkTemplates.h"
 #include "SkTLogic.h"
 
-#include <dirent.h>
 #include <expat.h>
 
 #include <stdlib.h>
@@ -96,20 +99,20 @@ struct FamilyData {
         , fDepth(1)
         , fSkip(0)
         , fHandler(&topLevelHandler, 1)
-    { };
+    { }
 
-    XML_Parser fParser;                       // The expat parser doing the work, owned by caller
-    SkTDArray<FontFamily*>& fFamilies;        // The array to append families, owned by caller
-    SkAutoTDelete<FontFamily> fCurrentFamily; // The family being created, owned by this
-    FontFileInfo* fCurrentFontInfo;           // The fontInfo being created, owned by fCurrentFamily
-    int fVersion;                             // The version of the file parsed.
-    const SkString& fBasePath;                // The current base path.
-    const bool fIsFallback;                   // Indicates the file being parsed is a fallback file
-    const char* fFilename;                    // The name of the file currently being parsed.
+    XML_Parser fParser;                         // The expat parser doing the work, owned by caller
+    SkTDArray<FontFamily*>& fFamilies;          // The array to append families, owned by caller
+    std::unique_ptr<FontFamily> fCurrentFamily; // The family being created, owned by this
+    FontFileInfo* fCurrentFontInfo;             // The info being created, owned by fCurrentFamily
+    int fVersion;                               // The version of the file parsed.
+    const SkString& fBasePath;                  // The current base path.
+    const bool fIsFallback;                     // The file being parsed is a fallback file
+    const char* fFilename;                      // The name of the file currently being parsed.
 
-    int fDepth;                               // The current element depth of the parse.
-    int fSkip;                                // The depth to stop skipping, 0 if not skipping.
-    SkTDArray<const TagHandler*> fHandler;    // The stack of current tag handlers.
+    int fDepth;                                 // The current element depth of the parse.
+    int fSkip;                                  // The depth to stop skipping, 0 if not skipping.
+    SkTDArray<const TagHandler*> fHandler;      // The stack of current tag handlers.
 };
 
 static bool memeq(const char* s1, const char* s2, size_t n1, size_t n2) {
@@ -152,7 +155,10 @@ namespace lmpParser {
 static const TagHandler axisHandler = {
     /*start*/[](FamilyData* self, const char* tag, const char** attributes) {
         FontFileInfo& file = *self->fCurrentFontInfo;
-        FontFileInfo::Axis& axis = file.fAxes.push_back();
+        SkFourByteTag axisTag = SkSetFourByteTag('\0','\0','\0','\0');
+        SkFixed axisStyleValue = 0;
+        bool axisTagIsValid = false;
+        bool axisStyleValueIsValid = false;
         for (size_t i = 0; ATTS_NON_NULL(attributes, i); i += 2) {
             const char* name = attributes[i];
             const char* value = attributes[i+1];
@@ -160,25 +166,33 @@ static const TagHandler axisHandler = {
             if (MEMEQ("tag", name, nameLen)) {
                 size_t valueLen = strlen(value);
                 if (valueLen == 4) {
-                    SkFourByteTag tag = SkSetFourByteTag(value[0], value[1], value[2], value[3]);
-                    for (int j = 0; j < file.fAxes.count() - 1; ++j) {
-                        if (file.fAxes[j].fTag == tag) {
+                    axisTag = SkSetFourByteTag(value[0], value[1], value[2], value[3]);
+                    axisTagIsValid = true;
+                    for (int j = 0; j < file.fVariationDesignPosition.count() - 1; ++j) {
+                        if (file.fVariationDesignPosition[j].axis == axisTag) {
+                            axisTagIsValid = false;
                             SK_FONTCONFIGPARSER_WARNING("'%c%c%c%c' axis specified more than once",
-                                                        (tag >> 24) & 0xFF,
-                                                        (tag >> 16) & 0xFF,
-                                                        (tag >>  8) & 0xFF,
-                                                        (tag      ) & 0xFF);
+                                                        (axisTag >> 24) & 0xFF,
+                                                        (axisTag >> 16) & 0xFF,
+                                                        (axisTag >>  8) & 0xFF,
+                                                        (axisTag      ) & 0xFF);
                         }
                     }
-                    axis.fTag = SkSetFourByteTag(value[0], value[1], value[2], value[3]);
                 } else {
                     SK_FONTCONFIGPARSER_WARNING("'%s' is an invalid axis tag", value);
                 }
             } else if (MEMEQ("stylevalue", name, nameLen)) {
-                if (!parse_fixed<16>(value, &axis.fValue)) {
+                if (parse_fixed<16>(value, &axisStyleValue)) {
+                    axisStyleValueIsValid = true;
+                } else {
                     SK_FONTCONFIGPARSER_WARNING("'%s' is an invalid axis stylevalue", value);
                 }
             }
+        }
+        if (axisTagIsValid && axisStyleValueIsValid) {
+            auto& coordinate = file.fVariationDesignPosition.push_back();
+            coordinate.axis = axisTag;
+            coordinate.value = SkFixedToScalar(axisStyleValue);
         }
     },
     /*end*/nullptr,
@@ -235,7 +249,7 @@ static const TagHandler fontHandler = {
 static const TagHandler familyHandler = {
     /*start*/[](FamilyData* self, const char* tag, const char** attributes) {
         // 'name' (string) [optional]
-        // 'lang' (string) [default ""]
+        // 'lang' (space separated string) [default ""]
         // 'variant' ("elegant", "compact") [default "default"]
         // If there is no name, this is a fallback only font.
         FontFamily* family = new FontFamily(self->fBasePath, true);
@@ -250,7 +264,16 @@ static const TagHandler familyHandler = {
                 family->fNames.push_back().set(tolc.lc());
                 family->fIsFallbackFont = false;
             } else if (MEMEQ("lang", name, nameLen)) {
-                family->fLanguage = SkLanguage(value, valueLen);
+                size_t i = 0;
+                while (true) {
+                    for (; i < valueLen && is_whitespace(value[i]); ++i) { }
+                    if (i == valueLen) { break; }
+                    size_t j;
+                    for (j = i + 1; j < valueLen && !is_whitespace(value[j]); ++j) { }
+                    family->fLanguages.emplace_back(value + i, j - i);
+                    i = j;
+                    if (i == valueLen) { break; }
+                }
             } else if (MEMEQ("variant", name, nameLen)) {
                 if (MEMEQ("elegant", value, valueLen)) {
                     family->fVariant = kElegant_FontVariant;
@@ -261,7 +284,7 @@ static const TagHandler familyHandler = {
         }
     },
     /*end*/[](FamilyData* self, const char* tag) {
-        *self->fFamilies.append() = self->fCurrentFamily.detach();
+        *self->fFamilies.append() = self->fCurrentFamily.release();
     },
     /*tag*/[](FamilyData* self, const char* tag, const char** attributes) -> const TagHandler* {
         size_t len = strlen(tag);
@@ -386,9 +409,16 @@ static const TagHandler fileHandler = {
                     }
 
                 } else if (MEMEQ("lang", name, nameLen)) {
-                    SkLanguage prevLang = currentFamily.fLanguage;
-                    currentFamily.fLanguage = SkLanguage(value, valueLen);
-                    if (currentFamily.fFonts.count() > 1 && currentFamily.fLanguage != prevLang) {
+                    SkLanguage currentLanguage = SkLanguage(value, valueLen);
+                    bool showWarning = false;
+                    if (currentFamily.fLanguages.empty()) {
+                        showWarning = (currentFamily.fFonts.count() > 1);
+                        currentFamily.fLanguages.push_back(std::move(currentLanguage));
+                    } else if (currentFamily.fLanguages[0] != currentLanguage) {
+                        showWarning = true;
+                        currentFamily.fLanguages[0] = std::move(currentLanguage);
+                    }
+                    if (showWarning) {
                         SK_FONTCONFIGPARSER_WARNING("'%s' unexpected language found\n"
                             "Note: Every font file within a family must have identical languages.",
                             value);
@@ -461,7 +491,7 @@ static const TagHandler familyHandler = {
         }
     },
     /*end*/[](FamilyData* self, const char* tag) {
-        *self->fFamilies.append() = self->fCurrentFamily.detach();
+        *self->fFamilies.append() = self->fCurrentFamily.release();
     },
     /*tag*/[](FamilyData* self, const char* tag, const char** attributes) -> const TagHandler* {
         size_t len = strlen(tag);
@@ -663,12 +693,9 @@ static void append_fallback_font_families_for_locale(SkTDArray<FontFamily*>& fal
                                                      const char* dir,
                                                      const SkString& basePath)
 {
-    SkAutoTCallIProc<DIR, closedir> fontDirectory(opendir(dir));
-    if (nullptr == fontDirectory) {
-        return;
-    }
-
-    for (struct dirent* dirEntry; (dirEntry = readdir(fontDirectory));) {
+    SkOSFile::Iter iter(dir, nullptr);
+    SkString fileName;
+    while (iter.next(&fileName, false)) {
         // The size of the prefix and suffix.
         static const size_t fixedLen = sizeof(LOCALE_FALLBACK_FONTS_PREFIX) - 1
                                      + sizeof(LOCALE_FALLBACK_FONTS_SUFFIX) - 1;
@@ -676,7 +703,6 @@ static void append_fallback_font_families_for_locale(SkTDArray<FontFamily*>& fal
         // The size of the prefix, suffix, and a minimum valid language code
         static const size_t minSize = fixedLen + 2;
 
-        SkString fileName(dirEntry->d_name);
         if (fileName.size() < minSize ||
             !fileName.startsWith(LOCALE_FALLBACK_FONTS_PREFIX) ||
             !fileName.endsWith(LOCALE_FALLBACK_FONTS_SUFFIX))
@@ -695,7 +721,7 @@ static void append_fallback_font_families_for_locale(SkTDArray<FontFamily*>& fal
 
         for (int i = 0; i < langSpecificFonts.count(); ++i) {
             FontFamily* family = langSpecificFonts[i];
-            family->fLanguage = SkLanguage(locale);
+            family->fLanguages.emplace_back(locale);
             *fallbackFonts.append() = family;
         }
     }

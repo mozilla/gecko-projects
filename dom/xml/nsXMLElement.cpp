@@ -9,6 +9,7 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "nsContentUtils.h" // nsAutoScriptBlocker
 
+using namespace mozilla;
 using namespace mozilla::dom;
 
 nsresult
@@ -20,13 +21,32 @@ NS_NewXMLElement(Element** aInstancePtrResult,
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(nsXMLElement, Element,
-                            nsIDOMNode, nsIDOMElement)
-
 JSObject*
 nsXMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ElementBinding::Wrap(aCx, this, aGivenProto);
+  return Element_Binding::Wrap(aCx, this, aGivenProto);
+}
+
+void
+nsXMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
+{
+  CSSPseudoElementType pseudoType = GetPseudoElementType();
+  bool isBefore = pseudoType == CSSPseudoElementType::before;
+  nsAtom* property = isBefore
+    ? nsGkAtoms::beforePseudoProperty : nsGkAtoms::afterPseudoProperty;
+
+  switch (pseudoType) {
+    case CSSPseudoElementType::before:
+    case CSSPseudoElementType::after: {
+      MOZ_ASSERT(GetParent());
+      MOZ_ASSERT(GetParent()->IsElement());
+      GetParent()->DeleteProperty(property);
+      break;
+    }
+    default:
+      break;
+  }
+  Element::UnbindFromTree(aDeep, aNullParent);
 }
 
 NS_IMPL_ELEMENT_CLONE(nsXMLElement)

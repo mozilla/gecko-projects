@@ -14,10 +14,8 @@ var gClient;
 var gTab;
 
 function test() {
-  if (!DebuggerServer.initialized) {
-    DebuggerServer.init();
-    DebuggerServer.addBrowserActors();
-  }
+  DebuggerServer.init();
+  DebuggerServer.registerAllActors();
 
   let transport = DebuggerServer.connectPipe();
   gClient = new DebuggerClient(transport);
@@ -32,9 +30,9 @@ function test() {
       })
       .then(pauseDebuggee)
       .then(testEventListeners)
-      .then(closeConnection)
+      .then(() => gClient.close())
       .then(finish)
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -85,13 +83,13 @@ function testEventListeners(aThreadClient) {
       });
       return lDeferred.promise;
     })).then(listeners => {
-      is (listeners.length, 3, "Found three event listeners.");
+      is(listeners.length, 3, "Found three event listeners.");
       for (let l of listeners) {
         let node = l.node;
         ok(node, "There is a node property.");
         ok(node.object, "There is a node object property.");
         ok(node.selector == "window" ||
-          content.document.querySelectorAll(node.selector).length == 1,
+          gBrowser.contentDocumentAsCPOW.querySelectorAll(node.selector).length == 1,
           "The node property is a unique CSS selector.");
 
         let func = l.function;
@@ -118,12 +116,6 @@ function testEventListeners(aThreadClient) {
   return deferred.promise;
 }
 
-function closeConnection() {
-  let deferred = promise.defer();
-  gClient.close(deferred.resolve);
-  return deferred.promise;
-}
-
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gClient = null;
 });

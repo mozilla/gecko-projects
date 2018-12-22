@@ -2,17 +2,15 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(function() {
     openScratchpad(runTests);
-  }, true);
+  });
 
-  content.location = "data:text/html;charset=utf8,test Scratchpad eval function.";
+  gBrowser.loadURI("data:text/html;charset=utf8,test Scratchpad eval function.");
 }
 
 function reportErrorAndQuit(error) {
@@ -21,17 +19,18 @@ function reportErrorAndQuit(error) {
   finish();
 }
 
-function runTests(sw)
-{
+function runTests(sw) {
   const sp = sw.Scratchpad;
 
-  let foo = "" + function main() { console.log(1); };
-  let bar = "var bar = " + (() => { console.log(2); });
+  /* eslint-disable brace-style */
+  const foo = "" + function main() { console.log(1); };
+  const bar = "var bar = " + (() => { console.log(2); });
+  /* eslint-enable brace-style */
 
   const fullText =
     foo + "\n" +
     "\n" +
-    bar + "\n"
+    bar + "\n";
 
   sp.setText(fullText);
 

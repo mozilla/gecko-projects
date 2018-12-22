@@ -1,0 +1,5 @@
+commit a8f7012587250b32ffb43a3cbd8da8a9f9d1565e
+Author: Rick Waldron <waldron.rick@gmail.com>
+Date:   Tue May 22 15:47:50 2018 -0400
+
+    Array.prototype.flatten => Array.prototype.flat (#1569)

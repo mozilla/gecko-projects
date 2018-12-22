@@ -1,6 +1,4 @@
-function test() {
-  waitForExplicitFinish();
-
+add_task(async function test() {
   const kTestURI =
     "data:text/html," +
     "<script type=\"text/javascript\">" +
@@ -10,50 +8,51 @@ function test() {
     "  }" +
     "</script>" +
     "<body id=\"body\">" +
-    "<button id=\"eventTarget\" onmousedown=\"onMouseDown(event);\">click here</button>" +
+    "<button onmousedown=\"onMouseDown(event);\" style=\"width: 100px; height: 100px;\">click here</button>" +
     "<input id=\"willBeFocused\"></body>";
 
-  let tab = gBrowser.addTab();
-  gBrowser.selectedTab = tab;
+  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, kTestURI);
 
-  // Set the focus to the contents.
-  tab.linkedBrowser.focus();
-  // Load on the tab
-  tab.linkedBrowser.addEventListener("load", onLoadTab, true);
-  tab.linkedBrowser.loadURI(kTestURI);
+  let fm = Cc["@mozilla.org/focus-manager;1"].
+        getService(Ci.nsIFocusManager);
 
-  function onLoadTab() {
-    tab.linkedBrowser.removeEventListener("load", onLoadTab, true);
-    setTimeout(doTest, 0);
+  for (var button = 0; button < 3; button++) {
+    // Set focus to a chrome element before synthesizing a mouse down event.
+    document.getElementById("urlbar").focus();
+
+    is(fm.focusedElement, document.getElementById("urlbar").inputField,
+       "Failed to move focus to search bar: button=" + button);
+
+    // Synthesize mouse down event on browser object over the button, such that
+    // the event propagates through both processes.
+    EventUtils.synthesizeMouse(tab.linkedBrowser, 20, 20, { "button": button });
+
+    isnot(fm.focusedElement, document.getElementById("urlbar").inputField,
+       "Failed to move focus away from search bar: button=" + button);
+
+    await ContentTask.spawn(tab.linkedBrowser, button, async function (button) {
+      let fm = Cc["@mozilla.org/focus-manager;1"].
+          getService(Ci.nsIFocusManager);
+
+      let attempts = 10;
+      await new Promise(resolve => {
+        function check() {
+          if (attempts > 0 && content.document.activeElement.id != "willBeFocused") {
+            attempts--;
+            content.window.setTimeout(check, 100);
+            return;
+          }
+
+          Assert.equal(content.document.activeElement.id, "willBeFocused",
+                       "The input element isn't active element: button=" + button);
+          Assert.equal(fm.focusedElement, content.document.activeElement,
+                       "The active element isn't focused element in App level: button=" + button);
+          resolve();
+        }
+        check();
+      });
+    });
   }
 
-  function doTest() {
-    let fm = Components.classes["@mozilla.org/focus-manager;1"].
-                        getService(Components.interfaces.nsIFocusManager);
-    let eventTarget =
-      tab.linkedBrowser.contentDocument.getElementById("eventTarget");
-
-    for (var button = 0; button < 3; button++) {
-      // Set focus to a chrome element before synthesizing a mouse down event.
-      document.getElementById("urlbar").focus();
-
-      is(fm.focusedElement, document.getElementById("urlbar").inputField,
-         "Failed to move focus to search bar: button=" +
-         button);
-
-      EventUtils.synthesizeMouse(eventTarget, 10, 10, { "button": button },
-                                 tab.linkedBrowser.contentWindow);
-
-      let e = tab.linkedBrowser.contentDocument.activeElement;
-      is(e.id, "willBeFocused",
-         "The input element isn't active element: button=" + button);
-
-      is(fm.focusedElement, e,
-         "The active element isn't focused element in App level: button=" +
-         button);
-    }
-
-    gBrowser.removeTab(tab);
-    finish();
-  }
-}
+  gBrowser.removeTab(tab);
+});

@@ -6,19 +6,22 @@ installation script for talos. This script:
 - sets up talos in development mode: `python setup.py develop`
 - downloads pageloader and packages to talos/page_load_test/pageloader.xpi
 """
+from __future__ import absolute_import
 
 import os
 import subprocess
 import sys
 import urllib2
+
 try:
     from subprocess import check_call as call
-except:
+except ImportError:
     from subprocess import call
 
 # globals
 here = os.path.dirname(os.path.abspath(__file__))
-VIRTUALENV='https://raw.github.com/pypa/virtualenv/1.10/virtualenv.py'
+VIRTUALENV = 'https://raw.github.com/pypa/virtualenv/1.10/virtualenv.py'
+
 
 def which(binary, path=os.environ['PATH']):
     dirs = path.split(os.pathsep)
@@ -27,6 +30,7 @@ def which(binary, path=os.environ['PATH']):
             return os.path.join(dir, path)
         if os.path.isfile(os.path.join(dir, path + ".exe")):
             return os.path.join(dir, path + ".exe")
+
 
 def main(args=sys.argv[1:]):
 
@@ -40,7 +44,11 @@ def main(args=sys.argv[1:]):
     if virtualenv:
         call([virtualenv, '--system-site-packages', here])
     else:
-        process = subprocess.Popen([sys.executable, '-', '--system-site-packages', here], stdin=subprocess.PIPE)
+        process = subprocess.Popen([sys.executable,
+                                    '-',
+                                    '--system-site-packages',
+                                    here],
+                                   stdin=subprocess.PIPE)
         stdout, stderr = process.communicate(input=urllib2.urlopen(VIRTUALENV).read())
 
     # find the virtualenv's python
@@ -59,6 +67,7 @@ def main(args=sys.argv[1:]):
 
     # install talos into the virtualenv
     call([os.path.abspath(virtualenv_python), 'setup.py', 'develop'], cwd=here)
+
 
 if __name__ == '__main__':
     main()

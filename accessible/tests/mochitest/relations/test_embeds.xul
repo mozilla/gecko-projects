@@ -56,7 +56,13 @@
     {
       this.invoke = function loadOneTab_invoke()
       {
-        tabBrowser().loadOneTab(aURI, null, null, null, false);
+        tabBrowser().loadOneTab(aURI, {
+          referrerURI: null,
+          charset: null,
+          postData: null,
+          inBackground: false,
+          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        });
       }
 
       this.eventSeq = [
@@ -89,7 +95,7 @@
       enableLogging("docload");
       gQueue = new eventQueue();
 
-      gQueue.push(new loadURI("about:about"));
+      gQueue.push(new loadURI("about:robots"));
       gQueue.push(new loadOneTab("about:mozilla"));
 
       gQueue.onFinish = function()
@@ -101,7 +107,7 @@
     }
 
     SimpleTest.waitForExplicitFinish();
-    openBrowserWindow(doTests, "about:");
+    openBrowserWindow(doTests, "about:license");
   ]]>
   </script>
 

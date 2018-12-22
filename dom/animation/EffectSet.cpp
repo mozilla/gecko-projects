@@ -6,8 +6,7 @@
 
 #include "EffectSet.h"
 #include "mozilla/dom/Element.h" // For Element
-#include "mozilla/RestyleManagerHandle.h"
-#include "mozilla/RestyleManagerHandleInlines.h"
+#include "mozilla/RestyleManager.h"
 #include "nsCSSPseudoElements.h" // For CSSPseudoElementType
 #include "nsCycleCollectionNoteChild.h" // For CycleCollectionNoteChild
 #include "nsPresContext.h"
@@ -16,7 +15,7 @@
 namespace mozilla {
 
 /* static */ void
-EffectSet::PropertyDtor(void* aObject, nsIAtom* aPropertyName,
+EffectSet::PropertyDtor(void* aObject, nsAtom* aPropertyName,
                         void* aPropertyValue, void* aData)
 {
   EffectSet* effectSet = static_cast<EffectSet*>(aPropertyValue);
@@ -39,52 +38,28 @@ EffectSet::Traverse(nsCycleCollectionTraversalCallback& aCallback)
 }
 
 /* static */ EffectSet*
-EffectSet::GetEffectSet(dom::Element* aElement,
+EffectSet::GetEffectSet(const dom::Element* aElement,
                         CSSPseudoElementType aPseudoType)
 {
-  nsIAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
+  if (!aElement->MayHaveAnimations()) {
+    return nullptr;
+  }
+
+  nsAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
   return static_cast<EffectSet*>(aElement->GetProperty(propName));
 }
 
 /* static */ EffectSet*
 EffectSet::GetEffectSet(const nsIFrame* aFrame)
 {
-  nsIContent* content = aFrame->GetContent();
-  if (!content) {
+  Maybe<NonOwningAnimationTarget> target =
+    EffectCompositor::GetAnimationElementAndPseudoForFrame(aFrame);
+
+  if (!target) {
     return nullptr;
   }
 
-  nsIAtom* propName;
-  if (aFrame->IsGeneratedContentFrame()) {
-    nsIFrame* parent = aFrame->GetParent();
-    if (parent->IsGeneratedContentFrame()) {
-      return nullptr;
-    }
-    nsIAtom* name = content->NodeInfo()->NameAtom();
-    if (name == nsGkAtoms::mozgeneratedcontentbefore) {
-      propName = nsGkAtoms::animationEffectsForBeforeProperty;
-    } else if (name == nsGkAtoms::mozgeneratedcontentafter) {
-      propName = nsGkAtoms::animationEffectsForAfterProperty;
-    } else {
-      return nullptr;
-    }
-    content = content->GetParent();
-    if (!content) {
-      return nullptr;
-    }
-  } else {
-    if (nsLayoutUtils::GetStyleFrame(content) != aFrame) {
-      // The effects associated with an element are for its primary frame.
-      return nullptr;
-    }
-    propName = nsGkAtoms::animationEffectsProperty;
-  }
-
-  if (!content->MayHaveAnimations()) {
-    return nullptr;
-  }
-
-  return static_cast<EffectSet*>(content->GetProperty(propName));
+  return GetEffectSet(target->mElement, target->mPseudoType);
 }
 
 /* static */ EffectSet*
@@ -96,7 +71,7 @@ EffectSet::GetOrCreateEffectSet(dom::Element* aElement,
     return effectSet;
   }
 
-  nsIAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
+  nsAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
   effectSet = new EffectSet();
 
   nsresult rv = aElement->SetProperty(propName, effectSet,
@@ -118,7 +93,7 @@ EffectSet::GetOrCreateEffectSet(dom::Element* aElement,
 EffectSet::DestroyEffectSet(dom::Element* aElement,
                             CSSPseudoElementType aPseudoType)
 {
-  nsIAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
+  nsAtom* propName = GetEffectSetPropertyAtom(aPseudoType);
   EffectSet* effectSet =
     static_cast<EffectSet*>(aElement->GetProperty(propName));
   if (!effectSet) {
@@ -135,17 +110,14 @@ EffectSet::DestroyEffectSet(dom::Element* aElement,
 void
 EffectSet::UpdateAnimationGeneration(nsPresContext* aPresContext)
 {
-  MOZ_ASSERT(aPresContext->RestyleManager()->IsGecko(),
-             "stylo: Servo-backed style system should not be using "
-             "EffectSet");
   mAnimationGeneration =
-    aPresContext->RestyleManager()->AsGecko()->GetAnimationGeneration();
+    aPresContext->RestyleManager()->GetAnimationGeneration();
 }
 
-/* static */ nsIAtom**
+/* static */ nsAtom**
 EffectSet::GetEffectSetPropertyAtoms()
 {
-  static nsIAtom* effectSetPropertyAtoms[] =
+  static nsAtom* effectSetPropertyAtoms[] =
     {
       nsGkAtoms::animationEffectsProperty,
       nsGkAtoms::animationEffectsForBeforeProperty,
@@ -156,7 +128,7 @@ EffectSet::GetEffectSetPropertyAtoms()
   return effectSetPropertyAtoms;
 }
 
-/* static */ nsIAtom*
+/* static */ nsAtom*
 EffectSet::GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType)
 {
   switch (aPseudoType) {
@@ -170,14 +142,14 @@ EffectSet::GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType)
       return nsGkAtoms::animationEffectsForAfterProperty;
 
     default:
-      NS_NOTREACHED("Should not try to get animation effects for a pseudo "
-                    "other that :before or :after");
+      MOZ_ASSERT_UNREACHABLE("Should not try to get animation effects for "
+                             "a pseudo other that :before or :after");
       return nullptr;
   }
 }
 
 void
-EffectSet::AddEffect(dom::KeyframeEffectReadOnly& aEffect)
+EffectSet::AddEffect(dom::KeyframeEffect& aEffect)
 {
   if (mEffects.Contains(&aEffect)) {
     return;
@@ -188,7 +160,7 @@ EffectSet::AddEffect(dom::KeyframeEffectReadOnly& aEffect)
 }
 
 void
-EffectSet::RemoveEffect(dom::KeyframeEffectReadOnly& aEffect)
+EffectSet::RemoveEffect(dom::KeyframeEffect& aEffect)
 {
   if (!mEffects.Contains(&aEffect)) {
     return;

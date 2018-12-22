@@ -10,6 +10,7 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "nsPIDOMWindow.h"
+#include "mozilla/media/DeviceChangeCallback.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,6 +24,7 @@ struct MediaTrackSupportedConstraints;
  { 0x9a, 0x36, 0x74, 0xa4, 0xd6, 0x71, 0xa6, 0xc8 } }
 
 class MediaDevices final : public DOMEventTargetHelper
+                          ,public DeviceChangeCallback
 {
 public:
   explicit MediaDevices(nsPIDOMWindowInner* aWindow) :
@@ -37,17 +39,28 @@ public:
   void GetSupportedConstraints(MediaTrackSupportedConstraints& aResult) {};
 
   already_AddRefed<Promise>
-  GetUserMedia(const MediaStreamConstraints& aConstraints, ErrorResult &aRv);
+  GetUserMedia(const MediaStreamConstraints& aConstraints,
+	       CallerType aCallerType, ErrorResult &aRv);
 
   already_AddRefed<Promise>
-  EnumerateDevices(ErrorResult &aRv);
+  EnumerateDevices(CallerType aCallerType, ErrorResult &aRv);
+
+  virtual void OnDeviceChange() override;
+
+  mozilla::dom::EventHandlerNonNull* GetOndevicechange();
+
+  void SetOndevicechange(mozilla::dom::EventHandlerNonNull* aCallback);
+
+  void EventListenerAdded(nsAtom* aType) override;
+  using DOMEventTargetHelper::EventListenerAdded;
 
 private:
   class GumResolver;
   class EnumDevResolver;
   class GumRejecter;
 
-  virtual ~MediaDevices() {}
+  virtual ~MediaDevices();
+  nsCOMPtr<nsITimer> mFuzzTimer;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(MediaDevices,

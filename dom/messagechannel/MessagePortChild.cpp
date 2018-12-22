@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,31 +12,36 @@
 namespace mozilla {
 namespace dom {
 
-bool
+MessagePortChild::MessagePortChild()
+  : mPort(nullptr)
+{
+}
+
+mozilla::ipc::IPCResult
 MessagePortChild::RecvStopSendingDataConfirmed()
 {
   MOZ_ASSERT(mPort);
   mPort->StopSendingDataConfirmed();
   MOZ_ASSERT(!mPort);
-  return true;
+  return IPC_OK();
 }
 
-bool
-MessagePortChild::RecvEntangled(nsTArray<MessagePortMessage>&& aMessages)
+mozilla::ipc::IPCResult
+MessagePortChild::RecvEntangled(nsTArray<ClonedMessageData>&& aMessages)
 {
   if (mPort) {
     mPort->Entangled(aMessages);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
-MessagePortChild::RecvReceiveData(nsTArray<MessagePortMessage>&& aMessages)
+mozilla::ipc::IPCResult
+MessagePortChild::RecvReceiveData(nsTArray<ClonedMessageData>&& aMessages)
 {
   if (mPort) {
     mPort->MessagesReceived(aMessages);
   }
-  return true;
+  return IPC_OK();
 }
 
 void

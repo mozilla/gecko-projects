@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "ScopedNSSTypes.h"
 #include "base64.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Move.h"
+#include "mozilla/Sprintf.h"
 #include "nspr.h"
 #include "nss.h"
 #include "plarenas.h"
@@ -129,32 +129,32 @@ AddKeyFromFile(const char* basePath, const char* filename)
 
   unsigned int binLength;
   UniquePORTString bin(
-    reinterpret_cast<char*>(ATOB_AsciiToData(base64, &binLength)));
+    BitwiseCast<char*, unsigned char*>(ATOB_AsciiToData(base64, &binLength)));
   if (!bin || binLength == 0) {
     PrintPRError("ATOB_AsciiToData failed");
     return SECFailure;
   }
-  ScopedSECItem secitem(::SECITEM_AllocItem(nullptr, nullptr, binLength));
+  UniqueSECItem secitem(::SECITEM_AllocItem(nullptr, nullptr, binLength));
   if (!secitem) {
     PrintPRError("SECITEM_AllocItem failed");
     return SECFailure;
   }
   PORT_Memcpy(secitem->data, bin.get(), binLength);
-  ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
   if (!slot) {
     PrintPRError("PK11_GetInternalKeySlot failed");
     return SECFailure;
   }
-  if (PK11_NeedUserInit(slot)) {
-    if (PK11_InitPin(slot, nullptr, nullptr) != SECSuccess) {
+  if (PK11_NeedUserInit(slot.get())) {
+    if (PK11_InitPin(slot.get(), nullptr, nullptr) != SECSuccess) {
       PrintPRError("PK11_InitPin failed");
       return SECFailure;
     }
   }
   SECKEYPrivateKey* privateKey;
-  if (PK11_ImportDERPrivateKeyInfoAndReturnKey(slot, secitem, nullptr, nullptr,
-                                               true, false, KU_ALL,
-                                               &privateKey, nullptr)
+  if (PK11_ImportDERPrivateKeyInfoAndReturnKey(slot.get(), secitem.get(),
+                                               nullptr, nullptr, true, false,
+                                               KU_ALL, &privateKey, nullptr)
         != SECSuccess) {
     PrintPRError("PK11_ImportDERPrivateKeyInfoAndReturnKey failed");
     return SECFailure;
@@ -183,28 +183,28 @@ AddCertificateFromFile(const char* basePath, const char* filename)
   if (rv != SECSuccess) {
     return rv;
   }
-  SECItem certDER;
+  ScopedAutoSECItem certDER;
   rv = CERT_DecodeCertPackage(buf, strlen(buf), DecodeCertCallback, &certDER);
   if (rv != SECSuccess) {
     PrintPRError("CERT_DecodeCertPackage failed");
     return rv;
   }
-  ScopedCERTCertificate cert(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
+  UniqueCERTCertificate cert(CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
                                                      &certDER, nullptr, false,
                                                      true));
-  PORT_Free(certDER.data);
   if (!cert) {
     PrintPRError("CERT_NewTempCertificate failed");
     return SECFailure;
   }
-  ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
   if (!slot) {
     PrintPRError("PK11_GetInternalKeySlot failed");
     return SECFailure;
   }
   // The nickname is the filename without '.pem'.
   std::string nickname(filename, strlen(filename) - 4);
-  rv = PK11_ImportCert(slot, cert, CK_INVALID_HANDLE, nickname.c_str(), false);
+  rv = PK11_ImportCert(slot.get(), cert.get(), CK_INVALID_HANDLE,
+                       nickname.c_str(), false);
   if (rv != SECSuccess) {
     PrintPRError("PK11_ImportCert failed");
     return rv;
@@ -410,11 +410,11 @@ DoCallback()
 }
 
 SECStatus
-ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
-                                /*optional*/ ScopedCERTCertificate *certOut,
-                                /*optional*/ SSLKEAType *keaOut)
+ConfigSecureServerWithNamedCert(PRFileDesc* fd, const char* certName,
+                                /*optional*/ UniqueCERTCertificate* certOut,
+                                /*optional*/ SSLKEAType* keaOut)
 {
-  ScopedCERTCertificate cert(PK11_FindCertFromNickname(certName, nullptr));
+  UniqueCERTCertificate cert(PK11_FindCertFromNickname(certName, nullptr));
   if (!cert) {
     PrintPRError("PK11_FindCertFromNickname failed");
     return SECFailure;
@@ -424,7 +424,7 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
   // we don't encounter unknown issuer errors when that's not what we're
   // testing.
   UniqueCERTCertificateList certList;
-  ScopedCERTCertificate issuerCert(
+  UniqueCERTCertificate issuerCert(
     CERT_FindCertByName(CERT_GetDefaultCertDB(), &cert->derIssuer));
   // If we can't find the issuer cert, continue without it.
   if (issuerCert) {
@@ -432,7 +432,7 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
     // utility function, so we must create it ourselves. This consists
     // of creating an arena, allocating space for the CERTCertificateList,
     // and then transferring ownership of the arena to that list.
-    ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+    UniquePLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
     if (!arena) {
       PrintPRError("PORT_NewArena failed");
       return SECFailure;
@@ -443,10 +443,10 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
       PrintPRError("PORT_ArenaAlloc failed");
       return SECFailure;
     }
-    certList->arena = arena.forget();
+    certList->arena = arena.release();
     // We also have to manually copy the certificates we care about to the
     // list, because there aren't any utility functions for that either.
-    certList->certs = reinterpret_cast<SECItem*>(
+    certList->certs = static_cast<SECItem*>(
       PORT_ArenaAlloc(certList->arena, 2 * sizeof(SECItem)));
     if (SECITEM_CopyItem(certList->arena, certList->certs, &cert->derCert)
           != SECSuccess) {
@@ -461,7 +461,11 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
     certList->len = 2;
   }
 
-  ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
+  UniquePK11SlotInfo slot(PK11_GetInternalKeySlot());
+  if (!slot) {
+    PrintPRError("PK11_GetInternalKeySlot failed");
+    return SECFailure;
+  }
   UniqueSECKEYPrivateKey key(
     PK11_FindKeyByDERCert(slot.get(), cert.get(), nullptr));
   if (!key) {
@@ -469,7 +473,7 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
     return SECFailure;
   }
 
-  SSLKEAType certKEA = NSS_FindCertKEAType(cert);
+  SSLKEAType certKEA = NSS_FindCertKEAType(cert.get());
 
   if (SSL_ConfigSecureServerWithCertChain(fd, cert.get(), certList.get(),
                                           key.get(), certKEA) != SECSuccess) {
@@ -478,12 +482,15 @@ ConfigSecureServerWithNamedCert(PRFileDesc *fd, const char *certName,
   }
 
   if (certOut) {
-    *certOut = cert.forget();
+    *certOut = std::move(cert);
   }
 
   if (keaOut) {
     *keaOut = certKEA;
   }
+
+  SSL_OptionSet(fd, SSL_NO_CACHE, false);
+  SSL_OptionSet(fd, SSL_ENABLE_SESSION_TICKETS, true);
 
   return SECSuccess;
 }

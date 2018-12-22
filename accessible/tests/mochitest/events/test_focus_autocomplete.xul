@@ -35,13 +35,10 @@
     ////////////////////////////////////////////////////////////////////////////
     // Hacky stuffs
 
-    // This is the hack needed for searchbar work outside of browser.
-    function getBrowser()
-    {
-      return {
-        mCurrentBrowser: { engines: new Array() }
-      };
-    }
+    // This is the hacks needed to use a searchbar without browser.js.
+    var BrowserSearch = {
+      updateOpenSearchBadge: function() {}
+    };
 
     ////////////////////////////////////////////////////////////////////////////
     // Invokers
@@ -123,8 +120,8 @@
 
       this.invoke = function removeChar_invoke()
       {
-        synthesizeKey("VK_LEFT", { shiftKey: true });
-        synthesizeKey("VK_DELETE", {});
+        synthesizeKey("KEY_ArrowLeft", {shiftKey: true});
+        synthesizeKey("KEY_Delete");
       }
 
       this.getID = function removeChar_getID()
@@ -140,7 +137,7 @@
       this.invoke = function replaceOnChar_invoke()
       {
         this.DOMNode.select();
-        synthesizeKey(aChar, {});
+        sendString(aChar);
       }
 
       this.getID = function replaceOnChar_getID()
@@ -157,7 +154,7 @@
       {
         this.id = aIDFunc.call(null, aIDFuncArg);
         this.node = getNode(this.id);
-        this.window = this.node.ownerDocument.defaultView;
+        this.window = this.node.ownerGlobal;
 
         if (this.node.localName == "tree") {
           var tree = getAccessible(this.node);
@@ -215,7 +212,7 @@
       {
         var id = aIDFunc.call(null, aIDFuncArg);
         var node = getNode(id);
-        var targetWindow = node.ownerDocument.defaultView;
+        var targetWindow = node.ownerGlobal;
 
         var x = 0, y = 0;
         if (node.localName == "tree") {
@@ -260,9 +257,9 @@
       var popupNode = autocompleteNode.popup;
       if (!popupNode) {
         // HTML form autocomplete
-        var controller = Components.classes["@mozilla.org/autocomplete/controller;1"].
-          getService(Components.interfaces.nsIAutoCompleteController);
-        popupNode = controller.input.popup.QueryInterface(nsIDOMNode);
+        var controller = Cc["@mozilla.org/autocomplete/controller;1"].
+          getService(Ci.nsIAutoCompleteController);
+        popupNode = controller.input.popup;
       }
 
       if (popupNode) {

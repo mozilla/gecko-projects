@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -110,8 +111,8 @@ struct IntCoordTyped :
 
   typedef BaseCoord< int32_t, IntCoordTyped<units> > Super;
 
-  MOZ_CONSTEXPR IntCoordTyped() : Super() {}
-  MOZ_CONSTEXPR MOZ_IMPLICIT IntCoordTyped(int32_t aValue) : Super(aValue) {}
+  constexpr IntCoordTyped() : Super() {}
+  constexpr MOZ_IMPLICIT IntCoordTyped(int32_t aValue) : Super(aValue) {}
 };
 
 template<class units, class F>
@@ -126,9 +127,9 @@ struct CoordTyped :
 
   typedef BaseCoord< F, CoordTyped<units, F> > Super;
 
-  MOZ_CONSTEXPR CoordTyped() : Super() {}
-  MOZ_CONSTEXPR MOZ_IMPLICIT CoordTyped(F aValue) : Super(aValue) {}
-  explicit MOZ_CONSTEXPR CoordTyped(const IntCoordTyped<units>& aCoord) : Super(F(aCoord.value)) {}
+  constexpr CoordTyped() : Super() {}
+  constexpr MOZ_IMPLICIT CoordTyped(F aValue) : Super(aValue) {}
+  explicit constexpr CoordTyped(const IntCoordTyped<units>& aCoord) : Super(F(aCoord.value)) {}
 
   void Round() {
     this->value = floor(this->value + 0.5);

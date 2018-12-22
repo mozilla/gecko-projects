@@ -8,12 +8,12 @@
   max-width: 45em;
 }
 
-#info\.body {
+#infoBody {
   -moz-user-focus: normal;
   -moz-user-select: text;
   cursor: text !important;
   white-space: pre-wrap;
-  unicode-bidi: -moz-plaintext;
+  unicode-bidi: plaintext;
 }
 
 #loginLabel, #password1Label {

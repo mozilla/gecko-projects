@@ -9,16 +9,17 @@
  * returns null.
  */
 
-function findGraphNodeParent (el) {
+function findGraphNodeParent(el) {
   // Some targets may not contain `classList` property
-  if (!el.classList)
+  if (!el.classList) {
     return null;
+  }
 
   while (!el.classList.contains("nodes")) {
-    if (el.classList.contains("audionode"))
+    if (el.classList.contains("audionode")) {
       return el;
-    else
-      el = el.parentNode;
+    }
+    el = el.parentNode;
   }
   return null;
 }
@@ -39,24 +40,24 @@ function findGraphNodeParent (el) {
  */
 var ToggleMixin = {
 
-  bindToggle: function () {
+  bindToggle: function() {
     this._onToggle = this._onToggle.bind(this);
-    this.button.addEventListener("mousedown", this._onToggle, false);
+    this.button.addEventListener("mousedown", this._onToggle);
   },
 
-  unbindToggle: function () {
+  unbindToggle: function() {
     this.button.removeEventListener("mousedown", this._onToggle);
   },
 
-  show: function () {
+  show: function() {
     this._viewController({ visible: true });
   },
 
-  hide: function () {
+  hide: function() {
     this._viewController({ visible: false });
   },
 
-  hideImmediately: function () {
+  hideImmediately: function() {
     this._viewController({ visible: false, delayed: false, animated: false });
   },
 
@@ -64,8 +65,8 @@ var ToggleMixin = {
    * Returns a boolean indicating whether or not the view.
    * is currently being shown.
    */
-  isVisible: function () {
-    return !this.el.hasAttribute("pane-collapsed");
+  isVisible: function() {
+    return !this.el.classList.contains("pane-collapsed");
   },
 
   /**
@@ -77,8 +78,8 @@ var ToggleMixin = {
    *        - delayed: boolean indicating whether the pane's opening should wait
    *                   a few cycles or not
    */
-  _viewController: function ({ visible, animated, delayed }) {
-    let flags = {
+  _viewController: function({ visible, animated, delayed }) {
+    const flags = {
       visible: visible,
       animated: animated != null ? animated : !!this._animated,
       delayed: delayed != null ? delayed : !!this._delayed,
@@ -88,16 +89,15 @@ var ToggleMixin = {
     ViewHelpers.togglePane(flags, this.el);
 
     if (flags.visible) {
-      this.button.removeAttribute("pane-collapsed");
+      this.button.classList.remove("pane-collapsed");
       this.button.setAttribute("tooltiptext", this._collapseString);
-    }
-    else {
-      this.button.setAttribute("pane-collapsed", "");
+    } else {
+      this.button.classList.add("pane-collapsed");
       this.button.setAttribute("tooltiptext", this._expandString);
     }
   },
 
-  _onToggle: function () {
+  _onToggle: function() {
     this._viewController({ visible: !this.isVisible() });
   }
-}
+};

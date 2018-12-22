@@ -1,25 +1,25 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['cpp']
+TEST_DIRS += ['gtest']
 
 TESTING_JS_MODULES += [
     'PlacesTestUtils.jsm',
 ]
 
 XPCSHELL_TESTS_MANIFESTS += [
-    'autocomplete/xpcshell.ini',
     'bookmarks/xpcshell.ini',
     'expiration/xpcshell.ini',
     'favicons/xpcshell.ini',
     'history/xpcshell.ini',
-    'inline/xpcshell.ini',
+    'legacy/xpcshell.ini',
+    'maintenance/xpcshell.ini',
     'migration/xpcshell.ini',
-    'network/xpcshell.ini',
     'queries/xpcshell.ini',
+    'sync/xpcshell.ini',
     'unifiedcomplete/xpcshell.ini',
     'unit/xpcshell.ini',
 ]
@@ -55,7 +55,9 @@ TEST_HARNESS_FILES.testing.mochitest.tests.toolkit.components.places.tests.brows
     'browser/redirect-target.html',
     'browser/redirect.sjs',
     'browser/redirect_once.sjs',
+    'browser/redirect_thrice.sjs',
     'browser/redirect_twice.sjs',
+    'browser/redirect_twice_perma.sjs',
     'browser/title1.html',
     'browser/title2.html',
 ]
@@ -68,4 +70,3 @@ TEST_HARNESS_FILES.testing.mochitest.tests.toolkit.components.places.tests.chrom
     'chrome/rss_as_html.rss^headers^',
     'chrome/sample_feed.atom',
 ]
-

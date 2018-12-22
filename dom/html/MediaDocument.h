@@ -10,7 +10,6 @@
 #include "mozilla/Attributes.h"
 #include "nsHTMLDocument.h"
 #include "nsGenericHTMLElement.h"
-#include "nsAutoPtr.h"
 #include "nsIStringBundle.h"
 
 #define NSMEDIADOCUMENT_PROPERTIES_URI "chrome://global/locale/layout/MediaDocument.properties"
@@ -34,15 +33,23 @@ public:
                                      bool                aReset = true,
                                      nsIContentSink*     aSink = nullptr) override;
 
-  virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject) override;
-
   virtual bool WillIgnoreCharsetOverride() override
   {
     return true;
   }
 
 protected:
-  void BecomeInteractive();
+  // Hook to be called once our initial document setup is done.  Subclasses
+  // should call this from SetScriptGlobalObject when setup hasn't been done
+  // yet, a non-null script global is being set, and they have finished whatever
+  // setup work they plan to do for an initial load.
+  void InitialSetupDone();
+
+  // Check whether initial setup has been done.
+  MOZ_MUST_USE bool InitialSetupHasBeenDone() const
+  {
+    return mDidInitialDocumentSetup;
+  }
 
   virtual nsresult CreateSyntheticDocument();
 
@@ -54,7 +61,7 @@ protected:
   nsresult LinkStylesheet(const nsAString& aStylesheet);
   nsresult LinkScript(const nsAString& aScript);
 
-  // |aFormatNames[]| needs to have four elements in the following order: 
+  // |aFormatNames[]| needs to have four elements in the following order:
   // a format name with neither dimension nor file, a format name with
   // filename but w/o dimension, a format name with dimension but w/o filename,
   // a format name with both of them.  For instance, it can have
@@ -63,8 +70,8 @@ protected:
   //
   // Also see MediaDocument.properties if you want to define format names
   // for a new subclass. aWidth and aHeight are pixels for |ImageDocument|,
-  // but could be in other units for other 'media', in which case you have to 
-  // define format names accordingly. 
+  // but could be in other units for other 'media', in which case you have to
+  // define format names accordingly.
   void UpdateTitleAndCharset(const nsACString&  aTypeStr,
                              nsIChannel* aChannel,
                              const char* const* aFormatNames = sFormatNames,
@@ -74,10 +81,14 @@ protected:
 
   nsCOMPtr<nsIStringBundle>     mStringBundle;
   static const char* const      sFormatNames[4];
-  
+
 private:
   enum                          {eWithNoInfo, eWithFile, eWithDim, eWithDimAndFile};
-  bool                          mDocumentElementInserted;   
+
+  // A boolean that indicates whether we did our initial document setup.  This
+  // will be false initially, become true when we finish setting up the document
+  // during initial load and stay true thereafter.
+  bool                          mDidInitialDocumentSetup;
 };
 
 
@@ -96,8 +107,13 @@ public:
 
   NS_DECL_NSISTREAMLISTENER
 
-  RefPtr<MediaDocument>      mDocument;
-  nsCOMPtr<nsIStreamListener>  mNextStream;
+  void DropDocumentRef()
+  {
+    mDocument = nullptr;
+  }
+
+  RefPtr<MediaDocument> mDocument;
+  nsCOMPtr<nsIStreamListener> mNextStream;
 };
 
 } // namespace dom

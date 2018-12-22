@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,11 +12,11 @@
 #include "mozilla/RefPtr.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
-#include "nsRenderingContext.h"
 #include "nsDisplayList.h"
 #include "gfxContext.h"
 #include "nsMathMLElement.h"
 #include <algorithm>
+#include "gfxMathTable.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -33,9 +34,9 @@ using namespace mozilla::gfx;
 #define THICK_FRACTION_LINE_MINIMUM_PIXELS   2  // minimum of 2 pixels
 
 nsIFrame*
-NS_NewMathMLmfracFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewMathMLmfracFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsMathMLmfracFrame(aContext);
+  return new (aPresShell) nsMathMLmfracFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmfracFrame)
@@ -91,9 +92,9 @@ nsMathMLmfracFrame::TransmitAutomaticData()
   return NS_OK;
 }
 
-nscoord 
+nscoord
 nsMathMLmfracFrame::CalcLineThickness(nsPresContext*  aPresContext,
-                                      nsStyleContext*  aStyleContext,
+                                      ComputedStyle*  aComputedStyle,
                                       nsString&        aThicknessAttribute,
                                       nscoord          onePixel,
                                       nscoord          aDefaultRuleThickness,
@@ -135,12 +136,12 @@ nsMathMLmfracFrame::CalcLineThickness(nsPresContext*  aPresContext,
       lineThickness = defaultThickness;
       ParseNumericValue(aThicknessAttribute, &lineThickness,
                         nsMathMLElement::PARSE_ALLOW_UNITLESS,
-                        aPresContext, aStyleContext, aFontSizeInflation);
+                        aPresContext, aComputedStyle, aFontSizeInflation);
     }
   }
 
   // use minimum if the lineThickness is a non-zero value less than minimun
-  if (lineThickness && lineThickness < minimumThickness) 
+  if (lineThickness && lineThickness < minimumThickness)
     lineThickness = minimumThickness;
 
   return lineThickness;
@@ -148,13 +149,12 @@ nsMathMLmfracFrame::CalcLineThickness(nsPresContext*  aPresContext,
 
 void
 nsMathMLmfracFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                     const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
 {
   /////////////
   // paint the numerator and denominator
-  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-  
+  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aLists);
+
   /////////////
   // paint the fraction line
   if (mIsBevelled) {
@@ -167,7 +167,7 @@ nsMathMLmfracFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 nsresult
 nsMathMLmfracFrame::AttributeChanged(int32_t  aNameSpaceID,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      int32_t  aModType)
 {
   if (nsGkAtoms::linethickness_ == aAttribute) {
@@ -180,13 +180,13 @@ nsMathMLmfracFrame::AttributeChanged(int32_t  aNameSpaceID,
 
 /* virtual */ nsresult
 nsMathMLmfracFrame::MeasureForWidth(DrawTarget* aDrawTarget,
-                                    nsHTMLReflowMetrics& aDesiredSize)
+                                    ReflowOutput& aDesiredSize)
 {
   return PlaceInternal(aDrawTarget, false, aDesiredSize, true);
 }
 
 nscoord
-nsMathMLmfracFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
+nsMathMLmfracFrame::FixInterFrameSpacing(ReflowOutput& aDesiredSize)
 {
   nscoord gap = nsMathMLContainerFrame::FixInterFrameSpacing(aDesiredSize);
   if (!gap) return 0;
@@ -198,7 +198,7 @@ nsMathMLmfracFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 /* virtual */ nsresult
 nsMathMLmfracFrame::Place(DrawTarget*          aDrawTarget,
                           bool                 aPlaceOrigin,
-                          nsHTMLReflowMetrics& aDesiredSize)
+                          ReflowOutput& aDesiredSize)
 {
   return PlaceInternal(aDrawTarget, aPlaceOrigin, aDesiredSize, false);
 }
@@ -206,17 +206,17 @@ nsMathMLmfracFrame::Place(DrawTarget*          aDrawTarget,
 nsresult
 nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
                                   bool                 aPlaceOrigin,
-                                  nsHTMLReflowMetrics& aDesiredSize,
+                                  ReflowOutput& aDesiredSize,
                                   bool                 aWidthOnly)
 {
   ////////////////////////////////////
   // Get the children's desired sizes
   nsBoundingMetrics bmNum, bmDen;
-  nsHTMLReflowMetrics sizeNum(aDesiredSize.GetWritingMode());
-  nsHTMLReflowMetrics sizeDen(aDesiredSize.GetWritingMode());
+  ReflowOutput sizeNum(aDesiredSize.GetWritingMode());
+  ReflowOutput sizeDen(aDesiredSize.GetWritingMode());
   nsIFrame* frameDen = nullptr;
   nsIFrame* frameNum = mFrames.FirstChild();
-  if (frameNum) 
+  if (frameNum)
     frameDen = frameNum->GetNextSibling();
   if (!frameNum || !frameDen || frameDen->GetNextSibling()) {
     // report an error, encourage people to get their markups in order
@@ -239,9 +239,8 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   nscoord oneDevPixel = fm->AppUnitsPerDevPixel();
   gfxFont* mathFont = fm->GetThebesFontGroup()->GetFirstMathFont();
   if (mathFont) {
-    defaultRuleThickness =
-      mathFont->GetMathConstant(gfxFontEntry::FractionRuleThickness,
-                                oneDevPixel);
+    defaultRuleThickness = mathFont->MathTable()->
+      Constant(gfxMathTable::FractionRuleThickness, oneDevPixel);
   } else {
     GetRuleThickness(aDrawTarget, fm, defaultRuleThickness);
   }
@@ -254,15 +253,15 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     outermostEmbellished = parentData.coreFrame != mEmbellishData.coreFrame;
   }
 
-  // see if the linethickness attribute is there 
+  // see if the linethickness attribute is there
   nsAutoString value;
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::linethickness_, value);
-  mLineThickness = CalcLineThickness(presContext, mStyleContext, value,
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::linethickness_, value);
+  mLineThickness = CalcLineThickness(presContext, mComputedStyle, value,
                                      onePixel, defaultRuleThickness,
                                      fontSizeInflation);
 
   // bevelled attribute
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::bevelled_, value);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::bevelled_, value);
   mIsBevelled = value.EqualsLiteral("true");
 
   bool displayStyle = StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_BLOCK;
@@ -305,31 +304,30 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       denShift = displayStyle ? denShift1 : denShift2;
       if (mathFont) {
         numShift = mathFont->
-          GetMathConstant(displayStyle ?
-                          gfxFontEntry::StackTopDisplayStyleShiftUp :
-                          gfxFontEntry::StackTopShiftUp,
-                          oneDevPixel);
+          MathTable()->Constant(displayStyle ?
+                                gfxMathTable::StackTopDisplayStyleShiftUp :
+                                gfxMathTable::StackTopShiftUp,
+                                oneDevPixel);
         denShift = mathFont->
-          GetMathConstant(displayStyle ?
-                          gfxFontEntry::StackBottomDisplayStyleShiftDown :
-                          gfxFontEntry::StackBottomShiftDown,
-                          oneDevPixel);
+          MathTable()->Constant(displayStyle ?
+                                gfxMathTable::StackBottomDisplayStyleShiftDown :
+                                gfxMathTable::StackBottomShiftDown,
+                                oneDevPixel);
       }
     } else {
       numShift = displayStyle ? numShift1 : numShift2;
       denShift = displayStyle ? denShift1 : denShift2;
       if (mathFont) {
-        numShift = mathFont->
-          GetMathConstant(displayStyle ?
-                          gfxFontEntry::FractionNumeratorDisplayStyleShiftUp :
-                          gfxFontEntry::FractionNumeratorShiftUp,
-                          oneDevPixel);
-        denShift = mathFont->
-          GetMathConstant(
-            displayStyle ?
-            gfxFontEntry::FractionDenominatorDisplayStyleShiftDown :
-            gfxFontEntry::FractionDenominatorShiftDown,
-            oneDevPixel);
+        numShift = mathFont->MathTable()->
+          Constant(displayStyle ?
+                   gfxMathTable::FractionNumeratorDisplayStyleShiftUp :
+                   gfxMathTable::FractionNumeratorShiftUp,
+                   oneDevPixel);
+        denShift = mathFont->MathTable()->
+          Constant(displayStyle ?
+                   gfxMathTable::FractionDenominatorDisplayStyleShiftDown :
+                   gfxMathTable::FractionDenominatorShiftDown,
+                   oneDevPixel);
       }
     }
 
@@ -340,11 +338,11 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       nscoord minClearance = displayStyle ?
         7 * defaultRuleThickness : 3 * defaultRuleThickness;
       if (mathFont) {
-        minClearance =
-          mathFont->GetMathConstant(displayStyle ?
-                                    gfxFontEntry::StackDisplayStyleGapMin :
-                                    gfxFontEntry::StackGapMin,
-                                    oneDevPixel);
+        minClearance = mathFont->MathTable()->
+          Constant(displayStyle ?
+                   gfxMathTable::StackDisplayStyleGapMin :
+                   gfxMathTable::StackGapMin,
+                   oneDevPixel);
       }
       // Factor in axis height
       // http://www.mathml-association.org/MathMLinHTML5/S3.html#SS3.SSS2
@@ -369,7 +367,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     // Try $a \above10pt b$ to see. Here is what TeX does:
     // minClearance = displayStyle ?
     //   3 * actualRuleThickness : actualRuleThickness;
- 
+
     // we slightly depart from TeX here. We use the defaultRuleThickness instead
     // of the value coming from the linethickness attribute, i.e., we recover what
     // TeX does if the user hasn't set linethickness. But when the linethickness
@@ -379,15 +377,15 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       nscoord minClearanceDen = minClearanceNum;
       if (mathFont) {
         minClearanceNum = mathFont->
-          GetMathConstant(displayStyle ?
-                          gfxFontEntry::FractionNumDisplayStyleGapMin :
-                          gfxFontEntry::FractionNumeratorGapMin,
-                          oneDevPixel);
+          MathTable()->Constant(displayStyle ?
+                                gfxMathTable::FractionNumDisplayStyleGapMin :
+                                gfxMathTable::FractionNumeratorGapMin,
+                                oneDevPixel);
         minClearanceDen = mathFont->
-          GetMathConstant(displayStyle ?
-                          gfxFontEntry::FractionDenomDisplayStyleGapMin :
-                          gfxFontEntry::FractionDenominatorGapMin,
-                          oneDevPixel);
+          MathTable()->Constant(displayStyle ?
+                                gfxMathTable::FractionDenomDisplayStyleGapMin :
+                                gfxMathTable::FractionDenominatorGapMin,
+                                oneDevPixel);
       }
 
       // adjust numShift to maintain minClearanceNum if needed
@@ -414,15 +412,15 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     nscoord dxDen = leftSpace + (width - sizeDen.Width())/2;
     width += leftSpace + rightSpace;
 
-    // see if the numalign attribute is there 
-    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::numalign_, value);
+    // see if the numalign attribute is there
+    mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::numalign_, value);
     if (value.EqualsLiteral("left"))
       dxNum = leftSpace;
     else if (value.EqualsLiteral("right"))
       dxNum = width - rightSpace - sizeNum.Width();
 
-    // see if the denomalign attribute is there 
-    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::denomalign_, value);
+    // see if the denomalign attribute is there
+    mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::denomalign_, value);
     if (value.EqualsLiteral("left"))
       dxDen = leftSpace;
     else if (value.EqualsLiteral("right"))
@@ -486,7 +484,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       trailingSpace += coreData.trailingSpace;
     }
     nscoord delta;
-    
+
     //           ___________
     //          |           |    /
     //         {|-NUMERATOR-|   /
@@ -497,7 +495,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     //                         S   _____________ } denShift
     //                         H  |             |}
     //                        /   |-DENOMINATOR-|}
-    //                       /    |_____________| 
+    //                       /    |_____________|
     //
 
     // first, ensure that the top of the numerator is at least as high as the
@@ -519,7 +517,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       numShift += xHeight / 2;
       denShift += xHeight / 4;
     }
-   
+
     // Set the ascent/descent of our BoundingMetrics.
     mBoundingMetrics.ascent = bmNum.ascent + numShift;
     mBoundingMetrics.descent = bmDen.descent + denShift;
@@ -565,7 +563,7 @@ nsMathMLmfracFrame::PlaceInternal(DrawTarget*          aDrawTarget,
 
     mReference.x = 0;
     mReference.y = aDesiredSize.BlockStartAscent();
-    
+
     if (aPlaceOrigin) {
       nscoord dx, dy;
 
@@ -610,7 +608,7 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) override;
+                     gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("MathMLSlash", TYPE_MATHML_SLASH)
 
 private:
@@ -620,7 +618,7 @@ private:
 };
 
 void nsDisplayMathMLSlash::Paint(nsDisplayListBuilder* aBuilder,
-                                 nsRenderingContext* aCtx)
+                                 gfxContext* aCtx)
 {
   DrawTarget& aDrawTarget = *aCtx->GetDrawTarget();
 
@@ -628,11 +626,11 @@ void nsDisplayMathMLSlash::Paint(nsDisplayListBuilder* aBuilder,
   nsPresContext* presContext = mFrame->PresContext();
   Rect rect = NSRectToRect(mRect + ToReferenceFrame(),
                            presContext->AppUnitsPerDevPixel());
-  
+
   ColorPattern color(ToDeviceColor(
-                       mFrame->GetVisitedDependentColor(eCSSProperty_color)));
- 
-  // draw the slash as a parallelogram 
+    mFrame->GetVisitedDependentColor(&nsStyleText::mWebkitTextFillColor)));
+
+  // draw the slash as a parallelogram
   Point delta = Point(presContext->AppUnitsToGfxUnits(mThickness), 0);
   RefPtr<PathBuilder> builder = aDrawTarget.CreatePathBuilder();
   if (mRTL) {
@@ -658,7 +656,7 @@ nsMathMLmfracFrame::DisplaySlash(nsDisplayListBuilder* aBuilder,
   if (!aFrame->StyleVisibility()->IsVisible() || aRect.IsEmpty())
     return;
 
-  aLists.Content()->AppendNewToTop(new (aBuilder)
-    nsDisplayMathMLSlash(aBuilder, aFrame, aRect, aThickness,
-                         StyleVisibility()->mDirection));
+  aLists.Content()->AppendToTop(
+    MakeDisplayItem<nsDisplayMathMLSlash>(aBuilder, aFrame, aRect, aThickness,
+                                          StyleVisibility()->mDirection));
 }

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,15 +13,21 @@
 #include "nsContainerFrame.h"
 #include "nsIFrameInlines.h" // for methods used by IS_TRUE_OVERFLOW_CONTAINER
 
-class nsColumnSetFrame final : public nsContainerFrame {
+/**
+ * nsColumnSetFrame implements CSS multi-column layout.
+ * @note nsColumnSetFrame keeps true overflow containers in the normal flow
+ * child lists (i.e. the principal and overflow lists).
+ */
+class nsColumnSetFrame final : public nsContainerFrame
+{
 public:
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsColumnSetFrame)
 
-  explicit nsColumnSetFrame(nsStyleContext* aContext);
+  explicit nsColumnSetFrame(ComputedStyle* aStyle);
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
 #ifdef DEBUG
@@ -35,14 +42,14 @@ public:
                            nsIFrame*       aOldFrame) override;
 #endif
 
-  virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
-  virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
+  virtual nscoord GetMinISize(gfxContext *aRenderingContext) override;
+  virtual nscoord GetPrefISize(gfxContext *aRenderingContext) override;
 
   /**
    * Retrieve the available height for content of this frame. The available content
    * height is the available height for the frame, minus borders and padding.
    */
-  virtual nscoord GetAvailableContentBSize(const nsHTMLReflowState& aReflowState);
+  virtual nscoord GetAvailableContentBSize(const ReflowInput& aReflowInput);
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
     nsIFrame* frame = PrincipalChildList().FirstChild();
@@ -54,14 +61,6 @@ public:
     return frame->GetContentInsertionFrame();
   }
 
-  virtual nsresult StealFrame(nsIFrame* aChild, bool aForceNormal) override
-  {
-    // nsColumnSetFrame keeps true overflow containers in the normal flow
-    // child lists (i.e. the principal and overflow lists).
-    return nsContainerFrame::StealFrame(aChild,
-                                        IS_TRUE_OVERFLOW_CONTAINER(aChild));
-  }
-
   virtual bool IsFrameOfType(uint32_t aFlags) const override
    {
      return nsContainerFrame::IsFrameOfType(aFlags &
@@ -69,14 +68,7 @@ public:
    }
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
-
-  virtual nsIAtom* GetType() const override;
-
-  virtual void PaintColumnRule(nsRenderingContext* aCtx,
-                               const nsRect&        aDirtyRect,
-                               const nsPoint&       aPt);
 
   /**
    * Similar to nsBlockFrame::DrainOverflowLines. Locate any columns not
@@ -85,11 +77,20 @@ public:
    */
   void DrainOverflowColumns();
 
+  // Return the column-content frame.
+  void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
+
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override {
     return MakeFrameName(NS_LITERAL_STRING("ColumnSet"), aResult);
   }
 #endif
+
+  nsRect CalculateColumnRuleBounds(const nsPoint& aOffset);
+  void CreateBorderRenderers(nsTArray<nsCSSBorderRenderer>& aBorderRenderers,
+                             gfxContext* aCtx,
+                             const nsRect& aDirtyRect,
+                             const nsPoint& aPt);
 
 protected:
   nscoord        mLastBalanceBSize;
@@ -163,8 +164,8 @@ protected:
     }
   };
 
-  bool ReflowColumns(nsHTMLReflowMetrics& aDesiredSize,
-                     const nsHTMLReflowState& aReflowState,
+  bool ReflowColumns(ReflowOutput& aDesiredSize,
+                     const ReflowInput& aReflowInput,
                      nsReflowStatus& aReflowStatus,
                      ReflowConfig& aConfig,
                      bool aLastColumnUnbounded,
@@ -178,14 +179,14 @@ protected:
    * style. This function will also be responsible for implementing
    * the state machine that controls column balancing.
    */
-  ReflowConfig ChooseColumnStrategy(const nsHTMLReflowState& aReflowState,
+  ReflowConfig ChooseColumnStrategy(const ReflowInput& aReflowInput,
                                     bool aForceAuto, nscoord aFeasibleBSize,
                                     nscoord aInfeasibleBSize);
 
   /**
    * Perform the binary search for the best balance height for this column set.
    *
-   * @param aReflowState The input parameters for the current reflow iteration.
+   * @param aReflowInput The input parameters for the current reflow iteration.
    * @param aPresContext The presentation context in which the current reflow
    *        iteration is occurring.
    * @param aConfig The ReflowConfig object associated with this column set
@@ -206,11 +207,11 @@ protected:
    * @param aStatus A final reflow status of the column set frame, passed in as
    *        an output parameter.
    */
-  void FindBestBalanceBSize(const nsHTMLReflowState& aReflowState,
+  void FindBestBalanceBSize(const ReflowInput& aReflowInput,
                             nsPresContext* aPresContext,
                             ReflowConfig& aConfig,
                             ColumnBalanceData& aColData,
-                            nsHTMLReflowMetrics& aDesiredSize,
+                            ReflowOutput& aDesiredSize,
                             nsCollapsingMargin& aOutMargin,
                             bool& aUnboundedLastColumn,
                             bool& aRunWasFeasible,
@@ -219,13 +220,16 @@ protected:
    * Reflow column children. Returns true iff the content that was reflowed
    * fit into the mColMaxBSize.
    */
-  bool ReflowChildren(nsHTMLReflowMetrics& aDesiredSize,
-                        const nsHTMLReflowState& aReflowState,
+  bool ReflowChildren(ReflowOutput& aDesiredSize,
+                        const ReflowInput& aReflowInput,
                         nsReflowStatus& aStatus,
                         const ReflowConfig& aConfig,
                         bool aLastColumnUnbounded,
                         nsCollapsingMargin* aCarriedOutBEndMargin,
                         ColumnBalanceData& aColData);
+
+  void ForEachColumnRule(const std::function<void(const nsRect& lineRect)>& aSetLineRect,
+                         const nsPoint& aPt);
 };
 
 #endif // nsColumnSetFrame_h___

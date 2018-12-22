@@ -7,8 +7,10 @@
 #ifndef mozilla_StaticPtr_h
 #define mozilla_StaticPtr_h
 
+#include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
 
@@ -43,7 +45,15 @@ public:
 #ifdef DEBUG
   StaticAutoPtr()
   {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+  // False positive with gcc. See bug 1430729
+#endif
     MOZ_ASSERT(!mRawPtr);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
   }
 #endif
 
@@ -64,6 +74,13 @@ public:
   }
 
   T& operator*() const { return *get(); }
+
+  T* forget()
+  {
+    T* temp = mRawPtr;
+    mRawPtr = nullptr;
+    return temp;
+  }
 
 private:
   // Disallow copy constructor, but only in debug mode.  We only define
@@ -95,7 +112,15 @@ public:
 #ifdef DEBUG
   StaticRefPtr()
   {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+  // False positive with gcc. See bug 1430729
+#endif
     MOZ_ASSERT(!mRawPtr);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
   }
 #endif
 
@@ -108,6 +133,26 @@ public:
   StaticRefPtr<T>& operator=(const StaticRefPtr<T>& aRhs)
   {
     return (this = aRhs.mRawPtr);
+  }
+
+  StaticRefPtr<T>& operator=(already_AddRefed<T>& aRhs)
+  {
+    AssignAssumingAddRef(aRhs.take());
+    return *this;
+  }
+
+  StaticRefPtr<T>& operator=(already_AddRefed<T>&& aRhs)
+  {
+    AssignAssumingAddRef(aRhs.take());
+    return *this;
+  }
+
+  already_AddRefed<T>
+  forget()
+  {
+    T* temp = mRawPtr;
+    mRawPtr = nullptr;
+    return already_AddRefed<T>(temp);
   }
 
   T* get() const { return mRawPtr; }
@@ -231,5 +276,26 @@ REFLEXIVE_EQUALITY_OPERATORS(const StaticRefPtr<T>&, StaticPtr_internal::Zero*,
 #undef REFLEXIVE_EQUALITY_OPERATORS
 
 } // namespace mozilla
+
+// Declared in mozilla/RefPtr.h
+template<class T> template<class U>
+RefPtr<T>::RefPtr(const mozilla::StaticRefPtr<U>& aOther)
+  : RefPtr(aOther.get())
+{}
+
+template<class T> template<class U>
+RefPtr<T>&
+RefPtr<T>::operator=(const mozilla::StaticRefPtr<U>& aOther)
+{
+  return operator=(aOther.get());
+}
+
+template <class T>
+inline already_AddRefed<T>
+do_AddRef(const mozilla::StaticRefPtr<T>& aObj)
+{
+  RefPtr<T> ref(aObj);
+  return ref.forget();
+}
 
 #endif

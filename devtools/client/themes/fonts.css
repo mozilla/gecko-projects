@@ -6,128 +6,304 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  padding-bottom: 20px;
   width: 100%;
-  /* Bug 1243598 - Reduce the container height by the tab height to make room
-     for the tabs above. */
-  height: calc(100% - 24px);
-  position: absolute;
-}
-
-#sidebar-panel-fontinspector > .devtools-toolbar {
-  display: flex;
+  height: 100%;
+  overflow: auto;
 }
 
 #font-container {
-  overflow: auto;
   flex: auto;
 }
 
-#all-fonts {
+.fonts-list {
   padding: 0;
   margin: 0;
-}
-
-#font-showall {
-  border-radius: 0;
-  border: 1px solid black;
-  margin: 3px;
-  cursor: pointer;
-  position: fixed;
-  bottom: 0;
-  right: 0;
-}
-
-.dim > #font-container,
-.font:not(.has-code) .font-css-code,
-.font-is-local,
-.font-is-remote,
-.font.is-local .font-format-url,
-#font-template {
-  display: none;
-}
-
-.font.is-remote .font-is-remote,
-.font.is-local .font-is-local {
-  display: inline;
-}
-
-.font-format::before {
-  content: "(";
-}
-
-.font-format::after {
-  content: ")";
-}
-
-.preview-input-toolbar {
-  display: flex;
-  width: 100%;
-}
-
-.font-preview-container {
-  overflow-x: auto;
-}
-
-#font-preview-text-input {
-  font: inherit;
-  margin-top: 1px;
-  margin-bottom: 1px;
-  padding-top: 0;
-  padding-bottom: 0;
-  flex: 1;
+  list-style: none;
 }
 
 .font {
-  padding: 10px 10px;
+  border: 1px solid var(--theme-splitter-color);
+  border-width: 0 1px 1px 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-column-gap: 10px;
+  padding: 10px 20px;
+  overflow: auto;
 }
 
-.theme-dark .font {
-  border-bottom: 1px solid #444;
+#font-container .theme-twisty {
+  display: inline-block;
+  cursor: pointer;
+  vertical-align: bottom;
 }
 
-.theme-light .font {
-  border-bottom: 1px solid #DDD;
-}
-
-.font:last-of-type {
-  border-bottom: 0;
-}
-
-.theme-light .font:nth-child(even) {
-  background: #F4F4F4;
+.font-preview-container {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  overflow: hidden;
+  display: grid;
+  place-items: center end;
+  position: relative;
 }
 
 .font-preview {
-  margin-left: -4px;
-  height: 60px;
+  height: 50px;
   display: block;
 }
 
-.font-info {
-  display: block;
+.font-preview:hover {
+  cursor: text;
+  background-image: linear-gradient(to right,
+    var(--grey-40) 3px, transparent 3px, transparent);
+  background-size: 6px 1px;
+  background-repeat: repeat-x;
+  background-position-y: 45px;
+}
+
+#font-container .font-preview-input {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: calc(100% - 5px);
+  height: calc(100% - 10px);
+  background: transparent;
+  color: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.font-preview-input::-moz-selection {
+  background: transparent;
+  color: transparent;
+}
+
+.font-name,
+.font-family-name {
+  font-weight: normal;
+  white-space: nowrap;
 }
 
 .font-name {
-  display: inline;
+  margin-bottom: 0.6em;
+  font-size: 1em;
+  color: var(--grey-50);
+}
+
+.font-family-name {
+  margin-bottom: 0.2em;
+  font-size: 1.2em;
 }
 
 .font-css-code {
-  max-width: 100%;
+  direction: ltr;
+  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 5px;
+  color: var(--theme-toolbar-color);
+  grid-column: span 2;
+  position: relative;
+  inset-inline-start: -4px;
 }
 
-.theme-light .font-css-code,
-.theme-light .font-url {
-  border: 1px solid #CCC;
-  background: white;
+.font-css-code-expander::before {
+  content: "\2026";
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin: 0 2px;
+  line-height: 3px;
+  color: var(--theme-body-color-inactive);
+  border-radius: 3px;
+  border-style: solid;
+  border-width: 1px;
+  text-align: center;
+  vertical-align: middle;
 }
 
-.theme-dark .font-css-code,
-.theme-dark .font-url {
-  border: 1px solid #333;
-  background: black;
-  color: white;
+.font-control {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 20px;
+}
+
+.font-control-family {
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.font-control-box,
+.font-control-input {
+  flex: 4;
+  min-width: 100px;
+}
+
+.font-control-input {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.font-control-label {
+  display: inline-block;
+  flex: 1;
+  font-size: 12px;
+  min-width: 80px;
+  margin-right: 10px;
+  -moz-user-select: none;
+}
+
+.font-family-unused-header {
+  -moz-user-select: none;
+  margin-bottom: .7em;
+  cursor: pointer;
+}
+
+.font-family-unused {
+  margin-bottom: .3em;
+  color: var(--grey-50);
+}
+
+.font-instance-select:active{
+  outline: none;
+}
+
+.font-value-input {
+  margin-left: 10px;
+  width: 60px;
+}
+
+.font-value-slider {
+  flex: 1;
+  margin: 0;
+  min-width: 50px;
+}
+
+/*
+  The value of font-weight goes from 100 to 900 in increments of 100.
+  Decorate the slider for font-weight to have 9 vertical notches using a linear gradient.
+*/
+.font-value-slider[name=font-weight] {
+  --notch-size: 2px;
+  /* Draw a vertical line to get one notch per background-image instance */
+  background-image: linear-gradient(90deg, var(--grey-30) var(--notch-size), transparent 0);
+  /* Offset the background so the notch aligns with the center of the slider thumb */
+  background-position: 7px center;
+  /* Repeat the background-image horizontally */
+  background-repeat: repeat-x;
+  /* Size the background to get nine visible notch instances. */
+  background-size: calc(12.5% - var(--notch-size)) 90%;
+}
+
+.font-value-slider:-moz-focusring {
+  outline: none;
+}
+
+.font-value-slider::-moz-focus-outer {
+  border: 0;
+}
+
+.font-value-slider::-moz-range-thumb {
+  background: var(--grey-50);
+  border-color: rgba(0, 0, 0, 0);
+}
+.font-value-slider::-moz-range-track {
+  background: var(--grey-30);
+}
+
+.font-value-slider:focus::-moz-range-thumb {
+  background: var(--blue-55);
+}
+
+/*
+  Restyle a native checkbox input to look like a toggle with a "thumb".
+  Build the decoration using solid shapes created with radial- and linear-gradient
+  background images. Animate the position of the "thumb" using background-position.
+ */
+.font-value-toggle {
+  /* Reset native checkbox styling. */
+  -moz-appearance: none;
+  --bg: var(--grey-30);
+  --thumb-color: var(--grey-50);
+  --thumb-position: 0% 50%;
+  cursor: pointer;
+  /* Change font-size to scale. */
+  font-size: 140%;
+  width: 2em;
+  height: 1em;
+
+  background-repeat: no-repeat;
+
+  background-image:
+    /* thumb */
+    radial-gradient(circle 0.35em, var(--thumb-color) 100%, transparent 0),
+    /* left circle */
+    radial-gradient(circle 0.5em, var(--bg) 100%, transparent 0),
+    /* middle bar */
+    linear-gradient(var(--bg) , var(--bg)),
+    /* right circle */
+    radial-gradient(circle 0.5em, var(--bg) 100%, transparent 0);
+
+  /* Every shape has a size of 1em x 1em and is positioned with background-position. */
+  background-size: 1em 1em;
+
+  background-position:
+    var(--thumb-position), /* thumb */
+    left center,  /* left circle */
+    0.5em center, /* middle bar */
+    right center; /* right circle */
+
+  /* Animate the thumb position between states of the checkbox. */
+  transition: background-position .1s ease-out;
+}
+
+.font-value-toggle:checked{
+  --bg: var(--blue-55);
+  --thumb-color: white;
+  --thumb-position: 100% 50%;
+}
+
+.font-origin {
+  margin-top: .2em;
+  color: var(--grey-50);
+  justify-self: start;
+}
+
+.font-origin.system {
+  text-transform: capitalize;
+}
+
+.font-origin.remote {
+  display: grid;
+  grid-template-columns: 1fr 20px;
+}
+
+.font-origin.remote .url {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.font-origin .copy-icon {
+  border: 0;
+  padding: 0;
+  position: relative;
+  cursor: pointer;
+  width: 12px;
+  height: 12px;
+  place-self: center;
+
+  background: url(chrome://devtools/skin/images/copy.svg) no-repeat;
+  background-size: 12px;
+  background-position-x: -1px;
+  -moz-context-properties: fill;
+  fill: var(--theme-toolbar-color);
+
+}
+
+#font-container .devtools-sidepanel-no-result + .accordion {
+  border-block-start: 1px solid var(--theme-splitter-color);
 }

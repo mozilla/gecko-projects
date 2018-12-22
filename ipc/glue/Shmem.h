@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,10 +14,10 @@
 
 #include "nscore.h"
 #include "nsDebug.h"
-#include "nsAutoPtr.h"
 
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/ipc/SharedMemory.h"
+#include "mozilla/ipc/IPDLParamTraits.h"
 
 /**
  * |Shmem| is one agent in the IPDL shared memory scheme.  The way it
@@ -63,7 +62,7 @@ namespace ipc {
 
 class Shmem final
 {
-  friend struct IPC::ParamTraits<mozilla::ipc::Shmem>;
+  friend struct IPDLParamTraits<mozilla::ipc::Shmem>;
 #ifdef DEBUG
   // For ShadowLayerForwarder::CheckSurfaceDescriptor
   friend class mozilla::layers::ShadowLayerForwarder;
@@ -74,7 +73,11 @@ public:
   // Low-level wrapper around platform shmem primitives.
   typedef mozilla::ipc::SharedMemory SharedMemory;
   typedef SharedMemory::SharedMemoryType SharedMemoryType;
-  struct IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead {};
+  // Shmem objects should only be constructed directly from SharedMemory
+  // objects by the Shmem implementation itself, or by a select few functions
+  // in ProtocolUtils.{h,cpp}.  You should not need to add new instances of
+  // this token.
+  struct PrivateIPDLCaller {};
 
   Shmem() :
     mSegment(nullptr),
@@ -93,7 +96,7 @@ public:
   }
 
 #if !defined(DEBUG)
-  Shmem(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  Shmem(PrivateIPDLCaller,
         SharedMemory* aSegment, id_t aId) :
     mSegment(aSegment),
     mData(aSegment->memory()),
@@ -103,7 +106,7 @@ public:
     mSize = static_cast<size_t>(*PtrToSize(mSegment));
   }
 #else
-  Shmem(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  Shmem(PrivateIPDLCaller,
         SharedMemory* aSegment, id_t aId);
 #endif
 
@@ -111,7 +114,7 @@ public:
   {
     // Shmem only holds a "weak ref" to the actual segment, which is
     // owned by IPDL. So there's nothing interesting to be done here
-    forget(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead());
+    forget(PrivateIPDLCaller());
   }
 
   Shmem& operator=(const Shmem& aRhs)
@@ -170,23 +173,23 @@ public:
   }
 
   // These shouldn't be used directly, use the IPDL interface instead.
-  id_t Id(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead) const {
+  id_t Id(PrivateIPDLCaller) const {
     return mId;
   }
 
-  SharedMemory* Segment(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead) const {
+  SharedMemory* Segment(PrivateIPDLCaller) const {
     return mSegment;
   }
 
 #ifndef DEBUG
-  void RevokeRights(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead)
+  void RevokeRights(PrivateIPDLCaller)
   {
   }
 #else
-  void RevokeRights(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead);
+  void RevokeRights(PrivateIPDLCaller);
 #endif
 
-  void forget(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead)
+  void forget(PrivateIPDLCaller)
   {
     mSegment = nullptr;
     mData = nullptr;
@@ -195,7 +198,7 @@ public:
   }
 
   static already_AddRefed<Shmem::SharedMemory>
-  Alloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  Alloc(PrivateIPDLCaller,
         size_t aNBytes,
         SharedMemoryType aType,
         bool aUnsafe,
@@ -206,7 +209,7 @@ public:
   // this segment in OpenExisting() below.  Return a new message if
   // successful (owned by the caller), nullptr if not.
   IPC::Message*
-  ShareTo(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  ShareTo(PrivateIPDLCaller,
           base::ProcessId aTargetPid,
           int32_t routingId);
 
@@ -215,8 +218,7 @@ public:
   // segment.  Return a new message if successful (owned by the
   // caller), nullptr if not.
   IPC::Message*
-  UnshareFrom(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
-              base::ProcessId aTargetPid,
+  UnshareFrom(PrivateIPDLCaller,
               int32_t routingId);
 
   // Return a SharedMemory instance in this process using the
@@ -224,13 +226,13 @@ public:
   // underlying OS shmem resource.  The contents of the descriptor
   // depend on the type of SharedMemory that was passed to us.
   static already_AddRefed<SharedMemory>
-  OpenExisting(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  OpenExisting(PrivateIPDLCaller,
                const IPC::Message& aDescriptor,
                id_t* aId,
                bool aProtect=false);
 
   static void
-  Dealloc(IHadBetterBeIPDLCodeCallingThis_OtherwiseIAmADoodyhead,
+  Dealloc(PrivateIPDLCaller,
           SharedMemory* aSegment);
 
 private:
@@ -238,7 +240,7 @@ private:
   void AssertAligned() const
   {
     if (0 != (mSize % sizeof(T)))
-      NS_RUNTIMEABORT("shmem is not T-aligned");
+      MOZ_CRASH("shmem is not T-aligned");
   }
 
 #if !defined(DEBUG)
@@ -257,41 +259,19 @@ private:
   void AssertInvariants() const;
 #endif
 
-  SharedMemory* MOZ_NON_OWNING_REF mSegment;
+  RefPtr<SharedMemory> mSegment;
   void* mData;
   size_t mSize;
   id_t mId;
 };
 
-
-} // namespace ipc
-} // namespace mozilla
-
-
-namespace IPC {
-
 template<>
-struct ParamTraits<mozilla::ipc::Shmem>
+struct IPDLParamTraits<Shmem>
 {
-  typedef mozilla::ipc::Shmem paramType;
+  typedef Shmem paramType;
 
-  // NB: Read()/Write() look creepy in that Shmems have a pointer
-  // member, but IPDL internally uses mId to properly initialize a
-  // "real" Shmem
-
-  static void Write(Message* aMsg, const paramType& aParam)
-  {
-    WriteParam(aMsg, aParam.mId);
-  }
-
-  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
-  {
-    paramType::id_t id;
-    if (!ReadParam(aMsg, aIter, &id))
-      return false;
-    aResult->mId = id;
-    return true;
-  }
+  static void Write(IPC::Message* aMsg, IProtocol* aActor, paramType& aParam);
+  static bool Read(const IPC::Message* aMsg, PickleIterator* aIter, IProtocol* aActor, paramType* aResult);
 
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
@@ -299,8 +279,7 @@ struct ParamTraits<mozilla::ipc::Shmem>
   }
 };
 
-
-} // namespace IPC
-
+} // namespace ipc
+} // namespace mozilla
 
 #endif // ifndef mozilla_ipc_Shmem_h

@@ -4,16 +4,18 @@
 
 #include "PublicKeyPinningService.h"
 
+#include "RootCertificateTelemetryUtils.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Base64.h"
+#include "mozilla/BinarySearch.h"
+#include "mozilla/Casting.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Telemetry.h"
+#include "nsDependentString.h"
 #include "nsISiteSecurityService.h"
 #include "nsServiceManagerUtils.h"
 #include "nsSiteSecurityService.h"
-#include "nssb64.h"
 #include "pkix/pkixtypes.h"
-#include "mozilla/Logging.h"
-#include "RootCertificateTelemetryUtils.h"
-#include "ScopedNSSTypes.h"
 #include "seccomon.h"
 #include "sechash.h"
 
@@ -40,7 +42,7 @@ GetBase64HashSPKI(const CERTCertificate* cert, nsACString& hashSPKIDigest)
     return rv;
   }
   return Base64Encode(nsDependentCSubstring(
-                        reinterpret_cast<const char*>(digest.get().data),
+                        BitwiseCast<char*, unsigned char*>(digest.get().data),
                         digest.get().len),
                       hashSPKIDigest);
 }
@@ -98,53 +100,62 @@ EvalCert(const CERTCertificate* cert, const StaticFingerprints* fingerprints,
  * dynamicFingerprints array, or to false otherwise.
  */
 static nsresult
-EvalChain(const CERTCertList* certList, const StaticFingerprints* fingerprints,
+EvalChain(const RefPtr<nsNSSCertList>& certList,
+          const StaticFingerprints* fingerprints,
           const nsTArray<nsCString>* dynamicFingerprints,
   /*out*/ bool& certListIntersectsPinset)
 {
   certListIntersectsPinset = false;
-  CERTCertificate* currentCert;
-
   if (!fingerprints && !dynamicFingerprints) {
     MOZ_ASSERT(false, "Must pass in at least one type of pinset");
     return NS_ERROR_FAILURE;
   }
 
-  CERTCertListNode* node;
-  for (node = CERT_LIST_HEAD(certList); !CERT_LIST_END(node, certList);
-       node = CERT_LIST_NEXT(node)) {
-    currentCert = node->cert;
-    MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
-           ("pkpin: certArray subject: '%s'\n", currentCert->subjectName));
-    MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
-           ("pkpin: certArray issuer: '%s'\n", currentCert->issuerName));
-    nsresult rv = EvalCert(currentCert, fingerprints, dynamicFingerprints,
-                           certListIntersectsPinset);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    if (certListIntersectsPinset) {
+  certList->ForEachCertificateInChain(
+    [&certListIntersectsPinset, &fingerprints, &dynamicFingerprints]
+      (nsCOMPtr<nsIX509Cert> aCert, bool aHasMore, /* out */ bool& aContinue) {
+      // We need an owning handle when calling nsIX509Cert::GetCert().
+      UniqueCERTCertificate nssCert(aCert->GetCert());
+      MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
+             ("pkpin: certArray subject: '%s'\n", nssCert->subjectName));
+      MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
+             ("pkpin: certArray issuer: '%s'\n", nssCert->issuerName));
+      nsresult rv = EvalCert(nssCert.get(), fingerprints, dynamicFingerprints,
+                             certListIntersectsPinset);
+      if (NS_FAILED(rv)) {
+        return rv;
+      }
+
+      if (certListIntersectsPinset) {
+        aContinue = false;
+      }
       return NS_OK;
-    }
+  });
+
+  if (!certListIntersectsPinset) {
+    MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug, ("pkpin: no matches found\n"));
   }
-  MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug, ("pkpin: no matches found\n"));
   return NS_OK;
 }
 
-/**
-  Comparator for the is public key pinned host.
-*/
-static int
-TransportSecurityPreloadCompare(const void *key, const void *entry) {
-  const char *keyStr = reinterpret_cast<const char *>(key);
-  const TransportSecurityPreload *preloadEntry =
-    reinterpret_cast<const TransportSecurityPreload *>(entry);
+class TransportSecurityPreloadBinarySearchComparator
+{
+public:
+  explicit TransportSecurityPreloadBinarySearchComparator(
+    const char* aTargetHost)
+    : mTargetHost(aTargetHost) { }
 
-  return strcmp(keyStr, preloadEntry->mHost);
-}
+  int operator()(const TransportSecurityPreload& val) const
+  {
+    return strcmp(mTargetHost, val.mHost);
+  }
+
+private:
+  const char* mTargetHost; // non-owning
+};
 
 nsresult
-PublicKeyPinningService::ChainMatchesPinset(const CERTCertList* certList,
+PublicKeyPinningService::ChainMatchesPinset(const RefPtr<nsNSSCertList>& certList,
                                             const nsTArray<nsCString>& aSHA256keys,
                                     /*out*/ bool& chainMatchesPinset)
 {
@@ -156,8 +167,9 @@ PublicKeyPinningService::ChainMatchesPinset(const CERTCertList* certList,
 // Dynamic pins are prioritized over static pins.
 static nsresult
 FindPinningInformation(const char* hostname, mozilla::pkix::Time time,
+                       const OriginAttributes& originAttributes,
                /*out*/ nsTArray<nsCString>& dynamicFingerprints,
-               /*out*/ TransportSecurityPreload*& staticFingerprints)
+               /*out*/ const TransportSecurityPreload*& staticFingerprints)
 {
   if (!hostname || hostname[0] == 0) {
     return NS_ERROR_INVALID_ARG;
@@ -169,9 +181,9 @@ FindPinningInformation(const char* hostname, mozilla::pkix::Time time,
   if (!sssService) {
     return NS_ERROR_FAILURE;
   }
-  TransportSecurityPreload* foundEntry = nullptr;
-  char* evalHost = const_cast<char*>(hostname);
-  char* evalPart;
+  const TransportSecurityPreload* foundEntry = nullptr;
+  const char* evalHost = hostname;
+  const char* evalPart;
   // Notice how the (xx = strchr) prevents pins for unqualified domain names.
   while (!foundEntry && (evalPart = strchr(evalHost, '.'))) {
     MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
@@ -181,7 +193,8 @@ FindPinningInformation(const char* hostname, mozilla::pkix::Time time,
     bool found;
     bool includeSubdomains;
     nsTArray<nsCString> pinArray;
-    rv = sssService->GetKeyPinsForHostname(evalHost, time, pinArray,
+    rv = sssService->GetKeyPinsForHostname(nsDependentCString(evalHost), time,
+                                           originAttributes, pinArray,
                                            &includeSubdomains, &found);
     if (NS_FAILED(rv)) {
       return rv;
@@ -193,12 +206,12 @@ FindPinningInformation(const char* hostname, mozilla::pkix::Time time,
       return NS_OK;
     }
 
-    foundEntry = (TransportSecurityPreload *)bsearch(evalHost,
-      kPublicKeyPinningPreloadList,
-      sizeof(kPublicKeyPinningPreloadList) / sizeof(TransportSecurityPreload),
-      sizeof(TransportSecurityPreload),
-      TransportSecurityPreloadCompare);
-    if (foundEntry) {
+    size_t foundEntryIndex;
+    if (BinarySearchIf(kPublicKeyPinningPreloadList, 0,
+                       ArrayLength(kPublicKeyPinningPreloadList),
+                       TransportSecurityPreloadBinarySearchComparator(evalHost),
+                       &foundEntryIndex)) {
+      foundEntry = &kPublicKeyPinningPreloadList[foundEntryIndex];
       MOZ_LOG(gPublicKeyPinningLog, LogLevel::Debug,
              ("pkpin: Found pinset for host: '%s'\n", evalHost));
       if (evalHost != hostname) {
@@ -231,8 +244,9 @@ FindPinningInformation(const char* hostname, mozilla::pkix::Time time,
 // subject public key info data in the list and the most relevant non-expired
 // pinset for the host or there is no pinning information for the host.
 static nsresult
-CheckPinsForHostname(const CERTCertList* certList, const char* hostname,
+CheckPinsForHostname(const RefPtr<nsNSSCertList>& certList, const char* hostname,
                      bool enforceTestMode, mozilla::pkix::Time time,
+                     const OriginAttributes& originAttributes,
              /*out*/ bool& chainHasValidPins,
     /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo)
 {
@@ -245,9 +259,9 @@ CheckPinsForHostname(const CERTCertList* certList, const char* hostname,
   }
 
   nsTArray<nsCString> dynamicFingerprints;
-  TransportSecurityPreload* staticFingerprints = nullptr;
-  nsresult rv = FindPinningInformation(hostname, time, dynamicFingerprints,
-                                       staticFingerprints);
+  const TransportSecurityPreload* staticFingerprints = nullptr;
+  nsresult rv = FindPinningInformation(hostname, time, originAttributes,
+                                       dynamicFingerprints, staticFingerprints);
   // If we have no pinning information, the certificate chain trivially
   // validates with respect to pinning.
   if (dynamicFingerprints.Length() == 0 && !staticFingerprints) {
@@ -265,7 +279,7 @@ CheckPinsForHostname(const CERTCertList* certList, const char* hostname,
       return rv;
     }
     chainHasValidPins = enforceTestModeResult;
-    Telemetry::ID histogram = staticFingerprints->mIsMoz
+    Telemetry::HistogramID histogram = staticFingerprints->mIsMoz
       ? Telemetry::CERT_PINNING_MOZ_RESULTS
       : Telemetry::CERT_PINNING_RESULTS;
     if (staticFingerprints->mTestMode) {
@@ -291,15 +305,22 @@ CheckPinsForHostname(const CERTCertList* certList, const char* hostname,
             enforceTestModeResult ? 1 : 0;
       }
       pinningTelemetryInfo->accumulateResult = true;
-      pinningTelemetryInfo->certPinningResultHistogram = histogram;
+      pinningTelemetryInfo->certPinningResultHistogram = Some(histogram);
     }
 
     // We only collect per-CA pinning statistics upon failures.
-    CERTCertListNode* rootNode = CERT_LIST_TAIL(certList);
+    nsCOMPtr<nsIX509Cert> rootCert;
+    rv = certList->GetRootCertificate(rootCert);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
     // Only log telemetry if the certificate list is non-empty.
-    if (!CERT_LIST_END(rootNode, certList)) {
-      if (!enforceTestModeResult && pinningTelemetryInfo) {
-        int32_t binNumber = RootCABinNumber(&rootNode->cert->derCert);
+    if (rootCert && !enforceTestModeResult && pinningTelemetryInfo) {
+      UniqueCERTCertificate rootCertObj =
+        UniqueCERTCertificate(rootCert.get()->GetCert());
+      if (rootCertObj) {
+        int32_t binNumber = RootCABinNumber(&rootCertObj->derCert);
         if (binNumber != ROOT_CERTIFICATE_UNKNOWN ) {
           pinningTelemetryInfo->accumulateForRoot = true;
           pinningTelemetryInfo->rootBucket = binNumber;
@@ -318,12 +339,14 @@ CheckPinsForHostname(const CERTCertList* certList, const char* hostname,
 }
 
 nsresult
-PublicKeyPinningService::ChainHasValidPins(const CERTCertList* certList,
-                                           const char* hostname,
-                                           mozilla::pkix::Time time,
-                                           bool enforceTestMode,
-                                   /*out*/ bool& chainHasValidPins,
-                          /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo)
+PublicKeyPinningService::ChainHasValidPins(
+  const RefPtr<nsNSSCertList>& certList,
+  const char* hostname,
+  mozilla::pkix::Time time,
+  bool enforceTestMode,
+  const OriginAttributes& originAttributes,
+  /*out*/ bool& chainHasValidPins,
+  /*optional out*/ PinningTelemetryInfo* pinningTelemetryInfo)
 {
   chainHasValidPins = false;
   if (!certList) {
@@ -334,22 +357,24 @@ PublicKeyPinningService::ChainHasValidPins(const CERTCertList* certList,
   }
   nsAutoCString canonicalizedHostname(CanonicalizeHostname(hostname));
   return CheckPinsForHostname(certList, canonicalizedHostname.get(),
-                              enforceTestMode, time, chainHasValidPins,
-                              pinningTelemetryInfo);
+                              enforceTestMode, time, originAttributes,
+                              chainHasValidPins, pinningTelemetryInfo);
 }
 
 nsresult
 PublicKeyPinningService::HostHasPins(const char* hostname,
                                      mozilla::pkix::Time time,
                                      bool enforceTestMode,
+                                     const OriginAttributes& originAttributes,
                                      /*out*/ bool& hostHasPins)
 {
   hostHasPins = false;
   nsAutoCString canonicalizedHostname(CanonicalizeHostname(hostname));
   nsTArray<nsCString> dynamicFingerprints;
-  TransportSecurityPreload* staticFingerprints = nullptr;
+  const TransportSecurityPreload* staticFingerprints = nullptr;
   nsresult rv = FindPinningInformation(canonicalizedHostname.get(), time,
-                                       dynamicFingerprints, staticFingerprints);
+                                       originAttributes, dynamicFingerprints,
+                                       staticFingerprints);
   if (NS_FAILED(rv)) {
     return rv;
   }

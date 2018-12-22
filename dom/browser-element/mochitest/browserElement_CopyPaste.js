@@ -7,8 +7,9 @@
 SimpleTest.waitForExplicitFinish();
 SimpleTest.requestFlakyTimeout("untriaged");
 browserElementTestHelpers.setEnabledPref(true);
-browserElementTestHelpers.setAccessibleCaretEnabledPref(true);
+browserElementTestHelpers.setupAccessibleCaretPref();
 browserElementTestHelpers.addPermission();
+browserElementTestHelpers.allowTopLevelDataURINavigation();
 const { Services } = SpecialPowers.Cu.import('resource://gre/modules/Services.jsm');
 
 var gTextarea = null;
@@ -23,10 +24,12 @@ var focusScript;
 var createEmbededFrame = false;
 var testSelectionChange = false;
 
-function copyToClipboard(str) {
+function copyToClipboard(str, callback) {
   gTextarea.value = str;
   SpecialPowers.wrap(gTextarea).editor.selectAll();
-  SpecialPowers.wrap(gTextarea).editor.copy();
+  SimpleTest.waitForClipboard(() => true, () => {
+    SpecialPowers.wrap(gTextarea).editor.copy();
+  }, callback, () => { ok(false, "clipboard copy failed"); });
 }
 
 function getScriptForGetContent() {
@@ -60,9 +63,7 @@ function runTest() {
   gTextarea = document.createElement('textarea');
   document.body.appendChild(gTextarea);
 
-  iframeOuter.addEventListener("mozbrowserloadend", function onloadend(e) {
-    iframeOuter.removeEventListener("mozbrowserloadend", onloadend);
-
+  iframeOuter.addEventListener("mozbrowserloadend", function(e) {
     if (createEmbededFrame) {
       var contentWin = SpecialPowers.wrap(iframeOuter)
                              .QueryInterface(SpecialPowers.Ci.nsIFrameLoaderOwner)
@@ -72,17 +73,16 @@ function runTest() {
       iframeInner.setAttribute('mozbrowser', true);
       iframeInner.setAttribute('remote', 'false');
       contentDoc.body.appendChild(iframeInner);
-      iframeInner.addEventListener("mozbrowserloadend", function onloadendinner(e) {
-        iframeInner.removeEventListener("mozbrowserloadend", onloadendinner);
+      iframeInner.addEventListener("mozbrowserloadend", function(e) {
         mm = SpecialPowers.getBrowserFrameMessageManager(iframeInner);
         dispatchTest(e);
-      });
+      }, {once: true});
     } else {
       iframeInner = iframeOuter;
       mm = SpecialPowers.getBrowserFrameMessageManager(iframeInner);
       dispatchTest(e);
     }
-  });
+  }, {once: true});
 }
 
 function doCommand(cmd) {
@@ -97,11 +97,10 @@ function doCommand(cmd) {
 }
 
 function dispatchTest(e) {
-  iframeInner.addEventListener("mozbrowserloadend", function onloadend2(e) {
-    iframeInner.removeEventListener("mozbrowserloadend", onloadend2);
+  iframeInner.addEventListener("mozbrowserloadend", function(e) {
     iframeInner.focus();
     SimpleTest.executeSoon(function() { testSelectAll(e); });
-  });
+  }, {once: true});
 
   switch (state) {
     case 0: // test for textarea
@@ -191,14 +190,13 @@ function testSelectAll(e) {
   // Skip mozbrowser test if we're at child process.
   if (!isChildProcess()) {
     let eventName = "mozbrowsercaretstatechanged";
-    iframeOuter.addEventListener(eventName, function caretchangeforselectall(e) {
-      iframeOuter.removeEventListener(eventName, caretchangeforselectall, true);
+    iframeOuter.addEventListener(eventName, function(e) {
       ok(true, "got mozbrowsercaretstatechanged event." + stateMeaning);
       ok(e.detail, "event.detail is not null." + stateMeaning);
       ok(e.detail.width != 0, "event.detail.width is not zero" + stateMeaning);
       ok(e.detail.height != 0, "event.detail.height is not zero" + stateMeaning);
       SimpleTest.executeSoon(function() { testCopy1(e); });
-    }, true);
+    }, {capture: true, once: true});
   }
 
   mm.addMessageListener('content-focus', function messageforfocus(msg) {
@@ -216,36 +214,37 @@ function testSelectAll(e) {
 function testCopy1(e) {
   // Right now we're at "selectall" state, so we can test copy commnad by
   // calling doCommand
-  copyToClipboard("");
-  let setup = function() {
-    doCommand("copy");
-  };
+  copyToClipboard("", () => {
+    let setup = function() {
+      doCommand("copy");
+    };
 
-  let nextTest = function(success) {
-    ok(success, "copy command works" + stateMeaning);
-    SimpleTest.executeSoon(function() { testPaste1(e); });
-  };
+    let nextTest = function(success) {
+      ok(success, "copy command works" + stateMeaning);
+      SimpleTest.executeSoon(function() { testPaste1(e); });
+    };
 
-  let success = function() {
-    nextTest(true);
-  }
+    let success = function() {
+      nextTest(true);
+    }
 
-  let fail = function() {
-    nextTest(false);
-  }
+    let fail = function() {
+      nextTest(false);
+    }
 
-  let compareData = defaultData;
-  SimpleTest.waitForClipboard(compareData, setup, success, fail);
+    let compareData = defaultData;
+    SimpleTest.waitForClipboard(compareData, setup, success, fail);
+  });
 }
 
 function testPaste1(e) {
   // Next test paste command, first we copy to global clipboard in parent side.
   // Then paste it to child side.
-  copyToClipboard(pasteData);
-
-  doCommand('selectall');
-  doCommand("paste");
-  SimpleTest.executeSoon(function() { testPaste2(e); });
+  copyToClipboard(pasteData, () => {
+    doCommand('selectall');
+    doCommand("paste");
+    SimpleTest.executeSoon(function() { testPaste2(e); });
+  });
 }
 
 function testPaste2(e) {
@@ -268,40 +267,42 @@ function testPaste2(e) {
 
 function testCut1(e) {
   // Clean clipboard first
-  copyToClipboard("");
-  let setup = function() {
-    doCommand("selectall");
-    doCommand("cut");
-  };
+  copyToClipboard("", () => {
+    let setup = function() {
+      doCommand("selectall");
+      doCommand("cut");
+    };
 
-  let nextTest = function(success) {
-    if (state == 3 && browserElementTestHelpers.getOOPByDefaultPref()) {
-      // Something weird when we doCommand with content editable element in OOP.
-      todo(false, "cut function works" + stateMeaning);
-    } else {
-      ok(success, "cut function works" + stateMeaning);
+    let nextTest = function(success) {
+      if (state == 3 && browserElementTestHelpers.getOOPByDefaultPref()) {
+        // Something weird when we doCommand with content editable element in OOP.
+        todo(false, "cut function works" + stateMeaning);
+      } else {
+        ok(success, "cut function works" + stateMeaning);
+      }
+      SimpleTest.executeSoon(function() { testCut2(e); });
+    };
+
+    let success = function() {
+      nextTest(true);
     }
-    SimpleTest.executeSoon(function() { testCut2(e); });
-  };
 
-  let success = function() {
-    nextTest(true);
-  }
+    let fail = function() {
+      nextTest(false);
+    }
 
-  let fail = function() {
-    nextTest(false);
-  }
+    let compareData = pasteData;
 
-  let compareData = pasteData;
-  // Something weird when we doCommand with content editable element in OOP.
-  // Always true in this case
-  // Normal div case cannot cut, always true as well.
-  if ((state == 3 && browserElementTestHelpers.getOOPByDefaultPref()) ||
-      state == 4) {
-    compareData = function() { return true; }
-  }
+    // Something weird when we doCommand with content editable element in OOP.
+    // Always true in this case
+    // Normal div case cannot cut, always true as well.
+    if ((state == 3 && browserElementTestHelpers.getOOPByDefaultPref()) ||
+        state == 4) {
+      compareData = function() { return true; }
+    }
 
-  SimpleTest.waitForClipboard(compareData, setup, success, fail);
+    SimpleTest.waitForClipboard(compareData, setup, success, fail);
+  });
 }
 
 function testCut2(e) {

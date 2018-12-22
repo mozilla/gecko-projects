@@ -19,7 +19,7 @@ promise_test(() => {
   return delay(50).then(() => {
     controller.close();
     assert_throws(new TypeError(), () => controller.close(), 'close should throw a TypeError the second time');
-    assert_throws(new TypeError(), () => controller.error(), 'error should throw a TypeError on a closed stream');
+    controller.error();
   });
 
 }, 'ReadableStreamController methods should continue working properly when scripts lose their reference to the ' +
@@ -70,6 +70,6 @@ promise_test(() => {
   return delay(50).then(() => assert_throws(new TypeError(), () => rs.getReader(),
     'old reader should still be locking the stream even after garbage collection'));
 
-}, 'Garbage-collecting a ReadableStreamReader should not unlock its stream');
+}, 'Garbage-collecting a ReadableStreamDefaultReader should not unlock its stream');
 
 done();

@@ -16,9 +16,9 @@ from mozharness.base.transfer import TransferMixin
 try_config_options = [
     [["--try-message"],
      {"action": "store",
-     "dest": "try_message",
-     "default": None,
-     "help": "try syntax string to select tests to run",
+      "dest": "try_message",
+      "default": None,
+      "help": "try syntax string to select tests to run",
       }],
 ]
 
@@ -27,7 +27,7 @@ test_flavors = {
     'chrome': {},
     'devtools-chrome': {},
     'mochitest': {},
-    'xpcshell' :{},
+    'xpcshell': {},
     'reftest': {
         "path": lambda x: os.path.join("tests", "reftest", "tests", x)
     },
@@ -36,8 +36,15 @@ test_flavors = {
     },
     'web-platform-tests': {
         "path": lambda x: os.path.join("tests", x.split("testing" + os.path.sep)[1])
-    }
+    },
+    'web-platform-tests-reftests': {
+        "path": lambda x: os.path.join("tests", x.split("testing" + os.path.sep)[1])
+    },
+    'web-platform-tests-wdspec': {
+        "path": lambda x: os.path.join("tests", x.split("testing" + os.path.sep)[1])
+    },
 }
+
 
 class TryToolsMixin(TransferMixin):
     """Utility functions for an interface between try syntax and out test harnesses.
@@ -78,45 +85,17 @@ class TryToolsMixin(TransferMixin):
         msg = None
         if "try_message" in self.config and self.config["try_message"]:
             msg = self.config["try_message"]
-        else:
-            if self.buildbot_config['sourcestamp']['changes']:
-                msg = self.buildbot_config['sourcestamp']['changes'][-1]['comments']
+        elif 'TRY_COMMIT_MSG' in os.environ:
+            msg = os.environ['TRY_COMMIT_MSG']
 
-            if msg is None or len(msg) == 1024:
-                # This commit message was potentially truncated, get the full message
-                # from hg.
-                props = self.buildbot_config['properties']
-                rev = props['revision']
-                repo = props['repo_path']
-                url = 'https://hg.mozilla.org/%s/json-pushes?changeset=%s&full=1' % (repo, rev)
-
-                pushinfo = self.load_json_from_url(url)
-                for k, v in pushinfo.items():
-                    if isinstance(v, dict) and 'changesets' in v:
-                        msg = v['changesets'][-1]['desc']
-
-            if not msg and 'try_syntax' in self.buildbot_config['properties']:
-                # If we don't find try syntax in the usual place, check for it in an
-                # alternate property available to tools using self-serve.
-                msg = self.buildbot_config['properties']['try_syntax']
-
+        if not msg:
+            self.warning('Try message not found.')
         return msg
 
-    @PostScriptAction('download-and-extract')
-    def set_extra_try_arguments(self, action, success=None):
-        """Finds a commit message and parses it for extra arguments to pass to the test
-        harness command line and test paths used to filter manifests.
-
-        Extracting arguments from a commit message taken directly from the try_parser.
-        """
-        if (not self.buildbot_config or 'properties' not in self.buildbot_config or
-                self.buildbot_config['properties'].get('branch') != 'try'):
-            return
-
-        msg = self._extract_try_message()
+    def _extract_try_args(self, msg):
+        """ Returns a list of args from a try message, for parsing """
         if not msg:
-            return
-
+            return None
         all_try_args = None
         for line in msg.splitlines():
             if 'try: ' in line:
@@ -128,18 +107,58 @@ class TryToolsMixin(TransferMixin):
                 try_message = line.strip().split('try: ', 1)
                 all_try_args = re.findall(r'(?:\[.*?\]|\S)+', try_message[1])
                 break
-
         if not all_try_args:
-            self.warning('Try syntax not found in buildbot config, unable to append '
-                         'arguments from try.')
+            self.warning('Try syntax not found in: %s.' % msg)
+        return all_try_args
+
+    def try_message_has_flag(self, flag, message=None):
+        """
+        Returns True if --`flag` is present in message.
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--' + flag, action='store_true')
+        message = message or self._extract_try_message()
+        if not message:
+            return False
+        msg_list = self._extract_try_args(message)
+        args, _ = parser.parse_known_args(msg_list)
+        return getattr(args, flag, False)
+
+    def _is_try(self):
+        repo_path = None
+        get_branch = self.config.get('branch', repo_path)
+        if get_branch is not None:
+            on_try = ('try' in get_branch or 'Try' in get_branch)
+        elif os.environ is not None:
+            on_try = ('TRY_COMMIT_MSG' in os.environ)
+        else:
+            on_try = False
+        return on_try
+
+    @PostScriptAction('download-and-extract')
+    def set_extra_try_arguments(self, action, success=None):
+        """Finds a commit message and parses it for extra arguments to pass to the test
+        harness command line and test paths used to filter manifests.
+
+        Extracting arguments from a commit message taken directly from the try_parser.
+        """
+        if not self._is_try():
             return
 
+        msg = self._extract_try_message()
+        if not msg:
+            return
+
+        all_try_args = self._extract_try_args(msg)
+        if not all_try_args:
+            return
 
         parser = argparse.ArgumentParser(
             description=('Parse an additional subset of arguments passed to try syntax'
                          ' and forward them to the underlying test harness command.'))
 
         label_dict = {}
+
         def label_from_val(val):
             if val in label_dict:
                 return label_dict[val]
@@ -202,8 +221,8 @@ class TryToolsMixin(TransferMixin):
                       'files: %s.' % ','.join(self.try_test_paths[flavor]))
             args.extend(['--this-chunk=1', '--total-chunks=1'])
 
-            path_func = test_flavors[flavor].get("path", lambda x:x)
-            tests = [path_func(item) for item in self.try_test_paths[flavor]]
+            path_func = test_flavors[flavor].get("path", lambda x: x)
+            tests = [path_func(os.path.normpath(item)) for item in self.try_test_paths[flavor]]
         else:
             tests = []
 

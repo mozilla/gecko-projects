@@ -6,23 +6,22 @@
  * Uses the editor front as the actors do not retain connect state.
  */
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
-  let { panelWin } = panel;
-  let { gFront, $, $$, EVENTS, gAudioNodes } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(SIMPLE_CONTEXT_URL);
+  const { panelWin } = panel;
+  const { gFront, $, $$, EVENTS, gAudioNodes } = panelWin;
 
-  reload(target);
-
-  let [actors] = yield Promise.all([
+  const events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
-
-  let [dest, osc, gain] = actors;
+  reload(target);
+  const [actors] = await events;
+  const [dest, osc, gain] = actors;
 
   info("Disconnecting oscillator...");
   osc.disconnect();
-  yield Promise.all([
+  await Promise.all([
     waitForGraphRendered(panelWin, 3, 1),
     once(gAudioNodes, "disconnect")
   ]);
@@ -30,11 +29,11 @@ add_task(function*() {
 
   info("Reconnecting oscillator...");
   osc.connectNode(gain);
-  yield Promise.all([
+  await Promise.all([
     waitForGraphRendered(panelWin, 3, 2),
     once(gAudioNodes, "connect")
   ]);
   ok(true, "Oscillator reconnected.");
 
-  yield teardown(target);
+  await teardown(target);
 });

@@ -7,23 +7,27 @@
 #ifndef VideoUtils_h
 #define VideoUtils_h
 
-#include "FlushableTaskQueue.h"
+#include "AudioSampleFormat.h"
+#include "MediaInfo.h"
+#include "TimeUnits.h"
+#include "VideoLimits.h"
+#include "mozilla/gfx/Point.h" // for gfx::IntSize
+#include "mozilla/AbstractThread.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/RefPtr.h"
-
+#include "mozilla/SharedThreadPool.h"
+#include "mozilla/UniquePtr.h"
+#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
+#include "nsINamed.h"
 #include "nsIThread.h"
-#include "nsSize.h"
-#include "nsRect.h"
+#include "nsITimer.h"
 
 #include "nsThreadUtils.h"
 #include "prtime.h"
-#include "AudioSampleFormat.h"
-#include "TimeUnits.h"
-#include "nsITimer.h"
-#include "nsCOMPtr.h"
 
 using mozilla::CheckedInt64;
 using mozilla::CheckedUint64;
@@ -38,6 +42,12 @@ using mozilla::CheckedUint32;
 // This belongs in xpcom/monitor/Monitor.h, once we've made
 // mozilla::Monitor non-reentrant.
 namespace mozilla {
+
+class MediaContainerType;
+
+// EME Key System String.
+extern const nsLiteralCString kEMEKeySystemClearkey;
+extern const nsLiteralCString kEMEKeySystemWidevine;
 
 /**
  * ReentrantMonitorConditionallyEnter
@@ -79,10 +89,14 @@ private:
 };
 
 // Shuts down a thread asynchronously.
-class ShutdownThreadEvent : public nsRunnable
+class ShutdownThreadEvent : public Runnable
 {
 public:
-  explicit ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
+  explicit ShutdownThreadEvent(nsIThread* aThread)
+    : Runnable("ShutdownThreadEvent")
+    , mThread(aThread)
+  {
+  }
   ~ShutdownThreadEvent() {}
   NS_IMETHOD Run() override {
     mThread->Shutdown();
@@ -92,27 +106,6 @@ public:
 private:
   nsCOMPtr<nsIThread> mThread;
 };
-
-template<class T>
-class DeleteObjectTask: public nsRunnable {
-public:
-  explicit DeleteObjectTask(nsAutoPtr<T>& aObject)
-    : mObject(aObject)
-  {
-  }
-  NS_IMETHOD Run() {
-    NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
-    mObject = nullptr;
-    return NS_OK;
-  }
-private:
-  nsAutoPtr<T> mObject;
-};
-
-template<class T>
-void DeleteOnMainThread(nsAutoPtr<T>& aObject) {
-  NS_DispatchToMainThread(new DeleteObjectTask<T>(aObject));
-}
 
 class MediaResource;
 
@@ -131,6 +124,9 @@ CheckedInt64 FramesToUsecs(int64_t aFrames, uint32_t aRate);
 // Converts from number of audio frames (aFrames) TimeUnit, given
 // the specified audio rate (aRate).
 media::TimeUnit FramesToTimeUnit(int64_t aFrames, uint32_t aRate);
+// Perform aValue * aMul / aDiv, reducing the possibility of overflow due to
+// aValue * aMul overflowing.
+CheckedInt64 SaferMultDiv(int64_t aValue, uint64_t aMul, uint64_t aDiv);
 
 // Converts from microseconds (aUsecs) to number of audio frames, given the
 // specified audio rate (aRate). Stores the result in aOutFrames. Returns
@@ -151,29 +147,22 @@ CheckedInt64 TimeUnitToFrames(const media::TimeUnit& aTime, uint32_t aRate);
 // integer is too big to fit in an int64_t.
 nsresult SecondsToUsecs(double aSeconds, int64_t& aOutUsecs);
 
-// The maximum height and width of the video. Used for
-// sanitizing the memory allocation of the RGB buffer.
-// The maximum resolution we anticipate encountering in the
-// wild is 2160p (UHD "4K") or 4320p - 7680x4320 pixels for VR.
-static const int32_t MAX_VIDEO_WIDTH = 8192;
-static const int32_t MAX_VIDEO_HEIGHT = 4608;
-
 // Scales the display rect aDisplay by aspect ratio aAspectRatio.
 // Note that aDisplay must be validated by IsValidVideoRegion()
 // before being used!
-void ScaleDisplayByAspectRatio(nsIntSize& aDisplay, float aAspectRatio);
-
-// Downmix multichannel Audio samples to Stereo.
-// Input are the buffer contains multichannel data,
-// the number of channels and the number of frames.
-int DownmixAudioToStereo(mozilla::AudioDataValue* buffer,
-                         int channels,
-                         uint32_t frames);
+void
+ScaleDisplayByAspectRatio(gfx::IntSize& aDisplay, float aAspectRatio);
 
 // Downmix Stereo audio samples to Mono.
 // Input are the buffer contains stereo data and the number of frames.
 void DownmixStereoToMono(mozilla::AudioDataValue* aBuffer,
                          uint32_t aFrames);
+
+// Decide the number of playback channels according to the
+// given AudioInfo and the prefs that are being set.
+uint32_t DecideAudioPlaybackChannels(const AudioInfo& info);
+
+bool IsDefaultPlaybackDeviceMono();
 
 bool IsVideoContentType(const nsCString& aContentType);
 
@@ -181,8 +170,10 @@ bool IsVideoContentType(const nsCString& aContentType);
 // extracted inside a frame of size aFrame, and scaled up to and displayed
 // at a size of aDisplay. You should validate the frame, picture, and
 // display regions before using them to display video frames.
-bool IsValidVideoRegion(const nsIntSize& aFrame, const nsIntRect& aPicture,
-                        const nsIntSize& aDisplay);
+bool
+IsValidVideoRegion(const gfx::IntSize& aFrame,
+                   const gfx::IntRect& aPicture,
+                   const gfx::IntSize& aDisplay);
 
 // Template to automatically set a variable to a value on scope exit.
 // Useful for unsetting flags, etc.
@@ -201,20 +192,11 @@ private:
   const T mValue;
 };
 
-class SharedThreadPool;
-
-// The MediaDataDecoder API blocks, with implementations waiting on platform
-// decoder tasks.  These platform decoder tasks are queued on a separate
-// thread pool to ensure they can run when the MediaDataDecoder clients'
-// thread pool is blocked.  Tasks on the PLATFORM_DECODER thread pool must not
-// wait on tasks in the PLAYBACK thread pool.
-//
-// No new dependencies on this mechanism should be added, as methods are being
-// made async supported by MozPromise, making this unnecessary and
-// permitting unifying the pool.
 enum class MediaThreadType {
-  PLAYBACK, // MediaDecoderStateMachine and MediaDecoderReader
-  PLATFORM_DECODER
+  PLAYBACK, // MediaDecoderStateMachine and MediaFormatReader
+  PLATFORM_DECODER, // MediaDataDecoder
+  MSG_CONTROL,
+  WEBRTC_DECODER
 };
 // Returns the thread pool that is shared amongst all decoder state machines
 // for decoding streams.
@@ -259,6 +241,34 @@ ExtractH264CodecDetails(const nsAString& aCodecs,
                         int16_t& aProfile,
                         int16_t& aLevel);
 
+struct VideoColorSpace
+{
+  // TODO: Define the value type as strong type enum
+  // to better know the exact meaning corresponding to ISO/IEC 23001-8:2016.
+  // Default value is listed https://www.webmproject.org/vp9/mp4/#optional-fields
+  uint8_t mPrimaryId = 1; // Table 2
+  uint8_t mTransferId = 1; // Table 3
+  uint8_t mMatrixId = 1; // Table 4
+  uint8_t mRangeId = 0;
+};
+
+// Extracts the VPX codecs parameter string.
+// See https://www.webmproject.org/vp9/mp4/#codecs-parameter-string
+// for more details.
+// Returns false on failure.
+bool
+ExtractVPXCodecDetails(const nsAString& aCodec,
+                       uint8_t& aProfile,
+                       uint8_t& aLevel,
+                       uint8_t& aBitDepth);
+bool
+ExtractVPXCodecDetails(const nsAString& aCodec,
+                       uint8_t& aProfile,
+                       uint8_t& aLevel,
+                       uint8_t& aBitDepth,
+                       uint8_t& aChromaSubsampling,
+                       VideoColorSpace& aColorSpace);
+
 // Use a cryptographic quality PRNG to generate raw random bytes
 // and convert that to a base64 string.
 nsresult
@@ -270,10 +280,7 @@ nsresult
 GenerateRandomPathName(nsCString& aOutSalt, uint32_t aLength);
 
 already_AddRefed<TaskQueue>
-CreateMediaDecodeTaskQueue();
-
-already_AddRefed<FlushableTaskQueue>
-CreateFlushableMediaDecodeTaskQueue();
+CreateMediaDecodeTaskQueue(const char* aName);
 
 // Iteratively invokes aWork until aCondition returns true, or aWork returns false.
 // Use this rather than a while loop to avoid bogarting the task queue.
@@ -286,14 +293,17 @@ RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
   }
 
   struct Helper {
-    static void Iteration(RefPtr<GenericPromise::Private> aPromise, Work aLocalWork, Condition aLocalCondition) {
+    static void Iteration(const RefPtr<GenericPromise::Private>& aPromise, Work aLocalWork, Condition aLocalCondition) {
       if (!aLocalWork()) {
         aPromise->Reject(NS_ERROR_FAILURE, __func__);
       } else if (aLocalCondition()) {
         aPromise->Resolve(true, __func__);
       } else {
-        nsCOMPtr<nsIRunnable> r =
-          NS_NewRunnableFunction([aPromise, aLocalWork, aLocalCondition] () { Iteration(aPromise, aLocalWork, aLocalCondition); });
+        nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+          "InvokeUntil::Helper::Iteration",
+          [aPromise, aLocalWork, aLocalCondition]() {
+            Iteration(aPromise, aLocalWork, aLocalCondition);
+          });
         AbstractThread::GetCurrent()->Dispatch(r.forget());
       }
     }
@@ -304,23 +314,24 @@ RefPtr<GenericPromise> InvokeUntil(Work aWork, Condition aCondition) {
 }
 
 // Simple timer to run a runnable after a timeout.
-class SimpleTimer : public nsITimerCallback
+class SimpleTimer : public nsITimerCallback, public nsINamed
 {
 public:
   NS_DECL_ISUPPORTS
+  NS_DECL_NSINAMED
 
   // Create a new timer to run aTask after aTimeoutMs milliseconds
   // on thread aTarget. If aTarget is null, task is run on the main thread.
   static already_AddRefed<SimpleTimer> Create(nsIRunnable* aTask,
                                               uint32_t aTimeoutMs,
-                                              nsIThread* aTarget = nullptr);
+                                              nsIEventTarget* aTarget = nullptr);
   void Cancel();
 
   NS_IMETHOD Notify(nsITimer *timer) override;
 
 private:
   virtual ~SimpleTimer() {}
-  nsresult Init(nsIRunnable* aTask, uint32_t aTimeoutMs, nsIThread* aTarget);
+  nsresult Init(nsIRunnable* aTask, uint32_t aTimeoutMs, nsIEventTarget* aTarget);
 
   RefPtr<nsIRunnable> mTask;
   nsCOMPtr<nsITimer> mTimer;
@@ -330,16 +341,265 @@ void
 LogToBrowserConsole(const nsAString& aMsg);
 
 bool
+ParseMIMETypeString(const nsAString& aMIMEType,
+                    nsString& aOutContainerType,
+                    nsTArray<nsString>& aOutCodecs);
+
+bool
 ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs);
 
 bool
-IsH264ContentType(const nsAString& aContentType);
-
-bool
-IsAACContentType(const nsAString& aContentType);
+IsH264CodecString(const nsAString& aCodec);
 
 bool
 IsAACCodecString(const nsAString& aCodec);
+
+bool
+IsVP8CodecString(const nsAString& aCodec);
+
+bool
+IsVP9CodecString(const nsAString& aCodec);
+
+// Try and create a TrackInfo with a given codec MIME type.
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMEType(const nsACString& aCodecMIMEType);
+
+// Try and create a TrackInfo with a given codec MIME type, and optional extra
+// parameters from a container type (its MIME type and codecs are ignored).
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMETypeAndContainerTypeExtraParameters(
+  const nsACString& aCodecMIMEType,
+  const MediaContainerType& aContainerType);
+
+namespace detail {
+
+// aString should start with aMajor + '/'.
+constexpr bool
+StartsWithMIMETypeMajor(const char* aString,
+                        const char* aMajor, size_t aMajorRemaining)
+{
+  return (aMajorRemaining == 0 && *aString == '/') ||
+         (*aString == *aMajor && StartsWithMIMETypeMajor(aString + 1,
+                                                         aMajor + 1,
+                                                         aMajorRemaining - 1));
+}
+
+// aString should only contain [a-z0-9\-\.] and a final '\0'.
+constexpr bool
+EndsWithMIMESubtype(const char* aString, size_t aRemaining)
+{
+  return aRemaining == 0 ||
+         (((*aString >= 'a' && *aString <= 'z') ||
+           (*aString >= '0' && *aString <= '9') ||
+           *aString == '-' ||
+           *aString == '.') &&
+          EndsWithMIMESubtype(aString + 1, aRemaining - 1));
+}
+
+// Simple MIME-type literal string checker with a given (major) type.
+// Only accepts "{aMajor}/[a-z0-9\-\.]+".
+template <size_t MajorLengthPlus1>
+constexpr bool
+IsMIMETypeWithMajor(const char* aString, size_t aLength,
+                    const char (&aMajor)[MajorLengthPlus1])
+{
+  return aLength > MajorLengthPlus1 && // Major + '/' + at least 1 char
+         StartsWithMIMETypeMajor(aString, aMajor, MajorLengthPlus1 - 1) &&
+         EndsWithMIMESubtype(aString + MajorLengthPlus1,
+                             aLength - MajorLengthPlus1);
+}
+
+} // namespace detail
+
+// Simple MIME-type string checker.
+// Only accepts lowercase "{application,audio,video}/[a-z0-9\-\.]+".
+// Add more if necessary.
+constexpr bool
+IsMediaMIMEType(const char* aString, size_t aLength)
+{
+  return detail::IsMIMETypeWithMajor(aString, aLength, "application") ||
+         detail::IsMIMETypeWithMajor(aString, aLength, "audio") ||
+         detail::IsMIMETypeWithMajor(aString, aLength, "video");
+}
+
+// Simple MIME-type string literal checker.
+// Only accepts lowercase "{application,audio,video}/[a-z0-9\-\.]+".
+// Add more if necessary.
+template <size_t LengthPlus1>
+constexpr bool
+IsMediaMIMEType(const char (&aString)[LengthPlus1])
+{
+  return IsMediaMIMEType(aString, LengthPlus1 - 1);
+}
+
+// Simple MIME-type string checker.
+// Only accepts lowercase "{application,audio,video}/[a-z0-9\-\.]+".
+// Add more if necessary.
+inline bool
+IsMediaMIMEType(const nsACString& aString)
+{
+  return IsMediaMIMEType(aString.Data(), aString.Length());
+}
+
+enum class StringListRangeEmptyItems
+{
+  // Skip all empty items (empty string will process nothing)
+  // E.g.: "a,,b" -> ["a", "b"], "" -> nothing
+  Skip,
+  // Process all, except if string is empty
+  // E.g.: "a,,b" -> ["a", "", "b"], "" -> nothing
+  ProcessEmptyItems,
+  // Process all, including 1 empty item in an empty string
+  // E.g.: "a,,b" -> ["a", "", "b"], "" -> [""]
+  ProcessAll
+};
+
+template <typename String,
+          StringListRangeEmptyItems empties = StringListRangeEmptyItems::Skip>
+class StringListRange
+{
+  typedef typename String::char_type CharType;
+  typedef const CharType* Pointer;
+
+public:
+  // Iterator into range, trims items and optionally skips empty items.
+  class Iterator
+  {
+  public:
+    bool operator!=(const Iterator& a) const
+    {
+      return mStart != a.mStart || mEnd != a.mEnd;
+    }
+    Iterator& operator++()
+    {
+      SearchItemAt(mComma + 1);
+      return *this;
+    }
+    // DereferencedType should be 'const nsDependent[C]String' pointing into
+    // mList (which is 'const ns[C]String&').
+    typedef decltype(Substring(Pointer(), Pointer())) DereferencedType;
+    DereferencedType operator*()
+    {
+      return Substring(mStart, mEnd);
+    }
+  private:
+    friend class StringListRange;
+    Iterator(const CharType* aRangeStart, uint32_t aLength)
+      : mRangeEnd(aRangeStart + aLength)
+      , mStart(nullptr)
+      , mEnd(nullptr)
+      , mComma(nullptr)
+    {
+      SearchItemAt(aRangeStart);
+    }
+    void SearchItemAt(Pointer start)
+    {
+      // First, skip leading whitespace.
+      for (Pointer p = start; ; ++p) {
+        if (p >= mRangeEnd) {
+          if (p > mRangeEnd
+                  + (empties != StringListRangeEmptyItems::Skip ? 1 : 0)) {
+            p = mRangeEnd
+                + (empties != StringListRangeEmptyItems::Skip ? 1 : 0);
+          }
+          mStart = mEnd = mComma = p;
+          return;
+        }
+        auto c = *p;
+        if (c == CharType(',')) {
+          // Comma -> Empty item -> Skip or process?
+          if (empties != StringListRangeEmptyItems::Skip) {
+            mStart = mEnd = mComma = p;
+            return;
+          }
+        } else if (c != CharType(' ')) {
+          mStart = p;
+          break;
+        }
+      }
+      // Find comma, recording start of trailing space.
+      Pointer trailingWhitespace = nullptr;
+      for (Pointer p = mStart + 1; ; ++p) {
+        if (p >= mRangeEnd) {
+          mEnd = trailingWhitespace ? trailingWhitespace : p;
+          mComma = p;
+          return;
+        }
+        auto c = *p;
+        if (c == CharType(',')) {
+          mEnd = trailingWhitespace ? trailingWhitespace : p;
+          mComma = p;
+          return;
+        }
+        if (c == CharType(' ')) {
+          // Found a whitespace -> Record as trailing if not first one.
+          if (!trailingWhitespace) {
+            trailingWhitespace = p;
+          }
+        } else {
+          // Found a non-whitespace -> Reset trailing whitespace if needed.
+          if (trailingWhitespace) {
+            trailingWhitespace = nullptr;
+          }
+        }
+      }
+    }
+    const Pointer mRangeEnd;
+    Pointer mStart;
+    Pointer mEnd;
+    Pointer mComma;
+  };
+
+  explicit StringListRange(const String& aList) : mList(aList) {}
+  Iterator begin() const
+  {
+    return Iterator(
+      mList.Data()
+      + ((empties == StringListRangeEmptyItems::ProcessEmptyItems &&
+          mList.Length() == 0)
+          ? 1
+          : 0),
+      mList.Length());
+  }
+  Iterator end() const
+  {
+    return Iterator(mList.Data() + mList.Length()
+                    + (empties != StringListRangeEmptyItems::Skip ? 1 : 0),
+                    0);
+  }
+private:
+  const String& mList;
+};
+
+template <StringListRangeEmptyItems empties = StringListRangeEmptyItems::Skip,
+          typename String>
+StringListRange<String, empties>
+MakeStringListRange(const String& aList)
+{
+  return StringListRange<String, empties>(aList);
+}
+
+template <StringListRangeEmptyItems empties = StringListRangeEmptyItems::Skip,
+          typename ListString, typename ItemString>
+static bool
+StringListContains(const ListString& aList, const ItemString& aItem)
+{
+  for (const auto& listItem : MakeStringListRange<empties>(aList)) {
+    if (listItem.Equals(aItem)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline void
+AppendStringIfNotEmpty(nsACString& aDest, nsACString&& aSrc)
+{
+  if (!aSrc.IsEmpty()) {
+    aDest.Append(NS_LITERAL_CSTRING("\n"));
+    aDest.Append(aSrc);
+  }
+}
 
 } // end namespace mozilla
 

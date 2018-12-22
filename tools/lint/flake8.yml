@@ -1,0 +1,58 @@
+---
+flake8:
+    description: Python linter
+    include:
+        - accessible/
+        - browser/
+        - build/
+        - config/
+        - configure.py
+        - js/
+        - memory/
+        - mobile/
+        - mozglue/
+        - layout/tools/reftest
+        - python/mach
+        - python/mach_commands.py
+        - python/mozboot
+        - python/mozbuild/mozpack/path.py
+        - python/mozlint
+        - python/mozterm
+        - python/mozversioncontrol
+        - security/
+        - security/manager
+        - taskcluster
+        - testing/firefox-ui
+        - testing/mach_commands.py
+        - testing/marionette/client
+        - testing/marionette/harness
+        - testing/marionette/puppeteer
+        - testing/mochitest
+        - testing/mozbase
+        - testing/mozharness/configs
+        - testing/mozharness/mozfile
+        - testing/mozharness/mozharness/mozilla/l10n/locales.py
+        - testing/mozharness/mozharness/mozilla/mar.py
+        - testing/mozharness/mozharness/mozilla/testing/
+        - testing/mozharness/mozinfo
+        - testing/mozharness/scripts
+        - testing/raptor
+        - testing/remotecppunittests.py
+        - testing/runcppunittests.py
+        - testing/talos/
+        - testing/xpcshell
+        - toolkit/components/telemetry
+        - toolkit/crashreporter/tools/upload_symbols.py
+        - tools/
+        - xpcom/
+    # Excludes should be added to topsrcdir/.flake8 due to a bug in flake8 where
+    # specifying --exclude causes custom configuration files to be ignored.
+    exclude: []
+    # The configure option is used by the build system
+    extensions: ['configure', 'py']
+    support-files:
+        - '**/.flake8'
+        - 'tools/lint/python/flake8*'
+    type: external
+    payload: python.flake8:lint
+    setup: python.flake8:setup

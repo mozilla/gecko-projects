@@ -44,18 +44,16 @@ function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
           "WHERE id = (SELECT id FROM moz_items_annos " +
                       "WHERE item_id = :id " +
                       "ORDER BY dateAdded DESC LIMIT 1)";
-  }
-  else if (aIdentifier instanceof Ci.nsIURI){
+  } else if (aIdentifier instanceof Ci.nsIURI) {
     // Page annotation.
     as.setPageAnnotation(aIdentifier, aName, aValue, 0, aExpirePolicy);
     // Update dateAdded for the last added annotation.
     sql = "UPDATE moz_annos SET dateAdded = :expire_date, lastModified = :last_modified " +
           "WHERE id = (SELECT a.id FROM moz_annos a " +
                       "LEFT JOIN moz_places h on h.id = a.place_id " +
-                      "WHERE h.url = :id " +
+                      "WHERE h.url_hash = hash(:id) AND h.url = :id " +
                       "ORDER BY a.dateAdded DESC LIMIT 1)";
-  }
-  else
+  } else
     do_throw("Wrong identifier type");
 
   let stmt = DBConn().createStatement(sql);
@@ -65,34 +63,29 @@ function add_old_anno(aIdentifier, aName, aValue, aExpirePolicy,
   stmt.params.last_modified = lastModifiedDate;
   try {
     stmt.executeStep();
-  }
-  finally {
+  } finally {
     stmt.finalize();
   }
 }
 
-function run_test() {
-  run_next_test();
-}
-
-add_task(function* test_annos_expire_policy() {
+add_task(async function test_annos_expire_policy() {
   // Set interval to a large value so we don't expire on it.
   setInterval(3600); // 1h
 
   // Expire all expirable pages.
   setMaxPages(0);
 
-  let now = getExpirablePRTime();
+  let now_specific_to_test = getExpirablePRTime();
   // Add some bookmarked page and timed annotations for each.
   for (let i = 0; i < 5; i++) {
     let pageURI = uri("http://item_anno." + i + ".mozilla.org/");
-    yield PlacesTestUtils.addVisits({ uri: pageURI, visitDate: now++ });
-    let bm = yield PlacesUtils.bookmarks.insert({
+    await PlacesTestUtils.addVisits({ uri: pageURI, visitDate: now_specific_to_test++ });
+    let bm = await PlacesUtils.bookmarks.insert({
       parentGuid: PlacesUtils.bookmarks.unfiledGuid,
       url: pageURI,
       title: null
     });
-    let id = yield PlacesUtils.promiseItemId(bm.guid);
+    let id = await PlacesUtils.promiseItemId(bm.guid);
     // Add a 6 days old anno.
     add_old_anno(id, "persist_days", "test", as.EXPIRE_DAYS, 6);
     // Add a 8 days old anno, modified 5 days ago.
@@ -139,7 +132,7 @@ add_task(function* test_annos_expire_policy() {
   // Add some visited page and timed annotations for each.
   for (let i = 0; i < 5; i++) {
     let pageURI = uri("http://page_anno." + i + ".mozilla.org/");
-    yield PlacesTestUtils.addVisits({ uri: pageURI, visitDate: now++ });
+    await PlacesTestUtils.addVisits({ uri: pageURI, visitDate: now_specific_to_test++ });
     // Add a 6 days old anno.
     add_old_anno(pageURI, "persist_days", "test", as.EXPIRE_DAYS, 6);
     // Add a 8 days old anno, modified 5 days ago.
@@ -163,27 +156,27 @@ add_task(function* test_annos_expire_policy() {
   }
 
   // Expire all visits for the bookmarks.
-  yield promiseForceExpirationStep(5);
+  await promiseForceExpirationStep(5);
 
   ["expire_days", "expire_weeks", "expire_months"].forEach(function(aAnno) {
     let pages = as.getPagesWithAnnotation(aAnno);
-    do_check_eq(pages.length, 0);
+    Assert.equal(pages.length, 0);
   });
 
   ["expire_days", "expire_weeks", "expire_months"].forEach(function(aAnno) {
     let items = as.getItemsWithAnnotation(aAnno);
-    do_check_eq(items.length, 0);
+    Assert.equal(items.length, 0);
   });
 
   ["persist_days", "persist_lm_days", "persist_weeks", "persist_lm_weeks",
    "persist_months", "persist_lm_months"].forEach(function(aAnno) {
     let pages = as.getPagesWithAnnotation(aAnno);
-    do_check_eq(pages.length, 10);
+    Assert.equal(pages.length, 10);
   });
 
   ["persist_days", "persist_lm_days", "persist_weeks", "persist_lm_weeks",
    "persist_months", "persist_lm_months"].forEach(function(aAnno) {
     let items = as.getItemsWithAnnotation(aAnno);
-    do_check_eq(items.length, 5);
+    Assert.equal(items.length, 5);
   });
 });

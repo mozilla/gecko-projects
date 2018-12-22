@@ -5,10 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "FormData.h"
-#include "nsIVariant.h"
 #include "nsIInputStream.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/Directory.h"
 #include "mozilla/dom/HTMLFormElement.h"
+#include "mozilla/Encoding.h"
 
 #include "MultipartBlobImpl.h"
 
@@ -16,7 +17,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 FormData::FormData(nsISupports* aOwner)
-  : nsFormSubmission(NS_LITERAL_CSTRING("UTF-8"), nullptr)
+  : HTMLFormSubmission(UTF_8_ENCODING, nullptr)
   , mOwner(aOwner)
 {
 }
@@ -83,7 +84,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(FormData)
                                 "mFormData[i].GetAsBlob()", 0);
   }
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(FormData)
@@ -93,18 +93,17 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(FormData)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FormData)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsIDOMFormData)
-  NS_INTERFACE_MAP_ENTRY(nsIXHRSendable)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMFormData)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 // -------------------------------------------------------------------------
-// nsFormSubmission
+// HTMLFormSubmission
 nsresult
 FormData::GetEncodedSubmission(nsIURI* aURI,
-                               nsIInputStream** aPostDataStream)
+                               nsIInputStream** aPostDataStream,
+                               nsCOMPtr<nsIURI>& aOutURI)
 {
-  NS_NOTREACHED("Shouldn't call FormData::GetEncodedSubmission");
+  MOZ_ASSERT_UNREACHABLE("Shouldn't call FormData::GetEncodedSubmission");
   return NS_OK;
 }
 
@@ -129,6 +128,12 @@ FormData::Append(const nsAString& aName, Blob& aBlob,
 }
 
 void
+FormData::Append(const nsAString& aName, Directory* aDirectory)
+{
+  AddNameDirectoryPair(aName, aDirectory);
+}
+
+void
 FormData::Delete(const nsAString& aName)
 {
   // We have to use this slightly awkward for loop since uint32_t >= 0 is an
@@ -142,7 +147,7 @@ FormData::Delete(const nsAString& aName)
 
 void
 FormData::Get(const nsAString& aName,
-              Nullable<OwningBlobOrUSVString>& aOutValue)
+              Nullable<OwningBlobOrDirectoryOrUSVString>& aOutValue)
 {
   for (uint32_t i = 0; i < mFormData.Length(); ++i) {
     if (aName.Equals(mFormData[i].name)) {
@@ -156,11 +161,11 @@ FormData::Get(const nsAString& aName,
 
 void
 FormData::GetAll(const nsAString& aName,
-                 nsTArray<OwningBlobOrUSVString>& aValues)
+                 nsTArray<OwningBlobOrDirectoryOrUSVString>& aValues)
 {
   for (uint32_t i = 0; i < mFormData.Length(); ++i) {
     if (aName.Equals(mFormData[i].name)) {
-      OwningBlobOrUSVString* element = aValues.AppendElement();
+      OwningBlobOrDirectoryOrUSVString* element = aValues.AppendElement();
       *element = mFormData[i].value;
     }
   }
@@ -197,6 +202,16 @@ FormData::AddNameBlobOrNullPair(const nsAString& aName, Blob* aBlob)
 
   FormDataTuple* data = mFormData.AppendElement();
   SetNameFilePair(data, aName, file);
+  return NS_OK;
+}
+
+nsresult
+FormData::AddNameDirectoryPair(const nsAString& aName, Directory* aDirectory)
+{
+  MOZ_ASSERT(aDirectory);
+
+  FormDataTuple* data = mFormData.AppendElement();
+  SetNameDirectoryPair(data, aName, aDirectory);
   return NS_OK;
 }
 
@@ -265,7 +280,7 @@ FormData::GetKeyAtIndex(uint32_t aIndex) const
   return mFormData[aIndex].name;
 }
 
-const OwningBlobOrUSVString&
+const OwningBlobOrDirectoryOrUSVString&
 FormData::GetValueAtIndex(uint32_t aIndex) const
 {
   MOZ_ASSERT(aIndex < mFormData.Length());
@@ -297,60 +312,23 @@ FormData::SetNameFilePair(FormDataTuple* aData,
   aData->value.SetAsBlob() = aFile;
 }
 
-// -------------------------------------------------------------------------
-// nsIDOMFormData
-
-NS_IMETHODIMP
-FormData::Append(const nsAString& aName, nsIVariant* aValue)
+void
+FormData::SetNameDirectoryPair(FormDataTuple* aData,
+                               const nsAString& aName,
+                               Directory* aDirectory)
 {
-  uint16_t dataType;
-  nsresult rv = aValue->GetDataType(&dataType);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(aData);
+  MOZ_ASSERT(aDirectory);
 
-  if (dataType == nsIDataType::VTYPE_INTERFACE ||
-      dataType == nsIDataType::VTYPE_INTERFACE_IS) {
-    nsCOMPtr<nsISupports> supports;
-    nsID *iid;
-    rv = aValue->GetAsInterface(&iid, getter_AddRefs(supports));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    free(iid);
-
-    nsCOMPtr<nsIDOMBlob> domBlob = do_QueryInterface(supports);
-    RefPtr<Blob> blob = static_cast<Blob*>(domBlob.get());
-    if (domBlob) {
-      Optional<nsAString> temp;
-      ErrorResult rv;
-      Append(aName, *blob, temp, rv);
-      if (NS_WARN_IF(rv.Failed())) {
-        return rv.StealNSResult();
-      }
-
-      return NS_OK;
-    }
-  }
-
-  char16_t* stringData = nullptr;
-  uint32_t stringLen = 0;
-  rv = aValue->GetAsWStringWithSize(&stringLen, &stringData);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsString valAsString;
-  valAsString.Adopt(stringData, stringLen);
-
-  ErrorResult error;
-  Append(aName, valAsString, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return error.StealNSResult();
-  }
-
-  return NS_OK;
+  aData->name = aName;
+  aData->wasNullBlob = false;
+  aData->value.SetAsDirectory() = aDirectory;
 }
 
 /* virtual */ JSObject*
 FormData::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return FormDataBinding::Wrap(aCx, this, aGivenProto);
+  return FormData_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<FormData>
@@ -365,14 +343,14 @@ FormData::Constructor(const GlobalObject& aGlobal,
   return formData.forget();
 }
 
-// -------------------------------------------------------------------------
-// nsIXHRSendable
-
-NS_IMETHODIMP
+// contentTypeWithCharset can be set to the contentType or
+// contentType+charset based on what the spec says.
+// See: https://fetch.spec.whatwg.org/#concept-bodyinit-extract
+nsresult
 FormData::GetSendInfo(nsIInputStream** aBody, uint64_t* aContentLength,
-                      nsACString& aContentType, nsACString& aCharset)
+                      nsACString& aContentTypeWithCharset, nsACString& aCharset) const
 {
-  nsFSMultipartFormData fs(NS_LITERAL_CSTRING("UTF-8"), nullptr);
+  FSMultipartFormData fs(UTF_8_ENCODING, nullptr);
 
   for (uint32_t i = 0; i < mFormData.Length(); ++i) {
     if (mFormData[i].wasNullBlob) {
@@ -381,14 +359,17 @@ FormData::GetSendInfo(nsIInputStream** aBody, uint64_t* aContentLength,
     } else if (mFormData[i].value.IsUSVString()) {
       fs.AddNameValuePair(mFormData[i].name,
                           mFormData[i].value.GetAsUSVString());
-    } else {
-      MOZ_ASSERT(mFormData[i].value.IsBlob());
+    } else if (mFormData[i].value.IsBlob()) {
       fs.AddNameBlobOrNullPair(mFormData[i].name,
                                mFormData[i].value.GetAsBlob());
+    } else {
+      MOZ_ASSERT(mFormData[i].value.IsDirectory());
+      fs.AddNameDirectoryPair(mFormData[i].name,
+                              mFormData[i].value.GetAsDirectory());
     }
   }
 
-  fs.GetContentType(aContentType);
+  fs.GetContentType(aContentTypeWithCharset);
   aCharset.Truncate();
   *aContentLength = 0;
   NS_ADDREF(*aBody = fs.GetSubmissionBody(aContentLength));

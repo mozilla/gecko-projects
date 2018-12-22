@@ -187,22 +187,25 @@ CERT_AddExtensionByOID(void *exthandle, SECItem *oid, SECItem *value,
     /* point to ext struct */
     node->ext = ext;
 
-    /* the object ID of the extension */
-    ext->id = *oid;
-
     /* set critical field */
     if (critical) {
         ext->critical.data = (unsigned char *)&hextrue;
         ext->critical.len = 1;
     }
 
-    /* set the value */
+    /* set object ID of the extension and its value */
     if (copyData) {
+        rv = SECITEM_CopyItem(handle->ownerArena, &ext->id, oid);
+        if (rv) {
+            return (SECFailure);
+        }
+
         rv = SECITEM_CopyItem(handle->ownerArena, &ext->value, value);
         if (rv) {
             return (SECFailure);
         }
     } else {
+        ext->id = *oid;
         ext->value = *value;
     }
 
@@ -394,24 +397,21 @@ CERT_FindBitStringExtension(CERTCertExtension **extensions, int tag,
 {
     SECItem wrapperItem, tmpItem = { siBuffer, 0 };
     SECStatus rv;
-    PLArenaPool *arena = NULL;
+    PORTCheapArenaPool tmpArena;
 
     wrapperItem.data = NULL;
     tmpItem.data = NULL;
 
-    arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
-
-    if (!arena) {
-        return (SECFailure);
-    }
+    PORT_InitCheapArena(&tmpArena, DER_DEFAULT_CHUNKSIZE);
 
     rv = cert_FindExtension(extensions, tag, &wrapperItem);
     if (rv != SECSuccess) {
         goto loser;
     }
 
-    rv = SEC_QuickDERDecodeItem(
-        arena, &tmpItem, SEC_ASN1_GET(SEC_BitStringTemplate), &wrapperItem);
+    rv = SEC_QuickDERDecodeItem(&tmpArena.arena, &tmpItem,
+                                SEC_ASN1_GET(SEC_BitStringTemplate),
+                                &wrapperItem);
 
     if (rv != SECSuccess) {
         goto loser;
@@ -432,9 +432,7 @@ loser:
     rv = SECFailure;
 
 done:
-    if (arena) {
-        PORT_FreeArena(arena, PR_FALSE);
-    }
+    PORT_DestroyCheapArena(&tmpArena);
 
     if (wrapperItem.data) {
         PORT_Free(wrapperItem.data);

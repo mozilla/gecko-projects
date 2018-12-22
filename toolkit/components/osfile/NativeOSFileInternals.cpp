@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -5,6 +7,8 @@
 /**
  * Native implementation of some OS.File operations.
  */
+
+#include "NativeOSFileInternals.h"
 
 #include "nsString.h"
 #include "nsNetCID.h"
@@ -15,17 +19,16 @@
 #include "nsProxyRelease.h"
 
 #include "nsINativeOSFileInternals.h"
-#include "NativeOSFileInternals.h"
 #include "mozilla/dom/NativeOSFileInternalsBinding.h"
 
-#include "nsIUnicodeDecoder.h"
+#include "mozilla/Encoding.h"
 #include "nsIEventTarget.h"
 
-#include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Scoped.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtr.h"
 
 #include "prio.h"
 #include "prerror.h"
@@ -33,6 +36,7 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "js/Conversions.h"
 #include "js/Utility.h"
 #include "xpcpublic.h"
 
@@ -95,10 +99,7 @@ struct MOZ_NON_TEMPORARY_CLASS ScopedArrayBufferContents: public Scoped<ScopedAr
   explicit ScopedArrayBufferContents(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM):
     Scoped<ScopedArrayBufferContentsTraits>(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM_TO_PARENT)
   { }
-  explicit ScopedArrayBufferContents(const ArrayBufferContents& v
-                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM):
-    Scoped<ScopedArrayBufferContentsTraits>(v MOZ_GUARD_OBJECT_NOTIFIER_PARAM_TO_PARENT)
-  { }
+
   ScopedArrayBufferContents& operator=(ArrayBufferContents ptr) {
     Scoped<ScopedArrayBufferContentsTraits>::operator=(ptr);
     return *this;
@@ -133,11 +134,13 @@ private:
 // errors, we need to map a few high-level errors to OS-level
 // constants.
 #if defined(XP_UNIX)
+#define OS_ERROR_FILE_EXISTS EEXIST
 #define OS_ERROR_NOMEM ENOMEM
 #define OS_ERROR_INVAL EINVAL
 #define OS_ERROR_TOO_LARGE EFBIG
 #define OS_ERROR_RACE EIO
 #elif defined(XP_WIN)
+#define OS_ERROR_FILE_EXISTS ERROR_ALREADY_EXISTS
 #define OS_ERROR_NOMEM ERROR_NOT_ENOUGH_MEMORY
 #define OS_ERROR_INVAL ERROR_BAD_ARGUMENTS
 #define OS_ERROR_TOO_LARGE ERROR_FILE_TOO_LARGE
@@ -232,7 +235,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(AbstractResult)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AbstractResult)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AbstractResult)
@@ -385,12 +387,52 @@ TypedArrayResult::GetCacheableResult(JSContext* cx, JS::MutableHandle<JS::Value>
   return NS_OK;
 }
 
+/**
+ * Return a result as an int32_t.
+ *
+ * In this implementation, attribute |result| is an int32_t.
+ */
+class Int32Result final: public AbstractResult
+{
+public:
+  explicit Int32Result(TimeStamp aStartDate)
+    : AbstractResult(aStartDate)
+    , mContents(0)
+  {
+  }
+
+  /**
+   * Initialize the object once the contents of the result are available.
+   *
+   * @param aContents The contents to pass to JS. This is an int32_t.
+   */
+  void Init(TimeStamp aDispatchDate,
+            TimeDuration aExecutionDuration,
+            int32_t aContents) {
+    AbstractResult::Init(aDispatchDate, aExecutionDuration);
+    mContents = aContents;
+  }
+
+protected:
+  nsresult GetCacheableResult(JSContext* cx, JS::MutableHandleValue aResult) override;
+private:
+  int32_t mContents;
+};
+
+nsresult
+Int32Result::GetCacheableResult(JSContext* cx, JS::MutableHandleValue aResult)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  aResult.set(JS::NumberValue(mContents));
+  return NS_OK;
+}
+
 //////// Callback events
 
 /**
  * An event used to notify asynchronously of an error.
  */
-class ErrorEvent final : public nsRunnable {
+class OSFileErrorEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -407,21 +449,22 @@ public:
    * alread_AddRefed to ensure that we do not manipulate main-thread
    * only refcounters off the main thread.
    */
-  ErrorEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
-             nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
-             already_AddRefed<AbstractResult>& aDiscardedResult,
-             const nsACString& aOperation,
-             int32_t aOSError)
-    : mOnSuccess(aOnSuccess)
+  OSFileErrorEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                   nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
+                   already_AddRefed<AbstractResult>& aDiscardedResult,
+                   const nsACString& aOperation,
+                   int32_t aOSError)
+    : Runnable("OSFileErrorEvent")
+    , mOnSuccess(aOnSuccess)
     , mOnError(aOnError)
     , mDiscardedResult(aDiscardedResult)
     , mOSError(aOSError)
     , mOperation(aOperation)
-    {
-      MOZ_ASSERT(!NS_IsMainThread());
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
     }
 
-  NS_METHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     (void)mOnError->Complete(mOperation, mOSError);
 
@@ -448,7 +491,7 @@ public:
 /**
  * An event used to notify of a success.
  */
-class SuccessEvent final : public nsRunnable {
+class SuccessEvent final : public Runnable {
 public:
   /**
    * @param aOnSuccess The success callback.
@@ -461,17 +504,19 @@ public:
    * we do not manipulate xpconnect refcounters off the main thread
    * (which is illegal).
    */
-  SuccessEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
-               nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
-               already_AddRefed<nsINativeOSFileResult>& aResult)
-    : mOnSuccess(aOnSuccess)
+  SuccessEvent(
+    nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+    nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError,
+    already_AddRefed<nsINativeOSFileResult>& aResult)
+    : Runnable("SuccessEvent")
+    , mOnSuccess(aOnSuccess)
     , mOnError(aOnError)
     , mResult(aResult)
-    {
-      MOZ_ASSERT(!NS_IsMainThread());
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
     }
 
-  NS_METHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     (void)mOnSuccess->Complete(mResult);
 
@@ -499,11 +544,13 @@ public:
 /**
  * Base class shared by actions.
  */
-class AbstractDoEvent: public nsRunnable {
+class AbstractDoEvent: public Runnable {
 public:
-  AbstractDoEvent(nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
-                  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
-    : mOnSuccess(aOnSuccess)
+  AbstractDoEvent(
+    nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+    nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
+    : Runnable("AbstractDoEvent")
+    , mOnSuccess(aOnSuccess)
     , mOnError(aOnError)
 #if defined(DEBUG)
     , mResolved(false)
@@ -519,17 +566,19 @@ public:
             already_AddRefed<AbstractResult>&& aDiscardedResult,
             int32_t aOSError = 0) {
     Resolve();
-    RefPtr<ErrorEvent> event = new ErrorEvent(mOnSuccess,
-                                                mOnError,
-                                                aDiscardedResult,
-                                                aOperation,
-                                                aOSError);
+
+    RefPtr<OSFileErrorEvent> event = new OSFileErrorEvent(mOnSuccess,
+                                                          mOnError,
+                                                          aDiscardedResult,
+                                                          aOperation,
+                                                          aOSError);
     nsresult rv = NS_DispatchToMainThread(event);
     if (NS_FAILED(rv)) {
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      NS_ReleaseOnMainThread(event.forget());
+      NS_ReleaseOnMainThreadSystemGroup("AbstractDoEvent::OSFileErrorEvent",
+                                        event.forget());
     }
   }
 
@@ -539,14 +588,15 @@ public:
   void Succeed(already_AddRefed<nsINativeOSFileResult>&& aResult) {
     Resolve();
     RefPtr<SuccessEvent> event = new SuccessEvent(mOnSuccess,
-                                                    mOnError,
-                                                    aResult);
+                                                  mOnError,
+                                                  aResult);
     nsresult rv = NS_DispatchToMainThread(event);
     if (NS_FAILED(rv)) {
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      NS_ReleaseOnMainThread(event.forget());
+      NS_ReleaseOnMainThreadSystemGroup("AbstractDoEvent::SuccessEvent",
+                                        event.forget());
     }
 
   }
@@ -594,7 +644,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  NS_METHOD Run() override {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(!NS_IsMainThread());
     TimeStamp dispatchDate = TimeStamp::Now();
 
@@ -741,13 +791,14 @@ public:
     , mResult(new TypedArrayResult(TimeStamp::Now()))
   { }
 
-  ~DoReadToTypedArrayEvent() {
+  ~DoReadToTypedArrayEvent() override {
     // If AbstractReadEvent::Run() has bailed out, we may need to cleanup
     // mResult, which is main-thread only data
     if (!mResult) {
       return;
     }
-    NS_ReleaseOnMainThread(mResult.forget());
+    NS_ReleaseOnMainThreadSystemGroup("DoReadToTypedArrayEvent::mResult",
+                                      mResult.forget());
   }
 
 protected:
@@ -778,13 +829,14 @@ public:
     , mResult(new StringResult(TimeStamp::Now()))
   { }
 
-  ~DoReadToStringEvent() {
+  ~DoReadToStringEvent() override {
     // If AbstraactReadEvent::Run() has bailed out, we may need to cleanup
     // mResult, which is main-thread only data
     if (!mResult) {
       return;
     }
-    NS_ReleaseOnMainThread(mResult.forget());
+    NS_ReleaseOnMainThreadSystemGroup("DoReadToStringEvent::mResult",
+                                      mResult.forget());
   }
 
 protected:
@@ -792,12 +844,12 @@ protected:
     // Obtain the decoder. We do this before reading to avoid doing
     // any unnecessary I/O in case the name of the encoding is incorrect.
     MOZ_ASSERT(!NS_IsMainThread());
-    nsAutoCString encodingName;
-    if (!dom::EncodingUtils::FindEncodingForLabel(mEncoding, encodingName)) {
+    const Encoding* encoding = Encoding::ForLabel(mEncoding);
+    if (!encoding) {
       Fail(NS_LITERAL_CSTRING("Decode"), mResult.forget(), OS_ERROR_INVAL);
       return NS_ERROR_FAILURE;
     }
-    mDecoder = dom::EncodingUtils::DecoderForEncoding(encodingName);
+    mDecoder = encoding->NewDecoderWithBOMRemoval();
     if (!mDecoder) {
       Fail(NS_LITERAL_CSTRING("DecoderForEncoding"), mResult.forget(), OS_ERROR_INVAL);
       return NS_ERROR_FAILURE;
@@ -810,37 +862,41 @@ protected:
                  ScopedArrayBufferContents& aBuffer) override {
     MOZ_ASSERT(!NS_IsMainThread());
 
-    int32_t maxChars;
-    const char* sourceChars = reinterpret_cast<const char*>(aBuffer.get().data);
-    int32_t sourceBytes = aBuffer.get().nbytes;
-    if (sourceBytes < 0) {
-      Fail(NS_LITERAL_CSTRING("arithmetics"), mResult.forget(), OS_ERROR_TOO_LARGE);
-      return;
-    }
+    auto src = MakeSpan(aBuffer.get().data, aBuffer.get().nbytes);
 
-    nsresult rv = mDecoder->GetMaxLength(sourceChars, sourceBytes, &maxChars);
-    if (NS_FAILED(rv)) {
-      Fail(NS_LITERAL_CSTRING("GetMaxLength"), mResult.forget(), OS_ERROR_INVAL);
-      return;
-    }
-
-    if (maxChars < 0) {
+    CheckedInt<size_t> needed = mDecoder->MaxUTF16BufferLength(src.Length());
+    if (!needed.isValid() ||
+        needed.value() > MaxValue<nsAString::size_type>::value) {
       Fail(NS_LITERAL_CSTRING("arithmetics"), mResult.forget(), OS_ERROR_TOO_LARGE);
       return;
     }
 
     nsString resultString;
-    resultString.SetLength(maxChars);
-    if (resultString.Length() != (nsString::size_type)maxChars) {
+    bool ok = resultString.SetLength(needed.value(), fallible);
+    if (!ok) {
       Fail(NS_LITERAL_CSTRING("allocation"), mResult.forget(), OS_ERROR_TOO_LARGE);
       return;
     }
 
-
-    rv = mDecoder->Convert(sourceChars, &sourceBytes,
-                           resultString.BeginWriting(), &maxChars);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    resultString.SetLength(maxChars);
+    // Yoric said on IRC that this method is normally called for the entire file,
+    // but that's not guaranteed. Retaining the bug that EOF in conversion isn't
+    // handled anywhere.
+    uint32_t result;
+    size_t read;
+    size_t written;
+    bool hadErrors;
+    Tie(result, read, written, hadErrors) =
+      mDecoder->DecodeToUTF16(src, resultString, false);
+    MOZ_ASSERT(result == kInputEmpty);
+    MOZ_ASSERT(read == src.Length());
+    MOZ_ASSERT(written <= needed.value());
+    Unused << hadErrors;
+    ok = resultString.SetLength(written, fallible);
+    if (!ok) {
+      Fail(
+        NS_LITERAL_CSTRING("allocation"), mResult.forget(), OS_ERROR_TOO_LARGE);
+      return;
+    }
 
     mResult->Init(aDispatchDate, TimeStamp::Now() - aDispatchDate, resultString);
     Succeed(mResult.forget());
@@ -848,8 +904,265 @@ protected:
 
  private:
   nsCString mEncoding;
-  nsCOMPtr<nsIUnicodeDecoder> mDecoder;
+  mozilla::UniquePtr<mozilla::Decoder> mDecoder;
   RefPtr<StringResult> mResult;
+};
+
+/**
+ * An event implenting writing atomically to a file.
+ */
+class DoWriteAtomicEvent: public AbstractDoEvent {
+public:
+  /**
+   * @param aPath The path of the file.
+   */
+  DoWriteAtomicEvent(const nsAString& aPath,
+                     UniquePtr<char> aBuffer,
+                     const uint64_t aBytes,
+                     const nsAString& aTmpPath,
+                     const nsAString& aBackupTo,
+                     const bool aFlush,
+                     const bool aNoOverwrite,
+                     nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
+                     nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
+    : AbstractDoEvent(aOnSuccess, aOnError)
+    , mPath(aPath)
+    , mBuffer(std::move(aBuffer))
+    , mBytes(aBytes)
+    , mTmpPath(aTmpPath)
+    , mBackupTo(aBackupTo)
+    , mFlush(aFlush)
+    , mNoOverwrite(aNoOverwrite)
+    , mResult(new Int32Result(TimeStamp::Now()))
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+  }
+
+  ~DoWriteAtomicEvent() override {
+    // If Run() has bailed out, we may need to cleanup
+    // mResult, which is main-thread only data
+    if (!mResult) {
+      return;
+    }
+    NS_ReleaseOnMainThreadSystemGroup("DoWriteAtomicEvent::mResult",
+                                      mResult.forget());
+  }
+
+  NS_IMETHODIMP Run() override {
+    MOZ_ASSERT(!NS_IsMainThread());
+    TimeStamp dispatchDate = TimeStamp::Now();
+    int32_t bytesWritten;
+
+    nsresult rv = WriteAtomic(&bytesWritten);
+    if (NS_FAILED(rv)) {
+      return NS_OK;
+    }
+
+    AfterWriteAtomic(dispatchDate, bytesWritten);
+    return NS_OK;
+  }
+
+private:
+  /**
+   * Write atomically to a file.
+   * Must be called off the main thread.
+   * @param aBytesWritten will contain the total bytes written.
+   * This does not support compression in this implementation.
+   */
+  nsresult WriteAtomic(int32_t* aBytesWritten)
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
+
+    // Note: In Windows, many NSPR File I/O functions which act on pathnames
+    // do not handle UTF-16 encoding. Thus, we use the following functions
+    // to overcome this.
+    // PR_Access : GetFileAttributesW
+    // PR_Delete : DeleteFileW
+    // PR_OpenFile : CreateFileW followed by PR_ImportFile
+    // PR_Rename : MoveFileW
+
+    ScopedPRFileDesc file;
+    NS_ConvertUTF16toUTF8 path(mPath);
+    NS_ConvertUTF16toUTF8 tmpPath(mTmpPath);
+    NS_ConvertUTF16toUTF8 backupTo(mBackupTo);
+    bool fileExists = false;
+
+    if (!mTmpPath.IsVoid() || !mBackupTo.IsVoid() || mNoOverwrite) {
+      // fileExists needs to be computed in the case of tmpPath, since
+      // the rename behaves differently depending on whether the
+      // file already exists. It's also computed for backupTo since the
+      // backup can be skipped if the file does not exist in the first place.
+#if defined(XP_WIN)
+      fileExists = ::GetFileAttributesW(mPath.get()) != INVALID_FILE_ATTRIBUTES;
+#else
+      fileExists = PR_Access(path.get(), PR_ACCESS_EXISTS) == PR_SUCCESS;
+#endif // defined(XP_WIN)
+    }
+
+    // Check noOverwrite.
+    if (mNoOverwrite && fileExists) {
+      Fail(NS_LITERAL_CSTRING("noOverwrite"), nullptr, OS_ERROR_FILE_EXISTS);
+      return NS_ERROR_FAILURE;
+    }
+
+    // Backup the original file if it exists.
+    if (!mBackupTo.IsVoid() && fileExists) {
+#if defined(XP_WIN)
+      if (::GetFileAttributesW(mBackupTo.get()) != INVALID_FILE_ATTRIBUTES) {
+        // The file specified by mBackupTo exists, so we need to delete it first.
+        if (::DeleteFileW(mBackupTo.get()) == false) {
+          Fail(NS_LITERAL_CSTRING("delete"), nullptr, ::GetLastError());
+          return NS_ERROR_FAILURE;
+        }
+      }
+
+      if (::MoveFileW(mPath.get(), mBackupTo.get()) == false) {
+        Fail(NS_LITERAL_CSTRING("rename"), nullptr, ::GetLastError());
+        return NS_ERROR_FAILURE;
+      }
+#else
+      if (PR_Access(backupTo.get(), PR_ACCESS_EXISTS) == PR_SUCCESS) {
+        // The file specified by mBackupTo exists, so we need to delete it first.
+        if (PR_Delete(backupTo.get()) == PR_FAILURE) {
+          Fail(NS_LITERAL_CSTRING("delete"), nullptr, PR_GetOSError());
+          return NS_ERROR_FAILURE;
+         }
+       }
+
+       if (PR_Rename(path.get(), backupTo.get()) == PR_FAILURE) {
+        Fail(NS_LITERAL_CSTRING("rename"), nullptr, PR_GetOSError());
+        return NS_ERROR_FAILURE;
+      }
+#endif // defined(XP_WIN)
+    }
+
+#if defined(XP_WIN)
+    // In addition to not handling UTF-16 encoding in file paths,
+    // PR_OpenFile opens files without sharing, which is not the
+    // general semantics of OS.File.
+    HANDLE handle;
+    // if we're dealing with a tmpFile, we need to write there.
+    if (!mTmpPath.IsVoid()) {
+      handle =
+        ::CreateFileW(mTmpPath.get(),
+                      GENERIC_WRITE,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                      /*Security attributes*/nullptr,
+                      // CREATE_ALWAYS is used since since we need to create the temporary file,
+                      // which we don't care about overwriting.
+                      CREATE_ALWAYS,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+                      /*Template file*/ nullptr);
+    } else {
+      handle =
+        ::CreateFileW(mPath.get(),
+                      GENERIC_WRITE,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                      /*Security attributes*/nullptr,
+                      // CREATE_ALWAYS is used since since have already checked the noOverwrite
+                      // condition, and thus can overwrite safely.
+                      CREATE_ALWAYS,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+                      /*Template file*/ nullptr);
+    }
+
+    if (handle == INVALID_HANDLE_VALUE) {
+      Fail(NS_LITERAL_CSTRING("open"), nullptr, ::GetLastError());
+      return NS_ERROR_FAILURE;
+    }
+
+    file = PR_ImportFile((PROsfd)handle);
+    if (!file) {
+      // |file| is closed by PR_ImportFile
+      Fail(NS_LITERAL_CSTRING("ImportFile"), nullptr, PR_GetOSError());
+      return NS_ERROR_FAILURE;
+    }
+
+#else
+    // if we're dealing with a tmpFile, we need to write there.
+    if (!mTmpPath.IsVoid()) {
+      file = PR_OpenFile(tmpPath.get(),
+                         PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
+                         PR_IRUSR | PR_IWUSR);
+    } else {
+      file = PR_OpenFile(path.get(),
+                         PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
+                         PR_IRUSR | PR_IWUSR);
+    }
+
+    if (!file) {
+      Fail(NS_LITERAL_CSTRING("open"), nullptr, PR_GetOSError());
+      return NS_ERROR_FAILURE;
+    }
+#endif // defined(XP_WIN)
+
+    int32_t bytesWrittenSuccess = PR_Write(file, (void* )(mBuffer.get()), mBytes);
+
+    if (bytesWrittenSuccess == -1) {
+      Fail(NS_LITERAL_CSTRING("write"), nullptr, PR_GetOSError());
+      return NS_ERROR_FAILURE;
+    }
+
+    // Apply any tmpPath renames.
+    if (!mTmpPath.IsVoid()) {
+      if (mBackupTo.IsVoid() && fileExists) {
+        // We need to delete the old file first, if it exists and we haven't already
+        // renamed it as a part of backing it up.
+#if defined(XP_WIN)
+        if (::DeleteFileW(mPath.get()) == false) {
+          Fail(NS_LITERAL_CSTRING("delete"), nullptr, ::GetLastError());
+          return NS_ERROR_FAILURE;
+        }
+#else
+        if (PR_Delete(path.get()) == PR_FAILURE) {
+          Fail(NS_LITERAL_CSTRING("delete"), nullptr, PR_GetOSError());
+          return NS_ERROR_FAILURE;
+        }
+#endif // defined(XP_WIN)
+      }
+
+#if defined(XP_WIN)
+      if (::MoveFileW(mTmpPath.get(), mPath.get()) == false) {
+        Fail(NS_LITERAL_CSTRING("rename"), nullptr, ::GetLastError());
+        return NS_ERROR_FAILURE;
+      }
+#else
+      if(PR_Rename(tmpPath.get(), path.get()) == PR_FAILURE) {
+        Fail(NS_LITERAL_CSTRING("rename"), nullptr, PR_GetOSError());
+        return NS_ERROR_FAILURE;
+      }
+#endif // defined(XP_WIN)
+    }
+
+    if (mFlush) {
+      if (PR_Sync(file) == PR_FAILURE) {
+        Fail(NS_LITERAL_CSTRING("sync"), nullptr, PR_GetOSError());
+        return NS_ERROR_FAILURE;
+      }
+    }
+
+    *aBytesWritten = bytesWrittenSuccess;
+    return NS_OK;
+  }
+
+protected:
+  nsresult AfterWriteAtomic(TimeStamp aDispatchDate, int32_t aBytesWritten) {
+    MOZ_ASSERT(!NS_IsMainThread());
+    mResult->Init(aDispatchDate, TimeStamp::Now() - aDispatchDate, aBytesWritten);
+    Succeed(mResult.forget());
+    return NS_OK;
+  }
+
+  const nsString mPath;
+  const UniquePtr<char> mBuffer;
+  const int32_t mBytes;
+  const nsString mTmpPath;
+  const nsString mBackupTo;
+  const bool mFlush;
+  const bool mNoOverwrite;
+
+private:
+  RefPtr<Int32Result> mResult;
 };
 
 } // namespace
@@ -887,10 +1200,12 @@ NativeOSFileInternalsService::Read(const nsAString& aPath,
   // Prepare the off main thread event and dispatch it
   nsCOMPtr<nsINativeOSFileSuccessCallback> onSuccess(aOnSuccess);
   nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> onSuccessHandle(
-    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(onSuccess));
+    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(
+      "nsINativeOSFileSuccessCallback", onSuccess));
   nsCOMPtr<nsINativeOSFileErrorCallback> onError(aOnError);
   nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> onErrorHandle(
-    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(onError));
+    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(
+      "nsINativeOSFileErrorCallback", onError));
 
   RefPtr<AbstractDoEvent> event;
   if (encoding.IsEmpty()) {
@@ -912,5 +1227,92 @@ NativeOSFileInternalsService::Read(const nsAString& aPath,
   return target->Dispatch(event, NS_DISPATCH_NORMAL);
 }
 
-} // namespace mozilla
+// Note: This method steals the contents of `aBuffer`.
+NS_IMETHODIMP
+NativeOSFileInternalsService::WriteAtomic(const nsAString& aPath,
+                                          JS::HandleValue aBuffer,
+                                          JS::HandleValue aOptions,
+                                          nsINativeOSFileSuccessCallback *aOnSuccess,
+                                          nsINativeOSFileErrorCallback *aOnError,
+                                          JSContext* cx)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // Extract typed-array/string into buffer. We also need to store the length
+  // of the buffer as that may be required if not provided in `aOptions`.
+  UniquePtr<char> buffer;
+  int32_t bytes;
 
+  // The incoming buffer must be an Object.
+  if (!aBuffer.isObject()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  JS::RootedObject bufferObject(cx, nullptr);
+  if (!JS_ValueToObject(cx, aBuffer, &bufferObject)) {
+    return NS_ERROR_FAILURE;
+  }
+  if (!JS_IsArrayBufferObject(bufferObject.get())) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  bytes = JS_GetArrayBufferByteLength(bufferObject.get());
+  buffer.reset(static_cast<char*>(
+                 JS_StealArrayBufferContents(cx, bufferObject)));
+
+  if (!buffer) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Extract options.
+  dom::NativeOSFileWriteAtomicOptions dict;
+
+  if (aOptions.isObject()) {
+    if (!dict.Init(cx, aOptions)) {
+      return NS_ERROR_INVALID_ARG;
+    }
+  } else {
+    // If an options object is not provided, initializing with a `null`
+    // value, which will give a set of defaults defined in the WebIDL binding.
+    if (!dict.Init(cx, JS::NullHandleValue)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  if (dict.mBytes.WasPassed() && !dict.mBytes.Value().IsNull()) {
+    // We need to check size and cast because NSPR and WebIDL have different types.
+    if (dict.mBytes.Value().Value() > PR_INT32_MAX) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    bytes = (int32_t) (dict.mBytes.Value().Value());
+  }
+
+  // Prepare the off main thread event and dispatch it
+  nsCOMPtr<nsINativeOSFileSuccessCallback> onSuccess(aOnSuccess);
+  nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> onSuccessHandle(
+    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(
+      "nsINativeOSFileSuccessCallback", onSuccess));
+  nsCOMPtr<nsINativeOSFileErrorCallback> onError(aOnError);
+  nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> onErrorHandle(
+    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(
+      "nsINativeOSFileErrorCallback", onError));
+
+  RefPtr<AbstractDoEvent> event = new DoWriteAtomicEvent(aPath,
+                                                         std::move(buffer),
+                                                         bytes,
+                                                         dict.mTmpPath,
+                                                         dict.mBackupTo,
+                                                         dict.mFlush,
+                                                         dict.mNoOverwrite,
+                                                         onSuccessHandle,
+                                                         onErrorHandle);
+  nsresult rv;
+  nsCOMPtr<nsIEventTarget> target = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID, &rv);
+
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  return target->Dispatch(event, NS_DISPATCH_NORMAL);
+}
+
+} // namespace mozilla

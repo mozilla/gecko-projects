@@ -14,7 +14,11 @@ from mach.decorators import (
 )
 
 from mozbuild.base import MachCommandBase
+from mozbuild.util import mkdir
 
+def get_test_parser():
+    import runtests
+    return runtests.get_parser
 
 @CommandProvider
 class WebIDLProvider(MachCommandBase):
@@ -29,17 +33,22 @@ class WebIDLProvider(MachCommandBase):
         for i in interface:
             manager.generate_example_files(i)
 
-    @Command('webidl-parser-test', category='testing',
+    @Command('webidl-parser-test', category='testing', parser=get_test_parser,
              description='Run WebIDL tests (Interface Browser parser).')
-    @CommandArgument('--verbose', '-v', action='store_true',
-                     help='Run tests in verbose mode.')
-    def webidl_test(self, verbose=False):
+    def webidl_test(self, **kwargs):
         sys.path.insert(0, os.path.join(self.topsrcdir, 'other-licenses',
                         'ply'))
+
+        # Ensure the topobjdir exists. On a Taskcluster test run there won't be
+        # an objdir yet.
+        mkdir(self.topobjdir)
 
         # Make sure we drop our cached grammar bits in the objdir, not
         # wherever we happen to be running from.
         os.chdir(self.topobjdir)
+
+        if kwargs["verbose"] is None:
+            kwargs["verbose"] = False
 
         # Now we're going to create the cached grammar file in the
         # objdir.  But we're going to try loading it as a python
@@ -47,5 +56,5 @@ class WebIDLProvider(MachCommandBase):
         # path.
         sys.path.insert(0, self.topobjdir)
 
-        from runtests import run_tests
-        return run_tests(None, verbose=verbose)
+        import runtests
+        return runtests.run_tests(kwargs["tests"], verbose=kwargs["verbose"])

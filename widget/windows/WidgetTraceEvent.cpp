@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <windows.h>
 
+#include "mozilla/RefPtr.h"
 #include "mozilla/WidgetTraceEvent.h"
 #include "nsAppShellCID.h"
 #include "nsComponentManagerUtils.h"
@@ -20,7 +21,6 @@
 #include "nsISupportsImpl.h"
 #include "nsIWidget.h"
 #include "nsIXULWindow.h"
-#include "nsAutoPtr.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nsWindowDefs.h"
@@ -32,18 +32,13 @@ HANDLE sEventHandle = nullptr;
 
 // We need a runnable in order to find the hidden window on the main
 // thread.
-class HWNDGetter : public nsRunnable {
+class HWNDGetter : public mozilla::Runnable {
 public:
-  HWNDGetter() : hidden_window_hwnd(nullptr) {
-    MOZ_COUNT_CTOR(HWNDGetter);
-  }
-  ~HWNDGetter() {
-    MOZ_COUNT_DTOR(HWNDGetter);
-  }
+  HWNDGetter() : Runnable("HWNDGetter"), hidden_window_hwnd(nullptr) {}
 
   HWND hidden_window_hwnd;
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     // Jump through some hoops to locate the hidden window.
     nsCOMPtr<nsIAppShellService> appShell(do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
     nsCOMPtr<nsIXULWindow> hiddenWindow;
@@ -60,7 +55,7 @@ public:
     }
 
     nsCOMPtr<nsIBaseWindow> baseWindow(do_QueryInterface(docShell));
-    
+
     if (!baseWindow)
       return NS_ERROR_FAILURE;
 

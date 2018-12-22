@@ -16,6 +16,7 @@
 
 #include "nsCOMPtr.h"
 #include "mozilla/dom/HTMLOptionElement.h"
+#include "mozilla/dom/HTMLSelectElement.h"
 #include "nsIComboboxControlFrame.h"
 #include "nsContainerFrame.h"
 #include "nsIListControlFrame.h"
@@ -38,17 +39,17 @@ HTMLSelectListAccessible::
 // HTMLSelectListAccessible: Accessible public
 
 uint64_t
-HTMLSelectListAccessible::NativeState()
+HTMLSelectListAccessible::NativeState() const
 {
   uint64_t state = AccessibleWrap::NativeState();
-  if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple))
+  if (mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple))
     state |= states::MULTISELECTABLE | states::EXTSELECTABLE;
 
   return state;
 }
 
 role
-HTMLSelectListAccessible::NativeRole()
+HTMLSelectListAccessible::NativeRole() const
 {
   return roles::LISTBOX;
 }
@@ -59,14 +60,14 @@ HTMLSelectListAccessible::NativeRole()
 bool
 HTMLSelectListAccessible::SelectAll()
 {
-  return mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple) ?
+  return mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple) ?
     AccessibleWrap::SelectAll() : false;
 }
 
 bool
 HTMLSelectListAccessible::UnselectAll()
 {
-  return mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple) ?
+  return mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::multiple) ?
     AccessibleWrap::UnselectAll() : false;
 }
 
@@ -92,7 +93,7 @@ HTMLSelectListAccessible::AreItemsOperable() const
 }
 
 Accessible*
-HTMLSelectListAccessible::CurrentItem()
+HTMLSelectListAccessible::CurrentItem() const
 {
   nsIListControlFrame* listControlFrame = do_QueryFrame(GetFrame());
   if (listControlFrame) {
@@ -107,11 +108,15 @@ HTMLSelectListAccessible::CurrentItem()
 }
 
 void
-HTMLSelectListAccessible::SetCurrentItem(Accessible* aItem)
+HTMLSelectListAccessible::SetCurrentItem(const Accessible* aItem)
 {
-  aItem->GetContent()->SetAttr(kNameSpaceID_None,
-                               nsGkAtoms::selected, NS_LITERAL_STRING("true"),
-                               true);
+  if (!aItem->GetContent()->IsElement())
+    return;
+
+  aItem->GetContent()->AsElement()->SetAttr(kNameSpaceID_None,
+                                            nsGkAtoms::selected,
+                                            NS_LITERAL_STRING("true"),
+                                            true);
 }
 
 bool
@@ -134,7 +139,7 @@ HTMLSelectOptionAccessible::
 // HTMLSelectOptionAccessible: Accessible public
 
 role
-HTMLSelectOptionAccessible::NativeRole()
+HTMLSelectOptionAccessible::NativeRole() const
 {
   if (GetCombobox())
     return roles::COMBOBOX_OPTION;
@@ -143,18 +148,18 @@ HTMLSelectOptionAccessible::NativeRole()
 }
 
 ENameValueFlag
-HTMLSelectOptionAccessible::NativeName(nsString& aName)
+HTMLSelectOptionAccessible::NativeName(nsString& aName) const
 {
   // CASE #1 -- great majority of the cases
   // find the label attribute - this is what the W3C says we should use
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
+  mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
   if (!aName.IsEmpty())
     return eNameOK;
 
-  // CASE #2 -- no label parameter, get the first child, 
+  // CASE #2 -- no label parameter, get the first child,
   // use it if it is a text node
   nsIContent* text = mContent->GetFirstChild();
-  if (text && text->IsNodeOfType(nsINode::eTEXT)) {
+  if (text && text->IsText()) {
     nsTextEquivUtils::AppendTextEquivFromTextContent(text, &aName);
     aName.CompressWhitespace();
     return aName.IsEmpty() ? eNameOK : eNameFromSubtree;
@@ -164,7 +169,7 @@ HTMLSelectOptionAccessible::NativeName(nsString& aName)
 }
 
 uint64_t
-HTMLSelectOptionAccessible::NativeState()
+HTMLSelectOptionAccessible::NativeState() const
 {
   // As a HTMLSelectOptionAccessible we can have the following states:
   // SELECTABLE, SELECTED, FOCUSED, FOCUSABLE, OFFSCREEN
@@ -181,7 +186,7 @@ HTMLSelectOptionAccessible::NativeState()
     return state;
 
   // Are we selected?
-  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
+  HTMLOptionElement* option = HTMLOptionElement::FromNode(mContent);
   bool selected = option && option->Selected();
   if (selected)
     state |= states::SELECTED;
@@ -193,7 +198,10 @@ HTMLSelectOptionAccessible::NativeState()
     // visible option
     if (!selected) {
       state |= states::OFFSCREEN;
-      state ^= states::INVISIBLE;
+      // Ensure the invisible state is removed. Otherwise, group info will skip
+      // this option. Furthermore, this gets cached and this doesn't get
+      // invalidated even once the select is expanded.
+      state &= ~states::INVISIBLE;
     } else {
       // Clear offscreen and invisible for currently showing option
       state &= ~(states::OFFSCREEN | states::INVISIBLE);
@@ -208,8 +216,8 @@ HTMLSelectOptionAccessible::NativeState()
     if (listAcc) {
       nsIntRect optionRect = Bounds();
       nsIntRect listRect = listAcc->Bounds();
-      if (optionRect.y < listRect.y ||
-          optionRect.y + optionRect.height > listRect.y + listRect.height) {
+      if (optionRect.Y() < listRect.Y() ||
+          optionRect.YMost() > listRect.YMost()) {
         state |= states::OFFSCREEN;
       }
     }
@@ -257,13 +265,13 @@ HTMLSelectOptionAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 uint8_t
-HTMLSelectOptionAccessible::ActionCount()
+HTMLSelectOptionAccessible::ActionCount() const
 {
   return 1;
 }
 
 bool
-HTMLSelectOptionAccessible::DoAction(uint8_t aIndex)
+HTMLSelectOptionAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Select)
     return false;
@@ -275,7 +283,7 @@ HTMLSelectOptionAccessible::DoAction(uint8_t aIndex)
 void
 HTMLSelectOptionAccessible::SetSelected(bool aSelect)
 {
-  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
+  HTMLOptionElement* option = HTMLOptionElement::FromNode(mContent);
   if (option)
     option->SetSelected(aSelect);
 }
@@ -298,7 +306,7 @@ HTMLSelectOptionAccessible::ContainerWidget() const
 ////////////////////////////////////////////////////////////////////////////////
 
 role
-HTMLSelectOptGroupAccessible::NativeRole()
+HTMLSelectOptGroupAccessible::NativeRole() const
 {
   return roles::GROUPING;
 }
@@ -309,8 +317,14 @@ HTMLSelectOptGroupAccessible::NativeInteractiveState() const
   return NativelyUnavailable() ? states::UNAVAILABLE : 0;
 }
 
+bool
+HTMLSelectOptGroupAccessible::IsAcceptableChild(nsIContent* aEl) const
+{
+  return aEl->IsCharacterData() || aEl->IsHTMLElement(nsGkAtoms::option);
+}
+
 uint8_t
-HTMLSelectOptGroupAccessible::ActionCount()
+HTMLSelectOptGroupAccessible::ActionCount() const
 {
   return 0;
 }
@@ -322,7 +336,7 @@ HTMLSelectOptGroupAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-HTMLSelectOptGroupAccessible::DoAction(uint8_t aIndex)
+HTMLSelectOptGroupAccessible::DoAction(uint8_t aIndex) const
 {
   return false;
 }
@@ -354,7 +368,7 @@ HTMLComboboxAccessible::
 // HTMLComboboxAccessible: Accessible
 
 role
-HTMLComboboxAccessible::NativeRole()
+HTMLComboboxAccessible::NativeRole() const
 {
   return roles::COMBOBOX;
 }
@@ -383,7 +397,7 @@ HTMLComboboxAccessible::Shutdown()
 }
 
 uint64_t
-HTMLComboboxAccessible::NativeState()
+HTMLComboboxAccessible::NativeState() const
 {
   // As a HTMLComboboxAccessible we can have the following states:
   // FOCUSED, FOCUSABLE, HASPOPUP, EXPANDED, COLLAPSED
@@ -417,7 +431,7 @@ HTMLComboboxAccessible::Description(nsString& aDescription)
 }
 
 void
-HTMLComboboxAccessible::Value(nsString& aValue)
+HTMLComboboxAccessible::Value(nsString& aValue) const
 {
   // Use accessible name of selected option.
   Accessible* option = SelectedOption();
@@ -426,13 +440,13 @@ HTMLComboboxAccessible::Value(nsString& aValue)
 }
 
 uint8_t
-HTMLComboboxAccessible::ActionCount()
+HTMLComboboxAccessible::ActionCount() const
 {
   return 1;
 }
 
 bool
-HTMLComboboxAccessible::DoAction(uint8_t aIndex)
+HTMLComboboxAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click)
     return false;
@@ -455,6 +469,12 @@ HTMLComboboxAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
     aName.AssignLiteral("close");
   else
     aName.AssignLiteral("open");
+}
+
+bool
+HTMLComboboxAccessible::IsAcceptableChild(nsIContent* aEl) const
+{
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -480,13 +500,13 @@ HTMLComboboxAccessible::AreItemsOperable() const
 }
 
 Accessible*
-HTMLComboboxAccessible::CurrentItem()
+HTMLComboboxAccessible::CurrentItem() const
 {
   return AreItemsOperable() ? mListAccessible->CurrentItem() : nullptr;
 }
 
 void
-HTMLComboboxAccessible::SetCurrentItem(Accessible* aItem)
+HTMLComboboxAccessible::SetCurrentItem(const Accessible* aItem)
 {
   if (AreItemsOperable())
     mListAccessible->SetCurrentItem(aItem);
@@ -498,19 +518,15 @@ HTMLComboboxAccessible::SetCurrentItem(Accessible* aItem)
 Accessible*
 HTMLComboboxAccessible::SelectedOption() const
 {
-  nsIFrame* frame = GetFrame();
-  nsIComboboxControlFrame* comboboxFrame = do_QueryFrame(frame);
-  if (!comboboxFrame)
-    return nullptr;
+  HTMLSelectElement* select = HTMLSelectElement::FromNode(mContent);
+  int32_t selectedIndex = select->SelectedIndex();
 
-  nsIListControlFrame* listControlFrame =
-    do_QueryFrame(comboboxFrame->GetDropDown());
-  if (listControlFrame) {
-    nsCOMPtr<nsIContent> activeOptionNode = listControlFrame->GetCurrentOption();
-    if (activeOptionNode) {
+  if (selectedIndex >= 0) {
+    HTMLOptionElement* option = select->Item(selectedIndex);
+    if (option) {
       DocAccessible* document = Document();
       if (document)
-        return document->GetAccessible(activeOptionNode);
+        return document->GetAccessible(option);
     }
   }
 
@@ -546,13 +562,13 @@ HTMLComboboxListAccessible::GetFrame() const
 }
 
 role
-HTMLComboboxListAccessible::NativeRole()
+HTMLComboboxListAccessible::NativeRole() const
 {
   return roles::COMBOBOX_LIST;
 }
 
 uint64_t
-HTMLComboboxListAccessible::NativeState()
+HTMLComboboxListAccessible::NativeState() const
 {
   // As a HTMLComboboxListAccessible we can have the following states:
   // FOCUSED, FOCUSABLE, FLOATING, INVISIBLE
@@ -596,6 +612,12 @@ HTMLComboboxListAccessible::RelativeBounds(nsIFrame** aBoundingFrame) const
   return (*aBoundingFrame)->GetRect();
 }
 
+bool
+HTMLComboboxListAccessible::IsAcceptableChild(nsIContent* aEl) const
+{
+  return aEl->IsAnyOfHTMLElements(nsGkAtoms::option, nsGkAtoms::optgroup);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLComboboxListAccessible: Widgets
 
@@ -610,4 +632,3 @@ HTMLComboboxListAccessible::AreItemsOperable() const
 {
   return mParent && mParent->AreItemsOperable();
 }
-

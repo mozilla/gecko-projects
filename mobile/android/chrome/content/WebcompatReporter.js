@@ -2,22 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "Snackbars", "resource://gre/modules/Snackbars.jsm");
 
 var WebcompatReporter = {
   menuItem: null,
   menuItemEnabled: null,
   init: function() {
-    Services.obs.addObserver(this, "DesktopMode:Change", false);
-    Services.obs.addObserver(this, "chrome-document-global-created", false);
-    Services.obs.addObserver(this, "content-document-global-created", false);
+    GlobalEventDispatcher.registerListener(this, "DesktopMode:Change");
+    Services.obs.addObserver(this, "chrome-document-global-created");
+    Services.obs.addObserver(this, "content-document-global-created");
 
     let visible = true;
     if ("@mozilla.org/parental-controls-service;1" in Cc) {
@@ -26,6 +24,16 @@ var WebcompatReporter = {
     }
 
     this.addMenuItem(visible);
+  },
+
+  onEvent: function(event, data, callback) {
+    if (event === "DesktopMode:Change") {
+      let tab = BrowserApp.getTabForId(data.tabId);
+      let currentURI = tab.browser.currentURI.spec;
+      if (data.desktopMode && this.isReportableUrl(currentURI)) {
+        this.reportDesktopModePrompt(tab);
+      }
+    }
   },
 
   observe: function(subject, topic, data) {
@@ -44,13 +52,6 @@ var WebcompatReporter = {
       } else if (this.menuItemEnabled && !this.isReportableUrl(currentURI)) {
         NativeWindow.menu.update(this.menuItem, {enabled: false});
         this.menuItemEnabled = false;
-      }
-    } else if (topic === "DesktopMode:Change") {
-      let args = JSON.parse(data);
-      let tab = BrowserApp.getTabForId(args.tabId);
-      let currentURI = tab.browser.currentURI.spec;
-      if (args.desktopMode && this.isReportableUrl(currentURI)) {
-        this.reportDesktopModePrompt(tab);
       }
     }
   },
@@ -84,7 +85,7 @@ var WebcompatReporter = {
         canvas.width = dpr * w;
         canvas.height = dpr * h;
         ctx.scale(dpr, dpr);
-        ctx.drawWindow(win, x, y, w, h, '#ffffff');
+        ctx.drawWindow(win, x, y, w, h, "#ffffff");
         let screenshot = canvas.toDataURL();
         resolve({tab: tab, data: screenshot});
       } catch (e) {
@@ -117,19 +118,17 @@ var WebcompatReporter = {
   reportIssue: (tabData) => {
     return new Promise((resolve) => {
       const WEBCOMPAT_ORIGIN = "https://webcompat.com";
-      let url = tabData.tab.browser.currentURI.spec
-      let webcompatURL = `${WEBCOMPAT_ORIGIN}/?open=1&url=${url}`;
+      let url = tabData.tab.browser.currentURI.spec;
+      let webcompatURL = `${WEBCOMPAT_ORIGIN}/issues/new?url=${url}&src=mobile-reporter`;
 
       if (tabData.data && typeof tabData.data === "string") {
-        BrowserApp.deck.addEventListener("DOMContentLoaded", function sendDataToTab(event) {
-          BrowserApp.deck.removeEventListener("DOMContentLoaded", sendDataToTab, false);
-
+        BrowserApp.deck.addEventListener("DOMContentLoaded", function(event) {
           if (event.target.defaultView.location.origin === WEBCOMPAT_ORIGIN) {
             // Waive Xray vision so event.origin is not chrome://browser on the other side.
             let win = Cu.waiveXrays(event.target.defaultView);
             win.postMessage(tabData.data, WEBCOMPAT_ORIGIN);
           }
-        }, false);
+        }, {once: true});
       }
 
       let isPrivateTab = PrivateBrowsingUtils.isBrowserPrivate(tabData.tab.browser);

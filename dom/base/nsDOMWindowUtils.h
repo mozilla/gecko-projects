@@ -13,7 +13,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/BasicEvents.h"
 
-class nsGlobalWindow;
+class nsGlobalWindowOuter;
 class nsIPresShell;
 class nsIWidget;
 class nsPresContext;
@@ -22,8 +22,12 @@ class nsView;
 struct nsPoint;
 
 namespace mozilla {
+  namespace dom {
+    class Element;
+  } // namespace dom
   namespace layers {
     class LayerTransactionChild;
+    class WebRenderBridgeChild;
   } // namespace layers
 } // namespace mozilla
 
@@ -40,7 +44,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSITRANSLATIONNODELIST
 
-  void AppendElement(nsIDOMNode* aElement, bool aIsRoot)
+  void AppendElement(nsINode* aElement, bool aIsRoot)
   {
     mNodes.AppendElement(aElement);
     mNodeIsRoot.AppendElement(aIsRoot);
@@ -50,7 +54,7 @@ public:
 private:
   ~nsTranslationNodeList() {}
 
-  nsTArray<nsCOMPtr<nsIDOMNode> > mNodes;
+  nsTArray<nsCOMPtr<nsINode> > mNodes;
   nsTArray<bool> mNodeIsRoot;
   uint32_t mLength;
 };
@@ -61,7 +65,7 @@ class nsDOMWindowUtils final : public nsIDOMWindowUtils,
   typedef mozilla::widget::TextEventDispatcher
     TextEventDispatcher;
 public:
-  explicit nsDOMWindowUtils(nsGlobalWindow *aWindow);
+  explicit nsDOMWindowUtils(nsGlobalWindowOuter *aWindow);
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMWINDOWUTILS
 
@@ -75,13 +79,16 @@ protected:
   // Add this offset to any event offset we're given to make it relative to the
   // widget returned by GetWidget.
   nsIWidget* GetWidget(nsPoint* aOffset = nullptr);
-  nsIWidget* GetWidgetForElement(nsIDOMElement* aElement);
+  nsIWidget* GetWidgetForElement(mozilla::dom::Element* aElement);
 
   nsIPresShell* GetPresShell();
   nsPresContext* GetPresContext();
   nsIDocument* GetDocument();
   mozilla::layers::LayerTransactionChild* GetLayerTransaction();
+  mozilla::layers::WebRenderBridgeChild* GetWebRenderBridge();
 
+  // Until callers are annotated.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   NS_IMETHOD SendMouseEventCommon(const nsAString& aType,
                                   float aX,
                                   float aY,
@@ -91,29 +98,12 @@ protected:
                                   bool aIgnoreRootScrollFrame,
                                   float aPressure,
                                   unsigned short aInputSourceArg,
+                                  uint32_t aIdentifier,
                                   bool aToWindow,
                                   bool *aPreventDefault,
-                                  bool aIsSynthesized);
-
-  NS_IMETHOD SendPointerEventCommon(const nsAString& aType,
-                                    float aX,
-                                    float aY,
-                                    int32_t aButton,
-                                    int32_t aClickCount,
-                                    int32_t aModifiers,
-                                    bool aIgnoreRootScrollFrame,
-                                    float aPressure,
-                                    unsigned short aInputSourceArg,
-                                    int32_t aPointerId,
-                                    int32_t aWidth,
-                                    int32_t aHeight,
-                                    int32_t aTiltX,
-                                    int32_t aTiltY,
-                                    bool aIsPrimary,
-                                    bool aIsSynthesized,
-                                    uint8_t aOptionalArgCount,
-                                    bool aToWindow,
-                                    bool* aPreventDefault);
+                                  bool aIsDOMEventSynthesized,
+                                  bool aIsWidgetEventSynthesized,
+                                  int32_t aButtons);
 
   NS_IMETHOD SendTouchEventCommon(const nsAString& aType,
                                   uint32_t* aIdentifiers,

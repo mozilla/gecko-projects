@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/cache/ManagerId.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "nsIPrincipal.h"
 #include "nsProxyRelease.h"
 #include "mozilla/RefPtr.h"
@@ -13,6 +14,8 @@
 namespace mozilla {
 namespace dom {
 namespace cache {
+
+using mozilla::dom::quota::QuotaManager;
 
 // static
 nsresult
@@ -25,9 +28,9 @@ ManagerId::Create(nsIPrincipal* aPrincipal, ManagerId** aManagerIdOut)
   // order to interpret calls from QM correctly.
   nsCString quotaOrigin;
   nsresult rv = QuotaManager::GetInfoFromPrincipal(aPrincipal,
-                                                   nullptr,   //group
-                                                   &quotaOrigin,
-                                                   nullptr);  // is app
+                                                   nullptr,   // suffix
+                                                   nullptr,   // group
+                                                   &quotaOrigin);
   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 
   RefPtr<ManagerId> ref = new ManagerId(aPrincipal, quotaOrigin);
@@ -48,7 +51,7 @@ ManagerId::ManagerId(nsIPrincipal* aPrincipal, const nsACString& aQuotaOrigin)
     : mPrincipal(aPrincipal)
     , mQuotaOrigin(aQuotaOrigin)
 {
-  MOZ_ASSERT(mPrincipal);
+  MOZ_DIAGNOSTIC_ASSERT(mPrincipal);
 }
 
 ManagerId::~ManagerId()
@@ -62,7 +65,8 @@ ManagerId::~ManagerId()
 
   // The PBackground worker thread shouldn't be running after the main thread
   // is stopped.  So main thread is guaranteed to exist here.
-  NS_ReleaseOnMainThread(mPrincipal.forget());
+  NS_ReleaseOnMainThreadSystemGroup(
+    "ManagerId::mPrincipal", mPrincipal.forget());
 }
 
 } // namespace cache

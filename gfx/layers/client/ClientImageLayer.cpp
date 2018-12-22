@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -12,7 +13,6 @@
 #include "mozilla/layers/ImageClient.h"  // for ImageClient, etc
 #include "mozilla/layers/LayersMessages.h"  // for ImageLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -60,9 +60,24 @@ protected:
     DestroyBackBuffer();
   }
 
+  virtual bool SupportsAsyncUpdate() override
+  {
+    if (GetImageClientType() == CompositableType::IMAGE_BRIDGE) {
+      return true;
+    }
+    return false;
+  }
+
+  virtual void HandleMemoryPressure() override
+  {
+    if (mImageClient) {
+      mImageClient->HandleMemoryPressure();
+    }
+  }
+
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
-    aAttrs = ImageLayerAttributes(mFilter, mScaleToSize, mScaleMode);
+    aAttrs = ImageLayerAttributes(mSamplingFilter, mScaleToSize, mScaleMode);
   }
 
   virtual Layer* AsLayer() override { return this; }
@@ -71,7 +86,6 @@ protected:
   virtual void Disconnect() override
   {
     DestroyBackBuffer();
-    ClientLayer::Disconnect();
   }
 
   void DestroyBackBuffer()
@@ -132,9 +146,6 @@ ClientImageLayer::RenderLayer()
       return;
     }
     TextureFlags flags = TextureFlags::DEFAULT;
-    if (mDisallowBigImage) {
-      flags |= TextureFlags::DISALLOW_BIGIMAGE;
-    }
     mImageClient = ImageClient::CreateImageClient(type,
                                                   ClientManager()->AsShadowForwarder(),
                                                   flags);

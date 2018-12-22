@@ -9,18 +9,23 @@
 #if defined(XP_WIN)
 #include "prinrval.h"
 #include "prenv.h"
+#include "nsExceptionHandler.h"
 #include "nsIMemoryReporter.h"
 #include "nsMemoryPressure.h"
+#include "nsPrintfCString.h"
 #endif
 
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIRunnable.h"
 #include "nsISupports.h"
+#include "nsITimer.h"
 #include "nsThreadUtils.h"
+#include "nsXULAppAPI.h"
 
-#include "mozilla/Preferences.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/Services.h"
+#include "mozilla/Unused.h"
 
 #if defined(XP_WIN)
 #   include "nsWindowsDllInterceptor.h"
@@ -37,101 +42,31 @@ namespace {
 
 #if defined(XP_WIN)
 
-// We don't want our diagnostic functions to call malloc, because that could
-// call VirtualAlloc, and we'd end up back in here!  So here are a few simple
-// debugging macros (modeled on jemalloc's), which hopefully won't allocate.
-
-// #define LOGGING_ENABLED
-
-#ifdef LOGGING_ENABLED
-
-#define LOG(msg)       \
-  do {                 \
-    safe_write(msg);   \
-    safe_write("\n");  \
-  } while(0)
-
-#define LOG2(m1, m2)   \
-  do {                 \
-    safe_write(m1);    \
-    safe_write(m2);    \
-    safe_write("\n");  \
-  } while(0)
-
-#define LOG3(m1, m2, m3) \
-  do {                   \
-    safe_write(m1);      \
-    safe_write(m2);      \
-    safe_write(m3);      \
-    safe_write("\n");    \
-  } while(0)
-
-#define LOG4(m1, m2, m3, m4) \
-  do {                       \
-    safe_write(m1);          \
-    safe_write(m2);          \
-    safe_write(m3);          \
-    safe_write(m4);          \
-    safe_write("\n");        \
-  } while(0)
-
+// Fire a low-memory notification if we have less than this many bytes of
+// virtual address space available.
+#if defined(HAVE_64BIT_BUILD)
+static const size_t kLowVirtualMemoryThreshold = 0;
 #else
-
-#define LOG(msg)
-#define LOG2(m1, m2)
-#define LOG3(m1, m2, m3)
-#define LOG4(m1, m2, m3, m4)
-
+static const size_t kLowVirtualMemoryThreshold = 256 * 1024 * 1024;
 #endif
 
-void
-safe_write(const char* aStr)
-{
-  // Well, puts isn't exactly "safe", but at least it doesn't call malloc...
-  fputs(aStr, stdout);
-}
+// Fire a low-memory notification if we have less than this many bytes of commit
+// space (physical memory plus page file) left.
+static const size_t kLowCommitSpaceThreshold = 256 * 1024 * 1024;
 
-void
-safe_write(uint64_t aNum)
-{
-  // 2^64 is 20 decimal digits.
-  const unsigned int max_len = 21;
-  char buf[max_len];
-  buf[max_len - 1] = '\0';
+// Fire a low-memory notification if we have less than this many bytes of
+// physical memory available on the whole machine.
+static const size_t kLowPhysicalMemoryThreshold = 0;
 
-  uint32_t i;
-  for (i = max_len - 2; i < max_len && aNum > 0; i--) {
-    buf[i] = "0123456789"[aNum % 10];
-    aNum /= 10;
-  }
+// Don't fire a low-memory notification because of low available physical
+// memory or low commit space more often than this interval.
+static const uint32_t kLowMemoryNotificationIntervalMS = 10000;
 
-  safe_write(&buf[i + 1]);
-}
+Atomic<uint32_t, MemoryOrdering::Relaxed> sNumLowVirtualMemEvents;
+Atomic<uint32_t, MemoryOrdering::Relaxed> sNumLowCommitSpaceEvents;
+Atomic<uint32_t, MemoryOrdering::Relaxed> sNumLowPhysicalMemEvents;
 
-#ifdef DEBUG
-#define DEBUG_WARN_IF_FALSE(cond, msg)          \
-  do {                                          \
-    if (!(cond)) {                              \
-      safe_write(__FILE__);                     \
-      safe_write(":");                          \
-      safe_write(__LINE__);                     \
-      safe_write(" ");                          \
-      safe_write(msg);                          \
-      safe_write("\n");                         \
-    }                                           \
-  } while(0)
-#else
-#define DEBUG_WARN_IF_FALSE(cond, msg)
-#endif
-
-uint32_t sLowVirtualMemoryThreshold = 0;
-uint32_t sLowCommitSpaceThreshold = 0;
-uint32_t sLowPhysicalMemoryThreshold = 0;
-uint32_t sLowMemoryNotificationIntervalMS = 0;
-
-Atomic<uint32_t> sNumLowVirtualMemEvents;
-Atomic<uint32_t> sNumLowCommitSpaceEvents;
-Atomic<uint32_t> sNumLowPhysicalMemEvents;
+#if !defined(HAVE_64BIT_BUILD)
 
 WindowsDllInterceptor sKernel32Intercept;
 WindowsDllInterceptor sGdi32Intercept;
@@ -144,7 +79,7 @@ bool sHooksActive = false;
 
 // Alas, we'd like to use mozilla::TimeStamp, but we can't, because it acquires
 // a lock!
-volatile bool sHasScheduledOneLowMemoryNotification = false;
+volatile bool sUnderMemoryPressure = false;
 volatile PRIntervalTime sLastLowMemoryNotificationTime;
 
 // These are function pointers to the functions we wrap in Init().
@@ -161,21 +96,26 @@ HBITMAP(WINAPI* sCreateDIBSectionOrig)(HDC aDC, const BITMAPINFO* aBitmapInfo,
                                        HANDLE aSection, DWORD aOffset);
 
 /**
- * Fire a memory pressure event if it's been long enough since the last one we
+ * Fire a memory pressure event if we were not under memory pressure yet, or
+ * fire an ongoing one if it's been long enough since the last one we
  * fired.
  */
 bool
 MaybeScheduleMemoryPressureEvent()
 {
+  MemoryPressureState state = MemPressure_New;
+  PRIntervalTime now = PR_IntervalNow();
+
   // If this interval rolls over, we may fire an extra memory pressure
   // event, but that's not a big deal.
-  PRIntervalTime interval = PR_IntervalNow() - sLastLowMemoryNotificationTime;
-  if (sHasScheduledOneLowMemoryNotification &&
-      PR_IntervalToMilliseconds(interval) < sLowMemoryNotificationIntervalMS) {
+  PRIntervalTime interval = now - sLastLowMemoryNotificationTime;
+  if (sUnderMemoryPressure) {
+    if (PR_IntervalToMilliseconds(interval) <
+        kLowMemoryNotificationIntervalMS) {
+      return false;
+    }
 
-    LOG("Not scheduling low physical memory notification, "
-        "because not enough time has elapsed since last one.");
-    return false;
+    state = MemPressure_Ongoing;
   }
 
   // There's a bit of a race condition here, since an interval may be a
@@ -184,12 +124,26 @@ MaybeScheduleMemoryPressureEvent()
   // experiencing memory pressure and firing notifications, so the worst
   // thing that can happen is that we fire two notifications when we
   // should have fired only one.
-  sHasScheduledOneLowMemoryNotification = true;
-  sLastLowMemoryNotificationTime = PR_IntervalNow();
+  sUnderMemoryPressure = true;
+  sLastLowMemoryNotificationTime = now;
 
-  LOG("Scheduling memory pressure notification.");
-  NS_DispatchEventualMemoryPressure(MemPressure_New);
+  NS_DispatchEventualMemoryPressure(state);
   return true;
+}
+
+static bool
+CheckLowMemory(DWORDLONG available, size_t threshold,
+               Atomic<uint32_t, MemoryOrdering::Relaxed>& counter)
+{
+  if (available < threshold) {
+    if (MaybeScheduleMemoryPressureEvent()) {
+      counter++;
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 void
@@ -203,28 +157,16 @@ CheckMemAvailable()
   stat.dwLength = sizeof(stat);
   bool success = GlobalMemoryStatusEx(&stat);
 
-  DEBUG_WARN_IF_FALSE(success, "GlobalMemoryStatusEx failed.");
-
   if (success) {
-    // sLowVirtualMemoryThreshold is in MB, but ullAvailVirtual is in bytes.
-    if (stat.ullAvailVirtual < sLowVirtualMemoryThreshold * 1024 * 1024) {
-      // If we're running low on virtual memory, unconditionally schedule the
-      // notification.  We'll probably crash if we run out of virtual memory,
-      // so don't worry about firing this notification too often.
-      LOG("Detected low virtual memory.");
-      ++sNumLowVirtualMemEvents;
-      NS_DispatchEventualMemoryPressure(MemPressure_New);
-    } else if (stat.ullAvailPageFile < sLowCommitSpaceThreshold * 1024 * 1024) {
-      LOG("Detected low available page file space.");
-      if (MaybeScheduleMemoryPressureEvent()) {
-        ++sNumLowCommitSpaceEvents;
-      }
-    } else if (stat.ullAvailPhys < sLowPhysicalMemoryThreshold * 1024 * 1024) {
-      LOG("Detected low physical memory.");
-      if (MaybeScheduleMemoryPressureEvent()) {
-        ++sNumLowPhysicalMemEvents;
-      }
-    }
+    bool lowMemory = CheckLowMemory(stat.ullAvailVirtual,
+                                    kLowVirtualMemoryThreshold,
+                                    sNumLowVirtualMemEvents);
+    lowMemory |= CheckLowMemory(stat.ullAvailPageFile, kLowCommitSpaceThreshold,
+                                sNumLowCommitSpaceEvents);
+    lowMemory |= CheckLowMemory(stat.ullAvailPhys, kLowPhysicalMemoryThreshold,
+                                sNumLowPhysicalMemEvents);
+
+    sUnderMemoryPressure = lowMemory;
   }
 }
 
@@ -250,9 +192,9 @@ VirtualAllocHook(LPVOID aAddress, SIZE_T aSize,
   // Don't call CheckMemAvailable for MEM_RESERVE if we're not tracking low
   // virtual memory.  Similarly, don't call CheckMemAvailable for MEM_COMMIT if
   // we're not tracking low physical memory.
-  if ((sLowVirtualMemoryThreshold != 0 && aAllocationType & MEM_RESERVE) ||
-      (sLowPhysicalMemoryThreshold != 0 && aAllocationType & MEM_COMMIT)) {
-    LOG3("VirtualAllocHook(size=", aSize, ")");
+  if ((kLowVirtualMemoryThreshold != 0 && aAllocationType & MEM_RESERVE) ||
+      ((kLowCommitSpaceThreshold != 0 || kLowPhysicalMemoryThreshold != 0) &&
+       aAllocationType & MEM_COMMIT)) {
     CheckMemAvailable();
   }
 
@@ -269,7 +211,6 @@ MapViewOfFileHook(HANDLE aFileMappingObject,
   LPVOID result = sMapViewOfFileOrig(aFileMappingObject, aDesiredAccess,
                                      aFileOffsetHigh, aFileOffsetLow,
                                      aNumBytesToMap);
-  LOG("MapViewOfFileHook");
   CheckMemAvailable();
   return result;
 }
@@ -309,7 +250,6 @@ CreateDIBSectionHook(HDC aDC,
     // If we're allocating more than 1MB, check how much memory is left after
     // the allocation.
     if (size > 1024 * 1024 * 8) {
-      LOG3("CreateDIBSectionHook: Large allocation (size=", size, ")");
       doCheck = true;
     }
   }
@@ -324,10 +264,202 @@ CreateDIBSectionHook(HDC aDC,
   return result;
 }
 
+#else
+
+class nsAvailableMemoryWatcher final : public nsIObserver,
+                                       public nsITimerCallback
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+  NS_DECL_NSITIMERCALLBACK
+
+  nsresult Init();
+
+private:
+  // Poll the amount of free memory at this rate.
+  static const uint32_t kPollingIntervalMS = 1000;
+
+  // Observer topics we subscribe to
+  static const char* const kObserverTopics[];
+
+  static bool IsVirtualMemoryLow(const MEMORYSTATUSEX& aStat);
+  static bool IsCommitSpaceLow(const MEMORYSTATUSEX& aStat);
+  static bool IsPhysicalMemoryLow(const MEMORYSTATUSEX& aStat);
+
+  ~nsAvailableMemoryWatcher() {};
+  void AdjustPollingInterval(const bool aLowMemory);
+  void SendMemoryPressureEvent();
+  void Shutdown();
+
+  nsCOMPtr<nsITimer> mTimer;
+  bool mUnderMemoryPressure;
+};
+
+const char* const nsAvailableMemoryWatcher::kObserverTopics[] = {
+  "quit-application",
+  "user-interaction-active",
+  "user-interaction-inactive",
+};
+
+NS_IMPL_ISUPPORTS(nsAvailableMemoryWatcher, nsIObserver, nsITimerCallback)
+
+nsresult
+nsAvailableMemoryWatcher::Init()
+{
+  mTimer = NS_NewTimer();
+
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
+  MOZ_ASSERT(observerService);
+
+  for (auto topic : kObserverTopics) {
+    nsresult rv = observerService->AddObserver(this, topic,
+                                               /* ownsWeak */ false);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  MOZ_TRY(mTimer->InitWithCallback(this, kPollingIntervalMS,
+                                   nsITimer::TYPE_REPEATING_SLACK));
+  return NS_OK;
+}
+
+void
+nsAvailableMemoryWatcher::Shutdown()
+{
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
+  MOZ_ASSERT(observerService);
+
+  for (auto topic : kObserverTopics) {
+    Unused << observerService->RemoveObserver(this, topic);
+  }
+
+  if (mTimer) {
+    mTimer->Cancel();
+    mTimer = nullptr;
+  }
+}
+
+/* static */ bool
+nsAvailableMemoryWatcher::IsVirtualMemoryLow(const MEMORYSTATUSEX& aStat)
+{
+  if ((kLowVirtualMemoryThreshold != 0) &&
+      (aStat.ullAvailVirtual < kLowVirtualMemoryThreshold)) {
+    sNumLowVirtualMemEvents++;
+    return true;
+  }
+
+  return false;
+}
+
+/* static */ bool
+nsAvailableMemoryWatcher::IsCommitSpaceLow(const MEMORYSTATUSEX& aStat)
+{
+  if ((kLowCommitSpaceThreshold != 0) &&
+      (aStat.ullAvailPageFile < kLowCommitSpaceThreshold)) {
+    sNumLowCommitSpaceEvents++;
+    CrashReporter::AnnotateCrashReport(
+      NS_LITERAL_CSTRING("LowCommitSpaceEvents"),
+      nsPrintfCString("%" PRIu32, uint32_t(sNumLowCommitSpaceEvents)));
+    return true;
+  }
+
+  return false;
+}
+
+/* static */ bool
+nsAvailableMemoryWatcher::IsPhysicalMemoryLow(const MEMORYSTATUSEX& aStat)
+{
+  if ((kLowPhysicalMemoryThreshold != 0) &&
+      (aStat.ullAvailPhys < kLowPhysicalMemoryThreshold)) {
+    sNumLowPhysicalMemEvents++;
+    return true;
+  }
+
+  return false;
+}
+
+void
+nsAvailableMemoryWatcher::SendMemoryPressureEvent()
+{
+    MemoryPressureState state = mUnderMemoryPressure ? MemPressure_Ongoing
+                                                     : MemPressure_New;
+    NS_DispatchEventualMemoryPressure(state);
+}
+
+void
+nsAvailableMemoryWatcher::AdjustPollingInterval(const bool aLowMemory)
+{
+  if (aLowMemory) {
+    // We entered a low-memory state, wait for a longer interval before polling
+    // again as there's no point in rapidly sending further notifications.
+    mTimer->SetDelay(kLowMemoryNotificationIntervalMS);
+  } else if (mUnderMemoryPressure) {
+    // We were under memory pressure but we're not anymore, resume polling at
+    // a faster pace.
+    mTimer->SetDelay(kPollingIntervalMS);
+  }
+}
+
+// Timer callback, polls memory stats to detect low-memory conditions. This
+// will send memory-pressure events if memory is running low and adjust the
+// polling interval accordingly.
+NS_IMETHODIMP
+nsAvailableMemoryWatcher::Notify(nsITimer* aTimer)
+{
+  MEMORYSTATUSEX stat;
+  stat.dwLength = sizeof(stat);
+  bool success = GlobalMemoryStatusEx(&stat);
+
+  if (success) {
+    bool lowMemory =
+      IsVirtualMemoryLow(stat) ||
+      IsCommitSpaceLow(stat) ||
+      IsPhysicalMemoryLow(stat);
+
+    if (lowMemory) {
+      SendMemoryPressureEvent();
+    }
+
+    AdjustPollingInterval(lowMemory);
+    mUnderMemoryPressure = lowMemory;
+  }
+
+  return NS_OK;
+}
+
+// Observer service callback, used to stop the polling timer when the user
+// stops interacting with Firefox and resuming it when they interact again.
+// Also used to shut down the service if the application is quitting.
+NS_IMETHODIMP
+nsAvailableMemoryWatcher::Observe(nsISupports* aSubject, const char* aTopic,
+                                  const char16_t* aData)
+{
+  if (strcmp(aTopic, "quit-application") == 0) {
+    Shutdown();
+  } else if (strcmp(aTopic, "user-interaction-inactive") == 0) {
+    mTimer->Cancel();
+  } else if (strcmp(aTopic, "user-interaction-active") == 0) {
+    mTimer->InitWithCallback(this, kPollingIntervalMS,
+                             nsITimer::TYPE_REPEATING_SLACK);
+  } else {
+    MOZ_ASSERT_UNREACHABLE("Unknown topic");
+  }
+
+  return NS_OK;
+}
+
+#endif // !defined(HAVE_64BIT_BUILD)
+
 static int64_t
 LowMemoryEventsVirtualDistinguishedAmount()
 {
   return sNumLowVirtualMemEvents;
+}
+
+static int64_t
+LowMemoryEventsCommitSpaceDistinguishedAmount()
+{
+  return sNumLowCommitSpaceEvents;
 }
 
 static int64_t
@@ -344,34 +476,27 @@ public:
   NS_DECL_ISUPPORTS
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize)
+                            nsISupports* aData, bool aAnonymize) override
   {
-    nsresult rv;
-
-    // We only do virtual-memory tracking on 32-bit builds.
-    if (sizeof(void*) == 4) {
-      rv = MOZ_COLLECT_REPORT(
-        "low-memory-events/virtual", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
-        LowMemoryEventsVirtualDistinguishedAmount(),
+    MOZ_COLLECT_REPORT(
+      "low-memory-events/virtual", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
+      LowMemoryEventsVirtualDistinguishedAmount(),
 "Number of low-virtual-memory events fired since startup. We fire such an "
 "event if we notice there is less than memory.low_virtual_mem_threshold_mb of "
 "virtual address space available (if zero, this behavior is disabled). The "
 "process will probably crash if it runs out of virtual address space, so "
 "this event is dire.");
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
 
-    rv = MOZ_COLLECT_REPORT(
-      "low-commit-space-events", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
-      sNumLowCommitSpaceEvents,
+    MOZ_COLLECT_REPORT(
+      "low-memory-events/commit-space", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
+      LowMemoryEventsCommitSpaceDistinguishedAmount(),
 "Number of low-commit-space events fired since startup. We fire such an "
 "event if we notice there is less than memory.low_commit_space_threshold_mb of "
 "commit space available (if zero, this behavior is disabled). Windows will "
 "likely kill the process if it runs out of commit space, so this event is "
 "dire.");
-    NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "low-memory-events/physical", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
       LowMemoryEventsPhysicalDistinguishedAmount(),
 "Number of low-physical-memory events fired since startup. We fire such an "
@@ -379,7 +504,6 @@ public:
 "of physical memory available (if zero, this behavior is disabled).  The "
 "machine will start to page if it runs out of physical memory.  This may "
 "cause it to run slowly, but it shouldn't cause it to crash.");
-    NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
   }
@@ -431,14 +555,9 @@ public:
   NS_DECL_NSIOBSERVER
 
   void Init();
-
-private:
-  static bool sFreeDirtyPages;
 };
 
 NS_IMPL_ISUPPORTS(nsMemoryPressureWatcher, nsIObserver)
-
-bool nsMemoryPressureWatcher::sFreeDirtyPages = false;
 
 /**
  * Initialize and subscribe to the memory-pressure events. We subscribe to the
@@ -453,9 +572,6 @@ nsMemoryPressureWatcher::Init()
   if (os) {
     os->AddObserver(this, "memory-pressure", /* ownsWeak */ false);
   }
-
-  Preferences::AddBoolVarCache(&sFreeDirtyPages, "memory.free_dirty_pages",
-                               false);
 }
 
 /**
@@ -468,11 +584,9 @@ nsMemoryPressureWatcher::Observe(nsISupports* aSubject, const char* aTopic,
 {
   MOZ_ASSERT(!strcmp(aTopic, "memory-pressure"), "Unknown topic");
 
-  if (sFreeDirtyPages) {
-    nsCOMPtr<nsIRunnable> runnable = new nsJemallocFreeDirtyPagesRunnable();
+  nsCOMPtr<nsIRunnable> runnable = new nsJemallocFreeDirtyPagesRunnable();
 
-    NS_DispatchToMainThread(runnable);
-  }
+  NS_DispatchToMainThread(runnable);
 
   return NS_OK;
 }
@@ -485,25 +599,9 @@ namespace AvailableMemoryTracker {
 void
 Activate()
 {
-#if defined(_M_IX86) && defined(XP_WIN)
+#if defined(XP_WIN) && !defined(HAVE_64BIT_BUILD)
   MOZ_ASSERT(sInitialized);
   MOZ_ASSERT(!sHooksActive);
-
-  // On 64-bit systems, hardcode sLowVirtualMemoryThreshold to 0 -- we assume
-  // we're not going to run out of virtual memory!
-  if (sizeof(void*) > 4) {
-    sLowVirtualMemoryThreshold = 0;
-  } else {
-    Preferences::AddUintVarCache(&sLowVirtualMemoryThreshold,
-                                 "memory.low_virtual_mem_threshold_mb", 128);
-  }
-
-  Preferences::AddUintVarCache(&sLowPhysicalMemoryThreshold,
-                               "memory.low_physical_memory_threshold_mb", 0);
-  Preferences::AddUintVarCache(&sLowCommitSpaceThreshold,
-                               "memory.low_commit_space_threshold_mb", 128);
-  Preferences::AddUintVarCache(&sLowMemoryNotificationIntervalMS,
-                               "memory.low_memory_notification_interval_ms", 10000);
 
   RegisterStrongMemoryReporter(new LowEventsReporter());
   RegisterLowMemoryEventsVirtualDistinguishedAmount(
@@ -511,11 +609,21 @@ Activate()
   RegisterLowMemoryEventsPhysicalDistinguishedAmount(
     LowMemoryEventsPhysicalDistinguishedAmount);
   sHooksActive = true;
-#endif
+#endif // defined(XP_WIN) && !defined(HAVE_64BIT_BUILD)
 
-  // This object is held alive by the observer service.
+  // The watchers are held alive by the observer service.
   RefPtr<nsMemoryPressureWatcher> watcher = new nsMemoryPressureWatcher();
   watcher->Init();
+
+#if defined(XP_WIN) && defined(HAVE_64BIT_BUILD)
+  if (XRE_IsParentProcess()) {
+    RefPtr<nsAvailableMemoryWatcher> poller = new nsAvailableMemoryWatcher();
+
+    if (NS_FAILED(poller->Init())) {
+      NS_WARNING("Could not start the available memory watcher");
+    }
+  }
+#endif // defined(XP_WIN) && defined(HAVE_64BIT_BUILD)
 }
 
 void
@@ -530,7 +638,7 @@ Init()
   // process, because we aren't going to run out of virtual memory, and the
   // system is likely to have a fair bit of physical memory.
 
-#if defined(_M_IX86) && defined(XP_WIN)
+#if defined(XP_WIN) && !defined(HAVE_64BIT_BUILD)
   // Don't register the hooks if we're a build instrumented for PGO: If we're
   // an instrumented build, the compiler adds function calls all over the place
   // which may call VirtualAlloc; this makes it hard to prevent
@@ -551,7 +659,7 @@ Init()
   }
 
   sInitialized = true;
-#endif
+#endif // defined(XP_WIN) && !defined(HAVE_64BIT_BUILD)
 }
 
 } // namespace AvailableMemoryTracker

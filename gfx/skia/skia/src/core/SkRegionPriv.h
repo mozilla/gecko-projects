@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
@@ -11,10 +10,16 @@
 #define SkRegionPriv_DEFINED
 
 #include "SkRegion.h"
+
 #include "SkAtomics.h"
+#include "SkMalloc.h"
+
+inline bool SkRegionValueIsSentinel(int32_t value) {
+    return value == (int32_t)SkRegion::kRunTypeSentinel;
+}
 
 #define assert_sentinel(value, isSentinel) \
-    SkASSERT(((value) == SkRegion::kRunTypeSentinel) == isSentinel)
+    SkASSERT(SkRegionValueIsSentinel(value) == isSentinel)
 
 //SkDEBUGCODE(extern int32_t gRgnAllocCounter;)
 
@@ -63,10 +68,12 @@ public:
         //SkDEBUGCODE(sk_atomic_inc(&gRgnAllocCounter);)
         //SkDEBUGF(("************** gRgnAllocCounter::alloc %d\n", gRgnAllocCounter));
 
-        SkASSERT(count >= SkRegion::kRectRegionRuns);
+        if (count < SkRegion::kRectRegionRuns) {
+            return nullptr;
+        }
 
         const int64_t size = sk_64_mul(count, sizeof(RunType)) + sizeof(RunHead);
-        if (count < 0 || !sk_64_isS32(size)) { SK_CRASH(); }
+        if (count < 0 || !sk_64_isS32(size)) { SK_ABORT("Invalid Size"); }
 
         RunHead* head = (RunHead*)sk_malloc_throw(size);
         head->fRefCnt = 1;
@@ -78,10 +85,14 @@ public:
     }
 
     static RunHead* Alloc(int count, int yspancount, int intervalCount) {
-        SkASSERT(yspancount > 0);
-        SkASSERT(intervalCount > 1);
+        if (yspancount <= 0 || intervalCount <= 1) {
+            return nullptr;
+        }
 
         RunHead* head = Alloc(count);
+        if (!head) {
+            return nullptr;
+        }
         head->fYSpanCount = yspancount;
         head->fIntervalCount = intervalCount;
         return head;
@@ -231,6 +242,16 @@ public:
 private:
     int32_t fYSpanCount;
     int32_t fIntervalCount;
+};
+
+#include <functional>
+
+class SkRegionPriv {
+public:
+    // Call the function with each span, in Y -> X ascending order.
+    // We pass a rect, but we will still ensure the span Y->X ordering, so often the height
+    // of the rect may be 1. It should never be empty.
+    static void VisitSpans(const SkRegion& rgn, const std::function<void(const SkIRect&)>&);
 };
 
 #endif

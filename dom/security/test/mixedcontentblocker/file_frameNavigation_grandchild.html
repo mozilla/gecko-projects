@@ -13,7 +13,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=840388
 
 <script>
   // For tests that require setTimeout, set the maximum polling time to 100 x 100ms = 10 seconds.
-  var MAX_COUNT = 100;
+  var MAX_COUNT = 50;
   var TIMEOUT_INTERVAL = 100;
   var counter = 0;
 
@@ -28,7 +28,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=840388
         loc = child.contentDocument.location;
       }
     } catch(e) {
-      if (e.message && e.message.indexOf("Permission denied to access property") == -1) {
+      if (e.message && !e.message.includes("Permission denied to access property")) {
         // We received an exception we didn't expect.
         throw e;
       }

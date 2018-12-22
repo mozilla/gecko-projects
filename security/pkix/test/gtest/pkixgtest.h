@@ -112,7 +112,7 @@ public:
                       Result::FATAL_ERROR_LIBRARY_FAILURE);
   }
 
-  Result IsChainValid(const DERArray&, Time) override
+  Result IsChainValid(const DERArray&, Time, const CertPolicyId&) override
   {
     ADD_FAILURE();
     return NotReached("IsChainValid should not be called",
@@ -171,6 +171,18 @@ public:
     return NotReached("CheckValidityIsAcceptable should not be called",
                       Result::FATAL_ERROR_LIBRARY_FAILURE);
   }
+
+  Result NetscapeStepUpMatchesServerAuth(Time, bool&) override
+  {
+    ADD_FAILURE();
+    return NotReached("NetscapeStepUpMatchesServerAuth should not be called",
+                      Result::FATAL_ERROR_LIBRARY_FAILURE);
+  }
+
+  virtual void NoteAuxiliaryExtension(AuxiliaryExtension, Input) override
+  {
+    ADD_FAILURE();
+  }
 };
 
 class DefaultCryptoTrustDomain : public EverythingFailsByDefaultTrustDomain
@@ -214,6 +226,16 @@ class DefaultCryptoTrustDomain : public EverythingFailsByDefaultTrustDomain
                                    override
   {
     return Success;
+  }
+
+  Result NetscapeStepUpMatchesServerAuth(Time, /*out*/ bool& matches) override
+  {
+    matches = true;
+    return Success;
+  }
+
+  void NoteAuxiliaryExtension(AuxiliaryExtension, Input) override
+  {
   }
 };
 

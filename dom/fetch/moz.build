@@ -1,13 +1,20 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM")
+
 EXPORTS.mozilla.dom += [
+    'BodyExtractor.h',
     'ChannelInfo.h',
     'Fetch.h',
     'FetchDriver.h',
+    'FetchIPCTypes.h',
+    'FetchObserver.h',
+    'FetchStreamReader.h',
     'FetchUtil.h',
     'Headers.h',
     'InternalHeaders.h',
@@ -18,9 +25,14 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    'BodyExtractor.cpp',
     'ChannelInfo.cpp',
     'Fetch.cpp',
+    'FetchConsumer.cpp',
     'FetchDriver.cpp',
+    'FetchObserver.cpp',
+    'FetchStream.cpp',
+    'FetchStreamReader.cpp',
     'FetchUtil.cpp',
     'Headers.cpp',
     'InternalHeaders.cpp',
@@ -32,10 +44,12 @@ UNIFIED_SOURCES += [
 
 IPDL_SOURCES += [
     'ChannelInfo.ipdlh',
+    'FetchTypes.ipdlh',
 ]
 
 LOCAL_INCLUDES += [
-    '../workers',
+    # For nsDOMSerializer
+    '/dom/base',
     # For HttpBaseChannel.h dependencies
     '/netwerk/base',
     # For nsDataHandler.h

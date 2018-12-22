@@ -8,18 +8,45 @@
 #include "mozilla/dom/ImageCapture.h"
 #include "mozilla/dom/ImageCaptureError.h"
 #include "mozilla/dom/ImageEncoder.h"
+#include "mozilla/dom/MediaStreamTrack.h"
 #include "mozilla/dom/VideoStreamTrack.h"
 #include "gfxUtils.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
 
+class CaptureTask::MediaStreamEventListener : public MediaStreamTrackListener
+{
+public:
+  explicit MediaStreamEventListener(CaptureTask* aCaptureTask)
+    : mCaptureTask(aCaptureTask) {};
+
+  // MediaStreamListener methods.
+  void NotifyEnded() override
+  {
+    if(!mCaptureTask->mImageGrabbedOrTrackEnd) {
+      mCaptureTask->PostTrackEndEvent();
+    }
+  }
+
+private:
+  CaptureTask* mCaptureTask;
+};
+
+CaptureTask::CaptureTask(dom::ImageCapture* aImageCapture)
+  : mImageCapture(aImageCapture)
+  , mEventListener(new MediaStreamEventListener(this))
+  , mImageGrabbedOrTrackEnd(false)
+  , mPrincipalChanged(false)
+{
+}
+
 nsresult
 CaptureTask::TaskComplete(already_AddRefed<dom::Blob> aBlob, nsresult aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  DetachStream();
+  DetachTrack();
 
   nsresult rv;
   RefPtr<dom::Blob> blob(aBlob);
@@ -48,54 +75,38 @@ CaptureTask::TaskComplete(already_AddRefed<dom::Blob> aBlob, nsresult aRv)
 }
 
 void
-CaptureTask::AttachStream()
+CaptureTask::AttachTrack()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
-
-  RefPtr<DOMMediaStream> domStream = track->GetStream();
-  domStream->AddPrincipalChangeObserver(this);
-
-  RefPtr<MediaStream> stream = domStream->GetPlaybackStream();
-  stream->AddListener(this);
+  dom::VideoStreamTrack* track = mImageCapture->GetVideoStreamTrack();
+  track->AddPrincipalChangeObserver(this);
+  track->AddListener(mEventListener.get());
+  track->AddDirectListener(this);
 }
 
 void
-CaptureTask::DetachStream()
+CaptureTask::DetachTrack()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<dom::VideoStreamTrack> track = mImageCapture->GetVideoStreamTrack();
-
-  RefPtr<DOMMediaStream> domStream = track->GetStream();
-  domStream->RemovePrincipalChangeObserver(this);
-
-  RefPtr<MediaStream> stream = domStream->GetPlaybackStream();
-  stream->RemoveListener(this);
+  dom::VideoStreamTrack* track = mImageCapture->GetVideoStreamTrack();
+  track->RemovePrincipalChangeObserver(this);
+  track->RemoveListener(mEventListener.get());
+  track->RemoveDirectListener(this);
 }
 
 void
-CaptureTask::PrincipalChanged(DOMMediaStream* aMediaStream)
+CaptureTask::PrincipalChanged(dom::MediaStreamTrack* aMediaStreamTrack)
 {
   MOZ_ASSERT(NS_IsMainThread());
   mPrincipalChanged = true;
 }
 
 void
-CaptureTask::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
-                                      StreamTime aTrackOffset,
-                                      uint32_t aTrackEvents,
-                                      const MediaSegment& aQueuedMedia,
-                                      MediaStream* aInputStream,
-                                      TrackID aInputTrackID)
+CaptureTask::SetCurrentFrames(const VideoSegment& aSegment)
 {
   if (mImageGrabbedOrTrackEnd) {
-    return;
-  }
-
-  if (aTrackEvents == MediaStreamListener::TRACK_EVENT_ENDED) {
-    PostTrackEndEvent();
     return;
   }
 
@@ -117,51 +128,42 @@ CaptureTask::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph, TrackID aID,
     RefPtr<CaptureTask> mTask;
   };
 
-  if (aQueuedMedia.GetType() == MediaSegment::VIDEO && mTrackID == aID) {
-    VideoSegment* video =
-      const_cast<VideoSegment*> (static_cast<const VideoSegment*>(&aQueuedMedia));
-    VideoSegment::ChunkIterator iter(*video);
-    while (!iter.IsEnded()) {
-      VideoChunk chunk = *iter;
-      // Extract the first valid video frame.
-      VideoFrame frame;
-      if (!chunk.IsNull()) {
-        RefPtr<layers::Image> image;
-        if (chunk.mFrame.GetForceBlack()) {
-          // Create a black image.
-          image = VideoFrame::CreateBlackImage(chunk.mFrame.GetIntrinsicSize());
-        } else {
-          image = chunk.mFrame.GetImage();
-        }
-        MOZ_ASSERT(image);
-        mImageGrabbedOrTrackEnd = true;
+  for (VideoSegment::ConstChunkIterator iter(aSegment);
+       !iter.IsEnded(); iter.Next()) {
+    VideoChunk chunk = *iter;
 
-        // Encode image.
-        nsresult rv;
-        nsAutoString type(NS_LITERAL_STRING("image/jpeg"));
-        nsAutoString options;
-        rv = dom::ImageEncoder::ExtractDataFromLayersImageAsync(
-                                  type,
-                                  options,
-                                  false,
-                                  image,
-                                  new EncodeComplete(this));
-        if (NS_FAILED(rv)) {
-          PostTrackEndEvent();
-        }
-        return;
+    // Extract the first valid video frame.
+    VideoFrame frame;
+    if (!chunk.IsNull()) {
+      RefPtr<layers::Image> image;
+      if (chunk.mFrame.GetForceBlack()) {
+        // Create a black image.
+        image = VideoFrame::CreateBlackImage(chunk.mFrame.GetIntrinsicSize());
+      } else {
+        image = chunk.mFrame.GetImage();
       }
-      iter.Next();
-    }
-  }
-}
+      if (!image) {
+        MOZ_ASSERT(image);
+        continue;
+      }
+      mImageGrabbedOrTrackEnd = true;
 
-void
-CaptureTask::NotifyEvent(MediaStreamGraph* aGraph, MediaStreamGraphEvent aEvent)
-{
-  if (((aEvent == EVENT_FINISHED) || (aEvent == EVENT_REMOVED)) &&
-      !mImageGrabbedOrTrackEnd) {
-    PostTrackEndEvent();
+      // Encode image.
+      nsresult rv;
+      nsAutoString type(NS_LITERAL_STRING("image/jpeg"));
+      nsAutoString options;
+      rv = dom::ImageEncoder::ExtractDataFromLayersImageAsync(
+                                type,
+                                options,
+                                false,
+                                image,
+                                false,
+                                new EncodeComplete(this));
+      if (NS_FAILED(rv)) {
+        PostTrackEndEvent();
+      }
+      return;
+    }
   }
 }
 
@@ -171,13 +173,16 @@ CaptureTask::PostTrackEndEvent()
   mImageGrabbedOrTrackEnd = true;
 
   // Got track end or finish event, stop the task.
-  class TrackEndRunnable : public nsRunnable
+  class TrackEndRunnable : public Runnable
   {
   public:
     explicit TrackEndRunnable(CaptureTask* aTask)
-      : mTask(aTask) {}
+      : mozilla::Runnable("TrackEndRunnable")
+      , mTask(aTask)
+    {
+    }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       mTask->TaskComplete(nullptr, NS_ERROR_FAILURE);
       mTask = nullptr;
@@ -189,7 +194,8 @@ CaptureTask::PostTrackEndEvent()
   };
 
   IC_LOG("Got MediaStream track removed or finished event.");
-  NS_DispatchToMainThread(new TrackEndRunnable(this));
+  nsCOMPtr<nsIRunnable> event = new TrackEndRunnable(this);
+  SystemGroup::Dispatch(TaskCategory::Other, event.forget());
 }
 
 } // namespace mozilla

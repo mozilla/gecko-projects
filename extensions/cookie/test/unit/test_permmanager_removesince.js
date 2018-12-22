@@ -15,7 +15,7 @@ function continue_test()
   do_run_generator(test_generator);
 }
 
-function do_run_test() {
+function* do_run_test() {
   // Set up a profile.
   let profile = do_get_profile();
 
@@ -57,13 +57,13 @@ function do_run_test() {
   pm.removeAllSince(since);
 
   // principal1 - the first one should remain.
-  do_check_eq(1, pm.testPermissionFromPrincipal(principal1, "test/remove-since"));
+  Assert.equal(1, pm.testPermissionFromPrincipal(principal1, "test/remove-since"));
   // but the second should have been removed.
-  do_check_eq(0, pm.testPermissionFromPrincipal(principal1, "test/remove-since-2"));
+  Assert.equal(0, pm.testPermissionFromPrincipal(principal1, "test/remove-since-2"));
 
   // principal2 - both should have been removed.
-  do_check_eq(0, pm.testPermissionFromPrincipal(principal2, "test/remove-since"));
-  do_check_eq(0, pm.testPermissionFromPrincipal(principal2, "test/remove-since-2"));
+  Assert.equal(0, pm.testPermissionFromPrincipal(principal2, "test/remove-since"));
+  Assert.equal(0, pm.testPermissionFromPrincipal(principal2, "test/remove-since-2"));
 
   do_finish_generator_test(test_generator);
 }

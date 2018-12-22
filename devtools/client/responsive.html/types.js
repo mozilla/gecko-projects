@@ -4,10 +4,48 @@
 
 "use strict";
 
-const { PropTypes } = require("devtools/client/shared/vendor/react");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const { createEnum } = require("devtools/client/shared/enum");
 
 // React PropTypes are used to describe the expected "shape" of various common
 // objects that get passed down as props to components.
+
+/* ENUMS */
+
+/**
+ * An enum containing the possible states for loadable things.
+ */
+exports.loadableState = createEnum([
+  "INITIALIZED",
+  "LOADING",
+  "LOADED",
+  "ERROR",
+]);
+
+/* GLOBAL */
+
+/**
+ * The location of the document displayed in the viewport(s).
+ */
+exports.location = PropTypes.string;
+
+/**
+ * Whether to reload the page automatically when certain actions occur.
+ */
+exports.reloadConditions = {
+
+  // Whether to reload when touch simulation is toggled
+  touchSimulation: PropTypes.bool,
+
+  // Whether to reload when user agent is changed
+  userAgent: PropTypes.bool,
+
+  // Loaded state of these conditions
+  state: PropTypes.oneOf(Object.keys(exports.loadableState)),
+
+};
+
+/* DEVICE */
 
 /**
  * A single device that can be displayed in the viewport.
@@ -32,8 +70,11 @@ const device = {
   // Whether or not it is a touch device
   touch: PropTypes.bool,
 
-  //  The operating system of the device
+  // The operating system of the device
   os: PropTypes.String,
+
+  // Whether or not the device is displayed in the device selector
+  displayed: PropTypes.bool,
 
 };
 
@@ -63,19 +104,49 @@ exports.devices = {
   // An array of watch devices
   watches: PropTypes.arrayOf(PropTypes.shape(device)),
 
+  // Whether or not the device modal is open
+  isModalOpen: PropTypes.bool,
+
+  // Viewport id that triggered the modal to open
+  modalOpenedFromViewport: PropTypes.number,
+
+  // Device list state, possible values are exported above in an enum
+  listState: PropTypes.oneOf(Object.keys(exports.loadableState)),
+
+};
+
+/* VIEWPORT */
+
+/**
+ * Network throttling state for a given viewport.
+ */
+exports.networkThrottling = {
+
+  // Whether or not network throttling is enabled
+  enabled: PropTypes.bool,
+
+  // Name of the selected throttling profile
+  profile: PropTypes.string,
+
 };
 
 /**
- * The location of the document displayed in the viewport(s).
+ * Device pixel ratio for a given viewport.
  */
-exports.location = PropTypes.string;
+const pixelRatio = exports.pixelRatio = {
+
+  // The device pixel ratio value
+  value: PropTypes.number,
+
+};
 
 /**
- * The progression of the screenshot
+ * Touch simulation state for a given viewport.
  */
-exports.screenshot = {
+exports.touchSimulation = {
 
-  isCapturing: PropTypes.bool.isRequired,
+  // Whether or not touch simulation is enabled
+  enabled: PropTypes.bool,
 
 };
 
@@ -85,15 +156,37 @@ exports.screenshot = {
 exports.viewport = {
 
   // The id of the viewport
-  id: PropTypes.number.isRequired,
+  id: PropTypes.number,
 
-  // The currently selected device applied to the viewport.
+  // The currently selected device applied to the viewport
   device: PropTypes.string,
+
+  // The currently selected device type applied to the viewport
+  deviceType: PropTypes.string,
 
   // The width of the viewport
   width: PropTypes.number,
 
   // The height of the viewport
   height: PropTypes.number,
+
+  // The device pixel ratio of the viewport
+  pixelRatio: PropTypes.shape(pixelRatio),
+
+  // The user context (container) ID for the viewport
+  // Defaults to 0 meaning the default context
+  userContextId: PropTypes.number,
+
+};
+
+/* ACTIONS IN PROGRESS */
+
+/**
+ * The progression of the screenshot.
+ */
+exports.screenshot = {
+
+  // Whether screenshot capturing is in progress
+  isCapturing: PropTypes.bool,
 
 };

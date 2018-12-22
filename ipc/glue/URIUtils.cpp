@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,27 +10,28 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/dom/BlobURL.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDebug.h"
 #include "nsID.h"
 #include "nsJARURI.h"
 #include "nsIIconURI.h"
-#include "nsHostObjectURI.h"
-#include "nsNullPrincipalURI.h"
+#include "NullPrincipalURI.h"
 #include "nsJSProtocolHandler.h"
 #include "nsNetCID.h"
 #include "nsSimpleNestedURI.h"
 #include "nsThreadUtils.h"
+#include "nsIURIMutator.h"
 
 using namespace mozilla::ipc;
 using mozilla::ArrayLength;
 
 namespace {
 
-NS_DEFINE_CID(kSimpleURICID, NS_SIMPLEURI_CID);
-NS_DEFINE_CID(kStandardURLCID, NS_STANDARDURL_CID);
-NS_DEFINE_CID(kJARURICID, NS_JARURI_CID);
-NS_DEFINE_CID(kIconURICID, NS_MOZICONURI_CID);
+NS_DEFINE_CID(kSimpleURIMutatorCID, NS_SIMPLEURIMUTATOR_CID);
+NS_DEFINE_CID(kStandardURLMutatorCID, NS_STANDARDURLMUTATOR_CID);
+NS_DEFINE_CID(kJARURIMutatorCID, NS_JARURIMUTATOR_CID);
+NS_DEFINE_CID(kIconURIMutatorCID, NS_MOZICONURIMUTATOR_CID);
 
 } // namespace
 
@@ -74,54 +77,57 @@ DeserializeURI(const URIParams& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsCOMPtr<nsIIPCSerializableURI> serializable;
+  nsCOMPtr<nsIURIMutator> mutator;
 
   switch (aParams.type()) {
     case URIParams::TSimpleURIParams:
-      serializable = do_CreateInstance(kSimpleURICID);
+      mutator = do_CreateInstance(kSimpleURIMutatorCID);
       break;
 
     case URIParams::TStandardURLParams:
-      serializable = do_CreateInstance(kStandardURLCID);
+      mutator = do_CreateInstance(kStandardURLMutatorCID);
       break;
 
     case URIParams::TJARURIParams:
-      serializable = do_CreateInstance(kJARURICID);
+      mutator = do_CreateInstance(kJARURIMutatorCID);
       break;
 
     case URIParams::TJSURIParams:
-      serializable = new nsJSURI();
+      mutator = new nsJSURI::Mutator();
       break;
 
     case URIParams::TIconURIParams:
-      serializable = do_CreateInstance(kIconURICID);
+      mutator = do_CreateInstance(kIconURIMutatorCID);
       break;
 
     case URIParams::TNullPrincipalURIParams:
-      serializable = new nsNullPrincipalURI();
+      mutator = new NullPrincipalURI::Mutator();
       break;
 
     case URIParams::TSimpleNestedURIParams:
-      serializable = new nsSimpleNestedURI();
+      mutator = new net::nsSimpleNestedURI::Mutator();
       break;
 
     case URIParams::THostObjectURIParams:
-      serializable = new nsHostObjectURI();
+      mutator = new mozilla::dom::BlobURL::Mutator();
       break;
 
     default:
       MOZ_CRASH("Unknown params!");
   }
 
-  MOZ_ASSERT(serializable);
+  MOZ_ASSERT(mutator);
 
-  if (!serializable->Deserialize(aParams)) {
+  nsresult rv = mutator->Deserialize(aParams);
+  if (NS_FAILED(rv)) {
     MOZ_ASSERT(false, "Deserialize failed!");
     return nullptr;
   }
 
-  nsCOMPtr<nsIURI> uri = do_QueryInterface(serializable);
+  nsCOMPtr<nsIURI> uri;
+  DebugOnly<nsresult> rv2 = mutator->Finalize(getter_AddRefs(uri));
   MOZ_ASSERT(uri);
+  MOZ_ASSERT(NS_SUCCEEDED(rv2));
 
   return uri.forget();
 }

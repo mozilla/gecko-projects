@@ -2,13 +2,13 @@
 // Selects "open link in new container tab" from the context menu.
 
 function getReferrerTest(aTestNumber) {
-  let test = _referrerTests[aTestNumber];
-  if (test) {
+  let testCase = _referrerTests[aTestNumber];
+  if (testCase) {
     // We want all the referrer tests to fail!
-    test.result = "";
+    testCase.result = "";
   }
 
-  return test;
+  return testCase;
 }
 
 function startNewTabTestCase(aTestNumber) {
@@ -23,18 +23,24 @@ function startNewTabTestCase(aTestNumber) {
     });
 
     let menu = gTestWindow.document.getElementById("context-openlinkinusercontext-menu");
-    ok(menu && menu.firstChild, "The menu exists and it has a first child node.");
 
-    let menupopup = menu.firstChild;
-    is(menupopup.nodeType, Node.ELEMENT_NODE, "We have a menupopup.");
-    ok(menupopup.firstChild, "We have a first container entry.");
+    let menupopup = menu.menupopup;
+    menu.addEventListener("popupshown", function() {
+      is(menupopup.nodeType, Node.ELEMENT_NODE, "We have a menupopup.");
+      ok(menupopup.firstChild, "We have a first container entry.");
 
-    let firstContext = menupopup.firstChild;
-    is(firstContext.nodeType, Node.ELEMENT_NODE, "We have a first container entry.");
-    ok(firstContext.hasAttribute('usercontextid'), "We have a usercontextid value.");
+      let firstContext = menupopup.firstChild;
+      is(firstContext.nodeType, Node.ELEMENT_NODE, "We have a first container entry.");
+      ok(firstContext.hasAttribute("data-usercontextid"), "We have a usercontextid value.");
 
-    firstContext.doCommand();
-    aContextMenu.hidePopup();
+      aContextMenu.addEventListener("popuphidden", function() {
+        firstContext.doCommand();
+      }, {once: true});
+
+      aContextMenu.hidePopup();
+    }, {once: true});
+
+    menupopup.openPopup();
   });
 }
 
@@ -44,7 +50,7 @@ function test() {
   SpecialPowers.pushPrefEnv(
     {set: [["privacy.userContext.enabled", true]]},
     function() {
-      requestLongerTimeout(10);  // slowwww shutdown on e10s
+      requestLongerTimeout(10); // slowwww shutdown on e10s
       startReferrerTest(startNewTabTestCase);
     });
 }

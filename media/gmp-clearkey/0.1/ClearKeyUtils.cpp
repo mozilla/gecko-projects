@@ -14,42 +14,77 @@
  * limitations under the License.
  */
 
+#include "ClearKeyUtils.h"
+
 #include <algorithm>
+#include <assert.h>
+#include <stdlib.h>
+#include <cctype>
 #include <ctype.h>
+#include <memory.h>
+#include <sstream>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <vector>
 
-#include "ClearKeyUtils.h"
-#include "ClearKeyBase64.h"
 #include "ArrayUtils.h"
-#include <assert.h>
-#include <memory.h>
-#include "Endian.h"
+#include "BigEndian.h"
+#include "ClearKeyBase64.h"
+// This include is required in order for content_decryption_module to work
+// on Unix systems.
+#include "stddef.h"
+#include "content_decryption_module.h"
 #include "openaes/oaes_lib.h"
+#include "psshparser/PsshParser.h"
 
+using namespace cdm;
 using namespace std;
-
-#define FOURCC(a,b,c,d) ((a << 24) + (b << 16) + (c << 8) + d)
-
-// System ID identifying the cenc v2 pssh box format; specified at:
-// https://dvcs.w3.org/hg/html-media/raw-file/tip/encrypted-media/cenc-format.html
-const uint8_t kSystemID[] = {
-  0x10, 0x77, 0xef, 0xec, 0xc0, 0xb2, 0x4d, 0x02,
-  0xac, 0xe3, 0x3c, 0x1e, 0x52, 0xe2, 0xfb, 0x4b
-};
 
 void
 CK_Log(const char* aFmt, ...)
 {
+  FILE* out = stdout;
+
+  if (getenv("CLEARKEY_LOG_FILE")) {
+    out = fopen(getenv("CLEARKEY_LOG_FILE"), "a");
+  }
+
   va_list ap;
 
   va_start(ap, aFmt);
-  vprintf(aFmt, ap);
+  const size_t len = 1024;
+  char buf[len];
+  vsnprintf(buf, len, aFmt, ap);
   va_end(ap);
 
-  printf("\n");
-  fflush(stdout);
+  fprintf(out, "%s\n", buf);
+  fflush(out);
+
+  if (out != stdout) {
+    fclose(out);
+  }
+}
+
+static bool
+PrintableAsString(const uint8_t* aBytes, uint32_t aLength)
+{
+  return all_of(aBytes, aBytes + aLength, [] (uint8_t c) {
+    return isprint(c) == 1;
+  });
+}
+
+void
+CK_LogArray(const char* prepend,
+            const uint8_t* aData,
+            const uint32_t aDataSize)
+{
+  // If the data is valid ascii, use that. Otherwise print the hex
+  string data = PrintableAsString(aData, aDataSize) ?
+                string(aData, aData + aDataSize) :
+                ClearKeyUtils::ToHexString(aData, aDataSize);
+
+  CK_LOGD("%s%s", prepend, data.c_str());
 }
 
 static void
@@ -64,22 +99,22 @@ IncrementIV(vector<uint8_t>& aIV) {
 ClearKeyUtils::DecryptAES(const vector<uint8_t>& aKey,
                           vector<uint8_t>& aData, vector<uint8_t>& aIV)
 {
-  assert(aIV.size() == CLEARKEY_KEY_LEN);
-  assert(aKey.size() == CLEARKEY_KEY_LEN);
+  assert(aIV.size() == CENC_KEY_LEN);
+  assert(aKey.size() == CENC_KEY_LEN);
 
   OAES_CTX* aes = oaes_alloc();
   oaes_key_import_data(aes, &aKey[0], aKey.size());
   oaes_set_option(aes, OAES_OPTION_ECB, nullptr);
 
-  for (size_t i = 0; i < aData.size(); i += CLEARKEY_KEY_LEN) {
+  for (size_t i = 0; i < aData.size(); i += CENC_KEY_LEN) {
     size_t encLen;
-    oaes_encrypt(aes, &aIV[0], CLEARKEY_KEY_LEN, nullptr, &encLen);
+    oaes_encrypt(aes, &aIV[0], CENC_KEY_LEN, nullptr, &encLen);
 
     vector<uint8_t> enc(encLen);
-    oaes_encrypt(aes, &aIV[0], CLEARKEY_KEY_LEN, &enc[0], &encLen);
+    oaes_encrypt(aes, &aIV[0], CENC_KEY_LEN, &enc[0], &encLen);
 
-    assert(encLen >= 2 * OAES_BLOCK_SIZE + CLEARKEY_KEY_LEN);
-    size_t blockLen = min(aData.size() - i, CLEARKEY_KEY_LEN);
+    assert(encLen >= 2 * OAES_BLOCK_SIZE + CENC_KEY_LEN);
+    size_t blockLen = min(aData.size() - i, CENC_KEY_LEN);
     for (size_t j = 0; j < blockLen; j++) {
       aData[i + j] ^= enc[2 * OAES_BLOCK_SIZE + j];
     }
@@ -124,7 +159,9 @@ EncodeBase64Web(vector<uint8_t> aBinary, string& aEncoded)
     // Cast idx to size_t before using it as an array-index,
     // to pacify clang 'Wchar-subscripts' warning:
     size_t idx = static_cast<size_t>(out[i]);
-    assert(idx < MOZ_ARRAY_LENGTH(sAlphabet)); // out of bounds index for 'sAlphabet'
+
+    // out of bounds index for 'sAlphabet'
+    assert(idx < MOZ_ARRAY_LENGTH(sAlphabet));
     out[i] = sAlphabet[idx];
   }
 
@@ -132,67 +169,9 @@ EncodeBase64Web(vector<uint8_t> aBinary, string& aEncoded)
 }
 
 /* static */ void
-ClearKeyUtils::ParseCENCInitData(const uint8_t* aInitData,
-                                 uint32_t aInitDataSize,
-                                 vector<KeyId>& aOutKeyIds)
-{
-  using mozilla::BigEndian;
-
-  uint32_t size = 0;
-  for (uint32_t offset = 0; offset + sizeof(uint32_t) < aInitDataSize; offset += size) {
-    const uint8_t* data = aInitData + offset;
-    size = BigEndian::readUint32(data); data += sizeof(uint32_t);
-
-    CK_LOGD("Looking for pssh at offset %u", offset);
-
-    if (size + offset > aInitDataSize) {
-      CK_LOGE("Box size %u overflows init data buffer", size);
-      return;
-    }
-
-    if (size < 36) {
-      // Too small to be a cenc2 pssh box
-      continue;
-    }
-
-    uint32_t box = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    if (box != FOURCC('p','s','s','h')) {
-      CK_LOGE("ClearKey CDM passed non-pssh initData");
-      return;
-    }
-
-    uint32_t head = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    CK_LOGD("Got version %u pssh box, length %u", head & 0xff, size);
-
-    if ((head >> 24) != 1) {
-      // Ignore pssh boxes with wrong version
-      CK_LOGD("Ignoring pssh box with wrong version");
-      continue;
-    }
-
-    if (memcmp(kSystemID, data, sizeof(kSystemID))) {
-      // Ignore pssh boxes with wrong system ID
-      continue;
-    }
-    data += sizeof(kSystemID);
-
-    uint32_t kidCount = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    if (data + kidCount * CLEARKEY_KEY_LEN > aInitData + aInitDataSize) {
-      CK_LOGE("pssh key IDs overflow init data buffer");
-      return;
-    }
-
-    for (uint32_t i = 0; i < kidCount; i++) {
-      aOutKeyIds.push_back(KeyId(data, data + CLEARKEY_KEY_LEN));
-      data += CLEARKEY_KEY_LEN;
-    }
-  }
-}
-
-/* static */ void
 ClearKeyUtils::MakeKeyRequest(const vector<KeyId>& aKeyIDs,
                               string& aOutRequest,
-                              GMPSessionType aSessionType)
+                              SessionType aSessionType)
 {
   assert(aKeyIDs.size() && aOutRequest.empty());
 
@@ -257,6 +236,9 @@ SkipString(ParserContext& aCtx)
   for (uint8_t sym = GetNextSymbol(aCtx); sym; sym = GetNextSymbol(aCtx)) {
     if (sym == '\\') {
       sym = GetNextSymbol(aCtx);
+      if (!sym) {
+          return false;
+      }
     } else if (sym == '"') {
       return true;
     }
@@ -377,15 +359,6 @@ GetNextLabel(ParserContext& aCtx, string& aOutLabel)
 }
 
 static bool
-DecodeKey(string& aEncoded, Key& aOutDecoded)
-{
-  return
-    DecodeBase64KeyOrId(aEncoded, aOutDecoded) &&
-    // Key should be 128 bits long.
-    aOutDecoded.size() == CLEARKEY_KEY_LEN;
-}
-
-static bool
 ParseKeyObject(ParserContext& aCtx, KeyIdPair& aOutKey)
 {
   EXPECT_SYMBOL(aCtx, '{');
@@ -430,8 +403,8 @@ ParseKeyObject(ParserContext& aCtx, KeyIdPair& aOutKey)
 
   return !key.empty() &&
          !keyId.empty() &&
-         DecodeBase64KeyOrId(keyId, aOutKey.mKeyId) &&
-         DecodeKey(key, aOutKey.mKey) &&
+         DecodeBase64(keyId, aOutKey.mKeyId) &&
+         DecodeBase64(key, aOutKey.mKey) &&
          GetNextSymbol(aCtx) == '}';
 }
 
@@ -465,7 +438,7 @@ ParseKeys(ParserContext& aCtx, vector<KeyIdPair>& aOutKeys)
 /* static */ bool
 ClearKeyUtils::ParseJWK(const uint8_t* aKeyData, uint32_t aKeyDataSize,
                         vector<KeyIdPair>& aOutKeys,
-                        GMPSessionType aSessionType)
+                        SessionType aSessionType)
 {
   ParserContext ctx;
   ctx.mIter = aKeyData;
@@ -518,12 +491,12 @@ ParseKeyIds(ParserContext& aCtx, vector<KeyId>& aOutKeyIds)
   while (true) {
     string label;
     vector<uint8_t> keyId;
-    if (!GetNextLabel(aCtx, label) ||
-        !DecodeBase64KeyOrId(label, keyId)) {
+    if (!GetNextLabel(aCtx, label) || !DecodeBase64(label, keyId)) {
       return false;
     }
-    assert(!keyId.empty());
-    aOutKeyIds.push_back(keyId);
+    if (!keyId.empty() && keyId.size() <= kMaxKeyIdsLength) {
+      aOutKeyIds.push_back(keyId);
+    }
 
     uint8_t sym = PeekSymbol(aCtx);
     if (!sym || sym == ']') {
@@ -540,11 +513,8 @@ ParseKeyIds(ParserContext& aCtx, vector<KeyId>& aOutKeyIds)
 /* static */ bool
 ClearKeyUtils::ParseKeyIdsInitData(const uint8_t* aInitData,
                                    uint32_t aInitDataSize,
-                                   vector<KeyId>& aOutKeyIds,
-                                   string& aOutSessionType)
+                                   vector<KeyId>& aOutKeyIds)
 {
-  aOutSessionType = "temporary";
-
   ParserContext ctx;
   ctx.mIter = aInitData;
   ctx.mEnd = aInitData + aInitDataSize;
@@ -560,10 +530,10 @@ ClearKeyUtils::ParseKeyIdsInitData(const uint8_t* aInitData,
 
     if (label == "kids") {
       // Parse "kids" array.
-      if (!ParseKeyIds(ctx, aOutKeyIds)) return false;
-    } else if (label == "type") {
-      // Consume type string.
-      if (!GetNextLabel(ctx, aOutSessionType)) return false;
+      if (!ParseKeyIds(ctx, aOutKeyIds) ||
+          aOutKeyIds.empty()) {
+        return false;
+      }
     } else {
       SkipToken(ctx);
     }
@@ -584,15 +554,16 @@ ClearKeyUtils::ParseKeyIdsInitData(const uint8_t* aInitData,
 }
 
 /* static */ const char*
-ClearKeyUtils::SessionTypeToString(GMPSessionType aSessionType)
+ClearKeyUtils::SessionTypeToString(SessionType aSessionType)
 {
   switch (aSessionType) {
-    case kGMPTemporySession: return "temporary";
-    case kGMPPersistentSession: return "persistent";
-    default: {
-      assert(false); // Should not reach here.
-      return "invalid";
-    }
+  case SessionType::kTemporary: return "temporary";
+  case SessionType::kPersistentLicense: return "persistent-license";
+  default: {
+    // We don't support any other license types.
+    assert(false);
+    return "invalid";
+  }
   }
 }
 
@@ -612,9 +583,15 @@ ClearKeyUtils::IsValidSessionId(const char* aBuff, uint32_t aLength)
   return true;
 }
 
-GMPMutex* GMPCreateMutex() {
-  GMPMutex* mutex;
-  auto err = GetPlatform()->createmutex(&mutex);
-  assert(mutex);
-  return GMP_FAILED(err) ? nullptr : mutex;
+string
+ClearKeyUtils::ToHexString(const uint8_t * aBytes, uint32_t aLength)
+{
+  stringstream ss;
+  ss << std::showbase << std::uppercase << std::hex;
+  for (uint32_t i = 0; i < aLength; ++i) {
+    ss << std::hex << static_cast<uint32_t>(aBytes[i]);
+    ss << " ";
+  }
+
+  return ss.str();
 }

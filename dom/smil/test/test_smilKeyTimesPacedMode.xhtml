@@ -7,7 +7,7 @@
 <body>
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=555026">Mozilla Bug 555026</a>
 <p id="display"></p>
-<div id="content" style="display: none">
+<div id="content">
 <svg id="svg" xmlns="http://www.w3.org/2000/svg" width="120px" height="120px"
      onload="this.pauseAnimations()">
   <circle r="10" id="circle"/>
@@ -60,7 +60,7 @@ function testByAnimation() {
     is(gCircle.cx.animVal.value, 100,
        "Checking animVal with 'by' and keyTimes='" + curKeyTimes + "'");
 
-    anim.parentNode.removeChild(anim); // clean up
+    anim.remove(); // clean up
   }
 }
 
@@ -76,7 +76,7 @@ function testToAnimation() {
     is(gCircle.cx.animVal.value, 100,
        "Checking animVal with 'to' and keyTimes='" + curKeyTimes + "'");
 
-    anim.parentNode.removeChild(anim); // clean up
+    anim.remove(); // clean up
   }
 }
 
@@ -92,7 +92,7 @@ function testValuesAnimation() {
     is(gCircle.cx.animVal.value, 150,
        "Checking animVal with 'values' and keyTimes='" + curKeyTimes + "'");
 
-    anim.parentNode.removeChild(anim); // clean up
+    anim.remove(); // clean up
   }
 }
 
@@ -115,7 +115,7 @@ function createAnim() {
   return gCircle.appendChild(anim);
 }
 
-window.addEventListener("load", main, false);
+window.addEventListener("load", main);
 ]]>
 </script>
 </pre>

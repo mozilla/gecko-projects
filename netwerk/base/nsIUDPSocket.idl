@@ -57,6 +57,11 @@ interface nsIUDPSocket : nsISupports
                               in nsIPrincipal aPrincipal,
                               [optional] in boolean aAddressReuse);
 
+    [optional_argc] void init2(in AUTF8String aAddr,
+                               in long aPort,
+                               in nsIPrincipal aPrincipal,
+                               [optional] in boolean aAddressReuse);
+
     /**
      * initWithAddress
      *
@@ -266,6 +271,13 @@ interface nsIUDPSocket : nsISupports
      * The size of the receive buffer. Default depends on the OS.
      */
     [noscript] attribute long recvBufferSize;
+
+    /**
+     * sendBufferSize
+     *
+     * The size of the send buffer. Default depends on the OS.
+     */
+    [noscript] attribute long sendBufferSize;
 };
 
 /**

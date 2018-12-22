@@ -17,7 +17,11 @@ DevToolsUtils.reportingDisabled = true;
 var gPanel, gDebugger, gFrames, gSources, gPrefs, gOptions;
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: JS_URL,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
     gFrames = gDebugger.DebuggerView.StackFrames;
@@ -30,9 +34,8 @@ function test() {
     isnot(gOptions._pauseOnExceptionsItem.getAttribute("checked"), "true",
       "The pause-on-exceptions menu item should not be checked.");
 
-    waitForSourceShown(gPanel, JS_URL)
-      .then(checkInitialSource)
-      .then(enablePauseOnExceptions)
+    checkInitialSource();
+    enablePauseOnExceptions()
       .then(disableIgnoreCaughtExceptions)
       .then(testSetBreakpoint)
       .then(reloadPage)
@@ -40,7 +43,7 @@ function test() {
       .then(enableIgnoreCaughtExceptions)
       .then(disablePauseOnExceptions)
       .then(() => closeDebuggerAndFinish(gPanel))
-      .then(null, aError => {
+      .catch(aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
       });
   });
@@ -90,9 +93,7 @@ function testSetBreakpoint() {
   let sourceForm = getSourceForm(gSources, JS_URL);
   let source = gDebugger.gThreadClient.source(sourceForm);
 
-  source.setBreakpoint({ line: 3, column: 18 }, aResponse => {
-    ok(!aResponse.error,
-      "Should be able to set a breakpoint in a js file.");
+  source.setBreakpoint({ line: 3, column: 18 }).then(([aResponse]) => {
     ok(!aResponse.actualLocation,
       "Should be able to set a breakpoint on line 3 and column 18.");
 
@@ -173,7 +174,7 @@ function disablePauseOnExceptions() {
   return deferred.promise;
 }
 
-registerCleanupFunction(function() {
+registerCleanupFunction(function () {
   gPanel = null;
   gDebugger = null;
   gFrames = null;

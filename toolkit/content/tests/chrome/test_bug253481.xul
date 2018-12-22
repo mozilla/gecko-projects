@@ -35,7 +35,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=253481
 <textbox id="replacewithcommas" newlines="replacewithcommas"/>
 <textbox id="stripsurroundingwhitespace" newlines="stripsurroundingwhitespace"/>
 </vbox>
-<script class="testbody" type="application/javascript;version=1.7">
+<script class="testbody" type="application/javascript">
 <![CDATA[
 /** Test for Bug 253481 **/
 function testPaste(name, element, expected) {
@@ -67,11 +67,11 @@ var expectedResults = {
 
 // Put a multi-line string in the clipboard
 SimpleTest.waitForClipboard(testString, function() {
-  var clip = Components.classes["@mozilla.org/widget/clipboardhelper;1"]
-                       .getService(Components.interfaces.nsIClipboardHelper);
+  var clip = Cc["@mozilla.org/widget/clipboardhelper;1"]
+               .getService(Ci.nsIClipboardHelper);
   clip.copyString(testString);
 }, function() {
-  for (let [item, expected] in Iterator(expectedResults)) {
+  for (let [item, expected] of Object.entries(expectedResults)) {
      testPaste(item, $(item), expected);
   }
 

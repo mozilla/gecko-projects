@@ -72,9 +72,11 @@ ElemSizeFromType(GLenum elemType)
         return 16;
 
     default:
-        MOZ_CRASH("Bad `elemType`.");
+        MOZ_CRASH("GFX: Bad `elemType`.");
     }
 }
+
+////////////////////
 
 WebGLActiveInfo::WebGLActiveInfo(WebGLContext* webgl, GLint elemCount, GLenum elemType,
                                  bool isArray, const nsACString& baseUserName,
@@ -88,12 +90,38 @@ WebGLActiveInfo::WebGLActiveInfo(WebGLContext* webgl, GLint elemCount, GLenum el
     , mBaseMappedName(baseMappedName)
 { }
 
+bool
+WebGLActiveInfo::IsSampler() const
+{
+    switch (mElemType) {
+    case LOCAL_GL_SAMPLER_2D:
+    case LOCAL_GL_SAMPLER_3D:
+    case LOCAL_GL_SAMPLER_CUBE:
+    case LOCAL_GL_SAMPLER_2D_SHADOW:
+    case LOCAL_GL_SAMPLER_2D_ARRAY:
+    case LOCAL_GL_SAMPLER_2D_ARRAY_SHADOW:
+    case LOCAL_GL_SAMPLER_CUBE_SHADOW:
+    case LOCAL_GL_INT_SAMPLER_2D:
+    case LOCAL_GL_INT_SAMPLER_3D:
+    case LOCAL_GL_INT_SAMPLER_CUBE:
+    case LOCAL_GL_INT_SAMPLER_2D_ARRAY:
+    case LOCAL_GL_UNSIGNED_INT_SAMPLER_2D:
+    case LOCAL_GL_UNSIGNED_INT_SAMPLER_3D:
+    case LOCAL_GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case LOCAL_GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 JSObject*
 WebGLActiveInfo::WrapObject(JSContext* js, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGLActiveInfoBinding::Wrap(js, this, givenProto);
+    return dom::WebGLActiveInfo_Binding::Wrap(js, this, givenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(WebGLActiveInfo)

@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ClearOnShutdown.h"
 #include "nsAutoPtr.h"
 #include "nsJARProtocolHandler.h"
 #include "nsIIOService.h"
@@ -12,16 +13,11 @@
 #include "nsJARURI.h"
 #include "nsIURL.h"
 #include "nsJARChannel.h"
-#include "nsXPIDLString.h"
 #include "nsString.h"
 #include "nsNetCID.h"
 #include "nsIMIMEService.h"
 #include "nsMimeTypes.h"
-#include "nsIRemoteOpenFileListener.h"
-#include "nsIHashable.h"
 #include "nsThreadUtils.h"
-#include "nsXULAppAPI.h"
-#include "nsTArray.h"
 
 static NS_DEFINE_CID(kZipReaderCacheCID, NS_ZIPREADERCACHE_CID);
 
@@ -29,19 +25,15 @@ static NS_DEFINE_CID(kZipReaderCacheCID, NS_ZIPREADERCACHE_CID);
 
 //-----------------------------------------------------------------------------
 
-nsJARProtocolHandler *gJarHandler = nullptr;
+StaticRefPtr<nsJARProtocolHandler> gJarHandler;
 
 nsJARProtocolHandler::nsJARProtocolHandler()
-: mIsMainProcess(XRE_IsParentProcess())
 {
     MOZ_ASSERT(NS_IsMainThread());
 }
 
 nsJARProtocolHandler::~nsJARProtocolHandler()
-{
-    MOZ_ASSERT(gJarHandler == this);
-    gJarHandler = nullptr;
-}
+{}
 
 nsresult
 nsJARProtocolHandler::Init()
@@ -55,7 +47,7 @@ nsJARProtocolHandler::Init()
     return rv;
 }
 
-nsIMIMEService * 
+nsIMIMEService *
 nsJARProtocolHandler::MimeService()
 {
     if (!mMimeService)
@@ -64,87 +56,23 @@ nsJARProtocolHandler::MimeService()
     return mMimeService.get();
 }
 
-bool
-nsJARProtocolHandler::RemoteOpenFileInProgress(
-                                           nsIHashable *aRemoteFile,
-                                           nsIRemoteOpenFileListener *aListener)
-{
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(aRemoteFile);
-    MOZ_ASSERT(aListener);
-
-    if (IsMainProcess()) {
-        MOZ_CRASH("Shouldn't be called in the main process!");
-    }
-
-    RemoteFileListenerArray *listeners;
-    if (mRemoteFileListeners.Get(aRemoteFile, &listeners)) {
-        listeners->AppendElement(aListener);
-        return true;
-    }
-
-    // We deliberately don't put the listener in the new array since the first
-    // load is handled differently.
-    mRemoteFileListeners.Put(aRemoteFile, new RemoteFileListenerArray());
-    return false;
-}
-
-void
-nsJARProtocolHandler::RemoteOpenFileComplete(nsIHashable *aRemoteFile,
-                                             nsresult aStatus)
-{
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(aRemoteFile);
-
-    if (IsMainProcess()) {
-        MOZ_CRASH("Shouldn't be called in the main process!");
-    }
-
-    RemoteFileListenerArray *tempListeners;
-    if (!mRemoteFileListeners.Get(aRemoteFile, &tempListeners)) {
-        return;
-    }
-
-    // Save the listeners in a stack array. The call to Remove() below will
-    // delete the tempListeners array.
-    RemoteFileListenerArray listeners;
-    tempListeners->SwapElements(listeners);
-
-    mRemoteFileListeners.Remove(aRemoteFile);
-
-    // Technically we must fail OnRemoteFileComplete() since OpenNSPRFileDesc()
-    // won't succeed here. We've trained nsJARChannel to recognize
-    // NS_ERROR_ALREADY_OPENED in this case as "proceed to JAR cache hit."
-    nsresult status = NS_SUCCEEDED(aStatus) ? NS_ERROR_ALREADY_OPENED : aStatus;
-
-    uint32_t count = listeners.Length();
-    for (uint32_t index = 0; index < count; index++) {
-        listeners[index]->OnRemoteFileOpenComplete(status);
-    }
-}
-
 NS_IMPL_ISUPPORTS(nsJARProtocolHandler,
                   nsIJARProtocolHandler,
                   nsIProtocolHandler,
                   nsISupportsWeakReference)
 
-nsJARProtocolHandler*
+already_AddRefed<nsJARProtocolHandler>
 nsJARProtocolHandler::GetSingleton()
 {
     if (!gJarHandler) {
         gJarHandler = new nsJARProtocolHandler();
-        if (!gJarHandler)
-            return nullptr;
-
-        NS_ADDREF(gJarHandler);
-        nsresult rv = gJarHandler->Init();
-        if (NS_FAILED(rv)) {
-            NS_RELEASE(gJarHandler);
-            return nullptr;
+        if (NS_SUCCEEDED(gJarHandler->Init())) {
+            ClearOnShutdown(&gJarHandler);
+        } else {
+            gJarHandler = nullptr;
         }
     }
-    NS_ADDREF(gJarHandler);
-    return gJarHandler;
+    return do_AddRef(gJarHandler);
 }
 
 NS_IMETHODIMP
@@ -190,21 +118,11 @@ nsJARProtocolHandler::NewURI(const nsACString &aSpec,
                              nsIURI *aBaseURI,
                              nsIURI **result)
 {
-    nsresult rv = NS_OK;
-
-    RefPtr<nsJARURI> jarURI = new nsJARURI();
-    if (!jarURI)
-        return NS_ERROR_OUT_OF_MEMORY;
-
-    rv = jarURI->Init(aCharset);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = jarURI->SetSpecWithBase(aSpec, aBaseURI);
-    if (NS_FAILED(rv))
-        return rv;
-
-    NS_ADDREF(*result = jarURI);
-    return rv;
+    nsCOMPtr<nsIURI> base(aBaseURI);
+    return NS_MutateURI(new nsJARURI::Mutator())
+             .Apply(NS_MutatorMethod(&nsIJARURIMutator::SetSpecBaseCharset,
+                                     nsCString(aSpec), base, aCharset))
+             .Finalize(result);
 }
 
 NS_IMETHODIMP

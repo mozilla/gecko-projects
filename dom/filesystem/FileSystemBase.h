@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_FileSystemBase_h
 #define mozilla_dom_FileSystemBase_h
 
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "Directory.h"
 
@@ -18,12 +17,8 @@ class BlobImpl;
 
 class FileSystemBase
 {
-  NS_INLINE_DECL_REFCOUNTING(FileSystemBase)
 public:
-
-  // Create file system object from its string representation.
-  static already_AddRefed<FileSystemBase>
-  DeserializeDOMPath(const nsAString& aString);
+  NS_INLINE_DECL_REFCOUNTING(FileSystemBase)
 
   FileSystemBase();
 
@@ -37,19 +32,18 @@ public:
   virtual already_AddRefed<FileSystemBase>
   Clone() = 0;
 
+  virtual bool
+  ShouldCreateDirectory() = 0;
+
   virtual nsISupports*
   GetParentObject() const;
 
-  /*
-   * Get the virtual name of the root directory. This name will be exposed to
-   * the content page.
-   */
   virtual void
-  GetRootName(nsAString& aRetval) const = 0;
+  GetDirectoryName(nsIFile* aFile, nsAString& aRetval,
+                   ErrorResult& aRv) const;
 
   void
-  GetDOMPath(nsIFile* aFile, Directory::DirectoryType aType,
-             nsAString& aRetval, ErrorResult& aRv) const;
+  GetDOMPath(nsIFile* aFile, nsAString& aRetval, ErrorResult& aRv) const;
 
   /*
    * Return the local root path of the FileSystem implementation.
@@ -58,9 +52,9 @@ public:
    * directory of the exposed root Directory (per type).
    */
   const nsAString&
-  LocalOrDeviceStorageRootPath() const
+  LocalRootPath() const
   {
-    return mLocalOrDeviceStorageRootPath;
+    return mLocalRootPath;
   }
 
   bool
@@ -78,24 +72,12 @@ public:
   bool
   GetRealPath(BlobImpl* aFile, nsIFile** aPath) const;
 
-  /*
-   * Get the permission name required to access this file system.
-   */
-  const nsCString&
-  GetPermission() const
-  {
-    return mPermission;
-  }
-
-  bool
-  RequiresPermissionChecks() const
-  {
-    return mRequiresPermissionChecks;
-  }
-
   // CC methods
   virtual void Unlink() {}
   virtual void Traverse(nsCycleCollectionTraversalCallback &cb) {}
+
+  void
+  AssertIsOnOwningThread() const;
 
 protected:
   virtual ~FileSystemBase();
@@ -103,23 +85,15 @@ protected:
   // The local path of the root (i.e. the OS path, with OS path separators, of
   // the OS directory that acts as the root of this OSFileSystem).
   // This path must be set by the FileSystem implementation immediately
-  // because it will be used for the validation of any FileSystemTaskBase.
+  // because it will be used for the validation of any FileSystemTaskChildBase.
   // The concept of this path is that, any task will never go out of it and this
   // must be considered the OS 'root' of the current FileSystem. Different
   // Directory object can have different OS 'root' path.
   // To be more clear, any path managed by this FileSystem implementation must
   // be discendant of this local root path.
-  // The reason why it's not just called 'localRootPath' is because for
-  // DeviceStorage this contains the path of the device storage SDCard, that is
-  // the parent directory of the exposed root path.
-  nsString mLocalOrDeviceStorageRootPath;
+  nsString mLocalRootPath;
 
   bool mShutdown;
-
-  // The permission name required to access the file system.
-  nsCString mPermission;
-
-  bool mRequiresPermissionChecks;
 };
 
 } // namespace dom

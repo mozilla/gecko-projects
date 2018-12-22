@@ -10,7 +10,6 @@
 #include "GLContextTypes.h"
 #include "mozilla/Attributes.h"
 #include "nsSize.h"
-#include "nsAutoPtr.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/Types.h"
 
@@ -35,7 +34,7 @@ already_AddRefed<gfx::DataSourceSurface>
 ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, gfx::SurfaceFormat aFormat);
 
 already_AddRefed<gfx::DataSourceSurface>
-YInvertImageSurface(gfx::DataSourceSurface* aSurf);
+YInvertImageSurface(gfx::DataSourceSurface* aSurf, uint32_t aStride);
 
 void
 SwapRAndBComponents(gfx::DataSourceSurface* surf);

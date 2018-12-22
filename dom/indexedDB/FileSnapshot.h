@@ -9,7 +9,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/File.h"
-#include "nsAutoPtr.h"
 #include "nsISupports.h"
 #include "nsWeakPtr.h"
 
@@ -61,9 +60,15 @@ private:
   }
 
   virtual void
-  GetPath(nsAString& aPath, ErrorResult& aRv) override
+  GetDOMPath(nsAString& aPath) const override
   {
-    mBlobImpl->GetPath(aPath, aRv);
+    mBlobImpl->GetDOMPath(aPath);
+  }
+
+  virtual void
+  SetDOMPath(const nsAString& aPath) override
+  {
+    mBlobImpl->SetDOMPath(aPath);
   }
 
   virtual int64_t
@@ -79,9 +84,10 @@ private:
   }
 
   virtual void
-  GetMozFullPath(nsAString& aName, ErrorResult& aRv) const override
+  GetMozFullPath(nsAString& aName, SystemCallerGuarantee aGuarantee,
+                 ErrorResult& aRv) const override
   {
-    mBlobImpl->GetMozFullPath(aName, aRv);
+    mBlobImpl->GetMozFullPath(aName, aGuarantee, aRv);
   }
 
   virtual void
@@ -100,6 +106,18 @@ private:
   GetType(nsAString& aType) override
   {
     mBlobImpl->GetType(aType);
+  }
+
+  size_t
+  GetAllocationSize() const override
+  {
+    return mBlobImpl->GetAllocationSize();
+  }
+
+  size_t
+  GetAllocationSize(FallibleTArray<BlobImpl*>& aVisitedBlobs) const override
+  {
+    return mBlobImpl->GetAllocationSize(aVisitedBlobs);
   }
 
   virtual uint64_t
@@ -121,7 +139,7 @@ private:
   }
 
   virtual void
-  GetInternalStream(nsIInputStream** aStream,
+  CreateInputStream(nsIInputStream** aStream,
                     ErrorResult& aRv) override;
 
   virtual int64_t

@@ -9,6 +9,9 @@
 #define GrRenderTargetPriv_DEFINED
 
 #include "GrRenderTarget.h"
+#include "GrGpu.h"
+
+class GrStencilSettings;
 
 /** Class that adds methods to GrRenderTarget that are only intended for use internal to Skia.
     This class is purely a privileged window into GrRenderTarget. It should never have additional
@@ -25,7 +28,11 @@ public:
      * currently attached GrStencilAttachment will be removed if one was previously attached. This
      * function returns false if there were any failure in attaching the GrStencilAttachment.
      */
-    bool attachStencilAttachment(GrStencilAttachment* stencil);
+    bool attachStencilAttachment(sk_sp<GrStencilAttachment> stencil);
+
+    int numStencilBits() const;
+
+    GrRenderTargetFlags flags() const { return fRenderTarget->fFlags; }
 
 private:
     explicit GrRenderTargetPriv(GrRenderTarget* renderTarget) : fRenderTarget(renderTarget) {}
@@ -37,7 +44,7 @@ private:
     GrRenderTargetPriv* operator&();
 
     GrRenderTarget* fRenderTarget;
-        
+
     friend class GrRenderTarget; // to construct/copy this type.
 };
 

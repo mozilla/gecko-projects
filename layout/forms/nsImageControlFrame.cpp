@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,39 +9,36 @@
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
-#include "nsFormControlFrame.h"
+#include "nsCheckboxRadioFrame.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/MouseEvents.h"
 #include "nsIContent.h"
 
 using namespace mozilla;
 
-typedef nsImageFrame nsImageControlFrameSuper;
-class nsImageControlFrame : public nsImageControlFrameSuper,
+class nsImageControlFrame : public nsImageFrame,
                             public nsIFormControlFrame
 {
 public:
-  explicit nsImageControlFrame(nsStyleContext* aContext);
+  explicit nsImageControlFrame(ComputedStyle* aStyle);
   ~nsImageControlFrame();
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
 
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsImageControlFrame)
 
-  virtual void Reflow(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) override;
+  virtual void Reflow(nsPresContext* aPresContext,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
+                      nsReflowStatus& aStatus) override;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
-
-  virtual nsIAtom* GetType() const override;
 
 #ifdef ACCESSIBILITY
   virtual mozilla::a11y::AccType AccessibleType() override;
@@ -56,13 +54,12 @@ public:
                              nsIFrame::Cursor& aCursor) override;
   // nsIFormContromFrame
   virtual void SetFocus(bool aOn, bool aRepaint) override;
-  virtual nsresult SetFormProperty(nsIAtom* aName, 
+  virtual nsresult SetFormProperty(nsAtom* aName,
                                    const nsAString& aValue) override;
 };
 
-
-nsImageControlFrame::nsImageControlFrame(nsStyleContext* aContext):
-  nsImageControlFrameSuper(aContext)
+nsImageControlFrame::nsImageControlFrame(ComputedStyle* aStyle)
+  : nsImageFrame(aStyle, kClassID)
 {
 }
 
@@ -71,18 +68,18 @@ nsImageControlFrame::~nsImageControlFrame()
 }
 
 void
-nsImageControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
+nsImageControlFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
   if (!GetPrevInFlow()) {
-    nsFormControlFrame::RegUnRegAccessKey(this, false);
+    nsCheckboxRadioFrame::RegUnRegAccessKey(this, false);
   }
-  nsImageControlFrameSuper::DestroyFrom(aDestructRoot);
+  nsImageFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
 nsIFrame*
-NS_NewImageControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
+NS_NewImageControlFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle)
 {
-  return new (aPresShell) nsImageControlFrame(aContext);
+  return new (aPresShell) nsImageControlFrame(aStyle);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageControlFrame)
@@ -92,12 +89,12 @@ nsImageControlFrame::Init(nsIContent*       aContent,
                           nsContainerFrame* aParent,
                           nsIFrame*         aPrevInFlow)
 {
-  nsImageControlFrameSuper::Init(aContent, aParent, aPrevInFlow);
+  nsImageFrame::Init(aContent, aParent, aPrevInFlow);
 
   if (aPrevInFlow) {
     return;
   }
-  
+
   mContent->SetProperty(nsGkAtoms::imageClickedPoint,
                         new nsIntPoint(0, 0),
                         nsINode::DeleteProperty<nsIntPoint>);
@@ -105,7 +102,7 @@ nsImageControlFrame::Init(nsIContent*       aContent,
 
 NS_QUERYFRAME_HEAD(nsImageControlFrame)
   NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsImageControlFrameSuper)
+NS_QUERYFRAME_TAIL_INHERITING(nsImageFrame)
 
 #ifdef ACCESSIBILITY
 a11y::AccType
@@ -119,27 +116,22 @@ nsImageControlFrame::AccessibleType()
 }
 #endif
 
-nsIAtom*
-nsImageControlFrame::GetType() const
-{
-  return nsGkAtoms::imageControlFrame; 
-}
-
 void
 nsImageControlFrame::Reflow(nsPresContext*           aPresContext,
-                            nsHTMLReflowMetrics&     aDesiredSize,
-                            const nsHTMLReflowState& aReflowState,
+                            ReflowOutput&     aDesiredSize,
+                            const ReflowInput& aReflowInput,
                             nsReflowStatus&          aStatus)
 {
   DO_GLOBAL_REFLOW_COUNT("nsImageControlFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
   if (!GetPrevInFlow() && (mState & NS_FRAME_FIRST_REFLOW)) {
-    nsFormControlFrame::RegUnRegAccessKey(this, true);
+    nsCheckboxRadioFrame::RegUnRegAccessKey(this, true);
   }
-  return nsImageControlFrameSuper::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
+  return nsImageFrame::Reflow(aPresContext, aDesiredSize, aReflowInput, aStatus);
 }
 
-nsresult 
+nsresult
 nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
                                  WidgetGUIEvent* aEvent,
                                  nsEventStatus* aEventStatus)
@@ -151,13 +143,8 @@ nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
     return NS_OK;
   }
 
-  // do we have user-input style?
-  const nsStyleUserInterface* uiStyle = StyleUserInterface();
-  if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
+  if (IsContentDisabled()) {
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
-
-  if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) { // XXX cache disabled
-    return NS_OK;
   }
 
   *aEventStatus = nsEventStatus_eIgnore;
@@ -175,11 +162,10 @@ nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
       TranslateEventCoords(pt, *lastClickPoint);
     }
   }
-  return nsImageControlFrameSuper::HandleEvent(aPresContext, aEvent,
-                                               aEventStatus);
+  return nsImageFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
 }
 
-void 
+void
 nsImageControlFrame::SetFocus(bool aOn, bool aRepaint)
 {
 }
@@ -200,7 +186,7 @@ nsImageControlFrame::GetCursor(const nsPoint&    aPoint,
 }
 
 nsresult
-nsImageControlFrame::SetFormProperty(nsIAtom* aName,
+nsImageControlFrame::SetFormProperty(nsAtom* aName,
                                      const nsAString& aValue)
 {
   return NS_OK;

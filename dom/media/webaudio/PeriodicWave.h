@@ -17,6 +17,9 @@ namespace mozilla {
 
 namespace dom {
 
+class AudioContext;
+struct PeriodicWaveOptions;
+
 class PeriodicWave final : public nsWrapperCache
 {
 public:
@@ -24,10 +27,15 @@ public:
                const float* aRealData,
                const float* aImagData,
                const uint32_t aLength,
+               const bool aDisableNormalization,
                ErrorResult& aRv);
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(PeriodicWave)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(PeriodicWave)
+
+  static already_AddRefed<PeriodicWave>
+  Constructor(const GlobalObject& aGlobal, AudioContext& aAudioContext,
+              const PeriodicWaveOptions& aOptions, ErrorResult& aRv);
 
   AudioContext* GetParentObject() const
   {
@@ -38,10 +46,15 @@ public:
 
   uint32_t DataLength() const
   {
-    return mLength;
+    return mCoefficients.mDuration;
   }
 
-  ThreadSharedFloatArrayBufferList* GetThreadSharedBuffer() const
+  bool DisableNormalization() const
+  {
+    return mDisableNormalization;
+  }
+
+  const AudioChunk& GetThreadSharedBuffer() const
   {
     return mCoefficients;
   }
@@ -50,11 +63,11 @@ public:
   size_t SizeOfIncludingThisIfNotShared(MallocSizeOf aMallocSizeOf) const;
 
 private:
-  ~PeriodicWave() {}
+  ~PeriodicWave() = default;
 
+  AudioChunk mCoefficients;
   RefPtr<AudioContext> mContext;
-  RefPtr<ThreadSharedFloatArrayBufferList> mCoefficients;
-  uint32_t mLength;
+  bool mDisableNormalization;
 };
 
 } // namespace dom

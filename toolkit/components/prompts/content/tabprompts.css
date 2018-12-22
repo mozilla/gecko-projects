@@ -13,20 +13,21 @@ tabmodalprompt {
 .mainContainer {
   min-width: 20em;
   min-height: 12em;
+  -moz-user-focus: normal;
 }
 
-.info\.title {
+.infoTitle {
   margin-bottom: 1em !important;
   font-weight: bold;
 }
 
-.info\.body {
+.infoBody {
   margin: 0 !important;
   -moz-user-focus: normal;
   -moz-user-select: text;
   cursor: text !important;
   white-space: pre-wrap;
-  unicode-bidi: -moz-plaintext;
+  unicode-bidi: plaintext;
 }
 
 label[value=""] {

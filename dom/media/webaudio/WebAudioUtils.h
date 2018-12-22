@@ -50,15 +50,6 @@ namespace WebAudioUtils {
   }
 
   /**
-   * Computes an exponential smoothing rate for a time based variable
-   * over aDuration seconds.
-   */
-  inline double ComputeSmoothingRate(double aDuration, double aSampleRate)
-  {
-    return 1.0 - std::exp(-1.0 / (aDuration * aSampleRate));
-  }
-
-  /**
    * Converts an AudioTimelineEvent's floating point time values to tick values
    * with respect to a destination AudioNodeStream.
    *
@@ -187,16 +178,18 @@ namespace WebAudioUtils {
     if (mozilla::IsNaN(f)) {
       // It is the responsibility of the caller to deal with NaN values.
       // If we ever get to this point, we have a serious bug to fix.
-      NS_RUNTIMEABORT("We should never see a NaN here");
+      MOZ_CRASH("We should never see a NaN here");
     }
 
-    if (f > FloatType(numeric_limits<IntType>::max())) {
-      // If the floating point value is outside of the range of maximum
-      // integral value for this type, just clamp to the maximum value.
+    // If the floating point value is outside of the range of maximum
+    // integral value for this type, just clamp to the maximum value.
+    // The equality case must also return max() due to loss of precision when
+    // converting max() to float.
+    if (f >= FloatType(numeric_limits<IntType>::max())) {
       return numeric_limits<IntType>::max();
     }
 
-    if (f < FloatType(numeric_limits<IntType>::min())) {
+    if (f <= FloatType(numeric_limits<IntType>::min())) {
       // If the floating point value is outside of the range of minimum
       // integral value for this type, just clamp to the minimum value.
       return numeric_limits<IntType>::min();
@@ -225,6 +218,10 @@ namespace WebAudioUtils {
                         uint32_t aChannel,
                         const int16_t* aIn, uint32_t* aInLen,
                         int16_t* aOut, uint32_t* aOutLen);
+
+  void
+  LogToDeveloperConsole(uint64_t aWindowID, const char* aKey);
+
   } // namespace WebAudioUtils
 
 } // namespace dom

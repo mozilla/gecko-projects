@@ -17,7 +17,7 @@ namespace net {
 class CacheObserver : public nsIObserver
                     , public nsSupportsWeakReference
 {
-  virtual ~CacheObserver() {}
+  virtual ~CacheObserver() = default;
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -27,7 +27,6 @@ class CacheObserver : public nsIObserver
   static CacheObserver* Self() { return sSelf; }
 
   // Access to preferences
-  static bool UseNewCache();
   static bool UseDiskCache()
     { return sUseDiskCache; }
   static bool UseMemoryCache()
@@ -57,8 +56,6 @@ class CacheObserver : public nsIObserver
     { return sCompressionLevel; }
   static uint32_t HalfLifeSeconds()
     { return sHalfLifeHours * 60.0F * 60.0F; }
-  static int32_t HalfLifeExperiment()
-    { return sHalfLifeExperiment; }
   static bool ClearCacheOnShutdown()
     { return sSanitizeOnShutdown && sClearCacheOnShutdown; }
   static bool CacheFSReported()
@@ -71,7 +68,12 @@ class CacheObserver : public nsIObserver
 
   static bool EntryIsTooBig(int64_t aSize, bool aUsingDisk);
 
-  static TimeDuration const& MaxShutdownIOLag();
+  static uint32_t MaxShutdownIOLag()
+    { return sMaxShutdownIOLag; }
+  static bool IsPastShutdownIOLag();
+
+  static bool ShuttingDown()
+    { return sShutdownDemandedTime != PR_INTERVAL_NO_TIMEOUT; }
 
 private:
   static CacheObserver* sSelf;
@@ -81,7 +83,6 @@ private:
   void StoreHashStatsReported();
   void AttachToPreferences();
 
-  static uint32_t sUseNewCache;
   static bool sUseMemoryCache;
   static bool sUseDiskCache;
   static uint32_t sMetadataMemoryLimit;
@@ -98,12 +99,12 @@ private:
   static uint32_t sMaxDiskPriorityChunksMemoryUsage;
   static uint32_t sCompressionLevel;
   static float sHalfLifeHours;
-  static int32_t sHalfLifeExperiment;
   static bool sSanitizeOnShutdown;
   static bool sClearCacheOnShutdown;
   static bool sCacheFSReported;
   static bool sHashStatsReported;
-  static int32_t sMaxShutdownIOLag;
+  static Atomic<uint32_t, Relaxed> sMaxShutdownIOLag;
+  static Atomic<PRIntervalTime> sShutdownDemandedTime;
 
   // Non static properties, accessible via sSelf
   nsCOMPtr<nsIFile> mCacheParentDirectoryOverride;

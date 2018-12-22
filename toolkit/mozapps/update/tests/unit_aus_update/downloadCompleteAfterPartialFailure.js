@@ -2,46 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-Components.utils.import("resource://testing-common/MockRegistrar.jsm");
-
-function run_test() {
-  setupTestCommon();
-
-  debugDump("testing download a complete on partial failure. Calling " +
-            "nsIUpdatePrompt::showUpdateError should call getNewPrompter " +
-            "and alert on the object returned by getNewPrompter when the " +
-            "update.state == " + STATE_FAILED + " and the update.errorCode " +
-             "== " + WRITE_ERROR + " (Bug 595059).");
-
-  Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, false);
-
-  let windowWatcherCID =
-    MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1",
-                           WindowWatcher);
-  do_register_cleanup(() => {
-    MockRegistrar.unregister(windowWatcherCID);
-  });
-
-  standardInit();
-
-  writeUpdatesToXMLFile(getLocalUpdatesXMLString(""), false);
-  let url = URL_HOST + "/" + FILE_COMPLETE_MAR;
-  let patches = getLocalPatchString("complete", url, null, null, null, null,
-                                    STATE_FAILED);
-  let updates = getLocalUpdateString(patches, null, null, "version 1.0", "1.0",
-                                     null, null, null, null, url);
-  writeUpdatesToXMLFile(getLocalUpdatesXMLString(updates), true);
-  writeStatusFile(STATE_FAILED);
-
-  reloadUpdateManagerData();
-
-  let update = gUpdateManager.activeUpdate;
-  update.errorCode = WRITE_ERROR;
-  let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                 createInstance(Ci.nsIUpdatePrompt);
-  prompter.showUpdateError(update);
-}
-
 const WindowWatcher = {
   getNewPrompter: function WW_getNewPrompter(aParent) {
     Assert.ok(!aParent,
@@ -57,10 +17,57 @@ const WindowWatcher = {
         Assert.equal(aText, text,
                      "the ui string for message" + MSG_SHOULD_EQUAL);
 
-        doTestFinish();
+        // Cleaning up the active update along with reloading the update manager
+        // in doTestFinish will prevent writing the update xml files during
+        // shutdown.
+        gUpdateManager.cleanupActiveUpdate();
+        executeSoon(waitForUpdateXMLFiles);
       }
     };
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWindowWatcher])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWindowWatcher])
 };
+
+function run_test() {
+  setupTestCommon();
+
+  debugDump("testing download a complete on partial failure. Calling " +
+            "nsIUpdatePrompt::showUpdateError should call getNewPrompter " +
+            "and alert on the object returned by getNewPrompter when the " +
+            "update.state == " + STATE_FAILED + " and the update.errorCode " +
+             "== " + WRITE_ERROR + " (Bug 595059).");
+
+  Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, false);
+
+  let windowWatcherCID =
+    MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1",
+                           WindowWatcher);
+  registerCleanupFunction(() => {
+    MockRegistrar.unregister(windowWatcherCID);
+  });
+
+  standardInit();
+
+  let patchProps = {url: URL_HOST + "/" + FILE_COMPLETE_MAR,
+                    state: STATE_FAILED};
+  let patches = getLocalPatchString(patchProps);
+  let updates = getLocalUpdateString({}, patches);
+  writeUpdatesToXMLFile(getLocalUpdatesXMLString(updates), true);
+  writeStatusFile(STATE_FAILED);
+
+  reloadUpdateManagerData();
+
+  let update = gUpdateManager.activeUpdate;
+  update.errorCode = WRITE_ERROR;
+  let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
+                 createInstance(Ci.nsIUpdatePrompt);
+  prompter.showUpdateError(update);
+}
+
+/**
+ * Called after the call to waitForUpdateXMLFiles finishes.
+ */
+function waitForUpdateXMLFilesFinished() {
+  executeSoon(doTestFinish);
+}

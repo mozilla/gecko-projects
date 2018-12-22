@@ -33,7 +33,6 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SpeechSynthesisUtterance,
                                            DOMEventTargetHelper)
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
 
   nsISupports* GetParentObject() const;
 
@@ -97,6 +96,7 @@ private:
 
   void DispatchSpeechSynthesisEvent(const nsAString& aEventType,
                                     uint32_t aCharIndex,
+                                    const Nullable<uint32_t>& aCharLength,
                                     float aElapsedTime, const nsAString& aName);
 
   nsString mText;

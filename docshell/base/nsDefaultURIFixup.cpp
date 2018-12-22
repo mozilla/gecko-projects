@@ -7,7 +7,6 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsIProtocolHandler.h"
-#include "nsCRT.h"
 
 #include "nsIFile.h"
 #include <algorithm>
@@ -17,12 +16,15 @@
 #endif
 
 #include "nsIURIFixup.h"
+#include "nsIURIMutator.h"
 #include "nsDefaultURIFixup.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/Tokenizer.h"
+#include "mozilla/Unused.h"
 #include "nsIObserverService.h"
 #include "nsXULAppAPI.h"
 
@@ -70,41 +72,18 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn)
   // Rats, we have to massage the URI
   nsCOMPtr<nsIURI> uri;
   if (isWyciwyg) {
-    nsAutoCString path;
-    nsresult rv = aURI->GetPath(path);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    uint32_t pathLength = path.Length();
-    if (pathLength <= 2) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Path is of the form "//123/http://foo/bar", with a variable number of
-    // digits. To figure out where the "real" URL starts, search path for a '/',
-    // starting at the third character.
-    int32_t slashIndex = path.FindChar('/', 2);
-    if (slashIndex == kNotFound) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // Get the charset of the original URI so we can pass it to our fixed up
-    // URI.
-    nsAutoCString charset;
-    aURI->GetOriginCharset(charset);
-
-    rv = NS_NewURI(getter_AddRefs(uri),
-                   Substring(path, slashIndex + 1, pathLength - slashIndex - 1),
-                   charset.get());
+    nsresult rv = nsContentUtils::RemoveWyciwygScheme(aURI, getter_AddRefs(uri));
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    // clone the URI so zapping user:pass doesn't change the original
-    nsresult rv = aURI->Clone(getter_AddRefs(uri));
-    NS_ENSURE_SUCCESS(rv, rv);
+    // No need to clone the URI as NS_MutateURI does that for us.
+    uri = aURI;
   }
 
   // hide user:pass unless overridden by pref
   if (Preferences::GetBool("browser.fixup.hide_user_pass", true)) {
-    uri->SetUserPass(EmptyCString());
+    Unused << NS_MutateURI(uri)
+                .SetUserPass(EmptyCString())
+                .Finalize(uri);
   }
 
   uri.forget(aReturn);
@@ -154,6 +133,15 @@ HasUserPassword(const nsACString& aStringURI)
   return false;
 }
 
+// Assume that 1 tab is accidental, but more than 1 implies this is
+// supposed to be tab-separated content.
+static bool
+MaybeTabSeparatedContent(const nsCString& aStringURI)
+{
+  auto firstTab = aStringURI.FindChar('\t');
+  return firstTab != kNotFound && aStringURI.RFindChar('\t') != firstTab;
+}
+
 NS_IMETHODIMP
 nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
                                    uint32_t aFixupFlags,
@@ -167,9 +155,9 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
   nsAutoCString uriString(aStringURI);
 
   // Eliminate embedded newlines, which single-line text fields now allow:
-  uriString.StripChars("\r\n");
-  // Cleanup the empty spaces that might be on each end:
-  uriString.Trim(" ");
+  uriString.StripCRLF();
+  // Cleanup the empty spaces and tabs that might be on each end:
+  uriString.Trim(" \t");
 
   NS_ENSURE_TRUE(!uriString.IsEmpty(), NS_ERROR_FAILURE);
 
@@ -186,18 +174,27 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
   // after it. The easiest way to do that is to call this method again with the
   // "view-source:" lopped off and then prepend it again afterwards.
 
-  if (scheme.LowerCaseEqualsLiteral("view-source")) {
+  if (scheme.EqualsLiteral("view-source")) {
     nsCOMPtr<nsIURIFixupInfo> uriInfo;
     // We disable keyword lookup and alternate URIs so that small typos don't
     // cause us to look at very different domains
     uint32_t newFixupFlags = aFixupFlags & ~FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP
                                          & ~FIXUP_FLAGS_MAKE_ALTERNATE_URI;
 
-    rv = GetFixupURIInfo(Substring(uriString,
-                                   sizeof("view-source:") - 1,
-                                   uriString.Length() -
-                                   (sizeof("view-source:") - 1)),
-                         newFixupFlags, aPostData, getter_AddRefs(uriInfo));
+    const uint32_t viewSourceLen = sizeof("view-source:") - 1;
+    nsAutoCString innerURIString(Substring(uriString, viewSourceLen,
+                                           uriString.Length() -
+                                           viewSourceLen));
+    // Prevent recursion:
+    innerURIString.Trim(" ");
+    nsAutoCString innerScheme;
+    ioService->ExtractScheme(innerURIString, innerScheme);
+    if (innerScheme.EqualsLiteral("view-source")) {
+      return NS_ERROR_FAILURE;
+    }
+
+    rv = GetFixupURIInfo(innerURIString, newFixupFlags, aPostData,
+                         getter_AddRefs(uriInfo));
     if (NS_FAILED(rv)) {
       return NS_ERROR_FAILURE;
     }
@@ -248,39 +245,49 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
   if (sFixTypos && (aFixupFlags & FIXUP_FLAG_FIX_SCHEME_TYPOS)) {
     // Fast-path for common cases.
     if (scheme.IsEmpty() ||
-        scheme.LowerCaseEqualsLiteral("http") ||
-        scheme.LowerCaseEqualsLiteral("https") ||
-        scheme.LowerCaseEqualsLiteral("ftp") ||
-        scheme.LowerCaseEqualsLiteral("file")) {
+        scheme.EqualsLiteral("http") ||
+        scheme.EqualsLiteral("https") ||
+        scheme.EqualsLiteral("ftp") ||
+        scheme.EqualsLiteral("file")) {
       // Do nothing.
-    } else if (scheme.LowerCaseEqualsLiteral("ttp")) {
+    } else if (scheme.EqualsLiteral("ttp")) {
       // ttp -> http.
-      uriString.Replace(0, 3, "http");
+      uriString.ReplaceLiteral(0, 3, "http");
       scheme.AssignLiteral("http");
       info->mFixupChangedProtocol = true;
-    } else if (scheme.LowerCaseEqualsLiteral("ttps")) {
+    } else if (scheme.EqualsLiteral("htp")) {
+      // htp -> http.
+      uriString.ReplaceLiteral(0, 3, "http");
+      scheme.AssignLiteral("http");
+      info->mFixupChangedProtocol = true;
+    } else if (scheme.EqualsLiteral("ttps")) {
       // ttps -> https.
-      uriString.Replace(0, 4, "https");
+      uriString.ReplaceLiteral(0, 4, "https");
       scheme.AssignLiteral("https");
       info->mFixupChangedProtocol = true;
-    } else if (scheme.LowerCaseEqualsLiteral("tps")) {
+    } else if (scheme.EqualsLiteral("tps")) {
       // tps -> https.
-      uriString.Replace(0, 3, "https");
+      uriString.ReplaceLiteral(0, 3, "https");
       scheme.AssignLiteral("https");
       info->mFixupChangedProtocol = true;
-    } else if (scheme.LowerCaseEqualsLiteral("ps")) {
+    } else if (scheme.EqualsLiteral("ps")) {
       // ps -> https.
-      uriString.Replace(0, 2, "https");
+      uriString.ReplaceLiteral(0, 2, "https");
       scheme.AssignLiteral("https");
       info->mFixupChangedProtocol = true;
-    } else if (scheme.LowerCaseEqualsLiteral("ile")) {
+    } else if (scheme.EqualsLiteral("htps")) {
+      // htps -> https.
+      uriString.ReplaceLiteral(0, 4, "https");
+      scheme.AssignLiteral("https");
+      info->mFixupChangedProtocol = true;
+    } else if (scheme.EqualsLiteral("ile")) {
       // ile -> file.
-      uriString.Replace(0, 3, "file");
+      uriString.ReplaceLiteral(0, 3, "file");
       scheme.AssignLiteral("file");
       info->mFixupChangedProtocol = true;
-    } else if (scheme.LowerCaseEqualsLiteral("le")) {
+    } else if (scheme.EqualsLiteral("le")) {
       // le -> file.
-      uriString.Replace(0, 2, "file");
+      uriString.ReplaceLiteral(0, 2, "file");
       scheme.AssignLiteral("file");
       info->mFixupChangedProtocol = true;
     }
@@ -290,8 +297,12 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
   // really know about.
   nsCOMPtr<nsIProtocolHandler> ourHandler, extHandler;
 
-  ioService->GetProtocolHandler(scheme.get(), getter_AddRefs(ourHandler));
   extHandler = do_GetService(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "default");
+  if (!scheme.IsEmpty()) {
+    ioService->GetProtocolHandler(scheme.get(), getter_AddRefs(ourHandler));
+  } else {
+    ourHandler = extHandler;
+  }
 
   if (ourHandler != extHandler || !PossiblyHostPortUrl(uriString)) {
     // Just try to create an URL out of it
@@ -358,12 +369,16 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
     inputHadDuffProtocol = true;
   }
 
-  // NB: this rv gets returned at the end of this method if we never
-  // do a keyword fixup after this (because the pref or the flags passed
-  // might not let us).
-  rv = FixupURIProtocol(uriString, info, getter_AddRefs(uriWithProtocol));
-  if (uriWithProtocol) {
-    info->mFixedURI = uriWithProtocol;
+  // Note: this rv gets returned at the end of this method if we don't fix up
+  // the protocol and don't do a keyword fixup after this (because the pref
+  // or the flags passed might not let us).
+  rv = NS_OK;
+  // Avoid fixing up content that looks like tab-separated values
+  if (!MaybeTabSeparatedContent(uriString)) {
+    rv = FixupURIProtocol(uriString, info, getter_AddRefs(uriWithProtocol));
+    if (uriWithProtocol) {
+      info->mFixedURI = uriWithProtocol;
+    }
   }
 
   // See if it is a keyword
@@ -423,7 +438,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
       return NS_ERROR_NOT_AVAILABLE;
     }
 
-    ipc::OptionalInputStreamParams postData;
+    RefPtr<nsIInputStream> postData;
     ipc::OptionalURIParams uri;
     nsAutoString providerName;
     if (!contentChild->SendKeywordToURI(keyword, &providerName, &postData,
@@ -435,11 +450,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
     info->mKeywordProviderName = providerName;
 
     if (aPostData) {
-      nsTArray<ipc::FileDescriptor> fds;
-      nsCOMPtr<nsIInputStream> temp = DeserializeInputStream(postData, fds);
-      temp.forget(aPostData);
-
-      MOZ_ASSERT(fds.IsEmpty());
+      postData.forget(aPostData);
     }
 
     nsCOMPtr<nsIURI> temp = DeserializeURI(uri);
@@ -517,7 +528,7 @@ nsDefaultURIFixup::TryKeywordFixupForURIInfo(const nsACString& aURIString,
 }
 
 bool
-nsDefaultURIFixup::MakeAlternateURI(nsIURI* aURI)
+nsDefaultURIFixup::MakeAlternateURI(nsCOMPtr<nsIURI>& aURI)
 {
   if (!Preferences::GetRootBranch()) {
     return false;
@@ -539,11 +550,22 @@ nsDefaultURIFixup::MakeAlternateURI(nsIURI* aURI)
   if (!userpass.IsEmpty()) {
     return false;
   }
+  // Don't fix up hosts with ports
+  int32_t port;
+  aURI->GetPort(&port);
+  if (port != -1) {
+    return false;
+  }
 
   nsAutoCString oldHost;
-  nsAutoCString newHost;
   aURI->GetHost(oldHost);
 
+  // Don't fix up 'localhost' because that's confusing:
+  if (oldHost.EqualsLiteral("localhost")) {
+    return false;
+  }
+
+  nsAutoCString newHost;
   // Count the dots
   int32_t numDots = 0;
   nsReadingIterator<char> iter;
@@ -561,16 +583,17 @@ nsDefaultURIFixup::MakeAlternateURI(nsIURI* aURI)
   // are www. & .com but they could be any other value, e.g. www. & .org
 
   nsAutoCString prefix("www.");
-  nsAdoptingCString prefPrefix =
-    Preferences::GetCString("browser.fixup.alternate.prefix");
-  if (prefPrefix) {
+  nsAutoCString prefPrefix;
+  nsresult rv =
+    Preferences::GetCString("browser.fixup.alternate.prefix", prefPrefix);
+  if (NS_SUCCEEDED(rv)) {
     prefix.Assign(prefPrefix);
   }
 
   nsAutoCString suffix(".com");
-  nsAdoptingCString prefSuffix =
-    Preferences::GetCString("browser.fixup.alternate.suffix");
-  if (prefSuffix) {
+  nsAutoCString prefSuffix;
+  rv = Preferences::GetCString("browser.fixup.alternate.suffix", prefSuffix);
+  if (NS_SUCCEEDED(rv)) {
     suffix.Assign(prefSuffix);
   }
 
@@ -600,44 +623,11 @@ nsDefaultURIFixup::MakeAlternateURI(nsIURI* aURI)
   }
 
   // Assign the new host string over the old one
-  aURI->SetHost(newHost);
+  Unused << NS_MutateURI(aURI)
+              .SetHost(newHost)
+              .Finalize(aURI);
+
   return true;
-}
-
-/**
- * Check if the host name starts with ftp\d*\. and it's not directly followed
- * by the tld.
- */
-bool
-nsDefaultURIFixup::IsLikelyFTP(const nsCString& aHostSpec)
-{
-  bool likelyFTP = false;
-  if (aHostSpec.EqualsIgnoreCase("ftp", 3)) {
-    nsACString::const_iterator iter;
-    nsACString::const_iterator end;
-    aHostSpec.BeginReading(iter);
-    aHostSpec.EndReading(end);
-    iter.advance(3); // move past the "ftp" part
-
-    while (iter != end) {
-      if (*iter == '.') {
-        // now make sure the name has at least one more dot in it
-        ++iter;
-        while (iter != end) {
-          if (*iter == '.') {
-            likelyFTP = true;
-            break;
-          }
-          ++iter;
-        }
-        break;
-      } else if (!nsCRT::IsAsciiDigit(*iter)) {
-        break;
-      }
-      ++iter;
-    }
-  }
-  return likelyFTP;
 }
 
 nsresult
@@ -680,47 +670,9 @@ nsDefaultURIFixup::ConvertFileToStringURI(const nsACString& aIn,
     // Test if this is a valid path by trying to create a local file
     // object. The URL of that is returned if successful.
 
-    // NOTE: Please be sure to check that the call to NS_NewLocalFile
-    //       rejects bad file paths when using this code on a new
-    //       platform.
-
     nsCOMPtr<nsIFile> filePath;
-    nsresult rv;
-
-    // this is not the real fix but a temporary fix
-    // in order to really fix the problem, we need to change the
-    // nsICmdLineService interface to use wstring to pass paramenters
-    // instead of string since path name and other argument could be
-    // in non ascii.(see bug 87127) Since it is too risky to make interface
-    // change right now, we decide not to do so now.
-    // Therefore, the aIn we receive here maybe already in damage form
-    // (e.g. treat every bytes as ISO-8859-1 and cast up to char16_t
-    //  while the real data could be in file system charset )
-    // we choice the following logic which will work for most of the case.
-    // Case will still failed only if it meet ALL the following condiction:
-    //    1. running on CJK, Russian, or Greek system, and
-    //    2. user type it from URL bar
-    //    3. the file name contains character in the range of
-    //       U+00A1-U+00FF but encode as different code point in file
-    //       system charset (e.g. ACP on window)- this is very rare case
-    // We should remove this logic and convert to File system charset here
-    // once we change nsICmdLineService to use wstring and ensure
-    // all the Unicode data come in is correctly converted.
-    // XXXbz nsICmdLineService doesn't hand back unicode, so in some cases
-    // what we have is actually a "utf8" version of a "utf16" string that's
-    // actually byte-expanded native-encoding data.  Someone upstream needs
-    // to stop using AssignWithConversion and do things correctly.  See bug
-    // 58866 for what happens if we remove this
-    // PossiblyByteExpandedFileName check.
-    NS_ConvertUTF8toUTF16 in(aIn);
-    if (PossiblyByteExpandedFileName(in)) {
-      // removes high byte
-      rv = NS_NewNativeLocalFile(NS_LossyConvertUTF16toASCII(in), false,
-                                 getter_AddRefs(filePath));
-    } else {
-      // input is unicode
-      rv = NS_NewLocalFile(in, false, getter_AddRefs(filePath));
-    }
+    nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(aIn), false,
+                                  getter_AddRefs(filePath));
 
     if (NS_SUCCEEDED(rv)) {
       NS_GetURLSpecFromFile(filePath, aResult);
@@ -749,7 +701,7 @@ nsDefaultURIFixup::FixupURIProtocol(const nsACString& aURIString,
   //   no-scheme.com/query?foo=http://www.foo.com
   //   user:pass@no-scheme.com
   //
-  int32_t schemeDelim = uriString.Find("://", 0);
+  int32_t schemeDelim = uriString.Find("://");
   int32_t firstDelim = uriString.FindCharInSet("/:");
   if (schemeDelim <= 0 ||
       (firstDelim != -1 && schemeDelim > firstDelim)) {
@@ -764,11 +716,7 @@ nsDefaultURIFixup::FixupURIProtocol(const nsACString& aURIString,
     uriString.Left(hostSpec, hostPos);
 
     // insert url spec corresponding to host name
-    if (IsLikelyFTP(hostSpec)) {
-      uriString.InsertLiteral("ftp://", 0);
-    } else {
-      uriString.InsertLiteral("http://", 0);
-    }
+    uriString.InsertLiteral("http://", 0);
     aFixupInfo->mFixupChangedProtocol = true;
   } // end if checkprotocol
 
@@ -815,8 +763,8 @@ nsDefaultURIFixup::PossiblyHostPortUrl(const nsACString& aUrl)
     // Parse a chunk of the address
     while (iter != iterEnd &&
            (*iter == '-' ||
-            nsCRT::IsAsciiAlpha(*iter) ||
-            nsCRT::IsAsciiDigit(*iter))) {
+            IsAsciiAlpha(*iter) ||
+            IsAsciiDigit(*iter))) {
       ++chunkSize;
       ++iter;
     }
@@ -844,7 +792,7 @@ nsDefaultURIFixup::PossiblyHostPortUrl(const nsACString& aUrl)
 
   uint32_t digitCount = 0;
   while (iter != iterEnd && digitCount <= 5) {
-    if (nsCRT::IsAsciiDigit(*iter)) {
+    if (IsAsciiDigit(*iter)) {
       digitCount++;
     } else if (*iter == '/') {
       break;
@@ -861,28 +809,6 @@ nsDefaultURIFixup::PossiblyHostPortUrl(const nsACString& aUrl)
 
   // Yes, it's possibly a host:port url
   return true;
-}
-
-bool
-nsDefaultURIFixup::PossiblyByteExpandedFileName(const nsAString& aIn)
-{
-  // XXXXX HACK XXXXX : please don't copy this code.
-  // There are cases where aIn contains the locale byte chars padded to short
-  // (thus the name "ByteExpanded"); whereas other cases
-  // have proper Unicode code points.
-  // This is a temporary fix.  Please refer to 58866, 86948
-
-  nsReadingIterator<char16_t> iter;
-  nsReadingIterator<char16_t> iterEnd;
-  aIn.BeginReading(iter);
-  aIn.EndReading(iterEnd);
-  while (iter != iterEnd) {
-    if (*iter >= 0x0080 && *iter <= 0x00FF) {
-      return true;
-    }
-    ++iter;
-  }
-  return false;
 }
 
 nsresult
@@ -945,14 +871,14 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
              *iter == ']' ||
              (*iter >= 'a' && *iter <= 'f') ||
              (*iter >= 'A' && *iter <= 'F') ||
-             nsCRT::IsAsciiDigit(*iter)))) {
+             IsAsciiDigit(*iter)))) {
         looksLikeIpv6 = false;
       }
     }
 
     // If we're at the end of the string or this is the first slash,
     // check if the thing before the slash looks like ipv4:
-    if ((iter.size_forward() == 1 ||
+    if ((iterEnd - iter == 1 ||
          (lastSlashLoc == uint32_t(kNotFound) && *iter == '/')) &&
         // Need 2 or 3 dots + only digits
         (foundDots == 2 || foundDots == 3) &&
@@ -991,9 +917,9 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
       foundRSBrackets++;
     } else if (*iter == '/') {
       lastSlashLoc = pos;
-    } else if (nsCRT::IsAsciiAlpha(*iter)) {
+    } else if (IsAsciiAlpha(*iter)) {
       hasAsciiAlpha = true;
-    } else if (nsCRT::IsAsciiDigit(*iter)) {
+    } else if (IsAsciiDigit(*iter)) {
       ++foundDigits;
     }
 
@@ -1012,17 +938,17 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
   }
 
   nsAutoCString asciiHost;
-  nsAutoCString host;
+  nsAutoCString displayHost;
 
-  bool isValidAsciiHost =
+  bool isValidHost =
     aFixupInfo->mFixedURI &&
     NS_SUCCEEDED(aFixupInfo->mFixedURI->GetAsciiHost(asciiHost)) &&
     !asciiHost.IsEmpty();
 
-  bool isValidHost =
+  bool isValidDisplayHost =
     aFixupInfo->mFixedURI &&
-    NS_SUCCEEDED(aFixupInfo->mFixedURI->GetHost(host)) &&
-    !host.IsEmpty();
+    NS_SUCCEEDED(aFixupInfo->mFixedURI->GetDisplayHost(displayHost)) &&
+    !displayHost.IsEmpty();
 
   nsresult rv = NS_OK;
   // We do keyword lookups if a space or quote preceded the dot, colon
@@ -1034,10 +960,10 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
       firstQMarkLoc == 0) {
     rv = TryKeywordFixupForURIInfo(aFixupInfo->mOriginalInput, aFixupInfo,
                                    aPostData);
-    // ... or when the host is the same as asciiHost and there are no
+    // ... or when the asciiHost is the same as displayHost and there are no
     // characters from [a-z][A-Z]
-  } else if (isValidAsciiHost && isValidHost && !hasAsciiAlpha &&
-             host.EqualsIgnoreCase(asciiHost.get())) {
+  } else if (isValidHost && isValidDisplayHost && !hasAsciiAlpha &&
+             asciiHost.EqualsIgnoreCase(displayHost.get())) {
     if (!sDNSFirstForSingleWords) {
       rv = TryKeywordFixupForURIInfo(aFixupInfo->mOriginalInput, aFixupInfo,
                                      aPostData);
@@ -1050,7 +976,7 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
                                 firstDotLoc == aURIString.Length() - 1))) &&
            firstColonLoc == uint32_t(kNotFound) &&
            firstQMarkLoc == uint32_t(kNotFound)) {
-    if (isValidAsciiHost && IsDomainWhitelisted(asciiHost, firstDotLoc)) {
+    if (isValidHost && IsDomainWhitelisted(asciiHost, firstDotLoc)) {
       return NS_OK;
     }
 
@@ -1058,7 +984,7 @@ nsDefaultURIFixup::KeywordURIFixup(const nsACString& aURIString,
     // this is a valid host:
     if (firstDotLoc == uint32_t(kNotFound) &&
         lastSlashLoc != uint32_t(kNotFound) &&
-        hasAsciiAlpha && isValidAsciiHost) {
+        hasAsciiAlpha && isValidHost) {
       return NS_OK;
     }
 

@@ -4,31 +4,14 @@
 
 %include ../../../shared/incontentprefs/preferences.inc.css
 
-prefpane .groupbox-title {
-  background: none;
-  margin-bottom: 0;
+:root > * {
+  font-size: 1.36em;
 }
 
 .actionsMenu > .menulist-label-box > .menulist-icon {
   margin-top: 2px;
-  -moz-margin-start: 2px;
-  -moz-margin-end: 8px !important;
-}
-
-#downloadFolder > .fileFieldContentBox {
-  -moz-padding-start: 3px;
-}
-
-#fxaProfileImage {
-  -moz-user-focus: normal;
-}
-
-textbox + button {
-  -moz-margin-start: -4px;
-}
-
-filefield + button {
-  -moz-margin-start: -8px;
+  margin-inline-start: 2px;
+  margin-inline-end: 8px !important;
 }
 
 #popupPolicyRow {
@@ -37,17 +20,4 @@ filefield + button {
   margin-bottom: 0 !important;
   padding-bottom: 0 !important;
   border-bottom: none;
-}
-
-#advancedPrefs {
-  margin-right: 0; /*override margin from normal preferences.css */
-  margin-left: 0;
-}
-
-/**
- * Dialog
- */
-
-#dialogTitle {
-  font-size: 1.1em;
 }

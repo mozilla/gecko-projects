@@ -6,10 +6,8 @@
 package org.mozilla.gecko.toolbar;
 
 import org.mozilla.gecko.AboutPages;
-import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.CustomEditText;
 import org.mozilla.gecko.InputMethods;
-import org.mozilla.gecko.R;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnCommitListener;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnDismissListener;
 import org.mozilla.gecko.toolbar.BrowserToolbar.OnFilterListener;
@@ -20,6 +18,7 @@ import org.mozilla.gecko.util.StringUtils;
 import android.content.Context;
 import android.graphics.Rect;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.NoCopySpan;
 import android.text.Selection;
 import android.text.Spanned;
@@ -307,6 +306,7 @@ public class ToolbarEditText extends CustomEditText
         final int textLength = text.length();
         final int resultLength = result.length();
         final int autoCompleteStart = text.getSpanStart(AUTOCOMPLETE_SPAN);
+        final int pathStart = StringUtils.pathStartIndex(getNonAutocompleteText(text));
         mAutoCompleteResult = result;
 
         if (autoCompleteStart > -1) {
@@ -314,11 +314,17 @@ public class ToolbarEditText extends CustomEditText
 
             // If the result and the current text don't have the same prefixes,
             // the result is stale and we should wait for the another result to come in.
-            if (!TextUtils.regionMatches(result, 0, text, 0, autoCompleteStart)) {
+            final String userText = text.toString().substring(0, autoCompleteStart);
+            if (!StringUtils.caseInsensitiveStartsWith(result, userText)) {
                 return;
             }
 
             beginSettingAutocomplete();
+
+            // Should we force capitalisation from result
+            if (pathStart != -1) {
+                text.replace(pathStart, autoCompleteStart, result, pathStart, autoCompleteStart);
+            }
 
             // Replace the existing autocomplete text with new one.
             // replace() preserves the autocomplete spans that we set before.
@@ -337,7 +343,14 @@ public class ToolbarEditText extends CustomEditText
             // If the result prefix doesn't match the current text,
             // the result is stale and we should wait for the another result to come in.
             if (resultLength <= textLength ||
-                    !TextUtils.regionMatches(result, 0, text, 0, textLength)) {
+                    !StringUtils.caseInsensitiveStartsWith(result, text.toString())) {
+                return;
+            }
+
+            // Now that we know the result and the usertext are the same case-insensitively,
+            // we should check whether their path parts match case-sensitively
+            if (pathStart != -1 &&
+                    !TextUtils.regionMatches(result, pathStart, text, pathStart, textLength - pathStart)) {
                 return;
             }
 
@@ -417,12 +430,19 @@ public class ToolbarEditText extends CustomEditText
      * If there is no autocomplete text, both removeAutocomplete() and commitAutocomplete()
      * are no-ops and return false. Therefore we can use them here without checking explicitly
      * if we have autocomplete text or not.
+     *
+     * Also turns off text prediction for private mode tabs.
      */
     @Override
     public InputConnection onCreateInputConnection(final EditorInfo outAttrs) {
         final InputConnection ic = super.onCreateInputConnection(outAttrs);
         if (ic == null) {
             return null;
+        }
+
+        if (isPrivateMode()) {
+            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            outAttrs.imeOptions |= InputMethods.IME_FLAG_NO_PERSONALIZED_LEARNING;
         }
 
         return new InputConnectionWrapper(ic, false) {
@@ -434,10 +454,7 @@ public class ToolbarEditText extends CustomEditText
                     // are deleting, we should delete the autocomplete text first.
                     // Make the IME aware that we interrupted the deleteSurroundingText call,
                     // by restarting the IME.
-                    final InputMethodManager imm = InputMethods.getInputMethodManager(mContext);
-                    if (imm != null) {
-                        imm.restartInput(ToolbarEditText.this);
-                    }
+                    InputMethods.restartInput(mContext, ToolbarEditText.this);
                     return false;
                 }
                 return super.deleteSurroundingText(beforeLength, afterLength);
@@ -473,6 +490,9 @@ public class ToolbarEditText extends CustomEditText
             @Override
             public boolean setComposingText(final CharSequence text, final int newCursorPosition) {
                 if (removeAutocompleteOnComposing(text)) {
+                    if (InputMethods.needsRemoveAutocompleteHack(mContext)) {
+                        InputMethods.restartInput(mContext, ToolbarEditText.this);
+                    }
                     return false;
                 }
                 return super.setComposingText(text, newCursorPosition);
@@ -529,7 +549,7 @@ public class ToolbarEditText extends CustomEditText
             // to discard any autocomplete results that are in-flight, and vice versa.
             mDiscardAutoCompleteResult = !doAutocomplete;
 
-            if (doAutocomplete && mAutoCompleteResult.startsWith(text)) {
+            if (doAutocomplete && StringUtils.caseInsensitiveStartsWith(mAutoCompleteResult, text)) {
                 // If this text already matches our autocomplete text, autocomplete likely
                 // won't change. Just reuse the old autocomplete value.
                 onAutocomplete(mAutoCompleteResult);
@@ -577,7 +597,7 @@ public class ToolbarEditText extends CustomEditText
                 final Editable content = getText();
                 if (!hasCompositionString(content)) {
                     if (mCommitListener != null) {
-                        mCommitListener.onCommit();
+                        mCommitListener.onCommitByKey();
                     }
 
                     return true;
@@ -603,7 +623,7 @@ public class ToolbarEditText extends CustomEditText
                 }
 
                 if (mCommitListener != null) {
-                    mCommitListener.onCommit();
+                    mCommitListener.onCommitByKey();
                 }
 
                 return true;
@@ -618,8 +638,7 @@ public class ToolbarEditText extends CustomEditText
             }
 
             if ((keyCode == KeyEvent.KEYCODE_DEL ||
-                (Versions.feature11Plus &&
-                 keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) &&
+                (keyCode == KeyEvent.KEYCODE_FORWARD_DEL)) &&
                 removeAutocomplete(getText())) {
                 // Delete autocomplete text when backspacing or forward deleting.
                 return true;

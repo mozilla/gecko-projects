@@ -1,8 +1,8 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* This Source Code is subject to the terms of the Mozilla Public License
- * version 2.0 (the "License"). You can obtain a copy of the License at
- * http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* rendering object for CSS "display: ruby-base" */
 
@@ -11,24 +11,18 @@
 
 #include "nsRubyContentFrame.h"
 
-typedef nsRubyContentFrame nsRubyBaseFrameSuper;
-
 /**
  * Factory function.
  * @return a newly allocated nsRubyBaseFrame (infallible)
  */
 nsContainerFrame* NS_NewRubyBaseFrame(nsIPresShell* aPresShell,
-                                      nsStyleContext* aContext);
+                                      mozilla::ComputedStyle* aStyle);
 
-class nsRubyBaseFrame final : public nsRubyBaseFrameSuper
+class nsRubyBaseFrame final : public nsRubyContentFrame
 {
 public:
-  NS_DECL_FRAMEARENA_HELPERS
-  NS_DECL_QUERYFRAME_TARGET(nsRubyBaseFrame)
+  NS_DECL_FRAMEARENA_HELPERS(nsRubyBaseFrame)
   NS_DECL_QUERYFRAME
-
-  // nsIFrame overrides
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
@@ -36,9 +30,10 @@ public:
 
 protected:
   friend nsContainerFrame* NS_NewRubyBaseFrame(nsIPresShell* aPresShell,
-                                               nsStyleContext* aContext);
-  explicit nsRubyBaseFrame(nsStyleContext* aContext)
-    : nsRubyBaseFrameSuper(aContext) {}
+                                               ComputedStyle* aStyle);
+  explicit nsRubyBaseFrame(ComputedStyle* aStyle)
+    : nsRubyContentFrame(aStyle, kClassID)
+  {}
 };
 
 #endif /* nsRubyBaseFrame_h___ */

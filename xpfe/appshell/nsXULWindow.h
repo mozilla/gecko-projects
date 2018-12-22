@@ -34,12 +34,15 @@
 #include "nsIWeakReference.h"
 #include "nsIWidgetListener.h"
 #include "nsITabParent.h"
+#include "nsIXULStore.h"
 
 namespace mozilla {
 namespace dom {
 class Element;
 } // namespace dom
 } // namespace mozilla
+
+class nsAtom;
 
 // nsXULWindow
 
@@ -73,6 +76,7 @@ public:
    void LockUntilChromeLoad() { mLockedUntilChromeLoad = true; }
    bool IsLocked() const { return mLockedUntilChromeLoad; }
    void IgnoreXULSizeMode(bool aEnable) { mIgnoreXULSizeMode = aEnable; }
+   void WasRegistered() { mRegistered = true; }
 
 protected:
    enum persistentAttributes {
@@ -89,7 +93,11 @@ protected:
    NS_IMETHOD EnsurePrimaryContentTreeOwner();
    NS_IMETHOD EnsurePrompter();
    NS_IMETHOD EnsureAuthPrompter();
+   NS_IMETHOD ForceRoundedDimensions();
+   NS_IMETHOD GetAvailScreenSize(int32_t* aAvailWidth, int32_t* aAvailHeight);
 
+   void ApplyChromeFlags();
+   void SizeShell();
    void OnChromeLoaded();
    void StaggerPosition(int32_t &aRequestedX, int32_t &aRequestedY,
                         int32_t aSpecWidth, int32_t aSpecHeight);
@@ -105,14 +113,27 @@ protected:
 
    // See nsIDocShellTreeOwner for docs on next two methods
    nsresult ContentShellAdded(nsIDocShellTreeItem* aContentShell,
-                                          bool aPrimary, bool aTargetable,
-                                          const nsAString& aID);
+                              bool aPrimary);
    nsresult ContentShellRemoved(nsIDocShellTreeItem* aContentShell);
-   NS_IMETHOD SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX, 
+   NS_IMETHOD GetPrimaryContentSize(int32_t* aWidth,
+                                    int32_t* aHeight);
+   NS_IMETHOD SetPrimaryContentSize(int32_t aWidth,
+                                    int32_t aHeight);
+   nsresult GetRootShellSize(int32_t* aWidth,
+                             int32_t* aHeight);
+   nsresult SetRootShellSize(int32_t aWidth,
+                             int32_t aHeight);
+
+   NS_IMETHOD SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX,
       int32_t aCY);
    NS_IMETHOD ExitModalLoop(nsresult aStatus);
-   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
-   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, mozIDOMWindowProxy* aOpenerWindow, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags,
+                                     nsITabParent* aOpeningTab,
+                                     mozIDOMWindowProxy* aOpenerWindow,
+                                     uint64_t aNextTabParentId,
+                                     nsIXULWindow **_retval);
+   NS_IMETHOD GetHasPrimaryContent(bool* aResult);
 
    void       EnableParent(bool aEnable);
    bool       ConstrainToZLevel(bool aImmediate, nsWindowZ *aPlacement,
@@ -122,6 +143,13 @@ protected:
    void       SetContentScrollbarVisibility(bool aVisible);
    bool       GetContentScrollbarVisibility();
    void       PersistentAttributesDirty(uint32_t aDirtyFlags);
+   nsresult   GetTabCount(uint32_t* aResult);
+
+   void       LoadPersistentWindowState();
+   nsresult   GetPersistentValue(const nsAtom* aAttr,
+                                 nsAString& aValue);
+   nsresult   SetPersistentValue(const nsAtom* aAttr,
+                                 const nsAString& aValue);
 
    nsChromeTreeOwner*      mChromeTreeOwner;
    nsContentTreeOwner*     mContentTreeOwner;
@@ -134,13 +162,13 @@ protected:
    nsCOMPtr<nsIAuthPrompt> mAuthPrompter;
    nsCOMPtr<nsIXULBrowserWindow> mXULBrowserWindow;
    nsCOMPtr<nsIDocShellTreeItem> mPrimaryContentShell;
-   nsTArray<nsContentShellInfo*> mContentShells; // array of doc shells by id
    nsresult                mModalStatus;
    bool                    mContinueModalLoop;
    bool                    mDebuting;       // being made visible right now
    bool                    mChromeLoaded; // True when chrome has loaded
+   bool                    mSizingShellFromXUL; // true when in SizeShell()
    bool                    mShowAfterLoad;
-   bool                    mIntrinsicallySized; 
+   bool                    mIntrinsicallySized;
    bool                    mCenterAfterLoad;
    bool                    mIsHiddenWindow;
    bool                    mLockedUntilChromeLoad;
@@ -151,33 +179,24 @@ protected:
    // mDestroying is used to prevent reentry into into Destroy(), which can
    // otherwise happen due to script running as we tear down various things.
    bool                    mDestroying;
-   uint32_t                mContextFlags;
+   bool                    mRegistered;
    uint32_t                mPersistentAttributesDirty; // persistentAttributes
    uint32_t                mPersistentAttributesMask;
    uint32_t                mChromeFlags;
+   uint64_t                mNextTabParentId;
    nsString                mTitle;
    nsIntRect               mOpenerScreenRect; // the screen rect of the opener
 
-   nsCOMArray<nsIWeakReference> mTargetableShells; // targetable shells only
-
    nsCOMPtr<nsITabParent> mPrimaryTabParent;
+private:
+   // GetPrimaryTabParentSize is called from xpidl methods and we don't have a
+   // good way to annotate those with MOZ_CAN_RUN_SCRIPT yet.  It takes no
+   // refcounted args other than "this", and the "this" uses seem ok.
+   MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult GetPrimaryTabParentSize(int32_t* aWidth, int32_t* aHeight);
+   nsresult GetPrimaryContentShellSize(int32_t* aWidth, int32_t* aHeight);
+   nsresult SetPrimaryTabParentSize(int32_t aWidth, int32_t aHeight);
+   nsCOMPtr<nsIXULStore> mLocalStore;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsXULWindow, NS_XULWINDOW_IMPL_CID)
-
-// nsContentShellInfo
-// Used to map shell IDs to nsIDocShellTreeItems.
-
-class nsContentShellInfo
-{
-public:
-   nsContentShellInfo(const nsAString& aID,
-                      nsIWeakReference* aContentShell);
-   ~nsContentShellInfo();
-
-public:
-   nsString id; // The identifier of the content shell
-   nsWeakPtr child; // content shell (weak reference to nsIDocShellTreeItem)
-};
-
 #endif /* nsXULWindow_h__ */

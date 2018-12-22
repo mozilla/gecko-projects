@@ -2,20 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+var EXPORTED_SYMBOLS = ["CryptoUtils"];
 
-this.EXPORTED_SYMBOLS = ["CryptoUtils"];
+ChromeUtils.import("resource://services-common/observers.js");
+ChromeUtils.import("resource://services-common/utils.js");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://services-common/observers.js");
-Cu.import("resource://services-common/utils.js");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-this.CryptoUtils = {
+var CryptoUtils = {
   xor: function xor(a, b) {
     let bytes = [];
 
     if (a.length != b.length) {
-      throw new Error("can't xor unequal length strings: "+a.length+" vs "+b.length);
+      throw new Error("can't xor unequal length strings: " + a.length + " vs " + b.length);
     }
 
     for (let i = 0; i < a.length; i++) {
@@ -56,7 +54,10 @@ this.CryptoUtils = {
    */
   digestBytes: function digestBytes(message, hasher) {
     // No UTF-8 encoding for you, sunshine.
-    let bytes = Array.prototype.slice.call(message).map(b => b.charCodeAt(0));
+    let bytes = new Uint8Array(message.length);
+    for (let i = 0; i < message.length; ++i) {
+      bytes[i] = message.charCodeAt(i) & 0xff;
+    }
     hasher.update(bytes, bytes.length);
     let result = hasher.finish(false);
     if (hasher instanceof Ci.nsICryptoHMAC) {
@@ -71,7 +72,7 @@ this.CryptoUtils = {
    * with a single hasher, but eventually you must extract the result
    * yourself.
    */
-  updateUTF8: function(message, hasher) {
+  updateUTF8(message, hasher) {
     let bytes = this._utf8Converter.convertToByteArray(message, {});
     hasher.update(bytes, bytes.length);
   },
@@ -106,6 +107,22 @@ this.CryptoUtils = {
     return CommonUtils.encodeBase32(CryptoUtils.UTF8AndSHA1(message));
   },
 
+  sha256(message) {
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+                 .createInstance(Ci.nsICryptoHash);
+    hasher.init(hasher.SHA256);
+    return CommonUtils.bytesAsHex(CryptoUtils.digestUTF8(message, hasher));
+  },
+
+  sha256Base64(message) {
+    let data = this._utf8Converter.convertToByteArray(message, {});
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+                 .createInstance(Ci.nsICryptoHash);
+    hasher.init(hasher.SHA256);
+    hasher.update(data, data.length);
+    return hasher.finish(true);
+  },
+
   /**
    * Produce an HMAC key object from a key string.
    */
@@ -127,12 +144,6 @@ this.CryptoUtils = {
    * HMAC-based Key Derivation (RFC 5869).
    */
   hkdf: function hkdf(ikm, xts, info, len) {
-    const BLOCKSIZE = 256 / 8;
-    if (typeof xts === undefined)
-      xts = String.fromCharCode(0, 0, 0, 0,  0, 0, 0, 0,
-                                0, 0, 0, 0,  0, 0, 0, 0,
-                                0, 0, 0, 0,  0, 0, 0, 0,
-                                0, 0, 0, 0,  0, 0, 0, 0);
     let h = CryptoUtils.makeHMACHasher(Ci.nsICryptoHMAC.SHA256,
                                        CryptoUtils.makeHMACKey(xts));
     let prk = CryptoUtils.digestBytes(ikm, h);
@@ -148,7 +159,7 @@ this.CryptoUtils = {
                                        CryptoUtils.makeHMACKey(prk));
     let T = "";
     let Tn = "";
-    let iterations = Math.ceil(len/BLOCKSIZE);
+    let iterations = Math.ceil(len / BLOCKSIZE);
     for (let i = 0; i < iterations; i++) {
       Tn = CryptoUtils.digestBytes(Tn + info + String.fromCharCode(i + 1), h);
       T += Tn;
@@ -176,13 +187,12 @@ this.CryptoUtils = {
    * The output is an octet string of length dkLen, which you
    * can encode as you wish.
    */
-  pbkdf2Generate : function pbkdf2Generate(P, S, c, dkLen,
-                       hmacAlg=Ci.nsICryptoHMAC.SHA1, hmacLen=20) {
+  pbkdf2Generate: function pbkdf2Generate(P, S, c, dkLen,
+                       hmacAlg = Ci.nsICryptoHMAC.SHA1, hmacLen = 20) {
 
     // We don't have a default in the algo itself, as NSS does.
-    // Use the constant.
     if (!dkLen) {
-      dkLen = SYNC_KEY_DECODED_LENGTH;
+      throw new Error("dkLen should be defined");
     }
 
     function F(S, c, i, h) {
@@ -214,7 +224,7 @@ this.CryptoUtils = {
       I[2] = String.fromCharCode((i >> 8) & 0xff);
       I[3] = String.fromCharCode(i & 0xff);
 
-      U[0] = CryptoUtils.digestBytes(S + I.join(''), h);
+      U[0] = CryptoUtils.digestBytes(S + I.join(""), h);
       for (let j = 1; j < c; j++) {
         U[j] = CryptoUtils.digestBytes(U[j - 1], h);
       }
@@ -240,27 +250,12 @@ this.CryptoUtils = {
     }
 
     let ret = "";
-    for (let i = 0; i < l-1;) {
+    for (let i = 0; i < l - 1;) {
       ret += T[i++];
     }
     ret += T[l - 1].substr(0, r);
 
     return ret;
-  },
-
-  deriveKeyFromPassphrase: function deriveKeyFromPassphrase(passphrase,
-                                                            salt,
-                                                            keyLength,
-                                                            forceJS) {
-    if (Svc.Crypto.deriveKeyFromPassphrase && !forceJS) {
-      return Svc.Crypto.deriveKeyFromPassphrase(passphrase, salt, keyLength);
-    }
-    else {
-      // Fall back to JS implementation.
-      // 4096 is hardcoded in WeaveCrypto, so do so here.
-      return CryptoUtils.pbkdf2Generate(passphrase, atob(salt), 4096,
-                                        keyLength);
-    }
   },
 
   /**
@@ -327,12 +322,12 @@ this.CryptoUtils = {
     let ext = (extra && extra.ext) ? extra.ext : "";
 
     let requestString = ts.toString(10) + "\n" +
-                        nonce           + "\n" +
-                        usedMethod      + "\n" +
-                        uri.path        + "\n" +
-                        host            + "\n" +
-                        port            + "\n" +
-                        ext             + "\n";
+                        nonce + "\n" +
+                        usedMethod + "\n" +
+                        uri.pathQueryRef + "\n" +
+                        host + "\n" +
+                        port + "\n" +
+                        ext + "\n";
 
     let hasher = CryptoUtils.makeHMACHasher(Ci.nsICryptoHMAC.SHA1,
                                             CryptoUtils.makeHMACKey(key));
@@ -344,16 +339,16 @@ this.CryptoUtils = {
     }
 
     return {
-      identifier: identifier,
-      key:        key,
+      identifier,
+      key,
       method:     usedMethod,
       hostname:   host,
-      port:       port,
-      mac:        mac,
-      nonce:      nonce,
-      ts:         ts,
-      ext:        ext,
-      getHeader:  getHeader
+      port,
+      mac,
+      nonce,
+      ts,
+      ext,
+      getHeader
     };
   },
 
@@ -376,23 +371,23 @@ this.CryptoUtils = {
    */
   getHTTPMACSHA1Header: function getHTTPMACSHA1Header(identifier, ts, nonce,
                                                       mac, ext) {
-    let header ='MAC id="' + identifier + '", ' +
-                'ts="'     + ts         + '", ' +
-                'nonce="'  + nonce      + '", ' +
-                'mac="'    + btoa(mac)  + '"';
+    let header = 'MAC id="' + identifier + '", ' +
+                'ts="' + ts + '", ' +
+                'nonce="' + nonce + '", ' +
+                'mac="' + btoa(mac) + '"';
 
     if (!ext) {
       return header;
     }
 
-    return header += ', ext="' + ext +'"';
+    return header += ', ext="' + ext + '"';
   },
 
   /**
    * Given an HTTP header value, strip out any attributes.
    */
 
-  stripHeaderAttributes: function(value) {
+  stripHeaderAttributes(value) {
     value = value || "";
     let i = value.indexOf(";");
     return value.substring(0, (i >= 0) ? i : undefined).trim().toLowerCase();
@@ -451,7 +446,7 @@ this.CryptoUtils = {
    *             ext - (string) app-specific data
    *             MAC - (string) request MAC (base64)
    */
-  computeHAWK: function(uri, method, options) {
+  computeHAWK(uri, method, options) {
     let credentials = options.credentials;
     let ts = options.ts || Math.floor(((options.now || Date.now()) +
                                        (options.localtimeOffsetMsec || 0))
@@ -480,10 +475,10 @@ this.CryptoUtils = {
     }
 
     let artifacts = {
-      ts: ts,
+      ts,
       nonce: options.nonce || btoa(CryptoUtils.generateRandomBytes(8)),
       method: method.toUpperCase(),
-      resource: uri.path, // This includes both path and search/queryarg.
+      resource: uri.pathQueryRef, // This includes both path and search/queryarg.
       host: uri.asciiHost.toLowerCase(), // This includes punycoding.
       port: port.toString(10),
       hash: options.hash,
@@ -498,7 +493,7 @@ this.CryptoUtils = {
                      .createInstance(Ci.nsICryptoHash);
       hasher.init(hash_algo);
       CryptoUtils.updateUTF8("hawk.1.payload\n", hasher);
-      CryptoUtils.updateUTF8(contentType+"\n", hasher);
+      CryptoUtils.updateUTF8(contentType + "\n", hasher);
       CryptoUtils.updateUTF8(options.payload, hasher);
       CryptoUtils.updateUTF8("\n", hasher);
       let hash = hasher.finish(false);
@@ -508,13 +503,13 @@ this.CryptoUtils = {
       artifacts.hash = hash_b64;
     }
 
-    let requestString = ("hawk.1.header"        + "\n" +
+    let requestString = ("hawk.1.header\n" +
                          artifacts.ts.toString(10) + "\n" +
-                         artifacts.nonce        + "\n" +
-                         artifacts.method       + "\n" +
-                         artifacts.resource     + "\n" +
-                         artifacts.host         + "\n" +
-                         artifacts.port         + "\n" +
+                         artifacts.nonce + "\n" +
+                         artifacts.method + "\n" +
+                         artifacts.resource + "\n" +
+                         artifacts.host + "\n" +
+                         artifacts.port + "\n" +
                          (artifacts.hash || "") + "\n");
     if (artifacts.ext) {
       requestString += artifacts.ext.replace("\\", "\\\\").replace("\n", "\\n");
@@ -537,7 +532,7 @@ this.CryptoUtils = {
                   (artifacts.ext ? ('ext="' + escape(artifacts.ext) + '", ') : "") +
                   'mac="' + artifacts.mac + '"');
     return {
-      artifacts: artifacts,
+      artifacts,
       field: header,
     };
   },
@@ -558,15 +553,6 @@ XPCOMUtils.defineLazyServiceGetter(Svc,
                                    "KeyFactory",
                                    "@mozilla.org/security/keyobjectfactory;1",
                                    "nsIKeyObjectFactory");
-
-Svc.__defineGetter__("Crypto", function() {
-  let ns = {};
-  Cu.import("resource://services-crypto/WeaveCrypto.js", ns);
-
-  let wc = new ns.WeaveCrypto();
-  delete Svc.Crypto;
-  return Svc.Crypto = wc;
-});
 
 Observers.add("xpcom-shutdown", function unloadServices() {
   Observers.remove("xpcom-shutdown", unloadServices);

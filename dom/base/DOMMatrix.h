@@ -22,12 +22,16 @@ namespace dom {
 
 class GlobalObject;
 class DOMMatrix;
+class DOMPoint;
+class StringOrUnrestrictedDoubleSequence;
+struct DOMPointInit;
 
 class DOMMatrixReadOnly : public nsWrapperCache
 {
 public:
   explicit DOMMatrixReadOnly(nsISupports* aParent)
-    : mParent(aParent), mMatrix2D(new gfx::Matrix())
+    : mParent(aParent)
+    , mMatrix2D(new gfx::Matrix())
   {
   }
 
@@ -41,8 +45,22 @@ public:
     }
   }
 
+  DOMMatrixReadOnly(nsISupports* aParent, const gfx::Matrix4x4& aMatrix)
+    : mParent(aParent)
+  {
+    mMatrix3D = new gfx::Matrix4x4(aMatrix);
+  }
+
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(DOMMatrixReadOnly)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(DOMMatrixReadOnly)
+
+  nsISupports* GetParentObject() const { return mParent; }
+  virtual JSObject* WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) override;
+
+  static already_AddRefed<DOMMatrixReadOnly> Constructor(
+    const GlobalObject& aGlobal,
+    const Optional<StringOrUnrestrictedDoubleSequence>& aArg,
+    ErrorResult& aRv);
 
 #define GetMatrixMember(entry2D, entry3D, default) \
 { \
@@ -87,88 +105,7 @@ public:
 #undef GetMatrixMember
 #undef Get3DMatrixMember
 
-  already_AddRefed<DOMMatrix> Translate(double aTx,
-                                        double aTy,
-                                        double aTz = 0) const;
-  already_AddRefed<DOMMatrix> Scale(double aScale,
-                                    double aOriginX = 0,
-                                    double aOriginY = 0) const;
-  already_AddRefed<DOMMatrix> Scale3d(double aScale,
-                                      double aOriginX = 0,
-                                      double aOriginY = 0,
-                                      double aOriginZ = 0) const;
-  already_AddRefed<DOMMatrix> ScaleNonUniform(double aScaleX,
-                                              double aScaleY = 1.0,
-                                              double aScaleZ = 1.0,
-                                              double aOriginX = 0,
-                                              double aOriginY = 0,
-                                              double aOriginZ = 0) const;
-  already_AddRefed<DOMMatrix> Rotate(double aAngle,
-                                     double aOriginX = 0,
-                                     double aOriginY = 0) const;
-  already_AddRefed<DOMMatrix> RotateFromVector(double aX,
-                                               double aY) const;
-  already_AddRefed<DOMMatrix> RotateAxisAngle(double aX,
-                                              double aY,
-                                              double aZ,
-                                              double aAngle) const;
-  already_AddRefed<DOMMatrix> SkewX(double aSx) const;
-  already_AddRefed<DOMMatrix> SkewY(double aSy) const;
-  already_AddRefed<DOMMatrix> Multiply(const DOMMatrix& aOther) const;
-  already_AddRefed<DOMMatrix> FlipX() const;
-  already_AddRefed<DOMMatrix> FlipY() const;
-  already_AddRefed<DOMMatrix> Inverse() const;
-
-  bool                        Is2D() const;
-  bool                        Identity() const;
-  already_AddRefed<DOMPoint>  TransformPoint(const DOMPointInit& aPoint) const;
-  void                        ToFloat32Array(JSContext* aCx,
-                                             JS::MutableHandle<JSObject*> aResult,
-                                             ErrorResult& aRv) const;
-  void                        ToFloat64Array(JSContext* aCx,
-                                             JS::MutableHandle<JSObject*> aResult,
-                                             ErrorResult& aRv) const;
-  void                        Stringify(nsAString& aResult);
-protected:
-  nsCOMPtr<nsISupports>     mParent;
-  nsAutoPtr<gfx::Matrix>    mMatrix2D;
-  nsAutoPtr<gfx::Matrix4x4> mMatrix3D;
-
-  virtual ~DOMMatrixReadOnly() {}
-
-private:
-  DOMMatrixReadOnly() = delete;
-  DOMMatrixReadOnly(const DOMMatrixReadOnly&) = delete;
-  DOMMatrixReadOnly& operator=(const DOMMatrixReadOnly&) = delete;
-};
-
-class DOMMatrix : public DOMMatrixReadOnly
-{
-public:
-  explicit DOMMatrix(nsISupports* aParent)
-    : DOMMatrixReadOnly(aParent)
-  {}
-
-  DOMMatrix(nsISupports* aParent, const DOMMatrixReadOnly& other)
-    : DOMMatrixReadOnly(aParent, other)
-  {}
-
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, const nsAString& aTransformList, ErrorResult& aRv);
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, const DOMMatrixReadOnly& aOther, ErrorResult& aRv);
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, const Float32Array& aArray32, ErrorResult& aRv);
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, const Float64Array& aArray64, ErrorResult& aRv);
-  static already_AddRefed<DOMMatrix>
-  Constructor(const GlobalObject& aGlobal, const Sequence<double>& aNumberSequence, ErrorResult& aRv);
-
-  nsISupports* GetParentObject() const { return mParent; }
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
-
+  // Defined here so we can construct DOMMatrixReadOnly objects.
 #define Set2DMatrixMember(entry2D, entry3D) \
 { \
   if (mMatrix3D) { \
@@ -213,6 +150,95 @@ public:
 #undef Set2DMatrixMember
 #undef Set3DMatrixMember
 
+
+  already_AddRefed<DOMMatrix> Translate(double aTx,
+                                        double aTy,
+                                        double aTz = 0) const;
+  already_AddRefed<DOMMatrix> Scale(double aScale,
+                                    double aOriginX = 0,
+                                    double aOriginY = 0) const;
+  already_AddRefed<DOMMatrix> Scale3d(double aScale,
+                                      double aOriginX = 0,
+                                      double aOriginY = 0,
+                                      double aOriginZ = 0) const;
+  already_AddRefed<DOMMatrix> ScaleNonUniform(double aScaleX,
+                                              double aScaleY = 1.0,
+                                              double aScaleZ = 1.0,
+                                              double aOriginX = 0,
+                                              double aOriginY = 0,
+                                              double aOriginZ = 0) const;
+  already_AddRefed<DOMMatrix> Rotate(double aAngle,
+                                     double aOriginX = 0,
+                                     double aOriginY = 0) const;
+  already_AddRefed<DOMMatrix> RotateFromVector(double aX,
+                                               double aY) const;
+  already_AddRefed<DOMMatrix> RotateAxisAngle(double aX,
+                                              double aY,
+                                              double aZ,
+                                              double aAngle) const;
+  already_AddRefed<DOMMatrix> SkewX(double aSx) const;
+  already_AddRefed<DOMMatrix> SkewY(double aSy) const;
+  already_AddRefed<DOMMatrix> Multiply(const DOMMatrix& aOther) const;
+  already_AddRefed<DOMMatrix> FlipX() const;
+  already_AddRefed<DOMMatrix> FlipY() const;
+  already_AddRefed<DOMMatrix> Inverse() const;
+
+  bool                        Is2D() const;
+  bool                        IsIdentity() const;
+  already_AddRefed<DOMPoint>  TransformPoint(const DOMPointInit& aPoint) const;
+  void                        ToFloat32Array(JSContext* aCx,
+                                             JS::MutableHandle<JSObject*> aResult,
+                                             ErrorResult& aRv) const;
+  void                        ToFloat64Array(JSContext* aCx,
+                                             JS::MutableHandle<JSObject*> aResult,
+                                             ErrorResult& aRv) const;
+  void                        Stringify(nsAString& aResult);
+protected:
+  nsCOMPtr<nsISupports>     mParent;
+  nsAutoPtr<gfx::Matrix>    mMatrix2D;
+  nsAutoPtr<gfx::Matrix4x4> mMatrix3D;
+
+  virtual ~DOMMatrixReadOnly() {}
+
+  DOMMatrixReadOnly* SetMatrixValue(const nsAString& aTransformList, ErrorResult& aRv);
+  void Ensure3DMatrix();
+
+private:
+  DOMMatrixReadOnly() = delete;
+  DOMMatrixReadOnly(const DOMMatrixReadOnly&) = delete;
+  DOMMatrixReadOnly& operator=(const DOMMatrixReadOnly&) = delete;
+};
+
+class DOMMatrix : public DOMMatrixReadOnly
+{
+public:
+  explicit DOMMatrix(nsISupports* aParent)
+    : DOMMatrixReadOnly(aParent)
+  {}
+
+  DOMMatrix(nsISupports* aParent, const DOMMatrixReadOnly& other)
+    : DOMMatrixReadOnly(aParent, other)
+  {}
+
+  DOMMatrix(nsISupports* aParent, const gfx::Matrix4x4& aMatrix)
+    : DOMMatrixReadOnly(aParent, aMatrix)
+  {}
+
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, const nsAString& aTransformList, ErrorResult& aRv);
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, const DOMMatrixReadOnly& aOther, ErrorResult& aRv);
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, const Float32Array& aArray32, ErrorResult& aRv);
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, const Float64Array& aArray64, ErrorResult& aRv);
+  static already_AddRefed<DOMMatrix>
+  Constructor(const GlobalObject& aGlobal, const Sequence<double>& aNumberSequence, ErrorResult& aRv);
+
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+
   DOMMatrix* MultiplySelf(const DOMMatrix& aOther);
   DOMMatrix* PreMultiplySelf(const DOMMatrix& aOther);
   DOMMatrix* TranslateSelf(double aTx,
@@ -244,8 +270,6 @@ public:
   DOMMatrix* SkewYSelf(double aSy);
   DOMMatrix* InvertSelf();
   DOMMatrix* SetMatrixValue(const nsAString& aTransformList, ErrorResult& aRv);
-protected:
-  void Ensure3DMatrix();
 
   virtual ~DOMMatrix() {}
 };

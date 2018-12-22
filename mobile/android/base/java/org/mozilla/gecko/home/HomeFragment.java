@@ -5,28 +5,33 @@
 
 package org.mozilla.gecko.home;
 
+import java.lang.ref.WeakReference;
 import java.util.EnumSet;
 
-import org.mozilla.gecko.EditBookmarkDialog;
-import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.Clipboard;
 import org.mozilla.gecko.GeckoApplication;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.IntentHelper;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.reader.ReaderModeUtils;
-import org.mozilla.gecko.SnackbarHelper;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
+import org.mozilla.gecko.activitystream.ActivityStream;
+import org.mozilla.gecko.bookmarks.BookmarkUtils;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.BrowserContract.SuggestedSites;
+import org.mozilla.gecko.distribution.PartnerBookmarksProviderProxy;
 import org.mozilla.gecko.home.HomeContextMenuInfo.RemoveItemType;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenInBackgroundListener;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.TopSitesGridView.TopSitesGridContextMenuInfo;
+import org.mozilla.gecko.preferences.GeckoPreferences;
+import org.mozilla.gecko.reader.SavedReaderViewHelper;
+import org.mozilla.gecko.reader.ReadingListHelper;
 import org.mozilla.gecko.restrictions.Restrictable;
 import org.mozilla.gecko.restrictions.Restrictions;
-import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UIAsyncTask;
@@ -35,6 +40,7 @@ import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.support.design.widget.Snackbar;
@@ -55,7 +61,7 @@ import android.view.View;
  */
 public abstract class HomeFragment extends Fragment {
     // Log Tag.
-    private static final String LOGTAG="GeckoHomeFragment";
+    private static final String LOGTAG = "GeckoHomeFragment";
 
     // Share MIME type.
     protected static final String SHARE_MIME_TYPE = "text/plain";
@@ -75,7 +81,35 @@ public abstract class HomeFragment extends Fragment {
     protected OnUrlOpenListener mUrlOpenListener;
 
     // Helper for opening a tab in the background.
-    private OnUrlOpenInBackgroundListener mUrlOpenInBackgroundListener;
+    protected OnUrlOpenInBackgroundListener mUrlOpenInBackgroundListener;
+
+    protected PanelStateChangeListener mPanelStateChangeListener = null;
+
+    /**
+     * Listener to notify when a home panels' state has changed in a way that needs to be stored
+     * for history/restoration. E.g. when a folder is opened/closed in bookmarks.
+     */
+    public interface PanelStateChangeListener {
+
+        /**
+         * @param bundle Data that should be persisted, and passed to this panel if restored at a later
+         * stage.
+         */
+        void onStateChanged(Bundle bundle);
+
+        void setCachedRecentTabsCount(int count);
+
+        int getCachedRecentTabsCount();
+    }
+
+    public void restoreData(Bundle data) {
+        // Do nothing
+    }
+
+    public void setPanelStateChangeListener(
+            PanelStateChangeListener mPanelStateChangeListener) {
+        this.mPanelStateChangeListener = mPanelStateChangeListener;
+    }
 
     @Override
     public void onAttach(Activity activity) {
@@ -130,10 +164,11 @@ public abstract class HomeFragment extends Fragment {
             return;
         }
 
-        HomeContextMenuInfo info = (HomeContextMenuInfo) menuInfo;
+        final HomeContextMenuInfo info = (HomeContextMenuInfo) menuInfo;
 
-        // Don't show the context menu for folders.
-        if (info.isFolder) {
+        // Don't show the context menu for folders if full bookmark management isn't enabled.
+        final boolean enableFullBookmarkManagement = BookmarkUtils.isEnabled(getContext());
+        if (info.isFolder && !enableFullBookmarkManagement) {
             return;
         }
 
@@ -149,7 +184,7 @@ public abstract class HomeFragment extends Fragment {
 
         // Hide the "Edit" menuitem if this item isn't a bookmark,
         // or if this is a reading list item.
-        if (!info.hasBookmarkId() || info.isInReadingList()) {
+        if (!info.hasBookmarkId()) {
             menu.findItem(R.id.home_edit_bookmark).setVisible(false);
         }
 
@@ -165,9 +200,52 @@ public abstract class HomeFragment extends Fragment {
         if (!Restrictions.isAllowed(view.getContext(), Restrictable.PRIVATE_BROWSING)) {
             menu.findItem(R.id.home_open_private_tab).setVisible(false);
         }
+        final boolean distSetAsHomepage = GeckoSharedPrefs.forProfile(view.getContext()).getBoolean(GeckoPreferences.PREFS_SET_AS_HOMEPAGE, false);
+        menu.findItem(R.id.home_set_as_homepage).setVisible(distSetAsHomepage);
 
-        menu.findItem(R.id.mark_read).setVisible(info.isInReadingList() && info.isUnread);
-        menu.findItem(R.id.mark_unread).setVisible(info.isInReadingList() && !info.isUnread);
+        // Hide unused menu items for bookmark folder.
+        if (info.isFolder) {
+            menu.findItem(R.id.home_open_new_tab).setVisible(false);
+            menu.findItem(R.id.home_open_private_tab).setVisible(false);
+            menu.findItem(R.id.home_copyurl).setVisible(false);
+            menu.findItem(R.id.home_share).setVisible(false);
+            MenuUtils.safeSetVisible(menu, R.id.home_add_to_launcher, false);
+            menu.findItem(R.id.home_set_as_homepage).setVisible(false);
+
+            menu.findItem(R.id.home_as_pin).setVisible(false);
+            return;
+        }
+
+        // If Activity Stream is disabled, simply hide "AS Pin" menu item as classic Top Sites do not
+        // support pinning from outside of the Top Site tiles.
+        if (!ActivityStream.isEnabled(getContext())) {
+            menu.findItem(R.id.home_as_pin).setVisible(false);
+            return;
+        }
+
+        // Asynchronously update pin state for this item.
+        // This code should be superseded by context menu unification work in Bug 1377292.
+        final MenuItem asPinItem = menu.findItem(R.id.home_as_pin);
+        // Do not let user interact with this menu item before we figure out pinned state.
+        asPinItem.setEnabled(false);
+
+        (new UIAsyncTask.WithoutParams<Boolean>(ThreadUtils.getBackgroundHandler()) {
+            @Override
+            protected Boolean doInBackground() {
+                return BrowserDB.from(getContext()).isPinnedForAS(
+                        getContext().getContentResolver(), info.url);
+            }
+
+            @Override
+            protected void onPostExecute(Boolean hasPin) {
+                if (hasPin) {
+                    asPinItem.setTitle(R.string.contextmenu_top_sites_unpin);
+                }
+
+                info.updateAsPinned(hasPin);
+                asPinItem.setEnabled(true);
+            }
+        }).execute();
     }
 
     @Override
@@ -202,7 +280,7 @@ public abstract class HomeFragment extends Fragment {
                 return false;
             }
 
-            Clipboard.setText(info.url);
+            Clipboard.setText(context, info.url);
             return true;
         }
 
@@ -231,11 +309,11 @@ public abstract class HomeFragment extends Fragment {
             ThreadUtils.postToBackgroundThread(new Runnable() {
                 @Override
                 public void run() {
-                    GeckoAppShell.createShortcut(displayTitle, info.url);
-
+                    GeckoApplication.createBrowserShortcut(displayTitle, info.url);
                 }
             });
 
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.CONTEXT_MENU, "home_add_to_launcher");
             return true;
         }
 
@@ -249,9 +327,7 @@ public abstract class HomeFragment extends Fragment {
             // the PinSiteDialog are wrapped in a special URI until we can get a
             // valid URL. If the url is a user-entered url, decode the URL
             // before loading it.
-            final String url = StringUtils.decodeUserEnteredUrl(info.isInReadingList()
-                    ? ReaderModeUtils.getAboutReaderForUrl(info.url)
-                    : info.url);
+            final String url = StringUtils.decodeUserEnteredUrl(info.url);
 
             final EnumSet<OnUrlOpenInBackgroundListener.Flags> flags = EnumSet.noneOf(OnUrlOpenInBackgroundListener.Flags.class);
             if (item.getItemId() == R.id.home_open_private_tab) {
@@ -265,34 +341,31 @@ public abstract class HomeFragment extends Fragment {
             return true;
         }
 
-        if (itemId == R.id.home_edit_bookmark) {
-            // UI Dialog associates to the activity context, not the applications'.
-            new EditBookmarkDialog(context).show(info.url);
-            return true;
-        }
-
         if (itemId == R.id.home_remove) {
             // For Top Sites grid items, position is required in case item is Pinned.
             final int position = info instanceof TopSitesGridContextMenuInfo ? info.position : -1;
 
-            (new RemoveItemByUrlTask(context, info.url, info.itemType, position)).execute();
+            if (info.hasPartnerBookmarkId()) {
+                new RemovePartnerBookmarkTask(getActivity(), info.bookmarkId).execute();
+            } else {
+                new RemoveItemTask(getActivity(), info, position).execute();
+            }
             return true;
         }
 
-        if (itemId == R.id.mark_read) {
-            GeckoProfile
-                    .get(context)
-                    .getDB()
-                    .getReadingListAccessor()
-                    .markAsRead(context.getContentResolver(), info.id);
+        if (itemId == R.id.home_set_as_homepage) {
+            final SharedPreferences prefs = GeckoSharedPrefs.forProfile(context);
+            final SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(GeckoPreferences.PREFS_HOMEPAGE, info.url);
+            editor.apply();
+            Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.CONTEXT_MENU,
+                getResources().getResourceEntryName(itemId));
+            return true;
         }
 
-        if (itemId == R.id.mark_unread) {
-            GeckoProfile
-                    .get(context)
-                    .getDB()
-                    .getReadingListAccessor()
-                    .markAsUnread(context.getContentResolver(), info.id);
+        if (itemId == R.id.home_as_pin) {
+            new ToggleASPinTask(getActivity(), info).execute();
+            return true;
         }
 
         return false;
@@ -367,56 +440,108 @@ public abstract class HomeFragment extends Fragment {
         mIsLoaded = true;
     }
 
-    protected static class RemoveItemByUrlTask extends UIAsyncTask.WithoutParams<Void> {
-        private final Context mContext;
-        private final String mUrl;
-        private final RemoveItemType mType;
-        private final int mPosition;
-        private final BrowserDB mDB;
+    private static class ToggleASPinTask extends UIAsyncTask.WithoutParams<Void> {
+        private final WeakReference<Activity> activityWeakReference;
+        private final Context context;
+        private final HomeContextMenuInfo info;
+        private final BrowserDB db;
+        private final ContentResolver cr;
+        private final boolean toggleWillPin;
 
-        /**
-         * Remove bookmark/history/reading list type item by url, and also unpin the
-         * Top Sites grid item at index <code>position</code>.
-         */
-        public RemoveItemByUrlTask(Context context, String url, RemoveItemType type, int position) {
+        ToggleASPinTask(Activity activity, HomeContextMenuInfo info) {
             super(ThreadUtils.getBackgroundHandler());
 
-            mContext = context;
-            mUrl = url;
-            mType = type;
-            mPosition = position;
-            mDB = GeckoProfile.get(context).getDB();
+            this.activityWeakReference = new WeakReference<Activity>(activity);
+            this.context = activity.getApplicationContext();
+            this.db = BrowserDB.from(context);
+            this.info = info;
+            this.cr = context.getContentResolver();
+
+            if (info.isAsPinned == null) {
+                throw new IllegalStateException("Tried changing pinned state before it's determined.");
+            }
+
+            this.toggleWillPin = !info.isAsPinned;
+        }
+
+        @Override
+        protected Void doInBackground() {
+            if (toggleWillPin) {
+                db.pinSiteForAS(cr, info.url, info.title);
+            } else {
+                db.unpinSiteForAS(cr, info.url);
+            }
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void aVoid) {
+            final Activity activity = activityWeakReference.get();
+            if (activity == null || activity.isFinishing()) {
+                return;
+            }
+
+            int messageId = R.string.home_pinned_site;
+            if (!toggleWillPin) {
+                messageId = R.string.home_unpinned_site;
+            }
+
+            SnackbarBuilder.builder(activity)
+                    .message(messageId)
+                    .duration(Snackbar.LENGTH_LONG)
+                    .buildAndShow();
+        }
+    }
+
+    static class RemoveItemTask extends UIAsyncTask.WithoutParams<Void> {
+        private final WeakReference<Activity> activityWeakReference;
+        private final Context context;
+        private final HomeContextMenuInfo info;
+        private final int position;
+        private final BrowserDB db;
+
+        /**
+         * Remove bookmark/history/reading list type item, and also unpin the
+         * Top Sites grid item at index <code>position</code>.
+         */
+        RemoveItemTask(Activity activity, HomeContextMenuInfo info, int position) {
+            super(ThreadUtils.getBackgroundHandler());
+
+            this.activityWeakReference = new WeakReference<>(activity);
+            this.context = activity.getApplicationContext();
+            this.info = info;
+            this.position = position;
+            this.db = BrowserDB.from(context);
         }
 
         @Override
         public Void doInBackground() {
-            ContentResolver cr = mContext.getContentResolver();
+            ContentResolver cr = context.getContentResolver();
 
-            if (mPosition > -1) {
-                mDB.unpinSite(cr, mPosition);
-                if (mDB.hideSuggestedSite(mUrl)) {
+            if (position > -1) {
+                db.unpinSite(cr, position);
+                if (db.hideSuggestedSite(info.url)) {
                     cr.notifyChange(SuggestedSites.CONTENT_URI, null);
                 }
             }
 
-            switch(mType) {
+            final RemoveItemType type = info.itemType;
+            switch (type) {
                 case BOOKMARKS:
-                    Telemetry.sendUIEvent(TelemetryContract.Event.UNSAVE, TelemetryContract.Method.CONTEXT_MENU, "bookmark");
-                    mDB.removeBookmarksWithURL(cr, mUrl);
+                    removeBookmark(cr);
                     break;
 
                 case HISTORY:
-                    mDB.removeHistoryEntry(cr, mUrl);
+                    removeHistory(cr);
                     break;
 
-                case READING_LIST:
-                    Telemetry.sendUIEvent(TelemetryContract.Event.UNSAVE, TelemetryContract.Method.CONTEXT_MENU, "reading_list");
-                    mDB.getReadingListAccessor().removeReadingListItemWithURL(cr, mUrl);
-                    GeckoAppShell.notifyObservers("Reader:Removed", mUrl);
+                case COMBINED:
+                    removeBookmark(cr);
+                    removeHistory(cr);
                     break;
 
                 default:
-                    Log.e(LOGTAG, "Can't remove item type " + mType.toString());
+                    Log.e(LOGTAG, "Can't remove item type " + type.toString());
                     break;
             }
             return null;
@@ -424,9 +549,83 @@ public abstract class HomeFragment extends Fragment {
 
         @Override
         public void onPostExecute(Void result) {
-            SnackbarHelper.showSnackbar((Activity) mContext,
-                    mContext.getString(R.string.page_removed),
-                    Snackbar.LENGTH_LONG);
+            final Activity activity = activityWeakReference.get();
+            if (activity == null || activity.isFinishing()) {
+                return;
+            }
+            final int message;
+            if (info.isFolder) {
+                message = R.string.folder_removed;
+            } else {
+                message = R.string.page_removed;
+            }
+            SnackbarBuilder.builder(activity)
+                    .message(message)
+                    .duration(Snackbar.LENGTH_LONG)
+                    .buildAndShow();
+        }
+
+        private void removeBookmark(ContentResolver cr) {
+            SavedReaderViewHelper rch = SavedReaderViewHelper.getSavedReaderViewHelper(context);
+            final boolean isReaderViewPage = rch.isURLCached(info.url);
+
+            final String extra;
+            if (info.isFolder) {
+                extra = "bookmark_folder";
+            } else if (isReaderViewPage) {
+                extra = "bookmark_reader";
+            } else {
+                extra = "bookmark";
+            }
+
+            Telemetry.sendUIEvent(TelemetryContract.Event.UNSAVE, TelemetryContract.Method.CONTEXT_MENU, extra);
+            db.removeBookmarkWithId(cr, info.bookmarkId);
+
+            if (isReaderViewPage) {
+                ReadingListHelper.removeCachedReaderItem(info.url, context);
+            }
+        }
+
+        private void removeHistory(ContentResolver cr) {
+            db.removeHistoryEntry(cr, info.url);
+        }
+    }
+
+    private static class RemovePartnerBookmarkTask extends UIAsyncTask.WithoutParams<Void> {
+        private final WeakReference<Activity> activityWeakReference;
+        private Context context;
+        private long bookmarkId;
+
+        private RemovePartnerBookmarkTask(Activity activity, long bookmarkId) {
+            super(ThreadUtils.getBackgroundHandler());
+
+            this.activityWeakReference = new WeakReference<>(activity);
+            this.context = activity.getApplicationContext();
+            this.bookmarkId = bookmarkId;
+        }
+
+        @Override
+        protected Void doInBackground() {
+            context.getContentResolver().delete(
+                    PartnerBookmarksProviderProxy.getUriForBookmark(context, bookmarkId),
+                    null,
+                    null
+            );
+
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void aVoid) {
+            final Activity activity = activityWeakReference.get();
+            if (activity == null || activity.isFinishing()) {
+                return;
+            }
+
+            SnackbarBuilder.builder(activity)
+                    .message(R.string.page_removed)
+                    .duration(Snackbar.LENGTH_LONG)
+                    .buildAndShow();
         }
     }
 }

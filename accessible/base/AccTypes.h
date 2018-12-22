@@ -39,6 +39,7 @@ enum AccType {
   eHTMLTableCellType,
   eHTMLTableRowType,
   eHTMLTextFieldType,
+  eHTMLTextPasswordFieldType,
   eHyperTextType,
   eImageType,
   eOuterDocType,
@@ -83,8 +84,9 @@ enum AccGenericType {
   eTable = 1 << 12,
   eTableCell = 1 << 13,
   eTableRow = 1 << 14,
+  eText = 1 << 15,
 
-  eLastAccGenericType = eTableRow
+  eLastAccGenericType = eText
 };
 
 } // namespace a11y

@@ -1,9 +1,25 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+
+/* import-globals-from ../../shared/test/telemetry-test-helpers.js */
+
 "use strict";
 
-const { require, loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const { require, loader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 
+try {
+  Services.scriptloader.loadSubScript(
+    "chrome://mochitests/content/browser/devtools/client/shared/test/telemetry-test-helpers.js", this);
+} catch (e) {
+  ok(false,
+    "MISSING DEPENDENCY ON telemetry-test-helpers.js\n" +
+    "Please add the following line in browser.ini:\n" +
+    "  !/devtools/client/shared/test/telemetry-test-helpers.js\n"
+  );
+  throw e;
+}
+
+/* exported loader, either, click, dblclick, mousedown, rightMousedown, key */
 // All tests are asynchronous.
 waitForExplicitFinish();
 
@@ -22,7 +38,7 @@ const either = (value, a, b, message) => {
   } else {
     ok(false, message);
   }
-}
+};
 
 // Shortcut for simulating a click on an element.
 const click = (node, win = window) => {
@@ -51,25 +67,22 @@ const key = (id, win = window) => {
 
 // Don't pollute global scope.
 (() => {
-  const DevToolsUtils = require("devtools/shared/DevToolsUtils");
   const PrefUtils = require("devtools/client/performance/test/helpers/prefs");
 
-  DevToolsUtils.testing = true;
-
   // Make sure all the prefs are reverted to their defaults once tests finish.
-  let stopObservingPrefs = PrefUtils.whenUnknownPrefChanged("devtools.performance", pref => {
-    ok(false, `Unknown pref changed: ${pref}. Please add it to test/helpers/prefs.js ` +
-      "to make sure it's reverted to its default value when the tests finishes, " +
-      "and avoid interfering with future tests.\n");
-  });
+  const stopObservingPrefs = PrefUtils.whenUnknownPrefChanged("devtools.performance",
+    pref => {
+      ok(false, `Unknown pref changed: ${pref}. Please add it to test/helpers/prefs.js ` +
+        "to make sure it's reverted to its default value when the tests finishes, " +
+        "and avoid interfering with future tests.\n");
+    });
 
   // By default, enable memory flame graphs for tests for now.
   // TODO: remove when we have flame charts via bug 1148663.
   Services.prefs.setBoolPref(PrefUtils.UI_ENABLE_MEMORY_FLAME_CHART, true);
 
   registerCleanupFunction(() => {
-    info(`finish() was called, cleaning up...`);
-    DevToolsUtils.testing = false;
+    info("finish() was called, cleaning up...");
 
     PrefUtils.rollbackPrefsToDefault();
     stopObservingPrefs();
@@ -78,8 +91,7 @@ const key = (id, win = window) => {
     // avoid at least some leaks on OSX. Theoretically the module should never
     // be active at this point. We shouldn't have to do this, but rather
     // find and fix the leak in the module itself. Bug 1257439.
-    let nsIProfilerModule = Cc["@mozilla.org/tools/profiler;1"].getService(Ci.nsIProfiler);
-    nsIProfilerModule.StopProfiler();
+    Services.profiler.StopProfiler();
 
     // Forces GC, CC and shrinking GC to get rid of disconnected docshells
     // and windows.

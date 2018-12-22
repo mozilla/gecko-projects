@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_CycleCollectedJSRuntime_h__
-#define mozilla_CycleCollectedJSRuntime_h__
+#ifndef mozilla_CycleCollectedJSRuntime_h
+#define mozilla_CycleCollectedJSRuntime_h
 
 #include <queue>
 
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/DeferredFinalize.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/mozalloc.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/SegmentedVector.h"
@@ -19,13 +21,11 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
-#include "nsTArray.h"
 #include "nsTHashtable.h"
 
 class nsCycleCollectionNoteRootCallback;
 class nsIException;
 class nsIRunnable;
-class nsThread;
 class nsWrapperCache;
 
 namespace js {
@@ -37,6 +37,9 @@ namespace mozilla {
 class JSGCThingParticipant: public nsCycleCollectionParticipant
 {
 public:
+  constexpr JSGCThingParticipant()
+    : nsCycleCollectionParticipant(false) {}
+
   NS_IMETHOD_(void) Root(void*) override
   {
     MOZ_ASSERT(false, "Don't call Root on GC things");
@@ -57,14 +60,15 @@ public:
     MOZ_ASSERT(false, "Can't directly delete a cycle collectable GC thing");
   }
 
-  NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb)
-    override;
+  NS_IMETHOD TraverseNative(void* aPtr, nsCycleCollectionTraversalCallback& aCb) override;
+
+  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(JSGCThingParticipant)
 };
 
 class JSZoneParticipant : public nsCycleCollectionParticipant
 {
 public:
-  MOZ_CONSTEXPR JSZoneParticipant(): nsCycleCollectionParticipant()
+  constexpr JSZoneParticipant(): nsCycleCollectionParticipant(false)
   {
   }
 
@@ -88,46 +92,17 @@ public:
     MOZ_ASSERT(false, "Can't directly delete a cycle collectable GC thing");
   }
 
-  NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb)
-    override;
+  NS_IMETHOD TraverseNative(void* aPtr, nsCycleCollectionTraversalCallback& aCb) override;
+
+  NS_DECL_CYCLE_COLLECTION_CLASS_NAME_METHOD(JSZoneParticipant)
 };
 
 class IncrementalFinalizeRunnable;
 
-// Contains various stats about the cycle collection.
-struct CycleCollectorResults
+struct JSHolderInfo
 {
-  CycleCollectorResults()
-  {
-    // Initialize here so when we increment mNumSlices the first time we're
-    // not using uninitialized memory.
-    Init();
-  }
-
-  void Init()
-  {
-    mForcedGC = false;
-    mMergedZones = false;
-    mAnyManual = false;
-    mVisitedRefCounted = 0;
-    mVisitedGCed = 0;
-    mFreedRefCounted = 0;
-    mFreedGCed = 0;
-    mFreedJSZones = 0;
-    mNumSlices = 1;
-    // mNumSlices is initialized to one, because we call Init() after the
-    // per-slice increment of mNumSlices has already occurred.
-  }
-
-  bool mForcedGC;
-  bool mMergedZones;
-  bool mAnyManual; // true if any slice of the CC was manually triggered, or at shutdown.
-  uint32_t mVisitedRefCounted;
-  uint32_t mVisitedGCed;
-  uint32_t mFreedRefCounted;
-  uint32_t mFreedGCed;
-  uint32_t mFreedJSZones;
-  uint32_t mNumSlices;
+  void* mHolder;
+  nsScriptObjectTracer* mTracer;
 };
 
 class CycleCollectedJSRuntime
@@ -135,13 +110,12 @@ class CycleCollectedJSRuntime
   friend class JSGCThingParticipant;
   friend class JSZoneParticipant;
   friend class IncrementalFinalizeRunnable;
+  friend class CycleCollectedJSContext;
 protected:
-  CycleCollectedJSRuntime();
+  CycleCollectedJSRuntime(JSContext* aMainContext);
   virtual ~CycleCollectedJSRuntime();
 
-  nsresult Initialize(JSRuntime* aParentRuntime,
-                      uint32_t aMaxBytes,
-                      uint32_t aMaxNurseryBytes);
+  virtual void Shutdown(JSContext* cx);
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   void UnmarkSkippableJSHolders();
@@ -152,14 +126,11 @@ protected:
 
   virtual void CustomGCCallback(JSGCStatus aStatus) {}
   virtual void CustomOutOfMemoryCallback() {}
-  virtual void CustomLargeAllocationFailureCallback() {}
-  virtual bool CustomContextCallback(JSContext* aCx, unsigned aOperation)
-  {
-    return true; // Don't block context creation.
-  }
 
-  std::queue<nsCOMPtr<nsIRunnable>> mPromiseMicroTaskQueue;
-  std::queue<nsCOMPtr<nsIRunnable>> mDebuggerPromiseMicroTaskQueue;
+  LinkedList<CycleCollectedJSContext>& Contexts()
+  {
+    return mContexts;
+  }
 
 private:
   void
@@ -207,36 +178,32 @@ private:
 
   static void TraceBlackJS(JSTracer* aTracer, void* aData);
   static void TraceGrayJS(JSTracer* aTracer, void* aData);
-  static void GCCallback(JSRuntime* aRuntime, JSGCStatus aStatus, void* aData);
-  static void GCSliceCallback(JSRuntime* aRuntime, JS::GCProgress aProgress,
+  static void GCCallback(JSContext* aContext, JSGCStatus aStatus, void* aData);
+  static void GCSliceCallback(JSContext* aContext, JS::GCProgress aProgress,
                               const JS::GCDescription& aDesc);
-  static void GCNurseryCollectionCallback(JSRuntime* aRuntime,
+  static void GCNurseryCollectionCallback(JSContext* aContext,
                                           JS::GCNurseryProgress aProgress,
                                           JS::gcreason::Reason aReason);
   static void OutOfMemoryCallback(JSContext* aContext, void* aData);
-  static void LargeAllocationFailureCallback(void* aData);
+  /**
+   * Callback for reporting external string memory.
+   */
+  static size_t SizeofExternalStringCallback(JSString* aStr,
+                                             mozilla::MallocSizeOf aMallocSizeOf);
+
   static bool ContextCallback(JSContext* aCx, unsigned aOperation,
                               void* aData);
-  static bool EnqueuePromiseJobCallback(JSContext* aCx,
-                                        JS::HandleObject aJob,
-                                        void* aData);
 
   virtual void TraceNativeBlackRoots(JSTracer* aTracer) { };
   void TraceNativeGrayRoots(JSTracer* aTracer);
 
-  void AfterProcessMicrotask(uint32_t aRecursionDepth);
 public:
-  void ProcessStableStateQueue();
-private:
-  void ProcessMetastableStateQueue(uint32_t aRecursionDepth);
+  void FinalizeDeferredThings(CycleCollectedJSContext::DeferredFinalizeType aType);
 
-public:
-  enum DeferredFinalizeType {
-    FinalizeIncrementally,
-    FinalizeNow,
-  };
-
-  void FinalizeDeferredThings(DeferredFinalizeType aType);
+  virtual void PrepareForForgetSkippable() = 0;
+  virtual void BeginCycleCollectionCallback() = 0;
+  virtual void EndCycleCollectionCallback(CycleCollectorResults& aResults) = 0;
+  virtual void DispatchDeferredDeletion(bool aContinuation, bool aPurge = false) = 0;
 
   // Two conditions, JSOutOfMemory and JSLargeAllocationFailure, are noted in
   // crash reports. Here are the values that can appear in the reports:
@@ -270,11 +237,42 @@ public:
     Recovered
   };
 
-private:
+  void SetLargeAllocationFailure(OOMState aNewState);
+
   void AnnotateAndSetOutOfMemory(OOMState* aStatePtr, OOMState aNewState);
-  void OnGC(JSGCStatus aStatus);
+  void OnGC(JSContext* aContext, JSGCStatus aStatus);
   void OnOutOfMemory();
   void OnLargeAllocationFailure();
+
+  JSRuntime* Runtime() { return mJSRuntime; }
+  const JSRuntime* Runtime() const { return mJSRuntime; }
+
+  bool HasPendingIdleGCTask() const
+  {
+    // Idle GC task associates with JSRuntime.
+    MOZ_ASSERT_IF(mHasPendingIdleGCTask, Runtime());
+    return mHasPendingIdleGCTask;
+  }
+  void SetPendingIdleGCTask()
+  {
+    // Idle GC task associates with JSRuntime.
+    MOZ_ASSERT(Runtime());
+    mHasPendingIdleGCTask = true;
+  }
+  void ClearPendingIdleGCTask() { mHasPendingIdleGCTask = false; }
+
+  void RunIdleTimeGCTask()
+  {
+    if (HasPendingIdleGCTask()) {
+      JS::RunIdleTimeGCTask(Runtime());
+      ClearPendingIdleGCTask();
+    }
+  }
+
+  bool IsIdleGCTaskNeeded()
+  {
+    return !HasPendingIdleGCTask() && Runtime() && JS::IsIdleGCTaskNeeded(Runtime());
+  }
 
 public:
   void AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer);
@@ -284,21 +282,20 @@ public:
   void AssertNoObjectsToTrace(void* aPossibleJSHolder);
 #endif
 
-  already_AddRefed<nsIException> GetPendingException() const;
-  void SetPendingException(nsIException* aException);
-
-  std::queue<nsCOMPtr<nsIRunnable>>& GetPromiseMicroTaskQueue();
-  std::queue<nsCOMPtr<nsIRunnable>>& GetDebuggerPromiseMicroTaskQueue();
-
   nsCycleCollectionParticipant* GCThingParticipant();
   nsCycleCollectionParticipant* ZoneParticipant();
 
   nsresult TraverseRoots(nsCycleCollectionNoteRootCallback& aCb);
-  bool UsefulToMergeZones() const;
+  virtual bool UsefulToMergeZones() const;
   void FixWeakMappingGrayBits() const;
+  void CheckGrayBits() const;
   bool AreGCGrayBitsValid() const;
   void GarbageCollect(uint32_t aReason) const;
 
+  // This needs to be an nsWrapperCache, not a JSObject, because we need to know
+  // when our object gets moved.  But we can't trace it (and hence update our
+  // storage), because we do not want to keep it alive.  nsWrapperCache handles
+  // this for us via its "object moved" handling.
   void NurseryWrapperAdded(nsWrapperCache* aCache);
   void NurseryWrapperPreserved(JSObject* aWrapper);
   void JSObjectsTenured();
@@ -309,36 +306,6 @@ public:
   void DeferredFinalize(nsISupports* aSupports);
 
   void DumpJSHeap(FILE* aFile);
-
-  virtual void PrepareForForgetSkippable() = 0;
-  virtual void BeginCycleCollectionCallback() = 0;
-  virtual void EndCycleCollectionCallback(CycleCollectorResults& aResults) = 0;
-  virtual void DispatchDeferredDeletion(bool aContinuation, bool aPurge = false) = 0;
-
-  JSRuntime* Runtime() const
-  {
-    MOZ_ASSERT(mJSRuntime);
-    return mJSRuntime;
-  }
-
-  // nsThread entrypoints
-  virtual void BeforeProcessTask(bool aMightBlock) { };
-  virtual void AfterProcessTask(uint32_t aRecursionDepth);
-
-  // microtask processor entry point
-  void AfterProcessMicrotask();
-
-  uint32_t RecursionDepth();
-
-  // Run in stable state (call through nsContentUtils)
-  void RunInStableState(already_AddRefed<nsIRunnable>&& aRunnable);
-  // This isn't in the spec at all yet, but this gets the behavior we want for IDB.
-  // Runs after the current microtask completes.
-  void RunInMetastableState(already_AddRefed<nsIRunnable>&& aRunnable);
-
-  // Get the current thread's CycleCollectedJSRuntime.  Returns null if there
-  // isn't one.
-  static CycleCollectedJSRuntime* Get();
 
   // Add aZone to the set of zones waiting for a GC.
   void AddZoneWaitingForGC(JS::Zone* aZone)
@@ -352,49 +319,41 @@ public:
   // full GC.
   void PrepareWaitingZonesForGC();
 
-  // Queue an async microtask to the current main or worker thread.
-  virtual void DispatchToMicroTask(nsIRunnable* aRunnable);
+  // Get the current thread's CycleCollectedJSRuntime.  Returns null if there
+  // isn't one.
+  static CycleCollectedJSRuntime* Get();
 
-  // Storage for watching rejected promises waiting for some client to
-  // consume their rejection.
-  // We store values as `nsISupports` to avoid adding compile-time dependencies
-  // from xpcom to dom/promise, but they can really only have a single concrete
-  // type.
-  nsTArray<nsCOMPtr<nsISupports /* Promise */>> mUncaughtRejections;
-  nsTArray<nsCOMPtr<nsISupports /* Promise */ >> mConsumedRejections;
-  nsTArray<nsCOMPtr<nsISupports /* UncaughtRejectionObserver */ >> mUncaughtRejectionObservers;
+  void AddContext(CycleCollectedJSContext* aContext);
+  void RemoveContext(CycleCollectedJSContext* aContext);
+
+#ifdef NIGHTLY_BUILD
+  bool GetRecentDevError(JSContext* aContext, JS::MutableHandle<JS::Value> aError);
+  void ClearRecentDevError();
+#endif // defined(NIGHTLY_BUILD)
 
 private:
+  LinkedList<CycleCollectedJSContext> mContexts;
+
   JSGCThingParticipant mGCThingCycleCollectorGlobal;
 
   JSZoneParticipant mJSZoneCycleCollectorGlobal;
 
   JSRuntime* mJSRuntime;
+  bool mHasPendingIdleGCTask;
 
   JS::GCSliceCallback mPrevGCSliceCallback;
   JS::GCNurseryCollectionCallback mPrevGCNurseryCollectionCallback;
 
-  nsDataHashtable<nsPtrHashKey<void>, nsScriptObjectTracer*> mJSHolders;
+  mozilla::TimeStamp mLatestNurseryCollectionStart;
+
+  SegmentedVector<JSHolderInfo, 1024, InfallibleAllocPolicy> mJSHolders;
+  nsDataHashtable<nsPtrHashKey<void>, JSHolderInfo*> mJSHolderMap;
 
   typedef nsDataHashtable<nsFuncPtrHashKey<DeferredFinalizeFunction>, void*>
     DeferredFinalizerTable;
   DeferredFinalizerTable mDeferredFinalizerTable;
 
   RefPtr<IncrementalFinalizeRunnable> mFinalizeRunnable;
-
-  nsCOMPtr<nsIException> mPendingException;
-  nsThread* mOwningThread; // Manual refcounting to avoid include hell.
-
-  struct RunInMetastableStateData
-  {
-    nsCOMPtr<nsIRunnable> mRunnable;
-    uint32_t mRecursionDepth;
-  };
-
-  nsTArray<nsCOMPtr<nsIRunnable>> mStableStateEvents;
-  nsTArray<RunInMetastableStateData> mMetastableStateEvents;
-  uint32_t mBaseRecursionDepth;
-  bool mDoingStableStates;
 
   OOMState mOutOfMemoryState;
   OOMState mLargeAllocationFailureState;
@@ -412,6 +371,41 @@ private:
     void invoke(JS::HandleObject scope, Closure& closure) override;
   };
   EnvironmentPreparer mEnvironmentPreparer;
+
+#ifdef DEBUG
+  bool mShutdownCalled;
+#endif
+
+#ifdef NIGHTLY_BUILD
+  // Implementation of the error interceptor.
+  // Built on nightly only to avoid any possible performance impact on release
+
+  struct ErrorInterceptor final : public JSErrorInterceptor {
+    virtual void interceptError(JSContext* cx, const JS::Value& val) override;
+    void Shutdown(JSRuntime* rt);
+
+    // Copy of the details of the exception.
+    // We store this rather than the exception itself to avoid dealing with complicated
+    // garbage-collection scenarios, e.g. a JSContext being killed while we still hold
+    // onto an exception thrown from it.
+    struct ErrorDetails {
+      nsString mFilename;
+      nsString mMessage;
+      nsString mStack;
+      JSExnType mType;
+      uint32_t mLine;
+      uint32_t mColumn;
+    };
+
+    // If we have encountered at least one developer error,
+    // the first error we have encountered. Otherwise, or
+    // if we have reset since the latest error, `None`.
+    Maybe<ErrorDetails> mThrownError;
+  };
+  ErrorInterceptor mErrorInterceptor;
+
+#endif // defined(NIGHTLY_BUILD)
+
 };
 
 void TraceScriptHolder(nsISupports* aHolder, JSTracer* aTracer);
@@ -419,7 +413,10 @@ void TraceScriptHolder(nsISupports* aHolder, JSTracer* aTracer);
 // Returns true if the JS::TraceKind is one the cycle collector cares about.
 inline bool AddToCCKind(JS::TraceKind aKind)
 {
-  return aKind == JS::TraceKind::Object || aKind == JS::TraceKind::Script;
+  return aKind == JS::TraceKind::Object ||
+         aKind == JS::TraceKind::Script ||
+         aKind == JS::TraceKind::Scope ||
+         aKind == JS::TraceKind::RegExpShared;
 }
 
 bool
@@ -427,4 +424,4 @@ GetBuildId(JS::BuildIdCharVector* aBuildID);
 
 } // namespace mozilla
 
-#endif // mozilla_CycleCollectedJSRuntime_h__
+#endif // mozilla_CycleCollectedJSRuntime_h

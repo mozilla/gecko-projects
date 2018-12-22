@@ -36,14 +36,14 @@ function runTest() {
   file.fileAttributesWin &= ~file.WFA_READWRITE;
 
   let url = URL_HTTP_UPDATE_XML + "?showDetails=1" + getVersionParams();
-  setUpdateURLOverride(url);
+  setUpdateURL(url);
 
   gUP.checkForUpdates();
 }
 
 function getWriteTestFile() {
-  let file = getAppBaseDir();
-  file.append(FILE_PERMS_TEST);
+  let file = getUpdatesRootDir();
+  file.append(FILE_UPDATE_TEST);
   file.QueryInterface(Ci.nsILocalFileWin);
   if (file.exists()) {
     file.fileAttributesWin |= file.WFA_READWRITE;

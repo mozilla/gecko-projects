@@ -25,7 +25,7 @@ public:
   /*
    * Return the HWND or null for this widget.
    */
-  virtual HWND GetWindowHandle() final {
+  HWND GetWindowHandle() {
     return static_cast<HWND>(GetNativeData(NS_NATIVE_WINDOW));
   }
 
@@ -86,11 +86,16 @@ public:
   virtual bool DispatchPluginEvent(const MSG& aMsg);
 
   /*
+   * Returns true if this should dispatch a plugin event.
+   */
+  bool ShouldDispatchPluginEvent();
+
+  /*
    * Touch input injection apis
    */
   virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                               TouchPointerState aPointerState,
-                                              ScreenIntPoint aPointerScreenPoint,
+                                              LayoutDeviceIntPoint aPoint,
                                               double aPointerPressure,
                                               uint32_t aPointerOrientation,
                                               nsIObserver* aObserver) override;
@@ -103,32 +108,38 @@ public:
   virtual bool HandleAppCommandMsg(const MSG& aAppCommandMsg,
                                    LRESULT *aRetValue);
 
+  const InputContext& InputContextRef() const { return mInputContext; }
+
 protected:
   virtual int32_t LogToPhys(double aValue) = 0;
   void ChangedDPI();
 
   static bool InitTouchInjection();
-  bool InjectTouchPoint(uint32_t aId, ScreenIntPoint& aPointerScreenPoint,
+  bool InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
                         POINTER_FLAGS aFlags, uint32_t aPressure = 1024,
                         uint32_t aOrientation = 90);
 
   class PointerInfo
   {
   public:
-    PointerInfo(int32_t aPointerId, ScreenIntPoint& aPoint) :
+    PointerInfo(int32_t aPointerId, LayoutDeviceIntPoint& aPoint) :
       mPointerId(aPointerId),
       mPosition(aPoint)
     {
     }
 
     int32_t mPointerId;
-    ScreenIntPoint mPosition;
+    LayoutDeviceIntPoint mPosition;
   };
 
   nsClassHashtable<nsUint32HashKey, PointerInfo> mActivePointers;
   static bool sTouchInjectInitialized;
   static InjectTouchInputPtr sInjectTouchFuncPtr;
 
+  // This is used by SynthesizeNativeTouchPoint to maintain state between
+  // multiple synthesized points, in the case where we can't call InjectTouch
+  // directly.
+  mozilla::UniquePtr<mozilla::MultiTouchInput> mSynthesizedTouchInput;
 protected:
   InputContext mInputContext;
 };

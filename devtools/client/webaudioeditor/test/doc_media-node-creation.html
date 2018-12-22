@@ -10,15 +10,15 @@
 
   <body>
 
-    <script type="text/javascript;version=1.8">
+    <script type="text/javascript">
       "use strict";
 
-      let ctx = new AudioContext();
-      let audio = new Audio();
+      const ctx = new AudioContext();
+      const audio = new Audio();
       let meNode, msNode, mdNode;
       navigator.getUserMedia = navigator.getUserMedia || navigator.mozGetUserMedia;
 
-      navigator.getUserMedia({ audio: true }, stream => {
+      navigator.getUserMedia({ audio: true, fake: true }, stream => {
         meNode = ctx.createMediaElementSource(audio);
         msNode = ctx.createMediaStreamSource(stream);
         mdNode = ctx.createMediaStreamDestination();

@@ -16,9 +16,9 @@ namespace dom {
 
 VideoPlaybackQuality::VideoPlaybackQuality(HTMLMediaElement* aElement,
                                            DOMHighResTimeStamp aCreationTime,
-                                           uint64_t aTotalFrames,
-                                           uint64_t aDroppedFrames,
-                                           uint64_t aCorruptedFrames)
+                                           uint32_t aTotalFrames,
+                                           uint32_t aDroppedFrames,
+                                           uint32_t aCorruptedFrames)
   : mElement(aElement)
   , mCreationTime(aCreationTime)
   , mTotalFrames(aTotalFrames)
@@ -36,7 +36,7 @@ VideoPlaybackQuality::GetParentObject() const
 JSObject*
 VideoPlaybackQuality::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return VideoPlaybackQualityBinding::Wrap(aCx, this, aGivenProto);
+  return VideoPlaybackQuality_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(VideoPlaybackQuality, AddRef)

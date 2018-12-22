@@ -7,10 +7,13 @@
 #define mozilla_layers_APZCCallbackHelper_h
 
 #include "FrameMetrics.h"
+#include "InputData.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/Function.h"
 #include "mozilla/layers/APZUtils.h"
 #include "nsIDOMWindowUtils.h"
+#include "nsRefreshDriver.h"
+
+#include <functional>
 
 class nsIContent;
 class nsIDocument;
@@ -23,8 +26,27 @@ template<class T> class nsCOMPtr;
 namespace mozilla {
 namespace layers {
 
-typedef function<void(uint64_t, const nsTArray<TouchBehaviorFlags>&)>
+typedef std::function<void(uint64_t, const nsTArray<TouchBehaviorFlags>&)>
         SetAllowedTouchBehaviorCallback;
+
+/* Refer to documentation on SendSetTargetAPZCNotification for this class */
+class DisplayportSetListener : public nsAPostRefreshObserver
+{
+public:
+  DisplayportSetListener(nsIWidget* aWidget,
+                         nsIPresShell* aPresShell,
+                         const uint64_t& aInputBlockId,
+                         const nsTArray<ScrollableLayerGuid>& aTargets);
+  virtual ~DisplayportSetListener();
+  bool Register();
+  void DidRefresh() override;
+
+private:
+  RefPtr<nsIWidget> mWidget;
+  RefPtr<nsIPresShell> mPresShell;
+  uint64_t mInputBlockId;
+  nsTArray<ScrollableLayerGuid> mTargets;
+};
 
 /* This class contains some helper methods that facilitate implementing the
    GeckoContentController callback interface required by the AsyncPanZoomController.
@@ -66,10 +88,8 @@ public:
        given presShell. */
     static void InitializeRootDisplayport(nsIPresShell* aPresShell);
 
-    /* Tell layout that we received the scroll offset update for the given view ID, so
-       that it accepts future scroll offset updates from APZ. */
-    static void AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
-                                        const uint32_t& aScrollGeneration);
+    /* Get the pres context associated with the document enclosing |aContent|. */
+    static nsPresContext* GetPresContextForContent(nsIContent* aContent);
 
     /* Get the pres shell associated with the root content document enclosing |aContent|. */
     static nsIPresShell* GetRootContentDocumentPresShellForContent(nsIContent* aContent);
@@ -109,10 +129,12 @@ public:
                                                        uint64_t aTime,
                                                        const LayoutDevicePoint& aRefPoint,
                                                        Modifiers aModifiers,
+                                                       int32_t aClickCount,
                                                        nsIWidget* aWidget);
 
     /* Dispatch a mouse event with the given parameters.
      * Return whether or not any listeners have called preventDefault on the event. */
+    MOZ_CAN_RUN_SCRIPT
     static bool DispatchMouseEvent(const nsCOMPtr<nsIPresShell>& aPresShell,
                                    const nsString& aType,
                                    const CSSPoint& aPoint,
@@ -120,35 +142,46 @@ public:
                                    int32_t aClickCount,
                                    int32_t aModifiers,
                                    bool aIgnoreRootScrollFrame,
-                                   unsigned short aInputSourceArg);
+                                   unsigned short aInputSourceArg,
+                                   uint32_t aPointerId);
 
     /* Fire a single-tap event at the given point. The event is dispatched
      * via the given widget. */
     static void FireSingleTapEvent(const LayoutDevicePoint& aPoint,
                                    Modifiers aModifiers,
+                                   int32_t aClickCount,
                                    nsIWidget* aWidget);
 
     /* Perform hit-testing on the touch points of |aEvent| to determine
      * which scrollable frames they target. If any of these frames don't have
      * a displayport, set one.
      *
-     * If any displayports need to be set, the actual notification to APZ is
-     * sent to the compositor, which will then post a message back to APZ's
-     * controller thread. Otherwise, the provided widget's SetConfirmedTargetAPZC
-     * method is invoked immediately.
+     * If any displayports need to be set, this function returns a heap-allocated
+     * object. The caller is responsible for calling Register() on that object,
+     * and release()'ing the UniquePtr if that Register() call returns true.
+     * The object registers itself as a post-refresh observer on the presShell
+     * and ensures that notifications get sent to APZ correctly after the
+     * refresh.
+     *
+     * Having the caller manage this object is desirable in case they want to
+     * (a) know about the fact that a displayport needs to be set, and
+     * (b) register a post-refresh observer of their own that will run in
+     *     a defined ordering relative to the APZ messages.
      */
-    static void SendSetTargetAPZCNotification(nsIWidget* aWidget,
-                                              nsIDocument* aDocument,
-                                              const WidgetGUIEvent& aEvent,
-                                              const ScrollableLayerGuid& aGuid,
-                                              uint64_t aInputBlockId);
+    static UniquePtr<DisplayportSetListener> SendSetTargetAPZCNotification(
+            nsIWidget* aWidget,
+            nsIDocument* aDocument,
+            const WidgetGUIEvent& aEvent,
+            const ScrollableLayerGuid& aGuid,
+            uint64_t aInputBlockId);
 
     /* Figure out the allowed touch behaviors of each touch point in |aEvent|
      * and send that information to the provided callback. */
     static void SendSetAllowedTouchBehaviorNotification(nsIWidget* aWidget,
-                                                         const WidgetTouchEvent& aEvent,
-                                                         uint64_t aInputBlockId,
-                                                         const SetAllowedTouchBehaviorCallback& aCallback);
+                                                        nsIDocument* aDocument,
+                                                        const WidgetTouchEvent& aEvent,
+                                                        uint64_t aInputBlockId,
+                                                        const SetAllowedTouchBehaviorCallback& aCallback);
 
     /* Notify content of a mouse scroll testing event. */
     static void NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId, const nsString& aEvent);
@@ -156,15 +189,10 @@ public:
     /* Notify content that the repaint flush is complete. */
     static void NotifyFlushComplete(nsIPresShell* aShell);
 
-    /* Temporarily ignore the Displayport for better paint performance. If at
-     * all possible, pass in a presShell if you have one at the call site, we
-     * use it to trigger a repaint once suppression is disabled. Without that
-     * the displayport may get left at the suppressed size for an extended
-     * period of time and result in unnecessary checkerboarding (see bug
-     * 1255054). */
-    static void SuppressDisplayport(const bool& aEnabled,
-                                    const nsCOMPtr<nsIPresShell>& aShell);
-    static bool IsDisplayportSuppressed();
+    static void NotifyAsyncScrollbarDragRejected(const FrameMetrics::ViewID& aScrollId);
+    static void NotifyAsyncAutoscrollRejected(const FrameMetrics::ViewID& aScrollId);
+
+    static void CancelAutoscroll(const FrameMetrics::ViewID& aScrollId);
 
     static void
     AdjustDisplayPortForScrollDelta(mozilla::layers::FrameMetrics& aFrameMetrics,
@@ -177,6 +205,15 @@ public:
      */
     static bool
     IsScrollInProgress(nsIScrollableFrame* aFrame);
+
+    /* Notify content of the progress of a pinch gesture that APZ won't do
+     * zooming for (because the apz.allow_zooming pref is false). This function
+     * will dispatch appropriate WidgetSimpleGestureEvent events to gecko.
+     */
+    static void NotifyPinchGesture(PinchGestureInput::PinchGestureType aType,
+                                   LayoutDeviceCoord aSpanChange,
+                                   Modifiers aModifiers,
+                                   nsIWidget* aWidget);
 private:
   static uint64_t sLastTargetAPZCNotificationInputBlock;
 };

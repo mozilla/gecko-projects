@@ -4,8 +4,8 @@
 function read_stream(stream, count) {
   /* assume stream has non-ASCII data */
   var wrapper =
-      Components.classes["@mozilla.org/binaryinputstream;1"]
-                .createInstance(Components.interfaces.nsIBinaryInputStream);
+      Cc["@mozilla.org/binaryinputstream;1"]
+        .createInstance(Ci.nsIBinaryInputStream);
   wrapper.setInputStream(stream);
   /* JS methods can be called with a maximum of 65535 arguments, and input
      streams don't have to return all the data they make .available() when
@@ -52,6 +52,8 @@ function ChannelListener(closure, ctx, flags) {
   this._closure = closure;
   this._closurectx = ctx;
   this._flags = flags;
+  this._isFromCache = false;
+  this._cacheEntryId = undefined;
 }
 ChannelListener.prototype = {
   _closure: null,
@@ -63,11 +65,11 @@ ChannelListener.prototype = {
   _lastEvent: 0,
 
   QueryInterface: function(iid) {
-    if (iid.equals(Components.interfaces.nsIStreamListener) ||
-        iid.equals(Components.interfaces.nsIRequestObserver) ||
-        iid.equals(Components.interfaces.nsISupports))
+    if (iid.equals(Ci.nsIStreamListener) ||
+        iid.equals(Ci.nsIRequestObserver) ||
+        iid.equals(Ci.nsISupports))
       return this;
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
   onStartRequest: function(request, context) {
@@ -77,7 +79,22 @@ ChannelListener.prototype = {
       this._got_onstartrequest = true;
       this._lastEvent = Date.now();
 
-      request.QueryInterface(Components.interfaces.nsIChannel);
+      try {
+        this._isFromCache = request.QueryInterface(Ci.nsICacheInfoChannel).isFromCache();
+      } catch (e) {}
+
+      var thrown = false;
+      try {
+        this._cacheEntryId = request.QueryInterface(Ci.nsICacheInfoChannel).getCacheEntryId();
+      } catch (e) {
+        thrown = true;
+      }
+      if (this._isFromCache && thrown)
+        do_throw("Should get a CacheEntryId");
+      else if (!this._isFromCache && !thrown)
+        do_throw("Shouldn't get a CacheEntryId");
+
+      request.QueryInterface(Ci.nsIChannel);
       try {
         this._contentLen = request.contentLength;
       }
@@ -107,7 +124,6 @@ ChannelListener.prototype = {
         request.suspend();
         do_timeout(SUSPEND_DELAY, function() { request.resume(); });
       }
-
     } catch (ex) {
       do_throw("Error in onStartRequest: " + ex);
     }
@@ -162,12 +178,17 @@ ChannelListener.prototype = {
       if (!(this._flags & (CL_EXPECT_FAILURE | CL_EXPECT_LATE_FAILURE | CL_IGNORE_CL)) &&
           !(this._flags & CL_EXPECT_GZIP) &&
           this._contentLen != -1)
-          do_check_eq(this._buffer.length, this._contentLen)
+          Assert.equal(this._buffer.length, this._contentLen)
     } catch (ex) {
       do_throw("Error in onStopRequest: " + ex);
     }
     try {
-      this._closure(request, this._buffer, this._closurectx);
+      this._closure(request,
+                    this._buffer,
+                    this._closurectx,
+                    this._isFromCache,
+                    this._cacheEntryId);
+      this._closurectx = null;
     } catch (ex) {
       do_throw("Error in closure function: " + ex);
     }
@@ -203,39 +224,16 @@ ChannelEventSink.prototype = {
   }
 };
 
-
 /**
- * Class that implements nsILoadContext.  Use it as callbacks for channel when
- * test needs it.
+ * A helper class to construct origin attributes.
  */
-function LoadContextCallback(appId, inIsolatedMozBrowser, isPrivate, isContent) {
+function OriginAttributes(appId, inIsolatedMozBrowser, privateId) {
   this.appId = appId;
-  this.isInIsolatedMozBrowserElement = inIsolatedMozBrowser;
-  this.originAttributes = {
-    appId: appId,
-    inIsolatedMozBrowser: inIsolatedMozBrowser
-  };
-  this.usePrivateBrowsing = isPrivate;
-  this.isContent = isContent;
+  this.inIsolatedMozBrowser = inIsolatedMozBrowser;
+  this.privateBrowsingId = privateId;
 }
-
-LoadContextCallback.prototype = {
-  associatedWindow: null,
-  topWindow : null,
-  isAppOfType: function(appType) {
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  },
-  QueryInterface: function(iid) {
-    if (iid.equals(Ci.nsILoadContext) ||
-        iid.equals(Ci.nsIInterfaceRequestor) ||
-        iid.equals(Ci.nsISupports)) {
-        return this;
-    }
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-  getInterface: function(iid) {
-    if (iid.equals(Ci.nsILoadContext))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-}
+OriginAttributes.prototype = {
+  appId: 0,
+  inIsolatedMozBrowser: false,
+  privateBrowsingId: 0
+};

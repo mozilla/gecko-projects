@@ -6,6 +6,7 @@
 #define Logging_h
 
 #include "mozilla/Likely.h"
+#include "mozilla/MacroArgs.h"
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -24,9 +25,6 @@
   MOZ_ONE_OR_MORE_ARGS_IMPL((__VA_ARGS__, m, m, m, m, m, m, m, m, 1, 0))
 
 #define MOZ_MACRO_GLUE(a, b) a b
-#define MOZ_CONCAT2(a, b) a ## b
-#define MOZ_CONCAT1(a, b) MOZ_CONCAT2(a, b)
-#define MOZ_CONCAT(a, b) MOZ_CONCAT1(a, b)
 
 /* Some magic to choose between LOG1 and LOGm depending on the number of
  * arguments */
@@ -71,17 +69,5 @@ private:
       LOG(__VA_ARGS__);  \
     }                    \
   } while(0)
-
-#if defined(__LP64__)
-#  define PRIxAddr "lx"
-#  define PRIxSize "lx"
-#  define PRIdSize "ld"
-#  define PRIuSize "lu"
-#else
-#  define PRIxAddr "x"
-#  define PRIxSize "x"
-#  define PRIdSize "d"
-#  define PRIuSize "u"
-#endif
 
 #endif /* Logging_h */

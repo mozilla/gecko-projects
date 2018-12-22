@@ -22,7 +22,7 @@
 #include "nsSVGFilters.h"
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
-#include "nsStyleContext.h"
+#include "mozilla/ComputedStyle.h"
 #include "nsIFrame.h"
 #include "imgIContainer.h"
 #include "mozilla/dom/SVGFilterElement.h"
@@ -38,6 +38,7 @@
 #include "mozilla/dom/SVGFEFuncRElementBinding.h"
 #include "mozilla/dom/SVGFEPointLightElement.h"
 #include "mozilla/dom/SVGFESpotLightElement.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 
 #if defined(XP_WIN)
 // Prevent Windows redefining LoadImage
@@ -52,10 +53,10 @@ using namespace mozilla::gfx;
 
 nsSVGElement::LengthInfo nsSVGFE::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 100, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 100, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y }
+  { &nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 100, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 100, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y }
 };
 
 //----------------------------------------------------------------------
@@ -65,11 +66,7 @@ NS_IMPL_ADDREF_INHERITED(nsSVGFE,nsSVGFEBase)
 NS_IMPL_RELEASE_INHERITED(nsSVGFE,nsSVGFEBase)
 
 NS_INTERFACE_MAP_BEGIN(nsSVGFE)
-   // nsISupports is an ambiguous base of nsSVGFE so we have to work
-   // around that
-   if ( aIID.Equals(NS_GET_IID(nsSVGFE)) )
-     foundInterface = static_cast<nsISupports*>(static_cast<void*>(this));
-   else
+   NS_INTERFACE_MAP_ENTRY_CONCRETE(nsSVGFE)
 NS_INTERFACE_MAP_END_INHERITING(nsSVGFEBase)
 
 //----------------------------------------------------------------------
@@ -96,7 +93,7 @@ nsSVGFE::OutputIsTainted(const nsTArray<bool>& aInputsAreTainted,
 
 bool
 nsSVGFE::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                   nsIAtom* aAttribute) const
+                                   nsAtom* aAttribute) const
 {
   return aNameSpaceID == kNameSpaceID_None &&
          (aAttribute == nsGkAtoms::x ||
@@ -140,12 +137,12 @@ nsSVGFE::Result()
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-nsSVGFE::IsAttributeMapped(const nsIAtom* name) const
+nsSVGFE::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sFiltersMap
   };
-  
+
   return FindAttributeDependence(name, map) ||
     nsSVGFEBase::IsAttributeMapped(name);
 }
@@ -160,7 +157,7 @@ nsSVGFE::StyleIsSetToSRGB()
   nsIFrame* frame = GetPrimaryFrame();
   if (!frame) return false;
 
-  nsStyleContext* style = frame->StyleContext();
+  ComputedStyle* style = frame->Style();
   return style->StyleSVG()->mColorInterpolationFilters ==
            NS_STYLE_COLOR_INTERPOLATION_SRGB;
 }
@@ -244,11 +241,7 @@ NS_IMPL_ADDREF_INHERITED(SVGComponentTransferFunctionElement,SVGComponentTransfe
 NS_IMPL_RELEASE_INHERITED(SVGComponentTransferFunctionElement,SVGComponentTransferFunctionElementBase)
 
 NS_INTERFACE_MAP_BEGIN(SVGComponentTransferFunctionElement)
-   // nsISupports is an ambiguous base of nsSVGFE so we have to work
-   // around that
-   if ( aIID.Equals(NS_GET_IID(SVGComponentTransferFunctionElement)) )
-     foundInterface = static_cast<nsISupports*>(static_cast<void*>(this));
-   else
+   NS_INTERFACE_MAP_ENTRY_CONCRETE(SVGComponentTransferFunctionElement)
 NS_INTERFACE_MAP_END_INHERITING(SVGComponentTransferFunctionElementBase)
 
 
@@ -257,7 +250,7 @@ NS_INTERFACE_MAP_END_INHERITING(SVGComponentTransferFunctionElementBase)
 
 bool
 SVGComponentTransferFunctionElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                               nsIAtom* aAttribute) const
+                                                               nsAtom* aAttribute) const
 {
   return aNameSpaceID == kNameSpaceID_None &&
          (aAttribute == nsGkAtoms::tableValues ||
@@ -320,7 +313,7 @@ SVGComponentTransferFunctionElement::ComputeAttributes()
   uint32_t type = mEnumAttributes[TYPE].GetAnimValue();
 
   float slope, intercept, amplitude, exponent, offset;
-  GetAnimatedNumberValues(&slope, &intercept, &amplitude, 
+  GetAnimatedNumberValues(&slope, &intercept, &amplitude,
                           &exponent, &offset, nullptr);
 
   const SVGNumberList &tableValues =
@@ -368,7 +361,7 @@ SVGComponentTransferFunctionElement::GetNumberInfo()
 /* virtual */ JSObject*
 SVGFEFuncRElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncRElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncRElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -384,7 +377,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncRElement)
 /* virtual */ JSObject*
 SVGFEFuncGElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncGElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -400,7 +393,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncGElement)
 /* virtual */ JSObject*
 SVGFEFuncBElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncBElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncBElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -416,7 +409,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncBElement)
 /* virtual */ JSObject*
 SVGFEFuncAElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncAElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -454,21 +447,13 @@ nsSVGElement::StringInfo nsSVGFELightingElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(nsSVGFELightingElement,nsSVGFELightingElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGFELightingElement,nsSVGFELightingElementBase)
-
-NS_INTERFACE_MAP_BEGIN(nsSVGFELightingElement) 
-NS_INTERFACE_MAP_END_INHERITING(nsSVGFELightingElementBase)
-
-//----------------------------------------------------------------------
 // Implementation
 
 NS_IMETHODIMP_(bool)
-nsSVGFELightingElement::IsAttributeMapped(const nsIAtom* name) const
+nsSVGFELightingElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
+    sColorMap,
     sLightingEffectsMap
   };
 
@@ -502,7 +487,7 @@ nsSVGFELightingElement::ComputeLightAttributes(nsSVGFilterInstance* aInstance)
 }
 
 FilterPrimitiveDescription
-nsSVGFELightingElement::AddLightingAttributes(FilterPrimitiveDescription aDescription,
+nsSVGFELightingElement::AddLightingAttributes(const FilterPrimitiveDescription& aDescription,
                                               nsSVGFilterInstance* aInstance)
 {
   nsIFrame* frame = GetPrimaryFrame();
@@ -510,14 +495,20 @@ nsSVGFELightingElement::AddLightingAttributes(FilterPrimitiveDescription aDescri
     return FilterPrimitiveDescription(PrimitiveType::Empty);
   }
 
-  nsStyleContext* style = frame->StyleContext();
-  Color color(Color::FromABGR(style->StyleSVGReset()->mLightingColor));
+  const nsStyleSVGReset* styleSVGReset = frame->Style()->StyleSVGReset();
+  Color color(Color::FromABGR(styleSVGReset->mLightingColor.CalcColor(frame)));
   color.a = 1.f;
   float surfaceScale = mNumberAttributes[SURFACE_SCALE].GetAnimValue();
   Size kernelUnitLength =
     GetKernelUnitLength(aInstance, &mNumberPairAttributes[KERNEL_UNIT_LENGTH]);
 
-  FilterPrimitiveDescription& descr = aDescription;
+  if (kernelUnitLength.width <= 0 || kernelUnitLength.height <= 0) {
+    // According to spec, A negative or zero value is an error. See link below for details.
+    // https://www.w3.org/TR/SVG/filters.html#feSpecularLightingKernelUnitLengthAttribute
+    return FilterPrimitiveDescription(PrimitiveType::Empty);
+  }
+
+  FilterPrimitiveDescription descr = aDescription;
   descr.Attributes().Set(eLightingLight, ComputeLightAttributes(aInstance));
   descr.Attributes().Set(eLightingSurfaceScale, surfaceScale);
   descr.Attributes().Set(eLightingKernelUnitLength, kernelUnitLength);
@@ -527,7 +518,7 @@ nsSVGFELightingElement::AddLightingAttributes(FilterPrimitiveDescription aDescri
 
 bool
 nsSVGFELightingElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                  nsIAtom* aAttribute) const
+                                                  nsAtom* aAttribute) const
 {
   return nsSVGFELightingElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
          (aNameSpaceID == kNameSpaceID_None &&

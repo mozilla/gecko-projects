@@ -11,14 +11,12 @@
 #include <errno.h>
 #include <sys/utsname.h>
 #include "nsCRTGlue.h"
+#include "nsExceptionHandler.h"
+#include "nsICrashReporter.h"
 #include "prenv.h"
 
 #include "GfxInfoX11.h"
 
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#include "nsICrashReporter.h"
-#endif
 
 namespace mozilla {
 namespace widget {
@@ -28,7 +26,7 @@ NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
 #endif
 
 // these global variables will be set when firing the glxtest process
-int glxtest_pipe = 0;
+int glxtest_pipe = -1;
 pid_t glxtest_pid = 0;
 
 nsresult
@@ -55,8 +53,8 @@ GfxInfo::GetData()
     // to understand this function, see bug 639842. We retrieve the OpenGL driver information in a
     // separate process to protect against bad drivers.
 
-    // if glxtest_pipe == 0, that means that we already read the information
-    if (!glxtest_pipe)
+    // if glxtest_pipe == -1, that means that we already read the information
+    if (glxtest_pipe == -1)
         return;
 
     enum { buf_size = 1024 };
@@ -65,7 +63,7 @@ GfxInfo::GetData()
                              &buf,
                              buf_size-1); // -1 because we'll append a zero
     close(glxtest_pipe);
-    glxtest_pipe = 0;
+    glxtest_pipe = -1;
 
     // bytesread < 0 would mean that the above read() call failed.
     // This should never happen. If it did, the outcome would be to blacklist anyway.
@@ -135,7 +133,7 @@ GfxInfo::GetData()
     // only useful for Linux kernel version check for FGLRX driver.
     // assumes X client == X server, which is sad.
     struct utsname unameobj;
-    if (!uname(&unameobj))
+    if (uname(&unameobj) >= 0)
     {
       mOS.Assign(unameobj.sysname);
       mOSRelease.Assign(unameobj.release);
@@ -176,9 +174,8 @@ GfxInfo::GetData()
             mAdapterDescription.Append(nsDependentCString(buf));
             mAdapterDescription.Append('\n');
         }
-#ifdef MOZ_CRASHREPORTER
+
         CrashReporter::AppendAppNotesToCrashReport(mAdapterDescription);
-#endif
         return;
     }
 
@@ -194,9 +191,8 @@ GfxInfo::GetData()
     if (mHasTextureFromPixmap)
         note.AppendLiteral(" -- texture_from_pixmap");
     note.Append('\n');
-#ifdef MOZ_CRASHREPORTER
+
     CrashReporter::AppendAppNotesToCrashReport(note);
-#endif
 
     // determine the major OpenGL version. That's the first integer in the version string.
     mGLMajorVersion = strtol(mVersion.get(), 0, 10);
@@ -264,50 +260,67 @@ const nsTArray<GfxDriverInfo>&
 GfxInfo::GetGfxDriverInfo()
 {
   // Nothing here yet.
-  //if (!mDriverInfo->Length()) {
+  //if (!sDriverInfo->Length()) {
   //
   //}
-  return *mDriverInfo;
+  return *sDriverInfo;
 }
 
 nsresult
-GfxInfo::GetFeatureStatusImpl(int32_t aFeature, 
-                              int32_t *aStatus, 
-                              nsAString & aSuggestedDriverVersion, 
-                              const nsTArray<GfxDriverInfo>& aDriverInfo, 
+GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
+                              int32_t *aStatus,
+                              nsAString & aSuggestedDriverVersion,
+                              const nsTArray<GfxDriverInfo>& aDriverInfo,
+                              nsACString& aFailureId,
                               OperatingSystem* aOS /* = nullptr */)
 
 {
-  GetData();
-
   NS_ENSURE_ARG_POINTER(aStatus);
   *aStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
   aSuggestedDriverVersion.SetIsVoid(true);
-  OperatingSystem os = DRIVER_OS_LINUX;
+  OperatingSystem os = OperatingSystem::Linux;
   if (aOS)
     *aOS = os;
+
+  if (sShutdownOccurred) {
+    return NS_OK;
+  }
+
+  GetData();
 
   if (mGLMajorVersion == 1) {
     // We're on OpenGL 1. In most cases that indicates really old hardware.
     // We better block them, rather than rely on them to fail gracefully, because they don't!
     // see bug 696636
     *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+    aFailureId = "FEATURE_FAILURE_OPENGL_1";
     return NS_OK;
   }
 
   // Don't evaluate any special cases if we're checking the downloaded blocklist.
   if (!aDriverInfo.Length()) {
+    // Blacklist software GL implementations from using layers acceleration.
+    // On the test infrastructure, we'll force-enable layers acceleration.
+    if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS &&
+        (mIsLlvmpipe || mIsOldSwrast) &&
+        !PR_GetEnv("MOZ_LAYERS_ALLOW_SOFTWARE_GL"))
+    {
+      *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
+      aFailureId = "FEATURE_FAILURE_SOFTWARE_GL";
+      return NS_OK;
+    }
+
+    if (aFeature == nsIGfxInfo::FEATURE_WEBRENDER) {
+      *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
+      aFailureId = "FEATURE_UNQUALIFIED_WEBRENDER_LINUX";
+      return NS_OK;
+    }
+
     // Only check features relevant to Linux.
     if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS ||
         aFeature == nsIGfxInfo::FEATURE_WEBGL_OPENGL ||
+        aFeature == nsIGfxInfo::FEATURE_WEBGL2 ||
         aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA) {
-
-      // Disable OpenGL layers when we don't have texture_from_pixmap because it regresses performance. 
-      if (aFeature == nsIGfxInfo::FEATURE_OPENGL_LAYERS && !mHasTextureFromPixmap) {
-        *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
-        aSuggestedDriverVersion.AssignLiteral("<Anything with EXT_texture_from_pixmap support>");
-        return NS_OK;
-      }
 
       // whitelist the linux test slaves' current configuration.
       // this is necessary as they're still using the slightly outdated 190.42 driver.
@@ -325,24 +338,29 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       if (mIsMesa) {
         if (mIsNouveau && version(mMajorVersion, mMinorVersion) < version(8,0)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_MESA_1";
           aSuggestedDriverVersion.AssignLiteral("Mesa 8.0");
         }
         else if (version(mMajorVersion, mMinorVersion, mRevisionVersion) < version(7,10,3)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_MESA_2";
           aSuggestedDriverVersion.AssignLiteral("Mesa 7.10.3");
         }
         else if (mIsOldSwrast) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_SW_RAST";
         }
         else if (mIsLlvmpipe && version(mMajorVersion, mMinorVersion) < version(9, 1)) {
           // bug 791905, Mesa bug 57733, fixed in Mesa 9.1 according to
           // https://bugs.freedesktop.org/show_bug.cgi?id=57733#c3
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_MESA_3";
         }
         else if (aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA)
         {
           if (mIsIntel && version(mMajorVersion, mMinorVersion) < version(8,1)) {
             *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+            aFailureId = "FEATURE_FAILURE_MESA_4";
             aSuggestedDriverVersion.AssignLiteral("Mesa 8.1");
           }
         }
@@ -350,6 +368,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       } else if (mIsNVIDIA) {
         if (version(mMajorVersion, mMinorVersion, mRevisionVersion) < version(257,21)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_OLD_NV";
           aSuggestedDriverVersion.AssignLiteral("NVIDIA 257.21");
         }
       } else if (mIsFGLRX) {
@@ -357,6 +376,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         // by requiring OpenGL 3, we effectively require recent drivers.
         if (version(mMajorVersion, mMinorVersion, mRevisionVersion) < version(3, 0)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
+          aFailureId = "FEATURE_FAILURE_OLD_FGLRX";
           aSuggestedDriverVersion.AssignLiteral("<Something recent>");
         }
         // Bug 724640: FGLRX + Linux 2.6.32 is a crashy combo
@@ -365,6 +385,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
                      mOSRelease.Find("2.6.32") != -1;
         if (unknownOS || badOS) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
+          aFailureId = "FEATURE_FAILURE_OLD_OS";
         }
       } else {
         // like on windows, let's block unknown vendors. Think of virtual machines.
@@ -374,7 +395,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
     }
   }
 
-  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, &os);
+  return GfxInfoBase::GetFeatureStatusImpl(aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId, &os);
 }
 
 

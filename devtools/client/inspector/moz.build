@@ -3,8 +3,15 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
+    'animation',
+    'animation-old',
+    'boxmodel',
+    'components',
     'computed',
+    'extensions',
+    'flexbox',
     'fonts',
+    'grids',
     'layout',
     'markup',
     'rules',
@@ -14,8 +21,15 @@ DIRS += [
 DevToolsModules(
     'breadcrumbs.js',
     'inspector-commands.js',
-    'inspector-panel.js',
-    'inspector-search.js'
+    'inspector-search.js',
+    'inspector.js',
+    'panel.js',
+    'reducers.js',
+    'store.js',
+    'toolsidebar.js',
 )
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
+
+with Files('**'):
+    BUG_COMPONENT = ('DevTools', 'Inspector')

@@ -2,11 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cu = Components.utils;
-
-Cu.import("resource://testing-common/httpd.js");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://testing-common/httpd.js");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 const PATH = "/file.meh";
 var httpserver = new HttpServer();
@@ -45,15 +42,15 @@ const tests = [
 
 // A basic listener that reads checks the if we sniffed properly.
 var listener = {
-  onStartRequest: function(request, context) {
-    do_check_eq(request.QueryInterface(Ci.nsIChannel).contentType,
-                tests[testRan].expectedContentType);
+  onStartRequest(request, context) {
+    Assert.equal(request.QueryInterface(Ci.nsIChannel).contentType,
+                 tests[testRan].expectedContentType);
   },
 
-  onDataAvailable: function(request, context, stream, offset, count) {
+  onDataAvailable(request, context, stream, offset, count) {
     try {
-      var bis = Components.classes["@mozilla.org/binaryinputstream;1"]
-                          .createInstance(Components.interfaces.nsIBinaryInputStream);
+      var bis = Cc["@mozilla.org/binaryinputstream;1"]
+                  .createInstance(Ci.nsIBinaryInputStream);
       bis.setInputStream(stream);
       bis.readByteArray(bis.available());
     } catch (ex) {
@@ -61,23 +58,22 @@ var listener = {
     }
   },
 
-  onStopRequest: function(request, context, status) {
+  onStopRequest(request, context, status) {
     testRan++;
     runNext();
   }
 };
 
-function setupChannel(url, flags)
-{
+function setupChannel(url, flags) {
   let uri = "http://localhost:" +
              httpserver.identity.primaryPort + url;
   var chan = NetUtil.newChannel({
-    uri: uri,
+    uri,
     loadUsingSystemPrincipal: true,
     contentPolicyType: Ci.nsIContentPolicy.TYPE_MEDIA
   });
   chan.loadFlags |= flags;
-  var httpChan = chan.QueryInterface(Components.interfaces.nsIHttpChannel);
+  var httpChan = chan.QueryInterface(Ci.nsIHttpChannel);
   return httpChan;
 }
 

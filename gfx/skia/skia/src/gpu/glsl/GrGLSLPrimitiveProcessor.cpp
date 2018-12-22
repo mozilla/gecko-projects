@@ -8,19 +8,21 @@
 #include "GrGLSLPrimitiveProcessor.h"
 
 #include "GrCoordTransform.h"
+#include "GrTexture.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
+#include "glsl/GrGLSLProgramBuilder.h"
 #include "glsl/GrGLSLUniformHandler.h"
-#include "glsl/GrGLSLVertexShaderBuilder.h"
+#include "glsl/GrGLSLVertexGeoBuilder.h"
 
 SkMatrix GrGLSLPrimitiveProcessor::GetTransformMatrix(const SkMatrix& localMatrix,
                                                       const GrCoordTransform& coordTransform) {
     SkMatrix combined;
-    // We only apply the localmatrix to localcoords
-    if (kLocal_GrCoordSet == coordTransform.sourceCoords()) {
-        combined.setConcat(coordTransform.getMatrix(), localMatrix);
-    } else {
-        combined = coordTransform.getMatrix();
+    combined.setConcat(coordTransform.getMatrix(), localMatrix);
+    if (coordTransform.normalize()) {
+        combined.postIDiv(coordTransform.peekTexture()->width(),
+                          coordTransform.peekTexture()->height());
     }
+
     if (coordTransform.reverseY()) {
         // combined.postScale(1,-1);
         // combined.postTranslate(0,1);
@@ -34,16 +36,31 @@ SkMatrix GrGLSLPrimitiveProcessor::GetTransformMatrix(const SkMatrix& localMatri
     return combined;
 }
 
-void GrGLSLPrimitiveProcessor::setupUniformColor(GrGLSLFragmentBuilder* fragBuilder,
+void GrGLSLPrimitiveProcessor::setupUniformColor(GrGLSLFPFragmentBuilder* fragBuilder,
                                                  GrGLSLUniformHandler* uniformHandler,
                                                  const char* outputName,
                                                  UniformHandle* colorUniform) {
     SkASSERT(colorUniform);
     const char* stagedLocalVarName;
-    *colorUniform = uniformHandler->addUniform(GrGLSLUniformHandler::kFragment_Visibility,
-                                               kVec4f_GrSLType,
-                                               kDefault_GrSLPrecision,
+    *colorUniform = uniformHandler->addUniform(kFragment_GrShaderFlag,
+                                               kHalf4_GrSLType,
                                                "Color",
                                                &stagedLocalVarName);
     fragBuilder->codeAppendf("%s = %s;", outputName, stagedLocalVarName);
+    if (fragBuilder->getProgramBuilder()->shaderCaps()->mustObfuscateUniformColor()) {
+        fragBuilder->codeAppendf("%s = max(%s, half4(0, 0, 0, 0));", outputName, outputName);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+const GrCoordTransform* GrGLSLPrimitiveProcessor::FPCoordTransformHandler::nextCoordTransform() {
+#ifdef SK_DEBUG
+    SkASSERT(nullptr == fCurr || fAddedCoord);
+    fAddedCoord = false;
+    fCurr = fIter.next();
+    return fCurr;
+#else
+    return fIter.next();
+#endif
 }

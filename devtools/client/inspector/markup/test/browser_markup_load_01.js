@@ -1,6 +1,7 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable mozilla/no-arbitrary-setTimeout */
 
 "use strict";
 
@@ -28,44 +29,49 @@ const TEST_URL = "data:text/html," +
   "<head><meta charset='utf-8' /></head>" +
   "<body>" +
   "<p>Slow script</p>" +
-  "<img src='http://localhost:" + server.identity.primaryPort + "/slow.gif' /></script>" +
+  "<img src='http://localhost:" + server.identity.primaryPort + "/slow.gif' />" +
   "</body>" +
   "</html>";
 
-add_task(function*() {
-  let {inspector, testActor, tab} = yield openInspectorForURL(TEST_URL);
-  let domContentLoaded = waitForLinkedBrowserEvent(tab, "DOMContentLoaded");
-  let pageLoaded = waitForLinkedBrowserEvent(tab, "load");
+add_task(async function() {
+  const {inspector, testActor, tab} = await openInspectorForURL(TEST_URL);
+
+  const domContentLoaded = waitForLinkedBrowserEvent(tab, "DOMContentLoaded");
+  const pageLoaded = waitForLinkedBrowserEvent(tab, "load");
 
   ok(inspector.markup, "There is a markup view");
 
   // Select an element while the tab is in the middle of a slow reload.
   testActor.eval("location.reload()");
-  yield domContentLoaded;
-  yield chooseWithInspectElementContextMenu("img", testActor);
-  yield pageLoaded;
 
-  yield inspector.once("markuploaded");
-  yield waitForMultipleChildrenUpdates(inspector);
+  info("Wait for DOMContentLoaded");
+  await domContentLoaded;
+
+  info("Inspect element via context menu");
+  const markupLoaded = inspector.once("markuploaded");
+  await chooseWithInspectElementContextMenu("img", tab);
+
+  info("Wait for load");
+  await pageLoaded;
+
+  info("Wait for markup-loaded after element inspection");
+  await markupLoaded;
+  info("Wait for multiple children updates after element inspection");
+  await waitForMultipleChildrenUpdates(inspector);
 
   ok(inspector.markup, "There is a markup view");
   is(inspector.markup._elt.children.length, 1, "The markup view is rendering");
 });
 
-function* chooseWithInspectElementContextMenu(selector, testActor) {
-  yield BrowserTestUtils.synthesizeMouseAtCenter(selector, {
+async function chooseWithInspectElementContextMenu(selector, tab) {
+  await BrowserTestUtils.synthesizeMouseAtCenter(selector, {
     type: "contextmenu",
     button: 2
-  }, gBrowser.selectedBrowser);
+  }, tab.linkedBrowser);
 
-  yield testActor.synthesizeKey({key: "Q", options: {}});
+  await EventUtils.sendString("Q");
 }
 
 function waitForLinkedBrowserEvent(tab, event) {
-  let def = promise.defer();
-  tab.linkedBrowser.addEventListener(event, function cb() {
-    tab.linkedBrowser.removeEventListener(event, cb, true);
-    def.resolve();
-  }, true);
-  return def.promise;
+  return BrowserTestUtils.waitForContentEvent(tab.linkedBrowser, event, true);
 }

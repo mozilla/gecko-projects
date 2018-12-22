@@ -10,17 +10,18 @@
 #include "nsISerializable.h"
 #include "nsIFileURL.h"
 #include "nsIStandardURL.h"
-#include "nsIUnicodeEncoder.h"
+#include "mozilla/Encoding.h"
 #include "nsIObserver.h"
 #include "nsCOMPtr.h"
 #include "nsURLHelper.h"
 #include "nsIClassInfo.h"
 #include "nsISizeOf.h"
-#include "prclist.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsIIPCSerializableURI.h"
 #include "nsISensitiveInfoHiddenURI.h"
+#include "nsIURIMutator.h"
 
 #ifdef NS_BUILD_REFCNT_LOGGING
 #define DEBUG_DUMP_URLS_AT_SHUTDOWN
@@ -33,6 +34,10 @@ class nsIPrefBranch;
 class nsIFile;
 class nsIURLParser;
 
+namespace mozilla {
+class Encoding;
+namespace net {
+
 //-----------------------------------------------------------------------------
 // standard URL implementation
 //-----------------------------------------------------------------------------
@@ -44,27 +49,28 @@ class nsStandardURL : public nsIFileURL
                     , public nsISizeOf
                     , public nsIIPCSerializableURI
                     , public nsISensitiveInfoHiddenURI
+#ifdef DEBUG_DUMP_URLS_AT_SHUTDOWN
+                    , public LinkedListElement<nsStandardURL>
+#endif
 {
 protected:
     virtual ~nsStandardURL();
+    explicit nsStandardURL(bool aSupportsFileURL = false, bool aTrackURL = true);
 
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIURI
     NS_DECL_NSIURL
     NS_DECL_NSIFILEURL
     NS_DECL_NSISTANDARDURL
     NS_DECL_NSISERIALIZABLE
     NS_DECL_NSICLASSINFO
-    NS_DECL_NSIMUTABLE
     NS_DECL_NSIIPCSERIALIZABLEURI
     NS_DECL_NSISENSITIVEINFOHIDDENURI
 
     // nsISizeOf
-    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-    explicit nsStandardURL(bool aSupportsFileURL = false, bool aTrackURL = true);
+    virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
+    virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const override;
 
     static void InitGlobalObjects();
     static void ShutdownGlobalObjects();
@@ -80,12 +86,13 @@ public: /* internal -- HPUX compiler can't handle this being private */
 
         URLSegment() : mPos(0), mLen(-1) {}
         URLSegment(uint32_t pos, int32_t len) : mPos(pos), mLen(len) {}
+        URLSegment(const URLSegment& aCopy) = default;
         void Reset() { mPos = 0; mLen = -1; }
         // Merge another segment following this one to it if they're contiguous
         // Assumes we have something like "foo;bar" where this object is 'foo' and right
         // is 'bar'.
         void Merge(const nsCString &spec, const char separator, const URLSegment &right) {
-            if (mLen >= 0 && 
+            if (mLen >= 0 &&
                 *(spec.get() + mPos + mLen) == separator &&
                 mPos + mLen + 1 == right.mPos) {
                 mLen += 1 + right.mLen;
@@ -94,27 +101,12 @@ public: /* internal -- HPUX compiler can't handle this being private */
     };
 
     //
-    // Pref observer
-    //
-    class nsPrefObserver final : public nsIObserver
-    {
-        ~nsPrefObserver() {}
-
-    public:
-        NS_DECL_ISUPPORTS
-        NS_DECL_NSIOBSERVER
-
-        nsPrefObserver() { }
-    };
-    friend class nsPrefObserver;
-
-    //
     // URL segment encoder : performs charset conversion and URL escaping.
     //
     class nsSegmentEncoder
     {
     public:
-        explicit nsSegmentEncoder(const char *charset);
+        explicit nsSegmentEncoder(const Encoding* encoding = nullptr);
 
         // Encode the given segment if necessary, and return the length of
         // the encoded segment.  The encoded segment is appended to |buf|
@@ -122,30 +114,29 @@ public: /* internal -- HPUX compiler can't handle this being private */
         int32_t EncodeSegmentCount(const char *str,
                                    const URLSegment &segment,
                                    int16_t mask,
-                                   nsAFlatCString &buf,
+                                   nsCString& buf,
                                    bool& appended,
                                    uint32_t extraLen = 0);
-         
+
         // Encode the given string if necessary, and return a reference to
         // the encoded string.  Returns a reference to |buf| if encoding
         // is required.  Otherwise, a reference to |str| is returned.
-        const nsACString &EncodeSegment(const nsASingleFragmentCString &str,
+        const nsACString& EncodeSegment(const nsACString& str,
                                         int16_t mask,
-                                        nsAFlatCString &buf);
+                                        nsCString& buf);
     private:
-        bool InitUnicodeEncoder();
-        
-        const char* mCharset;  // Caller should keep this alive for
-                               // the life of the segment encoder
-        nsCOMPtr<nsIUnicodeEncoder> mEncoder;
+      const Encoding* mEncoding;
     };
     friend class nsSegmentEncoder;
+
+    static nsresult NormalizeIPv4(const nsACString& host, nsCString& result);
 
 protected:
     // enum used in a few places to specify how .ref attribute should be handled
     enum RefHandlingEnum {
         eIgnoreRef,
-        eHonorRef
+        eHonorRef,
+        eReplaceRef
     };
 
     // Helper to share code between Equals and EqualsExceptRef
@@ -158,10 +149,12 @@ protected:
 
     // Helper to share code between Clone methods.
     nsresult CloneInternal(RefHandlingEnum aRefHandlingMode,
+                           const nsACString& newRef,
                            nsIURI** aClone);
     // Helper method that copies member variables from the source StandardURL
-    // if copyCached = true, it will also copy mFile and mHostA
+    // if copyCached = true, it will also copy mFile and mDisplayHost
     nsresult CopyMembers(nsStandardURL * source, RefHandlingEnum mode,
+                         const nsACString& newRef,
                          bool copyCached = false);
 
     // Helper for subclass implementation of GetFile().  Subclasses that map
@@ -170,7 +163,33 @@ protected:
     // returns NS_ERROR_NO_INTERFACE if the url does not map to a file
     virtual nsresult EnsureFile();
 
+    virtual nsresult Clone(nsIURI** aURI);
+    virtual nsresult SetSpecInternal(const nsACString &input);
+    virtual nsresult SetScheme(const nsACString &input);
+    virtual nsresult SetUserPass(const nsACString &input);
+    virtual nsresult SetUsername(const nsACString &input);
+    virtual nsresult SetPassword(const nsACString &input);
+    virtual nsresult SetHostPort(const nsACString &aValue);
+    virtual nsresult SetHost(const nsACString &input);
+    virtual nsresult SetPort(int32_t port);
+    virtual nsresult SetPathQueryRef(const nsACString &input);
+    virtual nsresult SetRef(const nsACString &input);
+    virtual nsresult SetFilePath(const nsACString &input);
+    virtual nsresult SetQuery(const nsACString &input);
+    virtual nsresult SetQueryWithEncoding(const nsACString &input, const Encoding* encoding);
+    bool Deserialize(const mozilla::ipc::URIParams&);
+    nsresult ReadPrivate(nsIObjectInputStream *stream);
+
 private:
+    nsresult Init(uint32_t urlType, int32_t defaultPort, const nsACString &spec,
+                  const char *charset, nsIURI *baseURI);
+    nsresult SetDefaultPort(int32_t aNewDefaultPort);
+    nsresult SetFile(nsIFile *file);
+
+    nsresult SetFileNameInternal(const nsACString &input);
+    nsresult SetFileBaseNameInternal(const nsACString &input);
+    nsresult SetFileExtensionInternal(const nsACString &input);
+
     int32_t  Port() { return mPort == -1 ? mDefaultPort : mPort; }
 
     void     ReplacePortInSpec(int32_t aNewPort);
@@ -178,13 +197,19 @@ private:
     void     InvalidateCache(bool invalidateCachedFile = true);
 
     bool     ValidIPv6orHostname(const char *host, uint32_t aLen);
-    nsresult NormalizeIDN(const nsCSubstring &host, nsCString &result);
+    static bool     IsValidOfBase(unsigned char c, const uint32_t base);
+    nsresult NormalizeIDN(const nsACString& host, nsCString& result);
+    nsresult CheckIfHostIsAscii();
     void     CoalescePath(netCoalesceFlags coalesceFlag, char *path);
 
-    uint32_t AppendSegmentToBuf(char *, uint32_t, const char *, URLSegment &, const nsCString *esc=nullptr, bool useEsc = false);
+    uint32_t AppendSegmentToBuf(char *, uint32_t, const char *,
+                                const URLSegment &input, URLSegment &output,
+                                const nsCString *esc=nullptr,
+                                bool useEsc = false, int32_t* diff = nullptr);
     uint32_t AppendToBuf(char *, uint32_t, const char *, uint32_t);
 
-    nsresult BuildNormalizedSpec(const char *spec);
+    nsresult BuildNormalizedSpec(const char* spec, const Encoding* encoding);
+    nsresult SetSpecWithEncoding(const nsACString &input, const Encoding* encoding);
 
     bool     SegmentIs(const URLSegment &s1, const char *val, bool ignoreCase = false);
     bool     SegmentIs(const char* spec, const URLSegment &s1, const char *val, bool ignoreCase = false);
@@ -220,23 +245,21 @@ private:
     const nsDependentCSubstring Ref()       { return Segment(mRef); }
 
     // shift the URLSegments to the right by diff
-    void ShiftFromAuthority(int32_t diff) { mAuthority.mPos += diff; ShiftFromUsername(diff); }
-    void ShiftFromUsername(int32_t diff)  { mUsername.mPos += diff; ShiftFromPassword(diff); }
-    void ShiftFromPassword(int32_t diff)  { mPassword.mPos += diff; ShiftFromHost(diff); }
-    void ShiftFromHost(int32_t diff)      { mHost.mPos += diff; ShiftFromPath(diff); }
-    void ShiftFromPath(int32_t diff)      { mPath.mPos += diff; ShiftFromFilepath(diff); }
-    void ShiftFromFilepath(int32_t diff)  { mFilepath.mPos += diff; ShiftFromDirectory(diff); }
-    void ShiftFromDirectory(int32_t diff) { mDirectory.mPos += diff; ShiftFromBasename(diff); }
-    void ShiftFromBasename(int32_t diff)  { mBasename.mPos += diff; ShiftFromExtension(diff); }
-    void ShiftFromExtension(int32_t diff) { mExtension.mPos += diff; ShiftFromQuery(diff); }
-    void ShiftFromQuery(int32_t diff)     { mQuery.mPos += diff; ShiftFromRef(diff); }
-    void ShiftFromRef(int32_t diff)       { mRef.mPos += diff; }
+    void ShiftFromAuthority(int32_t diff);
+    void ShiftFromUsername(int32_t diff);
+    void ShiftFromPassword(int32_t diff);
+    void ShiftFromHost(int32_t diff);
+    void ShiftFromPath(int32_t diff);
+    void ShiftFromFilepath(int32_t diff);
+    void ShiftFromDirectory(int32_t diff);
+    void ShiftFromBasename(int32_t diff);
+    void ShiftFromExtension(int32_t diff);
+    void ShiftFromQuery(int32_t diff);
+    void ShiftFromRef(int32_t diff);
 
     // fastload helper functions
     nsresult ReadSegment(nsIBinaryInputStream *, URLSegment &);
     nsresult WriteSegment(nsIBinaryOutputStream *, const URLSegment &);
-
-    static void PrefsChanged(nsIPrefBranch *prefs, const char *pref);
 
     void FindHostLimit(nsACString::const_iterator& aStart,
                        nsACString::const_iterator& aEnd);
@@ -260,15 +283,15 @@ private:
     URLSegment mQuery;
     URLSegment mRef;
 
-    nsCString              mOriginCharset;
     nsCOMPtr<nsIURLParser> mParser;
 
     // mFile is protected so subclasses can access it directly
 protected:
     nsCOMPtr<nsIFile>      mFile;  // cached result for nsIFileURL::GetFile
-    
+
 private:
-    char                  *mHostA; // cached result for nsIURI::GetHostA
+    // cached result for nsIURI::GetDisplayHost
+    nsCString              mDisplayHost;
 
     enum {
         eEncoding_Unknown,
@@ -276,26 +299,204 @@ private:
         eEncoding_UTF8
     };
 
-    uint32_t mHostEncoding    : 2; // eEncoding_xxx
-    uint32_t mSpecEncoding    : 2; // eEncoding_xxx
     uint32_t mURLType         : 2; // nsIStandardURL::URLTYPE_xxx
-    uint32_t mMutable         : 1; // nsIStandardURL::mutable
     uint32_t mSupportsFileURL : 1; // QI to nsIFileURL?
+    uint32_t mCheckedIfHostA  : 1; // If set to true, it means either that
+                                   // mDisplayHost has a been initialized, or
+                                   // that the hostname is not punycode
 
     // global objects.  don't use COMPtr as its destructor will cause a
     // coredump if we leak it.
     static nsIIDNService               *gIDN;
-    static char                         gHostLimitDigits[];
+    static const char                   gHostLimitDigits[];
     static bool                         gInitialized;
-    static bool                         gEscapeUTF8;
-    static bool                         gAlwaysEncodeInUTF8;
-    static bool                         gEncodeQueryInUTF8;
+    static bool                         gPunycodeHost;
 
 public:
 #ifdef DEBUG_DUMP_URLS_AT_SHUTDOWN
-    PRCList mDebugCList;
     void PrintSpec() const { printf("  %s\n", mSpec.get()); }
 #endif
+
+public:
+
+    // We make this implementation a template so that we can avoid writing
+    // the same code for SubstitutingURL (which extends nsStandardURL)
+    template<class T>
+    class TemplatedMutator
+        : public nsIURIMutator
+        , public BaseURIMutator<T>
+        , public nsIStandardURLMutator
+        , public nsIURLMutator
+        , public nsIFileURLMutator
+        , public nsISerializable
+    {
+        NS_FORWARD_SAFE_NSIURISETTERS_RET(BaseURIMutator<T>::mURI)
+
+        MOZ_MUST_USE NS_IMETHOD
+        Deserialize(const mozilla::ipc::URIParams& aParams) override
+        {
+            return BaseURIMutator<T>::InitFromIPCParams(aParams);
+        }
+
+        NS_IMETHOD
+        Write(nsIObjectOutputStream *aOutputStream) override
+        {
+            MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
+            return NS_ERROR_NOT_IMPLEMENTED;
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        Read(nsIObjectInputStream* aStream) override
+        {
+            return BaseURIMutator<T>::InitFromInputStream(aStream);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        Finalize(nsIURI** aURI) override
+        {
+            BaseURIMutator<T>::mURI.forget(aURI);
+            return NS_OK;
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        SetSpec(const nsACString& aSpec, nsIURIMutator** aMutator) override
+        {
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            return BaseURIMutator<T>::InitFromSpec(aSpec);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        Init(uint32_t aURLType, int32_t aDefaultPort,
+             const nsACString& aSpec, const char* aCharset, nsIURI* aBaseURI,
+             nsIURIMutator** aMutator) override
+        {
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            RefPtr<T> uri;
+            if (BaseURIMutator<T>::mURI) {
+                // We don't need a new URI object if we already have one
+                BaseURIMutator<T>::mURI.swap(uri);
+            } else {
+                uri = Create();
+            }
+            nsresult rv = uri->Init(aURLType, aDefaultPort, aSpec, aCharset, aBaseURI);
+            if (NS_FAILED(rv)) {
+                return rv;
+            }
+            BaseURIMutator<T>::mURI = uri.forget();
+            return NS_OK;
+        }
+
+        MOZ_MUST_USE NS_IMETHODIMP
+        SetDefaultPort(int32_t aNewDefaultPort, nsIURIMutator** aMutator) override
+        {
+            if (!BaseURIMutator<T>::mURI) {
+                return NS_ERROR_NULL_POINTER;
+            }
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            return BaseURIMutator<T>::mURI->SetDefaultPort(aNewDefaultPort);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        SetFileName(const nsACString& aFileName, nsIURIMutator** aMutator) override
+        {
+            if (!BaseURIMutator<T>::mURI) {
+                return NS_ERROR_NULL_POINTER;
+            }
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            return BaseURIMutator<T>::mURI->SetFileNameInternal(aFileName);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        SetFileBaseName(const nsACString& aFileBaseName, nsIURIMutator** aMutator) override
+        {
+            if (!BaseURIMutator<T>::mURI) {
+                return NS_ERROR_NULL_POINTER;
+            }
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            return BaseURIMutator<T>::mURI->SetFileBaseNameInternal(aFileBaseName);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        SetFileExtension(const nsACString& aFileExtension, nsIURIMutator** aMutator) override
+        {
+            if (!BaseURIMutator<T>::mURI) {
+                return NS_ERROR_NULL_POINTER;
+            }
+            if (aMutator) {
+                nsCOMPtr<nsIURIMutator> mutator = this;
+                mutator.forget(aMutator);
+            }
+            return BaseURIMutator<T>::mURI->SetFileExtensionInternal(aFileExtension);
+        }
+
+        T* Create() override
+        {
+            return new T(mMarkedFileURL);
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        MarkFileURL() override
+        {
+            mMarkedFileURL = true;
+            return NS_OK;
+        }
+
+        MOZ_MUST_USE NS_IMETHOD
+        SetFile(nsIFile* aFile) override
+        {
+            RefPtr<T> uri;
+            if (BaseURIMutator<T>::mURI) {
+                // We don't need a new URI object if we already have one
+                BaseURIMutator<T>::mURI.swap(uri);
+            } else {
+                uri = new T(/* aSupportsFileURL = */ true);
+            }
+
+            nsresult rv = uri->SetFile(aFile);
+            if (NS_FAILED(rv)) {
+                return rv;
+            }
+            BaseURIMutator<T>::mURI.swap(uri);
+            return NS_OK;
+        }
+
+        explicit TemplatedMutator() : mMarkedFileURL(false)
+        {
+        }
+    private:
+        virtual ~TemplatedMutator() = default;
+
+        bool mMarkedFileURL = false;
+
+        friend T;
+    };
+
+    class Mutator final
+        : public TemplatedMutator<nsStandardURL>
+    {
+        NS_DECL_ISUPPORTS
+    public:
+        explicit Mutator() = default;
+    private:
+        virtual ~Mutator() = default;
+    };
+
+    friend BaseURIMutator<nsStandardURL>;
 };
 
 #define NS_THIS_STANDARDURL_IMPL_CID                 \
@@ -384,5 +585,8 @@ nsStandardURL::Filename()
     }
     return Substring(mSpec, pos, len);
 }
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsStandardURL_h__

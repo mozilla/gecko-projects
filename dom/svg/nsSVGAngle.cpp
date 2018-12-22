@@ -19,8 +19,10 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::dom::SVGAngle_Binding;
+using namespace mozilla::dom::SVGMarkerElement_Binding;
 
-static nsIAtom** const unitMap[] =
+static nsStaticAtom** const unitMap[] =
 {
   nullptr, /* SVG_ANGLETYPE_UNKNOWN */
   nullptr, /* SVG_ANGLETYPE_UNSPECIFIED */
@@ -48,7 +50,7 @@ IsValidUnitType(uint16_t unit)
   return false;
 }
 
-static void 
+static void
 GetUnitString(nsAString& unit, uint16_t unitType)
 {
   if (IsValidUnitType(unitType)) {
@@ -58,17 +60,16 @@ GetUnitString(nsAString& unit, uint16_t unitType)
     return;
   }
 
-  NS_NOTREACHED("Unknown unit type");
-  return;
+  MOZ_ASSERT_UNREACHABLE("Unknown unit type");
 }
 
 static uint16_t
 GetUnitTypeForString(const nsAString& unitStr)
 {
-  if (unitStr.IsEmpty()) 
+  if (unitStr.IsEmpty())
     return SVG_ANGLETYPE_UNSPECIFIED;
-                   
-  nsIAtom *unitAtom = NS_GetStaticAtom(unitStr);
+
+  nsStaticAtom* unitAtom = NS_GetStaticAtom(unitStr);
 
   if (unitAtom) {
     for (uint32_t i = 0 ; i < ArrayLength(unitMap) ; i++) {
@@ -84,21 +85,17 @@ GetUnitTypeForString(const nsAString& unitStr)
 static void
 GetValueString(nsAString &aValueAsString, float aValue, uint16_t aUnitType)
 {
-  char16_t buf[24];
-  nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-                            MOZ_UTF16("%g"),
-                            (double)aValue);
-  aValueAsString.Assign(buf);
+  nsTextFormatter::ssprintf(aValueAsString, u"%g", (double)aValue);
 
   nsAutoString unitString;
   GetUnitString(unitString, aUnitType);
   aValueAsString.Append(unitString);
 }
 
-static bool
-GetValueFromString(const nsAString& aString,
-                   float& aValue,
-                   uint16_t* aUnitType)
+/* static */ bool
+nsSVGAngle::GetValueFromString(const nsAString& aString,
+                               float& aValue,
+                               uint16_t* aUnitType)
 {
   RangedPtr<const char16_t> iter =
     SVGContentUtils::GetStartRangedPtr(aString);
@@ -126,7 +123,7 @@ nsSVGAngle::GetDegreesPerUnit(uint8_t aUnit)
   case SVG_ANGLETYPE_GRAD:
     return 90.0f / 100.0f;
   default:
-    NS_NOTREACHED("Unknown unit type");
+    MOZ_ASSERT_UNREACHABLE("Unknown unit type");
     return 0;
   }
 }
@@ -256,7 +253,7 @@ nsSVGAngle::SetBaseValueString(const nsAString &aValueAsString,
 {
   float value;
   uint16_t unitType;
-  
+
   if (!GetValueFromString(aValueAsString, value, &unitType)) {
      return NS_ERROR_DOM_SYNTAX_ERR;
   }
@@ -350,16 +347,16 @@ SVGAnimatedAngle::~SVGAnimatedAngle()
   sSVGAnimatedAngleTearoffTable.RemoveTearoff(mVal);
 }
 
-nsISMILAttr*
+UniquePtr<nsISMILAttr>
 nsSVGAngle::ToSMILAttr(nsSVGElement *aSVGElement)
 {
   if (aSVGElement->NodeInfo()->Equals(nsGkAtoms::marker, kNameSpaceID_SVG)) {
     SVGMarkerElement *marker = static_cast<SVGMarkerElement*>(aSVGElement);
-    return new SMILOrient(marker->GetOrientType(), this, aSVGElement);
+    return MakeUnique<SMILOrient>(marker->GetOrientType(), this, aSVGElement);
   }
   // SMILOrient would not be useful for general angle attributes (also,
   // "orient" is the only animatable <angle>-valued attribute in SVG 1.1).
-  NS_NOTREACHED("Trying to animate unknown angle attribute.");
+  MOZ_ASSERT_UNREACHABLE("Trying to animate unknown angle attribute.");
   return nullptr;
 }
 
@@ -384,7 +381,7 @@ nsSVGAngle::SMILOrient::ValueFromString(const nsAString& aStr,
     val.mU.mOrient.mUnit = unitType;
     val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_ANGLE;
   }
-  aValue = Move(val);
+  aValue = std::move(val);
   aPreventCachingOfSandwich = false;
 
   return NS_OK;

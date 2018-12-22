@@ -6,8 +6,6 @@
 // Test that enabling Service Workers testing option enables the
 // mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow.
 
-const COMMON_FRAME_SCRIPT_URL =
-  "chrome://devtools/content/shared/frame-script-utils.js";
 const ROOT_TEST_DIR =
   getRootDirectory(gTestPath);
 const FRAME_SCRIPT_URL =
@@ -31,19 +29,15 @@ function test() {
 }
 
 function init() {
-  let tab = gBrowser.selectedTab = gBrowser.addTab();
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let linkedBrowser = tab.linkedBrowser;
+  addTab(TEST_URI).then(tab => {
+    const target = TargetFactory.forTab(tab);
+    const linkedBrowser = tab.linkedBrowser;
 
-  linkedBrowser.messageManager.loadFrameScript(COMMON_FRAME_SCRIPT_URL, false);
-  linkedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
+    loadFrameScriptUtils(linkedBrowser);
+    linkedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
 
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
     gDevTools.showToolbox(target).then(testSelectTool);
-  }, true);
-
-  content.location = TEST_URI;
+  });
 }
 
 function testSelectTool(aToolbox) {
@@ -60,14 +54,18 @@ function unregister(swr) {
   return executeInContent("devtools:sw-test:unregister");
 }
 
+function registerAndUnregisterInFrame() {
+  return executeInContent("devtools:sw-test:iframe:register-and-unregister");
+}
+
 function testRegisterFails(data) {
   is(data.success, false, "Register should fail with security error");
   return promise.resolve();
 }
 
 function toggleServiceWorkersTestingCheckbox() {
-  let panel = toolbox.getCurrentPanel();
-  let cbx = panel.panelDoc.getElementById(ELEMENT_ID);
+  const panel = toolbox.getCurrentPanel();
+  const cbx = panel.panelDoc.getElementById(ELEMENT_ID);
 
   cbx.scrollIntoView();
 
@@ -83,15 +81,10 @@ function toggleServiceWorkersTestingCheckbox() {
 }
 
 function reload() {
-  let deferred = promise.defer();
-
-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    deferred.resolve();
-  }, true);
+  const promise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
 
   executeInContent("devtools:test:reload", {}, {}, false);
-  return deferred.promise;
+  return promise;
 }
 
 function testRegisterSuccesses(data) {
@@ -107,6 +100,8 @@ function start() {
     .then(register)
     .then(testRegisterSuccesses)
     .then(unregister)
+    .then(registerAndUnregisterInFrame)
+    .then(testRegisterSuccesses)
     // Workers should be turned back off when we closes the toolbox
     .then(toolbox.destroy.bind(toolbox))
     .then(reload)

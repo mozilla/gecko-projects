@@ -18,13 +18,9 @@
 #include <algorithm>
 #include "prerror.h"
 
-#if defined(ANDROID) && ANDROID_VERSION > 19
-#include <resolv_netid.h>
-#endif
-
 #include "mozilla/Logging.h"
 
-#if DNSQUERY_AVAILABLE
+#ifdef DNSQUERY_AVAILABLE
 // There is a bug in windns.h where the type of parameter ppQueryResultsSet for
 // DnsQuery_A is dependent on UNICODE being set. It should *always* be
 // PDNS_RECORDA, but if UNICODE is set it is PDNS_RECORDW. To get around this
@@ -44,7 +40,7 @@ static LazyLogModule gGetAddrInfoLog("GetAddrInfo");
 #define LOG_WARNING(msg, ...) \
   MOZ_LOG(gGetAddrInfoLog, LogLevel::Warning, ("[DNS]: " msg, ##__VA_ARGS__))
 
-#if DNSQUERY_AVAILABLE
+#ifdef DNSQUERY_AVAILABLE
 ////////////////////////////
 // WINDOWS IMPLEMENTATION //
 ////////////////////////////
@@ -87,7 +83,7 @@ private:
     LOG("Freeing Dnsapi.dll");
     MOZ_ASSERT(mLibrary);
     DebugOnly<BOOL> rv = FreeLibrary(mLibrary);
-    NS_WARN_IF_FALSE(rv, "Failed to free Dnsapi.dll.");
+    NS_WARNING_ASSERTION(rv, "Failed to free Dnsapi.dll.");
   }
 };
 
@@ -121,7 +117,7 @@ _GetAddrInfoInit_Windows()
   FARPROC dnsFreeFunc = GetProcAddress(library, "DnsFree");
   if (NS_WARN_IF(!dnsQueryFunc) || NS_WARN_IF(!dnsFreeFunc)) {
     DebugOnly<BOOL> rv = FreeLibrary(library);
-    NS_WARN_IF_FALSE(rv, "Failed to free Dnsapi.dll.");
+    NS_WARNING_ASSERTION(rv, "Failed to free Dnsapi.dll.");
     return NS_ERROR_FAILURE;
   }
 
@@ -200,9 +196,9 @@ _GetMinTTLForRequestType_Windows(DnsapiInfo * dnsapi, const char* aHost,
 }
 
 static MOZ_ALWAYS_INLINE nsresult
-_GetTTLData_Windows(const char* aHost, uint16_t* aResult, uint16_t aAddressFamily)
+_GetTTLData_Windows(const nsACString& aHost, uint32_t* aResult, uint16_t aAddressFamily)
 {
-  MOZ_ASSERT(aHost);
+  MOZ_ASSERT(!aHost.IsEmpty());
   MOZ_ASSERT(aResult);
   if (aAddressFamily != PR_AF_UNSPEC &&
       aAddressFamily != PR_AF_INET &&
@@ -224,12 +220,12 @@ _GetTTLData_Windows(const char* aHost, uint16_t* aResult, uint16_t aAddressFamil
   // In order to avoid using ANY records which are not always implemented as a
   // "Gimme what you have" request in hostname resolvers, we should send A
   // and/or AAAA requests, based on the address family requested.
-  unsigned int ttl = -1;
+  unsigned int ttl = (unsigned int)-1;
   if (aAddressFamily == PR_AF_UNSPEC || aAddressFamily == PR_AF_INET) {
-    _GetMinTTLForRequestType_Windows(dnsapi, aHost, DNS_TYPE_A, &ttl);
+    _GetMinTTLForRequestType_Windows(dnsapi, aHost.BeginReading(), DNS_TYPE_A, &ttl);
   }
   if (aAddressFamily == PR_AF_UNSPEC || aAddressFamily == PR_AF_INET6) {
-    _GetMinTTLForRequestType_Windows(dnsapi, aHost, DNS_TYPE_AAAA, &ttl);
+    _GetMinTTLForRequestType_Windows(dnsapi, aHost.BeginReading(), DNS_TYPE_AAAA, &ttl);
   }
 
   {
@@ -238,7 +234,7 @@ _GetTTLData_Windows(const char* aHost, uint16_t* aResult, uint16_t aAddressFamil
     dnsapi = nullptr;
   }
 
-  if (ttl == -1) {
+  if (ttl == (unsigned int)-1) {
     LOG("No useable TTL found.");
     return NS_ERROR_FAILURE;
   }
@@ -248,80 +244,15 @@ _GetTTLData_Windows(const char* aHost, uint16_t* aResult, uint16_t aAddressFamil
 }
 #endif
 
-#if defined(ANDROID) && ANDROID_VERSION >= 19
-// Make the same as nspr functions.
-static MOZ_ALWAYS_INLINE PRAddrInfo*
-_Android_GetAddrInfoForNetInterface(const char* hostname,
-                                   uint16_t af,
-                                   uint16_t flags,
-                                   const char* aNetworkInterface)
-{
-  if ((af != PR_AF_INET && af != PR_AF_UNSPEC) ||
-      (flags & ~ PR_AI_NOCANONNAME) != PR_AI_ADDRCONFIG) {
-    PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
-    return nullptr;
-  }
-
-  struct addrinfo *res, hints;
-  int rv;
-  memset(&hints, 0, sizeof(hints));
-  if (!(flags & PR_AI_NOCANONNAME)) {
-    hints.ai_flags |= AI_CANONNAME;
-  }
-
-#ifdef AI_ADDRCONFIG
-  if ((flags & PR_AI_ADDRCONFIG) &&
-      strcmp(hostname, "localhost") != 0 &&
-      strcmp(hostname, "localhost.localdomain") != 0 &&
-      strcmp(hostname, "localhost6") != 0 &&
-      strcmp(hostname, "localhost6.localdomain6") != 0) {
-    hints.ai_flags |= AI_ADDRCONFIG;
-  }
-#endif
-
-  hints.ai_family = (af == PR_AF_INET) ? AF_INET : AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-
-#if ANDROID_VERSION == 19
-  rv = android_getaddrinfoforiface(hostname, NULL, &hints, aNetworkInterface,
-                                   0, &res);
-#else
-  uint32_t netId = atoi(aNetworkInterface);
-  rv = android_getaddrinfofornet(hostname, NULL, &hints, netId, 0, &res);
-#endif
-
-#ifdef AI_ADDRCONFIG
-  if (rv == EAI_BADFLAGS && (hints.ai_flags & AI_ADDRCONFIG)) {
-    hints.ai_flags &= ~AI_ADDRCONFIG;
-#if ANDROID_VERSION == 19
-    rv = android_getaddrinfoforiface(hostname, NULL, &hints, aNetworkInterface,
-                                     0, &res);
-#else
-    uint32_t netId = atoi(aNetworkInterface);
-    rv = android_getaddrinfofornet(hostname, NULL, &hints, netId, 0, &res);
-#endif
-  }
-#endif
-
-  if (rv == 0) {
-    return (PRAddrInfo *) res;
-  }
-
-  PR_SetError(PR_DIRECTORY_LOOKUP_ERROR, rv);
-  return nullptr;
-}
-#endif
-
 ////////////////////////////////////
 // PORTABLE RUNTIME IMPLEMENTATION//
 ////////////////////////////////////
 
 static MOZ_ALWAYS_INLINE nsresult
-_GetAddrInfo_Portable(const char* aCanonHost, uint16_t aAddressFamily,
-                      uint16_t aFlags, const char* aNetworkInterface,
-                      AddrInfo** aAddrInfo)
+_GetAddrInfo_Portable(const nsACString& aCanonHost, uint16_t aAddressFamily,
+                      uint16_t aFlags, AddrInfo** aAddrInfo)
 {
-  MOZ_ASSERT(aCanonHost);
+  MOZ_ASSERT(!aCanonHost.IsEmpty());
   MOZ_ASSERT(aAddrInfo);
 
   // We accept the same aFlags that nsHostResolver::ResolveHost accepts, but we
@@ -339,26 +270,15 @@ _GetAddrInfo_Portable(const char* aCanonHost, uint16_t aAddressFamily,
     aAddressFamily = PR_AF_UNSPEC;
   }
 
-  PRAddrInfo* prai;
-#if defined(ANDROID) && ANDROID_VERSION >= 19
-  if (aNetworkInterface && aNetworkInterface[0] != '\0') {
-    prai = _Android_GetAddrInfoForNetInterface(aCanonHost,
-                                               aAddressFamily,
-                                               prFlags,
-                                               aNetworkInterface);
-  } else
-#endif
-  {
-    prai = PR_GetAddrInfoByName(aCanonHost, aAddressFamily, prFlags);
-  }
+  PRAddrInfo* prai = PR_GetAddrInfoByName(aCanonHost.BeginReading(), aAddressFamily, prFlags);
 
   if (!prai) {
     return NS_ERROR_UNKNOWN_HOST;
   }
 
-  const char* canonName = nullptr;
+  nsAutoCString canonName;
   if (aFlags & nsHostResolver::RES_CANON_NAME) {
-    canonName = PR_GetCanonNameFromAddrInfo(prai);
+    canonName.Assign(PR_GetCanonNameFromAddrInfo(prai));
   }
 
   bool filterNameCollision = !(aFlags & nsHostResolver::RES_ALLOW_NAME_COLLISION);
@@ -381,7 +301,7 @@ nsresult
 GetAddrInfoInit() {
   LOG("Initializing GetAddrInfo.\n");
 
-#if DNSQUERY_AVAILABLE
+#ifdef DNSQUERY_AVAILABLE
   return _GetAddrInfoInit_Windows();
 #else
   return NS_OK;
@@ -392,7 +312,7 @@ nsresult
 GetAddrInfoShutdown() {
   LOG("Shutting down GetAddrInfo.\n");
 
-#if DNSQUERY_AVAILABLE
+#ifdef DNSQUERY_AVAILABLE
   return _GetAddrInfoShutdown_Windows();
 #else
   return NS_OK;
@@ -400,43 +320,50 @@ GetAddrInfoShutdown() {
 }
 
 nsresult
-GetAddrInfo(const char* aHost, uint16_t aAddressFamily, uint16_t aFlags,
-            const char* aNetworkInterface, AddrInfo** aAddrInfo, bool aGetTtl)
+GetAddrInfo(const nsACString& aHost, uint16_t aAddressFamily, uint16_t aFlags,
+            AddrInfo** aAddrInfo, bool aGetTtl)
 {
-  if (NS_WARN_IF(!aHost) || NS_WARN_IF(!aAddrInfo)) {
+  if (NS_WARN_IF(aHost.IsEmpty()) || NS_WARN_IF(!aAddrInfo)) {
     return NS_ERROR_NULL_POINTER;
   }
 
-#if DNSQUERY_AVAILABLE
+#ifdef DNSQUERY_AVAILABLE
   // The GetTTLData needs the canonical name to function properly
   if (aGetTtl) {
     aFlags |= nsHostResolver::RES_CANON_NAME;
   }
 #endif
 
-  *aAddrInfo = nullptr;
-  nsresult rv = _GetAddrInfo_Portable(aHost, aAddressFamily, aFlags,
-                                      aNetworkInterface, aAddrInfo);
+  nsAutoCString host(aHost);
+  if (gNativeIsLocalhost) {
+    // pretend we use the given host but use IPv4 localhost instead!
+    host = NS_LITERAL_CSTRING("localhost");
+    aAddressFamily = PR_AF_INET;
+  }
 
-#if DNSQUERY_AVAILABLE
+  *aAddrInfo = nullptr;
+  nsresult rv = _GetAddrInfo_Portable(host, aAddressFamily, aFlags,
+                                      aAddrInfo);
+
+#ifdef DNSQUERY_AVAILABLE
   if (aGetTtl && NS_SUCCEEDED(rv)) {
     // Figure out the canonical name, or if that fails, just use the host name
     // we have.
-    const char *name = nullptr;
-    if (*aAddrInfo != nullptr && (*aAddrInfo)->mCanonicalName) {
+    nsAutoCString name;
+    if (*aAddrInfo != nullptr && !(*aAddrInfo)->mCanonicalName.IsEmpty()) {
       name = (*aAddrInfo)->mCanonicalName;
     } else {
-      name = aHost;
+      name = host;
     }
 
-    LOG("Getting TTL for %s (cname = %s).", aHost, name);
-    uint16_t ttl = 0;
+    LOG("Getting TTL for %s (cname = %s).", host.get(), name.get());
+    uint32_t ttl = 0;
     nsresult ttlRv = _GetTTLData_Windows(name, &ttl, aAddressFamily);
     if (NS_SUCCEEDED(ttlRv)) {
       (*aAddrInfo)->ttl = ttl;
-      LOG("Got TTL %u for %s (name = %s).", ttl, aHost, name);
+      LOG("Got TTL %u for %s (name = %s).", ttl, host.get(), name.get());
     } else {
-      LOG_WARNING("Could not get TTL for %s (cname = %s).", aHost, name);
+      LOG_WARNING("Could not get TTL for %s (cname = %s).", host.get(), name.get());
     }
   }
 #endif

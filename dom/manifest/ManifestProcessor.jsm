@@ -24,7 +24,8 @@
 const {
   utils: Cu
 } = Components;
-Cu.importGlobalProperties(['URL']);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ['URL']);
 const displayModes = new Set(['fullscreen', 'standalone', 'minimal-ui',
   'browser'
 ]);
@@ -32,15 +33,17 @@ const orientationTypes = new Set(['any', 'natural', 'landscape', 'portrait',
   'portrait-primary', 'portrait-secondary', 'landscape-primary',
   'landscape-secondary'
 ]);
-Cu.import('resource://gre/modules/Console.jsm');
-Cu.import("resource://gre/modules/Services.jsm");
+const textDirections = new Set(['ltr', 'rtl', 'auto']);
+
+ChromeUtils.import('resource://gre/modules/Console.jsm');
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 // ValueExtractor is used by the various processors to get values
 // from the manifest and to report errors.
-Cu.import('resource://gre/modules/ValueExtractor.jsm');
+ChromeUtils.import('resource://gre/modules/ValueExtractor.jsm');
 // ImageObjectProcessor is used to process things like icons and images
-Cu.import('resource://gre/modules/ImageObjectProcessor.jsm');
+ChromeUtils.import('resource://gre/modules/ImageObjectProcessor.jsm');
 
-this.ManifestProcessor = { // jshint ignore:line
+var ManifestProcessor = { // jshint ignore:line
   get defaultDisplayMode() {
     return 'browser';
   },
@@ -49,6 +52,9 @@ this.ManifestProcessor = { // jshint ignore:line
   },
   get orientationTypes() {
     return orientationTypes;
+  },
+  get textDirections() {
+    return textDirections;
   },
   // process() method processes JSON text into a clean manifest
   // that conforms with the W3C specification. Takes an object
@@ -79,6 +85,7 @@ this.ManifestProcessor = { // jshint ignore:line
     const extractor = new ValueExtractor(console, domBundle);
     const imgObjProcessor = new ImageObjectProcessor(console, extractor);
     const processedManifest = {
+      'dir': processDirMember.call(this),
       'lang': processLangMember(),
       'start_url': processStartURLMember(),
       'display': processDisplayMember.call(this),
@@ -87,15 +94,27 @@ this.ManifestProcessor = { // jshint ignore:line
       'icons': imgObjProcessor.process(
         rawManifest, manifestURL, 'icons'
       ),
-      'splash_screens': imgObjProcessor.process(
-        rawManifest, manifestURL, 'splash_screens'
-      ),
       'short_name': processShortNameMember(),
       'theme_color': processThemeColorMember(),
       'background_color': processBackgroundColorMember(),
     };
     processedManifest.scope = processScopeMember();
     return processedManifest;
+
+    function processDirMember() {
+      const spec = {
+        objectName: 'manifest',
+        object: rawManifest,
+        property: 'dir',
+        expectedType: 'string',
+        trim: true,
+      };
+      const value = extractor.extractValue(spec);
+      if (this.textDirections.has(value)) {
+        return value;
+      }
+      return 'auto';
+    }
 
     function processNameMember() {
       const spec = {
@@ -128,11 +147,10 @@ this.ManifestProcessor = { // jshint ignore:line
         trim: true
       };
       const value = extractor.extractValue(spec);
-      if (this.orientationTypes.has(value)) {
-        return value;
+      if (value && typeof value === "string" && this.orientationTypes.has(value.toLowerCase())) {
+        return value.toLowerCase();
       }
-      // The spec special-cases orientation to return the empty string.
-      return '';
+      return undefined;
     }
 
     function processDisplayMember() {
@@ -144,8 +162,8 @@ this.ManifestProcessor = { // jshint ignore:line
         trim: true
       };
       const value = extractor.extractValue(spec);
-      if (displayModes.has(value)) {
-        return value;
+      if (value && typeof value === "string" && displayModes.has(value.toLowerCase())) {
+        return value.toLowerCase();
       }
       return this.defaultDisplayMode;
     }
@@ -253,4 +271,4 @@ this.ManifestProcessor = { // jshint ignore:line
     }
   }
 };
-this.EXPORTED_SYMBOLS = ['ManifestProcessor']; // jshint ignore:line
+var EXPORTED_SYMBOLS = ['ManifestProcessor']; // jshint ignore:line

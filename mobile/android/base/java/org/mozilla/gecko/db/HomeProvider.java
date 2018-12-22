@@ -19,6 +19,7 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.UriMatcher;
 import android.database.Cursor;
+import android.database.DatabaseUtils;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.util.Log;
@@ -81,9 +82,9 @@ public class HomeProvider extends SQLiteBridgeContentProvider {
             throw new IllegalArgumentException("All queries should contain a dataset ID parameter");
         }
 
-        selection = DBUtils.concatenateWhere(selection, HomeItems.DATASET_ID + " = ?");
-        selectionArgs = DBUtils.appendSelectionArgs(selectionArgs,
-                                                    new String[] { datasetId });
+        selection = DatabaseUtils.concatenateWhere(selection, HomeItems.DATASET_ID + " = ?");
+        selectionArgs = DatabaseUtils.appendSelectionArgs(selectionArgs,
+                                                          new String[] { datasetId });
 
         // Otherwise, let the SQLiteContentProvider implementation take care of this query for us!
         Cursor c = super.query(uri, projection, selection, selectionArgs, sortOrder);
@@ -141,7 +142,7 @@ public class HomeProvider extends SQLiteBridgeContentProvider {
      */
 
     @Override
-    protected String getDBName(){
+    protected String getDBName() {
         return DB_FILENAME;
     }
 
@@ -151,7 +152,7 @@ public class HomeProvider extends SQLiteBridgeContentProvider {
     }
 
     @Override
-    protected int getDBVersion(){
+    protected int getDBVersion() {
         return DB_VERSION;
     }
 

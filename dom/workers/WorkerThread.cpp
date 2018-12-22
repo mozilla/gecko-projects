@@ -8,6 +8,10 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "EventQueue.h"
+#include "mozilla/ThreadEventQueue.h"
+#include "mozilla/PerformanceCounter.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsIThreadInternal.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
@@ -17,10 +21,10 @@
 #endif
 
 namespace mozilla {
-namespace dom {
-namespace workers {
 
-using namespace mozilla::ipc;
+using namespace ipc;
+
+namespace dom {
 
 namespace {
 
@@ -65,7 +69,11 @@ private:
 };
 
 WorkerThread::WorkerThread()
-  : nsThread(nsThread::NOT_MAIN_THREAD, kWorkerStackSize)
+  : nsThread(MakeNotNull<ThreadEventQueue<mozilla::EventQueue>*>(
+               MakeUnique<mozilla::EventQueue>()),
+             nsThread::NOT_MAIN_THREAD,
+             kWorkerStackSize)
+  , mLock("WorkerThread::mLock")
   , mWorkerPrivateCondVar(mLock, "WorkerThread::mWorkerPrivateCondVar")
   , mWorkerPrivate(nullptr)
   , mOtherThreadsDispatchingViaEventTarget(0)
@@ -86,10 +94,8 @@ WorkerThread::~WorkerThread()
 already_AddRefed<WorkerThread>
 WorkerThread::Create(const WorkerThreadFriendKey& /* aKey */)
 {
-  MOZ_ASSERT(nsThreadManager::get());
-
   RefPtr<WorkerThread> thread = new WorkerThread();
-  if (NS_FAILED(thread->Init())) {
+  if (NS_FAILED(thread->Init(NS_LITERAL_CSTRING("DOM Worker")))) {
     NS_WARNING("Failed to create new thread!");
     return nullptr;
   }
@@ -143,9 +149,24 @@ WorkerThread::SetWorker(const WorkerThreadFriendKey& /* aKey */,
   }
 }
 
+void
+WorkerThread::IncrementDispatchCounter()
+{
+  if (!mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
+    return;
+  }
+  MutexAutoLock lock(mLock);
+  if (mWorkerPrivate) {
+    PerformanceCounter* performanceCounter = mWorkerPrivate->GetPerformanceCounter();
+    if (performanceCounter) {
+      performanceCounter->IncrementDispatchCounter(DispatchCategory::Worker);
+    }
+  }
+}
+
 nsresult
 WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
-                                      already_AddRefed<nsIRunnable>&& aRunnable)
+                                      already_AddRefed<nsIRunnable> aRunnable)
 {
   nsCOMPtr<nsIRunnable> runnable(aRunnable);
 
@@ -170,7 +191,7 @@ WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
 
 nsresult
 WorkerThread::DispatchAnyThread(const WorkerThreadFriendKey& /* aKey */,
-                       already_AddRefed<WorkerRunnable>&& aWorkerRunnable)
+                       already_AddRefed<WorkerRunnable> aWorkerRunnable)
 {
   // May be called on any thread!
 
@@ -189,6 +210,10 @@ WorkerThread::DispatchAnyThread(const WorkerThreadFriendKey& /* aKey */,
     }
   }
 #endif
+
+  // Increment the PerformanceCounter dispatch count
+  // to keep track of how many runnables are executed.
+  IncrementDispatchCounter();
   nsCOMPtr<nsIRunnable> runnable(aWorkerRunnable);
 
   nsresult rv = nsThread::Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
@@ -203,8 +228,6 @@ WorkerThread::DispatchAnyThread(const WorkerThreadFriendKey& /* aKey */,
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(WorkerThread, nsThread)
-
 NS_IMETHODIMP
 WorkerThread::DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags)
 {
@@ -213,7 +236,7 @@ WorkerThread::DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
-WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags)
+WorkerThread::Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags)
 {
   // May be called on any thread!
   nsCOMPtr<nsIRunnable> runnable(aRunnable); // in case we exit early
@@ -224,6 +247,7 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
   }
 
   const bool onWorkerThread = PR_GetCurrentThread() == mThread;
+
 
 #ifdef DEBUG
   if (runnable && !onWorkerThread) {
@@ -262,6 +286,9 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
     }
   }
 
+  // Increment the PerformanceCounter dispatch count
+  // to keep track of how many runnables are executed.
+  IncrementDispatchCounter();
   nsresult rv;
   if (runnable && onWorkerThread) {
     RefPtr<WorkerRunnable> workerRunnable = workerPrivate->MaybeWrapAsWorkerRunnable(runnable.forget());
@@ -298,6 +325,12 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
   return NS_OK;
 }
 
+NS_IMETHODIMP
+WorkerThread::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 uint32_t
 WorkerThread::RecursionDepth(const WorkerThreadFriendKey& /* aKey */) const
 {
@@ -306,10 +339,19 @@ WorkerThread::RecursionDepth(const WorkerThreadFriendKey& /* aKey */) const
   return mNestedEventLoopDepth;
 }
 
+PerformanceCounter*
+WorkerThread::GetPerformanceCounter(nsIRunnable* aEvent)
+{
+  if (mWorkerPrivate) {
+    return mWorkerPrivate->GetPerformanceCounter();
+  }
+  return nullptr;
+}
+
 NS_IMPL_ISUPPORTS(WorkerThread::Observer, nsIThreadObserver)
 
 NS_IMETHODIMP
-WorkerThread::Observer::OnDispatchedEvent(nsIThreadInternal* /* aThread */)
+WorkerThread::Observer::OnDispatchedEvent()
 {
   MOZ_CRASH("OnDispatchedEvent() should never be called!");
 }
@@ -321,12 +363,13 @@ WorkerThread::Observer::OnProcessNextEvent(nsIThreadInternal* /* aThread */,
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   // If the PBackground child is not created yet, then we must permit
-  // blocking event processing to support SynchronouslyCreatePBackground().
-  // If this occurs then we are spinning on the event queue at the start of
+  // blocking event processing to support
+  // BackgroundChild::GetOrCreateCreateForCurrentThread(). If this occurs
+  // then we are spinning on the event queue at the start of
   // PrimaryWorkerRunnable::Run() and don't want to process the event in
   // mWorkerPrivate yet.
   if (aMayWait) {
-    MOZ_ASSERT(CycleCollectedJSRuntime::Get()->RecursionDepth() == 2);
+    MOZ_ASSERT(CycleCollectedJSContext::Get()->RecursionDepth() == 2);
     MOZ_ASSERT(!BackgroundChild::GetForCurrentThread());
     return NS_OK;
   }
@@ -345,6 +388,5 @@ WorkerThread::Observer::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
   return NS_OK;
 }
 
-} // namespace workers
 } // namespace dom
 } // namespace mozilla

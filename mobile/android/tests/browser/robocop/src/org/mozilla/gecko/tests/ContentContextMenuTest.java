@@ -5,7 +5,7 @@
 package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.Actions;
-import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.Clipboard;
 import org.mozilla.gecko.Element;
 import org.mozilla.gecko.R;
 
@@ -48,7 +48,7 @@ abstract class ContentContextMenuTest extends PixelTest {
         if (!mSolo.searchText(contextMenuOption)) {
             openWebContentContextMenu(contextMenuOption); // Open the context menu if it is not already
         }
-        Actions.EventExpecter tabEventExpecter = mActions.expectGeckoEvent("Tab:Added");
+        Actions.EventExpecter tabEventExpecter = mActions.expectGlobalEvent(Actions.EventType.UI, "Tab:Added");
         mSolo.clickOnText(contextMenuOption);
         tabEventExpecter.blockForEvent();
         tabEventExpecter.unregisterListener();
@@ -81,7 +81,7 @@ abstract class ContentContextMenuTest extends PixelTest {
         boolean correctText = waitForCondition(new Condition() {
             @Override
             public boolean isSatisfied() {
-                final String clipboardText = Clipboard.getText();
+                final String clipboardText = Clipboard.getText(getActivity());
                 mAsserter.dumpLog("Clipboard text = " + clipboardText + " , expected text = " + copiedText);
                 return clipboardText.contains(copiedText);
             }

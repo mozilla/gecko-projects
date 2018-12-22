@@ -1,5 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint-disable no-shadow, max-nested-callbacks */
+
+"use strict";
 
 /**
  * Test that we don't stop at debugger statements inside black boxed sources.
@@ -10,16 +13,16 @@ var gClient;
 var gThreadClient;
 var gBpClient;
 
-function run_test()
-{
+function run_test() {
   initTestDebuggerServer();
   gDebuggee = addTestGlobal("test-black-box");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-black-box", function(aResponse, aTabClient, aThreadClient) {
-      gThreadClient = aThreadClient;
-      test_black_box();
-    });
+    attachTestTabAndResume(gClient, "test-black-box",
+                           function(response, tabClient, threadClient) {
+                             gThreadClient = threadClient;
+                             test_black_box();
+                           });
   });
   do_test_pending();
 }
@@ -27,20 +30,19 @@ function run_test()
 const BLACK_BOXED_URL = "http://example.com/blackboxme.js";
 const SOURCE_URL = "http://example.com/source.js";
 
-function test_black_box()
-{
-  gClient.addOneTimeListener("paused", function  (aEvent, aPacket) {
-    let source = gThreadClient.source(aPacket.frame.where.source);
+function test_black_box() {
+  gClient.addOneTimeListener("paused", function(event, packet) {
+    const source = gThreadClient.source(packet.frame.where.source);
     source.setBreakpoint({
       line: 4
-    }, function ({error}, bpClient) {
+    }).then(function([response, bpClient]) {
       gBpClient = bpClient;
-      do_check_true(!error, "Should not get an error: " + error);
       gThreadClient.resume(test_black_box_dbg_statement);
     });
   });
 
-  Components.utils.evalInSandbox(
+  /* eslint-disable no-multi-spaces, no-undef */
+  Cu.evalInSandbox(
     "" + function doStuff(k) { // line 1
       debugger;                // line 2 - Break here
       k(100);                  // line 3
@@ -51,10 +53,10 @@ function test_black_box()
     1
   );
 
-  Components.utils.evalInSandbox(
+  Cu.evalInSandbox(
     "" + function runTest() { // line 1
       doStuff(                // line 2
-        function (n) {        // line 3
+        function(n) {        // line 3
           Math.abs(n);        // line 4 - Break here
         }                     // line 5
       );                      // line 6
@@ -65,21 +67,24 @@ function test_black_box()
     SOURCE_URL,
     1
   );
+  /* eslint-enable no-multi-spaces, no-undef */
 }
 
 function test_black_box_dbg_statement() {
-  gThreadClient.getSources(function ({error, sources}) {
-    do_check_true(!error, "Should not get an error: " + error);
-    let sourceClient = gThreadClient.source(sources.filter(s => s.url == BLACK_BOXED_URL)[0]);
+  gThreadClient.getSources(function({error, sources}) {
+    Assert.ok(!error, "Should not get an error: " + error);
+    const sourceClient = gThreadClient.source(
+      sources.filter(s => s.url == BLACK_BOXED_URL)[0]
+    );
 
-    sourceClient.blackBox(function ({error}) {
-      do_check_true(!error, "Should not get an error: " + error);
+    sourceClient.blackBox(function({error}) {
+      Assert.ok(!error, "Should not get an error: " + error);
 
-      gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-        do_check_eq(aPacket.why.type, "breakpoint",
-                    "We should pass over the debugger statement.");
-        gBpClient.remove(function ({error}) {
-          do_check_true(!error, "Should not get an error: " + error);
+      gClient.addOneTimeListener("paused", function(event, packet) {
+        Assert.equal(packet.why.type, "breakpoint",
+                     "We should pass over the debugger statement.");
+        gBpClient.remove(function({error}) {
+          Assert.ok(!error, "Should not get an error: " + error);
           gThreadClient.resume(test_unblack_box_dbg_statement.bind(null, sourceClient));
         });
       });
@@ -88,13 +93,13 @@ function test_black_box_dbg_statement() {
   });
 }
 
-function test_unblack_box_dbg_statement(aSourceClient) {
-  aSourceClient.unblackBox(function ({error}) {
-    do_check_true(!error, "Should not get an error: " + error);
+function test_unblack_box_dbg_statement(sourceClient) {
+  sourceClient.unblackBox(function({error}) {
+    Assert.ok(!error, "Should not get an error: " + error);
 
-    gClient.addOneTimeListener("paused", function (aEvent, aPacket) {
-      do_check_eq(aPacket.why.type, "debuggerStatement",
-                  "We should stop at the debugger statement again");
+    gClient.addOneTimeListener("paused", function(event, packet) {
+      Assert.equal(packet.why.type, "debuggerStatement",
+                   "We should stop at the debugger statement again");
       finishClient(gClient);
     });
     gDebuggee.runTest();

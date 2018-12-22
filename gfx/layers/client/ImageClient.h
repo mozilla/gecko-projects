@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -11,7 +12,6 @@
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr, already_AddRefed
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat
-#include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
 #include "mozilla/layers/CompositableClient.h"  // for CompositableClient
 #include "mozilla/layers/CompositorTypes.h"  // for CompositableType, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
@@ -25,7 +25,6 @@ namespace layers {
 
 class ClientLayer;
 class CompositableForwarder;
-class AsyncTransactionTracker;
 class Image;
 class ImageContainer;
 class ShadowableLayer;
@@ -64,14 +63,15 @@ public:
    * asynchronously remove all the textures used by the image client.
    *
    */
-  virtual void FlushAllImages(AsyncTransactionWaiter* aAsyncTransactionWaiter) {}
+  virtual void FlushAllImages() {}
 
   virtual void RemoveTexture(TextureClient* aTexture) override;
 
-  void RemoveTextureWithWaiter(TextureClient* aTexture,
-                               AsyncTransactionWaiter* aAsyncTransactionWaiter = nullptr);
-
   virtual ImageClientSingle* AsImageClientSingle() { return nullptr; }
+
+  static already_AddRefed<TextureClient> CreateTextureClientForImage(Image* aImage, KnowsCompositor* aForwarder);
+
+  uint32_t GetLastUpdateGenerationCounter() { return mLastUpdateGenerationCounter; }
 
 protected:
   ImageClient(CompositableForwarder* aFwd, TextureFlags aFlags,
@@ -100,9 +100,11 @@ public:
 
   virtual TextureInfo GetTextureInfo() const override;
 
-  virtual void FlushAllImages(AsyncTransactionWaiter* aAsyncTransactionWaiter) override;
+  virtual void FlushAllImages() override;
 
   ImageClientSingle* AsImageClientSingle() override { return this; }
+
+  bool IsEmpty() { return mBuffers.IsEmpty(); }
 
 protected:
   struct Buffer {
@@ -131,13 +133,8 @@ public:
     return TextureInfo(mType);
   }
 
-  virtual void SetIPDLActor(CompositableChild* aChild) override
-  {
-    MOZ_ASSERT(!aChild, "ImageClientBridge should not have IPDL actor");
-  }
-
 protected:
-  uint64_t mAsyncContainerID;
+  CompositableHandle mAsyncContainerHandle;
 };
 
 } // namespace layers

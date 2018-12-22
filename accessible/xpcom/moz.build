@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,6 +6,7 @@
 
 UNIFIED_SOURCES += [
     'nsAccessibleRelation.cpp',
+    'xpcAccessibilityService.cpp',
     'xpcAccessible.cpp',
     'xpcAccessibleApplication.cpp',
     'xpcAccessibleDocument.cpp',
@@ -26,6 +27,7 @@ SOURCES += [
 
 EXPORTS += [
     '!xpcAccEvents.h',
+    'xpcAccessibilityService.h',
 ]
 
 LOCAL_INCLUDES += [
@@ -50,19 +52,15 @@ else:
         '/accessible/other',
     ]
 
-GENERATED_FILES += [
-    'xpcAccEvents.cpp',
-    'xpcAccEvents.h',
-]
+GENERATED_FILES += [('xpcAccEvents.h', 'xpcAccEvents.cpp')]
 
-xpc_acc_events_h = GENERATED_FILES['xpcAccEvents.h']
-xpc_acc_events_h.script = 'AccEventGen.py:gen_header_file'
-xpc_acc_events_h.inputs += ['AccEvents.conf']
-
-xpc_acc_events_cpp = GENERATED_FILES['xpcAccEvents.cpp']
-xpc_acc_events_cpp.script = 'AccEventGen.py:gen_cpp_file'
-xpc_acc_events_cpp.inputs += ['AccEvents.conf']
+xpc_acc = GENERATED_FILES[('xpcAccEvents.h', 'xpcAccEvents.cpp')]
+xpc_acc.script = 'AccEventGen.py:gen_files'
+xpc_acc.inputs += ['AccEvents.conf', '!/xpcom/idl-parser/xpidl/xpidllex.py', '!/xpcom/idl-parser/xpidl/xpidlyacc.py']
 
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

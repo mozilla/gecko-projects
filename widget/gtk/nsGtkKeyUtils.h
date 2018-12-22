@@ -39,7 +39,7 @@ public:
     /**
      * Compute a DOM key name index from aGdkKeyEvent.
      */
-    KeyNameIndex ComputeDOMKeyNameIndex(const GdkEventKey* aGdkKeyEvent);
+    static KeyNameIndex ComputeDOMKeyNameIndex(const GdkEventKey* aGdkKeyEvent);
 
     /**
      * Compute a DOM code name index from aGdkKeyEvent.
@@ -107,6 +107,18 @@ public:
                                    guint aModifierState);
 
     /**
+     * Utility function to compute current keyboard modifiers for
+     * WidgetInputEvent
+     */
+    static uint32_t ComputeCurrentKeyModifiers();
+
+    /**
+     * Utility function to covert platform modifier state to keyboard modifiers
+     * of WidgetInputEvent
+     */
+    static uint32_t ComputeKeyModifiers(guint aModifierState);
+
+    /**
      * InitInputEvent() initializes the aInputEvent with aModifierState.
      */
     static void InitInputEvent(WidgetInputEvent& aInputEvent,
@@ -119,9 +131,11 @@ public:
      * @param aKeyEvent         It's an WidgetKeyboardEvent which needs to be
      *                          initialized.
      * @param aGdkKeyEvent      A native GDK key event.
+     * @param aIsProcessedByIME true if aGdkKeyEvent is handled by IME.
      */
     static void InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                             GdkEventKey* aGdkKeyEvent);
+                             GdkEventKey* aGdkKeyEvent,
+                             bool aIsProcessedByIME);
 
     /**
      * WillDispatchKeyboardEvent() is called via
@@ -160,7 +174,10 @@ protected:
      */
     void Init();
     void InitXKBExtension();
-    void InitBySystemSettings();
+    void InitBySystemSettingsX11();
+#ifdef MOZ_WAYLAND
+    void InitBySystemSettingsWayland();
+#endif
 
     /**
      * mModifierKeys stores each hardware key information.
@@ -257,6 +274,8 @@ protected:
      * Signal handlers.
      */
     static void OnKeysChanged(GdkKeymap* aKeymap, KeymapWrapper* aKeymapWrapper);
+    static void OnDirectionChanged(GdkKeymap *aGdkKeymap,
+                                   KeymapWrapper* aKeymapWrapper);
 
     /**
      * GetCharCodeFor() Computes what character is inputted by the key event
@@ -322,6 +341,16 @@ protected:
      *                          in ASCII range.  Otherwise, FALSE.
      */
     static bool IsBasicLatinLetterOrNumeral(uint32_t aCharCode);
+
+    /**
+     * IsPrintableASCIICharacter() checks whether the aCharCode is a printable
+     * ASCII character.  I.e., returns false if aCharCode is a control
+     * character even in an ASCII character.
+     */
+    static bool IsPrintableASCIICharacter(uint32_t aCharCode)
+    {
+      return aCharCode >= 0x20 && aCharCode <= 0x7E;
+    }
 
     /**
      * GetGDKKeyvalWithoutModifier() returns the keyval for aGdkKeyEvent when

@@ -4,9 +4,7 @@
 
 // Tests that state menu is displayed correctly (enabled or disabled) in the add-on manager
 // when the preference is unlocked / locked
-var {classes: Cc, interfaces: Ci} = Components;
 const gIsWindows = ("@mozilla.org/windows-registry-key;1" in Cc);
-const gIsOSX = ("nsILocalFileMac" in Ci);
 const gIsLinux = ("@mozilla.org/gnome-gconf-service;1" in Cc) ||
   ("@mozilla.org/gio-service;1" in Cc);
 
@@ -17,11 +15,10 @@ var gPluginElement;
 function getTestPluginPref() {
   let prefix = "plugin.state.";
   if (gIsWindows)
-    return prefix + "nptest";
-  else if (gIsLinux)
-    return prefix + "libnptest";
-  else
-    return prefix + "test";
+    return `${prefix}nptest`;
+  if (gIsLinux)
+    return `${prefix}libnptest`;
+  return `${prefix}test`;
 }
 
 registerCleanupFunction(() => {
@@ -30,9 +27,7 @@ registerCleanupFunction(() => {
 });
 
 function getPlugins() {
-  return new Promise(resolve => {
-    AddonManager.getAddonsByTypes(["plugin"], plugins => resolve(plugins));
-  });
+  return AddonManager.getAddonsByTypes(["plugin"]);
 }
 
 function getTestPlugin(aPlugins) {
@@ -76,50 +71,49 @@ function checkStateMenuDetail(locked) {
   is_element_visible(details, "Details link should be visible.");
   EventUtils.synthesizeMouseAtCenter(details, {}, gManagerWindow);
 
-  return new Promise(resolve => {
-    wait_for_view_load(gManagerWindow, function() {
-      let menuList = gManagerWindow.document.getElementById("detail-state-menulist");
-      is_element_visible(menuList, "Details state menu should be visible.");
-      Assert.equal(menuList.disabled, locked,
-        "Details state menu enabled state should be correct.");
-      resolve();
-    });
+  return new Promise(async resolve => {
+    await wait_for_view_load(gManagerWindow);
+    let menuList = gManagerWindow.document.getElementById("detail-state-menulist");
+    is_element_visible(menuList, "Details state menu should be visible.");
+    Assert.equal(menuList.disabled, locked,
+      "Details state menu enabled state should be correct.");
+    resolve();
   });
 }
 
-add_task(function* initializeState() {
+add_task(async function initializeState() {
   Services.prefs.setIntPref(getTestPluginPref(), Ci.nsIPluginTag.STATE_ENABLED);
   Services.prefs.unlockPref(getTestPluginPref());
-  gManagerWindow = yield open_manager();
+  gManagerWindow = await open_manager();
   gCategoryUtilities = new CategoryUtilities(gManagerWindow);
-  yield gCategoryUtilities.openType("plugin");
+  await gCategoryUtilities.openType("plugin");
 
-  let plugins = yield getPlugins();
+  let plugins = await getPlugins();
   gPluginElement = getTestPlugin(plugins);
 });
 
 // Tests that plugin state menu is enabled if the preference is unlocked
-add_task(function* taskCheckStateMenuIsEnabled() {
+add_task(async function taskCheckStateMenuIsEnabled() {
   checkStateMenu(false);
-  yield checkStateMenuDetail(false);
+  await checkStateMenuDetail(false);
 });
 
 // Lock the preference and then reload the plugin category
-add_task(function* reinitializeState() {
+add_task(async function reinitializeState() {
   // lock the preference
   Services.prefs.lockPref(getTestPluginPref());
-  yield gCategoryUtilities.openType("plugin");
+  await gCategoryUtilities.openType("plugin");
   // Retrieve the test plugin element
-  let plugins = yield getPlugins();
+  let plugins = await getPlugins();
   gPluginElement = getTestPlugin(plugins);
 });
 
 // Tests that plugin state menu is disabled if the preference is locked
-add_task(function* taskCheckStateMenuIsDisabled() {
+add_task(async function taskCheckStateMenuIsDisabled() {
   checkStateMenu(true);
-  yield checkStateMenuDetail(true);
+  await checkStateMenuDetail(true);
 });
 
-add_task(function* testCleanup() {
-  yield close_manager(gManagerWindow);
+add_task(async function testCleanup() {
+  await close_manager(gManagerWindow);
 });

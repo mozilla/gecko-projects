@@ -6,12 +6,13 @@
 #ifndef GFX_FONT_UTILS_H
 #define GFX_FONT_UTILS_H
 
+#include "gfxFontVariations.h"
 #include "gfxPlatform.h"
 #include "nsComponentManagerUtils.h"
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Endian.h"
+#include "mozilla/Encoding.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
@@ -44,9 +45,10 @@ public:
         uint32_t len = aBitset.mBlocks.Length();
         mBlocks.AppendElements(len);
         for (uint32_t i = 0; i < len; ++i) {
-            Block *block = aBitset.mBlocks[i];
-            if (block)
-                mBlocks[i] = new Block(*block);
+            Block *block = aBitset.mBlocks[i].get();
+            if (block) {
+                mBlocks[i] = mozilla::MakeUnique<Block>(*block);
+            }
         }
     }
 
@@ -56,8 +58,8 @@ public:
         }
         size_t n = mBlocks.Length();
         for (size_t i = 0; i < n; ++i) {
-            const Block *b1 = mBlocks[i];
-            const Block *b2 = aOther->mBlocks[i];
+            const Block *b1 = mBlocks[i].get();
+            const Block *b2 = aOther->mBlocks[i].get();
             if (!b1 != !b2) {
                 return false;
             }
@@ -74,11 +76,13 @@ public:
     bool test(uint32_t aIndex) const {
         NS_ASSERTION(mBlocks.DebugGetHeader(), "mHdr is null, this is bad");
         uint32_t blockIndex = aIndex/BLOCK_SIZE_BITS;
-        if (blockIndex >= mBlocks.Length())
+        if (blockIndex >= mBlocks.Length()) {
             return false;
-        Block *block = mBlocks[blockIndex];
-        if (!block)
+        }
+        const Block *block = mBlocks[blockIndex].get();
+        if (!block) {
             return false;
+        }
         return ((block->mBits[(aIndex>>3) & (BLOCK_SIZE - 1)]) & (1 << (aIndex & 0x7))) != 0;
     }
 
@@ -99,43 +103,54 @@ public:
 
         endBlock = aEnd >> BLOCK_INDEX_SHIFT;
         for (blockIndex = startBlock; blockIndex <= endBlock; blockIndex++) {
-            if (blockIndex < blockLen && mBlocks[blockIndex])
+            if (blockIndex < blockLen && mBlocks[blockIndex]) {
                 hasBlocksInRange = true;
+            }
         }
-        if (!hasBlocksInRange) return false;
+        if (!hasBlocksInRange) {
+            return false;
+        }
 
         Block *block;
         uint32_t i, start, end;
         
         // first block, check bits
-        if ((block = mBlocks[startBlock])) {
+        if ((block = mBlocks[startBlock].get())) {
             start = aStart;
             end = std::min(aEnd, ((startBlock+1) << BLOCK_INDEX_SHIFT) - 1);
             for (i = start; i <= end; i++) {
-                if ((block->mBits[(i>>3) & (BLOCK_SIZE - 1)]) & (1 << (i & 0x7)))
+                if ((block->mBits[(i>>3) & (BLOCK_SIZE - 1)]) & (1 << (i & 0x7))) {
                     return true;
+                }
             }
         }
-        if (endBlock == startBlock) return false;
+        if (endBlock == startBlock) {
+            return false;
+        }
 
         // [2..n-1] blocks check bytes
         for (blockIndex = startBlock + 1; blockIndex < endBlock; blockIndex++) {
             uint32_t index;
             
-            if (blockIndex >= blockLen || !(block = mBlocks[blockIndex])) continue;
+            if (blockIndex >= blockLen ||
+                !(block = mBlocks[blockIndex].get())) {
+                continue;
+            }
             for (index = 0; index < BLOCK_SIZE; index++) {
-                if (block->mBits[index]) 
+                if (block->mBits[index]) {
                     return true;
+                }
             }
         }
         
         // last block, check bits
-        if (endBlock < blockLen && (block = mBlocks[endBlock])) {
+        if (endBlock < blockLen && (block = mBlocks[endBlock].get())) {
             start = endBlock << BLOCK_INDEX_SHIFT;
             end = aEnd;
             for (i = start; i <= end; i++) {
-                if ((block->mBits[(i>>3) & (BLOCK_SIZE - 1)]) & (1 << (i & 0x7)))
+                if ((block->mBits[(i>>3) & (BLOCK_SIZE - 1)]) & (1 << (i & 0x7))) {
                     return true;
+                }
             }
         }
         
@@ -145,14 +160,12 @@ public:
     void set(uint32_t aIndex) {
         uint32_t blockIndex = aIndex/BLOCK_SIZE_BITS;
         if (blockIndex >= mBlocks.Length()) {
-            nsAutoPtr<Block> *blocks = mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
-            if (MOZ_UNLIKELY(!blocks)) // OOM
-                return;
+            mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
         }
-        Block *block = mBlocks[blockIndex];
+        Block *block = mBlocks[blockIndex].get();
         if (!block) {
             block = new Block;
-            mBlocks[blockIndex] = block;
+            mBlocks[blockIndex].reset(block);
         }
         block->mBits[(aIndex>>3) & (BLOCK_SIZE - 1)] |= 1 << (aIndex & 0x7);
     }
@@ -170,26 +183,24 @@ public:
 
         if (endIndex >= mBlocks.Length()) {
             uint32_t numNewBlocks = endIndex + 1 - mBlocks.Length();
-            nsAutoPtr<Block> *blocks = mBlocks.AppendElements(numNewBlocks);
-            if (MOZ_UNLIKELY(!blocks)) // OOM
-                return;
+            mBlocks.AppendElements(numNewBlocks);
         }
 
         for (uint32_t i = startIndex; i <= endIndex; ++i) {
             const uint32_t blockFirstBit = i * BLOCK_SIZE_BITS;
             const uint32_t blockLastBit = blockFirstBit + BLOCK_SIZE_BITS - 1;
 
-            Block *block = mBlocks[i];
+            Block *block = mBlocks[i].get();
             if (!block) {
-                bool fullBlock = false;
-                if (aStart <= blockFirstBit && aEnd >= blockLastBit)
-                    fullBlock = true;
+                bool fullBlock =
+                    (aStart <= blockFirstBit && aEnd >= blockLastBit);
 
                 block = new Block(fullBlock ? 0xFF : 0);
-                mBlocks[i] = block;
+                mBlocks[i].reset(block);
 
-                if (fullBlock)
+                if (fullBlock) {
                     continue;
+                }
             }
 
             const uint32_t start = aStart > blockFirstBit ? aStart - blockFirstBit : 0;
@@ -204,11 +215,9 @@ public:
     void clear(uint32_t aIndex) {
         uint32_t blockIndex = aIndex/BLOCK_SIZE_BITS;
         if (blockIndex >= mBlocks.Length()) {
-            nsAutoPtr<Block> *blocks = mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
-            if (MOZ_UNLIKELY(!blocks)) // OOM
-                return;
+            mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
         }
-        Block *block = mBlocks[blockIndex];
+        Block *block = mBlocks[blockIndex].get();
         if (!block) {
             return;
         }
@@ -221,15 +230,13 @@ public:
 
         if (endIndex >= mBlocks.Length()) {
             uint32_t numNewBlocks = endIndex + 1 - mBlocks.Length();
-            nsAutoPtr<Block> *blocks = mBlocks.AppendElements(numNewBlocks);
-            if (MOZ_UNLIKELY(!blocks)) // OOM
-                return;
+            mBlocks.AppendElements(numNewBlocks);
         }
 
         for (uint32_t i = startIndex; i <= endIndex; ++i) {
             const uint32_t blockFirstBit = i * BLOCK_SIZE_BITS;
 
-            Block *block = mBlocks[i];
+            Block *block = mBlocks[i].get();
             if (!block) {
                 // any nonexistent block is implicitly all clear,
                 // so there's no need to even create it
@@ -249,7 +256,7 @@ public:
         size_t total = mBlocks.ShallowSizeOfExcludingThis(aMallocSizeOf);
         for (uint32_t i = 0; i < mBlocks.Length(); i++) {
             if (mBlocks[i]) {
-                total += aMallocSizeOf(mBlocks[i]);
+                total += aMallocSizeOf(mBlocks[i].get());
             }
         }
         return total;
@@ -262,8 +269,9 @@ public:
     // clear out all blocks in the array
     void reset() {
         uint32_t i;
-        for (i = 0; i < mBlocks.Length(); i++)
-            mBlocks[i] = nullptr;    
+        for (i = 0; i < mBlocks.Length(); i++) {
+            mBlocks[i] = nullptr;
+        }
     }
 
     // set this bitset to the union of its current contents and another
@@ -272,10 +280,7 @@ public:
         uint32_t blockCount = aBitset.mBlocks.Length();
         if (blockCount > mBlocks.Length()) {
             uint32_t needed = blockCount - mBlocks.Length();
-            nsAutoPtr<Block> *blocks = mBlocks.AppendElements(needed);
-            if (MOZ_UNLIKELY(!blocks)) { // OOM
-                return;
-            }
+            mBlocks.AppendElements(needed);
         }
         // for each block that may be present in aBitset...
         for (uint32_t i = 0; i < blockCount; ++i) {
@@ -285,7 +290,7 @@ public:
             }
             // if the block is missing in this set, just copy the other
             if (!mBlocks[i]) {
-                mBlocks[i] = new Block(*aBitset.mBlocks[i]);
+                mBlocks[i] = mozilla::MakeUnique<Block>(*aBitset.mBlocks[i]);
                 continue;
             }
             // else set existing block to the union of both
@@ -306,7 +311,7 @@ public:
         uint32_t check = adler32(0, Z_NULL, 0);
         for (uint32_t i = 0; i < mBlocks.Length(); i++) {
             if (mBlocks[i]) {
-                const Block *block = mBlocks[i];
+                const Block *block = mBlocks[i].get();
                 check = adler32(check, (uint8_t*) (&i), 4);
                 check = adler32(check, (uint8_t*) block, sizeof(Block));
             }
@@ -315,7 +320,7 @@ public:
     }
 
 private:
-    nsTArray< nsAutoPtr<Block> > mBlocks;
+    nsTArray<mozilla::UniquePtr<Block>> mBlocks;
 };
 
 #define TRUETYPE_TAG(a, b, c, d) ((a) << 24 | (b) << 16 | (c) << 8 | (d))
@@ -778,8 +783,8 @@ public:
                           gfxSparseBitSet& aCharacterMap);
 
     static nsresult
-    ReadCMAPTableFormat12(const uint8_t *aBuf, uint32_t aLength, 
-                          gfxSparseBitSet& aCharacterMap);
+    ReadCMAPTableFormat12or13(const uint8_t *aBuf, uint32_t aLength, 
+                              gfxSparseBitSet& aCharacterMap);
 
     static nsresult 
     ReadCMAPTableFormat4(const uint8_t *aBuf, uint32_t aLength, 
@@ -791,23 +796,21 @@ public:
 
     static uint32_t
     FindPreferredSubtable(const uint8_t *aBuf, uint32_t aBufLength,
-                          uint32_t *aTableOffset, uint32_t *aUVSTableOffset,
-                          bool *aSymbolEncoding);
+                          uint32_t *aTableOffset, uint32_t *aUVSTableOffset);
 
     static nsresult
     ReadCMAP(const uint8_t *aBuf, uint32_t aBufLength,
              gfxSparseBitSet& aCharacterMap,
-             uint32_t& aUVSOffset,
-             bool& aUnicodeFont, bool& aSymbolFont);
+             uint32_t& aUVSOffset);
 
     static uint32_t
-    MapCharToGlyphFormat4(const uint8_t *aBuf, char16_t aCh);
+    MapCharToGlyphFormat4(const uint8_t *aBuf, uint32_t aLength, char16_t aCh);
 
     static uint32_t
     MapCharToGlyphFormat10(const uint8_t *aBuf, uint32_t aCh);
 
     static uint32_t
-    MapCharToGlyphFormat12(const uint8_t *aBuf, uint32_t aCh);
+    MapCharToGlyphFormat12or13(const uint8_t *aBuf, uint32_t aCh);
 
     static uint16_t
     MapUVSToGlyphFormat14(const uint8_t *aBuf, uint32_t aCh, uint32_t aVS);
@@ -855,6 +858,20 @@ public:
     GetFamilyNameFromTable(hb_blob_t *aNameTable,
                            nsAString& aFamilyName);
 
+    // Find the table directory entry for a given table tag, in a (validated)
+    // buffer of 'sfnt' data. Returns null if the tag is not present.
+    static mozilla::TableDirEntry*
+    FindTableDirEntry(const void* aFontData, uint32_t aTableTag);
+
+    // Return a blob that wraps a table found within a buffer of font data.
+    // The blob does NOT own its data; caller guarantees that the buffer
+    // will remain valid at least as long as the blob.
+    // Returns null if the specified table is not found.
+    // This method assumes aFontData is valid 'sfnt' data; before using this,
+    // caller is responsible to do any sanitization/validation necessary.
+    static hb_blob_t*
+    GetTableFromFontData(const void* aFontData, uint32_t aTableTag);
+
     // create a new name table and build a new font with that name table
     // appended on the end, returns true on success
     static nsresult
@@ -888,8 +905,12 @@ public:
         return (ch == 0x200D);
     }
 
+    // We treat Combining Grapheme Joiner (U+034F) together with the join
+    // controls (ZWJ, ZWNJ) here, because (like them) it is an invisible
+    // char that will be handled by the shaper even if not explicitly
+    // supported by the font. (See bug 1408366.)
     static inline bool IsJoinControl(uint32_t ch) {
-        return (ch == 0x200C || ch == 0x200D);
+        return (ch == 0x200C || ch == 0x200D || ch == 0x034f);
     }
 
     enum {
@@ -976,8 +997,18 @@ public:
     static bool GetColorGlyphLayers(hb_blob_t* aCOLR,
                                     hb_blob_t* aCPAL,
                                     uint32_t aGlyphId,
+                                    const mozilla::gfx::Color& aDefaultColor,
                                     nsTArray<uint16_t> &aGlyphs,
                                     nsTArray<mozilla::gfx::Color> &aColors);
+
+    // Helper used to implement gfxFontEntry::GetVariationInstances for
+    // platforms where the native font APIs don't provide the info we want
+    // in a convenient form.
+    // (Not used on platforms -- currently, freetype -- where the font APIs
+    // expose variation instance details directly.)
+    static void
+    GetVariationInstances(gfxFontEntry* aFontEntry,
+                          nsTArray<gfxFontVariationInstance>& aInstances);
 
 protected:
     friend struct MacCharsetMappingComparator;
@@ -986,25 +1017,24 @@ protected:
     ReadNames(const char *aNameData, uint32_t aDataLen, uint32_t aNameID,
               int32_t aLangID, int32_t aPlatformID, nsTArray<nsString>& aNames);
 
-    // convert opentype name-table platform/encoding/language values to a charset name
-    // we can use to convert the name data to unicode, or "" if data is UTF16BE
-    static const char*
+    // convert opentype name-table platform/encoding/language values to an
+    // Encoding object we can use to convert the name data to unicode
+    static const mozilla::Encoding*
     GetCharsetForFontName(uint16_t aPlatform, uint16_t aScript, uint16_t aLanguage);
 
     struct MacFontNameCharsetMapping {
-        uint16_t    mEncoding;
+        uint16_t    mScript;
         uint16_t    mLanguage;
-        const char *mCharsetName;
+        const mozilla::Encoding* mEncoding;
 
         bool operator<(const MacFontNameCharsetMapping& rhs) const {
-            return (mEncoding < rhs.mEncoding) ||
-                   ((mEncoding == rhs.mEncoding) && (mLanguage < rhs.mLanguage));
+            return (mScript < rhs.mScript) ||
+                   ((mScript == rhs.mScript) && (mLanguage < rhs.mLanguage));
         }
     };
     static const MacFontNameCharsetMapping gMacFontNameCharsets[];
-    static const char* gISOFontNameCharsets[];
-    static const char* gMSFontNameCharsets[];
+    static const mozilla::Encoding* gISOFontNameCharsets[];
+    static const mozilla::Encoding* gMSFontNameCharsets[];
 };
-
 
 #endif /* GFX_FONT_UTILS_H */

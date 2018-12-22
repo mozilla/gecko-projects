@@ -16,6 +16,7 @@
 #include "nsClassHashtable.h"
 #include "nsCOMPtr.h"
 #include "nsHashKeys.h"
+#include "nsINamed.h"
 #include "nsITimer.h"
 
 class nsIEventTarget;
@@ -28,6 +29,12 @@ namespace dom {
 
 class IDBFactory;
 
+namespace quota {
+
+class QuotaManager;
+
+} // namespace quota
+
 namespace indexedDB {
 
 class BackgroundUtilsChild;
@@ -39,8 +46,10 @@ class FileManagerInfo;
 class IndexedDatabaseManager final
   : public nsIObserver
   , public nsITimerCallback
+  , public nsINamed
 {
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
+  typedef mozilla::dom::quota::QuotaManager QuotaManager;
   typedef mozilla::dom::indexedDB::FileManager FileManager;
   typedef mozilla::dom::indexedDB::FileManagerInfo FileManagerInfo;
 
@@ -57,6 +66,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   // Returns a non-owning reference.
   static IndexedDatabaseManager*
@@ -124,11 +134,20 @@ public:
   static bool
   IsFileHandleEnabled();
 
+  static uint32_t
+  DataThreshold();
+
+  static uint32_t
+  MaxSerializedMsgSize();
+
   void
   ClearBackgroundActor();
 
   void
-  NoteBackgroundThread(nsIEventTarget* aBackgroundThread);
+  NoteLiveQuotaManager(QuotaManager* aQuotaManager);
+
+  void
+  NoteShuttingDownQuotaManager();
 
   already_AddRefed<FileManager>
   GetFileManager(PersistenceType aPersistenceType,
@@ -170,10 +189,8 @@ public:
   nsresult
   FlushPendingFileDeletions();
 
-#ifdef ENABLE_INTL_API
   static const nsCString&
   GetLocale();
-#endif
 
   static mozilla::Mutex&
   FileMutex()
@@ -188,7 +205,7 @@ public:
   CommonPostHandleEvent(EventChainPostVisitor& aVisitor, IDBFactory* aFactory);
 
   static bool
-  ResolveSandboxBinding(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
+  ResolveSandboxBinding(JSContext* aCx);
 
   static bool
   DefineIndexedDB(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
@@ -222,9 +239,7 @@ private:
   // and FileInfo.mSliceRefCnt
   mozilla::Mutex mFileMutex;
 
-#ifdef ENABLE_INTL_API
   nsCString mLocale;
-#endif
 
   indexedDB::BackgroundUtilsChild* mBackgroundActor;
 

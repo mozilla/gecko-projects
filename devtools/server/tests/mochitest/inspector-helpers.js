@@ -1,13 +1,17 @@
-var Cu = Components.utils;
+/* exported attachURL, promiseDone, assertOwnershipTrees, checkMissing, checkAvailable,
+   promiseOnce, isSrcChange, isUnretained, isNewRoot, assertSrcChange, assertUnload,
+   assertFrameLoad, assertChildList, waitForMutation, addTest, addAsyncTest,
+   runNextTest */
+"use strict";
 
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const {DebuggerClient} = require("devtools/shared/client/main");
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {DebuggerClient} = require("devtools/shared/client/debugger-client");
 const {DebuggerServer} = require("devtools/server/main");
-Cu.import("resource://gre/modules/Task.jsm");
 
 const Services = require("Services");
-const promise = require("promise");
-const {_documentWalker} = require("devtools/server/actors/inspector");
+// promise is still used in tests using this helper
+const defer = require("devtools/shared/defer");
+const {DocumentWalker: _documentWalker} = require("devtools/server/actors/inspector/document-walker");
 
 // Always log packets when running tests.
 Services.prefs.setBoolPref("devtools.debugger.log", true);
@@ -15,10 +19,9 @@ SimpleTest.registerCleanupFunction(function() {
   Services.prefs.clearUserPref("devtools.debugger.log");
 });
 
-
 if (!DebuggerServer.initialized) {
   DebuggerServer.init();
-  DebuggerServer.addBrowserActors();
+  DebuggerServer.registerAllActors();
   SimpleTest.registerCleanupFunction(function() {
     DebuggerServer.destroy();
   });
@@ -27,7 +30,7 @@ if (!DebuggerServer.initialized) {
 var gAttachCleanups = [];
 
 SimpleTest.registerCleanupFunction(function() {
-  for (let cleanup of gAttachCleanups) {
+  for (const cleanup of gAttachCleanups) {
     cleanup();
   }
 });
@@ -40,10 +43,10 @@ SimpleTest.registerCleanupFunction(function() {
  * and disconnect its debugger client.
  */
 function attachURL(url, callback) {
-  var win = window.open(url, "_blank");
-  var client = null;
+  let win = window.open(url, "_blank");
+  let client = null;
 
-  let cleanup = () => {
+  const cleanup = () => {
     if (client) {
       client.close();
       client = null;
@@ -59,14 +62,15 @@ function attachURL(url, callback) {
     if (event.data === "ready") {
       client = new DebuggerClient(DebuggerServer.connectPipe());
       client.connect().then(([applicationType, traits]) => {
-        client.listTabs(response => {
-          for (let tab of response.tabs) {
+        client.listTabs().then(response => {
+          for (const tab of response.tabs) {
             if (tab.url === url) {
-              window.removeEventListener("message", loadListener, false);
-              client.attachTab(tab.actor, function(aResponse, aTabClient) {
+              window.removeEventListener("message", loadListener);
+              // eslint-disable-next-line max-nested-callbacks
+              client.attachTab(tab.actor).then(function() {
                 try {
                   callback(null, client, tab, win.document);
-                } catch(ex) {
+                } catch (ex) {
                   Cu.reportError(ex);
                   dump(ex);
                 }
@@ -77,13 +81,13 @@ function attachURL(url, callback) {
         });
       });
     }
-  }, false);
+  });
 
   return cleanup;
 }
 
 function promiseOnce(target, event) {
-  let deferred = promise.defer();
+  const deferred = defer();
   target.on(event, (...args) => {
     if (args.length === 1) {
       deferred.resolve(args[0]);
@@ -99,16 +103,16 @@ function sortOwnershipChildren(children) {
 }
 
 function serverOwnershipSubtree(walker, node) {
-  let actor = walker._refMap.get(node);
+  const actor = walker._refMap.get(node);
   if (!actor) {
     return undefined;
   }
 
-  let children = [];
-  let docwalker = new _documentWalker(node, window);
+  const children = [];
+  const docwalker = new _documentWalker(node, window);
   let child = docwalker.firstChild();
   while (child) {
-    let item = serverOwnershipSubtree(walker, child);
+    const item = serverOwnershipSubtree(walker, child);
     if (item) {
       children.push(item);
     }
@@ -117,25 +121,27 @@ function serverOwnershipSubtree(walker, node) {
   return {
     name: actor.actorID,
     children: sortOwnershipChildren(children)
-  }
+  };
 }
 
 function serverOwnershipTree(walker) {
-  let serverConnection = walker.conn._transport._serverConnection;
-  let serverWalker = serverConnection.getActor(walker.actorID);
+  const serverWalker = DebuggerServer.searchAllConnectionsForActor(walker.actorID);
 
   return {
-    root: serverOwnershipSubtree(serverWalker, serverWalker.rootDoc ),
-    orphaned: [...serverWalker._orphaned].map(o => serverOwnershipSubtree(serverWalker, o.rawNode)),
-    retained: [...serverWalker._retainedOrphans].map(o => serverOwnershipSubtree(serverWalker, o.rawNode))
+    root: serverOwnershipSubtree(serverWalker, serverWalker.rootDoc),
+    orphaned: [...serverWalker._orphaned]
+              .map(o => serverOwnershipSubtree(serverWalker, o.rawNode)),
+    retained: [...serverWalker._retainedOrphans]
+              .map(o => serverOwnershipSubtree(serverWalker, o.rawNode))
   };
 }
 
 function clientOwnershipSubtree(node) {
   return {
     name: node.actorID,
-    children: sortOwnershipChildren(node.treeChildren().map(child => clientOwnershipSubtree(child)))
-  }
+    children: sortOwnershipChildren(node.treeChildren()
+              .map(child => clientOwnershipSubtree(child)))
+  };
 }
 
 function clientOwnershipTree(walker) {
@@ -143,32 +149,33 @@ function clientOwnershipTree(walker) {
     root: clientOwnershipSubtree(walker.rootNode),
     orphaned: [...walker._orphaned].map(o => clientOwnershipSubtree(o)),
     retained: [...walker._retainedOrphans].map(o => clientOwnershipSubtree(o))
-  }
+  };
 }
 
 function ownershipTreeSize(tree) {
   let size = 1;
-  for (let child of tree.children) {
+  for (const child of tree.children) {
     size += ownershipTreeSize(child);
   }
   return size;
 }
 
 function assertOwnershipTrees(walker) {
-  let serverTree = serverOwnershipTree(walker);
-  let clientTree = clientOwnershipTree(walker);
-  is(JSON.stringify(clientTree, null, ' '), JSON.stringify(serverTree, null, ' '), "Server and client ownership trees should match.");
+  const serverTree = serverOwnershipTree(walker);
+  const clientTree = clientOwnershipTree(walker);
+  is(JSON.stringify(clientTree, null, " "), JSON.stringify(serverTree, null, " "),
+     "Server and client ownership trees should match.");
 
   return ownershipTreeSize(clientTree.root);
 }
 
 // Verify that an actorID is inaccessible both from the client library and the server.
 function checkMissing(client, actorID) {
-  let deferred = promise.defer();
-  let front = client.getActor(actorID);
+  let deferred = defer();
+  const front = client.getActor(actorID);
   ok(!front, "Front shouldn't be accessible from the client for actorID: " + actorID);
 
-  deferred = promise.defer();
+  deferred = defer();
   client.request({
     to: actorID,
     type: "request",
@@ -181,23 +188,24 @@ function checkMissing(client, actorID) {
 
 // Verify that an actorID is accessible both from the client library and the server.
 function checkAvailable(client, actorID) {
-  let deferred = promise.defer();
-  let front = client.getActor(actorID);
+  let deferred = defer();
+  const front = client.getActor(actorID);
   ok(front, "Front should be accessible from the client for actorID: " + actorID);
 
-  deferred = promise.defer();
+  deferred = defer();
   client.request({
     to: actorID,
     type: "garbageAvailableTest",
   }, response => {
-    is(response.error, "unrecognizedPacketType", "node list actor should be contactable.");
+    is(response.error, "unrecognizedPacketType",
+       "node list actor should be contactable.");
     deferred.resolve(undefined);
   });
   return deferred.promise;
 }
 
-function promiseDone(promise) {
-  promise.then(null, err => {
+function promiseDone(currentPromise) {
+  currentPromise.catch(err => {
     ok(false, "Promise failed: " + err);
     if (err.stack) {
       dump(err.stack);
@@ -208,12 +216,8 @@ function promiseDone(promise) {
 
 // Mutation list testing
 
-function isSrcChange(change) {
-  return (change.type === "attributes" && change.attributeName === "src");
-}
-
 function assertAndStrip(mutations, message, test) {
-  let size = mutations.length;
+  const size = mutations.length;
   mutations = mutations.filter(test);
   ok((mutations.size != size), message);
   return mutations;
@@ -246,7 +250,8 @@ function isNewRoot(change) {
 // Make sure an iframe's src attribute changed and then
 // strip that mutation out of the list.
 function assertSrcChange(mutations) {
-  return assertAndStrip(mutations, "Should have had an iframe source change.", isSrcChange);
+  return assertAndStrip(mutations, "Should have had an iframe source change.",
+                        isSrcChange);
 }
 
 // Make sure there's an unload in the mutation list and strip
@@ -269,9 +274,9 @@ function assertChildList(mutations) {
 
 // Load mutations aren't predictable, so keep accumulating mutations until
 // the one we're looking for shows up.
-function waitForMutation(walker, test, mutations=[]) {
-  let deferred = promise.defer();
-  for (let change of mutations) {
+function waitForMutation(walker, test, mutations = []) {
+  const deferred = defer();
+  for (const change of mutations) {
     if (test(change)) {
       deferred.resolve(mutations);
     }
@@ -280,12 +285,11 @@ function waitForMutation(walker, test, mutations=[]) {
   walker.once("mutations", newMutations => {
     waitForMutation(walker, test, mutations.concat(newMutations)).then(finalMutations => {
       deferred.resolve(finalMutations);
-    })
+    });
   });
 
   return deferred.promise;
 }
-
 
 var _tests = [];
 function addTest(test) {
@@ -293,15 +297,15 @@ function addTest(test) {
 }
 
 function addAsyncTest(generator) {
-  _tests.push(() => Task.spawn(generator).then(null, ok.bind(null, false)));
+  _tests.push(() => (generator)().catch(ok.bind(null, false)));
 }
 
 function runNextTest() {
   if (_tests.length == 0) {
-    SimpleTest.finish()
+    SimpleTest.finish();
     return;
   }
-  var fn = _tests.shift();
+  const fn = _tests.shift();
   try {
     fn();
   } catch (ex) {

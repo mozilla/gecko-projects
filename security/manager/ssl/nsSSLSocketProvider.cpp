@@ -4,9 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/BasePrincipal.h"
 #include "nsSSLSocketProvider.h"
 #include "nsNSSIOLayer.h"
 #include "nsError.h"
+
+using mozilla::OriginAttributes;
 
 nsSSLSocketProvider::nsSSLSocketProvider()
 {
@@ -23,7 +26,9 @@ nsSSLSocketProvider::NewSocket(int32_t family,
                                const char *host,
                                int32_t port,
                                nsIProxyInfo *proxy,
+                               const OriginAttributes &originAttributes,
                                uint32_t flags,
+                               uint32_t tlsFlags,
                                PRFileDesc **_result,
                                nsISupports **securityInfo)
 {
@@ -31,10 +36,12 @@ nsSSLSocketProvider::NewSocket(int32_t family,
                                       host,
                                       port,
                                       proxy,
+                                      originAttributes,
                                       _result,
                                       securityInfo,
                                       false,
-                                      flags);
+                                      flags,
+                                      tlsFlags);
   return (NS_FAILED(rv)) ? NS_ERROR_SOCKET_CREATE_FAILED : NS_OK;
 }
 
@@ -44,7 +51,9 @@ nsSSLSocketProvider::AddToSocket(int32_t family,
                                  const char *host,
                                  int32_t port,
                                  nsIProxyInfo *proxy,
+                                 const OriginAttributes &originAttributes,
                                  uint32_t flags,
+                                 uint32_t tlsFlags,
                                  PRFileDesc *aSocket,
                                  nsISupports **securityInfo)
 {
@@ -52,10 +61,12 @@ nsSSLSocketProvider::AddToSocket(int32_t family,
                                         host,
                                         port,
                                         proxy,
+                                        originAttributes,
                                         aSocket,
                                         securityInfo,
                                         false,
-                                        flags);
-  
+                                        flags,
+                                        tlsFlags);
+
   return (NS_FAILED(rv)) ? NS_ERROR_SOCKET_CREATE_FAILED : NS_OK;
 }

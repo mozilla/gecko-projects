@@ -16,14 +16,9 @@
 /**
  * moz_places
  */
-#define CREATE_IDX_MOZ_PLACES_URL \
+#define CREATE_IDX_MOZ_PLACES_URL_HASH \
   CREATE_PLACES_IDX( \
-    "url_uniqueindex", "moz_places", "url", "UNIQUE" \
-  )
-
-#define CREATE_IDX_MOZ_PLACES_FAVICON \
-  CREATE_PLACES_IDX( \
-    "faviconindex", "moz_places", "favicon_id", "" \
+    "url_hashindex", "moz_places", "url_hash", "" \
   )
 
 #define CREATE_IDX_MOZ_PLACES_REVHOST \
@@ -49,6 +44,11 @@
 #define CREATE_IDX_MOZ_PLACES_GUID \
   CREATE_PLACES_IDX( \
     "guid_uniqueindex", "moz_places", "guid", "UNIQUE" \
+  )
+
+#define CREATE_IDX_MOZ_PLACES_ORIGIN_ID \
+  CREATE_PLACES_IDX( \
+    "originidindex", "moz_places", "origin_id", "" \
   )
 
 /**
@@ -89,6 +89,11 @@
     "itemlastmodifiedindex", "moz_bookmarks", "fk, lastModified", "" \
   )
 
+#define CREATE_IDX_MOZ_BOOKMARKS_DATEADDED \
+  CREATE_PLACES_IDX( \
+    "dateaddedindex", "moz_bookmarks", "dateAdded", "" \
+  )
+
 #define CREATE_IDX_MOZ_BOOKMARKS_GUID \
   CREATE_PLACES_IDX( \
     "guid_uniqueindex", "moz_bookmarks", "guid", "UNIQUE" \
@@ -119,6 +124,20 @@
 #define CREATE_IDX_MOZ_KEYWORDS_PLACEPOSTDATA \
   CREATE_PLACES_IDX( \
     "placepostdata_uniqueindex", "moz_keywords", "place_id, post_data", "UNIQUE" \
+  )
+
+// moz_pages_w_icons
+
+#define CREATE_IDX_MOZ_PAGES_W_ICONS_ICONURLHASH \
+  CREATE_PLACES_IDX( \
+    "urlhashindex", "moz_pages_w_icons", "page_url_hash", "" \
+  )
+
+// moz_icons
+
+#define CREATE_IDX_MOZ_ICONS_ICONURLHASH \
+  CREATE_PLACES_IDX( \
+    "iconurlhashindex", "moz_icons", "fixed_icon_url_hash", "" \
   )
 
 #endif // nsPlacesIndexes_h__

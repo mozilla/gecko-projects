@@ -110,12 +110,10 @@ txKeyFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-nsresult
-txKeyFunctionCall::getNameAtom(nsIAtom** aAtom)
+void
+txKeyFunctionCall::appendName(nsAString& aDest)
 {
-    *aAtom = nsGkAtoms::key;
-    NS_ADDREF(*aAtom);
-    return NS_OK;
+    aDest.Append(nsGkAtoms::key->GetUTF16String());
 }
 #endif
 
@@ -220,7 +218,7 @@ txKeyHash::getKeyNodes(const txExpandedName& aKeyName,
 
     nsresult rv = xslKey->indexSubtreeRoot(aRoot, mKeyValues, aEs);
     NS_ENSURE_SUCCESS(rv, rv);
-    
+
     indexEntry->mIndexed = true;
 
     // Now that the key is indexed we can get its value.
@@ -261,8 +259,8 @@ bool txXSLKey::addKey(nsAutoPtr<txPattern>&& aMatch, nsAutoPtr<Expr>&& aUse)
     if (!key)
         return false;
 
-    key->matchPattern = Move(aMatch);
-    key->useExpr = Move(aUse);
+    key->matchPattern = std::move(aMatch);
+    key->useExpr = std::move(aUse);
 
     return true;
 }
@@ -338,7 +336,11 @@ nsresult txXSLKey::testNode(const txXPathNode& aNode,
     nsAutoString val;
     uint32_t currKey, numKeys = mKeys.Length();
     for (currKey = 0; currKey < numKeys; ++currKey) {
-        if (mKeys[currKey].matchPattern->matches(aNode, &aEs)) {
+        bool matched;
+        nsresult rv = mKeys[currKey].matchPattern->matches(aNode, &aEs, matched);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        if (matched) {
             txSingleNodeContext *evalContext =
                 new txSingleNodeContext(aNode, &aEs);
             NS_ENSURE_TRUE(evalContext, NS_ERROR_OUT_OF_MEMORY);
@@ -390,6 +392,6 @@ nsresult txXSLKey::testNode(const txXPathNode& aNode,
             }
         }
     }
-    
+
     return NS_OK;
 }

@@ -15,6 +15,11 @@
     <!-- We have our own l10n system & don't use the platform's plurals. -->
     <issue id="PluralsCandidate" severity="ignore" />
 
+    <!-- We don't want to have to follow the SDK release schedule: we can keep
+	 the warning in order to not forget that there's a new SDK, but there's
+	 no need to break on update. -->
+    <issue id="OldTargetApi" severity="warning" />
+
     <!-- We want all lint warnings to be fatal errors.
          Right now, we set these to lint warnings so:
 
@@ -24,16 +29,66 @@
          and not fail everything. -->
     <issue id="AppCompatResource" severity="warning" />
     <issue id="GoogleAppIndexingDeepLinkError" severity="warning" />
+    <issue id="GoogleAppIndexingUrlError" severity="warning" />
     <issue id="Instantiatable" severity="warning" />
     <issue id="LongLogTag" severity="warning" />
     <issue id="MissingPermission" severity="warning" />
-    <issue id="NewApi" severity="warning" />
     <issue id="OnClick" severity="warning" />
     <issue id="ReferenceType" severity="warning" />
     <issue id="ResourceAsColor" severity="warning" />
     <issue id="ResourceType" severity="warning" />
     <issue id="ValidFragment" severity="warning" />
-    <issue id="WrongConstant" severity="warning" />
+
+    <!-- New Android-Gradle lint integration regressed this check. -->
+    <issue id="MissingRegistered" severity="warning" />
+
+    <!-- Fixes are in progress but we would like to block future candidates.
+         The ** in the path are wildcards. We need these wildcards to not change our code structure.
+         See: http://stackoverflow.com/questions/43994420/what-path-is-the-issue-ignore-path-element-in-lint-xml-relative-to -->
+    <issue id="NewApi" severity="error">
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/activitystream/ActivityStreamPreference.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/dlc/DownloadContentTelemetry.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/preferences/LocaleListPreference.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/media/MediaControlService.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/PrintHelper.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/animation/PropertyAnimator.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/RemotePresentationService.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/db/SharedBrowserDatabaseProvider.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/tabs/TabPanelBackButton.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/toolbar/ToolbarEditText.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/util/ViewUtil.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/IntentHelper.java"/>
+        <ignore path="**/media/webrtc/trunk/webrtc/modules/audio_device/android/java/src/org/webrtc/voiceengine/WebRtcAudioEffects.java"/>
+        <ignore path="**/media/webrtc/trunk/webrtc/modules/audio_device/android/java/src/org/webrtc/voiceengine/WebRtcAudioRecord.java"/>
+        <ignore path="src/photon/res/values/styles.xml"/>
+    </issue>
+
+    <!-- We fixed all "Registered" lint errors. However the current gradle plugin has a bug where
+         it ignores @SuppressLint annotations for this check. See CrashReporterActivity class and
+         https://code.google.com/p/android/issues/detail?id=204846 -->
+    <issue id="Registered" severity="warning" />
+
+    <issue id="ObjectAnimatorBinding" severity="error">
+        <!-- Two animated properties are provided by the underlying
+             View implementation. -->
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/firstrun/FirstrunPager.java"/>
+    </issue>
+
+    <!-- Tracked by Bug 1409550. -->
+    <issue id="AppCompatCustomView" severity="error">
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/firstrun/FirstrunPager.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/home/PanelHeaderView.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/menu/MenuItemDefault.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/tabs/TabPanelBackButton.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/AllCapsTextView.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/ClickableWhenDisabledEditText.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/EllipsisTextView.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/SquaredImageView.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/themed/ThemedEditText.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/themed/ThemedImageButton.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/themed/ThemedImageView.java"/>
+        <ignore path="**/mobile/android/base/java/org/mozilla/gecko/widget/themed/ThemedTextView.java"/>
+    </issue>
 
     <!-- WHEN YOU FIX A LINT WARNING, ADD IT TO THIS LIST.
 
@@ -119,7 +174,6 @@
     <issue id="MissingId" severity="error" />
     <issue id="MissingPrefix" severity="error" />
     <issue id="MissingQuantity" severity="error" />
-    <issue id="MissingRegistered" severity="error" />
     <issue id="MissingSuperCall" severity="error" />
     <issue id="MissingTranslation" severity="error" />
     <issue id="MissingVersion" severity="error" />
@@ -130,7 +184,6 @@
     <issue id="NfcTechWhitespace" severity="error" />
     <issue id="NotSibling" severity="error" />
     <issue id="ObsoleteLayoutParam" severity="error" />
-    <issue id="OldTargetApi" severity="error" />
     <issue id="OnClick" severity="error" />
     <issue id="Orientation" severity="error" />
     <issue id="Override" severity="error" />
@@ -144,7 +197,6 @@
     <issue id="ProtectedPermissions" severity="error" />
     <issue id="PxUsage" severity="error" />
     <issue id="Range" severity="error" />
-    <issue id="Registered" severity="error" />
     <issue id="RelativeOverlap" severity="error" />
     <issue id="RequiredSize" severity="error" />
     <issue id="ResAuto" severity="error" />
@@ -184,7 +236,12 @@
     <issue id="UnlocalizedSms" severity="error" />
     <issue id="UnusedNamespace" severity="error" />
     <issue id="UnusedQuantity" severity="error" />
-    <issue id="UnusedResources" severity="error" />
+    <issue id="UnusedResources" severity="error">
+        <!-- The moz.build based build system leaves a .mkdir.done file lying around in the
+             preprocessed_resources res/raw folder. Lint reports it as unused. We should get
+             rid of the file eventually. See bug 1268948. -->
+        <ignore path="**/raw/.mkdir.done" />
+    </issue>
     <issue id="Usability" severity="error" />
     <issue id="UseCheckPermission" severity="error" />
     <issue id="UseCompoundDrawables" severity="error" />

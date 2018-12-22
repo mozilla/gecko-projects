@@ -8,8 +8,11 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/SVGAnimatedTransformList.h"
+#include "mozilla/dom/SVGGradientElementBinding.h"
 #include "mozilla/dom/SVGRadialGradientElementBinding.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGLinearGradientElementBinding.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
 #include "nsSVGElement.h"
@@ -19,6 +22,9 @@ NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(RadialGradient)
 
 namespace mozilla {
 namespace dom {
+
+using namespace SVGGradientElement_Binding;
+using namespace SVGUnitTypes_Binding;
 
 //--------------------- Gradients------------------------
 
@@ -41,8 +47,9 @@ nsSVGElement::EnumInfo SVGGradientElement::sEnumInfo[2] =
   }
 };
 
-nsSVGElement::StringInfo SVGGradientElement::sStringInfo[1] =
+nsSVGElement::StringInfo SVGGradientElement::sStringInfo[2] =
 {
+  { &nsGkAtoms::href, kNameSpaceID_None, true },
   { &nsGkAtoms::href, kNameSpaceID_XLink, true }
 };
 
@@ -95,14 +102,16 @@ SVGGradientElement::SpreadMethod()
 already_AddRefed<SVGAnimatedString>
 SVGGradientElement::Href()
 {
-  return mStringAttributes[HREF].ToDOMAnimatedString(this);
+  return mStringAttributes[HREF].IsExplicitlySet()
+         ? mStringAttributes[HREF].ToDOMAnimatedString(this)
+         : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
 }
 
 //----------------------------------------------------------------------
 // nsIContent methods
 
 NS_IMETHODIMP_(bool)
-SVGGradientElement::IsAttributeMapped(const nsIAtom* name) const
+SVGGradientElement::IsAttributeMapped(const nsAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
     sColorMap,
@@ -118,15 +127,15 @@ SVGGradientElement::IsAttributeMapped(const nsIAtom* name) const
 JSObject*
 SVGLinearGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGLinearGradientElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGLinearGradientElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::LengthInfo SVGLinearGradientElement::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x1, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y1, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::x2, 100, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y2, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x1, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y1, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::x2, 100, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y2, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
 
 //----------------------------------------------------------------------
@@ -138,7 +147,7 @@ SVGLinearGradientElement::SVGLinearGradientElement(already_AddRefed<mozilla::dom
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGLinearGradientElement)
 
@@ -192,16 +201,17 @@ SVGLinearGradientElement::GetLengthInfo()
 JSObject*
 SVGRadialGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGRadialGradientElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGRadialGradientElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::LengthInfo SVGRadialGradientElement::sLengthInfo[5] =
+nsSVGElement::LengthInfo SVGRadialGradientElement::sLengthInfo[6] =
 {
-  { &nsGkAtoms::cx, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::cy, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::r, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::XY },
-  { &nsGkAtoms::fx, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::fy, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::cx, 50, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::cy, 50, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::r, 50, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::XY },
+  { &nsGkAtoms::fx, 50, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::fy, 50, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::fr, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::XY },
 };
 
 //----------------------------------------------------------------------
@@ -213,7 +223,7 @@ SVGRadialGradientElement::SVGRadialGradientElement(already_AddRefed<mozilla::dom
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGRadialGradientElement)
 
@@ -247,6 +257,12 @@ already_AddRefed<SVGAnimatedLength>
 SVGRadialGradientElement::Fy()
 {
   return mLengthAttributes[ATTR_FY].ToDOMAnimatedLength(this);
+}
+
+already_AddRefed<SVGAnimatedLength>
+SVGRadialGradientElement::Fr()
+{
+  return mLengthAttributes[ATTR_FR].ToDOMAnimatedLength(this);
 }
 
 //----------------------------------------------------------------------

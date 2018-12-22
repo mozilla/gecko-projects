@@ -4,14 +4,10 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["Accounts"];
+var EXPORTED_SYMBOLS = ["Accounts"];
 
-const { utils: Cu } = Components;
-
-Cu.import("resource://gre/modules/Deprecated.jsm"); /*global Deprecated */
-Cu.import("resource://gre/modules/Messaging.jsm"); /*global Messaging */
-Cu.import("resource://gre/modules/Promise.jsm"); /*global Promise */
-Cu.import("resource://gre/modules/Services.jsm"); /*global Services */
+ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 /**
  * A promise-based API for querying the existence of Sync accounts,
@@ -33,25 +29,18 @@ Cu.import("resource://gre/modules/Services.jsm"); /*global Services */
  *   );
  */
 var Accounts = Object.freeze({
-  _accountsExist: function (kind) {
-    return Messaging.sendRequestForResult({
+  _accountsExist: function(kind) {
+    return EventDispatcher.instance.sendRequestForResult({
       type: "Accounts:Exist",
       kind: kind
     }).then(data => data.exists);
   },
 
-  firefoxAccountsExist: function () {
+  firefoxAccountsExist: function() {
     return this._accountsExist("fxa");
   },
 
-  syncAccountsExist: function () {
-    Deprecated.warning("The legacy Sync account type has been removed from Firefox for Android. " +
-                       "Please use `firefoxAccountsExist` instead.",
-                       "https://developer.mozilla.org/en-US/Add-ons/Firefox_for_Android/API/Accounts.jsm");
-    return Promise.resolve(false);
-  },
-
-  anySyncAccountsExist: function () {
+  anySyncAccountsExist: function() {
     return this._accountsExist("any");
   },
 
@@ -65,19 +54,19 @@ var Accounts = Object.freeze({
    *
    * There is no return value from this method.
    */
-  launchSetup: function (extras) {
-    Messaging.sendRequest({
+  launchSetup: function(extras) {
+    EventDispatcher.instance.sendRequest({
       type: "Accounts:Create",
       extras: extras
     });
   },
 
-  _addDefaultEndpoints: function (json) {
+  _addDefaultEndpoints: function(json) {
     let newData = Cu.cloneInto(json, {}, { cloneFunctions: false });
     let associations = {
-      authServerEndpoint: 'identity.fxaccounts.auth.uri',
-      profileServerEndpoint: 'identity.fxaccounts.remote.profile.uri',
-      tokenServerEndpoint: 'identity.sync.tokenserver.uri'
+      authServerEndpoint: "identity.fxaccounts.auth.uri",
+      profileServerEndpoint: "identity.fxaccounts.remote.profile.uri",
+      tokenServerEndpoint: "identity.sync.tokenserver.uri"
     };
     for (let key in associations) {
       newData[key] = newData[key] || Services.urlFormatter.formatURLPref(associations[key]);
@@ -94,8 +83,8 @@ var Accounts = Object.freeze({
    *
    * Returns a Promise that resolves to a boolean indicating success.
    */
-  createFirefoxAccountFromJSON: function (json) {
-    return Messaging.sendRequestForResult({
+  createFirefoxAccountFromJSON: function(json) {
+    return EventDispatcher.instance.sendRequestForResult({
       type: "Accounts:CreateFirefoxAccountFromJSON",
       json: this._addDefaultEndpoints(json)
     });
@@ -111,8 +100,8 @@ var Accounts = Object.freeze({
    *
    * Returns a Promise that resolves to a boolean indicating success.
    */
-  updateFirefoxAccountFromJSON: function (json) {
-    return Messaging.sendRequestForResult({
+  updateFirefoxAccountFromJSON: function(json) {
+    return EventDispatcher.instance.sendRequestForResult({
       type: "Accounts:UpdateFirefoxAccountFromJSON",
       json: this._addDefaultEndpoints(json)
     });
@@ -126,8 +115,8 @@ var Accounts = Object.freeze({
    *
    * There is no return value from this method.
    */
-  notifyFirefoxAccountProfileChanged: function () {
-    Messaging.sendRequest({
+  notifyFirefoxAccountProfileChanged: function() {
+    EventDispatcher.instance.sendRequest({
       type: "Accounts:ProfileUpdated",
     });
   },
@@ -138,8 +127,8 @@ var Accounts = Object.freeze({
    * Returns a Promise that resolves to null if no Android Firefox Account
    * exists, or an object including at least a string-valued 'email' key.
    */
-  getFirefoxAccount: function () {
-    return Messaging.sendRequestForResult({
+  getFirefoxAccount: function() {
+    return EventDispatcher.instance.sendRequestForResult({
       type: "Accounts:Exist",
       kind: "fxa",
     }).then(data => {
@@ -158,19 +147,19 @@ var Accounts = Object.freeze({
    *
    * Returns a Promise that resolves to a boolean indicating success.
    */
-  deleteFirefoxAccount: function () {
-    return Messaging.sendRequestForResult({
+  deleteFirefoxAccount: function() {
+    return EventDispatcher.instance.sendRequestForResult({
       type: "Accounts:DeleteFirefoxAccount",
     });
   },
 
-  showSyncPreferences: function () {
+  showSyncPreferences: function() {
     // Only show Sync preferences of an existing Android Account.
     return Accounts.getFirefoxAccount().then(account => {
       if (!account) {
         throw new Error("Can't show Sync preferences of non-existent Firefox Account!");
       }
-      return Messaging.sendRequestForResult({
+      return EventDispatcher.instance.sendRequestForResult({
         type: "Accounts:ShowSyncPreferences"
       });
     });

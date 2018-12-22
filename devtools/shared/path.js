@@ -4,15 +4,6 @@
 
 "use strict";
 
-const URL = require("URL");
-
-/*
- * Returns the directory name of the path
- */
-exports.dirname = path => {
-  return new URL(".", new URL(path)).href;
-}
-
 /*
  * Join all the arguments together and normalize the resulting URI.
  * The initial path must be an full URI with a protocol (i.e. http://).
@@ -22,16 +13,15 @@ exports.joinURI = (initialPath, ...paths) => {
 
   try {
     url = new URL(initialPath);
-  }
-  catch(e) {
-    return;
+  } catch (e) {
+    return null;
   }
 
-  for(let path of paths) {
+  for (const path of paths) {
     if (path) {
       url = new URL(path, url);
     }
   }
 
   return url.href;
-}
+};

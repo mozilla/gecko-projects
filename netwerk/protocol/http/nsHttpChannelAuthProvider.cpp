@@ -28,7 +28,10 @@
 #include "nsServiceManagerUtils.h"
 #include "nsILoadContext.h"
 #include "nsIURL.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
+#include "nsIProxiedChannel.h"
+#include "nsIProxyInfo.h"
 
 namespace mozilla {
 namespace net {
@@ -37,14 +40,27 @@ namespace net {
 #define SUBRESOURCE_AUTH_DIALOG_DISALLOW_CROSS_ORIGIN 1
 #define SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL 2
 
-#define HTTP_AUTH_DIALOG_TOP_LEVEL_DOC 0
-#define HTTP_AUTH_DIALOG_SAME_ORIGIN_SUBRESOURCE 1
-#define HTTP_AUTH_DIALOG_CROSS_ORIGIN_SUBRESOURCE 2
+#define HTTP_AUTH_DIALOG_TOP_LEVEL_DOC 29
+#define HTTP_AUTH_DIALOG_SAME_ORIGIN_SUBRESOURCE 30
+#define HTTP_AUTH_DIALOG_SAME_ORIGIN_XHR 31
+#define HTTP_AUTH_DIALOG_NON_WEB_CONTENT 32
+
+#define HTTP_AUTH_BASIC_INSECURE 0
+#define HTTP_AUTH_BASIC_SECURE 1
+#define HTTP_AUTH_DIGEST_INSECURE 2
+#define HTTP_AUTH_DIGEST_SECURE 3
+#define HTTP_AUTH_NTLM_INSECURE 4
+#define HTTP_AUTH_NTLM_SECURE 5
+#define HTTP_AUTH_NEGOTIATE_INSECURE 6
+#define HTTP_AUTH_NEGOTIATE_SECURE 7
+
+#define MAX_DISPLAYED_USER_LENGTH 64
+#define MAX_DISPLAYED_HOST_LENGTH 64
 
 static void
 GetOriginAttributesSuffix(nsIChannel* aChan, nsACString &aSuffix)
 {
-    NeckoOriginAttributes oa;
+    OriginAttributes oa;
 
     // Deliberately ignoring the result and going with defaults
     if (aChan) {
@@ -56,6 +72,9 @@ GetOriginAttributesSuffix(nsIChannel* aChan, nsACString &aSuffix)
 
 nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
     : mAuthChannel(nullptr)
+    , mPort(-1)
+    , mUsingSSL(false)
+    , mProxyUsingSSL(false)
     , mIsPrivate(false)
     , mProxyAuthContinuationState(nullptr)
     , mAuthContinuationState(nullptr)
@@ -63,6 +82,8 @@ nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
     , mTriedProxyAuth(false)
     , mTriedHostAuth(false)
     , mSuppressDefensiveAuth(false)
+    , mCrossOrigin(false)
+    , mConnectionBased(false)
     , mHttpHandler(gHttpHandler)
 {
 }
@@ -70,18 +91,6 @@ nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
 nsHttpChannelAuthProvider::~nsHttpChannelAuthProvider()
 {
     MOZ_ASSERT(!mAuthChannel, "Disconnect wasn't called");
-}
-
-uint32_t nsHttpChannelAuthProvider::sAuthAllowPref =
-    SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL;
-
-void
-nsHttpChannelAuthProvider::InitializePrefs()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  mozilla::Preferences::AddUintVarCache(&sAuthAllowPref,
-                                        "network.auth.subresource-http-auth-allow",
-                                        SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL);
 }
 
 NS_IMETHODIMP
@@ -94,8 +103,23 @@ nsHttpChannelAuthProvider::Init(nsIHttpAuthenticableChannel *channel)
     nsresult rv = mAuthChannel->GetURI(getter_AddRefs(mURI));
     if (NS_FAILED(rv)) return rv;
 
-    mAuthChannel->GetIsSSL(&mUsingSSL);
+    rv = mAuthChannel->GetIsSSL(&mUsingSSL);
     if (NS_FAILED(rv)) return rv;
+
+    nsCOMPtr<nsIProxiedChannel> proxied(do_QueryInterface(channel));
+    if (proxied) {
+        nsCOMPtr<nsIProxyInfo> pi;
+        rv = proxied->GetProxyInfo(getter_AddRefs(pi));
+        if (NS_FAILED(rv)) return rv;
+
+        if (pi) {
+            nsAutoCString proxyType;
+            rv = pi->GetType(proxyType);
+            if (NS_FAILED(rv)) return rv;
+
+            mProxyUsingSSL = proxyType.EqualsLiteral("https");
+        }
+    }
 
     rv = mURI->GetAsciiHost(mHost);
     if (NS_FAILED(rv)) return rv;
@@ -249,10 +273,10 @@ nsHttpChannelAuthProvider::CheckForSuperfluousAuth()
     // contained a userpass, then (provided some other conditions are true),
     // we'll give the user an opportunity to abort the channel as this might be
     // an attempt to spoof a different site (see bug 232567).
-    if (!ConfirmAuth(NS_LITERAL_STRING("SuperfluousAuth"), true)) {
+    if (!ConfirmAuth("SuperfluousAuth", true)) {
         // calling cancel here sets our mStatus and aborts the HTTP
         // transaction, which prevents OnDataAvailable events.
-        mAuthChannel->Cancel(NS_ERROR_ABORT);
+        Unused << mAuthChannel->Cancel(NS_ERROR_ABORT);
         return NS_ERROR_ABORT;
     }
     return NS_OK;
@@ -267,6 +291,11 @@ nsHttpChannelAuthProvider::Cancel(nsresult status)
         mAsyncPromptAuthCancelable->Cancel(status);
         mAsyncPromptAuthCancelable = nullptr;
     }
+
+    if (mGenerateCredentialsCancelable) {
+        mGenerateCredentialsCancelable->Cancel(status);
+        mGenerateCredentialsCancelable = nullptr;
+    }
     return NS_OK;
 }
 
@@ -278,6 +307,11 @@ nsHttpChannelAuthProvider::Disconnect(nsresult status)
     if (mAsyncPromptAuthCancelable) {
         mAsyncPromptAuthCancelable->Cancel(status);
         mAsyncPromptAuthCancelable = nullptr;
+    }
+
+    if (mGenerateCredentialsCancelable) {
+        mGenerateCredentialsCancelable->Cancel(status);
+        mGenerateCredentialsCancelable = nullptr;
     }
 
     NS_IF_RELEASE(mProxyAuthContinuationState);
@@ -314,7 +348,8 @@ SetIdent(nsHttpAuthIdentity &ident,
     if (authFlags & nsIHttpAuthenticator::IDENTITY_INCLUDES_DOMAIN)
         ParseUserDomain(userBuf, &user, &domain);
 
-    ident.Set(domain, user, passBuf);
+    DebugOnly<nsresult> rv = ident.Set(domain, user, passBuf);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
 // helper function for getting an auth prompt from an interface requestor
@@ -355,11 +390,6 @@ nsHttpChannelAuthProvider::GenCredsAndSetEntry(nsIHttpAuthenticator *auth,
                                                char                    **result)
 {
     nsresult rv;
-    uint32_t authFlags;
-
-    rv = auth->GetAuthFlags(&authFlags);
-    if (NS_FAILED(rv)) return rv;
-
     nsISupports *ss = sessionState;
 
     // set informations that depend on whether
@@ -371,6 +401,22 @@ nsHttpChannelAuthProvider::GenCredsAndSetEntry(nsIHttpAuthenticator *auth,
         continuationState = &mProxyAuthContinuationState;
     } else {
         continuationState = &mAuthContinuationState;
+    }
+
+    rv = auth->GenerateCredentialsAsync(mAuthChannel,
+                                       this,
+                                       challenge,
+                                       proxyAuth,
+                                       ident.Domain(),
+                                       ident.User(),
+                                       ident.Password(),
+                                       ss,
+                                       *continuationState,
+                                       getter_AddRefs(mGenerateCredentialsCancelable));
+    if (NS_SUCCEEDED(rv)) {
+        // Calling generate credentials async, results will be dispatched to the
+        // main thread by calling OnCredsGenerated method
+        return NS_ERROR_IN_PROGRESS;
     }
 
     uint32_t generateFlags;
@@ -393,6 +439,29 @@ nsHttpChannelAuthProvider::GenCredsAndSetEntry(nsIHttpAuthenticator *auth,
     LOG(("generated creds: %s\n", *result));
 #endif
 
+    return UpdateCache(auth, scheme, host, port, directory, realm,
+            challenge, ident, *result, generateFlags, sessionState);
+}
+
+nsresult
+nsHttpChannelAuthProvider::UpdateCache(nsIHttpAuthenticator *auth,
+                                       const char           *scheme,
+                                       const char           *host,
+                                       int32_t               port,
+                                       const char           *directory,
+                                       const char           *realm,
+                                       const char           *challenge,
+                                       const nsHttpAuthIdentity &ident,
+                                       const char           *creds,
+                                       uint32_t              generateFlags,
+                                       nsISupports          *sessionState)
+{
+    nsresult rv;
+
+    uint32_t authFlags;
+    rv = auth->GetAuthFlags(&authFlags);
+    if (NS_FAILED(rv)) return rv;
+
     // find out if this authenticator allows reuse of credentials and/or
     // challenge.
     bool saveCreds =
@@ -410,6 +479,7 @@ nsHttpChannelAuthProvider::GenCredsAndSetEntry(nsIHttpAuthenticator *auth,
     nsAutoCString suffix;
     GetOriginAttributesSuffix(chan, suffix);
 
+
     // create a cache entry.  we do this even though we don't yet know that
     // these credentials are valid b/c we need to avoid prompting the user
     // more than once in case the credentials are valid.
@@ -417,12 +487,13 @@ nsHttpChannelAuthProvider::GenCredsAndSetEntry(nsIHttpAuthenticator *auth,
     // if the credentials are not reusable, then we don't bother sticking
     // them in the auth cache.
     rv = authCache->SetAuthEntry(scheme, host, port, directory, realm,
-                                 saveCreds ? *result : nullptr,
+                                 saveCreds ? creds : nullptr,
                                  saveChallenge ? challenge : nullptr,
                                  suffix,
                                  saveIdentity ? &ident : nullptr,
                                  sessionState);
     return rv;
+
 }
 
 nsresult
@@ -445,7 +516,7 @@ nsHttpChannelAuthProvider::PrepareForAuthentication(bool proxyAuth)
     // non-request based authentication handshake (e.g., for NTLM auth).
 
     nsAutoCString contractId;
-    contractId.Assign(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
+    contractId.AssignLiteral(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
     contractId.Append(mProxyAuthType);
 
     nsresult rv;
@@ -477,7 +548,7 @@ nsHttpChannelAuthProvider::PrepareForAuthentication(bool proxyAuth)
 nsresult
 nsHttpChannelAuthProvider::GetCredentials(const char     *challenges,
                                           bool            proxyAuth,
-                                          nsAFlatCString &creds)
+                                          nsCString& creds)
 {
     nsCOMPtr<nsIHttpAuthenticator> auth;
     nsAutoCString challenge;
@@ -544,7 +615,7 @@ nsHttpChannelAuthProvider::GetCredentials(const char     *challenges,
 
                 break;
             }
-            else if (rv == NS_ERROR_IN_PROGRESS) {
+            if (rv == NS_ERROR_IN_PROGRESS) {
                 // authentication prompt has been invoked and result is
                 // expected asynchronously, save current challenge being
                 // processed and all remaining challenges to use later in
@@ -574,10 +645,10 @@ nsHttpChannelAuthProvider::GetCredentials(const char     *challenges,
 
 nsresult
 nsHttpChannelAuthProvider::GetAuthorizationMembers(bool                 proxyAuth,
-                                                   nsCSubstring&        scheme,
+                                                   nsACString&        scheme,
                                                    const char*&         host,
                                                    int32_t&             port,
-                                                   nsCSubstring&        path,
+                                                   nsACString&        path,
                                                    nsHttpAuthIdentity*& ident,
                                                    nsISupports**&       continuationState)
 {
@@ -615,7 +686,7 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
                                                       const char *authType,
                                                       bool        proxyAuth,
                                                       nsIHttpAuthenticator *auth,
-                                                      nsAFlatCString     &creds)
+                                                      nsCString& creds)
 {
     LOG(("nsHttpChannelAuthProvider::GetCredentialsForChallenge "
          "[this=%p channel=%p proxyAuth=%d challenges=%s]\n",
@@ -692,14 +763,19 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
     // try instead.
     //
     nsHttpAuthEntry *entry = nullptr;
-    authCache->GetAuthEntryForDomain(scheme.get(), host, port,
-                                     realm.get(), suffix, &entry);
+    Unused << authCache->GetAuthEntryForDomain(scheme.get(), host, port,
+                                               realm.get(), suffix, &entry);
 
     // hold reference to the auth session state (in case we clear our
     // reference to the entry).
     nsCOMPtr<nsISupports> sessionStateGrip;
     if (entry)
         sessionStateGrip = entry->mMetaData;
+
+    // remember if we already had the continuation state.  it means we are in
+    // the middle of the authentication exchange and the connection must be
+    // kept sticky then (and only then).
+    bool authAtProgress = !!*continuationState;
 
     // for digest auth, maybe our cached nonce value simply timed out...
     bool identityInvalid;
@@ -714,6 +790,37 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
     if (NS_FAILED(rv)) return rv;
 
     LOG(("  identity invalid = %d\n", identityInvalid));
+
+    if (mConnectionBased && identityInvalid) {
+        // If the flag is set and identity is invalid, it means we received the first
+        // challange for a new negotiation round after negotiating a connection based
+        // auth failed (invalid password).
+        // The mConnectionBased flag is set later for the newly received challenge,
+        // so here it reflects the previous 401/7 response schema.
+        rv = mAuthChannel->CloseStickyConnection();
+        MOZ_ASSERT(NS_SUCCEEDED(rv));
+        if (!proxyAuth) {
+            // We must clear proxy ident in the following scenario + explanation:
+            // - we are authenticating to an NTLM proxy and an NTLM server
+            // - we successfully authenticated to the proxy, mProxyIdent keeps
+            //   the user name/domain and password, the identity has also been cached
+            // - we just threw away the connection because we are now asking for
+            //   creds for the server (WWW auth)
+            // - hence, we will have to auth to the proxy again as well
+            // - if we didn't clear the proxy identity, it would be considered
+            //   as non-valid and we would ask the user again ; clearing it forces
+            //   use of the cached identity and not asking the user again
+            mProxyIdent.Clear();
+        }
+    }
+
+    mConnectionBased = !!(authFlags & nsIHttpAuthenticator::CONNECTION_BASED);
+
+    // It's legal if the peer closes the connection after the first 401/7.
+    // Making the connection sticky will prevent its restart giving the user
+    // a 'network reset' error every time.  Hence, we mark the connection
+    // as restartable.
+    mAuthChannel->ConnectionRestartable(!authAtProgress);
 
     if (identityInvalid) {
         if (entry) {
@@ -742,7 +849,8 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
                 // to distinguish logons based on the supplied password alone,
                 // but that would be quite unusual... and i don't think we need
                 // to worry about such unorthodox cases.
-                ident->Set(entry->Identity());
+                rv = ident->Set(entry->Identity());
+                MOZ_ASSERT(NS_SUCCEEDED(rv));
                 identFromURI = false;
                 if (entry->Creds()[0] != '\0') {
                     LOG(("    using cached credentials!\n"));
@@ -759,17 +867,43 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
 
         if (!entry && ident->IsEmpty()) {
             uint32_t level = nsIAuthPrompt2::LEVEL_NONE;
-            if (mUsingSSL)
+            if ((!proxyAuth && mUsingSSL) || (proxyAuth && mProxyUsingSSL))
                 level = nsIAuthPrompt2::LEVEL_SECURE;
             else if (authFlags & nsIHttpAuthenticator::IDENTITY_ENCRYPTED)
                 level = nsIAuthPrompt2::LEVEL_PW_ENCRYPTED;
+
+            // Collect statistics on how frequently the various types of HTTP
+            // authentication are used over SSL and non-SSL connections.
+            if (gHttpHandler->IsTelemetryEnabled()) {
+              if (NS_LITERAL_CSTRING("basic").LowerCaseEqualsASCII(authType)) {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_TYPE_STATS,
+                  UsingSSL() ? HTTP_AUTH_BASIC_SECURE : HTTP_AUTH_BASIC_INSECURE);
+              } else if (NS_LITERAL_CSTRING("digest").LowerCaseEqualsASCII(authType)) {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_TYPE_STATS,
+                  UsingSSL() ? HTTP_AUTH_DIGEST_SECURE : HTTP_AUTH_DIGEST_INSECURE);
+              } else if (NS_LITERAL_CSTRING("ntlm").LowerCaseEqualsASCII(authType)) {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_TYPE_STATS,
+                  UsingSSL() ? HTTP_AUTH_NTLM_SECURE : HTTP_AUTH_NTLM_INSECURE);
+              } else if (NS_LITERAL_CSTRING("negotiate").LowerCaseEqualsASCII(authType)) {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_TYPE_STATS,
+                  UsingSSL() ? HTTP_AUTH_NEGOTIATE_SECURE : HTTP_AUTH_NEGOTIATE_INSECURE);
+              }
+            }
 
             // Depending on the pref setting, the authentication dialog may be
             // blocked for all sub-resources, blocked for cross-origin
             // sub-resources, or always allowed for sub-resources.
             // For more details look at the bug 647010.
-            if (BlockPrompt()) {
-              return NS_ERROR_ABORT;
+            // BlockPrompt will set mCrossOrigin parameter as well.
+            if (BlockPrompt(proxyAuth)) {
+                LOG(("nsHttpChannelAuthProvider::GetCredentialsForChallenge: "
+                     "Prompt is blocked [this=%p pref=%d img-pref=%d "
+                     "non-web-content-triggered-pref=%d]\n",
+                     this,
+                     StaticPrefs::network_auth_subresource_http_auth_allow(),
+                     StaticPrefs::network_auth_subresource_img_cross_origin_http_auth_allow(),
+                     StaticPrefs::network_auth_non_web_content_triggered_resources_http_auth_allow()));
+                return NS_ERROR_ABORT;
             }
 
             // at this point we are forced to interact with the user to get
@@ -784,10 +918,11 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
     if (identFromURI) {
         // Warn the user before automatically using the identity from the URL
         // to automatically log them into a site (see bug 232567).
-        if (!ConfirmAuth(NS_LITERAL_STRING("AutomaticAuth"), false)) {
+        if (!ConfirmAuth("AutomaticAuth", false)) {
             // calling cancel here sets our mStatus and aborts the HTTP
             // transaction, which prevents OnDataAvailable events.
-            mAuthChannel->Cancel(NS_ERROR_ABORT);
+            rv = mAuthChannel->Cancel(NS_ERROR_ABORT);
+            MOZ_ASSERT(NS_SUCCEEDED(rv));
             // this return code alone is not equivalent to Cancel, since
             // it only instructs our caller that authentication failed.
             // without an explicit call to Cancel, our caller would just
@@ -806,7 +941,7 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
     // that we don't transparently authenticate as someone they're not
     // expecting to authenticate as.
     //
-    nsXPIDLCString result;
+    nsCString result;
     rv = GenCredsAndSetEntry(auth, proxyAuth, scheme.get(), host, port,
                              path.get(), realm.get(), challenge, *ident,
                              sessionStateGrip, getter_Copies(result));
@@ -816,7 +951,7 @@ nsHttpChannelAuthProvider::GetCredentialsForChallenge(const char *challenge,
 }
 
 bool
-nsHttpChannelAuthProvider::BlockPrompt()
+nsHttpChannelAuthProvider::BlockPrompt(bool proxyAuth)
 {
     // Verify that it's ok to prompt for credentials here, per spec
     // http://xhr.spec.whatwg.org/#the-send%28%29-method
@@ -825,63 +960,110 @@ nsHttpChannelAuthProvider::BlockPrompt()
     MOZ_ASSERT(chanInternal);
 
     if (chanInternal->GetBlockAuthPrompt()) {
+        LOG(("nsHttpChannelAuthProvider::BlockPrompt: Prompt is blocked "
+             "[this=%p channel=%p]\n", this, mAuthChannel));
         return true;
+    }
+
+    if (proxyAuth) {
+      // Do not block auth-dialog if this is a proxy authentication.
+      return false;
     }
 
     nsCOMPtr<nsIChannel> chan = do_QueryInterface(mAuthChannel);
     nsCOMPtr<nsILoadInfo> loadInfo;
     chan->GetLoadInfo(getter_AddRefs(loadInfo));
-    if (!loadInfo) {
-        return false;
+
+    // We will treat loads w/o loadInfo as a top level document.
+    bool topDoc = true;
+    bool xhr = false;
+    bool nonWebContent = false;
+
+    if (loadInfo) {
+        if (loadInfo->GetExternalContentPolicyType() !=
+            nsIContentPolicy::TYPE_DOCUMENT) {
+            topDoc = false;
+        }
+
+        if (!topDoc) {
+            nsCOMPtr<nsIPrincipal> triggeringPrinc =
+                loadInfo->TriggeringPrincipal();
+            if (nsContentUtils::IsSystemPrincipal(triggeringPrinc)) {
+                nonWebContent = true;
+            }
+        }
+
+        if (loadInfo->GetExternalContentPolicyType() ==
+            nsIContentPolicy::TYPE_XMLHTTPREQUEST) {
+            xhr = true;
+        }
+
+        if (!topDoc && !xhr) {
+            nsCOMPtr<nsIURI> topURI;
+            Unused << chanInternal->GetTopWindowURI(getter_AddRefs(topURI));
+
+            if (!topURI) {
+                // If we do not have topURI try the loadingPrincipal.
+                nsCOMPtr<nsIPrincipal> loadingPrinc = loadInfo->LoadingPrincipal();
+                if (loadingPrinc) {
+                    loadingPrinc->GetURI(getter_AddRefs(topURI));
+                }
+            }
+
+            if (!NS_SecurityCompareURIs(topURI, mURI, true)) {
+                mCrossOrigin = true;
+            }
+        }
     }
 
     if (gHttpHandler->IsTelemetryEnabled()) {
-      if (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT) {
-        Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS,
-                              HTTP_AUTH_DIALOG_TOP_LEVEL_DOC);
-      } else {
-        nsCOMPtr<nsIPrincipal> loadingPrincipal = loadInfo->LoadingPrincipal();
-        if (loadingPrincipal) {
-          if (NS_SUCCEEDED(loadingPrincipal->CheckMayLoad(mURI, false, false))) {
-            Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS,
-              HTTP_AUTH_DIALOG_SAME_ORIGIN_SUBRESOURCE);
-          } else {
-            Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS,
-              HTTP_AUTH_DIALOG_CROSS_ORIGIN_SUBRESOURCE);
-          }
+        if (topDoc) {
+            Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
+                                  HTTP_AUTH_DIALOG_TOP_LEVEL_DOC);
+        } else if (nonWebContent) {
+            Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
+                                   HTTP_AUTH_DIALOG_NON_WEB_CONTENT);
+        } else if (!mCrossOrigin) {
+            if (xhr) {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
+                                      HTTP_AUTH_DIALOG_SAME_ORIGIN_XHR);
+            } else {
+                Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
+                                      HTTP_AUTH_DIALOG_SAME_ORIGIN_SUBRESOURCE);
+            }
+        } else {
+            Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
+                                  loadInfo->GetExternalContentPolicyType());
         }
-      }
     }
 
-    // Allow if it is the top-level document or xhr.
-    if ((loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT) ||
-        (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_XMLHTTPREQUEST)) {
-        return false;
+    if (!topDoc &&
+        !StaticPrefs::network_auth_non_web_content_triggered_resources_http_auth_allow() &&
+        nonWebContent) {
+        return true;
     }
 
-    switch (sAuthAllowPref) {
+    switch (StaticPrefs::network_auth_subresource_http_auth_allow()) {
     case SUBRESOURCE_AUTH_DIALOG_DISALLOW_ALL:
         // Do not open the http-authentication credentials dialog for
         // the sub-resources.
-        return true;
-        break;
+        return !topDoc && !xhr;
     case SUBRESOURCE_AUTH_DIALOG_DISALLOW_CROSS_ORIGIN:
-        // Do not open the http-authentication credentials dialog for
+        // Open the http-authentication credentials dialog for
         // the sub-resources only if they are not cross-origin.
-        {
-            nsCOMPtr<nsIPrincipal> loadingPrincipal =
-                loadInfo->LoadingPrincipal();
-            if (!loadingPrincipal) {
-                return false;
-            }
-
-            if (NS_FAILED(loadingPrincipal->CheckMayLoad(mURI, false, false))) {
-                return true;
-            }
-        }
-        break;
+        return !topDoc && !xhr && mCrossOrigin;
     case SUBRESOURCE_AUTH_DIALOG_ALLOW_ALL:
-        // Allow the http-authentication dialog.
+        // Allow the http-authentication dialog for subresources.
+        // If pref network.auth.subresource-img-cross-origin-http-auth-allow
+        // is set, http-authentication dialog for image subresources is
+        // blocked.
+        if (mCrossOrigin &&
+            !StaticPrefs::network_auth_subresource_img_cross_origin_http_auth_allow() &&
+            loadInfo &&
+            ((loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_IMAGE) ||
+             (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_IMAGESET))) {
+            return true;
+        }
         return false;
     default:
         // This is an invalid value.
@@ -916,7 +1098,7 @@ nsHttpChannelAuthProvider::GetAuthenticator(const char            *challenge,
     ToLowerCase(authType);
 
     nsAutoCString contractid;
-    contractid.Assign(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
+    contractid.AssignLiteral(NS_HTTP_AUTHENTICATOR_CONTRACTID_PREFIX);
     contractid.Append(authType);
 
     return CallGetService(contractid.get(), auth);
@@ -1017,7 +1199,8 @@ void
 nsHTTPAuthInformation::SetToHttpAuthIdentity(uint32_t authFlags,
                                              nsHttpAuthIdentity& identity)
 {
-    identity.Set(Domain().get(), User().get(), Password().get());
+    DebugOnly<nsresult> rv = identity.Set(Domain().get(), User().get(), Password().get());
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
 nsresult
@@ -1073,6 +1256,10 @@ nsHttpChannelAuthProvider::PromptForIdentity(uint32_t            level,
     if (authFlags & nsIHttpAuthenticator::IDENTITY_INCLUDES_DOMAIN)
         promptFlags |= nsIAuthInformation::NEED_DOMAIN;
 
+    if (mCrossOrigin) {
+        promptFlags |= nsIAuthInformation::CROSS_ORIGIN_SUB_RESOURCE;
+    }
+
     RefPtr<nsHTTPAuthInformation> holder =
         new nsHTTPAuthInformation(promptFlags, realmU,
                                   nsDependentCString(authType));
@@ -1108,6 +1295,19 @@ nsHttpChannelAuthProvider::PromptForIdentity(uint32_t            level,
     if (!proxyAuth)
         mSuppressDefensiveAuth = true;
 
+    if (mConnectionBased) {
+        // Connection can be reset by the server in the meantime user is entering
+        // the credentials.  Result would be just a "Connection was reset" error.
+        // Hence, we drop the current regardless if the user would make it on time
+        // to provide credentials.
+        // It's OK to send the NTLM type 1 message (response to the plain "NTLM"
+        // challenge) on a new connection.
+        {
+            DebugOnly<nsresult> rv = mAuthChannel->CloseStickyConnection();
+            MOZ_ASSERT(NS_SUCCEEDED(rv));
+        }
+    }
+
     return rv;
 }
 
@@ -1142,9 +1342,9 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthAvailable(nsISupports *aContext,
 
     nsHttpAuthCache *authCache = gHttpHandler->AuthCache(mIsPrivate);
     nsHttpAuthEntry *entry = nullptr;
-    authCache->GetAuthEntryForDomain(scheme.get(), host, port,
-                                     realm.get(), suffix,
-                                     &entry);
+    Unused << authCache->GetAuthEntryForDomain(scheme.get(), host, port,
+                                               realm.get(), suffix,
+                                               &entry);
 
     nsCOMPtr<nsISupports> sessionStateGrip;
     if (entry)
@@ -1152,9 +1352,10 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthAvailable(nsISupports *aContext,
 
     nsAuthInformationHolder* holder =
             static_cast<nsAuthInformationHolder*>(aAuthInfo);
-    ident->Set(holder->Domain().get(),
-               holder->User().get(),
-               holder->Password().get());
+    rv = ident->Set(holder->Domain().get(),
+                    holder->User().get(),
+                    holder->Password().get());
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 
     nsAutoCString unused;
     nsCOMPtr<nsIHttpAuthenticator> auth;
@@ -1166,7 +1367,7 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthAvailable(nsISupports *aContext,
         return NS_OK;
     }
 
-    nsXPIDLCString creds;
+    nsCString creds;
     rv = GenCredsAndSetEntry(auth, mProxyAuth,
                              scheme.get(), host, port, path.get(),
                              realm.get(), mCurrentChallenge.get(), *ident,
@@ -1191,11 +1392,27 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthCancelled(nsISupports *aContext,
     if (!mAuthChannel)
         return NS_OK;
 
+    // When user cancels or auth fails we want to close the connection for
+    // connection based schemes like NTLM.  Some servers don't like re-negotiation
+    // on the same connection.
+    nsresult rv;
+    if (mConnectionBased) {
+        rv = mAuthChannel->CloseStickyConnection();
+        MOZ_ASSERT(NS_SUCCEEDED(rv));
+        mConnectionBased = false;
+    }
+
     if (userCancel) {
         if (!mRemainingChallenges.IsEmpty()) {
             // there are still some challenges to process, do so
-            nsresult rv;
 
+            // Get rid of current continuationState to avoid reusing it in
+            // next challenges since it is no longer relevant.
+            if (mProxyAuth) {
+                NS_IF_RELEASE(mProxyAuthContinuationState);
+            } else {
+                NS_IF_RELEASE(mAuthContinuationState);
+            }
             nsAutoCString creds;
             rv = GetCredentials(mRemainingChallenges.get(), mProxyAuth, creds);
             if (NS_SUCCEEDED(rv)) {
@@ -1205,7 +1422,7 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthCancelled(nsISupports *aContext,
                 mRemainingChallenges.Truncate();
                 return ContinueOnAuthAvailable(creds);
             }
-            else if (rv == NS_ERROR_IN_PROGRESS) {
+            if (rv == NS_ERROR_IN_PROGRESS) {
                 // GetCredentials successfully queued another authprompt for
                 // a challenge from the list, we are now waiting for the user
                 // to provide the credentials
@@ -1218,13 +1435,74 @@ NS_IMETHODIMP nsHttpChannelAuthProvider::OnAuthCancelled(nsISupports *aContext,
         mRemainingChallenges.Truncate();
     }
 
-    mAuthChannel->OnAuthCancelled(userCancel);
+    rv = mAuthChannel->OnAuthCancelled(userCancel);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 
     return NS_OK;
 }
 
+NS_IMETHODIMP nsHttpChannelAuthProvider::OnCredsGenerated(const char *aGeneratedCreds,
+                                                          uint32_t aFlags,
+                                                          nsresult aResult,
+                                                          nsISupports* aSessionState,
+                                                          nsISupports* aContinuationState)
+{
+    nsresult rv;
+
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // When channel is closed, do not proceed
+    if (!mAuthChannel) {
+        return NS_OK;
+    }
+
+    mGenerateCredentialsCancelable = nullptr;
+
+    if (NS_FAILED(aResult)) {
+        return OnAuthCancelled(nullptr, true);
+    }
+
+    // We want to update m(Proxy)AuthContinuationState in case it was changed by
+    // nsHttpNegotiateAuth::GenerateCredentials
+    nsCOMPtr<nsISupports> contState(aContinuationState);
+    if (mProxyAuth) {
+        contState.swap(mProxyAuthContinuationState);
+    } else {
+        contState.swap(mAuthContinuationState);
+    }
+
+    nsCOMPtr<nsIHttpAuthenticator> auth;
+    nsAutoCString unused;
+    rv = GetAuthenticator(mCurrentChallenge.get(), unused, getter_AddRefs(auth));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    const char *host;
+    int32_t port;
+    nsHttpAuthIdentity *ident;
+    nsAutoCString directory, scheme;
+    nsISupports **unusedContinuationState;
+
+    // Get realm from challenge
+    nsAutoCString realm;
+    ParseRealm(mCurrentChallenge.get(), realm);
+
+    rv = GetAuthorizationMembers(mProxyAuth, scheme, host, port,
+                                 directory, ident, unusedContinuationState);
+    if (NS_FAILED(rv)) return rv;
+
+    rv = UpdateCache(auth, scheme.get(), host, port, directory.get(),
+                     realm.get(), mCurrentChallenge.get(), *ident,
+                     aGeneratedCreds, aFlags, aSessionState);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    mCurrentChallenge.Truncate();
+
+    rv = ContinueOnAuthAvailable(nsDependentCString(aGeneratedCreds));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    return NS_OK;
+}
+
 nsresult
-nsHttpChannelAuthProvider::ContinueOnAuthAvailable(const nsCSubstring& creds)
+nsHttpChannelAuthProvider::ContinueOnAuthAvailable(const nsACString& creds)
 {
     nsresult rv;
     if (mProxyAuth)
@@ -1239,14 +1517,14 @@ nsHttpChannelAuthProvider::ContinueOnAuthAvailable(const nsCSubstring& creds)
     // authentication it'll respond with failure and resend the challenge list
     mRemainingChallenges.Truncate();
 
-    mAuthChannel->OnAuthAvailable();
+    Unused << mAuthChannel->OnAuthAvailable();
 
     return NS_OK;
 }
 
 bool
-nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
-                                       bool            doYesNoPrompt)
+nsHttpChannelAuthProvider::ConfirmAuth(const char* bundleKey,
+                                       bool        doYesNoPrompt)
 {
     // skip prompting the user if
     //   1) we've already prompted the user
@@ -1293,11 +1571,38 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
         return true;
 
     NS_ConvertUTF8toUTF16 ucsHost(host), ucsUser(user);
+
+    size_t userLength = ucsUser.Length();
+    if (userLength > MAX_DISPLAYED_USER_LENGTH) {
+      size_t desiredLength = MAX_DISPLAYED_USER_LENGTH;
+      // Don't cut off right before a low surrogate. Just include it.
+      if (NS_IS_LOW_SURROGATE(ucsUser[desiredLength])) {
+        desiredLength++;
+      }
+      ucsUser.Replace(desiredLength, userLength - desiredLength,
+                      nsContentUtils::GetLocalizedEllipsis());
+    }
+
+    size_t hostLen = ucsHost.Length();
+    if (hostLen > MAX_DISPLAYED_HOST_LENGTH) {
+      size_t cutPoint = hostLen - MAX_DISPLAYED_HOST_LENGTH;
+      // Likewise, don't cut off right before a low surrogate here.
+      // Keep the low surrogate
+      if (NS_IS_LOW_SURROGATE(ucsHost[cutPoint])) {
+        cutPoint--;
+      }
+      // It's possible cutPoint was 1 and is now 0. Only insert the ellipsis
+      // if we're actually removing anything.
+      if (cutPoint > 0) {
+        ucsHost.Replace(0, cutPoint, nsContentUtils::GetLocalizedEllipsis());
+      }
+    }
+
     const char16_t *strs[2] = { ucsHost.get(), ucsUser.get() };
 
-    nsXPIDLString msg;
-    bundle->FormatStringFromName(bundleKey.get(), strs, 2, getter_Copies(msg));
-    if (!msg)
+    nsAutoString msg;
+    rv = bundle->FormatStringFromName(bundleKey, strs, 2, msg);
+    if (NS_FAILED(rv))
         return true;
 
     nsCOMPtr<nsIInterfaceRequestor> callbacks;
@@ -1323,7 +1628,7 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
     if (doYesNoPrompt) {
         int32_t choice;
         bool checkState = false;
-        rv = prompt->ConfirmEx(nullptr, msg,
+        rv = prompt->ConfirmEx(nullptr, msg.get(),
                                nsIPrompt::BUTTON_POS_1_DEFAULT +
                                nsIPrompt::STD_YES_NO_BUTTONS,
                                nullptr, nullptr, nullptr, nullptr,
@@ -1334,7 +1639,7 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
         confirmed = choice == 0;
     }
     else {
-        rv = prompt->Confirm(nullptr, msg, &confirmed);
+        rv = prompt->Confirm(nullptr, msg.get(), &confirmed);
         if (NS_FAILED(rv))
             return true;
     }
@@ -1395,13 +1700,14 @@ nsHttpChannelAuthProvider::SetAuthorizationHeader(nsHttpAuthCache    *authCache,
         }
         bool identFromURI;
         if (ident.IsEmpty()) {
-            ident.Set(entry->Identity());
+            rv = ident.Set(entry->Identity());
+            MOZ_ASSERT(NS_SUCCEEDED(rv));
             identFromURI = false;
         }
         else
             identFromURI = true;
 
-        nsXPIDLCString temp;
+        nsCString temp;  // this must have the same lifetime as creds
         const char *creds     = entry->Creds();
         const char *challenge = entry->Challenge();
         // we can only send a preemptive Authorization header if we have either
@@ -1427,10 +1733,14 @@ nsHttpChannelAuthProvider::SetAuthorizationHeader(nsHttpAuthCache    *authCache,
         }
         if (creds[0]) {
             LOG(("   adding \"%s\" request header\n", header.get()));
-            if (header == nsHttp::Proxy_Authorization)
-                mAuthChannel->SetProxyCredentials(nsDependentCString(creds));
-            else
-                mAuthChannel->SetWWWCredentials(nsDependentCString(creds));
+            if (header == nsHttp::Proxy_Authorization) {
+                rv = mAuthChannel->SetProxyCredentials(nsDependentCString(creds));
+                MOZ_ASSERT(NS_SUCCEEDED(rv));
+            }
+            else {
+                rv = mAuthChannel->SetWWWCredentials(nsDependentCString(creds));
+                MOZ_ASSERT(NS_SUCCEEDED(rv));
+            }
 
             // suppress defensive auth prompting for this channel since we know
             // that we already prompted at least once this session.  we only do
@@ -1452,12 +1762,12 @@ nsHttpChannelAuthProvider::GetCurrentPath(nsACString &path)
     if (url)
         rv = url->GetDirectory(path);
     else
-        rv = mURI->GetPath(path);
+        rv = mURI->GetPathQueryRef(path);
     return rv;
 }
 
 NS_IMPL_ISUPPORTS(nsHttpChannelAuthProvider, nsICancelable,
-                  nsIHttpChannelAuthProvider, nsIAuthPromptCallback)
+                  nsIHttpChannelAuthProvider, nsIAuthPromptCallback, nsIHttpAuthenticatorCallback)
 
 } // namespace net
 } // namespace mozilla

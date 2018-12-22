@@ -8,6 +8,7 @@
 #define OmxDataDecoder_h_
 
 #include "mozilla/Monitor.h"
+#include "mozilla/StateWatching.h"
 
 #include "AudioCompactor.h"
 #include "ImageContainer.h"
@@ -28,6 +29,8 @@ typedef OmxPromiseLayer::OmxBufferFailureHolder OmxBufferFailureHolder;
 typedef OmxPromiseLayer::OmxCommandFailureHolder OmxCommandFailureHolder;
 typedef OmxPromiseLayer::BufferData BufferData;
 typedef OmxPromiseLayer::BUFFERLIST BUFFERLIST;
+
+DDLoggedTypeDeclNameAndBase(OmxDataDecoder, MediaDataDecoder);
 
 /* OmxDataDecoder is the major class which performs followings:
  *   1. Translate PDM function into OMX commands.
@@ -55,28 +58,32 @@ typedef OmxPromiseLayer::BUFFERLIST BUFFERLIST;
  *
  *   OmxPlatformLayer acts as the OpenMAX IL core.
  */
-class OmxDataDecoder : public MediaDataDecoder {
+class OmxDataDecoder
+  : public MediaDataDecoder
+  , public DecoderDoctorLifeLogger<OmxDataDecoder>
+{
 protected:
   virtual ~OmxDataDecoder();
 
 public:
   OmxDataDecoder(const TrackInfo& aTrackInfo,
-                 MediaDataDecoderCallback* aCallback,
+                 TaskQueue* aTaskQueue,
                  layers::ImageContainer* aImageContainer);
 
   RefPtr<InitPromise> Init() override;
+  RefPtr<DecodePromise> Decode(MediaRawData* aSample) override;
+  RefPtr<DecodePromise> Drain() override;
+  RefPtr<FlushPromise> Flush() override;
+  RefPtr<ShutdownPromise> Shutdown() override;
 
-  nsresult Input(MediaRawData* aSample) override;
-
-  nsresult Flush() override;
-
-  nsresult Drain() override;
-
-  nsresult Shutdown() override;
-
-  const char* GetDescriptionName() const override
+  nsCString GetDescriptionName() const override
   {
-    return "omx decoder";
+    return NS_LITERAL_CSTRING("omx decoder");
+  }
+
+  ConversionRequired NeedsConversion() const override
+  {
+    return ConversionRequired::kNeedAnnexB;
   }
 
   // Return true if event is handled.
@@ -87,7 +94,7 @@ protected:
 
   void ResolveInitPromise(const char* aMethodName);
 
-  void RejectInitPromise(DecoderFailureReason aReason, const char* aMethodName);
+  void RejectInitPromise(MediaResult aError, const char* aMethodName);
 
   void OmxStateRunner();
 
@@ -101,7 +108,9 @@ protected:
 
   void EmptyBufferFailure(OmxBufferFailureHolder aFailureHolder);
 
-  void NotifyError(OMX_ERRORTYPE aError, const char* aLine);
+  void NotifyError(OMX_ERRORTYPE aOmxError,
+                   const char* aLine,
+                   const MediaResult& aError = MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR));
 
   // Configure audio/video codec.
   // Some codec may just ignore this and rely on codec specific data in
@@ -129,9 +138,9 @@ protected:
 
   OMX_DIRTYPE GetPortDirection(uint32_t aPortIndex);
 
-  void DoAsyncShutdown();
+  RefPtr<ShutdownPromise> DoAsyncShutdown();
 
-  void DoFlush();
+  RefPtr<FlushPromise> DoFlush();
 
   void FlushComplete(OMX_COMMANDTYPE aCommandType);
 
@@ -149,12 +158,10 @@ protected:
   RefPtr<OmxPromiseLayer::OmxBufferPromise::AllPromiseType>
   CollectBufferPromises(OMX_DIRTYPE aType);
 
-  Monitor mMonitor;
-
   // The Omx TaskQueue.
   RefPtr<TaskQueue> mOmxTaskQueue;
 
-  RefPtr<TaskQueue> mReaderTaskQueue;
+  RefPtr<TaskQueue> mTaskQueue;
 
   RefPtr<layers::ImageContainer> mImageContainer;
 
@@ -170,16 +177,24 @@ protected:
   // It is accessed in both omx and reader TaskQueue.
   Atomic<bool> mFlushing;
 
-  // It is accessed in Omx/reader TaskQeueu.
+  // It is accessed in Omx/reader TaskQueue.
   Atomic<bool> mShuttingDown;
 
   // It is accessed in Omx TaskQeueu.
   bool mCheckingInputExhausted;
 
-  // It is accessed in reader TaskQueue.
+  // It is accessed in OMX TaskQueue.
   MozPromiseHolder<InitPromise> mInitPromise;
+  MozPromiseHolder<DecodePromise> mDecodePromise;
+  MozPromiseHolder<DecodePromise> mDrainPromise;
+  MozPromiseHolder<FlushPromise> mFlushPromise;
+  MozPromiseHolder<ShutdownPromise> mShutdownPromise;
+  // Where decoded samples will be stored until the decode promise is resolved.
+  DecodedData mDecodedData;
 
-  // It is written in Omx TaskQeueu. Read in Omx TaskQueue.
+  void CompleteDrain();
+
+  // It is written in Omx TaskQueue. Read in Omx TaskQueue.
   // It value means the port index which port settings is changed.
   // -1 means no port setting changed.
   //
@@ -195,8 +210,6 @@ protected:
   BUFFERLIST mOutPortBuffers;
 
   RefPtr<MediaDataHelper> mMediaDataHelper;
-
-  MediaDataDecoderCallback* mCallback;
 };
 
 template<class T>

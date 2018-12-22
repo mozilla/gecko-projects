@@ -11,7 +11,6 @@
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
 #include "nsAlgorithm.h"
-#include "nsAutoPtr.h"
 #include "nsRect.h"
 #include <algorithm>
 #include "TableArea.h"
@@ -34,14 +33,6 @@ struct nsColInfo
   nsColInfo();
   nsColInfo(int32_t aNumCellsOrig,
             int32_t aNumCellsSpan);
-};
-
-enum Corner
-{
-  eBStartIStart = 0,
-  eBStartIEnd   = 1,
-  eBEndIEnd     = 2,
-  eBEndIStart   = 3
 };
 
 struct BCInfo
@@ -200,6 +191,7 @@ protected:
 public:
   void ResetBStartStart(mozilla::LogicalSide aSide,
                         nsCellMap& aCellMap,
+                        uint32_t   aRowGroupStart,
                         uint32_t   aYPos,
                         uint32_t   aXPos,
                         bool       aIsBEndIEnd = false);
@@ -214,7 +206,7 @@ public:
                        nscoord       aSize,
                        bool          aChanged);
 
-  void SetBCBorderCorner(::Corner    aCorner,
+  void SetBCBorderCorner(mozilla::LogicalCorner aCorner,
                          nsCellMap&  aCellMap,
                          uint32_t    aCellMapStart,
                          uint32_t    aYPos,
@@ -570,8 +562,8 @@ public:
     mMap(aMap), mCurMap(aMap->mFirstMap), mCurMapStart(0),
     mCurMapRow(0), mCol(aCol), mFoundCells(0)
   {
-    NS_PRECONDITION(aMap, "Must have map");
-    NS_PRECONDITION(mCol < aMap->GetColCount(), "Invalid column");
+    MOZ_ASSERT(aMap, "Must have map");
+    MOZ_ASSERT(mCol < aMap->GetColCount(), "Invalid column");
     mOrigCells = aMap->GetNumCellsOriginatingInCol(mCol);
     if (mCurMap) {
       mCurMapContentRowCount = mCurMap->GetRowCount();

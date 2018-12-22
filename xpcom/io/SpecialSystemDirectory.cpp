@@ -12,7 +12,6 @@
 #if defined(XP_WIN)
 
 #include <windows.h>
-#include <shlobj.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,9 +19,6 @@
 #include <shlobj.h>
 #include <knownfolders.h>
 #include <guiddef.h>
-#include "mozilla/WindowsVersion.h"
-
-using mozilla::IsWin7OrLater;
 
 #elif defined(XP_UNIX)
 
@@ -31,6 +27,9 @@ using mozilla::IsWin7OrLater;
 #include <stdlib.h>
 #include <sys/param.h>
 #include "prenv.h"
+#if defined(MOZ_WIDGET_COCOA)
+#include "CocoaFileUtils.h"
+#endif
 
 #endif
 
@@ -48,40 +47,17 @@ using mozilla::IsWin7OrLater;
 #endif
 #endif
 
-#ifdef XP_WIN
-typedef HRESULT (WINAPI* nsGetKnownFolderPath)(GUID& rfid,
-                                               DWORD dwFlags,
-                                               HANDLE hToken,
-                                               PWSTR* ppszPath);
-
-static nsGetKnownFolderPath gGetKnownFolderPath = nullptr;
-#endif
-
-void
-StartupSpecialSystemDirectory()
-{
-#if defined (XP_WIN)
-  // SHGetKnownFolderPath is only available on Windows Vista
-  // so that we need to use GetProcAddress to get the pointer.
-  HMODULE hShell32DLLInst = GetModuleHandleW(L"shell32.dll");
-  if (hShell32DLLInst) {
-    gGetKnownFolderPath = (nsGetKnownFolderPath)
-      GetProcAddress(hShell32DLLInst, "SHGetKnownFolderPath");
-  }
-#endif
-}
-
 #if defined (XP_WIN)
 
 static nsresult
 GetKnownFolder(GUID* aGuid, nsIFile** aFile)
 {
-  if (!aGuid || !gGetKnownFolderPath) {
+  if (!aGuid) {
     return NS_ERROR_FAILURE;
   }
 
   PWSTR path = nullptr;
-  gGetKnownFolderPath(*aGuid, 0, nullptr, &path);
+  SHGetKnownFolderPath(*aGuid, 0, nullptr, &path);
 
   if (!path) {
     return NS_ERROR_FAILURE;
@@ -108,6 +84,9 @@ GetWindowsFolder(int aFolder, nsIFile** aFile)
 
   // Append the trailing slash
   int len = wcslen(path);
+  if (len == 0) {
+    return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+  }
   if (len > 1 && path[len - 1] != L'\\') {
     path[len]   = L'\\';
     path[++len] = L'\0';
@@ -116,6 +95,7 @@ GetWindowsFolder(int aFolder, nsIFile** aFile)
   return NS_NewLocalFile(nsDependentString(path, len), true, aFile);
 }
 
+#if WINVER < 0x0601
 __inline HRESULT
 SHLoadLibraryFromKnownFolder(REFKNOWNFOLDERID aFolderId, DWORD aMode,
                              REFIID riid, void** ppv)
@@ -134,26 +114,20 @@ SHLoadLibraryFromKnownFolder(REFKNOWNFOLDERID aFolderId, DWORD aMode,
   }
   return hr;
 }
+#endif
 
 /*
- * Check to see if we're on Win7 and up, and if so, returns the default
- * save-to location for the Windows Library passed in through aFolderId.
- * Otherwise falls back on pre-win7 GetWindowsFolder.
+ * Return the default save-to location for the Windows Library passed in
+ * through aFolderId.
  */
 static nsresult
 GetLibrarySaveToPath(int aFallbackFolderId, REFKNOWNFOLDERID aFolderId,
                      nsIFile** aFile)
 {
-  // Skip off checking for library support if the os is Vista or lower.
-  if (!IsWin7OrLater()) {
-    return GetWindowsFolder(aFallbackFolderId, aFile);
-  }
-
   RefPtr<IShellLibrary> shellLib;
   RefPtr<IShellItem> savePath;
-  HRESULT hr =
-    SHLoadLibraryFromKnownFolder(aFolderId, STGM_READ,
-                                 IID_IShellLibrary, getter_AddRefs(shellLib));
+  SHLoadLibraryFromKnownFolder(aFolderId, STGM_READ,
+                               IID_IShellLibrary, getter_AddRefs(shellLib));
 
   if (shellLib &&
       SUCCEEDED(shellLib->GetDefaultSaveFolder(DSFT_DETECT, IID_IShellItem,
@@ -182,9 +156,9 @@ static nsresult
 GetRegWindowsAppDataFolder(bool aLocal, nsIFile** aFile)
 {
   HKEY key;
-  NS_NAMED_LITERAL_STRING(keyName,
-    "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders");
-  DWORD res = ::RegOpenKeyExW(HKEY_CURRENT_USER, keyName.get(), 0, KEY_READ,
+  LPCWSTR keyName =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders";
+  DWORD res = ::RegOpenKeyExW(HKEY_CURRENT_USER, keyName, 0, KEY_READ,
                               &key);
   if (res != ERROR_SUCCESS) {
     return NS_ERROR_FAILURE;
@@ -490,28 +464,6 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
                                    aFile);
 #endif
 
-    case OS_DriveDirectory:
-#if defined (XP_WIN)
-    {
-      int32_t len = ::GetWindowsDirectoryW(path, MAX_PATH);
-      if (len == 0) {
-        break;
-      }
-      if (path[1] == char16_t(':') && path[2] == char16_t('\\')) {
-        path[3] = 0;
-      }
-
-      return NS_NewLocalFile(nsDependentString(path),
-                             true,
-                             aFile);
-    }
-#else
-    return NS_NewNativeLocalFile(nsDependentCString("/"),
-                                 true,
-                                 aFile);
-
-#endif
-
     case OS_TemporaryDirectory:
 #if defined (XP_WIN)
     {
@@ -633,9 +585,6 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
                                aFile);
       }
     }
-    case Win_Desktop: {
-      return GetWindowsFolder(CSIDL_DESKTOP, aFile);
-    }
     case Win_Programs: {
       return GetWindowsFolder(CSIDL_PROGRAMS, aFile);
     }
@@ -655,68 +604,11 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
       return rv;
     }
 
-    case Win_Controls: {
-      return GetWindowsFolder(CSIDL_CONTROLS, aFile);
-    }
-    case Win_Printers: {
-      return GetWindowsFolder(CSIDL_PRINTERS, aFile);
-    }
-    case Win_Personal: {
-      return GetWindowsFolder(CSIDL_PERSONAL, aFile);
-    }
     case Win_Favorites: {
       return GetWindowsFolder(CSIDL_FAVORITES, aFile);
     }
-    case Win_Startup: {
-      return GetWindowsFolder(CSIDL_STARTUP, aFile);
-    }
-    case Win_Recent: {
-      return GetWindowsFolder(CSIDL_RECENT, aFile);
-    }
-    case Win_Sendto: {
-      return GetWindowsFolder(CSIDL_SENDTO, aFile);
-    }
-    case Win_Bitbucket: {
-      return GetWindowsFolder(CSIDL_BITBUCKET, aFile);
-    }
-    case Win_Startmenu: {
-      return GetWindowsFolder(CSIDL_STARTMENU, aFile);
-    }
     case Win_Desktopdirectory: {
       return GetWindowsFolder(CSIDL_DESKTOPDIRECTORY, aFile);
-    }
-    case Win_Drives: {
-      return GetWindowsFolder(CSIDL_DRIVES, aFile);
-    }
-    case Win_Network: {
-      return GetWindowsFolder(CSIDL_NETWORK, aFile);
-    }
-    case Win_Nethood: {
-      return GetWindowsFolder(CSIDL_NETHOOD, aFile);
-    }
-    case Win_Fonts: {
-      return GetWindowsFolder(CSIDL_FONTS, aFile);
-    }
-    case Win_Templates: {
-      return GetWindowsFolder(CSIDL_TEMPLATES, aFile);
-    }
-    case Win_Common_Startmenu: {
-      return GetWindowsFolder(CSIDL_COMMON_STARTMENU, aFile);
-    }
-    case Win_Common_Programs: {
-      return GetWindowsFolder(CSIDL_COMMON_PROGRAMS, aFile);
-    }
-    case Win_Common_Startup: {
-      return GetWindowsFolder(CSIDL_COMMON_STARTUP, aFile);
-    }
-    case Win_Common_Desktopdirectory: {
-      return GetWindowsFolder(CSIDL_COMMON_DESKTOPDIRECTORY, aFile);
-    }
-    case Win_Common_AppData: {
-      return GetWindowsFolder(CSIDL_COMMON_APPDATA, aFile);
-    }
-    case Win_Printhood: {
-      return GetWindowsFolder(CSIDL_PRINTHOOD, aFile);
     }
     case Win_Cookies: {
       return GetWindowsFolder(CSIDL_COOKIES, aFile);
@@ -737,55 +629,25 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
     }
 #if defined(MOZ_CONTENT_SANDBOX)
     case Win_LocalAppdataLow: {
-      // This should only really fail on versions pre-Vista, in which case this
-      // shouldn't have been used in the first place.
       GUID localAppDataLowGuid = FOLDERID_LocalAppDataLow;
       return GetKnownFolder(&localAppDataLowGuid, aFile);
     }
 #endif
+#if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
     case Win_Documents: {
       return GetLibrarySaveToPath(CSIDL_MYDOCUMENTS,
                                   FOLDERID_DocumentsLibrary,
                                   aFile);
     }
-    case Win_Pictures: {
-      return GetLibrarySaveToPath(CSIDL_MYPICTURES,
-                                  FOLDERID_PicturesLibrary,
-                                  aFile);
-    }
-    case Win_Music: {
-      return GetLibrarySaveToPath(CSIDL_MYMUSIC,
-                                  FOLDERID_MusicLibrary,
-                                  aFile);
-    }
-    case Win_Videos: {
-      return GetLibrarySaveToPath(CSIDL_MYVIDEO,
-                                  FOLDERID_VideosLibrary,
-                                  aFile);
-    }
+#endif
 #endif  // XP_WIN
 
 #if defined(XP_UNIX)
-    case Unix_LocalDirectory:
-      return NS_NewNativeLocalFile(nsDependentCString("/usr/local/netscape/"),
-                                   true,
-                                   aFile);
-    case Unix_LibDirectory:
-      return NS_NewNativeLocalFile(nsDependentCString("/usr/local/lib/netscape/"),
-                                   true,
-                                   aFile);
-
     case Unix_HomeDirectory:
       return GetUnixHomeDir(aFile);
 
     case Unix_XDG_Desktop:
-    case Unix_XDG_Documents:
     case Unix_XDG_Download:
-    case Unix_XDG_Music:
-    case Unix_XDG_Pictures:
-    case Unix_XDG_PublicShare:
-    case Unix_XDG_Templates:
-    case Unix_XDG_Videos:
       return GetUnixXDGUserDirectory(aSystemSystemDirectory, aFile);
 #endif
 
@@ -799,10 +661,20 @@ GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
 nsresult
 GetOSXFolderType(short aDomain, OSType aFolderType, nsIFile** aLocalFile)
 {
-  OSErr err;
-  FSRef fsRef;
   nsresult rv = NS_ERROR_FAILURE;
 
+  if (aFolderType == kTemporaryFolderType) {
+    NS_NewLocalFile(EmptyString(), true, aLocalFile);
+    nsCOMPtr<nsILocalFileMac> localMacFile(do_QueryInterface(*aLocalFile));
+    if (localMacFile) {
+      rv = localMacFile->InitWithCFURL(
+             CocoaFileUtils::GetTemporaryFolderCFURLRef());
+    }
+    return rv;
+  }
+
+  OSErr err;
+  FSRef fsRef;
   err = ::FSFindFolder(aDomain, aFolderType, kCreateFolder, &fsRef);
   if (err == noErr) {
     NS_NewLocalFile(EmptyString(), true, aLocalFile);

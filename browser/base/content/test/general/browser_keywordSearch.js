@@ -20,14 +20,13 @@ function test() {
   waitForExplicitFinish();
 
   let windowObserver = {
-    observe: function(aSubject, aTopic, aData) {
+    observe(aSubject, aTopic, aData) {
       if (aTopic == "domwindowopened") {
         ok(false, "Alert window opened");
-        let win = aSubject.QueryInterface(Ci.nsIDOMEventTarget);
+        let win = aSubject;
         win.addEventListener("load", function() {
-          win.removeEventListener("load", arguments.callee, false);
           win.close();
-        }, false);
+        }, {once: true});
         executeSoon(finish);
       }
     }
@@ -35,7 +34,35 @@ function test() {
 
   Services.ww.registerNotification(windowObserver);
 
-  let tab = gBrowser.selectedTab = gBrowser.addTab();
+  let tab = gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+
+  // We use a web progress listener in the content process to cancel
+  // the request. For everything else, we can do the work in the
+  // parent, since it's easier.
+  ContentTask.spawn(gBrowser.selectedBrowser, null, function* gen() {
+    let listener = {
+      onStateChange: function onLocationChange(webProgress, req, flags, status) {
+        let docStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
+                       Ci.nsIWebProgressListener.STATE_START;
+        if (!(flags & docStart)) {
+          return;
+        }
+
+        req.cancel(Cr.NS_ERROR_FAILURE);
+      },
+
+      QueryInterface: ChromeUtils.generateQI(["nsIWebProgressListener", "nsIWebProgressListener2", "nsISupportsWeakReference"])
+    };
+
+    let webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIWebProgress);
+    webProgress.addProgressListener(listener,
+                                    Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT);
+
+    addEventListener("unload", () => {
+      webProgress.removeProgressListener(listener);
+    });
+  });
 
   let listener = {
     onStateChange: function onLocationChange(webProgress, req, flags, status) {
@@ -51,14 +78,13 @@ function test() {
       is(req.originalURI.spec, gCurrTest.searchURL, "search URL was loaded");
       info("Actual URI: " + req.URI.spec);
 
-      req.cancel(Components.results.NS_ERROR_FAILURE);
-
       executeSoon(nextTest);
     }
   };
+
   gBrowser.addProgressListener(listener);
 
-  registerCleanupFunction(function () {
+  registerCleanupFunction(function() {
     Services.ww.unregisterNotification(windowObserver);
 
     gBrowser.removeProgressListener(listener);
@@ -84,5 +110,5 @@ function doTest() {
   // Simulate a user entering search terms
   gURLBar.value = gCurrTest.testText;
   gURLBar.focus();
-  EventUtils.synthesizeKey("VK_RETURN", {});
+  EventUtils.synthesizeKey("KEY_Enter");
 }

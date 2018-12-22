@@ -1,85 +1,42 @@
 General fixes:
 =============
 
-- Move feature parsing from util into the library
-
-- 'const' for getter APIs? (use mutable internally)
-
-- Fix TT 'kern' on/off and GPOS interaction (move kerning before GPOS)
-
-- Do proper rounding when scaling from font space?
-
-- Misc features:
-  * init/medi/fina/isol for non-cursive scripts
-  * vkna,hkna etc for kana, *jmo for hangul, etc
-
-- Move non-native direction and normalization handling to the generic non-OT
-  layer, such that uniscribe and other backends can use.
-
-- Uniscribe backend needs to enforce one direction only, otherwise cluster
-  values can confused the user.
+- Implement 'rand' feature.
 
 
-API issues to fix before 1.0:
-============================
+API issues:
+===========
 
-- Rename all internal symbols (static ones even) to have _hb prefix?
+- API to accept a list of languages?
 
-- Add pkg-config files for glue codes (harfbuzz-glib, etc)
+- Remove hb_ot_shape_glyphs_closure()?
 
-- Figure out how many .so objects, how to link, etc
+
+API additions
+=============
+
+- Language to/from script.
+
+- blob_from_file?
 
 - Add hb-cairo glue
 
 - Add sanitize API (and a cached version, that saves result on blob user-data)
 
-- Add glib GBoxedType stuff and introspection
-
-
-API to add (maybe after 1.0):
-============================
-
-- Add Uniscribe face / font get API
-
 - BCP 47 language handling / API (language_matches?)
 
-- Add hb_face_get_glyph_count()?
+- Add hb_font_create_unscaled()?
 
-- Add hb_font_create_linear()?
+- Add query / enumeration API for aalt-like features?
 
-- Add hb_shape_plan()/hb_shape_execute()
-
-- Add query API for aalt-like features?
-
-- SFNT api? get_num_faces? get_table_tags? (there's something in stash)
+- SFNT api? get_num_faces?
 
 - Add segmentation API
 
-- Add hb-fribidi?
+- Add hb-fribidi glue?
 
 
-hb-view enhancements:
-====================
+hb-view / hb-shape enhancements:
+===============================
 
-- Add --format
-- Add --width, --height, --auto-size, --align, etc?
-- Port to GOption, --help
-- Add XML and JSON formats
-
-
-Tests to write:
-==============
-
-- ot-layout enumeration API (needs font)
-
-- Finish test-shape.c, grep for TODO
-
-- Finish test-unicode.c, grep for TODO
-
-
-Optimizations:
-=============
-
-- Avoid allocating blob objects internally for for_data() faces?
-
-- Add caching layer to hb-ft
+- Add --width, --height, --auto-size, --ink-box, --align, etc?

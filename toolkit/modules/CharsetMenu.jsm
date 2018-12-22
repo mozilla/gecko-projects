@@ -2,18 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-this.EXPORTED_SYMBOLS = [ "CharsetMenu" ];
+var EXPORTED_SYMBOLS = [ "CharsetMenu" ];
 
-const { classes: Cc, interfaces: Ci, utils: Cu} = Components;
-
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyGetter(this, "gBundle", function() {
   const kUrl = "chrome://global/locale/charsetMenu.properties";
   return Services.strings.createBundle(kUrl);
 });
 
-XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
+ChromeUtils.defineModuleGetter(this, "Deprecated",
     "resource://gre/modules/Deprecated.jsm");
 
 const kAutoDetectors = [
@@ -46,7 +44,7 @@ const kEncodings = new Set([
   "windows-1250",
   "ISO-8859-2",
   // Chinese, Simplified
-  "gbk",
+  "GBK",
   // Chinese, Traditional
   "Big5",
   // Cyrillic
@@ -103,9 +101,8 @@ function CharsetComparator(a, b) {
 }
 
 function SetDetector(event) {
-  let str = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
-  str.data = event.target.getAttribute("detector");
-  Services.prefs.setComplexValue("intl.charset.detector", Ci.nsISupportsString, str);
+  Services.prefs.setStringPref("intl.charset.detector",
+                               event.target.getAttribute("detector"));
 }
 
 function UpdateDetectorMenu(event) {
@@ -120,7 +117,7 @@ function UpdateDetectorMenu(event) {
 var gDetectorInfoCache, gCharsetInfoCache, gPinnedInfoCache;
 
 var CharsetMenu = {
-  build: function(parent, deprecatedShowAccessKeys=true, showDetector=true) {
+  build(parent, deprecatedShowAccessKeys = true, showDetector = true) {
     if (!deprecatedShowAccessKeys) {
       Deprecated.warning("CharsetMenu no longer supports building a menu with no access keys.",
                          "https://bugzilla.mozilla.org/show_bug.cgi?id=1088710");
@@ -164,7 +161,7 @@ var CharsetMenu = {
     gCharsetInfoCache.forEach(charsetInfo => parent.appendChild(createDOMNode(doc, charsetInfo)));
   },
 
-  getData: function() {
+  getData() {
     this._ensureDataReady();
     return {
       detectors: gDetectorInfoCache,
@@ -173,7 +170,7 @@ var CharsetMenu = {
     };
   },
 
-  _ensureDataReady: function() {
+  _ensureDataReady() {
     if (!gDetectorInfoCache) {
       gDetectorInfoCache = this.getDetectorInfo();
       gPinnedInfoCache = this.getCharsetInfo(kPinned, false);
@@ -181,7 +178,7 @@ var CharsetMenu = {
     }
   },
 
-  getDetectorInfo: function() {
+  getDetectorInfo() {
     return kAutoDetectors.map(([detectorName, nodeId]) => ({
       label: this._getDetectorLabel(detectorName),
       accesskey: this._getDetectorAccesskey(detectorName),
@@ -190,7 +187,7 @@ var CharsetMenu = {
     }));
   },
 
-  getCharsetInfo: function(charsets, sort=true) {
+  getCharsetInfo(charsets, sort = true) {
     let list = Array.from(charsets, charset => ({
       label: this._getCharsetLabel(charset),
       accesskey: this._getCharsetAccessKey(charset),
@@ -204,21 +201,21 @@ var CharsetMenu = {
     return list;
   },
 
-  _getDetectorLabel: function(detector) {
+  _getDetectorLabel(detector) {
     try {
       return gBundle.GetStringFromName("charsetMenuAutodet." + detector);
     } catch (ex) {}
     return detector;
   },
-  _getDetectorAccesskey: function(detector) {
+  _getDetectorAccesskey(detector) {
     try {
       return gBundle.GetStringFromName("charsetMenuAutodet." + detector + ".key");
     } catch (ex) {}
     return "";
   },
 
-  _getCharsetLabel: function(charset) {
-    if (charset == "gbk") {
+  _getCharsetLabel(charset) {
+    if (charset == "GBK") {
       // Localization key has been revised
       charset = "gbk.bis";
     }
@@ -227,8 +224,8 @@ var CharsetMenu = {
     } catch (ex) {}
     return charset;
   },
-  _getCharsetAccessKey: function(charset) {
-    if (charset == "gbk") {
+  _getCharsetAccessKey(charset) {
+    if (charset == "GBK") {
       // Localization key has been revised
       charset = "gbk.bis";
     }
@@ -242,20 +239,20 @@ var CharsetMenu = {
    * For substantially similar encodings, treat two encodings as the same
    * for the purpose of the check mark.
    */
-  foldCharset: function(charset) {
+  foldCharset(charset) {
     switch (charset) {
       case "ISO-8859-8-I":
         return "windows-1255";
 
       case "gb18030":
-        return "gbk";
+        return "GBK";
 
       default:
         return charset;
     }
   },
 
-  update: function(parent, charset) {
+  update(parent, charset) {
     let menuitem = parent.getElementsByAttribute("charset", this.foldCharset(charset)).item(0);
     if (menuitem) {
       menuitem.setAttribute("checked", "true");

@@ -26,12 +26,12 @@ public:
         return (gfxPlatformMac*) gfxPlatform::GetPlatform();
     }
 
+    bool UsesTiling() const override;
+    bool ContentUsesTiling() const override;
+
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenSurface(const IntSize& aSize,
                              gfxImageFormat aFormat) override;
-
-    already_AddRefed<mozilla::gfx::ScaledFont>
-      GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont) override;
 
     gfxFontGroup*
     CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
@@ -42,10 +42,14 @@ public:
 
     virtual gfxPlatformFontList* CreatePlatformFontList() override;
 
-    bool IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags) override;
+    void
+    ReadSystemFontList(InfallibleTArray<mozilla::dom::SystemFontListEntry>*
+                       aFontList) override;
+
+    bool IsFontFormatSupported(uint32_t aFormatFlags) override;
 
     virtual void GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
-                                        int32_t aRunScript,
+                                        Script aRunScript,
                                         nsTArray<const char*>& aFontList) override;
 
     // lookup the system font for a particular system font type and set
@@ -56,11 +60,12 @@ public:
                      gfxFontStyle &aFontStyle,
                      float aDevPixPerCSSPixel);
 
-    virtual bool CanRenderContentToDataSurface() const override {
+    virtual bool SupportsApzWheelInput() const override {
       return true;
     }
 
-    virtual bool SupportsApzWheelInput() const override {
+    bool RespectsFontStyleSmoothing() const override {
+      // gfxMacFont respects the font smoothing hint.
       return true;
     }
 
@@ -71,7 +76,6 @@ public:
       return true;
     }
 
-    virtual bool UseProgressivePaint() override;
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;
 
     // lower threshold on font anti-aliasing
@@ -79,6 +83,10 @@ public:
 
 protected:
     bool AccelerateLayersByDefault() override;
+
+    BackendPrefsData GetBackendPrefs() const override;
+
+    bool CheckVariationFontSupport() override;
 
 private:
     virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size) override;

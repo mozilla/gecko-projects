@@ -7,15 +7,31 @@
 #ifndef nsStringBuffer_h__
 #define nsStringBuffer_h__
 
-#include "mozilla/Atomics.h"
+#include <atomic>
 #include "mozilla/MemoryReporting.h"
 
 template<class T> struct already_AddRefed;
 
+/*
+ * Add a canary field to protect against double-frees of nsStringBuffer and
+ * other potential heap corruptions.  We intend to back this out before 58 hits
+ * beta.
+ */
+#if (defined(DEBUG) || defined(NIGHTLY_BUILD)) && !defined(MOZ_ASAN)
+# define STRING_BUFFER_CANARY 1
+#endif
+
+#ifdef STRING_BUFFER_CANARY
+enum nsStringBufferCanary : uint32_t {
+  CANARY_OK = 0xaf57c8fa,
+  CANARY_POISON = 0x534dc0f5
+};
+#endif
+
 /**
  * This structure precedes the string buffers "we" allocate.  It may be the
  * case that nsTAString::mData does not point to one of these special
- * buffers.  The mFlags member variable distinguishes the buffer type.
+ * buffers.  The mDataFlags member variable distinguishes the buffer type.
  *
  * When this header is in use, it enables reference counting, and capacity
  * tracking.  NOTE: A string buffer can be modified only if its reference
@@ -26,8 +42,12 @@ class nsStringBuffer
 private:
   friend class CheckStaticAtomSizes;
 
-  mozilla::Atomic<int32_t> mRefCount;
+  std::atomic<uint32_t> mRefCount;
   uint32_t mStorageSize;
+
+#ifdef STRING_BUFFER_CANARY
+  uint32_t mCanary;
+#endif
 
 public:
 
@@ -78,7 +98,12 @@ public:
    */
   static nsStringBuffer* FromData(void* aData)
   {
-    return reinterpret_cast<nsStringBuffer*>(aData) - 1;
+    nsStringBuffer* sb = reinterpret_cast<nsStringBuffer*>(aData) - 1;
+#ifdef STRING_BUFFER_CANARY
+    if (MOZ_UNLIKELY(sb->mCanary != CANARY_OK))
+      sb->FromDataCanaryCheckFailed();
+#endif
+    return sb;
   }
 
   /**
@@ -109,7 +134,27 @@ public:
    */
   bool IsReadonly() const
   {
-    return mRefCount > 1;
+    // This doesn't lead to the destruction of the buffer, so we don't
+    // need to perform acquire memory synchronization for the normal
+    // reason that a reference count needs acquire synchronization
+    // (ensuring that all writes to the object made on other threads are
+    // visible to the thread destroying the object).
+    //
+    // We then need to consider the possibility that there were prior
+    // writes to the buffer on a different thread:  one that has either
+    // since released its reference count, or one that also has access
+    // to this buffer through the same reference.  There are two ways
+    // for that to happen: either the buffer pointer or a data structure
+    // (e.g., string object) pointing to the buffer was transferred from
+    // one thread to another, or the data structure pointing to the
+    // buffer was already visible on both threads.  In the first case
+    // (transfer), the transfer of data from one thread to another would
+    // have handled the memory synchronization.  In the latter case
+    // (data structure visible on both threads), the caller needed some
+    // sort of higher level memory synchronization to protect against
+    // the string object being mutated at the same time on multiple
+    // threads.
+    return mRefCount.load(std::memory_order_relaxed) > 1;
   }
 
   /**
@@ -155,6 +200,15 @@ public:
    * double-counting.
    */
   size_t SizeOfIncludingThisEvenIfShared(mozilla::MallocSizeOf aMallocSizeOf) const;
+
+#ifdef STRING_BUFFER_CANARY
+  /*
+   * Called by FromData if the canary check failed.  This is out-of-line in
+   * nsSubstring.cpp so that MOZ_CRASH_UNSAFE_PRINTF is available via #includes.
+   * It is not available in FromData due to #include-order.
+   */
+  void FromDataCanaryCheckFailed() const;
+#endif
 };
 
 #endif /* !defined(nsStringBuffer_h__ */

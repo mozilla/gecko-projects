@@ -25,6 +25,8 @@ protected:
 public:
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
+
+  nsSVGElement* AsSVGElement() final { return this; }
 };
 
 } // namespace dom

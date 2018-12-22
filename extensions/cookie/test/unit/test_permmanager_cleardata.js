@@ -9,14 +9,14 @@ function createPrincipal(aOrigin, aOriginAttributes)
   return Services.scriptSecurityManager.createCodebasePrincipal(NetUtil.newURI(aOrigin), aOriginAttributes);
 }
 
-// Return the data required by 'clear-origin-data' notification.
+// Return the data required by 'clear-origin-attributes-data' notification.
 function getData(aPattern)
 {
   return JSON.stringify(aPattern);
 }
 
 // Use aEntries to create principals, add permissions to them and check that they have them.
-// Then, it is notifying 'clear-origin-data' with the given aData and check if the permissions
+// Then, it is notifying 'clear-origin-attributes-data' with the given aData and check if the permissions
 // of principals[i] matches the permission in aResults[i].
 function test(aEntries, aData, aResults)
 {
@@ -27,16 +27,16 @@ function test(aEntries, aData, aResults)
   }
 
   for (principal of principals) {
-    do_check_eq(pm.testPermissionFromPrincipal(principal, "test/clear-origin"), pm.UNKNOWN_ACTION);
+    Assert.equal(pm.testPermissionFromPrincipal(principal, "test/clear-origin"), pm.UNKNOWN_ACTION);
     pm.addFromPrincipal(principal, "test/clear-origin", pm.ALLOW_ACTION, pm.EXPIRE_NEVER, 0);
-    do_check_eq(pm.testPermissionFromPrincipal(principal, "test/clear-origin"), pm.ALLOW_ACTION);
+    Assert.equal(pm.testPermissionFromPrincipal(principal, "test/clear-origin"), pm.ALLOW_ACTION);
   }
 
-  Services.obs.notifyObservers(null, 'clear-origin-data', aData);
+  Services.obs.notifyObservers(null, 'clear-origin-attributes-data', aData);
 
   var length = aEntries.length;
   for (let i=0; i<length; ++i) {
-    do_check_eq(pm.testPermissionFromPrincipal(principals[i], 'test/clear-origin'), aResults[i]);
+    Assert.equal(pm.testPermissionFromPrincipal(principals[i], 'test/clear-origin'), aResults[i]);
 
     // Remove allowed actions.
     if (aResults[i] == pm.ALLOW_ACTION) {

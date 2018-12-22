@@ -1,14 +1,10 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
-var Cu = Components.utils;
-Cu.import("resource://devtools/shared/Loader.jsm");
-const {escapeCSSComment, _unescapeCSSComment} =
-      devtools.require("devtools/client/shared/css-parsing-utils");
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {escapeCSSComment, _unescapeCSSComment} = require("devtools/shared/css/parsing-utils");
 
 const TEST_DATA = [
   {
@@ -31,13 +27,13 @@ const TEST_DATA = [
 
 function run_test() {
   let i = 0;
-  for (let test of TEST_DATA) {
+  for (const test of TEST_DATA) {
     ++i;
-    do_print("Test #" + i);
+    info("Test #" + i);
 
-    let escaped = escapeCSSComment(test.input);
+    const escaped = escapeCSSComment(test.input);
     equal(escaped, test.expected);
-    let unescaped = _unescapeCSSComment(escaped);
+    const unescaped = _unescapeCSSComment(escaped);
     equal(unescaped, test.input);
   }
 }

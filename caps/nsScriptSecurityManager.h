@@ -9,25 +9,23 @@
 
 #include "nsIScriptSecurityManager.h"
 
-#include "nsIAddonPolicyService.h"
 #include "mozilla/Maybe.h"
-#include "nsIAddonPolicyService.h"
 #include "nsIPrincipal.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
 #include "nsServiceManagerUtils.h"
+#include "nsStringFwd.h"
 #include "plstr.h"
 #include "js/TypeDecls.h"
 
 #include <stdint.h>
 
-class nsCString;
 class nsIIOService;
 class nsIStringBundle;
-class nsSystemPrincipal;
+class SystemPrincipal;
 
 namespace mozilla {
-class PrincipalOriginAttributes;
+class OriginAttributes;
 } // namespace mozilla
 
 /////////////////////////////
@@ -55,12 +53,8 @@ public:
     // Invoked exactly once, by XPConnect.
     static void InitStatics();
 
-    static nsSystemPrincipal*
+    static already_AddRefed<SystemPrincipal>
     SystemPrincipalSingletonConstructor();
-
-    JSContext* GetCurrentJSContext();
-
-    JSContext* GetSafeJSContext();
 
     /**
      * Utility method for comparing two URIs.  For security purposes, two URIs
@@ -71,10 +65,8 @@ public:
     static bool SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI);
     static uint32_t SecurityHashURI(nsIURI* aURI);
 
-    static uint16_t AppStatusForPrincipal(nsIPrincipal *aPrin);
-
-    static nsresult 
-    ReportError(JSContext* cx, const nsAString& messageTag,
+    static nsresult
+    ReportError(JSContext* cx, const char* aMessageTag,
                 nsIURI* aSource, nsIURI* aTarget);
 
     static uint32_t
@@ -101,10 +93,6 @@ private:
     static bool
     JSPrincipalsSubsume(JSPrincipals *first, JSPrincipals *second);
 
-    // Returns null if a principal cannot be found; generally callers
-    // should error out at that point.
-    static nsIPrincipal* doGetObjectPrincipal(JSObject* obj);
-
     nsresult
     Init();
 
@@ -117,43 +105,36 @@ private:
     inline void
     AddSitesToFileURIWhitelist(const nsCString& aSiteList);
 
-    // If aURI is a moz-extension:// URI, set mAddonId to the associated addon.
-    nsresult MaybeSetAddonIdFromURI(mozilla::PrincipalOriginAttributes& aAttrs, nsIURI* aURI);
+    nsresult GetChannelResultPrincipal(nsIChannel* aChannel,
+                                       nsIPrincipal** aPrincipal,
+                                       bool aIgnoreSandboxing);
+
+    nsresult
+    CheckLoadURIFlags(nsIURI* aSourceURI, nsIURI* aTargetURI, nsIURI* aSourceBaseURI,
+                      nsIURI* aTargetBaseURI, uint32_t aFlags);
+
+    // Returns the file URI whitelist, initializing it if it has not been
+    // initialized.
+    const nsTArray<nsCOMPtr<nsIURI>>& EnsureFileURIWhitelist();
 
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
     bool mPrefInitialized;
     bool mIsJavaScriptEnabled;
-    nsTArray<nsCOMPtr<nsIURI>> mFileURIWhitelist;
+
+    // List of URIs whose domains and sub-domains are whitelisted to allow
+    // access to file: URIs.  Lazily initialized; isNothing() when not yet
+    // initialized.
+    mozilla::Maybe<nsTArray<nsCOMPtr<nsIURI>>> mFileURIWhitelist;
 
     // This machinery controls new-style domain policies. The old-style
     // policy machinery will be removed soon.
     nsCOMPtr<nsIDomainPolicy> mDomainPolicy;
 
-    // Cached addon policy service. We can't generate this in Init() because
-    // that's too early to get a service.
-    mozilla::Maybe<nsCOMPtr<nsIAddonPolicyService>> mAddonPolicyService;
-    nsIAddonPolicyService* GetAddonPolicyService()
-    {
-        if (mAddonPolicyService.isNothing()) {
-            mAddonPolicyService.emplace(do_GetService("@mozilla.org/addons/policy-service;1"));
-        }
-        return mAddonPolicyService.ref();
-    }
-
     static bool sStrictFileOriginPolicy;
 
     static nsIIOService    *sIOService;
     static nsIStringBundle *sStrBundle;
-    static JSRuntime       *sRuntime;
+    static JSContext       *sContext;
 };
-
-namespace mozilla {
-
-void
-GetJarPrefix(uint32_t aAppid,
-             bool aInIsolatedMozBrowser,
-             nsACString& aJarPrefix);
-
-} // namespace mozilla
 
 #endif // nsScriptSecurityManager_h__

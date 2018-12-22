@@ -6,6 +6,7 @@
 #include "nsISupports.idl"
 
 interface nsIFile;
+interface nsIURI;
 interface mozIPersonalDictionary;
 
 [scriptable, uuid(8ba643a4-7ddc-4662-b976-7ec123843f10)]
@@ -85,12 +86,26 @@ interface mozISpellCheckingEngine : nsISupports {
    * Remove dictionaries from a directory from the spell checker
    */
   void removeDirectory(in nsIFile dir);
+
+  /**
+   * Add a dictionary with the given language code and source URI. The URI
+   * must point to an affix file, with the ".aff" extension. The word list
+   * file must be in the same directory, with the same base name, and the
+   * ".dic" extension.
+   */
+  void addDictionary(in AString lang, in nsIURI file);
+
+  /**
+   * Remove a dictionary with the given language code and path. If the path does
+   * not match that of the current entry with the given language code, it is not
+   * removed.
+   *
+   * @returns True if the dictionary was found and removed.
+   */
+  bool removeDictionary(in AString lang, in nsIURI file);
 };
 
 %{C++
-#define DICTIONARY_SEARCH_DIRECTORY "DictD"
-#define DICTIONARY_SEARCH_DIRECTORY_LIST "DictDL"
-
 #define SPELLCHECK_DICTIONARY_REMOVE_NOTIFICATION \
   "spellcheck-dictionary-remove"
 %}

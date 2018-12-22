@@ -6,9 +6,8 @@
 "use strict";
 
 const { Cc, Ci, Cu, Cr } = require("chrome");
-const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
-const { CanvasFront } = require("devtools/server/actors/canvas");
+const { CanvasFront } = require("devtools/shared/fronts/canvas");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
 function CanvasDebuggerPanel(iframeWindow, toolbox) {
@@ -17,7 +16,7 @@ function CanvasDebuggerPanel(iframeWindow, toolbox) {
   this._destroyer = null;
 
   EventEmitter.decorate(this);
-};
+}
 
 exports.CanvasDebuggerPanel = CanvasDebuggerPanel;
 
@@ -35,7 +34,7 @@ CanvasDebuggerPanel.prototype = {
     if (!this.target.isRemote) {
       targetPromise = this.target.makeRemote();
     } else {
-      targetPromise = promise.resolve(this.target);
+      targetPromise = Promise.resolve(this.target);
     }
 
     return targetPromise
@@ -50,7 +49,7 @@ CanvasDebuggerPanel.prototype = {
         this.emit("ready");
         return this;
       })
-      .then(null, function onError(aReason) {
+      .catch(function onError(aReason) {
         DevToolsUtils.reportException("CanvasDebuggerPanel.prototype.open", aReason);
       });
   },

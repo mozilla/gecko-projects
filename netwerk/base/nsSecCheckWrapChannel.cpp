@@ -10,8 +10,11 @@
 #include "mozilla/Logging.h"
 #include "nsCOMPtr.h"
 
-static mozilla::LazyLogModule gChannelWrapperLog("ChannelWrapper");
-#define CHANNELWRAPPERLOG(args) MOZ_LOG(gChannelWrapperLog, mozilla::LogLevel::Debug, args)
+namespace mozilla {
+namespace net {
+
+static LazyLogModule gChannelWrapperLog("ChannelWrapper");
+#define CHANNELWRAPPERLOG(args) MOZ_LOG(gChannelWrapperLog, LogLevel::Debug, args)
 
 NS_IMPL_ADDREF(nsSecCheckWrapChannelBase)
 NS_IMPL_RELEASE(nsSecCheckWrapChannelBase)
@@ -42,10 +45,6 @@ nsSecCheckWrapChannelBase::nsSecCheckWrapChannelBase(nsIChannel* aChannel)
   MOZ_ASSERT(mChannel, "can not create a channel wrapper without a channel");
 }
 
-nsSecCheckWrapChannelBase::~nsSecCheckWrapChannelBase()
-{
-}
-
 //---------------------------------------------------------
 // nsISecCheckWrapChannel implementation
 //---------------------------------------------------------
@@ -69,11 +68,8 @@ nsSecCheckWrapChannel::nsSecCheckWrapChannel(nsIChannel* aChannel,
   {
     nsCOMPtr<nsIURI> uri;
     mChannel->GetURI(getter_AddRefs(uri));
-    nsAutoCString spec;
-    if (uri) {
-      uri->GetSpec(spec);
-    }
-    CHANNELWRAPPERLOG(("nsSecCheckWrapChannel::nsSecCheckWrapChannel [%p] (%s)",this, spec.get()));
+    CHANNELWRAPPERLOG(("nsSecCheckWrapChannel::nsSecCheckWrapChannel [%p] (%s)",
+                       this, uri ? uri->GetSpecOrDefault().get() : ""));
   }
 }
 
@@ -97,10 +93,6 @@ nsSecCheckWrapChannel::MaybeWrap(nsIChannel* aChannel, nsILoadInfo* aLoadInfo)
   return channel.forget();
 }
 
-nsSecCheckWrapChannel::~nsSecCheckWrapChannel()
-{
-}
-
 //---------------------------------------------------------
 // SecWrapChannelStreamListener helper
 //---------------------------------------------------------
@@ -118,7 +110,7 @@ class SecWrapChannelStreamListener final : public nsIStreamListener
     NS_DECL_NSIREQUESTOBSERVER
 
   private:
-    ~SecWrapChannelStreamListener() {}
+    ~SecWrapChannelStreamListener() = default;
 
     nsCOMPtr<nsIRequest>        mRequest;
     nsCOMPtr<nsIStreamListener> mListener;
@@ -191,3 +183,6 @@ nsSecCheckWrapChannel::Open2(nsIInputStream** aStream)
   NS_ENSURE_SUCCESS(rv, rv);
   return Open(aStream);
 }
+
+} // namespace net
+} // namespace mozilla

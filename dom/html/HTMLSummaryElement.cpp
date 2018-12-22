@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,22 +9,13 @@
 #include "mozilla/dom/HTMLDetailsElement.h"
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/HTMLUnknownElement.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEvents.h"
 #include "nsFocusManager.h"
 
-// Expand NS_IMPL_NS_NEW_HTML_ELEMENT(Summary) to add pref check.
-nsGenericHTMLElement*
-NS_NewHTMLSummaryElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                         mozilla::dom::FromParser aFromParser)
-{
-  if (!mozilla::dom::HTMLDetailsElement::IsDetailsEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
-  }
-
-  return new mozilla::dom::HTMLSummaryElement(aNodeInfo);
-}
+NS_IMPL_NS_NEW_HTML_ELEMENT(Summary)
 
 namespace mozilla {
 namespace dom {
@@ -76,16 +68,16 @@ HTMLSummaryElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 
     switch (event->mMessage) {
       case eKeyPress:
-        if (keyboardEvent->charCode == nsIDOMKeyEvent::DOM_VK_SPACE) {
+        if (keyboardEvent->mCharCode == ' ') {
           // Consume 'space' key to prevent scrolling the page down.
           aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
         }
 
-        dispatchClick = keyboardEvent->keyCode == nsIDOMKeyEvent::DOM_VK_RETURN;
+        dispatchClick = keyboardEvent->mKeyCode == NS_VK_RETURN;
         break;
 
       case eKeyUp:
-        dispatchClick = keyboardEvent->keyCode == nsIDOMKeyEvent::DOM_VK_SPACE;
+        dispatchClick = keyboardEvent->mKeyCode == NS_VK_SPACE;
         break;
 
       default:
@@ -151,13 +143,13 @@ HTMLSummaryElement::IsMainSummary() const
 HTMLDetailsElement*
 HTMLSummaryElement::GetDetails() const
 {
-  return HTMLDetailsElement::FromContentOrNull(GetParent());
+  return HTMLDetailsElement::FromNodeOrNull(GetParent());
 }
 
 JSObject*
 HTMLSummaryElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

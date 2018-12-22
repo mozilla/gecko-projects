@@ -8,7 +8,11 @@
 
 <body>
 <input id="fileList" type="file"></input>
-<script type="application/javascript;version=1.7">
+<script type="application/javascript">
+
+function setup_tests() {
+  SpecialPowers.pushPrefEnv({"set": [["dom.input.dirpicker", true]]}, next);
+}
 
 function getType(a) {
   if (a === null || a === undefined)
@@ -19,6 +23,10 @@ function getType(a) {
 
   if (typeof a == 'object')
     return 'object';
+
+  if (SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported() &&
+      a instanceof WebAssembly.Module)
+    return "wasm";
 
   return 'primitive';
 }
@@ -55,24 +63,35 @@ function compare(a, b) {
     return;
   }
 
+  if (type == 'wasm') {
+    var wasmA = new WebAssembly.Instance(a);
+    ok(wasmA instanceof WebAssembly.Instance, "got an instance");
+
+    var wasmB = new WebAssembly.Instance(b);
+    ok(wasmB instanceof WebAssembly.Instance, "got an instance");
+
+    ok(wasmA.exports.foo() === wasmB.exports.foo(), "Same result!");
+    ok(wasmB.exports.foo() === 42, "We want 42");
+  }
+
   if (type != 'null') {
     is (a.toSource(), b.toSource(), 'Matching using toSource()');
   }
 }
 
 var clonableObjects = [
-  { crossThreads: true, data: 'hello world' },
-  { crossThreads: true, data: 123 },
-  { crossThreads: true, data: null },
-  { crossThreads: true, data: true },
-  { crossThreads: true, data: new Date() },
-  { crossThreads: true, data: [ 1, 'test', true, new Date() ] },
-  { crossThreads: true, data: { a: true, b:  null, c: new Date(), d: [ true, false, {} ] } },
-  { crossThreads: true, data: new Blob([123], { type: 'plain/text' }) },
-  { crossThreads: true, data: new ImageData(2, 2) },
+  { target: 'all', data: 'hello world' },
+  { target: 'all', data: 123 },
+  { target: 'all', data: null },
+  { target: 'all', data: true },
+  { target: 'all', data: new Date() },
+  { target: 'all', data: [ 1, 'test', true, new Date() ] },
+  { target: 'all', data: { a: true, b:  null, c: new Date(), d: [ true, false, {} ] } },
+  { target: 'all', data: new Blob([123], { type: 'plain/text' }) },
+  { target: 'all', data: new ImageData(2, 2) },
 ];
 
-function create_fileList_forFile() {
+function create_fileList() {
   var url = SimpleTest.getTestFileURL("script_postmessages_fileList.js");
   var script = SpecialPowers.loadChromeScript(url);
 
@@ -84,7 +103,7 @@ function create_fileList_forFile() {
     var domFile = fileList.files[0];
     is(domFile.name, "prefs.js", "fileName should be prefs.js");
 
-    clonableObjects.push({ crossThreads: true, data: fileList.files });
+    clonableObjects.push({ target: 'all', data: fileList.files });
     script.destroy();
     next();
   }
@@ -93,7 +112,12 @@ function create_fileList_forFile() {
   script.sendAsyncMessage("file.open");
 }
 
-function create_fileList_forDir() {
+function create_directory() {
+  if (navigator.userAgent.toLowerCase().includes('Android')) {
+    next();
+    return;
+  }
+
   var url = SimpleTest.getTestFileURL("script_postmessages_fileList.js");
   var script = SpecialPowers.loadChromeScript(url);
 
@@ -101,27 +125,56 @@ function create_fileList_forDir() {
     var fileList = document.getElementById('fileList');
     SpecialPowers.wrap(fileList).mozSetDirectory(message.dir);
 
-    // Just a simple test
-    is(fileList.files.length, 1, "Filelist has 1 element");
-    ok(fileList.files[0] instanceof Directory, "We have a directory.");
+    fileList.getFilesAndDirectories().then(function(list) {
+      // Just a simple test
+      is(list.length, 1, "This list has 1 element");
+      ok(list[0] instanceof Directory, "We have a directory.");
 
-    clonableObjects.push({ crossThreads: false, data: fileList.files });
-    script.destroy();
-    next();
+      clonableObjects.push({ target: 'all', data: list[0] });
+      script.destroy();
+      next();
+    });
   }
 
   script.addMessageListener("dir.opened", onOpened);
   script.sendAsyncMessage("dir.open");
 }
 
-function runTests(obj) {
-  ok(('clonableObjects' in obj) &&
-     ('transferableObjects' in obj) &&
-     (obj.clonableObjects || obj.transferableObjects), "We must run some test!");
+function create_wasmModule() {
+  info("Checking if we can play with WebAssembly...");
 
-  // cloning tests
+  if (!SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported()) {
+    next();
+    return;
+  }
+
+  ok(WebAssembly, "WebAssembly object should exist");
+  ok(WebAssembly.compile, "WebAssembly.compile function should exist");
+
+  const wasmTextToBinary = SpecialPowers.unwrap(SpecialPowers.Cu.getJSTestingFunctions().wasmTextToBinary);
+  const fooModuleCode = wasmTextToBinary(`(module
+    (func $foo (result i32) (i32.const 42))
+    (export "foo" $foo)
+  )`, 'new-format');
+
+  WebAssembly.compile(fooModuleCode).then((m) => {
+    ok(m instanceof WebAssembly.Module, "The WasmModule has been compiled.");
+    clonableObjects.push({ target: 'sameProcess', data: m });
+    next();
+  }, () => {
+    ok(false, "The compilation of the wasmModule failed.");
+  });
+}
+
+function runTests(obj) {
+  ok(('clonableObjectsEveryWhere' in obj) &&
+     ('clonableObjectsSameProcess' in obj) &&
+     ('transferableObjects' in obj) &&
+     (obj.clonableObjectsEveryWhere || obj.clonableObjectsSameProcess || obj.transferableObjects), "We must run some test!");
+
+  // cloning tests - everyWhere
   new Promise(function(resolve, reject) {
-    if (!obj.clonableObjects) {
+    if (!obj.clonableObjectsEveryWhere) {
       resolve();
       return;
     }
@@ -135,9 +188,7 @@ function runTests(obj) {
 
       var object = clonableObjects[clonableObjectsId++];
 
-      // If this test requires a cross-thread structured clone algorithm, maybe
-      // we have to skip it.
-      if (!object.crossThread && obj.crossThread) {
+      if (object.target != 'all') {
         runClonableTest();
         return;
       }
@@ -149,6 +200,38 @@ function runTests(obj) {
     }
 
     runClonableTest();
+  })
+
+  // clonable same process
+  .then(function() {
+    return new Promise(function(resolve, reject) {
+      if (!obj.clonableObjectsSameProcess) {
+        resolve();
+        return;
+      }
+
+      var clonableObjectsId = 0;
+      function runClonableTest() {
+        if (clonableObjectsId >= clonableObjects.length) {
+          resolve();
+          return;
+        }
+
+        var object = clonableObjects[clonableObjectsId++];
+
+        if (object.target != 'sameProcess') {
+          runClonableTest();
+          return;
+        }
+
+        obj.send(object.data, []).then(function(received) {
+          compare(received.data, object.data);
+          runClonableTest();
+        });
+      }
+
+      runClonableTest();
+    });
   })
 
   // transfering tests
@@ -230,9 +313,9 @@ function test_windowToWindow() {
   }
 
   runTests({
-    clonableObjects: true,
+    clonableObjectsEveryWhere: true,
+    clonableObjectsSameProcess: true,
     transferableObjects: true,
-    crossThread: false,
     send: function(what, ports) {
       return new Promise(function(r, rr) {
         resolve = r;
@@ -284,9 +367,9 @@ function test_windowToIframeURL(url) {
   ifr.src = url;
   ifr.onload = function() {
     runTests({
-      clonableObjects: true,
+      clonableObjectsEveryWhere: true,
+      clonableObjectsSameProcess: true,
       transferableObjects: true,
-      crossThread: false,
       send: function(what, ports) {
         return new Promise(function(r, rr) {
           resolve = r;
@@ -332,9 +415,9 @@ function test_workers() {
     }
 
     runTests({
-      clonableObjects: true,
+      clonableObjectsEveryWhere: true,
+      clonableObjectsSameProcess: true,
       transferableObjects: true,
-      crossThread: true,
       send: function(what, ports) {
         return new Promise(function(r, rr) {
           resolve = r;
@@ -376,9 +459,9 @@ function test_broadcastChannel() {
   }
 
   runTests({
-    clonableObjects: true,
+    clonableObjectsEveryWhere: true,
+    clonableObjectsSameProcess: false,
     transferableObjects: false,
-    crossThread: true,
     send: function(what, ports) {
       return new Promise(function(r, rr) {
         if (ports.length) {
@@ -422,9 +505,9 @@ function test_broadcastChannel_inWorkers() {
     }
 
     runTests({
-      clonableObjects: true,
+      clonableObjectsEveryWhere: true,
+      clonableObjectsSameProcess: false,
       transferableObjects: false,
-      crossThread: true,
       send: function(what, ports) {
         return new Promise(function(r, rr) {
           if (ports.length) {
@@ -464,9 +547,9 @@ function test_messagePort() {
   }
 
   runTests({
-    clonableObjects: true,
+    clonableObjectsEveryWhere: true,
+    clonableObjectsSameProcess: false,
     transferableObjects: true,
-    crossThread: true,
     send: function(what, ports) {
       return new Promise(function(r, rr) {
         resolve = r;
@@ -510,9 +593,9 @@ function test_messagePort_inWorkers() {
     }
 
     runTests({
-      clonableObjects: true,
+      clonableObjectsEveryWhere: true,
+      clonableObjectsSameProcess: false,
       transferableObjects: true,
-      crossThread: true,
       send: function(what, ports) {
         return new Promise(function(r, rr) {
           resolve = r;
@@ -534,8 +617,11 @@ function test_messagePort_inWorkers() {
 }
 
 var tests = [
-  create_fileList_forFile,
-  create_fileList_forDir,
+  setup_tests,
+
+  create_fileList,
+  create_directory,
+  create_wasmModule,
 
   test_windowToWindow,
   test_windowToIframe,

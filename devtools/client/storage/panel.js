@@ -9,36 +9,33 @@
 const EventEmitter = require("devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "StorageFront",
-                        "devtools/server/actors/storage", true);
+                         "devtools/shared/fronts/storage", true);
 loader.lazyRequireGetter(this, "StorageUI",
                          "devtools/client/storage/ui", true);
 
-var StoragePanel = this.StoragePanel =
-function StoragePanel(panelWin, toolbox) {
-  EventEmitter.decorate(this);
+class StoragePanel {
+  constructor(panelWin, toolbox) {
+    EventEmitter.decorate(this);
 
-  this._toolbox = toolbox;
-  this._target = toolbox.target;
-  this._panelWin = panelWin;
+    this._toolbox = toolbox;
+    this._target = toolbox.target;
+    this._panelWin = panelWin;
 
-  this.destroy = this.destroy.bind(this);
-};
+    this.destroy = this.destroy.bind(this);
+  }
 
-exports.StoragePanel = StoragePanel;
-
-StoragePanel.prototype = {
   get target() {
     return this._toolbox.target;
-  },
+  }
 
   get panelWindow() {
     return this._panelWin;
-  },
+  }
 
   /**
    * open is effectively an asynchronous constructor
    */
-  open: function() {
+  open() {
     let targetPromise;
     // We always interact with the target as if it were remote
     if (!this.target.isRemote) {
@@ -51,7 +48,8 @@ StoragePanel.prototype = {
       this.target.on("close", this.destroy);
       this._front = new StorageFront(this.target.client, this.target.form);
 
-      this.UI = new StorageUI(this._front, this._target, this._panelWin);
+      this.UI = new StorageUI(this._front, this._target,
+                              this._panelWin, this._toolbox);
       this.isReady = true;
       this.emit("ready");
 
@@ -60,12 +58,12 @@ StoragePanel.prototype = {
       console.log("error while opening storage panel", e);
       this.destroy();
     });
-  },
+  }
 
   /**
    * Destroy the storage inspector.
    */
-  destroy: function() {
+  destroy() {
     if (!this._destroyed) {
       this.UI.destroy();
       this.UI = null;
@@ -82,5 +80,7 @@ StoragePanel.prototype = {
     }
 
     return Promise.resolve(null);
-  },
-};
+  }
+}
+
+exports.StoragePanel = StoragePanel;

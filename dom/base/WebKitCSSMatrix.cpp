@@ -8,8 +8,9 @@
 
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/WebKitCSSMatrixBinding.h"
-#include "nsCSSParser.h"
-#include "nsStyleTransformMatrix.h"
+#include "mozilla/Preferences.h"
+#include "nsPresContext.h"
+#include "nsGlobalWindowInner.h"
 
 namespace mozilla {
 namespace dom {
@@ -51,65 +52,14 @@ WebKitCSSMatrix::Constructor(const GlobalObject& aGlobal,
 JSObject*
 WebKitCSSMatrix::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return WebKitCSSMatrixBinding::Wrap(aCx, this, aGivenProto);
+  return WebKitCSSMatrix_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 WebKitCSSMatrix*
 WebKitCSSMatrix::SetMatrixValue(const nsAString& aTransformList,
                                 ErrorResult& aRv)
 {
-  // An empty string is a no-op.
-  if (aTransformList.IsEmpty()) {
-    return this;
-  }
-
-  nsCSSValue value;
-  nsCSSParser parser;
-  bool parseSuccess = parser.ParseTransformProperty(aTransformList,
-                                                    true,
-                                                    value);
-  if (!parseSuccess) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return nullptr;
-  }
-
-  // A value of "none" results in a 2D identity matrix.
-  if (value.GetUnit() == eCSSUnit_None) {
-    mMatrix3D = nullptr;
-    mMatrix2D = new gfx::Matrix();
-    return this;
-  }
-
-  // A value other than a transform-list is a syntax error.
-  if (value.GetUnit() != eCSSUnit_SharedList) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return nullptr;
-  }
-
-  RuleNodeCacheConditions dummy;
-  nsStyleTransformMatrix::TransformReferenceBox dummyBox;
-  bool contains3dTransform = false;
-  gfx::Matrix4x4 transform = nsStyleTransformMatrix::ReadTransforms(
-                               value.GetSharedListValue()->mHead,
-                               nullptr, nullptr, dummy, dummyBox,
-                               nsPresContext::AppUnitsPerCSSPixel(),
-                               &contains3dTransform);
-
-  if (!contains3dTransform) {
-    mMatrix3D = nullptr;
-    mMatrix2D = new gfx::Matrix();
-
-    SetA(transform._11);
-    SetB(transform._12);
-    SetC(transform._21);
-    SetD(transform._22);
-    SetE(transform._41);
-    SetF(transform._42);
-  } else {
-    mMatrix3D = new gfx::Matrix4x4(transform);
-    mMatrix2D = nullptr;
-  }
-
+  DOMMatrix::SetMatrixValue(aTransformList, aRv);
   return this;
 }
 

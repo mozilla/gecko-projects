@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,8 +12,11 @@
  */
 
 #include "APZTestCommon.h"
+#include "gfxPrefs.h"
+#include "mozilla/layers/APZSampler.h"
+#include "mozilla/layers/APZUpdater.h"
 
-class APZCBasicTester : public ::testing::Test {
+class APZCBasicTester : public APZCTesterBase {
 public:
   explicit APZCBasicTester(AsyncPanZoomController::GestureBehavior aGestureBehavior = AsyncPanZoomController::DEFAULT_GESTURES)
     : mGestureBehavior(aGestureBehavior)
@@ -27,10 +30,12 @@ protected:
     APZThreadUtils::SetThreadAssertionsEnabled(false);
     APZThreadUtils::SetControllerThread(MessageLoop::current());
 
-    mcc = new NiceMock<MockContentControllerDelayed>();
     tm = new TestAPZCTreeManager(mcc);
-    apzc = new TestAsyncPanZoomController(0, mcc, tm, mGestureBehavior);
+    updater = new APZUpdater(tm, false);
+    sampler = new APZSampler(tm, false);
+    apzc = new TestAsyncPanZoomController(LayersId{0}, mcc, tm, mGestureBehavior);
     apzc->SetFrameMetrics(TestFrameMetrics());
+    apzc->GetScrollMetadata().SetIsLayersIdRoot(true);
   }
 
   /**
@@ -48,6 +53,8 @@ protected:
   {
     while (mcc->RunThroughDelayedTasks());
     apzc->Destroy();
+    tm->ClearTree();
+    tm->ClearContentController();
   }
 
   void MakeApzcWaitForMainThread()
@@ -96,7 +103,7 @@ protected:
 
       // Trigger computation of the overscroll tranform, to make sure
       // no assetions fire during the calculation.
-      apzc->GetOverscrollTransform(AsyncPanZoomController::NORMAL);
+      apzc->GetOverscrollTransform(AsyncPanZoomController::eForHitTesting);
 
       if (!apzc->IsOverscrolled()) {
         recoveredFromOverscroll = true;
@@ -111,8 +118,9 @@ protected:
   void TestOverscroll();
 
   AsyncPanZoomController::GestureBehavior mGestureBehavior;
-  RefPtr<MockContentControllerDelayed> mcc;
   RefPtr<TestAPZCTreeManager> tm;
+  RefPtr<APZSampler> sampler;
+  RefPtr<APZUpdater> updater;
   RefPtr<TestAsyncPanZoomController> apzc;
 };
 

@@ -8,7 +8,10 @@
 #define MOZILLA_AUTOTASKQUEUE_H_
 
 #include "mozilla/RefPtr.h"
+#include "mozilla/SystemGroup.h"
 #include "mozilla/TaskQueue.h"
+
+class nsIEventTarget;
 
 namespace mozilla {
 
@@ -16,22 +19,37 @@ namespace mozilla {
 class AutoTaskQueue : public AbstractThread
 {
 public:
-  explicit AutoTaskQueue(already_AddRefed<SharedThreadPool> aPool, bool aSupportsTailDispatch = false)
-  : AbstractThread(aSupportsTailDispatch)
-  , mTaskQueue(new TaskQueue(Move(aPool), aSupportsTailDispatch))
-  {}
+  explicit AutoTaskQueue(already_AddRefed<nsIEventTarget> aPool,
+                         bool aSupportsTailDispatch = false)
+    : AbstractThread(aSupportsTailDispatch)
+    , mTaskQueue(new TaskQueue(std::move(aPool), aSupportsTailDispatch))
+    , mMonitor("AutoTaskQueue")
+  {
+  }
+
+  AutoTaskQueue(already_AddRefed<nsIEventTarget> aPool,
+                const char* aName,
+                bool aSupportsTailDispatch = false)
+    : AbstractThread(aSupportsTailDispatch)
+    , mTaskQueue(new TaskQueue(std::move(aPool), aName, aSupportsTailDispatch))
+    , mMonitor("AutoTaskQueue")
+  {
+  }
 
   TaskDispatcher& TailDispatcher() override
   {
     return mTaskQueue->TailDispatcher();
   }
 
-  void Dispatch(already_AddRefed<nsIRunnable> aRunnable,
-                DispatchFailureHandling aFailureHandling = AssertDispatchSuccess,
-                DispatchReason aReason = NormalDispatch) override
+  MOZ_MUST_USE nsresult
+  Dispatch(already_AddRefed<nsIRunnable> aRunnable,
+           DispatchReason aReason = NormalDispatch) override
   {
-    mTaskQueue->Dispatch(Move(aRunnable), aFailureHandling, aReason);
+    return mTaskQueue->Dispatch(std::move(aRunnable), aReason);
   }
+
+  // Prevent a GCC warning about the other overload of Dispatch being hidden.
+  using AbstractThread::Dispatch;
 
   // Blocks until all tasks finish executing.
   void AwaitIdle() { mTaskQueue->AwaitIdle(); }
@@ -42,15 +60,12 @@ public:
   // the task queue.
   bool IsCurrentThreadIn() override { return mTaskQueue->IsCurrentThreadIn(); }
 
+  mozilla::Monitor& Monitor() { return mMonitor; }
+
 private:
-  ~AutoTaskQueue()
-  {
-    RefPtr<TaskQueue> taskqueue = mTaskQueue;
-    nsCOMPtr<nsIRunnable> task =
-      NS_NewRunnableFunction([taskqueue]() { taskqueue->BeginShutdown(); });
-    AbstractThread::MainThread()->Dispatch(task.forget());
-  }
+  ~AutoTaskQueue() { mTaskQueue->BeginShutdown(); }
   RefPtr<TaskQueue> mTaskQueue;
+  mozilla::Monitor mMonitor;
 };
 
 } // namespace mozilla

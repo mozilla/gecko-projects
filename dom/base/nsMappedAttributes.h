@@ -14,14 +14,14 @@
 
 #include "nsAttrAndChildArray.h"
 #include "nsMappedAttributeElement.h"
-#include "nsIStyleRule.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ServoBindingTypes.h"
 #include "mozilla/MemoryReporting.h"
 
-class nsIAtom;
+class nsAtom;
 class nsHTMLStyleSheet;
 
-class nsMappedAttributes final : public nsIStyleRule
+class nsMappedAttributes final
 {
 public:
   nsMappedAttributes(nsHTMLStyleSheet* aSheet,
@@ -31,10 +31,11 @@ public:
   void* operator new(size_t size, uint32_t aAttrCount = 1) CPP_THROW_NEW;
   nsMappedAttributes* Clone(bool aWillAddAttr);
 
-  NS_DECL_ISUPPORTS
+  NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(nsMappedAttributes, LastRelease())
 
-  void SetAndTakeAttr(nsIAtom* aAttrName, nsAttrValue& aValue);
-  const nsAttrValue* GetAttr(nsIAtom* aAttrName) const;
+  void SetAndSwapAttr(nsAtom* aAttrName, nsAttrValue& aValue,
+                      bool* aValueWasSet);
+  const nsAttrValue* GetAttr(nsAtom* aAttrName) const;
   const nsAttrValue* GetAttr(const nsAString& aAttrName) const;
 
   uint32_t Count() const
@@ -43,7 +44,7 @@ public:
   }
 
   bool Equals(const nsMappedAttributes* aAttributes) const;
-  uint32_t HashValue() const;
+  PLDHashNumber HashValue() const;
 
   void DropStyleSheetReference()
   {
@@ -69,19 +70,33 @@ public:
   // aValue; any value that was already in aValue is destroyed.
   void RemoveAttrAt(uint32_t aPos, nsAttrValue& aValue);
   const nsAttrName* GetExistingAttrNameFromQName(const nsAString& aName) const;
-  int32_t IndexOfAttr(nsIAtom* aLocalName) const;
-  
+  int32_t IndexOfAttr(nsAtom* aLocalName) const;
 
-  // nsIStyleRule 
-  virtual void MapRuleInfoInto(nsRuleData* aRuleData) override;
-  virtual bool MightMapInheritedStyleData() override;
-#ifdef DEBUG
-  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
-#endif
+  // Apply the contained mapper to the contained set of servo rules,
+  // unless the servo rules have already been initialized.
+  void LazilyResolveServoDeclaration(nsIDocument* aDocument);
+
+  // Obtain the contained servo declaration block
+  // May return null if called before the inner block
+  // has been (lazily) resolved
+  const RefPtr<RawServoDeclarationBlock>& GetServoStyle() const
+  {
+    return mServoStyle;
+  }
+
+  void ClearServoStyle() {
+    MOZ_ASSERT(NS_IsMainThread());
+    mServoStyle = nullptr;
+  }
+
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
+  static void Shutdown();
 private:
+
+  void LastRelease();
+
   nsMappedAttributes(const nsMappedAttributes& aCopy);
   ~nsMappedAttributes();
 
@@ -92,7 +107,7 @@ private:
   };
 
   /**
-   * Due to a compiler bug in VisualAge C++ for AIX, we need to return the 
+   * Due to a compiler bug in VisualAge C++ for AIX, we need to return the
    * address of the first index into mAttrs here, instead of simply
    * returning mAttrs itself.
    *
@@ -113,7 +128,14 @@ private:
 #endif
   nsHTMLStyleSheet* mSheet; //weak
   nsMapRuleToAttributesFunc mRuleMapper;
+  RefPtr<RawServoDeclarationBlock> mServoStyle;
   void* mAttrs[1];
+
+  static bool sShuttingDown;
+
+  // We're caching some memory to avoid trashing the allocator.
+  // The memory stored at index N can hold N attribute values.
+  static nsTArray<void*>* sCachedMappedAttributeAllocations;
 };
 
 #endif /* nsMappedAttributes_h___ */

@@ -18,18 +18,22 @@
 #include "xpcpublic.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/Services.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/TimeStamp.h"
+#include "nsString.h"
+#include "GeckoProfiler.h"
 
-#define NOTIFY_GLOBAL_OBSERVERS
+static const uint32_t kMinTelemetryNotifyObserversLatencyMs = 1;
 
 // Log module for nsObserverService logging...
 //
 // To enable logging (see prlog.h for full details):
 //
-//    set NSPR_LOG_MODULES=ObserverService:5
-//    set NSPR_LOG_FILE=nspr.log
+//    set MOZ_LOG=ObserverService:5
+//    set MOZ_LOG_FILE=service.log
 //
-// this enables LogLevel::Debug level information and places all output in
-// the file nspr.log
+// This enables LogLevel::Debug level information and places all output in
+// the file service.log.
 static mozilla::LazyLogModule sObserverServiceLog("ObserverService");
 #define LOG(x) MOZ_LOG(sObserverServiceLog, mozilla::LogLevel::Debug, x)
 
@@ -93,12 +97,11 @@ nsObserverService::CollectReports(nsIHandleReportCallback* aHandleReport,
   }
 
   // These aren't privacy-sensitive and so don't need anonymizing.
-  nsresult rv;
   for (uint32_t i = 0; i < suspectObservers.Length(); i++) {
     SuspectObserver& suspect = suspectObservers[i];
     nsPrintfCString suspectPath("observer-service-suspect/referent(topic=%s)",
                                 suspect.mTopic);
-    rv = aHandleReport->Callback(
+    aHandleReport->Callback(
       /* process */ EmptyCString(),
       suspectPath, KIND_OTHER, UNITS_COUNT, suspect.mReferentCount,
       NS_LITERAL_CSTRING("A topic with a suspiciously large number of "
@@ -106,47 +109,24 @@ nsObserverService::CollectReports(nsIHandleReportCallback* aHandleReport,
                          "if the number of referents is high with "
                          "respect to the number of windows."),
       aData);
-
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
   }
 
-  rv = aHandleReport->Callback(
-         /* process */ EmptyCString(),
-         NS_LITERAL_CSTRING("observer-service/referent/strong"),
-         KIND_OTHER, UNITS_COUNT, totalNumStrong,
-         NS_LITERAL_CSTRING("The number of strong references held by the "
-                            "observer service."),
-         aData);
+  MOZ_COLLECT_REPORT(
+    "observer-service/referent/strong", KIND_OTHER, UNITS_COUNT,
+    totalNumStrong,
+    "The number of strong references held by the observer service.");
 
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  MOZ_COLLECT_REPORT(
+    "observer-service/referent/weak/alive", KIND_OTHER, UNITS_COUNT,
+    totalNumWeakAlive,
+    "The number of weak references held by the observer service that are "
+    "still alive.");
 
-  rv = aHandleReport->Callback(
-         /* process */ EmptyCString(),
-         NS_LITERAL_CSTRING("observer-service/referent/weak/alive"),
-         KIND_OTHER, UNITS_COUNT, totalNumWeakAlive,
-         NS_LITERAL_CSTRING("The number of weak references held by the "
-                            "observer service that are still alive."),
-         aData);
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = aHandleReport->Callback(
-         /* process */ EmptyCString(),
-         NS_LITERAL_CSTRING("observer-service/referent/weak/dead"),
-         KIND_OTHER, UNITS_COUNT, totalNumWeakDead,
-         NS_LITERAL_CSTRING("The number of weak references held by the "
-                            "observer service that are dead."),
-         aData);
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  MOZ_COLLECT_REPORT(
+    "observer-service/referent/weak/dead", KIND_OTHER, UNITS_COUNT,
+    totalNumWeakDead,
+    "The number of weak references held by the observer service that are "
+    "dead.");
 
   return NS_OK;
 }
@@ -200,9 +180,10 @@ nsObserverService::Create(nsISupports* aOuter, const nsIID& aIID,
   // The memory reporter can not be immediately registered here because
   // the nsMemoryReporterManager may attempt to get the nsObserverService
   // during initialization, causing a recursive GetService.
-  RefPtr<nsRunnableMethod<nsObserverService>> registerRunnable =
-    NS_NewRunnableMethod(os, &nsObserverService::RegisterReporter);
-  NS_DispatchToCurrentThread(registerRunnable);
+  NS_DispatchToCurrentThread(
+    NewRunnableMethod("nsObserverService::RegisterReporter",
+                      os,
+                      &nsObserverService::RegisterReporter));
 
   return os->QueryInterface(aIID, aInstancePtr);
 }
@@ -229,12 +210,17 @@ nsObserverService::AddObserver(nsIObserver* aObserver, const char* aTopic,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (mozilla::net::IsNeckoChild() && !strncmp(aTopic, "http-on-", 8)) {
+  // Specifically allow http-on-opening-request and http-on-stop-request in the
+  // child process; see bug 1269765.
+  if (mozilla::net::IsNeckoChild() && !strncmp(aTopic, "http-on-", 8) &&
+      strcmp(aTopic, "http-on-opening-request") &&
+      strcmp(aTopic, "http-on-stop-request")) {
     nsCOMPtr<nsIConsoleService> console(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
     nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
     error->Init(NS_LITERAL_STRING("http-on-* observers only work in the parent process"),
                 EmptyString(), EmptyString(), 0, 0,
-                nsIScriptError::warningFlag, "chrome javascript");
+                nsIScriptError::warningFlag, "chrome javascript",
+                false /* from private window */);
     console->LogMessage(error);
 
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -283,7 +269,8 @@ nsObserverService::EnumerateObservers(const char* aTopic,
     return NS_NewEmptyEnumerator(anEnumerator);
   }
 
-  return observerList->GetObserverList(anEnumerator);
+  observerList->GetObserverList(anEnumerator);
+  return NS_OK;
 }
 
 // Enumerate observers of aTopic and call Observe on each.
@@ -298,17 +285,22 @@ NS_IMETHODIMP nsObserverService::NotifyObservers(nsISupports* aSubject,
     return NS_ERROR_INVALID_ARG;
   }
 
+  mozilla::TimeStamp start = TimeStamp::Now();
+
+  AUTO_PROFILER_LABEL_DYNAMIC_CSTR(
+    "nsObserverService::NotifyObservers", OTHER, aTopic);
+
   nsObserverList* observerList = mObserverTopicTable.GetEntry(aTopic);
   if (observerList) {
     observerList->NotifyObservers(aSubject, aTopic, aSomeData);
   }
 
-#ifdef NOTIFY_GLOBAL_OBSERVERS
-  observerList = mObserverTopicTable.GetEntry("*");
-  if (observerList) {
-    observerList->NotifyObservers(aSubject, aTopic, aSomeData);
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (latencyMs >= kMinTelemetryNotifyObserversLatencyMs) {
+    Telemetry::Accumulate(Telemetry::NOTIFY_OBSERVERS_LATENCY_MS,
+                          nsDependentCString(aTopic),
+                          latencyMs);
   }
-#endif
 
   return NS_OK;
 }

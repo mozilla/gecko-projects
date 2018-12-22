@@ -2,10 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var Ci = Components.interfaces;
-var Cr = Components.results;
-var Cc = Components.classes;
-var Cu = Components.utils;
+ // Defined in dialog.xml.
+ /* globals centerWindowOnScreen:false, moveToAlertPosition:false */
 
 var gArgs, listBox;
 
@@ -35,7 +33,7 @@ function dialogOnLoad() {
         if (str == "")
             str = "<>";
         listBox.appendItem(str);
-        listBox.getItemAtIndex(i).addEventListener("dblclick", dialogDoubleClick, false);
+        listBox.getItemAtIndex(i).addEventListener("dblclick", dialogDoubleClick);
     }
     listBox.selectedIndex = 0;
     listBox.focus();
@@ -56,7 +54,6 @@ function dialogOnLoad() {
 }
 
 function dialogOK() {
-    let selected = listBox.selectedIndex;
     gArgs.setProperty("selected", listBox.selectedIndex);
     gArgs.setProperty("ok", true);
     return true;

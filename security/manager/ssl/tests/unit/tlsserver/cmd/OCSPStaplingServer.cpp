@@ -60,6 +60,9 @@ const OCSPHost sOCSPHosts[] =
   { "ocsp-stapling-must-staple-empty.example.com", ORTEmpty, nullptr, "must-staple-ee" },
   { "ocsp-stapling-must-staple-ee-with-must-staple-int.example.com", ORTGood, nullptr, "must-staple-ee-with-must-staple-int" },
   { "ocsp-stapling-plain-ee-with-must-staple-int.example.com", ORTGood, nullptr, "must-staple-missing-ee" },
+  { "ocsp-stapling-must-staple-expired.example.com", ORTExpired, nullptr, "must-staple-ee" },
+  { "ocsp-stapling-must-staple-try-later.example.com", ORTTryLater, nullptr, "must-staple-ee" },
+  { "ocsp-stapling-must-staple-invalid-signer.example.com", ORTGoodOtherCA, "other-test-ca", "must-staple-ee" },
   { "multi-tls-feature-good.example.com", ORTNone, nullptr, "multi-tls-feature-good-ee" },
   { "multi-tls-feature-bad.example.com", ORTNone, nullptr, "multi-tls-feature-bad-ee" },
   { nullptr, ORTNull, nullptr, nullptr }
@@ -82,7 +85,7 @@ DoSNISocketConfig(PRFileDesc *aFd, const SECItem *aSrvNameArr,
   const char *certNickname = host->mServerCertName ? host->mServerCertName
                                                    : DEFAULT_CERT_NICKNAME;
 
-  ScopedCERTCertificate cert;
+  UniqueCERTCertificate cert;
   SSLKEAType certKEA;
   if (SECSuccess != ConfigSecureServerWithNamedCert(aFd, certNickname,
                                                     &cert, &certKEA)) {
@@ -94,7 +97,7 @@ DoSNISocketConfig(PRFileDesc *aFd, const SECItem *aSrvNameArr,
     return 0;
   }
 
-  PLArenaPool *arena = PORT_NewArena(1024);
+  UniquePLArenaPool arena(PORT_NewArena(1024));
   if (!arena) {
     PrintPRError("PORT_NewArena failed");
     return SSL_SNI_SEND_ALERT;
@@ -102,15 +105,13 @@ DoSNISocketConfig(PRFileDesc *aFd, const SECItem *aSrvNameArr,
 
   // response is contained by the arena - freeing the arena will free it
   SECItemArray *response = GetOCSPResponseForType(host->mORT, cert, arena,
-                                                  host->mAdditionalCertName);
+                                                  host->mAdditionalCertName, 0);
   if (!response) {
-    PORT_FreeArena(arena, PR_FALSE);
     return SSL_SNI_SEND_ALERT;
   }
 
   // SSL_SetStapledOCSPResponses makes a deep copy of response
   SECStatus st = SSL_SetStapledOCSPResponses(aFd, response, certKEA);
-  PORT_FreeArena(arena, PR_FALSE);
   if (st != SECSuccess) {
     PrintPRError("SSL_SetStapledOCSPResponses failed");
     return SSL_SNI_SEND_ALERT;

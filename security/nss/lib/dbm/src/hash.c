@@ -704,8 +704,7 @@ hash_put(
         return (DBM_ERROR);
     }
 
-    rv = hash_access(hashp, flag == R_NOOVERWRITE ? HASH_PUTNEW
-                                                  : HASH_PUT,
+    rv = hash_access(hashp, flag == R_NOOVERWRITE ? HASH_PUTNEW : HASH_PUT,
                      (DBT *)key, (DBT *)data);
 
     if (rv == DATABASE_CORRUPTED_ERROR) {
@@ -1020,7 +1019,7 @@ __expand_table(HTAB *hashp)
             hashp->DSIZE = dirsize << 1;
         }
         if ((hashp->dir[new_segnum] =
-                 (SEGMENT)calloc((size_t)hashp->SGSIZE, sizeof(SEGMENT))) == NULL)
+                 (SEGMENT)calloc((size_t)hashp->SGSIZE, sizeof(BUFHEAD *))) == NULL)
             return (-1);
         hashp->exsegs++;
         hashp->nsegs++;
@@ -1091,13 +1090,13 @@ alloc_segs(
     register SEGMENT store;
 
     if ((hashp->dir =
-             (SEGMENT *)calloc((size_t)hashp->DSIZE, sizeof(SEGMENT *))) == NULL) {
+             (SEGMENT *)calloc((size_t)hashp->DSIZE, sizeof(SEGMENT))) == NULL) {
         errno = ENOMEM;
         return (-1);
     }
     /* Allocate segments */
     if ((store =
-             (SEGMENT)calloc((size_t)nsegs << hashp->SSHIFT, sizeof(SEGMENT))) == NULL) {
+             (SEGMENT)calloc((size_t)nsegs << hashp->SSHIFT, sizeof(BUFHEAD *))) == NULL) {
         errno = ENOMEM;
         return (-1);
     }

@@ -59,6 +59,8 @@ namespace places {
 class MatchAutoCompleteFunction final : public mozIStorageFunction
 {
 public:
+  MatchAutoCompleteFunction();
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
 
@@ -71,7 +73,14 @@ public:
   static nsresult create(mozIStorageConnection *aDBConn);
 
 private:
-  ~MatchAutoCompleteFunction();
+  ~MatchAutoCompleteFunction() {}
+
+  /**
+   * IntegerVariants for 0 and 1 are frequently used in awesomebar queries,
+   * so we cache them to avoid allocating memory repeatedly.
+   */
+  nsCOMPtr<nsIVariant> mCachedZero;
+  nsCOMPtr<nsIVariant> mCachedOne;
 
   /**
    * Argument Indexes
@@ -166,13 +175,14 @@ private:
    * @param aMatchBehavior
    *        The matching behavior to use defined by one of the
    *        mozIPlacesAutoComplete::MATCH_* values.
-   * @param _fixedSpec
-   *        An out parameter that is the fixed up string.
+   * @param aSpecBuf
+   *        A string buffer that the returned slice can point into, if needed.
+   * @return the fixed up string.
    */
-  static void fixupURISpec(const nsCString &aURISpec, int32_t aMatchBehavior,
-                           nsCString &_fixedSpec);
+  static nsDependentCSubstring fixupURISpec(const nsACString &aURISpec,
+                                            int32_t aMatchBehavior,
+                                            nsACString &aSpecBuf);
 };
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -186,18 +196,14 @@ private:
  * Optional parameters must be passed in if the page is not yet in the database,
  * otherwise they will be fetched from it automatically.
  *
- * @param pageId
+ * @param {int64_t} pageId
  *        The id of the page.  Pass -1 if the page is being added right now.
- * @param [optional] typed
- *        Whether the page has been typed in.  Default is false.
- * @param [optional] fullVisitCount
- *        Count of all the visits (All types).  Default is 0.
- * @param [optional] isBookmarked
- *        Whether the page is bookmarked. Default is false.
+ * @param [optional] {int32_t} useRedirectBonus
+ *        Whether we should use the lower redirect bonus for the most recent
+ *        page visit.  If not passed in, it will use a database guess.
  */
 class CalculateFrecencyFunction final : public mozIStorageFunction
 {
-  ~CalculateFrecencyFunction();
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
@@ -209,6 +215,8 @@ public:
    *        The database connection to register with.
    */
   static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~CalculateFrecencyFunction() {}
 };
 
 /**
@@ -219,7 +227,6 @@ public:
  */
 class GenerateGUIDFunction final : public mozIStorageFunction
 {
-  ~GenerateGUIDFunction();
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
@@ -231,6 +238,31 @@ public:
    *        The database connection to register with.
    */
   static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~GenerateGUIDFunction() {}
+};
+
+/**
+ * SQL function to check if a GUID is valid.  This is just a wrapper around
+ * IsValidGUID in Helpers.h.
+ *
+ * @return true if valid, false otherwise.
+ */
+class IsValidGUIDFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~IsValidGUIDFunction() {}
 };
 
 /**
@@ -243,7 +275,6 @@ public:
  */
 class GetUnreversedHostFunction final : public mozIStorageFunction
 {
-  ~GetUnreversedHostFunction();
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
@@ -255,6 +286,8 @@ public:
    *        The database connection to register with.
    */
   static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~GetUnreversedHostFunction() {}
 };
 
 
@@ -272,7 +305,6 @@ public:
  */
 class FixupURLFunction final : public mozIStorageFunction
 {
-  ~FixupURLFunction();
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
@@ -284,6 +316,8 @@ public:
    *        The database connection to register with.
    */
   static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~FixupURLFunction() {}
 };
 
 
@@ -309,7 +343,6 @@ public:
  */
 class FrecencyNotificationFunction final : public mozIStorageFunction
 {
-  ~FrecencyNotificationFunction();
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
@@ -321,8 +354,241 @@ public:
    *        The database connection to register with.
    */
   static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~FrecencyNotificationFunction() {}
 };
 
+
+////////////////////////////////////////////////////////////////////////////////
+//// Store Last Inserted Id Function
+
+/**
+ * Store the last inserted id for reference purpose.
+ *
+ * @param tableName
+ *        The table name.
+ * @param id
+ *        The last inserted id.
+ * @return null
+ */
+class StoreLastInsertedIdFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~StoreLastInsertedIdFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// Hash Function
+
+/**
+ * Calculates hash for a given string using the mfbt AddToHash function.
+ *
+ * @param string
+ *        A string.
+ * @return
+ *        The hash for the string.
+ */
+class HashFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~HashFunction() {}
+};
+
+////////////////////////////////////////////////////////////////////////////////
+//// Get Query Param Function
+
+/**
+ * Extracts and returns the value of a parameter from a query string.
+ *
+ * @param string
+ *        A string.
+ * @return
+ *        The value of the query parameter as a string, or NULL if not set.
+ */
+class GetQueryParamFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~GetQueryParamFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// Get prefix function
+
+/**
+ * Gets the length of the prefix in a URL.  "Prefix" is defined to be the
+ * scheme, colon, and, if present, two slashes.
+ *
+ * @param url
+ *        A URL, or a string that may be a URL.
+ * @return
+ *        If `url` is actually a URL and has a prefix, then this returns the
+ *        prefix.  Otherwise this returns an empty string.
+ */
+class GetPrefixFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~GetPrefixFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// Get host and port function
+
+/**
+ * Gets the host and port substring of a URL.
+ *
+ * @param url
+ *        A URL, or a string that may be a URL.
+ * @return
+ *        If `url` is actually a URL, or if it's a URL without the prefix, then
+ *        this returns the host and port substring of the URL.  Otherwise, this
+ *        returns `url` itself.
+ */
+class GetHostAndPortFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~GetHostAndPortFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// Strip prefix function
+
+/**
+ * Gets the part of a URL after its prefix and userinfo; i.e., the substring
+ * starting at the host.
+ *
+ * @param url
+ *        A URL, or a string that may be a URL.
+ * @return
+ *        If `url` is actually a URL, or if it's a URL without the prefix, then
+ *        this returns the substring starting at the host.  Otherwise, this
+ *        returns `url` itself.
+ */
+class StripPrefixAndUserinfoFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~StripPrefixAndUserinfoFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// Is frecency decaying function
+
+/**
+ * Returns nsNavHistory::IsFrecencyDecaying().
+ *
+ * @return
+ *        True if frecency is currently decaying and false otherwise.
+ */
+class IsFrecencyDecayingFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~IsFrecencyDecayingFunction() {}
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// sqrt function
+
+/**
+ * Gets the square root of a given value.
+ */
+class SqrtFunction final : public mozIStorageFunction
+{
+public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_MOZISTORAGEFUNCTION
+
+  /**
+   * Registers the function with the specified database connection.
+   *
+   * @param aDBConn
+   *        The database connection to register with.
+   */
+  static nsresult create(mozIStorageConnection *aDBConn);
+private:
+  ~SqrtFunction() {}
+};
 
 } // namespace places
 } // namespace mozilla

@@ -7,38 +7,33 @@
 #ifndef mozilla_dom_workernavigator_h__
 #define mozilla_dom_workernavigator_h__
 
-#include "Workers.h"
-#include "RuntimeService.h"
+#include "WorkerCommon.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
-
-// Need this to use Navigator::HasDataStoreSupport() in
-// WorkerNavigatorBinding.cpp
-#include "mozilla/dom/Navigator.h"
+#include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/StorageManager.h"
+#include "mozilla/dom/workerinternals/RuntimeService.h"
 
 namespace mozilla {
 namespace dom {
 class Promise;
+class StorageManager;
+
+namespace network {
+class Connection;
+} // namespace network
 
 class WorkerNavigator final : public nsWrapperCache
 {
-  typedef struct workers::RuntimeService::NavigatorProperties NavigatorProperties;
+  typedef struct workerinternals::RuntimeService::NavigatorProperties NavigatorProperties;
 
   NavigatorProperties mProperties;
+  RefPtr<StorageManager> mStorageManager;
+  RefPtr<network::Connection> mConnection;
   bool mOnline;
 
-  WorkerNavigator(const NavigatorProperties& aProperties,
-                  bool aOnline)
-    : mProperties(aProperties)
-    , mOnline(aOnline)
-  {
-    MOZ_COUNT_CTOR(WorkerNavigator);
-  }
-
-  ~WorkerNavigator()
-  {
-    MOZ_COUNT_DTOR(WorkerNavigator);
-  }
+  WorkerNavigator(const NavigatorProperties& aProperties, bool aOnline);
+  ~WorkerNavigator();
 
 public:
 
@@ -55,15 +50,17 @@ public:
     return nullptr;
   }
 
-  void GetAppCodeName(nsString& aAppCodeName) const
+  void GetAppCodeName(nsString& aAppCodeName, ErrorResult& /* unused */) const
   {
     aAppCodeName.AssignLiteral("Mozilla");
   }
-  void GetAppName(nsString& aAppName) const;
+  void GetAppName(nsString& aAppName, CallerType aCallerType) const;
 
-  void GetAppVersion(nsString& aAppVersion) const;
+  void GetAppVersion(nsString& aAppVersion, CallerType aCallerType,
+                     ErrorResult& aRv) const;
 
-  void GetPlatform(nsString& aPlatform) const;
+  void GetPlatform(nsString& aPlatform, CallerType aCallerType,
+                   ErrorResult& aRv) const;
 
   void GetProduct(nsString& aProduct) const
   {
@@ -89,7 +86,8 @@ public:
     aLanguages = mProperties.mLanguages;
   }
 
-  void GetUserAgent(nsString& aUserAgent, ErrorResult& aRv) const;
+  void GetUserAgent(nsString& aUserAgent, CallerType aCallerType,
+                    ErrorResult& aRv) const;
 
   bool OnLine() const
   {
@@ -104,12 +102,11 @@ public:
 
   void SetLanguages(const nsTArray<nsString>& aLanguages);
 
-  already_AddRefed<Promise> GetDataStores(JSContext* aCx,
-                                          const nsAString& aName,
-                                          const nsAString& aOwner,
-                                          ErrorResult& aRv);
-
   uint64_t HardwareConcurrency() const;
+
+  StorageManager* Storage();
+
+  network::Connection* GetConnection(ErrorResult& aRv);
 };
 
 } // namespace dom

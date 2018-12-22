@@ -9,7 +9,6 @@
 #include "MediaSegment.h"
 #include "nsCOMPtr.h"
 #include "gfxPoint.h"
-#include "nsAutoPtr.h"
 #include "ImageContainer.h"
 
 namespace mozilla {
@@ -30,7 +29,8 @@ public:
   {
     return mIntrinsicSize == aFrame.mIntrinsicSize &&
            mForceBlack == aFrame.mForceBlack &&
-           ((mForceBlack && aFrame.mForceBlack) || mImage == aFrame.mImage);
+           ((mForceBlack && aFrame.mForceBlack) || mImage == aFrame.mImage) &&
+           mPrincipalHandle == aFrame.mPrincipalHandle;
   }
   bool operator!=(const VideoFrame& aFrame) const
   {
@@ -40,6 +40,11 @@ public:
   Image* GetImage() const { return mImage; }
   void SetForceBlack(bool aForceBlack) { mForceBlack = aForceBlack; }
   bool GetForceBlack() const { return mForceBlack; }
+  void SetPrincipalHandle(PrincipalHandle aPrincipalHandle)
+  {
+    mPrincipalHandle = std::forward<PrincipalHandle>(aPrincipalHandle);
+  }
+  const PrincipalHandle& GetPrincipalHandle() const { return mPrincipalHandle; }
   const gfx::IntSize& GetIntrinsicSize() const { return mIntrinsicSize; }
   void SetNull();
   void TakeFrom(VideoFrame* aFrame);
@@ -54,11 +59,12 @@ protected:
   // The desired size to render the video frame at.
   gfx::IntSize mIntrinsicSize;
   bool mForceBlack;
+  // principalHandle for the image in this frame.
+  // This can be compared to an nsIPrincipal when back on main thread.
+  PrincipalHandle mPrincipalHandle;
 };
 
 struct VideoChunk {
-  VideoChunk();
-  ~VideoChunk();
   void SliceTo(StreamTime aStart, StreamTime aEnd)
   {
     NS_ASSERTION(aStart >= 0 && aStart < aEnd && aEnd <= mDuration,
@@ -86,9 +92,11 @@ struct VideoChunk {
     return 0;
   }
 
+  const PrincipalHandle& GetPrincipalHandle() const { return mFrame.GetPrincipalHandle(); }
+
   StreamTime mDuration;
   VideoFrame mFrame;
-  mozilla::TimeStamp mTimeStamp;
+  TimeStamp mTimeStamp;
 };
 
 class VideoSegment : public MediaSegmentBase<VideoSegment, VideoChunk> {
@@ -97,12 +105,19 @@ public:
   typedef mozilla::gfx::IntSize IntSize;
 
   VideoSegment();
+  VideoSegment(VideoSegment&& aSegment);
+
+  VideoSegment(const VideoSegment&)=delete;
+  VideoSegment& operator= (const VideoSegment&)=delete;
+
   ~VideoSegment();
 
   void AppendFrame(already_AddRefed<Image>&& aImage,
                    StreamTime aDuration,
                    const IntSize& aIntrinsicSize,
-                   bool aForceBlack = false);
+                   const PrincipalHandle& aPrincipalHandle,
+                   bool aForceBlack = false,
+                   TimeStamp aTimeStamp = TimeStamp::Now());
   const VideoFrame* GetLastFrame(StreamTime* aStart = nullptr)
   {
     VideoChunk* c = GetLastChunk();
@@ -130,6 +145,12 @@ public:
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
+
+  bool IsEmpty() const
+  {
+    return mChunks.IsEmpty();
+  }
+
 };
 
 } // namespace mozilla

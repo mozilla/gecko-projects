@@ -6,23 +6,23 @@
   list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric.svg");
   max-width: 48px;
   max-height: 48px;
-  -moz-margin-end: 6px;
+  margin-inline-end: 6px;
 }
 
 #eula-dialog[addontype="theme"] #icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/themeGeneric.png");
+  list-style-image: url("chrome://mozapps/skin/extensions/themeGeneric.svg");
 }
 
 #eula-dialog[addontype="locale"] #icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/localeGeneric.png");
+  list-style-image: url("chrome://mozapps/skin/extensions/localeGeneric.svg");
 }
 
 #eula-dialog[addontype="plugin"] #icon {
-  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric.png");
+  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric.svg");
 }
 
 #eula-dialog[addontype="dictionary"] #icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/dictionaryGeneric.png");
+  list-style-image: url("chrome://mozapps/skin/extensions/dictionaryGeneric.svg");
 }
 
 #heading-container {
@@ -38,10 +38,6 @@
   color: -moz-FieldText;
   background-color: -moz-Field;
   margin: 1em;
-  border: 1px solid;
-  -moz-border-top-colors: ActiveBorder;
-  -moz-border-right-colors: ActiveBorder;
-  -moz-border-bottom-colors: ActiveBorder;
-  -moz-border-left-colors: ActiveBorder;
+  border: 1px solid ActiveBorder;
 }
 

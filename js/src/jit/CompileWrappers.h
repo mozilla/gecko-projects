@@ -7,7 +7,7 @@
 #ifndef jit_CompileWrappers_h
 #define jit_CompileWrappers_h
 
-#include "jscntxt.h"
+#include "vm/JSContext.h"
 
 namespace js {
 namespace jit {
@@ -16,7 +16,7 @@ class JitRuntime;
 
 // During Ion compilation we need access to various bits of the current
 // compartment, runtime and so forth. However, since compilation can run off
-// thread while the main thread is actively mutating the VM, this access needs
+// thread while the main thread is mutating the VM, this access needs
 // to be restricted. The classes below give the compiler an interface to access
 // all necessary information in a threadsafe fashion.
 
@@ -27,43 +27,15 @@ class CompileRuntime
   public:
     static CompileRuntime* get(JSRuntime* rt);
 
-    bool onMainThread();
-
-    js::PerThreadData* mainThread();
-
-    // &runtime()->jitTop
-    const void* addressOfJitTop();
-
-    // &runtime()->jitActivation
-    const void* addressOfJitActivation();
-
-    // &runtime()->profilingActivation
-    const void* addressOfProfilingActivation();
-
-    // rt->runtime()->jitStackLimit;
-    const void* addressOfJitStackLimit();
-
-    // &runtime()->jitJSContext
-    const void* addressOfJSContext();
-
-    // &runtime()->activation_
-    const void* addressOfActivation();
-
-    // &GetJitContext()->runtime->nativeIterCache.last
-    const void* addressOfLastCachedNativeIterator();
-
 #ifdef JS_GC_ZEAL
     const void* addressOfGCZealModeBits();
 #endif
 
-    const void* addressOfInterruptUint32();
-
     const JitRuntime* jitRuntime();
 
-    // Compilation does not occur off thread when the SPS profiler is enabled.
-    SPSProfiler& spsProfiler();
+    // Compilation does not occur off thread when the Gecko Profiler is enabled.
+    GeckoProfilerRuntime& geckoProfiler();
 
-    bool canUseSignalHandlers();
     bool jitSupportsFloatingPoint();
     bool hadOutOfMemory();
     bool profilingScripts();
@@ -75,6 +47,10 @@ class CompileRuntime
     const Value& positiveInfinityValue();
     const WellKnownSymbols& wellKnownSymbols();
 
+    const void* mainContextPtr();
+    const void* addressOfJitStackLimit();
+    const void* addressOfInterruptBits();
+
 #ifdef DEBUG
     bool isInsideNursery(gc::Cell* cell);
 #endif
@@ -82,10 +58,7 @@ class CompileRuntime
     // DOM callbacks must be threadsafe (and will hopefully be removed soon).
     const DOMCallbacks* DOMcallbacks();
 
-    const MathCache* maybeGetMathCache();
-
-    const Nursery& gcNursery();
-    void setMinorGCShouldCancelIonCompilations();
+    bool runtimeMatches(JSRuntime* rt);
 };
 
 class CompileZone
@@ -95,31 +68,51 @@ class CompileZone
   public:
     static CompileZone* get(Zone* zone);
 
-    const void* addressOfNeedsIncrementalBarrier();
+    CompileRuntime* runtime();
+    bool isAtomsZone();
 
+#ifdef DEBUG
+    const void* addressOfIonBailAfter();
+#endif
+
+    const void* addressOfNeedsIncrementalBarrier();
     const void* addressOfFreeList(gc::AllocKind allocKind);
+    const void* addressOfNurseryPosition();
+    const void* addressOfStringNurseryPosition();
+    const void* addressOfNurseryCurrentEnd();
+    const void* addressOfStringNurseryCurrentEnd();
+
+    bool nurseryExists();
+    bool canNurseryAllocateStrings();
+    void setMinorGCShouldCancelIonCompilations();
 };
 
-class JitCompartment;
+class JitRealm;
 
-class CompileCompartment
+class CompileRealm
 {
-    JSCompartment* compartment();
+    JS::Realm* realm();
 
   public:
-    static CompileCompartment* get(JSCompartment* comp);
+    static CompileRealm* get(JS::Realm* realm);
 
     CompileZone* zone();
     CompileRuntime* runtime();
 
-    const void* addressOfEnumerators();
+    const void* realmPtr() {
+        return realm();
+    }
+
     const void* addressOfRandomNumberGenerator();
 
-    const JitCompartment* jitCompartment();
+    const JitRealm* jitRealm();
+
+    const GlobalObject* maybeGlobal();
+    const uint32_t* addressOfGlobalWriteBarriered();
 
     bool hasAllocationMetadataBuilder();
 
-    // Mirror CompartmentOptions.
+    // Mirror RealmOptions.
     void setSingletonsAsValues();
 };
 
@@ -133,8 +126,8 @@ class JitCompileOptions
         return cloneSingletons_;
     }
 
-    bool spsSlowAssertionsEnabled() const {
-        return spsSlowAssertionsEnabled_;
+    bool profilerSlowAssertionsEnabled() const {
+        return profilerSlowAssertionsEnabled_;
     }
 
     bool offThreadCompilationAvailable() const {
@@ -143,7 +136,7 @@ class JitCompileOptions
 
   private:
     bool cloneSingletons_;
-    bool spsSlowAssertionsEnabled_;
+    bool profilerSlowAssertionsEnabled_;
     bool offThreadCompilationAvailable_;
 };
 

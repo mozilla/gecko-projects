@@ -19,8 +19,9 @@
 
 #include "mozilla/scache/StartupCache.h"
 
+class nsIHandleReportCallback;
 namespace mozilla {
-class CSSStyleSheet;
+class StyleSheet;
 } // namespace mozilla
 
 /**
@@ -65,24 +66,21 @@ public:
     JSScript* GetScript(nsIURI* aURI);
     nsresult PutScript(nsIURI* aURI, JS::Handle<JSScript*> aScriptObject);
 
-    nsXBLDocumentInfo* GetXBLDocumentInfo(nsIURI* aURL) {
-        return mXBLDocTable.GetWeak(aURL);
-    }
+    nsXBLDocumentInfo* GetXBLDocumentInfo(nsIURI* aURL);
+
     nsresult PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo);
 
     /**
      * Get a style sheet by URI. If the style sheet is not in the cache,
      * returns nullptr.
      */
-    mozilla::CSSStyleSheet* GetStyleSheet(nsIURI* aURI) {
-        return mStyleSheetTable.GetWeak(aURI);
-    }
+    mozilla::StyleSheet* GetStyleSheet(nsIURI* aURI);
 
     /**
      * Store a style sheet in the cache. The key, style sheet's URI is obtained
      * from the style sheet itself.
      */
-    nsresult PutStyleSheet(mozilla::CSSStyleSheet* aStyleSheet);
+    nsresult PutStyleSheet(mozilla::StyleSheet* aStyleSheet);
 
     /**
      * Write the XUL prototype document to a cache file. The proto must be
@@ -111,6 +109,10 @@ public:
     void MarkInCCGeneration(uint32_t aGeneration);
     void MarkInGC(JSTracer* aTrc);
     void FlushScripts();
+
+    static void CollectMemoryReports(nsIHandleReportCallback* aHandleReport,
+                                     nsISupports* aData);
+
 protected:
     friend nsresult
     NS_NewXULPrototypeCache(nsISupports* aOuter, REFNSIID aIID, void** aResult);
@@ -122,10 +124,13 @@ protected:
 
     void FlushSkinFiles();
 
+    using StyleSheetTable = nsRefPtrHashtable<nsURIHashKey, mozilla::StyleSheet>;
+    using XBLDocTable = nsRefPtrHashtable<nsURIHashKey, nsXBLDocumentInfo>;
+
     nsRefPtrHashtable<nsURIHashKey,nsXULPrototypeDocument>   mPrototypeTable; // owns the prototypes
-    nsRefPtrHashtable<nsURIHashKey,mozilla::CSSStyleSheet>   mStyleSheetTable;
+    StyleSheetTable                                          mStyleSheetTable;
     nsJSThingHashtable<nsURIHashKey, JSScript*>              mScriptTable;
-    nsRefPtrHashtable<nsURIHashKey,nsXBLDocumentInfo>        mXBLDocTable;
+    XBLDocTable                                              mXBLDocTable;
 
     // URIs already written to the startup cache, to prevent double-caching.
     nsTHashtable<nsURIHashKey>                               mStartupCacheURITable;

@@ -6,3 +6,9 @@
 
 <!-- LOCALIZATION NOTE : Placeholder for the searchbox that allows you to filter the table items. -->
 <!ENTITY searchBox.placeholder         "Filter items">
+
+<!-- LOCALIZATION NOTE : Label of popup menu action to delete all storage items. -->
+<!ENTITY storage.popupMenu.deleteAllLabel "Delete All">
+
+<!-- LOCALIZATION NOTE : Label of popup menu action to delete all session cookies. -->
+<!ENTITY storage.popupMenu.deleteAllSessionCookiesLabel "Delete All Session Cookies">

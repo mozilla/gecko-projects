@@ -1,38 +1,32 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests if copying an image as data uri works.
  */
 
-function test() {
-  initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL).then(([aTab, aDebuggee, aMonitor]) => {
-    info("Starting test... ");
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL);
+  info("Starting test... ");
 
-    let { NetMonitorView } = aMonitor.panelWin;
-    let { RequestsMenu } = NetMonitorView;
+  const { document } = monitor.panelWin;
 
-    RequestsMenu.lazyUpdate = false;
+  // Execute requests.
+  await performRequests(monitor, tab, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
 
-    waitForNetworkEvents(aMonitor, 7).then(() => {
-      let requestItem = RequestsMenu.getItemAtIndex(5);
-      RequestsMenu.selectedItem = requestItem;
+  EventUtils.sendMouseEvent({ type: "mousedown" },
+    document.querySelectorAll(".request-list-item")[5]);
+  EventUtils.sendMouseEvent({ type: "contextmenu" },
+    document.querySelectorAll(".request-list-item")[5]);
 
-      waitForClipboard(TEST_IMAGE_DATA_URI, function setup() {
-        RequestsMenu.copyImageAsDataUri();
-      }, function onSuccess() {
-        ok(true, "Clipboard contains the currently selected image as data uri.");
-        cleanUp();
-      }, function onFailure() {
-        ok(false, "Copying the currently selected image as data uri was unsuccessful.");
-        cleanUp();
-      });
-    });
+  await waitForClipboardPromise(function setup() {
+    monitor.panelWin.parent.document
+      .querySelector("#request-list-context-copy-image-as-data-uri").click();
+  }, TEST_IMAGE_DATA_URI);
 
-    aDebuggee.performRequests();
+  ok(true, "Clipboard contains the currently selected image as data uri.");
 
-    function cleanUp(){
-      teardown(aMonitor).then(finish);
-    }
-  });
-}
+  await teardown(monitor);
+});

@@ -9,42 +9,53 @@
 #include "OmxDataDecoder.h"
 #include "OmxPlatformLayer.h"
 
+#ifdef MOZ_OMX
+#include "PureOmxPlatformLayer.h"
+#endif
+
 namespace mozilla {
 
-already_AddRefed<MediaDataDecoder>
-OmxDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
-                                     mozilla::layers::LayersBackend aLayersBackend,
-                                     mozilla::layers::ImageContainer* aImageContainer,
-                                     FlushableTaskQueue* aVideoTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
-{
-  RefPtr<OmxDataDecoder> decoder = new OmxDataDecoder(aConfig, aCallback, aImageContainer);
-  return decoder.forget();
-}
-
-already_AddRefed<MediaDataDecoder>
-OmxDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
-                                     FlushableTaskQueue* aAudioTaskQueue,
-                                     MediaDataDecoderCallback* aCallback)
-{
-  RefPtr<OmxDataDecoder> decoder = new OmxDataDecoder(aConfig, aCallback, nullptr);
-  return decoder.forget();
-}
-
-void
+/* static */ bool
 OmxDecoderModule::Init()
 {
-  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
+#ifdef MOZ_OMX
+  return PureOmxPlatformLayer::Init();
+#endif
+  return false;
 }
 
-PlatformDecoderModule::ConversionRequired
-OmxDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
+OmxDecoderModule*
+OmxDecoderModule::Create()
 {
-  return kNeedNone;
+#ifdef MOZ_OMX
+  if (Init()) {
+    return new OmxDecoderModule();
+  }
+#endif
+  return nullptr;
+}
+
+already_AddRefed<MediaDataDecoder>
+OmxDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
+{
+  RefPtr<OmxDataDecoder> decoder = new OmxDataDecoder(aParams.mConfig,
+                                                      aParams.mTaskQueue,
+                                                      aParams.mImageContainer);
+  return decoder.forget();
+}
+
+already_AddRefed<MediaDataDecoder>
+OmxDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
+{
+  RefPtr<OmxDataDecoder> decoder = new OmxDataDecoder(aParams.mConfig,
+                                                      aParams.mTaskQueue,
+                                                      nullptr);
+  return decoder.forget();
 }
 
 bool
-OmxDecoderModule::SupportsMimeType(const nsACString& aMimeType) const
+OmxDecoderModule::SupportsMimeType(const nsACString& aMimeType,
+                                   DecoderDoctorDiagnostics* aDiagnostics) const
 {
   return OmxPlatformLayer::SupportsMimeType(aMimeType);
 }

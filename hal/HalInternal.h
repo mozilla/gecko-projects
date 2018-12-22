@@ -55,46 +55,6 @@ void EnableScreenConfigurationNotifications();
 void DisableScreenConfigurationNotifications();
 
 /**
- * Enable switch notifications from the backend
- */
-void EnableSwitchNotifications(hal::SwitchDevice aDevice);
-
-/**
- * Disable switch notifications from the backend
- */
-void DisableSwitchNotifications(hal::SwitchDevice aDevice);
-
-/**
- * Enable alarm notifications from the backend.
- */
-bool EnableAlarm();
-
-/**
- * Disable alarm notifications from the backend.
- */
-void DisableAlarm();
-
-/**
- * Enable system clock change notifications from the backend.
- */
-void EnableSystemClockChangeNotifications();
-
-/**
- * Disable system clock change notifications from the backend.
- */
-void DisableSystemClockChangeNotifications();
-
-/**
- * Enable system timezone change notifications from the backend.
- */
-void EnableSystemTimezoneChangeNotifications();
-
-/**
- * Disable system timezone change notifications from the backend.
- */
-void DisableSystemTimezoneChangeNotifications();
-
-/**
  * Has the child-side HAL IPC object been destroyed?  If so, you shouldn't send
  * messages to hal_sandbox.
  */

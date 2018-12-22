@@ -9,13 +9,13 @@
  * Also make sure the labels are the same distance away from the icons.
  */
 .actionsMenu {
-  -moz-margin-start: -2px;
+  margin-inline-start: -2px;
   margin-top: 0;
   margin-bottom: -1px;
 }
 
 #handlersView > richlistitem label {
-  -moz-margin-start: 3px;
+  margin-inline-start: 3px;
   margin-top: 2px;
 }
 
@@ -25,13 +25,13 @@
 
 .typeIcon,
 .actionIcon {
-  -moz-margin-start: 3px;
+  margin-inline-start: 3px;
 }
 
 .typeIcon,
 .actionIcon,
 .actionsMenu .menulist-icon {
-  -moz-margin-end: 2px;
+  margin-inline-end: 2px;
 }
 
 .actionsMenu > menupopup > menuitem > .menu-iconic-left {
@@ -58,7 +58,7 @@ menuitem[appHandlerIcon="feed"] {
 
 richlistitem[appHandlerIcon="plugin"],
 menuitem[appHandlerIcon="plugin"] {
-  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric-16.png");
+  list-style-image: url("chrome://mozapps/skin/plugins/pluginGeneric.svg");
 }
 
 /* Repeat what menu.css does for .menuitem-iconic */
@@ -68,6 +68,26 @@ menuitem[appHandlerIcon] {
 }
 
 menuitem[appHandlerIcon] > .menu-iconic-left > .menu-iconic-icon {
-  -moz-margin-start: 0;
+  margin-inline-start: 0;
   width: 16px;
+}
+
+#appList {
+  min-height: 212px;
+}
+
+#appList > richlistitem {
+  -moz-box-align: center;
+}
+
+#appList > richlistitem > image {
+  margin: 5px;
+  width: 32px;
+  height: 32px;
+}
+
+#appList > richlistitem > label {
+  margin: 0px;
+  padding: 5px;
+  white-space: nowrap;
 }

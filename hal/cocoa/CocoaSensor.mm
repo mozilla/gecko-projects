@@ -73,8 +73,7 @@ UpdateHandler(nsITimer *aTimer, void *aClosure)
 
     hal::SensorData sdata(sensor,
                           PR_Now(),
-                          values,
-                          hal::SENSOR_ACCURACY_UNKNOWN);
+                          values);
     hal::NotifySensorChange(sdata);
   }
 }
@@ -113,10 +112,11 @@ EnableSensorNotifications(SensorType aSensor)
   if (!sUpdateTimer) {
     CallCreateInstance("@mozilla.org/timer;1", &sUpdateTimer);
     if (sUpdateTimer) {
-        sUpdateTimer->InitWithFuncCallback(UpdateHandler,
-                                           nullptr,
-                                           DEFAULT_SENSOR_POLL,
-                                           nsITimer::TYPE_REPEATING_SLACK);
+        sUpdateTimer->InitWithNamedFuncCallback(UpdateHandler,
+                                                nullptr,
+                                                DEFAULT_SENSOR_POLL,
+                                                nsITimer::TYPE_REPEATING_SLACK,
+                                                "hal_impl::UpdateHandler");
     }
   }
 }

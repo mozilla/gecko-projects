@@ -7,22 +7,29 @@
 '''Python usage, esp. virtualenv.
 '''
 
+import errno
 import os
 import subprocess
 import sys
-import time
 import json
+import socket
 import traceback
+import urlparse
 
+import mozharness
 from mozharness.base.script import (
     PostScriptAction,
     PostScriptRun,
     PreScriptAction,
-    PreScriptRun,
+    ScriptMixin,
 )
 from mozharness.base.errors import VirtualenvErrorList
 from mozharness.base.log import WARNING, FATAL
-from mozharness.mozilla.proxxy import Proxxy
+
+external_tools_path = os.path.join(
+    os.path.abspath(os.path.dirname(os.path.dirname(mozharness.__file__))),
+    'external_tools',
+)
 
 def get_tlsv1_post():
     # Monkeypatch to work around SSL errors in non-bleeding-edge Python.
@@ -43,32 +50,28 @@ def get_tlsv1_post():
 
 # Virtualenv {{{1
 virtualenv_config_options = [
-    [["--venv-path", "--virtualenv-path"], {
+    [["--virtualenv-path"], {
         "action": "store",
         "dest": "virtualenv_path",
         "default": "venv",
         "help": "Specify the path to the virtualenv top level directory"
     }],
-    [["--virtualenv"], {
-        "action": "store",
-        "dest": "virtualenv",
-        "help": "Specify the virtualenv executable to use"
-    }],
     [["--find-links"], {
         "action": "extend",
         "dest": "find_links",
+        "default": ["https://pypi.pub.build.mozilla.org/pub"],
         "help": "URL to look for packages at"
     }],
     [["--pip-index"], {
         "action": "store_true",
-        "default": True,
+        "default": False,
         "dest": "pip_index",
-        "help": "Use pip indexes (default)"
+        "help": "Use pip indexes"
     }],
     [["--no-pip-index"], {
         "action": "store_false",
         "dest": "pip_index",
-        "help": "Don't use pip indexes"
+        "help": "Don't use pip indexes (default)"
     }],
 ]
 
@@ -105,18 +108,21 @@ class VirtualenvMixin(object):
                                          optional, two_pass, editable))
 
     def query_virtualenv_path(self):
-        c = self.config
+        """Determine the absolute path to the virtualenv."""
         dirs = self.query_abs_dirs()
-        virtualenv = None
+
         if 'abs_virtualenv_dir' in dirs:
-            virtualenv = dirs['abs_virtualenv_dir']
-        elif c.get('virtualenv_path'):
-            if os.path.isabs(c['virtualenv_path']):
-                virtualenv = c['virtualenv_path']
-            else:
-                virtualenv = os.path.join(dirs['abs_work_dir'],
-                                          c['virtualenv_path'])
-        return virtualenv
+            return dirs['abs_virtualenv_dir']
+
+        p = self.config['virtualenv_path']
+        if not p:
+            self.fatal('virtualenv_path config option not set; '
+                       'this should never happen')
+
+        if os.path.isabs(p):
+            return p
+        else:
+            return os.path.join(dirs['abs_work_dir'], p)
 
     def query_python_path(self, binary="python"):
         """Return the path of a binary inside the virtualenv, if
@@ -128,10 +134,8 @@ class VirtualenvMixin(object):
             if self._is_windows():
                 bin_dir = 'Scripts'
             virtualenv_path = self.query_virtualenv_path()
-            if virtualenv_path:
-                self.python_paths[binary] = os.path.abspath(os.path.join(virtualenv_path, bin_dir, binary))
-            else:
-                self.python_paths[binary] = self.query_exe(binary)
+            self.python_paths[binary] = os.path.abspath(os.path.join(virtualenv_path, bin_dir, binary))
+
         return self.python_paths[binary]
 
     def query_python_site_packages_path(self):
@@ -157,7 +161,7 @@ class VirtualenvMixin(object):
             if not pip:
                 self.log("package_versions: Program pip not in path", level=error_level)
                 return {}
-            pip_freeze_output = self.get_output_from_command([pip, "freeze"], silent=True)
+            pip_freeze_output = self.get_output_from_command([pip, "freeze"], silent=True, ignore_errors=True)
             if not isinstance(pip_freeze_output, basestring):
                 self.fatal("package_versions: Error encountered running `pip freeze`: %s" % pip_freeze_output)
 
@@ -238,22 +242,20 @@ class VirtualenvMixin(object):
                 # not understood by easy_install.
                 self.install_module(requirements=requirements,
                                     install_method='pip')
-            # Allow easy_install to be overridden by
-            # self.config['exes']['easy_install']
-            default = 'easy_install'
-            if self._is_windows():
-                # Don't invoke `easy_install` directly on windows since
-                # the 'install' in the executable name hits UAC
-                # - http://answers.microsoft.com/en-us/windows/forum/windows_7-security/uac-message-do-you-want-to-allow-the-following/bea30ad8-9ef8-4897-aab4-841a65f7af71
-                # - https://bugzilla.mozilla.org/show_bug.cgi?id=791840
-                default = [self.query_python_path(), self.query_python_path('easy_install-script.py')]
-            command = self.query_exe('easy_install', default=default, return_type="list")
+            command = [self.query_python_path(), '-m', 'easy_install']
         else:
             self.fatal("install_module() doesn't understand an install_method of %s!" % install_method)
 
-        # Add --find-links pages to look at
-        proxxy = Proxxy(self.config, self.log_obj)
-        for link in proxxy.get_proxies_and_urls(c.get('find_links', [])):
+        for link in c.get('find_links', []):
+            parsed = urlparse.urlparse(link)
+
+            try:
+                socket.gethostbyname(parsed.hostname)
+            except socket.gaierror as e:
+                self.info('error resolving %s (ignoring): %s' %
+                          (parsed.hostname, e.message))
+                continue
+
             command.extend(["--find-links", link])
 
         # module_url can be None if only specifying requirements files
@@ -297,12 +299,7 @@ class VirtualenvMixin(object):
         """
         Create a python virtualenv.
 
-        The virtualenv exe can be defined in c['virtualenv'] or
-        c['exes']['virtualenv'], as a string (path) or list (path +
-        arguments).
-
-        c['virtualenv_python_dll'] is an optional config item that works
-        around an old windows virtualenv bug.
+        This uses the copy of virtualenv that is vendored in mozharness.
 
         virtualenv_modules can be a list of module names to install, e.g.
 
@@ -343,45 +340,29 @@ class VirtualenvMixin(object):
         dirs = self.query_abs_dirs()
         venv_path = self.query_virtualenv_path()
         self.info("Creating virtualenv %s" % venv_path)
-        virtualenv = c.get('virtualenv', self.query_exe('virtualenv'))
-        if isinstance(virtualenv, str):
-            # allow for [python, virtualenv] in config
-            virtualenv = [virtualenv]
 
-        if not os.path.exists(virtualenv[0]) and not self.which(virtualenv[0]):
-            self.add_summary("The executable '%s' is not found; not creating "
-                             "virtualenv!" % virtualenv[0], level=FATAL)
-            return -1
-
-        # https://bugs.launchpad.net/virtualenv/+bug/352844/comments/3
-        # https://bugzilla.mozilla.org/show_bug.cgi?id=700415#c50
-        if c.get('virtualenv_python_dll'):
-            # We may someday want to copy a differently-named dll, but
-            # let's not think about that right now =\
-            dll_name = os.path.basename(c['virtualenv_python_dll'])
-            target = self.query_python_path(dll_name)
-            scripts_dir = os.path.dirname(target)
-            self.mkdir_p(scripts_dir)
-            self.copyfile(c['virtualenv_python_dll'], target, error_level=WARNING)
-        else:
-            self.mkdir_p(dirs['abs_work_dir'])
-
-        # make this list configurable?
-        for module in ('distribute', 'pip'):
-            if c.get('%s_url' % module):
-                self.download_file(c['%s_url' % module],
-                                   parent_dir=dirs['abs_work_dir'])
-
-        virtualenv_options = c.get('virtualenv_options',
-                                   ['--no-site-packages', '--distribute'])
+        # Always use the virtualenv that is vendored since that is deterministic.
+        # TODO Bug 1408051 - Use the copy of virtualenv under
+        # third_party/python/virtualenv once everything is off buildbot
+        virtualenv = [
+            sys.executable,
+            os.path.join(external_tools_path, 'virtualenv', 'virtualenv.py'),
+        ]
+        virtualenv_options = c.get('virtualenv_options', [])
+        # Don't create symlinks. If we don't do this, permissions issues may
+        # hinder virtualenv creation or operation.
+        virtualenv_options.append('--always-copy')
 
         if os.path.exists(self.query_python_path()):
             self.info("Virtualenv %s appears to already exist; skipping virtualenv creation." % self.query_python_path())
         else:
+            self.mkdir_p(dirs['abs_work_dir'])
             self.run_command(virtualenv + virtualenv_options + [venv_path],
                              cwd=dirs['abs_work_dir'],
                              error_list=VirtualenvErrorList,
+                             partial_env={'VIRTUALENV_NO_DOWNLOAD': "1"},
                              halt_on_failure=True)
+
         if not modules:
             modules = c.get('virtualenv_modules', [])
         if not requirements:
@@ -437,7 +418,42 @@ class VirtualenvMixin(object):
         execfile(activate, dict(__file__=activate))
 
 
-class ResourceMonitoringMixin(object):
+# This is (sadly) a mixin for logging methods.
+class PerfherderResourceOptionsMixin(ScriptMixin):
+    def perfherder_resource_options(self):
+        """Obtain a list of extraOptions values to identify the env."""
+        opts = []
+
+        if 'TASKCLUSTER_INSTANCE_TYPE' in os.environ:
+            # Include the instance type so results can be grouped.
+            opts.append('taskcluster-%s' % os.environ['TASKCLUSTER_INSTANCE_TYPE'])
+        else:
+            # We assume !taskcluster => buildbot.
+            instance = 'unknown'
+
+            # Try to load EC2 instance type from metadata file. This file
+            # may not exist in many scenarios (including when inside a chroot).
+            # So treat it as optional.
+            try:
+                # This file should exist on Linux in EC2.
+                with open('/etc/instance_metadata.json', 'rb') as fh:
+                    im = json.load(fh)
+                    instance = im.get('aws_instance_type', u'unknown').encode('ascii')
+            except IOError as e:
+                if e.errno != errno.ENOENT:
+                    raise
+                self.info('instance_metadata.json not found; unable to '
+                          'determine instance type')
+            except Exception:
+                self.warning('error reading instance_metadata: %s' %
+                             traceback.format_exc())
+
+            opts.append('buildbot-%s' % instance)
+
+        return opts
+
+
+class ResourceMonitoringMixin(PerfherderResourceOptionsMixin):
     """Provides resource monitoring capabilities to scripts.
 
     When this class is in the inheritance chain, resource usage stats of the
@@ -454,11 +470,24 @@ class ResourceMonitoringMixin(object):
     def __init__(self, *args, **kwargs):
         super(ResourceMonitoringMixin, self).__init__(*args, **kwargs)
 
-        self.register_virtualenv_module('psutil>=0.7.1', method='pip',
+        self.register_virtualenv_module('psutil>=3.1.1', method='pip',
                                         optional=True)
-        self.register_virtualenv_module('mozsystemmonitor==0.0.0',
+        self.register_virtualenv_module('mozsystemmonitor==0.3',
                                         method='pip', optional=True)
+        self.register_virtualenv_module('jsonschema==2.5.1',
+                                        method='pip')
+        # explicitly install functools32, because some slaves aren't using
+        # a version of pip recent enough to install it automatically with
+        # jsonschema (which depends on it)
+        # https://github.com/Julian/jsonschema/issues/233
+        self.register_virtualenv_module('functools32==3.2.3-2',
+                                        method='pip')
         self._resource_monitor = None
+
+        # 2-tuple of (name, options) to assign Perfherder resource monitor
+        # metrics to. This needs to be assigned by a script in order for
+        # Perfherder metrics to be reported.
+        self.resource_monitor_perfherder_id = None
 
     @PostScriptAction('create-virtualenv')
     def _start_resource_monitoring(self, action, success=None):
@@ -506,11 +535,27 @@ class ResourceMonitoringMixin(object):
         try:
             self._resource_monitor.stop()
             self._log_resource_usage()
+
+            # Upload a JSON file containing the raw resource data.
+            try:
+                upload_dir = self.query_abs_dirs()['abs_blob_upload_dir']
+                if not os.path.exists(upload_dir):
+                    os.makedirs(upload_dir)
+                with open(os.path.join(upload_dir, 'resource-usage.json'), 'wb') as fh:
+                    json.dump(self._resource_monitor.as_dict(), fh,
+                              sort_keys=True, indent=4)
+            except (AttributeError, KeyError):
+                self.exception('could not upload resource usage JSON',
+                               level=WARNING)
+
         except Exception:
             self.warning("Exception when reporting resource usage: %s" %
                          traceback.format_exc())
 
     def _log_resource_usage(self):
+        # Delay import because not available until virtualenv is populated.
+        import jsonschema
+
         rm = self._resource_monitor
 
         if rm.start_time is None:
@@ -521,7 +566,10 @@ class ResourceMonitoringMixin(object):
             cpu_times = rm.aggregate_cpu_times(phase=phase, per_cpu=False)
             io = rm.aggregate_io(phase=phase)
 
-            return cpu_percent, cpu_times, io
+            swap_in = sum(m.swap.sin for m in rm.measurements)
+            swap_out = sum(m.swap.sout for m in rm.measurements)
+
+            return cpu_percent, cpu_times, io, (swap_in, swap_out)
 
         def log_usage(prefix, duration, cpu_percent, cpu_times, io):
             message = '{prefix} - Wall time: {duration:.0f}s; ' \
@@ -543,233 +591,244 @@ class ResourceMonitoringMixin(object):
                         io_write_time=io.write_time
                     )
                 )
+
             except ValueError:
                 self.warning("Exception when formatting: %s" %
                              traceback.format_exc())
 
-        cpu_percent, cpu_times, io = resources(None)
+        cpu_percent, cpu_times, io, (swap_in, swap_out) = resources(None)
         duration = rm.end_time - rm.start_time
+
+        # Write out Perfherder data if configured.
+        if self.resource_monitor_perfherder_id:
+            perfherder_name, perfherder_options = self.resource_monitor_perfherder_id
+
+            suites = []
+            overall = []
+
+            if cpu_percent:
+                overall.append({
+                    'name': 'cpu_percent',
+                    'value': cpu_percent,
+                })
+
+            overall.extend([
+                {'name': 'io_write_bytes', 'value': io.write_bytes},
+                {'name': 'io.read_bytes', 'value': io.read_bytes},
+                {'name': 'io_write_time', 'value': io.write_time},
+                {'name': 'io_read_time', 'value': io.read_time},
+            ])
+
+            suites.append({
+                'name': '%s.overall' % perfherder_name,
+                'extraOptions': perfherder_options + self.perfherder_resource_options(),
+                'subtests': overall,
+
+            })
+
+            for phase in rm.phases.keys():
+                phase_duration = rm.phases[phase][1] - rm.phases[phase][0]
+                subtests = [
+                    {
+                        'name': 'time',
+                        'value': phase_duration,
+                    }
+                ]
+                cpu_percent = rm.aggregate_cpu_percent(phase=phase,
+                                                       per_cpu=False)
+                if cpu_percent is not None:
+                    subtests.append({
+                        'name': 'cpu_percent',
+                        'value': rm.aggregate_cpu_percent(phase=phase,
+                                                          per_cpu=False),
+                    })
+
+                # We don't report I/O during each step because measured I/O
+                # is system I/O and that I/O can be delayed (e.g. writes will
+                # buffer before being flushed and recorded in our metrics).
+                suites.append({
+                    'name': '%s.%s' % (perfherder_name, phase),
+                    'subtests': subtests,
+                })
+
+            data = {
+                'framework': {'name': 'job_resource_usage'},
+                'suites': suites,
+            }
+
+            schema_path = os.path.join(external_tools_path,
+                                       'performance-artifact-schema.json')
+            with open(schema_path, 'rb') as fh:
+                schema = json.load(fh)
+
+            # this will throw an exception that causes the job to fail if the
+            # perfherder data is not valid -- please don't change this
+            # behaviour, otherwise people will inadvertently break this
+            # functionality
+            self.info('Validating Perfherder data against %s' % schema_path)
+            jsonschema.validate(data, schema)
+            self.info('PERFHERDER_DATA: %s' % json.dumps(data))
 
         log_usage('Total resource usage', duration, cpu_percent, cpu_times, io)
 
+        # Print special messages so usage shows up in Treeherder.
+        if cpu_percent:
+            self._tinderbox_print('CPU usage<br/>{:,.1f}%'.format(
+                                  cpu_percent))
+
+        self._tinderbox_print('I/O read bytes / time<br/>{:,} / {:,}'.format(
+                              io.read_bytes, io.read_time))
+        self._tinderbox_print('I/O write bytes / time<br/>{:,} / {:,}'.format(
+                              io.write_bytes, io.write_time))
+
+        # Print CPU components having >1%. "cpu_times" is a data structure
+        # whose attributes are measurements. Ideally we'd have an API that
+        # returned just the measurements as a dict or something.
+        cpu_attrs = []
+        for attr in sorted(dir(cpu_times)):
+            if attr.startswith('_'):
+                continue
+            if attr in ('count', 'index'):
+                continue
+            cpu_attrs.append(attr)
+
+        cpu_total = sum(getattr(cpu_times, attr) for attr in cpu_attrs)
+
+        for attr in cpu_attrs:
+            value = getattr(cpu_times, attr)
+            # cpu_total can be 0.0. Guard against division by 0.
+            percent = value / cpu_total * 100.0 if cpu_total else 0.0
+
+            if percent > 1.00:
+                self._tinderbox_print('CPU {}<br/>{:,.1f} ({:,.1f}%)'.format(
+                                      attr, value, percent))
+
+        # Swap on Windows isn't reported by psutil.
+        if not self._is_windows():
+            self._tinderbox_print('Swap in / out<br/>{:,} / {:,}'.format(
+                                  swap_in, swap_out))
+
         for phase in rm.phases.keys():
             start_time, end_time = rm.phases[phase]
-            cpu_percent, cpu_times, io = resources(phase)
+            cpu_percent, cpu_times, io, swap = resources(phase)
             log_usage(phase, end_time - start_time, cpu_percent, cpu_times, io)
 
+    def _tinderbox_print(self, message):
+        self.info('TinderboxPrint: %s' % message)
 
-class InfluxRecordingMixin(object):
-    """Provides InfluxDB stat recording to scripts.
 
-    This class records stats to an InfluxDB server, if enabled. Stat recording
-    is enabled in a script by inheriting from this class, and adding an
-    influxdb_credentials line to the influx_credentials_file (usually oauth.txt
-    in automation).  This line should look something like:
+# This needs to be inherited only if you have already inherited ScriptMixin
+class Python3Virtualenv(object):
+    ''' Support Python3.5+ virtualenv creation.'''
+    py3_initialized_venv = False
 
-        influxdb_credentials = 'http://goldiewilson-onepointtwentyone-1.c.influxdb.com:8086/db/DBNAME/series?u=DBUSERNAME&p=DBPASSWORD'
+    def py3_venv_configuration(self, python_path, venv_path):
+        '''We don't use __init__ to allow integrating with other mixins.
 
-    Where DBNAME, DBUSERNAME, and DBPASSWORD correspond to the database name,
-    and user/pw credentials for recording to the database. The stats from
-    mozharness are recorded in the 'mozharness' table.
-    """
+        python_path - Path to Python 3 binary.
+        venv_path - Path to virtual environment to be created.
+        '''
+        self.py3_initialized_venv = True
+        self.py3_python_path = os.path.abspath(python_path)
+        version = self.get_output_from_command(
+                    [self.py3_python_path, '--version'], env=self.query_env()).split()[-1]
+        # Using -m venv is only used on 3.5+ versions
+        assert version > '3.5.0'
+        self.py3_venv_path = os.path.abspath(venv_path)
+        self.py3_pip_path = os.path.join(self.py3_path_to_executables(), 'pip')
 
-    @PreScriptRun
-    def influxdb_recording_init(self):
-        self.recording = False
-        self.post = None
-        self.posturl = None
-        self.build_metrics_summary = None
-        self.res_props = self.config.get('build_resources_path') % self.query_abs_dirs()
-        self.info("build_resources.json path: %s" % self.res_props)
-        if self.res_props:
-            self.rmtree(self.res_props)
+    def py3_path_to_executables(self):
+        platform = self.platform_name()
+        if platform.startswith('win'):
+            return os.path.join(self.py3_venv_path, 'Scripts')
+        else:
+            return os.path.join(self.py3_venv_path, 'bin')
 
-        try:
-            site_packages_path = self.query_python_site_packages_path()
-            if site_packages_path not in sys.path:
-                sys.path.append(site_packages_path)
+    def py3_venv_initialized(func):
+        def call(self, *args, **kwargs):
+            if not self.py3_initialized_venv:
+                raise Exception('You need to call py3_venv_configuration() '
+                                'before using this method.')
+            func(self, *args, **kwargs)
+        return call
 
-            self.post = get_tlsv1_post()
+    @py3_venv_initialized
+    def py3_create_venv(self):
+        '''Create Python environment with python3 -m venv /path/to/venv.'''
+        if os.path.exists(self.py3_venv_path):
+            self.info("Virtualenv %s appears to already exist; skipping "
+                      "virtualenv creation." % self.py3_venv_path)
+        else:
+            self.info('Running command...')
+            self.run_command(
+                '%s -m venv %s' % (self.py3_python_path, self.py3_venv_path),
+                error_list=VirtualenvErrorList,
+                halt_on_failure=True,
+                env=self.query_env())
 
-            auth = os.path.join(os.getcwd(), self.config['influx_credentials_file'])
-            if not os.path.exists(auth):
-                self.warning("Unable to start influxdb recording: %s not found" % (auth,))
-                return
-            credentials = {}
-            execfile(auth, credentials)
-            if 'influxdb_credentials' in credentials:
-                self.posturl = credentials['influxdb_credentials']
-                self.recording = True
-            else:
-                self.warning("Unable to start influxdb recording: no credentials")
-                return
+    @py3_venv_initialized
+    def py3_install_modules(self, modules,
+                            use_mozharness_pip_config=True):
+        if not os.path.exists(self.py3_venv_path):
+            raise Exception('You need to call py3_create_venv() first.')
 
-        except Exception:
-            # The exact reason for failing to start stats doesn't really matter.
-            # If anything fails, we just won't record stats for this job.
-            self.warning("Unable to start influxdb recording: %s" %
-                         traceback.format_exc())
-            return
+        for m in modules:
+            cmd = [self.py3_pip_path, 'install']
+            if use_mozharness_pip_config:
+                cmd += self._mozharness_pip_args()
+            cmd += [m]
+            self.run_command(cmd, env=self.query_env())
 
-    @PreScriptAction
-    def influxdb_recording_pre_action(self, action):
-        if not self.recording:
-            return
+    def _mozharness_pip_args(self):
+        '''We have information in Mozharness configs that apply to pip'''
+        c = self.config
+        pip_args = []
+        # To avoid timeouts with our pypi server, increase default timeout:
+        # https://bugzilla.mozilla.org/show_bug.cgi?id=1007230#c802
+        pip_args += ['--timeout', str(c.get('pip_timeout', 120))]
 
-        self.start_time = time.time()
+        if c.get('find_links') and not c["pip_index"]:
+            pip_args += ['--no-index']
 
-    @PostScriptAction
-    def influxdb_recording_post_action(self, action, success=None):
-        if not self.recording:
-            return
+        # Add --find-links pages to look at. Add --trusted-host automatically if
+        # the host isn't secure. This allows modern versions of pip to connect
+        # without requiring an override.
+        trusted_hosts = set()
+        for link in c.get('find_links', []):
+            parsed = urlparse.urlparse(link)
 
-        elapsed_time = time.time() - self.start_time
+            try:
+                socket.gethostbyname(parsed.hostname)
+            except socket.gaierror as e:
+                self.info('error resolving %s (ignoring): %s' %
+                          (parsed.hostname, e.message))
+                continue
 
-        c = {}
-        p = {}
-        if self.buildbot_config:
-            c = self.buildbot_config.get('properties', {})
-        if self.buildbot_properties:
-            p = self.buildbot_properties
-        self.record_influx_stat([{
-            "points": [[
-                action,
-                elapsed_time,
-                c.get('buildername'),
-                c.get('product'),
-                c.get('platform'),
-                c.get('branch'),
-                c.get('slavename'),
-                c.get('revision'),
-                p.get('gaia_revision'),
-                c.get('buildid'),
-            ]],
-            "name": "mozharness",
-            "columns": [
-                "action",
-                "runtime",
-                "buildername",
-                "product",
-                "platform",
-                "branch",
-                "slavename",
-                "gecko_revision",
-                "gaia_revision",
-                "buildid",
-            ],
-        }])
+            pip_args += ["--find-links", link]
+            if parsed.scheme != 'https':
+                trusted_hosts.add(parsed.hostname)
 
-    def _get_resource_usage(self, res, name, iolen, cpulen):
-        c = {}
-        p = {}
-        if self.buildbot_config:
-            c = self.buildbot_config.get('properties', {})
-        if self.buildbot_properties:
-            p = self.buildbot_properties
+        for host in sorted(trusted_hosts):
+            pip_args += ['--trusted-host', host]
 
-        data = [
-            # Build properties
-            c.get('buildername'),
-            c.get('product'),
-            c.get('platform'),
-            c.get('branch'),
-            c.get('slavename'),
-            c.get('revision'),
-            p.get('gaia_revision'),
-            c.get('buildid'),
+        return pip_args
 
-            # Mach step properties
-            name,
-            res.get('start'),
-            res.get('end'),
-            res.get('duration'),
-            res.get('cpu_percent'),
-        ]
-        # The io and cpu_times fields are arrays, though they aren't always
-        # present if a step completes before resource utilization is measured.
-        # We add the arrays if they exist, otherwise we just do an array of None
-        # to fill up the stat point.
-        data.extend(res.get('io', [None] * iolen))
-        data.extend(res.get('cpu_times', [None] * cpulen))
-        return data
+    @py3_venv_initialized
+    def py3_install_requirement_files(self, requirements, pip_args=[],
+                                      use_mozharness_pip_config=True):
+        '''
+        requirements - You can specify multiple requirements paths
+        '''
+        cmd = [self.py3_pip_path, 'install']
+        cmd += pip_args
 
-    @PostScriptAction('build')
-    def record_mach_stats(self, action, success=None):
-        if not os.path.exists(self.res_props):
-            self.info('No build_resources.json found, not logging stats')
-            return
-        with open(self.res_props) as fh:
-            resources = json.load(fh)
-            data = {
-                "points": [
-                ],
-                "name": "mach",
-                "columns": [
-                    # Build properties
-                    "buildername",
-                    "product",
-                    "platform",
-                    "branch",
-                    "slavename",
-                    "gecko_revision",
-                    "gaia_revision",
-                    "buildid",
+        if use_mozharness_pip_config:
+            cmd += self._mozharness_pip_args()
 
-                    # Mach step properties
-                    "name",
-                    "start",
-                    "end",
-                    "duration",
-                    "cpu_percent",
-                ],
-            }
+        for requirement_path in requirements:
+            cmd += ['-r', requirement_path]
 
-            # The io and cpu_times fields aren't static - they may vary based
-            # on the specific platform being measured. Mach records the field
-            # names, which we use as the column names here.
-            data['columns'].extend(resources['io_fields'])
-            data['columns'].extend(resources['cpu_times_fields'])
-            iolen = len(resources['io_fields'])
-            cpulen = len(resources['cpu_times_fields'])
-
-            if 'duration' in resources:
-                self.build_metrics_summary = {
-                    'name': 'build times',
-                    'value': resources['duration'],
-                    'subtests': [],
-                }
-
-            # The top-level data has the overall resource usage, which we record
-            # under the name 'TOTAL' to separate it from the individual tiers.
-            data['points'].append(self._get_resource_usage(resources, 'TOTAL', iolen, cpulen))
-
-            # Each tier also has the same resource stats as the top-level.
-            for tier in resources['tiers']:
-                data['points'].append(self._get_resource_usage(tier, tier['name'], iolen, cpulen))
-                if 'duration' not in tier:
-                    self.build_metrics_summary = None
-                elif self.build_metrics_summary:
-                    self.build_metrics_summary['subtests'].append({
-                        'name': tier['name'],
-                        'value': tier['duration'],
-                    })
-
-            self.record_influx_stat([data])
-
-    def record_influx_stat(self, json_data):
-        if not self.recording:
-            return
-        try:
-            r = self.post(self.posturl, data=json.dumps(json_data), timeout=5)
-            if r.status_code != 200:
-                self.warning("Failed to log stats. Return code = %i, stats = %s" % (r.status_code, json_data))
-
-                # Disable recording for the rest of this job. Even if it's just
-                # intermittent, we don't want to keep the build from progressing.
-                self.recording = False
-        except Exception, e:
-            self.warning('Failed to log stats. Exception = %s' % str(e))
-            self.recording = False
+        self.run_command(cmd, env=self.query_env())
 
 
 # __main__ {{{1

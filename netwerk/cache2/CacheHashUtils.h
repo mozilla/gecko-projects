@@ -21,6 +21,9 @@
     (nsPrintfCString("%08x%08x%08x%08x%08x", LOGSHA1(x)).get())
 
 namespace mozilla {
+
+class OriginAttributes;
+
 namespace net {
 
 class CacheHash : public nsISupports
@@ -42,7 +45,7 @@ public:
   Hash16_t GetHash16();
 
 private:
-  virtual ~CacheHash() {}
+  virtual ~CacheHash() = default;
 
   void Feed(uint32_t aVal, uint8_t aLen = 4);
 
@@ -54,6 +57,9 @@ private:
   bool     mFinalized;
 };
 
+typedef uint64_t OriginAttrsHash;
+
+OriginAttrsHash GetOriginAttrsHash(const mozilla::OriginAttributes &aOA);
 
 } // namespace net
 } // namespace mozilla

@@ -32,24 +32,22 @@ public:
     mRemote(true) {}
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(xpcAccessibleDocument,
-                                           xpcAccessibleGeneric)
 
   // nsIAccessibleDocument
-  NS_IMETHOD GetURL(nsAString& aURL) final override;
-  NS_IMETHOD GetTitle(nsAString& aTitle) final override;
-  NS_IMETHOD GetMimeType(nsAString& aType) final override;
-  NS_IMETHOD GetDocType(nsAString& aType) final override;
-  NS_IMETHOD GetDOMDocument(nsIDOMDocument** aDOMDocument) final override;
-  NS_IMETHOD GetWindow(mozIDOMWindowProxy** aDOMWindow) final override;
+  NS_IMETHOD GetURL(nsAString& aURL) final;
+  NS_IMETHOD GetTitle(nsAString& aTitle) final;
+  NS_IMETHOD GetMimeType(nsAString& aType) final;
+  NS_IMETHOD GetDocType(nsAString& aType) final;
+  NS_IMETHOD GetDOMDocument(nsIDocument** aDOMDocument) final;
+  NS_IMETHOD GetWindow(mozIDOMWindowProxy** aDOMWindow) final;
   NS_IMETHOD GetParentDocument(nsIAccessibleDocument** aDocument)
-    final override;
-  NS_IMETHOD GetChildDocumentCount(uint32_t* aCount) final override;
+    final;
+  NS_IMETHOD GetChildDocumentCount(uint32_t* aCount) final;
   NS_IMETHOD GetChildDocumentAt(uint32_t aIndex,
                                 nsIAccessibleDocument** aDocument)
-    final override;
+    final;
   NS_IMETHOD GetVirtualCursor(nsIAccessiblePivot** aVirtualCursor)
-    final override;
+    final;
 
   /**
    * Return XPCOM wrapper for the internal accessible.
@@ -75,32 +73,43 @@ private:
   void NotifyOfShutdown(Accessible* aAccessible)
   {
     MOZ_ASSERT(!mRemote);
-    xpcAccessibleGeneric* xpcAcc = mCache.GetWeak(aAccessible);
-    if (xpcAcc)
+    xpcAccessibleGeneric* xpcAcc = mCache.Get(aAccessible);
+    if (xpcAcc) {
       xpcAcc->Shutdown();
+    }
 
     mCache.Remove(aAccessible);
+    if (mCache.Count() == 0 && mRefCnt == 1) {
+      GetAccService()->RemoveFromXPCDocumentCache(
+        mIntl.AsAccessible()->AsDoc());
+    }
   }
 
   void NotifyOfShutdown(ProxyAccessible* aProxy)
   {
     MOZ_ASSERT(mRemote);
-    xpcAccessibleGeneric* acc = mCache.GetWeak(aProxy);
-    if (acc) {
-      acc->Shutdown();
+    xpcAccessibleGeneric* xpcAcc = mCache.Get(aProxy);
+    if (xpcAcc) {
+      xpcAcc->Shutdown();
     }
 
     mCache.Remove(aProxy);
+    if (mCache.Count() == 0 && mRefCnt == 1) {
+      GetAccService()->RemoveFromRemoteXPCDocumentCache(
+        mIntl.AsProxy()->AsDoc());
+    }
   }
 
   friend class DocManager;
   friend class DocAccessible;
   friend class ProxyAccessible;
+  friend class ProxyAccessibleBase<ProxyAccessible>;
+  friend class xpcAccessibleGeneric;
 
   xpcAccessibleDocument(const xpcAccessibleDocument&) = delete;
   xpcAccessibleDocument& operator =(const xpcAccessibleDocument&) = delete;
 
-  nsRefPtrHashtable<nsPtrHashKey<const void>, xpcAccessibleGeneric> mCache;
+  nsDataHashtable<nsPtrHashKey<const void>, xpcAccessibleGeneric*> mCache;
   bool mRemote;
 };
 

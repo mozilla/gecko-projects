@@ -2,42 +2,69 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {Cu, CC} = require("chrome");
-const promise = require("promise");
+"use strict";
+
 const Services = require("Services");
 
-const XMLHttpRequest = CC("@mozilla.org/xmlextras/xmlhttprequest;1");
+loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
 
-// Downloads and caches a JSON file from a URL given by the pref.
-exports.getJSON = function (prefName, bypassCache) {
-  if (!bypassCache) {
-    try {
-      let str = Services.prefs.getCharPref(prefName + "_cache");
-      let json = JSON.parse(str);
-      return promise.resolve(json);
-    } catch(e) {/* no pref or invalid json. Let's continue */}
-  }
+/**
+ * Downloads and caches a JSON file from an URL given by a pref.
+ *
+ * @param {String} prefName
+ *        The preference for the target URL
+ *
+ * @return {Promise}
+ *         - Resolved with the JSON object in case of successful request
+ *           or cache hit
+ *         - Rejected with an error message in case of failure
+ */
+exports.getJSON = function(prefName) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
 
-  let deferred = promise.defer();
-  let xhr = new XMLHttpRequest();
-
-  xhr.onload = () => {
-    let json;
-    try {
-      json = JSON.parse(xhr.responseText);
-    } catch(e) {
-      return deferred.reject("Invalid JSON");
+    // We used to store cached data in preferences, but now we use asyncStorage
+    // Migration step: if it still exists, move this now useless preference in its
+    // new location and clear it
+    if (Services.prefs.prefHasUserValue(prefName + "_cache")) {
+      const json = Services.prefs.getCharPref(prefName + "_cache");
+      asyncStorage.setItem(prefName + "_cache", json).catch(function(e) {
+        // Could not move the cache, let's log the error but continue
+        console.error(e);
+      });
+      Services.prefs.clearUserPref(prefName + "_cache");
     }
-    Services.prefs.setCharPref(prefName + "_cache", xhr.responseText);
-    deferred.resolve(json);
-  }
 
-  xhr.onerror = (e) => {
-    deferred.reject("Network error");
-  }
+    function readFromStorage(networkError) {
+      asyncStorage.getItem(prefName + "_cache").then(function(json) {
+        if (!json) {
+          return reject("Empty cache for " + prefName);
+        }
+        return resolve(json);
+      }).catch(function(e) {
+        reject("JSON not available, CDN error: " + networkError +
+                        ", storage error: " + e);
+      });
+    }
 
-  xhr.open("get", Services.prefs.getCharPref(prefName));
-  xhr.send();
+    xhr.onload = () => {
+      try {
+        const json = JSON.parse(xhr.responseText);
+        asyncStorage.setItem(prefName + "_cache", json).catch(function(e) {
+          // Could not update cache, let's log the error but continue
+          console.error(e);
+        });
+        resolve(json);
+      } catch (e) {
+        readFromStorage(e);
+      }
+    };
 
-  return deferred.promise;
-}
+    xhr.onerror = (e) => {
+      readFromStorage(e);
+    };
+
+    xhr.open("get", Services.prefs.getCharPref(prefName));
+    xhr.send();
+  });
+};

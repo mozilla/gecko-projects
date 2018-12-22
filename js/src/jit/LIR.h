@@ -44,6 +44,8 @@ static const uint32_t VREG_TYPE_OFFSET = 0;
 static const uint32_t VREG_DATA_OFFSET = 1;
 static const uint32_t TYPE_INDEX = 0;
 static const uint32_t PAYLOAD_INDEX = 1;
+static const uint32_t INT64LOW_INDEX = 0;
+static const uint32_t INT64HIGH_INDEX = 1;
 #elif defined(JS_PUNBOX64)
 # define BOX_PIECES         1
 #else
@@ -185,10 +187,12 @@ class LAllocation : public TempObject
         return bits_;
     }
 
-    UniqueChars toString() const;
     bool aliases(const LAllocation& other) const;
-    void dump() const;
 
+#ifdef JS_JITSPEW
+    UniqueChars toString() const;
+    void dump() const;
+#endif
 };
 
 class LUse : public LAllocation
@@ -315,27 +319,30 @@ class LBoxAllocation
 #endif
 };
 
-class LInt64Allocation
+template<class ValT>
+class LInt64Value
 {
 #if JS_BITS_PER_WORD == 32
-    LAllocation high_;
-    LAllocation low_;
+    ValT high_;
+    ValT low_;
 #else
-    LAllocation value_;
+    ValT value_;
 #endif
 
   public:
 #if JS_BITS_PER_WORD == 32
-    LInt64Allocation(LAllocation high, LAllocation low) : high_(high), low_(low) {}
+    LInt64Value(ValT high, ValT low) : high_(high), low_(low) {}
 
-    LAllocation high() const { return high_; }
-    LAllocation low() const { return low_; }
+    ValT high() const { return high_; }
+    ValT low() const { return low_; }
 #else
-    explicit LInt64Allocation(LAllocation value) : value_(value) {}
+    explicit LInt64Value(ValT value) : value_(value) {}
 
-    LAllocation value() const { return value_; }
+    ValT value() const { return value_; }
 #endif
 };
+
+using LInt64Allocation = LInt64Value<LAllocation>;
 
 class LGeneralReg : public LAllocation
 {
@@ -460,14 +467,14 @@ class LDefinition
 
     // This should be kept in sync with LIR.cpp's TypeChars.
     enum Type {
-        GENERAL,    // Generic, integer or pointer-width data (GPR).
-        INT32,      // int32 data (GPR).
-        OBJECT,     // Pointer that may be collected as garbage (GPR).
-        SLOTS,      // Slots/elements pointer that may be moved by minor GCs (GPR).
-        FLOAT32,    // 32-bit floating-point value (FPU).
-        DOUBLE,     // 64-bit floating-point value (FPU).
-        INT32X4,    // SIMD data containing four 32-bit integers (FPU).
-        FLOAT32X4,  // SIMD data containing four 32-bit floats (FPU).
+        GENERAL,      // Generic, integer or pointer-width data (GPR).
+        INT32,        // int32 data (GPR).
+        OBJECT,       // Pointer that may be collected as garbage (GPR).
+        SLOTS,        // Slots/elements pointer that may be moved by minor GCs (GPR).
+        FLOAT32,      // 32-bit floating-point value (FPU).
+        DOUBLE,       // 64-bit floating-point value (FPU).
+        SIMD128INT,   // 128-bit SIMD integer vector (FPU).
+        SIMD128FLOAT, // 128-bit SIMD floating point vector (FPU).
         SINCOS,
 #ifdef JS_NUNBOX32
         // A type virtual register must be followed by a payload virtual
@@ -522,7 +529,7 @@ class LDefinition
         return (Type)((bits_ >> TYPE_SHIFT) & TYPE_MASK);
     }
     bool isSimdType() const {
-        return type() == INT32X4 || type() == FLOAT32X4;
+        return type() == SIMD128INT || type() == SIMD128FLOAT;
     }
     bool isCompatibleReg(const AnyRegister& r) const {
         if (isFloatReg() && r.isFloat()) {
@@ -588,40 +595,45 @@ class LDefinition
 
     static inline Type TypeFrom(MIRType type) {
         switch (type) {
-          case MIRType_Boolean:
-          case MIRType_Int32:
+          case MIRType::Boolean:
+          case MIRType::Int32:
             // The stack slot allocator doesn't currently support allocating
-            // 1-byte slots, so for now we lower MIRType_Boolean into INT32.
+            // 1-byte slots, so for now we lower MIRType::Boolean into INT32.
             static_assert(sizeof(bool) <= sizeof(int32_t), "bool doesn't fit in an int32 slot");
             return LDefinition::INT32;
-          case MIRType_String:
-          case MIRType_Symbol:
-          case MIRType_Object:
-          case MIRType_ObjectOrNull:
+          case MIRType::String:
+          case MIRType::Symbol:
+          case MIRType::Object:
+          case MIRType::ObjectOrNull:
             return LDefinition::OBJECT;
-          case MIRType_Double:
+          case MIRType::Double:
             return LDefinition::DOUBLE;
-          case MIRType_Float32:
+          case MIRType::Float32:
             return LDefinition::FLOAT32;
 #if defined(JS_PUNBOX64)
-          case MIRType_Value:
+          case MIRType::Value:
             return LDefinition::BOX;
 #endif
-          case MIRType_SinCosDouble:
+          case MIRType::SinCosDouble:
             return LDefinition::SINCOS;
-          case MIRType_Slots:
-          case MIRType_Elements:
+          case MIRType::Slots:
+          case MIRType::Elements:
             return LDefinition::SLOTS;
-          case MIRType_Pointer:
-#if JS_BITS_PER_WORD == 64
-          case MIRType_Int64:
-#endif
+          case MIRType::Pointer:
             return LDefinition::GENERAL;
-          case MIRType_Bool32x4:
-          case MIRType_Int32x4:
-            return LDefinition::INT32X4;
-          case MIRType_Float32x4:
-            return LDefinition::FLOAT32X4;
+#if defined(JS_PUNBOX64)
+          case MIRType::Int64:
+            return LDefinition::GENERAL;
+#endif
+          case MIRType::Int8x16:
+          case MIRType::Int16x8:
+          case MIRType::Int32x4:
+          case MIRType::Bool8x16:
+          case MIRType::Bool16x8:
+          case MIRType::Bool32x4:
+            return LDefinition::SIMD128INT;
+          case MIRType::Float32x4:
+            return LDefinition::SIMD128FLOAT;
           default:
             MOZ_CRASH("unexpected type");
         }
@@ -629,8 +641,12 @@ class LDefinition
 
     UniqueChars toString() const;
 
+#ifdef JS_JITSPEW
     void dump() const;
+#endif
 };
+
+using LInt64Definition = LInt64Value<LDefinition>;
 
 // Forward declarations of LIR types.
 #define LIROP(op) class L##op;
@@ -645,78 +661,100 @@ class LElementVisitor;
 // The common base class for LPhi and LInstruction.
 class LNode
 {
-    uint32_t id_;
-    LBlock* block_;
-
   protected:
     MDefinition* mir_;
 
-  public:
-    LNode()
-      : id_(0),
-        block_(nullptr),
-        mir_(nullptr)
-    { }
+  private:
+    LBlock* block_;
+    uint32_t id_;
 
-    enum Opcode {
-#   define LIROP(name) LOp_##name,
+  protected:
+    // Bitfields below are all uint32_t to make sure MSVC packs them correctly.
+    uint32_t op_ : 10;
+    uint32_t isCall_ : 1;
+    // LPhi::numOperands() may not fit in this bitfield, so we only use this
+    // field for LInstruction.
+    uint32_t nonPhiNumOperands_ : 6;
+    // For LInstruction, the first operand is stored at offset
+    // sizeof(LInstruction) + nonPhiOperandsOffset_ * sizeof(uintptr_t).
+    uint32_t nonPhiOperandsOffset_ : 5;
+    uint32_t numDefs_ : 4;
+    uint32_t numTemps_ : 4;
+
+  public:
+    enum class Opcode {
+#define LIROP(name) name,
         LIR_OPCODE_LIST(LIROP)
-#   undef LIROP
-        LOp_Invalid
+#undef LIROP
+        Invalid
     };
+
+    LNode(Opcode op, uint32_t nonPhiNumOperands, uint32_t numDefs, uint32_t numTemps)
+      : mir_(nullptr),
+        block_(nullptr),
+        id_(0),
+        op_(uint32_t(op)),
+        isCall_(false),
+        nonPhiNumOperands_(nonPhiNumOperands),
+        nonPhiOperandsOffset_(0),
+        numDefs_(numDefs),
+        numTemps_(numTemps)
+    {
+        MOZ_ASSERT(op < Opcode::Invalid);
+        MOZ_ASSERT(op_ == uint32_t(op), "opcode must fit in bitfield");
+        MOZ_ASSERT(nonPhiNumOperands_ == nonPhiNumOperands,
+                   "nonPhiNumOperands must fit in bitfield");
+        MOZ_ASSERT(numDefs_ == numDefs, "numDefs must fit in bitfield");
+        MOZ_ASSERT(numTemps_ == numTemps, "numTemps must fit in bitfield");
+    }
 
     const char* opName() {
         switch (op()) {
-#   define LIR_NAME_INS(name)                   \
-            case LOp_##name: return #name;
-            LIR_OPCODE_LIST(LIR_NAME_INS)
-#   undef LIR_NAME_INS
+#define LIR_NAME_INS(name)                   \
+          case Opcode::name: return #name;
+          LIR_OPCODE_LIST(LIR_NAME_INS)
+#undef LIR_NAME_INS
           default:
-            return "Invalid";
+            MOZ_CRASH("Invalid op");
         }
     }
 
     // Hook for opcodes to add extra high level detail about what code will be
     // emitted for the op.
-    virtual const char* extraName() const {
+  private:
+    const char* extraName() const {
         return nullptr;
     }
 
-    virtual Opcode op() const = 0;
+  public:
+#ifdef JS_JITSPEW
+    const char* getExtraName() const;
+#endif
+
+    Opcode op() const {
+        return Opcode(op_);
+    }
 
     bool isInstruction() const {
-        return op() != LOp_Phi;
+        return op() != Opcode::Phi;
     }
     inline LInstruction* toInstruction();
     inline const LInstruction* toInstruction() const;
 
     // Returns the number of outputs of this instruction. If an output is
     // unallocated, it is an LDefinition, defining a virtual register.
-    virtual size_t numDefs() const = 0;
-    virtual LDefinition* getDef(size_t index) = 0;
-    virtual void setDef(size_t index, const LDefinition& def) = 0;
-
-    // Returns information about operands.
-    virtual size_t numOperands() const = 0;
-    virtual LAllocation* getOperand(size_t index) = 0;
-    virtual void setOperand(size_t index, const LAllocation& a) = 0;
-
-    // Returns information about temporary registers needed. Each temporary
-    // register is an LDefinition with a fixed or virtual register and
-    // either GENERAL, FLOAT32, or DOUBLE type.
-    virtual size_t numTemps() const = 0;
-    virtual LDefinition* getTemp(size_t index) = 0;
-    virtual void setTemp(size_t index, const LDefinition& a) = 0;
-
-    // Returns the number of successors of this instruction, if it is a control
-    // transfer instruction, or zero otherwise.
-    virtual size_t numSuccessors() const = 0;
-    virtual MBasicBlock* getSuccessor(size_t i) const = 0;
-    virtual void setSuccessor(size_t i, MBasicBlock* successor) = 0;
-
-    virtual bool isCall() const {
-        return false;
+    size_t numDefs() const {
+        return numDefs_;
     }
+
+    bool isCall() const {
+        return isCall_;
+    }
+
+    // Does this call preserve the given register?
+    // By default, it is assumed that all registers are clobbered by a call.
+    inline bool isCallPreserved(AnyRegister reg) const;
+
     uint32_t id() const {
         return id_;
     }
@@ -741,37 +779,30 @@ class LNode
 
     // For an instruction which has a MUST_REUSE_INPUT output, whether that
     // output register will be restored to its original value when bailing out.
-    virtual bool recoversInput() const {
-        return false;
-    }
+    inline bool recoversInput() const;
 
-    virtual void dump(GenericPrinter& out);
+#ifdef JS_JITSPEW
+    void dump(GenericPrinter& out);
     void dump();
     static void printName(GenericPrinter& out, Opcode op);
-    virtual void printName(GenericPrinter& out);
-    virtual void printOperands(GenericPrinter& out);
+    void printName(GenericPrinter& out);
+    void printOperands(GenericPrinter& out);
+#endif
 
   public:
     // Opcode testing and casts.
-#   define LIROP(name)                                                      \
+#define LIROP(name)                                                         \
     bool is##name() const {                                                 \
-        return op() == LOp_##name;                                          \
+        return op() == Opcode::name;                                        \
     }                                                                       \
     inline L##name* to##name();                                             \
     inline const L##name* to##name() const;
     LIR_OPCODE_LIST(LIROP)
-#   undef LIROP
+#undef LIROP
 
-    virtual void accept(LElementVisitor* visitor) = 0;
-
+// Note: GenerateOpcodeFiles.py generates LOpcodes.h based on this macro.
 #define LIR_HEADER(opcode)                                                  \
-    Opcode op() const {                                                     \
-        return LInstruction::LOp_##opcode;                                  \
-    }                                                                       \
-    void accept(LElementVisitor* visitor) {                                 \
-        visitor->setElement(this);                                          \
-        visitor->visit##opcode(this);                                       \
-    }
+    static constexpr LNode::Opcode classOpcode = LNode::Opcode::opcode;
 };
 
 class LInstruction
@@ -788,17 +819,58 @@ class LInstruction
     LSafepoint* safepoint_;
 
     LMoveGroup* inputMoves_;
+    LMoveGroup* fixReuseMoves_;
     LMoveGroup* movesAfter_;
 
   protected:
-    LInstruction()
-      : snapshot_(nullptr),
+    LInstruction(Opcode opcode, uint32_t numOperands, uint32_t numDefs, uint32_t numTemps)
+      : LNode(opcode, numOperands, numDefs, numTemps),
+        snapshot_(nullptr),
         safepoint_(nullptr),
         inputMoves_(nullptr),
+        fixReuseMoves_(nullptr),
         movesAfter_(nullptr)
     { }
 
+    void setIsCall() {
+        isCall_ = true;
+    }
+
   public:
+    inline LDefinition* getDef(size_t index);
+
+    void setDef(size_t index, const LDefinition& def) {
+        *getDef(index) = def;
+    }
+
+    LAllocation* getOperand(size_t index) const {
+        MOZ_ASSERT(index < numOperands());
+        MOZ_ASSERT(nonPhiOperandsOffset_ > 0);
+        uintptr_t p = reinterpret_cast<uintptr_t>(this + 1) + nonPhiOperandsOffset_ * sizeof(uintptr_t);
+        return reinterpret_cast<LAllocation*>(p) + index;
+    }
+    void setOperand(size_t index, const LAllocation& a) {
+        *getOperand(index) = a;
+    }
+
+    void initOperandsOffset(size_t offset) {
+        MOZ_ASSERT(nonPhiOperandsOffset_ == 0);
+        MOZ_ASSERT(offset >= sizeof(LInstruction));
+        MOZ_ASSERT(((offset - sizeof(LInstruction)) % sizeof(uintptr_t)) == 0);
+        offset = (offset - sizeof(LInstruction)) / sizeof(uintptr_t);
+        nonPhiOperandsOffset_ = offset;
+        MOZ_ASSERT(nonPhiOperandsOffset_ == offset,
+                   "offset must fit in bitfield");
+    }
+
+    // Returns information about temporary registers needed. Each temporary
+    // register is an LDefinition with a fixed or virtual register and
+    // either GENERAL, FLOAT32, or DOUBLE type.
+    size_t numTemps() const {
+        return numTemps_;
+    }
+    inline LDefinition* getTemp(size_t index);
+
     LSnapshot* snapshot() const {
         return snapshot_;
     }
@@ -811,11 +883,20 @@ class LInstruction
     void setInputMoves(LMoveGroup* moves) {
         inputMoves_ = moves;
     }
+    LMoveGroup* fixReuseMoves() const {
+        return fixReuseMoves_;
+    }
+    void setFixReuseMoves(LMoveGroup* moves) {
+        fixReuseMoves_ = moves;
+    }
     LMoveGroup* movesAfter() const {
         return movesAfter_;
     }
     void setMovesAfter(LMoveGroup* moves) {
         movesAfter_ = moves;
+    }
+    uint32_t numOperands() const {
+        return nonPhiNumOperands_;
     }
     void assignSnapshot(LSnapshot* snapshot);
     void initSafepoint(TempAllocator& alloc);
@@ -849,7 +930,6 @@ class LElementVisitor
         return ins_;
     }
 
-  public:
     void setElement(LNode* ins) {
         ins_ = ins;
         if (ins->mirRaw()) {
@@ -864,11 +944,6 @@ class LElementVisitor
         lastPC_(nullptr),
         lastNotInlinedPC_(nullptr)
     {}
-
-  public:
-#define VISIT_INS(op) virtual void visit##op(L##op*) { MOZ_CRASH("NYI: " #op); }
-    LIR_OPCODE_LIST(VISIT_INS)
-#undef VISIT_INS
 };
 
 typedef InlineList<LInstruction>::iterator LInstructionIterator;
@@ -889,14 +964,15 @@ class LPhi final : public LNode
     LIR_HEADER(Phi)
 
     LPhi(MPhi* ins, LAllocation* inputs)
-        : inputs_(inputs)
+      : LNode(classOpcode,
+              /* nonPhiNumOperands = */ 0,
+              /* numDefs = */ 1,
+              /* numTemps = */ 0),
+        inputs_(inputs)
     {
         setMir(ins);
     }
 
-    size_t numDefs() const {
-        return 1;
-    }
     LDefinition* getDef(size_t index) {
         MOZ_ASSERT(index == 0);
         return &def_;
@@ -916,24 +992,10 @@ class LPhi final : public LNode
         MOZ_ASSERT(index < numOperands());
         inputs_[index] = a;
     }
-    size_t numTemps() const {
-        return 0;
-    }
-    LDefinition* getTemp(size_t index) {
-        MOZ_CRASH("no temps");
-    }
-    void setTemp(size_t index, const LDefinition& temp) {
-        MOZ_CRASH("no temps");
-    }
-    size_t numSuccessors() const {
-        return 0;
-    }
-    MBasicBlock* getSuccessor(size_t i) const {
-        MOZ_CRASH("no successors");
-    }
-    void setSuccessor(size_t i, MBasicBlock*) {
-        MOZ_CRASH("no successors");
-    }
+
+    // Phis don't have temps, so calling numTemps/getTemp is pointless.
+    size_t numTemps() const = delete;
+    LDefinition* getTemp(size_t index) = delete;
 };
 
 class LMoveGroup;
@@ -948,7 +1010,7 @@ class LBlock
 
   public:
     explicit LBlock(MBasicBlock* block);
-    bool init(TempAllocator& alloc);
+    MOZ_MUST_USE bool init(TempAllocator& alloc);
 
     void add(LInstruction* ins) {
         ins->setBlock(this);
@@ -1029,47 +1091,50 @@ class LBlock
         return begin()->isGoto() && !mir()->isLoopHeader();
     }
 
+#ifdef JS_JITSPEW
     void dump(GenericPrinter& out);
     void dump();
+#endif
 };
 
 namespace details {
     template <size_t Defs, size_t Temps>
     class LInstructionFixedDefsTempsHelper : public LInstruction
     {
-        mozilla::Array<LDefinition, Defs> defs_;
-        mozilla::Array<LDefinition, Temps> temps_;
+        mozilla::Array<LDefinition, Defs + Temps> defsAndTemps_;
+
+      protected:
+        LInstructionFixedDefsTempsHelper(Opcode opcode, uint32_t numOperands)
+          : LInstruction(opcode, numOperands, Defs, Temps)
+        {}
 
       public:
-        size_t numDefs() const final override {
-            return Defs;
+        // Override the methods in LInstruction with more optimized versions
+        // for when we know the exact instruction type.
+        LDefinition* getDef(size_t index) {
+            MOZ_ASSERT(index < Defs);
+            return &defsAndTemps_[index];
         }
-        LDefinition* getDef(size_t index) final override {
-            return &defs_[index];
-        }
-        size_t numTemps() const final override {
-            return Temps;
-        }
-        LDefinition* getTemp(size_t index) final override {
-            return &temps_[index];
+        LDefinition* getTemp(size_t index) {
+            MOZ_ASSERT(index < Temps);
+            return &defsAndTemps_[Defs + index];
         }
 
-        void setDef(size_t index, const LDefinition& def) final override {
-            defs_[index] = def;
+        void setDef(size_t index, const LDefinition& def) {
+            MOZ_ASSERT(index < Defs);
+            defsAndTemps_[index] = def;
         }
-        void setTemp(size_t index, const LDefinition& a) final override {
-            temps_[index] = a;
+        void setTemp(size_t index, const LDefinition& a) {
+            MOZ_ASSERT(index < Temps);
+            defsAndTemps_[Defs + index] = a;
         }
-
-        size_t numSuccessors() const override {
-            return 0;
-        }
-        MBasicBlock* getSuccessor(size_t i) const override {
-            MOZ_ASSERT(false);
-            return nullptr;
-        }
-        void setSuccessor(size_t i, MBasicBlock* successor) override {
-            MOZ_ASSERT(false);
+        void setInt64Temp(size_t index, const LInt64Definition& a) {
+#if JS_BITS_PER_WORD == 32
+            setTemp(index, a.low());
+            setTemp(index + 1, a.high());
+#else
+            setTemp(index, a.value());
+#endif
         }
 
         // Default accessors, assuming a single input and output, respectively.
@@ -1081,38 +1146,83 @@ namespace details {
             MOZ_ASSERT(numDefs() == 1);
             return getDef(0);
         }
+        static size_t offsetOfDef(size_t index) {
+            using T = LInstructionFixedDefsTempsHelper<0, 0>;
+            return offsetof(T, defsAndTemps_) + index * sizeof(LDefinition);
+        }
+        static size_t offsetOfTemp(uint32_t numDefs, uint32_t index) {
+            using T = LInstructionFixedDefsTempsHelper<0, 0>;
+            return offsetof(T, defsAndTemps_) + (numDefs + index) * sizeof(LDefinition);
+        }
     };
 } // namespace details
+
+inline LDefinition*
+LInstruction::getDef(size_t index)
+{
+    MOZ_ASSERT(index < numDefs());
+    using T = details::LInstructionFixedDefsTempsHelper<0, 0>;
+    uint8_t* p = reinterpret_cast<uint8_t*>(this) + T::offsetOfDef(index);
+    return reinterpret_cast<LDefinition*>(p);
+}
+
+inline LDefinition*
+LInstruction::getTemp(size_t index)
+{
+    MOZ_ASSERT(index < numTemps());
+    using T = details::LInstructionFixedDefsTempsHelper<0, 0>;
+    uint8_t* p = reinterpret_cast<uint8_t*>(this) + T::offsetOfTemp(numDefs(), index);
+    return reinterpret_cast<LDefinition*>(p);
+}
 
 template <size_t Defs, size_t Operands, size_t Temps>
 class LInstructionHelper : public details::LInstructionFixedDefsTempsHelper<Defs, Temps>
 {
     mozilla::Array<LAllocation, Operands> operands_;
 
-  public:
-    size_t numOperands() const final override {
-        return Operands;
+  protected:
+    explicit LInstructionHelper(LNode::Opcode opcode)
+      : details::LInstructionFixedDefsTempsHelper<Defs, Temps>(opcode, Operands)
+    {
+        static_assert(Operands == 0 || sizeof(operands_) == Operands * sizeof(LAllocation),
+                      "mozilla::Array should not contain other fields");
+        if (Operands > 0) {
+            using T = LInstructionHelper<Defs, Operands, Temps>;
+            this->initOperandsOffset(offsetof(T, operands_));
+        }
     }
-    LAllocation* getOperand(size_t index) final override {
+
+  public:
+    // Override the methods in LInstruction with more optimized versions
+    // for when we know the exact instruction type.
+    LAllocation* getOperand(size_t index) {
         return &operands_[index];
     }
-    void setOperand(size_t index, const LAllocation& a) final override {
+    void setOperand(size_t index, const LAllocation& a) {
         operands_[index] = a;
     }
     void setBoxOperand(size_t index, const LBoxAllocation& alloc) {
 #ifdef JS_NUNBOX32
-        operands_[index] = alloc.type();
-        operands_[index + 1] = alloc.payload();
+        operands_[index + TYPE_INDEX] = alloc.type();
+        operands_[index + PAYLOAD_INDEX] = alloc.payload();
 #else
         operands_[index] = alloc.value();
 #endif
     }
     void setInt64Operand(size_t index, const LInt64Allocation& alloc) {
 #if JS_BITS_PER_WORD == 32
-        operands_[index] = alloc.low();
-        operands_[index + 1] = alloc.high();
+        operands_[index + INT64LOW_INDEX] = alloc.low();
+        operands_[index + INT64HIGH_INDEX] = alloc.high();
 #else
         operands_[index] = alloc.value();
+#endif
+    }
+    const LInt64Allocation getInt64Operand(size_t offset) {
+#if JS_BITS_PER_WORD == 32
+        return LInt64Allocation(operands_[offset + INT64HIGH_INDEX],
+                                operands_[offset + INT64LOW_INDEX]);
+#else
+        return LInt64Allocation(operands_[offset]);
 #endif
     }
 };
@@ -1120,29 +1230,47 @@ class LInstructionHelper : public details::LInstructionFixedDefsTempsHelper<Defs
 template<size_t Defs, size_t Temps>
 class LVariadicInstruction : public details::LInstructionFixedDefsTempsHelper<Defs, Temps>
 {
-    FixedList<LAllocation> operands_;
+  protected:
+    LVariadicInstruction(LNode::Opcode opcode, size_t numOperands)
+      : details::LInstructionFixedDefsTempsHelper<Defs, Temps>(opcode, numOperands)
+    {}
 
   public:
-    bool init(TempAllocator& alloc, size_t length) {
-        return operands_.init(alloc, length);
-    }
-    size_t numOperands() const final override {
-        return operands_.length();
-    }
-    LAllocation* getOperand(size_t index) final override {
-        return &operands_[index];
-    }
-    void setOperand(size_t index, const LAllocation& a) final override {
-        operands_[index] = a;
+    void setBoxOperand(size_t index, const LBoxAllocation& a) {
+#ifdef JS_NUNBOX32
+        this->setOperand(index + TYPE_INDEX, a.type());
+        this->setOperand(index + PAYLOAD_INDEX, a.payload());
+#else
+        this->setOperand(index, a.value());
+#endif
     }
 };
 
 template <size_t Defs, size_t Operands, size_t Temps>
 class LCallInstructionHelper : public LInstructionHelper<Defs, Operands, Temps>
 {
+  protected:
+    explicit LCallInstructionHelper(LNode::Opcode opcode)
+      : LInstructionHelper<Defs, Operands, Temps>(opcode)
+    {
+        this->setIsCall();
+    }
+};
+
+template <size_t Defs, size_t Temps>
+class LBinaryCallInstructionHelper : public LCallInstructionHelper<Defs, 2, Temps>
+{
+  protected:
+    explicit LBinaryCallInstructionHelper(LNode::Opcode opcode)
+      : LCallInstructionHelper<Defs, 2, Temps>(opcode)
+    {}
+
   public:
-    virtual bool isCall() const {
-        return true;
+    const LAllocation* lhs() {
+        return this->getOperand(0);
+    }
+    const LAllocation* rhs() {
+        return this->getOperand(1);
     }
 };
 
@@ -1160,13 +1288,14 @@ class LRecoverInfo : public TempObject
     RecoverOffset recoverOffset_;
 
     explicit LRecoverInfo(TempAllocator& alloc);
-    bool init(MResumePoint* mir);
+    MOZ_MUST_USE bool init(MResumePoint* mir);
 
     // Fill the instruction vector such as all instructions needed for the
     // recovery are pushed before the current instruction.
-    bool appendOperands(MNode* ins);
-    bool appendDefinition(MDefinition* def);
-    bool appendResumePoint(MResumePoint* rp);
+    template <typename Node>
+    MOZ_MUST_USE bool appendOperands(Node* ins);
+    MOZ_MUST_USE bool appendDefinition(MDefinition* def);
+    MOZ_MUST_USE bool appendResumePoint(MResumePoint* rp);
   public:
     static LRecoverInfo* New(MIRGenerator* gen, MResumePoint* mir);
 
@@ -1198,37 +1327,50 @@ class LRecoverInfo : public TempObject
         MNode** it_;
         MNode** end_;
         size_t op_;
+        size_t opEnd_;
+        MResumePoint* rp_;
+        MNode* node_;
 
       public:
         explicit OperandIter(LRecoverInfo* recoverInfo)
-          : it_(recoverInfo->begin()), end_(recoverInfo->end()), op_(0)
+          : it_(recoverInfo->begin()), end_(recoverInfo->end()),
+            op_(0), opEnd_(0), rp_(nullptr), node_(nullptr)
         {
             settle();
         }
 
         void settle() {
-            while ((*it_)->numOperands() == 0) {
+            opEnd_ = (*it_)->numOperands();
+            while (opEnd_ == 0) {
                 ++it_;
                 op_ = 0;
+                opEnd_ = (*it_)->numOperands();
             }
+            node_ = *it_;
+            if (node_->isResumePoint())
+                rp_ = node_->toResumePoint();
         }
 
         MDefinition* operator*() {
-            return (*it_)->getOperand(op_);
+            if (rp_) // de-virtualize MResumePoint::getOperand calls.
+                return rp_->getOperand(op_);
+            return node_->getOperand(op_);
         }
         MDefinition* operator ->() {
-            return (*it_)->getOperand(op_);
+            if (rp_) // de-virtualize MResumePoint::getOperand calls.
+                return rp_->getOperand(op_);
+            return node_->getOperand(op_);
         }
 
         OperandIter& operator ++() {
             ++op_;
-            if (op_ == (*it_)->numOperands()) {
-                op_ = 0;
-                ++it_;
-            }
+            if (op_ != opEnd_)
+                return *this;
+            op_ = 0;
+            ++it_;
+            node_ = rp_ = nullptr;
             if (!*this)
                 settle();
-
             return *this;
         }
 
@@ -1258,7 +1400,7 @@ class LSnapshot : public TempObject
     BailoutKind bailoutKind_;
 
     LSnapshot(LRecoverInfo* recover, BailoutKind kind);
-    bool init(MIRGenerator* gen);
+    MOZ_MUST_USE bool init(MIRGenerator* gen);
 
   public:
     static LSnapshot* New(MIRGenerator* gen, LRecoverInfo* recover, BailoutKind kind);
@@ -1322,7 +1464,7 @@ struct SafepointSlotEntry {
     // Byte offset of the slot, as in LStackSlot or LArgument.
     uint32_t slot:31;
 
-    SafepointSlotEntry() { }
+    SafepointSlotEntry() : stack(0), slot(0) { }
     SafepointSlotEntry(bool stack, uint32_t slot)
       : stack(stack), slot(slot)
     { }
@@ -1336,7 +1478,7 @@ struct SafepointNunboxEntry {
     LAllocation type;
     LAllocation payload;
 
-    SafepointNunboxEntry() { }
+    SafepointNunboxEntry() : typeVreg(0) { }
     SafepointNunboxEntry(uint32_t typeVreg, LAllocation type, LAllocation payload)
       : typeVreg(typeVreg), type(type), payload(payload)
     { }
@@ -1447,7 +1589,7 @@ class LSafepoint : public TempObject
     LiveGeneralRegisterSet gcRegs() const {
         return gcRegs_;
     }
-    bool addGcSlot(bool stack, uint32_t slot) {
+    MOZ_MUST_USE bool addGcSlot(bool stack, uint32_t slot) {
         bool result = gcSlots_.append(SlotEntry(stack, slot));
         if (result)
             assertInvariants();
@@ -1467,13 +1609,13 @@ class LSafepoint : public TempObject
         slotsOrElementsRegs_.addUnchecked(reg);
         assertInvariants();
     }
-    bool addSlotsOrElementsSlot(bool stack, uint32_t slot) {
+    MOZ_MUST_USE bool addSlotsOrElementsSlot(bool stack, uint32_t slot) {
         bool result = slotsOrElementsSlots_.append(SlotEntry(stack, slot));
         if (result)
             assertInvariants();
         return result;
     }
-    bool addSlotsOrElementsPointer(LAllocation alloc) {
+    MOZ_MUST_USE bool addSlotsOrElementsPointer(LAllocation alloc) {
         if (alloc.isMemory())
             return addSlotsOrElementsSlot(alloc.isStackSlot(), alloc.memorySlot());
         MOZ_ASSERT(alloc.isRegister());
@@ -1492,7 +1634,7 @@ class LSafepoint : public TempObject
         return false;
     }
 
-    bool addGcPointer(LAllocation alloc) {
+    MOZ_MUST_USE bool addGcPointer(LAllocation alloc) {
         if (alloc.isMemory())
             return addGcSlot(alloc.isStackSlot(), alloc.memorySlot());
         if (alloc.isRegister())
@@ -1512,7 +1654,7 @@ class LSafepoint : public TempObject
         return false;
     }
 
-    bool addValueSlot(bool stack, uint32_t slot) {
+    MOZ_MUST_USE bool addValueSlot(bool stack, uint32_t slot) {
         bool result = valueSlots_.append(SlotEntry(stack, slot));
         if (result)
             assertInvariants();
@@ -1532,14 +1674,14 @@ class LSafepoint : public TempObject
 
 #ifdef JS_NUNBOX32
 
-    bool addNunboxParts(uint32_t typeVreg, LAllocation type, LAllocation payload) {
+    MOZ_MUST_USE bool addNunboxParts(uint32_t typeVreg, LAllocation type, LAllocation payload) {
         bool result = nunboxParts_.append(NunboxEntry(typeVreg, type, payload));
         if (result)
             assertInvariants();
         return result;
     }
 
-    bool addNunboxType(uint32_t typeVreg, LAllocation type) {
+    MOZ_MUST_USE bool addNunboxType(uint32_t typeVreg, LAllocation type) {
         for (size_t i = 0; i < nunboxParts_.length(); i++) {
             if (nunboxParts_[i].type == type)
                 return true;
@@ -1557,7 +1699,7 @@ class LSafepoint : public TempObject
         return result;
     }
 
-    bool addNunboxPayload(uint32_t payloadVreg, LAllocation payload) {
+    MOZ_MUST_USE bool addNunboxPayload(uint32_t payloadVreg, LAllocation payload) {
         for (size_t i = 0; i < nunboxParts_.length(); i++) {
             if (nunboxParts_[i].payload == payload)
                 return true;
@@ -1613,7 +1755,7 @@ class LSafepoint : public TempObject
         return valueRegs_;
     }
 
-    bool addBoxedValue(LAllocation alloc) {
+    MOZ_MUST_USE bool addBoxedValue(LAllocation alloc) {
         if (alloc.isRegister()) {
             Register reg = alloc.toRegister().gpr();
             if (!valueRegs().has(reg))
@@ -1755,7 +1897,7 @@ class LIRGraph
   public:
     explicit LIRGraph(MIRGraph* mir);
 
-    bool init() {
+    MOZ_MUST_USE bool init() {
         return constantPoolMap_.init() && blocks_.init(mir_.alloc(), mir_.numBlocks());
     }
     MIRGraph& mir() const {
@@ -1770,8 +1912,9 @@ class LIRGraph
     uint32_t numBlockIds() const {
         return mir_.numBlockIds();
     }
-    bool initBlock(MBasicBlock* mir) {
-        LBlock* lir = new (&blocks_[mir->id()]) LBlock(mir);
+    MOZ_MUST_USE bool initBlock(MBasicBlock* mir) {
+        auto* block = &blocks_[mir->id()];
+        auto* lir = new (block) LBlock(mir);
         return lir->init(mir_.alloc());
     }
     uint32_t getVirtualRegister() {
@@ -1821,7 +1964,7 @@ class LIRGraph
     uint32_t totalSlotCount() const {
         return paddedLocalSlotCount() + argumentsSize();
     }
-    bool addConstantToPool(const Value& v, uint32_t* index);
+    MOZ_MUST_USE bool addConstantToPool(const Value& v, uint32_t* index);
     size_t numConstants() const {
         return constantPool_.length();
     }
@@ -1850,8 +1993,10 @@ class LIRGraph
         return safepoints_[i];
     }
 
+#ifdef JS_JITSPEW
     void dump(GenericPrinter& out);
     void dump();
+#endif
 };
 
 LAllocation::LAllocation(AnyRegister reg)

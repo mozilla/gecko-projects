@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Sprintf.h"
 
 void
 mozalloc_abort(const char* const msg)
@@ -50,8 +51,8 @@ void fillAbortMessage(char (&msg)[N], uintptr_t retAddress) {
         reinterpret_cast<void*>(retAddress - uintptr_t(info.dli_fbase));
     const char* const sym = info.dli_sname ? info.dli_sname : "";
 
-    snprintf(msg, sizeof(msg), "abort() called from %s:%p (%s)",
-             base_module ? base_module + 1 : module, module_offset, sym);
+    SprintfLiteral(msg, "abort() called from %s:%p (%s)",
+                   base_module ? base_module + 1 : module, module_offset, sym);
 }
 #endif
 
@@ -68,7 +69,7 @@ void fillAbortMessage(char (&msg)[N], uintptr_t retAddress) {
 //
 // That segmentation fault will be interpreted as another bug by ASan and as a
 // result, ASan will just exit(1) instead of aborting.
-void abort(void)
+extern "C" void abort(void)
 {
 #ifdef MOZ_WIDGET_ANDROID
     char msg[64] = {};

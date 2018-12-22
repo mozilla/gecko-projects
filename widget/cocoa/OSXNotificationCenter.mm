@@ -7,9 +7,9 @@
 #import <AppKit/AppKit.h>
 #include "imgIRequest.h"
 #include "imgIContainer.h"
+#include "nsICancelable.h"
 #include "nsIStringBundle.h"
 #include "nsNetUtil.h"
-#include "imgLoader.h"
 #import "nsCocoaUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -17,10 +17,10 @@
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
-#include "nsIContentPolicy.h"
-#include "imgRequestProxy.h"
 
 using namespace mozilla;
+
+#define MAX_NOTIFICATION_NAME_LEN 5000
 
 #if !defined(MAC_OS_X_VERSION_10_8) || (MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8)
 @protocol NSUserNotificationCenterDelegate
@@ -148,22 +148,23 @@ enum {
   OSXNotificationActionSettings = 1,
 };
 
-class OSXNotificationInfo {
+class OSXNotificationInfo final : public nsISupports {
 private:
-  ~OSXNotificationInfo();
+  virtual ~OSXNotificationInfo();
 
 public:
-  NS_INLINE_DECL_REFCOUNTING(OSXNotificationInfo)
+  NS_DECL_ISUPPORTS
   OSXNotificationInfo(NSString *name, nsIObserver *observer,
                       const nsAString & alertCookie);
 
   NSString *mName;
   nsCOMPtr<nsIObserver> mObserver;
   nsString mCookie;
-  RefPtr<imgRequestProxy> mIconRequest;
-  id<FakeNSUserNotification> mPendingNotifiction;
-  nsCOMPtr<nsITimer> mIconTimeoutTimer;
+  RefPtr<nsICancelable> mIconRequest;
+  id<FakeNSUserNotification> mPendingNotification;
 };
+
+NS_IMPL_ISUPPORTS0(OSXNotificationInfo)
 
 OSXNotificationInfo::OSXNotificationInfo(NSString *name, nsIObserver *observer,
                                          const nsAString & alertCookie)
@@ -174,7 +175,7 @@ OSXNotificationInfo::OSXNotificationInfo(NSString *name, nsIObserver *observer,
   mName = [name retain];
   mObserver = observer;
   mCookie = alertCookie;
-  mPendingNotifiction = nil;
+  mPendingNotification = nil;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -184,7 +185,7 @@ OSXNotificationInfo::~OSXNotificationInfo()
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   [mName release];
-  [mPendingNotifiction release];
+  [mPendingNotification release];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -218,8 +219,8 @@ OSXNotificationCenter::~OSXNotificationCenter()
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NS_IMPL_ISUPPORTS(OSXNotificationCenter, nsIAlertsService, nsITimerCallback,
-                  imgINotificationObserver, nsIAlertsIconData)
+NS_IMPL_ISUPPORTS(OSXNotificationCenter, nsIAlertsService, nsIAlertsIconData,
+                  nsIAlertNotificationImageListener)
 
 nsresult OSXNotificationCenter::Init()
 {
@@ -240,7 +241,8 @@ OSXNotificationCenter::ShowAlertNotification(const nsAString & aImageUrl, const 
                                              const nsAString & aLang,
                                              const nsAString & aData,
                                              nsIPrincipal * aPrincipal,
-                                             bool aInPrivateBrowsing)
+                                             bool aInPrivateBrowsing,
+                                             bool aRequireInteraction)
 {
   nsCOMPtr<nsIAlertNotification> alert =
     do_CreateInstance(ALERT_NOTIFICATION_CONTRACTID);
@@ -248,9 +250,18 @@ OSXNotificationCenter::ShowAlertNotification(const nsAString & aImageUrl, const 
   nsresult rv = alert->Init(aAlertName, aImageUrl, aAlertTitle,
                             aAlertText, aAlertTextClickable,
                             aAlertCookie, aBidi, aLang, aData,
-                            aPrincipal, aInPrivateBrowsing);
+                            aPrincipal, aInPrivateBrowsing,
+                            aRequireInteraction);
   NS_ENSURE_SUCCESS(rv, rv);
   return ShowAlert(alert, aAlertListener);
+}
+
+NS_IMETHODIMP
+OSXNotificationCenter::ShowPersistentNotification(const nsAString& aPersistentData,
+                                                  nsIAlertNotification* aAlert,
+                                                  nsIObserver* aAlertListener)
+{
+  return ShowAlert(aAlert, aAlertListener);
 }
 
 NS_IMETHODIMP
@@ -287,11 +298,11 @@ OSXNotificationCenter::ShowAlertWithIconData(nsIAlertNotification* aAlert,
 
   if (!hostPort.IsEmpty() && bundle) {
     const char16_t* formatStrings[] = { hostPort.get() };
-    nsXPIDLString notificationSource;
-    bundle->FormatStringFromName(MOZ_UTF16("source.label"),
+    nsAutoString notificationSource;
+    bundle->FormatStringFromName("source.label",
                                  formatStrings,
                                  ArrayLength(formatStrings),
-                                 getter_Copies(notificationSource));
+                                 notificationSource);
     notification.subtitle = nsCocoaUtils::ToNSString(notificationSource);
   }
 
@@ -306,20 +317,17 @@ OSXNotificationCenter::ShowAlertWithIconData(nsIAlertNotification* aAlert,
   // If this is not an application/extension alert, show additional actions dealing with permissions.
   bool isActionable;
   if (bundle && NS_SUCCEEDED(aAlert->GetActionable(&isActionable)) && isActionable) {
-    nsXPIDLString closeButtonTitle, actionButtonTitle, disableButtonTitle, settingsButtonTitle;
-    bundle->GetStringFromName(MOZ_UTF16("closeButton.title"),
-                              getter_Copies(closeButtonTitle));
-    bundle->GetStringFromName(MOZ_UTF16("actionButton.label"),
-                              getter_Copies(actionButtonTitle));
+    nsAutoString closeButtonTitle, actionButtonTitle, disableButtonTitle, settingsButtonTitle;
+    bundle->GetStringFromName("closeButton.title", closeButtonTitle);
+    bundle->GetStringFromName("actionButton.label", actionButtonTitle);
     if (!hostPort.IsEmpty()) {
       const char16_t* formatStrings[] = { hostPort.get() };
-      bundle->FormatStringFromName(MOZ_UTF16("webActions.disableForOrigin.label"),
+      bundle->FormatStringFromName("webActions.disableForOrigin.label",
                                    formatStrings,
                                    ArrayLength(formatStrings),
-                                   getter_Copies(disableButtonTitle));
+                                   disableButtonTitle);
     }
-    bundle->GetStringFromName(MOZ_UTF16("webActions.settings.label"),
-                              getter_Copies(settingsButtonTitle));
+    bundle->GetStringFromName("webActions.settings.label", settingsButtonTitle);
 
     notification.otherButtonTitle = nsCocoaUtils::ToNSString(closeButtonTitle);
 
@@ -344,6 +352,13 @@ OSXNotificationCenter::ShowAlertWithIconData(nsIAlertNotification* aAlert,
   }
   nsAutoString name;
   rv = aAlert->GetName(name);
+  // Don't let an alert name be more than MAX_NOTIFICATION_NAME_LEN characters.
+  // More than that shouldn't be necessary and userInfo (assigned to below) has
+  // a length limit of 16k on OS X 10.11. Exception thrown if limit exceeded.
+  if (name.Length() > MAX_NOTIFICATION_NAME_LEN) {
+    return NS_ERROR_FAILURE;
+  }
+
   NS_ENSURE_SUCCESS(rv, rv);
   NSString *alertName = nsCocoaUtils::ToNSString(name);
   if (!alertName) {
@@ -370,17 +385,13 @@ OSXNotificationCenter::ShowAlertWithIconData(nsIAlertNotification* aAlert,
     [(NSObject*)notification setValue:@(NO) forKey:@"_identityImageHasBorder"];
   }
 
-  nsAutoString imageUrl;
-  rv = aAlert->GetImageURL(imageUrl);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   bool inPrivateBrowsing;
   rv = aAlert->GetInPrivateBrowsing(&inPrivateBrowsing);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Show the notification without waiting for an image if there is no icon URL or
   // notification icons are not supported on this version of OS X.
-  if (imageUrl.IsEmpty() || ![unClass instancesRespondToSelector:@selector(setContentImage:)]) {
+  if (![unClass instancesRespondToSelector:@selector(setContentImage:)]) {
     CloseAlertCocoaString(alertName);
     mActiveAlerts.AppendElement(osxni);
     [GetNotificationCenter() deliverNotification:notification];
@@ -390,36 +401,13 @@ OSXNotificationCenter::ShowAlertWithIconData(nsIAlertNotification* aAlert,
     }
   } else {
     mPendingAlerts.AppendElement(osxni);
-    osxni->mPendingNotifiction = notification;
-    RefPtr<imgLoader> il = imgLoader::GetInstance();
-    if (il) {
-      nsCOMPtr<nsIURI> imageUri;
-      NS_NewURI(getter_AddRefs(imageUri), imageUrl);
-      if (imageUri) {
-        nsCOMPtr<nsIPrincipal> principal;
-        rv = aAlert->GetPrincipal(getter_AddRefs(principal));
-        if (NS_SUCCEEDED(rv)) {
-          rv = il->LoadImage(imageUri, nullptr, nullptr,
-                             mozilla::net::RP_Default,
-                             principal, nullptr,
-                             this, nullptr,
-                             inPrivateBrowsing ? nsIRequest::LOAD_ANONYMOUS :
-                                                 nsIRequest::LOAD_NORMAL,
-                             nullptr, nsIContentPolicy::TYPE_INTERNAL_IMAGE,
-                             EmptyString(),
-                             getter_AddRefs(osxni->mIconRequest));
-          if (NS_SUCCEEDED(rv)) {
-            // Set a timer for six seconds. If we don't have an icon by the time this
-            // goes off then we go ahead without an icon.
-            nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID);
-            osxni->mIconTimeoutTimer = timer;
-            timer->InitWithCallback(this, 6000, nsITimer::TYPE_ONE_SHOT);
-            return NS_OK;
-          }
-        }
-      }
+    osxni->mPendingNotification = notification;
+    // Wait six seconds for the image to load.
+    rv = aAlert->LoadImage(6000, this, osxni,
+                           getter_AddRefs(osxni->mIconRequest));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      ShowPendingNotification(osxni);
     }
-    ShowPendingNotification(osxni);
   }
 
   return NS_OK;
@@ -464,6 +452,10 @@ OSXNotificationCenter::CloseAlertCocoaString(NSString *aAlertName)
     if ([aAlertName isEqualToString:osxni->mName]) {
       if (osxni->mObserver) {
         osxni->mObserver->Observe(nullptr, "alertfinished", osxni->mCookie.get());
+      }
+      if (osxni->mIconRequest) {
+        osxni->mIconRequest->Cancel(NS_BINDING_ABORTED);
+        osxni->mIconRequest = nullptr;
       }
       mActiveAlerts.RemoveElementAt(i);
       break;
@@ -520,11 +512,6 @@ OSXNotificationCenter::ShowPendingNotification(OSXNotificationInfo *osxni)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (osxni->mIconTimeoutTimer) {
-    osxni->mIconTimeoutTimer->Cancel();
-    osxni->mIconTimeoutTimer = nullptr;
-  }
-
   if (osxni->mIconRequest) {
     osxni->mIconRequest->Cancel(NS_BINDING_ABORTED);
     osxni->mIconRequest = nullptr;
@@ -540,46 +527,27 @@ OSXNotificationCenter::ShowPendingNotification(OSXNotificationInfo *osxni)
     }
   }
 
-  [GetNotificationCenter() deliverNotification:osxni->mPendingNotifiction];
+  [GetNotificationCenter() deliverNotification:osxni->mPendingNotification];
 
   if (osxni->mObserver) {
     osxni->mObserver->Observe(nullptr, "alertshow", osxni->mCookie.get());
   }
 
-  [osxni->mPendingNotifiction release];
-  osxni->mPendingNotifiction = nil;
+  [osxni->mPendingNotification release];
+  osxni->mPendingNotification = nil;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 NS_IMETHODIMP
-OSXNotificationCenter::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData)
+OSXNotificationCenter::OnImageMissing(nsISupports* aUserData)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  if (aType == imgINotificationObserver::LOAD_COMPLETE) {
-    OSXNotificationInfo *osxni = nullptr;
-    for (unsigned int i = 0; i < mPendingAlerts.Length(); i++) {
-      if (aRequest == mPendingAlerts[i]->mIconRequest) {
-        osxni = mPendingAlerts[i];
-        break;
-      }
-    }
-    if (!osxni || !osxni->mPendingNotifiction) {
-      return NS_ERROR_FAILURE;
-    }
-    NSImage *cocoaImage = nil;
-    uint32_t imgStatus = imgIRequest::STATUS_ERROR;
-    nsresult rv = aRequest->GetImageStatus(&imgStatus);
-    if (NS_SUCCEEDED(rv) && !(imgStatus & imgIRequest::STATUS_ERROR)) {
-      nsCOMPtr<imgIContainer> image;
-      rv = aRequest->GetImage(getter_AddRefs(image));
-      if (NS_SUCCEEDED(rv)) {
-        nsCocoaUtils::CreateNSImageFromImageContainer(image, imgIContainer::FRAME_FIRST, &cocoaImage, 1.0f);
-      }
-    }
-    (osxni->mPendingNotifiction).contentImage = cocoaImage;
-    [cocoaImage release];
+  OSXNotificationInfo *osxni = static_cast<OSXNotificationInfo*>(aUserData);
+  if (osxni->mPendingNotification) {
+    // If there was an error getting the image, or the request timed out, show
+    // the notification without a content image.
     ShowPendingNotification(osxni);
   }
   return NS_OK;
@@ -588,24 +556,28 @@ OSXNotificationCenter::Notify(imgIRequest *aRequest, int32_t aType, const nsIntR
 }
 
 NS_IMETHODIMP
-OSXNotificationCenter::Notify(nsITimer *timer)
+OSXNotificationCenter::OnImageReady(nsISupports* aUserData,
+                                    imgIRequest* aRequest)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  if (!timer) {
+  nsCOMPtr<imgIContainer> image;
+  nsresult rv = aRequest->GetImage(getter_AddRefs(image));
+  if (NS_WARN_IF(NS_FAILED(rv) || !image)) {
+    return rv;
+  }
+
+  OSXNotificationInfo *osxni = static_cast<OSXNotificationInfo*>(aUserData);
+  if (!osxni->mPendingNotification) {
     return NS_ERROR_FAILURE;
   }
 
-  for (unsigned int i = 0; i < mPendingAlerts.Length(); i++) {
-    OSXNotificationInfo *osxni = mPendingAlerts[i];
-    if (timer == osxni->mIconTimeoutTimer.get()) {
-      osxni->mIconTimeoutTimer = nullptr;
-      if (osxni->mPendingNotifiction) {
-        ShowPendingNotification(osxni);
-        break;
-      }
-    }
-  }
+  NSImage *cocoaImage = nil;
+  nsCocoaUtils::CreateNSImageFromImageContainer(image, imgIContainer::FRAME_FIRST, &cocoaImage, 1.0f);
+  (osxni->mPendingNotification).contentImage = cocoaImage;
+  [cocoaImage release];
+  ShowPendingNotification(osxni);
+
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;

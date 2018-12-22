@@ -6,7 +6,6 @@
 /* Implement shared vtbl methods. */
 
 #include "xptcprivate.h"
-#include "xptiprivate.h"
 
 #if defined(sparc) || defined(__sparc__)
 
@@ -66,7 +65,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
         case nsXPTType::T_I32    : dp->val.i32 = *((int32_t*) ap);       break;
         case nsXPTType::T_DOUBLE :
         case nsXPTType::T_U64    :
-        case nsXPTType::T_I64    : ((DU *)dp)->hi = ((DU *)ap)->hi; 
+        case nsXPTType::T_I64    : ((DU *)dp)->hi = ((DU *)ap)->hi;
                                    ((DU *)dp)->lo = ((DU *)ap)->lo;
                                    ap++;
                                    break;

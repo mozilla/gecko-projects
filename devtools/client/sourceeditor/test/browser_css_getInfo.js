@@ -56,6 +56,8 @@ const source = [
 //  expectedProperty, - The expected property name for states value and property
 //  expectedValue, - If state is value, then the expected value
 // ]
+
+/* eslint-disable max-len */
 const tests = [
   [{line: 0, ch: 13}, "selector", ".devtools-toolbar"],
   [{line: 8, ch: 13}, "property", ["#devtools-menu.devtools-menulist",
@@ -79,6 +81,7 @@ const tests = [
                                  ".devtools-toolbarbutton#devtools-menu "], "background",
    "linear-gradient(hsla(212,7%,57%,.35),\n              hsla(212,7%,57%,.1)) padding-box"],
 ];
+/* eslint-enable max-len */
 
 const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
   ["<!DOCTYPE html>",
@@ -120,21 +123,15 @@ const TEST_URI = "data:text/html;charset=UTF-8," + encodeURIComponent(
    " </html>"
   ].join("\n"));
 
-let doc = null;
-function test() {
-  waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab();
-  BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser).then(() => {
-    doc = content.document;
-    runTests();
-  });
-  gBrowser.loadURI(TEST_URI);
-}
+add_task(async function test() {
+  const tab = await addTab(TEST_URI);
+  const browser = tab.linkedBrowser;
 
-function runTests() {
-  let completer = new CSSCompleter();
-  let matches = (arr, toCheck) => !arr.some((x, i) => x != toCheck[i]);
-  let checkState = (expected, actual) => {
+  const completer = new CSSCompleter({
+    cssProperties: getClientCssProperties()
+  });
+  const matches = (arr, toCheck) => !arr.some((x, i) => x != toCheck[i]);
+  const checkState = (expected, actual) => {
     if (expected[0] == "null" && actual == null) {
       return true;
     } else if (expected[0] == actual.state && expected[0] == "selector" &&
@@ -153,14 +150,17 @@ function runTests() {
     return false;
   };
 
-  let progress = doc.getElementById("progress");
-  let progressDiv = doc.querySelector("#progress > div");
   let i = 0;
-  for (let expected of tests) {
-    let caret = expected.splice(0, 1)[0];
-    progress.dataset.progress = ++i;
-    progressDiv.style.width = 100 * i / tests.length + "%";
-    let actual = completer.getInfoAt(source, caret);
+  for (const expected of tests) {
+    ++i;
+    const caret = expected.splice(0, 1)[0];
+    await ContentTask.spawn(browser, [i, tests.length], function([idx, len]) {
+      const progress = content.document.getElementById("progress");
+      const progressDiv = content.document.querySelector("#progress > div");
+      progress.dataset.progress = idx;
+      progressDiv.style.width = 100 * idx / len + "%";
+    });
+    const actual = completer.getInfoAt(source, caret);
     if (checkState(expected, actual)) {
       ok(true, "Test " + i + " passed. ");
     } else {
@@ -168,9 +168,11 @@ function runTests() {
          "but found [" + actual.state + ", " +
          (actual.selector || actual.selectors) + ", " +
          actual.propertyName + ", " + actual.value + "].");
-      progress.classList.add("failed");
+      await ContentTask.spawn(browser, null, function() {
+        const progress = content.document.getElementById("progress");
+        progress.classList.add("failed");
+      });
     }
   }
   gBrowser.removeCurrentTab();
-  finish();
-}
+});

@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/Unused.h"
+#include "nsArrayUtils.h"
 #include "nsClipboardProxy.h"
 #include "nsISupportsPrimitives.h"
 #include "nsCOMPtr.h"
@@ -33,7 +35,13 @@ nsClipboardProxy::SetData(nsITransferable *aTransferable,
 
   bool isPrivateData = false;
   aTransferable->GetIsPrivateData(&isPrivateData);
-  child->SendSetClipboard(ipcDataTransfer, isPrivateData, aWhichClipboard);
+  nsCOMPtr<nsIPrincipal> requestingPrincipal;
+  aTransferable->GetRequestingPrincipal(getter_AddRefs(requestingPrincipal));
+  nsContentPolicyType contentPolicyType = nsIContentPolicy::TYPE_OTHER;
+  aTransferable->GetContentPolicyType(&contentPolicyType);
+  child->SendSetClipboard(ipcDataTransfer, isPrivateData,
+                          IPC::Principal(requestingPrincipal),
+                          contentPolicyType, aWhichClipboard);
 
   return NS_OK;
 }
@@ -43,11 +51,11 @@ nsClipboardProxy::GetData(nsITransferable *aTransferable, int32_t aWhichClipboar
 {
    nsTArray<nsCString> types;
   
-  nsCOMPtr<nsISupportsArray> flavorList;
+  nsCOMPtr<nsIArray> flavorList;
   aTransferable->FlavorsTransferableCanImport(getter_AddRefs(flavorList));
   if (flavorList) {
     uint32_t flavorCount = 0;
-    flavorList->Count(&flavorCount);
+    flavorList->GetLength(&flavorCount);
     for (uint32_t j = 0; j < flavorCount; ++j) {
       nsCOMPtr<nsISupportsCString> flavor = do_QueryElementAt(flavorList, j);
       if (flavor) {
@@ -73,39 +81,44 @@ nsClipboardProxy::GetData(nsITransferable *aTransferable, int32_t aWhichClipboar
         do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      nsString data = item.data().get_nsString();
+      const nsString& data = item.data().get_nsString();
       rv = dataWrapper->SetData(data);
       NS_ENSURE_SUCCESS(rv, rv);
 
       rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper,
                                           data.Length() * sizeof(char16_t));
       NS_ENSURE_SUCCESS(rv, rv);
-    } else if (item.data().type() == IPCDataTransferData::TnsCString) {
+    } else if (item.data().type() == IPCDataTransferData::TShmem) {
       // If this is an image, convert it into an nsIInputStream.
-      nsCString flavor = item.flavor();
+      const nsCString& flavor = item.flavor();
+      mozilla::ipc::Shmem data = item.data().get_Shmem();
       if (flavor.EqualsLiteral(kJPEGImageMime) ||
           flavor.EqualsLiteral(kJPGImageMime) ||
           flavor.EqualsLiteral(kPNGImageMime) ||
           flavor.EqualsLiteral(kGIFImageMime)) {
         nsCOMPtr<nsIInputStream> stream;
-        NS_NewCStringInputStream(getter_AddRefs(stream), item.data().get_nsCString());
+
+        NS_NewCStringInputStream(getter_AddRefs(stream),
+                                 nsDependentCString(data.get<char>(), data.Size<char>()));
 
         rv = aTransferable->SetTransferData(flavor.get(), stream, sizeof(nsISupports*));
         NS_ENSURE_SUCCESS(rv, rv);
       } else if (flavor.EqualsLiteral(kNativeHTMLMime) ||
-                 flavor.EqualsLiteral(kRTFMime)) {
+                 flavor.EqualsLiteral(kRTFMime) ||
+                 flavor.EqualsLiteral(kCustomTypesMime)) {
         nsCOMPtr<nsISupportsCString> dataWrapper =
           do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID, &rv);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        nsCString data = item.data().get_nsCString();
-        rv = dataWrapper->SetData(data);
+        rv = dataWrapper->SetData(nsDependentCString(data.get<char>(), data.Size<char>()));
         NS_ENSURE_SUCCESS(rv, rv);
 
         rv = aTransferable->SetTransferData(item.flavor().get(), dataWrapper,
-                                            data.Length());
+                                            data.Size<char>());
         NS_ENSURE_SUCCESS(rv, rv);
       }
+
+      mozilla::Unused << ContentChild::GetSingleton()->DeallocShmem(data);
     }
   }
 

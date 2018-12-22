@@ -10,20 +10,16 @@
 
 #include "GeckoProfiler.h"
 #include "nsComponentManagerUtils.h"
+#include "nsIIdlePeriod.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Services.h"
 
 #ifdef DEBUG
 #define ASSERT_OWNING_THREAD()                                                 \
-  PR_BEGIN_MACRO                                                               \
-    nsIThread* currentThread = NS_GetCurrentThread();                          \
-    if (currentThread) {                                                       \
-      nsCOMPtr<nsISupports> current(do_QueryInterface(currentThread));         \
-      nsCOMPtr<nsISupports> test(do_QueryInterface(mOwningThread));            \
-      MOZ_ASSERT(current == test, "Wrong thread!");                            \
-    }                                                                          \
-  PR_END_MACRO
+  do {                                                                         \
+    MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread());               \
+  } while(0)
 #else
 #define ASSERT_OWNING_THREAD() /* nothing */
 #endif
@@ -31,11 +27,11 @@
 namespace mozilla {
 
 LazyIdleThread::LazyIdleThread(uint32_t aIdleTimeoutMS,
-                               const nsCSubstring& aName,
+                               const nsACString& aName,
                                ShutdownMethod aShutdownMethod,
                                nsIObserver* aIdleObserver)
   : mMutex("LazyIdleThread::mMutex")
-  , mOwningThread(NS_GetCurrentThread())
+  , mOwningEventTarget(GetCurrentThreadSerialEventTarget())
   , mIdleObserver(aIdleObserver)
   , mQueuedRunnables(nullptr)
   , mIdleTimeoutMS(aIdleTimeoutMS)
@@ -47,7 +43,7 @@ LazyIdleThread::LazyIdleThread(uint32_t aIdleTimeoutMS,
   , mIdleTimeoutEnabled(true)
   , mName(aName)
 {
-  MOZ_ASSERT(mOwningThread, "Need owning thread!");
+  MOZ_ASSERT(mOwningEventTarget, "Need owning thread!");
 }
 
 LazyIdleThread::~LazyIdleThread()
@@ -63,8 +59,8 @@ LazyIdleThread::SetWeakIdleObserver(nsIObserver* aObserver)
   ASSERT_OWNING_THREAD();
 
   if (mShutdown) {
-    NS_WARN_IF_FALSE(!aObserver,
-                     "Setting an observer after Shutdown was called!");
+    NS_WARNING_ASSERTION(!aObserver,
+                         "Setting an observer after Shutdown was called!");
     return;
   }
 
@@ -108,7 +104,7 @@ LazyIdleThread::EnableIdleTimeout()
   }
 
   if (mThread) {
-    nsCOMPtr<nsIRunnable> runnable(new nsRunnable());
+    nsCOMPtr<nsIRunnable> runnable(new Runnable("LazyIdleThreadDummyRunnable"));
     if (NS_FAILED(Dispatch(runnable.forget(), NS_DISPATCH_NORMAL))) {
       NS_WARNING("Failed to dispatch!");
     }
@@ -157,18 +153,18 @@ LazyIdleThread::EnsureThread()
     }
   }
 
-  mIdleTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
+  mIdleTimer = NS_NewTimer();
   if (NS_WARN_IF(!mIdleTimer)) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &LazyIdleThread::InitThread);
+  nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod(
+    "LazyIdleThread::InitThread", this, &LazyIdleThread::InitThread);
   if (NS_WARN_IF(!runnable)) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  rv = NS_NewThread(getter_AddRefs(mThread), runnable);
+  rv = NS_NewNamedThread("Lazy Idle", getter_AddRefs(mThread), runnable);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -179,11 +175,6 @@ LazyIdleThread::EnsureThread()
 void
 LazyIdleThread::InitThread()
 {
-  char aLocal;
-  profiler_register_thread(mName.get(), &aLocal);
-
-  PR_SetCurrentThreadName(mName.get());
-
   // Happens on mThread but mThread may not be set yet...
 
   nsCOMPtr<nsIThreadInternal> thread(do_QueryInterface(NS_GetCurrentThread()));
@@ -210,8 +201,6 @@ LazyIdleThread::CleanupThread()
     MOZ_ASSERT(!mThreadIsShuttingDown, "Shouldn't be true ever!");
     mThreadIsShuttingDown = true;
   }
-
-  profiler_unregister_thread();
 }
 
 void
@@ -270,7 +259,7 @@ LazyIdleThread::ShutdownThread()
     if (mShutdownMethod == AutomaticShutdown && NS_IsMainThread()) {
       nsCOMPtr<nsIObserverService> obs =
         mozilla::services::GetObserverService();
-      NS_WARN_IF_FALSE(obs, "Failed to get observer service!");
+      NS_WARNING_ASSERTION(obs, "Failed to get observer service!");
 
       if (obs &&
           NS_FAILED(obs->RemoveObserver(this, "xpcom-shutdown-threads"))) {
@@ -290,8 +279,8 @@ LazyIdleThread::ShutdownThread()
     }
 #endif
 
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &LazyIdleThread::CleanupThread);
+    nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod(
+      "LazyIdleThread::CleanupThread", this, &LazyIdleThread::CleanupThread);
     if (NS_WARN_IF(!runnable)) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -367,9 +356,9 @@ LazyIdleThread::Release()
     // Stabilize refcount.
     mRefCnt = 1;
 
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewNonOwningRunnableMethod(this, &LazyIdleThread::SelfDestruct);
-    NS_WARN_IF_FALSE(runnable, "Couldn't make runnable!");
+    nsCOMPtr<nsIRunnable> runnable = NewNonOwningRunnableMethod(
+      "LazyIdleThread::SelfDestruct", this, &LazyIdleThread::SelfDestruct);
+    NS_WARNING_ASSERTION(runnable, "Couldn't make runnable!");
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
       MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
@@ -386,9 +375,11 @@ LazyIdleThread::Release()
 
 NS_IMPL_QUERY_INTERFACE(LazyIdleThread, nsIThread,
                         nsIEventTarget,
+                        nsISerialEventTarget,
                         nsITimerCallback,
                         nsIThreadObserver,
-                        nsIObserver)
+                        nsIObserver,
+                        nsINamed)
 
 NS_IMETHODIMP
 LazyIdleThread::DispatchFromScript(nsIRunnable* aEvent, uint32_t aFlags)
@@ -398,7 +389,7 @@ LazyIdleThread::DispatchFromScript(nsIRunnable* aEvent, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
-LazyIdleThread::Dispatch(already_AddRefed<nsIRunnable>&& aEvent,
+LazyIdleThread::Dispatch(already_AddRefed<nsIRunnable> aEvent,
                          uint32_t aFlags)
 {
   ASSERT_OWNING_THREAD();
@@ -431,6 +422,12 @@ LazyIdleThread::Dispatch(already_AddRefed<nsIRunnable>&& aEvent,
 }
 
 NS_IMETHODIMP
+LazyIdleThread::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 LazyIdleThread::IsOnCurrentThread(bool* aIsOnCurrentThread)
 {
   if (mThread) {
@@ -439,6 +436,16 @@ LazyIdleThread::IsOnCurrentThread(bool* aIsOnCurrentThread)
 
   *aIsOnCurrentThread = false;
   return NS_OK;
+}
+
+NS_IMETHODIMP_(bool)
+LazyIdleThread::IsOnCurrentThreadInfallible()
+{
+  if (mThread) {
+    return mThread->IsOnCurrentThread();
+  }
+
+  return false;
 }
 
 NS_IMETHODIMP
@@ -450,6 +457,19 @@ LazyIdleThread::GetPRThread(PRThread** aPRThread)
 
   *aPRThread = nullptr;
   return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::GetCanInvokeJS(bool* aCanInvokeJS)
+{
+  *aCanInvokeJS = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::SetCanInvokeJS(bool aCanInvokeJS)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -483,8 +503,14 @@ LazyIdleThread::HasPendingEvents(bool* aHasPendingEvents)
 {
   // This is only supposed to be called from the thread itself so it's not
   // implemented here.
-  NS_NOTREACHED("Shouldn't ever call this!");
+  MOZ_ASSERT_UNREACHABLE("Shouldn't ever call this!");
   return NS_ERROR_UNEXPECTED;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::IdleDispatch(already_AddRefed<nsIRunnable> aEvent)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -493,7 +519,7 @@ LazyIdleThread::ProcessNextEvent(bool aMayWait,
 {
   // This is only supposed to be called from the thread itself so it's not
   // implemented here.
-  NS_NOTREACHED("Shouldn't ever call this!");
+  MOZ_ASSERT_UNREACHABLE("Shouldn't ever call this!");
   return NS_ERROR_UNEXPECTED;
 }
 
@@ -521,9 +547,16 @@ LazyIdleThread::Notify(nsITimer* aTimer)
 }
 
 NS_IMETHODIMP
-LazyIdleThread::OnDispatchedEvent(nsIThreadInternal* /*aThread */)
+LazyIdleThread::GetName(nsACString& aName)
 {
-  MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread, "Wrong thread!");
+  aName.AssignLiteral("LazyIdleThread");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::OnDispatchedEvent()
+{
+  MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread());
   return NS_OK;
 }
 
@@ -560,13 +593,13 @@ LazyIdleThread::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
   }
 
   if (shouldNotifyIdle) {
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &LazyIdleThread::ScheduleTimer);
+    nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod(
+      "LazyIdleThread::ScheduleTimer", this, &LazyIdleThread::ScheduleTimer);
     if (NS_WARN_IF(!runnable)) {
       return NS_ERROR_UNEXPECTED;
     }
 
-    nsresult rv = mOwningThread->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
+    nsresult rv = mOwningEventTarget->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -587,6 +620,26 @@ LazyIdleThread::Observe(nsISupports* /* aSubject */,
 
   Shutdown();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::GetEventTarget(nsIEventTarget** aEventTarget)
+{
+  nsCOMPtr<nsIEventTarget> target = this;
+  target.forget(aEventTarget);
+  return NS_OK;
+}
+
+nsIEventTarget*
+LazyIdleThread::EventTarget()
+{
+  return this;
+}
+
+nsISerialEventTarget*
+LazyIdleThread::SerialEventTarget()
+{
+  return this;
 }
 
 } // namespace mozilla

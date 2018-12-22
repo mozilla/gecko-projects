@@ -8,7 +8,6 @@
 #define mozilla_a11y_TextRange_h__
 
 #include "mozilla/Move.h"
-#include "nsAutoPtr.h"
 #include "nsCaseTreatment.h"
 #include "nsRect.h"
 #include "nsTArray.h"
@@ -48,18 +47,18 @@ public:
   TextRange(HyperTextAccessible* aRoot,
             HyperTextAccessible* aStartContainer, int32_t aStartOffset,
             HyperTextAccessible* aEndContainer, int32_t aEndOffset);
-  TextRange() {}
+  TextRange() : mStartOffset{0}, mEndOffset{0} {}
   TextRange(TextRange&& aRange) :
-    mRoot(mozilla::Move(aRange.mRoot)),
-    mStartContainer(mozilla::Move(aRange.mStartContainer)),
-    mEndContainer(mozilla::Move(aRange.mEndContainer)),
+    mRoot(std::move(aRange.mRoot)),
+    mStartContainer(std::move(aRange.mStartContainer)),
+    mEndContainer(std::move(aRange.mEndContainer)),
     mStartOffset(aRange.mStartOffset), mEndOffset(aRange.mEndOffset) {}
 
   TextRange& operator= (TextRange&& aRange)
   {
-    mRoot = mozilla::Move(aRange.mRoot);
-    mStartContainer = mozilla::Move(aRange.mStartContainer);
-    mEndContainer = mozilla::Move(aRange.mEndContainer);
+    mRoot = std::move(aRange.mRoot);
+    mStartContainer = std::move(aRange.mStartContainer);
+    mEndContainer = std::move(aRange.mEndContainer);
     mStartOffset = aRange.mStartOffset;
     mEndOffset = aRange.mEndOffset;
     return *this;

@@ -21,8 +21,7 @@ interface PerformanceTiming {
   readonly attribute unsigned long long domainLookupEnd;
   readonly attribute unsigned long long connectStart;
   readonly attribute unsigned long long connectEnd;
-  // secureConnectionStart will be implemneted in bug 772589
-  // readonly attribute unsigned long long secureConnectionStart;
+  readonly attribute unsigned long long secureConnectionStart;
   readonly attribute unsigned long long requestStart;
   readonly attribute unsigned long long responseStart;
   readonly attribute unsigned long long responseEnd;
@@ -34,5 +33,17 @@ interface PerformanceTiming {
   readonly attribute unsigned long long loadEventStart;
   readonly attribute unsigned long long loadEventEnd;
 
-  jsonifier;
+  // This is a Chrome proprietary extension and not part of the
+  // performance/navigation timing specification.
+  // Returns 0 if a non-blank paint has not happened.
+  [Pref="dom.performance.time_to_non_blank_paint.enabled"]
+  readonly attribute unsigned long long timeToNonBlankPaint;
+
+  // This is a Mozilla proprietary extension and not part of the
+  // performance/navigation timing specification. It marks the
+  // completion of the first presentation flush after DOMContentLoaded.
+  [Pref="dom.performance.time_to_dom_content_flushed.enabled"]
+  readonly attribute unsigned long long timeToDOMContentFlushed;
+
+  [Default] object toJSON();
 };

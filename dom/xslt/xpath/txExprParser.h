@@ -20,7 +20,7 @@ class Expr;
 class txExprLexer;
 class FunctionCall;
 class LocationStep;
-class nsIAtom;
+class nsAtom;
 class PredicateList;
 class Token;
 class txIParseContext;
@@ -30,7 +30,7 @@ class txExprParser
 {
 public:
 
-    static nsresult createExpr(const nsSubstring& aExpression,
+    static nsresult createExpr(const nsAString& aExpression,
                                txIParseContext* aContext, Expr** aExpr)
     {
         return createExprInternal(aExpression, 0, aContext, aExpr);
@@ -39,13 +39,13 @@ public:
     /**
      * Creates an Attribute Value Template using the given value
      */
-    static nsresult createAVT(const nsSubstring& aAttrValue,
+    static nsresult createAVT(const nsAString& aAttrValue,
                               txIParseContext* aContext,
                               Expr** aResult);
 
 
 protected:
-    static nsresult createExprInternal(const nsSubstring& aExpression,
+    static nsresult createExprInternal(const nsAString& aExpression,
                                        uint32_t aSubStringPos,
                                        txIParseContext* aContext,
                                        Expr** aExpr);
@@ -75,18 +75,18 @@ protected:
     static nsresult createUnionExpr(txExprLexer& lexer,
                                     txIParseContext* aContext,
                                     Expr** aResult);
-                  
+
     static bool isLocationStepToken(Token* aToken);
-                  
+
     static short precedence(Token* aToken);
 
     /**
      * Resolve a QName, given the mContext parse context.
      * Returns prefix and localName as well as namespace ID
      */
-    static nsresult resolveQName(const nsAString& aQName, nsIAtom** aPrefix,
+    static nsresult resolveQName(const nsAString& aQName, nsAtom** aPrefix,
                                  txIParseContext* aContext,
-                                 nsIAtom** aLocalName, int32_t& aNamespace,
+                                 nsAtom** aLocalName, int32_t& aNamespace,
                                  bool aIsNameTest = false);
 
     /**

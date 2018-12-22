@@ -20,10 +20,9 @@ gfxFontFeatureValueSet::GetFontFeatureValuesFor(const nsAString& aFamily,
                                                 const nsAString& aName,
                                                 nsTArray<uint32_t>& aValues)
 {
-    nsAutoString family(aFamily), name(aName);
+    nsAutoString family(aFamily);
     ToLowerCase(family);
-    ToLowerCase(name);
-    FeatureValueHashKey key(family, aVariantProperty, name);
+    FeatureValueHashKey key(family, aVariantProperty, aName);
 
     aValues.Clear();
     FeatureValueHashEntry *entry = mFontFeatureValues.GetEntry(key);
@@ -52,14 +51,22 @@ gfxFontFeatureValueSet::AddFontFeatureValues(const nsAString& aFamily,
         uint32_t j, numValues = fv.valuelist.Length();
         for (j = 0; j < numValues; j++) {
             const ValueList& v = fv.valuelist.ElementAt(j);
-            nsAutoString name(v.name);
-            ToLowerCase(name);
-            FeatureValueHashKey key(family, alternate, name);
-            FeatureValueHashEntry *entry = mFontFeatureValues.PutEntry(key);
-            entry->mKey = key;
-            entry->mValues = v.featureSelectors;
+            auto* array = AppendFeatureValueHashEntry(family, v.name, alternate);
+            *array = v.featureSelectors;
         }
     }
+}
+
+
+nsTArray<uint32_t>*
+gfxFontFeatureValueSet::AppendFeatureValueHashEntry(const nsAString& aFamily,
+                                                    const nsAString& aName,
+                                                    uint32_t aAlternate)
+{
+    FeatureValueHashKey key(aFamily, aAlternate, aName);
+    FeatureValueHashEntry *entry = mFontFeatureValues.PutEntry(key);
+    entry->mKey = key;
+    return &entry->mValues;
 }
 
 bool

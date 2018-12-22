@@ -27,7 +27,7 @@ struct IdValuePair
     explicit IdValuePair(jsid idArg)
       : value(UndefinedValue()), id(idArg)
     {}
-    IdValuePair(jsid idArg, Value valueArg)
+    IdValuePair(jsid idArg, const Value& valueArg)
       : value(valueArg), id(idArg)
     {}
 
@@ -37,7 +37,7 @@ struct IdValuePair
     }
 };
 
-using IdValueVector = GCVector<IdValuePair>;
+using IdValueVector = JS::GCVector<IdValuePair>;
 
 } /* namespace js */
 

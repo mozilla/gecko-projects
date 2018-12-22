@@ -10,12 +10,12 @@
 #include "nsIThreadPool.h"
 #include "nsIThread.h"
 #include "nsIRunnable.h"
-#include "nsEventQueue.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/EventQueue.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Monitor.h"
 
@@ -25,10 +25,9 @@ class nsThreadPool final
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSIEVENTTARGET
+  NS_DECL_NSIEVENTTARGET_FULL
   NS_DECL_NSITHREADPOOL
   NS_DECL_NSIRUNNABLE
-  using nsIEventTarget::Dispatch;
 
   nsThreadPool();
 
@@ -37,11 +36,12 @@ private:
 
   void ShutdownThread(nsIThread* aThread);
   nsresult PutEvent(nsIRunnable* aEvent);
-  nsresult PutEvent(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags);
+  nsresult PutEvent(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags);
 
   nsCOMArray<nsIThread> mThreads;
   mozilla::Mutex        mMutex;
-  nsEventQueue          mEvents;
+  mozilla::CondVar      mEventsAvailable;
+  mozilla::EventQueue   mEvents;
   uint32_t              mThreadLimit;
   uint32_t              mIdleThreadLimit;
   uint32_t              mIdleThreadTimeout;

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=2:et:sw=2:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,20 +10,25 @@
 #define nsBlockReflowContext_h___
 
 #include "nsIFrame.h"
-#include "nsHTMLReflowMetrics.h"
+#include "mozilla/ReflowOutput.h"
 
-class nsBlockReflowState;
-struct nsHTMLReflowState;
 class nsLineBox;
 class nsPresContext;
+namespace mozilla {
+class BlockReflowInput;
+} // namespace mozilla
 
 /**
  * An encapsulation of the state and algorithm for reflowing block frames.
  */
 class nsBlockReflowContext {
+  using BlockReflowInput = mozilla::BlockReflowInput;
+  using ReflowInput = mozilla::ReflowInput;
+  using ReflowOutput = mozilla::ReflowOutput;
+
 public:
   nsBlockReflowContext(nsPresContext* aPresContext,
-                       const nsHTMLReflowState& aParentRS);
+                       const ReflowInput& aParentRI);
   ~nsBlockReflowContext() { }
 
   void ReflowBlock(const mozilla::LogicalRect& aSpace,
@@ -32,31 +37,31 @@ public:
                    nscoord                     aClearance,
                    bool                        aIsAdjacentWithBStart,
                    nsLineBox*                  aLine,
-                   nsHTMLReflowState&          aReflowState,
+                   ReflowInput&          aReflowInput,
                    nsReflowStatus&             aReflowStatus,
-                   nsBlockReflowState&         aState);
+                   BlockReflowInput&         aState);
 
-  bool PlaceBlock(const nsHTMLReflowState& aReflowState,
-                  bool                     aForceFit,
-                  nsLineBox*               aLine,
-                  nsCollapsingMargin&      aBEndMarginResult /* out */,
-                  nsOverflowAreas&         aOverflowAreas,
-                  nsReflowStatus           aReflowStatus);
+  bool PlaceBlock(const ReflowInput& aReflowInput,
+                  bool aForceFit,
+                  nsLineBox* aLine,
+                  nsCollapsingMargin& aBEndMarginResult /* out */,
+                  nsOverflowAreas& aOverflowAreas,
+                  const nsReflowStatus& aReflowStatus);
 
   nsCollapsingMargin& GetCarriedOutBEndMargin() {
     return mMetrics.mCarriedOutBEndMargin;
   }
 
-  const nsHTMLReflowMetrics& GetMetrics() const {
+  const ReflowOutput& GetMetrics() const {
     return mMetrics;
   }
 
   /**
    * Computes the collapsed block-start margin (in the context's parent's
-   * writing mode) for a block whose reflow state is in aRS.
+   * writing mode) for a block whose reflow state is in aRI.
    * The computed margin is added into aMargin, whose writing mode is the
    * parent's mode as found in mMetrics.GetWritingMode(); note this may not be
-   * the block's own writing mode as found in aRS.
+   * the block's own writing mode as found in aRI.
    * If aClearanceFrame is null then this is the first optimistic pass which
    * shall assume that no frames have clearance, and we clear the HasClearance
    * on all frames encountered.
@@ -70,7 +75,7 @@ public:
    * We return true if we changed the clearance state of any line and marked it
    * dirty.
    */
-  bool ComputeCollapsedBStartMargin(const nsHTMLReflowState& aRS,
+  bool ComputeCollapsedBStartMargin(const ReflowInput& aRI,
                                     nsCollapsingMargin* aMargin,
                                     nsIFrame* aClearanceFrame,
                                     bool* aMayNeedRetry,
@@ -78,7 +83,7 @@ public:
 
 protected:
   nsPresContext* mPresContext;
-  const nsHTMLReflowState& mOuterReflowState;
+  const ReflowInput& mOuterReflowInput;
 
   nsIFrame* mFrame;
   mozilla::LogicalRect mSpace;
@@ -86,7 +91,7 @@ protected:
   nscoord mICoord, mBCoord;
   nsSize mContainerSize;
   mozilla::WritingMode mWritingMode;
-  nsHTMLReflowMetrics mMetrics;
+  ReflowOutput mMetrics;
   nsCollapsingMargin mBStartMargin;
 };
 

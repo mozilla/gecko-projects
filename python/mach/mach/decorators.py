@@ -10,7 +10,6 @@ import inspect
 import types
 
 from .base import MachError
-from .config import ConfigProvider
 from .registrar import Registrar
 
 
@@ -185,7 +184,7 @@ def CommandProvider(cls):
 
         if command.name not in seen_commands:
             raise MachError('Command referenced by sub-command does not '
-                'exist: %s' % command.name)
+                            'exist: %s' % command.name)
 
         if command.name not in Registrar.command_handlers:
             continue
@@ -195,9 +194,6 @@ def CommandProvider(cls):
         command.pass_context = pass_context
         parent = Registrar.command_handlers[command.name]
 
-        if parent._parser:
-            raise MachError('cannot declare sub commands against a command '
-                'that has a parser installed: %s' % command)
         if command.subcommand in parent.subcommand_handlers:
             raise MachError('sub-command already defined: %s' % command.subcommand)
 
@@ -238,6 +234,7 @@ class Command(object):
 
         return func
 
+
 class SubCommand(object):
     """Decorator for functions or methods that provide a sub-command.
 
@@ -255,9 +252,9 @@ class SubCommand(object):
 
         description -- A textual description for this sub command.
     """
-    def __init__(self, command, subcommand, description=None):
+    def __init__(self, command, subcommand, description=None, parser=None):
         self._mach_command = _MachCommand(name=command, subcommand=subcommand,
-                                          description=description)
+                                          description=description, parser=parser)
 
     def __call__(self, func):
         if not hasattr(func, '_mach_command'):
@@ -266,6 +263,7 @@ class SubCommand(object):
         func._mach_command |= self._mach_command
 
         return func
+
 
 class CommandArgument(object):
     """Decorator for additional arguments to mach subcommands.
@@ -336,14 +334,13 @@ def SettingsProvider(cls):
     When this decorator is encountered, the underlying class will automatically
     be registered with the Mach registrar and will (likely) be hooked up to the
     mach driver.
-
-    This decorator is only allowed on mach.config.ConfigProvider classes.
     """
-    if not issubclass(cls, ConfigProvider):
-        raise MachError('@SettingsProvider encountered on class that does ' +
-                        'not derived from mach.config.ConfigProvider.')
+    if not hasattr(cls, 'config_settings'):
+        raise MachError('@SettingsProvider must contain a config_settings attribute. It '
+                        'may either be a list of tuples, or a callable that returns a list '
+                        'of tuples. Each tuple must be of the form:\n'
+                        '(<section>.<option>, <type_cls>, <description>, <default>, <choices>)\n'
+                        'as specified by ConfigSettings._format_metadata.')
 
     Registrar.register_settings_provider(cls)
-
     return cls
-

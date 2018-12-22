@@ -27,19 +27,17 @@ HTMLLinkAccessible::
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(HTMLLinkAccessible, HyperTextAccessible)
-
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessible
 
 role
-HTMLLinkAccessible::NativeRole()
+HTMLLinkAccessible::NativeRole() const
 {
   return roles::LINK;
 }
 
 uint64_t
-HTMLLinkAccessible::NativeState()
+HTMLLinkAccessible::NativeState() const
 {
   return HyperTextAccessibleWrap::NativeState() & ~states::READONLY;
 }
@@ -68,14 +66,14 @@ HTMLLinkAccessible::NativeInteractiveState() const
   // This is how we indicate it is a named anchor. In other words, this anchor
   // can be selected as a location :) There is no other better state to use to
   // indicate this.
-  if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::name))
+  if (mContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::name))
     state |= states::SELECTABLE;
 
   return state;
 }
 
 void
-HTMLLinkAccessible::Value(nsString& aValue)
+HTMLLinkAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
 
@@ -85,7 +83,7 @@ HTMLLinkAccessible::Value(nsString& aValue)
 }
 
 uint8_t
-HTMLLinkAccessible::ActionCount()
+HTMLLinkAccessible::ActionCount() const
 {
   return IsLinked() ? 1 : HyperTextAccessible::ActionCount();
 }
@@ -106,7 +104,7 @@ HTMLLinkAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-HTMLLinkAccessible::DoAction(uint8_t aIndex)
+HTMLLinkAccessible::DoAction(uint8_t aIndex) const
 {
   if (!IsLinked())
     return HyperTextAccessible::DoAction(aIndex);
@@ -123,14 +121,14 @@ HTMLLinkAccessible::DoAction(uint8_t aIndex)
 // HyperLinkAccessible
 
 bool
-HTMLLinkAccessible::IsLink()
+HTMLLinkAccessible::IsLink() const
 {
   // Expose HyperLinkAccessible unconditionally.
   return true;
 }
 
 already_AddRefed<nsIURI>
-HTMLLinkAccessible::AnchorURIAt(uint32_t aAnchorIndex)
+HTMLLinkAccessible::AnchorURIAt(uint32_t aAnchorIndex) const
 {
   return aAnchorIndex == 0 ? mContent->GetHrefURI() : nullptr;
 }

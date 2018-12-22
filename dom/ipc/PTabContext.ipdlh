@@ -4,8 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include "mozilla/dom/TabMessageUtils.h";
+
 include protocol PBrowser;
 include PBrowserOrId;
+
+using UIStateChangeType from "nsPIDOMWindow.h";
+using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 
 namespace mozilla {
 namespace dom {
@@ -33,20 +38,26 @@ struct PopupIPCTabContext
 // An IPCTabContext which corresponds to an app, browser, or normal frame.
 struct FrameIPCTabContext
 {
-  // The stringified originAttributes dictionary.
-  nsCString originSuffix;
-
-  // The ID of the app containing this app/browser frame, if applicable.
-  uint32_t frameOwnerAppId;
-
-  // The origin without originAttribute suffix for a signed package.
-  // This value would be empty if the TabContext doesn't own a signed
-  // package.
-  nsCString signedPkgOriginNoSuffix;
+  // The originAttributes dictionary.
+  OriginAttributes originAttributes;
 
   // Whether this is a mozbrowser frame.  <iframe mozbrowser mozapp> and
   // <xul:browser> are not considered to be mozbrowser frames.
   bool isMozBrowserElement;
+
+  // The requested presentation URL.
+  // This value would be empty if the TabContext isn't created for
+  // presented content.
+  nsString presentationURL;
+
+  // Keyboard indicator state inherited from the parent.
+  UIStateChangeType showAccelerators;
+  UIStateChangeType showFocusRings;
+};
+
+struct JSPluginFrameIPCTabContext
+{
+  uint32_t jsPluginId;
 };
 
 // XXXcatalinb: This is only used by ServiceWorkerClients::OpenWindow.
@@ -67,6 +78,7 @@ union IPCTabContext
 {
   PopupIPCTabContext;
   FrameIPCTabContext;
+  JSPluginFrameIPCTabContext;
   UnsafeIPCTabContext;
 };
 

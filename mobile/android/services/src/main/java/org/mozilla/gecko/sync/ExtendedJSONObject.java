@@ -10,6 +10,7 @@ import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 import org.mozilla.apache.commons.codec.binary.Base64;
 import org.mozilla.gecko.sync.UnexpectedJSONException.BadRequiredFieldJSONException;
+import org.mozilla.gecko.util.StringUtils;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -25,7 +26,7 @@ import java.util.Set;
  * @author rnewman
  *
  */
-public class ExtendedJSONObject {
+public class ExtendedJSONObject implements Cloneable {
 
   public JSONObject object;
 
@@ -138,7 +139,7 @@ public class ExtendedJSONObject {
    */
   public static ExtendedJSONObject parseUTF8AsJSONObject(byte[] in)
       throws NonObjectJSONException, IOException {
-    return new ExtendedJSONObject(new String(in, "UTF-8"));
+    return new ExtendedJSONObject(new String(in, StringUtils.UTF_8));
   }
 
   public ExtendedJSONObject() {
@@ -174,7 +175,7 @@ public class ExtendedJSONObject {
   }
 
   @Override
-  public ExtendedJSONObject clone() {
+  public ExtendedJSONObject clone() throws CloneNotSupportedException {
     return new ExtendedJSONObject((JSONObject) this.object.clone());
   }
 
@@ -271,8 +272,7 @@ public class ExtendedJSONObject {
   }
 
   protected void putRaw(String key, Object value) {
-    @SuppressWarnings("unchecked")
-    Map<Object, Object> map = this.object;
+    Map<String, Object> map = this.object;
     map.put(key, value);
   }
 

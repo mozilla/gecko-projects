@@ -5,10 +5,11 @@
  *
  * The origin of this IDL file is
  * http://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html
- *
+ * https://w3c.github.io/push-api/
+ * https://notifications.spec.whatwg.org/
  */
 
-[Func="mozilla::dom::ServiceWorkerRegistrationVisible",
+[Func="mozilla::dom::DOMPrefs::ServiceWorkersEnabled",
  Exposed=(Window,Worker)]
 interface ServiceWorkerRegistration : EventTarget {
   [Unforgeable] readonly attribute ServiceWorker? installing;
@@ -16,6 +17,8 @@ interface ServiceWorkerRegistration : EventTarget {
   [Unforgeable] readonly attribute ServiceWorker? active;
 
   readonly attribute USVString scope;
+  [Throws]
+  readonly attribute ServiceWorkerUpdateViaCache updateViaCache;
 
   [Throws, NewObject]
   Promise<void> update();
@@ -27,9 +30,22 @@ interface ServiceWorkerRegistration : EventTarget {
   attribute EventHandler onupdatefound;
 };
 
+enum ServiceWorkerUpdateViaCache {
+  "imports",
+  "all",
+  "none"
+};
+
+// https://w3c.github.io/push-api/
 partial interface ServiceWorkerRegistration {
-#ifndef MOZ_SIMPLEPUSH
-  [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
+  [Throws, Exposed=(Window,Worker), Func="mozilla::dom::DOMPrefs::PushEnabled"]
   readonly attribute PushManager pushManager;
-#endif
+};
+
+// https://notifications.spec.whatwg.org/
+partial interface ServiceWorkerRegistration {
+  [Throws, Func="mozilla::dom::DOMPrefs::NotificationEnabledInServiceWorkers"]
+  Promise<void> showNotification(DOMString title, optional NotificationOptions options);
+  [Throws, Func="mozilla::dom::DOMPrefs::NotificationEnabledInServiceWorkers"]
+  Promise<sequence<Notification>> getNotifications(optional GetNotificationOptions filter);
 };

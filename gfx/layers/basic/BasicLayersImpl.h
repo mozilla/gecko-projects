@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -12,7 +13,6 @@
 #include "gfxContext.h"                 // for gfxContext, etc
 #include "mozilla/Attributes.h"         // for MOZ_STACK_CLASS
 #include "mozilla/Maybe.h"              // for Maybe
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -62,7 +62,7 @@ protected:
   }
 
 public:
-  virtual void SetVisibleRegion(const LayerIntRegion& aRegion)
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion) override
   {
     NS_ASSERTION(BasicManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -106,7 +106,7 @@ void
 FillRectWithMask(gfx::DrawTarget* aDT,
                  const gfx::Rect& aRect,
                  gfx::SourceSurface* aSurface,
-                 gfx::Filter aFilter,
+                 gfx::SamplingFilter aSamplingFilter,
                  const gfx::DrawOptions& aOptions,
                  gfx::ExtendMode aExtendMode,
                  gfx::SourceSurface* aMaskSource = nullptr,
@@ -117,7 +117,7 @@ FillRectWithMask(gfx::DrawTarget* aDT,
                  const gfx::Point& aDeviceOffset,
                  const gfx::Rect& aRect,
                  gfx::SourceSurface* aSurface,
-                 gfx::Filter aFilter,
+                 gfx::SamplingFilter aSamplingFilter,
                  const gfx::DrawOptions& aOptions,
                  Layer* aMaskLayer);
 void
@@ -127,6 +127,26 @@ FillRectWithMask(gfx::DrawTarget* aDT,
                  const gfx::Color& aColor,
                  const gfx::DrawOptions& aOptions,
                  Layer* aMaskLayer);
+
+void
+FillPathWithMask(gfx::DrawTarget* aDT,
+                 const gfx::Path* aPath,
+                 const gfx::Rect& aClipRect,
+                 const gfx::Color& aColor,
+                 const gfx::DrawOptions& aOptions,
+                 gfx::SourceSurface* aMaskSource = nullptr,
+                 const gfx::Matrix* aMaskTransform = nullptr);
+void
+FillPathWithMask(gfx::DrawTarget* aDT,
+                 const gfx::Path* aPath,
+                 const gfx::Rect& aClipRect,
+                 gfx::SourceSurface* aSurface,
+                 gfx::SamplingFilter aSamplingFilter,
+                 const gfx::DrawOptions& aOptions,
+                 gfx::ExtendMode aExtendMode,
+                 gfx::SourceSurface* aMaskSource,
+                 const gfx::Matrix* aMaskTransform,
+                 const gfx::Matrix* aSurfaceTransform);
 
 BasicImplData*
 ToData(Layer* aLayer);

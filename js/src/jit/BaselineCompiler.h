@@ -31,7 +31,9 @@ namespace jit {
 
 #define OPCODE_LIST(_)         \
     _(JSOP_NOP)                \
+    _(JSOP_NOP_DESTRUCTURING)  \
     _(JSOP_LABEL)              \
+    _(JSOP_ITERNEXT)           \
     _(JSOP_POP)                \
     _(JSOP_POPN)               \
     _(JSOP_DUPAT)              \
@@ -41,6 +43,7 @@ namespace jit {
     _(JSOP_DUP2)               \
     _(JSOP_SWAP)               \
     _(JSOP_PICK)               \
+    _(JSOP_UNPICK)             \
     _(JSOP_GOTO)               \
     _(JSOP_IFEQ)               \
     _(JSOP_IFNE)               \
@@ -70,6 +73,7 @@ namespace jit {
     _(JSOP_REGEXP)             \
     _(JSOP_LAMBDA)             \
     _(JSOP_LAMBDA_ARROW)       \
+    _(JSOP_SETFUNNAME)         \
     _(JSOP_BITOR)              \
     _(JSOP_BITXOR)             \
     _(JSOP_BITAND)             \
@@ -97,7 +101,6 @@ namespace jit {
     _(JSOP_BITNOT)             \
     _(JSOP_NEG)                \
     _(JSOP_NEWARRAY)           \
-    _(JSOP_SPREADCALLARRAY)    \
     _(JSOP_NEWARRAY_COPYONWRITE) \
     _(JSOP_INITELEM_ARRAY)     \
     _(JSOP_NEWOBJECT)          \
@@ -112,14 +115,17 @@ namespace jit {
     _(JSOP_INITHIDDENPROP)     \
     _(JSOP_INITPROP_GETTER)    \
     _(JSOP_INITPROP_SETTER)    \
-    _(JSOP_ARRAYPUSH)          \
     _(JSOP_GETELEM)            \
     _(JSOP_SETELEM)            \
     _(JSOP_STRICTSETELEM)      \
     _(JSOP_CALLELEM)           \
     _(JSOP_DELELEM)            \
     _(JSOP_STRICTDELELEM)      \
+    _(JSOP_GETELEM_SUPER)      \
+    _(JSOP_SETELEM_SUPER)      \
+    _(JSOP_STRICTSETELEM_SUPER) \
     _(JSOP_IN)                 \
+    _(JSOP_HASOWN)             \
     _(JSOP_GETGNAME)           \
     _(JSOP_BINDGNAME)          \
     _(JSOP_SETGNAME)           \
@@ -132,8 +138,11 @@ namespace jit {
     _(JSOP_CALLPROP)           \
     _(JSOP_DELPROP)            \
     _(JSOP_STRICTDELPROP)      \
+    _(JSOP_GETPROP_SUPER)      \
+    _(JSOP_SETPROP_SUPER)      \
+    _(JSOP_STRICTSETPROP_SUPER) \
     _(JSOP_LENGTH)             \
-    _(JSOP_GETXPROP)           \
+    _(JSOP_GETBOUNDNAME)       \
     _(JSOP_GETALIASEDVAR)      \
     _(JSOP_SETALIASEDVAR)      \
     _(JSOP_GETNAME)            \
@@ -157,6 +166,7 @@ namespace jit {
     _(JSOP_INITALIASEDLEXICAL) \
     _(JSOP_UNINITIALIZED)      \
     _(JSOP_CALL)               \
+    _(JSOP_CALL_IGNORES_RV)    \
     _(JSOP_CALLITER)           \
     _(JSOP_FUNCALL)            \
     _(JSOP_FUNAPPLY)           \
@@ -180,15 +190,21 @@ namespace jit {
     _(JSOP_FINALLY)            \
     _(JSOP_GOSUB)              \
     _(JSOP_RETSUB)             \
-    _(JSOP_PUSHBLOCKSCOPE)     \
-    _(JSOP_POPBLOCKSCOPE)      \
-    _(JSOP_FRESHENBLOCKSCOPE)  \
-    _(JSOP_DEBUGLEAVEBLOCK)    \
+    _(JSOP_PUSHLEXICALENV)     \
+    _(JSOP_POPLEXICALENV)      \
+    _(JSOP_FRESHENLEXICALENV)  \
+    _(JSOP_RECREATELEXICALENV) \
+    _(JSOP_DEBUGLEAVELEXICALENV) \
+    _(JSOP_PUSHVARENV)         \
+    _(JSOP_POPVARENV)          \
     _(JSOP_EXCEPTION)          \
     _(JSOP_DEBUGGER)           \
     _(JSOP_ARGUMENTS)          \
     _(JSOP_RUNONCE)            \
     _(JSOP_REST)               \
+    _(JSOP_TOASYNC)            \
+    _(JSOP_TOASYNCGEN)         \
+    _(JSOP_TOASYNCITER)        \
     _(JSOP_TOID)               \
     _(JSOP_TOSTRING)           \
     _(JSOP_TABLESWITCH)        \
@@ -196,33 +212,52 @@ namespace jit {
     _(JSOP_MOREITER)           \
     _(JSOP_ISNOITER)           \
     _(JSOP_ENDITER)            \
+    _(JSOP_ISGENCLOSING)       \
     _(JSOP_GENERATOR)          \
     _(JSOP_INITIALYIELD)       \
     _(JSOP_YIELD)              \
+    _(JSOP_AWAIT)              \
     _(JSOP_DEBUGAFTERYIELD)    \
     _(JSOP_FINALYIELDRVAL)     \
     _(JSOP_RESUME)             \
     _(JSOP_CALLEE)             \
+    _(JSOP_SUPERBASE)          \
+    _(JSOP_SUPERFUN)           \
     _(JSOP_GETRVAL)            \
     _(JSOP_SETRVAL)            \
     _(JSOP_RETRVAL)            \
     _(JSOP_RETURN)             \
     _(JSOP_FUNCTIONTHIS)       \
     _(JSOP_GLOBALTHIS)         \
+    _(JSOP_CHECKISOBJ)         \
+    _(JSOP_CHECKISCALLABLE)    \
     _(JSOP_CHECKTHIS)          \
+    _(JSOP_CHECKTHISREINIT)    \
     _(JSOP_CHECKRETURN)        \
     _(JSOP_NEWTARGET)          \
     _(JSOP_SUPERCALL)          \
     _(JSOP_SPREADSUPERCALL)    \
     _(JSOP_THROWSETCONST)      \
     _(JSOP_THROWSETALIASEDCONST) \
+    _(JSOP_THROWSETCALLEE)     \
     _(JSOP_INITHIDDENPROP_GETTER) \
     _(JSOP_INITHIDDENPROP_SETTER) \
     _(JSOP_INITHIDDENELEM)     \
     _(JSOP_INITHIDDENELEM_GETTER) \
     _(JSOP_INITHIDDENELEM_SETTER) \
     _(JSOP_CHECKOBJCOERCIBLE)  \
-    _(JSOP_DEBUGCHECKSELFHOSTED)
+    _(JSOP_DEBUGCHECKSELFHOSTED) \
+    _(JSOP_JUMPTARGET)         \
+    _(JSOP_IS_CONSTRUCTING)    \
+    _(JSOP_TRY_DESTRUCTURING_ITERCLOSE) \
+    _(JSOP_CHECKCLASSHERITAGE) \
+    _(JSOP_INITHOMEOBJECT)     \
+    _(JSOP_BUILTINPROTO)       \
+    _(JSOP_OBJWITHPROTO)       \
+    _(JSOP_FUNWITHPROTO)       \
+    _(JSOP_CLASSCONSTRUCTOR)   \
+    _(JSOP_DERIVEDCONSTRUCTOR) \
+    _(JSOP_IMPORTMETA)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {
@@ -241,9 +276,9 @@ class BaselineCompiler : public BaselineCompilerSpecific
     // equivalent positions when debug mode is off.
     CodeOffset postDebugPrologueOffset_;
 
-    // For each INITIALYIELD or YIELD op, this Vector maps the yield index
-    // to the bytecode offset of the next op.
-    Vector<uint32_t>            yieldOffsets_;
+    // For each INITIALYIELD or YIELD or AWAIT op, this Vector maps the yield
+    // index to the bytecode offset of the next op.
+    Vector<uint32_t>            yieldAndAwaitOffsets_;
 
     // Whether any on stack arguments are modified.
     bool modifiesArguments_;
@@ -261,43 +296,43 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
   public:
     BaselineCompiler(JSContext* cx, TempAllocator& alloc, JSScript* script);
-    bool init();
+    MOZ_MUST_USE bool init();
 
     MethodStatus compile();
 
   private:
     MethodStatus emitBody();
 
-    bool emitCheckThis(ValueOperand val);
+    MOZ_MUST_USE bool emitCheckThis(ValueOperand val, bool reinit=false);
     void emitLoadReturnValue(ValueOperand val);
 
-    void emitInitializeLocals(size_t n, const Value& v);
-    bool emitPrologue();
-    bool emitEpilogue();
-    bool emitOutOfLinePostBarrierSlot();
-    bool emitIC(ICStub* stub, ICEntry::Kind kind);
-    bool emitOpIC(ICStub* stub) {
+    void emitInitializeLocals();
+    MOZ_MUST_USE bool emitPrologue();
+    MOZ_MUST_USE bool emitEpilogue();
+    MOZ_MUST_USE bool emitOutOfLinePostBarrierSlot();
+    MOZ_MUST_USE bool emitIC(ICStub* stub, ICEntry::Kind kind);
+    MOZ_MUST_USE bool emitOpIC(ICStub* stub) {
         return emitIC(stub, ICEntry::Kind_Op);
     }
-    bool emitNonOpIC(ICStub* stub) {
+    MOZ_MUST_USE bool emitNonOpIC(ICStub* stub) {
         return emitIC(stub, ICEntry::Kind_NonOp);
     }
 
-    bool emitStackCheck(bool earlyCheck=false);
-    bool emitInterruptCheck();
-    bool emitWarmUpCounterIncrement(bool allowOsr=true);
-    bool emitArgumentTypeChecks();
+    MOZ_MUST_USE bool emitStackCheck(bool earlyCheck=false);
+    MOZ_MUST_USE bool emitInterruptCheck();
+    MOZ_MUST_USE bool emitWarmUpCounterIncrement(bool allowOsr=true);
+    MOZ_MUST_USE bool emitArgumentTypeChecks();
     void emitIsDebuggeeCheck();
-    bool emitDebugPrologue();
-    bool emitDebugTrap();
-    void emitCoverage(jsbytecode* pc);
-    bool emitTraceLoggerEnter();
-    bool emitTraceLoggerExit();
+    MOZ_MUST_USE bool emitDebugPrologue();
+    MOZ_MUST_USE bool emitDebugTrap();
+    MOZ_MUST_USE bool emitTraceLoggerEnter();
+    MOZ_MUST_USE bool emitTraceLoggerExit();
+    MOZ_MUST_USE bool emitTraceLoggerResume(Register script, AllocatableGeneralRegisterSet& regs);
 
     void emitProfilerEnterFrame();
     void emitProfilerExitFrame();
 
-    bool initScopeChain();
+    MOZ_MUST_USE bool initEnvironmentChain();
 
     void storeValue(const StackValue* source, const Address& dest,
                     const ValueOperand& scratch);
@@ -307,40 +342,45 @@ class BaselineCompiler : public BaselineCompilerSpecific
 #undef EMIT_OP
 
     // JSOP_NEG, JSOP_BITNOT
-    bool emitUnaryArith();
+    MOZ_MUST_USE bool emitUnaryArith();
 
     // JSOP_BITXOR, JSOP_LSH, JSOP_ADD etc.
-    bool emitBinaryArith();
+    MOZ_MUST_USE bool emitBinaryArith();
 
     // Handles JSOP_LT, JSOP_GT, and friends
-    bool emitCompare();
+    MOZ_MUST_USE bool emitCompare();
 
-    bool emitReturn();
+    MOZ_MUST_USE bool emitReturn();
 
-    bool emitToBoolean();
-    bool emitTest(bool branchIfTrue);
-    bool emitAndOr(bool branchIfTrue);
-    bool emitCall();
-    bool emitSpreadCall();
+    MOZ_MUST_USE bool emitToBoolean();
+    MOZ_MUST_USE bool emitTest(bool branchIfTrue);
+    MOZ_MUST_USE bool emitAndOr(bool branchIfTrue);
+    MOZ_MUST_USE bool emitCall();
+    MOZ_MUST_USE bool emitSpreadCall();
 
-    bool emitInitPropGetterSetter();
-    bool emitInitElemGetterSetter();
+    MOZ_MUST_USE bool emitInitPropGetterSetter();
+    MOZ_MUST_USE bool emitInitElemGetterSetter();
 
-    bool emitFormalArgAccess(uint32_t arg, bool get);
+    MOZ_MUST_USE bool emitFormalArgAccess(uint32_t arg, bool get);
 
-    bool emitThrowConstAssignment();
-    bool emitUninitializedLexicalCheck(const ValueOperand& val);
+    MOZ_MUST_USE bool emitThrowConstAssignment();
+    MOZ_MUST_USE bool emitUninitializedLexicalCheck(const ValueOperand& val);
 
-    bool addPCMappingEntry(bool addIndexEntry);
+    MOZ_MUST_USE bool emitIsMagicValue();
 
-    bool addYieldOffset();
+    MOZ_MUST_USE bool addPCMappingEntry(bool addIndexEntry);
 
-    void getScopeCoordinateObject(Register reg);
-    Address getScopeCoordinateAddressFromObject(Register objReg, Register reg);
-    Address getScopeCoordinateAddress(Register reg);
+    MOZ_MUST_USE bool addYieldAndAwaitOffset();
+
+    void getEnvironmentCoordinateObject(Register reg);
+    Address getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg);
+    Address getEnvironmentCoordinateAddress(Register reg);
+
+    void getThisEnvironmentCallee(Register reg);
 };
 
 extern const VMFunction NewArrayCopyOnWriteInfo;
+extern const VMFunction ImplicitThisInfo;
 
 } // namespace jit
 } // namespace js

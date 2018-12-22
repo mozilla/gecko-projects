@@ -51,7 +51,6 @@ public:
   NS_IMETHOD GetIsGPU2Active(bool *aIsGPU2Active) override;
   using GfxInfoBase::GetFeatureStatus;
   using GfxInfoBase::GetFeatureSuggestedDriverVersion;
-  using GfxInfoBase::GetWebGLParameter;
 
   void EnsureInitialized();
 
@@ -73,6 +72,7 @@ protected:
                                         int32_t *aStatus, 
                                         nsAString & aSuggestedDriverVersion, 
                                         const nsTArray<GfxDriverInfo>& aDriverInfo,
+                                        nsACString &aFailureId,
                                         OperatingSystem* aOS = nullptr) override;
   virtual const nsTArray<GfxDriverInfo>& GetGfxDriverInfo() override;
 

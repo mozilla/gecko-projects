@@ -14,10 +14,6 @@
 #include "mozilla/Telemetry.h"
 #include "nsThreadUtils.h"
 
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
-#include "nsDirectoryServiceDefs.h"
-#endif
-
 using std::vector;
 using std::string;
 
@@ -25,109 +21,53 @@ using mozilla::ipc::BrowserProcessSubThread;
 using mozilla::ipc::GeckoChildProcessHost;
 using mozilla::plugins::LaunchCompleteTask;
 using mozilla::plugins::PluginProcessParent;
-using base::ProcessArchitecture;
 
-template<>
-struct RunnableMethodTraits<PluginProcessParent>
-{
-    static void RetainCallee(PluginProcessParent* obj) { }
-    static void ReleaseCallee(PluginProcessParent* obj) { }
-};
+#ifdef XP_WIN
+PluginProcessParent::PidSet* PluginProcessParent::sPidSet = nullptr;
+#endif
 
 PluginProcessParent::PluginProcessParent(const std::string& aPluginFilePath) :
-    GeckoChildProcessHost(GeckoProcessType_Plugin),
-    mPluginFilePath(aPluginFilePath),
-    mTaskFactory(this),
-    mMainMsgLoop(MessageLoop::current()),
-    mRunCompleteTaskImmediately(false)
+      GeckoChildProcessHost(GeckoProcessType_Plugin)
+    , mPluginFilePath(aPluginFilePath)
+    , mTaskFactory(this)
+    , mMainMsgLoop(MessageLoop::current())
+#ifdef XP_WIN
+    , mChildPid(0)
+#endif
 {
 }
 
 PluginProcessParent::~PluginProcessParent()
 {
-}
-
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
-static void
-AddSandboxAllowedFile(vector<std::wstring>& aAllowedFiles, nsIProperties* aDirSvc,
-                      const char* aDir, const nsAString& aSuffix = EmptyString())
-{
-    nsCOMPtr<nsIFile> userDir;
-    nsresult rv = aDirSvc->Get(aDir, NS_GET_IID(nsIFile), getter_AddRefs(userDir));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
+#ifdef XP_WIN
+    if (sPidSet && mChildPid) {
+        sPidSet->RemoveEntry(mChildPid);
+        if (sPidSet->IsEmpty()) {
+            delete sPidSet;
+            sPidSet = nullptr;
+        }
     }
-
-    nsAutoString userDirPath;
-    rv = userDir->GetPath(userDirPath);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    if (!aSuffix.IsEmpty()) {
-        userDirPath.Append(aSuffix);
-    }
-    aAllowedFiles.push_back(std::wstring(userDirPath.get()));
-    return;
-}
-
-static void
-AddSandboxAllowedFiles(int32_t aSandboxLevel,
-                       vector<std::wstring>& aAllowedFilesRead,
-                       vector<std::wstring>& aAllowedFilesReadWrite,
-                       vector<std::wstring>& aAllowedDirectories)
-{
-    if (aSandboxLevel < 2) {
-        return;
-    }
-
-    nsresult rv;
-    nsCOMPtr<nsIProperties> dirSvc =
-        do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-    }
-
-    // Higher than level 2 currently removes the users own rights.
-    if (aSandboxLevel > 2) {
-        AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR);
-        AddSandboxAllowedFile(aAllowedFilesRead, dirSvc, NS_WIN_HOME_DIR,
-                              NS_LITERAL_STRING("\\*"));
-    }
-
-    // Level 2 and above is now using low integrity, so we need to give write
-    // access to the Flash directories. Access also has to be given to create
-    // the parent directories as they may not exist.
-    // This should be made Flash specific (Bug 1171396).
-    AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Macromedia\\Flash Player\\*"));
-    AddSandboxAllowedFile(aAllowedDirectories, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Macromedia\\Flash Player"));
-    AddSandboxAllowedFile(aAllowedDirectories, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Macromedia"));
-    AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Adobe\\Flash Player\\*"));
-    AddSandboxAllowedFile(aAllowedDirectories, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Adobe\\Flash Player"));
-    AddSandboxAllowedFile(aAllowedDirectories, dirSvc, NS_WIN_APPDATA_DIR,
-                          NS_LITERAL_STRING("\\Adobe"));
-
-    // Write access to the Temp directory is needed in some mochitest crash
-    // tests.
-    // Bug 1171393 tracks removing this requirement.
-    AddSandboxAllowedFile(aAllowedFilesReadWrite, dirSvc, NS_OS_TEMP_DIR,
-                          NS_LITERAL_STRING("\\*"));
-}
 #endif
+}
 
 bool
 PluginProcessParent::Launch(mozilla::UniquePtr<LaunchCompleteTask> aLaunchCompleteTask,
-                            int32_t aSandboxLevel)
+                            int32_t aSandboxLevel,
+                            bool aIsSandboxLoggingEnabled)
 {
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+#if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_SANDBOX)
+    // At present, the Mac Flash plugin sandbox does not support different
+    // levels and is enabled via a boolean pref or environment variable.
+    // On Mac, when |aSandboxLevel| is positive, we enable the sandbox.
+#if defined(XP_WIN)
     mSandboxLevel = aSandboxLevel;
-    AddSandboxAllowedFiles(mSandboxLevel, mAllowedFilesRead,
-                           mAllowedFilesReadWrite, mAllowedDirectories);
+
+    // The sandbox process sometimes needs read access to the plugin file.
+    if (aSandboxLevel >= 3) {
+        std::wstring pluginFile(NS_ConvertUTF8toUTF16(mPluginFilePath.c_str()).get());
+        mAllowedFilesRead.push_back(pluginFile);
+    }
+#endif // XP_WIN
 #else
     if (aSandboxLevel != 0) {
         MOZ_ASSERT(false,
@@ -135,48 +75,22 @@ PluginProcessParent::Launch(mozilla::UniquePtr<LaunchCompleteTask> aLaunchComple
     }
 #endif
 
-    ProcessArchitecture currentArchitecture = base::GetCurrentProcessArchitecture();
-    uint32_t containerArchitectures = GetSupportedArchitecturesForProcessType(GeckoProcessType_Plugin);
-
-    uint32_t pluginLibArchitectures = currentArchitecture;
-#ifdef XP_MACOSX
-    nsresult rv = GetArchitecturesForBinary(mPluginFilePath.c_str(), &pluginLibArchitectures);
-    if (NS_FAILED(rv)) {
-        // If the call failed just assume that we want the current architecture.
-        pluginLibArchitectures = currentArchitecture;
-    }
-#endif
-
-    ProcessArchitecture selectedArchitecture = currentArchitecture;
-    if (!(pluginLibArchitectures & containerArchitectures & currentArchitecture)) {
-        // Prefererence in order: x86_64, i386, PPC. The only particularly important thing
-        // about this order is that we'll prefer 64-bit architectures first.
-        if (base::PROCESS_ARCH_X86_64 & pluginLibArchitectures & containerArchitectures) {
-            selectedArchitecture = base::PROCESS_ARCH_X86_64;
-        }
-        else if (base::PROCESS_ARCH_I386 & pluginLibArchitectures & containerArchitectures) {
-            selectedArchitecture = base::PROCESS_ARCH_I386;
-        }
-        else if (base::PROCESS_ARCH_PPC & pluginLibArchitectures & containerArchitectures) {
-            selectedArchitecture = base::PROCESS_ARCH_PPC;
-        }
-        else if (base::PROCESS_ARCH_ARM & pluginLibArchitectures & containerArchitectures) {
-          selectedArchitecture = base::PROCESS_ARCH_ARM;
-        }
-        else if (base::PROCESS_ARCH_MIPS & pluginLibArchitectures & containerArchitectures) {
-          selectedArchitecture = base::PROCESS_ARCH_MIPS;
-        }
-        else {
-            return false;
-        }
-    }
-
-    mLaunchCompleteTask = mozilla::Move(aLaunchCompleteTask);
+    mLaunchCompleteTask = std::move(aLaunchCompleteTask);
 
     vector<string> args;
     args.push_back(MungePluginDsoPath(mPluginFilePath));
 
-    bool result = AsyncLaunch(args, selectedArchitecture);
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+    if (aSandboxLevel > 0) {
+        args.push_back("-flashSandboxLevel");
+        args.push_back(std::to_string(aSandboxLevel));
+        if (aIsSandboxLoggingEnabled) {
+            args.push_back("-flashSandboxLogging");
+        }
+    }
+#endif
+
+    bool result = AsyncLaunch(args);
     if (!result) {
         mLaunchCompleteTask = nullptr;
     }
@@ -194,14 +108,10 @@ PluginProcessParent::Delete()
       return;
   }
 
-  ioLoop->PostTask(FROM_HERE,
-                   NewRunnableMethod(this, &PluginProcessParent::Delete));
-}
-
-void
-PluginProcessParent::SetCallRunnableImmediately(bool aCallImmediately)
-{
-    mRunCompleteTaskImmediately = aCallImmediately;
+  ioLoop->PostTask(
+    NewNonOwningRunnableMethod("plugins::PluginProcessParent::Delete",
+                               this,
+                               &PluginProcessParent::Delete));
 }
 
 /**
@@ -224,7 +134,7 @@ bool
 PluginProcessParent::WaitUntilConnected(int32_t aTimeoutMs)
 {
     bool result = GeckoChildProcessHost::WaitUntilConnected(aTimeoutMs);
-    if (mRunCompleteTaskImmediately && mLaunchCompleteTask) {
+    if (mLaunchCompleteTask) {
         if (result) {
             mLaunchCompleteTask->SetLaunchSucceeded();
         }
@@ -236,22 +146,21 @@ PluginProcessParent::WaitUntilConnected(int32_t aTimeoutMs)
 void
 PluginProcessParent::OnChannelConnected(int32_t peer_pid)
 {
-    GeckoChildProcessHost::OnChannelConnected(peer_pid);
-    if (mLaunchCompleteTask && !mRunCompleteTaskImmediately) {
-        mLaunchCompleteTask->SetLaunchSucceeded();
-        mMainMsgLoop->PostTask(FROM_HERE, mTaskFactory.NewRunnableMethod(
-                                   &PluginProcessParent::RunLaunchCompleteTask));
+#ifdef XP_WIN
+    mChildPid = static_cast<uint32_t>(peer_pid);
+    if (!sPidSet) {
+        sPidSet = new PluginProcessParent::PidSet();
     }
+    sPidSet->PutEntry(mChildPid);
+#endif
+
+    GeckoChildProcessHost::OnChannelConnected(peer_pid);
 }
 
 void
 PluginProcessParent::OnChannelError()
 {
     GeckoChildProcessHost::OnChannelError();
-    if (mLaunchCompleteTask && !mRunCompleteTaskImmediately) {
-        mMainMsgLoop->PostTask(FROM_HERE, mTaskFactory.NewRunnableMethod(
-                                   &PluginProcessParent::RunLaunchCompleteTask));
-    }
 }
 
 bool
@@ -261,3 +170,13 @@ PluginProcessParent::IsConnected()
     return mProcessState == PROCESS_CONNECTED;
 }
 
+bool
+PluginProcessParent::IsPluginProcessId(base::ProcessId procId) {
+#ifdef XP_WIN
+    MOZ_ASSERT(XRE_IsParentProcess());
+    return sPidSet && sPidSet->Contains(static_cast<uint32_t>(procId));
+#else
+    NS_ERROR("IsPluginProcessId not available on this platform.");
+    return false;
+#endif
+}

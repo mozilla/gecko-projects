@@ -3,31 +3,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef _NS_NSSCERTIFICATE_H_
-#define _NS_NSSCERTIFICATE_H_
+#ifndef nsNSSCertificate_h
+#define nsNSSCertificate_h
 
+#include <functional>
+#include <vector>
+
+#include "ScopedNSSTypes.h"
+#include "certt.h"
+#include "nsCOMPtr.h"
+#include "nsIASN1Object.h"
+#include "nsIClassInfo.h"
+#include "nsISerializable.h"
+#include "nsISimpleEnumerator.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertDB.h"
 #include "nsIX509CertList.h"
-#include "nsIASN1Object.h"
-#include "nsCOMPtr.h"
-#include "nsNSSShutDown.h"
-#include "nsISimpleEnumerator.h"
-#include "nsISerializable.h"
-#include "nsIClassInfo.h"
-#include "ScopedNSSTypes.h"
-#include "certt.h"
+#include "nsStringFwd.h"
 
 namespace mozilla { namespace pkix { class DERArray; } }
 
-class nsAutoString;
 class nsINSSComponent;
 class nsIASN1Sequence;
 
-class nsNSSCertificate final : public nsIX509Cert,
-                               public nsISerializable,
-                               public nsIClassInfo,
-                               public nsNSSShutDownObject
+class nsNSSCertificate final : public nsIX509Cert
+                             , public nsISerializable
+                             , public nsIClassInfo
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -35,61 +36,45 @@ public:
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
 
-  friend class nsNSSCertificateFakeTransport;
-
-  explicit nsNSSCertificate(CERTCertificate* cert, SECOidTag* evOidPolicy = nullptr);
+  explicit nsNSSCertificate(CERTCertificate* cert);
   nsNSSCertificate();
-  nsresult FormatUIStrings(const nsAutoString& nickname,
-                           nsAutoString& nickWithSerial,
-                           nsAutoString& details);
-  static nsNSSCertificate* Create(CERTCertificate*cert = nullptr,
-                                  SECOidTag* evOidPolicy = nullptr);
+  static nsNSSCertificate* Create(CERTCertificate* cert = nullptr);
   static nsNSSCertificate* ConstructFromDER(char* certDER, int derLen);
-  nsresult GetIsExtendedValidation(bool* aIsEV);
-
-  enum EVStatus {
-    ev_status_invalid = 0,
-    ev_status_valid = 1,
-    ev_status_unknown = 2
-  };
 
   // This is a separate static method so nsNSSComponent can use it during NSS
   // initialization. Other code should probably not use it.
-  static nsresult GetDbKey(CERTCertificate* cert, nsACString& aDbKey);
+  static nsresult GetDbKey(const mozilla::UniqueCERTCertificate& cert,
+                           nsACString& aDbKey);
 
 private:
   virtual ~nsNSSCertificate();
 
-  mozilla::ScopedCERTCertificate mCert;
+  mozilla::UniqueCERTCertificate mCert;
   bool             mPermDelete;
   uint32_t         mCertType;
+  std::vector<nsString> mSubjectAltNames;
   nsresult CreateASN1Struct(nsIASN1Object** aRetVal);
-  nsresult CreateTBSCertificateASN1Struct(nsIASN1Sequence** retSequence,
-                                          nsINSSComponent* nssComponent);
+  nsresult CreateTBSCertificateASN1Struct(nsIASN1Sequence** retSequence);
   nsresult GetSortableDate(PRTime aTime, nsAString& _aSortableDate);
-  virtual void virtualDestroyNSSReference() override;
-  void destructorSafeDestroyNSSReference();
   bool InitFromDER(char* certDER, int derLen);  // return false on failure
 
   nsresult GetCertificateHash(nsAString& aFingerprint, SECOidTag aHashAlg);
-
-  EVStatus mCachedEVStatus;
-  SECOidTag mCachedEVOidTag;
-  nsresult hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
-  nsresult getValidEVOidTag(SECOidTag& resultOidTag, bool& validEV);
+  void GetSubjectAltNames();
 };
 
 namespace mozilla {
 
 SECStatus ConstructCERTCertListFromReversedDERArray(
             const mozilla::pkix::DERArray& certArray,
-            /*out*/ mozilla::ScopedCERTCertList& certList);
+            /*out*/ mozilla::UniqueCERTCertList& certList);
 
 } // namespace mozilla
 
-class nsNSSCertList: public nsIX509CertList,
-                     public nsISerializable,
-                     public nsNSSShutDownObject
+typedef const std::function<nsresult(nsCOMPtr<nsIX509Cert>& aCert,
+                bool aHasMore, /* out */ bool& aContinue)> ForEachCertOperation;
+
+class nsNSSCertList : public nsIX509CertList
+                    , public nsISerializable
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -97,40 +82,58 @@ public:
   NS_DECL_NSISERIALIZABLE
 
   // certList is adopted
-  nsNSSCertList(mozilla::ScopedCERTCertList& certList,
-                const nsNSSShutDownPreventionLock& proofOfLock);
+  explicit nsNSSCertList(mozilla::UniqueCERTCertList certList);
 
   nsNSSCertList();
 
-  static CERTCertList* DupCertList(CERTCertList* aCertList,
-                                   const nsNSSShutDownPreventionLock&
-                                     proofOfLock);
-private:
-   virtual ~nsNSSCertList();
-   virtual void virtualDestroyNSSReference() override;
-   void destructorSafeDestroyNSSReference();
+  static mozilla::UniqueCERTCertList DupCertList(
+    const mozilla::UniqueCERTCertList& certList);
 
-   mozilla::ScopedCERTCertList mCertList;
+  // For each certificate in this CertList, run the operation aOperation.
+  // To end early with NS_OK, set the `aContinue` argument false before
+  // returning. To end early with an error, return anything except NS_OK.
+  // The `aHasMore` argument is false when this is the last certificate in the
+  // chain.
+  nsresult ForEachCertificateInChain(ForEachCertOperation& aOperation);
+
+  // Split a certificate chain into the root, intermediates (if any), and end
+  // entity. This method does so blindly, assuming that the current list object
+  // is ordered [end entity, intermediates..., root]. If that isn't true, this
+  // method will return the certificates at the two ends without regard to the
+  // actual chain of trust. Callers are encouraged to check, if there's any
+  // doubt.
+  // Will return error if used on self-signed or empty chains.
+  // This method requires that all arguments be empty, notably the list
+  // `aIntermediates` must be empty.
+  nsresult SegmentCertificateChain(/* out */ nsCOMPtr<nsIX509Cert>& aRoot,
+                           /* out */ nsCOMPtr<nsIX509CertList>& aIntermediates,
+                           /* out */ nsCOMPtr<nsIX509Cert>& aEndEntity);
+
+  // Obtain the root certificate of a certificate chain. This method does so
+  // blindly, as SegmentCertificateChain; the same restrictions apply. On an
+  // empty list, leaves aRoot empty and returns OK.
+  nsresult GetRootCertificate(/* out */ nsCOMPtr<nsIX509Cert>& aRoot);
+
+private:
+   virtual ~nsNSSCertList() {}
+
+   mozilla::UniqueCERTCertList mCertList;
 
    nsNSSCertList(const nsNSSCertList&) = delete;
    void operator=(const nsNSSCertList&) = delete;
 };
 
-class nsNSSCertListEnumerator: public nsISimpleEnumerator,
-                               public nsNSSShutDownObject
+class nsNSSCertListEnumerator : public nsISimpleEnumerator
 {
 public:
    NS_DECL_THREADSAFE_ISUPPORTS
    NS_DECL_NSISIMPLEENUMERATOR
 
-   nsNSSCertListEnumerator(CERTCertList* certList,
-                           const nsNSSShutDownPreventionLock& proofOfLock);
+   explicit nsNSSCertListEnumerator(const mozilla::UniqueCERTCertList& certList);
 private:
-   virtual ~nsNSSCertListEnumerator();
-   virtual void virtualDestroyNSSReference() override;
-   void destructorSafeDestroyNSSReference();
+   virtual ~nsNSSCertListEnumerator() {}
 
-   mozilla::ScopedCERTCertList mCertList;
+   mozilla::UniqueCERTCertList mCertList;
 
    nsNSSCertListEnumerator(const nsNSSCertListEnumerator&) = delete;
    void operator=(const nsNSSCertListEnumerator&) = delete;
@@ -143,4 +146,4 @@ private:
     { 0xbb, 0x20, 0x89, 0x85, 0xa6, 0x32, 0xdf, 0x05 }                 \
   }
 
-#endif // _NS_NSSCERTIFICATE_H_
+#endif // nsNSSCertificate_h

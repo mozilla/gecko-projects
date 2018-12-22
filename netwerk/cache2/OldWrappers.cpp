@@ -21,6 +21,7 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsProxyRelease.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Telemetry.h"
 
 static NS_DEFINE_CID(kStreamTransportServiceCID,
@@ -36,20 +37,18 @@ namespace {
 // Fires the doom callback back on the main thread
 // after the cache I/O thread is looped.
 
-class DoomCallbackSynchronizer : public nsRunnable
+class DoomCallbackSynchronizer : public Runnable
 {
 public:
-  explicit DoomCallbackSynchronizer(nsICacheEntryDoomCallback* cb) : mCB(cb)
+  explicit DoomCallbackSynchronizer(nsICacheEntryDoomCallback* cb)
+    : Runnable("net::DoomCallbackSynchronizer")
+    , mCB(cb)
   {
-    MOZ_COUNT_CTOR(DoomCallbackSynchronizer);
   }
   nsresult Dispatch();
 
 private:
-  virtual ~DoomCallbackSynchronizer()
-  {
-    MOZ_COUNT_DTOR(DoomCallbackSynchronizer);
-  }
+  virtual ~DoomCallbackSynchronizer() = default;
 
   NS_DECL_NSIRUNNABLE
   nsCOMPtr<nsICacheEntryDoomCallback> mCB;
@@ -94,14 +93,10 @@ class DoomCallbackWrapper : public nsICacheListener
 
   explicit DoomCallbackWrapper(nsICacheEntryDoomCallback* cb) : mCB(cb)
   {
-    MOZ_COUNT_CTOR(DoomCallbackWrapper);
   }
 
 private:
-  virtual ~DoomCallbackWrapper()
-  {
-    MOZ_COUNT_DTOR(DoomCallbackWrapper);
-  }
+  virtual ~DoomCallbackWrapper() = default;
 
   nsCOMPtr<nsICacheEntryDoomCallback> mCB;
 };
@@ -143,8 +138,6 @@ _OldVisitCallbackWrapper::~_OldVisitCallbackWrapper()
   if (mVisitEntries) {
     mCB->OnCacheEntryVisitCompleted();
   }
-
-  MOZ_COUNT_DTOR(_OldVisitCallbackWrapper);
 }
 
 NS_IMETHODIMP _OldVisitCallbackWrapper::VisitDevice(const char * deviceID,
@@ -210,8 +203,8 @@ NS_IMETHODIMP _OldVisitCallbackWrapper::VisitEntry(const char * deviceID,
   *_retval = true;
 
   // Read all informative properties from the entry.
-  nsXPIDLCString clientId;
-  rv = entryInfo->GetClientID(getter_Copies(clientId));
+  nsAutoCString clientId;
+  rv = entryInfo->GetClientID(clientId);
   if (NS_FAILED(rv))
     return NS_OK;
 
@@ -268,7 +261,8 @@ NS_IMETHODIMP _OldVisitCallbackWrapper::VisitEntry(const char * deviceID,
 
   // Send them to the consumer.
   rv = mCB->OnCacheEntryInfo(
-    uri, enhanceId, (int64_t)dataSize, fetchCount, lastModified, expirationTime, false);
+    uri, enhanceId, (int64_t)dataSize, fetchCount, lastModified,
+    expirationTime, false, mLoadInfo);
 
   *_retval = NS_SUCCEEDED(rv);
   return NS_OK;
@@ -301,12 +295,13 @@ nsresult _OldGetDiskConsumption::Get(nsICacheStorageConsumptionObserver* aCallba
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(_OldGetDiskConsumption,
-                            nsRunnable,
+                            Runnable,
                             nsICacheVisitor)
 
 _OldGetDiskConsumption::_OldGetDiskConsumption(
   nsICacheStorageConsumptionObserver* aCallback)
-  : mCallback(aCallback)
+  : Runnable("net::_OldGetDiskConsumption")
+  , mCallback(aCallback)
   , mSize(0)
 {
 }
@@ -347,22 +342,19 @@ _OldGetDiskConsumption::VisitEntry(const char * deviceID,
 // _OldCacheEntryWrapper
 
 _OldCacheEntryWrapper::_OldCacheEntryWrapper(nsICacheEntryDescriptor* desc)
-: mOldDesc(desc), mOldInfo(desc)
+: mOldDesc(desc), mOldInfo(desc), mCacheEntryId(CacheEntry::GetNextId())
 {
-  MOZ_COUNT_CTOR(_OldCacheEntryWrapper);
   LOG(("Creating _OldCacheEntryWrapper %p for descriptor %p", this, desc));
 }
 
 _OldCacheEntryWrapper::_OldCacheEntryWrapper(nsICacheEntryInfo* info)
-: mOldDesc(nullptr), mOldInfo(info)
+: mOldDesc(nullptr), mOldInfo(info), mCacheEntryId(CacheEntry::GetNextId())
 {
-  MOZ_COUNT_CTOR(_OldCacheEntryWrapper);
   LOG(("Creating _OldCacheEntryWrapper %p for info %p", this, info));
 }
 
 _OldCacheEntryWrapper::~_OldCacheEntryWrapper()
 {
-  MOZ_COUNT_DTOR(_OldCacheEntryWrapper);
   LOG(("Destroying _OldCacheEntryWrapper %p for descriptor %p", this, mOldInfo.get()));
 }
 
@@ -397,6 +389,11 @@ NS_IMETHODIMP _OldCacheEntryWrapper::GetDataSize(int64_t *aSize)
 
   *aSize = size;
   return NS_OK;
+}
+
+NS_IMETHODIMP _OldCacheEntryWrapper::GetAltDataSize(int64_t *aSize)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP _OldCacheEntryWrapper::GetPersistent(bool *aPersistToDisk)
@@ -447,6 +444,7 @@ NS_IMETHODIMP _OldCacheEntryWrapper::OpenInputStream(int64_t offset,
   return OpenInputStream(uint32_t(offset), _retval);
 }
 NS_IMETHODIMP _OldCacheEntryWrapper::OpenOutputStream(int64_t offset,
+                                                      int64_t predictedSize,
                                                       nsIOutputStream * *_retval)
 {
   if (offset > PR_UINT32_MAX)
@@ -494,7 +492,7 @@ namespace {
 
 class MetaDataVisitorWrapper : public nsICacheMetaDataVisitor
 {
-  virtual ~MetaDataVisitorWrapper() {}
+  virtual ~MetaDataVisitorWrapper() = default;
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSICACHEMETADATAVISITOR
@@ -525,10 +523,10 @@ namespace {
 
 nsresult
 GetCacheSessionNameForStoragePolicy(
-        nsCSubstring const &scheme,
+        const nsACString& scheme,
         nsCacheStoragePolicy storagePolicy,
         bool isPrivate,
-        NeckoOriginAttributes const *originAttribs,
+        OriginAttributes const *originAttribs,
         nsACString& sessionName)
 {
   MOZ_ASSERT(!isPrivate || storagePolicy == nsICache::STORE_IN_MEMORY);
@@ -589,7 +587,7 @@ GetCacheSessionNameForStoragePolicy(
 }
 
 nsresult
-GetCacheSession(nsCSubstring const &aScheme,
+GetCacheSession(const nsACString& aScheme,
                 bool aWriteToDisk,
                 nsILoadContextInfo* aLoadInfo,
                 nsIApplicationCache* aAppCache,
@@ -653,16 +651,17 @@ GetCacheSession(nsCSubstring const &aScheme,
 } // namespace
 
 
-NS_IMPL_ISUPPORTS_INHERITED(_OldCacheLoad, nsRunnable, nsICacheListener)
+NS_IMPL_ISUPPORTS_INHERITED(_OldCacheLoad, Runnable, nsICacheListener)
 
-_OldCacheLoad::_OldCacheLoad(nsCSubstring const& aScheme,
-                             nsCSubstring const& aCacheKey,
+_OldCacheLoad::_OldCacheLoad(const nsACString& aScheme,
+                             const nsACString& aCacheKey,
                              nsICacheEntryOpenCallback* aCallback,
                              nsIApplicationCache* aAppCache,
                              nsILoadContextInfo* aLoadInfo,
                              bool aWriteToDisk,
                              uint32_t aFlags)
-  : mScheme(aScheme)
+  : Runnable("net::_OldCacheLoad")
+  , mScheme(aScheme)
   , mCacheKey(aCacheKey)
   , mCallback(aCallback)
   , mLoadInfo(GetLoadContextInfo(aLoadInfo))
@@ -675,13 +674,12 @@ _OldCacheLoad::_OldCacheLoad(nsCSubstring const& aScheme,
   , mRunCount(0)
   , mAppCache(aAppCache)
 {
-  MOZ_COUNT_CTOR(_OldCacheLoad);
 }
 
 _OldCacheLoad::~_OldCacheLoad()
 {
-  ProxyReleaseMainThread(mAppCache);
-  MOZ_COUNT_DTOR(_OldCacheLoad);
+  ProxyReleaseMainThread(
+    "_OldCacheLoad::mAppCache", mAppCache);
 }
 
 nsresult _OldCacheLoad::Start()
@@ -778,7 +776,7 @@ _OldCacheLoad::Run()
     }
 
     // Opening failed, propagate the error to the consumer
-    LOG(("  Opening cache entry failed with rv=0x%08x", rv));
+    LOG(("  Opening cache entry failed with rv=0x%08" PRIx32, static_cast<uint32_t>(rv)));
     mStatus = rv;
     mNew = false;
     NS_DispatchToMainThread(this);
@@ -817,7 +815,8 @@ _OldCacheLoad::Run()
     rv = cb->OnCacheEntryAvailable(entry, mNew, mAppCache, mStatus);
 
     if (NS_FAILED(rv) && entry) {
-      LOG(("  cb->OnCacheEntryAvailable failed with rv=0x%08x", rv));
+      LOG(("  cb->OnCacheEntryAvailable failed with rv=0x%08" PRIx32,
+           static_cast<uint32_t>(rv)));
       if (mNew)
         entry->AsyncDoom(nullptr);
       else
@@ -867,8 +866,10 @@ _OldCacheLoad::Check()
 
   uint32_t result;
   nsresult rv = mCallback->OnCacheEntryCheck(mCacheEntry, mAppCache, &result);
-  LOG(("  OnCacheEntryCheck result ent=%p, cb=%p, appcache=%p, rv=0x%08x, result=%d",
-    mCacheEntry.get(), mCallback.get(), mAppCache.get(), rv, result));
+  LOG(("  OnCacheEntryCheck result ent=%p, cb=%p, appcache=%p, rv=0x%08"
+       PRIx32 ", result=%d",
+      mCacheEntry.get(), mCallback.get(), mAppCache.get(), static_cast<uint32_t>(rv),
+      result));
 
   if (NS_FAILED(rv)) {
     NS_WARNING("cache check failed");
@@ -902,13 +903,9 @@ _OldStorage::_OldStorage(nsILoadContextInfo* aInfo,
 , mLookupAppCache(aLookupAppCache)
 , mOfflineStorage(aOfflineStorage)
 {
-  MOZ_COUNT_CTOR(_OldStorage);
 }
 
-_OldStorage::~_OldStorage()
-{
-  MOZ_COUNT_DTOR(_OldStorage);
-}
+_OldStorage::~_OldStorage() = default;
 
 NS_IMETHODIMP _OldStorage::AsyncOpenURI(nsIURI *aURI,
                                         const nsACString & aIdExtension,
@@ -1079,6 +1076,14 @@ NS_IMETHODIMP _OldStorage::AsyncVisitStorage(nsICacheStorageVisitor* aVisitor,
   return NS_OK;
 }
 
+NS_IMETHODIMP _OldStorage::GetCacheIndexEntryAttrs(nsIURI *aURI,
+                                                   const nsACString &aIdExtension,
+                                                   bool *aHasAltData,
+                                                   uint32_t *aSizeInKB)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 // Internal
 
 nsresult _OldStorage::AssembleCacheKey(nsIURI *aURI,
@@ -1131,7 +1136,7 @@ nsresult _OldStorage::AssembleCacheKey(nsIURI *aURI,
   return NS_OK;
 }
 
-nsresult _OldStorage::ChooseApplicationCache(nsCSubstring const &cacheKey,
+nsresult _OldStorage::ChooseApplicationCache(const nsACString& cacheKey,
                                              nsIApplicationCache** aCache)
 {
   nsresult rv;

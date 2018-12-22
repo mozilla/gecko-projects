@@ -1,6 +1,6 @@
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+
 "use strict";
 
 /**
@@ -8,22 +8,26 @@
  * request.
  */
 
-add_task(function* () {
-  let [tab, debuggee, monitor] = yield initNetMonitor(CUSTOM_GET_URL);
-  let { $, NetMonitorView } = monitor.panelWin;
-  let { RequestsMenu } = NetMonitorView;
-  RequestsMenu.lazyUpdate = false;
+add_task(async function() {
+  const { tab, monitor } = await initNetMonitor(CUSTOM_GET_URL);
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
 
-  debuggee.performRequests(1, HTTPS_REDIRECT_SJS);
-  yield waitForNetworkEvents(monitor, 2);
+  store.dispatch(Actions.batchEnable(false));
 
-  is(RequestsMenu.itemCount, 2, "There were two requests due to redirect.");
+  const wait = waitForNetworkEvents(monitor, 2);
+  await ContentTask.spawn(tab.linkedBrowser, HTTPS_REDIRECT_SJS, async function(url) {
+    content.wrappedJSObject.performRequests(1, url);
+  });
+  await wait;
 
-  let initial = RequestsMenu.items[0];
-  let redirect = RequestsMenu.items[1];
+  is(store.getState().requests.requests.size, 2,
+     "There were two requests due to redirect.");
 
-  let initialSecurityIcon = $(".requests-security-state-icon", initial.target);
-  let redirectSecurityIcon = $(".requests-security-state-icon", redirect.target);
+  const [
+    initialSecurityIcon,
+    redirectSecurityIcon,
+  ] = document.querySelectorAll(".requests-security-state-icon");
 
   ok(initialSecurityIcon.classList.contains("security-state-insecure"),
      "Initial request was marked insecure.");
@@ -31,5 +35,5 @@ add_task(function* () {
   ok(redirectSecurityIcon.classList.contains("security-state-secure"),
      "Redirected request was marked secure.");
 
-  yield teardown(monitor);
+  await teardown(monitor);
 });

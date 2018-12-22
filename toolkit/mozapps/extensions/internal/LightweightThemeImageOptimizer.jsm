@@ -4,24 +4,21 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["LightweightThemeImageOptimizer"];
+var EXPORTED_SYMBOLS = ["LightweightThemeImageOptimizer"];
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
+ChromeUtils.defineModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+ChromeUtils.defineModuleGetter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
 
 const ORIGIN_TOP_RIGHT = 1;
 const ORIGIN_BOTTOM_LEFT = 2;
 
-this.LightweightThemeImageOptimizer = {
-  optimize: function(aThemeData, aScreen) {
+var LightweightThemeImageOptimizer = {
+  optimize(aThemeData, aScreen) {
     let data = Object.assign({}, aThemeData);
     if (!data.headerURL) {
       return data;
@@ -38,7 +35,7 @@ this.LightweightThemeImageOptimizer = {
     return data;
   },
 
-  purge: function() {
+  purge() {
     let dir = FileUtils.getDir("ProfD", ["lwtheme"]);
     dir.followLinks = false;
     try {
@@ -52,7 +49,7 @@ Object.freeze(LightweightThemeImageOptimizer);
 var ImageCropper = {
   _inProgress: {},
 
-  getCroppedImageURL: function(aImageURL, aScreen, aOrigin) {
+  getCroppedImageURL(aImageURL, aScreen, aOrigin) {
     // We can crop local files, only.
     if (!aImageURL.startsWith("file://")) {
       return aImageURL;
@@ -60,7 +57,7 @@ var ImageCropper = {
 
     // Generate the cropped image's file name using its
     // base name and the current screen size.
-    let uri = Services.io.newURI(aImageURL, null, null);
+    let uri = Services.io.newURI(aImageURL);
     let file = uri.QueryInterface(Ci.nsIFileURL).file;
 
     // Make sure the source file exists.
@@ -76,7 +73,9 @@ var ImageCropper = {
       let fileURI = Services.io.newFileURI(croppedFile);
 
       // Copy the query part to avoid wrong caching.
-      fileURI.QueryInterface(Ci.nsIURL).query = uri.query;
+      fileURI = fileURI.mutate()
+                       .setQuery(uri.query)
+                       .finalize();
       return fileURI.spec;
     }
 
@@ -88,7 +87,7 @@ var ImageCropper = {
     return aImageURL;
   },
 
-  _crop: function(aURI, aTargetFile, aScreen, aOrigin) {
+  _crop(aURI, aTargetFile, aScreen, aOrigin) {
     let inProgress = this._inProgress;
     inProgress[aTargetFile.path] = true;
 
@@ -98,14 +97,14 @@ var ImageCropper = {
 
     ImageFile.read(aURI, function(aInputStream, aContentType) {
       if (aInputStream && aContentType) {
-        let image = ImageTools.decode(aInputStream, aContentType);
-        if (image && image.width && image.height) {
-          let stream = ImageTools.encode(image, aScreen, aOrigin, aContentType);
-          if (stream) {
-            ImageFile.write(aTargetFile, stream, resetInProgress);
-            return;
+        ImageTools.decode(aInputStream, aContentType, function(aImage) {
+          if (aImage && aImage.width && aImage.height) {
+            let stream = ImageTools.encode(aImage, aScreen, aOrigin, aContentType);
+            if (stream) {
+              ImageFile.write(aTargetFile, stream, resetInProgress);
+            }
           }
-        }
+        });
       }
 
       resetInProgress();
@@ -114,7 +113,7 @@ var ImageCropper = {
 };
 
 var ImageFile = {
-  read: function(aURI, aCallback) {
+  read(aURI, aCallback) {
     this._netUtil.asyncFetch({
       uri: aURI,
       loadUsingSystemPrincipal: true,
@@ -129,7 +128,7 @@ var ImageFile = {
       });
   },
 
-  write: function(aFile, aInputStream, aCallback) {
+  write(aFile, aInputStream, aCallback) {
     let fos = FileUtils.openSafeFileOutputStream(aFile);
     this._netUtil.asyncCopy(aInputStream, fos, function(aResult) {
       FileUtils.closeSafeFileOutputStream(fos);
@@ -150,17 +149,23 @@ XPCOMUtils.defineLazyModuleGetter(ImageFile, "_netUtil",
   "resource://gre/modules/NetUtil.jsm", "NetUtil");
 
 var ImageTools = {
-  decode: function(aInputStream, aContentType) {
-    let outParam = {value: null};
+  decode(aInputStream, aContentType, aCallback) {
+    let callback = {
+      onImageReady(aImage, aStatus) {
+        aCallback(aImage);
+      }
+    };
 
     try {
-      this._imgTools.decodeImageData(aInputStream, aContentType, outParam);
-    } catch (e) {}
-
-    return outParam.value;
+      let threadManager = Cc["@mozilla.org/thread-manager;1"].getService();
+      this._imgTools.decodeImageAsync(aInputStream, aContentType, callback,
+                                      threadManager.currentThread);
+    } catch (e) {
+      aCallback(null);
+    }
   },
 
-  encode: function(aImage, aScreen, aOrigin, aContentType) {
+  encode(aImage, aScreen, aOrigin, aContentType) {
     let stream;
     let width = Math.min(aImage.width, aScreen.width);
     let height = Math.min(aImage.height, aScreen.height);

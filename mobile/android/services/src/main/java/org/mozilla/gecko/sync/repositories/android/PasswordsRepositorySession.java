@@ -4,9 +4,6 @@
 
 package org.mozilla.gecko.sync.repositories.android;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserContract.DeletedColumns;
@@ -17,12 +14,11 @@ import org.mozilla.gecko.sync.repositories.NoStoreDelegateException;
 import org.mozilla.gecko.sync.repositories.NullCursorException;
 import org.mozilla.gecko.sync.repositories.RecordFilter;
 import org.mozilla.gecko.sync.repositories.Repository;
+import org.mozilla.gecko.sync.repositories.RepositorySession;
 import org.mozilla.gecko.sync.repositories.StoreTrackingRepositorySession;
 import org.mozilla.gecko.sync.repositories.android.RepoUtils.QueryHelper;
-import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionCreationDelegate;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionFetchRecordsDelegate;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionFinishDelegate;
-import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionGuidsSinceDelegate;
 import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionWipeDelegate;
 import org.mozilla.gecko.sync.repositories.domain.PasswordRecord;
 import org.mozilla.gecko.sync.repositories.domain.Record;
@@ -40,11 +36,8 @@ public class PasswordsRepositorySession extends
 
   public static class PasswordsRepository extends Repository {
     @Override
-    public void createSession(RepositorySessionCreationDelegate delegate,
-        Context context) {
-      PasswordsRepositorySession session = new PasswordsRepositorySession(PasswordsRepository.this, context);
-      final RepositorySessionCreationDelegate deferredCreationDelegate = delegate.deferredCreationDelegate();
-      deferredCreationDelegate.onSessionCreated(session);
+    public RepositorySession createSession(Context context) {
+      return new PasswordsRepositorySession(this, context);
     }
   }
 
@@ -71,93 +64,40 @@ public class PasswordsRepositorySession extends
   private static final String WHERE_GUID_IS = Passwords.GUID + " = ?";
   private static final String WHERE_DELETED_GUID_IS = DeletedPasswords.GUID + " = ?";
 
-  @Override
-  public void guidsSince(final long timestamp, final RepositorySessionGuidsSinceDelegate delegate) {
-    final Runnable guidsSinceRunnable = new Runnable() {
-      @Override
-      public void run() {
-
-        if (!isActive()) {
-          delegate.onGuidsSinceFailed(new InactiveSessionException(null));
-          return;
-        }
-
-        // Checks succeeded, now get GUIDs.
-        final List<String> guids = new ArrayList<String>();
-        try {
-          Logger.debug(LOG_TAG, "Fetching guidsSince from data table.");
-          final Cursor data = passwordsHelper.safeQuery(passwordsProvider, ".getGUIDsSince", GUID_COLS, dateModifiedWhere(timestamp), null, null);
-          try {
-            if (data.moveToFirst()) {
-              while (!data.isAfterLast()) {
-                guids.add(RepoUtils.getStringFromCursor(data, Passwords.GUID));
-                data.moveToNext();
-              }
-            }
-          } finally {
-            data.close();
-          }
-
-          // Fetch guids from deleted table.
-          Logger.debug(LOG_TAG, "Fetching guidsSince from deleted table.");
-          final Cursor deleted = deletedPasswordsHelper.safeQuery(passwordsProvider, ".getGUIDsSince", DELETED_GUID_COLS, dateModifiedWhereDeleted(timestamp), null, null);
-          try {
-            if (deleted.moveToFirst()) {
-              while (!deleted.isAfterLast()) {
-                guids.add(RepoUtils.getStringFromCursor(deleted, DeletedColumns.GUID));
-                deleted.moveToNext();
-              }
-            }
-          } finally {
-            deleted.close();
-          }
-        } catch (Exception e) {
-          Logger.error(LOG_TAG, "Exception in fetch.");
-          delegate.onGuidsSinceFailed(e);
-          return;
-        }
-        String[] guidStrings = new String[guids.size()];
-        delegate.onGuidsSinceSucceeded(guids.toArray(guidStrings));
-      }
-    };
-
-    delegateQueue.execute(guidsSinceRunnable);
-  }
-
-  @Override
-  public void fetchSince(final long timestamp, final RepositorySessionFetchRecordsDelegate delegate) {
+  private void fetchSince(final long timestamp, final RepositorySessionFetchRecordsDelegate delegate) {
     final RecordFilter filter = this.storeTracker.getFilter();
     final Runnable fetchSinceRunnable = new Runnable() {
       @Override
       public void run() {
         if (!isActive()) {
-          delegate.onFetchFailed(new InactiveSessionException(null), null);
+          delegate.onFetchFailed(new InactiveSessionException());
           return;
         }
 
         final long end = now();
         try {
           // Fetch from data table.
-          Cursor data = passwordsHelper.safeQuery(passwordsProvider, ".fetchSince",
-                                                  getAllColumns(),
-                                                  dateModifiedWhere(timestamp),
-                                                  null, null);
+          Cursor data = passwordsHelper.safeQuery(passwordsProvider, ".fetchModified",
+                  getAllColumns(),
+                  dateModifiedWhere(timestamp),
+                  null, null);
           if (!fetchAndCloseCursorDeleted(data, false, filter, delegate)) {
             return;
           }
 
           // Fetch from deleted table.
-          Cursor deleted = deletedPasswordsHelper.safeQuery(passwordsProvider, ".fetchSince",
-                                                            getAllDeletedColumns(),
-                                                            dateModifiedWhereDeleted(timestamp),
-                                                            null, null);
+          Cursor deleted = deletedPasswordsHelper.safeQuery(passwordsProvider, ".fetchModified",
+                  getAllDeletedColumns(),
+                  dateModifiedWhereDeleted(timestamp),
+                  null, null);
           if (!fetchAndCloseCursorDeleted(deleted, true, filter, delegate)) {
             return;
           }
 
           // Success!
           try {
-            delegate.onFetchCompleted(end);
+            setLastFetchTimestamp(end);
+            delegate.onFetchCompleted();
           } catch (Exception e) {
             Logger.error(LOG_TAG, "Delegate fetch completed callback failed.", e);
             // Don't call failure callback.
@@ -165,23 +105,32 @@ public class PasswordsRepositorySession extends
           }
         } catch (Exception e) {
           Logger.error(LOG_TAG, "Exception in fetch.");
-          delegate.onFetchFailed(e, null);
+          delegate.onFetchFailed(e);
         }
       }
     };
 
-    delegateQueue.execute(fetchSinceRunnable);
+    fetchWorkQueue.execute(fetchSinceRunnable);
+  }
+
+  @Override
+  public void fetchModified(final RepositorySessionFetchRecordsDelegate delegate) {
+    this.fetchSince(getLastSyncTimestamp(), delegate);
+  }
+
+  @Override
+  public void fetchAll(RepositorySessionFetchRecordsDelegate delegate) {
+    this.fetchSince(-1, delegate);
   }
 
   @Override
   public void fetch(final String[] guids, final RepositorySessionFetchRecordsDelegate delegate) {
     if (guids == null || guids.length < 1) {
       Logger.error(LOG_TAG, "No guids to be fetched.");
-      final long end = now();
-      delegateQueue.execute(new Runnable() {
+      fetchWorkQueue.execute(new Runnable() {
         @Override
         public void run() {
-          delegate.onFetchCompleted(end);
+          delegate.onFetchCompleted();
         }
       });
       return;
@@ -193,7 +142,7 @@ public class PasswordsRepositorySession extends
       @Override
       public void run() {
         if (!isActive()) {
-          delegate.onFetchFailed(new InactiveSessionException(null), null);
+          delegate.onFetchFailed(new InactiveSessionException());
           return;
         }
 
@@ -218,26 +167,22 @@ public class PasswordsRepositorySession extends
             return;
           }
 
-          delegate.onFetchCompleted(end);
+          setLastFetchTimestamp(end);
+          delegate.onFetchCompleted();
 
         } catch (Exception e) {
           Logger.error(LOG_TAG, "Exception in fetch.");
-          delegate.onFetchFailed(e, null);
+          delegate.onFetchFailed(e);
         }
       }
     };
 
-    delegateQueue.execute(fetchRunnable);
-  }
-
-  @Override
-  public void fetchAll(RepositorySessionFetchRecordsDelegate delegate) {
-    fetchSince(0, delegate);
+    fetchWorkQueue.execute(fetchRunnable);
   }
 
   @Override
   public void store(final Record record) throws NoStoreDelegateException {
-    if (delegate == null) {
+    if (storeDelegate == null) {
       Logger.error(LOG_TAG, "No store delegate.");
       throw new NoStoreDelegateException();
     }
@@ -257,13 +202,13 @@ public class PasswordsRepositorySession extends
       public void run() {
         if (!isActive()) {
           Logger.warn(LOG_TAG, "RepositorySession is inactive. Store failing.");
-          delegate.onRecordStoreFailed(new InactiveSessionException(null), record.guid);
+          storeDelegate.onRecordStoreFailed(new InactiveSessionException(), record.guid);
           return;
         }
 
         final String guid = remoteRecord.guid;
         if (guid == null) {
-          delegate.onRecordStoreFailed(new RuntimeException("Can't store record with null GUID."), record.guid);
+          storeDelegate.onRecordStoreFailed(new RuntimeException("Can't store record with null GUID."), record.guid);
           return;
         }
 
@@ -272,7 +217,7 @@ public class PasswordsRepositorySession extends
           existingRecord = retrieveByGUID(guid);
         } catch (NullCursorException | RemoteException e) {
           // Indicates a serious problem.
-          delegate.onRecordStoreFailed(e, record.guid);
+          storeDelegate.onRecordStoreFailed(e, record.guid);
           return;
         }
 
@@ -311,15 +256,16 @@ public class PasswordsRepositorySession extends
           trace("Both local and remote records have been modified.");
           if (remoteRecord.lastModified > existingRecord.lastModified) {
             trace("Remote is newer, and deleted. Deleting local.");
+            // Note that while this counts as "reconciliation", we're probably over-counting.
+            // Currently, locallyModified above is _always_ true if a record exists locally,
+            // and so we'll consider any deletions of already present records as reconciliations.
+            storeDelegate.onRecordStoreReconciled(record.guid, null, null);
             storeRecordDeletion(remoteRecord);
             return;
           }
 
           trace("Remote is older, local is not deleted. Ignoring.");
-          if (!locallyModified) {
-            Logger.warn(LOG_TAG, "Inconsistency: old remote record is deleted, but local record not modified!");
-            // Ensure that this is tracked for upload.
-          }
+
           return;
         }
         // End deletion logic.
@@ -327,7 +273,7 @@ public class PasswordsRepositorySession extends
         // Validate the incoming record.
         if (!remoteRecord.isValid()) {
             Logger.warn(LOG_TAG, "Incoming record is invalid. Reporting store failed.");
-            delegate.onRecordStoreFailed(new RuntimeException("Can't store invalid password record."), record.guid);
+            storeDelegate.onRecordStoreFailed(new RuntimeException("Can't store invalid password record."), record.guid);
             return;
         }
 
@@ -338,10 +284,10 @@ public class PasswordsRepositorySession extends
             existingRecord = findExistingRecord(remoteRecord);
           } catch (RemoteException e) {
             Logger.error(LOG_TAG, "Remote exception in findExistingRecord.");
-            delegate.onRecordStoreFailed(e, record.guid);
+            storeDelegate.onRecordStoreFailed(e, record.guid);
           } catch (NullCursorException e) {
             Logger.error(LOG_TAG, "Null cursor in findExistingRecord.");
-            delegate.onRecordStoreFailed(e, record.guid);
+            storeDelegate.onRecordStoreFailed(e, record.guid);
           }
         }
 
@@ -354,11 +300,11 @@ public class PasswordsRepositorySession extends
             inserted = insert(remoteRecord);
           } catch (RemoteException e) {
             Logger.debug(LOG_TAG, "Record insert caused a RemoteException.");
-            delegate.onRecordStoreFailed(e, record.guid);
+            storeDelegate.onRecordStoreFailed(e, record.guid);
             return;
           }
           trackRecord(inserted);
-          delegate.onRecordStoreSucceeded(inserted.guid);
+          storeDelegate.onRecordStoreSucceeded(1);
           return;
         }
 
@@ -371,11 +317,12 @@ public class PasswordsRepositorySession extends
           return;
         }
 
-        Record toStore = reconcileRecords(remoteRecord, existingRecord, lastRemoteRetrieval, lastLocalRetrieval);
-        if (toStore == null) {
-          Logger.debug(LOG_TAG, "Reconciling returned null. Not inserting a record.");
+        if (!shouldReconcileRecords(remoteRecord, existingRecord)) {
+          Logger.debug(LOG_TAG, "shouldReconcileRecords returned false. Not inserting a record.");
           return;
         }
+
+        Record toStore = reconcileRecords(remoteRecord, existingRecord, lastRemoteRetrieval, lastLocalRetrieval);
 
         // TODO: pass in timestamps?
         Logger.debug(LOG_TAG, "Replacing " + existingRecord.guid + " with record " + toStore.guid);
@@ -384,7 +331,7 @@ public class PasswordsRepositorySession extends
           replaced = replace(existingRecord, toStore);
         } catch (RemoteException e) {
           Logger.debug(LOG_TAG, "Record replace caused a RemoteException.");
-          delegate.onRecordStoreFailed(e, record.guid);
+          storeDelegate.onRecordStoreFailed(e, record.guid);
           return;
         }
 
@@ -392,7 +339,8 @@ public class PasswordsRepositorySession extends
         // of reconcileRecords.
         Logger.debug(LOG_TAG, "Calling delegate callback with guid " + replaced.guid +
                               "(" + replaced.androidID + ")");
-        delegate.onRecordStoreSucceeded(record.guid);
+        storeDelegate.onRecordStoreReconciled(record.guid, existingRecord.guid, null);
+        storeDelegate.onRecordStoreSucceeded(1);
         return;
       }
     };
@@ -407,7 +355,7 @@ public class PasswordsRepositorySession extends
       @Override
       public void run() {
         if (!isActive()) {
-          delegate.onWipeFailed(new InactiveSessionException(null));
+          delegate.onWipeFailed(new InactiveSessionException());
           return;
         }
 
@@ -562,7 +510,7 @@ public class PasswordsRepositorySession extends
       }
     } catch (Exception e) {
       Logger.error(LOG_TAG, "Exception in fetch.");
-      delegate.onFetchFailed(e, null);
+      delegate.onFetchFailed(e);
       return false;
     } finally {
       cursor.close();
@@ -647,18 +595,16 @@ public class PasswordsRepositorySession extends
       deleteGUID(record.guid);
     } catch (RemoteException e) {
       Logger.error(LOG_TAG, "RemoteException in password delete.");
-      delegate.onRecordStoreFailed(e, record.guid);
+      storeDelegate.onRecordStoreFailed(e, record.guid);
       return;
     }
-    delegate.onRecordStoreSucceeded(record.guid);
+    storeDelegate.onRecordStoreSucceeded(1);
   }
 
   /**
    * Make a PasswordRecord from a Cursor.
    * @param cur
    *        Cursor from query.
-   * @param deleted
-   *        true if creating a deleted Record, false if otherwise.
    * @return
    *        PasswordRecord populated from Cursor.
    */
@@ -721,5 +667,9 @@ public class PasswordsRepositorySession extends
     cv.put(BrowserContract.Passwords.TIME_PASSWORD_CHANGED, rec.timePasswordChanged);
     cv.put(BrowserContract.Passwords.TIMES_USED,            rec.timesUsed);
     return cv;
+  }
+
+  private static void trace(String message) {
+    Logger.trace(LOG_TAG, message);
   }
 }

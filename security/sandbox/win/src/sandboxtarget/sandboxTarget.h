@@ -10,19 +10,14 @@
 #include <windows.h>
 
 #include "mozilla/Assertions.h"
-#include "base/MissingBasicTypes.h"
-#include "sandbox/win/src/sandbox.h"
-#include "sandbox/win/src/target_services.h"
 
-#ifdef TARGET_SANDBOX_EXPORTS
-#define TARGET_SANDBOX_EXPORT __declspec(dllexport)
-#else
-#define TARGET_SANDBOX_EXPORT __declspec(dllimport)
-#endif
+namespace sandbox {
+class TargetServices;
+}
+
 namespace mozilla {
 
-
-class TARGET_SANDBOX_EXPORT SandboxTarget
+class SandboxTarget
 {
 public:
   /**
@@ -50,12 +45,7 @@ public:
    * Called by the library that wants to "start" the sandbox, i.e. change to the
    * more secure delayed / lockdown policy.
    */
-  void StartSandbox()
-  {
-    if (mTargetServices) {
-      mTargetServices->LowerToken();
-    }
-  }
+  void StartSandbox();
 
   /**
    * Used to duplicate handles via the broker process. The permission for the
@@ -63,17 +53,7 @@ public:
    */
   bool BrokerDuplicateHandle(HANDLE aSourceHandle, DWORD aTargetProcessId,
                              HANDLE* aTargetHandle, DWORD aDesiredAccess,
-                             DWORD aOptions)
-  {
-    if (!mTargetServices) {
-      return false;
-    }
-
-    sandbox::ResultCode result =
-      mTargetServices->DuplicateHandle(aSourceHandle, aTargetProcessId,
-                                       aTargetHandle, aDesiredAccess, aOptions);
-    return (sandbox::SBOX_ALL_OK == result);
-  }
+                             DWORD aOptions);
 
 protected:
   SandboxTarget() :

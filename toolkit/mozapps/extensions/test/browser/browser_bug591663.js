@@ -30,7 +30,7 @@ var gExtensionProperties = {
   type: "extension"
 };
 
-function test() {
+async function test() {
   waitForExplicitFinish();
 
   gProvider = new MockProvider(true, [{
@@ -40,10 +40,9 @@ function test() {
     flags: AddonManager.TYPE_UI_VIEW_LIST
   }]);
 
-  open_manager(VIEW_ID, function(aWindow) {
-    gManagerWindow = aWindow;
-    run_next_test();
-  });
+  let aWindow = await open_manager(VIEW_ID);
+  gManagerWindow = aWindow;
+  run_next_test();
 }
 
 function end_test() {
@@ -88,14 +87,14 @@ add_test(function() {
 // Test that onInstallStarted properly hides empty notice and adds install to list
 add_test(function() {
   gItem.addTestListener({
-    onDownloadStarted: function() {
+    onDownloadStarted() {
       // Install type unknown until download complete
       check_list(null);
     },
-    onInstallStarted: function() {
+    onInstallStarted() {
       check_list(gItem);
     },
-    onInstallEnded: function() {
+    onInstallEnded() {
       check_list(gItem);
       run_next_test();
     }
@@ -105,12 +104,11 @@ add_test(function() {
 });
 
 // Test that restarting the manager does not change list
-add_test(function() {
-  restart_manager(gManagerWindow, VIEW_ID, function(aManagerWindow) {
-    gManagerWindow = aManagerWindow;
-    check_list(gItem);
-    run_next_test();
-  });
+add_test(async function() {
+  let aManagerWindow = await restart_manager(gManagerWindow, VIEW_ID);
+  gManagerWindow = aManagerWindow;
+  check_list(gItem);
+  run_next_test();
 });
 
 // Test that onInstallCancelled removes install and shows empty notice
@@ -127,13 +125,13 @@ add_test(function() {
   check_list(null);
 
   extension.addTestListener({
-    onDownloadStarted: function() {
+    onDownloadStarted() {
       check_list(null);
     },
-    onInstallStarted: function() {
+    onInstallStarted() {
       check_list(null);
     },
-    onInstallEnded: function() {
+    onInstallEnded() {
       check_list(null);
       extension.cancel();
       run_next_test();
@@ -151,11 +149,10 @@ add_test(function() {
 });
 
 // Test that restarting the manager does not change list
-add_test(function() {
-  restart_manager(gManagerWindow, VIEW_ID, function(aManagerWindow) {
-    gManagerWindow = aManagerWindow;
-    check_list(gItem);
-    run_next_test();
-  });
+add_test(async function() {
+  let aManagerWindow = await restart_manager(gManagerWindow, VIEW_ID);
+  gManagerWindow = aManagerWindow;
+  check_list(gItem);
+  run_next_test();
 });
 

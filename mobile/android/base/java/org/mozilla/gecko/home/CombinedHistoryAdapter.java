@@ -4,101 +4,70 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 package org.mozilla.gecko.home;
 
+import android.content.res.Resources;
+import android.support.annotation.UiThread;
+import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 
-import android.content.Context;
 import android.database.Cursor;
-import android.util.Log;
 import android.util.SparseArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
-import org.json.JSONArray;
-import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.db.BrowserContract;
-import org.mozilla.gecko.db.RemoteClient;
-import org.mozilla.gecko.db.RemoteTab;
-import org.mozilla.gecko.home.CombinedHistoryPanel.SectionHeader;
+import org.mozilla.gecko.util.ThreadUtils;
 
-import java.util.Collections;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistoryItem> implements CombinedHistoryRecyclerView.AdapterContextMenuBuilder {
+    private static final int RECENT_TABS_SMARTFOLDER_INDEX = 0;
 
-public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistoryItem> {
-    private static final String LOGTAG = "GeckoCombinedHistAdapt";
+    // Array for the time ranges in milliseconds covered by each section.
+    static final HistorySectionsHelper.SectionDateRange[] sectionDateRangeArray = new HistorySectionsHelper.SectionDateRange[SectionHeader.values().length];
 
-    public enum ItemType {
-        CLIENT, HIDDEN_DEVICES, SECTION_HEADER, HISTORY, NAVIGATION_BACK, CHILD;
-
-        public static ItemType viewTypeToItemType(int viewType) {
-            if (viewType >= ItemType.values().length) {
-                Log.e(LOGTAG, "No corresponding ItemType!");
-            }
-            return ItemType.values()[viewType];
-        }
-
-        public static int itemTypeToViewType(ItemType itemType) {
-            return itemType.ordinal();
-        }
+    // Semantic names for the time covered by each section
+    public enum SectionHeader {
+        TODAY,
+        YESTERDAY,
+        WEEK,
+        THIS_MONTH,
+        MONTH_AGO,
+        TWO_MONTHS_AGO,
+        THREE_MONTHS_AGO,
+        FOUR_MONTHS_AGO,
+        FIVE_MONTHS_AGO,
+        OLDER_THAN_SIX_MONTHS
     }
 
-    private List<RemoteClient> remoteClients = Collections.emptyList();
-    private List<RemoteTab> clientChildren;
-    private int remoteClientIndexOfParent = -1;
+    private HomeFragment.PanelStateChangeListener panelStateChangeListener;
+
     private Cursor historyCursor;
+    private DevicesUpdateHandler devicesUpdateHandler;
+    private int deviceCount = 0;
+    private RecentTabsUpdateHandler recentTabsUpdateHandler;
+    private int recentTabsCount = 0;
 
-    // Maintain group collapsed and hidden state. Only accessed from the UI thread.
-    protected static RemoteTabsExpandableListState sState;
-
-    // List of hidden remote clients.
-    // Only accessed from the UI thread.
-    protected final List<RemoteClient> hiddenClients = new ArrayList<>();
+    private LinearLayoutManager linearLayoutManager; // Only used on the UI thread, so no need to be volatile.
 
     // We use a sparse array to store each section header's position in the panel [more cheaply than a HashMap].
-    private final SparseArray<CombinedHistoryPanel.SectionHeader> sectionHeaders;
+    private final SparseArray<SectionHeader> sectionHeaders;
 
-    private final Context context;
-
-    public CombinedHistoryAdapter(Context context, int savedParentIndex) {
+    public CombinedHistoryAdapter(Resources resources, int cachedRecentTabsCount) {
         super();
-        this.context = context;
+        recentTabsCount = cachedRecentTabsCount;
         sectionHeaders = new SparseArray<>();
-
-        // This races when multiple Fragments are created. That's okay: one
-        // will win, and thereafter, all will be okay. If we create and then
-        // drop an instance the shared SharedPreferences backing all the
-        // instances will maintain the state for us. Since everything happens on
-        // the UI thread, this doesn't even need to be volatile.
-        if (sState == null) {
-            sState = new RemoteTabsExpandableListState(GeckoSharedPrefs.forProfile(context));
-        }
-        remoteClientIndexOfParent = savedParentIndex;
+        HistorySectionsHelper.updateRecentSectionOffset(resources, sectionDateRangeArray);
+        this.setHasStableIds(true);
     }
 
-    public void setClients(List<RemoteClient> clients) {
-        hiddenClients.clear();
-        remoteClients.clear();
+    public void setPanelStateChangeListener(
+            HomeFragment.PanelStateChangeListener panelStateChangeListener) {
+        this.panelStateChangeListener = panelStateChangeListener;
+    }
 
-        final Iterator<RemoteClient> it = clients.iterator();
-        while (it.hasNext()) {
-            final RemoteClient client = it.next();
-            if (sState.isClientHidden(client.guid)) {
-                hiddenClients.add(client);
-                it.remove();
-            }
-        }
-
-        remoteClients = clients;
-
-        // Add item for unhiding clients.
-        if (!hiddenClients.isEmpty()) {
-            remoteClients.add(null);
-        }
-
-        notifyItemRangeChanged(0, remoteClients.size());
+    @UiThread
+    public void setLinearLayoutManager(LinearLayoutManager linearLayoutManager) {
+        this.linearLayoutManager = linearLayoutManager;
     }
 
     public void setHistory(Cursor history) {
@@ -107,116 +76,168 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         notifyDataSetChanged();
     }
 
-    public void removeItem(int position) {
-        final ItemType  itemType = getItemTypeForPosition(position);
-        switch (itemType) {
-            case CLIENT:
-                final boolean hadHiddenClients = !hiddenClients.isEmpty();
-                final RemoteClient client = remoteClients.remove(transformAdapterPositionForDataStructure(ItemType.CLIENT, position));
-                notifyItemRemoved(position);
+    public interface DevicesUpdateHandler {
+        void onDeviceCountUpdated(int count);
+    }
 
-                sState.setClientHidden(client.guid, true);
-                hiddenClients.add(client);
-                if (!hadHiddenClients) {
-                    // Add item for unhiding clients;
-                    remoteClients.add(null);
-                } else {
-                    // Update "hidden clients" item because number of hidden clients changed.
-                    notifyItemChanged(getRemoteClientsHiddenItemsIndex());
+    public DevicesUpdateHandler getDeviceUpdateHandler() {
+        if (devicesUpdateHandler == null) {
+            devicesUpdateHandler = new DevicesUpdateHandler() {
+                @Override
+                public void onDeviceCountUpdated(int count) {
+                    deviceCount = count;
+                    notifyItemChanged(getSyncedDevicesSmartFolderIndex());
                 }
-                break;
-            case HISTORY:
-                notifyItemRemoved(position);
-                break;
+            };
         }
+        return devicesUpdateHandler;
     }
 
-    public void unhideClients(List<RemoteClient> selectedClients) {
-        if (selectedClients.size() == 0) {
-            return;
-        }
-
-        for (RemoteClient client : selectedClients) {
-            sState.setClientHidden(client.guid, false);
-            hiddenClients.remove(client);
-        }
-
-        final int insertIndex = getRemoteClientsHiddenItemsIndex();
-
-        remoteClients.addAll(insertIndex, selectedClients);
-        notifyItemRangeInserted(insertIndex, selectedClients.size());
-
-        if (hiddenClients.isEmpty()) {
-            // No more hidden clients, remove "unhide" item.
-            remoteClients.remove(getRemoteClientsHiddenItemsIndex());
-        } else {
-            // Update "hidden clients" item because number of hidden clients changed.
-            notifyItemChanged(getRemoteClientsHiddenItemsIndex());
-        }
+    public interface RecentTabsUpdateHandler {
+        void onRecentTabsCountUpdated(int count, boolean countReliable);
     }
 
-    /**
-     * Get the position of the "N devices hidden" item in the remoteClients List.
-     *
-     * This is the last item in the remoteClients list, if any items are hidden.
-     * <code>hiddenClients</code> must be in a consistent state with <code>remoteClients</code>
-     * (e.g. each client should be in exactly one of the two lists).
-     *
-     * @return index of the "N devices hidden" item, or -1 if it doesn't exist.
-     */
-    private int getRemoteClientsHiddenItemsIndex() {
-        if (hiddenClients.isEmpty()) {
-            return -1;
+    public RecentTabsUpdateHandler getRecentTabsUpdateHandler() {
+        if (recentTabsUpdateHandler != null) {
+            return recentTabsUpdateHandler;
         }
-        return remoteClients.size() - 1;
-    }
 
-    public List<RemoteClient> getHiddenClients() {
-        return hiddenClients;
-    }
+        recentTabsUpdateHandler = new RecentTabsUpdateHandler() {
+            @Override
+            public void onRecentTabsCountUpdated(final int count, final boolean countReliable) {
+                // Now that other items can move around depending on the visibility of the
+                // Recent Tabs folder, only update the recentTabsCount on the UI thread.
+                ThreadUtils.postToUiThread(new Runnable() {
+                    @UiThread
+                    @Override
+                    public void run() {
+                        if (!countReliable && count <= recentTabsCount) {
+                            // The final tab count (where countReliable = true) is normally >= than
+                            // previous values with countReliable = false. Hence we only want to
+                            // update the displayed tab count with a preliminary value if it's larger
+                            // than the previous count, so as to avoid the displayed count jumping
+                            // downwards and then back up, as well as unnecessary folder animations.
+                            return;
+                        }
 
-    public JSONArray getCurrentChildTabs() {
-        if (clientChildren != null) {
-            final JSONArray urls = new JSONArray();
-            for (int i = 1; i < clientChildren.size(); i++) {
-                urls.put(clientChildren.get(i).url);
+                        final boolean prevFolderVisibility = isRecentTabsFolderVisible();
+                        recentTabsCount = count;
+                        final boolean folderVisible = isRecentTabsFolderVisible();
+
+                        if (prevFolderVisibility == folderVisible) {
+                            if (prevFolderVisibility) {
+                                notifyItemChanged(RECENT_TABS_SMARTFOLDER_INDEX);
+                            }
+                            return;
+                        }
+
+                        // If the Recent Tabs smart folder has become hidden/unhidden,
+                        // we need to recalculate the history section header positions.
+                        populateSectionHeaders(historyCursor, sectionHeaders);
+
+                        if (folderVisible) {
+                            int scrollPos = -1;
+                            if (linearLayoutManager != null) {
+                                scrollPos = linearLayoutManager.findFirstCompletelyVisibleItemPosition();
+                            }
+
+                            notifyItemInserted(RECENT_TABS_SMARTFOLDER_INDEX);
+                            // If the list exceeds the display height and we want to show the new
+                            // item inserted at position 0, we need to scroll up manually
+                            // (see https://code.google.com/p/android/issues/detail?id=174227#c2).
+                            // However we only do this if our current scroll position is at the
+                            // top of the list.
+                            if (linearLayoutManager != null && scrollPos == 0) {
+                                linearLayoutManager.scrollToPosition(0);
+                            }
+                        } else {
+                            notifyItemRemoved(RECENT_TABS_SMARTFOLDER_INDEX);
+                        }
+
+                        if (countReliable && panelStateChangeListener != null) {
+                            panelStateChangeListener.setCachedRecentTabsCount(recentTabsCount);
+                        }
+                    }
+                });
             }
-            return urls;
+        };
+        return recentTabsUpdateHandler;
+    }
+
+    @UiThread
+    private boolean isRecentTabsFolderVisible() {
+        return recentTabsCount > 0;
+    }
+
+    @UiThread
+    // Number of smart folders for determining practical empty state.
+    public int getNumVisibleSmartFolders() {
+        int visibleFolders = 1; // Synced devices folder is always visible.
+
+        if (isRecentTabsFolderVisible()) {
+            visibleFolders += 1;
         }
-        return null;
+
+        return visibleFolders;
     }
 
-    public int getParentIndex() {
-        return remoteClientIndexOfParent;
+    @UiThread
+    private int getSyncedDevicesSmartFolderIndex() {
+        return isRecentTabsFolderVisible() ?
+                RECENT_TABS_SMARTFOLDER_INDEX + 1 :
+                RECENT_TABS_SMARTFOLDER_INDEX;
     }
 
-    private boolean isInChildView() {
-        return remoteClientIndexOfParent != -1;
-    }
+    @Override
+    public CombinedHistoryItem onCreateViewHolder(ViewGroup viewGroup, int viewType) {
+        final LayoutInflater inflater = LayoutInflater.from(viewGroup.getContext());
+        final View view;
 
-    public void showChildView(int parentPosition) {
-        if (clientChildren == null) {
-            clientChildren = new ArrayList<>();
+        final CombinedHistoryItem.ItemType itemType = CombinedHistoryItem.ItemType.viewTypeToItemType(viewType);
+
+        switch (itemType) {
+            case RECENT_TABS:
+            case SYNCED_DEVICES:
+                view = inflater.inflate(R.layout.home_smartfolder, viewGroup, false);
+                return new CombinedHistoryItem.SmartFolder(view);
+
+            case SECTION_HEADER:
+                view = inflater.inflate(R.layout.home_header_row, viewGroup, false);
+                return new CombinedHistoryItem.BasicItem(view);
+
+            case HISTORY:
+                view = inflater.inflate(R.layout.home_item_row, viewGroup, false);
+                return new CombinedHistoryItem.HistoryItem(view);
+            default:
+                throw new IllegalArgumentException("Unexpected Home Panel item type");
         }
-        // Handle "back" view.
-        clientChildren.add(null);
-        remoteClientIndexOfParent = transformAdapterPositionForDataStructure(ItemType.CLIENT, parentPosition);
-        clientChildren.addAll(remoteClients.get(remoteClientIndexOfParent).tabs);
-        notifyDataSetChanged();
     }
 
-    public boolean exitChildView() {
-        if (!isInChildView()) {
-            return false;
+    @Override
+    public void onBindViewHolder(CombinedHistoryItem viewHolder, int position) {
+        final CombinedHistoryItem.ItemType itemType = getItemTypeForPosition(position);
+        final int localPosition = transformAdapterPositionForDataStructure(itemType, position);
+
+        switch (itemType) {
+            case RECENT_TABS:
+                ((CombinedHistoryItem.SmartFolder) viewHolder).bind(R.drawable.icon_recent, R.string.home_closed_tabs_title2, R.string.home_closed_tabs_one, R.string.home_closed_tabs_number, recentTabsCount);
+                break;
+
+            case SYNCED_DEVICES:
+                ((CombinedHistoryItem.SmartFolder) viewHolder).bind(R.drawable.cloud, R.string.home_synced_devices_smartfolder, R.string.home_synced_devices_one, R.string.home_synced_devices_number, deviceCount);
+                break;
+
+            case SECTION_HEADER:
+                ((TextView) viewHolder.itemView).setText(getSectionHeaderTitle(sectionHeaders.get(localPosition)));
+                break;
+
+            case HISTORY:
+                if (historyCursor == null || !historyCursor.moveToPosition(localPosition)) {
+                    throw new IllegalStateException("Couldn't move cursor to position " + localPosition);
+                }
+                ((CombinedHistoryItem.HistoryItem) viewHolder).bind(historyCursor);
+                break;
         }
-        remoteClientIndexOfParent = -1;
-        clientChildren.clear();
-        notifyDataSetChanged();
-        return true;
-    }
-
-    private ItemType getItemTypeForPosition(int position) {
-        return ItemType.viewTypeToItemType(getItemViewType(position));
     }
 
     /**
@@ -229,107 +250,91 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
      * @param position position in the adapter
      * @return position of the item in the data structure
      */
-    private int transformAdapterPositionForDataStructure(ItemType type, int position) {
-        if (type == ItemType.CLIENT) {
+    @UiThread
+    private int transformAdapterPositionForDataStructure(CombinedHistoryItem.ItemType type, int position) {
+        if (type == CombinedHistoryItem.ItemType.SECTION_HEADER) {
             return position;
-        } else if (type == ItemType.SECTION_HEADER) {
-            return position - remoteClients.size();
-        } else if (type == ItemType.HISTORY){
-            return position - remoteClients.size() - getHeadersBefore(position);
+        } else if (type == CombinedHistoryItem.ItemType.HISTORY) {
+            return position - getHeadersBefore(position) - getNumVisibleSmartFolders();
         } else {
             return position;
         }
     }
 
-    public HomeContextMenuInfo makeContextMenuInfoFromPosition(View view, int position) {
-        final ItemType itemType = getItemTypeForPosition(position);
-        HomeContextMenuInfo info;
-        switch (itemType) {
-            case CHILD:
-                info = new HomeContextMenuInfo(view, position, -1);
-                return CombinedHistoryPanel.populateChildInfoFromTab(info, clientChildren.get(position));
-            case HISTORY:
-                info = new HomeContextMenuInfo(view, position, -1);
-                historyCursor.moveToPosition(transformAdapterPositionForDataStructure(ItemType.HISTORY, position));
-                return CombinedHistoryPanel.populateHistoryInfoFromCursor(info, historyCursor);
-            case CLIENT:
-                final int clientPosition = transformAdapterPositionForDataStructure(ItemType.CLIENT, position);
-                info = new CombinedHistoryPanel.RemoteTabsClientContextMenuInfo(view, position,-1, remoteClients.get(clientPosition));
-                return info;
+    @UiThread
+    private CombinedHistoryItem.ItemType getItemTypeForPosition(int position) {
+        if (position == RECENT_TABS_SMARTFOLDER_INDEX && isRecentTabsFolderVisible()) {
+            return CombinedHistoryItem.ItemType.RECENT_TABS;
         }
-        return null;
+        if (position == getSyncedDevicesSmartFolderIndex()) {
+            return CombinedHistoryItem.ItemType.SYNCED_DEVICES;
+        }
+        final int sectionPosition = transformAdapterPositionForDataStructure(CombinedHistoryItem.ItemType.SECTION_HEADER, position);
+        if (sectionHeaders.get(sectionPosition) != null) {
+            return CombinedHistoryItem.ItemType.SECTION_HEADER;
+        }
+        return CombinedHistoryItem.ItemType.HISTORY;
     }
 
-    @Override
-    public CombinedHistoryItem onCreateViewHolder(ViewGroup viewGroup, int viewType) {
-        final LayoutInflater inflater = LayoutInflater.from(viewGroup.getContext());
-        final View view;
-
-        final ItemType itemType = ItemType.viewTypeToItemType(viewType);
-
-        switch (itemType) {
-            case CLIENT:
-                view = inflater.inflate(R.layout.home_remote_tabs_group, viewGroup, false);
-                return new CombinedHistoryItem.ClientItem(view);
-
-            case HIDDEN_DEVICES:
-                view = inflater.inflate(R.layout.home_remote_tabs_hidden_devices, viewGroup, false);
-                return new CombinedHistoryItem.BasicItem(view);
-
-            case NAVIGATION_BACK:
-                view = inflater.inflate(R.layout.home_combined_back_item, viewGroup, false);
-                return new CombinedHistoryItem.HistoryItem(view);
-
-            case SECTION_HEADER:
-                view = inflater.inflate(R.layout.home_header_row, viewGroup, false);
-                return new CombinedHistoryItem.BasicItem(view);
-
-            case CHILD:
-            case HISTORY:
-                view = inflater.inflate(R.layout.home_item_row, viewGroup, false);
-                return new CombinedHistoryItem.HistoryItem(view);
-            default:
-                throw new IllegalArgumentException("Unexpected Home Panel item type");
-        }
-    }
-
+    @UiThread
     @Override
     public int getItemViewType(int position) {
-        if (isInChildView()) {
-            if (position == 0) {
-                return ItemType.itemTypeToViewType(ItemType.NAVIGATION_BACK);
-            }
-            return ItemType.itemTypeToViewType(ItemType.CHILD);
-        } else {
-            final int numClients = remoteClients.size();
-            if (position < numClients) {
-                if (!hiddenClients.isEmpty() && position == numClients - 1) {
-                    return ItemType.itemTypeToViewType(ItemType.HIDDEN_DEVICES);
-                }
-                return ItemType.itemTypeToViewType(ItemType.CLIENT);
-            }
-
-            final int sectionPosition = transformAdapterPositionForDataStructure(ItemType.SECTION_HEADER, position);
-            if (sectionHeaders.get(sectionPosition) != null) {
-                return ItemType.itemTypeToViewType(ItemType.SECTION_HEADER);
-            }
-
-            return ItemType.itemTypeToViewType(ItemType.HISTORY);
-        }
+        return CombinedHistoryItem.ItemType.itemTypeToViewType(getItemTypeForPosition(position));
     }
 
+    @UiThread
     @Override
     public int getItemCount() {
-        if (isInChildView()) {
-            if (clientChildren == null) {
-                clientChildren = new ArrayList<>();
-                clientChildren.add(null);
-                clientChildren.addAll(remoteClients.get(remoteClientIndexOfParent).tabs);
-            }
-            return clientChildren.size();
-        } else {
-            final int historySize = historyCursor == null ? 0 : historyCursor.getCount();
-            return remoteClients.size() + historySize + sectionHeaders.size();
+        final int historySize = historyCursor == null ? 0 : historyCursor.getCount();
+        return historySize + sectionHeaders.size() + getNumVisibleSmartFolders();
+    }
+
+    /**
+     * Returns stable ID for each position. Data behind historyCursor is a sorted Combined view.
+     *
+     * @param position view item position for which to generate a stable ID
+     * @return stable ID for given position
+     */
+    @UiThread
+    @Override
+    public long getItemId(int position) {
+        // Two randomly selected large primes used to generate non-clashing IDs.
+        final long PRIME_BOOKMARKS = 32416189867L;
+        final long PRIME_SECTION_HEADERS = 32416187737L;
+
+        // RecyclerView.NO_ID is -1, so let's start from -2 for our hard-coded IDs.
+        final int RECENT_TABS_ID = -2;
+        final int SYNCED_DEVICES_ID = -3;
+
+        switch (getItemTypeForPosition(position)) {
+            case RECENT_TABS:
+                return RECENT_TABS_ID;
+            case SYNCED_DEVICES:
+                return SYNCED_DEVICES_ID;
+            case SECTION_HEADER:
+                // We might have multiple section headers, so we try get unique IDs for them.
+                return position * PRIME_SECTION_HEADERS;
+            case HISTORY:
+                final int historyPosition = transformAdapterPositionForDataStructure(
+                        CombinedHistoryItem.ItemType.HISTORY, position);
+                if (!historyCursor.moveToPosition(historyPosition)) {
+                    return RecyclerView.NO_ID;
+                }
+
+                final int historyIdCol = historyCursor.getColumnIndexOrThrow(BrowserContract.Combined.HISTORY_ID);
+                final long historyId = historyCursor.getLong(historyIdCol);
+
+                if (historyId != -1) {
+                    return historyId;
+                }
+
+                final int bookmarkIdCol = historyCursor.getColumnIndexOrThrow(BrowserContract.Combined.BOOKMARK_ID);
+                final long bookmarkId = historyCursor.getLong(bookmarkIdCol);
+
+                // Avoid clashing with historyId.
+                return bookmarkId * PRIME_BOOKMARKS;
+            default:
+                throw new IllegalStateException("Unexpected Home Panel item type");
         }
     }
 
@@ -339,7 +344,10 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
      * @param c data Cursor
      * @param sparseArray SparseArray to populate
      */
-    private static void populateSectionHeaders(Cursor c, SparseArray<SectionHeader> sparseArray) {
+    @UiThread
+    private void populateSectionHeaders(Cursor c, SparseArray<SectionHeader> sparseArray) {
+        ThreadUtils.assertOnUiThread();
+
         sparseArray.clear();
 
         if (c == null || !c.moveToFirst()) {
@@ -351,11 +359,11 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         do {
             final int historyPosition = c.getPosition();
             final long visitTime = c.getLong(c.getColumnIndexOrThrow(BrowserContract.History.DATE_LAST_VISITED));
-            final SectionHeader itemSection = CombinedHistoryPanel.getSectionFromTime(visitTime);
+            final SectionHeader itemSection = getSectionFromTime(visitTime);
 
             if (section != itemSection) {
                 section = itemSection;
-                sparseArray.append(historyPosition + sparseArray.size(), section);
+                sparseArray.append(historyPosition + sparseArray.size() + getNumVisibleSmartFolders(), section);
             }
 
             if (section == SectionHeader.OLDER_THAN_SIX_MONTHS) {
@@ -364,48 +372,18 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         } while (c.moveToNext());
     }
 
-
-    public boolean containsHistory() {
-        if (historyCursor == null) {
-            return false;
-        }
-        return (historyCursor.getCount() > 0);
+    private static String getSectionHeaderTitle(SectionHeader section) {
+        return sectionDateRangeArray[section.ordinal()].displayName;
     }
 
-    @Override
-    public void onBindViewHolder(CombinedHistoryItem viewHolder, int position) {
-        final ItemType itemType = getItemTypeForPosition(position);
-        final int localPosition = transformAdapterPositionForDataStructure(itemType, position);
-
-        switch (itemType) {
-            case CLIENT:
-                final CombinedHistoryItem.ClientItem clientItem = (CombinedHistoryItem.ClientItem) viewHolder;
-                final RemoteClient client = remoteClients.get(localPosition);
-                clientItem.bind(client, context);
-                break;
-
-            case HIDDEN_DEVICES:
-                final String hiddenDevicesLabel = context.getResources().getString(R.string.home_remote_tabs_many_hidden_devices, hiddenClients.size());
-                ((TextView) viewHolder.itemView).setText(hiddenDevicesLabel);
-                break;
-
-            case CHILD:
-                RemoteTab remoteTab = clientChildren.get(position);
-                ((CombinedHistoryItem.HistoryItem) viewHolder).bind(remoteTab);
-                break;
-
-            case SECTION_HEADER:
-                ((TextView) viewHolder.itemView).setText(CombinedHistoryPanel.getSectionHeaderTitle(sectionHeaders.get(localPosition)));
-                break;
-
-
-            case HISTORY:
-                if (historyCursor == null || !historyCursor.moveToPosition(localPosition)) {
-                    throw new IllegalStateException("Couldn't move cursor to position " + localPosition);
-                }
-                ((CombinedHistoryItem.HistoryItem) viewHolder).bind(historyCursor);
-                break;
+    private static SectionHeader getSectionFromTime(long time) {
+        for (int i = 0; i < SectionHeader.OLDER_THAN_SIX_MONTHS.ordinal(); i++) {
+            if (time > sectionDateRangeArray[i].start) {
+                return SectionHeader.values()[i];
+            }
         }
+
+        return SectionHeader.OLDER_THAN_SIX_MONTHS;
     }
 
     /**
@@ -413,15 +391,43 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
      * @param position position in the adapter
      */
     private int getHeadersBefore(int position) {
-        final int adjustedPosition = position - remoteClients.size();
         // Skip the first header case because there will always be a header.
         for (int i = 1; i < sectionHeaders.size(); i++) {
             // If the position of the header is greater than the history position,
             // return the number of headers tested.
-            if (sectionHeaders.keyAt(i) > adjustedPosition) {
+            if (sectionHeaders.keyAt(i) > position) {
                 return i;
             }
         }
         return sectionHeaders.size();
     }
+
+    @Override
+    public HomeContextMenuInfo makeContextMenuInfoFromPosition(View view, int position) {
+        final CombinedHistoryItem.ItemType itemType = getItemTypeForPosition(position);
+        if (itemType == CombinedHistoryItem.ItemType.HISTORY) {
+            final HomeContextMenuInfo info = new HomeContextMenuInfo(view, position, -1);
+
+            historyCursor.moveToPosition(transformAdapterPositionForDataStructure(CombinedHistoryItem.ItemType.HISTORY, position));
+            return populateHistoryInfoFromCursor(info, historyCursor);
+        }
+        return null;
+    }
+
+    protected static HomeContextMenuInfo populateHistoryInfoFromCursor(HomeContextMenuInfo info, Cursor cursor) {
+        info.url = cursor.getString(cursor.getColumnIndexOrThrow(BrowserContract.Combined.URL));
+        info.title = cursor.getString(cursor.getColumnIndexOrThrow(BrowserContract.Combined.TITLE));
+        info.historyId = cursor.getInt(cursor.getColumnIndexOrThrow(BrowserContract.Combined.HISTORY_ID));
+        info.itemType = HomeContextMenuInfo.RemoveItemType.HISTORY;
+        final int bookmarkIdCol = cursor.getColumnIndexOrThrow(BrowserContract.Combined.BOOKMARK_ID);
+        if (cursor.isNull(bookmarkIdCol)) {
+            // If this is a combined cursor, we may get a history item without a
+            // bookmark, in which case the bookmarks ID column value will be null.
+            info.bookmarkId =  -1;
+        } else {
+            info.bookmarkId = cursor.getInt(bookmarkIdCol);
+        }
+        return info;
+    }
+
 }

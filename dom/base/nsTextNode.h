@@ -8,12 +8,11 @@
 #define nsTextNode_h
 
 /*
- * Implementation of DOM Core's nsIDOMText node.
+ * Implementation of DOM Core's Text node.
  */
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Text.h"
-#include "nsIDOMText.h"
 #include "nsDebug.h"
 
 class nsNodeInfoManager;
@@ -21,13 +20,12 @@ class nsNodeInfoManager;
 /**
  * Class used to implement DOM text nodes
  */
-class nsTextNode : public mozilla::dom::Text,
-                   public nsIDOMText
+class nsTextNode : public mozilla::dom::Text
 {
 private:
   void Init()
   {
-    MOZ_ASSERT(mNodeInfo->NodeType() == nsIDOMNode::TEXT_NODE,
+    MOZ_ASSERT(mNodeInfo->NodeType() == TEXT_NODE,
                "Bad NodeType in aNodeInfo");
   }
 
@@ -47,22 +45,12 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  using mozilla::dom::Text::GetParentElement;
-
-  // nsIDOMCharacterData
-  NS_FORWARD_NSIDOMCHARACTERDATA(nsGenericDOMDataNode::)
-  using nsGenericDOMDataNode::SetData; // Prevent hiding overloaded virtual function.
-
-  // nsIDOMText
-  NS_FORWARD_NSIDOMTEXT(nsGenericDOMDataNode::)
-
   // nsINode
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
 
-  virtual nsGenericDOMDataNode* CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
-                                              bool aCloneText) const override;
+  virtual already_AddRefed<CharacterData>
+    CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
+                  bool aCloneText) const override;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
@@ -73,7 +61,9 @@ public:
   nsresult AppendTextForNormalize(const char16_t* aBuffer, uint32_t aLength,
                                   bool aNotify, nsIContent* aNextSibling);
 
-  virtual nsIDOMNode* AsDOMNode() override { return this; }
+  // Need to have a copy here because including nsDocument.h in this file will
+  // fail to build on Windows.
+  static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject);
 
 #ifdef DEBUG
   virtual void List(FILE* out, int32_t aIndent) const override;

@@ -13,13 +13,13 @@ function run_test() {
 }
 
 function finish_test() {
-  do_execute_soon(function() {
-    test_generator.close();
+  executeSoon(function() {
+    test_generator.return();
     do_test_finished();
   });
 }
 
-function do_run_test() {
+function* do_run_test() {
   // Set up a profile.
   let profile = do_get_profile();
 
@@ -49,16 +49,16 @@ function do_run_test() {
   do_close_profile(test_generator);
   yield;
   do_load_profile();
-  do_check_eq(Services.cookies.countCookiesFromHost(uri1.host), 4);
-  do_check_eq(Services.cookies.countCookiesFromHost(uri2.host), 0);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri1.host), 4);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri2.host), 0);
 
   // Again, but don't wait for the async close to complete. This should always
   // work, since we blocked on close above and haven't kicked off any writes
   // since then.
   do_close_profile();
   do_load_profile();
-  do_check_eq(Services.cookies.countCookiesFromHost(uri1.host), 4);
-  do_check_eq(Services.cookies.countCookiesFromHost(uri2.host), 0);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri1.host), 4);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri2.host), 0);
 
   // test with cookies set to session-only
   Services.prefs.setIntPref("network.cookie.lifetimePolicy", 2);
@@ -70,8 +70,8 @@ function do_run_test() {
   do_close_profile(test_generator);
   yield;
   do_load_profile();
-  do_check_eq(Services.cookies.countCookiesFromHost(uri1.host), 0);
-  do_check_eq(Services.cookies.countCookiesFromHost(uri2.host), 0);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri1.host), 0);
+  Assert.equal(Services.cookies.countCookiesFromHost(uri2.host), 0);
 
   finish_test();
 }

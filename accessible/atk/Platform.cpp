@@ -19,14 +19,16 @@
 #endif
 #include <gtk/gtk.h>
 
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
 extern "C" __attribute__((weak,visibility("default"))) int atk_bridge_adaptor_init(int*, char **[]);
 #endif
 
 using namespace mozilla;
 using namespace mozilla::a11y;
 
-int atkMajorVersion = 1, atkMinorVersion = 12;
+int atkMajorVersion = 1, atkMinorVersion = 12, atkMicroVersion = 0;
+
+GType (*gAtkTableCellGetTypeFunc)();
 
 extern "C" {
 typedef GType (* AtkGetTypeType) (void);
@@ -67,14 +69,6 @@ static GnomeAccessibilityModule sAtkBridge = {
     "gnome_accessibility_module_shutdown", nullptr
 };
 
-#if (MOZ_WIDGET_GTK == 2)
-static GnomeAccessibilityModule sGail = {
-    "libgail.so", nullptr,
-    "gnome_accessibility_module_init", nullptr,
-    "gnome_accessibility_module_shutdown", nullptr
-};
-#endif
-
 static nsresult
 LoadGtkModule(GnomeAccessibilityModule& aModule)
 {
@@ -100,11 +94,7 @@ LoadGtkModule(GnomeAccessibilityModule& aModule)
             else
                 subLen = loc2 - loc1;
             nsAutoCString sub(Substring(libPath, loc1, subLen));
-#if (MOZ_WIDGET_GTK == 2)
-            sub.AppendLiteral("/gtk-2.0/modules/");
-#else
             sub.AppendLiteral("/gtk-3.0/modules/");
-#endif
             sub.Append(aModule.libName);
             aModule.lib = PR_LoadLibrary(sub.get());
             if (aModule.lib)
@@ -156,6 +146,9 @@ a11y::PlatformInit()
       AtkSocketAccessible::g_atk_socket_embed;
   }
 
+  gAtkTableCellGetTypeFunc = (GType (*)())
+    PR_FindFunctionSymbol(sATKLib, "atk_table_cell_get_type");
+
   const char* (*atkGetVersion)() =
     (const char* (*)()) PR_FindFunctionSymbol(sATKLib, "atk_get_version");
   if (atkGetVersion) {
@@ -163,24 +156,20 @@ a11y::PlatformInit()
     if (version) {
       char* endPtr = nullptr;
       atkMajorVersion = strtol(version, &endPtr, 10);
-      if (*endPtr == '.')
+      if (atkMajorVersion != 0L) {
         atkMinorVersion = strtol(endPtr + 1, &endPtr, 10);
+        if (atkMinorVersion != 0L)
+          atkMicroVersion = strtol(endPtr + 1, &endPtr, 10);
+      }
     }
   }
-
-#if (MOZ_WIDGET_GTK == 2)
-  // Load and initialize gail library.
-  nsresult rv = LoadGtkModule(sGail);
-  if (NS_SUCCEEDED(rv))
-    (*sGail.init)();
-#endif
 
   // Initialize the MAI Utility class, it will overwrite gail_util.
   g_type_class_unref(g_type_class_ref(mai_util_get_type()));
 
   // Init atk-bridge now
   PR_SetEnv("NO_AT_BRIDGE=0");
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
   if (atk_bridge_adaptor_init) {
     atk_bridge_adaptor_init(nullptr, nullptr);
   } else
@@ -228,19 +217,6 @@ a11y::PlatformShutdown()
         sAtkBridge.init = nullptr;
         sAtkBridge.shutdown = nullptr;
     }
-#if (MOZ_WIDGET_GTK == 2)
-    if (sGail.lib) {
-        // Do not shutdown gail because
-        // 1) Maybe it's not init-ed by us. e.g. GtkEmbed
-        // 2) We need it to avoid assert in spi_atk_tidy_windows
-        // if (sGail.shutdown)
-        //   (*sGail.shutdown)();
-        // PR_UnloadLibrary(sGail.lib);
-        sGail.lib = nullptr;
-        sGail.init = nullptr;
-        sGail.shutdown = nullptr;
-    }
-#endif
     // if (sATKLib) {
     //     PR_UnloadLibrary(sATKLib);
     //     sATKLib = nullptr;

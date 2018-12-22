@@ -4,12 +4,17 @@
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-let log = Cu.import("resource://gre/modules/Log.jsm", {})
+let log = ChromeUtils.import("resource://gre/modules/Log.jsm", {})
             .Log.repository.getLogger("Sync.RemoteTabs");
 
-this.EXPORTED_SYMBOLS = [
+XPCOMUtils.defineLazyModuleGetters(this, {
+  OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
+});
+
+var EXPORTED_SYMBOLS = [
   "TabListComponent"
 ];
 
@@ -22,11 +27,13 @@ this.EXPORTED_SYMBOLS = [
  * to state changes so it can rerender.
  */
 
-function TabListComponent({window, store, View, SyncedTabs, clipboardHelper}) {
+function TabListComponent({window, store, View, SyncedTabs, clipboardHelper,
+                           getChromeWindow}) {
   this._window = window;
   this._store = store;
   this._View = View;
   this._clipboardHelper = clipboardHelper;
+  this._getChromeWindow = getChromeWindow;
   // used to trigger Sync from context menu
   this._SyncedTabs = SyncedTabs;
 }
@@ -42,6 +49,7 @@ TabListComponent.prototype = {
     this._view = new this._View(this._window, {
       onSelectRow: (...args) => this.onSelectRow(...args),
       onOpenTab: (...args) => this.onOpenTab(...args),
+      onOpenTabs: (...args) => this.onOpenTabs(...args),
       onMoveSelectionDown: (...args) => this.onMoveSelectionDown(...args),
       onMoveSelectionUp: (...args) => this.onMoveSelectionUp(...args),
       onToggleBranch: (...args) => this.onToggleBranch(...args),
@@ -104,7 +112,24 @@ TabListComponent.prototype = {
   },
 
   onOpenTab(url, where, params) {
-    this._window.openUILinkIn(url, where, params);
+    this._window.openTrustedLinkIn(url, where, params);
+  },
+
+  onOpenTabs(urls, where) {
+    if (!OpenInTabsUtils.confirmOpenInTabs(urls.length, this._window)) {
+      return;
+    }
+    if (where == "window") {
+      this._window.openDialog(this._window.getBrowserURL(), "_blank",
+                              "chrome,dialog=no,all", urls.join("|"));
+    } else {
+      let loadInBackground = where == "tabshifted";
+      this._getChromeWindow(this._window).gBrowser.loadTabs(urls, {
+        inBackground: loadInBackground,
+        replace: false,
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      });
+    }
   },
 
   onCopyTabLocation(url) {

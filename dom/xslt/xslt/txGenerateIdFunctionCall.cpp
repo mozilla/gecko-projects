@@ -37,7 +37,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
     if (!requireParams(0, 1, aContext))
         return NS_ERROR_XPATH_BAD_ARGUMENT_COUNT;
 
-    txExecutionState* es = 
+    txExecutionState* es =
         static_cast<txExecutionState*>(aContext->getPrivateContext());
     if (!es) {
         NS_ERROR(
@@ -56,7 +56,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
                                     strRes->mValue);
 
         *aResult = strRes;
- 
+
         return NS_OK;
     }
 
@@ -70,7 +70,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
 
         return NS_OK;
     }
-    
+
     StringResult* strRes;
     rv = aContext->recycler()->getStringResult(&strRes);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -79,7 +79,7 @@ GenerateIdFunctionCall::evaluate(txIEvalContext* aContext,
                                 strRes->mValue);
 
     *aResult = strRes;
- 
+
     return NS_OK;
 }
 
@@ -104,11 +104,9 @@ GenerateIdFunctionCall::isSensitiveTo(ContextSensitivity aContext)
 }
 
 #ifdef TX_TO_STRING
-nsresult
-GenerateIdFunctionCall::getNameAtom(nsIAtom** aAtom)
+void
+GenerateIdFunctionCall::appendName(nsAString& aDest)
 {
-    *aAtom = nsGkAtoms::generateId;
-    NS_ADDREF(*aAtom);
-    return NS_OK;
+    aDest.Append(nsGkAtoms::generateId->GetUTF16String());
 }
 #endif

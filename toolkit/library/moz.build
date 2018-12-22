@@ -1,8 +1,15 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+@template
+def Libxul_defines():
+    LIBRARY_DEFINES['MOZILLA_INTERNAL_API'] = True
+    LIBRARY_DEFINES['IMPL_LIBXUL'] = True
+    if not CONFIG['JS_SHARED_LIBRARY']:
+        LIBRARY_DEFINES['STATIC_EXPORTABLE_JS_API'] = True
 
 @template
 def Libxul(name):
@@ -17,11 +24,9 @@ def Libxul(name):
 
     DELAYLOAD_DLLS += [
         'comdlg32.dll',
-        'dbghelp.dll',
-        'PowrProf.dll',
-        'psapi.dll',
-        'rasapi32.dll',
-        'rasdlg.dll',
+        'hid.dll',
+        'msimg32.dll',
+        'netapi32.dll',
         'secur32.dll',
         'wininet.dll',
         'winspool.drv'
@@ -39,7 +44,10 @@ def Libxul(name):
             'api-ms-win-core-winrt-string-l1-1-0.dll',
         ]
 
-    if CONFIG['OS_ARCH'] == 'WINNT' and not CONFIG['GNU_CC']:
+    if CONFIG['OS_ARCH'] == 'WINNT' and CONFIG['ACCESSIBILITY']:
+        LOCAL_INCLUDES += ['!/accessible/interfaces/gecko/']
+
+    if CONFIG['OS_ARCH'] == 'WINNT' and CONFIG['CC_TYPE'] not in ('clang', 'gcc'):
         LOCAL_INCLUDES += [
             '/widget/windows',
             '/xpcom/base',
@@ -50,33 +58,35 @@ def Libxul(name):
         # and config/version.mk would lift the $(srcdir)
         RCINCLUDE = '$(DEPTH)/toolkit/library/xulrunner.rc'
 
-    LIBRARY_DEFINES['MOZILLA_INTERNAL_API'] = True
-    LIBRARY_DEFINES['IMPL_LIBXUL'] = True
-    if not CONFIG['JS_SHARED_LIBRARY']:
-        LIBRARY_DEFINES['STATIC_EXPORTABLE_JS_API'] = True
+    # BFD ld doesn't create multiple PT_LOADs as usual when an unknown section
+    # exists. Using an implicit linker script to make it fold that section in
+    # .data.rel.ro makes it create multiple PT_LOADs. That implicit linker
+    # script however makes gold misbehave, first because it doesn't like that
+    # the linker script is given after crtbegin.o, and even past that, replaces
+    # the default section rules with those from the script instead of
+    # supplementing them. Which leads to a lib with a huge load of sections.
+    if CONFIG['OS_TARGET'] not in ('OpenBSD', 'WINNT') and CONFIG['LD_IS_BFD']:
+        LDFLAGS += [TOPSRCDIR + '/toolkit/library/StaticXULComponents.ld']
+
+    Libxul_defines()
 
     if CONFIG['MOZ_NEEDS_LIBATOMIC']:
         OS_LIBS += ['atomic']
 
-Libxul('xul')
+    # This option should go away in bug 1290972, but we need to wait until
+    # Rust 1.12 has been released.
+    # We're also linking against libresolv to solve bug 1367932.
+    if CONFIG['OS_ARCH'] == 'Darwin':
+        LDFLAGS += ['-Wl,-no_compact_unwind,-lresolv']
 
-SDK_LIBRARY = True
+    if CONFIG['MOZ_DEBUG_SYMBOLS'] and CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
+        LDFLAGS += ['-NATVIS:%s/toolkit/library/gecko.natvis' % TOPSRCDIR]
+
+Libxul('xul')
 
 FORCE_STATIC_LIB = True
 
 STATIC_LIBRARY_NAME = 'xul_s'
-
-SOURCES += [
-    'StaticXULComponentsStart.cpp',
-]
-
-# This, combined with the fact the file is first, makes the start pointer
-# it contains first in Windows PGO builds.
-SOURCES['StaticXULComponentsStart.cpp'].no_pgo = True
-
-# Don't let LTO reorder StaticXULComponentsStart.o.
-if '-flto' in CONFIG['OS_CXXFLAGS']:
-    SOURCES['StaticXULComponentsStart.cpp'].flags += ['-fno-lto']
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     SOURCES += [
@@ -89,12 +99,15 @@ LOCAL_INCLUDES += [
     '/widget/windows',
 ]
 
-if CONFIG['OS_ARCH'] == 'WINNT' and not CONFIG['GNU_CC']:
+if CONFIG['OS_ARCH'] == 'WINNT' and CONFIG['CC_TYPE'] not in ('clang', 'gcc'):
     LOCAL_INCLUDES += [
         '/xpcom/base',
     ]
 
 DIRS += ['gtest']
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+  DIRS += ['dummydll']
 
 # js needs to come after xul for now, because it is an archive and its content
 # is discarded when it comes first.
@@ -102,16 +115,11 @@ USE_LIBS += [
     'js',
 ]
 
-if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
-    USE_LIBS += [
-        'sandboxbroker',
-    ]
-
 USE_LIBS += [
-    'gkmedias',
     'lgpllibs',
     'nspr',
     'nss',
+    'psshparser',
     'sqlite',
     'zlib',
 ]
@@ -126,12 +134,17 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk3':
         'mozgtk_stub',
     ]
 
+if CONFIG['MOZ_WAYLAND']:
+    USE_LIBS += [
+        'mozwayland',
+    ]
+
 if CONFIG['MOZ_JPROF']:
     USE_LIBS += [
         'jprof',
     ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt' or \
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or \
         CONFIG['MOZ_TREE_FREETYPE']:
     USE_LIBS += [
         'freetype',
@@ -144,7 +157,6 @@ if CONFIG['MOZ_WEBRTC']:
     if CONFIG['OS_TARGET'] == 'WINNT':
         OS_LIBS += [
             'secur32',
-            'crypt32',
             'iphlpapi',
             'strmiids',
             'dmoguids',
@@ -158,7 +170,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     OS_LIBS += [
         '-framework OpenGL',
         '-framework SystemConfiguration',
-        '-framework QTKit',
+        '-framework AVFoundation',
+        '-framework CoreMedia',
         '-framework IOKit',
         '-F%s' % CONFIG['MACOS_PRIVATE_FRAMEWORKS_DIR'],
         '-framework CoreUI',
@@ -173,14 +186,6 @@ if CONFIG['MOZ_WMF']:
         'strmiids',
     ]
 
-if CONFIG['MOZ_DIRECTSHOW']:
-    OS_LIBS += [
-        'dmoguids',
-        'wmcodecdspuuid',
-        'strmiids',
-        'msdmo',
-    ]
-
 if CONFIG['OS_ARCH'] == 'FreeBSD':
     OS_LIBS += [
         'util',
@@ -188,21 +193,11 @@ if CONFIG['OS_ARCH'] == 'FreeBSD':
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     OS_LIBS += [
+        'crypt32',
         'shell32',
         'ole32',
         'version',
         'winspool',
-    ]
-
-if CONFIG['MOZ_B2G_BT_BLUEZ'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    OS_LIBS += [
-        'dbus',
-    ]
-
-if CONFIG['MOZ_B2G_CAMERA'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    OS_LIBS += [
-        'stagefright',
-        'stagefright_omx',
     ]
 
 if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
@@ -210,18 +205,20 @@ if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
         'rt',
     ]
 
+if CONFIG['MOZ_ANDROID_GOOGLE_VR']:
+    OS_LIBS += [
+        '-L%s' % CONFIG['MOZ_ANDROID_GOOGLE_VR_LIBS'],
+        '-lgvr',
+    ]
+
 OS_LIBS += CONFIG['MOZ_CAIRO_OSLIBS']
 OS_LIBS += CONFIG['MOZ_WEBRTC_X11_LIBS']
-OS_LIBS += CONFIG['MOZ_SERVO_LIBS']
 
 if CONFIG['MOZ_SYSTEM_JPEG']:
     OS_LIBS += CONFIG['MOZ_JPEG_LIBS']
 
 if CONFIG['MOZ_SYSTEM_PNG']:
     OS_LIBS += CONFIG['MOZ_PNG_LIBS']
-
-if CONFIG['MOZ_SYSTEM_HUNSPELL']:
-    OS_LIBS += CONFIG['MOZ_HUNSPELL_LIBS']
 
 if CONFIG['MOZ_SYSTEM_LIBEVENT']:
     OS_LIBS += CONFIG['MOZ_LIBEVENT_LIBS']
@@ -237,45 +234,6 @@ if CONFIG['MOZ_ALSA']:
 
 if CONFIG['HAVE_CLOCK_MONOTONIC']:
     OS_LIBS += CONFIG['REALTIME_LIBS']
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    OS_LIBS += [
-        'GLESv2',
-    ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    OS_LIBS += [
-        'ui',
-        'media',
-        'hardware_legacy',
-        'hardware',
-        'utils',
-        'cutils',
-        'sysutils',
-        'camera_client',
-        'sensorservice',
-        'stagefright',
-        'stagefright_foundation',
-        'stagefright_omx',
-        'binder',
-        'gui',
-        'mtp',
-    ]
-
-    if int(CONFIG['ANDROID_VERSION']) >= 17:
-        OS_LIBS += [
-            'sync',
-        ]
-
-    if CONFIG['ANDROID_VERSION'] >= '16':
-        OS_LIBS += [
-            'mdnssd',
-        ]
-
-if 'rtsp' in CONFIG['NECKO_PROTOCOLS']:
-    OS_LIBS += [
-        'stagefright_foundation',
-    ]
 
 OS_LIBS += CONFIG['ICONV_LIBS']
 
@@ -305,13 +263,6 @@ if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
         'gthread-2.0',
     ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    OS_LIBS += CONFIG['XLDFLAGS']
-    OS_LIBS += CONFIG['XLIBS']
-    OS_LIBS += CONFIG['XT_LIBS']
-    OS_LIBS += CONFIG['MOZ_QT_LIBS']
-    OS_LIBS += CONFIG['MOZ_PANGO_LIBS']
-
 if CONFIG['MOZ_ENABLE_STARTUP_NOTIFICATION']:
     OS_LIBS += CONFIG['MOZ_STARTUP_NOTIFICATION_LIBS']
 
@@ -322,7 +273,7 @@ if CONFIG['OS_ARCH'] == 'SunOS':
     OS_LIBS += [
         'elf',
     ]
-    if CONFIG['GNU_CC']:
+    if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
         OS_LIBS += [
             'demangle',
         ]
@@ -341,33 +292,28 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'comdlg32',
         'imm32',
         'msimg32',
+        'netapi32',
         'shlwapi',
-        'psapi',
         'ws2_32',
-        'dbghelp',
-        'rasapi32',
-        'rasdlg',
+        'dwmapi',
         'iphlpapi',
         'uxtheme',
         'setupapi',
         'secur32',
         'sensorsapi',
         'portabledeviceguids',
-        'windowscodecs',
         'wininet',
         'wbemuuid',
         'wintrust',
         'wtsapi32',
         'locationapi',
         'sapi',
+        'dxguid',
     ]
     if CONFIG['ACCESSIBILITY']:
         OS_LIBS += [
             'oleacc',
         ]
-
-if CONFIG['MOZ_ENABLE_QT']:
-    OS_LIBS += CONFIG['XEXT_LIBS']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     OS_LIBS += [
@@ -375,5 +321,29 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'oleaut32',
     ]
 
-# This needs to be last
-USE_LIBS += ['StaticXULComponentsEnd']
+if CONFIG['COMPILE_ENVIRONMENT']:
+    if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('cocoa', 'uikit'):
+        full_libname = SHARED_LIBRARY_NAME
+    else:
+        full_libname = '%s%s%s' % (
+            CONFIG['DLL_PREFIX'],
+            LIBRARY_NAME,
+            CONFIG['DLL_SUFFIX']
+        )
+    GENERATED_FILES += [('dependentlibs.list', 'dependentlibs.list.gtest')]
+    dep_libs_list = GENERATED_FILES[('dependentlibs.list', 'dependentlibs.list.gtest')]
+    dep_libs_list.script = 'dependentlibs.py:gen_list'
+    dep_libs_list.inputs = [
+        '!%s' % full_libname,
+    ]
+    FINAL_TARGET_FILES += ['!dependentlibs.list', '!dependentlibs.list.gtest']
+
+    if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
+        GENERATED_FILES += ['symverscript']
+        GENERATED_FILES['symverscript'].script = 'gen_symverscript.py'
+        GENERATED_FILES['symverscript'].inputs = ['symverscript.in']
+        SYMBOLS_FILE = '!symverscript'
+
+# This library is entirely composed of Rust code, and needs to come after
+# all the C++ code so any possible C++ -> Rust calls can be resolved.
+USE_LIBS += ['gkrust']

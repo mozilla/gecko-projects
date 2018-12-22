@@ -22,16 +22,16 @@ public:
                        WidgetEvent* aEvent);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_FORWARD_TO_EVENT
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioProcessingEvent, Event)
 
   JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
+  using Event::InitEvent;
   void InitEvent(AudioBuffer* aInputBuffer,
                  uint32_t aNumberOfInputChannels,
                  double aPlaybackTime)
   {
-    InitEvent(NS_LITERAL_STRING("audioprocess"), false, false);
+    InitEvent(NS_LITERAL_STRING("audioprocess"), CanBubble::eNo, Cancelable::eNo);
     mInputBuffer = aInputBuffer;
     mNumberOfInputChannels = aNumberOfInputChannels;
     mPlaybackTime = aPlaybackTime;

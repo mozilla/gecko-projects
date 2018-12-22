@@ -8,39 +8,16 @@
 #include "mozilla/Attributes.h"
 #include "nscore.h"
 #include "nsContainerFrame.h"
-#include "nsIAtom.h"
+#include "nsAtom.h"
 #include "nsILineIterator.h"
-#include "nsTablePainter.h"
 #include "nsTArray.h"
 #include "nsTableFrame.h"
 #include "mozilla/WritingModes.h"
 
 class nsTableRowFrame;
-
-struct nsRowGroupReflowState {
-  const nsHTMLReflowState& reflowState;  // Our reflow state
-
-  nsTableFrame* tableFrame;
-
-  // The available size (computed from the parent)
-  mozilla::LogicalSize availSize;
-
-  // Running block-offset
-  nscoord bCoord;
-
-  nsRowGroupReflowState(const nsHTMLReflowState& aReflowState,
-                        nsTableFrame*            aTableFrame)
-      : reflowState(aReflowState)
-      , tableFrame(aTableFrame)
-      , availSize(aReflowState.GetWritingMode(),
-                  aReflowState.AvailableISize(),
-                  aReflowState.AvailableBSize())
-      , bCoord(0)
-  {
-  }
-
-  ~nsRowGroupReflowState() {}
-};
+namespace mozilla {
+struct TableRowGroupReflowInput;
+} // namespace mozilla
 
 #define MIN_ROWS_NEEDING_CURSOR 20
 
@@ -57,10 +34,11 @@ class nsTableRowGroupFrame final
   : public nsContainerFrame
   , public nsILineIterator
 {
+  using TableRowGroupReflowInput = mozilla::TableRowGroupReflowInput;
+
 public:
-  NS_DECL_QUERYFRAME_TARGET(nsTableRowGroupFrame)
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsTableRowGroupFrame)
 
   /** instantiate a new instance of nsTableRowFrame.
     * @param aPresShell the pres shell for this frame
@@ -68,20 +46,24 @@ public:
     * @return           the frame that was created
     */
   friend nsTableRowGroupFrame* NS_NewTableRowGroupFrame(nsIPresShell* aPresShell,
-                                                        nsStyleContext* aContext);
+                                                        ComputedStyle* aStyle);
   virtual ~nsTableRowGroupFrame();
 
-  nsTableFrame* GetTableFrame() const
+  // nsIFrame overrides
+  virtual void Init(nsIContent*       aContent,
+                    nsContainerFrame* aParent,
+                    nsIFrame*         aPrevInFlow) override
   {
-    nsIFrame* parent = GetParent();
-    MOZ_ASSERT(parent && parent->GetType() == nsGkAtoms::tableFrame);
-    return static_cast<nsTableFrame*>(parent);
+    nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
+    if (!aPrevInFlow) {
+      mWritingMode = GetTableFrame()->GetWritingMode();
+    }
   }
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData) override;
 
-  /** @see nsIFrame::DidSetStyleContext */
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
+  /** @see nsIFrame::DidSetComputedStyle */
+  virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
 
   virtual void AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList) override;
@@ -96,7 +78,6 @@ public:
   virtual nsMargin GetUsedPadding() const override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
    /** calls Reflow for all of its child rows.
@@ -109,27 +90,25 @@ public:
     * @see nsIFrame::Reflow
     */
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
-  virtual bool UpdateOverflow() override;
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::tableRowGroupFrame
-   */
-  virtual nsIAtom* GetType() const override;
-
-  nsTableRowFrame* GetFirstRow();
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
-  virtual mozilla::WritingMode GetWritingMode() const override
-    { return GetTableFrame()->GetWritingMode(); }
+  nsTableRowFrame* GetFirstRow();
+  nsTableRowFrame* GetLastRow();
+
+  nsTableFrame* GetTableFrame() const
+  {
+    nsIFrame* parent = GetParent();
+    MOZ_ASSERT(parent && parent->IsTableFrame());
+    return static_cast<nsTableFrame*>(parent);
+  }
 
   /** return the number of child rows (not necessarily == number of child frames) */
   int32_t GetRowCount();
@@ -146,6 +125,19 @@ public:
   void AdjustRowIndices(int32_t   aRowIndex,
                         int32_t   anAdjustment);
 
+  // See nsTableFrame.h
+  int32_t GetAdjustmentForStoredIndex(int32_t aStoredIndex);
+
+  /* mark rows starting from aStartRowFrame to the next 'aNumRowsToRemove-1'
+   * number of rows as deleted
+   */
+  void MarkRowsAsDeleted(nsTableRowFrame& aStartRowFrame,
+                         int32_t          aNumRowsToDelete);
+
+  // See nsTableFrame.h
+  void AddDeletedRowIndex(int32_t aDeletedRowStoredIndex);
+
+
   /**
    * Used for header and footer row group frames that are repeated when
    * splitting a table frame.
@@ -161,7 +153,7 @@ public:
   /**
    * Get the total bsize of all the row rects
    */
-  nscoord GetBSizeBasis(const nsHTMLReflowState& aReflowState);
+  nscoord GetBSizeBasis(const ReflowInput& aReflowInput);
 
   mozilla::LogicalMargin GetBCBorderWidth(mozilla::WritingMode aWM);
 
@@ -336,59 +328,59 @@ public:
     return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
 
-  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
-  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
+  virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
+  virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
 
 protected:
-  explicit nsTableRowGroupFrame(nsStyleContext* aContext);
+  explicit nsTableRowGroupFrame(ComputedStyle* aStyle);
 
-  void InitChildReflowState(nsPresContext&     aPresContext,
+  void InitChildReflowInput(nsPresContext&     aPresContext,
                             bool               aBorderCollapse,
-                            nsHTMLReflowState& aReflowState);
+                            ReflowInput& aReflowInput);
 
-  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
+  virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
   void PlaceChild(nsPresContext*         aPresContext,
-                  nsRowGroupReflowState& aReflowState,
+                  TableRowGroupReflowInput& aReflowInput,
                   nsIFrame*              aKidFrame,
                   mozilla::WritingMode   aWM,
                   const mozilla::LogicalPoint& aKidPosition,
                   const nsSize&          aContainerSize,
-                  nsHTMLReflowMetrics&   aDesiredSize,
+                  ReflowOutput&   aDesiredSize,
                   const nsRect&          aOriginalKidRect,
                   const nsRect&          aOriginalKidVisualOverflow);
 
   void CalculateRowBSizes(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState);
+                          ReflowOutput&     aDesiredSize,
+                          const ReflowInput& aReflowInput);
 
-  void DidResizeRows(nsHTMLReflowMetrics& aDesiredSize);
+  void DidResizeRows(ReflowOutput& aDesiredSize);
 
-  void SlideChild(nsRowGroupReflowState& aReflowState,
+  void SlideChild(TableRowGroupReflowInput& aReflowInput,
                   nsIFrame*              aKidFrame);
 
   /**
    * Reflow the frames we've already created
    *
    * @param   aPresContext presentation context to use
-   * @param   aReflowState current inline state
+   * @param   aReflowInput current inline state
    */
   void ReflowChildren(nsPresContext*         aPresContext,
-                      nsHTMLReflowMetrics&   aDesiredSize,
-                      nsRowGroupReflowState& aReflowState,
+                      ReflowOutput&   aDesiredSize,
+                      TableRowGroupReflowInput& aReflowInput,
                       nsReflowStatus&        aStatus,
                       bool*                aPageBreakBeforeEnd = nullptr);
 
   nsresult SplitRowGroup(nsPresContext*           aPresContext,
-                         nsHTMLReflowMetrics&     aDesiredSize,
-                         const nsHTMLReflowState& aReflowState,
+                         ReflowOutput&     aDesiredSize,
+                         const ReflowInput& aReflowInput,
                          nsTableFrame*            aTableFrame,
                          nsReflowStatus&          aStatus,
                          bool                     aRowForcedPageBreak);
 
   void SplitSpanningCells(nsPresContext&           aPresContext,
-                          const nsHTMLReflowState& aReflowState,
+                          const ReflowInput& aReflowInput,
                           nsTableFrame&            aTableFrame,
                           nsTableRowFrame&         aFirstRow,
                           nsTableRowFrame&         aLastRow,
@@ -458,12 +450,12 @@ inline void
 nsTableRowGroupFrame::GetContinuousBCBorderWidth(mozilla::WritingMode aWM,
                                                  mozilla::LogicalMargin& aBorder)
 {
-  int32_t aPixelsToTwips = nsPresContext::AppUnitsPerCSSPixel();
-  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(aPixelsToTwips,
+  int32_t d2a = PresContext()->AppUnitsPerDevPixel();
+  aBorder.IEnd(aWM) = BC_BORDER_START_HALF_COORD(d2a,
                                                  mIEndContBorderWidth);
-  aBorder.BEnd(aWM) = BC_BORDER_START_HALF_COORD(aPixelsToTwips,
+  aBorder.BEnd(aWM) = BC_BORDER_START_HALF_COORD(d2a,
                                                  mBEndContBorderWidth);
-  aBorder.IStart(aWM) = BC_BORDER_END_HALF_COORD(aPixelsToTwips,
+  aBorder.IStart(aWM) = BC_BORDER_END_HALF_COORD(d2a,
                                                  mIStartContBorderWidth);
 }
 #endif

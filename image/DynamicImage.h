@@ -31,9 +31,11 @@ public:
   }
 
   // Inherited methods from Image.
+  nsresult GetNativeSizes(nsTArray<gfx::IntSize>& aNativeSizes) const override;
+  size_t GetNativeSizesLength() const override;
   virtual already_AddRefed<ProgressTracker> GetProgressTracker() override;
   virtual size_t SizeOfSourceWithComputedFallback(
-                                 MallocSizeOf aMallocSizeOf) const override;
+                                 SizeOfState& aState) const override;
   virtual void CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
                                      MallocSizeOf aMallocSizeOf) const override;
 
@@ -53,7 +55,7 @@ public:
                                        nsresult aStatus,
                                        bool aLastPart) override;
 
-  virtual void OnSurfaceDiscarded() override;
+  virtual void OnSurfaceDiscarded(const SurfaceKey& aSurfaceKey) override;
 
   virtual void SetInnerWindowID(uint64_t aInnerWindowId) override;
   virtual uint64_t InnerWindowID() const override;
@@ -61,7 +63,7 @@ public:
   virtual bool HasError() override;
   virtual void SetHasError() override;
 
-  virtual ImageURL* GetURI() override;
+  nsIURI* GetURI() const override;
 
 private:
   virtual ~DynamicImage() { }

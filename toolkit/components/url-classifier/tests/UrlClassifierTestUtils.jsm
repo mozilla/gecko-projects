@@ -1,17 +1,17 @@
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["UrlClassifierTestUtils"];
-
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var EXPORTED_SYMBOLS = ["UrlClassifierTestUtils"];
 
 const TRACKING_TABLE_NAME = "mochitest-track-simple";
 const TRACKING_TABLE_PREF = "urlclassifier.trackingTable";
 const WHITELIST_TABLE_NAME = "mochitest-trackwhite-simple";
 const WHITELIST_TABLE_PREF = "urlclassifier.trackingWhitelistTable";
 
-Cu.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-this.UrlClassifierTestUtils = {
+let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+
+var UrlClassifierTestUtils = {
 
   addTestTrackers() {
     // Add some URLs to the tracking databases
@@ -46,7 +46,25 @@ this.UrlClassifierTestUtils = {
       }
     ];
 
-    return this.useTestDatabase(tables);
+    let tableIndex = 0;
+    let doOneUpdate = () => {
+      if (tableIndex == tables.length) {
+        return Promise.resolve();
+      }
+      return this.useTestDatabase(tables[tableIndex])
+        .then(() => {
+          tableIndex++;
+          return doOneUpdate();
+        }, aErrMsg => {
+          dump("Rejected: " + aErrMsg + ". Retry later.\n");
+          return new Promise(resolve => {
+            timer.initWithCallback(resolve, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+          })
+          .then(doOneUpdate);
+        });
+    };
+
+    return doOneUpdate();
   },
 
   cleanupTestTrackers() {
@@ -60,10 +78,8 @@ this.UrlClassifierTestUtils = {
    *
    * @return {Promise}
    */
-  useTestDatabase(tables) {
-    for (var table of tables) {
-      Services.prefs.setCharPref(table.pref, table.name);
-    }
+  useTestDatabase(table) {
+    Services.prefs.setCharPref(table.pref, table.name);
 
     return new Promise((resolve, reject) => {
       let dbService = Cc["@mozilla.org/url-classifier/dbservice;1"].
@@ -79,19 +95,21 @@ this.UrlClassifierTestUtils = {
         updateUrlRequested: url => { },
         streamFinished: status => { },
         updateError: errorCode => {
-          reject("Couldn't update classifier.");
+          reject("Got updateError when updating " + table.name);
         },
         updateSuccess: requestedTimeout => {
           resolve();
         }
       };
 
-      for (var table of tables) {
+      try {
         dbService.beginUpdate(listener, table.name, "");
         dbService.beginStream("", "");
         dbService.updateStream(table.update);
         dbService.finishStream();
         dbService.finishUpdate();
+      } catch (e) {
+        reject("Failed to update with dbService: " + table.name);
       }
     });
   },

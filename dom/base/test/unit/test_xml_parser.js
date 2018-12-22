@@ -8,8 +8,8 @@ function run_test () {
 
 var tests = [
   [ test1, "Unable to parse basic XML document" ],
-  [ test2, "ParseXML doesn't return nsIDOMDocument" ],
-  [ test3, "ParseXML return value's documentElement is not nsIDOMElement" ],
+  [ test2, "ParseXML doesn't return Document" ],
+  [ test3, "ParseXML return value's documentElement is not Element" ],
   [ test4, "" ],
   [ test5, "" ],
   [ test6, "" ],
@@ -21,28 +21,28 @@ function test1() {
 }
 
 function test2() {
-  return (ParseXML("<root/>") instanceof nsIDOMDocument);
+  return (ChromeUtils.getClassName(ParseXML("<root/>")) === "XMLDocument");
 }
 
 function test3() {
-  return (ParseXML("<root/>").documentElement instanceof nsIDOMElement);
+  return Element.isInstance(ParseXML("<root/>").documentElement);
 }
 
 function test4() {
   var doc = ParseXML("<root/>");
-  do_check_eq(doc.documentElement.namespaceURI, null); 
+  Assert.equal(doc.documentElement.namespaceURI, null); 
   return true;
 }
 
 function test5() {
   var doc = ParseXML("<root xmlns=''/>");
-  do_check_eq(doc.documentElement.namespaceURI, null); 
+  Assert.equal(doc.documentElement.namespaceURI, null); 
   return true;
 }
 
 function test6() {
   var doc = ParseXML("<root xmlns='ns1'/>");
-  do_check_neq(doc.documentElement.namespaceURI, null); 
-  do_check_eq(doc.documentElement.namespaceURI, 'ns1'); 
+  Assert.notEqual(doc.documentElement.namespaceURI, null); 
+  Assert.equal(doc.documentElement.namespaceURI, 'ns1'); 
   return true;
 }

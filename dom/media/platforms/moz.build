@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,39 +6,45 @@
 
 EXPORTS += [
     'agnostic/AgnosticDecoderModule.h',
+    'agnostic/DummyMediaDataDecoder.h',
     'agnostic/OpusDecoder.h',
+    'agnostic/TheoraDecoder.h',
     'agnostic/VorbisDecoder.h',
     'agnostic/VPXDecoder.h',
     'MediaTelemetryConstants.h',
     'PDMFactory.h',
     'PlatformDecoderModule.h',
-    'wrappers/FuzzingWrapper.h',
-    'wrappers/H264Converter.h'
+    'ReorderQueue.h',
+    'SimpleMap.h',
+    'wrappers/H264Converter.h',
+    'wrappers/MediaDataDecoderProxy.h'
+
 ]
 
 UNIFIED_SOURCES += [
     'agnostic/AgnosticDecoderModule.cpp',
     'agnostic/BlankDecoderModule.cpp',
+    'agnostic/DummyMediaDataDecoder.cpp',
+    'agnostic/NullDecoderModule.cpp',
     'agnostic/OpusDecoder.cpp',
+    'agnostic/TheoraDecoder.cpp',
     'agnostic/VorbisDecoder.cpp',
     'agnostic/VPXDecoder.cpp',
     'agnostic/WAVDecoder.cpp',
     'PDMFactory.cpp',
-    'PlatformDecoderModule.cpp',
-    'wrappers/FuzzingWrapper.cpp',
-    'wrappers/H264Converter.cpp'
+    'wrappers/H264Converter.cpp',
+    'wrappers/MediaDataDecoderProxy.cpp'
 ]
 
 DIRS += [
+    'agnostic/bytestreams',
+    'agnostic/eme',
     'agnostic/gmp',
     'omx'
 ]
 
 if CONFIG['MOZ_WMF']:
     DIRS += [ 'wmf' ];
-
-if CONFIG['MOZ_EME']:
-    DIRS += ['agnostic/eme']
 
 if CONFIG['MOZ_FFVPX'] or CONFIG['MOZ_FFMPEG']:
     # common code to either FFmpeg or FFVPX
@@ -56,6 +62,22 @@ if CONFIG['MOZ_FFMPEG']:
         'ffmpeg',
     ]
 
+if CONFIG['MOZ_AV1']:
+    EXPORTS += [
+        'agnostic/AOMDecoder.h',
+    ]
+    UNIFIED_SOURCES += [
+        'agnostic/AOMDecoder.cpp',
+    ]
+
+if CONFIG['MOZ_OMX']:
+    EXPORTS += [
+        'omx/OmxCoreLibLinker.h',
+    ]
+    UNIFIED_SOURCES += [
+        'omx/OmxCoreLibLinker.cpp',
+    ]
+
 if CONFIG['MOZ_APPLEMEDIA']:
   EXPORTS += [
       'apple/AppleDecoderModule.h',
@@ -64,8 +86,6 @@ if CONFIG['MOZ_APPLEMEDIA']:
       'apple/AppleATDecoder.cpp',
       'apple/AppleCMLinker.cpp',
       'apple/AppleDecoderModule.cpp',
-      'apple/AppleVDADecoder.cpp',
-      'apple/AppleVDALinker.cpp',
       'apple/AppleVTDecoder.cpp',
       'apple/AppleVTLinker.cpp',
   ]
@@ -73,18 +93,19 @@ if CONFIG['MOZ_APPLEMEDIA']:
       '-framework AudioToolbox',
   ]
 
-if CONFIG['MOZ_GONK_MEDIACODEC']:
-    DEFINES['MOZ_GONK_MEDIACODEC'] = True
-    DIRS += ['gonk']
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     EXPORTS += [
         'android/AndroidDecoderModule.h',
+        'android/JavaCallbacksSupport.h',
     ]
     UNIFIED_SOURCES += [
         'android/AndroidDecoderModule.cpp',
+        'android/RemoteDataDecoder.cpp',
     ]
 
 FINAL_LIBRARY = 'xul'
+
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    CXXFLAGS += ['-Wno-error=shadow']

@@ -10,14 +10,12 @@
 #include "DocAccessible-inl.h"
 #include "Role.h"
 
-#include "nsIDOMHTMLCollection.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMHTMLAreaElement.h"
 #include "nsIFrame.h"
 #include "nsImageFrame.h"
 #include "nsImageMap.h"
 #include "nsIURI.h"
+#include "mozilla/dom/HTMLAreaElement.h"
 
 using namespace mozilla::a11y;
 
@@ -35,15 +33,10 @@ HTMLImageMapAccessible::
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HTMLImageMapAccessible: nsISupports
-
-NS_IMPL_ISUPPORTS_INHERITED0(HTMLImageMapAccessible, ImageAccessible)
-
-////////////////////////////////////////////////////////////////////////////////
 // HTMLImageMapAccessible: Accessible public
 
 role
-HTMLImageMapAccessible::NativeRole()
+HTMLImageMapAccessible::NativeRole() const
 {
   return roles::IMAGE_MAP;
 }
@@ -64,7 +57,7 @@ HTMLImageMapAccessible::AnchorAt(uint32_t aAnchorIndex)
 }
 
 already_AddRefed<nsIURI>
-HTMLImageMapAccessible::AnchorURIAt(uint32_t aAnchorIndex)
+HTMLImageMapAccessible::AnchorURIAt(uint32_t aAnchorIndex) const
 {
   Accessible* area = GetChildAt(aAnchorIndex);
   if (!area)
@@ -87,9 +80,7 @@ HTMLImageMapAccessible::UpdateChildAreas(bool aDoFireEvents)
   if (!imageMapObj)
     return;
 
-  bool treeChanged = false;
-  AutoTreeMutation mt(this);
-  RefPtr<AccReorderEvent> reorderEvent = new AccReorderEvent(this);
+  TreeMutation mt(this, TreeMutation::kNoEvents & !aDoFireEvents);
 
   // Remove areas that are not a valid part of the image map anymore.
   for (int32_t childIdx = mChildren.Length() - 1; childIdx >= 0; childIdx--) {
@@ -97,15 +88,8 @@ HTMLImageMapAccessible::UpdateChildAreas(bool aDoFireEvents)
     if (area->GetContent()->GetPrimaryFrame())
       continue;
 
-    if (aDoFireEvents) {
-      RefPtr<AccHideEvent> event = new AccHideEvent(area, area->GetContent());
-      mDoc->FireDelayedEvent(event);
-      reorderEvent->AddSubMutationEvent(event);
-    }
-
     mt.BeforeRemoval(area);
     RemoveChild(area);
-    treeChanged = true;
   }
 
   // Insert new areas into the tree.
@@ -123,22 +107,10 @@ HTMLImageMapAccessible::UpdateChildAreas(bool aDoFireEvents)
       }
 
       mt.AfterInsertion(area);
-
-      if (aDoFireEvents) {
-        RefPtr<AccShowEvent> event = new AccShowEvent(area);
-        mDoc->FireDelayedEvent(event);
-        reorderEvent->AddSubMutationEvent(event);
-      }
-
-      treeChanged = true;
     }
   }
 
   mt.Done();
-
-  // Fire reorder event if needed.
-  if (treeChanged && aDoFireEvents)
-    mDoc->FireDelayedEvent(reorderEvent);
 }
 
 Accessible*
@@ -171,13 +143,13 @@ HTMLAreaAccessible::
 // HTMLAreaAccessible: Accessible
 
 ENameValueFlag
-HTMLAreaAccessible::NativeName(nsString& aName)
+HTMLAreaAccessible::NativeName(nsString& aName) const
 {
   ENameValueFlag nameFlag = Accessible::NativeName(aName);
   if (!aName.IsEmpty())
     return nameFlag;
 
-  if (!mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aName))
+  if (!mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aName))
     Value(aName);
 
   return eNameOK;
@@ -189,7 +161,8 @@ HTMLAreaAccessible::Description(nsString& aDescription)
   aDescription.Truncate();
 
   // Still to do - follow IE's standard here
-  nsCOMPtr<nsIDOMHTMLAreaElement> area(do_QueryInterface(mContent));
+  RefPtr<dom::HTMLAreaElement> area =
+    dom::HTMLAreaElement::FromNodeOrNull(mContent);
   if (area)
     area->GetShape(aDescription);
 }
@@ -243,7 +216,6 @@ HTMLAreaAccessible::RelativeBounds(nsIFrame** aBoundingFrame) const
   // XXX Areas are screwy; they return their rects as a pair of points, one pair
   // stored into the width and height.
   *aBoundingFrame = frame;
-  bounds.width -= bounds.x;
-  bounds.height -= bounds.y;
+  bounds.SizeTo(bounds.Width() - bounds.X(), bounds.Height() - bounds.Y());
   return bounds;
 }

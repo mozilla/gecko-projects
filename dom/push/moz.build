@@ -3,6 +3,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Push Notifications")
+
 EXTRA_COMPONENTS += [
     'Push.js',
     'Push.manifest',
@@ -10,6 +13,7 @@ EXTRA_COMPONENTS += [
 ]
 
 EXTRA_JS_MODULES += [
+    'PushBroadcastService.jsm',
     'PushCrypto.jsm',
     'PushDB.jsm',
     'PushRecord.jsm',
@@ -40,25 +44,25 @@ EXPORTS.mozilla.dom += [
     'PushManager.h',
     'PushNotifier.h',
     'PushSubscription.h',
+    'PushSubscriptionOptions.h',
+    'PushUtil.h',
 ]
 
 UNIFIED_SOURCES += [
     'PushManager.cpp',
     'PushNotifier.cpp',
     'PushSubscription.cpp',
+    'PushSubscriptionOptions.cpp',
+    'PushUtil.cpp',
 ]
 
 TEST_DIRS += ['test/xpcshell']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += ['-Wshadow']
-
 LOCAL_INCLUDES += [
     '../base',
     '../ipc',
-    '../workers',
 ]
 
 FINAL_LIBRARY = 'xul'

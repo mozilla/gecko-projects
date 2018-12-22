@@ -35,11 +35,6 @@
 
 #ifdef CAIRO_HAS_QUARTZ_SURFACE
 #include "gfxQuartzSurface.h"
-#include "gfxQuartzImageSurface.h"
-#endif
-
-#if defined(CAIRO_HAS_QT_SURFACE) && defined(MOZ_WIDGET_QT)
-#include "gfxQPainterSurface.h"
 #endif
 
 #include <stdio.h>
@@ -60,7 +55,7 @@ static cairo_user_data_key_t gfxasurface_pointer_key;
 
 gfxASurface::gfxASurface()
  : mSurface(nullptr), mFloatingRefs(0), mBytesRecorded(0),
-   mSurfaceValid(false), mAllowUseAsSource(true)
+   mSurfaceValid(false)
 {
     MOZ_COUNT_CTOR(gfxASurface);
 }
@@ -86,11 +81,10 @@ gfxASurface::AddRef(void)
         }
 
         return (nsrefcnt) cairo_surface_get_reference_count(mSurface);
-    } else {
-        // the surface isn't valid, but we still need to refcount
-        // the gfxASurface
-        return ++mFloatingRefs;
     }
+    // the surface isn't valid, but we still need to refcount
+    // the gfxASurface
+    return ++mFloatingRefs;
 }
 
 nsrefcnt
@@ -108,26 +102,12 @@ gfxASurface::Release(void)
         // |this| may not be valid any more, don't use it!
 
         return --refcnt;
-    } else {
-        if (--mFloatingRefs == 0) {
-            delete this;
-            return 0;
-        }
-
-        return mFloatingRefs;
     }
-}
-
-nsrefcnt
-gfxASurface::AddRefExternal(void)
-{
-  return AddRef();
-}
-
-nsrefcnt
-gfxASurface::ReleaseExternal(void)
-{
-  return Release();
+    if (--mFloatingRefs == 0) {
+        delete this;
+        return 0;
+    }
+    return mFloatingRefs;
 }
 
 void
@@ -185,14 +165,6 @@ gfxASurface::Wrap (cairo_surface_t *csurf, const IntSize& aSize)
 #ifdef CAIRO_HAS_QUARTZ_SURFACE
     else if (stype == CAIRO_SURFACE_TYPE_QUARTZ) {
         result = new gfxQuartzSurface(csurf, aSize);
-    }
-    else if (stype == CAIRO_SURFACE_TYPE_QUARTZ_IMAGE) {
-        result = new gfxQuartzImageSurface(csurf);
-    }
-#endif
-#if defined(CAIRO_HAS_QT_SURFACE) && defined(MOZ_WIDGET_QT)
-    else if (stype == CAIRO_SURFACE_TYPE_QT) {
-        result = new gfxQPainterSurface(csurf);
     }
 #endif
     else {
@@ -341,16 +313,6 @@ gfxASurface::CreateSimilarSurface(gfxContentType aContent,
 }
 
 already_AddRefed<gfxImageSurface>
-gfxASurface::GetAsReadableARGB32ImageSurface()
-{
-    RefPtr<gfxImageSurface> imgSurface = GetAsImageSurface();
-    if (!imgSurface || imgSurface->Format() != SurfaceFormat::A8R8G8B8_UINT32) {
-      imgSurface = CopyToARGB32ImageSurface();
-    }
-    return imgSurface.forget();
-}
-
-already_AddRefed<gfxImageSurface>
 gfxASurface::CopyToARGB32ImageSurface()
 {
     if (!mSurface || !mSurfaceValid) {
@@ -376,57 +338,6 @@ gfxASurface::CairoStatus()
         return -1;
 
     return cairo_surface_status(mSurface);
-}
-
-/* static */
-bool
-gfxASurface::CheckSurfaceSize(const IntSize& sz, int32_t limit)
-{
-    if (sz.width < 0 || sz.height < 0) {
-        NS_WARNING("Surface width or height < 0!");
-        return false;
-    }
-
-    // reject images with sides bigger than limit
-    if (limit && (sz.width > limit || sz.height > limit)) {
-        NS_WARNING("Surface size too large (exceeds caller's limit)!");
-        return false;
-    }
-
-#if defined(XP_MACOSX)
-    // CoreGraphics is limited to images < 32K in *height*,
-    // so clamp all surfaces on the Mac to that height
-    if (sz.height > SHRT_MAX) {
-        NS_WARNING("Surface size too large (exceeds CoreGraphics limit)!");
-        return false;
-    }
-#endif
-
-    // make sure the surface area doesn't overflow a int32_t
-    CheckedInt<int32_t> tmp = sz.width;
-    tmp *= sz.height;
-    if (!tmp.isValid()) {
-        NS_WARNING("Surface size too large (would overflow)!");
-        return false;
-    }
-
-    // assuming 4-byte stride, make sure the allocation size
-    // doesn't overflow a int32_t either
-    tmp *= 4;
-    if (!tmp.isValid()) {
-        NS_WARNING("Allocation too large (would overflow)!");
-        return false;
-    }
-
-    return true;
-}
-
-/* static */
-int32_t
-gfxASurface::FormatStrideForWidth(gfxImageFormat format, int32_t width)
-{
-    cairo_format_t cformat = GfxFormatToCairoFormat(format);
-    return cairo_format_stride_for_width(cformat, (int)width);
 }
 
 nsresult
@@ -475,29 +386,6 @@ gfxASurface::ContentFromFormat(gfxImageFormat format)
         default:
             return gfxContentType::COLOR;
     }
-}
-
-void
-gfxASurface::SetSubpixelAntialiasingEnabled(bool aEnabled)
-{
-#ifdef MOZ_TREE_CAIRO
-    if (!mSurfaceValid)
-        return;
-    cairo_surface_set_subpixel_antialiasing(mSurface,
-        aEnabled ? CAIRO_SUBPIXEL_ANTIALIASING_ENABLED : CAIRO_SUBPIXEL_ANTIALIASING_DISABLED);
-#endif
-}
-
-bool
-gfxASurface::GetSubpixelAntialiasingEnabled()
-{
-    if (!mSurfaceValid)
-      return false;
-#ifdef MOZ_TREE_CAIRO
-    return cairo_surface_get_subpixel_antialiasing(mSurface) == CAIRO_SUBPIXEL_ANTIALIASING_ENABLED;
-#else
-    return true;
-#endif
 }
 
 int32_t
@@ -558,16 +446,16 @@ static const SurfaceMemoryReporterAttrs sSurfaceMemoryReporterAttrs[] = {
     {"gfx-surface-subsurface", nullptr},
 };
 
-PR_STATIC_ASSERT(MOZ_ARRAY_LENGTH(sSurfaceMemoryReporterAttrs) ==
-                 size_t(gfxSurfaceType::Max));
-PR_STATIC_ASSERT(uint32_t(CAIRO_SURFACE_TYPE_SKIA) ==
-                 uint32_t(gfxSurfaceType::Skia));
+static_assert(MOZ_ARRAY_LENGTH(sSurfaceMemoryReporterAttrs) ==
+                 size_t(gfxSurfaceType::Max), "sSurfaceMemoryReporterAttrs exceeds max capacity");
+static_assert(uint32_t(CAIRO_SURFACE_TYPE_SKIA) ==
+                 uint32_t(gfxSurfaceType::Skia), "CAIRO_SURFACE_TYPE_SKIA not equal to gfxSurfaceType::Skia");
 
 /* Surface size memory reporting */
 
 class SurfaceMemoryReporter final : public nsIMemoryReporter
 {
-    ~SurfaceMemoryReporter() {}
+    ~SurfaceMemoryReporter() = default;
 
     // We can touch this array on several different threads, and we don't
     // want to introduce memory barriers when recording the memory used.  To
@@ -583,11 +471,14 @@ public:
         // ordering.  So separate out the read and write operations.
         sSurfaceMemoryUsed[size_t(aType)] = sSurfaceMemoryUsed[size_t(aType)] + aBytes;
     };
-    
-    NS_DECL_ISUPPORTS
 
-    NS_IMETHOD CollectReports(nsIMemoryReporterCallback *aCb,
-                              nsISupports *aClosure, bool aAnonymize) override
+    // This memory reporter is sometimes allocated on the compositor thread,
+    // but always released on the main thread, so its refcounting needs to be
+    // threadsafe.
+    NS_DECL_THREADSAFE_ISUPPORTS
+
+    NS_IMETHOD CollectReports(nsIHandleReportCallback *aHandleReport,
+                              nsISupports *aData, bool aAnonymize) override
     {
         const size_t len = ArrayLength(sSurfaceMemoryReporterAttrs);
         for (size_t i = 0; i < len; i++) {
@@ -600,11 +491,9 @@ public:
                     desc = sDefaultSurfaceDescription;
                 }
 
-                nsresult rv = aCb->Callback(EmptyCString(), nsCString(path),
-                                            KIND_OTHER, UNITS_BYTES,
-                                            amount,
-                                            nsCString(desc), aClosure);
-                NS_ENSURE_SUCCESS(rv, rv);
+                aHandleReport->Callback(
+                    EmptyCString(), nsCString(path), KIND_OTHER, UNITS_BYTES,
+                    amount, nsCString(desc), aData);
             }
         }
 
@@ -677,7 +566,7 @@ gfxASurface::BytesPerPixel(gfxImageFormat aImageFormat)
       return 1;
     case SurfaceFormat::UNKNOWN:
     default:
-      NS_NOTREACHED("Not really sure what you want me to say here");
+      MOZ_ASSERT_UNREACHABLE("Not really sure what you want me to say here");
       return 0;
   }
 }

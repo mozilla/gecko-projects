@@ -28,7 +28,11 @@ public:
 
   VideoTrack* operator[](uint32_t aIndex);
 
+  void RemoveTrack(const RefPtr<MediaTrack>& aTrack) override;
+
   void EmptyTracks() override;
+
+  VideoTrack* GetSelectedTrack();
 
   // WebIDL
   int32_t SelectedIndex() const

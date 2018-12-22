@@ -4,15 +4,18 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
+ * https://webaudio.github.io/web-audio-api/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
-interface OfflineAudioCompletionEvent : Event {
-
-    readonly attribute AudioBuffer renderedBuffer;
-
+dictionary OfflineAudioCompletionEventInit : EventInit {
+    required AudioBuffer renderedBuffer;
 };
 
+[Constructor(DOMString type, OfflineAudioCompletionEventInit eventInitDict),
+ Pref="dom.webaudio.enabled"]
+interface OfflineAudioCompletionEvent : Event {
+    readonly attribute AudioBuffer renderedBuffer;
+};

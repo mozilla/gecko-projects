@@ -109,6 +109,7 @@ interface nsISearchEngine : nsISupports
    * @param  options
    *         An object that must contain the following fields:
    *         {window} the content window for the window performing the search
+   *         {originAttributes} the originAttributes for performing the search
    *
    * @throws NS_ERROR_INVALID_ARG if options is omitted or lacks required
    *         elemeents
@@ -154,9 +155,9 @@ interface nsISearchEngine : nsISupports
 
   /**
    * Gets a string representing the hostname from which search results for a
-   * given responseType are returned, minus the leading "www." (if present).
-   * This can be specified as an url attribute in the engine description file,
-   * but will default to host from the <Url>'s template otherwise.
+   * given responseType are returned.  This can be specified as an url attribute
+   * in the engine description file, but will default to host from the <Url>'s
+   * template otherwise.
    *
    * @param  responseType [optional]
    *         The MIME type to get resultDomain for.  Defaults to "text/html".
@@ -269,6 +270,23 @@ interface nsIBrowserSearchService : nsISupports
   void resetToOriginalDefaultEngine();
 
   /**
+   * Checks if an EngineURL of type URLTYPE_SEARCH_HTML exists for
+   * any engine, with a matching method, template URL, and query params.
+   *
+   * @param method
+   *        The HTTP request method used when submitting a search query.
+   *        Must be a case insensitive value of either "get" or "post".
+   *
+   * @param url
+   *        The URL to which search queries should be sent.
+   *        Must not be null.
+   *
+   * @param formData
+   *        The un-sorted form data used as query params.
+   */
+  boolean hasEngineWithURL(in AString method, in AString url, in jsval formData);
+
+  /**
    * Adds a new search engine from the file at the supplied URI, optionally
    * asking the user for confirmation first.  If a confirmation dialog is
    * shown, it will offer the option to begin using the newly added engine
@@ -296,11 +314,15 @@ interface nsIBrowserSearchService : nsISupports
    *        addition is complete, or if the addition fails. It will not be
    *        called if addEngine throws an exception.
    *
+   * @param extensionID [optional]
+   *        Optional: The correct extensionID if called by an add-on.
+   *
    * @throws NS_ERROR_FAILURE if the description file cannot be successfully
    *         loaded.
    */
   void addEngine(in AString engineURL, in long dataType, in AString iconURL,
-                 in boolean confirm, [optional] in nsISearchInstallCallback callback);
+                 in boolean confirm, [optional] in nsISearchInstallCallback callback,
+                 [optional] in AString extensionID);
 
   /**
    * Adds a new search engine, without asking the user for confirmation and
@@ -312,6 +334,8 @@ interface nsIBrowserSearchService : nsISupports
    * @param iconURL
    *        Optional: A URL string pointing to the icon to be used to represent
    *        the engine.
+   *        This is a jsval so that an object can be passed to replace the
+   *        parameters below.
    *
    * @param alias
    *        Optional: A unique shortcut that can be used to retrieve the
@@ -321,28 +345,45 @@ interface nsIBrowserSearchService : nsISupports
    *        Optional: a description of the search engine.
    *
    * @param method
-   *        The HTTP request method used when submitting a search query.
-   *        Must be a case insensitive value of either "get" or "post".
+   *        Optional: The HTTP request method used when submitting a search query.
+   *        Case insensitive value of either "get" or "post".
+   *        Defaults to "get".
    *
-   * @param url
-   *        The URL to which search queries should be sent.
+   * @param template
+   *        The template for the URL to which search queries should be sent. The
+   *        template will be subjected to OpenSearch parameter substitution.
+   *        See http://www.opensearch.org/Specifications/OpenSearch
    *        Must not be null.
    *
    * @param extensionID [optional]
    *        Optional: The correct extensionID if called by an add-on.
+   *
+   * Alternatively, all of these parameters except for name can be
+   * passed as an object in place of parameter two.
+   *
+   *   Services.search.addEngineWithDetails("Example engine", {
+   *     template: "http://example.com/?search={searchTerms}",
+   *     description: "Example search engine description",
+   *     suggestURL: http://example.com/?suggest={searchTerms},
+   * });
+   *
+   * Using this method, you can use a new parameter, suggestURL:
+   *
+   * @param suggestURL [optional]
+   *        Optional: The URL to which search suggestion requests
+   *        should be sent.
+   *
    */
   void addEngineWithDetails(in AString name,
-                            in AString iconURL,
-                            in AString alias,
-                            in AString description,
-                            in AString method,
-                            in AString url,
+                            in jsval iconURL,
+                            [optional] in AString alias,
+                            [optional] in AString description,
+                            [optional] in AString method,
+                            [optional] in AString url,
                             [optional] in AString extensionID);
 
   /**
-   * Un-hides all engines installed in the directory corresponding to
-   * the directory service's NS_APP_SEARCH_DIR key. (i.e. the set of
-   * engines returned by getDefaultEngines)
+   * Un-hides all engines in the set of engines returned by getDefaultEngines.
    */
   void restoreDefaultEngines();
 
@@ -387,14 +428,23 @@ interface nsIBrowserSearchService : nsISupports
 
   /**
    * Returns an array of all default search engines. This includes all loaded
-   * engines that aren't in the user's profile directory
-   * (NS_APP_USER_SEARCH_DIR).
+   * engines that aren't in the user's profile directory.
    *
    * @returns an array of nsISearchEngine objects.
    */
   void getDefaultEngines(
             [optional] out unsigned long engineCount,
             [retval, array, size_is(engineCount)] out nsISearchEngine engines);
+
+  /**
+   * Returns an array of search engines installed by a given extension.
+   *
+   * @returns an array of nsISearchEngine objects.
+   */
+  void getEnginesByExtensionID(in AString extensionID,
+            [optional] out unsigned long engineCount,
+            [retval, array, size_is(engineCount)] out nsISearchEngine engines);
+
 
   /**
    * Moves a visible search engine.
@@ -418,6 +468,12 @@ interface nsIBrowserSearchService : nsISupports
    *         The engine to remove.
    */
   void removeEngine(in nsISearchEngine engine);
+
+  /**
+   * The original Engine object that is the default for this region,
+   * ignoring changes the user may have subsequently made.
+   */
+  readonly attribute nsISearchEngine originalDefaultEngine;
 
   /**
    * Alias for the currentEngine attribute, kept for add-on compatibility.

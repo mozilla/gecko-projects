@@ -6,32 +6,32 @@
  * the graph.
  */
 
-add_task(function*() {
-  let { target, panel } = yield initWebAudioEditor(SIMPLE_CONTEXT_URL);
-  let { panelWin } = panel;
-  let { gFront, $ } = panelWin;
+add_task(async function() {
+  const { target, panel } = await initWebAudioEditor(SIMPLE_CONTEXT_URL);
+  const { panelWin } = panel;
+  const { gFront, $ } = panelWin;
 
-  reload(target);
-
-  let [actors] = yield Promise.all([
+  let events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
+  reload(target);
+  await events;
 
   let { nodes, edges } = countGraphObjects(panelWin);
   is(nodes, 3, "should only be 3 nodes.");
   is(edges, 2, "should only be 2 edges.");
 
-  reload(target);
-
-  [actors] = yield Promise.all([
+  events = Promise.all([
     get3(gFront, "create-node"),
     waitForGraphRendered(panelWin, 3, 2)
   ]);
+  reload(target);
+  await events;
 
   ({ nodes, edges } = countGraphObjects(panelWin));
   is(nodes, 3, "after reload, should only be 3 nodes.");
   is(edges, 2, "after reload, should only be 2 edges.");
 
-  yield teardown(target);
+  await teardown(target);
 });

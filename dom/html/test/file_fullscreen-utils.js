@@ -54,29 +54,43 @@ function addFullscreenChangeContinuation(type, callback, inDoc) {
     requestAnimationFrame(() => setTimeout(() => callback(event), 0), 0);
   }
   function onFullscreenChange(event) {
-    doc.removeEventListener("fullscreenchange", onFullscreenChange, false);
+    doc.removeEventListener("fullscreenchange", onFullscreenChange);
     if (checkCondition()) {
       invokeCallback(event);
       return;
     }
     function onResize() {
       if (checkCondition()) {
-        topWin.removeEventListener("resize", onResize, false);
+        topWin.removeEventListener("resize", onResize);
         invokeCallback(event);
       }
     }
-    topWin.addEventListener("resize", onResize, false);
+    topWin.addEventListener("resize", onResize);
   }
-  doc.addEventListener("fullscreenchange", onFullscreenChange, false);
+  doc.addEventListener("fullscreenchange", onFullscreenChange);
 }
 
 // Calls |callback| when the next fullscreenerror is dispatched to inDoc||document.
 function addFullscreenErrorContinuation(callback, inDoc) {
   var doc = inDoc || document;
   var listener = function(event) {
-    doc.removeEventListener("fullscreenerror", listener, false);
+    doc.removeEventListener("fullscreenerror", listener);
     setTimeout(function(){callback(event);}, 0);
   };
-  doc.addEventListener("fullscreenerror", listener, false);
+  doc.addEventListener("fullscreenerror", listener);
 }
 
+// Waits until the window has both the load event and a MozAfterPaint called on
+// it, and then invokes the callback
+function waitForLoadAndPaint(win, callback) {
+  win.addEventListener("MozAfterPaint", function() {
+    // The load event may have fired before the MozAfterPaint, in which case
+    // listening for it now will hang. Instead we check the readyState to see if
+    // it already fired, and if so, invoke the callback right away.
+    if (win.document.readyState == 'complete') {
+      callback();
+    } else {
+      win.addEventListener("load", callback, {once: true});
+    }
+  }, { once: true });
+}

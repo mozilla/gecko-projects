@@ -19,14 +19,14 @@ public:
     : nsMIMEInfoImpl(aType, aClass)
   {}
 
-  NS_IMETHOD LaunchWithFile(nsIFile* aFile);
+  NS_IMETHOD LaunchWithFile(nsIFile* aFile) override;
 
 protected:
   virtual nsresult LoadUriInternal(nsIURI* aURI);
 #ifdef DEBUG
   virtual nsresult LaunchDefaultWithFile(nsIFile* aFile)
   {
-    NS_NOTREACHED("do not call this method, use LaunchWithFile");
+    MOZ_ASSERT_UNREACHABLE("do not call this method, use LaunchWithFile");
     return NS_ERROR_UNEXPECTED;
   }
 #endif

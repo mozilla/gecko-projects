@@ -7,7 +7,7 @@
 #ifndef AudioDestinationNode_h_
 #define AudioDestinationNode_h_
 
-#include "mozilla/dom/AudioChannelBinding.h"
+#include "AudioChannelService.h"
 #include "AudioNode.h"
 #include "nsIAudioChannelAgent.h"
 
@@ -25,7 +25,7 @@ public:
   // whether it's in offline mode.
   AudioDestinationNode(AudioContext* aContext,
                        bool aIsOffline,
-                       AudioChannel aChannel = AudioChannel::Normal,
+                       bool aAllowedToStart,
                        uint32_t aNumberOfChannels = 0,
                        uint32_t aLength = 0,
                        float aSampleRate = 0.0f);
@@ -38,7 +38,7 @@ public:
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  uint16_t NumberOfOutputs() const final override
+  uint16_t NumberOfOutputs() const final
   {
     return 0;
   }
@@ -60,17 +60,8 @@ public:
 
   void OfflineShutdown();
 
-  AudioChannel MozAudioChannelType() const;
-
   void NotifyMainThreadStreamFinished() override;
   void FireOfflineCompletionEvent();
-
-  // An amount that should be added to the MediaStream's current time to
-  // get the AudioContext.currentTime.
-  StreamTime ExtraCurrentTime();
-
-  // When aIsOnlyNode is true, this is the only node for the AudioContext.
-  void SetIsOnlyNodeForContext(bool aIsOnlyNode);
 
   nsresult CreateAudioChannelAgent();
   void DestroyAudioChannelAgent();
@@ -86,18 +77,16 @@ public:
   void InputMuted(bool aInputMuted);
   void ResolvePromise(AudioBuffer* aRenderedBuffer);
 
+  unsigned long Length()
+  {
+    MOZ_ASSERT(mIsOffline);
+    return mFramesToProduce;
+  }
+
 protected:
   virtual ~AudioDestinationNode();
 
 private:
-  void SetMozAudioChannelType(AudioChannel aValue, ErrorResult& aRv);
-  bool CheckAudioChannelPermissions(AudioChannel aValue);
-
-  void SetCanPlay(float aVolume, bool aMuted);
-
-  void NotifyStableState();
-  void ScheduleStableStateNotification();
-
   SelfReference<AudioDestinationNode> mOfflineRenderingRef;
   uint32_t mFramesToProduce;
 
@@ -106,15 +95,11 @@ private:
 
   RefPtr<Promise> mOfflineRenderingPromise;
 
-  // Audio Channel Type.
-  AudioChannel mAudioChannel;
   bool mIsOffline;
-  bool mAudioChannelAgentPlaying;
+  bool mAudioChannelSuspended;
 
-  TimeStamp mStartedBlockingDueToBeingOnlyNode;
-  StreamTime mExtraCurrentTimeSinceLastStartedBlocking;
-  bool mExtraCurrentTimeUpdatedSinceLastStableState;
   bool mCaptured;
+  AudioChannelService::AudibleState mAudible;
 };
 
 } // namespace dom

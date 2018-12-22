@@ -5,10 +5,13 @@
 
 "use strict";
 
-var Cu = Components.utils;
-const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const {parseDeclarations, _parseCommentDeclarations} =
-  require("devtools/client/shared/css-parsing-utils");
+const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {
+  parseDeclarations,
+  _parseCommentDeclarations,
+  parseNamedDeclarations
+} = require("devtools/shared/css/parsing-utils");
+const {isCssPropertyKnown} = require("devtools/server/actors/css-properties");
 
 const TEST_DATA = [
   // Simple test
@@ -68,11 +71,58 @@ const TEST_DATA = [
       {name: "p2", value: "v2", priority: "important", offsets: [21, 40]}
     ]
   },
+  // Test simple priority
+  {
+    input: "p1: v1 !/*comment*/important;",
+    expected: [
+      {name: "p1", value: "v1", priority: "important", offsets: [0, 29]},
+    ]
+  },
+  // Test priority without terminating ";".
+  {
+    input: "p1: v1 !important",
+    expected: [
+      {name: "p1", value: "v1", priority: "important", offsets: [0, 17]},
+    ]
+  },
+  // Test trailing "!" without terminating ";".
+  {
+    input: "p1: v1 !",
+    expected: [
+      {name: "p1", value: "v1 !", priority: "", offsets: [0, 8]},
+    ]
+  },
   // Test invalid priority
   {
     input: "p1: v1 important;",
     expected: [
       {name: "p1", value: "v1 important", priority: "", offsets: [0, 17]}
+    ]
+  },
+  // Test invalid priority (in the middle of the declaration).
+  // See bug 1462553.
+  {
+    input: "p1: v1 !important v2;",
+    expected: [
+      {name: "p1", value: "v1 !important v2", priority: "", offsets: [0, 21]}
+    ]
+  },
+  {
+    input: "p1: v1 !    important v2;",
+    expected: [
+      {name: "p1", value: "v1 ! important v2", priority: "", offsets: [0, 25]}
+    ]
+  },
+  {
+    input: "p1: v1 !  /*comment*/  important v2;",
+    expected: [
+      {name: "p1", value: "v1 ! important v2", priority: "", offsets: [0, 36]}
+    ]
+  },
+  {
+    input: "p1: v1 !/*hi*/important v2;",
+    expected: [
+      {name: "p1", value: "v1 ! important v2", priority: "", offsets: [0, 27]}
     ]
   },
   // Test various types of background-image urls
@@ -239,12 +289,13 @@ const TEST_DATA = [
     }]
   },
   {
-    input: "content: \"a not s\\\
-          o very long title\"",
-    expected: [
-      {name: "content", value: '"a not s\\\
-          o very long title"', priority: "", offsets: [0, 46]}
-    ]
+    input: "content: \"a not s\\          o very long title\"",
+    expected: [{
+      name: "content",
+      value: '"a not s\\          o very long title"',
+      priority: "",
+      offsets: [0, 46]
+    }]
   },
   // Test calc with nested parentheses
   {
@@ -327,10 +378,11 @@ const TEST_DATA = [
   {
     parseComments: true,
     input: "<!-- color: red; --> color: blue;",
-    expected: [{name: "color", value: "red", priority: "",
-                offsets: [5, 16]},
-               {name: "color", value: "blue", priority: "",
-                offsets: [21, 33]}]
+    expected: [
+      {name: "color", value: "red", priority: "",
+       offsets: [5, 16]},
+      {name: "color", value: "blue", priority: "",
+       offsets: [21, 33]}]
   },
 
   // Don't error on an empty comment.
@@ -346,30 +398,54 @@ const TEST_DATA = [
     input: "/*! walrus: zebra; */",
     expected: [{name: "walrus", value: "zebra", priority: "",
                 offsets: [4, 18], commentOffsets: [0, 21]}]
-  }
+  },
+
+  // Regression test for bug 1287620.
+  {
+    input: "color: blue \\9 no\\_need",
+    expected: [{name: "color", value: "blue \\9 no_need", priority: "", offsets: [0, 23]}]
+  },
+
+  // Regression test for bug 1297890 - don't paste tokens.
+  {
+    parseComments: true,
+    input: "stroke-dasharray: 1/*ThisIsAComment*/2;",
+    expected: [{name: "stroke-dasharray", value: "1 2", priority: "", offsets: [0, 39]}]
+  },
+
+  // Regression test for bug 1384463 - don't trim significant
+  // whitespace.
+  {
+    // \u00a0 is non-breaking space.
+    input: "\u00a0vertical-align: top",
+    expected: [{name: "\u00a0vertical-align", value: "top", priority: "",
+                offsets: [0, 20]}]
+  },
 ];
 
 function run_test() {
   run_basic_tests();
   run_comment_tests();
+  run_named_tests();
 }
 
 // Test parseDeclarations.
 function run_basic_tests() {
-  for (let test of TEST_DATA) {
-    do_print("Test input string " + test.input);
+  for (const test of TEST_DATA) {
+    info("Test input string " + test.input);
     let output;
     try {
-      output = parseDeclarations(test.input, test.parseComments);
+      output = parseDeclarations(isCssPropertyKnown, test.input,
+                                 test.parseComments);
     } catch (e) {
-      do_print("parseDeclarations threw an exception with the given input " +
+      info("parseDeclarations threw an exception with the given input " +
         "string");
       if (test.throws) {
-        do_print("Exception expected");
-        do_check_true(true);
+        info("Exception expected");
+        Assert.ok(true);
       } else {
-        do_print("Exception unexpected\n" + e);
-        do_check_true(false);
+        info("Exception unexpected\n" + e);
+        Assert.ok(false);
       }
     }
     if (output) {
@@ -393,10 +469,32 @@ const COMMENT_DATA = [
 
 // Test parseCommentDeclarations.
 function run_comment_tests() {
-  for (let test of COMMENT_DATA) {
-    do_print("Test input string " + test.input);
-    let output = _parseCommentDeclarations(test.input, 0,
+  for (const test of COMMENT_DATA) {
+    info("Test input string " + test.input);
+    const output = _parseCommentDeclarations(isCssPropertyKnown, test.input, 0,
                                            test.input.length + 4);
+    deepEqual(output, test.expected);
+  }
+}
+
+const NAMED_DATA = [
+  {
+    input: "position:absolute;top50px;height:50px;",
+    expected: [
+      {name: "position", value: "absolute", priority: "", terminator: "",
+       offsets: [0, 18], colonOffsets: [8, 9]},
+      {name: "height", value: "50px", priority: "", terminator: "",
+       offsets: [26, 38], colonOffsets: [32, 33]}
+    ],
+  },
+];
+
+// Test parseNamedDeclarations.
+function run_named_tests() {
+  for (const test of NAMED_DATA) {
+    info("Test input string " + test.input);
+    const output = parseNamedDeclarations(isCssPropertyKnown, test.input, true);
+    info(JSON.stringify(output));
     deepEqual(output, test.expected);
   }
 }
@@ -404,22 +502,22 @@ function run_comment_tests() {
 function assertOutput(actual, expected) {
   if (actual.length === expected.length) {
     for (let i = 0; i < expected.length; i++) {
-      do_check_true(!!actual[i]);
-      do_print("Check that the output item has the expected name, " +
+      Assert.ok(!!actual[i]);
+      info("Check that the output item has the expected name, " +
         "value and priority");
-      do_check_eq(expected[i].name, actual[i].name);
-      do_check_eq(expected[i].value, actual[i].value);
-      do_check_eq(expected[i].priority, actual[i].priority);
+      Assert.equal(expected[i].name, actual[i].name);
+      Assert.equal(expected[i].value, actual[i].value);
+      Assert.equal(expected[i].priority, actual[i].priority);
       deepEqual(expected[i].offsets, actual[i].offsets);
       if ("commentOffsets" in expected[i]) {
         deepEqual(expected[i].commentOffsets, actual[i].commentOffsets);
       }
     }
   } else {
-    for (let prop of actual) {
-      do_print("Actual output contained: {name: " + prop.name + ", value: " +
+    for (const prop of actual) {
+      info("Actual output contained: {name: " + prop.name + ", value: " +
         prop.value + ", priority: " + prop.priority + "}");
     }
-    do_check_eq(actual.length, expected.length);
+    Assert.equal(actual.length, expected.length);
   }
 }

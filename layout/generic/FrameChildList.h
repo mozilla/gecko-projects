@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=8 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,7 +38,7 @@ friend class FrameChildListIterator;
   bool operator==(FrameChildListIDs aOther) const {
     return mIDs == aOther.mIDs;
   }
-  bool operator!=(FrameChildListIDs aOther) const {
+  bool operator!=(const FrameChildListIDs& aOther) const {
     return !(*this == aOther);
   }
   bool Contains(FrameChildListIDs aOther) const {
@@ -106,7 +106,7 @@ operator|(mozilla::layout::FrameChildListID aLeftOp,
 
 inline mozilla::layout::FrameChildListIDs
 operator|(mozilla::layout::FrameChildListID aLeftOp,
-          mozilla::layout::FrameChildListIDs aRightOp)
+          const mozilla::layout::FrameChildListIDs& aRightOp)
 {
   return mozilla::layout::FrameChildListIDs(aLeftOp) | aRightOp;
 }

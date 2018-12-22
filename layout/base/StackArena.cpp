@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -93,7 +95,7 @@ StackArena::Push()
       // Fill in any marks that we couldn't allocate during a prior call
       // to Push().
       for (; mMarkLength < mStackTop; ++mMarkLength) {
-        NS_NOTREACHED("should only hit this on out-of-memory");
+        MOZ_ASSERT_UNREACHABLE("should only hit this on out-of-memory");
         newMarks[mMarkLength].mBlock = mCurBlock;
         newMarks[mMarkLength].mPos = mPos;
       }
@@ -150,7 +152,7 @@ StackArena::Pop()
   if (mStackTop >= mMarkLength) {
     // We couldn't allocate the marks array at the time of the push, so
     // we don't know where we're freeing to.
-    NS_NOTREACHED("out of memory");
+    MOZ_ASSERT_UNREACHABLE("out of memory");
     if (mStackTop == 0) {
       // But we do know if we've completely pushed the stack.
       mCurBlock = mBlocks;

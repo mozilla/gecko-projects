@@ -17,15 +17,16 @@
 #include "js/Value.h"
 
 #include "mozilla/Maybe.h"
-#include "mozilla/OwningNonNull.h"
+#include "mozilla/RootedOwningNonNull.h"
+#include "mozilla/RootedRefPtr.h"
 
 #include "mozilla/dom/DOMString.h"
 
-#include "nsAutoPtr.h" // for nsRefPtr member variables
 #include "nsCOMPtr.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsTArray.h"
 
+class nsIPrincipal;
 class nsWrapperCache;
 
 namespace mozilla {
@@ -65,6 +66,23 @@ public:
   }
 };
 
+template<typename T>
+inline typename EnableIf<IsBaseOf<DictionaryBase, T>::value, void>::Type
+ImplCycleCollectionUnlink(T& aDictionary)
+{
+  aDictionary.UnlinkForCC();
+}
+
+template<typename T>
+inline typename EnableIf<IsBaseOf<DictionaryBase, T>::value, void>::Type
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            T& aDictionary,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  aDictionary.TraverseForCC(aCallback, aFlags);
+}
+
 // Struct that serves as a base class for all typed arrays and array buffers and
 // array buffer views.  Particularly useful so we can use IsBaseOf to detect
 // typed array/buffer/view template arguments.
@@ -82,6 +100,8 @@ struct EnumEntry {
   const char* value;
   size_t length;
 };
+
+enum class CallerType : uint32_t;
 
 class MOZ_STACK_CLASS GlobalObject
 {
@@ -107,6 +127,14 @@ public:
   {
     return !Get();
   }
+
+  // It returns the subjectPrincipal if called on the main-thread, otherwise
+  // a nullptr is returned.
+  nsIPrincipal* GetSubjectPrincipal() const;
+
+  // Get the caller type.  Note that this needs to be called before anyone has
+  // had a chance to mess with the JSContext.
+  dom::CallerType CallerType() const;
 
 protected:
   JS::Rooted<JSObject*> mGlobalJSObject;
@@ -150,7 +178,7 @@ public:
   template<typename... Args>
   InternalType& Construct(Args&&... aArgs)
   {
-    mImpl.emplace(Forward<Args>(aArgs)...);
+    mImpl.emplace(std::forward<Args>(aArgs)...);
     return *mImpl;
   }
 
@@ -274,7 +302,7 @@ class Optional<JS::Value>
 private:
   Optional() = delete;
 
-  explicit Optional(JS::Value aValue) = delete;
+  explicit Optional(const JS::Value& aValue) = delete;
 };
 
 // A specialization of Optional for NonNull that lets us get a T& from Value()
@@ -334,18 +362,19 @@ template<>
 class Optional<nsAString>
 {
 public:
-  Optional() : mPassed(false) {}
+  Optional()
+    : mStr(nullptr)
+  {}
 
   bool WasPassed() const
   {
-    return mPassed;
+    return !!mStr;
   }
 
   void operator=(const nsAString* str)
   {
     MOZ_ASSERT(str);
     mStr = str;
-    mPassed = true;
   }
 
   // If this code ever goes away, remove the comment pointing to it in the
@@ -354,7 +383,6 @@ public:
   {
     MOZ_ASSERT(str);
     mStr = reinterpret_cast<const nsString*>(str);
-    mPassed = true;
   }
 
   const nsAString& Value() const
@@ -368,9 +396,29 @@ private:
   Optional(const Optional& other) = delete;
   const Optional &operator=(const Optional &other) = delete;
 
-  bool mPassed;
   const nsAString* mStr;
 };
+
+template<typename T>
+inline void
+ImplCycleCollectionUnlink(Optional<T>& aField)
+{
+  if (aField.WasPassed()) {
+    ImplCycleCollectionUnlink(aField.Value());
+  }
+}
+
+template<typename T>
+inline void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            Optional<T>& aField,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  if (aField.WasPassed()) {
+    ImplCycleCollectionTraverse(aCallback, aField.Value(), aName, aFlags);
+  }
+}
 
 template<class T>
 class NonNull
@@ -433,6 +481,7 @@ public:
   }
 
 protected:
+  // ptr is left uninitialized for optimization purposes.
   T* ptr;
 #ifdef DEBUG
   bool inited;
@@ -499,6 +548,49 @@ struct MOZ_STACK_CLASS ParentObject {
   nsWrapperCache* const mWrapperCache;
   bool mUseXBLScope;
 };
+
+namespace binding_detail {
+
+// Class for simple sequence arguments, only used internally by codegen.
+template<typename T>
+class AutoSequence : public AutoTArray<T, 16>
+{
+public:
+  AutoSequence() : AutoTArray<T, 16>()
+  {}
+
+  // Allow converting to const sequences as needed
+  operator const Sequence<T>&() const {
+    return *reinterpret_cast<const Sequence<T>*>(this);
+  }
+};
+
+} // namespace binding_detail
+
+// Enum to represent a system or non-system caller type.
+enum class CallerType : uint32_t {
+  System,
+  NonSystem
+};
+
+// A class that can be passed (by value or const reference) to indicate that the
+// caller is always a system caller.  This can be used as the type of an
+// argument to force only system callers to call a function.
+class SystemCallerGuarantee {
+public:
+  operator CallerType() const { return CallerType::System; }
+};
+
+class ProtoAndIfaceCache;
+typedef void (*CreateInterfaceObjectsMethod)(JSContext* aCx,
+                                             JS::Handle<JSObject*> aGlobal,
+                                             ProtoAndIfaceCache& aCache,
+                                             bool aDefineOnGlobal);
+JS::Handle<JSObject*> GetPerInterfaceObjectHandle(
+  JSContext* aCx,
+  size_t aSlotId,
+  CreateInterfaceObjectsMethod aCreator,
+  bool aDefineOnGlobal);
 
 } // namespace dom
 } // namespace mozilla

@@ -6,11 +6,10 @@
 
 #include "HTMLFontElement.h"
 #include "mozilla/dom/HTMLFontElementBinding.h"
+#include "mozilla/MappedDeclarations.h"
 #include "nsAttrValueInlines.h"
 #include "nsMappedAttributes.h"
-#include "nsRuleData.h"
 #include "nsContentUtils.h"
-#include "nsCSSParser.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Font)
 
@@ -24,15 +23,16 @@ HTMLFontElement::~HTMLFontElement()
 JSObject*
 HTMLFontElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFontElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFontElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_ELEMENT_CLONE(HTMLFontElement)
 
 bool
 HTMLFontElement::ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
                                 nsAttrValue& aResult)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -50,69 +50,51 @@ HTMLFontElement::ParseAttribute(int32_t aNamespaceID,
   }
 
   return nsGenericHTMLElement::ParseAttribute(aNamespaceID, aAttribute, aValue,
-                                              aResult);
+                                              aMaybeScriptedPrincipal, aResult);
 }
 
 void
 HTMLFontElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                       nsRuleData* aData)
+                                       MappedDeclarations& aDecls)
 {
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Font)) {
-    // face: string list
-    nsCSSValue* family = aData->ValueForFontFamily();
-    if (family->GetUnit() == eCSSUnit_Null) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::face);
-      if (value && value->Type() == nsAttrValue::eString &&
-          !value->IsEmptyString()) {
-        nsCSSParser parser;
-        parser.ParseFontFamilyListString(value->GetStringValue(),
-                                         nullptr, 0, *family);
-      }
-    }
-
-    // size: int
-    nsCSSValue* fontSize = aData->ValueForFontSize();
-    if (fontSize->GetUnit() == eCSSUnit_Null) {
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::size);
-      if (value && value->Type() == nsAttrValue::eInteger) {
-        fontSize->SetIntValue(value->GetIntegerValue(), eCSSUnit_Enumerated);
-      }
+  // face: string list
+  if (!aDecls.PropertyIsSet(eCSSProperty_font_family)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::face);
+    if (value && value->Type() == nsAttrValue::eString &&
+        !value->IsEmptyString()) {
+      aDecls.SetFontFamily(value->GetStringValue());
     }
   }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Color)) {
-    nsCSSValue* colorValue = aData->ValueForColor();
-    if (colorValue->GetUnit() == eCSSUnit_Null &&
-        aData->mPresContext->UseDocumentColors()) {
-      // color: color
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::color);
-      nscolor color;
-      if (value && value->GetColorValue(color)) {
-        colorValue->SetColorValue(color);
-      }
+  // size: int
+  if (!aDecls.PropertyIsSet(eCSSProperty_font_size)) {
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::size);
+    if (value && value->Type() == nsAttrValue::eInteger)
+      aDecls.SetKeywordValue(eCSSProperty_font_size, value->GetIntegerValue());
+  }
+  if (!aDecls.PropertyIsSet(eCSSProperty_color)) {
+    // color: color
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::color);
+    nscolor color;
+    if (value && value->GetColorValue(color)) {
+      aDecls.SetColorValue(eCSSProperty_color, color);
     }
   }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset) &&
-      aData->mPresContext->CompatibilityMode() == eCompatibility_NavQuirks) {
+  if (aDecls.Document()->GetCompatibilityMode() == eCompatibility_NavQuirks) {
     // Make <a><font color="red">text</font></a> give the text a red underline
     // in quirks mode.  The NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL flag only
     // affects quirks mode rendering.
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::color);
     nscolor color;
     if (value && value->GetColorValue(color)) {
-      nsCSSValue* decoration = aData->ValueForTextDecorationLine();
-      int32_t newValue = NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL;
-      if (decoration->GetUnit() == eCSSUnit_Enumerated) {
-        newValue |= decoration->GetIntValue();
-      }
-      decoration->SetIntValue(newValue, eCSSUnit_Enumerated);
+      aDecls.SetTextDecorationColorOverride();
     }
   }
 
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
-HTMLFontElement::IsAttributeMapped(const nsIAtom* aAttribute) const
+HTMLFontElement::IsAttributeMapped(const nsAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
     { &nsGkAtoms::face },

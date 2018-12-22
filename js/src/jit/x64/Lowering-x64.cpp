@@ -6,6 +6,7 @@
 
 #include "jit/x64/Lowering-x64.h"
 
+#include "jit/Lowering.h"
 #include "jit/MIR.h"
 #include "jit/x64/Assembler-x64.h"
 
@@ -17,7 +18,7 @@ using namespace js::jit;
 LBoxAllocation
 LIRGeneratorX64::useBoxFixed(MDefinition* mir, Register reg1, Register, bool useAtStart)
 {
-    MOZ_ASSERT(mir->type() == MIRType_Value);
+    MOZ_ASSERT(mir->type() == MIRType::Value);
 
     ensureDefined(mir);
     return LBoxAllocation(LUse(reg1, mir->virtualRegister(), useAtStart));
@@ -27,6 +28,12 @@ LAllocation
 LIRGeneratorX64::useByteOpRegister(MDefinition* mir)
 {
     return useRegister(mir);
+}
+
+LAllocation
+LIRGeneratorX64::useByteOpRegisterAtStart(MDefinition* mir)
+{
+    return useRegisterAtStart(mir);
 }
 
 LAllocation
@@ -48,7 +55,27 @@ LIRGeneratorX64::tempToUnbox()
 }
 
 void
-LIRGeneratorX64::visitBox(MBox* box)
+LIRGeneratorX64::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0>* ins,
+                                  MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    ins->setInt64Operand(0, useInt64RegisterAtStart(lhs));
+    ins->setInt64Operand(INT64_PIECES,
+                         lhs != rhs ? useInt64OrConstant(rhs) : useInt64OrConstantAtStart(rhs));
+    defineInt64ReuseInput(ins, mir, 0);
+}
+
+void
+LIRGeneratorX64::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDefinition* rhs)
+{
+    // X64 doesn't need a temp for 64bit multiplication.
+    ins->setInt64Operand(0, useInt64RegisterAtStart(lhs));
+    ins->setInt64Operand(INT64_PIECES,
+                         lhs != rhs ? useInt64OrConstant(rhs) : useInt64OrConstantAtStart(rhs));
+    defineInt64ReuseInput(ins, mir, 0);
+}
+
+void
+LIRGenerator::visitBox(MBox* box)
 {
     MDefinition* opd = box->getOperand(0);
 
@@ -67,11 +94,11 @@ LIRGeneratorX64::visitBox(MBox* box)
 }
 
 void
-LIRGeneratorX64::visitUnbox(MUnbox* unbox)
+LIRGenerator::visitUnbox(MUnbox* unbox)
 {
     MDefinition* box = unbox->getOperand(0);
 
-    if (box->type() == MIRType_ObjectOrNull) {
+    if (box->type() == MIRType::ObjectOrNull) {
         LUnboxObjectOrNull* lir = new(alloc()) LUnboxObjectOrNull(useRegisterAtStart(box));
         if (unbox->fallible())
             assignSnapshot(lir, unbox->bailoutKind());
@@ -79,7 +106,7 @@ LIRGeneratorX64::visitUnbox(MUnbox* unbox)
         return;
     }
 
-    MOZ_ASSERT(box->type() == MIRType_Value);
+    MOZ_ASSERT(box->type() == MIRType::Value);
 
     LUnboxBase* lir;
     if (IsFloatingPointType(unbox->type())) {
@@ -99,10 +126,10 @@ LIRGeneratorX64::visitUnbox(MUnbox* unbox)
 }
 
 void
-LIRGeneratorX64::visitReturn(MReturn* ret)
+LIRGenerator::visitReturn(MReturn* ret)
 {
     MDefinition* opd = ret->getOperand(0);
-    MOZ_ASSERT(opd->type() == MIRType_Value);
+    MOZ_ASSERT(opd->type() == MIRType::Value);
 
     LReturn* ins = new(alloc()) LReturn;
     ins->setOperand(0, useFixed(opd, JSReturnReg));
@@ -122,82 +149,145 @@ LIRGeneratorX64::lowerUntypedPhiInput(MPhi* phi, uint32_t inputPosition, LBlock*
 }
 
 void
-LIRGeneratorX64::visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins)
+LIRGeneratorX64::defineInt64Phi(MPhi* phi, size_t lirIndex)
+{
+    defineTypedPhi(phi, lirIndex);
+}
+
+void
+LIRGeneratorX64::lowerInt64PhiInput(MPhi* phi, uint32_t inputPosition, LBlock* block, size_t lirIndex)
+{
+    lowerTypedPhiInput(phi, inputPosition, block, lirIndex);
+}
+
+void
+LIRGenerator::visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins)
 {
     lowerCompareExchangeTypedArrayElement(ins, /* useI386ByteRegisters = */ false);
 }
 
 void
-LIRGeneratorX64::visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins)
+LIRGenerator::visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins)
 {
     lowerAtomicExchangeTypedArrayElement(ins, /* useI386ByteRegisters = */ false);
 }
 
 void
-LIRGeneratorX64::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
+LIRGenerator::visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins)
 {
     lowerAtomicTypedArrayElementBinop(ins, /* useI386ByteRegisters = */ false);
 }
 
 void
-LIRGeneratorX64::visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble* ins)
+LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins)
 {
-    MOZ_ASSERT(ins->input()->type() == MIRType_Int32);
-    LAsmJSUInt32ToDouble* lir = new(alloc()) LAsmJSUInt32ToDouble(useRegisterAtStart(ins->input()));
+    MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
+    LWasmUint32ToDouble* lir = new(alloc()) LWasmUint32ToDouble(useRegisterAtStart(ins->input()));
     define(lir, ins);
 }
 
 void
-LIRGeneratorX64::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins)
+LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins)
 {
-    MOZ_ASSERT(ins->input()->type() == MIRType_Int32);
-    LAsmJSUInt32ToFloat32* lir = new(alloc()) LAsmJSUInt32ToFloat32(useRegisterAtStart(ins->input()));
+    MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
+    LWasmUint32ToFloat32* lir = new(alloc()) LWasmUint32ToFloat32(useRegisterAtStart(ins->input()));
     define(lir, ins);
 }
 
 void
-LIRGeneratorX64::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
+LIRGenerator::visitWasmLoad(MWasmLoad* ins)
 {
     MDefinition* base = ins->base();
-    MOZ_ASSERT(base->type() == MIRType_Int32);
+    MOZ_ASSERT(base->type() == MIRType::Int32);
 
-    // For simplicity, require a register if we're going to emit a bounds-check
-    // branch, so that we don't have special cases for constants.
-    LAllocation baseAlloc = gen->needsAsmJSBoundsCheckBranch(ins)
-                            ? useRegisterAtStart(base)
-                            : useRegisterOrZeroAtStart(base);
+    if (ins->type() != MIRType::Int64) {
+        auto* lir = new(alloc()) LWasmLoad(useRegisterOrZeroAtStart(base));
+        define(lir, ins);
+        return;
+    }
 
-    define(new(alloc()) LAsmJSLoadHeap(baseAlloc), ins);
+    auto* lir = new(alloc()) LWasmLoadI64(useRegisterOrZeroAtStart(base));
+    defineInt64(lir, ins);
 }
 
 void
-LIRGeneratorX64::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
+LIRGenerator::visitWasmStore(MWasmStore* ins)
 {
     MDefinition* base = ins->base();
-    MOZ_ASSERT(base->type() == MIRType_Int32);
+    MOZ_ASSERT(base->type() == MIRType::Int32);
 
-    // For simplicity, require a register if we're going to emit a bounds-check
-    // branch, so that we don't have special cases for constants.
-    LAllocation baseAlloc = gen->needsAsmJSBoundsCheckBranch(ins)
-                            ? useRegisterAtStart(base)
-                            : useRegisterOrZeroAtStart(base);
-
-    LAsmJSStoreHeap* lir = nullptr;  // initialize to silence GCC warning
-    switch (ins->accessType()) {
+    MDefinition* value = ins->value();
+    LAllocation valueAlloc;
+    switch (ins->access().type()) {
       case Scalar::Int8:
       case Scalar::Uint8:
       case Scalar::Int16:
       case Scalar::Uint16:
       case Scalar::Int32:
       case Scalar::Uint32:
-        lir = new(alloc()) LAsmJSStoreHeap(baseAlloc, useRegisterOrConstantAtStart(ins->value()));
+        valueAlloc = useRegisterOrConstantAtStart(value);
+        break;
+      case Scalar::Int64:
+        // No way to encode an int64-to-memory move on x64.
+        if (value->isConstant() && value->type() != MIRType::Int64)
+            valueAlloc = useOrConstantAtStart(value);
+        else
+            valueAlloc = useRegisterAtStart(value);
         break;
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Float32x4:
+      case Scalar::Int8x16:
+      case Scalar::Int16x8:
       case Scalar::Int32x4:
-        lir = new(alloc()) LAsmJSStoreHeap(baseAlloc, useRegisterAtStart(ins->value()));
+        valueAlloc = useRegisterAtStart(value);
         break;
+      case Scalar::Uint8Clamped:
+      case Scalar::MaxTypedArrayViewType:
+        MOZ_CRASH("unexpected array type");
+    }
+
+    LAllocation baseAlloc = useRegisterOrZeroAtStart(base);
+    auto* lir = new(alloc()) LWasmStore(baseAlloc, valueAlloc);
+    add(lir, ins);
+}
+
+void
+LIRGenerator::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
+{
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    define(new(alloc()) LAsmJSLoadHeap(useRegisterOrZeroAtStart(base)), ins);
+}
+
+void
+LIRGenerator::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
+{
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    LAsmJSStoreHeap* lir = nullptr;  // initialize to silence GCC warning
+    switch (ins->access().type()) {
+      case Scalar::Int8:
+      case Scalar::Uint8:
+      case Scalar::Int16:
+      case Scalar::Uint16:
+      case Scalar::Int32:
+      case Scalar::Uint32:
+        lir = new(alloc()) LAsmJSStoreHeap(useRegisterOrZeroAtStart(base),
+                                           useRegisterOrConstantAtStart(ins->value()));
+        break;
+      case Scalar::Float32:
+      case Scalar::Float64:
+      case Scalar::Float32x4:
+      case Scalar::Int8x16:
+      case Scalar::Int16x8:
+      case Scalar::Int32x4:
+        lir = new(alloc()) LAsmJSStoreHeap(useRegisterOrZeroAtStart(base),
+                                           useRegisterAtStart(ins->value()));
+        break;
+      case Scalar::Int64:
       case Scalar::Uint8Clamped:
       case Scalar::MaxTypedArrayViewType:
         MOZ_CRASH("unexpected array type");
@@ -206,10 +296,10 @@ LIRGeneratorX64::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 }
 
 void
-LIRGeneratorX64::visitAsmJSCompareExchangeHeap(MAsmJSCompareExchangeHeap* ins)
+LIRGenerator::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins)
 {
     MDefinition* base = ins->base();
-    MOZ_ASSERT(base->type() == MIRType_Int32);
+    MOZ_ASSERT(base->type() == MIRType::Int32);
 
     // The output may not be used but will be clobbered regardless, so
     // pin the output to eax.
@@ -219,16 +309,16 @@ LIRGeneratorX64::visitAsmJSCompareExchangeHeap(MAsmJSCompareExchangeHeap* ins)
     const LAllocation oldval = useRegister(ins->oldValue());
     const LAllocation newval = useRegister(ins->newValue());
 
-    LAsmJSCompareExchangeHeap* lir =
-        new(alloc()) LAsmJSCompareExchangeHeap(useRegister(base), oldval, newval);
+    LWasmCompareExchangeHeap* lir =
+        new(alloc()) LWasmCompareExchangeHeap(useRegister(base), oldval, newval);
 
     defineFixed(lir, ins, LAllocation(AnyRegister(eax)));
 }
 
 void
-LIRGeneratorX64::visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins)
+LIRGenerator::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins)
 {
-    MOZ_ASSERT(ins->base()->type() == MIRType_Int32);
+    MOZ_ASSERT(ins->base()->type() == MIRType::Int32);
 
     const LAllocation base = useRegister(ins->base());
     const LAllocation value = useRegister(ins->value());
@@ -237,16 +327,20 @@ LIRGeneratorX64::visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins)
     // so ignore the case where we're not using the value and just
     // use the output register as a temp.
 
-    LAsmJSAtomicExchangeHeap* lir =
-        new(alloc()) LAsmJSAtomicExchangeHeap(base, value);
+    LWasmAtomicExchangeHeap* lir =
+        new(alloc()) LWasmAtomicExchangeHeap(base, value);
     define(lir, ins);
 }
 
 void
-LIRGeneratorX64::visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins)
+LIRGenerator::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins)
 {
     MDefinition* base = ins->base();
-    MOZ_ASSERT(base->type() == MIRType_Int32);
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    // No support for 64-bit operations with constants at the masm level.
+
+    bool canTakeConstant = ins->access().type() != Scalar::Int64;
 
     // Case 1: the result of the operation is not used.
     //
@@ -254,9 +348,11 @@ LIRGeneratorX64::visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins)
     // LOCK OR, or LOCK XOR.
 
     if (!ins->hasUses()) {
-        LAsmJSAtomicBinopHeapForEffect* lir =
-            new(alloc()) LAsmJSAtomicBinopHeapForEffect(useRegister(base),
-                                                        useRegisterOrConstant(ins->value()));
+        LAllocation value = canTakeConstant
+                            ? useRegisterOrConstant(ins->value())
+                            : useRegister(ins->value());
+        LWasmAtomicBinopHeapForEffect* lir =
+            new(alloc()) LWasmAtomicBinopHeapForEffect(useRegister(base), value);
         add(lir, ins);
         return;
     }
@@ -289,19 +385,18 @@ LIRGeneratorX64::visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins)
     LAllocation value;
 
     if (bitOp || ins->value()->isConstant()) {
-        value = useRegisterOrConstant(ins->value());
+        value = canTakeConstant ? useRegisterOrConstant(ins->value()) : useRegister(ins->value());
     } else {
         reuseInput = true;
         value = useRegisterAtStart(ins->value());
     }
 
-    LAsmJSAtomicBinopHeap* lir =
-        new(alloc()) LAsmJSAtomicBinopHeap(useRegister(base),
-                                           value,
-                                           bitOp ? temp() : LDefinition::BogusTemp());
+    auto* lir = new(alloc()) LWasmAtomicBinopHeap(useRegister(base),
+                                                   value,
+                                                   bitOp ? temp() : LDefinition::BogusTemp());
 
     if (reuseInput)
-        defineReuseInput(lir, ins, LAsmJSAtomicBinopHeap::valueOp);
+        defineReuseInput(lir, ins, LWasmAtomicBinopHeap::valueOp);
     else if (bitOp)
         defineFixed(lir, ins, LAllocation(AnyRegister(rax)));
     else
@@ -309,13 +404,7 @@ LIRGeneratorX64::visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins)
 }
 
 void
-LIRGeneratorX64::visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins)
-{
-    define(new(alloc()) LAsmJSLoadFuncPtr(useRegister(ins->index()), temp()), ins);
-}
-
-void
-LIRGeneratorX64::visitSubstr(MSubstr* ins)
+LIRGenerator::visitSubstr(MSubstr* ins)
 {
     LSubstr* lir = new (alloc()) LSubstr(useRegister(ins->string()),
                                          useRegister(ins->begin()),
@@ -328,13 +417,7 @@ LIRGeneratorX64::visitSubstr(MSubstr* ins)
 }
 
 void
-LIRGeneratorX64::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorX64::visitRandom(MRandom* ins)
+LIRGenerator::visitRandom(MRandom* ins)
 {
     LRandom *lir = new(alloc()) LRandom(temp(),
                                         temp(),
@@ -346,7 +429,7 @@ void
 LIRGeneratorX64::lowerDivI64(MDiv* div)
 {
     if (div->isUnsigned()) {
-        lowerUDiv64(div);
+        lowerUDivI64(div);
         return;
     }
 
@@ -359,7 +442,7 @@ void
 LIRGeneratorX64::lowerModI64(MMod* mod)
 {
     if (mod->isUnsigned()) {
-        lowerUMod64(mod);
+        lowerUModI64(mod);
         return;
     }
 
@@ -369,39 +452,52 @@ LIRGeneratorX64::lowerModI64(MMod* mod)
 }
 
 void
-LIRGeneratorX64::lowerUDiv64(MDiv* div)
+LIRGeneratorX64::lowerUDivI64(MDiv* div)
 {
-    LUDivOrMod64* lir = new(alloc()) LUDivOrMod64(useRegister(div->lhs()),
-                                                  useRegister(div->rhs()),
-                                                  tempFixed(rdx));
+    LUDivOrModI64* lir = new(alloc()) LUDivOrModI64(useRegister(div->lhs()),
+                                                    useRegister(div->rhs()),
+                                                    tempFixed(rdx));
     defineInt64Fixed(lir, div, LInt64Allocation(LAllocation(AnyRegister(rax))));
 }
 
 void
-LIRGeneratorX64::lowerUMod64(MMod* mod)
+LIRGeneratorX64::lowerUModI64(MMod* mod)
 {
-    LUDivOrMod64* lir = new(alloc()) LUDivOrMod64(useRegister(mod->lhs()),
-                                                  useRegister(mod->rhs()),
-                                                  tempFixed(rax));
+    LUDivOrModI64* lir = new(alloc()) LUDivOrModI64(useRegister(mod->lhs()),
+                                                    useRegister(mod->rhs()),
+                                                    tempFixed(rax));
     defineInt64Fixed(lir, mod, LInt64Allocation(LAllocation(AnyRegister(rdx))));
 }
 
 void
-LIRGeneratorX64::visitTruncateToInt64(MTruncateToInt64* ins)
+LIRGenerator::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins)
 {
     MDefinition* opd = ins->input();
-    MOZ_ASSERT(opd->type() == MIRType_Double || opd->type() == MIRType_Float32);
+    MOZ_ASSERT(opd->type() == MIRType::Double || opd->type() == MIRType::Float32);
 
     LDefinition maybeTemp = ins->isUnsigned() ? tempDouble() : LDefinition::BogusTemp();
-    defineInt64(new(alloc()) LTruncateToInt64(useRegister(opd), maybeTemp), ins);
+    defineInt64(new(alloc()) LWasmTruncateToInt64(useRegister(opd), maybeTemp), ins);
 }
 
 void
-LIRGeneratorX64::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
+LIRGenerator::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
 {
     MDefinition* opd = ins->input();
-    MOZ_ASSERT(opd->type() == MIRType_Int64);
+    MOZ_ASSERT(opd->type() == MIRType::Int64);
     MOZ_ASSERT(IsFloatingPointType(ins->type()));
 
-    define(new(alloc()) LInt64ToFloatingPoint(useInt64Register(opd)), ins);
+    LDefinition maybeTemp = ins->isUnsigned() ? temp() : LDefinition::BogusTemp();
+    define(new(alloc()) LInt64ToFloatingPoint(useInt64Register(opd), maybeTemp), ins);
+}
+
+void
+LIRGenerator::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
+{
+    defineInt64(new(alloc()) LExtendInt32ToInt64(useAtStart(ins->input())), ins);
+}
+
+void
+LIRGenerator::visitSignExtendInt64(MSignExtendInt64* ins)
+{
+    defineInt64(new(alloc()) LSignExtendInt64(useInt64RegisterAtStart(ins->input())), ins);
 }

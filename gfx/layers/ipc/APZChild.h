@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=4 ts=8 et tw=80 : */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,57 +9,45 @@
 
 #include "mozilla/layers/PAPZChild.h"
 
-class nsIObserver;
-
 namespace mozilla {
-
-namespace dom {
-class TabChild;
-} // namespace dom
 
 namespace layers {
 
+class GeckoContentController;
+
+/**
+ * APZChild implements PAPZChild and is used to remote a GeckoContentController
+ * that lives in a different process than where APZ lives.
+ */
 class APZChild final : public PAPZChild
 {
 public:
-  static APZChild* Create(const dom::TabId& aTabId);
-
+  explicit APZChild(RefPtr<GeckoContentController> aController);
   ~APZChild();
 
-  virtual bool RecvUpdateFrame(const FrameMetrics& frame) override;
+  mozilla::ipc::IPCResult RecvRequestContentRepaint(const FrameMetrics& frame) override;
 
-  virtual bool RecvAcknowledgeScrollUpdate(const ViewID& aScrollId,
-                                           const uint32_t& aScrollGeneration) override;
+  mozilla::ipc::IPCResult RecvUpdateOverscrollVelocity(const float& aX, const float& aY, const bool& aIsRootContent) override;
 
-  virtual bool RecvHandleDoubleTap(const CSSPoint& aPoint,
-                                   const Modifiers& aModifiers,
-                                   const ScrollableLayerGuid& aGuid) override;
+  mozilla::ipc::IPCResult RecvUpdateOverscrollOffset(const float& aX, const float& aY, const bool& aIsRootContent) override;
 
-  virtual bool RecvHandleSingleTap(const CSSPoint& aPoint,
-                                   const Modifiers& aModifiers,
-                                   const ScrollableLayerGuid& aGuid,
-                                   const bool& aCallTakeFocusForClickFromTap) override;
+  mozilla::ipc::IPCResult RecvNotifyMozMouseScrollEvent(const ViewID& aScrollId,
+                                                        const nsString& aEvent) override;
 
-  virtual bool RecvHandleLongTap(const CSSPoint& aPoint,
-                                 const Modifiers& aModifiers,
-                                 const ScrollableLayerGuid& aGuid,
-                                 const uint64_t& aInputBlockId) override;
+  mozilla::ipc::IPCResult RecvNotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
+                                                   const APZStateChange& aChange,
+                                                   const int& aArg) override;
 
-  virtual bool RecvNotifyAPZStateChange(const ViewID& aViewId,
-                                        const APZStateChange& aChange,
-                                        const int& aArg) override;
+  mozilla::ipc::IPCResult RecvNotifyFlushComplete() override;
 
-  virtual bool RecvNotifyFlushComplete() override;
+  mozilla::ipc::IPCResult RecvNotifyAsyncScrollbarDragRejected(const ViewID& aScrollId) override;
 
-  void SetBrowser(dom::TabChild* aBrowser);
+  mozilla::ipc::IPCResult RecvNotifyAsyncAutoscrollRejected(const ViewID& aScrollId) override;
+
+  mozilla::ipc::IPCResult RecvDestroy() override;
 
 private:
-  APZChild() {};
-
-  void SetObserver(nsIObserver* aObserver);
-
-  RefPtr<dom::TabChild> mBrowser;
-  RefPtr<nsIObserver> mObserver;
+  RefPtr<GeckoContentController> mController;
 };
 
 } // namespace layers

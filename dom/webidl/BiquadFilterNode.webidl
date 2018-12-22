@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/audio/raw-file/tip/webaudio/specification.html
+ * https://webaudio.github.io/web-audio-api/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
@@ -21,6 +21,16 @@ enum BiquadFilterType {
   "allpass"
 };
 
+dictionary BiquadFilterOptions : AudioNodeOptions {
+             BiquadFilterType type = "lowpass";
+             float            Q = 1;
+             float            detune = 0;
+             float            frequency = 350;
+             float            gain = 0;
+};
+
+[Pref="dom.webaudio.enabled",
+ Constructor(BaseAudioContext context, optional BiquadFilterOptions options)]
 interface BiquadFilterNode : AudioNode {
 
     attribute BiquadFilterType type;

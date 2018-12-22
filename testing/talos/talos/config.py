@@ -1,13 +1,14 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
+from __future__ import absolute_import, print_function
 
-import sys
-import os
 import copy
+import os
+import sys
+import time
 
 from mozlog.commandline import setup_logging
-
 from talos import utils, test
 from talos.cmdline import parse_args
 
@@ -25,27 +26,28 @@ DEFAULTS = dict(
     # base data for all tests
     basetest=dict(
         cycles=1,
-        test_name_extension='',
         profile_path='${talos}/base_profile',
         responsiveness=False,
-        e10s=False,
-        sps_profile=False,
-        sps_profile_interval=1,
-        sps_profile_entries=100000,
+        gecko_profile=False,
+        gecko_profile_interval=1,
+        gecko_profile_entries=100000,
         resolution=1,
-        rss=False,
         mainthread=False,
         shutdown=False,
         timeout=3600,
         tpchrome=True,
         tpcycles=10,
         tpmozafterpaint=False,
-        tpdisable_e10s=False,
-        tpnoisy=True,
+        tphero=False,
+        fnbpaint=False,
+        firstpaint=False,
+        format_pagename=True,
+        userready=False,
+        testeventmap=[],
+        base_vs_ref=False,
         tppagecycles=1,
         tploadnocache=False,
         tpscrolltest=False,
-        tprender=False,
         win_counters=[],
         w7_counters=[],
         linux_counters=[],
@@ -53,157 +55,26 @@ DEFAULTS = dict(
         xperf_counters=[],
         setup=None,
         cleanup=None,
+        preferences={},
     ),
-    # default preferences to run with
-    # these are updated with --extraPrefs from the commandline
-    # for extension scopes, see
-    # see https://developer.mozilla.org/en/Installing_extensions
-    preferences={
-        'app.update.enabled': False,
-        'browser.addon-watch.interval': -1,  # Deactivate add-on watching
-        'browser.aboutHomeSnippets.updateUrl':
-            'https://127.0.0.1/about-dummy/',
-        'browser.bookmarks.max_backups': 0,
-        'browser.cache.disk.smart_size.enabled': False,
-        'browser.cache.disk.smart_size.first_run': False,
-        'browser.chrome.dynamictoolbar': False,
-        'browser.dom.window.dump.enabled': True,
-        'browser.EULA.override': True,
-        'browser.link.open_newwindow': 2,
-        'browser.reader.detectedFirstArticle': True,
-        'browser.shell.checkDefaultBrowser': False,
-        'browser.warnOnQuit': False,
-        'browser.tabs.remote.autostart': False,
-        'dom.allow_scripts_to_close_windows': True,
-        'dom.disable_open_during_load': False,
-        'dom.disable_window_flip': True,
-        'dom.disable_window_move_resize': True,
-        'dom.max_chrome_script_run_time': 0,
-        'dom.max_script_run_time': 0,
-        'extensions.autoDisableScopes': 10,
-        'extensions.checkCompatibility': False,
-        'extensions.enabledScopes': 5,
-        'extensions.update.notifyUser': False,
-        'hangmonitor.timeout': 0,
-        'network.proxy.http': 'localhost',
-        'network.proxy.http_port': 80,
-        'network.proxy.type': 1,
-        'security.enable_java': False,
-        'security.fileuri.strict_origin_policy': False,
-        'dom.send_after_paint_to_content': True,
-        'security.turn_off_all_security_so_that_viruses_can_'
-        'take_over_this_computer': True,
-        'browser.newtabpage.directory.source':
-            '${webserver}/directoryLinks.json',
-        'browser.newtabpage.directory.ping': '',
-        'browser.newtabpage.introShown': True,
-        'browser.safebrowsing.provider.google.gethashURL':
-            'http://127.0.0.1/safebrowsing-dummy/gethash',
-        'browser.safebrowsing.provider.google.updateURL':
-            'http://127.0.0.1/safebrowsing-dummy/update',
-        'browser.safebrowsing.provider.mozilla.gethashURL':
-            'http://127.0.0.1/safebrowsing-dummy/gethash',
-        'browser.safebrowsing.provider.mozilla.updateURL':
-            'http://127.0.0.1/safebrowsing-dummy/update',
-        'privacy.trackingprotection.introURL':
-            'http://127.0.0.1/trackingprotection/tour',
-        'browser.safebrowsing.enabled': False,
-        'browser.safebrowsing.malware.enabled': False,
-        'browser.safebrowsing.forbiddenURIs.enabled': False,
-        'browser.safebrowsing.blockedURIs.enabled': False,
-        'privacy.trackingprotection.enabled': False,
-        'privacy.trackingprotection.pbmode.enabled': False,
-        'browser.search.isUS': True,
-        'browser.search.countryCode': 'US',
-        'browser.selfsupport.url':
-            'https://127.0.0.1/selfsupport-dummy/',
-        'extensions.update.url':
-            'http://127.0.0.1/extensions-dummy/updateURL',
-        'extensions.update.background.url':
-            'http://127.0.0.1/extensions-dummy/updateBackgroundURL',
-        'extensions.blocklist.enabled': False,
-        'extensions.blocklist.url':
-            'http://127.0.0.1/extensions-dummy/blocklistURL',
-        'extensions.hotfix.url':
-            'http://127.0.0.1/extensions-dummy/hotfixURL',
-        'extensions.update.enabled': False,
-        'extensions.webservice.discoverURL':
-            'http://127.0.0.1/extensions-dummy/discoveryURL',
-        'extensions.getAddons.maxResults': 0,
-        'extensions.getAddons.get.url':
-            'http://127.0.0.1/extensions-dummy/repositoryGetURL',
-        'extensions.getAddons.getWithPerformance.url':
-            'http://127.0.0.1/extensions-dummy'
-            '/repositoryGetWithPerformanceURL',
-        'extensions.getAddons.search.browseURL':
-            'http://127.0.0.1/extensions-dummy/repositoryBrowseURL',
-        'extensions.getAddons.search.url':
-            'http://127.0.0.1/extensions-dummy/repositorySearchURL',
-        'plugins.update.url':
-            'http://127.0.0.1/plugins-dummy/updateCheckURL',
-        'media.gmp-manager.url':
-            'http://127.0.0.1/gmpmanager-dummy/update.xml',
-        'extensions.systemAddon.update.url':
-            'http://127.0.0.1/dummy-system-addons.xml',
-        'media.navigator.enabled': True,
-        'media.peerconnection.enabled': True,
-        'media.navigator.permission.disabled': True,
-        'media.capturestream_hints.enabled': True,
-        'browser.contentHandlers.types.0.uri': 'http://127.0.0.1/rss?url=%s',
-        'browser.contentHandlers.types.1.uri': 'http://127.0.0.1/rss?url=%s',
-        'browser.contentHandlers.types.2.uri': 'http://127.0.0.1/rss?url=%s',
-        'browser.contentHandlers.types.3.uri': 'http://127.0.0.1/rss?url=%s',
-        'browser.contentHandlers.types.4.uri': 'http://127.0.0.1/rss?url=%s',
-        'browser.contentHandlers.types.5.uri': 'http://127.0.0.1/rss?url=%s',
-        'identity.fxaccounts.auth.uri': 'https://127.0.0.1/fxa-dummy/',
-        'datareporting.healthreport.about.reportUrl':
-            'http://127.0.0.1/abouthealthreport/',
-        'datareporting.healthreport.documentServerURI':
-            'http://127.0.0.1/healthreport/',
-        'datareporting.policy.dataSubmissionPolicyBypassNotification': True,
-        'general.useragent.updates.enabled': False,
-        'browser.webapps.checkForUpdates': 0,
-        'browser.search.geoSpecificDefaults': False,
-        'browser.snippets.enabled': False,
-        'browser.snippets.syncPromo.enabled': False,
-        'toolkit.telemetry.server': 'https://127.0.0.1/telemetry-dummy/',
-        'experiments.manifest.uri':
-            'https://127.0.0.1/experiments-dummy/manifest',
-        'network.http.speculative-parallel-limit': 0,
-        'browser.displayedE10SPrompt': 9999,
-        'browser.displayedE10SPrompt.1': 9999,
-        'browser.displayedE10SPrompt.2': 9999,
-        'browser.displayedE10SPrompt.3': 9999,
-        'browser.displayedE10SPrompt.4': 9999,
-        'browser.displayedE10SPrompt.5': 9999,
-        'app.update.badge': False,
-        'lightweightThemes.selectedThemeID': "",
-        'devtools.webide.widget.enabled': False,
-        'devtools.webide.widget.inNavbarByDefault': False,
-        'devtools.chrome.enabled': False,
-        'devtools.debugger.remote-enabled': False,
-        'devtools.theme': "light",
-        'devtools.timeline.enabled': False,
-        'identity.fxaccounts.migrateToDevEdition': False
-    }
 )
 
 
 # keys to generated self.config that are global overrides to tests
 GLOBAL_OVERRIDES = (
     'cycles',
-    'sps_profile',
-    'sps_profile_interval',
-    'sps_profile_entries',
-    'rss',
-    'mainthread',
-    'shutdown',
+    'gecko_profile',
+    'gecko_profile_interval',
+    'gecko_profile_entries',
     'tpcycles',
-    'tpdelay',
     'tppagecycles',
     'tpmanifest',
     'tptimeout',
     'tpmozafterpaint',
+    'tphero',
+    'fnbpaint',
+    'firstpaint',
+    'userready',
 )
 
 
@@ -267,14 +138,10 @@ def set_webserver(config):
 
 @validator
 def update_prefs(config):
-    # if e10s is enabled, set prefs accordingly
-    if config['e10s']:
-        config['preferences']['browser.tabs.remote.autostart'] = True
-        config['preferences']['extensions.e10sBlocksEnabling'] = False
-    else:
-        config['preferences']['browser.tabs.remote.autostart'] = False
-        config['preferences']['browser.tabs.remote.autostart.1'] = False
-        config['preferences']['browser.tabs.remote.autostart.2'] = False
+    config.setdefault('preferences', {}).update({
+        # Bug 1383896 - reduces noise in tests
+        'idle.lastDailyNotification': int(time.time()),
+    })
 
     # update prefs from command line
     prefs = config.pop('extraPrefs')
@@ -290,10 +157,22 @@ def fix_init_url(config):
         config['init_url'] = convert_url(config, config['init_url'])
 
 
+@validator
+def determine_local_symbols_path(config):
+    if 'symbols_path' not in config:
+        return
+
+    # use objdir/dist/crashreporter-symbols for symbolsPath if none provided
+    if not config['symbols_path'] and \
+       config['develop'] and \
+       'MOZ_DEVELOPER_OBJ_DIR' in os.environ:
+        config['symbols_path'] = os.path.join(os.environ['MOZ_DEVELOPER_OBJ_DIR'],
+                                              'dist',
+                                              'crashreporter-symbols')
+
+
 def get_counters(config):
     counters = set()
-    if config['rss']:
-        counters.add('Main_RSS')
     return counters
 
 
@@ -308,9 +187,6 @@ def get_active_tests(config):
         raise ConfigurationError("No definition found for test(s): %s"
                                  % missing)
 
-    # disabled DAMP on winXP: frequent hangs, <3% of devtools users on winXP
-    if utils.PLATFORM_TYPE == 'win_':
-        activeTests = [i for i in activeTests if i != 'damp']
     return activeTests
 
 
@@ -318,20 +194,12 @@ def get_global_overrides(config):
     global_overrides = {}
     for key in GLOBAL_OVERRIDES:
         # get global overrides for all tests
-        value = config.pop(key)
+        value = config[key]
         if value is not None:
             global_overrides[key] = value
+        if key != 'gecko_profile':
+            config.pop(key)
 
-    # add noChrome to global overrides (HACK)
-    noChrome = config.pop('noChrome')
-    if noChrome:
-        global_overrides['tpchrome'] = False
-
-    # HACK: currently xperf tests post results to graph server and
-    # we want to ensure we don't publish shutdown numbers
-    # This is also hacked because "--noShutdown -> shutdown:True"
-    if config['xperf_path']:
-        global_overrides['shutdown'] = False
     return global_overrides
 
 
@@ -355,10 +223,10 @@ def build_manifest(config, manifestName):
 
 def get_test(config, global_overrides, counters, test_instance):
     mozAfterPaint = getattr(test_instance, 'tpmozafterpaint', None)
-
-    # add test_name_extension to config
-    if mozAfterPaint:
-        test_instance.test_name_extension = '_paint'
+    hero = getattr(test_instance, 'tphero', None)
+    firstPaint = getattr(test_instance, 'firstpaint', None)
+    userReady = getattr(test_instance, 'userready', None)
+    firstNonBlankPaint = getattr(test_instance, 'fnbpaint', None)
 
     test_instance.update(**global_overrides)
 
@@ -366,6 +234,14 @@ def get_test(config, global_overrides, counters, test_instance):
     # so check for None
     if mozAfterPaint is not None:
         test_instance.tpmozafterpaint = mozAfterPaint
+    if firstNonBlankPaint is not None:
+        test_instance.fnbpaint = firstNonBlankPaint
+    if firstPaint is not None:
+        test_instance.firstpaint = firstPaint
+    if userReady is not None:
+        test_instance.userready = userReady
+    if hero is not None:
+        test_instance.tphero = hero
 
     # fix up url
     url = getattr(test_instance, 'url', None)
@@ -410,22 +286,27 @@ def tests(config):
 
 
 def get_browser_config(config):
-    required = ('preferences', 'extensions', 'browser_path', 'browser_wait',
+    required = ('extensions', 'browser_path', 'browser_wait',
                 'extra_args', 'buildid', 'env', 'init_url', 'webserver')
     optional = {'bcontroller_config': '${talos}/bcontroller.json',
                 'branch_name': '',
-                'child_process': 'firefox-webcontent',
+                'child_process': 'plugin-container',
+                'debug': False,
+                'debugger': None,
+                'debugger_args': None,
                 'develop': False,
-                'e10s': False,
                 'process': '',
                 'framework': 'talos',
                 'repository': None,
                 'sourcestamp': None,
                 'symbols_path': None,
-                'test_name_extension': '',
                 'test_timeout': 1200,
                 'xperf_path': None,
                 'error_filename': None,
+                'no_upload_results': False,
+                'stylothreads': 0,
+                'subtests': None,
+                'preferences': {},
                 }
     browser_config = dict(title=config['title'])
     browser_config.update(dict([(i, config[i]) for i in required]))
@@ -477,6 +358,6 @@ def get_configs(argv=None):
 
 if __name__ == '__main__':
     cfgs = get_configs()
-    print cfgs[0]
+    print(cfgs[0])
     print
-    print cfgs[1]
+    print(cfgs[1])

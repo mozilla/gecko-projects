@@ -6,16 +6,21 @@
 
 #include "Sandbox.h"
 
-#include "LinuxCapabilities.h"
 #include "LinuxSched.h"
 #include "SandboxBrokerClient.h"
-#include "SandboxChroot.h"
+#include "SandboxChrootProto.h"
 #include "SandboxFilter.h"
 #include "SandboxInternal.h"
 #include "SandboxLogging.h"
-#include "SandboxUtil.h"
+#ifdef MOZ_GMP_SANDBOX
+#include "SandboxOpenedFiles.h"
+#endif
+#include "SandboxReporterClient.h"
 
 #include <dirent.h>
+#ifdef NIGHTLY_BUILD
+#include "dlfcn.h"
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/futex.h>
@@ -30,20 +35,27 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "mozilla/Array.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/Maybe.h"
+#include "mozilla/Range.h"
 #include "mozilla/SandboxInfo.h"
+#include "mozilla/Span.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "prenv.h"
+#include "base/posix/eintr_wrapper.h"
+#include "sandbox/linux/bpf_dsl/codegen.h"
 #include "sandbox/linux/bpf_dsl/dump_bpf.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/bpf_dsl/policy_compiler.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/seccomp-bpf/trap.h"
+#include "sandbox/linux/system_headers/linux_filter.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 #if defined(ANDROID)
-#include "sandbox/linux/services/android_ucontext.h"
+#include "sandbox/linux/system_headers/linux_ucontext.h"
 #endif
-#include "sandbox/linux/services/linux_syscalls.h"
 
 #ifdef MOZ_ASAN
 // Copy libsanitizer declarations to avoid depending on ASAN headers.
@@ -65,20 +77,17 @@ __sanitizer_sandbox_on_notify(__sanitizer_sandbox_arguments *args);
 } // extern "C"
 #endif // MOZ_ASAN
 
+// Signal number used to enable seccomp on each thread.
+mozilla::Atomic<int> gSeccompTsyncBroadcastSignum(0);
+
 namespace mozilla {
 
-#ifdef ANDROID
+static bool gSandboxCrashOnError = false;
+
+// This is initialized by SandboxSetCrashFunc().
 SandboxCrashFunc gSandboxCrashFunc;
-#endif
 
-#ifdef MOZ_GMP_SANDBOX
-// For media plugins, we can start the sandbox before we dlopen the
-// module, so we have to pre-open the file and simulate the sandboxed
-// open().
-static SandboxOpenedFile gMediaPluginFile;
-#endif
-
-static UniquePtr<SandboxChroot> gChrootHelper;
+static SandboxReporterClient* gSandboxReporterClient;
 static void (*gChromiumSigSysHandler)(int, siginfo_t*, void*);
 
 // Test whether a ucontext, interpreted as the state after a syscall,
@@ -130,28 +139,24 @@ SigSysHandler(int nr, siginfo_t *info, void *void_context)
     return;
   }
 
-  pid_t pid = getpid();
-  unsigned long syscall_nr = SECCOMP_SYSCALL(&savedCtx);
-  unsigned long args[6];
-  args[0] = SECCOMP_PARM1(&savedCtx);
-  args[1] = SECCOMP_PARM2(&savedCtx);
-  args[2] = SECCOMP_PARM3(&savedCtx);
-  args[3] = SECCOMP_PARM4(&savedCtx);
-  args[4] = SECCOMP_PARM5(&savedCtx);
-  args[5] = SECCOMP_PARM6(&savedCtx);
+  SandboxReport report = gSandboxReporterClient->MakeReportAndSend(&savedCtx);
 
   // TODO, someday when this is enabled on MIPS: include the two extra
   // args in the error message.
-  SANDBOX_LOG_ERROR("seccomp sandbox violation: pid %d, syscall %d,"
-                    " args %d %d %d %d %d %d.  Killing process.",
-                    pid, syscall_nr,
-                    args[0], args[1], args[2], args[3], args[4], args[5]);
+  SANDBOX_LOG_ERROR("seccomp sandbox violation: pid %d, tid %d, syscall %d,"
+                    " args %d %d %d %d %d %d.%s",
+                    report.mPid, report.mTid, report.mSyscall,
+                    report.mArgs[0], report.mArgs[1], report.mArgs[2],
+                    report.mArgs[3], report.mArgs[4], report.mArgs[5],
+                    gSandboxCrashOnError ? "  Killing process." : "");
 
-  // Bug 1017393: record syscall number somewhere useful.
-  info->si_addr = reinterpret_cast<void*>(syscall_nr);
+  if (gSandboxCrashOnError) {
+    // Bug 1017393: record syscall number somewhere useful.
+    info->si_addr = reinterpret_cast<void*>(report.mSyscall);
 
-  gSandboxCrashFunc(nr, info, &savedCtx);
-  _exit(127);
+    gSandboxCrashFunc(nr, info, &savedCtx);
+    _exit(127);
+  }
 }
 
 /**
@@ -207,15 +212,20 @@ InstallSigSysHandler(void)
  * program).  The kernel won't allow seccomp-bpf without doing this,
  * because otherwise it could be used for privilege escalation attacks.
  *
- * Returns false (and sets errno) on failure.
+ * Returns false if the filter was already installed (see the
+ * PR_SET_NO_NEW_PRIVS rule in SandboxFilter.cpp).  Crashes on any
+ * other error condition.
  *
  * @see SandboxInfo
  * @see BroadcastSetThreadSandbox
  */
-static bool MOZ_WARN_UNUSED_RESULT
+static bool MOZ_MUST_USE
 InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
 {
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+    if (!aUseTSync && errno == ETXTBSY) {
+      return false;
+    }
     SANDBOX_LOG_ERROR("prctl(PR_SET_NO_NEW_PRIVS) failed: %s", strerror(errno));
     MOZ_CRASH("prctl(PR_SET_NO_NEW_PRIVS)");
   }
@@ -225,13 +235,13 @@ InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
                 SECCOMP_FILTER_FLAG_TSYNC, aProg) != 0) {
       SANDBOX_LOG_ERROR("thread-synchronized seccomp failed: %s",
                         strerror(errno));
-      return false;
+      MOZ_CRASH("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)");
     }
   } else {
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, (unsigned long)aProg, 0, 0)) {
       SANDBOX_LOG_ERROR("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER) failed: %s",
                         strerror(errno));
-      return false;
+      MOZ_CRASH("seccomp+tsync failed, but kernel supports tsync");
     }
   }
   return true;
@@ -241,7 +251,7 @@ InstallSyscallFilter(const sock_fprog *aProg, bool aUseTSync)
 // The communication channel from the signal handler back to the main thread.
 static mozilla::Atomic<int> gSetSandboxDone;
 // Pass the filter itself through a global.
-static const sock_fprog* gSetSandboxFilter;
+const sock_fprog* gSetSandboxFilter;
 
 // We have to dynamically allocate the signal number; see bug 1038900.
 // This function returns the first realtime signal currently set to
@@ -253,7 +263,7 @@ static const sock_fprog* gSetSandboxFilter;
 static int
 FindFreeSignalNumber()
 {
-  for (int signum = SIGRTMIN; signum <= SIGRTMAX; ++signum) {
+  for (int signum = SIGRTMAX; signum >= SIGRTMIN; --signum) {
     struct sigaction sa;
 
     if (sigaction(signum, nullptr, &sa) == 0 &&
@@ -270,13 +280,7 @@ FindFreeSignalNumber()
 static bool
 SetThreadSandbox()
 {
-  if (prctl(PR_GET_SECCOMP, 0, 0, 0, 0) == 0) {
-    if (!InstallSyscallFilter(gSetSandboxFilter, false)) {
-      MOZ_CRASH("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)");
-    }
-    return true;
-  }
-  return false;
+  return InstallSyscallFilter(gSetSandboxFilter, false);
 }
 
 static void
@@ -298,16 +302,21 @@ SetThreadSandboxHandler(int signum)
 static void
 EnterChroot()
 {
-  if (gChrootHelper) {
-    gChrootHelper->Invoke();
-    gChrootHelper = nullptr;
+  if (!PR_GetEnv(kSandboxChrootEnvFlag)) {
+    return;
   }
+  char msg = kSandboxChrootRequest;
+  ssize_t msg_len = HANDLE_EINTR(write(kSandboxChrootClientFd, &msg, 1));
+  MOZ_RELEASE_ASSERT(msg_len == 1);
+  msg_len = HANDLE_EINTR(read(kSandboxChrootClientFd, &msg, 1));
+  MOZ_RELEASE_ASSERT(msg_len == 1);
+  MOZ_RELEASE_ASSERT(msg == kSandboxChrootResponse);
+  close(kSandboxChrootClientFd);
 }
 
 static void
 BroadcastSetThreadSandbox(const sock_fprog* aFilter)
 {
-  int signum;
   pid_t pid, tid, myTid;
   DIR *taskdp;
   struct dirent *de;
@@ -326,25 +335,11 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
     MOZ_CRASH();
   }
 
-  EnterChroot();
-
-  signum = FindFreeSignalNumber();
-  if (signum == 0) {
-    SANDBOX_LOG_ERROR("No available signal numbers!");
-    MOZ_CRASH();
-  }
-  void (*oldHandler)(int);
-  oldHandler = signal(signum, SetThreadSandboxHandler);
-  if (oldHandler != SIG_DFL) {
-    // See the comment on FindFreeSignalNumber about race conditions.
-    SANDBOX_LOG_ERROR("signal %d in use by handler %p!\n", signum, oldHandler);
-    MOZ_CRASH();
-  }
-
   // In case this races with a not-yet-deprivileged thread cloning
   // itself, repeat iterating over all threads until we find none
   // that are still privileged.
   bool sandboxProgress;
+  const int tsyncSignum = gSeccompTsyncBroadcastSignum;
   do {
     sandboxProgress = false;
     // For each thread...
@@ -360,9 +355,12 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
         // continue to signal other threads.
         continue;
       }
+
+      MOZ_RELEASE_ASSERT(tsyncSignum != 0);
+
       // Reset the futex cell and signal.
       gSetSandboxDone = 0;
-      if (syscall(__NR_tgkill, pid, tid, signum) != 0) {
+      if (syscall(__NR_tgkill, pid, tid, tsyncSignum) != 0) {
         if (errno == ESRCH) {
           SANDBOX_LOG_ERROR("Thread %d unexpectedly exited.", tid);
           // Rescan threads, in case it forked before exiting.
@@ -432,13 +430,16 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
     }
     rewinddir(taskdp);
   } while (sandboxProgress);
-  oldHandler = signal(signum, SIG_DFL);
+
+  void (*oldHandler)(int);
+  oldHandler = signal(tsyncSignum, SIG_DFL);
   if (oldHandler != SetThreadSandboxHandler) {
     // See the comment on FindFreeSignalNumber about race conditions.
     SANDBOX_LOG_ERROR("handler for signal %d was changed to %p!",
-                      signum, oldHandler);
+                      tsyncSignum, oldHandler);
     MOZ_CRASH();
   }
+  gSeccompTsyncBroadcastSignum = 0;
   Unused << closedir(taskdp);
   // And now, deprivilege the main thread:
   SetThreadSandbox();
@@ -448,13 +449,90 @@ BroadcastSetThreadSandbox(const sock_fprog* aFilter)
 static void
 ApplySandboxWithTSync(sock_fprog* aFilter)
 {
-  EnterChroot();
-  // At this point we're committed to using tsync, because the signal
-  // broadcast workaround needs to access procfs.  (Unless chroot
-  // isn't used... but this failure shouldn't happen in the first
-  // place, so let's not make extra special cases for it.)
+  // At this point we're committed to using tsync, because we'd have
+  // needed to allocate a signal and prevent it from being blocked on
+  // other threads (see SandboxHooks.cpp), so there's no attempt to
+  // fall back to the non-tsync path.
   if (!InstallSyscallFilter(aFilter, true)) {
-    MOZ_CRASH("seccomp+tsync failed, but kernel supports tsync");
+    MOZ_CRASH();
+  }
+}
+
+#ifdef NIGHTLY_BUILD
+static bool
+IsLibPresent(const char* aName)
+{
+  if (const auto handle = dlopen(aName, RTLD_LAZY | RTLD_NOLOAD)) {
+    dlclose(handle);
+    return true;
+  }
+  return false;
+}
+
+static const Array<const char*, 1> kLibsThatWillCrash {
+  "libesets_pac.so",
+};
+#endif // NIGHTLY_BUILD
+
+void
+SandboxEarlyInit() {
+  if (PR_GetEnv("MOZ_SANDBOXED") == nullptr) {
+    return;
+  }
+
+  // Fix LD_PRELOAD for any child processes.  See bug 1434392 comment #10;
+  // this can probably go away when audio remoting is mandatory.
+  const char* oldPreload = PR_GetEnv("MOZ_ORIG_LD_PRELOAD");
+  char* preloadEntry;
+  // This string is "leaked" because the environment takes ownership.
+  if (asprintf(&preloadEntry, "LD_PRELOAD=%s",
+               oldPreload ? oldPreload : "") != -1) {
+    PR_SetEnv(preloadEntry);
+  }
+
+  // If TSYNC is not supported, set up signal handler
+  // used to enable seccomp on each thread.
+  if (!SandboxInfo::Get().Test(SandboxInfo::kHasSeccompTSync)) {
+    // The signal number has to be chosen early, so that the
+    // interceptions in SandboxHooks.cpp can prevent it from being
+    // masked.
+    const int tsyncSignum = FindFreeSignalNumber();
+    if (tsyncSignum == 0) {
+      SANDBOX_LOG_ERROR("No available signal numbers!");
+      MOZ_CRASH();
+    }
+    gSeccompTsyncBroadcastSignum = tsyncSignum;
+
+    // ...and the signal handler also needs to be installed now, to
+    // indicate to anything else looking for free signals that it's
+    // claimed.
+    void (*oldHandler)(int);
+    oldHandler = signal(tsyncSignum, SetThreadSandboxHandler);
+    if (oldHandler != SIG_DFL) {
+      // See the comment on FindFreeSignalNumber about race conditions.
+      SANDBOX_LOG_ERROR("signal %d in use by handler %p!\n",
+                        tsyncSignum, oldHandler);
+      MOZ_CRASH();
+    }
+  }
+}
+
+static void
+SandboxLateInit() {
+#ifdef NIGHTLY_BUILD
+  gSandboxCrashOnError = true;
+  for (const char* name : kLibsThatWillCrash) {
+    if (IsLibPresent(name)) {
+      gSandboxCrashOnError = false;
+      break;
+    }
+  }
+#endif
+
+  if (const char* envVar = PR_GetEnv("MOZ_SANDBOX_CRASH_ON_ERROR")) {
+    if (envVar[0]) {
+      gSandboxCrashOnError = envVar[0] != '0';
+    }
   }
 }
 
@@ -463,14 +541,22 @@ static void
 SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
 {
   MOZ_ASSERT(gSandboxCrashFunc);
+  MOZ_RELEASE_ASSERT(gSandboxReporterClient != nullptr);
+  SandboxLateInit();
+
+  // Auto-collect child processes -- mainly the chroot helper if
+  // present, but also anything setns()ed into the pid namespace (not
+  // yet implemented).  This process won't be able to waitpid them
+  // after the seccomp-bpf policy is applied.
+  signal(SIGCHLD, SIG_IGN);
 
   // Note: PolicyCompiler borrows the policy and registry for its
   // lifetime, but does not take ownership of them.
   sandbox::bpf_dsl::PolicyCompiler compiler(aPolicy.get(),
                                             sandbox::Trap::Registry());
-  auto program = compiler.Compile();
+  sandbox::CodeGen::Program program = compiler.Compile();
   if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
-    sandbox::bpf_dsl::DumpBPF::PrintProgram(*program);
+    sandbox::bpf_dsl::DumpBPF::PrintProgram(program);
   }
 
   InstallSigSysHandler();
@@ -484,10 +570,10 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
 #endif
 
   // The syscall takes a C-style array, so copy the vector into one.
-  size_t programLen = program->size();
+  size_t programLen = program.size();
   UniquePtr<sock_filter[]> flatProgram(new sock_filter[programLen]);
-  for (auto i = program->begin(); i != program->end(); ++i) {
-    flatProgram[i - program->begin()] = *i;
+  for (auto i = program.begin(); i != program.end(); ++i) {
+    flatProgram[i - program.begin()] = *i;
   }
 
   sock_fprog fprog;
@@ -507,119 +593,10 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
     }
     BroadcastSetThreadSandbox(&fprog);
   }
-  MOZ_RELEASE_ASSERT(!gChrootHelper, "forgot to chroot");
-}
 
-void
-SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
-{
-  // Bug 1168555: Nuwa isn't reliably single-threaded at this point;
-  // it starts an IPC I/O thread and then shuts it down before calling
-  // the plugin-container entry point, but that thread may not have
-  // finished exiting.  If/when any type of sandboxing is used for the
-  // Nuwa process (e.g., unsharing the network namespace there instead
-  // of for each content process, to save memory), this will need to be
-  // changed by moving the SandboxEarlyInit call to an earlier point.
-  if (aIsNuwa) {
-    return;
-  }
-
-  const SandboxInfo info = SandboxInfo::Get();
-  if (info.Test(SandboxInfo::kUnexpectedThreads)) {
-    return;
-  }
-  MOZ_RELEASE_ASSERT(IsSingleThreaded());
-
-  // Which kinds of resource isolation (of those that need to be set
-  // up at this point) can be used by this process?
-  bool canChroot = false;
-  bool canUnshareNet = false;
-  bool canUnshareIPC = false;
-
-  switch (aType) {
-  case GeckoProcessType_Default:
-    MOZ_ASSERT(false, "SandboxEarlyInit in parent process");
-    return;
-#ifdef MOZ_GMP_SANDBOX
-  case GeckoProcessType_GMPlugin:
-    if (!info.Test(SandboxInfo::kEnabledForMedia)) {
-      break;
-    }
-    canUnshareNet = true;
-    canUnshareIPC = true;
-    // Need seccomp-bpf to intercept open().
-    canChroot = info.Test(SandboxInfo::kHasSeccompBPF);
-    break;
-#endif
-    // In the future, content processes will be able to use some of
-    // these.
-  default:
-    // Other cases intentionally left blank.
-    break;
-  }
-
-  // If there's nothing to do, then we're done.
-  if (!canChroot && !canUnshareNet && !canUnshareIPC) {
-    return;
-  }
-
-  {
-    LinuxCapabilities existingCaps;
-    if (existingCaps.GetCurrent() && existingCaps.AnyEffective()) {
-      SANDBOX_LOG_ERROR("PLEASE DO NOT RUN THIS AS ROOT.  Strange things may"
-                        " happen when capabilities are dropped.");
-    }
-  }
-
-  // If capabilities can't be gained, then nothing can be done.
-  if (!info.Test(SandboxInfo::kHasUserNamespaces)) {
-    // Drop any existing capabilities; unsharing the user namespace
-    // would implicitly drop them, so if we're running in a broken
-    // configuration where that would matter (e.g., running as root
-    // from a non-root-owned mode-0700 directory) this means it will
-    // break the same way on all kernels and be easier to troubleshoot.
-    LinuxCapabilities().SetCurrent();
-    return;
-  }
-
-  // The failure cases for the various unshares, and setting up the
-  // chroot helper, don't strictly need to be fatal -- but they also
-  // shouldn't fail on any reasonable system, so let's take the small
-  // risk of breakage over the small risk of quietly providing less
-  // security than we expect.  (Unlike in SandboxInfo, this is in the
-  // child process, so crashing here isn't as severe a response to the
-  // unexpected.)
-  if (!UnshareUserNamespace()) {
-    SANDBOX_LOG_ERROR("unshare(CLONE_NEWUSER): %s", strerror(errno));
-    // If CanCreateUserNamespace (SandboxInfo.cpp) returns true, then
-    // the unshare shouldn't have failed.
-    MOZ_CRASH("unshare(CLONE_NEWUSER)");
-  }
-  // No early returns after this point!  We need to drop the
-  // capabilities that were gained by unsharing the user namesapce.
-
-  if (canUnshareIPC && syscall(__NR_unshare, CLONE_NEWIPC) != 0) {
-    SANDBOX_LOG_ERROR("unshare(CLONE_NEWIPC): %s", strerror(errno));
-    MOZ_CRASH("unshare(CLONE_NEWIPC)");
-  }
-
-  if (canUnshareNet && syscall(__NR_unshare, CLONE_NEWNET) != 0) {
-    SANDBOX_LOG_ERROR("unshare(CLONE_NEWNET): %s", strerror(errno));
-    MOZ_CRASH("unshare(CLONE_NEWNET)");
-  }
-
-  if (canChroot) {
-    gChrootHelper = MakeUnique<SandboxChroot>();
-    if (!gChrootHelper->Prepare()) {
-      SANDBOX_LOG_ERROR("failed to set up chroot helper");
-      MOZ_CRASH("SandboxChroot::Prepare");
-    }
-  }
-
-  if (!LinuxCapabilities().SetCurrent()) {
-    SANDBOX_LOG_ERROR("dropping capabilities: %s", strerror(errno));
-    MOZ_CRASH("can't drop capabilities");
-  }
+  // Now that all threads' filesystem accesses are being intercepted
+  // (if a broker is used) it's safe to chroot the process:
+  EnterChroot();
 }
 
 #ifdef MOZ_CONTENT_SANDBOX
@@ -629,23 +606,32 @@ SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
  *
  * Will normally make the process exit on failure.
 */
-void
-SetContentProcessSandbox(int aBrokerFd)
+bool
+SetContentProcessSandbox(ContentProcessSandboxParams&& aParams)
 {
+  int brokerFd = aParams.mBrokerFd;
+  aParams.mBrokerFd = -1;
+
   if (!SandboxInfo::Get().Test(SandboxInfo::kEnabledForContent)) {
-    if (aBrokerFd >= 0) {
-      close(aBrokerFd);
+    if (brokerFd >= 0) {
+      close(brokerFd);
     }
-    return;
+    return false;
   }
+
+  auto procType = aParams.mFileProcess
+    ? SandboxReport::ProcType::FILE
+    : SandboxReport::ProcType::CONTENT;
+  gSandboxReporterClient = new SandboxReporterClient(procType);
 
   // This needs to live until the process exits.
-  static Maybe<SandboxBrokerClient> sBroker;
-  if (aBrokerFd >= 0) {
-    sBroker.emplace(aBrokerFd);
+  static SandboxBrokerClient* sBroker;
+  if (brokerFd >= 0) {
+    sBroker = new SandboxBrokerClient(brokerFd);
   }
 
-  SetCurrentProcessSandbox(GetContentSandboxPolicy(sBroker.ptrOr(nullptr)));
+  SetCurrentProcessSandbox(GetContentSandboxPolicy(sBroker, std::move(aParams)));
+  return true;
 }
 #endif // MOZ_CONTENT_SANDBOX
 
@@ -664,24 +650,33 @@ SetContentProcessSandbox(int aBrokerFd)
 void
 SetMediaPluginSandbox(const char *aFilePath)
 {
+  MOZ_RELEASE_ASSERT(aFilePath != nullptr);
   if (!SandboxInfo::Get().Test(SandboxInfo::kEnabledForMedia)) {
     return;
   }
 
-  MOZ_ASSERT(!gMediaPluginFile.mPath);
-  if (aFilePath) {
-    gMediaPluginFile.mPath = strdup(aFilePath);
-    gMediaPluginFile.mFd = open(aFilePath, O_RDONLY | O_CLOEXEC);
-    if (gMediaPluginFile.mFd == -1) {
-      SANDBOX_LOG_ERROR("failed to open plugin file %s: %s",
-                        aFilePath, strerror(errno));
-      MOZ_CRASH();
-    }
-  } else {
-    gMediaPluginFile.mFd = -1;
+  gSandboxReporterClient =
+    new SandboxReporterClient(SandboxReport::ProcType::MEDIA_PLUGIN);
+
+  SandboxOpenedFile plugin(aFilePath);
+  if (!plugin.IsOpen()) {
+    SANDBOX_LOG_ERROR("failed to open plugin file %s: %s",
+                      aFilePath, strerror(errno));
+    MOZ_CRASH();
   }
+
+  auto files = new SandboxOpenedFiles();
+  files->Add(std::move(plugin));
+  files->Add("/dev/urandom", true);
+  files->Add("/sys/devices/system/cpu/cpu0/tsc_freq_khz");
+  files->Add("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+  files->Add("/proc/cpuinfo"); // Info also available via CPUID instruction.
+#ifdef __i386__
+  files->Add("/proc/self/auxv"); // Info also in process's address space.
+#endif
+
   // Finally, start the sandbox.
-  SetCurrentProcessSandbox(GetMediaSandboxPolicy(&gMediaPluginFile));
+  SetCurrentProcessSandbox(GetMediaSandboxPolicy(files));
 }
 #endif // MOZ_GMP_SANDBOX
 

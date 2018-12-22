@@ -5,7 +5,7 @@
 
 #include "mozilla/chrome/RegistryMessageUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "nsResProtocolHandler.h"
 #include "nsIIOService.h"
@@ -61,24 +61,45 @@ NS_IMPL_QUERY_INTERFACE(nsResProtocolHandler, nsIResProtocolHandler,
 NS_IMPL_ADDREF_INHERITED(nsResProtocolHandler, SubstitutingProtocolHandler)
 NS_IMPL_RELEASE_INHERITED(nsResProtocolHandler, SubstitutingProtocolHandler)
 
+NS_IMETHODIMP
+nsResProtocolHandler::AllowContentToAccess(nsIURI *aURI, bool *aResult)
+{
+    *aResult = false;
+
+    nsAutoCString host;
+    nsresult rv = aURI->GetAsciiHost(host);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint32_t flags;
+    rv = GetSubstitutionFlags(host, &flags);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    *aResult = flags & nsISubstitutingProtocolHandler::ALLOW_CONTENT_ACCESS;
+    return NS_OK;
+}
+
 nsresult
-nsResProtocolHandler::GetSubstitutionInternal(const nsACString& root, nsIURI **result)
+nsResProtocolHandler::GetSubstitutionInternal(const nsACString& aRoot,
+                                              nsIURI** aResult,
+                                              uint32_t* aFlags)
 {
     nsAutoCString uri;
 
-    if (!ResolveSpecialCases(root, NS_LITERAL_CSTRING("/"), uri)) {
+    if (!ResolveSpecialCases(aRoot, NS_LITERAL_CSTRING("/"), NS_LITERAL_CSTRING("/"), uri)) {
         return NS_ERROR_NOT_AVAILABLE;
     }
 
-    return NS_NewURI(result, uri);
+    *aFlags = 0; // No content access.
+    return NS_NewURI(aResult, uri);
 }
 
 bool
 nsResProtocolHandler::ResolveSpecialCases(const nsACString& aHost,
                                           const nsACString& aPath,
+                                          const nsACString& aPathname,
                                           nsACString& aResult)
 {
-    if (aHost.Equals("") || aHost.Equals(kAPP)) {
+    if (aHost.EqualsLiteral("") || aHost.EqualsLiteral(kAPP)) {
         aResult.Assign(mAppURI);
     } else if (aHost.Equals(kGRE)) {
         aResult.Assign(mGREURI);
@@ -92,8 +113,19 @@ nsResProtocolHandler::ResolveSpecialCases(const nsACString& aHost,
 nsresult
 nsResProtocolHandler::SetSubstitution(const nsACString& aRoot, nsIURI* aBaseURI)
 {
-    MOZ_ASSERT(!aRoot.Equals(""));
-    MOZ_ASSERT(!aRoot.Equals(kAPP));
-    MOZ_ASSERT(!aRoot.Equals(kGRE));
+    MOZ_ASSERT(!aRoot.EqualsLiteral(""));
+    MOZ_ASSERT(!aRoot.EqualsLiteral(kAPP));
+    MOZ_ASSERT(!aRoot.EqualsLiteral(kGRE));
     return SubstitutingProtocolHandler::SetSubstitution(aRoot, aBaseURI);
+}
+
+nsresult
+nsResProtocolHandler::SetSubstitutionWithFlags(const nsACString& aRoot,
+                                               nsIURI* aBaseURI,
+                                               uint32_t aFlags)
+{
+    MOZ_ASSERT(!aRoot.EqualsLiteral(""));
+    MOZ_ASSERT(!aRoot.EqualsLiteral(kAPP));
+    MOZ_ASSERT(!aRoot.EqualsLiteral(kGRE));
+    return SubstitutingProtocolHandler::SetSubstitutionWithFlags(aRoot, aBaseURI, aFlags);
 }

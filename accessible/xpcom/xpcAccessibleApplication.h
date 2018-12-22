@@ -27,13 +27,16 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIAccessibleApplication
-  NS_IMETHOD GetAppName(nsAString& aName) final override;
-  NS_IMETHOD GetAppVersion(nsAString& aVersion) final override;
-  NS_IMETHOD GetPlatformName(nsAString& aName) final override;
-  NS_IMETHOD GetPlatformVersion(nsAString& aVersion) final override;
+  NS_IMETHOD GetAppName(nsAString& aName) final;
+  NS_IMETHOD GetAppVersion(nsAString& aVersion) final;
+  NS_IMETHOD GetPlatformName(nsAString& aName) final;
+  NS_IMETHOD GetPlatformVersion(nsAString& aVersion) final;
 
 protected:
-  virtual ~xpcAccessibleApplication() {}
+  virtual ~xpcAccessibleApplication()
+  {
+    Shutdown();
+  }
 
 private:
   ApplicationAccessible* Intl() { return mIntl.AsAccessible()->AsApplication(); }

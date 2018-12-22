@@ -30,10 +30,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-
-
-static char *RCSSTRING __UNUSED__="$Id: ice_candidate.c,v 1.2 2008/04/28 17:59:01 ekr Exp $";
-
 #include <csi_platform.h>
 #include <assert.h>
 #include <stdio.h>
@@ -215,8 +211,8 @@ int nr_ice_candidate_create(nr_ice_ctx *ctx,nr_ice_component *comp,nr_ice_socket
 
     nr_ice_candidate_compute_codeword(cand);
 
-    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): created candidate %s with type %s",
-      ctx->label,cand->label,nr_ctype_name(ctype));
+    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s)/CAND(%s): created candidate %s with type %s",
+      ctx->label,cand->codeword,cand->label,nr_ctype_name(ctype));
 
     *candp=cand;
 
@@ -321,6 +317,20 @@ int nr_ice_candidate_destroy(nr_ice_candidate **candp)
         break;
 #ifdef USE_TURN
       case RELAYED:
+        // record stats back to the ice ctx on destruction
+        if (cand->u.relayed.turn) {
+          nr_accumulate_count(&(cand->ctx->stats.turn_401s), cand->u.relayed.turn->cnt_401s);
+          nr_accumulate_count(&(cand->ctx->stats.turn_403s), cand->u.relayed.turn->cnt_403s);
+          nr_accumulate_count(&(cand->ctx->stats.turn_438s), cand->u.relayed.turn->cnt_438s);
+
+          nr_turn_stun_ctx* stun_ctx;
+          stun_ctx = STAILQ_FIRST(&cand->u.relayed.turn->stun_ctxs);
+          while (stun_ctx) {
+            nr_accumulate_count(&(cand->ctx->stats.stun_retransmits), stun_ctx->stun->retransmit_ct);
+
+            stun_ctx = STAILQ_NEXT(stun_ctx, entry);
+          }
+        }
         if (cand->u.relayed.turn_handle)
           nr_ice_socket_deregister(cand->isock, cand->u.relayed.turn_handle);
         if (cand->u.relayed.srvflx_candidate)
@@ -366,7 +376,9 @@ static int nr_ice_get_foundation(nr_ice_ctx *ctx,nr_ice_candidate *cand)
     while(foundation){
       if(nr_transport_addr_cmp(&cand->base,&foundation->addr,NR_TRANSPORT_ADDR_CMP_MODE_ADDR))
         goto next;
-      if(cand->type != foundation->type)
+      // cast necessary because there is no guarantee that enum is signed.
+      // foundation->type should probably match nr_ice_candidate_type
+      if((int)cand->type != foundation->type)
         goto next;
       if(cand->stun_server != foundation->stun_server)
         goto next;
@@ -662,6 +674,11 @@ static int nr_ice_candidate_resolved_cb(void *cb_arg, nr_transport_addr *addr)
       ABORT(R_NOT_FOUND);
     }
 
+    if (nr_transport_addr_check_compatibility(addr, &cand->base)) {
+      r_log(LOG_ICE,LOG_WARNING,"ICE(%s): Skipping STUN server because of link local mis-match for candidate %s",cand->ctx->label,cand->label);
+      ABORT(R_NOT_FOUND);
+    }
+
     /* Copy the address */
     if(r=nr_transport_addr_copy(&cand->stun_server_addr,addr))
       ABORT(r);
@@ -936,7 +953,7 @@ int nr_ice_format_candidate_attribute(nr_ice_candidate *cand, char *attr, int ma
     /* raddr, rport */
     raddr = (cand->stream->ctx->flags &
              (NR_ICE_CTX_FLAGS_RELAY_ONLY |
-              NR_ICE_CTX_FLAGS_ONLY_DEFAULT_ADDRS)) ?
+              NR_ICE_CTX_FLAGS_HIDE_HOST_CANDIDATES)) ?
       &cand->addr : &cand->base;
 
     switch(cand->type){

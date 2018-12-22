@@ -10,6 +10,10 @@ import org.mozilla.gecko.home.HomeConfig;
 import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.util.StringUtils;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 public class AboutPages {
     // All of our special pages.
     public static final String ACCOUNTS        = "about:accounts";
@@ -17,12 +21,10 @@ public class AboutPages {
     public static final String CONFIG          = "about:config";
     public static final String DOWNLOADS       = "about:downloads";
     public static final String FIREFOX         = "about:firefox";
-    public static final String HEALTHREPORT    = "about:healthreport";
     public static final String HOME            = "about:home";
     public static final String LOGINS          = "about:logins";
     public static final String PRIVATEBROWSING = "about:privatebrowsing";
     public static final String READER          = "about:reader";
-    public static final String UPDATER         = "about:";
 
     public static final String URL_FILTER = "about:%";
 
@@ -35,6 +37,13 @@ public class AboutPages {
     public static final boolean isTitlelessAboutPage(final String url) {
         return isAboutHome(url) ||
                PRIVATEBROWSING.equals(url);
+    }
+
+    public static final boolean isDefaultHomePage(final String url) {
+        if (url == null) {
+            return false;
+        }
+        return HOME.equals(url);
     }
 
     public static final boolean isAboutHome(final String url) {
@@ -72,22 +81,14 @@ public class AboutPages {
 
     }
 
-    private static final String[] DEFAULT_ICON_PAGES = new String[] {
-        ACCOUNTS,
-        ADDONS,
-        CONFIG,
-        DOWNLOADS,
-        FIREFOX,
-        HEALTHREPORT,
-        UPDATER
-    };
-
-    /**
-     * Callers must not modify the returned array.
-     */
-    public static String[] getDefaultIconPages() {
-        return DEFAULT_ICON_PAGES;
-    }
+    public static final List<String> DEFAULT_ICON_PAGES = Collections.unmodifiableList(Arrays.asList(
+            HOME,
+            ACCOUNTS,
+            ADDONS,
+            CONFIG,
+            DOWNLOADS,
+            FIREFOX
+    ));
 
     public static boolean isBuiltinIconPage(final String url) {
         if (url == null ||
@@ -101,8 +102,8 @@ public class AboutPages {
         }
 
         // TODO: it'd be quicker to not compare the "about:" part every time.
-        for (int i = 0; i < DEFAULT_ICON_PAGES.length; ++i) {
-            if (DEFAULT_ICON_PAGES[i].equals(url)) {
+        for (String page : DEFAULT_ICON_PAGES) {
+            if (page.equals(url)) {
                 return true;
             }
         }

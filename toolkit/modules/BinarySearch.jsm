@@ -4,11 +4,11 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [
+var EXPORTED_SYMBOLS = [
   "BinarySearch",
 ];
 
-this.BinarySearch = Object.freeze({
+var BinarySearch = Object.freeze({
 
   /**
    * Returns the index of the given target in the given array or -1 if the
@@ -18,7 +18,7 @@ this.BinarySearch = Object.freeze({
    *
    * @return The index of `target` in `array` or -1 if `target` is not found.
    */
-  indexOf: function (comparator, array, target) {
+  indexOf(comparator, array, target) {
     let [found, idx] = this.search(comparator, array, target);
     return found ? idx : -1;
   },
@@ -32,7 +32,7 @@ this.BinarySearch = Object.freeze({
    * @return The index in `array` where `target` may be inserted to keep `array`
    *         ordered.
    */
-  insertionIndexOf: function (comparator, array, target) {
+  insertionIndexOf(comparator, array, target) {
     return this.search(comparator, array, target)[1];
   },
 
@@ -56,7 +56,7 @@ this.BinarySearch = Object.freeze({
    *         second element is the index where it may be inserted to keep the
    *         array ordered.
    */
-  search: function (comparator, array, target) {
+  search(comparator, array, target) {
     let low = 0;
     let high = array.length - 1;
     while (low <= high) {

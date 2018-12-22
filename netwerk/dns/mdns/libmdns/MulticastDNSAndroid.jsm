@@ -5,13 +5,18 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = ["MulticastDNS"];
+var EXPORTED_SYMBOLS = ["MulticastDNS"];
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.import("resource://gre/modules/Messaging.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
-var log = Cu.import("resource://gre/modules/AndroidLog.jsm", {}).AndroidLog.d.bind(null, "MulticastDNS");
+const DEBUG = false;
+
+var log = function(s) {};
+if (DEBUG) {
+  log = ChromeUtils.import("resource://gre/modules/AndroidLog.jsm", {})
+          .AndroidLog.d.bind(null, "MulticastDNS");
+}
 
 const FAILURE_INTERNAL_ERROR = -65537;
 
@@ -28,7 +33,7 @@ function send(type, data, callback) {
     }
   }
 
-  Messaging.sendRequestForResult(msg)
+  EventDispatcher.instance.sendRequestForResult(msg)
     .then(result => callback(result, null),
           err => callback(null, typeof err === "number" ? err : FAILURE_INTERNAL_ERROR));
 }
@@ -41,16 +46,28 @@ ServiceManager.prototype = {
   listeners: {},
   numListeners: 0,
 
+  onEvent: function(event, data, callback) {
+    if (event === "NsdManager:ServiceFound") {
+      this.onServiceFound();
+    } else if (event === "NsdManager:ServiceLost") {
+      this.onServiceLost();
+    }
+  },
+
   registerEvent: function() {
     log("registerEvent");
-    Messaging.addListener(this.onServiceFound.bind(this), "NsdManager:ServiceFound");
-    Messaging.addListener(this.onServiceLost.bind(this), "NsdManager:ServiceLost");
+    EventDispatcher.instance.registerListener(this, [
+      "NsdManager:ServiceFound",
+      "NsdManager:ServiceLost",
+    ]);
   },
 
   unregisterEvent: function() {
     log("unregisterEvent");
-    Messaging.removeListener("NsdManager:ServiceFound");
-    Messaging.removeListener("NsdManager:ServiceLost");
+    EventDispatcher.instance.unregisterListener(this, [
+      "NsdManager:ServiceFound",
+      "NsdManager:ServiceLost",
+    ]);
   },
 
   addListener: function(aServiceType, aListener) {

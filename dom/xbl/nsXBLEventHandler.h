@@ -12,13 +12,14 @@
 #include "nsIDOMEventListener.h"
 #include "nsTArray.h"
 
-class nsIAtom;
-class nsIDOMKeyEvent;
+class nsAtom;
 class nsXBLPrototypeHandler;
 
 namespace mozilla {
-namespace dom {
 struct IgnoreModifierState;
+namespace dom {
+class Event;
+class KeyboardEvent;
 } // namespace dom
 } // namespace mozilla
 
@@ -37,7 +38,7 @@ protected:
 
 private:
   nsXBLEventHandler();
-  virtual bool EventMatched(nsIDOMEvent* aEvent)
+  virtual bool EventMatched(mozilla::dom::Event* aEvent)
   {
     return true;
   }
@@ -50,15 +51,15 @@ public:
   virtual ~nsXBLMouseEventHandler();
 
 private:
-  bool EventMatched(nsIDOMEvent* aEvent) override;
+  bool EventMatched(mozilla::dom::Event* aEvent) override;
 };
 
 class nsXBLKeyEventHandler : public nsIDOMEventListener
 {
-  typedef mozilla::dom::IgnoreModifierState IgnoreModifierState;
+  typedef mozilla::IgnoreModifierState IgnoreModifierState;
 
 public:
-  nsXBLKeyEventHandler(nsIAtom* aEventType, uint8_t aPhase, uint8_t aType);
+  nsXBLKeyEventHandler(nsAtom* aEventType, uint8_t aPhase, uint8_t aType);
 
   NS_DECL_ISUPPORTS
 
@@ -69,7 +70,7 @@ public:
     mProtoHandlers.AppendElement(aProtoHandler);
   }
 
-  bool Matches(nsIAtom* aEventType, uint8_t aPhase, uint8_t aType) const
+  bool Matches(nsAtom* aEventType, uint8_t aPhase, uint8_t aType) const
   {
     return (mEventType == aEventType && mPhase == aPhase && mType == aType);
   }
@@ -103,11 +104,11 @@ private:
   nsXBLKeyEventHandler();
   virtual ~nsXBLKeyEventHandler();
 
-  bool ExecuteMatchedHandlers(nsIDOMKeyEvent* aEvent, uint32_t aCharCode,
+  bool ExecuteMatchedHandlers(mozilla::dom::KeyboardEvent* aEvent, uint32_t aCharCode,
                               const IgnoreModifierState& aIgnoreModifierState);
 
   nsTArray<nsXBLPrototypeHandler*> mProtoHandlers;
-  nsCOMPtr<nsIAtom> mEventType;
+  RefPtr<nsAtom> mEventType;
   uint8_t mPhase;
   uint8_t mType;
   bool mIsBoundToChrome;
@@ -116,6 +117,6 @@ private:
 
 already_AddRefed<nsXBLEventHandler>
 NS_NewXBLEventHandler(nsXBLPrototypeHandler* aHandler,
-                      nsIAtom* aEventType);
+                      nsAtom* aEventType);
 
 #endif

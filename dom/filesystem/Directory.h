@@ -11,26 +11,12 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/File.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
-
-// Resolve the name collision of Microsoft's API name with macros defined in
-// Windows header files. Undefine the macro of CreateDirectory to avoid
-// Directory#CreateDirectory being replaced by Directory#CreateDirectoryW.
-#ifdef CreateDirectory
-#undef CreateDirectory
-#endif
-// Undefine the macro of CreateFile to avoid Directory#CreateFile being replaced
-// by Directory#CreateFileW.
-#ifdef CreateFile
-#undef CreateFile
-#endif
 
 namespace mozilla {
 namespace dom {
 
-struct CreateFileOptions;
 class FileSystemBase;
 class Promise;
 class StringOrFileOrDirectory;
@@ -40,37 +26,17 @@ class Directory final
   , public nsWrapperCache
 {
 public:
-  struct BlobImplOrDirectoryPath
-  {
-    RefPtr<BlobImpl> mBlobImpl;
-    nsString mDirectoryPath;
-
-    enum {
-      eBlobImpl,
-      eDirectoryPath
-    } mType;
-  };
-
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(Directory)
 
-  static already_AddRefed<Promise>
-  GetRoot(FileSystemBase* aFileSystem, ErrorResult& aRv);
-
-  enum DirectoryType {
-    // When a directory is selected using a HTMLInputElement, that will be the
-    // DOM root directory and its name will be '/'. All the sub directory will
-    // be called with they real name. We use this enum to mark what we must
-    // consider the '/' of this DOM filesystem.
-    eDOMRootDirectory,
-
-    // All the sub directories of the '/' will be marked using this other value.
-    eNotDOMRootDirectory
-  };
+  static already_AddRefed<Directory>
+  Constructor(const GlobalObject& aGlobal,
+              const nsAString& aRealPath,
+              ErrorResult& aRv);
 
   static already_AddRefed<Directory>
   Create(nsISupports* aParent, nsIFile* aDirectory,
-         DirectoryType aType, FileSystemBase* aFileSystem = 0);
+         FileSystemBase* aFileSystem = 0);
 
   // ========= Begin WebIDL bindings. ===========
 
@@ -83,22 +49,6 @@ public:
   void
   GetName(nsAString& aRetval, ErrorResult& aRv);
 
-  already_AddRefed<Promise>
-  CreateFile(const nsAString& aPath, const CreateFileOptions& aOptions,
-             ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  CreateDirectory(const nsAString& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  Get(const nsAString& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  Remove(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
-
-  already_AddRefed<Promise>
-  RemoveDeep(const StringOrFileOrDirectory& aPath, ErrorResult& aRv);
-
   // From https://microsoftedge.github.io/directory-upload/proposal.html#directory-interface :
 
   void
@@ -109,6 +59,9 @@ public:
 
   already_AddRefed<Promise>
   GetFilesAndDirectories(ErrorResult& aRv);
+
+  already_AddRefed<Promise>
+  GetFiles(bool aRecursiveFlag, ErrorResult& aRv);
 
   // =========== End WebIDL bindings.============
 
@@ -140,14 +93,15 @@ public:
   FileSystemBase*
   GetFileSystem(ErrorResult& aRv);
 
-  DirectoryType Type() const
+  nsIFile*
+  GetInternalNsIFile() const
   {
-    return mType;
+    return mFile;
   }
 
 private:
   Directory(nsISupports* aParent,
-            nsIFile* aFile, DirectoryType aType,
+            nsIFile* aFile,
             FileSystemBase* aFileSystem = nullptr);
   ~Directory();
 
@@ -157,14 +111,9 @@ private:
   nsresult
   DOMPathToRealPath(const nsAString& aPath, nsIFile** aFile) const;
 
-  already_AddRefed<Promise>
-  RemoveInternal(const StringOrFileOrDirectory& aPath, bool aRecursive,
-                 ErrorResult& aRv);
-
   nsCOMPtr<nsISupports> mParent;
   RefPtr<FileSystemBase> mFileSystem;
   nsCOMPtr<nsIFile> mFile;
-  DirectoryType mType;
 
   nsString mFilters;
   nsString mPath;
